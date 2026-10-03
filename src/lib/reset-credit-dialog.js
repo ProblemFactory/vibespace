@@ -12,6 +12,7 @@ import { t, deviceLocale } from './i18n.js';
 import { createModalShell, fetchJson, showToast } from './utils.js';
 import { UI_ICONS } from './icons.js';
 import { dialogModel, refusalLine } from '../reset-credit.js';
+import { getBackendMeta } from './agent-meta.js';
 
 /** An instant in the device's own words (the dialog names WHEN, never UTC). */
 export function fmtInstant(sec) {
@@ -37,7 +38,10 @@ export async function openResetCreditDialog(app, { accountKey, sessionId = null,
     return 'failed';
   }
   if (!p.name) p.name = t('CLI login'); // no account record = the machine's own login
-  const m = dialogModel(p, { nowSec: Math.floor(Date.now() / 1000), fmtTime: fmtInstant });
+  // THE HARNESS IS NAMED (lane reset-path): "Account: CLI login" said nothing about WHOSE CLI — the
+  // harness's own label leads the account line ("Codex · CLI login")
+  const harness = p.backend ? (getBackendMeta(p.backend)?.label || null) : null;
+  const m = dialogModel(p, { nowSec: Math.floor(Date.now() / 1000), fmtTime: fmtInstant, harness });
   const resolveTodo = async (status) => {
     if (!todoId) return;
     const r = await fetchJson(`/api/user-todos/${encodeURIComponent(todoId)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) });
@@ -78,12 +82,17 @@ export async function openResetCreditDialog(app, { accountKey, sessionId = null,
       // verify-r6 R1: the POST names the window this dialog SHOWED — one that reset while it stayed open is refused, nothing spent
       const r = await fetchJson(`/api/accounts/${encodeURIComponent(p.key)}/reset-credit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: p.sessionId || sessionId || null, expect: { resetsAtSec: p.resetsAtSec ?? null } }) });
       if (r && r.ok) {
-        showToast(t('Reset credit requested on {account} — the result arrives as a notice and in the usage panel', { account: p.name || p.key }));
+        const who = harness ? `${harness} · ${p.name || p.key}` : (p.name || p.key);
+        showToast(r.via === 'helper'
+          ? t('Reset credit requested on {account} through a short-lived codex helper process — the result arrives as a notice and in the usage panel', { account: who })
+          : t('Reset credit requested on {account} — the result arrives as a notice and in the usage panel', { account: who }));
         await resolveTodo('done');
         settle('used'); close();
         return;
       }
-      const why = r && r.code ? words(refusalLine(r.code, { until: r.cooldownUntilSec ? fmtInstant(r.cooldownUntilSec) : null, why: r.error, member: r.restartPending ? (r.restartPending.name || r.restartPending.id || null) : null })) : (r && r.error) || t('server unreachable');
+      // verify r1: an `unsettled` refusal names WHEN the unanswered request went out (the cooldown's `until` slot carries it)
+      const until = r && r.code === 'unsettled' ? (r.unsettled && r.unsettled.sinceSec ? fmtInstant(r.unsettled.sinceSec) : null) : (r && r.cooldownUntilSec ? fmtInstant(r.cooldownUntilSec) : null);
+      const why = r && r.code ? words(refusalLine(r.code, { until, why: r.error, member: r.restartPending ? (r.restartPending.name || r.restartPending.id || null) : null })) : (r && r.error) || t('server unreachable');
       showToast(t('Reset credit not used — {reason}', { reason: why }), { type: 'error' });
       settle('failed'); close();
     };

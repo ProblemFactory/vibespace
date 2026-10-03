@@ -54,6 +54,7 @@ function pipePtyShim(handle) {
   handle.onData = (buf) => data.emit(typeof buf === 'string' ? buf : buf.toString('utf-8'));
   handle.onExit = (code) => exit.emit({ exitCode: code ?? 0 });
   return {
+    _pipe: true,                    // no dtach behind it: the ONE healer refuses to "re-attach" (kill) it (B-b675)
     pid: handle.pid || -1,
     onData: (cb) => data.on(cb),
     onExit: (cb) => exit.on(cb),

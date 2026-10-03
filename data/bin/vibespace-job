@@ -162,7 +162,13 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
       // reminder reads it as "each fire will message me", which is false
       // unless notifyOk (the 79928a2b silent-reminder incident). Say it.
       if (!isNotify && j.kind === 'cron') {
-        if (echoReminder) console.log('reminder-style command detected (bare echo/printf on a schedule): per-fire notify turned ON for you — notify-cron is the cleaner primitive for pure reminders (vibespace-job notify-cron --text "...").');
+        // B-644d verify r1: per-fire notify only reaches this conversation while auto-notify is ON — with it OFF (the job's
+        // --notify off, the group or Settings) no fire messages anyone, and the line must not promise one
+        const autoOff = !!(r.notify && !r.notify.enabled);
+        if ((echoReminder || j.notifyOk) && autoOff) console.log(`per-fire notify is set${echoReminder ? ' (reminder-style command)' : ' (--notify-ok)'}, but auto-notify is OFF${r.notify.source ? ' (' + r.notify.source + ')' : ''} — NO fire will message this conversation; poll it (vibespace-job poll ${j.id})${r.notify.source === 'job' ? ` or turn it on: vibespace-job notify ${j.id} on` : ''}.`);
+        else if (echoReminder) console.log('reminder-style command detected (bare echo/printf on a schedule): per-fire notify turned ON for you — notify-cron is the cleaner primitive for pure reminders (vibespace-job notify-cron --text "...").');
+        // B-644d: the server's answer, never the flag — it says what the stored job's fires will do
+        else if (j.notifyOk) console.log('per-fire notify: ON (--notify-ok) — every fire messages this conversation, successes included.');
         else console.log(`scheduled task: SUCCESSFUL fires are SILENT (failures/asks/parks notify) — add --notify-ok to be messaged on every fire; for pure reminders use notify-cron.`);
       }
       if (r.survivalNote) console.log('runtime note: ' + r.survivalNote);

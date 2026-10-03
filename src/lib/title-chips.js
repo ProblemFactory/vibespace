@@ -85,6 +85,59 @@ export function chipWords({ name, target } = {}) {
   return { full: tg ? (n ? `${n} → ${tg}` : tg) : n, short: memberShortName(tg || n) };
 }
 
+/**
+ * THE PHONE'S PILLS (lane phone-chip, B-e5ff — the owner's phone read "⣿ 全部 → Beta Ma": a 90 px CSS cap cut
+ * the member's name mid-word). A pill is WHOLE or it FOLDS, never cut: the chat status bar's billing chip and the
+ * window-switcher row's chip carry the same three forms as the desktop badge, and the widest one that fits is
+ * drawn. `pillMode` is `chipMode` with no title beside it (the status bar is a wrapping row: a pill's room is a
+ * whole line of it — `slotPx`); the switcher row shares its room with the window's title and calls `chipMode`
+ * itself, exactly as the desktop title bar does.
+ */
+export function pillMode({ slotPx, fullPx, compactPx } = {}) {
+  return chipMode({ availablePx: slotPx, titlePx: 0, titleMinPx: 0, chipFullPx: fullPx, chipCompactPx: Number.isFinite(compactPx) ? compactPx : fullPx });
+}
+
+/** A name's FIRST WORD when it is short enough to stand alone (≤ MEMBER_SHORT_MAX code points), else null —
+ *  the compact pill never cuts a word: 'Beta Max' → 'Beta', '测试团队' → '测试团队', 'Northwindcorp Max' → null. */
+export function shortWord(name, max = MEMBER_SHORT_MAX) {
+  const w = oneLine(name).split(' ')[0] || '';
+  return w && Array.from(w).length <= max ? w : null;
+}
+
+/**
+ * The phone billing pill's THREE FORMS from the identity's parts (`kind`: 'pooled' | 'api' | 'subscription' |
+ * 'unknown'; `name` = the pool / account / login label; `target` = the pool member serving now; `glyph` = the
+ * pool's text glyph): full = every word ("⣿ 全部 → Beta Max", "Personal Max"); compact = the glyph + the member's
+ * (or the account's) first word, or null when that word is too long to stand alone ("⣿ → Beta", "Personal");
+ * icon = the glyph alone (`iconKind` names which: 'pool' text / 'key' / 'crown' SVG / '?'). `tip` = the full words
+ * — the tooltip and aria-label always say what a folded form leaves out.
+ */
+export function billingPillForms({ kind = 'subscription', name = '', target = '', glyph = '⣿' } = {}) {
+  const n = oneLine(name), tg = oneLine(target);
+  if (kind === 'unknown') return { full: '?', compact: null, icon: '?', iconKind: 'unknown', tip: '?' };
+  if (kind === 'pooled') {
+    const full = `${glyph} ${n}${tg ? ` → ${tg}` : ''}`;
+    const w = shortWord(tg || n);
+    return { full, compact: w ? (tg ? `${glyph} → ${w}` : `${glyph} ${w}`) : null, icon: glyph, iconKind: 'pool', tip: full };
+  }
+  const w = shortWord(n);
+  return { full: n, compact: w && w !== n ? w : null, icon: '', iconKind: kind === 'api' ? 'key' : 'crown', tip: n };
+}
+
+/** The icon form's glyph for a pill that has no text glyph: the desktop badge's own key (API) and crown (subscription). */
+export const PILL_ICON_SVG = Object.freeze({
+  key: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="8" r="3"/><path d="M8 8h6.5M12 8v2.5M14.5 8v2"/></svg>',
+  crown: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12.5h11M3 12.5L2 4.5l3.2 2.6L8 3l2.8 4.1L14 4.5l-1 8z"/></svg>',
+});
+
+/** THE ONE MARKUP of a phone billing pill: the three forms as three spans (CSS shows the one `data-mode` names —
+ *  the full form until something was measured). `esc` = the caller's HTML escaper (every word is a label). */
+export function billingPillHtml(forms, esc) {
+  const f = forms || {};
+  const icon = f.iconKind === 'key' || f.iconKind === 'crown' ? PILL_ICON_SVG[f.iconKind] : esc(f.icon || '');
+  return `<span class="pill-full">${esc(f.full || '')}</span>` + (f.compact ? `<span class="pill-compact">${esc(f.compact)}</span>` : '') + `<span class="pill-icon">${icon}</span>`;
+}
+
 /** The inbox chip's number as drawn: the count, never wider than two digits and a plus. */
 export function inboxCountText(count) {
   const n = Math.max(0, Math.floor(Number(count) || 0));

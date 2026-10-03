@@ -206,14 +206,14 @@ console.log('§6 the routed names (design-unknown-records, 2026-09-21): a routed
   ack.convertHistory([
     { type: 'user', uuid: 'ku1', parentUuid: null, isSidechain: false, sessionId: 's', message: { role: 'user', content: 'go' } },
     { type: 'assistant', uuid: 'ka1', parentUuid: 'ku1', isSidechain: false, sessionId: 's', message: { id: 'msg_k1', role: 'assistant', model: 'm', content: [{ type: 'tool_use', id: 'toolu_k', name: 'Agent', input: { description: 'bg agent', run_in_background: true } }] } },
-    { type: 'user', uuid: 'ku2', parentUuid: 'ka1', isSidechain: false, sessionId: 's', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_k', content: 'Async agent launched successfully.\nagentId: abc123\noutput_file: /w/o' }] } },
+    { type: 'user', uuid: 'ku2', parentUuid: 'ka1', isSidechain: false, sessionId: 's', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_k', content: [{ type: 'text', text: 'Async agent launched successfully.\nagentId: abc123\noutput_file: /w/o' }] }] } },
   ]);
   const ackCard = ack.messages.find((m) => m.toolCallId === 'toolu_k');
   ok('a HISTORY launch ack ("Async agent launched") synthesizes taskInfo with backgrounded:true (a member of the level set on a rebuilt view)', ackCard?.taskInfo?.status === 'running' && ackCard.taskInfo.backgrounded === true, ackCard?.taskInfo);
   const old = createMessageManager('claude', 'test-routed-6old');
   old.processLive({ type: 'assistant', uuid: 'oa1', session_id: 's', message: { id: 'msg_o1', role: 'assistant', model: 'm', content: [{ type: 'tool_use', id: 'toolu_o', name: 'Agent', input: { description: 'old cli' } }] } });
   old.processLive({ type: 'system', subtype: 'task_started', task_id: 'to', tool_use_id: 'toolu_o', description: 'old cli', task_type: 'local_agent', uuid: 'os1', session_id: 's' });
-  old.processLive({ type: 'user', uuid: 'ou1', session_id: 's', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_o', content: 'Async agent launched successfully.\nagentId: to\noutput_file: /w/o' }] } });
+  old.processLive({ type: 'user', uuid: 'ou1', session_id: 's', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_o', content: [{ type: 'text', text: 'Async agent launched successfully.\nagentId: to\noutput_file: /w/o' }] }] } });
   ok('LIVE ORDER: a task_started lacking the flag (older CLI) followed by the background ack ⇒ backgrounded:true', old.messages.find((m) => m.toolCallId === 'toolu_o')?.taskInfo?.backgrounded === true);
   // the client half is source-pinned (chat-status-bar / chat-renderers / chat-view are DOM modules): ONE owner of the close, the tail patched by a later verdict, `finished` drawn neutral
   const sb = read('src/lib/chat-status-bar.js');

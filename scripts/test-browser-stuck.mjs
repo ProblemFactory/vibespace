@@ -1185,13 +1185,14 @@ async function noticeCase(scenario, { Dmod = D, SSmod = null } = {}) {
   const run = (Dmod) => { const w = Dmod.create({ keeper: null, log: { warn() { } } }); for (let i = 0; i < 3; i++) w.noteOutcome(NAMED, { state: 'timeout', browserKey: KEY2 }); const f = w.factFor({ profileId: NAMED, browserKey: KEY, consume: false }); w.shutdown(); return f; };
   ok(!run(D).stuck && run(MUT.load('src/server/browser-dialogs.js', src.replace(needle, "const okey = (pid, bk) => `${pid}|`;"), 'shared-run')).stuck, 'CONTROL: a run keyed by the browser alone says another conversation\'s timeouts are this one\'s — the shared-run leg reddens on it');
 }
-// VERIFY r1 A1 (LOW): the dialog route applies the resolve's one-driver belt on a SHARED profile (a direct call answered a
-// dialog while the user drove the browser from another conversation's live view)
+// VERIFY r1 A1 (LOW): a direct call to the dialog route never answers a dialog under the user's hands. lane browser-windows:
+// the one-driver belt is gone with the drive claim — the user driving the WINDOW this lease is in (its own, or an older run's
+// shared window: taken WITH the view) is this lease's OWN input state, which the route refuses browser_interrupted
 {
   async function busyRoute(routesMod) {
     const answered = [];
     const k = { profile: (id) => (id === NAMED ? { id: NAMED, label: 'Work', owner: { kind: 'instance', id: null } } : null), leasesFor: () => [{ profileId: NAMED }],
-      inputStateFor: () => ({ input: 'agent' }), driveVerdictFor: () => ({ ok: false, code: 'browser_busy', by: 'user', holder: 'Chat A', error: 'the user drives "Work" from Chat A', retryAfterMs: null }) };
+      inputStateFor: () => ({ input: 'user', takenAt: 5 }) };
     const d = { arm: async () => ({ ok: true }), factFor: () => ({ watched: true, open: { id: 'dlg-1', type: 'confirm', message: 'x' }, text: 'x', notes: [] }), answer: async () => { answered.push(1); return { ok: true, dialog: { type: 'confirm' }, text: 'done' }; } };
     const sessionsB = new Map([['sess-b', { agentToken: 'vsst_b', _browserKey: KEY2, name: 'Chat B' }]]);
     routesMod.setup({ keeper: k, activeSessions: sessionsB, dialogs: d, tasksForSession: () => [] });
@@ -1203,11 +1204,12 @@ async function noticeCase(scenario, { Dmod = D, SSmod = null } = {}) {
   }
   const Rb = MUT.load('src/routes/browser.js', fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8'), 'busy-real'); // its own module state (the ③ routes keep theirs)
   const b1 = await busyRoute(Rb);
-  ok(b1.r.status === 409 && b1.r.body.code === 'browser_busy' && b1.r.body.by === 'user' && b1.answered === 0, 'A1: while the user drives a shared browser from another conversation, this conversation\'s `dialog accept` is refused browser_busy by name — the resolve\'s belt, on the route itself', b1);
+  ok(b1.r.status === 409 && b1.r.body.code === 'browser_interrupted' && /your window of this browser/.test(b1.r.body.error) && b1.answered === 0, 'A1: while the user drives the window this lease is in, its `dialog accept` is refused browser_interrupted (named: your window) — the route\'s own input check', b1);
   const rsrc = fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8');
-  const needle = "if (!t.ephemeral && typeof k.driveVerdictFor === 'function') {";
-  ok(rsrc.includes(needle), 'control setup: the drive belt is found in the dialog route');
-  const b2 = await busyRoute(MUT.load('src/routes/browser.js', rsrc.replace(needle, 'if (false) {'), 'busy-none'));
+  ok(!/driveVerdictFor/.test(rsrc), 'lane browser-windows: the route carries no drive belt any more (the claim is deleted)');
+  const needle = "if (st && st.input === 'user') return res.status(409)";
+  ok(rsrc.includes(needle), 'control setup: the input check is found in the dialog route');
+  const b2 = await busyRoute(MUT.load('src/routes/browser.js', rsrc.replace(needle, "if (false) return res.status(409)"), 'busy-none'));
   ok(b2.r.status === 200 && b2.answered === 1, 'CONTROL: without it the direct call answers the dialog under the user\'s hands — the leg reddens on it', b2);
 }
 // VERIFY r1 A6 (LOW): the Agent browser panel's row SAYS a browser launched before the lane still accepts leave-page
@@ -1374,7 +1376,7 @@ try {
   await until(() => dialogs.factFor({ profileId: EPH, browserKey: KEY, ephemeral: true, consume: false }).open, 1000);
   userDrives = true;
   const pr2 = await fetch(API + '/api/agent/browser/dialog', { method: 'POST', headers: { Authorization: 'Bearer ' + TOKEN, 'Content-Type': 'application/json' }, body: JSON.stringify({ profile: EPH, action: 'accept' }) }).then(async (x) => ({ status: x.status, body: await x.json() }));
-  ok(pr2.status === 409 && pr2.body.code === 'browser_interrupted' && /The user took over this browser/.test(pr2.body.error) && dialogs.factFor({ profileId: EPH, browserKey: KEY, ephemeral: true, consume: false }).open, 'while the user drives, the agent\'s answer is refused browser_interrupted — the dialog is theirs (and stays open for them)', pr2);
+  ok(pr2.status === 409 && pr2.body.code === 'browser_interrupted' && /The user took over your window of this browser/.test(pr2.body.error) && dialogs.factFor({ profileId: EPH, browserKey: KEY, ephemeral: true, consume: false }).open, 'while the user drives, the agent\'s answer is refused browser_interrupted — the dialog is theirs (and stays open for them)', pr2);
   const sc = M.newScope({ targets: ['T1'] }); sc.sessions.set('S1', 'T1');
   const jp = M.judge({ id: 1, method: 'Page.handleJavaScriptDialog', sessionId: 'S1', params: { accept: true } }, sc, { paused: true });
   const jf = M.judge({ id: 2, method: 'Page.handleJavaScriptDialog', sessionId: 'S1', params: { accept: true } }, sc, { paused: false });

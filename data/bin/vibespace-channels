@@ -61,16 +61,19 @@ const flag = (name) => { const i = args.indexOf(name); return i >= 0 && i + 1 < 
 const when = (ms) => (ms ? new Date(Number(ms)).toISOString().replace('T', ' ').slice(0, 16) + 'Z' : '');
 
 const USAGE = `vibespace-channels — read connected channels, PROPOSE replies (Communication panel)
-  vibespace-channels list                          ← conversations visible to you (+ send/policy chips)
+  vibespace-channels list [--all]                  ← conversations visible to you (+ send/policy chips);
+                                                     --all also lists the titles you may REQUEST (where the user allows it)
   vibespace-channels read <conv> [--limit N] [--since <ms>] [--fresh] [--thread <msg id>]
                                                    ← --fresh = refresh first (floor + budget apply); --thread = that thread only (no vendor call)
   vibespace-channels refresh <conv> [--thread <msg id>]
                                                    ← fetch the newest messages NOW (not a loop: a floor, the budget, a vendor back-off and a per-account queue cap apply); --thread loads that thread
-  vibespace-channels reply <conv> "text" [--why "…"] [--to <vendor msg id> [--in-thread] [--also-in-chat]] [--replaces <proposalId>]
+  vibespace-channels reply <conv> "text" [--why "…"] [--to <vendor msg id> [--in-thread] [--also-in-chat]] [--all] [--cc <addr>[,<addr>]] [--replaces <proposalId>]
                                                    ← PROPOSES; prints the policy verdict + proposal id + WHERE it lands:
                                                      no --to = a plain message in the chat; --to alone = this channel's norm
                                                      (in a thread if that message is in one, else a quote — or the thread on Slack);
                                                      --in-thread = inside that message's thread; --also-in-chat = in the thread AND shown in the chat
+                                                     mail: --all = REPLY ALL (the sender + its To + its Cc, minus you), in the same thread;
+                                                     --cc adds people; a thread reply with everyone is 'reply --all', never 'compose'
   vibespace-channels react <conv> <msg id> <emoji key> [--why "…"]
   vibespace-channels unreact <conv> <msg id> <emoji key> [--why "…"]
                                                    ← PROPOSES a reaction (the user approves it unless the account's reaction policy is direct)
@@ -83,6 +86,11 @@ const USAGE = `vibespace-channels — read connected channels, PROPOSE replies (
                                                    ← messages you can see (the stored logs; no vendor call)
   vibespace-channels status [<proposalId>]         ← what you were given (access / notification) + your proposals
   vibespace-channels request <conv> "why"          ← ask the user for access (only on a 'requestable' row)
+  vibespace-channels watch <conv|account> [--mode next-turn|wake] [--keyword "w"[,"w2"]] [--cap N] [--why "…"]
+                                                   ← YOUR notification on what you can read: next-turn (default, free —
+                                                     the news rides your next turn) is set at once; wake (a billed turn now)
+                                                     asks the user, who approves it with one click
+  vibespace-channels unwatch <conv|account>        ← removes YOUR notification there (one the user set is theirs)
 <conv> is the key list prints: <adapter>/<conversation id>.
 A reply is a PROPOSAL — the user may edit or reject it; the receipt lands in your next turn.
 Reactions show as counts ("(the account owner)" = the user's own) — never who reacted.
@@ -101,6 +109,7 @@ function printProposal(p, { full = false } = {}) {
     if (rc.status === 'sent' || rc.status === 'edited') console.log(`    the recipient sees: ${rc.identityMarking === 'none' ? 'you, with no application marker' : (rc.identityMarkingText || (rc.identityMarking === 'unknown' ? 'NOT VERIFIED for this channel' : 'marked as sent by an application'))}`);
   }
   if (p.compose) console.log(`    a NEW message to ${(p.compose.to || []).join(', ')}${(p.compose.cc || []).length ? ` (cc ${p.compose.cc.join(', ')})` : ''} — subject: ${p.compose.subject}`);
+  printRecipients(p);
   if (p.kind === 'reaction' && p.reaction) console.log(`    a reaction: ${p.reaction.op === 'remove' ? 'remove' : 'add'} ${p.reaction.glyph || `:${p.reaction.key}:`} on ${p.reaction.msg}`);
   // 2026-09-28: WHERE the reply lands (the server's words; an older server's proposal carries `inThread` only)
   const place = p.placementText || (p.inThread ? 'in a thread' : null);
@@ -108,6 +117,12 @@ function printProposal(p, { full = false } = {}) {
   if (p.replaces) console.log(`    it replaces ${p.replaces}`);
   if (p.replacedBy) console.log(`    replaced by ${p.replacedBy}`);
   if (full) console.log(`    text: ${p.text}`);
+}
+/** B-a085: WHO a mail reply goes to — resolved when it was proposed, exactly what the card shows and the send uses. */
+function printRecipients(p) {
+  const e = p && p.replyEnvelope;
+  if (!e || !e.to) return;
+  console.log(`    ${e.all ? 'reply all — ' : ''}to: ${e.to}${e.cc ? ` · cc: ${e.cc}` : ''}${Array.isArray(e.added) && e.added.length ? ` (you added: ${e.added.join(', ')})` : ''}`);
 }
 /** The replace half of a reply / compose answer, said by name. */
 function printReplaced(r) {
@@ -119,23 +134,33 @@ function printReplaced(r) {
 (async () => {
   if (!verb || verb === 'list') {
     if (!verb) console.log(USAGE + '\n');
-    const r = await call('GET', '/api/agent/channels/list');
-    const rows = r.conversations || [];
-    if (!rows.length) { console.log('no channel conversations are visible to you right now (ask the user to grant you access).'); return; }
+    const all = args.includes('--all');
+    const r = await call('GET', '/api/agent/channels/list' + (all ? '?all=1' : ''));
+    const rows0 = r.conversations || [];
+    // lane channel-agent-watch W2: the directory's rows (titles you may REQUEST) print after what you can read
+    const dir = rows0.filter((c) => c.directory);
+    const rows = rows0.filter((c) => !c.directory);
+    if (!rows.length && !dir.length) { console.log(all ? 'no channel conversations are visible or requestable for you right now (the user can grant access, or let agents see an account\'s list).' : 'no channel conversations are visible to you right now (ask the user to grant you access; `list --all` shows what you may request).'); return; }
     const via = (v) => (v && v !== 'conversation' ? ` via the ${v === 'account' ? 'whole account' : 'rule'}` : '');
     for (const c of rows) {
       const chips = [c.level === 'requestable' ? 'requestable (not readable yet)' : 'visible', c.canSend ? `reply → ${c.policy === 'direct' ? 'sends directly' : 'user approves'}` : `no reply (${c.sendWhy || 'not offered'})`];
       // R4: ACCESS and NOTIFICATION are two separate facts
       const acc = c.access || (c.assigned ? { authority: c.authority, via: c.assignedVia } : null);
       if (acc) chips.push(`access${via(acc.via)} (${acc.authority === 'send' ? 'may send' : 'drafts'})`);
-      if (c.watched) chips.push(`notifies you: ${c.watched.notify === 'digest' ? 'digest' : 'wake'}${c.watched.mode === 'filtered' ? ' on a filter' : ''}${via(c.watched.via)}`);
+      if (c.watched) chips.push(`notifies you: ${c.watched.delivery === 'next-turn' ? 'on your next turn' : c.watched.notify === 'digest' ? 'digest' : 'wake'}${c.watched.mode === 'filtered' ? ' on a filter' : ''}${via(c.watched.via)}${c.watched.setBy === 'agent' ? ' (set by you)' : ''}`);
       else if (acc) chips.push('no notification (read when you choose)');
       if (c.unread) chips.push(`${c.unread} unread`);
       if (c.awaiting) chips.push(`${c.awaiting} of your proposals awaiting approval`);
       console.log(`${c.key}  — ${c.title}  [${c.adapter}]`);
       console.log(`    ${chips.join(' · ')}`);
     }
-    console.log('\nread: vibespace-channels read <conv>   propose a reply: vibespace-channels reply <conv> "..."');
+    if (dir.length) {
+      const age = (ms) => { if (!ms) return 'no activity yet'; const m = Math.max(0, Math.round((Date.now() - Number(ms)) / 60000)); return m < 90 ? `${m} min ago` : m < 2880 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`; };
+      console.log(`${rows.length ? '\n' : ''}requestable — you cannot read these yet (titles only):`);
+      for (const c of dir) console.log(`${c.key}  — ${c.title}  [${c.adapter}] · ${c.kind === 'dm' ? 'single chat' : c.kind || 'conversation'}${c.members ? ` · ${c.members} members` : ''} · last activity ${age(c.lastAt)} · requestable`);
+      console.log('ask for one: vibespace-channels request <conv> "why"');
+    }
+    if (rows.length) console.log('\nread: vibespace-channels read <conv>   propose a reply: vibespace-channels reply <conv> "..."   be notified: vibespace-channels watch <conv>');
     return;
   }
   // THE AGENT'S REFRESH (2026-09-26): reach first, then the per-conversation
@@ -212,8 +237,8 @@ function printReplaced(r) {
   if (verb === 'reply') {
     const conv = args[1];
     const text = args[2];
-    const REPLY_USAGE = 'usage: vibespace-channels reply <conv> "text" [--why "…"] [--to <msg id> [--in-thread] [--also-in-chat]] [--replaces <proposalId>]';
-    if (!conv || !text || ['--why', '--reply-to', '--to', '--replaces', '--in-thread', '--also-in-chat'].includes(text)) { console.error(REPLY_USAGE); process.exit(1); }
+    const REPLY_USAGE = 'usage: vibespace-channels reply <conv> "text" [--why "…"] [--to <msg id> [--in-thread] [--also-in-chat]] [--all] [--cc <addr>[,<addr>]] [--replaces <proposalId>]';
+    if (!conv || !text || ['--why', '--reply-to', '--to', '--replaces', '--in-thread', '--also-in-chat', '--all', '--cc'].includes(text)) { console.error(REPLY_USAGE); process.exit(1); }
     const body = { conv, text };
     if (flag('--why')) body.why = { kind: 'text', label: flag('--why') };
     // THE PLACEMENT (2026-09-28): --to <msg> answers that message (alone: the channel's norm, decided by the server);
@@ -230,6 +255,11 @@ function printReplaced(r) {
     if (msg) body.replyTo = msg;
     if (alsoInChat) body.placement = 'thread+chat';
     else if (inThread) body.placement = 'thread';
+    // B-a085 (mail): --all = everyone on the message it answers (resolved by the server when proposed, shown on the
+    // card); --cc <addr>[,<addr>] = people the reply ADDS — both stay in the thread (In-Reply-To / References)
+    if (args.includes('--all')) body.replyAll = true;
+    if (args.includes('--cc') && !valueOf('--cc')) { console.error(`--cc names the addresses the reply adds: --cc <addr>[,<addr>]\n${REPLY_USAGE}`); process.exit(1); }
+    if (valueOf('--cc')) body.cc = valueOf('--cc');
     if (flag('--replaces')) body.replaces = flag('--replaces');
     const r = await call('POST', '/api/agent/channels/reply', body);
     const p = r.proposal;
@@ -240,6 +270,7 @@ function printReplaced(r) {
     if (p.state === 'sent') console.log(`sent directly (policy: direct) — proposal ${p.id}, sent as ${(p.result && p.result.sentAs) || p.sendAs}`);
     else if (p.state === 'awaiting-approval') console.log(`proposed — proposal ${p.id} is awaiting the user's approval (${(p.policy.reasons || []).join(', ') || 'review'}); the receipt arrives in your next turn`);
     else console.log(`proposal ${p.id}: ${p.state}${p.reason ? ' — ' + p.reason : ''}`);
+    printRecipients(p);
     printReplaced(r);
     if (p.identity && p.identity.marking !== 'none') console.log(`note: on this channel the recipient sees ${p.identity.marking === 'unknown' ? 'an UNVERIFIED sender identity' : 'an application marker'}${p.identity.text ? ' — ' + p.identity.text : ''}`);
     return;
@@ -292,7 +323,7 @@ function printReplaced(r) {
       console.log('access:');
       for (const a of acc) {
         const where = a.grain === 'account' ? `${a.adapterId} — the whole account (${a.adapter})` : a.grain === 'pattern' ? `${a.adapterId} — conversations matching: ${a.rule}` : `${a.key} — ${a.title}`;
-        const as = a.via === 'group' ? ` (as a member of group ${a.as.name || a.as.id})` : '';
+        const as = a.via === 'group' ? ` (as a member of group ${a.as.name || a.as.id})` : a.via === 'everyone' ? ' (the user gave it to all agents)' : '';
         const w = a.watched;
         const note = w ? `notified: ${w.notify === 'digest' ? `a digest every ${w.digestMinutes} min` : 'woken per batch'}${w.mode === 'filtered' ? ' on a filter' : ''}, at most ${w.dailyWakeCap}/day (${w.wakes24h} in 24 h)` : 'not notified — nothing wakes you; read when you choose';
         console.log(`  ${where}${as}\n      authority: ${a.authority === 'send' ? 'may send directly where the policy allows' : 'drafts (the user approves)'} · ${note}`);
@@ -337,12 +368,29 @@ function printReplaced(r) {
     if (r.truncated) console.log('(more matches exist — narrow the words or pass --account)');
     return;
   }
+  if (verb === 'watch' || verb === 'unwatch') {
+    const target = args[1];
+    if (!target || target.startsWith('--')) { console.error(`usage: vibespace-channels ${verb === 'watch' ? 'watch <conv|account> [--mode next-turn|wake] [--keyword "w"[,"w2"]] [--cap N] [--why "…"]' : 'unwatch <conv|account>'}`); process.exit(1); }
+    if (verb === 'unwatch') { await call('POST', '/api/agent/channels/unwatch', { target }); console.log(`removed — your notification on ${target} is gone (one the user set stays).`); return; }
+    if (flag('--regex')) { console.error('--regex is not offered: a pattern run over other people\'s messages can stall the server — use --keyword (any of the words matches)'); process.exit(1); }
+    const body = { target, delivery: flag('--mode') || 'next-turn' };
+    if (flag('--keyword')) body.keywords = String(flag('--keyword')).split(',').map((x) => x.trim()).filter(Boolean);
+    if (flag('--cap')) body.dailyWakeCap = Number(flag('--cap'));
+    if (flag('--why')) body.why = flag('--why');
+    const r = await call('POST', '/api/agent/channels/watch', body);
+    const on = (r.keywords && r.keywords.length) ? `messages with: ${r.keywords.join(', ')}` : 'every new message';
+    if (r.already && r.setBy === 'user') console.log(r.note);
+    else if (r.proposed && r.already) console.log(`a wake request of yours for ${target} is already waiting for the user (${r.request.id}); they decide.`);
+    else if (r.proposed) console.log(`requested — a wake is a billed turn, so the user approves it: their For-you tray shows what Approve writes (at most ${r.dailyWakeCap} wakes a day). Until then nothing wakes you (request ${r.request.id}).`);
+    else console.log(`watching ${r.target}${r.title ? ` (${r.title})` : ''} — ${on} rides your NEXT turn (free; nothing wakes you)${r.replaced ? '; your earlier watch here was replaced' : ''}. Undo: vibespace-channels unwatch ${r.target}`);
+    return;
+  }
   if (verb === 'request') {
     const conv = args[1];
     const why = args[2];
     if (!conv || !why) { console.error('usage: vibespace-channels request <conv> "why"'); process.exit(1); }
     const r = await call('POST', '/api/agent/channels/request', { conv, why });
-    if (r.already && r.level) console.log(`you can already see ${conv} (${r.level}).`);
+    if (r.already && r.level) console.log(r.via === 'everyone' ? `already allowed — the user gave every agent access to ${conv} (All agents); no request was filed.` : `you can already see ${conv} (${r.level}).`);
     else if (r.already) console.log(`a request of yours is already open for ${conv} (${r.request.id}); the user decides.`);
     else console.log(`requested — the user sees "${why}" in their For-you inbox and decides; approval grants YOU visibility on this ONE conversation (request ${r.request.id}).`);
     return;

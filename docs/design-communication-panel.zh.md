@@ -1432,6 +1432,17 @@ effective(principalCtx, scope, grants) -> { level, via:'group'|'agent'|'default'
   求批准能与一条手工授权区分开来, 以及面板能说出一个 principal *为什么*看得见某样东西。
 - 每一次授权变更都往 `audit.ndjson` 追加一行, 带谁 / 何时 / 为什么。
 
+### 8.1 "所有 agent" —— 一个主体, 落在每个模型里 (2026-10-02, lane everyone-principal)
+
+owner: "所有配置权限的地方都加入'所有'这个选项"。`{kind:'everyone', id:'*'}` 是 channel-acl 的 reach grant、channel-filter 的 ACCESS 行和 WATCHERS 行都认的第四种主体:
+
+- **可见 / 可操作 (ACCESS + reach)**: All 的行对每个 agent 会话都适用, 现在和以后。它加入 MAX —— 某个 agent 自己的行(或它所在组的行)永远不会把它压低; 去掉 All 那一行, 其余的具体行原样留下(它们本来就是各自的行, 从不折叠进 All)。权限仍按 MAX 取: A 自己的 `draft` 行不会把 All 的 `send` 压成 draft。
+- **通知 (WATCHERS) = 扇出**: All 的通知会唤醒**每一个运行中的会话** —— 每个都是一次计费回合, 选择器的那一行和 Notify 的预览句都把这件事说出来 ("每次命中, 每个运行中的会话都会被唤醒一次")。上限按**会话**计: 一条存储的 All 通知在唤醒路径上展开成每个运行中会话一项 (`everyone:*><cid>`), 每项有它自己的账本 (`stats.fan[cid]`)、自己的 pending、自己的 scope 链 —— 上限 N 就是每个会话每天 N 次, 绝不是大家共享 N 次, 也绝不是 All × N 不设上限 (金钱规则)。没有会话在运行 = 不唤醒任何人; 之后才开始运行的会话拿到它自己的新上限; 同一批里被具体点名、又被 All 覆盖的会话只被唤醒一次。
+- **申请**: agent 对一个 All 已能看见的会话 `request`, 回答 "已经允许" —— 不建 For you 卡片。
+- **raw-API 的分级** (下一条 lane) 挂在同一条 ACCESS 行上, 所以继承 All 那一行; All 之下的默认分级 = 只读, 给所有人 write-auto 需要显式的第二次点击。
+
+门: scripts/test-everyone-principal.mjs (普查 + 每个模型的 PURE 表 + 真引擎上的金钱规则与对照)。
+
 ---
 
 ## 9. Outbox: propose → policy → approve → send → receipt

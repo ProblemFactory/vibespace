@@ -1566,4 +1566,5 @@ class TaskGroupManager {
   }
 }
 
-module.exports = { TaskGroupManager, BACKLOG_PRIORITIES };
+// B-31d7: the item's line + detail caps, for the route that REFUSES past them before a write (never a silent clip)
+module.exports = { TaskGroupManager, BACKLOG_PRIORITIES, BACKLOG_CAPS: Object.freeze({ text: CAPS.backlogItem, detail: CAPS.detail }) };

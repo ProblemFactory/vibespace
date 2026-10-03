@@ -188,7 +188,7 @@ const express = require('express');
 const R = require('../src/routes/browser.js');
 const rtEnv = { PATH: PATH_ENV, HOME: fakeHome, FAKE_AB_STATE: AB_STATE };
 // 2.369.200 integration (lane hooks-create H5 × this suite): the keeper's env (rtEnv) names no desktop and its PATH carries the
-// system's Xvfb, so an UNSET window preference plans the hidden-window rung once H5's switch is on (OFF in 2.369.200, ON in .201) and the keeper launches with the display-
+// system's Xvfb, so an UNSET window preference plans the hidden-window rung once H5's switch is on (OFF in 2.369.200 and 2.369.202) and the keeper launches with the display-
 // planned copy (browser-env/display/…) — a fact of the box, never this suite's subject (the config the keeper NAMES): it pins
 // headless, as test-browser-env pins a PATH without Xvfb; test-browser-display owns the display legs.
 const settings = { 'browser.idleTimeoutMs': 600000, 'browser.noDisplayMode': 'headless' };
@@ -1422,6 +1422,36 @@ out({ success: false, error: 'fake: unknown verb ' + process.argv.slice(2).join(
   ok(!k1.threw && k1.notices.length === 1 && k1.notices[0].key === 'browser' && k1.notices[0].origin === 'browser' && k1.notices[0].kind === 'notice' && k1.notices[0].text.includes(k1.label) && k1.notices[0].text.includes(String(B.HEAL_BUDGET)) && /Stop/.test(k1.notices[0].detail || ''), `⑥ r5 MAJOR 1 (a): ONE For-you notice (origin browser) naming the profile and the count — "${k1.notices[0] ? k1.notices[0].text : ''}"`, k1.notices);
   ok(!k1.threw && /^browser_unstable /.test(k1.attach || '') && /Browser panel/.test(k1.attach) && k1.relaunchesAfter === k1.relaunches && k1.noticesAfter === 1 && k1.journal <= 12 + 3 /* lane profile-lock-roll: one tab-loss line per in-place relaunch, bounded by the heal budget (3) */, `⑥ r5 MAJOR 1 (a): an attach while unstable is refused by name (${String(k1.attach).slice(0, 90)}…), the next tick relaunches nothing and files no second notice; ${k1.journal} journal lines over the whole storm (never a line per tick forever)`, k1);
   ok(!k1.threw && k1.afterStop && k1.afterStop.state === 'ready' && !k1.afterStop.closed && k1.afterStop.attempts === 0 && k1.afterStop.browser, '⑥ r5 MAJOR 1 (a): a Stop from the panel ends the record — the next start runs with a NEW ledger (0 attempts, no verdict)', k1.afterStop);
+  // B-47f9 (lane browser-reliability): THE SLOW CLOSER — a chrome that dies after every relaunch, its closures 4 min apart on
+  // the keeper's clock, 14 leased ticks: the 10-min window never holds 3 (r6's LOW 2: restarted for good, nobody told); the
+  // day tier stops it at HEAL_DAY_BUDGET relaunches with ONE notice naming the day
+  const slowLeg = async (Kmod, tag) => {
+    clear6();
+    const KEYS = tag === 'slow' ? 'bk-0000c503' : 'bk-0000c504';
+    const ib = inbox6();
+    let clock = Date.now();
+    const kk = mk6(Kmod, tag, new Set([KEYS]), HOME6, { FAKE_CHROME_TTL: '2000' }, { userTodos: ib.store, now: () => clock }); // a tick under load can outlast 1.2 s: the chrome must die BETWEEN ticks
+    const bank = kk.createProfile({ label: 'Slow ' + tag }, { owner: { kind: 'instance', id: null } });
+    const r = { tag, label: 'Slow ' + tag, perTick: [] };
+    try {
+      await kk.attach({ profileId: bank.id, browserKey: KEYS, sessionId: 'sess-w' });
+      logs6.length = 0;
+      for (let i = 0; i < 14; i++) { await sleep(2400); clock += 4 * 60000; await kk.tick(); const x = recOf6(kk, bank.id); r.perTick.push(`${relaunchN()}:${x.closed || '-'}`); }
+      r.relaunches = relaunchN(); r.rec = recOf6(kk, bank.id);
+      r.ledger = kk.browserOf(bank.id).heals || null;
+      r.notices = ib.items.map((x) => ({ text: x.text, detail: x.detail }));
+      // verify r1 LOW: the journal's counts — each relaunch line per tier, the unstable line naming the day
+      r.restarts = logs6.map((l) => /\(restart (\d+) of (\d+) in ([^,)]+)(?:, (\d+) of (\d+) in ([^)]+))?\)/.exec(l)).filter(Boolean).map((m) => m.slice(1).filter(Boolean).join('/'));
+      r.unstableLine = (logs6.find((l) => /NOT started again \(browser_unstable\)/.test(l)) || '').replace(/^.*(after \d+ restarts in [^—]+).*$/, '$1').trim();
+    } catch (e) { r.threw = String((e && (e.code || '')) + ' ' + (e && e.stack)); }
+    try { await kk.stop(bank.id).catch(() => { }); } catch { }
+    kk.shutdown(); killAll6();
+    return r;
+  };
+  const k1s = await slowLeg(K, 'slow');
+  const tiersOk = (x) => x.restarts.length === B.HEAL_DAY_BUDGET && x.restarts.every((w) => { const [n, b] = w.split('/'); return Number(n) <= Number(b); }) && x.restarts[x.restarts.length - 1].endsWith('10/10/24 h') && x.unstableLine === 'after 10 restarts in 24 h';
+  ok(!k1s.threw && tiersOk(k1s), `⑥ B-47f9 verify r1: the journal counts each tier (${k1s.restarts && k1s.restarts.slice(-2).join(' · ')}; "${k1s.unstableLine}") — never "restart 9 of 3 in 10 min" or "10 restarts in 1440 min"`, JSON.stringify({ restarts: k1s.restarts, unstableLine: k1s.unstableLine }));
+  ok(!k1s.threw && k1s.relaunches === B.HEAL_DAY_BUDGET && k1s.rec && k1s.rec.closed === 'browser_unstable' && /10 times in 24 h/.test(k1s.rec.text) && k1s.ledger && k1s.ledger.attempts.length === B.HEAL_DAY_BUDGET && k1s.notices.length === 1 && /10 restarts in 24 h/.test(k1s.notices[0].text) && k1s.notices[0].text.includes(k1s.label), `⑥ B-47f9 THE SLOW CLOSER: closures 4 min apart, 14 leased ticks — ${k1s.relaunches} relaunches (the day tier, ${B.HEAL_DAY_BUDGET}), then \`${k1s.rec && k1s.rec.closed}\` and ONE notice "${k1s.notices && k1s.notices[0] ? k1s.notices[0].text : ''}" (per tick ${(k1s.perTick || []).join(' ')}; ledger ${JSON.stringify(k1s.ledger && k1s.ledger.attempts ? k1s.ledger.attempts.map((x) => Math.round((x - k1s.ledger.attempts[0]) / 1000)) : null)} s)`, k1s.threw || k1s.ledger);
   const wipeLeg = async (Kmod, tag) => {
     clear6();
     const KEYW = tag === 'wipe' ? 'bk-0000c503' : 'bk-0000c504';
@@ -1687,9 +1717,14 @@ out({ success: false, error: 'fake: unknown verb ' + process.argv.slice(2).join(
     const t0 = 10000000;
     ok(B.HEAL_BUDGET === 3 && B.HEAL_WINDOW_MS === 600000 && B.HEAL_RETRY_MS === 30000, '⑥ r5 PURE: the budget is 3 relaunches in 10 min; a failed heal is retried after 30 s', { b: B.HEAL_BUDGET, w: B.HEAL_WINDOW_MS, r: B.HEAL_RETRY_MS });
     const hv = (att) => (typeof B.healBudgetVerdict === 'function' ? B.healBudgetVerdict({ attempts: att, now: t0 }) : { ok: null });
-    ok(hv([]).ok === true && hv([t0 - 1000, t0 - 2000]).ok === true && hv([t0 - 1000, t0 - 2000]).count === 2 && hv([t0 - 1000, t0 - 2000, t0 - 3000]).ok === false && hv([t0 - 1000, t0 - 2000, t0 - 3000]).count === 3 && hv([t0 - 700000, t0 - 650000, t0 - 1000]).ok === true && (hv([t0 - 700000, t0 - 650000, t0 - 1000]).recent || []).length === 1, '⑥ r5 PURE: healBudgetVerdict — 3 relaunches inside the window ⇒ refused; older ones fall out of it (and out of the ledger)');
+    ok(hv([]).ok === true && hv([t0 - 1000, t0 - 2000]).ok === true && hv([t0 - 1000, t0 - 2000]).count === 2 && hv([t0 - 1000, t0 - 2000, t0 - 3000]).ok === false && hv([t0 - 1000, t0 - 2000, t0 - 3000]).count === 3 && hv([t0 - 700000, t0 - 650000, t0 - 1000]).ok === true && (hv([t0 - 700000, t0 - 650000, t0 - 1000]).recent || []).length === 1, '⑥ r5 PURE: healBudgetVerdict — 3 relaunches inside the window ⇒ refused; older ones fall out of it');
+    // B-47f9 (lane browser-reliability): the SECOND tier — a day of attempts is kept, HEAL_DAY_BUDGET of them in a day ⇒ refused (its window named)
+    { const four = (n) => Array.from({ length: n }, (_, i) => t0 - (n - i) * 240000); const d9 = hv(four(9)), d10 = hv(four(10)), old = hv([t0 - 90000000, ...four(9)]);
+      ok(B.HEAL_DAY_BUDGET === 10 && B.HEAL_DAY_MS === 86400000 && d9.ok === true && (d9.kept || []).length === 9 && (d9.recent || []).length === 2 && d10.ok === false && d10.count === 10 && d10.windowMs === 86400000 && old.ok === true && (old.kept || []).length === 9, `⑥ B-47f9 PURE: closures 4 min apart — 9 in a day pass (2 inside the 10 min), the 10th ⇒ refused by the day tier (windowMs ${d10.windowMs}); an attempt older than a day falls out`, { d9: d9.ok, d10, old: old.ok });
+      const ud = B.unstableText({ label: 'Bank', count: 10, windowMs: 86400000 }), nd = B.unstableNotice({ label: 'Bank', count: 10, windowMs: 86400000 });
+      ok(/10 times in 24 h/.test(ud) && /10 restarts in 24 h/.test(nd.text) && /10 times in 24 h/.test(nd.detail), `⑥ B-47f9 PURE: the day tier's words name the day — "${nd.text}"`); }
     const L0 = typeof B.healLedger === 'function' ? B.healLedger({ attempts: [1, 'x', -5, 2e12, null], lastOutcome: 7, noticedAt: 'no' }) : null;
-    ok(L0 && JSON.stringify(L0.attempts) === JSON.stringify([1, 2e12]) && L0.lastOutcome === null && L0.noticedAt === null && JSON.stringify(B.healLedger(null)) === JSON.stringify({ attempts: [], lastOutcome: null, noticedAt: null, unstableCount: null, failed: null, unstableKind: null, unstableSpanMs: null }), '⑥ r5 PURE: healLedger keeps only finite positive attempt times and drops garbage (a hand-edited store never throws)', L0);
+    ok(L0 && JSON.stringify(L0.attempts) === JSON.stringify([1, 2e12]) && L0.lastOutcome === null && L0.noticedAt === null && JSON.stringify(B.healLedger(null)) === JSON.stringify({ attempts: [], lastOutcome: null, noticedAt: null, unstableCount: null, failed: null, unstableKind: null, unstableSpanMs: null, unstableWindowMs: null }), '⑥ r5 PURE: healLedger keeps only finite positive attempt times and drops garbage (a hand-edited store never throws)', L0);
     const ut = typeof B.unstableText === 'function' ? B.unstableText({ label: 'Bank', count: 3, windowMs: 600000 }) : '';
     ok(/"Bank"/.test(ut) && /3 times in 10 min/.test(ut) && /Browser panel/.test(ut) && /Stop/.test(ut), '⑥ r5 PURE: the unstable refusal names the profile, the count and the way out', ut);
     // r6 MINOR 1 PURE: the failed-ask streak, its cap (a count AND a span) and its own words
@@ -2054,6 +2089,18 @@ out({ success: false, error: 'fake: unknown verb ' + process.argv.slice(2).join(
       const cs = await stormLeg(M6.load('src/server/browser-keeper.js', k6src.replace(BUD, '      const bud = { ok: true, count: 0, recent: [] };'), 'no-ledger'), 'ctl-storm');
       ok(!cs.threw && cs.relaunches >= 5 && cs.rec.closed !== 'browser_unstable' && cs.notices.length === 0, `⑥ r5 MAJOR 1 (a) CONTROL: a keeper copy without the ledger relaunches ${cs.relaunches} times in six ticks (${cs.perTick.join(' ')}) and tells nobody — the storm leg can go red`, cs);
     } else ok(false, '⑥ r5 MAJOR 1 (a) CONTROL: the budget anchor was not found in src/server/browser-keeper.js');
+    // (9b) B-47f9: the ledger keeps only the 10-min window (the base) — the slow closer is restarted on every closure, nobody told
+    const KEPT = '      noteHeal(rec, { attempts: [...B.healBudgetVerdict({ attempts: B.healLedger(rec.heals).attempts, now: tAsk }).kept, tAsk], failed: null });';
+    if (k6src.includes(KEPT)) {
+      const csl = await slowLeg(M6.load('src/server/browser-keeper.js', k6src.replace(KEPT, KEPT.replace(').kept,', ').recent,')), 'window-ledger'), 'ctl-slow');
+      ok(!csl.threw && csl.relaunches === 14 && csl.rec.closed !== 'browser_unstable' && csl.notices.length === 0, `⑥ B-47f9 CONTROL: a keeper copy whose ledger keeps only the 10-min window relaunches the slow closer ${csl.relaunches} times in 14 ticks (${csl.perTick.join(' ')}) and tells nobody — the slow-closer leg can go red`, csl.threw || null);
+    } else ok(false, '⑥ B-47f9 CONTROL: the ledger anchor was not found in src/server/browser-keeper.js');
+    // (9c) B-47f9 verify r1 LOW: the journal lines before the fix — the day's ledger length read as the 10-min count
+    { const J1 = '(restart ${healTiers(rec)})', J2 = "after ${count} restarts in ${windowMs >= 2 * 3600e3 ? Math.round(windowMs / 3600e3) + ' h' : Math.round(windowMs / 60000) + ' min'} — NOT";
+      if (k6src.includes(J1) && k6src.includes(J2)) {
+        const cj = await slowLeg(M6.load('src/server/browser-keeper.js', k6src.replace(J1, '(restart ${B.healLedger(rec.heals).attempts.length} of ${B.HEAL_BUDGET} in ${Math.round(B.HEAL_WINDOW_MS / 60000)} min)').replace(J2, 'after ${count} restarts in ${Math.round(windowMs / 60000)} min — NOT'), 'journal-old'), 'ctl-journal');
+        ok(!cj.threw && !tiersOk(cj) && cj.restarts.some((w) => { const [n, b] = w.split('/'); return Number(n) > Number(b); }), `⑥ B-47f9 verify r1 CONTROL: a keeper copy with the lane's first journal lines says "restart ${(cj.restarts || []).slice(-1)[0]}" and "${cj.unstableLine}" — the journal row can go red`, JSON.stringify({ restarts: cj.restarts, unstableLine: cj.unstableLine }));
+      } else ok(false, '⑥ B-47f9 verify r1 CONTROL: the journal anchors were not found in src/server/browser-keeper.js'); }
     // (10) r5 MAJOR 1 (b): the identified-check neutered — a healed chrome that died before its recapture reads as a success
     const WP = '      if (!b) { // r5 MAJOR 1 (b)';
     if (k6src.includes(WP)) {
@@ -2091,7 +2138,7 @@ out({ success: false, error: 'fake: unknown verb ' + process.argv.slice(2).join(
       ok(!cl7.threw && cl7.cdp === 0 && cl7.chromes.length === 0 && cl7.after.closed === 'profile_locked', `⑥ r5 LOW 5 CONTROL: a keeper copy whose refusal arms the gate does NOT heal on the tick after the human closes (${cl7.chromes.length} chromes, still \`${cl7.after.closed}\`) — the LOW 5 leg can go red`, cl7);
     } else ok(false, '⑥ r5 LOW 5 CONTROL: the setClosed anchor was not found in src/server/browser-keeper.js');
     // (16) r6 MINOR 1: today's order (r5) — the attempt counted BEFORE the ask, so a FAILED ask spends the relaunch budget
-    const BO = '      if (!bud.ok) { markUnstable(rec, p, bud.count, seenBy); commit(); return null; }\n';
+    const BO = '      if (!bud.ok) { markUnstable(rec, p, bud.count, seenBy, { windowMs: bud.windowMs }); commit(); return null; }\n'; // B-47f9: the tier's window named
     if (k6src.includes(BO)) {
       const KO = M6.load('src/server/browser-keeper.js', k6src.replace(BO, BO + '      noteHeal(rec, { attempts: [...bud.recent, now()] });\n'), 'count-before-ask');
       const cgo = await gateLeg(KO, 'ctl-gate-r6');

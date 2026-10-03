@@ -89,8 +89,10 @@ function loadStuck() {
 }
 const DS = loadStuck();
 const API = process.env.VIBESPACE_API;
-const TOKEN = process.env.VIBESPACE_SESSION_TOKEN;
-const needSession = () => { if (!API || !TOKEN) { console.error('vibespace-browser: not inside a VibeSpace session (VIBESPACE_API / VIBESPACE_SESSION_TOKEN missing)'); process.exit(2); } };
+// lane jobs-browser (B-dbc1): a Background Work job's process carries VIBESPACE_JOB_TOKEN — it browses as the conversation
+// that owns it (the server's rule: the owner's profile, its own window; verbs that change the conversation's browsers refused)
+const TOKEN = process.env.VIBESPACE_SESSION_TOKEN || process.env.VIBESPACE_JOB_TOKEN;
+const needSession = () => { if (!API || !TOKEN) { console.error('vibespace-browser: not inside a VibeSpace session or job (VIBESPACE_API / VIBESPACE_SESSION_TOKEN or VIBESPACE_JOB_TOKEN missing)'); process.exit(2); } };
 
 const rawArgs = process.argv.slice(2);
 const C = V.classify(rawArgs, { ours: true });
@@ -136,8 +138,8 @@ YOURS:
                                                   a named profile EVERY conversation of the user's can use (logins
                                                   survive; one browser — a second conversation joins it in its own
                                                   tab); --sharing instance = each conversation sees only its own tabs
-  vibespace-browser use <label|id> [--alias <h>]  attach to it; your page verbs then run there (one conversation
-                                                  drives a shared browser at a time: browser_busy names who does)
+  vibespace-browser use <label|id> [--alias <h>]  attach to it; your page verbs then run there, in a window of your
+                                                  own (other conversations work in theirs at the same time)
   vibespace-browser resume                        start THIS conversation's own browser again with its kept tabs (same
                                                   order, the same tab on show) — or, while it runs, reopen the tabs a
                                                   close kept (its logins stay either way; a command's note names them)
@@ -269,17 +271,13 @@ function printRefusal(r) {
     for (const h of r.holders || []) console.error(`  holder: ${h.label}${h.sessions && h.sessions.length ? ' (' + h.sessions.join(', ') + ')' : ''}${h.kind && h.kind !== 'profile' ? ' [' + h.kind + ']' : ''}`);
   } else if (r.code === 'not_owner') {
     // "Who can use it" is a list: the user kept that profile to some conversations / Task Groups — the way out is THEIR
-    // button (add this conversation, or All my conversations), never a recreate
-    console.error('  way out: ask the user to add this conversation under "Who can use it" in the Agent browser panel (Change…), or to switch it to "All my conversations"');
+    // button (add this conversation, or All agents), never a recreate
+    console.error('  way out: ask the user to add this conversation under "Who can use it" in the Agent browser panel (Change…), or to pick "All agents" there');
   } else if (r.code === 'groups_unreadable') {
     console.error('  the Task Group list could not be read — run the same command again once');
   } else if (r.code === 'remote_session') {
     // identity verify r2 (2026-09-28): a profile's browser runs on the VibeSpace machine — a conversation elsewhere keeps its own
     console.error('  this conversation runs on another machine — keep using its own browser (a bare `vibespace-browser <verb>` lands on it)');
-  } else if (r.code === 'browser_busy') {
-    // owner ruling A (2): one conversation drives a shared browser at a time — wait (once), never loop
-    console.error(`  driven by: ${r.by === 'user' ? 'the user' + (r.holder ? ' (in "' + r.holder + '"\'s live view)' : '') : (r.holder ? '"' + r.holder + '"' : 'another conversation')}${r.retryAfterMs ? ` · free in at most ${Math.ceil(r.retryAfterMs / 1000)} s` : ''}`);
-    console.error('  run the same command again once it is free — once, never in a loop');
   } else if (r.code === 'browser_paused') {
     // P3 (§4.3): the user drives this browser — do NOT retry in a loop; the handback names the page they left you on
     if (r.takenAt) console.error(`  taken over at: ${new Date(r.takenAt).toISOString()}${r.lastUserInputAt ? ` · last input ${ago(r.lastUserInputAt)}` : ''}`);
@@ -293,7 +291,7 @@ function printRefusal(r) {
 /** THE AGENT IS TOLD (the owner's ruling, 2026-09-27): the audit's `interrupted` answer — the user took this browser
  *  over while the command ran. Printed by name like every refusal; the caller exits 1. `code` = the binary's own. */
 function printInterrupted(it, code) {
-  console.error(`${it.error || 'The user took over this browser — your operation was interrupted. Wait for the handback, then run it again.'} [browser_interrupted]`);
+  console.error(`${it.error || 'The user took over your window of this browser — your operation was interrupted. Wait for the handback, then run it again.'} [browser_interrupted]`);
   if (it.takenAt) console.error(`  taken over at: ${new Date(it.takenAt).toISOString()}${it.input === 'agent' && it.handedBackAt ? ` · handed back at ${new Date(it.handedBackAt).toISOString()} — control is back with you: re-read the page, then run it again` : ' · the user still drives — wait for the handback (it names what to re-run)'}`);
   if (it.aborted) console.error(`  this command was cut short: its calls in flight were answered browser_interrupted, a script it was running was asked to stop (one awaiting a timer or a fetch may still finish)${Number(it.landed) > 0 ? ` — but ${it.landed === 1 ? 'one of its calls' : it.landed + ' of its calls'} had already reached the page and took effect (a fill's text may be in the field, a click may have landed): check the page before running it again` : ''}${Number(it.unsettled) > 0 ? ` — and ${it.unsettled === 1 ? 'one of its calls' : it.unsettled + ' of its calls'} had not been answered by the page when this was written, so whether it took effect is unknown: check the page before running it again` : ''}`);
   else if (code === 0 && it.mediated) console.error('  the takeover found none of this command\'s calls in flight (its last one had answered): it ran to its end — check the page before re-running it (a click that landed is not to be clicked twice)');
@@ -608,6 +606,8 @@ async function runPage(c) {
   const r = await call('POST', '/api/agent/browser/resolve', { handle: handle || '', argv: rest, wrapper: true }, { soft: true });
   if (r._failed) {
     printRefusal(r);
+    // lane browser-recipes: refused on its FIRST command (no browser of this conversation's yet) ⇒ the recipe, by name
+    if (r.recipe) console.error(`  next: ${r.recipe}`);
     // verify S2 r3 (r2 F2): a verb that would CHANGE WHAT THE USER IS LOOKING AT (`tab t2`, `open <url>`, `back`…) is
     // refused like every page verb while they drive — and SAID so by name (the verb table's rule, never the server's guess)
     if (r.code === 'browser_paused' && typeof V.pausedSwitchNote === 'function') { const n = V.pausedSwitchNote(cls.verb, cls.sub); if (n) console.error(`  ${n}`); }
@@ -702,7 +702,7 @@ async function runPage(c) {
         if (t.closed) console.log(`closed that tab${t.closed.current ? ' (your current one)' : ''}`);
         for (const l of t.lines || []) console.log(l);
       }
-      if (t.note) console.error(`note: ${t.note} [tab_closed_current]`);
+      if (t.note) console.error(`note: ${t.note} [${/^[a-z_]{3,40}$/.test(String(t.noteCode || '')) ? t.noteCode : 'tab_closed_current'}]`); // lane browser-windows: a `tab new` outside a window of its own names itself
       if (au && !au._failed && au.interrupted) { printInterrupted(au.interrupted, 0); process.exit(1); }
       process.exit(0);
     }
@@ -1103,6 +1103,10 @@ async function runOursPage(cls, { r, head, profileId, wantsJson }) {
     const ephWords = eph ? `ephemeral: ${eph.state === 'not-started' ? 'not started yet' : eph.state}${eph.startedAt ? ', started ' + ago(eph.startedAt) : ''}${eph.live && eph.pid ? ', pid ' + eph.pid : ''}` : 'ephemeral: not started yet — your first command starts it';
     if (!set.length && !(r.children || []).length) console.log(r.shared ? 'no profile attached — this session drives the machine\'s SHARED browser (per-session browsers are off here): never `close --all`.' : `no profile attached — this session browses its own managed browser (${ephWords}); its logins and tabs are kept for this conversation when it closes (a browser fenced to allowed domains keeps its tabs only).`);
     else if (eph && !r.shared) console.log(`this conversation's own managed browser: ${ephWords} (a bare verb lands on it only while nothing is attached)`);
+    // lane browser-recipes (userR's pod): a status that says what this conversation LACKS also names the recipe — and,
+    // where this machine has no display, that only this tool works here (her agent launched chromium by hand and died)
+    if (!set.length && r.recipe) console.log(r.recipe);
+    if (r.noDisplay) console.log(r.noDisplay);
     for (const a of set) {
       const l = r.leases.find((x) => x.profileId === a.profileId) || {};
       console.log(`${a.isDefault ? '*' : ' '} ${a.alias}  →  ${a.label} (${a.profileId})${l.mediated ? ' · shared (mediated: your own tabs only)' : ''} · attached ${ago(a.since)} · input: ${l.input || '?'} · browser: ${l.browser ? l.browser.state + (l.browser.pid ? ' pid ' + l.browser.pid : '') : 'not running'} · ${l.others ?? 0} other session(s)`);

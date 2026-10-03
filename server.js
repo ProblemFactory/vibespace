@@ -13,6 +13,7 @@ const os = require('os');
 const { execFileSync, spawn } = require('child_process');
 const compression = require('compression');
 const { MessageManager } = require('./src/message-manager');
+const { sameToken } = require('./src/pairing-token'); // B-8dda: a vsst_ compare in constant time
 const { createMessageManager, feedLive, feedPeerCard } = require('./src/normalizers');
 const { Telemetry } = require('./src/telemetry');
 const { SyncStore } = require('./src/sync-store');
@@ -409,7 +410,7 @@ const {
   apiDerivedWindow, establishedWindows, repairIdentityAnchors, // B-855a: the two identity witnesses handed to setupUsage — the panel probe may only write the account it proves — + c2's STANDING identity repair (boot + POST /api/usage/repair-identity)
   poolChooserForModel, poolReadCache, probeUsageForAccountKey, readRawUsageCache, spendGuard, // the ONE raw usage-cache read (overage lives there — design §1.4) + THE SPEND CEILING (§4.4c): ONE authorizer in front of every turn nobody typed, per credential slot, persisted ⇒ src/server/spend-guard.js
   noteSessionProduced, noteTurnEnd: noteTurnEndEngine, noteWallSignal, noteStreamRecord, recordIsLate, beforeAutoResumeFire, fireIdentityFor, memberLoginState, probeUsageViaSession, recordCodexQuotaSignal, recordRateLimitEvent, resolveUsageKey, noteServedModel, noteModelFallback, servedDefinesModel, rerouteAnnouncedBy, settleTurnLane, // …+ the SERVED-MODEL pair + its FALLBACK PREDICATE (r3-r2: the parse's target-less lock latch asks it, so a classifier substitute never becomes the lock target that defines placement) + the REROUTE THIS RECORD ANNOUNCES (r4: placed BEFORE the served capture at both feeds — the incident's first announcement rides the very record the substitute answered) + the per-turn LANE settle (2026-09-13 r3): both stdout feeds destructure them from the `engine:` literals below, and neither was exported here — the whole round-1 fix was a TypeError in production
-  sessionModelFor, sweepUsageAnchors, usageCacheKeyFor, resetCreditOffer, resetCreditPreview, consumeResetCreditFor, claimColdRestarts, // the stored reset credits the auto-resume arm card offers (design-reset-credits §5) + the manual use's preview/POST (p2)
+  sessionModelFor, sweepUsageAnchors, usageCacheKeyFor, resetCreditOffer, resetCreditPreview, consumeResetCreditFor, claimColdRestarts, refreshCodexForPerson, settleResetCreditByRead, catchUpResetCreditFromBuffer, // the stored reset credits the auto-resume arm card offers (design-reset-credits §5) + the manual use's preview/POST (p2) + verify r1: the session path's read before a press over an unsettled attempt
   usageIdentityAccountIds, usageIdentityGroups, usageIdentityGroupsCached,
   writeUsageCacheForKey, clearSealedOrders, pushSealedOrders,
   estOverlayCache, predictCalib,
@@ -486,13 +487,13 @@ const { checkClaudeGoalStatus } = require('./src/server/goal-sync.js').create({
 // setupSessionPty + attachToDtach + the session-meta store.
 const { setupSessionPty, attachToDtach, readSessionMeta, writeSessionMeta,
   deleteSessionMeta, sessionMetaOwnerConflict, _metaTombstones,
-  applyTaskToolUpdate, emitTaskListTodos, updateSessionTodos, reattachLocalPty, ptyQuietSince,
+  applyTaskToolUpdate, emitTaskListTodos, updateSessionTodos, reattachLocalPty, ptyQuietSince, writeSessionInput,
 } = require('./src/server/session-stdout.js').create({
   rootDir: __dirname, BUFFERS_DIR, META_DIR, DTACH_CMD, USAGE_SCANNER_PATH,
   CLAUDE_STREAM_TYPES, _seenStreamTypes, activeSessions,
   engine: { _vsuPending, armWorkflowUsageWatcher, kickPoolEval, markLimitBanner, // EVERY name the registered consumers destructure from `engine` must be here — test-fable-cap-pool-storm §10 derives that set from their own `const {…} = engine;` and fails THIS literal (r3: two were missing and every claude chat record became raw output)
     maybePoolAutoSwitch, maybeRepinLockedModel, maybeStopOnFallback, notePoolAuthFailure,
-    modelsMatch, noteSessionProduced, noteTurnEnd, noteTurnStopped, noteWallSignal, recordCodexQuotaSignal, recordRateLimitEvent, resolveUsageKey, usageEstimator, noteStreamRecord, recordIsLate, noteServedModel, noteModelFallback, servedDefinesModel, rerouteAnnouncedBy, settleTurnLane },   // noteTurnEnd = the hooked wrapper above (the park)
+    modelsMatch, noteSessionProduced, noteTurnEnd, noteTurnStopped, noteWallSignal, recordCodexQuotaSignal, catchUpResetCreditFromBuffer, recordRateLimitEvent, resolveUsageKey, usageEstimator, noteStreamRecord, recordIsLate, noteServedModel, noteModelFallback, servedDefinesModel, rerouteAnnouncedBy, settleTurnLane },   // noteTurnEnd = the hooked wrapper above (the park); catchUpResetCreditFromBuffer = lane reset-path's buffer-file catch-up (codex-events — wired at the 2.369.202 integration)
   checkClaudeGoalStatus,
   broadcastToSession,
   broadcastActiveSessions: (...a) => broadcastActiveSessions(...a),
@@ -529,7 +530,7 @@ const hooksLate = require('./src/server/hooks-late.js').create({ activeSessions,
 const {
   AGENT_BIN_DIR, EDITOR_DIR, EDITOR_CMD, STATUS_CMD, USAGE_STATUSLINE_CMD, HOOK_CMD,
   createEditorHelper, createStatusHelper, createHookHelper, userStatuslineCmd,
-  ensureAgentHooks, stripAgentHookEntries, removeAgentHooks, hookRegistrationSafe,
+  ensureAgentHooks, stripAgentHookEntries, removeAgentHooks, hookRegistrationSafe, ownerWriteRefusal, refuseOwnerWrite, rootRecovery,
   agentHooksStatus, HOOK_OPTOUT_FILE,
 } = require('./src/server/agent-tool-generators.js').create({ rootDir: __dirname, port: PORT, onHookFileCreated: (ev) => hooksLate.noteCreated(ev) });
 // ── Harness settings (src/server/harness-config-sync.js; docs/design-harness-settings.zh.md) ──
@@ -539,7 +540,7 @@ const {
 // machine applies (local: in-process below; remote: VIBESPACE_CLI_CONFIG on the
 // install/prelude/dial sites in hosts.js and ws-create.js).
 const harnessConfig = require('./src/server/harness-config-sync.js').create({
-  serverSetting: (...a) => serverSetting(...a), harnesses: require('./src/harnesses'), adapterRegistry, activeSessions, hookRegistrationSafe,
+  serverSetting: (...a) => serverSetting(...a), harnesses: require('./src/harnesses'), adapterRegistry, activeSessions, hookRegistrationSafe, ownerWriteRefusal, refuseOwnerWrite, rootRecovery,
   log: (...a) => console.log(...a), warn: (...a) => console.warn(...a),
 });
 const { harnessSetting, harnessDeclares, harnessSpawnSettings, cliConfigPlanB64 } = harnessConfig;
@@ -571,7 +572,7 @@ function serverNotice(key, text, { level = 1, i18n = null } = {}) { // i18n = {k
 // hook config and pick it up after restart/compaction; the notice says so.
 function checkAgentHookHealth() {
   try {
-    if (!hookRegistrationSafe() || !integrationEnabled() || fs.existsSync(HOOK_OPTOUT_FILE)) return;
+    if (!hookRootWatch.probeMayRun() || !integrationEnabled() || fs.existsSync(HOOK_OPTOUT_FILE)) return; // verify r2 ①: an unjudgeable root arms the backoff re-judge, never a silent return
     const scriptMissing = !fs.existsSync(HOOK_CMD);
     if (scriptMissing) { try { createHookHelper(); } catch {} }
     const st = agentHooksStatus();
@@ -581,7 +582,7 @@ function checkAgentHookHealth() {
       if (info.stale || !info.installed || scriptMissing) {
         global.__vsEvent?.('agent-hook-broken', `${key}${info.stale ? '/stale' : ''}${!info.installed ? '/missing-entry' : ''}${scriptMissing ? '/script-missing' : ''}`);
         ensureAgentHooks({ auto: true }); // self-heal the registration in place
-        serverNotice(`hook-health-${key}`,
+        if (!hookRootWatch.saidRecoveryInstead(info, scriptMissing)) serverNotice(`hook-health-${key}`, // verify r2 ①: a root never registered because it could not be read is a recovery, not "broken and repaired"
           `VibeSpace's ${key} agent-hook registration was broken (stale or missing path) and has been repaired — CLI sessions already running pick the fix up only after they restart or compact.`,
           { level: 2 });
       }
@@ -658,7 +659,7 @@ app.post('/api/editor/open', (req, res) => {
     const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
     let ok = false;
     if (token && token.startsWith('vsst_')) {
-      for (const [, s] of activeSessions) { if (s.agentToken === token) { ok = true; break; } }
+      for (const [, s] of activeSessions) { if (sameToken(token, s.agentToken)) { ok = true; break; } }
     }
     if (!ok) return res.status(401).json({ error: 'unauthorized (session token required)' });
   }
@@ -738,9 +739,10 @@ function integrationEnabled() {
 // the master switch. ensureAgentHooks({auto:true}) still honors the manual
 // data/.agent-hooks-optout marker (Manage-Agents Remove) — the switch never
 // overrides that narrower explicit choice; Install there clears it.
+const hookRootWatch = require('./src/server/hook-root-watch.js').create({ dataDir: path.join(__dirname, 'data'), ensureAgentHooks, rootRecovery, ownerWriteRefusal, integrationEnabled: () => integrationEnabled(), serverNotice: (...a) => serverNotice(...a) });
 function syncHookRegistration() {
   try {
-    if (integrationEnabled()) ensureAgentHooks({ auto: true });
+    if (integrationEnabled()) hookRootWatch.sync(); // the unknown ⇒ the notice once per cause + the backoff re-judge; ok ⇒ the recovery said once // verify r1 (hook-root-guard): an UNJUDGEABLE root (a read error on .git) is said to the OWNER, not only the journal; every writer re-reads, the probe heals + notifies
     else stripAgentHookEntries();
   } catch (e) { console.warn('[integration] hook registration sync failed:', e.message); }
 }
@@ -1206,7 +1208,7 @@ app.get('/api/telemetry/summary', (req, res) => {
 require('./src/server/account-usage-routes.js').create({
   app, rootDir: __dirname, HOST, CLAUDE_CMD, NODE_CMD,
   CLAUDE_SUBSCRIPTION_LOGIN_HELPER, activeSessions, auth,
-  engine: { clearSealedOrders, resetCreditPreview, consumeResetCreditFor, claimColdRestarts, memberRemoved, decideDefaultTarget, fallbackDefaultTarget, removalTargetFor, maybePoolAutoSwitchForPool, setConversationPin, gatherPlan, onMemberLoginSuccess }, // + the login re-check (2026-09-29: a member that signs in ⇒ ONE usage read + ONE pool re-decision) + the removed-member wall (2026-09-28: the members route evicts through the engine's ONE entry point, the default re-point by decision) // + claimColdRestarts (r4: the manual routes never double a restart in flight) + the manual reset-credit use (design-reset-credits p2, src/routes/reset-credit.js)
+  engine: { clearSealedOrders, resetCreditPreview, consumeResetCreditFor, claimColdRestarts, refreshCodexForPerson, settleResetCreditByRead, memberRemoved, decideDefaultTarget, fallbackDefaultTarget, removalTargetFor, maybePoolAutoSwitchForPool, setConversationPin, gatherPlan, onMemberLoginSuccess }, // + the login re-check (2026-09-29: a member that signs in ⇒ ONE usage read + ONE pool re-decision) + the removed-member wall (2026-09-28: the members route evicts through the engine's ONE entry point, the default re-point by decision) // + claimColdRestarts (r4: the manual routes never double a restart in flight) + the manual reset-credit use (design-reset-credits p2, src/routes/reset-credit.js)
   serverSetting: (...a) => serverSetting(...a),
   recordUsageAttribution: (...a) => recordUsageAttribution(...a),
   liveAccountIdSet: (...a) => liveAccountIdSet(...a),
@@ -1248,6 +1250,7 @@ const userTodos = new UserTodoManager({
   },
 });
 require('./src/server/helper-asks').install({ userTodos, sessionKeyFor: (s, id) => sessionStatusKey(s, id), activeSessions, persistAskedAt: (s, map) => { if (s && s.sockName) writeSessionMeta(s.sockName, { ...(readSessionMeta(s.sockName) || {}), helperAskedAt: map }); } }); // lane S1: a helper's ask unanswered for 60 s ⇒ ONE For-you item, resolved when it is answered
+require('./src/server/unexpected-exit').install({ userTodos, sessionKeyFor: (s, id) => sessionStatusKey(s, id), activeSessions, clients: () => wss.clients, buffersDir: BUFFERS_DIR }); // B-f698: an unexpected exit while working is resumed ONCE by itself (one client asked) + one For-you item
 const loginExpiryWatch = require('./src/server/login-expiry-watch.js').create({ accounts, userTodos, dataDir: path.join(__dirname, 'data'), log: (...a) => console.log(...a) }); loginExpiryWatch.start(); // PASSIVE (file reads only, §ban-safety): warns the inbox at 24h/1h/expired before a subscription's LOGIN SESSION dies AND retracts those warnings once the member is re-logged in — see src/login-expiry.js. The handle is kept so the accounts login routes can sweep it IMMEDIATELY on a successful login (up to 5 min of staring at the item you just fixed is the reported defect)
 app.get('/api/user-todos', (req, res) => res.json({ todos: userTodos.snapshot() }));
 require('./src/routes/user-todos-reply.js').registerResolveManyRoute(app, { userTodos }); // "Mark all seen" (POST /api/user-todos/resolve-many, owner-only) — registered BEFORE the :id route below, which would otherwise read `resolve-many` as an item id
@@ -1288,6 +1291,7 @@ const jobsWiring = require('./src/server/jobs-wiring.js').create({
   userTodos, log: (...a) => console.log(...a), getTelemetry: () => { try { return telemetry; } catch { return null; } }, // jobs-archive-write-failed rides telemetry
   serverSetting, taskGroups: tasks, activeSessions, // owner auto-notify (2.344.0): toggles + channel-lane session lookup
   onStash: () => { try { stashView.changed(); } catch { } }, // 2026-09-27: a job notification stashed / drained ⇒ the session's `stash` fact is re-published
+  onRunEnded: (job) => { try { browserKeeper?.releaseJob?.(job.id, 'the job run ended'); } catch { } }, // lane jobs-browser: a run's end releases its browser lease + window
 });
 // WHAT WAITS FOR AN AGENT (2026-09-27, the owner: "我在界面里完全看不到'有消息在 queue'这件事情"): both stashes summarized as the `stash` session fact + the user's POST /api/sessions/:id/stash/hand-over (ONE ladder turn, spend reason stash-handover) — src/server/stash-handover.js
 const stashView = require('./src/server/stash-handover.js').create({ activeSessions, getDeliver: () => deliver, getJobs: jobsWiring.getJobs, getGroups: () => { try { return channelsWiring.groups; } catch { return null; } } /* lane group-report-card: the group messages waiting for a member's next turn (created further down — TDZ-safe) */, broadcastSessions: () => broadcastActiveSessions(), renderMsgStash: require('./src/agent-routes.js').renderMsgStash, renderNotifStash: require('./src/job-model.js').renderNotifStash, dataDir: path.join(__dirname, 'data') }); stashView.register(app);   // verify r4: dataDir = the delivered-hand-over memory on disk (a restart between a delivery and its echo)
@@ -1307,7 +1311,7 @@ app.post('/api/sessions/:id/msg-reachability', (req, res) => {
   res.json({ ok: true, level: lv });
 });
 const recordClear = require('./src/server/record-clear.js').create({ tasks, userTodos, sessionStatus, getJobs: jobsWiring.getJobs, getGroups: () => channelsWiring.groups }); require('./src/routes/records-clear.js').registerRecordClearRoutes(app, { recordClear }); // "Clear content…" (2026-09-28): ONE entry point (PURE verdict, each store's door, the journal line); the owner's POST /api/records/clear[-many] here, an agent's own verbs through setupAgentRoutes
-setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionStatusManager, userTodos, sessionStatusKey, serverSetting, spendGuard, scheduleCtxSync, remoteCtxBaseFor, readUserState: () => persistenceRouter.readUserState(), getJobs: jobsWiring.getJobs, deliver, getPublishedPages: () => publishedPages, getDesignKit: () => designKit, getChannels: () => channelsWiring.channels, getGroups: () => channelsWiring.groups, getTouches: () => channelsWiring.touches, getRecordClear: () => recordClear }); // lazy getters: all three are created further down (TDZ at boot otherwise); getChannels = the vibespace-channels routes' engine (P3)
+setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionStatusManager, userTodos, sessionStatusKey, serverSetting, spendGuard, scheduleCtxSync, remoteCtxBaseFor, readUserState: () => persistenceRouter.readUserState(), getJobs: jobsWiring.getJobs, deliver, getPublishedPages: () => publishedPages, getChannels: () => channelsWiring.channels, getGroups: () => channelsWiring.groups, getTouches: () => channelsWiring.touches, getRecordClear: () => recordClear, getSendUserInput: () => sendUserInput }); // lazy getters: all three are created further down (TDZ at boot otherwise); getChannels = the vibespace-channels routes' engine (P3); getSendUserInput = THE typing path for a dispatch's `/compact` (lane worker-dispatch — sendUserInput is declared further down)
 app.get('/api/agent-hooks', (req, res) => res.json({ ...agentHooksStatus(), integrationOff: !integrationEnabled(), cliConfig: harnessConfig.cliConfigStatus() })); // cliConfig = fresh per-key receipts for the managed CLI-config rows (Settings window chips + the Machines card; D2: never persisted)
 app.post('/api/agent-hooks/install', (req, res) => {
   // The master switch outranks the button: boot/toggle would strip the entries
@@ -1315,6 +1319,8 @@ app.post('/api/agent-hooks/install', (req, res) => {
   if (!integrationEnabled()) return res.status(400).json({ error: 'VibeSpace integration is disabled (Settings → Integration → master switch). Enable it first.' });
   createHookHelper(); // regenerate the script too (repair path)
   const results = ensureAgentHooks({ auto: false }); // explicit → clears any opt-out
+  // A worktree / temp server refuses BY NAME (src/server-root.js) — never "installed"
+  if (results.refused) return res.status(409).json({ error: results.refused.line, refused: results.refused, status: agentHooksStatus() });
   res.json({ success: true, results, status: agentHooksStatus() });
 });
 hooksLate.registerApplyRoute(app, { ensureAgentHooks, agentHooksStatus, integrationEnabled, harnessConfig, hookRegistrationSafe }); // POST /api/cli-config/apply — the missing-file chip's "Apply" (human-triggered): the boot registration + CLI-config plan on demand (lane hooks-create)
@@ -1326,6 +1332,7 @@ app.post('/api/agent-hooks/uninstall', (req, res) => {
 // ── Hosts (the MACHINE registry — ssh hosts AND dial-out devices, B-f3e8) ──
 const { HostManager } = require('./src/hosts');
 const hosts = new HostManager({ dataDir: path.join(__dirname, 'data') });
+hosts.ownerWriteRefusal = refuseOwnerWrite; // the root verdict (src/server-root.js): a worktree / temp server runs no register helper on another machine either
 hosts.cliConfigPlanB64 = cliConfigPlanB64; // the CLI-config plan rides every remote install + the gated --status probe as VIBESPACE_CLI_CONFIG (design-harness-settings §6)
 const bcastAll = (msg) => { const j = JSON.stringify(msg); wss.clients.forEach(c => { if (c.readyState === WS_OPEN) { try { c.send(j); } catch {} } }); };
 // B-f3e8 one-time migration: dial-tokens.json (deviceId → sha256) folds into
@@ -1561,7 +1568,7 @@ const publishedPages = require('./src/server/published-pages.js').create({ // 2.
   dataDir: path.join(__dirname, 'data'), requestAuthed: (req) => auth.requestAuthed(req), log: (...a) => console.log(...a), publicUrl: () => instanceUrl.url(),
   onPublished: (page) => { const s2 = page.sessionId && activeSessions.get(page.sessionId); if (s2) broadcastToSession(s2, page.sessionId, { type: 'page-published', sessionId: page.sessionId, page }); },
 });
-const designKit = require('./src/server/design-kit.js').create({ dataDir: path.join(__dirname, 'data'), claudeCmd: () => CLAUDE_CMD, log: (...a) => console.log(...a) }); designKit.registerRoutes(app); setTimeout(() => designKit.ensure().catch(() => { }), 15000); publishedPages.registerRoutes(app); // 2.366.0: the /design kit from the INSTALLED CLI, adapted to publish here; warmed off the boot path
+publishedPages.registerRoutes(app); // 2.364.0 published pages (/p/<id> + /api/pages); the Design window publishes through the same store (lane design-docs: the Claude CLI kit that was wired here is gone — the Design window is VibeSpace's own, src/server/design-engine.js)
 // protocol override: {proto: 'http'|'https'|'tcp'|null} (null = back to auto);
 // a published forward is transparently re-published in the new mode
 app.post('/api/port-forward/:id/proto', async (req, res) => {
@@ -1601,7 +1608,7 @@ const integrationsWiring = require('./src/server/integrations-wiring.js').create
 // ── Mounts + plugins + dial-session wiring (src/server/mounts-plugins-wiring.js, decomposition #12) ──
 const { mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, browserKeeper, bootBrowserKeeper, browserStream, browserHandback, browserTrace, browserKeys, browserDialogs, pluginLoader,
 } = require('./src/server/mounts-plugins-wiring.js').create({
-  app, server, rootDir: __dirname, HOST, PORT, BUFFERS_DIR, PERMISSION_MODES, integrations: integrationsWiring.store, // + agent browser P4 second half (§7.5): the key consumer's store
+  app, server, rootDir: __dirname, HOST, PORT, BUFFERS_DIR, PERMISSION_MODES, integrations: integrationsWiring.store, getJobs: () => jobsWiring.getJobs(), // + lane jobs-browser: a job browses as its owner conversation // + agent browser P4 second half (§7.5): the key consumer's store
   auth, wss, WS_OPEN,
   bcastAll: (...a) => bcastAll(...a), serverNotice: (...a) => serverNotice(...a), // + agent browser P1: the keeper's runaway/ceiling notices
   serverSetting: (...a) => serverSetting(...a),
@@ -1655,7 +1662,8 @@ app.get('/api/session-options', (req, res) => {
 });
 
 // ── WebSocket Terminal Handler (extracted to src/ws-handler.js) ──
-const sendUserInput = require('./src/server/user-input.js').createUserInputSender({ activeSessions, adapterRegistry, BUFFERS_DIR, broadcastToSession, feedLive, autoResume, reattachLocalPty, ptyQuietSince, log: (...a) => console.log(...a) }).send; require('./src/routes/user-todos-reply.js').registerUserTodoReplyRoutes(app, { userTodos, activeSessions, sendUserInput, sessionStatusKey }); // THE typing path, ONE implementation: the ws chat-input case AND the For-you reply route (POST /api/user-todos/:id/reply, owner-only — design-user-inbox-reply D1)
+const sendUserInput = require('./src/server/user-input.js').createUserInputSender({ activeSessions, adapterRegistry, BUFFERS_DIR, broadcastToSession, feedLive, autoResume, reattachLocalPty, ptyQuietSince, writeSessionInput, log: (...a) => console.log(...a) }).send; require('./src/routes/user-todos-reply.js').registerUserTodoReplyRoutes(app, { userTodos, activeSessions, sendUserInput, sessionStatusKey }); // THE typing path, ONE implementation: the ws chat-input case AND the For-you reply route (POST /api/user-todos/:id/reply, owner-only — design-user-inbox-reply D1)
+const designEngine = require('./src/server/design-engine.js').create({ dataDir: path.join(__dirname, 'data'), rootDir: __dirname, activeSessions, getRemoteFs: () => remoteFs, getPublishedPages: () => publishedPages, getDeliver: () => deliver, sendUserInput, broadcastAll: (m) => bcastAll(m), broadcastToSession, log: (...a) => console.log(...a) }); require('./src/routes/design.js').registerDesignRoutes(app, { design: designEngine, activeSessions, getJobs: jobsWiring.getJobs }); // THE DESIGN WINDOW (lane design-core, docs/design-design-window.md §3.3): the registry, one-op reads, the 2 s watch while a window looks, a comment → THE typing sender (else the stash), publish → published pages
 { const { turnDigest } = require('./src/server/turn-facts.js'); let lastTurns = ''; setInterval(() => { const d = turnDigest(activeSessions); if (d !== lastTurns) { lastTurns = d; broadcastActiveSessions(); } }, 1000).unref(); } // the payload's `turn` column ('running'|'idle'|'waiting' — the inbox's running dot; carried, never gating) is DERIVED: one 1 s digest over _isStreaming/_turnState, a list broadcast only when it moved — never a hook at the nine flip sites (design-user-inbox-reply D1.7)
 const { registerWsHandler, noConvoRef, pickCodexThreadCandidate } = require('./src/ws-handler');
 registerWsHandler(wss, {
@@ -1667,14 +1675,14 @@ registerWsHandler(wss, {
   activeSessions, WS_OPEN, broadcastActiveSessions, broadcastToSession, resizeSessionToMin,
   setupSessionPty, reattachLocalPty, ptyQuietSince, refreshWebuiPids, deleteSessionMeta, writeSessionMeta, readSessionMeta, autoResume,
   readLayouts, writeLayouts, getSyncStore, serverSetting, integrationEnabled,
-  harnessSetting, harnessDeclares, harnessSpawnSettings, cliConfigPlanB64, // harness settings (design-harness-settings §5/§6)
+  harnessSetting, harnessDeclares, harnessSpawnSettings, cliConfigPlanB64, ownerWriteRefusal: refuseOwnerWrite, // harness settings (design-harness-settings §5/§6)
   sessionCounterRef, createSessionMessages,
   SOCKETS_DIR, BUFFERS_DIR, PTY_WRAPPER, CHAT_WRAPPER,
   NODE_CMD, DTACH_CMD, ENV_CMD, CLAUDE_CMD, EDITOR_CMD, AGENT_BIN_DIR, PORT, X_ENV, cliCmds,
   adapterRegistry, pty, path, fs, os, execFileSync, ensureDir, hosts,
   accounts, scheduleCtxSync, activeSessionsPayload, serverNotice,
   getExitProxy: () => { try { return exitProxy; } catch { return null; } }, // verify-r2 A3-r2 / ask-a: the kill path ends a dead conversation's pairs + asks
-  USAGE_STATUSLINE_CMD, userStatuslineCmd, telemetry, sendUserInput, // telemetry: the ws switch's `default:` counts unknown message types (Plugin Ph1); sendUserInput = THE typing path (src/server/user-input.js), shared with the For-you reply route
+  USAGE_STATUSLINE_CMD, userStatuslineCmd, telemetry, sendUserInput, getDesign: () => designEngine, // getDesign = the Design window's watch (design-watch / design-unwatch); telemetry: the ws switch's `default:` counts unknown message types (Plugin Ph1); sendUserInput = THE typing path (src/server/user-input.js), shared with the For-you reply route
 });
 
 // Billing identity for the card badge. Precedence: env-key spawn (definite) →

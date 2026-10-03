@@ -44,7 +44,7 @@ ok('a FOREGROUND result synthesizes nothing (negative control)', parseBackground
 const TU = 'toolu_019W5ktfvTJx9Kmn91CUgDvs';
 const hist = [
   { type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: TU, name: 'Agent', input: { description: 'Recon prepaid-mode touchpoints', prompt: 'x' } }] } },
-  { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: TU, content: AGENT_ACK }] } },
+  { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: TU, content: [{ type: 'text', text: AGENT_ACK }] }] /* B-63f1: the real shape — a text-block list */ } },
 ];
 const mm = createMessageManager('claude', 'test-hist');
 mm.convertHistory(hist);

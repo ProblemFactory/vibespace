@@ -392,7 +392,7 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     }
     const before = writeFrame(p.before, 'before');
     const after = p.afterSame && p.after === p.before ? (before ? { ...before, file: before.file } : null) : writeFrame(p.after, 'after');
-    const entry = T.entryFor({ id, at: p.at, sessionId: tp.sessionId, browserKey: tp.browserKey, profileId: tp.profileId, browserSession: bs ? bs.id : null, command: p.command, result: p.result, position, before, after, afterSame: p.afterSame, url: tp.lastUrl || p.url || null, holder: tp.human ? 'user' : null });
+    const entry = T.entryFor({ id, at: p.at, sessionId: tp.sessionId, browserKey: tp.browserKey, profileId: tp.profileId, browserSession: bs ? bs.id : null, command: p.command, result: p.result, position, before, after, afterSame: p.afterSame, url: tp.lastUrl || p.url || null, holder: tp.human ? 'user' : null, job: typeof keeper?.jobOf === 'function' ? keeper.jobOf(tp.browserKey) : null });
     if (bs) { if (!isFit) bs.count++; bs.lastAt = Math.max(bs.lastAt || 0, entry.at); } // a session counts the agent's actions; a fit rides beside
     try { fs.writeFileSync(path.join(dir, `${id}.json`), JSON.stringify(entry), { mode: FILE_MODE }); } catch (e) { log.warn?.(`[browser-trace] entry write failed: ${e && e.message}`); }
     appendIndex(scope, entry);

@@ -742,7 +742,7 @@ function rebuildUnderFault(PS, name, code) {
   // to have, so prose is blanked before asking whether one survives.
   const noComments = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   const reqs = [...src.matchAll(/require\('([^']+)'\)/g)].map((m) => m[1]);
-  ok(reqs.every((r) => ['fs', 'path', 'crypto', './channel-record.js', './channel-reactions.js'].includes(r)), 'the store is SHARED: node builtins only — fs, path, and crypto for the attachment cache\'s file names (2026-09-26) — plus, since lane channel-threads, the two PURE modules the side log\'s dedup key and compaction fold are theirs (SHARED may import PURE)', reqs.join(','));
+  ok(reqs.every((r) => ['fs', 'path', 'crypto', './channel-record.js', './channel-reactions.js', './channel-thread.js'].includes(r)), 'the store is SHARED: node builtins only — fs, path, and crypto for the attachment cache\'s file names (2026-09-26) — plus, since lane channel-threads, the PURE modules the side log\'s dedup key and compaction fold are theirs, and (lane lark-threads) the place patch\'s widen-only rules (SHARED may import PURE)', reqs.join(','));
   ok(!/module\.exports[\s\S]*writeIndex|exports\.writeIndex/.test(src), 'there is deliberately NO "write the whole index back" export — the serialized owner is the index\'s only writer (§5.1)');
   ok(!/writeAdapters/.test(noComments), '…and none for adapters.json either (r2): every caller used to re-parse and write its own private copy back, which is the read-modify-write lost update this invariant exists to eliminate');
   ok(/appendLines\(fp[\s\S]{0,300}?for \(const r of fresh\) rememberVendorId/.test(src) && !/if \(set\.has\(r\.vendorId\)[\s\S]{0,120}?rememberVendorId/.test(src), 'the dedup set is written AFTER the bytes are durable, never inside the selection loop');
@@ -1042,6 +1042,7 @@ console.log('\n⑫ the side-log cost census — bounded reads, append-only write
     readSide: 'sideTail (the window, ≥ 64 KiB, default SIDE_READ_BYTES)',
     trimSide: 'sideWindow + a temp write ≤ SIDE_KEEP_BYTES + rename',
     trim: 'trimSide (inside the message trim — its own reads and writes are the MESSAGE log\'s, bounded by retention)',
+    placesOf: 'lane lark-threads (A1): sideLines (the window) — the place patches folded ONCE per conversation, cached (PLACE_CACHE_MAX)',
   };
   const VIA_ONLY = new Set(['trim']);   // touches a side file only through a listed function
   const code = strip(srcS);
@@ -1168,6 +1169,96 @@ console.log('⑫b the custom-emoji picture cache: the account\'s attachment budg
   const u = st.attachmentUsage('a');
   ok(u.bytes <= budget && [...(a1.evicted || []), ...(a2.evicted || [])].length === 1 && !st.attachmentGet('a', '~emoji', 'party_parrot') && !!st.attachmentGet('a', '~emoji', 'shipit') && !!st.attachmentGet('a', 'c', 'att-2'), `past the budget the least-recently-used picture goes first — the untouched emoji evicted, the one drawn since kept, the newest attachment kept (${Math.round(u.bytes / 1024)} KiB ≤ ${budget / 1024} KiB; evicted ${[...(a1.evicted || []), ...(a2.evicted || [])].length})`, JSON.stringify(u));
   st.close && st.close();
+}
+
+// ⑬ lane lark-threads (A1, 2026-10-01 — the owner's post: a Lark message stored BEFORE anyone answered it in a thread
+// carries no thread id, and the log's dedup kept that first copy for ever; the later copy naming the thread was thrown
+// away). THE PLACE DOOR: widen-only (null → the vendor's key / root; never the reverse, never another field), every append
+// path offers its duplicates, every read serves the patched record, ONE write-hook event per widening, the side
+// compaction keeps the patch, the log's trim folds it into the line and drops the side line. CONTROL: the pre-lane
+// append (duplicates offered to nobody) loses the thread.
+console.log('\n⑬ lane lark-threads: the place door (widen-only)');
+{
+  const R = require(path.join(REPO, 'src/channel-record.js'));
+  const hooks = [];
+  const st = S.createChannelStore({ dir: path.join(ROOT, 'place'), onWrite: (a, c, w) => hooks.push({ a, c, kind: w && w.kind, patched: w && w.patched }) });
+  const root = { ...rec('g', 1), text: 'the post' };
+  const reply = { ...rec('g', 2), replyTo: 'v1', threadKey: 'v1', root: 'v1', text: 'a quote' };   // a quote reply: a chain key
+  st.appendRecords('a', 'g', [root, reply, rec('g', 3)]);
+  // the vendor's later copy of the root: it heads a topic now (the chat listing re-read / the walk's repeated root)
+  const later = { ...root, threadKey: 'omt_born', text: 'EDITED TEXT', author: { id: 'x', name: 'Mallory', isSelf: false, isBot: false } };
+  const a1 = st.appendRecords('a', 'g', [later, rec('g', 4)]);
+  const tail = st.readTail('a', 'g', { limit: 10 });
+  const r1 = tail.find((r) => r.vendorId === 'v1');
+  ok(a1.appended === 1 && a1.duplicates === 1 && a1.widened.length === 1 && a1.widened[0].vendorId === 'v1' && a1.widened[0].threadKey === 'omt_born' && r1.threadKey === 'omt_born' && r1.text === 'the post' && r1.author.name === 'U',
+    '⑬ a later copy of a stored root that names its new thread WIDENS the stored place (threadKey null → omt_born) through appendRecords — the text and the author stay the first copy\'s (never any other field)', JSON.stringify({ a1, r1 }));
+  const ph = hooks.filter((h) => h.kind === 'place');
+  ok(ph.length === 1 && ph[0].a === 'a' && ph[0].c === 'g' && JSON.stringify(ph[0].patched) === JSON.stringify([{ vendorId: 'v1', threadKey: 'omt_born', root: null }]), '⑬ ONE write-hook event per widening, naming the patched message (the engine\'s caches and windows re-derive from it)', JSON.stringify(ph));
+  // NEVER THE REVERSE, NEVER A KEY REPLACED: a copy without the thread, a copy naming ANOTHER thread, a chain key replaced
+  const a2 = st.appendRecords('a', 'g', [{ ...root, threadKey: null }, { ...root, threadKey: 'omt_other' }, { ...reply, threadKey: 'omt_x' }]);
+  const t2 = st.readTail('a', 'g', { limit: 10 });
+  ok(a2.widened.length === 0 && t2.find((r) => r.vendorId === 'v1').threadKey === 'omt_born' && t2.find((r) => r.vendorId === 'v2').threadKey === 'v1' && st.placesOf('a', 'g').size === 1,
+    '⑬ widen-only: a copy without the thread, a copy naming another thread and a stored chain key are all no-ops (no side line, no flip)', JSON.stringify(a2.widened));
+  // verify r1 F5: a copy naming ANOTHER thread than the stored one is refused (never changed) and SAID once per conversation
+  {
+    const warned = [];
+    const st6 = S.createChannelStore({ dir: path.join(ROOT, 'place-conflict'), log: { warn: (m) => warned.push(String(m)), log() {} } });
+    st6.appendRecords('a', 'g', [{ ...root, threadKey: 'omt_first' }, rec('g', 2)]);
+    const c1 = st6.widenPlaces('a', 'g', [{ vendorId: 'v1', threadKey: 'omt_OTHER' }], { src: 'recheck' });
+    const c2 = st6.widenPlaces('a', 'g', [{ vendorId: 'v1', threadKey: 'omt_OTHER' }], { src: 'recheck' });
+    const c3 = st6.appendRecords('a', 'g', [{ ...root, threadKey: 'omt_THIRD' }]);
+    const kept = st6.readTail('a', 'g', { limit: 5 }).find((r) => r.vendorId === 'v1').threadKey;
+    ok(c1.widened.length === 0 && JSON.stringify(c1.conflicts) === JSON.stringify([{ vendorId: 'v1', stored: 'omt_first', offered: 'omt_OTHER' }]) && c2.conflicts.length === 1 && c3.widened.length === 0 && kept === 'omt_first' && warned.filter((w) => /DIFFERENT thread id/.test(w)).length === 1 && /omt_first/.test(warned[0]) && /omt_OTHER/.test(warned[0]),
+      '⑬ verify r1 F5: a copy naming another thread is refused by name (`conflicts`: stored + offered), the stored place never changes, and the door SAYS it once per conversation (three offers, one line)', JSON.stringify({ c1, c2: c2.conflicts, kept, warned }));
+    st6.close();
+  }
+  // the DOOR directly: an unknown message is `unknown` (the caller ingests it); a root offered for a reply that lacks one
+  const d1 = st.widenPlaces('a', 'g', [{ vendorId: 'v-nope', threadKey: 'omt_z' }, { vendorId: 'v3', root: 'v3' }, { vendorId: 'v3', threadKey: 'omt_3' }], { src: 'walk' });
+  ok(JSON.stringify(d1.unknown) === JSON.stringify(['v-nope']) && d1.widened.length === 1 && d1.widened[0].vendorId === 'v3' && d1.widened[0].threadKey === 'omt_3' && d1.widened[0].root === null,
+    '⑬ the door judges only a STORED message (unknown ⇒ named back, never written); a root equal to the message is no root (no line); a second offer of one message is judged against the first\'s widening', JSON.stringify(d1));
+  // EVERY READ serves the patch: findRecord, oldestRecord, search — and a fresh store over the same dir (a restart)
+  const st2 = S.createChannelStore({ dir: path.join(ROOT, 'place') });
+  const fr = st2.findRecord('a', 'g', 'v1'), od = st2.oldestRecord('a', 'g');
+  {
+    const sr = await st2.search('a', 'the post');
+    ok(fr && fr.threadKey === 'omt_born' && od && od.vendorId === 'v1' && od.threadKey === 'omt_born' && sr.results.length === 1 && sr.results[0].threadKey === 'omt_born' && st2.readTail('a', 'g', { limit: 10 }).find((r) => r.vendorId === 'v3').threadKey === 'omt_3',
+      '⑬ every reader serves the patched record — findRecord, oldestRecord, search, readTail — across a restart (the side line is the durable fact)', JSON.stringify({ fr: fr && fr.threadKey, od: od && od.threadKey, sr: sr.results.map((r) => r.threadKey) }));
+  }
+  // THE BYTES: the message line is untouched (append-only), the patch is ONE validated side line
+  const logText = fs.readFileSync(st2.logPath('a', 'g'), 'utf-8');
+  const sideL = fs.readFileSync(st2.sidePath('a', 'g'), 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  ok(!logText.includes('omt_born') && sideL.length === 2 && sideL.every((x) => x.k === 'pl' && R.validateSide(x).ok) && sideL.find((x) => x.msg === 'v3').src === 'walk',
+    '⑬ the message log stays append-only (the line as first written); each widening is ONE validated `pl` side line naming where it came from', JSON.stringify(sideL));
+  // THE SIDE COMPACTION KEEPS IT: 1+ MiB of reactions on another message — the place line survives, never "forgotten"
+  const many = [];
+  for (let i = 0; i < 9000; i++) many.push(R.validateSide({ k: 'rx', msg: 'v4', at: NOW + i, form: 'delta', op: i % 2 ? 'remove' : 'add', key: 'OK', actor: { id: `u${i % 300}`, name: 'Some One With A Long Name ' + i }, src: 'event' }).side);
+  for (let i = 0; i < many.length; i += 500) st2.appendSide('a', 'g', many.slice(i, i + 500));
+  const st3 = S.createChannelStore({ dir: path.join(ROOT, 'place') });
+  const sideAfter = fs.readFileSync(st3.sidePath('a', 'g'), 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  ok(fs.statSync(st3.sidePath('a', 'g')).size < S.SIDE_COMPACT_BYTES * 2 && sideAfter.filter((x) => x.k === 'pl').length === 2 && st3.readTail('a', 'g', { limit: 10 }).find((r) => r.vendorId === 'v1').threadKey === 'omt_born',
+    '⑬ the side log\'s growth compaction (a reaction storm past 1 MiB) KEEPS the place lines — a patch is never forgotten like an old reaction', JSON.stringify({ size: fs.statSync(st3.sidePath('a', 'g')).size, pl: sideAfter.filter((x) => x.k === 'pl').length }));
+  // THE TRIM FOLDS IT: the message line carries the place, the side line goes; the read is unchanged
+  const tr = st3.trim('a', 'g');
+  const log2 = fs.readFileSync(st3.logPath('a', 'g'), 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  const side2 = fs.readFileSync(st3.sidePath('a', 'g'), 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  const st4 = S.createChannelStore({ dir: path.join(ROOT, 'place') });
+  ok(tr.folded === 2 && log2.find((r) => r.vendorId === 'v1').threadKey === 'omt_born' && log2.find((r) => r.vendorId === 'v3').threadKey === 'omt_3' && side2.filter((x) => x.k === 'pl').length === 0 && st4.placesOf('a', 'g').size === 0 && st4.readTail('a', 'g', { limit: 10 }).find((r) => r.vendorId === 'v1').threadKey === 'omt_born',
+    '⑬ the log\'s trim FOLDS the patches into the message lines (temp + rename) and only then drops the side lines — the read is unchanged', JSON.stringify({ tr, pl: side2.filter((x) => x.k === 'pl') }));
+  // the PREPEND path (an older page) offers its duplicates too
+  const st5 = S.createChannelStore({ dir: path.join(ROOT, 'place-pre') });
+  st5.appendRecords('a', 'h', [rec('h', 10), rec('h', 11)]);
+  const pp = st5.prependRecords('a', 'h', [{ ...rec('h', 10), threadKey: 'omt_old' }, rec('h', 9, NOW - 500e3)]);
+  ok(pp.appended === 1 && pp.widened.length === 1 && st5.readTail('a', 'h', { limit: 5 }).find((r) => r.vendorId === 'v10').threadKey === 'omt_old', '⑬ the backfill (prependRecords) offers its duplicates to the door as well', JSON.stringify(pp));
+  // CONTROL: the pre-lane append — a duplicate offered to nobody — keeps the key-less first copy for ever
+  const src = fs.readFileSync(path.join(REPO, 'src/channel-store.js'), 'utf-8');
+  const PRE = src.replace("if (set.has(r.vendorId) || inBatch.has(r.vendorId)) { duplicates++; if (set.has(r.vendorId) && (r.threadKey || r.root)) offers.push(r); continue; }", "if (set.has(r.vendorId) || inBatch.has(r.vendorId)) { duplicates++; continue; }");
+  ok(PRE !== src, '⑬ CONTROL setup: the pre-lane append (duplicates offered to nobody) was reconstructed from the shipped bytes');
+  const PS = require(MUTCS.write('src/channel-store.js', PRE, 'place-pre-lane'));
+  const sc = PS.createChannelStore({ dir: path.join(ROOT, 'place-ctl') });
+  sc.appendRecords('a', 'g', [root]);
+  sc.appendRecords('a', 'g', [later]);
+  ok(sc.readTail('a', 'g', { limit: 5 })[0].threadKey === null && sc.placesOf('a', 'g').size === 0, '⑬ CONTROL: through the pre-lane append the later copy naming the thread is thrown away — the root never heads its topic (the owner\'s post)');
+  for (const x of [st, st2, st3, st4, st5, sc]) x.close();
 }
 
 // ── ⑩ THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──

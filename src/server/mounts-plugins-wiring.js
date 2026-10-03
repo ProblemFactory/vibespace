@@ -7,6 +7,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { sameToken } = require('../pairing-token.js'); // B-8dda
 const http = require('http');
 const { spawn, execFile, execFileSync } = require('child_process');
 const { SessionMessages } = require('../session-store');
@@ -22,6 +23,8 @@ function create({ app, server, rootDir, HOST, PORT, BUFFERS_DIR, PERMISSION_MODE
   // agent browser P1 second half (§3.2.5 / §3.8): the Task-Group default rung, the
   // zero-billed notice queue and the session-meta writer the pin persists through
   getTasks = null, sessionStatusKey = null, getSessionStatus = null, persistSessionMeta = null, rebindSessionMeta = null,
+  // lane jobs-browser (B-dbc1): the Background Work engine — a job browses as its owner conversation while its run is alive
+  getJobs = null,
   // B-f7ab: the late browser key reads the record it extends (never a partial one) and asks THE integration switch
   readSessionMetaOf = null, integrationEnabled = null,
   // agent browser P3 (§4.3.1): the ONE delivery ladder the handback announcer forwards to, and the "For you" inbox
@@ -389,7 +392,7 @@ const pluginLoader = require('./plugin-loader.js').create({
   agentAuth: (req) => {
     const tok = String(req.headers?.authorization || '').replace(/^Bearer\s+/i, '').trim();
     if (!tok.startsWith('vsst_') || !activeSessions) return null;
-    for (const [id, s] of activeSessions) if (s.agentToken === tok) return { sessionId: id };
+    for (const [id, s] of activeSessions) if (sameToken(tok, s.agentToken)) return { sessionId: id };
     return null;
   },
 });
@@ -756,11 +759,14 @@ function createSessionMessages(session, sessionId) {
       ...(testEgressMap.size ? { egressResolve: (h) => testEgressMap.get(String(h || '').toLowerCase()) || h } : {}),
       dataDir: path.join(rootDir, 'data'), env: () => agentEnv(), broadcast: (m) => bcastAll(m),
       kept: browserKept, // lane browser-resume (§3.9)
+      vncDisplay: process.env.VIBESPACE_VNC_DISPLAY || ':7', // B-d635: the desktop singleton's display (src/vnc.js VNC_DISPLAY) — the display probe names it, so no surface says "no desktop session" beside it
       serverSetting, serverNotice, getTelemetry,
       userTodos, // lane H verify r5: the ONE For-you notice (origin browser) when a profile's browser keeps closing (the heal budget)
       access: browserAccess, hostKnown: (h) => browserAccess.hostKnown(h),
       integrations: () => integrations, keys: browserBackend, mediator: cdpMediator,
       liveKeys: () => new Set([...activeSessions.values()].map((s) => s && s._browserKey).filter(Boolean)),
+      // lane jobs-browser: a RUNNING job carries its browser handle (its lease outlives its owner conversation until the job ends)
+      jobRunning: (jobId) => { try { const jm = getJobs ? getJobs() : null; const j = jm && jm.jobs && typeof jm.jobs.get === 'function' ? jm.jobs.get(String(jobId)) : null; return require('../browser-job-principal').isRunningJob(j); } catch { return false; } },
       // identity verify r2 (2026-09-28): the keys carried by live sessions on ANOTHER machine (an ssh host / a paired device —
       // rung H): the keeper refuses their `use` / attach (`remote_session`) and never writes them into "Who can use it"
       remoteKeys: () => new Set([...activeSessions.values()].filter((s) => s && s._browserKey && (s.hostId || s.host || s._browserVariant === 'H')).map((s) => s._browserKey)),
@@ -784,8 +790,8 @@ function createSessionMessages(session, sessionId) {
       // construction, which released its browser (and its helpers') 3 min after
       // the last verb MID-WORK; null = unknown = never released (the CLI's own
       // idle timeout still ends a browser nobody uses). Pinned: test-architecture §57.
-      // owner ruling A (2): + the conversation's NAME — a `browser_busy` refusal names the conversation that drives a
-      // shared browser (the ruling's "told so by name"; the one deliberate exception to B-325a)
+      // + the conversation's NAME (the keeper's journal lines and its own refusals; lane browser-windows retired the
+      // `browser_busy` refusal that relayed it to another conversation)
       conversationFacts: (bk) => {
         let s = null;
         for (const x of activeSessions.values()) if (x && x._browserKey === bk) { s = x; break; }
@@ -827,6 +833,8 @@ function createSessionMessages(session, sessionId) {
         catch (e) { if (/not found/i.test(String(e && e.message))) return null; throw e; }
       },
     });
+    // lane browser-recipes: ONE display probe at boot — the first session's tools intro says "no display" on a pod
+    try { browserKeeper.machineDisplayCached(); } catch { /* the intro then says nothing about the display */ }
     const taskIdsFor = (s, id) => {
       const tasks = getTasks ? getTasks() : null;
       if (!tasks || !s) return [];
@@ -886,8 +894,13 @@ function createSessionMessages(session, sessionId) {
         if (digestTimer.unref) digestTimer.unref();
       });
     } catch (e) { browserDialogs = null; console.warn('[browser-dialog] the dialog watch is unavailable — ' + (e && e.message)); }
+    // lane jobs-browser: a job's facts — the engine, the owner conversation's recorded key (a stopped one), its Task Groups
+    let jobBindings = null; try { jobBindings = require('./browser-bindings').create({ dataDir: path.join(rootDir, 'data') }); } catch (e) { console.warn('[browser] the job → conversation key reader is unavailable — a job of a stopped conversation is refused no_browser_key: ' + (e && e.message)); }
     setupBrowserRoutes({
       keeper: browserKeeper, activeSessions,
+      getJobs: () => (getJobs ? getJobs() : null),
+      bindingsLookup: (cid) => (jobBindings ? jobBindings.lookup(cid) : ''),
+      tasksForConversation: (cid) => { const tasks = getTasks ? getTasks() : null; return tasks ? (tasks.groupsForSession({ sessionKey: cid }) || []).map((g) => g.id) : []; },
       dialogs: browserDialogs,
       // lane browser-propose step 3: the proposal runner (created below, after the handback announcer it tells through) —
       // the routes reach it through this delegate: a claim's card + item, the user's Approve / Reject, a rejection told once

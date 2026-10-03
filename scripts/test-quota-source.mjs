@@ -385,23 +385,25 @@ const cxSess = mkCodex('w-cx', 'cxs-1', (m, s) => {
 }
 
 // ── 7. wiring pins (the 2.355.0 lesson: a pure fix without its call site is dead) ──
+// (the 2.369.202 integration: lane reset-path put its post-consume read between the codex write and the waiters' settle — the
+// window widened to 2 000; the codex feed hands the whole record as a third argument)
 {
   const eng = read('src/server/usage-pool-engine.js');
   ok('WIRING: scheduleWallProbe and beforeAutoResumeFire both call probeQuotaForKey(target, { session })', (eng.match(/probeQuotaForKey\(target, \{ session \}\)/g) || []).length === 2);
   ok('WIRING: getQuotaProbe is consumed ONLY inside the dispatcher\'s cli-usage rung', (eng.match(/getQuotaProbe\?\.\(\)/g) || []).length === 1 && /if \(rung === 'cli-usage'\) \{\s*\n\s*const probe = getQuotaProbe\?\.\(\);/.test(eng));
   ok('WIRING: recordRateLimitEvent classifies through the session harness (no direct parseRateLimitEvent in the engine)', /quotaSourceFor\(session\.backend\)\.signalFromStream\(msg\)/.test(eng) && !/parseRateLimitEvent\(/.test(eng));
-  ok('WIRING: recordCodexQuotaSignal consumes the harness signal (snapshot / tripped / resetsAtSec), NAMES the reading channel at the write (2026-09-07 r3: writeSnap takes `source` as a parameter — the task_failed branch is a refusal, not this push) and settles probe waiters AFTER the cache write', /const snap0 = sig\?\.snapshot \|\| null;[\s\S]{0,200}const w = writeSnap\(snap0, 'codex-rate-limits'\);\s*\n[\s\S]{0,300}settleCodexLimitsWaiters\(session, w && w\.key \?/.test(eng) && /const tripped = sig\.tripped;/.test(eng) && /const resets = sig\.resetsAtSec;/.test(eng) && !/require\('\.\.\/usage-routes\.js'\)/.test(eng));
+  ok('WIRING: recordCodexQuotaSignal consumes the harness signal (snapshot / tripped / resetsAtSec), NAMES the reading channel at the write (2026-09-07 r3: writeSnap takes `source` as a parameter — the task_failed branch is a refusal, not this push) and settles probe waiters AFTER the cache write', /const snap0 = sig\?\.snapshot \|\| null;[\s\S]{0,200}const w = writeSnap\(snap0, 'codex-rate-limits'\);\s*\n[\s\S]{0,2000}settleCodexLimitsWaiters\(session, w && w\.key \?/.test(eng) && /const tripped = sig\.tripped;/.test(eng) && /const resets = sig\.resetsAtSec;/.test(eng) && !/require\('\.\.\/usage-routes\.js'\)/.test(eng));
   ok('WIRING: notePoolAuthFailure asks the session harness for the auth verdict', /quotaSourceFor\(session\.backend\)\.classifyAuthFailure\(info\)/.test(eng));
   ok('WIRING: the wall-machine pins test-auto-resume relies on are intact (verify probe, ladder, veto)', /_wallVerifyAt\.set\(scope, Date\.now\(\)\);\s*\n\s*scheduleWallProbe\(session, scope, model, 0\)/.test(eng) && /async function beforeAutoResumeFire/.test(eng) && /WALL_PROBE_BACKOFF = \[0, 1800000, 3600000, 7200000\]/.test(eng));
   ok('server.js still hands the cli-usage refresher to the engine (usage.refreshViaCliPanel — the ONE `claude -p /usage` spawn site)', /getQuotaProbe: \(\) => \{ try \{ return usage\.refreshViaCliPanel; \}/.test(read('server.js')));
   ok('session-schema registers the waiter field with an owner', /_codexLimitsWaiters:\s*\{ owner: 'engine'/.test(read('src/session-schema.js')));
   const ur = read('src/usage-routes.js');
-  ok('usage-routes defines NO quota normalizer of its own any more — it binds the registry and re-exports the old names', !/function normalizeCodexRateLimit\(/.test(ur) && !/function parseCliUsageText\(/.test(ur) && /harnesses\.get\('codex'\)\.quota;?\s*\n?[\s\S]{0,120}?codexQuota\.normalize|harnesses\.get\('codex'\)\.quota\.normalize/.test(ur) && /module\.exports = \{ setupUsage, parseCliUsageText, normalizeCodexRateLimit \}/.test(ur));
+  ok('usage-routes defines NO quota normalizer of its own any more — it binds the registry and re-exports the old names', !/function normalizeCodexRateLimit\(/.test(ur) && !/function parseCliUsageText\(/.test(ur) && /harnesses\.get\('codex'\)\.quota;?\s*\n?[\s\S]{0,120}?codexQuota\.normalize|harnesses\.get\('codex'\)\.quota\.normalize/.test(ur) && /module\.exports = \{ setupUsage, parseCliUsageText, normalizeCodexRateLimit, PANEL_PROBE_ARGS \}/.test(ur));
   const arch = read('scripts/test-architecture.mjs');
   // both sides' pins kept: backend-caps is in the PURE SET (membership) AND inside the `const PURE = new Set([` literal (placement)
   ok('test-architecture tiers the harness modules as SHARED (never reaching up into ORCH) and backend-caps as PURE', /'src\/harnesses\/claude-quota\.js', 'src\/harnesses\/codex-quota\.js'/.test(arch) && /'src\/backend-caps\.js'[,\]]/.test(arch) && /const PURE = new Set\(\[[^\]]*'src\/backend-caps\.js'/.test(arch));
   const ss = read('src/server/stdout/claude-stream-json.js') + '\n' + read('src/server/stdout/codex-events.js'); // S5: per-protocol consumer modules
-  ok('the stdout consumers still feed both engine entry points (claude rate_limit_event / codex quota events) — S5 moved the parse behind the registry, S4 owns the signals', /recordRateLimitEvent\(session, msg\)/.test(ss) && /recordCodexQuotaSignal\?\.\(session, msg\.payload\)/.test(ss));
+  ok('the stdout consumers still feed both engine entry points (claude rate_limit_event / codex quota events) — S5 moved the parse behind the registry, S4 owns the signals', /recordRateLimitEvent\(session, msg\)/.test(ss) && /recordCodexQuotaSignal\?\.\(session, msg\.payload(?:, msg)?\)/.test(ss));
   ok('the codex wrapper still serves the verb the rpc rung writes (codex-read-limits → account/rateLimits/read → rate_limits_updated)', /msg\.type === 'codex-read-limits'/.test(read('data/bin/codex-chat-wrapper.js')) && /account\/rateLimits\/read/.test(read('data/bin/codex-chat-wrapper.js')));
 }
 

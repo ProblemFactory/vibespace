@@ -284,7 +284,7 @@ setInterval(() => {}, 1e3);
   // rest. A backend-id exclusion is exactly what kept the shredding class open
   // for codex while its wrapper had no _frame_file verb.
   ok(!ws.includes("session.backend !== 'codex'") && !/stdinPayload\.length > 64 \* 1024[^\n]*session\.backend/.test(ws), "NEGATIVE: the chat-input bypass carries no backend-id exclusion (codex is gated by its wrapper's caps like everyone else)");
-  ok(/stdinPayload\.length > 64 \* 1024 && !session\.host && session\.socketPath\) \{/.test(ws), 'bypass condition = size + local transport only; capability decides pointer-vs-raw-vs-refuse');
+  ok(/stdinPayload\.length > 64 \* 1024 && !session\.host && \(session\.socketPath \|\| session\.agentdSession\)\) \{/.test(ws), 'bypass condition = size + local transport only (a local dtach socket, or a local R6 pipe — whose socketPath is null since B-b675); capability decides pointer-vs-raw-vs-refuse');
   // the codex wrapper side of the contract
   const cw = fs.readFileSync(path.join(REPO, 'data/bin/codex-chat-wrapper.js'), 'utf8');
   // the caps object GROWS (threadScoped joined it in B-7473) — pin the two the

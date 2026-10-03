@@ -200,5 +200,27 @@ console.log('— wiring pins');
   ok('the usage popup draws the SAME chip (creditsChipHtml + UI_ICONS.money)', /if \(ovc\) parts\.push\(creditsChipHtml\(ovc, \{ esc: escHtml, icon: UI_ICONS\.money \}\)\);/.test(um));
   ok('ci.mjs runs this suite', /'test-roster-live-usage'/.test(fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf8')));
 }
+console.log('— B-ce1c: the machine login and a named account of the same identity are TWO sign-ins');
+{
+  // Owner, 2026-09-07: ~/.claude/.credentials.json (owner@example.com, alive to 09-10) and the pool's
+  // copy sub-cac86a3ff4d1 (same account, expired 09-02) — the CLI-login row read "= “Personal Max”" and
+  // the owner took the live machine login for Personal Max. One account ⇒ one quota (merged), two sign-ins.
+  const hint = typeof MA.machineLoginLinkHint === 'function' ? MA.machineLoginLinkHint : null;
+  const h = hint ? hint('Personal Max') : null;
+  ok('B-ce1c: the CLI-login row names the account AND says it is a separate sign-in (not "= “Personal Max”")', !!h && /“Personal Max”/.test(h.label) && /separate sign-in/.test(h.label) && !/^=/.test(h.label), JSON.stringify(h));
+  ok('B-ce1c: …its tooltip says one Anthropic account, one quota, two sign-ins that each expire and renew on their own', !!h && /same Anthropic account/.test(h.tip) && /one quota/.test(h.tip) && /two separate sign-ins/.test(h.tip) && /expires and is renewed on its own/.test(h.tip), h && h.tip);
+  const hc = hint ? hint('Personal Pro', 'ChatGPT') : null;
+  ok('B-ce1c: the codex twin says the same about a ChatGPT account', !!hc && /same ChatGPT account/.test(hc.tip) && /“Personal Pro”/.test(hc.label));
+  const maSrc = fs.readFileSync(path.join(REPO, 'src/lib/manage-agents.js'), 'utf8');
+  ok('B-ce1c WIRING: both machine-login rows (claude + codex) render machineLoginLinkHint, escaped; none writes the bare "= “{name}”"',
+    (maSrc.match(/const h = machineLoginLinkHint\(linked(Sub|Cx)\.name[^\n]*title="\$\{escHtml\(h\.tip\)\}">\$\{escHtml\(h\.label\)\}/g) || []).length === 2 && !maSrc.includes("t('= “{name}”'"));
+  const umSrc = fs.readFileSync(path.join(REPO, 'src/lib/usage-meter.js'), 'utf8');
+  ok('B-ce1c WIRING: the usage popup\'s merged chip (claude + codex) says one quota, two separate sign-ins — never "also the CLI login"',
+    (umSrc.match(/t\('same account as this machine’s CLI login — one quota, two separate sign-ins'\)/g) || []).length === 2 && !umSrc.includes('also the CLI login on this machine'));
+  const keys = ['same account as “{name}” · a separate sign-in', 'same account as this machine’s CLI login — one quota, two separate sign-ins'];
+  const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
+  ok('B-ce1c: the new words are in zh and ja (and the tooltip keeps {name} + {vendor} in both)', keys.every((k) => zh.includes(JSON.stringify(k) + ':') && ja.includes(JSON.stringify(k) + ':'))
+    && [zh, ja].every((d) => { const m = d.match(/^  "This machine’s CLI login and “\{name\}” are the same \{vendor\} account[^\n]*": "([^\n]*)",$/m); return !!m && m[1].includes('{name}') && m[1].includes('{vendor}'); }));
+}
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

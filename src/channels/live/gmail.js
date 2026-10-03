@@ -50,6 +50,14 @@ const PULL_TIMEOUT_MS = 75 * 1000;
 const PULL_MAX = 100;
 /** Backoff after a failed pull (a transport error, a 5xx), capped. */
 const PULL_BACKOFF_MS = [2000, 5000, 15000, 30000, 60000];
+/** THE DELIBERATE SWALLOWS of this lane (lane lark-threads verify r3): a vendor refusal here never reaches a POLL pass's
+ *  ladder — each catch is a LADDER of its own, named, and the response census (test-channels-gmail-shape) pins the rows. */
+const RATE_OK = Object.freeze([
+  { id: 'watch-arm', why: 'the first users.watch of an arm: a retryable refusal (a 429, a 5xx) reconnects on the lane\'s own ladder (1 s doubling to 60 s), a refusal parks the lane by name' },
+  { id: 'watch-renew', why: 'the daily renewal: a retryable refusal is counted (WATCH_RENEW_MAX_FAILS in a row parks), a refusal parks at once; the watch lives 7 days past its last success' },
+  { id: 'pull-backoff', why: 'the Pub/Sub pull (a different API and quota): a 401/403/404 parks by name, anything else waits PULL_BACKOFF_MS (2 s to 60 s) — one pull in flight per lane' },
+  { id: 'pull-loop', why: 'the loop\'s own death ends the arm as closed — the lane core reconnects on its ladder; nothing is re-sent here' },
+]);
 const SUBSCRIPTION_RE = /^projects\/[^/]+\/subscriptions\/[^/]+$/;
 const TOPIC_RE = /^projects\/[^/]+\/topics\/[^/]+$/;
 
@@ -109,7 +117,7 @@ function createGmailLive({ adapterId, api, accessToken, tokenScopes, options, fe
           // refused watch is a permanent, named refusal (the topic's IAM).
           let watch;
           try { watch = await api('/watch', { method: 'POST', json: { topicName: topic }, what: 'gmail watch' }); }
-          catch (e) { const err = new Error(`users.watch refused: ${(e && e.message) || e} — grant gmail-api-push@system.gserviceaccount.com the Pub/Sub Publisher role on the topic`); err.permanent = !(e && e.retryable); err.code = 'watch-refused'; throw err; }
+          catch (e) { const err = new Error(`users.watch refused: ${(e && e.message) || e} — grant gmail-api-push@system.gserviceaccount.com the Pub/Sub Publisher role on the topic`); err.permanent = !(e && e.retryable); err.code = 'watch-refused'; throw err; }   // rate-ok: watch-arm
           let alive = true;
           let ac = new AbortController();
           let renew = null;
@@ -122,7 +130,7 @@ function createGmailLive({ adapterId, api, accessToken, tokenScopes, options, fe
             if (!alive) return;
             api('/watch', { method: 'POST', json: { topicName: topic }, what: 'gmail watch renew' })
               .then((w) => { watch = w; renewFails = 0; })
-              .catch((e) => {
+              .catch((e) => {   // rate-ok: watch-renew
                 if (!alive) return;
                 renewFails++;
                 const refused = !(e && e.retryable);
@@ -158,7 +166,7 @@ function createGmailLive({ adapterId, api, accessToken, tokenScopes, options, fe
                   if (m && m.ackId) acks.push(m.ackId);
                 }
                 if (alive && acks.length) await pubsub('POST', subscription, 'acknowledge', { ackIds: acks }, token, AbortSignal.timeout(20000));
-              } catch (e) {
+              } catch (e) {   // rate-ok: pull-backoff
                 if (!alive) break;
                 if (e && e.name === 'AbortError') continue;          // a bounded pull that answered nothing: not heard, not failed
                 // a 401/403/404 pull is PERMANENT: park (§6.4) — reported as a
@@ -169,7 +177,7 @@ function createGmailLive({ adapterId, api, accessToken, tokenScopes, options, fe
                 await sleep(wait);
               }
             }
-          })().catch((e) => { if (alive) { shutdown(); h.closed(`pull loop died: ${(e && e.message) || e}`); } });
+          })().catch((e) => { if (alive) { shutdown(); h.closed(`pull loop died: ${(e && e.message) || e}`); } });   // rate-ok: pull-loop
 
           return {
             close() { shutdown(); },
@@ -181,4 +189,4 @@ function createGmailLive({ adapterId, api, accessToken, tokenScopes, options, fe
   };
 }
 
-module.exports = { createGmailLive, decodeNote, EGRESS, PUBSUB_SCOPE, WATCH_RENEW_MS, WATCH_RENEW_MAX_FAILS, PULL_TIMEOUT_MS, PULL_MAX, SUBSCRIPTION_RE, TOPIC_RE };
+module.exports = { createGmailLive, decodeNote, EGRESS, RATE_OK, PUBSUB_SCOPE, WATCH_RENEW_MS, WATCH_RENEW_MAX_FAILS, PULL_TIMEOUT_MS, PULL_MAX, SUBSCRIPTION_RE, TOPIC_RE };

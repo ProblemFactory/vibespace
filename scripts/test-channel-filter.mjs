@@ -420,7 +420,7 @@ console.log('⑩ R4 verify r2: the store invariant holds at READ — a watcher w
   const legacyOK = F.grainOf({ access: [], watchers: [] }, { principal: ag('L'), mode: 'all', notify: 'wake', authority: 'draft' });
   ok(legacyOK.access.length === 1 && legacyOK.watchers.length === 1, 'a pre-split assignment (access + watcher for one principal) still lifts whole');
   ok(F.liftGrainRecord({ principal: ag('L'), mode: 'all', notify: 'wake', authority: 'draft', watchers: [{ principal: ag('B'), notify: 'wake', mode: 'all' }] }).rec.watchers.map((w) => w.principal.id).join() === 'L', 'liftGrainRecord (the migration) repairs the orphan on its way through');
-  const LINE = '  return { access, watchers: watchers.filter((w) => granted.has(principalKey(w.principal))) };';
+  const LINE = '  return { access, watchers: watchers.filter((w) => eligibleFor(keys, w.principal)) };';   // lane channel-agent-watch: the ONE eligibility rule (access here or above)
   ok(src.split(LINE).length === 2, 'the read-time filter line is present once (the control patches exactly it)');
   const bad = M.load('src/channel-filter.js', src.replace(LINE, '  return { access, watchers };'), 'orphan-honoured');
   ok(bad.grainOf(orphan).watchers.length === 2, 'CONTROL: a copy without the filter honours the orphan watcher — the leg above would go red');

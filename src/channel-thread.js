@@ -151,7 +151,7 @@ function threadIndex(records, { convId = null } = {}) {
       const id = String(a.id || a.name || '');
       if (!id || seenP.has(id)) return;
       seenP.add(id);
-      parts.push({ id: String(a.id || ''), name: String(a.name || '') });
+      parts.push({ id: String(a.id || ''), name: String(a.display || a.name || '') });
     };
     if (rootRec) addP(rootRec.author);
     for (const r of replies) { if (parts.length >= THREAD_PARTICIPANTS_MAX) break; addP(r.author); }
@@ -288,7 +288,7 @@ function placeOf(rec, ix) {
   if (c.quotes) {
     const p = idx.byId.get(c.quotes);
     quote = p
-      ? { of: c.quotes, author: String((p.author && (p.author.name || p.author.id)) || ''), text: firstLine(p.text, QUOTE_MAX), loaded: true }
+      ? { of: c.quotes, author: String((p.author && (p.author.display || p.author.name || p.author.id)) || ''), text: firstLine(p.text, QUOTE_MAX), loaded: true }   // lane lark-threads: the head as the owner reads it
       : { of: c.quotes, author: '', text: '', loaded: false };
   } else if (c.external) {
     quote = { of: null, author: '', text: '', loaded: false, external: true };
@@ -355,7 +355,74 @@ function agentPlaceLine(place, { now = 0 } = {}) {
   return out;
 }
 
+
+// ── lane lark-threads (A1, 2026-10-01): THE PLACE PATCH — widen-only ──────────────────────────────────────────
+// The owner's post: a Lark message stored BEFORE anyone answered it in a thread carries no thread id (the vendor names a
+// topic on its root only once the topic exists — "不返回说明该消息不是话题形式的消息"), and the append-only log keeps that
+// first copy for ever (dedup by vendorId). A LATER vendor copy that names the thread (the chat listing re-read, the thread
+// walk's repeated root, a by-id read) WIDENS the stored record's place through the store's ONE door — a side line
+// (`{k:'pl', msg, threadKey, root}`) folded at read and into the log at its trim. These are the rules, PURE:
+//   P1 widen only: `threadKey` null → the vendor's key; `root` null → the vendor's root — never a key replaced, never
+//      a field emptied, never any other field;
+//   P2 makeRecord's own place rules hold: a root equal to the message itself is no root (R1), and a root with neither a
+//      thread nor a parent is a contradiction — dropped (R2);
+//   P3 several patches of one message fold in FILE order, each field's FIRST value winning (a replayed or racing second
+//      patch is a no-op, never a flip);
+//   P4 an id is bounded like the record's (≤ 512, no control character) — a hostile key is no key.
+const PLACE_ID_MAX = 512;
+/** A place id the patch may write (P4): a non-empty string ≤ 512 with no control character. */
+const placeIdOk = (v) => typeof v === 'string' && v.length > 0 && v.length <= PLACE_ID_MAX && !/[\u0000-\u001f\u007f]/.test(v);
+/**
+ * THE VERDICT (P1, P2, P4): `cur` = the stored place `{threadKey, root, replyTo}`, `offer` = the vendor's `{threadKey,
+ * root}`, `vendorId` = the message. → `{threadKey|null, root|null}` (only the fields it WIDENS) | null (nothing to widen).
+ */
+function widenPlace(cur, offer, vendorId) {
+  const c = cur && typeof cur === 'object' ? cur : {};
+  const o = offer && typeof offer === 'object' ? offer : {};
+  const id = String(vendorId || '');
+  const tk = !c.threadKey && placeIdOk(o.threadKey) ? o.threadKey : null;
+  const hasPlace = !!(c.threadKey || tk || c.replyTo);   // R2: a root needs a thread or a parent
+  const rt = !c.root && placeIdOk(o.root) && o.root !== id && hasPlace ? o.root : null;
+  return tk || rt ? { threadKey: tk, root: rt } : null;
+}
+/** P3: a conversation's place lines (`{k:'pl', msg, threadKey, root}`, file order) → Map<vendorId, {threadKey, root}>. */
+function foldPlaces(lines) {
+  const out = new Map();
+  for (const x of Array.isArray(lines) ? lines : []) {
+    if (!x || x.k !== 'pl' || !placeIdOk(x.msg)) continue;
+    const cur = out.get(x.msg) || { threadKey: null, root: null };
+    // each field's FIRST value wins; R2 (a root needs a thread or a parent) is judged against the record at apply
+    out.set(x.msg, {
+      threadKey: cur.threadKey || (placeIdOk(x.threadKey) ? x.threadKey : null),
+      root: cur.root || (placeIdOk(x.root) && x.root !== x.msg ? x.root : null),
+    });
+  }
+  return out;
+}
+/** A stored record as its patches make it (P1, P2): a NEW object only when something widened — never mutated. */
+function applyPlace(rec, p) {
+  if (!rec || !p || typeof rec !== 'object') return rec;
+  const w = widenPlace({ threadKey: rec.threadKey || null, root: rec.root || null, replyTo: rec.replyTo || null }, p, rec.vendorId);
+  if (!w) return rec;
+  const out = { ...rec };
+  if (w.threadKey) out.threadKey = w.threadKey;
+  if (w.root && (out.threadKey || out.replyTo)) out.root = w.root;
+  return out;
+}
+/** The compaction's rule for place lines: one line per message (the folded place, its first instant), the newest `max`. */
+function compactPlaces(lines, max = 3000) {
+  const first = new Map();
+  for (const x of Array.isArray(lines) ? lines : []) if (x && x.k === 'pl' && placeIdOk(x.msg) && !first.has(x.msg)) first.set(x.msg, x);
+  const folded = foldPlaces(lines);
+  const out = [];
+  for (const [msg, pl] of folded) { if (!pl.threadKey && !pl.root) continue; const f = first.get(msg); out.push({ k: 'pl', msg, at: Number(f && f.at) || 1, src: (f && f.src) || 'history', threadKey: pl.threadKey, root: pl.root }); }
+  out.sort((a, b) => a.at - b.at);
+  return out.length > max ? out.slice(out.length - max) : out;
+}
+
 module.exports = {
   THREAD_REPLIES_MAX, THREAD_HOPS_MAX, THREAD_PARTICIPANTS_MAX, QUOTE_MAX, AGENT_QUOTE_MAX, PANE_NARROW_PX, THREAD_KINDS, PLACE_KINDS,
   cmpRecord, chainKeyOf, keyOfRecord, threadIndex, mergeThreadStats, topicOf, placeKindOf, placeOf, threadView, paneMode, firstLine, agentPlaceLine, agoText,
+  // lane lark-threads (A1): the place patch — widen-only
+  PLACE_ID_MAX, placeIdOk, widenPlace, foldPlaces, applyPlace, compactPlaces,
 };

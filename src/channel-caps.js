@@ -703,6 +703,13 @@ function budgetText(budget, { t = defaultT } = {}) {
   const byAgents = Math.round(Number(b.spentBy && b.spentBy.agent) || 0);
   // lane R5: a PACED account names its per-second figure beside the minute's (drain rule 18)
   const r = Number(b.perSec) > 0 ? Math.round(Number(b.perSec) * 100) / 100 : 0;
+  // verify r3 (T2 ②): the per-second bucket admits `burst` at once — a sliding minute holds up to {n} + {b}, and the
+  // words say so when the bucket is wider than one request (the minute's figure alone read as the ceiling it is not)
+  const bu = Number(b.burst) > 1 ? Math.round(Number(b.burst) * 100) / 100 : 0;
+  if (r && bu) {
+    if (byAgents > 0) return t('Vendor budget reached — {n} {unit}/min (at most {r}/s, {b} at once) for this account, {a} of them by agent refreshes; {k} conversations waiting, next refresh in {s} s', { ...args, r, b: bu, a: byAgents });
+    return t('Vendor budget reached — {n} {unit}/min (at most {r}/s, {b} at once) for this account; {k} conversations waiting, next refresh in {s} s', { ...args, r, b: bu });
+  }
   if (r) {
     if (byAgents > 0) return t('Vendor budget reached — {n} {unit}/min (at most {r}/s) for this account, {a} of them by agent refreshes; {k} conversations waiting, next refresh in {s} s', { ...args, r, a: byAgents });
     return t('Vendor budget reached — {n} {unit}/min (at most {r}/s) for this account; {k} conversations waiting, next refresh in {s} s', { ...args, r });
@@ -1061,6 +1068,25 @@ function feedUnreadableText(view, { t = defaultT } = {}) {
   const names = [...new Set(shapeFields(c.malformedFields).flat())];
   return names.length ? t('{n} search hits could not be read in the last hour (missing or unreadable: {fields})', { n, fields: names.join(', ') }) : t('{n} search hits could not be read in the last hour', { n });
 }
+/**
+ * THE THREAD MEASUREMENT, said (lane lark-threads A5, 2026-10-01): whether the search's hits carry a thread id at all
+ * (`threadHits`), what the hits the chat reads did not find turned out to be when read one by one (`missingFetched` —
+ * thread replies the search indexes; `missingRefused`; `missingOther`), and the recent-roots rechecks (`rechecks`,
+ * `recheckWidened`). Unmeasured on the real vendor until the owner's instance runs — this ONE sentence is how it
+ * answers. '' before the feed read a page and before any recheck.
+ */
+function feedThreadsText(view, { t = defaultT } = {}) {
+  const c = view && view.counters && typeof view.counters === 'object' ? view.counters : null;
+  if (!c) return '';
+  const n = (k) => Math.max(0, Math.floor(Number(c[k]) || 0));
+  const parts = [];
+  if (n('pages') > 0) parts.push(n('threadHits') ? t('{n} search hits named a thread', { n: n('threadHits') }) : t('no search hit has named a thread yet'));
+  const byId = n('missingFetched') + n('missingRefused') + n('missingOther');
+  if (byId) parts.push(t('{f} of {n} messages the chats did not list were thread replies, read one by one', { f: n('missingFetched'), n: byId }));
+  if (n('missingWaiting')) parts.push(t('{n} waiting to be read one by one', { n: n('missingWaiting') }));   // verify r2 ②: a queue the owner can see (≤ 5 a tick)
+  if (n('rechecks')) parts.push(t('{n} chat checks for new threads found {w}', { n: n('rechecks'), w: n('recheckWidened') }));
+  return parts.length ? t('Threads: {parts}', { parts: parts.join(' · ') }) : '';
+}
 /** The single-chat catch-up (§2.7), said once it ran: how many single chats the first run found. */
 function feedCatchUpText(cu, { t = defaultT } = {}) {
   const c = cu && typeof cu === 'object' ? cu : null;
@@ -1085,7 +1111,8 @@ function grantsText(grants, { t = defaultT, vendor = '' } = {}) {
     if (r.length) refused.push(...r);
     else adds.push(g.what);
   }
-  const words = { reactions: t('reading reactions'), feed: t('new-message search and single chats') };
+  // lane lark-threads (B1/B5, MEASURED): `people` = reading people's profiles (who left a chat, the nickname, the department)
+  const words = { reactions: t('reading reactions'), feed: t('new-message search and single chats'), people: t('reading people\'s profiles') };
   const parts = [];
   if (refused.length) parts.push(refusedScopeText([...new Set(refused)], { t, vendor }));
   if (adds.length) parts.push(t('One Re-authorize adds: {what}', { what: adds.map((w) => words[w] || String(w)).join(' · ') }));
@@ -1121,4 +1148,6 @@ module.exports = {
   FEED_MODES, FEED_DEFAULTS, feedState, feedText, feedCatchUpText, grantsText, untitledText, credentialChangedAt, feedBoundSec, feedFreshMs, changeFeedRow,
   // lane lark-p2p: a shape park's bounded field lists + the unreadable-hits line; verify r1: the lone-miss bound
   shapeFields, feedUnreadableText, FEED_LOUD_STRIKES,
+  // lane lark-threads (A5): the thread measurement's one sentence
+  feedThreadsText,
 };

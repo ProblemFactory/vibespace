@@ -14,6 +14,7 @@ const crypto = require('crypto');
 // S3: the codex naming rule + zstd rollout readers live in discovery-facts
 // (the tiny module the daemon bundle and every discovery collector share)
 const { deriveCodexSessionName, classifyCodexThread, deriveCodexAgentName, ZSTD_SUPPORTED, isZstPath, isZstBuffer, zstdDecompressFrames, readHeadText, CODEX_ROLLOUT_RE } = require('../discovery-facts');
+const { turnPreviewOf } = require('../assistant-note.js'); // PURE (B-40f8): THE preview of a user turn — the huge-session minimap too
 const { capsOf } = require('../backend-caps');   // responseStyle enum — the ONE list, never a second copy here
 
 const CODEX_SESSIONS_DIR = path.join(os.homedir(), '.codex', 'sessions');
@@ -552,11 +553,12 @@ function scanJsonlUserTurns(fp, backend) {
   return turns;
 }
 
-function _previewOf(text) {
-  const t = String(text || '').trim().replace(/\s+/g, ' ');
-  if (!t) return '';
-  if (t.startsWith('This session is being continued from a previous conversation')) return null; // compact
-  return t.length > 60 ? t.slice(0, 60) + '…' : t;
+// B-40f8: THE turn preview (src/assistant-note.js) over the record's text and the
+// provenance its normalizer reads (typed = the CLI's promptSource; a peer / the
+// auto-resume continue are cards, never notes) — the nudge turn is a note here too
+function _turnOf(line, ts, text, prov = {}) {
+  const p = turnPreviewOf({ role: 'user', content: [{ type: 'text', text }], ...prov });
+  return p ? { line, ts, preview: p.preview, isCompact: !!p.isCompact, ...(p.note ? { note: p.note } : {}) } : null;
 }
 
 function _claudeUserTurn(rec, line) {
@@ -568,10 +570,9 @@ function _claudeUserTurn(rec, line) {
     if (content.some((b) => b.type === 'tool_result')) return null; // tool result, not a real user turn
     text = content.filter((b) => b.type === 'text').map((b) => b.text || '').join('');
   }
-  if (!text.trim()) return null;
   const ts = rec.timestamp ? Date.parse(rec.timestamp) || 0 : 0;
-  const preview = _previewOf(text);
-  return { line, ts, preview: preview ?? 'Context compacted', isCompact: preview === null };
+  const prov = rec.origin?.kind === 'peer' ? { originKind: 'peer-message' } : rec.originKind === 'auto-resume' ? { originKind: 'auto-resume' } : (rec.promptSource || rec._fromWebui) ? { typed: true } : {};
+  return _turnOf(line, ts, text, prov);
 }
 
 function _codexUserTurn(rec, line) {
@@ -580,10 +581,8 @@ function _codexUserTurn(rec, line) {
   const text = Array.isArray(content)
     ? content.filter((b) => b.type === 'input_text' || b.type === 'text').map((b) => b.text || '').join('')
     : String(content || '');
-  if (!text.trim()) return null;
   const ts = rec.timestamp ? Date.parse(rec.timestamp) || 0 : 0;
-  const preview = _previewOf(text);
-  return { line, ts, preview: preview ?? 'Context compacted', isCompact: preview === null };
+  return _turnOf(line, ts, text, rec.payload?.webui_peer ? { originKind: 'peer-message' } : {});
 }
 
 // ── Full-file streaming search ──

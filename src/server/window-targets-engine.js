@@ -113,6 +113,8 @@
  *     lease kills it by its handle and releases the keys / buttons it held (`cancelActs`; the verb answers its refusal
  *     with `did.partial`); a Task Group store that cannot be read refuses `reach_unreadable` and keeps the lease; every
  *     re-check site is pinned on its own (test-window-targets §5's per-site census).
+ *     B-a38d (2026-10-03): `type` without a ref under an auto share no probe resolved since a restart probes first and
+ *     acts as the resolved mode (pixels ⇒ keys); the probe and the focused-node read are each followed by a re-check.
  *     VERIFY R3 (2026-09-26): a running act belongs to the WINDOW HANDLE (`acting`: handle → the AbortControllers of the
  *     injections running on that window), never to the lease object that started it — a detach + re-attach (or a
  *     revoke + re-share + re-attach) during the verb's probe replaced that object, and the takeover's cancel found
@@ -123,6 +125,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { sameToken } = require('../pairing-token.js'); // B-8dda
 const { execFile } = require('child_process');
 const WT = require('../window-targets');
 const T = require('../browser-takeover');
@@ -223,7 +226,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   // ── who is asking ──
   function factsForToken(token) {
     if (!token || !String(token).startsWith('vsst_')) return null;
-    for (const [id, s] of sessionsMap()) if (s && s.agentToken === token) return { sessionId: id, session: s, browserKey: s._browserKey || null, name: s.name || null };
+    for (const [id, s] of sessionsMap()) if (s && sameToken(token, s.agentToken)) return { sessionId: id, session: s, browserKey: s._browserKey || null, name: s.name || null };
     return null;
   }
   const sessionLive = (sessionId) => sessionsMap().has(sessionId);
@@ -1002,7 +1005,12 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
 
     if (verb === 'type') {
       const text = String(body.text ?? '');
-      const rr = rec.origin === 'desktop' ? null : reachRecord(rec.id);
+      let rr = rec.origin === 'desktop' ? null : reachRecord(rec.id);
+      // B-a38d: an auto share nothing resolved in THIS process (a restart keeps the lease and the share, never the
+      // resolution) is resolved here, before a type without a ref picks its road: it acts as the resolved mode (pixels ⇒
+      // keys, as it did before the restart) — it used to ask the tree for the focused node and pass the helper's own
+      // code through (python3_missing / a11y_unavailable / helper_error: the code named the machine, not the window)
+      if (!body.ref && rr && rr.mode === 'auto' && !resolutions.get(rec.id)) { await ensureResolved(rec); held(); rr = reachRecord(rec.id); }
       const res = rr && rr.mode === 'auto' ? resolutions.get(rec.id) : null;
       const pixelShare = !!rr && (rr.mode === 'pixels' || (rr.mode === 'auto' && res && res.mode === 'pixels'));
       /** Lane E: text as KEYS into whatever holds focus on the app's own display (pixel mode, Chrome's entries). */
@@ -1019,6 +1027,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
       if (body.ref) e = refEntry();
       else {
         const f = await wt.focusedNode({ pids: pidsOf(rec), env: base, ...helperOpts() });
+        held(); // B-a38d: a revoke / takeover during the read answers its own refusal — never the helper's code, nor whether anything holds focus
         if (!f.ok) throw namedError(f.code, f.why, { helper: true });
         if (!f.node) throw namedError('no_focused_node', `nothing in ${rec.label} holds keyboard focus${rec.origin === 'desktop' ? '' : ' on its accessibility tree'} — name the field: \`vibespace-window type ${rec.id} @eN "…"\`${rec.origin === 'desktop' ? '' : ', or click it first and type again (a window with no tree: the user can share it in pixel mode, where type sends keys)'}`);
         e = { ref: f.node.ref, pid: f.node.pid, path: f.node.path, role: f.node.role, name: f.node.name, actions: f.node.actions || null, editable: !!f.node.editable, bounds: f.node.bounds || null, states: f.node.states || [] };
@@ -1029,7 +1038,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
         if (rec.origin !== 'desktop' && Array.isArray(e.states) && e.states.includes('editable')) return injected(e, {});
         audit({ ...who, verb: 'type', by: 'node', node: nodeLine(e), ok: false, code: 'node_not_editable' }); throw namedError('node_not_editable', `${e.role} ${JSON.stringify(e.name)} (${e.ref}) exports no EditableText — pick a text field from the snapshot (\`editable\`)`, { node: nodeLine(e) });
       }
-      held();
+      held(); // no-await-before: the post-probe re-check (a ref) or the focused-node read's own (no ref, B-a38d) precedes it with no await between — redundant by construction, kept as the act's own guard
       const r = await wt.actOnNode({ entry: e, verb: body.replace ? 'set_text' : 'insert_text', text, env: base, ...helperOpts() });
       fromHelper(r, { verb: 'type', by: 'node', node: nodeLine(e), chars: text.length });
       return { ok: true, handle: rec.id, did: { verb: 'type', by: 'node', ref: e.ref, chars: text.length, replaced: !!body.replace }, ms: r.ms };
@@ -1176,7 +1185,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
       }
     }
     const n = R.normPrincipal(p);
-    if (!n) throw namedError('bad_principal', 'a principal is {kind: session|group, id} — a live session by its id or its conversation key, a Task Group by its id');
+    if (!n) throw namedError('bad_principal', 'a principal is {kind: session|group|everyone, id} — a live session by its id or its conversation key, a Task Group by its id, or everyone (all agents)');
     return n;
   }
   /** Every live session a row reaches right now (names for the dialog — a group row lists its live members), and how
@@ -1188,7 +1197,8 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     for (const [id, s] of sessionsMap()) {
       if (!s || s.backend === 'shell') continue;
       let hit = false;
-      if (row.principal.kind === 'session') hit = keysOf(s, id).includes(row.principal.id);
+      if (row.principal.kind === 'everyone') hit = true;   // All agents (lane everyone-principal): every live agent session
+      else if (row.principal.kind === 'session') hit = keysOf(s, id).includes(row.principal.id);
       else {
         const c = ctxOf({ sessionId: id, session: s });
         if (c.unreadable) { unreadable++; continue; }

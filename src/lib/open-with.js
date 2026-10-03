@@ -24,8 +24,9 @@
 //   the `file-changed` broadcast → the page's window event (src/lib/file-changed.js)
 import { t } from './i18n.js';
 import { fetchJson, showToast, createPopover } from './utils.js';
-import { fileVerdict, moduleForFile, OFFICE_MODULES } from '../office-open.js';
-import { launchDpr, launchUiScale, showLaunchDialog, showInstallDialog, openWithRefusalText, officeInstallLabel } from './desktop-app-launcher.js';
+import { fileVerdict, moduleForFile, OFFICE_MODULES, FONTS_ID } from '../office-open.js';
+import { rememberedShareFor, announceRememberedShare, launchKeyOf } from './window-share.js'; // B-04da ⑥
+import { launchDpr, launchUiScale, showLaunchDialog, showInstallDialog, openWithRefusalText, officeInstallLabel, officeFontsLabel } from './desktop-app-launcher.js';
 import { SCALE_PREF_KEY, launchScaleChoice } from './desktop-app-scale.js';
 import { wireAppPrefs, appPrefs, appPrefsReady } from './desktop-app-prefs.js';
 import { relayFileChanged } from './file-changed.js';
@@ -63,7 +64,13 @@ export function officeMenuItems(app, verdict, { host = null, file = '' } = {}) {
   if (verdict && verdict.ok === false && verdict.code === 'host_needs_daemon') {
     return [{ key: 'office-note', note: true, label: openWithRefusalText('host_needs_daemon', { machine }) }];
   }
-  return [{ key: 'office-open', label: t('Open with LibreOffice'), action: () => app.openWithDesktopApp({ file, host }) }];
+  const open = { key: 'office-open', label: t('Open with LibreOffice'), action: () => app.openWithDesktopApp({ file, host }) };
+  // B-04da ②: LibreOffice is there but the Calibri / Cambria look-alikes are not — a .docx lays out in other faces
+  // (other line breaks, another page count): offer the faces alone, on the file's machine
+  if (verdict && verdict.ok && Array.isArray(verdict.fontsMissing) && verdict.fontsMissing.length) {
+    return [open, { key: 'office-fonts', label: officeFontsLabel(machine), title: t('{fonts} missing — Word documents lay out with other fonts until they are installed', { fonts: verdict.fontsMissing.join(', ') }), action: () => installOffice(app, { host, what: FONTS_ID }) }];
+  }
+  return [open];
 }
 
 /** §7.9 the Word viewer's button: LibreOffice ABSENT on the file's machine (or its agent too old to know it) ⇒ the
@@ -138,8 +145,16 @@ export async function openWithDesktopApp(app, { catalogId = null, file, host = n
   await Promise.race([appPrefsReady(), new Promise((r) => setTimeout(r, 3000))]);
   const appId = catalogId || OFFICE_MODULES[fv.module].id;
   const scaleChoice = launchScaleChoice(appPrefs(SCALE_PREF_KEY), { appId });
-  const r = await fetchJson('/api/desktop/apps', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ appId, file: fv.file, fileHost: h || 'local', ...(h ? { host: h } : {}), dpr: launchDpr(), uiScale: launchUiScale(), ...(scaleChoice != null ? { scaleChoice } : {}) }) });
-  if (r && !r.error && r.id) { app.openDesktopApp(r.id); return r; }
+  // B-04da ⑥: the share this app REMEMBERS rides the door too (the launcher's untouched row applies it; a document
+  // opened from the explorer was hidden from agents however the person had shared LibreOffice) — this machine only
+  const share = h ? null : await rememberedShareFor(app, launchKeyOf({ appId }));
+  const r = await fetchJson('/api/desktop/apps', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ appId, file: fv.file, fileHost: h || 'local', ...(h ? { host: h } : {}), dpr: launchDpr(), uiScale: launchUiScale(), ...(scaleChoice != null ? { scaleChoice } : {}), ...(share ? { share } : {}) }) });
+  if (r && !r.error && r.id) {
+    app.openDesktopApp(r.id);
+    announceRememberedShare(app, share, r);
+    if (r.reachError) showToast(t('The app started, but sharing it failed: {why}', { why: r.reachError.error || '' }), { type: 'error' });
+    return r;
+  }
   const code = (r && r.code) || null;
   app._officeVerdicts?.clear(); // what the menu remembered is stale now
   if (DIALOG_CODES.includes(code)) {

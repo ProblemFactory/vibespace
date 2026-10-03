@@ -61,6 +61,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
 const B = require('../browser-profiles.js');
+const J = require('../browser-job-principal.js'); // lane jobs-browser: a Background Work job's browser handle + its release rule
 const SW = require('../browser-switch.js');
 const F = require('../browser-facts.js');
 const T = require('../browser-takeover.js');
@@ -75,6 +76,7 @@ const DSP = require('../browser-display.js'); // lane headless-fallback: headed 
 const HC = require('../hidden-chars.js'); // lane browser-propose: a proposal card's words carry no character that is not drawn (THE one set)
 const KB = require('../browser-kept.js'); // lane browser-resume (§3.9): the conversation's KEPT browser — tabs, D2's restore kind (PURE)
 const BB = require('../browser-builds.js'); // lane browser-admin 2a: which Chrome build a profile runs (the machine's list + the ONE verdict)
+const WIN = require('../browser-windows.js'); // lane browser-windows: a window per holder — the measured placement, the window mates, the cap setting (PURE)
 const TBS = require('../browser-tabs.js'); // lane browser-resume C (§3.9, ruling 3): whose tab it is — the agent's own tab verbs, the user's tab row (PURE)
 
 const STORE_FILE = 'browser-profiles.json';
@@ -124,11 +126,15 @@ function keeper() { return installed; }
  *   facts / runtime / limits / log / now / tickMs / guardSampleMs — injectable for the gate
  */
 function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast = null, serverSetting = () => undefined,
-  serverNotice = null, getTelemetry = () => null, liveKeys = () => new Set(), remoteKeys = () => new Set(), userTodos = null,
+  serverNotice = null, getTelemetry = () => null, liveKeys: sessionLiveKeys = () => new Set(), remoteKeys = () => new Set(), userTodos = null,
+  // lane jobs-browser (B-dbc1): is this Background Work job's run alive (state starting | up)? A running job CARRIES its
+  // browser handle (src/browser-job-principal.js), so its lease outlives its owner conversation until the job ends
+  jobRunning = () => false,
   facts = null, runtime = null, limits = LIMITS, log = console, now = Date.now, tickMs = TICK_MS, guardSampleMs = null, install = true,
   // lane H: how long a verb waits for the lease seam's listeners (the recorder ARMING its tap) before it runs
   armWaitMs = ARM_WAIT_MS,
   taskGroupDefault = null, access = null, hostKnown = null,
+  vncDisplay = null, // B-d635 (lane browser-reliability): VibeSpace's own VNC desktop display the probe also looks at (the server wiring names it)
   // P4 second half (§7.4 / §7.5): the integration store (a handle or a
   // getter) the key consumer resolves through; `keys` = src/server/browser-
   // backend.js's `{keyFor, sourceOf}` (built here over `integrations` when
@@ -163,12 +169,12 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   // archived}` | null (a store that no longer lists it) — the write's `unknown_task` and the panel's words. Absent ⇒ no
   // Task Group admits anyone the keeper judges itself (the routes hand their own taskIds to attach).
   taskIdsForKey = null, taskInfo = null,
-  // owner ruling A (2): how long a conversation keeps DRIVING a shared profile's browser after its last command when its
-  // turn is not known to have ended (B.DRIVE_HOLD_MS; injectable for the gate)
-  driveHoldMs = null,
   // BROWSE YOURSELF verify r1 (H6): the browser's page targets with their OPENER (CDP Target.getTargets over the keeper
   // browser's own endpoint) — what the user's own tabs are derived from; injectable for the gate (a fake has no CDP)
   readTargets = null,
+  // lane browser-windows (U1): the window a holder's tab opens in — `(cdpUrl, {url}) → {ok, targetId, windowId}` over the
+  // keeper browser's own endpoint (browser-viewport.openWindow); injectable for the gate (a fake has no CDP)
+  openWindow: openWindowFn = null, closeTarget: closeTargetFn = null, openTabInWindow: openInWindowFn = null, windowOf: windowOfFn = null, openTabByActivate: activateFn = null, // verify r2 T1: rung 2 of a later tab (browser-viewport.openTabByActivate)
   // lane browser-resume (§3.9, the owner's ruling 1): THE KEPT STORE (src/server/browser-kept.js, or a getter) — a
   // conversation's own browser's logins directory + its tabs survive the browser's stop; the keeper is its ONE feeder
   // (start / stop / the live tab list / a deliberate close). Absent ⇒ nothing is kept (today's ephemerality).
@@ -673,10 +679,10 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       // P6 (§6.2 / §6.5): is `sharing:"instance"` a value HERE, and the grants
       // (counts only — never a token, never a raw url)
       mediation: { available: mediationOn(), port: mediator && mediationOn() ? mediator.port() : null, grants: mediator && mediationOn() ? mediator.list() : [] },
-      pins: { ...reg.pins }, cap: { used: running, cap: Number(limits.CONCURRENT_CAP) || LIMITS.CONCURRENT_CAP },
+      pins: { ...reg.pins }, cap: { used: running, cap: machineCap(), setting: 'browser.maxRunning' },
+      windowLeaks: { count: windowLeaks.count, last: windowLeaks.last ? { ...windowLeaks.last } : null }, // verify r3 T2 ①: rung-2 tabs that landed in another holder's window, closed at once — COUNTED (this run)
       // owner ruling A (2): who DRIVES each shared profile's browser right now (profileId → {browserKey, since, at}) — a
       // browser key, never a name (this digest also reaches agents); the client names it from its own session rows
-      drivers: activeDrivers(),
       floor: lv === undefined ? null : B.floorVerdict(lv, B.FLOOR_VERSION),
       // P4 (§7.1): the provider rows with their capability cells + the local
       // verdict — a control the digest's consumers disable WITH its reason
@@ -737,7 +743,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   const configSaid = new Set();
   const configSay = (key, line) => { if (configSaid.has(key)) return; configSaid.add(key); try { log.warn?.(`[browser] ${line}`); } catch { /* none */ } };
   // lane headless-fallback: THIS machine's display, probed at every LOCAL launch; the planned config beside the keeper's files
-  const displays = require('./browser-display-config.js').create({ dir: path.join(CONFIG_DIR, 'display'), writeJson: writeJsonAtomic, log, env: () => rtEnv, now });
+  const displays = require('./browser-display-config.js').create({ dir: path.join(CONFIG_DIR, 'display'), writeJson: writeJsonAtomic, log, env: () => rtEnv, now, vncDisplay });
   /**
    * LANE H VERIFY r4 (MAJOR 2): THE LAUNCH MARK. Every browser THIS keeper launches runs with a config whose `args` carry
    * `--vibespace-keeper=<mark>` (a named profile's id, an ephemeral's browser key) — the file `machine-<mark>.json` /
@@ -1011,7 +1017,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     reg.profiles = reg.profiles.filter((x) => x.id !== id);
     delete reg.browsers[id];
     for (const [k, v] of Object.entries(reg.pins)) if (v && v.profileId === id) reg.pins[k] = { profileId: null, origin: 'harness', at: now(), cleared: { id, label: p.label, at: now() } }; // lane S2: the cleared MARK (read by the browser fact)
-    ephPairs.delete(id); ephSessions.delete(id); drivers.delete(id); humans.delete(id); delete reg.leftTabs[id]; // BROWSE YOURSELF: never outlives its record
+    ephPairs.delete(id); ephSessions.delete(id); humans.delete(id); rung2Refusals.delete(String(id)); delete reg.leftTabs[id]; // BROWSE YOURSELF: never outlives its record; verify r5 ②: nor the refusals told at a drive's end
     // r4: the keeper's own marked config for this record goes with it (nothing runs on it — removal needs a stopped browser)
     { const mk = markOf(p); if (mk && MARK_RE.test(String(mk))) { try { fs.rmSync(path.join(CONFIG_DIR, markFileName(isEph(p) ? 'ephemeral' : 'machine', mk)), { force: true }); } catch { /* best effort */ } configMemo.delete((isEph(p) ? 'ephemeral' : 'machine') + '|' + mk); } }
     commit();
@@ -1353,6 +1359,10 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
 
   // ── the browser: reuse-or-spawn ──
   function idleMs() { return B.idleTimeoutMs(setting('browser.idleTimeoutMs', B.DEFAULT_IDLE_TIMEOUT_MS)); }
+  /** lane browser-windows (U4): the machine's ceiling of running browsers is the SETTING `browser.maxRunning` (1–32), read
+   *  at every judgement (a change applies to the next start); the keeper's CONCURRENT_CAP (6) is its default. Desktop apps
+   *  keep their own ceiling. The resource guard only REPORTS, as before. */
+  function machineCap() { return WIN.maxRunningOf(setting('browser.maxRunning', null), Number(limits.CONCURRENT_CAP) || LIMITS.CONCURRENT_CAP); }
   /** r4 LOW 5: the idle timeout an ephemeral's spawn pairs carry (frozen at spawn), else the setting. */
   function pairsIdleMs(pairs) {
     // ONE reading of the pairs' idle (2.369.183: lane P's PURE B.pairsIdleMs — the same fact its launch passes)
@@ -1362,7 +1372,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   /** The ceiling over EVERY live browser record (named + managed ephemeral)
    *  plus the holders the count seam reports (desktop apps, D2). */
   function ceilingNow({ ephemeral = false, browserKey = null } = {}) {
-    return B.ceilingVerdict(Object.values(reg.browsers).map((r) => { const q = profile(r.profileId); return { ...r, label: q?.label, ephemeral: isEph(q), owner: isEph(q) ? q.owner.id : null }; }), reg.leases, limits, { others: othersNow(), ephemeral, idleMs: idleMs(), browserKey });
+    return B.ceilingVerdict(Object.values(reg.browsers).map((r) => { const q = profile(r.profileId); return { ...r, label: q?.label, ephemeral: isEph(q), owner: isEph(q) ? q.owner.id : null }; }), reg.leases, { ...limits, CONCURRENT_CAP: machineCap() }, { others: othersNow(), ephemeral, idleMs: idleMs(), browserKey });
   }
   // ── MULTIVIEW D4: the PER-CONVERSATION cap (below the machine ceiling) ──
   const convFacts = (bk) => { if (typeof conversationFacts !== 'function') return {}; try { return conversationFacts(B.parentKeyOf(bk)) || {}; } catch (e) { log.warn?.(`[browser] conversation facts unreadable — ${e && e.message}`); return {}; } };
@@ -1790,8 +1800,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   // ── VERIFY r6 (2026-09-25) MINOR 1: only a relaunch whose url ANSWERED is an attempt (r5 counted before the ask, so three
   // asks the binary refused made the profile "keeps closing" in 93 s); a failed ask has its own streak + cap + words
   // (`rec.heals.failed`, B.failedAskVerdict: 10 spanning 4.5 min ⇒ `browser_unstable` "could not be started", `closed.unstable
-  // = 'failing'`). LOW 2 is a KNOWN BOUND, not fixed: the window slides, so a browser closing less often than 3 in 10 min
-  // (one every ~4 min) is restarted on every closure for as long as a lease holds it — bounded, never the 5-s storm.
+  // = 'failing'`). B-47f9 (lane browser-reliability): r6's LOW 2 (the window slides — a browser closing every ~4 min was
+  // restarted on every closure for good) is closed by a SECOND tier: HEAL_DAY_BUDGET relaunches in HEAL_DAY_MS ⇒ unstable.
   const HEAL_RETRY_MS = B.HEAL_RETRY_MS;
   const healing = new Map();
   const closedText = (p, why) => `"${p.label}"'s browser was closed (its window or process ended) and could not be started again${why ? ' — ' + why : ''}; stop it from the Browser panel, then run the command again`;
@@ -1811,16 +1821,18 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     return !same;
   }
   const noteHeal = (rec, patch) => { rec.heals = { ...B.healLedger(rec.heals), ...patch }; dirty = true; };
+  /** B-47f9 verify r1: the journal's count, per tier (the ledger keeps a day — its length is not the 10-min count). */
+  const healTiers = (rec) => { const v = B.healBudgetVerdict({ attempts: B.healLedger(rec.heals).attempts, now: now() }); return `${v.recent.length} of ${B.HEAL_BUDGET} in ${Math.round(B.HEAL_WINDOW_MS / 60000)} min, ${v.kept.length} of ${B.HEAL_DAY_BUDGET} in ${Math.round(B.HEAL_DAY_MS / 3600e3)} h`; };
   /** r5: the budget is spent — `browser_unstable` (no more relaunches until a stop ends the record) + the ONE notice. r6
    *  MINOR 1: `kind` 'closing' (HEAL_BUDGET relaunches that each produced a browser that closed) or 'failing' (the failed-ask
    *  cap: every ask to start it again failed, `spanMs` the time they spanned) — two verdicts, two sets of words, one code. */
-  function markUnstable(rec, p, count, seenBy, { kind = 'closing', spanMs = null } = {}) {
+  function markUnstable(rec, p, count, seenBy, { kind = 'closing', spanMs = null, windowMs = B.HEAL_WINDOW_MS } = {}) {
     const failing = kind === 'failing';
-    const first = setClosed(rec, { code: 'browser_unstable', error: B.unstableText({ label: p.label, count, windowMs: B.HEAL_WINDOW_MS, kind, spanMs }), ...(failing ? { unstable: 'failing' } : {}) });
-    noteHeal(rec, { lastOutcome: 'unstable', unstableCount: count, unstableKind: failing ? 'failing' : null, unstableSpanMs: failing ? spanMs : null });
+    const first = setClosed(rec, { code: 'browser_unstable', error: B.unstableText({ label: p.label, count, windowMs, kind, spanMs }), ...(failing ? { unstable: 'failing' } : {}) });
+    noteHeal(rec, { lastOutcome: 'unstable', unstableCount: count, unstableKind: failing ? 'failing' : null, unstableSpanMs: failing ? spanMs : null, unstableWindowMs: failing ? null : windowMs });
     if (first) {
       if (failing) log.warn?.(`[browser] ${p.id} "${p.label}": its browser could not be started — ${count} relaunch asks in ${Math.round((spanMs || 0) / 1000)} s all failed (daemon ${rec.pid} alive, seen by ${seenBy}; no browser started) — NOT asked again (browser_unstable) until it is stopped from the Browser panel`);
-      else log.warn?.(`[browser] ${p.id} "${p.label}": its browser closed again (daemon ${rec.pid} alive, seen by ${seenBy}) after ${count} restarts in ${Math.round(B.HEAL_WINDOW_MS / 60000)} min — NOT started again (browser_unstable) until it is stopped from the Browser panel`);
+      else log.warn?.(`[browser] ${p.id} "${p.label}": its browser closed again (daemon ${rec.pid} alive, seen by ${seenBy}) after ${count} restarts in ${windowMs >= 2 * 3600e3 ? Math.round(windowMs / 3600e3) + ' h' : Math.round(windowMs / 60000) + ' min'} — NOT started again (browser_unstable) until it is stopped from the Browser panel`);
     }
     noticeUnstable(rec, p);
   }
@@ -1832,7 +1844,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // a store that is not wired / refuses: said ONCE (never a journal line per tick), tried again silently on each pass
     const unfiled = (why) => { if (L.lastOutcome !== 'unstable-unfiled') { noteHeal(rec, { lastOutcome: 'unstable-unfiled' }); log.warn?.(`[browser] ${p.id} "${p.label}": keeps closing — ${why}`); } return false; };
     if (!userTodos || typeof userTodos.add !== 'function') return unfiled('no For-you store is wired, so only this journal says so');
-    const n = B.unstableNotice({ label: p.label, count: L.unstableCount || B.HEAL_BUDGET, windowMs: B.HEAL_WINDOW_MS, kind: L.unstableKind === 'failing' ? 'failing' : 'closing', spanMs: L.unstableSpanMs }); // r6: its own words
+    const n = B.unstableNotice({ label: p.label, count: L.unstableCount || B.HEAL_BUDGET, windowMs: L.unstableWindowMs || B.HEAL_WINDOW_MS, kind: L.unstableKind === 'failing' ? 'failing' : 'closing', spanMs: L.unstableSpanMs }); // r6: its own words
     try { userTodos.add('browser', { origin: 'browser', kind: 'notice', urgency: 'normal', by: 'agent', text: n.text, detail: n.detail, sessionName: 'Agent browser' }); }
     catch (e) { return unfiled(`the For-you notice was not filed (${e && e.message}) — tried again on the next pass`); }
     noteHeal(rec, { noticedAt: now() });
@@ -1882,7 +1894,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       // transient fault (the binary mid-reinstall, the folder unreadable, a full disk) never reads as "closed each time"
       const L = B.healLedger(rec.heals);
       const bud = B.healBudgetVerdict({ attempts: L.attempts, now: now() });
-      if (!bud.ok) { markUnstable(rec, p, bud.count, seenBy); commit(); return null; }
+      if (!bud.ok) { markUnstable(rec, p, bud.count, seenBy, { windowMs: bud.windowMs }); commit(); return null; }
       const tAsk = now();
       const t0 = Date.now();
       rec.cdpUrl = null;
@@ -1902,7 +1914,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         return null;
       }
       // r6 MINOR 1: the url answered — THIS is a relaunch (the budget's attempt), and the failed streak ends
-      noteHeal(rec, { attempts: [...B.healBudgetVerdict({ attempts: B.healLedger(rec.heals).attempts, now: tAsk }).recent, tAsk], failed: null });
+      noteHeal(rec, { attempts: [...B.healBudgetVerdict({ attempts: B.healLedger(rec.heals).attempts, now: tAsk }).kept, tAsk], failed: null }); // B-47f9: a day of attempts (the second tier)
       const lost = rec.browserLost;
       const b = recaptureBrowser(rec, `${seenBy}, healed`);
       if (!b) { // r5 MAJOR 1 (b): its CDP url answered but no browser process holds the directory — it died at birth: CLOSED, never a success
@@ -1915,7 +1927,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       }
       rec.closed = null; rec.browserLost = null; dirty = true;
       noteHeal(rec, { lastOutcome: 'healed' });
-      log.log?.(`[browser] ${p.id} "${p.label}": its browser had closed (${lost && lost.pid ? 'pid ' + lost.pid + ' gone, ' : ''}daemon ${rec.pid} alive, seen by ${seenBy}) — started again in that daemon in ${Date.now() - t0} ms: ${b ? 'pid ' + b.pid + (b.devtoolsPort ? ', DevToolsActivePort ' + b.devtoolsPort : '') : 'its CDP url answers (the process is not identified)'} (restart ${B.healLedger(rec.heals).attempts.length} of ${B.HEAL_BUDGET} in ${Math.round(B.HEAL_WINDOW_MS / 60000)} min); the leases follow (mediated: repointed; others: their next command)`);
+      log.log?.(`[browser] ${p.id} "${p.label}": its browser had closed (${lost && lost.pid ? 'pid ' + lost.pid + ' gone, ' : ''}daemon ${rec.pid} alive, seen by ${seenBy}) — started again in that daemon in ${Date.now() - t0} ms: ${b ? 'pid ' + b.pid + (b.devtoolsPort ? ', DevToolsActivePort ' + b.devtoolsPort : '') : 'its CDP url answers (the process is not identified)'} (restart ${healTiers(rec)}); the leases follow (mediated: repointed; others: their next command)`);
       commit();
       return b;
     })();
@@ -2608,10 +2620,182 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (cycles.has(k)) cycles.set(k, INT.dropUserAct(cycles.get(k), rec));
     else log.log?.(`[browser] ${browserKey}${profileId ? ' on ' + profileId : ''}: the user's ${rec.kind} the handback already told the agent about did NOT run (${String(why || '').slice(0, 200)})`);
   }
+  /** verify r3 T2 ①: ONE serial lock per browser for rung 2 — two holders' window-state cycles interleaved would hand one
+   *  holder's create to the other's window (the cycle moves Chrome's sticky create target; measured). Bounded by profiles. */
+  const rung2Locks = new Map();
+  async function rung2Serialized(profileId, fn) { const k = String(profileId); const prev = rung2Locks.get(k) || Promise.resolve(); let done; const cur = new Promise((r) => { done = r; }); rung2Locks.set(k, prev.then(() => cur, () => cur)); await prev.catch(() => { }); try { return await fn(); } finally { done(); if (rung2Locks.get(k) === cur) rung2Locks.delete(k); } }
+  /** verify r3 T2 ①: THE LEAKS COUNTED — rung-2 tabs that landed in another holder's window and were closed at once (this run). */
+  const windowLeaks = { count: 0, last: null };
+  /** verify r4 T1 (the owner's invariant): does the USER drive ANY window of this browser right now — a takeover of any
+   *  lease's window (the in-memory input side), or his own Browse-yourself window with the controls? Rung 2 never runs then.
+   *  verify r5 ⑥: a HOLDER question, asked through holdersOn (the conversations' leases + his row — the census's holder
+   *  class): each conversation's drive is read off the in-memory `inputs` (never the lease's mirrored field), his off his row. */
+  const userDrivesAnyWindowOf = (profileId) => { const pid = String(profileId || ''); return holdersOn(pid).some((h) => h.human ? h.input === 'user' : ((inputs.get(inputKey(h.browserKey, pid)) || {}).input === 'user')); };
+  /** verify r5 ② (MEASURED: a holder refused `user_driving` heard NOTHING at the handback — 0 events on its key over 10
+   *  takeovers and 5 Browse-yourself releases; its retry was blind): the holders refused rung 2 while the user drove are
+   *  remembered per profile and TOLD ONCE when his drive ENDS (no window of the browser driven any more: a handback, his
+   *  window letting go, his row ending) — a `drive-ended` event the announcer turns into a FREE next-turn notice. */
+  const rung2Refusals = new Map(); // profileId → Map(browserKey → {sessionId, n, at})
+  const noteRung2Refused = (profileId, browserKey, sessionId) => { const pid = String(profileId || ''); const m = rung2Refusals.get(pid) || new Map(); const prev = m.get(browserKey) || { sessionId: null, n: 0, at: 0 }; m.set(browserKey, { sessionId: sessionId || prev.sessionId || null, n: prev.n + 1, at: now() }); rung2Refusals.set(pid, m); };
+  const driveEnded = (profileId) => {
+    const pid = String(profileId || ''); const m = rung2Refusals.get(pid);
+    if (!m || !m.size || userDrivesAnyWindowOf(pid)) return null; // somebody still drives a window of it: not yet
+    rung2Refusals.delete(pid);
+    const refused = [...m].map(([browserKey, x]) => ({ browserKey, sessionId: x.sessionId, n: x.n, at: x.at }));
+    log.log?.(`[browser] ${pid}: the user's drive ended — ${refused.length} holder(s) refused window_busy while he drove are told, free (${refused.map((x) => `${x.browserKey} ×${x.n}`).join(', ')})`);
+    emitInput({ kind: 'drive-ended', browserKey: null, profileId: pid, sessionId: null, state: null, cause: 'drive-ended', url: '', refused });
+    return refused;
+  };
   const tabRowOf = (rows, id) => (Array.isArray(rows) ? rows.find((x) => String(x.targetId).toUpperCase() === String(id).toUpperCase()) : null) || null;
   const tabFacts = (x) => ({ title: x ? KB.keptTitle(x.title || '') : '', url: x ? (KB.keptUrl(x.url || '') || '') : '' });
   const execFailed = (r) => !(r && r.ok) || !!(r.json && r.json.success === false);
   const execWhy = (r) => String((r && r.json && r.json.error) || (r && (r.stderr || r.error)) || 'the browser did not answer').trim().slice(0, 300);
+  /**
+   * lane browser-windows (U1): EVERY TAB VIBESPACE OPENS FOR A HOLDER OPENS IN A WINDOW OF ITS OWN (src/browser-windows.js —
+   * measured on 0.38.1 + Chrome 154: a create names no window; a plain one lands in Chrome's last focused window, often
+   * another holder's, where it takes the show and hides that holder's page — 0 fps, a click 4.6 s). The window is made
+   * over the keeper browser's own endpoint (`newWindow:true, focus:false`), the holder's session is BOUND to its tab (`tab
+   * <targetId>` — the CLI's own switch, so its daemon holds it) and, with a url, navigates there ITSELF (`open <url>`: its
+   * headers, init scripts and routes apply before the first document, as `tab new <url>` did). A browser on another
+   * machine, or a create the browser refuses, ⇒ the session's own `tab new` as before — said by name (`window:'shared'`,
+   * `why`); `fallback:false` (the attach) leaves it to the first command instead. A window no session could be bound to
+   * is closed again (never left to nobody). → {ok, targetId, window:'own'|'shared', windowId?, intoWindow?, remade?, why?, json?, error?}
+   *
+   * T2 ⑧ (the owner, 2026-10-01 23:20 PDT — "agent 意外创建多个窗口"): ONE WINDOW PER HOLDER. The FIRST tab makes the
+   * holder's window (`newWindow:true`, as U1); a LATER tab (this holder already has a live window, `lease.windowId`) opens
+   * IN that window — measured: CDP names no window and `activateTarget`/`bringToFront` then a plain create is NOT reliable
+   * in headless (state-dependent), but a page's `window.open` lands in its OPENER's window every time (headless + hidden),
+   * so the keeper opens the new tab from a page of the holder's window (`openTabInWindow`) and VERIFIES it with
+   * `Browser.getWindowForTarget` — a tab that landed elsewhere is closed, one retry, else a new single window is opened and
+   * the lease re-bound (said once, `remade`). A mediated lease keeps `newWindow:true` per create (the proxy drives the
+   * agent's own CDP; it cannot inject the opener rule without corrupting the agent's target map — its safety property, never
+   * ANOTHER holder's window, still holds).
+   */
+  async function openOwnTab(p, holderKey, { url = '', ns = null, opts = {}, pin = [], fallback = true, json = false, timeout = 30000 } = {}) {
+    const rec = p ? reg.browsers[p.id] : null;
+    const VP = () => require('./browser-viewport.js');
+    let made = null;
+    if (rec && rec.cdpUrl && isLocalRec(rec)) {
+      // T2 ⑧: does this holder already have a live window of its own? (a mediated lease never does — it keeps newWindow)
+      const lease = !isMediated(p) ? B.findLease(reg.leases, p.id, holderKey) : null;
+      const windowOf = async (tid) => { try { const w = await (typeof windowOfFn === 'function' ? windowOfFn(rec.cdpUrl, tid) : VP().windowOf(rec.cdpUrl, tid)); return WIN.windowIdOf(w); } catch { return null; } }; // lane site-reset-windows: THE one reader — `Number(null)` was window 0 (a dead tab read as a stray window 0, a lease stamped window 0)
+      const cands = lease ? [...new Set([lease.targetId, ...(Array.isArray(lease.tabRoots) ? lease.tabRoots : [])].filter(Boolean).map((x) => String(x).toUpperCase()))] : [];
+      let wantWin = lease ? WIN.windowIdOf(lease.windowId) : null; // verify r2: null is not window 0
+      const windows = new Map(); // candidate → its window (asked once)
+      // verify r2 ② (THE UPGRADE PATH, reproduced): a lease whose first tab IS in a window of its own in this run (`windowIn`)
+      // but whose window id was never stamped — a lease from before r1, or a `Browser.getWindowForTarget` that did not answer
+      // at the first window — DERIVES it from its live tabs; without this every later tab was a new window, said to nobody
+      if (wantWin == null && lease && WIN.hasOwnWindow(lease, WIN.instanceOf(rec))) {
+        for (const c of cands) { const w = await windowOf(c); windows.set(c, w); if (w != null) { wantWin = w; lease.windowId = w; log.log?.(`[browser] ${holderKey} on ${p.id}: its window id was never stamped — derived ${w} from its tab ${c.slice(0, 8)}`); break; } }
+      }
+      // THE LIVE ANCHORS: every tab of the lease that answers the holder's window — the window is LOST only when none does;
+      // verify r3 ④: the candidates answering ANOTHER window are the STRAYS (a lease from before r1 whose tabs sit in several
+      // windows) — said once per browser run (STRAYS_NOTE), never folded (no page is closed on the agent's behalf)
+      const anchors = [];
+      if (wantWin != null) for (const c of cands) { const w = windows.has(c) ? windows.get(c) : await windowOf(c); windows.set(c, w); if (w != null && w === wantWin) anchors.push(c); }
+      const strays = wantWin != null ? WIN.strayWindowsOf(windows, wantWin) : { windows: [], tabs: [] };
+      let gone = false;
+      if (anchors.length) {
+        const open = async (fn, a) => { try { return await fn(a); } catch (e) { return { ok: false, code: 'open_failed', error: String(e && e.message) }; } };
+        const viaOpener = (a) => open((x) => (typeof openInWindowFn === 'function' ? openInWindowFn(rec.cdpUrl, { anchorTargetId: x, windowId: wantWin }) : VP().openTabInWindow(rec.cdpUrl, { anchorTargetId: x, windowId: wantWin })), a);
+        // verify r3 T2 ①: rung 2's PLAN from the browser's display fact (the window-state cycle, never on a real display), its
+        // tries, and ONE serial lock per browser — two holders' cycles must not interleave (the cycle moves the sticky target)
+        // verify r4 T2 ① + T1: the plan also reads WHO WATCHES this window (the bridge's viewer count — no cycle under a live
+        // view: it flips the page hidden → visible, measured) and whether the USER DRIVES any window of this browser (then
+        // rung 2 is not run at all — refused window_busy by name, never a cycle or an activation under his hands)
+        // verify r5 ①/② (MEASURED on the product's Chrome, 30/30 per mode): r4 read the plan ONCE at the ladder's TOP — before
+        // the opener rung's probes (up to OPENER_ANCHORS_MAX × ANCHOR_PROBE_MS) and before the wait for the browser's rung-2
+        // lock — so a takeover that began inside them ran rung 2 under the user's hands and a live view that opened inside
+        // them got the cycle under its first frames. THE PLAN IS READ AT RUNG 2, after the last await before it (the lock)
+        const planNow = () => WIN.rung2Plan(rec.display, { viewers: watchers.get(inputKey(holderKey, p.id)) || 0, driven: userDrivesAnyWindowOf(p.id) });
+        let plan = null;
+        const viaActivate = (a) => rung2Serialized(p.id, () => { plan = planNow(); if (plan.run === false) return { ok: false, code: 'rung2_not_run', error: plan.why }; return open((x) => (typeof activateFn === 'function' ? activateFn(rec.cdpUrl, { anchorTargetId: x, windowId: wantWin, tries: WIN.RUNG2_TRIES, breaker: plan.breaker }) : VP().openTabByActivate(rec.cdpUrl, { anchorTargetId: x, windowId: wantWin, tries: WIN.RUNG2_TRIES, breaker: plan.breaker })), a); });
+        const tried = [];
+        // verify r2 T1 (reproduced on the fake target model, measured on Chrome 154): RUNG 1 = the opener rule from EACH live
+        // anchor (≤ OPENER_ANCHORS_MAX — a dialog open, a crash, a navigation or a site hijacking window.open on ONE tab costs
+        // no window; verify r3: an anchor that does not answer the probe costs ANCHOR_PROBE_MS, not the act's timeout);
+        // RUNG 2 = the cycle + activate + a plain create from the first anchor, verified (lands where the page act cannot)
+        for (const a of anchors.slice(0, WIN.OPENER_ANCHORS_MAX)) { made = await viaOpener(a); if (made && made.ok) { made.rung = 'opener'; break; } tried.push(`${a.slice(0, 8)}: ${(made && (made.code || made.error)) || 'failed'}`); }
+        if (!(made && made.ok)) made = await viaActivate(anchors[0]); // verify r5: the plan is read in there, at rung 2
+        if (made && made.code === 'rung2_not_run') {
+          // verify r4 T1: the user drives a window of this browser — rung 2 is NOT run (no cycle, no activation under his
+          // hands); said by name in the refusal, the agent tries again after the handback — verify r5 ②: and is TOLD then
+          tried.push(`activate+create: not run (${plan.why})`);
+          noteRung2Refused(p.id, holderKey, lease ? lease.sessionId : null);
+          log.log?.(`[browser] ${holderKey} on ${p.id}: rung 2 NOT run — ${plan.why}; the opener rule failed on ${tried.length - 1} anchor(s): ${tried.slice(0, -1).join('; ')} — refused window_busy, the agent tries again after the handback (told then)`);
+        } else if (!(made && made.ok) || made.rung !== 'opener') {
+          // verify r3 T2 ①: every leak COUNTED — a tab that landed in another holder's window and was closed at once
+          for (const lk of Array.isArray(made && made.leaks) ? made.leaks : []) { windowLeaks.count++; windowLeaks.last = { at: now(), browserKey: holderKey, profileId: p.id, window: lk.window == null ? null : lk.window, livedMs: Number(lk.livedMs) || 0 }; log.log?.(`[browser] ${holderKey} on ${p.id}: rung 2 (try ${lk.try}) opened its tab in window ${lk.window == null ? '(unknown)' : lk.window} — another holder's, not its own ${wantWin} — closed at once after ${Number(lk.livedMs) || 0} ms (leak ${windowLeaks.count} of this run; ${plan.breaker ? 'the window-state cycle before each try' : 'no cycle: ' + plan.why})`); }
+          if (made && made.ok) made.rung = 'activate'; // the RUNG is the keeper's fact (the seam's own word is not trusted)
+          if (made && made.ok) log.log?.(`[browser] ${holderKey} on ${p.id}: its tab opened by rung 2 (${plan.breaker ? 'the window-state cycle + ' : 'no cycle (' + plan.why + ') + '}activate + a background create, try ${made.tries || 1}) in its window ${wantWin} — the opener rule failed on ${tried.length} anchor(s): ${tried.join('; ')}`);
+          else tried.push(`activate+create: ${(made && (made.code || made.error)) || 'failed'}`);
+        }
+        if (made && made.ok) { made.windowId = wantWin; made.inWindow = true; }
+        else {
+          // verify r3 ⑦ (measured: the anchor was its window's LAST tab and closed 0 ms into the act ⇒ no tab, the window gone):
+          // the window is RE-ASKED before it is called busy — none of the lease's tabs answers it any more ⇒ it is gone ⇒
+          // one new window of its own below (r2 said "your tabs are still there" for a window that was not)
+          let answers = 0; for (const c of cands) { const w = await windowOf(c); if (w != null && w === wantWin) answers++; }
+          if (!answers) { gone = true; log.log?.(`[browser] ${holderKey} on ${p.id}: its own window ${wantWin} went away during the ladder (${tried.join('; ')}) — no tab of its answers it now; a new window of its own is opened`); }
+          else {
+            // the window provably LIVES (its tabs answer) ⇒ NEVER re-minted (r1 re-minted here: a dialog on the anchor made a
+            // second window, and the note claimed the old tabs were closed) — refused by name, the agent tries again
+            log.log?.(`[browser] ${holderKey} on ${p.id}: its own window ${wantWin} could not take a new tab right now (${tried.join('; ')}) — refused window_busy, never a second window`);
+            made = { ok: false, code: 'window_busy', why: plan && plan.run === false ? 'user_driving' : 'ladder', error: `your window could not take a new tab right now (${tried.join('; ')}) — your window and its tabs are still there; try again ${plan && plan.run === false ? 'after the user hands the browser back (VibeSpace tells you then)' : 'in a moment'}` };
+          }
+        }
+      }
+      if (!anchors.length || gone) {
+        // no tab of the lease answers its window: the window is GONE (none yet, or a previous run's) ⇒ ONE new window of its own
+        const hadWindow = wantWin != null;
+        try { made = await (typeof openWindowFn === 'function' ? openWindowFn(rec.cdpUrl, { url: 'about:blank' }) : VP().openWindow(rec.cdpUrl, { url: 'about:blank' })); } catch (e) { made = { ok: false, error: String(e && e.message) }; }
+        if (made && made.ok) { made.remade = hadWindow; made.rung = 'new-window'; } // the holder HAD a window and it was lost ⇒ a new single one of its own
+      }
+      if (made && made.ok && strays.windows.length) made.strays = strays; // verify r3 ④: said with the result, once per run
+    } else made = { ok: false, error: rec && rec.cdpUrl ? 'a browser on another machine' : 'the browser answered no CDP url' };
+    if (made && made.ok && made.targetId) {
+      const id = String(made.targetId).toUpperCase();
+      if (mediator && isMediated(p)) mediator.admitTarget(p.id, holderKey, id); // P6: the proxy scopes the lease to it before its session binds it
+      let b = null;
+      try { b = await rt.exec(ns, [...pin, 'tab', id, '--json'], { ...opts, timeout }); } catch (e) { b = { ok: false, error: String(e && e.message) }; }
+      if (!execFailed(b)) {
+        let json = (b && b.json) || null;
+        if (url) {
+          // lane site-reset-windows: the url is NAVIGATED, never waited for — as the binary's own `tab new <url>` did before this
+          // lane (0.38.1 waits for nothing there). The binary's `open` waits for the page's load: a page that never settles (userW's
+          // stale-login loop) sat its 25 s timeout and the agent's `tab new` failed tab_failed with its tab opened and bound, the
+          // loop never told. `Page.navigate` on the new tab's own socket answers at the commit; the binary's `open` only where no
+          // page socket answers (a fake CDP endpoint, a refused navigation)
+          let nav = null;
+          try { nav = await VP().navigateTarget(rec.cdpUrl, id, url); } catch (e) { nav = { ok: false, error: String(e && e.message) }; }
+          if (!(nav && nav.ok)) {
+            let o = null;
+            try { o = await rt.exec(ns, [...pin, 'open', url, '--json'], { ...opts, timeout }); } catch (e) { o = { ok: false, error: String(e && e.message) }; }
+            if (execFailed(o)) return { ok: false, targetId: id, window: 'own', windowId: made.windowId, error: execWhy(o) };
+            json = (o && o.json) || json;
+          }
+        }
+        return { ok: true, targetId: id, window: 'own', windowId: made.windowId, intoWindow: !made.remade && made.windowId != null && !!made.inWindow, remade: !!made.remade, rung: made.rung || null, strays: made.strays || null, json }; // verify r3: the RUNG that landed is named; the strays ride once
+      }
+      try { await (typeof closeTargetFn === 'function' ? closeTargetFn(rec.cdpUrl, id) : require('./browser-viewport.js').closeTarget(rec.cdpUrl, id)); } catch { /* the next start ends it */ }
+      // verify r5 ③ (MEASURED on the product's Chrome, 30/30 per mode): a bind that fails — the user closed the holder's window
+      // between the create and the `tab <id>` ("No tab with label …") — fell to the binary's own `tab new`, which lands in the
+      // browser's LAST window in the FOREGROUND: the other holder's page hidden for good (the U0b class this lane exists to
+      // end, on the fallback path). An own-window tab whose bind failed is REFUSED window_busy (why bind_failed): nothing
+      // opened, the same `tab new` once more re-asks the window (gone ⇒ a new window of its own) — never the shared fallback
+      if (fallback) { log.log?.(`[browser] ${holderKey} on ${p ? p.id : '?'}: its new tab ${id.slice(0, 8)} could not be bound to its session (${execWhy(b)}) — closed, refused window_busy (bind_failed), never the browser's last window`); made = { ok: false, code: 'window_busy', why: 'bind_failed', error: `your new tab could not be bound to your session (${execWhy(b)}) — nothing opened; run the same \`tab new\` once more (a window of yours that is gone gets a new one)` }; }
+      else made = { ok: false, error: `its new window could not be bound to its session (${execWhy(b)})` };
+    }
+    if (made && made.code === 'window_busy') return { ok: false, code: 'window_busy', why: made.why || 'ladder', targetId: null, window: 'own', error: made.error }; // verify r2 T1: a living window is never traded for the browser's last window (another holder's)
+    if (!fallback) { log.log?.(`[browser] ${holderKey} on ${p ? p.id : '?'}: no window of its own was opened — ${made && made.error ? made.error : 'no window'}; its first command opens its tab`); return { ok: false, targetId: null, window: null, why: made && made.error }; }
+    log.log?.(`[browser] ${holderKey} on ${p ? p.id : '?'}: its tab opens in the browser's last window, not a window of its own — ${made && made.error ? made.error : 'no window'}`);
+    let r = null;
+    try { r = await rt.exec(ns, [...pin, 'tab', 'new', ...(url ? [url] : []), ...(json ? ['--json'] : [])], { ...opts, timeout }); } catch (e) { r = { ok: false, error: String(e && e.message) }; } // each caller's own pre-lane argv (only the agent's fenced `tab new` asked for --json)
+    if (execFailed(r)) return { ok: false, targetId: null, window: 'shared', why: made && made.error, error: execWhy(r) };
+    const d = r.json && r.json.data && typeof r.json.data === 'object' ? r.json.data : null;
+    const tid = KB.targetIdOf(r.stdout) || (d ? (d.targetId || d.tabId || d.id || null) : null); // as the pre-lane callers read it (never re-cased)
+    return { ok: true, targetId: tid ? String(tid) : null, window: 'shared', why: made && made.error, json: r.json || null };
+  }
   /**
    * THE AGENT'S `tab` VERBS on a SHARED profile's browser (the CLI routes them here after its /resolve; the route is the
    * belt). `resolveFor` FIRST — the one admission and every refusal it answers (profile_changed, browser_paused while the
@@ -2642,7 +2826,9 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const pin = pinTab ? ['--pin-tab'] : [];
     const ns = nsOf(p.id);
     const read = async () => {
-      const rows = await tabListUnder(ns, o);
+      const rows0 = await tabListUnder(ns, o);
+      const lw = B.findLease(reg.leases, p.id, bk);
+      const rows = rows0 ? WIN.withLabelsOnRows(rows0, lw && lw.tabLabels) : null; // lane browser-windows: the labels of the tabs VibeSpace opened in their own windows
       const targets = rows ? await tabTargetsOf(o.extraEnv.AGENT_BROWSER_CDP) : null;
       const active = rows ? ((rows.find((x) => x.active) || {}).targetId || null) : null;
       const owners = targets ? TBS.tabOwners({ targets, holders: tabHoldersOf(p.id, active ? { [bk]: String(active).toUpperCase() } : {}) }) : null;
@@ -2657,15 +2843,23 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (!av.ok) { log.log?.(`[browser] ${bk} on ${p.id}: its \`tab ${w.act}${w.ref ? ' ' + String(w.ref).slice(0, 40) : ''}\` refused ${av.code} — nothing ran`); throw namedError(av.code, av.error); }
     const out = { ok: true, act: w.act, profileId: p.id };
     if (w.act === 'new') {
-      const r = await rt.exec(ns, [...pin, 'tab', 'new', ...(w.label ? ['--label', w.label] : []), ...(w.url ? [w.url] : []), '--json'], { ...o, timeout: 30000 });
-      if (execFailed(r)) throw namedError('tab_failed', execWhy(r));
-      const id = KB.targetIdOf(r.stdout);
+      // lane browser-windows (U1): the new tab opens in a WINDOW OF ITS OWN (measured: the binary's `tab new` lands in
+      // Chrome's last focused window — often another conversation's, hiding its page); its session is bound there and
+      // navigates itself; a label is the lease's (the binary labels only the tabs it creates)
+      const made = await openOwnTab(p, bk, { url: w.url || '', ns, opts: o, pin, json: true });
+      if (!made.ok) throw namedError(made.code === 'window_busy' ? 'window_busy' : 'tab_failed', made.error || 'the tab could not be opened', made.code === 'window_busy' && made.why ? { why: made.why } : {}); // verify r2 T1: window_busy by name (the window lives; nothing opened); verify r5 ⑤: the refusal carries WHY (user_driving / bind_failed / ladder) to the route and the CLI's JSON
+      const id = made.targetId;
       const l = B.findLease(reg.leases, p.id, bk);
-      if (id && l) { l.tabRoots = TBS.addRoot(l.tabRoots, id); save(); }
-      // 2.369.199 integration (lane site-reset verify r4 #1 × this fence): the binary's own ack names the new tab as IT spells
-      // it — the route binds that id in the dialog watch to THIS conversation (the CLI's audit no longer sees a fenced `tab new`)
-      const ack = (() => { for (const line of String(r.stdout || '').slice(0, 64 * 1024).split('\n').reverse()) { const x = line.trim(); if (!x.startsWith('{') || !x.includes('targetId')) continue; try { const j = JSON.parse(x); const v = j && j.data && j.data.targetId; if (typeof v === 'string' && /^[0-9A-Za-z_-]{4,64}$/.test(v)) return v; } catch { /* not the result line */ } } return null; })();
-      out.opened = { targetId: id ? String(id).toUpperCase() : null, url: w.url || 'about:blank', ack };
+      if (id && l) { l.tabRoots = TBS.addRoot(l.tabRoots, id); if (made.window === 'own') { l.windowIn = WIN.instanceOf(rec); if ((made.remade || WIN.windowIdOf(l.windowId) == null) && WIN.windowIdOf(made.windowId) != null) l.windowId = WIN.windowIdOf(made.windowId); } if (w.label) l.tabLabels = WIN.withTabLabel(l.tabLabels, w.label, id); save(); } // T2 ⑧: a later tab is IN the holder's window; a lost window is re-minted once
+      if (made.window === 'own' && made.remade) { out.note = 'your window was gone (none of your tabs answered it), so this tab opened in a new window of your own'; out.noteCode = 'tab_new_window'; log.log?.(`[browser] ${bk} on ${p.id}: its window was gone — a new window of its own opened for its \`tab new\` (${String(id || '').slice(0, 8)})`); }
+      // 2.369.199 integration (lane site-reset verify r4 #1 × this fence): the ack names the new tab as the browser spells it —
+      // the route binds that id in the dialog watch to THIS conversation (the CLI's audit no longer sees a fenced `tab new`)
+      const ack = id ? String(id) : null;
+      out.opened = { targetId: id ? String(id).toUpperCase() : null, url: w.url || 'about:blank', ack, window: made.window || null, ...(made.window === 'own' ? { inWindow: !!made.intoWindow, windowId: WIN.windowIdOf(made.windowId), rung: made.rung || null } : {}) }; // verify r2 T1: the result SAYS the tab is in the holder's existing window; verify r3: and by which RUNG
+      // verify r3 ④ (THE UPGRADE PATH, reproduced): a lease whose tabs sit in windows other than its own (the r1 bug's
+      // leftovers) is TOLD so once per browser run — the state is said, never folded (no page of the agent's is closed)
+      if (made.window === 'own' && made.strays && made.strays.windows.length && l && l.straysSaidIn !== WIN.instanceOf(rec) && !out.note) { l.straysSaidIn = WIN.instanceOf(rec); save(); out.note = `${made.strays.tabs.length} of your tabs sit in ${made.strays.windows.length} other window${made.strays.windows.length === 1 ? '' : 's'} of this browser (from before this version); your new tabs open in your window — close those with \`tab close <id>\` or leave them`; out.noteCode = WIN.STRAYS_NOTE; log.log?.(`[browser] ${bk} on ${p.id}: ${made.strays.tabs.length} of its tabs sit in ${made.strays.windows.length} other window(s) (${made.strays.windows.join(', ')}) besides its own ${WIN.windowIdOf(made.windowId)} — said once (${WIN.STRAYS_NOTE}); nothing closed`); }
+      if (made.window !== 'own' && made.why) { out.note = `this tab opened in the browser's last window, not a window of your own (${String(made.why).slice(0, 160)}) — it may sit beside another conversation's tab`; out.noteCode = 'tab_shared_window'; }
     } else if (w.act === 'switch') {
       const r = await rt.exec(ns, [...pin, 'tab', av.targetId, '--json'], { ...o, timeout: 30000 });
       if (execFailed(r)) throw namedError('tab_failed', execWhy(r));
@@ -2676,6 +2870,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       const l = B.findLease(reg.leases, p.id, bk);
       if (l && Array.isArray(l.tabRoots)) { l.tabRoots = TBS.cleanRoots(l.tabRoots.filter((x) => String(x).toUpperCase() !== av.targetId)); save(); }
       out.closed = { targetId: av.targetId, current: !!av.closesCurrent };
+      if (av.closesCurrent) out.noteCode = 'tab_closed_current';
       if (av.closesCurrent) out.note = 'that was your current tab — your next page verb answers tab_gone until you switch to another of yours (`vibespace-browser tab <id>`) or open one (`vibespace-browser tab new <url>`)';
     }
     const s1 = w.act === 'list' ? s0 : await read();
@@ -2780,6 +2975,17 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const v = TBS.userTabVerdict({ act, owner, human: false, driving, mediated: false, counts, active: isActive });
     if (!v.ok) refuse(v, `${owner}, ${driving ? 'driving' : 'not driving'}, ${counts.agent} of the agent's`);
     const who = eph ? `${bk} (its own browser)` : `${bk} on ${p.id}`;
+    // lane browser-windows (U0b, userW's inc-muqdohf0-hkjc): a click on the chip of the tab the session is ON is not a no-op —
+    // that tab may be BEHIND another one in its window (Chrome activated a neighbour when a tab closed): it paints nothing
+    // and the view is a frozen picture. The session's own switch (`tab <id>`, the binary activates it) brings it forward;
+    // its current tab is unchanged, so nothing is told to the agent — the journal and the view say it
+    if (v.noop && act === 'switch' && !eph) {
+      if (!driving) refuse(TBS.userTabVerdict({ act, owner: 'agent', human: false, driving: false, mediated: false, counts }), 'not driving');
+      const r = await rt.exec(ns, [...pin, 'tab', id, '--json'], { ...opts, timeout: 30000 });
+      if (execFailed(r)) throw namedError('tab_failed', execWhy(r));
+      log.log?.(`[browser] ${bk} on ${p.id}: the user brought the agent's current tab ${id.slice(0, 8)} to the front of its window while driving it (the agent's tab is unchanged — nothing to tell it)`);
+      return { ok: true, act, targetId: id, switchedTo: id, broughtForward: true };
+    }
     if (v.noop) return { ok: true, act, targetId: id, switchedTo: id, noop: true };
     // verify F3 — "checked at the door is not allowed at the answer": `driving` was read BEFORE the tab list and the CDP
     // reads; a handback (explicit, idle, viewer-left) landing inside them returned control to the agent, and the switch /
@@ -2892,7 +3098,14 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   /** lane headless-fallback: one journal line per launch whose display fact changed something (a fallback, a recovery). */
   function sayDisplay(fact, what) { const line = DSP.journalLine(fact, what); if (line) { try { log.warn?.(`[browser] ${line}`); } catch { /* none */ } } }
   /** lane headless-fallback: THIS machine's display right now (Settings → Agent browser's read-only line) — a fresh probe. */
-  function machineDisplay() { return displays.probe(); }
+  function machineDisplay() { return displays.probe().then((v) => { displayCache = { v, at: now() }; return v; }); }
+  /** lane browser-recipes: the LAST probe's verdict, sync (the tools intro is built synchronously) — a missing or stale
+   *  (> 60 s) one asks a fresh probe for the NEXT reader (never a timer); null until a first probe answered. */
+  let displayCache = null;
+  function machineDisplayCached() {
+    if (!displayCache || now() - displayCache.at > 60000) { if (!displayCache || !displayCache.pending) { const c = displayCache || { v: null, at: 0 }; c.pending = true; displayCache = c; machineDisplay().catch(() => { c.pending = false; }); } }
+    return displayCache ? displayCache.v : null;
+  }
   /** lane headless-fallback addendum: `browser.noDisplayMode` — 'auto' (a hidden window where Xvfb is here, else headless) | 'headless'. */
   function noDisplayMode() { return DSP.noDisplayModeOf(setting('browser.noDisplayMode', 'auto')); }
   async function start(profileId, { why = 'attach', browserKey = null } = {}) {
@@ -3277,6 +3490,46 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
    * that prints the answer strips it (§5.1: `use` never prints a CDP URL).
    */
   /**
+   * lane browser-windows (U1): A LEASE'S TAB IN THIS BROWSER IS IN A WINDOW OF ITS OWN. At the attach of a NEW lease, of a
+   * lease whose tab is gone (`tabClosed`), and of a lease whose window was in a PREVIOUS run of this browser (a restart —
+   * none of its windows survived), the keeper opens its window and binds its session there BEFORE its first command
+   * (`openOwnTab`, no fallback: a window that cannot be made leaves the first command to open the tab as before). A lease
+   * whose tab still lives in the browser's shared window (started before this lane, adopted across a restart) is left
+   * where it is — its page is not moved (Chrome has no CDP move) and it stays taken over WITH the others in that window
+   * until the browser restarts (`windowMates`). A MEDIATED lease's tabs land in windows of their own through the proxy's
+   * create rewrite (src/browser-mediation.js) — it is only recorded. `windowIn` = the browser run its window is in.
+   */
+  async function ownWindowAtAttach(p, browserKey, { created = false } = {}) {
+    const rec = reg.browsers[p.id];
+    const inst = WIN.instanceOf(rec);
+    const l = B.findLease(reg.leases, p.id, browserKey);
+    if (!l || !inst || WIN.hasOwnWindow(l, inst)) return null;
+    const k = `${p.id}|${browserKey}`;
+    const stale = typeof l.windowIn === 'string' && l.windowIn !== inst;
+    if (!(created || stale || reg.tabClosed[k])) return null;
+    if (isMediated(p)) { l.windowIn = inst; commit(); return { window: 'own', mediated: true }; }
+    const o = await leaseCliOpts(p.id, browserKey);
+    if (!o) return null;
+    const pinTab = !!(bf.lastVersion() !== undefined && B.floorVerdict(bf.lastVersion()).sharedProfiles);
+    const r = await openOwnTab(p, browserKey, { ns: nsOf(p.id), opts: o, pin: pinTab ? ['--pin-tab'] : [], fallback: false });
+    if (!(r && r.ok && r.targetId)) return null;
+    const l2 = B.findLease(reg.leases, p.id, browserKey);
+    if (!l2) return null;
+    l2.windowIn = inst;
+    l2.windowId = WIN.windowIdOf(r.windowId); // T2 ⑧: THE holder's one window — every later tab opens in it (verify r2: an unread id stays null, never 0)
+    l2.tabRoots = TBS.addRoot([], r.targetId); // its window's tab is its only root in this browser
+    // lane browser-windows-fix (int201): a lease whose tab was LOST (L2's mark: a replaced browser — a pod roll, a crash — or the
+    // user's close) or whose window was in a previous run is TOLD it was rebound, as L2's block below would have said it: this bind
+    // takes the mark, so that block never runs. Before, the first command after a SingletonLock takeover printed no [tab_rebound]
+    // and the agent silently lost its page (test-browser-share ⑩). The note rides the lease until an answer carries it (F4).
+    const lostWhy = reg.tabClosed[k] ? (reg.tabLostWhy && reg.tabLostWhy[k] === 'closed' ? 'closed' : 'life') : stale ? 'life' : null;
+    if (lostWhy) keepRebound(p.id, browserKey, { how: 'new', targetId: String(r.targetId), url: 'about:blank', why: lostWhy, text: TBS.reboundNoteText({ how: 'new', why: lostWhy }) });
+    delete reg.tabClosed[k]; if (reg.tabLostWhy && typeof reg.tabLostWhy === 'object') delete reg.tabLostWhy[k];
+    commit();
+    log.log?.(`[browser] ${browserKey} on ${p.id} "${p.label}": its own window opened and bound (tab ${String(r.targetId).slice(0, 8)}${r.windowId ? ', window ' + r.windowId : ''}) — ${created ? 'a new lease' : stale ? 'its window was in a previous run of this browser' : 'its tab was gone'}`);
+    return r;
+  }
+  /**
    * `by` = who asks: 'agent' (the CLI's `use`, a verb's resolve), 'user' (the UI's attach — the user's pick WRITES the list:
    * the conversation is added when the list does not admit it, §3.3) or 'pin' (a verb opening the conversation's pin —
    * judged by the list like any other: a pin never authorizes). `via: 'pin'` is stamped on a lease the pin CREATED, so a
@@ -3358,6 +3611,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (reg.leftTabs[p.id] && reg.leftTabs[p.id][browserKey]) { delete reg.leftTabs[p.id][browserKey]; if (!Object.keys(reg.leftTabs[p.id]).length) delete reg.leftTabs[p.id]; }
     p.lastUsedAt = now();
     commit();
+    await ownWindowAtAttach(p, browserKey, { created: !!d.created });
     // a conversation whose tab the keeper CLOSED (the user took the profile from it, closeLeaseSession) is bound to that
     // gone tab until it binds a new one — the keeper binds it here, before its first command runs (never a mediated
     // lease: the proxy scopes its tabs; never an unmarked session: a tab it still has is kept)
@@ -3509,7 +3763,6 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     }
     let stopped = false;
     if (B.isLiveBrowser(reg.browsers[profileId])) { await stop(profileId, { why: 'user' }); stopped = true; } // the user's Delete… — a user act
-    drivers.delete(profileId);
     log.log?.(`[browser] ${profileId} "${p.label}" released by the user: ${detached.length} lease(s) detached${stopped ? ', its browser stopped' : ''}`);
     return { detached, stopped };
   }
@@ -3554,7 +3807,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       const running = Object.values(reg.browsers).filter(B.isLiveBrowser).length + othersNow().length;
       const v = HM.browseYourselfVerdict({ profile: p ? { ...p, ephemeral: isEph(p) } : null, row: p ? rowOf(p.provider) : null, control: p && !isEph(p) && !p.host ? control(p.provider, { host: null }) : null,
         switching: !!p && switching.has(p.id), closed: p ? closedRefusalOf(p.id) : null, live: B.isLiveBrowser(rec), human: h0 ? { state: h0.state, alive: h0.state === 'driving' && !!(h0.input && h0.input.takenBy) && viewerAliveOf(h0.input.takenBy.viewerId) } : null,
-        running, cap: Number(limits.CONCURRENT_CAP) || LIMITS.CONCURRENT_CAP });
+        running, cap: machineCap() });
       if (!v.ok) { log.log?.(`[browser] ${id}: browse yourself refused (${v.code})`); throw namedError(v.code, v.error, { ...(Number.isInteger(v.pid) ? { holderPid: v.pid } : {}), ...(v.detail ? { detail: v.detail } : {}) }); }
       if (v.how === 'focus') return { ok: true, how: 'focus', key: v.key, syncId: v.syncId, profileId: p.id, label: p.label, fresh: null };
       // verify r3 (the heal): "he LAUNCHED the browser" is the RECORD's fact — this daemon run was started by his press (a heal
@@ -3570,7 +3823,9 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       let h = humans.get(p.id);
       if (!h) {
         const pinTab = !!(bf.lastVersion() !== undefined && B.floorVerdict(bf.lastVersion()).sharedProfiles);
-        const r = await rt.exec(nsOf(p.id), [...(pinTab ? ['--pin-tab'] : []), 'tab', 'new'], o);
+        // lane browser-windows (U1): HIS OWN WINDOW — never a tab beside an agent's in a window it shows (no takeover needed)
+        const made = await openOwnTab(p, v.key, { ns: nsOf(p.id), opts: o, pin: pinTab ? ['--pin-tab'] : [] });
+        const r = { ok: !!made.ok, json: made.ok && made.targetId ? { data: { targetId: made.targetId } } : made.json || null, error: made.error || null };
         if (!(r && r.ok)) {
           const why = String((r && (r.stderr || r.error)) || 'no answer').trim().slice(0, 200);
           log.warn?.(`[browser] ${p.id} "${p.label}": your own tab could not be opened — ${why}`);
@@ -3640,6 +3895,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     emitLease({ kind: 'human-away', profileId: h.profileId, key: h.key });
     log.log?.(`[browser] ${h.profileId}: the user's browsing window let go of his tab (${d.cause}) — kept ${Math.round(humanKeepOf(h) / 60000)} min for Continue`);
     commit();
+    driveEnded(h.profileId); // verify r5 ②: his own window let go ⇒ the holders refused while he drove are told
     return { ok: true, cause: d.cause, state: humanInputState(key) };
   }
   /** The window that attaches to a browsing window's relay: take at once, claim from his other live window (the one he
@@ -3670,6 +3926,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const r = HM.HUMAN_END_REASONS.includes(reason) ? reason : 'released';
     humans.delete(h.profileId);
     watchers.delete(inputKey(h.key, h.profileId));
+    driveEnded(h.profileId); // verify r5 ②: his row ended (Close / Quit / the keep ran out) while he drove ⇒ the refused holders are told
     const p = profile(h.profileId);
     const rec = reg.browsers[h.profileId];
     let closed = null;
@@ -3882,13 +4139,14 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     }
     const k = inputKey(browserKey, profileId);
     const alive = typeof viewerAlive === 'function' ? (id) => { try { return !!viewerAlive(id); } catch { return holderAlive; } } : () => holderAlive;
-    // verify r7 (S2): ONE BROWSER, ONE HOLDER. A sibling conversation's LIVE holder (driving from its own view, or holding
+    // lane browser-windows (U2): ONE WINDOW, ONE HOLDER — the check runs over the WINDOW's mates only (a lease in a window of
+    // its own has none: two views may drive two conversations' windows at once). verify r7 (S2): A sibling conversation's LIVE holder (driving from its own view, or holding
     // this lease WITH a primary takeover) blocks this takeover by name exactly as this lease's own would — the bridge's
     // per-relay `holderAlive` read every sibling's holder as gone (it sits on another relay), so a second view re-seized a
     // browser somebody was driving: two holders, both inputs forwarded, the handback from one view leaving the other's
     // lease paused. A holder whose socket IS gone never blocks: the whole browser moves to the new viewer (siblingTakeover).
     if (profileId) {
-      for (const sib of siblingLeases(browserKey, profileId)) {
+      for (const sib of windowMatesOf(browserKey, profileId)) {
         const s = inputs.get(inputKey(sib.browserKey, profileId));
         if (!s || s.input !== 'user' || !s.takenBy || s.takenBy.viewerId === viewerId) continue;
         const sd = T.decideTakeover({ state: s, viewerId, now: now(), holderAlive: alive(s.takenBy.viewerId) });
@@ -3915,9 +4173,11 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       cycles.set(k, oc.cycle);
       const view = INT.interruptionView(oc.cycle);
       log.log?.(`[browser] ${browserKey}${profileId ? ' on ' + profileId : ' (ephemeral)'}: the user took over (viewer ${viewerId}) — ${view.n ? `${view.n} operation(s) of the agent interrupted (${view.verbs.join(', ')})` : 'nothing of the agent\'s was in flight'}${ab && ab.aborted.length ? `; ${ab.aborted.length} mediated call(s) aborted${ab.terminated ? `, ${ab.terminated} running script(s) asked to stop` : ''}` : ''}${oc.fresh ? '' : ' (the same takeover goes on: a second viewer took it before the handback)'}; agent commands are refused until the handback`);
-      emitInput({ kind: 'takeover', browserKey, profileId: profileId || null, sessionId, state: { ...d.state }, cause: null, url: d.state.url || '', interruption: { ...view, fresh: oc.fresh } });
-      // verify r6 (S2, MEDIUM): a takeover is of the BROWSER — every OTHER conversation leased on this named profile (one
-      // Chrome, its own tabs) is taken over WITH it by the same viewer: its calls in flight cut, its own cycle opened (its
+      emitInput({ kind: 'takeover', browserKey, profileId: profileId || null, sessionId, state: { ...d.state }, cause: null, url: d.state.url || '', interruption: { ...view, fresh: oc.fresh }, sharedWindow: sharedWindowOf(browserKey, profileId) }); // verify r2 ⑦: the words name a legacy shared window
+      // lane browser-windows (U2): a takeover is of the WINDOW the view shows — only the leases IN that window (an older
+      // browser run's shared window; none for a lease in a window of its own) are taken WITH it; every other conversation
+      // runs on in its own window. verify r6 (S2, MEDIUM, when one window held every conversation's tab): the mates are
+      // taken over WITH it by the same viewer: its calls in flight cut, its own cycle opened (its
       // own card, its own reminder naming ITS verbs), its next verbs refused browser_paused. Measured before: the sibling's
       // fill ran on under the user's hands, its `tab` switch moved what the user was looking at (the r3 F2 class across
       // conversations), and nobody told it. A sibling already driven by its own user keeps its own takeover.
@@ -3925,15 +4185,27 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     }
     return { ok: true, already: !!d.already, state: inputStateFor(browserKey, profileId) };
   }
-  /** The other conversations leased on a NAMED profile's browser (never an ephemeral record's, never a child's own). */
-  function siblingLeases(browserKey, profileId) {
+  /** lane browser-windows (U2): THE OTHER LEASES IN THE WINDOW A TAKEOVER DRIVES — nobody for a lease in a window of its
+   *  own (every lease after this lane); for a lease still in the shared window of an older browser run (its tab cannot be
+   *  moved — Chrome has no CDP move), the other leases still in it (PURE `windowMates`: taken WITH it, as before). Never an
+   *  ephemeral record's, never a child's own. Before this lane it was every lease of the profile — one takeover froze every
+   *  conversation on the browser (userW's D-payments, 2026-10-01). */
+  function windowMatesOf(browserKey, profileId) {
     const p = profileId ? profile(profileId) : null;
     if (!p || isEph(p)) return [];
-    return reg.leases.filter((l) => l && l.profileId === profileId && l.browserKey !== browserKey);
+    return WIN.windowMates({ leases: reg.leases, profileId, browserKey, instance: WIN.instanceOf(reg.browsers[profileId]) });
+  }
+  /** verify r2 ⑦: is this lease's tab in the SHARED window of an older browser run (no window of its own in this run)? — the
+   *  takeover / handback / paused words then say "the shared window of …", never "your window" (r1 LOW 6). */
+  function sharedWindowOf(browserKey, profileId) {
+    const p = profileId ? profile(profileId) : null;
+    if (!p || isEph(p)) return false;
+    const l = B.findLease(reg.leases, profileId, browserKey);
+    return !!(l && !WIN.hasOwnWindow(l, WIN.instanceOf(reg.browsers[profileId])));
   }
   function siblingTakeover({ browserKey, profileId, viewerId, at, alive = () => true }) {
     const taken = [];
-    for (const l of siblingLeases(browserKey, profileId)) {
+    for (const l of windowMatesOf(browserKey, profileId)) {
       const sk = inputKey(l.browserKey, profileId);
       const prev = inputs.get(sk);
       // its own user drives it (its own cycle is open) — never taken from them; verify r7: unless that holder's socket is
@@ -3954,7 +4226,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       cycles.set(sk, oc.cycle);
       const view = INT.interruptionView(oc.cycle);
       log.log?.(`[browser] ${l.browserKey} on ${profileId}: taken over WITH ${browserKey} (the same browser; viewer ${viewerId}) — ${view.n ? `${view.n} operation(s) of its agent interrupted (${view.verbs.join(', ')})` : 'nothing of its agent\'s was in flight'}${ab && ab.aborted.length ? `; ${ab.aborted.length} mediated call(s) aborted` : ''}; its commands are refused until the handback`);
-      emitInput({ kind: 'takeover', browserKey: l.browserKey, profileId, sessionId: l.sessionId || null, state: { ...sd.state }, cause: null, url: sd.state.url || '', interruption: { ...view, fresh: oc.fresh }, sibling: browserKey });
+      emitInput({ kind: 'takeover', browserKey: l.browserKey, profileId, sessionId: l.sessionId || null, state: { ...sd.state }, cause: null, url: sd.state.url || '', interruption: { ...view, fresh: oc.fresh }, sibling: browserKey, sharedWindow: true }); // verify r2 ⑦: a mate is taken WITH the shared window — said so
       taken.push(l.browserKey);
     }
     return taken;
@@ -3967,7 +4239,10 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const mine = inputs.get(k);
     if (mine && mine.input === 'user') return false;
     let holder = null, holderKey = null;
-    for (const [sk, s] of inputs) { if (s && s.input === 'user' && s.takenBy && sk.endsWith('|' + profileId) && sk !== k) { holder = s.takenBy; holderKey = s.with || sk.slice(0, sk.length - String(profileId).length - 1); break; } } // a sibling's `with` names the view's conversation
+    // lane browser-windows (U2): only a takeover of the window THIS lease is in — a lease in a window of its own (every new
+    // one) is never paused by the user driving another conversation's window
+    const mates = new Set(windowMatesOf(browserKey, profileId).map((l) => inputKey(l.browserKey, profileId)));
+    for (const [sk, s] of inputs) { if (s && s.input === 'user' && s.takenBy && sk.endsWith('|' + profileId) && sk !== k && mates.has(sk)) { holder = s.takenBy; holderKey = s.with || sk.slice(0, sk.length - String(profileId).length - 1); break; } } // a sibling's `with` names the view's conversation
     if (!holder) return false;
     const at = now();
     const sd = T.decideTakeover({ state: mine || null, viewerId: holder.viewerId, now: at, holderAlive: false });
@@ -3985,7 +4260,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   function siblingsHeldBy(browserKey, profileId, viewerId) {
     const out = [];
     if (viewerId === null || viewerId === undefined) return out;
-    for (const l of siblingLeases(browserKey, profileId)) {
+    for (const l of windowMatesOf(browserKey, profileId)) {
       const sk = inputKey(l.browserKey, profileId);
       const s = inputs.get(sk);
       if (s && s.input === 'user' && s.takenBy && s.takenBy.viewerId === viewerId) out.push({ lease: l, key: sk, state: s });
@@ -4029,7 +4304,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const rerun = INT.interruptedVerbs(closed);
     const userActs = closed && Array.isArray(closed.userActs) ? closed.userActs.slice() : []; // lane browser-resume C: the user's tab acts while he drove
     log.log?.(`[browser] ${browserKey}${profileId ? ' on ' + profileId : ' (ephemeral)'}: handed back to the agent (${d.cause}${d.byHolder ? '' : ', not by the holder'}) after ${Math.round(d.heldMs / 1000)} s${d.state.url ? ' at ' + T.urlForLog(d.state.url) : ''}${rerun.length ? ` — to re-run: ${rerun.join(', ')}` : ''}${userActs.length ? ` — the user's tab acts while driving (said to the agent): ${userActs.map((a) => a.kind).join(', ')}` : ''}`); // lane live-input: origin + path in the journal — never the query (order ids, tokens)
-    emitInput({ kind: 'handback', browserKey, profileId: profileId || null, sessionId, state: { ...d.state }, cause: d.cause, url: d.state.url || '', heldMs: d.heldMs, byHolder: d.byHolder, rerun, ...(userActs.length ? { userActs } : {}), interruption: INT.interruptionView(closed), ...(sibling ? { sibling } : {}) });
+    emitInput({ kind: 'handback', browserKey, profileId: profileId || null, sessionId, state: { ...d.state }, cause: d.cause, url: d.state.url || '', heldMs: d.heldMs, byHolder: d.byHolder, rerun, ...(userActs.length ? { userActs } : {}), interruption: INT.interruptionView(closed), ...(sibling ? { sibling } : {}), sharedWindow: sharedWindowOf(browserKey, profileId) }); // verify r2 ⑦
+    if (profileId) driveEnded(profileId); // verify r5 ②: no window of the browser driven any more ⇒ the holders refused meanwhile are told
     return { ok: true, cause: d.cause, heldMs: d.heldMs, byHolder: d.byHolder, rerun, userActs, state: inputStateFor(browserKey, profileId) };
   }
   /**
@@ -4090,7 +4366,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const rv = rerunVerb(verb);
     if (rv && cycles.has(k)) cycles.set(k, INT.noteRefused(cycles.get(k), { verb: rv, at: now() }));
     const p = profileId ? profile(profileId) : null;
-    return T.browserPausedRefusal({ state: s, label: p ? p.label : null, handles, now: now(), idleMs: takeoverIdleMs() });
+    return T.browserPausedRefusal({ state: s, label: p ? p.label : null, handles, now: now(), idleMs: takeoverIdleMs(), shared: sharedWindowOf(browserKey, profileId) }); // verify r2 ⑦: a legacy shared window is named as such
   }
   /**
    * WAS THIS COMMAND INTERRUPTED? (the owner's ruling, 2026-09-27 — "告知agent发生了打断"). The CLI asks after its
@@ -4319,19 +4595,18 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   function statusFor(browserKey) {
     ensureLoaded();
     // lane H: the HOLDER rows — a live managed ephemeral browser is one (ephemeral: true), beside `ephemeral` below
-    const act = activeDrivers();
     const leases = holders(B.leasesOf(reg.leases, browserKey, { children: true })).map((l) => {
       const p = profile(l.profileId);
-      // owner ruling A (2): who drives this (shared) browser right now — the user from another conversation's live view,
-      // else the conversation whose agent last acted on it (a browser key; the strip names it from the client's rows)
+      // lane browser-windows: who drives THIS lease's window from ANOTHER view — only the user, and only for a lease still in
+      // an older run's shared window (its window mates' views); a lease in its own window is driven from its own view or not
       const ud = !l.ephemeral && p ? userDrivingOf(l.profileId, l.browserKey) : null;
-      const driver = ud ? { browserKey: ud.browserKey, by: 'user' } : (act[l.profileId] ? { browserKey: act[l.profileId].browserKey, by: 'agent' } : null);
+      const driver = ud ? { browserKey: ud.browserKey, by: 'user' } : null;
       return { ...l, label: l.label || (p ? p.label : l.profileId), browser: agentBrowserView(reg.browsers[l.profileId]), others: reg.leases.filter((x) => x.profileId === l.profileId && x.browserKey !== l.browserKey).length, driver, scope: p ? B.scopeOf(p) : null };
     });
     const set = setFor(browserKey);
     // MULTIVIEW §4 (B-89d0): each helper's handle carries ITS OWN browser's state
     // (its managed ephemeral record — null until its first page verb) — the strip lists it
-    const children = set.children.map((c) => { const e = ephemeralFor(c.handle); return { ...c, browser: e ? { profileId: e.profileId, state: e.state, live: e.live, stoppedBy: e.stoppedBy, endedAt: e.endedAt, startedAt: e.startedAt } : null }; });
+    const children = set.children.map((c) => { const e = ephemeralFor(c.handle); const jl = !e && c.job ? reg.leases.find((l) => l.browserKey === c.handle) : null; const jr = jl ? reg.browsers[jl.profileId] : null; return { ...c, browser: e ? { profileId: e.profileId, state: e.state, live: e.live, stoppedBy: e.stoppedBy, endedAt: e.endedAt, startedAt: e.startedAt } : (jl ? { profileId: jl.profileId, state: jr ? jr.state : 'stopped', live: !!(jr && B.isLiveBrowser(jr)), job: true } : null) }; });
     const cap = capFor(browserKey);
     return { browserKey, leases, pin: pinFor(browserKey), pinFailure: pinFailureOf(browserKey), defaultProfile: set.defaultId, attachments: set.attachments, handles: set.handles, children, fingerprint: set.fingerprint, told: reg.told[String(browserKey || '')]?.fingerprint || null,
       // P3 (§4.3): who drives each of this conversation's browsers (its helpers' too — MULTIVIEW), and what is waiting on a confirmation
@@ -4339,7 +4614,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       // takeover C3: this conversation's managed ephemeral browser (null until its first page verb)
       ephemeral: ephemeralFor(browserKey),
       // MULTIVIEW D4: the strip's `own/cap` chip — this conversation's live browsers against ITS cap; the machine's ceiling beside it (a count, never names)
-      cap: { own: ownLive(browserKey), cap: cap.cap, origin: cap.origin, explicit: capOf(browserKey), machine: { used: Object.values(reg.browsers).filter(B.isLiveBrowser).length + othersNow().length, cap: Number(limits.CONCURRENT_CAP) || LIMITS.CONCURRENT_CAP } } };
+      cap: { own: ownLive(browserKey), cap: cap.cap, origin: cap.origin, explicit: capOf(browserKey), machine: { used: Object.values(reg.browsers).filter(B.isLiveBrowser).length + othersNow().length, cap: machineCap() } } };
   }
 
   /** Lane H: the browser this conversation's agent holds LIVE right now, as
@@ -4414,7 +4689,47 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
 
   // ── §3.7 the attachment set + handles; §3.8 layer ① the one-time refusal ──
   function childrenOf(browserKey) {
-    return Object.entries(reg.children).filter(([k, c]) => c && B.parentKeyOf(k) === browserKey && k !== browserKey).map(([k, c]) => ({ handle: k, since: c.since || 0, sessionId: c.sessionId || null }));
+    return Object.entries(reg.children).filter(([k, c]) => c && B.parentKeyOf(k) === browserKey && k !== browserKey).map(([k, c]) => ({ handle: k, since: c.since || 0, sessionId: c.sessionId || null, ...(c.job ? { job: String(c.job) } : {}) }));
+  }
+  // ── lane jobs-browser (B-dbc1): A BACKGROUND WORK JOB BROWSES AS ITS OWNER CONVERSATION ──
+  /** The job's handle under its owner's key (src/browser-job-principal.js): found, else minted — a child handle tagged
+   *  `job` (reaped by the job's end, never by its owner's: a running job carries it). One per (job, owner key). */
+  function jobHandleFor({ ownerKey, jobId } = {}) {
+    ensureLoaded();
+    if (!B.isBrowserKey(ownerKey) || !jobId) throw namedError('bad-request', 'a job handle needs its owner\'s browser key and the job id');
+    const have = J.jobHandleOf(reg.children, jobId, ownerKey);
+    if (have) return have;
+    const n = B.nextChildN(reg.children, ownerKey);
+    if (n > 999) throw namedError('cap', 'this conversation has minted 999 child handles — detach some');
+    const handle = B.childHandleFor(ownerKey, n);
+    reg.children[handle] = { parent: ownerKey, since: now(), sessionId: null, carrierLostAt: null, job: String(jobId) };
+    commit();
+    ensureTimer();
+    log.log?.(`[browser] ${ownerKey}: job ${jobId} uses the conversation's browser as ${handle} (its own lease and window; released when the job ends)`);
+    return handle;
+  }
+  /** READ-ONLY: the job's existing handle under this owner key, or null (the belt's identity — it never mints). */
+  function findJobHandle({ ownerKey, jobId } = {}) { ensureLoaded(); return J.jobHandleOf(reg.children, jobId, ownerKey); }
+  /** The job's id for a handle, or null (the trace names the job by id; its name is read live). */
+  function jobOf(handle) { const c = reg.children[String(handle || '')]; return c && c.job ? String(c.job) : null; }
+  /** THE RELEASE: every handle of this job — its leases detached (its window closes, a takeover of it ends), the handle
+   *  dropped. At the run's finalize (src/jobs.js onRunEnded) and by the reconcile's evidence rule. → handles released. */
+  function releaseJob(jobId, why = 'the job ended') {
+    ensureLoaded();
+    const mine = J.jobHandles(reg.children).filter((x) => x.jobId === String(jobId));
+    for (const { handle } of mine) releaseJobHandle(handle, why);
+    return mine.map((x) => x.handle);
+  }
+  function releaseJobHandle(handle, why) {
+    for (const l of reg.leases.filter((x) => x.browserKey === handle)) { try { detach({ profileId: l.profileId, browserKey: handle, by: 'user' }); } catch (e) { log.warn?.(`[browser] ${handle}: its lease on ${l.profileId} not detached — ${e && e.message}`); } }
+    if (dropChild(handle)) log.log?.(`[browser] ${handle}: job handle released (${why})`);
+  }
+  /** The live set every carrier rule reads: the live sessions' keys + the handles of RUNNING jobs. */
+  function liveKeys() {
+    const out = new Set();
+    try { for (const k of sessionLiveKeys() || []) out.add(k); } catch { /* none */ }
+    try { for (const h of J.carriedJobHandles(reg.children, jobRunning)) out.add(h); } catch { /* none */ }
+    return out;
   }
   /** The attachment set of ONE conversation, derived from the registry. */
   function setFor(browserKey) {
@@ -4434,57 +4749,28 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (!had || had.fingerprint !== view.fingerprint) save();
     return view;
   }
-  // ── OWNER RULING A (2): ONE DRIVER AT A TIME on a shared profile's browser ──
-  // profileId → {browserKey (the conversation, a parent key), at (its last command), since}. In memory: a restart forgets
-  // who was mid-work, and the next command simply claims it (a lease — who holds a TAB — is what persists).
-  const drivers = new Map();
-  const holdMs = () => (Number.isFinite(Number(driveHoldMs)) && Number(driveHoldMs) > 0 ? Number(driveHoldMs) : B.DRIVE_HOLD_MS);
-  /** A conversation whose live view the USER has taken this profile's browser over from (never the asker's own). */
+  // ── OWNER RULING A (2), RETIRED (lane browser-windows, 2026-10-01): no driver claim between conversations — each runs
+  // its own daemon in windows of its own (measured, src/browser-windows.js); the only pause is the user's takeover of a
+  // WINDOW. Who the user drives is the input side (`inputs`); a lease in the shared window of an older browser run is
+  // taken WITH the one in that window the user took (`windowMatesOf`), never a lease in a window of its own.
+  /** The conversation from whose live view the USER drives the window `exceptKey`'s lease is in (a window mate's view —
+   *  only a lease still in an older run's shared window has one), else null. Never the asker's own takeover. */
   function userDrivingOf(profileId, exceptKey) {
     const me = B.parentKeyOf(String(exceptKey || ''));
+    const mates = new Set(windowMatesOf(exceptKey, profileId).map((l) => B.parentKeyOf(l.browserKey)));
     for (const [k, s] of inputs) {
       if (!s || s.input !== 'user' || !k.endsWith('|' + profileId)) continue;
-      // integration 2.369.192 (S2 × S5): a lease taken WITH another view's takeover (lane S2 r6: a takeover is of the
-      // BROWSER) names that view's conversation in `with` — the one the user drives FROM, never the sibling itself
+      // integration 2.369.192 (S2 × S5): a lease taken WITH another view's takeover names that view's conversation in `with`
       const bk = s.with || k.slice(0, k.length - profileId.length - 1);
-      if (B.parentKeyOf(bk) !== me) return { browserKey: bk };
+      if (B.parentKeyOf(bk) !== me && mates.has(B.parentKeyOf(bk))) return { browserKey: bk };
     }
     return null;
-  }
-  /** The facts the PURE verdict needs about the current claimant. */
-  function driveHolderFacts(profileId, holderKey) {
-    if (!holderKey) return {};
-    const f = convFacts(holderKey);
-    return { leased: reg.leases.some((l) => l.profileId === profileId && B.parentKeyOf(l.browserKey) === holderKey), turn: f && f.turn !== undefined ? f.turn : null };
-  }
-  /** May `browserKey` act on `profileId`'s browser now? → the PURE verdict (ok + claim) or the typed `browser_busy` refusal
-   *  naming the other conversation (the ruling's "told so by name"). Never for an ephemeral record (its conversation's). */
-  function driveVerdictFor(browserKey, profileId) {
-    ensureLoaded();
-    const p = profile(profileId);
-    if (!p || isEph(p)) return { ok: true, claim: null };
-    const d = drivers.get(profileId) || null;
-    const v = B.driveVerdict({ drive: d, browserKey, holder: driveHolderFacts(profileId, d ? d.browserKey : null), userDriving: userDrivingOf(profileId, browserKey), now: now(), holdMs: holdMs() });
-    if (v.ok) return v;
-    const f = convFacts(v.holderKey);
-    return { ...B.browserBusyRefusal({ label: p.label, holderName: f && f.name ? String(f.name) : '', by: v.by, retryAfterMs: v.retryAfterMs }), holderKey: v.holderKey };
-  }
-  /** Record the claim a verdict granted (a command is about to run). A CHANGE of driver is broadcast (the strips name it). */
-  function noteDrive(profileId, claim) {
-    if (!claim || !claim.browserKey) return;
-    const prev = drivers.get(profileId) || null;
-    drivers.set(profileId, { browserKey: claim.browserKey, at: claim.at, since: claim.since });
-    if (!prev || prev.browserKey !== claim.browserKey) {
-      const others = reg.leases.filter((l) => l.profileId === profileId && B.parentKeyOf(l.browserKey) !== claim.browserKey).length;
-      if (others) log.log?.(`[browser] ${profileId}: ${claim.browserKey} now drives it (${others} other conversation(s) hold a lease — one driver at a time)`);
-      notify();
-    }
   }
   /**
    * identity verify r4 (2026-09-28): does ANYTHING this keeper holds name the conversation key `bk` (its parent key —
    * a child handle names its parent)? The registry as a whole (a list row, a lease, a pin, a cap, `told`, a child
    * handle, a blocked claim, `tabClosed`, an ephemeral record's owner — every field, present and future: the whole
-   * serialized store is scanned, not a hand-written list of its fields) plus the in-memory maps (the drivers, the input
+   * serialized store is scanned, not a hand-written list of its fields) plus the in-memory maps (the input
    * sides). The fresh-key rule (browser-profiles.freshBrowserKey) asks this at every mint so a key the store still
    * names — a stopped conversation's — is never handed to a new conversation. Unreadable ⇒ named (fail closed).
    */
@@ -4494,28 +4780,11 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (!B.isBrowserKey(K)) return false;
     const re = new RegExp('(^|[^0-9a-f])' + K.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![0-9a-f])');
     try { if (re.test(JSON.stringify(reg))) return true; } catch { return true; }
-    for (const d of drivers.values()) if (d && B.parentKeyOf(String(d.browserKey || '')) === K) return true;
     for (const k of inputs.keys()) if (B.parentKeyOf(String(k).slice(0, String(k).indexOf('|'))) === K) return true;
     try { for (const e of ephemerals()) if (B.parentKeyOf(String(e.browserKey || '')) === K) return true; } catch { return true; }
     // lane browser-resume (§3.9): a KEPT browser is its conversation's until it ends — a fresh key never lands on it
     try { const ks = keptStore(); if (ks && ks.has(K)) return true; } catch { return true; }
     return false;
-  }
-  /** The drivers still DRIVING (the digest's `drivers`, the strips' "who drives"): a claim whose holder let go is dropped. */
-  function activeDrivers(t = now()) {
-    const out = {};
-    for (const [pid, d] of drivers) {
-      const h = driveHolderFacts(pid, d.browserKey);
-      const v = B.driveVerdict({ drive: d, browserKey: '(outsider)', holder: h, now: t, holdMs: holdMs() }); // an outsider's view: busy ⇔ the claim still holds
-      if (!v.ok) out[pid] = { browserKey: d.browserKey, since: d.since, at: d.at };
-    }
-    return out;
-  }
-  function sweepDrivers(t) {
-    const act = activeDrivers(t);
-    let gone = false;
-    for (const pid of [...drivers.keys()]) if (!act[pid]) { drivers.delete(pid); gone = true; }
-    if (gone) notify();
   }
   /**
    * WHICH browser a command issued through the CLI acts on (§3.7), after
@@ -4541,13 +4810,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       if (v.kind === 'attachment' && switching.has(v.attachment.profileId)) { const rr = SW.restartingRefusal(profile(v.attachment.profileId)); return { ...rr, handles: v.handles || [] }; }
       const paused = pausedVerdictFor(bk, v.kind === 'attachment' ? v.attachment.profileId : null, { handles: v.handles || [], verb }); // the refused verb goes on the handback's re-run list
       if (paused) { log.log?.(`[browser] ${bk}: refused with browser_paused (the user drives${v.kind === 'attachment' ? ' ' + v.attachment.profileId : ' the ephemeral browser'})`); return paused; }
-      // OWNER RULING A (2): one driver at a time on a SHARED profile's browser — another conversation mid-work on it (or
-      // the user driving it from another conversation's live view) refuses this command `browser_busy`, BY NAME
-      if (v.kind === 'attachment') {
-        const dv = driveVerdictFor(bk, v.attachment.profileId);
-        if (!dv.ok) { log.log?.(`[browser] ${bk}: refused with browser_busy on ${v.attachment.profileId} (${dv.by === 'user' ? 'the user drives it from ' : 'driven by '}${dv.holderKey})`); return { ...dv, handles: v.handles || [] }; }
-        noteDrive(v.attachment.profileId, dv.claim);
-      }
+      // lane browser-windows: no `browser_busy` between conversations any more (owner ruling A (2) retired) — another
+      // conversation's agent works in its OWN window of this browser and never holds this one up (measured: one daemon each)
     }
     // MULTIVIEW §4: a helper's browser is watchable and can be taken over in the
     // live view — then IT is paused (keyed by the child handle), never by its parent's takeover
@@ -4942,8 +5206,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     return new Promise((resolve) => {
       try {
         require('child_process').execFile(p, ['--version'], { timeout: 8000, encoding: 'utf8', env: F.sanitizeProbeEnv({ ...(env() || {}), PATH: (env() || {}).PATH || process.env.PATH || '' }) }, (er, so, se) => {
-          const got = er ? null : B.parseVersion(String(so || '') + String(se || '')); // verify r1 ⑦: a crashed probe names no version (node's own "v24.12.0" on a stack trace is not the CLI's)
-          const v = got ? got.join('.') : null;
+          const v = F.versionFromProbe({ err: er, stdout: so, stderr: se }) || null; // verify r1 ⑦ + r2 ⑥: ONE probe table (browser-facts.versionFromProbe) — a crash names no version, a version on stdout counts whatever the exit
           if (v) cliVersions.set(p, { id, version: v });
           resolve(v);
         });
@@ -5492,11 +5755,12 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         // browser that was just stopped — 0.38.1's pin is sticky per session, so `--pin-tab open <url>` answered
         // `tab_gone` ("bound tab is gone … Run `tab new <url>`") and every later verb of the lease did too; `tab new` is
         // the binary's own recovery: it opens the tab in the NEW browser and binds the session to it
-        const r = await rt.exec(ns, [...(pinTab ? ['--pin-tab'] : []), 'tab', 'new', url], o);
+        // lane browser-windows (U1): …in a WINDOW OF ITS OWN in the new browser (the old one's windows are gone with it)
+        const r = await openOwnTab(p, l.browserKey, { url, ns, opts: o, pin: pinTab ? ['--pin-tab'] : [] });
         ok = !!r.ok;
-        const d = r.json && r.json.data && typeof r.json.data === 'object' ? r.json.data : null;
-        targetId = d ? (d.targetId || d.tabId || d.id || null) : null;
-        if (!ok) error = (r.stderr || r.error || '').trim().slice(0, 200) || 'open failed';
+        targetId = r.targetId || null;
+        if (ok && r.window === 'own') { l.windowIn = WIN.instanceOf(reg.browsers[p.id]); if (WIN.windowIdOf(r.windowId) != null) l.windowId = WIN.windowIdOf(r.windowId); } // T2 ⑧: the new browser's one window of this holder
+        if (!ok) error = String(r.error || '').trim().slice(0, 200) || 'open failed';
       } catch (e) { error = String(e && e.message); }
       // the SAME lease object: only targetId is re-minted (§7.4 step 5)
       l.targetId = targetId ? String(targetId) : null;
@@ -5626,6 +5890,11 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const out = new Set();
     if (HM.isHumanKey(bk)) { const h = humans.get(pid); if (h && h.key === bk) { if (h.ownTab) out.add(String(h.ownTab)); for (const a of (Array.isArray(h.adopted) ? h.adopted : [])) if (a) out.add(String(a)); } return [...out]; }
     for (const l of reg.leases) if (l && l.profileId === pid && String(l.browserKey) === bk) { if (l.targetId) out.add(String(l.targetId)); for (const t of (Array.isArray(l.tabs) ? l.tabs : [])) if (t) out.add(String(t)); } // verify r3 #2: + the tabs the watch witnessed as its (persisted on the lease)
+    // lane browser-windows-fix (int201): + this holder's ROOTS — THE whose-tab answer the tab fence reads (tabHoldersOf), where the
+    // keeper records the tab of the holder's OWN WINDOW (openOwnTab / ownWindowAtAttach: opened by the keeper, no verb in flight for
+    // the watch to witness). Before, on a shared profile that tab was nobody's here: a bare `site-reset <host>` read no tab of its
+    // own (`host_not_current`, its own site refused too) and its `stop` stopped nothing of its own — one answer, never a second rule
+    for (const h of tabHoldersOf(pid)) if (h && h.key === bk) for (const t of (Array.isArray(h.roots) ? h.roots : [])) if (t) out.add(String(t));
     try { const g = mediator && typeof mediator._grant === 'function' ? mediator._grant(pid, bk) : null; if (g && g.scope && g.scope.targets) for (const t of g.scope.targets) if (t) out.add(String(t)); } catch { /* no grant: nothing to add */ }
     return [...out];
   }
@@ -5723,11 +5992,11 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const o = await leaseCliOpts(p.id, l.browserKey);
     if (!o) return { ok: false, error: noCdpError(p) };
     const pinTab = !!(bf.lastVersion() !== undefined && B.floorVerdict(bf.lastVersion()).sharedProfiles);
-    const r = await rt.exec(nsOf(p.id), [...(pinTab ? ['--pin-tab'] : []), 'tab', 'new', String(url || 'about:blank')], o);
-    const d = r.json && r.json.data && typeof r.json.data === 'object' ? r.json.data : null;
-    const targetId = d ? (d.targetId || d.tabId || d.id || null) : null;
-    if (r.ok && targetId) { l.targetId = String(targetId); l.lastUrl = String(url || ''); if (mediator && isMediated(p)) mediator.admitTarget(p.id, l.browserKey, l.targetId); commit(); }
-    return { ok: !!r.ok, targetId: targetId ? String(targetId) : null, error: r.ok ? null : ((r.stderr || r.error || '').trim().slice(0, 200) || 'open failed') };
+    // lane browser-windows (U1): in a WINDOW OF ITS OWN (openOwnTab admits a mediated lease's tab before its session binds it)
+    const r = await openOwnTab(p, l.browserKey, { url: String(url || ''), ns: nsOf(p.id), opts: o, pin: pinTab ? ['--pin-tab'] : [] });
+    const targetId = r.targetId || null;
+    if (r.ok && targetId) { l.targetId = String(targetId); l.lastUrl = String(url || ''); if (r.window === 'own') { l.windowIn = WIN.instanceOf(reg.browsers[p.id]); if (WIN.windowIdOf(r.windowId) != null) l.windowId = WIN.windowIdOf(r.windowId); } if (mediator && isMediated(p)) mediator.admitTarget(p.id, l.browserKey, l.targetId); commit(); } // T2 ⑧: in the holder's one window (re-minted only when it was lost)
+    return { ok: !!r.ok, targetId: targetId ? String(targetId) : null, error: r.ok ? null : (String(r.error || '').trim().slice(0, 200) || 'open failed') };
   }
   function blockedFor({ browserKey = null, profileId = null } = {}) {
     ensureLoaded();
@@ -5763,6 +6032,9 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   // ── §3.5 boot reconciliation + adoption ──
   function reconcile({ graceMs = 0 } = {}) {
     ensureLoaded();
+    // lane jobs-browser: a job handle whose job is not running (finished, archived, unknown) is released — evidence, at
+    // boot and on every tick (a run that ended without its finalize hook too)
+    for (const { handle } of J.jobChildrenToRelease(reg.children, jobRunning)) releaseJobHandle(handle, 'its job is not running');
     const live = liveKeys();
     const r = B.reconcileLeases({ leases: reg.leases, liveKeys: live, now: now(), graceMs });
     for (const d of r.dropped) {
@@ -5929,7 +6201,6 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     sweepPending();
     sweepIdleReleases(t); // MULTIVIEW B-325a
     refreshKeptTabs(t); // lane browser-resume: a running conversation browser nobody mirrors — its tabs read every 30 s (a crash keeps them)
-    sweepDrivers(t); // owner ruling A (2): a driver whose turn ended / went quiet leaves the digest (the strips say who drives)
     if (!Object.values(reg.browsers).some(B.isLiveBrowser) && !reg.leases.length && !inputs.size && !pending.size && !humans.size) stopTimer();
   }
   function startTimer() {
@@ -6243,11 +6514,35 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     return withCdpUrl(target, (url) => VP.watchCopies(url, { targetId, activeUrl, onCopy, onEnd }));
   }
 
+  /** lane browser-windows (U0b): is this tab PAINTING — asked of the page (server-side CDP; the endpoint never leaves it).
+   *  A background tab of its window paints nothing (measured: 0 fps); the bridge says so and polls its picture. */
+  async function tabVisibilityFor(target, targetId) {
+    ensureLoaded();
+    if (!target || !target.ok || !TBS.TARGET_ID_RE.test(String(targetId || ''))) return { ok: false, error: 'no tab' };
+    const VP = require('./browser-viewport.js');
+    return withCdpUrl(target, (url) => VP.visibilityOf(url, String(targetId).toUpperCase()));
+  }
+  /** lane browser-windows (U3/U0b): ONE fresh picture of a named tab (a background tab's polled frame). */
+  async function captureTabFor(target, targetId) {
+    ensureLoaded();
+    if (!target || !target.ok || !TBS.TARGET_ID_RE.test(String(targetId || ''))) return { ok: false, error: 'no tab' };
+    const VP = require('./browser-viewport.js');
+    return withCdpUrl(target, (url) => VP.captureTarget(url, String(targetId).toUpperCase()));
+  }
+  /** lane browser-windows (U3): WATCH a tab the session is not on — the screencast, else ≤ 2 fps captures (said by mode).
+   *  The tab must be one the VIEW may show: the bridge judged its owner (the viewed conversation's own, his own). */
+  async function watchTabFor(target, targetId, hooks = {}) {
+    ensureLoaded();
+    if (!target || !target.ok || !TBS.TARGET_ID_RE.test(String(targetId || ''))) return { ok: false, error: 'no tab' };
+    const VP = require('./browser-viewport.js');
+    return withCdpUrl(target, (url) => VP.watchTarget(url, String(targetId).toUpperCase(), { ...hooks, firstFrameMs: WIN.WATCH_FIRST_FRAME_MS, pollMs: WIN.WATCH_POLL_MS }));
+  }
+
   const api = {
     list, profile, profileByRef, browserOf, leasesFor, leasesOn, createProfile, adoptDirectory, removeProfile,
     buildsFor, buildsView, machineBuilds, setBrowserChoice, onRelaunch, // lane browser-admin 2a: Change build…
     cliPin, cliFacts, cliFactReady, installCli, _reattached: () => reattached, // lane browser-admin 2b: the browser CLI VibeSpace drives (verify r3: cliFactReady = the doors' fact, the candidates asked first)
-    machineDisplay, noDisplayMode, headedSetting, // lane headless-fallback (+ H5: the stored window preference, for Settings' fact line): this machine's display now (a fresh probe — Settings' read-only line) + the no-display setting
+    machineDisplay, machineDisplayCached, noDisplayMode, headedSetting, // lane headless-fallback (+ H5: the stored window preference, for Settings' fact line): this machine's display now (a fresh probe — Settings' read-only line) + the no-display setting
     reshapeStore: (fn) => { ensureLoaded(); const r = fn(reg); commit(); return r; }, // MIGRATIONS ONLY (2026-09-runaway-parks-void): reshape the in-memory registry, then the ONE atomic save
     usageOf: (id) => { const l = live.get(id); return l ? { ...l } : null; }, // 2026-09-25: the Browser panel's memory cell (memBytes + memMetric, over)
     // takeover C3 (design-browser-takeover §5): the managed ephemeral browser + the ceiling's count seam
@@ -6265,6 +6560,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     agentTabAct, tabOwnersFor, userTabAct, bootstrapTabRoot, // lane browser-resume C (§3.9, ruling 3): the agent's own tab verbs, whose tab it is (the bridge's row), the user's ✕ / switch
     ephemeralPairsFor: (browserKey) => { ensureLoaded(); const p = reg.profiles.find((x) => isEph(x) && x.owner.id === String(browserKey || '')); return p ? (pairsOf(p.id) || null) : null; }, // naive study 2 (finding 4): a sub-agent browser's OWN pairs — the recorder's tap on it
     viewportFor, // lane J: the page's own viewport (the live view's input space)
+    tabVisibilityFor, captureTabFor, watchTabFor, // lane browser-windows (U3/U0b): a background tab is said and polled; a watched tab's frames
     setViewportFor, freshFrameFor, // lane S4: size the page to the pane (never starting a browser) + a fresh frame after a navigation
     watchCopiesFor, // lane live-input: the copies the page performs while the user drives (copy out)
     cdpEndpointFor, setStuckSource, holdsDialogsFor, // lane browser-stuck: the dialog watch's upstream by profile id; the conversation's stuck fact on factView
@@ -6278,7 +6574,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // stops the conversation's own browser first. "Who can use it" is a list (2026-09-27): the ONE re-judge, the pick that
     // writes the list, the keys a write may name, the Task Group seams (the routes' GET …/use reads them)
     rejudgeLeases, rejudgeAll, addConversation, knownKeysOf, keyNamed, taskIdsForKey: (bk) => groupsOfKey(bk), taskInfo: (id) => taskFacts(id),
-    copyPin, notePinFailure, pinFailureOf, clearPinFailure, driveVerdictFor, activeDrivers, releaseAll, stopEphemeralOf,
+    copyPin, notePinFailure, pinFailureOf, clearPinFailure, releaseAll, stopEphemeralOf,
     start, stop, attach: attachTimed, detach, statusFor,
     // BROWSE YOURSELF (B-6ae8): the user as one more holder on his own tab — the button, his window's controls, the two ends
     browse, humanOf, humanTargetFor, humanInputState, humanAttach, humanTake, humanPass, humanRelease, noteHumanInput, navigateHuman, closeHuman, quitHuman, endHuman, holdersOn, setViewerAlive, humanKeepOf: (id) => { const h = humans.get(String(id || '')); return h ? humanKeepOf(h) : null; },
@@ -6288,7 +6584,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     clock: () => now(), // the ONE clock a takeover's instant and a /resolve's instant are compared on (the route stamps with it)
     notePending, resolvePending, pendingFor, pendingAllFor, answerConfirmation, onConfirmation,
     // P1 second half (§3.7/§3.8): the set, handles, the one-time refusal, children, the audit, adopt
-    setFor, tell, resolveFor, newChild, dropChild, audit, adoptScratch, auditFile: path.join(dataDir, AUDIT_FILE),
+    setFor, tell, resolveFor, newChild, dropChild, jobHandleFor, findJobHandle, jobOf, releaseJob, audit, adoptScratch, auditFile: path.join(dataDir, AUDIT_FILE),
     reconcile, adoptAll, boot, tick, startTimer, shutdown,
     // P4 (§7.3): the paired-machine question the routes ask before a create is judged
     hostKnown: knownHost, isLocalRec, probeCdp, desktopConsent,

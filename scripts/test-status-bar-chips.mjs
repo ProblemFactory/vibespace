@@ -198,7 +198,7 @@ console.log('— ④ negative control: a neutered copy (whole-bar rebuild) break
   fs.mkdirSync(dir, { recursive: true });
   try {
     const src = read('src/lib/chat-status-bar.js');
-    const neutered = src.replace('    this._reconcile(chips);\n  }', '    this._chipEls.clear(); this._element.innerHTML = \'\'; this._element.childNodes.length = 0; this._reconcile(chips);\n  }')
+    const neutered = src.replace('    this._reconcile(chips);\n', '    this._chipEls.clear(); this._element.innerHTML = \'\'; this._element.childNodes.length = 0; this._reconcile(chips);\n')   // (lane phone-chip's _fitBilling() follows the reconcile since the 2.369.202 integration)
       .replace(/from '\.\//g, `from '${pathToFileURL(path.join(repo, 'src/lib')).href}/`)
       .replace(/from '\.\.\//g, `from '${pathToFileURL(path.join(repo, 'src')).href}/`);
     ok(neutered !== src, '④ the copy differs from the source (the neuter landed)');
@@ -218,7 +218,7 @@ console.log('— ⑤ wiring');
 {
   const src = read('src/lib/chat-status-bar.js');
   const renderBody = src.slice(src.indexOf('\n  render() {'), src.indexOf('\n  _reconcile(chips) {'));
-  ok(renderBody.length > 0 && /\n    this\._reconcile\(chips\);\n  \}\s*$/.test(renderBody.replace(/\n  \/\*\*[\s\S]*$/, '\n')), '⑤ render() ends in this._reconcile(chips)');
+  ok(renderBody.length > 0 && /\n    this\._reconcile\(chips\);\n(?:    this\._fitBilling\(\);\n)?  \}\s*$/.test(renderBody.replace(/\n  \/\*\*[\s\S]*$/, '\n')), '⑤ render() ends in this._reconcile(chips) (then lane phone-chip\'s _fitBilling(), which measures the drawn pill)');
   ok(!/this\._element\.innerHTML\s*=/.test(src), '⑤ the file never assigns this._element.innerHTML (the whole-bar rebuild is gone)');
   ok(!/\bparts\.push\(|parts\.join\(/.test(src), '⑤ no parts.push / parts.join left');
   ok((src.match(/\n\s*(?:if \([^)]*\) )?chip\('/g) || []).length >= 22, `⑤ every chip site goes through chip(key, …) (${(src.match(/\n\s*(?:if \([^)]*\) )?chip\('/g) || []).length} sites)`);

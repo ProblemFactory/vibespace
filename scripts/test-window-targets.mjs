@@ -84,6 +84,13 @@
 //      the pre-fix order in a patched copy is the NEGATIVE CONTROL (it answers the machine: the mirror's red); §5's
 //      no-tree window sits on a pid no box can hand out, so its mode legs run everywhere (no more `if (!real)`); a SKIP
 //      names what is missing (§3's reason reaches §4's and §5's skips; the xdotool half of a control is skipped by name).
+//      B-a38d (2026-10-03): §4r also RESTARTS the engine after an auto attach resolved pixels — `type` with no ref acts as
+//      the resolved mode (no_injection_backend in all four shapes, as before the restart), CONTROL = a patched copy
+//      without the pre-road probe answers the machine's code; §5 pins the two new re-checks (after that probe, after the
+//      focused-node read) with a leg each.
+//   B-f18a (2026-10-03): §2 — an injection killed from OUTSIDE releases what it held; `locale -a` is the third UTF-8
+//      tier; a failed type quotes only xdotool's known stderr lines; a hanging `locale` is asked once (a time-scaled copy);
+//      each with a patched copy of the pre-fix code as its CONTROL.
 //   §6 WHERE A SCREENSHOT LANDS (2026-09-26, the owner's pixel-mode test: a PNG landed in the production checkout): the
 //      shipped CLI against a stub route from a cwd that must stay empty — no --out ⇒ <tmpdir>/vibespace-window/ (0700), a
 //      relative --out ⇒ VIBESPACE_SESSION_CWD (else that temp dir), ~/.ssh / a home dot-entry / a symlinked `..` into one /
@@ -336,6 +343,79 @@ console.log('§2b the cancellable injection (lane E verify r2, L5): killed by IT
     fs.writeFileSync(xlog, '');
     const enNo = await WT.injectType({ bins: { xdotool: recXdo, locale: enOnly }, xenv: bare, text: 'é' });
     ok(enNo.code === 'no_utf8_locale' && /"é" \(U\+00E9, character 1\)/.test(enNo.why) && fs.readFileSync(xlog, 'utf8') === '', 'r3 F3: …the same machine with no locale in the env refuses by name (Latin-1 is non-ASCII too), nothing typed');
+  }
+  // B-f18a (2026-10-03, lane E verify r4 O1–O4, the injection leftovers): ① an injection killed by a signal nobody here
+  // sent releases what it held (it skipped the release: `err.killed` is node's own kill only); ② a machine without
+  // C.UTF-8 whose env names no locale types under a UTF-8 locale `locale -a` lists; ③ a failed type quotes only
+  // xdotool's own known stderr lines (a tracing wrapper echoed the TEXT into the refusal); ④ a hanging `locale` is asked
+  // once per verdict, and the NO is remembered. Each leg has a patched copy of the pre-fix code as its control.
+  {
+    const fx = (name, body) => { const f = path.join(dir, `f18a-${name}.sh`); fs.writeFileSync(f, `#!/bin/sh\n${body}\n`); fs.chmodSync(f, 0o755); return f; };
+    const srcWf = fs.readFileSync(require.resolve('../src/window-targets.js'), 'utf8');
+    const srcDf = fs.readFileSync(require.resolve('../src/desktop-display.js'), 'utf8');
+    // ① killed from OUTSIDE (SIGTERM to the injection's own pid) mid-type
+    const klog = path.join(dir, 'f18a-kill.log');
+    const kxdo = fx('kill-xdo', `echo "$$ $*" >> ${JSON.stringify(klog)}\ncase " $* " in *" keyup "*|*" mouseup "*) exit 0;; esac\nexec sleep 5`);
+    const killOutside = async (M) => {
+      fs.writeFileSync(klog, '');
+      const p = M.injectType({ bins: { xdotool: kxdo }, xenv: { PATH: process.env.PATH }, text: 'hello World' });
+      let pid = 0;
+      for (let i = 0; i < 100 && !pid; i++) { await sleep(20); pid = Number((fs.readFileSync(klog, 'utf8').split('\n').find((l) => / type /.test(l)) || '0').split(' ')[0]); }
+      if (pid) process.kill(pid, 'SIGTERM');
+      const r = await p;
+      return { r, pid, keyup: fs.readFileSync(klog, 'utf8').split('\n').find((l) => / keyup /.test(l)) || '' };
+    };
+    const o1 = await killOutside(WT);
+    ok(o1.pid > 0 && o1.r.code === 'inject_failed' && o1.r.partial === true && !o1.r.cancelled && /killed part-way by SIGTERM \(not by VibeSpace\)/.test(o1.r.why) && o1.r.released && o1.r.released.via === 'xdotool' && /\bU0068\b/.test(o1.keyup) && /\bU0057\b/.test(o1.keyup) && /\bShift_L\b/.test(o1.keyup), `B-f18a ①: a type killed from OUTSIDE (SIGTERM to pid ${o1.pid}) runs the release pass — keyup of every key the text could hold — and says who killed it (${o1.r.why})`);
+    const noOutside = srcWf.replace('killed: cancelled || !!(err && err.killed) || outside, outside,', 'killed: cancelled || !!(err && err.killed), outside,');
+    ok(noOutside !== srcWf, 'B-f18a ① control: the patch applies (`killed` = cancelled || err.killed, the pre-fix rule)');
+    const c1 = await killOutside(MUTW.load('src/window-targets.js', noOutside, 'f18a-nooutside'));
+    ok(c1.pid > 0 && !c1.r.released && c1.keyup === '', `B-f18a ① CONTROL: the pre-fix rule answers a plain failure and releases NOTHING (${String(c1.r.why).slice(0, 90)})`);
+    // ② `locale -a`: no C.UTF-8, no locale in the env, en_US.utf8 generated (de_DE.utf8 too — en_US is asked first)
+    const llog = path.join(dir, 'f18a-locale.log');
+    const locA = fx('locale-a', `echo "$1 LC_ALL=$LC_ALL" >> ${JSON.stringify(llog)}\nif [ "$1" = "-a" ]; then printf 'C\\nC.utf8\\nPOSIX\\nde_DE.utf8\\nen_US.utf8\\n'; exit 0; fi\ncase "$LC_ALL" in en_US.utf8|de_DE.utf8) echo UTF-8;; *) echo ANSI_X3.4-1968;; esac`);
+    const locNone = fx('locale-a-none', `if [ "$1" = "-a" ]; then printf 'C\\nPOSIX\\n'; exit 0; fi\necho ANSI_X3.4-1968`);
+    const xrec = path.join(dir, 'f18a-xdo-env.log');
+    const xdoRec = fx('xdo-rec', `echo "LC_ALL=$LC_ALL $1" >> ${JSON.stringify(xrec)}`);
+    fs.writeFileSync(llog, ''); fs.writeFileSync(xrec, '');
+    const t2 = await WT.injectType({ bins: { xdotool: xdoRec, locale: locA }, xenv: { PATH: process.env.PATH }, text: 'é中' });
+    const asked = fs.readFileSync(llog, 'utf8').trim().split('\n');
+    ok(t2.ok === true && /^LC_ALL=en_US\.utf8 type/.test(fs.readFileSync(xrec, 'utf8')) && asked.includes('-a LC_ALL=') && !asked.some((l) => /de_DE/.test(l)), `B-f18a ②: no C.UTF-8 and an env naming no locale ⇒ the text is typed under the UTF-8 locale \`locale -a\` lists (en_US first; asked: ${asked.join(' | ')})`);
+    const n2 = await D.utf8LocaleEnv({ PATH: process.env.PATH }, { bins: { locale: locNone } });
+    ok(!n2.ok && /locale -a. lists no other UTF-8 locale/.test(n2.why), `B-f18a ②: a machine whose \`locale -a\` lists no UTF-8 locale is still refused, and says so (${n2.why})`);
+    const noLocaleA = srcDf.replace('  const listed = await utf8LocalesOf(tool, base, { now });', '  const listed = { names: [], hung: false }; // CONTROL');
+    ok(noLocaleA !== srcDf, 'B-f18a ② control: the patch applies (no `locale -a` tier)');
+    const c2 = await MUTW.load('src/desktop-display.js', noLocaleA, 'f18a-nolocalea').utf8LocaleEnv({ PATH: process.env.PATH }, { bins: { locale: locA } });
+    ok(!c2.ok, `B-f18a ② CONTROL: without the tier the same machine is refused (tried ${c2.tried && c2.tried.join(', ')})`);
+    // ③ an xdotool whose stderr echoes its argv (a tracing wrapper), then xdotool's own line
+    const echoXdo = fx('xdo-echo', 'echo "+ xdotool $*" >&2\necho "Invalid multi-byte sequence encountered" >&2\necho "xdo_enter_text_window reported an error" >&2\nexit 1');
+    const secret = 'my secret passphrase 42';
+    const t3 = await WT.injectType({ bins: { xdotool: echoXdo }, xenv: { PATH: process.env.PATH }, text: secret });
+    ok(t3.code === 'inject_failed' && !t3.why.includes('secret') && /Invalid multi-byte sequence encountered; xdo_enter_text_window reported an error; 1 other line withheld/.test(t3.why), `B-f18a ③: a failed type quotes only xdotool's known lines and counts the rest — the echoed text never reaches the refusal (${t3.why})`);
+    ok(WT.xdoStderr("Error: Can't open display: (null)\nFailed creating new xdo instance") === "Error: Can't open display: (null); Failed creating new xdo instance" && WT.xdoStderr("Error: Can't open display: hunter2") === '1 other line withheld' && WT.xdoStderr('') === 'no message', 'B-f18a ③: the closed set — the measured no-display lines pass, a display "name" carrying anything else is withheld');
+    const oldQuote = srcWf.replace('${xdoStderr(r.stderr).slice(0, 200)}', "${([...new Set(String(r.stderr || '').split('\\n').map((l) => l.trim()).filter(Boolean))].join('; ') || 'no message').slice(0, 200)}");
+    ok(oldQuote !== srcWf, 'B-f18a ③ control: the patch applies (stderr quoted raw)');
+    const c3 = await MUTW.load('src/window-targets.js', oldQuote, 'f18a-rawstderr').injectType({ bins: { xdotool: echoXdo }, xenv: { PATH: process.env.PATH }, text: secret });
+    ok(c3.why.includes(secret), `B-f18a ③ CONTROL: the raw quote hands the typed text back in the refusal (${String(c3.why).slice(0, 110)})`);
+    // ④ a `locale` that hangs — TIME-SCALED copies (LOCALE_PROBE_MS 3000 → 250, nothing else changed) so the leg costs < 1 s
+    const scaled = srcDf.replace('const LOCALE_PROBE_MS = 3000;', 'const LOCALE_PROBE_MS = 250;');
+    ok(scaled !== srcDf && scaled.replace('const LOCALE_PROBE_MS = 250;', 'const LOCALE_PROBE_MS = 3000;') === srcDf, 'B-f18a ④: the scaled copy differs from the shipped file in the probe limit only');
+    const hangLog = path.join(dir, 'f18a-hang.log');
+    const hangLoc = fx('locale-hang', `echo "$1" >> ${JSON.stringify(hangLog)}\nexec sleep 30`);
+    const hangRun = async (Dm) => {
+      fs.writeFileSync(hangLog, '');
+      const t0 = Date.now(); const v1 = await Dm.utf8LocaleEnv({ PATH: process.env.PATH, LANG: 'en_US.UTF-8' }, { bins: { locale: hangLoc } }); const ms1 = Date.now() - t0;
+      const n1 = fs.readFileSync(hangLog, 'utf8').trim().split('\n').filter(Boolean).length;
+      const t1 = Date.now(); const v2 = await Dm.utf8LocaleEnv({ PATH: process.env.PATH, LANG: 'en_US.UTF-8' }, { bins: { locale: hangLoc } }); const ms2 = Date.now() - t1;
+      const n2b = fs.readFileSync(hangLog, 'utf8').trim().split('\n').filter(Boolean).length - n1;
+      return { v1, v2, ms1, ms2, n1, n2: n2b };
+    };
+    const o4 = await hangRun(MUTW.load('src/desktop-display.js', scaled, 'f18a-scaled'));
+    ok(!o4.v1.ok && /did not answer within 250 ms/.test(o4.v1.why) && o4.n1 === 1 && o4.n2 === 0 && o4.ms2 < 100, `B-f18a ④: a hanging \`locale\` is asked ONCE (${o4.n1} call, ${o4.ms1} ms) and the NO is remembered (next verdict: ${o4.n2} calls, ${o4.ms2} ms) — ${o4.v1.why}`);
+    const noStop = scaled.split('if (v.hung) return hung();').join('').replace('  if (listed.hung) return hung();\n', '');
+    ok(noStop !== scaled, 'B-f18a ④ control: the patch applies (the walk no longer stops at a hang)');
+    const c4 = await hangRun(MUTW.load('src/desktop-display.js', noStop, 'f18a-nostop'));
+    ok(c4.n1 >= 3 && c4.ms1 >= 3 * 250, `B-f18a ④ CONTROL: without the stop every candidate waits out the limit (${c4.n1} calls, ${c4.ms1} ms — 3 s each unscaled)`);
   }
 }
 
@@ -852,7 +932,8 @@ console.log('§4 the engine over a fake keeper + the routes');
       let spawns = 0;
       const count = (fn) => (...a) => { spawns++; return fn(...a); };
       const wtR = { ...WT, probeA11y: count(WT.probeA11y), snapshotTarget: count(WT.snapshotTarget), runHelper: count(WT.runHelper), actOnNode: count(WT.actOnNode), focusedNode: count(WT.focusedNode) };
-      const eR = M.create({ keeper, dataDir: path.join(dir, `runner-shape-${tag}`), env: () => runnerEnv, activeSessions: sessions, wt: wtR, bins: { xdotool: null, gdbus: null }, python: sh.python, ...(sh.helper !== undefined ? { helper: sh.helper } : {}), log: { warn() { }, log() { } }, modeProbeMs: 0 });
+      const mkR = () => M.create({ keeper, dataDir: path.join(dir, `runner-shape-${tag}`), env: () => runnerEnv, activeSessions: sessions, wt: wtR, bins: { xdotool: null, gdbus: null }, python: sh.python, ...(sh.helper !== undefined ? { helper: sh.helper } : {}), log: { warn() { }, log() { } }, modeProbeMs: 0 });
+      const eR = mkR();
       eR.grantReach('da-rs', { kind: 'session', id: 's1' }); eR.grantReach('da-rs2', { kind: 'session', id: 's2' });
       eR.attach('da-rs', f1);
       const s0 = spawns;
@@ -862,8 +943,15 @@ console.log('§4 the engine over a fake keeper + the routes');
       const snap = await err(() => eR.snapshot('da-rs', f1));
       const am = await eR.attachWithMode('da-rs2', f2);
       const mi = eR.modeInfo('da-rs');
+      // B-a38d: `type` with no ref on the window attach resolved to pixels (keys), then a RESTART — a second engine over
+      // the same data dir keeps the share and the lease, never the resolution — and the same type again
+      const typeBefore = await err(() => eR.act('da-rs2', f2, { verb: 'type', text: 'x' }));
       eR.shutdown();
-      return { click, type, preSpawns, snap, am, mi };
+      const eR2 = mkR();
+      const typeAfter = await err(() => eR2.act('da-rs2', f2, { verb: 'type', text: 'x' }));
+      const miAfter = eR2.modeInfo('da-rs2');
+      eR2.shutdown();
+      return { click, type, preSpawns, snap, am, mi, typeBefore, typeAfter, miAfter };
     };
     const outs = [];
     for (const sh of SHAPES) {
@@ -874,7 +962,10 @@ console.log('§4 the engine over a fake keeper + the routes');
       ok(o.click && o.click.code === 'ref_unknown' && o.type && o.type.code === 'ref_unknown' && o.preSpawns === 0, `  ${sh.code}: click @e1 / type @e3 before any snapshot ⇒ ref_unknown with NO probe spawned (${o.click && o.click.code} / ${o.type && o.type.code}, spawns ${o.preSpawns})`);
       ok(o.snap && o.snap.code === 'mode_pixels' && o.snap.resolvedMode === 'pixels' && o.snap.reason && o.snap.reason.code === sh.code && String(o.snap.message).includes(`unreachable here (${sh.code}:`) && o.mi.resolved === 'pixels' && o.mi.why.includes(sh.code), `  ${sh.code}: the auto snapshot ⇒ mode_pixels naming the reason it saw, the resolution recorded (${o.snap && o.snap.code}: ${o.snap && String(o.snap.message).slice(0, 120)})`);
       ok(o.am.mode.resolved === 'pixels' && o.am.mode.why.includes(`(${sh.code}:`) && /^vibespace-window screenshot /.test(o.am.next), `  ${sh.code}: attach resolves auto to pixels naming the reason, and points at screenshot (${o.am.mode.why.slice(0, 110)})`);
+      ok(o.typeBefore && o.typeBefore.code === 'no_injection_backend' && o.typeAfter && o.typeAfter.code === 'no_injection_backend' && o.miAfter.resolved === 'pixels' && o.miAfter.why.includes(`(${sh.code}:`), `  ${sh.code}: B-a38d — \`type\` with no ref after a RESTART acts as the resolved mode (pixels ⇒ keys; no xdotool here), exactly as before it (${o.typeBefore && o.typeBefore.code} → ${o.typeAfter && o.typeAfter.code}; re-resolved: ${o.miAfter.resolved})`);
     }
+    const restartCodes = new Set(outs.map((o) => o.typeAfter && o.typeAfter.code));
+    ok(restartCodes.size === 1 && restartCodes.has('no_injection_backend'), `B-a38d THE LAW after a restart: ${SHAPES.length} missing capabilities, ONE code for \`type\` with no ref (${[...restartCodes].join(', ')})`);
     const codes = new Set(outs.flatMap((o) => [o.click && o.click.code, o.type && o.type.code, o.snap && o.snap.code]));
     const reasons = new Set(outs.map((o) => o.snap && o.snap.reason && o.snap.reason.code));
     ok(codes.size === 2 && codes.has('ref_unknown') && codes.has('mode_pixels') && reasons.size === SHAPES.length, `THE LAW: ${SHAPES.length} different missing capabilities, ONE code per call (${[...codes].join(', ')}); the reasons differ (${[...reasons].join(', ')})`);
@@ -897,6 +988,16 @@ console.log('§4 the engine over a fake keeper + the routes');
       for (const sh of SHAPES) ctl.push({ sh, o: await runShape(Mpre, sh, `ctl-${sh.code}`) });
       const said = ctl.map(({ sh, o }) => `${sh.code}: click ${o.click && o.click.code} (spawns ${o.preSpawns}), snapshot ${o.snap && o.snap.code}`).join('; ');
       ok(ctl.every(({ o }) => o.click && o.click.code === 'mode_pixels' && o.preSpawns > 0) && ctl.every(({ sh, o }) => o.snap && o.snap.code === sh.code), `NEGATIVE CONTROL: the pre-fix order answers the machine — the mirror's red reproduced (${said})`);
+    }
+    // B-a38d NEGATIVE CONTROL: without the pre-road probe, `type` with no ref after the restart asks the tree and answers the MACHINE
+    {
+      const srcE = fs.readFileSync(require.resolve('../src/server/window-targets-engine.js'), 'utf8');
+      const noProbe = srcE.replace(/\n[^\n]*if \(!body\.ref && rr && rr\.mode === 'auto' && !resolutions\.get\(rec\.id\)\) \{ await ensureResolved\(rec\); held\(\); rr = reachRecord\(rec\.id\); \}\n/, '\n');
+      ok(noProbe !== srcE, 'B-a38d control: the patch applies (the pre-road probe removed)');
+      const Mnp = require(MUTW.write('src/server/window-targets-engine.js', noProbe, 'a38d-noprobe'));
+      const ctl = [];
+      for (const sh of SHAPES) ctl.push({ sh, o: await runShape(Mnp, sh, `a38d-${sh.code}`) });
+      ok(ctl.every(({ sh, o }) => o.typeAfter && o.typeAfter.code === sh.code), `B-a38d NEGATIVE CONTROL: without the probe the restarted type answers the machine (${ctl.map(({ sh, o }) => `${sh.code} → ${o.typeAfter && o.typeAfter.code}`).join('; ')})`);
     }
     for (const id of ['da-rs', 'da-rs2']) records.delete(id);
   }
@@ -1025,7 +1126,7 @@ console.log('§4 the engine over a fake keeper + the routes');
     {
       const STEP_MS = 2;
       const acts = [], killed = [];
-      let trigger = null, injectMs = 2, a11yUp = true, deskOn = true, injectMode = null;
+      let trigger = null, injectMs = 2, a11yUp = true, deskOn = true, injectMode = null, injUp = true, focusNone = false;
       const arm = (name) => { if (trigger && !trigger.fired && trigger.at === name) { trigger.fired = true; if (trigger.delayMs) setTimeout(trigger.fire, trigger.delayMs); else trigger.fire(); } };
       const step = async (name) => { arm(name); await sleep(STEP_MS); };
       const snapD = { apps: [], nodes: [{ ref: '@e1', pid: 4242, path: [0], role: 'push button', name: 'Go', actions: ['click'], editable: false, states: [] }, { ref: '@e2', pid: 4242, path: [1], role: 'entry', name: 'Field', actions: [], editable: true, states: ['editable'] }, { ref: '@e3', pid: 4242, path: [2], role: 'entry', name: 'Web field', actions: [], editable: false, states: ['editable'] }], census: { nodes: 3 }, unreadable: [], truncated: false, budget: 400, callTimeoutMs: 1, ms: 1, nodesPerSec: 1 };
@@ -1042,8 +1143,8 @@ console.log('§4 the engine over a fake keeper + the routes');
         probeA11y: async () => { await step('probeA11y'); return a11yUp ? { ok: true, apps: 1 } : { ok: false, apps: 0, why: 'the bus is down (test)' }; },
         runHelper: async () => ({ ok: true, apps: [{ pid: sleeper.pid, name: 'Race desk app', children: 1 }] }),
         snapshotTarget: async () => { await step('snapshotTarget'); return { ok: true, snapshot: snapD, refs: WT.refTableOf(snapD) }; },
-        focusedNode: async () => { await step('focusedNode'); return { ok: true, node: snapD.nodes[1] }; },
-        probeInputBackends: async () => { await step('probeInputBackends'); return { rows: [], injection: { backend: 'xtest' }, ours: true }; },
+        focusedNode: async () => { await step('focusedNode'); return { ok: true, node: focusNone ? null : snapD.nodes[1] }; },
+        probeInputBackends: async () => { await step('probeInputBackends'); return injUp ? { rows: [], injection: { backend: 'xtest' }, ours: true } : { rows: [{ backend: 'xtest', available: false, why: 'xdotool not on PATH (test)' }], injection: null, ours: true }; },
         displayGeometry: async () => ({ ok: false }),
         screenshotDisplay: async ({ out }) => { await step('screenshotDisplay'); fs.writeFileSync(out, 'png'); return { ok: true, w: 10, h: 10, x: 0, y: 0, bytes: 3 }; },
         windowShot: async ({ out }) => { await step('windowShot'); fs.writeFileSync(out, 'png'); return { ok: true, w: 10, h: 10, lit: 7, bytes: 3 }; },
@@ -1074,7 +1175,7 @@ console.log('§4 the engine over a fake keeper + the routes');
       const shotsIn = (E) => { const d = path.join(path.dirname(E.auditFile), 'window-shots'); return fs.existsSync(d) ? fs.readdirSync(d).length : 0; };
       /** bring an engine to a known state: the share (session or group row), the mode, the lease, refs from a tree snapshot */
       async function prep(E, { mode = 'auto', via = 'session', refs = false } = {}) {
-        trigger = null; a11yUp = true; injectMs = 2; groupsThrow = false; injectMode = null;
+        trigger = null; a11yUp = true; injectMs = 2; groupsThrow = false; injectMode = null; injUp = true; focusNone = false;
         E.handback({ handle: 'da-race', viewerId: 'v-race', cause: 'explicit' });
         groupsD.s1 = via === 'group' ? ['task-race'] : [];
         E.grantReach('da-race', via === 'group' ? PG : P);
@@ -1105,6 +1206,8 @@ console.log('§4 the engine over a fake keeper + the routes');
         { name: 'attachWithMode: a revoke during its mode probe ⇒ not_exposed, never "attached" with the lease gone', prep: { mode: 'auto' }, at: 'probeA11y', user: 'revoke', run: async (E) => { E.detach('da-race', fD); return E.attachWithMode('da-race', fD); }, want: (o, E) => o.code === 'not_exposed' && !E.leaseOf('da-race') },
         { name: 'key: the Task Group LEFT while the input probe awaits ⇒ not_exposed, no key', prep: { mode: 'pixels', via: 'group' }, at: 'probeInputBackends', user: 'group-left', run: (E) => E.act('da-race', fD, { verb: 'key', chord: 'Return' }), want: (o) => o.code === 'not_exposed' && o.acts.length === 0 },
         { name: 'type (tree, the focused node): a takeover while the focused node is read ⇒ window_paused, nothing typed', prep: { mode: 'tree' }, at: 'focusedNode', user: 'takeover', run: (E) => E.act('da-race', fD, { verb: 'type', text: 'hello' }), want: (o) => o.code === 'window_paused' && o.acts.length === 0 },
+        { name: 'B-a38d: type with no ref under an auto share NO probe resolved yet (a restart), the probe resolving PIXELS on a display with no injection backend: a revoke during the probe ⇒ not_exposed — never the backend verdict to a revoked session', prep: { mode: 'auto' }, a11yDown: true, noInject: true, at: 'probeA11y', user: 'revoke', run: (E) => E.act('da-race', fD, { verb: 'type', text: 'hello' }), want: (o) => o.code === 'not_exposed' && o.acts.length === 0 },
+        { name: 'B-a38d: type with no ref (tree), nothing focused: a revoke while the focused node is read ⇒ not_exposed — never no_focused_node to a revoked session', prep: { mode: 'tree' }, noFocus: true, at: 'focusedNode', user: 'revoke', run: (E) => E.act('da-race', fD, { verb: 'type', text: 'hello' }), want: (o) => o.code === 'not_exposed' && o.acts.length === 0 },
         { name: 'scroll (pixels): a revoke while the input probe awaits ⇒ not_exposed, no wheel (r2 M1)', prep: { mode: 'pixels' }, at: 'probeInputBackends', user: 'revoke', run: (E) => E.act('da-race', fD, { verb: 'scroll', direction: 'down' }), want: (o) => o.code === 'not_exposed' && o.acts.length === 0 },
         { name: 'type with no ref under a PIXEL share (keys): a revoke while the input probe awaits ⇒ not_exposed, no keys (r2 M1)', prep: { mode: 'pixels' }, at: 'probeInputBackends', user: 'revoke', run: (E) => E.act('da-race', fD, { verb: 'type', text: 'hello' }), want: (o) => o.code === 'not_exposed' && o.acts.length === 0 },
         { name: 'type @ref into a field editable by STATE (focus through the tree, then keys): a revoke during the input probe ⇒ not_exposed, the field never focused (r2 M1)', prep: { mode: 'tree', refs: true }, at: 'probeInputBackends', user: 'revoke', run: (E) => E.act('da-race', fD, { verb: 'type', ref: '@e3', text: 'hello' }), want: (o) => o.code === 'not_exposed' && o.acts.length === 0 },
@@ -1123,6 +1226,8 @@ console.log('§4 the engine over a fake keeper + the routes');
         if (leg.engine === 'desk') { trigger = null; deskOn = true; await E.list(fD); try { E.attach(`dw-${sleeper.pid}`, fD); } catch { } acts.length = 0; killed.length = 0; }
         else await prep(E, leg.prep || {});
         if (leg.a11yDown) a11yUp = false;
+        if (leg.noInject) injUp = false;
+        if (leg.noFocus) focusNone = true;
         if (leg.injectMs) injectMs = leg.injectMs;
         if (leg.injectMode) injectMode = leg.injectMode;
         const shotsBefore = shotsIn(E);

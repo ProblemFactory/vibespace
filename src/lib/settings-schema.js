@@ -431,6 +431,9 @@ const SETTINGS_SCHEMA = {
       // NOT in the default set (lane group-report-card): a group message handed to this agent is what the owner
       // asked to SEE in the conversation — it folds only when the user ticks it
       { value: 'group', label: t('Group messages delivered to this agent (vibespace-msg)') },
+      // NOT in the default set (lane peer-card-fold): a message another agent, a worker or a job sent — content the
+      // owner reads; it already arrives folded to one line (chat.foldPeerMessages), and that line stays in a folded run
+      { value: 'peer', label: t('Messages from other agents and jobs (outside a group)') },
       // NOT in the default set (2.369.120, owner): an Unknown event — a harness
       // record VibeSpace does not recognize — is the fall-back card and must
       // stay visible until the user decides it is noise.
@@ -438,6 +441,14 @@ const SETTINGS_SCHEMA = {
     ],
     label: t('Card kinds that collapse'),
     description: t('Which card kinds fold into the summary line, by MEANING — the same setting covers every backend (claude Bash and codex exec are both command runs). Enabled kinds collapse TOGETHER as one interleaved group (think → read → edit → run is the real work pattern; per-kind groups rarely get long enough to fold). Memory = operations on the agent\'s own memory directory — housekeeping, folded by default and listed as memory/<name> in the summary; project-file writes are off by default — diffs are usually worth seeing. A run of only thinking needs two or more; any tool card folds immediately. Cards waiting for your approval never fold.'),
+    category: t('Chat'), liveApply: true,
+  },
+  'chat.foldPeerMessages': {
+    // lane peer-card-fold (owner 2026-10-02: five worker reports, each under an H1, filled the window): a message
+    // another agent / worker / group / job sent arrives as its head + one preview line + Show (src/lib/peer-card-model.js)
+    type: 'boolean', default: true,
+    label: t('Fold messages from other agents and jobs'),
+    description: t('A message another agent, a worker, a group or a background job sent this chat arrives folded to its sender and first line; press Show to read the whole message. A one-line message is never folded. Turn off to show every such message whole.'),
     category: t('Chat'), liveApply: true,
   },
   'chat.reducedMotionSpin': {
@@ -487,7 +498,7 @@ const SETTINGS_SCHEMA = {
     ],
     label: t('Show the agent browser window'),
     // lane hooks-create H5 (the owner's decision 2026-10-01) — its rule (UNSET + no desktop + Xvfb ⇒ the hidden-window rung)
-    // is OFF in 2.369.200 (browser-display NO_DESKTOP_WINDOW_DEFAULT): these words say .199's meaning until it ships in .201
+    // is OFF in 2.369.200 (browser-display NO_DESKTOP_WINDOW_DEFAULT): these words say .199's meaning until it ships (still OFF in 2.369.202)
     description: t('Whether an agent\'s browser draws a real window on this machine\'s desktop. Unset (default): whatever your own ~/.agent-browser/config.json says. A visible window per session is one framebuffer per session and, on the installed CLI, is also exempt from the idle timeout above.'),
     category: t('Agent browser'), liveApply: true,
     // lane headless-fallback (2026-09-28): a PREFERENCE — the row also shows the FACT (this machine's display now, read-only):
@@ -648,10 +659,18 @@ const SETTINGS_SCHEMA = {
   // Task Group's default beats it; the conversation's own value, set from the
   // Agent browser window's chip or Session Properties, beats both). The
   // machine's ceiling (six, shared with desktop apps) stays the hard top.
+  // lane browser-windows (U4, the owner 2026-10-01: "profile全局上限是6个？能不能允许用户配置？"): the machine's ceiling of
+  // running agent browsers is a setting — the keeper's CONCURRENT_CAP (6) is its default; read at every start
+  'browser.maxRunning': {
+    type: 'number', default: 6, min: 1, max: 32,
+    label: t('Browsers running at once on this machine'),
+    description: t('The most agent browsers (desktop apps counted with them) that may run on this machine at the same time: 6 by default, 1 to 32. Several conversations on one profile share its one browser, each in its own window, so they count once. At the ceiling a new browser is refused by name — the agent is told which of its own run and how many others do — and nothing starts until one idles out or you stop one. A change applies to the next browser that starts; nothing running is stopped. The resource guard still only reports a browser that uses too much memory or CPU.'),
+    category: t('Agent browser'), liveApply: true,
+  },
   'browser.defaultPerConversationCap': {
     type: 'number', default: 3, min: 1, max: 6,
     label: t('Browsers one conversation may run at once'),
-    description: t('The default number of browsers one conversation (with its helpers) may have running at the same time. Each conversation can change its own from the count in its Agent browser window or in Session Properties, and a Task Group can give its new conversations a different default (a conversation keeps the group default it started with). The machine keeps its own ceiling of six, shared with desktop apps.'),
+    description: t('The default number of browsers one conversation (with its helpers) may have running at the same time. Each conversation can change its own from the count in its Agent browser window or in Session Properties, and a Task Group can give its new conversations a different default (a conversation keeps the group default it started with). The machine keeps its own ceiling (Browsers running at once on this machine, six by default), shared with desktop apps.'),
     category: t('Agent browser'), liveApply: true,
   },
   // B-325a: a conversation's own browser (and its helpers') is let go a few
@@ -1006,6 +1025,26 @@ const SETTINGS_SCHEMA = {
     type: 'number', default: 60, min: 10, max: 3600, step: 10,
     label: t('Threads: seconds between two loads of one thread'),
     description: t('Opening a thread loads its replies from the vendor (where they are not listed with the conversation — Lark topics); the same thread is loaded again at most this often.'),
+    category: t('Channels'), liveApply: true,
+  },
+  // lane lark-threads (A2, 2026-10-01): THE RECENT-ROOTS RECHECK — a message read before anyone answered it in a thread
+  // (Lark names the thread on its first message only once the thread exists) is found again by re-reading each active
+  // conversation's newest page this often (and at once on the owner's Refresh)
+  'channels.threadRecheckSec': {
+    type: 'number', default: 3600, min: 300, max: 86400, step: 300,
+    label: t('Threads: seconds between two checks of a chat for new threads'),
+    description: t('Where thread replies are not listed with the conversation (Lark), a message read before anyone replied to it in a thread is found again by re-reading the newest page of each chat active in the last 14 days this often — one request per chat. Pressing Refresh in a chat checks it at once.'),
+    category: t('Channels'), liveApply: true,
+  },
+  // lane lark-threads (B5): how a Lark person's name is SHOWN — the nickname the organization gives them, else their
+  // name, then (optionally) one of their profile fields in parentheses, the way Lark shows it; the vendor name stays the title
+  'channels.larkNameField': {
+    type: 'enum', default: 'department', options: [
+      { value: 'none', label: t('Name only') },
+      { value: 'department', label: t('Name (department)') },
+      { value: 'jobTitle', label: t('Name (job title)') },
+    ], label: t('Lark: how people are named'),
+    description: t('A person is shown by the nickname your organization gives them, else their name, followed by their department or job title in parentheses when you choose one — the way Lark shows it. Reading profiles needs the sign-in to allow it (the account card says when it does not). A name you set yourself on an author always wins.'),
     category: t('Channels'), liveApply: true,
   },
   // lane lark-search-poll (B-5aab, design §8 + owner decision 4): THE CHANGE FEED — one account-wide search per tick

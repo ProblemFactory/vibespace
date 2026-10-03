@@ -429,7 +429,14 @@ const meta = {
   // seen one and reports an EMPTY queue it merely guessed. Same per-PROCESS
   // skew law as the adverts above: a wrapper spawned before this verb would
   // drop the frame silently and the server must not ask it.
-  caps: { peerMessage: true, frameFile: true, threadScoped: true, inputQueue: true, queueVerbs: QUEUE_VERBS_SERVED, responseStyle: true, permissionRules: true, queueResync: true },
+  // resetCreditKey (lane reset-path): `codex-reset-credit` sends the server's idempotencyKey AND
+  // reports `reset_credit_sent` when the consume leaves — the server hands a person's press only to
+  // a wrapper that says so (an older one goes to the helper process instead)
+  // resetCreditReadFirst (lane reset-path verify r8 T0, the owner's yes on ut-cdaa01aff0): `codex-reset-credit
+  // {readFirst:true}` takes ONE account/rateLimits/read BEFORE the consume, pushes it as `rate_limits_updated
+  // {beforeReset, idempotencyKey}` and consumes only on the server's `codex-reset-credit-go {go:true}` — a wrapper
+  // without this advert ignores the flag and consumes at once (the server's dialog says which it will do)
+  caps: { peerMessage: true, frameFile: true, threadScoped: true, inputQueue: true, queueVerbs: QUEUE_VERBS_SERVED, responseStyle: true, permissionRules: true, queueResync: true, resetCreditKey: true, resetCreditReadFirst: true },
   // The response style (codex Personality) this session actually runs with.
   // '' = the user made no choice ⇒ the key is never sent and ~/.codex/config.toml
   // decides. Reported so Session Properties can name the EFFECTIVE value.
@@ -498,6 +505,10 @@ function send(payload) {
 // the reset-credit consume's per-try answer budget (a suite shortens it to
 // drive the one same-key retry without waiting 30 s)
 const RESET_CREDIT_CONSUME_TIMEOUT_MS = Math.max(50, Number(process.env.VIBESPACE_CODEX_RESET_TIMEOUT_MS) || 30000);
+// the wait for the server's verdict on the read taken BEFORE a consume (verify r8 T0): no verdict in time ⇒ NO consume
+// (`reset_credit_result {skipped, why:'no-verdict'}`) — a press nobody judged never spends; a suite shortens it
+const RESET_CREDIT_GO_TIMEOUT_MS = Math.max(50, Number(process.env.VIBESPACE_CODEX_RESET_GO_TIMEOUT_MS) || 25000);
+const resetCreditGoWaiters = new Map(); // idempotencyKey → resolve({go, why})
 function request(method, params, timeoutMs = 30000) {
   const id = nextId++;
   send({ id, method, params });
@@ -2941,6 +2952,8 @@ async function handleInput(msg) {
     const peerKind = msg.kind === 'notification' ? 'notification' : 'peer';
     // A GROUP message's facts (lane group-report-card: a group wake's card is "<sender> → <group>") — carried into the
     // marker as data only (the normalizer sanitizes them: src/group-card.js groupOf); an older server sends none
+    // a CHANNEL notice's conversation (B-c127) — data only, sanitized by the normalizer (src/channel-ref.js refOf)
+    const peerChannel = msg.channel && typeof msg.channel === 'object' ? { adapterId: msg.channel.adapterId == null ? null : String(msg.channel.adapterId), convId: String(msg.channel.convId || ''), name: String(msg.channel.name || ''), account: msg.channel.account == null ? null : String(msg.channel.account), vendor: msg.channel.vendor == null ? null : String(msg.channel.vendor) } : null;
     const peerGroup = msg.group && typeof msg.group === 'object' ? { id: String(msg.group.id || ''), name: String(msg.group.name || ''), at: Number(msg.group.at) || 0, from: msg.group.from ? String(msg.group.from) : null, self: msg.group.self === true, via: msg.group.via === 'wake' ? 'wake' : 'report' } : null;
     // afterCommit: on the IDLE path `turn/start` has ALREADY persisted the
     // app-server's own copy of this message by the time we get here, so this
@@ -2959,7 +2972,7 @@ async function handleInput(msg) {
     // round-1 major, still open for the one producer that minted no id).
     const recordPeerMessage = (afterCommit, queueCid) => record('response_item', {
       type: 'message', role: 'user', content: [{ type: 'input_text', text }],
-      webui_peer: { name: fromName, body: cardText, kind: peerKind, ...(peerGroup ? { group: peerGroup } : {}) }, // kind = the PATH the words took (S3 verify F3): a peer is never drawn as a VibeSpace notice, whatever it is called or says; group = a group wake's sender → group (lane group-report-card)
+      webui_peer: { name: fromName, body: cardText, kind: peerKind, ...(peerChannel ? { channel: peerChannel } : {}), ...(peerGroup ? { group: peerGroup } : {}) }, // kind = the PATH the words took (S3 verify F3): a peer is never drawn as a VibeSpace notice, whatever it is called or says; group = a group wake's sender → group (lane group-report-card)
       ...(queueCid ? { webui_queue_id: queueCid } : {}),
       ...(afterCommit ? { webui_after_commit: true } : {}),
     });
@@ -3018,6 +3031,14 @@ async function handleInput(msg) {
   }
   if (msg.type === 'codex-read-limits') {
     await readAccountLimits(true);
+    return;
+  }
+  if (msg.type === 'codex-reset-credit-go') {
+    // the server's verdict on the read this wrapper took before a consume (verify r8 T0); a key nobody waits on is ignored
+    const k = typeof msg.idempotencyKey === 'string' ? msg.idempotencyKey : '';
+    const w = resetCreditGoWaiters.get(k);
+    if (w) w({ go: msg.go === true, why: typeof msg.why === 'string' ? msg.why : null });
+    else log(`codex-reset-credit-go for a key this wrapper is not waiting on (${k.slice(0, 8)}…) — ignored`);
     return;
   }
   if (msg.type === 'read-permission-rules') {
@@ -3116,12 +3137,46 @@ async function handleInput(msg) {
     const idempotencyKey = (typeof msg.idempotencyKey === 'string' && msg.idempotencyKey.trim())
       ? msg.idempotencyKey.trim().slice(0, 200)
       : require('crypto').randomUUID();
+    // THE READ BEFORE THE CONSUME (lane reset-path verify r8 T0, the owner's yes): a person's press asks for ONE
+    // account/rateLimits/read first; its answer is pushed with the press's key and the server judges it (the same table
+    // as the helper's read-first — the window the dialog showed, the earlier attempts, the count) and answers
+    // `codex-reset-credit-go`. go:false ⇒ nothing is sent, said back as `skipped`; no verdict within the wait ⇒ the same
+    // (a press nobody judged never spends). A read that FAILS is pushed as its error and the consume still goes out on
+    // the count the dialog showed — a failed read never blocks a person's press (the server says it happened).
+    if (msg.readFirst === true) {
+      let rl0 = null, rc0 = null, readErr = null;
+      try {
+        const r0 = await request('account/rateLimits/read', {}, 20000);
+        rl0 = r0?.rateLimits || r0?.rate_limits || null;
+        rc0 = r0?.rateLimitResetCredits || r0?.rate_limit_reset_credits || null;
+        if (!rl0) readErr = 'no rateLimits in the read before the consume';
+      } catch (e0) { readErr = String((e0 && e0.message) || e0); }
+      if (readErr) emitTaskEvent('rate_limits_updated', { error: readErr, onDemand: true, beforeReset: true, idempotencyKey });
+      else {
+        meta.rateLimits = rl0; meta.rateLimitsFetchedAt = Date.now(); if (rc0) meta.rateLimitResetCredits = rc0; scheduleMeta();
+        emitTaskEvent('rate_limits_updated', { rateLimits: rl0, resetCredits: rc0, onDemand: true, beforeReset: true, idempotencyKey });
+        const verdict = await new Promise((resolve) => {
+          const timer = setTimeout(() => { resetCreditGoWaiters.delete(idempotencyKey); resolve({ go: false, why: 'no-verdict' }); }, RESET_CREDIT_GO_TIMEOUT_MS);
+          resetCreditGoWaiters.set(idempotencyKey, (v) => { clearTimeout(timer); resetCreditGoWaiters.delete(idempotencyKey); resolve(v); });
+        });
+        if (!verdict.go) {
+          log(`reset credit NOT consumed: the server's verdict on the read before it was ${verdict.why || 'no'} (key ${idempotencyKey.slice(0, 8)}…)`);
+          emitTaskEvent('reset_credit_result', { skipped: true, why: verdict.why || 'skipped', idempotencyKey, attempts: 0, sent: false, ...(verdict.why === 'no-verdict' ? { error: `no verdict on the read before the consume within ${RESET_CREDIT_GO_TIMEOUT_MS}ms — nothing sent` } : {}) });
+          return;
+        }
+      }
+    }
     let attempts = 0;
     try {
       let r = null;
       for (;;) {
         attempts += 1;
-        try { r = await request('account/rateLimitResetCredit/consume', { idempotencyKey }, RESET_CREDIT_CONSUME_TIMEOUT_MS); break; }
+        // THE REQUEST WENT OUT (lane reset-path): request() writes the consume to the app-server's
+        // stdin synchronously, so `sent` is said the moment it left — the server arms its
+        // ten-minute floor and charges the spend on THIS, never on its own write of the verb
+        const consumed = request('account/rateLimitResetCredit/consume', { idempotencyKey }, RESET_CREDIT_CONSUME_TIMEOUT_MS);
+        emitTaskEvent('reset_credit_sent', { idempotencyKey, attempt: attempts });
+        try { r = await consumed; break; }
         catch (e) { if (attempts < 2 && /timed out after/.test(String((e && e.message) || e))) continue; throw e; }
       }
       // THE POST-RESET READING GOES OUT FIRST (reset credits r3): the server
@@ -3136,7 +3191,9 @@ async function handleInput(msg) {
       try {
         const r2 = await request('account/rateLimits/read', {}, 20000);
         const rl2 = r2?.rateLimits || r2?.rate_limits || null;
-        if (rl2) { meta.rateLimits = rl2; meta.rateLimitsFetchedAt = Date.now(); scheduleMeta(); emitTaskEvent('rate_limits_updated', { rateLimits: rl2, resetCredits: r2?.rateLimitResetCredits || null }); }
+        // …and it NAMES ITSELF (verify r5): `afterReset` + the press's key — the server keeps this reading on the attempt
+        // and judges an answer it cannot read by it, never by the cache file (a passive push mid-flight, a carried count)
+        if (rl2) { meta.rateLimits = rl2; meta.rateLimitsFetchedAt = Date.now(); scheduleMeta(); emitTaskEvent('rate_limits_updated', { rateLimits: rl2, resetCredits: r2?.rateLimitResetCredits || null, afterReset: true, idempotencyKey }); }
         else emitTaskEvent('rate_limits_updated', { error: 'no rateLimits in the post-reset read', onDemand: true, afterReset: true });
       } catch (e2) { emitTaskEvent('rate_limits_updated', { error: String((e2 && e2.message) || e2), onDemand: true, afterReset: true }); }
       emitTaskEvent('reset_credit_result', { result: r || null, outcome: r?.outcome || null, idempotencyKey, attempts });

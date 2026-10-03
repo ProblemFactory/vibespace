@@ -105,6 +105,7 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
   // (B-ae4b; test-pty-duck is the census).
   session._ptyOpenedAt = Date.now(); // THIS bridge's birth (verify r1): `ptyQuietSince(session, _ptyOpenedAt)` = "this pty never spoke" — the broken-stdin detector re-sends only then
   ptyProcess.onData(() => { session._lastPtyDataAt = Date.now(); });
+  if (session._bridgeHeldInputs && session._bridgeHeldInputs.pty === null) replayHeldInputs(session, ptyProcess, session._bridgeHeldInputs.lines);   // the onExit ladder's carry (B-c20d verify r1)
 
   if (session.mode === 'chat') {
     // Dispatch by DECLARED protocol (P4 → S5): the harness descriptor's caps
@@ -173,7 +174,9 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
       // Stale PTY (a replacement was already attached, e.g. broken-stdin
       // recovery): must not null the fresh pty or schedule re-attach.
       if (!isCurrent) return;
+      const carry = takeHeldInputs(session);   // B-c20d verify r1: a never-spoke pty that EXITS forwarded nothing either — its held inputs ride this ladder's re-attach (setupSessionPty replays them; dropped, the message was lost)
       session.pty = null;
+      if (carry.length) session._bridgeHeldInputs = { pty: null, lines: carry, replaying: true };
       // Auto re-attach so the session doesn't become a zombie (LIVE in the
       // sidebar but input-dead). Bounded retries; counter resets on data.
       session._reattachAttempts = (session._reattachAttempts || 0) + 1;
@@ -203,6 +206,10 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
     if (session._subNormalizers) { session._subNormalizers.clear(); }
     if (session._normalizer) { session._normalizer.listeners.length = 0; }
     if (session._interruptTimer) { clearTimeout(session._interruptTimer); session._interruptTimer = null; }
+    // B-f698: was it WORKING when it died — a turn running, or background tasks the CLI still listed live
+    // (the 2026-09-24 three were between turns with Workflows in flight)? Read before this teardown clears it.
+    let midTurn = !!session._isStreaming;
+    try { midTurn = midTurn || (session._normalizer?.backgroundTasks?.() || []).length > 0; } catch { }
     session._isStreaming = false;
     // THE THIRD EXIT OF THE COMPACTION CLAIM (§2.11, round 7). `_streamingKind
     // === 'compacting'` is a statement about a process that is now gone, and
@@ -248,7 +255,7 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
     if (activeSessions.get(id) !== session) return;
     let socketExists = false;
     try { socketExists = !!session.socketPath && fs.existsSync(session.socketPath); } catch {}
-    const facts = exitFacts({ meta: wrapperMeta, socketPath: session.socketPath || null, socketExists, wrapperRunning: settle.running });
+    const facts = exitFacts({ meta: wrapperMeta, socketPath: session.socketPath || null, socketExists, wrapperRunning: settle.running, asked: session._exitAsked, now: Date.now() });
     const childCode = facts.code;
     // CLI-death classifier (2.226.0, user directive "不要静默失败"): known
     // canned errors become a machine reason + the matched line, which rides
@@ -324,6 +331,9 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
       try { fs.unlinkSync(path.join(BUFFERS_DIR, id + '.buf')); } catch {}
       try { fs.unlinkSync(path.join(BUFFERS_DIR, id + '.json')); } catch {}
     }
+    // B-f698: an UNEXPECTED exit while working is resumed ONCE by itself (no continue, no bill) + one For-you item;
+    // a second one only notifies. The rule is PURE (exit-facts unexpectedExitVerdict) over the facts the line printed.
+    try { require('./unexpected-exit').onExit(session, id, facts, { midTurn }); } catch (e) { console.warn(`[unexpected-exit] ${id}: not judged — ${e.message}`); }
     broadcastActiveSessions();
     };
     settleWrapperMeta(wrapperMetaPath, WRAPPER_SETTLE_MS, finishTeardown);
@@ -494,40 +504,86 @@ function ptyQuietSince(session, since) { return !(Number(session._lastPtyDataAt)
  *  The TRIGGERS differ because the evidence differs (no bytes since attach vs
  *  no ack + no bytes since the write); the HEALING is one implementation.
  *  Deliberately local: the daemon is the thing under suspicion. */
-function reattachLocalPty(id, session, why, { resend = null, kind = 'reattach' } = {}) {
+function reattachLocalPty(id, session, why, { kind = 'reattach' } = {}) {
   if (!activeSessions.has(id) || !session.socketPath) return false;
+  // B-b675 (belt): a daemon PIPE session (R6, src/pty-duck.js pipePtyShim) has no dtach behind it — this "re-attach"
+  // would kill a healthy pipe (the daemon's kill-pipe-session) and spawn a client against a socket that never existed.
+  // ws-create nulls an R6 session's socketPath (the braces); this refuses one that keeps it. A daemonPtyShim is NOT
+  // refused: it relays a real `dtach -a`, and healing it locally is the attach probe's whole job.
+  if (session.pty && session.pty._pipe) { console.warn(`[${id}] ${why} — NOT re-attached: a daemon pipe session has no dtach socket (its pipe is left alone)`); return false; }
   console.log(`[${id}] ${why} — re-attaching dtach locally`);
   try { global.__vsEvent?.('pty-reattach-local', why); } catch { }
   const silentSince = Number(session._lastPtyDataAt) || null;   // the last byte the OLD bridge carried (the catch-up's "lost at" floor)
+  const replay = takeHeldInputs(session);                        // B-c20d: read BEFORE the new pty re-stamps _ptyOpenedAt
   if (session.pty) { try { session.pty.kill(); } catch { } }
   const newPty = pty.spawn(DTACH_CMD, ['-a', session.socketPath, '-E', '-r', 'winch'], {
     name: 'xterm-256color', cols: 120, rows: 30,
     env: { ...agentEnv(), TERM: 'xterm-256color', COLORTERM: 'truecolor' },
   });
   setupSessionPty(session, id, newPty);
-  if (resend != null) setTimeout(() => { try { newPty.write(resend + '\n'); } catch { } }, 500);
+  repaintFromBuf(id, session);   // B-c20d: a terminal's clients get the .buf tail (the hole the dead client swallowed), as the onExit ladder's re-attach does
+  if (replay.length) replayHeldInputs(session, newPty, replay);
   // lane-dead-bridge: a stuck attach client a dead server left (an ORPHAN) is what makes a bridge dead; the new attach is
   // connected now — the watch ends the socket's orphans (attach first, then kill) and counts what the heal releases
   try { onLocalReattach?.(id, session, { why, kind, silentSince }); } catch { }
   return true;
 }
 
+/** B-c20d — THE INPUTS A BRIDGE THAT NEVER SPOKE WAS HANDED. A dtach client that never spoke never connected (its
+ *  preamble is written right after connect()), so it forwarded nothing: every input written to it is held, in order,
+ *  until it speaks (then the client forwards them — verify r1: re-sending doubled the message) or the ONE healer
+ *  replaces it (then they are replayed through the new attach, in order). One message re-sent per detector was the
+ *  hole: a second message typed inside the first one's 5 s was ended by the ack of the first one's re-send, and a
+ *  heal by the attach probe or the dead-bridge watch re-sent nothing at all. `writeSessionInput` is the ONE write of
+ *  a typed input (src/server/user-input.js); the hold ends at the first byte, so it lives for one bridge's silence. */
+function writeSessionInput(session, line) {
+  const held = session._bridgeHeldInputs;
+  if (held && held.pty === session.pty && held.replaying) { held.lines.push(line); return; }   // a heal's replay has not run yet: queue behind it (order)
+  session.pty.write(line + '\n');
+  if (!session.socketPath) return;
+  if (!ptyQuietSince(session, Number(session._ptyOpenedAt) || 0)) { if (held) session._bridgeHeldInputs = null; return; }   // this bridge spoke: it forwards what it gets
+  if (held && held.pty === session.pty) held.lines.push(line);
+  else session._bridgeHeldInputs = { pty: session.pty, lines: [line], replaying: false };
+}
+/** What a heal must replay: the held lines of the CURRENT bridge, only if it never spoke (or its own replay never ran). */
+function takeHeldInputs(session) {
+  const held = session._bridgeHeldInputs;
+  session._bridgeHeldInputs = null;
+  if (!held || held.pty !== session.pty) return [];
+  if (held.replaying) return held.lines;   // healed again inside the last heal's 500 ms: none of these was written yet
+  return ptyQuietSince(session, Number(session._ptyOpenedAt) || 0) ? held.lines : [];
+}
+/** Replay through the new attach, after the 500 ms the single re-send always waited (dtach sets its raw mode first).
+ *  The lines stay held on the NEW bridge: if it never speaks either, the next heal replays them again. */
+function replayHeldInputs(session, newPty, lines) {
+  const held = session._bridgeHeldInputs = { pty: newPty, lines: lines.slice(), replaying: true };
+  setTimeout(() => {
+    if (session._bridgeHeldInputs !== held || session.pty !== newPty) return;   // healed again meanwhile: that heal took the lines
+    held.replaying = false;
+    for (const l of held.lines) { try { newPty.write(l + '\n'); } catch { } }
+    if (!ptyQuietSince(session, Number(session._ptyOpenedAt) || 0)) session._bridgeHeldInputs = null;
+  }, 500);
+}
+
+/** The terminal RE-attach repaint — both re-attach paths (the onExit ladder's attachToDtach({repaint}) and THE ONE
+ *  HEALER): dtach replays nothing on attach and a plain shell never repaints, so the buffer FILE tail (clear +
+ *  replay) goes to attached clients — a daemon self-upgrade re-exec, or the output a dead client swallowed before a
+ *  heal, otherwise stayed blank / a hole until a page reload. */
+function repaintFromBuf(id, session) {
+  if (session.mode === 'chat') return;
+  try {
+    const buf = fs.readFileSync(path.join(BUFFERS_DIR, id + '.buf'));
+    const tail = buf.length > 200000 ? buf.subarray(buf.length - 200000) : buf;
+    const data = '\x1b[2J\x1b[3J\x1b[H' + tail.toString('utf-8');
+    session.buffer = tail.toString('utf-8').slice(-50000);
+    broadcastToSession(session, id, { type: 'output', sessionId: id, data });
+  } catch { /* no buffer file — nothing to repaint */ }
+}
+
 // Attach a PTY to an existing dtach socket for I/O.
-// opts.repaint (the RE-attach path): dtach replays nothing on attach and a
-// plain shell never repaints, so after healing the bridge we push the buffer
-// FILE tail (clear + replay) to attached clients — a daemon self-upgrade
-// re-exec otherwise left visually-blank terminals until a page reload.
+// opts.repaint (the RE-attach path): repaintFromBuf above.
 function attachToDtach(id, socketPath, session, { repaint = false } = {}) {
-  const repaintClients = () => {
-    if (!repaint || session.mode === 'chat') return;
-    try {
-      const buf = fs.readFileSync(path.join(BUFFERS_DIR, id + '.buf'));
-      const tail = buf.length > 200000 ? buf.subarray(buf.length - 200000) : buf;
-      const data = '\x1b[2J\x1b[3J\x1b[H' + tail.toString('utf-8');
-      session.buffer = tail.toString('utf-8').slice(-50000);
-      broadcastToSession(session, id, { type: 'output', sessionId: id, data });
-    } catch { /* no buffer file — nothing to repaint */ }
-  };
+  const repaintClients = () => { if (repaint) repaintFromBuf(id, session); };
   // Arm the liveness probe for THIS attach: if the bridge produced no byte at
   // all, heal it locally. The confirm stage exists because a blocked event
   // loop runs the timers phase before the poll phase — a 30 s boot stall
@@ -664,6 +720,6 @@ function attachToDtach(id, socketPath, session, { repaint = false } = {}) {
   return { setupSessionPty, attachToDtach, readSessionMeta, writeSessionMeta,
     deleteSessionMeta, sessionMetaOwnerConflict, _metaTombstones,
     applyTaskToolUpdate, emitTaskListTodos, updateSessionTodos,
-    reattachLocalPty, ptyQuietSince }; // the ONE healer + the ONE liveness reader (ws-handler's input detector shares both)
+    reattachLocalPty, ptyQuietSince, writeSessionInput }; // the ONE healer + the ONE liveness reader (ws-handler's input detector shares both) + the ONE typed-input write (B-c20d)
 }
 module.exports = { create };

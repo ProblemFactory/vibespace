@@ -40,6 +40,23 @@ export function procStat(pid, procRoot = '/proc') {
   return { comm: s.slice(s.indexOf('(') + 1, rp), state: f[0], ppid: Number(f[1]), starttime: Number(f[19]) || 0, exitCode: f.length > 49 ? Number(f[49]) : null };
 }
 
+/** USER_HZ: the unit of /proc/<pid>/stat's `starttime` — 100 on every Linux ABI node runs on (a fixed ABI value,
+ *  not the kernel's CONFIG_HZ; `getconf CLK_TCK`). */
+export const USER_HZ = 100;
+/** The boot's wall-clock start in ms (`btime` of <procRoot>/stat), or null when the proc root states none (a fake
+ *  table in a test). */
+export function procBootMs(procRoot = '/proc') {
+  try { const m = /^btime (\d+)$/m.exec(fs.readFileSync(path.join(procRoot, 'stat'), 'latin1')); return m ? Number(m[1]) * 1000 : null; } catch { return null; }
+}
+/** A process's BIRTH in ms since the epoch, by the kernel's own clock: btime + starttime / USER_HZ (what `ps -o
+ *  lstart` prints). null when the boot time or the starttime is unknown. B-442c (2026-10-02): NEVER the mtime of
+ *  /proc/<pid> — procfs stamps that when it instantiates the inode, and it re-instantiates every one after a dentry
+ *  eviction: after the 16:23 OOM every /proc dir on the box read 16:23:10, a 45-min-old orphan read "8 min" and
+ *  `--reap --dry-run` spared hour-old orphans as "young: 42 s". */
+export function procBornMs(st, bootMs) {
+  return bootMs != null && st && Number(st.starttime) > 0 ? bootMs + (Number(st.starttime) * 1000) / USER_HZ : null;
+}
+
 /** This boot's id ('' when the proc root has none — a fake root in a test, or no /proc). */
 export function machineBootId(procRoot = '/proc') {
   try { return fs.readFileSync(path.join(procRoot, 'sys', 'kernel', 'random', 'boot_id'), 'utf8').trim(); } catch { return ''; }

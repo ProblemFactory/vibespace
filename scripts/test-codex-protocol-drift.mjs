@@ -24,9 +24,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
 import { judge, wrapperRequestSites, wrapperConsumed, measuredTables, installedCodexVersion, WRAPPER } from './codex-protocol-census.mjs';
 import { scratch, stopWrapper, withoutVendorKeys, endRootedProcesses } from './scratch.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
+import { writeStub } from './codex-app-server-stub.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
@@ -86,6 +89,24 @@ for (const [n, why] of Object.entries(NEVER_SHIPPED)) ok(TABLES.every(({ table }
   ok(e === 'Invalid request: missing field `idempotencyKey`', `the incident's words are the CLI's own answer to the keyless consume (measured live on ${NEWEST.version})`, e);
 }
 
+console.log('— ②b the reset-credit helper (lane reset-path) judged against every measured table');
+{
+  // the helper (src/codex-reset-helper.js) is a SECOND app-server client: one bounded child a person's
+  // Use… starts when no conversation can carry the credit — its requests are judged exactly like the wrapper's
+  const HELPER = read('src/codex-reset-helper.js');
+  const hs = wrapperRequestSites(HELPER);
+  const hm = [...new Set(hs.flatMap((x) => x.methods))].sort();
+  ok(JSON.stringify(hm) === JSON.stringify(['account/rateLimitResetCredit/consume', 'account/rateLimits/read', 'initialize']) && hs.every((x) => x.methods.length === 1),
+    `the helper's census reads its three requests (${hm.join(', ')})`, JSON.stringify(hs));
+  ok(hm.every((m) => m in (NEWEST.table.wrapperMethods || {})), `every helper method was PROBED by the newest table (${NEWEST.version})`, hm.filter((m) => !(m in (NEWEST.table.wrapperMethods || {}))).join(', '));
+  ok(JSON.stringify(wrapperConsumed(HELPER).notifies) === '["initialized"]', 'the helper sends exactly one notification: initialized');
+  for (const { version, table } of TABLES) {
+    const f = judge(table, HELPER, { neverShipped: NEVER_SHIPPED });
+    ok(f.length === 0, `codex ${version}: the helper is in step (0 findings)`, f.map((x) => `[${x.kind}] ${x.detail}`).join(' | '));
+  }
+  const pre = HELPER.replace("request('account/rateLimitResetCredit/consume', { idempotencyKey })", "request('account/rateLimitResetCredit/consume', {})");
+  ok(pre !== HELPER && judge(NEWEST.table, pre, { neverShipped: NEVER_SHIPPED }).some((x) => x.kind === 'missing-required' && x.field === 'idempotencyKey'), 'CONTROL: a helper consume without the key is named — missing-required idempotencyKey');
+}
 console.log('— ② controls: each finding kind is produced when its drift is planted');
 {
   const consumeLine = "request('account/rateLimitResetCredit/consume', { idempotencyKey }, RESET_CREDIT_CONSUME_TIMEOUT_MS)";
@@ -116,8 +137,14 @@ console.log('— ③ every reset-credit outcome the CLI declares is handled');
     const un = table.resetCreditOutcomes.filter((o) => !handled.has(o));
     ok(table.resetCreditOutcomes.length >= 4 && un.length === 0, `codex ${version}: outcomes ${table.resetCreditOutcomes.join(', ')} — each is the reset path, the keyed alreadyRedeemed, or said in words`, un.join(', '));
   }
-  ok(/out0 === 'alreadyRedeemed' && keyed \? 'reset' : out0/.test(ENGINE), 'a KEYED alreadyRedeemed is the press\'s own reset (the schema: "the same idempotency key already completed a reset")');
-  ok(/session\.pty\.write\(JSON\.stringify\(\{ type: 'codex-reset-credit', idempotencyKey: idemKey \}\)/.test(ENGINE) && /const idemKey = crypto\.randomUUID\(\);/.test(ENGINE), 'the engine\'s one writer mints the key per press and hands it down in the verb');
+  // lane reset-path: the answer's reading moved into the PURE rule (src/reset-credit.js creditAnswerOf) the engine calls
+  const RCP = require(path.join(REPO, 'src/reset-credit.js'));
+  // verify r3 (money): the PURE rule's closed set IS the measured enum, both ways — a word a re-measure adds is RED here
+  // until it is classified, and a word in our set no table lists is a stale row; a word outside the set fails CLOSED
+  for (const { version, table } of TABLES) ok(JSON.stringify([...table.resetCreditOutcomes].sort()) === JSON.stringify([...RCP.VENDOR_OUTCOMES].sort()), `codex ${version}: the measured outcome enum equals src/reset-credit.js VENDOR_OUTCOMES (${RCP.VENDOR_OUTCOMES.join(', ')})`, table.resetCreditOutcomes.join(', '));
+  ok(RCP.creditAnswerOf({ outcome: 'somethingNew', idempotencyKey: 'k', attempts: 1 }).outcome === 'unknown-outcome' && RCP.outcomeArmsFloor('unknown-outcome') && RCP.UNSETTLED_OUTCOMES.includes('unknown-outcome') && RCP.creditAnswerOf({ result: {}, outcome: null, idempotencyKey: 'k', attempts: 1 }).outcome === 'unknown-outcome', 'an outcome word outside the measured enum (or an answer with none) fails CLOSED — unknown-outcome: charged, the floor, unsettled until a reading; never "nothing spent"');
+  ok(RCP.creditAnswerOf({ outcome: 'alreadyRedeemed', idempotencyKey: 'k', attempts: 2 }).outcome === 'reset' && RCP.creditAnswerOf({ outcome: 'alreadyRedeemed' }).outcome === 'alreadyRedeemed' && /const ans = resetCredit\.creditAnswerOf\(payload\);/.test(ENGINE), 'a KEYED alreadyRedeemed is the press\'s own reset (the schema: "the same idempotency key already completed a reset")');
+  ok(/session\.pty\.write\(JSON\.stringify\(\{ type: 'codex-reset-credit', idempotencyKey: idemKey, \.\.\.\(rf \? \{ readFirst: true \} : \{\}\) \}\)/.test(ENGINE) && /const idemKey = crypto\.randomUUID\(\);/.test(ENGINE), 'the engine\'s one writer mints the key per press and hands it down in the verb (lane reset-path verify r8 T0: with `readFirst` for a person\'s press on a wrapper that reads first)');
 }
 
 console.log('— ④ THE VERSION GATE: the installed codex-cli was measured');
@@ -141,49 +168,9 @@ const DIR = scratch('cx159');
 fs.mkdirSync(DIR, { recursive: true });
 const cleanup = () => { try { endRootedProcesses(DIR); } catch { } try { fs.rmSync(DIR, { recursive: true, force: true }); } catch { } };
 process.on('exit', cleanup);
-const STUB = path.join(DIR, 'stub-app-server.cjs');
-fs.writeFileSync(STUB, `'use strict';
-const fs = require('fs');
-const T = JSON.parse(fs.readFileSync(process.env.STUB_TABLE, 'utf8'));
-const LOG = process.env.STUB_LOG, MODE = process.env.STUB_MODE || 'answer';
-// the CLI's own words, read off the measured table (never spelled here)
-const missingWords = (f) => T.wrapperMethods['account/rateLimitResetCredit/consume'].errorOnEmpty.message.replace(/\`[^\`]+\`/, '\`' + f + '\`');
-const unknownWords = (m) => T.unknownMethodError.message.replace(/\`[^\`]+\`/, '\`' + m + '\`').split(', expected')[0];
-const seenKeys = new Set(); const dropped = new Set();
-const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
-let b = '';
-process.stdin.setEncoding('utf8');
-process.stdin.on('data', (d) => { b += d; let i; while ((i = b.indexOf('\\n')) >= 0) { const l = b.slice(0, i); b = b.slice(i + 1); if (!l.trim()) continue; let m; try { m = JSON.parse(l); } catch { continue; }
-  if (m.id === undefined || !m.method) continue;
-  const row = T.clientRequests[m.method];
-  const p = m.params || {};
-  let verdict = 'ok', error = null;
-  if (!row) error = { code: T.unknownMethodError.code, message: unknownWords(m.method) };
-  else { const miss = row.required.filter((f) => !(f in p) || p[f] === undefined || p[f] === null); if (miss.length) error = { code: -32600, message: missingWords(miss[0]) }; }
-  if (!error && m.method === 'account/rateLimitResetCredit/consume' && p.idempotencyKey === '') error = { code: -32600, message: 'idempotencyKey must not be empty' };
-  if (error) verdict = 'refused';
-  fs.appendFileSync(LOG, JSON.stringify({ method: m.method, params: p, verdict, error: error && error.message }) + '\\n');
-  if (error) { out({ id: m.id, error }); continue; }
-  let r = {};
-  if (m.method === 'initialize') r = { userAgent: 'stub/' + T.codexVersion };
-  else if (/^thread\\/(start|resume|fork)$/.test(m.method)) r = { thread: { id: p.threadId || 'th-stub-1', name: null }, model: 'gpt-stub', reasoningEffort: 'medium' };
-  else if (m.method === 'account/rateLimits/read') r = { rateLimits: { primary: { usedPercent: 100, windowDurationMins: 10080, resetsAt: Math.floor(Date.now() / 1000) + 86400 }, secondary: null }, rateLimitResetCredits: { availableCount: 1, credits: null } };
-  else if (m.method === 'account/rateLimitResetCredit/consume') {
-    const k = p.idempotencyKey;
-    if (MODE === 'drop-first' && !dropped.has(k)) { dropped.add(k); seenKeys.add(k); continue; } // no answer: the consume landed, the reply was lost
-    r = { outcome: seenKeys.has(k) ? 'alreadyRedeemed' : 'reset' }; seenKeys.add(k);
-  }
-  else if (m.method === 'thread/queue/list') r = { data: [] };
-  else if (m.method === 'thread/goal/get') r = { goal: null };
-  else if (m.method === 'turn/start') r = { turn: { id: 'turn-stub-1', status: 'inProgress', items: [] } };
-  else if (m.method === 'thread/name/set') r = { thread: { id: p.threadId, name: p.name } };
-  else if (m.method === 'config/read') r = { config: {}, origins: {}, layers: [] };
-  out({ id: m.id, result: r });
-} });
-// the app-server's own lifetime rule: stdin closed (the wrapper is gone) ⇒ exit —
-// a stub that outlives its wrapper is an orphan for the scratch reaper
-process.stdin.on('end', () => process.exit(0));
-`);
+// the stub lives in ONE place since lane reset-path (scripts/codex-app-server-stub.mjs): the reset-credit
+// helper's legs (test-reset-credit-ui, test-vendor-whitelist §8) drive the same measured-table answers
+const STUB = writeStub(DIR);
 
 async function runWrapper(tag, { wrapperFile = path.join(REPO, WRAPPER), env = {}, mode = 'answer', drive = async () => { } } = {}) {
   const d = path.join(DIR, tag); fs.mkdirSync(d, { recursive: true });

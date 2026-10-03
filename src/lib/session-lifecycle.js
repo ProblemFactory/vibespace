@@ -586,6 +586,17 @@ export function installSessionLifecycle(App, ctx = {}) {
     setTimeout(go, 15000); // a lost exited must not strand the restart
   },
 
+  // RESPAWN AFTER AN UNEXPECTED EXIT (B-f698): the server judged a dead conversation's exit unexpected
+  // (src/exit-facts.js unexpectedExitVerdict) and asked THIS client to resume it once. The conversation is
+  // already dead, so it is restartConversationInPlace's "just resume" — the same resumeSession a sidebar
+  // Resume runs (its per-conversation settings, its window's place); no message is sent, so no turn is billed.
+  _respawnAfterExit(sess = {}) {
+    if (!sess.backendSessionId) return;
+    try { window.__vsOp?.('unexpected-exit-respawn', { sid: sess.backendSessionId, serverId: sess.serverId, host: sess.host || null }); } catch {}
+    const name = this.sidebar?.getCustomName?.({ backend: sess.backend, backendSessionId: sess.backendSessionId }) || sess.name || '';
+    this.resumeSession(sess.backendSessionId, sess.cwd || '', name, { mode: sess.mode || 'chat', backend: sess.backend || 'claude', backendSessionId: sess.backendSessionId, hostId: sess.host || undefined, excludeWebuiId: sess.serverId || undefined });
+  },
+
   // Jump the sidebar to a conversation's entry (owner UX: with dozens of
   // sessions the entry hunt was the pain) — switch to Folders, expand the
   // containing folder if collapsed, scroll to the card and flash it.

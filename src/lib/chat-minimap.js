@@ -6,6 +6,12 @@
 import { createPopover, uiScale } from './utils.js';
 import { startPointerDrag } from './drag-feed.js'; // THE feed for every drag door (lane-drag-release verify r2 census)
 import { t } from './i18n.js';
+import { noteSentence } from './chat-run-summary.js';
+
+// What a turn's drag label and outline row say (B-40f8): a VibeSpace note to the
+// assistant (the Stop nudge, an injection turn — src/assistant-note.js turnPreviewOf
+// marks it `note`) says its sentence in the device's language, never its raw text.
+const turnText = (turn) => (turn.note ? t(noteSentence(turn.note)) : turn.preview || '');
 
 export class ChatMinimap {
   /**
@@ -207,7 +213,7 @@ export class ChatMinimap {
   appendFullTurn(turn) {
     if (!this._fullExtent || !turn?.ts) return;
     const ext = this._fullExtent;
-    const rec = { ts: turn.ts, preview: turn.preview, isCompact: turn.isCompact, line: turn.line };
+    const rec = { ts: turn.ts, preview: turn.preview, isCompact: turn.isCompact, note: turn.note, line: turn.line };
     ext.fullTurns.push(rec);
     if (turn.ts > ext.lastTs) ext.lastTs = turn.ts;
     // Incremental: ONE new marker + reposition existing ones (the span end
@@ -302,7 +308,7 @@ export class ChatMinimap {
       const isToday = d.toDateString() === now.toDateString();
       const date = isToday ? '' : d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ';
       const time = date + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      const preview = turn.preview || '';
+      const preview = turnText(turn);
       // Two-line card: dim time on top, message preview below (textContent —
       // previews are raw user text)
       this._label.innerHTML = '';
@@ -407,7 +413,7 @@ export class ChatMinimap {
       list.innerHTML = '';
       const q = (f || '').toLowerCase();
       for (const turn of turns) {
-        const preview = turn.preview || '';
+        const preview = turnText(turn);
         if (q && !preview.toLowerCase().includes(q)) continue;
         const row = document.createElement('div');
         row.className = 'chat-minimap-toc-row' + (turn.isCompact ? ' compact' : '');

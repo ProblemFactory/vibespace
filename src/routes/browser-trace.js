@@ -265,15 +265,16 @@ function liveByKey() {
 function useViewOf(p, live, cache = {}) {
   const k = ctx?.keeper || null;
   const U = B.whoMayUse(p);
-  if (!U || U.mode === 'all') return { mode: 'all' };
+  // lane everyone-principal: All agents may KEEP the rows picked beside it (named like a list's, restored when All goes)
+  if (!U || (U.mode === 'all' && !(U.kept && U.kept.length))) return { mode: 'all' };
   if (U.mode === 'unknown') return { mode: 'unknown', who: [] };
   const convOf = (key) => {
     if (cache.byKey === undefined) { cache.byKey = null; try { cache.byKey = ctx?.bindings?.conversationsByKey ? ctx.bindings.conversationsByKey() : null; } catch { cache.byKey = null; } }
     return cache.byKey ? cache.byKey.get(key) || null : null;
   };
   return {
-    mode: 'only',
-    who: U.who.map((w) => {
+    mode: U.mode === 'all' ? 'all' : 'only',
+    who: (U.mode === 'all' ? U.kept : U.who).map((w) => {
       if (w.kind === 'session') {
         const l = live.get(w.id) || null;
         return { kind: 'session', key: w.id, conversationId: (l && l.conversationId) || convOf(w.id), live: !!l, sessionId: l ? l.sessionId : null, name: l ? l.name : null, backend: l ? l.backend : null };
@@ -385,7 +386,8 @@ router.patch('/api/browser/profiles/:id', async (req, res) => {
           rows.push({ kind: 'session', key: r.key });
         } else rows.push({ kind: 'task', id: r.id });
       }
-      patch.use = sv.mode === 'all' ? { mode: 'all' } : { mode: 'only', who: rows };
+      // ALL AGENTS beside picked rows (lane everyone-principal): the rows ride along, kept for when All is taken away
+      patch.use = sv.mode === 'all' ? (rows.length ? { mode: 'all', who: rows } : { mode: 'all' }) : { mode: 'only', who: rows };
     }
     const r = k.updateProfile(req.params.id, patch, { knownKeys });
     // a narrowing's detached conversations each hear it on their next message (layer ②, zero billed turns)

@@ -16,9 +16,11 @@ const { peerOriginOf } = require('./message-manager'); // peerOriginOf = peerDis
 // web-search cards: the ONE results renderer + the twin-dedup key (PURE, shared with the client's title chip)
 const { renderSearchOutput, searchActionKey, NO_SEARCH_DETAILS } = require('./search-card');
 const { sliceTextWindow } = require('./text-window.js'); // PURE: the attach slab (the claude normalizer's twin)
+const { turnPreviewOf, COMPACT_PREVIEW } = require('./assistant-note.js'); // PURE (B-40f8): THE preview of a user turn
 const { agentName, collabSummaryText } = require('./collab-row');
 const { rewoundByTurns, applyRewound, rewoundOp } = require('./rewind-ops.js');
-const { offerOf } = require('./reset-credit.js'); // PURE: the reset-credit offer a peer card may carry (design-reset-credits §5)
+const { offerOf, offerResolution } = require('./reset-credit.js'); // PURE: the reset-credit offer a peer card may carry (design-reset-credits §5) + its resolution (lane reset-path R3)
+const { refOf: channelRefOf } = require('./channel-ref.js'); // PURE (B-c127): a channel notice's conversation — `peerChannel`
 const { groupOf: groupCardOf } = require('./group-card.js'); // PURE (lane group-report-card): a group message's card facts — `peerGroup`
 
 function safeJsonParse(text, fallback = null) {
@@ -143,7 +145,8 @@ function peerRecordOf(item, content) {
   const via = marker && (marker.kind === 'notification' || marker.kind === 'peer') ? marker.kind : inferred.via;
   // lane group-report-card: the wrapper writes the ladder's `group` into its marker — a group WAKE's card, live and on a rebuild
   const group = marker ? groupCardOf(marker.group) : null;
-  return { content: body ? [{ type: 'text', text: body }] : content, from: group ? (group.self ? null : (group.from || from)) : from, via: group ? 'peer' : via, group };
+  const channel = marker ? channelRefOf(marker.channel) : null;   // B-c127: a channel notice's conversation, live and on a rebuild
+  return { content: body ? [{ type: 'text', text: body }] : content, from: group ? (group.self ? null : (group.from || from)) : from, via: group ? 'peer' : via, group, channel };
 }
 
 function toTs(value) {
@@ -307,7 +310,9 @@ const SKIPPED_EVENT_TYPES = new Set([
   // rules…" on a codex session fired a false `codex-unknown-record:
   // permission_rules` breadcrumb, poisoning the signal whose whole job is to
   // announce genuine upstream additions (round-2 verifier).
-  'rate_limits_updated', 'goal_updated', 'goal_cleared', 'thread_goal_updated', 'thread_queue_changed', '_remote_state', 'peer_message_result', 'reset_credit_result', 'permission_rules',
+  // reset_credit_sent (lane reset-path) = the wrapper saying the consume left for the app-server:
+  // the pool engine arms its floor on it; never a card
+  'rate_limits_updated', 'goal_updated', 'goal_cleared', 'thread_goal_updated', 'thread_queue_changed', '_remote_state', 'peer_message_result', 'reset_credit_result', 'reset_credit_sent', 'permission_rules',
   // webui_user_retracted = the wrapper telling the READER that a user record it
   // already wrote will never be committed by the app-server (round 3). It is a
   // merge-time fact about the claim ledger (mergeCodexRecords), never a card:
@@ -505,7 +510,7 @@ class CodexMessageManager {
   // it: there the wrapper's own buffer record is the carrier (peerRecordOf)
   // and a second card here would double-render live. Containment-free: the
   // delivery site posts once per fire (same-body repeats are legitimate).
-  injectPeerCard({ fromName, text, resetCredit = null, kind = null, group = null, exitRun = null }) {
+  injectPeerCard({ fromName, text, resetCredit = null, kind = null, group = null, exitRun = null, channel = null }) {
     const body = String(text || '').trim();
     if (!body) return null;
     this._currentRk = null; // outside any record context — take the s-fallback id, never the last record's key
@@ -519,12 +524,39 @@ class CodexMessageManager {
     // a STORED RESET CREDIT the card offers (design-reset-credits §5): the wall
     // card / the auto-resume arm card — two numbers-and-a-mode, never markup
     const rc = offerOf(resetCredit);
-    if (rc) msg.resetCredit = rc;
+    if (rc) { msg.resetCredit = rc; if (!rc.resolved) { const l = this._rcOffers || (this._rcOffers = []); l.push(msg); if (l.length > 64) l.shift(); } } // R3: the open offers a later fact may answer
     if (exitRun && typeof exitRun === 'object') msg.exitRun = exitRun;   // lane-exit-run-output E3: the run's output block (bounded by the producer)
+    const cr = channelRefOf(channel);   // B-c127: a channel notice's conversation — the card's one-click link
+    if (cr) msg.peerChannel = cr;
     const gc = groupCardOf(group);   // lane group-report-card: sender → group, a peer's words
     if (gc) { msg.peerGroup = gc; msg.peerVia = 'peer'; msg.peerFrom = gc.self ? null : (gc.from || msg.peerFrom); }
     this._emit({ op: 'create', message: msg });
     return msg;
+  }
+
+  /** THE CARD THE CREDIT OUTLIVED (lane reset-path R3): a later fact about account `keys` — a credit used
+   *  (`{kind:'used', at, untilSec}`) or a reading (`{kind:'reading', at, usable}`) — resolves every OPEN offer
+   *  card on that account drawn before it: the resolution goes ON THE MESSAGE (a slab / page-in re-render
+   *  carries it) and ONE `edit` op per card carries only its resetCredit (the client patches it in place).
+   *  The PURE rule is src/reset-credit.js offerResolution. → how many cards it resolved */
+  resolveResetCreditOffers(keys, ev) {
+    const open = this._rcOffers;
+    if (!open || !open.length) return 0;
+    const ks = new Set((Array.isArray(keys) ? keys : [keys]).filter(Boolean).map(String));
+    let n = 0;
+    for (let i = open.length - 1; i >= 0; i--) {
+      const m = open[i];
+      const rc = m && m.resetCredit;
+      if (!rc || rc.resolved) { open.splice(i, 1); continue; }
+      if (!ks.has(String(rc.accountKey || ''))) continue;
+      const res = offerResolution(rc, m.ts, ev);
+      if (!res) continue;
+      m.resetCredit = { ...rc, resolved: res };
+      open.splice(i, 1);
+      this._emit({ op: 'edit', id: m.id, fields: { resetCredit: m.resetCredit } });
+      n++;
+    }
+    return n;
   }
 
   get total() { return this.messages.length; }
@@ -545,11 +577,8 @@ class CodexMessageManager {
       const turnIndex = m.turnIndex ?? 0;
       if (turnIndex === lastTurn) continue;
       const entry = { turnIndex, startIdx: i, ts: m.ts, role: m.role };
-      if (m.isCompact) { entry.isCompact = true; entry.preview = 'Context compacted'; }
-      if (m.role === 'user') {
-        const raw = (m.content || []).map((b) => b.text || '').join('').trim();
-        if (raw) entry.preview = raw.length > 10 ? `${raw.slice(0, 10)}…` : raw;
-      }
+      if (m.isCompact) { entry.isCompact = true; entry.preview = COMPACT_PREVIEW; }
+      if (m.role === 'user') Object.assign(entry, turnPreviewOf(m)); // B-40f8: THE preview rule (the wrapper's <vibespace-reminder> nudge turn is a note)
       turns.push(entry);
       lastTurn = turnIndex;
     }
@@ -1354,6 +1383,7 @@ class CodexMessageManager {
         msg.peerFrom = peer.from;
         if (peer.via) msg.peerVia = peer.via; // S3 verify F3: never read off the words
         if (peer.group) msg.peerGroup = peer.group; // lane group-report-card: sender → group
+        if (peer.channel) msg.peerChannel = peer.channel; // B-c127: the channel notice's conversation (its name is the link)
         this._stampUserIdentity(msg, queueMsgId);
         if (emit) this._emit({ op: 'create', message: msg });
         return;

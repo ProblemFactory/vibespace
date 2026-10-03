@@ -1,6 +1,6 @@
 import { SETTINGS_SCHEMA, SETTINGS_CATEGORIES, harnessSectionFor, harnessFileRel, orderedCategories, settingsGroupOf, settingsGroups, clampToSchema } from './settings-schema.js';
 import { showConfirmDialog, fetchJson, showToast } from './utils.js';
-import { receiptLine, offLine, applyHead } from './cli-config-chips.js';
+import { receiptLine, offLine, applyHead, refusalLine, recoveredLine } from './cli-config-chips.js';
 import { machineDisplayText } from './browser-display-words.js'; // lane headless-fallback: the display fact beside the headed preference
 import { t } from './i18n.js';
 import { escHtml } from './utils.js';
@@ -317,7 +317,9 @@ class SettingsUI {
           // human-triggered (the boot registration + the CLI-config plan on demand), never a greyed control
           if (l.apply) el.appendChild(this._cliApplyButton(el, (cc2) => (cc2.receipts || []).find((x) => x.harness === schema.harness && x.key === key)));
         } else addLine({ tone: 'dim', text: `? ${t('this machine')}: ${t('not checked — reinstall the agent tools')}` });
-        if (cc.safe === false) addLine({ tone: 'dim', text: t('This server runs from a temporary directory and never writes the real CLI config.') });
+        if (cc.refused) addLine(refusalLine(cc.refused, { t })); // the root verdict (src/server-root.js) — never "applied" on a worktree / temp server
+        else if (cc.registeredAfterError) addLine(recoveredLine(cc.registeredAfterError, { t })); // verify r2 ①: registered at HH:MM after an earlier read error
+        else if (cc.safe === false) addLine({ tone: 'dim', text: t('This server runs from a temporary directory and never writes the real CLI config.') });
       });
       const btn = document.createElement('button');
       btn.className = 'settings-link-btn';
@@ -328,6 +330,10 @@ class SettingsUI {
         const hd = await fetchJson('/api/hosts');
         const hosts = (hd && hd.hosts) || [];
         if (!hosts.length) { addLine({ tone: 'dim', text: t('No other machines registered.') }); return; }
+        // the root verdict (src/server-root.js), ONCE above the hosts: this server wrote none of what follows
+        const own = await (this._cliConfigPromise || Promise.resolve(null)).catch(() => null);
+        if (own && own.cliConfig && own.cliConfig.refused) addLine(refusalLine(own.cliConfig.refused, { t, remote: true }));
+        else if (own && own.cliConfig && own.cliConfig.registeredAfterError) addLine(recoveredLine(own.cliConfig.registeredAfterError, { t }));
         await Promise.all(hosts.map(async (h) => {
           const rs = await fetchJson(`/api/hosts/${encodeURIComponent(h.id)}/agent-tools`);
           if (!list.isConnected) return;

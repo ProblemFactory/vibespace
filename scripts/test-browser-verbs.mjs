@@ -772,7 +772,7 @@ try {
   // THE OWNER'S RULING (2026-09-27, "告知agent发生了打断"): the audit answers whether a takeover caught the command in flight — the
   // CLI prints the refusal BY NAME and exits 1 like every refusal, whatever the binary said
   {
-    const SENT = 'The user took over this browser — your operation was interrupted. Wait for the handback, then run it again.';
+    const SENT = 'The user took over your window of this browser — your operation was interrupted. Wait for the handback, then run it again.';
     const auditBodies = () => calls.filter((x) => x.path === '/api/agent/browser/audit').map((x) => x.body);
     ok(auditBodies().every((b) => !('since' in b)), 'interrupt: an answer with no server instant (an older server) ⇒ the audit sends no `since` (nothing to compare)');
     resolveAnswer = { ok: true, kind: 'none', handle: null, env: [], handles: [], pinTab: false, at: 1790000000123 };

@@ -206,7 +206,8 @@ function create({ log = console, now = Date.now } = {}) {
       }
       conn.pending.set(msg.id, v.pending);
       if (conn.pending.size > 10000) { const first = conn.pending.keys().next().value; conn.pending.delete(first); }
-      try { up.send(String(data)); } catch (e) { conn.pending.delete(msg.id); try { ws.send(JSON.stringify(M.refusal(msg.id, 'upstream_gone', e && e.message || 'send failed', v.pending.sessionId))); } catch { /* gone */ } }
+      if (v.rewrite && !conn.saidRewrite) { conn.saidRewrite = true; log.log?.(`[cdp-mediator] ${g.browserKey || '?'} on ${g.profileId || '?'}: its creates open in windows of their own (Target.createTarget rewritten newWindow:true, focus:false — a CDP reply carries Chrome's shape, so this line is where it is said)`); } // verify r2 ③
+      try { up.send(v.rewrite ? JSON.stringify({ ...msg, params: v.rewrite }) : String(data)); } catch (e) { conn.pending.delete(msg.id); try { ws.send(JSON.stringify(M.refusal(msg.id, 'upstream_gone', e && e.message || 'send failed', v.pending.sessionId))); } catch { /* gone */ } }
     });
     up.on('message', (data) => {
       let msg = null;

@@ -224,7 +224,8 @@ function browserFactWords(fact, tIn) {
   let why = '';
   switch (fact.differs) {
     case 'pin_gone': why = t('the pinned profile was deleted'); break;
-    case 'pin_cleared': why = t('{p} was deleted — its pin was cleared', { p: fact.pinCleared && fact.pinCleared.label ? fact.pinCleared.label : t('a deleted profile') }); break;
+    // B-160d ⑤ (lane browser-reliability): a mark with no label said "a deleted profile was deleted — …" (the word twice)
+    case 'pin_cleared': why = fact.pinCleared && fact.pinCleared.label ? t('{p} was deleted — its pin was cleared', { p: fact.pinCleared.label }) : t('the pinned profile was deleted — its pin was cleared'); break;
     case 'pin_failed': why = u.locked ? t('{p} could not start — another browser has it open', { p: pinnedName }) : t('{p} could not start', { p: pinnedName }); break;
     case 'pin_pending': why = t('{p} applies from the agent’s next browser command', { p: pinnedName }); break;
     case 'agent_elsewhere': why = t('the agent is still on {r}', { r: name }); break;

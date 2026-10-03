@@ -15,6 +15,10 @@ export function displayFactOf(digest, profileId) {
 /** One sentence for a browser's launch fact — '' when there is nothing to say (a window as asked, or none asked). */
 export function displayFactText(fact) {
   const c = factCode(fact);
+  // B-d635: beside VibeSpace's own VNC desktop the words say where the browser is NOT — never "no desktop session"
+  const vnc = fact && fact.vnc && fact.vnc.name ? String(fact.vnc.name) : '';
+  if (vnc && c === 'hidden-window') return t('The browser runs in a hidden window, not on this machine’s VNC desktop ({name}) — watch it and take over in the live view', { name: vnc });
+  if (vnc && c === 'headless') return t('The browser runs headless, not on this machine’s VNC desktop ({name}) — watch it and take over in the live view', { name: vnc });
   if (c === 'hidden-window') return t('This machine has no desktop session — the browser runs in a hidden window (the live view can still take over)');
   if (c === 'headless') return t('This machine has no desktop session — the browser runs headless (the live view can still take over)');
   if (c === 'substituted') return t('The browser settings ask for {wanted}, which this machine does not have right now — it runs on {used} instead', { wanted: kindName(fact.fallback.wanted), used: kindName(fact.fallback.used) });
@@ -32,6 +36,7 @@ export function machineDisplayText(answer) {
   let main;
   if (d.kind === 'wayland') main = t('This machine has a Wayland desktop session ({name}) — a browser that asks for a window shows one', { name: String(d.name || '') });
   else if (d.kind === 'x11') main = t('This machine has an X11 display ({name}) — a browser that asks for a window shows one', { name: String(d.name || '') });
+  else if (d.vnc && d.vnc.name) main = d.xvfb === true && answer.mode !== 'headless' ? t('Agent browsers do not use this machine’s VNC desktop ({name}) — a browser that asks for a window runs in a hidden window (the live view can still take over)', { name: String(d.vnc.name) }) : t('Agent browsers do not use this machine’s VNC desktop ({name}) — a browser that asks for a window runs headless (the live view can still take over)', { name: String(d.vnc.name) }); // B-d635
   // lane hooks-create H5: an UNSET preference asks for that window here (no desktop + Xvfb + auto) — said as the rule's result
   else if (NO_DESKTOP_WINDOW_DEFAULT && d.xvfb === true && answer.mode !== 'headless' && (answer.preference === null || answer.preference === undefined)) main = /* H5's line — said only while its switch is on (OFF in 2.369.200) */ t("This machine has no desktop session now — with the window setting unset, an agent's browser runs in a hidden window (the live view can still take over)");
   else if (d.xvfb === true && answer.mode !== 'headless' && answer.preference !== false) main = t('This machine has no desktop session now — a browser that asks for a window runs in a hidden window (the live view can still take over)');

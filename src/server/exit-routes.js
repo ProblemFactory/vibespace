@@ -6,6 +6,7 @@
 // ORCH tier.
 const fs = require('fs');
 const path = require('path');
+const { sameToken } = require('../pairing-token.js'); // B-8dda
 const { spawn } = require('child_process');
 
 const { mk } = require('./lazy.js');
@@ -25,7 +26,7 @@ const isAnyBearer = (req) => /^Bearer\s+\S/i.test(String((req.headers && req.hea
 function exitAgentEntry(req) {
   const token = bearerOf(req);
   if (!token || !token.startsWith('vsst_')) return null;
-  for (const [id, s] of activeSessions) if (s.agentToken === token) return [id, s];
+  for (const [id, s] of activeSessions) if (sameToken(token, s.agentToken)) return [id, s];
   return null;
 }
 function exitAgentSession(req) { const e = exitAgentEntry(req); return e ? e[1] : null; }

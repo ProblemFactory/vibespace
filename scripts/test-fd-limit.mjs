@@ -56,6 +56,10 @@ const tv = templateVerdict(TEMPLATE);
 ok(tv.ok, `install-service.sh's unit sets LimitNOFILE=${tv.value} — soft AND hard, at systemd's default hard limit`, tv.why);
 ok(/node raises its OWN soft\s*\n?#?\s*limit to the hard one/.test(TEMPLATE) && /FUSE daemon/.test(TEMPLATE), 'the template says why (node raises its own soft limit; the 12:03 EMFILE was the FUSE daemon\'s)');
 ok(/KillMode=process/.test(unitOf(TEMPLATE)) && /OOMScoreAdjust=-500/.test(unitOf(TEMPLATE)), 'the load-bearing neighbours are still there (KillMode=process, OOMScoreAdjust)');
+// B-442c (2026-10-02 16:23, the owner's ruling): one OOM-killed process in the unit (a leaked scratch daemon) must not stop the service
+const oomOf = (t) => (unitOf(t).match(/^OOMPolicy=(\S+)$/gm) || []).map((l) => l.split('=')[1]);
+ok(JSON.stringify(oomOf(TEMPLATE)) === '["continue"]', `install-service.sh's unit sets OOMPolicy=continue exactly once (${JSON.stringify(oomOf(TEMPLATE))}) — the kernel still kills the runaway, systemd no longer stops the server for it`);
+ok(oomOf(TEMPLATE.replace(/^OOMPolicy=continue\n/m, '')).length === 0, 'CONTROL: the template without the line names no OOMPolicy (systemd\'s default stop — the 16:23 outage)');
 ok(!templateVerdict(TEMPLATE.replace(/^LimitNOFILE=.*$/m, '')).ok, 'CONTROL: a template without the line fails the rule');
 ok(!templateVerdict(TEMPLATE.replace(/^LimitNOFILE=.*$/m, 'LimitNOFILE=65536')).ok, 'CONTROL: LimitNOFILE=65536 fails it too — it would LOWER the server\'s limit from 524288');
 ok(!templateVerdict(TEMPLATE.replace(/^LimitNOFILE=.*$/m, 'LimitNOFILE=1024:524288')).ok, 'CONTROL: a soft:hard pair fails it (the soft value is not what node runs at)');

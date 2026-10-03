@@ -110,6 +110,11 @@ class RemoteFs {
     });
   }
 
+  /** ONE remote command → its stdout (Buffer): a caller's own bounded script (the Design window's read lists and
+   *  base64-cats a folder in a single round trip — src/server/design-engine.js remoteReadScript). Same transport as
+   *  every metadata op here: ssh, or the device link for a dial host (whose answer is bounded by the link). */
+  async runScript(id, script, { timeoutMs = 30000, maxBuffer = 40 * 1024 * 1024 } = {}) { return this._run(id, String(script), { timeoutMs, maxBuffer }); }
+
   // Spawn a remote command and pipe its stdout to a stream (downloads).
   _spawn(id, cmd) {
     const h = this._host(id);

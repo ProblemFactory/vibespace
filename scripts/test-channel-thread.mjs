@@ -384,6 +384,62 @@ const M = mutantCopies('chanthread', REPO);
   for (const row of copiesCensus(M.files, M.dir, REPO, { minCopies: 5, label: 'chanthread: ' })) ok(row.pass, row.name, row.detail);
 }
 
+// ═══ lane lark-threads (A1, 2026-10-01): THE PLACE PATCH — a patched root HEADS ITS TOPIC ════════════════════════
+// The owner's post: Lark lists a root with `thread_id` only once its topic exists ("不返回说明该消息不是话题形式的消息") —
+// the copy stored before carries none. P1 widen-only (null → the vendor's key / root; never the reverse, never another
+// field), P2 makeRecord's own place rules (no self-root; a root needs a thread or a parent), P3 the first value wins, P4 a
+// bounded id. Through the REAL Lark normalizer: the stored root, patched by its later copy, is a TOPIC ROOT and its walked
+// replies sit under it; CONTROL: a verdict that REPLACES a key flips a quote chain into another thread.
+console.log('\n⑫ lane lark-threads: the place patch (widen-only) — a patched root heads its topic');
+{
+  const W = T.widenPlace;
+  const rows = [
+    ['null key ⇒ the vendor\'s key', W({}, { threadKey: 'omt_1' }, 'om_r'), { threadKey: 'omt_1', root: null }],
+    ['a key is never replaced', W({ threadKey: 'om_r' }, { threadKey: 'omt_1' }, 'om_x'), null],
+    ['never the reverse (a copy without the key)', W({ threadKey: 'omt_1' }, { threadKey: null }, 'om_r'), null],
+    ['a root for a reply with a thread', W({ threadKey: 'omt_1' }, { root: 'om_r' }, 'om_a'), { threadKey: null, root: 'om_r' }],
+    ['a root equal to the message is no root (R1)', W({}, { threadKey: 'omt_1', root: 'om_r' }, 'om_r'), { threadKey: 'omt_1', root: null }],
+    ['a root with neither a thread nor a parent is dropped (R2)', W({}, { root: 'om_r' }, 'om_a'), null],
+    ['a root for a quote reply (a parent)', W({ replyTo: 'om_r' }, { root: 'om_r' }, 'om_a'), { threadKey: null, root: 'om_r' }],
+    ['a 513-character key is no key (P4)', W({}, { threadKey: 'k'.repeat(513) }, 'om_r'), null],
+    ['a control character is no key (P4)', W({}, { threadKey: 'omt_\n1' }, 'om_r'), null],
+  ];
+  for (const [name, got, want] of rows) ok(eq(got, want), `widenPlace: ${name}`, got);
+  const f = T.foldPlaces([{ k: 'pl', msg: 'om_r', threadKey: 'omt_1', root: null }, { k: 'pl', msg: 'om_r', threadKey: 'omt_2', root: null }, { k: 'rx', msg: 'om_r' }, { k: 'pl', msg: 'om_a', threadKey: null, root: 'om_r' }, { k: 'pl', msg: 'om_a', threadKey: 'omt_1', root: 'om_x' }]);
+  ok(eq(f.get('om_r'), { threadKey: 'omt_1', root: null }) && eq(f.get('om_a'), { threadKey: 'omt_1', root: 'om_r' }) && f.size === 2, 'foldPlaces: file order, each field\'s FIRST value wins (a racing second patch is a no-op, never a flip); other side kinds ignored (P3)', [...f]);
+  const base = { vendorId: 'om_r', threadKey: null, replyTo: null, text: 'the post' };
+  const ap = T.applyPlace(base, { threadKey: 'omt_1' });
+  ok(ap !== base && ap.threadKey === 'omt_1' && ap.text === 'the post' && base.threadKey === null && T.applyPlace(base, null) === base && T.applyPlace({ ...base, threadKey: 'om_q' }, { threadKey: 'omt_1' }).threadKey === 'om_q', 'applyPlace: a new object only when something widens (the input never mutated); no patch / a stored key ⇒ the same record');
+  const cp = T.compactPlaces([{ k: 'pl', msg: 'a', at: 5, threadKey: 't1' }, { k: 'pl', msg: 'a', at: 9, root: 'r' }, { k: 'pl', msg: 'b', at: 3, threadKey: 't2' }], 10);
+  ok(eq(cp.map((x) => [x.msg, x.at, x.threadKey, x.root]), [['b', 3, 't2', null], ['a', 5, 't1', 'r']]), 'compactPlaces: one line per message (the folded place at its first instant), oldest first', cp);
+  // THROUGH THE REAL LARK NORMALIZER — the owner's shape: a plain group message stored with no thread; an hour later the
+  // vendor lists the same message WITH `thread_id` (its topic was born); the thread walk answers its replies (`root_id` +
+  // `thread_id`). Before the patch the root is plain and its replies form a topic whose root shows nothing; after it the
+  // root IS the topic's root (a chip), the replies sit under it.
+  const stored = lark.toRecord('lark', 'oc_grp', lk('om_post', T0 + 1000, { text: 'the post', sender: 'ou_zin' }));
+  const later = lark.toRecord('lark', 'oc_grp', lk('om_post', T0 + 1000, { thread: 'omt_new', text: 'the post', sender: 'ou_zin' }));
+  const r1 = lark.toRecord('lark', 'oc_grp', lk('om_r1', T0 + 5000, { parent: 'om_post', root: 'om_post', thread: 'omt_new', text: 'reply 1' }));
+  const plain = lark.toRecord('lark', 'oc_grp', lk('om_next', T0 + 6000, { text: 'next chat message' }));
+  ok(stored.threadKey === null && later.threadKey === 'omt_new' && !later.root, 'the fixture: the stored copy carries no thread (listed before its topic existed); the later copy names it (and no root — it IS the root)', [stored.threadKey, later.threadKey]);
+  const w = T.widenPlace({ threadKey: stored.threadKey, root: stored.root, replyTo: stored.replyTo }, { threadKey: later.threadKey, root: later.root }, stored.vendorId);
+  const patchedRoot = T.applyPlace(stored, w);
+  const before = T.threadIndex([stored, r1, plain], { convId: 'oc_grp' });
+  const afterIx = T.threadIndex([patchedRoot, plain], { convId: 'oc_grp' });
+  const afterWalk = T.threadIndex([patchedRoot, r1, plain], { convId: 'oc_grp' });
+  ok(T.placeKindOf(stored, T.threadIndex([stored, plain], { convId: 'oc_grp' })).kind === 'plain', 'before the patch (no reply walked yet): the stored root is a PLAIN message — no chip, nothing to open (the owner\'s screenshot)');
+  ok(T.placeKindOf(patchedRoot, afterIx).kind === 'topic-root' && afterIx.threads.get('omt_new') && afterIx.threads.get('omt_new').root === 'om_post' && afterIx.threads.get('omt_new').count === 0, 'after the patch, before any walk: the root HEADS ITS TOPIC (kind topic-root, the thread indexed with count 0 — the window draws "in thread · open to load")', T.placeKindOf(patchedRoot, afterIx));
+  const pl = T.placeOf(patchedRoot, afterWalk);
+  ok(T.placeKindOf(patchedRoot, afterWalk).kind === 'topic-root' && pl.thread && pl.thread.isRoot && pl.thread.count === 1 && T.placeKindOf(r1, afterWalk).kind === 'topic-reply' && before.threads.get('omt_new').root === 'om_post', 'after the walk: the patched root\'s chip counts its reply; the reply is a topic reply (its root named)', pl);
+  // CONTROL: a verdict that REPLACES a stored key — a quote reply (chain key = its root_id) offered a topic key is moved
+  // out of its chain: the quote-vs-topic rulings break (the quote becomes a topic member)
+  const RSRC = 'const tk = !c.threadKey && placeIdOk(o.threadKey) ? o.threadKey : null;';
+  ok(SRC.split(RSRC).length === 2, 'CONTROL setup: the widen-only line is present once');
+  const flip = M.load(MODEL, SRC.replace(RSRC, 'const tk = placeIdOk(o.threadKey) && o.threadKey !== c.threadKey ? o.threadKey : null;'), 'place-flips');
+  const quote = lark.toRecord('lark', 'oc_grp', lk('om_q', T0 + 7000, { parent: 'om_next', root: 'om_next', text: 'a quote' }));
+  const realQ = T.applyPlace(quote, { threadKey: 'omt_other' }), flipQ = flip.applyPlace(quote, { threadKey: 'omt_other' });
+  ok(realQ.threadKey === 'om_next' && flipQ.threadKey === 'omt_other' && T.placeKindOf(realQ, T.threadIndex([plain, realQ])).kind === 'quote' && flip.placeKindOf(flipQ, flip.threadIndex([plain, flipQ])).kind !== 'quote', 'CONTROL: a verdict that replaces a stored key moves a QUOTE out of its chain into a topic (the real one keeps it a quote)', [realQ.threadKey, flipQ.threadKey]);
+}
+
 // ═══ THE MODULE IS PURE ═════════════════════════════════════════════════════════════════════════
 {
   const reqs = [...SRC.matchAll(/require\(\s*['"]([^'"]+)['"]\s*\)/g)].map((m) => m[1]);

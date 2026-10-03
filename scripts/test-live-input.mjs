@@ -238,7 +238,7 @@ console.log('§4 the fit chip: a claim rules the page; the words say where the s
   ok(/そのウィンドウが操作を戻したあと/.test(holderJ.title) && !/相手/.test(holderJ.title), `ja: "そのウィンドウが操作を戻したあと" (never 相手): "${holderJ.title}"`);
   const zhTitles = kinds.map((c) => Z(c).title).concat([holderZ.title]);
   ok(zhTitles.every((x) => !/[。？！] /.test(x)) && kinds.map((c) => J(c).title).every((x) => !/[。？！] /.test(x)), 'zh / ja: no space after a full stop in any chip sentence (joined by the translated "{first} {then}")');
-  const raw = 'CDP error (Emulation.setDeviceMetricsOverride): browser_interrupted: The user took over this browser — your operation was interrupted';
+  const raw = 'CDP error (Emulation.setDeviceMetricsOverride): browser_interrupted: The user took over your window of this browser — your operation was interrupted';
   const un = FIT.fitChipState({ fit: { state: 'unavailable', width: 698, height: 435, error: raw, code: 'viewport_failed' } });
   ok(!/CDP|Emulation|browser_interrupted|Details/.test(W(un).title) && Z(un).title === '网页没法按这个窗口调整大小，所以按比例缩放显示。', `unavailable: never the raw error in the tooltip — zh "${Z(un).title}"`);
   const heldMine = FIT.fitChipState({ fit: { state: 'unavailable', width: 1398, height: 835, error: raw, code: 'held_while_driving' }, mine: true });

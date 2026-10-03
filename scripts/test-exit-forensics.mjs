@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // EXIT FORENSICS (B-3052) — a session's death leaves a record that names its actor.
+// §6 (B-f698): an UNEXPECTED exit while working is resumed ONCE by itself + one For-you item.
 //
 // The 2026-09-24 incident: three chat sessions died in one 40 ms window and
 // the journal held only `[session] exited <id> "<name>" mode=chat
@@ -978,11 +979,203 @@ function tombTeardown(eng, id, metaObj) {
   ok(!/wrapper=/.test(ctlLine), 'control (line): a copy without the facts suffix prints the pre-change line (no wrapper=/socket=)', ctlLine);
 }
 
+// ── § 6 AN UNEXPECTED EXIT IS RESUMED ONCE, BY ITSELF (B-f698) ──────────────
+// Owner 2026-10-02: a chat conversation that exits while WORKING, without a kill the
+// user or VibeSpace asked for, is resumed ONCE (nothing sent into it — no bill) and
+// the owner gets ONE For-you item; a second unexpected exit only notifies. The rule
+// is PURE (exit-facts unexpectedExitVerdict); src/server/unexpected-exit.js asks ONE
+// client to run the sidebar's own resume and files the item once the outcome is known.
+// Pre-fix (b924041f) the same teardown broadcast `exited` and nothing else.
+console.log('— §6 B-f698: an unexpected exit while working is resumed once by itself + one For-you item —');
+{
+  const XF = require(path.join(REPO, 'src/exit-facts.js'));
+  const V = (o) => XF.unexpectedExitVerdict({ mode: 'chat', midTurn: true, conversationId: 'c1', now: 1e12, ...o });
+  const F = (meta, extra) => ({ ...XF.exitFacts({ meta, socketPath: '/s', socketExists: false }), ...extra });
+  const act = (v) => `${v.action}/${v.why}`;
+  ok(act(V({ facts: F({ childExitCode: 1 }) })) === 'respawn/first', 'pure: a working chat whose CLI exited code 1 ⇒ respawn (the first time)');
+  ok(act(V({ facts: F({ childExitCode: null, childExitSignal: 'SIGKILL' }) })) === 'respawn/first' && act(V({ facts: F({ wrapperSignal: 'SIGHUP' }) })) === 'respawn/first',
+    'pure: a child killed by a signal, or a signalled wrapper (the 09-24 shape) ⇒ respawn');
+  ok(act(V({ facts: F({ childExitCode: 0 }) })) === 'null/clean' && act(V({ midTurn: false, facts: F({ childExitCode: 1 }) })) === 'null/idle' && act(V({ mode: 'terminal', facts: F({ childExitCode: 1 }) })) === 'null/not-chat',
+    'pure: code 0, an idle conversation, a terminal ⇒ nothing');
+  ok(act(V({ facts: F({ pid: 9 }) })) === 'respawn/first' && act(V({ remote: true, facts: F({ pid: 9 }) })) === 'null/remote' && act(V({ facts: F({ pid: 9 }, { wrapperFate: 'running' }) })) === 'null/wrapper-running',
+    'pure: no record on a LOCAL session (SIGKILL class, socket gone) ⇒ respawn; no record on a REMOTE one, or a wrapper still running ⇒ nothing (a CLI that may still run is never resumed beside)');
+  ok(act(V({ askedBy: 'interrupt', facts: F({ childExitCode: 130 }) })) === 'null/asked:interrupt' && act(V({ askedBy: 'terminate', facts: F({ wrapperSignal: 'SIGHUP' }) })) === 'null/asked:terminate',
+    'pure: an exit VibeSpace asked for (the Stop\'s SIGINT, Terminate) ⇒ nothing');
+  ok(act(V({ respawnedAt: 1e12 - 3600e3, facts: F({ childExitCode: 1 }) })) === 'notify/again' && act(V({ respawnedAt: 1e12 - XF.RESPAWN_ONCE_MS - 1, facts: F({ childExitCode: 1 }) })) === 'respawn/first'
+    && act(V({ conversationId: null, facts: F({ childExitCode: 1 }) })) === 'notify/no-conversation', 'pure: respawned within 24 h ⇒ notify only; a day later ⇒ respawn; no conversation id ⇒ notify');
+  const now = 5e12;
+  const fa = XF.exitFacts({ meta: { childExitCode: 130 }, asked: { by: 'interrupt', at: now - 2000 }, now });
+  const fs2 = XF.exitFacts({ meta: { childExitCode: 130 }, asked: { by: 'interrupt', at: now - XF.EXIT_ASK_FRESH_MS - 1 }, now });
+  const fh = XF.exitFacts({ meta: { childExitCode: 1 }, asked: { by: 'x\n[session] forged', at: now }, now });
+  ok(fa.askedBy === 'interrupt' && fa.suffix === ' wrapper=finalized socket=none asked=interrupt' && fa.eventSuffix.endsWith('/asked=interrupt') && fs2.askedBy === null && !/asked/.test(fs2.suffix) && fh.askedBy === null && !/forged/.test(fh.suffix),
+    'the exit line names the actor (asked=<by>) for 30 s; a stale or hostile mark says nothing', { fa: fa.suffix, fs2: fs2.suffix, fh: fh.suffix });
+
+  // the REAL teardown + the REAL orchestrator, a fake store + clients
+  const UE = require(path.join(REPO, 'src/server/unexpected-exit.js'));
+  const filed = [];
+  const userTodos = { add: (key, o) => { filed.push({ key, ...o }); return { id: 'u' + filed.length }; } };
+  const mkClient = () => ({ readyState: 1, sent: [], send(s) { this.sent.push(JSON.parse(s)); } });
+  let others = [];
+  const reinstall = (o = {}) => UE.install({ userTodos, sessionKeyFor: (s) => 'claude:' + (s.claudeSessionId || 'none'), activeSessions, clients: () => others, log: { log() { }, warn() { } }, tickMs: 20, landMs: 400, ...o });
+  let seq = 0;
+  function chatExit(eng, { cid = 'conv-' + (++seq), meta = { childExitCode: 1 }, streaming = true, bg = 0, host = null, asked = null, attached = null, ask = null } = {}) {
+    const id = 'xf-ue-' + (++seq);
+    if (meta) fs.writeFileSync(path.join(BUF, id + '.json'), JSON.stringify(meta));
+    let exitCb = null;
+    const duck = { pid: 1, onData() { }, onExit(cb) { exitCb = cb; }, write() { }, resize() { }, kill() { } };
+    const session = { name: 'ue ' + seq, mode: 'chat', backend: 'claude', claudeSessionId: cid, clients: new Map(attached ? [[attached, {}]] : []), buffer: '', socketPath: null, cwd: ROOT, host };
+    activeSessions.set(id, session);
+    eng.setupSessionPty(session, id, duck);
+    session._isStreaming = streaming;
+    if (bg) session._normalizer = { listeners: [], backgroundTasks: () => Array.from({ length: bg }, (_, i) => ({ id: 't' + i })) };
+    if (asked) session._exitAsked = asked;
+    if (ask) ask(session, id);
+    const orig = console.log; const mine = [];
+    console.log = (...a) => { const s = a.join(' '); if (s.includes('[session] exited')) mine.push(s); else orig(...a); };
+    try { exitCb({ exitCode: 0 }); } finally { console.log = orig; }
+    return { id, cid, session, line: () => mine.join('\n') };
+  }
+  const land = (cid) => activeSessions.set('xf-ue-live-' + cid, { mode: 'chat', backend: 'claude', claudeSessionId: cid, clients: new Map() });
+  const runLegs = async (eng, tag) => {
+    filed.length = 0; reinstall();
+    const mine = mkClient(), other = mkClient(); others = [other, mine];
+    // ① working, code 1: ONE client — the one that had it open — is asked; the item waits for the outcome
+    const a = chatExit(eng, { attached: mine });
+    await waitFor(() => !activeSessions.has(a.id) && (mine.sent.length || other.sent.length), 1500);
+    const asked1 = mine.sent.filter((m) => m.type === 'unexpected-exit-respawn');
+    const r1 = { asked: asked1.length, other: other.sent.length, keys: asked1[0] ? Object.keys(asked1[0]).join(',') : '', target: asked1[0]?.session, filedBefore: filed.length };
+    land(a.cid);
+    await waitFor(() => filed.length > 0, 1500);
+    r1.item = filed[0] || null;
+    // ② the same conversation exits unexpectedly AGAIN: no ask, one "again" item
+    const before = mine.sent.length + other.sent.length; filed.length = 0;
+    activeSessions.delete('xf-ue-live-' + a.cid);
+    chatExit(eng, { cid: a.cid, attached: mine });
+    await waitFor(() => filed.length > 0, 1500);
+    const r2 = { asks: mine.sent.length + other.sent.length - before, item: filed[0] || null };
+    // ③ the Stop's SIGINT: asked ⇒ the line names it, nothing asked, nothing filed
+    filed.length = 0; const b3 = mine.sent.length + other.sent.length;
+    const c = chatExit(eng, { meta: { childExitCode: null, childExitSignal: 'SIGINT' }, attached: mine, asked: { by: 'interrupt', at: Date.now() } });
+    await sleep(120);
+    const r3 = { line: c.line(), asks: mine.sent.length + other.sent.length - b3, filed: filed.length };
+    // ④ idle (between turns, nothing in flight) ⇒ nothing; ⑤ idle but background tasks live ⇒ respawn
+    const d = chatExit(eng, { streaming: false, attached: mine });
+    await sleep(120);
+    const r4 = { asks: mine.sent.filter((m) => m.session?.backendSessionId === d.cid).length, filed: filed.length };
+    const e = chatExit(eng, { streaming: false, bg: 2, attached: mine });
+    await waitFor(() => mine.sent.some((m) => m.session?.backendSessionId === e.cid), 1500);
+    const r5 = { asks: mine.sent.filter((m) => m.session?.backendSessionId === e.cid).length };
+    land(e.cid); await waitFor(() => filed.length > 0, 1500); filed.length = 0;
+    // ⑥ no client open: it WAITS, and the first client to appear is asked
+    others = [];
+    const f = chatExit(eng, {});
+    await sleep(150);
+    const late = mkClient(); others = [late];
+    await waitFor(() => late.sent.length > 0, 1500);
+    const r6 = { waited: filed.length === 0, askedLate: late.sent.filter((m) => m.session?.backendSessionId === f.cid).length };
+    land(f.cid); await waitFor(() => filed.length > 0, 1500); filed.length = 0;
+    // ⑦ asked, never came up ⇒ ONE "did not work" item after landMs
+    const g = chatExit(eng, { attached: mine });
+    await waitFor(() => filed.length > 0, 2500);
+    const r7 = { item: filed[0] || null, cid: g.cid };
+    return { r1, r2, r3, r4, r5, r6, r7 };
+  };
+  const H = await runLegs(realEng, 'head');
+  const { r1, r2, r3, r4, r5, r6, r7 } = H;
+  ok(r1.asked === 1 && r1.other === 0 && r1.keys === 'type,session' && r1.target && r1.target.backendSessionId && r1.target.serverId && r1.target.mode === 'chat' && r1.filedBefore === 0,
+    '① working + code 1: exactly ONE client is asked — the one that had it open — with the resume target only (no text, nothing for its stdin); no item before the outcome', r1);
+  ok(!!r1.item && /^"ue \d+" exited unexpectedly at \d\d:\d\d and was restarted; say continue if you need it$/.test(r1.item.text) && r1.item.origin === 'agent' && r1.item.key === 'claude:' + r1.target.backendSessionId
+    && r1.item.i18n?.text?.key === UE.TEXTS.respawned && /no turn was billed/.test(r1.item.detail) && /code=1 wrapper=finalized/.test(r1.item.detail),
+    '…once a live session carries it again: ONE For-you item in the owner\'s words, under the conversation, worded per device, the exit record in its detail', r1.item);
+  ok(r2.asks === 0 && !!r2.item && /exited unexpectedly again at \d\d:\d\d and was not restarted/.test(r2.item.text) && r2.item.urgency === 'high', '② a second unexpected exit of it: nothing asked, one "again" item', r2);
+  ok(r3.asks === 0 && r3.filed === 0 && / signal=SIGINT wrapper=finalized socket=none asked=interrupt$/.test(r3.line), '③ the Stop\'s SIGINT (asked): the line says asked=interrupt, nothing asked, nothing filed', r3.line);
+  ok(r4.asks === 0 && r4.filed === 0, '④ an IDLE conversation that exits code 1: nothing', r4);
+  ok(r5.asks === 1, '⑤ between turns but with background tasks live (the 09-24 shape): respawned', r5);
+  ok(r6.waited && r6.askedLate === 1, '⑥ no client open: the respawn waits and the first client to connect is asked', r6);
+  ok(!!r7.item && /restarting it did not work/.test(r7.item.text), '⑦ asked but nothing came up within landMs: ONE "did not work" item', r7.item);
+
+  // ⑧ the Stop's REAL path: claude-code postInterrupt's SIGINT fallback marks the session before it signals
+  const { ClaudeCodeAdapter } = require(path.join(REPO, 'src/adapters/claude-code.js'));
+  const stopLeg = async (AdapterClass) => {
+    const kid = spawn(process.execPath, ['-e', 'process.on("SIGINT", () => process.exit(130)); setInterval(() => {}, 1e6)'], { stdio: 'ignore' });
+    liveKids.add(kid.pid);
+    const got = new Promise((res) => kid.on('exit', (code, sig) => { liveKids.delete(kid.pid); res({ code, sig }); }));
+    const sid = 'xf-ue-stop-' + (++seq);
+    fs.writeFileSync(path.join(BUF, sid + '.json'), JSON.stringify({ streaming: true }));
+    const s = { _childPid: kid.pid };
+    new AdapterClass({ buffersDir: BUF }).postInterrupt(s, sid);
+    const ex = await within(got, 5000);
+    return { exitAsked: s._exitAsked || null, exit: ex };
+  };
+  const st = await stopLeg(ClaudeCodeAdapter);
+  ok(st.exitAsked?.by === 'interrupt' && Number.isFinite(st.exitAsked.at) && st.exit.code === 130, '⑧ the Stop\'s real SIGINT fallback marks _exitAsked {by:interrupt} before it signals the CLI', st);
+
+  // NEGATIVE CONTROLS — each patched copy must fail the leg it guards
+  const ss = read('src/server/session-stdout.js');
+  const CALL = "try { require('./unexpected-exit').onExit(session, id, facts, { midTurn }); }";
+  ok(ss.includes(CALL) && ss.includes('let midTurn = !!session._isStreaming;'), 'controls setup: the call and the capture exist verbatim');
+  const noCall = makeEngine(M.write('src/server/session-stdout.js', ss.replace(CALL, 'try { }'), 'ue-nocall'));
+  const C1 = await runLegs(noCall, 'nocall');
+  ok(C1.r1.asked === 0 && !C1.r1.item, 'NEGATIVE CONTROL: the teardown without the call (the base) asks nobody and files nothing', C1.r1);
+  const late2 = makeEngine(M.write('src/server/session-stdout.js', ss.replace(CALL, "try { require('./unexpected-exit').onExit(session, id, facts, { midTurn: !!session._isStreaming }); }"), 'ue-lateread'));
+  const C2 = await runLegs(late2, 'lateread');
+  ok(C2.r1.asked === 0 && C2.r5.asks === 0, 'NEGATIVE CONTROL: "working" read AFTER the teardown cleared it never respawns (① and ⑤ red)', { r1: C2.r1.asked, r5: C2.r5.asks });
+  const cc = read('src/adapters/claude-code.js');
+  const MARK = "      session._exitAsked = { by: 'interrupt', at: Date.now() };\n";
+  ok(cc.includes(MARK), 'controls setup: the Stop\'s mark exists verbatim');
+  const { ClaudeCodeAdapter: Unmarked } = require(M.write('src/adapters/claude-code.js', cc.replace(MARK, ''), 'ue-nomark'));
+  const st2 = await stopLeg(Unmarked);
+  ok(!st2.exitAsked && st2.exit.code === 130, 'NEGATIVE CONTROL: without the mark the Stop\'s SIGINT exit carries no actor (it would read as unexpected)', st2);
+  // WIRING PINS: the server installs it with the live clients; the client routes the ask to the sidebar Resume's own path
+  ok(/require\('\.\/src\/server\/unexpected-exit'\)\.install\(\{ userTodos, sessionKeyFor: [^\n]*activeSessions, clients: \(\) => wss\.clients(?:, buffersDir: BUFFERS_DIR)? \}\)/.test(read('server.js')), 'server.js installs the orchestrator with the store, the key fn and the live ws clients');
+  const appSrc = read('src/lib/app.js'), lcSrc = read('src/lib/session-lifecycle.js');
+  const body = lcSrc.slice(lcSrc.indexOf('  _respawnAfterExit(sess = {}) {'), lcSrc.indexOf('  // Jump the sidebar to a conversation'));
+  ok(/msg\.type === 'unexpected-exit-respawn' && msg\.session\) \{ try \{ this\._respawnAfterExit\(msg\.session\); \}/.test(appSrc)
+    && /this\.resumeSession\(sess\.backendSessionId, [^\n]*excludeWebuiId: sess\.serverId/.test(body) && !/\.send\(|sendInput|continue/.test(body),
+    'the client runs resumeSession (excluding the dead id) and sends nothing into the conversation');
+  // ── verify r1 (B-f698): who is never respawned, and the crash loop ──
+  const r1Table = (X) => {
+    const V1 = (o) => X.unexpectedExitVerdict({ mode: 'chat', midTurn: true, conversationId: 'c1', now: 1e12, facts: { code: 1, wrapperFate: 'finalized' }, ...o });
+    return { codex: act(V1({ backend: 'codex' })), opencode: act(V1({ backend: 'opencode' })), remote: act(V1({ remote: true })), claude: act(V1({ backend: 'claude' })),
+      loop: act(V1({ midTurn: false, respawnedAt: 1e12 - 60000 })), idleLate: act(V1({ midTurn: false, respawnedAt: 1e12 - 5 * 60000 - 1 })), idle: act(V1({ midTurn: false })),
+      loopClean: act(V1({ midTurn: false, respawnedAt: 1e12 - 60000, facts: { code: 0, wrapperFate: 'finalized' } })) };
+  };
+  const vr = r1Table(XF);
+  ok(vr.codex === 'null/backend:codex' && vr.opencode === 'null/backend:opencode' && vr.remote === 'null/remote' && vr.claude === 'respawn/first', 'r1 pure: a codex / OpenCode conversation or a REMOTE one is never respawned, even on a code-1 record (only a Claude conversation on this machine)', vr);
+  ok(vr.loop === 'notify/again' && vr.idleLate === 'null/idle' && vr.idle === 'null/idle' && vr.loopClean === 'null/clean' && XF.RESPAWN_STARTUP_MS === 5 * 60000, 'r1 pure: the crash loop — a respawned conversation that dies again while STARTING (idle, < 5 min) only notifies; idle later, never respawned, or a clean exit stays nothing', vr);
+  const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+  filed.length = 0; reinstall(); const mL = mkClient(); others = [mL];
+  const l1 = chatExit(realEng, { attached: mL });
+  await waitFor(() => mL.sent.length > 0, 1500); land(l1.cid); await waitFor(() => filed.length > 0, 1500);
+  const loop = { first: filed.map((f) => f.text) }; filed.length = 0; activeSessions.delete('xf-ue-live-' + l1.cid);
+  chatExit(realEng, { cid: l1.cid, streaming: false, attached: mL });
+  await waitFor(() => filed.length > 0, 1500); await pause(200);
+  Object.assign(loop, { asks: mL.sent.filter((m) => m.type === 'unexpected-exit-respawn').length, items: filed.map((f) => f.text) });
+  ok(loop.first.length === 1 && loop.asks === 1 && loop.items.length === 1 && /exited unexpectedly again at \d\d:\d\d and was not restarted/.test(loop.items[0]), 'r1 ⑨ (real teardown) the crash loop: the respawned CLI dies while starting (idle, code 1) ⇒ ONE "again" item, no second ask', loop);
+  filed.length = 0; reinstall({ landMs: 300 }); const mP = mkClient(); others = [mP];
+  const p1 = chatExit(realEng, { attached: mP }); await waitFor(() => mP.sent.length > 0, 1500);
+  chatExit(realEng, { cid: p1.cid, streaming: false }); await pause(800);
+  const pend = filed.map((f) => f.text);
+  ok(pend.length === 1 && /again/.test(pend[0]), 'r1 ⑨b it dies before it was ever seen live ⇒ the ONE item is "again" (the superseded respawn files no "did not work" on top)', pend);
+  filed.length = 0; reinstall(); const mX = mkClient(); others = [mX];
+  chatExit(realEng, { attached: mX, ask: (s) => { s.backend = 'codex'; } }); chatExit(realEng, { attached: mX, host: 'box-1' }); await pause(300);
+  ok(mX.sent.length === 0 && filed.length === 0, 'r1 ⑩ (real teardown) a codex conversation and a remote one exiting code 1 mid-turn: no ask, no item', { sent: mX.sent.length, filed: filed.length });
+  const xfSrc = read('src/exit-facts.js');
+  const GUARDS = ["  if ((backend || 'claude') !== 'claude') return no('backend:' + backend);\n", "  if (remote) return no('remote');\n"];
+  const LOOP = "  if (!midTurn && !restarting) return no('idle');\n";
+  ok(GUARDS.every((g) => xfSrc.includes(g)) && xfSrc.includes(LOOP), 'r1 controls setup: the two guards and the startup rule exist verbatim');
+  const cg = r1Table(require(M.write('src/exit-facts.js', GUARDS.reduce((s, g) => s.replace(g, ''), xfSrc), 'ue-r1-noguard')));
+  ok(cg.codex === 'respawn/first' && cg.remote === 'respawn/first', 'r1 NEGATIVE CONTROL: without the two guards a codex and a remote conversation are respawned (the r1 finding)', cg);
+  const cl = r1Table(require(M.write('src/exit-facts.js', xfSrc.replace(LOOP, "  if (!midTurn) return no('idle');\n"), 'ue-r1-noloop')));
+  ok(cl.loop === 'null/idle', 'r1 NEGATIVE CONTROL: without the startup rule the crash loop is silent (the r1 finding)', cl);
+  reinstall({ userTodos: null }); others = [];
+}
+
 // ── § 5 WIRING PINS over the source ─────────────────────────────────────────
 console.log('— §5 wiring: the line, the event and the tomb are built from exitFacts —');
 {
   const s = read('src/server/session-stdout.js');
-  ok(/require\('\.\.\/exit-facts\.js'\)/.test(s) && /const facts = exitFacts\(\{ meta: wrapperMeta, socketPath: session\.socketPath \|\| null, socketExists, wrapperRunning: settle\.running \}\)/.test(s), 'session-stdout requires exit-facts and builds `facts` from the ONE meta read');
+  ok(/require\('\.\.\/exit-facts\.js'\)/.test(s) && /const facts = exitFacts\(\{ meta: wrapperMeta, socketPath: session\.socketPath \|\| null, socketExists, wrapperRunning: settle\.running, asked: session\._exitAsked, now: Date\.now\(\) \}\)/.test(s), 'session-stdout requires exit-facts and builds `facts` from the ONE meta read');
   ok((s.match(/readFileSync\(path\.join\(BUFFERS_DIR, id \+ '\.json'\)/g) || []).length === 0 && /settleWrapperMeta\(wrapperMetaPath, WRAPPER_SETTLE_MS, finishTeardown\);/.test(s),
     'r4: the teardown reads the wrapper meta only through settleWrapperMeta (no second, unsettled read)');
   const lineSrc = s.split('\n').find((l) => l.includes('[session] exited'));
@@ -1000,7 +1193,128 @@ console.log('— §5 wiring: the line, the event and the tomb are built from exi
   }
 }
 
-for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 23 })) ok(r.pass, r.name, r.detail);
+// ── § 6c THE KILL-DOOR CENSUS (B-f698 verify r2) ────────────────────────────
+// Every call that can end a process on the SERVER side is declared here, per file, with WHY its exit is never
+// judged "unexpected": an ACTOR mark (`_exitAsked` / markAskedByPid) set BEFORE the kill, an ATTACH client (the CLI
+// keeps running under its dtach socket; a pty exit with the socket present re-attaches), an UNREGISTERED process (no
+// session ⇒ no teardown), a DEVICE (remote ⇒ never respawned), or NOT A CONVERSATION. Every CLIENT door (window
+// close, sidebar / card / Manage agents Terminate, pool switch + account change + restart-in-place, resume-all) is
+// App.killSession → the ws kill case ('terminate'). A NEW kill call anywhere, or a new file with one, turns this red
+// until it is declared — a respawn after a kill the user or VibeSpace asked for is the defect it fences.
+// (A kill through an injected alias — bridge-watch / opencode-serve `kill = (pid, sig) => process.kill(…)` — is
+// counted where the alias is defined.)
+console.log('— §6c every kill door is declared: an actor marked before the kill, or why its exit is never judged —');
+{
+  const KILL_CALL = /\b(?:process\.kill|\.kill)\s*\((?:[^()]|\([^()]*\))*\)/g;   // a liveness probe `kill(pid, 0)` is no door
+  const KILL_DOORS = {
+    'src/ws-handler.js': [2, 'actor terminate: the ws kill case — every client door is App.killSession'],
+    'src/adapters/claude-code.js': [1, "actor interrupt: the Stop's SIGINT fallback"],
+    'src/server/sysinfo-wiring.js': [1, 'actor user-signal: the System panel'],
+    'src/routes/sessions.js': [1, 'actor user-kill: /api/kill-pid'],
+    'src/server/session-stdout.js': [3, 'attach: reattachLocalPty + an abandoned device open-session'],
+    'src/server/bridge-watch.js': [2, "attach: shutdown's endAttachPtys + orphaned dtach -a clients (alias)"],
+    'src/pty-duck.js': [1, "attach: a device handle's pty duck"],
+    'src/server/boot-restore.js': [1, 'unregistered: a duplicate husk retired at boot before adoption'],
+    'src/agentd/agentd.js': [5, "device: the daemon's own pipe / pty sessions"],
+    'src/agentd/attach-cli.js': [1, 'device: an attach client'],
+    'src/agentd/client.js': [1, 'device: an attach client'],
+    'src/dial-session-bridge.js': [4, 'device: dial bridge handles'],
+    'src/server/dial-pairing.js': [1, 'device: a pairing handle'],
+    'src/hosts.js': [1, 'device: an install child on a timeout'],
+    'src/opencode-serve.js': [5, 'not respawned: OpenCode serve (backend ≠ claude)'],
+    'src/desktop-serve.js': [3, 'not a conversation: desktop apps'],
+    'src/device-mount.js': [4, 'not a conversation: rclone mounts (lane mac-pull-refresh added one — its bounded refresh child; composed at the 2.369.202 integration)'],
+    'src/machine-mounts.js': [1, 'not a conversation: mount probes'],
+    'src/mounts.js': [5, 'not a conversation: mounts'],
+    'src/jobs.js': [2, 'not a conversation: background jobs'],
+    'src/plugins.js': [2, 'not a conversation: plugins'],
+    'src/server/plugin-loader.js': [2, 'not a conversation: plugin children'],
+    'src/port-forward.js': [1, 'not a conversation: port forwards'],
+    'src/remote-fs.js': [2, 'not a conversation: file transfers'],
+    'src/routes/files.js': [5, 'not a conversation: file transfers'],
+    'src/server/browser-keeper.js': [9, 'not a conversation: agent browsers, their stale holders and the CLI install child (the 2.369.202 integration: lanes browser-windows / jobs-browser / browser-admin added four)'],
+    // the 2.369.202 integration — kill calls the other lanes of this release added beside lane unexpected-exit's census
+    'src/agentd/worker-pool.js': [1, "device: the daemon ends ITSELF by SIGKILL after its exit handlers while an fs worker is stuck in the kernel (lane runaway-daemon) — never a conversation"],
+    'src/codex-reset-helper.js': [2, 'not a conversation: the bounded codex app-server child of a reset-credit press (lane reset-path), its own process group, ended at its deadline'],
+    'src/vnc.js': [2, 'not a conversation: VNC (lane desktop-apps-safety B-956d added the held-display retry\'s end — composed at the 2.369.202 integration)'],
+    'src/window-targets.js': [2, 'not a conversation: X helpers'],
+  };
+  // the actor pins: the mark is set BEFORE the kill it names (the teardown reads it; the kill case deletes the session late)
+  const ACTOR_PINS = [
+    ['src/ws-handler.js', "session._exitAsked = { by: 'terminate', at: Date.now() };", ["process.kill(dpid, 'SIGTERM')", 'if (session.pty) session.pty.kill();']],
+    ['src/adapters/claude-code.js', "session._exitAsked = { by: 'interrupt', at: Date.now() };", ["process.kill(session._childPid, 'SIGINT')"]],
+    ['src/server/sysinfo-wiring.js', "markAskedByPid(pid, 'user-signal', { refreshOnly: sig === 'CONT' })", ["process.kill(pid, 'SIG' + sig)"]],
+    ['src/routes/sessions.js', "markAskedByPid(pid, 'user-kill')", ["process.kill(pid, 'SIGTERM')"]],
+  ];
+  const serverFiles = (root) => {
+    const out = ['server.js'];
+    const walk = (rel) => { for (const e of fs.readdirSync(path.join(root, rel), { withFileTypes: true })) {
+      const r = rel + '/' + e.name;
+      if (e.isDirectory()) { if (!(rel === 'src' && /^(lib|public)$/.test(e.name))) walk(r); } else if (e.name.endsWith('.js')) out.push(r); } };
+    walk('src');
+    return out;
+  };
+  function killDoorCensus(readOf, files) {
+    const bad = [];
+    for (const f of files) {
+      const n = [...readOf(f).matchAll(KILL_CALL)].filter((m) => !/,\s*0\s*\)$/.test(m[0])).length;
+      const want = KILL_DOORS[f] ? KILL_DOORS[f][0] : 0;
+      if (n !== want) bad.push(`${f}: ${n} kill call(s), ${want} declared${KILL_DOORS[f] ? ' (' + KILL_DOORS[f][1] + ')' : ''}`);
+    }
+    for (const f of Object.keys(KILL_DOORS)) if (!files.includes(f)) bad.push(`${f}: declared but gone`);
+    for (const [f, mark, kills] of ACTOR_PINS) {
+      const s = readOf(f), at = s.indexOf(mark);
+      for (const k of kills) { const ki = s.indexOf(k, Math.max(0, at)); if (at < 0 || ki < 0 || ki - at > 2500) bad.push(`${f}: the actor mark does not precede ${k}`); }
+    }
+    const ui = [];
+    const walkLib = (rel) => { for (const e of fs.readdirSync(path.join(REPO, rel), { withFileTypes: true })) { const r = rel + '/' + e.name; if (e.isDirectory()) walkLib(r); else if (e.name.endsWith('.js')) ui.push(r); } };
+    walkLib('src/lib');
+    const sends = ui.flatMap((f) => [...readOf(f).matchAll(/type: *'kill'/g)].map(() => f));
+    const ks = readOf('src/lib/session-lifecycle.js');
+    const body = ks.slice(ks.indexOf('  killSession(webuiId, backendSessionId) {'), ks.indexOf('\n  },', ks.indexOf('  killSession(webuiId, backendSessionId) {')));
+    if (sends.length !== 2 || sends.some((f) => f !== 'src/lib/session-lifecycle.js') || (body.match(/type: 'kill'/g) || []).length !== 2)
+      bad.push(`client: the ws kill is sent outside App.killSession (${sends.join(', ')})`);
+    return bad;
+  }
+  const files = serverFiles(REPO);
+  const real = (f) => read(f);
+  const census = killDoorCensus(real, files);
+  ok(census.length === 0, `every server kill call is declared (${Object.values(KILL_DOORS).reduce((a, [n]) => a + n, 0)} calls in ${Object.keys(KILL_DOORS).length} files), every actor is marked before its kill, the client kills only through App.killSession`, census.join(' | '));
+  // controls: each must go red
+  const mut = (file, fn) => (f) => (f === file ? fn(read(f)) : read(f));
+  ok(killDoorCensus(mut('src/server/ops-routes.js', (s) => s + "\nfunction stopIt(s) { process.kill(s._childPid, 'SIGTERM'); }\n"), files).some((b) => b.startsWith('src/server/ops-routes.js')),
+    'control: a NEW kill door in an undeclared file is red');
+  ok(killDoorCensus(mut('src/jobs.js', (s) => s + "\nfunction stopIt(s) { s.pty.kill(); }\n"), files).some((b) => b.startsWith('src/jobs.js')),
+    'control: one more kill call in a declared file is red');
+  ok(killDoorCensus(mut('src/ws-handler.js', (s) => s.replace("session._exitAsked = { by: 'terminate', at: Date.now() };", '')), files).some((b) => /actor mark does not precede/.test(b)),
+    'control: the ws kill case without its actor mark is red');
+  ok(killDoorCensus(mut('src/lib/chat-view.js', (s) => s + "\nfunction stopIt(ws, id) { ws.send({ type: 'kill', sessionId: id }); }\n"), files).some((b) => b.startsWith('client:')),
+    'control: a client kill sent around App.killSession is red');
+  // the actors the census names are each an asked exit, never a respawn — even mid-turn with a crash code
+  const { askedActor: AA, unexpectedExitVerdict: UV } = require(path.join(REPO, 'src/exit-facts.js'));
+  const t0 = 1_800_000_000_000;
+  for (const by of ['terminate', 'interrupt', 'user-signal', 'user-kill']) {
+    const v = UV({ mode: 'chat', backend: 'claude', midTurn: true, facts: { code: 1, signal: null, wrapperFate: 'finalized' }, conversationId: 'c-' + by, askedBy: AA({ by, at: t0 - 20000 }, t0), now: t0 });
+    ok(v.action === null && v.why === 'asked:' + by, `actor ${by}: a mid-turn exit it asked for is never respawned (${v.why})`);
+  }
+  // r2: STOP → TERM → CONT a minute later — the TERM is delivered at the CONT; the CONT re-stamps the mark
+  {
+    const UX = require(path.join(REPO, 'src/server/unexpected-exit.js'));
+    let clock = t0; const sx = { _childPid: 4242 }, other = { _childPid: 5151 };
+    UX.install({ activeSessions: new Map([['sx', sx], ['so', other]]), now: () => clock, log: { log() { }, warn() { } } });
+    UX.markAskedByPid(4242, 'user-signal');                         // the panel's TERM while the CLI is STOPped
+    clock += 60000;
+    ok(AA(sx._exitAsked, clock) === null, 'r2 control: a minute later the TERM mark alone is stale (the CONT would kill a "crash")');
+    UX.markAskedByPid(4242, 'user-signal', { refreshOnly: true });  // the panel's CONT delivers the pending TERM
+    UX.markAskedByPid(5151, 'user-signal', { refreshOnly: true });  // a CONT of a session nobody signalled
+    ok(AA(sx._exitAsked, clock) === 'user-signal' && UV({ mode: 'chat', midTurn: true, facts: { code: null, signal: 'SIGTERM', wrapperFate: 'finalized' }, conversationId: 'cx', askedBy: AA(sx._exitAsked, clock), now: clock }).action === null,
+      'r2: the CONT re-stamps the mark — the TERM it delivers is the user\'s kill, never respawned');
+    ok(other._exitAsked === undefined, 'r2: a CONT marks nothing new (a session never signalled stays unmarked)');
+    UX.install({});
+  }
+}
+
+for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 26 })) ok(r.pass, r.name, r.detail);
 
 console.log(`\n${fail ? '✗' : '✓'} test-exit-forensics: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

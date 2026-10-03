@@ -1603,5 +1603,44 @@ console.log('⑳ (r6) what you approve is what runs: the helper card shows the W
   check('⑳ the r6 words have zh + ja entries', keys6.every((k) => zh.includes(JSON.stringify(k) + ':') && ja.includes(JSON.stringify(k) + ':')), keys6.filter((k) => !zh.includes(JSON.stringify(k) + ':') || !ja.includes(JSON.stringify(k) + ':')));
 }
 
+console.log('㉑ (B-63f1) the launch ack as the transcript holds it — a text-block list — names the helper on a HISTORY rebuild');
+{
+  // Every real transcript (CLI 2.1.81 … 2.1.281, and this measured stream) carries a
+  // background Agent's launch ack as a ONE-TEXT-BLOCK LIST; the fast fixtures used a
+  // plain string, and the normalizer only read a string — a rebuild from the
+  // transcript alone (no stream task_started) never learned which helper a card launched.
+  const ackOf = (b) => b?.type === 'tool_result' && Array.isArray(b.content) && /^Async agent launched/.test(b.content[0]?.text || '');
+  const acks = recs.filter((r) => r?.type === 'user' && !r.parent_tool_use_id && Array.isArray(r.message?.content) && r.message.content.some(ackOf)).flatMap((r) => r.message.content.filter(ackOf));
+  check('㉑ the measured fixture carries every launch ack as a text-block list (the real shape)', acks.length >= 2, acks.length);
+  const launches = (MM) => {
+    const mm = new MM('b63f1');
+    mm.convertHistory(recs.filter((r) => (r?.type === 'assistant' || r?.type === 'user') && !r.parent_tool_use_id)); // the transcript's main records; no task replay
+    return acks.map((b) => {
+      const want = /agentId:\s*([a-z0-9]+)/.exec(b.content[0].text)?.[1];
+      const card = mm.messages.find((m) => m.toolCallId === b.tool_use_id);
+      return { call: b.tool_use_id, want, got: card?.taskInfo?.id || null, bg: card?.taskInfo?.backgrounded === true, mapped: !!card && mm.taskMsgByTaskId.get(want) === card.id };
+    });
+  };
+  const L = launches(MessageManager);
+  check('㉑ every background Agent card rebuilt from the transcript alone names its helper (taskInfo.id = the ack\'s agentId, backgrounded, the id → card map)', L.length === acks.length && L.every((x) => x.want && x.got === x.want && x.bg && x.mapped), L);
+  const RS = await import('file://' + path.join(REPO, 'src/lib/chat-run-summary.js'));
+  const MMx = require(path.join(REPO, 'src/message-manager.js'));
+  const lines = acks.map((b) => RS.toolResultSentence({ toolName: 'Agent', input: { description: 'Fetch it' }, output: MMx.toolResultText(b.content) }));
+  check('㉑ the card\'s visible line over the REAL ack text is "Helper started: …" (never the ack\'s JSON with the agentId)', lines.every((s) => s?.key === 'Helper started: {what}' && s.params.what === 'Fetch it'), lines);
+  const cr = read('src/lib/chat-renderers.js');
+  check('㉑ both of the renderer\'s visible-line sites hand the sentence table the result\'s TEXT (the parsed block list), never the card\'s JSON', (cr.match(/this\._resultSentence\(\{ \.\.\.block, output: resultText \}\)/g) || []).length === 2 && !/this\._resultSentence\(block\)/.test(cr));
+  // FIXTURE CENSUS: no suite feeds a launch ack as a plain-string tool_result any more
+  const plain = fs.readdirSync(path.join(REPO, 'scripts')).filter((f) => /^test-.*\.mjs$/.test(f))
+    .filter((f) => /type: 'tool_result'[^}\n]*content: (?:'Async agent launched|AGENT_ACK \})/.test(fs.readFileSync(path.join(REPO, 'scripts', f), 'utf8')));
+  check('㉑ FIXTURE CENSUS: no suite feeds an Agent launch ack as a plain-string tool_result (the shape no transcript holds)', plain.length === 0, plain);
+  // NEGATIVE CONTROL: the pre-fix normalizer read the card's JSON
+  const M21 = mutantCopies('helper-ask-b63f1', REPO);
+  const mmSrc = read('src/message-manager.js');
+  const pre = mmSrc.replace('const ackText = toolResultText(tr.content);', 'const ackText = resultText;');
+  check('㉑ (the pre-fix patch applied)', pre !== mmSrc);
+  const Lp = launches(M21.load('src/message-manager.js', pre, 'pre-b63f1').MessageManager);
+  check('㉑ NEGATIVE CONTROL: the pre-fix normalizer (the card\'s JSON) leaves every rebuilt launch card without its helper', Lp.length === acks.length && Lp.every((x) => x.got === null && !x.mapped), Lp);
+}
+
 console.log(`\n${failed ? '✗' : 'ALL PASS'} (${passed} passed${failed ? `, ${failed} failed` : ''})`);
 process.exit(failed ? 1 : 0);

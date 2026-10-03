@@ -17,6 +17,9 @@
 // group or changing membership is refused locally, before any request.
 // Exit codes: 0 ok · 1 refused (the server's typed code + its remedy) ·
 // 2 not inside a session · 3 server unreachable. Full manual: vibespace-docs msg.
+// DISPATCH (lane worker-dispatch, 2026-10-02): `dispatch <agent> --file brief.md` (or `send <agent> --wake
+// --compact-first "…"`) = a wake with the worker COMPACTED first when it is idle — POST /api/agent/msg/dispatch;
+// the answer says whether it compacted and why not. A conversation's verb: refused locally inside a job.
 'use strict';
 const API = process.env.VIBESPACE_API;
 const SESS = process.env.VIBESPACE_SESSION_TOKEN;
@@ -26,13 +29,18 @@ const AS_JOB = !SESS && !!JOBT;
 if (!API || !TOKEN) { console.error('vibespace-msg: not inside a VibeSpace session (VIBESPACE_API / token missing)'); process.exit(2); }
 
 const argv = process.argv.slice(2);
-// flags anywhere: --context "…" --quiet --wake --yes --before <ts> --limit <n>
+// flags anywhere: --context "…" --quiet --wake --yes --compact-first --before <ts> --limit <n> --file <path> --at <member> (repeatable)
 const flags = {};
 const args = [];
+const atRefs = [];
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
   if (a === '--quiet' || a === '--wake' || a === '--yes') flags[a.slice(2)] = true;
-  else if (a === '--context' || a === '--before' || a === '--limit') { flags[a.slice(2)] = argv[i + 1]; i++; }
+  else if (a === '--compact-first') flags.compactFirst = true;
+  else if (a === '--again') flags.again = true;                       // verify r2 ②: send the same text again on purpose
+  else if (a.startsWith('--again=')) flags.again = a.slice('--again='.length);   // reuse a printed nonce = a retry of that attempt
+  else if (a === '--context' || a === '--before' || a === '--limit' || a === '--file') { flags[a.slice(2)] = argv[i + 1]; i++; }
+  else if (a === '--at') { if (argv[i + 1] !== undefined) atRefs.push(argv[i + 1]); i++; }
   else args.push(a);
 }
 const verb = args[0];
@@ -53,6 +61,9 @@ const REMEDY = {
   'too-few-members': 'a group needs at least one other agent besides you',
   self: 'that is this session',
   'bad-member': 'this session cannot act as itself yet (no conversation id of its own) — wait a moment and repeat the command; the server\'s line above says when',
+  'not-chat': 'nothing was sent. A terminal session cannot be compacted by an agent — send the brief without the compaction: vibespace-msg send <agent> --wake "…"',
+  'unknown-mention': 'nothing was sent. @ a member by its exact name or conversation id (the candidates above), or name it with --at <name|id>; a literal "@word" goes in backticks as code',
+  'ambiguous-mention': 'nothing was sent. @ the member by its conversation id (one of the ids above), or --at <id>',
   'confirm-wakes': 'nothing was sent. Repeat with --yes if waking them all NOW is worth that many billed turns — or send without --wake (add --quiet to an invite): they read it on their next turn, free',
 };
 function refused(j, status) {
@@ -77,19 +88,24 @@ async function call(method, p, body) {
 const USAGE = `vibespace-msg — message other agent sessions (groups; Task-Group scoped reach)
   vibespace-msg list                              ← sessions you can see/message (name · id · state)
   vibespace-msg group list                        ← the groups you are in (id · members · unread · your notify mode; also: groups)
-  vibespace-msg send <name|id|group> "text" [--wake] [--yes]
+  vibespace-msg send <name|id|group> "text" [--at <member>]… [--wake] [--yes]
         ← an agent: your direct (two-member) group with it · a group: everyone in it.
-          Default: it reaches them on THEIR next turn (free). @name in the text, or --wake, wakes them NOW (a billed turn each).
+          Default: it reaches them on THEIR next turn (free). @name in the text, --at <name|id>, or --wake, wakes them NOW (a billed turn each).
+          Every @ is resolved to a member's id when you send: an @ that names no member (or two) is refused with the candidates.
           Waking more than 5 at once is refused with the count until you add --yes; at most 8 wakes per minute are yours.
+  vibespace-msg dispatch <agent> --file brief.md | "text"   ← hand a WORKER its next brief: compacted first if idle, then woken (ONE billed turn)
+        = send <agent> --wake --compact-first "text". Waits for the compaction (≤ 3 min); says whether it compacted and why not.
+          Compacts only a worker in a Task Group you both belong to, idle, with no owner input for 10 min; the compaction
+          counts as an unattended turn beside the wake. A retry of the same brief within 10 min re-sends nothing.
   vibespace-msg read <group> [--before <ts>] [--limit N]   ← the group's log (older history on purpose); each message ends with where it
           stands: "waiting for <name>'s next turn" (not handed over yet) / "read by <name>" / muted / left
   vibespace-msg group create <name> <member…> [--context "why"] [--quiet] [--yes]
   vibespace-msg group invite <group> <member…> [--context "why"] [--quiet] [--yes]   ← an invite wakes each invitee (billed) unless --quiet; > 5 need --yes
   vibespace-msg group leave <group> | kick <group> <member> | rename <group> <new name> | archive <group>
-  vibespace-msg group notify <group> <next-turn|mention|always|mute>        ← YOUR mode in that group
+  vibespace-msg group notify <group> <next-turn|mention|always|mute>        ← YOUR mode in that group (mention = only what @names you reaches you)
 Members: a session name or conversation id · <group>: a group id (g-…) or its name — an ambiguous name is refused with the candidates.
 Reach: same Task Group = mutual by default; other groups only if opened by the user.
-Inside a Background Work job: list / group list / read / send only (as the conversation that owns the job).`;
+Inside a Background Work job: list / group list / read / send only (as the conversation that owns the job) — never dispatch.`;
 
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 /** THE wake echo: every wake is a billed turn, so the count is always said. */
@@ -140,11 +156,43 @@ const deliveryClause = (rows) => {
     }
     return;
   }
+  if (verb === 'dispatch' || (verb === 'send' && flags.compactFirst)) {
+    if (AS_JOB) { console.error('vibespace-msg: refused [job-token] — a dispatch is a conversation\'s verb; a job never compacts a conversation\n  → ' + REMEDY['job-token']); process.exit(1); }
+    const to = args[1];
+    let text = args[2];
+    if (flags.file) {
+      if (text) { console.error('vibespace-msg: give the brief as text OR --file, not both'); process.exit(1); }
+      try { text = require('node:fs').readFileSync(flags.file, 'utf8'); }   // a node BUILTIN: a host has no checkout, it has node
+      catch (e) { console.error(`vibespace-msg: cannot read the brief file ${flags.file} (${e.code || e.message})`); process.exit(1); }
+    }
+    if (verb === 'send' && !flags.wake) { console.error('vibespace-msg: --compact-first needs --wake (a compaction is only worth paying for before a turn you start now) — or use: vibespace-msg dispatch <agent> --file brief.md'); process.exit(1); }
+    if (!to || !text || !text.trim()) { console.error('usage: vibespace-msg dispatch <agent> --file brief.md | "text"   (= send <agent> --wake --compact-first "text")'); process.exit(1); }
+    const body = { to, text, compactFirst: true };
+    if (flags.yes) body.yes = true;
+    if (flags.again) { body.again = true; if (typeof flags.again === 'string') body.attempt = flags.again; }   // verify r2 ②: a fresh attempt (or a retry of a printed nonce)
+    console.error('dispatching — an idle worker is compacted first (a large conversation takes 1–2 minutes; this waits up to 3)…');
+    const r = await call('POST', '/api/agent/msg/dispatch', body);
+    const rec = r.record || {};
+    const worker = (rec.target && rec.target.name) || to;
+    // verify r1 ③: 'unknown' = no end record was observed (it may have finished); ②: a replay re-sent nothing
+    const said = rec.compacted === true ? 'compacted' : rec.compacted === false ? 'NOT compacted' : rec.compacted === 'unknown' ? 'compaction outcome UNKNOWN' : r.replay ? 'ALREADY delivered' : 'no compaction';
+    console.log(`dispatched to "${worker}" — ${said}: ${rec.why || ''}`);
+    if (rec.compactionCounted) console.log('  the compaction counts as one unattended turn (a model call nobody typed) on the same ceiling as the wake');
+    const wk = rec.wake || {};
+    if (r.replay) console.log(`  nothing re-sent, nobody woken (not billed)${wk.reason ? ' — ' + wk.reason : ''}`);
+    else if (wk.billed) console.log(`  ${wakeCount(1)}${wk.identity ? ' (on ' + wk.identity.name + ')' : ''} — the brief is its next turn`);
+    else console.log(`  not woken (not billed)${wk.reason ? ' — ' + wk.reason : ''} — the brief reaches it on its next turn`);
+    if (rec.reply && rec.reply.notify) console.log(`  the worker's reply ${rec.reply.words}${r.group ? ` — change it with: vibespace-msg group notify ${r.group.id} <next-turn|mention|always|mute>` : ''}`);
+    if (r.attempt) console.log(`  attempt ${r.attempt} — if this answer is lost, retry THIS exact attempt with: vibespace-msg dispatch ${to} --again=${r.attempt} …`);
+    if (r.group) console.log(`  posted to your direct group "${r.group.name}" (${r.group.id}); replies arrive in this conversation`);
+    return;
+  }
   if (verb === 'send') {
     const to = args[1];
     const text = args[2];
     if (!to || !text) { console.error('usage: vibespace-msg send <name|id|group> "text" [--wake]'); process.exit(1); }
     const body = { to, text, wake: !!flags.wake };
+    if (atRefs.length) body.at = atRefs;
     if (flags.yes) body.yes = true;
     const r = await call('POST', '/api/agent/msg/send', body);
     if (r.posted) {

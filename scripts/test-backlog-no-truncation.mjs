@@ -104,6 +104,36 @@ const target = tasks.get(g.id).backlog[3];
 const rc = post({ claim: target.id });
 check('claim echoes the item by id', rc.out && rc.out.item && rc.out.item.id === target.id && rc.out.item.claimedBy.includes('claude:sess1'), JSON.stringify(rc.out).slice(0, 200));
 
+// (3b) B-31d7 (2026-09-26, B-4ffb stored twice): the store keeps an item's ONE LINE to 500 characters
+// (CAPS.backlogItem) and its detail to 6000. A 600-character title was stored CLIPPED, the identity
+// echo compared the clipped text with the sent one, and the route answered "the item was not stored —
+// nothing parked" for an item that WAS stored — the agent parked it again. Over the cap the route now
+// refuses BEFORE the write, by name, with the recipe (shorter line, the rest in --detail); at the cap
+// (CJK, ①…⑨, →) it is stored whole and echoed by id. edit --text / --detail keep the same caps.
+{
+  const unit = '①②③④⑤⑥⑦⑧⑨ 去重 → (括号) / ';
+  const mkText = (n) => unit.repeat(Math.ceil(n / unit.length)).slice(0, n - 1) + '。'; // never ends in a space (the route trims)
+  const count = () => tasks.get(g.id).backlog.length;
+  const n0 = count();
+  const long = mkText(612);
+  const rl = post({ add: long, detail: 'the rest' });
+  check('B-31d7: a 612-character line is refused 400 by name — the cap, its length, --detail, nothing parked', rl.code === 400 && rl.out && /612/.test(rl.out.error || '') && /500/.test(rl.out.error || '') && /--detail/.test(rl.out.error || '') && /nothing parked/.test(rl.out.error || ''), JSON.stringify(rl));
+  check('B-31d7: …and the store is unchanged (no clipped twin of it)', count() === n0 && !tasks.get(g.id).backlog.some((b) => b.text === long.slice(0, 500)), `count ${n0} → ${count()}`);
+  const at = mkText(500);
+  const ra = post({ add: at });
+  check('B-31d7: exactly 500 characters (①…⑨, →, CJK) is stored WHOLE and echoed by its fresh id', ra.code === 200 && ra.out.item && ra.out.item.text === at && tasks.get(g.id).backlog.some((b) => b.id === ra.out.item.id && b.text === at), JSON.stringify(ra).slice(0, 200));
+  const mid = mkText(330);
+  const rm = post({ add: mid, detail: '330 characters, as reported' });
+  check('B-31d7: the reported ~330-character CJK title is stored and echoed', rm.code === 200 && rm.out.item && rm.out.item.text === mid, JSON.stringify(rm).slice(0, 200));
+  const rd = post({ add: 'a short line', detail: 'x'.repeat(6001) });
+  check('B-31d7: a 6001-character detail is refused 400 by name (never clipped silently)', rd.code === 400 && /6001/.test(rd.out.error || '') && /6000/.test(rd.out.error || ''), JSON.stringify(rd).slice(0, 200));
+  const n1 = count();
+  const re = post({ edit: ra.out.item.id, text: mkText(501) });
+  check('B-31d7: edit --text past the cap is refused 400 and the item keeps its words', re.code === 400 && /501/.test(re.out.error || '') && tasks.get(g.id).backlog.find((b) => b.id === ra.out.item.id).text === at && count() === n1, JSON.stringify(re).slice(0, 200));
+  const rde = post({ edit: ra.out.item.id, detail: 'y'.repeat(6001) });
+  check('B-31d7: edit --detail past the cap is refused 400', rde.code === 400 && !tasks.get(g.id).backlog.find((b) => b.id === ra.out.item.id).detail, JSON.stringify(rde).slice(0, 200));
+}
+
 // (4) source pins
 const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
 const tg = strip(fs.readFileSync(path.join(REPO, 'src/task-groups.js'), 'utf8'));

@@ -39,6 +39,14 @@ const quotaModel = require('./quota-model.js');
 const { authoritativeScopesOf } = quotaModel;
 
 const probeLog = require('./server/usage-probe-log.js'); // the raw /usage probe ring (2.369.109)
+// THE PANEL PROBE'S ARGV (B-9b40): `/usage` and no MCP server at all. Measured on
+// the claude 2.1.288 binary: print mode loads the account's claude.ai connectors
+// unless the MCP config is strict (`headlessSyncsClaudeAiConnectors: !strictConfig
+// && …`), so every probe listed the account's connectors and opened the mcp-proxy
+// for each one — five mcp-logs-claude-ai-* dirs under each member's probe cwd,
+// one file per probe. `--strict-mcp-config` with no `--mcp-config` = none loaded;
+// the probe's one vendor call is the panel. One spelling: the spawn and the log.
+const PANEL_PROBE_ARGS = Object.freeze(['-p', '/usage', '--strict-mcp-config']);
 function setupUsage({ app, accounts, hosts, usageHistory, activeSessions, serverSetting, ensureDir, USAGE_CACHE_FILE, USAGE_CACHE_DIR, CODEX_SESSIONS_DIR, META_DIR, AVAILABLE_MODELS, BUFFERS_DIR, apiDerivedWindow, establishedWindows, repairIdentityAnchors, probeUsageForAccountKey, onMemberReadingFresh, CLAUDE_CMD }) {
 const https = require('https');
 function readUsageCache() {
@@ -605,9 +613,9 @@ async function refreshViaCliPanel(key) {
       if (credsDir) env.CLAUDE_SECURESTORAGE_CONFIG_DIR = credsDir;
       if (probeConfigDir) env.CLAUDE_CONFIG_DIR = probeConfigDir;
       const bin = CLAUDE_CMD || 'claude';
-      probeRec.argv = [bin, '-p', '/usage'];
+      probeRec.argv = [bin, ...PANEL_PROBE_ARGS];
       const t0 = Date.now();
-      execFile(bin, ['-p', '/usage'], { env, cwd: probeCwd, timeout: 60000, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+      execFile(bin, [...PANEL_PROBE_ARGS], { env, cwd: probeCwd, timeout: 60000, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
         probeRec.ms = Date.now() - t0;
         probeRec.exitCode = err ? (typeof err.code === 'number' ? err.code : (err.killed ? 'killed' : String(err.code || err.signal || 'error'))) : 0;
         probeRec.rawStdout = stdout == null ? '' : String(stdout);
@@ -1453,4 +1461,4 @@ app.get('/api/usage', (req, res) => {
   return { refreshViaCliPanel, panelVerdictFor, getOAuthToken, usagePollingEnabled, refreshRateLimit, reloadRateLimitCache, ingestPassiveUsage, summarizeCodexRateLimit, summarizeCodexRateLimits };
 }
 
-module.exports = { setupUsage, parseCliUsageText, normalizeCodexRateLimit };
+module.exports = { setupUsage, parseCliUsageText, normalizeCodexRateLimit, PANEL_PROBE_ARGS };

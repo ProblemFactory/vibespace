@@ -1261,12 +1261,19 @@ console.log('— ⑥ the REAL wrapper against the REAL `codex app-server` (evide
   } else {
     const ver = (which.stdout || '').trim();
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-qs-real-'));
+    // A SCRATCH CODEX_HOME (lane hook-root-guard, B-c77a): this leg ran the real
+    // app-server on the AMBIENT home, and the owner's ~/.codex/config.toml
+    // carried 676 `[projects."/tmp/vs-qs-real-…"] trust_level = "trusted"`
+    // tables from it (2026-10-01; 692 in all). A thread needs no login
+    // (measured on 0.159.3: thread/start answers on a logged-out home), so
+    // nothing this leg proves needs the owner's home. test-architecture §50b.
+    const codexHome = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-qs-home-'));
     const buf = path.join(dir, 's.buf'), sidecar = path.join(dir, 's.json');
     const w = spawn(process.execPath, [path.join(REPO, 'data/bin/codex-chat-wrapper.js'), buf, sidecar, 'codex', 'app-server'], {
       stdio: ['pipe', 'pipe', 'pipe'],
       // no ambient API key (B-5f0b): this leg starts no turn, and a key must
       // not be the thing that would make one billable if a future codex did
-      env: { ...withoutVendorKeys(process.env), CODEX_WEBUI_CWD: dir, VIBESPACE_API: '', VIBESPACE_SESSION_TOKEN: '', VIBESPACE_SKIP_AGENT_HOOKS: '1' },
+      env: { ...withoutVendorKeys(process.env), CODEX_HOME: codexHome, CODEX_WEBUI_CWD: dir, VIBESPACE_API: '', VIBESPACE_SESSION_TOKEN: '', VIBESPACE_SKIP_AGENT_HOOKS: '1' },
     });
     let out = '', werr = '';
     w.stdout.on('data', (d) => { out += d; }); w.stderr.on('data', (d) => { werr += d; });
@@ -1293,6 +1300,7 @@ console.log('— ⑥ the REAL wrapper against the REAL `codex app-server` (evide
       await sleep(400);
     }
     try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+    try { fs.rmSync(codexHome, { recursive: true, force: true }); } catch {}
   }
 }
 

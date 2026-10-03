@@ -76,7 +76,7 @@ check('countKinds zero-fills every kind and still counts an unlisted one (never 
 })());
 check('files/errors/running composition', S.runSummaryLabel({ byKind: S.countKinds(['read', 'read']), files: ['a.js', 'b.js', 'c.js', 'd.js', 'e.js'], running: true }, t) === '2 file reads — a.js, b.js, c.js, d.js, +1 · running…');
 check('mcpParts splits mcp__server__tool and rejects the rest', JSON.stringify(S.mcpParts('mcp__a__b_c')) === '{"server":"a","tool":"b_c"}' && S.mcpParts('Bash') === null && S.mcpParts('') === null);
-check('the pure module imports nothing (DOM-free by construction)', !/^\s*import /m.test(read('src/lib/chat-run-summary.js')));
+check('the pure module imports nothing but the PURE note rule (DOM-free by construction; B-40f8: src/assistant-note.js)', (read('src/lib/chat-run-summary.js').match(/^\s*import .*$/gm) || []).every((l) => /from '\.\.\/assistant-note\.js';/.test(l)));
 
 // ── inc-mudv05ja-n5rv: WHEN THE FOLD PASS RUNS — the PURE classifier ─────────
 {

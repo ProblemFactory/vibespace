@@ -14,12 +14,13 @@ a message to another agent session now — one verb per authority semantics.
 ## Commands
 
 ```
-vibespace-channels list                          # conversations visible to you
+vibespace-channels list [--all]                  # conversations visible to you; --all = + the TITLES you may request
 vibespace-channels read <conv> [--limit N] [--since <ms>] [--fresh] [--thread <msg id>]
 vibespace-channels refresh <conv> [--thread <msg id>]
                                                  # fetch the newest messages NOW (a floor applies); --thread loads that thread
-vibespace-channels reply <conv> "text" [--why "…"] [--to <vendor msg id> [--in-thread] [--also-in-chat]] [--replaces <proposalId>]
+vibespace-channels reply <conv> "text" [--why "…"] [--to <vendor msg id> [--in-thread] [--also-in-chat]] [--all] [--cc <addr>[,<addr>]] [--replaces <proposalId>]
                                                  # PROPOSE a reply; --to = the message it answers (WHERE it lands: see "Where a reply lands")
+                                                 # mail: --all = reply to everyone on it, --cc = add people (see "Replying to everyone on a mail")
 vibespace-channels react <conv> <msg id> <emoji key> [--why "…"]
 vibespace-channels unreact <conv> <msg id> <emoji key> [--why "…"]
                                                  # PROPOSE a reaction (the user approves it unless the account's policy is direct)
@@ -31,6 +32,9 @@ vibespace-channels search "words" [--account <id>] [--limit N]
                                                  # messages you can see (the stored logs)
 vibespace-channels status [<proposalId>]         # what you were given (access / notification) + your proposals
 vibespace-channels request <conv> "why"          # ask for access (requestable rows only)
+vibespace-channels watch <conv|account> [--mode next-turn|wake] [--keyword "w"[,"w2"]] [--cap N] [--why "…"]
+                                                 # YOUR notification on what you can read (next-turn = free, at once; wake = the user approves)
+vibespace-channels unwatch <conv|account>        # remove YOUR notification there
 ```
 
 `<conv>` is the key `list` prints: `<adapter>/<conversation id>`.
@@ -155,6 +159,31 @@ The user gives you two DIFFERENT things, in this order:
   request <conv> "why"` files ONE item in the user's For you tray (bottom right) with your
   reason; approval grants YOU visibility on that ONE conversation and
   touches no group default.
+- **Finding what to ask for (`list --all`).** Where the user lets agents see an
+  account's list (group chats by default, single chats only if they turn it
+  on), `list --all` adds the conversations you cannot read yet: their TITLE,
+  kind, member count and last activity — never a message, never a name beyond
+  the title — each marked `requestable`. `request <conv> "why"` works on them.
+- **Watching on your own (`watch`).** On a conversation you can READ (or a whole
+  account you have access to) you may ask to be told about new messages:
+  `watch <conv>` (every message) or `watch <conv> --keyword deploy,incident`
+  (any of the words). `--mode next-turn` (the default) is FREE and set at once:
+  the news rides your next turn, nothing wakes you. `--mode wake` is a billed
+  turn, so it is NOT yours to set: it files ONE request in the user's For you
+  tray naming exactly what Approve writes (the words, `--cap` wakes a day);
+  until they approve, nothing wakes you. Ask for `--mode wake` ONLY when the
+  user asked to be told at once (or to act on those messages immediately);
+  otherwise next-turn. You may hold at most 20 notifications of your own and
+  2 wake asks waiting; a notification the user REMOVED in Notify… stays
+  removed — `watch` there is refused by name (ask them, or file a wake ask
+  they approve). Your row shows in the user's Notify…
+  as "set by the agent"; a notification the USER set for you is theirs — `watch`
+  never replaces it (it says so), `unwatch` removes only your own. A watch
+  never lets you read anything: a conversation you cannot read is refused with
+  the `request` to file first. `--regex` is not offered (use `--keyword`).
+- **Access on the whole account counts.** Access the user gave you on the
+  whole account (or through a rule, or an approved request) is access on each
+  of its conversations — a notification on one chat needs nothing more.
 - Uniform errors: a conversation you cannot see and one that does not exist
   give the same `not-found` answer. You cannot widen your own reach — ask
   the user.
@@ -200,6 +229,28 @@ The user gives you two DIFFERENT things, in this order:
   from the message it answers (`--reply-to`, else the thread's newest stored
   message) — shown on the card and sent to exactly those; a message arriving
   later never re-targets it.
+
+## Replying to everyone on a mail (`--all`, `--cc`)
+
+- A plain `reply` on a mail answers the SENDER only (its Reply-To, else its
+  From). To answer everyone — a support ticket with its desk, the list and
+  the people on Cc — use `reply <conv> "text" --all`: To = the sender + the
+  message's To, Cc = its Cc, without the account's own address and without
+  duplicates.
+- `--cc a@x.com[,b@y.com]` adds people the mail did not have (plain
+  addresses; with or without `--all`). The card lists them apart, as added
+  by you. Adding people is composing to them, so it needs what `compose`
+  needs: access to the WHOLE account (access to this conversation alone ⇒
+  `bad-proposal`, `why: cc`, nothing created — reply without `--cc`, or ask
+  the user), and it goes out directly only when a composed message would.
+- The reply STAYS IN THE THREAD (In-Reply-To / References) — the people on
+  it see one conversation. Replying in a thread with everyone is `reply
+  --all`, never `compose`: a composed message starts a new, unthreaded mail.
+- The recipients are resolved when you propose, printed by the CLI
+  (`reply all — to: … · cc: …`) and shown on the user's approval card —
+  every one of them — before Approve.
+- Only mail offers it: on a chat channel `--all` / `--cc` are refused
+  (`bad-proposal`, `why: replyAll` / `cc`) and nothing is created.
 - Invisible direction / zero-width characters (U+202A–E, U+2066–9, U+200E/F,
   U+061C, U+200B, U+2060, U+FEFF) are refused in a recipient, a subject and
   `--reply-to` (`bad-proposal`, named); in the text they are shown to the
@@ -263,6 +314,7 @@ A reply's PLACEMENT is one of four, and each channel offers only some:
 
 - `compose <account> --to a@x.com[,b@y.com] [--cc c@z.com] --subject "…" "text"`
 - To and Cc only: a `bcc` or a reply target on a NEW message is refused by name (`bad-proposal`, `why: bcc|replyTo`) — every recipient of a composed message is visible.
+- `compose` is for a NEW conversation. To answer a mail thread with more people, use `reply --all` (and `--cc`) — it stays in the thread.
   starts a NEW conversation (a new email thread) on an account you have access
   to AS A WHOLE (`status` lists it as "the whole account"). It is a PROPOSAL
   exactly like `reply`: the account's policy decides (review by default), a

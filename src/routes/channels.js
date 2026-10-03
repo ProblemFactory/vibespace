@@ -418,6 +418,8 @@ router.put('/api/channels/adapters/:id', async (req, res) => {
     // switch = `409 client-change-needs-reauth`: use Re-authorize)
     // lane channel-threads (spec §2.6): the account's row for an AGENT's reactions — propose | direct | off
     if (b.reactionPolicy !== undefined) { const rp = await engine().setReactionPolicy(req.params.id, b.reactionPolicy); if (!rp.ok) return res.status(rp.code === 'not-found' ? 404 : 400).json({ error: rp.error, code: rp.code }); out = { ...out, ...rp }; }
+    // lane channel-agent-watch W2: may agents see the LIST of conversations (titles, to request one) — groups / single chats
+    if (b.agentDirectory !== undefined) { const ad = await engine().setAgentDirectory(req.params.id, b.agentDirectory); if (!ad.ok) return res.status(ad.code === 'not-found' ? 404 : 400).json({ error: ad.error, code: ad.code }); out = { ...out, ...ad }; }
     if (typeof b.label === 'string') out = { ...out, ...(await engine().setLabel(req.params.id, b.label)) };
     if (b.credential && typeof b.credential === 'object' && !Array.isArray(b.credential)) out = { ...out, ...(await engine().setCustomSecret(req.params.id, { appId: b.credential.appId, appSecret: b.credential.appSecret })) };
     res.json(out);
@@ -523,7 +525,7 @@ router.get('/api/channels/:adapterId/:convId', (req, res) => {
     const conv = eng.conversationView(req.params.adapterId, req.params.convId);
     if (!conv) return bad(res, 404, 'No such conversation');
     const rec = eng.adapterRecords().adapters.find((a) => a.id === conv.adapterId) || null;
-    res.json({ conversation: conv, adapter: rec ? eng.adapterView(rec) : null });
+    res.json({ conversation: conv, adapter: rec ? eng.adapterView(rec) : null, accounts: eng.accountsBrief() });   // B-5fe1: the bar's account badge
   } catch (e) { fail(res, e); }
 });
 
@@ -538,6 +540,18 @@ router.get('/api/channels/:adapterId/:convId', (req, res) => {
  * record's `vendorId`, which invariant 2 makes unique per conversation; the
  * store orders by `(at, vendorId)`.
  */
+// lane lark-threads (B3): THE OWNER'S NAME FOR AN AUTHOR (the VibeSpace 备注) — owner-only (an agent bearer is refused by
+// name; with sign-in on the cookie gate answers first); `{alias}` (empty / null clears it). docs/kb-api.md
+router.patch('/api/channels/:adapterId/authors/:id', async (req, res) => {
+  try {
+    if (refuseAgentBearer(req, res, 'a name for an author is the owner\'s — an agent token may not set one')) return;
+    const b = req.body || {};
+    if (!('alias' in b)) return bad(res, 400, 'alias is required (a string; empty clears it)', { code: 'bad-request' });
+    const r = await engine().setAlias(req.params.adapterId, req.params.id, b.alias === null ? '' : b.alias, { by: 'user' });
+    if (!r.ok) return bad(res, r.code === 'not-found' ? 404 : 400, r.error, { code: r.code });
+    res.json(r);
+  } catch (e) { fail(res, e); }
+});
 router.get('/api/channels/:adapterId/:convId/messages', (req, res) => {
   try {
     forHost(req);
@@ -792,7 +806,7 @@ router.post('/api/channels/:adapterId/:convId/propose', async (req, res) => {
   try {
     forHost(req);
     const b = req.body || {};
-    answer3(res, await engine().propose({ kind: 'user' }, req.params.adapterId, req.params.convId, { text: b.text, replyTo: b.replyTo, why: b.why, attachments: b.attachments, ...(b.inThread !== undefined ? { inThread: b.inThread } : {}), ...(b.placement !== undefined ? { placement: b.placement } : {}) }, wakeGuards(b)));
+    answer3(res, await engine().propose({ kind: 'user' }, req.params.adapterId, req.params.convId, { text: b.text, replyTo: b.replyTo, why: b.why, attachments: b.attachments, ...(b.inThread !== undefined ? { inThread: b.inThread } : {}), ...(b.placement !== undefined ? { placement: b.placement } : {}), ...(b.replyAll !== undefined ? { replyAll: b.replyAll } : {}) }, wakeGuards(b)));
   } catch (e) { fail(res, e); }
 });
 /** THE OWNER'S OWN MESSAGE (design §22, 2.369.159): the composer's Send on
@@ -804,7 +818,7 @@ router.post('/api/channels/:adapterId/:convId/send', async (req, res) => {
   try {
     forHost(req);
     const b = req.body || {};
-    answer3(res, await engine().propose({ kind: 'user' }, req.params.adapterId, req.params.convId, { text: b.text, replyTo: b.replyTo, attachments: b.attachments, direct: true, ...(b.inThread !== undefined ? { inThread: b.inThread } : {}), ...(b.placement !== undefined ? { placement: b.placement } : {}) }, wakeGuards(b)));
+    answer3(res, await engine().propose({ kind: 'user' }, req.params.adapterId, req.params.convId, { text: b.text, replyTo: b.replyTo, attachments: b.attachments, direct: true, ...(b.inThread !== undefined ? { inThread: b.inThread } : {}), ...(b.placement !== undefined ? { placement: b.placement } : {}), ...(b.replyAll !== undefined ? { replyAll: b.replyAll } : {}) }, wakeGuards(b)));
   } catch (e) { fail(res, e); }
 });
 /** APPROVE (`{text?}` = approve with an edit) — the unconditional convCaps
@@ -937,7 +951,7 @@ function groupReply(res, r) {
   const status = code === 'not-found' || code === 'unreachable' ? 404 : code === 'not-allowed' || code === 'not-member' ? 403 : code === 'archived' || code === 'pair-group' || code === 'wake-count-mismatch' ? 409 : 400;
   // r3: a wake-count-mismatch carries the group view the server counted
   // against, so the panel repaints before its next click
-  return res.status(status).json({ error: (r && r.error) || 'refused', code, ...(r && Number.isFinite(r.wakes) ? { wakes: r.wakes } : {}), ...(r && r.group && code === 'wake-count-mismatch' ? { group: r.group } : {}) });
+  return res.status(status).json({ error: (r && r.error) || 'refused', code, ...(r && Number.isFinite(r.wakes) ? { wakes: r.wakes } : {}), ...(r && r.group && (code === 'wake-count-mismatch' || code === 'unknown-mention' || code === 'ambiguous-mention') ? { group: r.group } : {}), ...(r && (code === 'unknown-mention' || code === 'ambiguous-mention') ? { token: r.token || '', candidates: r.candidates || [] } : {}) });
 }
 router.get('/api/channel-groups', (req, res) => {
   try { forHost(req); res.json({ groups: groupsEngine().list() }); } catch (e) { fail(res, e); }
@@ -970,7 +984,7 @@ router.post('/api/channel-groups/:id/:verb', async (req, res) => {
     const group = req.params.id;
     let r;
     switch (req.params.verb) {
-      case 'post': r = await ge.post({ group, from: OWNER, text: b.text, wake: b.wake === true, consent: ownerConsent(b), mayWake: ownerPacer(ge) }); break;   // the owner's own words go DIRECTLY (§22.5), never through the outbox
+      case 'post': r = await ge.post({ group, from: OWNER, text: b.text, wake: b.wake === true, consent: ownerConsent(b), mayWake: ownerPacer(ge), mentions: Array.isArray(b.mentions) ? b.mentions.slice(0, 64) : [] }); break;   // B-ff04: the @-picker's places, by id   // the owner's own words go DIRECTLY (§22.5), never through the outbox
       case 'invite': r = await ge.invite({ by: OWNER, group, members: Array.isArray(b.members) ? b.members.map(String) : [], context: b.context || '', quiet: b.quiet === true, consent: ownerConsent(b), mayWake: ownerPacer(ge) }); break;
       case 'kick': r = await ge.kick({ by: OWNER, group, member: b.member }); break;
       case 'rename': r = await ge.rename({ by: OWNER, group, name: b.name }); break;

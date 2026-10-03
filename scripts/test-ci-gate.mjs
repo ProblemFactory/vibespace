@@ -1330,6 +1330,60 @@ console.log('\n§8 lanes, the serial table, the impact scope, the full-tier cloc
   ok(heavyBlocker({ dir: bdir, head: G, repoRoot: brepo })?.sha === G, 'an affected RED blocks exactly like a full red');
 }
 
+// ── §8b SHARDS: the Actions mirror runs the heavy tier as n slices (lane mirror-green r2, 2026-10-03) ──
+console.log('\n§8b shards — every heavy suite in exactly one slice, the serial group whole, the matrix runs every slice');
+{
+  const { shardPlan, shardCensus, parseShard, SERIAL } = await import('./ci.mjs');
+  const heavy = SUITES.filter((s) => s.tier === 'heavy');
+  const srcOf = (name) => { try { return fs.readFileSync(path.join(REPO, 'scripts', name + '.mjs'), 'utf-8'); } catch { return ''; } };
+  for (const n of [1, 2, 3, 4, 6]) {
+    const p = shardPlan(heavy, n, { sourceOf: srcOf });
+    const problems = shardCensus(heavy, p.shards, p.serial);
+    ok(p.shards.length === n && !problems.length && p.shards.every((s) => s.length),
+      `n=${n}: ${p.shards.map((s) => s.length).join(' + ')} = ${heavy.length} heavy suites, each in exactly one shard, none empty${problems.length ? ' — ' + problems.slice(0, 3).join('; ') : ''}`);
+  }
+  const p4 = shardPlan(heavy, 4, { sourceOf: srcOf });
+  ok(SERIAL.every((r) => p4.serial.includes(r.name)) && p4.serial.every((name) => p4.shards[0].some((s) => s.name === name)),
+    `the serial group (${p4.serial.join(', ')}) is whole in shard 1`);
+  const split = (p) => p.shards.map((s) => s.map((x) => x.name).sort().join()).join('|');
+  ok(split(shardPlan([...heavy].reverse(), 4, { sourceOf: srcOf })) === split(p4), 'the SAME table gives the SAME split — a function of the names and n, not of the table order');
+  const grown = shardPlan([...heavy, { name: 'test-zz-added-suite', tier: 'heavy' }], 4, { sourceOf: srcOf });
+  ok(grown.shards.every((s, k) => p4.shards[k].every((x) => s.some((y) => y.name === x.name))), 'adding a suite moves NO other suite (a hash of the name, not a position)');
+  // CONTROLS: the census is red for each way a split can lose or double a suite
+  const victim = p4.shards[2][0].name;
+  const dropped = p4.shards.map((s, k) => (k === 2 ? s.slice(1) : s));
+  ok(shardCensus(heavy, dropped, p4.serial).some((x) => x.includes(victim) && /NO shard/.test(x)), `CONTROL: ${victim} dropped from every shard is RED (no mirror job would run it)`);
+  const twice = p4.shards.map((s, k) => (k === 3 ? [...s, p4.shards[2][0]] : s));
+  ok(shardCensus(heavy, twice, p4.serial).some((x) => x.includes(victim) && /AND shard/.test(x)), 'CONTROL: a suite in two shards is RED');
+  ok(shardCensus([{ name: 'a' }, { name: 'b' }], [[{ name: 'a' }], [{ name: 'b' }]], ['a', 'b']).some((x) => /serial group is split/.test(x)), 'CONTROL: a serial group split over two shards is RED');
+  ok(parseShard('2/4')?.i === 2 && parseShard('4/4')?.n === 4 && !parseShard('0/4') && !parseShard('5/4') && !parseShard('1/0') && !parseShard('x') && !parseShard(''),
+    'parseShard: <i>/<n> with 1 ≤ i ≤ n; anything else refused');
+  // THE CLI, end to end (every call is a --dry-run: a refusal that failed would otherwise start a real tier)
+  const cli = (args) => spawnSync(process.execPath, [path.join(REPO, 'scripts', 'ci.mjs'), ...args], { cwd: REPO, encoding: 'utf-8', env: { ...process.env, ...GIT_ENV } });
+  const listed = [];
+  for (let i = 1; i <= 4; i++) {
+    const r = cli(['--heavy', '--shard', `${i}/4`, '--dry-run']);
+    if (r.status === 0) listed.push(...r.stdout.split('\n').filter((l) => /^  test-/.test(l)).map((l) => l.trim())); else listed.push(`(shard ${i}/4 exit ${r.status})`);
+  }
+  ok(listed.length === heavy.length && new Set(listed).size === heavy.length && heavy.every((s) => listed.includes(s.name)),
+    `--heavy --shard i/4 --dry-run × 4 lists ${listed.length} names = the ${heavy.length} heavy suites, each once`);
+  const bad = cli(['--heavy', '--shard', '5/4', '--dry-run']);
+  ok(bad.status === 2 && /--shard/.test(bad.stderr), '--shard 5/4 is a loud exit 2 (never a run of nothing)');
+  ok(cli(['--heavy', '--shard', '1/4', '--only=' + heavy[0].name, '--dry-run']).status === 2, '--shard with --only is refused (a shard slices the FULL tier)');
+  // THE WORKFLOW: the matrix runs every slice its denominator names, and one aggregate job is the tier's status
+  const wf = fs.readFileSync(path.join(REPO, '.github', 'workflows', 'ci.yml'), 'utf-8');
+  const mat = /shard:\s*\[([\d,\s]+)\]/.exec(wf);
+  const den = /--shard \$\{\{ matrix\.shard \}\}\/(\d+)/.exec(wf);
+  const slots = mat ? mat[1].split(',').map((x) => Number(x.trim())) : [];
+  ok(!!den && slots.length === Number(den[1]) && slots.every((v, k) => v === k + 1), `ci.yml's heavy matrix runs shards [${slots.join(', ')}] of ${den ? den[1] : '?'} — every slice, once`);
+  ok(/needs:\s*heavy-shards/.test(wf) && /if:\s*always\(\)/.test(wf) && /test "\$\{\{ needs\.heavy-shards\.result \}\}" = success/.test(wf),
+    'one aggregate `heavy` job needs the matrix, runs always() and is green only when needs.heavy-shards.result is success');
+  // CONTROL of that census: a matrix that drops a slice is red
+  const short = wf.replace(/shard:\s*\[[\d,\s]+\]/, 'shard: [1, 2, 3]');
+  const sm = /shard:\s*\[([\d,\s]+)\]/.exec(short)[1].split(',').map((x) => Number(x.trim()));
+  ok(!(sm.length === Number(den ? den[1] : 0)), 'CONTROL: a matrix of [1, 2, 3] under --shard …/4 fails the matrix census');
+}
+
 // ── §9 THE SCRATCH-ORPHAN REAPER (2.369.104) — decided over a FAKE proc root ──
 // 2026-09-16: 504 leaked vibespace-device daemons + 552 scratch node processes
 // + 2,137 orphaned dtach clients (86 GB, load 15) — every worktree server a

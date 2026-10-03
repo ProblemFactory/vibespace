@@ -171,7 +171,7 @@ function stashKindOf(e) {
 function noticeCardView(from, text, { facts = null } = {}) {
   const body = noticeBody(text);
   const f = typeof facts === 'function' ? facts(body) : null;
-  if (f && f.title) return { title: f.title, body: f.body != null ? String(f.body) : body, folded: true, foldLabel: f.foldLabel || null };   // 2026-09-28: a fact may name the body it leaves under the expander and the expander's own label (the hand-over card)
+  if (f && f.title) return { title: f.title, body: f.body != null ? String(f.body) : body, folded: true, foldLabel: f.foldLabel || null, ref: f.ref || null };   // B-c127: a channel block's facts name the conversation (`ref`, src/channel-ref.js wakeFacts)   // 2026-09-28: a fact may name the body it leaves under the expander and the expander's own label (the hand-over card)
   const name = typeof from === 'string' ? from.trim() : '';
   if (name && isNotificationSender(name) && name !== 'VibeSpace browser') return { title: { text: name }, body, folded: false };
   // nothing names it: the first sentence of what happened is the title, the

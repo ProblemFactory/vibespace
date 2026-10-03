@@ -36,7 +36,8 @@
  *               'plain' (the class of the previous fetch), streak (request-
  *               class fetches since the last due-row fetch), calls, fetches
  *               (ingests that succeeded), vendorCalls, discovery: { wanted,
- *               done }, hostScan: { wanted, done }, pressKey, failed, cut }
+ *               done }, hostScan: { wanted, done }, pressKey, failed, cut,
+ *               feed (rule 21), recheck: { armed, pending: [key], done, perPass } (rule 22) }
  *   FACTS (read by `next` only, never written by `apply`):
  *   now       the engine's clock (ms)
  *   stopped   the engine is stopping · dropped  the account was removed /
@@ -76,9 +77,11 @@
  *                                                          drop / failure / not-connected)
  *   { type: 'discover' }                                   the discovery walk
  *   { type: 'feed' }                                       ONE change-feed page (rule 21)
+ *   { type: 'recheck', key }                               ONE recent-roots page (rule 22)
  *   { type: 'scanHost' }                                   the scan lane's host facts
  *   { type: 'fetch', key, chargeTo: 'timer'|'owner'|'agent', waiters, due,
- *     rider, pressed }                                     ONE conversation
+ *     rider, pressed, recheck }                            ONE conversation (`recheck` = rule 22b:
+ *                                                          the round holds the OWNER's press)
  *   { type: 'wait', ms, next, key }                        rule 18: the bucket
  *                                                          is short — sleep
  *                                                          `ms` (≤ 1 s), then ask
@@ -320,6 +323,7 @@ function open(snap, { origin = 'timer', force = false, backoff = false, timerDue
       due: [], fetchedAt: {}, inflight: null, last: null, streak: 0, calls: 0, fetches: 0, vendorCalls: 0,
       discovery: { wanted: false, done: false }, hostScan: { wanted: !!hostScan, done: false },
       feed: { wanted: false, done: false, pages: 0, perPass: FEED_PAGES_PER_PASS },
+      recheck: { armed: false, pending: [], done: 0, perPass: RECHECK_PER_PASS },
       pressKey: null, failed: null, cut: false,
     },
   };
@@ -369,7 +373,7 @@ function mergeFront(p, rows, requests) {
   return front.concat(p.due.filter((d) => !moved.has(d.key)));
 }
 /** THE TIMER'S TURN: the due list by the clock NOW (and whether discovery / the change feed is due). */
-function turn(snap, { due = [], discoveryDue = false, feedDue = false, feedPerPass = FEED_PAGES_PER_PASS } = {}) {
+function turn(snap, { due = [], discoveryDue = false, feedDue = false, feedPerPass = FEED_PAGES_PER_PASS, recheckDue: rd = [], recheckPerPass = RECHECK_PER_PASS } = {}) {
   const p = snap.pass;
   if (!p || p.backoff || p.failed || p.cut) return snap;
   const q = { ...p, timerWork: true, turnPending: false };
@@ -378,6 +382,13 @@ function turn(snap, { due = [], discoveryDue = false, feedDue = false, feedPerPa
   // RULE 21: the timer's turn marks the feed wanted (once per pass — a done feed is not re-armed by a later turn)
   const f0 = q.feed || { wanted: false, done: false, pages: 0, perPass: FEED_PAGES_PER_PASS };
   if (feedDue && !f0.done && !f0.wanted) q.feed = { ...f0, wanted: true, perPass: Math.max(1, Math.floor(Number(feedPerPass) || FEED_PAGES_PER_PASS)) };
+  // RULE 22a: the timer's turn arms the recheck ONCE per pass (a later turn never re-arms it)
+  const r0 = q.recheck || { armed: false, pending: [], done: 0, perPass: RECHECK_PER_PASS };
+  if (!r0.armed) {
+    const keys = [];
+    for (const d of Array.isArray(rd) ? rd : []) { const k = d && typeof d === 'object' ? d.key : d; if (typeof k === 'string' && k && !keys.includes(k)) keys.push(k); }
+    q.recheck = { ...r0, armed: true, pending: keys, perPass: Math.max(0, Math.floor(Number(recheckPerPass) || 0)) };
+  }
   return { ...snap, pass: q };
 }
 /** Close a pass without a step (the engine's crash path). */
@@ -426,6 +437,12 @@ function feedEligible(s, p, humanWaiting) {
   if (!(s.budget && s.budget.remainingUnits > 0)) return false;
   if (!(s.feedPages && Number(s.feedPages.remaining) > 0)) return false;
   return f.pages < (Number(f.perPass) || FEED_PAGES_PER_PASS);
+}
+/** RULE 22a — may the next step be ONE recheck? (only with nothing else pending — the caller asks with an empty queue) */
+function recheckEligible(s, p) {
+  const r = p.recheck;
+  if (!r || !r.pending.length || r.done >= r.perPass || p.backoff || !p.timerWork || p.cut) return false;
+  return !!(s.budget && s.budget.remainingUnits > 0);
 }
 /** RULE 7's order: humans first, then the filing order of the earliest waiter. */
 const byRank = (a, b) => (Number(b.human) - Number(a.human)) || (a.minSeq - b.minSeq);
@@ -482,6 +499,8 @@ function next(s) {
   // 21. the change feed — the timer's work, never ahead of a waiting human, its own minute and per-pass bound, BEFORE discovery
   if (feedEligible(s, p, humanWaiting)) return paced(s, base, { ...base, type: 'feed' });
   if (p.discovery.wanted && !p.discovery.done && !humanWaiting && s.budget.remainingUnits > 0) return paced(s, base, { ...base, type: 'discover' });
+  // 22a. the recent-roots recheck — nothing else pending (the lowest priority), the timer's work, the minute, paced
+  if (!queue.length && recheckEligible(s, p)) return paced(s, base, { ...base, type: 'recheck', key: p.recheck.pending[0] });
   // 16. nothing pending
   if (!queue.length) {
     const idle = p.backoff && p.fetches === 0;
@@ -510,6 +529,7 @@ function next(s) {
     chargeTo: pick.due ? 'timer' : pick.human ? 'owner' : 'agent',
     waiters: ids(pick.reqs),   // THE ROUND
     due: pick.due, rider: pick.due && pick.reqs.length > 0, pressed: press !== null && pick.key === press,
+    recheck: pick.reqs.some((r) => r.origin === 'owner'),   // 22b: the owner's press re-lists the conversation at once
   });
 }
 
@@ -546,6 +566,14 @@ function apply(snap, act, result) {
       if (result && result.skip) { p.feed = { ...p.feed, wanted: false, done: true, skipped: String(result.skip) }; break; }
       if (result && Array.isArray(result.due) && result.due.length) p.due = mergeFront(p, result.due, requests);
       { const more = !!(result && result.more) && p.feed.pages < (Number(p.feed.perPass) || FEED_PAGES_PER_PASS); p.feed = { ...p.feed, wanted: more, done: !more }; }
+      break;
+    case 'recheck':   // RULE 22a: one page — the key leaves the pending list when it begins; an error is rule 3
+      if (!p) break;
+      if (result === undefined) { p.inflight = { type: 'recheck', key: act.key }; p.recheck = { ...p.recheck, pending: p.recheck.pending.filter((k) => k !== act.key) }; break; }
+      p.inflight = null;
+      p.vendorCalls++;
+      p.recheck = { ...p.recheck, done: (Number(p.recheck.done) || 0) + 1 };
+      if (result && result.error) { p.failed = String(result.error); break; }
       break;
     case 'discover':
     case 'scanHost':
@@ -760,7 +788,63 @@ function threadApply(mem, ev, now) { return rxApply(mem, ev, now); }
  *     The step is `next`'s (after the cut, before discovery), the merge `mergeFront`, the move `apply`'s `feed`.
  */
 
+// ── RULE 22: THE RECENT-ROOTS RECHECK (lane lark-threads, 2026-10-01) ──
+/**
+ * 22. THE RECENT-ROOTS RECHECK (lane lark-threads A2 — the owner: "这个帖子应该是有个thread的，但显然你这里没展示出来"):
+ *     where thread replies are listed SEPARATELY, a message stored before anyone answered it in a thread carries no
+ *     thread id — the vendor names the topic on its root only once the topic exists, and the conversation's own walk
+ *     stops at its stored anchor, so the root is never listed again. The recheck re-lists the conversation's NEWEST
+ *     page (no anchor stop) and offers it to the store's place door (a stored root widens to its new thread; the
+ *     thread is then owed — rule 20's walk). WHEN, decided here:
+ *     22a THE TIMER'S RECHECK: `recheckDue(rows, {now, everyMs, activeMs, max})` names the conversations due — live
+ *         (never paused, never unlisted), on a separately-listed adapter, not a topic group (every message there is a
+ *         topic already), walked at least once (a first walk reads that page anyway), active within `activeMs`
+ *         (RECHECK_ACTIVE_MS — a quiet conversation's newest page grows no new topic) and not rechecked within
+ *         `everyMs` (the setting `channels.threadRecheckSec`, default 3600) — the oldest recheck first, at most `max`.
+ *         `turn(snap, {recheckDue})` arms them ONCE per pass; `next` sends `{type:'recheck', key}` ONLY when nothing
+ *         else is pending (no waiter, no due row — the lowest priority: a recheck never delays a human or a due
+ *         row), with the timer's work, never inside a back-off, with the minute unspent (rule 9), paced (rule 18), at
+ *         most `recheckPerPass` (RECHECK_PER_PASS) per pass, a key at most once per pass. Its result: `{}` done,
+ *         `{skip}` (a conversation-level refusal — the pass goes on), `{error}` = rule 3.
+ *     22b THE OWNER'S PRESS: a fetch whose round holds the OWNER's request (origin 'owner' — never a window's open,
+ *         never an agent's refresh: a recheck is a metered call the owner pays for) carries `recheck: true` — the
+ *         engine re-lists that conversation right after its ingest, unless `recheckOnPress(lastRecheckAt, now)`
+ *         says it was rechecked within RECHECK_FLOOR_MS.
+ */
+const RECHECK_PER_PASS = 3;
+const RECHECK_EVERY_MS = 3600e3;
+const RECHECK_ACTIVE_MS = 14 * 86400e3;
+const RECHECK_FLOOR_MS = 60e3;
+const RECHECK_DUE_MAX = 200;
+/**
+ * RULE 22a's DUE LIST. rows = [{key, live, separate, mode, walked, lastRecheckAt, lastAt}] (the engine's index read).
+ * → [{key, dueAt}] — the due ones, oldest recheck first (never rechecked = 0), at most `max`.
+ */
+function recheckDue(rows, { now = 0, everyMs = RECHECK_EVERY_MS, activeMs = RECHECK_ACTIVE_MS, max = RECHECK_DUE_MAX } = {}) {
+  const t = Number(now) || 0;
+  const every = Math.max(60e3, Number(everyMs) || RECHECK_EVERY_MS);
+  const out = [];
+  for (const r of Array.isArray(rows) ? rows : []) {
+    if (!r || typeof r.key !== 'string' || !r.key) continue;
+    if (r.live !== true || r.separate !== true || r.mode === 'topic' || r.walked !== true) continue;
+    const lastAt = Number(r.lastAt) || 0;
+    if (!(lastAt > 0) || t - lastAt > activeMs) continue;
+    const last = Number(r.lastRecheckAt) || 0;
+    if (last > t) continue;   // a clock that went backwards rechecks nothing
+    if (last && t - last < every) continue;
+    out.push({ key: r.key, dueAt: last });
+  }
+  out.sort((a, b) => a.dueAt - b.dueAt || (a.key < b.key ? -1 : 1));
+  return out.slice(0, Math.max(0, Math.floor(Number(max) || 0)));
+}
+/** RULE 22b — may the owner's press re-list this conversation now? (never twice inside RECHECK_FLOOR_MS) */
+function recheckOnPress(lastRecheckAt, now, floorMs = RECHECK_FLOOR_MS) {
+  const last = Number(lastRecheckAt) || 0, t = Number(now) || 0;
+  return !(last > 0 && t >= last && t - last < floorMs);
+}
+
 module.exports = {
+  RECHECK_PER_PASS, RECHECK_EVERY_MS, RECHECK_ACTIVE_MS, RECHECK_FLOOR_MS, RECHECK_DUE_MAX, recheckDue, recheckOnPress,
   REFRESH_QUEUE_CAP, REFRESH_OWNER_RESERVE, STREAK_MAX, ORIGINS, REFUSAL_CODES, ANSWER_OUTCOMES, PACE_WAIT_MAX_MS, FEED_PAGES_PER_PASS,
   OLDER_FLOOR_MS, OLDER_MEMORY_MS, OLDER_EVENTS,
   empty, admit, withdraw, census, hasRequests, takenRequests, queueAsk,

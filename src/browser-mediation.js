@@ -154,6 +154,7 @@ function admitTarget(scope, targetId) { if (scope && targetId) scope.targets.add
 // views of it for the readers that want a set (the suites, the CLI's words); the judge reads the census directly.
 const CENSUS = require('./cdp-census.js');
 const INT = require('./browser-interrupt.js'); // the owner's ruling (2026-09-27): the ONE spelling of `browser_interrupted`
+const WIN = require('./browser-windows.js'); // lane browser-windows (U1): a lease's new tab opens in a window of its own (PURE, imports nothing)
 const { INTERRUPTED_CODE } = INT;
 /** Whole-browser acts no session url may perform, and the escape hatches out of the mediation (the census's `refused` class). */
 const ALWAYS_REFUSED = CENSUS.methodsOf('refused');
@@ -338,7 +339,8 @@ function refusalCodeOf(reply) {
 
 /**
  * Judge ONE client→browser message. Returns
- *   {kind:'forward', pending:{method, params, sessionId}}  — send upstream, remember by id
+ *   {kind:'forward', pending:{method, params, sessionId}}  — send upstream, remember by id (`rewrite` = the params to send
+ *                                                             instead of the client's: a create into a window of its own)
  *   {kind:'refuse', reply}                                  — answer the client, send nothing
  *   {kind:'drop', why}                                      — not a CDP call (no id): say nothing
  * `paused` is the live input side (true = the user drives). A refusal carries `why`
@@ -371,6 +373,15 @@ function judge(msg, scope, { paused = false } = {}) {
   if (CONTEXT_METHODS.has(method) || (method === 'Target.createTarget' && params.browserContextId != null)) {
     const c = params.browserContextId == null ? '' : String(params.browserContextId);
     if (!scope.contexts.has(c)) return { kind: 'refuse', reply: refusal(id, 'context_out_of_scope', `browser context ${c || '(none)'} is not one this lease created`, sid) };
+  }
+  // lane browser-windows (U1, measured on 0.38.1 + Chrome 154): a create names no window — Chrome puts a plain one in its
+  // LAST FOCUSED window, often another conversation's, where the new tab takes the show and hides that conversation's
+  // page (0 fps, a click 4.6 s). Every tab a lease creates opens in a NEW unfocused window of its own instead (`rewrite`
+  // = the params the proxy sends; a window / hidden / tab-type create is left as written). Its pages' own popups stay in
+  // its window (Chrome's rule — measured), so the lease's scope IS its windows' tabs.
+  if (method === 'Target.createTarget') {
+    const ow = WIN.ownWindowParams(params);
+    if (ow.rewritten) return { kind: 'forward', pending: { method, params: ow.params, sessionId: sid }, rewrite: ow.params };
   }
   return { kind: 'forward', pending: { method, params, sessionId: sid } };
 }

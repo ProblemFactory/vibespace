@@ -96,7 +96,7 @@ const PLAY = [
   { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_hs1', content: 'status: done — answered' }] } },
   { type: 'assistant', message: { id: 'msg_h3', type: 'message', role: 'assistant', model: 'claude-fable-5', content: [{ type: 'text', text: 'Starting a helper.' }], usage: {} } },
   { type: 'assistant', message: { id: 'msg_h4', type: 'message', role: 'assistant', model: 'claude-fable-5', content: [{ type: 'tool_use', id: 'toolu_hag', name: 'Agent', input: { description: 'Fetch title of example.com', prompt: 'Open example.com and read the title', run_in_background: true } }], usage: {} } },
-  { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_hag', content: AGENT_ACK }] } },
+  { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_hag', content: [{ type: 'text', text: AGENT_ACK }] }] /* B-63f1: the real shape — a text-block list */ } },
   { type: 'assistant', message: { id: 'msg_h5', type: 'message', role: 'assistant', model: 'claude-fable-5', content: [{ type: 'text', text: 'Stopping it again.' }], usage: {} } },
   { type: 'assistant', message: { id: 'msg_h6', type: 'message', role: 'assistant', model: 'claude-fable-5', content: [{ type: 'tool_use', id: 'toolu_hts', name: 'TaskStop', input: { task_id: 'afebc69a80454c5a0' } }], usage: {} } },
   { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_hts', content: STOP_JSON }] } },

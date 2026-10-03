@@ -389,7 +389,7 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
   async function stop(id, opts = {}) {
     const ro = store.apps[id] ? null : remoteOf(id);
     if (!ro) return machine.stop(id, opts);
-    const r = await acc().call(ro.hostId, 'stop', { id, why: opts.why || 'user' });
+    const r = await acc().call(ro.hostId, 'stop', { id, why: opts.why || 'user', ...(opts.force === true ? { force: true } : {}) }); // B-04da ④
     ingestOne(ro.hostId, r.app);
     return remoteGet(id) || r.app;
   }
@@ -460,7 +460,9 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
   /** The IDLE verdict: a ready record with no input for its timeout is stopped (why 'idle'); true = the machine skips it. */
   function idleVerdict(rec, t) {
     const idle = M.idleState(rec, t, rec.idleTimeoutMs);
-    if (idle.expired) { stop(rec.id, { why: 'idle' }).catch(() => { }); return true; }
+    // B-04da ④: a LibreOffice session the idle stop only ASKED (its save prompt is up — it answers `ready`) restarts its
+    // idle clock: never a second prompt every tick, never a kill over unsaved edits
+    if (idle.expired) { stop(rec.id, { why: 'idle' }).then((v) => { if (v && M.isLiveState(v.state)) noteInput(rec.id); }).catch(() => { }); return true; }
     return false;
   }
   /** x5 LOW-2: while a BLOCKED pane exists on the xpra rung, the record keeps the app's own title fresh (rate-limited). */

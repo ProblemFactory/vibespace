@@ -11,7 +11,8 @@
  *   spend    — src/server/spend-guard.js (the unattended-turn ceiling)
  *   login    — src/server/login-expiry-watch.js (a subscription login ending)
  *   pool     — src/server/usage-pool-engine.js (the reset-credit decision)
- *   jobs     — src/server/jobs-wiring.js (Background Work notify / ask)
+ *   jobs     — src/server/jobs-wiring.js (Background Work notify / ask; B-dfb4: the ≤ 1/h notice that a
+ *              conversation's job notifications fell off the 30-entry stash cap)
  *   channels — src/server/channels-engine.js (adapter failures, outbox, reach)
  *   browser  — src/server/browser-handback.js + the browser-switch proposal
  *              (src/server/mounts-plugins-wiring.js wires the browser routes)
@@ -25,6 +26,8 @@
  *   agent    — src/agent-routes.js (`vibespace-ask`, an agent's own item)
  *              + src/server/helper-asks.js (a helper's permission ask left
  *              unanswered for 60 s — lane S1)
+ *              + src/server/unexpected-exit.js (a conversation that exited
+ *              unexpectedly while working: restarted once, or why not — B-f698)
  *
  * Exactly the producers that file (r2: a `system` row was dropped — nothing
  * has ever filed with `by: 'system'`, so its group, chip and legacy-rung row

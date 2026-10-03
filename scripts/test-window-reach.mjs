@@ -58,7 +58,7 @@ const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); 
 console.log('§1 the closed sets');
 {
   ok(JSON.stringify(R.LEVELS) === '["hidden","exposed"]' && R.RANK.hidden < R.RANK.exposed, 'two levels, ranked: hidden < exposed');
-  ok(JSON.stringify(R.PRINCIPAL_KINDS) === '["session","group"]' && JSON.stringify(R.GRANT_ORIGINS) === '["user","request","self-open"]', 'principals are sessions or Task Groups; a row is written by the user, the user\'s request, or the agent\'s own open');
+  ok(JSON.stringify(R.PRINCIPAL_KINDS) === '["session","group","everyone"]' && JSON.stringify(R.GRANT_ORIGINS) === '["user","request","self-open"]', 'principals are sessions, Task Groups or ALL AGENTS (lane everyone-principal); a row is written by the user, the user\'s request, or the agent\'s own open');
   ok(JSON.stringify(R.MODES) === '["auto","tree","pixels"]' && JSON.stringify(R.RESOLVED_MODES) === '["tree","pixels"]', 'three share modes, two resolutions');
   let threw = null; try { R.refuse('nope', 'x'); } catch (e) { threw = e; }
   ok(threw && /unknown refusal code/.test(threw.message) && R.refuse('not_exposed', 'x').code === 'not_exposed', 'the refusal set is CLOSED — an unknown code throws');
@@ -405,7 +405,7 @@ console.log('§9 NEGATIVE CONTROLS — patched copies outside the tree');
   const file = path.join(REPO, 'src/window-reach.js');
   const src = fs.readFileSync(file, 'utf8');
   // (a) reachFor ignores group rows
-  const a = src.replace("const hit = row.principal.kind === 'session' ? keys.has(row.principal.id) : groups.has(row.principal.id);", "const hit = row.principal.kind === 'session' ? keys.has(row.principal.id) : false;");
+  const a = src.replace("const hit = k === 'everyone' ? callerKnown : k === 'session' ? keys.has(row.principal.id) : groups.has(row.principal.id);", "const hit = k === 'everyone' ? callerKnown : k === 'session' ? keys.has(row.principal.id) : false;");
   ok(a !== src, 'control (a): the patch applies (reachFor ignoring group rows)');
   const Ra = MUT.load('src/window-reach.js', a, 'nogroups');
   const ta = runTable(Ra);

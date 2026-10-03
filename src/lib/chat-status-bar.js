@@ -1,4 +1,5 @@
-import { escHtml, showInputDialog, uiScale, showToast, fetchJson, copyText, absUrl, onOutsidePress } from './utils.js';
+import { pillMode, billingPillForms, billingPillHtml } from './title-chips.js'; // lane phone-chip: the billing pill folds, never cuts
+import { escHtml, showInputDialog, showConfirmDialog, uiScale, showToast, fetchJson, copyText, absUrl, onOutsidePress } from './utils.js';
 import { UI_ICONS } from './icons.js';
 import { BACKEND_META, getBackendMeta, backendFeatureCaps, autoResumeCapsFor, effortDisplay, effortLabel, noteModelCatalog, responseStyleLabel, responseStyleCaps, styleAppliesLive, initHealthLabel } from './agent-meta.js';
 import { t } from './i18n.js';
@@ -6,6 +7,10 @@ import { shortWorkflowName } from '../workflow-name.js';
 import { waitingChip } from '../helper-ask.js'; // PURE (lane S1): the waiting chip names who waits
 import { billingAuthKey, placementNote } from './pool-priority-model.js'; // PURE: THE ONE billing re-render key + the placement note (the title chip's twin)
 import { chipText as channelChipText, rowName as channelRowName, rowWords as channelRowWords, glyphFor as channelGlyphFor } from '../channel-touch.js'; // PURE (§26, B-099e): the channels chip's words
+
+/** Alias-tolerant model identity ('fable' vs 'claude-fable-5', a [1m] suffix) — the mismatch and the refusal chip (B-c643) ask the same. */
+const modelCore = (v) => String(v || '').replace(/\[1m\]$/, '').trim().replace(/^claude-/, '');
+const sameModel = (x, y) => { const a = modelCore(x), b = modelCore(y); return !!a && !!b && (a === b || a.startsWith(b) || b.startsWith(a)); };
 
 /** The channels chip's glyph by the PURE glyphFor's closed answer (literal names — test-architecture §58). */
 const CHANNEL_GLYPH = { mail: UI_ICONS.mail, chat: UI_ICONS.chat, robot: UI_ICONS.robot };
@@ -43,7 +48,7 @@ export class ChatStatusBar {
    * @param {function} opts.openInTempEditor - (text) => void
    * @param {function} [opts.startReview] - ({ target, delivery }) => void
    */
-  constructor(ws, sessionId, { backend = 'claude', allowReview = false, getToolMsg, openSubagentViewer, openInTempEditor, startReview, onConfigChange, onOpenWorkflow, getWorkflowIds, onWorkflowVerdict = null, onDesignRequest = null, onRestartSession = null, onSearch = null, onBrowserAction = null, onJumpToAsk = null, onChannelOpen = null }) {
+  constructor(ws, sessionId, { backend = 'claude', allowReview = false, getToolMsg, openSubagentViewer, openInTempEditor, startReview, onConfigChange, onOpenWorkflow, getWorkflowIds, onWorkflowVerdict = null, onDesignRequest = null, onOpenDesign = null, onPublishDesign = null, onRestartSession = null, onSearch = null, onBrowserAction = null, onJumpToAsk = null, onChannelOpen = null }) {
     this._ws = ws;
     // §26 (B-099e): the conversations THIS TURN read or drafted (PURE chipView over the witness's ring — the
     // view hands it over) and the one door that opens one; null = the turn touched nothing (no chip)
@@ -58,6 +63,9 @@ export class ChatStatusBar {
     // the view has no search bar (never rendered).
     this._onSearch = onSearch;
     this._onDesignRequest = onDesignRequest; // 2.366.0 design chip (null = view-only window: no chip)
+    // lane design-window: this session's designs in the popover — Open (the Design window) / Publish… (its dialog)
+    this._onOpenDesign = onOpenDesign;
+    this._onPublishDesign = onPublishDesign;
     // agent browser P2 (§3.8 layer ③): the Browser chip's pair — what the agent
     // LAST USED vs what is PINNED — with labels resolved by the view; null =
     // no browser key (no chip). `onBrowserAction(what, ev)` = nudge|live|pin.
@@ -76,11 +84,13 @@ export class ChatStatusBar {
     // must never be drawn as a claim.
     this._turnState = null;
     this._pages = []; // pages published from this session (server truth via /api/pages + page-published)
+    this._designs = []; // this session's designs (lane design-window: GET /api/designs, refreshed on designs-updated)
     this._sessionId = sessionId;
     this._backend = backend;
     this._onConfigChange = onConfigChange || null;
     this._onRestartSession = onRestartSession || null;
     this._servedModel = null; // actual serving model (per-turn) — fallback detection
+    this._refusalFallback = null; // B-c643: the last safety-classifier reroute {from, to, category} — the ⚠ chip names it while `to` serves
     this._allowReview = allowReview;
     this._reviewEnabled = !allowReview;
     this._getToolMsg = getToolMsg;
@@ -406,9 +416,18 @@ export class ChatStatusBar {
 
   _modelMismatch() {
     if (!this._servedModel || !this._statusModel) return false;
-    const core = (v) => String(v || '').replace(/\[1m\]$/, '').trim().replace(/^claude-/, '');
-    const a = core(this._servedModel), b = core(this._statusModel);
-    return !(a === b || a.startsWith(b) || b.startsWith(a));
+    return !sameModel(this._servedModel, this._statusModel);
+  }
+
+  /** B-c643: a safety-classifier reroute (the `model-refusal-fallback` notice's
+   *  side effect, live or rebuilt). While its `to` is the served model the ⚠
+   *  chip says "refusal (category)" and its tooltip names the reroute — it used
+   *  to blame capacity/overload, and only the one-time notice said why. */
+  setRefusalFallback(f) {
+    const next = f && f.to ? { from: f.from || null, to: f.to, category: f.category || null } : null;
+    if (JSON.stringify(next) === JSON.stringify(this._refusalFallback)) return;
+    this._refusalFallback = next;
+    this.render();
   }
 
   setPermMode(mode) {
@@ -448,6 +467,9 @@ export class ChatStatusBar {
 
   /** Pages published from this session (status-bar design chip + popover). */
   setPages(pages) { this._pages = Array.isArray(pages) ? pages.slice() : []; this.render(); this._refillDesignList(); }
+  /** This session's designs (lane design-window: GET /api/designs?sessionId, re-read on `designs-updated`) — the
+   *  chip's count and the popover's list above the pages, both followed live. */
+  setDesigns(designs) { this._designs = Array.isArray(designs) ? designs.filter((d) => d && typeof d.dir === 'string' && d.dir).slice(0, 200) : []; this.render(); this._refillDesignList(); }
   /** page-published broadcast: publish / republish / visibility change /
    *  removal (page.removed) — the chip AND an open popover list follow. */
   notePagePublished(page) {
@@ -460,10 +482,17 @@ export class ChatStatusBar {
   }
   _refillDesignList() {
     const list = this._designListEl;
-    if (!list || !list.isConnected) return;
-    list.replaceChildren();
-    for (const p of this._pages.slice().sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))) list.appendChild(this._designPageRow(p));
-    list.classList.toggle('hidden', !this._pages.length);
+    if (list && list.isConnected) {
+      list.replaceChildren();
+      for (const p of this._pages.slice().sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))) list.appendChild(this._designPageRow(p));
+      list.classList.toggle('hidden', !this._pages.length);
+    }
+    const dl = this._designsEl;
+    if (dl && dl.isConnected) {
+      dl.replaceChildren();
+      for (const d of this._designs.slice().sort((a, b) => (b.openedAt || b.createdAt || 0) - (a.openedAt || a.createdAt || 0))) dl.appendChild(this._designRow(d));
+      dl.classList.toggle('hidden', !this._designs.length);
+    }
   }
 
   /** What the live session was SPAWNED with (attach payload) + the pending-wait state. */
@@ -559,15 +588,19 @@ export class ChatStatusBar {
       const known = !!this._statusModel;
       const mismatch = this._modelMismatch();
       const locked = !!this._modelLocked;
-      const title = mismatch
+      const refusal = mismatch && this._refusalFallback && sameModel(this._refusalFallback.to, this._servedModel) ? this._refusalFallback : null; // B-c643
+      const title = refusal
+        ? t('Safety-classifier fallback: {from} flagged a message{category}, so {served} is answering instead of {model}. Your model setting is unchanged. Click to re-pick.', { from: refusal.from || '?', category: refusal.category ? ` (${refusal.category})` : '', served: this._servedModel, model: this._statusModel })
+        : mismatch
         ? t('Auto-fallback: the harness is serving {served} instead of {model} (capacity/overload). Click to re-pick.', { served: this._servedModel, model: this._statusModel })
         : known
           ? t('Model (as last reported by the CLI) — click to change')
           : t('Model not reported by the CLI yet — click to set');
       const lockTip = locked ? ' \u00b7 ' + t('LOCKED — retries {model} after any fallback', { model: this._lockedModel || this._statusModel || '?' }) : '';
+      const why = refusal ? ` \u00b7 ${escHtml(t('refusal'))}${refusal.category ? ` (${escHtml(refusal.category)})` : ''}` : '';
       const label = locked
-        ? UI_ICONS.lock + (mismatch ? `\u26a0 ${escHtml(this._servedModel)}` : escHtml(this._statusModel || '?'))
-        : (mismatch ? `\u26a0 ${escHtml(this._servedModel)}` : (known ? escHtml(this._statusModel) : t('model: ?')));
+        ? UI_ICONS.lock + (mismatch ? `\u26a0 ${escHtml(this._servedModel)}${why}` : escHtml(this._statusModel || '?'))
+        : (mismatch ? `\u26a0 ${escHtml(this._servedModel)}${why}` : (known ? escHtml(this._statusModel) : t('model: ?')));
       chip('model', `chat-status-model chat-status-clickable${known ? '' : ' chat-status-dim'}${mismatch ? ' chat-status-model-fallback' : ''}${locked ? ' chat-status-model-locked' : ''}`, title + lockTip, label);
       const eKnown = !!this._statusEffort;
       // The DELEGATION mode reads as a downgrade unless the tooltip names the
@@ -746,8 +779,8 @@ export class ChatStatusBar {
     // discoverable way to ask for a design drafted by the agent and HOSTED
     // by this VibeSpace; the count = pages published from this session
     if (this._onDesignRequest) {
-      const n = this._pages.length;
-      const dTitle = n ? t('{n} page(s) published from this session — click to view or request a design', { n }) : t('Request a design canvas — drafted by the agent, hosted by this VibeSpace, shareable by link');
+      const n = this._pages.length + this._designs.length;
+      const dTitle = n ? t('{n} design(s) and page(s) from this session — click to open one or request a design', { n }) : t('Request a design canvas — drafted by the agent, hosted by this VibeSpace, shareable by link');
       chip('design', `chat-status-design chat-status-clickable${n ? '' : ' chat-status-design-empty'}`, dTitle, `${UI_ICONS.design}${n ? ` ${n}` : ''}`);
     }
 
@@ -762,7 +795,7 @@ export class ChatStatusBar {
       const shown = driving ? t('You are driving') : w.line;
       // lane H: say whether a browser of this conversation is RUNNING right now
       const running = f.live ? t('Running now — click for the live view') : t('Not running — the agent’s next browser command starts it');
-      const tip = (driving ? t('You took over this browser — the agent is paused until you hand back') + '\n' : '') + w.tooltip + '\n' + running;
+      const tip = (driving ? t('You took over the agent’s window of this browser — the agent is paused until you hand back; other conversations keep working in their own windows') + '\n' : '') + w.tooltip + '\n' + running;
       // the three browser faces (design-browser-faces direction B): the chip names WHOSE browser this is — the agent's — on its window-with-a-dot glyph (the globe is the web view's); the tooltip's first line carries the same prefix
       const face = t('Agent browser') + ' · ';
       // lane S4: the words sit in their own span so the phone's sticky chip can cut them to fit (chat.css ≤768px); lane S2: amber = the browser fact's words say so
@@ -813,7 +846,10 @@ export class ChatStatusBar {
         + (a.hostName && (a.name || isApi) ? ' · ' + t('on "{name}"', { name: a.hostName }) : '')
         + (a.guessed ? ' · ' + t('estimated from the login state at spawn') : '')
         + ' · ' + t('Click to switch billing');
-      chip('billing', `chat-status-billing chat-status-clickable${isApi ? ' api' : ''}${isPooled ? ' pooled' : ''}`, tip, escHtml(label));
+      // lane phone-chip (B-e5ff): a pill is WHOLE or it FOLDS, never cut — the three forms in one chip, the widest
+      // that fits a line of this (wrapping) bar drawn after the render (`_fitBilling`); the full words in title + aria-label
+      const forms = billingPillForms({ kind: a.source === 'unknown' ? 'unknown' : isPooled ? 'pooled' : isApi ? 'api' : 'subscription', name: isPooled ? (a.name || t('Pool')) : label, target: isPooled ? (a.poolTarget || '') : '' });
+      chip('billing', `chat-status-billing chat-status-clickable${isApi ? ' api' : ''}${isPooled ? ' pooled' : ''}`, forms.tip + ' — ' + tip, billingPillHtml(forms, escHtml), { attrs: { 'aria-label': forms.tip } });
     }
 
     // Permission mode (always show, click to change; Codex sandbox policy in tooltip)
@@ -899,6 +935,35 @@ export class ChatStatusBar {
     }
 
     this._reconcile(chips);
+    this._fitBilling();
+  }
+
+  /** lane phone-chip (B-e5ff): the billing pill takes the widest form that fits ONE LINE of this wrapping bar
+   *  (PURE `pillMode` = lane G's `chipMode` with no title beside it) — measured in layout px, its three widths
+   *  once per set of words; re-decided on every render and when the bar's width changes (rotation, UI scale). */
+  _fitBilling() {
+    const rec = this._chipEls && this._chipEls.get('billing');
+    const bar = this._element;
+    if (!rec || !bar || !bar.isConnected || !bar.clientWidth) return;
+    const el = rec.el;
+    if (!this._billingRO && typeof ResizeObserver === 'function') { this._billingRO = new ResizeObserver(() => this._fitBilling()); this._billingRO.observe(bar); }
+    const cs = getComputedStyle(bar);
+    // ONE unit (verify r1): under the UI scale (a CSS zoom on <body>, desktop widths) a rect is in zoomed px and
+    // clientWidth in the bar's own — the slot is converted by the bar's effective zoom `k`, the widths cached per k
+    // (mixed, 1.25 folded a pill that fit a 220 px bar to its glyph; 0.8 drew one wider than the line)
+    const k = bar.offsetWidth ? bar.getBoundingClientRect().width / bar.offsetWidth : 1;
+    const slotPx = (bar.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0)) * k;
+    if (!this._billingW || this._billingW.html !== rec.html || Math.abs(this._billingW.k - k) > 1e-3) {
+      const cur = el.dataset.mode || 'full';
+      const w = { html: rec.html, k };
+      for (const m of ['full', 'compact', 'icon']) { el.dataset.mode = m; w[m] = el.getBoundingClientRect().width; }
+      el.dataset.mode = cur;
+      if (!(w.full > 0)) return;
+      if (!el.querySelector('.pill-compact')) w.compact = Infinity;   // no short word: full or the glyph
+      this._billingW = w;
+    }
+    const mode = pillMode({ slotPx, fullPx: this._billingW.full, compactPx: this._billingW.compact });
+    if (el.dataset.mode !== mode) el.dataset.mode = mode;
   }
 
   /** THE IN-PLACE UPDATE (design-accessibility-tree §3 row 8 (b), §8 lean set):
@@ -949,15 +1014,14 @@ export class ChatStatusBar {
 
   // ── Private ──
 
-  /** Design popover (2.366.0): kit status · brief · public toggle · Create,
-   *  then the pages published from this session (Open / Copy link / visibility).
-   *  DOM built with textContent — page names are agent-chosen strings. */
+  /** Design popover (2.366.0; lane design-window 2026-10-02): brief · public toggle · Create (NEVER disabled — the
+   *  Claude CLI kit and its status line are gone: the agent makes the design with vibespace-design, no kit to wait
+   *  for), then this session's DESIGNS (Open = the Design window · Publish…), then the pages published from this
+   *  session (rows unchanged: Open / Copy link / visibility). DOM built with textContent — titles, dirs and page
+   *  names are agent-chosen strings. */
   _renderDesignPopover(dropdown) {
     const box = document.createElement('div');
     box.style.cssText = 'display:flex;flex-direction:column;gap:8px;padding:4px';
-    const kitLine = document.createElement('div');
-    kitLine.className = 'chat-design-kit';
-    kitLine.textContent = t('Checking the design kit…');
     const ta = document.createElement('textarea');
     ta.className = 'chat-design-brief';
     ta.rows = 3;
@@ -983,7 +1047,11 @@ export class ChatStatusBar {
       dropdown.remove();
     };
     row.append(pubLabel, go);
-    box.append(kitLine, ta, row);
+    box.append(ta, row);
+    const designs = document.createElement('div');
+    designs.className = 'chat-design-designs' + (this._designs.length ? '' : ' hidden');
+    this._designsEl = designs; // refilled in place on designs-updated while the popover is open
+    box.appendChild(designs);
     const list = document.createElement('div');
     list.className = 'chat-design-pages' + (this._pages.length ? '' : ' hidden');
     this._designListEl = list; // refilled in place on page-published while the popover is open
@@ -993,42 +1061,28 @@ export class ChatStatusBar {
     // detached node (that guard exists for broadcasts arriving with no popover
     // open), so filling first left the chip saying "1" over an empty popover
     // — owner-caught. Guards must not sit on the path that has to run.
-    // Kit status: a failed build shows its reason AND a Retry (the server also
-    // retries stale failures on view); Create stays disabled until the kit is
-    // ready so the user never sends a request known to fail.
-    const paintKit = (k) => {
-      if (!kitLine.isConnected) return;
-      kitLine.replaceChildren();
-      if (!k || (k.error && !k.version && k.ok === undefined)) { kitLine.textContent = t('Design kit: status unavailable'); return; }
-      // lane design-kit-287: a kit taken from ANOTHER CLI version says so (Claude Code
-      // 2.1.287 ships none — the server falls back to an older installed version or a
-      // kit it stored); "no version has one" gets its own sentence with the two ways
-      // out; every other refusal is the server's own line (it names version + rung)
-      const words = k.ok
-        ? (k.donor
-          ? (k.ownShipped === false
-            ? t('Design kit ready — taken from CLI {donor}; this CLI {v} does not ship it', { donor: k.donor, v: k.version })
-            : t('Design kit ready — taken from CLI {donor}; this CLI {v} could not give its own', { donor: k.donor, v: k.version }))
-          : t('Design kit ready (CLI {v})', { v: k.version }))
-        : (k.code === 'not_shipped'
-          ? t('Claude Code {v} does not ship the design canvas kit, and no other version on this machine has one (the last that did: {last}). VibeSpace keeps looking by itself — press Retry any time; the CLI you run stays as it is, nothing is downgraded. Or use /design in a terminal session, which works through claude.ai.', { v: k.version, last: k.lastShipped || '?' })
-          : t('Design kit not ready: {err}', { err: k.error || '?' }));
-      kitLine.append(document.createTextNode(words));
-      kitLine.title = (k.ok ? k.source : k.error) || ''; // the record's own words (paths, rungs) one hover away
-      kitLine.classList.toggle('chat-design-kit-bad', !k.ok);
-      go.disabled = !k.ok;
-      go.title = k.ok ? '' : t('The design kit is not ready — fix the reason above or retry');
-      if (!k.ok) {
-        const retry = document.createElement('button');
-        retry.className = 'btn-cancel chat-design-retry';
-        retry.textContent = t('Retry');
-        retry.onclick = () => { retry.disabled = true; kitLine.append(document.createTextNode(' …')); fetchJson('/api/design-kit/status?refresh=1').then(paintKit); };
-        kitLine.append(document.createTextNode(' '), retry);
-      }
-    };
-    go.disabled = true;
-    fetchJson('/api/design-kit/status').then(paintKit);
     setTimeout(() => ta.focus(), 0);
+  }
+
+  /** One design of this session: its title (or folder) · Open (the Design window) · Publish… (its dialog). */
+  _designRow(d) {
+    const row = document.createElement('div');
+    row.className = 'chat-design-page chat-design-design';
+    const name = document.createElement('span');
+    name.className = 'chat-design-page-name';
+    const dir = String(d.dir || '');
+    name.textContent = d.title || dir.replace(/\/+$/, '').split('/').pop() || dir;
+    name.title = (d.host ? d.host + ':' : '') + dir;
+    const open = document.createElement('button');
+    open.className = 'btn-cancel';
+    open.textContent = t('Open');
+    open.onclick = () => this._onOpenDesign?.(d);
+    const pub = document.createElement('button');
+    pub.className = 'btn-cancel';
+    pub.textContent = t('Publish…');
+    pub.onclick = () => this._onPublishDesign?.(d);
+    row.append(name, open, pub);
+    return row;
   }
 
   _designPageRow(p) {
@@ -1059,7 +1113,20 @@ export class ChatStatusBar {
       if (!r || r.error) { showToast(t('Update failed: {err}', { err: (r && r.error) || 'network' }), { type: 'error' }); return; }
       if (r.page) { p.public = !!r.page.public; paint(); this.notePagePublished(r.page); }
     };
-    row.append(name, open, copy, vis);
+    // B-f694: the take-down the agent's `vibespace-page unpublish` does (the explorer's Publish page… dialog had it;
+    // this list had only the visibility toggle). The id + name are captured BEFORE the confirm (test-approval-census §1).
+    const unpub = document.createElement('button');
+    unpub.className = 'btn-cancel';
+    unpub.textContent = t('Unpublish');
+    unpub.onclick = async () => {
+      const page = { ...p }, label = p.name || p.id;
+      if (!await showConfirmDialog({ title: t('Unpublish'), message: t('Unpublish "{name}"? Anyone who opens its link is told the page was taken down.', { name: label }), confirmText: t('Unpublish'), danger: true })) return;
+      const r = await fetchJson('/api/pages/' + encodeURIComponent(page.id), { method: 'DELETE' });
+      if (!r || r.error) { showToast(t('Unpublish failed: {err}', { err: (r && r.error) || 'network' }), { type: 'error' }); return; }
+      showToast(t('Page unpublished'));
+      this.notePagePublished({ ...page, removed: true });
+    };
+    row.append(name, open, copy, vis, unpub);
     return row;
   }
 

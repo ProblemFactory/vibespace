@@ -20,7 +20,10 @@
  *   next-turn (DEFAULT) — new messages are batched into ONE report delivered as
  *                         context on that member's next USER-initiated turn:
  *                         zero billed turns, zero echo chamber;
- *   mention             — an @mention wakes it at once;
+ *   mention             — ONLY a message that @mentions it (by id) reaches it: it
+ *                         is woken at once and its report holds only those; the
+ *                         rest is never queued for it (B-a354, the owner's
+ *                         "at-style group" — `read` shows the log on purpose);
  *   always              — every message wakes it at once;
  *   mute                — nothing: no wake, no report (it may `read` on purpose).
  * An @mention is an explicit act: it wakes every mode but `mute`. An invite is
@@ -84,6 +87,8 @@ const ERROR_CODES = Object.freeze([
   'job-token',        // (routes) a Background Work job token may list, read and post — never create a group or change membership
   'confirm-wakes',    // (consent) the act would wake more than WAKE_CONFIRM_ABOVE agents and the caller did not confirm (`--yes`) — the answer carries `wakes`
   'wake-count-mismatch', // (consent) the owner's panel previewed a different number of wakes than the act would cause — the answer carries `wakes`
+  'unknown-mention',  // (send, B-ff04) an @ that names no member — refused BEFORE anything is written; the answer carries `candidates`
+  'ambiguous-mention', // (send, B-ff04) an @ two members answer to — refused the same way, with both as `candidates`
 ]);
 const NAME_MAX = 80;
 const CONTEXT_MAX = 4000;
@@ -306,47 +311,144 @@ function archive(group, { by, at } = {}) {
  *  word has — "@测试请看" mentions 测试, "@beta请看" mentions beta. */
 const UNSPACED = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\u3000-\u303F\uFF00-\uFFEF]/u;
 const lastChar = (s) => { const a = Array.from(String(s)); return a.length ? a[a.length - 1] : ''; };
+/** A LENGTH-KEEPING lower case (verify r1 F10): `toLowerCase` turns "İ" (U+0130) into two code units, and the scan
+ *  reads PLACES in the original words — a character whose lower case has another length is kept as it is. */
+const foldCase = (s) => { let o = ''; for (const ch of String(s)) { const l = ch.toLowerCase(); o += l.length === ch.length ? l : ch; } return o; };
+
+/** The [start, end) spans of `inline code` and ``` fences: an @ inside one is CODE — never a mention and never
+ *  refused (quoting it as code is how a literal "@word" is written). */
+function codeSpans(t) {
+  const out = [];
+  const fence = /```[\s\S]*?(?:```|$)/g;
+  let m;
+  while ((m = fence.exec(t))) out.push([m.index, m.index + m[0].length]);
+  const inline = /`[^`\n]{1,300}`/g;
+  while ((m = inline.exec(t))) { const s = m.index; if (!out.some(([a, b]) => s >= a && s < b)) out.push([s, s + m[0].length]); }
+  return out;
+}
+const WORD_START = /^[\p{L}\p{N}_]/u;
+/** The word an unresolved @ reached for (to the next space, ≤ 40 characters) — what a refusal quotes. */
+const tokenAt = (t, i) => Array.from(t.slice(i + 1).split(/\s/)[0]).slice(0, 40).join('');
+/** Does a name END at `j` of `lower` (whitespace / punctuation / end of text, or a script boundary)? */
+const endsAt = (lower, j, key) => {
+  const next = lower[j];
+  return next === undefined || /[\s.,;:!?)\]}'"]/.test(next) || UNSPACED.test(lastChar(key)) || UNSPACED.test(String.fromCodePoint(lower.codePointAt(j)));
+};
 
 /**
- * Who a message @mentions: `@<conversation id>` exactly, or `@<member name>`
- * case-insensitively, ending at whitespace / punctuation / end of text — or
- * at a SCRIPT boundary: the next character is from an unspaced script (CJK /
- * kana / Hangul), or the name itself ends in one (then whatever follows is a
- * new word). A Latin name followed by a Latin letter is nobody ("@ceex").
- * The longest name is tried first so "@api" never steals "@api lane".
+ * THE @ OF A MESSAGE, RESOLVED AT SEND TIME (B-ff04; the owner, 2026-10-03: "@ 要从头到尾结构化，背后传的是 id").
+ * Every `@` that opens a word (never the tail of an address — x@api.com) outside `code` is read ONCE, here:
+ * `@<conversation id>` exactly, or `@<member name>` case-insensitively — the longest name first, so "@api" never
+ * steals "@api lane" — ending at whitespace / punctuation / end of text, or at a SCRIPT boundary (the next character
+ * is from an unspaced script — CJK / kana / Hangul — or the name itself ends in one: "@测试请看" mentions 测试). A
+ * Latin name followed by a Latin letter is nobody ("@ceex").
+ * `explicit` = places the SENDER picked by id (`[{id, start, end}]` — the window's @-picker): each must sit on an `@`
+ * of the text and name a member; they are claimed first and never read again by name.
  * @param members [{member, name}]
- * @returns [{id, name}] — each member at most once
+ * @returns {{mentions: [{id, name, pos: [[start, end]…]}], unknown: [{at, token}], ambiguous: [{at, token, ids}], bad: [{id, start}]}}
+ *   `mentions` — each member once, `pos` = every place the words name it; `unknown` — an @ that reads as a name and
+ *   names nobody; `ambiguous` — an @ two members answer to; `bad` — a picked place that is not on an `@`, overlaps
+ *   another, or names no member. `atRefusal` turns the last three into the refusal.
  */
-function mentionsIn(text, members) {
+function scanAts(text, members, { explicit = [] } = {}) {
   const t = String(text || '');
-  if (!t.includes('@')) return [];
-  const out = [];
-  const found = new Set();
+  const out = { mentions: [], unknown: [], ambiguous: [], bad: [] };
+  const byId = new Map();
+  const add = (id, name, s, e) => {
+    let m = byId.get(id);
+    if (!m) { m = { id, name: name || id, pos: [] }; byId.set(id, m); out.mentions.push(m); }
+    m.pos.push([s, e]);
+  };
+  const names = new Map();
+  for (const m of members || []) if (m && m.member) names.set(m.member, m.name || null);
+  const claimed = [];
+  const inAny = (i, spans) => spans.some(([s, e]) => i >= s && i < e);
+  for (const x of Array.isArray(explicit) ? explicit : []) {
+    const s = Number(x && x.start), e = Number(x && x.end), id = x && x.id;
+    if (!names.has(id) || !Number.isInteger(s) || !Number.isInteger(e) || s < 0 || e <= s + 1 || e > t.length || t[s] !== '@' || claimed.some(([a, b]) => s < b && e > a)) { out.bad.push({ id: String(id == null ? '' : id).slice(0, 80), start: s }); continue; }
+    claimed.push([s, e]);
+    add(id, names.get(id), s, e);
+  }
   const cands = [];
-  for (const m of members || []) {
-    if (!m || !m.member) continue;
-    cands.push({ key: m.member, id: m.member, name: m.name || null });
-    if (m.name) cands.push({ key: String(m.name), id: m.member, name: m.name });
+  for (const [id, name] of names) {
+    cands.push({ key: id, id, name });
+    if (name) cands.push({ key: String(name), id, name });
   }
   cands.sort((a, b) => b.key.length - a.key.length);
-  const lower = t.toLowerCase();
-  const taken = [];   // [start, end) spans a longer name already claimed — "@api lane" is never ALSO "@api"
-  const inTaken = (i) => taken.some(([s, e]) => i >= s && i < e);
-  for (const c of cands) {
-    if (found.has(c.id)) continue;
-    const needle = '@' + c.key.toLowerCase();
-    const nameUnspaced = UNSPACED.test(lastChar(c.key));
-    let i = lower.indexOf(needle);
-    while (i >= 0) {
-      const prev = i > 0 ? lower[i - 1] : '';
-      const next = lower[i + needle.length];
-      const startsOk = !prev || !/[a-z0-9_.+-]/.test(prev);   // x@api.com is an address, not a mention
-      const endsOk = next === undefined || /[\s.,;:!?)\]}'"]/.test(next) || nameUnspaced || UNSPACED.test(String.fromCodePoint(lower.codePointAt(i + needle.length)));
-      if (startsOk && endsOk && !inTaken(i)) { found.add(c.id); out.push({ id: c.id, name: c.name || c.id }); taken.push([i, i + needle.length]); break; }
-      i = lower.indexOf(needle, i + 1);
+  const lower = foldCase(t);
+  const code = t.includes('`') ? codeSpans(t) : [];
+  for (let i = t.indexOf('@'); i >= 0; i = t.indexOf('@', i + 1)) {
+    if (inAny(i, claimed) || inAny(i, code)) continue;
+    const prev = i > 0 ? lower[i - 1] : '';
+    if (prev && /[a-z0-9_.+-]/.test(prev)) continue;   // x@api.com is an address, not a mention
+    let hit = null;
+    const ids = [];
+    for (const c of cands) {
+      if (hit && c.key.length < hit.key.length) break;
+      const key = foldCase(c.key);
+      if (!lower.startsWith('@' + key, i) || !endsAt(lower, i + 1 + key.length, c.key)) continue;
+      if (!hit) hit = c;
+      if (!ids.includes(c.id)) ids.push(c.id);
     }
+    if (hit && ids.length > 1) { out.ambiguous.push({ at: i, token: t.slice(i + 1, i + 1 + hit.key.length), ids }); continue; }
+    if (hit) { add(hit.id, hit.name, i, i + 1 + hit.key.length); i += hit.key.length; continue; }
+    if (WORD_START.test(t.slice(i + 1, i + 3))) out.unknown.push({ at: i, token: tokenAt(t, i) });
   }
+  for (const m of out.mentions) m.pos.sort((a, b) => a[0] - b[0]);
   return out;
+}
+
+/** Who a message @mentions — `scanAts`'s members without their places (each once, `{id, name}`). */
+function mentionsIn(text, members) {
+  return scanAts(text, members).mentions.map((m) => ({ id: m.id, name: m.name }));
+}
+
+/** The members an unresolved "@token" most likely meant: the longest shared start of the name first; every member
+ *  (≤ 8) when none shares even its first character. `[{conversationId, name}]`. */
+function nearMembers(token, members) {
+  const q = String(token || '').toLowerCase();
+  const list = (members || []).filter((m) => m && m.member).map((m) => ({ conversationId: m.member, name: m.name || m.member }));
+  const lcp = (a) => { const n = String(a).toLowerCase(); let k = 0; while (k < n.length && k < q.length && n[k] === q[k]) k++; return k; };
+  const near = list.map((c) => ({ c, k: Math.max(lcp(c.name), lcp(c.conversationId)) })).filter((x) => x.k > 0).sort((a, b) => b.k - a.k).map((x) => x.c);
+  return (near.length ? near : list).slice(0, 8);
+}
+
+/**
+ * THE REFUSAL A SCAN EARNS, or null (B-ff04 ①: an @ that names nobody, or two, is refused BY NAME before anything is
+ * written, with the candidates). `{ok:false, code, error, token, candidates:[{conversationId, name}]}`.
+ */
+function atRefusal(scan, members) {
+  if (!scan) return null;
+  const list = (members || []).filter((m) => m && m.member).map((m) => ({ conversationId: m.member, name: m.name || m.member }));
+  const say = (s) => piece(s, 80);
+  if (scan.bad && scan.bad.length) return { ...err('bad-request', 'a picked @mention no longer sits on its @ in the text, or names no member — nothing was sent; pick it again'), token: '', candidates: [] };
+  if (scan.ambiguous && scan.ambiguous.length) {
+    const a = scan.ambiguous[0];
+    const candidates = list.filter((c) => a.ids.includes(c.conversationId));
+    return { ...err('ambiguous-mention', `"@${say(a.token)}" names ${candidates.length} members of this group — nothing was sent; @ the one you mean by its conversation id (or --at <id>): ${candidates.map((c) => c.conversationId).join(', ')}`), token: a.token, candidates };
+  }
+  if (scan.unknown && scan.unknown.length) {
+    const u = scan.unknown[0];
+    const candidates = nearMembers(u.token, members);
+    return { ...err('unknown-mention', `"@${say(u.token)}" is not a member of this group — nothing was sent. Members: ${list.slice(0, 12).map((c) => say(c.name)).join(', ') || '(none)'}${list.length > 12 ? ` +${list.length - 12} more` : ''}. @ one of them by name or id (or --at <name|id>); a literal "@word" goes in backticks as code`), token: u.token, candidates };
+  }
+  return null;
+}
+
+/** Does this record @mention `member` — BY ID (B-ff04: the send resolved every @; the words are never re-read). */
+const mentionsMember = (rec, member) => !!(rec && Array.isArray(rec.mentions) && rec.mentions.some((x) => x && x.id === member));
+/**
+ * Does this record REACH this member's report (B-a354)? A `mention` member is handed only what @mentions it — plus
+ * its OWN invite (the context it was added with); every other mode is handed every record (mute: nothing, by the
+ * callers). The ONE rule the report, the pending strip and the unread count read.
+ */
+function reachesReport(group, member, rec) {
+  const m = memberOf(group, member);
+  if (!m || !rec) return false;
+  if (m.notify !== 'mention') return true;
+  const raw = rec.raw || {};
+  if (raw.kind === 'invite' && raw.member === member) return true;
+  return mentionsMember(rec, member);
 }
 
 /**
@@ -489,14 +591,27 @@ function clipBytes(s, max) {
 
 /** One log record's report-line PREFIX (the part before its words) — `lineFor` and the shown lines' card text
  *  (`reportFor` → `lines[].body`) read the same one. */
-function linePrefix(r) {
+function linePrefix(r, member = null, group = null) {
   const who = piece((r.author && (r.author.name || r.author.id)) || 'unknown', 200);
   const k = (r.raw && r.raw.kind) || 'message';
-  return k === 'message' ? `- [${stamp(r.at)}] ${who}: ` : `- [${stamp(r.at)}] (${k}) `;
+  return k === 'message' ? `- [${stamp(r.at)}] ${who}${mentionField(r, member, group)}: ` : `- [${stamp(r.at)}] (${k}) `;
+}
+/** THE @ AS A FIELD (B-ff04 ②): who a message mentions, BY ID — the member reading it is told "you" by its OWN id,
+ *  never left to match a name in the words. Others by the group's current name (a rename shows the new one), at most
+ *  three, then the count. '' when the message mentions nobody. */
+function mentionField(r, member, group) {
+  const ms = (r && Array.isArray(r.mentions) ? r.mentions : []).filter((x) => x && x.id);
+  if (!ms.length) return '';
+  const nm = (x) => { const m = group && memberOf(group, x.id); return piece((m && m.name) || x.name || x.id, 80); };
+  const mine = member ? ms.filter((x) => x.id === member) : [];
+  const others = ms.filter((x) => x.id !== member);
+  const parts = mine.map((x) => `you (${piece(x.id, 80)})`).concat(others.slice(0, 3).map((x) => `${nm(x)} (${piece(x.id, 80)})`));
+  if (others.length > 3) parts.push(`+${others.length - 3} more`);
+  return ` [mentions: ${parts.join(', ')}]`;
 }
 /** One log record as one report line (agent-facing English, frame-inert — the line rule too: no opener dangles). */
-function lineFor(r) {
-  return linePrefix(r) + piece(clipLine(r.text));
+function lineFor(r, member = null, group = null) {
+  return linePrefix(r, member, group) + piece(clipLine(r.text));
 }
 
 /**
@@ -529,13 +644,17 @@ function reportFor(group, log, member, { since = null, budget = REPORT_BUDGET, l
   const floor = m.joinedAt - 1;
   const mark = since !== null && since !== undefined ? since : (Number.isFinite(m.reportedUpTo) ? m.reportedUpTo : floor);
   const after = Math.max(Number(mark) || 0, floor);
-  const recs = (Array.isArray(log) ? log : []).filter((r) => r && Number(r.at) > after && !(r.author && r.author.id === member))
+  const news = (Array.isArray(log) ? log : []).filter((r) => r && Number(r.at) > after && !(r.author && r.author.id === member));
+  // B-a354: a `mention` member is handed only what @mentions it; what it is not handed is ACCOUNTED for (the marker
+  // moves past it — never queued, never "waiting")
+  const recs = news.filter((r) => reachesReport(group, member, r))
     .sort((a, b) => (a.at - b.at) || String(a.vendorId).localeCompare(String(b.vendorId)));
   if (!recs.length) return null;
+  const newest = news.reduce((x, r) => Math.max(x, Number(r.at) || 0), 0);
   const invite = recs.find((r) => r.raw && r.raw.kind === 'invite' && r.raw.member === member) || null;
   const rest = recs.filter((r) => r !== invite);
   for (const form of REPORT_FORMS) {
-    const r = buildReport(group, m, recs, invite, rest, Number(budget) || 0, lead, form, log);
+    const r = buildReport(group, m, recs, invite, rest, Number(budget) || 0, lead, form, log, newest);
     if (r && (r.shown > 0 || !rest.length || form === REPORT_FORMS[REPORT_FORMS.length - 1])) return r;
   }
   return { text: '', upTo: null, count: recs.length, shown: 0, clipped: rest.length, context: !!invite, fits: false, lines: [] };
@@ -550,7 +669,7 @@ const REPORT_FORMS = Object.freeze([
 ]);
 /** Would lineFor cut this record's text at LINE_MAX? */
 const cutAtLine = (r) => String((r && r.text) || '').replace(/\s+/g, ' ').trim().length > LINE_MAX;
-function buildReport(group, m, recs, invite, rest, budget, lead, form, log) {
+function buildReport(group, m, recs, invite, rest, budget, lead, form, log, newest = 0) {
   const id = group.id;
   const gname = form.name === Infinity ? piece(group.name) : piece(clipBytes(piece(group.name), form.name));
   const head = form.head === 'full' ? `#### Group "${gname}" (${id}) — ${recs.length} new since your last report` : `#### Group "${gname}" (${id}) — ${recs.length} new`;
@@ -589,7 +708,7 @@ function buildReport(group, m, recs, invite, rest, budget, lead, form, log) {
   const shownLines = [];
   let shown = 0;
   for (let i = rest.length - 1; i >= 0; i--) {
-    let l = lineFor(rest[i]);
+    let l = lineFor(rest[i], m.member, group);
     let isCut = cutAtLine(rest[i]);
     let room = budget - used - 1;
     if (bytes(l) > room) {
@@ -600,7 +719,7 @@ function buildReport(group, m, recs, invite, rest, budget, lead, form, log) {
       isCut = true;
     }
     lines.unshift(l);
-    const pre = linePrefix(rest[i]);
+    const pre = linePrefix(rest[i], m.member, group);
     shownLines.unshift({ rec: rest[i], cut: isCut, body: isCut ? (l.startsWith(pre) ? l.slice(pre.length) : '') : String(rest[i].text == null ? '' : rest[i].text) });
     if (isCut) cut.push(rest[i]);
     used += bytes(l) + 1;
@@ -624,7 +743,7 @@ function buildReport(group, m, recs, invite, rest, budget, lead, form, log) {
   out.push(foot);
   const text = out.join('\n');
   if (bytes(text) > budget) return null;
-  return { text, upTo: recs[recs.length - 1].at, count: recs.length, shown, clipped, context: !!invite, fits: true, lines: shownLines };
+  return { text, upTo: Math.max(recs[recs.length - 1].at, Number(newest) || 0), count: recs.length, shown, clipped, context: !!invite, fits: true, lines: shownLines };
 }
 
 /**
@@ -713,6 +832,6 @@ module.exports = {
   NOTIFY_MODES, DEFAULT_NOTIFY, DELIVERY_STATES, OWNER, GROUP_ADAPTER_ID, ERROR_CODES, NAME_MAX, CONTEXT_MAX, MEMBER_MAX, REPORT_BUDGET, LINE_MAX,
   WAKE_CONFIRM_ABOVE, WAKE_FLOOR_MS, SENDER_WAKES, SENDER_WINDOW_MS, PACE_SKEW_MS,
   newGroupId, pairKey, cleanName, cleanText, isCid, isGroupId, memberOf, validateGroup, makeGroup,
-  addMember, removeMember, setNotify, rename, archive, mentionsIn, wakeVerdict, wakesPlanned, consentVerdict, reportFor, deliveryOf,
+  addMember, removeMember, setNotify, rename, archive, mentionsIn, scanAts, atRefusal, codeSpans, foldCase, reachesReport, wakeVerdict, wakesPlanned, consentVerdict, reportFor, deliveryOf,
   emptyPace, prunePace, paceFuture, paceVerdict, paceGrant, paceRefund,
 };

@@ -626,7 +626,9 @@ async function pass({ lang, viewport, theme }) {
 
   // ── OUTBOX WINDOW ──
   await page.evaljs(`(() => { const w = window.app.openChannelOutbox(); for (const e of document.querySelectorAll('[data-shot="win"]')) delete e.dataset.shot; w.element.dataset.shot = 'win'; return w.id; })()`);
-  await waitFor(page, `document.querySelectorAll('.chan-outbox-list .chan-prop').length >= 4`, 40);
+  // B-f467: the Outbox lists one ROW per proposal; the first row is opened so its full card is on screen too
+  await waitFor(page, `document.querySelectorAll('.chan-outbox-list .chan-orow').length >= 4`, 40);
+  await page.evaljs(`(() => { const r = document.querySelector('[data-shot="win"] .chan-outbox-list > .chan-orow'); if (r) r.click(); return !!r; })()`);
   await sleep(300);
   await capture(page, tag, 'outbox-window', '[data-shot="win"]');
   await page.evaljs(`(() => { const b = document.querySelector('[data-shot="win"] .chan-seg [data-view="all"]'); if (b) b.click(); return !!b; })()`);
@@ -990,6 +992,15 @@ const IM_WIN_GROUPS = {
   readonly: { sel: '.chanwin-readonly', parts: { text: ':scope > span', btn: '.mounts-btn' }, whole: ['btn'] },
 };
 
+// B-f467: the Outbox window — its rows (the channel list's grammar), the state heads, the toolbar, an opened card's head + actions
+const IM_OUTBOX_GROUPS = {
+  orow: { sel: '.chan-outbox-list > .chan-orow', parts: { av: ':scope > .chan-av', title: '.chan-orow-title', acct: '.chan-orow-acct', at: '.chan-orow-at', chev: '.chan-orow-chev', pill: '.chan-prop-state', text: '.chan-orow-text', act: '.chan-orow-act .mounts-btn' }, whole: ['at', 'pill', 'act'] },
+  sec: { sel: '.chan-outbox-list > .chan-outbox-sec', parts: { dot: '.chan-dot', words: ':scope > span:last-child' }, whole: ['words'] },
+  bar: { sel: '.chan-outbox > .jobs-toolbar', parts: { summary: '.jobs-summary', seg: '.chan-seg' } },
+  cardhead: { sel: '.chan-outbox-list > .chan-prop > .chan-prop-head', parts: { state: '.chan-prop-state', who: '.chan-prop-who', when: '.chan-prop-when' }, whole: ['state', 'when'] },
+  cardact: { sel: '.chan-outbox-list > .chan-prop > .chan-prop-actions', parts: { a: ':scope > :nth-child(1)', b: ':scope > :nth-child(2)', c: ':scope > :nth-child(3)' }, whole: ['a', 'b', 'c'] },
+};
+
 // the two plain-words dialogs (channel-polish): Grant access… and Notify… — their rows, radios, chips, picker rows
 const IM_DLG_GROUPS = {
   header: { sel: '.dialog-header', parts: { title: 'h3', close: '.dialog-close, button' } },
@@ -1043,6 +1054,9 @@ async function imPass({ lang, viewport, theme }) {
   // (from the PAGE, as the classic pass's PROPOSE does — the owner's own request)
   { const r = await page.evaljs(`fetch('/api/channels/fake-poll/fake-poll-ops/propose', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'Could someone look at the staging box before 3pm?' }) }).then((x) => x.status)`);
     if (r !== 200) log('IM propose', 'HTTP', r); }
+  // B-f467: a second draft whose first line is long (the Outbox row clips it with an ellipsis, never its time / pill / button)
+  { const r = await page.evaljs(`fetch('/api/channels/fake-poll/fake-poll-ops/propose', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'Status for everyone following the launch: the staging box was rebuilt overnight, the checklist is green except the smoke test, and the release notes are drafted.\\nDetails below.' }) }).then((x) => x.status)`);
+    if (r !== 200) log('IM propose 2', 'HTTP', r); }
   await sleep(1500);
   if (!mobile) {
     await openPanel(page);
@@ -1134,6 +1148,14 @@ async function imPass({ lang, viewport, theme }) {
     } else log(tag, 'the Notify dialog did not open');
   } else log(tag, 'the Grant access dialog did not open');
   await page.evaljs(`(() => { for (const o of document.querySelectorAll('.dialog-overlay')) o.remove(); return 1; })()`);
+  // ── B-f467: THE OUTBOX — one row per proposal, then the All view with the first row opened (its full card under it) ──
+  await page.evaljs(`(() => { for (const w of [...window.app.wm.windows.values()]) window.app.wm.closeWindow(w.id); const w = window.app.openChannelOutbox(); for (const e of document.querySelectorAll('[data-shot="win"]')) delete e.dataset.shot; w.element.dataset.shot = 'win'; return w.id; })()`);
+  if (!(await waitFor(page, `document.querySelectorAll('[data-shot="win"] .chan-outbox-list > .chan-orow').length >= 2`, 40))) log(tag, 'outbox rows not ready');
+  await sleep(400);
+  await imCapture(page, tag, `${mobile ? 'm-' : ''}outbox-rows`, '[data-shot="win"]', IM_OUTBOX_GROUPS);
+  await page.evaljs(`(() => { const b = document.querySelector('[data-shot="win"] .chan-seg [data-view="all"]'); if (b) b.click(); const r = document.querySelector('[data-shot="win"] .chan-outbox-list > .chan-orow'); if (r) r.click(); return !!r; })()`);
+  await sleep(500);
+  await imCapture(page, tag, `${mobile ? 'm-' : ''}outbox-open`, '[data-shot="win"]', IM_OUTBOX_GROUPS);
   await page.evaljs(`(() => { for (const w of [...window.app.wm.windows.values()]) window.app.wm.closeWindow(w.id); return 1; })()`);
   page.close();
 }

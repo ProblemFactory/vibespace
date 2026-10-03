@@ -17,6 +17,18 @@
 //      recorded pid gone, the profile removed (a person's ending), the record says fileChanged, and ONE
 //      `file-changed {host: null, path, mtime}` reached a ws client AND the page's window event; CONTROL: a second
 //      session on the same file stopped with the file untouched ⇒ fileChanged false, no signal;
+//   §4b B-04da ④ AN UNSAVED EDIT IS NEVER SIGNALLED AWAY: an edit typed INTO LibreOffice (xdotool on the session's
+//      own display), then Stop ⇒ 409 app-asked, LibreOffice alive with its OWN "Save Document?" prompt up, the record
+//      ready + closeAskedAt; a second Stop ⇒ refused again with ONE hand-over (never a stacked prompt); a Scale ▸
+//      relaunch ⇒ app-asked, no successor; the window's Stop says it in words (Cancel keeps it running); the person
+//      answers Save in the app's window ⇒ the edit is WRITTEN (python-docx reads it back) and LibreOffice ends itself;
+//      a second edited session stopped through the window's confirm ("Stop and lose the edits") ⇒ exited, stopForced,
+//      nothing of it left, the file untouched; (verify r1) a third one relaunched with `force` after its app-asked ⇒
+//      200, the old app stopForced and gone, the successor ready (never a 409 with a successor minted anyway);
+//   §4c B-04da ⑤ Ctrl+W on the last document (LibreOffice's own close ⇒ its Start Center, measured) ends a FILE session
+//      (exited, stoppedBy user); CONTROL: the generic LibreOffice row keeps its Start Center (still ready);
+//   (② in §3: this box has LibreOffice without Carlito / Caladea ⇒ the menu offers the faces alone; ⑥ in §3: the door
+//      applies the Writer row's remembered share — a Task Group, pixels — like the launcher's untouched row)
 //   §5 the code editor honours the signal: an editor on a text file, the file rewritten on disk, a signal naming
 //      ANOTHER file changes nothing (CONTROL), the signal naming it reloads the editor at once (never the 15 s poll);
 //   §6 A MACHINE WITHOUT LIBREOFFICE (the server rebooted on a scratch PATH that hides libreoffice + soffice — nothing
@@ -192,6 +204,11 @@ console.log('§2 the launch route\'s machine rule — before any machine is aske
   check('nothing was recorded by the refused requests', recordedApps().length === before, recordedApps().length);
 }
 
+// B-04da ⑥: the Writer row REMEMBERS a share (a Task Group, pixels) — the door must apply it like the launcher's untouched row
+const shareGrp = await j('POST', '/api/tasks', { title: 'Office door share' });
+const shareGid = shareGrp.body && shareGrp.body.task && shareGrp.body.task.id;
+await j('PATCH', '/api/user-state', { desktopAppReach: { 'libreoffice-writer': { principals: [{ kind: 'group', id: shareGid, name: 'Office door share' }], mode: 'pixels' } } });
+
 console.log('§3 the explorer row → the door → the window');
 let recId = null;
 {
@@ -201,6 +218,13 @@ let recId = null;
   await sleep(600); // the verdict answered meanwhile: the row stays (Writer is here)
   const rows2 = await p1.evalJs(MENU_ROWS);
   check('the verdict arrived and the row is still "Open with LibreOffice" (Writer is installed here)', !!rows2 && rows2.some((r) => r.key === 'office-open'), rows2 && rows2.map((r) => r.text));
+  // B-04da ②: LibreOffice is here — and when the Calibri / Cambria look-alikes are not, the menu offers them alone
+  // the box's faces measured HERE (fontconfig), never by the code under test
+  let families = '';
+  try { families = execFileSync('fc-list', [':', 'family'], { encoding: 'utf8', timeout: 10000 }); } catch { families = ''; }
+  const fontsMissing = families ? ['Carlito', 'Caladea'].filter((f) => !new RegExp(`^${f}$`, 'm').test(families)) : [];
+  const fontsRow = rows2 && rows2.find((r) => r.key === 'office-fonts');
+  check(fontsMissing.length ? `② this box has LibreOffice WITHOUT ${fontsMissing.join(' / ')} ⇒ the menu offers the faces alone ("${fontsRow && fontsRow.text}")` : '② the faces are installed here ⇒ no fonts row', fontsMissing.length ? !!fontsRow && /context-menu-item/.test(fontsRow.cls) && /Calibri \/ Cambria/.test(fontsRow.text) : !fontsRow, rows2 && rows2.map((r) => [r.key, r.text]));
   await shot(p1, 'explorer-row.png');
   const t0 = Date.now();
   await trustedClick(p1, `[...document.querySelectorAll('.context-menu [data-key="office-open"]')][0]`);
@@ -230,6 +254,8 @@ let recId = null;
     let xw = '';
     try { xw = execFileSync(bin('xdotool') || 'xdotool', ['search', '--name', path.basename(DOCX)], { env: xenv, encoding: 'utf8', timeout: 10000 }).trim(); } catch (e) { xw = ''; }
     check('on the app\'s own display a window is named after the file (xdotool search --name)', !!xw, xw || '(none)');
+    const reach = await j('GET', `/api/desktop/apps/${rec.id}/reach`);
+    check('⑥ the door applied the Writer row\'s REMEMBERED share (the Task Group, pixels) — as the launcher\'s untouched row does', !!shareGid && reach.body && reach.body.mode === 'pixels' && (reach.body.rows || []).some((r) => r.principal && r.principal.id === shareGid), reach.body);
   }
 }
 
@@ -258,7 +284,10 @@ console.log('§4 after editing: the file-changed signal');
     // removes it after the clean teardown ONLY because it names this session's own profile (the witness)
     const lock = O.lockFileOf(DOCX);
     const recL = recordedApps().find((a) => a.id === rec.id);
-    check('no stale LibreOffice lock file is left beside the document (the next open is not "in use") — removed by its witness', !fs.existsSync(lock) && recL && !!recL.fileLockRemovedAt, { exists: fs.existsSync(lock), removedAt: recL && recL.fileLockRemovedAt, kept: recL && recL.fileLockKept });
+    // B-04da ④: Stop now ASKS LibreOffice to quit (its own File ▸ Exit) — an unmodified document closes and LibreOffice
+    // removes its own lock; the witness rule stays the belt for a session that had to be signalled
+    check('no stale LibreOffice lock file is left beside the document (the next open is not "in use") — LibreOffice\'s own quit removed it, or the machine by its witness', !fs.existsSync(lock) && recL && (!!recL.fileLockRemovedAt || recL.fileLockDone === true), { exists: fs.existsSync(lock), removedAt: recL && recL.fileLockRemovedAt, done: recL && recL.fileLockDone, kept: recL && recL.fileLockKept });
+    check('B-04da ④: that Stop ASKED first — LibreOffice quit on its own (no `closeAskedAt`, no force)', recL && !recL.closeAskedAt && !recL.stopForced && /LibreOffice quit on its own when asked/.test(srvLog.join('')), recL && { closeAskedAt: recL.closeAskedAt, stopForced: recL.stopForced });
     // CONTROL: the same file opened again and stopped UNTOUCHED ⇒ no signal
     const r2 = await j('POST', '/api/desktop/apps', { file: DOCX, fileHost: 'local' });
     const id2 = r2.body && r2.body.id;
@@ -272,10 +301,126 @@ console.log('§4 after editing: the file-changed signal');
     const s2 = id2 && await j('POST', `/api/desktop/apps/${id2}/stop`, {});
     await sleep(2500);
     const rec2 = recordedApps().find((a) => a.id === id2);
-    check('CONTROL: a session stopped with its file untouched ⇒ fileChanged false and NO file-changed', !!ready2 && s2 && s2.status === 200 && rec2 && rec2.fileChanged === false && !wsMsgs.some((m) => m.appId === id2), { ready: !!ready2, fileChanged: rec2 && rec2.fileChanged, msgs: wsMsgs.filter((m) => m.appId === id2) });
+    check('CONTROL: a session stopped with its file untouched ⇒ fileChanged false and NO file-changed', !!ready2 && s2 && s2.status === 200 && rec2 && rec2.fileChanged === false && !wsMsgs.some((m) => m.appId === id2), { ready: !!ready2, stop: s2 && { status: s2.status, code: s2.body && s2.body.code, error: s2.body && s2.body.error }, fileChanged: rec2 && rec2.fileChanged, msgs: wsMsgs.filter((m) => m.appId === id2) });
     check('CONTROL: a lock naming another LibreOffice is KEPT (never removed on a guess) and the record says why', fs.existsSync(lock) && fs.readFileSync(lock, 'utf8') === foreign && rec2 && !rec2.fileLockRemovedAt && /another LibreOffice/.test(rec2.fileLockKept || ''), { exists: fs.existsSync(lock), kept: rec2 && rec2.fileLockKept });
     try { fs.unlinkSync(lock); } catch {}
   }
+}
+
+// ── B-04da: a session with its window open in p1 (the active pane), and an edit typed INTO LibreOffice ──
+const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+// §4b's document: an .odt beside the .docx (LibreOffice converts it with a throwaway profile) — its Save writes at once
+// (a .docx would ask "Keep current format?" as a second question)
+const ODT = DOCX.replace(/\.docx$/, '.odt');
+try { execFileSync(office.path, ['--headless', `-env:UserInstallation=file://${path.join(docs, '.conv-profile')}`, '--convert-to', 'odt', '--outdir', docs, DOCX], { timeout: 60000, stdio: 'ignore' }); } catch { /* checked below */ }
+try { fs.rmSync(path.join(docs, '.conv-profile'), { recursive: true, force: true }); } catch {}
+const odtText = (f) => { try { return execFileSync(PY, ['-c', 'import zipfile,sys,re\nprint(re.sub(r"<[^>]+>", " ", zipfile.ZipFile(sys.argv[1]).read("content.xml").decode()))', f], { encoding: 'utf8', timeout: 20000 }); } catch (e) { return `(unreadable: ${e.message})`; } };
+const docxText = (f) => { try { return execFileSync(PY, ['-c', 'import docx,sys\nprint("\\n".join(p.text for p in docx.Document(sys.argv[1]).paragraphs))', f], { encoding: 'utf8', timeout: 20000 }); } catch (e) { return `(unreadable: ${e.message})`; } };
+const handoversOf = (id) => fs.readdirSync('/proc').filter((d) => /^\d+$/.test(d)).filter((d) => { try { const c = fs.readFileSync(`/proc/${d}/cmdline`, 'utf8'); return c.includes('.uno:Quit') && c.includes(`desktop-apps/${id}/profile`); } catch { return false; } });
+async function openSession(body, { title = null } = {}) {
+  const r = await j('POST', '/api/desktop/apps', body);
+  const id = r.body && r.body.id;
+  const ready = id && await until(async () => { const x = (await j('GET', `/api/desktop/apps/${id}`)).body; return x && x.state === 'ready' ? x : null; }, 45000, 250);
+  if (!ready) return { id, ready: null };
+  await p1.evalJs(`(() => { app.openDesktopApp(${JSON.stringify(id)}); return true; })()`);
+  const w = await until(async () => { const x = await p1.evalJs(WIN(id)); return x && x.canvas && x.canvas.brightFrac > 0.3 && (!title || (x.title || '').includes(title)) ? x : null; }, 60000, 500);
+  const xenv = { ...process.env, DISPLAY: ready.display, XAUTHORITY: path.join(appDir(id), 'Xauthority') };
+  const xdo = (args) => { try { return execFileSync(bin('xdotool') || 'xdotool', args, { env: xenv, encoding: 'utf8', timeout: 10000 }).trim(); } catch { return ''; } };
+  await sleep(1500);
+  return { id, ready, w, xdo };
+}
+const typeEdit = async (s, text, file = DOCX) => {
+  const win = await until(() => s.xdo(['search', '--name', path.basename(file)]).split('\n')[0] || null, 20000, 300);
+  if (win) { s.xdo(['windowfocus', '--sync', win]); s.xdo(['type', '--delay', '40', text]); }
+  await sleep(1200);
+  return !!win;
+};
+const dialogOf = (p) => p.evalJs(`(() => { const o = [...document.querySelectorAll('.modal-overlay, .dialog-overlay, .dialog')].reverse().find((e) => /has unsaved changes/.test(e.textContent)); if (!o) return null; const b = [...o.querySelectorAll('button')]; return { text: o.textContent.slice(0, 400), buttons: b.map((x) => x.textContent) }; })()`);
+const clickDialog = (p, label) => trustedClick(p, `[...document.querySelectorAll('button')].find((b) => b.textContent === ${JSON.stringify(label)} && b.offsetParent)`);
+
+console.log('§4b B-04da ④ an unsaved edit is never signalled away');
+{
+  check('the .odt fixture exists (LibreOffice converted the .docx)', fs.existsSync(ODT), ODT);
+  const s = await openSession({ file: ODT, fileHost: 'local' }, { title: path.basename(ODT) });
+  check('a session on the fixture is ready with its window open (the active pane)', !!s.ready && !!s.w, { id: s.id, w: s.w });
+  const mtime0 = fs.statSync(ODT).mtimeMs;
+  const typed = s.ready && await typeEdit(s, 'EDITED ', ODT);
+  const appPid = s.ready && s.ready.pids.app;
+  const st1 = await j('POST', `/api/desktop/apps/${s.id}/stop`, {});
+  const prompt = await until(() => s.xdo(['search', '--name', 'Save Document']) || null, 5000, 200);
+  check('Stop of a session holding an unsaved edit ⇒ 409 app-asked, said for a person', typed && st1.status === 409 && st1.body?.code === 'app-asked' && /asking in its own window whether to save/.test(st1.body?.error || ''), { typed, status: st1.status, body: st1.body });
+  check('…LibreOffice still runs and its OWN "Save Document?" prompt is up on its display (nothing was signalled)', !!appPid && alive(appPid) && !!prompt, { alive: alive(appPid), prompt });
+  const rec3 = (await j('GET', `/api/desktop/apps/${s.id}`)).body;
+  check('…the record stays ready and says it asked (closeAskedAt, closeAskedBy user)', rec3 && rec3.state === 'ready' && Number.isFinite(rec3.closeAskedAt) && rec3.closeAskedBy === 'user', rec3 && { state: rec3.state, closeAskedAt: rec3.closeAskedAt, closeAskedBy: rec3.closeAskedBy });
+  const st2 = await j('POST', `/api/desktop/apps/${s.id}/stop`, {});
+  check('a second Stop while the prompt is up ⇒ app-asked again with ONE hand-over (never a second prompt stacked)', st2.status === 409 && st2.body?.code === 'app-asked' && handoversOf(s.id).length === 1, { st2: st2.body, handovers: handoversOf(s.id) });
+  const n0 = recordedApps().length;
+  const rl = await j('POST', `/api/desktop/apps/${s.id}/relaunch`, { scale: 2 });
+  check('a Scale ▸ relaunch ⇒ 409 app-asked as well — no successor recorded, the app still running', rl.status === 409 && rl.body?.code === 'app-asked' && recordedApps().length === n0 && alive(appPid), { status: rl.status, body: rl.body, n: recordedApps().length, n0 });
+  // the window's own Stop: the words, and Cancel keeps it running
+  await p1.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(s.id)}); w._desktopAppStop(); return true; })()`);
+  const dlg = await until(() => dialogOf(p1), 8000, 150);
+  check('the window\'s Stop asks in words: "… has unsaved changes", answer it in the app\'s window or "Stop and lose the edits"', !!dlg && /asking in its own window whether to save/.test(dlg.text) && dlg.buttons.includes('Stop and lose the edits'), dlg);
+  await shot(p1, 'unsaved-edits-confirm.png');
+  if (dlg) await clickDialog(p1, 'Cancel');
+  await sleep(800);
+  check('…Cancel keeps it running (nothing signalled)', alive(appPid) && (await j('GET', `/api/desktop/apps/${s.id}`)).body?.state === 'ready', { alive: alive(appPid) });
+  // the person answers Save in LibreOffice's own window: a real pointer click (XTEST) on its Save button — the rightmost
+  // of Don't Save / Cancel / Save along the prompt's bottom row (measured on this box: ~85 % across, ~73 % down)
+  const t0 = Date.now();
+  let clicked = null;
+  while (Date.now() - t0 < 20000 && alive(appPid)) {
+    const dlgWin = s.xdo(['search', '--name', 'Save Document']).split('\n').filter(Boolean)[0];
+    const g = dlgWin && Object.fromEntries(s.xdo(['getwindowgeometry', '--shell', dlgWin]).split('\n').map((l) => l.split('=')).filter((kv) => kv.length === 2).map(([k, v]) => [k, Number(v)]));
+    if (g && g.WIDTH > 100) { clicked = { x: Math.round(g.X + g.WIDTH * 0.85), y: Math.round(g.Y + g.HEIGHT * 0.73), g }; s.xdo(['mousemove', '--sync', String(clicked.x), String(clicked.y)]); s.xdo(['click', '1']); }
+    await sleep(2000);
+  }
+  const ended = await until(async () => { const x = (await j('GET', `/api/desktop/apps/${s.id}`)).body; return x && x.state === 'exited' ? x : null; }, 15000, 250);
+  const text = odtText(ODT);
+  check('answering Save in the app\'s window WRITES the edit (read back from the .odt) and LibreOffice ends by itself', !!ended && !ended.stoppedBy && fs.statSync(ODT).mtimeMs !== mtime0 && /EDITED/.test(text), { clicked, ended: ended && { state: ended.state, stoppedBy: ended.stoppedBy, lastError: ended.lastError }, changed: fs.statSync(ODT).mtimeMs !== mtime0, text: text.replace(/\s+/g, ' ').slice(0, 200), windows: s.xdo(['search', '--onlyvisible', '--name', '.']).split('\n').map((w) => s.xdo(['getwindowname', w])) });
+  check('…its hand-over ended with it', handoversOf(s.id).length === 0, handoversOf(s.id));
+  if (alive(appPid)) await j('POST', `/api/desktop/apps/${s.id}/stop`, { force: true }); // the net: never a session left holding the file for the legs below
+
+  // a second edited session, ended through the window's confirm — the person chose to lose the edit
+  const s2 = await openSession({ file: ODT, fileHost: 'local' }, { title: path.basename(ODT) });
+  const mtime1 = fs.statSync(ODT).mtimeMs;
+  const typed2 = s2.ready && await typeEdit(s2, 'DISCARDED ', ODT);
+  await p1.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(s2.id)}); w._desktopAppStop(); return true; })()`);
+  const dlg2 = await until(() => dialogOf(p1), 10000, 150);
+  if (dlg2) await clickDialog(p1, 'Stop and lose the edits');
+  const ended2 = await until(async () => { const x = (await j('GET', `/api/desktop/apps/${s2.id}`)).body; return x && x.state === 'exited' ? x : null; }, 20000, 250);
+  const pids2 = Object.values((s2.ready && s2.ready.pids) || {}).filter(Boolean);
+  check('"Stop and lose the edits" ⇒ exited, stoppedBy user, stopForced — every recorded pid and the hand-over gone', typed2 && !!dlg2 && !!ended2 && ended2.stoppedBy === 'user' && ended2.stopForced === true && pids2.every((p) => !alive(p)) && handoversOf(s2.id).length === 0, { typed2, dlg2: !!dlg2, ended2: ended2 && { stoppedBy: ended2.stoppedBy, stopForced: ended2.stopForced }, left: pids2.filter(alive), handovers: handoversOf(s2.id) });
+  check('…the file is untouched (the person chose to lose that edit) and no lock is left beside it', fs.statSync(ODT).mtimeMs === mtime1 && !/DISCARDED/.test(odtText(ODT)) && !fs.existsSync(O.lockFileOf(ODT)), { changed: fs.statSync(ODT).mtimeMs !== mtime1, lock: fs.existsSync(O.lockFileOf(ODT)) });
+  // verify r1: a third edited session, relaunched at another scale AFTER the person confirmed losing the edit (`force`)
+  // — the old app ends (stopForced), its profile carries, the successor runs; never a 409 with a successor minted anyway
+  const s3 = await openSession({ file: ODT, fileHost: 'local' }, { title: path.basename(ODT) });
+  const mtime3 = fs.statSync(ODT).mtimeMs;
+  const typed3 = s3.ready && await typeEdit(s3, 'RESCALED ', ODT);
+  const rl3a = await j('POST', `/api/desktop/apps/${s3.id}/relaunch`, { scale: 2 });
+  const rl3 = await j('POST', `/api/desktop/apps/${s3.id}/relaunch`, { scale: 2, force: true });
+  const old3 = (await j('GET', `/api/desktop/apps/${s3.id}`)).body;
+  const pids3 = Object.values((s3.ready && s3.ready.pids) || {}).filter(Boolean);
+  const succ3 = rl3.body && rl3.body.app && await until(async () => { const x = (await j('GET', `/api/desktop/apps/${rl3.body.app.id}`)).body; return x && x.state === 'ready' ? x : null; }, 45000, 250);
+  check('a FORCED Scale ▸ relaunch of an edited session (after its app-asked) ⇒ 200: the old app exited stopForced, every pid and the hand-over gone, the successor ready', typed3 && rl3a.status === 409 && rl3a.body?.code === 'app-asked' && rl3.status === 200 && old3 && old3.state === 'exited' && old3.stopForced === true && old3.replacedBy === (rl3.body.app && rl3.body.app.id) && pids3.every((x) => !alive(x)) && handoversOf(s3.id).length === 0 && !!succ3, { typed3, first: rl3a.status, status: rl3.status, body: rl3.body && (rl3.body.code || rl3.body.error), old: old3 && { state: old3.state, stopForced: old3.stopForced, replacedBy: old3.replacedBy }, left: pids3.filter(alive), succ: !!succ3 });
+  check('…the file is untouched (that edit was given up)', fs.statSync(ODT).mtimeMs === mtime3 && !/RESCALED/.test(odtText(ODT)), { changed: fs.statSync(ODT).mtimeMs !== mtime3 });
+  if (succ3) await j('POST', `/api/desktop/apps/${succ3.id}/stop`, { force: true });
+  if (s3.id && pids3.some(alive)) await j('POST', `/api/desktop/apps/${s3.id}/stop`, { force: true });
+}
+
+console.log('§4c B-04da ⑤ closing the last document inside LibreOffice ends a file session');
+{
+  const s = await openSession({ file: DOCX, fileHost: 'local' }, { title: path.basename(DOCX) });
+  const win = s.ready && await until(() => s.xdo(['search', '--name', path.basename(DOCX)]).split('\n')[0] || null, 20000, 300);
+  if (win) { s.xdo(['windowfocus', '--sync', win]); s.xdo(['key', 'ctrl+w']); }
+  const ended = await until(async () => { const x = (await j('GET', `/api/desktop/apps/${s.id}`)).body; return x && x.state === 'exited' ? x : null; }, 20000, 250);
+  check('Ctrl+W on the last document (LibreOffice\'s Start Center takes the window) ⇒ the file session ends: exited, stoppedBy user', !!win && !!ended && ended.stoppedBy === 'user' && !ended.stopForced, { win, ended: ended && { state: ended.state, stoppedBy: ended.stoppedBy, lastError: ended.lastError }, now: (await j('GET', `/api/desktop/apps/${s.id}`)).body?.state });
+  const g = await openSession({ appId: 'libreoffice' });
+  await sleep(4000);
+  const gv = g.id && await p1.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(g.id)}); return w ? (w._desktopStartCenter || null) : 'no-window'; })()`);
+  const gr = g.id && (await j('GET', `/api/desktop/apps/${g.id}`)).body;
+  check('CONTROL: the generic LibreOffice row (no file) keeps its Start Center — the verdict says no-file, still ready', !!gr && gr.state === 'ready' && gv && gv.why === 'no-file', { state: gr && gr.state, verdict: gv });
+  if (g.id) await j('POST', `/api/desktop/apps/${g.id}/stop`, {});
 }
 
 console.log('§5 the code editor honours the signal (never waits for its 15 s poll)');

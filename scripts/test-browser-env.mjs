@@ -129,7 +129,7 @@ console.log('— ②b lane hooks-create H5: the window preference on a machine w
   const podX = { ...D.displayVerdict({}), xvfb: true };
   const desk = { ...D.displayVerdict({ env: { XDG_RUNTIME_DIR: '/r' }, entries: [{ path: '/r/wayland-0', type: 'socket', alive: true }] }), xvfb: true };
   // 2.369.200: H5's rule ships behind its switch, OFF (browser-display NO_DESKTOP_WINDOW_DEFAULT) — these legs judge the RULE
-  // with the switch ON (the .201 shape, `noDesktopWindow: true`); the shipped default is judged by the leg right after
+  // with the switch ON (the shape it will ship in — still OFF in 2.369.202; `noDesktopWindow: true`); the shipped default is judged by the leg right after
   const mkDisp = (v, o = { noDesktopWindow: true }) => DC.create({ dir: path.join(ROOT, 'disp-' + Math.random().toString(36).slice(2, 8)), writeJson: (f, o2) => fs.writeFileSync(f, JSON.stringify(o2, null, 2)), log: { warn() {} }, probe: async () => v, ...o });
   const dOff = mkDisp(podX, {});
   const fOff = await dOff.factFor({ baseFile: rU.configPath, mode: 'auto', preference: null });

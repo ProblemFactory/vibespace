@@ -14,8 +14,14 @@ const { normalizeCodexSource } = require('../../adapters/codex');
 const protocol = 'codex-events';
 
 function create({ engine, deliverRef, permissionRulesRef }) {
-  const { noteTurnEnd, recordCodexQuotaSignal } = engine;
+  const { noteTurnEnd, recordCodexQuotaSignal, catchUpResetCreditFromBuffer } = engine;
   function attach(session, id, ptyProcess, { feedLive, broadcastToSession, broadcastActiveSessions, readSessionMeta, writeSessionMeta, updateSessionTodos }) {
+    // THE WORD A RESTART LOSES (lane reset-path verify r10): before this bridge's first live byte, the keyed reset-credit
+    // records the wrapper wrote to its own buffer file while no server was attached (a press that straddled the restart:
+    // its read pushed, its `skipped`, its consume sent / answered) are read back for THIS session's open attempts — dtach
+    // replays nothing, and r9 ② only took the words that reached the new engine live. Nothing to do when no attempt of
+    // this session is open (the common attach costs no file read).
+    try { catchUpResetCreditFromBuffer?.(session, id); } catch (e) { console.warn(`[reset-credit] ${id}: the buffer-file catch-up failed:`, e.message); }
     let lineBuf = '';
     const stripAnsi = (value) => String(value || '').replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, '');
     ptyProcess.onData((output) => {
@@ -198,8 +204,10 @@ function create({ engine, deliverRef, permissionRulesRef }) {
           // Codex quota signals → pool/auto-resume engine (P2): readings +
           // typed exhaustion, relayed by the wrapper (older wrappers simply
           // never emit these — additive, no capability gate needed)
-          if (msg.type === 'event_msg' && (msg.payload?.type === 'rate_limits_updated' || msg.payload?.type === 'task_failed' || msg.payload?.type === 'reset_credit_result')) {
-            try { recordCodexQuotaSignal?.(session, msg.payload); } catch {}
+          // (reset_credit_sent, lane reset-path: the consume LEFT — the floor and the charge start there)
+          // (the whole RECORD rides along — verify r5: its own `timestamp` is how a backlog reading / wall is told from a live one)
+          if (msg.type === 'event_msg' && (msg.payload?.type === 'rate_limits_updated' || msg.payload?.type === 'task_failed' || msg.payload?.type === 'reset_credit_result' || msg.payload?.type === 'reset_credit_sent')) {
+            try { recordCodexQuotaSignal?.(session, msg.payload, msg); } catch {}
           }
           // codex turn boundary (task_complete; task_failed classifies
           // inside recordCodexQuotaSignal) — same wall machine as claude

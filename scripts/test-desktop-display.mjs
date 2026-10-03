@@ -71,7 +71,7 @@ console.log('§1 no-binary facts');
 }
 {
   const env = D.x11Env({ PATH: '/x', WAYLAND_DISPLAY: 'wayland-0', XDG_SESSION_TYPE: 'wayland', HOME: '/h' }, { display: ':42', authFile: '/a' });
-  ok(!('WAYLAND_DISPLAY' in env) && env.XDG_SESSION_TYPE === 'x11' && env.DISPLAY === ':42' && env.XAUTHORITY === '/a' && env.GDK_BACKEND === 'x11' && env.QT_QPA_PLATFORM === 'xcb' && env.HOME === '/h' && env.PATH === '/x', 'x11Env strips the Wayland session (x11vnc 0.9.17 EXITS when WAYLAND_DISPLAY is set — measured) and pins DISPLAY/XAUTHORITY/XDG_SESSION_TYPE/GDK_BACKEND/QT_QPA_PLATFORM, keeping the rest');
+  ok(env.WAYLAND_DISPLAY === D.NO_WAYLAND_DISPLAY && env.XDG_SESSION_TYPE === 'x11' && env.DISPLAY === ':42' && env.XAUTHORITY === '/a' && env.GDK_BACKEND === 'x11' && env.QT_QPA_PLATFORM === 'xcb' && env.HOME === '/h' && env.PATH === '/x', 'x11Env replaces the Wayland session with a display that cannot exist (§9) and pins DISPLAY/XAUTHORITY/XDG_SESSION_TYPE/GDK_BACKEND/QT_QPA_PLATFORM, keeping the rest');
 }
 {
   const cookie = D.newCookie();
@@ -793,6 +793,75 @@ console.log('§8 (2026-09-25) memory is a FOOTPRINT: ΣPss over the set, one met
   ok(src.split(needle).length === 2, 'CONTROL setup: the verdict\'s memory comparison is found exactly once');
   const RGm = MUTDD.load('src/runaway-guard.js', src.replace(needle, 'sample.rssBytes > L.GUARD_MEM_BYTES'), 'rss-sum');
   ok(RGm.resourceVerdict(inc, null, 0, 1000).over !== null, 'CONTROL: a verdict comparing rssBytes calls the incident fixture OVER (the Chrome incident, reproduced) — the shipped one does not');
+}
+
+console.log('\n§9 a desktop app never reaches the machine\'s own Wayland desktop (2026-10-02: the owner\'s Blender on xpra :4 opened on the physical screen)');
+{
+  const env = D.x11Env({ PATH: '/x', HOME: '/h', XDG_RUNTIME_DIR: '/run/user/1000', XDG_SESSION_TYPE: 'wayland', WAYLAND_DISPLAY: 'wayland-0' }, { display: ':4', authFile: '/a' });
+  const name = D.NO_WAYLAND_DISPLAY;
+  ok(env.WAYLAND_DISPLAY === name && typeof name === 'string' && name.length > 0 && !name.includes('/') && !/^wayland-\d+$/.test(name), `x11Env NAMES a Wayland display that cannot exist (${JSON.stringify(name)}: non-empty, relative ⇒ under XDG_RUNTIME_DIR, no compositor's wayland-N) — a deleted variable lets libwayland default to wayland-0`);
+  ok(env.SDL_VIDEODRIVER === 'x11' && env.GDK_BACKEND === 'x11' && env.QT_QPA_PLATFORM === 'xcb' && env.XDG_SESSION_TYPE === 'x11', 'and pins SDL_VIDEODRIVER=x11 beside GDK_BACKEND / QT_QPA_PLATFORM / XDG_SESSION_TYPE (SDL3 prefers Wayland; SDL2 and SDL3 both read this name)');
+  const unset = D.x11Env({ PATH: '/x' }, { display: ':4', authFile: '/a' }), empty = D.x11Env({ PATH: '/x', WAYLAND_DISPLAY: '' }, { display: ':4', authFile: '/a' });
+  ok(unset.WAYLAND_DISPLAY === name && empty.WAYLAND_DISPLAY === name, 'a base with no WAYLAND_DISPLAY (a server started before login) or an empty one gets the same name — the default socket is exactly what this closes');
+  const w = D.withoutWayland(env);
+  ok(!('WAYLAND_DISPLAY' in w) && env.WAYLAND_DISPLAY === name && w.DISPLAY === ':4', 'withoutWayland drops the variable on a copy (the input keeps it)');
+}
+{
+  // the keeper's own X parts: x11vnc 0.9.17 EXITS on any WAYLAND_DISPLAY (measured with the name above too), xpra reads any as a Wayland session
+  const sdir = path.join(dir, 'wl-parts'); fs.mkdirSync(sdir, { recursive: true });
+  const shim = (n, tail) => { const p = path.join(sdir, n); fs.writeFileSync(p, `#!/bin/sh\nenv > "${p}.env"\n${tail}\n`, { mode: 0o755 }); return p; };
+  const envOf = async (p) => { for (let i = 0; i < 50 && !fs.existsSync(`${p}.env`); i++) await sleep(60); await sleep(60); return fs.existsSync(`${p}.env`) ? fs.readFileSync(`${p}.env`, 'utf8').split('\n') : null; };
+  const xenv = D.x11Env({ PATH: process.env.PATH, HOME: process.env.HOME, WAYLAND_DISPLAY: 'wayland-0' }, { display: ':4', authFile: '/a' });
+  const vnc = shim('x11vnc', 'exit 0');
+  await D.startX11vnc({ binPath: vnc, display: ':4', authFile: '/a', rfbPort: 5999, env: xenv });
+  const ve = await envOf(vnc);
+  ok(!!ve && !ve.some((l) => l.startsWith('WAYLAND_DISPLAY=')) && ve.includes('DISPLAY=:4'), 'startX11vnc hands x11vnc an x11Env WITHOUT WAYLAND_DISPLAY (it would exit) — the rest of the env intact', ve && ve.filter((l) => /DISPLAY=/.test(l)));
+  const xp = shim('xpra', 'echo 4 >&3\nexec sleep 1');
+  const up = await D.startXpra({ binPath: xp, port: 1, dir: sdir, env: xenv, deadlineMs: 4000 }).catch((e) => ({ error: e.message }));
+  const xe = await envOf(xp);
+  ok(up.display === ':4' && !!xe && !xe.some((l) => l.startsWith('WAYLAND_DISPLAY=')) && xe.includes('XPRA_CLIENT_CAN_SHUTDOWN=0'), 'startXpra hands xpra an x11Env WITHOUT WAYLAND_DISPLAY (its env as before the fix; the shutdown switch kept)', { up: up.display || up.error, wl: xe && xe.filter((l) => /WAYLAND|XPRA_CLIENT/.test(l)) });
+  const xs = shim('Xvnc', 'echo 4 >&3\nexec sleep 1');
+  const xu = await D.startXServer({ bin: 'Xvnc', binPath: xs, authFile: '/a', rfbPort: 1, env: xenv, deadlineMs: 4000 }).catch((e) => ({ error: e.message }));
+  const se = await envOf(xs);
+  ok(xu.display === ':4' && !!se && !se.some((l) => l.startsWith('WAYLAND_DISPLAY=')) && se.includes('DISPLAY=:4'), 'startXServer hands the X server an x11Env WITHOUT WAYLAND_DISPLAY too (an Xvnc that is a wrapper around x11vnc would otherwise lose its picture server)', { up: xu.display || xu.error });
+}
+{
+  // THE REAL LEG: libwayland itself, against a scratch runtime dir whose wayland-0 is a plain listening socket (connect() is all it takes)
+  const py = D.binOnPath('python3', { env: process.env });
+  if (!py) skip('§9 real leg: python3 is not on PATH — the libwayland client cannot run');
+  else {
+    const rt = path.join(dir, 'xdg-rt'); fs.mkdirSync(rt, { recursive: true, mode: 0o700 });
+    let reached = 0;
+    const srv = net.createServer((s) => { reached++; s.destroy(); });
+    await new Promise((res, rej) => { srv.once('error', rej); srv.listen(path.join(rt, 'wayland-0'), res); });
+    const client = [
+      'import ctypes, sys',
+      'try:',
+      '    lib = ctypes.CDLL("libwayland-client.so.0")',
+      'except OSError as e:',
+      '    print("NOLIB", e); sys.exit(0)',
+      'lib.wl_display_connect.restype = ctypes.c_void_p',
+      'lib.wl_display_connect.argtypes = [ctypes.c_char_p]',
+      'lib.wl_display_disconnect.argtypes = [ctypes.c_void_p]',
+      'd = lib.wl_display_connect(None)',
+      'print("CONNECTED" if d else "REFUSED")',
+      'if d: lib.wl_display_disconnect(d)',
+    ].join('\n');
+    const connectUnder = async (env) => { const before = reached; const r = await run(py, ['-c', client], env); await sleep(250); return { out: r.stdout.trim(), err: r.stderr.trim().slice(0, 200), reached: reached - before }; };
+    const now = D.x11Env({ PATH: process.env.PATH, HOME: process.env.HOME, XDG_RUNTIME_DIR: rt }, { display: ':4', authFile: '/a' });
+    const pre = { ...now }; delete pre.WAYLAND_DISPLAY; delete pre.SDL_VIDEODRIVER;   // what x11Env handed an app before the fix
+    try {
+      const a = await connectUnder(pre);
+      if (/^NOLIB/.test(a.out)) skip(`§9 real leg: ${a.out} — libwayland-client is not installed here`);
+      else {
+        ok(a.out === 'CONNECTED' && a.reached === 1, `CONTROL: under the PRE-FIX env (WAYLAND_DISPLAY deleted) wl_display_connect(NULL) reaches the runtime dir's wayland-0 — the owner's Blender, reproduced (${a.out}, ${a.reached} accepted)`, a);
+        const b = await connectUnder(now);
+        ok(b.out === 'REFUSED' && b.reached === 0, `under x11Env's env it does NOT — no socket by that name, the default never tried (${b.out}, ${b.reached} accepted)`, b);
+        const c = await connectUnder({ ...now, WAYLAND_DISPLAY: 'wayland-0' });
+        ok(c.out === 'CONNECTED' && c.reached === 1, `CONTROL: the same client with WAYLAND_DISPLAY=wayland-0 connects — the REFUSED above is the name, not a broken client (${c.out})`, c);
+      }
+    } finally { await new Promise((res) => srv.close(res)); }
+  }
 }
 
 console.log('\n§tree the patched copies never touch the tree');

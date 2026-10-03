@@ -1,0 +1,270 @@
+#!/usr/bin/env node
+// vibespace-design — draft a design as plain-HTML artboards in this conversation's folder and show it in the
+// VibeSpace Design window (lane design-core, docs/design-design-window.md §3.4). STATIC tracked, in AGENT_TOOLS
+// (ships to remote hosts). Thin HTTP to the VibeSpace hub: it execs nothing, holds no token on argv
+// (VIBESPACE_SESSION_TOKEN / VIBESPACE_JOB_TOKEN from the environment), and writes only inside the design folder it
+// names (no `..`, symlinks resolved first, a symlinked file never written through). Every verdict comes from the hub
+// (src/design-model.js runs there — this file ships no copy of it). Full manual: vibespace-docs design.
+'use strict';
+const fs = require('fs');
+const path = require('path');
+const API = process.env.VIBESPACE_API;
+const TOKEN = process.env.VIBESPACE_SESSION_TOKEN || process.env.VIBESPACE_JOB_TOKEN;
+
+const args = process.argv.slice(2);
+const verb = args[0];
+const VALUE_FLAGS = new Set(['--title', '--dir', '--w', '--h', '--x', '--y', '--page']);
+const flag = (name) => { const i = args.indexOf(name); return i >= 0 ? (args[i + 1] ?? '') : undefined; };
+const has = (name) => args.includes(name);
+/** The positional arguments after the verb (a value flag's value is not one). */
+const positional = () => { const out = []; for (let i = 1; i < args.length; i++) { if (VALUE_FLAGS.has(args[i])) { i++; continue; } if (!args[i].startsWith('--')) out.push(args[i]); } return out; };
+
+const USAGE = `vibespace-design — plain-HTML design artboards, shown live in the VibeSpace Design window
+  vibespace-design new <slug> [--title "<what the user would call it>"] [--dir designs]
+        ← creates <dir>/<slug>/ with design.json + a Main.html to replace, opens the window, prints the folder
+  vibespace-design add <file.html> [--title "…"] [--w 1280 --h 800] [--x 0 --y 0] [--page <id>]
+        ← checks the artboard on the hub, then adds / updates its row in design.json and repaints it
+  vibespace-design check [dir]      ← every artboard's verdict and design.json's, by name (exit 1 on a refusal)
+  vibespace-design sync [dir]       ← "these files changed" — run it after every edit (on any machine)
+  vibespace-design open [dir]       ← opens (or brings forward) the Design window on the folder
+  vibespace-design show [dir]       ← design.json in words: artboards, pages, the notes
+  vibespace-design publish [dir] [--public] [--page <id>]
+        ← publishes the design as one page on this VibeSpace (asks the user first) and prints its path
+  vibespace-design list             ← this conversation's designs and their pages
+One complete HTML document per artboard; images beside it, referenced by name (src="logo.png").
+Full manual: vibespace-docs design`;
+
+function die(msg, code = 1) { console.error(msg); process.exit(code); }
+async function call(method, p, body) {
+  const res = await fetch(API + p, { method, headers: { Authorization: 'Bearer ' + TOKEN, ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined }).catch((e) => ({ _neterr: e.message }));
+  if (res._neterr) die('vibespace-design: VibeSpace is unreachable (' + res._neterr + ')', 3);
+  let j = {};
+  try { j = await res.json(); } catch { }
+  return { status: res.status, ok: res.ok && j.ok !== false && !j.error, body: j };
+}
+/** A refusal from the hub, said with its way out. */
+function refuse(r) {
+  const b = r.body || {};
+  let msg = (b.error || `HTTP ${r.status}`) + (b.code ? ` (${b.code})` : '');
+  if (b.code === 'not_registered') msg += '\n  → vibespace-design open <dir> registers the folder (or start with vibespace-design new <slug>)';
+  for (const x of (b.refusals || []).slice(1, 10)) msg += `\n  ✗ ${x.where}: ${x.why}`;
+  die(msg);
+}
+
+/** The design folder: the named one, else this directory when it holds design.json or an artboard. Real path. */
+function designDir(given) {
+  let d = given ? path.resolve(given) : null;
+  if (!d) {
+    const cwd = process.cwd();
+    let names = [];
+    try { names = fs.readdirSync(cwd); } catch { }
+    if (names.includes('design.json') || names.some((n) => /\.html$/i.test(n))) d = cwd;
+  }
+  if (!d) die('name the design folder (vibespace-design list shows yours) — e.g. vibespace-design check designs/<slug>', 2);
+  let real;
+  try { real = fs.realpathSync(d); } catch { die(`no such folder: ${d}`, 2); }
+  if (!fs.statSync(real).isDirectory()) die(`not a folder: ${real}`, 2);
+  return real;
+}
+/** Write a file INSIDE `dir` (its real path): never through a symlink, never outside. */
+function writeInside(dir, name, text) {
+  if (!name || name.includes('/') || name.includes('\\') || name === '.' || name === '..') die(`refusing to write ${name}: not a file name of the design folder`);
+  const fp = path.join(dir, name);
+  let st = null;
+  try { st = fs.lstatSync(fp); } catch { }
+  if (st && !st.isFile()) die(`refusing to write ${fp}: it is a link or not a regular file`);
+  const tmp = path.join(dir, `.${name}.tmp-${process.pid}`);
+  fs.writeFileSync(tmp, text, { flag: 'wx' });
+  fs.renameSync(tmp, fp);
+  return fp;
+}
+const escHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+/** OUR minimal first artboard: a title, one section, one button — to be replaced. */
+const skeleton = (title) => `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escHtml(title)}</title>
+<style>
+  body { margin: 0; font: 16px/1.5 system-ui, sans-serif; color: #1d1d1f; background: #fafafa; }
+  main { max-width: 960px; margin: 0 auto; padding: 64px 32px; }
+  h1 { font-size: 40px; line-height: 1.15; margin: 0 0 16px; }
+  button { font: inherit; padding: 10px 20px; border: 0; border-radius: 8px; background: #1d1d1f; color: #fff; cursor: pointer; }
+</style>
+</head>
+<body>
+<main>
+  <section>
+    <h1>${escHtml(title)}</h1>
+    <p>Replace this with the first screen of the design.</p>
+    <button type="button">Get started</button>
+  </section>
+</main>
+</body>
+</html>
+`;
+const intFlag = (name, lo, hi) => {
+  const v = flag(name);
+  if (v === undefined) return undefined;
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < lo || n > hi) die(`${name} must be a whole number from ${lo} to ${hi}`, 2);
+  return n;
+};
+const sizeWords = (s) => (s && s.why ? `  size: ${s.why}` : '');
+function printCheck(r, { only = null } = {}) {
+  console.log(`${r.title} — ${r.dir}${r.host ? ` (on ${r.host})` : ''}`);
+  for (const x of r.refusals) console.log(`  ✗ design.json ${x.where}: ${x.why}`);
+  for (const f of r.frames) if (!only || f.file === only) console.log(f.ok ? `  ✓ ${f.file}  ${f.w}×${f.h} at ${f.x},${f.y}${f.page ? ` (page ${f.page})` : ''}` : `  ✗ ${f.file} — ${f.why}`);
+  for (const w of r.warnings) console.log(`  ! ${w.why}`);
+  if (sizeWords(r.size)) console.log(sizeWords(r.size));
+}
+const refused = (r) => r.refusals.length > 0 || r.frames.some((f) => !f.ok);
+
+(async () => {
+  if (!verb || verb === 'help' || verb === '--help' || verb === '-h') { console.log(USAGE); return; }
+  if (!API || !TOKEN) die('vibespace-design: not inside a VibeSpace session (VIBESPACE_API / token missing)', 2);
+
+  if (verb === 'new') {
+    const slug = positional()[0];
+    if (!slug || !/^[a-z0-9][a-z0-9-]{0,62}$/.test(slug)) die('usage: vibespace-design new <slug> [--title "…"] [--dir designs] — the slug is lower-case letters, digits and -', 2);
+    const title = (flag('--title') || slug.replace(/-/g, ' ')).replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, 120);
+    const baseRaw = path.resolve(flag('--dir') || 'designs');
+    fs.mkdirSync(baseRaw, { recursive: true });
+    const base = fs.realpathSync(baseRaw);
+    const target = path.join(base, slug);
+    let st = null;
+    try { st = fs.lstatSync(target); } catch { }
+    if (st && !st.isDirectory()) die(`refusing ${target}: it exists and is not a folder (a link is never followed)`);
+    if (!st) fs.mkdirSync(target);
+    const dir = fs.realpathSync(target);
+    if (path.dirname(dir) !== base) die(`refusing ${target}: it resolves outside ${base}`);
+    const made = [];
+    if (!fs.existsSync(path.join(dir, 'design.json'))) { writeInside(dir, 'design.json', JSON.stringify({ title, artboards: [{ file: 'Main.html', x: 0, y: 0, w: 1280, h: 800, title: 'Main' }] }, null, 2) + '\n'); made.push('design.json'); }
+    if (!fs.existsSync(path.join(dir, 'Main.html'))) { writeInside(dir, 'Main.html', skeleton(title)); made.push('Main.html'); }
+    const r = await call('POST', '/api/agent/design/register', { dir, title });
+    if (!r.ok) refuse(r);
+    console.log(dir);
+    console.log(made.length ? `created ${made.join(' + ')} — replace Main.html with the first screen, then: vibespace-design add <file.html> · check · sync` : 'the folder already held a design — nothing overwritten');
+    console.log(r.body.opened ? 'the Design window is open on the user\'s screen' : '(no live window to open — the design is listed in the chat\'s design chip)');
+    return;
+  }
+
+  if (verb === 'add') {
+    const file = positional()[0];
+    if (!file || !/\.html$/i.test(file)) die('usage: vibespace-design add <file.html> [--title "…"] [--w --h] [--x --y] [--page <id>]', 2);
+    let real;
+    try { real = fs.realpathSync(path.resolve(file)); } catch { die(`no such file: ${path.resolve(file)}`, 2); }
+    const dir = path.dirname(real);
+    const name = path.basename(real);
+    if (name !== path.basename(path.resolve(file))) die(`refusing ${file}: it is a link to ${real} — write the artboard itself in the design folder`);
+    const row = {};
+    const w = intFlag('--w', 120, 8000), h = intFlag('--h', 120, 8000), x = intFlag('--x', -100000, 100000), y = intFlag('--y', -100000, 100000);
+    if ((x === undefined) !== (y === undefined)) die('give --x and --y together (or neither: the artboard is placed in the row)', 2);
+    if (w !== undefined) row.w = w; if (h !== undefined) row.h = h; if (x !== undefined) { row.x = x; row.y = y; }
+    if (flag('--title') !== undefined) row.title = String(flag('--title')).slice(0, 120);
+    if (flag('--page') !== undefined) row.page = String(flag('--page'));
+    // 1. the artboard itself, judged by the hub (its file as it is on disk)
+    const c = await call('POST', '/api/agent/design/check', { dir });
+    if (!c.ok) refuse(c);
+    const fr = c.body.frames.find((f) => f.file === name);
+    if (fr && !fr.ok) die(`✗ ${name} — ${fr.why}\n(nothing added: fix the artboard, then add it again)`);
+    // 2. its row in design.json (created when absent), written inside the folder
+    const mf = path.join(dir, 'design.json');
+    let before = null, m = { artboards: [] };
+    if (fs.existsSync(mf)) {
+      before = fs.readFileSync(mf, 'utf8');
+      try { m = JSON.parse(before); } catch { die('design.json is not valid JSON — fix it first (vibespace-design check names the problem)'); }
+      if (!m || typeof m !== 'object' || Array.isArray(m)) die('design.json must hold one JSON object');
+    }
+    if (!Array.isArray(m.artboards)) m.artboards = [];
+    const i = m.artboards.findIndex((a) => a && typeof a.file === 'string' && a.file.toLowerCase() === name.toLowerCase());
+    if (i >= 0) m.artboards[i] = { ...m.artboards[i], file: name, ...row };
+    else m.artboards.push({ file: name, ...row });
+    writeInside(dir, 'design.json', JSON.stringify(m, null, 2) + '\n');
+    // 3. the hub's verdict on the whole design; a manifest it refuses is put back as it was
+    const c2 = await call('POST', '/api/agent/design/check', { dir });
+    if (!c2.ok) refuse(c2);
+    if (c2.body.refusals.length) {
+      if (before !== null) writeInside(dir, 'design.json', before); else fs.unlinkSync(mf);
+      die(`design.json would be refused — put back as it was:\n${c2.body.refusals.map((x) => `  ✗ ${x.where}: ${x.why}`).join('\n')}`);
+    }
+    const n = await call('POST', '/api/agent/design/changed', { dir, files: [name, 'design.json'] });
+    if (!n.ok) refuse(n);
+    printCheck(c2.body, { only: name });
+    console.log(`${i >= 0 ? 'updated' : 'added'} ${name} in design.json — the Design window repaints it`);
+    return;
+  }
+
+  if (verb === 'check') {
+    const dir = designDir(positional()[0]);
+    const r = await call('POST', '/api/agent/design/check', { dir });
+    if (!r.ok) refuse(r);
+    printCheck(r.body);
+    if (refused(r.body)) process.exit(1);
+    console.log(`all ${r.body.frames.length} artboard(s) pass`);
+    return;
+  }
+
+  if (verb === 'sync') {
+    const dir = designDir(positional()[0]);
+    const files = fs.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile() && (e.name === 'design.json' || /\.(html|png|jpe?g|gif|webp|svg)$/i.test(e.name))).map((e) => e.name).filter((n) => n === 'design.json' || /^[A-Za-z0-9_][A-Za-z0-9 _.-]{0,80}\.[A-Za-z]+$/.test(n)).slice(0, 60);
+    const r = await call('POST', '/api/agent/design/changed', { dir, files });
+    if (!r.ok) refuse(r);
+    console.log(`notified ${r.body.notified} file(s)${r.body.watchers ? ` — ${r.body.watchers} Design window(s) repaint` : ' — no Design window is open on it'}`);
+    return;
+  }
+
+  if (verb === 'open') {
+    const dir = designDir(positional()[0]);
+    const r = await call('POST', '/api/agent/design/register', { dir, ...(flag('--title') !== undefined ? { title: flag('--title') } : {}) });
+    if (!r.ok) refuse(r);
+    console.log(r.body.opened ? `opened the Design window on ${dir}` : `${dir} is registered (no live window to open — the chat's design chip lists it)`);
+    return;
+  }
+
+  if (verb === 'show') {
+    const dir = designDir(positional()[0]);
+    const r = await call('POST', '/api/agent/design/check', { dir });
+    if (!r.ok) refuse(r);
+    const b = r.body;
+    console.log(`${b.title} — ${b.dir}`);
+    if (b.pages.length) console.log('pages: ' + b.pages.map((p) => `${p.id} "${p.name}"`).join(', '));
+    console.log(`launch: ${b.launch.view}${b.launch.page ? ` page ${b.launch.page}` : ''}${b.launch.file ? ` ${b.launch.file}` : ''}`);
+    console.log('artboards:');
+    for (const f of b.frames) console.log(`  ${f.file}  "${f.title}"  ${f.w}×${f.h} at ${f.x},${f.y}${f.page ? ` page ${f.page}` : ''}${f.placed === 'auto' ? ' (placed in the row)' : ''}${f.ok ? '' : `  ✗ ${f.why}`}`);
+    if (b.notes.length) { console.log('notes:'); for (const n of b.notes) console.log(`  [${n.id}, ${n.color}${n.page ? `, page ${n.page}` : ''}]\n${n.text.split('\n').map((l) => '    ' + l).join('\n')}`); }
+    for (const x of b.refusals) console.log(`  ✗ design.json ${x.where}: ${x.why}`);
+    for (const w of b.warnings) console.log(`  ! ${w.why}`);
+    return;
+  }
+
+  if (verb === 'publish') {
+    const dir = designDir(positional()[0]);
+    const body = { dir };
+    if (has('--public')) body.public = true;   // omitted = keep the page's current visibility (the user may have flipped it)
+    if (flag('--page') !== undefined) body.page = String(flag('--page'));
+    const r = await call('POST', '/api/agent/design/publish', body);
+    if (!r.ok) refuse(r);
+    const p = r.body.page || {};
+    console.log(`published: ${p.path}`);
+    console.log('Write that PATH verbatim in your reply — the chat UI turns it into a working link');
+    console.log('against the address the user actually opens VibeSpace at. Do NOT prefix it with a');
+    console.log('hostname or IP: this server cannot know how the user reaches it (reverse proxy,');
+    console.log('tunnel, another hostname), and a guess produces a link that resolves only here.');
+    console.log(p.public ? '(public — anyone with the link can view)' : '(private — viewers must be logged in to this VibeSpace; --public opens it, or the user flips it in the chat status bar)');
+    if (p.replaced) console.log('(replaced the previous version of this design — same URL)');
+    if (r.body.size && r.body.size.warn) console.log(`(${r.body.size.why})`);
+    return;
+  }
+
+  if (verb === 'list') {
+    const r = await call('GET', '/api/agent/designs');
+    if (!r.ok) refuse(r);
+    if (!r.body.designs.length) { console.log('no designs in this conversation yet — vibespace-design new <slug> starts one'); return; }
+    for (const d of r.body.designs) console.log(`${d.dir}${d.host ? ` (on ${d.host})` : ''}  "${d.title}"${d.page ? `  ${d.page.path} (${d.page.public ? 'public' : 'private'})` : ''}`);
+    return;
+  }
+
+  die(`unknown verb "${verb}"\n` + USAGE, 2);
+})().catch((e) => die('vibespace-design: ' + (e && e.message || e)));

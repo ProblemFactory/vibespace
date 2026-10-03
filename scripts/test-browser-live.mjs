@@ -1155,7 +1155,8 @@ console.log('— ④ the real agent-browser: one headless chromium, the real str
       const keeper = { setFor: () => ({ attachments: [] }), list: () => ({ profiles: [] }), streamPortFor: async () => ({ ok: true, port: port.port }) };
       // no attachment ⇒ the ephemeral target needs pairs; hand the session its pairs
       activeSessions.get('sess-real')._browserEnv = [`AGENT_BROWSER_SESSION=${ns}`, `AGENT_BROWSER_NAMESPACE=${ns}`];
-      const bridge = BS.create({ keeper, activeSessions, requestAuthed: () => true, log: { warn() { }, log() { } } });
+      const realLines = [];
+      const bridge = BS.create({ keeper, activeSessions, requestAuthed: () => true, log: { warn() { }, log: (l) => realLines.push(String(l)) } }); // lane stream-ping: the named close lines are read below
       const srv = http.createServer((_q, res) => { res.statusCode = 404; res.end(); });
       srv.on('upgrade', (req, socket, head) => bridge.handleUpgrade(req, socket, head));
       const P = await freePort(); await new Promise((r) => srv.listen(P, '127.0.0.1', r));
@@ -1181,6 +1182,28 @@ console.log('— ④ the real agent-browser: one headless chromium, the real str
         const e0 = es[0];
         ok(ran.ok && e0 && ['open', 'navigate'].includes(e0.action) && /traced-real/.test(JSON.stringify(e0)) && e0.after && fs.existsSync(path.join(tdir, 'browser-trace', 'ephemeral', e0.after.file)), `lane H (real binary ${String(ver || '').trim()}): the daemon's own mirror of a REAL \`open\` is RECORDED under browser-trace/ephemeral (action ${e0 && e0.action}, an after-frame on disk)`, JSON.stringify({ ran: ran.ok, stderr: String(ran.stderr || '').slice(0, 200), e0 }).slice(0, 600));
         trc.shutdown();
+      }
+      // lane stream-ping (browser-windows BL-r5-2): A HALF-OPEN VIEWER on the REAL stream server — a second live view that
+      // never answers a ping and reads nothing (autoPong off + its socket paused: what a phone that slept or a proxy that
+      // dropped the socket is to the server) is dropped by the production keepalive (20 s ping, two silent rounds) within
+      // 40 s, with ONE named close line; the first viewer, which answers its pings, keeps its REAL picture after the drop
+      {
+        const KA = require('../src/ws-keepalive.js');
+        const h = new WebSocket(`ws://127.0.0.1:${P}/api/browser/stream?session=sess-real`, { autoPong: false });
+        h.on('error', () => { });
+        h.on('open', () => { try { h._socket.pause(); } catch { } });
+        await until(() => bridge.viewerCount('sess-real') === 2, 10000);
+        const two = bridge.viewerCount('sess-real');
+        const t0 = Date.now();
+        const gone = await until(() => bridge.viewerCount('sess-real') === 1, 2 * KA.PING_MS + 5000, 200);
+        const took = Date.now() - t0;
+        const named = realLines.filter((l) => new RegExp(`viewer \\d+ closed \\(no pong for ${2 * KA.PING_MS} ms${KA.NOTHING_ACKED}\\) after \\d+s, code 1006`).test(l));
+        ok(two === 2 && gone && took <= 2 * KA.PING_MS + 2000 && named.length === 1, `lane stream-ping (REAL): a half-open viewer is dropped by the production keepalive in ${Math.round(took / 1000)} s (≤ 40 s), the count 2 → ${bridge.viewerCount('sess-real')}, ONE named line`, JSON.stringify({ two, took, named, last: realLines.slice(-3) }));
+        const f0 = v.frames;
+        await rt.exec(ns, ['open', 'data:text/html,<title>after</title><h1>after the drop</h1>'], { dir: path.join(D, 'prof'), session: ns, extraEnv, timeout: 30000 });
+        await v.until((x) => x.frames > f0, 15000);
+        ok(v.frames > f0 && v.closed === null, `lane stream-ping (REAL): the viewer that answers its pings keeps its picture after the drop (${v.frames - f0} new frame(s))`);
+        try { h.terminate(); } catch { }
       }
       bridge.shutdown(); srv.close();
     } finally {
@@ -1452,7 +1475,7 @@ await (async () => {
       const tcard8 = await (async () => { for (let i = 0; i < 60; i++) { const c = ((await chatMsgs()) || []).slice(cardsBefore.length).filter((t) => /The user took over your browser; /.test(t)); if (c.length) return c; await sleep(150); } return null; })();
       ok(took8 && tcard8 && tcard8.length === 1 && /The user took over your browser; 1 operation was interrupted: wait\. Wait for the handback, then run it again\./.test(tcard8[0]) && /(^|\s)VibeSpace · The user took over your browser/.test(tcard8[0]), `⑧ the TAKEOVER TELLS: the conversation shows VibeSpace's card at once — "${tcard8 ? tcard8[0].slice(0, 220) : 'none'}" (the agent's \`wait\`, in flight on the trace, named; nothing delivered, no billed turn)`, JSON.stringify(((await chatMsgs()) || []).slice(-4)) + '\n' + (journal || '').split('\n').filter((l) => /\[browser\] .*(takeover|took over)/.test(l)).slice(-3).join('\n'));
       const w8 = await wait8;
-      ok(!w8.ok && /\[browser_interrupted\]/.test(w8.stderr) && /The user took over this browser — your operation was interrupted/.test(w8.stderr) && /ran to its end/.test(w8.stderr), '⑧ the `wait` the takeover caught ends [browser_interrupted] (exit 1): THE sentence, and — the ephemeral browser has no proxy — that it ran to its end while the user drove', (w8.stderr || '').slice(-500));
+      ok(!w8.ok && /\[browser_interrupted\]/.test(w8.stderr) && /The user took over your window of this browser — your operation was interrupted/.test(w8.stderr) && /ran to its end/.test(w8.stderr), '⑧ the `wait` the takeover caught ends [browser_interrupted] (exit 1): THE sentence, and — the ephemeral browser has no proxy — that it ran to its end while the user drove', (w8.stderr || '').slice(-500));
       const jHb9 = journal.length;
       await q('L.send({ type: "handback" }); return true;');
       const toast9 = await (async () => { for (let i = 0; i < 30; i++) { const t = await evaluate(`(() => { const s = document.getElementById('global-toasts'); return s ? s.textContent : ''; })()`); if (/it was told to re-run: wait/.test(t)) return t; await sleep(100); } return null; })();

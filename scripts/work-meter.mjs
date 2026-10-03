@@ -5,10 +5,13 @@
 // this meter counts the operations a call performs, exactly, so 2× the input reads as 2× the count on any box.
 //   · BLOCK EXECUTIONS — V8's precise block coverage (the inspector's Profiler.startPreciseCoverage with
 //     callCount + detailed): every basic block of the measured modules carries an execution counter, taken and RESET
-//     around each measured call; a loop body counts once per iteration, a branch once per time it was taken. Exact,
-//     unaffected by load, and V8 disables optimized code while precise coverage is on, so a hot function counts the
-//     same as a cold one. The meter must START before the measured modules are loaded (a function compiled before
-//     coverage began has no block counters — only its call count).
+//     around each measured call; a loop body counts once per iteration, a branch once per time it was taken. Exact
+//     and unaffected by load ONLY while no measured function runs OPTIMIZED: precise coverage does NOT stop TurboFan
+//     or Maglev, and an optimized frame never bumps the invocation counter a function's own count is read from — a
+//     hot function with no inner blocks (`isReactionKey`) read 2 000 calls in one take and 0 in the next (lane
+//     mirror-green: the .199 / .200 mirror red). `startWorkMeter` pins both optimizing tiers OFF for the process
+//     (the interpreter and Sparkplug keep every counter). The meter must START before the measured modules are
+//     loaded (a function compiled before coverage began has no block counters — only its call count).
 //   · NATIVE WORK — the built-ins a parser leans on do their loops inside V8, invisible to coverage: while a call is
 //     measured, the array / string / collection / iterator prototypes are patched to add each call's element work
 //     (includes/indexOf: the elements scanned; filter/map/some/find…: the callbacks run; shift/splice/unshift: the
@@ -22,6 +25,7 @@
 //     that cuts its input before walking it does the same work for both (ratio ≤ BOUNDED_RATIO).
 // Deterministic by construction: two measurements of the same call agree byte for byte (the suite asserts it).
 import inspector from 'node:inspector';
+import v8 from 'node:v8';
 
 export const LINEAR_BOUND = 2.2;
 export const BOUNDED_RATIO = 1.25;
@@ -33,6 +37,13 @@ const post = (method, params) => { let out, err; session.post(method, params || 
 /** Start precise block coverage — BEFORE the measured modules are required. Idempotent. */
 export function startWorkMeter() {
   if (started) return;
+  // THE OPTIMIZER PIN (lane mirror-green): an optimized (TurboFan or Maglev) frame skips the invocation-count bump a
+  // function's coverage count is read from, so a hot callee's calls VANISH from a take once it tiers up — and WHEN
+  // depends on the Node version and on what ran before (the runner's Node 22 tiered isReactionKey up between the
+  // second and third take of compactSide, ours before the first: the determinism leg read 48363 vs 46363 there, equal
+  // here, and both were short). Off for the whole process; the measured modules load after this line.
+  v8.setFlagsFromString('--no-turbofan');
+  v8.setFlagsFromString('--no-maglev');
   session = new inspector.Session();
   session.connect();
   post('Profiler.enable');
@@ -119,10 +130,11 @@ export async function measureAsync(fn, files) {
 }
 
 /** The work of `run(x)` in the parser's STEADY STATE: the input is built OUTSIDE the measured call (its construction
- *  is not the parser's work), and the call is measured TWICE, the second reading returned — measured: the very first
- *  measured execution of a function reads a constant more (V8 folds the counts of its lazy compile's first run into
- *  the first take that sees it — 2 000 extra blocks on compactSide over 2 000 deltas, then exact for ever after, fresh
- *  inputs included); a module-level memo filling on its first sight of an input is not the parser's growth either. */
+ *  is not the parser's work), and the call is measured TWICE, the second reading returned — a module-level memo
+ *  filling on its first sight of an input is not the parser's growth. (lane-mirror-198 read "the first take counts
+ *  2 000 blocks more on compactSide over 2 000 deltas" as a lazy-compile artifact; lane mirror-green found the FIRST
+ *  take was the true count — isReactionKey's 2 000 calls — and every later one had lost them to TurboFan: the
+ *  optimizer pin in `startWorkMeter`.) */
 function steady(run, x, files) { measure(() => run(x), files); return measure(() => run(x), files).total; }
 
 /** The work of ONE call in its steady state (measured twice, the second reading — see `steady`). */
@@ -146,9 +158,10 @@ export function bounded(mk, run, n, files, { ratio = BOUNDED_RATIO, slack = 256 
   return { n, w1, w2, r: w2 / Math.max(1, w1), ok: w2 <= ratio * w1 + slack, ratio };
 }
 
-/** The meter's own proof: the same call measured twice agrees exactly (after the one measured warm call `steady` takes). */
+/** The meter's own proof: the same call measured twice agrees exactly (after the one measured warm call `steady`
+ *  takes); `warm` is that first take, returned so a suite whose call fills no memo can pin it equal too. */
 export function deterministic(fn, files) {
-  measure(fn, files);
+  const warm = measure(fn, files);
   const a = measure(fn, files), b = measure(fn, files);
-  return { ok: a.total === b.total && a.blocks === b.blocks && a.native === b.native, a, b };
+  return { ok: a.total === b.total && a.blocks === b.blocks && a.native === b.native, a, b, warm };
 }

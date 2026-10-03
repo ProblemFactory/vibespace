@@ -58,7 +58,8 @@ function levelLabel(l) {
  *  Assign editor draws from (the sidebar's live list + its task store), so
  *  the two dialogs cannot name different principals. */
 function principals(app) {
-  const out = [];
+  // ALL AGENTS (lane everyone-principal): every conversation, now and later — the picker's first row
+  const out = [{ kind: 'everyone', id: '*', name: t('All agents') }];
   const live = (app.sidebar && app.sidebar._webuiSessions) || [];
   const groups = (app.sidebar && app.sidebar._tasks) || [];
   for (const s of live) {
@@ -81,7 +82,7 @@ export async function showReachDialog(app, conv0) {
   let current = conv;
   // "Grant reach to…": ONE picker for the dialog's life (a repaint re-appends it — never re-created, a
   // popover the person has open survives a broadcast); its rows are the live roster, re-read on its broadcasts
-  who = principalPicker({ items: () => rosterFromApp(app), app, compact: true, placeholder: t('Grant reach to…'), label: t('Grant reach to…') });
+  who = principalPicker({ items: () => rosterFromApp(app), app, compact: true, placeholder: t('Grant reach to…'), label: t('Grant reach to…'), everyone: { key: 'everyone:*' } });
   who.el.classList.add('chan-reach-who-pick');
 
   function draw() {
@@ -106,15 +107,16 @@ export async function showReachDialog(app, conv0) {
     const roster = principals(app);
     // a grant an ASSIGNMENT wrote carries only {kind, id}: the name is the
     // roster's (a Task Group's `title`), never the id on screen (a1 A5)
-    const nameOf = (pr) => pr.name || (roster.find((x) => x.kind === pr.kind && x.id === pr.id) || {}).name || pr.id;
+    const nameOf = (pr) => (pr.kind === 'everyone' ? t('All agents') : pr.name || (roster.find((x) => x.kind === pr.kind && x.id === pr.id) || {}).name || pr.id);
     if (!entries.length) body.appendChild(el('div', 'chan-flow-note', t('Nobody yet — every agent is hidden from it by default.')));
     else {
       const listEl = el('div', 'chan-reach-list');
-      for (const g of entries) {
+      // ALL AGENTS first (the cards put the All chip first)
+      for (const g of [...entries.filter((x) => x.principal && x.principal.kind === 'everyone'), ...entries.filter((x) => !(x.principal && x.principal.kind === 'everyone'))]) {
         const row = el('div', 'chan-reach-row');
         row.dataset.grant = g.id;
         const who = el('span', 'chan-reach-who');
-        who.appendChild(el('span', 'chan-reach-kind', g.principal.kind === 'group' ? t('group') : t('agent')));
+        if (g.principal.kind !== 'everyone') who.appendChild(el('span', 'chan-reach-kind', g.principal.kind === 'group' ? t('group') : t('agent')));   // "All agents" names itself
         who.appendChild(el('span', '', nameOf(g.principal)));
         const lv = el('span', `chan-reach-level chan-reach-level-${g.level}`, levelLabel(g.level));
         // WHERE the row lives (§8, 2026-09-26): the whole account, a rule, or this conversation
@@ -135,6 +137,11 @@ export async function showReachDialog(app, conv0) {
         listEl.appendChild(row);
       }
       body.appendChild(listEl);
+      // verify r1 T2 ⑥: reach is the MAX over the rows naming the agent — a requestable row beside a VISIBLE All row
+      // changes nothing, and the owner who added it wanting less is told so
+      const allVisible = entries.some((g) => g.principal && g.principal.kind === 'everyone' && g.level === 'visible');
+      const moot = allVisible ? entries.filter((g) => g.principal && g.principal.kind !== 'everyone' && g.level !== 'visible').map((g) => nameOf(g.principal)) : [];
+      if (moot.length) body.appendChild(el('div', 'chan-flow-note chan-reach-moot', t('All agents is visible here, so a requestable row beside it changes nothing: {names} can already see it (remove the All agents row to narrow).', { names: moot.join(', ') })));
     }
     // add a grant
     const add = el('div', 'chan-reach-add');
@@ -147,7 +154,7 @@ export async function showReachDialog(app, conv0) {
       const p = principals(app).find((x) => `${x.kind}:${x.id}` === k);
       if (!p) { showToast(t('Pick an agent or a group.'), { type: 'error' }); return; }
       go.disabled = true;
-      const r = await api(`${base}/reach`, { principal: { kind: p.kind, id: p.id, name: p.name }, level: lvSel.value });
+      const r = await api(`${base}/reach`, { principal: { kind: p.kind, id: p.id, name: p.kind === 'everyone' ? null : p.name }, level: lvSel.value });
       go.disabled = false;
       if (r) { showToast(t('Reach granted')); who.setSelected([]); }
     };

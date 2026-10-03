@@ -44,7 +44,7 @@ import { vncEnv } from './scratch.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
-const { scratch, freePort } = await import(path.join(REPO, 'scripts/scratch.mjs'));
+const { scratch, freePort, endDaemonsOf, endRootedProcesses } = await import(path.join(REPO, 'scripts/scratch.mjs'));
 
 // Master's fire-and-forget leaves `handle.ready` REJECTIONS unattached. In the
 // server they are swallowed by server.js's global `unhandledRejection` handler
@@ -86,13 +86,13 @@ const stray = new Set();            // dtach fixture sockets
 // the shared .git — we clean up after ourselves on every exit path.
 const worktrees = new Set();
 
+// B-442c (2026-10-02, the 16:23 OOM that stopped the production service): the pid file ALONE missed a daemon. §4 kills
+// each server right as it reports "upgrading", and a self-upgrade spawns the NEW daemon before that one writes its pid:
+// the kill ended the old pid, installStale deleted the root, and the orphan — its bundle gone — grew to 45.7 GB when its
+// fs worker pool's respawns crashed (src/agentd/worker-pool.js is bounded since). scratch.mjs endDaemonsOf ends every
+// daemon whose own root env lies in the root, the re-exec child included, and leaves the dtach sessions alone.
 function killDaemons() {
-  for (const root of daemonRoots) {
-    try {
-      const pid = Number(fs.readFileSync(path.join(root, 'state', 'agentd.pid'), 'utf8'));
-      if (pid > 0) process.kill(pid, 'SIGKILL');
-    } catch { }
-  }
+  for (const root of daemonRoots) { try { endDaemonsOf(root); } catch { } }
 }
 function cleanup() {
   killDaemons();
@@ -106,8 +106,11 @@ function cleanup() {
   // stranded `dtach -c` + pty-wrapper + zsh trees, some 3.5 h old, before this
   // line existed). ROOT is per-pid (scripts/scratch.mjs), so this pattern can
   // only ever match processes this run created; it runs BEFORE the rmSync so
-  // the paths it matches on still exist.
+  // the paths it matches on still exist. `pkill -f` reads argv only — the device
+  // daemon rewrites its title — so scratch.mjs endRootedProcesses (cwd, HOME, the
+  // daemon's root env, argv) is the end of everything rooted here (B-442c).
   try { execFileSync('pkill', ['-f', ROOT], { stdio: 'ignore' }); } catch { }
+  try { endRootedProcesses(ROOT); } catch { }
   for (const wt of worktrees) { try { execFileSync('git', ['-C', REPO, 'worktree', 'remove', '--force', wt], { stdio: 'ignore' }); } catch { } }
   try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { }
 }
@@ -816,11 +819,17 @@ console.log('— §5 the attach probe and the input detector share ONE re-attach
   // terminal's echo really can come back inside the same ms as the write.
   ok(eng.ptyQuietSince(session, Number(session._lastPtyDataAt)) === false,
     'ptyQuietSince: a byte stamped in the SAME millisecond as `since` reads ALIVE (the tie may not cost a duplicated keystroke)');
-  const healed = eng.reattachLocalPty(id, session, 'test heal', { resend: 'echo VSHEALED' });
-  ok(healed === true && session.pty !== before, 'reattachLocalPty replaces the pty and reports it');
+  // B-c20d: what the healer re-sends is what a bridge that NEVER SPOKE was handed (writeSessionInput holds it) — the
+  // device channel that never opened, modelled by a duck that relays nothing
+  const dead = { _daemon: true, pid: -1, onData: () => ({ dispose() { } }), onExit: () => ({ dispose() { } }), write() { }, resize() { }, kill() { } };
+  try { before.kill(); } catch { }
+  eng.setupSessionPty(session, id, dead);
+  eng.writeSessionInput(session, 'echo VSHEALED');
+  const healed = eng.reattachLocalPty(id, session, 'test heal');
+  ok(healed === true && session.pty !== dead && session.pty !== before, 'reattachLocalPty replaces the pty and reports it');
   const t0 = Date.now();
   while (Date.now() - t0 < 5000 && !frames.some((f) => /VSHEALED/.test(f.data || ''))) await sleep(150);
-  ok(frames.some((f) => /VSHEALED/.test(f.data || '')), 'reattachLocalPty RESENDS the payload the detector was holding');
+  ok(frames.some((f) => /VSHEALED/.test(f.data || '')), 'reattachLocalPty RESENDS the input the never-spoke bridge was holding');
   try { session.pty?.kill?.(); } catch { }
 }
 

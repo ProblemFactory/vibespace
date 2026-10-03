@@ -1,6 +1,7 @@
 // "WHO CAN USE <machine>?" (lane-pairing ⑥, B-7007). Before this lane a paired machine's exit was ONE toggle that
 // opened it to every conversation for both things an exit does. The dialog edits the machine's TWO lists (PURE
-// src/exit-reach.js), each Nobody / All my conversations / Only these:
+// src/exit-reach.js), each Nobody / the agents you pick (ALL AGENTS the picker's first row — lane everyone-principal: it
+// IS the `everyone` mode, never a second spelling; the rows picked beside it are kept for when All is taken away):
 //   · Borrow its network — `vibespace-exit use / url` (the command runs here, only its traffic leaves there)
 //   · Run commands on it — `vibespace-exit run` (a shell command ON the machine, as the user, up to 30 s),
 //     with "Ask me each time" (every command waits for the user's Allow in For you, 60 s, then refused)
@@ -18,11 +19,14 @@ import { exitAccessOf, summaryOf, spawnFailureText } from '../exit-reach.js';
 import { openExitRunsDialog } from './exit-runs-dialog.js'; // lane-exit-run-output E4: the machine's command list
 
 const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
-const MODE_WORDS = { nobody: () => t('Nobody'), everyone: () => t('All my conversations'), only: () => t('Only these') };
+// TWO answers: Nobody / Agents you pick (the radio's value stays `only`; ALL AGENTS is the picker's first row and maps
+// to the stored `everyone` mode — lane everyone-principal)
+const MODE_WORDS = { nobody: () => t('Nobody'), only: () => t('Agents you pick') };
+const EVERYONE_KEY = 'everyone:*';
 
 /** The words of one grant's summary (row, toast): nobody · everyone · {n} picked (+ " (ask me)" for run). */
 function grantWords(g, { ask = false } = {}) {
-  const base = g.mode === 'everyone' ? t('everyone') : g.mode === 'only' ? t('{n} picked', { n: g.n }) : g.mode === 'unknown' ? t('unreadable') : t('nobody');
+  const base = g.mode === 'everyone' ? t('All agents') : g.mode === 'only' ? t('{n} picked', { n: g.n }) : g.mode === 'unknown' ? t('unreadable') : t('nobody');
   return base + (ask && g.mode !== 'nobody' ? t(' (ask me)') : '');
 }
 /** The machine row's line: `Exit: network — everyone · commands — 2 picked (ask me)`. `exit` = the stored record. */
@@ -44,7 +48,7 @@ export function lastRunText(lr) {
 function codeWords(code, extra = {}) {
   switch (code) {
     case 'list_changed': return t('The lists changed while this dialog was open (another window) — here they are as they are now; nothing was saved');
-    case 'empty_list': return t('Pick at least one conversation or Task Group, or choose Nobody / All my conversations.');
+    case 'empty_list': return t('Pick All agents or at least one conversation or Task Group, or choose Nobody.');
     case 'too_many': return t('At most 64 conversations and Task Groups per list');
     case 'session-gone': return t('"{name}" is not running any more — pick it again when it is', { name: extra.name || '' });
     case 'ask_settled': return t('Already answered');
@@ -95,9 +99,10 @@ export async function openExitAccessDialog(app, { hostId, name = '' } = {}) {
       const radios = el('div', 'exit-access-modes');
       radios.setAttribute('role', 'radiogroup');
       radios.setAttribute('aria-label', grant === 'use' ? t('Borrow its network') : t('Run commands on it'));
-      let mode = g.mode;
+      // the stored `everyone` mode is the "Agents you pick" answer with ALL AGENTS picked (its kept rows beside it)
+      let mode = g.mode === 'everyone' ? 'only' : g.mode;
       const radioEls = {};
-      for (const m of ['nobody', 'everyone', 'only']) {
+      for (const m of ['nobody', 'only']) {
         const lab = el('label', 'exit-access-mode');
         const r = document.createElement('input');
         r.type = 'radio'; r.name = `exit-${grant}-mode`; r.value = m; r.checked = mode === m;
@@ -111,7 +116,7 @@ export async function openExitAccessDialog(app, { hostId, name = '' } = {}) {
       const stored = Array.isArray(g.who) ? g.who : [];
       const live = roster();
       const extra = [];
-      const selected = [];
+      const selected = g.mode === 'everyone' ? [EVERYONE_KEY] : [];
       for (const p of stored) {
         if (p.kind === 'group') {
           const k = `group:${p.id}`;
@@ -127,9 +132,13 @@ export async function openExitAccessDialog(app, { hostId, name = '' } = {}) {
       }
       const items = () => [...roster(), ...extra.filter((x) => !roster().some((r) => r.key === x.key))];
       const pickerWrap = el('div', 'exit-access-picker');
-      pickerWrap.appendChild(el('p', 'agents-note', t('Pick conversations and Task Groups. A Task Group means every conversation in it — now or later.')));
-      const picker = principalPicker({ items, app, multi: true, selected, placeholder: t('Search sessions and groups…'), label: grant === 'use' ? t('Borrow its network') : t('Run commands on it'), emptyText: t('No agent session is running'), onChange: () => { refuseLine.textContent = ''; syncCount(); } });
+      pickerWrap.appendChild(el('p', 'agents-note', t('Pick All agents, or conversations and Task Groups. A Task Group means every conversation in it — now or later.')));
+      const picker = principalPicker({ items, app, multi: true, selected, placeholder: t('Search sessions and groups…'), label: grant === 'use' ? t('Borrow its network') : t('Run commands on it'), emptyText: t('No agent session is running'), everyone: { key: EVERYONE_KEY }, onChange: () => { refuseLine.textContent = ''; syncCount(); } });
       pickerWrap.appendChild(picker.el);
+      // verify r1 T2 ④: with ALL AGENTS picked the sentence says what that IS — every conversation, the ones started
+      // later included, as you — per grant; the run sentence follows "Ask me each time"
+      const allLine = el('p', 'agents-note exit-access-all');
+      pickerWrap.appendChild(allLine);
       sec.appendChild(pickerWrap);
       let askBox = null, askLab = null, askNote = null;
       if (grant === 'run') {
@@ -157,14 +166,21 @@ export async function openExitAccessDialog(app, { hostId, name = '' } = {}) {
         const used = (d.usedBy && d.usedBy[grant]) || [];
         const sel = new Set(picker.selected());
         const covered = (sid) => {
-          if (mode === 'everyone') return true;
           if (mode === 'nobody') return false;
+          if (sel.has(EVERYONE_KEY)) return true;   // ALL AGENTS covers every conversation
           const r = roster().find((x) => String(x.webuiId) === String(sid));
           return !!r && (sel.has(r.key) || (r.groupIds || []).some((gid) => sel.has(`group:${gid}`)));
         };
         const n = used.filter((u) => !covered(u.sessionId)).length;
         countLine.textContent = n > 0 ? t('{n} conversation(s) using it now will lose it when you save', { n }) : '';
+        const allOn = mode === 'only' && sel.has(EVERYONE_KEY);
+        allLine.textContent = !allOn ? ''
+          : grant === 'use' ? t('Every conversation — the ones you start later included — can borrow the network of {machine}.', { machine })
+            : askBox && askBox.checked ? t('Every conversation — the ones you start later included — can run commands on {machine} as you, each after your Allow.', { machine })
+              : t('Every conversation — the ones you start later included — can run commands on {machine} as you, without asking.', { machine });
+        allLine.style.display = allOn ? '' : 'none';
       };
+      if (askBox) askBox.onchange = () => syncCount();
       sections[grant] = { get mode() { return mode; }, picker, askBox, syncSec, radioEls };
     }
     const lr = el('p', 'agents-note exit-access-last', lastRunText(d.lastRun));
@@ -191,8 +207,11 @@ export async function openExitAccessDialog(app, { hostId, name = '' } = {}) {
         const s = sections[grant];
         const g = { mode: s.mode };
         if (s.mode === 'only') {
-          const keys = s.picker.selected();
-          if (!keys.length) { refuseLine.textContent = t('Pick at least one conversation or Task Group, or choose Nobody / All my conversations.'); return; }
+          const all = s.picker.selected().includes(EVERYONE_KEY);
+          const keys = s.picker.selected().filter((k) => k !== EVERYONE_KEY);
+          if (!all && !keys.length) { refuseLine.textContent = t('Pick All agents or at least one conversation or Task Group, or choose Nobody.'); return; }
+          // ALL AGENTS = the stored `everyone` mode; the rows picked beside it ride along (kept, restored when All goes)
+          if (all) g.mode = 'everyone';
           const rows = roster();
           g.who = keys.map((k) => {
             if (k.startsWith('group:')) return { kind: 'group', id: k.slice('group:'.length) };

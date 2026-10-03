@@ -101,7 +101,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
     activeSessions, WS_OPEN, broadcastActiveSessions, broadcastToSession, resizeSessionToMin,
     setupSessionPty, refreshWebuiPids, deleteSessionMeta, writeSessionMeta, readSessionMeta,
     readLayouts, writeLayouts, getSyncStore, serverSetting, integrationEnabled, agentdRemote, dialBridge,
-    harnessSetting, harnessDeclares, harnessSpawnSettings, cliConfigPlanB64,
+    harnessSetting, harnessDeclares, harnessSpawnSettings, cliConfigPlanB64, ownerWriteRefusal,
     sessionCounterRef, createSessionMessages, poolChooser, sbNoteServerOp,
     SOCKETS_DIR, BUFFERS_DIR, PTY_WRAPPER, CHAT_WRAPPER,
     NODE_CMD, DTACH_CMD, ENV_CMD, CLAUDE_CMD, EDITOR_CMD, AGENT_BIN_DIR, PORT, X_ENV, cliCmds,
@@ -169,7 +169,9 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
     try { browserEnvOf()?.sweep(new Set([...activeSessions.values()].map((s) => s && s._browserKey).filter(Boolean))); } catch { }
   }, 20000).unref?.();
 
-  return Object.assign(async function handleCreate(ws, data, attachedSessions) {
+  // B-f698 verify r1: conversation → the promise its in-flight resume settles (see the resume guard)
+  const resumesInFlight = new Map();
+  async function createBody(ws, data, attachedSessions, held) {
     do {
           const backend = data.backend || 'claude';
           const adapter = adapterRegistry?.get?.(backend) || null;
@@ -211,6 +213,16 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           // driving through a live acp-wrapper, and a plain resume from a
           // stale card would spawn a second `opencode acp` on one session.
           if (capsOf(backend).streamProtocol && data.resume && data.resumeId && !data.fork) {
+            // B-f698 verify r1: TWO resumes of one conversation in flight at once BOTH passed this guard — a create
+            // registers its session only after its awaits (knob reads, the writer sweep), so the respawn after an
+            // unexpected exit racing the user's own Resume click spawned two CLIs on one transcript (B-4058). A resume
+            // in flight HOLDS the conversation until it settles; a second one waits for it, then meets the guard.
+            const flightKey = `${backend}|${data.hostId || ''}|${data.resumeId}`;
+            for (const t0 = Date.now(); resumesInFlight.has(flightKey) && Date.now() - t0 < 60000;) await Promise.race([resumesInFlight.get(flightKey), new Promise((r) => setTimeout(r, 1000))]);
+            if (resumesInFlight.has(flightKey)) {
+              ws.send(JSON.stringify({ type: 'error', code: 'resume-in-flight', reqId: data.reqId, message: 'This conversation is already being resumed — its window opens when that finishes.' }));
+              break;
+            }
             let existing = null;
             for (const [eid, es] of activeSessions) {
               if ((es.backend || 'claude') !== backend) continue;
@@ -228,6 +240,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
               }));
               break;
             }
+            { let release; resumesInFlight.set(flightKey, new Promise((r) => { release = r; })); held.release = () => { resumesInFlight.delete(flightKey); release(); }; }
           }
           // Unresumable-conversation circuit breaker (2.207.1, real bootloop:
           // a remote session killed 9s after creation never flushed a
@@ -1304,8 +1317,11 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
                     // ONE composition (src/remote-shell.js): REMOTE_PRELUDE → node
                     // finder → tools LAST (so ~/.vibespace/bin — the browser shim
                     // included — stays first on PATH over node's own bin dir)
+                    // THE ROOT VERDICT (src/server-root.js): a worktree / temp
+                    // server ships the tools but never runs the register helper —
+                    // the host's CLI config belongs to the owner's instance.
                     prelude = buildRemoteShellPrelude({ toolsOnPath: true, withNodeFinder: true })
-                      + `[ -n "$VS_NODE" ] && VIBESPACE_CLI_CONFIG=${cliConfigPlanB64()} "$VS_NODE" "$HOME/.vibespace/bin/vibespace-hook-register.mjs" >/dev/null 2>&1; `;
+                      + (ownerWriteRefusal() ? '' : `[ -n "$VS_NODE" ] && VIBESPACE_CLI_CONFIG=${cliConfigPlanB64()} "$VS_NODE" "$HOME/.vibespace/bin/vibespace-hook-register.mjs" >/dev/null 2>&1; `);
                     // EDITOR needs $HOME expansion → shell prefix assignment
                     // (envPairs are shq'd); PORT/SESSION_ID are static values.
                     tokenAssign = `VIBESPACE_SESSION_TOKEN="$(cat "$HOME/.vibespace/bin/${tokName}")" EDITOR="$HOME/.vibespace/editor/code" `;
@@ -1382,7 +1398,8 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
                 // same POSIX node finder as the ssh prelude (2.244.4 — a bare
                 // `node` is unresolvable in dash/non-login shells on nvm hosts)
                 + nodeFinder()
-                + `[ -n "$VS_NODE" ] && "$VS_NODE" "${bin}/vibespace-hook-register.mjs" 2>/dev/null || true`],
+                // the root verdict (src/server-root.js): no register on a refused root
+                + (ownerWriteRefusal() ? 'true' : `[ -n "$VS_NODE" ] && "$VS_NODE" "${bin}/vibespace-hook-register.mjs" 2>/dev/null || true`)],
                 // VIBESPACE_CLI_CONFIG rides the daemon's run-cmd env merge (no new
                 // op, no capability bit — run-cmd predates this): the device's own
                 // claude/codex configs get the managed keys too (design §6).
@@ -2162,9 +2179,14 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // registers the liveness stamp FIRST and the consumer second, and
             // the one-slot literal that lived here let the consumer REPLACE the
             // stamp — ptyQuietSince then read "silent" for a relaying bridge,
-            // and this session keeps a socketPath, so the broken-stdin
-            // detector's healer (whose first act kills the pipe) was one late
-            // ack away (B-ae4b).
+            // and the broken-stdin detector's healer (whose first act kills the
+            // pipe) was one late ack away (B-ae4b). No dtach socket exists for a
+            // pipe either (B-b675): the cw-* path above is never created, and
+            // keeping it armed the detector (+ the dead-bridge watch) on every
+            // input — a late _stdin_ack + 5 s of quiet killed a healthy pipe.
+            // Null it the way the ocPty branch does (the R6 boot re-open never
+            // set one); the healer refuses a pipe duck as the belt.
+            session.socketPath = null;
             setupSessionPty(session, id, pipePtyShim(r6Handle));
           } else setupSessionPty(session, id, createPty);
 
@@ -2493,6 +2515,11 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           }));
           broadcastActiveSessions();
     } while (0);
+  }
+  // the resume-in-flight hold is released however the create ends (created, refused, thrown)
+  return Object.assign(async function handleCreate(ws, data, attachedSessions) {
+    const held = { release: null };
+    try { return await createBody(ws, data, attachedSessions, held); } finally { try { held.release?.(); } catch { } }
   }, { onClientConnected });
 }
 

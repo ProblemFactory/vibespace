@@ -101,7 +101,7 @@ function namedWayland(env, runtimeDir) {
  * The paths the probe must look at (stat + connect) — and nothing else. `listing` = the runtime dir's entry
  * names. An abstract X11 name is spelled `@<path>` (the probe connects to `\0<path>`).
  */
-function displayCandidates({ env = {}, runtimeDir = undefined, listing = [], x11Dir = X11_DIR } = {}) {
+function displayCandidates({ env = {}, runtimeDir = undefined, listing = [], x11Dir = X11_DIR, vncDisplay = null } = {}) {
   const out = [];
   const add = (p) => { if (p && !out.includes(p)) out.push(p); };
   const rd = runtimeDir === undefined ? runtimeDirOf(env) : (typeof runtimeDir === 'string' && runtimeDir.startsWith('/') ? runtimeDir : null);
@@ -110,6 +110,8 @@ function displayCandidates({ env = {}, runtimeDir = undefined, listing = [], x11
   if (rd) for (const n of (Array.isArray(listing) ? listing : []).map(String).filter((x) => WAYLAND_SOCKET_RE.test(x)).sort(byWaylandN)) add(joinPath(rd, n));
   const x = parseX11Display(isObj(env) ? env.DISPLAY : '', x11Dir);
   if (x && !x.tcp) { add(x.path); add(x.abstract); }
+  const v = parseX11Display(vncDisplay, x11Dir); // B-d635: VibeSpace's own VNC desktop (src/vnc.js VNC_DISPLAY)
+  if (v && !v.tcp) { add(v.path); add(v.abstract); }
   return out;
 }
 function byWaylandN(a, b) { return Number(WAYLAND_SOCKET_RE.exec(a)[1]) - Number(WAYLAND_SOCKET_RE.exec(b)[1]); }
@@ -124,7 +126,7 @@ function byWaylandN(a, b) { return Number(WAYLAND_SOCKET_RE.exec(a)[1]) - Number
  *   env       what the LAUNCH must add so the browser finds the chosen display ({} or {WAYLAND_DISPLAY})
  *   why       one short line per thing looked at and not counted (the Settings line's detail)
  */
-function displayVerdict({ env = {}, runtimeDir = undefined, entries = [], x11Dir = X11_DIR, xvfb = null } = {}) {
+function displayVerdict({ env = {}, runtimeDir = undefined, entries = [], x11Dir = X11_DIR, xvfb = null, vncDisplay = null } = {}) {
   const rd = runtimeDir === undefined ? runtimeDirOf(env) : (typeof runtimeDir === 'string' && runtimeDir.startsWith('/') ? runtimeDir : null);
   const byPath = new Map();
   for (const e of Array.isArray(entries) ? entries : []) if (isObj(e) && typeof e.path === 'string') byPath.set(e.path, e);
@@ -160,8 +162,14 @@ function displayVerdict({ env = {}, runtimeDir = undefined, entries = [], x11Dir
   // the hidden-window rung's two inputs: is an Xvfb binary on the PATH the browser launches with (the probe's), and does
   // the process env name a display at all (a stale one keeps the CLI from starting its own Xvfb — measured)
   const envNamesDisplay = (isObj(env) && (str(env.DISPLAY).trim() !== '' || str(env.WAYLAND_DISPLAY).trim() !== '')) || false;
+  // B-d635 (userW's inc-murizo36-ecri): VibeSpace's own VNC desktop (Desktop apps' Xtigervnc, `:7` by default) is a
+  // desktop the USER sees — but no browser is launched on it (the process env never names it), so the probe found "no
+  // display" and every surface told him "This machine has no desktop session" while his page sat on that desktop. The fact
+  // names it now (live socket only); the words say where the agent's browser is NOT. Which display a launch uses is unchanged.
+  const vx = parseX11Display(vncDisplay, x11Dir);
+  const vnc = vx && !vx.tcp && !(x11 && x11.name === vx.name) && (live(vx.path) || live(vx.abstract)) ? { name: vx.name, socket: live(vx.path) ? vx.path : vx.abstract } : null;
   return { kind, socket: chosen ? chosen.socket : null, name: chosen ? chosen.name : null, available, wayland, x11, env: launchEnv, why,
-    xvfb: xvfb === true ? true : xvfb === false ? false : null, envNamesDisplay };
+    xvfb: xvfb === true ? true : xvfb === false ? false : null, envNamesDisplay, vnc };
 }
 
 // ── args (a string joined by `,` or newlines, or a list — the representation is kept) ──
@@ -207,6 +215,20 @@ function wantedOf(cfg, { headedEnv = null } = {}) {
   return { headed, args: c.args === undefined ? null : c.args };
 }
 
+// ── B-cc68 (lane browser-reliability, 2026-10-02): THE HIDDEN WINDOW DRAWS WEBGL IN SOFTWARE ──
+// MEASURED (agent-browser 0.38.1 + Chrome 154.0.8037.57, the dev box — a GPU at /dev/dri/renderD128): headless has WebGL by
+// itself (ANGLE on SwiftShader's Vulkan, with or without --disable-gpu); the HIDDEN WINDOW (the CLI's own Xvfb) has NONE —
+// an Xvfb has no GL, GPU or not — and with the pair below it gets the same SwiftShader WebGL. So the hidden-window rung adds
+// the pair (a config naming its own --use-angle, or turning WebGL off, keeps its choice); headless is left as it is.
+const SOFTWARE_GL_ARGS = Object.freeze(['--use-angle=swiftshader', '--enable-unsafe-swiftshader']);
+/** `args` with the SwiftShader pair appended → `{args, added}` (nothing added when the config chose its own GL). */
+function withSoftwareGl(args) {
+  const list = argsList(args);
+  if (list.some((a) => a.startsWith('--use-angle=') || a === '--disable-webgl' || a === '--disable-3d-apis')) return { args, added: [] };
+  const added = SOFTWARE_GL_ARGS.filter((a) => !list.includes(a));
+  return added.length ? { args: argsLike(args, [...list, ...added]), added } : { args, added: [] };
+}
+
 /** `browser.noDisplayMode`: 'auto' (the hidden window where Xvfb is installed, else headless — the default) | 'headless'. */
 const NO_DISPLAY_MODES = Object.freeze(['auto', 'headless']);
 function noDisplayModeOf(v) { return v === 'headless' ? 'headless' : 'auto'; }
@@ -226,8 +248,10 @@ function noDesktop(d) { return !isObj(d) || d.kind === 'none' || !(Array.isArray
  * THE SWITCH of H5's rule (the 2.369.200 integration): OFF in 2.369.200 — an UNSET preference keeps .199's meaning
  * everywhere (inherit; headless on a machine with no desktop, said by the display fact), while an explicit
  * `browser.headed = yes` still runs the hidden-window rung. Reason: the dialog / navigation-loop watch is not yet verified
- * on that rung (test-browser-dialog-chrome / -site-reset-chrome were red there); the rule ships ON with lane
- * browser-windows (one window per holder) in .201, where those suites run on that rung. Callers never pass it; gates do.
+ * on that rung (test-browser-dialog-chrome / -site-reset-chrome were red there); it was to ship ON with lane
+ * browser-windows (one window per holder); the 2.369.202 integration ran both suites on that rung (the switch on, their
+ * headless pin removed, in a scratch copy) and they were red there (dialog-chrome 5 legs, site-reset-chrome's loop legs) —
+ * so it stays OFF in 2.369.202 too. Callers never pass it; gates do.
  */
 const NO_DESKTOP_WINDOW_DEFAULT = false;
 function resolveHeaded({ setting = null, display = null, mode = 'auto', noDesktopWindow = NO_DESKTOP_WINDOW_DEFAULT } = {}) {
@@ -252,8 +276,10 @@ function launchPlan({ wanted = {}, display = null, mode = 'auto' } = {}) {
   if (d.kind === 'none' || !available.length) {
     const cut = withoutDisplayOzone(args);
     if (noDisplayModeOf(mode) === 'auto' && d.xvfb === true) {
-      // rung 1: a normal window on the CLI's own invisible Xvfb — X11 pinned, a named display cleared (measured above)
-      return { headed: true, args: withOzone(cut.args, 'x11'), changed: true, fallback: { why: 'no-display', wanted: 'headed', rung: 'hidden-window', dropped: cut.dropped }, env: d.envNamesDisplay ? { DISPLAY: '', WAYLAND_DISPLAY: '' } : {} };
+      // rung 1: a normal window on the CLI's own invisible Xvfb — X11 pinned, a named display cleared (measured above), and
+      // (B-cc68) WebGL drawn in software (an Xvfb has no GL: measured above SOFTWARE_GL_ARGS)
+      const gl = withSoftwareGl(withOzone(cut.args, 'x11'));
+      return { headed: true, args: gl.args, changed: true, fallback: { why: 'no-display', wanted: 'headed', rung: 'hidden-window', dropped: cut.dropped, softwareGl: gl.added }, env: d.envNamesDisplay ? { DISPLAY: '', WAYLAND_DISPLAY: '' } : {} };
     }
     return { headed: false, args: cut.args, changed: true, fallback: { why: 'no-display', wanted: 'headed', rung: 'headless', dropped: cut.dropped }, env: {} };
   }
@@ -288,11 +314,11 @@ function displayFact({ display = null, plan = null, wanted = null, prev = null, 
   return {
     kind: DISPLAY_KINDS.includes(d.kind) ? d.kind : 'none', socket: d.socket || null, name: d.name || null,
     available: Array.isArray(d.available) ? d.available.slice() : [],
-    wayland: isObj(d.wayland) ? { ...d.wayland } : null, x11: isObj(d.x11) ? { ...d.x11 } : null,
+    wayland: isObj(d.wayland) ? { ...d.wayland } : null, x11: isObj(d.x11) ? { ...d.x11 } : null, vnc: isObj(d.vnc) ? { ...d.vnc } : null,
     // `byDefault` (lane hooks-create H5): the window was asked for by resolveHeaded's no-desktop rule, not by a setting or
     // the config — every later call re-derives the same plan from this fact (planForFact)
     wanted: { headed: !!(isObj(wanted) && wanted.headed === true), ozone: isObj(wanted) ? ozoneOf(wanted.args) : null, ...(byDefault === true ? { byDefault: true } : {}) },
-    headed: p.headed === true, fallback: isObj(p.fallback) ? { ...p.fallback, ...(Array.isArray(p.fallback.dropped) ? { dropped: p.fallback.dropped.slice() } : {}) } : null,
+    headed: p.headed === true, fallback: isObj(p.fallback) ? { ...p.fallback, ...(Array.isArray(p.fallback.dropped) ? { dropped: p.fallback.dropped.slice() } : {}), ...(Array.isArray(p.fallback.softwareGl) ? { softwareGl: p.fallback.softwareGl.slice() } : {}) } : null,
     env: isObj(p.env) ? { ...p.env } : {},
     recovered: prevFb && !p.fallback && p.headed === true ? prevFb : null,
     why: Array.isArray(d.why) ? d.why.slice(0, 6) : [],
@@ -323,6 +349,8 @@ function kindName(kind) { return KIND_NAME[kind] || String(kind || ''); }
 /** THE AGENT'S sentence (English, never translated — an agent reads it; the user's surfaces word the code). '' = nothing to say. */
 function agentNote(fact) {
   const c = factCode(fact);
+  const vnc = isObj(fact) && isObj(fact.vnc) && fact.vnc.name ? fact.vnc.name : null; // B-d635: never "no desktop session" beside the VNC desktop
+  if (vnc && (c === 'hidden-window' || c === 'headless')) return `this browser runs ${c === 'headless' ? 'headless' : 'in a hidden window'} — NOT on this machine's VNC desktop (${vnc}), so the user cannot see it there or in Desktop apps; they watch it and take over in the Agent browser panel's live view [${c === 'headless' ? 'browser_headless' : 'browser_hidden_window'}]`;
   if (c === 'hidden-window') return 'this machine has no desktop session, so this browser runs in a hidden window (an invisible display on this machine; a window was asked for) — pages work the same, and the user can still watch it and take over in the live view [browser_hidden_window]';
   if (c === 'headless') return 'this machine has no desktop session, so this browser runs headless (a window was asked for) — pages work the same, and the user can still watch it and take over in the live view [browser_headless]';
   if (c === 'substituted') return `the browser config asks for ${kindName(fact.fallback.wanted)}, which this machine does not have right now — this browser runs on ${kindName(fact.fallback.used)} instead [browser_display_substituted]`;
@@ -332,7 +360,7 @@ function agentNote(fact) {
 /** One journal line for a launch's fact, or '' (nothing to say). */
 function journalLine(fact, what) {
   const c = factCode(fact);
-  if (c === 'hidden-window') return `${what}: no desktop session on this machine (${(fact.why || []).join('; ') || 'no display'}) — launched in a HIDDEN WINDOW (the browser CLI's own Xvfb, --ozone-platform=x11${fact.env && Object.keys(fact.env).length ? ', DISPLAY/WAYLAND_DISPLAY cleared' : ''})${fact.fallback.dropped && fact.fallback.dropped.length ? `; replaced ${fact.fallback.dropped.join(' ')}` : ''} (the user's config file is untouched)`;
+  if (c === 'hidden-window') return `${what}: no desktop session on this machine (${(fact.why || []).join('; ') || 'no display'}) — launched in a HIDDEN WINDOW (the browser CLI's own Xvfb, --ozone-platform=x11${fact.env && Object.keys(fact.env).length ? ', DISPLAY/WAYLAND_DISPLAY cleared' : ''})${fact.fallback.dropped && fact.fallback.dropped.length ? `; replaced ${fact.fallback.dropped.join(' ')}` : ''} (the user's config file is untouched)${fact.fallback.softwareGl && fact.fallback.softwareGl.length ? `; WebGL in software (${fact.fallback.softwareGl.join(' ')} — an Xvfb has no GL)` : ''}`;
   if (c === 'headless') return `${what}: no desktop session on this machine (${(fact.why || []).join('; ') || 'no display'}) — launched headless instead of the window its config asks for${fact.fallback.dropped && fact.fallback.dropped.length ? `; dropped ${fact.fallback.dropped.join(' ')}` : ''} (the user's config file is untouched)`;
   if (c === 'substituted') return `${what}: the config pins --ozone-platform=${fact.fallback.wanted}, which this machine does not have now — launched on ${fact.fallback.used} (${fact.socket || '?'})`;
   if (c === 'recovered') return `${what}: the desktop session is back (${kindName(fact.kind)} ${fact.name || ''}) — launched headed again`;
@@ -342,7 +370,7 @@ function journalLine(fact, what) {
 module.exports = {
   DISPLAY_KINDS, X11_DIR, OZONE_PREFIX, DISPLAY_PLATFORMS,
   runtimeDirOf, parseX11Display, displayCandidates, displayVerdict,
-  argsList, ozonePlatformsOf, ozoneOf, withoutDisplayOzone, withOzone,
+  argsList, ozonePlatformsOf, ozoneOf, withoutDisplayOzone, withOzone, SOFTWARE_GL_ARGS, withSoftwareGl,
   NO_DISPLAY_MODES, noDisplayModeOf, noDesktop, resolveHeaded, NO_DESKTOP_WINDOW_DEFAULT,
   wantedOf, launchPlan, applyPlan, displayFact, planApplies, planForFact, factCode, kindName, agentNote, journalLine,
 };

@@ -41,8 +41,8 @@
 // entry of hosts.js AGENT_TOOLS into exactly one of the two tables.
 // PUBLISH ASKS (r2, owner decision 2026-09-25): `vibespace-page publish` puts a
 // page under the user's name on this instance (`--public` = a link anyone can
-// open), so it is never pre-approved: vibespace-page is VERB-LISTED (`list`,
-// `kit`), and `publish` also rides the spawn as an ASK rule
+// open), so it is never pre-approved: vibespace-page is VERB-LISTED (`list`;
+// `kit` left with the Claude CLI kit, lane design-docs), and `publish` also rides the spawn as an ASK rule
 // (`permissions.ask`, 2.1.281: deny > ask > allow, and the ask-rule check runs
 // BEFORE the permission-mode check — measured in the binary, the rule prompts
 // even under bypassPermissions; dontAsk turns it into a refusal). A CLI with no
@@ -81,7 +81,10 @@ const { hiddenCharsOf } = require('./helper-ask.js');
 
 const JOB_VERBS = Object.freeze(['list', 'show', 'poll', 'answers', 'logs', 'progress', 'ask', 'docs', 'stop', 'rm', 'notify', 'notify-cron', 'announce', 'subscribe', 'unsubscribe']);
 /** vibespace-page's pre-approved verbs (r2): `publish` is held AND an ask rule. */
-const PAGE_VERBS = Object.freeze(['list', 'kit']);
+const PAGE_VERBS = Object.freeze(['list']);
+/** vibespace-design's pre-approved verbs (lane design-core): every verb but `publish`, which is held AND an ask rule
+ *  (the vibespace-page precedent — a page under the user's name). */
+const DESIGN_VERBS = Object.freeze(['new', 'add', 'check', 'sync', 'open', 'show', 'list']);
 /** vibespace-app's pre-approved verbs (Layer 0 apps, docs/design-app-persistence.zh.md §3.1): nothing here EXECUTES —
  *  `install` / `remove` only PROPOSE (one For-you item; the user installs); `add` (a user-level installer run as the
  *  user) is held. */
@@ -100,13 +103,24 @@ const AGENT_TOOL_RULES = Object.freeze([
   Object.freeze({ tool: 'vibespace-window', verbs: null, why: 'drives a desktop-app window under a lease the user can take over' }),
   Object.freeze({ tool: 'vibespace-channels', verbs: null, why: 'reads channels; a reply is a PROPOSAL the outbox policy decides; withdraw only takes back the agent\'s own undecided proposal (never a send)' }),
   Object.freeze({
-    tool: 'vibespace-page', verbs: PAGE_VERBS, why: 'lists the pages it published and prepares the design kit; publishing asks every time',
-    held: Object.freeze({ publish: 'puts a page under the user\'s name on this instance (--public = a link anyone can open) — it asks every time (owner 2026-09-25)' }),
-    ask: Object.freeze(['publish']),
+    tool: 'vibespace-page', verbs: PAGE_VERBS, why: 'lists the pages it published; publishing asks every time',
+    held: Object.freeze({
+      publish: 'puts a page under the user\'s name on this instance (--public = a link anyone can open) — it asks every time (owner 2026-09-25)',
+      // B-f694: `visibility … public` is the exposure `publish --public` asks for, so it rides the same ask rule (both
+      // directions — an ask rule is a command prefix); `unpublish` is held without one (it retracts, never exposes)
+      visibility: 'opens a page it published to anyone with the link, or makes it private — the exposure publish --public asks for, so it asks every time too',
+      unpublish: 'takes down a page it published — a link the user may have shared stops working',
+    }),
+    ask: Object.freeze(['publish', 'visibility']),
   }),
   Object.freeze({
     tool: 'vibespace-app', verbs: APP_VERBS, why: 'searches, plans and PROPOSES app installs — nothing executes; the user installs in For you (through VibeSpace\'s own package slot)',
     held: Object.freeze({ add: 'runs a user-level installer (uv / npm / an AppImage) as you, outside the approval the user gives in For you' }),
+  }),
+  Object.freeze({
+    tool: 'vibespace-design', verbs: DESIGN_VERBS, why: 'drafts design artboards in the conversation\'s own folder and shows them in the Design window; publishing asks every time',
+    held: Object.freeze({ publish: 'puts a design page under the user\'s name on this instance (--public = a link anyone can open) — it asks every time, like vibespace-page publish' }),
+    ask: Object.freeze(['publish']),
   }),
   Object.freeze({
     tool: 'vibespace-job', verbs: JOB_VERBS, why: 'Background Work bookkeeping',
@@ -609,8 +623,13 @@ function toolStep(tool, args) {
     case 'vibespace-channels': return verb === 'withdraw' ? S(i18nKey('Take back one of its proposed replies')) : S(i18nKey('Read a channel or propose a reply'));
     case 'vibespace-page':
       if (verb === 'list') return S(i18nKey('List the pages it published'));
-      if (verb === 'kit') return S(i18nKey('Prepare the design kit'));
+      if (verb === 'unpublish') return S(i18nKey('Take down a page it published'));
+      if (verb === 'visibility') return args.filter((a) => !a.startsWith('-'))[2] === 'public' ? S(i18nKey('Open a page it published to anyone with the link')) : S(i18nKey('Make a page it published private'));
       return args.includes('--public') ? S(i18nKey('Publish a page anyone with the link can open')) : S(i18nKey('Publish a page on this VibeSpace'));
+    case 'vibespace-design':
+      if (verb === 'publish') return args.includes('--public') ? S(i18nKey('Publish a design anyone with the link can open')) : S(i18nKey('Publish a design on this VibeSpace'));
+      if (verb === 'list' || verb === 'show' || verb === 'check') return S(i18nKey('Read its design drafts'));
+      return S(i18nKey('Draft a design and show it in the Design window'));
     case 'vibespace-job':
       if (verb === 'run' || verb === 'start') return S(i18nKey('Start a background shell command'));
       if (verb === 'rm' || verb === 'stop') return S(i18nKey('Stop or remove one of its background jobs'));
@@ -690,7 +709,7 @@ function describeAgentCommand(command) {
 }
 
 module.exports = {
-  AGENT_TOOL_RULES, HELD_TOOLS, JOB_VERBS, PAGE_VERBS, APP_VERBS, CODEX_NOTE, SCOPE_CLOSE_ALL, WITHHELD_ASK, WITHHELD_HELD, SAFE_ENV,
+  AGENT_TOOL_RULES, HELD_TOOLS, JOB_VERBS, PAGE_VERBS, DESIGN_VERBS, APP_VERBS, CODEX_NOTE, SCOPE_CLOSE_ALL, WITHHELD_ASK, WITHHELD_HELD, SAFE_ENV,
   claudeAllowRules, claudeAskRules, ASK_RULE_MODES, spawnPermissionMode, claudeAskRulesFor, parseRule, ruleMatchesCommand, coveredByAgentToolRules,
   widenSuggestions, alwaysAllowFor, rulesText, splitShell, describeAgentCommand, agentCommandText,
   // verify r6: the inert-tail census (F4), every update in words (F5), the ONE offer + the server's own answer (F6/F7)

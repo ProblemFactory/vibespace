@@ -125,15 +125,18 @@ globalThis.document = { createElement: (t) => new FakeEl(t) };
 
 // ── §2 the phone's chip ──────────────────────────────────────────────────
 console.log('§2 the REAL ChatStatusBar: a per-session switch repaints the chip in place');
+/** The pill's WHOLE form (lane phone-chip, composed at the 2.369.202 integration: the chip holds the whole form, the short
+ *  form and the icon side by side — CSS shows the one that fits; the member is named in the whole one). */
+const pillFull = (el) => { if (!el) return ''; const m = /<span class="pill-full">([\s\S]*?)<\/span>/.exec(el._html || ''); return m ? m[1].replace(/<[^>]*>/g, '').replace(/&amp;/g, '&').replace(/&gt;/g, '>').replace(/&lt;/g, '<') : el.textContent; };
 /** The owner's walk on a bar class: member A, then the same pool on member B. → what the chip showed. */
 function walkBar(Klass) {
   const bar = mkBar(Klass);
   bar.applyStatus({ model: 'claude-fable-5-1', permissionMode: 'default' });
   bar.setBilling(POOL(), () => {});
-  const el0 = billingEl(bar), text0 = el0?.textContent || '';
+  const el0 = billingEl(bar), text0 = pillFull(el0);
   bar.setBilling(POOL(TO_B), () => {}); // the next active-sessions broadcast: the SAME pool, another member
   const el1 = billingEl(bar);
-  const r = { bar, el0, text0, el1, text1: el1?.textContent || '', sameNode: !!el0 && el0 === el1 };
+  const r = { bar, el0, text0, el1, text1: pillFull(el1), sameNode: !!el0 && el0 === el1 };
   return r;
 }
 {

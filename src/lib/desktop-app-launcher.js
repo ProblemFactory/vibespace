@@ -67,7 +67,7 @@
 // what scrolled the title off-left. test-desktop-app-window pins the three
 // viewports with computed geometry.
 import { t } from './i18n.js';
-import { copyText, createModalShell, escHtml, fetchJson, showContextMenu, showToast, uiScale } from './utils.js';
+import { copyText, createModalShell, escHtml, fetchJson, showConfirmDialog, showContextMenu, showToast, uiScale } from './utils.js';
 import { registerCommand, registerMenuItem, runCommand } from './contributions.js';
 import { setupDirAutocomplete } from './autocomplete.js';
 import { FILE_ICONS, UI_ICONS } from './icons.js';
@@ -75,7 +75,7 @@ import { validateBrowserUrl } from '../desktop-apps.js';
 import { SCALE_PREF_KEY, scaleKeyOf, scaleChoiceOf, setScaleChoice, launchScaleChoice, scaleDefaultMenuModel } from './desktop-app-scale.js';
 import { wireAppPrefs, appPrefs, appPrefsReady, onAppPrefs, saveAppPrefs } from './desktop-app-prefs.js';
 import { mountLaunchShareRow, launchKeyOf } from './window-share.js';
-import { OFFICE_MODULES, installSpecFor } from '../office-open.js'; // §7.9: the LibreOffice table (PURE)
+import { OFFICE_MODULES, installSpecFor, FONTS_ID } from '../office-open.js'; // §7.9: the LibreOffice table (PURE)
 import { appPlanBlock, appRefusalText, appDialogTitle, appGoLabel, appPlanNote, appDoneText, renderAppsSection, openDebInstall } from './app-install-dialog.js'; // Layer 0 apps: THE install dialog shows an app's plan too
 
 export const COMMAND_ID = 'desktopApps.open';
@@ -244,6 +244,36 @@ export function openWithRefusalText(code, { app = 'LibreOffice', machine = '', f
 }
 /** §7.9: the install offer's words — the owner's own phrase, one per machine. */
 export const officeInstallLabel = (machine) => t('Install LibreOffice on {machine}…', { machine: machine || t('this machine') });
+/**
+ * B-04da ④ — STOP WITHOUT LOSING AN EDIT: POST …/stop; a LibreOffice session is asked to quit through its own File ▸ Exit
+ * first, and while its "Save changes?" prompt is up the keeper answers `app-asked` — then the person is asked here, in
+ * words, whether to stop it anyway (and lose the unsaved edits) or answer the prompt in the app's window. The ONE stop of
+ * every surface (the window's Stop, the ✕ pressed again, the launcher's running list). → the record, or null (kept
+ * running / failed — said).
+ */
+export async function stopDesktopApp(id, { name = '' } = {}) {
+  const post = (force) => fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}/stop`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: force ? JSON.stringify({ force: true }) : '{}' });
+  let r = await post(false);
+  if (r && r.code === 'app-asked') {
+    const okd = await confirmDiscard({ name, act: 'stop' });
+    if (!okd) { showToast(t('{app} keeps running — answer its question in its window', { app: name || t('The app') }), { duration: 4000 }); return null; }
+    r = await post(true);
+  }
+  if (!r || r.error) { showToast(r?.error || t('Could not stop the app'), { type: 'error' }); return null; }
+  return r;
+}
+/** B-04da ④: the words after an `app-asked` — LibreOffice is asking in its window; going on loses the unsaved edits. */
+export function confirmDiscard({ name = '', act = 'stop' } = {}) {
+  const app = name || t('The app');
+  return showConfirmDialog({
+    title: t('{app} has unsaved changes', { app }),
+    message: t('{app} is asking in its own window whether to save them. Answer it there to keep your edits — or go on now and lose them.', { app }),
+    confirmText: act === 'relaunch' ? t('Relaunch and lose the edits') : t('Stop and lose the edits'),
+    danger: true,
+  });
+}
+/** B-04da ②: the offer of the Calibri / Cambria look-alikes alone, on a machine that has LibreOffice without them. */
+export const officeFontsLabel = (machine) => t('Install the Calibri / Cambria look-alike fonts on {machine}…', { machine: machine || t('this machine') });
 
 /** Is the "Advanced" disclosure open at dialog open? PURE: the persisted
  *  preference wins, and an EMPTY catalog forces it open (there is nothing
@@ -316,7 +346,7 @@ export async function showInstallDialog(m, { what = 'xpra', onDone = null, reque
   const spec = xp || isApp ? null : installSpecFor(what);
   const appLabel = spec ? spec.label : 'LibreOffice';
   const name = xp ? machineName(m) : machineInSentence(m); // xpra's words exactly as before; a LibreOffice install names the machine inside its sentences
-  const { body: ib, close: iclose } = createModalShell({ id: 'desktop-install-dialog', title: isApp ? appDialogTitle(request || { kind: 'apt', packages: [] }, name) : xp ? t('Install xpra on {machine}', { machine: name }) : t('Install LibreOffice on {machine}', { machine: name }), dialogClass: 'desktop-install', escapeToClose: true });
+  const { body: ib, close: iclose } = createModalShell({ id: 'desktop-install-dialog', title: isApp ? appDialogTitle(request || { kind: 'apt', packages: [] }, name) : xp ? t('Install xpra on {machine}', { machine: name }) : what === FONTS_ID ? t('Install the Calibri / Cambria look-alike fonts on {machine}', { machine: name }) : t('Install LibreOffice on {machine}', { machine: name }), dialogClass: 'desktop-install', escapeToClose: true });
   ib.classList.add('desktop-install-body');
   if (isApp) ib.classList.add('desktop-install-app');
   const note = document.createElement('div'); note.className = 'desktop-install-note'; note.textContent = t('Reading what {machine} runs…', { machine: name });
@@ -621,9 +651,8 @@ export async function showLaunchDialog(app, opts = {}) {
       stop.disabled = busy.has(a.id);
       stop.onclick = async () => {
         busy.add(a.id); stop.disabled = true;
-        const r = await fetchJson(`/api/desktop/apps/${encodeURIComponent(a.id)}/stop`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+        await stopDesktopApp(a.id, { name: a.label || a.exec }); // B-04da ④: LibreOffice is asked first
         busy.delete(a.id);
-        if (!r || r.error) showToast(r?.error || t('Could not stop the app'), { type: 'error' });
         refresh();
       };
       row.append(open, stop);

@@ -59,7 +59,11 @@ failure is never archived — so if you want a failure to stay in the user's
 face, do not poll it; if you have handled it, poll it once.
 
 **Quiet-success law**: a scheduled run ending fine is silent by default
-(ring entry only). Opt successes into events+notify with `--notify-ok`.
+(ring entry only). Opt successes into events+notify with `--notify-ok` — the
+create line then says `per-fire notify: ON` and `show` prints `notifyOk=true`.
+Per-fire notify rides auto-notify: with it OFF (the schedule's own `--notify off`,
+the group or Settings) no fire messages anyone, and the create line says so.
+A schedule's `--notify` (or `vibespace-job notify <cron> on|off`) governs its fires.
 EXCEPTION (2.361.4): a scheduled BARE `echo`/`printf` command is recognized
 as a reminder-by-instinct and gets per-fire notify ON automatically (a bare
 echo's only purpose is its output — silent success would make it a no-op
@@ -159,9 +163,40 @@ control; `subscribe` needs view only.
 `VIBESPACE_API` · `VIBESPACE_JOB_ID` · `VIBESPACE_JOB_TOKEN` (acts on THIS
 job only: progress/ask/announce) · secrets you referenced with `--env-from`
 (user manages values in ⚙→Background Work; values are literal-redacted from
-log tails) · `data/bin` on PATH. Ambient vendor credentials are STRIPPED —
-jobs must never talk to LLM vendor APIs (creation refuses vendor/credential
-patterns; that class got a subscription banned — don't try to work around it).
+log tails) · `data/bin` on PATH. Ambient vendor credentials are STRIPPED, and a job
+whose command obviously reads a subscription sign-in — Claude's
+`.credentials.json`, codex's `auth.json`, OpenCode's login file, VibeSpace's
+account folders, the macOS keychain item, an OAuth token variable or a pasted
+token — is refused at create, at start and at every run (its cmd, cwd, a
+health probe, an `--env-from` name, a scheduled run's command): background use
+of a subscription login is the class that got a subscription banned. Calling
+any API with your own key is fine. This is a reminder against obvious reads of
+sign-in files, NOT a sandbox.
+
+### The agent browser inside a job
+
+A job may use the agent browser as its owner conversation: the same profile,
+the same who-may-use, its own window; its actions appear in the
+conversation's browser trace as the job's. Concretely:
+
+* `vibespace-browser <verb>` works in a job's script as it does in the
+  conversation (it reads `VIBESPACE_JOB_TOKEN`). It runs in the profile the
+  conversation has **pinned** (or its default attachment) — the same logins.
+  Pin the profile the job needs FROM the conversation before scheduling it;
+  with nothing pinned the job is refused `job_no_profile`.
+* The job gets its **own window** in that browser (one window per holder): it
+  never moves the conversation's tab, and the user can watch or take over the
+  job's window apart from the conversation's.
+* Admission is the conversation's: if the user keeps that profile to other
+  conversations, the job is refused `not_owner` exactly as the conversation
+  would be.
+* A job may read and act (open, click, snapshot, tabs, dialogs, status) but
+  never change the conversation's browsers — `use`, `pin`, `new`,
+  `new-child`, `detach`, `backend`, `blocked`, `site-hint`, `site-reset` and
+  `resume` are refused `job_token`; run those from the conversation.
+* It keeps browsing while its run is alive, even after the conversation that
+  created it stopped; when the run ends its window closes and its lease is
+  released. A finished job's token is refused `job_not_running`.
 
 ## 10. Picking the right tool (negative space)
 

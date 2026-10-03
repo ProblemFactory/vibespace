@@ -563,6 +563,7 @@ function setup(ctx) {
       if (!isCliProcess(pid, 'claude') && !isCliProcess(pid, 'codex')) {
         return res.status(400).json({ error: 'PID is not a claude/codex process' });
       }
+      try { require('../server/unexpected-exit').markAskedByPid(pid, 'user-kill'); } catch { } // B-f698 verify r1: a user kill is never "unexpected"
       process.kill(pid, 'SIGTERM');
       res.json({ success: true });
     } catch (err) { res.status(500).json({ error: err.message }); }

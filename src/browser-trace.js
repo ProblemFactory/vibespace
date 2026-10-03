@@ -280,7 +280,7 @@ function afterFramePick({ resultAt, frames = [], beforeSeq = null, now, settleMs
   return { pick: 'wait' };
 }
 /** The record. `before` / `after` are `{file, bytes, ...frameMeta, at}` or null. */
-function entryFor({ id, at, sessionId = null, browserKey = null, profileId = null, browserSession = null, command, result = null, position, before = null, after = null, afterSame = false, url = null, holder = null } = {}) {
+function entryFor({ id, at, sessionId = null, browserKey = null, profileId = null, browserSession = null, command, result = null, position, before = null, after = null, afterSame = false, url = null, holder = null, job = null } = {}) {
   const action = String(command && command.action || '');
   const params = redactParams(action, command && command.params);
   // BROWSE YOURSELF (B-6ae8, the owner 3): the USER's own act (his browsing window's input, or a command of his address row)
@@ -290,6 +290,8 @@ function entryFor({ id, at, sessionId = null, browserKey = null, profileId = nul
     ...(human ? { holder: 'user' } : {}),
     // lane trace-fits: a fit carries its run's count and last instant (1 and its own `at` until a later fit is folded in)
     ...(action === FIT_ACTION ? { n: 1, lastAt: Number(at) || 0 } : {}),
+    // lane jobs-browser: an action a Background Work job took as its conversation names the JOB BY ID (its name is read live)
+    ...(!human && typeof job === 'string' && /^jb-[0-9a-f]{4,16}$/.test(job) ? { job } : {}),
     id: String(id), at: Number(at) || 0, sessionId: human ? null : (sessionId || null), browserKey: browserKey || null, profileId: profileId || null,
     // the browser SESSION this action belongs to (`bs-…`, src/browser-sessions.js) — null only for a pre-session record
     browserSession: /^bs-[0-9a-f]{8}$/.test(String(browserSession || '')) ? browserSession : null,

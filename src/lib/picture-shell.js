@@ -47,6 +47,38 @@ export const RECONNECT_LADDER = [1000, 2000, 4000, 8000, 15000];
  *  asynchronous execCommand('copy') on plain http succeeds 0…4800 ms after a trusted Ctrl+C, fails from 5200 ms). */
 export const GESTURE_WINDOW_MS = 5000;
 
+/** THE PASTE PRESS SAYS WHAT HAPPENED, EVERY TIME (lane desktop-keepalive K2, userW inc-muoshmqn-dect: two presses,
+ *  nothing visible, NO toast in the ring). The .198 flow had two silent paths, both reproduced in test-vnc-view §9:
+ *  the paste box opened WITHOUT a toast (a plain-http page, a refused permission, an empty clipboard — a box the eye
+ *  can miss under the bar), and a `readText()` that never settles (a permission prompt nobody answers) did nothing at
+ *  all. Now: every press is said (a toast — the ring keeps it), the read has a deadline, and a press while the stream
+ *  is not connected QUEUES the text, kicks the reconnect (a press is intent) and pastes when the stream is back —
+ *  or says, after PASTE_WAIT_MS, that it was not pasted. PURE verdict: state → 'send' | 'queue' | 'refuse'. */
+export const PASTE_WAIT_MS = 30000;
+export const CLIPBOARD_READ_MS = 3000;
+export function pasteVerdict(state, { closed = false } = {}) {
+  if (closed) return 'refuse';
+  if (state === 'connected') return 'send';
+  if (state === 'idle' || !state) return 'refuse';  // the view never started a stream
+  return 'queue';                                     // starting / connecting / disconnected / error
+}
+/** The words of a box opening (every box opening is SAID — a toast — never only drawn). */
+export function pasteBoxToastKey(why) {
+  return why === 'insecure' ? 'This page cannot read your clipboard — paste into the box under the bar, then Send'
+    : why === 'denied' ? 'The browser refused clipboard access — paste into the box under the bar, then Send'
+      : why === 'timeout' ? 'The browser is still asking for clipboard permission — answer it, or paste into the box under the bar'
+        : 'Your clipboard holds no text — paste into the box under the bar, then Send';
+}
+/** The bridge's last close code (GET /api/vnc/last-close `code`) → the status chip's words (null = say nothing more). */
+export function closeWordsKey(code) {
+  return code === 'unanswered' ? 'the browser stopped answering'
+    : code === 'server-closed' ? 'the desktop server closed the stream'
+      : code === 'browser-closed' ? 'the connection dropped'
+        : code === 'session-ended' ? 'the desktop session ended'
+          : code === 'blocked' ? 'another window is driving it'
+            : null;
+}
+
 /** Where a copy made inside the remote app goes (round 3, A1 — docs/design-desktop-apps-seamless §3.1):
  *    'api'     — the async Clipboard API: a secure context that has it (unchanged);
  *    'gesture' — plain http, and the user's OWN copy chord in this pane (Ctrl/⌘+C, +X) was pressed `gestureAge` ms
@@ -115,7 +147,7 @@ export function streamUrl(pathname) {
  * `scheduleRetry(connect)` arms the next rung with the caller's own connect;
  * `want()`/`unwant()` flip the ladder's key; `close()` ends everything.
  */
-export function createPictureShell(host, { labels = {}, autoReconnect = false, onStatus = null, background = '#000', focus = null } = {}) {
+export function createPictureShell(host, { labels = {}, autoReconnect = false, onStatus = null, background = '#000', focus = null, ladderWords = false } = {}) {
   const L = { starting: t('Starting desktop…'), unavailable: t('Desktop unavailable on this server'), ...labels };
   const container = document.createElement('div');
   container.className = 'picture-shell';
@@ -179,7 +211,17 @@ export function createPictureShell(host, { labels = {}, autoReconnect = false, o
   let retryTimer = null;
   let state = 'idle';
 
-  const emit = (s, detail) => { state = s; try { onStatus?.(s, detail); } catch {} };
+  let pending = null;    // K2: {text, send, timer} — ONE queued paste (the latest press wins)
+  const emit = (s, detail) => {
+    state = s; try { onStatus?.(s, detail); } catch {}
+    if (s === 'connected' && pending) { const p = pending; pending = null; clearTimeout(p.timer); try { p.send(p.text); } catch {} }
+  };
+  const queuePaste = (text, send) => {
+    if (pending) clearTimeout(pending.timer);
+    const p = { text, send, timer: null };
+    p.timer = setTimeout(() => { if (pending === p) { pending = null; showToast(t('Not pasted — the desktop did not come back within 30 s; press Reconnect'), { type: 'error' }); } }, PASTE_WAIT_MS);
+    pending = p;
+  };
   const setStatus = (txt, { error = false, reconnect = false } = {}) => {
     status.textContent = txt;
     status.style.color = error ? 'var(--red, #e55)' : '';
@@ -192,10 +234,16 @@ export function createPictureShell(host, { labels = {}, autoReconnect = false, o
     const wait = RECONNECT_LADDER[Math.min(attempt, RECONNECT_LADDER.length - 1)];
     if (attempt >= RECONNECT_LADDER.length) return;
     attempt++;
+    // K3: the bar counts the ladder ("Reconnecting 2/5…") — the rung the stream is on, never a bare "Connection lost". OPT-IN
+    // (`ladderWords`): the VNC view's own chip says only "Connection lost"; the xpra view's already names its reason and keeps it
+    if (ladderWords) status.textContent = t('Reconnecting {n}/{total}…', { n: attempt, total: RECONNECT_LADDER.length }) + (lastCloseWords ? ' — ' + lastCloseWords : '');
     clearTimeout(retryTimer);
     retryTimer = setTimeout(() => { if (!closed) connect(); }, wait);
   };
   const resetLadder = () => { attempt = 0; clearTimeout(retryTimer); };
+  let lastCloseWords = '';
+  /** K3: what the bridge said about the last close, worded (set by the view on a disconnect; '' clears it). */
+  const setCloseWords = (w) => { lastCloseWords = String(w || ''); };
   const want = () => { wanted = true; clearTimeout(retryTimer); };
   const unwant = () => { wanted = false; clearTimeout(retryTimer); };
   /** Extra chrome a window type wants in the bar (inserted before Paste). */
@@ -215,6 +263,7 @@ export function createPictureShell(host, { labels = {}, autoReconnect = false, o
     note.textContent = why === 'insecure' ? t('This page is not served over HTTPS, so the browser will not hand over the clipboard — paste here instead (Ctrl+V), then Send.')
       : why === 'denied' ? t('The browser refused clipboard access (permission) — paste here instead (Ctrl+V), then Send.')
         : why === 'empty' ? t('The clipboard is empty or holds no text — paste here instead (Ctrl+V), then Send.')
+          : why === 'timeout' ? t('The browser is still asking for clipboard permission — answer it, or paste here (Ctrl+V), then Send.')
           : t('Clipboard unavailable (needs HTTPS + permission)');
     const ta = document.createElement('textarea');
     ta.className = 'vnc-paste-input'; ta.rows = 3; ta.placeholder = t('Paste text here…');
@@ -232,19 +281,32 @@ export function createPictureShell(host, { labels = {}, autoReconnect = false, o
   /** The Paste button: a dead view says so (`notConnected`); a readable
    *  clipboard is sent; a refused / empty / API-less one opens the box with
    *  its reason. `clipboard` is the API the view may use (null on plain http). */
-  const pasteFromClipboard = async ({ connected, notConnected, send, clipboard }) => {
-    if (!connected()) { showToast(notConnected, { type: 'error' }); return; }
+  const pasteFromClipboard = async ({ connected, notConnected, send, clipboard, reconnect = null }) => {
+    const v = pasteVerdict(connected() ? 'connected' : state, { closed });
+    if (v === 'refuse') { showToast(notConnected, { type: 'error' }); return 'refused'; }
+    if (v === 'queue') {
+      showToast(t('The desktop stream is reconnecting — your text is pasted when it is back'));
+      try { reconnect?.(); } catch {}
+    }
+    // every path that ends in a send goes through deliver: connected ⇒ now, else queued until the stream is back
+    const deliver = (text) => { if (connected()) return send(text); queuePaste(text, send); return true; };
     let text = null, why = null;
     if (!clipboard || typeof clipboard.readText !== 'function') why = 'insecure';
     else {
-      try { text = await clipboard.readText(); }
-      catch (e) { why = (e && (e.name === 'NotAllowedError' || e.name === 'SecurityError')) ? 'denied' : 'error'; }
+      // a permission prompt nobody answers must not swallow the press: the read has a deadline
+      let timer = null;
+      try { text = await Promise.race([clipboard.readText(), new Promise((_, rej) => { timer = setTimeout(() => rej(Object.assign(new Error('clipboard read timed out'), { name: 'TimeoutError' })), CLIPBOARD_READ_MS); })]); }
+      catch (e) { why = (e && e.name === 'TimeoutError') ? 'timeout' : (e && (e.name === 'NotAllowedError' || e.name === 'SecurityError')) ? 'denied' : 'error'; }
+      finally { clearTimeout(timer); }
     }
-    if (text) { send(text); return; }
+    if (text) { deliver(text); return v === 'queue' ? 'queued' : 'sent'; }
     // an unclassified failure keeps the retired window's exact toast (the
-    // byte-for-byte control) — and opens the box, which is the way out
+    // byte-for-byte control); every other box opening is SAID too (K2)
     if (why === 'error') showToast(t('Clipboard unavailable (needs HTTPS + permission)'), { type: 'error' });
-    openPasteBox(why || 'empty', send);
+    else showToast(t(pasteBoxToastKey(why || 'empty')));
+    openPasteBox(why || 'empty', deliver);
+    try { pasteBox?.scrollIntoView?.({ block: 'nearest' }); } catch {}
+    return 'box';
   };
 
   // ── app → browser: the API on a secure context, else the COPY CHIP ──
@@ -290,5 +352,5 @@ export function createPictureShell(host, { labels = {}, autoReconnect = false, o
 
   const close = () => { closed = true; unwant(); closePasteBox({ refocus: false }); clearTimeout(floatTimer); };
 
-  return { container, bar, mount, status, pasteBtn, reBtn, copyChip, copyHint, labels: L, setStatus, addControl, emit, scheduleRetry, resetLadder, want, unwant, close, pasteFromClipboard, openPasteBox, closePasteBox, deliverCopy, showCopied, hideCopied, setFloatingChip, get floatingChip() { return floating; }, get state() { return state; }, get wanted() { return wanted; }, get closed() { return closed; }, get pasteOpen() { return !!pasteBox; }, get copiedText() { return copiedText; }, get hintShown() { return copyHint.style.display !== 'none'; } };
+  return { setCloseWords, get pendingPaste() { return pending ? pending.text : null; }, container, bar, mount, status, pasteBtn, reBtn, copyChip, copyHint, labels: L, setStatus, addControl, emit, scheduleRetry, resetLadder, want, unwant, close, pasteFromClipboard, openPasteBox, closePasteBox, deliverCopy, showCopied, hideCopied, setFloatingChip, get floatingChip() { return floating; }, get state() { return state; }, get wanted() { return wanted; }, get closed() { return closed; }, get pasteOpen() { return !!pasteBox; }, get copiedText() { return copiedText; }, get hintShown() { return copyHint.style.display !== 'none'; } };
 }

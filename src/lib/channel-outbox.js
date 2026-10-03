@@ -52,11 +52,24 @@
 // visible mark; a card that just appeared or MOVED is inert for `P.ARM_MS`
 // (`placeArmed`) and Approve posts `shown` = the PURE digest of the record the
 // card showed — the engine refuses anything else (`changed-since-shown`).
+//
+// B-f467 (userW, 2026-10-03: the cards have "no visual centre of gravity —
+// some things I want to see at a glance"; he pointed at the channel list):
+// THE OUTBOX WINDOW LISTS ONE ROW PER PROPOSAL in the channel list's row
+// grammar — the conversation's avatar wearing its account badge · WHO
+// receives it and WHERE (+ the account at ≥ 2 of a vendor) · the time /
+// the state pill · the first line of the text · the primary ("Approve…" on
+// an awaiting one). The FULL CARD — this same renderer, the one
+// implementation — opens under its row on click or Enter. "Approve…" opens
+// the card and focuses ITS Approve: a decision is taken where the whole text,
+// the identity warning and the delivery choice are drawn (§9.5, verify r3 —
+// the approval rules are unchanged). The inline section keeps cards.
 import { fetchJson, showToast, showContextMenu } from './utils.js';
 import { t } from './i18n.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { registerCommand, registerMenuItem } from './contributions.js';
-import { icon, el, btn } from './channel-chrome.js';
+import { icon, el, btn, convAvatar } from './channel-chrome.js';
+import { accountBadges } from './channel-avatar.js';   // B-f467: the row's avatar wears its account badge (B-5fe1)
 import * as chanCaps from '../channel-caps.js';
 // PURE, bundled (a3 i18n): the proposal's OUTCOME as structure → words here.
 import * as P from '../channel-policy.js';
@@ -146,8 +159,13 @@ function appendReplyTarget(card, p) {
   }
   const e = p.replyEnvelope;
   if (e && e.to) {
-    card.appendChild(envRow('chan-prop-to', t('To'), e.to));
+    // B-a085: EVERY recipient before Approve — a reply-all's To and Cc in full, and apart the addresses the DRAFTER
+    // added (`reply --cc`) beside the thread's own people
+    const toRow = envRow('chan-prop-to', e.all ? t('To (reply all)') : t('To'), e.to);
+    if (e.all) toRow.dataset.replyAll = '1';
+    card.appendChild(toRow);
     if (e.cc) card.appendChild(envRow('chan-prop-cc', t('Cc'), e.cc));
+    if (Array.isArray(e.added) && e.added.length) card.appendChild(envRow('chan-prop-added', t('Cc added by the drafter'), e.added.join(', ')));
     if (e.subject) card.appendChild(envRow('chan-prop-subject', t('Subject'), e.subject));
   }
 }
@@ -244,7 +262,8 @@ export function renderProposalCard(app, p, { compact = false } = {}) {
     const where = el('div', 'chan-prop-where');
     if (p.compose) {
       // R4 (B-6acc): a NEW message — its envelope, and a link only once the vendor named its thread
-      where.appendChild(el('span', 'chan-prop-link', `${p.adapterLabel || p.adapterId} · ${t('New message')}`));
+      // B-f216 (userW pressed it 17 times): the envelope is WORDS — no link look without a target
+      where.appendChild(el('span', 'chan-prop-env', `${p.adapterLabel || p.adapterId} · ${t('New message')}`));
       if (p.convId) { const link = el('a', 'chan-prop-link', t('Open the conversation')); link.href = '#'; link.onclick = (ev) => { ev.preventDefault(); app.openChannel(p.adapterId, p.convId); }; where.appendChild(document.createTextNode(' · ')); where.appendChild(link); }
     } else {
       const link = el('a', 'chan-prop-link', `${p.adapterLabel || p.adapterId} · ${p.title || p.convId}`);
@@ -607,6 +626,124 @@ function placeArmed(container, nodes) {
   }
 }
 
+/** B-f467: a proposal's conversation, by the ladder name proposalView put on it NOW (③ the id only when nothing is known). */
+const convNameOf = (p) => p.title || p.convId || '';
+/** B-f467: WHO receives a proposal and WHERE it lands — `{who, where}` (either may be ''). A compose: its recipients,
+ *  then its subject (or "New message"); a reply: the recipients the adapter resolved (mail), then the conversation. */
+export function rowWhoWhere(p) {
+  if (p && p.compose) return { who: (p.compose.to || []).join(', '), where: p.compose.subject || t('New message') };
+  const e = (p && p.replyEnvelope) || null;
+  return { who: e && e.to ? String(e.to) : '', where: convNameOf(p || {}) };
+}
+/** B-f467: the first line of what would be sent (a reaction: its sentence). */
+export function rowFirstLine(p) {
+  if (p && p.kind === 'reaction' && p.reaction) return reactionCardText(p);
+  return String((p && p.text) || '').split('\n').map((s) => s.trim()).find(Boolean) || '';
+}
+/**
+ * B-f467: ONE ROW FOR ONE PROPOSAL (the Outbox window). `badge` = its account's (channel-avatar.js accountBadges);
+ * `open` = its full card is drawn under it; `onToggle(id)` / `onReview(id)` = the window's (a kept row's handlers
+ * call them with the id, never a stale record). Every string is textContent; the text's hidden characters are marks.
+ */
+export function renderProposalRow(app, p, { badge = null, open = false, onToggle = null, onReview = null } = {}) {
+  const row = el('div', `chan-orow chan-orow-${p.state}`);
+  row.dataset.orow = p.id;
+  row.tabIndex = 0;
+  row.setAttribute('role', 'button');
+  const { who, where } = rowWhoWhere(p);
+  row.appendChild(convAvatar({ key: p.convId ? `${p.adapterId}/${p.convId}` : `${p.adapterId}/compose`, title: who || where, kind: p.compose ? 'thread' : (p.convKind || ''), badge }, null, 'chan-orow-av'));
+  const line = el('div', 'chan-orow-line');
+  const title = el('span', 'chan-orow-title');
+  if (who) title.appendChild(el('span', 'chan-orow-who', who));
+  if (where) title.appendChild(el('span', 'chan-orow-where', who ? ` · ${where}` : where));
+  title.title = [who, where].filter(Boolean).join(' · ');
+  line.appendChild(title);
+  if (badge && badge.multi) { const ac = el('span', 'chan-orow-acct', badge.label); ac.title = t('From your {label} account', { label: badge.label }); line.appendChild(ac); }
+  line.appendChild(el('span', 'chan-orow-at', stamp(p.updatedAt || p.at)));
+  line.appendChild(icon('chevronRight', 10, 'chan-orow-chev'));
+  row.appendChild(line);
+  const sub = el('div', 'chan-orow-sub');
+  sub.appendChild(el('span', `chan-prop-state chan-prop-state-${p.state}`, stateLabel(p.state)));
+  const text = el('span', 'chan-orow-text');
+  revealInto(text, rowFirstLine(p).slice(0, 300));
+  sub.appendChild(text);
+  row.appendChild(sub);
+  if (p.state === 'awaiting-approval') {
+    const act = el('div', 'chan-orow-act');
+    const rv = btn(t('Approve…'), () => { if (onReview) onReview(p.id); }, 'mounts-btn-primary');
+    rv.dataset.review = '1';
+    rv.title = t('Open the proposal to approve it');
+    act.appendChild(rv);
+    row.appendChild(act);
+  }
+  row.onclick = (ev) => { if (ev && ev.target && ev.target.closest && ev.target.closest('button')) return; if (onToggle) onToggle(p.id); };
+  row.onkeydown = (ev) => { if (ev.target !== row || (ev.key !== 'Enter' && ev.key !== ' ')) return; ev.preventDefault(); if (onToggle) onToggle(p.id); };
+  setRowOpen(row, open);
+  return row;
+}
+/** A row's open state, patched IN PLACE (the row keeps its focus across a toggle). */
+function setRowOpen(row, open) {
+  row.classList.toggle('chan-orow-open', !!open);
+  row.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+/** The signature of what a row PRINTS (its open state is patched, never rebuilt). */
+function rowSig(p, badge) {
+  return JSON.stringify([p.state, p.adapterId, p.convId || null, p.title || null, p.convKind || null, p.compose || null, p.replyEnvelope ? p.replyEnvelope.to || null : null, p.kind || null, p.reaction || null, p.text || '', p.updatedAt || p.at || 0, badge]);
+}
+function keyedRow(app, p, prev, opts) {
+  const sig = rowSig(p, opts.badge);
+  if (prev && prev.dataset.sig === sig) { setRowOpen(prev, opts.open); return prev; }
+  const row = renderProposalRow(app, p, opts);
+  row.dataset.sig = sig;
+  return row;
+}
+/**
+ * B-f467 THE OUTBOX LIST'S NODES for one store answer `ob` (`{proposals, accounts}`): the Awaiting view = its rows;
+ * All = grouped by state with a head per state (the order of STATE_ORDER); each row followed by its FULL CARD when
+ * `open` holds its id. `list` = the container whose kept rows / cards / heads are reused (keyed). Returns
+ * `{nodes, view, awaiting, proposals}`; the caller places them (`placeArmed`).
+ */
+export function outboxNodes(app, list, ob, { view = null, open = new Set(), onToggle = null, onReview = null } = {}) {
+  const ps = ((ob && ob.proposals) || []).slice().sort((a, b) => (b.at || 0) - (a.at || 0));
+  const awaiting = ps.filter((p) => p.state === 'awaiting-approval');
+  const v = view || (awaiting.length ? 'awaiting' : 'all');
+  const badges = accountBadges((ob && ob.accounts) || []);
+  const kids = list ? [...list.children] : [];
+  const cards = new Map(kids.filter((c) => c.classList.contains('chan-prop')).map((c) => [c.dataset.proposal, c]));
+  const rows = new Map(kids.filter((c) => c.classList.contains('chan-orow')).map((c) => [c.dataset.orow, c]));
+  const heads = new Map(kids.filter((c) => c.classList.contains('chan-outbox-sec')).map((h) => [h.dataset.state, h]));
+  const nodes = [];
+  const push = (p) => {
+    const isOpen = open.has(p.id);
+    nodes.push(keyedRow(app, p, rows.get(p.id) || null, { badge: badges.get(p.adapterId) || null, open: isOpen, onToggle, onReview }));
+    if (isOpen) nodes.push(keyedCard(app, p, cards.get(p.id) || null));
+  };
+  if (!ps.length) nodes.push(el('div', 'empty-hint', t('When an agent proposes a reply with vibespace-channels, it waits here for you to approve, edit or reject it.')));
+  else if (v === 'awaiting') {
+    if (!awaiting.length) nodes.push(el('div', 'empty-hint', t('Nothing is waiting for your approval.')));
+    for (const p of awaiting) push(p);
+  } else {
+    const known = new Set(STATE_ORDER);
+    const groups = [...STATE_ORDER, ...ps.map((p) => p.state).filter((s) => !known.has(s))];
+    for (const st of [...new Set(groups)]) {
+      const mine = ps.filter((p) => p.state === st);
+      if (!mine.length) continue;
+      let h = heads.get(st);
+      if (!h) {
+        h = el('div', 'chan-outbox-sec');
+        h.dataset.state = st;
+        h.appendChild(el('span', `chan-dot chan-dot-${STATE_TONE[st] || 'idle'}`));
+        h.appendChild(el('span', ''));
+      }
+      const words = `${stateLabel(st)} · ${mine.length}`;
+      if (h.lastElementChild.textContent !== words) h.lastElementChild.textContent = words;
+      nodes.push(h);
+      for (const p of mine) push(p);
+    }
+  }
+  return { nodes, view: v, awaiting, proposals: ps };
+}
+
 /** The section a conversation window draws above its composer (design C4):
  *  the cards that need the user — awaiting first, then an unknown or failed
  *  outcome — plus the newest two decided ones (the outcome of a click stays
@@ -662,45 +799,29 @@ export function openChannelOutbox(app, opts = {}) {
   /** `null` until the user picks — the store decides the first view. */
   let view = null;
   let last = null;
+  /** B-f467: the proposals whose full card is open under their row (pruned as proposals leave). */
+  const open = new Set();
+  const onToggle = (id) => { if (open.has(id)) open.delete(id); else open.add(id); draw(last); };
+  const onReview = (id) => {
+    open.add(id);
+    draw(last);
+    const card = [...list.children].find((c) => c.classList.contains('chan-prop') && c.dataset.proposal === id);
+    const primary = card && card.querySelector(':scope > .chan-prop-actions button[data-approve]');
+    if (primary) primary.focus();
+    if (card && card.scrollIntoView) card.scrollIntoView({ block: 'nearest' });
+  };
 
-  // KEYED (2026-09-27): a broadcast re-renders only the cards whose record
+  // KEYED (2026-09-27): a broadcast re-renders only the rows / cards whose record
   // changed; a card the user is editing is left alone; section heads are
-  // re-worded in place
+  // re-worded in place (B-f467: the nodes are outboxNodes' — a row per proposal)
   function draw(ob) {
     last = ob;
-    const ps = ((ob && ob.proposals) || []).slice().sort((a, b) => (b.at || 0) - (a.at || 0));
-    const awaiting = ps.filter((p) => p.state === 'awaiting-approval');
-    const v = view || (awaiting.length ? 'awaiting' : 'all');
-    segAwait.classList.toggle('chan-seg-on', v === 'awaiting');
-    segAll.classList.toggle('chan-seg-on', v === 'all');
-    summary.textContent = ps.length ? t('{a} awaiting your approval · {n} proposals', { a: awaiting.length, n: ps.length }) : t('No proposals yet');
-    const byId = new Map([...list.querySelectorAll(':scope > .chan-prop')].map((c) => [c.dataset.proposal, c]));
-    const heads = new Map([...list.querySelectorAll(':scope > .chan-outbox-sec')].map((h) => [h.dataset.state, h]));
-    const hint = (text) => { const h = el('div', 'empty-hint', text); return h; };
-    const nodes = [];
-    if (!ps.length) nodes.push(hint(t('When an agent proposes a reply with vibespace-channels, it waits here for you to approve, edit or reject it.')));
-    else if (v === 'awaiting') {
-      if (!awaiting.length) nodes.push(hint(t('Nothing is waiting for your approval.')));
-      for (const p of awaiting) nodes.push(keyedCard(app, p, byId.get(p.id) || null));
-    } else {
-      const known = new Set(STATE_ORDER);
-      const groups = [...STATE_ORDER, ...ps.map((p) => p.state).filter((s) => !known.has(s))];
-      for (const st of [...new Set(groups)]) {
-        const mine = ps.filter((p) => p.state === st);
-        if (!mine.length) continue;
-        let h = heads.get(st);
-        if (!h) {
-          h = el('div', 'chan-outbox-sec');
-          h.dataset.state = st;
-          h.appendChild(el('span', `chan-dot chan-dot-${STATE_TONE[st] || 'idle'}`));
-          h.appendChild(el('span', ''));
-        }
-        const words = `${stateLabel(st)} · ${mine.length}`;
-        if (h.lastElementChild.textContent !== words) h.lastElementChild.textContent = words;
-        nodes.push(h);
-        for (const p of mine) nodes.push(keyedCard(app, p, byId.get(p.id) || null));
-      }
-    }
+    const r = outboxNodes(app, list, ob, { view, open, onToggle, onReview });
+    for (const id of [...open]) if (!r.proposals.some((p) => p.id === id)) open.delete(id);
+    segAwait.classList.toggle('chan-seg-on', r.view === 'awaiting');
+    segAll.classList.toggle('chan-seg-on', r.view === 'all');
+    summary.textContent = r.proposals.length ? t('{a} awaiting your approval · {n} proposals', { a: r.awaiting.length, n: r.proposals.length }) : t('No proposals yet');
+    const nodes = r.nodes;
     placeArmed(list, nodes);
   }
   segAwait.onclick = () => { view = 'awaiting'; draw(last); };

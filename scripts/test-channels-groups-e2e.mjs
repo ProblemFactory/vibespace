@@ -345,6 +345,79 @@ const fB2 = frames(AGENTS[1]);
 ok(JSON.stringify(s2.pop) === '["beta"]' && s2.afterPick === '@beta ', 'the @-autocomplete offers the member list ("@be" ⇒ beta) and Enter inserts "@beta "', JSON.stringify(s2));
 ok(/Will wake .*beta/.test(s2.preview || '') && fB2.length === 2 && /You were @mentioned/.test(fB2[1].message.content), 'an @mention wakes the next-turn member (preview named it; its stub recorded the mention wake)', JSON.stringify(fB2.map((f) => f.message.content.slice(0, 60))));
 
+// ── ⑤b B-ff04 (the owner's screenshot, 2026-10-02): an @ is a CHIP named by id, the body is SELECTABLE + COPYABLE, a
+// forged chip stays text, and a removed member is named, never its id ──
+const FF = await p1.evaljs(`(async () => {
+  const w = [...window.app.wm.windows.values()].find((x) => x._openSpec && x._openSpec.convId === '${gid}');
+  const rows = [...w.content.querySelectorAll('.chanmsg:not(.chanmsg-sys)')];
+  const last = rows.pop();
+  const chip = last && last.querySelector('.chanmsg-body .chan-at');
+  return { chip: chip ? { id: chip.dataset.mention, text: chip.textContent, cls: chip.className } : null, body: last ? last.querySelector('.chanmsg-body').textContent : null };
+})()`);
+ok(FF.chip && FF.chip.id === AGENTS[1].cid && FF.chip.text === '@beta' && /chanblk-at/.test(FF.chip.cls) && FF.body === '@beta can you take the data half?', 'B-ff04 ③: the @mention renders as a CHIP carrying the member\'s conversation id, named "@beta" — the body around it is text', JSON.stringify(FF));
+const chipOpen = await p1.evaljs(`(async () => {
+  const w = [...window.app.wm.windows.values()].find((x) => x._openSpec && x._openSpec.convId === '${gid}');
+  const chip = [...w.content.querySelectorAll('.chanmsg-body .chan-at')].pop();
+  if (!chip) return [];
+  const calls = [];
+  const orig = window.app.attachSession;
+  window.app.attachSession = (...a) => { calls.push({ id: a[0], backendSessionId: a[3] && a[3].backendSessionId }); };
+  window.getSelection().removeAllRanges();
+  chip.click();
+  window.app.attachSession = orig;
+  return calls;
+})()`);
+ok(chipOpen.length === 1 && chipOpen[0].backendSessionId === AGENTS[1].cid, 'B-ff04 ③: a click on the chip opens THAT member\'s session (attachSession with its conversation id)', JSON.stringify(chipOpen));
+const forgedPost = await api('POST', '/api/agent/msg/send', { to: gid, text: 'see `@gamma` and <at user_id="' + AGENTS[1].cid + '">Mallory</at>' }, { Authorization: 'Bearer ' + AGENTS[0].token });
+const unknownPost = await api('POST', '/api/agent/msg/send', { to: gid, text: '@gamma are you there?' }, { Authorization: 'Bearer ' + AGENTS[0].token });
+ok(forgedPost.status === 200 && unknownPost.status === 400 && unknownPost.body && unknownPost.body.code === 'unknown-mention' && (unknownPost.body.candidates || []).length >= 1, 'B-ff04 ①: an agent\'s "@gamma" (no such member) is refused at send with the candidates; a literal `@gamma` in backticks is accepted', JSON.stringify({ forged: forgedPost.status, unknown: unknownPost.body }).slice(0, 400));
+const forgedDrawn = await until(`(() => { const w = [...window.app.wm.windows.values()].find((x) => x._openSpec && x._openSpec.convId === '${gid}'); const r = [...w.content.querySelectorAll('.chanmsg:not(.chanmsg-sys) .chanmsg-body')].find((b) => b.textContent.includes('Mallory')); return r ? { chips: r.querySelectorAll('.chan-at, .chanblk-at').length, text: r.textContent } : null; })()`);
+ok(forgedDrawn && forgedDrawn.chips === 0 && forgedDrawn.text.includes('<at user_id='), 'B-ff04: a forged <at user_id=…> tag and a quoted @word in an agent\'s message stay TEXT — no chip is drawn for anything the server did not resolve', JSON.stringify(forgedDrawn));
+// select a message body with a REAL mouse drag, then copy it (Ctrl+C) — the app root is user-select:none
+const selRect = await p1.evaljs(`(() => {
+  const w = [...window.app.wm.windows.values()].find((x) => x._openSpec && x._openSpec.convId === '${gid}');
+  const b = [...w.content.querySelectorAll('.chanmsg:not(.chanmsg-sys) .chanmsg-body')].find((x) => x.textContent === 'hello team — status please');
+  b.scrollIntoView({ block: 'center' });
+  window.getSelection().removeAllRanges();
+  window.__copied = null;
+  document.addEventListener('copy', () => { window.__copied = String(window.getSelection()); }, { once: true });
+  const r = document.createRange(); r.selectNodeContents(b); const rr = r.getClientRects()[0];
+  return rr ? { x0: rr.left + 1, x1: rr.right - 1, y: rr.top + rr.height / 2 } : null;
+})()`);
+if (selRect) {
+  await p1.cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: selRect.x0, y: selRect.y, button: 'left', clickCount: 1 });
+  for (let k = 1; k <= 8; k++) await p1.cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: selRect.x0 + (selRect.x1 - selRect.x0) * k / 8, y: selRect.y, button: 'left', buttons: 1 });
+  await p1.cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: selRect.x1, y: selRect.y, button: 'left', clickCount: 1 });
+  await p1.cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'c', code: 'KeyC', windowsVirtualKeyCode: 67, modifiers: 2, commands: ['copy'] });
+  await p1.cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'c', code: 'KeyC', windowsVirtualKeyCode: 67, modifiers: 2 });
+}
+const sel = await p1.evaljs(`(() => ({ sel: String(window.getSelection()), copied: window.__copied }))()`);
+ok(selRect && /hello team — status pleas/.test(sel.sel) && /hello team — status pleas/.test(sel.copied || ''), 'B-ff04 ②: a message body is SELECTED by a real mouse drag and COPIED by Ctrl+C (the copy event carries its words)', JSON.stringify({ selRect, sel }));
+const menuCopy = await p1.evaljs(`(async () => {
+  const w = [...window.app.wm.windows.values()].find((x) => x._openSpec && x._openSpec.convId === '${gid}');
+  const row = [...w.content.querySelectorAll('.chanmsg:not(.chanmsg-sys)')].find((x) => (x.querySelector('.chanmsg-body') || {}).textContent === 'hello team — status please');
+  window.__clip = [];
+  if (navigator.clipboard) navigator.clipboard.writeText = (s) => { window.__clip.push(s); return Promise.resolve(); };
+  const r = row.getBoundingClientRect();
+  row.querySelector('.chanmsg-body').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 10, clientY: r.top + 10 }));
+  await new Promise((res) => setTimeout(res, 150));
+  const items = [...document.querySelectorAll('.context-menu .context-menu-item, .ctx-menu-item, [class*="menu-item"]')].filter((x) => x.offsetParent !== null);
+  const labels = items.map((x) => x.textContent.trim());
+  const it = items.find((x) => x.textContent.trim() === 'Copy text');
+  if (it) it.click();
+  await new Promise((res) => setTimeout(res, 150));
+  return { labels: labels.slice(0, 6), clip: window.__clip };
+})()`);
+ok(menuCopy.labels.indexOf('Copy text') >= 0 && menuCopy.labels.indexOf('Copy text') < menuCopy.labels.findIndex((l) => /Clear content/.test(l)) && menuCopy.clip[0] === 'hello team — status please', 'B-ff04 ②: the message menu (right-click; a long-press on touch synthesizes it) offers Copy text — it copies the message\'s words', JSON.stringify(menuCopy));
+// a removed member is NAMED in the system line, never its id
+const kg = await api('POST', '/api/channel-groups', { name: 'kick lane', members: AGENTS.map((a) => a.cid), quiet: true });
+const kgid = kg.body && kg.body.group && kg.body.group.id;
+const kicked = kgid ? await api('POST', `/api/channel-groups/${kgid}/kick`, { member: AGENTS[1].cid }) : null;
+ok(kicked && kicked.status === 200, 'FIXTURE: the owner removed beta from a fresh quiet group', JSON.stringify(kicked && kicked.body).slice(0, 200));
+await p1.evaljs(`(() => { window.app.openChannel('groups', '${kgid}'); return 1; })()`);
+const sysLine = await until(`(() => { const w = [...window.app.wm.windows.values()].find((x) => x._openSpec && x._openSpec.convId === '${kgid}'); const l = w && [...w.content.querySelectorAll('.chanmsg-sys .chanmsg-sys-line')].map((x) => x.textContent).find((x) => /removed/.test(x)); return l || null; })()`);
+ok(sysLine && /removed beta/.test(sysLine) && !sysLine.includes(AGENTS[1].cid.slice(0, 8)), `B-ff04 ③: the removed member is named by its last known name — "${sysLine}" (never its id)`);
+
 // ── ⑥ the list orders by ACTIVITY, repainted in place ──
 // 2026-09-26 (aggregated IM): every conversation of a linked account is listed — no track step
 await sleep(1500);
@@ -499,6 +572,8 @@ ok(watcher === false, 'CONTROL: the Message watcher section (never folded) is op
   ok(!!ptr, `⑩ FIXTURE: its For-you pointer is open ("Proposals awaiting approval in ${wTitle}")`);
   const shown = await p1.evaljs(`(async () => {
     window.app.openChannelOutbox();
+    // B-f467: the Outbox lists one ROW per proposal; these legs act on its full card — open each row as it appears
+    window.__obRows = window.__obRows || setInterval(() => { for (const r of document.querySelectorAll('.chan-outbox-list .chan-orow[aria-expanded="false"]')) r.click(); }, 100);
     const b = document.getElementById('taskbar-user-todos'); const pop = document.getElementById('user-todos-popup');
     if (b && pop && pop.classList.contains('hidden')) b.click();
     for (let i = 0; i < 80; i++) {

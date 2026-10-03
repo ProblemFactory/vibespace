@@ -1,5 +1,39 @@
 # Browsing from a VibeSpace session — the manual
 
+## 0. What the user asked for → what you do
+
+Your one browser tool is `vibespace-browser`. Never launch a browser yourself. Every quoted sentence below is
+SAID to the user in their language — its meaning, never the English string pasted.
+
+**(a) "Use my logged-in browser" / "log in to <site> as me"** — a browser with the USER's login:
+1. `vibespace-browser new "<site> — <user>'s login"` (once — a named profile)
+2. `vibespace-browser use "<site> — <user>'s login"` (this conversation now works in it)
+3. `vibespace-browser open <url>` (the site's sign-in page)
+4. Tell the user, in these words (in their language): "Open the Agent browser window and take over to log in; I will continue once you hand it back"
+Then wait for the handback and continue. Never ask for a password, never type one. The login stays in
+that profile for every later turn: next time, `vibespace-browser profiles` lists it and `use` is enough.
+On a conversation of ANOTHER machine (an ssh host, a paired device) `new` / `use` answer `remote_session` and that
+machine has no live view, so this cannot be done from here. Say: "This conversation runs on another machine; please
+ask a conversation on the VibeSpace machine to log in there" — then stop. Never ask for the password instead.
+
+**(b) "Look something up" / "browse"** — nothing to set up: `vibespace-browser open <url>`, then
+`snapshot`, `click @ref` (§1). Your own browser starts with your first command.
+Say: "I am looking it up in my browser — you can watch it in the Agent browser window."
+
+**(c) "The other agents should use the same login"** — a profile made with `new` is usable by all the
+user's conversations unless the user narrowed "Who can use it"; `new <label> --sharing instance` also keeps
+each conversation in its own tabs. A `use` refused `not_owner` = the user must widen "Who can use it".
+Say: "Ask in any conversation to use the '<label>' browser; if one is refused, add it under 'Who can use it' in the Agent browser panel."
+
+**(d) "This machine has no display"** (a pod, a server, nobody logged in to its desktop): only
+`vibespace-browser` works here — it runs in a hidden window (or headless), and the user still watches and
+takes over in the live view. Never launch chromium / google-chrome / playwright yourself: they die with
+"Missing X server or $DISPLAY", and VibeSpace cannot show them. If a verb refuses, the refusal names the
+next step — follow it. `vibespace-browser status` says when this machine has no display.
+Say: "I am using the Agent browser — open the Agent browser window to watch it or take over."
+
+---
+
 You have **one** browser tool: `vibespace-browser`. Every page verb is one of
 its verbs — `vibespace-browser open <url>`, `vibespace-browser snapshot`,
 `vibespace-browser click @e3` — and every one of them runs in a browser that
@@ -60,6 +94,7 @@ which cookie jar you are in.
 | a file WRITE — `download <sel> <path>`, `pdf <path>`, `screenshot [sel] [path]`, `state save <path>`, `record start <path>`, `trace/profiler stop <path>`, `network har stop <path>`, `wait --download <path>`, `diff screenshot -o <path>`, `--screenshot-dir <dir>` — to a path OUTSIDE the project directory the session was started in (not wherever your shell has `cd`ed since), `/tmp` or `~/Downloads`; or into a store: a `.ssh` / `.claude` / `.codex` / `.vibespace` / `.git` directory anywhere (a project's `.claude/settings.json` and `.git/hooks` too), a dot-entry directly under your home (`~/.bashrc`, `~/.config/…` — unless the project itself lives there), or VibeSpace's own data directory. A relative path, `..` after a symlink, a symlink, `~`, a trailing slash and a batch line all resolve first | `write_path_refused` | save under the project, `/tmp` or `~/Downloads`; if the user wants a file written elsewhere, they move it there themselves |
 | a batch with one refused line | `batch_line_refused` | the message names the line (or, for JSON on stdin, the command's index); nothing in the batch ran |
 | a stdin batch that is neither lines nor a JSON array of string arrays (or is empty) | `batch_stdin_refused` | pipe one command per line, or `[["open","https://x"],["snapshot","-i"]]` |
+| `tab new` while your window could take no tab right now (every rung of VibeSpace's own opener failed on every tab of yours — a dialog on each, a crash, a race with another conversation's switch — or the user is driving a window of this browser, so VibeSpace's own fallback was not run; or your new tab could not be bound to your session because your window closed under it: the refusal says which — `why` is `ladder`, `user_driving` or `bind_failed` in the JSON) | `window_busy` | your window and its tabs are still there, nothing opened: run the same `tab new` ONCE more after a moment (if it names the user driving, after the handback — VibeSpace tells you when he hands the browser back, as a note with your next turn; a window of yours that is gone gets a new one on that retry); a page dialog of yours answers `dialog_open` first — answer it (`dialog accept`); never a retry loop |
 | a word not in the list | `unknown_verb` (exit 2) | `vibespace-browser help`; a genuinely newer verb runs as `vibespace-browser -- <verb> …` |
 
 **Where a file lands.** A relative path means what it means in your shell —
@@ -171,9 +206,11 @@ Exit codes: `0` ok · `1` a typed refusal, or the page command itself failed ·
   While they drive they may also type to YOU in the chat (clicking the chat
   box keeps the browser theirs): a message that arrives during a takeover does
   NOT mean the browser is back — keep waiting for the handback message.
+  A takeover is of YOUR WINDOW only: on a profile other conversations share,
+  they keep working in their own windows while the user drives yours.
   **Taking over interrupts you.** The command you had running on that browser
-  ends with `[browser_interrupted]` ("The user took over this browser — your
-  operation was interrupted. Wait for the handback, then run it again."; the
+  ends with `[browser_interrupted]` ("The user took over your window of this
+  browser — your operation was interrupted. Wait for the handback, then run it again."; the
   tool exits 1 like any refusal). On an instance-shared profile its CDP calls
   in flight are cut at once and a script it was RUNNING is asked to stop — a
   script AWAITING a timer or a fetch cannot be recalled and may still finish;
@@ -382,7 +419,7 @@ vibespace-browser blocked --url <u> [--why <code>] [--evidence <text>] [--tier 2
   ruling, 2026-09-26). A profile you create with `new` (or `--adopt`) can be
   used by every other conversation of the user's too — the login you make in
   it is theirs as well. It runs ONE browser: a second conversation that uses
-  it JOINS that browser in its own tab; it is never started twice.
+  it JOINS that browser in a WINDOW OF ITS OWN; it is never started twice.
 * **The user can keep a profile to SOME conversations and Task Groups** (the
   Agent browser panel's "Who can use it" → Change…). A Task Group means every
   conversation in it, now or later. `profiles` tells you only whether YOURS
@@ -404,8 +441,8 @@ vibespace-browser blocked --url <u> [--why <code>] [--evidence <text>] [--tier 2
 * **You are told about your own conversation only.** Every answer names your
   own browsers, tabs and helpers; another conversation's browser key reads
   `bk-********`, its session `[another conversation]` — they are the user's
-  to name, not yours. The one thing said by key is who DRIVES a shared
-  browser right now (`drivers`), so a `browser_busy` can be relayed.
+  to name, not yours — no exception (nothing of another conversation's is
+  relayed to you: it works in its own window and never holds yours up).
 * **Switching a profile's backend, or claiming a block in it, needs the
   profile to be yours to use.** A `backend <name>` on a profile "Who can use
   it" keeps from this conversation is filed as a proposal to the user, never
@@ -419,15 +456,43 @@ vibespace-browser blocked --url <u> [--why <code>] [--evidence <text>] [--tier 2
   connection is cut, and your next command on it is refused (`profile_changed`
   once, then `not_owner` / `not_attached`) — the other conversations keep
   theirs.
-* **One conversation drives a shared browser at a time.** While another
-  conversation's agent is working in it (its turn is running and it sent a
-  command in the last ~90 s), your command answers `browser_busy`, naming
-  that conversation and how long at most to wait; while the USER drives it
-  from another conversation's live view, `browser_busy` says so. Your command
-  did not run: wait, then run it again ONCE — never in a loop; or tell the
-  user (they can take over from that conversation's live view).
+* **Your WINDOW of a shared browser** (2026-10-01). Several conversations —
+  and the user browsing it himself — use one profile's browser at the same
+  time, EACH IN ITS OWN WINDOW: your first tab in it opens in a window of
+  yours, and so does every `tab new` (a tab one of your pages opens — a popup,
+  a `target=_blank` link — lands in that page's window, so it is yours too).
+  `tab new --json` says where the tab landed (`opened.inWindow`, `opened.windowId`)
+  and by which rung (`opened.rung`: `opener` — opened from one of your pages;
+  `activate` — the browser's own create, verified; `new-window` — your window
+  was gone, a new one of yours, note `tab_new_window`). A conversation from
+  before this version whose tabs sit in several windows is told so ONCE
+  (note `tabs_in_other_windows`): your new tabs open in your current window;
+  the others stay where they are until you `tab close <id>` them — nothing of
+  yours is closed for you. "Your window" is the one VibeSpace stamped on your
+  lease; a lease without a stamp takes the window of your CURRENT tab (then it
+  is stamped). While the user drives any window of the browser (a takeover, or
+  browsing it himself) VibeSpace never minimizes or raises a window to place
+  your tab: a `tab new` whose opener fails on every tab of yours answers
+  `window_busy` naming him (`why: user_driving`) — that holds even when his
+  takeover begins in the middle of your `tab new`. When he hands the browser
+  back you are TOLD, free, with your next turn ("the user handed … back — the
+  `tab new` refused while he drove can run now"): run it once more then, no
+  polling. A new tab of yours that could not be bound to your session (your
+  window closed under it) is also `window_busy` (`why: bind_failed`) — never
+  a tab in another conversation's window; the same `tab new` once more opens
+  a new window of your own.
+  Nobody waits for anybody: there is no "one conversation at a time" any more
+  (your commands and another conversation's run side by side — your own
+  commands still run one after another, so a long `wait` of yours delays only
+  your next command). Other conversations' windows are not yours: `tab list`
+  only counts their tabs, and you never act in them. The user taking over
+  another conversation's window does NOT pause you; taking over yours does
+  (`browser_paused`, above). A window shows ONE tab at a time: only the tab on
+  show in its window renders — a tab of yours behind another one paints
+  nothing and acts slowly (a click there was measured at ~5 s), so `tab <id>`
+  to the tab you work on before a long sequence of page verbs.
 * **Your tabs, and only yours.** A profile's ONE browser holds every
-  conversation's tabs and the user's own (Browse yourself), and the browser
+  conversation's windows and the user's own (Browse yourself), and the browser
   CLI itself would list and close any of them — so on a shared profile the
   `tab` verbs are VibeSpace's: `tab list` names YOUR tabs (the tab it gave you,
   every tab you opened with `tab new`, every popup your pages opened) as
@@ -601,6 +666,12 @@ vibespace-browser blocked --url <u> [--why <code>] [--evidence <text>] [--tier 2
   notice on your next turn. Only one view holds the browser at a time: a second
   view's Take over is refused `held` while the first is live.
 
+### A Background Work job uses your browser as you
+
+A job you created (`vibespace-job`) may run `vibespace-browser` too: in your
+pinned profile, with your who-may-use, in a window of its own, released when
+its run ends — it never changes your browsers (`vibespace-docs jobs` §9).
+
 ### One session, several browsers — handles
 
 Your attachments form a **set**; `status` lists the handles and marks the
@@ -647,9 +718,9 @@ default with `*`.
 * **`navigation_loop` is got out of, never waited out** — `stop`, `tab close` or
   `site-reset <host>`; never retry the command that ran into it.
 * **`browser_paused` / `browser_interrupted` are never retried in a loop.**
-  Wait for the handback; it names what to re-run. The same for `browser_busy`
-  (another conversation drives a shared browser): run the command again once,
-  after the wait it names — or tell the user.
+  Wait for the handback; it names what to re-run. (`browser_busy` — "another
+  conversation drives this browser" — no longer exists: other conversations
+  work in their own windows and never hold yours up.)
 * **A refusal that names a button is the user's to press.** Relay it in your
   own words ("add this conversation to 'work' under Who can use it in the
   Agent browser panel"); never offer the user a `vibespace-browser` command line, and never

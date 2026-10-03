@@ -1,4 +1,4 @@
-// Run-fold classification + summary composition — PURE (no DOM, no imports).
+// Run-fold classification + summary composition — PURE (no DOM; imports only the PURE note rule, src/assistant-note.js).
 // ChatView._updateRuns feeds it per-card raw messages and renders the label;
 // scripts/test-fold-ux.mjs pins it in node. Extracted 2.369.37 after the
 // owner caught "9 条 Bash · 1 次 MCP" over a run whose only non-Bash card was a
@@ -7,11 +7,13 @@
 // honest per kind; which kinds FOLD stays a separate question (see
 // foldToggleFor).
 
+import { NOTE_MARKER, noteKindOfText, userNoteOf } from '../assistant-note.js'; // B-40f8: the note TEXT rule is PURE and shared — the server's turn previews read the same one
+
 // Every kind the classifier can return. The summary ORDER below must list
 // each one — an unlisted kind used to count `undefined++` = NaN and vanish
 // from the label (2.369.34); countKinds() now zero-fills from this list and
 // the test asserts SUMMARY_ORDER covers it.
-export const RUN_KINDS = ['note', 'thinking', 'bash', 'read', 'search', 'image', 'write', 'memory', 'mcp', 'lookup', 'agent', 'report', 'group', 'skill', 'unknown'];
+export const RUN_KINDS = ['note', 'thinking', 'bash', 'read', 'search', 'image', 'write', 'memory', 'mcp', 'lookup', 'agent', 'report', 'group', 'peer', 'skill', 'unknown'];
 
 // Counts the CALLER supplies that are not card kinds — they are never
 // produced by messageKind() and never zero-filled, so an unset one simply
@@ -47,6 +49,8 @@ const SUMMARY_ORDER = [
   // lane group-report-card: a group message handed to this agent (a report card, a wake's card) — CONTENT the owner
   // asked to see ("怎么在那个对话里看不到你发了消息？"), so the kind ships UNCHECKED in chat.collapseKinds
   ['group', '{n} group messages'],
+  // lane peer-card-fold: any other message a peer sent (an agent, a worker, a job) — CONTENT, ships UNCHECKED like 'group'
+  ['peer', '{n} agent messages'],
   ['skill', null],
   ['unknown', '{n} unknown events / new fields'], // 2.369.120: the fall-back card (a record VibeSpace does not know) + the §3 schema-drift card (a known record that grew); ships UNCHECKED — visible until the user folds it
 ];
@@ -116,6 +120,7 @@ export function messageKind(m, { toolCard, isMemoryPath = () => false }) {
       && m.content.every((b) => b.type === 'thinking')) return 'thinking';
   if (assistantNoteOf(m)) return 'note'; // lane S3: text VibeSpace addressed to the ASSISTANT — its own fold kind, default on
   if (m?.originKind === 'peer-message' && m.peerGroup && m.peerGroup.id) return 'group'; // lane group-report-card: its own fold kind, default OFF (the owner asked to see them)
+  if (m?.originKind === 'peer-message') return 'peer'; // lane peer-card-fold: every other peer card (agent, worker, job) — default OFF, so it still breaks a run unless ticked
   if (m?.noticeKind === 'unknown-record' || m?.noticeKind === 'unknown-fields') return 'unknown'; // 2.369.120: the fall-back card has its own toggle; the §3 drift card shares it
   return null;
 }
@@ -136,17 +141,8 @@ export function messageKind(m, { toolCard, isMemoryPath = () => false }) {
 // open with it — src/agent-routes.js stopNudgeReason), and every injection
 // block opens with its `<vibespace-…>` tag. A message the USER typed
 // (`typed`, the CLI's promptSource) is never a note, whatever it says.
-export const NOTE_MARKER = 'VibeSpace bookkeeping before you stop';
-// Which injection block names which note, most specific first: a delivery
-// that carries a Task Group's context AND the reminder is "its task context".
-const NOTE_TAGS = Object.freeze([
-  ['vibespace-task-context', 'context'],
-  ['vibespace-task-update', 'context'],
-  ['vibespace-group-manager', 'context'],
-  ['vibespace-session-tools', 'tools'],
-  ['vibespace-reminder', 'reminder'],
-  ['vibespace-user-instructions', 'instructions'],
-]);
+// The marker and the injection tags live in src/assistant-note.js (B-40f8).
+export { NOTE_MARKER };
 /** The one sentence each note kind shows (an i18n KEY — the caller runs t()). */
 export const NOTE_SENTENCES = Object.freeze({
   status: 'VibeSpace reminded the assistant to update its status',
@@ -157,19 +153,6 @@ export const NOTE_SENTENCES = Object.freeze({
   note: 'VibeSpace passed a note to the assistant',
 });
 export function noteSentence(what) { return NOTE_SENTENCES[what] || NOTE_SENTENCES.note; }
-const textOf = (m) => (Array.isArray(m?.content) ? m.content.map((b) => (b && typeof b.text === 'string' ? b.text : '')).join('') : '');
-function noteOfText(raw) {
-  const s = String(raw || '').trim();
-  if (!s) return null;
-  if (/^Stop hook feedback:/.test(s)) return s.includes(NOTE_MARKER) ? 'status' : null; // another hook's Stop feedback (a /goal check) keeps its own card
-  // a delivery made of VibeSpace blocks: it OPENS with one (a hook payload may
-  // put the user's own <system-reminder> notices after it, never before —
-  // agent-routes composes preamble → blocks → notices)
-  if (!/^<vibespace-[\w-]+[\s>]/.test(s)) return null;
-  if (s.includes(NOTE_MARKER)) return 'status'; // codex: the wrapper's turn-end nudge, a <vibespace-reminder> turn
-  for (const [tag, what] of NOTE_TAGS) if (s.includes('<' + tag)) return what;
-  return 'note';
-}
 /**
  * Is this normalized message a VibeSpace note to the assistant? →
  * `{ what, text }` (what ∈ NOTE_SENTENCES keys, text = the raw payload for the
@@ -178,16 +161,11 @@ function noteOfText(raw) {
  */
 export function assistantNoteOf(m) {
   if (!m || typeof m !== 'object') return null;
-  if (m.role === 'user') {
-    if (m.typed || m.originKind === 'peer-message' || m.originKind === 'auto-resume' || m.imageAttachment) return null;
-    const text = textOf(m);
-    const what = noteOfText(text);
-    return what ? { what, text: text.trim() } : null;
-  }
+  if (m.role === 'user') return userNoteOf(m);
   if (m.role === 'system') {
     const h = m.content?.[0]?.hookData;
     if (!h || typeof h.output !== 'string') return null;
-    const what = noteOfText(h.output);
+    const what = noteKindOfText(h.output);
     return what ? { what, text: h.output.trim() } : null;
   }
   return null;

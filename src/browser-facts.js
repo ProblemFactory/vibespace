@@ -96,6 +96,28 @@ function sanitizeProbeEnv(src) {
   return env;
 }
 
+/**
+ * verify r2 ⑥ (lane browser-windows) — THE `--version` PROBE TABLE, one for both probes (the facts' and the keeper's pin):
+ *   the binary is missing (ENOENT / exit 127)      → null  (there is no binary)
+ *   timed out / killed                              → ''    (it ran and would not say)
+ *   exit 0, a version anywhere in stdout + stderr  → that version
+ *   exit 0, no version                              → ''
+ *   non-zero exit, a version on STDOUT              → that version (a plugin warning on stderr + exit 1 is still the CLI saying
+ *                                                     its version — measured: 0.38.1 prints it on stdout alone, exit 0)
+ *   non-zero exit, nothing on stdout                → ''    (node's own "Node.js v24.12.0" on a crash's stderr is never a version — r1 ⑦)
+ *   verify r3 ⑧: a line naming the CLI (`agent-browser X.Y.Z`) wins on either stream over any other number (stdout first)
+ */
+function versionFromProbe({ err = null, stdout = '', stderr = '' } = {}) {
+  if (err && (err.code === 'ENOENT' || err.code === 127)) return null;
+  if (err && (err.killed || err.signal)) return '';
+  const so = String(stdout || ''), se = String(stderr || '');
+  // verify r3 ⑧ (pinned both ways with the 0.38.1 fixture): a line NAMING the CLI (`agent-browser 0.38.1`, the binary's own
+  // shape) wins over any other number on either stream — a wrapper's "npm notice 10.9.0 -> 11.0.0" on stdout read as the
+  // version while the CLI said its own on stderr; stdout before stderr, stderr only on a clean exit
+  const named = (txt) => { const m = /agent-browser[ \t]+v?(\d+)\.(\d+)\.(\d+)/i.exec(txt); return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null; };
+  const v = named(so) || named(se) || B.parseVersion(so) || (!err && B.parseVersion(se)) || null; // a CLI naming itself on stderr is still the CLI (a crash's stack trace never names it)
+  return v ? v.join('.') : '';
+}
 function createBrowserFacts({ cmd = 'agent-browser', execFileImpl = execFile, now = () => Date.now(), ttlMs = VERSION_TTL_MS, env = process.env, pinned = null } = {}) {
   let cached = null;          // { version: string|null, at: number, raw: string }
   let inFlight = null;
@@ -130,13 +152,9 @@ function createBrowserFacts({ cmd = 'agent-browser', execFileImpl = execFile, no
           // same answer as 'absent', because one of them deserves a sentence.
           if (err && (err.code === 'ENOENT' || err.code === 127)) return finish(null, err.message);
           const txt = String(stdout || '') + String(stderr || '');
-          // verify r1 ⑦ (lane browser-windows): a binary that CRASHED on `--version` is not a version — node's own
-          // "Node.js v24.12.0" on the stack trace read as the CLI's version (24.12.0), and every running browser was then
-          // refused `browser_cli_gone` naming a CLI that does not exist. A non-zero exit says nothing ('' = would not say).
-          const v = err ? null : B.parseVersion(txt);
-          // `''` = it ran and would not say. Deliberately NOT `null`, which
-          // means "there is no binary" — see floorVerdict.
-          finish(v ? v.join('.') : '', txt);
+          // verify r1 ⑦ + r2 ⑥ (lane browser-windows): ONE probe table, `versionFromProbe` — the keeper's pin probe reads
+          // the same. `''` = it ran and would not say. Deliberately NOT `null`, which means "there is no binary" — see floorVerdict.
+          finish(versionFromProbe({ err, stdout, stderr }), txt);
         });
       } catch (e) { finish(null, e && e.message); }
     });
@@ -570,7 +588,7 @@ function createBrowserRuntime({ cmd = 'agent-browser', execFileImpl = execFile, 
  * `xvfb` — an executable `Xvfb` on the env's PATH (the CLI starts its OWN invisible Xvfb there for a headed launch with
  * no display: the hidden-window rung).
  */
-async function probeDisplay({ env = process.env, x11Dir = undefined, connectMs = 400, fsp = require('fs').promises, netImpl = require('net') } = {}) {
+async function probeDisplay({ env = process.env, x11Dir = undefined, connectMs = 400, fsp = require('fs').promises, netImpl = require('net'), vncDisplay = null } = {}) {
   const D = require('./browser-display.js');
   const runtimeDir = D.runtimeDirOf(env);
   const xdir = x11Dir || D.X11_DIR;
@@ -582,7 +600,7 @@ async function probeDisplay({ env = process.env, x11Dir = undefined, connectMs =
     const tm = setTimeout(() => fin(false), Math.max(50, Number(connectMs) || 400));
     try { sock = netImpl.createConnection({ path: p.startsWith('@') ? '\0' + p.slice(1) : p }); sock.once('connect', () => fin(true)); sock.once('error', () => fin(false)); } catch { fin(false); }
   });
-  const entries = await Promise.all(D.displayCandidates({ env, runtimeDir, listing, x11Dir: xdir }).map(async (p) => {
+  const entries = await Promise.all(D.displayCandidates({ env, runtimeDir, listing, x11Dir: xdir, vncDisplay }).map(async (p) => { // B-d635: + VibeSpace's VNC desktop (src/vnc.js's default)
     if (p.startsWith('@')) return { path: p, type: 'socket', alive: await connects(p) }; // abstract (Linux): nothing to stat
     let st = null;
     try { st = await fsp.stat(p); } catch { return { path: p, type: 'missing', alive: false }; }
@@ -594,10 +612,10 @@ async function probeDisplay({ env = process.env, x11Dir = undefined, connectMs =
   for (const d of String((env && env.PATH) || '').split(':').filter((x) => x.startsWith('/'))) {
     try { await fsp.access(require('path').join(d, 'Xvfb'), require('fs').constants.X_OK); xvfb = true; break; } catch { /* not here */ }
   }
-  return D.displayVerdict({ env, runtimeDir, entries, x11Dir: xdir, xvfb });
+  return D.displayVerdict({ env, runtimeDir, entries, x11Dir: xdir, xvfb, vncDisplay });
 }
 
-module.exports = { cliPinReader, createBrowserFacts, binaryResolver, sanitizeProbeEnv, VERSION_TTL_MS, createBrowserRuntime, pidAlive, procStart, sameProcess, treeUsage,
+module.exports = { versionFromProbe, cliPinReader, createBrowserFacts, binaryResolver, sanitizeProbeEnv, VERSION_TTL_MS, createBrowserRuntime, pidAlive, procStart, sameProcess, treeUsage,
   // lane headless-fallback: the display this machine has now (probed at every launch where the browser runs)
   probeDisplay,
   // lane H verify r2 (M1): the browser a daemon launched, and who holds a profile directory's lock

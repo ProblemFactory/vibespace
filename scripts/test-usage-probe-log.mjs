@@ -77,12 +77,18 @@ const L = require(path.join(REPO, 'src/server/usage-probe-log.js'));
     return { root, dataDir, am, id, cacheDir, u, say, bin, log: () => L.readProbeLog(dataDir) };
   };
   const w = mkWorld();
-  w.say(`#!/bin/sh\ncat <<'EOF'\n${panelText}EOF\n`);
+  const argvFile = path.join(w.root, 'argv.txt');
+  w.say(`#!/bin/sh\nprintf '%s\\n' "$@" > '${argvFile}'\ncat <<'EOF'\n${panelText}EOF\n`);
   const ok1 = await w.u.refreshViaCliPanel(w.id);
   let rows = w.log();
   const r = rows[0];
   ok('a written panel leaves ONE record: rung panel, the account key + name, outcome written', ok1 === true && rows.length === 1 && r.rung === 'panel' && r.key === w.id && r.name === 'Panel Acct' && r.outcome === 'written', JSON.stringify(r));
   ok('…what was SENT: argv[0] is the binary, the creds dir is the account\'s own, the machine-wide oauthAccount was read before and after', r && Array.isArray(r.argv) && r.argv[0] === w.bin && r.argv[1] === '-p' && r.argv[2] === '/usage' && r.credsDir === w.am.subDir(w.id) && 'machineOrgBefore' in r && 'machineOrgAfter' in r, JSON.stringify(r && { argv: r.argv, credsDir: r.credsDir }));
+  // B-9b40: what the BINARY received — claude 2.1.288 print mode loads the account's claude.ai connectors
+  // (one mcp-proxy connect each) unless the MCP config is strict; the probe loads none
+  const got = (() => { try { return fs.readFileSync(argvFile, 'utf-8').split('\n').filter(Boolean); } catch { return null; } })();
+  ok('B-9b40: the spawned CLI got -p /usage --strict-mcp-config (no MCP server loaded, no --mcp-config) and the log names that same argv',
+    JSON.stringify(got) === JSON.stringify(['-p', '/usage', '--strict-mcp-config']) && r && JSON.stringify(r.argv.slice(1)) === JSON.stringify(got), JSON.stringify({ got, logged: r && r.argv }));
   ok('…what came BACK verbatim: the panel text, exit 0, a duration', r && r.rawStdout === panelText && r.exitCode === 0 && typeof r.ms === 'number' && r.rawStderr === '', JSON.stringify(r && { raw: r.rawStdout, exit: r.exitCode }));
   ok('…what the parser MADE of it: 5h 20 %, 7d 40 %, Fable 10 %', r && r.parsed && Math.round(r.parsed.fiveHour.utilization * 100) === 20 && Math.round(r.parsed.sevenDay.utilization * 100) === 40 && r.parsed.scopedWeekly.some((s) => /fable/i.test(s.name) && Math.round(s.utilization * 100) === 10), JSON.stringify(r && r.parsed));
   ok('…what the write DID: the window it filed the reading under (7d reset = the parse\'s)', r && r.window && r.window.sevenDay === r.parsed.sevenDay.resetsAt && r.why === null, JSON.stringify(r && r.window));

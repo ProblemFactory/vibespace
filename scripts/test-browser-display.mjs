@@ -131,11 +131,18 @@ const OWNER_ARGS = '--no-sandbox,--disable-blink-features=AutomationControlled,-
   const noneX = V({}, []); noneX.xvfb = true;
   const staleX = D.displayVerdict({ env: { DISPLAY: ':97', XDG_SESSION_TYPE: 'wayland' }, entries: [], x11Dir: '/x', xvfb: true });
   const h1 = D.launchPlan({ wanted: { headed: true, args: OWNER_ARGS }, display: noneX });
-  ok(h1.headed === true && h1.args === '--no-sandbox,--disable-blink-features=AutomationControlled,--ozone-platform=x11' && h1.fallback.rung === 'hidden-window' && eq(h1.fallback.dropped, ['--ozone-platform=wayland']) && eq(h1.env, {}), 'no display + Xvfb here (auto) ⇒ HEADED on the CLI\'s own Xvfb: the Wayland pin becomes x11 (XDG_SESSION_TYPE=wayland would pick Wayland — measured), rung hidden-window', h1);
+  ok(h1.headed === true && h1.args === '--no-sandbox,--disable-blink-features=AutomationControlled,--ozone-platform=x11,--use-angle=swiftshader,--enable-unsafe-swiftshader' && h1.fallback.rung === 'hidden-window' && eq(h1.fallback.dropped, ['--ozone-platform=wayland']) && eq(h1.env, {}), 'no display + Xvfb here (auto) ⇒ HEADED on the CLI\'s own Xvfb: the Wayland pin becomes x11 (XDG_SESSION_TYPE=wayland would pick Wayland — measured), rung hidden-window', h1);
   const h2 = D.launchPlan({ wanted: { headed: true, args: OWNER_ARGS }, display: staleX });
   ok(staleX.kind === 'none' && staleX.envNamesDisplay === true && eq(h2.env, { DISPLAY: '', WAYLAND_DISPLAY: '' }), 'a STALE DISPLAY in the process env ⇒ the launch clears BOTH (measured: a named display keeps the CLI from starting its Xvfb; DISPLAY=\'\' beside a set WAYLAND_DISPLAY does too)', { staleX, h2 });
   ok(D.launchPlan({ wanted: { headed: true, args: OWNER_ARGS }, display: noneX, mode: 'headless' }).fallback.rung === 'headless' && D.launchPlan({ wanted: { headed: true, args: OWNER_ARGS }, display: { ...noneX, xvfb: false } }).fallback.rung === 'headless' && D.launchPlan({ wanted: { headed: true, args: OWNER_ARGS }, display: none }).headed === false, 'browser.noDisplayMode = headless, no Xvfb, or Xvfb unknown ⇒ the headless rung');
-  ok(!D.launchPlan({ wanted: { headed: false, args: OWNER_ARGS }, display: noneX }).changed && D.launchPlan({ wanted: { headed: true, args: null }, display: noneX }).args === '--ozone-platform=x11', 'no window wanted ⇒ untouched even with Xvfb; no args ⇒ just the x11 pin');
+  ok(!D.launchPlan({ wanted: { headed: false, args: OWNER_ARGS }, display: noneX }).changed && D.launchPlan({ wanted: { headed: true, args: null }, display: noneX }).args === '--ozone-platform=x11,--use-angle=swiftshader,--enable-unsafe-swiftshader', 'no window wanted ⇒ untouched even with Xvfb; no args ⇒ just the x11 pin (+ the software-WebGL pair)');
+  // B-cc68 (lane browser-reliability): THE HIDDEN WINDOW DRAWS WEBGL IN SOFTWARE — measured: an Xvfb has no GL (no WebGL, GPU
+  // or not), the SwiftShader pair gives it WebGL; headless has it by itself (untouched)
+  { const g1 = D.launchPlan({ wanted: { headed: true, args: ['--no-sandbox'] }, display: noneX });
+    const g2 = D.launchPlan({ wanted: { headed: true, args: '--use-angle=vulkan' }, display: noneX });
+    const g3 = D.launchPlan({ wanted: { headed: true, args: OWNER_ARGS }, display: none });
+    const gf = D.displayFact({ display: noneX, plan: h1, wanted: { headed: true, args: OWNER_ARGS }, mode: 'auto' });
+    ok(eq(h1.fallback.softwareGl, ['--use-angle=swiftshader', '--enable-unsafe-swiftshader']) && eq(g1.args, ['--no-sandbox', '--ozone-platform=x11', '--use-angle=swiftshader', '--enable-unsafe-swiftshader']) && g2.args === '--use-angle=vulkan,--ozone-platform=x11' && eq(g2.fallback.softwareGl, []) && !/swiftshader/.test(String(g3.args)) && g3.fallback.softwareGl === undefined && eq(gf.fallback.softwareGl, h1.fallback.softwareGl) && eq(D.planForFact({ args: OWNER_ARGS, headed: true }, gf), h1) && /WebGL in software \(--use-angle=swiftshader --enable-unsafe-swiftshader/.test(D.journalLine(gf, 'launch')), 'B-cc68: the hidden-window rung adds the SwiftShader pair (a list stays a list; a config naming its own --use-angle keeps it); headless is untouched; the fact carries it, every later call re-derives it, the launch line says WebGL in software', { g1: g1.args, g2: g2.args, line: D.journalLine(gf, 'launch') }); }
   const fh = D.displayFact({ display: noneX, plan: h1, wanted: { headed: true, args: OWNER_ARGS }, mode: 'auto' });
   ok(D.factCode(fh) === 'hidden-window' && fh.xvfb === true && fh.mode === 'auto' && eq(D.planForFact({ args: OWNER_ARGS, headed: true }, fh), h1) && eq(D.planForFact({ args: OWNER_ARGS, headed: true }, D.displayFact({ display: noneX, wanted: { headed: true, args: OWNER_ARGS }, mode: 'headless' })).fallback.rung, 'headless'), 'the fact carries Xvfb + the mode, so every later call re-derives the SAME rung');
   ok(/runs in a hidden window/.test(D.agentNote(fh)) && /\[browser_hidden_window\]$/.test(D.agentNote(fh)) && /HIDDEN WINDOW/.test(D.journalLine(fh, 'x')), 'the agent\'s note and the journal name the rung');
@@ -161,7 +168,7 @@ const OWNER_ARGS = '--no-sandbox,--disable-blink-features=AutomationControlled,-
   // THE TABLE: desktop × Xvfb × preference × mode ⇒ what the launch does, over a POD's config (no headed key at all)
   const POD = { args: '--no-sandbox' };
   // 2.369.200: H5's rule ships behind a switch that is OFF (D.NO_DESKTOP_WINDOW_DEFAULT) — the table judges the RULE with the
-  // switch ON (the .201 shape); the shipped default is judged right after the table
+  // switch ON (the shape it will ship in — still OFF in 2.369.202); the shipped default is judged right after the table
   const H5 = { noDesktopWindow: true };
   const launchOf = (setting, display, mode = 'auto') => { const r = D.resolveHeaded({ setting, display, mode, ...H5 }); return D.launchPlan({ wanted: D.wantedOf(POD, { headedEnv: r.why === 'no-desktop' ? true : (r.headed === null ? null : r.headed) }), display, mode }); };
   const rung = (pl) => pl.fallback ? pl.fallback.rung || pl.fallback.why : (pl.headed === true ? 'window' : 'inherit');
@@ -188,7 +195,7 @@ const OWNER_ARGS = '--no-sandbox,--disable-blink-features=AutomationControlled,-
   const offBad = ROWS.filter(([, d, pref, mode, why]) => D.resolveHeaded({ setting: pref, display: d, mode }).why !== (why === 'no-desktop' ? 'inherit' : why));
   ok(D.NO_DESKTOP_WINDOW_DEFAULT === false && offBad.length === 0 && ROWS.filter((r) => r[4] === 'no-desktop').length === 3, 'H5 THE SHIPPED DEFAULT (2.369.200): the switch is OFF — unset + no desktop + Xvfb inherits (headless), exactly as .199; "yes" still asks the hidden window', offBad.map((r) => r[0]));
   const ph = launchOf('', staleX);
-  ok(ph.headed === true && ph.args === '--no-sandbox,--ozone-platform=x11' && eq(ph.env, { DISPLAY: '', WAYLAND_DISPLAY: '' }), 'H5: the pod\'s launch is the hidden-window rung exactly (x11 pinned, a stale display cleared)', ph);
+  ok(ph.headed === true && ph.args === ['--no-sandbox', '--ozone-platform=x11', ...D.SOFTWARE_GL_ARGS].join(',') && eq(ph.env, { DISPLAY: '', WAYLAND_DISPLAY: '' }), 'H5: the pod\'s launch is the hidden-window rung exactly (x11 pinned, a stale display cleared; + lane browser-reliability\'s software GL — composed at the 2.369.202 integration)', ph);
   const fd = D.displayFact({ display: noneX, plan: launchOf('', noneX), wanted: { headed: true, args: '--no-sandbox' }, mode: 'auto', byDefault: true });
   ok(fd.wanted.byDefault === true && D.factCode(fd) === 'hidden-window' && eq(D.planForFact(POD, fd), launchOf('', noneX)) && D.applyPlan(POD, D.planForFact(POD, fd)).headed === true && D.planForFact({ ...POD, headed: false }, fd).headed === true, 'H5: the fact says the window was the default\'s (wanted.byDefault) and EVERY later call re-derives the same planned config — headed:true — from a base that says nothing (or false)', fd);
   ok(D.displayFact({ display: noneX, plan: h1, wanted: { headed: true } }).wanted.byDefault === undefined && !D.planForFact(POD, D.displayFact({ display: noneX, wanted: { headed: false, args: '--no-sandbox' }, mode: 'auto' })).changed, 'H5: a fact without the default\'s mark never asks a window for a base that says nothing (today\'s meaning)');
@@ -207,6 +214,10 @@ const OWNER_ARGS = '--no-sandbox,--disable-blink-features=AutomationControlled,-
   const clearLine = "env: d.envNamesDisplay ? { DISPLAY: '', WAYLAND_DISPLAY: '' } : {} };";
   ok(src.includes(modeLine) && src.includes(clearLine), 'CONTROL setup: the rung\'s mode gate and its display clearing are found');
   const DM = MP.load('src/browser-display.js', src.replace(modeLine, '    if (d.xvfb === true) {'), 'ignores-mode');
+  const glLine = "      const gl = withSoftwareGl(withOzone(cut.args, 'x11'));";
+  ok(src.includes(glLine), 'B-cc68 CONTROL setup: the rung\'s software-WebGL line is found');
+  const DG = MP.load('src/browser-display.js', src.replace(glLine, "      const gl = { args: withOzone(cut.args, 'x11'), added: [] };"), 'no-software-gl');
+  ok(!/swiftshader/.test(String(DG.launchPlan({ wanted: { headed: true, args: OWNER_ARGS }, display: noneX }).args)), 'B-cc68 CONTROL: a plan without the pair (the base) launches the hidden window with no WebGL — caught by the B-cc68 row');
   ok(DM.launchPlan({ wanted: { headed: true, args: OWNER_ARGS }, display: noneX, mode: 'headless' }).fallback.rung === 'hidden-window', 'CONTROL: a plan that ignores browser.noDisplayMode is caught by the "headless" row');
   const DC = MP.load('src/browser-display.js', src.replace(clearLine, 'env: {} };'), 'keeps-stale-display');
   ok(eq(DC.launchPlan({ wanted: { headed: true, args: OWNER_ARGS }, display: staleX }).env, {}), 'CONTROL: a plan that keeps a stale DISPLAY is caught by the stale-display row (the fake below fails that launch)');
@@ -613,6 +624,30 @@ console.log('— ④ the words every surface says it with, and where they are dr
   ok(W.displayFactText(back) === 'The desktop session is back — the browser runs in a window again' && W.displayFactText(D.displayFact({ display: wl, wanted: { headed: true } })) === '' && W.displayFactText(null) === '', 'the window-is-back sentence; a plain launch / no fact says nothing');
   ok(W.displayFactOf({ browsers: { 'bp-1': { display: noD } } }, 'bp-1') === noD && W.displayFactOf({ browsers: {} }, 'bp-1') === null && W.displayFactOf(null, 'bp-1') === null, 'displayFactOf reads the digest\'s record');
   ok(/Wayland desktop session \(wayland-0\)/.test(W.machineDisplayText({ display: wl })) && /X11 display \(:0\)/.test(W.machineDisplayText({ display: x11Only })) && /no desktop session now .* runs headless/.test(W.machineDisplayText({ display: D.displayVerdict({}) })) && /Could not check this machine's display: boom/.test(W.machineDisplayText({ error: 'boom' })), 'Settings\' line: Wayland / X11 / none / an error said by name');
+  // B-d635 (lane browser-reliability, userW's inc-murizo36-ecri): VibeSpace's own VNC desktop (Desktop apps' Xtigervnc, :7)
+  // is a desktop the user sees — beside it no surface says "no desktop session"; the words say the browser is NOT on it
+  { const vncE = [{ path: '/tmp/.X11-unix/X7', type: 'socket', alive: true }];
+    const vncCase = (DD) => {
+      const vd = DD.displayVerdict({ entries: vncE, vncDisplay: ':7', xvfb: true });
+      const vh = DD.displayFact({ display: vd, wanted: { headed: true, args: OWNER_ARGS } }), vl = DD.displayFact({ display: { ...vd, xvfb: false }, wanted: { headed: true, args: OWNER_ARGS } });
+      return { vd, vh, words: [W.displayFactText(vh), W.displayFactText(vl), W.machineDisplayText({ display: vd, mode: 'auto' }), DD.agentNote(vh), DD.agentNote(vl)] };
+    };
+    const { vd, vh, words } = vncCase(D);
+    const vdead = D.displayVerdict({ entries: [{ path: '/tmp/.X11-unix/X7', type: 'socket', alive: false }], vncDisplay: ':7', xvfb: true });
+    const vsame = D.displayVerdict({ env: { DISPLAY: ':7' }, entries: vncE, vncDisplay: ':7' });
+    ok(vd.kind === 'none' && eq(vd.vnc, { name: ':7', socket: '/tmp/.X11-unix/X7' }) && vdead.vnc === null && vsame.kind === 'x11' && vsame.vnc === null && D.factCode(vh) === 'hidden-window' && eq(vh.vnc, vd.vnc) && D.displayCandidates({ vncDisplay: ':7' }).includes('/tmp/.X11-unix/X7') && words.every((w) => !/no desktop session/i.test(w) && /VNC desktop \(:7\)/.test(w)) && /hidden window/.test(words[0]) && /headless/.test(words[1]) && /\[browser_hidden_window\]$/.test(words[3]) && /\[browser_headless\]$/.test(words[4]), 'B-d635: VibeSpace\'s own VNC desktop (:7, a live socket) is in the fact — beside it the row, the Settings line and the agent\'s note say the browser is NOT on that desktop, never "no desktop session" (a dead socket, or the VNC display being the one DISPLAY names, adds nothing)', words);
+    const dsrc = fs.readFileSync(path.join(REPO, 'src/browser-display.js'), 'utf8');
+    const VL = "  const vnc = vx && !vx.tcp && !(x11 && x11.name === vx.name) && (live(vx.path) || live(vx.abstract)) ? { name: vx.name, socket: live(vx.path) ? vx.path : vx.abstract } : null;";
+    ok(dsrc.includes(VL), 'B-d635 control setup: the VNC-desktop line is found');
+    const MV = mutantCopies('browser-display-vnc', REPO);
+    const cv = vncCase(MV.load('src/browser-display.js', dsrc.replace(VL, '  const vnc = null;'), 'no-vnc'));
+    ok(cv.words.slice(0, 3).every((w) => /no desktop session/i.test(w)) && /no desktop session/.test(cv.words[3]), 'B-d635 CONTROL: a probe that cannot see the VNC desktop (the base) says "This machine has no desktop session" on every surface — the row above can go red', cv.words);
+    for (const r of copiesCensus(MV.files, MV.dir, REPO, { label: 'B-d635 control: ' })) ok(r.pass, r.name, r.detail);
+    // hermetic: only the SERVER names its VNC display (the wiring) — a probe / a keeper built without it never reads the
+    // machine's :7 (a test keeper on a box whose desktop singleton runs must see what the test planted, nothing else)
+    const fsrc = fs.readFileSync(path.join(REPO, 'src/browser-facts.js'), 'utf8'), csrc = fs.readFileSync(path.join(REPO, 'src/server/browser-display-config.js'), 'utf8'), ksrc0 = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8'), wsrc0 = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8');
+    ok(/netImpl = require\('net'\), vncDisplay = null \} = \{\}\) \{/.test(fsrc) && /probeDisplay\(\{ env: env\(\) \|\| \{\}, vncDisplay \}\)/.test(csrc) && /env: \(\) => rtEnv, now, vncDisplay \}\);/.test(ksrc0) && /vncDisplay: process\.env\.VIBESPACE_VNC_DISPLAY \|\| ':7',/.test(wsrc0), 'B-d635: the VNC display is named by the SERVER wiring only (src/vnc.js\'s default) — the probe\'s default is none, so a test keeper is hermetic');
+  }
   const wsrc = fs.readFileSync(path.join(REPO, 'src/lib/browser-display-words.js'), 'utf8');
   const keys = [...wsrc.matchAll(/\bt\((['"])((?:(?!\1).)+)\1/g)].map((m) => m[2].replace(/\\'/g, "'"));
   const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
@@ -624,7 +659,7 @@ console.log('— ④ the words every surface says it with, and where they are dr
   ok(/r\.display = keeper && typeof keeper\.browserOf === 'function'/.test(sv) && /displayLine\(state, r\.display\);/.test(tv) && /displayLine\(st, e\.display\);/.test(tv), 'WIRING: the Agent browser panel\'s profile rows (the housekeeping row carries the record\'s fact) and ephemeral rows draw it');
   ok(/key: 'display', kind: 'display', text: dt/.test(sw) && /displayFactText\(displayFactOf\(app\._browserProfiles, profileId\)\)/.test(sw), 'WIRING: the switch dialog says it under the now line');
   // the .197 integration: the merged line (browse-yourself's address / share / end lines, browser-stuck's dialog bar) keeps the note right after the blocked bar
-  ok(/root\.append\(strip, tabRow, bar, addrRow, shareLine, endLine, blockedBar, displayNote, resetNote, confirms, dialogBar, loopBar, body\)/.test(lv) && /const renderBackend = \(\) => \{\n    renderDisplay\(\);/.test(lv) && /st\.rows = computeRows\(\);\n    renderDisplay\(\);/.test(lv), 'WIRING: the live view\'s note under the bar (lane site-reset\'s reset line beside it, its loop banner after the dialog card), re-drawn with the digest and the strip');
+  ok(/root\.append\(strip, tabRow, watchLine, bar, addrRow, shareLine, endLine, blockedBar, displayNote, resetNote, confirms, dialogBar, loopBar, body\)/.test(lv) && /const renderBackend = \(\) => \{\n    renderDisplay\(\);/.test(lv) && /st\.rows = computeRows\(\);\n    renderDisplay\(\);/.test(lv), 'WIRING: the live view\'s note under the bar (lane site-reset\'s reset line beside it, its loop banner after the dialog card), re-drawn with the digest and the strip');
   ok(/'browser\.noDisplayMode': \{\s*type: 'enum', default: 'auto', options: \[\s*\{ value: 'auto'[\s\S]{0,120}\{ value: 'headless'/.test(ss) && /noDisplayMode: noDisplayMode\(\)/.test(fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8')), 'WIRING: the setting browser.noDisplayMode (auto default | headless) — the keeper reads it at every launch and hands it to a paired machine');
   ok(/'browser\.headed': \{[\s\S]{0,1600}fact: 'browser-display',/.test(ss) && /if \(schema\.fact === 'browser-display'\) this\._renderDisplayFact\(info\);/.test(su) && /fetchJson\('\/api\/browser\/display'\)/.test(su), 'WIRING: Settings → Agent browser: the read-only line under "Show the agent browser window"');
   ok(['.settings-row-fact', '.browser-live-display-note', '.brsw-display', '.bprof-display'].every((c) => css.includes(c + ' {')), 'each line has its own rule (theme tokens only)');

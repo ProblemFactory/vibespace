@@ -1,8 +1,29 @@
+import { chipMode, titleMinText, billingPillForms, billingPillHtml } from './title-chips.js'; // lane phone-chip: the row's billing pill folds, never cuts
 import { t } from './i18n.js';
 import { escHtml, onOutsidePress, showContextMenu } from './utils.js';
 import { showWindowContextMenu } from './taskbar.js';
 import { UI_ICONS, FILE_ICONS } from './icons.js';
 import { getCommand, runCommand } from './contributions.js';
+
+/** lane phone-chip (B-e5ff): a switcher row's billing pill takes the widest form that leaves the window's title
+ *  readable — lane G's `chipMode` over MEASURED widths (the title and the pill share the row, as on a desktop title
+ *  bar); a row not laid out keeps its full form. */
+function fitRowPill(label, chip) {
+  if (!label.isConnected || !chip.isConnected || !label.offsetWidth) return;
+  const w = {};
+  for (const m of ['full', 'compact', 'icon']) { chip.dataset.mode = m; w[m] = chip.getBoundingClientRect().width; }
+  if (!chip.querySelector('.pill-compact')) w.compact = w.full;
+  chip.dataset.mode = 'full';
+  const probe = document.createElement('span');
+  probe.style.cssText = 'position:absolute;visibility:hidden;white-space:nowrap;font:inherit';
+  label.appendChild(probe);
+  probe.textContent = label.firstChild && label.firstChild.nodeType === 3 ? label.firstChild.nodeValue : label.textContent;
+  const titlePx = probe.getBoundingClientRect().width;
+  probe.textContent = titleMinText(probe.textContent);
+  const titleMinPx = probe.getBoundingClientRect().width;
+  probe.remove();
+  chip.dataset.mode = chipMode({ availablePx: label.offsetWidth + w.full, titlePx, titleMinPx, chipFullPx: w.full, chipCompactPx: w.compact });
+}
 
 /**
  * MobileNav — mobile navigation bar controller.
@@ -251,12 +272,15 @@ export class MobileNav {
       const isApi = auth.source === 'api-key' || auth.source === 'api-console' || auth.source === 'api-other';
       billChip = document.createElement('span');
       billChip.className = 'mobile-win-billing' + (isApi ? ' api' : '');
-      billChip.textContent = auth.source === 'unknown' ? '?'
-        // pooled parity with the desktop badge: name the pool AND its current
-        // real target (2.267.1, mobile pooling support)
-        : auth.source === 'pooled' ? (auth.name || t('pool')) + (auth.poolTarget ? ` → ${auth.poolTarget}` : '')
-        : (auth.name || (isApi ? (auth.source === 'api-console' ? 'Console' : 'API') : t('CLI login')));
-      billChip.title = t('Click to switch billing');
+      // pooled parity with the desktop badge: name the pool AND its current real target (2.267.1). lane phone-chip
+      // (B-e5ff): the three forms, never cut — the row's title and the chip share the row (lane G's chipMode, fitted
+      // once the row is laid out); the full words in title + aria-label
+      const forms = billingPillForms({ kind: auth.source === 'unknown' ? 'unknown' : auth.source === 'pooled' ? 'pooled' : isApi ? 'api' : 'subscription',
+        name: auth.source === 'pooled' ? (auth.name || t('pool')) : (auth.name || (isApi ? (auth.source === 'api-console' ? 'Console' : 'API') : t('CLI login'))),
+        target: auth.source === 'pooled' ? (auth.poolTarget || '') : '' });
+      billChip.innerHTML = billingPillHtml(forms, escHtml);
+      billChip.title = forms.tip + ' — ' + t('Click to switch billing');
+      billChip.setAttribute('aria-label', forms.tip);
       billChip.onclick = (e) => {
         // Keep the window list open underneath — closing it left the switcher
         // menu floating context-less (real report). The list's outside-tap
@@ -273,6 +297,7 @@ export class MobileNav {
 
     if (billChip) item.append(icon, label, billChip, closeBtn);
     else item.append(icon, label, closeBtn);
+    if (billChip) requestAnimationFrame(() => fitRowPill(label, billChip));
     item.addEventListener('pointerdown', () => { item.style.background = 'var(--bg-hover)'; });
     // THE ROW NAMES THE WINDOW — reveal it as itself (inc-muiq348r-jwb5: a tab group's HOST row, tapped while the group
     // showed a guest, only raised the frame — the guest stayed on screen under the host's title and highlight)

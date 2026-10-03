@@ -44,13 +44,14 @@ function cleanCode(v) {
   return Number.isInteger(v) ? v : null;
 }
 
-/** exitFacts({meta, socketPath, socketExists}) →
- *  {code, signal, wrapperSignal, wrapperFate, socketFate, suffix, eventSuffix}.
+/** exitFacts({meta, socketPath, socketExists, wrapperRunning, asked, now}) →
+ *  {code, signal, wrapperSignal, wrapperFate, socketFate, askedBy, suffix, eventSuffix}.
  *  `suffix` is appended to the "[session] exited" line AFTER its existing
  *  fields (` signal=<sig>` only when present, ` wrapper=…` and ` socket=…`
- *  always); `eventSuffix` is the same three facts in the telemetry event's
- *  slash-separated spelling. */
-function exitFacts({ meta = null, socketPath = null, socketExists = false, wrapperRunning = false } = {}) {
+ *  always, ` asked=<by>` only when VibeSpace asked for the exit — B-f698);
+ *  `eventSuffix` is the same facts in the telemetry event's slash-separated
+ *  spelling. */
+function exitFacts({ meta = null, socketPath = null, socketExists = false, wrapperRunning = false, asked = null, now = Date.now() } = {}) {
   const m = meta && typeof meta === 'object' ? meta : {};
   const code = cleanCode(m.childExitCode);
   const signal = cleanSignal(m.childExitSignal);
@@ -58,9 +59,64 @@ function exitFacts({ meta = null, socketPath = null, socketExists = false, wrapp
   const wrapperFate = wrapperSignal ? 'signal:' + wrapperSignal
     : (code != null || signal ? 'finalized' : (wrapperRunning ? 'running' : 'unfinalized'));
   const socketFate = socketPath ? (socketExists ? 'present' : 'gone') : 'none';
-  const suffix = `${signal ? ' signal=' + signal : ''} wrapper=${wrapperFate} socket=${socketFate}`;
-  const eventSuffix = `${signal ? '/signal=' + signal : ''}/wrapper=${wrapperFate}/socket=${socketFate}`;
-  return { code, signal, wrapperSignal, wrapperFate, socketFate, suffix, eventSuffix };
+  const askedBy = askedActor(asked, now);
+  const suffix = `${signal ? ' signal=' + signal : ''} wrapper=${wrapperFate} socket=${socketFate}${askedBy ? ' asked=' + askedBy : ''}`;
+  const eventSuffix = `${signal ? '/signal=' + signal : ''}/wrapper=${wrapperFate}/socket=${socketFate}${askedBy ? '/asked=' + askedBy : ''}`;
+  return { code, signal, wrapperSignal, wrapperFate, socketFate, askedBy, suffix, eventSuffix };
+}
+
+// ── WHO ASKED FOR THE EXIT (B-f698) ──────────────────────────────────────────
+// A session that VibeSpace itself signals carries `_exitAsked = {by, at}` from
+// the moment it asks: 'interrupt' = the composer's Stop, whose last resort is a
+// SIGINT 2 s later (src/adapters/claude-code.js postInterrupt — recent CLIs
+// EXIT on it); 'terminate' = the Terminate kill case (src/ws-handler.js — it
+// deletes the session before the pty's onExit, so the mark is the belt). The
+// mark is fresh for EXIT_ASK_FRESH_MS: a Stop the CLI survived must not turn a
+// crash an hour later into "asked". The exit line says ` asked=<by>`.
+const EXIT_ASK_FRESH_MS = 30 * 1000;
+const ASKED_RE = /^[a-z][a-z-]{0,23}$/;
+function askedActor(asked, now = Date.now()) {
+  if (!asked || typeof asked !== 'object' || typeof asked.by !== 'string' || !ASKED_RE.test(asked.by)) return null;
+  if (!Number.isFinite(asked.at) || now - asked.at > EXIT_ASK_FRESH_MS || asked.at - now > EXIT_ASK_FRESH_MS) return null;
+  return asked.by;
+}
+
+// ── AN UNEXPECTED EXIT, AND WHAT VIBESPACE DOES ABOUT IT (B-f698) ────────────
+// 2026-09-24 08:11Z three conversations with work in flight died and nobody
+// knew for six hours. Owner 2026-10-02: a CHAT conversation that exits while
+// it is working, without a kill the user or VibeSpace asked for, is resumed
+// ONCE by itself — nothing is sent into it, so no turn is billed — and the
+// owner gets one For-you item; a second unexpected exit only notifies.
+//   working  = a turn running (`_isStreaming`) or background tasks the CLI
+//              still listed as live (the incident's three were idle between
+//              turns with Workflows in flight)
+//   died     = the record PROVES the CLI is gone: a non-zero code, a child
+//              signal, a signalled wrapper; or no record at all (SIGKILL class)
+//              on a LOCAL session — the teardown only runs once the dtach
+//              socket is gone. A remote session with no record, or a wrapper
+//              still running ('running'), proves nothing: resuming beside a
+//              CLI that may still run is two writers on one transcript.
+// → {unexpected, action: 'respawn'|'notify'|null, why}
+// verify r1: only a Claude conversation on THIS machine is respawned (the owner's YES) — a codex / OpenCode
+// conversation or a remote one keeps the base behaviour (its exit bar). The crash loop: a conversation VibeSpace
+// respawned that dies again while STARTING (idle, within RESPAWN_STARTUP_MS of the respawn) only notifies.
+const RESPAWN_ONCE_MS = 24 * 3600 * 1000;
+const RESPAWN_STARTUP_MS = 5 * 60 * 1000;
+function unexpectedExitVerdict({ mode = null, backend = 'claude', midTurn = false, facts = null, remote = false, conversationId = null, respawnedAt = null, askedBy = null, now = Date.now() } = {}) {
+  const no = (why) => ({ unexpected: false, action: null, why });
+  if (mode !== 'chat') return no('not-chat');
+  if ((backend || 'claude') !== 'claude') return no('backend:' + backend);
+  if (remote) return no('remote');
+  if (askedBy) return no('asked:' + askedBy);
+  const restarting = Number.isFinite(respawnedAt) && now - respawnedAt >= 0 && now - respawnedAt < RESPAWN_STARTUP_MS;
+  if (!midTurn && !restarting) return no('idle');
+  const f = facts && typeof facts === 'object' ? facts : {};
+  const died = (Number.isInteger(f.code) && f.code !== 0) || !!f.signal || !!f.wrapperSignal
+    || (f.wrapperFate === 'unfinalized' && !remote);
+  if (!died) return no(f.code === 0 ? 'clean' : f.wrapperFate === 'running' ? 'wrapper-running' : 'unproven');
+  if (!conversationId) return { unexpected: true, action: 'notify', why: 'no-conversation' };
+  if (Number.isFinite(respawnedAt) && now - respawnedAt < RESPAWN_ONCE_MS) return { unexpected: true, action: 'notify', why: 'again' };
+  return { unexpected: true, action: 'respawn', why: 'first' };
 }
 
 /** awaitsWrapper(meta) → true when the teardown should wait for the wrapper
@@ -84,4 +140,5 @@ function tombExpired(mtimeMs, now, maxAgeMs = EXIT_TOMB_MAX_AGE_MS) {
   return now - mtimeMs > maxAgeMs;
 }
 
-module.exports = { exitFacts, tombExpired, EXIT_TOMB_MAX_AGE_MS, awaitsWrapper, WRAPPER_SETTLE_MS, WRAPPER_SETTLE_STEP_MS };
+module.exports = { exitFacts, tombExpired, EXIT_TOMB_MAX_AGE_MS, awaitsWrapper, WRAPPER_SETTLE_MS, WRAPPER_SETTLE_STEP_MS,
+  askedActor, EXIT_ASK_FRESH_MS, unexpectedExitVerdict, RESPAWN_ONCE_MS, RESPAWN_STARTUP_MS };

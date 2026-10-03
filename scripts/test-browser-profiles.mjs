@@ -1730,7 +1730,7 @@ console.log('\n⑳ r5: the floor notice latches on DELIVERY · the conversation 
   ok(/^Browsing: `vibespace-browser <verb>`/.test(line('none')) && /^Browsing: `vibespace-browser <verb>`/.test(line('D')) && /vibespace-docs browser/.test(line('none')), 'both sentences keep the two anchors leg ⑦ pins (the one tool; the manual pointer)');
   ok(B.isolatedVariant('D') && B.isolatedVariant('C') && B.isolatedVariant('N') && B.isolatedVariant('H') && !B.isolatedVariant('none') && !B.isolatedVariant(null) && !B.isolatedVariant(''), 'isolatedVariant is the ONE table (D/C/N/H yes; none/null/empty no)');
   const arSrc = read('src/agent-routes.js');
-  const sites = arSrc.match(/sessionToolsIntro\((?:enabledTools\(\)|toolFlags), \{ browserVariant: s\._browserVariant(?:, browserSet: browserSetFacts\(s\))? \}\)/g) || []; // P1b added the set beside the variant; the pin follows the shipped call shape
+  const sites = arSrc.match(/sessionToolsIntro\((?:enabledTools\(\)|toolFlags), \{ browserVariant: s\._browserVariant(?:, browserSet: browserSetFacts\(s\))?(?:, browserDisplay: browserDisplayFacts\(s\))? \}\)/g) || []; // P1b added the set beside the variant, lane browser-recipes the display fact; the pin follows the shipped call shape
   ok(sites.length === 2, `both delivery sites (task-context + prompt-context) hand it \`s._browserVariant\` (${sites.length})`);
   ok(!/sessionToolsIntro\((?:enabledTools\(\)|toolFlags)\)/.test(arSrc), 'and no site calls it without the session\'s facts (the round-4 shape)');
   ok((read('src/server/boot-restore.js').match(/_browserVariant: meta\.browserVariant/g) || []).length === 3, 'the rung is restored with the session at all three boot-restore sites, so a restored session\'s re-delivered intro is about ITS rung');

@@ -1586,6 +1586,12 @@ function ephemeralDirOf(pairs, { configProfile = null } = {}) {
 // A PIN NEVER AUTHORIZES: the user's pick (New Session, Session properties, the card menu, the UI's attach) WRITES the
 // list (`keeper.setPin` / `attach(by:'user')` append the conversation), and a default applied by the spawn ladder (the
 // conversation's own, a fork's copy, a Task Group's, the instance's) never does.
+//
+// ALL AGENTS (lane everyone-principal, 2026-10-02 — the owner: "所有配置权限的地方都加入"所有"这个选项", userW: profiles
+// every agent shares): the picker's "All agents" row IS `{kind:'instance'}` — never a second spelling. It KEEPS the
+// rows it was given (`owner.who`, never consulted while every conversation may: `whoMayUse` answers `{mode:'all',
+// kept}`), so taking All away again restores exactly the conversations and Task Groups picked before it. Admission
+// is unchanged: `all` admits every conversation, the kept rows decide nothing.
 /** What a WRITE may produce (the pre-list single shapes `session` / `task` are still READ — see whoMayUse). */
 const OWNER_KINDS = Object.freeze(['only', 'instance']);
 /** The closed set of row kinds of an "only these" list. */
@@ -1629,7 +1635,7 @@ function whoMayUse(p) {
   const o = p.owner;
   if (o === undefined || o === null) return { mode: 'all' };
   if (typeof o !== 'object' || Array.isArray(o)) return { mode: 'unknown' };
-  if (o.kind === 'instance') return { mode: 'all' };
+  if (o.kind === 'instance') return Array.isArray(o.who) && o.who.length ? { mode: 'all', kept: normalizeWho(o.who) } : { mode: 'all' };
   if (o.kind === 'session' || o.kind === 'task') { const w = whoRow(o); return w ? { mode: 'only', who: [w] } : { mode: 'unknown' }; }
   if (o.kind === 'only' && Array.isArray(o.who)) return { mode: 'only', who: normalizeWho(o.who) };
   return { mode: 'unknown' };
@@ -1642,13 +1648,15 @@ function scopeOf(p) {
   if (!U) return null;
   return U.mode === 'all' ? 'all' : 'only';
 }
-/** The digest's `use`: keys and ids only (it is the broadcast) — `{mode:'all'}` | `{mode:'only', who:[{kind,key|id}]}`. */
+/** The digest's `use`: keys and ids only (it is the broadcast) — `{mode:'all'[, who: the kept rows]}` |
+ *  `{mode:'only', who:[{kind,key|id}]}`. */
+const digestRow = (w) => (w.kind === 'session' ? { kind: 'session', key: w.id } : { kind: 'task', id: w.id });
 function useDigestOf(p) {
   const U = whoMayUse(p);
   if (!U) return null;
-  if (U.mode === 'all') return { mode: 'all' };
+  if (U.mode === 'all') return U.kept && U.kept.length ? { mode: 'all', who: U.kept.map(digestRow) } : { mode: 'all' };
   if (U.mode === 'unknown') return { mode: 'unknown', who: [] };
-  return { mode: 'only', who: U.who.map((w) => (w.kind === 'session' ? { kind: 'session', key: w.id } : { kind: 'task', id: w.id })) };
+  return { mode: 'only', who: U.who.map(digestRow) };
 }
 /**
  * The refusal an agent gets for a profile the user kept to some conversations — ONE form (a list is a list): it names
@@ -1660,8 +1668,8 @@ function notOwnerRefusal({ label = '' } = {}) {
   const who = `"${label || 'this profile'}"`;
   return {
     ok: false, code: 'not_owner',
-    error: `profile ${who} is kept to some of the user's conversations and Task Groups, and yours is not one of them — ask the user to add this conversation (or its Task Group) under "Who can use it" in the Agent browser panel (Change…), or to switch it to "All my conversations"; or pick another profile. Never create a second profile with the same login.`,
-    remedy: `ask the user: Agent browser panel → ${who} → Who can use it → Change… → add this conversation, or All my conversations`,
+    error: `profile ${who} is kept to some of the user's conversations and Task Groups, and yours is not one of them — ask the user to add this conversation (or its Task Group) under "Who can use it" in the Agent browser panel (Change…), or to pick "All agents" there; or pick another profile. Never create a second profile with the same login.`,
+    remedy: `ask the user: Agent browser panel → ${who} → Who can use it → Change… → add this conversation, or All agents`,
   };
 }
 /** The Task Group list could not be read, and a Task Group row might have admitted the asker: refused BY NAME (never
@@ -1700,7 +1708,7 @@ function mayAttach(profile, { browserKey, taskIds = [], groupsUnreadable = false
     return notOwnerRefusal({ label: profile.label });
   }
   const kind = profile.owner && typeof profile.owner === 'object' ? String(profile.owner.kind) : typeof profile.owner;
-  return { ok: false, code: 'not_owner', error: `profile "${profile.label}" has an owner kind this release cannot judge (${kind}) — ask the user to set it to "All my conversations" in the Agent browser panel` };
+  return { ok: false, code: 'not_owner', error: `profile "${profile.label}" has an owner kind this release cannot judge (${kind}) — ask the user to set it to "All agents" in the Agent browser panel` };
 }
 /**
  * What the AGENT is told about a profile (`GET /api/agent/browser/profiles`, the CLI's `used by:` line): only whether
@@ -1784,8 +1792,8 @@ function agentBrowserView(rec, { own = false } = {}) {
  * use answered every other conversation's lease row, key + webui id; the `profiles` digest did for every profile):
  * every profile through `agentProfileView`; `leases` / the mediator's `grants` through `agentLeaseRow`; `ephemerals`
  * = the asker's own browsers (its helpers' included) + a COUNT of the others; a blocked claim of another conversation
- * without its key / session id; `pins` = the asker's own. `drivers` stays (owner ruling A (2): the ONE deliberate
- * exception — a `browser_busy` refusal names the conversation that drives, by key). `profileOf(id)` = the keeper's
+ * without its key / session id; `pins` = the asker's own (lane browser-windows: the digest's `drivers` went with the
+ * retired drive claim — no conversation's key is relayed to another any more). `profileOf(id)` = the keeper's
  * record (the digest row is a view). Pure over the digest object; never mutates it.
  */
 function agentDigestView(d, facts = {}, profileOf = () => null) {
@@ -1824,11 +1832,11 @@ function agentDigestView(d, facts = {}, profileOf = () => null) {
  * namespace, an `attach bk-…` line) whose conversation is not the asker's is masked `bk-********`; every other live
  * session's webui id / conversation id (`foreign.ids`) is masked `[another conversation]`; every other conversation's
  * browser pid (`foreign.pids`) becomes null. A string the asker itself SENT (`echoes`: a handle it named, a profile ref)
- * is left as it wrote it — an echo is not a disclosure. THE ONE EXCEPTION is `$.drivers` (owner ruling A (2): who
- * drives each shared browser right now, by key, so a `browser_busy` can be relayed) — `BELT_EXCEPTIONS` names it and
- * the census pins that it is the only one. Pure: never mutates the body; a non-object body is returned as is.
+ * is left as it wrote it — an echo is not a disclosure. NO EXCEPTION (lane browser-windows, 2026-10-01): `$.drivers` — who
+ * drove each shared browser, by key, so a `browser_busy` could be relayed — went with the retired drive claim;
+ * `BELT_EXCEPTIONS` is empty and the census pins that. Pure: never mutates the body; a non-object body is returned as is.
  */
-const BELT_EXCEPTIONS = Object.freeze(['drivers']);
+const BELT_EXCEPTIONS = Object.freeze([]);
 // identity verify r4 (2026-09-28): NO word boundaries and NO case — `trace_bk-…`, `xbk-…`, `bk-…f` (a 9th hex digit) and
 // `BK-…` slipped the old `\bbk-[0-9a-f]{8}\b`; a key-shaped run anywhere in a string is masked (over-masking is safe)
 const KEY_IN_TEXT_RE = /bk-[0-9a-f]{8}(?:\.\d{1,4})?/gi;
@@ -1894,7 +1902,7 @@ function agentAnswerView(body, { me = null, foreign = null, echoes = null } = {}
 function useStamp(p) {
   const U = whoMayUse(p) || { mode: 'unknown' };
   const lines = [JSON.stringify(['m', U.mode === 'all' ? 'all' : U.mode === 'only' ? 'only' : 'unknown'])];
-  if (U.mode === 'only') for (const w of U.who) lines.push(JSON.stringify([w.kind === 'session' ? 's' : 't', w.id]));
+  for (const w of U.mode === 'only' ? U.who : U.mode === 'all' ? (U.kept || []) : []) lines.push(JSON.stringify([w.kind === 'session' ? 's' : 't', w.id]));
   return lines.sort().join('\n');
 }
 /** The write's verdict on its base: absent = unconditional (a script); the stamp of the list as it stands NOW = ok;
@@ -1915,16 +1923,17 @@ function useBaseVerdict(profile, base) {
 }
 /**
  * The SHAPE of a `use` body (the panel's Save, PATCH /api/browser/profiles/:id) — PURE, before anything is resolved:
- *   {mode:'all'} | {mode:'only', who:[{kind:'task', id} | {kind:'session', key:'bk-…'} | {kind:'session', session:'<webui id>'}]}
+ *   {mode:'all'[, who]} | {mode:'only', who:[{kind:'task', id} | {kind:'session', key:'bk-…'} | {kind:'session', session:'<webui id>'}]}
+ * `all` may carry the rows it KEEPS (All agents beside picked rows — restored when All is taken away; empty is fine).
  * → `{ok, mode, rows}` (rows as given, kind-checked) | a typed refusal (bad-request / empty_list / too_many).
  */
 function useShapeVerdict(use) {
   const bad = (error) => ({ ok: false, code: 'bad-request', error });
   if (!use || typeof use !== 'object' || Array.isArray(use)) return bad('`use` must be {mode:"all"} or {mode:"only", who:[…]}');
-  if (use.mode === 'all') return { ok: true, mode: 'all', rows: [] };
-  if (use.mode !== 'only') return bad(`use.mode "${String(use.mode)}" is not a value — one of all, only`);
+  if (use.mode === 'all' && (use.who === undefined || use.who === null)) return { ok: true, mode: 'all', rows: [] };
+  if (use.mode !== 'only' && use.mode !== 'all') return bad(`use.mode "${String(use.mode)}" is not a value — one of all, only`);
   if (!Array.isArray(use.who)) return bad('use.who must be a list of conversations and Task Groups');
-  if (!use.who.length) return { ok: false, code: 'empty_list', error: 'Pick at least one conversation or Task Group, or choose All my conversations' };
+  if (!use.who.length && use.mode === 'only') return { ok: false, code: 'empty_list', error: 'Pick at least one conversation or Task Group, or choose All agents' };
   if (use.who.length > WHO_MAX * 4) return { ok: false, code: 'too_many', error: `at most ${WHO_MAX} conversations and Task Groups` };
   const rows = [];
   for (const r of use.who) {
@@ -1937,9 +1946,9 @@ function useShapeVerdict(use) {
       rows.push({ kind: 'session', key: k });
       continue;
     }
-    return bad(`row kind ${JSON.stringify(r.kind)} is not a value — one of ${WHO_KINDS.join(', ')}`);
+    return bad(`row kind ${JSON.stringify(r.kind)} is not a value — one of ${WHO_KINDS.join(', ')}${r.kind === 'everyone' ? ' (All agents is mode "all")' : ''}`);
   }
-  return { ok: true, mode: 'only', rows };
+  return { ok: true, mode: use.mode, rows };
 }
 /**
  * THE WRITE'S VERDICT on the rows (after the route resolved every picked live session to its key — a `session` row
@@ -1955,9 +1964,9 @@ function usePatchVerdict({ profile, use, knownTask = () => false, knownKey = () 
   if (profile.legacy) return { ok: false, code: 'bad-request', error: 'the legacy shared profile is always usable by every conversation — adopt it as a new profile to keep it to some' };
   const sv = useShapeVerdict(use);
   if (!sv.ok) return sv;
-  if (sv.mode === 'all') return { ok: true, owner: { kind: 'instance', id: null }, now: { mode: 'all' } };
+  if (sv.mode === 'all' && !sv.rows.length) return { ok: true, owner: { kind: 'instance', id: null }, now: { mode: 'all' } };
   const cur = whoMayUse(profile);
-  const had = new Set(cur && cur.mode === 'only' ? cur.who.map((w) => w.kind + ':' + w.id) : []);
+  const had = new Set(cur && cur.mode === 'only' ? cur.who.map((w) => w.kind + ':' + w.id) : cur && cur.mode === 'all' && cur.kept ? cur.kept.map((w) => w.kind + ':' + w.id) : []);
   const who = [], seen = new Set();
   for (const r of sv.rows) {
     let w;
@@ -1973,8 +1982,10 @@ function usePatchVerdict({ profile, use, knownTask = () => false, knownKey = () 
     if (seen.has(k)) continue;
     seen.add(k); who.push(w);
   }
-  if (!who.length) return { ok: false, code: 'empty_list', error: 'Pick at least one conversation or Task Group, or choose All my conversations' };
+  if (!who.length && sv.mode === 'only') return { ok: false, code: 'empty_list', error: 'Pick at least one conversation or Task Group, or choose All agents' };
   if (who.length > WHO_MAX) return { ok: false, code: 'too_many', error: `at most ${WHO_MAX} conversations and Task Groups (${who.length} were sent)` };
+  // ALL AGENTS beside picked rows: every conversation may; the rows are KEPT for when All is taken away
+  if (sv.mode === 'all') return { ok: true, owner: { kind: 'instance', id: null, ...(who.length ? { who } : {}) }, now: { mode: 'all', ...(who.length ? { kept: who } : {}) } };
   return { ok: true, owner: { kind: 'only', who }, now: { mode: 'only', who } };
 }
 /** THE PICK WRITES THE LIST: the owner a user's pick of this profile for conversation `browserKey` leaves — the list
@@ -2158,56 +2169,12 @@ function joinOrLaunch({ record = null, starting = false } = {}) {
   if (starting) return 'wait';
   return 'launch';
 }
-// ── OWNER RULING A (2): ONE DRIVER AT A TIME on a profile's browser ──
-/** How long a conversation keeps DRIVING a shared profile's browser after its last command when its turn is not known
- *  to have ended (a terminal-mode session publishes no turn). Its turn ending releases it at once. */
-const DRIVE_HOLD_MS = 90 * 1000;
-/**
- * May THIS conversation act on a profile's browser now? The lease says who holds a TAB; the DRIVE says who acts at this
- * moment (owner ruling A (2): one holder). `drive` = the current claim `{browserKey, at, since}` (null = nobody),
- * `holder` = facts about the claimant (`leased`: it still holds a lease on this profile; `turn`: its turn —
- * 'idle' | 'running' | 'waiting' | null unknown), `userDriving` = a conversation whose live view the USER has taken this
- * browser over from (null = none; the asker's OWN takeover is `browser_paused`, judged before this).
- *   ok (claim)          nobody drives / the asker already does / the claimant let go (no lease, its turn ended, or
- *                       `holdMs` without a command) — the asker becomes the driver
- *   browser_busy        another conversation's agent is mid-work on it (or the user drives it from another
- *                       conversation's live view) — named, with an upper bound to wait; NEVER a queue (a queue needs a
- *                       wake, a billed turn nobody typed — spend-authorizer territory)
- */
-function driveVerdict({ drive = null, browserKey, holder = {}, userDriving = null, now = 0, holdMs = DRIVE_HOLD_MS } = {}) {
-  const me = parentKeyOf(String(browserKey || ''));
-  const t = Number(now) || 0;
-  if (userDriving && userDriving.browserKey && parentKeyOf(userDriving.browserKey) !== me) {
-    return { ok: false, code: 'browser_busy', by: 'user', holderKey: parentKeyOf(userDriving.browserKey), retryAfterMs: null };
-  }
-  const claim = { browserKey: me, at: t, since: drive && parentKeyOf(drive.browserKey) === me ? (Number(drive.since) || t) : t };
-  if (!drive || !drive.browserKey || parentKeyOf(drive.browserKey) === me) return { ok: true, claim, why: drive ? 'already driving' : 'nobody drives' };
-  const h = holder || {};
-  const quietMs = t - (Number(drive.at) || 0);
-  if (h.leased === false) return { ok: true, claim, why: 'the previous driver let go (no lease)' };
-  if (h.turn === 'idle') return { ok: true, claim, why: 'the previous driver\'s turn ended' };
-  if (quietMs >= Number(holdMs)) return { ok: true, claim, why: `the previous driver sent no command for ${Math.round(quietMs / 1000)} s` };
-  return { ok: false, code: 'browser_busy', by: 'agent', holderKey: parentKeyOf(drive.browserKey), retryAfterMs: Math.max(1000, Number(holdMs) - quietMs) };
-}
-/**
- * The words of a `browser_busy` refusal. It NAMES the other conversation — the owner's ruling (2) says the second
- * conversation "is told so by name"; this is the ONE deliberate exception to B-325a (another session's name never
- * reaches an agent through the cap refusals), because here the agent must be able to tell the user WHICH chat to wait
- * for or take over from. A refusal names a button or a wait, never a command line.
- */
-function browserBusyRefusal({ label = '', holderName = '', by = 'agent', retryAfterMs = null } = {}) {
-  const who = `"${label || 'this profile'}"`;
-  const other = holderName ? `"${holderName}"` : 'another conversation';
-  const secs = Number.isFinite(Number(retryAfterMs)) && retryAfterMs !== null ? Math.max(1, Math.ceil(Number(retryAfterMs) / 1000)) : null;
-  if (by === 'user') {
-    return { ok: false, code: 'browser_busy', by: 'user', holder: holderName || null, retryAfterMs: null,
-      error: `${who} is being driven by the user right now (from the live view of ${other}) — your command did NOT run; one driver at a time on a shared browser. Wait until the user hands it back, then run the command again — never in a loop`,
-      remedy: 'wait for the user to hand the browser back (or ask them)' };
-  }
-  return { ok: false, code: 'browser_busy', by: 'agent', holder: holderName || null, retryAfterMs: secs === null ? null : secs * 1000,
-    error: `${other} is using ${who} right now — your command did NOT run; one conversation drives a shared browser at a time. Wait${secs ? ` (at most ${secs} s — until its turn ends or it goes quiet)` : ''}, then run the command again; or the user can take over from ${other}'s live view`,
-    remedy: `run the same command again once ${other} is done${secs ? ` (at most ${secs} s)` : ''} — once, never in a loop; or ask the user` };
-}
+// ── OWNER RULING A (2), RETIRED (lane browser-windows, 2026-10-01): NO DRIVER CLAIM BETWEEN CONVERSATIONS ──
+// The 90 s "one conversation drives a shared browser at a time" claim (`driveVerdict`, `browser_busy` by agent) is
+// DELETED. Measured on 0.38.1 + Chrome 154 (src/browser-windows.js WINDOWS_PROOF): each conversation's session runs its
+// OWN daemon — a command of one never waits for another's (4–5 ms beside a running `wait 5000`) — and every holder's tabs
+// now open in windows of its own, so nobody's tab hides anybody's page. A window has ONE holder; the only pause left is the
+// user's takeover of THAT window (src/browser-takeover.js — `browser_paused`, the leases in that window only).
 // ── OWNER RULING A (3): the CAP of a shared browser ──
 /** Is this live browser record THIS conversation's? Its own ephemeral / a helper's, or a profile it (or a helper) holds a
  *  lease on — so a SHARED profile's browser counts once in EACH conversation that holds a lease on it (the per-
@@ -2823,6 +2790,14 @@ function ephemeralHolderRefusal({ label = '', holderPid = null, holderName = '' 
 /** Relaunches a record may make inside HEAL_WINDOW_MS before it is `browser_unstable`. */
 const HEAL_BUDGET = 3;
 const HEAL_WINDOW_MS = 10 * 60 * 1000;
+// ── B-47f9 (lane browser-reliability, 2026-10-02): A SECOND, LONGER TIER ──
+// The 10-minute window slides: a browser closing every 4 minutes never had 3 relaunches inside it, so it was restarted
+// on every closure for as long as a lease held it — 6/6 in 24 minutes, never unstable, nobody told (lane H's verify LOW 2,
+// "a known bound"). A second tier counts the same attempts over a day: HEAL_DAY_BUDGET relaunches inside HEAL_DAY_MS ⇒
+// the same `browser_unstable`, the same ONE notice (its words name the day). The ledger keeps a day of attempts.
+/** Relaunches a record may make inside HEAL_DAY_MS (the slow closer's tier) before it is `browser_unstable`. */
+const HEAL_DAY_BUDGET = 10;
+const HEAL_DAY_MS = 24 * 60 * 60 * 1000;
 /** A closure a relaunch attempt made (a failed relaunch, a browser that died before it was identified) is retried by the
  *  tick after this — counted from THAT close; a refusal that attempted nothing (another browser holds the directory, a
  *  cloak record) never arms it. A verb retries at once. */
@@ -2848,18 +2823,23 @@ const HEAL_FAIL_SPAN_MS = (HEAL_FAIL_BUDGET - 1) * HEAL_RETRY_MS;
 function healLedger(x) {
   const h = x && typeof x === 'object' && !Array.isArray(x) ? x : {};
   const num = (v) => { const n = typeof v === 'number' ? v : NaN; return Number.isFinite(n) && n > 0 ? n : null; };
-  const attempts = (Array.isArray(h.attempts) ? h.attempts : []).map(num).filter((n) => n !== null).slice(-20);
+  const attempts = (Array.isArray(h.attempts) ? h.attempts : []).map(num).filter((n) => n !== null).slice(-(HEAL_DAY_BUDGET * 2));
   const f = h.failed && typeof h.failed === 'object' && !Array.isArray(h.failed) ? h.failed : null;
   const failed = f && Number.isInteger(f.count) && f.count > 0 && num(f.since) !== null ? { count: f.count, since: num(f.since) } : null;
   return { attempts, lastOutcome: typeof h.lastOutcome === 'string' && h.lastOutcome ? h.lastOutcome : null, noticedAt: num(h.noticedAt), unstableCount: Number.isInteger(h.unstableCount) && h.unstableCount > 0 ? h.unstableCount : null,
-    failed, unstableKind: h.unstableKind === 'failing' ? 'failing' : null, unstableSpanMs: num(h.unstableSpanMs) };
+    failed, unstableKind: h.unstableKind === 'failing' ? 'failing' : null, unstableSpanMs: num(h.unstableSpanMs), unstableWindowMs: num(h.unstableWindowMs) };
 }
-/** May a record relaunch its browser NOW? → `{ok, count, recent}`: `recent` = the attempts still inside the window (the
- *  ledger keeps only these), `count` their number; ≥ budget ⇒ ok:false (`browser_unstable`). */
-function healBudgetVerdict({ attempts = [], now = 0, budget = HEAL_BUDGET, windowMs = HEAL_WINDOW_MS } = {}) {
+/** May a record relaunch its browser NOW? → `{ok, count, recent, kept, windowMs}`: `recent` = the attempts inside the short
+ *  window, `kept` = those inside the day (the ledger keeps these), `count` / `windowMs` = the tier that judged; budget
+ *  attempts in the short window, or (B-47f9) dayBudget in the day ⇒ ok:false (`browser_unstable`). */
+function healBudgetVerdict({ attempts = [], now = 0, budget = HEAL_BUDGET, windowMs = HEAL_WINDOW_MS, dayBudget = HEAL_DAY_BUDGET, dayMs = HEAL_DAY_MS } = {}) {
   const t = Number(now) || 0;
-  const recent = (Array.isArray(attempts) ? attempts : []).filter((a) => typeof a === 'number' && Number.isFinite(a) && a > t - windowMs);
-  return recent.length >= budget ? { ok: false, code: 'browser_unstable', count: recent.length, recent } : { ok: true, code: null, count: recent.length, recent };
+  const valid = (Array.isArray(attempts) ? attempts : []).filter((a) => typeof a === 'number' && Number.isFinite(a));
+  const recent = valid.filter((a) => a > t - windowMs);
+  const kept = valid.filter((a) => a > t - Math.max(windowMs, dayMs));
+  if (recent.length >= budget) return { ok: false, code: 'browser_unstable', count: recent.length, recent, kept, windowMs };
+  if (kept.length >= dayBudget) return { ok: false, code: 'browser_unstable', count: kept.length, recent, kept, windowMs: dayMs };
+  return { ok: true, code: null, count: recent.length, recent, kept, windowMs };
 }
 /** r6 MINOR 1: may a record keep ASKING its daemon to relaunch after `failed` (the streak of consecutive asks the binary
  *  refused)? → `{ok, count, spanMs}`; HEAL_FAIL_BUDGET of them spanning ≥ HEAL_FAIL_SPAN_MS ⇒ ok:false (`browser_unstable`). */
@@ -2869,7 +2849,7 @@ function failedAskVerdict({ failed = null, now = 0, budget = HEAL_FAIL_BUDGET, s
   const span = f ? Math.max(0, (Number(now) || 0) - f.since) : 0;
   return count >= budget && span >= spanMs ? { ok: false, code: 'browser_unstable', count, spanMs: span } : { ok: true, code: null, count, spanMs: span };
 }
-const windowWords = (ms) => `${Math.max(1, Math.round((Number(ms) || HEAL_WINDOW_MS) / 60000))} min`;
+const windowWords = (ms) => { const m = Number(ms) || HEAL_WINDOW_MS; return m >= 2 * 3600e3 ? `${Math.round(m / 3600e3)} h` : `${Math.max(1, Math.round(m / 60000))} min`; };
 /** The refusal a lease / a view / an attach gets while a profile's browser is `browser_unstable` — `kind` 'closing' (it was
  *  started again and closed each time) or (r6) 'failing' (every ask to start it again failed: no browser was started). */
 function unstableText({ label = '', count = HEAL_BUDGET, windowMs = HEAL_WINDOW_MS, kind = 'closing', spanMs = null } = {}) {
@@ -3368,7 +3348,7 @@ module.exports = {
   parseDevToolsActivePort, cdpEndpointOf, // verify r8: the second legacy witness — the record's cdpUrl vs the directory's DevToolsActivePort (what a .199 boot on the new pod leaves)
   keeperMarksOf, keeperMarkArg, withKeeperMark, launchedByCli, // lane H verify r4: the keeper's launch mark (ownership by cmdline, never by directory)
   AUTOMATION_FLAG, automationFlagVerdict, withAutomationFlag, // lane browser-propose: the one launch flag that stops Chromium announcing automation
-  HEAL_BUDGET, HEAL_WINDOW_MS, HEAL_RETRY_MS, healLedger, healBudgetVerdict, unstableText, unstableNotice, // lane H verify r5: the heal ledger + budget
+  HEAL_BUDGET, HEAL_WINDOW_MS, HEAL_DAY_BUDGET, HEAL_DAY_MS, HEAL_RETRY_MS, healLedger, healBudgetVerdict, unstableText, unstableNotice, // lane H verify r5: the heal ledger + budget
   HEAL_FAIL_BUDGET, HEAL_FAIL_SPAN_MS, failedAskVerdict, // lane H verify r6: a failed relaunch ask is not a relaunch — its own streak + cap
   // P4 (§7.1–§7.3): provider rows + capability gating, the §7.2.1 egress record, the cdp env pair, the cloakserve plan
   CLOUD_PROVIDERS, CLOUD_UNWIRED, providerRow, providerIds, providerControl, capabilityRefusal, providerRows,
@@ -3380,7 +3360,7 @@ module.exports = {
   profileChangedRefusal, profileChangeNotice, renderProfileChangeNotice, auditVerbOf, auditLine,
   toldView, blindnessVerdict, nextChildN, childEnvFor, childPairsOver, adoptDirVerdict, normAbsPath,
   // OWNER RULING A (2026-09-26): who may use a profile (one field), one browser per profile, one driver at a time, the cap
-  SCOPES, scopeOf, notOwnerRefusal, migrateScopeAll, joinOrLaunch, DRIVE_HOLD_MS, driveVerdict, browserBusyRefusal,
+  SCOPES, scopeOf, notOwnerRefusal, migrateScopeAll, joinOrLaunch,
   // "Who can use it" is a LIST (2026-09-27): the ONE reader, the admission's words, the agent's view, the whole-list rule,
   // the write's verdicts, the pick that writes the list, the migration
   WHO_KINDS, WHO_MAX, whoRow, normalizeWho, whoMayUse, useDigestOf, groupsUnreadableRefusal, agentUseOf, agentProfileView,

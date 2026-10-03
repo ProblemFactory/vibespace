@@ -2,6 +2,8 @@ node_modules/
 node_modules
 public/bundle.js
 public/novnc.js
+# the published design page's runtime (src/design-viewer-entry.js — the second esbuild entry, novnc's precedent): built by npm run build, inlined by the hub at publish
+public/design-viewer.js
 # a scratch root's run record (scripts/scratch-run.mjs, B-1d08): ci.mjs stamps its isolated worktree AFTER
 # `git worktree add`, so the record sits in a checkout of this repository and must never read as a change
 .vs-run.json

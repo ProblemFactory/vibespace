@@ -62,7 +62,10 @@
  *   · per-app IDLE timeout from the last INPUT the bridge reported (DA3:
  *     30 min default, settings `desktop.idleTimeoutMin`, 0 = never; "keep
  *     running" is one explicit action)
- *   · stop = SIGTERM the app, then the picture server, then the WM, then the
+ *   · stop = (a LibreOffice session first ASKED to quit through its own File ▸
+ *     Exit — B-04da ④, `askAppToClose`: its save prompt answers, never a
+ *     signal over unsaved edits unless the person confirmed the loss) SIGTERM
+ *     the app, then the picture server, then the WM, then the
  *     X display, each VERIFIED gone (SIGKILL after a grace), then whatever
  *     still carries the session marker (rule 10) — no orphans on a machine
  *     with a readable /proc; the stated BOUNDARY (rule 8) is the one without
@@ -222,6 +225,12 @@ const STORE_FILE = 'desktop-apps.json';
 const LOG_DIR = 'desktop-apps';
 const TICK_MS = 5000;              // liveness + idle sweep
 const STOP_GRACE_MS = 3000;        // SIGTERM → SIGKILL
+/** B-04da ④: how long a stop waits for LibreOffice's own quit (`.uno:Quit` handed over its profile pipe) before it
+ *  answers `app-asked` — an unmodified document quits in ~250 ms (measured 224 ms); a longer wait means its "Save
+ *  changes?" prompt is up in the app's window, and only the person answers that. */
+const ASK_CLOSE_MS = 4000;
+/** …and how many times a hand-over that RETURNED while the app still runs is sent again (a quit dropped during the load). */
+const ASK_TRIES = 3;
 const RFB_DEADLINE_MS = 15000;     // picture server must answer its banner within this
 /** How long stop() waits for an in-flight bring-up to notice the verdict
  *  before its second teardown (rule 7). The bring-up's own longest wait after
@@ -297,13 +306,14 @@ const settingsReader = (obj) => (key) => (obj && typeof obj === 'object' && SETT
  *                    with a fourth rung to prove this file needs no change for one)
  *   log, now, tickMs, guardSampleMs, geometry, hostId
  *   fitSlowBeltMs  — the settled belt's cadence (default FIT_SLOW_BELT_MS; the suite shrinks it)
+ *   askCloseMs     — B-04da ④: the wait for an asked LibreOffice to quit (default ASK_CLOSE_MS)
  *   hooks          — the hub's policy (see the header); absent on a daemon
  *   apps           — the apps machine half (src/app-serve.js; default: created here over `appsHome` + dataDir as
  *                    the package slot's state dir) — its catalog rows join the registry (`app.<entry>`)
  *   appsHome       — the user's home on this machine (default: the base env's HOME, else os.homedir())
  */
 function install({ dataDir, env, serverSetting = () => undefined, singleton = null,
-  display = displayFacts, limits = LIMITS, registryRows = M.DEFAULT_REGISTRY, backends = M.DISPLAY_BACKENDS, log = console, now = Date.now, tickMs = TICK_MS, guardSampleMs = null, geometry = DEFAULT_GEOMETRY, hostId = null, fitSlowBeltMs = FIT_SLOW_BELT_MS, hooks = {}, apps = null, appsHome = null } = {}) {
+  display = displayFacts, limits = LIMITS, registryRows = M.DEFAULT_REGISTRY, backends = M.DISPLAY_BACKENDS, log = console, now = Date.now, tickMs = TICK_MS, guardSampleMs = null, geometry = DEFAULT_GEOMETRY, hostId = null, fitSlowBeltMs = FIT_SLOW_BELT_MS, askCloseMs = ASK_CLOSE_MS, hooks = {}, apps = null, appsHome = null } = {}) {
   if (!dataDir) throw new Error('desktop-serve: dataDir is required');
   if (env && typeof env === 'object') { const e0 = env; env = () => e0; }
   if (typeof env !== 'function') throw new Error('desktop-serve: env must be a function returning the sanitised base env');
@@ -327,6 +337,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
   const samples = new Map();    // id -> { at, sample, pids } — the latest sample, for the `status` op (a device's hub judges it)
   const fits = new Map();       // id -> { timer, inflight, firstUntil, refusedAt } (P8-2 x4: the app-fit step's state, never persisted)
   const stopping = new Set();
+  const quitAsks = new Map();   // id -> the ChildProcess of a `.uno:Quit` hand-over still waiting on LibreOffice's save prompt (B-04da ④)
   const deferred = new Map();   // id -> () => bringUp — a launch whose start waits for the record it replaces to stop (a browser relaunch, 2.369.176)
   let dirty = false;
   let factsCache = null;        // { at, facts }
@@ -672,14 +683,30 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     // §7.9: a LibreOffice session relaunches the same way — its document is LOCKED by the running instance
     // (.~lock.<name>#: a successor started beside it would open "Document in use"), and its profile goes with it
     if (rec.browser || rec.office) {
+      // B-04da ④: a LibreOffice session is ASKED to quit first (its own save prompt, in its window) — the successor is
+      // minted only once it has; an app still asking leaves everything as it was (`app-asked`: the person answers the
+      // prompt, or relaunches again with `force`). `stopping` is HELD from the ask to the stop: the app's own exit in
+      // between is the relaunch's, never an `exited` verdict that would close the window before its successor exists.
+      let held = false;
+      if (M.askCloseVerdict(rec, { force: rv.force }).ask) {
+        stopping.add(id);
+        let a = null;
+        try { a = await askAppToClose(rec); } finally { if (!(a && a.closed)) stopping.delete(id); }
+        if (!a.closed) throw askedError(rec, a, 'relaunch');
+        held = true;
+      }
       const nextId = newId();
-      const next = await launch({ ...M.relaunchBodyOf(rec), ...(rec.browser ? { url: rec.url || undefined, keepProfile: rec.keepProfile === true } : {}), dpr: rv.dpr, uiScale: rv.uiScale }, { ...lopts, id: nextId, deferBringUp: true });
+      let next;
+      try { next = await launch({ ...M.relaunchBodyOf(rec), ...(rec.browser ? { url: rec.url || undefined, keepProfile: rec.keepProfile === true } : {}), dpr: rv.dpr, uiScale: rv.uiScale }, { ...lopts, id: nextId, deferBringUp: true }); }
+      catch (e) { if (held) await stop(id, { why: 'user', held: true }); throw e; } // the app already quit: its record ends as a person's stop
       const armSeat = typeof onSuccessor === 'function' ? onSuccessor(nextId) : null;
       rec.replacedBy = nextId;
       commit();
       let old;
       rec.profileCarryTo = nextId; // stop() moves the profile onto this successor once every part is gone (the record carries the order; stop's reasons stay the closed list §54b pins)
-      try { old = await stop(id, { why: 'relaunch' }); } finally { startDeferred(nextId); if (typeof armSeat === 'function') armSeat(); }
+      // verify r1: a FORCED relaunch (the person confirmed losing the edits) stops with that force — a stop that asked
+      // again would answer `app-asked` AFTER the successor was minted, and the window would follow it off the old app
+      try { old = await stop(id, { why: 'relaunch', held, force: rv.force }); } finally { startDeferred(nextId); if (typeof armSeat === 'function') armSeat(); }
       log.log?.(`[desktop] ${id} relaunched as ${nextId} at ${next.scale}× (${next.scaleOrigin}) with its profile carried: ${rec.label}`);
       return { app: get(nextId) || next, replaced: old };
     }
@@ -1019,13 +1046,74 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     if (rec.profileDir && !M.isLiveState(rec.state) && !stopping.has(rec.id)) await retireProfile(rec, { clean, why: rec.state }); // B-bfe6: a stop retires AFTER its verdict (below)
     return clean;
   }
-  async function stop(id, { why = 'user' } = {}) {
+  /**
+   * B-04da ④ — ASK, NEVER SIGNAL, WHILE A DOCUMENT MAY HOLD EDITS. A LibreOffice session is asked to quit through its
+   * OWN File ▸ Exit (O.officeQuitArgv: `.uno:Quit` handed over the session's profile pipe — every modified document
+   * raises LibreOffice's "Save changes?" in its window), then its app part is watched for `askCloseMs` (wall clock).
+   * → { closed:true, why: 'quit'|'not-running' } | { closed:false, why: 'asking'|'pending'|'no-handover'|'spawn-failed',
+   * error? } — 'pending' = a hand-over still waits on that prompt (never a second prompt stacked on it). The hand-over
+   * carries the session marker, so a forced stop's teardown reaps it with the rest. The CALLER holds `stopping` (the
+   * app's own exit meanwhile is the stop's to judge — onPartExit ignores it).
+   */
+  async function askAppToClose(rec) {
+    const handles = children.get(rec.id) || null;
+    if (!rec.pids.app || !partIsOurs(rec, 'app', handles)) return { closed: true, why: 'not-running' };
+    const prev = quitAsks.get(rec.id);
+    if (prev && handleLive(prev)) return { closed: false, why: 'pending' };
+    const argv = O.officeQuitArgv(rec.profileDir);
+    const xenv = x11EnvFor(rec.id);
+    if (!argv || !xenv || !rec.exec) return { closed: false, why: 'no-handover', error: 'the session has no profile or display to hand the request to' };
+    // the hand-over BLOCKS while LibreOffice's save prompt is up (measured) — one that RETURNED while the app still runs
+    // was dropped (a request landing while the document still loads) and is asked again, at most ASK_TRIES times
+    const ask = async () => {
+      const c = await display.spawnDetached(rec.exec, argv, { env: { ...xenv, [SESSION_ENV]: rec.id }, name: 'libreoffice .uno:Quit' }).spawned;
+      quitAsks.set(rec.id, c);
+      c.once('exit', () => { if (quitAsks.get(rec.id) === c) quitAsks.delete(rec.id); });
+      return c;
+    };
+    let child = null, tries = 1;
+    try { child = await ask(); }
+    catch (e) { log.warn?.(`[desktop] ${rec.id}: could not ask LibreOffice to quit: ${e.message}`); return { closed: false, why: 'spawn-failed', error: e.message }; }
+    const until = Date.now() + askCloseMs;
+    while (Date.now() < until) {
+      if (!partIsOurs(rec, 'app', handles)) { log.log?.(`[desktop] ${rec.id}: LibreOffice quit on its own when asked: ${rec.label}`); return { closed: true, why: 'quit' }; }
+      await sleep(100);
+      if (!handleLive(child) && partIsOurs(rec, 'app', handles) && tries < ASK_TRIES) { await sleep(400); if (partIsOurs(rec, 'app', handles)) { tries++; try { child = await ask(); } catch { /* the wait below answers */ } } }
+    }
+    log.log?.(`[desktop] ${rec.id}: LibreOffice did not quit within ${askCloseMs} ms of being asked — its save prompt is up: ${rec.label}`);
+    return { closed: false, why: 'asking' };
+  }
+  /** The refusal of a stop / relaunch whose app is still asking (B-04da ④): `app-asked`, said for a person, the record
+   *  stamped (`closeAskedAt` / `closeAskedBy`) and broadcast. */
+  function askedError(rec, a, why) {
+    rec.closeAskedAt = now(); rec.closeAskedBy = why;
+    commit();
+    const name = rec.label || rec.id;
+    const msg = a.why === 'no-handover' || a.why === 'spawn-failed'
+      ? `${name} could not be asked to close (${a.error || a.why}) — stopping it now loses any unsaved edits`
+      : `${name} is asking in its own window whether to save its changes — answer it there, or stop it anyway and lose the unsaved edits`;
+    const e = namedError('app-asked', msg);
+    e.asked = a.why;
+    return e;
+  }
+  async function stop(id, { why = 'user', force = false, held = false } = {}) {
     const rec = store.apps[id];
     if (!rec) throw namedError('not-found', `no desktop app ${id}`);
-    if (!M.isLiveState(rec.state)) return view(rec);
-    if (stopping.has(id)) return view(rec);
+    if (!M.isLiveState(rec.state)) { if (held) stopping.delete(id); return view(rec); }
+    if (stopping.has(id) && !held) return view(rec);
     stopping.add(id);
     try {
+      // B-04da ④: a LibreOffice session is asked first (`held` = the relaunch already asked it, under this same hold).
+      // Still asking ⇒ a person's Stop / relaunch is refused `app-asked` (the client offers "stop anyway" = `force`);
+      // the idle timeout never forces — the app keeps running with its prompt up (the hub restarts its idle clock)
+      if (!held && M.askCloseVerdict(rec, { force }).ask) {
+        const a = await askAppToClose(rec);
+        if (!a.closed) {
+          const e = askedError(rec, a, why);
+          if (why === 'idle') { log.log?.(`[desktop] ${id}: idle timeout — ${e.message}; kept running`); return view(rec); }
+          throw e;
+        }
+      }
       // rule 7: `stopping` is what a bring-up still in flight reads at its next
       // await (it adds no more parts); tear down what is recorded now (this
       // also ends the recipe's RFB wait, which watches the picture server's
@@ -1051,6 +1139,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
       rec.state = next || 'exited';
       rec.endedAt = now();
       rec.stoppedBy = why;
+      if (force) rec.stopForced = true; // B-04da ④: the person confirmed losing unsaved edits
       if (why === 'idle') rec.lastError = `stopped after ${Math.round(rec.idleTimeoutMs / 60000)} min without input (idle timeout)`;
       else if (why === 'relaunch') rec.lastError = `relaunched as ${rec.replacedBy || 'a new session'} at another scale`;
       else if (why !== 'user') rec.lastError = why;
@@ -1321,6 +1410,14 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
         log.log?.(`[desktop] adopted ${rec.id}: ${rec.label} on ${rec.display} port ${rec.port} (pid ${rec.pids.app})`);
         armFirstFit(rec.id); // P8-2 x4: its window exists — fitted now, not at the first tick
       } else {
+        // verify r1 (B-04da ④): a LibreOffice session whose display AND app survived is never signalled for its picture
+        // server's silence — asked first (its own save prompt); still asking ⇒ kept ready, the person decides (Stop asks)
+        if (verdict.state === 'failed' && alive.x && alive.app && M.askCloseVerdict(rec).ask) {
+          stopping.add(rec.id);
+          let a = null;
+          try { a = await askAppToClose(rec); } finally { stopping.delete(rec.id); }
+          if (!a.closed) { rec.adoptedAt = now(); rec.lastError = `${verdict.lastError} — kept: LibreOffice may hold unsaved edits (asked to close: ${a.why})`; log.warn?.(`[desktop] ${rec.id} at boot: ${rec.lastError}`); continue; }
+        }
         rec.state = verdict.state; rec.lastError = verdict.lastError; rec.endedAt = now();
         log.warn?.(`[desktop] ${rec.id} ${verdict.state} at boot: ${verdict.lastError} — reaping what is left`);
         await teardown(rec, null);
@@ -1418,7 +1515,7 @@ const idOf = (p) => (typeof p.id === 'string' && /^da-[\w-]{1,64}$/.test(p.id) ?
  *   launch     {body, settings?, scaleChoice?, replacing?} → {ok, app}
  *              (lane D: `body.scaleChoice` = the app's default scale from the launch dialog, origin 'app' — a field of the
  *              launch REQUEST, validated like every other; the op's own `scaleChoice` = a relaunch's pick, origin 'chosen')
- *   stop       {id, why?}                             → {ok, app}
+ *   stop       {id, why?, force?}                     → {ok, app}  (B-04da ④: refused `app-asked` while LibreOffice asks)
  *   status     {id?}                                  → {ok, app, sample} | {ok, apps, samples}
  *   windows    {id}                                   → {ok, windows}
  *   fit        {id, w?, h?}                           → {ok, fit} (w×h = a client asked the display that size)
@@ -1462,7 +1559,7 @@ async function runDesktopServeOp(ds, action, params = {}) {
     if (!id) return bad(`${op} needs a desktop app id (da-…), got ${JSON.stringify(p.id)}`);
     if (!ds.get(id)) return { ok: false, code: 'not-found', error: `no desktop app ${id} on this machine` };
     if (op === 'status') return { ok: true, app: ds.get(id), sample: ds.latestSample(id) };
-    if (op === 'stop') return { ok: true, app: await ds.stop(id, { why: STOP_WHYS.includes(p.why) ? p.why : 'user' }) };
+    if (op === 'stop') return { ok: true, app: await ds.stop(id, { why: STOP_WHYS.includes(p.why) ? p.why : 'user', force: p.force === true }) }; // B-04da ④: `force` = the person confirmed the loss
     if (op === 'keep-alive') return { ok: true, app: ds.keepAlive(id) };
     if (op === 'windows') {
       const r = await ds.windows(id);
@@ -1484,4 +1581,4 @@ async function runDesktopServeOp(ds, action, params = {}) {
   }
 }
 
-module.exports = { install, runDesktopServeOp, DESKTOP_SERVE_OPS, SETTING_KEYS, settingsReader, STORE_FILE, LOG_DIR, TICK_MS, STOP_GRACE_MS, RFB_DEADLINE_MS, SETTLE_BRINGUP_MS, SESSION_ENV, FIT_DEBOUNCE_MS, FIT_FIRST_STEP_MS, FIT_FIRST_WINDOW_MS, FIT_REFUSED_RETRY_MS, FIT_SETTLE_RUNS, FIT_ACTIVE_MS, FIT_SLOW_BELT_MS, EXIT_CENSUS_MS, HISTORY_KEEP, PARTS };
+module.exports = { install, runDesktopServeOp, DESKTOP_SERVE_OPS, SETTING_KEYS, settingsReader, STORE_FILE, LOG_DIR, TICK_MS, STOP_GRACE_MS, ASK_CLOSE_MS, RFB_DEADLINE_MS, SETTLE_BRINGUP_MS, SESSION_ENV, FIT_DEBOUNCE_MS, FIT_FIRST_STEP_MS, FIT_FIRST_WINDOW_MS, FIT_REFUSED_RETRY_MS, FIT_SETTLE_RUNS, FIT_ACTIVE_MS, FIT_SLOW_BELT_MS, EXIT_CENSUS_MS, HISTORY_KEEP, PARTS };

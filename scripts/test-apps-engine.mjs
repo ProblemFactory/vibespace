@@ -319,7 +319,7 @@ console.log('§2b verify-r1 F2 — the same ask again is the open proposal; one 
   const ctlA = await probe(noDedup, UserTodoManager, 'f2a');
   ok(new Set(ctlA.ids).size === 3 && ctlA.gimpCards === 3, 'CONTROL (no-dedup): the same ask three times = three proposals and three cards', ctlA);
   const uSrc = fs.readFileSync(path.join(repo, 'src/user-todos.js'), 'utf8');
-  const noIdent = MUT.load('src/user-todos.js', uSrc.replace(", 'app-install': 'id' })", ' })'), 'no-ident');
+  const noIdent = MUT.load('src/user-todos.js', uSrc.replace(", 'app-install': 'id'", ''), 'no-ident');
   const ctlB = await probe(E, noIdent.UserTodoManager || noIdent, 'f2b');
   ok(ctlB.srcCards === 1 && !ctlB.card1 && /b\.example/.test(ctlB.srcDetails.join(' ')), 'CONTROL (no-identity): the second source\'s card swallowed the first — the first proposal has no card, its words replaced', ctlB);
   // verify-r1 F8: the agent's why reaches the approval card (For you) and the dialog with no hidden / reordering character

@@ -60,5 +60,41 @@ ok(callCount >= 2, `layout.js CALLS the scanner, not just defines it (${callCoun
 ok(/scanStoppedInDesktopStates\([\s\S]{0,200}_bootStoppedSessions\.push|_bootStoppedSessions\.push[\s\S]{0,600}scanStoppedInDesktopStates\(|scanStoppedInDesktopStates\(data, activeId/.test(laySrc),
   'the call feeds the resume-all collector');
 
+// ── B-ddc0 (lane chat-residuals): a restored window's NAME is the session's name, never its title ──
+// The title is `${name} — ${cwd}`; reading it back as the name grew a remote view-only window's
+// name by one " — <cwd>" per reload (the 2026-08-13 boot log: "… — /path ×8" once resumed).
+{
+  const { savedWindowName } = await import('../src/lib/layout.js');
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const { pathToFileURL, fileURLToPath } = await import('node:url');
+  const { mutantCopies, copiesCensus } = await import('./mutant-copy.mjs');
+  const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const cwd = '/home/u/agentic-search';
+  // each reload: restore from the saved record, then viewSession titles the window `${name} — ${cwd}` and names its openSpec
+  const reloads = (scan, n = 8) => {
+    let w = { type: 'chat', backendSessionId: 'abc123', cwd, title: `agentic-search — ${cwd}`, openSpec: { action: 'viewSession', hostId: 'host-aidev', backendSessionId: 'abc123', cwd, name: 'agentic-search' } };
+    const names = [];
+    for (let i = 0; i < n; i++) {
+      const [r] = scan({ desktopMeta: [{ id: 'd1' }, { id: 'd2' }], desktops: { d2: { autoSave: { windows: [w] } } } }, 'd1', [], [], () => null);
+      names.push(r?.name);
+      w = { ...w, title: `${r.name} — ${r.cwd}`, openSpec: { ...w.openSpec, name: r.name } };
+    }
+    return names;
+  };
+  const names = reloads(scanStoppedInDesktopStates);
+  ok(names.length === 8 && names.every((x) => x === 'agentic-search'), 'B-ddc0 a REMOTE view-only window keeps its name across 8 reloads (the title is never read back as the name)', names.slice(-1));
+  ok(savedWindowName({ cwd, title: `agentic-search — ${cwd} — ${cwd} — ${cwd}`, openSpec: { name: `agentic-search — ${cwd} — ${cwd}` } }) === 'agentic-search', 'B-ddc0 an already-grown saved name heals (every trailing " — <cwd>" is the title\'s suffix)');
+  ok(savedWindowName({ cwd, title: `agentic-search — ${cwd}` }) === 'agentic-search' && savedWindowName({ title: 'T' }) === 'T' && savedWindowName({ cwd, title: cwd, openSpec: {} }) === cwd, 'B-ddc0 an old record without openSpec.name: the title minus its suffix (a bare title stays as it is)');
+  const lay = fs.readFileSync(path.join(repo, 'src/lib/layout.js'), 'utf8');
+  ok(!/ws\.title \|\|/.test(lay) && (lay.match(/savedWindowName\(ws\) \|\| 'Session'/g) || []).length === 10, 'B-ddc0 CENSUS: no restore branch reads ws.title as a name (all 10 read savedWindowName)');
+  const M = mutantCopies('resume-name', repo);
+  const pre = lay.replace("  let name = String(typeof spec === 'string' && spec.trim() ? spec : (ws?.title || ''));", "  let name = String(ws?.title || ''); return name;");
+  ok(pre !== lay, 'B-ddc0 (the pre-fix patch applied — the title IS the name)');
+  const P = await import(pathToFileURL(M.write('src/lib/layout.js', pre, 'pre-ddc0')).href);
+  const pn = reloads(P.scanStoppedInDesktopStates);
+  ok((pn[7].match(/ — /g) || []).length === 8, `B-ddc0 NEGATIVE CONTROL: the pre-fix rule grows the name to 8 × " — <cwd>" in 8 reloads (the incident's shape)`, pn[7]);
+  for (const r of copiesCensus(M.files, M.dir, repo, { minCopies: 1, label: 'B-ddc0 ' })) ok(r.pass, r.name, r.detail);
+}
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

@@ -406,7 +406,7 @@ console.log('§1e the PACE rules (PURE) — r3 findings 4 + 5');
 }
 
 // ── the engine fixture: the REAL store + the REAL ladder + a recording authorizer
-function fixture(name, { refuse = new Set(), paceClock = undefined, log = { info() {}, warn() {}, log() {} }, onCleared = undefined } = {}) {
+function fixture(name, { refuse = new Set(), paceClock = undefined, log = { info() {}, warn() {}, log() {} }, onCleared = undefined, ge = GE } = {}) {
   const dataDir = path.join(ROOT, name);
   fs.mkdirSync(dataDir, { recursive: true });
   const store = createChannelStore({ dir: path.join(dataDir, 'channels') });
@@ -428,7 +428,7 @@ function fixture(name, { refuse = new Set(), paceClock = undefined, log = { info
     noteSpend: () => {}, releaseSpend: () => {},
   });
   let t = T0;
-  const eng = GE.create({ store, deliver, broadcast: (m) => bcasts.push(m), now: () => (t += 1000), roster: () => roster, groupSetting: () => 'none', log, ...(paceClock ? { paceClock } : {}), ...(onCleared ? { onCleared } : {}) });
+  const eng = ge.create({ store, deliver, broadcast: (m) => bcasts.push(m), now: () => (t += 1000), roster: () => roster, groupSetting: () => 'none', log, ...(paceClock ? { paceClock } : {}), ...(onCleared ? { onCleared } : {}) });
   return { store, eng, deliver, sessions, auths, posts, cards, bcasts, dataDir, roster, close: () => { try { deliver.flush(); } catch {} store.close(); } };
 }
 
@@ -1004,11 +1004,14 @@ console.log('§3k a renamed member session: the panel\'s count and the server\'s
   const text = '@beta please look at this';
   const pv = wakePreview(client, text).length;
   const r1 = await ownerPost(text, pv);
-  ok(pv === 2 && r1.ok === false && r1.code === 'wake-count-mismatch' && r1.wakes === 1, 'FIXTURE: the panel drew "beta" (preview 2), the server reads "beta-renamed" (1) ⇒ 409', JSON.stringify({ pv, r1 }));
-  ok(r1.group && r1.group.id === gid && r1.group.members.some((m) => m.name === 'beta-renamed'), 'the 409 CARRIES the fresh group view (live names) — the composer repaints from it before the next click', JSON.stringify(r1.group && r1.group.members.map((m) => m.name)));
-  const pv2 = r1.group ? wakePreview(r1.group, text).length : -1;
-  const r2 = await ownerPost(text, pv2);
-  ok(pv2 === 1 && r2.ok === true && r2.woke.length === 1, '…so the SECOND click counts against live names and is sent (the preview now says who it truly wakes)', JSON.stringify({ pv2, ok: r2.ok }));
+  // B-ff04: an @ is resolved AT SEND against the live names — "@beta" names nobody now, so the send is refused BY NAME
+  // (unknown-mention, the candidates said) before any count is compared; nothing is written
+  ok(pv === 2 && r1.ok === false && r1.code === 'unknown-mention' && r1.token === 'beta' && (r1.candidates || []).some((c) => c.conversationId === B && c.name === 'beta-renamed'), 'FIXTURE: the panel drew "beta" (preview 2), the server reads "beta-renamed" ⇒ refused unknown-mention with the renamed member as the candidate', JSON.stringify({ pv, r1 }));
+  ok(r1.group && r1.group.id === gid && r1.group.members.some((m) => m.name === 'beta-renamed'), 'the refusal CARRIES the fresh group view (live names) — the composer repaints from it before the next click', JSON.stringify(r1.group && r1.group.members.map((m) => m.name)));
+  const text2 = '@beta-renamed please look at this';
+  const pv2 = r1.group ? wakePreview(r1.group, text2).length : -1;
+  const r2 = await ownerPost(text2, pv2);
+  ok(pv2 === 2 && r2.ok === true && r2.woke.length === 2, '…so the SECOND click, @ the live name, counts against live names and is sent (the preview says who it truly wakes)', JSON.stringify({ pv2, ok: r2.ok }));
   // and a rename is ANNOUNCED: the roster's entry point asks the engine, which broadcasts only on a change
   f.roster[2].name = 'gamma-renamed';
   const b0 = f.bcasts.length;
@@ -1110,6 +1113,102 @@ console.log('§4c a terminal\'s automatic answers are not a person typing');
   ok(/if \(isTypedInput\(chunk\)\) session\._userInputAt = Date\.now\(\);\s*\n\s*session\.pty\.write\(chunk\)/.test(wsSrc), 'PIN: the input case stamps _userInputAt through isTypedInput');
 }
 
+console.log('§4d a restart\'s first prompt: the re-delivered full context never crowds the report out (B-c198)');
+{
+  // The owner, 2026-10-02 16:40 (the 3D-house agent): a next-turn group message waited through a USER turn. That turn
+  // was the first prompt after the 16:23 restart — every seen marker is persisted null, so the Task Group's FULL
+  // context rode again and filled the cap (the journal: "the jobs update (538 B) waits … the 0 B left under the inline
+  // cap"); the report, budgeted LAST from what was left, got nothing and waited without a word.
+  const AR = require(path.join(REPO, 'src/agent-routes.js'));
+  const f = fixture('e4d');
+  const made = await f.eng.create({ by: A, name: 'house', members: [B], quiet: true });
+  await f.eng.post({ group: made.group.id, from: A, text: 'news that waited across the restart' });
+  const routes = {};
+  const app = { get: (p, h) => { routes['GET ' + p] = h; }, post: (p, h) => { routes['POST ' + p] = h; }, put() {}, delete() {}, use() {} };
+  const wB = [...f.sessions.keys()].find((k) => f.sessions.get(k).claudeSessionId === B);
+  const sB = Object.assign(f.sessions.get(wB), { agentToken: 'vsst_beta4d', cwd: '/tmp', _toolsIntroSeen: true, _mgrIntroSeen: true });
+  let fullBytes = 11000;
+  const FULL = () => { const head = '# Task Group "3D house" (T-house)\nObjective: the house model\n'; const lines = []; for (let i = 0; Buffer.byteLength(head + lines.join('\n'), 'utf-8') < fullBytes; i++) lines.push(`- [10-02 16:${String(i % 60).padStart(2, '0')}Z] activity line ${i} ` + 'x'.repeat(40)); return head + lines.join('\n'); };
+  const groupRow = { id: 'T-house', title: '3D house', updatedAt: 1, contentUpdatedAt: 1 };
+  AR.setupAgentRoutes({
+    app, activeSessions: f.sessions,
+    tasks: { groupsForSession: () => [groupRow], renderContext: () => FULL(), snapshotForDiff: () => ({}), contextDirSignature: () => '', _persistRescueLine: () => 'If a block is cut, read it with vibespace-task show --full (persisted-output).', backlogNudgeFor: () => '' },
+    sessionStatus: { consumeNotices: () => [], pendingNotices: () => [], get: () => null, rekey() {} }, SessionStatusManager: { renderNotices: () => '' },
+    userTodos: {}, sessionStatusKey: (s) => 'claude:' + s.claudeSessionId, serverSetting: (k) => (k === 'agents.perTurnToolReminder' ? false : undefined),
+    integrationEnabled: () => true, scheduleCtxSync() {}, remoteCtxBaseFor: () => null, readUserState: () => ({}), getJobs: () => null, deliver: null,
+    getGroups: () => f.eng,
+  });
+  const ask = () => new Promise((resolve) => { routes['GET /api/agent/prompt-context']({ headers: { authorization: 'Bearer vsst_beta4d' }, query: {} }, { json: (o) => resolve(o), status() { return this; } }); });
+  sB._userInputAt = Date.now();   // the owner types the restart's first prompt
+  const first = String((await ask()).context || '');
+  ok(first.includes('news that waited across the restart') && first.includes('### Group messages since your last turn'),
+    'the restart\'s first USER turn, its Task Group\'s full context (11 KB) re-delivered, STILL carries the waiting group report', first.slice(-600));
+  ok(Buffer.byteLength(first, 'utf-8') <= 9600 && first.slice(0, 400).includes('# Task Group "3D house" (T-house)') && /context trimmed to stay inline — run `vibespace-task show --full`/.test(first),
+    '…the full context keeps its HEAD and gives up its TAIL (the show --full pointer), the whole delivery ≤ 9600 B', `${Buffer.byteLength(first, 'utf-8')} B`);
+  ok(/Reply: vibespace-msg send g-[0-9a-f]{8} "\.\.\."/.test(first.slice(first.indexOf('### Group messages since your last turn'))), '…and the report rides WHOLE (its closing Reply line is there)');
+  await new Promise((r) => setTimeout(r, 30));
+  sB._userInputAt = Date.now() + 1;
+  const second = String((await ask()).context || '');
+  ok(!second.includes('news that waited across the restart'), '…exactly ONCE (its marker moved with it)');
+  // CONTROL: no report waiting ⇒ the full context is cut exactly as before (capInline at the cap, no room held)
+  delete sB._groupSeenAt;
+  sB._userInputAt = Date.now() + 2;
+  const plain = String((await ask()).context || '');
+  ok(plain.slice(0, 400).includes('# Task Group "3D house" (T-house)') && Buffer.byteLength(plain, 'utf-8') > 9400 && Buffer.byteLength(plain, 'utf-8') <= 9600,
+    'CONTROL: with nothing waiting the re-delivered full context takes the whole cap as before (no room held for a report that is not there)', `${Buffer.byteLength(plain, 'utf-8')} B`);
+  // CONTROL: a full context that fits beside the report is not cut at all
+  fullBytes = 3000;
+  delete sB._groupSeenAt;
+  await f.eng.post({ group: made.group.id, from: A, text: 'a second piece of news' });
+  sB._userInputAt = Date.now() + 3;
+  const small = String((await ask()).context || '');
+  ok(small.includes('a second piece of news') && !/context trimmed/.test(small), 'CONTROL: a full context that fits beside the report rides uncut, the report with it');
+  f.close();
+}
+
+console.log('§4d2 three groups\' reports fill the held room beside a 6 KB preamble — the cut keeps its pointer, the report rides (B-c198 verify r1)');
+{
+  // verify r1: three groups with news beside a 2 000-char CJK preamble (agents.injectPreamble keeps 4 000 chars) filled
+  // the held room to within 90 B; the full re-delivery's cut then got a cap under its OWN pointer, capInline's
+  // subarray(0, -n) kept the whole text, and the report waited through the restart's first USER turn — B-c198 again
+  const AR = require(path.join(REPO, 'src/agent-routes.js'));
+  let rows = 0, reached = 0, rode = 0, over = 0;
+  const seen = [];
+  for (const full of [3000, 11000]) for (const msz of [3, 5]) {
+    const f = fixture(`e4d2-${full}-${msz}`);
+    for (let gi = 0; gi < 3; gi++) {
+      const made = await f.eng.create({ by: A, name: 'g' + gi, members: [B], quiet: true });
+      for (let i = 0; i < 40; i++) await f.eng.post({ group: made.group.id, from: A, text: `news ${gi}.${i} ` + '群消息内容'.repeat(msz) });
+    }
+    const routes = {};
+    const app = { get: (p, h) => { routes['GET ' + p] = h; }, post: (p, h) => { routes['POST ' + p] = h; }, put() {}, delete() {}, use() {} };
+    const wB = [...f.sessions.keys()].find((k) => f.sessions.get(k).claudeSessionId === B);
+    const tok = `vsst_e4d2_${full}_${msz}`;
+    const sB = Object.assign(f.sessions.get(wB), { agentToken: tok, cwd: '/tmp', _toolsIntroSeen: true, _mgrIntroSeen: true });
+    const FULL = () => { const head = '# Task Group "3D house" (T-house)\nObjective: the house model\n'; const lines = []; for (let i = 0; Buffer.byteLength(head + lines.join('\n'), 'utf-8') < full; i++) lines.push(`- activity line ${i} ` + 'x'.repeat(40)); return head + lines.join('\n'); };
+    AR.setupAgentRoutes({
+      app, activeSessions: f.sessions,
+      tasks: { groupsForSession: () => [{ id: 'T-house', title: '3D house', updatedAt: 1, contentUpdatedAt: 1 }], renderContext: () => FULL(), snapshotForDiff: () => ({}), contextDirSignature: () => '', _persistRescueLine: () => 'If a block is cut, read it with vibespace-task show --full (persisted-output).', backlogNudgeFor: () => '' },
+      sessionStatus: { consumeNotices: () => [], pendingNotices: () => [], get: () => null, rekey() {} }, SessionStatusManager: { renderNotices: () => '' },
+      userTodos: {}, sessionStatusKey: (s) => 'claude:' + s.claudeSessionId,
+      serverSetting: (k) => (k === 'agents.perTurnToolReminder' ? false : k === 'agents.injectPreamble' ? '请'.repeat(2000) : undefined),
+      integrationEnabled: () => true, scheduleCtxSync() {}, remoteCtxBaseFor: () => null, readUserState: () => ({}), getJobs: () => null, deliver: null,
+      getGroups: () => f.eng,
+    });
+    const ask = () => new Promise((resolve) => { routes['GET /api/agent/prompt-context']({ headers: { authorization: 'Bearer ' + tok }, query: {} }, { json: (o) => resolve(o), status() { return this; } }); });
+    sB._userInputAt = Date.now();
+    const first = String((await ask()).context || '');
+    rows++;
+    if (/context trimmed to stay inline — run `vibespace-task show --full`/.test(first)) reached++;
+    if (first.includes('### Group messages since your last turn') && first.includes('news 2.39')) rode++;
+    if (Buffer.byteLength(first, 'utf-8') > 9600) over++;
+    seen.push(`${full}/${msz}: ${Buffer.byteLength(first, 'utf-8')} B`);
+    f.close();
+  }
+  ok(rows === 4 && reached === rows, `the walk REACHES the rule: every row's re-delivered full context is cut beside the held report (${reached}/${rows})`, seen.join(' · '));
+  ok(rode === rows && over === 0, `three groups' reports beside a 6 KB preamble ride on the restart's first USER turn in every row (${rode}/${rows}; was 0/4: the cut's cap fell under its own pointer), each delivery ≤ 9600 B (${over} over)`, seen.join(' · '));
+}
+
 console.log('§4b wiring pins');
 {
   const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf-8');
@@ -1120,8 +1219,8 @@ console.log('§4b wiring pins');
   ok(/const groups = createGroups\(\{ store: channels\.store, deliver,/.test(read('src/server/channels-wiring.js')), 'PIN: the wiring builds the engine over the channels store + THE ladder');
   ok(/if \(isTypedInput\(chunk\)\) session\._userInputAt = Date\.now\(\);\s*\n\s*session\.pty\.write\(chunk\)/.test(read('src/ws-handler.js')) && /session\._userInputAt = Date\.now\(\);\s*\/\/ the owner's own turn/.test(read('src/server/user-input.js')) && /sendUserInput\(data\.sessionId, data\.text/.test(read('src/ws-handler.js')), 'PIN: ws input (typed bytes only — isTypedInput) AND chat-input (unconditional — THE typing path in src/server/user-input.js, shared with the For-you reply) stamp _userInputAt');
   ok(/s\._machineInputAt = Date\.now\(\)/.test(read('src/server/conversation-deliver.js')) && /s\._isStreaming = true; s\._machineInputAt = Date\.now\(\);/.test(read('server.js')), 'PIN: the ladder AND auto-resume\'s continue stamp _machineInputAt');
-  ok(/ge\.sendToAgent\(\{ from: myCid, to: tgt\.cid, text, wake: req\.body\?\.wake === true, create: !who\.job, mayWake, consent \}\)/.test(ar), 'PIN: /api/agent/msg/send routes an agent target through the pair group (a job token never creates one), paced + consented');
-  ok(/const tgt = ge\.resolveTarget\(to, myCid\);/.test(ar) && /ge\.post\(\{ group: tgt\.group\.id, from: myCid, text, wake: req\.body\?\.wake === true, mayWake, consent \}\)/.test(ar) && /const consent = agentConsent\(req\.body\?\.yes\);/.test(ar), 'PIN: send resolves its target ONCE (resolveTarget) and every post it makes carries the wake pace AND the --yes consent');
+  ok(/ge\.sendToAgent\(\{ from: myCid, to: tgt\.cid, text, wake: req\.body\?\.wake === true, create: !who\.job, mayWake, consent, at \}\)/.test(ar), 'PIN: /api/agent/msg/send routes an agent target through the pair group (a job token never creates one), paced + consented');
+  ok(/const tgt = ge\.resolveTarget\(to, myCid\);/.test(ar) && /ge\.post\(\{ group: tgt\.group\.id, from: myCid, text, wake: req\.body\?\.wake === true, mayWake, consent, at \}\)/.test(ar) && /const consent = agentConsent\(req\.body\?\.yes\);/.test(ar), 'PIN: send resolves its target ONCE (resolveTarget) and every post it makes carries the wake pace AND the --yes consent');
   ok((ar.match(/mayWake: wakeFloorFor\(c\.cid\), consent: agentConsent\(b\.yes\)/g) || []).length === 2, 'PIN: group create AND invite carry the wake pace and the consent (an invite is a wake)');
   ok(/return ge && typeof ge\.pacerFor === 'function' \? ge\.pacerFor\(senderCid\) : null;/.test(ar) && !/_wakeFloor/.test(ar), 'PIN: the agent routes\' pace IS the engine\'s persisted pacer — no in-memory floor Map left');
   ok(/if \(!myCid\) return res\.status\(409\)\.json\(\{ error: who\.cidWhy \|\| 'this session has no conversation id yet[^']*', code: 'bad-member' \}\)/.test(ar), 'PIN: with a groups engine, a cid-less sender is refused before the legacy lane — by the caller\'s own sentence (r4: a pending fork is "a fork that has not announced its own conversation id yet")');
@@ -1295,8 +1394,8 @@ console.log('§7 the cards: a group message handed to a turn is SEEN in that cha
   ok(peerMsgs(s4c._normalizer).length === 0, '…and a wake whose record is not in the transcript draws nothing on a rebuild (never a card the CLI did not take)');
   // the codex rung: the frame carries the group, the wrapper's marker hands it to the normalizer
   const cd = fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf-8');
-  ok(/type: 'peer-message', text, fromName: opts\.fromName \|\| null, cardText: opts\.cardText \|\| null, kind, \.\.\.\(opts\.group \? \{ group: opts\.group \} : \{\}\) \}/.test(cd), 'the codex (rpc-queue) frame carries `group`');
-  ok(/webui_peer: \{ name: fromName, body: cardText, kind: peerKind, \.\.\.\(peerGroup \? \{ group: peerGroup \} : \{\}\) \}/.test(fs.readFileSync(path.join(REPO, 'data/bin/codex-chat-wrapper.js'), 'utf-8')), '…and the codex wrapper writes it into its marker');
+  ok(/type: 'peer-message', text, fromName: opts\.fromName \|\| null, cardText: opts\.cardText \|\| null, kind, (?:\.\.\.\(opts\.channel \? \{ channel: opts\.channel \} : \{\}\), )?\.\.\.\(opts\.group \? \{ group: opts\.group \} : \{\}\) \}/.test(cd), 'the codex (rpc-queue) frame carries `group`');
+  ok(/webui_peer: \{ name: fromName, body: cardText, kind: peerKind, (?:\.\.\.\(peerChannel \? \{ channel: peerChannel \} : \{\}\), )?\.\.\.\(peerGroup \? \{ group: peerGroup \} : \{\}\) \}/.test(fs.readFileSync(path.join(REPO, 'data/bin/codex-chat-wrapper.js'), 'utf-8')), '…and the codex wrapper writes it into its marker');
   const cx = new CodexMessageManager('cx-g').convertHistory([{ timestamp: new Date(T0).toISOString(), type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'group news' }], webui_peer: { name: 'alpha · loud', body: 'wake up please', kind: 'peer', group: { id: g4, name: 'loud', at: p4.message.at, from: 'alpha', via: 'wake' } } } }]);
   const cxp = cx.filter((m) => m.originKind === 'peer-message');
   ok(cxp.length === 1 && cxp[0].peerGroup && cxp[0].peerGroup.id === g4 && cxp[0].peerGroup.via === 'wake' && cxp[0].peerVia === 'peer' && cxp[0].peerFrom === 'alpha', '…the codex normalizer draws the marker\'s group (live and on a rebuild — the buffer copy carries it)', cxp[0]);
@@ -1350,8 +1449,8 @@ console.log('§7 the cards: a group message handed to a turn is SEEN in that cha
     'the REAL prompt-context route on a USER turn: the report is injected AND its card is drawn in B\'s chat (the injection point)', gcards);
 
   // (i) the fold kind: its own, off by default
-  ok(RS.RUN_KINDS.includes('group') && RS.messageKind(pm[0], { toolCard: false }) === 'group' && RS.messageKind({ role: 'user', originKind: 'peer-message', peerFrom: 'x', content: [] }, { toolCard: false }) === null,
-    'the card\'s fold kind is `group` (a plain peer card keeps none)');
+  ok(RS.RUN_KINDS.includes('group') && RS.messageKind(pm[0], { toolCard: false }) === 'group' && RS.messageKind({ role: 'user', originKind: 'peer-message', peerFrom: 'x', content: [] }, { toolCard: false }) === 'peer',
+    'the card\'s fold kind is `group` (a plain peer card is `peer` — lane peer-card-fold — never `group`)');
   if (SCHEMA && SCHEMA.SETTINGS_SCHEMA) {
     const ck = SCHEMA.SETTINGS_SCHEMA['chat.collapseKinds'];
     ok(ck.options.some((o) => o.value === 'group') && !ck.default.includes('group'), '…offered in chat.collapseKinds and OFF by default (the owner asked to see them)');
@@ -1476,6 +1575,175 @@ console.log('§6 the CLI (data/bin/vibespace-msg) against a STUB server');
   r = await run(['groups']);
   ok(/g-0000abcd  "api" — 2 unread · your notify: mention/.test(r.out), 'groups lists id · unread · the caller\'s mode', r.out);
   srv.close();
+}
+
+// ── B-ff04 (the owner, 2026-10-03: "@ 要从头到尾结构化，背后传的是 id") ─────────────────────────────────────────────
+// ① SEND: every @ resolved to a member id at send, its places stored; an @ that names nobody (or two) refused by name;
+// --at; the owner's picks by id. ② DELIVERY: the report carries the @ as a field, "you" by the reader's own id; the
+// wake is by id. CENSUS: no wake / delivery path reads an @ by name text (grep-derived, a planted control goes red).
+console.log('§B-ff04 an @ is structured end to end — an id behind it from the send to the delivery');
+{
+  const read = (p) => fs.readFileSync(path.join(REPO, p), 'utf-8');
+  const f = fixture('ff04');
+  const made = await f.eng.create({ by: G.OWNER, name: 'at-structure', members: [A, B, C], quiet: true });
+  const gid = made.group.id;
+  const logOf = () => f.store.readTail(G.GROUP_ADAPTER_ID, gid, { limit: 1000 }).filter((r) => r.raw && r.raw.kind === 'message');
+  const p1 = await f.eng.post({ group: gid, from: A, text: '@beta and @gamma, see @beta again' });
+  const mB = p1.ok && p1.message.mentions.find((m) => m.id === B), mC = p1.ok && p1.message.mentions.find((m) => m.id === C);
+  ok(mB && mC && JSON.stringify(mB.pos) === '[[0,5],[22,27]]' && JSON.stringify(mC.pos) === '[[10,16]]', '① SEND: each @ is resolved to the member\'s ID when it is sent — mentions [{id, name, pos}], EVERY place the words name it', JSON.stringify(p1.message && p1.message.mentions));
+  const stored = p1.ok && logOf().find((r) => r.vendorId === p1.message.vendorId);
+  ok(stored && JSON.stringify(stored.mentions) === JSON.stringify(p1.message.mentions), '…the stored log record carries the same places (channel-record keeps `pos` where each sits on an @ of the final text)', JSON.stringify(stored && stored.mentions));
+  let n0 = logOf().length;
+  const u = await f.eng.post({ group: gid, from: A, text: '@delta please look' });
+  ok(u.ok === false && u.code === 'unknown-mention' && u.token === 'delta' && Array.isArray(u.candidates) && u.candidates.length >= 1 && /nothing was sent/.test(u.error) && logOf().length === n0, '① an @ that names NO member is refused BY NAME before anything is written (unknown-mention + candidates)', JSON.stringify(u).slice(0, 300));
+  f.roster[2].name = 'beta';   // gamma's session is renamed to its neighbour's name: "@beta" now answers to two members
+  const amb = await f.eng.post({ group: gid, from: A, text: '@beta hello' });
+  ok(amb.ok === false && amb.code === 'ambiguous-mention' && amb.candidates.map((c) => c.conversationId).sort().join() === [B, C].sort().join() && logOf().length === n0, '① an @ TWO members answer to is refused (ambiguous-mention) with both conversation ids', JSON.stringify(amb).slice(0, 300));
+  const byId = await f.eng.post({ group: gid, from: A, text: `@${C} hello` });
+  ok(byId.ok && byId.message.mentions.length === 1 && byId.message.mentions[0].id === C, '…and @<conversation id> names exactly one of them', JSON.stringify(byId.message && byId.message.mentions));
+  const picked = await f.eng.post({ group: gid, from: G.OWNER, text: '@beta can you?', mentions: [{ id: C, start: 0, end: 5 }] });
+  ok(picked.ok && picked.message.mentions.length === 1 && picked.message.mentions[0].id === C && JSON.stringify(picked.message.mentions[0].pos) === '[[0,5]]', '① the owner\'s @-picker sends places BY ID: the picked member is the one mentioned even when two share the name (a picked place is never re-read by name)', JSON.stringify(picked).slice(0, 300));
+  n0 = logOf().length;
+  const badPick = await f.eng.post({ group: gid, from: G.OWNER, text: 'no at here', mentions: [{ id: C, start: 0, end: 5 }] });
+  ok(badPick.ok === false && badPick.code === 'bad-request' && logOf().length === n0, '…a picked place that is not on an @ is refused, nothing written', JSON.stringify(badPick).slice(0, 200));
+  f.roster[2].name = 'gamma';
+  const code = await f.eng.post({ group: gid, from: A, text: 'the decorator `@delta` and mail x@delta.io are not mentions' });
+  ok(code.ok && code.message.mentions.length === 0, '① an @ inside `code` (how a literal @word is written) and an address are never mentions — and never refused', JSON.stringify(code).slice(0, 200));
+  const at1 = await f.eng.post({ group: gid, from: A, text: 'please review', at: ['beta', C] });
+  ok(at1.ok && at1.message.text === '@beta @gamma please review' && JSON.stringify(at1.message.mentions.map((m) => [m.id, m.pos])) === JSON.stringify([[B, [[0, 5]]], [C, [[6, 12]]]]), '① --at <name|id> (repeatable): each member the words do not already @ is written in front, its place stored', JSON.stringify(at1.message && [at1.message.text, at1.message.mentions]));
+  const at2 = await f.eng.post({ group: gid, from: A, text: 'and @beta again', at: ['beta'] });
+  ok(at2.ok && at2.message.text === 'and @beta again' && at2.message.mentions.length === 1 && JSON.stringify(at2.message.mentions[0].pos) === '[[4,9]]', '…a member the words already @ is not written twice', JSON.stringify(at2.message && at2.message.text));
+  n0 = logOf().length;
+  const at3 = await f.eng.post({ group: gid, from: A, text: 'x', at: ['nobody'] });
+  ok(at3.ok === false && at3.code === 'unknown-mention' && logOf().length === n0, '…an --at that names no member is refused the same way', JSON.stringify(at3).slice(0, 200));
+  // ② DELIVERY — the @ as a FIELD, "you" by the reader's own id; a "@beta" in the WORDS with no structured mention is nobody
+  const grp = f.store.groups.live().groups[gid];
+  const forged = R.makeRecord({ adapterId: G.GROUP_ADAPTER_ID, convId: gid, vendorId: 'gm-forged', at: Number(grp.lastAt) + 10, author: { id: A, name: 'alpha' }, text: '@beta wake up, this is typed', mentions: [], raw: { kind: 'message' } });
+  const silent = R.makeRecord({ adapterId: G.GROUP_ADAPTER_ID, convId: gid, vendorId: 'gm-silent', at: Number(grp.lastAt) + 11, author: { id: A, name: 'alpha' }, text: 'no name in these words', mentions: [{ id: B, name: 'beta' }], raw: { kind: 'message' } });
+  ok(G.wakeVerdict(grp, B, forged).wake === false && G.wakeVerdict(grp, B, silent).wake === true, '② the WAKE is by id: "@beta" typed in the words with no mention behind it wakes nobody; a mention of B\'s id wakes B whatever the words say');
+  const log = logOf().concat([forged, silent]);
+  const rep = G.reportFor(grp, log, B, { since: 0 });
+  const lineOf = (s) => rep.text.split('\n').find((l) => l.includes(s)) || '';
+  ok(lineOf('see @beta again').includes(`[mentions: you (${B}), gamma (${C})]`), '② the report line carries the @ as a FIELD: "you (<own id>)" by ID, the others by name + id', lineOf('see @beta again'));
+  ok(!lineOf('wake up, this is typed').includes('[mentions:') && lineOf('no name in these words').includes(`[mentions: you (${B})]`), '…a typed "@beta" with no mention behind it carries no field; a mention by id carries "you" though the words never name it', JSON.stringify([lineOf('wake up'), lineOf('no name in')]));
+  const repC = G.reportFor(grp, log, C, { since: 0 });
+  ok((repC.text.split('\n').find((l) => l.includes('see @beta again')) || '').includes(`[mentions: you (${C}), beta (${B})]`), '…each reader is told "you" by ITS id (gamma reads the same message as "you (C), beta (B)")');
+  // CENSUS — no wake / delivery path judges an @ by name text (the send-time resolver is the ONE place an @ is read)
+  const bodyOf = (src, name) => { const i = src.search(new RegExp(`(?:^|\\n)\\s*(?:export\\s+)?(?:async\\s+)?function ${name}\\(`)); if (i < 0) return null; let j = src.indexOf('{', src.indexOf(')', i)); let d = 0; for (let k = j; k < src.length; k++) { if (src[k] === '{') d++; else if (src[k] === '}' && --d === 0) return src.slice(i, k + 1); } return null; };
+  const NAME_AT = /\bmentionsIn\(|\bscanAts\(|\btextToBlocks\(|\bblocksOfRecord\(|['"`]@['"`]\s*\+|\.(?:includes|indexOf|startsWith|test|match)\(\s*['"`/]@|@\$\{/;
+  const srcG = read('src/channel-groups.js'), srcE = read('src/server/groups-engine.js');
+  const judged = [['src/channel-groups.js', srcG, ['wakeVerdict', 'wakesPlanned', 'reportFor', 'buildReport', 'linePrefix', 'mentionField', 'lineFor']], ['src/server/groups-engine.js', srcE, ['wake', 'wakeAll', 'reportsForTurn', 'cardsOf', 'previewFor', 'composeReports', 'pendingOf']]];
+  const flagged = [], missing = [];
+  for (const [file, src, names] of judged) for (const n of names) { const b = bodyOf(src, n); if (!b) missing.push(`${file}::${n}`); else if (NAME_AT.test(b)) flagged.push(`${file}::${n}`); }
+  if (NAME_AT.test(read('src/group-card.js'))) flagged.push('src/group-card.js');
+  ok(!missing.length && !flagged.length, `CENSUS: the ${judged.reduce((n, x) => n + x[2].length, 0)} wake + delivery functions and group-card.js never read an @ by name text (no mentionsIn / scanAts / '@' + name)`, JSON.stringify({ missing, flagged }));
+  const plantedWake = bodyOf(srcG, 'wakeVerdict').replace("if (m.notify === 'always')", "if (String(msg.text || '').includes('@' + m.name)) return { wake: true, why: 'mention' };\n  if (m.notify === 'always')");
+  ok(plantedWake !== bodyOf(srcG, 'wakeVerdict') && NAME_AT.test(plantedWake), 'NEGATIVE CONTROL: a planted wake-by-name-text line in wakeVerdict is FLAGGED by the same judge');
+  // every call of the resolver sits in a SEND path: the engine's post, the window's send-time preview — nowhere else
+  const calls = [];
+  const walk = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else if (/\.(?:js|mjs|cjs)$/.test(e.name)) { const s = read(p); if (/\b(?:mentionsIn|scanAts)\(/.test(s)) calls.push(p); } } };
+  walk('src');
+  const SEND_PATHS = { 'src/channel-groups.js': ['scanAts', 'mentionsIn'], 'src/server/groups-engine.js': ['post'], 'src/lib/channel-groups-view.js': ['wakePreview', 'atProblem'] };
+  const strays = [];
+  for (const p of calls) {
+    const allowed = SEND_PATHS[p];
+    if (!allowed) { strays.push(p); continue; }
+    let rest = read(p);
+    for (const n of allowed) { const b = bodyOf(rest, n); if (b) rest = rest.replace(b, ''); }
+    rest = rest.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '').replace(/module\.exports[\s\S]*$/, '');
+    if (/\b(?:mentionsIn|scanAts)\(/.test(rest)) strays.push(p);
+  }
+  ok(calls.length === 3 && !strays.length, `CENSUS: the @ resolver is called ONLY at send — the engine's post + the window's send-time preview (${calls.join(', ')})`, JSON.stringify({ calls, strays }));
+  f.close();
+}
+
+// ── B-a354 (the owner's "at-style group"): a `mention` member is handed ONLY what @mentions it — woken for it, and its
+// report / pending strip / unread hold nothing else; nothing else is queued (the marker moves past it) ──
+console.log('§B-a354 mention = only what @mentions you reaches you (wake + delivery)');
+{
+  const read = (p) => fs.readFileSync(path.join(REPO, p), 'utf-8');
+  const f = fixture('a354');
+  const made = await f.eng.create({ by: G.OWNER, name: 'at-style', members: [A, B, C], quiet: true });
+  const gid = made.group.id;
+  await f.eng.setNotify({ by: B, group: gid, notify: 'mention' });
+  const grpNow = () => f.store.groups.live().groups[gid];
+  const logNow = () => f.store.readTail(G.GROUP_ADAPTER_ID, gid, { limit: 1000 });
+  // B has read the invite (its own report committed) — from here on only the new messages count
+  const r0 = f.eng.reportsForTurn(B);
+  await f.eng.commitReports(B, r0.marks);
+  f.auths.length = 0;
+  await f.eng.post({ group: gid, from: A, text: 'plain update one — schema half done' });
+  await f.eng.post({ group: gid, from: C, text: 'plain update two — tests green' });
+  const unreadB = (f.eng.listFor(B).find((x) => x.id === gid) || {}).unread;
+  const pendB = f.eng.reportsForTurn(B, { preview: true });
+  ok(G.reportFor(grpNow(), logNow(), B) === null && unreadB === 0 && pendB.pending.filter((p) => p.groupId === gid).length === 0 && !pendB.text.includes(gid), 'a `mention` member is handed NOTHING that does not @ it: no report, no pending line, unread 0 (nothing queued for it)', JSON.stringify({ unreadB, pending: pendB.pending.length }));
+  const repC = G.reportFor(grpNow(), logNow(), C);
+  ok(repC && repC.text.includes('plain update one') && f.auths.length === 0, '…while a `next-turn` member gets both in its report, and nobody was woken (CONTROL of the fixture)', repC && repC.text);
+  const marks = f.eng.reportsForTurn(B).marks.filter((m) => m.groupId === gid);
+  ok(marks.length === 1 && marks[0].upTo === Number(grpNow().lastAt), '…its marker MOVES past them on its next turn (accounted for, never waiting)', JSON.stringify(marks));
+  await f.eng.commitReports(B, marks);
+  const at = await f.eng.post({ group: gid, from: A, text: '@beta please review the schema' });
+  await f.eng.post({ group: gid, from: C, text: 'plain update three' });
+  const woke = at.woke || [];
+  const repB = G.reportFor(grpNow(), logNow(), B, { since: marks[0].upTo });   // the wake already handed it over — read the same span again
+  const wokeText = (f.posts.filter((p) => p.cid === B).pop() || {}).text || '';
+  ok(woke.some((w) => w === B || (w && w.id === B) || /beta/.test(String(w && (w.name || w)))) && f.auths.length === 1, 'an @mention of the `mention` member WAKES it (one authorization)', JSON.stringify({ woke, auths: f.auths }));
+  ok(repB && repB.text.includes('@beta please review the schema') && !repB.text.includes('plain update') && repB.count === 1 && repB.upTo === Number(grpNow().lastAt) && wokeText.includes('@beta please review the schema') && !wokeText.includes('plain update'), '…and what it is handed (the wake, its report) holds ONLY that message — the plain one after it is accounted for, not delivered', JSON.stringify({ rep: repB && repB.text, wokeText }).slice(0, 600));
+  ok(G.reachesReport(grpNow(), B, { raw: { kind: 'invite', member: B, context: 'why' } }) && !G.reachesReport(grpNow(), B, { raw: { kind: 'rename' } }) && G.reachesReport(grpNow(), C, { raw: { kind: 'rename' } }), '…its OWN invite (the context it was added with) still reaches it; other system records do not; every other mode is handed everything');
+  // CONTROL — the old rule restored in a patched copy of the PURE model (mention = next-turn for delivery): red
+  const src = read('src/channel-groups.js');
+  const oldSrc = src.replace("if (m.notify !== 'mention') return true;", 'return true;').replace("require('./channel-record.js')", JSON.stringify(path.join(REPO, 'src/channel-record.js')).replace(/^/, 'require(') + ')').replace("require('./peer-text.js')", 'require(' + JSON.stringify(path.join(REPO, 'src/peer-text.js')) + ')');
+  const oldFile = path.join(ROOT, 'channel-groups-old.js');
+  fs.writeFileSync(oldFile, oldSrc);
+  const OLD = require(oldFile);
+  const oldB = OLD.reportFor(grpNow(), logNow(), B, { since: 0 });
+  ok(oldSrc !== src && oldB && oldB.text.includes('plain update one'), 'CONTROL: with the old rule (a `mention` member handed every record) the plain messages are queued for it again — the legs above would be red', oldB && oldB.text.slice(0, 200));
+  f.close();
+}
+
+// ── verify r1 (lane group-chat-ui) — D3: a post's answer `later` (the CLI's "on their next turn (free): …", the owner's
+// "{n} will read it on their next turn") names only members the record REACHES — never a `mention` member it is not
+// handed (B-a354); F10: the @ scan reads PLACES in the original words, so its lower case keeps every index ("İ",
+// U+0130, lower-cases to two code units: the lane head refused "İzmir @beta" and silently dropped "İİ @beta") ──
+console.log('§verify r1 — `later` names only who is handed it; the @ scan keeps its places');
+{
+  const read = (p) => fs.readFileSync(path.join(REPO, p), 'utf-8');
+  const absReq = (src, dir) => src.replace(/require\('(\.{1,2}\/[^']+)'\)/g, (_, rel) => 'require(' + JSON.stringify(path.join(dir, rel)) + ')');
+  const laterOf = async (ge, name) => {
+    const f = fixture(name, { ge });
+    const gid = (await f.eng.create({ by: G.OWNER, name: 'star', members: [A, B, C], quiet: true })).group.id;
+    await f.eng.setNotify({ by: B, group: gid, notify: 'mention' });
+    await f.eng.commitReports(B, f.eng.reportsForTurn(B).marks);
+    const r = await f.eng.post({ group: gid, from: A, text: 'status: schema half done' });
+    const handed = G.reportFor(f.store.groups.live().groups[gid], f.store.readTail(G.GROUP_ADAPTER_ID, gid, { limit: 100 }), B);
+    f.close();
+    return { ok: r.ok, later: (r.later || []).map((x) => x.member), handed: !!handed };
+  };
+  const now = await laterOf(GE, 'v1-later');
+  ok(now.ok && now.later.includes(C) && !now.later.includes(B) && !now.handed, 'D3: a plain post\'s answer promises the next turn to the `next-turn` member and NOT to the `mention` member it is never handed', JSON.stringify(now));
+  const eSrc = read('src/server/groups-engine.js');
+  const oldE = eSrc.replace(" && G.reachesReport(g, m, rec)) later.push(", ') later.push(');
+  const oldEFile = path.join(ROOT, 'groups-engine-v1-old.js');
+  fs.writeFileSync(oldEFile, absReq(oldE, path.join(REPO, 'src/server')));
+  const was = await laterOf(require(oldEFile), 'v1-later-old');
+  ok(oldE !== eSrc && was.later.includes(B) && !was.handed, 'CONTROL: the lane head\'s line (every non-woken member but mute) in a patched copy of the engine names the `mention` member — the leg above would be red', JSON.stringify(was));
+
+  const members = [{ member: B, name: 'beta' }, { member: C, name: 'gamma' }];
+  const s1 = G.scanAts('İzmir build: @beta please', members), s2 = G.scanAts('İİ @beta @gamma', members);
+  ok(s1.mentions.length === 1 && s1.mentions[0].id === B && JSON.stringify(s1.mentions[0].pos) === '[[13,18]]' && !s1.unknown.length && s2.mentions.map((m) => m.id).join() === [B, C].join(), 'F10: an @ after "İ" resolves at its own place (no false unknown-mention, no silently dropped @)', JSON.stringify({ s1, s2 }));
+  const f = fixture('v1-fold');
+  const gid = (await f.eng.create({ by: G.OWNER, name: 'tr', members: [A, B, C], quiet: true })).group.id;
+  f.auths.length = 0;
+  const p = await f.eng.post({ group: gid, from: A, text: 'İİ @beta look' });
+  ok(p.ok && p.message.mentions.some((m) => m.id === B) && f.auths.some((x) => x.cid === B), '…through the engine: the post is sent, mentions beta and wakes it', JSON.stringify({ ok: p.ok, code: p.code, mentions: p.message && p.message.mentions, auths: f.auths }));
+  f.close();
+  const gSrc = read('src/channel-groups.js');
+  const oldG = gSrc.replace('const lower = foldCase(t);', 'const lower = t.toLowerCase();').replace('const key = foldCase(c.key);', 'const key = c.key.toLowerCase();');
+  const oldGFile = path.join(ROOT, 'channel-groups-v1-old.js');
+  fs.writeFileSync(oldGFile, absReq(oldG, path.join(REPO, 'src')));
+  const OLDG = require(oldGFile);
+  const o1 = OLDG.scanAts('İzmir build: @beta please', members), o2 = OLDG.scanAts('İİ @beta @gamma', members);
+  ok(oldG !== gSrc && o1.unknown.length === 1 && o1.mentions.length === 0 && o2.mentions.length === 0, 'CONTROL: with the plain toLowerCase the same words are refused ("@beta" is not a member) or mention nobody — the legs above would be red', JSON.stringify({ o1, o2 }));
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

@@ -1252,9 +1252,10 @@ function producerCensus(src) {
       ok(c2.startsWith('<vibespace-session-tools>') && c2.includes('</vibespace-session-tools>') && P.s._toolsIntroSeen === true && !/context trimmed/.test(c2), '…the next prompt carries the intro whole and stamps it');
     } finally { P.done(); }
   }
-  // (e) a 2 400-char preamble: both fit — one prompt, unchanged
-  const Q = rigR7({ backend: 'codex', groups: 0, settings: { 'agents.injectPreamble': 'p'.repeat(2400) } });
-  try { const c = Q.get('/api/agent/prompt-context'); ok(c.includes('</vibespace-user-instructions>') && c.includes('</vibespace-session-tools>') && Q.s._toolsIntroSeen === true && !/context trimmed/.test(c) && B(c) <= AR.INLINE_CAP - AR.INLINE_TAIL_MARGIN, 'a 2 400-char preamble + the intro fit one prompt (unchanged)'); } finally { Q.done(); }
+  // (e) a 2 000-char preamble: both fit — one prompt, unchanged (2 400 until the 2.369.202 integration: the Design window's
+  // intro line + lane browser-recipes' login clause grew the intro to ~6.9 KB; a 2 400-char preamble now WAITS the intro, (d)'s rule)
+  const Q = rigR7({ backend: 'codex', groups: 0, settings: { 'agents.injectPreamble': 'p'.repeat(2000) } });
+  try { const c = Q.get('/api/agent/prompt-context'); ok(c.includes('</vibespace-user-instructions>') && c.includes('</vibespace-session-tools>') && Q.s._toolsIntroSeen === true && !/context trimmed/.test(c) && B(c) <= AR.INLINE_CAP - AR.INLINE_TAIL_MARGIN, 'a 2 000-char preamble + the intro fit one prompt (unchanged)'); } finally { Q.done(); }
 }
 {
   // ── 3. THE CODEX SessionStart DOOR ──
@@ -1558,6 +1559,19 @@ console.log('②k group messages waiting for the next turn: the fact reads the e
   const q = (c) => strip.el.querySelector('.' + c);
   ok(!strip.el.hidden && q('chat-stash-parts').textContent === ': a group message from alpha' && q('chat-stash-go').hidden === true && q('chat-stash-nobutton').hidden === false && q('chat-stash-nobutton').textContent === 'they ride your next message',
     'the REAL strip: "a group message from alpha", NO Hand over button (it would refuse "nothing_waiting"), "they ride your next message" where it would be', strip.el.textContent);
+  // B-c198 (the owner 2026-10-02): "they ride your next message" while the agent is MID-TURN was false — a message typed
+  // into a running turn is folded into it with no UserPromptSubmit, so the report waits for the turn after; the words say so
+  strip.set(f, { turn: 'running' });
+  ok(q('chat-stash-nobutton').textContent === 'this agent is mid-turn — they ride your first message after this turn ends' && /^This agent is mid-turn — a message typed into a running turn carries no group message/.test(q('chat-stash-nobutton').title),
+    'B-c198: MID-TURN the strip says the agent is mid-turn and the messages ride the first message after this turn ends (never "your next message")', strip.el.textContent);
+  // verify r1: `waiting` (the harness's requires_action — paused on a permission or a question) is INSIDE the turn: the
+  // user's answer continues it with no UserPromptSubmit, so "your next message" was false there too
+  strip.set(f, { turn: 'waiting' });
+  ok(q('chat-stash-nobutton').textContent === 'this agent is mid-turn — they ride your first message after this turn ends', 'B-c198 verify r1: WAITING on the user (a permission, a question — still inside the turn) the strip says mid-turn too, never "your next message"', strip.el.textContent);
+  strip.set(f, { turn: 'idle' });
+  ok(q('chat-stash-nobutton').textContent === 'they ride your next message', 'B-c198 CONTROL: the turn ends ⇒ the strip repaints to "they ride your next message" (the turn is in its patch key)', strip.el.textContent);
+  const wm = S.stashSummaryWords({ ...f, count: 2, items: [...f.items, { kind: 'peer', label: 'Bo', n: 1 }] }, tEn, { reachable: true, midTurn: true });
+  ok(wm.held === '1 group message rides your first message after this turn ends', 'B-c198: beside a stash entry, mid-turn, the held words say "after this turn ends" too', wm);
   // beside a stash entry the button stays, and says what it will NOT carry
   deliver.stashFor(B, { source: 'agent', kind: 'peer', fromName: 'Bo', text: 'a peer note' });
   const f2 = view.summaryFor(sB);

@@ -208,8 +208,8 @@ function sentenceTable(S, { log = false } = {}) {
   const lines = OPS.map(([, b]) => visibleLine(RS, b));
   ok(`CENSUS: no visible line of ${lines.length} agent-op results contains "internal metadata" / "never quote" / a \`{"\` head at column 0`, lines.every((l) => !LEAK.test(l) && !/^\{"/.test(l)), lines);
   const cr = read('src/lib/chat-renderers.js');
-  ok('the renderer uses the sentence on the Agent card and on the generic card (the raw record stays in the expander)', /\|\| this\._resultSentence\(block\) \|\| resultText\.split\('\\n'\)\[0\]\.substring\(0, 120\)/.test(cr) && /const firstLine = this\._resultSentence\(block\) \|\| resultText\.split/.test(cr));
-  ok('…and the pure table imports nothing (DOM-free by construction)', !/^\s*import /m.test(read('src/lib/chat-run-summary.js')));
+  ok('the renderer uses the sentence on the Agent card and on the generic card, over the result\'s TEXT (B-63f1: a real ack is a text-block list) — the raw record stays in the expander', /\|\| this\._resultSentence\(\{ \.\.\.block, output: resultText \}\) \|\| resultText\.split\('\\n'\)\[0\]\.substring\(0, 120\)/.test(cr) && /const firstLine = this\._resultSentence\(\{ \.\.\.block, output: resultText \}\) \|\| resultText\.split/.test(cr));
+  ok('…and the pure table imports nothing but the PURE note rule (DOM-free by construction — B-40f8 moved the text rule to src/assistant-note.js)', (read('src/lib/chat-run-summary.js').match(/^\s*import .*$/gm) || []).every((l) => /from '\.\.\/assistant-note\.js';/.test(l)));
 }
 
 /** Codex rollout-only rebuild of a delivered notification / a peer / a quote (S3 verify r1). */
@@ -475,8 +475,8 @@ console.log('§4b WHO MAY BE A NOTICE — a peer is never VibeSpace, whatever it
   ok(`CENSUS: ${stashSites.length} stash writers — every one states the entry's kind (a re-stash of a drained entry carries its own)`, stashSites.length >= 8 && stashNoKind.length === 0, stashNoKind.length ? stashNoKind : stashSites);
   // the wrappers write the path into their marker, and echo it on a refusal
   const cw = read('data/bin/codex-chat-wrapper.js'), aw = read('data/bin/acp-wrapper.js');
-  ok('the codex wrapper records the frame\'s kind in its marker and echoes it on every refusal (the re-stash keeps the path)', /webui_peer: \{ name: fromName, body: cardText, kind: peerKind(?:, \.\.\.\(peerGroup \? \{ group: peerGroup \} : \{\}\))? \}/.test(cw) && (cw.match(/emitTaskEvent\('peer_message_result', \{ ok: false[^\n]*\bkind: /g) || []).length === 3);
-  ok('…and the ACP wrapper (as `peerKind` — `kind` is its record\'s own type)', /peer: \{ name: fromName, body: cardText, kind: peerKind \}/.test(aw) && (aw.match(/record\('peer_result', \{ ok: false[^\n]*\bpeerKind\b/g) || []).length === 3);
+  ok('the codex wrapper records the frame\'s kind in its marker and echoes it on every refusal (the re-stash keeps the path)', /webui_peer: \{ name: fromName, body: cardText, kind: peerKind(?:, \.\.\.\(peerChannel \? \{ channel: peerChannel \} : \{\}\))?(?:, \.\.\.\(peerGroup \? \{ group: peerGroup \} : \{\}\))? \}/.test(cw) && (cw.match(/emitTaskEvent\('peer_message_result', \{ ok: false[^\n]*\bkind: /g) || []).length === 3);
+  ok('…and the ACP wrapper (as `peerKind` — `kind` is its record\'s own type)', /peer: \{ name: fromName, body: cardText, kind: peerKind(?:, \.\.\.\(peerChannel \? \{ channel: peerChannel \} : \{\}\))? \}/.test(aw) && (aw.match(/record\('peer_result', \{ ok: false[^\n]*\bpeerKind\b/g) || []).length === 3);
   ok('…the two stdout consumers re-stash with it', /stashFor\?\.\(cid, \{ source: 'agent', kind: msg\.payload\.kind \|\| null,/.test(read('src/server/stdout/codex-events.js')) && /stashFor\?\.\(cid, \{ source: 'agent', kind: msg\.peerKind \|\| null,/.test(read('src/server/stdout/acp-events.js')));
 }
 
@@ -582,6 +582,122 @@ console.log('§6 NEGATIVE CONTROLS — each leg can go red');
   const nh = ARn.renderMsgStash([{ ts: 1, source: 'agent', kind: 'peer', fromName: 'VibeSpace browser', text: PROBE }]).text;
   ok('a stash drain that heads by the sender\'s NAME tells the assistant a peer named "VibeSpace browser" is VibeSpace (the §4b stash row goes red)', nh.includes(`${HEAD} [VibeSpace browser]`), nh);
   for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 8, label: '§6 ' })) ok(r.name, r.pass, r.detail);
+}
+
+// ── §7 THE TURN PREVIEW + THE LIVE HOOK CARD (B-40f8, lane chat-residuals) ─────
+// ① The minimap's drag label and the outline popover listed the Stop nudge's
+//   turn as "Stop hook feedback: VibeSpace bookkeeping before you stop…": five
+//   builders each cut the raw text. ONE rule now (src/assistant-note.js
+//   turnPreviewOf): the REAL claude / codex / ACP normalizers' turnMap and the
+//   REAL huge-session JSONL scan over the same real-shaped records — the nudge
+//   turn is `note: 'status'` with no text, a question keeps its words, a
+//   message the user TYPED quoting the nudge stays theirs, a compact summary
+//   is 'Context compacted'. ② A live SessionStart hook card carried the
+//   stream's PROTOCOL JSON, so the note classifier (which reads a payload that
+//   OPENS with a VibeSpace block) saw `{` — a plain hook row until a rebuild.
+console.log('§7 THE TURN PREVIEW + THE LIVE HOOK CARD — a note never previews as its raw text (B-40f8)');
+const AN = require(path.join(REPO, 'src/assistant-note.js'));
+const T7 = (n) => new Date(Date.now() - 60000 + n * 1000).toISOString();
+const STOP_REC = { type: 'user', isMeta: true, message: { role: 'user', content: 'Stop hook feedback:\n' + nudgeWithExtra } }; // the REAL record: isMeta, a string content, the user's extra FIRST
+const CLAUDE_RECS = [
+  { type: 'user', promptSource: 'sdk', message: { role: 'user', content: 'Please fix the login page' } },
+  { type: 'assistant', message: { id: 'a1', role: 'assistant', model: 'claude-opus-5-5', content: [{ type: 'text', text: 'Done.' }] } },
+  STOP_REC,
+  { type: 'assistant', message: { id: 'a2', role: 'assistant', model: 'claude-opus-5-5', content: [{ type: 'text', text: 'ok' }] } },
+  { type: 'user', promptSource: 'sdk', message: { role: 'user', content: 'Stop hook feedback: ' + nudgeNew } },
+  { type: 'assistant', message: { id: 'a3', role: 'assistant', model: 'claude-opus-5-5', content: [{ type: 'text', text: 'ok' }] } },
+  { type: 'user', isMeta: true, message: { role: 'user', content: 'This session is being continued from a previous conversation that ran out of context.' } },
+].map((r, i) => ({ ...r, uuid: 'p' + i, timestamp: T7(i) }));
+const CODEX_RECS = [
+  { type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Please fix the login page' }] } },
+  { type: 'response_item', payload: { type: 'message', role: 'assistant', id: 'A1', content: [{ type: 'output_text', text: 'Done.' }] } },
+  { type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: '<vibespace-reminder>' + nudgeNew + '</vibespace-reminder>' }] } },
+].map((r, i) => ({ ...r, timestamp: T7(i) }));
+const ACP_RECS = [
+  { type: 'acp', kind: 'user', msgId: '', content: [{ type: 'text', text: 'Please fix the login page' }] },
+  { type: 'acp', kind: 'assistant', msgId: 'r1', content: [{ type: 'text', text: 'Done.' }] },
+  { type: 'acp', kind: 'user', msgId: '', content: [{ type: 'text', text: '<vibespace-reminder>' + nudgeNew + '</vibespace-reminder>' }] },
+].map((r, i) => ({ ...r, ts: Date.now() + i }));
+const userPreviews = (mm) => mm.turnMap().filter((e) => e.role === 'user');
+function builderRows({ MessageManager }, CX, { CodexMessageManager } = require(path.join(REPO, 'src/codex-message-manager.js')), { AcpMessageManager } = require(path.join(REPO, 'src/acp-message-manager.js'))) {
+  const out = {};
+  const cl = new MessageManager('tp-c'); for (const r of CLAUDE_RECS) cl.processLive(r); out['claude turnMap (the attach slab)'] = userPreviews(cl);
+  const cx = new CodexMessageManager('tp-x'); for (const r of CODEX_RECS) cx.processLive(r); out['codex turnMap'] = userPreviews(cx);
+  const ac = new AcpMessageManager('tp-a'); for (const r of ACP_RECS) ac.processLive(r); out['ACP turnMap'] = userPreviews(ac);
+  const fc = path.join(M.dir, 'tp-claude.jsonl'); fs.writeFileSync(fc, CLAUDE_RECS.map((r) => JSON.stringify(r)).join('\n') + '\n');
+  const fx = path.join(M.dir, 'tp-codex.jsonl'); fs.writeFileSync(fx, CODEX_RECS.map((r) => JSON.stringify(r)).join('\n') + '\n');
+  out['the huge-session JSONL scan (claude)'] = CX.scanJsonlUserTurns(fc, 'claude');
+  out['the huge-session JSONL scan (codex)'] = CX.scanJsonlUserTurns(fx, 'codex');
+  return out;
+}
+/** Judge every builder's user turns: [{name, pass, got}] */
+function previewTable(rows) {
+  return Object.entries(rows).map(([name, turns]) => {
+    const pv = turns.map((e) => e.preview || '');
+    const notes = turns.filter((e) => e.note);
+    const claude = name.includes('claude');
+    const pass = turns.length === (claude ? 4 : 2) && pv[0] === 'Please fix the login page' && !turns[0].note
+      && notes.length === 1 && notes[0].note === 'status' && notes[0].preview === '' && turns[1] === notes[0]
+      && !pv.some((p) => p.includes(AN.NOTE_MARKER) && !/^Stop hook feedback: VibeSpace/.test(p))
+      && (!claude || (pv[2].startsWith('Stop hook feedback: VibeSpace') && !turns[2].note && turns[3].isCompact === true && pv[3] === AN.COMPACT_PREVIEW));
+    return { name, pass, got: turns.map((e) => ({ preview: e.preview, note: e.note, isCompact: e.isCompact })) };
+  });
+}
+const MMreal = require(path.join(REPO, 'src/message-manager.js'));
+const CXreal = require(path.join(REPO, 'src/adapters/codex.js'));
+{
+  for (const r of previewTable(builderRows(MMreal, CXreal))) ok(`${r.name}: the nudge turn is a note with no text, a question keeps its words${r.name.includes('claude') ? ', a TYPED quote of the nudge stays the user\'s, a compact summary says so' : ''}`, r.pass, r.got);
+  ok('the live append (chat-view) builds its turn with the SAME rule', /const turn = \{ turnIndex: msg\.turnIndex, startIdx: this\._total - 1, ts: msg\.ts, role: 'user', \.\.\.turnPreviewOf\(msg\) \};/.test(read('src/lib/chat-view.js')));
+  const BUILDERS = ['src/message-manager.js', 'src/codex-message-manager.js', 'src/acp-message-manager.js', 'src/adapters/codex.js', 'src/lib/chat-view.js'];
+  const own = BUILDERS.filter((f) => { const s = read(f); return !/turnPreviewOf\(/.test(s) || /This session is being continued from a previous conversation/.test(s) || /preview = 'Context compacted'|preview: 'Context compacted'|\?\? 'Context compacted'/.test(s); });
+  ok(`CENSUS: every turn builder asks turnPreviewOf and none keeps its own cut or compact test (${BUILDERS.length} builders)`, own.length === 0, own);
+  const mm = read('src/lib/chat-minimap.js');
+  ok('the minimap\'s drag label AND the outline row say a note\'s sentence in the device\'s language (turnText → t(noteSentence))', /const turnText = \(turn\) => \(turn\.note \? t\(noteSentence\(turn\.note\)\) : turn\.preview \|\| ''\);/.test(mm) && (mm.match(/const preview = turnText\(turn\);/g) || []).length === 2 && /note: turn\.note, line: turn\.line/.test(mm));
+  ok('the note TEXT rule is ONE: chat-run-summary\'s assistantNoteOf reads src/assistant-note.js (no second marker / tag table)', /import \{ NOTE_MARKER, noteKindOfText, userNoteOf \} from '\.\.\/assistant-note\.js';/.test(read('src/lib/chat-run-summary.js')) && !/const NOTE_TAGS|function noteOfText/.test(read('src/lib/chat-run-summary.js')) && RS.NOTE_MARKER === AN.NOTE_MARKER);
+}
+// ② the live hook card — the stream-json hook_response, verbatim shape from a 2026-10-03 session buffer
+const CTX7 = '<vibespace-task-context>\nThis session belongs to VibeSpace Task Group "VibeSpace 车道" (T-261002-vibespace).\n</vibespace-task-context>';
+const PROTO7 = JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: CTX7 } });
+function liveHookCard({ MessageManager }, { output = PROTO7, ok: good = true, attachments = true } = {}) {
+  const mm = new MessageManager('tp-live');
+  const ops = []; mm.onOp((op) => ops.push(op));
+  mm.processLive({ type: 'system', subtype: 'hook_response', hook_id: 'h1', hook_name: 'SessionStart:startup', hook_event: 'SessionStart', output, stdout: '', stderr: '', exit_code: good ? 0 : 1, outcome: good ? 'success' : 'error' });
+  const first = ops.find((o) => o.op === 'create' && o.message?.content?.[0]?.hookData);
+  if (attachments) { // …then the transcript's own copies (hook_success with the protocol JSON on stdout, then hook_additional_context)
+    const now = new Date().toISOString();
+    mm.processLive({ type: 'attachment', uuid: 'h-s', timestamp: now, attachment: { type: 'hook_success', hookName: 'SessionStart:startup', hookEvent: 'SessionStart', content: '', stdout: output, stderr: '', exitCode: 0 } });
+    mm.processLive({ type: 'attachment', uuid: 'h-c', timestamp: now, attachment: { type: 'hook_additional_context', content: [CTX7] } });
+  }
+  return { first: first?.message || null, cards: mm.messages.filter((m) => m.content?.[0]?.hookData) };
+}
+{
+  const r = liveHookCard(MMreal);
+  const n = RS.assistantNoteOf(r.first);
+  ok('② the live SessionStart card is a note on its FIRST frame (the create op), its expander the unwrapped block', n?.what === 'context' && n.text === CTX7, { output: r.first?.content?.[0]?.hookData?.output?.slice(0, 60), note: n });
+  ok('…and the transcript\'s two copies arriving after it do not add a second card', r.cards.length === 1, r.cards.map((m) => m.content[0].text));
+  const ack = liveHookCard(MMreal, { output: '{"continue":true,"suppressOutput":true}', attachments: false });
+  ok('a hook whose stdout is only the protocol ack shows no raw JSON behind its row', ack.first?.content?.[0]?.hookData?.output === '', ack.first?.content?.[0]?.hookData);
+  const bad = liveHookCard(MMreal, { output: 'boom: exit 1', ok: false, attachments: false });
+  ok('a FAILED hook keeps its raw output (the attachment path\'s rule)', bad.first?.content?.[0]?.hookData?.output === 'boom: exit 1');
+}
+console.log('§7 NEGATIVE CONTROLS — the pre-fix builders go red');
+{
+  const mmSrc = read('src/message-manager.js');
+  const NEW_TM = "        if (m.role === 'user') Object.assign(entry, turnPreviewOf(m));";
+  const p1 = mmSrc.replace(NEW_TM, "        if (m.role === 'user') { const raw = (m.content || []).map(b => b.text || '').join('').trim(); if (raw) entry.preview = raw.length > 60 ? raw.substring(0, 60) + '…' : raw; }");
+  ok('(the pre-fix claude turnMap patch applied)', p1 !== mmSrc);
+  const c1 = previewTable(builderRows(M.load('src/message-manager.js', p1, 'pre-b40f8-turnmap'), CXreal)).filter((r) => !r.pass).map((r) => r.name);
+  ok(`the pre-fix claude turnMap previews the nudge as "Stop hook feedback: …" — exactly its row goes red (${c1.join(', ')})`, c1.length === 1 && c1[0].startsWith('claude turnMap'), c1);
+  const cxSrc = read('src/adapters/codex.js');
+  const p2 = cxSrc.replace("const p = turnPreviewOf({ role: 'user', content: [{ type: 'text', text }], ...prov });", "const p = text.trim() ? { preview: text.trim().replace(/\\s+/g, ' ').slice(0, 60) } : null;");
+  ok('(the pre-fix JSONL scan patch applied)', p2 !== cxSrc);
+  const c2 = previewTable(builderRows(MMreal, M.load('src/adapters/codex.js', p2, 'pre-b40f8-scan'))).filter((r) => !r.pass).map((r) => r.name);
+  ok(`a JSONL scan that cuts its own text reddens both huge-session rows (${c2.join(', ')})`, c2.length === 2 && c2.every((n) => n.includes('JSONL scan')), c2);
+  const p3 = mmSrc.replace('const output = hookPayloadText(rawOut) || (ok ? \'\' : rawOut);', 'const output = raw.output;');
+  ok('(the pre-fix live hook card patch applied)', p3 !== mmSrc);
+  const r3 = liveHookCard(M.load('src/message-manager.js', p3, 'pre-b40f8-hook'));
+  ok('the pre-fix live card (the stream\'s raw JSON) is NOT a note on its first frame — the plain row the item saw', RS.assistantNoteOf(r3.first) === null && /^\{"hookSpecificOutput"/.test(r3.first?.content?.[0]?.hookData?.output || ''), r3.first?.content?.[0]?.hookData?.output?.slice(0, 40));
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 11, label: '§7 ' })) ok(r.name, r.pass, r.detail);
 }
 
 console.log(failed ? `\n${failed} FAILED (${passed} passed)` : `\nALL PASS (${passed})`);

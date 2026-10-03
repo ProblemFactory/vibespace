@@ -16,7 +16,7 @@ import { fetchJson, showToast, createModalShell, showConfirmDialog } from './uti
 import { btn, el, noteLine, noteText } from './channel-chrome.js';
 import { principalPicker } from './principal-picker.js';
 import { folderTail } from './principal-picker-model.js';
-import { pickerRows, draftWho } from './browser-who-model.js';
+import { pickerRows, draftWho, EVERYONE_KEY } from './browser-who-model.js';
 import { nameHelpers } from './browser-who-dialog.js';
 import { installConfirmWords, installOutcomeWords } from './browser-switcher-model.js';
 import { providerChoices, machineChoices, createBody, createRefusalWords, adoptFormOf } from './browser-new-profile-model.js';
@@ -78,19 +78,13 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
   let buildPath = null;
   if (adopt !== 'keep') body.appendChild(buildWrap);
 
-  // ── who can use it (the who dialog's two answers + THE principal picker) ──
+  // ── who can use it (THE principal picker, as in the who dialog) ──
   const whoHead = el('div', 'bnew-section-head', t('Who can use it'));
-  const group = el('div', 'bwho-answers bnew-who'); group.setAttribute('role', 'radiogroup'); group.setAttribute('aria-label', t('Who can use it'));
-  const radio = (value, head, sub) => {
-    const row = el('label', 'bwho-answer');
-    const input = document.createElement('input'); input.type = 'radio'; input.name = 'bnew-who'; input.value = value; input.className = 'bwho-radio';
-    const text = el('span', 'bwho-answer-text'); text.append(el('span', 'bwho-answer-head', head), el('span', 'bwho-answer-sub', sub));
-    row.append(input, text); group.appendChild(row);
-    return { row, input };
-  };
-  const rAll = radio('all', t('All my conversations'), t('Any of your conversations can use this browser and its logins — one browser, each conversation in its own tab.'));
-  const rOnly = radio('only', t('Only these'), t('Pick conversations and Task Groups. A Task Group means every conversation in it — bound to it or started in its folders — now or later.'));
-  body.append(whoHead, group);
+  // ONE control, as in "Who can use it" (lane everyone-principal, folded in at the 2.369.202 integration — the two radios
+  // "All my conversations" / "Only these" are gone): THE principal picker, ALL AGENTS first and picked by default
+  // (= the profile's `use.mode:'all'`); the sentence above it says what the pick means
+  const meaning = el('div', 'bwho-meaning agents-note');
+  body.append(whoHead, meaning);
   let model = null;
   const rowsNow = () => {
     model = pickerRows({ use: { mode: 'all' }, usedBy: [] }, {
@@ -104,16 +98,21 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
   // the picker's door: the conversation that asked is the first pick when the list is narrowed
   const initial = fromSession && fromSession.webuiId ? [`session:${fromSession.webuiId}`].filter((k) => model.wire.has(k)) : [];
   const pickWrap = el('div', 'bwho-pick');
-  const picker = principalPicker({ items: () => rowsNow(), app, multi: true, selected: initial,
-    placeholder: t('Add a conversation or Task Group…'), label: t('Add a conversation or Task Group…'),
+  const picker = principalPicker({ items: () => rowsNow(), app, multi: true, selected: [...model.selected, ...initial],
+    placeholder: t('Add a conversation or Task Group…'), label: t('Who can use it'),
     emptyText: t('No conversation is running and there is no Task Group to pick'),
-    onChange: (sel) => { if (sel.length && !rOnly.input.checked) { rOnly.input.checked = true; syncWho(); } } });
+    everyone: { key: EVERYONE_KEY },
+    onChange: () => syncWho() });
   pickWrap.appendChild(picker.el);
-  rOnly.row.after(pickWrap);
-  const syncWho = () => { pickWrap.style.display = rOnly.input.checked ? '' : 'none'; };
-  rAll.input.checked = true; syncWho();
-  rAll.input.onchange = syncWho;
-  rOnly.input.onchange = () => { syncWho(); picker.focus(); };
+  body.appendChild(pickWrap);
+  const whoMode = () => (picker.selected().includes(EVERYONE_KEY) ? 'all' : 'only');
+  const syncWho = () => {
+    const sentence = whoMode() === 'all'
+      ? t('Any of your conversations can use this browser and its logins — one browser, each conversation in its own tab.')
+      : t('Pick conversations and Task Groups. A Task Group means every conversation in it — bound to it or started in its folders — now or later.');
+    if (meaning.textContent !== sentence) meaning.textContent = sentence;
+  };
+  syncWho();
 
   // ── the refusal line + the footer ──
   const refusal = noteLine('bwho-refusal bnew-refusal', '', { warn: true });
@@ -271,7 +270,7 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
   async function doCreate() {
     if (st.busy) return;
     const sel = picker.selected();
-    const who = rOnly.input.checked ? draftWho(sel, model.wire) : [];
+    const who = whoMode() === 'only' ? draftWho(sel, model.wire) : [];
     // lane browser-admin 2a: the build chosen for a Chromium profile (a path row with no absolute path is said, nothing sent)
     let browser = null;
     if (adopt !== 'keep' && st.provider === 'chromium' && st.buildKey !== 'default') {
@@ -279,7 +278,7 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
       browser = choiceOfRow(row, buildPath ? buildPath.value : '');
       if (!browser) { say(buildRefusalWords({ code: 'browser_choice_invalid' }, t)); if (buildPath) buildPath.focus(); return; }
     }
-    const c = createBody({ label: nameInput.value, provider: st.provider, host: st.host, cdpPort: portInput.value, mode: rOnly.input.checked ? 'only' : 'all', who, adopt, browser });
+    const c = createBody({ label: nameInput.value, provider: st.provider, host: st.host, cdpPort: portInput.value, mode: whoMode(), who, adopt, browser });
     if (!c.ok) { say(createRefusalWords({ code: c.code }, t)); (c.field === 'label' ? nameInput : c.field === 'cdpPort' ? portInput : picker).focus(); return; }
     st.busy = true; create.disabled = true; cancel.disabled = true; picker.setBusy(true);
     const r = fromSession

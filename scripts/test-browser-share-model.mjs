@@ -41,6 +41,8 @@ const B = require('../src/browser-profiles.js');
 const K = require('../src/server/browser-keeper.js');
 const F = require('../src/browser-facts.js');
 const S = require('../src/browser-stream.js');
+const WIN = require('../src/browser-windows.js'); // lane browser-windows: a window per holder (PURE)
+const LIMITS = require('../src/keeper-limits.js');
 const BE = require('../src/server/browser-env.js');
 const express = require('express');
 
@@ -78,31 +80,36 @@ console.log('— ① PURE: the default, one field, join-vs-launch, one driver, t
   const T = [[null, false, 'launch'], [{ state: 'stopped' }, false, 'launch'], [{ state: 'failed' }, false, 'launch'], [{ state: 'stopped' }, true, 'wait'], [{ state: 'starting' }, true, 'wait'], [{ state: 'starting' }, false, 'join'], [{ state: 'ready' }, false, 'join'], [{ state: 'ready' }, true, 'join']];
   const bad = T.filter(([record, starting, want]) => B.joinOrLaunch({ record, starting }) !== want);
   ok(!bad.length, `joinOrLaunch: a live record is JOINED, a launch in flight is WAITED on (a half-started record is never handed out), only a dead one LAUNCHES (${T.length} rows)`, bad);
-  // one driver at a time
-  const H = B.DRIVE_HOLD_MS;
-  const cases = [
-    ['nobody drives', { drive: null, browserKey: KB, now: 10 }, true],
-    ['the same conversation', { drive: { browserKey: KB, at: 5, since: 1 }, browserKey: KB, now: 10 }, true],
-    ['its own helper', { drive: { browserKey: KB, at: 5, since: 1 }, browserKey: KB + '.2', now: 10 }, true],
-    ['another mid-turn', { drive: { browserKey: KA, at: 5, since: 1 }, browserKey: KB, holder: { leased: true, turn: 'running' }, now: 10 }, false],
-    ['another waiting on the user', { drive: { browserKey: KA, at: 5, since: 1 }, browserKey: KB, holder: { leased: true, turn: 'waiting' }, now: 10 }, false],
-    ['another, turn unknown, recent', { drive: { browserKey: KA, at: 5, since: 1 }, browserKey: KB, holder: { leased: true, turn: null }, now: 10 }, false],
-    ['another whose turn ended', { drive: { browserKey: KA, at: 5, since: 1 }, browserKey: KB, holder: { leased: true, turn: 'idle' }, now: 10 }, true],
-    ['another quiet for the hold', { drive: { browserKey: KA, at: 5, since: 1 }, browserKey: KB, holder: { leased: true, turn: 'running' }, now: 5 + H }, true],
-    ['another that let go (no lease)', { drive: { browserKey: KA, at: 5, since: 1 }, browserKey: KB, holder: { leased: false, turn: 'running' }, now: 10 }, true],
-    ['the user drives from another view', { drive: null, browserKey: KB, userDriving: { browserKey: KA }, now: 10 }, false],
-    ['the user drives from MY view (browser_paused, judged before)', { drive: null, browserKey: KB, userDriving: { browserKey: KB }, now: 10 }, true],
-  ];
-  const wrong = cases.filter(([, a, want]) => B.driveVerdict(a).ok !== want).map(([n]) => n);
-  ok(!wrong.length, `driveVerdict: ${cases.length} rows — busy exactly while another conversation is mid-work on it (or the user drives it from another view)`, wrong);
-  const v1 = B.driveVerdict(cases[3][1]);
-  ok(v1.code === 'browser_busy' && v1.by === 'agent' && v1.holderKey === KA && v1.retryAfterMs === H - 5, 'a busy verdict names the holder\'s conversation and an upper bound to wait (the hold left)', v1);
-  const v2 = B.driveVerdict(cases[6][1]);
-  ok(v2.ok && v2.claim.browserKey === KB && v2.claim.at === 10 && v2.claim.since === 10, 'a released claim is taken over by the asker (since = now)');
-  const busyA = B.browserBusyRefusal({ label: 'work', holderName: 'Second chat', by: 'agent', retryAfterMs: 42000 });
-  const busyU = B.browserBusyRefusal({ label: 'work', holderName: 'Second chat', by: 'user' });
-  ok(/"Second chat" is using "work" right now/.test(busyA.error) && /did NOT run/.test(busyA.error) && /at most 42 s/.test(busyA.error) && /live view/.test(busyA.error) && busyA.holder === 'Second chat' && /never in a loop/.test(busyA.remedy), 'browser_busy NAMES the other conversation (the ruling\'s "told so by name"), says the command did not run, a bound to wait, and the take-over-from-its-live-view way', busyA.error);
-  ok(/driven by the user/.test(busyU.error) && /"Second chat"/.test(busyU.error) && /hands it back/.test(busyU.error), 'browser_busy by the USER names the live view they drive it from', busyU.error);
+  // lane browser-windows (U2, 2026-10-01): NO DRIVER CLAIM between conversations — the 90 s "one driver at a time" verdict,
+  // its hold and its `browser_busy` words are GONE (measured: one daemon per conversation, a window per holder)
+  ok(!('driveVerdict' in B) && !('browserBusyRefusal' in B) && !('DRIVE_HOLD_MS' in B), 'the drive claim is deleted: no driveVerdict, no browserBusyRefusal, no DRIVE_HOLD_MS — a window has one holder, the only pause is the user\'s takeover of THAT window');
+  // the window mates: who a takeover of a lease's window takes WITH it
+  const INST = '1900000000000';
+  const LW = [{ profileId: 'bp-0000c0b1', browserKey: KA, windowIn: INST }, { profileId: 'bp-0000c0b1', browserKey: KB, windowIn: INST }, { profileId: 'bp-0000c0b1', browserKey: KC }, { profileId: 'bp-0000c0b1', browserKey: KD, windowIn: '17' }, { profileId: 'bp-0000c0b2', browserKey: KE }];
+  const mates = (bk, inst = INST) => WIN.windowMates({ leases: LW, profileId: 'bp-0000c0b1', browserKey: bk, instance: inst }).map((l) => l.browserKey).sort().join(',');
+  const MT = [['own window (KA)', KA, INST, ''], ['own window (KB)', KB, INST, ''], ['legacy shared (KC) — the other legacy + a previous run\'s', KC, INST, [KC, KD].filter((x) => x !== KC).join(',')], ['a previous run\'s window (KD) is no window now', KD, INST, KC], ['no browser run known ⇒ everyone (fail closed)', KA, null, [KB, KC, KD].sort().join(',')]];
+  const badM = MT.filter(([, bk, inst, want]) => mates(bk, inst) !== want).map(([n, bk, inst]) => `${n}: ${mates(bk, inst)}`);
+  ok(!badM.length, `windowMates: ${MT.length} rows — a lease in its own window takes nobody with it; one in an older run's shared window takes the others still there; another profile never; no run known ⇒ all (fail closed)`, badM);
+  ok(WIN.hasOwnWindow({ windowIn: INST }, INST) && !WIN.hasOwnWindow({ windowIn: '17' }, INST) && !WIN.hasOwnWindow({}, INST) && !WIN.hasOwnWindow({ windowIn: INST }, null) && WIN.instanceOf({ startedAt: 1900000000000 }) === INST && WIN.instanceOf({ startedAt: 0 }) === null && WIN.instanceOf(null) === null, 'hasOwnWindow / instanceOf: a window counts only in the browser run it was opened in (a restart has none of it)');
+  // the create rewrite: a lease's new tab opens in an unfocused window of its own
+  const RW = [[{ url: 'about:blank' }, true, { url: 'about:blank', newWindow: true, focus: false }], [{ url: 'x', focus: true }, true, { url: 'x', focus: true, newWindow: true }], [{ url: 'x', newWindow: true }, false, null], [{ url: 'x', hidden: true }, false, null], [{ url: 'x', forTab: true }, true, { url: 'x', forTab: true, newWindow: true, focus: false }], [{ url: 'x', background: true }, true, { url: 'x', background: true, newWindow: true, focus: false }], [null, true, { newWindow: true, focus: false }]];
+  const badR = RW.filter(([p0, rw, want]) => { const o = WIN.ownWindowParams(p0); return o.rewritten !== rw || (want && JSON.stringify(o.params) !== JSON.stringify(want)); }).map(([p0]) => JSON.stringify(p0));
+  ok(!badR.length && JSON.stringify(WIN.windowCreateParams('')) === JSON.stringify({ url: 'about:blank', newWindow: true, focus: false }), `ownWindowParams: ${RW.length} rows — a plain create becomes newWindow + focus:false (an asked focus kept), a window / hidden create is left as written, a tab-type one is placed like a page (verify r1 ②: measured in another holder's window); VibeSpace's own creates the same`, badR);
+  const p0 = { url: 'x' }; WIN.ownWindowParams(p0);
+  ok(JSON.stringify(p0) === JSON.stringify({ url: 'x' }), 'ownWindowParams never mutates the params it judges');
+  // the labels of a tab VibeSpace opened (the binary labels only its own creates)
+  let labs = {}; for (let i = 0; i < 40; i++) labs = WIN.withTabLabel(labs, 'l' + i, 'abc' + i);
+  ok(Object.keys(labs).length === WIN.TAB_LABELS_MAX && labs.l39 === 'ABC39' && !labs.l0 && WIN.labelTargetOf(labs, 'l39') === 'ABC39' && WIN.labelTargetOf(labs, 'nope') === null && WIN.withLabelsOnRows([{ targetId: 'abc39' }, { targetId: 'abc39', label: 'mine' }, { targetId: 'zz' }], labs).map((x) => x.label || '').join() === 'l39,mine,', 'tab labels: the lease\'s map is bounded (the oldest goes), resolves a label to its tab and lays it on the rows that carry none (the binary\'s own label wins)');
+  // the watch mode of a tab the live view only watches
+  ok(WIN.watchModeVerdict({ framesSeen: 3, waitedMs: 0 }).mode === 'screencast' && WIN.watchModeVerdict({ framesSeen: 0, waitedMs: 200 }).waiting === true && WIN.watchModeVerdict({ framesSeen: 0, waitedMs: WIN.WATCH_FIRST_FRAME_MS }).mode === 'polling' && WIN.WATCH_POLL_MS >= 500, 'watchModeVerdict: the screencast while it paints, polling once it stayed silent a second; polling ≤ 2 fps');
+  // U4: the machine's ceiling of running browsers is a setting
+  const MR = [[undefined, 6], [null, 6], ['', 6], ['junk', 6], [0, 1], [-3, 1], [1, 1], ['9', 9], [9.4, 9], [32, 32], [500, 32]];
+  const badMR = MR.filter(([v, want]) => WIN.maxRunningOf(v, 6) !== want).map(([v]) => String(v));
+  ok(!badMR.length && WIN.maxRunningOf(undefined, LIMITS.CONCURRENT_CAP) === LIMITS.CONCURRENT_CAP, `maxRunningOf: ${MR.length} rows — unset/junk ⇒ the keeper's CONCURRENT_CAP (6), clamped to [${WIN.MAX_RUNNING_MIN}, ${WIN.MAX_RUNNING_MAX}]`, badMR);
+  // the measurement the rules stand on, pinned like the cloak proof
+  const PF = WIN.WINDOWS_PROOF;
+  const rowOf = (re) => PF.rows.find((r) => re.test(r.fact)) || {};
+  ok(PF.status === 'measured' && PF.measured === '2026-10-01' && PF.agentBrowser === '0.38.1' && /154\.0\.8037\.57/.test(PF.chrome) && Object.isFrozen(PF) && PF.rows.length >= 18 && /4 ms/.test(rowOf(/another conversation's `get title`/).headless) && /4504 ms/.test(rowOf(/same conversation's `get title`/).headless) && /0 · hidden · 0/.test(rowOf(/not on show in a shared window/).hidden) && /60 · visible/.test(rowOf(/second window/).hidden) && /last focused|newest focused/.test(rowOf(/plain createTarget/).headless) && /opener/.test(rowOf(/page opens/).hidden) && /^no/.test(rowOf(/can name a window/).headless) && /fresh/.test(rowOf(/captureScreenshot of a hidden tab/).hidden) && /^60 · visible · false/.test(rowOf(/WITHOUT the focus/).hidden) && /answered .* 0 frames follow/.test(rowOf(/mouse press on a background tab/).hidden) && /real desktop/i.test(PF.notMeasured), 'WINDOWS_PROOF: dated, versioned (agent-browser 0.38.1 + Chrome 154.0.8037.57), both modes — one daemon per conversation (4 ms vs 4504 ms), a hidden shared-window tab at 0 fps, a second window\'s tab at 60 fps, no create into a chosen window, popups in their opener\'s window, a fresh capture of a hidden tab; U0b: a NON-FOCUSED window\'s foreground tab paints at 60 fps under Xvfb, a background tab takes a click but paints nothing; the real desktop named as NOT measured');
   // the cap: a shared browser counts once in EACH conversation that holds a lease on it, and once on the machine
   const profiles = [{ id: 'bp-0000c0b1', label: 'Work', owner: { kind: 'instance', id: null } }, { id: 'bp-0000c0b2', label: 'Other', owner: { kind: 'instance', id: null } }, eph];
   const browsers = { 'bp-0000c0b1': { profileId: 'bp-0000c0b1', state: 'ready' }, 'bp-0000c0b2': { profileId: 'bp-0000c0b2', state: 'stopped' }, 'bp-0000c0a3': { profileId: 'bp-0000c0a3', state: 'ready' } };
@@ -194,9 +201,9 @@ console.log('— ① PURE: the default, one field, join-vs-launch, one driver, t
   ok(!('owner' in apv) && !('createdBy' in apv) && !('scopeAt' in apv) && apv.use.you === true && apv.use.via === 'task' && !JSON.stringify(apv).includes(KA) && apv.scope === 'only', 'agentProfileView: the record MINUS owner / createdBy / scopeAt (and never the list) PLUS use for the asker — no other conversation\'s key anywhere in it', apv);
   // the words census (every refusal the ruling touches)
   const pinnedForm = { error: `your pinned profile "work" did not open: ${B.notOwnerRefusal({ label: 'work' }).error} — tell the user; nothing else was opened instead`, remedy: '' };
-  const texts = [B.notOwnerRefusal({ label: 'work' }), B.groupsUnreadableRefusal({ label: 'work' }), pinnedForm, busyA, busyU, B.ephemeralHolderRefusal({ label: 'work', holderPid: 5, holderName: 'Old chat' })].flatMap((r) => [r.error, r.remedy || '']);
-  ok(texts.length === 12 && texts.every((x) => !CMDLINE_RE.test(x)), 'WORDS: not_owner (ONE form now), groups_unreadable, the pinned form, browser_busy (both), the pre-ruling holder\'s profile_locked — no command line in any error or remedy', texts.filter((x) => CMDLINE_RE.test(x)));
-  ok(/kept to some of the user's conversations and Task Groups/.test(texts[0]) && /"Who can use it" in the Agent browser panel \(Change…\)/.test(texts[0]) && /All my conversations/.test(texts[0]) && /Change… → add this conversation, or All my conversations/.test(texts[1]) && /run the same command again once/.test(texts[2]) && /press Stop/.test(B.ephemeralHolderRefusal({ label: 'w' }).error), '…each names the button: "Who can use it" → Change… in the Agent browser panel, or "All my conversations"; groups_unreadable says run it again once; Stop on that browser');
+  const texts = [B.notOwnerRefusal({ label: 'work' }), B.groupsUnreadableRefusal({ label: 'work' }), pinnedForm, B.ephemeralHolderRefusal({ label: 'work', holderPid: 5, holderName: 'Old chat' })].flatMap((r) => [r.error, r.remedy || '']);
+  ok(texts.length === 8 && texts.every((x) => !CMDLINE_RE.test(x)), 'WORDS: not_owner (ONE form now), groups_unreadable, the pinned form, the pre-ruling holder\'s profile_locked (browser_busy is gone with the drive claim) — no command line in any error or remedy', texts.filter((x) => CMDLINE_RE.test(x)));
+  ok(/kept to some of the user's conversations and Task Groups/.test(texts[0]) && /"Who can use it" in the Agent browser panel \(Change…\)/.test(texts[0]) && /"All agents"/.test(texts[0]) && /Change… → add this conversation, or All agents/.test(texts[1]) && /run the same command again once/.test(texts[2]) && /press Stop/.test(B.ephemeralHolderRefusal({ label: 'w' }).error), '…each names the button: "Who can use it" → Change… in the Agent browser panel, or "All agents" (lane everyone-principal); groups_unreadable says run it again once; Stop on that browser');
   ok(/opens "work"/.test(B.pinApplyNotice({ label: 'work', liveBrowser: true })) && !/RELAUNCHES/.test(B.pinApplyNotice({ label: 'work', liveBrowser: true })) && /never relaunched/.test(B.pinApplyNotice({ label: 'work', liveBrowser: true })), 'the pin\'s sentence: the next command OPENS the profile, nothing is relaunched');
   // resolveHandle: a pin opens only an EMPTY set (an attachment the agent made itself is never displaced)
   const set0 = B.attachmentsFor({ leases: [], profiles: [r0], browserKey: KB, pin: { profileId: r0.id } });
@@ -241,6 +248,7 @@ if (a === 'session' && b === 'info') { const s = read(); const act = !!(s && ali
 if (a === 'get' && b === 'cdp-url') { const s0 = read(); if (!(s0 && alive(s0.pid))) { out({ success: false, error: 'fake: no browser' }); process.exit(1); } out({ success: true, data: { cdpUrl: 'ws://127.0.0.1:19777/devtools/browser/fake-' + ns } }); process.exit(0); }
 if (a === 'close' && b === '--all') { const s = read(); if (s && alive(s.pid)) { try { process.kill(s.pid, 'SIGKILL'); } catch { } } try { fs.unlinkSync(f); } catch { } if (s && s.profile) { try { fs.unlinkSync(path.join(s.profile, 'SingletonLock.fake')); } catch { } } out({ success: true, data: { closed: 1 } }); process.exit(0); }
 if (a === 'close' && b !== '--all') { log('closes.log', { verb: 'close', ns, sess, cdp }); out({ success: true, data: { closed: 1 } }); process.exit(0); }
+if (a === 'tab' && /^[0-9A-F]{32}$/.test(String(b || ''))) { if (fs.existsSync(path.join(st, 'refuse-bind'))) { out({ success: false, error: 'fake: no such tab' }); process.exit(1); } const s = daemon('tab'); if (s.refused) { out({ success: false, error: s.refused }); process.exit(1); } log('binds.log', { ns, sess, cdp, targetId: b }); out({ success: true, data: { targetId: b } }); process.exit(0); }
 if (a === 'tab' && (b === 'close' || b === 'new')) { log('closes.log', { verb: 'tab ' + b, ns, sess, cdp }); out({ success: true, data: { closed: 1 } }); process.exit(0); }
 if (a === 'stream' && b === 'status') { log('stream.log', { ns, sess, cdp, profile: prof }); const s = daemon('stream status'); if (s.refused) { out({ success: false, error: s.refused }); process.exit(1); } out({ success: true, data: { enabled: true, connected: true, port: 21000 + (sess.length * 7) % 900, screencasting: false } }); process.exit(0); }
 if (['open', 'snapshot', 'get', 'click'].includes(a)) { const s = daemon(a); if (s.refused) { out({ success: false, error: s.refused }); process.exit(1); } log('cmds.log', { verb: a, ns, sess, cdp, profile: prof }); out({ success: true, data: { ok: true } }); process.exit(0); }
@@ -270,7 +278,11 @@ const taskDeps = {
 const remoteKeys = () => new Set([...active.values()].filter((x) => x && x._browserKey && (x.hostId || x.host || x._browserVariant === 'H')).map((x) => x._browserKey));
 const mkKeeper = (Kmod, extra = {}) => Kmod.create({ ...taskDeps, dataDir: DATA, homeDir: HOME, env: () => env, serverSetting: () => undefined, liveKeys: () => live, remoteKeys, runtime: F.createBrowserRuntime({ env }), facts: F.createBrowserFacts({ env }), log: { log() { }, warn() { }, error() { } }, install: false, now: () => clock, conversationFacts: (bk) => facts[bk] || { turn: null, name: null }, ...extra });
 const lim = { ...require('../src/keeper-limits.js') }; // mutable: the ceiling leg lowers the machine ceiling for one assert
-const k = mkKeeper(K, { limits: lim });
+// lane browser-windows: this keeper's browser has no CDP to open windows over (the fake binary) — every lease here stays in
+// the browser's shared window (the legacy shape: a takeover still takes the others in it WITH it); the per-window legs
+// below run on a second keeper whose window seam answers
+const NO_WINDOW = async () => ({ ok: false, error: 'fake: no CDP endpoint' });
+const k = mkKeeper(K, { limits: lim, openWindow: NO_WINDOW });
 const M = mutantCopies('browser-share-model', REPO);
 const be = BE.create({ dataDir: DATA, homeDir: HOME, serverNotice: null, telemetry: null, log: { warn() { }, log() { } }, env: { XDG_RUNTIME_DIR: XDG } });
 const tok = (c) => 'vsst_' + String(c).repeat(24);
@@ -407,53 +419,86 @@ try {
   fs.writeFileSync(path.join(AB, 'fail-dirs'), '');
   await j('POST', '/api/browser/pin', { sessionId: 'sess-6', profile: null });
 
-  // ── one driver at a time ──
-  clock += B.DRIVE_HOLD_MS + 1000; // every earlier command's claim (path B's two resolves) has lapsed: nobody drives
+  // ── lane browser-windows (U2): NO DRIVER CLAIM — two conversations act on one profile's browser at the same time ──
   facts[KA].turn = 'running'; facts[KB].turn = 'running'; facts[KD].turn = 'idle';
   let v = k.resolveFor({ browserKey: KA, handle: 'work' });
-  ok(v.ok && v.kind === 'attachment' && k.list().drivers[work.id] && k.list().drivers[work.id].browserKey === KA, 'one driver: conversation 1\'s command claims the drive (the digest names its browser key — never a name: the digest reaches agents)');
+  ok(v.ok && v.kind === 'attachment' && !('drivers' in k.list()), 'conversation 1 resolves on work; the digest carries no `drivers` (the claim is gone — nothing to relay)');
   r = await j('POST', '/api/agent/browser/resolve', { argv: ['snapshot'] }, as(sB));
-  ok(r.status === 409 && r.json.code === 'browser_busy' && r.json.holder === 'First chat' && r.json.by === 'agent' && r.json.retryAfterMs > 0 && r.json.retryAfterMs <= B.DRIVE_HOLD_MS && /"First chat" is using "work" right now/.test(r.json.error) && !CMDLINE_RE.test(r.json.error), 'conversation 2\'s command while conversation 1 is mid-turn on it ⇒ browser_busy BY NAME ("First chat"), with the bound to wait — its command did not run', r.json);
+  ok(r.status === 200 && r.json.kind === 'attachment' && r.json.code === undefined, 'conversation 2\'s command while conversation 1 is mid-turn on the SAME browser resolves — no browser_busy (measured: one daemon each, 4 ms beside a running wait)', r.json);
+  v = k.resolveFor({ browserKey: KA, handle: 'work' });
+  ok(v.ok, '…and conversation 1 right after it — nobody waits for anybody');
   const rowB = S.browserListFor(k.statusFor(KB)).find((x) => x.profileId === work.id);
-  ok(rowB && rowB.driver === 'other' && rowB.driverKey === KA && rowB.owners === 2, 'the strip: conversation 2\'s tab for work says ANOTHER conversation drives it (driverKey = conversation 1) and that two others hold it', rowB);
-  facts[KA].turn = 'idle';
-  v = k.resolveFor({ browserKey: KB, handle: 'work' });
-  ok(v.ok && k.list().drivers[work.id].browserKey === KB, 'conversation 1\'s turn ENDED ⇒ conversation 2\'s next command takes the drive');
-  facts[KA].turn = 'running';
-  v = k.resolveFor({ browserKey: KA, handle: 'work' });
-  ok(!v.ok && v.code === 'browser_busy' && v.holder === 'Second chat', '…and now conversation 1 is the one told to wait ("Second chat")');
-  clock += B.DRIVE_HOLD_MS + 1000;
-  v = k.resolveFor({ browserKey: KA, handle: 'work' });
-  ok(v.ok && k.list().drivers[work.id].browserKey === KA, `a driver that sent no command for ${B.DRIVE_HOLD_MS / 1000} s lets go even mid-turn`);
-  // the user takes over from conversation 2's live view: the takeover is of the BROWSER (lane S2 r6, the owner's ruling
-  // B-7199 "直接打断所有脚本和agent操作") — conversation 2 AND conversation 1 are browser_paused (1 taken WITH 2's view);
-  // who drives still names the VIEW (integration 2.369.192: the sibling state's `with`)
+  ok(rowB && rowB.driver === 'agent' && rowB.driverKey === null && rowB.owners === 2, 'the strip: conversation 2\'s entry is ITS window, held by its agent (never "another conversation drives it"); two others hold the profile', rowB);
+  // the LEGACY shared window (this keeper opened none — a browser started before this lane): a takeover still takes the
+  // others IN that window with it (they share one window: the user's hands move what they see) — fail closed, as before
   const to = k.takeover({ browserKey: KB, profileId: work.id, viewerId: 'viewer-b', sessionId: 'sess-2' });
   const vB = k.resolveFor({ browserKey: KB, handle: 'work' }), vA = k.resolveFor({ browserKey: KA, handle: 'work' });
-  ok(to && to.ok !== false && vB.code === 'browser_paused' && vA.code === 'browser_paused', 'the USER takes over from conversation 2\'s live view: conversation 2 is browser_paused (as today), conversation 1 is browser_paused too — a takeover is of the browser (lane S2), never a one-conversation pause', { to, vB: vB.code, vA });
-  ok(k.list().drivers !== undefined && (k.statusFor(KA).leases.find((l) => l.profileId === work.id) || {}).driver?.browserKey === KB, 'who drives conversation 1\'s lease names conversation 2 — the view the user drives FROM (never conversation 1 itself)', k.statusFor(KA).leases.map((l) => l.driver));
+  ok(to && to.ok !== false && vB.code === 'browser_paused' && vA.code === 'browser_paused' && /the shared window of the "work" browser \(your tab is in it\)/.test(vA.error), 'a SHARED window (no window of their own — an older browser run): the takeover from conversation 2\'s view takes conversation 1, in the same window, WITH it (browser_paused, the words name THE SHARED window — verify r2 ⑦, never "your window")', { to, vB: vB.code, vA });
+  ok((k.statusFor(KA).leases.find((l) => l.profileId === work.id) || {}).driver?.browserKey === KB, 'who drives conversation 1\'s window names conversation 2 — the view the user drives FROM', k.statusFor(KA).leases.map((l) => l.driver));
   const rowA = S.browserListFor(k.statusFor(KA)).find((x) => x.profileId === work.id);
-  ok(rowA && rowA.driver === 'other-user' && rowA.driverKey === KB, 'the strip of conversation 1 says the user drives it in conversation 2\'s view', rowA);
+  ok(rowA && rowA.driver === 'other-user' && rowA.driverKey === KB, 'the strip of conversation 1 says the user drives its (shared) window in conversation 2\'s view', rowA);
   k.handback({ browserKey: KB, profileId: work.id, viewerId: 'viewer-b', cause: 'explicit', sessionId: 'sess-2' });
   v = k.resolveFor({ browserKey: KA, handle: 'work' });
   ok(v.ok, 'the handback frees it — conversation 1 acts again');
   facts[KA].turn = 'idle'; facts[KB].turn = 'idle';
-  ok(Object.keys(k.activeDrivers()).length === 0, 'with every holder\'s turn ended nobody drives (the tick drops the claim; the strips stop naming a driver)');
-  // CONTROL: a keeper copy without the one-driver check lets two conversations act at once
+  // ── lane browser-windows (U1 + U2): A WINDOW PER HOLDER — a keeper whose window seam answers ──
   {
-    const ksrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
-    const noDrive = ksrc.replace("      if (v.kind === 'attachment') {\n        const dv = driveVerdictFor(bk, v.attachment.profileId);", "      if (false) {\n        const dv = driveVerdictFor(bk, v.attachment.profileId);");
-    ok(noDrive !== ksrc, 'control: the patched keeper copy lost the drive check');
-    const DATA2 = path.join(ROOT, 'data-nodrive'); fs.mkdirSync(DATA2, { recursive: true });
-    const Kn = M.load('src/server/browser-keeper.js', noDrive, 'no-drive');
-    const kn = Kn.create({ dataDir: DATA2, homeDir: HOME, env: () => env, serverSetting: () => undefined, liveKeys: () => live, runtime: F.createBrowserRuntime({ env }), facts: F.createBrowserFacts({ env }), log: { log() { }, warn() { }, error() { } }, install: false, now: () => clock, conversationFacts: (bk) => facts[bk] || { turn: null, name: null } });
-    const p2 = kn.createProfile({ label: 'Twin' });
-    await kn.attach({ profileId: p2.id, browserKey: KA }); await kn.attach({ profileId: p2.id, browserKey: KB });
+    const DATAW = path.join(ROOT, 'data-windows'); fs.mkdirSync(DATAW, { recursive: true });
+    let wn = 0; const opened = [];
+    const winSeam = async (cdpUrl, o) => { wn++; const targetId = ('F' + String(wn).padStart(4, '0')).padEnd(32, 'A'); opened.push({ cdpUrl, url: o && o.url, targetId }); return { ok: true, targetId, windowId: 7000 + wn }; };
+    const mkW = (Kmod, extra = {}) => mkKeeper(Kmod, { dataDir: DATAW, openWindow: winSeam, closeTarget: async () => ({ ok: true }), ...extra });
+    const kw = mkW(K);
+    const pw = kw.createProfile({ label: 'Windows' });
+    const b0 = logOf('binds.log').length;
+    await kw.attach({ profileId: pw.id, browserKey: KA, sessionId: 'sess-1' });
+    await kw.attach({ profileId: pw.id, browserKey: KB, sessionId: 'sess-2' });
+    const inst = WIN.instanceOf(kw.browserOf(pw.id));
+    const lw = kw.leasesOn(pw.id);
+    const binds = logOf('binds.log').slice(b0);
+    ok(opened.length === 2 && lw.length === 2 && lw.every((l) => l.windowIn === inst) && binds.length === 2 && binds.map((x) => x.sess).sort().join() === ['vs-' + KA, 'vs-' + KB].sort().join() && binds.every((x) => opened.some((o) => o.targetId === x.targetId)), 'U1: each NEW lease gets a window of its own at its attach — the keeper opens it over the browser\'s own endpoint and binds THAT conversation\'s session to its tab (`tab <targetId>`) before its first command', { opened: opened.map((o) => o.targetId.slice(0, 5)), binds, windowIn: lw.map((l) => l.windowIn) });
+    await kw.attach({ profileId: pw.id, browserKey: KA, sessionId: 'sess-1' });
+    ok(opened.length === 2, 'a re-attach of a lease that already has its window in this browser run opens nothing more');
     facts[KA].turn = 'running'; facts[KB].turn = 'running';
-    const a1 = kn.resolveFor({ browserKey: KA }), b1 = kn.resolveFor({ browserKey: KB });
-    ok(a1.ok && b1.ok, 'CONTROL: a keeper copy without the check lets conversation 2 act while conversation 1 is mid-turn — the one-driver legs can go red', { a1: a1.code, b1: b1.code });
-    facts[KA].turn = 'idle'; facts[KB].turn = 'idle';
-    await kn.stop(p2.id).catch(() => { }); kn.shutdown();
+    const tw = kw.takeover({ browserKey: KB, profileId: pw.id, viewerId: 'viewer-w', sessionId: 'sess-2' });
+    const wB = kw.resolveFor({ browserKey: KB, handle: 'windows' }), wA = kw.resolveFor({ browserKey: KA, handle: 'windows' });
+    ok(tw && tw.ok !== false && wB.code === 'browser_paused' && /your window of the "Windows" browser/.test(wB.error) && wA.ok && wA.kind === 'attachment', 'U2: the user takes over conversation 2\'s WINDOW — conversation 2 is browser_paused (named: "your window of the "Windows" browser"), conversation 1 in its own window RUNS ON (userW\'s D-payments)', { tw, wB: wB.code, wA: wA.code });
+    ok((kw.statusFor(KA).leases.find((l) => l.profileId === pw.id) || {}).driver === null && S.browserListFor(kw.statusFor(KA)).find((x) => x.profileId === pw.id).driver === 'agent', '…conversation 1\'s window is driven by nobody but its agent; its strip entry says so');
+    const tw2 = kw.takeover({ browserKey: KA, profileId: pw.id, viewerId: 'viewer-w2', sessionId: 'sess-1' });
+    ok(tw2 && tw2.ok !== false && kw.resolveFor({ browserKey: KA, handle: 'windows' }).code === 'browser_paused', 'ONE WINDOW, ONE HOLDER per window: a second view takes over conversation 1\'s window while the first still drives conversation 2\'s — two windows driven at once, never `held` across windows', tw2);
+    kw.handback({ browserKey: KA, profileId: pw.id, viewerId: 'viewer-w2', cause: 'explicit', sessionId: 'sess-1' });
+    // a conversation attached WHILE the user drives another's window gets its own window and is never paused from birth
+    await kw.attach({ profileId: pw.id, browserKey: KD, sessionId: 'sess-4' });
+    facts[KD].turn = 'running';
+    const wD = kw.resolveFor({ browserKey: KD, handle: 'windows' });
+    ok(opened.length === 3 && wD.ok && kw.inputStateFor(KD, pw.id).input !== 'user', 'a lease attached during another window\'s takeover gets a window of its own and is NOT paused from birth (only a lease in the driven window joins it)', { wD: wD.code, input: kw.inputStateFor(KD, pw.id).input });
+    kw.handback({ browserKey: KB, profileId: pw.id, viewerId: 'viewer-w', cause: 'explicit', sessionId: 'sess-2' });
+    ok(kw.resolveFor({ browserKey: KB, handle: 'windows' }).ok, 'the handback of conversation 2\'s window frees it');
+    // a window the session could not be bound to is closed again, and the lease is left to its first command (never a stray window)
+    const closedT = [];
+    const kx = mkKeeper(K, { dataDir: path.join(ROOT, 'data-windows-x'), openWindow: async () => ({ ok: true, targetId: 'E'.repeat(32), windowId: 1 }), closeTarget: async (u, id) => { closedT.push(id); return { ok: true }; } });
+    fs.mkdirSync(path.join(ROOT, 'data-windows-x'), { recursive: true });
+    const px = kx.createProfile({ label: 'Unbindable' });
+    fs.writeFileSync(path.join(AB, 'refuse-bind'), '1');
+    await kx.attach({ profileId: px.id, browserKey: KF, sessionId: 'sess-6' }).catch(() => null);
+    fs.rmSync(path.join(AB, 'refuse-bind'), { force: true });
+    const lx = kx.leasesOn(px.id).find((l) => l.browserKey === KF);
+    ok(closedT.length === 1 && closedT[0] === 'E'.repeat(32) && lx && !lx.windowIn, 'a window its session could not be bound to is CLOSED again (never left to nobody) and the lease is left to its first command (no window recorded)', { closedT, windowIn: lx && lx.windowIn });
+    await kx.stop(px.id).catch(() => { }); kx.shutdown();
+    facts[KA].turn = 'idle'; facts[KB].turn = 'idle'; facts[KD].turn = 'idle';
+    // CONTROL: the pre-lane rule (every lease of the profile is a mate) — the per-window leg goes red
+    const ksrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+    const allMates = ksrc.replace("return WIN.windowMates({ leases: reg.leases, profileId, browserKey, instance: WIN.instanceOf(reg.browsers[profileId]) });", "return reg.leases.filter((l) => l && l.profileId === profileId && l.browserKey !== browserKey);");
+    ok(allMates !== ksrc, 'control: the patched keeper copy takes every lease of the profile as a mate (the pre-lane rule)');
+    const kc = mkKeeper(M.load('src/server/browser-keeper.js', allMates, 'all-mates'), { dataDir: path.join(ROOT, 'data-windows-c'), openWindow: winSeam, closeTarget: async () => ({ ok: true }) });
+    fs.mkdirSync(path.join(ROOT, 'data-windows-c'), { recursive: true });
+    const pc = kc.createProfile({ label: 'Control' });
+    await kc.attach({ profileId: pc.id, browserKey: KA, sessionId: 'sess-1' }); await kc.attach({ profileId: pc.id, browserKey: KB, sessionId: 'sess-2' });
+    kc.takeover({ browserKey: KB, profileId: pc.id, viewerId: 'viewer-c', sessionId: 'sess-2' });
+    const cA = kc.resolveFor({ browserKey: KA, handle: 'control' });
+    ok(cA.code === 'browser_paused', 'CONTROL: with the pre-lane mates rule conversation 1 is paused by a takeover of conversation 2\'s window — the per-window leg above can go red', cA.code);
+    kc.handback({ browserKey: KB, profileId: pc.id, viewerId: 'viewer-c', cause: 'explicit', sessionId: 'sess-2' });
+    await kc.stop(pc.id).catch(() => { }); kc.shutdown();
+    await kw.stop(pw.id).catch(() => { }); kw.shutdown();
   }
 
   // ── the cap: counted once per holding conversation; a join never trips the machine ceiling ──
@@ -473,6 +518,30 @@ try {
   e = await threw(() => k.attach({ profileId: r.json.profile.id, browserKey: KC, sessionId: 'sess-3' }));
   ok(e && e.code === 'cap' && e.scope === 'machine' && logOf('launches.log').length === Lc, 'CONTROL: at the same ceiling a profile whose browser is NOT running is refused (cap, machine) — the join leg above is not a ceiling that never refuses', e && e.message);
   lim.CONCURRENT_CAP = 6;
+
+  // ── lane browser-windows (U4): the machine's ceiling is the SETTING `browser.maxRunning` (read at every start) ──
+  {
+    let capSetting = null;
+    const DATAC = path.join(ROOT, 'data-cap'); fs.mkdirSync(DATAC, { recursive: true });
+    const kc = mkKeeper(K, { dataDir: DATAC, openWindow: NO_WINDOW, serverSetting: (key) => (key === 'browser.maxRunning' ? capSetting : undefined) });
+    const c1 = kc.createProfile({ label: 'Cap one' }), c2 = kc.createProfile({ label: 'Cap two' });
+    await kc.attach({ profileId: c1.id, browserKey: KA, sessionId: 'sess-1' });
+    ok(kc.list().cap.cap === LIMITS.CONCURRENT_CAP && kc.list().cap.setting === 'browser.maxRunning' && kc.statusFor(KA).cap.machine.cap === LIMITS.CONCURRENT_CAP, `U4: unset ⇒ the ceiling is the keeper's CONCURRENT_CAP (${LIMITS.CONCURRENT_CAP}); the digest names the setting it reads`, kc.list().cap);
+    capSetting = 1;
+    const ec = await threw(() => kc.attach({ profileId: c2.id, browserKey: KB, sessionId: 'sess-2' }));
+    ok(ec && ec.code === 'cap' && ec.scope === 'machine' && /\(1\/1 running/.test(ec.message) && kc.list().cap.cap === 1 && kc.statusFor(KA).cap.machine.cap === 1, 'U4: browser.maxRunning = 1 ⇒ a second browser is refused BY NAME at the next start ("1/1 running"), the digest and the strip\'s machine count read 1', ec && ec.message);
+    capSetting = 2;
+    await kc.attach({ profileId: c2.id, browserKey: KB, sessionId: 'sess-2' });
+    ok(kc.browserOf(c2.id) && kc.browserOf(c2.id).state === 'ready' && kc.list().cap.cap === 2, 'U4: raised to 2 ⇒ it starts — the setting is read at every start, no restart');
+    capSetting = 1;
+    await sleep(20);
+    ok(kc.browserOf(c1.id).state === 'ready' && kc.browserOf(c2.id).state === 'ready' && kc.list().cap.used === 2 && kc.list().cap.cap === 1, 'U4: lowered BELOW what runs ⇒ nothing is stopped (the next start is refused) — 2 running at a ceiling of 1');
+    capSetting = 'junk';
+    ok(kc.list().cap.cap === LIMITS.CONCURRENT_CAP, 'U4: a junk value ⇒ the default (never 0, never NaN)');
+    await kc.stop(c1.id).catch(() => { }); await kc.stop(c2.id).catch(() => { }); kc.shutdown();
+    const ss = fs.readFileSync(path.join(REPO, 'src/lib/settings-schema.js'), 'utf8');
+    ok(/'browser\.maxRunning': \{\s*type: 'number', default: 6, min: 1, max: 32,/.test(ss) && /category: t\('Agent browser'\), liveApply: true,\s*\},\s*'browser\.defaultPerConversationCap'/.test(ss) && /refused by name/.test(ss), 'U4: the schema declares browser.maxRunning (number, default 6, 1–32, Agent browser) and its words say what happens at the ceiling');
+  }
 
   // ── "WHO CAN USE IT" IS A LIST (2026-09-27): the PATCH, the re-judge, the pick that writes the list, verb time ──
   // (entering: work is everyone's; First, Second (pinned by the user), Third and Fourth chat hold a tab in it)
@@ -1332,7 +1401,7 @@ console.log('— the list\'s controls: each rule removed in a patched copy turns
   const wsrc0 = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8');
   const wscsrc = fs.readFileSync(path.join(REPO, 'src/ws-create.js'), 'utf8');
   ok(/remoteKeys: \(\) => new Set\(\[\.\.\.activeSessions\.values\(\)\]\.filter\(\(s\) => s && s\._browserKey && \(s\.hostId \|\| s\.host \|\| s\._browserVariant === 'H'\)\)/.test(wsrc0) && /setPin\(bk\.key, pin\.profileId, \{ origin: pin\.origin, remote: !!data\.hostId \}\)/.test(wscsrc), 'WIRING (identity verify r2): the wiring hands the keeper the remote sessions\' keys; ws-create\'s explicit pick names a remote spawn');
-  ok((rsrc2.match(/attachAnswer\(r, \{ cdp: req\.body\?\.wrapper === true, agent: agentFactsOf\(f\) \}\)/g) || []).length === 2 && /if \(f\.remote\) \{ const rr = B\.remoteSessionRefusal/.test(rsrc2) && /const remote = !!\(s\.hostId \|\| s\.host \|\| s\._browserVariant === require\('\.\.\/browser-profiles\.js'\)\.VARIANTS\.H\);/.test(rsrc2), 'WIRING (identity verify r2): the agent\'s `use` and `resolve` answers ride attachAnswer with the asker\'s facts; pinAnswer refuses a remote session; sessionFacts names `remote`');
+  ok((rsrc2.match(/attachAnswer\(r, \{ cdp: req\.body\?\.wrapper === true, agent: agentFactsOf\(f\) \}\)/g) || []).length === 3 && /async function resolveForJob\(req, res, k, f\) \{[\s\S]{0,1400}attachAnswer\(r, \{ cdp: req\.body\?\.wrapper === true, agent: agentFactsOf\(f\) \}\)/.test(rsrc2) && /if \(f\.remote\) \{ const rr = B\.remoteSessionRefusal/.test(rsrc2) && /const remote = !!\(s\.hostId \|\| s\.host \|\| s\._browserVariant === require\('\.\.\/browser-profiles\.js'\)\.VARIANTS\.H\);/.test(rsrc2), 'WIRING (identity verify r2): the agent\'s `use` and `resolve` answers ride attachAnswer with the asker\'s facts; pinAnswer refuses a remote session; sessionFacts names `remote`');
   const tsrc = fs.readFileSync(path.join(REPO, 'src/routes/browser-trace.js'), 'utf8');
   ok(/await ctx\.keyForPickedSession\(r\.session\)/.test(tsrc) && /k\.updateProfile\(req\.params\.id, patch, \{ knownKeys \}\)/.test(tsrc), 'WIRING: the PATCH resolves picked sessions through the ONE resolver and hands the keeper the keys it resolved');
   const wsrc = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8');

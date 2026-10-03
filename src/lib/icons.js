@@ -153,6 +153,12 @@ export const UI_ICONS = {
   // the Word viewer's zoom out / in (a magnifier with − / +)
   zoomOut:   _s('<circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14M5 7h4"/>'),
   zoomIn:    _s('<circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14M5 7h4M7 5v4"/>'),
+  // the Design window (lane design-window): Fit = four corners drawn in; Print = a printer
+  fit:       _s('<path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/><rect x="5.5" y="5.5" width="5" height="5" rx="0.5"/>'),
+  print:     _s('<path d="M4.5 6V2.5h7V6"/><rect x="2.5" y="6" width="11" height="5" rx="1"/><path d="M4.5 9.5h7v4h-7z"/>'),
+  // lane everyone-principal (2026-10-02): THE "All agents" principal — every conversation, now and later (three heads;
+  // `users` stays a Task Group's / an agent group's glyph)
+  everyone:  _s('<circle cx="8" cy="4.8" r="2"/><path d="M4.6 12.6c.4-2.1 1.7-3.3 3.4-3.3s3 1.2 3.4 3.3"/><circle cx="3.2" cy="6.4" r="1.5"/><path d="M.9 12c.2-1.5 1-2.5 2.3-2.7"/><circle cx="12.8" cy="6.4" r="1.5"/><path d="M15.1 12c-.2-1.5-1-2.5-2.3-2.7"/>'),
   // an agent GROUP (design §22, g3): two heads — the group list's row glyph,
   // the members chip and the New group button
   users:     _s('<circle cx="6" cy="5.5" r="2.2"/><path d="M1.8 13c.4-2.4 2.1-3.8 4.2-3.8s3.8 1.4 4.2 3.8"/><path d="M10.2 3.5a2.2 2.2 0 010 4.2M11.6 9.4c1.4.5 2.3 1.8 2.6 3.6"/>'),
@@ -161,5 +167,8 @@ export const UI_ICONS = {
   // 2026-09-26 (the aggregated IM): a channel message's attachment chip + its download
   attachment: _s('<path d="M10.5 4.5l-5 5a1.4 1.4 0 002 2l5.5-5.5a2.8 2.8 0 00-4-4L3.5 7.5a4.2 4.2 0 006 6l4.5-4.5"/>'),
   download:  _s('<path d="M8 2.5v7.5M4.5 6.5L8 10l3.5-3.5"/><path d="M3 12.5h10"/>'),
+  // B-5fe1: an account's VENDOR glyph on a conversation avatar's badge (`vendor-<kind>`, drawn ≤ 10 px — a silhouette)
+  'vendor-gmail': _s('<path d="M2 12.5v-8l6 4.6 6-4.6v8"/><path d="M2 12.5h3V8.2M14 12.5h-3V8.2"/>', { sw: 1.8 }),
+  'vendor-lark': _s('<path d="M2.5 9.2c2.6-.4 4.8.4 6.6 2.4l5-5c-2.2-1-4.5-.7-6.4.9"/><path d="M4.6 3.4h3.6l3.2 3.1"/>', { sw: 1.8 }),
   forkBranch: _s('<path d="M5 5.372v.878c0 .414.336.75.75.75h4.5a.75.75 0 0 0 .75-.75v-.878a2.25 2.25 0 1 1 1.5 0v.878a2.25 2.25 0 0 1-2.25 2.25h-1.5v2.128a2.251 2.251 0 1 1-1.5 0V8.5h-1.5A2.25 2.25 0 0 1 3.5 6.25v-.878a2.25 2.25 0 1 1 1.5 0ZM5 3.25a.75.75 0 1 0-1.5 0 .75.75 0 0 0 1.5 0Zm6.75.75a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5Zm-3 8.75a.75.75 0 1 0-1.5 0 .75.75 0 0 0 1.5 0Z"/>', { fill: true }),
 };

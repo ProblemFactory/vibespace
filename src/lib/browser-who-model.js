@@ -18,6 +18,12 @@
 //   · loseCount  — how many conversations using it now the draft would take it from (a lease holder neither in the
 //                  draft by key nor by any of its Task Groups).
 //   · saveWords / refusalWords — the toasts.
+//   · ALL AGENTS (lane everyone-principal, 2026-10-02): the picker's first row (`EVERYONE_KEY`) IS `use.mode:'all'` —
+//     never a second spelling; the rows picked beside it are KEPT (`use.who` under `all`, restored when All is taken
+//     away), the panel shows "All agents" first ("All agents (N more rows)" when rows are kept).
+
+/** The picker key of ALL AGENTS — the dialog's first row (it maps to `use.mode:'all'`). */
+export const EVERYONE_KEY = 'everyone:*';
 
 /** How many chips the panel row shows before "+N more" (the phone: 2). */
 export const CHIPS_WIDE = 4;
@@ -35,7 +41,8 @@ export function chipKeyOf(row) {
  */
 export function whoChips(use, { t = (s) => s, nameOfConversation = () => '', taskOf = () => null } = {}) {
   const u = use && typeof use === 'object' ? use : { mode: 'all' };
-  if (u.mode === 'all') return { mode: 'all', chips: [], nobody: '' };
+  // ALL AGENTS: the value is "All agents"; rows kept beside it are counted, never drawn as if they decided anything
+  if (u.mode === 'all') { const kept = Array.isArray(u.who) ? u.who.length : 0; return { mode: 'all', chips: [], nobody: '', kept, allText: kept ? t('All agents ({n} more rows)', { n: kept }) : t('All agents') }; }
   const rows = Array.isArray(u.who) ? u.who : [];
   const chips = rows.map((w) => {
     if (w.kind === 'session') {
@@ -82,7 +89,8 @@ export function foldChips(chips, max = CHIPS_WIDE, { t = (s) => s } = {}) {
 export function pickerRows(view, { sessions = [], groups = [], groupsOfSession = () => [], folderTail = (x) => String(x || ''), nameOfConversation = () => '', t = (s) => s } = {}) {
   const v = view && typeof view === 'object' ? view : {};
   const use = v.use && typeof v.use === 'object' ? v.use : { mode: 'all' };
-  const listed = use.mode === 'only' && Array.isArray(use.who) ? use.who : [];
+  // the list's rows — under `all` the rows it KEEPS (picked again beside All agents, restored when All is taken away)
+  const listed = (use.mode === 'only' || use.mode === 'all') && Array.isArray(use.who) ? use.who : [];
   const rows = [], wire = new Map(), keyOfPick = new Map();
   const titleOf = (g) => String((g && (g.title || g.name)) || (g && g.id) || '');
   const liveGroups = (Array.isArray(groups) ? groups : []).filter((g) => g && g.id && !g.archived);
@@ -109,7 +117,8 @@ export function pickerRows(view, { sessions = [], groups = [], groupsOfSession =
     wire.set(key, inList ? { kind: 'session', key: bk } : { kind: 'session', session: s.id });
     if (bk) { keyOfPick.set(key, bk); liveByKey.set(bk, key); }
   }
-  const selected = [];
+  // ALL AGENTS: the dialog's first row (the picker draws it) — picked when every conversation may
+  const selected = use.mode === 'all' ? [EVERYONE_KEY] : [];
   for (const w of listed) {
     if (w.kind === 'task') {
       const key = `task:${w.id}`;
@@ -142,11 +151,19 @@ export function pickerRows(view, { sessions = [], groups = [], groupsOfSession =
   return { rows, selected, remote, wire, keyOfPick };
 }
 
-/** The picker's selection → the PATCH's `who` rows (unknown keys dropped). */
+/** The picker's selection → the PATCH's `who` rows (unknown keys dropped; ALL AGENTS is the mode, never a row). */
 export function draftWho(selected, wire) {
   const out = [];
-  for (const k of Array.isArray(selected) ? selected : []) { const w = wire && wire.get(String(k)); if (w) out.push({ ...w }); }
+  for (const k of Array.isArray(selected) ? selected : []) { if (String(k) === EVERYONE_KEY) continue; const w = wire && wire.get(String(k)); if (w) out.push({ ...w }); }
   return out;
+}
+/** THE PATCH's `use` from the picker's selection: ALL AGENTS picked ⇒ `{mode:'all'}` with the rows picked beside it
+ *  (kept); else `{mode:'only', who}`; nothing picked ⇒ null (refused in place: `empty_list`). */
+export function draftUse(selected, wire) {
+  const sel = Array.isArray(selected) ? selected.map(String) : [];
+  const who = draftWho(sel, wire);
+  if (sel.includes(EVERYONE_KEY)) return who.length ? { mode: 'all', who } : { mode: 'all' };
+  return who.length ? { mode: 'only', who } : null;
 }
 
 /** How many conversations USING it now (a lease) the draft takes it from: a holder whose key is not in the draft and
@@ -162,7 +179,7 @@ export function loseCount(usedBy, { mode = 'all', keys = [], taskIds = [] } = {}
 
 /** The success toast: "Who can use work: all my conversations" / "Who can use work: A, B". */
 export function saveWords({ label = '', mode = 'all', names = [] } = {}, t = (s) => s) {
-  if (mode !== 'only') return t('Who can use {label}: all my conversations', { label });
+  if (mode !== 'only') return t('Who can use {label}: All agents', { label });
   return t('Who can use {label}: {list}', { label, list: (names || []).filter(Boolean).join(', ') });
 }
 
@@ -172,7 +189,7 @@ export function refusalWords(r, t = (s) => s, { max = 64 } = {}) {
   const code = r && r.code;
   const name = (r && r.name) || '';
   switch (code) {
-    case 'empty_list': return t('Pick at least one conversation or Task Group, or choose “All my conversations”.');
+    case 'empty_list': return t('Pick All agents, or at least one conversation or Task Group.');
     case 'no_browser_key': return r && r.why === 'remote' ? t('“{name}” runs on another machine — the Agent browser runs on this machine only', { name }) : t('“{name}” has no browser of its own yet — restart it (Terminate → Resume), then add it', { name });
     case 'session-gone': return t('That conversation is not running any more — pick it again from the list');
     case 'unknown_task': return t('That Task Group no longer exists — pick another one');

@@ -412,6 +412,8 @@ export async function showEditAccountDialog(app, a, { kinds = null } = {}) {
   const custom = cfg.client ? { appId: cfg.client.appId || '', appSecret: cfg.client.appSecret || '' } : null;
   const honesty = cfg.senderHonestyLine === true ? 'on' : cfg.senderHonestyLine === false ? 'off' : 'default';
   const rxPolicy = ['propose', 'direct', 'off'].includes(a.reactionPolicy) ? a.reactionPolicy : 'propose';
+  // lane channel-agent-watch W2: may agents see the LIST of this account's conversations (titles only, to ask for one)
+  const dir = a.agentDirectory && typeof a.agentDirectory === 'object' ? a.agentDirectory : { groups: true, singles: false };
   const fields = [
     { key: 'name', label: tr('Name'), value: cfg.label || a.label || '' },
     ...clientFieldSpecs({ ...spec, presets: cfg.presets || spec.presets }, { value: cur, custom, secretType: 'text',
@@ -425,6 +427,10 @@ export async function showEditAccountDialog(app, a, { kinds = null } = {}) {
     // lane channel-threads (spec §2.6): what an AGENT's reaction does on this account — only where the channel can react
     ...(a.reactions && a.reactions.add ? [{ key: 'reactionPolicy', label: tr('Agent reactions'), type: 'select', value: rxPolicy, options: [['propose', tr('You approve each one')], ['direct', tr('As the channel policy allows')], ['off', tr('Off')]],
       hint: tr('An agent can propose an emoji reaction on a message; it shows in your name. "As the channel policy allows" sends it directly only where the channel sends replies directly and the agent may send.') }] : []),
+    { key: 'dirGroups', label: tr('Agents see the list of group chats'), type: 'select', value: dir.groups === false ? 'off' : 'on', options: [['on', tr('Yes (the default)')], ['off', tr('No')]],
+      hint: tr('An agent sees the TITLES of group chats it cannot read, so it can ask you for one. Never a message, never a name beyond the title.') },
+    { key: 'dirSingles', label: tr('Agents see the list of single chats'), type: 'select', value: dir.singles === true ? 'on' : 'off', options: [['off', tr('No (the default)')], ['on', tr('Yes')]],
+      hint: tr('A single chat\'s title is usually the other person\'s name, so it is off unless you turn it on.') },
   ];
   const ctx = mountsDialog(`${tr('Edit')} "${name}"`, fields, tr('Save'), async (v, { close }) => {
     const patch = {};
@@ -434,6 +440,7 @@ export async function showEditAccountDialog(app, a, { kinds = null } = {}) {
     if (cfg.push && v.push !== (cfg.push.claimedExclusive || 'unknown')) patch.push = { claimedExclusive: v.push };
     if (a.senderHonestyLine && v.honesty !== honesty) patch.senderHonestyLine = v.honesty === 'on' ? true : v.honesty === 'off' ? false : null;
     if (a.reactions && a.reactions.add && v.reactionPolicy && v.reactionPolicy !== rxPolicy) patch.reactionPolicy = v.reactionPolicy;
+    if ((v.dirGroups === 'on') !== (dir.groups !== false) || (v.dirSingles === 'on') !== (dir.singles === true)) patch.agentDirectory = { groups: v.dirGroups === 'on', singles: v.dirSingles === 'on' };
     const switching = switchesClient({ ...a, credentialKey: cfg.credentialKey, customClient: custom ? { appId: custom.appId } : null }, v, '', cfg.presets || spec.presets);
     if (!switching && v.client === 'custom' && v.csec !== ((custom && custom.appSecret) || '')) patch.credential = { appId: v.cid, appSecret: v.csec };
     if (Object.keys(patch).length) await capi(`/api/channels/adapters/${enc(a.id)}`, { method: 'PUT', body: JSON.stringify(patch) });

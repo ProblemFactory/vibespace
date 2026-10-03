@@ -1128,7 +1128,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
       // verify r6 (S2): `recorded` = the exact text the CLI's transcript now holds for this delivery — a first-attach rebuild
       // renders THAT record and skips the held card (normalizers.replayCard), never both; the card's own text may be a summary
       // `group` (lane group-report-card): a group WAKE's card names the sender → the group (src/group-card.js; the card door keys it)
-      const cardOk = () => { try { emitPeerCard?.(cid, { fromName: opts.fromName || null, text: opts.cardText || text, recorded: text, kind, ...(opts.group ? { group: opts.group } : {}) }); } catch (e) { log('[deliver] card emit failed:', e.message); } };
+      const cardOk = () => { try { emitPeerCard?.(cid, { fromName: opts.fromName || null, text: opts.cardText || text, recorded: text, kind, ...(opts.channel ? { channel: opts.channel } : {}), ...(opts.group ? { group: opts.group } : {}) }); } catch (e) { log('[deliver] card emit failed:', e.message); } };   // `channel` (B-c127): a channel notice's conversation — its name is the card's link
       // rung 0: VibeSpace channel socket (experimental, per-session opt-in)
       try {
         if (!noWake && serverSetting?.('agents.vibespaceChannel') === true && activeSessions) {
@@ -1208,7 +1208,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
         // turn (the frame is not written; the hold goes back in `finally`)
         if (noWake && !steersIntoRunningTurn) return { ok: false, lane: 'rpc-queue', reason: 'no turn is running to join — a delivery now would open a billed turn', refused: 'no-wake' };
         try {
-          rpc.s.pty.write(JSON.stringify({ type: 'peer-message', text, fromName: opts.fromName || null, cardText: opts.cardText || null, kind, ...(opts.group ? { group: opts.group } : {}) }) + '\n');   // `group`: the wrapper's marker carries it (lane group-report-card) — an older wrapper ignores it and draws the fromName card
+          rpc.s.pty.write(JSON.stringify({ type: 'peer-message', text, fromName: opts.fromName || null, cardText: opts.cardText || null, kind, ...(opts.channel ? { channel: opts.channel } : {}), ...(opts.group ? { group: opts.group } : {}) }) + '\n');   // `group`: the wrapper's marker carries it (lane group-report-card) — an older wrapper ignores it and draws the fromName card
           // EVERY frame joins the settle queue, charged or not — the wrapper
           // answers in write order, so a queue holding only the predicted-free
           // ones would hand this frame's answer to the next frame's entry.

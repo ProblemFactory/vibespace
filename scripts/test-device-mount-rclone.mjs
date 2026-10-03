@@ -31,6 +31,9 @@ const CONTENT = 'DEVICE-MOUNT-RCLONE ' + 'Y'.repeat(5000);
 fs.writeFileSync(path.join(share, 'hello.txt'), CONTENT);
 fs.writeFileSync(path.join(share, '多字节.md'), '# 设备挂载 ✓\n');
 fs.writeFileSync(path.join(share, 'sub', 'nested.txt'), 'nested-content-ok');
+fs.writeFileSync(path.join(share, 'snap.bin'), 'A'.repeat(8192));
+let hasSqlite = true;
+try { execFileSync('python3', ['-c', `import sqlite3;c=sqlite3.connect(${JSON.stringify(path.join(share, 'chat.db'))});c.execute('create table m(id integer primary key, body text)');c.executemany('insert into m(body) values (?)',[('old-%04d'%i,) for i in range(200)]);c.commit()`]); } catch { hasSqlite = false; }
 
 const version = require('../package.json').version;
 fs.writeFileSync(path.join(repo, 'src/agentd/version.js'), `module.exports = { VERSION: ${JSON.stringify(version)} };\n`);
@@ -83,6 +86,54 @@ try {
   // partial read (VFS seeks mid-file)
   const seek = (await run('dd', [`if=${path.join(mountpoint, 'hello.txt')}`, 'bs=1', 'skip=100', 'count=10', 'status=none'])).toString('utf8');
   check('mid-file seek read correct', seek === CONTENT.slice(100, 110), JSON.stringify(seek));
+
+  // B-35e3 (2.369.202): a same-size in-place rewrite on the device must reach
+  // a reader that keeps the file OPEN (a kept-open SQLite connection) and any
+  // (size, mtime) reader — base: the held reader served cached pages forever
+  // and the mount's mtime stayed pinned to the mount time (--no-modtime).
+  console.log('— a same-size rewrite reaches held readers within the poll interval (B-35e3) —');
+  const snap = path.join(mountpoint, 'snap.bin');
+  const holder = (code) => {
+    const c = spawn('python3', ['-u', '-c', code], { stdio: ['pipe', 'pipe', 'ignore'] });
+    const ask = () => new Promise((r) => { c.stdout.once('data', (d) => r(d.toString().trim())); c.stdin.write('x\n'); });
+    return { c, ask };
+  };
+  const heldFd = holder(`import sys,os\nf=os.open(${JSON.stringify(snap)},os.O_RDONLY)\nfor line in sys.stdin:\n  print(os.pread(f,4,0).decode(),flush=True)`);
+  const heldDb = hasSqlite ? holder(`import sys,sqlite3\nc=sqlite3.connect('file:'+${JSON.stringify(path.join(mountpoint, 'chat.db'))}+'?mode=ro',uri=True)\nfor line in sys.stdin:\n  print(c.execute('select body from m where id=7').fetchone()[0],flush=True)`) : null;
+  try {
+    check('held fd reads the first version', (await heldFd.ask()) === 'AAAA');
+    if (heldDb) check('kept-open sqlite connection reads the first version', (await heldDb.ask()) === 'old-0006');
+    const mtime0 = (await run('stat', ['-c', '%Y', snap])).toString().trim();
+    await sleep(8000); // the refresher has found the held files and settled
+    // re-read through the held handles: the first version is cached again
+    check('held fd still reads the first version', (await heldFd.ask()) === 'AAAA');
+    if (heldDb) check('kept-open connection still reads the first version', (await heldDb.ask()) === 'old-0006');
+    const w = fs.openSync(path.join(share, 'snap.bin'), 'r+'); fs.writeSync(w, Buffer.from('B'.repeat(8192)), 0, 8192, 0); fs.closeSync(w);
+    if (heldDb) execFileSync('python3', ['-c', `import sqlite3;c=sqlite3.connect(${JSON.stringify(path.join(share, 'chat.db'))});c.execute("update m set body='new-0007' where id=7");c.commit()`]);
+    check('the device rewrite kept both sizes', fs.statSync(path.join(share, 'snap.bin')).size === 8192);
+    // poll ONLY through the held handles — no fresh open of either file (an
+    // open drops the pages by itself and would hide the bug)
+    const t0c = Date.now(); let seenFd = '', seenDb = heldDb ? '' : 'new-0007';
+    while (Date.now() - t0c < 15000 && (seenFd !== 'BBBB' || seenDb !== 'new-0007')) {
+      await sleep(500);
+      if (seenFd !== 'BBBB') seenFd = await heldFd.ask();
+      if (seenDb !== 'new-0007') seenDb = await heldDb.ask();
+    }
+    const tookMs = Date.now() - t0c;
+    check(`held fd sees the rewrite (${tookMs}ms, tick 5s)`, seenFd === 'BBBB', `still ${JSON.stringify(seenFd)} after ${tookMs}ms`);
+    if (heldDb) check('kept-open sqlite connection sees the updated row', seenDb === 'new-0007', `still ${JSON.stringify(seenDb)}`);
+    // the listing (dir-cache 5s) + kernel attrs (1s) carry the device mtime
+    const devS = String(Math.floor(fs.statSync(path.join(share, 'snap.bin')).mtimeMs / 1000));
+    let mtime1 = mtime0; const t0m = Date.now();
+    while (Date.now() - t0m < 10000 && mtime1 !== devS) { await sleep(500); mtime1 = (await run('stat', ['-c', '%Y', snap])).toString().trim(); }
+    check('the mount reports the DEVICE mtime (not the mount time)', mtime1 === devS && mtime1 !== mtime0, `mount ${mtime0}→${mtime1}, device ${devS}`);
+    check('a fresh read sees the rewrite', (await run('head', ['-c', '4', snap])).toString() === 'BBBB');
+    // never "fixed" by --direct-io: that breaks MAP_SHARED mmap with ENODEV
+    const mm = (await run('python3', ['-c', `import mmap,os\nf=os.open(${JSON.stringify(snap)},os.O_RDONLY)\nprint(mmap.mmap(f,0,access=mmap.ACCESS_READ)[:4].decode())`])).toString().trim();
+    check('shared mmap of a mount file still works', mm === 'BBBB', mm);
+  } finally {
+    for (const hh of [heldFd, heldDb]) { try { hh && hh.c.kill(); } catch {} }
+  }
 } catch (e) {
   failed++; console.error('  ✗ device mount threw:', e.message);
 } finally {

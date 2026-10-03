@@ -607,7 +607,36 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
         return rep;
       },
     },
+    {
+      id: '2026-10-design-kit-removed',
+      note: "the Design window replaces the Claude CLI's /design kit (lane design-docs, docs/design-design-window.md §3.6): VibeSpace used to extract that kit — the CLI's own skill text, seeding helper and editor payload — out of the installed claude into data/design-kit/<cliVersion>/ and hand it to agents. Nothing reads it any more, and it is the CLI vendor's content, not ours, so it is DELETED rather than archived (the one exception to archive-then-strip: keeping a copy is the thing to stop). A symlink at data/design-kit is unlinked, never followed; a symlink inside it is removed as a link. Absent = nothing to do. A failure (a permission) is retried next boot. The three canvases published from it stay on /p/<id> untouched (data/published-pages/ is never read here).",
+      run() {
+        const rep = removeDesignKit(path.join(dataDir, 'design-kit'));
+        console.log('[migrate] design-kit-removed:', JSON.stringify(rep));
+        return rep;
+      },
+    },
   ];
+
+  /** 2026-10-design-kit-removed: delete the extracted vendor kit. lstat first — a link at the root is unlinked, never
+   *  followed (rmSync removes links inside as links); the report counts what went (it rides the ledger). */
+  function removeDesignKit(dir) {
+    let st;
+    try { st = fs.lstatSync(dir); } catch (e) { if (e && e.code === 'ENOENT') return { removed: false, why: 'absent' }; throw e; }
+    if (!st.isDirectory()) { fs.unlinkSync(dir); return { removed: true, kind: st.isSymbolicLink() ? 'symlink' : 'file', versions: 0, files: 0, bytes: 0 }; }
+    let versions = 0, files = 0, bytes = 0;
+    const walk = (d, depth) => {
+      for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+        const fp = path.join(d, e.name);
+        if (depth === 0 && e.isDirectory()) versions++;
+        if (e.isDirectory() && depth < 4) walk(fp, depth + 1);
+        else if (!e.isDirectory()) { files++; try { bytes += fs.lstatSync(fp).size; } catch { } }
+      }
+    };
+    try { walk(dir, 0); } catch { /* the count is a report, never a reason to keep the files */ }
+    fs.rmSync(dir, { recursive: true });
+    return { removed: true, kind: 'dir', versions, files, bytes };
+  }
 
   /** 2026-09-exit-access-lists (lane-pairing ⑥): archive every record's `allowExit`, then lift each record through
    *  the ONE PURE rule (src/exit-reach.js migrateExitAccess) and strip the boolean. */

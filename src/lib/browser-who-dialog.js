@@ -4,12 +4,13 @@
 // a list drawn a frame behind a write would overwrite the newer one) — and saved as ONE whole-list PATCH carrying the
 // `base` stamp it read (409 list-changed ⇒ the sentence, and the dialog re-opens on the list as it is now).
 //
-//   · two answers (radiogroup): "All my conversations" (the default) / "Only these";
-//   · under "Only these", THE principal picker (src/lib/principal-picker.js — chips above a search box, Recent, Task
-//     Groups first, sessions under their Task Group, Other; keyboard; rows patched in place on the roster broadcasts):
-//     every Task Group, every live local agent session (by its webui id — the server resolves it to the conversation's
-//     browser key), and every row of the current list the roster does not cover (a stopped conversation, a deleted Task
-//     Group), checked;
+//   · ONE control (lane everyone-principal, 2026-10-02 — the two radios "All my conversations" / "Only these" are gone):
+//     THE principal picker (src/lib/principal-picker.js — chips above a search box, ALL AGENTS first, Recent, Task
+//     Groups, sessions under their Task Group, Other; keyboard; rows patched in place on the roster broadcasts). ALL
+//     AGENTS picked = `use.mode:'all'` (the default; the rows picked beside it are KEPT for when All is taken away);
+//     otherwise every Task Group, every live local agent session (by its webui id — the server resolves it to the
+//     conversation's browser key), and every row of the current list the roster does not cover (a stopped
+//     conversation, a deleted Task Group), checked;
 //   · the "will lose it" sentence, live from who uses it now vs the draft (no second confirm — the sentence IS the
 //     warning); the empty list refused in place; Esc = the picker's own contract (a query first, then the dialog).
 //
@@ -19,7 +20,7 @@ import { fetchJson, showToast, createModalShell } from './utils.js';
 import { btn, el, noteLine, noteText } from './channel-chrome.js';
 import { principalPicker } from './principal-picker.js';
 import { folderTail } from './principal-picker-model.js';
-import { pickerRows, draftWho, loseCount, saveWords, refusalWords } from './browser-who-model.js';
+import { pickerRows, draftWho, draftUse, loseCount, saveWords, refusalWords, EVERYONE_KEY } from './browser-who-model.js';
 
 const DIALOG_ID = 'browser-who-dialog';
 
@@ -63,26 +64,13 @@ export async function openWhoDialog(app, profileId, { onSaved = null, label = ''
   shell.dialog.dataset.profileId = id;
   const body = shell.body;
 
-  // the two answers — a radiogroup of label rows (a whole row is the target)
-  const group = el('div', 'bwho-answers');
-  group.setAttribute('role', 'radiogroup');
-  group.setAttribute('aria-label', t('Who can use it'));
-  const radio = (value, head, sub) => {
-    const row = el('label', 'bwho-answer');
-    const input = document.createElement('input');
-    input.type = 'radio'; input.name = `bwho-mode-${id}`; input.value = value; input.className = 'bwho-radio';
-    const text = el('span', 'bwho-answer-text');
-    text.appendChild(el('span', 'bwho-answer-head', head));
-    text.appendChild(el('span', 'bwho-answer-sub', sub));
-    row.append(input, text);
-    group.appendChild(row);
-    return { row, input };
-  };
-  const rAll = radio('all', t('All my conversations'), t('Any of your conversations can use this browser and its logins — one browser, each conversation in its own tab.'));
-  const rOnly = radio('only', t('Only these'), t('Pick conversations and Task Groups. A Task Group means every conversation in it — bound to it or started in its folders — now or later.'));
-  body.appendChild(group);
+  // what the pick MEANS, one sentence above the picker (rebuilt as the pick changes)
+  const meaning = el('div', 'bwho-meaning agents-note');
+  // the rows picked beside All agents are KEPT — said on their own line (a sentence of its own in every language)
+  const keptLine = el('div', 'bwho-meaning bwho-kept agents-note');
+  body.append(meaning, keptLine);
 
-  // THE principal picker, under "Only these" — its rows re-read on the roster's broadcasts (the picker's own subscription)
+  // THE principal picker — ALL AGENTS first; its rows re-read on the roster's broadcasts (the picker's own subscription)
   let model = null;
   const rowsNow = () => {
     model = pickerRows(view, {
@@ -98,14 +86,16 @@ export async function openWhoDialog(app, profileId, { onSaved = null, label = ''
   const pickWrap = el('div', 'bwho-pick');
   const picker = principalPicker({
     items: () => rowsNow(), app, multi: true, selected: initial,
-    placeholder: t('Add a conversation or Task Group…'), label: t('Add a conversation or Task Group…'),
+    placeholder: t('Add a conversation or Task Group…'), label: t('Who can use it'),
     emptyText: t('No conversation is running and there is no Task Group to pick'),
-    onChange: (sel) => { if (sel.length && !rOnly.input.checked) { rOnly.input.checked = true; syncMode(); } refresh(); },
+    // ALL AGENTS = "every conversation of yours, now and later" — the profile's `all` (lane everyone-principal)
+    everyone: { key: EVERYONE_KEY },
+    onChange: () => refresh(),
   });
   pickWrap.appendChild(picker.el);
   const remoteLine = el('div', 'bwho-remote chat-status-dim', t('Conversations on other machines are not listed — the Agent browser runs on this machine only.'));
   pickWrap.appendChild(remoteLine);
-  rOnly.row.after(pickWrap);
+  body.appendChild(pickWrap);
   // the two notes sit OUTSIDE the scrolling body, right above the footer (the naive-user verifier, 2026-09-28: on a phone
   // the list fills the body, and a note at its end was below the fold — the warning the Save button acts on, and the
   // refusal it just caused, must be on screen beside it)
@@ -122,7 +112,7 @@ export async function openWhoDialog(app, profileId, { onSaved = null, label = ''
   footer.append(cancel, save);
   shell.dialog.append(notes, footer);
 
-  const mode = () => (rOnly.input.checked ? 'only' : 'all');
+  const mode = () => (picker.selected().includes(EVERYONE_KEY) ? 'all' : 'only');
   function draft() {
     const sel = picker.selected();
     const who = draftWho(sel, model.wire);
@@ -136,30 +126,30 @@ export async function openWhoDialog(app, profileId, { onSaved = null, label = ''
     noteText(lose, n ? t('{n} conversation(s) using it now will lose it when you save (their pages in it close).', { n }) : '');
     lose.style.display = n ? '' : 'none';
     remoteLine.style.display = mode() === 'only' && model.remote ? '' : 'none';
-    if (mode() === 'all' || d.sel.length) { refusal.style.display = 'none'; noteText(refusal, ''); }
+    const sentence = mode() === 'all'
+      ? t('Any of your conversations can use this browser and its logins — one browser, each conversation in its own tab.')
+      : t('Pick conversations and Task Groups. A Task Group means every conversation in it — bound to it or started in its folders — now or later.');
+    if (meaning.textContent !== sentence) meaning.textContent = sentence;
+    const kept = mode() === 'all' && d.who.length ? t('The others you picked are kept for when you take All agents away.') : '';
+    if (keptLine.textContent !== kept) keptLine.textContent = kept;
+    keptLine.style.display = kept ? '' : 'none';
+    if (d.sel.length) { refusal.style.display = 'none'; noteText(refusal, ''); }
     syncNotes();
   }
-  function syncMode() {
-    pickWrap.style.display = mode() === 'only' ? '' : 'none';
-    refresh();
-  }
-  rAll.input.onchange = syncMode;
-  rOnly.input.onchange = () => { syncMode(); picker.focus(); };
-  (view.use && view.use.mode === 'only' ? rOnly : rAll).input.checked = true;
-  syncMode();
+  refresh();
   refusal.style.display = 'none';
   syncNotes();
 
   async function doSave() {
     const d = draft();
-    if (mode() === 'only' && !d.who.length) {
+    const use = draftUse(d.sel, model.wire);   // ALL AGENTS ⇒ {mode:'all'} (+ the rows kept beside it); nothing ⇒ refused
+    if (!use) {
       noteText(refusal, refusalWords({ code: 'empty_list' }, t));
       refusal.style.display = '';
       syncNotes();
       picker.focus();
       return;
     }
-    const use = mode() === 'only' ? { mode: 'only', who: d.who } : { mode: 'all' };
     const namesPicked = mode() === 'only' ? picker.selectedRows().map((r) => r.name) : [];
     save.disabled = true; cancel.disabled = true; picker.setBusy(true);
     const r = await fetchJson(`/api/browser/profiles/${encodeURIComponent(id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ use, base: view.base }) });
@@ -182,6 +172,6 @@ export async function openWhoDialog(app, profileId, { onSaved = null, label = ''
     shell.close();
     try { onSaved?.(r); } catch (e) { console.warn('[browser] who-can-use onSaved', e); }
   }
-  setTimeout(() => { try { (mode() === 'only' ? picker : { focus: () => rAll.input.focus() }).focus(); } catch { /* none */ } }, 0);
+  setTimeout(() => { try { picker.focus(); } catch { /* none */ } }, 0);
   return { shell, picker, view, save: doSave, close: () => shell.close() };
 }

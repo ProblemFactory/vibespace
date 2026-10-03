@@ -90,7 +90,8 @@ const exitAskHtml = (i, t) => (i && i.action && i.action.type === 'exit-run-ask'
 /** lane browser-propose (2026-09-30): the agent's PROPOSAL, answered where it appears — its words (the card's, line for
  *  line: what Approve runs) ABOVE Approve / Reject, never folded (the exit-ask lesson: a folded detail below the button
  *  read as the whole story). ONE primary (Approve), a quiet Reject; open items only. */
-const proposalAskHtml = (i, t, detail) => (i && i.action && i.action.type === 'browser-proposal'
+const PROPOSAL_ACTIONS = ['browser-proposal', 'channel-watch-request'];   // lane channel-agent-watch: an agent's wake request is answered the same way
+const proposalAskHtml = (i, t, detail) => (i && i.action && PROPOSAL_ACTIONS.includes(i.action.type)
   ? `<div class="ut-proposal-plan">${escHtml(detail || '')}</div>`
     + (i.action.id ? `<div class="ut-exit-answer ut-proposal-answer"><button type="button" class="ut-act ut-action-proposal ut-proposal-approve" data-answer="approve" title="${escHtml(t('Runs exactly what this card says'))}">${escHtml(t('Approve'))}</button><button type="button" class="ut-act ut-action-proposal ut-proposal-reject" data-answer="reject">${escHtml(t('Reject'))}</button></div>` : '') : '');
 

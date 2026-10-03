@@ -113,13 +113,15 @@ const KIND_WORDS = () => ({ dm: t('direct message'), group: t('group'), thread: 
 const pkOf = (p) => (p && p.kind && p.id ? `${p.kind}:${p.id}` : '');
 const JSON_HDR = { 'Content-Type': 'application/json' };
 
-/** Every principal the owner may give access to: the live agent sessions
- *  and the Task Groups (named by their `title` — a1 §2.4 A5), plus any
- *  principal a stored row names that is not live now (kept, said so). */
+/** Every principal the owner may give access to: ALL AGENTS (lane
+ *  everyone-principal — every conversation, now and later), the live agent
+ *  sessions and the Task Groups (named by their `title` — a1 §2.4 A5), plus
+ *  any principal a stored row names that is not live now (kept, said so). */
+const EVERYONE_KEY = 'everyone:*';
 function principalChoices(app, stored = []) {
   const live = (app.sidebar && app.sidebar._webuiSessions) || [];
   const groups = (app.sidebar && app.sidebar._tasks) || [];
-  const out = [];
+  const out = [{ value: EVERYONE_KEY, label: t('All agents'), kind: 'everyone', id: '*', name: null }];
   for (const s of live) {
     const cid = s.backendSessionId || s.claudeSessionId;
     if (!cid || out.some((w) => w.kind === 'agent' && w.id === cid)) continue;
@@ -128,7 +130,7 @@ function principalChoices(app, stored = []) {
   for (const g of groups) if (g && g.id) out.push({ value: `group:${g.id}`, label: t('Group · {name}', { name: groupTitle(g) }), kind: 'group', id: g.id, name: groupTitle(g) || null });
   for (const r of stored) {
     const p = r && r.principal;
-    if (!p || out.some((w) => w.kind === p.kind && w.id === p.id)) continue;
+    if (!p || p.kind === 'everyone' || out.some((w) => w.kind === p.kind && w.id === p.id)) continue;
     out.unshift({ value: pkOf(p), label: t('{kind} · {name} (not live now)', { kind: principalKindText(p.kind), name: p.name || p.id }), kind: p.kind, id: p.id, name: p.name || null });
   }
   return out;
@@ -158,6 +160,9 @@ async function readGrain(target) {
       // the account's own sign-in name — "Only when this name is mentioned" starts from it
       selfName: (full.adapter && full.adapter.auth && full.adapter.auth.user) || '',
       access: own.access || [], watchers: own.watchers || [],
+      // lane channel-agent-watch W3: who holds access ABOVE this chat (the account, a rule, an approved request) — Notify…
+      // may name them without a per-chat access row (the PURE rule `validateWatchers` judges by the same list)
+      eligibleAbove: Array.isArray(conv.eligibleAbove) ? conv.eligibleAbove : [],
       caps: conv.authorityCaps || { offersSend: false, sendWhy: 'unknown', policyRequiresReview: true },
       latencyNote: wakeLatencyText(conv.wakeLatency), stats: conv.stats || null,
       inherited: (conv.watchers || []).filter((w) => w.source && w.source !== 'conversation'),
@@ -292,21 +297,25 @@ export async function showGrantAccessDialog(app, target) {
   const cap = F.authorityCapCode(st.caps);
   const capWords = (c) => F.authorityCapText(c, { t, sendWhyText: chanCaps.sendWhyText });
   const rows = st.access.map((r) => ({ key: pkOf(r.principal), authority: r.authority === 'send' && !cap ? 'send' : 'draft' }));
+  // ALL AGENTS's row first (the chips put it first; the rows follow)
+  rows.sort((a, b) => (b.key === EVERYONE_KEY) - (a.key === EVERYONE_KEY));
   // WHO (the ONE picker, multi-select — chips, the box focused on open): the live roster + every principal
   // that already holds access here but is not live now (said on its row); a pick adds its authority row
   const pickRows = () => {
     const live = rosterFromApp(app);
     const have = new Set(live.map((r) => r.key));
-    for (const c of principalChoices(app, st.access)) if (!have.has(c.value)) live.unshift({ key: c.value, kind: c.kind === 'group' ? 'group' : 'agent', id: c.id, name: c.name || c.id, hint: t('not live now'), groupIds: [], groupNames: [] });
+    for (const c of principalChoices(app, st.access)) if (c.kind !== 'everyone' && !have.has(c.value)) live.unshift({ key: c.value, kind: c.kind === 'group' ? 'group' : 'agent', id: c.id, name: c.name || c.id, hint: t('not live now'), groupIds: [], groupNames: [] });
     return live;
   };
   body.appendChild(fieldLabel(t('Access')));
   picker = principalPicker({
     items: pickRows, app, multi: true, selected: rows.map((r) => r.key), autofocus: true,
     placeholder: t('Add an agent or group…'), label: t('Add an agent or group'),
+    // ALL AGENTS (lane everyone-principal): the first row — every conversation may see and act here, now and later
+    everyone: { key: EVERYONE_KEY },
     onChange: (keys) => {
       for (let i = rows.length - 1; i >= 0; i--) if (!keys.includes(rows[i].key)) rows.splice(i, 1);
-      for (const k of keys) if (!rows.some((r) => r.key === k)) rows.push({ key: k, authority: 'draft' });
+      for (const k of keys) if (!rows.some((r) => r.key === k)) { if (k === EVERYONE_KEY) rows.unshift({ key: k, authority: 'draft' }); else rows.push({ key: k, authority: 'draft' }); }
       draw();
     },
   });
@@ -316,6 +325,16 @@ export async function showGrantAccessDialog(app, target) {
   body.appendChild(list);
   const watchedNote = noteEl('', true);
   body.appendChild(watchedNote);
+  // verify r1 T2 ⑥: authority is the MAX over every row naming the agent — a draft-only row beside an All row that
+  // may send is MOOT, and the owner who added it wanting LESS must be told so (never a silent widening)
+  const mootNote = noteEl('', true);
+  body.appendChild(mootNote);
+  const syncMoot = () => {
+    const all = rows.find((r) => r.key === EVERYONE_KEY);
+    const names = all && all.authority === 'send' ? rows.filter((r) => r.key !== EVERYONE_KEY && r.authority === 'draft').map((r) => picker.nameOf(r.key)) : [];
+    mootNote.textContent = names.length ? t('All agents may reply directly here, so a draft-only row beside it changes nothing: {names} may reply directly too (set All agents to draft, or remove it, to narrow).', { names: names.join(', ') }) : '';
+    mootNote.style.display = names.length ? '' : 'none';
+  };
   if (cap) body.appendChild(noteEl(t('Direct send is not offered here: {why}', { why: capWords(cap) })));
   for (const r of st.access) if (r.authorityClamped) body.appendChild(noteEl(`${principalText(r.principal)}: ${t('The stored authority is "send" but it reads as draft: {why}', { why: r.authorityWhyCap ? capWords(r.authorityWhyCap) : r.authorityWhy })}`, true));
   const draw = () => {
@@ -336,7 +355,7 @@ export async function showGrantAccessDialog(app, target) {
         const lab = el('label', 'dialog-check-row chan-radio-row');
         const inp = document.createElement('input');
         inp.type = 'radio'; inp.name = `chan-auth-${i}-${r.key}`; inp.value = value; inp.checked = r.authority === value;
-        inp.onchange = () => { if (inp.checked) r.authority = value; };
+        inp.onchange = () => { if (inp.checked) { r.authority = value; syncMoot(); } };
         lab.append(inp, el('span', 'chan-radio-words', words));
         auth.appendChild(lab);
       }
@@ -350,6 +369,7 @@ export async function showGrantAccessDialog(app, target) {
     const gone = st.watchers.filter((w) => !rows.some((r) => r.key === pkOf(w.principal)));
     watchedNote.textContent = gone.length ? t('Removing access also removes the notification of: {list}', { list: gone.map((w) => principalText(w.principal)).join(', ') }) : '';
     watchedNote.style.display = gone.length ? '' : 'none';
+    syncMoot();
   };
   draw();
   const actions = el('div', 'chan-flow-actions');
@@ -418,8 +438,12 @@ function watcherRow(host, { w = null, f = null, st, principals, onAnyChange, onR
   const head = el('div', 'chan-watch-head');
   let key = w ? pkOf(w.principal) : '';
   let usedNow = new Set();
-  const whoItems = () => principals.filter((p) => !(usedNow.has(p.value) && p.value !== key)).map((p) => ({ key: p.value, kind: p.kind === 'group' ? 'group' : 'agent', id: p.id, name: p.name || p.label, groupIds: [], groupNames: [], hint: accessAuthorityText(p.authority) }));
-  const whoPick = principalPicker({ items: whoItems, compact: true, selected: key ? [key] : [], placeholder: t('Who gets woken?'), label: t('Who gets woken?'), onChange: (keys) => { key = keys[0] || ''; authLine(); changed(); } });
+  // ALL AGENTS here is a principal that HOLDS ACCESS (a notification needs it): the roster carries its row — drawn first,
+  // its hint the money sentence (every running conversation gets a billed turn on each hit)
+  const whoItems = () => principals.filter((p) => !(usedNow.has(p.value) && p.value !== key)).map((p) => (p.kind === 'everyone'
+    ? { key: p.value, kind: 'everyone', id: '*', name: t('All agents'), groupIds: [], groupNames: [], hint: t('every running conversation gets a billed turn on each hit') }
+    : { key: p.value, kind: p.kind === 'group' ? 'group' : 'agent', id: p.id, name: p.name || p.label, groupIds: [], groupNames: [], hint: accessAuthorityText(p.authority) }));
+  const whoPick = principalPicker({ items: whoItems, compact: true, selected: key ? [key] : [], placeholder: t('Who gets woken?'), label: t('Who gets woken?'), everyone: 'roster', onChange: (keys) => { key = keys[0] || ''; authLine(); changed(); } });
   whoPick.el.classList.add('chan-watch-who');
   const rm = document.createElement('button');
   rm.type = 'button'; rm.className = 'icon-btn chan-af-rm'; rm.title = t('Remove this notification'); rm.setAttribute('aria-label', t('Remove this notification'));
@@ -526,6 +550,15 @@ function watcherRow(host, { w = null, f = null, st, principals, onAnyChange, onR
   addRule.onclick = () => { rules.push(freshRule('keyword')); drawRules(); changed(); const last = rulesList.querySelector('.chan-af-rule:last-child input'); if (last) last.focus(); };
   drawRules();
   const whatNow = () => (wRule.inp.checked ? 'rule' : wMen.inp.checked ? 'mention' : 'all');
+  // ── ② b WHEN (lane channel-agent-watch W5, the owner 2026-10-01: "notify配置的时候也不能调整是下一回合还是立刻唤醒") ──
+  // next turn = free (the news rides the agent's next turn); wake now = a billed turn under the cap below. A row saved
+  // before the choice existed reads (and is shown as) wake — what it always did; a NEW row starts at next turn.
+  const when0 = w ? F.deliveryModeOf(w) : 'next-turn';
+  const wNext = radio('when', 'next-turn', t('On its next turn (free)'), when0 === 'next-turn');
+  const wWake = radio('when', 'wake', t('Wake it now (a billed turn)'), when0 === 'wake');
+  if (w && F.watchOriginOf(w) === 'agent') box.appendChild(noteEl(t('Set by the agent — it asked to be told about this. Remove it here if you do not want that.')));
+  box.append(q(t('When is it told?')), wNext.lab, wWake.lab);
+  const whenNow = () => (wWake.inp.checked ? 'wake' : 'next-turn');
   // ── ③ HOW OFTEN AT MOST ──
   const cap0 = a0.cap;
   const how0 = a0.how;
@@ -626,7 +659,7 @@ function watcherRow(host, { w = null, f = null, st, principals, onAnyChange, onR
     expected() {
       const e = state.lastEstimate;
       const cur = current();
-      return { notify: cur.notify, digestMinutes: cur.digestMinutes, matchedPerDay: e ? e.matchedPerDay : 0, dailyWakeCap: cur.dailyWakeCap };
+      return { notify: cur.notify, digestMinutes: cur.digestMinutes, matchedPerDay: e ? e.matchedPerDay : 0, dailyWakeCap: cur.dailyWakeCap, principal: cur.principal || null };
     },
     read() {
       const p = principals.find((x) => x.value === key);
@@ -639,7 +672,7 @@ function watcherRow(host, { w = null, f = null, st, principals, onAnyChange, onR
       const c = clampOf(capInp, 0, F.MAX_DAILY_WAKE_CAP);
       if (d.value !== null) digestMin.value = String(d.value);
       if (c.value !== null) capInp.value = String(c.value);
-      return { watcher: { principal: { kind: p.kind, id: p.id, name: p.name }, mode: cur.mode, notify: cur.notify, digestMinutes: cur.digestMinutes, dailyWakeCap: cur.dailyWakeCap, receiptWake: cur.receiptWake, ...(filter ? { filter } : {}), estimateAtSet: state.lastEstimate }, clamped: !!((howNow() === 'digest' && d.note) || c.note) };
+      return { watcher: { principal: { kind: p.kind, id: p.id, name: p.name }, delivery: whenNow(), ...(w && F.watchOriginOf(w) === 'agent' ? { origin: 'agent' } : {}), mode: cur.mode, notify: cur.notify, digestMinutes: cur.digestMinutes, dailyWakeCap: cur.dailyWakeCap, receiptWake: cur.receiptWake, ...(filter ? { filter } : {}), estimateAtSet: state.lastEstimate }, clamped: !!((howNow() === 'digest' && d.note) || c.note) };
     },
   };
 }
@@ -656,6 +689,7 @@ export async function showNotifyDialog(app, target) {
   if (!st) return;
   const { body, close } = createModalShell({ id: 'chan-notify-dialog', title: grainTitle(st, 'notify'), dialogClass: 'chan-dialog chan-assign chan-notify', escapeToClose: true });
   const principals = st.access.map((r) => ({ value: pkOf(r.principal), label: principalText(r.principal), kind: r.principal.kind, id: r.principal.id, name: r.principal.name || null, authority: r.authority }));
+  for (const r of st.eligibleAbove || []) if (r && r.principal && !principals.some((x) => x.value === pkOf(r.principal))) principals.push({ value: pkOf(r.principal), label: `${principalText(r.principal)} ${r.via === 'pattern' ? t('(rule)') : r.via === 'grant' ? t('(approved request)') : t('(account)')}`, kind: r.principal.kind, id: r.principal.id, name: r.principal.name || null, authority: null });
   if (!principals.length) {
     const empty = el('div', 'chan-notify-empty');
     empty.appendChild(noteEl(t('Grant access first — use "Grant access…". Only an agent or group with access here can be notified.')));
@@ -672,6 +706,7 @@ export async function showNotifyDialog(app, target) {
   if (st.kind === 'conversation' && st.inherited.length) body.appendChild(noteEl(t('Also notified here through the account or a rule: {list}. A notification saved here replaces that agent\'s own for this conversation only.', { list: st.inherited.map((w) => principalText(w.principal)).join(', ') })));
   if (st.latencyNote) body.appendChild(noteEl(st.latencyNote));
   if (principals.some((p) => p.kind === 'group')) body.appendChild(noteEl(t('A group wakes one of its live sessions in turn (round-robin).')));
+  if (principals.some((p) => p.kind === 'everyone')) body.appendChild(noteEl(t('All agents wakes every running conversation — a billed turn for each, each under its own daily cap.'), true));
   const lw = st.stats && st.stats.lastWake;
   if (lw) body.appendChild(noteEl(lw.ok
     ? t('Last wake: {n} message(s) delivered via {lane} — {why}', { n: lw.n, lane: chanCaps.deliveryLaneText(lw.lane || 'message', { t }), why: lw.whys ? lw.whys.map((w) => wakeWhyText(w)).join(', ') : '' })
@@ -687,7 +722,14 @@ export async function showNotifyDialog(app, target) {
     const used = new Set(rows.map((r) => r.key()));
     for (const r of rows) r.setWho(used);
     addB.style.display = principals.some((p) => !rows.some((r) => r.key() === p.value)) ? '' : 'none';
-    total.textContent = rows.length ? t('In all: about {n} wakes a day — each notification has its own cap', { n: F.expectedWakesTotal(rows.map((r) => r.expected())) }) : t('Nobody is notified — saving wakes nobody (access stays).');
+    // ALL AGENTS is one cap PER RUNNING CONVERSATION — counted that way (the roster's agent conversations now), and
+    // the MULTIPLIER is said (verify r1 T2 ①: the owner must see "N conversations now × the cap", not one product)
+    const running = ((app.sidebar && app.sidebar._webuiSessions) || []).filter((s) => s && (s.backendSessionId || s.claudeSessionId)).length;
+    const expected = rows.map((r) => r.expected());
+    const allRow = expected.find((e) => e && e.principal && e.principal.kind === 'everyone');
+    total.textContent = !rows.length ? t('Nobody is notified — saving wakes nobody (access stays).')
+      : allRow ? t('In all: about {n} wakes a day — {running} conversation(s) running now, All agents is at most {cap} a day for EACH of them (a conversation started later gets its own); every notification has its own cap', { n: F.expectedWakesTotal(expected, { running }), running, cap: F.digestCap(allRow) })
+        : t('In all: about {n} wakes a day — each notification has its own cap', { n: F.expectedWakesTotal(expected, { running }) });
   };
   const addRow = (w) => {
     const filter = w && w.filter ? w.filter : null;
@@ -709,7 +751,7 @@ export async function showNotifyDialog(app, target) {
     const watchers = [];
     let clamped = false;
     for (const r of rows) { const v = r.read(); if (v.error) { showToast(v.error, { type: 'error' }); return; } watchers.push(v.watcher); clamped = clamped || v.clamped; }
-    const vw = F.validateWatchers(watchers.map((w) => ({ ...w, ...(w.filter ? { filterId: 'inline' } : {}) })), st.access);
+    const vw = F.validateWatchers(watchers.map((w) => ({ ...w, ...(w.filter ? { filterId: 'inline' } : {}) })), st.access, { inherited: st.eligibleAbove || [] });
     if (!vw.ok) { showToast(routeErrorText({ code: vw.code, error: vw.error, why: vw.why, principal: vw.principal }), { type: 'error' }); return; }
     save.disabled = true;
     try {

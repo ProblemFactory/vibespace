@@ -139,6 +139,20 @@ try {
 const adapter = fs.readFileSync(path.join(REPO, 'src/adapters/claude-code.js'), 'utf-8');
 ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get_usage rides the CLI control channel, never a direct vendor call');
 
+// ── 5b: THE /usage PANEL PROBE MAKES ITS ONE VENDOR CALL AND NO OTHER (B-9b40) ──
+// claude 2.1.288 print mode loads the account's claude.ai connectors unless the MCP config is strict
+// (`headlessSyncsClaudeAiConnectors: !strictConfig && …`): before this every auto-cli probe listed them
+// and opened the mcp-proxy for each (production: five mcp-logs-claude-ai-* dirs per member, one file per probe).
+{
+  const { PANEL_PROBE_ARGS } = require(path.join(REPO, 'src/usage-routes.js'));
+  ok(Array.isArray(PANEL_PROBE_ARGS) && PANEL_PROBE_ARGS.includes('--strict-mcp-config') && !PANEL_PROBE_ARGS.some((a) => /^--mcp-config/.test(a)),
+    'B-9b40: the auto-cli /usage probe loads NO MCP server (--strict-mcp-config, no --mcp-config)', JSON.stringify(PANEL_PROBE_ARGS));
+  ok(Array.isArray(PANEL_PROBE_ARGS) && PANEL_PROBE_ARGS[0] === '-p' && PANEL_PROBE_ARGS[1] === '/usage' && PANEL_PROBE_ARGS.length === 3, 'B-9b40: …and asks for /usage and nothing else');
+  const ur = fs.readFileSync(path.join(REPO, 'src/usage-routes.js'), 'utf-8');
+  ok((ur.match(/execFile\(bin, \[\.\.\.PANEL_PROBE_ARGS\]/g) || []).length === 1 && !/'-p', '\/usage'/.test(ur.replace(/const PANEL_PROBE_ARGS = [^\n]*/, '')),
+    'B-9b40: the probe spawns exactly PANEL_PROBE_ARGS — no second spelling of the argv');
+}
+
 // ── 6: LOCAL ORACLES (owner ruling 6 of docs/design-harness-features.md §5.1) ──
 // "用（逐条附「不发 vendor 请求」证据进白名单豁免；人触发/已有节拍）", with §4.2's
 // hard gate: the zero-network property must be MEASURED per command, never
@@ -486,6 +500,260 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
   const twoSlots = mut('two-slots', keeperRel, keeperSrc, "VERBS.cliInstallVerdict({ version: String(version || ''), running: installState.running,", "VERBS.cliInstallVerdict({ version: String(version || ''), running: false,");
   ok(reds(slotCensus(twoSlots, routesSrc, { ...serverTexts, [keeperRel]: twoSlots })).some((n) => /ONE SLOT/.test(n)), '§8 CONTROL: a CLI install that ignores the slot is RED');
   for (const x of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 4, label: '§8 ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
+}
+
+// ── 9: A THREAD BORN AFTER ITS ROOT WAS STORED (lane lark-threads, 2026-10-01 — the owner's post) ──
+// Two more vendor reads, allowlisted HERE deliberately with their gates (a function of the source text — an ungated copy,
+// written by scripts/mutant-copy.mjs, turns it red):
+//   RECHECK  `.recentRoots(` (ONE page of a chat's newest messages) is called ONCE in the server tree — the engine's
+//            `recheckOne()`, through `vendor(rec, e, …)` (the minute's budget, the pace); `recheckOne` is invoked ONLY by
+//            the drain's `recheck` action (rule 22a, the timer — one page per conversation per channels.threadRecheckSec)
+//            and the OWNER's press (rule 22b, `act.recheck`, floored) — never an agent route, never an ingest;
+//   BY-ID    `.messageById(` is called ONCE — the engine's `fetchMissing()`, through `vendor(rec, e, …)`, after the per-tick
+//            bound (BYID_PER_TICK) and `affordable(rec, e)` are asked; every answer that is not a thread reply remembered
+//            (BYID_MEMORY_MS) — `fetchMissing` is invoked only from the change feed's page (`feedPage`).
+{
+  const { mutantCopies, copiesCensus } = await import('./mutant-copy.mjs');
+  const strip = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/([^:'"\\])\/\/[^'"\n]*$/gm, '$1');
+  const bodyOf = (E, head) => { const at = E.indexOf(head); if (at < 0) return ''; const end = E.indexOf('\n  }\n', at); return end < 0 ? '' : E.slice(at, end); };
+  const census = (engineSrc, serverTexts) => {
+    const rows = [];
+    const E = strip(engineSrc);
+    const callersOf = (re) => { const out = []; for (const [rel, text] of Object.entries(serverTexts)) { const n = (strip(text).match(re) || []).length; if (n) out.push(`${rel}:${n}`); } return out; };
+    const rc = callersOf(/\.recentRoots\(/g), bc = callersOf(/\.messageById\(/g);
+    rows.push(['RECHECK: `.recentRoots(` is called from exactly one place in the server tree (the engine\'s recheckOne)', rc.length === 1 && rc[0] === 'src/server/channels-engine.js:1' && /vendor\(rec, e, \(\) => e\.adapter\.recentRoots\(/.test(bodyOf(E, 'async function recheckOne(')), rc.join(', ')]);
+    const invokes = (E.match(/(?<![.\w$])recheckOne\(/g) || []).length;
+    const fo = bodyOf(E, '      const fetchOne = async (act) => {') || E;
+    rows.push(['RECHECK: recheckOne is invoked only by the drain\'s `recheck` action and the OWNER\'s press (`act.recheck`, floored by recheckOnPress)', invokes === 3 && /act\.type === 'recheck'\) \{ e\.chargeBy = 'timer'; result = await recheckOne\(/.test(E) && /if \(act\.recheck && threadsRow\(registry\.capsOf\(rec\.kind\)\)\.listing === 'separate' && Drain\.recheckOnPress\(/.test(E), `bare occurrences ${invokes} (the definition + 2)`]);
+    const fm = bodyOf(E, 'async function fetchMissing(');
+    const bound = fm.indexOf('if (e.byIdTick.n >= BYID_PER_TICK || !affordable(rec, e)'), call = fm.indexOf('vendor(rec, e, () => e.adapter.messageById(');
+    rows.push(['BY-ID: `.messageById(` is called from exactly one place (the engine\'s fetchMissing), through vendor(rec, e, …), AFTER the per-tick bound and the minute\'s budget', bc.length === 1 && bc[0] === 'src/server/channels-engine.js:1' && bound > 0 && call > bound, JSON.stringify({ callers: bc, bound, call })]);
+    rows.push(['BY-ID: every answer that is not a thread reply (and every refusal) is remembered — never asked again per tick', /rememberById\(e, vid, 'refused'\)/.test(fm) && /rememberById\(e, vid, \(r && r\.kind\) \|\| 'absent'\)/.test(fm) && /e\.byIdMem\.has\(vid\)/.test(fm), '']);
+    const fmCalls = (E.match(/(?<![.\w$])fetchMissing\(/g) || []).length;
+    rows.push(['BY-ID: fetchMissing is invoked only from the change feed\'s page', fmCalls === 2 && /if \(separate\) await fetchMissing\(rec, e\);/.test(bodyOf(E, 'async function feedPage(')), `bare occurrences ${fmCalls}`]);
+    return rows;
+  };
+  const serverTexts = {};
+  for (const f of files) { const rel = path.relative(REPO, f); try { serverTexts[rel] = fs.readFileSync(f, 'utf-8'); } catch { } }
+  const engineRel = 'src/server/channels-engine.js';
+  const engineSrc = serverTexts[engineRel];
+  ok(typeof engineSrc === 'string', '§9 the engine is in the server census');
+  for (const [name, pass0, detail] of census(engineSrc, serverTexts)) ok(pass0, `§9 ${name}`, detail);
+  const MUT = mutantCopies('vendor-whitelist-lkt', REPO);
+  const reds = (rows) => rows.filter(([, p]) => !p).map(([n]) => n);
+  const mutEngine = (label, from, to) => {
+    ok(engineSrc.includes(from), `§9 CONTROL ${label}: the edit's anchor is in the engine`);
+    const f = MUT.write(engineRel, engineSrc.replace(from, to), label);
+    const t = fs.readFileSync(f, 'utf-8');
+    return reds(census(t, { ...serverTexts, [engineRel]: t }));
+  };
+  const ingestRecheck = mutEngine('ingest-recheck', 'if (freshRecs.length) en.authors = mergeAuthors(en.authors, freshRecs);', 'if (freshRecs.length) en.authors = mergeAuthors(en.authors, freshRecs); setTimeout(() => recheckOne(rec, e, convId, { by: \'timer\' }).catch(() => {}), 0);');
+  ok(ingestRecheck.some((n) => /RECHECK: recheckOne is invoked only/.test(n)), `§9 CONTROL: a copy whose INGEST rechecks every conversation it reads is RED (${ingestRecheck.join(' | ')})`);
+  const unbounded = mutEngine('byid-unbounded', 'if (e.byIdTick.n >= BYID_PER_TICK || !affordable(rec, e) || outlived(rec, e)) break;', 'if (outlived(rec, e)) break;');
+  ok(unbounded.some((n) => /BY-ID: `\.messageById\(`/.test(n)), `§9 CONTROL: a by-id loop without its per-tick bound and the budget is RED (${unbounded.join(' | ')})`);
+  const ingestById = mutEngine('ingest-byid', 'const r = await vendor(rec, e, () => e.adapter.history(convId, opts));', 'const r = await vendor(rec, e, () => e.adapter.history(convId, opts)); for (const x of r.records || []) await e.adapter.messageById(convId, { messageId: x.vendorId });');
+  ok(ingestById.some((n) => /BY-ID: `\.messageById\(`/.test(n)), `§9 CONTROL: a copy whose INGEST reads every message by id is RED (${ingestById.join(' | ')})`);
+  const forgets = mutEngine('byid-forgets', "rememberById(e, vid, 'refused'); f.counters.missingRefused++;", 'f.counters.missingRefused++;');
+  ok(forgets.some((n) => /remembered/.test(n)), `§9 CONTROL: a by-id read that forgets a refusal (asked again every tick) is RED (${forgets.join(' | ')})`);
+  for (const x of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 4, label: '§9 ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
+}
+
+// ── 10: THE CODEX APP-SERVER SPAWNS + THE RESET-CREDIT HELPER (lane reset-path, 2026-10-01) ──
+// The owner: the Agents list could not use a codex reset credit without a live chat session. The fix is ONE
+// bounded `codex app-server` child (src/codex-reset-helper.js) — the first app-server a PERSON'S CLICK starts
+// outside a conversation, and a vendor act (the consume IS the vendor call; the app-server's own startup also
+// reaches out — measured). It is allowlisted HERE deliberately, with its gates, and every other app-server
+// argv in the server tree is a row too — a new one fails until it is listed with its reason:
+//   ONE CALLER    the helper is called only by the engine's writeResetCreditViaHelper, after the spend ceiling
+//                 and the attempt record (the floor arms on its `onSent`);
+//   HUMAN ONLY    that writer is called only by consumeResetCreditFor (the human-only POST, after the
+//                 preview's refusals), never by the auto rung, never under a timer;
+//   MEASURED      MEASURED_CONNECTS: our own process 0 internet-family calls, the app-server's startup set recorded;
+//   LIVE (strace) the helper over the STUB app-server with an EMPTY CODEX_HOME opens ZERO internet connections.
+{
+  const strip8 = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/([^:'"\\])\/\/[^'"\n]*$/gm, '$1');
+  const APP_SERVER = /\[\s*['"]app-server['"]/g;
+  const ALLOW_APP_SERVER = {
+    'src/codex-thread-read.js': 'B-21e4: the thread/read fallback for a thread with no rollout (navigation-triggered; parked as B-af31)',
+    'src/adapters/codex.js': 'a conversation\'s OWN app-server, inside its wrapper (the session is the conversation)',
+    'src/local-oracles.js': 'a measured-and-REJECTED candidate record (codex-app-server-config-read) — never spawned',
+    'src/codex-reset-helper.js': 'THE RESET-CREDIT HELPER — a person\'s click on Use… with no conversation to carry it (gates below; +1 read per human press, both paths — the owner\'s yes on ut-cdaa01aff0, verify r8 T0)',
+  };
+  const hits8 = {};
+  for (const f of files) {
+    const rel = path.relative(REPO, f);
+    if (rel.startsWith('data/bin/vibespace-agentd')) continue; // the built bundle carries copies of the two rows above
+    let t = ''; try { t = strip8(fs.readFileSync(f, 'utf8')); } catch { continue; }
+    const n = (t.match(APP_SERVER) || []).length;
+    if (n) hits8[rel] = n;
+  }
+  for (const [rel, n] of Object.entries(hits8)) ok(!!ALLOW_APP_SERVER[rel], `§10 a \`codex app-server\` argv only in an allowlisted file (${rel}: ${n}${ALLOW_APP_SERVER[rel] ? '' : ' — NOT ALLOWLISTED'})`);
+  for (const [rel, why] of Object.entries(ALLOW_APP_SERVER)) ok(hits8[rel] > 0, `§10 allowlist row still matches: ${rel} (${why.split(' — ')[0]})`);
+  // THE HELPER'S GATES — a census over TEXT so a patched copy can be shown red
+  const helperCensus = (engineText, routeText, helperText) => {
+    const E = strip8(engineText), R = strip8(routeText), H = strip8(helperText);
+    const rows = [];
+    const fnBody = (src, header) => { const at = src.indexOf(header); if (at < 0) return ''; const end = src.indexOf('\n}\n', at); return end < 0 ? '' : src.slice(at, end); };
+    const calls = (re) => (E.match(re) || []).length;
+    const hb = fnBody(E, 'function writeResetCreditViaHelper(');
+    const auth = hb.indexOf("spendGuard.authorize({ reason: 'codex-reset-credit'"), open = hb.indexOf('openResetCreditTry('), spawnAt = hb.indexOf('consumeResetCreditViaAppServer(');
+    rows.push(['ONE CALLER: the helper is called once in the server tree, by writeResetCreditViaHelper, after the spend ceiling and the attempt record', calls(/consumeResetCreditViaAppServer\(/g) === 1 && auth > 0 && open > auth && spawnAt > open && /onSent: \(\) => noteResetCreditSent\(t\)/.test(hb), JSON.stringify({ calls: calls(/consumeResetCreditViaAppServer\(/g), auth, open, spawnAt })]);
+    const cb = fnBody(E, 'function consumeResetCreditFor(');
+    const pv = cb.indexOf('const p = resetCreditPreview('), refuse = cb.indexOf('if (p.code) return'), w = cb.indexOf('writeResetCreditViaHelper(');
+    rows.push(['HUMAN ONLY: writeResetCreditViaHelper is called once, by consumeResetCreditFor, after the preview\'s refusals (floor / in_flight / no_credits)', (E.match(/writeResetCreditViaHelper\(/g) || []).length === 2 && pv > 0 && refuse > pv && w > refuse, JSON.stringify({ n: (E.match(/writeResetCreditViaHelper\(/g) || []).length, pv, refuse, w })]);
+    // verify r1: the timer census reads up to three lines past a `setTimeout(` / `setInterval(` — a planted call on
+    // the next line (the press's own spawn deferred under a timer, a multi-line interval) escaped the same-line form
+    rows.push(['NEVER THE AUTO RUNG, NEVER A TIMER: no helper call in resetCreditRung, none under setTimeout / setInterval (up to three lines in)', !/writeResetCreditViaHelper\(|consumeResetCreditViaAppServer\(/.test(fnBody(E, 'function resetCreditRung(')) && !/set(?:Timeout|Interval)\((?:[^\n]*\n){0,3}[^\n]*(?:writeResetCreditViaHelper|consumeResetCreditViaAppServer)/.test(E), '']);
+    const post = R.indexOf("app.post('/api/accounts/:id/reset-credit'"), bearer = R.indexOf('if (isAgentBearer(req)) return res.status(403)', post), consume = R.indexOf('engine.consumeResetCreditFor(', post);
+    rows.push(['HUMAN ONLY: the POST refuses an agent\'s session / job token BEFORE it reaches the engine; the GET preview never consumes', post > 0 && bearer > post && consume > bearer && /\(vsst_\|jbt_\)/.test(R) && R.slice(0, post).indexOf('consumeResetCreditFor(') < 0, JSON.stringify({ post, bearer, consume })]);
+    rows.push(['the helper module builds no request of its own (no http/fetch, no vendor host in code)', !/require\(['"](https?|net|tls)['"]\)/.test(H) && !REQUESTY.test(H) && !/https?:\/\//.test(H.replace(/MEASURED_CONNECTS = Object\.freeze\(\{[\s\S]*?\}\);/, '')), '']);
+    return rows;
+  };
+  const engRel = 'src/server/usage-pool-engine.js', routeRel = 'src/routes/reset-credit.js', helperRel = 'src/codex-reset-helper.js';
+  const engT = fs.readFileSync(path.join(REPO, engRel), 'utf8'), routeT = fs.readFileSync(path.join(REPO, routeRel), 'utf8'), helperT = fs.readFileSync(path.join(REPO, helperRel), 'utf8');
+  for (const [name, pass8, detail] of helperCensus(engT, routeT, helperT)) ok(pass8, `§10 ${name}`, detail);
+  const H = require(path.join(REPO, helperRel));
+  const M = H.MEASURED_CONNECTS;
+  ok(M && /strace/.test(M.tool) && /^\d{4}-\d\d-\d\d$/.test(M.date) && /codex-cli \d+\.\d+\.\d+/.test(M.version) && /unshare -n/.test(M.runner) && M.ours.inet === 0 && M.appServer.inetOk === 0 && M.appServer.inet === M.appServer.dns + M.appServer.https + M.appServer.other,
+    '§10 MEASURED: the helper\'s connect set is a measurement (tool, date, CLI version, runner) — our own process 0 internet-family calls, none succeeded in the empty namespace', JSON.stringify(M));
+  // CONTROLS — the census over patched TEXT
+  const red8 = (rows) => rows.filter(([, p8]) => !p8).map(([n]) => n);
+  const swapEng = (from, to) => { ok(engT.includes(from), `§10 CONTROL: the anchor is in the engine (${from.slice(0, 50).trim()}…)`); return engT.replace(from, to); };
+  const before = swapEng("  const t = openResetCreditTry({ key, sid: null, via: 'helper', origin: 'user', resetsAtSec, lane: null, now, idemKey, av, creditsAt: resetCreditsLeft(null, key), reportsSent: true, window: spentWindowOf(readRawUsageCache(key)) });", "  codexResetHelper.consumeResetCreditViaAppServer({ idempotencyKey: 'x' });\n  const t = openResetCreditTry({ key, sid: null, via: 'helper', origin: 'user', resetsAtSec, lane: null, now, idemKey, av, creditsAt: resetCreditsLeft(null, key), reportsSent: true, window: spentWindowOf(readRawUsageCache(key)) });");
+  ok(red8(helperCensus(before, routeT, helperT)).some((n) => /ONE CALLER/.test(n)), '§10 CONTROL: a second helper call BEFORE the attempt record is RED');
+  const auto = swapEng("    // AUTO — through the ONE writer the manual button uses too (writeResetCredit).", "    if (!session.pty) writeResetCreditViaHelper(key, { resetsAtSec: R });\n    // AUTO — through the ONE writer the manual button uses too (writeResetCredit).");
+  ok(red8(helperCensus(auto, routeT, helperT)).some((n) => /NEVER THE AUTO RUNG/.test(n)), '§10 CONTROL: an auto rung that falls to the helper is RED');
+  const timer = swapEng("function writeResetCreditViaHelper(", "function _retry(k) { setTimeout(() => writeResetCreditViaHelper(k), 60e3); }\nfunction writeResetCreditViaHelper(");
+  ok(red8(helperCensus(timer, routeT, helperT)).some((n) => /NEVER A TIMER/.test(n)), '§10 CONTROL: a helper call under a timer is RED');
+  const deferred = swapEng("  Promise.resolve(codexResetHelper.consumeResetCreditViaAppServer({", "  setTimeout(() => {\n  Promise.resolve(codexResetHelper.consumeResetCreditViaAppServer({");
+  ok(red8(helperCensus(deferred, routeT, helperT)).some((n) => /NEVER A TIMER/.test(n)), '§10 CONTROL (verify r1): the press\'s own spawn deferred under a MULTI-LINE timer is RED (the same-line census let it through)');
+  const routeOpen = routeT.replace("      if (isAgentBearer(req)) return res.status(403).json({ error: 'human-triggered only', code: 'agent_forbidden' });\n", '');
+  ok(routeOpen !== routeT && red8(helperCensus(engT, routeOpen, helperT)).some((n) => /agent's session \/ job token/.test(n)), '§10 CONTROL: a POST that lets an agent token through is RED');
+  const fetchy = helperT.replace("const { spawn } = require('child_process');", "const { spawn } = require('child_process');\nconst https = require('https');");
+  ok(fetchy !== helperT && red8(helperCensus(engT, routeT, fetchy)).some((n) => /builds no request/.test(n)), '§10 CONTROL: a helper that loads an http client is RED');
+  // verify r2 (Q5): the timer census above is LEXICAL and ENGINE-ONLY — a timer two files away reaching the helper
+  // through the EXPORTED consumeResetCreditFor (server.js hands it to the routes; any module could call it) escaped
+  // it. A TREE-WIDE census of every CALL of consumeResetCreditFor: the route's POST (twice — the press, and the press
+  // re-asked after the conversation's read) and the engine's own definition; nothing else, none under a timer
+  const ALLOW_CONSUME_CALLS = { 'src/routes/reset-credit.js': 2, 'src/server/usage-pool-engine.js': 1 };
+  // verify r3: a REFERENCE census beside the call census — `const f = engine.consumeResetCreditFor; setInterval(f, …)` and
+  // `engine.consumeResetCreditFor.bind(engine)` carry no `(` after the name and slipped the call census whole. Every
+  // mention of the name is counted per file (the route: its typeof guard + two calls; the engine: the definition + the
+  // export; server.js: the one engine literal handed to the routes) and a `.bind(` / `.call(` / `.apply(` on it is RED
+  const ALLOW_CONSUME_REFS = { 'src/routes/reset-credit.js': 3, 'src/server/usage-pool-engine.js': 2, 'server.js': 1 };
+  const consumeCalls = (text) => (strip8(text).match(/consumeResetCreditFor\(/g) || []).length;
+  const consumeRefs = (text) => (strip8(text).match(/\bconsumeResetCreditFor\b/g) || []).length;
+  const consumeBound = (text) => /\bconsumeResetCreditFor\s*\.\s*(?:bind|call|apply)\s*\(/.test(strip8(text));
+  const consumeUnderTimer = (text) => /set(?:Timeout|Interval)\((?:[^\n]*\n){0,3}[^\n]*\bconsumeResetCreditFor\b/.test(strip8(text));
+  // verify r4 (T2 ⑤): a reach into the engine object that never SPELLS the name — `engine['consume' + 'ResetCreditFor']`,
+  // `Reflect.get(engine, k)`, a spread re-export `{ ...engine }` — carries no reference the census above can count. The
+  // server tree reaches the engine by dotted names only; any dynamic reach into an object called `engine` is RED by shape
+  // verify r5 (reproduced over the r4 census itself: FIVE aliasing shapes passed it — `const e = engine; e['consume' + …]`,
+  // a parameter `eng` with `Reflect.get(eng, k)`, `const { engine: pe } = deps; { ...pe }`, `Object.values(engine).find(f =>
+  // f.name.endsWith('ResetCreditFor'))`, `engine?.[k]`): a census keyed on ONE identifier is a census of a spelling. It is
+  // keyed on the NAME REACHED and on EVERY ALIAS the file binds to the engine: ① any string fragment that assembles the name
+  // ('consume' + …, … + 'ResetCreditFor', a bare 'ResetCreditFor', a template literal); ② the engine or any alias of it
+  // (const/let/var x = …engine, { engine: x }, a parameter named engine / eng, this.engine) reached by a computed member
+  // ([…] / ?.[…]), Reflect.get/apply/ownKeys, a spread, Object.values/entries/keys/getOwnPropertyNames, for…in
+  const consumeDynamic = (text) => {
+    const s = strip8(text);
+    if (/['"]consume['"]\s*\+|\+\s*['"]ResetCreditFor['"]|['"]ResetCreditFor['"]|`consume\$\{|\}ResetCreditFor`/.test(s)) return true;
+    const aliases = new Set(['engine', 'eng']);
+    for (const m of s.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:[\w$]+\s*\.\s*)*engine\b(?!\s*(?:\.|\?\.|\(|\[))/g)) aliases.add(m[1]); // the expression ENDS at the engine (`const r = engine.takeover(…)` binds a result, not the engine)
+    for (const m of s.matchAll(/\bengine\s*:\s*([A-Za-z_$][\w$]*)\s*[,}]/g)) aliases.add(m[1]);
+    const names = [...aliases].map((a) => a.replace(/\$/g, '\\$')).join('|');
+    const recv = `(?:\\b(?:${names})\\b|\\bthis\\s*\\.\\s*engine\\b)`;
+    return new RegExp(`${recv}\\s*(?:\\?\\.)?\\s*\\[|\\bReflect\\s*\\.\\s*(?:get|apply|ownKeys)\\s*\\(\\s*${recv}|\\.\\.\\.\\s*${recv}\\s*[,}]|\\bObject\\s*\\.\\s*(?:values|entries|keys|getOwnPropertyNames)\\s*\\(\\s*${recv}|\\bfor\\s*\\(\\s*(?:const|let|var)\\s+[\\w$]+\\s+in\\s+${recv}`).test(s);
+  };
+  const callCensus = (texts) => { const bad = []; for (const [rel, t] of Object.entries(texts)) { const n = consumeCalls(t); if (n && n !== (ALLOW_CONSUME_CALLS[rel] || 0)) bad.push(`${rel}: ${n} call(s), allowed ${ALLOW_CONSUME_CALLS[rel] || 0}`); const m = consumeRefs(t); if (m && m !== (ALLOW_CONSUME_REFS[rel] || 0)) bad.push(`${rel}: ${m} reference(s), allowed ${ALLOW_CONSUME_REFS[rel] || 0}`); if (consumeBound(t)) bad.push(`${rel}: consumeResetCreditFor bound with bind/call/apply`); if (consumeUnderTimer(t)) bad.push(`${rel}: a consumeResetCreditFor call under a timer`); if (consumeDynamic(t)) bad.push(`${rel}: a dynamic reach into the engine object (engine[…] / Reflect.get(engine / { …engine })`); } return bad; };
+  const treeTexts = {}; for (const f of files) { const rel = path.relative(REPO, f); if (rel.startsWith('data/bin/vibespace-agentd')) continue; try { treeTexts[rel] = fs.readFileSync(f, 'utf8'); } catch { } }
+  const badCalls = callCensus(treeTexts);
+  ok(badCalls.length === 0, '§10 TREE CENSUS (verify r2): consumeResetCreditFor is CALLED only by the route\'s POST (twice) and defined once in the engine — no other caller, none under a timer anywhere in the server tree', badCalls.join(' | '));
+  ok(Object.keys(ALLOW_CONSUME_CALLS).every((rel) => consumeCalls(treeTexts[rel] || '') === ALLOW_CONSUME_CALLS[rel]), '§10 TREE CENSUS: the allowlist rows still match (route 2, engine 1)');
+  ok(Object.keys(ALLOW_CONSUME_REFS).every((rel) => consumeRefs(treeTexts[rel] || '') === ALLOW_CONSUME_REFS[rel]), '§10 TREE CENSUS (verify r3): the reference rows still match (route 3, engine 2, server.js 1)', JSON.stringify(Object.fromEntries(Object.keys(ALLOW_CONSUME_REFS).map((rel) => [rel, consumeRefs(treeTexts[rel] || '')]))));
+  const plantedAlias = { ...treeTexts, 'server.js': (treeTexts['server.js'] || '') + "\nconst nudgeFn = engine.consumeResetCreditFor;\nsetInterval(nudgeFn, 60e3);\n" };
+  ok(callCensus(plantedAlias).some((b) => /^server\.js: 2 reference\(s\), allowed 1/.test(b)) && !callCensus(plantedAlias).some((b) => /server\.js: \d+ call/.test(b)), '§10 TREE CENSUS CONTROL (verify r3): a call through a VARIABLE (const f = engine.consumeResetCreditFor; setInterval(f)) is RED by the reference census — the call census alone saw nothing', callCensus(plantedAlias).join(' | '));
+  const plantedBind = { ...treeTexts, 'src/ws-handler.js': (treeTexts['src/ws-handler.js'] || '') + "\nconst spend = engine.consumeResetCreditFor.bind(engine);\n" };
+  ok(callCensus(plantedBind).some((b) => /bound with bind\/call\/apply/.test(b)) && callCensus(plantedBind).some((b) => /^src\/ws-handler\.js: 1 reference/.test(b)), '§10 TREE CENSUS CONTROL (verify r3): a `.bind(` on it is RED twice (the bind, and a reference in a file with none allowed)', callCensus(plantedBind).join(' | '));
+  const plantedTimer = { ...treeTexts, 'server.js': (treeTexts['server.js'] || '') + "\nsetInterval(() => {\n  engine.consumeResetCreditFor('x');\n}, 60e3);\n" };
+  ok(callCensus(plantedTimer).some((b) => /^server\.js: a consumeResetCreditFor call under a timer/.test(b)), '§10 TREE CENSUS CONTROL: a timer TWO FILES AWAY (a setInterval in server.js calling engine.consumeResetCreditFor) is RED');
+  const plantedCaller = { ...treeTexts, 'src/ws-handler.js': (treeTexts['src/ws-handler.js'] || '') + "\nfunction nudge(e) { return e.consumeResetCreditFor('x'); }\n" };
+  ok(callCensus(plantedCaller).some((b) => /^src\/ws-handler\.js: 1 call/.test(b)), '§10 TREE CENSUS CONTROL: a new caller in another file is RED until it is allowlisted with its reason');
+  for (const [what, line] of [['a dynamic property (engine[\'consume\' + \'ResetCreditFor\'])', "setInterval(() => engine['consume' + 'ResetCreditFor']('x'), 60e3);"], ['Reflect.get(engine, k)', "const k = 'consume' + 'ResetCreditFor'; setInterval(Reflect.get(engine, k), 60e3);"], ['a spread re-export ({ ...engine })', 'module.exports = { ...engine };'],
+    // verify r5: the aliasing shapes the r4 census let through — the key is assembled from fragments the fragment rule does
+    // not know ('cons' + 'umeResetCreditFor'), so only the ALIAS rule can catch them
+    ['an alias (const e = engine; e[k])', "const e = engine;\nconst k = 'cons' + 'umeResetCreditFor';\nsetInterval(() => e[k]('x'), 60e3);"],
+    ['this.engine[k]', "class N { constructor(engine) { this.engine = engine; } tick() { const k = 'cons' + 'umeResetCreditFor'; this.engine[k]('x'); } }"],
+    ['a parameter eng + Reflect.get(eng, k)', "function nudge(eng) { const k = 'cons' + 'umeResetCreditFor'; return Reflect.get(eng, k)('x'); }"],
+    ['a destructured alias spread ({ engine: pe } … { ...pe })', 'const { engine: pe } = deps;\nmodule.exports = { ...pe };'],
+    ['Object.values(engine) found by suffix', "Object.values(engine).find((f) => typeof f === 'function' && /CreditFor$/.test(f.name))('x');"],
+    ['an optional chain (engine?.[k])', "const k = 'cons' + 'umeResetCreditFor'; setInterval(() => engine?.[k]('x'), 60e3);"],
+    ['a template literal (`consume${…}`)', "const tail = 'ResetCreditFor'; setInterval(() => engine[`consume${tail}`]('x'), 60e3);"]]) {
+    const planted = { ...treeTexts, 'server.js': (treeTexts['server.js'] || '') + '\n' + line + '\n' };
+    ok(callCensus(planted).some((b) => /^server\.js: a dynamic reach into the engine object/.test(b)), `§10 TREE CENSUS CONTROL (verify r4): ${what} spells no name the reference census could count — RED by shape`, callCensus(planted).join(' | '));
+  }
+  // ── THE READ CENSUS (verify r9 ⑥): every `account/rateLimits/read` REQUEST site in the tree is a ROW with its gate — the
+  //    owner's yes (ut-cdaa01aff0) bought "+1 read per human press, both paths" and nothing more; a new site is RED until it is
+  //    listed here with its reason (the engine never builds one: it asks a wrapper / the helper)
+  {
+    const READ = /request\(\s*['"]account\/rateLimits\/read['"]/g;
+    const ALLOW_READ = {
+      'data/bin/codex-chat-wrapper.js': { n: 3, why: 'readAccountLimits (the boot read, fire-and-forget; the on-demand `codex-read-limits` verb: the usage menu ⟳ and the route\'s read over an unsettled prior) · the read BEFORE a consume (inside `if (msg.readFirst === true)` of the codex-reset-credit handler — the engine sets the flag only for a person\'s press, verify r8 T0) · the post-reset read after a consume' },
+      'src/codex-reset-helper.js': { n: 2, why: 'the helper\'s read-first (a person\'s press with no conversation to carry it) · its post-consume read' },
+    };
+    const hitsR = {};
+    for (const f of files) { const rel = path.relative(REPO, f); if (rel.startsWith('data/bin/vibespace-agentd')) continue; let t = ''; try { t = strip8(fs.readFileSync(f, 'utf8')); } catch { continue; } const n = (t.match(READ) || []).length; if (n) hitsR[rel] = n; }
+    ok(JSON.stringify(Object.keys(hitsR).sort()) === JSON.stringify(Object.keys(ALLOW_READ).sort()) && Object.entries(ALLOW_READ).every(([rel, r]) => hitsR[rel] === r.n), `§10 READ CENSUS (verify r9 ⑥): the account/rateLimits/read request sites are exactly the allowlisted rows, by file and count (${JSON.stringify(hitsR)})`, JSON.stringify(hitsR));
+    const wrapperRaw = fs.readFileSync(path.join(REPO, 'data/bin/codex-chat-wrapper.js'), 'utf8'), wrapperT = strip8(wrapperRaw);
+    const rc = wrapperT.indexOf("msg.type === 'codex-reset-credit')"), rf = wrapperT.indexOf('if (msg.readFirst === true) {', rc), rd = wrapperT.indexOf("request('account/rateLimits/read'", rf), go = wrapperT.indexOf('resetCreditGoWaiters.set(idempotencyKey', rd), cons = wrapperT.indexOf("request('account/rateLimitResetCredit/consume'", go);
+    ok(rc > 0 && rf > rc && rd > rf && go > rd && cons > go, '§10 READ CENSUS: the wrapper\'s read before a consume sits inside the readFirst gate of the codex-reset-credit handler, the wait for the go follows it, and the consume comes after the wait (the order in the source)', JSON.stringify({ rc, rf, rd, go, cons }));
+    const countR = (t) => (strip8(t).match(READ) || []).length;
+    ok(!ALLOW_READ['src/server/usage-pool-engine.js'] && countR(engT) === 0 && countR(engT + "\nsetInterval(() => request('account/rateLimits/read', {}), 60e3);\n") === 1, '§10 READ CENSUS CONTROL: a planted read site in the engine is RED (a file outside the rows)');
+    ok(countR(wrapperRaw) === 3 && countR(wrapperRaw + "\nconst extra = await request('account/rateLimits/read', {}, 20000);\n") === 4, '§10 READ CENSUS CONTROL: a fourth read in the wrapper is RED (the count is the row)');
+    // THE SHAPE CENSUS (verify r10 ⑥): the read census counts a LITERAL method name — a read spelled through a variable, a
+    // template literal or a computed string would never match it. So every `request(` in the two carriers must name its
+    // method as a string literal; the ONE non-literal call is startThread's closed ternary over three thread verbs
+    // (thread/start | thread/resume | thread/fork), pinned by shape. Any other non-literal first argument is RED by shape —
+    // the runtime census (test-reset-credit-ui §4b: the stub app-server's own log, reads per press) is the second witness
+    {
+      const helperRaw = fs.readFileSync(path.join(REPO, 'src/codex-reset-helper.js'), 'utf8');
+      const NONLIT = /(?<!function )\brequest\(\s*(?!['"`])([^,)]+)/g; // a CALL whose first argument is not a string literal (the `function request(method, …)` definition is not a call)
+      const nonLit = (t) => [...strip8(t).matchAll(NONLIT)].map((m) => m[1].trim());
+      const ternaryOk = /const method = resumeId \? \(isFork \? 'thread\/fork' : 'thread\/resume'\) : 'thread\/start';\n  if \(resumeId\) params\.threadId = resumeId;\n  const resp = await request\(method, params, 120000\);/.test(wrapperRaw);
+      ok(ternaryOk && JSON.stringify(nonLit(wrapperRaw)) === JSON.stringify(['method']), '§10 SHAPE CENSUS (verify r10 ⑥): every request() in the wrapper names a literal method except startThread\'s closed ternary (thread/start | resume | fork) — a method spelled through a variable elsewhere is RED by shape', JSON.stringify(nonLit(wrapperRaw)));
+      ok(nonLit(helperRaw).length === 0, '§10 SHAPE CENSUS: every request() in the helper names a literal method', JSON.stringify(nonLit(helperRaw)));
+      const planted = "\nconst m2 = 'account/rateLimits/' + 'read'; const r9 = await request(m2, {}, 20000);\n";
+      ok(JSON.stringify(nonLit(wrapperRaw + planted)) === JSON.stringify(['method', 'm2']) && countR(wrapperRaw + planted) === 3, '§10 SHAPE CENSUS CONTROL: a read spelled through a variable keeps the LITERAL count at 3 (the text census is blind to it) and is RED by shape (a non-literal method name)', JSON.stringify(nonLit(wrapperRaw + planted)));
+    }
+  }
+  // verify r2 (Q5): the strace leg below is the REAL witness of the census — it must run in the tier that gates a
+  // push. This suite is in ci.mjs's FAST tier (the pre-push tier); on a CI runner a missing strace is RED, never a SKIP
+  const ciRows = fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf8');
+  ok(/\{\s*name:\s*'test-vendor-whitelist',\s*tier:\s*'fast'/.test(ciRows), '§10 TIER PIN: test-vendor-whitelist is in the FAST tier of scripts/ci.mjs (the tier that gates a push) — its strace leg runs before every push');
+  // LIVE: the helper over the STUB app-server, an EMPTY CODEX_HOME, under strace — zero internet connections
+  const has8 = (bin) => { try { execFileSync('sh', ['-c', `command -v ${bin}`], { stdio: 'pipe' }); return true; } catch { return false; } };
+  const onCI = !!(process.env.CI || process.env.GITHUB_ACTIONS);
+  if (!has8('strace')) ok(!onCI, onCI ? '§10 LIVE leg: strace is REQUIRED on a CI runner — the leg that gates a push may never SKIP there (install strace on the runner)' : '§10 SKIP live leg: strace is not on PATH — the census + the recorded measurement stand alone (a CI runner would be RED here)');
+  else {
+    const { writeStub } = await import('./codex-app-server-stub.mjs');
+    const tmp8 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-vwl-helper-'));
+    try {
+      const stub = writeStub(tmp8);
+      const home = path.join(tmp8, 'codex-home'); fs.mkdirSync(home);
+      const drv = (extra) => { const f = path.join(tmp8, `drv-${Math.random().toString(36).slice(2)}.cjs`); fs.writeFileSync(f, `'use strict';\n${extra}\nrequire(${JSON.stringify(path.join(REPO, helperRel))}).consumeResetCreditViaAppServer({ idempotencyKey: 'k-vwl-1', env: process.env, cwd: process.env.CODEX_HOME, codexCmd: ${JSON.stringify(stub)}, pressedBy: 'person' }).then((r) => { process.stdout.write(JSON.stringify(r)); setTimeout(() => process.exit(0), 300); });\n`); return f; };
+      const traced = (f) => {
+        const out = path.join(tmp8, 'trace-' + Math.random().toString(36).slice(2));
+        const env8 = { HOME: tmp8, CODEX_HOME: home, PATH: process.env.PATH || '/usr/bin:/bin', STUB_TABLE: path.join(REPO, 'scripts/fixtures/codex-app-server/0.159.3-methods.json'), STUB_LOG: path.join(tmp8, 'rpc.ndjson'), STUB_READ_USED: '0' };
+        let res = ''; try { res = execFileSync('strace', ['-f', '-qq', '-e', 'trace=connect', '-o', out, process.execPath, f], { env: env8, timeout: 30000, encoding: 'utf8' }); } catch { }
+        let text = ''; try { text = fs.readFileSync(out, 'utf8'); } catch { }
+        return { result: (() => { try { return JSON.parse(res); } catch { return null; } })(), inet: text.split('\n').filter((l) => /\bconnect\(/.test(l) && /AF_INET6?/.test(l)).length };
+      };
+      const live = traced(drv(''));
+      ok(live.result && live.result.sent === true && live.result.outcome === 'reset' && live.inet === 0, '§10 LIVE: the helper over the stub (EMPTY CODEX_HOME) consumed and read — and the whole tree opened ZERO internet connections', JSON.stringify(live));
+      const ctl8 = traced(drv("const s=require('net').connect(1,'127.0.0.1');s.on('error',()=>{});"));
+      ok(ctl8.inet >= 1, '§10 LIVE CONTROL: the same run with one deliberate loopback connect is SEEN (the zero above is a measurement)', JSON.stringify(ctl8));
+    } finally { try { fs.rmSync(tmp8, { recursive: true, force: true }); } catch { } }
+  }
 }
 
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);

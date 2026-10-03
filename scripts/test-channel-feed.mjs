@@ -14,7 +14,8 @@
 //      single-chat catch-up over a doc-faithful vendor; controls: the verdict that never parks, the Date.parse fallback;
 //   ③ THE FOLD — newest instant per key, the thread marks both the conversation and the thread (U6), dedup by message id
 //      across the overlap and inside a page, a stored record marks nothing, an unknown single chat is BORN, an unknown
-//      group is a discovery hint, an unlisted row is counted, the thread-owed bound;
+//      group is a discovery hint, an unlisted row is counted, the thread-owed bound; lane lark-threads (A3/A4/A5): a STORED
+//      hit naming a thread still marks the thread (never the chat) — control: the pre-lane order; threadHits; owedHits;
 //   ④ owedSatisfied (the skew; an incomplete walk never clears) + birthFacts (catch-up ⇒ read, no news; steady ⇒ the hit
 //      unread + news);
 //   ⑤ THE SNIPPET CENSUS — the module reads no text field; the registry's hit fields are a closed list with no text;
@@ -274,6 +275,16 @@ function legFold(F) {
   // earlier of the two, a STALE entry (no owed mark before) never lowers a new line, keys outside the marks are dropped
   const rch = F.mergeThreadReach({ omt_a: T0 - 900e3, omt_stale: T0 - 86400e3, omt_gone: T0 - 5e3 }, { omt_a: T0 - 1e3 }, ['omt_a', 'omt_stale', 'omt_new'], T0 - 60e3, { omt_a: T0, omt_stale: T0, omt_new: T0 });
   ok(rch.omt_a === T0 - 900e3 && rch.omt_stale === T0 - 60e3 && rch.omt_new === T0 - 60e3 && !('omt_gone' in rch), '③ verify r2: a thread\'s reach = the earliest naming window\'s start while its mark lives; a stale entry starts afresh; bounded to the marks', J(rch));
+  // lane lark-threads (A3 / H1, 2026-10-01 — the owner's post in a group whose thread was born after the root was stored):
+  // a hit on a STORED message that names a thread still marks THE THREAD owed (the search re-surfaced a root once its
+  // topic existed, or a reply the push delivered) — a widened mark, never an owed chat read; the stored count unchanged
+  const stTh = F.foldHits([hit({ convId: 'oc_live', vendorId: 'om_root', at: T0 - 4e3, threadKey: 'omt_born' }), hit({ convId: 'oc_live', vendorId: 'om_plain', at: T0 - 3e3 })], { stateOf: () => 'live', hasRecord: () => true, separateThreads: true });
+  ok(stTh.stored === 2 && stTh.owed.size === 0 && stTh.threadOwed.get('oc_live') && stTh.threadOwed.get('oc_live').get('omt_born') === T0 - 4e3 && stTh.threadOwed.get('oc_live').size === 1, '③ lane lark-threads (A3): a STORED hit that names a thread marks the thread owed (never the conversation); a stored plain hit marks nothing', J({ stored: stTh.stored, owed: [...stTh.owed], th: [...(stTh.threadOwed.get('oc_live') || [])] }));
+  // A5: `threadHits` = the page's NEW hits carrying a thread id (the measurement: does the search carry thread ids at all)
+  ok(f.threadHits === 2 && stTh.threadHits === 1, `③ lane lark-threads (A5): threadHits counts the new hits that carry a thread id (${f.threadHits} of the fixture page, ${stTh.threadHits} stored)`, J([f.threadHits, stTh.threadHits]));
+  // A4: `owedHits` = the hits that made an owed CHAT mark with no thread id — what the conversation's chat read must find
+  // (a hit it does not find is read by id: a thread reply the chat listing never shows)
+  ok(J(f.owedHits.map((x) => x.vendorId).sort()) === J(['om_1', 'om_2', 'om_p']) && f.owedHits.every((x) => x.convId && x.at > 0) && stTh.owedHits.length === 0, '③ lane lark-threads (A4): owedHits lists the hits behind an owed chat read (no thread id) — never a stored one, never a thread hit', J(f.owedHits));
   const noSep = F.foldHits([hit({ convId: 'oc_live', vendorId: 'om_x', threadKey: 'omt_1' })], { stateOf: () => 'live', separateThreads: false });
   ok(noSep.threadOwed.size === 0 && noSep.owed.size === 1, '③ an adapter whose replies ride the listing gets no thread mark (nothing to walk)');
   const big = {}; for (let i = 0; i < 70; i++) big[`omt_${i}`] = T0 + i;
@@ -468,6 +479,14 @@ const patch = (from, to, tag) => { if (!SRC.includes(from)) throw new Error(`con
   const red = F9.pageVerdict({ hits: [hit()], total: null }, { from: T0 - 90e3, to: T0 }, { pageSize: 30, now: T0, pages: 150 }).ok === true;
   ok(e === 400 && red, `CONTROL the count's ceiling removed: the endless readable vendor pages ${e} times (the bound) through the copy, and the 151st page passes — ② goes red`, e);
 }
+{
+  // lane lark-threads (A3 / H1): the pre-fix order — a stored hit dropped BEFORE its thread mark (the owner's post: a thread
+  // born on a stored root was never walked). The copy restores it; the stored root's thread is not owed
+  const F13 = patch("    if (h.threadKey && separateThreads) {\n      if (!out.threadOwed.has(h.convId)) out.threadOwed.set(h.convId, new Map());\n      up(out.threadOwed.get(h.convId), h.threadKey, at);\n    }\n    if (hasRecord(h.convId, h.vendorId)) { out.stored++; continue; }", "    if (hasRecord(h.convId, h.vendorId)) { out.stored++; continue; }\n    if (h.threadKey && separateThreads) {\n      if (!out.threadOwed.has(h.convId)) out.threadOwed.set(h.convId, new Map());\n      up(out.threadOwed.get(h.convId), h.threadKey, at);\n    }", 'stored-before-mark');
+  const args = [[hit({ convId: 'oc_live', vendorId: 'om_root', at: T0 - 4e3, threadKey: 'omt_born' })], { stateOf: () => 'live', hasRecord: () => true, separateThreads: true }];
+  const real = F0.foldHits(...args), mut = F13.foldHits(...args);
+  ok(real.threadOwed.size === 1 && mut.threadOwed.size === 0, 'CONTROL the stored hit dropped before its thread mark (the pre-lane order): the copy owes no thread for a root re-surfaced with its new topic — ③ A3 would be red', J([real.threadOwed.size, mut.threadOwed.size]));
+}
 // ═══ ⑨ THE UNREADABLE RING (verify r2) ═══════════════════════════════════════════════════════════════════════════════
 // The card's "N search hits could not be read" is about NOW: the pages of the last UNREADABLE_RECENT_MS that held an
 // unreadable hit, appended per page, trimmed to the hour, bounded to UNREADABLE_RING_MAX; the count and the newest instant
@@ -514,7 +533,7 @@ console.log('⑨ the unreadable ring (verify r2)');
   for (let i = 0; i < 600; i++) busy0 = F11.recentUnreadable(busy0, T0 + i * 6000, 26);
   ok(busy0.length === F11.UNREADABLE_RING_MAX && F11.recentUnreadableCount(busy0, T0 + 599 * 6000).n === 200 * 26, `CONTROL the per-page ring: 600 busy pages fill the ${F11.UNREADABLE_RING_MAX}-entry bound and the hour reads ${200 * 26} for ${600 * 26} dropped — the exactness leg would be red`, J(busy0.length));
 }
-for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 7, label: 'larkfeed: ' })) ok(c.pass, c.name, c.pass ? undefined : c.detail);
+for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 8, label: 'larkfeed: ' })) ok(c.pass, c.name, c.pass ? undefined : c.detail);
 
 console.log(`\n${failN ? '✗' : '✓'} test-channel-feed: ${passN} passed, ${failN} failed`);
 process.exit(failN ? 1 : 0);

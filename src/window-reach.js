@@ -28,7 +28,13 @@
  *     D1: an agent that opened the window itself (`vibespace-window open`) is
  *     exposed to its own session;
  *   · `reachFor` = MAX over the applicable rows, the deciding row named, a
- *     session row preferred over a group row (the more specific grant).
+ *     session row preferred over a group row (the more specific grant);
+ *   · ALL AGENTS (lane everyone-principal, 2026-10-02): a row whose principal is
+ *     `{kind:'everyone', id:'*'}` exposes the window to EVERY agent session,
+ *     now and later — the owner's explicit share (D1's default stays hidden).
+ *     It is one more row: a session's / a group's own row is still preferred
+ *     (it names the caller more specifically) and never narrows it; revoking
+ *     All drops only the All row, every other row stays as it was.
  *
  * THE SHARE MODE (D7): every window's share carries `mode` ∈ auto | tree |
  * pixels (default auto). `pixels` is the closest thing to the user operating
@@ -65,7 +71,9 @@
 
 const LEVELS = Object.freeze(['hidden', 'exposed']);
 const RANK = Object.freeze({ hidden: 0, exposed: 1 });
-const PRINCIPAL_KINDS = Object.freeze(['session', 'group']);
+const PRINCIPAL_KINDS = Object.freeze(['session', 'group', 'everyone']);
+/** THE everyone principal's ONE id (the picker's, the channel models'). */
+const EVERYONE_ID = '*';
 /** Who wrote a row — the user's share, the user's request (D3), the agent's own open (D1's one exception). */
 const GRANT_ORIGINS = Object.freeze(['user', 'request', 'self-open']);
 const MODES = Object.freeze(['auto', 'tree', 'pixels']);
@@ -109,6 +117,7 @@ function normPrincipal(p) {
   const kind = String(p.kind || '');
   const id = String(p.id == null ? '' : p.id);
   if (!PRINCIPAL_KINDS.includes(kind)) return null;
+  if (kind === 'everyone') return { kind, id: EVERYONE_ID };   // ONE spelling, no name (the reader words it)
   if (kind === 'session' ? !SESSION_KEY_RE.test(id) : !GROUP_ID_RE.test(id)) return null;
   const name = cleanName(p.name);
   return name ? { kind, id, name } : { kind, id };
@@ -184,13 +193,17 @@ function reachFor(record, ctx = {}) {
   const keys = new Set([...(Array.isArray(ctx.sessionKeys) ? ctx.sessionKeys : []), ...(ctx.sessionId ? [String(ctx.sessionId)] : [])].map(String));
   const groups = new Set((Array.isArray(ctx.groupIds) ? ctx.groupIds : []).map(String));
   let best = null;
+  // the more SPECIFIC row decides which row is named: a session's own > a group's > All agents
+  const SPECIFIC = { session: 2, group: 1, everyone: 0 };
+  const callerKnown = keys.size > 0;
   for (const row of rec.rows) {
-    const hit = row.principal.kind === 'session' ? keys.has(row.principal.id) : groups.has(row.principal.id);
+    const k = row.principal.kind;
+    const hit = k === 'everyone' ? callerKnown : k === 'session' ? keys.has(row.principal.id) : groups.has(row.principal.id);
     if (!hit) continue;
-    if (!best || (best.principal.kind === 'group' && row.principal.kind === 'session')) best = row;
+    if (!best || SPECIFIC[k] > SPECIFIC[best.principal.kind]) best = row;
   }
   if (!best) return ctx.unreadable && rec.rows.some((r) => r.principal.kind === 'group') ? { level: 'hidden', via: null, row: null, unreadable: true } : { level: 'hidden', via: null, row: null };
-  return { level: 'exposed', via: best.principal.kind === 'group' ? 'group' : best.by === 'self-open' ? 'self-open' : 'session', row: best };
+  return { level: 'exposed', via: best.principal.kind === 'group' ? 'group' : best.principal.kind === 'everyone' ? 'everyone' : best.by === 'self-open' ? 'self-open' : 'session', row: best };
 }
 const isExposed = (record, ctx) => RANK[reachFor(record, ctx).level] >= RANK.exposed;
 
@@ -329,8 +342,10 @@ function pickerModel({ sessions = [], groups = [], record = null, principals = n
   const chosen = new Map();
   for (const r of rec.rows) chosen.set(principalKey(r.principal), r);
   for (const p of Array.isArray(principals) ? principals : []) { const n = normPrincipal(p); if (n && !chosen.has(principalKey(n))) chosen.set(principalKey(n), { principal: n, by: 'user', grantedAt: 0 }); }
-  const out = { sessions: [], groups: [], others: [], mode: rec.mode };
-  const seen = new Set();
+  const allRow = chosen.get(principalKey({ kind: 'everyone', id: EVERYONE_ID })) || null;
+  // ALL AGENTS: its own entry (never an `other`), checked when the record names it
+  const out = { everyone: { checked: !!allRow, by: allRow ? allRow.by : null }, sessions: [], groups: [], others: [], mode: rec.mode };
+  const seen = new Set([principalKey({ kind: 'everyone', id: EVERYONE_ID })]);
   for (const s of Array.isArray(sessions) ? sessions : []) {
     if (!s || !s.id || s.backend === 'shell') continue;
     const key = sessionKeyOf(s, s.id);
@@ -404,6 +419,7 @@ function principalsNow(principals, roster) {
   for (const g of roster && Array.isArray(roster.groups) ? roster.groups : []) if (g && g.id && !g.archived) listed.set(String(g.id), g);
   return (Array.isArray(principals) ? principals : []).map((p) => {
     if (!p || typeof p !== 'object') return p;
+    if (p.kind === 'everyone') return { kind: 'everyone', id: EVERYONE_ID };   // every conversation — never "absent"
     if (p.kind === 'session') { const s = live.get(p.id); return s ? { ...p, name: cleanName(s.name) || p.name || p.id } : { ...p, absent: 'session' }; }
     const g = listed.get(String(p.id));
     return g ? { ...p, name: cleanName(g.title || g.name) || String(p.id) } : { ...p, absent: 'group' };
@@ -456,7 +472,7 @@ function normShare(share) {
 }
 
 module.exports = {
-  LEVELS, RANK, PRINCIPAL_KINDS, GRANT_ORIGINS, MODES, RESOLVED_MODES, REFUSALS, refuse, PIXELS_SENTENCE, NOT_EXPOSED_SENTENCE, REACH_UNREADABLE_SENTENCE, NOTE_MAX, CONTAINER_ROLES, TREE_VERBS,
+  LEVELS, RANK, PRINCIPAL_KINDS, EVERYONE_ID, GRANT_ORIGINS, MODES, RESOLVED_MODES, REFUSALS, refuse, PIXELS_SENTENCE, NOT_EXPOSED_SENTENCE, REACH_UNREADABLE_SENTENCE, NOTE_MAX, CONTAINER_ROLES, TREE_VERBS,
   sessionKeyOf, callerKeys, normPrincipal, principalKey,
   emptyRecord, normRecord, grant, revoke, setMode, openerGrant, reachFor, isExposed,
   usableNodes, resolveMode, REASON_MAX, verbGate,

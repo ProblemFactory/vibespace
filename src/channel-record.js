@@ -8,9 +8,10 @@
  * become a per-adapter fact:
  *
  *   { id, convId, adapterId, vendorId, at,
- *     author:      { id, name, isSelf, isBot },
+ *     author:      { id, name, isSelf, isBot, alt?, external? },   // alt / external: lane lark-threads (src/channel-authors.js)
  *     text,                        // ALWAYS plain text — the only thing v1 renders
  *     mentions:    [{ id, name }], // RESOLVED names, never raw @_user_N placeholders
+ *                                  // + `pos` [[start, end]…] — an agent group's places of each @ in text (B-ff04)
  *     attachments: [{ id, name, bytes, mime, placeholder?, cid?, role? }],
  *     replyTo, threadKey,          // the record's PLACE: what it answers, which thread it is in
  *     raw:         { bounded, adapter-specific, NEVER rendered },
@@ -234,6 +235,10 @@ function peerName(v, max) {
   // verify r3 F7 (lane peer-census): the bound never splits a surrogate pair — a lone surrogate at the cut is a name the
   // CLI's stdout re-encodes as U+FFFD (the name the agent sees is not the name the store holds)
   const s = inertFrameLine(peerText(t.slice(0, nameCutAt(t, max)).trim()));
+  // lane lark-threads verify r2 (⑥): a name with NO visible character is no name — the joiners (U+200C / U+200D) are kept
+  // for the words that need them, so a name of joiners alone used to pass every belt as a non-empty INVISIBLE string
+  // (a blank author head, a blank alias, a blank nickname instead of the id)
+  if (!/[^\u200c\u200d\s]/.test(s)) return null;
   return s || null;
 }
 /** the largest cut ≤ n that does not split a surrogate pair (src/peer-text.js cutText's rule; this module imports nothing) */
@@ -388,6 +393,19 @@ function resolveMentions(text, mentions) {
   });
 }
 
+/** A mention's places in `text` (B-ff04): `[[start, end]…]`, each on an '@' and inside the text; null when none is. */
+const MAX_MENTION_POS = 32;
+function mentionPos(pos, text) {
+  if (!Array.isArray(pos)) return null;
+  const out = [];
+  for (const p of pos.slice(0, MAX_MENTION_POS)) {
+    if (!Array.isArray(p) || p.length !== 2) continue;
+    const [s, e] = p;
+    if (Number.isInteger(s) && Number.isInteger(e) && s >= 0 && e > s + 1 && e <= text.length && text[s] === '@') out.push([s, e]);
+  }
+  return out.length ? out : null;
+}
+
 /** The key separator, spelled as an ESCAPE. A literal NUL byte here would
  *  make this module invisible to grep / file(1) / ripgrep and to every source
  *  census in the tree — byte-identical at runtime, unreadable to every text
@@ -435,6 +453,11 @@ function makeRecord(input, opts = {}) {
   // prompt (§7.5 renders `from <author>`), so every one takes rule 3.
   const a = r.author && typeof r.author === 'object' ? r.author : {};
   const author = { id: peerText(a.id, 256), name: peerName(a.name, 200) || '', isSelf: !!a.isSelf, isBot: !!a.isBot };
+  // lane lark-threads (B1/B4/B5, 2026-10-01): OPTIONAL — the person's profile alternatives as the vendor names them
+  // (`alt`: enName / nickname / jobTitle / department, each a bounded name, only the non-empty ones) and `external` (the
+  // sender's organization is not the account's); the vendor `name` stays the name (src/channel-authors.js N3)
+  if (a.alt && typeof a.alt === 'object') { const x = {}; for (const k of ['enName', 'nickname', 'jobTitle', 'department']) { const v = peerName(a.alt[k], 200); if (v) x[k] = v; } if (Object.keys(x).length) author.alt = x; }
+  if (a.external === true) author.external = true;
 
   const mentions = (Array.isArray(r.mentions) ? r.mentions : []).slice(0, MAX_MENTIONS)
     .map((m) => ({ id: peerText(m && m.id, 256), name: peerName(m && m.name, 200) || '' }));
@@ -461,6 +484,9 @@ function makeRecord(input, opts = {}) {
   let text = str(r.text, MAX_TEXT);
   if (opts.resolveMentions !== false) text = resolveMentions(text, mentions);
   text = inertFrames(text);
+  // B-ff04: an agent-group message's @ is STRUCTURED — `pos` = the [start, end) places in `text` the mention names,
+  // written by the groups engine at send time; kept only where each still sits on an '@' of the FINAL text
+  (Array.isArray(r.mentions) ? r.mentions : []).slice(0, MAX_MENTIONS).forEach((m, i) => { const p = mentionPos(m && m.pos, text); if (p) mentions[i].pos = p; });
 
   const raw = boundRaw(r.raw);
   if ('synthetic' in raw && typeof raw.synthetic !== 'boolean') throw new Error('channel-record: raw.synthetic must be a boolean (declare a minted key, or omit it)');
@@ -530,10 +556,14 @@ const CUSTOM_IMAGE_RE = /^emoji:[A-Za-z0-9_+\-:.]{1,64}$/;
 /** The side log's closed schema: `rx` = a reaction fact, `th` = a vendor's
  *  thread stats. `edit` is the NAMED next occupant (vendor-flagged edits ride
  *  the same log later) — nobody invents a second mechanism. */
-const SIDE_KINDS = Object.freeze(['rx', 'th']);
+// lane lark-threads (A1, 2026-10-01): `pl` = a PLACE PATCH — a later vendor copy of a stored message named the thread
+// (or root) the first copy did not carry; widen-only (src/channel-thread.js `widenPlace`), folded at read
+const SIDE_KINDS = Object.freeze(['rx', 'th', 'pl']);
 const SIDE_FORMS = Object.freeze(['delta', 'snapshot']);
 const SIDE_OPS = Object.freeze(['add', 'remove']);
-const SIDE_SOURCES = Object.freeze(['event', 'list', 'history', 'self', 'agent']);
+// lane lark-threads: + `walk` (a thread walk's repeated root), `byid` (a message read by its id), `recheck` (the
+// recent-roots re-list) — where a place patch came from
+const SIDE_SOURCES = Object.freeze(['event', 'list', 'history', 'self', 'agent', 'walk', 'byid', 'recheck']);
 /** One side line, after JSON.stringify. A snapshot past it is TRUNCATED to
  *  the bounds (`truncated: true`), never refused — a vendor answer is still
  *  the truth for the counts. */
@@ -600,9 +630,11 @@ function validateReactions(list) {
  *   {k:'rx', msg, at, form:'delta', op, key, actor:{id, name}, rid?, src}
  *   {k:'rx', msg, at, form:'snapshot', src, list:[{key, count, by:[ids], rids:[ids]}], truncated?}
  *   {k:'th', msg, at, src, count, lastAt, replyUsers:[ids]}
+ *   {k:'pl', msg, at, src, threadKey|null, root|null}   (lane lark-threads: a place patch — at least one id, ≤ 512 each,
+ *                                                        no control character; a root equal to `msg` is no root)
  * A snapshot past the bounds (> REACTIONS_MAX keys, > REACTION_BY_MAX ids per
  * key, a line past SIDE_LINE_MAX_BYTES) is TRUNCATED with `truncated: true`;
- * anything else broken is REFUSED by name (`bad-kind`, `bad-msg`, `bad-at`,
+ * anything else broken is REFUSED by name (`bad-kind`, `bad-msg`, `bad-at`, `bad-place`,
  * `bad-form`, `bad-op`, `bad-key`, `bad-source`, `bad-actor`, `too-large`).
  * → `{ok:true, side}` (a NEW object holding only the declared fields) | `{ok:false, code, error}`.
  */
@@ -615,7 +647,13 @@ function validateSide(input) {
   if (!Number.isFinite(at) || at <= 0) return no('bad-at', 'at must be an epoch ms');
   if (!SIDE_SOURCES.includes(s.src)) return no('bad-source', `src must be one of ${SIDE_SOURCES.join('|')}`);
   let out;
-  if (s.k === 'th') {
+  if (s.k === 'pl') {
+    const pid = (v) => (typeof v === 'string' && v.length > 0 && v.length <= 512 && !/[\u0000-\u001f\u007f]/.test(v) ? v : null);
+    const threadKey = pid(s.threadKey);
+    const root = pid(s.root) === s.msg ? null : pid(s.root);
+    if (!threadKey && !root) return no('bad-place', 'a place patch names a thread key or a root (an id ≤ 512 characters)');
+    out = { k: 'pl', msg: s.msg, at, src: s.src, threadKey, root };
+  } else if (s.k === 'th') {
     const users = (Array.isArray(s.replyUsers) ? s.replyUsers : []).slice(0, REACTION_BY_MAX).map(idOf).filter(Boolean);
     const lastAt = Number(s.lastAt);
     out = { k: 'th', msg: s.msg, at, src: s.src, count: intIn(s.count, 0, REACTION_COUNT_MAX) || 0, lastAt: Number.isFinite(lastAt) && lastAt > 0 ? lastAt : null, replyUsers: users };
@@ -667,6 +705,7 @@ function validateSide(input) {
 function sideKey(s) {
   const x = s || {};
   if (x.k === 'th') return ['th', x.msg, x.at].join(':');
+  if (x.k === 'pl') return ['pl', x.msg, x.threadKey || '', x.root || ''].join(':');   // a replayed widening is a no-op, whenever it came
   if (x.form === 'snapshot') return ['rx', 'snapshot', x.msg, x.at].join(':');
   if (x.rid) return ['rx', 'delta', x.rid].join(':');
   return ['rx', 'delta', x.msg, x.key, (x.actor && x.actor.id) || '', x.op, x.at].join(':');

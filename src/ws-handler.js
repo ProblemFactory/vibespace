@@ -227,7 +227,7 @@ const WS_CTX_CONTRACT = [
   'activeSessions', 'WS_OPEN', 'broadcastActiveSessions', 'broadcastToSession', 'resizeSessionToMin',
   'setupSessionPty', 'reattachLocalPty', 'ptyQuietSince', 'refreshWebuiPids', 'deleteSessionMeta', 'writeSessionMeta', 'readSessionMeta', 'autoResume',
   'readLayouts', 'writeLayouts', 'getSyncStore', 'serverSetting', 'integrationEnabled', 'agentdRemote', 'dialBridge',
-  'harnessSetting', 'harnessDeclares', 'harnessSpawnSettings', 'cliConfigPlanB64', // harness settings (design-harness-settings §5/§6)
+  'harnessSetting', 'harnessDeclares', 'harnessSpawnSettings', 'cliConfigPlanB64', 'ownerWriteRefusal', // harness settings (design-harness-settings §5/§6) + the root verdict (src/server-root.js: a worktree / temp server runs no register helper)
   'sessionCounterRef', 'createSessionMessages', 'poolChooser', 'sbNoteServerOp',
   'SOCKETS_DIR', 'BUFFERS_DIR', 'PTY_WRAPPER', 'CHAT_WRAPPER',
   'NODE_CMD', 'DTACH_CMD', 'ENV_CMD', 'CLAUDE_CMD', 'EDITOR_CMD', 'AGENT_BIN_DIR', 'PORT', 'X_ENV', 'cliCmds', // cliCmds: the spawn-time re-resolve (B-a18e)
@@ -235,6 +235,7 @@ const WS_CTX_CONTRACT = [
   'accounts', 'scheduleCtxSync', 'activeSessionsPayload',
   'USAGE_STATUSLINE_CMD', 'userStatuslineCmd', 'serverNotice', 'otelEnv', 'telemetry',
   'sendUserInput', // THE typing path (src/server/user-input.js) — the chat-input case and the For-you reply route share it
+  'getDesign', // the Design window's hub (src/server/design-engine.js): design-watch / design-unwatch, a socket's close unwatches
 ];
 
 function registerWsHandler(wss, ctx) {
@@ -250,7 +251,7 @@ function registerWsHandler(wss, ctx) {
     adapterRegistry, pty, path, fs, os, execFileSync, ensureDir, hosts,
     accounts, scheduleCtxSync, activeSessionsPayload,
     USAGE_STATUSLINE_CMD, userStatuslineCmd, otelEnv, telemetry,
-    sendUserInput, getExitProxy = () => null,
+    sendUserInput, getExitProxy = () => null, getDesign = () => null,
   } = ctx;
 
   // Monotonic sequence for layout-sync rebroadcasts (shared across all
@@ -1329,6 +1330,7 @@ function registerWsHandler(wss, ctx) {
           if (session) {
             console.log(`[session] killed ${data.sessionId} "${session.name || ''}" mode=${session.mode} backend=${session.backend || 'claude'}`);
             global.__vsEvent?.('session-killed', `${session.mode}/${session.backend || 'claude'}`);
+            session._exitAsked = { by: 'terminate', at: Date.now() }; // B-f698: the record names the actor (this case deletes the session before onExit — the belt)
             // Cancel any pending delayed-SIGINT from a recent interrupt — after
             // kill, the childPid may be reused by an unrelated process
             if (session._interruptTimer) { clearTimeout(session._interruptTimer); session._interruptTimer = null; }
@@ -1470,6 +1472,12 @@ function registerWsHandler(wss, ctx) {
           if (store && data.key && typeof data.key === 'string') {
             if (data.value == null || data.value === '') store.delete(data.key, ws);
             else store.set(data.key, data.value, ws);
+            // lane worker-dispatch verify r2 ①: a non-empty chat draft is a PERSON composing a reply (not yet sent, so
+            // _userInputAt is stale) — stamp it so a dispatch never compacts a worker whose owner is mid-draft.
+            if (data.store === 'drafts' && data.value != null && data.value !== '' && data.key.startsWith('chat:')) {
+              const s = activeSessions.get(data.key.slice(5));
+              if (s) s._draftEditAt = Date.now();
+            }
           }
           break;
         }
@@ -1623,6 +1631,20 @@ function registerWsHandler(wss, ctx) {
           break;
         }
 
+        // THE DESIGN WINDOW'S WATCH (lane design-core): a window showing a design folder asks the hub to poll it (this
+        // machine: an async stat sweep every 2 s while any window watches) — refcounted per socket, answered with an ack
+        // that carries NO sessionId (a session-scoped error would flip a live chat window read-only)
+        case 'design-watch':
+        case 'design-unwatch': {
+          const de = getDesign && getDesign();
+          const host = typeof data.host === 'string' && data.host ? data.host : null;
+          const dir = typeof data.dir === 'string' ? data.dir : '';
+          const r = !de ? { ok: false, code: 'unavailable', error: 'the Design window is not available on this server' }
+            : data.type === 'design-watch' ? de.watch(ws, host, dir) : de.unwatch(ws, host, dir);
+          try { ws.send(JSON.stringify({ type: 'design-watch-ack', op: data.type === 'design-watch' ? 'watch' : 'unwatch', host, dir, ok: !!r.ok, ...(r.ok ? { watchers: r.watchers, polled: r.polled === true } : { code: r.code, error: r.error }), reqId: data.reqId || undefined })); } catch { }
+          break;
+        }
+
         case 'tmux-attach': {
           // Attach to a running tmux pane (read-only view of external session)
           const tmuxTarget = data.tmuxTarget;
@@ -1670,6 +1692,7 @@ function registerWsHandler(wss, ctx) {
     }
 
     ws.on('close', () => {
+      try { const de = getDesign && getDesign(); if (de) de.unwatchSocket(ws); } catch { }   // a closed socket's design watches end with it
       for (const sid of attachedSessions) {
         const session = activeSessions.get(sid);
         if (session) {

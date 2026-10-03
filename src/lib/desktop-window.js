@@ -38,6 +38,8 @@ export function openDesktop(app, { syncId } = {}) {
   const view = createVncView(winInfo.content, {
     url: streamUrl('/api/vnc'),
     autoReconnect: true,
+    // lane desktop-keepalive K3: the bridge's own record of the last close, worded in the status chip
+    lastClose: async () => { const r = await fetchJson('/api/vnc/last-close'); return r && !r.error ? r.close : null; },
     // start (or adopt) the server first; a failure's own text wins over the generic label
     before: async () => {
       let st = null;

@@ -126,6 +126,10 @@ const TARGETS = Object.freeze(['browser', 'window']);
 const targetOf = (t) => (TARGETS.includes(t) ? t : 'browser');
 /** "the "Notes" window" / "your browser" — the ONE noun rule. */
 const whoOf = (label, target = 'browser') => { const n = targetOf(target); return label ? `the "${label}" ${n}` : `your ${n}`; };
+/** lane browser-windows (U2): what a TAKEOVER of a profile's browser is of — the agent's own WINDOW in it (the user drives
+ *  one window; every other conversation works on in its own): "your window of the "Work" browser" / "your browser" (the
+ *  conversation's own browser has one holder) / "the "Notes" window" (a native window target, unchanged). */
+const takenWho = (label, target = 'browser', shared = false) => (targetOf(target) === 'browser' && label ? (shared ? `the shared window of the "${label}" browser (your tab is in it)` : `your window of the "${label}" browser`) : whoOf(label, target)); // verify r2 ⑦: a legacy shared window is named as such
 /** The ONE declared unattended-spend reason of this feature (§4.3.1). */
 const SPEND_REASON = 'browser-handback';
 /** Measured on 0.32.0: "Pending confirmations auto-deny after 60 seconds." */
@@ -263,10 +267,10 @@ function handbackWakeEcho({ wakes = 0, expect } = {}) {
 }
 
 /** The typed refusal an agent command gets while the user drives. */
-function browserPausedRefusal({ state = null, label = null, handles = [], now = 0, idleMs = DEFAULT_TAKEOVER_IDLE_MS, target = 'browser' } = {}) {
+function browserPausedRefusal({ state = null, label = null, handles = [], now = 0, idleMs = DEFAULT_TAKEOVER_IDLE_MS, target = 'browser', shared = false } = {}) {
   const s = state && typeof state === 'object' ? state : newInputState();
   const tg = targetOf(target);
-  const who = whoOf(label, tg);
+  const who = takenWho(label, tg, shared);
   const lim = num(idleMs);
   const back = lim > 0 ? `the live view hands back explicitly, or by itself after ${spellDur(lim)} without input` : 'the live view hands back explicitly';
   const after = tg === 'window' ? 'snapshot the window again when it comes back — they may have changed it' : 'it names the page they left you on';
@@ -281,10 +285,10 @@ function browserPausedRefusal({ state = null, label = null, handles = [], now = 
  *  say the whole thing once, with the URL first). `rerun` (the owner's ruling,
  *  2026-09-27 — "交还时提醒它重新运行") = the verbs the takeover interrupted or
  *  refused: said LAST, once; absent/empty ⇒ the words are byte-identical to before. */
-function handbackText({ cause = 'explicit', label = null, url = '', heldMs = 0, idleMs = DEFAULT_TAKEOVER_IDLE_MS, target = 'browser', handle = null, rerun = [], userActs = [] } = {}) {
+function handbackText({ cause = 'explicit', label = null, url = '', heldMs = 0, idleMs = DEFAULT_TAKEOVER_IDLE_MS, target = 'browser', handle = null, rerun = [], userActs = [], shared = false } = {}) {
   const tg = targetOf(target);
-  const who = whoOf(label, tg);
   const c = HANDBACK_CAUSES.includes(cause) ? cause : 'explicit';
+  const who = c === 'stop' ? whoOf(label, tg) : takenWho(label, tg, shared); // a stop is of the whole browser; a takeover of the agent's window (verify r2 ⑦: or of the shared one)
   const head = c === 'explicit' ? `The user handed ${who} back to you after ${spellDur(heldMs)} of driving it.`
     : c === 'idle' ? `The user's takeover of ${who} lapsed (no input for ${spellDur(idleMs)}); control is back with you.`
       : c === 'viewer-left' ? `The user closed the live view that held ${who}; control is back with you.`
@@ -311,7 +315,7 @@ function handbackText({ cause = 'explicit', label = null, url = '', heldMs = 0, 
  * i18n KEY: the reader's device words it, the user is "you".
  */
 const DUR = '(\\d+ (?:s|min|h))';
-const WHO = '(?:your (browser|window)|the "[^"]*" (browser|window))';
+const WHO = '(?:the shared window of the "[^"]*" browser \\(your tab is in it\\)|your window of the "[^"]*" browser|your (browser|window)|the "[^"]*" (browser|window))'; // lane browser-windows: a takeover is of the agent's WINDOW of a named browser (takenWho; verify r2 ⑦: or of the shared one) — read back as a browser handback
 function handbackFacts(text) {
   const s = String(text == null ? '' : text);
   const url = (/Current URL: (\S+?)\.(?:\s|$)/.exec(s) || [])[1] || null;
@@ -341,12 +345,12 @@ function handbackFacts(text) {
 
 /** The zero-spend notice (session-status `pushNotice`, kind `browser-handback`)
  *  that rides the user's own next message when nothing is delivered. */
-function handbackNotice({ cause = 'idle', label = null, url = '', heldMs = 0, idleMs = DEFAULT_TAKEOVER_IDLE_MS, at = 0, target = 'browser', handle = null, rerun = [], userActs = [] } = {}) {
+function handbackNotice({ cause = 'idle', label = null, url = '', heldMs = 0, idleMs = DEFAULT_TAKEOVER_IDLE_MS, at = 0, target = 'browser', handle = null, rerun = [], userActs = [], shared = false } = {}) {
   const tg = targetOf(target);
   const again = tg === 'browser' && Array.isArray(rerun) ? rerun.map(String).filter(Boolean).slice(0, 20) : [];
   // lane browser-resume C: the user's tab acts ride the notice too (bounded like the cycle: 16, the words cut)
   const acts = tg === 'browser' && Array.isArray(userActs) ? userActs.filter((a) => a && INT.USER_ACT_KINDS.includes(a.kind)).slice(-INT.USER_ACTS_CAP).map((a) => ({ kind: a.kind, title: String(a.title || '').slice(0, 300), url: String(a.url || '').slice(0, 2048) })) : [];
-  return { kind: 'browser-handback', cause: HANDBACK_CAUSES.includes(cause) ? cause : 'idle', label: label || null, url: url || null, heldMs: num(heldMs), idleMs: num(idleMs), at: num(at), ...(tg === 'window' ? { target: tg, handle: handle || null } : {}), ...(again.length ? { rerun: again } : {}), ...(acts.length ? { userActs: acts } : {}) };
+  return { kind: 'browser-handback', cause: HANDBACK_CAUSES.includes(cause) ? cause : 'idle', label: label || null, url: url || null, heldMs: num(heldMs), idleMs: num(idleMs), at: num(at), ...(tg === 'window' ? { target: tg, handle: handle || null } : {}), ...(again.length ? { rerun: again } : {}), ...(acts.length ? { userActs: acts } : {}), ...(shared === true ? { shared: true } : {}) }; // verify r2 ⑦: the notice remembers it was the shared window
 }
 function renderHandbackNotice(n) {
   return '<system-reminder>\n' + handbackText(n || {}) + '\n</system-reminder>';
@@ -355,10 +359,10 @@ function renderHandbackNotice(n) {
 /** THE TAKEOVER'S NOTICE (the owner's ruling, 2026-09-27 — "告知agent发生了打断"): zero-spend (session-status
  *  `pushNotice`, kind `browser-takeover`) — the agent reads it at its next turn; the conversation card carries the
  *  same words at the takeover (the handback announcer, never the delivery ladder: nothing is billed). */
-function takeoverNotice({ label = null, n = 0, verbs = [], at = 0 } = {}) {
-  return { kind: 'browser-takeover', label: label || null, n: Math.max(0, Math.floor(num(n))), verbs: (Array.isArray(verbs) ? verbs : []).map(String).filter(Boolean).slice(0, 20), at: num(at) };
+function takeoverNotice({ label = null, n = 0, verbs = [], at = 0, shared = false } = {}) {
+  return { kind: 'browser-takeover', label: label || null, n: Math.max(0, Math.floor(num(n))), verbs: (Array.isArray(verbs) ? verbs : []).map(String).filter(Boolean).slice(0, 20), at: num(at), ...(shared === true ? { shared: true } : {}) }; // verify r2 ⑦
 }
-function takeoverNoticeText(n) { const x = n || {}; return INT.takeoverText({ label: x.label || null, n: x.n || 0, verbs: x.verbs || [] }); }
+function takeoverNoticeText(n) { const x = n || {}; return INT.takeoverText({ label: x.label || null, n: x.n || 0, verbs: x.verbs || [], shared: x.shared === true }); }
 function renderTakeoverNotice(n) {
   return '<system-reminder>\n' + takeoverNoticeText(n) + '\n</system-reminder>';
 }

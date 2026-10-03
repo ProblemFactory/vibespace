@@ -144,11 +144,13 @@ export function freeDisplay(seed, { exists = (p) => fs.existsSync(p) } = {}) {
  *  REAL HOME and cwd `/tmp`: the scratch root is only in their arguments
  *  (`dtach -c <root>/…/data/sockets/cw-…`, `node <root>/…/data/bin/pty-wrapper.js`).
  *  A suite that boots a server owns what that server started: this lists every
- *  process whose cwd, HOME or any argv token (its start, or after `=`) lies in
- *  `root` — never this process or its ancestors — and signals each (SIGKILL by
- *  default; synchronous, so it runs inside an 'exit' handler). Returns the pids.
- *  The gate's reaper (scripts/ci.mjs argvScratchRoots) is the net for a suite that
- *  never got here. */
+ *  process whose cwd, HOME, daemon root (DAEMON_ROOT_ENV — B-442c: the server's
+ *  device daemon is title-rewritten, so neither its argv nor `pkill -f <root>` names
+ *  the root) or any argv token (its start, or after `=`) lies in `root` — never
+ *  this process or its ancestors — and signals each (SIGKILL by default;
+ *  synchronous, so it runs inside an 'exit' handler). Returns the pids. The gate's
+ *  reaper (scripts/ci.mjs argvScratchRoots) is the net for a suite that never got
+ *  here; test-architecture §57b names a server-booting suite that never calls this. */
 export function endRootedProcesses(root, { signal = 'SIGKILL', procRoot = '/proc', self = process.pid } = {}) {
   const r = path.resolve(String(root || ''));
   if (!r || r === '/' || !r.startsWith('/tmp/')) throw new Error(`endRootedProcesses(): refusing root ${JSON.stringify(root)} (a /tmp scratch dir only)`);
@@ -165,11 +167,44 @@ export function endRootedProcesses(root, { signal = 'SIGKILL', procRoot = '/proc
     let rooted = false;
     try { rooted = under(fs.readlinkSync(`${procRoot}/${pid}/cwd`)); } catch { }
     if (!rooted) try { rooted = fs.readFileSync(`${procRoot}/${pid}/cmdline`, 'utf8').split(/[\0\s]+/).some((t) => under(t) || t.split('=').slice(1).some((v) => under(v))); } catch { }
-    if (!rooted) try { rooted = under((fs.readFileSync(`${procRoot}/${pid}/environ`, 'utf8').split('\0').find((kv) => kv.startsWith('HOME=')) || '').slice(5)); } catch { }
+    if (!rooted) try { const env = fs.readFileSync(`${procRoot}/${pid}/environ`, 'utf8').split('\0'); rooted = ['HOME', ...DAEMON_ROOT_ENV].some((k) => under((env.find((kv) => kv.startsWith(k + '=')) || '').slice(k.length + 1))); } catch { }
     if (!rooted) continue;
     try { process.kill(pid, signal); hit.push(pid); } catch { }
   }
   return hit;
+}
+
+/** The env names a vibespace-device daemon takes its root from (src/agentd/agentd.js ROOT: VIBESPACE_DEVICE_ROOT, else
+ *  VIBESPACE_AGENTD_ROOT, else ~/.vibespace/agentd under HOME) — both kept by agent-env.js daemonEnv across a re-exec. */
+export const DAEMON_ROOT_ENV = Object.freeze(['VIBESPACE_DEVICE_ROOT', 'VIBESPACE_AGENTD_ROOT']);
+const DAEMON_ARGV = /(?:^|\/)(?:vibespace-)?agentd\.js$/;
+/** B-442c (2026-10-02, the 16:23 OOM): END THE DAEMON(S) OF ONE DAEMON ROOT, MID-RUN — and nothing else its server started
+ *  (a suite restarting its server over a fresh daemon keeps its dtach sessions). A daemon = a process whose
+ *  VIBESPACE_DEVICE_ROOT / VIBESPACE_AGENTD_ROOT lies in `root` AND that is one (comm `vibespace-devic…`, or an argv
+ *  naming an agentd bundle: a re-exec child before it renames itself), plus the pid `<root>/state/agentd.pid` names.
+ *  The pid file ALONE is what test-restore-liveness trusted: a self-upgrade spawns the NEW daemon before it writes
+ *  its pid, so a kill in that window ended the old pid, the suite then deleted the root, and the orphan — its
+ *  bundle gone — grew to 45.7 GB. Two passes, `settleMs` apart: a re-exec forked between the scan and the kill is
+ *  caught by the second. Synchronous (an 'exit' handler may call it); returns the pids signalled. */
+export function endDaemonsOf(root, { signal = 'SIGKILL', procRoot = '/proc', passes = 2, settleMs = 150 } = {}) {
+  const r = path.resolve(String(root || ''));
+  if (!r || r === '/' || !r.startsWith('/tmp/')) throw new Error(`endDaemonsOf(): refusing root ${JSON.stringify(root)} (a /tmp scratch dir only)`);
+  const under = (x) => { const v = String(x || ''); return v === r || v.startsWith(r + '/'); };
+  const hit = new Set();
+  const end = (pid) => { if (pid > 0 && pid !== process.pid && !hit.has(pid)) try { process.kill(pid, signal); hit.add(pid); } catch { } };
+  try { end(Number(fs.readFileSync(path.join(r, 'state', 'agentd.pid'), 'utf8').trim())); } catch { }
+  for (let k = 0; k < passes; k++) {
+    if (k) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, settleMs);
+    let pids = []; try { pids = fs.readdirSync(procRoot).filter((d) => /^\d+$/.test(d)).map(Number); } catch { return [...hit]; }
+    for (const pid of pids) {
+      let env; try { env = fs.readFileSync(`${procRoot}/${pid}/environ`, 'utf8').split('\0'); } catch { continue; }
+      if (!DAEMON_ROOT_ENV.some((n) => under((env.find((kv) => kv.startsWith(n + '=')) || '').slice(n.length + 1)))) continue;
+      let comm = '', argv = []; try { comm = fs.readFileSync(`${procRoot}/${pid}/comm`, 'utf8').trim(); } catch { }
+      try { argv = fs.readFileSync(`${procRoot}/${pid}/cmdline`, 'utf8').split('\0'); } catch { }
+      if (comm.startsWith('vibespace-devic') || argv.some((a) => DAEMON_ARGV.test(a))) end(pid);
+    }
+  }
+  return [...hit];
 }
 
 /** The ambient vendor credentials a REAL agent CLI would bill against instead

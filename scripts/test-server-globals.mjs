@@ -36,7 +36,7 @@ const GLOBALS = new Set([
 // server-tier files (client src/lib/** has its own bundle gate; agentd bundle
 // is esbuild-checked; data/bin scripts run standalone with their own globals)
 const files = ['server.js'];
-const EXCLUDE = new Set(['src/client.js']); // ESM client entry — covered by test-bundle-globals
+const EXCLUDE = new Set(['src/client.js', 'src/design-viewer-entry.js']); // ESM client entries (the app; the published design page's runtime, int201) — covered by test-bundle-globals
 (function walk(dir) {
   for (const e of fs.readdirSync(path.join(REPO, dir))) {
     const p = dir + '/' + e;

@@ -362,7 +362,7 @@ const _patchHookFile = (file, createIfMissing, mutate) => writeJsonManaged(file,
 // written by src/server/harness-config-sync.js through the same CAS writer.
 function agentHooksStatus() {
   const hookCmd = `${JSON.stringify(process.execPath)} ${HOOK_CMD}`; // absolute interpreter (2.244.2 — see the register template note)
-  const out = { hookPath: HOOK_CMD, optedOut: fs.existsSync(HOOK_OPTOUT_FILE) };
+  const out = { hookPath: HOOK_CMD, optedOut: fs.existsSync(HOOK_OPTOUT_FILE), refused: ownerWriteRefusal(), registeredAfterError: _registeredAfterError }; // verify r2 ①: the chip says "registered at HH:MM after an earlier read error"
   for (const [key, def] of Object.entries(HOOK_FILES)) {
     const file = def.file();
     let root = null, parseError = false;
@@ -390,22 +390,88 @@ function agentHooksStatus() {
 // command to its /tmp path; after worktree cleanup every Stop/UserPromptSubmit
 // hook errored MODULE_NOT_FOUND for two days — and the CLI snapshots hook
 // config per session, so healing the file doesn't reach already-running
-// sessions). Rule: a server whose own code lives under the OS temp dir skips
-// ALL global hook writes (register AND strip). Escape hatches:
-// VIBESPACE_SKIP_AGENT_HOOKS=1 forces skip anywhere (test harness belt),
-// VIBESPACE_FORCE_AGENT_HOOKS=1 overrides the tmp guard.
-function hookRegistrationSafe() {
-  if (process.env.VIBESPACE_FORCE_AGENT_HOOKS === '1') return true;
-  if (process.env.VIBESPACE_SKIP_AGENT_HOOKS === '1') return false;
-  const here = path.resolve(rootDir) + path.sep;
-  const tmp = path.resolve(os.tmpdir()) + path.sep;
-  return !here.startsWith(tmp) && !here.startsWith('/tmp/');
+// sessions). The /tmp-only rule missed the SECOND strike (2026-10-01, lane
+// hook-root-guard / B-c77a): a verify round's worktree under /var/tmp
+// registered into the owner's ~/.claude/settings.json and ~/.codex/hooks.json.
+// THE ROOT VERDICT (src/server-root.js, PURE) now decides for every writer of
+// the owner's CLI config — hooks (register AND strip), the cli-config sync, the
+// remote helper runs: a git WORKTREE, a TMP root, VIBESPACE_SKIP_AGENT_HOOKS=1
+// are refused; VIBESPACE_FORCE_AGENT_HOOKS=1 lifts a refusal ONLY under a
+// scratch HOME. The facts are read here with fs (the `.git` file's gitdir:
+// line + that dir's `commondir`), never a git child at boot — ONCE when the read
+// succeeds; a read ERROR (never ENOENT — the docker image has no git) is the
+// `error` fact, the verdict `unknown` (refused), and the facts are read AGAIN
+// at the next writer (verify r1 F1: an unreadable .git and a worktree whose
+// checkout was removed both shipped as `checkout` — every writer wrote).
+const serverRoot = require('../server-root');
+const { TMP_ROOTS } = require('../fixture-guard');
+const realOr = (p) => { try { return fs.realpathSync(p); } catch { return p; } };
+function readRootFacts(root) {
+  const facts = { root: realOr(path.resolve(root)), gitDir: null, gitCommonDir: null };
+  const dotGit = path.join(facts.root, '.git');
+  const errOf = (e) => (e && e.code) || (e && e.message) || String(e);
+  let st = null;
+  try { st = fs.statSync(dotGit); } catch (e) { if (e && e.code === 'ENOENT') return facts; facts.error = `${dotGit} cannot be read (${errOf(e)})`; return facts; }
+  if (st.isDirectory()) { facts.gitDir = facts.gitCommonDir = realOr(dotGit); return facts; }
+  let gd = null;
+  try { gd = serverRoot.parseGitFile(fs.readFileSync(dotGit, 'utf-8')); } catch (e) { facts.error = `${dotGit} cannot be read (${errOf(e)})`; return facts; }
+  if (!gd) { facts.error = `${dotGit} is a file without a gitdir: line`; return facts; }
+  facts.gitDir = realOr(path.resolve(facts.root, gd));
+  // the gitdir itself: GONE ⇒ a worktree whose checkout was removed — git's own layout (<common>/worktrees/<name>) still
+  // names the checkout, so it stays a worktree (never "no git"); any other failure is the error fact
+  try { fs.statSync(facts.gitDir); } catch (e) {
+    const m = /^(.+)\/worktrees\/[^/]+$/.exec(facts.gitDir);
+    if (e && e.code === 'ENOENT' && m) { facts.gitCommonDir = m[1]; facts.dangling = true; return facts; }
+    facts.error = `the gitdir ${facts.gitDir} named by ${dotGit} cannot be read (${errOf(e)})`; return facts;
+  }
+  let common = facts.gitDir;
+  try { common = realOr(path.resolve(facts.gitDir, fs.readFileSync(path.join(facts.gitDir, 'commondir'), 'utf-8').trim())); }
+  catch (e) { if (!(e && e.code === 'ENOENT')) { facts.error = `${path.join(facts.gitDir, 'commondir')} cannot be read (${errOf(e)})`; return facts; } } // no commondir = a submodule / --separate-git-dir: the gitdir IS the common dir
+  facts.gitCommonDir = common;
+  return facts;
 }
+let _rootFacts = null, _rootFactsAt = 0;
+let _lastRootError = null;          // verify r2 ①: the last `unknown` {at, error} — what a later registration happened AFTER
+let _registeredAfterError = null;   // verify r2 ①: {at, error, since} once the hooks registered after an earlier unknown (said once; the chip says it)
+function rootVerdict() {
+  const t = Date.now();
+  // an erroring read is never cached (verify r1 F1); a good one is kept ROOT_FACTS_TTL_MS (verify r2 ③: a `.git` converted in
+  // place — a checkout turned into a worktree while the server runs — is seen within a minute, not at the next restart)
+  if (!_rootFacts || _rootFacts.error || t - _rootFactsAt > serverRoot.ROOT_FACTS_TTL_MS) { _rootFacts = readRootFacts(rootDir); _rootFactsAt = t; }
+  const v = serverRoot.rootVerdict({
+    ..._rootFacts,
+    tmpRoots: [realOr(os.tmpdir()), ...TMP_ROOTS.map(realOr)],
+    envOverride: process.env[serverRoot.OVERRIDE_ENV] === '1',
+    force: process.env[serverRoot.FORCE_ENV] === '1',
+    home: realOr(os.homedir()),
+  });
+  if (!v.ok && v.kind === 'unknown') _lastRootError = { at: t, error: _rootFacts.error || v.why };
+  return v;
+}
+/** verify r2 ①: what happened around an unjudgeable root — the last `unknown` and the registration that followed it. */
+function rootRecovery() { return { lastError: _lastRootError, registeredAfterError: _registeredAfterError }; }
+/** null = this server may write the owner's CLI config; else the refusal the
+ *  status surfaces carry ({kind, why, checkout?, line}). */
+function ownerWriteRefusal() {
+  const v = rootVerdict();
+  if (v.ok) return null;
+  return { kind: v.kind, why: v.why, ...(v.checkout ? { checkout: v.checkout } : {}), line: serverRoot.refusalLine(v) };
+}
+// EVERY owner-config writer asks this first. ONE journal line per boot (the
+// first refused writer says it; the status surfaces carry it after that).
+let _refusalSaid = false;
+function refuseOwnerWrite() {
+  const r = ownerWriteRefusal();
+  if (r && !_refusalSaid) { _refusalSaid = true; console.log(r.line); }
+  return r;
+}
+function hookRegistrationSafe() { return rootVerdict().ok; }
 // auto=true (startup): respect the opt-out marker. auto=false (explicit Install
 // from the UI): always register + clear the marker.
 function ensureAgentHooks({ auto = false } = {}) {
   const hookCmd = `${JSON.stringify(process.execPath)} ${HOOK_CMD}`; // absolute interpreter (2.244.2 — see the register template note)
-  if (!hookRegistrationSafe()) { console.log('Agent-hook registration skipped (throwaway/temp server root)'); return { skipped: true }; }
+  const refused = refuseOwnerWrite();
+  if (refused) return { skipped: true, refused };
   if (auto && fs.existsSync(HOOK_OPTOUT_FILE)) return { optedOut: true };
   if (!auto) { try { fs.rmSync(HOOK_OPTOUT_FILE, { force: true }); } catch {} }
   const results = {};
@@ -430,6 +496,8 @@ function ensureAgentHooks({ auto = false } = {}) {
       results[key] = { ok: false, error: e.message, ...(e.missing ? { missing: e.missing } : {}) };
     }
   }
+  // verify r2 ①: registered AFTER an earlier unknown verdict (a read error at boot) — remembered once, said once by server.js
+  if (_lastRootError && !_registeredAfterError && Object.values(results).some((x) => x && x.ok)) _registeredAfterError = { at: Date.now(), error: _lastRootError.error, since: _lastRootError.at };
   return results;
 }
 // Strip ONLY our entries from both CLI configs — no opt-out marker. Used by
@@ -437,7 +505,7 @@ function ensureAgentHooks({ auto = false } = {}) {
 // SETTING-driven state: boot re-checks the setting, so no marker is needed
 // (and writing one would make a later re-enable silently not re-register).
 function stripAgentHookEntries() {
-  if (!hookRegistrationSafe()) return; // temp/worktree server: never edit global CLI configs
+  if (refuseOwnerWrite()) return; // a worktree / temp server: never edit the owner's CLI configs
   for (const def of Object.values(HOOK_FILES)) {
     try {
       _patchHookFile(def.file(), false, (root) => stripHookEntries(root, ALL_HOOK_EVENTS))
@@ -454,6 +522,7 @@ function removeAgentHooks() {
     AGENT_BIN_DIR, EDITOR_DIR, EDITOR_CMD, STATUS_CMD, USAGE_STATUSLINE_CMD, HOOK_CMD,
     createEditorHelper, createStatusHelper, createHookHelper, userStatuslineCmd,
     ensureAgentHooks, stripAgentHookEntries, removeAgentHooks, hookRegistrationSafe,
+    rootVerdict, ownerWriteRefusal, refuseOwnerWrite, readRootFacts, rootRecovery, // verify r1: the facts reader, for the gate's real-filesystem shapes; r2: the recovery fact
     agentHooksStatus,
     HOOK_OPTOUT_FILE: typeof HOOK_OPTOUT_FILE !== 'undefined' ? HOOK_OPTOUT_FILE : undefined,
   };

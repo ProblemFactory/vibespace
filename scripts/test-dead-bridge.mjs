@@ -40,6 +40,7 @@ import crypto from 'node:crypto';
 import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch, scratchHome, freePort, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { mutantCopies } from './mutant-copy.mjs';
 
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
@@ -261,6 +262,142 @@ setTimeout(() => {
     b2.kill(); for (const p of attachClientsOf(sockB)) { try { process.kill(p, 'SIGKILL'); } catch { } }
     try { execFileSync('pkill', ['-9', '-f', sockB]); } catch { }
   }
+}
+
+// ═══ §5 B-c20d — A NEVER-SPOKE BRIDGE HOLDS EVERY INPUT; THE TERMINAL HEAL REPAINTS (raw dtach + the REAL session-stdout + user-input) ═══
+// Found by verify r2 (held): the detector re-sent only ITS OWN input through a bridge that never spoke, and a SECOND
+// message typed inside the first one's 5 s was never re-sent — the first re-send's ack (or the new attach's bytes)
+// ended the second detector. And a terminal's clients kept the hole a dead client swallowed until a reload: the
+// healer never repainted the .buf tail (the onExit ladder's re-attach does). The never-spoke bridge = the device
+// channel that never opened: a duck that relays nothing. CONTROLS: copies of the real modules with b924041f's rule.
+console.log('\n§5 B-c20d — a never-spoke bridge holds every input for the heal (in order); the terminal heal repaints the .buf tail');
+{
+  const MUT = mutantCopies('dbridge', REPO);
+  const SS_SRC = fs.readFileSync(path.join(REPO, 'src/server/session-stdout.js'), 'utf8');
+  const UI_SRC = fs.readFileSync(path.join(REPO, 'src/server/user-input.js'), 'utf8');
+  const preSS = SS_SRC.replace("function reattachLocalPty(id, session, why, { kind = 'reattach' } = {}) {", "function reattachLocalPty(id, session, why, { kind = 'reattach', resend = null } = {}) {")
+    .replace('const replay = takeHeldInputs(session);', 'const replay = resend != null ? [resend] : [];');
+  const preUI = UI_SRC.replace(/(Broken pty stdin detected \(\$\{neverSpoke[^\n]*?\}\))`\);/, '$1`, { resend: neverSpoke ? payloadLine : null });');
+  const noPaint = SS_SRC.replace(/^\s*repaintFromBuf\(id, session\);[^\n]*\n/m, '');
+  ok(/resend != null \? \[resend\]/.test(preSS) && /\{ resend: neverSpoke \? payloadLine : null \}/.test(preUI) && noPaint !== SS_SRC, 'control setup: the pre-fix copies re-send the detector\'s OWN input only (b924041f\'s rule), the no-repaint copy lost exactly the healer\'s repaint line');
+  const BUFS = path.join(ROOT, 'c20d-bufs'); fs.mkdirSync(BUFS, { recursive: true });
+  const makeEng = (mod) => {
+    const activeSessions = new Map(), frames = [];
+    const eng = mod.create({ rootDir: REPO, BUFFERS_DIR: BUFS, META_DIR: path.join(ROOT, 'c20d-meta'), DTACH_CMD: DTACH, USAGE_SCANNER_PATH: '',
+      CLAUDE_STREAM_TYPES: new Set(), _seenStreamTypes: new Set(), activeSessions, engine: {}, checkClaudeGoalStatus() { },
+      broadcastToSession: (s, id, m) => frames.push(m), broadcastActiveSessions() { }, noteModelSeen() { }, noteHarnessModels() { }, recordUsageAttribution() { },
+      daemonPtyShim: (h) => h, agentEnv: () => process.env, sbSeenFirst() { }, getDeviceMgr: () => null, getHosts: () => null, getUsageHistory: () => null,
+      getTelemetry: () => null, getNoConvoRef: () => null, getDeliver: () => null, getPages: () => null, getPermissionRules: () => null });
+    return { eng, activeSessions, frames };
+  };
+  const deadDuck = () => { const d = { _daemon: true, pid: -1, wrote: [], onData: () => ({ dispose() { } }), onExit: () => ({ dispose() { } }), write: (x) => d.wrote.push(x), resize() { }, kill() { } }; return d; };
+  const adapterRegistry = { get: () => ({ formatChatInput: (t) => ({ stdinPayload: JSON.stringify({ type: 'user', text: t }), userMsg: null }) }) };
+  const twoMessages = async (SSmod, UImod, tag) => {
+    const sock = path.join(ROOT, 'cw-c20d-' + tag), inlog = path.join(ROOT, 'c20d-' + tag + '.in');
+    execFileSync(DTACH, ['-n', sock, '-E', '-r', 'none', process.execPath, WRITER, path.join(ROOT, 'c20d-' + tag + '.prog'), '50', inlog]);
+    await until(() => fs.existsSync(sock), 3000);
+    const { eng, activeSessions } = makeEng(SSmod);
+    const id = 'sess-c20d-' + tag;
+    const session = { mode: 'chat', backend: 'vs-c20d', clients: new Map(), buffer: '', socketPath: sock, cwd: ROOT };
+    activeSessions.set(id, session);
+    const dead = deadDuck();
+    eng.setupSessionPty(session, id, dead);
+    const send = UImod.createUserInputSender({ activeSessions, adapterRegistry, BUFFERS_DIR: BUFS, broadcastToSession() { }, feedLive() { }, autoResume: null,
+      reattachLocalPty: eng.reattachLocalPty, ptyQuietSince: eng.ptyQuietSince, writeSessionInput: eng.writeSessionInput, log() { } }).send;
+    const r1 = send(id, 'VSC20D-one'); await sleep(2000);
+    const r2 = send(id, 'VSC20D-two');                       // INSIDE the first message's 5 s
+    await sleep(8500);                                        // detector 1 heals at 5 s (+0.5 s replay), detector 2 judges at 7 s
+    const text = (() => { try { return fs.readFileSync(inlog, 'utf8'); } catch { return ''; } })();
+    const n = (m) => (text.match(new RegExp(m, 'g')) || []).length;
+    const out = { sent: !!(r1.ok && r2.ok), deadGot: dead.wrote.length, healed: session.pty !== dead, one: n('VSC20D-one'), two: n('VSC20D-two'), inOrder: text.indexOf('VSC20D-one') >= 0 && text.indexOf('VSC20D-one') < text.indexOf('VSC20D-two') };
+    activeSessions.delete(id); try { session.pty?.kill?.(); } catch { }
+    try { execFileSync('pkill', ['-9', '-f', sock]); } catch { }
+    return out;
+  };
+  const fx = await twoMessages(require(path.join(REPO, 'src/server/session-stdout.js')), require(path.join(REPO, 'src/server/user-input.js')), 'fix');
+  ok(fx.sent && fx.deadGot === 2 && fx.healed, `⑧ setup: both messages went into a bridge that never spoke (${fx.deadGot} writes swallowed) and the detector healed it`, JSON.stringify(fx));
+  ok(fx.one === 1 && fx.two === 1 && fx.inOrder, `⑧ B-c20d: the heal replays EVERY input the never-spoke bridge was handed — the second message typed inside the first one's 5 s lands too, once each, in order (one=${fx.one}× two=${fx.two}×)`, JSON.stringify(fx));
+  const ct = await twoMessages(MUT.load('src/server/session-stdout.js', preSS, 'pre'), MUT.load('src/server/user-input.js', preUI, 'pre'), 'ctl');
+  ok(ct.sent && ct.healed && ct.one === 1 && ct.two === 0, `⑧ CONTROL (b924041f's rule): the detector re-sends only its own input — the second message is LOST (one=${ct.one}× two=${ct.two}×)`, JSON.stringify(ct));
+  const repaint = async (SSmod, tag) => {
+    const sock = path.join(ROOT, 'cw-c20dt-' + tag);
+    execFileSync(DTACH, ['-n', sock, '-E', '-r', 'none', process.execPath, WRITER, path.join(ROOT, 'c20dt-' + tag + '.prog'), '600000']);
+    await until(() => fs.existsSync(sock), 3000);
+    const id = 'sess-c20dt-' + tag;
+    fs.writeFileSync(path.join(BUFS, id + '.buf'), 'VSHOLE-before\r\nVSHOLE-swallowed-by-the-dead-client\r\n');   // the wrapper's tee holds what the dead client swallowed
+    const { eng, activeSessions, frames } = makeEng(SSmod);
+    const session = { mode: 'terminal', backend: 'shell', clients: new Map(), buffer: '', socketPath: sock, cwd: ROOT };
+    activeSessions.set(id, session);
+    eng.setupSessionPty(session, id, deadDuck());
+    const healed = eng.reattachLocalPty(id, session, 'test: the watch heals a terminal');
+    await sleep(1000);
+    const out = { healed, painted: frames.some((f) => f.type === 'output' && /^\x1b\[2J\x1b\[3J\x1b\[H/.test(f.data || '') && /VSHOLE-swallowed-by-the-dead-client/.test(f.data || '')), buffer: /VSHOLE-swallowed/.test(session.buffer) };
+    activeSessions.delete(id); try { session.pty?.kill?.(); } catch { }
+    try { execFileSync('pkill', ['-9', '-f', sock]); } catch { }
+    return out;
+  };
+  const rp = await repaint(require(path.join(REPO, 'src/server/session-stdout.js')), 'fix');
+  ok(rp.healed && rp.painted && rp.buffer, '⑨ B-c20d: a terminal heal repaints the .buf tail to its clients (clear + the hole the dead client swallowed) and re-seeds session.buffer — no reload needed', JSON.stringify(rp));
+  const rc = await repaint(MUT.load('src/server/session-stdout.js', noPaint, 'nopaint'), 'ctl');
+  ok(rc.healed && !rc.painted && !rc.buffer, '⑨ CONTROL: without the repaint the clients keep the hole until a reload (the pre-fix healer)', JSON.stringify(rc));
+  // ⑩ verify r1: a never-spoke bridge that EXITS on its own (a device link that died before its preamble) — the onExit
+  // ladder re-attaches at 1 s, and the inputs it was holding ride that re-attach. CONTROL: a copy without the carry (the
+  // lane's first cut) re-attaches and the held message is gone.
+  const noCarry = SS_SRC.replace(/^\s*const carry = takeHeldInputs\(session\);[^\n]*\n/m, '').replace(/^\s*if \(carry\.length\) session\._bridgeHeldInputs = [^\n]*\n/m, '');
+  const exitLadder = async (SSmod, tag) => {
+    const sock = path.join(ROOT, 'cw-c20dx-' + tag), inlog = path.join(ROOT, 'c20dx-' + tag + '.in');
+    execFileSync(DTACH, ['-n', sock, '-E', '-r', 'none', process.execPath, WRITER, path.join(ROOT, 'c20dx-' + tag + '.prog'), '300', inlog]);
+    await until(() => fs.existsSync(sock), 3000);
+    const { eng, activeSessions } = makeEng(SSmod);
+    const id = 'sess-c20dx-' + tag;
+    const session = { mode: 'chat', backend: 'vs-c20d', clients: new Map(), buffer: '', socketPath: sock, cwd: ROOT };
+    activeSessions.set(id, session);
+    const exits = new Set();
+    const dead = { ...deadDuck(), onExit: (cb) => { exits.add(cb); return { dispose() { exits.delete(cb); } }; } };
+    eng.setupSessionPty(session, id, dead);
+    const send = require(path.join(REPO, 'src/server/user-input.js')).createUserInputSender({ activeSessions, adapterRegistry, BUFFERS_DIR: BUFS, broadcastToSession() { }, feedLive() { }, autoResume: null,
+      reattachLocalPty: eng.reattachLocalPty, ptyQuietSince: eng.ptyQuietSince, writeSessionInput: eng.writeSessionInput, log() { } }).send;
+    const r = send(id, 'VSC20DX-one'); await sleep(1500);
+    for (const cb of [...exits]) cb({ exitCode: 0 });   // the bridge exits having forwarded nothing
+    await sleep(8000);
+    const text = (() => { try { return fs.readFileSync(inlog, 'utf8'); } catch { return ''; } })();
+    const out = { sent: r.ok, reattached: !!session.pty && session.pty !== dead, one: (text.match(/VSC20DX-one/g) || []).length };
+    activeSessions.delete(id); try { session.pty?.kill?.(); } catch { }
+    try { execFileSync('pkill', ['-9', '-f', sock]); } catch { }
+    return out;
+  };
+  const xf = await exitLadder(require(path.join(REPO, 'src/server/session-stdout.js')), 'fix');
+  ok(xf.sent && xf.reattached && xf.one === 1, `⑩ verify r1: a never-spoke bridge that EXITS hands its held input to the onExit ladder's re-attach — it lands once (one=${xf.one}×)`, JSON.stringify(xf));
+  const xc = await exitLadder(MUT.load('src/server/session-stdout.js', noCarry, 'nocarry'), 'ctl');
+  ok(SS_SRC.length - noCarry.length > 200 && xc.sent && xc.reattached && xc.one === 0, `⑩ CONTROL (no carry — the lane's first cut): the ladder re-attaches and the held message is LOST (one=${xc.one}×)`, JSON.stringify(xc));
+  // ⑪ verify r1: a heal racing the bridge's first byte — a real attach connects and forwards the input during a 6 s
+  // event-loop stall, and the loop's next turn runs the TIMERS phase before the poll phase that reads its preamble.
+  // The detector's confirm stage judges after that poll phase. CONTROL: a copy that judges at once replays the input
+  // the bridge already forwarded — the CLI gets it twice (a second billed turn; b924041f's detector did the same).
+  const noConfirm = UI_SRC.replace('setTimeout(() => { if (silent()) setTimeout(() => {', 'setTimeout(() => { if (silent()) (() => {').replace('}, STDIN_CONFIRM_MS); }, 5000);', '})(); }, 5000);');
+  const stall = async (UImod, tag) => {
+    const sock = path.join(ROOT, 'cw-c20ds-' + tag), inlog = path.join(ROOT, 'c20ds-' + tag + '.in');
+    execFileSync(DTACH, ['-n', sock, '-E', '-r', 'none', process.execPath, WRITER, path.join(ROOT, 'c20ds-' + tag + '.prog'), '600000', inlog]);   // an idle CLI: prints nothing
+    await until(() => fs.existsSync(sock), 3000);
+    const { eng, activeSessions } = makeEng(require(path.join(REPO, 'src/server/session-stdout.js')));
+    const id = 'sess-c20ds-' + tag;
+    const session = { mode: 'chat', backend: 'vs-c20d', clients: new Map(), buffer: '', socketPath: sock, cwd: ROOT };
+    activeSessions.set(id, session);
+    const send = UImod.createUserInputSender({ activeSessions, adapterRegistry, BUFFERS_DIR: BUFS, broadcastToSession() { }, feedLive() { }, autoResume: null,
+      reattachLocalPty: eng.reattachLocalPty, ptyQuietSince: eng.ptyQuietSince, writeSessionInput: eng.writeSessionInput, log() { } }).send;
+    let r = null, first = null;
+    await new Promise((res) => setImmediate(() => { eng.attachToDtach(id, sock, session); first = session.pty; r = send(id, 'VSC20DS-one'); const t0 = Date.now(); while (Date.now() - t0 < 6000) { } res(); }));
+    await sleep(7000);
+    const text = (() => { try { return fs.readFileSync(inlog, 'utf8'); } catch { return ''; } })();
+    const out = { sent: !!(r && r.ok), healed: session.pty !== first, one: (text.match(/VSC20DS-one/g) || []).length };
+    activeSessions.delete(id); try { session.pty?.kill?.(); } catch { }
+    try { execFileSync('pkill', ['-9', '-f', sock]); } catch { }
+    return out;
+  };
+  const sf = await stall(require(path.join(REPO, 'src/server/user-input.js')), 'fix');
+  ok(sf.sent && !sf.healed && sf.one === 1, `⑪ verify r1: after a 6 s stall the detector judges once the bridge's preamble is read — no heal, the input reaches the CLI once (one=${sf.one}×)`, JSON.stringify(sf));
+  const sc = await stall(MUT.load('src/server/user-input.js', noConfirm, 'noconfirm'), 'ctl');
+  ok(noConfirm !== UI_SRC && /\}\)\(\); \}, 5000\);/.test(noConfirm) && sc.sent && sc.healed && sc.one === 2, `⑪ CONTROL (judged in the timers phase, no confirm): the heal replays an input the bridge already forwarded — the CLI got it TWICE (one=${sc.one}×)`, JSON.stringify(sc));
 }
 
 // ═══ the worktree server + the stub CLI (§2–§4) ═══════════════════════════════

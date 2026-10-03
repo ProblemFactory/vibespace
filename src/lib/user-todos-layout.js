@@ -180,6 +180,7 @@ export function entriesFor(layout, todos) {
 export const LIVE_DOT_WHY = Object.freeze({
   running: 'running (mid-turn)',
   idle: 'running, idle',
+  live: 'running (a terminal — its turns are not tracked)',
   waiting: 'waiting for you',
   unreachable: 'host unreachable',
   off: 'not running',
@@ -190,10 +191,14 @@ export const LIVE_DOT_WHY = Object.freeze({
  *  we cannot see is not "running"); else the payload's `turn` column —
  *  `waiting` (the harness's own requires_action: paused on the user),
  *  `running` (mid-turn), anything else `idle` (an older server without the
- *  column never paints a false "running"). A terminal session keeps its dot. */
+ *  column never paints a false "running"). A terminal session (no turn facts)
+ *  is `live` — running, its turns not tracked (B-3f5d ④), never "idle". */
 export function liveDotState(fact) {
   if (!fact || fact.live === false) return 'off';
   if (fact.remoteState) return 'unreachable';
+  // B-3f5d ④: a TERMINAL session never publishes a turn (src/server/turn-facts.js turnKnown) — it read "running, idle"
+  // whatever it was doing; its dot says it runs and that its turns are not tracked
+  if (fact.mode && fact.mode !== 'chat') return 'live';
   if (fact.turn === 'waiting') return 'waiting';
   if (fact.turn === 'running') return 'running';
   return 'idle';
@@ -378,7 +383,7 @@ export function noticeChips(notices, { prev = null } = {}) {
  *  same number the taskbar badge shows) with `urgency` their worst (the pill
  *  takes that tier's colour), `inbox.notice` = the open notices (the grey
  *  count); `history.unread` = the toast-history entries (`{ts}`) newer than
- *  `lastSeenTs` — the last time the Notifications tab was shown on this device
+ *  `lastSeenTs` that were not `seen` at show time (B-3f5d ①: the user's own feedback) — the last time the Notifications tab was shown on this device
  *  (null/garbage = never: everything counts; the panel stamps the key at
  *  install so an upgrade does not open on a hundred). */
 export function tabCounts(open, toastHistory, lastSeenTs) {
@@ -387,6 +392,7 @@ export function tabCounts(open, toastHistory, lastSeenTs) {
   for (const i of action) worst = Math.max(worst, URGENCY_ORDER.indexOf(i.urgency || 'normal'));
   const seen = Number(lastSeenTs);
   const since = Number.isFinite(seen) ? seen : 0;
-  const unread = (Array.isArray(toastHistory) ? toastHistory : []).filter((e) => e && typeof e.ts === 'number' && e.ts > since).length;
+  // B-3f5d ①: an entry recorded `seen` (shown while the user acted — their own "Copied", "Reply sent") is not unread
+  const unread = (Array.isArray(toastHistory) ? toastHistory : []).filter((e) => e && typeof e.ts === 'number' && e.ts > since && !e.seen).length;
   return { inbox: { action: action.length, notice: notices, urgency: action.length ? (URGENCY_ORDER[worst] || 'normal') : '' }, history: { unread } };
 }

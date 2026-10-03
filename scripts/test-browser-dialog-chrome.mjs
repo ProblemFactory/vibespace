@@ -23,7 +23,7 @@ import { createRequire } from 'node:module';
 import { scratch, freePort, endRootedProcesses } from './scratch.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
 // 2.369.200 integration (lane hooks-create H5 × this suite): with no desktop and Xvfb on the keeper's PATH an UNSET window
-// preference launches the hidden-window rung once H5's switch is on (OFF in 2.369.200, ON in .201 — a headed Chrome); this suite's subject is the dialog / loop watch on the
+// preference launches the hidden-window rung once H5's switch is on (OFF in 2.369.200 and 2.369.202 — red on that rung at the 2.369.202 integration; a headed Chrome); this suite's subject is the dialog / loop watch on the
 // rung it was measured on, so it pins headless — the hidden-window rung's own legs are test-browser-display-chrome's (and
 // the watch on it is HELD: see the 2.369.200 engineering log, integration)
 const HEADLESS_SETTING = (k) => (k === 'browser.noDisplayMode' ? 'headless' : undefined);

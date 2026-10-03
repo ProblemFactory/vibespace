@@ -149,10 +149,36 @@ export function getToastHistory() {
 // shown by the popup's Notifications tab after the owner had cleared the item ("Clear content…" cannot reach a device's
 // storage). The caller passes `history: {m, ref}`: `m` = what the history keeps (a head, never the record's words), `ref`
 // = `{kind, id}` the Notifications tab words from the LIVE store at render time (a cleared record reads the sentence).
+// A TOAST SHOWN WHILE THE USER ACTS IS ONE THEY SAW (B-3f5d ①, the 2026-09-24 verifier's note): the Notifications tab's
+// unread count took the user's OWN feedback — "Reply sent", "Copied", the error of a click — as news. A toast shown on a
+// visible, focused page within OWN_GESTURE_MS of the user's press, Enter, Space or shortcut (never plain typing in a field)
+// is recorded `seen` and tabCounts (src/lib/user-todos-layout.js) does not count it; a record's arrival toast (`ref`) is
+// news by construction and never `seen`. The history keeps every entry either way.
+export const OWN_GESTURE_MS = 4000;
+let _gestureAt = 0;
+/** PURE: does this key press count as the user ACTING (not typing)? A modifier shortcut, Enter, or any key outside a text field. */
+export function isGestureKey(e, editable) {
+  if (!e || typeof e.key !== 'string') return false;
+  if (e.ctrlKey || e.metaKey || e.altKey || e.key === 'Enter') return true;
+  return !editable;
+}
+/** PURE: is a toast shown at `now` one the user was looking at? */
+export function toastSeenAtShow({ now, gestureAt, visible, focused, ref = null }) {
+  return !ref && !!visible && !!focused && gestureAt > 0 && now >= gestureAt && now - gestureAt < OWN_GESTURE_MS;
+}
+const _editable = (el) => !!(el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName || '')));
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+  window.addEventListener('pointerdown', () => { _gestureAt = Date.now(); }, true);
+  window.addEventListener('keydown', (e) => { if (isGestureKey(e, _editable(e.target))) _gestureAt = Date.now(); }, true);
+}
+function _seenAtShow(ref) {
+  try { return toastSeenAtShow({ now: Date.now(), gestureAt: _gestureAt, visible: document.visibilityState === 'visible', focused: document.hasFocus(), ref }); } catch { return false; }
+}
 function _recordToast(message, type, ref = null) {
   try {
     const h = getToastHistory();
-    h.unshift({ m: String(message).slice(0, 500), type, ts: Date.now(), ...(ref && ref.kind && ref.id ? { ref: { kind: String(ref.kind), id: String(ref.id) } } : {}) });
+    const seen = _seenAtShow(ref && ref.kind && ref.id ? ref : null);   // B-3f5d ①: shown while the user acted ⇒ not unread
+    h.unshift({ m: String(message).slice(0, 500), type, ts: Date.now(), ...(ref && ref.kind && ref.id ? { ref: { kind: String(ref.kind), id: String(ref.id) } } : {}), ...(seen ? { seen: true } : {}) });
     localStorage.setItem('vibespace.toastHistory', JSON.stringify(h.slice(0, 100)));
   } catch {}
   try { window.dispatchEvent(new CustomEvent('vs-toast')); } catch {}

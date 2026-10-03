@@ -140,7 +140,9 @@ const server = http.createServer((req, res) => {
       if (!pv.ok) return send(pv.code === 'placement-not-offered' ? 409 : 400, { ok: false, code: pv.code, why: pv.why, placement: pv.placement, offered: pv.offered, error: pv.error });
       const into = P.isThreadPlacement(pv.placement);
       const place = { placement: pv.placement, placementText: P.placementWords(pv.placement), ...(pv.placement !== 'chat' ? { replyTo: v.proposal.replyTo } : {}), ...(pv.defaulted && pv.placement !== 'chat' ? { placementDefaulted: pv.rule } : {}), ...(into ? { inThread: true, threadKey: 'omt_t1' } : {}) };
-      return send(200, { ok: true, proposal: { id: 'p-1', state: 'awaiting-approval', adapterId: 'fake-poll', convId: 'ops', ...place, policy: { mode: 'review', reasons: ['channel-policy', 'authority'] }, sendAs: 'user', identity: { marking: 'unknown', text: null }, ...(body.replaces ? { replaces: body.replaces } : {}) }, decision: { mode: 'review', reasons: ['channel-policy', 'authority'] }, ...replaced });
+      // B-a085: a mail reply's recipients, resolved at propose (the engine's shape: the adapter's To / Cc + the added Cc)
+      const envB = v.proposal.replyAll || v.proposal.cc ? { replyEnvelope: { anchorId: 'm-1', to: 'desk@x.example, ops@x.example', cc: ['noc@x.example', ...(v.proposal.cc || [])].join(', '), subject: 'Re: PDU', ...(v.proposal.replyAll ? { all: true } : {}), ...(v.proposal.cc ? { added: v.proposal.cc } : {}) } } : {};
+      return send(200, { ok: true, proposal: { id: 'p-1', state: 'awaiting-approval', adapterId: 'fake-poll', convId: 'ops', ...place, ...envB, policy: { mode: 'review', reasons: ['channel-policy', 'authority'] }, sendAs: 'user', identity: { marking: 'unknown', text: null }, ...(body.replaces ? { replaces: body.replaces } : {}) }, decision: { mode: 'review', reasons: ['channel-policy', 'authority'] }, ...replaced });
     }
     // 2026-09-27: WITHDRAW — the engine's three answers (own: ok; somebody else's: 403 not-yours; decided: 409 not-withdrawable)
     const wd = /^\/api\/agent\/channels\/proposals\/([^/]+)\/withdraw$/.exec(url.pathname);
@@ -324,6 +326,15 @@ ok(calls.length === 0 && [rNoTo, rNoTo2, rBare, rTwo].every((r) => r.code === 1)
 calls.length = 0;
 const rPlain = await run(['reply', 'fake-poll/ops', 'a plain message']);
 ok(rPlain.code === 0 && calls[0].body.replyTo === undefined && calls[0].body.placement === undefined && !/lands/.test(rPlain.out), 'no --to = a plain message in the chat: no replyTo, no placement, no "lands" line', JSON.stringify([calls[0] && calls[0].body, rPlain.out]));
+// B-a085: REPLY ALL on mail — --all / --cc reach the server, and the CLI prints WHO receives it (what the card shows)
+calls.length = 0;
+const rAll = await run(['reply', 'fake-poll/ops', 'replaced the PDU, thanks all', '--all', '--cc', 'Lee@example.com']);
+ok(rAll.code === 0 && calls.length === 1 && calls[0].body.replyAll === true && calls[0].body.cc === 'Lee@example.com' && /\n    reply all — to: desk@x\.example, ops@x\.example · cc: noc@x\.example, lee@example\.com \(you added: lee@example\.com\)\n/.test(rAll.out), 'B-a085: reply --all --cc <addr> sends replyAll + cc and prints every recipient (To, Cc, the ones it added) — the card\'s list', JSON.stringify([calls[0] && calls[0].body, rAll.out]));
+calls.length = 0;
+const rAll2 = await run(['reply', 'fake-poll/ops', 'ok', '--all']);
+const rCcBare = await run(['reply', 'fake-poll/ops', 'ok', '--cc']);
+const rFlagText = await run(['reply', 'fake-poll/ops', '--all', 'ok']);
+ok(rAll2.code === 0 && calls.length === 1 && calls[0].body.replyAll === true && calls[0].body.cc === undefined && rCcBare.code === 1 && /--cc names the addresses the reply adds/.test(rCcBare.err) && rFlagText.code === 1 && /\[--all\] \[--cc <addr>/.test(rFlagText.err), 'B-a085: --all alone = replyAll only; a bare --cc and a flag where the text goes are usage errors — NOTHING is sent', JSON.stringify([rCcBare.err.split('\n')[0], rFlagText.err.split('\n')[0]]));
 const stPl = await run(['status', 'p-1']);
 ok(stPl.code === 0 && /placed in a thread — answering om_t2 \(thread omt_t1\)/.test(stPl.out), 'status <id> says where a reply landed', stPl.out);
 calls.length = 0;

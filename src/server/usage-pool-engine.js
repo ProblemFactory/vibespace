@@ -29,7 +29,13 @@ function create({ app, rootDir, USAGE_CACHE_DIR, activeSessions, wss, WS_OPEN, g
   // classifier-reroute stamp so a restored conversation still knows the CLI is
   // answering with a model we did not ask for (r3 §7).
   getSessionMetaStore = () => null,
-  getUserTodos = () => null}) {
+  getUserTodos = () => null,
+  // lane reset-path: how long a written reset-credit verb waits for its "sent" (src/reset-credit.js
+  // RESET_CREDIT_ACK_MS, 90 s) — a SUITE shortens it to drive the never-sent settle without a sleep
+  resetCreditAckMs = null,
+  // lane reset-path: the helper's codex command — default the one src/codex-thread-read.js is configured
+  // with (server.js / cli-env, re-resolved with the CLI); a SUITE hands a stub app-server here
+  resetCreditHelper = null}) {
   // late-bound singletons: created after this module in boot order, used only
   // at runtime — the Proxy re-resolves per property access, never caches
   const accounts = mk(getAccounts);
@@ -59,6 +65,9 @@ function create({ app, rootDir, USAGE_CACHE_DIR, activeSessions, wss, WS_OPEN, g
 const { decidePoolSwitch, decidePinnedPlacement, soonestUsableMember, rankPoolMembers, poolBlockedNotice, poolCreditsNotice, conversationDisplayName, bucketRemaining, warmCache, conversationInTurn, projectCacheAhead, projectionCrossing, PROJECTION_LEAD_SEC, SWITCH_THRESHOLD_PCT: POOL_HARD_PCT } = require('../account-pool-auto.js');
 const arSignal = require('../auto-resume-signal.js'); // PURE: the limit LANE a snapshot is about + the fresh-window edge
 const resetCredit = require('../reset-credit.js'); // PURE: is a stored reset credit worth spending at THIS wall, at THIS rung (design-reset-credits §4)
+const codexResetHelper = require('../codex-reset-helper.js'); // lane reset-path: ONE bounded app-server child carries a PERSON's press when no conversation can
+const { wrapperCaps } = require('./wrapper-files.js'); // the running wrapper's own advert (resetCreditKey: it sends the key AND reports the send)
+const { agentEnv: sanitizedSpawnEnv } = require('../agent-env.js'); // the helper child gets the agent env, never raw process.env
 const { feedPeerCard } = require('../normalizers'); // the rebuild-gated chat-card writer (the wall card that names the credits)
 // THE ONE READER of `cache.overage` (design §1.4: it was written by
 // rate-limit-capture and read by nobody). PURE; the spend authorizer and
@@ -2035,11 +2044,29 @@ const recordLateness = require('../record-lateness.js');
 function noteStreamRecord(session, msg) {
   if (!session || !msg || typeof msg !== 'object') return;
   const now = Date.now();
-  const o = recordLateness.observe(session._recordClock, msg, now);
+  const remote = !!session.host;
+  const o = recordLateness.observe(session._recordClock, msg, now, { remote });
   if (!o.stamped) return;
   session._recordClock = o.clock;
-  if (recordLateness.verdictOfClock(o.clock, { remote: !!session.host }).verdict === 'live') endLateBurst(session);
+  // A SYSTEMATIC OFFSET IS A CLOCK, NOT A BACKLOG (lane reset-path verify r6, reproduced): a CLI whose machine's clock
+  // runs behind this server's stamped every record late by the same amount, and every reading / wall / ⟳ of that
+  // session was refused for good as "a backlog record". The PURE rule declares the offset from the run's SHAPE
+  // (record-lateness.js: ≥ 3 late records over ≥ 60 s of arrivals, their delays within 10 s) and judges against it
+  // from then on; said once, and once more when the clock is corrected
+  if (o.skew && o.skew.corrected) console.log(`[stream] ${session._webuiId || '?'}: the CLI's clock offset ended (records now ${o.skew.skewMs ? recordLateness.lateWords(o.skew.skewMs) + ' behind' : 'in step with this clock'}) — judged against it from here`);
+  else if (o.skew) {
+    console.log(`[stream] ${session._webuiId || '?'}: records stamped ${recordLateness.lateWords(o.skew.skewMs)} behind this clock for ${Math.round(o.skew.spanMs / 1000)} s (${o.skew.n} records, steady) — a clock offset on the CLI's machine, not a backlog; its readings and walls are judged against that offset from here`);
+    global.__vsEvent?.('stream-clock-skew', `${Math.round(o.skew.skewMs / 60e3)}m`);
+    replayHeldLate(session); // the first minute's facts, each through its own gate against the offset (verify r7 ④)
+    session._recordClock = o.clock; // a replayed codex record re-enters noteStreamRecord; the declaring record's clock stands
+  }
+  // a live record ENDS the burst only when it ended the run (verify r8 ⑤: a record just under the bound at the run's
+  // level extends the run — the held facts of that level stay held for its declaration) — and never from INSIDE a replay
+  // (verify r8 ⑥, reproduced: a replayed codex record re-enters here live by the offset and closed the burst as "backlog
+  // over" halfway through the replay — the declaration's own close, with every replay's count, is the one that ends it)
+  if (recordLateness.verdictOfClock(o.clock, { remote }).verdict === 'live' && !(o.clock && o.clock.run) && !REPLAYING_HELD.has(session)) endLateBurst(session, o.skew && !o.skew.corrected ? 'declaration' : 'live');
 }
+const REPLAYING_HELD = new WeakSet(); // the sessions whose held ring is being replayed right now (a re-entrant record never closes the burst)
 function liveFactVerdict(session, msg) {
   const now = Date.now();
   const remote = !!(session && session.host);
@@ -2049,7 +2076,7 @@ function liveFactVerdict(session, msg) {
   let ahead = null;
   try { ahead = typeof session._peekStamp === 'function' ? session._peekStamp() : null; } catch { ahead = null; }
   if (ahead != null && Number.isFinite(ahead)) {
-    const w = recordLateness.verdictOfClock({ stampAt: ahead, arrivedAt: now, delayMs: now - ahead }, { remote });
+    const w = recordLateness.verdictOfClock({ stampAt: ahead, arrivedAt: now, delayMs: now - ahead, skewMs: (session && session._recordClock && session._recordClock.skewMs) || 0 }, { remote }); // the stream's declared offset holds for the look-ahead too
     return { ...w, by: 'next-stamp' };
   }
   return { verdict: 'live', lateMs: null, by: 'no-stamp' };
@@ -2064,25 +2091,114 @@ function gateLiveFact(session, msg, what, run) {
   let v = null;
   try { v = liveFactVerdict(session, msg); } catch { v = null; }
   if (!v || v.verdict !== 'late') return run();
-  noteLateFact(session, what, v);
+  noteLateFact(session, what, v, () => gateLiveFact(session, msg, what, run)); // held while the stream has no declared offset: re-judged at the declaration (verify r7 ④)
   return undefined;
 }
-function noteLateFact(session, what, v) {
-  const b = session._lateBurst || (session._lateBurst = { n: 0, maxLateMs: 0, kinds: {}, at: Date.now() });
+// THE FIRST MINUTE OF AN OFFSET STREAM IS HELD, NOT DROPPED (lane reset-path verify r7 ④, reproduced on the real engine):
+// a skewed codex stream whose FIRST record was the wall dropped it for good — no arm, no switch, said only as "a stalled
+// bridge's backlog" — and the declaration a minute later (readings, ⟳ presses) replayed nothing; only the NEXT wall armed.
+// A late fact gated while the stream has NO declared offset is held with its own replay (bounded: HELD_LATE_MAX newest),
+// re-judged at the declaration (`replayHeldLate`: taken when its delay minus the offset is within the bound, counted as
+// a backlog on the offset stream otherwise) and discarded when a LIVE record ends the burst (it WAS a backlog). NOT
+// held: the turn end and the live odometer (a backlog's spend is the ledger scan's to book, by time; the next turn end comes).
+const HELD_LATE_MAX = 32;
+// THE RING KEEPS WALLS (lane reset-path verify r8 ④, reproduced on the real engine): a skewed stream whose first record
+// was the wall, followed by more than HELD_LATE_MAX readings inside the first minute, pushed the wall out of the ring and
+// the declaration replayed readings only — r7 ④'s outcome by a fuller ring. When the ring is full the oldest READING
+// goes first; a wall is dropped only when the ring is all walls. Every drop is counted on the burst and SAID at its close.
+const HELD_WALL_KINDS = Object.freeze(['codex wall', 'limit banner']);
+const kindsText = (m) => Object.entries(m).map(([k, n]) => `${n} ${k}`).join(', ');
+// THE OWNER MUST KNOW A STOP HAPPENED (lane reset-path verify r8 ⑥): a late WALL is counted, never acted on — if the
+// conversation stays stopped at it, auto-resume will not continue it from that record and nothing else says so (a burst
+// that ends in a wall with no live record after it never closes: no timer). ONE For-you item per burst, filed at its
+// first late wall (origin pool — this file's producer), resolved when the conversation proves alive (a live record ends
+// the burst) or the wall is replayed at the declaration and taken. The journal lines stay English-only by design (an
+// operator's log); the item carries its i18n keys.
+function fileLateWallItem(session, b, what, v) {
+  if (b.todoId !== undefined) return;
+  b.todoId = null;
+  try {
+    const todos = getUserTodos();
+    if (!todos || typeof todos.add !== 'function') return;
+    const name = session.name || session._webuiId || '?', late = recordLateness.lateWords(v.lateMs);
+    // verify r9 ⑩ (reproduced, LOW): filed under the CONVERSATION's own key (the auto rung's spelling) so the reply route and the
+    // client's jump resolve it — "Open it to continue" opens it, Reply reaches it (a `webui:late-wall:<id>` key matched no session:
+    // Reply refused no_live_session on a live conversation); dedupe is by text, one item per burst by `b.todoId`
+    const bsid = session.backendSessionId || session.claudeSessionId;
+    const r = todos.add(bsid ? `${session.backend || 'codex'}:${bsid}` : `webui:${session._webuiId || '?'}`, {
+      origin: 'pool', kind: 'notice', urgency: 'normal', sessionName: session.name || null,
+      text: `A usage limit was hit on ${name} while its records were arriving ${late} late — if the conversation stays stopped, auto-resume will not continue it from that record. Open it to continue, or wait for the limit's reset.`,
+      detail: `The record (${what}) is ${late} older than its arrival: a stalled connection's backlog, or the first minute of a clock offset on the CLI's machine (the next records decide). A late limit is counted and never acted on, so no wait was armed for it. If the conversation produces a live record, or the offset is recognised and the limit replayed, this item resolves itself.`,
+      i18n: { text: { key: i18nKey('A usage limit was hit on {session} while its records were arriving {late} late — if the conversation stays stopped, auto-resume will not continue it from that record. Open it to continue, or wait for the limit’s reset.'), params: { session: name, late } } },
+      expiresAt: Date.now() + 24 * 3600e3,
+    });
+    b.todoId = (r && r.id) || null;
+  } catch (e) { console.warn('[stream] could not file the late-wall notice:', e.message); }
+}
+function resolveLateWallItem(b, why) {
+  if (!b || !b.todoId) return;
+  const id = b.todoId; b.todoId = null;
+  try { const todos = getUserTodos(); const it = todos && typeof todos.get === 'function' ? todos.get(id) : null; if (it && it.status === 'open' && typeof todos.setStatus === 'function') todos.setStatus(id, 'done', why); } catch { }
+}
+function noteLateFact(session, what, v, replay = null) {
+  const b = session._lateBurst || (session._lateBurst = { n: 0, maxLateMs: 0, kinds: {}, at: Date.now(), dropped: 0, droppedKinds: {} });
   if (!b.n) {
-    console.log(`[stream] ${session._webuiId || '?'}: records arriving ${recordLateness.lateWords(v.lateMs)} late — a stalled bridge's backlog; no wall, reading or turn end in it is taken as live (first: ${what})`);
+    console.log(`[stream] ${session._webuiId || '?'}: records arriving ${recordLateness.lateWords(v.lateMs)} late — a stalled bridge's backlog (or the first minute of a clock offset — the next records decide); no wall, reading or turn end in it is taken as live (first: ${what})`);
     global.__vsEvent?.('stream-backlog', `${what}:${Math.round((Number(v.lateMs) || 0) / 60e3)}m`);
   }
   b.n++;
   if ((Number(v.lateMs) || 0) > b.maxLateMs) b.maxLateMs = Number(v.lateMs) || 0;
   b.kinds[what] = (b.kinds[what] || 0) + 1;
+  if (HELD_WALL_KINDS.includes(what)) fileLateWallItem(session, b, what, v);
+  if (typeof replay === 'function' && !((session._recordClock && session._recordClock.skewMs) || 0)) {
+    const h = session._heldLate || (session._heldLate = []);
+    let key = null; try { key = usageCacheKeyFor(session) || null; } catch { key = null; } // the account this fact is about (the replay belt compares against ITS newest reading)
+    h.push({ what, lateMs: Number(v.lateMs) || 0, at: Date.now(), key, replay });
+    if (h.length > HELD_LATE_MAX) {
+      let i = h.findIndex((x) => !HELD_WALL_KINDS.includes(x.what)); if (i < 0) i = 0; // the oldest reading first; a wall only among walls
+      const d = h.splice(i, 1)[0];
+      b.dropped = (b.dropped || 0) + 1; b.droppedKinds = b.droppedKinds || {}; b.droppedKinds[d.what] = (b.droppedKinds[d.what] || 0) + 1; // counted already; it cannot be replayed — said at the close
+    }
+  }
 }
-function endLateBurst(session) {
+/** The offset was just declared: every held fact of the undeclared minute is re-judged through its own gate — unless a
+ *  NEWER reading of its account exists already (verify r8 ②, reproduced on the real engine: the replay of a held wall and
+ *  reading wrote the held numbers OVER a reading another conversation had taken since, and armed auto-resume for a wall
+ *  that reading had answered). The newest reading per account is read ONCE before any replay (a replayed reading must not
+ *  make the next held fact "superseded"); a fact older than it is not replayed, counted, said. A codex replay carries the
+ *  fact's own instant (`asOf` = its arrival on the skewed stream ≈ its emission + the offset), so the cache and the settle
+ *  rules see it at its true time. Replayed at most once: the ring is taken whole before the first replay. */
+function replayHeldLate(session) {
+  const held = session._heldLate; session._heldLate = null;
+  if (!held || !held.length) return;
   const b = session._lateBurst;
-  if (!b || !b.n) return;
+  const newestAt = {};
+  for (const e of held) { if (e.key && newestAt[e.key] === undefined) { let at = 0; try { const c = readRawUsageCache(e.key); at = Number(c && c.fetchedAt) || 0; } catch { at = 0; } newestAt[e.key] = at; } }
+  let taken = 0, superseded = 0; const kinds = {}, supKinds = {}; let wallTaken = false;
+  REPLAYING_HELD.add(session);
+  try { for (const e of held) {
+    if (e.key && newestAt[e.key] > Number(e.at)) { superseded++; supKinds[e.what] = (supKinds[e.what] || 0) + 1; continue; } // a newer reading of the account stands; this fact is history (still counted on the burst)
+    if (b) { b.n = Math.max(0, b.n - 1); if (b.kinds[e.what] > 0) b.kinds[e.what]--; if (!b.kinds[e.what]) delete b.kinds[e.what]; } // un-count: the replay re-counts itself if still late
+    const n0 = session._lateBurst ? session._lateBurst.n : 0;
+    try { e.replay(Number(e.at) || Date.now()); } catch { }
+    const n1 = session._lateBurst ? session._lateBurst.n : 0;
+    if (n1 === n0) { taken++; kinds[e.what] = (kinds[e.what] || 0) + 1; if (HELD_WALL_KINDS.includes(e.what)) wallTaken = true; }
+  } } finally { REPLAYING_HELD.delete(session); }
+  if (taken) console.log(`[stream] ${session._webuiId || '?'}: ${taken} fact(s) held from the offset stream's first minute re-judged live by the offset and taken (${kindsText(kinds)})`);
+  if (superseded) console.log(`[stream] ${session._webuiId || '?'}: ${superseded} held fact(s) not replayed — a newer reading of the account exists already (${kindsText(supKinds)})`);
+  if (wallTaken) resolveLateWallItem(session._lateBurst, 'wall-replayed');
+}
+function endLateBurst(session, how = 'live') {
+  const b = session._lateBurst;
+  if (!b) return;
   session._lateBurst = null;
-  const kinds = Object.entries(b.kinds).map(([k, n]) => `${n} ${k}`).join(', ');
-  console.log(`[stream] ${session._webuiId || '?'}: backlog over — ${b.n} late fact(s) not taken as live (${kinds}; up to ${recordLateness.lateWords(b.maxLateMs)} late)`);
+  session._heldLate = null; // a live record ended the burst: what was held WAS a backlog
+  resolveLateWallItem(b, how === 'live' ? 'stream-alive' : 'offset-declared'); // the conversation produced a live record, or declared its offset by producing records: it is not stopped at that wall
+  if (!b.n) return;
+  const kinds = kindsText(b.kinds);
+  const dropped = b.dropped ? `; ${b.dropped} dropped from the held ring of ${HELD_LATE_MAX} (${kindsText(b.droppedKinds || {})})` : '';
+  if (how === 'declaration') console.log(`[stream] ${session._webuiId || '?'}: the offset stream's first minute over — ${b.n} fact(s) not replayed (${kinds}; a turn end is never replayed, the next one comes${dropped})`);
+  else console.log(`[stream] ${session._webuiId || '?'}: backlog over — ${b.n} late fact(s) not taken as live (${kinds}; up to ${recordLateness.lateWords(b.maxLateMs)} late${dropped})`);
 }
 // ── A MODEL-CAP REJECTION MARKS THE MODEL'S CAP, NEVER THE PLAN LANE ────────
 // (the 2026-09-13 pool storm; the second half of it.)
@@ -2901,7 +3017,7 @@ function pickCodexProbeSession(target, session) {
   for (const [, s] of activeSessions) if (live(s) && ids.has(codexQuotaKeyFor(s))) return s;
   return null;
 }
-function readCodexLimitsViaSession(session, timeoutMs) {
+function readCodexLimitsViaSession(session, timeoutMs, { fresh = false } = {}) {
   return new Promise((resolve) => {
     const waiters = (session._codexLimitsWaiters = session._codexLimitsWaiters || []);
     const entry = {};
@@ -2910,6 +3026,11 @@ function readCodexLimitsViaSession(session, timeoutMs) {
     if (entry.timer.unref) entry.timer.unref();
     entry.resolve = (r) => { clearTimeout(entry.timer); drop(); resolve(r); };
     waiters.push(entry);
+    // SINGLE-FLIGHT per session (verify r1, reproduced: two presses in flight wrote two verbs = two vendor reads):
+    // a read already waiting on this session answers every waiter — the verb goes out once per round trip.
+    // `fresh` = a deliberate RE-ASK after silence (the reset hold's 30 s retry): the earlier push may be lost, so
+    // the verb goes out again and the older waiters ride its answer
+    if (waiters.length > 1 && !fresh) return;
     try { session.pty.write(JSON.stringify({ type: 'codex-read-limits' }) + '\n'); }
     catch (e) { entry.resolve({ ok: false, reason: 'stdin write failed: ' + e.message }); }
   });
@@ -2919,7 +3040,7 @@ function settleCodexLimitsWaiters(session, result) {
   if (!waiters || !waiters.length) return;
   for (const w of waiters.splice(0)) { try { w.resolve(result); } catch { } }
 }
-async function probeQuotaForKey(target, { session = null, timeoutMs = 20000 } = {}) {
+async function probeQuotaForKey(target, { session = null, timeoutMs = 20000, fresh = false } = {}) {
   const backend = quotaBackendFor(target, session);
   const rung = quotaSourceFor(backend).probe;
   global.__vsEvent?.('quota-probe', `${backend}:${rung || 'none'}`);
@@ -2932,10 +3053,41 @@ async function probeQuotaForKey(target, { session = null, timeoutMs = 20000 } = 
   if (rung === 'rpc-rate-limits') {
     const s = pickCodexProbeSession(target, session);
     if (!s) return { ok: false, rung, backend, reason: 'no live local codex chat session on this identity' };
-    const r = await readCodexLimitsViaSession(s, timeoutMs);
+    const r = await readCodexLimitsViaSession(s, timeoutMs, { fresh });
     return { ok: !!r.ok, rung, backend, reason: r.reason || null };
   }
   return { ok: false, rung: null, backend, reason: `backend '${backend}' declares no quota probe` };
+}
+
+/** THE USAGE MENU'S CODEX ⟳, ANSWERED (lane reset-path R4, the owner: the press refreshed the cache at
+ *  10:48:38 and nothing said so — a fixed 2.5 s timer repainted maybe, the only toast was the refusal). The
+ *  read rides a live LOCAL codex chat session ON the identity the popup shows (its own app-server — the
+ *  existing caps-routed rung, no new vendor surface), and the press waits for ITS round trip: the reading it
+ *  wrote (whose, which windows, the stored credits), the wrapper's refusal, or the timeout — by name.
+ *  `key` = the identity the popup displays; without one, the client's live session. */
+async function refreshCodexForPerson({ key = null, sessionId = null, timeoutMs = 20000 } = {}) {
+  const live = (x) => !!(x && x.pty && x.mode === 'chat' && !x.host && capsOf(x.backend).quotaProbe === 'rpc-rate-limits');
+  // A POOL IS NOT A QUOTA HOLDER (verify r1, reproduced): the popup's `auto` selection sends the DEFAULT codex
+  // account, which may be a pool — its sessions carry MEMBER keys, so the pool id matched none and the press was
+  // refused "no running session on CxPool" while a member's session was live. The pool resolves to its current
+  // member (the same rule a pool-billed reading lands by); the answer names the member
+  if (key) { try { const a = accounts.get(String(key)); if (a && a.type === 'pooled') key = accounts.poolCurrentFor(String(key), null) || accounts.poolCurrent(String(key)) || key; } catch { } }
+  let s = null;
+  if (key) { try { s = pickCodexProbeSession(String(key), null); } catch { s = null; } }
+  else { const c = sessionId ? activeSessions.get(String(sessionId)) : null; if (live(c)) s = c; }
+  if (!s) return { ok: false, code: 'no_live_session', key: key || null, name: key ? nameOf(key) : null, error: key ? `no running Codex chat session holds ${nameOf(key)}'s login (the read rides that session's own app-server)` : 'no running Codex chat session (the read rides its own app-server)' };
+  const r = await readCodexLimitsViaSession(s, timeoutMs);
+  const k = (r && r.key) || codexQuotaKeyFor(s);
+  if (!r || !r.ok) {
+    const reason = String((r && r.reason) || 'unknown');
+    return { ok: false, code: /within \d+ms/.test(reason) ? 'timeout' : (r && r.archived) ? 'archived' : 'refused', key: k, name: nameOf(k), sessionId: s._webuiId, timeoutMs, error: reason };
+  }
+  let c = null; try { c = readRawUsageCache(k); } catch { c = null; }
+  // a window that has not STARTED (quota-model: its "reset" slides with the clock) names no deadline — B-8b12;
+  // the toast then says "starts on first use", never a reset instant that is not one
+  const win = (b) => (b && typeof b === 'object' ? { usedPercent: Number.isFinite(Number(b.usedPercent)) ? Number(b.usedPercent) : (Number.isFinite(Number(b.utilization)) ? Math.round(Number(b.utilization) * 1000) / 10 : null), resetsAt: quotaModel.bucketCounts(b) && Number(b.resetsAt) > 0 ? Number(b.resetsAt) : null, notStarted: b.state === 'empty', windowMinutes: Number(b.windowMinutes) > 0 ? Number(b.windowMinutes) : null } : null);
+  const n = c && c.resetCredits && Number.isFinite(Number(c.resetCredits.availableCount)) ? Number(c.resetCredits.availableCount) : null;
+  return { ok: true, key: k, name: nameOf(k), sessionId: s._webuiId, reading: { fiveHour: win(c && c.fiveHour), sevenDay: win(c && c.sevenDay), fetchedAt: (c && Number(c.fetchedAt)) || null, source: (c && c.source) || null }, resetCredits: n };
 }
 
 // Probe ladder (owner-set): immediate, then 30min → 1h → 2h, then give up
@@ -3199,7 +3351,10 @@ function recordRateLimitEventNow(session, msg) {
 // is spent; ask — ONE For-you decision per limit event, then the switch/wait
 // rungs run as usual; auto — consumed through the spend ceiling (fail closed).
 const i18nKey = (s) => s; // the extraction marker (scripts/i18n-extract.mjs): the client words the item with t(key, params)
-const RESET_CREDIT_FLOOR_MS = 10 * 60e3; // one try per limit event (the 2.368.21 floor, now the verdict's `cooldownUntilSec`)
+// THE FLOOR (10 min) AND THE ACK WINDOW (90 s) are the PURE rule's (src/reset-credit.js
+// attemptBlock — lane reset-path): the floor arms only on a consume that WENT OUT
+const RESET_CREDIT_FLOOR_MS = resetCredit.RESET_CREDIT_FLOOR_MS; // one try per limit event (the 2.368.21 floor, now the verdict's `cooldownUntilSec`)
+const RESET_CREDIT_ACK_MS = Number(resetCreditAckMs) > 0 ? Number(resetCreditAckMs) : resetCredit.RESET_CREDIT_ACK_MS;
 // THE ONE-TRY FLOOR IS PER IDENTITY, NOT PER SESSION (r2, reproduced on the real
 // engine): one account wall seen by two warm conversations billing it spent TWO
 // credits — the floor lived on each session — and the second one's
@@ -3212,13 +3367,127 @@ const RESET_CREDIT_FLOOR_MS = 10 * 60e3; // one try per limit event (the 2.368.2
 // switch/wait ladder: the leader's answer settles every follower (a reset
 // re-opens the window for all of them; a failure walks each one's ladder; no
 // answer within the floor counts as a failure).
+// THE FLOOR ARMS ONLY ON A CONSUME THAT WENT OUT (lane reset-path, 2026-10-01, the owner's
+// report: a refused attempt said "already tried in the last 10 minutes — try again after 10:40").
+// The record was stamped when the verb was WRITTEN, so a wrapper older than the idempotency key
+// (codex refused the keyless consume locally), a wrapper that never answered and a vendor
+// `nothingToReset` all armed the floor as if a credit had been spent. Now an attempt is OPEN
+// (written) until the wrapper / the helper reports it SENT the request with its key
+// (`reset_credit_sent`, or a keyed answer that counts its attempts): only then is the spend
+// charged and the floor armed, and only `reset` and an UNANSWERED sent consume keep it
+// (src/reset-credit.js creditAnswerOf / attemptBlock). An open attempt nobody reports sent within
+// RESET_CREDIT_ACK_MS is settled `not-sent`: its spend hold released, nothing armed, a person told.
 /** The vendor's non-reset outcomes in words (codex-cli 0.159.3's own enum
  *  descriptions); an unknown outcome is quoted as the vendor said it. */
 const RESET_CREDIT_OUTCOME_WORDS = {
   nothingToReset: 'no current limit window is eligible for a reset (nothing was spent)',
   noCredit: 'the account has no reset credits available',
 };
-const _resetCreditTries = new Map(); // credit identity → { key, at, sid, origin, resetsAtSec, lane, followers: Map(sid → {resetsAtSec, lane}), outcome, outcomeAt, timer }
+const _resetCreditTries = new Map(); // credit identity → { key, at, sentAt, sid, via, origin, resetsAtSec, lane, eventKey, idempotencyKey, hold, identity, charged, followers: Map(sid → {resetsAtSec, lane}), outcome, outcomeAt, timer, ackTimer, creditsAt, reportsSent, window, settled, prior }
+// THE ATTEMPTS SURVIVE A RESTART (verify r1, the money class — reproduced: a press that went out, the server
+// restarted for an update, the floor gone with the process, the next press minted a second key). Every state
+// change writes data/reset-credit-tries.json (atomic); at boot the newest attempt per identity (+ its unsettled
+// priors) comes back — one the process DIED WITH (no outcome) is `unknown`: it may have gone out, so it is
+// unsettled until a reading of the account proves it (settleResetCreditByReading), never free by the restart.
+const RESET_CREDIT_TRIES_FILE = path.join(rootDir, 'data', 'reset-credit-tries.json');
+const RESET_CREDIT_TRIES_KEEP_MS = 24 * 3600e3; // a settled attempt older than this blocks nothing — not carried
+function resetCreditTryRecord(t) {
+  if (!t) return null;
+  const { key, at, sentAt, sid, via, origin, resetsAtSec, lane, eventKey, idempotencyKey, identity, charged, outcome, outcomeAt, creditsAt, reportsSent, window, settled, supersededAt, readFirst, revivedAt, reopenedAt, pressedAt, sentGuessed } = t;
+  return { key, at, sentAt, sid, via, origin, resetsAtSec, lane, eventKey, idempotencyKey, identity: identity && typeof identity === 'object' ? { key: identity.key, name: identity.name } : null, charged: !!charged, outcome, outcomeAt, creditsAt, reportsSent, window, settled, ...(supersededAt ? { supersededAt } : {}), ...(readFirst ? { readFirst: true } : {}), ...(revivedAt ? { revivedAt } : {}), ...(reopenedAt ? { reopenedAt } : {}), ...(pressedAt ? { pressedAt } : {}), ...(sentGuessed ? { sentGuessed: true } : {}), prior: resetCreditTryRecord(t.prior) };
+}
+function persistResetCreditTries() {
+  try {
+    const now = Date.now();
+    const tries = [];
+    for (const t of _resetCreditTries.values()) {
+      if (!t) continue;
+      const open = !t.outcome || resetCredit.isUnsettled(t, clockOpts(now)) || !!resetCredit.unsettledInChain(t.prior, clockOpts(now));
+      if (!open && now - (Number(t.outcomeAt) || Number(t.at) || 0) > RESET_CREDIT_TRIES_KEEP_MS) continue;
+      tries.push(resetCreditTryRecord(t));
+    }
+    const tmp = RESET_CREDIT_TRIES_FILE + '.tmp';
+    fs.mkdirSync(path.dirname(RESET_CREDIT_TRIES_FILE), { recursive: true });
+    fs.writeFileSync(tmp, JSON.stringify({ v: 1, at: now, tries }));
+    fs.renameSync(tmp, RESET_CREDIT_TRIES_FILE);
+  } catch (e) { console.warn('[reset-credit] attempts not persisted:', e.message); }
+}
+// verify r2 (reproduced): an unreadable attempts file was SILENTLY ignored at boot — no line, the bytes left in place
+// to be overwritten by the next write, and the next press minted a key as if no request had ever gone out. The
+// attempts cannot be recovered (there is nothing to read), so the honest thing is to say it: the file is set aside
+// with its bytes (`.corrupt-<ts>`), the journal names it, and ONE For-you item tells the person to ⟳ a codex account
+// before using a reset credit on it (an earlier request may have gone out). The inbox is created after this engine
+// (server.js), so the item is filed lazily — at the first preview, the first sweep
+let _resetCreditTriesLost = null; // { file, asideAs, at, why, filed }
+function fileResetCreditTriesLost() {
+  const L = _resetCreditTriesLost;
+  if (!L || L.filed) return false;
+  let todos = null;
+  try { todos = getUserTodos(); } catch { todos = null; }
+  if (!todos || typeof todos.add !== 'function') return false;
+  try {
+    const item = todos.add('webui:reset-credit', {
+      origin: 'pool',
+      text: 'The reset-credit attempt records could not be read at start — before using a codex reset credit, refresh the account (⟳) first',
+      detail: `${path.basename(L.file)} was unreadable (${L.why}); it was set aside as ${path.basename(L.asideAs)} with its bytes. Any reset-credit request that was open before the restart is unknown now: a refresh of the account shows its stored credit count before you spend one.`,
+      urgency: 'normal', kind: 'notice',
+      i18n: { text: { key: i18nKey('The reset-credit attempt records could not be read at start — before using a codex reset credit, refresh the account (⟳) first'), params: {} } },
+    });
+    L.filed = !!(item && item.id);
+  } catch (e) { console.warn('[reset-credit] could not file the For-you notice about the unreadable attempts file:', e.message); }
+  return L.filed;
+}
+function loadResetCreditTries() {
+  let doc = null, raw = null;
+  try { raw = fs.readFileSync(RESET_CREDIT_TRIES_FILE, 'utf8'); } catch { return 0; } // no file = no attempts (the common first boot)
+  let why = null;
+  try { doc = JSON.parse(raw); } catch (e) { why = 'not JSON: ' + String(e.message).slice(0, 80); }
+  if (!why && (!doc || doc.v !== 1 || !Array.isArray(doc.tries))) why = 'not the attempts shape (v 1, tries[])';
+  if (why) {
+    const asideAs = `${RESET_CREDIT_TRIES_FILE}.corrupt-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+    try { fs.renameSync(RESET_CREDIT_TRIES_FILE, asideAs); } catch (e) { console.warn('[reset-credit] could not set the unreadable attempts file aside:', e.message); }
+    console.warn(`[reset-credit] data/reset-credit-tries.json is unreadable (${why}) — set aside as ${path.basename(asideAs)}; every reset-credit request open before this start is UNKNOWN now (a press on a codex account should refresh it first)`);
+    _resetCreditTriesLost = { file: RESET_CREDIT_TRIES_FILE, asideAs, at: Date.now(), why, filed: false };
+    fileResetCreditTriesLost();
+    return 0;
+  }
+  const revive = (r) => {
+    if (!r || typeof r !== 'object' || typeof r.key !== 'string' || !Number(r.at)) return null;
+    const t = { ...r, hold: null, followers: new Map(), timer: null, ackTimer: null, prior: revive(r.prior) };
+    // verify r2: a record written before the null guard above carries the fabricated 0 — a REAL count of 0 at a
+    // press is impossible (the preview refuses `no_credits`, the verdict `no-credits` first), so 0 means unknown
+    if (t.creditsAt === 0) t.creditsAt = null;
+    if (!t.outcome) { // the process died with it open: it may have gone out
+      // verify r10 ② (reproduced, money — latent until the buffer-file catch-up below re-fed old pushes): WHICH half is the
+      // guess. A record the old engine saw SENT (`reset_credit_sent`: sentAt persisted > 0) is revived unknown with its send a
+      // FACT — nothing a wrapper says later re-opens it (its answer or a reading settles it); only a record with NO send on
+      // file has its send GUESSED here (`sentGuessed`), and that one the wrapper's own later word (its read pushed, its
+      // `skipped`) may overturn. r9 keyed the predicate on `revivedAt` alone, so a replayed `beforeReset` push re-opened a
+      // SENT record: a go to nobody, the ack window ended it not-sent ("nothing spent"), a second press minted a second key
+      t.sentGuessed = !(Number(t.sentAt) > 0);
+      t.sentAt = Number(t.sentAt) || Number(t.at); t.outcome = 'unknown'; t.outcomeAt = Date.now(); t.settled = null;
+      t.revivedAt = Date.now(); // verify r9 ② (reproduced): the boot's GUESS, marked — a reads-first wrapper's own later word for this key (its read pushed, its `skipped`) overturns it (verify r10: only while the SEND is guessed too — `sentGuessed`)
+      console.log(`[reset-credit] ${t.sid || 'helper'}: the reset-credit request on ${nameOf(t.key)} was open when the server last stopped — it may have gone out: unsettled until a reading of the account settles it`);
+      // verify r2 (reproduced, D6 never under-count): the live path charges an unknown consume (onResetCreditUnknown);
+      // the restart's one was revived unknown and NEVER charged — its spend hold died with the process, so the ledger
+      // showed nothing spent. Charged here, by the identity the record carries; the file is re-written below so a
+      // second restart cannot charge it twice
+      if (!t.charged) {
+        t.charged = true; charged++;
+        try { spendGuard.note({ reason: 'codex-reset-credit', session: null, identity: t.identity && t.identity.key ? t.identity : { key: t.key, name: nameOf(t.key) || t.key }, hold: null }); } catch (e) { console.warn('[codex] spend accounting failed (restart):', e.message); }
+      }
+    }
+    // verify r3: a record that went out supersedes its priors from its send (a lapsed one is dropped — nothing can settle it)
+    if (Number(t.sentAt) > 0) t.prior = resetCredit.supersede(t.prior, Number(t.sentAt), clockOpts(Number(t.sentAt)));
+    return t;
+  };
+  let n = 0, charged = 0;
+  for (const r of doc.tries) { const t = revive(r); if (t) { _resetCreditTries.set(t.key, t); n++; } }
+  if (n) console.log(`[reset-credit] ${n} attempt record${n === 1 ? '' : 's'} restored from the last run${charged ? ` (${charged} open at the stop, charged now)` : ''}`);
+  if (charged) persistResetCreditTries();
+  return n;
+}
+loadResetCreditTries();
 /** The newest attempt on this identity (its identity GROUP — one login under
  *  two account records is one credit store). */
 function resetCreditTryFor(key) {
@@ -3229,8 +3498,30 @@ function resetCreditTryFor(key) {
   for (const id of ids) { const t = _resetCreditTries.get(id); if (t && (!best || t.at > best.at)) best = t; }
   return best;
 }
-function resetCreditTriedAt(key) { const t = resetCreditTryFor(key); return t ? t.at : 0; }
-function resetCreditInFlight(t, now = Date.now()) { return !!(t && !t.outcome && now - t.at < RESET_CREDIT_FLOOR_MS); }
+/** What the identity's newest attempt blocks now — `in_flight` (written, not yet sent) or
+ *  `cooldown` (THE floor: a consume that went out) — the PURE rule (lane reset-path). */
+function resetCreditBlock(key, now = Date.now()) { return resetCredit.attemptBlock(resetCreditTryFor(key), { now, floorMs: RESET_CREDIT_FLOOR_MS, ackMs: RESET_CREDIT_ACK_MS }); }
+/** The PURE rule's clock facts (verify r3): every `isUnsettled` / `unsettledInChain` / `settleByReading` / `isLapsed`
+ *  here is judged by the clock with THIS engine's floor and ack window — the timers only make the verdict durable. */
+function clockOpts(now = Date.now()) { return { now, floorMs: RESET_CREDIT_FLOOR_MS, ackMs: RESET_CREDIT_ACK_MS }; }
+/** OPEN = no answer yet: written and waiting for its "sent" (≤ the ack window), or sent and
+ *  waiting for its answer (≤ the floor). A sibling walled on the same identity follows it. */
+function resetCreditInFlight(t, now = Date.now()) { return !!(t && !t.outcome && (t.sentAt ? now - t.sentAt < RESET_CREDIT_FLOOR_MS : now - t.at < RESET_CREDIT_ACK_MS)); }
+/** The attempt an answer belongs to: by the press's idempotency key when the answer echoes one
+ *  (the current wrapper, the 2.369.199 one, the helper), else this session's own open record. */
+function resetCreditTryByAnswer(payload, session, tKey) {
+  const k = payload && typeof payload.idempotencyKey === 'string' && payload.idempotencyKey ? payload.idempotencyKey : null;
+  if (k) {
+    for (const t of _resetCreditTries.values()) for (let x = t; x; x = x.prior) if (x && x.idempotencyKey === k) return x; // …or the UNSETTLED attempt a newer press kept as `prior` (verify r1)
+    // verify r4 (reproduced, the attribution class): a KEYED answer belongs to its key and to nothing else — press 1's
+    // consume landed LATE (its record settled not-landed by the read before press 2 and dropped from the chain at press
+    // 2's send) and its keyed `reset` fell through to the session's CURRENT record: a hung press 2 was marked landed, the
+    // person's origin consumed (their press's own failure then went unsaid) and a person's press walked the ladder
+    return null;
+  }
+  const t0 = tKey ? _resetCreditTries.get(tKey) : null;
+  return t0 && session && t0.sid === session._webuiId ? t0 : null;
+}
 /** A WALL RECORD RESTATING THE EVENT A CREDIT JUST RE-OPENED (r5, reproduced on
  *  the real engine): a third conversation whose turn was in flight at the vendor
  *  when the credit landed comes back rejected with the SAME stated reset. It is
@@ -3258,6 +3549,8 @@ function settleResetCreditTry(t, outcome, { failed = false, superseded = false }
   if (!t || t.outcome) return;
   t.outcome = outcome; t.outcomeAt = Date.now();
   try { clearTimeout(t.timer); } catch { }
+  try { clearTimeout(t.ackTimer); } catch { }
+  persistResetCreditTries();
   for (const [sid, f] of t.followers) {
     const s = activeSessions.get(sid);
     if (!s) continue;
@@ -3321,7 +3614,7 @@ function probeDuringResetHold(key, p) {
   p.probes++;
   try {
     const s = activeSessions.get(p.sid) || null;
-    Promise.resolve(probeQuotaForKey(key, { session: s })).catch(() => { });
+    Promise.resolve(probeQuotaForKey(key, { session: s, fresh: true })).catch(() => { }); // a re-ask after silence is written even while an older read waits
   } catch { }
 }
 function onResetHoldTimer(key, p) {
@@ -3398,7 +3691,9 @@ function sweepResetCreditAsks() {
     let open = true;
     try { if (todos && typeof todos.snapshot === 'function') open = (todos.snapshot().open || []).some((x) => x.id === id); } catch { }
     if (!open) { _resetCreditAsks.delete(id); continue; }
-    if (resetCreditCarriers(a.key).length) continue;
+    // lane reset-path: the question stays while ANY door can answer it — a conversation holding the login,
+    // or the helper process on this machine's copy of it
+    if (resetCreditCarriers(a.key).length || resetCreditHelperFor(a.key).ok) continue;
     _resetCreditAsks.delete(id);
     try { todos && todos.setStatus && todos.setStatus(id, 'dismissed', 'vibespace'); n++; } catch { }
     console.log(`[reset-credit] dismissed the For-you question about ${nameOf(a.key)}'s reset credit — no running conversation holds that login any more (${a.sid} restarted onto another member or ended)`);
@@ -3532,8 +3827,13 @@ function resetCreditOffer(session) {
  * is somebody else).
  * → {ok:true, identity} | {ok:false, why, detail} (why = the ceiling's refusal CODE, detail its sentence — which names the identity and the count; why null when it threw)
  */
-function writeResetCredit(session, { resetsAtSec = 0, lane = null, origin = 'auto', now = Date.now(), key = null } = {}) {
+function writeResetCredit(session, { resetsAtSec = 0, lane = null, origin = 'auto', now = Date.now(), key = null, readFirst = false } = {}) {
   key = key || creditIdentityFor(session).key;
+  // THE READ BEFORE A PERSON'S PRESS (verify r8 T0, the owner's yes): the verb asks the wrapper for ONE
+  // `account/rateLimits/read` before its consume; the wrapper's push (`rate_limits_updated {beforeReset, idempotencyKey}`)
+  // is judged here by the same table as the helper's read-first (answerReadBeforePress → `codex-reset-credit-go`). Only a
+  // person's press, only a wrapper that advertises the verb; the auto rung reads nothing extra
+  const rf = readFirst === true && origin === 'user' && readBeforePress() && wrapperReadsFirst(session);
   let av = null;
   try { av = spendGuard.authorize({ reason: 'codex-reset-credit', session, sessionId: session._webuiId, sessionName: session.name || null, identity: key ? { key, name: nameOf(key) || key } : null }); }
   catch (e) { console.warn('[codex] spend authorizer threw — not spending a reset credit:', e.message); return { ok: false, why: null }; }
@@ -3555,28 +3855,194 @@ function writeResetCredit(session, { resetsAtSec = 0, lane = null, origin = 'aut
   // older than the key ignores the field — its consume then fails on 0.159 and
   // the answer handler names the remedy (Terminate + Resume), never the raw text.
   const idemKey = crypto.randomUUID();
-  // the IDENTITY's attempt (r2): the floor every session and the preview read
-  if (key) {
-    const prev = _resetCreditTries.get(key);
-    try { clearTimeout(prev && prev.timer); } catch { }
-    const t = { key, at: now, sid: session._webuiId, origin: session._resetCreditOrigin, resetsAtSec: Number(resetsAtSec) || 0, lane: lane || null, idempotencyKey: idemKey, followers: new Map(), outcome: null, outcomeAt: 0, timer: null };
-    // NO ANSWER WITHIN THE FLOOR = a failure for the followers (and for the
-    // auto leader): a dead wrapper must not leave them waiting on nothing
-    t.timer = setTimeout(() => {
-      if (t.outcome) return;
-      console.log(`[reset-credit] ${t.sid}: no answer to the reset credit on ${nameOf(key)} within ${RESET_CREDIT_FLOOR_MS / 60e3} min — treating it as not landed`);
-      settleResetCreditTry(t, 'no-answer', { failed: true });
-      const leader = activeSessions.get(t.sid);
-      if (leader && t.origin === 'auto') walkLadderAfterCredit(leader, { resetsAtSec: t.resetsAtSec, lane: t.lane, key });
-    }, RESET_CREDIT_FLOOR_MS);
-    if (t.timer.unref) t.timer.unref();
-    _resetCreditTries.set(key, t);
-    if (_resetCreditTries.size > 256) _resetCreditTries.delete(_resetCreditTries.keys().next().value);
+  // the IDENTITY's attempt (r2): the floor every session and the preview read — OPEN until the
+  // wrapper reports the request went out (lane reset-path: the floor and the charge wait for it)
+  if (key) openResetCreditTry({ key, sid: session._webuiId, via: 'session', origin: session._resetCreditOrigin, resetsAtSec, lane, now, idemKey, av, creditsAt: resetCreditsLeft(session, key), reportsSent: wrapperKeyState(session) === 'keyed', window: spentWindowOf(readRawUsageCache(key)), readFirst: rf });
+  session.pty.write(JSON.stringify({ type: 'codex-reset-credit', idempotencyKey: idemKey, ...(rf ? { readFirst: true } : {}) }) + '\n');
+  return { ok: true, identity: av && av.identity, idempotencyKey: idemKey, readFirst: rf };
+}
+/** Open the identity's attempt record (one writer: the session verb and the helper both open it
+ *  here). The spend HOLD the authorizer took rides it: converted into the charge when the request
+ *  goes out (noteResetCreditSent), given back when it never does (onResetCreditNotSent). */
+function openResetCreditTry({ key, sid = null, via = 'session', origin = 'auto', resetsAtSec = 0, lane = null, now = Date.now(), idemKey, av = null, creditsAt = null, reportsSent = true, window = null, readFirst = false }) {
+  const prev = _resetCreditTries.get(key);
+  try { clearTimeout(prev && prev.timer); } catch { }
+  try { clearTimeout(prev && prev.ackTimer); } catch { }
+  const R = Number(resetsAtSec) || 0;
+  // verify r1 (the unknown consume): `creditsAt` = the stored count at the attempt and `window` = the wall's
+  // bucket {resetsAtSec, periodSec} — the two witnesses a later reading settles an unanswered consume by;
+  // `reportsSent` = the carrier SAYS when the request leaves (the helper, a wrapper advertising resetCreditKey) —
+  // one that cannot is never settled "not sent" by silence; an UNSETTLED previous attempt rides as `prior`
+  // (a press reads first and settles it; its late answer still finds it)
+  const t = { key, at: now, sentAt: 0, sid, via, origin: origin === 'user' ? 'user' : 'auto', resetsAtSec: R, lane: lane || null, eventKey: `${key}|${R || '?'}`, idempotencyKey: idemKey, hold: (av && av.hold) || null, identity: (av && av.identity) || null, charged: false, followers: new Map(), outcome: null, outcomeAt: 0, timer: null, ackTimer: null,
+    // verify r2 (reproduced, money): `Number(null)` is 0 — an attempt on an account whose stored count was UNKNOWN
+    // was recorded as `creditsAt: 0`, so the first reading ("count still 1 ≥ 0") settled it NOT LANDED and the next
+    // press minted a second key over a consume that may have landed. No count = null, never a fabricated 0
+    // verify r3 (reproduced, money): the prior is the newest UNSETTLED attempt in the chain, wherever it sits — a free
+    // record in front of it (a helper that never started) used to hide it, and the next press consumed with no read
+    creditsAt: creditsAt != null && creditsAt !== '' && Number.isFinite(Number(creditsAt)) ? Number(creditsAt) : null, reportsSent: reportsSent !== false, window: window && Number(window.resetsAtSec) > 0 ? { resetsAtSec: Number(window.resetsAtSec), periodSec: Number(window.periodSec) || null } : null, settled: null, readFirst: via === 'helper' || readFirst === true, prior: resetCredit.priorForPress(prev, clockOpts(now)) };
+  // NOBODY SAID IT WENT OUT within the ack window ⇒ it did not (a wrapper that never took the
+  // verb, a dead process): nothing armed, the hold given back, a person told, the followers walk
+  t.ackTimer = setTimeout(() => onResetCreditNotSent(t), RESET_CREDIT_ACK_MS);
+  if (t.ackTimer.unref) t.ackTimer.unref();
+  _resetCreditTries.set(key, t);
+  if (_resetCreditTries.size > 256) _resetCreditTries.delete(_resetCreditTries.keys().next().value);
+  persistResetCreditTries();
+  return t;
+}
+/** THE REQUEST WENT OUT (the wrapper's `reset_credit_sent`, the helper's onSent, or an answer that
+ *  proves it): from here the floor is armed, the spend is charged — CHARGE WHAT YOU AUTHORIZED
+ *  (r4): the slot the verdict resolved, handed back — and an answer is owed within the floor. */
+function noteResetCreditSent(t, now = Date.now(), { proof = 'record' } = {}) {
+  if (!t) return;
+  // verify r10 (the buffer-file catch-up): a REAL send over a boot's GUESSED one — the record was revived unknown with
+  // `sentAt` = its press instant. The wrapper's own `reset_credit_sent` RECORD (read back from its buffer file at ITS
+  // instant, or live within ms of the send) carries the send instant: the floor runs from it, the guess is gone. An
+  // ANSWER that proves a send (`proof: 'answer'`) carries no instant — the guess ends (nothing re-opens a sent record)
+  // but the earliest-known instant stays (the parity walk with a short floor caught a re-stamp to the answer's arrival)
+  if (t.sentGuessed) { t.sentGuessed = false; if (proof === 'record') t.sentAt = 0; }
+  if (t.sentAt) return;
+  t.sentAt = now;
+  try { clearTimeout(t.ackTimer); } catch { }
+  // verify r3: from this send on, no reading can judge the priors (the count it carries moves for THIS consume); a lapsed
+  // prior can never be settled now and is dropped
+  t.prior = resetCredit.supersede(t.prior, now, clockOpts(now));
+  if (!t.charged) {
+    t.charged = true;
+    try { spendGuard.note({ reason: 'codex-reset-credit', session: t.sid ? activeSessions.get(t.sid) || null : null, identity: t.identity, hold: t.hold }); } catch (e) { console.warn('[codex] spend accounting failed:', e.message); }
   }
-  session.pty.write(JSON.stringify({ type: 'codex-reset-credit', idempotencyKey: idemKey }) + '\n');
-  // CHARGE WHAT YOU AUTHORIZED (r4): the slot the verdict resolved, handed back.
-  try { spendGuard.note({ reason: 'codex-reset-credit', session, identity: av && av.identity, hold: av && av.hold }); } catch (e) { console.warn('[codex] spend accounting failed:', e.message); }
-  return { ok: true, identity: av && av.identity };
+  // THE CHARGE IS ON DISK WITH THE SEND (verify r10, reproduced on the real engine — money): the record used to be persisted
+  // BEFORE `charged` was set and never after, so the file said charged:false for every sent-and-unanswered press, and a
+  // restart inside that window (the consume's round trip, up to the floor) charged the SAME consume a second time at the
+  // boot — two ledger lines, the per-identity hour cap eaten twice. One persist, after the charge
+  persistResetCreditTries();
+  if (t.outcome) return; // a late "sent" after the attempt ended: charged, nothing left to wait for
+  // NO ANSWER WITHIN THE FLOOR = a failure for the followers (and for the
+  // auto leader): a dead wrapper must not leave them waiting on nothing
+  t.timer = setTimeout(() => {
+    if (t.outcome) return;
+    console.log(`[reset-credit] ${t.sid || 'helper'}: no answer to the reset credit on ${nameOf(t.key)} within ${RESET_CREDIT_FLOOR_MS / 60e3} min — treating it as not landed`);
+    settleResetCreditTry(t, 'no-answer', { failed: true });
+    const leader = t.sid ? activeSessions.get(t.sid) : null;
+    if (leader && t.origin === 'auto') walkLadderAfterCredit(leader, { resetsAtSec: t.resetsAtSec, lane: t.lane, key: t.key });
+  }, RESET_CREDIT_FLOOR_MS);
+  if (t.timer.unref) t.timer.unref();
+}
+/** The ack window passed and nothing said the request went out: it did not. */
+function onResetCreditNotSent(t) {
+  if (!t || t.outcome || t.sentAt) return;
+  if (!t.reportsSent) return onResetCreditUnknown(t); // silence from a carrier that cannot say is not "not sent" (verify r1)
+  try { if (t.hold && !t.charged) spendGuard.release({ hold: t.hold }); } catch { }
+  console.log(`[reset-credit] ${t.sid || 'helper'}: the reset-credit request on ${nameOf(t.key)} was never sent (no word from ${t.via === 'helper' ? 'the helper' : 'the conversation\'s codex wrapper'} within ${RESET_CREDIT_ACK_MS / 1000} s) — nothing spent, the ten-minute wait not started`);
+  settleResetCreditTry(t, 'not-sent', { failed: true });
+  const leader = t.sid ? activeSessions.get(t.sid) : null;
+  if (t.origin === 'user') {
+    // (verify r5: every codex-reset-* notice carries its i18n key — the owner reads zh)
+    serverNotice(`codex-reset-fail-${t.sid || 'helper'}-${Date.now()}`, `Reset credit not used on ${nameOf(t.key)} — ${t.via === 'helper' ? 'the codex helper process' : 'the conversation\'s codex wrapper'} never sent the request (nothing was spent). Use it again from the Agents list.`, { i18n: { key: t.via === 'helper' ? i18nKey('Reset credit not used on {account} — the codex helper process never sent the request (nothing was spent). Use it again from the Agents list.') : i18nKey('Reset credit not used on {account} — the conversation’s codex wrapper never sent the request (nothing was spent). Use it again from the Agents list.'), params: { account: nameOf(t.key) } } });
+    if (leader) leader._resetCreditOrigin = null;
+  } else if (leader) walkLadderAfterCredit(leader, { resetsAtSec: t.resetsAtSec, lane: t.lane, key: t.key });
+}
+/** THE UNKNOWN CONSUME (verify r1, the money class): the ack window passed with no word from a carrier that
+ *  CANNOT report its send (a wrapper older than `resetCreditKey` under the auto rung, a process that died with
+ *  the verb). The request may have gone out — so it is treated as sent at the write: charged, the floor armed,
+ *  the followers walk, and after the floor the attempt stays UNSETTLED (every press and the rung blocked on
+ *  this identity) until a reading of the account settles it (settleResetCreditByReading). Never "nothing spent". */
+function onResetCreditUnknown(t) {
+  if (!t || t.outcome || t.sentAt) return;
+  t.sentAt = t.at;
+  try { clearTimeout(t.ackTimer); } catch { }
+  t.prior = resetCredit.supersede(t.prior, t.at, clockOpts()); // verify r3: it may have gone out at the write — the priors are superseded from then
+  if (!t.charged) {
+    t.charged = true;
+    try { spendGuard.note({ reason: 'codex-reset-credit', session: t.sid ? activeSessions.get(t.sid) || null : null, identity: t.identity, hold: t.hold }); } catch (e) { console.warn('[codex] spend accounting failed:', e.message); }
+  }
+  console.log(`[reset-credit] ${t.sid || 'helper'}: no word about the reset-credit request on ${nameOf(t.key)} within ${RESET_CREDIT_ACK_MS / 1000} s from a wrapper that cannot report a send (it predates resetCreditKey) — the request MAY have gone out: charged, the ten-minute wait armed, and the account's next reading settles it`);
+  settleResetCreditTry(t, 'unknown', { failed: true });
+  const leader = t.sid ? activeSessions.get(t.sid) : null;
+  if (t.origin === 'user') {
+    serverNotice(`codex-reset-unknown-${t.sid || 'helper'}-${Date.now()}`, `Reset credit on ${nameOf(t.key)} — no answer came back within ${RESET_CREDIT_ACK_MS / 1000} s and the conversation's codex wrapper cannot say whether it sent the request; it may have been spent. The next reading of this account settles it (⟳ in the usage menu, or the account's next turn) — no second credit is minted before that.`, { i18n: { key: i18nKey('Reset credit on {account} — no answer came back within {secs} s and the conversation’s codex wrapper cannot say whether it sent the request; it may have been spent. The next reading of this account settles it (⟳ in the usage menu, or the account’s next turn) — no second credit is minted before that.'), params: { account: nameOf(t.key), secs: RESET_CREDIT_ACK_MS / 1000 } } });
+    if (leader) leader._resetCreditOrigin = null;
+  } else if (leader) walkLadderAfterCredit(leader, { resetsAtSec: t.resetsAtSec, lane: t.lane, key: t.key });
+}
+/** The wall's window as a READING states it (verify r1): the bucket with the attempt's period, else null. */
+function readingWindowFor(snap, window) {
+  if (!snap || !window || !Number(window.periodSec)) return null;
+  for (const b of [snap.fiveHour, snap.sevenDay]) {
+    if (!b || typeof b !== 'object') continue;
+    if (Number(b.windowMinutes) * 60 === Number(window.periodSec)) return Number(b.resetsAt) > 0 ? Number(b.resetsAt) : null;
+  }
+  return null;
+}
+/** The START of the reading's longest window (s) — verify r2: an attempt that knew no window is settled `expired`
+ *  once every window of the account began after its send. null when no bucket states both numbers. */
+function readingWindowStart(snap) {
+  let start = null;
+  for (const b of [snap && snap.fiveHour, snap && snap.sevenDay]) {
+    if (!b || typeof b !== 'object' || !(Number(b.resetsAt) > 0) || !(Number(b.windowMinutes) > 0)) continue;
+    const s = Number(b.resetsAt) - Number(b.windowMinutes) * 60;
+    if (start === null || s < start) start = s;
+  }
+  return start;
+}
+/** A READING OF THE IDENTITY SETTLES ITS UNANSWERED ATTEMPTS (verify r1): the newest attempt and the unsettled
+ *  ones it kept as `prior`. Landed ⇒ the attempt becomes `reset` (the credit WAS used — every card offering it
+ *  says so, the person is told); not landed / expired ⇒ the block ends; untold (verify r2: no count was known at
+ *  the send) ⇒ the block ends and the person is told the count the reading carries. → the last verdict, or null */
+function settleResetCreditByReading(key, snap) {
+  if (!key || !snap) return null;
+  let out = null;
+  const co = clockOpts();
+  // verify r5 (reproduced on the real engine, money): the cache FILE carries a stored count across pushes that state none
+  // (usage-cache-write's `resetCredits` carry), so a reading whose `fetchedAt` is after the send may hold a count STAMPED
+  // BEFORE it (`resetCredits.at`) — a passive push after the send + a vendor word no table lists settled an attempt NOT
+  // LANDED on a count 11 minutes older than the send, and the next press consumed with no read. A count is a witness only
+  // when its own stamp is after the send; the window the push states is fresh and still judges
+  const rc = snap.resetCredits && typeof snap.resetCredits === 'object' ? snap.resetCredits : null;
+  const count = rc && Number.isFinite(Number(rc.availableCount)) ? Number(rc.availableCount) : null;
+  const countAt = Number(rc && rc.at) || Number(snap.fetchedAt) || 0;
+  for (let x = resetCreditTryFor(key); x; x = x.prior) {
+    if (!resetCredit.isUnsettled(x, co)) continue;
+    const win = readingWindowFor(snap, x.window);
+    const sentAt0 = Number(x.sentAt) || Number(x.at) || 0;
+    const r = resetCredit.settleByReading(x, { fetchedAt: Number(snap.fetchedAt) || 0, creditsLeft: count !== null && countAt > sentAt0 ? count : null, resetsAtSec: win, periodSec: x.window && x.window.periodSec ? Number(x.window.periodSec) : null, windowStartSec: readingWindowStart(snap) }, co);
+    if (!r) continue;
+    x.settled = { how: r.how, why: r.why, at: Number(snap.fetchedAt) || Date.now() };
+    persistResetCreditTries();
+    const sentAt = x.sentAt || x.at;
+    if (r.how === 'landed') {
+      // verify r3: an attempt unsettled BY THE CLOCK (no outcome yet — its timer has not run) is settled like an answer:
+      // its timers cleared, its followers told, the outcome on disk; one stamped by a timer only changes its word
+      if (!x.outcome) settleResetCreditTry(x, 'reset'); else { x.outcome = 'reset'; x.outcomeAt = Date.now(); }
+      console.log(`[reset-credit] ${x.sid || 'helper'}: the reset-credit request on ${nameOf(x.key)} sent ${new Date(sentAt).toISOString()} DID land — ${r.why}`);
+      serverNotice(`codex-reset-settled-${x.sid || 'helper'}-${Date.now()}`, `Reset credit on ${nameOf(x.key)} — the request sent at ${new Date(sentAt).toISOString().slice(0, 16).replace('T', ' ')} UTC did land (${r.why}); the limit was reset then.`, { i18n: { key: i18nKey('Reset credit on {account} — the request sent at {time} did land ({why}); the limit was reset then.'), params: { account: nameOf(x.key), time: new Date(sentAt).toISOString().slice(0, 16).replace('T', ' ') + ' UTC', why: r.why } } });
+      // the cards resolve at the READING's instant (as the answer path does): every card drawn before it offered this credit
+      try { resolveResetCreditCards(x.key, { kind: 'used', at: x.settled.at, untilSec: win || null }); } catch { }
+    } else if (r.how === 'untold') {
+      // verify r2: the attempt knew no count and no window — nothing can ever say whether it landed; the block ends
+      // and the person is told what the account holds NOW (the next press shows that count)
+      console.log(`[reset-credit] ${x.sid || 'helper'}: the reset-credit request on ${nameOf(x.key)} sent ${new Date(sentAt).toISOString()} cannot be judged — ${r.why}; the block ends`);
+      // verify r6 (reproduced): the AUTO rung's attempt ending untold was journal-only — "a credit may have been spent and
+      // nobody can say" is the owner's fact whoever pressed; said for every origin (once per attempt)
+      serverNotice(`codex-reset-untold-${x.sid || 'helper'}-${Date.now()}`, `Reset credit on ${nameOf(x.key)} — the request sent at ${new Date(sentAt).toISOString().slice(0, 16).replace('T', ' ')} UTC cannot be judged (${r.why}); it may have been spent. A new press spends a credit on the count shown now.`, { i18n: { key: i18nKey('Reset credit on {account} — the request sent at {time} cannot be judged ({why}); it may have been spent. A new press spends a credit on the count shown now.'), params: { account: nameOf(x.key), time: new Date(sentAt).toISOString().slice(0, 16).replace('T', ' ') + ' UTC', why: r.why } } });
+    } else console.log(`[reset-credit] ${x.sid || 'helper'}: the reset-credit request on ${nameOf(x.key)} sent ${new Date(sentAt).toISOString()} is settled ${r.how} — ${r.why}; nothing holds the account any more`);
+    out = r;
+  }
+  return out;
+}
+/** THE SESSION PATH'S READ BEFORE A PRESS (verify r1): the route awaits it when the preview says `unsettled` and a
+ *  conversation carries the login — ONE `codex-read-limits` on that session's own app-server (the existing rung);
+ *  its push lands through recordCodexQuotaSignal, which settles the attempt. → {ok, settled, reason} */
+async function settleResetCreditByRead(key, { preferSessionId = null, timeoutMs = 20000 } = {}) {
+  const pref = preferSessionId ? activeSessions.get(preferSessionId) : null;
+  const s = pickCodexProbeSession(key, pref && pref.backend === 'codex' ? pref : null);
+  if (!s) return { ok: false, settled: false, how: null, reason: 'no live local codex chat session on this identity' };
+  const t0 = Date.now();
+  const r = await readCodexLimitsViaSession(s, timeoutMs);
+  // THE VERDICT this read produced (the route proceeds on IT, never on the cache — a reading that lost a
+  // same-millisecond tie at the cache writer still settled the attempt): the newest settle on the chain
+  let how = null, why = null, unsettled = false;
+  for (let x = resetCreditTryFor(key); x; x = x.prior) { if (resetCredit.isUnsettled(x, clockOpts())) unsettled = true; else if (x.settled && Number(x.settled.at) >= t0 && !how) { how = x.settled.how; why = x.settled.why || null; } }
+  return { ok: !!(r && r.ok), settled: !unsettled, how, why, reason: (r && r.reason) || null };
 }
 // ── THE MANUAL USE (p2, design-reset-credits §5): POST /api/accounts/:id/reset-credit
 // (src/routes/reset-credit.js) — the roster's "Use…", the wall/arm card's
@@ -3595,6 +4061,42 @@ function resetCreditCarriers(key) {
   }
   return out;
 }
+/** Can THIS conversation's wrapper carry a person's press (lane reset-path)? 'keyed' = its own sidecar
+ *  advertises `resetCreditKey` (it sends the press's idempotency key AND reports the send — the only
+ *  wrapper whose attempt can arm the floor honestly); 'stale' = it already had a consume refused for the
+ *  missing key; 'unknown' = no advert (older than this fix, or a REMOTE wrapper whose advert lives on its
+ *  own machine). A person's press rides only a 'keyed' one — everything else goes to the helper. */
+function wrapperKeyState(s) {
+  if (!s) return 'unknown';
+  if (s._resetCreditStale) return 'stale';
+  if (s.host) return 'unknown';
+  try { const wc = wrapperCaps(path.join(rootDir, 'data', 'session-buffers'), s._webuiId, s.socketPath); if (wc && wc.caps && wc.caps.resetCreditKey === true) return 'keyed'; } catch { }
+  return 'unknown';
+}
+/** THE HELPER PATH's preconditions for identity `key` (lane reset-path): a harness that can spend a
+ *  credit (caps row), a codex command on this machine, and a LOCAL login for the key — the account's
+ *  own isolated home, or the machine's own login — that is signed in. → {ok, home, envVar, cmd, extraArgs, why} */
+function resetCreditHelperFor(key) {
+  try {
+    const backend = quotaBackendFor(key);
+    if (capsOf(backend).resetCredit !== true) return { ok: false, why: 'this agent has no reset-credit interface' };
+    let cmd = null, extraArgs = null;
+    if (resetCreditHelper && resetCreditHelper.codexCmd) { cmd = resetCreditHelper.codexCmd; extraArgs = resetCreditHelper.extraArgs || []; }
+    else { try { const c = require('../codex-thread-read.js').configure({}); cmd = c.codexCmd || null; extraArgs = c.extraArgs || []; } catch { cmd = null; } }
+    if (!cmd) return { ok: false, why: 'the codex CLI is not installed on this machine' };
+    const creds = harnesses.get(backend).creds;
+    let home = null, loggedIn = false;
+    if (/^__global/.test(key)) { home = creds.sharedHome(); try { loggedIn = !!creds.parseAuth(home).loggedIn; } catch { loggedIn = false; } }
+    else {
+      const a = accounts.get(key);
+      if (!a || a.type === 'pooled') return { ok: false, why: 'not a single account' };
+      home = accounts._acctDir(backend, key);
+      try { loggedIn = !!accounts._readAuthFor(backend, key).loggedIn; } catch { loggedIn = false; }
+    }
+    if (!loggedIn) return { ok: false, why: `${nameOf(key)} is not signed in on this machine` };
+    return { ok: true, home, envVar: creds.spawnEnvVar, cmd, extraArgs };
+  } catch (e) { return { ok: false, why: e.message }; }
+}
 /** The window a manual use would replace: the account's MOST-spent bucket
  *  (that is the one a wall is on) → {resetsAtSec, periodSec, remainingPct}. */
 function spentWindowOf(snap) {
@@ -3612,6 +4114,7 @@ function spentWindowOf(snap) {
  * (the wall card's window, the item's session) — used as the carrier when it is one.
  */
 function resetCreditPreview(key, { preferSessionId = null, now = Date.now() } = {}) {
+  try { fileResetCreditTriesLost(); } catch { } // verify r2: the boot's unreadable-file notice, filed once the inbox exists
   key = String(key || '');
   try { const a = accounts.get(key); if (a && a.type === 'pooled') key = accounts.poolCurrent(key) || key; } catch { }
   const backend = quotaBackendFor(key);
@@ -3620,7 +4123,11 @@ function resetCreditPreview(key, { preferSessionId = null, now = Date.now() } = 
   // name null = the machine's own login (the client says so in its own words)
   const base = { key, name: recName, backend, vendor, creditsLeft: null, resetsAtSec: null, periodSec: null, remainingPct: null, sessionId: null, cooldownUntilSec: null };
   if (capsOf(backend).resetCredit !== true) return { ...base, code: 'not_supported', error: 'this agent has no reset-credit interface (Claude Code offers only the interactive /limit-reset)' };
-  const carriers = resetCreditCarriers(key);
+  // ONLY A WRAPPER THAT SENDS THE KEY carries a person's press (lane reset-path): an older one would
+  // be refused by codex (the key is required on every measured CLI), so the press goes to the HELPER
+  // (one bounded codex app-server child on this account's own login) — never a greyed button
+  const live = resetCreditCarriers(key);
+  const carriers = live.filter((s) => wrapperKeyState(s) === 'keyed');
   // a carrier that is LEAVING this account (r4): a held process whose pool moved
   // on, or one whose cold restart is in flight — kept only when no other carrier
   // exists. THE STATE IS NAMED (r5): `inFlight` = a restart request WENT OUT
@@ -3637,19 +4144,32 @@ function resetCreditPreview(key, { preferSessionId = null, now = Date.now() } = 
   const restartPending = leaving ? { id: leaving.to || null, name: leaving.to ? (accounts.get(leaving.to)?.name || leaving.to) : null, ...(leaving.inFlight ? { inFlight: true } : { pending: true }) } : null;
   const win = spentWindowOf(readRawUsageCache(key));
   const creditsLeft = resetCreditsLeft(carrier, key);
-  // the IDENTITY's floor (r2) — an attempt through ANY session on this account
-  const tried = resetCreditTriedAt(key);
-  const coolMs = tried ? tried + RESET_CREDIT_FLOOR_MS : 0;
-  const out = { ...base, ...win, creditsLeft, sessionId: carrier ? carrier._webuiId : null, cooldownUntilSec: coolMs > now ? Math.ceil(coolMs / 1000) : null, ...(restartPending ? { restartPending } : {}) };
-  if (!carrier) { try { sweepResetCreditAsks(); } catch { } return { ...out, code: 'no_live_session', error: 'no running chat session holds this account\'s login (the verb rides that session\'s own CLI; a pool conversation moved to another member restarts there and no longer can)' }; }
+  // the IDENTITY's floor (r2) — an attempt through ANY session on this account. ARMED ONLY BY A
+  // CONSUME THAT WENT OUT (lane reset-path): a refused / never-sent / nothing-to-reset attempt
+  // blocks nothing; one written and not yet sent is `in_flight` (≤ the ack window), not the floor
+  const block = resetCreditBlock(key, now);
+  const coolMs = block.code === 'cooldown' ? block.until : 0;
+  const helper = carrier ? null : resetCreditHelperFor(key);
+  const via = carrier ? 'session' : (helper && helper.ok ? 'helper' : null);
+  // verify r1: an earlier request went out and was never answered — the press READS first (the dialog says it)
+  const unsettled = block.code === 'unsettled' ? { sinceSec: Math.floor((block.sinceMs || now) / 1000) } : null;
+  // verify r2: an unsettled attempt whose wall is gone by itself LAPSED — the press is free and the dialog says the
+  // count shown may be one high (the record stays unsettled for a late reading to settle it on the ledger)
+  const lapsed = block.lapsed ? { sinceSec: Math.floor((block.lapsed.sinceMs || now) / 1000), atSec: Math.floor(block.lapsed.atMs / 1000) } : null;
+  // verify r8 T0: does THIS press read the account before it consumes? The helper always (the owner's yes); a conversation
+  // only through a wrapper that advertises the verb — said on the dialog, never claimed for an older wrapper
+  const readsFirst = via === 'helper' ? readBeforePress() : (via === 'session' && carrier ? (readBeforePress() && wrapperReadsFirst(carrier)) : false);
+  const out = { ...base, ...win, creditsLeft, sessionId: carrier ? carrier._webuiId : null, via, readsFirst, ...(via === 'helper' ? { helperWhy: live.length ? 'wrapper-predates' : 'no-session' } : {}), cooldownUntilSec: coolMs > now ? Math.ceil(coolMs / 1000) : null, ...(unsettled ? { unsettled } : {}), ...(lapsed ? { lapsed } : {}), ...(restartPending ? { restartPending } : {}) };
+  if (!carrier && !via) { try { sweepResetCreditAsks(); } catch { } return { ...out, code: 'no_live_session', error: `no running chat session holds this account's login, and no helper process can use it here (${(helper && helper.why) || 'unknown'})` }; }
   if (creditsLeft !== null && creditsLeft <= 0) return { ...out, code: 'no_credits', error: 'no stored reset credits on this account' };
-  if (coolMs > now) return { ...out, code: 'cooldown', error: 'a reset credit was tried on this account in the last 10 minutes' };
+  if (block.code === 'in_flight') return { ...out, code: 'in_flight', error: 'a reset-credit request on this account was handed to codex and has not been sent yet — its answer arrives as a notice' };
+  if (coolMs > now) return { ...out, code: 'cooldown', error: 'a reset-credit request went out on this account in the last 10 minutes (it may still land)' };
   if (restartPending && restartPending.inFlight) return { ...out, code: 'restart_pending', error: `the only running conversation holding this login is being restarted${restartPending.name ? ' onto ' + restartPending.name : ''} — the verb would ride a process that is being replaced` };
   return out;
 }
 /** THE MANUAL USE: one verb through the same writer as the auto rung. →
  *  {ok:true, sessionId, preview} | {ok:false, code, error, preview} */
-function consumeResetCreditFor(key, { preferSessionId = null, now = Date.now(), expect = null } = {}) {
+function consumeResetCreditFor(key, { preferSessionId = null, now = Date.now(), expect = null, afterRead = false } = {}) {
   const p = resetCreditPreview(key, { preferSessionId, now });
   if (p.code) return { ok: false, code: p.code, error: p.error, preview: p };
   // verify-r6 R1 ("what you approve is what runs"): the dialog showed THIS window — its reset instant, what the credit
@@ -3660,13 +4180,257 @@ function consumeResetCreditFor(key, { preferSessionId = null, now = Date.now(), 
     const shown = Number(expect.resetsAtSec);
     if (!Number.isFinite(shown) || Number(p.resetsAtSec) !== shown || now >= shown * 1000) return { ok: false, code: 'preview_changed', error: 'the limit window this dialog showed has reset (or moved) since it opened — nothing was spent; open it again to see the account now', preview: p };
   }
+  // THE HELPER PATH (lane reset-path): no conversation can carry it — ONE bounded app-server child does
+  if (p.via === 'helper') {
+    const hw = writeResetCreditViaHelper(p.key, { resetsAtSec: p.resetsAtSec || 0, now });
+    if (!hw.ok) return { ok: false, code: hw.code || 'spend_refused', error: hw.why ? `${hw.why}${hw.detail ? ': ' + hw.detail : ''}` : (hw.detail || 'the spend authorizer failed'), preview: p };
+    global.__vsEvent?.('codex-reset-credit-user', 'helper');
+    return { ok: true, sessionId: null, via: 'helper', preview: p };
+  }
   const session = activeSessions.get(p.sessionId);
   if (!session) return { ok: false, code: 'no_live_session', error: 'the session ended', preview: p };
-  const wr = writeResetCredit(session, { resetsAtSec: p.resetsAtSec || 0, lane: null, origin: 'user', now, key: p.key });
+  // verify r1: an earlier request on this identity is UNSETTLED — the route reads the account through this
+  // conversation first (settleResetCreditByRead) and asks again; a read that could not tell is the refusal
+  if (p.unsettled) return { ok: false, code: 'unsettled', needsRead: true, error: 'an earlier reset-credit request on this account got no answer — the account must be read before a credit is spent (nothing spent)', preview: p };
+  // verify r8 T0: a person's press READS FIRST through the conversation's own wrapper (`readFirst` on the verb) — unless the
+  // route just read the account for an unsettled prior (`afterRead`: one read per press, never two)
+  const wr = writeResetCredit(session, { resetsAtSec: p.resetsAtSec || 0, lane: null, origin: 'user', now, key: p.key, readFirst: !afterRead });
   if (!wr.ok) return { ok: false, code: 'spend_refused', error: wr.why ? `${wr.why}${wr.detail ? ': ' + wr.detail : ''}` : 'the spend authorizer failed', preview: p };
-  console.log(`[reset-credit] ${session._webuiId}: a person asked for a reset credit on ${nameOf(p.key)} (credits=${p.creditsLeft ?? '?'})`);
+  console.log(`[reset-credit] ${session._webuiId}: a person asked for a reset credit on ${nameOf(p.key)} (credits=${p.creditsLeft ?? '?'}${wr.readFirst ? ', the wrapper reads the account first' : ''})`);
   global.__vsEvent?.('codex-reset-credit-user', session._accountId || 'global');
-  return { ok: true, sessionId: session._webuiId, preview: p };
+  return { ok: true, sessionId: session._webuiId, via: 'session', preview: p };
+}
+/**
+ * THE HELPER PATH'S ONE WRITER (lane reset-path) — a VENDOR ACT FROM A HUMAN CLICK, allowlisted in
+ * scripts/test-vendor-whitelist.mjs §8 with its gates: its ONE caller is consumeResetCreditFor (the
+ * human-only POST), after the preview's refusals (the floor, in_flight, no_credits); the spend ceiling
+ * first (the same reason, the same identity), the attempt record (the floor arms on the helper's
+ * `onSent`), then ONE bounded `codex app-server` child on the account's own login. Never a timer, never
+ * the auto rung (which writes only to a conversation's own wrapper). → {ok, idempotencyKey} | {ok:false, why, detail, code}
+ */
+/** THE READ-FIRST SEAM (verify r5, pinned; FLIPPED verify r8 T0): does a human press read the account before its consume
+ *  even with NO unsettled prior? The owner answered ut-cdaa01aff0 on 2026-10-02 ("好的没问题" = yes): one more vendor
+ *  read per press, on BOTH carriers (the helper's own read; a conversation wrapper's `readFirst` verb), only on a
+ *  person's click — the AUTO rung reads nothing extra (its belts stay the ceiling + the ten-minute floor). It closes the
+ *  r3 LOW: a credit granted between the cached reading and the press is never counted as unused. ONE line. */
+function readBeforePress() { return true; }
+/** Does this conversation's wrapper read the account before a consume when asked (`codex-reset-credit {readFirst:true}`)?
+ *  Its own sidecar advertises `caps.resetCreditReadFirst` (the 2.369.202 wrapper); an older keyed wrapper ignores the
+ *  flag and consumes at once — the preview says so (`readsFirst: false`), never a lie on the dialog. Local only. */
+function wrapperReadsFirst(s) {
+  if (!s || s.host) return false;
+  try { const wc = wrapperCaps(path.join(rootDir, 'data', 'session-buffers'), s._webuiId, s.socketPath); return !!(wc && wc.caps && wc.caps.resetCreditReadFirst === true); } catch { return false; }
+}
+function writeResetCreditViaHelper(key, { resetsAtSec = 0, now = Date.now() } = {}) {
+  const h = resetCreditHelperFor(key);
+  if (!h.ok) return { ok: false, code: 'no_live_session', why: null, detail: h.why };
+  let av = null;
+  try { av = spendGuard.authorize({ reason: 'codex-reset-credit', session: null, sessionId: null, sessionName: null, identity: { key, name: nameOf(key) || key } }); }
+  catch (e) { console.warn('[codex] spend authorizer threw — not spending a reset credit:', e.message); return { ok: false, why: null }; }
+  if (av && av.ok === false) { console.log(`[codex] reset credit refused for the helper on ${nameOf(key)} (spend budget: ${av.why})`); return { ok: false, why: av.why || 'refused', detail: av.detail || null }; }
+  const idemKey = crypto.randomUUID();
+  const t = openResetCreditTry({ key, sid: null, via: 'helper', origin: 'user', resetsAtSec, lane: null, now, idemKey, av, creditsAt: resetCreditsLeft(null, key), reportsSent: true, window: spentWindowOf(readRawUsageCache(key)) });
+  const env = { ...sanitizedSpawnEnv(process.env), [h.envVar]: h.home };
+  // verify r1: an UNSETTLED earlier attempt rides as `prior` — the helper reads first and consumes only if no
+  // unsettled attempt remains on this identity (landed ⇒ the credit was used then; a reading that cannot tell
+  // ⇒ nothing spent either — never a second key on a guess)
+  // verify r5 (the pinned seam, ut-cdaa01aff0): `readBeforePress()` = a read before EVERY helper press — the owner's call
+  const readFirst = (t.prior || readBeforePress()) ? async (rl) => {
+    // THE READ ITSELF FAILED (verify r8 T0): nothing to write; the ONE table decides — an unsettled prior still refuses (a
+    // consume over it needs a reading), else the consume goes out on the count the dialog showed, and it is SAID
+    if (rl && rl.readError) return judgeReadFirst(t, resetCredit.preConsumeVerdict(t, { readOk: false, ...clockOpts() }), { readError: String(rl.readError) });
+    let fresh = null;
+    try {
+      const sig = quotaSourceFor(quotaBackendFor(key)).signalFromStream({ type: 'event_msg', payload: { type: 'rate_limits_updated', rateLimits: rl.rateLimits, resetCredits: rl.resetCredits || null, onDemand: true } });
+      const w = writeCodexReading(sig && sig.snapshot, 'codex-reset-helper', { key });
+      if (w && w.key) { settleResetCreditByReading(w.key, w.snap); fresh = w.snap; }
+      // the count AT THE SEND is the one this read just took (verify r5: the press carried the cached count — a credit granted
+      // between that reading and the press was the r3 LOW); the PURE table's `reading` row does the same for an open helper head
+      if (fresh && fresh.resetCredits && Number.isFinite(Number(fresh.resetCredits.availableCount)) && !t.sentAt && !t.outcome) t.creditsAt = Number(fresh.resetCredits.availableCount);
+    } catch (e) { console.warn('[reset-credit] helper read-first not written:', e.message); }
+    // WHAT YOU APPROVE IS WHAT RUNS (verify r5, reproduced — money) + the priors + a zero count: ONE table for both carriers
+    // (src/reset-credit.js preConsumeVerdict — the conversation wrapper's read-first is judged by the same rows)
+    return judgeReadFirst(t, resetCredit.preConsumeVerdict(t, { readOk: !!fresh, freshWindow: fresh && Number(t.resetsAtSec) > 0 ? readingWindowFor(fresh, t.window) : null, freshCount: fresh && fresh.resetCredits ? fresh.resetCredits.availableCount : null, ...clockOpts() }), {});
+  } : null;
+  console.log(`[reset-credit] helper: a person asked for a reset credit on ${nameOf(key)} with no conversation to carry it — one codex app-server child (≤ ${codexResetHelper.HELPER_WALL_MS / 1000} s)`);
+  Promise.resolve(codexResetHelper.consumeResetCreditViaAppServer({ idempotencyKey: idemKey, env, cwd: h.home, codexCmd: h.cmd, extraArgs: h.extraArgs, wallMs: (resetCreditHelper && Number(resetCreditHelper.wallMs)) || undefined, onSent: () => noteResetCreditSent(t), readFirst, pressedBy: t.origin === 'user' ? 'person' : 'auto' }))
+    .then((r) => onResetCreditHelperDone(t, r), (e) => onResetCreditHelperDone(t, { sent: false, answered: false, error: String((e && e.message) || e) }))
+    .catch((e) => console.warn('[reset-credit] helper answer failed:', e.message));
+  return { ok: true, identity: av && av.identity, idempotencyKey: idemKey };
+}
+/** THE VERDICT OF A READ BEFORE A PRESS, APPLIED (verify r8 T0; both carriers): `v` = preConsumeVerdict's row. A refusal
+ *  marks the attempt (`skipWhy`, `skipWindow`) and answers false; a failed read lets the consume through and SAYS so (journal
+ *  + a notice to the person — a failed read never blocks a human's press); else true. → boolean (go) */
+function judgeReadFirst(t, v, { readError = null } = {}) {
+  if (!v || typeof v !== 'object') return false;
+  if (v.go && v.why === 'read-failed') {
+    t.readFailed = readError || 'the read before the consume failed';
+    console.log(`[reset-credit] ${t.sid || 'helper'}: the read before the consume on ${nameOf(t.key)} failed (${String(t.readFailed).slice(0, 120)}) — the consume goes out on the count the dialog showed (a failed read never blocks a person's press; ut-cdaa01aff0)`);
+    if (t.origin === 'user') serverNotice(`codex-reset-readfail-${t.sid || 'helper'}-${Date.now()}`, `Reset credit on ${nameOf(t.key)} — the account could not be read before the request (${String(t.readFailed).slice(0, 120)}); it was sent on the count the dialog showed.`, { i18n: { key: i18nKey('Reset credit on {account} — the account could not be read before the request ({error}); it was sent on the count the dialog showed.'), params: { account: nameOf(t.key), error: String(t.readFailed).slice(0, 120) } } });
+    return true;
+  }
+  if (!v.go) { t.skipWhy = v.why || 'skipped'; t.skipWindow = v.window || null; return false; }
+  return true;
+}
+/** THE WORDS of a press that read first and did not consume (verify r8 T0: ONE spelling for the helper's `skipped` and the
+ *  wrapper's) — by what the read proved: a prior LANDED (the window moved because of it) · the wall EXPIRED by itself · a
+ *  prior UNTOLD (its own `why` names a moved window when that is the reason) · the window MOVED with no prior to explain it
+ *  (the web used a credit, a plan change) · NO CREDITS counted by the read · no verdict reached the wrapper in time · else.
+ *  → {text, i18n} */
+function resetCreditSkipNotice(t) {
+  const landed = (() => { for (let x = t.prior; x; x = x.prior) if (x.settled && x.settled.how === 'landed') return x; return null; })();
+  const expired = (() => { for (let x = t.prior; x; x = x.prior) if (x.settled && x.settled.how === 'expired') return x; return null; })();
+  const untold = (() => { for (let x = t.prior; x; x = x.prior) if (x.settled && x.settled.how === 'untold') return x; return null; })();
+  const utc = (x) => new Date(x.sentAt || x.at).toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
+  const acct = nameOf(t.key);
+  // verify r5: the read just taken shows a window other than the one the dialog showed — nothing was spent (said first:
+  // whatever the priors say, the person approved THAT window)
+  const moved = t.skipWhy === 'window-moved';
+  const movedAt = moved && Number(t.skipWindow) > 0 ? new Date(Number(t.skipWindow) * 1000).toISOString().slice(0, 16).replace('T', ' ') + ' UTC' : null;
+  if (moved && !landed && !expired && !untold) return { text: `Reset credit not used on ${acct} — the limit this dialog showed has moved since it opened (the account's window resets at ${movedAt || '?'} now); nothing was spent. Open it again to see the account now.`, i18n: { key: i18nKey('Reset credit not used on {account} — the limit this dialog showed has moved since it opened (the account’s window resets at {time} now); nothing was spent. Open it again to see the account now.'), params: { account: acct, time: movedAt || '?' } } };
+  if (landed) return { text: `Reset credit not used again on ${acct} — the request sent at ${utc(landed)} had already landed (${landed.settled.why}); this press spent nothing.`, i18n: { key: i18nKey('Reset credit not used again on {account} — the request sent at {time} had already landed ({why}); this press spent nothing.'), params: { account: acct, time: utc(landed), why: landed.settled.why } } };
+  if (expired) return { text: `Reset credit not used on ${acct} — the limit this dialog showed has reset by itself since the earlier request; nothing was spent. Open it again to see the account now.`, i18n: { key: i18nKey('Reset credit not used on {account} — the limit this dialog showed has reset by itself since the earlier request; nothing was spent. Open it again to see the account now.'), params: { account: acct } } };
+  if (untold) return { text: `Reset credit not used yet on ${acct} — the request sent at ${utc(untold)} cannot be judged (${untold.settled.why}); nothing was spent this time. Open it again: the count shown is the account's now, and a new press spends one.`, i18n: { key: i18nKey('Reset credit not used yet on {account} — the request sent at {time} cannot be judged ({why}); nothing was spent this time. Open it again: the count shown is the account’s now, and a new press spends one.'), params: { account: acct, time: utc(untold), why: untold.settled.why } } };
+  if (moved) return { text: `Reset credit not used on ${acct} — the limit this dialog showed has moved since it opened (the account's window resets at ${movedAt || '?'} now); nothing was spent. Open it again to see the account now.`, i18n: { key: i18nKey('Reset credit not used on {account} — the limit this dialog showed has moved since it opened (the account’s window resets at {time} now); nothing was spent. Open it again to see the account now.'), params: { account: acct, time: movedAt || '?' } } };
+  if (t.skipWhy === 'no-credits') return { text: `Reset credit not used on ${acct} — the account has no reset credits available.`, i18n: { key: i18nKey('Reset credit not used on {account} — the account has no reset credits available.'), params: { account: acct } } };
+  if (t.skipWhy === 'no-verdict') return { text: `Reset credit not used on ${acct} — the conversation's codex wrapper read the account but got no verdict in time; nothing was spent. Use it again from the Agents list.`, i18n: { key: i18nKey('Reset credit not used on {account} — the conversation’s codex wrapper read the account but got no verdict in time; nothing was spent. Use it again from the Agents list.'), params: { account: acct } } };
+  return { text: `Reset credit not used on ${acct} — the account's reading could not tell whether the earlier request landed, so nothing was spent. Try again after the account's next turn or ⟳.`, i18n: { key: i18nKey('Reset credit not used on {account} — the account’s reading could not tell whether the earlier request landed, so nothing was spent. Try again after the account’s next turn or ⟳.'), params: { account: acct } } };
+}
+/** A PRESS THAT STRADDLED A RESTART, STILL WAITING (verify r9 ②, reproduced on the real engine): the boot revived its record
+ *  `unknown` (it MAY have gone out — a failed read consumes at once) and charged it; a reads-first wrapper's own later word for
+ *  THAT key — its read pushed (`beforeReset`), or its `skipped` — proves nothing went out (the consume follows the verdict).
+ *  → is `t` such a record? (the wrapper's word beats the boot's guess; an older wrapper never speaks either) */
+function revivedReadFirstWaiting(t) { return !!(t && t.outcome === 'unknown' && t.revivedAt && t.sentGuessed === true && t.readFirst === true); } // verify r10 ②: a SENT record (its send on file before the restart) is never such a record
+/** …its read pushed: RE-OPEN the record so this reading settles its priors and the ONE table judges it like any press. The
+ *  press instant moves to NOW (the `in_flight` window and the ack timer must cover the go's flight — a restart longer than
+ *  the ack window would else admit a second press over a consume about to go out: reproduced), the boot's charge stands (the
+ *  ledger never under-counts; a later send charges nothing twice), the outcome comes from the wrapper (sent / skipped) within
+ *  the ack window re-armed here. Only the attempt's own conversation (the key's wrapper) re-opens it. → t | null */
+function reopenRevivedReadFirst(session, idemKey) {
+  const t = resetCreditTryByAnswer({ idempotencyKey: idemKey }, null, null);
+  if (!revivedReadFirstWaiting(t)) return null;
+  const sid = (session && session._webuiId) || '?';
+  if (t.sid && session && t.sid !== session._webuiId) { console.log(`[reset-credit] ${sid}: a read before the consume for the press revived unknown at the restart came from another conversation (${t.sid}) — not re-opened`); return null; }
+  const now = Date.now();
+  t.pressedAt = t.pressedAt || t.at; t.at = now; t.reopenedAt = now;
+  t.outcome = null; t.outcomeAt = 0; t.sentAt = 0; t.settled = null;
+  try { clearTimeout(t.ackTimer); } catch { }
+  t.ackTimer = setTimeout(() => onResetCreditNotSent(t), RESET_CREDIT_ACK_MS);
+  if (t.ackTimer.unref) t.ackTimer.unref();
+  persistResetCreditTries();
+  // (verify r10 ③: the floor is armed from the SEND — `at` = now governs only the ack window; the press's own instant is
+  // kept as `pressedAt` and NAMED here, the one reader of it)
+  console.log(`[reset-credit] ${sid}: the wrapper pushed its read before the consume for the press revived unknown at the restart (key ${String(idemKey).slice(0, 8)}…, pressed ${Math.round((now - Number(t.pressedAt)) / 1000)} s ago) — nothing went out (the consume follows the verdict): re-opened and judged now; the restart's charge on the ledger stays`);
+  return t;
+}
+/** THE WORD A RESTART LOSES — READ BACK FROM THE WRAPPER'S OWN FILE (verify r10, reproduced on the REAL wrapper file against
+ *  the stub app-server). r9 ② takes the wrapper's push / `skipped` when it REACHES the new engine, which needs the restart
+ *  to be shorter than the wrapper's wait (its push ≤ 20 s after the press, its go-wait 25 s). A longer restart — most real
+ *  ones — the wrapper wrote them to stdout while NO server was attached (dtach replays nothing; the repaint goes to clients
+ *  and skips chat) and to its own buffer file (every record it emits, a 1-s debounce). So at the ATTACH (the stdout
+ *  consumer, before its first live byte) the file's tail is read ONCE for the keyed records of THIS session's attempts
+ *  that are still open or revived unknown, and each is fed through the ONE entry (recordCodexQuotaSignal) at ITS OWN
+ *  instant (`asOf`: a reading is stamped when it was taken, never at the attach — a pre-consume read stamped NOW would
+ *  "settle" the consume that followed it). Rules: a `beforeReset` push that a send / a result of its key FOLLOWS in the
+ *  file is dropped (answered before the restart — re-fed, it would re-open the guessed record and write a go to nobody);
+ *  a READING older than LATE_MS is dropped (a late record is not a live fact); a keyed `reset_credit_sent` /
+ *  `reset_credit_result` is always taken (a fact about a request WE sent). Bounded: the last RESET_CATCHUP_TAIL_BYTES of a
+ *  LOCAL file (a remote wrapper's file is on its machine), nothing at all when no attempt of this session is open. The
+ *  window that remains: a record emitted inside the file's 1-s debounce right before the attach is in neither the file
+ *  nor the live stream — the orphan path (the floor, then a reading settles it) covers it. A re-attach (a bridge heal)
+ *  reads the file again: every keyed record is idempotent on its record (a repeated `skipped` / `reset` / `sent` changes
+ *  nothing; a repeated push writes a go the wrapper's one waiter ignores by name). → {fed, dropped} | null */
+const RESET_CATCHUP_TAIL_BYTES = 512 * 1024;
+const RESET_CATCHUP_TYPES = new Set(['rate_limits_updated', 'reset_credit_sent', 'reset_credit_result']);
+function catchUpResetCreditFromBuffer(session, id) {
+  if (!session || !id || session.host) return null;
+  const open = new Set();
+  for (const t of _resetCreditTries.values()) for (let x = t; x; x = x.prior) if (x && x.sid === id && typeof x.idempotencyKey === 'string' && x.idempotencyKey && (!x.outcome || x.outcome === 'unknown') && !x.settled) open.add(x.idempotencyKey);
+  if (!open.size) return null;
+  const f = path.join(rootDir, 'data', 'session-buffers', id + '.buf');
+  let text = '';
+  try {
+    const st = fs.statSync(f); const take = Math.min(st.size, RESET_CATCHUP_TAIL_BYTES); if (!take) return null;
+    const fd = fs.openSync(f, 'r'); try { const b = Buffer.alloc(take); fs.readSync(fd, b, 0, take, st.size - take); text = b.toString('utf8'); } finally { fs.closeSync(fd); }
+  } catch { return null; }
+  const recs = [];
+  for (const line of text.split('\n')) {
+    const l = line.trim(); if (!l || l[0] !== '{') continue;
+    let m; try { m = JSON.parse(l); } catch { continue; }
+    const p = m && m.type === 'event_msg' && m.payload && typeof m.payload === 'object' ? m.payload : null;
+    if (!p || !RESET_CATCHUP_TYPES.has(p.type) || typeof p.idempotencyKey !== 'string' || !open.has(p.idempotencyKey)) continue;
+    recs.push(m);
+  }
+  if (!recs.length) return null;
+  const answered = new Set(recs.filter((m) => m.payload.type !== 'rate_limits_updated').map((m) => m.payload.idempotencyKey));
+  const fed = [], dropped = [];
+  const spell = (p) => p.type + (p.beforeReset ? ':beforeReset' : p.afterReset ? ':afterReset' : '') + (p.skipped ? ':skipped' : p.outcome ? ':' + p.outcome : '');
+  for (const m of recs) {
+    const p = m.payload;
+    const ts = Date.parse(m.timestamp); const at = Number.isFinite(ts) && ts > 0 ? ts : null; // the wrapper stamps every record it writes
+    if (p.type === 'rate_limits_updated' && p.beforeReset === true && answered.has(p.idempotencyKey)) { dropped.push(spell(p) + ' (answered before the restart)'); continue; }
+    if (p.type === 'rate_limits_updated' && (at === null || Date.now() - at > recordLateness.LATE_MS)) { dropped.push(spell(p) + ' (' + (at === null ? 'unstamped' : recordLateness.lateWords(Date.now() - at) + ' old') + ')'); continue; }
+    try { recordCodexQuotaSignal(session, p, null, { asOf: at }); } catch (e) { console.warn(`[reset-credit] ${id}: a record from the wrapper's buffer file was not taken:`, e.message); }
+    fed.push(spell(p));
+  }
+  console.log(`[reset-credit] ${id}: ${fed.length} record(s) the wrapper wrote while no server was attached read back from its buffer file at the attach${fed.length ? ' (' + fed.join(', ') + ')' : ''}${dropped.length ? `; not re-fed: ${dropped.join(', ')}` : ''}`);
+  return { fed, dropped };
+}
+/** THE CONVERSATION WRAPPER'S READ BEFORE ITS CONSUME, ANSWERED (verify r8 T0): the wrapper took ONE `account/rateLimits/read`
+ *  for the press `idemKey` and pushed it (`rate_limits_updated {beforeReset, idempotencyKey}`, written to the cache and
+ *  through the settle like every reading) — or pushed its failure (`snap` null, `readError`). The open attempt is judged by
+ *  the ONE table (preConsumeVerdict → judgeReadFirst) and the wrapper is answered `codex-reset-credit-go {go}`: true ⇒ it
+ *  consumes; false ⇒ it never does (the attempt ends `skipped` here: the hold given back, the person told). A failed read
+ *  is only SAID — the wrapper already goes on to its consume, as the helper does (a failed read never blocks a press). */
+function answerReadBeforePress(session, idemKey, snap, readError = null) {
+  const t = resetCreditTryByAnswer({ idempotencyKey: idemKey }, null, null);
+  const sid = (session && session._webuiId) || '?';
+  if (!t || t.sentAt || t.outcome) { console.log(`[reset-credit] ${sid}: a read before the consume for an attempt that is ${!t ? 'not tracked' : t.sentAt ? 'sent already' : 'already ' + t.outcome} (key ${String(idemKey).slice(0, 8)}…) — no verdict written`); return; }
+  if (snap && snap.resetCredits && Number.isFinite(Number(snap.resetCredits.availableCount))) t.creditsAt = Number(snap.resetCredits.availableCount); // the count AT THE SEND = the read's count
+  const v = resetCredit.preConsumeVerdict(t, { readOk: !!snap, freshWindow: snap && Number(t.resetsAtSec) > 0 ? readingWindowFor(snap, t.window) : null, freshCount: snap && snap.resetCredits ? snap.resetCredits.availableCount : null, ...clockOpts() });
+  const go = judgeReadFirst(t, v, { readError: snap ? null : (readError || 'the read before the consume failed') });
+  if (!go) {
+    try { if (t.hold && !t.charged) spendGuard.release({ hold: t.hold }); } catch { }
+    t.hold = null;
+    settleResetCreditTry(t, 'skipped', { failed: true });
+    const nt = resetCreditSkipNotice(t);
+    console.log(`[reset-credit] ${sid}: the read before the consume on ${nameOf(t.key)} says no (${t.skipWhy}) — nothing spent, the wrapper told not to consume`);
+    if (t.origin === 'user') serverNotice(`codex-reset-skip-${sid}-${Date.now()}`, nt.text, { i18n: nt.i18n });
+    if (session) session._resetCreditOrigin = null;
+  }
+  if (!snap) return; // a failed read: the wrapper does not wait for a verdict (it goes on to its consume) — said above
+  try { if (session && session.pty) session.pty.write(JSON.stringify({ type: 'codex-reset-credit-go', idempotencyKey: idemKey, go, ...(go ? {} : { why: t.skipWhy || v.why || 'skipped' }) }) + '\n'); }
+  catch (e) { console.warn(`[reset-credit] ${sid}: could not answer the wrapper's read before the consume:`, e.message); }
+}
+/** The helper's answer, through the SAME doors as a wrapper's: its post-consume reading first (the one
+ *  cache writer — the pool decides on that cache, reset credits r3), then the answer (handleResetCreditResult). */
+function onResetCreditHelperDone(t, r) {
+  const res = r && typeof r === 'object' ? r : {};
+  // verify r1: the run read first and did NOT consume — the earlier request had landed (the reading settled it,
+  // said by settleResetCreditByReading) or the reading could not tell: this press spent nothing, nothing armed
+  if (res.skipped) {
+    try { if (t.hold && !t.charged) spendGuard.release({ hold: t.hold }); } catch { }
+    t.hold = null;
+    settleResetCreditTry(t, 'skipped', { failed: true });
+    const n = resetCreditSkipNotice(t);
+    if (t.skipWhy === 'window-moved') console.log(`[reset-credit] helper: the read before the consume on ${nameOf(t.key)} shows the window at ${t.skipWindow}, not the ${t.resetsAtSec} this dialog showed — nothing spent (what you approve is what runs)`);
+    else console.log(`[reset-credit] helper: the read before the consume on ${nameOf(t.key)} says no (${t.skipWhy || 'could not tell'}) — nothing spent`);
+    serverNotice(`codex-reset-skip-helper-${Date.now()}`, n.text, { i18n: n.i18n });
+    return;
+  }
+  if (res.rateLimits && !res.skipped) {
+    try {
+      const sig = quotaSourceFor(quotaBackendFor(t.key)).signalFromStream({ type: 'event_msg', payload: { type: 'rate_limits_updated', rateLimits: res.rateLimits, resetCredits: res.resetCredits || null, onDemand: true } });
+      // verify r4: this reading was taken AFTER the consume was answered — it is after the send by construction, so it is
+      // stamped strictly after it (a stub app-server answers both inside one millisecond; the PURE rule refuses a reading
+      // at or before the send, which a real vendor round trip can never tie)
+      if (sig && sig.snapshot && Number(t.sentAt) > 0 && !(Number(sig.snapshot.fetchedAt) > Number(t.sentAt))) sig.snapshot.fetchedAt = Number(t.sentAt) + 1;
+      const w = writeCodexReading(sig && sig.snapshot, 'codex-reset-helper', { key: t.key });
+      if (w && w.key) { t.postConsume = w.snap; settleResetCreditByReading(w.key, w.snap); const e = resetReadingEndsHold(w.key, null, w.snap); if (e) releaseResetHold(e[0], 'its post-reset reading landed'); } // verify r5: the helper's own post-consume read is the attempt's witness
+    } catch (e) { console.warn('[reset-credit] helper reading not written:', e.message); }
+  } else if (res.readError) console.log(`[reset-credit] helper: the post-consume read on ${nameOf(t.key)} failed (${String(res.readError).slice(0, 120)})`);
+  // `answered` rides the payload (verify r2): an app-server that exited after taking the consume said nothing — unanswered
+  handleResetCreditResult(null, { type: 'reset_credit_result', outcome: res.outcome || null, result: res.result || null, error: res.outcome ? null : (res.error || null), idempotencyKey: t.idempotencyKey, attempts: res.sent ? 1 : 0, sent: !!res.sent, answered: !!res.answered, via: 'helper' });
 }
 /**
  * THE RUNG. Returns
@@ -3738,10 +4502,13 @@ function resetCreditRung(session, { resetsAtSec = null, lane = null, key = null,
     const creditsLeft = resetCreditsLeft(session, key);
     const warmth = conversationWarmth(session, now);
     const poolAlternative = poolAlternativeFor(session, now);
-    const tried = resetCreditTriedAt(key); // the IDENTITY's floor (r2), across every session on it
+    // the IDENTITY's floor (r2), across every session on it — armed only by a consume that WENT
+    // OUT (lane reset-path) — and ONE TRY PER LIMIT EVENT: an attempt on this very event that
+    // ended (a `nothingToReset`, a refusal) is not retried before the event's own reset
+    const blockUntil = resetCredit.rungBlockUntil(t, { now, eventKey, resetsAtSec: R || null, floorMs: RESET_CREDIT_FLOOR_MS, ackMs: RESET_CREDIT_ACK_MS });
     const v = resetCredit.resetCreditVerdict({
       vendor, wallHit: true, remainingPct, resetsAtSec: R || null, nowSec, periodSec, creditsLeft,
-      cooldownUntilSec: tried ? Math.floor((tried + RESET_CREDIT_FLOOR_MS) / 1000) : null,
+      cooldownUntilSec: blockUntil ? Math.floor(blockUntil / 1000) : null,
       inTurn: warmth.inTurn, warm: warmth.warm, poolAlternative, ladderPosition: ladderPosition === 'after-switch' ? 'after-switch' : 'wall',
     });
     if (speak) console.log(`[reset-credit] ${session._webuiId}: ${v.use ? 'worth it' : 'kept'} (${v.reason} — ${resetCredit.reasonText(v.reason)}) mode=${mode} ${warmth.inTurn ? 'in-turn' : warmth.warm ? 'warm' : 'cold'} poolAlternative=${poolAlternative}${ladderPosition !== 'wall' ? ' ' + ladderPosition : ''} credits=${creditsLeft ?? '?'} on ${nameOf(key)}`);
@@ -3752,7 +4519,7 @@ function resetCreditRung(session, { resetsAtSec = null, lane = null, key = null,
       if (!firstOfEvent || !(creditsLeft > 0)) return;
       const n = creditsLeft;
       const why = refusedBy ? ` Not used automatically: ${refusedBy}.` : v.use || mode === 'off' ? '' : ` Not used automatically: ${resetCredit.reasonText(v.reason)}.`;
-      try { feedPeerCard(session, { fromName: 'VibeSpace', kind: 'notification', text: `Usage limit hit on ${nameOf(key)} — ${n} stored reset credit${n === 1 ? '' : 's'} available. ${desc.text}${why}`, resetCredit: { available: n, mode, accountKey: key } }); } catch { }
+      try { feedPeerCard(session, { fromName: 'VibeSpace', kind: 'notification', text: `Usage limit hit on ${nameOf(key)} — ${n} stored reset credit${n === 1 ? '' : 's'} available. ${desc.text}${why}`, resetCredit: { available: n, mode, accountKey: key, ...(R ? { resetsAtSec: R } : {}) } }); } catch { }
     };
     if (!v.use || mode === 'off') { wallCard(); return v.reason === 'cold-switch-first' ? 'switch-first' : 'skipped'; }
     if (mode === 'ask') {
@@ -3781,6 +4548,15 @@ function resetCreditRung(session, { resetsAtSec = null, lane = null, key = null,
       } catch (e) { console.warn('[reset-credit] could not file the For-you decision:', e.message); }
       return 'asked';
     }
+    // A WRAPPER OLDER THAN THE KEY (lane reset-path): this conversation's wrapper already had a
+    // consume refused by codex for the missing key — nothing it writes can be sent. Refused by
+    // name, the switch/wait rungs run (a person can still use the credit: the dialog sends it
+    // through the helper process — never the auto rung, which is no human click)
+    if (session._resetCreditStale) {
+      if (speak) console.log(`[reset-credit] ${session._webuiId}: kept (wrapper-predates-key — this conversation's codex wrapper predates the reset-credit fix; Terminate + Resume updates it) mode=${mode}`);
+      wallCard('this conversation\'s codex wrapper predates the reset-credit fix (Terminate + Resume it, or use the button)');
+      return 'skipped';
+    }
     // AUTO — through the ONE writer the manual button uses too (writeResetCredit).
     const wr = writeResetCredit(session, { resetsAtSec: R, lane, origin: 'auto', now, key });
     // the card NAMES the account the ceiling refused (r3 — the code alone said
@@ -3788,7 +4564,7 @@ function resetCreditRung(session, { resetsAtSec = null, lane = null, key = null,
     if (!wr.ok) { if (wr.why) wallCard(`the unattended-spend ceiling refused it (${wr.why}) for ${nameOf(key)}${wr.detail ? ` — ${String(wr.detail).replace(/\.$/, '')}` : ''}`); return 'skipped'; }
     const saved = v.waitSavedSec ? ` — saves a wait of ${resetCredit.fmtWait(v.waitSavedSec)}` : '';
     const leftTxt = creditsLeft > 0 ? `; ${creditsLeft - 1} left after this one` : '';
-    serverNotice(`codex-reset-${session._webuiId}-${now}`, `Usage limit hit on ${nameOf(key)} — using a stored reset credit${saved}${leftTxt} (${warmth.inTurn || warmth.warm ? 'warm conversation: before switching accounts' : 'no pool member can take it'}).`);
+    serverNotice(`codex-reset-${session._webuiId}-${now}`, `Usage limit hit on ${nameOf(key)} — using a stored reset credit${saved}${leftTxt} (${warmth.inTurn || warmth.warm ? 'warm conversation: before switching accounts' : 'no pool member can take it'}).`, { i18n: { key: warmth.inTurn || warmth.warm ? i18nKey('Usage limit hit on {account} — using a stored reset credit (warm conversation: before switching accounts).') : i18nKey('Usage limit hit on {account} — using a stored reset credit (no pool member can take it).'), params: { account: nameOf(key) }, ...(v.waitSavedSec ? { then: { key: i18nKey('Saves a wait of {wait}.'), params: { wait: resetCredit.fmtWait(v.waitSavedSec) } } } : creditsLeft > 0 ? { then: creditsLeft - 1 === 1 ? { key: i18nKey('1 reset credit left after this one.'), params: {} } : { key: i18nKey('{n} reset credits left after this one.'), params: { n: creditsLeft - 1 } } } : {}) } });
     global.__vsEvent?.('codex-reset-credit-try', session._accountId || 'global');
     return 'consumed';
   } catch (e) { console.warn('[reset-credit] rung failed:', e.message); return 'skipped'; }
@@ -3802,167 +4578,356 @@ function resetCreditRung(session, { resetsAtSec = null, lane = null, key = null,
 // The typed exhaustion enum + the snapshot normalizer live in the codex
 // harness (src/harnesses/codex-quota.js, S4): the harness classifies the
 // record into a signal, the engine runs the ladder on the signal.
-function recordCodexQuotaSignal(session, payload) {
+/** THE CARD THE CREDIT OUTLIVED (lane reset-path R3): a later fact about identity `key` resolves every open
+ *  wall / arm card offering a credit on it, in EVERY conversation's normalizer (the card lives where it was
+ *  drawn; the fact is the account's). ev = {kind:'used', at, untilSec} | {kind:'reading', at, usable}. */
+function resolveResetCreditCards(key, ev) {
+  if (!key || !ev) return 0;
+  const keys = new Set([key]);
+  try { for (const id of usageIdentityAccountIds(key) || []) keys.add(id); } catch { }
+  let n = 0;
+  for (const [, s] of activeSessions) {
+    try { if (s && s._normalizer && typeof s._normalizer.resolveResetCreditOffers === 'function') n += s._normalizer.resolveResetCreditOffers([...keys], ev) || 0; } catch { }
+  }
+  if (n) console.log(`[reset-credit] ${nameOf(key)}: ${n} card${n === 1 ? '' : 's'} offering a reset credit resolved (${ev.kind === 'used' ? 'the credit was used' : 'a later reading answered the wall'})`);
+  return n;
+}
+/** `reset_credit_sent` (lane reset-path): the wrapper wrote the consume, with this press's key, to
+ *  its app-server — the request went out. A "sent" that arrives after the ack window settled the
+ *  attempt `not-sent` (a wrapper busy for 90 s) re-opens it: the request did go out after all. */
+function onResetCreditSentRecord(session, payload, now = Date.now()) { // `now` = the record's own instant when read back from the wrapper's buffer file (verify r10), else its arrival
   try {
-    const sig = quotaSourceFor(session.backend).signalFromStream({ type: 'event_msg', payload });
+    const tKey = session._resetCreditKey || codexQuotaKeyFor(session);
+    const t = resetCreditTryByAnswer(payload, session, tKey);
+    if (!t) return;
+    if (t.outcome === 'not-sent') { console.log(`[reset-credit] ${session._webuiId}: the request on ${nameOf(t.key)} went out after all (${Math.round((Date.now() - t.at) / 1000)} s after it was written) — the ten-minute wait starts now`); t.outcome = null; t.outcomeAt = 0; persistResetCreditTries(); }
+    noteResetCreditSent(t, now);
+  } catch (e) { console.warn('[reset-credit] sent record failed:', e.message); }
+}
+/**
+ * THE ANSWER TO A RESET-CREDIT ATTEMPT — a conversation wrapper's `reset_credit_result`, or the
+ * helper's (lane reset-path: `session` null, the attempt found by its idempotency key). The answer
+ * is CLASSIFIED by the PURE rule (src/reset-credit.js creditAnswerOf): a vendor outcome went out;
+ * a keyless refusal naming the key = a wrapper older than the key (refused locally, never sent —
+ * the session is marked so the auto rung skips it and a person's press goes to the helper);
+ * "timed out" = sent and unanswered (the floor stays armed: it may still land); any other answered
+ * error = nothing spent. Only `reset` and an unanswered sent consume keep the ten-minute floor.
+ */
+function handleResetCreditResult(session, payload) {
+  const ans = resetCredit.creditAnswerOf(payload);
+  const out0 = payload.outcome || payload.result?.outcome || null;
+  // codex-cli >= 0.159 (its own schema): `alreadyRedeemed` = "the same idempotency key already
+  // completed a reset successfully" — with a key the answer is THIS press's own earlier success
+  // (the wrapper's retry of a timed-out consume), i.e. a reset; keyless (a wrapper older than the
+  // key, the 0.153 meaning) it stays the superseded path below. creditAnswerOf spells both.
+  const out = ans.outcome;
+  // A WRAPPER OLDER THAN THE KEY on a codex-cli that requires it: the consume never reached the
+  // vendor (refused locally, nothing spent) — the remedy is the conversation's wrapper (or the
+  // helper path from the Agents list), never the raw "missing field" text
+  const staleWrapper = out === 'refused-stale';
+  // THE IDENTITY'S ATTEMPT this answer belongs to (r2) — its followers are settled with it; an
+  // attempt already settled by the no-answer / not-sent timer has walked its ladder once and must
+  // not walk it twice
+  const tKey0 = session ? (session._resetCreditKey || codexQuotaKeyFor(session)) : null;
+  const tryRec = resetCreditTryByAnswer(payload, session, tKey0);
+  const tKey = (tryRec && tryRec.key) || tKey0;
+  const sid = (session && session._webuiId) || (tryRec && tryRec.sid) || 'helper';
+  // verify r4: a LATE answer for an attempt the chain no longer tracks (settled and dropped at a later press) — it is
+  // charged already (at its send); a `reset` says a credit of this account DID land late: the person is told, every card
+  // that offered it says used, and the pool waits for the post-reset reading. Nothing else moves: not the current
+  // attempt, not the session's origin, not the ladder
+  const keyedLate = !!(payload && typeof payload.idempotencyKey === 'string' && payload.idempotencyKey && !tryRec);
+  if (keyedLate) {
+    console.log(`[reset-credit] ${sid}: a late answer (${out || String(payload.error || '').slice(0, 60) || 'no word'}) for an earlier request on ${nameOf(tKey)} that is no longer tracked (key ${String(payload.idempotencyKey).slice(0, 8)}…) — ${out === 'reset' ? 'it LANDED late: the limit was reset (charged at its send)' : 'nothing changes'}`);
+    if (out === 'reset' && tKey) {
+      serverNotice(`codex-reset-late-${sid}-${Date.now()}`, `Reset credit on ${nameOf(tKey)} — an earlier request landed late: the limit was reset. The count shown next reflects it.`, { i18n: { key: i18nKey('Reset credit on {account} — an earlier request landed late: the limit was reset. The count shown next reflects it.'), params: { account: nameOf(tKey) } } });
+      try { resolveResetCreditCards(tKey, { kind: 'used', at: Date.now(), untilSec: null }); } catch { }
+      holdForResetReading(tKey, session ? session._webuiId : null);
+    }
+    return;
+  }
+  // verify r5 (LOW): the same keyed `reset` delivered twice (a replayed stdout line) is ONE landing — nothing is said,
+  // resolved or held a second time; the record already says so
+  if (tryRec && tryRec.outcome === 'reset' && out === 'reset' && payload && typeof payload.idempotencyKey === 'string' && payload.idempotencyKey === tryRec.idempotencyKey) {
+    console.log(`[reset-credit] ${sid}: a repeated reset answer for ${nameOf(tKey)} (key ${String(payload.idempotencyKey).slice(0, 8)}…) — it had landed already; nothing changes`);
+    return;
+  }
+  // (verify r10: a revived press is a PERSON's by its RECORD — the session object is new after a restart, its origin slot
+  // empty — on every branch below, not only the r9 skip: its failure / late answer is reported to the person who pressed)
+  const userAttempt = session ? (session._resetCreditOrigin === 'user' || !!(tryRec && tryRec.revivedAt && tryRec.origin === 'user')) : !!(tryRec && tryRec.origin === 'user');
+  if (session) session._resetCreditOrigin = null; // one answer per attempt
+  // verify r8 T0: the conversation's wrapper READ FIRST and did not consume — on this engine's own verdict (the attempt is
+  // `skipped` already, said at the verdict) or because no verdict reached it in time (settled here, said once)
+  if (out === 'skipped') {
+    // verify r9 ② (reproduced): the attempt the boot revived `unknown` (it MAY have gone out) — the wrapper's own keyed word says
+    // nothing did (`skipped`, sent:false): its word beats the boot's guess. Re-opened here so the settle below takes it (the floor
+    // the guess armed ends with the outcome, the dialog is free, the person told); the restart's charge stands (never under-counted)
+    let revivedPress = false;
+    if (tryRec && ans.sent === false && revivedReadFirstWaiting(tryRec)) { revivedPress = true; tryRec.outcome = null; tryRec.outcomeAt = 0; tryRec.sentAt = 0; tryRec.settled = null; console.log(`[reset-credit] ${sid}: the wrapper says the press revived unknown at the restart was never consumed (${ans.why || 'skipped'}) — its word stands over the boot's guess; the restart's charge on the ledger stays (never under-counted)`); }
+    if (!tryRec || tryRec.outcome || tryRec.sentAt) { console.log(`[reset-credit] ${sid}: the wrapper's read before the consume ended with no consume on ${nameOf(tKey)} (${ans.why || 'skipped'})${tryRec ? ' — the attempt is ' + (tryRec.outcome ? tryRec.outcome + ' already' : 'SENT already (a skipped after a send is not the wrapper\'s: ignored)') : ''}`); return; }
+    try { if (tryRec.hold && !tryRec.charged) spendGuard.release({ hold: tryRec.hold }); } catch { }
+    tryRec.hold = null; tryRec.skipWhy = ans.why || 'no-verdict';
+    settleResetCreditTry(tryRec, 'skipped', { failed: true });
+    console.log(`[reset-credit] ${sid}: the wrapper read the account before the consume on ${nameOf(tKey)} and did not consume (${tryRec.skipWhy}) — nothing spent`);
+    // a revived press is a PERSON's by its record (the session object is new after a restart: its origin slot is empty)
+    if (userAttempt || (revivedPress && tryRec.origin === 'user')) { const nt = resetCreditSkipNotice(tryRec); serverNotice(`codex-reset-skip-${sid}-${Date.now()}`, nt.text, { i18n: nt.i18n }); }
+    return;
+  }
+  const alreadyWalked = !!(tryRec && (tryRec.outcome === 'no-answer' || tryRec.outcome === 'not-sent'));
+  // WENT OUT, OR NEVER DID (lane reset-path): an answer proves the send (the 2.369.199 wrapper
+  // reports it only here) — the charge and the floor; a refusal before the send gives the spend
+  // hold back and arms nothing
+  if (tryRec && ans.sent) noteResetCreditSent(tryRec, Date.now(), { proof: 'answer' });
+  if (tryRec && !ans.sent && !tryRec.charged && tryRec.hold) { try { spendGuard.release({ hold: tryRec.hold }); } catch { } tryRec.hold = null; }
+  if (staleWrapper && session) session._resetCreditStale = true;
+  // verify r8 T0: judged against the SEND — the read taken BEFORE the consume is newer than the attempt's open and says
+  // nothing about the consume (it read "usable" / "spent" before anything went out); only a reading after the send can
+  // show the limit open because of it, or be the post-reset reading the pool waits for
+  const triedAtOf = () => (tryRec && (tryRec.sentAt || tryRec.at)) || Number(session && session._codexResetTriedAt) || 0;
+  if (out === 'reset') {
+    serverNotice(`codex-reset-ok-${sid}-${Date.now()}`, session ? `Codex reset credit consumed — the limit was reset, continuing on the same account.` : `Codex reset credit used on ${nameOf(tKey)} — the limit was reset.`, { i18n: session ? { key: i18nKey('Codex reset credit consumed — the limit was reset, continuing on the same account.'), params: {} } : { key: i18nKey('Codex reset credit used on {account} — the limit was reset.'), params: { account: nameOf(tKey) } } });
+    // worked:false — codex says the LIMIT was reset on this identity; the
+    // conversation itself has produced nothing yet. Nothing on this path
+    // fires a continue either (this very call disarms first, so the
+    // kickPoolEval below finds an unarmed session), so the classification
+    // only decides whether a still-live failed fire keeps its quarantine —
+    // and a redeemed credit is not a reason to re-open the hour's budget:
+    // that quarantine self-expires in 10min, the same floor
+    // the credit rung itself paces on (RESET_CREDIT_FLOOR_MS).
+    if (session) { try { getAutoResume()?.noteRecovered?.(session._webuiId, 'codex reset credit consumed', { worked: false }); } catch { } }
+    if (tryRec && tryRec.outcome) { tryRec.outcome = 'reset'; tryRec.outcomeAt = Date.now(); tryRec.settled = null; persistResetCreditTries(); } // a late answer still re-opened the window
+    settleResetCreditTry(tryRec, 'reset');
+    // THE POOL WAITS FOR THE POST-RESET READING (r3, see holdForResetReading):
+    // unless one already landed (the current wrapper re-reads BEFORE it
+    // answers), the cache still says spent — deciding on it now moves the
+    // pool off the account this credit just re-opened
+    let reRead = false;
+    try {
+      const c = tKey ? readRawUsageCache(tKey) : null;
+      const triedAt = triedAtOf();
+      reRead = !!(c && triedAt && (Number(c.fetchedAt) || 0) > triedAt && (c.source === 'codex-rate-limits' || c.source === 'codex-reset-helper'));
+    } catch { }
+    if (tKey && !reRead) holdForResetReading(tKey, session ? session._webuiId : null);
+    else kickPoolEval();
+    // R3: every card that offered this credit says it was used (the new window's end, when the post-reset reading said it)
+    try {
+      let untilSec = null;
+      if (reRead) { const c = readRawUsageCache(tKey); const b = (c && (c.sevenDay || c.fiveHour)) || null; untilSec = b && Number(b.resetsAt) > 0 ? Number(b.resetsAt) : null; }
+      resolveResetCreditCards(tKey, { kind: 'used', at: Date.now(), untilSec });
+    } catch { }
+    return;
+  }
+  // credit didn't land (nothingToReset / alreadyRedeemed / cooldown /
+  // error) — fall through to the normal ladder: switch, else wait.
+  global.__vsEvent?.('codex-reset-credit-failed', staleWrapper ? 'stale-wrapper (no idempotencyKey)' : String(out0 || out || payload.error || 'unknown').slice(0, 60));
+  // SUPERSEDED (r2, reproduced): `alreadyRedeemed` means somebody's credit
+  // already re-opened this limit, and a reading of this account NEWER than
+  // the attempt that shows it usable says the same — neither is a wall.
+  // Demoting/arming from the attempt's stale stated reset moved the whole
+  // pool off the account a sibling's credit had just re-opened. Re-read
+  // instead (the existing caps-routed rung — the account's own app-server;
+  // nothing here touches a vendor) and let THAT reading run the ladder.
+  let superseded = null;
+  if (out === 'alreadyRedeemed') superseded = 'the vendor says this limit was already redeemed';
+  else {
+    try {
+      const c = tKey ? readRawUsageCache(tKey) : null;
+      const triedAt = triedAtOf();
+      if (c && triedAt && (Number(c.fetchedAt) || 0) > triedAt && quotaVerdict(c, Math.floor(Date.now() / 1000)).usable === true) superseded = 'a reading newer than the attempt shows the limit open';
+    } catch { }
+  }
+  if (superseded) {
+    console.log(`[reset-credit] ${sid}: credit answer ${out || 'unknown'} on ${nameOf(tKey)} — ${superseded}; not a wall (re-reading instead of demoting)`);
+    settleResetCreditTry(tryRec, String(out || 'superseded'), { failed: true, superseded: true });
+    if (userAttempt) serverNotice(`codex-reset-fail-${sid}-${Date.now()}`, `Reset credit not used on ${nameOf(tKey)} — ${superseded}.`, { i18n: { key: out === 'alreadyRedeemed' ? i18nKey('Reset credit not used on {account} — the vendor says this limit was already redeemed.') : i18nKey('Reset credit not used on {account} — a reading newer than the attempt shows the limit open.'), params: { account: nameOf(tKey) } } });
+    try { Promise.resolve(probeQuotaForKey(tKey, { session })).then(() => kickPoolEval(), () => kickPoolEval()); } catch { }
+    return;
+  }
+  // a LATE answer (the not-sent / no-answer timer settled it first) still states the true outcome:
+  // the floor reads it (an unanswered consume arms, a nothingToReset does not)
+  if (tryRec && tryRec.outcome && tryRec.outcome !== out) { tryRec.outcome = String(out || 'failed'); tryRec.outcomeAt = Date.now(); persistResetCreditTries(); }
+  // the attempt's followers walk THEIR ladder whoever asked for it
+  settleResetCreditTry(tryRec, String(out || 'failed'), { failed: true });
+  // A PERSON'S attempt (p2) is REPORTED, never walked down the ladder: the
+  // wall that card sat on already ran it, and a roster click may have no
+  // wall at all (arming a wait from it would invent one).
+  const said = staleWrapper
+    ? 'this conversation\'s codex wrapper predates the reset-credit fix and codex refused the request (nothing was sent) — Terminate + Resume the conversation, or use the credit from the Agents list (it goes through a short-lived helper process there)'
+    : out === 'unanswered' ? `no answer came back (${String(payload.error || 'timed out').slice(0, 120)}) — it may still land, so the next try waits ten minutes`
+      : out === 'not-sent' ? `the request was never sent (${String(payload.error || 'no word from codex').slice(0, 120)}) — nothing was spent`
+        // verify r3 (money): a word outside the measured enum (or none) is a consume we cannot read — never "nothing spent"
+        : out === 'unknown-outcome' ? `codex answered «${String(ans.word || out0 || 'no outcome word').slice(0, 60)}», a word VibeSpace does not know (the measured CLI says ${resetCredit.VENDOR_OUTCOMES.join(' / ')}) — it may have spent a credit, so the next try waits ten minutes and the account's next reading settles it`
+          : (RESET_CREDIT_OUTCOME_WORDS[out0] || `the vendor answered ${String(out0 || payload.error || 'unknown').slice(0, 120)}`);
+  // THE WORDS' i18n (verify r5): one key per shape of `said`, the vendor's own text / word as a parameter
+  const acct = nameOf(tKey);
+  const saidI18n = staleWrapper ? { key: i18nKey('Reset credit not used on {account} — this conversation’s codex wrapper predates the reset-credit fix and codex refused the request (nothing was sent) — Terminate + Resume the conversation, or use the credit from the Agents list (it goes through a short-lived helper process there).'), params: { account: acct } }
+    : out === 'unanswered' ? { key: i18nKey('Reset credit not used on {account} — no answer came back ({error}) — it may still land, so the next try waits ten minutes.'), params: { account: acct, error: String(payload.error || 'timed out').slice(0, 120) } }
+      : out === 'not-sent' ? { key: i18nKey('Reset credit not used on {account} — the request was never sent ({error}) — nothing was spent.'), params: { account: acct, error: String(payload.error || 'no word from codex').slice(0, 120) } }
+        : out === 'unknown-outcome' ? { key: i18nKey('Reset credit not used on {account} — codex answered «{word}», a word VibeSpace does not know (the measured CLI says {known}) — it may have spent a credit, so the next try waits ten minutes and the account’s next reading settles it.'), params: { account: acct, word: String(ans.word || out0 || 'no outcome word').slice(0, 60), known: resetCredit.VENDOR_OUTCOMES.join(' / ') } }
+          : out0 === 'nothingToReset' ? { key: i18nKey('Reset credit not used on {account} — no current limit window is eligible for a reset (nothing was spent).'), params: { account: acct } }
+            : out0 === 'noCredit' ? { key: i18nKey('Reset credit not used on {account} — the account has no reset credits available.'), params: { account: acct } }
+              : { key: i18nKey('Reset credit not used on {account} — the vendor answered {text}.'), params: { account: acct, text: String(out0 || payload.error || 'unknown').slice(0, 120) } };
+  if (out === 'unknown-outcome') {
+    console.log(`[reset-credit] ${sid}: the consume on ${nameOf(tKey)} was answered «${String(ans.word || out0 || 'no outcome word').slice(0, 60)}» — not a word of the measured enum (${resetCredit.VENDOR_OUTCOMES.join('/')}): treated as a consume of unknown effect (charged, the floor, unsettled until a reading)`);
+    // THE ONE For-you ITEM FOR A WORD WE DO NOT KNOW (verify r5, T2 ⑤): a server notice is a toast — gone with the tab; a
+    // consume the engine could not read is a fact the owner should see once, with the vendor's word, until the reading
+    // settles it (it expires with the wall it was for). This file is the `pool` producer (the For-you census binds the
+    // origin to the producing FILE; the spend ceiling's own notices are spend-guard's)
+    try {
+      const todos = getUserTodos();
+      const word = String(ans.word || out0 || 'no outcome word').slice(0, 60);
+      const R = tryRec && Number(tryRec.resetsAtSec) > 0 ? Number(tryRec.resetsAtSec) * 1000 : 0;
+      if (todos && typeof todos.add === 'function') todos.add('webui:reset-credit', {
+        origin: 'pool',
+        text: `Codex answered a reset-credit request on ${acct} with a word VibeSpace does not know («${word}») — it may have spent a credit; refresh the account (⟳) to settle it`,
+        detail: `The measured codex CLI answers a consume with ${resetCredit.VENDOR_OUTCOMES.join(' / ')}; this one answered «${word}». The attempt is charged and the ten-minute wait is armed; the account's next reading (⟳ in the usage menu, or its next turn) says whether the count fell. If a new codex version added this word, scripts/measure-codex-protocol.mjs re-measures the outcome table.`,
+        urgency: 'normal', kind: 'notice', sessionName: (session && session.name) || null,
+        i18n: { text: { key: i18nKey('Codex answered a reset-credit request on {account} with a word VibeSpace does not know ({word}) — it may have spent a credit; refresh the account (⟳) to settle it'), params: { account: acct, word } } },
+        expiresAt: R && R > Date.now() ? R : Date.now() + 24 * 3600e3,
+      });
+    } catch (e) { console.warn('[reset-credit] could not file the For-you notice about the unknown vendor word:', e.message); }
+    // verify r4 (reproduced): the vendor ANSWERED, so the consume is complete — and its post-consume reading (the helper's,
+    // the wrapper's: both read BEFORE they answer) was taken while the attempt was still inside the floor with no outcome,
+    // so it settled nothing then. Consulted now: a count that did not fall settles it NOT LANDED at once (the floor still
+    // holds its ten minutes); a fall settles it landed. An UNANSWERED consume keeps the fresh read of the next press
+    // instead (it may still land after any earlier reading)
+    // verify r5 (reproduced, money): r4 consulted the cache FILE — a merge whose `fetchedAt` is the newest push's while its
+    // count and its buckets are CARRIED from older readings (usage-cache-write) — and a passive push after the send settled
+    // the attempt NOT LANDED on a count stamped 11 min before the send ("the window is unchanged": a bucket stamped before
+    // it); the next press consumed with no read. Only the carrier's OWN post-consume reading, kept on the attempt
+    // (`postConsume`: the helper's read, or a wrapper push marked `afterReset` with this key), may judge it; a carrier that
+    // marks none (an older wrapper) leaves it unsettled for the next press's read — the honest extra read, never a guess
+    try { if (tryRec && tryRec.postConsume) settleResetCreditByReading(tKey, tryRec.postConsume); } catch { }
+  }
+  if (staleWrapper) console.log(`[reset-credit] ${sid}: the conversation's wrapper predates the consume's idempotencyKey (codex-cli refused it locally, nothing sent) — the ten-minute wait not started; Terminate + Resume updates it, a person's press goes through the helper`);
+  if (userAttempt) {
+    serverNotice(`codex-reset-fail-${sid}-${Date.now()}`, `Reset credit not used on ${nameOf(tKey)} — ${said}.`, { i18n: saidI18n });
+    return;
+  }
+  if (alreadyWalked || !session) return; // the no-answer / not-sent timer already walked it
+  walkLadderAfterCredit(session, { resetsAtSec: Number(session._codexLastResetsAt) || 0, lane: session._codexLastLane || null, key: tKey });
+}
+/** THE ONE codex snapshot writer (the wrapper's pushes, a wall's synthesized mark, the reset-credit helper's
+ *  post-consume read): attributed through the turn-pinned slot (or the helper's own key), the window guard,
+ *  the producer stamped, the one cache writer. */
+function writeCodexReading(snap, source, { session = null, key: forKey = null } = {}) {
+  if (!snap) return null;
+  // ONE attribution function for readings (2026-09-07): the codex snapshot
+  // is a VALUE like every other, so it goes through the same turn-pinned
+  // validated slot instead of re-deriving "the pool's current member" per
+  // record. codexQuotaKeyFor is the un-pinned twin (probe matching).
+  // …and through the same window guard: `capsOf('codex').hotSwitch` is
+  // 'impossible', so codex has no re-point to lag behind — but the guard is
+  // about WHOSE numbers these are, and a key that is wrong for any other
+  // reason is wrong the same way. The synthesized spent-bucket snapshot on
+  // `task_failed` states no reset it did not receive, so it is inert there.
+  // the helper's reading names its identity (lane reset-path: no session — the key IS the login it ran on)
+  const _k0 = forKey || readingSlotFor(session).key || codexQuotaKeyFor(session);
+  const key = guardReadingTarget(_k0, readingLag.windowOf(snap), { session, what: 'codex:' + source, entry: snap });
+  // an ARCHIVED reading is not an unparseable one — the waiter must be told
+  // which of the two happened (a probe that says "unparseable" about a
+  // perfectly good payload sends the next reader hunting the wrong bug)
+  if (!key) return { key: null, snap, archived: true };
+  // STAMP THE PRODUCER AT THE WRITE (2026-09-07 r3, reproduced): the
+  // provenance line reads `snap.source`, and `normalizeCodexRateLimit` is
+  // a PURE payload mapper that cannot know which channel carried it — so
+  // every codex panel rendered "via unknown · No producer recorded this
+  // reading" about the one codex producer that exists.
+  snap.source = source;
+  // WHEN the stored reset-credit count was STATED (r2): the cache writer now
+  // carries the count across pushes that do not state it, so the file's
+  // `fetchedAt` no longer dates the count — resetCreditsLeft compares this
+  // stamp with the session's own last read and trusts the fresher one
+  if (snap.resetCredits && typeof snap.resetCredits === 'object' && !snap.resetCredits.at) snap.resetCredits = { ...snap.resetCredits, at: Number(snap.fetchedAt) || Date.now() };
+  try {
+    const cur = usageWrite.readCacheObject(USAGE_CACHE_DIR, key);
+    if (!cur || (Number(cur.fetchedAt) || 0) < (Number(snap.fetchedAt) || 0)) {
+      // codex has no OTel channel, so there is nothing to corroborate WITH:
+      // the label is deliberately absent rather than a fabricated `true`.
+      // ONE limit per push (B-9213): this snapshot names its own limitId
+      // and the write path merges it under that id, so a Spark push can no
+      // longer erase the plan limit this account is actually spending.
+      usageWrite.writeCacheObject({
+        cacheDir: USAGE_CACHE_DIR, key, obj: snap,
+        set: quotaSourceFor(session ? session.backend : quotaBackendFor(key)).limitSetFromSnapshot?.(snap, { identity: key, source }) || null,
+        source, backend: 'codex',
+      });
+    }
+  } catch { }
+  return { key, snap };
+}
+function recordCodexQuotaSignal(session, payload, rec = null, { asOf = null } = {}) {
+  try {
+    // verify r8 ②: a held fact replayed at the declaration is stamped at ITS instant (`asOf` = its arrival on the skewed
+    // stream), never at the replay's — the cache writer and the settle rules then see it in its true order
+    const now = Number(asOf) > 0 ? Number(asOf) : Date.now();
+    // A LATE RECORD IS NOT A LIVE FACT — on THIS feed too (verify r5, reproduced on the real consumer: the lane-hot-switch
+    // rule was wired into the claude parse only, while the codex wrapper stamps EVERY record it writes). A dead bridge's
+    // backlog delivered a 3-h-old `rate_limits_updated` as NOW: the cache filed 3-h-old numbers as current, an unsettled
+    // reset-credit attempt sent minutes earlier was settled NOT LANDED by them (the next press consumed with no read), and a
+    // 3-h-old wall armed auto-resume. The consumer hands the whole record (`rec`); a reading or a wall it stamped more than
+    // the bound ago is counted, never acted on. A keyed `reset_credit_sent` / `reset_credit_result` is a fact about a request
+    // WE sent (late or not: the vendor's own answer to our key) and is always taken.
+    if (rec && typeof rec === 'object' && payload && (payload.type === 'rate_limits_updated' || payload.type === 'task_failed')) {
+      try { noteStreamRecord(session, rec); } catch { }
+      // verify r8 T0: a reading the wrapper took IN REPLY to this engine's own verb (`beforeReset` + the press's key),
+      // arriving within the bound of that verb's write, is a live fact whatever its stamp says — on a skewed stream the
+      // stamp is about the clock, not the record. The gate below is for records nobody asked for
+      const ownReply = payload.type === 'rate_limits_updated' && payload.beforeReset === true && typeof payload.idempotencyKey === 'string' && (() => { try { const t = resetCreditTryByAnswer({ idempotencyKey: payload.idempotencyKey }, null, null); return !!(t && ((!t.sentAt && !t.outcome) || revivedReadFirstWaiting(t)) && Date.now() - Number(t.at) <= recordLateness.LATE_MS); } catch { return false; } })();
+      let v = null;
+      try { v = ownReply ? null : liveFactVerdict(session, rec); } catch { v = null; }
+      if (v && v.verdict === 'late') {
+        noteLateFact(session, payload.type === 'task_failed' ? 'codex wall' : 'codex reading', v, (at) => recordCodexQuotaSignal(session, payload, rec, { asOf: at })); // held while no offset is declared (verify r7 ④); replayed at its own instant (verify r8 ②)
+        if (payload.type === 'rate_limits_updated') settleCodexLimitsWaiters(session, { ok: false, reason: `the reading is a backlog record (${recordLateness.lateWords(v.lateMs)} late) — not taken as live` });
+        return;
+      }
+    }
+    const sig = quotaSourceFor(session.backend).signalFromStream({ type: 'event_msg', payload }, now);
     // `source` is a PARAMETER, not an assumption: this helper serves two
     // channels and one of them does not always carry a reading (see the
     // task_failed call site, which synthesizes a spent-bucket snapshot).
-    const writeSnap = (snap, source) => {
-      if (!snap) return null;
-      // ONE attribution function for readings (2026-09-07): the codex snapshot
-      // is a VALUE like every other, so it goes through the same turn-pinned
-      // validated slot instead of re-deriving "the pool's current member" per
-      // record. codexQuotaKeyFor is the un-pinned twin (probe matching).
-      // …and through the same window guard: `capsOf('codex').hotSwitch` is
-      // 'impossible', so codex has no re-point to lag behind — but the guard is
-      // about WHOSE numbers these are, and a key that is wrong for any other
-      // reason is wrong the same way. The synthesized spent-bucket snapshot on
-      // `task_failed` states no reset it did not receive, so it is inert there.
-      const _k0 = readingSlotFor(session).key || codexQuotaKeyFor(session);
-      const key = guardReadingTarget(_k0, readingLag.windowOf(snap), { session, what: 'codex:' + source, entry: snap });
-      // an ARCHIVED reading is not an unparseable one — the waiter must be told
-      // which of the two happened (a probe that says "unparseable" about a
-      // perfectly good payload sends the next reader hunting the wrong bug)
-      if (!key) return { key: null, snap, archived: true };
-      // STAMP THE PRODUCER AT THE WRITE (2026-09-07 r3, reproduced): the
-      // provenance line reads `snap.source`, and `normalizeCodexRateLimit` is
-      // a PURE payload mapper that cannot know which channel carried it — so
-      // every codex panel rendered "via unknown · No producer recorded this
-      // reading" about the one codex producer that exists.
-      snap.source = source;
-      // WHEN the stored reset-credit count was STATED (r2): the cache writer now
-      // carries the count across pushes that do not state it, so the file's
-      // `fetchedAt` no longer dates the count — resetCreditsLeft compares this
-      // stamp with the session's own last read and trusts the fresher one
-      if (snap.resetCredits && typeof snap.resetCredits === 'object' && !snap.resetCredits.at) snap.resetCredits = { ...snap.resetCredits, at: Number(snap.fetchedAt) || Date.now() };
-      try {
-        const cur = usageWrite.readCacheObject(USAGE_CACHE_DIR, key);
-        if (!cur || (Number(cur.fetchedAt) || 0) < (Number(snap.fetchedAt) || 0)) {
-          // codex has no OTel channel, so there is nothing to corroborate WITH:
-          // the label is deliberately absent rather than a fabricated `true`.
-          // ONE limit per push (B-9213): this snapshot names its own limitId
-          // and the write path merges it under that id, so a Spark push can no
-          // longer erase the plan limit this account is actually spending.
-          usageWrite.writeCacheObject({
-            cacheDir: USAGE_CACHE_DIR, key, obj: snap,
-            set: quotaSourceFor(session.backend).limitSetFromSnapshot?.(snap, { identity: key, source }) || null,
-            source, backend: 'codex',
-          });
-        }
-      } catch { }
-      return { key, snap };
-    };
+    const writeSnap = (snap, source) => writeCodexReading(snap, source, { session });
     // Escape ladder on codex exhaustion: the RESET-CREDIT RUNG (resetCreditRung,
     // above — the verdict forks it by warmth) → ② pool switch → ③ auto-resume wait.
-    if (payload.type === 'reset_credit_result') {
-      const out0 = payload.outcome || payload.result?.outcome || null;
-      // codex-cli >= 0.159 (its own schema): `alreadyRedeemed` = "the same
-      // idempotency key already completed a reset successfully" — with a key the
-      // answer is THIS press's own earlier success (the wrapper's retry of a
-      // timed-out consume), i.e. a reset. Keyless (a wrapper older than the key,
-      // the 0.153 meaning) it stays the superseded path below.
-      const keyed = typeof payload.idempotencyKey === 'string' && payload.idempotencyKey !== '';
-      const out = out0 === 'alreadyRedeemed' && keyed ? 'reset' : out0;
-      // A WRAPPER OLDER THAN THE KEY on a codex-cli that requires it: the consume
-      // never reached the vendor (refused locally, nothing spent) — the remedy is
-      // the conversation's wrapper, never the raw "missing field" text
-      const staleWrapper = !keyed && !out0 && /idempotencyKey/.test(String(payload.error || ''));
-      const userAttempt = session._resetCreditOrigin === 'user';
-      session._resetCreditOrigin = null; // one answer per attempt
-      // THE IDENTITY'S ATTEMPT this answer belongs to (r2) — its followers are
-      // settled with it; an attempt already settled by the no-answer timer has
-      // walked its ladder once and must not walk it twice
-      const tKey = session._resetCreditKey || codexQuotaKeyFor(session);
-      const t0 = tKey ? _resetCreditTries.get(tKey) : null;
-      const tryRec = t0 && t0.sid === session._webuiId ? t0 : null;
-      const alreadyWalked = !!(tryRec && tryRec.outcome === 'no-answer');
-      if (out === 'reset') {
-        serverNotice(`codex-reset-ok-${session._webuiId}-${Date.now()}`, `Codex reset credit consumed — the limit was reset, continuing on the same account.`);
-        // worked:false — codex says the LIMIT was reset on this identity; the
-        // conversation itself has produced nothing yet. Nothing on this path
-        // fires a continue either (this very call disarms first, so the
-        // kickPoolEval below finds an unarmed session), so the classification
-        // only decides whether a still-live failed fire keeps its quarantine —
-        // and a redeemed credit is not a reason to re-open the hour's budget:
-        // that quarantine self-expires in 10min, the same floor
-        // the credit rung itself paces on (RESET_CREDIT_FLOOR_MS).
-        try { getAutoResume()?.noteRecovered?.(session._webuiId, 'codex reset credit consumed', { worked: false }); } catch { }
-        if (tryRec && tryRec.outcome) { tryRec.outcome = 'reset'; tryRec.outcomeAt = Date.now(); } // a late answer still re-opened the window
-        settleResetCreditTry(tryRec, 'reset');
-        // THE POOL WAITS FOR THE POST-RESET READING (r3, see holdForResetReading):
-        // unless one already landed (the current wrapper re-reads BEFORE it
-        // answers), the cache still says spent — deciding on it now moves the
-        // pool off the account this credit just re-opened
-        let reRead = false;
-        try {
-          const c = tKey ? readRawUsageCache(tKey) : null;
-          const triedAt = (tryRec && tryRec.at) || Number(session._codexResetTriedAt) || 0;
-          reRead = !!(c && triedAt && (Number(c.fetchedAt) || 0) > triedAt && c.source === 'codex-rate-limits');
-        } catch { }
-        if (tKey && !reRead) holdForResetReading(tKey, session._webuiId);
-        else kickPoolEval();
-      } else {
-        // credit didn't land (nothingToReset / alreadyRedeemed / cooldown /
-        // error) — fall through to the normal ladder: switch, else wait.
-        global.__vsEvent?.('codex-reset-credit-failed', staleWrapper ? 'stale-wrapper (no idempotencyKey)' : String(out || payload.error || 'unknown').slice(0, 60));
-        // SUPERSEDED (r2, reproduced): `alreadyRedeemed` means somebody's credit
-        // already re-opened this limit, and a reading of this account NEWER than
-        // the attempt that shows it usable says the same — neither is a wall.
-        // Demoting/arming from the attempt's stale stated reset moved the whole
-        // pool off the account a sibling's credit had just re-opened. Re-read
-        // instead (the existing caps-routed rung — the account's own app-server;
-        // nothing here touches a vendor) and let THAT reading run the ladder.
-        let superseded = null;
-        if (out === 'alreadyRedeemed') superseded = 'the vendor says this limit was already redeemed';
-        else {
-          try {
-            const c = tKey ? readRawUsageCache(tKey) : null;
-            const triedAt = (tryRec && tryRec.at) || Number(session._codexResetTriedAt) || 0;
-            if (c && triedAt && (Number(c.fetchedAt) || 0) > triedAt && quotaVerdict(c, Math.floor(Date.now() / 1000)).usable === true) superseded = 'a reading newer than the attempt shows the limit open';
-          } catch { }
-        }
-        if (superseded) {
-          console.log(`[reset-credit] ${session._webuiId}: credit answer ${out || 'unknown'} on ${nameOf(tKey)} — ${superseded}; not a wall (re-reading instead of demoting)`);
-          settleResetCreditTry(tryRec, String(out || 'superseded'), { failed: true, superseded: true });
-          if (userAttempt) serverNotice(`codex-reset-fail-${session._webuiId}-${Date.now()}`, `Reset credit not used on ${nameOf(tKey)} — ${superseded}.`);
-          try { Promise.resolve(probeQuotaForKey(tKey, { session })).then(() => kickPoolEval(), () => kickPoolEval()); } catch { }
-          return;
-        }
-        // the attempt's followers walk THEIR ladder whoever asked for it
-        settleResetCreditTry(tryRec, String(out || 'failed'), { failed: true });
-        // A PERSON'S attempt (p2) is REPORTED, never walked down the ladder: the
-        // wall that card sat on already ran it, and a roster click may have no
-        // wall at all (arming a wait from it would invent one).
-        const said = staleWrapper
-          ? 'this conversation\'s codex wrapper is older than the codex CLI\'s reset-credit request (nothing was spent) — Terminate + Resume the conversation to update its wrapper, then use the credit again'
-          : (RESET_CREDIT_OUTCOME_WORDS[out] || `the vendor answered ${String(out || payload.error || 'unknown').slice(0, 120)}`);
-        if (staleWrapper) console.log(`[reset-credit] ${session._webuiId}: the conversation's wrapper predates the consume's idempotencyKey (codex-cli refused it locally, nothing spent) — Terminate + Resume updates it`);
-        if (userAttempt) {
-          serverNotice(`codex-reset-fail-${session._webuiId}-${Date.now()}`, `Reset credit not used on ${nameOf(tKey)} — ${said}.`);
-          return;
-        }
-        if (alreadyWalked) return; // the no-answer timer already walked it
-        walkLadderAfterCredit(session, { resetsAtSec: Number(session._codexLastResetsAt) || 0, lane: session._codexLastLane || null, key: tKey });
-      }
-      return;
-    }
+    // the request WENT OUT (lane reset-path): the floor + the charge start here, never at the write
+    if (payload.type === 'reset_credit_sent') { onResetCreditSentRecord(session, payload, now); return; }
+    if (payload.type === 'reset_credit_result') { handleResetCreditResult(session, payload); return; }
     if (payload.type === 'rate_limits_updated' && payload.rateLimits) {
       // the harness normalized the snapshot (window-by-length, exhaustion
       // markers, the on-demand resetCredits count) — sig.snapshot is it
       const snap0 = sig?.snapshot || null;
       // the live app-server push — the codex twin of claude's 'rate-limit-event'
       const w = writeSnap(snap0, 'codex-rate-limits');
+      // THE CARRIER'S OWN POST-CONSUME READ rides ON THE ATTEMPT (verify r5): the 2.369.200 wrapper marks the read it takes
+      // after the consume answered (`afterReset` + the press's key); an answer the engine cannot read (an unmeasured word)
+      // is judged by THIS reading and by nothing else — the cache FILE is a merge (a carried count, a carried bucket, a
+      // passive push taken while the consume was still in flight), never a witness of the consume's completion
+      if (w && w.snap && payload.afterReset === true && typeof payload.idempotencyKey === 'string' && payload.idempotencyKey) {
+        try { const t = resetCreditTryByAnswer({ idempotencyKey: payload.idempotencyKey }, null, null); if (t) t.postConsume = w.snap; } catch { }
+      }
       // an rpc-rate-limits probe waiting on this session settles AFTER the
       // cache write — its next quotaVerdictFor already reads the fresh file
-      settleCodexLimitsWaiters(session, w && w.key ? { ok: true }
-        : { ok: false, reason: w && w.archived ? 'the reading\'s window is not this account\'s (archived)' : 'unparseable rateLimits' });
+      settleCodexLimitsWaiters(session, w && w.key ? { ok: true, key: w.key } // R4: the press is answered with WHOSE reading it wrote
+        : { ok: false, archived: !!(w && w.archived), reason: w && w.archived ? 'the reading\'s window is not this account\'s (archived)' : 'unparseable rateLimits' });
       // the stored reset-credit count rides ONLY the on-demand read — remember it on
       // the session so the rung knows it even when a later passive push drops it
       // (p2: WITH the identity it was read for — after a pool switch the session
       // bills another member, and that member's count is not this one)
       if (snap0 && snap0.resetCredits && Number.isFinite(Number(snap0.resetCredits.availableCount))) session._resetCreditsSeen = { count: Number(snap0.resetCredits.availableCount), at: Date.now(), key: (w && w.key) || null };
       if (!w || !w.key) return;
+      // verify r1: an UNANSWERED attempt on this identity is settled by this reading first (landed ⇒ `reset`, the
+      // cards say used; else the block ends) — before the R3 re-judge below reads the cards
+      // verify r9 ② (reproduced): the read pushed for a press that straddled a RESTART re-opens the record the boot revived
+      // `unknown` BEFORE this reading settles it (the wrapper is waiting for a verdict — nothing went out)
+      if (payload.beforeReset === true && typeof payload.idempotencyKey === 'string' && payload.idempotencyKey) { try { reopenRevivedReadFirst(session, payload.idempotencyKey); } catch (e) { console.warn('[reset-credit] the revived attempt could not be re-opened:', e.message); } }
+      try { settleResetCreditByReading(w.key, w.snap); } catch { }
+      // THE READ BEFORE A CONVERSATION'S CONSUME (verify r8 T0): the wrapper waits for this engine's verdict on it
+      if (payload.beforeReset === true && typeof payload.idempotencyKey === 'string' && payload.idempotencyKey) { try { answerReadBeforePress(session, payload.idempotencyKey, w.snap); } catch (e) { console.warn('[reset-credit] the read before the consume could not be judged:', e.message); } }
+      // R3 (lane reset-path): a reading past a card's stated reset, or one that shows the account usable,
+      // answers the wall a card offered a credit for
+      // — never while a credit on it is IN FLIGHT: the current wrapper re-reads BEFORE it answers, so that
+      // reading is the credit's own post-reset reading, and the answer resolves the card as USED
+      try { if (!resetCreditInFlight(resetCreditTryFor(w.key))) resolveResetCreditCards(w.key, { kind: 'reading', at: Number(w.snap.fetchedAt) || Date.now(), usable: quotaVerdict(w.snap, Math.floor(Date.now() / 1000)).usable === true }); } catch { }
       // the post-reset reading a `reset` answer was waiting on (r3): the pool
       // re-decides on it now — whatever it says
       { const e = resetReadingEndsHold(w.key, session, w.snap); if (e) releaseResetHold(e[0], 'its post-reset reading landed'); }
@@ -3989,6 +4954,8 @@ function recordCodexQuotaSignal(session, payload) {
       // an on-demand rateLimits/read that FAILED ({error, onDemand}) — settle
       // any rpc-rate-limits probe waiting on this session, honestly
       settleCodexLimitsWaiters(session, { ok: false, reason: String(payload.error || 'no rateLimits in reply') });
+      // verify r8 T0: the read BEFORE a consume failed — the wrapper goes on to its consume on the count shown; SAID here
+      if (payload.beforeReset === true && typeof payload.idempotencyKey === 'string' && payload.idempotencyKey) { try { answerReadBeforePress(session, payload.idempotencyKey, null, String(payload.error || 'no rateLimits in the read before the consume')); } catch { } }
       // …and a hold waiting on THIS session's post-reset re-read hears that it
       // FAILED (r4) — not merely that it is late: the pool keeps the account on
       // the vendor's `reset` and the hold's own timer asks again
@@ -4001,7 +4968,7 @@ function recordCodexQuotaSignal(session, payload) {
       if (sig.kind === 'exhausted') {
         // exhaustion may arrive WITHOUT a fresh snapshot — mark the current
         // member's cache dead with the error's resets_at (or a bounded guess)
-        const nowSec = Math.floor(Date.now() / 1000);
+        const nowSec = Math.floor(now / 1000);
         const resets = sig.resetsAtSec;
         // THE SYNTHESIZED SNAPSHOT'S LANE IS A DEFAULT, and it is the best
         // evidence this record carries: the measured exhaustion record has
@@ -4033,7 +5000,7 @@ function recordCodexQuotaSignal(session, payload) {
         }
         const snap = sig.snapshot || {
           limitId: 'codex', sevenDay: { utilization: 1, usedPercent: 100, windowMinutes: 10080, resetsAt: resets > nowSec ? resets : nowSec + 24 * 3600, status: 'limited' },
-          fiveHour: null, rateLimitReachedType: 'unknown', fetchedAt: Date.now(),
+          fiveHour: null, rateLimitReachedType: 'unknown', fetchedAt: now,
         };
         // A REFUSAL, not a push: this is codex's 'limit-banner' — the claude
         // vocabulary already names it ("own session (limit hit)"), and the
@@ -5767,7 +6734,9 @@ function maybeStopOnFallback(session, id, from, to) {
     noteStreamRecord, recordIsLate, liveFactVerdict, // a LATE record is not a live fact (lane-hot-switch): both feeds show every record to noteStreamRecord first
     laneIsProvisional, laneFromBanner, laneByEvidence, settleTurnLane, pendingLaneDeferrals, deferTurnLane, // the per-turn LANE decision (2026-09-13): a model-cap rejection arrives on the unscoped weekly lane (r3 exports `deferTurnLane` so its CAP — which drops a wall — can be driven; see the reachability note at LANE_DEFER_MAX)
  quotaVerdictFor, probeUsageViaSession, recordRateLimitEvent, recordCodexQuotaSignal, resolveUsageKey,
-    resetCreditRung, resetCreditOffer, poolAlternativeFor, conversationWarmth, resetCreditPreview, consumeResetCreditFor, creditIdentityFor, heldPoolMemberFor, heldPoolUnknown, requestHeldRestart, sendColdRestart, claimColdRestarts, sweepResetCreditAsks, _resetCreditAsks, _resetCreditPending, _resetCreditTries, // r2: the credit's identity (the member the process HOLDS), the per-identity attempt record (WALL-CLOCK floor — a suite winds `.at` back instead of sleeping, the _poolAutoLast seam); p2: the manual use (src/routes/reset-credit.js) — the preview the dialog shows and the one writer the auto rung shares; THE RESET-CREDIT RUNG (design-reset-credits §4): the verdict's consumer, the offer the wall/arm cards carry, and its two inputs
+    refreshCodexForPerson, // lane reset-path R4: the usage menu's codex ⟳, answered at its round trip
+    settleResetCreditByRead, settleResetCreditByReading, // verify r1: the unknown consume — a reading settles an unanswered attempt; the session path's read before a press
+    resetCreditRung, resetCreditOffer, poolAlternativeFor, conversationWarmth, resetCreditPreview, consumeResetCreditFor, creditIdentityFor, heldPoolMemberFor, heldPoolUnknown, requestHeldRestart, sendColdRestart, claimColdRestarts, sweepResetCreditAsks, _resetCreditAsks, _resetCreditPending, _resetCreditTries, catchUpResetCreditFromBuffer, // verify r10: the stdout consumer's attach reads the wrapper's buffer file back for this session's open attempts // r2: the credit's identity (the member the process HOLDS), the per-identity attempt record (WALL-CLOCK floor — a suite winds `.at` back instead of sleeping, the _poolAutoLast seam); p2: the manual use (src/routes/reset-credit.js) — the preview the dialog shows and the one writer the auto rung shares; THE RESET-CREDIT RUNG (design-reset-credits §4): the verdict's consumer, the offer the wall/arm cards carry, and its two inputs
     probeQuotaForKey, quotaSourceFor, quotaBackendFor, // S4 caps-routed quota probe + the per-harness QuotaSignalSource lookup (functional seams for test-quota-source)
     overageState, readRawUsageCache, reserveFloorPct, overageMemberIds, creditsMemberIds, spendGuard, // the ONE overage reader, the two voluntary-move bars (D2/D3) and THE SPEND CEILING (§4.4c)
     apiDerivedWindow, noteApiDerivedWindow, apiWitnessEligibility, API_WITNESS_K, establishedWindows, inLagShadow, recentRepointRow, lastRepointRow, // B-855a: the two identity witnesses the panel probe is checked against (the API one a ring of K eligible readings) + the ⟳ control-rung eligibility test

@@ -99,12 +99,14 @@ console.log('⑥ THE RUNNING DOT (design-user-inbox-reply D1.7) — PURE liveDot
     [{ live: true, mode: 'chat', turn: 'running', remoteState: 'reconnecting' }, 'unreachable', 'a remoteState beats the turn ⇒ unreachable'],
     [null, 'off', 'not in the live list ⇒ off'],
     [{ live: false, mode: 'chat', turn: 'running' }, 'off', 'live:false ⇒ off whatever the turn says'],
-    [{ live: true, mode: 'terminal', turn: 'idle' }, 'idle', 'a terminal session keeps its dot (it IS running)'],
+    [{ live: true, mode: 'terminal', turn: 'idle' }, 'live', 'B-3f5d ④: a terminal session (it publishes no turn) ⇒ live — running, its turns not tracked; never "running, idle"'],
+    [{ live: true, mode: 'terminal', turn: 'running' }, 'live', 'B-3f5d ④: …whatever turn column it carries'],
+    [{ live: true, mode: 'terminal', remoteState: 'reconnecting' }, 'unreachable', 'B-3f5d ④: a remote terminal whose host is gone ⇒ unreachable (the host beats the mode)'],
     [{ live: true, mode: 'chat' }, 'idle', 'no turn column (an older server) ⇒ idle, never a false "running"'],
     [{ live: true, mode: 'chat', turn: 'bogus' }, 'idle', 'an unknown turn value ⇒ idle'],
   ];
   for (const [fact, want, m] of rowsD) eq(L.liveDotState ? L.liveDotState(fact) : null, want, m);
-  ok(L.LIVE_DOT_WHY && ['running', 'idle', 'waiting', 'unreachable', 'off'].every((k) => typeof L.LIVE_DOT_WHY[k] === 'string' && L.LIVE_DOT_WHY[k]), 'every dot state has one tooltip sentence');
+  ok(L.LIVE_DOT_WHY && ['running', 'idle', 'live', 'waiting', 'unreachable', 'off'].every((k) => typeof L.LIVE_DOT_WHY[k] === 'string' && L.LIVE_DOT_WHY[k]), 'every dot state has one tooltip sentence');
 }
 
 console.log('⑦ THE REPLY BUTTON — PURE replyButtonState = the ONE replyVerdict projected onto {show, enabled, why, code}');
@@ -328,6 +330,33 @@ console.log('⑪ NOTICES BY ORIGIN (B-328d) — the closed producer set, the leg
   eq(L.tabCounts(open, hist, 300).history.unread, 0, 'a look at/after the newest toast ⇒ 0');
   eq([null, undefined, 'garbage'].map((s) => L.tabCounts([], hist, s).history.unread), [3, 3, 3], 'never looked (null / garbage) ⇒ every stamped toast counts (the panel stamps the key at install)');
   eq(L.tabCounts([], null, 0), { inbox: { action: 0, notice: 0, urgency: '' }, history: { unread: 0 } }, 'empty ⇒ zeros, no urgency');
+  // B-3f5d ①: the user's OWN feedback ("Copied", "Reply sent", the error of a click) is recorded `seen` — not unread
+  eq(L.tabCounts([], [{ ts: 400, seen: true }, { ts: 350 }, { ts: 320, seen: true }], 300).history.unread, 1, 'B-3f5d ①: toasts recorded `seen` (shown while the user acted) are not unread — only the one nobody was acting for counts');
+  {
+    const U = await import(path.join(ROOT, 'src/lib/utils.js'));
+    const v = (o) => U.toastSeenAtShow({ now: 10000, gestureAt: 8000, visible: true, focused: true, ref: null, ...o });
+    ok(v({}) === true && v({ gestureAt: 10000 - U.OWN_GESTURE_MS }) === false && v({ gestureAt: 0 }) === false && v({ visible: false }) === false && v({ focused: false }) === false && v({ ref: { kind: 'todo', id: 'x' } }) === false && v({ gestureAt: 12000 }) === false,
+      'B-3f5d ①: toastSeenAtShow — seen only within OWN_GESTURE_MS of a gesture, on a visible focused page; a record\'s arrival (ref) never; no gesture never');
+    // verify r1 DECIDED (the brief: another client's toast, a delayed toast, an error after the user's action): `seen` means
+    // PRESENT — shown on THIS visible, focused page within OWN_GESTURE_MS of a press on THIS page — whatever raised it. The
+    // B-3f5d owner item lists errors among the user's own feedback, so the verdict takes no `type`; the gesture is per page.
+    const D = [
+      ['the error toast of the user\'s own click (300 ms later) — seen: on the page in front of them, their own feedback', { now: 10300, gestureAt: 10000, type: 'error' }, true],
+      ['a delayed toast (the reply lands 4 s after the press) — UNREAD: nobody can be assumed to be looking any more', { now: 14000, gestureAt: 10000 }, false],
+      ['another client\'s toast (the press was on the PHONE; this page saw no gesture) — UNREAD', { now: 10300, gestureAt: 0 }, false],
+      ['a toast raised elsewhere (a timer, a broadcast) 1 s after a press on this page — seen: it was shown to a user present at it', { now: 11000, gestureAt: 10000, type: 'warn' }, true],
+      ['the same toast in a background tab of the same browser — UNREAD (that page is hidden)', { now: 11000, gestureAt: 10000, visible: false }, false],
+      ['a For-you arrival toast (ref) right after a press — UNREAD: a record\'s arrival is news', { now: 10300, gestureAt: 10000, ref: { kind: 'todo', id: 'ut-1' } }, false],
+    ];
+    const missed = D.filter(([, o, want]) => U.toastSeenAtShow({ visible: true, focused: true, ref: null, ...o }) !== want).map(([n]) => n);
+    ok(missed.length === 0, `verify r1: the decided table — ${D.length} rows (an own error seen, a delayed toast and another client's unread, presence not cause)`, missed);
+    const k = (e, ed) => U.isGestureKey(e, ed);
+    ok(k({ key: 'a' }, true) === false && k({ key: 'Enter' }, true) === true && k({ key: 'c', ctrlKey: true }, true) === true && k({ key: 'c', metaKey: true }, true) === true && k({ key: ' ' }, false) === true && k({ key: 'a' }, false) === true && k(null, false) === false,
+      'B-3f5d ①: isGestureKey — typing in a field is not acting; Enter, a shortcut, any key outside a field is');
+    const us = fs.readFileSync(path.join(ROOT, 'src/lib/utils.js'), 'utf-8');
+    ok(/window\.addEventListener\('pointerdown', \(\) => \{ _gestureAt = Date\.now\(\); \}, true\);/.test(us) && /window\.addEventListener\('keydown', \(e\) => \{ if \(isGestureKey\(e, _editable\(e\.target\)\)\) _gestureAt = Date\.now\(\); \}, true\);/.test(us) && /const seen = _seenAtShow\(/.test(us) && /\.\.\.\(seen \? \{ seen: true \} : \{\}\)/.test(us),
+      'B-3f5d ① PIN: the capture-phase press / key listeners stamp the gesture and _recordToast records `seen` through the ONE verdict');
+  }
   eq(L.tabCounts([it('u', 'S', { urgency: 'urgent' }), it('m', 'S', {})], [], 0).inbox, { action: 2, notice: 0, urgency: 'urgent' }, 'the worst tier colours the Inbox pill (the taskbar badge\'s rule)');
   eq(L.tabCounts(open, [], 0).inbox.action, L.badgeCounts(open).action.length, 'the Inbox count IS the taskbar badge\'s action count');
 
@@ -403,6 +432,7 @@ console.log('⑪ NOTICES BY ORIGIN (B-328d) — the closed producer set, the leg
     'src/server/browser-propose.js': 'browser', // lane browser-propose: the agent's proposal (Approve / Reject), one item per proposal
     'src/agent-routes.js': 'agent',
     'src/server/helper-asks.js': 'agent', // lane S1: a helper's permission ask left unanswered for 60 s
+    'src/server/unexpected-exit.js': 'agent', // B-f698: a conversation that exited unexpectedly while working — restarted once, or why not
     'src/exit-proxy.js': 'machines', // lane-pairing ⑥: "Allow <conversation> to run a command on <machine>?" (Allow / Deny, 60 s)
     'src/server/hooks-late.js': 'agent', // lane hooks-create: "N running Claude Code conversations started before VibeSpace registered its hooks — Terminate and Resume them"
     'src/server/apps-engine.js': 'apps', // Layer 0 apps: an agent's install PROPOSAL (Install / Not now) + the failed-restore notice
@@ -507,8 +537,8 @@ console.log('⑪ NOTICES BY ORIGIN (B-328d) — the closed producer set, the leg
   console.log('     sites: ' + C.sites.map((x) => `${x.rel.replace(/^src\//, '')}:${x.line}=${x.origin}`).join(' · '));
   ok(C.sites.length >= 12, `the census scope is non-vacuous (${C.sites.length} sites; 12 when this shipped)`);
   ok(C.problems.length === 0, 'every site declares a literal origin of the closed set, the one its file produces; every origin has a producer; every PRODUCERS row files', C.problems);
-  eq(C.sites.length, 24, 'the widened match finds exactly the 24 declared sites (every classList.add(a, b) excluded, no other two-argument add in the tree; lane H verify r5 added the browser keeper\'s keeps-closing notice; lane S1 the helper-ask item; R4 (B-6acc) the channels engine\'s composed-message approval pointer; lane R5 verify r6 the channels engine\'s unsaved-sign-in item; lane-pairing ⑥ the exit ask; lane-pool-pin r2 the pool engine\'s removed-member hold notice — the owner\'s 全B; lane browser-propose the agent\'s proposal; lane hooks-create the late-hooks line; lane browser-admin the browser keeper\'s vanished-Chrome-build notice; lane browser-admin verify r2 (B5) its fall-back notice when a new Chrome build closed within seconds; Layer 0 apps the agent\'s install proposal + the failed-restore notice)');
-  eq(C.sites.filter((x) => x.rel === 'src/server/channels-engine.js').length, 7, 'channels-engine files from seven sites — all seven declared (R4: + composePointerSync, origin channels; R5 verify r6: the unsaved-sign-in item)');
+  eq(C.sites.length, 30, 'the widened match finds exactly the 30 declared sites (every classList.add(a, b) excluded, no other two-argument add in the tree; lane H verify r5 added the browser keeper\'s keeps-closing notice; lane S1 the helper-ask item; R4 (B-6acc) the channels engine\'s composed-message approval pointer; lane R5 verify r6 the channels engine\'s unsaved-sign-in item; lane-pairing ⑥ the exit ask; lane-pool-pin r2 the pool engine\'s removed-member hold notice — the owner\'s 全B; lane browser-propose the agent\'s proposal; lane hooks-create the late-hooks line; lane browser-admin the browser keeper\'s vanished-Chrome-build notice; lane browser-admin verify r2 (B5) its fall-back notice when a new Chrome build closed within seconds; Layer 0 apps the agent\'s install proposal + the failed-restore notice; lane reset-path verify r2 the pool engine\'s unreadable-attempts-file notice; lane reset-path verify r5 the pool engine\'s unknown-vendor-word item (origin pool — the engine IS the pool producer); lane reset-path verify r8 ⑥ the pool engine\'s late-wall notice (a limit hit on a conversation whose records arrive late — origin pool); lane channel-agent-watch the channels engine\'s wake-request item (origin channels); lane unexpected-exit (B-f698) the restarted-once item; lane for-you-jobs B-dfb4 the jobs wiring\'s dropped-at-the-cap notice)');
+  eq(C.sites.filter((x) => x.rel === 'src/server/channels-engine.js').length, 8, 'channels-engine files from eight sites — all eight declared (R4: + composePointerSync, origin channels; R5 verify r6: the unsaved-sign-in item; lane channel-agent-watch: an agent\'s wake request)');
   console.log('   negative controls (the census must be able to go red)');
   const drop = { ...files, 'src/server/spend-guard.js': files['src/server/spend-guard.js'].split("origin: 'spend', ").join('') };
   const cDrop = census(drop);

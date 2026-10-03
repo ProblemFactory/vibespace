@@ -125,7 +125,7 @@ const appSrc = read('src/lib/app.js');
 const gearSrc = read('src/lib/gear-menu.js');
 ok(/installPluginClient\(this\)/.test(appSrc) && /pluginClient\?\.contributedWindows\?\.\(\)/.test(appSrc + gearSrc), 'app installs the plugin client and the ⚙ menu (gear-menu.js since Ph1) lists contributed windows');
 const wiring = read('src/server/mounts-plugins-wiring.js');
-ok(/require\('\.\/plugin-loader\.js'\)\.create\(/.test(wiring) && /agentAuth: \(req\) =>/.test(wiring) && /s\.agentToken === tok/.test(wiring) && /pluginLoader\.shutdown\(\)/.test(wiring), 'wiring creates the loader with a vsst_-validating agentAuth and shuts plugin processes down with the server');
+ok(/require\('\.\/plugin-loader\.js'\)\.create\(/.test(wiring) && /agentAuth: \(req\) =>/.test(wiring) && /sameToken\(tok, s\.agentToken\)|s\.agentToken === tok/.test(wiring) && /pluginLoader\.shutdown\(\)/.test(wiring), 'wiring creates the loader with a vsst_-validating agentAuth and shuts plugin processes down with the server');
 ok(/, activeSessions,$/m.test(read('server.js')) && /pluginLoader,$/m.test(read('server.js')) && /const \{ agentEnv \} = require\('\.\.\/ws-handler'\);/.test(wiring), 'server.js passes activeSessions and receives the loader; the wiring takes agentEnv from ws-handler (the ONE sanitized-env builder)');
 ok(/'src\/plugin-manifest\.js'/.test(read('scripts/test-architecture.mjs')), 'the manifest validator is in the PURE tier');
 const pui = read('src/lib/plugins-ui.js');

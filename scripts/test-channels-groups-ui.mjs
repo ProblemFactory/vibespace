@@ -39,6 +39,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
+import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -85,6 +86,50 @@ console.log('§1 channel-groups-view (PURE)');
   ok(pairRow.pair === true && g1.memberCount === 3 && g1.unread === 1 && mailRow.mail === true && mailRow.sourceLabel === 'Gmail' && c1.lastText === 'deploy done', 'each row carries its source facts (pair / member count / unread / mail glyph / source label / last line)');
   const shuffled = V.groupListRows({ groups: groups.slice().reverse(), conversations: conversations.slice().reverse(), adapters });
   ok(JSON.stringify(shuffled.rows.map((r) => r.key)) === JSON.stringify(rows.map((r) => r.key)), 'the order is a property of the DATA, not of the input order');
+
+  // B-5fe1 (the owner, 2026-10-01 asks 4: "头像上展示来源角标…多色的，因为可能有多个账号属于同一个供应商，或者展示一个小字"):
+  // THE ACCOUNT BADGE — a hue per ACCOUNT (two of one vendor never share one), the vendor glyph by the account's KIND,
+  // the account's title in small text at ≥ 2 accounts of a kind
+  {
+    const AV = await import(path.join(REPO, 'src/lib/channel-avatar.js'));
+    // two Lark account ids whose own hash lands on the SAME hue — the case a hash alone would draw alike
+    const ids = Array.from({ length: 64 }, (_, i) => `lark:${(0x1000 + i).toString(16)}`);
+    let pairIds = null;
+    for (let i = 0; i < ids.length && !pairIds; i++) for (let j = i + 1; j < ids.length && !pairIds; j++) if (AV.hueOf('account/' + ids[i]) === AV.hueOf('account/' + ids[j])) pairIds = [ids[i], ids[j]];
+    const accts = [{ id: pairIds[1], kind: 'lark', label: 'Work' }, { id: pairIds[0], kind: 'lark', label: 'Home' }, { id: 'gmail:1', kind: 'gmail', label: 'Fish' }, { id: 'agents', kind: 'agents', label: 'Agents', builtin: true }];
+    const B = AV.accountBadges(accts), B2 = AV.accountBadges(accts.slice().reverse());
+    const a0 = B.get(pairIds[0]), a1 = B.get(pairIds[1]), gm = B.get('gmail:1');
+    ok(!!pairIds && a0 && a1 && a0.hue !== a1.hue && Number.isInteger(a0.hue) && Number.isInteger(a1.hue) && a0.glyph === 'vendor-lark' && a1.glyph === 'vendor-lark' && a0.multi && a1.multi && a0.label === 'Home' && a1.label === 'Work',
+      `B-5fe1: two Lark accounts whose ids HASH to the same hue (${pairIds && pairIds.join(' / ')}) still wear DIFFERENT hues (${a0 && a0.hue} / ${a1 && a1.hue}), the vendor glyph by kind, \`multi\` (2 accounts of one kind), each its own title`, JSON.stringify([...B]));
+    ok(gm && gm.glyph === 'vendor-gmail' && gm.multi === false && !B.has('agents') && JSON.stringify([...B].sort()) === JSON.stringify([...B2].sort()),
+      'B-5fe1: a single Gmail account is not `multi` (no small title); the built-in watcher wears no badge; the table is a function of the account LIST, not its order (every client draws the same hues)', JSON.stringify([...B2]));
+    const own = AV.accountBadges([{ id: pairIds[0], kind: 'lark' }]).get(pairIds[0]);
+    ok(own.hue === AV.hueOf('account/' + pairIds[0]), 'B-5fe1: an account no sibling crowds keeps its OWN hash hue (adding an unrelated vendor\'s account never repaints it)', JSON.stringify(own));
+    const many = AV.accountBadges(Array.from({ length: AV.AVATAR_HUES }, (_, i) => ({ id: `lark:${i}`, kind: 'lark' })));
+    ok(new Set([...many.values()].map((x) => x.hue)).size === AV.AVATAR_HUES, `B-5fe1: ${AV.AVATAR_HUES} accounts of one vendor wear ${AV.AVATAR_HUES} different hues`);
+    const R2 = V.groupListRows({ groups: [], conversations: [{ key: `${pairIds[0]}/c`, id: 'c', adapterId: pairIds[0], title: 'Ops', lastAt: 2 }, { key: `${pairIds[1]}/d`, id: 'd', adapterId: pairIds[1], title: 'Ops', lastAt: 1 }], adapters: accts }).rows;
+    ok(R2.length === 2 && R2[0].account && R2[1].account && R2[0].account.hue !== R2[1].account.hue && R2[0].account.label === 'Home' && R2[0].account.multi === true,
+      'B-5fe1: the first screen\'s rows carry their ACCOUNT badge — the same "Ops" in two Lark accounts is two colours and two titles', JSON.stringify(R2.map((r) => r.account)));
+    // PRE-FIX CONTROLS (patched ESM copies): the base row model (no account) and a hue by hash alone
+    const MC = mutantCopies('chan-b5fe1', REPO);
+    const VS = read('src/lib/channel-groups-view.js'), AS = read('src/lib/channel-avatar.js');
+    const CARRY = ', account: badges.get(c.adapterId) || null,';
+    const PROBE = '    for (let i = 0; i < AVATAR_HUES && used.has(hue); i++) hue = (hue + 1) % AVATAR_HUES;\n';
+    ok(VS.split(CARRY).length === 2 && AS.split(PROBE).length === 2, 'CONTROL setup: the row\'s account carry and the hue probe are each spelled once');
+    const V0 = await import(MC.write('src/lib/channel-groups-view.js', VS.replace(CARRY, ','), 'b5fe1-no-account', { esm: true }));
+    const R0 = V0.groupListRows({ groups: [], conversations: [{ key: `${pairIds[0]}/c`, id: 'c', adapterId: pairIds[0], title: 'Ops', lastAt: 2 }], adapters: accts }).rows;
+    ok(R0.length === 1 && !R0[0].account, 'CONTROL: the base row model carries no account — the avatar has no badge to draw and the leg above would be red', JSON.stringify(R0[0] && R0[0].account));
+    const AV0 = await import(MC.write('src/lib/channel-avatar.js', AS.replace(PROBE, ''), 'b5fe1-hash-only', { esm: true }));
+    const B0 = AV0.accountBadges(accts);
+    ok(B0.get(pairIds[0]).hue === B0.get(pairIds[1]).hue, 'CONTROL: a hue by the account\'s hash alone paints the two Lark accounts ALIKE — the hue leg would be red', JSON.stringify([...B0]));
+    for (const c of copiesCensus(MC.files, MC.dir, REPO, { minCopies: 2, label: 'chan-b5fe1: ' })) ok(c.pass, c.name, c.pass ? undefined : c.detail);
+    // the wiring: the panel row and the window bar pass the badge; line 1 says the account at ≥ 2; the route names the accounts
+    const PS = read('src/lib/channels-panel.js'), WS = read('src/lib/channel-window.js'), RS = read('src/routes/channels.js'), CS = read('src/lib/channel-chrome.js');
+    ok(/convAvatar\(\{ key: r\.key, [^\n]*badge: r\.account \}/.test(PS) && /const acct = r\.account && r\.account\.multi \? r\.account\.label : '';/.test(PS) && /chanEl\('span', 'chan-grow-acct', acct\)/.test(PS) && /\} else if \(!acct\) \{/.test(PS),
+      'B-5fe1 PIN: the first-screen row draws its account badge, says the account in small text at ≥ 2 accounts of a kind (one account name per row: the source chip stays away)');
+    ok(/const badge = accountBadges\(r\.accounts \|\| /.test(WS) && /convAvatar\(\{ key: `\$\{adapterId\}\/\$\{convId\}`, title: shownTitle, kind: c\.kind, badge \}/.test(WS) && /accounts: eng\.accountsBrief\(\)/.test(RS) && /b\.className = 'chan-av-badge';/.test(CS) && /UI_ICONS\[badge\.glyph\] \? badge\.glyph : 'chat'/.test(CS),
+      'B-5fe1 PIN: the window bar wears the same badge (its hue from the WHOLE account list the conversation route names); the badge is a library glyph inside the avatar (paint)');
+  }
 
   // the composer's mode BY CONVERSATION KIND
   const offers = (u, b, why = 'no-scope') => ({ sendAsUser: { offered: u, why: u ? null : why }, sendAsBot: { offered: b, why: b ? null : 'no-bot' } });
@@ -279,7 +324,7 @@ const CLIENT = ['src/lib/channels-panel.js', 'src/lib/channel-window.js', 'src/l
   ok(planted !== read('src/lib/channels-panel.js') && judge(planted).length === 1, 'NEGATIVE CONTROL: a planted `title.innerHTML = r.title` (a hostile group name) is FLAGGED by the same judge');
   const P = read('src/lib/channels-panel.js'), W = read('src/lib/channel-window.js'), D = read('src/lib/channel-group-dialogs.js');
   ok(/title\.textContent = r\.title;/.test(P) && /last\.textContent = r\.lastText \|\| '';/.test(P) && /src\.textContent = r\.kind === 'group'/.test(P), 'the group row: name, last line and source chip through textContent');
-  ok(/el\('div', 'chanmsg-ctx', raw\.context\)/.test(W) && /el\('div', 'chanmsg-body' \+ \(isCleared\(rec\) \? ' rc-cleared' : ''\), isCleared\(rec\) \? clearedText\(\) : \(rec\.text \|\| ''\)\)/.test(W) && /titleRow\.appendChild\(el\('b', '', group\.name \|\| groupId\)\)/.test(W), 'the group window: invite context, message body and the group name through el() (textContent)');
+  ok(/el\('div', 'chanmsg-ctx', raw\.context\)/.test(W) && /body\.appendChild\(document\.createTextNode\(r\.text\)\)/.test(W) && /el\('span', 'chanblk-at chan-at', '@' \+ nameOf\(r\.id, r\.text\.slice\(1\)\)\)/.test(W) && /titleRow\.appendChild\(el\('b', '', group\.name \|\| groupId\)\)/.test(W), 'the group window: invite context, message body and the group name through el() (textContent)');
   // channel-polish (2026-09-27): the member picker is the ONE principal picker — its names through el() (textContent)
   const PP = read('src/lib/principal-picker.js');
   ok(/el\('span', 'chan-gm-name', m\.owner \? t\('You \(observer\)'\) : m\.name\)/.test(D) && /n\.appendChild\(el\('span', 'pp-name', r\.name\)\)/.test(PP) && /c\.appendChild\(el\('span', 'pp-chip-name', r\.name\)\)/.test(PP) && /principalPicker\(\{ items, multi: true,/.test(D) && /t\('Group — \{name\}', \{ name: group\.name \}\)/.test(D), 'the dialogs: member names, the picker\'s row and chip names and the title (createModalShell textContent) never innerHTML');
@@ -353,7 +398,7 @@ console.log('§4 wiring pins');
   ok(/const fs = firstScreen\(rows, \{ view: VIEW, q, now \}\);/.test(P) && /export \{ focusRows, statusTag, filterRows, firstScreen,/.test(read('src/lib/channel-groups-view.js')), 'PIN (R3): …and narrowed to the ATTENTION list by firstScreen / focusRows (re-exported from the PURE channel-focus.js) — the full list one switch away');
   // lane-redact verify r6: the broadcast's list is kept (groupsGen) even before the first paint, which stays refresh()'s
   ok(/if \(msg\.type === 'channel-groups-updated'\) \{[\s\S]{0,200}groups = msg\.groups; groupsGen\+\+;[^\n]*\n\s*if \(digest === null\) return;[^\n]*\n\s*draw\(\);/.test(P), 'PIN: the panel repaints the group list from the broadcast\'s list (no fetch)');
-  ok(/if \(isGroupConv\(adapterId\)\) \{ root\.classList\.add\('chanwin-group'\); return openGroupWindow\(/.test(W) && /const w = wakePreview\(group, ta\.value\);/.test(W), 'PIN: the window routes a group to openGroupWindow and previews the wake under the box');
+  ok(/if \(isGroupConv\(adapterId\)\) \{ root\.classList\.add\('chanwin-group'\); return openGroupWindow\(/.test(W) && /const w = wakePreview\(group, ta\.value, \{ picked: spansOf\(ta\.value\) \}\);/.test(W), 'PIN: the window routes a group to openGroupWindow and previews the wake under the box');
   ok(/router\.post\('\/api\/channels\/:adapterId\/:convId\/send'[\s\S]{0,300}direct: true/.test(R) && /router\.get\('\/api\/channel-groups\/roster'/.test(R) && /case 'read': r = await ge\.markRead\(\{ group \}\)/.test(R), 'PIN: the routes expose /send (direct), /channel-groups/roster and the owner\'s /read');
   ok(/const own = !!\(input && input\.direct === true\) && \(!ctx \|\| ctx\.kind === 'user'\);/.test(E) && /lastText: en\.lastText \|\| ''/.test(E), 'PIN: the engine\'s own-message rule is the USER\'s only, and the digest carries lastText');
   ok(/return \{ appended: fresh\.length, duplicates, lastAt, lastText,/.test(S), 'PIN: the store\'s append answers the newest record\'s text');
@@ -367,6 +412,71 @@ console.log('§4 wiring pins');
   ok(/if \(g \|\| landed\) redrawDelivery\(\);/.test(grp) && /for \(const row of list\.querySelectorAll\('\.chanmsg\[data-vid\]:not\(\.chanmsg-sys\)'\)\)/.test(grp), 'PIN: the broadcast (a marker, a mode, a landed departure) re-judges every drawn line in place — never a list rebuild');
   ok(/reportedUpTo: Number\.isFinite\(m\.reportedUpTo\) \? m\.reportedUpTo : null, reportedAt: Number\.isFinite\(m\.reportedAt\) \? m\.reportedAt : null \}\)\)/.test(GEsrc) && /if \(moved\) announce\(\[gid\]\);/.test(GEsrc) && /m\.reportedUpTo = upTo; m\.reportedAt = now\(\); moved = true;/.test(GEsrc), 'PIN: the engine\'s view carries each member\'s marker AND its hand-over clock, the clock is stamped beside a marker that moves, and a moved marker is announced (the sender\'s window flips without a reload)');
   ok(/\.chanmsg-dlv\[data-tone="handed"\] \.chanmsg-dlv-dot \{ background: currentColor; \}/.test(read('public/style.css')) && /\.chanmsg-dlv-dot \{[^}]*border-radius: 50%;[^}]*border: 1px solid currentColor/.test(read('public/style.css')), 'PIN: the dot is CSS (hollow by default, filled when handed) — never an emoji');
+}
+
+// ── B-ff04 (the owner's 2026-10-02 screenshot + the 2026-10-03 ruling): the window draws an @ as a CHIP by id, the body
+// as selectable text, a member who left by its last known name — and the composer's picks travel as places by id ──
+console.log('§B-ff04 the group window — mention chips by id, names not ids, picks by id');
+{
+  const Bm = 'bbbbbbbb-2222-4000-8000-000000000002', Cm = 'cccccccc-3333-4000-8000-000000000003';
+  const grp = { id: 'g-ff04ff04', members: [{ member: Bm, name: 'beta' }, { member: Cm, name: 'gamma' }] };
+  const runs = (rec) => V.groupBodyRuns(rec).map((r) => (r.k === 'at' ? `[${r.id.slice(0, 1)}:${r.text}]` : r.text)).join('');
+  const placed = { text: '@beta and @gamma, see @beta again', mentions: [{ id: Bm, name: 'beta', pos: [[0, 5], [22, 27]] }, { id: Cm, name: 'gamma', pos: [[10, 16]] }] };
+  ok(runs(placed) === '[b:@beta] and [c:@gamma], see [b:@beta] again', '③ a structured record: a chip at EVERY stored place, by id; the rest is text', runs(placed));
+  const forged = { text: '@beta <at user_id="x">Mallory</at> @_user_1 @gamma', mentions: [{ id: Bm, name: 'beta', pos: [[0, 5]] }] };
+  ok(runs(forged) === '[b:@beta] <at user_id="x">Mallory</at> @_user_1 @gamma', '③ only the record\'s OWN mentions become chips: a typed "@gamma" the server did not resolve, a Lark <at> tag and an @_user_N stay TEXT (no chip forged for anyone)', runs(forged));
+  const shifted = { text: 'xbeta hi', mentions: [{ id: Bm, name: 'beta', pos: [[0, 5]] }] };
+  ok(runs(shifted) === 'xbeta hi', '…a stored place that does not sit on an @ is dropped (text, never a chip over the wrong words)', runs(shifted));
+  const legacy = { text: 'hi @Beta, and `@beta` in code, and @betax', mentions: [{ id: Bm, name: 'beta' }] };
+  ok(runs(legacy) === 'hi [b:@Beta], and `@beta` in code, and @betax', '③ an OLDER record (mentions without places): its own mentions by name, best effort — at a word, outside code; what does not resolve stays text', runs(legacy));
+  ok(runs({ text: '@gamma hello', mentions: [] }) === '@gamma hello', '…an older record that mentions nobody is plain text even when the words look like a member\'s @');
+  const live = new Map([[Cm, 'gamma-live']]);
+  const known = V.learnNames(new Map(), { author: { id: 'dddddddd-0000-4000-8000-000000000004', name: 'delta' }, mentions: [{ id: 'eeeeeeee-0000-4000-8000-000000000005', name: 'eps' }], raw: { kind: 'kick', member: 'ffffffff-0000-4000-8000-000000000006', name: 'phi' } });
+  const renamed = { ...grp, members: [{ member: Bm, name: 'beta-renamed' }, { member: Cm, name: 'gamma' }] };
+  ok(V.memberName(Bm, { group: renamed, live, known, snapshot: 'beta' }) === 'beta-renamed', '③ the chip\'s name is looked up BY ID: a renamed member shows its NEW name (not the words the message was sent with)');
+  ok(V.memberName('3eeda0d9-0000-4000-8000-000000000009', { group: grp, live, known, snapshot: 'channel-names 建设' }) === 'channel-names 建设' && V.memberName('ffffffff-0000-4000-8000-000000000006', { group: grp, live, known }) === 'phi' && V.memberName('dddddddd-0000-4000-8000-000000000004', { group: grp, known }) === 'delta', '③ a member who LEFT keeps a name: the record\'s own snapshot, else the last name the log knew (author / mention / kick)');
+  ok(V.memberName('99999999-0000-4000-8000-000000000009', { group: grp, live, known }) === '99999999', '…the short id only when no name was ever seen');
+  const t1 = '@beta and @beta-x hi';
+  ok(JSON.stringify(V.pickedSpans(t1, [{ id: Cm, name: 'beta' }])) === JSON.stringify([{ id: Cm, start: 0, end: 5 }]), '① the @-picker\'s choice travels as a place BY ID — the id picked, not the name re-read');
+  const t2 = 'edited: @betaz then @beta';
+  ok(JSON.stringify(V.pickedSpans(t2, [{ id: Bm, name: 'beta' }])) === JSON.stringify([{ id: Bm, start: 20, end: 25 }]) && V.pickedSpans('all gone', [{ id: Bm, name: 'beta' }]).length === 0, '…a pick claims the @name that still ends at a word ("@betaz" is not it); a deleted pick claims nothing');
+  const bad = V.atProblem(grp, '@delta look');
+  ok(bad && bad.code === 'unknown-mention' && bad.token === 'delta' && V.atProblem(grp, '@beta look') === null, '① the composer says the refusal FIRST — the server\'s own scanAts + atRefusal ("@delta" is not a member)', JSON.stringify(bad));
+  ok(V.wakePreview(grp, '@beta hi', { picked: [{ id: Cm, start: 0, end: 5 }] }).map((x) => x.member).join() === Cm, '…and the wake preview counts the PICKED id');
+  // CENSUS — the window draws a group body ONLY through groupBodyRuns; no forgeable rung (textToBlocks / blocksOfRecord),
+  // no resolver on the words; a chip's name is asked by id
+  const Wsrc = read('src/lib/channel-window.js');
+  const i0 = Wsrc.indexOf('function openGroupWindow('), i1 = Wsrc.indexOf('\nregisterWindowType(', i0);
+  const grpSrc = Wsrc.slice(i0, i1);
+  ok(i0 > 0 && /for \(const r of groupBodyRuns\(rec\)\)/.test(grpSrc) && /row\.appendChild\(isCleared\(rec\) \? el\('div', 'chanmsg-body rc-cleared', clearedText\(\)\) : groupBody\(rec\)\);/.test(grpSrc) && !/\b(?:textToBlocks|blocksOfRecord|renderBlocks|mentionsIn|scanAts)\(/.test(grpSrc), 'CENSUS: the group window draws a body ONLY through groupBodyRuns — never the forgeable generic rung (textToBlocks / blocksOfRecord / renderBlocks), never a resolver over the words');
+  ok(/el\('span', 'chanblk-at chan-at', '@' \+ nameOf\(r\.id, r\.text\.slice\(1\)\)\)/.test(grpSrc) && /const member = raw\.member \? nameOf\(raw\.member, raw\.name\) : '';/.test(Wsrc), '…a chip is named by ID through the ladder; a system line names a member by its record\'s own snapshot first');
+  const plantedRung = grpSrc.replace('groupBody(rec));', 'renderBlocks(blocksOfRecord(rec), {}));');
+  ok(plantedRung !== grpSrc && /\b(?:textToBlocks|blocksOfRecord|renderBlocks|mentionsIn|scanAts)\(/.test(plantedRung), 'NEGATIVE CONTROL: a planted generic-rung body (which parses <at> tags into chips) is FLAGGED');
+  const css = read('public/style.css');
+  ok(/\.chanmsg-body \{[^}]*user-select: text;[^}]*\}/.test(css) && /html, body \{[^}]*user-select: none;/.test(css), 'B-ff04: a message body is SELECTABLE (user-select: text) under the app root\'s user-select: none');
+  ok(/items\.push\(\{ label: t\('Copy text'\), action: \(\) => \{ copyText\(String\(words\)\); showToast\(t\('Copied'\)\); \} \}\);/.test(Wsrc), '…and the message menu (right-click; a long-press on touch) offers Copy text before Clear content…');
+  ok(/mentions: Array\.isArray\(b\.mentions\) \? b\.mentions\.slice\(0, 64\) : \[\]/.test(read('src/routes/channels.js')) && /body: JSON\.stringify\(\{ text, mentions, expectWakes: wakePreview\(group, text, \{ picked: mentions \}\)\.length \}\)/.test(Wsrc), 'PIN: the owner\'s post carries the picked places to the engine (the route passes `mentions`)');
+}
+
+// ── verify r1 (lane group-chat-ui) F10: an OLDER record's chip (no places stored — found by its own mentions' names)
+// sits on the "@" of the words even after a letter whose lower case is longer ("İ" → two code units): the lane head
+// matched in the lower-cased string and cut the words one place late ──
+console.log('§verify r1 — a legacy chip after "İ" covers its @');
+{
+  const Bm = 'bbbbbbbb-2222-4000-8000-000000000002';
+  const runs = (VV, rec) => VV.groupBodyRuns(rec).map((r) => (r.k === 'at' ? `[${r.text}]` : r.text)).join('');
+  const rec = { text: 'İ @beta hi', mentions: [{ id: Bm, name: 'beta' }] };
+  ok(runs(V, rec) === 'İ [@beta] hi', 'F10: the legacy chip covers "@beta" exactly', runs(V, rec));
+  const { pathToFileURL } = await import('node:url');
+  const src = fs.readFileSync(path.join(REPO, 'src/lib/channel-groups-view.js'), 'utf-8');
+  const old = src.replace('const lower = foldCase(text);', 'const lower = text.toLowerCase();').replace("const needle = '@' + foldCase(m.name);", "const needle = '@' + String(m.name).toLowerCase();")
+    .replace("from '../channel-groups.js'", 'from ' + JSON.stringify(pathToFileURL(path.join(REPO, 'src/channel-groups.js')).href)).replace("from './channel-focus.js'", 'from ' + JSON.stringify(pathToFileURL(path.join(REPO, 'src/lib/channel-focus.js')).href))
+    .replace("from '../channel-ref.js'", 'from ' + JSON.stringify(pathToFileURL(path.join(REPO, 'src/channel-ref.js')).href))
+    .replace("from './channel-avatar.js'", 'from ' + JSON.stringify(pathToFileURL(path.join(REPO, 'src/lib/channel-avatar.js')).href));   // + channels-polish's account badges   // memberName climbs channel-names' ladder (the 2.369.202 integration)
+  const oldFile = path.join(ROOT, 'channel-groups-view-v1-old.mjs');
+  fs.writeFileSync(oldFile, old);
+  const OLDV = await import(pathToFileURL(oldFile).href);
+  ok(src.includes('const lower = foldCase(text);') && !old.includes('foldCase(text)') && runs(OLDV, rec) !== 'İ [@beta] hi', 'CONTROL: the lane head\'s toLowerCase in a patched copy draws a shifted chip — the leg above would be red', runs(OLDV, rec));
 }
 
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);

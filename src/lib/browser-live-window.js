@@ -130,7 +130,8 @@ import { registerWindowType, svgIcon16 } from './window-types.js';
 import { registerMenuItem } from './contributions.js';
 import { ownerDots, livePlacement } from './chain-layout.js'; // P7 (§4.6): the per-SESSION owner colour, never the group's; MULTIVIEW D5: where a new live view goes
 import { stripOrder, stripFold, capChip, shortLabel, stoppableRows, rowStateWords, tabRowFold } from './live-strip-layout.js'; // MULTIVIEW §2 A1 / D4: the strip's order, fold and own/cap chip (PURE); lane browser-resume C: the tab row's fold
-import { tabRowModel, tabRefusalText } from '../browser-tabs.js'; // lane browser-resume C (§3.9, ruling 3): whose tab it is and what this viewer may do to it (PURE)
+import { tabRowModel, tabRefusalText } from '../browser-tabs.js';
+import { tabClickVerdict } from '../browser-windows.js'; // lane browser-windows (U3/U0b): what a chip click does — bring forward / switch (driving) · watch / follow (watching) // lane browser-resume C (§3.9, ruling 3): whose tab it is and what this viewer may do to it (PURE)
 import { avatarOf } from './channel-avatar.js'; // lane browser-resume C (D3): a tab's badge = the host's initial on a stable hue (no network — never a favicon fetch)
 import { UI_ICONS } from './icons.js';
 import { STREAM_PATH, MAX_FPS_DEFAULT, EPHEMERAL_REF, pointerToDevice, deviceToViewport, drawnRect, liveTitle, mouseRecord, wheelRecord, keyRecord, touchRecord, modifiersOf, liveViewPlan, viewTargetRunning, browserListFor, clickCountNext } from '../browser-stream.js';
@@ -370,6 +371,9 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
     resumeOffer: false, resuming: false, resumedHere: false, noteOpen: false, handedBack: false,
     // lane browser-resume C: the bridge's `tab-owners` (targetId → agent|you|other|orphan), the tab row's model + fold, the acts in flight
     tabOwners: {}, tabMediated: false, tabAdoptable: false, tabRow: null, tabFolded: [], tabRid: 0, tabActs: new Map(), tabError: null, quitAsked: null,
+    // lane browser-windows: the tab THIS viewer watches instead of the agent's ({targetId, mode, pending}) and the bridge's
+    // "the tab on show paints nothing" verdict ({targetId, since}) — both said on the watch line
+    watch: null, bg: null,
   };
   const row = () => sessionRow(app, sessionId);
   /** lane S2: THE browser fact of this view's session (active-sessions' `browserFact`, carried onto the merged row). */
@@ -528,7 +532,12 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
   // view — the user's own browsing tab included — says it once; a click hides it)
   const resetNote = document.createElement('div'); resetNote.className = 'browser-live-display-note browser-live-reset-note'; resetNote.style.display = 'none'; resetNote.setAttribute('role', 'status');
   resetNote.title = t('Click to hide'); resetNote.onclick = () => { resetNote.style.display = 'none'; };
-  root.append(strip, tabRow, bar, addrRow, shareLine, endLine, blockedBar, displayNote, resetNote, confirms, dialogBar, loopBar, body);
+  // lane browser-windows (U3/U0b): ONE line under the tab row — the tab this view watches, or the tab on show that paints nothing
+  const watchLine = document.createElement('div'); watchLine.className = 'browser-live-watch-line'; watchLine.style.display = 'none';
+  const watchLineText = document.createElement('span'); watchLineText.className = 'browser-live-watch-text';
+  const watchLineBtn = document.createElement('button'); watchLineBtn.className = 'file-tool-btn browser-live-watch-btn';
+  watchLine.append(watchLineText, watchLineBtn);
+  root.append(strip, tabRow, watchLine, bar, addrRow, shareLine, endLine, blockedBar, displayNote, resetNote, confirms, dialogBar, loopBar, body);
   if (H) { root.classList.add('human'); addrRow.style.display = ''; urlEl.style.display = 'none'; openBtn.style.display = 'none'; bindBtn.style.display = 'none'; titleBind.style.display = 'none'; closeBtn.style.display = ''; quitBtn.style.display = ''; }
   winInfo.content.appendChild(root);
 
@@ -1042,7 +1051,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
         const ti = document.createElement('span'); ti.className = 'browser-live-tabchip-title';
         const mk = document.createElement('span'); mk.className = 'browser-live-tabchip-mark';
         el.append(av, ti, mk);
-        el.addEventListener('click', (e) => { if (e.target.closest('.browser-live-tabchip-close')) return; const row = (st.tabRow && st.tabRow.rows || []).find((x) => x.targetId === el.dataset.target); if (row && row.canSwitch) tabAct('switch', row); });
+        el.addEventListener('click', (e) => { if (e.target.closest('.browser-live-tabchip-close')) return; const row = (st.tabRow && st.tabRow.rows || []).find((x) => x.targetId === el.dataset.target); if (row) chipClick(row); });
         el.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && el.getAttribute('role') === 'button') { e.preventDefault(); el.click(); } });
       }
       const av = el.querySelector('.browser-live-tabchip-av');
@@ -1053,10 +1062,16 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
       const mk = el.querySelector('.browser-live-tabchip-mark'); if (mk.textContent !== r.mark) mk.textContent = r.mark; mk.title = r.markTip;
       el.classList.toggle('active', r.active);
       el.dataset.owner = r.owner;
-      const tip = (r.canSwitch ? r.switchTip + '\n' : '') + r.tip + '\n' + r.markTip;
+      // lane browser-windows (U3/U0b): what a click does here — the PURE verdict (bring forward / switch while driving,
+      // watch / follow while watching); the row's own verdict still answers his own window and the close buttons
+      const cv = clickOf(r, driving);
+      const clickTip = cv.act === 'front' ? t('Bring this tab to the front of its window') : cv.act === 'switch' ? r.switchTip || t('Switch to this tab') : cv.act === 'watch' ? t('Watch this tab — the agent’s tab is not changed (take over to switch it)') : cv.act === 'follow' ? t('Back to the agent’s current tab') : (r.canSwitch ? r.switchTip : '');
+      const clickable = cv.act !== 'none' || r.canSwitch;
+      const tip = (clickTip ? clickTip + '\n' : '') + r.tip + '\n' + r.markTip;
       if (el.title !== tip) el.title = tip;
-      if (r.canSwitch) { el.setAttribute('role', 'button'); el.tabIndex = 0; } else { el.removeAttribute('role'); el.removeAttribute('tabindex'); }
-      el.classList.toggle('switchable', r.canSwitch);
+      if (clickable) { el.setAttribute('role', 'button'); el.tabIndex = 0; } else { el.removeAttribute('role'); el.removeAttribute('tabindex'); }
+      el.classList.toggle('switchable', clickable);
+      el.classList.toggle('watched', !!(st.watch && st.watch.targetId === r.targetId));
       let x = el.querySelector('.browser-live-tabchip-close');
       if (r.canClose && !x) {
         x = document.createElement('button'); x.className = 'browser-live-tabchip-close bar-icon-btn'; x.innerHTML = UI_ICONS.close;
@@ -1104,6 +1119,50 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
   };
   /** One switch / ✕ on the row: sent to the bridge (the keeper re-judges every fact), answered by ONE `tab-ack`; a refusal
    *  or a failure is a toast in the device's words (never silence). */
+  /** lane browser-windows (U3): the PURE click verdict for one row of the row model (his own window keeps the row's verdict). */
+  function clickOf(r, driving = st.mode === 'takeover' && st.mine) {
+    if (H) return { act: 'none', why: 'his-window' };
+    return tabClickVerdict({ owner: r.owner, human: false, driving, mediated: st.tabMediated, active: r.active, watching: st.watch ? st.watch.targetId : null, targetId: r.targetId });
+  }
+  /** A chip click: driving ⇒ the real switch (`front` = bring the agent's own current tab forward — it may sit behind
+   *  another tab of its window and paint nothing); watching ⇒ THIS view moves to that tab (the agent's tab untouched). */
+  function chipClick(row) {
+    const cv = clickOf(row);
+    if (cv.act === 'front' || cv.act === 'switch') { tabAct('switch', row); return; }
+    if (cv.act === 'watch') { watchTab(row); return; }
+    if (cv.act === 'follow') { watchTab(null); return; }
+    if (row.canSwitch) tabAct('switch', row);
+  }
+  function watchTab(row) {
+    if (!st.ws || st.ws.readyState !== 1) { showToast(t('Could not switch tabs: {why}', { why: t('the live view is not connected') }), { type: 'error' }); return; }
+    st.watch = row ? { targetId: row.targetId, mode: 'screencast', pending: true, title: row.title } : null;
+    send({ type: 'watch-tab', targetId: row ? row.targetId : null });
+    renderTabRow(); renderWatchLine();
+  }
+  /** The watch line: the tab this view watches (with the way back), else the tab on show that paints nothing (U0b — the
+   *  user never clicks a frozen picture in silence), else nothing. Patched in place. */
+  function renderWatchLine() {
+    if (st.closed) return;
+    const driving = st.mode === 'takeover' && st.mine;
+    let text = '', btn = '', act = null;
+    if (st.watch) {
+      text = st.watch.mode === 'polling' ? t('Watching a background tab of the agent’s — a new picture every half second; the agent’s current tab is unchanged') : t('Watching another tab of the agent’s — the agent’s current tab is unchanged');
+      btn = t('Back to the agent’s tab'); act = () => watchTab(null);
+    } else if (st.bg && st.bg.state === 'unresponsive') {
+      // B-d635 (userW's inc-murizo36-ecri): a tab that sends no picture and does not answer is SAID — never a blank canvas with no words
+      text = driving ? t('This tab is not responding — no picture, and it did not answer when asked (a busy or hung page). Reload it, or switch to another tab') : t('The agent’s tab is not responding — no picture, and it did not answer when asked (a busy or hung page). This view updates as soon as it answers');
+    } else if (st.bg) {
+      const row = (st.tabRow && st.tabRow.rows || []).find((x) => x.targetId === String(st.bg.targetId || '').toUpperCase() || x.active);
+      if (driving) { text = t('This tab is in the background of its window and paints nothing — bring it forward to see it live (a new picture every half second meanwhile)'); if (row) { btn = t('Bring it forward'); act = () => tabAct('switch', row); } }
+      else text = t('The agent’s tab is in the background of its window — a new picture every half second; take over and bring it forward to see it live');
+    }
+    const want = text ? '' : 'none';
+    if (watchLine.style.display !== want) watchLine.style.display = want;
+    if (watchLineText.textContent !== text) watchLineText.textContent = text;
+    watchLineBtn.style.display = btn ? '' : 'none';
+    if (watchLineBtn.textContent !== btn) watchLineBtn.textContent = btn;
+    watchLineBtn.onclick = act;
+  }
   function tabAct(act, row) {
     if (!st.ws || st.ws.readyState !== 1) { showToast(act === 'close' ? t('Could not close the tab: {why}', { why: t('the live view is not connected') }) : t('Could not switch tabs: {why}', { why: t('the live view is not connected') }), { type: 'error' }); return; }
     if (st.tabActs.has(row.targetId)) return;
@@ -1122,6 +1181,9 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
       st.tabError = { act, code: m.code || null, why, at: Date.now() };
       showToast(act === 'close' ? t('Could not close the tab: {why}', { why }) : t('Could not switch tabs: {why}', { why }), { type: 'error' });
     } else if (act === 'close' && pend && pend.owner === 'agent') showToast(t('Closed “{title}” — the agent is told when you hand back', { title: pend.title }), { duration: 3500 });
+    // lane browser-windows (U0b): a chip click that RAN is said (userW's clicks changed nothing visible and said nothing)
+    else if (act === 'switch' && m.broughtForward) showToast(t('Brought “{title}” to the front of its window', { title: (pend && pend.title) || '' }), { duration: 3000 });
+    else if (act === 'switch' && !m.noop && pend && pend.owner === 'agent') showToast(t('Switched the agent’s tab to “{title}” — the agent is told when you hand back', { title: pend.title }), { duration: 3500 });
     renderTabRow();
   }
   /** "Close all…" = the browser's own Stop (a conversation's view) / Quit (his window) — ONE confirm naming the browser. */
@@ -1216,10 +1278,12 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
   const inUse = (r) => { const f = st.fact || factNow(); const u = f && f.using; if (!u || !r) return false; return (u.kind === 'profile' && r.kind === 'attachment' && r.profileId === u.id) || (u.kind === 'own' && r.kind === 'ephemeral'); };
   /** A row's words: a profile's label (+ in use), the session's own browser (THE fact's name for it), a helper by its witnessed name or number. */
   /** The tab's own words, WITHOUT the marker (the marker is its own element, so a long name never cuts it off). */
+  // lane jobs-browser: a Background Work job's window is the conversation's helper row, named as the job (live name)
+  const jobOrHelper = (r) => (r.helper && r.helper.job ? t('Job: {name}', { name: r.helper.name || String((r.helper && r.helper.n) || '?') }) : r.helper && r.helper.name ? t('Helper: {name}', { name: r.helper.name }) : t('Helper {n}', { n: (r.helper && r.helper.n) || '?' }));
   const rowBase = (r) => {
     if (!r) return '';
     if (r.kind === 'ephemeral') return String((wordsNow() || {}).ownShort || t('Temp browser')); // short on the tab; the title says it whole
-    if (r.kind === 'child') return r.helper && r.helper.name ? t('Helper: {name}', { name: r.helper.name }) : t('Helper {n}', { n: (r.helper && r.helper.n) || '?' });
+    if (r.kind === 'child') return jobOrHelper(r);
     return String(r.label || r.alias || r.ref);
   };
   const rowLabel = (r) => (r ? rowBase(r) + (inUse(r) ? ' ' + t('(in use)') : '') : '');
@@ -1227,14 +1291,14 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
   const rowName = (r) => {
     if (!r) return '';
     if (r.kind === 'ephemeral') return t('This conversation’s browser') + ' — ' + String((wordsNow() || {}).ownName || t('no profile (temporary browser)')) + (inUse(r) ? ' ' + t('(in use)') : '');
-    if (r.kind === 'child') return r.helper && r.helper.name ? t('Helper: {name}', { name: r.helper.name }) : t('Helper {n}', { n: (r.helper && r.helper.n) || '?' });
+    if (r.kind === 'child') return jobOrHelper(r);
     return String(r.label || r.alias || r.ref) + (inUse(r) ? ' ' + t('(in use)') : '');
   };
-  // owner ruling A (2): a shared profile's browser names the OTHER conversation driving it (its name from this client's rows)
+  // lane browser-windows: an entry is this conversation's WINDOW; the user driving it from another conversation's view (a
+  // lease still in an older browser run's shared window) names that view's conversation (its name from this client's rows)
   const keyName = (k) => { const s = (app.sidebar?._allSessions || []).find((x) => x && x.browserKey === k); return s ? (s.webuiName || s.name || '') : ''; };
   const driverText = (r) => (r.driver === 'you' ? t('you')
-    : r.driver === 'other' ? t('{name} drives', { name: keyName(r.driverKey) || t('another chat') })
-      : r.driver === 'other-user' ? t('you, in {name}', { name: keyName(r.driverKey) || t('another chat') })
+    : r.driver === 'other-user' ? t('you, in {name}', { name: keyName(r.driverKey) || t('another chat') })
         : r.kind === 'child' ? '' : t('agent'));
   // lane P verify (finding 6): the words come from the PURE rowStateWords — a released own browser beside an attachment is
   // never promised "the next command" (a bare command lands on the attachment); one sentence per code
@@ -1334,6 +1398,8 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
     const head = document.createElement('div'); head.className = 'browser-live-cap-head'; head.textContent = t('This conversation’s browsers: {own} of {cap} running', { own: chip.own, cap: chip.cap });
     pop.appendChild(head);
     if (chip.machineFull) { const m = document.createElement('div'); m.className = 'browser-live-cap-machine'; m.textContent = t('Machine ceiling reached — no browser can start until one stops, anywhere on this machine'); pop.appendChild(m); }
+    // lane browser-windows (U4): the machine's count against its ceiling — a SETTING now (Settings → Agent browser)
+    { const mc = st.status && st.status.cap && st.status.cap.machine; if (mc && Number.isFinite(Number(mc.cap))) { const m = document.createElement('div'); m.className = 'browser-live-cap-machine-count'; m.textContent = t('This machine: {used} of {cap} browsers running (Settings → Agent browser → Browsers running at once on this machine)', { used: Number(mc.used) || 0, cap: Number(mc.cap) }); pop.appendChild(m); } }
     const list = stoppableRows(st.rows, { browsing: ((app._browserProfiles && app._browserProfiles.leases) || []).filter((l) => l && l.human).map((l) => l.profileId) }); // verify r2: a profile the user browses himself is never stopped from here
     if (!list.length) { const n = document.createElement('div'); n.className = 'browser-live-cap-empty'; n.textContent = t('None of them is running right now'); pop.appendChild(n); }
     for (const x of list) {
@@ -1654,6 +1720,8 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
         st.mode = m.mode || 'watch'; st.holder = m.holder || null; st.mine = !!m.mine; st.modeSince = Number(m.since) || 0; st.modeCause = m.cause || null;
         st.wakes = Number.isInteger(m.wakes) ? m.wakes : null; // r6 A-F9: what a Hand back from this view wakes
         renderMode(); renderFit(); // builder r2: the fit chip's words name who drives (a shared browser held while YOU drive)
+        if (st.mode === 'takeover' && st.mine && st.watch) st.watch = null; // lane browser-windows (U3): a takeover drives the agent's tab — the bridge ended this view's watch
+        renderTabRow(); renderWatchLine(); // lane browser-windows: the chips' clicks and the watch line's words follow who drives
         // lane browser-resume C: a takeover / handback moves who drives this browser — the strip's rows (and the tab row's
         // "Close all…", which is never offered on a browser somebody drives) re-read it now (an own browser's input change is
         // no digest write: without this they waited for an unrelated broadcast)
@@ -1751,6 +1819,19 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
         if (st.frames === 1) setStatus('', { hide: true });
         break;
       }
+      // lane browser-windows (U3): the tab THIS view watches (or null: back on the agent's), its mode, a refusal said by name
+      case 'watching': {
+        if (m.refused) { const why = m.refused === 'not_your_tab' ? tabRefusalText('not_your_tab', {}, t) : m.refused === 'driving' ? t('you drive this window — its chip switches the agent’s tab') : String(m.error || m.refused); showToast(t('Could not show that tab: {why}', { why }), { type: 'error' }); }
+        if (m.targetId) st.watch = { targetId: String(m.targetId), mode: m.mode === 'polling' ? 'polling' : 'screencast', pending: !!m.pending, title: st.watch && st.watch.targetId === String(m.targetId) ? st.watch.title : '' };
+        else { if (st.watch && m.ended) showToast(t('Back on the agent’s tab — the tab you watched is gone'), { duration: 3000 }); st.watch = null; }
+        renderTabRow(); renderWatchLine();
+        break;
+      }
+      // lane browser-windows (U0b): the tab on show paints nothing (a background tab of its window) — or it does again
+      case 'tab-background':
+        st.bg = m.targetId ? { targetId: String(m.targetId), since: Number(m.since) || Date.now(), state: m.state === 'unresponsive' ? 'unresponsive' : 'hidden' } : null; // B-d635: or a tab that never answers
+        renderWatchLine();
+        break;
       case 'tabs':
         st.tabs = Array.isArray(m.tabs) ? m.tabs.map((x) => ({ tabId: String(x.tabId || ''), targetId: String(x.targetId || ''), title: String(x.title || ''), url: String(x.url || ''), active: !!x.active })) : [];
         if (H) { const act = st.tabs.find((x) => x.active); if (act && act.url && act.url !== st.url) { st.url = act.url; renderUrl(); } } // his tab switched (a popup he opened): the address row follows

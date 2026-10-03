@@ -42,7 +42,7 @@ function ourSymbols() {
     }
   };
   walk(path.join(REPO, 'src', 'lib'));
-  for (const f of ['src/client.js']) {
+  for (const f of ['src/client.js', 'src/design-viewer-entry.js']) {
     const src = fs.readFileSync(path.join(REPO, f), 'utf-8');
     for (const m of src.matchAll(/^(?:async\s+)?function\s+([\w$]+)/gm)) names.add(m[1]);
   }
@@ -106,6 +106,18 @@ if (bundle) {
   ok(free.size === 0,
     'public/bundle.js: no bare calls to our own symbols (a surviving name = used but never imported)',
     free.size ? [...free.entries()].map(([n, c]) => `${n} (${c}×)`).join(', ') : '');
+}
+
+// The published design page's runtime (int201): the SECOND esbuild entry, built by the same `npm run build` just
+// before this suite — the same free-call rule over its bundle (it bundles src/lib/design-canvas*.js + design-model.js).
+{
+  let viewer = '';
+  try { viewer = fs.readFileSync(path.join(REPO, 'public', 'design-viewer.js'), 'utf-8'); } catch { }
+  ok(viewer.length > 8000, 'public/design-viewer.js exists and looks built (run npm run build first)');
+  if (viewer) {
+    const free = freeCalls(viewer);
+    ok(free.size === 0, 'public/design-viewer.js: no bare calls to our own symbols', free.size ? [...free.entries()].map(([n, c]) => `${n} (${c}×)`).join(', ') : '');
+  }
 }
 
 // ── NEGATIVE CONTROL: the checker must fire on the exact regression ──

@@ -343,6 +343,7 @@ console.log('§4 the user-select census (grep-derived over public/*.css and src/
 // A new opt-in without a row is red; so is a row nothing declares; so is a row that names a chrome surface.
 const OPT_INS = {
   '.chat-message-list': 'the chat transcript — the surface this lane is about',
+  '.chanmsg-body': 'a channel / agent-group message\'s words (lane group-chat-ui B-ff04: selectable and copyable with a mouse; on a touch-first device a long press stays the message menu, Copy text inside — composed at the 2.369.202 integration)',
   '.chat-permission-cmd, .chat-helper-ask-cmd': 'the command a permission card asks about (copied to check it)',
   '.ut-text, .ut-detail, .ut-hist-msg': 'For-you item text and history (agent-written words a person copies)',
   '.iw-title': 'the For-you window\'s item title',

@@ -99,9 +99,11 @@
  * Gate: scripts/test-live-input.mjs (fast) + scripts/test-browser-live-input.mjs (heavy).
  */
 const { WebSocketServer, WebSocket } = require('ws');
+const KA = require('../ws-keepalive.js'); // lane stream-ping: the ONE keepalive rule every *-stream.js bridge arms
 const S = require('../browser-stream.js');
 const T = require('../browser-takeover.js');
-const FIT = require('../browser-fit.js'); // lane S4: the pane → page viewport rules, the agent-set flag, the fresh-frame clocks
+const FIT = require('../browser-fit.js');
+const WIN = require('../browser-windows.js'); // lane browser-windows (U3/U0b): a background tab is said and polled; a watched tab's frames // lane S4: the pane → page viewport rules, the agent-set flag, the fresh-frame clocks
 /** lane S4: a page size the keeper could not set is not asked for again for this long (a new pane size is). */
 const FIT_RETRY_MS = 30000;
 /** builder r2 (the reality verifier's B): the page is never resized under the driver's HELD button — a resize landing
@@ -131,7 +133,10 @@ const HM = require('../browser-human.js'); // BROWSE YOURSELF (B-6ae8): the user
 
 function create({ keeper = null, activeSessions, requestAuthed, log = console, now = Date.now, limits = S.BACKPRESSURE,
   WebSocketImpl = WebSocket, connectTimeoutMs = 20000, getTelemetry = () => null, platform = process.platform, inputWindow = INPUT_WINDOW,
-  dialogs = null } = {}) { // lane browser-stuck: the page-dialog watch (src/server/browser-dialogs.js) — its records reach the viewers
+  dialogs = null, keepaliveMs = KA.PING_MS, // lane stream-ping: the viewers' keepalive cadence (src/ws-keepalive.js; the fast gate runs on short ones)
+  // lane browser-windows (U0b): the background check's clocks — the shipped values are the PURE constants (2 s of silence,
+  // a 1 s tick, a 500 ms poll); injectable so the fast gate runs on short ones
+  bgSilenceMs = WIN.BACKGROUND_SILENCE_MS, bgTickMs = 1000, bgPollMs = WIN.WATCH_POLL_MS, bgHungMs = WIN.UNRESPONSIVE_MS } = {}) { // lane browser-stuck: the page-dialog watch (src/server/browser-dialogs.js) — its records reach the viewers
   if (!activeSessions) throw new Error('browser-stream: activeSessions is required');
   if (typeof requestAuthed !== 'function') throw new Error('browser-stream: requestAuthed is required');
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_PAYLOAD });
@@ -303,8 +308,9 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     const key = relayKeyFor(sessionId, target);
     let relay = relays.get(key);
     if (!relay) { relay = createRelay(key, sessionId, target); relays.set(key, relay); }
-    const viewer = { id: nextViewerId++, ws, maxFps: S.MAX_FPS_DEFAULT, lastFrameAt: 0, sent: 0, dropped: 0, since: now(), sentSeq: 0, trailTimer: null };
+    const viewer = { id: nextViewerId++, ws, maxFps: S.MAX_FPS_DEFAULT, lastFrameAt: 0, sent: 0, dropped: 0, since: now(), sentSeq: 0, trailTimer: null, watch: null, watchSeq: 0 };
     relay.viewers.set(viewer.id, viewer);
+    armBg(relay); // lane browser-windows (U0b): a view of a tab that paints nothing is never silent
     noteViewers(relay);
     send(ws, { ...S.hello({ viewers: relay.viewers.size, target, mode: relay.mode, holder: relay.holder, platform }), you: viewer.id, mine: relay.holder === viewer.id, since: relay.modeSince || 0 });
     for (const t of S.REPLAYED_TYPES) if (relay.last[t]) send(ws, relay.last[t]);
@@ -312,6 +318,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (relay.viewport) send(ws, relay.viewport); // lane J: the page's viewport reading, replayed like the last frame
     if (relay.lastFit) send(ws, relay.lastFit); // lane S4: what the page's size is and whose pane it follows (the chip's words)
     if (relay.lastOwners) send(ws, relay.lastOwners); // lane browser-resume C: whose each tab is (the tab row's controls), replayed like the tabs record
+    if (relay.lastBg) send(ws, relay.lastBg); // lane browser-windows (U0b): the tab on show is in the background (said to a late viewer too)
     // 2.369.180 (lanes H + J on one tree): a viewer that joins a relay whose upstream is ALREADY open is told so — the
     // 'upstream-open' broadcast went out before it came, and lane H's recorder taps a holder's relay before anybody
     // watches, so EVERY live view of an ephemeral browser is such a joiner. Without it the view never read itself
@@ -322,8 +329,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (keeper && typeof keeper.pendingFor === 'function') { try { for (const c of keeper.pendingFor(relay.browserKey, relay.target.profileId || null)) send(ws, c); } catch { /* optional */ } }
     broadcastViewers(relay);
     ws.on('message', (d) => onViewerMessage(relay, viewer, d));
-    ws.on('close', () => dropViewer(relay, viewer));
-    ws.on('error', () => dropViewer(relay, viewer));
+    watchViewer(relay, viewer);
     await relay.ensureUpstream();
   }
 
@@ -341,8 +347,9 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     const rk = 'human:' + target.key;
     let relay = relays.get(rk);
     if (!relay) { relay = createRelay(rk, null, target); relays.set(rk, relay); }
-    const viewer = { id: nextViewerId++, ws, maxFps: S.MAX_FPS_DEFAULT, lastFrameAt: 0, sent: 0, dropped: 0, since: now(), sentSeq: 0, trailTimer: null };
+    const viewer = { id: nextViewerId++, ws, maxFps: S.MAX_FPS_DEFAULT, lastFrameAt: 0, sent: 0, dropped: 0, since: now(), sentSeq: 0, trailTimer: null, watch: null, watchSeq: 0 };
     relay.viewers.set(viewer.id, viewer);
+    armBg(relay); // lane browser-windows (U0b): a view of a tab that paints nothing is never silent
     noteViewers(relay);
     send(ws, { ...S.hello({ viewers: relay.viewers.size, target, mode: relay.mode, holder: relay.holder, platform }), you: viewer.id, mine: relay.holder === viewer.id, since: relay.modeSince || 0, human: true });
     for (const t of S.REPLAYED_TYPES) if (relay.last[t]) send(ws, relay.last[t]);
@@ -350,11 +357,11 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (relay.viewport) send(ws, relay.viewport);
     if (relay.lastFit) send(ws, relay.lastFit);
     if (relay.lastOwners) send(ws, relay.lastOwners); // lane browser-resume C: his window's tab row
+    if (relay.lastBg) send(ws, relay.lastBg); // lane browser-windows (U0b)
     if (relay.upstream && relay.upstream.readyState === 1) send(ws, { type: 'status', state: 'upstream-open' });
     broadcastViewers(relay);
     ws.on('message', (d) => onViewerMessage(relay, viewer, d));
-    ws.on('close', () => dropViewer(relay, viewer));
-    ws.on('error', () => dropViewer(relay, viewer));
+    watchViewer(relay, viewer);
     let a = null;
     try { a = keeper.humanAttach({ key: target.key, viewerId: viewer.id, token: fresh || null }); } catch (e) { a = { ok: false, error: String(e && e.message) }; }
     if (a && a.ok && !a.take) send(ws, { type: 'mode', mode: relay.mode, holder: relay.holder, mine: false, since: relay.modeSince || 0, cause: 'elsewhere', url: null, human: true }); // "You're browsing this in another window" + Continue here
@@ -397,6 +404,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
       inq: [], inflight: 0, fitClaim: null, copyWatch: null, lastCopy: null, copyArm: null, // copyArm: the holder's last copy GESTURE the bridge forwarded (verify: a copy leaves the server only on it — single-use)
       cmds: new Map(), // r6 A-F8: the last CMD_MEMORY `command` records by id (a confirmation's target = its paired command's params)
       acts: null, actSeq: 0, actTimer: null, // BROWSE YOURSELF: the user's input → ACTS on the taps (humanActStep's state, the synthetic ids, the burst flush)
+      bg: { state: null, targetId: null, since: 0, checkedAt: 0, busy: false, pollTimer: null, pollBusy: false }, bgTimer: null, lastBg: null, // lane browser-windows (U0b): the tab on show paints nothing (a background tab of its window) — said + polled
       lastOwners: null, ownersTimer: null, ownersBusy: false, ownersAgain: false, // lane browser-resume C: the tab row's `tab-owners` (judged by the keeper after a `tabs` record, debounced)
     };
     // P3: the keeper may already say somebody drives (an HTTP takeover, a
@@ -452,7 +460,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (cls !== 'frame') relay.ordSeq++;
     if (cls !== 'frame' && noteViewportCommand(relay, msg, t)) return; // lane S4: the mirror of OUR `set viewport` (+ its launch pair) — never a viewer's "running", never a tap's
     notePicture(relay, msg, cls);
-    if (cls === 'frame') { relay.frameSeq++; relay.lastUpFrameAt = t; if (!relay.firstFrameAt) relay.firstFrameAt = t; }
+    if (cls === 'frame') { relay.frameSeq++; relay.lastUpFrameAt = t; if (!relay.firstFrameAt) relay.firstFrameAt = t; if (relay.bg.state) { const b = relay.bg; b.frameTimes = [...(b.frameTimes || []), t].slice(-16); recheckBackground(relay); } } // lane browser-windows: a frame while a background verdict stands is RE-ASKED (a hidden tab can still send a stray frame — the heavy leg's popup); verify r1 ④: the frame instants are kept — a tab that PAINTS clears it whatever the page says
     else if (msg.type === 'url') noteNavigation(relay, typeof msg.url === 'string' ? msg.url : '');
     // P5: every tap sees every record (a tap that throws never breaks the fan-out)
     for (const fn of relay.taps) { try { fn(msg, text, relay); } catch (e) { log.warn?.(`[browser-live] ${relay.key}: tap failed — ${e && e.message}`); } }
@@ -592,7 +600,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (msg.type === 'tabs' && Array.isArray(msg.tabs)) {
       const act = msg.tabs.find((x) => x && x.active);
       const u = act && typeof act.url === 'string' ? act.url : '';
-      relay.activeTarget = act && act.targetId ? String(act.targetId) : null; // verify r2: every `tabs` record re-says which tab the user is looking at
+      { const prevAct = relay.activeTarget; relay.activeTarget = act && act.targetId ? String(act.targetId) : null; if (relay.bg.state && relay.activeTarget !== prevAct) clearBackground(relay, 'another tab is on show'); } // verify r2: every `tabs` record re-says which tab the user is looking at; lane browser-windows: a background verdict is of ONE tab
       if (relay.mode === 'takeover' && relay.viewers.has(relay.holder) && relay.activeTarget && (!relay.copyWatch || relay.copyWatch.targetId !== relay.activeTarget)) armCopyWatch(relay); // lane live-input: the copy watch follows the tab on show
       if (relay.anchor) { // verify r3: …and the takeover's anchor judges it (an agent's switch while the user drives ⇒ `switched`, inputs refused tab_switched)
         const next = S.takeoverAnchorStep(relay.anchor, { activeTarget: relay.activeTarget, now: now() });
@@ -628,6 +636,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
   // ── lane S4: THE TRAILING FRAME — the gate's refusal is never a viewer's last picture ──
   function fanOutFrame(relay, text, t) {
     for (const v of relay.viewers.values()) {
+      if (v.watch) continue; // lane browser-windows (U3): a viewer watching another tab gets THAT tab's frames only
       if (S.frameGate({ maxFps: v.maxFps, lastFrameAt: v.lastFrameAt, bufferedAmount: v.ws.bufferedAmount }, t, limits)) { send(v.ws, text); v.lastFrameAt = t; v.sent++; v.sentSeq = relay.frameSeq; }
       else { v.dropped++; relay.stats.dropped++; armTrail(relay, v); }
     }
@@ -639,7 +648,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     const wait = S.frameGateWait({ maxFps: v.maxFps, lastFrameAt: v.lastFrameAt, bufferedAmount: v.ws.bufferedAmount }, now(), limits);
     v.trailTimer = setTimeout(() => {
       v.trailTimer = null;
-      if (relays.get(relay.key) !== relay || !relay.viewers.has(v.id) || !relay.lastFrame || v.sentSeq >= relay.frameSeq) return;
+      if (relays.get(relay.key) !== relay || !relay.viewers.has(v.id) || !relay.lastFrame || v.sentSeq >= relay.frameSeq || v.watch) return;
       const t = now();
       if (S.frameGate({ maxFps: v.maxFps, lastFrameAt: v.lastFrameAt, bufferedAmount: v.ws.bufferedAmount }, t, limits)) { send(v.ws, relay.lastFrame); v.lastFrameAt = t; v.sent++; v.sentSeq = relay.frameSeq; relay.stats.trailed++; }
       else armTrail(relay, v);
@@ -988,13 +997,164 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
   function tabActFor(relay, viewer, v) {
     const ack = (o) => send(viewer.ws, { type: 'tab-ack', rid: v.rid, act: v.act, targetId: v.targetId, ...o });
     if (!keeper || typeof keeper.userTabAct !== 'function') { ack({ ok: false, code: 'unavailable', error: 'tab acts are not available on this server' }); return; }
+    const id8 = String(v.targetId || '').slice(0, 8);
     Promise.resolve().then(() => keeper.userTabAct({ target: relay.target, viewerId: viewer.id, act: v.act, targetId: v.targetId }))
       .then((r) => {
         if (r && r.switchedTo && relay.anchor && relays.get(relay.key) === relay) relay.anchor = S.takeoverAnchor(r.switchedTo, now());
-        ack({ ok: true, switchedTo: (r && r.switchedTo) || null, ...(r && r.noop ? { noop: true } : {}) });
+        // lane browser-windows (U0b, userW's inc-muqdohf0-hkjc — his chip clicks left no line anywhere): every act is RECORDED
+        log.log?.(`[browser-live] ${relay.key}: viewer ${viewer.id}'s tab ${v.act} on ${id8} — ${r && r.broughtForward ? 'brought the agent\'s current tab to the front of its window' : r && r.noop ? 'already the tab on show (nothing ran)' : v.act === 'switch' ? 'switched the agent\'s current tab' : 'closed it'}`);
+        if (r && (r.broughtForward || r.switchedTo) && relay.bg.state) relay.bg.checkedAt = 0; // re-judged at once: a tab brought forward paints again
+        ack({ ok: true, switchedTo: (r && r.switchedTo) || null, ...(r && r.noop ? { noop: true } : {}), ...(r && r.broughtForward ? { broughtForward: true } : {}) });
         scheduleOwners(relay, 0);
       })
-      .catch((e) => ack({ ok: false, code: (e && e.code) || 'internal', error: String((e && e.message) || e) }));
+      .catch((e) => { log.log?.(`[browser-live] ${relay.key}: viewer ${viewer.id}'s tab ${v.act} on ${id8} — refused ${(e && e.code) || 'internal'}`); ack({ ok: false, code: (e && e.code) || 'internal', error: String((e && e.message) || e) }); });
+  }
+  // ── lane browser-windows (U0b, userW's inc-muqdohf0-hkjc): A TAB THAT PAINTS NOTHING IS SAID — AND ITS PICTURE POLLED ──
+  // MEASURED (src/browser-windows.js WINDOWS_PROOF, 0.38.1 + Chrome 154): a background tab of a window paints nothing (0 fps)
+  // and a mouse press there is answered and lands — so the live view showed a frozen picture under the user's clicks
+  // ("卡死"). After BACKGROUND_SILENCE_MS without a frame the page is ASKED (`document.visibilityState`, server-side CDP);
+  // hidden ⇒ one `tab-background` record to every viewer (replayed to a late one), the journal names it, and its picture is
+  // polled at ≤ 2 fps (`Page.captureScreenshot`, measured fresh) until it paints again or another tab is on show.
+  function armBg(relay) {
+    if (relay.bgTimer || !keeper || typeof keeper.tabVisibilityFor !== 'function') return;
+    relay.bgTimer = setInterval(() => checkBackground(relay), bgTickMs);
+    if (relay.bgTimer.unref) relay.bgTimer.unref();
+  }
+  function checkBackground(relay) {
+    if (relays.get(relay.key) !== relay) { if (relay.bgTimer) clearInterval(relay.bgTimer); relay.bgTimer = null; return; }
+    const b = relay.bg, t = now(), id = relay.activeTarget;
+    if (!relay.viewers.size || b.busy || !id || !relay.upstream || relay.upstream.readyState !== 1) return;
+    if (t - Math.max(relay.lastUpFrameAt || 0, relay.since || 0) < bgSilenceMs) return;
+    if (t - b.checkedAt < (b.state ? Math.max(5000, bgSilenceMs) : bgSilenceMs)) return;
+    b.busy = true; b.checkedAt = t;
+    Promise.resolve().then(() => keeper.tabVisibilityFor(relay.target, id)).catch((e) => ({ ok: false, error: String((e && e.message) || e) })).then((r) => {
+      b.busy = false;
+      if (relays.get(relay.key) !== relay || relay.activeTarget !== id) return;
+      // B-d635 (lane browser-reliability, userW's inc-murizo36-ecri): a tab that sends nothing AND never answers (hung, not
+      // hidden) used to return here silently — a blank canvas with loading dots for good, no words. It is said now
+      // (`unresponsive`, re-asked on the verdict's clock; a frame or an answer ends it). A malformed id is not a hang.
+      // verify r1: only after bgHungMs WITHOUT an answer — one missed ask is a page busy with JS as often as a hung one
+      if (!r || !r.ok) { if (!r || r.error !== 'no tab') noAnswer(relay, id, t, (r && r.error) || 'no answer'); return; }
+      b.noAnswer = null;
+      if (r.visibility === 'hidden') setBackground(relay, id); else if (b.state) clearBackground(relay, 'it is on show');
+    });
+  }
+  /** A frame arrived while the verdict says hidden: ask the page again at once (≤ 1 per 500 ms) — only `visible` clears it. */
+  function recheckBackground(relay) {
+    const b = relay.bg, t = now(), id = b.targetId;
+    if (!b.state || !id) return;
+    // verify r1 ④ (a page that LIES hidden under a 60 fps stream kept the notice for ever, re-asking + capturing twice a second):
+    // the FRAME FACTS clear it — BACKGROUND_PAINT_FRAMES inside BACKGROUND_PAINT_WINDOW_MS ⇒ it paints, whatever the page says
+    { const pa = WIN.paintsAgain({ frameTimes: b.frameTimes || [], now: t }); if (pa.paints) { clearBackground(relay, `it paints again (${pa.recent} frames in a second)`); return; } }
+    if (b.busy || t - (b.recheckAt || 0) < 500) return;
+    b.busy = true; b.recheckAt = t;
+    Promise.resolve().then(() => keeper.tabVisibilityFor(relay.target, id)).catch(() => null).then((r) => {
+      b.busy = false;
+      if (relays.get(relay.key) !== relay || !r || !r.ok || b.targetId !== id) return;
+      if (r.visibility === 'hidden') { if (b.state !== 'hidden') setBackground(relay, id); } // B-d635: a hung tab that answers hidden is a background tab
+      else clearBackground(relay, 'it paints again');
+    });
+  }
+  /** B-d635 verify r1: the tab on show did not answer the ask begun at `t0` — `unresponsive` once it has gone bgHungMs
+   *  without an answer (asks in a row; a frame since the first miss, another tab, or a pause longer than bgHungMs since
+   *  the last miss — nobody watched, a tap kept the relay — starts over). */
+  function noAnswer(relay, id, t0, why) {
+    const b = relay.bg;
+    if (!b.noAnswer || b.noAnswer.id !== id || (relay.lastUpFrameAt || 0) > b.noAnswer.since || t0 - b.noAnswer.last > bgHungMs) b.noAnswer = { id, since: t0 };
+    b.noAnswer.last = now();
+    if (now() - b.noAnswer.since >= bgHungMs) setBackground(relay, id, 'unresponsive', why);
+  }
+  /** `state` 'hidden' (a background tab of its window: said, its picture polled) or (B-d635) 'unresponsive' (it sends no
+   *  frame and does not answer: said, nothing polled — a capture of a hung page does not answer either). */
+  function setBackground(relay, id, state = 'hidden', why = '') {
+    const b = relay.bg;
+    if (b.state === state && b.targetId === id) return;
+    b.state = state; b.targetId = id; b.since = now();
+    if (b.pollTimer) { clearInterval(b.pollTimer); b.pollTimer = null; }
+    if (state === 'unresponsive') {
+      log.log?.(`[browser-live] ${relay.key}: the tab on show (${String(id).slice(0, 8)}) sends no picture and does not answer (${String(why).slice(0, 80)}) — a busy or hung page; said on the view, asked again every ${Math.max(5000, bgSilenceMs) / 1000} s`);
+      relay.lastBg = JSON.stringify({ type: 'tab-background', targetId: id, since: b.since, state, pollMs: 0 });
+      broadcast(relay, relay.lastBg);
+      return;
+    }
+    log.log?.(`[browser-live] ${relay.key}: the tab on show (${String(id).slice(0, 8)}) is in the BACKGROUND of its window — it paints nothing; said on the view, its picture polled every ${bgPollMs} ms`);
+    relay.lastBg = JSON.stringify({ type: 'tab-background', targetId: id, since: b.since, pollMs: bgPollMs });
+    broadcast(relay, relay.lastBg);
+    b.pollTimer = setInterval(() => pollBackground(relay), bgPollMs);
+    if (b.pollTimer.unref) b.pollTimer.unref();
+  }
+  function clearBackground(relay, why) {
+    const b = relay.bg;
+    if (!b.state) return;
+    const id = b.targetId;
+    b.state = null; b.targetId = null; b.checkedAt = 0; b.frameTimes = [];
+    if (b.pollTimer) { clearInterval(b.pollTimer); b.pollTimer = null; }
+    relay.lastBg = null;
+    log.log?.(`[browser-live] ${relay.key}: the tab ${String(id || '').slice(0, 8)} is no longer a silent background tab (${why})`);
+    broadcast(relay, { type: 'tab-background', targetId: null, why });
+  }
+  function pollBackground(relay) {
+    const b = relay.bg;
+    // verify r1 ④: NOBODY WATCHING ⇒ NO CAPTURE — a recorder tap keeps a holder's relay alive for hours after the last viewer
+    // left, and the poll kept asking Chrome for a picture twice a second with no one to send it to (reproduced: 11 captures in
+    // the second after the viewer left). The verdict stands (a late viewer is told at once); the pictures resume with a viewer.
+    if (relays.get(relay.key) !== relay || !b.state || b.pollBusy || !relay.viewers.size || !keeper || typeof keeper.captureTabFor !== 'function') return;
+    b.pollBusy = true;
+    const id = b.targetId;
+    Promise.resolve().then(() => keeper.captureTabFor(relay.target, id)).catch(() => null).then((r) => {
+      b.pollBusy = false;
+      if (relays.get(relay.key) !== relay || b.targetId !== id || !r || !r.ok) return;
+      const rec = { type: 'frame', data: r.data, metadata: { deviceWidth: Number(r.clientWidth) || 0, deviceHeight: Number(r.clientHeight) || 0, pageScaleFactor: 1, offsetTop: 0, scrollOffsetX: 0, scrollOffsetY: 0, timestamp: now(), polled: 'background' } };
+      const text = JSON.stringify(rec);
+      notePicture(relay, rec, 'frame');
+      relay.frameSeq++; relay.stats.fresh++; // never lastUpFrameAt: the stream itself is still silent
+      relay.lastFrame = text; relay.stats.frames++;
+      fanOutFrame(relay, text, now());
+    });
+  }
+  // ── lane browser-windows (U3): A WATCHING VIEWER'S CHIP MOVES ITS VIEW — never the agent's tab ──
+  function stopViewerWatch(relay, viewer, why) {
+    const w = viewer.watch;
+    if (!w) return;
+    viewer.watch = null; viewer.watchSeq++;
+    if (w.timer) clearTimeout(w.timer);
+    if (typeof w.stop === 'function') { try { w.stop(); } catch { /* ended */ } }
+    send(viewer.ws, { type: 'watching', targetId: null, ...(why ? { ended: why } : {}) });
+    if (relay.lastFrame) { send(viewer.ws, relay.lastFrame); viewer.lastFrameAt = now(); viewer.sentSeq = relay.frameSeq; } // back on the agent's picture at once
+  }
+  function viewerWatch(relay, viewer, targetId) {
+    const say = (o) => send(viewer.ws, { type: 'watching', ...o });
+    const id = targetId ? String(targetId).toUpperCase() : null;
+    if (viewer.watch) stopViewerWatch(relay, viewer, null);
+    if (!id || (relay.activeTarget && id === String(relay.activeTarget).toUpperCase())) { log.log?.(`[browser-live] ${relay.key}: viewer ${viewer.id} follows the agent's tab again`); return; }
+    if (relay.holder === viewer.id) { say({ targetId: null, refused: 'driving', error: 'you drive this window — its chip switches the agent\'s tab' }); return; }
+    let owners = {}; try { owners = (JSON.parse(relay.lastOwners || '{}') || {}).owners || {}; } catch { owners = {}; }
+    const mine = isHuman(relay) ? 'you' : 'agent';
+    if (owners[id] !== mine) { log.log?.(`[browser-live] ${relay.key}: viewer ${viewer.id}'s watch of ${id.slice(0, 8)} refused not_your_tab`); say({ targetId: null, refused: 'not_your_tab', error: 'that tab is not this conversation\'s — open its own live view' }); return; }
+    if (!keeper || typeof keeper.watchTabFor !== 'function') { say({ targetId: null, refused: 'unavailable', error: 'this server cannot show another tab' }); return; }
+    const seq = ++viewer.watchSeq;
+    const w = { targetId: id, mode: 'screencast', stop: null, lastAt: 0, pending: null, timer: null };
+    viewer.watch = w;
+    const live = () => viewer.watch === w && relay.viewers.has(viewer.id) && relays.get(relay.key) === relay;
+    const push = (text) => {
+      const t = now();
+      if (S.frameGate({ maxFps: viewer.maxFps, lastFrameAt: w.lastAt, bufferedAmount: viewer.ws.bufferedAmount }, t, limits)) { send(viewer.ws, text); w.lastAt = t; return; }
+      w.pending = text; // the latest refused frame goes once the gate opens (a static page's last paint is never lost)
+      if (w.timer) return;
+      const wait = S.frameGateWait({ maxFps: viewer.maxFps, lastFrameAt: w.lastAt, bufferedAmount: viewer.ws.bufferedAmount }, t, limits);
+      w.timer = setTimeout(() => { w.timer = null; if (live() && w.pending) { const p = w.pending; w.pending = null; push(p); } }, wait === null ? RESUME_POLL_MS : Math.max(1, wait));
+      if (w.timer.unref) w.timer.unref();
+    };
+    log.log?.(`[browser-live] ${relay.key}: viewer ${viewer.id} watches the agent's tab ${id.slice(0, 8)} (its current tab ${String(relay.activeTarget || '?').slice(0, 8)} is unchanged)`);
+    say({ targetId: id, mode: 'screencast', pending: true });
+    Promise.resolve().then(() => keeper.watchTabFor(relay.target, id, {
+      onFrame: (f) => { if (live()) push(JSON.stringify({ type: 'frame', data: f.data, metadata: { ...(f.metadata || {}), watched: id } })); },
+      onMode: (m) => { if (live()) { w.mode = m; say({ targetId: id, mode: m }); } },
+      onEnd: (why) => { if (live() && why !== 'closed') stopViewerWatch(relay, viewer, why); },
+    })).catch((e) => ({ ok: false, error: String(e && e.message) })).then((r) => {
+      if (!r || !r.ok) { if (live()) { viewer.watch = null; say({ targetId: null, refused: 'unreadable', error: String((r && r.error) || 'the tab could not be shown') }); } return; }
+      if (live() && seq === viewer.watchSeq) w.stop = r.close; else { try { r.close(); } catch { /* ended */ } }
+    });
   }
   function onViewerMessage(relay, viewer, d) {
     let msg = null; try { msg = JSON.parse(typeof d === 'string' ? d : d.toString()); } catch { send(viewer.ws, { type: 'refused', code: 'bad-message', error: 'not JSON' }); return; }
@@ -1020,6 +1180,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (v.kind === 'ack') return;
     if (v.kind === 'ping') { send(viewer.ws, { type: 'pong', at: now() }); return; }
     if (v.kind === 'tab-act') { if (v.refusal) send(viewer.ws, v.refusal); else tabActFor(relay, viewer, v); return; } // lane browser-resume C: the tab row's switch / ✕
+    if (v.kind === 'watch-tab') { viewerWatch(relay, viewer, v.targetId); return; } // lane browser-windows (U3): a watching viewer's chip moves ITS view
     if (v.kind === 'input') {
       // lane S2 (naive study 2 T4): a record carrying `rid` is ANSWERED — an input-receipt from the browser's own
       // reply (a mediated lease: the credit minted here BEFORE the forward is what lets the user's own input past the
@@ -1045,6 +1206,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     }
     // P3 (§4.3): the control verbs
     if (v.kind === 'takeover') {
+      if (viewer.watch) stopViewerWatch(relay, viewer, 'you took over — the view follows the agent\'s tab'); // lane browser-windows (U3): a takeover drives the agent's tab
       const r = takeoverFor(relay, viewer);
       if (r.ok) scheduleViewport(relay, 'takeover'); // lane J: the page is re-read the moment input starts to matter (a window resized in the same proportions keeps its picture size)
       if (!r.ok) send(viewer.ws, { type: 'refused', code: r.code || 'held', error: r.error || 'refused', holder: r.holder ? r.holder.viewerId : relay.holder, mode: relay.mode });
@@ -1219,8 +1381,25 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (relay.upstream && relay.upstream.readyState === 1) { try { relay.upstream.send(JSON.stringify({ type: 'config', maxFps: m })); } catch { /* closing */ } }
   }
   function broadcastViewers(relay) { broadcast(relay, { type: 'viewers', n: relay.viewers.size }); }
+  /**
+   * lane stream-ping (browser-windows BL-r5-2): a viewer's socket is WATCHED — the ONE keepalive rule (src/ws-keepalive.js,
+   * the desktop bridge's 20 s ping / two silent rounds) drops a half-open viewer (no close frame, nothing ever read again)
+   * within 2 × keepaliveMs instead of the kernel's TCP timeout, and every close — clean, error or keepalive — leaves ONE
+   * named line (who closed, the code, after how long) and runs `dropViewer` exactly as a clean close does: the count falls,
+   * the window's watched state follows, the upstream and the other viewers are untouched.
+   */
+  function watchViewer(relay, viewer) {
+    const ws = viewer.ws;
+    viewer.keepalive = KA.armKeepalive(ws, { pingMs: keepaliveMs, now, onDrop: (d) => { viewer.closedBy = viewer.closedBy || d.reason; viewer.closeCode = d.code; } });
+    ws.on('close', (code) => { if (viewer.closeCode == null) viewer.closeCode = code; dropViewer(relay, viewer); });
+    ws.on('error', (e) => { viewer.closedBy = viewer.closedBy || `viewer socket error ${(e && e.code) || (e && e.message) || ''}`.trim(); dropViewer(relay, viewer); });
+  }
   function dropViewer(relay, viewer) {
+    if (viewer.keepalive) viewer.keepalive.stop();
     if (!relay.viewers.delete(viewer.id)) return;
+    if (viewer.watch) stopViewerWatch(relay, viewer, null); // lane browser-windows (U3)
+    // THE NAMED CLOSE LINE (the desktop bridge's spelling: closed (<who>) after <n>s)
+    log.log?.(`[browser-stream] ${relay.key}: viewer ${viewer.id} closed (${viewer.closedBy || 'the viewer closed its socket'}) after ${Math.round((now() - viewer.since) / 1000)}s, code ${viewer.closeCode == null ? '-' : viewer.closeCode}, ${viewer.sent} frame(s) sent`);
     if (viewer.trailTimer) { clearTimeout(viewer.trailTimer); viewer.trailTimer = null; }
     if (relay.fitClaim === viewer.id) relay.fitClaim = null; // lane live-input: a claim leaves with its view
     if (relay.fits.delete(viewer.id)) scheduleFit(relay, 'viewer-left'); // lane S4: the next pane rules (or nobody: the restore clock)
@@ -1304,6 +1483,8 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (isHuman(relay)) flushActs(relay, true); // BROWSE YOURSELF: the last burst of his acts reaches the recorder before its tap ends
     for (const tm of ['fitTimer', 'freshTimer', 'fitHoldTimer', 'actTimer', 'ownersTimer']) if (relay[tm]) { clearTimeout(relay[tm]); relay[tm] = null; } // lane browser-resume C: + the owners debounce
     for (const v of relay.viewers.values()) if (v.trailTimer) { clearTimeout(v.trailTimer); v.trailTimer = null; }
+    for (const v of relay.viewers.values()) if (v.watch) stopViewerWatch(relay, v, null); // lane browser-windows (U3): every watch pump ends with its relay
+    if (relay.bgTimer) { clearInterval(relay.bgTimer); relay.bgTimer = null; } if (relay.bg.pollTimer) { clearInterval(relay.bg.pollTimer); relay.bg.pollTimer = null; } // lane browser-windows (U0b)
     relay.fits.clear();
     armRestore(relay.key); // the keeper refuses a browser that is not running (a view never starts one); shutdown() clears the clocks
     // P3: a relay that ends while somebody drives hands back (the viewers are gone with it)

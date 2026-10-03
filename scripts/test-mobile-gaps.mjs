@@ -40,7 +40,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
+import { freePorts, scratch, scratchDir, scratchHome, ONBOARDED_SOURCE, vncEnv, readRunRecord, runOwnerState, RUN_RECORD } from './scratch.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 
@@ -56,6 +56,39 @@ const SID = 'f01d0000-0000-4000-8000-0000000ab11e'; // view-only fixture (the fo
 const VW = 390, VH = 844;
 let failed = 0;
 const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : ''}`); } };
+// screenshots for the mandatory human look (test-gear-menu's habit): their own
+// scratch dir, NOT removed by cleanup. B-3f5d ② (2026-09-24 verifier: ~76 left in /tmp): the gate's reaper judges
+// PROCESSES, never a directory, so nothing swept them. The dir is now STAMPED with this run's record (scratchDir) and
+// every run removes the shots of runs whose owner is gone — the newest look survives until the next run, a live
+// parallel run's is never touched (an unstamped dir from before this fix: its pid, by name, must be gone too).
+const SHOTS = scratchDir('mobile-gaps-shots');
+function sweepDeadShots() {
+  const root = path.dirname(SHOTS), stem = path.basename(SHOTS).replace(/-\d+$/, '-');
+  const gone = [];
+  for (const n of fs.readdirSync(root)) {
+    const m = n.startsWith(stem) ? /^(\d+)$/.exec(n.slice(stem.length)) : null;
+    const dir = path.join(root, n);
+    if (!m || dir === SHOTS) continue;
+    const rec = readRunRecord(dir);
+    const dead = rec ? !runOwnerState(rec).alive : !fs.existsSync(`/proc/${m[1]}`);
+    if (dead) { try { fs.rmSync(dir, { recursive: true, force: true }); gone.push(n); } catch { } }
+  }
+  return gone;
+}
+{
+  // the leg: one dead run's stamped dir, one unstamped dir of a gone pid, one LIVE run's (this process's parent) — the control
+  const root = path.dirname(SHOTS), stem = path.basename(SHOTS).replace(/-\d+$/, '-');
+  const deadPid = Number(fs.readFileSync('/proc/sys/kernel/pid_max', 'utf-8')) + 10 + (process.pid % 1000);   // above pid_max — never a live process
+  const dead = path.join(root, stem + deadPid), legacy = path.join(root, stem + (deadPid + 1)), live = path.join(root, stem + process.ppid);
+  for (const d of [dead, legacy]) fs.mkdirSync(d, { recursive: true });
+  fs.writeFileSync(path.join(dead, RUN_RECORD), JSON.stringify({ v: 1, run: 'gone', pid: deadPid, starttime: 12345, bootId: '' }) + '\n');
+  const livePlanted = !fs.existsSync(live);
+  if (livePlanted) { fs.mkdirSync(live, { recursive: true }); fs.writeFileSync(path.join(live, 'keep.png'), ''); }
+  const gone = sweepDeadShots();
+  check('B-3f5d ②: a gone run\'s shots dir (stamped, and an unstamped one of a dead pid) is removed at the next run; this run\'s own dir is stamped', !fs.existsSync(dead) && !fs.existsSync(legacy) && !!readRunRecord(SHOTS), { gone });
+  check('B-3f5d ② CONTROL: a dir whose pid is ALIVE (another run in flight) is never touched', fs.existsSync(path.join(live, 'keep.png')));
+  if (livePlanted) fs.rmSync(live, { recursive: true, force: true });
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── fixtures: a seeded For-you item (the store's own persisted shape) + a
@@ -170,10 +203,6 @@ const connectPage = async (wsUrl) => {
 };
 const phone = await connectPage(target.webSocketDebuggerUrl);
 const { cdp, evalJs, waitFor, pageErrors } = phone;
-// screenshots for the mandatory human look (test-gear-menu's habit): their own
-// scratch dir, NOT removed by cleanup, swept by the gate's reaper
-const SHOTS = scratch('mobile-gaps-shots');
-fs.mkdirSync(SHOTS, { recursive: true });
 const shot = async (name) => { try { const r = await cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(SHOTS, name), Buffer.from(r.data, 'base64')); } catch {} };
 // Let a RECEIVER settle before it acts as a sender: _applyRemoteState holds
 // `_restoring` for 1 s and _doAutoSave inside that window returns WITHOUT
@@ -392,7 +421,7 @@ try {
       console.log('billing chip on the phone follows the member');
       const poolAuth = (member, id, extra = {}) => ({ source: 'pooled', name: '全部', poolTarget: member, poolTargetId: id, placement: 'automatic', priorityRank: null, pinned: null, pinnedId: null, poolDefault: 'Alpha Max', ...extra });
       const feed = (auth) => `(() => { const base = app.sidebar._webuiSessions || []; if (!base.some((r) => r.id === ${JSON.stringify(sid)})) return false; app.ws.ws.onmessage({ data: JSON.stringify({ type: 'active-sessions', sessions: base.map((r) => (r.id === ${JSON.stringify(sid)} ? { ...r, auth: ${JSON.stringify(auth)} } : r)) }) }); return true; })()`;
-      const chipNow = `(() => { const el = document.querySelector('.window-active .chat-view .chat-status-bar .chat-status-billing'); if (!el) return null; const r = el.getBoundingClientRect(); const cs = getComputedStyle(el); return { text: el.textContent, title: el.getAttribute('title') || '', pooled: el.classList.contains('pooled'), w: Math.round(r.width), l: Math.round(r.left), r: Math.round(r.right), display: cs.display, clipped: el.scrollWidth > el.clientWidth + 1 }; })()`;
+      const chipNow = `(() => { const el = document.querySelector('.window-active .chat-view .chat-status-bar .chat-status-billing'); if (!el) return null; const r = el.getBoundingClientRect(); const cs = getComputedStyle(el); return { text: ([...el.querySelectorAll(':scope > span')].filter((s) => getComputedStyle(s).display !== 'none').map((s) => s.textContent).join('') || el.textContent), title: el.getAttribute('title') || '', pooled: el.classList.contains('pooled'), w: Math.round(r.width), l: Math.round(r.left), r: Math.round(r.right), display: cs.display, clipped: el.scrollWidth > el.clientWidth + 1 }; })()`;
       const realRows = await evalJs(`JSON.stringify(app.sidebar._webuiSessions || [])`);
       const walk = await evalJs(`(() => {
         const fed0 = ${feed(poolAuth('Alpha Max', 'acct-a'))};

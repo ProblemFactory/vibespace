@@ -633,7 +633,7 @@ agent 于是自己建了一个多余的 profile，最后静默退回一个临时
    对话会从其它**每一个**对话手里拿走它 —— 钉住它的也一样；之后在会话属性里再选一次就还回去。（偏离读者建议 C6 "钉住的
    对话保留" 的理由：否则开关没法从一个钉住它的对话手里拿走它，而且被拒绝的那个对话听到的按钮 —— "在会话属性里为这个
    对话选它" —— 会原地打转。）
-5. **一次一个驾驶者。** 租约说谁持有一个**标签页**；drive 说**此刻**谁在操作（keeper 的 `drivers`，内存态）。另一个对话
+5. **一次一个驾驶者（已撤销 —— lane browser-windows 2026-10-01，见 §3.10：每个持有者一个窗口，对话之间没有驾驶声明，接管只及那个窗口）。** 租约说谁持有一个**标签页**；drive 说**此刻**谁在操作（keeper 的 `drivers`，内存态）。另一个对话
    的 agent 正在它的回合里用它（且 `DRIVE_HOLD_MS` = 90 s 内发过命令），或者用户正从另一个对话的实时视图接管着它 ⇒
    `browser_busy`，**点名**那个对话（或"用户，在 X 的实时视图里"）并给出等待上界；它的回合结束 / 90 s 无命令 / 不再持有
    租约 ⇒ 释放，下一条命令接手（PURE `driveVerdict`，11 行表）。**不排队**：队列需要一次唤醒，而唤醒就是一个没人打字的
@@ -666,6 +666,8 @@ agent 于是自己建了一个多余的 profile，最后静默退回一个临时
 - **面板**：`谁能使用` 是一行 chips + `更改…`（house 文字按钮），超过 4 个折成"还有 N 个"（手机上 2 个），全部失效时琥珀色"现在没有会话能使用它：…"；chips 按 `data-key` 原地协调（广播不重建行、不重建没变的 chip）。**对话框**是 principal picker（任务组在前、会话按任务组分组、键盘 + 鼠标），从**新鲜的** `GET /api/browser/profiles/:id/use` 画，保存是一次带 `base` 的整表 `PATCH`（名单在对话框打开期间变了 ⇒ 409，什么都不写，重新打开在当前名单上）；空名单当场拒绝。
 - **迁移** `2026-09-browser-profiles-who-list`（在 all-conversations 之后）：单个 `session` / `task` owner ⇒ 一行名单，**并且只对这些记录**把昨天按第 4 条放行的每个用户 pin（非 agent、不早于 `scopeAt`）并进名单 —— 昨天能打开的，今天不会被拒绝。
 - 门禁：`test-browser-share-model`（36 格准入表、每种存储形状、写的拒绝、真 keeper + 路由、五个 patched-copy 对照）、`test-migrations`、`test-browser-who-ui`（heavy，40 个会话、zh 键鼠、一次 PATCH 带 base、第二个标签页 chip 节点不变、409、360 px）、`test-browser-share`（heavy，真 0.38.1：经任务组打开、解绑关掉标签页）。
+
+**补记（2026-10-02，lane everyone-principal）—— "所有 agent" 是选择器的第一行，就是 `{kind:'instance'}`。** owner："所有配置权限的地方都加入'所有'这个选项"（userW：有些 profile 想让所有 agent 共享）。对话框不再有"我的所有对话 / 仅以下"两个单选：它只有 principal picker，第一行"所有 agent（每个对话，现在和以后）"就是 `use.mode:'all'` = owner `{kind:'instance'}` —— 不另造第二种写法（一行 `{kind:'everyone'}` 会被拒：`All agents is mode "all"`）。选了 All 的同时选的那些对话和任务组**被保留**（owner `{kind:'instance', id:null, who:[…]}`，`whoMayUse` 答 `{mode:'all', kept}`，准入不变：`all` 放行每个对话，保留的行什么也不决定），去掉 All 时原样恢复（`usePatchVerdict` 把已保留的行当作已知）。摘要和 stamp 带着这些行（陈旧的对话框不能覆盖它们）。面板的值第一个是 All 的 chip（"所有 agent"，保留了行时"所有 agent（另有 N 行）"），保存的 toast 是"谁能使用 work：所有 agent"；agent 端的 `not_owner` 句子和 vibespace-browser 的出路行点名按钮"All agents"。门禁：`test-everyone-principal`（②的表 + 普查）、`test-browser-share-model`、`test-browser-who-ui`（heavy）。
 
 ### 3.3 profile 注册表
 
@@ -1087,7 +1089,42 @@ gate 的对象相反。
 - **门禁。** test-browser-tabs（fast：PURE 表 + 3 个补丁副本对照；真 keeper + 路由配一个保留一个共享 Chrome 标签页的假 0.38.1：外来的关闭在任何执行之前被拒——命令日志就是间谍——，一个没有判定的 keeper 副本关掉了 B 的页面；真桥：tab-owners、tab-ack、锚点）；test-browser-verbs（CLI 路由）；test-live-strip（`tabRowFold`）；test-browser-resume-ui ⑥（heavy，chrome：真点击的切换 / ✕、邻居、最后一个、交还、全部关闭、zh / ja 360 px）；test-browser-human-ui (b2)（heavy，**真 0.38.1**：agent 只列出自己的、关不掉他的、`tab_gone` 按名字说）。
 - **留待以后。** 中介租约上的切换 / 关闭（M8：给 (method, targetId) 绑定的 credit）；`click --new-tab` / `window new` 开出的、没有 opener 的标签页在 agent 下一条 `tab` 命令时才作为它会话的当前标签页被认领；另一台机器上的具名 profile 仍是 passthrough。
 
+### 3.10 每个持有者一个窗口（lane browser-windows，owner 2026-10-01："多agent可以同时用同一个profile，只是每个agent开的是个独立窗口吗？为啥现在只允许一个agent/人类同时在操作一个profile？"）
+
+**事故（U0，userW 的 pod，2026-10-01）。** ① D-payments 18:20–18:35：userW 在 Majordomo 的实时视图里接管了 jarvis-work，D-payments 的每条命令都被拒绝，直到交还 —— 接管是**整个浏览器**的，另外 §3.2 第 5 条的 90 s "一次一个驾驶者" 把十个 Jarvis 对话在一个 profile 上排成队。② inc-muqdohf0-hkjc 20:02：D-payments 的标签页在共享窗口里落到了**另一个标签页后面**（sess-31 关掉标签页后 Chrome 激活了邻居），实时视图是一张冻住的画面，他点标签芯片是一个无声的 no-op，日志里没有一行。
+
+**实测（`WINDOWS_PROOF`，src/browser-windows.js；scripts/measure-browser-windows.mjs，agent-browser 0.38.1 + Google Chrome 154.0.8037.57，headless 与隐藏窗口两种模式，2026-10-01）：**
+
+| 事实 | headless | 隐藏窗口（CLI 自己的 Xvfb） |
+|---|---|---|
+| 一个 profile 上每个对话的 daemon | 各 1 个 | 各 1 个 |
+| 另一个对话的 `wait 5000` 期间本对话 `get title` / 同一对话 | 4 ms / 4504 ms | 3 ms / 4502 ms |
+| 共享窗口里不在前台的标签页（fps · 可见性 · rAF/s） | 0 · hidden · 0 | 0 · hidden · 0 |
+| agent 在那个隐藏标签页上 `click` / 可见标签页上 | 5004 ms / 16 ms | 4591 ms / 18 ms |
+| CDP 鼠标按下打在后台标签页上 | 2 ms 应答，页面收到，**之后 0 帧** | 1 ms 应答，页面收到，0 帧 |
+| 第二个窗口（`newWindow`）的前台标签页 | 60 fps · visible | 60 fps · visible |
+| **没有焦点**的窗口的前台标签页（U0b） | 60 fps | 60 fps · hasFocus false |
+| `createTarget` 能否指定窗口 | 不能（无 windowId 参数） | 不能 |
+| 普通 create / CLI 的 `tab new` 落在 | 最新的有焦点窗口 | 最后被激活的窗口 |
+| 页面开出的标签页（window.open） | 开它的窗口 | 开它的窗口 |
+| 跨窗口 `activateTarget` | 另一窗口的前台标签页仍可见 | 同左 |
+| 后台标签页的 `Page.captureScreenshot` | 新鲜，33 ms | 新鲜，48 ms |
+| 真实桌面上的有头浏览器 | **未测**（本 lane 规则：只测 headless 与隐藏窗口）—— 在那里 `tab <id>`（activateTarget）会抬起它的窗口、可能抢走人的焦点 | |
+
+**规则（U1–U4）：**
+1. **一个持有者一个窗口。** VibeSpace 为一个持有者开的每个标签页 —— 新租约的第一个标签页、标签页丢了的 / 窗口属于浏览器上一次运行的租约、agent 在共享 profile 上的 `tab new`（keeper 的 `agentTabAct`）、Browse yourself 他自己的标签页、换 build/后端后的重开、`openInLease` —— 都开在一个**新的、不抢焦点的窗口**里（`Target.createTarget {newWindow:true, focus:false}`，keeper 的 `openOwnTab`），然后这个持有者的会话用 `tab <targetId>` 绑过去、用它自己的 `open <url>` 导航（会话自己的 header / init script / route 在第一个文档之前生效）。窗口开不出来 ⇒ 照旧 `tab new`，并点名说出来；绑定失败 ⇒ 关掉这个窗口。中介（`sharing:instance`）租约的每个 `Target.createTarget` 由代理改写成同样的新窗口（`ownWindowParams`；`newWindow`/`hidden`/`forTab` 的照原样）。页面自己开的标签页按 Chrome 自己的规则落在开它的窗口里 —— 所以一个租约的作用域就是它那些窗口里的标签页（原来按 target 的围栏就是按窗口的围栏）。Chrome 没有"把标签页开进窗口 W"，所以每个 VibeSpace 开的标签页各占一个窗口；租约记录 `windowIn` = 它的窗口所在的那次浏览器运行（`instanceOf` = 启动时刻）。
+2. **驾驶声明按窗口。** 对话之间的 90 s 驾驶声明**删除**（`driveVerdict` / `browserBusyRefusal` / `DRIVE_HOLD_MS` / digest 的 `drivers` / 带子唯一的例外 —— 不再有任何对话的 key 传给另一个对话）。接管是**实时视图显示的那个窗口**的：只有在那个窗口里的租约被一起接管（`windowMates`：有自己窗口的租约 = 没有；还在这条 lane 之前启动的浏览器共享窗口里的租约 = 那个窗口里的其它租约，照旧一起接管 —— 失败即关，直到浏览器重启）；别的窗口里的 agent 继续跑。措辞说出窗口："the user took over your window of the "Work" browser"。条带一项 = 这个对话在那个浏览器里的窗口，持有者是它的 agent 或你（或"你，在 X 里"—— 只有共享窗口的旧租约才会有）。
+3. **实时视图的标签芯片（U3）。** 你在驾驶：点 agent 当前的标签页 = **提到前面**（它可能在窗口里被别的标签页挡住，什么也不画 —— userW 的冻住画面），点它的另一个标签页 = 真正的切换（会话自己的 `tab <id>`）。你在观看：点它的另一个标签页 = **只移动你的视图**（keeper 的 `watchTabFor`：先 screencast，1 s 没有帧就每 500 ms 截一张图，并在视图上说出来），agent 当前的标签页不变；点它当前的标签页 = 回到 agent 的。另一个对话的标签页 = 不行（点名拒绝）。**U0b：** 视图 2 s 没有帧 ⇒ 桥问页面 `document.visibilityState`；hidden ⇒ 给每个观看者一条 `tab-background`（晚到的也重放），日志点名，画面每 500 ms 轮询一次，直到它又开始画或者换了标签页；静止但可见的页面不算。每次芯片操作（提到前面 / 切换 / 被拒绝）都写进日志并在视图上说出来。
+4. **上限是设置（U4）。** `browser.maxRunning`（1–32，默认 = keeper 的 `CONCURRENT_CAP` 6），每次启动时读取；到上限按名拒绝；调低不停掉正在跑的；资源守护照旧只报告。桌面应用保留自己的上限。
+
+**仍然串行的东西：** 一个对话自己的命令（它的 daemon 一次执行一条 —— 一个长 `wait` 只拖它自己）。**仍然一个 Chrome 一个 profile**（Chrome 的锁不允许两个）。**范围外：** 后台任务（jbt_）用不了 agent 浏览器；agent 自己脚本的原始 CDP 照旧被拒绝；跨机器的一切。
+**门禁：** test-browser-share-model（PURE 表 + 每窗口接管 + 补丁副本对照 + U4）、test-browser-windows（fast：真桥上的后台提示 / 轮询 / 观看泵 / 日志 + 对照）、test-browser-takeover、test-browser-mediation（改写表 + 真代理发出去的 create + 对照；⑦ 兄弟对话不再被一起打断）、test-browser-identity-census（带子没有例外）、test-browser-share（heavy，真 0.38.1 + Chrome：两个窗口、并发 85 ms、各自只见自己的标签页、接管一个窗口另一个照跑、`tab new` 开新窗口、观看 vs 驾驶的芯片、被弹窗挡住的标签页被说出来并被提到前面）。
+
 ---
+
+**verify r4（2026-10-02，在产品自己的 Chrome 上实测：真 keeper + 真 0.38.1 + scratch HOME，headless 与隐藏窗口各 30 次）：** 输掉竞争的流浪标签页曾在**前台**落进另一个持有者的窗口（它的页面被遮 10–21 ms，关掉后 Chrome 把该窗口**最后一个**标签页推到前台，30/30 —— 旁观者的 U0b 卡死）⇒ rung 2 的 create 改为**后台** `about:blank`（落点频率不变，另一个持有者的前台 30/30 不动，绑定时 CLI 自己的切换把它推到前台）。窗口状态循环在 headless 下让页面经历一次 hidden → visible（页面观察得到），隐藏窗口下什么也不发生，画面最多跳 1–3 帧 ⇒ 有人在看这个窗口（桥报告的观看者数）就不做循环；用户在驾驶这个浏览器的**任何**窗口（接管或 Browse yourself）时 rung 2 根本不跑（`window_busy` 点名，handback 后再试）。竞争者 20 / 50 / 200 ms 全部 30/30 落入自己的窗口；忙 2 s 的页面 402 ms 后换下一个锚点（循环最后），忙 300 ms 的照常落。
+
+**verify r5（2026-10-02，本 lane 最后一轮；攻击 r4 的三个部分，产品自己的 Chrome，headless 与隐藏窗口各 30 次）：** r4 的 plan 在梯子**顶端**读一次——在 opener 探测（最多 4 × 400 ms）和 rung-2 锁等待之前——于是 `tab new` 进行到 150 ms 时开始的接管让 rung 2（循环 + 激活）在用户手下照跑（30/30），那时打开的直播视图在它的头几帧下吃到循环（30/30；激活还会把被看的标签页压到后面）⇒ plan 改在 **rung 2 时、锁内**读。create 与绑定之间用户关掉了窗口 ⇒ `tab <id>` 答 No tab with label，keeper 退回二进制自己的 `tab new` ⇒ 标签页落进**另一个**持有者窗口的前台、它的页面被永久遮住（30/30）⇒ 改为 `window_busy`（`why: bind_failed`），绝不退回共享窗口，重试时重问窗口（没了就开自己的新窗口）。被 `user_driving` 拒绝的持有者在 handback 时什么也听不到（15 次驾驶 0 事件）⇒ 驾驶结束发一次 `drive-ended`，每个被拒持有者下一回合收到一条免费的 `browser-window-free` 提示。实测并保留：绑定（`tab <id>`）就是一次窗口聚焦（是另一方 rung 2 的竞争者，但仍 10/10 落入自己窗口）；headless 每次 `tab new` 3 次可见性事件、隐藏窗口 1 次；半开的观看者 socket 让窗口一直算有人在看（保守侧）。待办：另一持有者狂开标签页时绑定 + 导航偶尔耗时 ~30 s 仍成功（1–4/10）。
 
 ## 4. 实时视图（1.c）
 

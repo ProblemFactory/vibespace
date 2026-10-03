@@ -37,10 +37,16 @@ export function modeHint(mode) {
   if (mode === 'pixels') return t('Closest to you operating it by hand: the agent looks at screenshots and clicks, types, presses keys and scrolls at points.');
   return t('Accessibility tree when the app exposes one, otherwise pixels.');
 }
-/** The window's chip — "Shared with 2 · Pixels" ('' when nobody). `view` = a reach view (GET …/reach / the broadcast). */
+/** The window's chip — "Shared with 2 · Pixels" ('' when nobody); with ALL AGENTS it names it first — "Shared with:
+ *  All agents (2 more rows) · Pixels" (lane everyone-principal). `view` = a reach view (GET …/reach / the broadcast). */
 export function shareChipText(view) {
   if (!view || !Array.isArray(view.rows) || !view.rows.length) return '';
   const s = view.summary || shareSummary(view, view.resolved);
+  const all = view.rows.some((r) => r && r.principal && r.principal.kind === 'everyone');
+  if (all) {
+    const more = view.rows.length - 1;
+    return t('{who} · {mode}', { who: more ? t('Shared with: All agents ({n} more rows)', { n: more }) : t('Shared with: All agents'), mode: modeLabel(s.shown || s.mode) });
+  }
   return t('Shared with {n} · {mode}', { n: view.rows.length, mode: modeLabel(s.shown || s.mode) });
 }
 /** Who wrote a row, in words. */
@@ -62,6 +68,9 @@ function pickerItemsOf(model, { roster = null, app = null } = {}) {
   const live = new Map(((roster && roster.sessions) || []).map((s) => [s.id, s]));
   const sb = app && app.sidebar;
   const out = [];
+  // ALL AGENTS first (lane everyone-principal): every agent session, now and later — the owner's explicit share
+  const all = model.everyone || { checked: false, by: null };
+  out.push({ key: 'everyone:*', kind: 'everyone', id: '*', name: t('All agents'), checked: !!all.checked, hint: t('every conversation, now and later'), groupIds: [], groupNames: [], ref: { kind: 'everyone', row: { id: '*', name: null } } });
   for (const g of model.groups) out.push({ key: `group:${g.id}`, kind: 'group', id: g.id, name: g.name, checked: g.checked, hint: g.checked ? t('every session in it, now or later') : '', groupIds: [], groupNames: [], ref: { kind: 'group', row: g } });
   for (const s of model.sessions) {
     const w = live.get(s.id) || {};
@@ -91,7 +100,7 @@ export function renderPicker(container, { model, onToggle, onMode, busy = false,
     container.textContent = '';
     st = { items, sel: [], onToggle: null };
     st.picker = principalPicker({
-      items: () => st.items, multi: true,
+      items: () => st.items, multi: true, everyone: 'roster',   // the rows carry ALL AGENTS (checked from the record)
       placeholder: t('Search agents and Task Groups…'), label: t('Share with agents'),
       emptyText: t('No agent session is running'),
       onChange: (keys) => {
@@ -140,6 +149,7 @@ export function renderPicker(container, { model, onToggle, onMode, busy = false,
 // ── the per-app launch memory (user state `desktopAppReach`) — loaded once per page, kept in step by the broadcast ──
 let REACH_MAP = null;
 let mapWired = false;
+let mapLoaded = null; // the first load's promise (B-04da ⑥: a launch outside the launcher waits for it, bounded)
 // lane E verify (2026-09-25): whatever SAYS what a launch shares (the row, the cards) repaints when the memory arrives
 // or changes — the words must name what the click does at every instant, including the first paint before the load
 const mapListeners = new Set();
@@ -152,22 +162,41 @@ function wireMap(app) {
     REACH_MAP = m.state[REACH_KEY] && typeof m.state[REACH_KEY] === 'object' ? { ...m.state[REACH_KEY] } : {};
     notifyMap();
   });
-  fetchJson('/api/user-state').then((st) => { if (REACH_MAP === null) { REACH_MAP = st && st[REACH_KEY] && typeof st[REACH_KEY] === 'object' ? { ...st[REACH_KEY] } : {}; notifyMap(); } });
+  mapLoaded = fetchJson('/api/user-state').then((st) => { if (REACH_MAP === null) { REACH_MAP = st && st[REACH_KEY] && typeof st[REACH_KEY] === 'object' ? { ...st[REACH_KEY] } : {}; notifyMap(); } });
 }
 /** The key a launch's choice is remembered under (the desktopAppFrame key): the registry id, else `exec:<basename>`. */
 export const launchKeyOf = (payload) => frameKeyOf(payload && payload.appId ? { appId: payload.appId } : { exec: payload && payload.exec });
+
+/** B-04da ⑥ — the share a launch made OUTSIDE the launcher carries (the direct "Open with LibreOffice" door): what that
+ *  app REMEMBERS, exactly as the launcher's untouched row applies it (`launchShare` — the same function), this machine
+ *  only (the caller passes a local launch); the memory's first load is awaited ≤ 3 s. → share | null (hidden, auto). */
+export async function rememberedShareFor(app, key) {
+  wireMap(app);
+  if (REACH_MAP === null && mapLoaded) await Promise.race([mapLoaded.catch(() => { }), new Promise((r) => setTimeout(r, 3000))]);
+  const s = launchShare({ touched: false, choice: null, map: REACH_MAP || {}, key });
+  return s.principals.length || s.mode !== 'auto' ? s : null;
+}
+/** …and after such a launch: the launcher's own toast (the remembered share applied, where to change it). */
+export function announceRememberedShare(app, share, r) {
+  if (!share || !r || !r.reach) return;
+  const text = launchedToastText(launchSummary({ touched: false, proposal: share, roster: rosterOf(app) }));
+  if (text) showToast(text, { duration: 7000 });
+}
 
 /** One principal in words — lane E verify r2 (M2): a principal `launchSummary` read against the roster says when it is
  *  gone, in the picker's own words ("alpha (not running now)", "Ops (not in the list now)"); a listed one carries its
  *  CURRENT name (principalsNow). */
 function nameOf(p) {
+  if (p.kind === 'everyone') return t('All agents');
   const name = p.name || p.id;
   if (p.absent === 'session') return t('{name} ({state})', { name, state: t('not running now') });
   if (p.absent === 'group') return t('{name} ({state})', { name, state: t('not in the list now') });
   return name;
 }
 /** Who a share names, in a few words ("alpha, Ops…"). */
-function namesOf(principals) {
+function namesOf(principals0) {
+  // ALL AGENTS first (lane everyone-principal)
+  const principals = [...principals0.filter((p) => p && p.kind === 'everyone'), ...principals0.filter((p) => !(p && p.kind === 'everyone'))];
   return principals.map(nameOf).slice(0, 3).join(', ') + (principals.length > 3 ? '…' : '');
 }
 /**
@@ -329,7 +358,7 @@ export async function openShareDialog(app, id, { label = '' } = {}) {
         const res = await fetchJson(base, { method: on ? 'POST' : 'DELETE', headers: JSON_HDR, body: JSON.stringify({ principal }) });
         busy = false;
         if (!res || res.error) showToast(failText(res, on ? t('Could not share the window') : t('Could not stop sharing the window')), { type: 'error' });
-        else { view = res; if (!on && res.revoked && res.revoked.leaseDropped) showToast(t('{name} no longer holds this window', { name: r.name || r.id })); }
+        else { view = res; if (!on && res.revoked && res.revoked.leaseDropped) showToast(kind === 'everyone' ? t('The agent that held this window no longer reaches it') : t('{name} no longer holds this window', { name: r.name || r.id })); }
         if (overlay.isConnected) draw();
       },
       onMode: async (m) => {

@@ -25,8 +25,8 @@ import { spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { judgeScratch, scratchOrphans, reapScratchOrphans, reapScratchOrphansAsync, reapByHand, acquireReaperLock, acquireReaperLockAsync, verdictReport, scratchRootClaims, SCRATCH_ROOT_RE, REAPER_LOCK_WAIT_MS, defaultReaperLockPath } from './ci.mjs';
-import { scratch, scratchDir, scratchHome, stampScratchRun, readRunRecord, runOwnerState, RUN_RECORD } from './scratch.mjs';
-import { procStat, procUid, machineBootId, makeRunRecord } from './scratch-run.mjs';
+import { scratch, scratchDir, scratchHome, stampScratchRun, readRunRecord, runOwnerState, RUN_RECORD, endDaemonsOf, endRootedProcesses } from './scratch.mjs';
+import { procStat, procUid, machineBootId, makeRunRecord, procBootMs, procBornMs } from './scratch-run.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -726,6 +726,56 @@ const listed = (mod, pid, opts) => (mod && mod.judgeScratch ? mod.judgeScratch(o
   const c24 = await copy('linked-unasked', [["  const linkedElsewhere = (i) => { try { const st = fs.statSync(path.join(procRoot, String(i.pid), 'cwd')); return st.isDirectory() && st.nlink > 0; } catch { return false; } };", "  const linkedElsewhere = (i) => false;"]]);
   const v24 = c24 && !c24.missing ? c24.judgeScratch({ procRoot: F.root, now: NOW, self: 999999, exists: NS_EXISTS }) : null;
   ok(!!v24 && v24.victims.some((o) => o.pid === 581 && o.why === 'scratch dir gone' && o.root === NSROOT), `CONTROL (the linked directory unasked): a copy convicts the daemon in another mount namespace as "scratch dir gone" — the X2c leg can go red (${JSON.stringify((c24 && c24.missing) || (v24 && (v24.victims.find((o) => o.pid === 581) || v24.ignored.find((o) => o.pid === 581) || {}).why))})`);
+  // (25) B-442c (2026-10-02, the 16:23 OOM): THE AGE IS THE KERNEL'S — btime + starttime, never the /proc/<pid> dir's mtime. procfs
+  // stamps that mtime when it instantiates the inode; the OOM's dentry eviction re-instantiated every one at 16:23:10, and
+  // `--reap --dry-run` spared hour-old orphans as "young: 42 s". A table that states its boot (a root `stat` with btime): a row
+  // born an hour ago by its STARTTIME whose dir reads NOW, and the reverse, both under a gone root.
+  {
+    const T = fakeProc('btime'), BOOT_S = Math.floor(NOW / 1000) - 86400, GONE = sib('gone-btime');
+    fs.writeFileSync(path.join(T.root, 'stat'), `cpu  1 2 3 4\nbtime ${BOOT_S}\nprocesses 9\n`);
+    const tick = (bornMs) => Math.round((bornMs - BOOT_S * 1000) / 10);   // USER_HZ = 100
+    T.mk(4700, { name: 'vibespace-device', argv: ['vibespace-device'], cwd: GONE, born: NOW, starttime: tick(HOUR_AGO) });
+    T.mk(4701, { name: 'node', argv: ['node', 'x.js'], cwd: GONE, born: HOUR_AGO, starttime: tick(NOW - 60 * 1000) });
+    const V = judgeScratch({ procRoot: T.root, now: NOW, self: 999999 });
+    const v = V.victims.find((o) => o.pid === 4700), sp = V.spared.find((o) => o.pid === 4701);
+    ok(!!v && Math.abs(v.ageMs - 3600 * 1000) < 2000, `B-442c: a process born an hour ago by its starttime is OLD although its /proc dir reads NOW (the post-eviction state) — convicted at ${v ? Math.round(v.ageMs / 60000) : '?'} min`, v || V.spared.find((o) => o.pid === 4700));
+    ok(!!sp && /^young: (?:1 min|60 s) /.test(sp.why), `B-442c: …and one born a minute ago is YOUNG although its dir reads an hour — the age has ONE source (${sp && sp.why})`);
+    const c25 = await copy('dir-mtime-age', [['  let bornMs = procBornMs({ starttime }, bootMs);\n  if (bornMs == null) try {', '  let bornMs = null;\n  try {']]);
+    const v25 = c25 && !c25.missing ? c25.judgeScratch({ procRoot: T.root, now: NOW, self: 999999 }) : null;
+    const s25 = v25 && v25.spared.find((o) => o.pid === 4700);
+    ok(!!s25 && /^young: \d+ s < the 10 min stale floor/.test(s25.why), `CONTROL (the pre-fix age, the dir's mtime): a copy spares the hour-old orphan as "${s25 ? s25.why.slice(0, 40) : (c25 && c25.missing) || '?'}" — the incident's words`);
+    // the REAL kernel agrees with this process's OWN clock (node's timeOrigin is its start, measured without /proc)
+    const mine = procBornMs(procStat(process.pid), procBootMs());
+    ok(mine != null && Math.abs(mine - performance.timeOrigin) < 1500, `B-442c: on the real /proc, btime + starttime / USER_HZ is this process's start by its own clock (Δ ${mine == null ? '?' : Math.round(mine - performance.timeOrigin)} ms; a wrong USER_HZ would be off by its uptime)`);
+  }
+  // (26) B-442c: a scratch server's DAEMON is ended by its OWN root env. Real processes under a scratch root: A = a daemon (title
+  // vibespace-device) in state/agentd.pid; B = a self-upgrade's re-exec child (`node <root>/<ver>/agentd.js`) NOT yet in the pid
+  // file; C = a session-shaped sibling with the same env (not a daemon); D = a daemon of ANOTHER root. The pre-fix suite's kill
+  // (the pid file only) leaves B — the incident's orphan; endDaemonsOf ends A and B and nothing else.
+  {
+    const R = mkRoot('daemons'), DR = path.join(R, 'd'), OTHER = path.join(mkRoot('daemons-other'), 'd');
+    fs.mkdirSync(path.join(DR, 'state'), { recursive: true }); fs.mkdirSync(path.join(DR, '9.9.9'), { recursive: true });
+    const BUNDLE = path.join(DR, '9.9.9', 'agentd.js'); fs.writeFileSync(BUNDLE, 'setInterval(() => { }, 1e6);\n');
+    const run = (argv, env) => { const c = spawn(process.execPath, argv, { cwd: QUIET_CWD, env: { ...QUIET_ENV, ...env }, stdio: 'ignore', detached: true }); c.unref(); plant(c.pid); return c.pid; };
+    const TITLE = "process.title = 'vibespace-device'; setInterval(() => { }, 1e6);";
+    const A = run(['-e', TITLE], { VIBESPACE_AGENTD_ROOT: DR }), B = run([BUNDLE], { VIBESPACE_AGENTD_ROOT: DR });
+    const C = run(['-e', 'setInterval(() => { }, 1e6);'], { VIBESPACE_AGENTD_ROOT: DR }), D = run(['-e', TITLE], { VIBESPACE_DEVICE_ROOT: OTHER });
+    const comm = (pid) => { try { return fs.readFileSync(`/proc/${pid}/comm`, 'utf8').trim(); } catch { return ''; } };
+    for (let k = 0; k < 100 && !(comm(A).startsWith('vibespace-devic') && comm(D).startsWith('vibespace-devic')); k++) sleepSync(20);
+    fs.writeFileSync(path.join(DR, 'state', 'agentd.pid'), String(A));
+    const alive = (pid) => { const st = procStat(pid); return !!st && st.state !== 'Z' && st.state !== 'X'; };
+    // endRootedProcesses LISTS a daemon rooted by nothing but its root env (signal 0): its title hides argv, HOME and cwd are `/`
+    ok(endRootedProcesses(R, { signal: 0 }).includes(A) && !endRootedProcesses(R, { signal: 0 }).includes(D), 'B-442c: endRootedProcesses names a title-rewritten daemon by its VIBESPACE_*_ROOT env (cwd and HOME `/`, argv hidden) — and not another root\'s');
+    try { process.kill(Number(fs.readFileSync(path.join(DR, 'state', 'agentd.pid'), 'utf8')), 'SIGKILL'); } catch { }   // the pre-fix killDaemons
+    sleepSync(150);
+    ok(!alive(A) && alive(B), `CONTROL (the pre-fix suite's kill, the pid file only): the daemon it names is gone and the re-exec child it never named survives (pid ${B}) — the incident's orphan`);
+    const ended = endDaemonsOf(DR, { passes: 2, settleMs: 50 });
+    sleepSync(150);
+    ok(ended.includes(B) && !alive(B), `B-442c: endDaemonsOf ends the re-exec child by its root env + its agentd bundle argv (ended ${JSON.stringify(ended)})`);
+    ok(alive(C) && alive(D) && !ended.includes(C) && !ended.includes(D), 'B-442c: …and leaves a non-daemon with the same env (a session) and another root\'s daemon alive');
+    let refused = null; try { endDaemonsOf('/home'); } catch (e) { refused = e.message; }
+    ok(/refusing root/.test(refused || ''), 'endDaemonsOf refuses a root outside /tmp (a scratch dir only)');
+  }
   for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 25 })) ok(c.pass, c.name + (c.pass ? '' : ' — ' + c.detail));
 }
 // the owner record really is what spared the real stray: end the owner, and the same (dry) judgement convicts it

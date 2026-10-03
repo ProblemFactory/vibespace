@@ -90,6 +90,9 @@
 //      half the launcher's own pidfile-wait cap (read from the module) with the
 //      evidence beside it — polls counted by a PATH `sleep`; in-process "at
 //      once" = before the event loop turned; a deadline = its own words
+//   §adopt-office (verify r1, B-04da ④) a LibreOffice record whose display and app
+//      survived a restart but whose picture server is silent is ASKED to quit and,
+//      still asking, KEPT ready (never reaped); CONTROL: the pre-fix reap signals it
 // ~18 s (the install legs run a real detached launcher; the viewer-race legs wait on real timers). Scratch dirs from scripts/scratch.mjs; the install locks are named by the uid (/run/user/<uid>, else /tmp/vibespace-<uid> — verify r5 L3) after the SCRATCH state dirs' realpaths, so no name is ever production's, and every one this suite named is removed at exit; zero vendor calls.
 import fs from 'node:fs';
 import net from 'node:net';
@@ -1243,6 +1246,39 @@ console.log('§11 Layer 0 apps on the GENERALISED package slot (docs/design-app-
   ok(changed && changed.code === 'plan_changed', 'an app plan whose closure moved since it was shown ⇒ plan_changed, nothing run');
   ok(await ACC.create({ hosts: null, local: () => mk, install: false, log: quiet }).installPackage('local', { what: 'app:apt:hello' }).then(() => null, (e) => e && e.code) === 'host_unavailable', 'no planner wired ⇒ host_unavailable by name (never a silent xpra install)');
   mk.shutdown?.();
+}
+
+console.log('\n§adopt-office (verify r1, B-04da ④) a restart never signals a surviving LibreOffice for its picture server\'s silence');
+{
+  // a LibreOffice record whose X display and app SURVIVED the restart (throwaway `sleep`s this suite owns, each its own
+  // group) while its picture server does not answer the boot probe: the machine ASKS it to quit (the hand-over = a
+  // stand-in that blocks like LibreOffice's save prompt) and, still asking, KEEPS it — never the pre-fix reap (SIGTERM)
+  const { spawn: spawnA } = require('child_process');
+  const aliveA = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  const run = async (DSx, tag) => {
+    const dir = path.join(root, `adopt-office-${tag}`); fs.mkdirSync(path.join(dir, 'prof'), { recursive: true });
+    const xs = spawnA('sleep', ['60'], { stdio: 'ignore', detached: true }), app = spawnA('sleep', ['60'], { stdio: 'ignore', detached: true });
+    const asks = [];
+    const disp = { ...fakeDisplay, sameProcess: (pid) => pid === xs.pid || pid === app.pid ? aliveA(pid) : false, portAnswers: async () => false,
+      spawnDetached: (exec, argv) => { const c = spawnA('sleep', ['30'], { stdio: 'ignore', detached: true }); asks.push({ argv, c }); return { spawned: Promise.resolve(c) }; } };
+    const rec = { ...M.newRecord({ id: 'da-office-adopt', label: 'note.odt', exec: 'libreoffice', args: [], cwd: null, source: 'catalog', backend: 'xpra', via: 'xpra', fallbackWhy: null, idleTimeoutMs: 0, now: Date.now() - 60000 }),
+      state: 'ready', office: { module: 'writer' }, file: '/tmp/note.odt', profileDir: path.join(dir, 'prof'), display: ':977', port: 1,
+      pids: { x: xs.pid, server: xs.pid, app: app.pid, wm: null }, starts: { x: 1, server: 1, app: 1, wm: null } };
+    fs.writeFileSync(path.join(dir, DSx.STORE_FILE), JSON.stringify({ apps: { [rec.id]: rec } }));
+    const ds = DSx.install({ dataDir: dir, env: () => ({ PATH: '/usr/bin:/bin', HOME: root }), display: disp, log: quiet, askCloseMs: 300 });
+    await ds.adoptAll();
+    await new Promise((res) => setTimeout(res, 300));
+    const r = ds.get(rec.id);
+    const v = { state: r.state, lastError: r.lastError, appAlive: aliveA(app.pid), xAlive: aliveA(xs.pid), asks: asks.map((a) => a.argv[a.argv.length - 1]) };
+    for (const c of [xs, app, ...asks.map((a) => a.c)]) { try { process.kill(c.pid, 'SIGKILL'); } catch { } }
+    return v;
+  };
+  const head = await run(DS, 'head');
+  ok(head.state === 'ready' && head.appAlive && head.xAlive && JSON.stringify(head.asks) === '[".uno:Quit"]' && /kept: LibreOffice may hold unsaved edits/.test(head.lastError || ''), 'a surviving LibreOffice whose picture server is silent at boot is ASKED once (.uno:Quit) and, still asking, KEPT ready — its app and display alive', head);
+  const fixLine = "        if (verdict.state === 'failed' && alive.x && alive.app && M.askCloseVerdict(rec).ask) {";
+  ok(serveSrc.split(fixLine).length === 2, 'CONTROL setup: the boot ask is spelled once');
+  const pre = await run(MUT.load('src/desktop-serve.js', serveSrc.replace(fixLine, '        if (false) {'), 'noadoptask'), 'pre');
+  ok(pre.state === 'failed' && !pre.appAlive && pre.asks.length === 0, 'CONTROL: without the boot ask the same record is REAPED — failed, its LibreOffice signalled with nobody asked (the verify r1 reproduction)', pre);
 }
 
 console.log('\n§tree the patched copies never touch the tree');

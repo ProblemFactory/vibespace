@@ -45,6 +45,22 @@ const CLOCK_JUMP_MS = 20000;
 // testable: mirrors restoreState's aliveness logic exactly (backendSessionId
 // beats serverSessionId; remote windows can never stoppedMatch against LOCAL
 // discovery and are collected from their openSpec identity instead).
+// A saved window's SESSION NAME (B-ddc0). Its TITLE is `${name} — ${cwd}` (viewSession and the
+// attach paths), and every restore branch read that title back as the NAME — a remote window
+// always (a stopped remote session never stoppedMatches LOCAL discovery) — so each reload grew the
+// name by one " — <cwd>", and a resume carried it into the server's meta (the boot log's
+// "Reconnected: agentic-search — AIDev: /path — /path ×8", 2026-08-13). The name is openSpec.name;
+// a record without one (an old layout) falls back to the title. Either way a trailing " — <cwd>"
+// is the title's suffix, never part of a name — stripping every one also heals an already-grown name.
+export function savedWindowName(ws) {
+  const cwd = String(ws?.cwd || ws?.openSpec?.cwd || '');
+  const spec = ws?.openSpec?.name;
+  let name = String(typeof spec === 'string' && spec.trim() ? spec : (ws?.title || ''));
+  const tail = cwd ? ' — ' + cwd : '';
+  while (tail && name.length > tail.length && name.endsWith(tail)) name = name.slice(0, -tail.length);
+  return name;
+}
+
 export function scanStoppedInDesktopStates(data, activeId, live, all, getCustomName) {
   const out = [];
   for (const meta of data?.desktopMeta || []) {
@@ -66,11 +82,11 @@ export function scanStoppedInDesktopStates(data, activeId, live, all, getCustomN
       const stoppedMatch = all.find((s) => (s.backendSessionId || s.sessionId) === backendSessionId && (s.backend || 'claude') === backend);
       if (stoppedMatch) {
         out.push({ sessionId: stoppedMatch.sessionId, cwd: stoppedMatch.cwd,
-          name: customName || stoppedMatch.name || ws.title || 'Session',
+          name: customName || stoppedMatch.name || savedWindowName(ws) || 'Session',
           opts: { backend, backendSessionId, hostId: ws.openSpec?.hostId || undefined, winBounds } });
       } else if (ws.openSpec?.hostId) {
         out.push({ sessionId: backendSessionId, cwd: ws.cwd || '',
-          name: customName || ws.title || 'Session',
+          name: customName || savedWindowName(ws) || 'Session',
           opts: { backend, backendSessionId, hostId: ws.openSpec.hostId, winBounds } });
       }
     }
@@ -1132,9 +1148,9 @@ class LayoutManager {
           );
           if (stoppedMatch) {
             const rOpts = { backend, backendSessionId, hostId: ws.openSpec?.hostId || undefined };
-            const viewWin = this.app.viewSession(stoppedMatch.sessionId, stoppedMatch.cwd, customName || stoppedMatch.name || ws.title || 'Session', rOpts);
+            const viewWin = this.app.viewSession(stoppedMatch.sessionId, stoppedMatch.cwd, customName || stoppedMatch.name || savedWindowName(ws) || 'Session', rOpts);
             if (viewWin) applyPosition(viewWin, ws);
-            collectStopped(stoppedMatch.sessionId, stoppedMatch.cwd, customName || stoppedMatch.name || ws.title || 'Session', rOpts);
+            collectStopped(stoppedMatch.sessionId, stoppedMatch.cwd, customName || stoppedMatch.name || savedWindowName(ws) || 'Session', rOpts);
           } else if (ws.openSpec?.hostId) {
             // REMOTE session: /api/sessions is LOCAL discovery only, so a
             // remote session can never stoppedMatch — restore it view-only
@@ -1142,9 +1158,9 @@ class LayoutManager {
             // prefetches the transcript); dropping it silently lost the
             // window on every restore (audit 2.192.0)
             const rOpts = { backend, backendSessionId, hostId: ws.openSpec.hostId };
-            const viewWin = this.app.viewSession(backendSessionId, cwd, customName || ws.title || 'Session', rOpts);
+            const viewWin = this.app.viewSession(backendSessionId, cwd, customName || savedWindowName(ws) || 'Session', rOpts);
             if (viewWin) applyPosition(viewWin, ws);
-            collectStopped(backendSessionId, cwd, customName || ws.title || 'Session', rOpts);
+            collectStopped(backendSessionId, cwd, customName || savedWindowName(ws) || 'Session', rOpts);
           }
         }
       } else if (ws.type === 'chat') {
@@ -1172,9 +1188,9 @@ class LayoutManager {
           );
           if (stoppedMatch) {
             const rOpts = { backend, backendSessionId, hostId: ws.openSpec?.hostId || undefined };
-            const viewWin = this.app.viewSession(stoppedMatch.sessionId, stoppedMatch.cwd, customName || stoppedMatch.name || ws.title || 'Session', rOpts);
+            const viewWin = this.app.viewSession(stoppedMatch.sessionId, stoppedMatch.cwd, customName || stoppedMatch.name || savedWindowName(ws) || 'Session', rOpts);
             if (viewWin) applyPosition(viewWin, ws);
-            collectStopped(stoppedMatch.sessionId, stoppedMatch.cwd, customName || stoppedMatch.name || ws.title || 'Session', rOpts);
+            collectStopped(stoppedMatch.sessionId, stoppedMatch.cwd, customName || stoppedMatch.name || savedWindowName(ws) || 'Session', rOpts);
           } else if (ws.openSpec?.hostId) {
             // REMOTE session: /api/sessions is LOCAL discovery only, so a
             // remote session can never stoppedMatch — restore it view-only
@@ -1182,9 +1198,9 @@ class LayoutManager {
             // prefetches the transcript); dropping it silently lost the
             // window on every restore (audit 2.192.0)
             const rOpts = { backend, backendSessionId, hostId: ws.openSpec.hostId };
-            const viewWin = this.app.viewSession(backendSessionId, cwd, customName || ws.title || 'Session', rOpts);
+            const viewWin = this.app.viewSession(backendSessionId, cwd, customName || savedWindowName(ws) || 'Session', rOpts);
             if (viewWin) applyPosition(viewWin, ws);
-            collectStopped(backendSessionId, cwd, customName || ws.title || 'Session', rOpts);
+            collectStopped(backendSessionId, cwd, customName || savedWindowName(ws) || 'Session', rOpts);
           }
         }
       } else if (ws.type === 'files') {

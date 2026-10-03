@@ -783,6 +783,12 @@ patch('src/lib/chat-view.js', [
   // the start the same window is 150 or 50 (after the rung's jumpToBottom), one extend under
   // the 150 target, and the trim this leg's harm runs through never fires.
   ['const TRIM_SOFT_CARDS = 150;', 'const TRIM_SOFT_CARDS = 40;'],
+  // (6) THE LAYER B-172e ADDED (lane chat-scroll): a full-window rebuild bumps `_windowGen` and an
+  // extend answered after it drops its slab. Here the ungated sentinel extendTop is still in flight
+  // when the resume re-tail's jumpToBottom rebuilds the window (`gapUp:tail` → `gapReset` →
+  // `extendStale`), so with the generation in place the control's page never lands — the page this
+  // control's `extendTop:done` reading was made of is that stale write over the rebuilt window.
+  ['const stale = gen !== this._windowGen; // B-172e ③', 'const stale = false; // control: no window generation'],
 ]);
 buildBundle();
 const bad = await run('gates-removed');

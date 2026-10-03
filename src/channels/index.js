@@ -160,7 +160,10 @@ const PACE_COSTS = Object.freeze(['fetch', 'discover', 'scanHost', 'feed']);
  * the closed list (a snippet reaching the engine is a contract violation it names: `stripped`). `describe(convId,
  * {peerIds})` names a conversation the feed found (a title, a kind) — declared by `describes: true`.
  */
-const FEED_METHODS = Object.freeze(['changes', 'describe']);
+// lane lark-threads (A4): `messageById(convId, {messageId})` — a feed hit the chat read did not find, read by its id (a
+// thread reply the chat listing never shows) — declared by a change feed on an adapter whose thread replies are listed
+// separately (the two facts that make such a hit exist); → {kind (closed set), record|null, rootPatch|null, threadKey|null}
+const FEED_METHODS = Object.freeze(['changes', 'describe', 'messageById']);
 const PAGE_TOKEN_MAX = 2048;
 const TITLE_MAX = 200;
 /** §25 (2026-09-27): how a record is DRAWN — `text` (the default: the window's
@@ -217,7 +220,11 @@ const threadsOf = (c) => (c && c.threads && typeof c.threads === 'object' ? c.th
 const reactionsOf = (c) => (c && c.reactions && typeof c.reactions === 'object' ? c.reactions : NO_REACTIONS);
 /** The six methods the two rows declare (spec §2.1) — checked when an adapter is INSTANTIATED (its methods live
  *  on the instance): a declared one missing, or one present without its declaration, is refused by name. */
-const THREAD_REACTION_METHODS = Object.freeze(['threadHistory', 'reactions', 'react', 'unreact', 'emojiImage', 'reactionSet']);
+// lane lark-threads (A2): + `recentRoots(convId, {limit})` — the chat's newest page with NO anchor stop (the recent-roots
+// recheck: a stored root re-listed WITH its new thread id) — declared by `threads.listing: 'separate'`, like the walk
+const THREAD_REACTION_METHODS = Object.freeze(['threadHistory', 'recentRoots', 'reactions', 'react', 'unreact', 'emojiImage', 'reactionSet']);
+/** lane lark-threads (A4): the closed set of a by-id read's answers. */
+const BY_ID_KINDS = Object.freeze(['absent', 'foreign', 'deleted', 'reply', 'root', 'plain']);
 
 /**
  * THE VENDOR'S OWN RETRY HINT (lane R5): seconds from a response's
@@ -267,6 +274,7 @@ const METHOD_GATES = Object.freeze({
   // lane channel-threads (2026-09-28): the thread walk, the per-message reaction list, the two acts, the custom
   // emoji picture and the picker's vocabulary — each declared by its capability row
   threadHistory: (c) => threadsOf(c).listing === 'separate',
+  recentRoots: (c) => threadsOf(c).listing === 'separate',
   reactions: (c) => reactionsOf(c).read === 'list',
   react: (c) => reactionsOf(c).add === true,
   unreact: (c) => reactionsOf(c).remove === 'own',
@@ -275,6 +283,7 @@ const METHOD_GATES = Object.freeze({
   // lane lark-search-poll: the change feed's page, and the name of a conversation it found
   changes: (c) => !!(c.changeFeed && typeof c.changeFeed === 'object'),
   describe: (c) => !!(c.changeFeed && typeof c.changeFeed === 'object' && c.changeFeed.describes === true),
+  messageById: (c) => !!(c.changeFeed && typeof c.changeFeed === 'object') && threadsOf(c).listing === 'separate',
 });
 
 /**
@@ -476,6 +485,11 @@ function createChannelRegistry() {
       if (!mod.caps.changeFeed) throw new Error(`channel adapter '${kind}': feedGrant on an adapter that declares no change feed`);
       if (g.option !== undefined && !(typeof g.option === 'string' && /^[a-z][A-Za-z0-9]{0,31}$/.test(g.option))) throw new Error(`channel adapter '${kind}': feedGrant.option must be an option key`);
     }
+    // lane lark-threads (B1/B5): what unlocks READING PEOPLE'S PROFILES (the card's one-Re-authorize line) — {scopes, console}
+    if (mod.peopleGrant !== undefined) {
+      const g = mod.peopleGrant;
+      if (!g || !Array.isArray(g.scopes) || !g.scopes.length || !g.scopes.every((x) => typeof x === 'string' && x) || typeof g.console !== 'boolean') throw new Error(`channel adapter '${kind}': peopleGrant must be {scopes: [non-empty strings], console: boolean}`);
+    }
     mods.set(kind, mod);
     return mod;
   }
@@ -660,6 +674,26 @@ function createChannelRegistry() {
         // `bounded` (verify r3): the walk stopped at the adapter's own count bound while the vendor held more
         return { records, anchor: r.anchor === undefined ? null : r.anchor, reachedAnchor: r.reachedAnchor, complete: r.complete !== false, foreign: Math.max(0, Math.floor(Number(r.foreign) || 0)), ...(r.bounded === true ? { bounded: true } : {}) };
       },
+      /** lane lark-threads (A2): the chat's newest page, no anchor stop (`{records}`, never more than asked, every record
+       *  of THIS conversation — one stamped with another is dropped and counted `foreign`). */
+      async recentRoots(convId, opts = {}) {
+        const r = (await gated('recentRoots', impl.recentRoots && impl.recentRoots.bind(impl))(convId, opts)) || {};
+        const all = Array.isArray(r.records) ? r.records : [];
+        const limit = Number(opts.limit) || 50;
+        if (all.length > limit) throw new ChannelError('vendor-error', `${kind}.recentRoots returned ${all.length} records for limit ${limit} — an adapter never returns records the caller did not ask for`, { retryable: false });
+        const records = all.filter((x) => x && (x.convId === undefined || x.convId === null || String(x.convId) === String(convId)));
+        return { records, foreign: all.length - records.length };
+      },
+      /** lane lark-threads (A4): one message by its id — the kind from the CLOSED set, a record only for a thread reply of
+       *  THIS conversation, the root's patch only with a bounded id. */
+      async messageById(convId, opts = {}) {
+        const r = (await gated('messageById', impl.messageById && impl.messageById.bind(impl))(convId, opts)) || {};
+        const k = BY_ID_KINDS.includes(r.kind) ? r.kind : 'absent';
+        const idOk = (v) => typeof v === 'string' && v.length > 0 && v.length <= 512 && !/[\u0000-\u001f\u007f]/.test(v);
+        const record = k === 'reply' && r.record && typeof r.record === 'object' && String(r.record.convId) === String(convId) && String(r.record.vendorId || '') === String(opts.messageId || '') ? r.record : null;
+        const rp = r.rootPatch && typeof r.rootPatch === 'object' && idOk(r.rootPatch.vendorId) && idOk(r.rootPatch.threadKey) ? { vendorId: r.rootPatch.vendorId, threadKey: r.rootPatch.threadKey } : null;
+        return { kind: k === 'reply' && !record ? 'foreign' : k, record, rootPatch: (k === 'reply' || k === 'root') ? rp : null, threadKey: idOk(r.threadKey) ? r.threadKey : null };
+      },
       reactions: gated('reactions', impl.reactions && impl.reactions.bind(impl)),
       react: gated('react', impl.react && impl.react.bind(impl)),
       unreact: gated('unreact', impl.unreact && impl.unreact.bind(impl)),
@@ -706,6 +740,9 @@ function createChannelRegistry() {
       /** The ACCOUNT's own user id as its credential records it (a reaction's `mine` is judged against it at fold
        *  time — never stored); null when the adapter cannot say. Never throws. */
       selfId: () => { try { return typeof impl.selfId === 'function' ? (impl.selfId() || null) : null; } catch { return null; } },
+      /** lane lark-threads (B4): the ACCOUNT's own organization (a tenant key) — an author of another one is EXTERNAL;
+       *  null when the adapter cannot say. Never throws, never a vendor call. */
+      selfTenant: () => { try { const v = typeof impl.selfTenant === 'function' ? impl.selfTenant() : null; return typeof v === 'string' && v && v.length <= 64 ? v : null; } catch { return null; } },
     };
   }
 
@@ -714,7 +751,7 @@ function createChannelRegistry() {
 
 module.exports = {
   createChannelRegistry, ChannelError, validateCaps, validateMethods,
-  CHANNEL_ERROR_CODES, RECEIVE_MODES, SCAN_SOURCES, HISTORY_MODES, SEND_IDENTITIES, IDENTITY_MARKING, TOS_RISK, METHOD_GATES, OLDER_HISTORY, BUDGET_UNITS, PACE_COSTS, RENDER_MODES, TITLE_FORMS, FEED_METHODS,
+  CHANNEL_ERROR_CODES, RECEIVE_MODES, SCAN_SOURCES, HISTORY_MODES, SEND_IDENTITIES, IDENTITY_MARKING, TOS_RISK, METHOD_GATES, OLDER_HISTORY, BUDGET_UNITS, PACE_COSTS, RENDER_MODES, TITLE_FORMS, FEED_METHODS, BY_ID_KINDS,
   peerName,
   THREAD_READ, THREAD_LISTING, REACTION_READ, REACTION_REMOVE, REACTION_VOCABULARY, REACTION_CUSTOM, NO_THREADS, NO_REACTIONS, THREAD_REACTION_METHODS, threadsOf, reactionsOf,
   retryAfterSeconds, sentSecrets, withoutSent, bearerOf, SENT_SECRET_FIELDS,

@@ -23,7 +23,7 @@ const path = require('path');
 const crypto = require('crypto');
 const D = require('../browser-display.js');
 
-function create({ dir, writeJson, log = console, env = () => ({}), probe = null, now = Date.now, noDesktopWindow = undefined } = {}) { // noDesktopWindow: H5's switch for a gate (undefined = the module's default, OFF in 2.369.200)
+function create({ dir, writeJson, log = console, env = () => ({}), probe = null, now = Date.now, noDesktopWindow = undefined, vncDisplay = null } = {}) { // noDesktopWindow: H5's switch for a gate (undefined = the module's default, OFF in 2.369.200)
   if (!dir) throw new Error('browser-display-config: dir is required');
   const memo = new Map();
   const said = new Set();
@@ -32,7 +32,7 @@ function create({ dir, writeJson, log = console, env = () => ({}), probe = null,
   const probeNow = async () => {
     try {
       if (typeof probe === 'function') return await probe();
-      return await require('../browser-facts.js').probeDisplay({ env: env() || {} });
+      return await require('../browser-facts.js').probeDisplay({ env: env() || {}, vncDisplay }); // B-d635: the server's own VNC desktop (null in a test: hermetic)
     } catch (e) {
       const v = D.displayVerdict({ env: {}, runtimeDir: null, entries: [] });
       v.why = [`the display probe failed: ${e && e.message}`];

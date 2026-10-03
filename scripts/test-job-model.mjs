@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 const require = createRequire(import.meta.url);
 const M = require('../src/job-model.js');
+const __dirname_jm = require('path').dirname(new URL(import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 const B = (s) => Buffer.byteLength(s, 'utf-8');
@@ -32,10 +33,84 @@ ok(M.isOwner(mk(9), { conversationId: 'zzz', sessionId: 'sess-A', sessionCreated
 ok(!M.isOwner(mk(9), { conversationId: 'zzz', sessionId: 'sess-A', sessionCreatedAt: 2, groups: new Set() }), 'collided sessionId with different createdAt is NOT owner');
 
 // ── vendor vet (negative controls) ──
-ok(!M.vetSpec({ cmd: { argv: ['curl', 'https://api.anthropic.com/api/oauth/usage'] } }).ok, 'vendor host in argv refused');
+ok(M.vetSpec({ cmd: { argv: ['curl', 'https://api.anthropic.com/v1/messages', '-H', 'x-api-key: $ANTHROPIC_API_KEY'] } }).ok, 'an API call with your own key passes (owner decision, verify r3)');
 ok(!M.vetSpec({ cmd: { argv: ['bash', '-c', 'jq .t ~/.claude/.credentials.json'] } }).ok, 'credential path refused');
 ok(!M.vetSpec({ health: { type: 'cmd', value: 'cat data/subs/current' } }).ok, 'health probe reaching credential material refused');
 ok(M.vetSpec({ cmd: { argv: ['npm', 'run', 'dev'] } }).ok, 'ordinary spec passes');
+// B-f8c7 census (lane job-vendor-ban): EVERY command a job can run goes through the ONE vet — a planted vendor/credential
+// piece in each shape is refused, its clean twin passes (a census, not a blanket refusal). Before the fix every action.task
+// shape passed: the CLI's --every/--cron/--at put the command ONLY there.
+{
+  const sh = (bad) => ['sh', '-c', bad ? 'jq .t ~/.claude/.credentials.json' : 'curl https://example.com/health'];
+  const cwd = (bad) => (bad ? '/srv/vibespace/data/subs' : '/srv/vibespace/data/logs');
+  const secret = (bad) => [bad ? 'CLAUDE_CODE_OAUTH_TOKEN' : 'GITHUB_TOKEN'];
+  const task = (t) => ({ kind: 'cron', schedule: { cron: '7 * * * *' }, action: { type: 'spawn-task', task: t } });
+  const shapes = {
+    'spec.cmd.argv (a plain task)': (b) => ({ kind: 'task', cmd: { argv: sh(b) } }),
+    'spec.cmd.env': (b) => ({ cmd: { argv: ['./poll.sh'], env: { PROBE: sh(b)[2] } } }),
+    'spec.cmd.cwd': (b) => ({ cmd: { argv: ['cat', 'current'], cwd: cwd(b) } }),
+    'spec.health': (b) => ({ kind: 'service', cmd: { argv: ['npm', 'start'] }, health: { type: 'cmd', value: sh(b)[2] } }),
+    'spec.envFrom (a secret NAME)': (b) => ({ cmd: { argv: ['./poll.sh'] }, envFrom: secret(b) }),
+    'action.task.cmd.argv (the CLI --cron shape)': (b) => task({ cmd: { argv: sh(b), cwd: '/tmp' } }),
+    'action.task.cmd.argv (the CLI --at shape)': (b) => ({ ...task({ cmd: { argv: sh(b) } }), schedule: { at: '2099-01-01T00:00:00Z' } }),
+    'action.task.cmd.argv (the CLI --every shape)': (b) => ({ ...task({ cmd: { argv: sh(b) } }), schedule: { everyMs: 3600e3, jitterPct: 10 } }),
+    'action.task.cmd.env': (b) => task({ cmd: { argv: ['./poll.sh'], env: { PROBE: sh(b)[2] } } }),
+    'action.task.cmd.cwd': (b) => task({ cmd: { argv: ['cat', 'current'], cwd: cwd(b) } }),
+    'action.task.health': (b) => task({ cmd: { argv: ['./poll.sh'] }, health: { type: 'cmd', value: sh(b)[2] } }),
+    'action.task.envFrom': (b) => task({ cmd: { argv: ['./poll.sh'] }, envFrom: secret(b) }),
+    'a cron CHILD record ({ ...action.task, cronParent })': (b) => ({ kind: 'task', cronParent: 'jb-p', cmd: { argv: sh(b) } }),
+  };
+  for (const [name, mk] of Object.entries(shapes)) {
+    ok(!M.vetSpec(mk(true)).ok, `census: a vendor/credential piece in ${name} is refused`);
+    ok(M.vetSpec(mk(false)).ok, `census: the clean twin of ${name} passes`);
+  }
+  ok(M.vetSpec({ kind: 'cron', schedule: { cron: '7 * * * *' }, action: { type: 'notify', text: 'check api.anthropic.com status page by hand' } }).ok, 'census: a notify cron runs no command — its reminder TEXT is not judged');
+  // verify r3 (lane job-vendor-ban, owner decision 2026-10-03): ONLY an obvious read of a subscription sign-in is refused.
+  // (a) THE CENSUS — every harness descriptor's credential facts (creds.subsDirName under data/, creds.authFile in its home and
+  //     through creds.spawnEnvVar) plus the list's own entries are refused in every form a job stores: a descriptor gaining a
+  //     credential path the list misses reds HERE (planted in a tree copy: codex authFile tokens.json + subsDirName gem-subs).
+  const forms = {
+    'a plain task': (c) => ({ kind: 'task', cmd: { argv: ['sh', '-c', c] } }),
+    '--cron': (c) => task({ cmd: { argv: ['sh', '-c', c] } }),
+    '--every': (c) => ({ ...task({ cmd: { argv: ['sh', '-c', c] } }), schedule: { everyMs: 1800e3, jitterPct: 20 } }),
+    '--at': (c) => ({ ...task({ cmd: { argv: ['sh', '-c', c] } }), schedule: { at: Date.now() + 3600e3 } }),
+    '--keep-up': (c) => ({ kind: 'service', cmd: { argv: ['sh', '-c', c] } }),
+    'a cron child': (c) => ({ kind: 'task', cronParent: 'jb-p', cmd: { argv: ['sh', '-c', c] } }),
+  };
+  const H = require('../src/harnesses/index.js');
+  const descs = Object.values(H.HARNESSES).filter((h) => h && h.creds && h.creds.authFile);
+  ok(descs.length >= 2, `r3 census: ${descs.length} harness descriptors declare credentials`);
+  const facts = ['cat ~/.claude/.cred*', "security find-generic-password -s 'Claude Code-credentials' -w", 'jq . ~/.local/share/opencode/auth.json',
+    'CLAUDE_CODE_OAUTH_TOKEN="$T" ./poll.sh', 'curl -H "Authorization: Bearer ' + 'sk-ant-' + 'oat01-AAAA" "$U"', 'curl -d "refresh_' + 'token=' + 'sk-ant-' + 'ort01-AAAA" "$U"'];   // split at runtime: no token-shaped literal in the tree (push protection)
+  for (const h of descs) {
+    const c = h.creds;
+    const home = typeof c.sharedHome === 'function' ? path.basename(c.sharedHome()) : `.${h.id}`;
+    facts.push(`cat /srv/vs/data/${c.subsDirName}/a1/${c.authFile}`, `jq . ~/${home}/${c.authFile}`, `cat "$${c.spawnEnvVar}/${c.authFile}"`);
+  }
+  for (const c of facts) {
+    for (const [f, mk] of Object.entries(forms)) {
+      const v = M.vetSpec(mk(c));
+      ok(!v.ok && /vendor\/credential pattern \([^)]+\)/.test(v.error), `r3 census: "${c}" in ${f} is refused, named in words`, v.error || 'PASSES');
+    }
+  }
+  // (b) THE PASS LEG — everything else runs in every form: any API with your own key, the vendors' hosts named without a
+  //     sign-in read, `claude -p` / the Agent SDK / `codex exec` / `opencode run` on a timer, ordinary jobs.
+  for (const c of ['curl -s https://api.anthropic.com/v1/messages -H "x-api-key: $ANTHROPIC_API_KEY" -H "anthropic-beta: prompt-caching-2024-07-31" -d @q.json',
+    'curl -s https://api.openai.com/v1/responses -H "Authorization: Bearer $OPENAI_API_KEY" -d @r.json', 'python3 -c "import anthropic; print(anthropic.Anthropic().models.list())"',
+    'ANTHROPIC_API_KEY="$KEY" claude -p "summarize the log"', 'claude -p hi', "node -e \"import('@anthropic-ai/claude-agent-sdk')\"", 'codex exec "summarize"', 'opencode run hi',
+    'curl -s https://platform.claude.com/docs/en/api/messages', 'curl -fsSL https://claude.ai/install.sh | bash', 'curl -s https://chatgpt.com/backend-api/codex/responses',
+    'git -C /srv/app pull --ff-only && npm test', 'curl -fsS https://example.com/health', 'ls ~/.claude/projects', 'claude --version'])
+    for (const [f, mk] of Object.entries(forms)) ok(M.vetSpec(mk(c)).ok, `r3 pass leg: "${c}" in ${f} runs`, M.vetSpec(mk(c)).error);
+  // THE ONE DOOR: src/jobs.js starts a process in exactly ONE place and vets there before anything else — a new run path
+  // (an edit verb, a new restart policy) either goes through _spawn or reds this census; create and start answer early
+  const src = fs.readFileSync(new URL('../src/jobs.js', import.meta.url), 'utf8');
+  const starts = [...src.matchAll(/(?<![\w.])(spawn|spawnSync|exec|execSync|execFile|execFileSync|fork)\(/g)];
+  const door = src.indexOf('\n  _spawn(job, trigger) {\n    const vet = M.vetSpec(job);\n    if (!vet.ok) { this._refuseRun(job, vet, trigger); throw new Error(vet.error); }\n');
+  const doorEnd = src.indexOf('\n  }\n', door);
+  ok(starts.length === 1 && door > 0 && starts[0].index > door && starts[0].index < doorEnd, 'census: jobs.js starts a process in ONE place, behind the vet as _spawn\'s first act', `starts=${starts.length} door=${door}`);
+  ok(/  create\(spec, caller\) \{\n[^\n]*\n    const vet = M\.vetSpec\(spec\);\n    if \(!vet\.ok\) return \{ error: vet\.error \};/.test(src) && /    if \(job\.kind === 'cron'\) \{\n      const vet = M\.vetSpec\(job\);[^\n]*\n      if \(!vet\.ok\) \{ this\._refuseRun\(job, vet, 'manual'\); return \{ error: vet\.error \}; \}/.test(src) && /try \{ this\._spawn\(job, 'manual'\); \} catch \(e\) \{ return \{ error: e\.message \}; \}/.test(src), 'census: create vets before it touches the record; start answers a cron at once and a task/service through the door');
+  ok(/child = \{ \.\.\.a\.task, id: rid\(\)/.test(src) && /return \[spec\.cmd, spec\.health, spec\.envFrom, \.\.\.\(a \? jobCommandParts\(a\.task, depth \+ 1\) : \[\]\)\];/.test(fs.readFileSync(new URL('../src/job-model.js', import.meta.url), 'utf8')), 'census: a cron child is { ...action.task } and the vet recurses into action.task');
+}
 
 // ── schedules ──
 ok(M.parseCron('41 9 * * *') && M.parseCron('*/15 * * * *') && !M.parseCron('99 * * * *') && !M.parseCron('* * * *'), 'cron parse accepts/rejects correctly');
@@ -332,6 +407,57 @@ ok(M.renderNotifStash(stash, { budget: 250, spillPath: '/data/job-notifications-
   ok(/fetchJson\('\/api\/jobs\/seen', \{ method: 'POST'/.test(panel) && /seenAllButton\(sess\.ackable, refresh/.test(panel) && /seenAllButton\(ackableIds\(jobs\), render\)/.test(panel), 'the panel: "Mark all seen" per session header AND window-wide, ONE batch request each');
   const wiring = fs.readFileSync(new URL('../src/server/jobs-wiring.js', import.meta.url), 'utf8');
   ok(/app\.post\('\/api\/jobs\/seen'/.test(wiring) && /jm\.markAck\(job, 'user-opened', undefined, \{ quiet: true \}\)/.test(wiring) && /jm\._save\(\); try \{ jm\.d\.broadcast\('jobs-updated', \{ acked \}\)/.test(wiring) && wiring.indexOf("app.post('/api/jobs/seen'") < wiring.indexOf("app.post('/api/jobs/:id/:act'"), 'the server: POST /api/jobs/seen acknowledges each id quietly, then ONE save + ONE broadcast; registered before the per-job act route');
+}
+
+console.log('B-70f9 ② ownedJobsView — the jobs a conversation OWNS, attention first (Session Properties\' Background work list)');
+{
+  const jobs = [
+    { id: 'j1', name: 'web', kind: 'service', state: 'up', ownerSession: { conversationId: 'c-A' } },
+    { id: 'j2', name: 'build', kind: 'task', state: 'failed', ownerSession: { conversationId: 'c-A' } },
+    { id: 'j3', name: 'other', kind: 'task', state: 'up', ownerSession: { conversationId: 'c-B' } },
+    { id: 'j4', name: 'ask', kind: 'task', state: 'awaiting-user', owner: { conversation: { id: 'c-A' } } },
+    { id: 'j5', name: 'nightly', kind: 'cron', state: 'scheduled', ownerSession: { conversationId: 'c-A' } },
+    { id: 'j6', name: 'nobody', kind: 'task', state: 'up', ownerSession: { conversationId: null } },
+  ];
+  const v = M.ownedJobsView(jobs, 'c-A');
+  ok(JSON.stringify(v.map((j) => j.id)) === '["j4","j2","j1","j5"]', 'only c-A\'s jobs, attention first: waiting for you · failed · running · scheduled (the panel\'s ORDER)', v.map((j) => j.id));
+  ok(v[0].words === 'waiting for you' && v[0].glyph === '✋' && v[1].words === 'failed' && v[2].words === 'running' && v.every((j) => typeof j.words === 'string' && j.words), 'each row carries the panel glyph and the state as an English t() key');
+  ok(M.ownedJobsView(jobs, '').length === 0 && M.ownedJobsView(null, 'c-A').length === 0 && M.ownedJobsView(jobs, 'c-none').length === 0, 'no conversation id / no list / nothing owned ⇒ empty');
+  ok(Object.keys(M.STATE_WORDS).length === 10, 'every engine state has its words (10)');
+  const sp = require('fs').readFileSync(require('path').join(__dirname_jm, '..', 'src/lib/session-props.js'), 'utf-8');
+  ok(/import \{ ownedJobsView \} from '\.\.\/job-model\.js';/.test(sp) && /const oj = ownedJobs\(conv, \(\) => \{ if \(root\.isConnected\) render\(\); \}\);/.test(sp) && /a\.onclick = \(\) => app\.openJobs\?\.\(\{ focusJobId: j\.id \}\);/.test(sp) && /fetchJson\('\/api\/jobs'\)\.then\(\(r\) => \{\s*\n\s*if \(gen !== ownedJobsGen\) return;\s*\n\s*const rows = r && !r\.error && Array\.isArray\(r\.jobs\) \? ownedJobsView\(r\.jobs, conv\)/.test(sp),
+    'PIN: Session Properties lists the owned jobs through THE pure view (memoised ask of /api/jobs, a re-render only when the list moved) and a row opens the panel at its job');
+  // G2 (for-you-jobs verify r1): "Clear content…" on a job — the server answers the cleared sentence from then on, but a
+  // read begun BEFORE the clear landed after it and the memo kept the job's real name (and the window never repainted on
+  // jobs-updated). Session Properties' OWN memo code, run over a stalled /api/jobs: the clear's jobs-updated drops it.
+  const cut = (src) => src.slice(src.indexOf('const ownedJobsMemo = new Map();'), src.indexOf('function browserSessionsCount('));
+  const run = (code) => {
+    const asks = [];
+    const fetchJson = () => new Promise((resolve) => asks.push(resolve));
+    const api = new Function('fetchJson', 'ownedJobsView', code + '; return { ownedJobs, memo: ownedJobsMemo, drop: typeof dropOwnedJobs === "function" ? dropOwnedJobs : () => {} };')(fetchJson, M.ownedJobsView);
+    return { asks, api };
+  };
+  const before = [{ id: 'j9', name: 'scrape the secret client list', kind: 'task', state: 'up', ownerSession: { conversationId: 'c-A' } }];
+  const after = [{ id: 'j9', name: 'Content cleared', clearedAt: 1, kind: 'task', state: 'up', ownerSession: { conversationId: 'c-A' } }];
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+  const leg = async (code) => {
+    const { asks, api } = run(code);
+    api.ownedJobs('c-A', () => {});          // the window paints: read #1 is in flight
+    api.drop();                              // the owner clears j9 — the clear's jobs-updated reaches the window
+    asks[0]({ jobs: before });               // …and the read begun before the clear lands after it
+    await tick();
+    const oj = api.ownedJobs('c-A', () => {});   // the repaint the jobs-updated scheduled
+    if (asks[1]) { asks[1]({ jobs: after }); await tick(); }
+    const rows = (api.memo.get('c-A') || oj || {}).rows || [];
+    return { asks: asks.length, names: rows.map((r) => r.name), cleared: rows.map((r) => !!r.clearedAt) };
+  };
+  const fixed = await leg(cut(sp));
+  ok(fixed.asks === 2 && !fixed.names.includes(before[0].name) && fixed.cleared[0] === true,
+    'G2: a /api/jobs read begun before a job\'s clear never paints its words — the clear\'s jobs-updated drops the memo, the stale answer is discarded, the re-ask carries clearedAt (painted as clearedText())', fixed);
+  const reverted = await leg(cut(sp).replace('if (gen !== ownedJobsGen) return;', '').replace('function dropOwnedJobs() { ownedJobsGen++; ownedJobsMemo.clear(); }', 'function dropOwnedJobs() {}'));
+  ok(reverted.names.includes(before[0].name), 'G2 CONTROL: without the generation + the drop the cleared job\'s real name stays in the memo (no re-ask inside 15 s)', reverted);
+  ok(M.ownedJobsView(after, 'c-A')[0].clearedAt === 1 && /a\.textContent = `\$\{j\.glyph\} \$\{isCleared\(j\) \? clearedText\(\) : j\.name\} · \$\{t\(j\.words\)\}`;/.test(sp) && /if \(msg\.type === 'jobs-updated'\) \{ dropOwnedJobs\(\);/.test(sp),
+    'G2 PIN: the view carries clearedAt, the row paints clearedText() for a cleared job, the window drops the memo on jobs-updated');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

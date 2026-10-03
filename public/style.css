@@ -1442,6 +1442,10 @@ body.wm-dragging .window iframe, body.wm-dragging .window canvas, body.wm-draggi
 .ut-live-dot { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; box-sizing: border-box; border: 1.5px solid var(--text-dim); background: var(--text-dim); }
 .ut-live-dot[data-state="running"] { border-color: var(--green, #3fb950); background: var(--green, #3fb950); }
 .ut-live-dot[data-state="idle"] { border-color: var(--green, #3fb950); background: transparent; }
+.ut-live-dot[data-state="live"] { border-color: var(--green, #3fb950); background: color-mix(in srgb, var(--green, #3fb950) 40%, transparent); } /* B-3f5d ④: a terminal — running, its turns not tracked */
+.sp-owned-job { display: inline-block; margin: 0 8px 2px 0; padding: 0; border: 0; background: none; color: var(--accent); cursor: pointer; font: inherit; text-align: left; } /* B-70f9 ②: a job this conversation owns (Session Properties) */
+.sp-owned-job[data-state="failed"], .sp-owned-job[data-state="missed"] { color: var(--red, #f85149); }
+.sp-owned-job[data-state="awaiting-user"] { color: var(--yellow, #e5c07b); }
 .ut-live-dot[data-state="waiting"] { border-color: var(--yellow, #e5c07b); background: transparent; }
 .ut-live-dot[data-state="unreachable"] { border-style: dashed; background: transparent; }
 .ut-group-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -2024,14 +2028,22 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
 .mobile-win-billing {
   flex-shrink: 0; font-size: 10px; color: var(--text-secondary);
   border: 1px solid var(--border); border-radius: 999px; padding: 1px 7px;
-  max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  white-space: nowrap;
 }
 .mobile-win-billing.api { color: var(--yellow, #e5c07b); border-color: color-mix(in srgb, var(--yellow, #e5c07b) 40%, transparent); }
 .chat-status-billing {
   border: 1px solid var(--border); border-radius: 999px; padding: 0 6px;
-  color: var(--text-secondary); max-width: 90px; overflow: hidden;
-  text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: bottom;
+  color: var(--text-secondary); white-space: nowrap; display: inline-block; vertical-align: bottom;
 }
+/* lane phone-chip (B-e5ff): a billing pill is WHOLE or it FOLDS, never cut — three forms in one chip, CSS shows
+   the one `data-mode` names (full until measured; PURE src/lib/title-chips.js decides) */
+.mobile-win-billing .pill-compact, .mobile-win-billing .pill-icon,
+.chat-status-billing .pill-compact, .chat-status-billing .pill-icon { display: none; }
+.mobile-win-billing[data-mode="compact"] .pill-full, .chat-status-billing[data-mode="compact"] .pill-full,
+.mobile-win-billing[data-mode="icon"] .pill-full, .chat-status-billing[data-mode="icon"] .pill-full { display: none; }
+.mobile-win-billing[data-mode="compact"] .pill-compact, .chat-status-billing[data-mode="compact"] .pill-compact { display: inline; }
+.mobile-win-billing[data-mode="icon"] .pill-icon, .chat-status-billing[data-mode="icon"] .pill-icon { display: inline; }
+.mobile-win-billing .pill-icon svg, .chat-status-billing .pill-icon svg { width: 11px; height: 11px; vertical-align: -2px; }
 .chat-status-billing.api { color: var(--yellow, #e5c07b); border-color: color-mix(in srgb, var(--yellow, #e5c07b) 40%, transparent); }
 #mobile-nav-title {
   flex: 1; font-size: 14px; font-weight: 600; color: var(--text);
@@ -4584,6 +4596,24 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .chan-av[data-hue="7"] { --av: color-mix(in srgb, var(--red, #ef4444) 50%, var(--yellow, #f59e0b)); }
 .chan-av.chan-av-self { --av: var(--accent); }
 .sidebar .chan-av { --av-surface: var(--bg-sidebar, #0e0e1e); }
+/* B-5fe1 THE ACCOUNT BADGE: the vendor glyph on the ACCOUNT's hue (channel-avatar.js accountBadges — two accounts of one
+   vendor never share one) at the avatar's corner, ≤ 14 px, ringed in the surface so it reads on any fill. Paint: it
+   sits inside the aria-hidden avatar. Every hue is a THEME variable. */
+.chan-av.chan-av-badged { position: relative; overflow: visible; }
+.chan-av-badge {
+  --acct: var(--blue, #3b82f6); position: absolute; right: -3px; bottom: -3px; box-sizing: border-box;
+  width: clamp(11px, calc(var(--av-size) * 0.46), 14px); height: clamp(11px, calc(var(--av-size) * 0.46), 14px);
+  border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; line-height: 0;
+  background: var(--acct); color: var(--av-surface); box-shadow: 0 0 0 1.5px var(--av-surface); pointer-events: none;
+}
+.chan-av .chan-av-badge .chan-ic { font-size: clamp(8px, calc(var(--av-size) * 0.3), 10px); }
+.chan-av-badge[data-hue="1"] { --acct: var(--green, #22c55e); }
+.chan-av-badge[data-hue="2"] { --acct: var(--yellow, #f59e0b); }
+.chan-av-badge[data-hue="3"] { --acct: var(--red, #ef4444); }
+.chan-av-badge[data-hue="4"] { --acct: var(--magenta, #c678dd); }
+.chan-av-badge[data-hue="5"] { --acct: var(--cyan, #56b6c2); }
+.chan-av-badge[data-hue="6"] { --acct: color-mix(in srgb, var(--blue, #3b82f6) 50%, var(--magenta, #c678dd)); }
+.chan-av-badge[data-hue="7"] { --acct: color-mix(in srgb, var(--red, #ef4444) 50%, var(--yellow, #f59e0b)); }
 
 /* the rail panel */
 /* a NAMED container: the rows are `session-item-card`s, themselves inline-size containers, so an
@@ -4762,6 +4792,8 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .chan-sec-health-text { min-width: 0; overflow-wrap: anywhere; }
 .chan-grow-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--text); }
 .chan-grow-unread-on .chan-grow-title { font-weight: 600; }
+/* B-5fe1: WHICH account, in small text, when a vendor holds ≥ 2 */
+.chan-grow-acct { flex: 0 1 auto; min-width: 0; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; color: var(--text-dim); }
 .chan-grow-at { flex-shrink: 0; font-size: 10px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
 .chan-grow-unread-on .chan-grow-at { color: var(--attn-text); font-weight: 600; }
 .chan-grow-sub { display: flex; align-items: center; gap: 5px; min-width: 0; margin-top: 2px; font-size: 11px; color: var(--text-dim); }
@@ -4885,6 +4917,11 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .chanmsg-head { display: flex; align-items: baseline; gap: 7px; min-width: 0; }
 .chanmsg-head b { font-size: 12.5px; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chanmsg-agent .chanmsg-head b { color: var(--attn-text); }
+/* lane lark-threads (B3): the author head offers "Set a name…" — a pointer + an underline on hover / focus, nothing else */
+.chanmsg-head .chanmsg-who-btn { cursor: pointer; border-radius: var(--radius-sm); }
+.chanmsg-head .chanmsg-who-btn:hover, .chanmsg-head .chanmsg-who-btn:focus-visible { text-decoration: underline; outline: none; }
+/* …and on a phone it is a 36 px target like every other one (the comm-panel rule) — the head grows, nothing overlaps */
+@media (max-width: 768px) { .chanmsg-head .chanmsg-who-btn { display: inline-flex; align-items: center; min-height: 36px; } }
 .chanmsg-at { font-size: 10px; color: var(--text-dim); flex-shrink: 0; font-variant-numeric: tabular-nums; white-space: nowrap; }
 /* a continuation line's own time — in the avatar's gutter, on hover (the run's head carries the first) */
 .chanmsg-at-hover { position: absolute; top: 4px; left: 6px; width: calc(var(--chan-gutter) - 6px); text-align: right; opacity: 0; transition: opacity .12s; pointer-events: none; }
@@ -4896,7 +4933,9 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .chanmsg-sysrow .chanblk-sys { font-size: 11px; font-style: normal; color: var(--text-dim); }
 .chanmsg-self .chanmsg-head b { color: var(--attn-text); }
 .chanmsg-syn { font-size: 9px; color: var(--text-dim); border: 1px solid var(--border); border-radius: 999px; padding: 0 5px; flex-shrink: 0; }
-.chanmsg-body { font-size: 13px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; }
+.chanmsg-body { font-size: 13px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; -webkit-user-select: text; user-select: text; cursor: text; } /* B-ff04: a message's words are selectable + copyable (the app's root is user-select:none) */
+@media (hover: none) and (pointer: coarse) { .chanmsg-body { -webkit-user-select: none; user-select: none; cursor: default; } } /* the 2.369.202 integration: on a touch-first device a long press on a message is its menu (Copy text inside — B-ff04's touch door, reaction-hover's); words selectable there turn that press into a selection (press-select) and leave the phone no door */
+.chan-at { cursor: pointer; } /* B-ff04: an agent-group mention chip — the member's name by id; a click opens its session */
 /* lane group-pending (2026-10-01): WHERE A GROUP MESSAGE STANDS with its recipients — one dim line under every
    message ("Waiting for beta's next turn" / "Read by beta" / "1 waiting · 1 read"), keyed and patched in place;
    the dot is hollow while anyone still waits, filled once it reached everyone it could (never an emoji) */
@@ -5095,6 +5134,8 @@ a.chanmsg-file:hover .chanmsg-att-dl { color: var(--accent); }
 .chanwin-composer textarea { width: 100%; box-sizing: border-box; min-height: 40px; resize: none; font: inherit; font-size: 13px; line-height: 1.45; padding: 8px 10px 4px; border: none; border-radius: var(--radius) var(--radius) 0 0; background: transparent; color: var(--text); }
 .chanwin-composer textarea:focus { outline: none; }
 .chanwin-composer-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0; padding: 4px 6px 6px 10px; }
+/* B-a085: mail's "Reply all" box sits beside Send */
+.chanwin-reply-all { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; font-size: 12px; white-space: nowrap; cursor: pointer; }
 .chanwin-note { flex: 1; min-width: 0; font-size: 11px; color: var(--text-dim); line-height: 1.45; margin: 0; display: flex; align-items: center; gap: 4px; }
 .chanwin-note-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chanwin-note-info { display: inline-flex; flex-shrink: 0; color: var(--text-dim); cursor: help; }
@@ -5131,6 +5172,8 @@ a.chanmsg-file:hover .chanmsg-att-dl { color: var(--accent); }
 .chan-prop-arming .chan-prop-actions button { opacity: 0.55; cursor: default; }
 .chan-prop-arming-nudge { outline: 1px dashed var(--warn-text); outline-offset: 1px; }
 .chan-prop-link { color: var(--accent); text-decoration: none; }
+/* B-f216: a compose card's envelope ("Gmail · New message") is words, never styled as a link without a target */
+.chan-prop-env { color: var(--text-dim); }
 .chan-prop-text { font-size: 12px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
 /* lane channel-threads: where a threaded reply lands, and a reaction proposal's one sentence (the glyph is content) */
 .chan-prop-thread { font-size: 11px; color: var(--text-dim); padding-left: 8px; border-left: 2px solid var(--border); overflow-wrap: anywhere; }
@@ -5166,6 +5209,34 @@ a.chanmsg-file:hover .chanmsg-att-dl { color: var(--accent); }
 .chan-seg .jobs-btn:last-child { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; margin-left: -1px; }
 .chan-seg-on { color: var(--accent); border-color: var(--accent) !important; position: relative; z-index: 1; }
 .chan-outbox-list { gap: 8px; }
+/* B-f467 THE OUTBOX ROW — the channel list's row grammar: avatar (its account badge) · WHO and WHERE · the account at ≥ 2
+   of a vendor · the time / the state pill · the first line · the primary; the full card opens under it (click / Enter) */
+.chan-outbox-list:has(> .chan-orow) { gap: 2px; }
+.chan-outbox-list > .chan-outbox-sec { margin-top: 8px; }
+.chan-outbox-list > .chan-prop { margin: 0 0 8px; }
+.chan-orow { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "av line line" "av sub act"; column-gap: 10px; row-gap: 3px; align-items: center; padding: 7px 8px; border-radius: var(--radius-sm); border: 1px solid transparent; cursor: pointer; min-width: 0; transition: background var(--transition), border-color var(--transition); }
+.chan-orow:hover { background: var(--bg-hover); }
+.chan-orow:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.chan-orow.chan-orow-open { border-color: var(--border); background: color-mix(in srgb, var(--text) 4%, transparent); }
+.chan-orow > .chan-av { grid-area: av; --av-size: 32px; }
+.chan-orow-line { grid-area: line; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.chan-orow-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--text); }
+.chan-orow-who { font-weight: 600; }
+.chan-orow-where { color: var(--text-secondary); }
+.chan-orow-acct { flex: 0 1 auto; min-width: 0; max-width: 30%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; color: var(--text-dim); }
+.chan-orow-at { flex-shrink: 0; font-size: 10px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.chan-orow-chev { flex-shrink: 0; color: var(--text-dim); transition: transform var(--transition); }
+.chan-orow-open .chan-orow-chev { transform: rotate(90deg); }
+.chan-orow-sub { grid-area: sub; display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; color: var(--text-secondary); }
+.chan-orow-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chan-orow-act { grid-area: act; display: flex; justify-content: flex-end; }
+.chan-orow-act .mounts-btn { padding: 2px 10px; font-size: 12px; white-space: nowrap; }
+@media (max-width: 480px) {
+  .chan-orow { column-gap: 8px; padding: 7px 4px; } .chan-orow > .chan-av { --av-size: 26px; } .chan-orow-act .mounts-btn { min-height: 36px; padding: 6px 12px; }
+  /* the Outbox's own phone targets (first measured by the B-f467 shots): the Awaiting | All segment and an opened card's conversation link */
+  .chan-outbox .chan-seg .jobs-btn { min-height: 36px; padding: 6px 12px; }
+  .chan-outbox-list .chan-prop-where .chan-prop-link { display: inline-flex; align-items: center; min-height: 36px; }
+}
 .chan-outbox-sec { display: flex; align-items: center; gap: 6px; font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--text-dim); margin: 4px 0 -2px; }
 
 /* the dialog family — ONE width token (a1 O3 / R4), the house form rhythm */
@@ -5283,6 +5354,12 @@ label.chan-cap-row { cursor: default; }
 .pp-tg { flex: 0 1 auto; max-width: 40%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; font-weight: 600; padding: 0 6px; line-height: 15px; border-radius: 999px; color: var(--text-secondary); background: color-mix(in srgb, var(--text-secondary) 12%, transparent); }
 .pp-hint { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; color: var(--text-dim); margin-left: auto; }
 .pp-busy .pp-list, .pp-busy .pp-chips { opacity: .6; pointer-events: none; }
+/* ALL AGENTS (lane everyone-principal): the first row, set apart from the named rows by a rule under it; its chip
+   first among the chips. Never greyed — a surface that cannot grant everyone does not draw the row at all. */
+.pp-row.pp-row-everyone { margin-bottom: 3px; box-shadow: 0 1px 0 0 var(--border); border-radius: var(--radius-sm) var(--radius-sm) 0 0; }
+.pp-row.pp-row-everyone.pp-active { box-shadow: inset 0 0 0 1px var(--border-active), 0 1px 0 0 var(--border); }
+.pp-row.pp-row-everyone .pp-name { font-weight: 600; }
+.pp-chip.pp-chip-everyone { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
 .pp-trigger { display: inline-flex; align-items: center; justify-content: space-between; gap: 6px; width: 100%; min-width: 0; box-sizing: border-box; font: inherit; font-size: 12px; padding: 5px 8px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-input); color: var(--text); cursor: pointer; text-align: left; }
 .pp-trigger:hover, .pp-trigger:focus-visible { border-color: var(--accent); outline: none; }
 .pp-trigger-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -5354,6 +5431,10 @@ label.chan-cap-row { cursor: default; }
 .browser-live-tabchip.switchable { cursor: pointer; }
 .browser-live-tabchip.switchable:hover { background: var(--hover-overlay); }
 .browser-live-tabchip.active { color: var(--text); background: var(--bg-window); border-color: var(--border); }
+.browser-live-tabchip.watched { border-color: var(--accent); border-style: dashed; } /* lane browser-windows (U3): the tab THIS view watches (the agent's own stays .active) */
+.browser-live-watch-line { display: flex; align-items: center; gap: 8px; padding: 3px 8px; flex-shrink: 0; font-size: 11px; line-height: 1.4; color: var(--text); background: color-mix(in srgb, var(--accent) 10%, transparent); border-bottom: 1px solid var(--border); overflow-wrap: anywhere; } /* lane browser-windows: the watched tab / the tab on show that paints nothing (U0b) */
+.browser-live-watch-text { flex: 1 1 auto; min-width: 0; }
+.file-tool-btn.browser-live-watch-btn { flex: 0 0 auto; width: auto; white-space: nowrap; padding: 0 8px; } /* a WORDED button on the icon-box class: its own width (test-live-bar-layout's census) */
 .browser-live-tabchip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .browser-live-tabchip-title { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .browser-live-tabchip-mark { font-size: 10px; color: var(--text-dim); padding: 0 4px; border-radius: var(--radius-sm); background: var(--hover-overlay); flex: none; }
@@ -5384,6 +5465,7 @@ label.chan-cap-row { cursor: default; }
 .browser-live-cap-pop { min-width: 240px; max-width: 360px; padding: 8px 10px; background: var(--bg-dialog); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-window); font-size: 12px; color: var(--text); display: flex; flex-direction: column; gap: 6px; }
 .browser-live-cap-head { font-weight: 600; }
 .browser-live-cap-machine { color: var(--yellow); font-size: 11px; }
+.browser-live-cap-machine-count { color: var(--text-secondary); font-size: 11px; } /* lane browser-windows (U4): the machine count against its ceiling (a setting) */
 .browser-live-cap-empty, .browser-live-cap-shared { color: var(--text-dim); font-size: 11px; }
 .browser-live-cap-row { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
 .browser-live-cap-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -5778,16 +5860,10 @@ label.chan-cap-row { cursor: default; }
 /* the dialog (src/lib/browser-who-dialog.js): two answers, the principal picker under "Only these", the "will lose it" line */
 .dialog.bwho-dialog { width: min(520px, calc(92vw / var(--ui-scale, 1))); }
 .bwho-body { display: flex; flex-direction: column; gap: 8px; }
-.bwho-answers { display: flex; flex-direction: column; gap: 6px; }
-/* (0,2,1): out-ranks `.dialog-body label` (0,1,1), a COLUMN flex that stacked the radio above its words */
-.dialog-body label.bwho-answer { display: flex; flex-direction: row; align-items: flex-start; gap: 8px; margin: 0; padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; font-size: 12px; color: var(--text); }
-.dialog-body label.bwho-answer:has(.bwho-radio:checked) { border-color: var(--accent); }
-.dialog-body label.bwho-answer .bwho-radio { margin: 2px 0 0; padding: 0; flex: 0 0 auto; width: auto; }
 .bwho-dialog .pp-list { max-height: 220px; }
-.bwho-answer-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.bwho-answer-head { font-weight: 600; color: var(--text); }
-.bwho-answer-sub { font-size: 11px; color: var(--text-secondary); line-height: 1.4; }
-.bwho-pick { display: flex; flex-direction: column; gap: 6px; padding-left: 20px; min-width: 0; }
+.bwho-pick { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+/* lane everyone-principal: the radios are gone — one sentence says what the pick means (All agents first in the picker) */
+.bwho-meaning { font-size: 11px; color: var(--text-secondary); line-height: 1.4; }
 .bwho-remote { font-size: 11px; }
 /* the naive-user verifier (2026-09-28): the note's sentence lives in its OWN span (never the alert glyph's line-height:0 box —
    that drew a 0 px line whose text overlapped the next one and ran off the phone); the two notes sit between the scrolling
@@ -6078,3 +6154,62 @@ label.chan-cap-row { cursor: default; }
 .brp-fits-bar { padding: 2px 10px; border-bottom: 1px solid var(--border); font-size: 10px; display: flex; }
 .brp-fits-bar .browser-trace-fits-toggle { margin-left: 0; }
 .bprof-trace-fits { display: block; font-size: 10px; }
+
+/* ── THE DESIGN WINDOW (lane design-window L2, 2026-10-02) — the window's chrome; the canvas's own rules (.dc-*) are
+   src/lib/design-canvas.js CANVAS_CSS, one copy for the window and the published page. The bar NEVER wraps: every
+   child keeps its words on one line at its own width and what does not fit folds into ⋯ (bar-fold.js). ── */
+.design-window { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--bg-workspace); }
+.design-bar { display: flex; align-items: center; gap: 6px; padding: 6px 10px; flex-shrink: 0; min-width: 0; overflow: hidden; background: var(--bg-panel, var(--bg-titlebar)); border-bottom: 1px solid var(--border); font-size: 11px; }
+.design-bar > * { flex: 0 0 auto; white-space: nowrap; }
+.design-bar > .bar-folded { display: none !important; }
+.design-bar > .design-btn { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 7px; font-size: 11px; background: var(--bg-input); border: 1px solid var(--border); color: var(--text-secondary); border-radius: var(--radius-sm); cursor: pointer; }
+.design-bar > .design-btn:hover { border-color: var(--accent); color: var(--accent); }
+.design-bar > .design-btn.active { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
+.design-bar > .design-btn svg { flex: none; }
+.design-bar > .design-zoom { min-width: 48px; justify-content: center; font-variant-numeric: tabular-nums; }
+.design-bar > .design-pages { height: 24px; max-width: 180px; padding: 0 6px; font-size: 11px; background: var(--bg-input); border: 1px solid var(--border); color: var(--text); border-radius: var(--radius-sm); }
+.design-bar > .design-stamp { margin-left: auto; color: var(--text-dim); font-size: 10px; font-variant-numeric: tabular-nums; }
+.design-stage { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+.design-canvas-host { position: absolute; inset: 0; }
+.design-status { position: absolute; left: 50%; top: 40%; transform: translate(-50%, -50%); max-width: min(560px, 90%); padding: 14px 16px; border-radius: var(--radius); background: var(--bg-dialog); border: 1px solid var(--border); color: var(--text-secondary); font-size: 12px; text-align: left; }
+.design-status-head { color: var(--text); font-weight: 600; }
+.design-status-list { margin: 8px 0 0 18px; color: var(--red, #e55); font-size: 11px; }
+.design-chip { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; max-width: min(560px, 92%); padding: 6px 6px 6px 12px; border-radius: 999px; background: var(--bg-dialog); border: 1px solid var(--border); box-shadow: 0 8px 24px rgba(0,0,0,0.35); color: var(--text); font-size: 12px; z-index: 3; }
+.design-chip > span { min-width: 0; }
+.design-chip-x { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 999px; border: none; background: transparent; color: var(--text-secondary); cursor: pointer; }
+.design-chip-x:hover { color: var(--accent); background: var(--hover-overlay); }
+.design-composer { position: absolute; z-index: 4; padding: 10px; border-radius: var(--radius); background: var(--bg-dialog); border: 1px solid var(--border); box-shadow: 0 8px 24px rgba(0,0,0,0.35); }
+.design-composer-body { display: flex; flex-direction: column; gap: 8px; }
+.design-quote { font-size: 11px; color: var(--text-secondary); font-family: var(--font-mono, monospace); word-break: break-word; padding: 4px 6px; border-left: 2px solid var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); border-radius: var(--radius-sm); }
+.design-comment-input { width: 100%; resize: vertical; min-height: 64px; padding: 6px 8px; font: inherit; font-size: 12px; background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.design-comment-input:focus { outline: none; border-color: var(--accent); }
+.design-composer-foot { display: flex; justify-content: flex-end; gap: 8px; }
+.design-print-frame { position: fixed; left: -100000px; top: 0; border: 0; visibility: hidden; pointer-events: none; }
+.design-publish-field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; font-size: 12px; }
+.design-publish-public { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; font-size: 12px; }
+.design-publish-where { font-size: 11px; color: var(--text-dim); word-break: break-all; margin-bottom: 10px; }
+.design-publish-state { font-size: 11px; color: var(--text-secondary); margin-bottom: 8px; }
+.design-bar > .design-stamp.design-stamp-off { color: var(--yellow, #e5c07b); }
+.design-publish-url { font-size: 12px; word-break: break-all; margin-bottom: 6px; }
+.design-sheet .dialog-body { display: flex; flex-direction: column; gap: 8px; }
+.design-sheet-pages { display: flex; flex-wrap: wrap; gap: 6px; }
+.design-sheet-page { padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--bg-input); color: var(--text-secondary); font-size: 11px; cursor: pointer; }
+.design-sheet-page.active { border-color: var(--accent); color: var(--accent); }
+.design-sheet-list { display: flex; flex-direction: column; gap: 4px; max-height: calc(60vh / var(--ui-scale, 1)); overflow: auto; }
+.design-sheet-row { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 6px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-input); color: var(--text); text-align: left; cursor: pointer; }
+.design-sheet-row:hover, .design-sheet-row.active { border-color: var(--accent); }
+.design-sheet-name { font-size: 12px; font-weight: 600; }
+.design-sheet-meta { font-size: 10px; color: var(--text-dim); }
+/* the phone (≤ 768): full-screen window (the WM's phone layout), 44 px targets, the lists and the composer as bottom sheets */
+@media (max-width: 768px) {
+  .design-bar { padding: 4px 6px; gap: 4px; }
+  .design-bar > .design-btn, .design-bar > .design-pages { min-height: 44px; min-width: 44px; justify-content: center; }
+  .design-bar > .design-stamp { display: none; }
+  /* a bottom sheet: the phone's .dialog rule sizes every dialog 95vw !important — the sheet is the screen's width */
+  .dialog-overlay > .dialog.design-sheet, .dialog-overlay > .dialog.design-composer-sheet { position: fixed; left: 0; right: 0; bottom: 0; top: auto; width: 100% !important; max-width: none; min-width: 0 !important; border-radius: var(--radius) var(--radius) 0 0; border-bottom: none; }
+  .design-sheet-row { min-height: 44px; justify-content: center; }
+  .design-sheet-page { min-height: 44px; }
+  .design-composer-sheet .design-composer-foot button { min-height: 44px; min-width: 88px; }
+  .design-chip { bottom: 10px; }
+  .design-chip-x { width: 44px; height: 44px; }
+}

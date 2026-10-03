@@ -40,12 +40,25 @@ jobs:
         env:
           # claude setup-token secret; absent on fork PRs → chat E2E SKIPs
           VIBESPACE_CI_OAT: ${{ secrets.VIBESPACE_CI_OAT }}
-  heavy:
+  # SHARDED (lane mirror-green r2, 2026-10-03): ONE heavy job hit its 60-min
+  # timeout on .199/.200 — 216 suites over the runner's two lanes (4 cpus) had
+  # drained in 2611–2950 s already on .196–.198. `--shard i/4` runs one slice
+  # of the tier (scripts/ci.mjs SHARDS: the split is a function of the table's
+  # names and n alone, so the four jobs agree; the serial group is shard 1's;
+  # test-ci-gate §8b holds every heavy suite in exactly one slice and this
+  # matrix to every slice). The runner's own per-suite times (.198 + .200
+  # logs) put the slices at ~11–21 min of suites over two lanes, ~25 min with
+  # setup at worst — 45 is each job's own bound. fail-fast off: a red slice
+  # must not cancel the others (the tier reports ALL the damage). `heavy`
+  # below is the ONE status that reads green/red for the whole tier.
+  heavy-shards:
+    name: heavy ${{ matrix.shard }}/4
     runs-on: ubuntu-latest
-    # 60 (B-f4cb): the 23 suites THE TIER RULE moved out of fast add ~750 s of
-    # serial work here (~6 min over the runner's two lanes, ~10 min at its
-    # ~1.6×) to a job that measured 32–34 min (.189–.191) against 45.
-    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -83,7 +96,7 @@ jobs:
       # kernel OOM killer is SIGKILL) is a RED here, not a supersession — that
       # confusion is what once showed this job a green tick for a tier that
       # crashed and then ran nothing.
-      - run: node scripts/ci.mjs --heavy --dirty-ok
+      - run: node scripts/ci.mjs --heavy --dirty-ok --shard ${{ matrix.shard }}/4
         env:
           VIBESPACE_CI_OAT: ${{ secrets.VIBESPACE_CI_OAT }}
       # A chrome suite that goes red HERE and green locally (2.369.125's
@@ -94,7 +107,20 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: chrome-suite-shots-${{ github.sha }}
+          name: chrome-suite-shots-${{ github.sha }}-${{ matrix.shard }}
           path: /tmp/vs-*-shots-*/
           if-no-files-found: ignore
           retention-days: 7
+  # THE ONE HEAVY STATUS: green only when every shard is green. always(), so a
+  # red or cancelled shard turns THIS job red instead of leaving it skipped —
+  # a skipped check reads as "nothing to say".
+  heavy:
+    needs: heavy-shards
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: every heavy shard green
+        run: |
+          echo "heavy shards: ${{ needs.heavy-shards.result }}"
+          test "${{ needs.heavy-shards.result }}" = success

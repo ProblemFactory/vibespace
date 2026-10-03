@@ -53,6 +53,28 @@ export function receiptLine(r, { t, where, lastWriteAt = null, now = Date.now(),
       return { tone: 'dim', text: `? ${where}: ${t('not checked — reinstall the agent tools')}` };
   }
 }
+/** What a REFUSED server root says wherever it would otherwise report what it
+ *  wrote (lane hook-root-guard, src/server-root.js): the Machines card, the
+ *  Settings chip and "Check machines…" — never "registered". `refused` =
+ *  {kind, checkout?} off /api/agent-hooks or a host's agent-tools status. */
+export function refusalLine(refused, { t, remote = false } = {}) {
+  if (!refused) return null;
+  const text = refused.kind === 'worktree'
+    ? t('Not registered — this VibeSpace runs from a git worktree of {checkout}; the CLI config belongs to the VibeSpace started from that checkout.', { checkout: refused.checkout || '?' })
+    : refused.kind === 'tmp'
+      ? t('Not registered — this VibeSpace runs from a temporary folder and never writes your CLI config.')
+      : refused.kind === 'override'
+        ? t('Not registered — VIBESPACE_SKIP_AGENT_HOOKS=1 is set for this VibeSpace.')
+        : t('Not registered — this VibeSpace could not tell which folder it runs from.');
+  return { tone: 'warn', text: remote ? `${text} ${t('It writes no CLI config on other machines either.')}` : text };
+}
+/** verify r2 ① (lane hook-root-guard): the hooks registered AFTER an earlier read error at boot — the chip says WHEN, so an
+ *  owner who saw "could not tell which folder" knows which sessions have the tools (those started after HH:MM). */
+export function recoveredLine(rec, { t } = {}) {
+  if (!rec || !rec.at) return null;
+  const d = new Date(rec.at); const time = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  return { tone: 'ok', text: t('Registered at {time} after an earlier read error ({error}) — sessions started since then have the tools.', { time, error: String(rec.error || '').slice(0, 120) }) };
+}
 /** The "leave it alone" line for a cli-config row whose value is its `off` value. */
 export function offLine({ t, rel, path }) {
   return { tone: 'dim', text: `${t("Leaving the CLI's own value alone")} (${rel ? '~/' + rel : ''}${path ? ' → ' + path : ''})` };

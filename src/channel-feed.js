@@ -55,6 +55,8 @@ const FEED_SEEN_TTL_MS = 2 * 3600e3;
 const FEED_SKEW_MS = 5000;
 /** Thread owed marks kept per conversation (the oldest dropped and counted). */
 const THREAD_OWED_MAX = 50;
+/** lane lark-threads (A4): the hits behind owed chat reads a page hands the engine (what the read must find) — bounded. */
+const OWED_HITS_MAX = 60;
 /** Conversations a pass may ask the vendor to NAME (a born single chat's title). */
 const DESCRIBE_MAX = 5;
 /** The slack a hit may lie outside its window before the window is judged IGNORED. */
@@ -376,12 +378,15 @@ function recentUnreadableCount(ring, now) {
  *   hasRecord(cid, vendorId)  the store already holds this message (a push-delivered record, our own send)
  *   separateThreads  the adapter's thread replies are NOT in the conversation listing (`threads.listing:'separate'`)
  * → { owed: Map<convId, at>, threadOwed: Map<convId, Map<threadKey, at>>, births: Map<convId, {at, created, fromIds: []}>,
- *     groups: Map<convId, {at, threads: Map}>, seenAdd: [[vendorId, at]], repeats, stored, unlisted }
+ *     groups: Map<convId, {at, threads: Map}>, seenAdd: [[vendorId, at]], repeats, stored, unlisted,
+ *     threadHits (lane lark-threads A5: the new hits that carry a thread id — the measurement),
+ *     owedHits: [{convId, vendorId, at}] (A4: the hits behind an owed chat read with no thread id, ≤ OWED_HITS_MAX) }
+ * lane lark-threads (A3): a hit on a STORED message that names a thread still marks THE THREAD (never the chat).
  * U6: until a page pins a thread ROOT's `thread_position`, a hit with a thread marks BOTH the conversation (the
  * chat listing returns roots) and the thread (the thread walk returns replies).
  */
 function foldHits(hits, { seen = new Map(), stateOf = () => null, hasRecord = () => false, separateThreads = false } = {}) {
-  const out = { owed: new Map(), threadOwed: new Map(), births: new Map(), groups: new Map(), seenAdd: [], repeats: 0, stored: 0, unlisted: 0 };
+  const out = { owed: new Map(), threadOwed: new Map(), births: new Map(), groups: new Map(), seenAdd: [], repeats: 0, stored: 0, unlisted: 0, threadHits: 0, owedHits: [] };
   const inPage = new Set();
   const up = (m, k, at) => { if (!(m.get(k) >= at)) m.set(k, at); };
   for (const h of Array.isArray(hits) ? hits : []) {
@@ -390,6 +395,7 @@ function foldHits(hits, { seen = new Map(), stateOf = () => null, hasRecord = ()
     inPage.add(h.vendorId);
     const at = Math.max(Number(h.at) || 0, Number(h.updatedAt) || 0);
     out.seenAdd.push([h.vendorId, at]);
+    if (h.threadKey) out.threadHits++;   // A5 (lane lark-threads): the measurement — does the search carry thread ids at all
     const st = stateOf(h.convId);
     if (st === 'unlisted') { out.unlisted++; continue; }
     if (st === null || st === undefined) {
@@ -410,12 +416,19 @@ function foldHits(hits, { seen = new Map(), stateOf = () => null, hasRecord = ()
       }
       continue;
     }
-    if (hasRecord(h.convId, h.vendorId)) { out.stored++; continue; }
-    up(out.owed, h.convId, at);
+    // lane lark-threads (A3 / H1, 2026-10-01): THE THREAD MARK FIRST — a hit on a message the store already holds still
+    // names its thread: the search re-surfaced a root whose topic was born after it was stored (the chat listing will
+    // never show that root again — it is older than the anchor), or a reply the push already delivered. It used to be
+    // dropped here before its mark (`stored++; continue`), so a thread born on a stored root was invisible for ever. A
+    // stored hit marks the THREAD only (a widened mark) — never an owed chat read (the chat holds nothing new for it)
     if (h.threadKey && separateThreads) {
       if (!out.threadOwed.has(h.convId)) out.threadOwed.set(h.convId, new Map());
       up(out.threadOwed.get(h.convId), h.threadKey, at);
     }
+    if (hasRecord(h.convId, h.vendorId)) { out.stored++; continue; }
+    up(out.owed, h.convId, at);
+    // A4: a hit behind an owed CHAT read with no thread id — the read must find it; one it does not find is read by id
+    if (!h.threadKey && out.owedHits.length < OWED_HITS_MAX) out.owedHits.push({ convId: h.convId, vendorId: h.vendorId, at });
   }
   return out;
 }
@@ -570,7 +583,7 @@ function splitThreadDueKey(key, isConvKey = () => true) {
 function freshMs(everySec, overlapSec) { return Math.max(180e3, (3 * (Number(everySec) || 30) + (Number(overlapSec) || OVERLAP_DEFAULT_SEC)) * 1000); }
 
 module.exports = {
-  FEED_SEEN_MAX, FEED_SEEN_TTL_MS, FEED_SKEW_MS, THREAD_OWED_MAX, DESCRIBE_MAX, RANGE_SLACK_MS, TOTAL_PER_SEC_MAX,
+  FEED_SEEN_MAX, FEED_SEEN_TTL_MS, FEED_SKEW_MS, THREAD_OWED_MAX, OWED_HITS_MAX, DESCRIBE_MAX, RANGE_SLACK_MS, TOTAL_PER_SEC_MAX,
   PROMOTE_MIN, DEMOTE_MIN, MISS_THRESHOLD, OVERLAP_MIN_SEC, OVERLAP_DEFAULT_SEC, PAGE_TOKEN_TTL_MS, PAGE_SIGS_MAX, PENDING_SAMPLES_MAX,
   FEED_VIA, TIME_UNITS, HIT_FIELDS, PARK_CODES, MODES, EPOCH_MIN_MS, ID_MAX, THREAD_KEY_SEP,
   SHAPE_BAD_SHARE, SHAPE_MIN_ITEMS, SHAPE_FIELDS_MAX, SHAPE_FIELD_NAMES_MAX, UNREADABLE_RECENT_MS, UNREADABLE_RING_MAX,

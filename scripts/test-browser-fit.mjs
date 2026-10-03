@@ -187,7 +187,7 @@ console.log('— ① the PURE rules (src/browser-fit.js) over the measured 0.38.
 
   // the trailing edge of the gate
   ok(S.frameGateWait({ maxFps: 15, lastFrameAt: 1000, bufferedAmount: 0 }, 1020) === 47 && S.frameGateWait({ maxFps: 15, lastFrameAt: 1000, bufferedAmount: 0 }, 1100) === 0 && S.frameGateWait({ maxFps: 15, lastFrameAt: 0, bufferedAmount: 5e6 }, 5) === null, 'frameGateWait: the ms until the gate opens (47 of a 66.7 ms gap), 0 when open, null while the buffer holds it');
-  ok(S.viewerMessageVerdict({ type: 'fit', width: 1, height: 1 }).kind === 'fit' && S.viewerMessageVerdict({ type: 'refresh' }).kind === 'refresh' && S.hello({}).protocol.view.join(',') === 'fit,refresh' && S.hello({}).protocol.control.join(',') === 'takeover,handback,confirm,pass,claim', 'the view verbs are their own kinds (never forwarded); the hello names them beside the control verbs');
+  ok(S.viewerMessageVerdict({ type: 'fit', width: 1, height: 1 }).kind === 'fit' && S.viewerMessageVerdict({ type: 'refresh' }).kind === 'refresh' && S.hello({}).protocol.view.join(',') === 'fit,refresh,watch-tab' && S.hello({}).protocol.control.join(',') === 'takeover,handback,confirm,pass,claim', 'the view verbs are their own kinds (never forwarded); the hello names them beside the control verbs (lane browser-windows U3 added watch-tab)');
 }
 
 // ── ⑤a PURE controls ──

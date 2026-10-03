@@ -89,15 +89,17 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
   // r2: the rung's args ride `rcArgs` so a switch that moved nothing re-asks at `after-switch` (pinned exactly in test-reset-credit-verdict §7)
   ok('exhaustion ladder: the credit rung → ② pool switch → ③ auto-resume (both sites)', /const rcArgs = \{ resetsAtSec: tripped\?\.resetsAt, lane: arSignal\.laneOf\(w\.snap\)[^\n]*\n\s*const rung = resetCreditRung\(session, rcArgs\);\s*\n\s*if \(rung === 'consumed'\) return;[\s\S]{0,300}maybePoolAutoSwitch\(session\)/.test(eng) && /const rcArgs = \{ resetsAtSec: resets, lane: arSignal\.laneOf\(w2\?\.snap \|\| snap\)[^\n]*\n\s*const rung = resetCreditRung\(session, rcArgs\);\s*\n\s*if \(rung === 'consumed'\) return;[\s\S]{0,300}maybePoolAutoSwitch\(session\)/.test(eng));
   // 2.369.123 (design-harness-settings §5): the row is read through the DESCRIPTOR of the session's own backend — never a literal harness id (test-architecture §46 censuses the old spelling)
-  ok("…the mode (off | ask | auto, default off) is read through the session's harness; the one-try floor is the verdict's cooldown", /harnessDeclares\(session\.backend, 'limitResetCredit'\)\) return null;\s*\n\s*return harnessSetting\(session\.backend, 'limitResetCredit'\) \|\| 'off';/.test(eng) && /cooldownUntilSec: tried \? Math\.floor\(\(tried \+ RESET_CREDIT_FLOOR_MS\) \/ 1000\) : null,/.test(eng) && /const RESET_CREDIT_FLOOR_MS = 10 \* 60e3;/.test(eng));
+  ok("…the mode (off | ask | auto, default off) is read through the session's harness; the one-try floor is the verdict's cooldown", /harnessDeclares\(session\.backend, 'limitResetCredit'\)\) return null;\s*\n\s*return harnessSetting\(session\.backend, 'limitResetCredit'\) \|\| 'off';/.test(eng) && /cooldownUntilSec: blockUntil \? Math\.floor\(blockUntil \/ 1000\) : null,/.test(eng) && /const blockUntil = resetCredit\.rungBlockUntil\(t, \{ now, eventKey, resetsAtSec: R \|\| null, floorMs: RESET_CREDIT_FLOOR_MS, ackMs: RESET_CREDIT_ACK_MS \}\);/.test(eng) && /const RESET_CREDIT_FLOOR_MS = resetCredit\.RESET_CREDIT_FLOOR_MS;/.test(eng) && require(path.join(REPO, 'src/reset-credit.js')).RESET_CREDIT_FLOOR_MS === 10 * 60e3); // lane reset-path: the floor's rule + constant are the PURE module's (armed only by a consume that WENT OUT)
   // round 4: the recovery call also CLASSIFIES itself — a redeemed credit
   // moved the LIMIT, it is not proof this conversation produced anything, so
   // it disarms the wait without clearing the loop breaker (the full table of
   // noteRecovered callers is derived + enforced in test-auto-resume-loop §5)
   // p2 (2.369.157): a PERSON's failed attempt is reported (a notice) and returns BEFORE the ladder — the window grew by that branch
   // r2: the switch/wait rungs after a credit are ONE function (walkLadderAfterCredit) the attempt's own conversation AND its followers walk
-  ok('a successful reset recovers in place (disarm yes, breaker no); a failed one falls through the ladder', /out === 'reset'[\s\S]{0,1200}noteRecovered\?\.\(session\._webuiId, 'codex reset credit consumed', \{ worked: false \}\)[\s\S]{0,4000}codex-reset-credit-failed[\s\S]{0,3500}walkLadderAfterCredit\(session, /.test(eng) && /function walkLadderAfterCredit\(s, [^\n]*\n\s*maybePoolAutoSwitch\(s\);\s*\n\s*try \{ noteWallSignal\(s, /.test(eng));
-  ok('…unless it was a PERSON\'s attempt (the manual button): reported by name, never walked down the switch/wait ladder', /const userAttempt = session\._resetCreditOrigin === 'user';\s*\n\s*session\._resetCreditOrigin = null;/.test(eng) && /if \(userAttempt\) \{\s*\n\s*serverNotice\([^\n]*Reset credit not used on[^\n]*\n\s*return;\s*\n\s*\}\s*\n\s*if \(alreadyWalked\) return;[^\n]*\n\s*walkLadderAfterCredit\(session, /.test(eng));
+  // lane reset-path: the answer is handled by ONE function (handleResetCreditResult) the wrapper's record AND the helper's answer reach
+  // verify r3: the window grew again by the unknown-outcome words (a vendor word outside the measured enum, said by name)
+  ok('a successful reset recovers in place (disarm yes, breaker no); a failed one falls through the ladder', /out === 'reset'[\s\S]{0,2200}noteRecovered\?\.\(session\._webuiId, 'codex reset credit consumed', \{ worked: false \}\)[\s\S]{0,4000}codex-reset-credit-failed[\s\S]{0,12000}walkLadderAfterCredit\(session, /.test(eng) && /function walkLadderAfterCredit\(s, [^\n]*\n\s*maybePoolAutoSwitch\(s\);\s*\n\s*try \{ noteWallSignal\(s, /.test(eng));
+  ok('…unless it was a PERSON\'s attempt (the manual button): reported by name, never walked down the switch/wait ladder', /const userAttempt = session \? \(session\._resetCreditOrigin === 'user' \|\| !!\(tryRec && tryRec\.revivedAt && tryRec\.origin === 'user'\)\) : !!\(tryRec && tryRec\.origin === 'user'\);\s*\n\s*if \(session\) session\._resetCreditOrigin = null;/.test(eng) /* lane reset-path verify r10: a revived press is a PERSON's by its record */ && /if \(userAttempt\) \{\s*\n\s*serverNotice\([^\n]*Reset credit not used on[^\n]*\n\s*return;\s*\n\s*\}\s*\n\s*if \(alreadyWalked \|\| !session\) return;[^\n]*\n\s*walkLadderAfterCredit\(session, /.test(eng));
   // the row lives in the codex harness's DECLARED table (src/harness-settings.js) and the schema DERIVES the Codex section from it (2.369.123)
   const { HARNESS_SETTINGS: HS_TABLES, rowOf: hsRowOf } = require(path.join(REPO, 'src/harness-settings.js'));
   const lrc = hsRowOf(HS_TABLES.codex, 'limitResetCredit');
@@ -115,13 +117,14 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
   ok('…and the sidecar reader merges meta.rateLimitResetCredits', /snap\.resetCredits = \{ availableCount:/.test(read('src/usage-routes.js')));
   const um2 = read('src/lib/usage-meter.js');
   ok('the popup shows the stored reset-credit count', /Reset credits'\)\)\}<\/span> \$\{Number\(codex\.resetCredits\.availableCount\)/.test(um2));
-  ok("…and the codex ⟳ is CAPABILITY-gated (quotaRefresh 'session-rpc'), riding a live session's app-server", /backendFeatureCaps\('codex'\)\.quotaRefresh === 'session-rpc'/.test(um2) && /_refreshCodexQuota\(btn\)/.test(um2) && /codex-read-limits', sessionId: live\.webuiId/.test(um2));
+  ok("…and the codex ⟳ is CAPABILITY-gated (quotaRefresh 'session-rpc'), riding a live session's app-server", /backendFeatureCaps\('codex'\)\.quotaRefresh === 'session-rpc'/.test(um2) && /_refreshCodexQuota\(btn\)/.test(um2) && /fetchJson\('\/api\/usage\/codex-refresh'/.test(um2)); // lane reset-path R4: the press is ANSWERED (the route waits for the session's round trip)
   ok('recordCodexQuotaSignal exists: readings write the member cache, exhaustion switches then feeds the WALL MACHINE (2.369.0)', /function recordCodexQuotaSignal[\s\S]{0,14000}maybePoolAutoSwitch\(session\); \/\/ another ChatGPT account[\s\S]{0,800}noteWallSignal/.test(eng)); // window 9000→9500 in 2.369.123: tryResetCredit reads the row through the descriptor (harnessDeclares + harnessSetting), +~80 chars inside the function; →14000/800 in r2 (the credit result's followers + superseded check, the after-switch re-ask)
   ok('…typed exhaustion enum covers the workspace variants (owned by the codex harness since S4)', /usage_limit_reached\|quota_exceeded\|usage_not_included\|workspace_owner_usage_limit_reached\|workspace_member_usage_limit_reached\|workspace_member_credits_depleted/.test(read('src/harnesses/codex-quota.js')) && !/CODEX_EXHAUSTION_RE/.test(eng));
   // r2: …on the member the process HOLDS when it was stamped at spawn (a codex wrapper cannot follow a re-point), else the current member
   ok('…a pool-billed reading lands on the member (the held one, else the CURRENT one), never the pool wrapper', /a\.type === 'pooled'\) key = heldPoolMemberFor\(session, key\) \|\| accounts\.poolCurrentFor\(key, session\._webuiId\)/.test(eng));
   const ss = read('src/server/stdout/codex-events.js'); // S5: the codex-events consumer module
-  ok('the codex stdout pipeline feeds the engine (rate_limits_updated + task_failed + reset_credit_result)', /rate_limits_updated' \|\| msg\.payload\?\.type === 'task_failed' \|\| msg\.payload\?\.type === 'reset_credit_result'\)/.test(ss) && /recordCodexQuotaSignal\?\.\(session, msg\.payload\)/.test(ss));
+  // verify r5: the consumer hands the WHOLE record (msg) — its own `timestamp` is how the engine tells a backlog reading / wall from a live one (record-lateness on the codex feed)
+  ok('the codex stdout pipeline feeds the engine (rate_limits_updated + task_failed + reset_credit_result + reset_credit_sent) with the whole record', /rate_limits_updated' \|\| msg\.payload\?\.type === 'task_failed' \|\| msg\.payload\?\.type === 'reset_credit_result' \|\| msg\.payload\?\.type === 'reset_credit_sent'\)/.test(ss) && /recordCodexQuotaSignal\?\.\(session, msg\.payload, msg\)/.test(ss));
   const w = read('data/bin/codex-chat-wrapper.js');
   ok('the wrapper RELAYS rateLimits to stdout (sidecar was display-only)', /emitTaskEvent\('rate_limits_updated', \{ rateLimits: params\.rateLimits \}\)/.test(w));
   ok('…and forwards the typed codex_error_info on task_failed (it was dropped)', /codexErrorInfo: params\?\.codexErrorInfo \?\? params\?\.codex_error_info/.test(w));
@@ -216,7 +219,8 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
   // land in `sent`), `stubLimits` = the stub wrapper answers codex-read-limits
   // r4: `metaStore` = the lazy session-meta store the engine persists a ledger-derived stamp through; `newEngine()` = a
   // second engine over the SAME world (a server restart: nothing in memory, the inbox and the sessions survive)
-  const world = ({ mode = 'off', otherSpent = false, warm = true, hourCap = 100, credits = 3, engineModule = engMod, sessions: nSess = 1, held = false, clients = 0, realAr = false, metaStore = null } = {}) => {
+  // `keyed` (lane reset-path): every session's wrapper advertises `resetCreditKey` in its sidecar, as the current wrapper does
+  const world = ({ mode = 'off', otherSpent = false, warm = true, hourCap = 100, credits = 3, engineModule = engMod, sessions: nSess = 1, held = false, clients = 0, realAr = false, metaStore = null, keyed = true } = {}) => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-cxrung-'));
     worlds.push(root);
     const prevHome = process.env.CODEX_HOME;
@@ -260,7 +264,9 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
       getUserTodos: () => todos, getSessionMetaStore: () => metaStore,
     };
     const eng = engineModule.create(deps);
-    const newEngine = () => engineModule.create(deps);
+    // the stub wrapper answers the engine that wrote to it last (a restarted engine is a new one)
+    let engRef = eng;
+    const newEngine = () => (engRef = engineModule.create(deps));
     if (realAr) {
       const arMod = require(path.join(REPO, 'src/server/auto-resume.js'));
       const arDir = path.join(root, 'ar'); fs.mkdirSync(arDir, { recursive: true });
@@ -289,8 +295,13 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
       // THE STUB WRAPPER: collects verbs; answers codex-read-limits (a macrotask
       // later, like the real app-server round trip) with `stubLimits()` if set
       s.stubLimits = null;
-      s.pty = { write: (x) => { s.wrote.push(String(x)); if (/"codex-read-limits"/.test(String(x)) && s.stubLimits) setImmediate(() => { try { eng.recordCodexQuotaSignal(s, s.stubLimits()); } catch { } }); } };
+      // lane reset-path: the CURRENT wrapper says the consume LEFT (`reset_credit_sent`, the moment its
+      // request() wrote it — synchronously here) — the floor and the charge start on it.
+      // `s.stubSends = false` models a wrapper that takes the verb and never says so (an old / hung one)
+      s.stubSends = true;
+      s.pty = { write: (x) => { s.wrote.push(String(x)); if (/"codex-reset-credit"/.test(String(x)) && s.stubSends) { try { engRef.recordCodexQuotaSignal(s, { type: 'reset_credit_sent', idempotencyKey: JSON.parse(String(x)).idempotencyKey, attempt: 1 }); } catch { } } if (/"codex-read-limits"/.test(String(x)) && s.stubLimits) setImmediate(() => { try { eng.recordCodexQuotaSignal(s, s.stubLimits()); } catch { } }); } };
       if (realAr) s._autoResume = true;
+      if (keyed) { const bd = path.join(root, 'data', 'session-buffers'); fs.mkdirSync(bd, { recursive: true }); fs.writeFileSync(path.join(bd, s._webuiId + '.json'), JSON.stringify({ caps: { resetCreditKey: true } })); }
       sessions.set(s._webuiId, s);
       return s;
     };
@@ -339,7 +350,7 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
       && Array.isArray(it.i18n.detail) && it.i18n.detail[0].key === 'Starts a new {period} window now, running until {until}.'
       && it.action?.type === 'reset-credit' && it.action.sessionId === 'cx1' && it.action.creditsLeft === 3, JSON.stringify(it));
     ok('R2 …then the switch rung ran: the pool moved to the other member', w.current() === w.B, w.current());
-    ok('R2 …and the wall card names the credits and carries the offer {available, mode, accountKey}', w.cards.length === 1 && /3 stored reset credits available/.test(w.cards[0].text) && JSON.stringify(w.cards[0].resetCredit) === JSON.stringify({ available: 3, mode: 'ask', accountKey: w.A }), JSON.stringify(w.cards));
+    ok('R2 …and the wall card names the credits and carries the offer {available, mode, accountKey, resetsAtSec} (lane reset-path R3: the wall it is about)', w.cards.length === 1 && /3 stored reset credits available/.test(w.cards[0].text) && JSON.stringify(w.cards[0].resetCredit) === JSON.stringify({ available: 3, mode: 'ask', accountKey: w.A, resetsAtSec: w.nowS + 7200 }), JSON.stringify(w.cards));
     // the restatement needs the conversation to STAY on the walled member (after a
     // switch a new wall is a new member's, i.e. a new event): no member can serve
     const w2 = world({ mode: 'ask', otherSpent: true });
@@ -486,7 +497,7 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
     quietly(() => w3.wall());
     quietly(() => w3.eng.recordCodexQuotaSignal(w3.s1, { type: 'reset_credit_result', outcome: 'nothingToReset' }));
     ok('R8s CONTROL: the same failure with NO newer reading walks the ladder (switch + arm) — the leg sees the difference', w3.current() === w3.B && w3.arms.length === 1, `${w3.current() === w3.A ? 'A' : 'B'} ${JSON.stringify(w3.arms)}`);
-    const pre = patchedEngine('noSupersede', [['        if (superseded) {\n', '        if (false) {\n']]);
+    const pre = patchedEngine('noSupersede', [['  if (superseded) {\n', '  if (false) {\n']]); // lane reset-path: the answer handler is a module-level function now (handleResetCreditResult)
     ok('R8s NEGATIVE CONTROL: the patch hit the product source', !!pre);
     if (pre) {
       const wn = world({ mode: 'auto', held: true, engineModule: pre });
@@ -501,7 +512,7 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
       const w = world({ mode: 'auto', hourCap: 1, held, engineModule });
       quietly(() => w.wall());                         // wall 1: consumed on A
       quietly(() => w.wall(w.s1, w.nowS + 9000));      // a NEW event inside the floor: cooldown → the switch rung moves the pool to B
-      const t = w.eng._resetCreditTries.get(w.A); if (t) t.at -= 11 * 60e3; // the floor elapsed (wall-clock seam)
+      const t = w.eng._resetCreditTries.get(w.A); if (t) { t.at -= 11 * 60e3; if (t.sentAt) t.sentAt -= 11 * 60e3; } // the floor elapsed (wall-clock seam — it runs from the SEND since lane reset-path)
       w.s1._codexResetTriedAt = (w.s1._codexResetTriedAt || 0) - 11 * 60e3;
       const l3 = quietly(() => w.wall(w.s1, w.nowS + 12345)); // the SAME wrapper — still A's login (codex cannot hot-switch) — walls again
       return { w, l3 };
@@ -895,15 +906,18 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
     const preRestated = patchedEngine('noRestatedCheck', [['        if (restated) {\n', '        if (false) {\n']]);
     ok('R15 r5 NEGATIVE CONTROL: the patch hit the product source', !!preRestated);
     if (preRestated) for (const hold of [true, false]) { const c = runRestated(hold, preRestated); ok(`R15 r5 NEGATIVE CONTROL ${hold ? 'with the hold' : 'without a hold'}: writing the restated wall moves the pool off the re-opened account at the next evaluation — the leg sees the check`, c.w.current() === c.w.B && c.w.sentWs.length > 0, `${c.w.current() === c.w.A ? 'A' : 'B'} restarts=${c.w.sentWs.length}`); }
-    const pre = patchedEngine('noResetHold', [['        if (tKey && !reRead) holdForResetReading(tKey, session._webuiId);\n        else kickPoolEval();', '        kickPoolEval();']]);
+    const pre = patchedEngine('noResetHold', [['    if (tKey && !reRead) holdForResetReading(tKey, session ? session._webuiId : null);\n    else kickPoolEval();', '    kickPoolEval();']]); // lane reset-path: the answer handler is a module-level function (the helper's answer has no session)
     ok('R15 NEGATIVE CONTROL: the patch hit the product source', !!pre);
     if (pre) { const c = await run(pre); ok('R15 NEGATIVE CONTROL: without the hold the gap moves the pool A→B and restarts its conversations — the leg sees the real order', c.between === c.w.B && c.w.notices.some((n) => /auto-switched to Cx Beta/.test(n)), `${c.between === c.w.A ? 'A' : 'B'}`); }
     // THE WRAPPER emits the re-read BEFORE the answer (the pin), control = the pre-r3 order
     const wr = read('data/bin/codex-chat-wrapper.js');
-    const pin = (txt) => { const b = txt.indexOf("if (msg.type === 'codex-reset-credit') {"); const e = txt.indexOf("if (msg.type === 'review-start') {", b); const br = b >= 0 && e > b ? txt.slice(b, e) : ''; const i = br.indexOf("emitTaskEvent('rate_limits_updated'"), j = br.indexOf("emitTaskEvent('reset_credit_result', { result"); return i > 0 && j > i; };
+    // (lane reset-path verify r8 T0: the block now also pushes the read taken BEFORE the consume — the pin names the POST-reset one, `rl2`)
+    const pin = (txt) => { const b = txt.indexOf("if (msg.type === 'codex-reset-credit') {"); const e = txt.indexOf("if (msg.type === 'review-start') {", b); const br = b >= 0 && e > b ? txt.slice(b, e) : ''; const i = br.indexOf("emitTaskEvent('rate_limits_updated', { rateLimits: rl2"), j = br.indexOf("emitTaskEvent('reset_credit_result', { result"); return i > 0 && j > i; };
     ok('R15 WIRING: the wrapper emits the post-reset rate_limits_updated BEFORE reset_credit_result', pin(wr));
     const b0 = wr.indexOf("if (msg.type === 'codex-reset-credit') {"), e0 = wr.indexOf("if (msg.type === 'review-start') {", b0);
-    const oldOrder = wr.slice(0, b0) + wr.slice(b0, e0).replace("      emitTaskEvent('reset_credit_result', { result: r || null, outcome: r?.outcome || null });\n", '').replace("      try {\n        const r2 = await request('account/rateLimits/read'", "      emitTaskEvent('reset_credit_result', { result: r || null, outcome: r?.outcome || null });\n      try {\n        const r2 = await request('account/rateLimits/read'") + wr.slice(e0);
+    const resultLine = "      emitTaskEvent('reset_credit_result', { result: r || null, outcome: r?.outcome || null, idempotencyKey, attempts });\n"; // the current spelling (lane-codex-0159 added the key + attempts; the r3-era anchor matched nothing and the control's first replace was a no-op)
+    ok('R15 NEGATIVE CONTROL: the result line the control moves is in the wrapper source', wr.slice(b0, e0).includes(resultLine));
+    const oldOrder = wr.slice(0, b0) + wr.slice(b0, e0).replace(resultLine, '').replace("      try {\n        const r2 = await request('account/rateLimits/read'", resultLine + "      try {\n        const r2 = await request('account/rateLimits/read'") + wr.slice(e0);
     ok('R15 NEGATIVE CONTROL: the pin fails on the pre-r3 order (answer first)', oldOrder !== wr && !pin(oldOrder));
     // r4: a FAILED post-reset re-read is SAID ({error, onDemand, afterReset}) — control = the r3 `catch { }`
     const failPin = (txt) => { const b = txt.indexOf("if (msg.type === 'codex-reset-credit') {"); const e = txt.indexOf("if (msg.type === 'review-start') {", b); const br = b >= 0 && e > b ? txt.slice(b, e) : ''; return /catch \(e2\) \{ emitTaskEvent\('rate_limits_updated', \{ error: [^}]*onDemand: true, afterReset: true \}\); \}/.test(br) && /else emitTaskEvent\('rate_limits_updated', \{ error: /.test(br) && !/\} catch \{ \}\n\s*emitTaskEvent\('reset_credit_result'/.test(br); };
@@ -1237,6 +1251,49 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
     const f = copyPath('src/usage-routes.js', 'nocarry');
     writeCopy(f, src.replace(from, ''));
     try { const outN = run(require(f).setupUsage); ok('R20 NEGATIVE CONTROL: without the carry the chip disappears — the leg sees it', !(outN && outN.resetCredits), JSON.stringify(outN && outN.resetCredits)); } finally { /* MUTCP's scratch dir is removed at exit */ }
+  }
+  // (21) lane reset-path — THE AUTO RUNG'S ATTEMPTS ARM THE FLOOR ONLY WHEN THE CONSUME WENT OUT, and it
+  //      tries ONE time per limit event whatever the answer (the floor no longer covers a refusal)
+  {
+    const keyOfW = (w, i) => { const v = w.s1.wrote.filter((x) => /"codex-reset-credit"/.test(x))[i]; try { return JSON.parse(v).idempotencyKey; } catch { return null; } };
+    // (a) a wrapper older than the key: refused locally, never sent — no floor, nothing charged, the conversation marked
+    const wa = world({ mode: 'auto', otherSpent: true });
+    wa.s1.stubSends = false;
+    quietly(() => wa.wall(wa.s1, wa.nowS + 7200));
+    ok('R21a auto at a wall writes the verb once (the pool cannot move: no member serves)', wa.verbs() === 1 && wa.current() === wa.A, `verbs=${wa.verbs()}`);
+    quietly(() => wa.eng.recordCodexQuotaSignal(wa.s1, { type: 'reset_credit_result', error: 'Invalid request: missing field `idempotencyKey`' }));
+    const ta = wa.eng._resetCreditTries.get(wa.A);
+    ok('R21a the stale refusal ends the attempt `refused-stale`, never sent, NO floor, NOTHING charged', ta && ta.outcome === 'refused-stale' && !ta.sentAt && JSON.stringify(wa.charges()) === '{"A":0,"B":0}' && wa.eng.spendGuard.snapshot().holdsOpen === 0, JSON.stringify({ o: ta && ta.outcome, c: wa.charges() }));
+    ok('R21a …and the conversation is marked: its wrapper cannot send a keyed consume', wa.s1._resetCreditStale === true);
+    const la = quietly(() => wa.wall(wa.s1, wa.nowS + 9000));
+    ok('R21a a NEW limit event on the same conversation is refused BY NAME (wrapper-predates-key) — no second verb, no loop', wa.verbs() === 1 && la.some((l) => /kept \(wrapper-predates-key/.test(l)), la.filter((l) => /reset-credit/.test(l)).join(' | ').slice(0, 300));
+    // (b) the vendor's `nothingToReset`: one try per limit EVENT — the restatement is not re-asked, a new event is
+    const wb = world({ mode: 'auto', otherSpent: true });
+    quietly(() => wb.wall(wb.s1, wb.nowS + 7200));
+    quietly(() => wb.eng.recordCodexQuotaSignal(wb.s1, { type: 'reset_credit_result', outcome: 'nothingToReset', idempotencyKey: keyOfW(wb, 0), attempts: 1 }));
+    const tb = wb.eng._resetCreditTries.get(wb.A);
+    ok('R21b `nothingToReset` went out (charged once) and arms NO floor', tb && tb.outcome === 'nothingToReset' && tb.sentAt > 0 && JSON.stringify(wb.charges()) === '{"A":1,"B":0}', JSON.stringify(wb.charges()));
+    quietly(() => wb.wall(wb.s1, wb.nowS + 7200));
+    ok('R21b a RESTATED wall of the same event is not re-asked (one try per limit event)', wb.verbs() === 1, `verbs=${wb.verbs()}`);
+    quietly(() => wb.wall(wb.s1, wb.nowS + 9000));
+    ok('R21b a NEW limit event right after is tried (no ten-minute floor for a request that spent nothing)', wb.verbs() === 2, `verbs=${wb.verbs()}`);
+    // (c) sent and unanswered: it may still land — the floor holds across events
+    const wc = world({ mode: 'auto', otherSpent: true });
+    quietly(() => wc.wall(wc.s1, wc.nowS + 7200));
+    quietly(() => wc.eng.recordCodexQuotaSignal(wc.s1, { type: 'reset_credit_result', error: 'account/rateLimitResetCredit/consume timed out after 30000ms', idempotencyKey: keyOfW(wc, 0), attempts: 2 }));
+    quietly(() => wc.wall(wc.s1, wc.nowS + 9000));
+    ok('R21c a consume sent and unanswered keeps the floor: a NEW event inside it writes no second verb', wc.verbs() === 1 && wc.eng._resetCreditTries.get(wc.A)?.outcome === 'unanswered', `verbs=${wc.verbs()}`);
+    // CONTROL: the stale skip removed — the marked conversation writes a doomed verb at every new event
+    const pre = patchedEngine('noStaleSkip', [['    if (session._resetCreditStale) {\n', '    if (false) {\n']]);
+    ok('R21 NEGATIVE CONTROL: the patch hit the product source', !!pre);
+    if (pre) {
+      const wn = world({ mode: 'auto', otherSpent: true, engineModule: pre });
+      wn.s1.stubSends = false;
+      quietly(() => wn.wall(wn.s1, wn.nowS + 7200));
+      quietly(() => wn.eng.recordCodexQuotaSignal(wn.s1, { type: 'reset_credit_result', error: 'Invalid request: missing field `idempotencyKey`' }));
+      quietly(() => wn.wall(wn.s1, wn.nowS + 9000));
+      ok('R21 NEGATIVE CONTROL: without the stale skip the refused conversation is asked again at the next event — R21a sees the skip', wn.verbs() === 2, `verbs=${wn.verbs()}`);
+    }
   }
   for (const r of worlds) fs.rmSync(r, { recursive: true, force: true });
 }

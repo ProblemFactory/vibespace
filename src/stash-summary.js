@@ -29,7 +29,7 @@ const { CLEARED_TEXT } = require('./record-clear.js');   // PURE: the stored sen
 // not accept it at once (a transient miss on a live pid); it is posted again at the conversation's turn end and on a
 // bounded backoff (src/server/conversation-deliver.js, the retry park). It is listed first: it is on its way, not
 // waiting for a prompt. The fact carries `retrying: {n, nextAt}` beside the items.
-const KIND_ORDER = Object.freeze(['retrying', 'channel-receipt', 'channel', 'channel-reaction', 'job', 'handback', 'window-request', 'notice', 'group', 'peer']);
+const KIND_ORDER = Object.freeze(['retrying', 'channel-receipt', 'channel', 'channel-reaction', 'job', 'handback', 'window-request', 'design-comment', 'notice', 'group', 'peer']);
 /** THE sender name of the reaction digest (lane channel-threads, spec §5.4 — `👍 ×3 on your reply in <conversation>`), spelled
  *  ONCE: the channels engine files under it, this module and the agent's injection read it. The naive-user pass
  *  (2026-09-28): a digest was a "channel message" in the strip — the owner could not tell a reaction from a message —
@@ -48,6 +48,7 @@ function kindOf(e, { job = false } = {}) {
   if (src === 'channel-receipt') return 'channel-receipt';
   if (src === 'channel') return from === REACTION_DIGEST_FROM ? 'channel-reaction' : 'channel';
   if (src === 'window-request') return 'window-request';
+  if (src === 'design-comment') return 'design-comment';   // lane design-core: the USER's own comment on an artboard, waiting because no live chat process could take it
   if (e.kind === 'notification') {
     if (from === 'VibeSpace browser') return 'handback';
     if (from.startsWith('Background Work · ')) return 'job';
@@ -142,6 +143,7 @@ function partWords(item, t) {
     case 'job': return one ? t('a job result') : t('{n} job results', { n });
     case 'handback': return one ? t('a browser handback') : t('{n} browser handbacks', { n });
     case 'window-request': return one ? t('a window request') : t('{n} window requests', { n });
+    case 'design-comment': return one ? t('a design comment') : t('{n} design comments', { n });
     case 'notice': return one ? t('a VibeSpace notice') : t('{n} VibeSpace notices', { n });
     case 'group': {   // lane group-report-card: a group message waiting for the next turn, by its sender
       const name = item.label;
@@ -164,8 +166,12 @@ function partWords(item, t) {
  *  user presses): "starts a turn" when a turn would be billed; "joins the running turn" on the one lane that folds a
  *  notification into the turn already running — the MECHANISM, not a price, because that fold is the wrapper's to
  *  refuse (a review / compact turn, a turn that ends first: the frame then runs as its own billed turn, and the ledger
- *  says so; measured through the real codex consumer). `cost` = that word alone; `held` rides beside the button. */
-function stashSummaryWords(summary, t, { billed = true, inFlight = false, held = 0, reachable = true, now = Date.now(), armed = false } = {}) {
+ *  says so; measured through the real codex consumer). `cost` = that word alone; `held` rides beside the button.
+ *  `midTurn` (B-c198, the owner 2026-10-02): the agent is running a turn. What waits for "your next message" rides the
+ *  next USER turn's injection (UserPromptSubmit) — a message typed into a running turn is folded into it with no such
+ *  hook, so "your next message" was false there (and a long-running agent's turn can last hours): mid-turn the strip
+ *  says the first message you send AFTER this turn ends. */
+function stashSummaryWords(summary, t, { billed = true, inFlight = false, held = 0, reachable = true, now = Date.now(), armed = false, midTurn = false } = {}) {
   if (!summary || !summary.count) return null;
   const n = summary.count;
   // THE RETRYING ONES (lane notify-retry): on their way by themselves — the head says so when they are all there is,
@@ -184,7 +190,9 @@ function stashSummaryWords(summary, t, { billed = true, inFlight = false, held =
   // `reachable: false`), the sentence where it would be; some ⇒ the button stays and the count they are is said.
   const rides = (summary.items || []).filter((i) => i && i.kind === 'group').reduce((a, i) => a + (Number(i.n) || 0), 0);
   const groupOnly = rides > 0 && rides >= n;
-  const ridesWords = rides && !groupOnly ? (rides === 1 ? t('1 group message rides your next message') : t('{n} group messages ride your next message', { n: rides })) : null;
+  const ridesWords = rides && !groupOnly ? (midTurn
+    ? (rides === 1 ? t('1 group message rides your first message after this turn ends') : t('{n} group messages ride your first message after this turn ends', { n: rides }))
+    : (rides === 1 ? t('1 group message rides your next message') : t('{n} group messages ride your next message', { n: rides }))) : null;
   const costWords = billed ? t('starts a turn') : t('joins the running turn');
   return {
     head,
@@ -194,10 +202,10 @@ function stashSummaryWords(summary, t, { billed = true, inFlight = false, held =
     cost: reachable ? costWords : null,
     held: [armed ? t('they will arrive as a message when this turn ends') : null, retryWords, heldWords, ridesWords].filter(Boolean).join(' · ') || null,   // `armed` (R3): the last prompt could not carry them inline
     // no hand-over for this harness: the sentence stands where the button would
-    noButton: reachable ? null : t('they ride your next message'),
+    noButton: reachable ? null : midTurn ? t('this agent is mid-turn — they ride your first message after this turn ends') : t('they ride your next message'),
     title: allRetrying ? t('The agent did not accept this at once; VibeSpace posts it again when its turn ends and on a schedule — Hand over now delivers it this instant')
-      : groupOnly ? t('Group messages reach this agent with your next message — or at once when a member @mentions it')
-      : !reachable ? t('This agent has no live inbox — every waiting notice is delivered with your next message')
+      : groupOnly ? (midTurn ? t('This agent is mid-turn — a message typed into a running turn carries no group message; they reach it with your first message after this turn ends, or at once when a member @mentions it') : t('Group messages reach this agent with your next message — or at once when a member @mentions it'))
+      : !reachable ? (midTurn ? t('This agent has no live inbox and is mid-turn — every waiting notice is delivered with your first message after this turn ends') : t('This agent has no live inbox — every waiting notice is delivered with your next message'))
       : inFlight ? t('A hand-over is on its way')
         : billed ? t('Delivers every waiting notice now, as one message — it starts a billed turn for this agent')
           : t('Delivers every waiting notice now, as one message — it joins the turn already running; if that turn cannot take it, it runs as its own billed turn right after'),

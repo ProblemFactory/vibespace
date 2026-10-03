@@ -66,15 +66,31 @@ const canControl = (job, caller) => isOwner(job, caller) || scopeAllows((job.acc
 const canEdit = (job, caller) => isOwner(job, caller);
 const visibleJobs = (all, caller) => all.filter((j) => canView(j, caller));
 
-// ── vendor-pattern vet (§ban-safety guardrail; friction not proof) ────────
-const VENDOR_PATTERNS = [/api\.anthropic\.com/i, /\.credentials\.json/i, /data\/subs\b/, /CLAUDE_CODE_OAUTH/i, /claude\.ai\/api/i];
+// ── credential-read vet (§ban-safety reminder; friction, not a sandbox) ──────
+// owner decision 2026-10-03 (lane job-vendor-ban verify r3): a job is refused ONLY when its command obviously reads a
+// subscription sign-in — calling any API with your own key is ordinary pay-as-you-go use and runs; the vendor-host, whole-domain
+// and `claude -p`-on-a-timer rules are gone (a text check cannot tell which login a CLI will use, nor stop an agent set on
+// bypassing it). The list: every harness descriptor's credential facts (creds.subsDirName under data/: subs, codex-subs;
+// creds.authFile in its home: .credentials.json, codex's auth.json; creds.spawnEnvVar) — scripts/test-job-model's census reds
+// when a descriptor gains one this list misses — plus the macOS keychain item, OpenCode's own login file, the OAuth token
+// variable and pasted access/refresh tokens.
+const VENDOR_PATTERNS = [/\.credentials\.json/i, /\.claude\/\.cred/i, /data\/subs\b/, /data\/codex-subs\b/, /\.codex\/auth\.json/i, /CODEX_HOME\}?\/auth\.json/, /opencode\/auth\.json/i, Object.assign(/Claude[\s\\"',]{0,6}Code-credentials/i, { word: 'Claude Code-credentials' }), /CLAUDE_SECURESTORAGE_CONFIG_DIR/, /CLAUDE_CODE_OAUTH/i, /sk-ant-oat/i, /sk-ant-ort/i];
+// B-f8c7 (lane job-vendor-ban): THE CENSUS of what a job can RUN — the vet judged spec.cmd's argv/env alone, but a cron's
+// child is `{ ...action.task }` and the CLI's --every/--cron/--at shape carries its command ONLY there: `curl
+// api.anthropic.com` on a timer was created and fired while the same plain task was refused. Every command-bearing piece:
+// cmd WHOLE (argv, env, cwd), the health probe, the secret NAMES pulled in (--env-from), and action.task as a spec of its own.
+function jobCommandParts(spec, depth = 0) {
+  if (!spec || typeof spec !== 'object' || depth > 3) return [];
+  const a = spec.action && typeof spec.action === 'object' ? spec.action : null;
+  return [spec.cmd, spec.health, spec.envFrom, ...(a ? jobCommandParts(a.task, depth + 1) : [])];
+}
+// the refusal names the credential in words (`platform.claude.com`), never the regex that caught it
+const vendorWord = (re) => re.word || re.source.replace(/\(\?!.*$/, '').replace(/\\b|\\/g, '').replace(/\}\?/g, '');
+// one vet, every door: create (agent or owner), start, and _spawn itself (src/jobs.js) — a keep-up restart, a boot replay,
+// a cron fire's child and a record persisted before this census widened are all judged where they would run
 function vetSpec(spec) {
-  const hay = JSON.stringify([spec.cmd && spec.cmd.argv, spec.cmd && spec.cmd.env, spec.health && spec.health.value] || '');
-  for (const re of VENDOR_PATTERNS) {
-    if (re.test(hay)) {
-      return { ok: false, error: `refused: job spec matches a vendor/credential pattern (${re.source}) — background vendor polling is the §ban-safety class that got a subscription banned. Passive capture or an interactive session is the sanctioned path.` };
-    }
-  }
+  const re = VENDOR_PATTERNS.find((r) => r.test(JSON.stringify(jobCommandParts(spec))));
+  if (re) return { ok: false, error: `refused: job spec matches a vendor/credential pattern (${vendorWord(re)}) — the command reads a subscription sign-in, and background use of a subscription login is the §ban-safety class that got a subscription banned. Calling an API with your own key is fine; run anything that needs the sign-in from an interactive session.` };
   return { ok: true };
 }
 
@@ -536,12 +552,25 @@ function heldDigest(pending) {
   return { total, byConversation };
 }
 
+/** B-70f9 ② (design-background-work §9 "Session Properties gains 'Background work': jobs owned by this conversation"):
+ *  the jobs `/api/jobs` lists whose OWNER conversation is `cid`, attention first (the panel's ORDER), then name — each
+ *  `{id, name, kind, state, glyph, words}` with `words` the state as an English t() key. PURE. */
+const STATE_WORDS = Object.freeze({ 'awaiting-user': 'waiting for you', failed: 'failed', unverified: 'unverified', missed: 'missed', up: 'running', starting: 'starting', down: 'stopped', scheduled: 'scheduled', interrupted: 'interrupted', done: 'done' });
+function ownedJobsView(jobs, cid) {
+  if (!cid) return [];
+  return (Array.isArray(jobs) ? jobs : [])
+    .filter((j) => j && j.id && ((j.ownerSession && j.ownerSession.conversationId) || (j.owner && j.owner.conversation && j.owner.conversation.id)) === cid)
+    .map((j) => ({ id: j.id, name: String(j.name || j.id), clearedAt: j.clearedAt || null, kind: j.kind || 'task', state: j.state || 'down', glyph: GLYPH[j.state] || '·', words: STATE_WORDS[j.state] || String(j.state || '') }))
+    .sort((a, b) => ((ORDER[a.state] ?? 9) - (ORDER[b.state] ?? 9)) || a.name.localeCompare(b.name));
+}
+
 module.exports = {
+  ownedJobsView, STATE_WORDS,
   isTerminal, isOwner, canView, canControl, canEdit, visibleJobs,
   validateFilter, filterMatches,
   ONE_SHOT_TERMINAL, ATTENTION_FAILED, ACK_LANES, isOneShot, isTerminalOneShot, terminalAt, ackState, attentionOf, agentReadAcks, archiveVerdict, lastLineOf,
   HELD_KINDS, heldKind, heldDigest, NOTIF_TAIL, notifTailSentence,
-  vetSpec, VENDOR_PATTERNS,
+  vetSpec, jobCommandParts, VENDOR_PATTERNS,
   parseCron, nextFire, validateSchedule, AGENT_MIN_EVERY_MS,
   SUPERVISE, onServiceExit, resolveName,
   renderJobsDigest, renderJobsUpdate, fitDigest, jobLine,

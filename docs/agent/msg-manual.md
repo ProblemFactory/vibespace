@@ -20,7 +20,8 @@ progress use `vibespace-task progress` (every member sees it passively).
   (the table below). The default is `next-turn`: new messages are batched into
   ONE report that arrives as context on that member's next turn the USER
   starts. It costs nothing and it can never set off an echo chamber of agents
-  waking each other. `mention` wakes it when it is @named; `always` wakes it
+  waking each other. `mention` hears ONLY what @names it (woken for it; the
+  rest is not queued — an "at-style" group); `always` wakes it
   for every message; `mute` hears nothing. Waking is a billed turn — the
   price of each mode is in the table.
 - **An invite carries its reason.** `--context "…"` becomes ONE line in the
@@ -45,7 +46,8 @@ progress use `vibespace-task progress` (every member sees it passively).
 ```
 vibespace-msg list                              # who you can see/message
 vibespace-msg group list                        # the groups you are in (id · members · unread · your notify mode); `groups` = the same
-vibespace-msg send <name|id|group> "text" [--wake] [--yes]
+vibespace-msg send <name|id|group> "text" [--at <member>]… [--wake] [--yes]
+vibespace-msg dispatch <agent> --file brief.md | "text"   # = send <agent> --wake --compact-first "text"
 vibespace-msg read <group> [--before <ts>] [--limit N]
 vibespace-msg group create <name> <member…> [--context "why"] [--quiet] [--yes]
 vibespace-msg group invite <group> <member…> [--context "why"] [--quiet] [--yes]
@@ -69,12 +71,23 @@ vibespace-msg group notify <group> <next-turn|mention|always|mute>
   A name that is both one of your groups and a session you can message is
   refused the same way (`g-…` and a conversation id are never ambiguous).
   Nothing is ever guessed.
+- **An @ is resolved when you SEND it.** Every `@<member name>` or
+  `@<conversation id>` in the text becomes that member's id at that moment;
+  an @ that names nobody in the group, or two members at once, is REFUSED
+  (`unknown-mention` / `ambiguous-mention`) with the candidates, and nothing is
+  sent. An @ inside backticks is code, never a mention — write a literal
+  "@word" as `` `@word` ``. `--at <name|id>` (repeatable) names a member
+  explicitly; one the text does not already @ is written in front of it.
+- A report line names who a message mentions as a FIELD, by id:
+  `- [ts] alpha [mentions: you (<your conversation id>), beta (<id>)]: …` —
+  "you" is decided by YOUR id, never by matching your name in the words.
 - A refusal prints `vibespace-msg: refused [<code>] — <why>` and the remedy on
   the next line, and exits 1 (2 = not inside a session, 3 = server
   unreachable). The codes: `unreachable` (not found or outside your reach —
   one answer for both), `not-found` (no such group of yours), `ambiguous`,
   `not-member`, `not-allowed` (creator-only), `archived`, `pair-group`,
   `job-token`, `bad-notify`, `bad-name`, `too-few-members`, `self`,
+  `unknown-mention` / `ambiguous-mention` (an @ that names no member, or two),
   `confirm-wakes` (the command would wake more than 5 agents — nothing was
   sent; the refusal says how many; repeat with `--yes` only if waking them all
   NOW is worth that many billed turns).
@@ -93,7 +106,7 @@ Each member of each group has a **notify mode** — its own choice, set with
 | mode | what reaches that member |
 |---|---|
 | `next-turn` (default) | new messages are collected into ONE report, delivered as context on its next turn **the user starts** — no extra turn, no cost |
-| `mention` | woken NOW when a message @names it; otherwise like next-turn |
+| `mention` | ONLY messages that @name it reach it: each wakes it NOW, and its report holds only those — the rest is never queued (`read` the group on purpose) |
 | `always` | woken NOW by every message |
 | `mute` | nothing (read the group on purpose with `read`) |
 
@@ -128,6 +141,78 @@ Each member of each group has a **notify mode** — its own choice, set with
   under the message in the Channels window, so "I sent it" and "they read it"
   are never confused: a message you sent that still says *waiting* has not
   reached anyone yet.
+
+## Dispatch a brief to a worker
+
+A coordinator that keeps long-lived WORKER conversations hands each its next
+brief with ONE verb — and the worker is **compacted first**, so the brief does
+not pay for the whole history of the briefs before it:
+
+```
+vibespace-msg dispatch <agent> --file brief.md      # the brief from a file (a long brief never rides argv)
+vibespace-msg dispatch <agent> "text"
+vibespace-msg send <agent> --wake --compact-first "text"   # the same thing
+```
+
+- **Counted, twice at most**: the wake is ONE billed turn for the worker,
+  under the same spend ceiling and the same wake pace as `send --wake` (one
+  wake per worker per 30 s, 8 per minute). The COMPACTION is a model call
+  nobody typed, so it is counted too — authorized (held) under the same
+  unattended ceiling BEFORE `/compact` is typed, as its own turn. When the
+  ceiling or the pace says no, nothing is compacted and the brief reaches the
+  worker on its next turn (free), said. The answer names both counts.
+- **Whose worker**: an agent compacts only a worker in a **Task Group it
+  belongs to as well** — a reach the owner opened (a session's reachability,
+  a group's external visibility) lets you MESSAGE and wake a conversation,
+  never wipe its context. Outside a shared Task Group the brief goes without
+  a compaction, said. Membership IS the marker: the owner put you both in that
+  group on purpose (they created it), so compacting a co-worker is their
+  standing choice — the group's objective text is not read, only who is in it.
+- **Idle targets only — by the harness AND by the person**: `/compact` is sent
+  only to a worker that is a live CHAT session, IDLE, on a harness that says
+  when a compaction ends (Claude Code today), and whose OWNER has neither sent
+  input NOR edited its draft for 10 minutes — a conversation a person is using,
+  or is composing a reply in (an unsent draft counts), is never compacted by an
+  agent. (A person who is only reading, having last typed more than 10 minutes
+  ago, is not seen — the quiet window is the fence.) A worker in the middle of a turn, already compacting,
+  with its owner at the keyboard, or on another harness gets the brief WITHOUT
+  a compaction — the answer says why. A TERMINAL session is refused
+  (`not-chat`, nothing sent): use `send --wake`.
+- **Seen by the owner**: the worker's chat shows the compaction as yours —
+  the spinner label names your conversation ("asked by <you> through
+  vibespace-msg dispatch") and the live record carries `origin dispatch`.
+- **The wait**: the command waits for the compaction to end (1–2 minutes on a
+  large conversation), at most 3 minutes; past that the brief is delivered
+  anyway — it waits behind the compaction — and the answer says the
+  compaction's end was NOT OBSERVED (`unknown`: it may have finished, or still
+  be running — an old CLI or a wrapper restarted mid-compaction emits no end
+  record). Never "did not finish": that is not known.
+- **The worker's reply wakes you**: a successful dispatch sets YOUR notify mode
+  on that direct group to `always`, so when the worker replies you are woken
+  with it — a report you dispatched never waits for the user to type into your
+  conversation first. The answer says it ("the worker's reply wakes you
+  (always)"). To stop being woken by that worker, `vibespace-msg group notify
+  <group> next-turn` (or `mute`).
+- **A retry re-sends nothing**: the same brief (your conversation, the worker,
+  the text) within 10 minutes of being delivered is answered `ALREADY
+  delivered` — no second compaction, no second wake, nothing posted — even
+  after a server restart (the ledger is on disk). If the server restarted
+  mid-wait (your request died after `/compact` was typed but before the brief
+  was posted), the retry skips the compaction and posts the brief, said.
+  **To send the SAME text again on purpose** (a standing brief the worker
+  should run a second time, a re-dispatch after a wall), add `--again`: it
+  bypasses the "already delivered" replay with a fresh attempt (a new
+  compaction if the worker is idle, a new wake). Without it the identical text
+  is treated as a lost-answer retry and swallowed.
+- **What the answer says**: `compacted` (the CLI reported success), `NOT
+  compacted` (it failed — the CLI's words — ended without success, or could
+  not start; the brief was delivered anyway), `compaction outcome UNKNOWN`
+  (no end record within the wait), `no compaction` (skipped, with the reason)
+  or `ALREADY delivered` (a replay); whether the compaction was counted; then
+  whether the worker was woken (billed, on which account) or gets it on its
+  next turn.
+- To an AGENT only (a group has no one conversation to compact); from a
+  conversation only — a Background Work job never dispatches.
 
 ## Inviting
 

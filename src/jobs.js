@@ -28,6 +28,9 @@ function writeJsonAtomic(file, obj) {
  *  rule, conversation-deliver `capUnclaimed`). The store may exceed the cap by the claimed count while one is in flight. */
 const NOTIF_STASH_CAP = 30;
 const FLOOR_DROP_WINDOW_MS = 60 * 60 * 1000;   // verify r4: a floor witness from the future is dropped once; a second within this window is re-based (the clock keeps going back)
+/** B-dfb4 (the product decision, notify-retry verify r4): an eviction is SAID to the owner — a For-you notice (origin
+ *  jobs) at most once per conversation per this window; every eviction is still journaled. */
+const DROP_NOTICE_EVERY_MS = 60 * 60 * 1000;
 function capUnclaimedNotifs(q) {
   // the cap counts the UNCLAIMED entries (when every slot is claimed, a newcomer is the only unclaimed one — a
   // cap over the whole store would evict exactly the entry that just arrived); the oldest unclaimed fall off
@@ -115,6 +118,7 @@ class JobManager {
     // THE RETRY PARK'S EVENTS (lane notify-retry, 2026-10-01): a notification the ladder parked (a transient miss on a
     // live pid) is this engine's to book — parked / attempt / delivered / fell — by the job id the park's meta names
     if (typeof deps.onRetry === 'function') { try { deps.onRetry((ev, cid, entry, extra) => this._onRetryEvent(ev, cid, entry, extra)); } catch (e) { deps.log && deps.log('[jobs] retry events unavailable:', e.message); } }
+    this._dropNoticeAt = new Map(); // conversationId → when its last "dropped at the cap" For-you notice was filed (B-dfb4: ≤ 1 per hour)
     this._notifyRate = new Map(); // conversationId → {ts, h} — engine-side floor under the CLI's own throttles; `h` = the text's DIGEST (lane-redact verify r9: the TEXT — a job's name + words — sat here per conversation, pruned only past 500, out of every clear's reach)
     this._floorDrops = new Map(); // conversationId → {at, saidAt}: when its floor witness was last DROPPED for a backward clock (verify r4: the second drop within the hour re-bases instead, said once an hour)
   }
@@ -557,7 +561,7 @@ class JobManager {
         this._deliverTo(sub.conversationId, job, ev, { subscriber: true, text: notifText });
       }
       if (!cid) return; // user-created or lineage-less job — user lanes (inbox/panel) already cover it
-      const eff = M.notifyEffective(job, this.d.groupNotifyFor ? this.d.groupNotifyFor(job) : null, this.d.notifyGlobal ? this.d.notifyGlobal() : true);
+      const eff = M.notifyEffective(this._notifyOverrideOf(job), this.d.groupNotifyFor ? this.d.groupNotifyFor(job) : null, this.d.notifyGlobal ? this.d.notifyGlobal() : true);
       if (!eff.on) { job.lastNotify = { ts: now(), lane: 'off', ok: false, source: eff.source }; this._notifyLogPush(job, { lane: 'off', ok: false, reason: 'auto-notify off (' + eff.source + ')' }); return; }
       this._deliverTo(cid, job, ev, {});
     } catch (e) { this.d.log('[jobs] owner notify failed:', e.message); }
@@ -711,11 +715,30 @@ class JobManager {
     const dropped = capUnclaimedNotifs(q); // per-conversation cap; a may-have-landed copy first, then the oldest UNCLAIMED (a claimed one is being handed over — verify r4)
     const n = dropped.length;
     if (n) this.d.log(`[jobs] ${cid}: ${n} oldest waiting notification(s) fell off the ${NOTIF_STASH_CAP}-entry cap (${dropped.map((e) => `${e.jobId} ${new Date(Number(e.ts) || 0).toISOString()}${e.held && e.held.maybeDelivered ? ' — a may-have-landed copy, gave way first' : ''}`).join('; ')}) — never delivered (channel-jump verify r6: an eviction is said)`);
+    if (n) this._sayDropped(cid, n, dropped);
     this.pendingNotifs.set(cid, q);
     if (stampLast) job.lastNotify = { ts: now(), lane: 'stash', ok: true, reason: reason || null };
     this._notifyLogPush(job, { lane: 'stash', ok: false, reason: reason || 'not reachable', to: String(cid).slice(0, 8) });
     this.d.log(`[jobs] notify → stashed for ${cid} (${reason || 'not reachable'})`);
     try { this.d.onStash?.(cid); } catch { } // the conversation's `stash` session fact (the strip above its composer) follows
+  }
+  /** THE EVICTION IS SAID TO THE OWNER (B-dfb4, 2026-10-01 decision): the journal line above was the only trace — the
+   *  panel shows the 30 still waiting, never the ones that fell off. One For-you notice (origin jobs, kind notice) per
+   *  conversation per DROP_NOTICE_EVERY_MS through the wiring's `noticeDropped`; an eviction inside the window is
+   *  journaled only (the notice already standing says it). verify r1: the window survives a RESTART — this map is in
+   *  memory, so the wiring answers `{recent, at}` from the For-you store's own filing time (a restart inside the hour
+   *  reopened the notice the user had dismissed); a filing the store REFUSES (its 20-open cap) consumes no window (it
+   *  left the conversation unsaid for the rest of the hour) — the next eviction tries again. */
+  _sayDropped(cid, n, dropped) {
+    if (typeof this.d.noticeDropped !== 'function') return false;
+    const at = now();
+    if (at - (this._dropNoticeAt.get(cid) || 0) < DROP_NOTICE_EVERY_MS) return false;
+    const jobs = [...new Set(dropped.map((e) => (e && e.jobName) || (e && e.jobId) || 'job'))].slice(0, 5);
+    try {
+      const r = this.d.noticeDropped({ cid, n, cap: NOTIF_STASH_CAP, jobs, every: DROP_NOTICE_EVERY_MS });
+      this._dropNoticeAt.set(cid, (r && r.recent && Number(r.at)) || at);
+      return !(r && r.recent);
+    } catch (e) { this.d.log(`[jobs] ${cid}: the dropped-notification notice was not filed — ${e && e.message}`); return false; }
   }
   /** explicit per-conversation subscription to a VISIBLE job's notifications
    *  (2.345.0). View access is the route's responsibility; dedupe by
@@ -781,11 +804,20 @@ class JobManager {
   }
   /** honest notify preview for the CREATE response + UI: will the owner
    *  conversation hear back, over which lane, decided by which layer. */
+  /** A cron CHILD runs its parent's schedule, so the parent's `--notify on|off` (or a later `vibespace-job notify <cron>`)
+   *  is the child's switch unless the child has its own (B-644d verify r1: `run … --at … --notify-ok --notify off`
+   *  answered "auto-notify: OFF" while every fire messaged the conversation — the child, built from the spawn-task,
+   *  never carried the override and fell through to the group / global default). */
+  _notifyOverrideOf(job) {
+    if (job.notify === 'on' || job.notify === 'off' || !job.cronParent) return job;
+    const p = this.jobs.get(job.cronParent);
+    return p && (p.notify === 'on' || p.notify === 'off') ? { notify: p.notify } : job;
+  }
   notifyPreview(job) {
     if (!job) return null;
     const cid = job.owner && job.owner.conversation && job.owner.conversation.id;
     if (!cid) return { enabled: false, mode: 'off', reason: 'no conversation lineage recorded for this job (user-created, or the session id was not known yet at creation)' };
-    const eff = M.notifyEffective(job, this.d.groupNotifyFor ? this.d.groupNotifyFor(job) : null, this.d.notifyGlobal ? this.d.notifyGlobal() : true);
+    const eff = M.notifyEffective(this._notifyOverrideOf(job), this.d.groupNotifyFor ? this.d.groupNotifyFor(job) : null, this.d.notifyGlobal ? this.d.notifyGlobal() : true);
     if (!eff.on) return { enabled: false, mode: 'off', source: eff.source, reason: `auto-notify is OFF at the ${eff.source} level` };
     const reachable = this.d.peerReachable ? this.d.peerReachable(cid) : false;
     return {
@@ -909,7 +941,24 @@ class JobManager {
   }
 
   // ── spawn ───────────────────────────────────────────────────────────────
+  // B-f8c7 (lane job-vendor-ban): THE ONE VET judges every RUN, not only the create — this is the one place a job's command
+  // starts (a keep-up restart, a boot replay, a `start`, a cron fire's child built from action.task, a record persisted
+  // before the census widened). A refused run never starts; the record — and a cron child's parent, else the timer re-fires
+  // every tick — parks (failed, desiredUp off) and says why.
+  _refuseRun(job, vet, trigger) {
+    const parent = job.cronParent ? this.jobs.get(job.cronParent) : null;
+    for (const j of parent ? [job, parent] : [job]) {
+      j.state = 'failed'; j.desiredUp = false;
+      if (j.kind === 'cron') j.nextFireAt = null;
+      if (j.kind === 'service') this._teardownPublish(j);
+      this._touch(j, { what: `refused to run (${trigger}): ${vet.error}` });
+    }
+    this.d.log(`[jobs] ${job.id} refused to run (${trigger}) — vendor/credential pattern`);
+    this._save();
+  }
   _spawn(job, trigger) {
+    const vet = M.vetSpec(job);
+    if (!vet.ok) { this._refuseRun(job, vet, trigger); throw new Error(vet.error); }
     const runTs = now();
     const ctl = this._ctlDir(job, runTs);
     fs.mkdirSync(ctl, { recursive: true });
@@ -1028,6 +1077,8 @@ class JobManager {
   }
   _finalizeRun(job, run, exit, why) {
     run.endedAt = exit.endedAt || now();
+    // lane jobs-browser (B-dbc1): the run is over — what it held as its conversation (its browser lease + window) is released
+    try { this.d.onRunEnded?.(job, run); } catch { }
     run.exit = exit.code;
     const untilHit = job._untilHit;
     run.cause = untilHit ? 'ok(until-output)' : exit.signal === 'SIGKILL' && why === 'oom' ? 'oom'
@@ -1286,11 +1337,15 @@ class JobManager {
     if (this.readOnly) return { error: 'registry is read-only in this process' };
     job.desiredUp = true;
     job.supervise = { consecutiveFails: 0, parkedAt: null };
-    if (job.kind === 'cron') { job.state = 'scheduled'; job.nextFireAt = M.nextFire(job.schedule, now()); this._touch(job); this._save(); return { ok: true }; }
+    if (job.kind === 'cron') {
+      const vet = M.vetSpec(job); // B-f8c7: a cron spawns only at its next fire — reviving one the vet refuses answers NOW
+      if (!vet.ok) { this._refuseRun(job, vet, 'manual'); return { error: vet.error }; }
+      job.state = 'scheduled'; job.nextFireAt = M.nextFire(job.schedule, now()); this._touch(job); this._save(); return { ok: true }; }
     // a refusal names the job by ID (lane-redact verify r7): the panel toasts it and the device's toast history (the For-you
     // Notifications tab) keeps every toast — `<name> is already running` outlived the job's "Clear content…" there
-    if (['up', 'starting'].includes(job.state)) return { error: `${job.id} is already running` };
-    this._spawn(job, 'manual'); this._save();
+    if (['up', 'starting'].includes(job.state)) return { error: `${job.id} is already running` }; // a live process is never re-judged into 'failed'
+    try { this._spawn(job, 'manual'); } catch (e) { return { error: e.message }; } // B-f8c7: the run-time vet's refusal is an answer
+    this._save();
     return { ok: true };
   }
   rm(job, { stop, orphan } = {}) {
@@ -1374,7 +1429,9 @@ class JobManager {
       // re-inspect what they registered) — env VALUES stay out (names only)
       cmd: job.cmd ? { argv: job.cmd.argv, cwd: job.cmd.cwd || null, envKeys: Object.keys(job.cmd.env || {}) } : null,
       envFrom: job.envFrom || [], restart: job.restart || null, timeoutMs: job.timeoutMs || null,
-      untilOutput: job.untilOutput || null, notifyUser: !!job.notifyUser, notifyOk: !!job.notifyOk,
+      // B-644d: a cron PARENT's fires run its embedded spawn-task, whose notifyOk the child inherits — the parent's own
+      // field is never read (`vibespace-job run --at … --notify-ok` showed notifyOk=false for fires that notify)
+      untilOutput: job.untilOutput || null, notifyUser: !!job.notifyUser, notifyOk: !!job.notifyOk || !!(job.action && job.action.type === 'spawn-task' && job.action.task && job.action.task.notifyOk),
       catchUp: job.catchUp || null, stopWithOwner: !!job.stopWithOwner, singleInstance: job.singleInstance !== false,
       run: run ? { startedAt: run.startedAt, endedAt: run.endedAt || null, exit: run.exit ?? null, cause: run.cause || null, trigger: run.trigger, lastLine: run.lastLine || '' } : null,
       runsCount: (job.runs || []).length,

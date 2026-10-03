@@ -96,7 +96,7 @@ const VIEWER_CONTROL_TYPES = Object.freeze(['takeover', 'handback', 'confirm', '
 /** lane S4 (naive study 2): the VIEW verbs — `fit` {width, height, dpr, visible, force} = this viewer's pane (the bridge
  *  sizes the page to the ruling pane, src/browser-fit.js), `refresh` = "I have no picture of this page — send a fresh
  *  one". Answered by the bridge, never forwarded; any viewer may send them (a watcher's pane counts too). */
-const VIEWER_VIEW_TYPES = Object.freeze(['fit', 'refresh']);
+const VIEWER_VIEW_TYPES = Object.freeze(['fit', 'refresh', 'watch-tab']); // lane browser-windows (U3): `watch-tab` {targetId|null} = show THIS viewer another tab of the conversation's (null = follow the agent's again) — never the agent's tab moved
 /** CDP's modifier bitmask, the one the stream server expects (measured off
  *  the dashboard's own bundle: alt 1, ctrl 2, meta 4, shift 8). */
 const KEY_MODIFIERS = Object.freeze({ alt: 1, ctrl: 2, meta: 4, shift: 8 });
@@ -311,6 +311,8 @@ function viewerMessageVerdict(msg, { holder = null, viewerId = null, mode = 'wat
   // BROWSE YOURSELF (B-6ae8, Q6): "Continue here" — a viewer of the user's OWN browsing window takes the controls from the
   // user's other live window (the receiver-initiated pass: one holder always; the bridge allows it on a human relay only)
   if (t === 'claim') return { kind: 'claim', forward: false };
+  // lane browser-windows (U3): a WATCHING viewer's tab chip moves its VIEW, never the agent's tab (the bridge judges whose)
+  if (t === 'watch-tab') { const id = typeof msg.targetId === 'string' && /^[0-9A-Fa-f]{32}$/.test(msg.targetId) ? msg.targetId.toUpperCase() : null; return { kind: 'watch-tab', forward: false, targetId: id }; }
   // lane S4: the view verbs (the bridge sanitizes a `fit` report with src/browser-fit.js fitReport)
   if (t === 'fit') return { kind: 'fit', forward: false };
   if (t === 'refresh') return { kind: 'refresh', forward: false };
@@ -806,7 +808,8 @@ function rowStateOf(b) {
  * THE STRIP'S LIST — PURE over the status answer. Every row:
  *   { ref, kind, label, state, driver, isDefault, owners, profileId, helper }
  *   ref     what the view asks the bridge for (`profile=`): a profile id, EPHEMERAL_REF, a child handle
- *   driver  'agent' | 'helper' | 'you' — 'you' while the USER holds the input side (keeper `inputs`)
+ *   driver  'agent' | 'helper' | 'you' — 'you' while the USER holds the input side (keeper `inputs`) | 'other-user' — the
+ *           user drives the window this lease shares (an older browser run's) from ANOTHER conversation's view
  *   owners  how many OTHER conversations hold a lease on the same profile (a count, never a name)
  *   helper  { name, n } for a child row — `name` only when a WITNESS paired it (see bindHelpers)
  * `activity` (ref → true) upgrades a live row to 'running'; `helpers` is the
@@ -829,11 +832,12 @@ function browserListFor(status, { activity = null, helpers = null } = {}) {
   for (const a of Array.isArray(status.attachments) ? status.attachments : []) {
     if (!isObj(a) || typeof a.profileId !== 'string' || !a.profileId) continue;
     const l = leases.find((x) => x.profileId === a.profileId && String(x.browserKey || '') === bk) || null;
-    // owner ruling A (2): a SHARED profile's browser is driven by ONE conversation at a time — another one's agent
-    // ('other', `driverKey` names it) or the user from another conversation's live view ('other-user')
-    const dk = l && isObj(l.driver) && typeof l.driver.browserKey === 'string' ? l.driver.browserKey : null;
-    const other = dk && dk.split('.')[0] !== bk ? (l.driver.by === 'user' ? 'other-user' : 'other') : null;
-    push({ ref: a.profileId, kind: 'attachment', profileId: a.profileId, alias: a.alias || null, label: String(a.label || a.alias || a.profileId), state: stateFor(a.profileId, l ? l.browser : null), driver: other === 'other-user' ? other : (drivenByUser(bk, a.profileId) ? 'you' : (other || 'agent')), driverKey: other ? dk : null, isDefault: !!a.isDefault, owners: l ? Math.max(0, Number(l.others) || 0) : 0, helper: null });
+    // lane browser-windows (U2): each entry is THIS conversation's WINDOW in that browser — its holder is its agent, or you
+    // (driving it from this view), or you from ANOTHER view ('other-user', `driverKey` names it: only a lease still in an
+    // older browser run's shared window has one). No conversation drives another's window any more (the drive claim is gone)
+    const dk = l && isObj(l.driver) && typeof l.driver.browserKey === 'string' && l.driver.by === 'user' ? l.driver.browserKey : null;
+    const other = dk && dk.split('.')[0] !== bk ? 'other-user' : null;
+    push({ ref: a.profileId, kind: 'attachment', profileId: a.profileId, alias: a.alias || null, label: String(a.label || a.alias || a.profileId), state: stateFor(a.profileId, l ? l.browser : null), driver: other || (drivenByUser(bk, a.profileId) ? 'you' : 'agent'), driverKey: other ? dk : null, isDefault: !!a.isDefault, owners: l ? Math.max(0, Number(l.others) || 0) : 0, helper: null });
   }
   const e = isObj(status.ephemeral) ? status.ephemeral : null;
   if (e && !e.child && String(e.browserKey || '') === bk && typeof e.profileId === 'string') {
@@ -846,7 +850,7 @@ function browserListFor(status, { activity = null, helpers = null } = {}) {
   for (const c of kids) {
     const h = String(c.handle);
     const b = isObj(c.browser) ? c.browser : null;
-    push({ ref: h, kind: 'child', profileId: b && typeof b.profileId === 'string' ? b.profileId : null, alias: null, label: null, state: stateFor(h, b), driver: drivenByUser(h, null) ? 'you' : 'helper', isDefault: false, owners: 0, helper: { name: names[h] || null, n: childN(h) } });
+    push({ ref: h, kind: 'child', profileId: b && typeof b.profileId === 'string' ? b.profileId : null, alias: null, label: null, state: stateFor(h, b), driver: drivenByUser(h, null) ? 'you' : 'helper', isDefault: false, owners: 0, helper: c.job ? { name: (isObj(status.jobNames) && typeof status.jobNames[h] === 'string' ? status.jobNames[h] : null), n: childN(h), job: true } : { name: names[h] || null, n: childN(h) } });
   }
   return rows;
 }

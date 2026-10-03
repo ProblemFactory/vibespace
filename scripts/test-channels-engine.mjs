@@ -1317,7 +1317,7 @@ console.log('⑪ R4 access and notification (two operations), compose, search');
   // CONTROL: a copy that keeps the watcher when its access goes
   {
     const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
-    const LINE = '      watchers = cur.watchers.filter((w) => granted.has(pkOf(w.principal)));';
+    const LINE = '      watchers = cur.watchers.filter((w) => F.eligibleFor(keep, w.principal));';   // lane channel-agent-watch: the one eligibility rule (access here or above)
     const keep = esrc.replace(LINE, '      watchers = cur.watchers;');
     ok(keep !== esrc && esrc.split(LINE).length === 2, 'CONTROL setup: a copy whose access removal keeps the watcher is reconstructed from the shipped bytes');
     const cp = patchPath('src/server', 'channels-engine'); writeCopy(cp, keep);
@@ -1887,9 +1887,10 @@ const esrc2 = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 
     const sb = await sameBootSurvives(ENG, 'r4-resv-sameboot');
     ok(sb.before === 1 && sb.releasedN === 0 && sb.after === 1, `a reservation from THIS boot (an in-flight wake) survives a release sweep (${sb.after} of ${sb.before}, released ${sb.releasedN})`, JSON.stringify(sb));
     {
-      const LINE = 'w.stats.wakes = w.stats.wakes.filter((r) => !(r && r.reserved === true && r.bootId !== BOOT_ID));';
+      // lane everyone-principal: the sweep walks every ledger of a watcher (its own + an All row's per-conversation ones)
+      const LINE = 'l.wakes = l.wakes.filter((r) => !(r && r.reserved === true && r.bootId !== BOOT_ID));';
       ok(esrc2.split(LINE).length === 2, 'the boot-scoped release line is present once (the control patches exactly it)');
-      const cp = patchPath('src/server', 'channels-engine'); writeCopy(cp, esrc2.replace(LINE, 'w.stats.wakes = w.stats.wakes.filter((r) => !(r && r.reserved === true));'));
+      const cp = patchPath('src/server', 'channels-engine'); writeCopy(cp, esrc2.replace(LINE, 'l.wakes = l.wakes.filter((r) => !(r && r.reserved === true));'));
       const sbc = await sameBootSurvives(require(cp), 'r4-resv-sameboot-ctl');
       ok(sbc.releasedN === 1 && sbc.after === 0, `CONTROL: a copy that releases EVERY reservation drops the in-flight one too (released ${sbc.releasedN}, ${sbc.after} left) — the same-boot leg would go red`);
     }
@@ -4222,7 +4223,7 @@ async function stashRevokeRun(EM, DM, tag, { revoke = true } = {}) {
   ok(noGate.read === 'not-found' && noGate.leaks(noGate.injected) && /launch code is 0417/.test(noGate.injected), 'CONTROL: a ladder that never asks the gate hands the revoked agent the message text, the title and the vendor id (the reproduction) — the asserts above would be red', JSON.stringify(noGate.injected).slice(0, 300));
   const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
   const aboutSites = esrc.match(/, about: stashAbout\(/g) || [];
-  ok(aboutSites.length === 4, `CONTROL setup: the four channel producers file \`about\` (${aboutSites.length})`);
+  ok(aboutSites.length === 5, `CONTROL setup: the five channel producers file \`about\` (${aboutSites.length}) — lane channel-agent-watch added the next-turn notification`);
   const noAbout = await stashRevokeRun(MUTE.load('src/server/channels-engine.js', esrc.replace(/, about: stashAbout\(\{[^)]*\}\)/g, ''), 'no-about'), DLV, 'noabout');
   ok(noAbout.leaks(noAbout.injected), 'CONTROL: producers that file no `about` leave the gate nothing to judge — the revoked agent reads it all', JSON.stringify(noAbout.injected).slice(0, 300));
   // THE CENSUS: every stashFor producer in the engine files `about`
@@ -4451,6 +4452,8 @@ console.log('\n㉑ verify r3 (money/memory): the per-account memories — the ce
     feedSeen: 'the message ids the change feed saw — FEED_SEEN_MAX (20 000) / 2 h, trimmed after every page (channel-feed trimSeen)',
     feedGroups: 'the groups the feed found before discovery listed them — ≤ 200, cleared by a complete discovery walk',
     feedUnlisted: 'verify r1: the chats a complete listing did not list — FEED_UNLISTED_MAX (500), oldest first; each for one cold cycle',
+    feedMissing: 'lane lark-threads (A4): the feed hits behind an owed chat read — FEED_MISSING_MAX (500), oldest first; each leaves when its read found it or its by-id read ran',
+    byIdMem: 'lane lark-threads (A4): the by-id answers remembered per message id — FEED_MISSING_MAX (500), oldest first; each for BYID_MEMORY_MS (6 h)',
   };
   const unlisted = [...names].filter((x) => !TABLE[x]);
   ok(lit.length > 0 && names.size >= 9 && !unlisted.length, `(a) the census: every per-account Map / Set on the live entry is on the table with its bound (${[...names].sort().join(', ')})${unlisted.length ? ' — UNLISTED: ' + unlisted.join(', ') : ''}`);
@@ -5779,8 +5782,510 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
   ok(leaks.length === 0 && bleak === 0 && !JSON.stringify(eng2.digest()).includes('SNIPPET-LEAK') && sv.counters && Mx.eng.adapterRecords().adapters[0].feed.counters.stripped > 0, 'THE SNIPPET NEVER LEAVES THE ADAPTER: every hit carried one — stripped at the registry (counted), in no store file, no digest, no broadcast', JSON.stringify({ leaks, bleak }));
 }
 
+// ㉓ lane lark-threads (2026-10-01 — the owner's post: "这个帖子应该是有个thread的，但显然你这里没展示出来"): a message
+// read BEFORE anyone answered it in a thread carries no thread id (the vendor names the topic on its root only once it
+// exists), the chat walk stops at its anchor, so the root never headed its topic. Over the REAL engine + store and a
+// scripted Lark-shaped vendor (a separate thread listing, a change feed, the recent-roots page, a by-id read):
+//   (A) root ingested key-less → the vendor grows a topic on it → the timer's RECHECK (rule 22a) widens the root through
+//       the place door → the thread is OWED → the next pass WALKS it → the replies land; the broadcast grows the chip
+//       ("open to load") before the walk; (B) the cadence: no second recheck inside the hour, one after it;
+//   (C) the OWNER's Refresh rechecks at once (rule 22b) — the agent's refresh never does;
+//   (D) a feed hit the chat read did not find is read BY ID: a thread reply → a record + its root patched + its thread
+//       owed (missingFetched); a plain answer → counted + remembered, never asked again (missingOther);
+//   (E) A3: a search hit on a STORED root naming its new topic → the walk → the walk's repeated root patches it;
+//   (F) CONTROL: an engine copy that never hands the drain its recheck rows — the root never heads its topic.
+console.log('\n㉓ lane lark-threads: a thread born after its root was stored');
+{
+  const { makeRecord, makeConversation } = require(path.join(REPO, 'src/channel-record.js'));
+  const Thr = require(path.join(REPO, 'src/channel-thread.js'));
+  const FD = { via: 'search', scope: 'search:message', option: 'search', pageSize: 30, pagesPerPass: 5, perMin: 10, maxWindowSec: 3600, catchUp: null, describes: false, timeUnit: 'ms' };
+  let clock = Date.UTC(2026, 9, 1, 18, 0, 0);
+  const clockFn = () => clock;
+  const mk = () => ({ chat: new Map(), threads: new Map(), topicOf: new Map(), hitThreadIds: true, hidden: new Set(), noReplyHits: false, recentThrow: null, byIdThrow: null, historyThrow: null, forbidden: new Set(), calls: { history: 0, recent: [], thread: [], byId: [], changes: 0 } });
+  const say = (W, conv, id, at, o = {}) => { if (!W.chat.has(conv)) W.chat.set(conv, []); W.chat.get(conv).push({ vendorId: id, at, author: o.author || { id: 'ou_zin', name: 'Zin' }, text: o.text || id }); };
+  const reply = (W, conv, root, id, at) => { const tk = W.topicOf.get(root); const k = `${conv}#${tk}`; if (!W.threads.has(k)) W.threads.set(k, []); W.threads.get(k).push({ vendorId: id, at, root, author: { id: 'ou_ann', name: 'Ann' }, text: id }); };
+  const sorted = (l) => l.slice().sort((a, b) => a.at - b.at || (a.vendorId < b.vendorId ? -1 : 1));
+  function laneMod(kind, W) {
+    const chatRec = (A, conv, m) => makeRecord({ adapterId: A, convId: conv, vendorId: m.vendorId, at: m.at, author: { id: m.author.id, name: m.author.name, isSelf: false, isBot: false }, text: m.text, threadKey: W.topicOf.get(m.vendorId) || null, raw: { msg_type: 'text', chat_id: conv } });
+    const replyRec = (A, conv, m) => makeRecord({ adapterId: A, convId: conv, vendorId: m.vendorId, at: m.at, author: { id: m.author.id, name: m.author.name, isSelf: false, isBot: false }, text: m.text, replyTo: m.root, threadKey: W.topicOf.get(m.root), root: m.root, raw: { msg_type: 'text', chat_id: conv } });
+    const page = (all, anchor, limit, initialMax) => {
+      const list = sorted(all);
+      let idx = 0;
+      if (anchor) { const at = list.findIndex((r) => r.vendorId === anchor); idx = at >= 0 ? at + 1 : 0; } else if (Number(initialMax) > 0) idx = Math.max(0, list.length - Number(initialMax));
+      const pg = list.slice(idx, idx + limit);
+      return { pg, anchor: pg.length ? pg[pg.length - 1].vendorId : anchor, done: idx + limit >= list.length };
+    };
+    return {
+      kind,
+      caps: { receive: 'poll', pollInterval: { hot: 30, cold: 300, floor: 10 }, history: 'page', listConversations: true, sendAs: [], identityMarking: 'none', budget: { unit: 'request', default: 600, settingKey: null, metered: true }, changeFeed: FD, threads: { read: 'vendor', replyInto: false, listing: 'separate' } },
+      create(record, deps) {
+        const A = record.id;
+        const meter = typeof deps.meter === 'function' ? deps.meter : () => {};
+        return {
+          auth: { state: async () => ({ state: 'connected', expiresAt: null, scopes: ['search:message'], why: null }) },
+          async listConversations() { meter(1); return { conversations: [...W.chat.keys()].map((g) => makeConversation({ id: g, vendorId: g, title: g.toUpperCase(), kind: 'group', participants: '', lastAt: null })), cursor: null, complete: true }; },
+          async convCaps() { meter(1); return { read: 'yes', sendAs: [], why: null, threads: { replyInto: false, mode: 'chat', why: null } }; },
+          async history(conv, { anchor = null, limit = 50, initialMax = null } = {}) {
+            meter(1); W.calls.history++;
+            if (W.historyThrow) { const e = W.historyThrow; W.historyThrow = null; throw e; }   // verify r3: the vendor refuses THIS read once (a typed failure of any code)
+            if (W.forbidden.has(conv)) throw new CH.ChannelError('forbidden', 'scripted: the user is not in the chat (230002)', { retryable: false, detail: { code: 230002 } });   // verify r1 (I)
+            const r = page((W.chat.get(conv) || []).filter((m) => !W.hidden.has(m.vendorId)), anchor, limit, initialMax);
+            return { records: r.pg.map((m) => chatRec(A, conv, m)), anchor: r.anchor, reachedAnchor: r.done, complete: r.done };
+          },
+          // the vendor's THREAD listing answers the root too (the dedup absorbs it — and the place door reads it)
+          async threadHistory(conv, key, { anchor = null, limit = 50 } = {}) {
+            meter(1); W.calls.thread.push(`${conv}#${key}`);
+            const root = [...W.topicOf].find(([, k]) => k === key);
+            const rootMsg = root ? (W.chat.get(conv) || []).find((m) => m.vendorId === root[0]) : null;
+            const all = (rootMsg ? [{ ...rootMsg, isRoot: true }] : []).concat(W.threads.get(`${conv}#${key}`) || []);
+            const r = page(all, anchor, limit, null);
+            return { records: r.pg.map((m) => (m.isRoot ? chatRec(A, conv, m) : replyRec(A, conv, m))), anchor: r.anchor, reachedAnchor: r.done, complete: r.done };
+          },
+          async recentRoots(conv, { limit = 50 } = {}) {
+            meter(1); W.calls.recent.push(conv);
+            if (W.recentThrow) { const e = W.recentThrow; W.recentThrow = null; throw e; }   // verify r1 (G): the vendor refuses THIS page once
+            if (W.forbidden.has(conv)) throw new CH.ChannelError('forbidden', 'scripted: the user is not in the chat (230002)', { retryable: false, detail: { code: 230002 } });   // verify r1 (I)
+            const list = sorted((W.chat.get(conv) || []).filter((m) => !W.hidden.has(m.vendorId))).slice(-limit);
+            return { records: list.map((m) => chatRec(A, conv, m)) };
+          },
+          async messageById(conv, { messageId } = {}) {
+            meter(1); W.calls.byId.push(messageId);
+            if (W.byIdThrow) { const e = W.byIdThrow; W.byIdThrow = null; throw e; }   // verify r1 (G): the vendor refuses THIS read once
+            for (const [k, l] of W.threads) { const m = l.find((x) => x.vendorId === messageId); if (m && k.startsWith(`${conv}#`)) return { kind: 'reply', record: replyRec(A, conv, m), rootPatch: { vendorId: m.root, threadKey: W.topicOf.get(m.root) }, threadKey: W.topicOf.get(m.root) }; }
+            if ((W.chat.get(conv) || []).some((m) => m.vendorId === messageId)) return { kind: 'plain', record: null, rootPatch: null, threadKey: null };
+            return { kind: 'absent', record: null, rootPatch: null, threadKey: null };
+          },
+          async changes({ from, to } = {}) {
+            meter(1); W.calls.changes++;
+            const hits = [];
+            for (const [conv, l] of W.chat) for (const m of l) if (m.at >= from && m.at <= to) hits.push({ convId: conv, vendorId: m.vendorId, at: m.at, updatedAt: m.updatedAt || null, threadKey: W.hitThreadIds ? (W.topicOf.get(m.vendorId) || null) : null, isP2p: false, fromId: m.author.id });
+            if (!W.noReplyHits) for (const [k, l] of W.threads) for (const m of l) if (m.at >= from && m.at <= to) hits.push({ convId: k.split('#')[0], vendorId: m.vendorId, at: m.at, updatedAt: null, threadKey: W.hitThreadIds ? k.split('#')[1] : null, isP2p: false, fromId: m.author.id });
+            hits.sort((a, b) => b.at - a.at);
+            return { hits: hits.slice(0, 30), more: false, pageToken: null, total: hits.length };
+          },
+        };
+      },
+    };
+  }
+  const quietL = { log() {}, warn() {}, error() {} };
+  const writeRecL = (dataDir, linkedAt) => {
+    fs.mkdirSync(path.join(dataDir, 'channels'), { recursive: true });
+    fs.writeFileSync(path.join(dataDir, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: [{ id: 'larky', kind: 'larky', label: 'Larky', enabled: true, linkedAt, auth: { tokenEnc: null, expiresAt: null, scopes: ['search:message'] }, lastPass: null, consecutiveFailures: 0, push: { enabled: false, claimedExclusive: 'unknown', state: null, lastEventAt: null, missRate: 0, demotedAt: null, demotedWhy: null }, scan: null }] }, null, 1));
+  };
+  const mkL = (dataDir, W, { EM = ENG } = {}) => {
+    const registry = CH.createChannelRegistry(); registry.register(laneMod('larky', W));
+    const events = [];
+    const eng = EM.create({ dataDir, env: {}, registry, broadcast: (m) => events.push(m), now: clockFn, log: quietL, serverSetting: () => undefined });
+    engines.push(eng);
+    return { eng, events };
+  };
+  const rootOf = (eng, conv, vid) => eng.store.readTail('larky', conv, { limit: 500 }).find((r) => r.vendorId === vid);
+  const enL = (eng, conv) => eng.store.index.snapshot().conversations[`larky/${conv}`];
+  const T0 = clock;
+
+  // ── (A) the owner's post: ingested key-less; the vendor grows a topic on it; the recheck widens, the walk loads
+  const W = mk();
+  say(W, 'oc_gtm', 'om_a', T0 - 3 * 3600e3); say(W, 'oc_gtm', 'om_post', T0 - 2 * 3600e3, { text: 'the post' }); say(W, 'oc_gtm', 'om_b', T0 - 3600e3);
+  const dA = path.join(ROOT, 'lkt-a');
+  writeRecL(dA, T0 - 86400e3);
+  const { eng, events } = mkL(dA, W);
+  await eng.pass('larky');
+  ok(rootOf(eng, 'oc_gtm', 'om_post') && rootOf(eng, 'oc_gtm', 'om_post').threadKey === null && W.calls.recent.length === 0, '(A) setup: the post is ingested with no thread (nobody had answered it in one); the first pass rechecks nothing (the conversation had not been walked when its turn armed)', JSON.stringify(W.calls));
+  // the topic is born ON the stored root, then two replies inside it; later chat messages move the anchor past the post
+  W.topicOf.set('om_post', 'omt_gtm1');
+  clock += 60e3; reply(W, 'oc_gtm', 'om_post', 'om_r1', clock - 30e3); reply(W, 'oc_gtm', 'om_post', 'om_r2', clock - 20e3);
+  say(W, 'oc_gtm', 'om_c', clock - 10e3);
+  W.hitThreadIds = false;   // (A) alone: the search carries no thread ids (the production page) — the recheck must find it
+  const ev0 = events.length;
+  await eng.pass('larky');
+  await eng.settleWakes();
+  const rootA = rootOf(eng, 'oc_gtm', 'om_post');
+  const thrEv = events.slice(ev0).filter((m) => m.threads && m.threads['larky/oc_gtm'] && m.threads['larky/oc_gtm'].omt_gtm1);
+  const owed = enL(eng, 'oc_gtm').threadOwed || {};
+  ok(W.calls.recent.includes('oc_gtm') && rootA.threadKey === 'omt_gtm1' && rootA.text === 'the post', '(A) the TIMER\'s recheck (rule 22a) re-lists the newest page and the place door WIDENS the stored root: it heads omt_gtm1 now (its words untouched)', JSON.stringify({ recent: W.calls.recent, root: rootA.threadKey }));
+  ok(thrEv.length >= 1 && thrEv[0].threads['larky/oc_gtm'].omt_gtm1.root === 'om_post' && thrEv[0].threads['larky/oc_gtm'].omt_gtm1.walked === false && thrEv[0].threads['larky/oc_gtm'].omt_gtm1.separate === true, '(A) ONE `threads` broadcast names the new topic, its root and "not walked yet" — every open window grows the chip in place (no reload)', JSON.stringify(thrEv.map((m) => m.threads)));
+  ok(owed.omt_gtm1 > 0 || W.calls.thread.includes('oc_gtm#omt_gtm1'), '(A) the widened thread is OWED a walk (rule 20 via the timer, exactly as a feed-named key)', JSON.stringify(owed));
+  await eng.pass('larky');
+  await eng.settleWakes();
+  const tail = eng.store.readTail('larky', 'oc_gtm', { limit: 500 });
+  const ix = Thr.threadIndex(tail, { convId: 'oc_gtm' });
+  ok(W.calls.thread.filter((x) => x === 'oc_gtm#omt_gtm1').length === 1 && tail.some((r) => r.vendorId === 'om_r1') && tail.some((r) => r.vendorId === 'om_r2') && Thr.placeKindOf(rootA, ix).kind === 'topic-root' && ix.threads.get('omt_gtm1').count === 2 && !(enL(eng, 'oc_gtm').threadOwed || {}).omt_gtm1, '(A) the next pass WALKS the thread once: both replies land under the root (topic-root, 2 replies), the owed mark is cleared', JSON.stringify({ thread: W.calls.thread, count: ix.threads.get('omt_gtm1') && ix.threads.get('omt_gtm1').count }));
+  const page = eng.messages('larky', 'oc_gtm', { limit: 50 });
+  const pRow = (Array.isArray(page) ? page : []).find((r) => r.vendorId === 'om_post');
+  ok(pRow && pRow.place && pRow.place.thread && pRow.place.thread.isRoot && pRow.place.thread.count === 2, '(A) the window\'s page serves the root with its thread fact (the chip "2 replies")', JSON.stringify(pRow && pRow.place));
+
+  // ── (B) THE CADENCE: no second recheck inside the hour; one after it
+  const r0 = W.calls.recent.length;
+  clock += 120e3; await eng.pass('larky');
+  const rIn = W.calls.recent.length - r0;
+  clock += 3600e3; await eng.pass('larky');
+  const rAfter = W.calls.recent.length - r0 - rIn;
+  ok(rIn === 0 && rAfter === 1, `(B) the cadence (channels.threadRecheckSec, 3600): ${rIn} recheck inside the hour, ${rAfter} after it`, JSON.stringify(W.calls.recent));
+
+  // ── (C) THE OWNER'S PRESS rechecks at once; the agent's refresh never does
+  W.topicOf.set('om_b', 'omt_gtm2');
+  clock += 60e3; reply(W, 'oc_gtm', 'om_b', 'om_r3', clock - 5e3);
+  const r1 = W.calls.recent.length;
+  const own = await eng.refresh('larky', 'oc_gtm');
+  await eng.settleWakes();
+  ok(own.ok && W.calls.recent.length === r1 + 1 && rootOf(eng, 'oc_gtm', 'om_b').threadKey === 'omt_gtm2', '(C) the OWNER\'s Refresh (rule 22b) re-lists the chat at once — a root that grew a thread minutes ago heads it before the answer', JSON.stringify({ own, recent: W.calls.recent.length - r1 }));
+  // the press's floor is the OWNER's previous press (never the timer's recheck): a second press 10 s later re-lists nothing
+  clock += 10e3;
+  const r1b = W.calls.recent.length;
+  await eng.refresh('larky', 'oc_gtm');
+  ok(W.calls.recent.length === r1b, '(C) a second press inside 60 s of the first re-lists nothing (rule 22b\'s floor — the owner\'s own presses)', JSON.stringify(W.calls.recent.length - r1b));
+  clock += 61e3;
+  await eng.refresh('larky', 'oc_gtm');
+  ok(W.calls.recent.length === r1b + 1, '(C) …and past it the press re-lists again, whatever the timer did meanwhile');
+  const acc = await eng.setScopeAssignment('larky', { kind: 'account' }, { principal: { kind: 'agent', id: 'agent-1', name: 'Worker 1' }, mode: 'all', notify: 'wake', dailyWakeCap: 100 });
+  const AGL = { kind: 'agent', id: 'agent-1', name: 'Worker 1', groups: [], msgLevelFor: () => 'none' };
+  clock += 300e3;
+  const r2 = W.calls.recent.length, h2 = W.calls.history;
+  const ag = await eng.agentRefresh(AGL, 'larky', 'oc_gtm');
+  ok(acc.ok && ag && ag.ok !== false && W.calls.history > h2 && W.calls.recent.length === r2, '(C) the AGENT\'s refresh fetches the conversation and never rechecks it (a recheck is a metered call the owner pays for)', JSON.stringify({ acc, ag, recent: W.calls.recent.length - r2 }));
+
+  // ── (D) A HIT THE CHAT READ DID NOT FIND, read BY ID: a reply made on an OLD root the recent page no longer covers
+  const W2 = mk();
+  say(W2, 'oc_old', 'om_ancient', T0 - 5 * 86400e3, { text: 'an old root' });
+  for (let i = 0; i < 60; i++) say(W2, 'oc_old', `om_n${String(i).padStart(2, '0')}`, T0 - 4 * 86400e3 + i * 1000);
+  const dD = path.join(ROOT, 'lkt-d');
+  writeRecL(dD, T0 - 6 * 86400e3);
+  clock = T0 + 10 * 3600e3;
+  const E2 = mkL(dD, W2);
+  await E2.eng.pass('larky');
+  ok(!E2.eng.store.readTail('larky', 'oc_old', { limit: 500 }).some((r) => r.vendorId === 'om_ancient'), '(D) setup: the old root is past the first page — not in the log (the case a recent page cannot cover)');
+  W2.topicOf.set('om_ancient', 'omt_old');
+  W2.hitThreadIds = false;   // the search names the reply's chat, no thread id: the chat read is owed, and cannot find it
+  clock += 31e3; reply(W2, 'oc_old', 'om_ancient', 'om_late', clock - 3e3);
+  say(W2, 'oc_old', 'om_plain', clock - 2e3);
+  await E2.eng.pass('larky');   // the feed page owes the chat read; the read runs (finds om_plain, not om_late)
+  await E2.eng.settleWakes();
+  const afterRead = E2.eng.store.readTail('larky', 'oc_old', { limit: 500 });
+  ok(afterRead.some((r) => r.vendorId === 'om_plain') && !afterRead.some((r) => r.vendorId === 'om_late') && W2.calls.byId.length === 0, '(D) the owed chat read finds the chat message, not the reply (the vendor\'s chat listing never shows a topic\'s reply); nothing is read by id before the read has run', JSON.stringify(W2.calls.byId));
+  clock += 31e3;
+  await E2.eng.pass('larky');   // the next feed page reads the missing hit by id
+  await E2.eng.settleWakes();
+  const lateRec = E2.eng.store.readTail('larky', 'oc_old', { limit: 500 }).find((r) => r.vendorId === 'om_late');
+  const fv = E2.eng.adapterView(E2.eng.adapterRecords().adapters[0]).feed;
+  ok(W2.calls.byId.length === 1 && W2.calls.byId[0] === 'om_late' && lateRec && lateRec.threadKey === 'omt_old' && lateRec.root === 'om_ancient' && fv.counters.missingFetched === 1, '(D) the missing hit is read BY ID once: the thread reply is a record of its chat (its topic + root named), counted missingFetched', JSON.stringify({ byId: W2.calls.byId, rec: lateRec && [lateRec.threadKey, lateRec.root], c: fv.counters }));
+  ok((enL(E2.eng, 'oc_old').threadOwed || {}).omt_old > 0 || W2.calls.thread.includes('oc_old#omt_old'), '(D) …and its thread is owed a walk (the rest of the topic)', JSON.stringify(enL(E2.eng, 'oc_old').threadOwed));
+  // a hit whose by-id answer is NOT a thread reply (a message the chat listing does not show, by its id a plain one):
+  // counted missingOther, remembered — never asked again
+  clock += 31e3;
+  say(W2, 'oc_old', 'om_ghost', clock - 2e3, { text: 'listed nowhere' }); W2.hidden.add('om_ghost');
+  await E2.eng.pass('larky'); await E2.eng.settleWakes();   // the hit owes the read; the read cannot find it
+  for (let i = 0; i < 3; i++) { clock += 31e3; await E2.eng.pass('larky'); await E2.eng.settleWakes(); }
+  const fv2 = E2.eng.adapterView(E2.eng.adapterRecords().adapters[0]).feed;
+  ok(W2.calls.byId.filter((x) => x === 'om_ghost').length === 1 && fv2.counters.missingOther === 1 && !E2.eng.store.readTail('larky', 'oc_old', { limit: 500 }).some((r) => r.vendorId === 'om_ghost'), '(D) a by-id answer that is NOT a thread reply is counted (missingOther), never stored, never asked again across three more passes', JSON.stringify({ byId: W2.calls.byId, c: fv2.counters }));
+  // the counters say it in the account view (A5's sentence reads these)
+  ok(fv.counters && typeof fv.counters.threadHits === 'number' && fv.counters.threadHits === 0 && typeof fv.counters.missingRefused === 'number' && typeof fv.counters.missingOther === 'number', '(D) A5: the account view carries threadHits (0 — this vendor\'s hits carried no thread id), missingFetched / missingRefused / missingOther', JSON.stringify(fv.counters));
+
+  // ── (E) A3: a search hit on a STORED root that names its new topic — the walk runs, its repeated root patches it
+  const W3 = mk();
+  say(W3, 'oc_e', 'om_root', T0 - 3600e3);
+  const dE = path.join(ROOT, 'lkt-e');
+  writeRecL(dE, T0 - 86400e3);
+  clock = T0 + 20 * 3600e3;
+  const E3 = mkL(dE, W3);
+  await E3.eng.pass('larky');
+  // the root's topic is born and the vendor RE-INDEXES the root inside the feed's window (its update instant moves)
+  W3.topicOf.set('om_root', 'omt_e');
+  clock += 31e3;
+  // the scripted search answers hits by CREATION instant: re-date the root inside the window for this leg (the vendor
+  // re-surfacing a stored root — an edit, a re-index); the next pass restores it
+  const rootMsg = W3.chat.get('oc_e')[0]; const keepAt = rootMsg.at; rootMsg.at = clock - 5e3;
+  reply(W3, 'oc_e', 'om_root', 'om_e1', clock - 4e3);
+  W3.hitThreadIds = true;
+  await E3.eng.pass('larky'); await E3.eng.settleWakes();
+  rootMsg.at = keepAt;
+  await E3.eng.pass('larky'); await E3.eng.settleWakes();
+  const rE = rootOf(E3.eng, 'oc_e', 'om_root');
+  const sideE = fs.readFileSync(E3.eng.store.sidePath('larky', 'oc_e'), 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((x) => x.k === 'pl' && x.msg === 'om_root');
+  ok(sideE.length === 1 && sideE[0].src === 'walk' && sideE[0].threadKey === 'omt_e', '(E) verify r1 F6: the side line the walk\'s repeated root wrote names its source (`walk` — it said `history`, the only source the engine ever passed)', JSON.stringify(sideE));
+  ok(W3.calls.thread.includes('oc_e#omt_e') && rE && rE.threadKey === 'omt_e' && E3.eng.store.readTail('larky', 'oc_e', { limit: 50 }).some((r) => r.vendorId === 'om_e1'), '(E) A3: a search hit on the STORED root naming its new topic marks the thread owed (never dropped as "stored"); the walk lands the reply and its repeated root WIDENS the stored copy', JSON.stringify({ thread: W3.calls.thread, root: rE && rE.threadKey }));
+
+  // ── (F) CONTROL: an engine copy that never hands the drain its recheck rows — the root never heads its topic
+  const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const FIXL = ', recheckDue: recheckDueFor(rec) });';
+  ok(esrc.split(FIXL).length === 2, '(F) CONTROL setup: the turn hands rule 22a its rows exactly once');
+  const engCopyL = patchPath('src/server', 'channels-engine');
+  writeCopy(engCopyL, esrc.replace(FIXL, ' });'));
+  const PEL = require(engCopyL);
+  const W4 = mk();
+  say(W4, 'oc_f', 'om_fpost', T0 - 2 * 3600e3);
+  const dF = path.join(ROOT, 'lkt-f');
+  writeRecL(dF, T0 - 86400e3);
+  clock = T0 + 30 * 3600e3;
+  const E4 = mkL(dF, W4, { EM: PEL });
+  await E4.eng.pass('larky');
+  W4.topicOf.set('om_fpost', 'omt_f'); W4.hitThreadIds = false; W4.noReplyHits = true;   // (F) isolates rule 22: the search indexes no reply
+  clock += 60e3; reply(W4, 'oc_f', 'om_fpost', 'om_fr1', clock - 30e3);
+  for (let i = 0; i < 3; i++) { await E4.eng.pass('larky'); await E4.eng.settleWakes(); clock += 3700e3; }
+  ok(W4.calls.recent.length === 0 && rootOf(E4.eng, 'oc_f', 'om_fpost').threadKey === null && !W4.calls.thread.length, '(F) CONTROL: without rule 22a\'s rows the stored root NEVER heads its topic and its replies are never walked (the owner\'s post, reproduced)', JSON.stringify({ recent: W4.calls.recent, thread: W4.calls.thread }));
+
+  // ── (G) verify r1 F1 (the vendor-budget class): a RATE refusal on either NEW call shape is the ACCOUNT's back-off, whoever
+  //        asked — the owner's press recheck used to swallow it (the pass answered ok, the card showed no back-off, the next
+  //        call went out at once); a by-id read's 429 used to leave the hit waiting while the pass went on calling. Now both
+  //        take the pass's failure path (the rate ladder, the vendor's hint, the bucket emptied) exactly as the timer's recheck.
+  {
+    const err429 = () => new CH.ChannelError('rate-limited', 'scripted: request trigger frequency limit (99991400)', { retryable: true, detail: { code: 99991400, status: 429, retryAfterSec: 30 } });
+    const W5 = mk();
+    say(W5, 'oc_g', 'om_a', T0 - 3 * 3600e3); say(W5, 'oc_g', 'om_post', T0 - 2 * 3600e3);
+    const dG = path.join(ROOT, 'lkt-g'); writeRecL(dG, T0 - 86400e3);
+    clock = T0 + 40 * 3600e3;
+    const E5 = mkL(dG, W5);
+    await E5.eng.pass('larky');
+    clock += 60e3; say(W5, 'oc_g', 'om_b', clock - 10e3);
+    W5.recentThrow = err429();
+    const ev5 = E5.events.length;
+    const own = await E5.eng.refresh('larky', 'oc_g');
+    const bo = E5.eng.adapterView(E5.eng.adapterRecords().adapters[0]).backoff;
+    const landed = E5.eng.store.readTail('larky', 'oc_g', { limit: 10 }).some((r) => r.vendorId === 'om_b');
+    const named = E5.events.slice(ev5).some((m) => m.type === 'channels-updated' && Array.isArray(m.changedKeys) && m.changedKeys.includes('larky/oc_g'));
+    ok(own.ok === false && own.code === 'rate-limited' && Number(own.retryAfterSec) > 0 && bo && bo.kind === 'rate' && bo.strikes === 1 && landed && named, '(G) a 429 on the OWNER\'s press recheck is the account\'s: the rate ladder (strike 1, the vendor\'s hint), the owner hears it with the retry instant, the records the fetch landed were broadcast before the answer', JSON.stringify({ own, bo, landed, named }));
+    const W6 = mk();
+    say(W6, 'oc_h', 'om_ancient', T0 - 5 * 86400e3);
+    for (let i = 0; i < 60; i++) say(W6, 'oc_h', `om_h${String(i).padStart(2, '0')}`, T0 - 4 * 86400e3 + i * 1000);
+    const dH = path.join(ROOT, 'lkt-h'); writeRecL(dH, T0 - 6 * 86400e3);
+    clock = T0 + 50 * 3600e3;
+    const E6 = mkL(dH, W6);
+    await E6.eng.pass('larky');
+    W6.topicOf.set('om_ancient', 'omt_h'); W6.hitThreadIds = false;
+    clock += 31e3; reply(W6, 'oc_h', 'om_ancient', 'om_hlate', clock - 3e3); say(W6, 'oc_h', 'om_hplain', clock - 2e3);
+    await E6.eng.pass('larky'); await E6.eng.settleWakes();   // the owed read runs and cannot find the reply
+    clock += 31e3; W6.byIdThrow = err429();
+    const h6 = W6.calls.history;
+    const r6 = await E6.eng.pass('larky'); await E6.eng.settleWakes();
+    const bo6 = E6.eng.adapterView(E6.eng.adapterRecords().adapters[0]).backoff;
+    ok(W6.calls.byId.length === 1 && r6.ok === false && r6.why === 'rate-limited' && bo6 && bo6.kind === 'rate' && W6.calls.history === h6, '(G) a 429 on a by-id read fails the pass the same way (the account backs off; nothing else is sent in that pass)', JSON.stringify({ byId: W6.calls.byId, r6, bo6 }));
+    clock += 31e3;
+    await E6.eng.pass('larky'); await E6.eng.settleWakes();
+    ok(W6.calls.byId.length === 2 && E6.eng.store.readTail('larky', 'oc_h', { limit: 500 }).some((r) => r.vendorId === 'om_hlate'), '(G) …the hit waited (never remembered as an answer): read by id once the back-off ends, the reply lands', JSON.stringify(W6.calls.byId));
+    // ── verify r3 (the 429 class, the judge's 5xx half): a 5xx that carries Retry-After is typed `transport` WITH the hint, and the
+    //    FAILURE ladder waits at least the vendor's hint (never less) — the card names it; the rate ladder is unchanged. Thrown from
+    //    a plain timer read (the owner's press recheck swallows a transport blip by design — only auth / rate leave it, r1 (G))
+    {
+      const W7 = mk();
+      say(W7, 'oc_h7', 'om_ancient', T0 - 5 * 86400e3);
+      const dH7 = path.join(ROOT, 'lkt-h7'); writeRecL(dH7, T0 - 6 * 86400e3);
+      clock = T0 + 70 * 3600e3;
+      const E7 = mkL(dH7, W7);
+      await E7.eng.pass('larky');
+      clock += 31e3; say(W7, 'oc_h7', 'om_new', clock - 2e3);
+      W7.historyThrow = new CH.ChannelError('transport', 'scripted: HTTP 503 (503)', { retryable: true, detail: { status: 503, retryAfterSec: 600 } });
+      const r7 = await E7.eng.pass('larky'); await E7.eng.settleWakes();
+      const bo7 = E7.eng.adapterView(E7.eng.adapterRecords().adapters[0]).backoff;
+      ok(r7.ok === false && r7.why === 'transport' && bo7 && bo7.kind === 'failure' && bo7.retryAfterSec === 600 && bo7.until - clock >= 600e3 && bo7.until - clock <= 901e3, `a 503 with Retry-After: 600 on a chat read ⇒ the failure ladder waits the vendor's 600 s (card: kind failure, retryAfterSec 600, until +${bo7 && Math.round((bo7.until - clock) / 1000)} s — never less than the hint, the ladder's own rung when longer)`);
+      E7.eng.stop();
+    }
+    // CONTROL: the pre-verify engine — the press's catch swallowed everything but a dead token; the by-id read kept calling
+    const SWALLOW = "if (err instanceof ChannelError && (err.code === 'auth-expired' || err.code === 'rate-limited')) throw err; log.warn(`[channels] ${key}: the recheck on the owner's Refresh failed";
+    const BYID = "if (code === 'rate-limited') throw err;";
+    ok(esrc.split(SWALLOW).length === 2 && esrc.split(BYID).length === 2, '(G) CONTROL setup: both rate paths are present once');
+    const engCopyG = patchPath('src/server', 'channels-engine');
+    writeCopy(engCopyG, esrc.replace(SWALLOW, SWALLOW.replace(" || err.code === 'rate-limited'", '')).replace(BYID, ''));
+    const PEG = require(engCopyG);
+    const W7 = mk();
+    say(W7, 'oc_g', 'om_a', T0 - 3 * 3600e3); say(W7, 'oc_g', 'om_post', T0 - 2 * 3600e3);
+    const dG2 = path.join(ROOT, 'lkt-g2'); writeRecL(dG2, T0 - 86400e3);
+    clock = T0 + 60 * 3600e3;
+    const E7 = mkL(dG2, W7, { EM: PEG });
+    await E7.eng.pass('larky');
+    clock += 60e3; say(W7, 'oc_g', 'om_b', clock - 10e3);
+    W7.recentThrow = err429();
+    const own7 = await E7.eng.refresh('larky', 'oc_g');
+    const bo7 = E7.eng.adapterView(E7.eng.adapterRecords().adapters[0]).backoff;
+    ok(own7.ok === true && !bo7, '(G) CONTROL: the pre-verify engine answers the press ok and shows no back-off after the vendor\'s 429 (the account kept calling) — RED under the fix', JSON.stringify({ own7, bo7 }));
+    for (const x of [E5.eng, E6.eng, E7.eng]) x.stop();
+  }
+
+  // ── (H) verify r1 F2 (the event loop): a feed hit waiting for its chat read is NOT asked of the log until that read ran —
+  //        `msgHeld` is a synchronous whole-file scan for a message the log lacks, and the page's own pass used to pay one per
+  //        waiting hit (30 hits ⇒ 30 scans of the log before any read could have landed them)
+  {
+    const W8 = mk();
+    say(W8, 'oc_s', 'om_ancient', T0 - 5 * 86400e3, { text: 'an old root' });
+    for (let i = 0; i < 60; i++) say(W8, 'oc_s', `om_s${String(i).padStart(2, '0')}`, T0 - 4 * 86400e3 + i * 1000, { text: 'x'.repeat(200) });
+    const dS = path.join(ROOT, 'lkt-s'); writeRecL(dS, T0 - 6 * 86400e3);
+    clock = T0 + 70 * 3600e3;
+    const E8 = mkL(dS, W8);
+    await E8.eng.pass('larky');
+    let scans = 0;
+    const realFind = E8.eng.store.findRecord;
+    E8.eng.store.findRecord = (a, c, v) => { scans++; return realFind(a, c, v); };
+    W8.topicOf.set('om_ancient', 'omt_s'); W8.hitThreadIds = false;
+    clock += 31e3;
+    for (let i = 0; i < 30; i++) reply(W8, 'oc_s', 'om_ancient', `om_slate${i}`, clock - 20e3 + i * 10);
+    await E8.eng.pass('larky'); await E8.eng.settleWakes();
+    const first = scans;
+    const perPass = [];
+    for (let p = 0; p < 6; p++) { const s0 = scans; clock += 31e3; await E8.eng.pass('larky'); await E8.eng.settleWakes(); perPass.push(scans - s0); }
+    const landed = E8.eng.store.readTail('larky', 'oc_s', { limit: 500 }).filter((r) => /^om_slate/.test(r.vendorId)).length;
+    ok(first === 0 && perPass.every((n) => n <= 5) && W8.calls.byId.length === 30 && landed === 30, `(H) the page's own pass scans the log for none of the 30 waiting hits (it was 30 — one whole-file scan each); each later pass scans at most the ${5} it reads by id; every reply lands`, JSON.stringify({ first, perPass, byId: W8.calls.byId.length, landed }));
+    // CONTROL: the pre-verify order — the log asked before the gate — pays a scan per waiting hit on the page's own pass
+    const GATE = "      if (!(Number(en.lane && en.lane.walkStartedAt) >= h.observedAt)) continue;   // its chat read has not run since — it waits\n      if (msgHeld(rec.id, h.convId, vid)) { e.feedMissing.delete(vid); continue; }   // the read found it\n";
+    ok(esrc.split(GATE).length === 2, '(H) CONTROL setup: the gate-then-log order is present once');
+    const engCopyH = patchPath('src/server', 'channels-engine');
+    writeCopy(engCopyH, esrc.replace(GATE, "      if (msgHeld(rec.id, h.convId, vid)) { e.feedMissing.delete(vid); continue; }\n      if (!(Number(en.lane && en.lane.walkStartedAt) >= h.observedAt)) continue;\n"));
+    const PEH = require(engCopyH);
+    const W9 = mk();
+    say(W9, 'oc_s', 'om_ancient', T0 - 5 * 86400e3, { text: 'an old root' });
+    for (let i = 0; i < 60; i++) say(W9, 'oc_s', `om_s${String(i).padStart(2, '0')}`, T0 - 4 * 86400e3 + i * 1000, { text: 'x'.repeat(200) });
+    const dS2 = path.join(ROOT, 'lkt-s2'); writeRecL(dS2, T0 - 6 * 86400e3);
+    clock = T0 + 80 * 3600e3;
+    const E9 = mkL(dS2, W9, { EM: PEH });
+    await E9.eng.pass('larky');
+    let scans9 = 0;
+    const realFind9 = E9.eng.store.findRecord;
+    E9.eng.store.findRecord = (a, c, v) => { scans9++; return realFind9(a, c, v); };
+    W9.topicOf.set('om_ancient', 'omt_s'); W9.hitThreadIds = false;
+    clock += 31e3;
+    for (let i = 0; i < 30; i++) reply(W9, 'oc_s', 'om_ancient', `om_slate${i}`, clock - 20e3 + i * 10);
+    await E9.eng.pass('larky'); await E9.eng.settleWakes();
+    ok(scans9 >= 30, `(H) CONTROL: the pre-verify order scans the log ${scans9} times on the page's own pass — RED under the fix`, JSON.stringify({ scans9 }));
+    for (const x of [E8.eng, E9.eng]) x.stop();
+  }
+
+  // ── (I) verify r1 F4 (the budget): a conversation the vendor REFUSES the owner (he was removed from the chat — its read
+  //        answers 403) is not re-listed every hour on top of its own cadence's probes; the recheck returns once a read succeeds
+  {
+    const W10 = mk();
+    say(W10, 'oc_k', 'om_1', T0 - 3600e3); say(W10, 'oc_k', 'om_2', T0 - 1800e3);
+    const dK = path.join(ROOT, 'lkt-k'); writeRecL(dK, T0 - 86400e3);
+    clock = T0 + 90 * 3600e3;
+    const E10 = mkL(dK, W10);
+    await E10.eng.pass('larky');
+    clock += 3700e3; await E10.eng.pass('larky');
+    ok(W10.calls.recent.length === 1, '(I) setup: the chat is rechecked while the owner may read it');
+    W10.forbidden.add('oc_k');
+    const r0 = W10.calls.recent.length;
+    for (let i = 0; i < 4; i++) { clock += 3700e3; await E10.eng.pass('larky'); await E10.eng.settleWakes(); }
+    ok(W10.calls.recent.length === r0 + 1 && (enL(E10.eng, 'oc_k').lane || {}).lastError && enL(E10.eng, 'oc_k').lane.lastError.code === 'forbidden', `(I) after the owner lost access: ONE more recheck at most (the one whose read had not yet failed), none while the row remembers the refusal (${W10.calls.recent.length - r0} over 4 h; it was 4)`, JSON.stringify({ recent: W10.calls.recent, lane: enL(E10.eng, 'oc_k').lane }));
+    W10.forbidden.delete('oc_k');
+    const r1 = W10.calls.recent.length;
+    clock += 3700e3; await E10.eng.pass('larky'); await E10.eng.settleWakes();
+    clock += 3700e3; await E10.eng.pass('larky'); await E10.eng.settleWakes();
+    ok(W10.calls.recent.length >= r1 + 1 && !(enL(E10.eng, 'oc_k').lane || {}).lastError, '(I) …and once a read succeeds again (the refusal cleared) the recheck returns', JSON.stringify({ recent: W10.calls.recent.length - r1 }));
+    E10.eng.stop();
+  }
+  // ── (J) verify r2 ② (the ≤ 5-per-tick by-id gate): the hits still WAITING for a by-id read are SAID — the feed view carries
+  //        `missingWaiting` and the card's sentence names them (30 replies on an ancient root ⇒ 25 waiting after the first
+  //        tick, 0 once every one landed); a 403d chat's waiting hits cost no call and are drained when its read returns
+  {
+    const Caps = require(path.join(REPO, 'src/channel-caps.js'));
+    const W11 = mk();
+    say(W11, 'oc_j', 'om_jancient', T0 - 5 * 86400e3);
+    for (let i = 0; i < 60; i++) say(W11, 'oc_j', `om_j${String(i).padStart(2, '0')}`, T0 - 4 * 86400e3 + i * 1000);
+    const dJ = path.join(ROOT, 'lkt-j'); writeRecL(dJ, T0 - 6 * 86400e3);
+    clock = T0 + 80 * 3600e3;
+    const E11 = mkL(dJ, W11);
+    await E11.eng.pass('larky');
+    W11.topicOf.set('om_jancient', 'omt_j'); W11.hitThreadIds = false;
+    clock += 31e3; for (let i = 0; i < 29; i++) reply(W11, 'oc_j', 'om_jancient', `om_jlate${String(i).padStart(2, '0')}`, clock - 25e3 + i * 100);
+    say(W11, 'oc_j', 'om_jplain', clock - 2e3);
+    await E11.eng.pass('larky'); await E11.eng.settleWakes();   // the owed read runs and cannot list the replies: 30 hits wait (the plain one too — the next tick's cheap check resolves it, no call)
+    const fv0 = E11.eng.adapterView(E11.eng.adapterRecords().adapters[0]).feed;
+    clock += 31e3; await E11.eng.pass('larky'); await E11.eng.settleWakes();   // the first by-id tick: 5 read, 24 wait
+    const fv1 = E11.eng.adapterView(E11.eng.adapterRecords().adapters[0]).feed;
+    const s1 = Caps.feedThreadsText(fv1);
+    ok(fv0.counters.missingWaiting === 30 && fv1.counters.missingWaiting === 24 && fv1.counters.missingFetched === 5 && /24 waiting to be read one by one/.test(s1), `(J) the feed view says how many hits WAIT for a by-id read (${fv0.counters.missingWaiting} before the first tick, ${fv1.counters.missingWaiting} after it) and the card's sentence names them: "${s1}"`, JSON.stringify({ fv0: fv0.counters, fv1: fv1.counters }));
+    for (let t = 0; t < 6; t++) { clock += 31e3; await E11.eng.pass('larky'); await E11.eng.settleWakes(); }
+    const fv2 = E11.eng.adapterView(E11.eng.adapterRecords().adapters[0]).feed;
+    const s2 = Caps.feedThreadsText(fv2);
+    ok(fv2.counters.missingWaiting === 0 && fv2.counters.missingFetched === 29 && !/waiting/.test(s2), `(J) …and once every one landed (29 read by id over 6 ticks) the count is 0 and the clause is gone: "${s2}"`, JSON.stringify(fv2.counters));
+    E11.eng.stop();
+  }
+  for (const x of [eng, E2.eng, E3.eng, E4.eng]) x.stop();
+}
+
+// ㉔ lane lark-threads PART B: WHO IS THIS at the ONE view door — the owner's own name for an author (the VibeSpace 备注:
+// Lark's per-viewer remark is readable by no API) on every read (the window's page, the thread pane's quote, the agent's
+// read), the vendor name kept as the title; an external author; a nameless bot never "app"; the owner-only route
+// (an agent bearer refused by name), the broadcast with the result, a cleared name restores; the card's people grant.
+console.log('\n㉔ lane lark-threads PART B: the owner\'s names for authors, at the one view door');
+{
+  const { makeRecord, makeConversation } = require(path.join(REPO, 'src/channel-record.js'));
+  const B = { recs: [] };
+  const peopleMod = {
+    kind: 'peoply',
+    caps: { receive: 'poll', pollInterval: { hot: 30, cold: 300, floor: 10 }, history: 'page', listConversations: true, sendAs: [], identityMarking: 'none', budget: { unit: 'request', default: 600, settingKey: null, metered: true } },
+    peopleGrant: { scopes: ['contact:contact.base:readonly'], console: true },
+    create(record) {
+      const A = record.id;
+      return {
+        auth: { state: async () => ({ state: 'connected', expiresAt: null, scopes: ['contact:user.base:readonly'], why: null }) },
+        async listConversations() { return { conversations: [makeConversation({ id: 'oc_b', vendorId: 'oc_b', title: 'B', kind: 'group', participants: '', lastAt: null })], cursor: null, complete: true }; },
+        async convCaps() { return { read: 'yes', sendAs: [], why: null }; },
+        async history() { return { records: B.recs.map((m) => makeRecord({ adapterId: A, convId: 'oc_b', ...m })), anchor: 'om_z', reachedAnchor: true, complete: true }; },
+        selfTenant() { return 'tn_own'; },
+      };
+    },
+  };
+  B.recs = [
+    { vendorId: 'om_1', at: Date.UTC(2026, 9, 1, 10), author: { id: 'ou_zin', name: 'Zin', alt: { nickname: 'Susan', department: 'Marketing' } }, text: 'hello', raw: { msg_type: 'text', tenant_key: '1433ddec23579750' } },
+    { vendorId: 'om_2', at: Date.UTC(2026, 9, 1, 11), author: { id: 'ou_col', name: 'Colleague' }, text: 'hi', raw: { msg_type: 'text', tenant_key: 'tn_own' } },
+    { vendorId: 'om_3', at: Date.UTC(2026, 9, 1, 12), author: { id: 'cli_a5ed0d00a', name: 'app', isBot: true }, text: 'bot', replyTo: 'om_1', threadKey: 'om_1', raw: { msg_type: 'text' } },
+    { vendorId: 'om_z', at: Date.UTC(2026, 9, 1, 13), author: { id: 'ou_zin', name: 'Zin', alt: { nickname: 'Susan', department: 'Marketing' } }, text: 'bye', raw: { msg_type: 'text', tenant_key: '1433ddec23579750' } },
+  ];
+  const dB = path.join(ROOT, 'lkt-b');
+  fs.mkdirSync(path.join(dB, 'channels'), { recursive: true });
+  fs.writeFileSync(path.join(dB, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: [{ id: 'peoply', kind: 'peoply', label: 'Peoply', enabled: true, linkedAt: 1, auth: { tokenEnc: null, expiresAt: null, scopes: ['contact:user.base:readonly'] }, lastPass: null, consecutiveFailures: 0, push: { enabled: false, claimedExclusive: 'unknown', state: null, lastEventAt: null, missRate: 0, demotedAt: null, demotedWhy: null }, scan: null }] }, null, 1));
+  const registry = CH.createChannelRegistry(); registry.register(peopleMod);
+  const events = [];
+  const settings = { 'channels.larkNameField': 'department' };
+  const eng = ENG.create({ dataDir: dB, env: {}, registry, broadcast: (m) => events.push(m), log: { log() {}, warn() {}, error() {} }, serverSetting: (k) => settings[k] });
+  engines.push(eng);
+  await eng.pass('peoply');
+  const page = () => eng.messages('peoply', 'oc_b', { limit: 50 });
+  const p0 = page();
+  const z = p0.find((r) => r.vendorId === 'om_1').author, col = p0.find((r) => r.vendorId === 'om_2').author, bot = p0.find((r) => r.vendorId === 'om_3').author;
+  ok(z.display === 'Susan (Marketing)' && z.name === 'Zin' && z.external === true && col.display === 'Colleague' && !col.external && bot.name !== 'app' && /^Bot /.test(bot.display), 'the window\'s page: the vendor\'s way ("Susan (Marketing)"), the vendor name kept as the name; Zin EXTERNAL (her tenant ≠ the account\'s — no call), the colleague not; a nameless bot is never "app" even on an adapter with no read view of its own', JSON.stringify({ z, col, bot }));
+  settings['channels.larkNameField'] = 'none';
+  ok(page().find((r) => r.vendorId === 'om_1').author.display === 'Susan', 'channels.larkNameField none: the nickname alone (read live — no re-ingest)');
+  settings['channels.larkNameField'] = 'department';
+  // THE OWNER'S NAME (the route): an agent bearer refused by name; the owner's PATCH stored, broadcast, applied everywhere
+  routes.setup({ getEngine: () => eng });
+  const call = (method, pth, params, body, headers = {}) => new Promise((resolve) => {
+    const req = { method, url: pth, params, query: {}, body: body || {}, headers };
+    const res = { statusCode: 200, status(c) { this.statusCode = c; return this; }, json(payload) { resolve({ status: this.statusCode, body: payload }); return this; } };
+    const layer = routes.router.stack.find((l) => l.route && l.route.path === pth && l.route.methods[method.toLowerCase()]);
+    if (!layer) return resolve({ status: 0, body: { error: 'no such route' } });
+    Promise.resolve(layer.route.stack[0].handle(req, res, () => {})).catch((e) => resolve({ status: 500, body: { error: String(e && e.message) } }));
+  });
+  const R = '/api/channels/:adapterId/authors/:id';
+  const ag = await call('PATCH', R, { adapterId: 'peoply', id: 'ou_zin' }, { alias: 'Hacked' }, { authorization: 'Bearer vsst_agent-token' });
+  ok(ag.status === 403 && ag.body.code === 'agent-forbidden' && !page().find((r) => r.vendorId === 'om_1').author.alias, 'an AGENT bearer is refused by name (403 agent-forbidden) — a name for an author is the owner\'s', JSON.stringify(ag));
+  const ev0 = events.length;
+  const set = await call('PATCH', R, { adapterId: 'peoply', id: 'ou_zin' }, { alias: '  Susan from GTM‮  ' });
+  const ev = events.slice(ev0).find((m) => m.authors && m.authors.peoply);
+  const p1 = page();
+  ok(set.status === 200 && set.body.alias === 'Susan from GTM' && ev && ev.authors.peoply.ou_zin.alias === 'Susan from GTM' && p1.filter((r) => r.author.id === 'ou_zin').every((r) => r.author.display === 'Susan from GTM' && r.author.alias === 'Susan from GTM' && r.author.name === 'Zin' && r.author.vendorDisplay === 'Susan (Marketing)'), 'the OWNER\'s name: through the name door (trimmed, a bidi control dropped), ONE channels-updated with the result, every record of that author reads it (the vendor name and the vendor\'s way kept beside it)', JSON.stringify({ set: set.body, ev: ev && ev.authors }));
+  const tr = eng.threadRead('peoply', 'oc_b', 'om_3');
+  const q = tr.records && tr.records[0] && tr.records[0].place && tr.records[0].place.quote;
+  ok(!q || q.author === 'Susan from GTM' || tr.code === 'not-a-thread', 'the quote line names the quoted author by the owner\'s name too (the thread index reads viewed records)', JSON.stringify(tr).slice(0, 300));
+  const AGB = { kind: 'agent', id: 'agent-b', name: 'B', groups: [], msgLevelFor: () => 'none' };
+  await eng.setScopeAssignment('peoply', { kind: 'account' }, { principal: { kind: 'agent', id: 'agent-b', name: 'B' }, mode: 'all', notify: 'wake', dailyWakeCap: 10 });
+  const rd = eng.readFor(AGB, 'peoply', 'oc_b', { limit: 10 });
+  const rz = rd && rd.records ? rd.records.find((r) => r.vendorId === 'om_1') : null;
+  ok(rz && rz.author.name === 'Susan from GTM' && rz.author.vendorName === 'Zin' && rz.author.display === 'Susan from GTM', 'the AGENT\'s read names the author by the owner\'s name (it is the owner\'s word; the CLI prints `name`, unchanged) with the vendor name kept as vendorName', JSON.stringify(rz && rz.author));
+  const clr = await call('PATCH', R, { adapterId: 'peoply', id: 'ou_zin' }, { alias: '' });
+  ok(clr.status === 200 && clr.body.alias === null && page().find((r) => r.vendorId === 'om_1').author.display === 'Susan (Marketing)' && !page().find((r) => r.vendorId === 'om_1').author.alias, 'an EMPTY name clears it — the vendor\'s way restores', JSON.stringify(clr.body));
+  const badId = await call('PATCH', R, { adapterId: 'peoply', id: 'x'.repeat(300) }, { alias: 'a' });
+  const noAcc = await call('PATCH', R, { adapterId: 'nope', id: 'ou_zin' }, { alias: 'a' });
+  const noBody = await call('PATCH', R, { adapterId: 'peoply', id: 'ou_zin' }, {});
+  ok(badId.status === 400 && noAcc.status === 404 && noBody.status === 400, 'refusals by name: an over-long author id (400), an unknown account (404), no `alias` (400)', JSON.stringify([badId.body, noAcc.body, noBody.body]));
+  const onDisk = JSON.parse(fs.readFileSync(path.join(dB, 'channels', 'aliases.json'), 'utf-8'));
+  ok(onDisk && onDisk.aliases && onDisk.aliases.peoply && !onDisk.aliases.peoply.ou_zin, 'data/channels/aliases.json is the store (written atomically; a cleared name leaves it)', JSON.stringify(onDisk));
+  // THE CARD: the people grant the sign-in lacks — "One Re-authorize adds: reading people's profiles"
+  const view = eng.adapterView(eng.adapterRecords().adapters[0]);
+  const g = (view.grants || []).find((x) => x.what === 'people');
+  const CC = require(path.join(REPO, 'src/channel-caps.js'));
+  ok(g && JSON.stringify(g.missing) === JSON.stringify(['contact:contact.base:readonly']) && CC.grantsText(view.grants, { vendor: 'Lark' }).text === 'One Re-authorize adds: reading people\'s profiles', 'the account card says it while the sign-in lacks the measured scope: "One Re-authorize adds: reading people\'s profiles" — never a silent refusal per person', JSON.stringify(view.grants));
+  eng.stop();
+}
+
 console.log('\ntree: the patched copies never touch the tree');
-for (const r of copiesCensus(MUTE.files, MUTE.dir, REPO, { minCopies: 27 })) ok(r.pass, 'tree: ' + r.name, r.pass ? undefined : r.detail);
+for (const r of copiesCensus(MUTE.files, MUTE.dir, REPO, { minCopies: 29 })) ok(r.pass, 'tree: ' + r.name, r.pass ? undefined : r.detail);
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

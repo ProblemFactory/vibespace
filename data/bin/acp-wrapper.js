@@ -726,9 +726,11 @@ async function handleInput(msg) {
       // ignore: the result SAYS the steer was unavailable, so the difference is
       // on the wire rather than only in this comment.
       const peerKind = msg.kind === 'notification' ? 'notification' : 'peer';
+      // a CHANNEL notice's conversation (B-c127) — data only, sanitized by the normalizer (src/channel-ref.js refOf)
+      const peerChannel = msg.channel && typeof msg.channel === 'object' ? { adapterId: msg.channel.adapterId == null ? null : String(msg.channel.adapterId), convId: String(msg.channel.convId || ''), name: String(msg.channel.name || ''), account: msg.channel.account == null ? null : String(msg.channel.account), vendor: msg.channel.vendor == null ? null : String(msg.channel.vendor) } : null;
       const body = `Message from ${fromName || 'another session'}:\n${text}`;
       try {
-        record('user', { msgId: '', content: [{ type: 'text', text }], peer: { name: fromName, body: cardText, kind: peerKind } }); // kind = the PATH (S3 verify F3)
+        record('user', { msgId: '', content: [{ type: 'text', text }], peer: { name: fromName, body: cardText, kind: peerKind, ...(peerChannel ? { channel: peerChannel } : {}) } }); // kind = the PATH (S3 verify F3); channel = B-c127
         const queued = !!activePrompt;
         // peerText/peerFrom ride the queue entry so a Stop that drops it can
         // hand the message back to the delivery ladder instead of losing it.

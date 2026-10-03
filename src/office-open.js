@@ -36,8 +36,15 @@
  *     REASON and its install remedy, never hidden
  *   • `installSpecFor(what)` — the CLOSED set of LibreOffice installs (the
  *     module's package + the metric-compatible Calibri / Cambria faces a .docx
- *     lays out with); src/desktop-apps.js `packageInstallPlan` turns one into
- *     the plan the dialog shows before anything runs.
+ *     lays out with; B-04da ②: the faces alone, `libreoffice-fonts`, for a
+ *     machine that has LibreOffice without them); src/desktop-apps.js
+ *     `packageInstallPlan` turns one into the plan the dialog shows before
+ *     anything runs
+ *   • `officeQuitArgv(profileDir)` — B-04da ④: the hand-over that asks a RUNNING
+ *     LibreOffice to quit through its OWN File ▸ Exit (its save prompt, in its
+ *     window), never a signal while a document may hold unsaved edits
+ *   • `startCenterVerdict(...)` — B-04da ⑤: a FILE session whose main window
+ *     became the Start Center (the person closed the document) ends.
  *
  * A machine never trusts the hub and the hub never trusts a request: the route
  * runs `openWithVerdict` with the machine rule before any machine is asked, the
@@ -50,6 +57,20 @@ const OFFICE_EXECS = Object.freeze(['libreoffice', 'soffice']);
 /** Metric-compatible replacements of Office's default faces (Calibri → Carlito, Cambria → Caladea — LibreOffice's own
  *  substitution table maps them): installed with every module so a .docx paginates as it does in Word. */
 const OFFICE_FONT_PACKAGES = Object.freeze(['fonts-crosextra-carlito', 'fonts-crosextra-caladea']);
+/** B-04da ② — the two faces as FACTS a machine probes (src/desktop-display.js officeFacts: a stat of the files each
+ *  distro's package installs — never a spawn): a machine that already HAS LibreOffice but not these lays a .docx out in
+ *  other faces (other line breaks, other page count), so its catalog row says so and offers the faces alone. */
+const OFFICE_FONTS = Object.freeze([
+  Object.freeze({ family: 'Carlito', replaces: 'Calibri', package: 'fonts-crosextra-carlito', files: Object.freeze(['/usr/share/fonts/truetype/crosextra/Carlito-Regular.ttf', '/usr/share/fonts/google-carlito-fonts/Carlito-Regular.ttf', '/usr/share/fonts/TTF/Carlito-Regular.ttf', '/usr/local/share/fonts/Carlito-Regular.ttf']) }),
+  Object.freeze({ family: 'Caladea', replaces: 'Cambria', package: 'fonts-crosextra-caladea', files: Object.freeze(['/usr/share/fonts/truetype/crosextra/Caladea-Regular.ttf', '/usr/share/fonts/google-crosextra-caladea-fonts/Caladea-Regular.ttf', '/usr/share/fonts/TTF/Caladea-Regular.ttf', '/usr/local/share/fonts/Caladea-Regular.ttf']) }),
+]);
+/** The install of the faces ALONE (B-04da ②) — not a catalog row: the remedy a served LibreOffice row carries. */
+const FONTS_ID = 'libreoffice-fonts';
+/** The faces a machine's office facts say are absent (`fonts: {Carlito: bool, …}`; absent / null = not knowable ⇒ none). */
+function fontsMissingOf(office) {
+  const f = office && office.fonts && typeof office.fonts === 'object' ? office.fonts : null;
+  return f ? OFFICE_FONTS.filter((x) => f[x.family] === false).map((x) => x.family) : [];
+}
 /** The three modules. `lib` = the library in LibreOffice's program dir that exists only when the module is installed
  *  (MEASURED 2026-09-27 on this box, LibreOffice 26.2.5.2 from Ubuntu: libreoffice-writer installed ⇒ libswlo.so
  *  present, libsclo.so / libsdlo.so absent — the binary alone says nothing: `libreoffice --calc` without Calc starts
@@ -175,7 +196,9 @@ function openWithVerdict({ row = null, file, ext = null, machine = {} } = {}) {
   if (!m.registry.some((r) => r && r.office)) return refuse('host_needs_daemon', `the VibeSpace agent on ${whereName} predates opening files in LibreOffice — reconnect the machine to upgrade it`, { hostId: where });
   const served = m.registry.find((r) => r && r.id === want.id);
   if (!served || !served.available) return refuse('app-absent', `${want.label} is not installed on ${whereName}${served && served.reason ? ` (${served.reason})` : ''}`, { hostId: where, catalogId: want.id, module: fv.module, remedy: remedyFor(want.id, m.label || null) });
-  return base;
+  // B-04da ②: it opens — and when the machine lacks the Calibri / Cambria look-alikes the verdict says so (the menu offers them)
+  const fontsMissing = Array.isArray(served.fontsMissing) ? served.fontsMissing.slice() : [];
+  return fontsMissing.length ? { ...base, fontsMissing, fontRemedy: remedyFor(FONTS_ID, m.label || null) } : base;
 }
 
 // ── the argv ──
@@ -256,23 +279,63 @@ function officeRowFor(row, office) {
     const have = want ? !!mods[want.module] : MODULE_KEYS.some((k) => mods[k]);
     if (!have) return absent(want ? `${label} is not installed (package ${want.package})` : `no LibreOffice module is installed (${MODULE_KEYS.map((k) => OFFICE_MODULES[k].package).join(', ')})`);
   }
-  return { ...row, exec: o.exec, path: o.path, available: true, reason: null, reasonCode: null, remedy: null, confinement: o.confinement || null };
+  // B-04da ②: LibreOffice is here but the Calibri / Cambria look-alikes are not — the row says which, and the remedy
+  // installs the faces alone (a .docx otherwise paginates in other faces)
+  const fontsMissing = fontsMissingOf(o);
+  return { ...row, exec: o.exec, path: o.path, available: true, reason: null, reasonCode: null, remedy: null, confinement: o.confinement || null, fontsMissing, fontRemedy: fontsMissing.length ? remedyFor(FONTS_ID, null) : null };
 }
 
 // ── installs ──
 /** THE CLOSED SET of LibreOffice installs: each catalog id → its apt packages (the module + the fonts). The generic
  *  row installs the three modules. Anything else ⇒ null (a request never names a package). */
 function installSpecFor(what) {
+  if (what === FONTS_ID) return { what: FONTS_ID, label: 'Carlito / Caladea fonts', packages: OFFICE_FONT_PACKAGES.slice(), verify: 'command -v fc-list' };
   if (what === GENERIC_ID) return { what: GENERIC_ID, label: 'LibreOffice', packages: [...MODULE_KEYS.map((k) => OFFICE_MODULES[k].package), ...OFFICE_FONT_PACKAGES], verify: 'command -v soffice' };
   const k = MODULE_KEYS.find((x) => OFFICE_MODULES[x].id === what);
   if (!k) return null;
   return { what, label: OFFICE_MODULES[k].label, packages: [OFFICE_MODULES[k].package, ...OFFICE_FONT_PACKAGES], verify: 'command -v soffice' };
 }
-const INSTALL_WHATS = Object.freeze(OFFICE_ROW_IDS.slice());
+const INSTALL_WHATS = Object.freeze([...OFFICE_ROW_IDS, FONTS_ID]);
+
+// ── ending a session without losing an edit (B-04da) ──
+/**
+ * B-04da ④ — THE ARGV THAT ASKS A RUNNING LIBREOFFICE TO QUIT (PURE): `<exec> -env:UserInstallation=<the session's
+ * profile> .uno:Quit`. A second LibreOffice started on the SAME profile hands its arguments to the running one over
+ * that profile's pipe and exits (the header's reason for the per-session profile), and a `.uno:` argument is
+ * DISPATCHED there — `.uno:Quit` is File ▸ Exit: every modified document raises LibreOffice's own "Save changes to
+ * document … before closing?" in its window (Save / Don't Save / Cancel), an unmodified one closes and LibreOffice
+ * removes its own lock. MEASURED 2026-10-02 (LibreOffice 26.2.5.2, Xvfb): unmodified ⇒ the hand-over returns in 18 ms
+ * and the app exits 224 ms later, no `.~lock` left; modified ⇒ the prompt shows and the hand-over BLOCKS until it is
+ * answered (Cancel ⇒ the app keeps running, the document still open). Run it ONLY while the session's app is alive: on
+ * a profile nobody runs, the hand-over starts a fresh LibreOffice that quits at once (measured, 131 ms).
+ * null = no absolute profile (nothing to hand over to).
+ */
+function officeQuitArgv(profileDir) {
+  const prof = userInstallationArg(profileDir);
+  return prof ? [prof, '.uno:Quit'] : null;
+}
+/** WM_CLASS of LibreOffice's Start Center (MEASURED 2026-10-02: `"libreoffice", "libreoffice-startcenter"`, title
+ *  "LibreOffice"; a Writer document is `"libreoffice", "libreoffice-writer"`). */
+const START_CENTER_CLASS = 'libreoffice-startcenter';
+/**
+ * B-04da ⑤ — A FILE SESSION WHOSE MAIN WINDOW BECAME THE START CENTER ENDS (PURE). Closing the last document from
+ * inside LibreOffice (File ▸ Close, the menu bar's ✕) leaves its Start Center — a window of an app nobody opened —
+ * where the document was; the window's ✕ (WM_DELETE_WINDOW) on the last document ends LibreOffice outright
+ * (measured). `classInstance` = the main window's xpra `class-instance` ([res_name, res_class]).
+ *   → { end, why: 'not-office'|'no-file'|'document'|'start-center' } — the generic row (no file) keeps its Start Center:
+ *   that IS what it opened.
+ */
+function startCenterVerdict({ office = null, file = null, classInstance = null } = {}) {
+  if (!office) return { end: false, why: 'not-office' };
+  if (!file) return { end: false, why: 'no-file' };
+  const cls = Array.isArray(classInstance) ? classInstance.map((c) => String(c)) : [];
+  return cls.includes(START_CENTER_CLASS) ? { end: true, why: 'start-center' } : { end: false, why: 'document' };
+}
 
 module.exports = {
   OFFICE_EXECS, OFFICE_FONT_PACKAGES, OFFICE_MODULES, MODULE_KEYS, OFFICE_ANY, GENERIC_ID, EXT_MODULE, OFFICE_EXTS, OFFICE_ROWS, OFFICE_ROW_IDS, INSTALL_WHATS,
   PATH_MAX, LABEL_MAX, baseName, extOf, moduleForFile, isOfficeFile, foldAbs, fileLabel, isOfficeModule,
   fileVerdict, hostKey, openWithVerdict, userInstallationArg, officeArgv, officeRowFor, installSpecFor, remedyFor,
   lockFileOf, staleLockVerdict,
+  OFFICE_FONTS, FONTS_ID, fontsMissingOf, officeQuitArgv, START_CENTER_CLASS, startCenterVerdict, // B-04da
 };

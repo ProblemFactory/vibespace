@@ -20,6 +20,7 @@ import { registerCommand, registerKeybinding, runCommand, hasCommand } from './c
 import { LEGACY_QUEUE_VERBS, worktreeLatchWrite } from '../backend-caps.js';
 import { mcpParts, messageKind, foldToggleFor, countKinds, runSummaryLabel, foldPassMode } from './chat-run-summary.js';
 import { assistantNoteOf } from './chat-run-summary.js'; // lane S3: a run's note members say which note they were
+import { turnPreviewOf } from '../assistant-note.js'; // PURE (B-40f8): THE preview of a user turn — the server's turnMap builders read the same rule
 import { collabTrafficStats, collabHeadText, collabRunPart, subAgentStreamLabel } from '../collab-row.js';
 import { TEXT_WINDOW } from '../text-window.js';
 import { attachSlab } from './view-visibility.js'; // perf r1: which slab an attach asks for // PURE: the attach slab's numbers (the rescue's harm bound reads maxRecords)
@@ -328,6 +329,8 @@ class ChatView {
       // broken Update card after toggling). Rebuild what's on screen.
       this._rerenderVisible();
     });
+    // lane peer-card-fold: folded vs whole is a per-card DOM structure too
+    onSetting('chat.foldPeerMessages', () => this._rerenderVisible());
 
     // Apply font size from global settings (scale message list relative to base 14px)
     const BASE_FONT = 14;
@@ -360,8 +363,11 @@ class ChatView {
       // one-click Terminate+Resume from the style menu (owner UX 2.369.8)
       onRestartSession: readOnly ? null : () => this.app?.restartConversationInPlace?.({ webuiId: this.sessionId }),
       // Design chip (2.366.0): a brief → a design request the agent fulfils
-      // with the design kit and publishes to THIS VibeSpace (view-only windows: none)
+      // in the Design window (vibespace-design) and publishes to THIS VibeSpace (view-only windows: none)
       onDesignRequest: readOnly ? null : (brief, opts) => this._sendDesignRequest(brief, opts), // false = refused (the dropdown keeps the brief)
+      // lane design-window: a design of this session → the Design window (comments go to THIS live session) / its publish dialog
+      onOpenDesign: (d) => this.app.openDesign({ host: d.host || '', dir: d.dir, sessionId: this.sessionId }),
+      onPublishDesign: (d) => this.app.publishDesign({ host: d.host || '', dir: d.dir, title: d.title || '' }),
       // Running-workflow chips: click → live detail window; poll needs ids
       onOpenWorkflow: (runId, name) => {
         const ids = this._getSessionIds();
@@ -444,6 +450,9 @@ class ChatView {
     // branch closed the very run a click had just opened). Keyed by member
     // element like _runExpanded, because run records are rebuilt every pass.
     this._runStickyOpen = new WeakSet();
+    // lane peer-card-fold: which peer cards the user opened (Show), keyed by MESSAGE ID — the renderer reads it on
+    // every build, so a live patch / a fold pass / a reconnect rebuild / a trim keep a card open (never element-keyed)
+    this._peerOpen = new Set();
     // Live re-fold on toggle — the observer only fires on list mutations, so
     // a settings change used to take effect on the NEXT message only.
     onSetting('chat.collapseRuns', () => this._updateRuns());
@@ -489,6 +498,7 @@ class ChatView {
       getQueueCaps: () => this._queueCaps(),
       // live sub-agent traffic (2026-09-07): only the view knows whether a
       // collab card is still the one the next row lands in on a live turn
+      peerFold: { isOpen: (id) => this._peerOpen.has(id), set: (id, open, el) => this._setPeerOpen(id, open, el) },
       isCollabLive: (msg) => this._noteCollabHeadPainted(msg?.id, this._liveCollabId() === msg?.id),
       // SendUserFile links (owner ruling 8(c)): toolCallId → the rows the
       // server published for that call. Filled by the live broadcast AND by
@@ -942,7 +952,14 @@ class ChatView {
     // Chat input area
     this._chatInput = new ChatInput(wsManager, sessionId, {
       onSend: () => {
-        if (this._windowEnd < this._total) {
+        // A SEND ALWAYS LANDS ON THE SENT MESSAGE (B-172e, inc-mt1zrvj3-wsr4):
+        // a teleported seek slab keeps the window accounting it had before the
+        // jump, so with nothing new since, `windowEnd < total` read "at the live
+        // tail" — the send pinned the SLAB and scrolled to its bottom while every
+        // live op is deferred in teleport mode (the sent message nowhere). Any
+        // view that is not the live tail leaves for it, as the resume re-tail
+        // already does; jumpToBottom exits teleport mode and holds the echo.
+        if (this._teleported || this._windowEnd < this._total) { // B-172e ②
           this.jumpToBottom();
         } else {
           this._pinned = true;
@@ -1165,6 +1182,10 @@ class ChatView {
         // bar's design chip is the live list; the agent's reply carries the link
         this._statusBar?.notePagePublished?.(msg.page);
         showToast(t('Page published: {name}', { name: msg.page?.name || '' }));
+      } else if (msg.type === 'designs-updated') {
+        // the hub's registry changed (a design registered / opened / retitled — lane design-window): a live window
+        // re-reads its own list (coalesced: one broadcast per write, many windows)
+        if (this._chatInput) { clearTimeout(this._designsReloadTimer); this._designsReloadTimer = setTimeout(() => this._loadDesigns(), 300); }
       } else if (msg.type === 'goal-updated' && msg.sessionId === sessionId) {
         // The server ALWAYS answers a set-goal with this broadcast (status /
         // resume / set / clear alike), so it is the one honest confirmation
@@ -1411,7 +1432,7 @@ class ChatView {
     // it off the view (test-chat-paging prints it; the metric ring is sampled)
     this._lastHistoryRenderMs = performance.now() - _t0;
     metric('history-render-ms', this._lastHistoryRenderMs);
-    if (this._chatInput) this._loadPages(); // design chip count/list (live windows only)
+    if (this._chatInput) { this._loadPages(); this._loadDesigns(); } // design chip count/list (live windows only)
     // ── Blank-window telemetry (user-reported "session窗口空白" class) ──
     // The server said this session has messages but NOTHING rendered — the exact
     // symptom that's un-debuggable from a bug report alone. Emit names/ids only.
@@ -2686,9 +2707,11 @@ class ChatView {
       for (;;) {
       const newStart = Math.max(0, this._windowStart - slab);
       const fetchCount = this._windowStart - newStart;
+      const gen = this._windowGen;
       // A failed fetch (server restart mid-scroll) must NOT leave _loading stuck
       // true forever — that permanently blocks all pagination. The finally resets it.
       const msgs = await this._fetchMessages(newStart, fetchCount);
+      if (this._windowMoved(gen, 'top', newStart)) break;
 
       const scrollHeightBefore = this._messageList.scrollHeight;
       // Element-anchored position preservation (see _withViewportAnchor —
@@ -2795,10 +2818,32 @@ class ChatView {
   _liftLoadLock() {
     this._loading = false;
     const pending = this._wheelPending; this._wheelPending = null;
-    if (!pending || this._suspended || this._disposed || this._teleported) return;
+    if (this._suspended || this._disposed || this._teleported) return;
     const list = this._messageList;
     if (pending === 'up' && this._windowStart > 0 && list.scrollTop < 10) { this._pinned = false; this._trace('wheelPending', { dir: 'up', ws: this._windowStart }); this._extendTop(); } // a wheel-up is intent to leave the tail (the wheelTop branch unpins the same way)
     else if (pending === 'down' && this._windowEnd < this._total && list.scrollHeight - list.scrollTop - list.clientHeight < 10) { this._trace('wheelPending', { dir: 'down', we: this._windowEnd }); this._extendBottom(); }
+    else if (this._lockSkippedPageUp()) { this._trace('lockBand', { st: Math.round(list.scrollTop), ws: this._windowStart }); this._extendTop(); }
+  }
+
+  /** THE PAGE-UP THE LOCK SKIPPED (B-8c25 — test-chat-paging's red on the
+   *  2.369.195 mirror, `up-fast-3: landed at scrollTop 31 (inside the 100 px
+   *  pageUp band) with 2472 messages and the gap still above`). A notch that
+   *  arrives in the 300 ms after a landing, with more room than it asks for,
+   *  is no edge notch: it scrolls natively — INTO the scroll handler's pageUp
+   *  band — and leaves no `_wheelPending`; the handler's decision for that
+   *  scroll was taken while `_loading` held and paged nothing, and nothing
+   *  re-took it: the reader parked at the top of the slab with history above
+   *  until the next notch. The lift re-takes it, on the handler's own positive
+   *  evidence: a REAL wheel-up as recent as its `goingUp` (displacement is not
+   *  intent — a view that drifted into the band pages nothing here), unpinned,
+   *  history above the window, no input resize, no down-lockout. */
+  _lockSkippedPageUp() {
+    const list = this._messageList;
+    if (this._pinned || !this._canPaginate || this._windowStart <= 0 || list.scrollTop >= 100) return false; // 100 = the scroll handler's pageUp band
+    if (!(this._wheelDir < 0 && Date.now() - (this._wheelDirAt || 0) < 1200)) return false;
+    if (Date.now() - (this._lastStructuralAt || 0) < 600 && this._lastStructuralDir === 'down') return false;
+    if ((window.__vsInputResizeAt && Date.now() - window.__vsInputResizeAt < 250) || (window.__vsViewportResizeAt && Date.now() - window.__vsViewportResizeAt < 400)) return false;
+    return true;
   }
 
   // ── THE CARRIED NOTCH, ONE ACCOUNTING (inc-mubvu3a4-x8sb; verifier r1) ────
@@ -3082,8 +3127,10 @@ class ChatView {
       let slab = count, passes = 0;
       for (;;) {
       const end = Math.min(this._total, this._windowEnd + slab);
+      const gen = this._windowGen;
       // finally resets _loading even if the fetch rejects — else pagination locks.
       const msgs = await this._fetchMessages(this._windowEnd, end - this._windowEnd);
+      if (this._windowMoved(gen, 'bottom', end)) break;
 
       const list = this._messageList;
       const nBefore = list.childElementCount;
@@ -3496,6 +3543,7 @@ class ChatView {
     // Clear and rebuild DOM
     this._messageList.querySelectorAll('.chat-msg, .chat-msg-system').forEach(el => el.remove());
     this._resetGapAfterJump();
+    this._windowGen = (this._windowGen || 0) + 1;   // an extend still in flight drops its slab (B-172e ③)
     this._elements.clear();
     this._renderedMsgIds.clear();
     this._messages = [];
@@ -3539,25 +3587,46 @@ class ChatView {
     if (user) this._noteUserNav('jumpToBottom');
     const windowSize = 50;
     const start = Math.max(0, this._total - windowSize);
+    // THE ECHO IS NOT LOST (B-172e ①, inc-mt1zrvj3-wsr4): a send from a window
+    // paged out of the tail comes here, and the server feeds the user's message
+    // live in the same breath (src/server/user-input.js) — its `create` arrived
+    // DURING this fetch, on a view still reading history (deferred: no card),
+    // and the slab below, sized by the total read BEFORE the await, ended one
+    // record short of it: the view landed on the tail without the message it was
+    // sent for. Every live op from here to the landing is held and replayed in
+    // order once the slab is the view (a create the slab holds dedups by id; an
+    // edit is a field assign). Overlapping calls share one hold, and ONLY THE
+    // NEWEST CALL lands or fails for the view (verify r1): an older call answered
+    // after a newer one started drops its slab. Released by the last call to
+    // finish, a fetch that hung kept every live op held — the reader's ↓ or next
+    // send landed a slab sized before the echo, pinned, with nothing rendering.
+    const hold = this._tailHold || (this._tailHold = { ops: [] });
+    const call = this._tailCall = (this._tailCall || 0) + 1;
     // Same as jumpToIndex: never wipe the rendered view for a fetch that failed
     // (the "return to latest" button would just blank the window).
     let msgs;
     const endLoad = this._beginHistoryLoad(t('Loading messages…'));
     try { msgs = await this._fetchMessages(start, this._total - start); }
     catch (e) {
+      if (call !== this._tailCall) return;   // a newer tail call answers for the view
       this._showHistoryStatus(t('Couldn\'t load the latest messages'), {
         kind: 'error', retry: () => this.jumpToBottom(),
       });
+      this._releaseTailHold(hold);   // the held ops apply to the window that stays
       return;
     } finally { endLoad(); }
+    if (call !== this._tailCall) { this._trace('tailStale', { call, newest: this._tailCall }); return; } // verify r1: superseded
 
     this._messageList.querySelectorAll('.chat-msg, .chat-msg-system').forEach(el => el.remove());
     this._resetGapAfterJump();
+    this._windowGen = (this._windowGen || 0) + 1;   // an extend still in flight drops its slab (B-172e ③)
     this._elements.clear();
     this._renderedMsgIds.clear();
     this._messages = [];
     this._windowStart = start;
-    this._windowEnd = this._total;
+    // the window ends where the SLAB ends: what lies past it arrives as live
+    // creates (held or later), each counted once as it renders
+    this._windowEnd = this._total = start + msgs.length;
 
     this._loadingHistory = true;
     for (const msg of msgs) this._onCreateMessage(msg);
@@ -3565,11 +3634,34 @@ class ChatView {
     this._pinned = true;
     this._newMsgCount = 0;
     this._scrollBtn.classList.add('hidden');
+    this._releaseTailHold(hold);   // pinned at the tail now: the held echo renders below the slab
     if (this._search?.hasHighlight) this._search.applyHighlightLayer();
 
     // Temporarily disable content-visibility so the browser computes real heights
     // for all elements, then scroll to bottom, then re-enable
     this._forceScrollToBottom();
+  }
+
+  /** Replay the live ops a tail fetch held (B-172e ①), in arrival order, once
+   *  the newest jumpToBottom landed its slab (or failed). */
+  _releaseTailHold(hold) {
+    if (!hold || this._tailHold !== hold) return;
+    this._tailHold = null;
+    if (this._disposed) return;
+    if (hold.ops.length) this._trace('tailHold', { ops: hold.ops.length });
+    for (const op of hold.ops) { try { this._onOp(op); } catch (e) { console.error('[chat-view] held op', e); } }
+  }
+
+  /** A FULL-WINDOW REBUILD LANDED DURING AN EXTEND'S FETCH (B-172e ③): a send
+   *  rebuilt the window at the tail (jumpToBottom) — or a jump elsewhere —
+   *  while a page was in flight, and the page's slab belongs to the window that
+   *  is gone: appended below the sent message (older history under the newest)
+   *  or prepended above the tail with the old bounds (a hole the window claims
+   *  to hold). `gen` is `_windowGen` when the extend's fetch went out. */
+  _windowMoved(gen, side, at) {
+    const stale = gen !== this._windowGen; // B-172e ③
+    if (stale) this._trace('extendStale', { side, at });
+    return stale;
   }
 
   _forceScrollToBottom() {
@@ -3668,6 +3760,12 @@ class ChatView {
     // advance the watermark past a card the view will not hold). Held, in order,
     // tagged with the epoch this view believes; the rebuild drains it.
     if (this._resetPending) { this._holdResetOp(op); return; }
+    // A TAIL FETCH IS IN FLIGHT (B-172e ①): the op post-dates the request
+    // jumpToBottom sent — applied now it lands on the window that fetch is about
+    // to replace (deferred, when that window is history) and the slab ends
+    // before it. Held, in order; _releaseTailHold replays it once the slab is
+    // the view.
+    if (this._tailHold) { this._tailHold.ops.push(op); return; } // B-172e ①
     // THE LAST FRAME THIS VIEW HAS (perf lane chunk D): a stamped op carries the
     // server's per-session `seq`; the epoch it belongs to is the one this view
     // holds right now (a frame of a newer epoch that lands before its `attached`
@@ -3788,6 +3886,7 @@ class ChatView {
           if (se.permMode) this._statusBar.setPermMode(se.permMode);
           if (se.slashCommands && this._chatInput) this._chatInput.setSlashCommands(se.slashCommands, { terminal: se.terminalSlashCommands || null });
           if (se.memoryPaths) noteMemoryPaths(se.memoryPaths);
+          if (se.refusalFallback) this._statusBar.setRefusalFallback(se.refusalFallback); // B-c643
           // (the init frame's health facts are applied ABOVE the deferral, not
           // here — a renderer runs for replays too; see round 5)
           this._statusBar.render();
@@ -3825,15 +3924,7 @@ class ChatView {
       // Update minimap with new user turns (CLI-injected page-image
       // attachments share the previous turnIndex — not a turn, no marker)
       if (msg.role === 'user' && !msg.imageAttachment) {
-        const preview = (msg.content || []).map(b => b.text || '').join('').trim();
-        const turn = { turnIndex: msg.turnIndex, startIdx: this._total - 1, ts: msg.ts, role: 'user' };
-        if (preview) {
-          if (preview.startsWith('This session is being continued from a previous conversation')) {
-            turn.isCompact = true; turn.preview = 'Context compacted';
-          } else {
-            turn.preview = preview.length > 60 ? preview.substring(0, preview.lastIndexOf(' ', 60) > 30 ? preview.lastIndexOf(' ', 60) : 60) + '…' : preview;
-          }
-        }
+        const turn = { turnIndex: msg.turnIndex, startIdx: this._total - 1, ts: msg.ts, role: 'user', ...turnPreviewOf(msg) }; // B-40f8: the server builders' ONE rule
         this._chatMinimap.addTurn(turn, this._total);
         // Huge-session (time-coordinate) minimap: extend the timeline too —
         // addTurn is a no-op in full-extent mode, and without this the map
@@ -3878,6 +3969,14 @@ class ChatView {
     if (msg.noticeKind === 'browser-proposal' && fields.content && !fields.status) {
       const el = this._elements.get(id);
       if (el) this._renderers.patchProposal(el, msg);
+      return;
+    }
+
+    // lane reset-path R3: a card that offered a reset credit, answered by a later fact (the credit used, the
+    // limit reset) — PATCHED IN PLACE: the button becomes one outcome line; the card is never re-created
+    if ('resetCredit' in fields && !fields.status) {
+      const el = this._elements.get(id);
+      if (el) this._renderers.patchResetCredit(el, msg);
       return;
     }
 
@@ -4413,20 +4512,25 @@ class ChatView {
     });
   }
 
-  /** The design request (2.366.0): a VISIBLE user message (no hidden
-   *  injection — the transcript shows exactly what the agent was asked)
-   *  that routes the bundled design-canvas flow to this instance: the kit
-   *  comes from `vibespace-page kit`, the publish step is
-   *  `vibespace-page publish`. Agent-facing text: English, not t(). */
+  /** This session's designs → the status-bar design chip (lane design-window; by webui session id OR conversation id,
+   *  as the pages are: a resume mints a new session id while the registry row keeps the old one). */
+  _loadDesigns() {
+    const ids = this._getSessionIds();
+    const cid = ids?.claudeId || ids?.backendSessionId || '';
+    fetchJson('/api/designs?sessionId=' + encodeURIComponent(this.sessionId) + (cid ? '&conversationId=' + encodeURIComponent(cid) : '')).then((r) => {
+      if (r && Array.isArray(r.designs) && this._statusBar) this._statusBar.setDesigns(r.designs);
+    });
+  }
+
+  /** The design request (2.366.0; lane design-window 2026-10-02): a VISIBLE user message (no hidden injection — the
+   *  transcript shows exactly what the agent was asked) routing the request to VibeSpace's own design canvas: the
+   *  agent makes it with `vibespace-design` (its manual: `vibespace-docs design` — named in the text itself, so a
+   *  harness the tools intro never reached still finds it), as plain-HTML artboards the user watches in the Design
+   *  window. The words are the contract's (§3.5). Agent-facing text: English, not t(). */
   _sendDesignRequest(brief, { public: pub = false } = {}) {
     const b = String(brief || '').trim();
     if (!b || !this._chatInput) return false;
-    const msg = `[VibeSpace design request] ${b}
-
-Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
-1. Run \`vibespace-page kit\` — it prints "Base directory for this skill: <dir>".
-2. Read <dir>/SKILL.md and follow it exactly: author the .dc.html artboards (and canvas.json for several), seed with seed-canvas.mjs, run its --check. Work inside a new subdirectory designs/<short-slug>/ of the current working directory (create it) so the working files and the seeded ~2 MB page never land in a repo root. Do not use the Artifact tool, artifact-capabilities or anything pointing at claude.ai.
-3. Publish with \`vibespace-page publish <seeded file> --title "<what I would call it>"${pub ? ' --public' : ''}\` and reply with the share link plus a line on what you drafted and assumed.`;
+    const msg = `[VibeSpace design request] ${b} — Make it with vibespace-design (manual: vibespace-docs design): new → write plain-HTML artboards under the printed dir → add → check; say the directory.${pub ? ' [--public requested]' : ''}`;
     // ANSWER THE DIALOG (round-5): sendText refuses while a queued-message
     // edit owns the input, and the brief exists only in the dropdown's own
     // textarea — the caller keeps it open on a false. Every reachable false
@@ -6492,6 +6596,9 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
         // §26 (B-099e): a card the channel WITNESS bound conversations to is exempt the same way — its rows are
         // the jump the owner asked for ("finding the conversation is the slow part"), and a folded card hides them
         for (const el of members) if (el.classList.contains('chat-channel-touched')) inline.add(el);
+        // lane peer-card-fold: a FOLDED peer card is already one line (head + preview + Show) — it keeps its fold kind
+        // (the run stays joined, the summary counts it) but stays on screen, so its Show is one press away
+        for (const el of members) if (el.classList.contains('chat-peer-folded')) inline.add(el);
         if (inline.size === members.length) { run = []; runKind = null; return; }
         if (members.length >= (hasTool ? 1 : 2)) {
           const header = document.createElement('div');
@@ -6677,6 +6784,19 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
   //       an open run; same non-.chat-msg family as the header (removed and
   //       re-inserted by every _updateRuns pass, invisible to counts/trims).
   // Collapsed runs show none of these. Esc is NOT bound (data-popover owns it).
+  /** lane peer-card-fold: a peer card's Show / Hide, recorded by message id (bounded — the oldest open id goes
+   *  first past 500). A re-render that builds the card already open reports the same state: a no-op. */
+  _setPeerOpen(id, open, el) {
+    if (!id || !!open === this._peerOpen.has(id)) return;
+    if (!open) { this._peerOpen.delete(id); return; }
+    this._peerOpen.add(id);
+    if (this._peerOpen.size > 500) this._peerOpen.delete(this._peerOpen.values().next().value);
+    // Show on a card inside a FOLDED run opens the run, then the card: one press and the message is read in place,
+    // its neighbours back in order around it (a deliberate open — _setRunOpen marks it sticky outside a pass)
+    const run = el && this._runs?.find((r) => !r.open && r.members?.includes(el));
+    if (run) this._setRunOpen(run, true);
+  }
+
   _setRunOpen(run, open) {
     if (!run?.header) return;
     run.open = !!open;

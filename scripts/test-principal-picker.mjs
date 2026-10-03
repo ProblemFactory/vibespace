@@ -103,11 +103,11 @@ console.log('① the model: fold, filter + rank, sections, recent, keyboard, tai
   const badET = ET.filter(([f, want]) => PM.enterTarget(f) !== want).map(([f, want]) => [f, want, PM.enterTarget(f)]);
   ok(!badET.length, `enterTarget: ${ET.length} rows — the highlighted row by key, else the armed first row while still first, else nothing`, J(badET));
   const PK = read('src/lib/principal-picker.js');
-  ok(/const k = PM\.enterTarget\(\{ active, visibleKeys, armedFirst \}\);/.test(PK) && !/active \|\| visibleKeys\[0\]/.test(PK) && /if \(byPerson\) armedFirst = visibleKeys\[0\] \?\? null;\n\s*else if \(gone\) armedFirst = null;/.test(PK) && /refresh: \(\) => \{ rows = source\(\) \|\| \[\]; noteRows\(\); drawChips\(\); drawList\(\{ byPerson: false \}\); \}/.test(PK), 'PIN: Enter asks the PURE rule; the person\'s redraw arms the first row, a roster patch never does (and disarms when the highlight vanished)');
+  ok(/const k = PM\.enterTarget\(\{ active, visibleKeys, armedFirst, skip: everyoneKeys\(\) \}\);/.test(PK) && !/active \|\| visibleKeys\[0\]/.test(PK) && /if \(byPerson\) armedFirst = PM\.armableFirst\(visibleKeys, everyoneKeys\(\)\);[^\n]*\n\s*else if \(gone\) armedFirst = null;/.test(PK) && /refresh: \(\) => \{ rows = source\(\) \|\| \[\]; noteRows\(\); drawChips\(\); drawList\(\{ byPerson: false \}\); \}/.test(PK), 'PIN: Enter asks the PURE rule; the person\'s redraw arms the first row, a roster patch never does (and disarms when the highlight vanished)');
   // verify round 4: a refused Enter is SHOWN (the first row highlighted, picked by the next Enter through the highlighted-row
   // rule), and a redraw touches only the nodes that MOVED — `replaceChildren` detached every row and Chrome dropped the
   // click in flight on one (a trusted click across an `active-sessions` broadcast that changed nothing was lost)
-  ok(/else if \(!k && !active && visibleKeys\.length\) \{[\s\S]{0,900}?active = visibleKeys\[0\];\n\s*drawList\(\{ byPerson: false \}\);/.test(PK), 'PIN: a refused Enter (nothing armed, nothing highlighted) highlights the first row and picks nothing — the next Enter takes the HIGHLIGHTED row by key');
+  ok(/else if \(!k && !active && visibleKeys\.length\) \{[\s\S]{0,1100}?active = PM\.armableFirst\(visibleKeys, everyoneKeys\(\)\);\n\s*if \(!active\) return;\n\s*drawList\(\{ byPerson: false \}\);/.test(PK), 'PIN: a refused Enter (nothing armed, nothing highlighted) highlights the first row and picks nothing — the next Enter takes the HIGHLIGHTED row by key (lane everyone-principal: the first row that is not ALL AGENTS)');
   ok(!/\.replaceChildren\(/.test(PK) && /reconcile\(list, out\);/.test(PK) && /reconcile\(chips, out\);/.test(PK) && /for \(let i = 0; i < out\.length; i\+\+\) if \(kids\[i\] !== out\[i\]\) parent\.insertBefore\(out\[i\], kids\[i\] \|\| null\);/.test(PK), 'PIN: the list and the chips are reconciled in place (a node already at its place is never detached) — never replaceChildren');
   // verify round 5: a HELD Enter is one Enter — the OS auto-repeat (~30 Hz after its delay) toggled the first row of a
   // multi picker on and off per repeat (measured with trusted CDP `autoRepeat: true`: ∅ / picked / ∅ / picked …), the
@@ -116,6 +116,41 @@ console.log('① the model: fold, filter + rank, sections, recent, keyboard, tai
   ok(PM.folderTail('/home/a/work/api') === 'api' && PM.folderTail('/home/a/work/api/') === 'api' && PM.folderTail('box: /srv/x/') === 'box: x' && PM.folderTail('/') === '/' && PM.folderTail('') === '', 'a folder\'s tail (a host label kept)');
   ok(PM.identityOf(ROSTER[0]) === 'group:t-ops' && PM.identityOf(ROSTER[3]) === 'agent:7f3a91c2', 'the identity every dialog remembers a pick by (never a caller\'s own key)');
   ok(PM.initialsOf === AV.initialsOf && PM.initialsOf('Ops triage') === 'OT', 'ONE initials implementation (the avatar rule\'s, re-exported)');
+}
+
+// ═══ ①b ALL AGENTS (lane everyone-principal, 2026-10-02) ═══
+console.log('①b ALL AGENTS: first, never hidden by a search, never a recent pick, never Enter\'s fallback, its chip first');
+{
+  const ALL = PM.everyoneRow({ key: 'everyone:*', name: 'All agents', hint: 'every conversation, now and later' });
+  ok(ALL.kind === 'everyone' && ALL.id === PM.EVERYONE_ID && PM.EVERYONE_ID === '*' && PM.isEveryone(ALL) && !ALL.disabled && J(PM.PRINCIPAL_KINDS) === J(['everyone', 'group', 'agent']), 'the model answers `everyone` as a principal kind — one id (*), never disabled');
+  ok(PM.identityOf(ALL) === 'everyone:*', 'its identity is everyone:* (one row in every dialog)');
+  const R2 = [...ROSTER, ALL];   // the caller may hand it anywhere — it is drawn first
+  const FIRST = [['', 'All agents'], ['api', 'All agents'], ['zzz', 'All agents'], ['部署', 'All agents'], ['7f3a', 'All agents']];
+  const badF = FIRST.map(([q, want]) => [q, want, names(PM.filterPrincipals(R2, q))]).filter(([, want, got]) => got[0] !== want);
+  ok(!badF.length, `a search never hides it and it is always first (${FIRST.length} queries, one matching nothing)`, J(badF));
+  ok(J(names(PM.filterPrincipals(R2, 'api'))) === J(['All agents', 'api lane', 'API docs', 'rapid prototype']) && J(names(PM.filterPrincipals(R2, 'zzz'))) === J(['All agents']), 'the named rows keep their own filter + rank behind it');
+  const secs = PM.groupPrincipals(PM.filterPrincipals(R2, ''));
+  ok(secs[0].kind === 'everyone' && secs[0].rows.length === 1 && secs[1].kind === 'groups', 'the sections: ALL AGENTS first (its own), then Task Groups, then sessions');
+  const rr = PM.rankRecent(R2, ['everyone:*', 'agent:e6f7']);
+  ok(J(names(rr.recent)) === J(['Deploy bot']) && rr.rest.includes(ALL), 'it is never a recent pick (always first already)');
+  ok(PM.armableFirst(['everyone:*', 'agent:a', 'agent:b'], ['everyone:*']) === 'agent:a' && PM.armableFirst(['everyone:*'], ['everyone:*']) === null && PM.armableFirst(['agent:a'], []) === 'agent:a', 'Enter\'s fallback never lands on it: the first visible row that is not ALL AGENTS (none ⇒ nothing)');
+  ok(PM.enterTarget({ active: 'everyone:*', visibleKeys: ['everyone:*', 'agent:a'], armedFirst: 'agent:a' }) === 'everyone:*', 'highlighted with ↑ / ↓, Enter takes it (the highlighted-row rule)');
+  // the armed row is "still first" when it is the first ARMABLE row — All sits above it in every list (the heavy exit
+  // dialog leg caught the first spelling: `keys[0] === armed` never held again, and "运维" + Enter picked nothing)
+  const ET2 = [
+    [{ active: null, visibleKeys: ['everyone:*', 'group:ops', 'agent:a'], armedFirst: 'group:ops', skip: ['everyone:*'] }, 'group:ops'],
+    [{ active: null, visibleKeys: ['everyone:*', 'agent:b', 'group:ops'], armedFirst: 'group:ops', skip: ['everyone:*'] }, null],
+    [{ active: null, visibleKeys: ['everyone:*'], armedFirst: null, skip: ['everyone:*'] }, null],
+    [{ active: 'everyone:*', visibleKeys: ['everyone:*', 'agent:a'], armedFirst: 'agent:a', skip: ['everyone:*'] }, 'everyone:*'],
+  ];
+  const badET2 = ET2.filter(([f, want]) => PM.enterTarget(f) !== want).map(([f, want]) => [f, want, PM.enterTarget(f)]);
+  ok(!badET2.length, `enterTarget with ALL AGENTS above the list: the armed row is taken while it is the first ARMABLE row (${ET2.length} rows)`, J(badET2));
+  const KS = ['everyone:*', 'agent:a', 'agent:b'], SK = { skip: ['everyone:*'] };
+  ok(PM.moveActive(KS, null, 1, SK) === 'agent:a' && PM.moveActive(KS, 'agent:a', -1, SK) === 'everyone:*' && PM.moveActive(KS, null, -1, SK) === 'agent:b' && PM.moveActive(['everyone:*'], null, 1, SK) === 'everyone:*' && PM.moveActive(KS, null, 1) === 'everyone:*', 'the keyboard: the FIRST ↓ lands on the first named row (typing then ↓ highlights a match), All is one ↑ above it; only All visible ⇒ ↓ reaches it');
+  ok(J(PM.chipOrder(['agent:a', 'group:g', 'everyone:*'], ['everyone:*'])) === J(['everyone:*', 'agent:a', 'group:g']), 'its chip is drawn first, the picks after it in the order they were made');
+  const PK = read('src/lib/principal-picker.js');
+  ok(/const allRow = everyone && typeof everyone === 'object' \? PM\.everyoneRow\(/.test(PK) && /for \(const s of secs\) if \(s\.kind === 'everyone'\) s\.rows\.forEach\(add\);\n\s*if \(recent\.length\)/.test(PK) && /if \(PM\.isEveryone\(row\)\) return;/.test(PK) && /PM\.chipOrder\(sel, everyoneKeys\(\)\)/.test(PK), 'PIN: the DOM half injects the row (an object option), draws it ABOVE Recent, never remembers it, orders the chips through the model');
+  ok(!/pp-row-everyone[^\n]*disabled/.test(PK) && /never disabled|Never disabled/.test(read('src/lib/principal-picker-model.js')), 'PIN: the All row is never a greyed hint (no disabled path names it)');
 }
 
 // ═══ ② the census ═══
@@ -174,7 +209,7 @@ console.log('③ controls: a patched copy per rule turns its own leg red');
   const c = await load('for (const tok of toks) { const r = tokenRank(row, tok); if (r < 0) return; score += r; }', 'let any = false; for (const tok of toks) { const r = tokenRank(row, tok); if (r >= 0) { any = true; score += r; } } if (!any) return;', 'or');
   ok(!!c && names(c.filterPrincipals(ROSTER, 'api ops')).length > 1, 'CONTROL (c): a filter that ORs its tokens keeps more than "api lane" for "api ops" — ① reddens');
   // (d) verify round 3: Enter with the first-row fallback UNARMED (the pre-fix rule) — the row that moved up is picked
-  const d = await load("  if (armedFirst != null && keys.length && keys[0] === String(armedFirst)) return keys[0];", '  if (keys.length) return keys[0];', 'unarmed');
+  const d = await load("  if (armedFirst != null && first != null && first === String(armedFirst)) return first;", '  if (first != null) return first;', 'unarmed');
   ok(!!d && d.enterTarget({ active: null, visibleKeys: ['b', 'c'], armedFirst: 'a' }) === 'b', 'CONTROL (d): without the arm, Enter after a roster patch picks the row that moved to the top — the person never saw it first (① reddens)');
   for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 4 })) ok(x.pass, 'tree: ' + x.name, x.detail);
 }

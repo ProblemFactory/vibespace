@@ -89,6 +89,16 @@ const EMPTY_WINDOW_JITTER_SEC = 600;
  *  end. scripts/test-quota-model.mjs pins them together. */
 const WINDOW_JITTER_SEC = 120;
 
+/** A STATED RESET LANDS A MINUTE LATE (2.369.117; B-a4f1 moved it here). The
+ *  CLI's /usage panel names MINUTES ("resets 8:59am"), so a stated reset can be
+ *  up to ~60 s early and the vendor's clock lags on top. Every reader that turns
+ *  "the reset passed" into "the window is full again" waits this long after the
+ *  stated instant: `bucketRemaining` (src/account-pool-auto.js) and the
+ *  estimator's weekly roll (src/usage-estimator.js). One number, two readers —
+ *  the estimator re-based a bucket on the bare instant while the pool's own
+ *  reader waited, and the overlay handed the pool the re-based bucket. */
+const RESET_GRACE_SEC = 60;
+
 const SCOPES = Object.freeze(['plan', 'model', 'credits', 'overage']);
 const STATES = Object.freeze(['running', 'empty', 'unknown']);
 
@@ -1346,7 +1356,7 @@ function wallAttribution({
 
 module.exports = {
   // constants
-  WINDOW_MINUTES, EMPTY_WINDOW_JITTER_SEC, WINDOW_JITTER_SEC, SCOPES, STATES, EMPTY_SET,
+  WINDOW_MINUTES, EMPTY_WINDOW_JITTER_SEC, WINDOW_JITTER_SEC, RESET_GRACE_SEC, SCOPES, STATES, EMPTY_SET,
   // builders
   makeWindow, makeLimit, makeLimitSet,
   // validator

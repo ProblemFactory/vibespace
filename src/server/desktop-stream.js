@@ -122,9 +122,28 @@ const { DESKTOP_SINGLETON_ID } = require('../desktop-apps');
 
 const STREAM_RE = /^\/api\/desktop\/([A-Za-z0-9._-]{1,80})\/stream$/;
 const INPUT_REPORT_MS = 2000;
-const PING_MS = 20000;            // ws keepalive cadence on a bridge (2.369.118); silent for 2 rounds = terminated + named
+const KA = require('../ws-keepalive.js'); // lane stream-ping: the ONE keepalive rule both bridges arm
+const PING_MS = KA.PING_MS;        // ws keepalive cadence on a bridge (2.369.118); silent for 2 rounds = terminated + named
 const WS_HIGH_WATER = 8 * 1024 * 1024;
 const WS_LOW_WATER = 1024 * 1024;
+/** THE LIVENESS RULE (lane desktop-keepalive, userW inc-muoshmqn-dect) lives in src/ws-keepalive.js since the 2.369.202
+ *  integration — THE ONE keepalive both bridges arm (lane stream-ping): a pong, bytes from the browser, or the kernel's
+ *  progress through a backlog keep a viewer alive; two silent rounds ⇒ terminated + named `… and nothing acknowledged`.
+ *  Re-exported here for the desktop suites. */
+const { livenessVerdict, SILENT_ROUNDS_TO_CUT } = KA;
+/** THE CLOSE, AS A CODE THE PAGE CAN WORD (lane desktop-keepalive K3): the bridge's named close line → a closed set.
+ *  noVNC never exposes a close frame's reason, and a terminate() sends none, so the page reads the bridge's own record
+ *  (GET /api/vnc/last-close) and words the code itself. */
+const CLOSE_CODES = Object.freeze(['unanswered', 'server-closed', 'browser-closed', 'session-ended', 'blocked', 'other']);
+function closeCodeOf(why) {
+  const w = String(why || '');
+  if (/^no pong/.test(w)) return 'unanswered';
+  if (/^the (VNC|xpra) server closed its socket|^(VNC|xpra) (server )?socket error/.test(w)) return 'server-closed';
+  if (/^the browser closed/.test(w)) return 'browser-closed';
+  if (/app session ended/.test(w)) return 'session-ended';
+  if (/blocked|another viewer|Resume here/i.test(w)) return 'blocked';
+  return 'other';
+}
 /**
  * THE HELD-BYTES CAP (2026-09-22, the r6 verify's open hole A — reproduced: an
  * authenticated viewer whose xpra header DECLARED a 2 GiB packet and then
@@ -593,6 +612,7 @@ function create({ auth, resolveTarget, forwardPort = null, onInput = () => { }, 
   if (typeof resolveTarget !== 'function') throw new Error('desktop-stream: resolveTarget is required');
   const wss = new WebSocketServer({ noServer: true, maxPayload: WS_MAX_MESSAGE_BYTES });
   const stats = { opened: 0, refused: 0, relayed: 0, dropped: 0, held: 0, netem: 0, lifecycle: 0, oversize: 0, blocked: 0, cut: 0 };
+  const lastClose = new Map(); // lane desktop-keepalive K3: id → {why, code, at, afterS} of its LAST close (one row per stream id)
   if (viewerSeats && (typeof viewerSeats.join !== 'function' || typeof viewerSeats.leave !== 'function' || typeof viewerSeats.state !== 'function')) throw new Error('desktop-stream: viewerSeats needs join / leave / state');
   const resolveTargetSafe = (id) => { try { const t = resolveTarget(id); return t && t.port ? t : null; } catch { return null; } };
   const netems = new Map(); // id → { rttMs, kbps } (dev-only, see the header)
@@ -703,21 +723,16 @@ function create({ auth, resolveTarget, forwardPort = null, onInput = () => { }, 
     // pingMs (the browser answers on its own); a peer silent for two rounds is
     // terminated and NAMED; every close logs who closed, after how long, and
     // how many bytes went each way.
-    let alive = true;
-    const pinger = setInterval(() => {
-      if (ws.readyState !== 1) { clearInterval(pinger); return; }
-      if (!alive) { closedBy = closedBy || `no pong for ${2 * pingMs} ms`; clearInterval(pinger); try { ws.terminate(); } catch { /* gone */ } return; }
-      alive = false;
-      try { ws.ping(); } catch { /* closing */ }
-    }, pingMs);
-    ws.on('pong', () => { alive = true; });
+    // lane stream-ping: THE ONE keepalive rule (src/ws-keepalive.js) — the same 20 s / two silent rounds / named reason
+    const keepalive = KA.armKeepalive(ws, { pingMs, now, onDrop: (d) => { closedBy = closedBy || d.reason; } });
     const conn = {};
     const seatRef = takeSeat(id, viewerId, req, conn);
     const finish = (why) => {
       if (logged) return;
       logged = true; closed(id);
-      clearInterval(pinger);
+      keepalive.stop();
       const dur = Math.round((now() - openedAt) / 1000);
+      lastClose.set(id, { why: String(closedBy || why), code: closeCodeOf(closedBy || why), at: now(), afterS: dur }); // K3: the page words the last close
       log.log?.(`[desktop-stream] ${id}: closed (${closedBy || why}) after ${dur}s, ${down} B to the browser, ${up} B to the server${viewerId ? `, viewer ${viewerId}` : ''}${dropped ? `, ${dropped} input message(s) refused (${lastRefusal || 'policy'})` : ''}`);
       seatRef.forget();
       leave();
@@ -808,22 +823,17 @@ function create({ auth, resolveTarget, forwardPort = null, onInput = () => { }, 
     const leave = () => { if (!viewerId) return; const m = viewers.get(id); if (m && m.get(viewerId) === ws) { m.delete(viewerId); if (!m.size) viewers.delete(id); try { onViewerLeft?.(id, viewerId); } catch (e) { log.warn?.(`[desktop-stream] ${id}: onViewerLeft failed — ${e && e.message}`); } } };
     const q = netem ? { down: netemQueue(netem, now), up: netemQueue(netem, now) } : null;
     if (netem) stats.netem++;
-    let alive = true;
-    const pinger = setInterval(() => {
-      if (ws.readyState !== 1) { clearInterval(pinger); return; }
-      if (!alive) { closedBy = closedBy || `no pong for ${2 * pingMs} ms`; clearInterval(pinger); try { ws.terminate(); } catch { /* gone */ } return; }
-      alive = false;
-      try { ws.ping(); } catch { /* closing */ }
-    }, pingMs);
-    ws.on('pong', () => { alive = true; });
+    // lane stream-ping: THE ONE keepalive rule (src/ws-keepalive.js) — the same 20 s / two silent rounds / named reason
+    const keepalive = KA.armKeepalive(ws, { pingMs, now, onDrop: (d) => { closedBy = closedBy || d.reason; } });
     const conn = {};
     const seatRef = takeSeat(id, viewerId, req, conn);
     const finish = (why) => {
       if (logged) return;
       logged = true; closed(id);
-      clearInterval(pinger);
+      keepalive.stop();
       if (q) { q.down.stop(); q.up.stop(); }
       const dur = Math.round((now() - openedAt) / 1000);
+      lastClose.set(id, { why: String(closedBy || why), code: closeCodeOf(closedBy || why), at: now(), afterS: dur }); // K3: the page words the last close
       log.log?.(`[desktop-stream] ${id}: closed (${closedBy || why}) after ${dur}s, ${down} B to the browser, ${up} B to the server (xpra)${viewerId ? `, viewer ${viewerId}` : ''}${dropped ? `, ${dropped} packet(s) refused (${lastRefusal || 'policy'})` : ''}${netem ? `, netem rtt ${netem.rttMs} ms / ${netem.kbps || '∞'} kbps` : ''}`);
       seatRef.forget();
       leave();
@@ -978,7 +988,7 @@ function create({ auth, resolveTarget, forwardPort = null, onInput = () => { }, 
     }, (e) => { log.warn?.(`[desktop-stream] ${id}: ${target.hostId} unreachable — ${e && e.message}`); refuse(socket, 502, 'Machine unreachable'); });
   }
 
-  return { handleUpgrade, streamEndpointFor, upgradeId, streamPath, stats: () => ({ ...stats }), wss, viewersOf, viewerAlive, connections, setNetem, netemOf, netemEnabled: !!netemEnabled, refresh, refreshAll };
+  return { lastCloseOf: (id) => { const c = lastClose.get(String(id)); return c ? { ...c } : null; }, handleUpgrade, streamEndpointFor, upgradeId, streamPath, stats: () => ({ ...stats }), wss, viewersOf, viewerAlive, connections, setNetem, netemOf, netemEnabled: !!netemEnabled, refresh, refreshAll };
 }
 
-module.exports = { create, upgradeId, streamPath, viewerOf, paneOf, prevOf, rfbInputSieve, RFB_INPUT_TYPES, RFB_FIXED_LEN, xpraInputSieve, xpraPacketType, xpraStrings, XPRA_INPUT_TYPES, XPRA_WATCH_TYPES, XPRA_KEYMAP_TYPES, XPRA_KEYMAP_HOLD_BYTES, XPRA_DISPLAY_TYPES, XPRA_DISPLAY_HOLD_BYTES, XPRA_GEOMETRY_TYPES, XPRA_GEOMETRY_HOLD_BYTES, XPRA_HELLO_HOLD_BYTES, XPRA_HELD_KINDS, XPRA_LIFECYCLE_TYPES, XPRA_MAX_PACKET_BYTES, RFB_MAX_MESSAGE_BYTES, WS_MAX_MESSAGE_BYTES, OVERSIZE_CLOSE, OVERSIZE_REASON, parseNetem, netemQueue, netemOfUrl, STREAM_RE, INPUT_REPORT_MS, WS_HIGH_WATER, WS_LOW_WATER, PING_MS, VIEWER_RE };
+module.exports = { livenessVerdict, SILENT_ROUNDS_TO_CUT, CLOSE_CODES, closeCodeOf, create, upgradeId, streamPath, viewerOf, paneOf, prevOf, rfbInputSieve, RFB_INPUT_TYPES, RFB_FIXED_LEN, xpraInputSieve, xpraPacketType, xpraStrings, XPRA_INPUT_TYPES, XPRA_WATCH_TYPES, XPRA_KEYMAP_TYPES, XPRA_KEYMAP_HOLD_BYTES, XPRA_DISPLAY_TYPES, XPRA_DISPLAY_HOLD_BYTES, XPRA_GEOMETRY_TYPES, XPRA_GEOMETRY_HOLD_BYTES, XPRA_HELLO_HOLD_BYTES, XPRA_HELD_KINDS, XPRA_LIFECYCLE_TYPES, XPRA_MAX_PACKET_BYTES, RFB_MAX_MESSAGE_BYTES, WS_MAX_MESSAGE_BYTES, OVERSIZE_CLOSE, OVERSIZE_REASON, parseNetem, netemQueue, netemOfUrl, STREAM_RE, INPUT_REPORT_MS, WS_HIGH_WATER, WS_LOW_WATER, PING_MS, VIEWER_RE };

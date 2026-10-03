@@ -88,6 +88,9 @@ export function inboxModel(app) {
     // through to "Session not found in the list yet", i.e. a dead end on an
     // item whose whole point is that the user must act.
     if (key === 'accounts') { close(); app._showAgentsDialog?.(); return; }
+    // B-c127: an item ABOUT a channel conversation (an approval pointer, a reach request, an unknown outcome) opens
+    // THAT conversation — its 'channels' group is no session, and the click used to end in "Session not found"
+    if (item?.action?.type === 'open-channel' && item.action.adapterId && item.action.convId) { close(); app.openChannel?.(item.action.adapterId, item.action.convId); return; }
     const s = sessionFor(key);
     if (!s) { showToast(t('Session not found in the list yet — try from the sidebar'), { type: 'error' }); return; }
     close();
@@ -155,6 +158,14 @@ export function inboxModel(app) {
       const w = code === 'ask_settled' ? t('Already answered') : code === 'ask_expired' ? t('Too late — it was refused after 60 s') : code === 'ask_unknown' ? t('That request is gone')
         : code === 'ask_changed' ? t('The request changed after it was shown — nothing ran') : (r && r.error) || t('server unreachable'); // verify-r5 X1
       showToast(w, { type: 'error' });
+      return false;
+    }
+    if (rec && rec.action && rec.action.type === 'channel-watch-request') {
+      // lane channel-agent-watch W1: an agent asked to be WOKEN by a conversation — Approve writes exactly what the item
+      // says, through the access request's own decide route (the one door; never a second approval surface)
+      const r = await fetchJson(`/api/channels/reach-requests/${encodeURIComponent(rec.action.id)}/${answer === 'reject' ? 'deny' : 'approve'}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      if (r && r.ok) { showToast(answer === 'reject' ? t('Denied — nothing changed') : t('Approved — the agent is woken by it from now on')); return true; }
+      showToast((r && r.code === 'bad-state') ? t('That request was already decided') : (r && r.error) || t('server unreachable'), { type: 'error' });
       return false;
     }
     if (rec && rec.action && rec.action.type === 'browser-proposal') {

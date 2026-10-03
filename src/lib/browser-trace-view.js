@@ -628,7 +628,7 @@ export function rowWhyText(r) {
 // ── OWNER RULING A (2026-09-26): WHO CAN USE a profile — the row's "Who can use it" cell, Rename…, Delete… ──
 /**
  * THE "WHO CAN USE IT" CELL of one profile row (2026-09-27 — a LIST of conversations and Task Groups): the label, the
- * VALUE ("All my conversations", or one chip per row of the list — a conversation by its backend glyph and name, dim
+ * VALUE ("All agents" — lane everyone-principal: the All chip, "(N more rows)" when rows are kept beside it — or one chip per row of the list — a conversation by its backend glyph and name, dim
  * with a hollow dot when not running; a Task Group by the people glyph and its title, amber when deleted — folded into
  * "+N more" past 4, past 2 at ≤ 768 px), the amber "Nobody can use it now…" line when every row is dead, and the
  * house text button "Change…" (the dialog, src/lib/browser-who-dialog.js). KEYED IN PLACE: the cell element and its
@@ -639,7 +639,11 @@ export function whoCell(app, { onChange = null } = {}) {
   const root = chromeEl('div', 'bprof-who');
   root.appendChild(chromeEl('span', 'bprof-who-label', t('Who can use it')));
   const value = chromeEl('span', 'bprof-who-value');
-  const allText = chromeEl('span', 'bprof-who-all');
+  // ALL AGENTS (lane everyone-principal): the value's first chip — the everyone glyph + "All agents"
+  const allText = chromeEl('span', 'bprof-who-all bprof-who-chip is-everyone');
+  allText.appendChild(chromeIcon('everyone', 12, 'bprof-who-glyph'));
+  const allWords = chromeEl('span', 'bprof-who-name');
+  allText.appendChild(allWords);
   const chips = chromeEl('span', 'bprof-who-chips');
   const more = chromeEl('span', 'bprof-who-more');
   value.append(allText, chips, more);
@@ -674,7 +678,7 @@ export function whoCell(app, { onChange = null } = {}) {
     const narrow = typeof window !== 'undefined' && window.matchMedia ? window.matchMedia('(max-width: 768px)').matches : false;
     const f = foldChips(m.chips, narrow ? CHIPS_NARROW : CHIPS_WIDE, { t });
     allText.style.display = m.mode === 'all' ? '' : 'none';
-    setText(allText, m.mode === 'all' ? t('All my conversations') : '');
+    setText(allWords, m.mode === 'all' ? (m.allText || t('All agents')) : '');
     const out = f.shown.map(chipNode);
     const kids = chips.childNodes;
     for (let i = 0; i < out.length; i++) if (kids[i] !== out[i]) chips.insertBefore(out[i], kids[i] || null);

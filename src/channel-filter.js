@@ -53,6 +53,19 @@
  *    an agent's context. This is the XSS rule's prompt-injection twin and it
  *    belongs in the PURE renderer, where a unit test can prove it.
  *
+ * ALL AGENTS (lane everyone-principal, 2026-10-02 — the owner: "所有配置权限的
+ * 地方都加入"所有"这个选项"): `{kind:'everyone', id:'*'}` is a principal of
+ * both lists. An ACCESS row for it names every agent conversation (`rowNames`;
+ * a specific row beside it never narrows it — authority is the MAX over every
+ * row naming the agent; removing it leaves the specific rows untouched — they
+ * are their own rows). A WATCHER row for it is a FAN-OUT: every RUNNING agent
+ * conversation is woken — a billed turn each — and its pace is PER
+ * CONVERSATION: `fanOutWatchers` turns the one stored row into one item per
+ * running conversation (principal `{kind:'everyone', id:'*', target:<cid>}`,
+ * `principalKey` = `everyone:*><cid>`, the conversation's OWN ledger in the
+ * stored row's `stats.fan[<cid>]`), so a cap of N is N wakes per conversation
+ * per day — never N shared by everybody, never All × conversations uncapped.
+ *
  * THREE LAYERS, THREE JOBS (§7.4, written here so nobody folds them): the
  * per-watcher daily wake cap (`paceVerdict`, one ledger per (principal,
  * scope)) is PACING; the delivery
@@ -81,9 +94,23 @@ const RULE_KINDS = Object.freeze(['mention', 'keyword', 'sender-in-group', 'from
  *  `placeHit(rule, record, ctx)` = the ONE decision → the `why` string that fired, or null. */
 const PLACE_RULE_KINDS = Object.freeze(['reply-to-mine', 'in-thread-with-me']);
 const MATCH_MODES = Object.freeze(['any', 'every']);
-const PRINCIPAL_KINDS = Object.freeze(['agent', 'group']);
+const PRINCIPAL_KINDS = Object.freeze(['agent', 'group', 'everyone']);
+/** THE everyone principal's ONE id (channel-acl's, the picker's). */
+const EVERYONE_ID = '*';
+/** The separator of a fan-out target's key (`everyone:*>cid`) — never inside a stored principal's key. */
+const FAN_SEP = '>';
 const ASSIGN_MODES = Object.freeze(['all', 'filtered']);
 const NOTIFY_MODES = Object.freeze(['wake', 'digest']);
+/**
+ * lane channel-agent-watch (the owner, 2026-10-01): WHEN a watcher's hit reaches its principal — `next-turn` (free: the
+ * hit rides the watcher's next turn, stashed; no billed turn, no cap spent) | `wake` (a billed turn now, under the
+ * per-(principal, scope) cap + the spend authorizer + the pacer; `notify` then says per batch or a digest). A row with
+ * no `delivery` (every row written before this lane) reads `wake` — today's behaviour, shown as such.
+ */
+const DELIVERY_MODES = Object.freeze(['next-turn', 'wake']);
+/** WHO wrote a watcher row: `user` (the owner's Notify…; every row before this lane) | `agent` (the agent's own
+ *  `vibespace-channels watch` — next-turn at once, or a `wake` the owner approved). */
+const WATCH_ORIGINS = Object.freeze(['user', 'agent']);
 const AUTHORITIES = Object.freeze(['draft', 'send']);
 /** THE THREE GRAINS (owner ruling 2026-09-26: a linked account is an
  *  aggregated IM, and the owner gives the whole ACCOUNT, the conversations a
@@ -100,6 +127,9 @@ const ASSIGN_REFUSALS = Object.freeze(['not-an-object', 'principal', 'mode', 'fi
 const GRANT_REFUSALS = Object.freeze(['bad-access', 'bad-watcher', 'duplicate-principal', 'watcher-needs-access', 'too-many-rows', 'authority-capped']);
 /** At most this many rows per list per grain (a refusal names it). */
 const MAX_ACCESS_ROWS = 16;
+// verify r1 F2 (lane channel-agent-watch): what ONE agent may hold of its own — rows across every grain, and wake asks waiting
+const MAX_AGENT_WATCHES = 20;
+const MAX_OPEN_WATCH_REQUESTS = 2;
 const MAX_WATCHER_ROWS = 16;
 /** The CONVERSATION-level rule set a pattern is made of — a closed set APART
  *  from the message-level `RULE_KINDS` (a pattern chooses conversations, a
@@ -413,7 +443,7 @@ function validateAssignment(input, caps = {}) {
   if (!a) return no('not-an-object', 'an assignment must be an object');
   const p = a.principal && typeof a.principal === 'object' ? a.principal : null;
   if (!p || !PRINCIPAL_KINDS.includes(p.kind)) return no('principal', `principal.kind must be ${PRINCIPAL_KINDS.join('|')}`);
-  const pid = str(p.id).trim();
+  const pid = p.kind === 'everyone' ? EVERYONE_ID : str(p.id).trim();
   if (!pid) return no('principal', 'principal.id is required');
   const mode = a.mode === undefined ? 'all' : a.mode;
   if (!ASSIGN_MODES.includes(mode)) return no('mode', `mode must be ${ASSIGN_MODES.join('|')}`);
@@ -452,7 +482,7 @@ function validateAssignment(input, caps = {}) {
   }
   return {
     ok: true,
-    assignment: { principal: { kind: p.kind, id: pid.slice(0, 256), name: str(p.name).trim().slice(0, 200) || null }, mode, filterId, notify, digestMinutes, authority, dailyWakeCap, receiptWake, ...(scope ? { scope } : {}) },
+    assignment: { principal: { kind: p.kind, id: pid.slice(0, 256), name: p.kind === 'everyone' ? null : (str(p.name).trim().slice(0, 200) || null) }, mode, filterId, notify, digestMinutes, authority, dailyWakeCap, receiptWake, ...(scope ? { scope } : {}) },
   };
 }
 
@@ -496,18 +526,24 @@ function effectiveAuthority(assignment, caps = {}) {
 
 // ── R4: ACCESS and WATCHERS — two lists per grain, access first ─────────
 
-/** `kind:id` — the ONE identity of a principal inside a grain's lists. */
+/** `kind:id` — the ONE identity of a principal inside a grain's lists. The everyone principal is `everyone:*`
+ *  whatever id it carries; a FAN-OUT target (a principal `fanOutWatchers` made, never a stored one) is
+ *  `everyone:*><cid>` — its own pending hits, timers, scope chain and ledger. */
 function principalKey(p) {
-  return p && typeof p === 'object' && PRINCIPAL_KINDS.includes(p.kind) && str(p.id).trim() ? `${p.kind}:${str(p.id).trim()}` : null;
+  if (!p || typeof p !== 'object' || !PRINCIPAL_KINDS.includes(p.kind)) return null;
+  if (p.kind === 'everyone') { const tg = str(p.target).trim(); return `everyone:${EVERYONE_ID}${tg ? FAN_SEP + tg : ''}`; }
+  return str(p.id).trim() ? `${p.kind}:${str(p.id).trim()}` : null;
 }
 function cleanPrincipal(p0) {
   const p = p0 && typeof p0 === 'object' ? p0 : null;
   if (!p || !PRINCIPAL_KINDS.includes(p.kind)) return refuse('bad-principal', `principal.kind must be ${PRINCIPAL_KINDS.join('|')}`);
+  // ALL AGENTS: ONE spelling on disk — `{kind:'everyone', id:'*'}`, no name (its words are the reader's), never a target
+  if (p.kind === 'everyone') return { ok: true, principal: { kind: 'everyone', id: EVERYONE_ID, name: null } };
   const pid = str(p.id).trim();
   if (!pid) return refuse('bad-principal', 'principal.id is required');
   return { ok: true, principal: { kind: p.kind, id: pid.slice(0, 256), name: str(p.name).trim().slice(0, 200) || null } };
 }
-const principalWords = (p) => `${p.kind} ${p.name || p.id}`;
+const principalWords = (p) => (p.kind === 'everyone' ? 'all agents' : `${p.kind} ${p.name || p.id}`);
 
 /**
  * ONE ACCESS row `{principal, authority}` — who may see and act. `caps` are
@@ -569,7 +605,45 @@ function validateWatcher(input) {
   dailyWakeCap = Math.min(MAX_DAILY_WAKE_CAP, Math.round(dailyWakeCap));
   // R4 verify r5: a digest IS a paced wake — a cap of 0 would never deliver.
   if (notify === 'digest' && dailyWakeCap === 0) return refuse('bad-watcher', 'a digest is a paced wake — set the daily cap to at least 1, or remove the notification', { why: 'digest-cap-zero' });
-  return { ok: true, watcher: { principal: pv.principal, notify, mode, filterId, digestMinutes, dailyWakeCap, receiptWake: a.receiptWake === true } };
+  // lane channel-agent-watch: `delivery` (absent = a legacy row = wake) and `origin` (absent = the owner's) are kept
+  // only when spelled right — a row never gains a field it did not ask for (the grain stamp of an old row is unchanged)
+  if (a.delivery !== undefined && a.delivery !== null && !DELIVERY_MODES.includes(a.delivery)) return refuse('bad-watcher', `delivery must be ${DELIVERY_MODES.join('|')}`, { why: 'delivery' });
+  if (a.origin !== undefined && a.origin !== null && !WATCH_ORIGINS.includes(a.origin)) return refuse('bad-watcher', `origin must be ${WATCH_ORIGINS.join('|')}`, { why: 'origin' });
+  return { ok: true, watcher: { principal: pv.principal, notify, mode, filterId, digestMinutes, dailyWakeCap, receiptWake: a.receiptWake === true,
+    ...(DELIVERY_MODES.includes(a.delivery) ? { delivery: a.delivery } : {}), ...(a.origin === 'agent' ? { origin: 'agent' } : {}) } };
+}
+/** THE ONE READER of a watcher row's delivery (the engine's hit dispatch, the dialog's row, the agent's CLI, the
+ *  proposal's words): `next-turn` | `wake`; a row that never said (written before the choice existed) = `wake`. */
+function deliveryModeOf(row) { return row && DELIVERY_MODES.includes(row.delivery) ? row.delivery : 'wake'; }
+/** Who wrote a watcher row (`agent` = the agent's own watch — listed "set by the agent"; else the owner's). */
+function watchOriginOf(row) { return row && row.origin === 'agent' ? 'agent' : 'user'; }
+
+/**
+ * WHO MAY BE NOTIFIED AT A GRAIN (lane channel-agent-watch W3 — the owner, 2026-10-01: "针对某个聊天设置通知的时候，不会
+ * 检查是否有agent有整个channel的权限"). ONE rule: access is MAX over the grain AND ITS ANCESTORS — a principal holding
+ * access on the whole account (or through a rule matching this conversation, or a visible grant of any origin here: an
+ * approved request, a hand-written grant) may be notified on this conversation without a per-chat access row; an
+ * ALL AGENTS (`everyone`) access anywhere above covers every principal. `access` = the grain's own rows; `inherited`
+ * = principal keys (or rows / principals) granted above it. → a Set of principal keys (`everyone:*` = all).
+ */
+function eligibleKeys({ access = [], inherited = [] } = {}) {
+  const out = new Set();
+  const add = (x) => {
+    if (typeof x === 'string') { if (x) out.add(x.startsWith(`everyone:${EVERYONE_ID}`) ? `everyone:${EVERYONE_ID}` : x); return; }
+    const p = x && x.principal ? x.principal : x;
+    const k = principalKey(p && p.kind === 'everyone' ? { kind: 'everyone', id: EVERYONE_ID } : p);
+    if (k) out.add(k);
+  };
+  for (const r of Array.isArray(access) ? access : []) add(r);
+  for (const r of inherited instanceof Set ? [...inherited] : Array.isArray(inherited) ? inherited : []) add(r);
+  return out;
+}
+/** Does that set cover this principal (itself, or All agents)? An All-agents WATCHER needs an All-agents access. */
+function eligibleFor(keys, principal) {
+  const k = principalKey(principal);
+  if (!k || !keys) return false;
+  if (keys.has(k)) return true;
+  return principal.kind !== 'everyone' && keys.has(`everyone:${EVERYONE_ID}`);
 }
 /**
  * A grain's whole WATCHERS list against ITS OWN access list: one row per
@@ -577,10 +651,11 @@ function validateWatcher(input) {
  * a watcher without access is refused BY NAME (`watcher-needs-access`):
  * notification is the second operation, access is its prerequisite.
  */
-function validateWatchers(list, access = []) {
+function validateWatchers(list, access = [], { inherited = [] } = {}) {
   if (!Array.isArray(list)) return refuse('bad-watcher', 'watchers must be a list', { why: 'not-an-object' });
   if (list.length > MAX_WATCHER_ROWS) return refuse('too-many-rows', `a grain holds at most ${MAX_WATCHER_ROWS} watchers`, { max: MAX_WATCHER_ROWS });
-  const granted = new Set((Array.isArray(access) ? access : []).map((r) => principalKey(r && r.principal)).filter(Boolean));
+  // lane channel-agent-watch W3: access at THIS grain or ABOVE it (the account, a matching rule, a visible grant here)
+  const keys = eligibleKeys({ access, inherited });
   const rows = [];
   const seen = new Set();
   for (let i = 0; i < list.length; i++) {
@@ -588,7 +663,7 @@ function validateWatchers(list, access = []) {
     if (!v.ok) return { ...v, index: i };
     const k = principalKey(v.watcher.principal);
     if (seen.has(k)) return refuse('duplicate-principal', `${principalWords(v.watcher.principal)} is listed twice — one notification per agent or group`, { index: i, principal: v.watcher.principal });
-    if (!granted.has(k)) return refuse('watcher-needs-access', `${principalWords(v.watcher.principal)} has no access here — grant access first (a notification needs access at the same grain)`, { index: i, principal: v.watcher.principal });
+    if (!eligibleFor(keys, v.watcher.principal)) return refuse('watcher-needs-access', `${principalWords(v.watcher.principal)} has no access here — grant access first (a notification needs access here or on the whole account)`, { index: i, principal: v.watcher.principal });
     seen.add(k);
     rows.push(v.watcher);
   }
@@ -625,7 +700,7 @@ function splitAssignment(a0) {
  * list names is never doubled), never a fallback that hides one of them.
  * Rows without a valid principal are dropped.
  */
-function grainOf(rec, legacy = undefined) {
+function grainOf(rec, legacy = undefined, { inherited = [] } = {}) {
   const r = rec && typeof rec === 'object' ? rec : {};
   const ok = (x) => x && typeof x === 'object' && !!principalKey(x.principal);
   const access = Array.isArray(r.access) ? r.access.filter(ok) : [];
@@ -643,8 +718,10 @@ function grainOf(rec, legacy = undefined) {
   // keeps the two lists in ONE update) is INERT: never woken, never listed,
   // never a ledger. `validateWatchers` refuses it by name at write time; the
   // engine's boot census names the rows this drops.
-  const granted = new Set(access.map((x) => principalKey(x.principal)));
-  return { access, watchers: watchers.filter((w) => granted.has(principalKey(w.principal))) };
+  // lane channel-agent-watch W3: "access" = this grain's rows OR the ones above it (`inherited`, the caller's: the
+  // account, a matching rule, a visible grant) — the same rule `validateWatchers` writes by
+  const keys = eligibleKeys({ access, inherited });
+  return { access, watchers: watchers.filter((w) => eligibleFor(keys, w.principal)) };
 }
 
 /**
@@ -847,17 +924,23 @@ function patternSummary(pattern) {
  * `source` = the finest grain holding any row (the row chip's "(account)" /
  * "(rule)").
  */
-function effectiveGrants({ conversation = null, patterns = [], account = null } = {}, facts = {}) {
+function effectiveGrants({ conversation = null, patterns = [], account = null } = {}, facts = {}, { grantKeys = [], accountKeys = [] } = {}) {
   /* PRECEDENCE: conversation > pattern > account */
-  const grains = [];
-  grains.push({ source: 'conversation', patternId: null, why: [], g: grainOf(conversation) });
+  // lane channel-agent-watch W3: each grain is READ with the access ABOVE it — the account's rows (+ the account-scope
+  // grants, `accountKeys`), then a matching rule's, then (for the conversation) every visible grant that reaches it
+  // (`grantKeys`: an approved request, a hand-written grant, the account's) — so a notification set on one chat for an
+  // agent that holds the whole account is in effect, never dropped as "no access at this grain"
+  const accountG = grainOf(account, undefined, { inherited: accountKeys });
   const ranked = (Array.isArray(patterns) ? patterns : []).filter((x) => x && x.pattern)
     .slice().sort((a, b) => (Number(a.createdAt) || 0) - (Number(b.createdAt) || 0) || String(a.id).localeCompare(String(b.id)));
+  const matched = [];
   for (const pa of ranked) {
     const m = matchConversation(pa.pattern, facts);
-    if (m.hit) grains.push({ source: 'pattern', patternId: pa.id || null, why: m.why, g: grainOf(pa) });
+    if (m.hit) matched.push({ source: 'pattern', patternId: pa.id || null, why: m.why, g: grainOf(pa, undefined, { inherited: [...accountG.access, ...accountKeys] }) });
   }
-  grains.push({ source: 'account', patternId: null, why: [], g: grainOf(account) });
+  const above = [...accountG.access, ...accountKeys, ...matched.flatMap((x) => x.g.access), ...grantKeys];
+  const grains = [{ source: 'conversation', patternId: null, why: [], g: grainOf(conversation, undefined, { inherited: above }) }, ...matched,
+    { source: 'account', patternId: null, why: [], g: accountG }];
   const access = [], watchers = [];
   const seenA = new Set(), seenW = new Set();
   let first = null;
@@ -884,14 +967,85 @@ function effectiveAccess(input, facts) { const e = effectiveGrants(input, facts)
 /** Who is woken (the `watchers` half of `effectiveGrants`). */
 function effectiveWatchers(input, facts) { const e = effectiveGrants(input, facts); return e ? e.watchers : []; }
 /** Is THIS principal (an agent ctx `{kind:'agent', id, groups}`) named by a
- *  row — itself, or one of its groups? */
+ *  row — itself, one of its groups, or every agent (an `everyone` row; a
+ *  fan-out target names its own conversation only)? */
 function rowNames(row, ctx) {
   const p = row && row.principal;
   if (!p || !ctx) return false;
+  if (p.kind === 'everyone') return ctx.kind === 'agent' && !!ctx.id && (!p.target || str(p.target) === str(ctx.id));
   if (p.kind === 'agent') return ctx.kind === 'agent' && ctx.id === p.id;
   if (p.kind === 'group') return Array.isArray(ctx.groups) && ctx.groups.includes(p.id);
   return false;
 }
+// ── ALL AGENTS: the watcher FAN-OUT (lane everyone-principal) ────────────
+
+/** The fan-out target of a principal (`fanOutWatchers` made it) — its conversation id — or null. */
+function fanTargetOf(p) {
+  return p && typeof p === 'object' && p.kind === 'everyone' && str(p.target).trim() ? str(p.target).trim() : null;
+}
+/** A watcher key's fan-out parts: `everyone:*><cid>` → `{root:'everyone:*', cid}`, anything else → null. */
+function fanOfKey(pk) {
+  const k = str(pk);
+  const head = `everyone:${EVERYONE_ID}${FAN_SEP}`;
+  return k.startsWith(head) && k.length > head.length ? { root: `everyone:${EVERYONE_ID}`, cid: k.slice(head.length) } : null;
+}
+/** The pace ledger of ONE fan-out target inside the stored everyone row (`stats.fan[<cid>]`; a read-only empty one
+ *  when it has none yet). */
+function fanStatsOf(w, cid) {
+  const f = w && w.stats && w.stats.fan && typeof w.stats.fan === 'object' ? w.stats.fan[str(cid)] : null;
+  return f && typeof f === 'object' ? f : { wakes: [], hits: [] };
+}
+/** A fan-out target's watcher: the stored everyone row's settings (notify, mode, filter, digest, CAP) with the
+ *  target's principal and the target's OWN ledger — never the shared one. */
+function fanWatcher(root, cid, name = null) {
+  return { ...root, principal: { kind: 'everyone', id: EVERYONE_ID, target: str(cid), name: name || null }, stats: fanStatsOf(root, cid) };
+}
+/**
+ * THE FAN-OUT: an effective answer (`effectiveGrants`) with every `everyone` watcher replaced by ONE item per
+ * RUNNING agent conversation (`live` = `[{cid, name}]`, the engine's live sessions) — in the stored row's place, in
+ * the roster's order, each carrying `fan: {cid, root}` and its own ledger. A stored everyone watcher with nobody
+ * running wakes nobody (its hits are not held for a conversation that does not exist). Nothing else changes:
+ * access rows, the other watchers, the sources. PURE.
+ */
+function fanOutWatchers(eff, live = []) {
+  if (!eff || !Array.isArray(eff.watchers) || !eff.watchers.some((x) => x && x.watcher && x.watcher.principal && x.watcher.principal.kind === 'everyone' && !fanTargetOf(x.watcher.principal))) return eff;
+  const seen = new Set();
+  const targets = [];
+  for (const s of Array.isArray(live) ? live : []) {
+    const cid = s && str(s.cid).trim();
+    if (!cid || seen.has(cid)) continue;
+    seen.add(cid);
+    targets.push({ cid, name: s.name || null });
+  }
+  const watchers = [];
+  for (const item of eff.watchers) {
+    const p = item && item.watcher && item.watcher.principal;
+    if (!p || p.kind !== 'everyone' || fanTargetOf(p)) { watchers.push(item); continue; }
+    for (const tg of targets) watchers.push({ ...item, watcher: fanWatcher(item.watcher, tg.cid, tg.name), fan: { cid: tg.cid, root: item.watcher } });
+  }
+  return { ...eff, watchers };
+}
+/** Every wake row of a stored watcher, its fan-out targets' included (the card's "N wakes / 24 h" of an everyone row). */
+function ledgerRowsOf(stats) {
+  const s = stats && typeof stats === 'object' ? stats : {};
+  const own = Array.isArray(s.wakes) ? s.wakes : [];
+  const fan = s.fan && typeof s.fan === 'object' ? Object.values(s.fan).flatMap((f) => (f && Array.isArray(f.wakes) ? f.wakes : [])) : [];
+  return fan.length ? [...own, ...fan] : own;
+}
+/** The fan-out ledgers pruned: a target with nothing in its 7-day window is dropped (the map never grows with every
+ *  conversation that ever ran). Mutates `stats.fan` IN PLACE (inside the store's update) and returns it. */
+function pruneFan(stats, now) {
+  if (!stats || !stats.fan || typeof stats.fan !== 'object') return stats ? stats.fan : undefined;
+  for (const k of Object.keys(stats.fan)) {
+    const f = stats.fan[k];
+    if (!f || typeof f !== 'object') { delete stats.fan[k]; continue; }
+    f.wakes = pruneLedger(f.wakes, now);
+    f.hits = pruneLedger(f.hits, now);
+    if (!f.wakes.length && !f.hits.length && !f.lastRefusal) delete stats.fan[k];
+  }
+  return stats.fan;
+}
+
 /** What the editor shows BEFORE saving (§7.3): wakes per day at most, the
  *  pacing cap and the digest windows folded in. `matchedPerDay` is the honest
  *  estimate over the scope. */
@@ -906,10 +1060,13 @@ function expectedWakesPerDay({ notify = 'wake', digestMinutes = DEFAULT_DIGEST_M
   return Math.min(cap, matched);
 }
 /** The Notify dialog's total: every watcher row's own ceiling, summed —
- *  each has its own ledger, so N watchers of one grain are N budgets. */
-function expectedWakesTotal(rows) {
+ *  each has its own ledger, so N watchers of one grain are N budgets. An
+ *  ALL-AGENTS row is one budget PER RUNNING CONVERSATION (`running`, the
+ *  roster's count now) — said, never folded into one. */
+function expectedWakesTotal(rows, { running = 1 } = {}) {
   let n = 0;
-  for (const r of Array.isArray(rows) ? rows : []) n += expectedWakesPerDay(r || {});
+  const many = Math.max(0, Number(running) || 0);
+  for (const r of Array.isArray(rows) ? rows : []) n += expectedWakesPerDay(r || {}) * (r && r.principal && r.principal.kind === 'everyone' ? many : 1);
   return Math.round(n * 10) / 10;
 }
 
@@ -959,7 +1116,7 @@ function renderWakeBlock({ adapterLabel = 'channel', title = '', convId = '', hi
   if (ol) lines.push(ol);
   let body = shown.map((h) => {
     const r = h.record;
-    const who = safeInline((r.author && (r.author.name || r.author.id)) || 'unknown', 80);
+    const who = safeInline((r.author && (r.author.display || r.author.name || r.author.id)) || 'unknown', 80);
     return `from ${who} at ${stamp(r.at)}\n${safeLine(r.text, maxChars)}`;
   });
   if (dropped > 0) body.push(`(${dropped} older elided)`);
@@ -973,7 +1130,7 @@ function renderWakeBlock({ adapterLabel = 'channel', title = '', convId = '', hi
     n--;
     const cut = shown.slice(shown.length - n);
     const drop2 = list.length - cut.length + (Number(elided) || 0);
-    body = cut.map((h) => `from ${safeInline((h.record.author && (h.record.author.name || h.record.author.id)) || 'unknown', 80)} at ${stamp(h.record.at)}\n${safeLine(h.record.text, Math.max(80, Math.floor(maxChars / 2)))}`);
+    body = cut.map((h) => `from ${safeInline((h.record.author && (h.record.author.display || h.record.author.name || h.record.author.id)) || 'unknown', 80)} at ${stamp(h.record.at)}\n${safeLine(h.record.text, Math.max(80, Math.floor(maxChars / 2)))}`);
     if (drop2 > 0) body.push(`(${drop2} older elided)`);
     if (replyHint) body.push(`Reply with: vibespace-channels reply ${safeInline(convId, 200)} "…"   (this PROPOSES; the user approves)`);
     out = [...lines, ...body].join('\n');
@@ -1023,7 +1180,7 @@ function renderScopeDigestBlock({ adapterLabel = 'channel', scopeLabel = '', gro
     const recs = g.hits.slice(-perConversation);
     const more = g.hits.length - recs.length + (Number(g.elided) || 0);
     const sec = [`#### ${safeInline(g.title || g.convId, 120)} — ${safeInline(g.convId, 200)}`]
-      .concat(recs.map((h) => `from ${safeInline((h.record.author && (h.record.author.name || h.record.author.id)) || 'unknown', 80)} at ${stamp(h.record.at)}\n${safeLine(h.record.text, maxChars)}`));
+      .concat(recs.map((h) => `from ${safeInline((h.record.author && (h.record.author.display || h.record.author.name || h.record.author.id)) || 'unknown', 80)} at ${stamp(h.record.at)}\n${safeLine(h.record.text, maxChars)}`));
     if (more > 0) sec.push(`(${more} more in this conversation)`);
     const next = out + '\n' + sec.join('\n');
     const rest = list.length - shown - 1 + (Number(elidedConversations) || 0);
@@ -1062,6 +1219,10 @@ module.exports = {
   // 2026-09-26: the three grains + conversation patterns + the scope digest
   ASSIGN_SCOPES, CONV_RULE_KINDS, CONV_KINDS, validatePattern, matchConversation, patternSummary, expectedWakesPerDay, renderScopeDigestBlock,
   // R4 (2026-09-27): access and notification — two lists per grain, access first
-  MAX_ACCESS_ROWS, MAX_WATCHER_ROWS, principalKey, validateAccessRow, validateAccess, validateWatcher, validateWatchers,
+  // lane everyone-principal: ALL AGENTS — the principal, and the watcher fan-out (a ledger per running conversation)
+  EVERYONE_ID, fanTargetOf, fanOfKey, fanStatsOf, fanWatcher, fanOutWatchers, ledgerRowsOf, pruneFan,
+  MAX_ACCESS_ROWS, MAX_WATCHER_ROWS, MAX_AGENT_WATCHES, MAX_OPEN_WATCH_REQUESTS, principalKey, validateAccessRow, validateAccess, validateWatcher, validateWatchers,
+  // lane channel-agent-watch: the delivery choice, who wrote a row, and THE eligibility rule (access over the grain and its ancestors)
+  DELIVERY_MODES, WATCH_ORIGINS, deliveryModeOf, watchOriginOf, eligibleKeys, eligibleFor,
   splitAssignment, grainOf, grainStamp, grainBaseVerdict, liftGrainRecord, LEGACY_ASSIGNMENT_FIELDS, effectiveGrants, effectiveAccess, effectiveWatchers, rowNames, expectedWakesTotal, othersLine,
 };

@@ -48,7 +48,9 @@ ok(require(path.join(REPO, 'src/hosts.js')).HostManager.AGENT_TOOLS.includes('vi
 {
   const src = fs.readFileSync(CLI, 'utf-8').replace(/^\s*\/\/.*$/gm, '');
   const reqs = [...src.matchAll(/require\(['"]([^'"]+)['"]\)/g)].map((m) => m[1]);
-  ok(reqs.length === 0, 'it is dependency-free (a host has no checkout)', reqs.join(','));
+  // lane worker-dispatch: `dispatch --file` reads the brief with node's own fs — a BUILTIN needs no checkout; anything else does
+  const deps = reqs.filter((r) => !require('node:module').isBuiltin(r));
+  ok(deps.length === 0 && reqs.every((r) => r.startsWith('node:')), 'it is dependency-free — node builtins only, spelled node:* (a host has no checkout)', reqs.join(','));
 }
 
 const seen = [];
@@ -722,9 +724,10 @@ console.log('§2 the routes over the REAL engine + store + ladder');
     const rp = await reportLeg(AR, 'r6-report');
     ok(rp.posted === 200 && !rp.forkGot && rp.parentGot && !rp.afterAdoption, `a pending fork's prompt never carries the PARENT's group report; the parent's own next prompt does; an adopted fork hears nothing of the parent's (${JSON.stringify(rp)})`);
     const arsrc6 = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf-8');
-    const GR = "      const myCid = ownConversationIdOf(s).cid;\n      if (ge && myCid && turnIsUserInitiated(s)) {";
+    // B-c198 (lane for-you-jobs) moved the block up — the report is DECIDED FIRST — and assigns the hoisted `myCid`
+    const GR = "      myCid = ownConversationIdOf(s).cid;\n      if (ge && myCid && turnIsUserInitiated(s)) {";
     ok(arsrc6.split(GR).length === 2, 'the next-turn group-report block reads the caller through ownConversationIdOf, once (the control reads the raw id)');
-    const ARr = M6.load('src/agent-routes.js', arsrc6.replace(GR, "      const myCid = s.claudeSessionId || s.backendSessionId || null;\n      if (ge && myCid && turnIsUserInitiated(s)) {"), 'reports-raw');
+    const ARr = M6.load('src/agent-routes.js', arsrc6.replace(GR, "      myCid = s.claudeSessionId || s.backendSessionId || null;\n      if (ge && myCid && turnIsUserInitiated(s)) {"), 'reports-raw');
     const rpC = await reportLeg(ARr, 'r6-report-ctl');
     ok(rpC.forkGot && !rpC.parentGot, `CONTROL: with the raw id the FORK's prompt carries the parent's report and the parent's own prompt is empty (${JSON.stringify(rpC)}) — the leg would go red`);
     for (const c of copiesCensus(M6.files, M6.dir, REPO, { minCopies: 1, label: 'r6 fork control: ' })) ok(c.pass, c.name, c.detail);
@@ -767,13 +770,15 @@ console.log('§2c the addressing-read census (r7): every raw "which session carr
   const TABLE = [
     { file: 'src/agent-routes.js', needle: '=== cid && !liveForkPending(t)', verdict: 'predicate', why: '_msgEndpoints finder — a pending fork is excluded by !liveForkPending on the same line (r4)' },
     { file: 'src/server/jobs-wiring.js', needle: '=== ownerCid', verdict: 'harmless', why: 'display name only; ownerCid is the job\'s OWN owner conversation, recorded fork-aware at create via jobsCaller (r5)' },
+    { file: 'src/server/jobs-wiring.js', needle: '=== cid) { sessName = s.name', verdict: 'harmless', why: 'display name only (B-dfb4): the dropped-notifications notice is FILED under claude:<cid> — the conversation whose stash overflowed; the live session found here only names it in For you' },
+    { file: 'src/server/unexpected-exit.js', needle: 'sid !== entry.deadId && s && (s.claudeSessionId || s.backendSessionId) === entry.cid', verdict: 'harmless', why: 'lane unexpected-exit liveCarrier (composed at the 2.369.202 integration): a READ — does another live session (a resume, a fork sharing the cid) carry the conversation again? Any carrier means do NOT respawn the dead one; it names, bills, grants and records nothing' },
     { file: 'src/transcript-service.js', needle: '=== r.sessionId) return s', verdict: 'harmless', why: 'serves the transcript; a pending fork SHARES the parent\'s file until adoption, so either session returns the same bytes (read)' },
     { file: 'src/ws-handler.js', needle: 'data.backendSessionId && (session.backendSessionId', verdict: 'harmless', why: 'rename-session fallback, reached only when the client\'s own webui id is stale (missing from activeSessions); user-explicit, renames a display name, self-heals at adoption' },
     { file: 'src/ws-handler.js', needle: 'data.sessionId = eid; break', verdict: 'harmless', why: 'kill fallback on a stale webui id; user-explicit, no bill/grant/record; a fork/parent id ambiguity here is the same transient class as any two sessions momentarily sharing an id' },
     { file: 'server.js', needle: '=== sid && s2._accountId === acct', verdict: 'harmless', why: 'recordUsageAttribution — the REAL inference odometer (reading-attribution campaign, slot-transitions/reading-repair), NOT the addressing lane; the pool MEMBER is chosen by poolMemberOfSession keyed on the found session\'s webuiId, and requests share the parent\'s transcript rid pre-adoption' },
   ];
   const hits = censusOf(REPO);
-  ok(hits.length === 6, `the tree holds exactly the 6 known addressing-idiom sites (found ${hits.length}: ${hits.map((h) => h.file + ':' + h.line).join(', ')})`);
+  ok(hits.length === 8, `the tree holds exactly the 8 known addressing-idiom sites (found ${hits.length}: ${hits.map((h) => h.file + ':' + h.line).join(', ')})`);
   let classified = 0, unlisted = [];
   for (const h of hits) {
     const row = TABLE.find((r) => r.file === h.file && h.text.includes(r.needle));

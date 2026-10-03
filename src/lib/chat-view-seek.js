@@ -505,6 +505,7 @@ export function installChatSeek(ChatView) {
     clearTimeout(this._cvRestoreTimer);
     this._cvRestoreTimer = setTimeout(() => this._setStableHeights(false), 1600);
     this._messageList.querySelectorAll('.chat-msg, .chat-msg-system').forEach(el => el.remove());
+    this._windowGen = (this._windowGen || 0) + 1;   // an extend still in flight drops its slab (B-172e ③)
     this._elements.clear();
     this._renderedMsgIds.clear();
     this._messages = [];

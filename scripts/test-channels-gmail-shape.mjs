@@ -94,6 +94,10 @@ function mkVendor() {
         // and a thread whose answered message is gone
         let msgs = t0.messages.slice();
         if (state.lateMessage) msgs.push({ id: 'msg_late_evil', threadId: 'thr_ops_0001', labelIds: ['INBOX'], internalDate: String(T0 + 60e3), payload: { mimeType: 'text/plain', headers: [{ name: 'Subject', value: 'Re: Nightly job slow again' }, { name: 'From', value: 'Mallory <mallory@evil.example>' }, { name: 'Reply-To', value: 'drop@evil.example' }, { name: 'To', value: 'member.a@example.com' }, { name: 'Message-ID', value: '<late@evil.example>' }] } });
+        // B-a085: a support-ticket mail (a desk's Reply-To; To = us + a list; Cc = the NOC, a quoted "Last, First" name and us again)
+        if (state.ticket) msgs.push({ id: 'msg_ticket', threadId: 'thr_ops_0001', labelIds: ['INBOX'], internalDate: String(T0 + 30e3), payload: { mimeType: 'text/plain', headers: [{ name: 'Subject', value: 'Re: Nightly job slow again' }, { name: 'From', value: 'DC Support <support@dc.example>' }, { name: 'Reply-To', value: 'tickets+4411@dc.example' }, { name: 'To', value: 'Member A <member.a@example.com>, ops-list@example.com' }, { name: 'Cc', value: 'noc@dc.example, "Lee, Sam" <sam.lee@example.com>, MEMBER.A@example.com, ops-list@example.com' }, { name: 'Message-ID', value: '<t1@dc.example>' }, { name: 'References', value: '<a1@example.com> <b1@example.com>' }] } });
+        // verify r2: the owner's unsent DRAFT in the thread (Gmail lists it among the messages) — a forward to counsel + the CFO
+        if (state.draft) msgs.push({ id: 'msg_draft', threadId: 'thr_ops_0001', labelIds: ['DRAFT'], internalDate: String(T0 + 90e3), payload: { mimeType: 'text/plain', headers: [{ name: 'Subject', value: 'Fwd: Nightly job slow again' }, { name: 'From', value: 'Member A <member.a@example.com>' }, { name: 'To', value: 'counsel@law.example' }, { name: 'Cc', value: 'cfo@example.com' }] } });
         if (state.dropAnchor) msgs = msgs.filter((m) => m.id !== state.dropAnchor);
         return jsonRes({ ...t0, messages: msgs });
       }
@@ -427,6 +431,84 @@ let flowState = null;
   const dc2 = v8.calls.find((c) => c.path.endsWith('/drafts') && c.method === 'POST');
   const mime2 = Buffer.from(dc2.json.message.raw, 'base64url').toString('utf-8');
   ok(/^To: Ada <ada@example\.com>\r\n/m.test(mime2) && /\r\nIn-Reply-To: <a1@example\.com>\r\n/.test(mime2) && /\r\nReferences: <a1@example\.com>\r\n/.test(mime2), 'replyTo picks the ANCHOR: somebody else\'s message ⇒ To = its From, threading on ITS Message-ID');
+  // B-a085: REPLY ALL — To = the Reply-To (else From) + the anchor's To, Cc = its Cc; the account's own address and every
+  // duplicate gone (case-blind; To wins); resolved at propose; the send stays IN THE THREAD (threadId + In-Reply-To/References)
+  {
+    const tk = gmail.replyHeaders({ payload: { headers: [{ name: 'From', value: 'DC Support <support@dc.example>' }, { name: 'Reply-To', value: 'tickets+4411@dc.example' }, { name: 'To', value: 'Member A <member.a@example.com>, ops-list@example.com' }, { name: 'Cc', value: 'noc@dc.example, "Lee, Sam" <sam.lee@example.com>, MEMBER.A@example.com, ops-list@example.com' }, { name: 'Subject', value: 'PDU alarm' }] } }, 'member.a@example.com', { all: true });
+    ok(tk.to === 'tickets+4411@dc.example, ops-list@example.com' && tk.cc === 'noc@dc.example, "Lee, Sam" <sam.lee@example.com>' && tk.all === true && tk.subject === 'Re: PDU alarm', 'B-a085 PURE replyHeaders {all}: To = Reply-To + the anchor\'s To, Cc = its Cc — us (any case) and duplicates removed, a quoted "Last, First" kept whole', JSON.stringify(tk));
+    const plain = gmail.replyHeaders({ payload: { headers: [{ name: 'From', value: 'DC Support <support@dc.example>' }, { name: 'Reply-To', value: 'tickets+4411@dc.example' }, { name: 'To', value: 'ops-list@example.com' }, { name: 'Cc', value: 'noc@dc.example' }] } }, 'member.a@example.com');
+    ok(plain.to === 'tickets+4411@dc.example' && plain.cc === null && !plain.all, 'B-a085 PURE: a plain reply is unchanged (the sender only, no Cc)', JSON.stringify(plain));
+    const mine = gmail.replyHeaders({ payload: { headers: [{ name: 'From', value: 'Member A <member.a@example.com>' }, { name: 'To', value: 'ada@example.com, member.a@example.com' }, { name: 'Cc', value: 'ops-list@example.com' }] } }, 'member.a@example.com', { all: true });
+    const self = gmail.replyHeaders({ payload: { headers: [{ name: 'From', value: 'member.a@example.com' }, { name: 'To', value: 'member.a@example.com' }] } }, 'member.a@example.com', { all: true });
+    const ccOnly = gmail.replyHeaders({ payload: { headers: [{ name: 'From', value: 'member.a@example.com' }, { name: 'To', value: 'undisclosed-recipients:;' }, { name: 'Cc', value: 'ada@example.com' }] } }, 'member.a@example.com', { all: true });
+    ok(mine.to === 'ada@example.com' && mine.cc === 'ops-list@example.com' && self.to === 'member.a@example.com' && ccOnly.to === 'ada@example.com' && ccOnly.cc === null, 'B-a085 PURE: OUR message ⇒ its To + its Cc (minus us); a note to ourselves still answers us; a To of only a group / us ⇒ the Cc moves up', JSON.stringify([mine, self, ccOnly]));
+    ok(JSON.stringify(gmail.addressList('a@x.example, "Lee, Sam" <s@x.example>, <b@x.example>, grp:;, not-an-address')) === JSON.stringify(['a@x.example', '"Lee, Sam" <s@x.example>', '<b@x.example>']) && gmail.addressList('a@b.example, '.repeat(2000)) === null && gmail.replyHeaders({ payload: { headers: [{ name: 'From', value: 'x@y.example' }, { name: 'Cc', value: 'a@b.example, '.repeat(2000) }] } }, 'me@x.example', { all: true }).tooLong === true, 'B-a085 PURE addressList: commas inside quotes never split; a group label / a word without @ is no address; a header over its cap is REFUSED (null ⇒ replyHeaders says tooLong), never clipped into another recipient list');
+    v8.state.ticket = true;
+    v8.calls.length = 0;
+    const envA = await a.replyEnvelope(C, { anchorId: 'msg_ticket', all: true });
+    ok(envA.all === true && envA.to === 'tickets+4411@dc.example, ops-list@example.com' && envA.cc === 'noc@dc.example, "Lee, Sam" <sam.lee@example.com>' && envA.inReplyTo === '<t1@dc.example>' && envA.references === '<a1@example.com> <b1@example.com> <t1@dc.example>' && v8.calls.length === 1,
+      'B-a085 adapter: replyEnvelope {all} over the recorded thread shape — everyone but us, the echo `all`, the threading chain — ONE metadata read', JSON.stringify(envA));
+    const envP = await a.replyEnvelope(C, { anchorId: 'msg_ticket' });
+    ok(envP.to === 'tickets+4411@dc.example' && envP.cc === null && !('all' in envP), 'B-a085 adapter: without {all} the reply answers the desk alone, as before', JSON.stringify(envP));
+    v8.calls.length = 0;
+    await a.send(C, { text: 'rack 12 PDU replaced', idemKey: 'p-ra1', as: 'user', replyTo: 'msg_ticket', envelope: envA });
+    const dcA = v8.calls.find((c) => c.path.endsWith('/drafts') && c.method === 'POST');
+    const mimeA = Buffer.from(dcA.json.message.raw, 'base64url').toString('utf-8');
+    ok(dcA.json.message.threadId === C && /^To: tickets\+4411@dc\.example, ops-list@example\.com\r\n/m.test(mimeA) && /\r\nCc: noc@dc\.example, "Lee, Sam" <sam\.lee@example\.com>\r\n/.test(mimeA) && /\r\nIn-Reply-To: <t1@dc\.example>\r\n/.test(mimeA) && /\r\nReferences: <a1@example\.com> <b1@example\.com> <t1@dc\.example>\r\n/.test(mimeA) && !/member\.a@example\.com/i.test(mimeA.split('\r\n').filter((l) => /^(To|Cc):/.test(l)).join('\n')),
+      'B-a085 the reply-all DRAFT is IN THE THREAD (threadId) with To + Cc exactly as resolved and the In-Reply-To / References chain — never a new, unthreaded mail; we are not among the recipients', mimeA.split('\r\n').slice(0, 7).join(' | '));
+    // a CJK display name on the reply-all: each name is encoded ON ITS OWN, every address stays bare (one encoded-word
+    // over the whole header hid them all — RFC 2047 §5); an ASCII header is unchanged
+    const wire = gmail.buildMime({ to: '张三 <zhang@dc.example>, ops-list@example.com', cc: '"Lee, Sam" <sam.lee@example.com>, "李 四" <li@dc.example>', subject: 's', text: 'x' });
+    ok(/^To: =\?UTF-8\?B\?5byg5LiJ\?= <zhang@dc\.example>, ops-list@example\.com\r\n/m.test(wire) && /\r\nCc: "Lee, Sam" <sam\.lee@example\.com>, =\?UTF-8\?B\?[A-Za-z0-9+/=]+\?= <li@dc\.example>\r\n/.test(wire) && gmail.encodeAddressHeader('Ada <ada@example.com>, b@example.com') === 'Ada <ada@example.com>, b@example.com',
+      'B-a085 the wire To / Cc: a non-ASCII display name is encoded on its own and the address beside it stays bare (never one encoded-word hiding every address); ASCII unchanged', wire.split('\r\n').slice(0, 3).join(' | '));
+    v8.state.ticket = false;
+    // verify r1 F2: the address grammar — a comment never splits a list and never names the address (a CJK comment
+    // holding <evil> redirected the WIRE to evil while the card reads j); a group's members are plain recipients (we
+    // were hidden from the self filter inside one); an address never sits inside an encoded-word
+    const R1 = (G) => {
+      const hd = (o) => ({ payload: { headers: Object.entries(o).map(([name, value]) => ({ name, value })) } });
+      const ra = (o) => G.replyHeaders(hd({ From: 'a@dc.example', ...o }), 'member.a@example.com', { all: true });
+      const wireTo = (to) => /^To: (.*)$/m.exec(G.buildMime({ to, subject: 's', text: 'x' }))[1];
+      return {
+        redirect: wireTo('j@x.example (张 <evil@x.example>)'),
+        commentForm: wireTo('z@x.example (张三)'),
+        comma: ra({ To: 'j@x.example (Doe, John), k@x.example' }).to,
+        group: ra({ To: 'Team: b@x.example, member.a@example.com;' }).to,
+        eai: wireTo('用户@例子.example, 张三 <z@x.example>'),
+      };
+    };
+    const r1 = R1(gmail);
+    ok(r1.redirect === '=?UTF-8?B?5bygIDxldmlsQHguZXhhbXBsZT4=?= <j@x.example>' && r1.commentForm === '=?UTF-8?B?5byg5LiJ?= <z@x.example>' && r1.comma === 'a@dc.example, j@x.example (Doe, John), k@x.example' && r1.group === 'a@dc.example, b@x.example' && r1.eai === '用户@例子.example, =?UTF-8?B?5byg5LiJ?= <z@x.example>',
+      'verify r1 F2: j@x (张 <evil@x>) goes to j on the wire (the comment is its words, encoded); z@x (张三) keeps z bare; a comment\'s comma never splits (k stays a recipient, the comment closed); a group\'s label is dropped and we are filtered out of it; an EAI address is never hidden in an encoded-word', JSON.stringify(r1));
+    const MR1 = mutantCopies('chan-gmail-r1', REPO);
+    const srcR1 = fs.readFileSync(path.join(REPO, 'src/channels/gmail.js'), 'utf-8');
+    const LAST_LT = "    if (/^[\\x20-\\x7e]*$/.test(a)) return a;\n    const { addr, words } = addressParts(a);\n    if (!words) return addr;\n    return `${/^[\\x20-\\x7e]*$/.test(words) ? `\"${words.replace(/[\\\\\"]/g, '\\\\$&')}\"` : encodeHeader(words)} <${addr}>`;";
+    const COMMENT = "    else if (ch === '(') depth = 1;\n";
+    ok(srcR1.split(LAST_LT).length === 2 && srcR1.split(COMMENT).length === 2, 'the per-item wire rebuild and the comment state are present once (the controls drop exactly them)');
+    const gLt = MR1.load('src/channels/gmail.js', srcR1.replace(LAST_LT, "    const lt = a.lastIndexOf('<');\n    if (lt <= 0) return encodeHeader(a);\n    const name = a.slice(0, lt).trim();\n    return `${/^[\\x20-\\x7e]*$/.test(name) ? name : encodeHeader(name.replace(/^\"|\"$/g, ''))} ${a.slice(lt).trim()}`;"), 'last-lt');
+    const gCm = MR1.load('src/channels/gmail.js', srcR1.replace(COMMENT, ''), 'no-comment');
+    const c1 = R1(gLt), c2 = R1(gCm);
+    // a reply-all whose answered message was deleted between propose and approve ⇒ refused by name, no draft
+    v8.state.ticket = true;
+    const envG = await a.replyEnvelope(C, { anchorId: 'msg_ticket', all: true });
+    v8.state.dropAnchor = 'msg_ticket'; v8.calls.length = 0;
+    const goneA = await a.send(C, { text: 'x', idemKey: 'p-ra-gone', as: 'user', replyTo: 'msg_ticket', envelope: envG }).then(() => null, (e) => e);
+    v8.state.dropAnchor = null; v8.state.ticket = false;
+    ok(envG.all === true && goneA && goneA.code === 'not-found' && goneA.detail.why === 'reply-anchor-gone' && !v8.calls.some((c) => c.method === 'POST'), 'verify r1: a REPLY-ALL whose answered message is gone at send ⇒ refused by name (reply-anchor-gone), NO draft', goneA && goneA.message);
+    // verify r2: a reply answering the owner's unsent DRAFT (named, or simply the newest stored message) went to the
+    // draft's unsent To / Cc — people this thread never wrote to — direct on a direct conversation: refused by name
+    v8.state.draft = true;
+    const drP = await threw(() => a.replyEnvelope(C, { anchorId: 'msg_draft' }));
+    const drA = await threw(() => a.replyEnvelope(C, { anchorId: 'msg_draft', all: true }));
+    const DRAFT_GUARD = `${srcR1.split('\n').find((l) => l.includes("why: 'reply-anchor-draft'"))}\n`;
+    const gDr = MR1.load('src/channels/gmail.js', srcR1.replace(DRAFT_GUARD, ''), 'no-draft-guard');
+    const tokDr = { read: () => ({ token: { access_token: 'ya29.s', expiresAt: now() + 3600e3, refresh_token: '1//r', scopes: [gmail.SCOPE, gmail.SCOPE_COMPOSE], email: 'member.a@example.com' }, why: null }), write: async () => {}, clear: async () => {} };
+    const drM = await gDr.create({ id: 'gmail', options: {} }, { now, fetch: v8.fetchFn, tokens: tokDr, resolveIntegration: (id) => integrations.resolveIntegration(id), log: quiet }).replyEnvelope(C, { anchorId: 'msg_draft', all: true }).catch((e) => e);
+    v8.state.draft = false;
+    ok(srcR1.split(DRAFT_GUARD).length === 2 && [drP, drA].every((e) => e && e.code === 'not-found' && e.detail && e.detail.why === 'reply-anchor-draft'), 'verify r2: a reply (plain or --all) answering an unsent DRAFT is refused by name (reply-anchor-draft) — its To / Cc are nobody this thread wrote to', JSON.stringify([drP && drP.message, drA && drA.detail]));
+    ok(drM && drM.to === 'counsel@law.example' && drM.cc === 'cfo@example.com', 'CONTROL: without the draft guard a reply-all answers the draft — To counsel, Cc the CFO', JSON.stringify(drM && (drM.message || drM)));
+    ok(/<evil@x\.example>\)$/.test(c1.redirect) && !/z@x\.example/.test(c1.commentForm) && !/j@x\.example/.test(c2.comma), 'CONTROL: the lane head\'s last-`<` rebuild sends j@x (张 <evil@x>) to EVIL and hides z inside an encoded-word; without the comment state a comment\'s comma splits the list and j is no recipient at all — the leg above would go red', JSON.stringify([c1.redirect, c1.commentForm, c2.comma]));
+  }
   // r6 verify F3: a message joins the thread AFTER the owner looked (a stranger with a Reply-To) — the approved
   // reply still goes to the recipients the card showed; the answered message gone ⇒ refused by name, nothing sent
   {
@@ -635,7 +717,7 @@ function gateCensus(src, { gateRe, ungatedIds }) {
   const L = srcMain.split('\n'); const a0 = L.findIndex((l) => /^  const api = async \(pathq, opts = \{\}\) => \{/.test(l)); const g0 = L.findIndex((l) => GATE.test(l));
   const idx = (re) => L.findIndex((l, i) => i > a0 && i < g0 && re.test(l));
   ok(a0 >= 0 && g0 > a0 && idx(/await accessToken\(\)/) < idx(/await pace\(units\)/) && idx(/await pace\(units\)/) < idx(/^\s*meter\(units\)/) && /bearerNow\(at\)/.test(L[g0]), 'the gate reads token → pace → meter → bearerNow(at) → send (the bearer re-read AFTER the wait is on the gate line itself)');
-  ok(/if \(refreshing\) \{ await refreshing; return accessToken\(\); \}/.test(srcMain) && /refreshing = refreshAccessToken\(cred, token\)\.finally/.test(srcMain) && /cur\.refresh_token \|\| ''\) === String\(token\.refresh_token/.test(srcMain), 'the refresh is SINGLE-FLIGHT (siblings wait for the one POST and re-read) and a refused refresh stamps invalidGrantAt only while the stored token is still the one it tried');
+  ok(/if \(refreshing\) \{ await refreshing; return accessToken\(depth \+ 1\); \}/.test(srcMain) && /refreshing = refreshAccessToken\(cred, token\)\.finally/.test(srcMain) && /cur\.refresh_token \|\| ''\) === String\(token\.refresh_token/.test(srcMain), 'the refresh is SINGLE-FLIGHT (siblings wait for the one POST and re-read) and a refused refresh stamps invalidGrantAt only while the stored token is still the one it tried');
   // NEGATIVE CONTROLS (patched copies in scratch, never src/): the census must SEE a bare call
   const M = mutantCopies('chan-gmail-gate', REPO);
   const bare = srcMain.replace("  const selfEmail = () => {", "  const labels = () => callJson(fetchFn, `${API}/labels`, { what: 'gmail labels' });\n  const selfEmail = () => {");
@@ -952,6 +1034,138 @@ console.log('\n⑧ what we sent never comes back in our words (verify r4)');
   ok(rh2.to === 'x@example.com' && rh2.subject === 'Re:' && rh2.inReplyTo === null && rh2.references === null, 'no Message-ID ⇒ no threading headers INVENTED (the thread id alone links)');
   const m8 = gmail.buildMime({ to: 'a@example.com', subject: '報告 — nightly', text: 'héllo\nworld' });
   ok(/^To: a@example\.com\r\nSubject: =\?UTF-8\?B\?[A-Za-z0-9+/=]+\?=\r\n/.test(m8) && Buffer.from(m8.split('\r\n\r\n')[1].replace(/\r\n/g, ''), 'base64').toString('utf-8') === 'héllo\nworld', 'buildMime: a non-ASCII subject is an RFC 2047 encoded-word, the body round-trips');
+}
+
+// ── lane lark-threads verify r3 — THE 429 CLASS, THE GMAIL TWIN (2026-10-01): the same census over src/channels/gmail.js and
+//    src/channels/live/gmail.js (scripts/vendor-response-census.mjs) + the judge table + three planted copies; then this round's
+//    Gmail finding: listConversations swallowed a RATE refusal on a title read and went on reading the next titles into the
+//    vendor's stop (ten of ten refused) while the pass resolved ok — the account's rate ladder never saw it (r2 F1's shape on
+//    the other adapter); and the owner's reconcile, which answered \`unknown\` for a 429 (one more press, one more call).
+console.log('\n⑲ verify r3: one response judge, the catch census (gmail.js + live/gmail.js), the listing, the reconcile');
+{
+  const { responseCensus, censusLine } = await import('./vendor-response-census.mjs');
+  const GL = require(path.join(REPO, 'src/channels/live/gmail.js'));
+  const src = fs.readFileSync(path.join(REPO, 'src/channels/gmail.js'), 'utf-8');
+  const liveSrc = fs.readFileSync(path.join(REPO, 'src/channels/live/gmail.js'), 'utf-8');
+  const OPT = () => ({ direct: /\b(?:api|callJson|fetchFn)\s*\(/, raw: /\bfetchFn\s*\(/g, rateOkIds: new Set(gmail.RATE_OK.map((r) => r.id)) });
+  const cls = (cc, k) => cc.sites.filter((s) => `${s.kind}:${s.cls}` === k).length;
+  const c = responseCensus(src, OPT());
+  console.log('    response census (gmail.js): ' + censusLine(c));
+  ok(c.problems.length === 0 && cls(c, 'catch:RED') === 0 && cls(c, 'raw:judge') === 1 && cls(c, 'raw:unjudged') === 0, `gmail.js: the one raw send is the judge's own; every catch over a vendor call re-throws a RATE refusal, ends by re-throwing, or is a RATE_OK row (${c.sites.length} sites)`, c.problems.join(' ; '));
+  ok(c.sites.filter((s) => s.cls === 'rate-ok').map((s) => s.id).join() === 'consent-profile' && cls(c, 'catch:rethrows-rate') >= 6, `the one deliberate swallow is the consent's profile read; the rate re-throws (${cls(c, 'catch:rethrows-rate')}): the listing's title read + the reconcile's five reads`);
+  const cl = responseCensus(liveSrc, { direct: /\b(?:api|callJson|f)\s*\(/, raw: /(?<![\w$.])f\s*\(/g, rateOkIds: new Set(GL.RATE_OK.map((r) => r.id)) });
+  console.log('    response census (live/gmail.js): ' + censusLine(cl));
+  ok(cl.problems.length === 0 && cls(cl, 'raw:lane-judge') === 1 && cl.sites.filter((s) => s.cls === 'rate-ok').map((s) => s.id).sort().join() === 'pull-backoff,pull-loop,watch-arm,watch-renew' && Object.isFrozen(GL.RATE_OK), 'live/gmail.js: the Pub/Sub pull is judged by the lane (status + permanent), and its four catches are the lane\'s own ladders, each a RATE_OK row with its reason', cl.problems.join(' ; '));
+  // THE JUDGE TABLE
+  const hdr = (o) => ({ get: (k) => (o[k.toLowerCase()] == null ? null : String(o[k.toLowerCase()])) });
+  const J = (status, body, h) => gmail.typedFailure(status, body, 'x', CH.retryAfterSeconds(hdr(h || {})));
+  const g1 = J(429, { error: { code: 429, message: 'Rate Limit Exceeded', errors: [{ reason: 'rateLimitExceeded' }] } }, { 'retry-after': '30' });
+  const g2 = J(403, { error: { code: 403, message: 'User Rate Limit Exceeded', errors: [{ reason: 'userRateLimitExceeded', domain: 'usageLimits' }] } });
+  const g3 = J(403, { error: { code: 403, message: "Quota exceeded for quota metric 'Total Query Cost' and limit 'Units per minute per user'", errors: [{ reason: 'quotaExceeded', domain: 'usageLimits' }] } });
+  const g4 = J(403, { error: { code: 403, message: 'Insufficient Permission', errors: [{ reason: 'insufficientPermissions' }] } });
+  const g5 = J(503, { error: { code: 503, message: 'Backend Error' } }, { 'retry-after': '4' });
+  const g6 = J(502, null);
+  ok(g1.code === 'rate-limited' && g1.retryable && g1.detail.retryAfterSec === 30 && g2.code === 'rate-limited' && g3.code === 'rate-limited' && g4.code === 'forbidden', 'JUDGE 429 (+ Retry-After) / 403 userRateLimitExceeded / the quota-metric words ⇒ rate-limited; a plain 403 stays forbidden');
+  ok(g5.code === 'transport' && g5.retryable && g5.detail.retryAfterSec === 4 && g6.code === 'transport' && !('retryAfterSec' in g6.detail), 'JUDGE a 5xx is transport (retryable); its Retry-After rides the detail; none given ⇒ no key');
+  const mkG = (fetchFn, mod = gmail) => { const tok = { st: { token: { access_token: 'ya', expiresAt: now() + 3600e3, refresh_token: 'r', scopes: [gmail.SCOPE, gmail.SCOPE_COMPOSE], email: 'me@example.com' } }, read() { return { token: tok.st.token, why: null }; }, async write(t) { tok.st.token = t; }, async clear() {} }; return mod.create({ id: 'gmail', options: {} }, { now, fetch: fetchFn, tokens: tok, resolveIntegration: () => ({ values: { clientId: 'c', clientSecret: 's' }, why: null }), log: { warn() {}, log() {} } }); };
+  const res429 = () => ({ ok: false, status: 429, headers: hdr({ 'retry-after': '30' }), json: async () => ({ error: { code: 429, message: 'Rate Limit Exceeded', errors: [{ reason: 'rateLimitExceeded' }] } }) });
+  const eNet = await threw(() => mkG(async () => { throw new Error('ECONNRESET'); }).listConversations({ limit: 10 }));
+  ok(eNet && eNet.code === 'transport' && eNet.retryable === true, 'FROM THE WIRE: a fetch that throws ⇒ transport (retryable) through the listing');
+  // THE LISTING (r3 G1): twelve threads, every title read refused 429 — one read, then the pass's failure (the cursor kept)
+  const listRun = async (mod) => { const calls = []; const a = mkG(async (url) => { const u = new URL(String(url)); const p = u.pathname.replace('/gmail/v1/users/me', ''); calls.push(p); if (p === '/threads') return { ok: true, status: 200, headers: hdr({}), json: async () => ({ threads: Array.from({ length: 12 }, (_, i) => ({ id: `t${i + 1}`, snippet: `s${i + 1}` })) }) }; return res429(); }, mod); let out = null; const e = await threw(async () => { out = await a.listConversations({ limit: 100 }); }); return { code: e && e.code, hint: e && e.detail && e.detail.retryAfterSec, listed: out ? out.conversations.length : null, meta: calls.filter((p) => /^\/threads\/t\d+$/.test(p)).length }; };
+  const lr = await listRun(gmail);
+  ok(lr.code === 'rate-limited' && lr.hint === 30 && lr.listed === null && lr.meta === 1, `LISTING under a title-read 429: thrown as rate-limited with the vendor's hint after ONE read (${JSON.stringify(lr)})`);
+  // THE RECONCILE (r3 L2, Gmail): a 429 on the draft read is thrown, never an \`unknown\`
+  const er = await threw(() => mkG(async () => res429()).reconcile('thr_1', { idemKey: 'p-2', sentAt: now() - 5000, text: 'hello', as: 'user', handle: { draftId: 'd1' } }));
+  ok(er && er.code === 'rate-limited', 'RECONCILE under a 429: the draft read\'s refusal is thrown as rate-limited (the owner\'s next look names the wait; nothing else is asked)');
+  // THE PLANTED CONTROLS
+  const Mg = mutantCopies('chan-gmail-r3', REPO);
+  const anchorApi = '  const api = async (pathq, opts = {}) => {';
+  const anchorHist = "const h = await api(`/history?${q}`, { what: 'gmail history' });";
+  const anchorJudge = 'if (!r.ok) throw typedFailure(r.status, withoutSent(parsed, sent), what, retryAfterSeconds(r.headers));';
+  // verify r4 F2 rewrote the catch (a 5xx thrown, a blip stops the title reads): the r3 anchor is the WHOLE block now, read off the file
+  const aListStart = src.indexOf('try { m = await metaFor(id); } catch (e) {'); const aListEnd = src.indexOf('\n          }', aListStart) + '\n          }'.length;
+  const anchorList = aListStart >= 0 ? src.slice(aListStart, aListEnd) : '<no listing catch>';
+  ok(src.includes(anchorApi) && src.includes(anchorHist) && src.includes(anchorJudge) && src.includes(anchorList), 'CONTROL anchors: the gate, the history read, the judge line, the listing\'s re-throw are in the file');
+  const bare = src.replace(anchorApi, anchorApi + "\n    if (opts.probe) { const z = await fetchFn('https://example.invalid/probe', {}); if (!z.ok) return null; }");
+  Mg.write('src/channels/gmail.js', bare, 'bare-send');
+  const cb = responseCensus(bare, OPT());
+  ok(cb.problems.some((p) => /raw send whose answer no judge reads/.test(p)), 'CONTROL ①: a bare fetch outside the judge is RED', cb.problems.join(' ; '));
+  const swallow = src.replace(anchorHist, "let h; try { h = await api(`/history?${q}`, { what: 'gmail history' }); } catch (e) { h = { history: [] }; }");
+  Mg.write('src/channels/gmail.js', swallow, 'swallowing-catch');
+  const cs = responseCensus(swallow, OPT());
+  ok(swallow !== src && cs.problems.some((p) => /can swallow a rate refusal/.test(p)), 'CONTROL ②: a try/catch around the history read that swallows is RED', cs.problems.join(' ; '));
+  const modOk = Mg.load('src/channels/gmail.js', src.replace(anchorJudge, 'if (r.status !== 429 && !r.ok) throw typedFailure(r.status, withoutSent(parsed, sent), what, retryAfterSeconds(r.headers));'), 'judge-maps-429-ok');
+  const eOk = await threw(() => mkG(async () => res429(), modOk).listConversations({ limit: 10 }));
+  ok(eOk === null, 'CONTROL ③: a judge that maps a 429 to ok (the listing resolves on a refused page) is RED by behaviour');
+  const modPre = Mg.load('src/channels/gmail.js', src.replace(anchorList, "try { m = await metaFor(id); } catch (e) { if (e instanceof ChannelError && e.code === 'auth-expired') throw e; m = null; }"), 'listing-swallow');
+  const lp = await listRun(modPre);
+  ok(lp.code === null && lp.listed === 12 && lp.meta === 10, `CONTROL: the pre-r3 listing swallows the title read's 429 and sends ${lp.meta} title reads into the stop while resolving ok — RED`);
+  // ── verify r4 — THE INJECTION TABLE'S FINDS (2026-10-01), the Gmail half ──
+  // r4 F1 (MED): the refresh loop's Gmail twin — a token refresh answered 200 WITHOUT an access_token was stored as '' and re-entered
+  // accessToken() for ever (one refresh POST per loop); now a typed vendor-error, nothing stored, ONE POST
+  {
+    const run = async (mod) => {
+      const calls = [];
+      const tok = { st: { token: { access_token: 'ya', expiresAt: now() - 1, refresh_token: 'r', scopes: [gmail.SCOPE, gmail.SCOPE_COMPOSE], email: 'me@example.com' } }, read() { return { token: tok.st.token, why: null }; }, async write(t) { tok.st.token = t; }, async clear() {} };
+      const a = mod.create({ id: 'gmail', options: {} }, { now, fetch: async (url) => { const u = new URL(String(url)); calls.push(u.hostname + u.pathname); if (calls.length > 12) throw new Error('STOP-SPIN (the fixture bounds what the copy does not)'); return jsonRes({ expires_in: 3600 }); }, tokens: tok, resolveIntegration: () => ({ values: { clientId: 'c', clientSecret: 's' }, why: null }), log: { warn() {}, log() {} } });
+      const e = await threw(() => a.listConversations({ limit: 10 }));
+      return { code: e && e.code, noToken: !!(e && e.detail && e.detail.noAccessToken), posts: calls.filter((p) => /oauth2\.googleapis\.com\/token$/.test(p)).length, stored: tok.st.token && tok.st.token.access_token };
+    };
+    const f1 = await run(gmail);
+    ok(f1.code === 'vendor-error' && f1.noToken && f1.posts === 1 && f1.stored === 'ya', `r4 F1: a refresh answered without access_token ⇒ vendor-error (noAccessToken), ONE refresh POST, the stored token untouched (${JSON.stringify(f1)})`);
+    const aGuard = "    if (!d || typeof d.access_token !== 'string' || !d.access_token) throw new ChannelError('vendor-error', `gmail token refresh: the vendor's answer carried no access_token";
+    const aGot = '    if (got) return got;\n';
+    const aDepth = "    if (depth >= 1) throw new ChannelError('vendor-error', `gmail: the token refresh did not yield a usable access token (re-entered after a superseded refresh) — re-authorize if it persists`, { retryable: true, detail: { refreshLoop: true } });\n    return accessToken(depth + 1);";
+    ok(src.split('\n').some((l) => l.startsWith(aGuard)) && src.includes(aGot) && src.includes(aDepth), 'r4 F1 CONTROL anchors: the answer guard and the bounded re-entry are in the file');
+    const pre = src.split('\n').filter((l) => !l.startsWith(aGuard)).join('\n').replace(aGot, '').replace(aDepth, '    return got || accessToken();');
+    const c1 = await run(Mg.load('src/channels/gmail.js', pre, 'refresh-loop'));
+    ok(pre !== src && c1.posts >= 12, `r4 F1 CONTROL: the copy without the guard re-enters for ever — ${c1.posts} refresh POSTs before the fixture stopped it (RED)`);
+  }
+  // r4 F2 (MED): the listing under a 503 + Retry-After on a title read went on reading the next NINE titles into the vendor's stop while
+  // resolving ok (the 5xx half of r3 F1 — the hint never reached the ladder); a network blip did the same into a dead connection.
+  // Now: a vendor 5xx is thrown (the failure ladder waits its hint); a blip stops this listing's title reads (the rest wait for the next pass)
+  {
+    const listRun2 = async (mod, answer) => { const calls = []; const a = mkG(async (url) => { const u = new URL(String(url)); const p = u.pathname.replace('/gmail/v1/users/me', ''); calls.push(p); if (p === '/threads') return { ok: true, status: 200, headers: hdr({}), json: async () => ({ threads: Array.from({ length: 12 }, (_, i) => ({ id: `t${i + 1}`, snippet: `s${i + 1}` })) }) }; return answer(); }, mod); let out = null; const e = await threw(async () => { out = await a.listConversations({ limit: 100 }); }); return { code: e && e.code, hint: e && e.detail && e.detail.retryAfterSec, listed: out ? out.conversations.length : null, meta: calls.filter((p) => /^\/threads\/t\d+$/.test(p)).length }; };
+    const res503 = () => ({ ok: false, status: 503, headers: hdr({ 'retry-after': '600' }), json: async () => ({ error: { code: 503, message: 'Backend Error' } }) });
+    const r503 = await listRun2(gmail, res503);
+    ok(r503.code === 'transport' && r503.hint === 600 && r503.meta === 1 && r503.listed === null, `r4 F2: a 503 + Retry-After 600 on a title read is thrown after ONE read with the hint (the failure ladder waits it) (${JSON.stringify(r503)})`);
+    const rNet = await listRun2(gmail, () => { throw new Error('ECONNRESET'); });
+    ok(rNet.code === null && rNet.listed === 12 && rNet.meta === 1, `r4 F2: a network blip on a title read: ONE read, the listing resolves on snippets, the rest of the titles wait for the next pass (${JSON.stringify(rNet)})`);
+    const aF2 = "            if (e instanceof ChannelError && e.code === 'transport' && e.detail && Number(e.detail.status) >= 500) throw e;\n            budget = 0; m = null;\n          }";
+    ok(src.includes(aF2), 'r4 F2 CONTROL anchor: the 5xx throw + the blip stop are in the file');
+    const modF2 = Mg.load('src/channels/gmail.js', src.replace(aF2, '            m = null;\n          }'), 'listing-5xx-continues');
+    const c503 = await listRun2(modF2, res503); const cNet = await listRun2(modF2, () => { throw new Error('ECONNRESET'); });
+    ok(c503.code === null && c503.meta === 10 && cNet.meta === 10, `r4 F2 CONTROL: the copy sends ${c503.meta} title reads into the 503 window and ${cNet.meta} into the dead connection while resolving ok (RED)`);
+  }
+  // r4 F3 (LOW): a REFUSED history.list was memoized as a completed sync for MAILBOX_MEMO_MS (mailbox.at stamped before the read): a pass
+  // inside those 20 s read every thread against the stale change set, resolved ok, reset the rate ladder and cleared the card while the
+  // vendor was still refusing. Now a refused sync is no sync — the next pass asks again.
+  {
+    const run = async (mod) => {
+      const calls = []; let refuse = false;
+      const msg = (id) => ({ id, threadId: 't1', internalDate: String(now() - 60e3), labelIds: ['INBOX'], payload: { mimeType: 'text/plain', headers: [{ name: 'From', value: 'a@example.com' }, { name: 'Subject', value: 'S' }], body: { data: Buffer.from('b').toString('base64url') } } });
+      const a = mkG(async (url) => { const u = new URL(String(url)); const p = u.pathname.replace('/gmail/v1/users/me', ''); calls.push(p);
+        if (p === '/profile') return { ok: true, status: 200, headers: hdr({}), json: async () => ({ emailAddress: 'me@example.com', historyId: '1000' }) };
+        if (p === '/history') return refuse ? res429() : { ok: true, status: 200, headers: hdr({}), json: async () => ({ history: [{ id: '1001', messagesAdded: [{ message: { id: 'm9', threadId: 't1' } }] }], historyId: '1001' }) };
+        if (/^\/threads\/t1$/.test(p)) return { ok: true, status: 200, headers: hdr({}), json: async () => ({ id: 't1', messages: [msg('m1'), msg('m2')] }) };
+        return { ok: true, status: 200, headers: hdr({}), json: async () => ({}) }; }, mod);
+      const r1 = await a.history('t1', { limit: 50 });
+      const t0 = clock; clock += 30e3; refuse = true;
+      const e2 = await threw(() => a.history('t1', { anchor: r1.anchor, limit: 50 }));
+      clock += 8e3; calls.length = 0;
+      const e3 = await threw(() => a.history('t1', { anchor: r1.anchor, limit: 50 }));
+      clock = t0;
+      return { second: e2 && e2.code, third: e3 && e3.code, historyAskedAgain: calls.includes('/history') };
+    };
+    const f3 = await run(gmail);
+    ok(f3.second === 'rate-limited' && f3.third === 'rate-limited' && f3.historyAskedAgain, `r4 F3: a refused history.list is asked again 8 s later (the memo keeps no refusal) (${JSON.stringify(f3)})`);
+    const aF3 = '      mailbox.at = 0;   // verify r4 F3';
+    ok(src.includes(aF3), 'r4 F3 CONTROL anchor: the memo reset is in the file');
+    const c3 = await run(Mg.load('src/channels/gmail.js', src.replace(aF3, '      // (memo kept)'), 'mailbox-memo-keeps-refusal'));
+    ok(c3.second === 'rate-limited' && c3.third === null && !c3.historyAskedAgain, 'r4 F3 CONTROL: the copy serves the refused sync from the memo — the pass 8 s later resolves ok with no vendor call (RED)');
+  }
+  for (const x of copiesCensus(Mg.files, Mg.dir, REPO, { minCopies: 7, label: '⑲ ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
 }
 
 eng.stop();

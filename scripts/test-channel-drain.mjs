@@ -36,6 +36,9 @@
 //      with the due rows exhausted a pass ends after exactly STREAK_MAX request fetches;
 //   ④ MUTANTS — a patched COPY of the model per rule (scripts/mutant-copy.mjs, scratch only), each
 //      turning its own leg red: the walk's named invariant AND the table / repro it protects;
+//   ④d RULE 22 (lane lark-threads) — the recent-roots recheck: the PURE due list + the press floor, the order (the lowest
+//      priority), the per-pass bound, no recheck in a back-off / request-only / spent minute, skip vs rule 3, the OWNER's
+//      press only; four mutants (ahead of the queue, unbounded, a key twice, any press) each red in its row AND the walk;
 //   ④c RULE 21 (lane lark-search-poll) — the change feed as a table (the order: a human first, the
 //      feed's pages, discovery, the feed's rows, the plain rows; its own minute; the budget; a skip
 //      never fails the pass; rule 3; no page on a request-only or back-off pass; the per-pass bound;
@@ -85,6 +88,9 @@ function createSim(D, o = {}) {
     // rule 21 (lane lark-search-poll): the change feed — its own sliding minute (`calls`), its per-pass bound, and the
     // SIM's vendor answer (`answer(api)` → {due, more} | {skip} | {error}); `feedDue` = the tick says a page is due
     feed: o.feed ? { perPass: o.feed.perPass ?? 5, perMin: o.feed.perMin ?? 10, calls: [], answer: o.feed.answer || null } : null, feedDue: !!o.feed,
+    // rule 22 (lane lark-threads): the recent-roots recheck — the keys the engine's PURE due list names at a turn
+    // (`due(api)` → [{key, dueAt}]), its per-pass bound, the SIM's vendor answer (`answer(api, key)` → {} | {skip} | {error})
+    recheck: o.recheck ? { perPass: o.recheck.perPass ?? 3, due: o.recheck.due || (() => []), answer: o.recheck.answer || null } : null,
   };
   if (W.pace) W.bucket = { tokens: W.pace.burst, at: W.now };
   const lvl = (t) => Math.min(W.pace.burst, W.bucket.tokens + ((t - W.bucket.at) * W.pace.unitsPerSec) / 1000);
@@ -229,7 +235,26 @@ function createSim(D, o = {}) {
     if (act.press !== (O.pressed || null) && !(act.press === null && O.pressed === null)) V('5-press', `the press granted to ${act.press}, the oracle's ${O.pressed}`);
     if (O.pressed) bump('5-press-granted');
     if (pv.cutPending) { if (act.type !== 'end' || !act.cut) V('9-cut', `the step after a cut was ${act.type}`); return; }
-    const vendorCall = act.type === 'fetch' || act.type === 'discover' || act.type === 'scanHost' || act.type === 'feed';
+    const vendorCall = act.type === 'fetch' || act.type === 'discover' || act.type === 'scanHost' || act.type === 'feed' || act.type === 'recheck';
+    // RULE 22 — the recent-roots recheck, from the SIM's own facts: only with NOTHING pending (no waiter, no due row), the
+    // timer's work, never in a back-off, the minute unspent, ≤ perPass a pass, a key the turn armed, never twice a pass
+    const recheckOk = !!W.recheck && pv.recheckArmed.length > 0 && !O.queue.length && !s.pass.backoff && pv.timerWork && s.budget.remainingUnits > 0 && pv.rechecks < W.recheck.perPass && !pv.cutPending;
+    if (act.type === 'recheck' || (act.type === 'wait' && act.next === 'recheck')) {
+      if (act.type === 'recheck') bump('r22-recheck');
+      if (!W.recheck) V('r22-undeclared', 'a recheck on an account with no recheck');
+      if (O.queue.length) V('r22-order', `a recheck with ${O.queue.length} item(s) pending (a waiter or a due row goes first)`);
+      if (s.pass.backoff || !pv.timerWork) V('r22-timer', 'a recheck without the timer\'s work (or inside a back-off)');
+      if (!(s.budget.remainingUnits > 0)) V('r22-budget', 'a recheck with the minute spent');
+      if (W.recheck && pv.rechecks >= W.recheck.perPass) V('r22-per-pass', `recheck ${pv.rechecks + 1} of a pass bounded at ${W.recheck.perPass}`);
+      if (!pv.recheckArmed.includes(act.key)) V('r22-unarmed', `a recheck of ${act.key}, never armed by this pass's turn`);
+      if (pv.rechecked.includes(act.key)) V('r22-twice', `${act.key} rechecked twice in one pass`);
+      if (act.type === 'recheck' && pv.recheckArmed[0] !== act.key) V('r22-order', `rechecked ${act.key}, the oldest armed is ${pv.recheckArmed[0]}`);
+    } else if (recheckOk && act.type === 'end' && !act.cut) V('r22-skipped', `the pass ended with ${pv.recheckArmed.length} armed recheck(s) and nothing else pending`);
+    if (act.type === 'fetch') {
+      const owner = s.requests.some((r) => r.key === act.key && r.origin === 'owner');
+      if (!!act.recheck !== owner) V('r22-press', `the fetch of ${act.key} says recheck ${!!act.recheck}, its round holds the owner ${owner}`);
+      else if (owner) bump('r22-press');
+    }
     // RULE 21 — the change feed, from the SIM's own facts (never the model's helper)
     const f21 = s.pass.feed || {};
     const feedWanted = !!(f21.wanted && !f21.done);
@@ -279,6 +304,8 @@ function createSim(D, o = {}) {
           else bump('18-wait-discover');
         } else if (act.next === 'feed') {
           bump('18-wait-feed');
+        } else if (act.next === 'recheck') {
+          bump('18-wait-recheck');
         } else if (act.next === 'scanHost') {
           if (pv.scanned || pv.calls || !W.hostScan) V('18-wait-pick', 'a wait for a host scan the rules do not run');
         } else V('18-wait-pick', `a wait for ${act.next}`);
@@ -372,6 +399,13 @@ function createSim(D, o = {}) {
       return a;
     }
     if (act.type === 'scanHost') { pv.scanned = true; return {}; }
+    if (act.type === 'recheck') {
+      pv.rechecks++; pv.rechecked.push(act.key); pv.recheckArmed = pv.recheckArmed.filter((k) => k !== act.key);
+      const a = W.recheck.answer ? W.recheck.answer(api, act.key) : {};
+      if (a && a.error) { failPass(pv, a.error); pv.failed = a.error; bump('r22-error'); return { error: a.error }; }
+      if (a && a.skip) bump('r22-skip');
+      return a || {};
+    }
     const refused = W.refuse ? W.refuse(act, api) : null;
     const k = W.keys.get(act.key);
     if (refused) { for (const id of act.waiters) { const w = waiters.get(id); if (w && !w.answer) answer(w, { code: refused }, 'conv-refused'); } return { refused, hints: [] }; }
@@ -398,15 +432,18 @@ function createSim(D, o = {}) {
     if (!W.connected && o.walk) bump('4-pass');
     snap = D.open(snap, { origin, force, backoff, timerDue: W.timerDue, hostScan: W.hostScan });
     if (snap.pass.timerWork) W.timerDue = false;
-    const pv = { last: null, streak: 0, fetchedAt: {}, fetchTick: {}, discovered: false, scanned: false, pressKey: null, pressFetched: null, cutPending: false, failed: null, okFetches: 0, vendorCalls: 0, calls: 0, backoff, wasInBackoff, timerWork: snap.pass.timerWork, pass: passNo, feedPages: 0, feedSkipped: false, feedRows: null };
+    const pv = { last: null, streak: 0, fetchedAt: {}, fetchTick: {}, discovered: false, scanned: false, pressKey: null, pressFetched: null, cutPending: false, failed: null, okFetches: 0, vendorCalls: 0, calls: 0, backoff, wasInBackoff, timerWork: snap.pass.timerWork, pass: passNo, feedPages: 0, feedSkipped: false, feedRows: null, recheckArmed: [], rechecks: 0, rechecked: [] };
     for (let guard = 0; guard < 20000; guard++) {
       if (D.wantsTurn(snap, W.timerDue)) {
         const before = snap.pass.due;
         W.timerDue = false;
         const rows = dueList(snap.pass.force);
         const takenKeys = new Set(snap.requests.filter((r) => r.taken).map((r) => r.key));
-        snap = D.turn(snap, { due: rows, discoveryDue: W.discoveryDue, feedDue: !!(W.feed && W.feedDue), feedPerPass: W.feed ? W.feed.perPass : undefined });
+        const rd = W.recheck ? W.recheck.due(api) : [];
+        snap = D.turn(snap, { due: rows, discoveryDue: W.discoveryDue, feedDue: !!(W.feed && W.feedDue), feedPerPass: W.feed ? W.feed.perPass : undefined, ...(W.recheck ? { recheckDue: rd, recheckPerPass: W.recheck.perPass } : {}) });
         pv.timerWork = true;
+        if (W.recheck && !pv.recheckTurned) { pv.recheckTurned = true; pv.recheckArmed = [...new Set(rd.map((d) => d.key))]; if (pv.recheckArmed.length) bump('r22-armed'); }
+        else if (W.recheck && rd.length && pv.recheckTurned) bump('r22-not-rearmed');
         checkMerge('13-turn', before, rows, snap.pass.due, pv, takenKeys);
       }
       const s = { ...snap, ...facts() };
@@ -522,14 +559,16 @@ const PROFILES = {
   // lane lark-search-poll: HALF the mixed seeds also run rule 21 — the change feed pages (a bound per pass, its own sliding
   // minute), answering rows (some already pending, some fetched this pass), `more`, feed-local refusals and account
   // failures (folded into this profile, not a fifth one: the gate's tier budget)
-  mixed: { storm: 0.02, arrivals: 0.45, rerequest: 0.12, p429: 0.008, sticky: 0.01, limit: [40, 120, 600, 1e6], share: [5, 25, 100], feedShare: 0.5, feed: { perPass: [1, 2, 5], perMin: [2, 4, 10, 30], pMore: 0.5, pSkip: 0.05, pError: 0.01 } },
+  // lane lark-threads: half the mixed seeds (and a third of the paced) also run rule 22 — the recent-roots recheck armed at
+  // the timer's turn (0–6 keys, some due again), its per-pass bound, conversation-level skips and account failures
+  mixed: { storm: 0.02, arrivals: 0.45, rerequest: 0.12, p429: 0.008, sticky: 0.01, limit: [40, 120, 600, 1e6], share: [5, 25, 100], feedShare: 0.5, feed: { perPass: [1, 2, 5], perMin: [2, 4, 10, 30], pMore: 0.5, pSkip: 0.05, pError: 0.01 }, recheckShare: 0.5, recheck: { perPass: [1, 3], pSkip: 0.05, pError: 0.01 } },
   storms: { storm: 0.08, arrivals: 0.6, rerequest: 0.2, p429: 0.004, sticky: 0.005, limit: [600, 1e6], share: [25, 100] },
   tight: { storm: 0.02, arrivals: 0.5, rerequest: 0.12, p429: 0.03, sticky: 0.04, limit: [12, 25, 40], share: [5, 25] },
   // lane R5: rule 18 on — [unitsPerSec, burst] (a burst of 1 with 2-unit calls = a call larger than the bucket)
   // (lane lark-search-poll: a third of the paced seeds run the change feed too — rule 18 holds a feed page like any call)
-  paced: { storm: 0.02, arrivals: 0.45, rerequest: 0.12, p429: 0.01, sticky: 0.01, limit: [40, 120, 600, 1e6], share: [5, 25, 100], pace: [[1, 1], [2, 4], [5, 5], [3, 10], [20, 20]], feedShare: 0.34, feed: { perPass: [2, 5], perMin: [4, 10], pMore: 0.5, pSkip: 0.03, pError: 0.005 } },
+  paced: { storm: 0.02, arrivals: 0.45, rerequest: 0.12, p429: 0.01, sticky: 0.01, limit: [40, 120, 600, 1e6], share: [5, 25, 100], pace: [[1, 1], [2, 4], [5, 5], [3, 10], [20, 20]], feedShare: 0.34, feed: { perPass: [2, 5], perMin: [4, 10], pMore: 0.5, pSkip: 0.03, pError: 0.005 }, recheckShare: 0.34, recheck: { perPass: [1, 3], pSkip: 0.03, pError: 0.005 } },
 };
-function walk(D, seed, profileName, steps = 3000, { forceFeed = false, noFeed = false } = {}) {
+function walk(D, seed, profileName, steps = 3000, { forceFeed = false, noFeed = false, forceRecheck = false } = {}) {
   const P = PROFILES[profileName];
   const rnd = mulberry32(seed);
   const ri = (n) => Math.floor(rnd() * n);
@@ -572,8 +611,15 @@ function walk(D, seed, profileName, steps = 3000, { forceFeed = false, noFeed = 
       return { due, more: rnd() < FP.pMore };
     },
   } : null;
+  // rule 22 (lane lark-threads): `noFeed` draws NO random number here either (the rules 1–18 mutants' sequences)
+  const RP = P.recheck && !noFeed && (forceRecheck || rnd() < (P.recheckShare ?? 1)) ? P.recheck : null;
+  const recheck = RP ? {
+    perPass: RP.perPass[ri(RP.perPass.length)],
+    due: () => { const out = []; for (let i = ri(7); i > 0; i--) { const k = keyOf(ri(nKeys)); if (!out.some((d) => d.key === k)) out.push({ key: k, dueAt: 0 }); } return out; },
+    answer: () => { const x = rnd(); if (x < RP.pError) return { error: rnd() < 0.5 ? 'transport' : 'auth-expired' }; if (x < RP.pError + RP.pSkip) return { skip: 'not-found' }; return {}; },
+  } : null;
   const sim = createSim(D, {
-    rnd, walk: true, keys: nKeys, limit: P.limit[ri(P.limit.length)], sharePct: P.share[ri(P.share.length)],
+    rnd, walk: true, keys: nKeys, recheck, limit: P.limit[ri(P.limit.length)], sharePct: P.share[ri(P.share.length)],
     pace: pc ? { unitsPerSec: pc[0], burst: pc[1] } : null, discoverUnits: pc ? 1 + ri(8) : 1,
     floorMs: [5e3, 20e3, 60e3][ri(3)], hostScan: rnd() < 0.2, latency: 5 + ri(40), units: 1 + ri(2),
     cadenceOf: (i) => (i % 3 === 0 ? 300e3 : 30e3), lastOf: () => T0 - ri(400e3), during, feed,
@@ -625,6 +671,9 @@ const RULE_COVER = [
   ['f21-skip', 'rule 21: a feed-local refusal ended the feed, never the pass'], ['f21-error', 'rule 21: an account failure on a feed page (rule 3)'],
   ['f21-front', 'rule 21: the feed\'s rows went AHEAD of pending plain rows'], ['f21-moved-up', 'rule 21: a pending key moved up'], ['f21-fetched-not-again', 'rule 21: a key fetched this pass with no newer hit was not due again'],
   ['f21-human-first', 'rule 21: a waiting human went before a wanted feed'], ['f21-minute-spent', 'rule 21: the feed\'s own minute held it back'], ['18-wait-feed', 'rule 18: a wait holding a feed page'],
+  // rule 22 (lane lark-threads)
+  ['r22-armed', 'rule 22a: the timer\'s turn armed rechecks'], ['r22-recheck', 'rule 22a: a recheck page (nothing else pending)'], ['r22-skip', 'rule 22a: a conversation-level refusal of a recheck, the pass went on'],
+  ['r22-error', 'rule 22a: an account failure on a recheck (rule 3)'], ['r22-press', 'rule 22b: an owner\'s round carried the recheck'], ['18-wait-recheck', 'rule 18: a wait holding a recheck'],
 ];
 console.log('① THE WALK: 48 seeds × 3000 steps over four profiles (half the mixed seeds also run rule 21, the change feed), every rule at every step against the oracle');
 const WALK_STEPS = 3000;
@@ -657,7 +706,7 @@ let totalSteps = 0, totalPasses = 0, totalFetches = 0;
 // ═══ ② THE TABLES — the r2–r8 repros in the model's own terms ══════════════════════════════════
 /** A scripted account: 45 conversations, every one due at +31 s unless `dueOnly`. */
 function account(D, o = {}) {
-  return createSim(D, { keys: o.keys ?? 45, now: T0 + 31e3, lastOf: o.lastOf || (() => T0), cadenceOf: o.cadenceOf || ((i) => (o.dueOnly === undefined || o.dueOnly.includes(i) ? 30e3 : 900e3)), limit: o.limit ?? 1e6, sharePct: o.sharePct ?? 25, floorMs: o.floorMs ?? 20e3, latency: o.latency ?? 20, units: o.units ?? 1, fail: o.fail, refuse: o.refuse, hostScan: o.hostScan, backoffUntil: o.backoffUntil, epoch: o.epoch, failures: o.failures, pace: o.pace || null, discoverUnits: o.discoverUnits, feed: o.feed || null });
+  return createSim(D, { keys: o.keys ?? 45, now: T0 + 31e3, lastOf: o.lastOf || (() => T0), cadenceOf: o.cadenceOf || ((i) => (o.dueOnly === undefined || o.dueOnly.includes(i) ? 30e3 : 900e3)), limit: o.limit ?? 1e6, sharePct: o.sharePct ?? 25, floorMs: o.floorMs ?? 20e3, latency: o.latency ?? 20, units: o.units ?? 1, fail: o.fail, refuse: o.refuse, hostScan: o.hostScan, backoffUntil: o.backoffUntil, epoch: o.epoch, failures: o.failures, pace: o.pace || null, discoverUnits: o.discoverUnits, feed: o.feed || null, recheck: o.recheck || null });
 }
 /** callsPerKey over a list of fetches. */
 const callsOn = (sim, key) => sim.fetches.filter((f) => f.key === key).length;
@@ -1360,6 +1409,105 @@ const R21 = {
   }
 }
 
+// ═══ ④d RULE 22 (lane lark-threads) — the recent-roots recheck: the due list, the order, the bounds, the press ═══
+console.log('④d RULE 22: the recent-roots recheck — the PURE due list, the lowest priority, its bounds, the owner\'s press');
+const recheckOf = (keys, o = {}) => ({ perPass: o.perPass ?? 3, due: () => keys.map((k) => ({ key: k, dueAt: 0 })), answer: o.answer || (() => ({})) });
+const R22 = {
+  /** THE ORDER: a human's request, the due rows, then — nothing else pending — the armed rechecks (oldest first). */
+  order(D) {
+    const sim = account(D, { keys: 4, dueOnly: [0, 1], recheck: recheckOf([keyOf(2), keyOf(3), keyOf(0)]) });
+    sim.file('owner', keyOf(3));
+    const end = sim.runPass({ origin: 'timer' });
+    return { log: sim.vendorLog.map((v) => `${v.type === 'fetch' ? 'f' : v.type}:${v.key ? v.key.slice(5) : ''}`), end, v: sim.violations };
+  },
+  /** THE PER-PASS BOUND: five armed, perPass 2 ⇒ two rechecks; a second turn in the pass re-arms nothing. */
+  bound(D) {
+    const sim = account(D, { keys: 6, dueOnly: [], recheck: recheckOf([keyOf(0), keyOf(1), keyOf(2), keyOf(3), keyOf(4)], { perPass: 2 }) });
+    sim.W.timerDue = true;
+    sim.runPass({ origin: 'timer' });
+    return { rechecks: sim.vendorLog.filter((v) => v.type === 'recheck').map((v) => v.key.slice(5)), v: sim.violations };
+  },
+  /** A back-off pass (the owner's one press), a request-only pass, the minute spent: no recheck. */
+  never(D) {
+    const a = account(D, { keys: 4, dueOnly: [], recheck: recheckOf([keyOf(1)]), backoffUntil: T0 + 120e3, epoch: 1, failures: 1 });
+    a.file('owner', keyOf(1)); a.runPass({ origin: 'timer' });
+    const b = account(D, { keys: 4, dueOnly: [], recheck: recheckOf([keyOf(1)]) });
+    b.file('agent', keyOf(2)); b.runPass({ origin: 'request' });
+    const c = account(D, { keys: 4, dueOnly: [], limit: 3, recheck: recheckOf([keyOf(1)]) });
+    c.W.spent = 3; c.runPass({ origin: 'timer' });
+    const n = (x) => x.vendorLog.filter((v) => v.type === 'recheck').length;
+    return { backoff: n(a), request: n(b), budget: n(c) };
+  },
+  /** A conversation-level refusal ends that recheck, never the pass; an account failure is rule 3. */
+  refusals(D) {
+    const a = account(D, { keys: 4, dueOnly: [], recheck: recheckOf([keyOf(1), keyOf(2)], { answer: (api, k) => (k === keyOf(1) ? { skip: 'not-found' } : {}) }) });
+    const ea = a.runPass({ origin: 'timer' });
+    const b = account(D, { keys: 4, dueOnly: [], recheck: recheckOf([keyOf(1), keyOf(2)], { answer: () => ({ error: 'auth-expired' }) }) });
+    const eb = b.runPass({ origin: 'timer' });
+    return { skipOk: ea.ok, skipN: a.vendorLog.filter((v) => v.type === 'recheck').length, errOk: eb.ok, errWhy: eb.why, errN: b.vendorLog.filter((v) => v.type === 'recheck').length };
+  },
+  /** 22b: the owner's press carries `recheck`; a window's open and an agent's refresh never do. */
+  press(D) {
+    const out = {};
+    for (const origin of ['owner', 'open', 'agent']) {
+      const sim = account(D, { keys: 3, dueOnly: [] });
+      sim.file(origin, keyOf(1));
+      let flag = null;
+      sim.hooks.onStep = (s) => { const act = D.next(s); if (act.type === 'fetch' && flag === null) flag = !!act.recheck; };
+      sim.runPass({ origin: 'request' });
+      out[origin] = flag;
+    }
+    return out;
+  },
+};
+{
+  const NOW = T0 + 10 * 86400e3;
+  const row = (key, o = {}) => ({ key, live: true, separate: true, mode: 'chat', walked: true, lastRecheckAt: 0, lastAt: NOW - 3600e3, ...o });
+  const due = D0.recheckDue([
+    row('acct/a'), row('acct/b', { lastRecheckAt: NOW - 2 * 3600e3 }), row('acct/c', { lastRecheckAt: NOW - 600e3 }),
+    row('acct/paused', { live: false }), row('acct/inline', { separate: false }), row('acct/topic', { mode: 'topic' }),
+    row('acct/fresh', { walked: false }), row('acct/quiet', { lastAt: NOW - 15 * 86400e3 }), row('acct/never', { lastAt: null }),
+    row('acct/future', { lastRecheckAt: NOW + 60e3 }), null, { key: '' },
+  ], { now: NOW, everyMs: 3600e3 });
+  ok(J(due.map((d) => d.key)) === J(['acct/a', 'acct/b']), 'rule 22a recheckDue: due = live + separately listed + not a topic group + walked once + active within 14 d + not rechecked within the hour — never rechecked first, then the oldest; a paused / inline / topic / never-walked / quiet / silent row, a clock gone backwards and junk are not due', J(due));
+  ok(D0.recheckDue(Array.from({ length: 500 }, (_, i) => row('acct/k' + i)), { now: NOW, max: 7 }).length === 7 && D0.recheckDue([row('acct/a', { lastRecheckAt: NOW - 61e3 })], { now: NOW, everyMs: 1 }).length === 1 && D0.recheckDue([row('acct/a', { lastRecheckAt: NOW - 59e3 })], { now: NOW, everyMs: 1 }).length === 0, 'rule 22a recheckDue: at most `max`; the cadence is never under a minute (a setting of 1 ms reads as 60 s)');
+  ok(D0.recheckOnPress(0, NOW) && D0.recheckOnPress(NOW - 61e3, NOW) && !D0.recheckOnPress(NOW - 30e3, NOW) && D0.recheckOnPress(NOW + 5e3, NOW) && D0.RECHECK_FLOOR_MS === 60e3, 'rule 22b recheckOnPress: the owner\'s press re-lists unless the conversation was rechecked within 60 s (a clock gone backwards never blocks it)');
+  const o = R22.order(D0);
+  ok(J(o.log) === J(['f:c0003', 'f:c0000', 'f:c0001', 'recheck:c0002', 'recheck:c0003', 'recheck:c0000']) && o.end.ok && o.v.length === 0, 'rule 22 ORDER: the owner\'s request, then the due rows, then — nothing else pending — the armed rechecks in their order (the lowest priority: a recheck never delays a human or a due row)', J(o.log));
+  const bd = R22.bound(D0);
+  ok(J(bd.rechecks) === J(['c0000', 'c0001']) && bd.v.length === 0, 'rule 22: perPass (2) rechecks a pass, the rest wait for the next pass; a second turn in the pass re-arms nothing', J(bd));
+  const nv = R22.never(D0);
+  ok(nv.backoff === 0 && nv.request === 0 && nv.budget === 0, 'rule 22: no recheck inside a back-off (the owner\'s one press only), on a request-only pass, or with the minute spent', J(nv));
+  const rf = R22.refusals(D0);
+  ok(rf.skipOk && rf.skipN === 2 && !rf.errOk && rf.errWhy === 'auth-expired' && rf.errN === 1, 'rule 22: a conversation-level refusal ends that recheck and the pass goes on; an account failure is rule 3 (nothing more sent)', J(rf));
+  const pr = R22.press(D0);
+  ok(pr.owner === true && pr.open === false && pr.agent === false, 'rule 22b: the OWNER\'s press carries `recheck`; a window\'s open and an agent\'s refresh never do (a metered call the owner pays for)', J(pr));
+}
+{
+  const MUT22 = [
+    { tag: 'recheck-ahead', clause: 'the lowest priority (nothing else pending)', edits: [["  if (!queue.length && recheckEligible(s, p)) return paced(s, base, { ...base, type: 'recheck', key: p.recheck.pending[0] });", "  if (recheckEligible(s, p) && !humanWaiting) return paced(s, base, { ...base, type: 'recheck', key: p.recheck.pending[0] });"]], walk: ['r22-order'], repro: (D) => { const r = R22.order(D); return { red: r.log.indexOf('recheck:c0002') < r.log.indexOf('f:c0001'), said: J(r.log) }; } },
+    { tag: 'recheck-unbounded', clause: 'at most perPass a pass', edits: [['  if (!r || !r.pending.length || r.done >= r.perPass || p.backoff || !p.timerWork || p.cut) return false;', '  if (!r || !r.pending.length || p.backoff || !p.timerWork || p.cut) return false;']], walk: ['r22-per-pass'], repro: (D) => { const r = R22.bound(D); return { red: r.rechecks.length > 2, said: J(r) }; } },
+    // (a back-off pass never arms a recheck — `turn` does not run inside a back-off — so the in-back-off clause is the turn's;
+    // the table's `never` row holds it. The fourth clause is the key's once-per-pass:)
+    { tag: 'recheck-twice', clause: 'a key at most once a pass', edits: [["      if (result === undefined) { p.inflight = { type: 'recheck', key: act.key }; p.recheck = { ...p.recheck, pending: p.recheck.pending.filter((k) => k !== act.key) }; break; }", "      if (result === undefined) { p.inflight = { type: 'recheck', key: act.key }; break; }"]], walk: ['r22-twice'], repro: (D) => { const r = R22.bound(D); return { red: r.rechecks[0] === r.rechecks[1], said: J(r.rechecks) }; } },
+    { tag: 'recheck-any-press', clause: 'the owner\'s press only', edits: [["    recheck: pick.reqs.some((r) => r.origin === 'owner'),", '    recheck: pick.reqs.length > 0,']], walk: ['r22-press'], repro: (D) => { const r = R22.press(D); return { red: r.open || r.agent, said: J(r) }; } },
+  ];
+  for (const m of MUT22) {
+    const mm = mutant(m.tag, m.edits);
+    if (!ok(mm.setup, `MUTANT setup · ${m.tag} (rule 22: ${m.clause}) is reconstructed from the shipped bytes`, mm.why)) continue;
+    let rep;
+    try { rep = m.repro(mm.D); } catch (e) { rep = { red: true, said: 'threw: ' + e.message }; }
+    const hit = {};
+    for (let i = 0; i < 8 && !m.walk.some((k) => hit[k]); i++) {
+      let r;
+      try { r = walk(mm.D, 5151 + i * 97, 'mixed', 900, { forceRecheck: true }); } catch (e) { hit['threw'] = (hit['threw'] || 0) + 1; continue; }
+      for (const v of r.sim.violations) { const kk = v.split(':')[0]; hit[kk] = (hit[kk] || 0) + 1; }
+    }
+    const named = m.walk.filter((k) => hit[k]);
+    ok(rep.red && named.length > 0, `MUTANT ${m.tag}: its table row goes red (${String(rep.said).slice(0, 140)}) AND the walk names rule 22's invariant (${named.map((k) => `${k} ×${hit[k]}`).join(', ')})`, `repro red ${rep.red}; walk hit ${J(hit)}`);
+  }
+}
+
 // ═══ ⑤ THE CENSUS ═════════════════════════════════════════════════════════════════════════════
 console.log('⑤ THE CENSUS: a pure model, codes the routes and the CLI know, an engine with no scheduling of its own');
 {
@@ -1368,7 +1516,7 @@ console.log('⑤ THE CENSUS: a pure model, codes the routes and the CLI know, an
   ok(!/Date\.now|new Date|setTimeout|setImmediate|setInterval|Math\.random|process\./.test(code), 'the model reads no clock, sets no timer, draws no randomness and touches no process — `now` is a fact the driver hands in');
   ok(/^'use strict';/.test(SRC) && /module\.exports = \{/.test(SRC), 'the model is CJS (the engine requires it, this suite and a patched copy load it the same way)');
   const rules = [...SRC.matchAll(/^ \* {1,2}(\d{1,2})\. [A-Z]/gm)].map((m) => Number(m[1]));
-  ok(J(rules) === J(Array.from({ length: 21 }, (_, i) => i + 1)), `the doc comment states the rules as ONE numbered list 1–21 (${rules.join(',')}) — rule 20 (lane channel-threads) is the reaction trickle + the thread walk, rule 21 (lane lark-search-poll) the change feed`);
+  ok(J(rules) === J(Array.from({ length: 22 }, (_, i) => i + 1)), `the doc comment states the rules as ONE numbered list 1–22 (${rules.join(',')}) — rule 20 (lane channel-threads) is the reaction trickle + the thread walk, rule 21 (lane lark-search-poll) the change feed, rule 22 (lane lark-threads) the recent-roots recheck`);
   ok(J(D0.REFUSAL_CODES) === J(['backoff', 'vendor-budget', 'refresh-floor', 'refresh-queue-full']) && !D0.ANSWER_OUTCOMES.includes('wait') && D0.PACE_WAIT_MAX_MS === 1000, 'rule 18 adds NO refusal code and no settlement — a wait is neither (REFUSAL_CODES unchanged; PACE_WAIT_MAX_MS 1000)');
   const asrc = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf8');
   const line = asrc.split('\n').find((l) => l.includes('const status = code === \'not-found\' ? 404') && l.includes('refresh-queue-full')) || '';
@@ -1454,6 +1602,26 @@ console.log('⑥ RULE 19: one conversation\'s older history — join, the rememb
     ok(m.red(mm.D) && !m.red(D0), `MUTANT ${m.tag}: its own row goes red on the copy and stays green on the shipped model`);
   }
   for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: MUTANTS.length + OLD_MUTANTS.length })) ok(r.pass, 'rule 19 ' + r.name, r.detail);
+}
+
+// ── lane lark-threads verify r3 (T2 ②): THE SLIDING MINUTE — the minute's meter is a fixed window (60), the per-second bucket
+//    (1/s, burst 5) is what bounds a SLIDING minute; the burst and the first refill share instant 0, so any half-open 60 s
+//    window holds at most 60·r + burst − 1 = 64 — exactly what r2's day walk measured ("max in any sliding minute: 64"). Pinned
+//    PURE on paceFresh/paceLevel with a greedy sender; the card's words name the burst beside the minute and the per-second figure.
+console.log('\nverify r3 (T2 ②): the sliding minute = 60·r + burst − 1, said on the card');
+{
+  const D = require(path.join(REPO, 'src/channel-drain.js'));
+  const greedy = (r, burst, seconds) => { const sends = []; let b = D.paceFresh(r, burst, 0); let t = 0; while (t <= seconds * 1000) { const lvl = D.paceLevel(b, t); if (lvl >= 1) { b = D.paceFresh(r, burst, t, lvl - 1); sends.push(t); } else t += Math.ceil(((1 - lvl) / r) * 1000); } return sends; };
+  const maxWindow = (sends, w) => { let best = 0; for (let i = 0; i < sends.length; i++) { let j = i; while (j < sends.length && sends[j] < sends[i] + w) j++; best = Math.max(best, j - i); } return best; };
+  const s15 = greedy(1, 5, 600), s11 = greedy(1, 1, 600), s2040 = greedy(40, 40, 120);
+  ok(maxWindow(s15, 60e3) === 64 && s15.filter((t) => t === 0).length === 5, `pace 1/s burst 5: a greedy sender puts 5 at instant 0 and 1 per second after ⇒ at most 64 in any sliding minute (measured ${maxWindow(s15, 60e3)}; r2's walk: 64)`);
+  ok(maxWindow(s11, 60e3) === 60 && maxWindow(s2040, 60e3) === 40 * 60 + 40 - 1, `the formula 60·r + burst − 1: burst 1 ⇒ 60; Gmail's 40/s burst 40 ⇒ ${40 * 60 + 40 - 1}`);
+  const C = require(path.join(REPO, 'src/channel-caps.js'));
+  const words = (b) => C.budgetText({ unit: 'request', limit: 60, exhausted: true, waiting: 2, resetInSeconds: 12, perSec: 1, spentBy: { agent: 0 }, ...b });
+  ok(/60 requests\/min \(at most 1\/s, 5 at once\)/.test(words({ burst: 5 })) && /60 requests\/min \(at most 1\/s\)/.test(words({ burst: 1 })) && !/at once/.test(words({ burst: null })), 'the card\'s budget sentence names the burst beside the minute and the per-second figure ("5 at once"); a bucket of one says nothing more');
+  ok(/\(at most 1\/s, 5 at once\) for this account, 3 of them by agent refreshes/.test(words({ burst: 5, spentBy: { agent: 3 } })), '…and the agent-share variant carries the same burst');
+  const eng = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
+  ok(/burst: pd \? Math\.round\(pd\.burst \* 100\) \/ 100 : null \};/.test(eng), 'WIRING: budgetView serves `burst` from the pace declaration (the card reads it; nothing else computes a ceiling)');
 }
 
 console.log(`\n${failN ? 'FAILED' : 'ALL PASS'} (${passN} passed${failN ? `, ${failN} failed` : ''})`);

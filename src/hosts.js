@@ -889,7 +889,7 @@ class HostManager {
    *  table the shipped `vibespace-browser` runs (copied at boot from
    *  src/browser-verbs.js); `vibespace-browser-stuck.js` its page-dialog words (lane browser-stuck, copied at boot from
    *  src/browser-stuck.js). test-architecture §52 fails a static tool left out. */
-  static AGENT_TOOLS = ['vibespace-status', 'vibespace-task', 'vibespace-ask', 'vibespace-exit', 'vibespace-job', 'vibespace-docs', 'vibespace-msg', 'vibespace-page', 'vibespace-channels', 'vibespace-browser', 'vibespace-browser-verbs.js', 'vibespace-browser-stuck.js', 'agent-browser', 'vibespace-window', 'vibespace-app', 'vibespace-hook.mjs', 'vibespace-hook-register.mjs', 'vibespace-remote-keeper', 'vibespace-claude-subscription-login.mjs', 'vibespace-usage'];
+  static AGENT_TOOLS = ['vibespace-status', 'vibespace-task', 'vibespace-ask', 'vibespace-exit', 'vibespace-job', 'vibespace-docs', 'vibespace-msg', 'vibespace-page', 'vibespace-design', 'vibespace-channels', 'vibespace-browser', 'vibespace-browser-verbs.js', 'vibespace-browser-stuck.js', 'agent-browser', 'vibespace-window', 'vibespace-app', 'vibespace-hook.mjs', 'vibespace-hook-register.mjs', 'vibespace-remote-keeper', 'vibespace-claude-subscription-login.mjs', 'vibespace-usage'];
   /** Plugin agent-tool shims (Plugin Ph4, 2.369.30): the loader installs a
    *  provider returning the `vibespace-tool-<plugin>-<name>` files it
    *  generates right now, so they ship to ssh hosts and dial devices with the
@@ -925,7 +925,7 @@ class HostManager {
       + `if [ -n "$VS_NODE" ]; then VIBESPACE_CLI_CONFIG=${this._cliConfigPlanB64()} "$VS_NODE" "$HOME/.vibespace/bin/vibespace-hook-register.mjs" --status 2>/dev/null; else echo "CFG|*|*|no-node"; fi; `
       + 'else echo "CFG|*|*|unknown"; fi';
     const out = await this._hostShell(h, probe, { timeoutMs: 12000 });
-    const st = { tools: {}, node: false, hooks: {}, keeperSessions: 0, cliConfig: parseReceiptLines(out) };
+    const st = { tools: {}, node: false, hooks: {}, keeperSessions: 0, cliConfig: parseReceiptLines(out), refused: this._ownerWriteRefusal() };
     for (const line of out.split('\n')) {
       const p = line.trim().split('|');
       if (p[0] === 'T') st.tools[p[1]] = { present: !!p[2], sha256: p[2] || null };
@@ -947,7 +947,15 @@ class HostManager {
   /** Install/refresh the tools + register the hook — the SAME tar-over-stdin
    *  channel the per-spawn distribution uses (nothing bulky/secret in argv;
    *  no token here, tokens stay strictly per-session). */
+  /** THE ROOT VERDICT (src/server-root.js; server.js sets `hosts.ownerWriteRefusal`):
+   *  null, or the refusal — a worktree / temp server ships the tools but runs
+   *  no register helper on another machine either. No server behind it = null. */
+  _ownerWriteRefusal() {
+    try { return typeof this.ownerWriteRefusal === 'function' ? this.ownerWriteRefusal() : null; } catch { return null; }
+  }
+
   installAgentTools(id, toolDir) {
+    const refused = this._ownerWriteRefusal();
     const h = this.get(id);
     const present = HostManager.agentTools().filter((n) => { try { return fs.statSync(path.join(toolDir, n)).isFile(); } catch { return false; } });
     if (!present.length) throw new Error('no agent tools found locally');
@@ -964,11 +972,12 @@ class HostManager {
         // plan (claude cleanupPeriodDays, codex [history] persistence, …) rides
         // the register helper — the helper prints one CFG| receipt per managed
         // key, returned with the install result. Shell-safe bare (base64).
-        + `[ -n "$VS_NODE" ] && VIBESPACE_CLI_CONFIG=${this._cliConfigPlanB64()} "$VS_NODE" "$HOME/.vibespace/bin/vibespace-hook-register.mjs" 2>/dev/null; echo VS-INSTALLED`],
+        + (refused ? '' : `[ -n "$VS_NODE" ] && VIBESPACE_CLI_CONFIG=${this._cliConfigPlanB64()} "$VS_NODE" "$HOME/.vibespace/bin/vibespace-hook-register.mjs" 2>/dev/null; `)
+        + 'echo VS-INSTALLED'],
         { timeout: 30000 }, (err, stdout, stderr) => {
           if (err) return reject(new Error((stderr?.toString() || err.message || '').trim().slice(0, 300)));
           if (!String(stdout).includes('VS-INSTALLED')) return reject(new Error('unexpected response'));
-          resolve({ installed: present, cliConfig: parseReceiptLines(String(stdout)) });
+          resolve({ installed: present, cliConfig: parseReceiptLines(String(stdout)), ...(refused ? { refused } : {}) });
         });
       child.stdin.end(tar);
     });
@@ -1172,7 +1181,7 @@ class HostManager {
     // plugin shims of plugins disabled/uninstalled since the last ship are not
     // in the live list any more — the glob sweeps every generated shim
     const cmd = REMOTE_PRELUDE
-      + nodeFinder() + 'if [ -n "$VS_NODE" ] && [ -f "$HOME/.vibespace/bin/vibespace-hook-register.mjs" ]; then "$VS_NODE" "$HOME/.vibespace/bin/vibespace-hook-register.mjs" --uninstall 2>/dev/null || true; fi; '
+      + (this._ownerWriteRefusal() ? '' : nodeFinder() + 'if [ -n "$VS_NODE" ] && [ -f "$HOME/.vibespace/bin/vibespace-hook-register.mjs" ]; then "$VS_NODE" "$HOME/.vibespace/bin/vibespace-hook-register.mjs" --uninstall 2>/dev/null || true; fi; ')
       + `rm -f ${rms} "$HOME"/.vibespace/bin/vibespace-tool-* 2>/dev/null; echo VS-REMOVED`;
     const out = String(await this._ssh(h, cmd, { timeoutMs: 15000 }));
     if (!out.includes('VS-REMOVED')) throw new Error('unexpected response');

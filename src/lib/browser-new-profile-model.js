@@ -141,7 +141,7 @@ export function createRefusalWords(r, t = (s) => s) {
     case 'tier3_is_a_window_target': return t(i18nKey('A window on your desktop is shared with an agent from the window itself — it is not a profile.'));
     case 'sharing_refused': return t(i18nKey("Separate tabs can't be used here."));
     case 'dir_unwritable': return t(i18nKey("VibeSpace couldn't create the profile's folder on this computer."));
-    case 'empty_list': return t(i18nKey('Pick at least one conversation or Task Group, or choose “All my conversations”.'));
+    case 'empty_list': return t(i18nKey('Pick All agents, or at least one conversation or Task Group.'));   // the who dialog's words (one control since lane everyone-principal)
     case 'no_browser_key': return r && r.why === 'remote' ? t(i18nKey('“{name}” runs on another machine — the Agent browser runs on this machine only'), { name }) : t(i18nKey('“{name}” has no browser of its own yet — restart it (Terminate → Resume), then add it'), { name });
     case 'session-gone': return t(i18nKey('That conversation is not running any more — pick it again from the list'));
     case 'unknown_task': return t(i18nKey('That Task Group no longer exists — pick another one'));

@@ -174,6 +174,22 @@ const base = { adapterId: 'a', convId: 'c', vendorId: 'v1', at: 1700000000000, t
   ok(R.validateSide({ k: 'rx', msg: 'm', at: 1, form: 'delta', op: 'add', key: F, actor: { id: 'u' }, src: 'event' }).code === 'bad-key' && R.validateReactions([{ key: F, count: 1 }]).reactions.length === 0, 'a KEY carrying a frame is refused by the alphabet — never neutered into a drawable string');
 }
 
+// ── ④g lane lark-threads (A1): THE PLACE PATCH's side line — `{k:'pl', msg, at, src, threadKey, root}`: at least one id,
+// each ≤ 512 with no control character, a root equal to the message is no root; its dedup key is its CONTENT (a replayed
+// widening is a no-op whenever it came); the three new sources ──
+{
+  const ok1 = R.validateSide({ k: 'pl', msg: 'om_r', at: 5, src: 'recheck', threadKey: 'omt_1', root: null, extra: 'dropped' });
+  const self = R.validateSide({ k: 'pl', msg: 'om_r', at: 5, src: 'walk', threadKey: 'omt_1', root: 'om_r' });
+  const none = R.validateSide({ k: 'pl', msg: 'om_r', at: 5, src: 'byid', threadKey: null, root: 'om_r' });
+  const big = R.validateSide({ k: 'pl', msg: 'om_r', at: 5, src: 'history', threadKey: 'k'.repeat(513) });
+  const ctl = R.validateSide({ k: 'pl', msg: 'om_r', at: 5, src: 'history', threadKey: 'omt\u0000x' });
+  const badSrc = R.validateSide({ k: 'pl', msg: 'om_r', at: 5, src: 'nowhere', threadKey: 'omt_1' });
+  ok(ok1.ok && JSON.stringify(ok1.side) === JSON.stringify({ k: 'pl', msg: 'om_r', at: 5, src: 'recheck', threadKey: 'omt_1', root: null }) && self.ok && self.side.root === null && none.code === 'bad-place' && big.code === 'bad-place' && ctl.code === 'bad-place' && badSrc.code === 'bad-source',
+    '④g a place patch line: only its declared fields; a self-root is no root; nothing to widen / an over-long / a control-character id is refused `bad-place`; the source is a closed set', JSON.stringify([ok1, self, none.code, big.code, ctl.code, badSrc.code]));
+  ok(R.sideKey(ok1.side) === 'pl:om_r:omt_1:' && R.sideKey({ ...ok1.side, at: 99 }) === R.sideKey(ok1.side) && R.SIDE_KINDS.includes('pl') && ['walk', 'byid', 'recheck'].every((x) => R.SIDE_SOURCES.includes(x)),
+    '④g its dedup key is its content (the instant is not in it — the same widening offered twice is one line)');
+}
+
 // ── ④d THE FIXED HALF IS A CENSUS, NOT A MEMORY ──
 // The `vibespace-*` half is a namespace; the rest is a list, and a list is
 // the tool this class defeats. Every HYPHENATED tag name the tree writes must
@@ -193,12 +209,13 @@ const base = { adapterId: 'a', convId: 'c', vendorId: 'v1', at: 1700000000000, t
     // Names that are PROSE, not frames — each one a placeholder inside a
     // message or a comment (`<buffer-file>`, `<remote-id>`, …). They are
     // listed with their reason so a fourteenth FRAME cannot hide among them.
-    const PROSE = new Set(['buffer-file', 'json-file', 'meta-file', 'deleted-id', 'remote-id', 'short-slug',
+    const PROSE = new Set(['buffer-file', 'json-file', 'meta-file', 'deleted-id', 'remote-id',
       'task-id', 'tool-use-id', 'webui-id', 'wss-url', 'parent-of-the-install-dir',
       // agent browser (2026-09-21): usage placeholders in the CLIs' help text and comments —
       // `<app-id>` (vibespace-window), `<per-session scratch dir>` / `<vs-key>` (browser-profiles.js's
       // variant table + remote prelude). (`<agent-browser args…>` left with the browser takeover:
-      // vibespace-browser's help no longer names the CLI it hides.)
+      // vibespace-browser's help no longer names the CLI it hides.) (`<short-slug>` left at 2.369.202 with the
+      // retired Claude CLI canvas request: the chip's request names `vibespace-design new` instead.)
       'app-id', 'per-session', 'vs-key']);
     const seen = new Map();
     for (const f of files) {
@@ -465,11 +482,11 @@ const base = { adapterId: 'a', convId: 'c', vendorId: 'v1', at: 1700000000000, t
   const SITES = [
     ['src/channel-blocks.js', 'name: String(x.name) })', 'into a render tree — validateBlocks (this module\'s door) judges every tree makeRecord keeps and every tree a read serves'],
     ['src/channel-reactions.js', "label: String(key || '')", 'the KEY itself — an identifier REACTION_KEY_RE already judged, never a vendor label'],
-    ['src/channel-thread.js', "name: String(a.name || '')", 'a stored record\'s author — makeRecord\'s door'],
+    ['src/channel-thread.js', "name: String(a.display || a.name || '')", 'a stored record\'s author — makeRecord\'s door (lane lark-threads: `display` = channel-authors\' view, built from door outputs and the owner\'s alias through the door)'],
     ['src/channels/gmail.js', 'name: String(p.filename', 'an attachment of a record makeRecord builds — the door'],
+    ['src/channels/fake.js', "name: String((r.author && r.author.name) || 'Ada')", 'lane lark-threads: the fake topics seam\'s reply author — a record makeRecord builds (the door)'],
     ['src/channels/lark.js', "name: String((m && m.name) || '')", 'a record\'s mentions — makeRecord\'s door'],
     ['src/channels/lark.js', "names.set(String(m.member_id), String(m.name || ''))", 'the members\' names map — read only into makeRecord\'s author and a tree\'s @ (both doors)'],
-    ['src/channels/lark.js', 'u.name.trim().slice(0, 200)', 'a contact\'s name — read only into describe() (the registry\'s door) and a record\'s author (makeRecord\'s door)'],
     ['src/server/channels-engine.js', 'en.title = c.title', 'makeConversation\'s output — the door'],
     ['src/server/channels-engine.js', 'en.participants = c.participants', 'makeConversation\'s output — the door'],
     ['src/server/channels-engine.js', "en.title = null; en.bornBy = 'feed'", 'no name (the client words "Single chat")'],

@@ -50,10 +50,20 @@
  * MEASURED FACTS THIS FILE ENCODES (dev box, Ubuntu 25.10, x11vnc 0.9.17):
  *   · x11vnc EXITS when `WAYLAND_DISPLAY` is in its environment ("Wayland
  *     display server detected … Exiting"), even with `-display :N` naming an
- *     Xvfb; `x11Env()` strips it and pins XDG_SESSION_TYPE=x11 for every
- *     process on a private display (GTK/Qt get GDK_BACKEND=x11 / QT_QPA_PLATFORM=xcb
- *     for the same reason — a Wayland session's toolkits would otherwise ignore
- *     DISPLAY).
+ *     Xvfb — and even when the name it holds does not exist (re-measured
+ *     2026-10-02); `x11Env()` pins XDG_SESSION_TYPE=x11 for every process on a
+ *     private display (GTK/Qt get GDK_BACKEND=x11 / QT_QPA_PLATFORM=xcb, SDL
+ *     SDL_VIDEODRIVER=x11, for the same reason — a Wayland session's toolkits
+ *     would otherwise ignore DISPLAY), and the keeper's own X server /
+ *     x11vnc / xpra spawns drop the variable (`withoutWayland`).
+ *   · DELETING `WAYLAND_DISPLAY` IS NOT ENOUGH (2026-10-02, the owner's Blender
+ *     on xpra :4 opened on the machine's physical screen, its VibeSpace window
+ *     waiting for ever): libwayland's wl_display_connect(NULL) with the
+ *     variable unset tries `wayland-0` under XDG_RUNTIME_DIR — the user's own
+ *     compositor — and Blender's GHOST prefers Wayland whenever a connect
+ *     succeeds. `x11Env()` NAMES a display that cannot exist
+ *     (NO_WAYLAND_DISPLAY: relative ⇒ $XDG_RUNTIME_DIR/<it>, where nothing
+ *     listens; never "" — some toolkits read "" as unset).
  *   · Xvfb answers `-displayfd` in ~40 ms; x11vnc's first banner ~350 ms after
  *     spawn; Xvfb 1024x768x24 = 65 MB RSS, x11vnc = 14.5 MB, xmessage = 5.8 MB.
  *   · both die cleanly on SIGTERM; `xwininfo -root -tree` lists an unmanaged
@@ -212,7 +222,11 @@ async function hostFacts({ hostId = null, env = process.env, bins = PROBE_BINS, 
  * `modules: null` (not knowable — judged present, the snap decides), `confinement: 'snap'`. Async stats only, never a
  * spawn; a module's YES is remembered for the program dir's life, a NO re-asked after BIN_RECHECK_MS (an install must
  * be seen without a restart; hostFacts' `fresh` clears it). Never throws.
- *   → { exec: 'libreoffice'|'soffice'|null, path, program, confinement: 'snap'|null, modules: {writer, calc, impress}|null }
+ *   → { exec: 'libreoffice'|'soffice'|null, path, program, confinement: 'snap'|null, modules: {writer, calc, impress}|null,
+ *       fonts: {Carlito, Caladea}|null }
+ * B-04da ② `fonts`: is each metric-compatible face (office-open OFFICE_FONTS) installed — a stat of the files the
+ * distros' packages put down, plus the user's own ~/.local/share/fonts (memoised like a module; null for a snap, whose
+ * fonts are its own).
  */
 const _officeMemo = new Map(); // `${program}|${lib}` → { at, yes }
 async function officeFacts({ bins = null, env = process.env, now = Date.now } = {}) {
@@ -222,7 +236,7 @@ async function officeFacts({ bins = null, env = process.env, now = Date.now } = 
   if (!p) return none;
   let real = null;
   try { real = await fs.promises.realpath(p); } catch { return none; } // vanished between the probe and now
-  if (real.startsWith('/snap/') || path.basename(real) === 'snap') return { exec, path: p, program: null, confinement: 'snap', modules: null };
+  if (real.startsWith('/snap/') || path.basename(real) === 'snap') return { exec, path: p, program: null, confinement: 'snap', modules: null, fonts: null };
   const program = path.dirname(real);
   const modules = {};
   for (const k of OFFICE.MODULE_KEYS) {
@@ -234,22 +248,50 @@ async function officeFacts({ bins = null, env = process.env, now = Date.now } = 
     _officeMemo.set(key, { at: now(), yes });
     modules[k] = yes;
   }
-  return { exec, path: p, program, confinement: null, modules };
+  const fonts = {};
+  const home = env && env.HOME ? String(env.HOME) : null;
+  for (const f of OFFICE.OFFICE_FONTS) {
+    const key = `font|${f.family}|${home || ''}`;
+    const hit = _officeMemo.get(key);
+    if (hit && (hit.yes || now() - hit.at < BIN_RECHECK_MS)) { fonts[f.family] = hit.yes; continue; }
+    const files = [...f.files, ...(home ? [path.join(home, '.local/share/fonts', path.basename(f.files[0])), path.join(home, '.fonts', path.basename(f.files[0]))] : [])];
+    let yes = false;
+    for (const file of files) { try { await fs.promises.access(file, fs.constants.R_OK); yes = true; break; } catch { /* the next place */ } }
+    _officeMemo.set(key, { at: now(), yes });
+    fonts[f.family] = yes;
+  }
+  return { exec, path: p, program, confinement: null, modules, fonts };
 }
 
 // ── env for a process on a private X display ─────────────────────────────────
+/** The Wayland display every process on a keeper-owned display is pointed at:
+ *  a relative name no compositor ever takes (see the default-socket fact in
+ *  the header). */
+const NO_WAYLAND_DISPLAY = 'vibespace-x11-only';
 /** The env every process on a keeper-owned display gets: the caller's
- *  (already sanitised) base minus the Wayland session, plus the display and
- *  its cookie file. See the x11vnc fact in the header. */
+ *  (already sanitised) base with the Wayland session replaced by a display
+ *  that cannot exist, plus the X display and its cookie file. See the x11vnc
+ *  and default-socket facts in the header. */
 function x11Env(base, { display, authFile }) {
   const env = { ...base };
-  delete env.WAYLAND_DISPLAY;
+  env.WAYLAND_DISPLAY = NO_WAYLAND_DISPLAY;  // never `delete` — unset means wayland-0, the machine's own screen
   env.DISPLAY = display;
   env.XAUTHORITY = authFile;
   env.XDG_SESSION_TYPE = 'x11';
   env.GDK_BACKEND = 'x11';
   env.QT_QPA_PLATFORM = 'xcb';
+  env.SDL_VIDEODRIVER = 'x11';  // SDL3 prefers Wayland; SDL2 and SDL3 both read this name
   return env;
+}
+/** The keeper's OWN X parts — the X server (Xvfb / Xvnc) and the picture
+ *  server (x11vnc, xpra) — keep their env as before: x11vnc 0.9.17 exits on
+ *  ANY WAYLAND_DISPLAY (measured with NO_WAYLAND_DISPLAY too), xpra 6.5's
+ *  is_Wayland() treats the session as Wayland (its source), and none of them
+ *  is a Wayland client. Only clients on the display get the dead name. */
+function withoutWayland(env) {
+  const e = { ...(env || process.env) };
+  delete e.WAYLAND_DISPLAY;
+  return e;
 }
 
 // ── Xauthority ───────────────────────────────────────────────────────────────
@@ -461,7 +503,7 @@ function startXServer({ bin, binPath, authFile, geometry = '1280x800', depth = 2
   if (!argsOf) return Promise.reject(namedError('unknown-x-server', `startXServer: unknown X server ${bin}`));
   const args = argsOf({ authFile, geometry, depth, rfbPort });
   return new Promise((resolve, reject) => {
-    const { child, spawned } = spawnDetached(binPath || bin, args, { env, logFd, extraStdio: 'pipe', name: bin });
+    const { child, spawned } = spawnDetached(binPath || bin, args, { env: withoutWayland(env), logFd, extraStdio: 'pipe', name: bin });
     let settled = false;
     const done = (fn, v) => { if (settled) return; settled = true; clearTimeout(t); fn(v); };
     const t = setTimeout(() => { if (!settled) { try { child?.kill('SIGTERM'); } catch { } done(reject, namedError('x-timeout', `${bin} did not report a display within ${deadlineMs} ms`)); } }, deadlineMs);
@@ -482,7 +524,7 @@ function startXServer({ bin, binPath, authFile, geometry = '1280x800', depth = 2
  *  the child once SPAWNED; rejects a spawn failure by name. */
 function startX11vnc({ binPath, display, authFile, rfbPort, env, logFd = 'ignore' }) {
   const args = ['-display', display, '-auth', authFile, '-localhost', '-rfbport', String(rfbPort), '-forever', '-shared', '-nopw', '-quiet'];
-  return spawnDetached(binPath || 'x11vnc', args, { env, logFd, name: 'x11vnc' }).spawned;
+  return spawnDetached(binPath || 'x11vnc', args, { env: withoutWayland(env), logFd, name: 'x11vnc' }).spawned;
 }
 
 /**
@@ -564,6 +606,7 @@ const XPRA_ARGS = ({ port, dir, geometryMax = XPRA_GEOMETRY_MAX, dpi = 96 }) => 
  */
 function startXpra({ binPath, port, dir, env, logFd = 'ignore', deadlineMs = 15000, geometryMax = XPRA_GEOMETRY_MAX, dpi = 96 }) {
   const args = XPRA_ARGS({ port, dir, geometryMax, dpi });
+  env = withoutWayland(env || process.env);
   return new Promise((resolve, reject) => {
     // XPRA_CLIENT_CAN_SHUTDOWN=0: xpra ignores a client's `shutdown-server` (server/base.py `_request_stop`) — the keeper stops it
     const { child, spawned } = spawnDetached(binPath || 'xpra', args, { env: { ...(env || process.env), XPRA_CLIENT_CAN_SHUTDOWN: '0' }, logFd, extraStdio: 'pipe', name: 'xpra' });
@@ -899,24 +942,42 @@ function utf8Env(env) { return { ...(env || {}), LC_ALL: UTF8_LOCALE }; }
 /** The locale name the C library would pick for LC_CTYPE from an env (LC_ALL > LC_CTYPE > LANG). */
 const ctypeOf = (env) => String((env && (env.LC_ALL || env.LC_CTYPE || env.LANG)) || '');
 const UTF8_NAMED = /\.utf-?8(@|$)/i;
-const _charmapMemo = new Map(); // `${tool}|LC_ALL|LC_CTYPE|LANG|LOCPATH` → {ok, at} — a YES remembered, a NO re-asked after BIN_RECHECK_MS
-async function charmapOf(tool, env, { now = Date.now, timeout = 3000 } = {}) {
+const _charmapMemo = new Map(); // `${tool}|LC_ALL|LC_CTYPE|LANG|LOCPATH` → {ok, hung, at} — a YES remembered, a NO (a hang included) re-asked after BIN_RECHECK_MS
+const LOCALE_PROBE_MS = 3000;
+async function charmapOf(tool, env, { now = Date.now, timeout = LOCALE_PROBE_MS } = {}) {
   const key = [tool, env.LC_ALL || '', env.LC_CTYPE || '', env.LANG || '', env.LOCPATH || ''].join('|');
   const hit = _charmapMemo.get(key);
-  if (hit && (hit.ok || now() - hit.at < BIN_RECHECK_MS)) return hit.ok;
+  if (hit && (hit.ok || now() - hit.at < BIN_RECHECK_MS)) return hit;
   const r = await run(tool, ['charmap'], { env, timeout });
-  const ok = !r.err && r.stdout.trim() === 'UTF-8';
-  _charmapMemo.set(key, { ok, at: now() });
-  return ok;
+  const v = { ok: !r.err && r.stdout.trim() === 'UTF-8', hung: !!(r.err && r.err.killed), at: now() };
+  _charmapMemo.set(key, v);
+  return v;
 }
-function resetCharmapMemo() { _charmapMemo.clear(); }
+/** B-f18a ②: how many of `locale -a`'s UTF-8 locales are asked (en_US first, then the machine's own order). */
+const LOCALE_A_MAX = 4;
+const _localesMemo = new Map(); // `${tool}|LOCPATH` → {names, hung, at}, re-asked after BIN_RECHECK_MS
+async function utf8LocalesOf(tool, env, { now = Date.now, timeout = LOCALE_PROBE_MS } = {}) {
+  const key = [tool, env.LOCPATH || ''].join('|');
+  const hit = _localesMemo.get(key);
+  if (hit && now() - hit.at < BIN_RECHECK_MS) return hit;
+  const r = await run(tool, ['-a'], { env, timeout });
+  const names = r.err ? [] : [...new Set(r.stdout.split('\n').map((l) => l.trim()))].filter((n) => UTF8_NAMED.test(n) && !/^C\.utf-?8$/i.test(n) && /^[\w.@-]{1,64}$/.test(n));
+  const en = (n) => (/^en_US\./i.test(n) ? 0 : 1);
+  names.sort((a, b) => en(a) - en(b)); // stable: en_US first, the rest in the machine's order
+  const v = { names: names.slice(0, LOCALE_A_MAX), hung: !!(r.err && r.err.killed), at: now() };
+  _localesMemo.set(key, v);
+  return v;
+}
+function resetCharmapMemo() { _charmapMemo.clear(); _localesMemo.clear(); }
 /**
  * An env in which a child can carry non-ASCII text (lane E verify r3, F3) — `{ok, env, locale, verified}` or
  * `{ok:false, tried, why}`. Candidates in order: the UTF-8 rule (LC_ALL=C.UTF-8), then the env's OWN locale when its
- * name says UTF-8 (a machine without C.UTF-8 — an old glibc — but with en_US.UTF-8 generated). Each is asked with
+ * name says UTF-8 (a machine without C.UTF-8 — an old glibc — but with en_US.UTF-8 generated), then (B-f18a ②) the
+ * UTF-8 locales `locale -a` lists — en_US first, at most LOCALE_A_MAX — for an env that names none. Each is asked with
  * `locale charmap` under that env (glibc answers ANSI_X3.4-1968 when the locale cannot be loaded — measured). No
  * `locale` binary (`bins.locale === null`, or none on PATH): the rule is applied unverified — the child's own error
- * is then the answer.
+ * is then the answer. B-f18a ④: a `locale` that HANGS is asked once — the walk stops at its first timeout (it used to
+ * spend LOCALE_PROBE_MS per candidate) — and the NO is remembered BIN_RECHECK_MS like any other.
  */
 async function utf8LocaleEnv(env, { bins = null, now = Date.now } = {}) {
   const base = env || {};
@@ -925,8 +986,24 @@ async function utf8LocaleEnv(env, { bins = null, now = Date.now } = {}) {
   if (own && own !== UTF8_LOCALE && UTF8_NAMED.test(own)) cands.push(base);
   const tool = bins && Object.prototype.hasOwnProperty.call(bins, 'locale') ? bins.locale : binOnPath('locale', { env: base, now });
   if (!tool) return { ok: true, env: cands[0], locale: UTF8_LOCALE, verified: false };
-  for (const c of cands) if (await charmapOf(tool, c, { now })) return { ok: true, env: c, locale: ctypeOf(c), verified: true };
-  return { ok: false, tried: cands.map(ctypeOf), why: '`locale charmap` answers no UTF-8 for any of them' };
+  const tried = [];
+  const hung = () => ({ ok: false, tried, why: `\`locale\` did not answer within ${LOCALE_PROBE_MS} ms` });
+  for (const c of cands) {
+    tried.push(ctypeOf(c));
+    const v = await charmapOf(tool, c, { now });
+    if (v.ok) return { ok: true, env: c, locale: ctypeOf(c), verified: true };
+    if (v.hung) return hung();
+  }
+  const listed = await utf8LocalesOf(tool, base, { now });
+  if (listed.hung) return hung();
+  for (const name of listed.names) {
+    const c = { ...base, LC_ALL: name };
+    tried.push(name);
+    const v = await charmapOf(tool, c, { now });
+    if (v.ok) return { ok: true, env: c, locale: name, verified: true };
+    if (v.hung) return hung();
+  }
+  return { ok: false, tried, why: `\`locale charmap\` answers no UTF-8 for any of them${listed.names.length ? '' : ', and `locale -a` lists no other UTF-8 locale'}` };
 }
 // One `xwininfo -root -tree` child line: indent, id, the NAME, `: ("instance" "Class")`,
 // then `WxH+relX+relY  +absX+absY`. Parsed from the RIGHT, because the name is
@@ -1151,7 +1228,7 @@ async function installFacts({ env = process.env, now = Date.now, osRelease = '/e
 }
 
 module.exports = {
-  assertLocal, binOnPath, resetBinMemo, forgetBin, assertExecutable, PROBE_BINS, BROWSER_BINS, browserConfinement, hostFacts, officeFacts, x11Env,
+  assertLocal, binOnPath, resetBinMemo, forgetBin, assertExecutable, PROBE_BINS, BROWSER_BINS, browserConfinement, hostFacts, officeFacts, x11Env, NO_WAYLAND_DISPLAY, withoutWayland,
   newCookie, writeXauthority, xauthEntry, freePort, rfbBanner, waitForRfb, httpProbe, waitForHttp, waitForListen, portAnswers, LISTEN_PROBES,
   listenerInode, pidHoldsInode, listenerHeldBy,
   spawnDetached, X_SERVER_ARGS, startXServer, startX11vnc, startWindowManager, startApp, applyXResources, waitForXftDpi, RECIPES,

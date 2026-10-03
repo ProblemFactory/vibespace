@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePorts, scratch, scratchHome, fixtureSid, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
 import { writeHugeTranscript } from './huge-transcript-fixture.mjs';
-import { judgeGesture, formatGesture, SNAP_SOURCE, RING_SINCE_SOURCE, WHEEL_POINT_SOURCE, JUMP_SLACK_VIEWPORTS, DELIVERY_MIN_FRACTION, PAGE_UP_BAND_PX } from './paging-gesture-rules.mjs';
+import { judgeGesture, formatGesture, SNAP_SOURCE, RING_SINCE_SOURCE, WHEEL_POINT_SOURCE, JUMP_SLACK_VIEWPORTS, DELIVERY_MIN_FRACTION, PAGE_UP_BAND_PX, historyAbove } from './paging-gesture-rules.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 const { fixtureLitter } = require('../src/fixture-guard.js');
@@ -800,6 +800,66 @@ console.log('§4e the release frame (B-1192): a paging landing under a 3-frame s
   const C = ctl.landings || [];
   for (const l of C) console.log(line('control', l));
   check(`§4e NEGATIVE CONTROL: the pre-fix two-frame release on the same view lays a fresh card out ON SCREEN off its height (${C.filter((l) => l.nScreen).length} of ${C.length} landings) — the leg sees the defect`, C.length >= 5 && C.some((l) => l.nScreen), JSON.stringify(ctl.opened || C).slice(0, 400));
+}
+
+// ── 4g. THE NOTCH INSIDE THE LOAD LOCK (B-8c25 — this suite's red on the 2.369.195 mirror, passed on retry:
+// `up-fast-3: landed at scrollTop 31 (inside the 100 px pageUp band) with 2472 messages and the gap still
+// above`). An extend holds `_loading` 300 ms past its landing; a notch in that window that the browser can
+// deliver scrolls natively into the scroll handler's pageUp band, the handler (locked) pages nothing, and the
+// lift re-checked only the very edge (`scrollTop < 10`, and only for a notch it saw as an edge notch) — the
+// reader parked at the top of the slab with history above. A fling's last notch landing in that window is
+// timing (the runner's two starved cores); here it is CONSTRUCTED: one real notch from the top edge starts an
+// extendTop, the page catches its landing while the lock still holds and puts the view at LOCK_PROBE_ST
+// (a write — no input), and ONE real 120 px notch lands it inside the band, off the edge. The CONTROL is the
+// same leg with the lift's re-taken decision neutered on the instance (`_lockSkippedPageUp` → false) — the
+// pre-fix lift exactly (that predicate is the fix's only new branch). Judged by the judge's own band rule.
+const LOCK_PROBE_ST = 170;
+const lockProbe = async (control) => {
+  const label = control ? 'control' : 'fix';
+  await pageReady(PORT, 'lock ' + label);
+  await sleep(1500);
+  const opened = await evaljs(OPEN_HUGE(SID3, CWD, 'huge lock ' + label));
+  if (!opened?.ok) return { opened, rows: [] };
+  if (control) await evaljs('(() => { window.__v._lockSkippedPageUp = () => false; return 1; })()');
+  const pt = (await evaljs(WHEEL_POINT_SOURCE('up', 2400))) || { x: Math.round(opened.rect.x + opened.rect.w / 2), y: Math.round(opened.rect.y + opened.rect.h / 2) };
+  const wheel = (dy) => cdp('Input.dispatchMouseEvent', { type: 'mouseWheel', x: pt.x, y: pt.y, deltaX: 0, deltaY: dy });
+  // leave the live tail with the product's own paging (history below AND above the window)
+  for (let k = 0; k < 20; k++) { await wheel(-720); await sleep(400); const s = await evaljs('({ we: window.__v._windowEnd, total: window.__v._total })'); if (s.we < s.total) break; }
+  const rows = [];
+  for (let a = 0; a < 2; a++) {
+    await sleep(2000);   // past every paging gate's horizon
+    await evaljs('(() => { window.__list.scrollTop = 5; return 1; })()'); await sleep(300);
+    const before = await snap(); const mark = before.ringSeq;
+    const landing = evaljs(`(async () => { const v = window.__v, l = window.__list; const t0 = performance.now(); let seen = false;
+      while (performance.now() - t0 < 5000) { await new Promise((r) => requestAnimationFrame(r)); if (v._extendingTop) seen = true;
+        if (seen && !v._extendingTop && v._loading) { const st0 = Math.round(l.scrollTop); l.scrollTop = ${LOCK_PROBE_ST}; window.__lockNotch = null;
+          l.addEventListener('wheel', () => { window.__lockNotch = { loading: v._loading ? 1 : 0 }; }, { capture: true, once: true, passive: true });
+          return { ok: true, st0, ws: v._windowStart }; } }
+      return { ok: false, seen, loading: v._loading ? 1 : 0 }; })()`);
+    await wheel(-120);   // the edge notch: starts the extendTop
+    const landed = await landing;
+    if (!landed?.ok) { rows.push({ landed }); continue; }
+    await wheel(-120);   // THE NOTCH INSIDE THE LOCK
+    await sleep(2200);
+    const after = await snap(); const ring = await ringSince(mark);
+    const notch = await evaljs('window.__lockNotch');
+    const pre = !!(notch && notch.loading === 1);
+    const parked = after.st < PAGE_UP_BAND_PX && historyAbove(after) && !after.loading;
+    const tags = {}; for (const e of ring) tags[e.tag] = (tags[e.tag] || 0) + 1;
+    rows.push({ landed, pre, parked, after, lockBand: tags.lockBand || 0 });
+    console.log(`    [${label} ${a + 1}] landing st ${landed.st0} → view put at ${LOCK_PROBE_ST} inside the lock → one 120 px notch delivered ${pre ? 'WHILE LOCKED' : 'after the lock (precondition missed)'} → settled st ${after.st} ws ${after.ws} loading ${after.loading}: ${parked ? 'PARKED IN THE pageUp BAND with history above' : 'paged on'}  ring: ${Object.entries(tags).filter(([k]) => k !== 'axBand').map(([k, v]) => k + (v > 1 ? '×' + v : '')).join(' ')}`);
+  }
+  return { opened, rows };
+};
+console.log('§4g the notch inside the load lock (B-8c25): a real notch that scrolls into the pageUp band while a landing\'s lock holds still pages');
+{
+  const F = await lockProbe(false);
+  const fr = (F.rows || []).filter((r) => r.pre);
+  check(`§4g the leg ran on the fix: the notch was delivered inside the lock in ≥ 1 of 2 attempts (${fr.length})`, fr.length >= 1, JSON.stringify(F.opened?.ok ? F.rows.map((r) => r.landed) : F.opened));
+  check('§4g on the fix the lift re-takes the skipped decision: the view never parks inside the pageUp band with history above (the extend runs from the lift — `lockBand` in the ring)', fr.length >= 1 && fr.every((r) => !r.parked && r.lockBand >= 1), JSON.stringify(fr.map((r) => ({ st: r.after.st, ws: r.after.ws, lockBand: r.lockBand }))));
+  const C = await lockProbe(true);
+  const cr = (C.rows || []).filter((r) => r.pre);
+  check(`§4g NEGATIVE CONTROL: with the lift's re-taken decision neutered (the pre-fix lift) the same notch PARKS the reader inside the band with history above (${cr.filter((r) => r.parked).length} of ${cr.length} attempts) — the leg sees the defect`, cr.length >= 1 && cr.some((r) => r.parked), JSON.stringify(cr.map((r) => ({ st: r.after.st, ws: r.after.ws }))));
 }
 
 // ── 4d. THE PRE-FIX CONTROL: the same fixture and gestures on a scratch copy of

@@ -86,8 +86,6 @@
 .chat-status-design { color: var(--accent); font-weight: 600; }
 .chat-status-design-empty { opacity: 0.45; filter: grayscale(0.6); }
 .chat-status-design-empty:hover { opacity: 1; filter: none; }
-.chat-design-kit { font-size: 11px; color: var(--text-secondary); }
-.chat-design-kit-bad { color: var(--red); }
 .chat-design-brief { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; font-size: 12px; padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); color: var(--text); }
 .chat-design-public { font-size: 11px; color: var(--text-secondary); display: flex; align-items: center; gap: 4px; margin-right: auto; }
 .chat-design-pages { display: flex; flex-direction: column; gap: 4px; border-top: 1px solid var(--border); padding-top: 6px; max-height: 180px; overflow: auto; }
@@ -95,7 +93,9 @@
 .chat-design-page-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-design-page button { padding: 1px 8px; font-size: 11px; }
 .chat-design-pages.hidden { display: none; }
-.chat-design-retry { padding: 0 6px; font-size: 10px; margin-left: 4px; }
+/* lane design-window: this session's designs, above the pages (Open = the Design window · Publish…) */
+.chat-design-designs { display: flex; flex-direction: column; gap: 4px; border-top: 1px solid var(--border); padding-top: 6px; max-height: 180px; overflow: auto; }
+.chat-design-designs.hidden { display: none; }
 .chat-status-bar {
   display: flex; align-items: center; gap: 10px;
   padding: 3px 16px; font-size: 10px; color: var(--text-dim);
@@ -326,6 +326,21 @@
 /* the head's sentence is ONE flex item (lane S3): as three items the 6 px gap
    rendered `Message from “ VibeSpace browser ”` */
 .chat-peer-message .chat-peer-title { min-width: 0; }
+/* lane peer-card-fold: a folded peer card = its head + ONE preview line + Show — the house expander
+   (details.chat-diff, as on tool cards); the preview never wraps, the whole text sits behind Show */
+.chat-peer-fold.chat-diff { margin: 0; font-size: inherit; }
+.chat-peer-fold > .chat-peer-fold-summary { display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; font-size: 12px; color: var(--text); padding: 0; min-width: 0; }
+.chat-peer-fold > .chat-peer-fold-summary::-webkit-details-marker { display: none; }
+.chat-peer-fold > .chat-peer-fold-summary::marker { content: ''; }
+.chat-peer-preview { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.chat-peer-fold-btn { flex: none; margin-left: auto; color: var(--accent); font-size: 11px; font-weight: 600; padding: 1px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.chat-peer-fold-summary:hover .chat-peer-fold-btn, .chat-peer-fold-summary:focus-visible .chat-peer-fold-btn { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.chat-peer-fold[open] > summary .chat-peer-preview, .chat-peer-fold[open] > summary .chat-peer-fold-show, .chat-peer-fold:not([open]) > summary .chat-peer-fold-hide { display: none; }
+.chat-peer-fold[open] > .chat-text { margin-top: 4px; }
+/* a peer's "# Report" is bold text in a card, never a page-level heading (peer-card-model demoteHeadings) */
+.chat-msg .chat-peer-h { font-weight: 700; font-size: inherit; line-height: inherit; margin: 8px 0 2px; }
+.chat-msg .chat-peer-h:first-child { margin-top: 0; }
+@media (max-width: 768px) { .chat-peer-fold > .chat-peer-fold-summary { min-height: 44px; } .chat-peer-fold-btn { min-height: 44px; min-width: 44px; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; } }
 /* A GROUP MESSAGE (lane group-report-card): "<sender> → <group>" — the group a link to its window; a dim line under
    the text when the agent was shown it cut short, or "… and N more" on a report's oldest card */
 .chat-peer-group { text-decoration: underline dotted; cursor: pointer; overflow-wrap: anywhere; }
@@ -338,6 +353,10 @@
 .chat-msg.chat-vs-notice { display: block; border: 1px solid var(--border); border-left: 2px solid var(--accent); background: color-mix(in srgb, var(--accent) 6%, transparent); border-radius: var(--radius-sm); padding: 8px 12px; margin: 4px 0; }
 .chat-vs-notice .chat-vs-notice-head { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--accent); font-weight: 600; margin-bottom: 4px; }
 .chat-vs-notice .chat-vs-notice-title { min-width: 0; overflow-wrap: anywhere; }
+/* B-c127: a channel notice's conversation, by name — the one-click link to its window */
+.chat-vs-notice .chat-vs-notice-conv-line { overflow-wrap: anywhere; margin-bottom: 2px; }
+.chat-vs-notice .chat-vs-notice-conv { color: var(--accent); text-decoration: underline dotted; cursor: pointer; font-weight: 600; }
+.chat-vs-notice .chat-vs-notice-conv:hover { text-decoration: underline; }
 .chat-vs-notice .chat-text { font-size: 13px; }
 /* lane-exit-run-output E3: the command card's output block — the first lines in mono, the stored heads behind "Show output" */
 .chat-exit-run { margin-top: 4px; display: flex; flex-direction: column; gap: 4px; }
@@ -1580,6 +1599,8 @@ body.hide-empty-thinking .chat-compact .chat-msg.chat-empty-thinking { display: 
 .chat-reset-credit-btn { display: inline-flex; align-items: center; gap: 5px; margin-top: 6px; padding: 2px 8px; font-size: 11px; color: var(--accent); background: transparent; border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); border-radius: var(--radius-sm); cursor: pointer; }
 .chat-reset-credit-btn:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .chat-reset-credit-btn svg { width: 12px; height: 12px; }
+/* lane reset-path R3: the card a later fact answered — one outcome line instead of the button */
+.chat-reset-credit-resolved { margin-top: 6px; font-size: 11px; color: var(--text-dim); }
 
 /* A For-you inbox reply (design-user-inbox-reply D1.8): the user's own message
    sent from the inbox — a head naming the item, the quote folded, the reply. */

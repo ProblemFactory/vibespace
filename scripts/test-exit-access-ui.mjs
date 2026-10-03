@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // test-exit-access-ui — lane-pairing ⑥ in a REAL page (B-7007): "Who can use <machine>?" — two lists per machine
-// (borrow its network / run commands on it), each Nobody / All my conversations / Only these (THE principal picker),
+// (borrow its network / run commands on it), each Nobody / Agents you pick (THE principal picker — lane everyone-principal:
+// its FIRST row "All agents" IS the stored `everyone` mode; the old "All my conversations" radio is gone),
 // run with "Ask me each time". A throwaway worktree server + headless chrome (scripts/pairing-ui-harness.mjs) + a
 // REAL device daemon paired and dialed in (its `run` really runs `sh -lc` on this box) + stub claude sessions with
 // their vsst_ tokens + three Task Groups, the page in zh:
@@ -64,7 +65,7 @@ try {
   ok(await P.realClick(exitIcon), 'a real click on the row\'s exit icon');
   ok(await P.waitFor(`!!document.querySelector('${sec('run')}')`, 8000), 'the dialog 谁能使用 exmac？ opens');
   ok(await P.evalJs(`document.querySelector('#exit-access-dialog .dialog-header h3').textContent === '谁能使用 exmac？'`), 'its title');
-  ok(await P.evalJs(`document.querySelector('${sec('use')} input[value="everyone"]').checked`), 'the dialog shows the SERVER\'s list (network: 我的所有会话), not the row\'s stale copy (mirror-193)');
+  ok(await P.evalJs(`document.querySelector('${sec('use')} input[value="only"]').checked && [...document.querySelectorAll('${sec('use')} .pp-chip')].map((c) => c.dataset.key).join() === 'everyone:*' && !document.querySelector('${sec('use')} input[value="everyone"]')`), 'the dialog shows the SERVER\'s list (network: 你选的 agent with the 所有 agent chip — the stored everyone mode, no radio of its own), not the row\'s stale copy (mirror-193)');
   // naive-user N-radio: `.dialog-body label` (0,1,1) is a COLUMN flex — the six mode radios and "每次都问我" sat above
   // their words (the checkbox centred on its own line). THE LABEL CENSUS + a patched copy of style.css as the control.
   // naive-user N-greyed: commands = 没有人 here — "每次都问我" sat greyed out (disabled) and did nothing when clicked (the
@@ -73,7 +74,7 @@ try {
   const g0 = await P.evalJs(greyedJs);
   ok(g0.length === 0 && !(await P.evalJs(`!!document.querySelector('${sec('run')} .exit-access-ask')?.offsetParent`)), 'N-greyed: with commands = 没有人 the dialog shows NO greyed control — "每次都问我" is not shown under Nobody', g0);
   const lcx = await P.evalJs(labelRowCensusJs('#exit-access-dialog'));
-  ok(lcx.ok && lcx.n === 6, `N-radio: every mode radio sits BESIDE its words (${lcx.n} labels)`, lcx);
+  ok(lcx.ok && lcx.n === 4, `N-radio: every mode radio sits BESIDE its words (${lcx.n} labels — two answers per list since lane everyone-principal)`, lcx);
   {
     const real = fs.readFileSync(path.join(REPO, 'public/style.css'), 'utf8');
     const MUT = mutantCopies('exitui', REPO);
@@ -81,7 +82,7 @@ try {
     await P.evalJs(swapStyleJs(fs.readFileSync(fPre, 'utf8')));
     await sleep(200);
     const pre = await P.evalJs(labelRowCensusJs('#exit-access-dialog'));
-    ok(!pre.ok && pre.bad.length === 6, `CONTROL (N-radio): the pre-fix style.css stacks all ${pre.bad.length} controls above their words`, pre);
+    ok(!pre.ok && pre.bad.length === 4, `CONTROL (N-radio): the pre-fix style.css stacks all ${pre.bad.length} controls above their words`, pre);
     await P.evalJs(swapStyleJs(real));
     await sleep(200);
   }
@@ -109,7 +110,7 @@ try {
   await P.evalJs(`(() => { const s = app.sidebar; s._renderMounts = s.__realRender; return true; })()`);
   // ② pick with the keyboard and the mouse, ask me, Save ⇒ ONE PATCH
   console.log('② Only these + a Task Group by keyboard + a conversation by mouse + 每次都问我 ⇒ ONE PATCH');
-  ok(await P.realClick(`${sec('run')} input[value="only"]`), 'a real click on 仅以下会话和任务组 (commands)');
+  ok(await P.realClick(`${sec('run')} input[value="only"]`), 'a real click on 你选的 agent (commands)');
   ok(await P.waitFor(`!!document.querySelector('${sec('run')} .pp-input')?.offsetParent`, 4000), 'the principal picker shows');
   await P.realClick(`${sec('run')} .pp-input`);
   await P.type('运维');
@@ -127,12 +128,12 @@ try {
   const pd = patches(P).slice(pBefore);
   const body = pd[0] && JSON.parse(pd[0].body);
   ok(pd.length === 1 && body && typeof body.base === 'string' && body.run.mode === 'only' && body.run.ask === true && body.run.who.some((r) => r.kind === 'session' && r.session === S[1].sid) && body.run.who.some((r) => r.kind === 'group' && r.id === groups[0].id), 'ONE PATCH: `session:<webui id>` rows + the group + ask + the base it read', pd.map((x) => x.body));
-  ok(await P.waitFor(`[...document.querySelectorAll('.global-toast')].some((t) => /^谁能使用 exmac：网络 — 所有会话；命令 — 已选 2 个（每次问我）✕?$/.test(t.textContent.trim()))`, 4000), 'the toast: 谁能使用 exmac：网络 — 所有会话；命令 — 已选 2 个（每次问我）', await P.evalJs(`[...document.querySelectorAll('.global-toast')].map((t) => t.textContent).join(' | ')`));
+  ok(await P.waitFor(`[...document.querySelectorAll('.global-toast')].some((t) => /^谁能使用 exmac：网络 — 所有 agent；命令 — 已选 2 个（每次问我）✕?$/.test(t.textContent.trim()))`, 4000), 'the toast: 谁能使用 exmac：网络 — 所有 agent；命令 — 已选 2 个（每次问我）', await P.evalJs(`[...document.querySelectorAll('.global-toast')].map((t) => t.textContent).join(' | ')`));
   const stored = (await W.hostRow('exmac')).exit;
   ok(stored.run.mode === 'only' && stored.run.ask === true && stored.run.who.some((w) => w.kind === 'session' && w.id === 'claude:' + S[1].cid), 'the server resolved the live pick to its durable key (claude:<conversation id>)', stored.run);
   const P2 = await W.openPage({ width: 1280, height: 820, lang: 'zh' });
   await openRemote(P2);
-  ok(await P2.waitFor(`/^出口：网络 — 所有会话 · 命令 — 已选 2 个（每次问我）$/.test(${rowOf}?.querySelector('.mounts-exit-line')?.textContent || '')`, 10000), 'a SECOND page\'s row shows the summary 出口：网络 — 所有会话 · 命令 — 已选 2 个（每次问我）');
+  ok(await P2.waitFor(`/^出口：网络 — 所有 agent · 命令 — 已选 2 个（每次问我）$/.test(${rowOf}?.querySelector('.mounts-exit-line')?.textContent || '')`, 10000), 'a SECOND page\'s row shows the summary 出口：网络 — 所有 agent · 命令 — 已选 2 个（每次问我）');
   ok(await P.waitFor(`/已选 2 个（每次问我）/.test(${rowOf}?.querySelector('.mounts-exit-line')?.textContent || '')`, 10000), '…and the first page\'s row repainted from the broadcast');
   // ③ the 409 leg + the empty-list refusal
   console.log('③ another writer while the dialog is open ⇒ 409, re-drawn; the empty list refused in place');
@@ -150,7 +151,7 @@ try {
   const pEmpty = patches(P).length;
   await P.realClick('#exit-access-dialog .exit-access-save');
   await sleep(300);
-  ok(await P.evalJs(`document.querySelector('#exit-access-dialog .exit-access-refuse').textContent`) === '至少选一个会话或任务组，或者选“没有人”/“我的所有会话”。' && patches(P).length === pEmpty, '"Only these" with nobody picked is refused IN PLACE — no request sent');
+  ok(await P.evalJs(`document.querySelector('#exit-access-dialog .exit-access-refuse').textContent`) === '选“所有 agent”，或至少选一个会话或任务组，或者选“没有人”。' && patches(P).length === pEmpty, '"Agents you pick" with nobody picked (not even All agents) is refused IN PLACE — no request sent');
   // THE RECT CENSUS at 860 / 360
   await P.cdp('Emulation.setDeviceMetricsOverride', { width: 860, height: 760, deviceScaleFactor: 1, mobile: false });
   await sleep(300);

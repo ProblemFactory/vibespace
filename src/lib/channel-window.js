@@ -56,11 +56,12 @@
 // standing line under the composer (a1 W1). An AGENT GROUP (the same window
 // type, `adapterId` = the group namespace) is drawn by `openGroupWindow`
 // below: its composer sends as You, @name wakes.
-import { fetchJson, showToast, showContextMenu, showImageOverlay } from './utils.js';
+import { fetchJson, showToast, showContextMenu, showImageOverlay, showInputDialog, copyText } from './utils.js';
 import { t, deviceLocale } from './i18n.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { menuItems } from './contributions.js';
 import { icon, el, btn, avatar, convAvatar, fileIcon } from './channel-chrome.js';
+import { accountBadges } from './channel-avatar.js';   // B-5fe1: the bar's account badge
 // P2: the Assign & filter editor and the one-line summary the bar draws.
 import { showAssignFilterDialog, assignmentSummary } from './channel-filter-editor.js';
 // P3: the inline approval cards (the SAME renderer the Outbox window uses —
@@ -84,11 +85,11 @@ import { showReauthAccountDialog } from './channel-account-dialogs.js';
 import * as chanCaps from '../channel-caps.js';
 // g3 (design §22): the composer's mode by conversation kind, the @-autocomplete,
 // the wake preview, and the group dialogs + words.
-import { composerMode, isGroupConv, mentionQuery, mentionCandidates, insertMention, wakePreview, deliveryOf, OWNER, GROUP_ADAPTER_ID } from './channel-groups-view.js';
+import { composerMode, isGroupConv, mentionQuery, mentionCandidates, insertMention, wakePreview, pickedSpans, atProblem, groupBodyRuns, memberName, learnNames, deliveryOf, OWNER, GROUP_ADAPTER_ID } from './channel-groups-view.js';
 import { showGroupDetail, showGroupMembersDialog, renameGroup, archiveGroup } from './channel-group-dialogs.js';
 import { groupErrorText, wakeEchoText, deliveryLineText } from './channel-words.js';
 import { clearRecords, isCleared, clearedText } from './record-clear-ui.js'; // "Clear content…" (2026-09-28): a group message's menu + the cleared sentence
-import { touchedByRow } from './channel-touch-view.js'; // §26 (B-099e): "Drafted by <agent>" — the reverse link to the chat
+import { touchedByRow, openSessionOf } from './channel-touch-view.js'; // §26 (B-099e): "Drafted by <agent>" — the reverse link to the chat; B-ff04: a mention chip opens its session
 // lane channel-rich (D2): a mail's formatted body in the ONE sandboxed frame (the surface's only srcdoc lives there)
 import { createMailFrames } from './channel-mail-frame.js';
 // lane channel-threads (2026-09-28): a reply shows WHAT it answers, a root its thread, every message its REACTIONS;
@@ -281,7 +282,21 @@ function isSysRow(rec) {
  *  stable hue — the self author in the accent; paint, the name is the head. */
 function authorAvatar(rec) {
   const a = rec.author || {};
-  return avatar({ name: a.name || a.id || '', key: authorKey(rec), self: !!a.isSelf }, null, 'chanmsg-av');
+  // verify r3 (T2 ④): an author known only by a vendor id (`ou_…`, `cli_…`) has NO initials — the avatar shows '?' on the
+  // author's stable hue; the id itself is still the head's text (a name the vendor never gave is shown as the id, not hidden)
+  return avatar({ name: a.display || a.name || '', key: authorKey(rec), self: !!a.isSelf }, null, 'chanmsg-av');
+}
+/** lane lark-threads (B3–B5): the author head's TITLE — the vendor name when the head shows another (the owner's name /
+ *  the organization's nickname), the profile's alternatives, "external to your organization", "your name for them". */
+function authorTitle(a) {
+  const x = a || {};
+  const alt = x.alt && typeof x.alt === 'object' ? x.alt : {};
+  const parts = [];
+  if (x.name && (x.display || x.name) !== x.name) parts.push(x.name);
+  for (const v of [alt.nickname, alt.enName, alt.jobTitle, alt.department]) if (v && v !== x.display && !String(x.display || '').includes(v) && !parts.includes(v)) parts.push(v);
+  if (x.external) parts.push(t('external to your organization'));
+  if (x.alias) parts.push(t('your name for them'));
+  return parts.join(' · ');
 }
 
 /** ONE row. EVERYTHING is textContent — see rule 1. `cont` = a continuation
@@ -308,7 +323,21 @@ function renderRecord(rec, { cont = false, base = null, folds = null, mail = nul
   if (!cont) {
     row.appendChild(authorAvatar(rec));
     const head = el('div', 'chanmsg-head');
-    const who = el('b', '', (rec.author && rec.author.name) || (rec.author && rec.author.id) || t('unknown'));
+    // lane lark-threads (B3–B5): the head is the author as the owner reads them (`display`: the owner's own name › the
+    // vendor's way), the vendor name the title; a click offers "Set a name…" (the VibeSpace 备注)
+    const au = rec.author || {};
+    const who = el('b', 'chanmsg-who', au.display || au.name || au.id || t('unknown'));
+    who.dataset.authorId = au.id || '';
+    who.dataset.vendorDisplay = au.vendorDisplay || au.name || au.id || '';
+    who._author = au;
+    { const tt = authorTitle(au); if (tt) who.title = tt; }
+    if (ctx && typeof ctx.onAuthor === 'function' && au.id && !au.isSelf) {
+      who.classList.add('chanmsg-who-btn');
+      who.tabIndex = 0;
+      who.setAttribute('role', 'button');
+      who.addEventListener('click', (ev) => { ev.stopPropagation(); ctx.onAuthor(who._author || au, who); });
+      who.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); ctx.onAuthor(who._author || au, who); } });
+    }
     const when = el('span', 'chanmsg-at', stamp(rec.at));
     when.title = full;
     // D3 (lane channel-rich): a bot's name wears a small bot mark (the icon library's glyph — never an emoji)
@@ -478,7 +507,9 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
     // THE LOOK (channel-polish): the conversation's avatar, then ONE column —
     // the title row (title · the access chip · ⋯) over the meta line; on a
     // phone the bar is one line (the avatar and the meta line hidden by CSS)
-    bar.appendChild(convAvatar({ key: `${adapterId}/${convId}`, title: shownTitle, kind: c.kind }, null, 'chanwin-av'));
+    // B-5fe1: the account's badge — its hue is a function of the WHOLE account list the route names
+    const badge = accountBadges(r.accounts || (lastAdapter ? [lastAdapter] : [])).get(adapterId) || null;
+    bar.appendChild(convAvatar({ key: `${adapterId}/${convId}`, title: shownTitle, kind: c.kind, badge }, null, 'chanwin-av'));
     const headCol = el('div', 'chanwin-head');
     bar.appendChild(headCol);
     const titleRow = el('div', 'chanwin-title-row');
@@ -542,7 +573,7 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
     // every broadcast); a change (a re-authorization, a disconnect) rebuilds it
     // and carries the typed text over into the new composer
     const ad0 = r.adapter || {};
-    const footKey = JSON.stringify([cm.mode, cm.why || null, (c.offers && c.offers.sendAsUser && c.offers.sendAsUser.why) || null, !!ad0.sendStartsTurn, ad0.sendForm || null, !!ad0.connectable, ad0.id || null, ad0.sendGrant ? ad0.sendGrant.missing : null, c.policy ? c.policy.mode : null]);
+    const footKey = JSON.stringify([cm.mode, cm.why || null, (c.offers && c.offers.sendAsUser && c.offers.sendAsUser.why) || null, !!ad0.sendStartsTurn, ad0.sendForm || null, !!ad0.connectable, ad0.id || null, ad0.sendGrant ? ad0.sendGrant.missing : null, c.policy ? c.policy.mode : null, !!ad0.replyAll]);
     if (foot.dataset.footKey === footKey && foot.firstChild) return c;
     // a draft being typed is HELD across every rebuild — including the flip to the
     // read-only line (a disconnect mid-sentence) — and restored when the composer returns
@@ -584,6 +615,18 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
         note.appendChild(info);
       }
       note.title = polWhy;
+      // B-a085: mail answers EVERYONE on the newest message when "Reply all" is ticked (its To + Cc, without you —
+      // resolved by the server, in the thread); unticked = the sender only, as before
+      let allBox = null;
+      if (ad0.replyAll) {
+        const lab = el('label', 'chanwin-reply-all');
+        allBox = document.createElement('input');
+        allBox.type = 'checkbox';
+        allBox.dataset.channelReplyAll = '1';
+        lab.title = t('Reply to everyone on the newest message (its To and Cc), in the same thread');
+        lab.append(allBox, document.createTextNode(' ' + t('Reply all')));
+        row.appendChild(lab);
+      }
       const sendBtn = btn(direct ? t('Send') : t('Propose'), null, 'mounts-btn-primary');
       if (direct) { sendBtn.dataset.channelDirect = '1'; sendBtn.prepend(icon('send', 11)); } else sendBtn.dataset.channelPropose = '1';
       sendBtn.onclick = async () => {
@@ -593,7 +636,7 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
         // lane reaction-hover: a QUOTE picked from a message's action bar rides as the reply's placement (the engine's
         // PURE verdict re-judges it — a refusal is worded by its code and keeps both the words and the quote)
         const q = quoteTarget;
-        const r2 = await fetchJson(`/api/channels/${encodeURIComponent(adapterId)}/${encodeURIComponent(convId)}/${direct ? 'send' : 'propose'}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, expectWakes: wakes, ...(q ? { replyTo: q.vid, placement: 'quote' } : {}) }) });
+        const r2 = await fetchJson(`/api/channels/${encodeURIComponent(adapterId)}/${encodeURIComponent(convId)}/${direct ? 'send' : 'propose'}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, expectWakes: wakes, ...(q ? { replyTo: q.vid, placement: 'quote' } : {}), ...(allBox && allBox.checked ? { replyAll: true } : {}) }) });
         sendBtn.disabled = false;
         if (!r2 || r2.error) { showToast(routeErrorText(r2), { type: 'error' }); return; }
         ta.value = '';
@@ -603,10 +646,12 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
         // the policy's reasons are an ENUM — worded through the card's own `reasonLabel` (a3 i18n)
         if (st === 'failed') showToast(t('The channel refused the send: {error}', { error: (r2.proposal && r2.proposal.reason) || '' }), { type: 'error' });
         else if (st === 'unknown') showToast(t('The send left but its answer was lost — check the conversation on the platform'), { type: 'warn' });
+        else if (st === 'sent' && allBox && allBox.checked && r2.proposal.replyEnvelope) showToast(t('Sent to {to}', { to: [r2.proposal.replyEnvelope.to, r2.proposal.replyEnvelope.cc].filter(Boolean).join(', ') }));
         else showToast(st === 'sent' ? t('Sent') : st === 'awaiting-approval' ? t('Held in the outbox for your approval ({why})', { why: ((r2.decision && r2.decision.reasons) || []).map(reasonLabel).join('; ') }) : t('Proposal {state}', { state: st || '?' }));
       };
       ta.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); sendBtn.click(); } });
-      row.append(note, sendBtn);
+      row.prepend(note);
+      row.appendChild(sendBtn);
       comp.append(ta, row);
       foot.textContent = '';
       foot.appendChild(comp);
@@ -810,8 +855,34 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
     const rows = [...list.querySelectorAll('.chanmsg[data-vid]'), ...(pane ? pane.rows().querySelectorAll('.chanmsg[data-vid]') : [])];
     for (const row of rows) if (row._acts) syncMsgBar(row, row._acts());
   }
+  /** lane lark-threads (B3): the author head's menu — "Set a name…" (the owner's own name for them, every surface). */
+  const onAuthor = (a, anchor) => {
+    const r = anchor.getBoundingClientRect();
+    showContextMenu(r.left, r.bottom + 2, [{ label: t('Set a name…'), action: async () => {
+      const v = await showInputDialog({ title: t('Your name for {name}', { name: a.name || a.vendorDisplay || a.id }), label: t('Shown instead of the name the channel gives — in every window, the thread pane and what your agents read. Leave it empty to use the channel\'s name again.'), value: a.alias || '', confirmText: t('Save') });
+      if (v === null) return;
+      const res = await fetchJson(`${adapterBase}/authors/${encodeURIComponent(a.id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ alias: v }) });
+      if (!res || res.error) { showToast(routeErrorText(res), { type: 'error' }); return; }
+      applyAuthors({ [a.id]: { alias: res.alias || null } });   // this window at once (the broadcast repaints the others)
+    } }]);
+  };
+  /** An `authors` broadcast (or our own save): each named author's heads re-spelled IN PLACE — list and pane, keyed by id. */
+  function applyAuthors(map) {
+    for (const [id, ch] of Object.entries(map || {})) {
+      const sel = `.chanmsg-who[data-author-id="${CSS.escape(String(id))}"]`;
+      for (const who of [...list.querySelectorAll(sel), ...(pane ? pane.rows().querySelectorAll(sel) : [])]) {
+        const alias = ch && ch.alias ? String(ch.alias) : '';
+        const au = { ...(who._author || {}), alias: alias || undefined };
+        au.display = alias || who.dataset.vendorDisplay || au.name || id;
+        who._author = au;
+        who.textContent = au.display;
+        const tt = authorTitle(au); if (tt) who.title = tt; else who.removeAttribute('title');
+      }
+    }
+  }
   /** THE ROW CONTEXT every renderRecord of this window gets (the list's; the pane passes `inPane` + its root). */
   const rowCtx = {
+    onAuthor,
     strip: (rec) => stripCtx(rec),
     bar: (rec, c, row) => barActs(rec, c, row),
     onJump: (vid, place) => jumpTo(vid, place),
@@ -897,7 +968,7 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
         const pl = row._place;
         if (!pl || !pl.thread || !pl.thread.isRoot || pl.thread.key !== tk) continue;
         matched = true;
-        pl.thread = { ...pl.thread, count: st.count, lastAt: st.lastAt, walked: true };
+        pl.thread = { ...pl.thread, count: st.count, lastAt: st.lastAt, walked: st.walked !== false, ...(st.separate !== undefined ? { separate: !!st.separate } : {}) };
         const words = row.querySelector(`.chanmsg-thread-chip[data-thread-key="${CSS.escape(tk)}"] .chanmsg-thread-words`);
         if (words) words.textContent = threadChipText(pl.thread);
         else { const head = row.querySelector(':scope > .chanmsg-head'); const chip = threadChip(pl, { onOpen: (th) => openThread(th, chip) }); if (head && chip) head.appendChild(chip); }
@@ -906,7 +977,8 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
       // and was just answered INTO a new topic (`reply_in_thread` — the vendor mints the thread on it): the broadcast
       // names the topic's root, so its row becomes a topic root in place and grows its chip (never a rebuilt row)
       const root = !matched && st && st.root ? list.querySelector(`.chanmsg[data-vid="${CSS.escape(String(st.root))}"]`) : null;
-      if (root && !(root._place && root._place.thread)) becomeTopicRoot(root, { key: tk, count: st.count, lastAt: st.lastAt, isRoot: true, kind: 'vendor', root: String(st.root), walked: true });
+      // lane lark-threads: a root the place door just widened arrives with `walked: false` — "in thread · open to load"
+      if (root && !(root._place && root._place.thread)) becomeTopicRoot(root, { key: tk, count: st.count, lastAt: st.lastAt, isRoot: true, kind: 'vendor', root: String(st.root), walked: st.walked !== false, separate: !!st.separate });
     }
     if (pane) pane.applyThreads(map);
   }
@@ -1245,6 +1317,8 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
     // applied to the drawn rows IN PLACE by key; no /messages fetch, no row rebuilt (another client's reaction lands
     // on the chip under the reader's pointer as a re-spelled count)
     let sideOnly = false;
+    // lane lark-threads (B3): the owner named an author — that author's heads re-spelled in place (no fetch, no rebuild)
+    if (msg.authors && msg.authors[adapterId]) { applyAuthors(msg.authors[adapterId]); if (!(msg.changedKeys && msg.changedKeys.includes(key))) return; }
     if (msg.patches && msg.patches[key]) { for (const [vid, p] of Object.entries(msg.patches[key])) applyReactions(vid, (p && p.reactions) || []); sideOnly = true; }
     if (Array.isArray(msg.rereadReactions) && msg.rereadReactions.includes(key)) { rereadReactions().catch(() => {}); sideOnly = true; }
     if (msg.threads && msg.threads[key]) { applyThreads(msg.threads[key]); sideOnly = true; }
@@ -1298,7 +1372,7 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
 function groupSysText(rec, nameOf) {
   const raw = rec.raw || {};
   const by = nameOf(raw.by || (rec.author && rec.author.id));
-  const member = raw.member ? nameOf(raw.member) : '';
+  const member = raw.member ? nameOf(raw.member, raw.name) : '';   // B-ff04: a member who LEFT keeps its last known name
   switch (raw.kind) {
     case 'create': return t('{by} created the group', { by });
     case 'invite': return t('{by} added {member}', { by, member });
@@ -1314,10 +1388,31 @@ function openGroupWindow(app, winInfo, groupId, { bar, list, foot }) {
   let group = null;
   let oldest = null;
   const seen = new Set();   // vendorIds already drawn — a broadcast's record may be one we appended from the send answer
-  const nameOf = (id) => {
+  // B-ff04 ③: a member is shown by NAME through the ladder (memberName) — a member who left by the last name the log
+  // knew (`known`, learned from every record drawn), its id only when no name was ever seen
+  const known = new Map();
+  const liveNames = () => new Map(((app && app.sidebar && app.sidebar._webuiSessions) || []).filter((s) => s && (s.backendSessionId || s.claudeSessionId)).map((s) => [s.backendSessionId || s.claudeSessionId, s.name || '']));
+  const nameOf = (id, snapshot = null) => {
     if (id === OWNER) return t('You');
-    const m = group && (group.members || []).find((x) => x.member === id);
-    return (m && m.name) || String(id || '').slice(0, 8) || t('unknown');
+    return memberName(id, { group, live: liveNames(), known, snapshot }) || t('unknown');
+  };
+  /** A message body: words as TEXT, a mention as a chip named by id (the member's current name) that opens its
+   *  session — chips only where the record's own mentions put them (groupBodyRuns); selectable and copyable. */
+  const groupBody = (rec) => {
+    const body = el('div', 'chanmsg-body chan-group-body');
+    for (const r of groupBodyRuns(rec)) {
+      if (r.k !== 'at') { body.appendChild(document.createTextNode(r.text)); continue; }
+      const chip = el('span', 'chanblk-at chan-at', '@' + nameOf(r.id, r.text.slice(1)));
+      chip.dataset.mention = r.id;
+      chip.setAttribute('role', 'link');
+      chip.title = t('Open this agent\'s conversation');
+      body.appendChild(chip);
+    }
+    return body;
+  };
+  const openMember = (cid) => {
+    const s = ((app && app.sidebar && app.sidebar._webuiSessions) || []).find((x) => x && (x.backendSessionId || x.claudeSessionId) === cid);
+    if (s) openSessionOf(app, s.id); else showToast(t('That agent session is no longer running'), { type: 'warn' });
   };
 
   function renderGroupRecord(rec, { cont = false } = {}) {
@@ -1349,7 +1444,7 @@ function openGroupWindow(app, winInfo, groupId, { bar, list, foot }) {
       row.appendChild(when);
     }
     // a CLEARED message ("Clear content…"): its place, time and author stay; its words read the cleared sentence, dimmed
-    row.appendChild(el('div', 'chanmsg-body' + (isCleared(rec) ? ' rc-cleared' : ''), isCleared(rec) ? clearedText() : (rec.text || '')));
+    row.appendChild(isCleared(rec) ? el('div', 'chanmsg-body rc-cleared', clearedText()) : groupBody(rec));
     // WHERE IT STANDS (lane group-pending, the owner 2026-10-01): "Waiting for beta's next turn" / "Read by beta" under
     // every message, the owner's own included — a KEYED line (the row's vendorId) patched in place by drawDelivery
     const dlv = el('div', 'chanmsg-dlv');
@@ -1416,7 +1511,7 @@ function openGroupWindow(app, winInfo, groupId, { bar, list, foot }) {
   function place(recs, { prepend = false } = {}) {
     const fresh = recs.filter((r) => r && !seen.has(r.vendorId)).map((r) => clearedSeen.get(r.vendorId) || r);
     if (!fresh.length) return 0;
-    for (const r of fresh) { seen.add(r.vendorId); drawn.set(r.vendorId, r); }
+    for (const r of fresh) { seen.add(r.vendorId); drawn.set(r.vendorId, r); learnNames(known, r); }
     const frag = document.createDocumentFragment();
     let prev = null;
     if (!prepend) { const tail = [...list.querySelectorAll('.chanmsg')].pop(); if (tail) prev = { at: Number(tail.dataset.at), author: { id: tail.dataset.author }, raw: { kind: tail.classList.contains('chanmsg-sys') ? 'sys' : 'message' } }; }
@@ -1516,9 +1611,14 @@ function openGroupWindow(app, winInfo, groupId, { bar, list, foot }) {
     row.append(note, sendBtn);
     comp.append(pop, ta, row);
     foot.appendChild(comp);
-    // the preview: who THIS text would wake — said before the click
+    // B-ff04 ①: the members the person PICKED from the @ list, in order — sent as places by id, never re-read by name
+    let picks = [];
+    const spansOf = (s) => pickedSpans(s, picks);
+    // the preview: who THIS text would wake — said before the click (and an @ the server would refuse, first)
     const preview = () => {
-      const w = wakePreview(group, ta.value);
+      const bad = atProblem(group, ta.value, { picked: spansOf(ta.value) });
+      if (bad) { note.classList.add('chan-warn'); note.textContent = groupErrorText(bad); return; }
+      const w = wakePreview(group, ta.value, { picked: spansOf(ta.value) });
       note.classList.toggle('chan-warn', w.length > 0);
       note.textContent = w.length
         ? t('Will wake {names} — {n} billed turn(s)', { names: w.map((x) => x.name).join(', '), n: w.length })
@@ -1542,6 +1642,7 @@ function openGroupWindow(app, winInfo, groupId, { bar, list, foot }) {
       const c = cands[i];
       if (!c || !q) return;
       const r = insertMention(ta.value, q, c.name);
+      picks.push({ id: c.member, name: c.name });
       ta.value = r.text;
       ta.setSelectionRange(r.caret, r.caret);
       closePop();
@@ -1573,18 +1674,20 @@ function openGroupWindow(app, winInfo, groupId, { bar, list, foot }) {
       sendBtn.disabled = true;
       // the count the preview SAID travels with the send (r2): the server refuses
       // `wake-count-mismatch` if the act would wake a different number
-      const r = await fetchJson(`/api/channel-groups/${encodeURIComponent(groupId)}/post`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, expectWakes: wakePreview(group, text).length }) });
+      const mentions = spansOf(text);
+      const r = await fetchJson(`/api/channel-groups/${encodeURIComponent(groupId)}/post`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, mentions, expectWakes: wakePreview(group, text, { picked: mentions }).length }) });
       sendBtn.disabled = false;
       if (!r || r.error) {
         // r3: a `wake-count-mismatch` CARRIES the view the server counted
         // against (live names — a member renamed since this window drew them):
         // repaint from it, so the preview, the @-autocomplete and the next
         // click count against the same names the server does
-        if (r && r.code === 'wake-count-mismatch' && r.group && r.group.id === groupId) { group = { ...group, ...r.group }; drawBar(); preview(); }
+        if (r && (r.code === 'wake-count-mismatch' || r.code === 'unknown-mention' || r.code === 'ambiguous-mention') && r.group && r.group.id === groupId) { group = { ...group, ...r.group }; drawBar(); preview(); }
         showToast(groupErrorText(r), { type: 'error' });
         return;
       }
       ta.value = '';
+      picks = [];
       preview();
       // the send answers with its record — drawn NOW, never waiting for the broadcast echo
       if (r.message) place([r.message]);
@@ -1623,7 +1726,12 @@ function openGroupWindow(app, winInfo, groupId, { bar, list, foot }) {
   // `cleared` part then re-draws the row in place on every client (this one included)
   const msgMenu = (rec, x, y) => {
     const words = (rec.raw && rec.raw.kind && rec.raw.kind !== 'message') ? groupSysText(rec, nameOf) : (rec.text || '');
-    showContextMenu(x, y, [{ label: t('Clear content…'), action: () => { clearRecords([{ kind: 'group-message', groupId, id: rec.vendorId, at: rec.at, words }]); } }]);
+    // B-ff04: the words are COPYABLE from the menu too — the touch door (a long-press opens this menu), as the chat's own
+    // message menu does; a drag still selects on desktop
+    const items = [];
+    if (String(words).trim()) items.push({ label: t('Copy text'), action: () => { copyText(String(words)); showToast(t('Copied')); } });
+    items.push({ label: t('Clear content…'), action: () => { clearRecords([{ kind: 'group-message', groupId, id: rec.vendorId, at: rec.at, words }]); } });
+    showContextMenu(x, y, items);
   };
   list.addEventListener('contextmenu', (ev) => {
     const row = ev.target.closest('.chanmsg[data-vid]');
@@ -1633,6 +1741,8 @@ function openGroupWindow(app, winInfo, groupId, { bar, list, foot }) {
     msgMenu(rec, ev.clientX, ev.clientY);
   }, { signal: winInfo._listenerCtl?.signal });
   list.addEventListener('click', (ev) => {
+    const chip = ev.target.closest('.chan-at[data-mention]');
+    if (chip && !String(window.getSelection && window.getSelection()).trim()) { ev.preventDefault(); ev.stopPropagation(); openMember(chip.dataset.mention); return; }
     const more = ev.target.closest('.chanmsg-more');
     if (!more) return;
     const row = more.closest('.chanmsg[data-vid]');

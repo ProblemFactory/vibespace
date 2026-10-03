@@ -285,6 +285,9 @@ function accountLines(app, a, kinds) {
         // desktop, while a feed dropping 89 % of what it finds is a silent failure); the shape park's line says them itself
         const un = a.feed.state === 'refused' && a.feed.why === 'shape' ? '' : chanCaps.feedUnreadableText(a.feed, { t });
         if (un) { const u = noteLine('chan-sec-note', un); u.dataset.chanFeedUnreadable = a.id; out.push(u); }
+        // lane lark-threads (A5): the thread measurement — does the search name threads, what the by-id reads found
+        const th = chanCaps.feedThreadsText(a.feed, { t });
+        if (th) { const u = noteLine('chan-sec-note', th); u.dataset.chanFeedThreads = a.id; out.push(u); }
       }
       const cl = chanCaps.feedCatchUpText(a.feed.catchUp, { t });
       if (cl) { const n = noteLine('chan-sec-note', cl); n.dataset.chanFeedCatchup = a.id; out.push(n); }
@@ -1101,7 +1104,7 @@ export function renderChannelsPanel(app, c) {
   function groupRow(r, now = Date.now()) {
     const st = r.kind === 'conv' ? statusTag(r, now) : null;
     const tag = statusTagParts(st, { now });
-    const sig = JSON.stringify(['g', r.kind, r.id, r.adapterId, r.title, r.lastAt, r.unread, r.archived, r.pair, r.memberCount, r.sourceLabel, r.lastText, !!(r.group && r.group.lastCleared), r.conv ? r.conv.kind : '', rowTime(r.lastAt), st && st.code, tag]);   // r.group.lastCleared: the last line drawn as the cleared sentence ("Clear content…", the merge onto master's signature census)
+    const sig = JSON.stringify(['g', r.kind, r.id, r.adapterId, r.title, r.lastAt, r.unread, r.archived, r.pair, r.memberCount, r.sourceLabel, r.lastText, !!(r.group && r.group.lastCleared), r.conv ? r.conv.kind : '', rowTime(r.lastAt), st && st.code, tag, r.account]);   // r.group.lastCleared: the last line drawn as the cleared sentence ("Clear content…", the merge onto master's signature census)
     return memoRow('g:' + r.key, sig, r, (cur) => groupRowBuild(r, now, cur, st, tag));
   }
   function groupRowBuild(r, now, cur, st, tag) {
@@ -1112,7 +1115,8 @@ export function renderChannelsPanel(app, c) {
     if (r.kind === 'group') el.dataset.group = r.id;
     // THE LOOK (channel-polish): the conversation's avatar — the SAME circle its window's bar wears
     // (an agent group the people glyph, a mail thread the mail glyph, a chat the title's initials)
-    el.appendChild(convAvatar({ key: r.key, title: r.title, kind: r.conv ? r.conv.kind : '', group: r.kind === 'group' }, null, 'chan-grow-av'));
+    // B-5fe1: …wearing its ACCOUNT's badge (the vendor glyph on the account's own hue — two Lark accounts differ)
+    el.appendChild(convAvatar({ key: r.key, title: r.title, kind: r.conv ? r.conv.kind : '', group: r.kind === 'group', badge: r.account }, null, 'chan-grow-av'));
     const line = document.createElement('div');
     line.className = 'chan-grow-line';
     const title = document.createElement('span');
@@ -1120,6 +1124,10 @@ export function renderChannelsPanel(app, c) {
     title.textContent = r.title;
     title.title = r.title;
     line.appendChild(title);
+    // B-5fe1: with ≥ 2 accounts of one kind the title line says WHICH account, in small text (line 2's source chip
+    // then stays away — one account name per row)
+    const acct = r.account && r.account.multi ? r.account.label : '';
+    if (acct) { const ac = chanEl('span', 'chan-grow-acct', acct); ac.title = t('From your {label} account', { label: acct }); line.appendChild(ac); }
     const at = document.createElement('span');
     at.className = 'chan-grow-at';
     at.textContent = rowTime(r.lastAt);
@@ -1140,7 +1148,7 @@ export function renderChannelsPanel(app, c) {
       if (tag.after) g.appendChild(chanEl('span', 'chan-tag-words', tag.after));
       g.title = `${tag.title} · ${srcTitle}`;
       sub.appendChild(g);
-    } else {
+    } else if (!acct) {
       const src = document.createElement('span');
       src.className = 'chan-src-chip';
       src.textContent = r.kind === 'group' ? (r.pair ? t('Direct') : t('Agents')) : r.sourceLabel;

@@ -58,6 +58,7 @@ const G = require('../channel-groups.js');
 const GC = require('../group-card.js');
 const { makeRecord, inertFrames } = require('../channel-record.js');
 const { toAgentText: agentText } = require('../peer-text.js');   // verify r1 F3: a group's name on its way out (view)
+const DM = require('../dispatch-model.js');   // lane worker-dispatch verify r1 ②: the dispatch ledger's windows (PURE)
 const msgAcl = require('../msg-acl.js');
 // "Clear content…" (2026-09-28): the replacement record, the fold every reader applies, the clear itself
 const RC = require('../record-clear.js');
@@ -126,6 +127,34 @@ function create({
     const sender = sessionOf(by);
     return msgAcl.levelFor({ cid: target.cid, groups: target.groups || [], reachability: target.reachability || null }, sender ? sender.groups || [] : [], groupSetting);
   }
+  /** verify r1 ④ (lane worker-dispatch): `by` and `to` BOTH belong to one Task Group — a compaction of another
+   *  conversation is a Task-Group act (the owner put them in one group as co-workers), never an opened-reach one
+   *  (`reachability`/`externalVisibility` let an agent MESSAGE a conversation, not wipe its context). */
+  function sharesGroup(by, to) {
+    if (!by || !to || by === to) return false;
+    const a = sessionOf(by), b = sessionOf(to);
+    if (!a || !b) return false;
+    const bg = new Set((b.groups || []).filter(Boolean));
+    return (a.groups || []).some((g) => g && bg.has(g));
+  }
+  /** THE DISPATCH LEDGER (verify r1 ②, lane worker-dispatch): what each brief (its key = sha256 of sender | worker |
+   *  text, minted by src/server/worker-dispatch.js) already did — `compactAt` the instant `/compact` was typed for it,
+   *  `deliveredAt` the instant it was posted into the worker's group. Persisted (the store's dispatch-ledger.json), so
+   *  a retry after a restart REPLAYS (the PURE rule: DM.replayVerdict) instead of compacting and waking again. Pruned
+   *  to the model's longest window on every write. */
+  const dispatchLedger = {
+    get(key) { const fam = store.dispatch; const e = fam && fam.live().entries ? fam.live().entries[key] : null; return e ? { ...e } : null; },
+    set(key, patch) {
+      const fam = store.dispatch;
+      if (!fam || !key) return;
+      const at = paceClock();
+      const keep = Math.max(DM.REPLAY_DELIVERED_MS, DM.REPLAY_COMPACT_MS);
+      const entries = {};
+      for (const [k, e] of Object.entries(fam.live().entries || {})) { const t = Math.max(Number(e && e.deliveredAt) || 0, Number(e && e.compactAt) || 0); if (t && at - t < keep) entries[k] = e; }
+      entries[key] = { ...(entries[key] || {}), ...patch };
+      fam.set({ v: 1, entries });
+    },
+  };
   const displayName = (group, cid) => {
     if (cid === G.OWNER) return 'User';   // agent-facing; the panel renders the owner's own rows as "You" (author.isSelf)
     const s = sessionOf(cid);
@@ -244,22 +273,25 @@ function create({
    *  be stale-free or absent: `list()`/`listFor()` read no log after the
    *  first count. The first count is warmed in the background after boot. */
   const unreadMemo = new Map();   // `${gid}|${who}` → {since, lastAt, n}
+  // B-a354: a `mention` member counts only what reaches it (G.reachesReport) — its mode is part of the memo's facts
+  const modeOf = (g, who) => { const m = who === G.OWNER ? null : G.memberOf(g, who); return m ? m.notify : null; };
   function unreadFor(g, who, since) {
     const key = g.id + '|' + who;
     const lastAt = Number(g.lastAt) || 0;
-    if (!(lastAt > since)) { unreadMemo.set(key, { since, lastAt, n: 0 }); return 0; }
+    const mode = modeOf(g, who);
+    if (!(lastAt > since)) { unreadMemo.set(key, { since, lastAt, mode, n: 0 }); return 0; }
     const m = unreadMemo.get(key);
-    if (m && m.since === since && m.lastAt === lastAt) return m.n;
-    const n = readLog(g.id).filter((r) => r.at > since && !(r.author && r.author.id === who)).length;
-    unreadMemo.set(key, { since, lastAt, n });
+    if (m && m.since === since && m.lastAt === lastAt && m.mode === mode) return m.n;
+    const n = readLog(g.id).filter((r) => r.at > since && !(r.author && r.author.id === who) && (mode !== 'mention' || G.reachesReport(g, who, r))).length;
+    unreadMemo.set(key, { since, lastAt, mode, n });
     return n;
   }
-  function bumpUnread(g, prevLastAt, at, author) {
+  function bumpUnread(g, prevLastAt, at, author, rec = null) {
     for (const who of [G.OWNER, ...g.members.map((m) => m.member)]) {
       const e = unreadMemo.get(g.id + '|' + who);
       if (!e || e.lastAt !== prevLastAt) continue;
       e.lastAt = at;
-      if (author !== who && at > e.since) e.n++;
+      if (author !== who && at > e.since && (e.mode !== 'mention' || (rec && G.reachesReport(g, who, rec)))) e.n++;
     }
   }
   const memberSince = (m) => (Number.isFinite(m.reportedUpTo) ? m.reportedUpTo : m.joinedAt - 1);
@@ -319,7 +351,7 @@ function create({
     });
     store.appendRecords(A, g.id, [rec]);
     g.lastAt = at;
-    bumpUnread(g, prevLastAt, at, author);
+    bumpUnread(g, prevLastAt, at, author, rec);
     g.lastText = String(rec.text).replace(/\s+/g, ' ').slice(0, LAST_TEXT_MAX);
     delete g.lastCleared;
     return rec;
@@ -445,7 +477,7 @@ function create({
       const g = getGroup(gid) || g0;
       const v = G.wakeVerdict(g, m, rec);
       const name = displayName(g, m);
-      if (!v.wake) { if (v.why !== 'mute' && v.why !== 'own-message' && v.why !== 'not-member') later.push({ member: m, name }); continue; }
+      if (!v.wake) { if (v.why !== 'mute' && v.why !== 'own-message' && v.why !== 'not-member' && G.reachesReport(g, m, rec)) later.push({ member: m, name }); continue; }   // verify r1 D3: never promise a `mention` member a next turn it is not handed (B-a354)
       const pace = typeof mayWake === 'function' ? mayWake(m) : true;   // reserves the pace slot when it grants
       if (pace !== true) {
         const reason = (pace && pace.reason) || 'rate floor';
@@ -491,7 +523,7 @@ function create({
       const refusal = consentOf(consent, quiet ? 0 : resolved.filter((r) => G.wakeVerdict(g, r.cid, { author: { id: by }, raw: { kind: 'invite', member: r.cid, wake: true } }).wake).length);
       if (refusal) return refusal;
       recs.push(appendIn(g, { author: by, text: `${displayName(g, by)} created the group "${g.name}"`, raw: { kind: 'create', by } }));
-      for (const r of resolved) recs.push(appendIn(g, { author: by, text: inviteText(g, by, r.cid, ctx), raw: { kind: 'invite', by, member: r.cid, context: ctx, wake: !quiet } }));
+      for (const r of resolved) recs.push(appendIn(g, { author: by, text: inviteText(g, by, r.cid, ctx), raw: { kind: 'invite', by, member: r.cid, name: displayName(g, r.cid), context: ctx, wake: !quiet } }));
       gr.groups[id] = g;
       if (by === G.OWNER) ownerSaw(gr, g);
       return { ok: true, group: g };
@@ -534,7 +566,7 @@ function create({
       }
       const refusal = consentOf(consent, quiet ? 0 : joined.filter((cid) => G.wakeVerdict(g, cid, { author: { id: by }, raw: { kind: 'invite', member: cid, wake: true } }).wake).length);
       if (refusal) return { ...refusal, group: view(gr.groups[rg.group.id]) };
-      for (const cid of joined) recs.push(appendIn(g, { author: by, text: inviteText(g, by, cid, ctx), raw: { kind: 'invite', by, member: cid, context: ctx, wake: !quiet } }));
+      for (const cid of joined) recs.push(appendIn(g, { author: by, text: inviteText(g, by, cid, ctx), raw: { kind: 'invite', by, member: cid, name: displayName(g, cid), context: ctx, wake: !quiet } }));
       gr.groups[g.id] = g;
       if (by === G.OWNER) ownerSaw(gr, g);
       return { ok: true, group: g };
@@ -562,7 +594,7 @@ function create({
       const t = G.removeMember(g0, { member: target, by, at: now(), kick });
       if (t.ok === false) return t;
       const who = displayName(g0, target);
-      rec = appendIn(t.group, { author: by, text: kick ? `${displayName(g0, by)} removed ${who}` : `${who} left${t.event.archived ? ' — the group is archived' : ''}`, raw: { kind: kick ? 'kick' : 'leave', by, member: target, archived: t.event.archived } });
+      rec = appendIn(t.group, { author: by, text: kick ? `${displayName(g0, by)} removed ${who}` : `${who} left${t.event.archived ? ' — the group is archived' : ''}`, raw: { kind: kick ? 'kick' : 'leave', by, member: target, name: who, archived: t.event.archived } });
       gr.groups[g0.id] = t.group;
       return { ok: true, group: t.group, archived: t.event.archived };
     });
@@ -625,10 +657,14 @@ function create({
     return { ok: true, group: view(res.group), member: target, notify, noop: res.noop };
   }
 
-  /** Post a message. `from` = a member or the owner. Mentions are resolved
-   *  against the members' names; `wake:true` (`--wake`) @mentions every OTHER
+  /** Post a message. `from` = a member or the owner. Every @ is resolved NOW
+   *  (B-ff04: `G.scanAts` — an id behind each, its places in the words; an @
+   *  that names nobody, or two, is refused before anything is written);
+   *  `at` (`--at <name|id>`, repeatable) names members explicitly — one the
+   *  words do not already @ is written in front; `mentions` = the places the
+   *  owner's @-picker chose by id; `wake:true` (`--wake`) @mentions every OTHER
    *  member — an explicit act, each one a billed turn through the ladder. */
-  async function post({ group: ref, from, text, wake: wakeEveryone = false, mayWake = null, consent = null } = {}) {
+  async function post({ group: ref, from, text, wake: wakeEveryone = false, mayWake = null, consent = null, at: atRefs = [], mentions: picked = [] } = {}) {
     const body = String(text == null ? '' : text);
     if (!body.trim()) return { ok: false, code: 'bad-request', error: 'an empty message' };
     if (Buffer.byteLength(body, 'utf-8') > TEXT_MAX) return { ok: false, code: 'bad-request', error: 'message too large (16KB cap) — write a file and send its path instead' };
@@ -640,7 +676,24 @@ function create({
       if (!g || g.archivedAt) return { ok: false, code: 'archived', error: `group "${rg.group.name}" is archived` };
       if (!(from === G.OWNER || G.memberOf(g, from))) return { ok: false, code: 'not-member', error: 'only a member can post' };
       const named = g.members.map((m) => ({ member: m.member, name: displayName(g, m.member) }));
-      let mentions = G.mentionsIn(body, named);
+      const scan = G.scanAts(body, named, { explicit: picked });
+      const atNo = G.atRefusal(scan, named);
+      if (atNo) return { ...atNo, group: view(g) };
+      const front = [];
+      for (const a of Array.isArray(atRefs) ? atRefs : []) {
+        const hit = memberRef(g, a);
+        if (!hit.ok) return { ok: false, code: hit.code === 'ambiguous' ? 'ambiguous-mention' : 'unknown-mention', error: `--at: ${hit.error} — nothing was sent`, candidates: hit.candidates || named.map((m) => ({ conversationId: m.member, name: m.name })), group: view(g) };
+        if (!scan.mentions.some((x) => x.id === hit.member) && !front.includes(hit.member)) front.push(hit.member);
+      }
+      let words = body;
+      let mentions = scan.mentions;
+      if (front.length) {
+        let lead = '';
+        const added = front.map((id) => { const name = displayName(g, id); const s = lead.length; lead += `@${name} `; return { id, name, pos: [[s, s + 1 + name.length]] }; });
+        for (const m of mentions) m.pos = m.pos.map(([s, e]) => [s + lead.length, e + lead.length]);
+        words = lead + body;
+        mentions = added.concat(mentions);
+      }
       if (wakeEveryone) for (const m of named) if (m.member !== from && !mentions.some((x) => x.id === m.member)) mentions.push({ id: m.member, name: m.name });
       mentions = mentions.filter((x) => x.id !== from);
       const refusal = consentOf(consent, G.wakesPlanned(g, { author: { id: from }, mentions, raw: { kind: 'message' } }, g.members.map((m) => m.member).filter((m) => m !== from)));
@@ -650,7 +703,7 @@ function create({
       if (refusal) return { ...refusal, group: view(g) };
       const cur = G.memberOf(g, from);
       if (cur) cur.name = displayName(g, from);   // refresh the snapshot the report prints when the session is gone
-      rec = appendIn(g, { author: from, text: body, mentions, raw: { kind: 'message' } });
+      rec = appendIn(g, { author: from, text: words, mentions, raw: { kind: 'message' } });
       if (from === G.OWNER) ownerSaw(gr, g);
       return { ok: true, group: g };
     });
@@ -667,14 +720,14 @@ function create({
    *  otherwise or the sender passes `wake` (= an @, a billed turn).
    *  `create:false` (a Background Work job posting as its owner conversation)
    *  posts only into a pair that ALREADY exists — a job never makes a group. */
-  async function sendToAgent({ from, to, text, wake: w = false, create = true, mayWake = null, consent = null } = {}) {
+  async function sendToAgent({ from, to, text, wake: w = false, create = true, mayWake = null, consent = null, at = [] } = {}) {
     const r = resolveMember(to, from);
     if (!r.ok) return r;
     const shown = r.name || to;
     if (!create && !findPair(from, r.cid)) return { ok: false, code: 'job-token', error: `no direct group with "${shown}" exists yet, and a job token never creates one — start it from the conversation that owns this job (vibespace-msg send "${shown}" "…"), then the job can post into it` };
     const pair = await findOrCreatePair(from, r.cid, r.name);
     if (!pair.ok) return pair;
-    const p = await post({ group: pair.group.id, from, text, wake: w, mayWake, consent });
+    const p = await post({ group: pair.group.id, from, text, wake: w, mayWake, consent, at });
     return p.ok ? { ...p, pairCreated: pair.created } : p;
   }
   /** The live (unarchived) two-member group of a and b, or null. */
@@ -922,7 +975,7 @@ function create({
       const since = memberSince(m);
       if (!((Number(g.lastAt) || 0) > since)) continue;
       for (const r of readLog(g.id)) {
-        if (!r || !(Number(r.at) > since) || (r.author && r.author.id === cid) || ((r.raw && r.raw.kind) || 'message') !== 'message') continue;
+        if (!r || !(Number(r.at) > since) || (r.author && r.author.id === cid) || ((r.raw && r.raw.kind) || 'message') !== 'message' || !G.reachesReport(g, cid, r)) continue;   // B-a354: a `mention` member waits only for what @mentions it
         const self = !!(r.author && r.author.id === G.OWNER);
         out.push({ groupId: g.id, groupName: g.name, at: r.at, from: self ? null : ((r.author && (r.author.name || r.author.id)) || null), self, text: String(r.text == null ? '' : r.text).slice(0, PENDING_TEXT_MAX) });
       }
@@ -1030,6 +1083,7 @@ function create({
 
   return {
     list, listFor, markRead, liveRoster, pacerFor, noteRoster, get: (id) => { const g = getGroup(id); return g ? view(g) : null; }, resolveGroup, resolveMember, resolveTarget, reach,
+    sharesGroup, dispatchLedger,   // lane worker-dispatch verify r1 ④ / ②
     create: createGroup, invite, leave: (o) => remove({ ...o, kick: false }), kick: (o) => remove({ ...o, kick: true }),
     rename: renameGroup, archive: archiveGroup, setNotify, post, sendToAgent, findPair, findOrCreatePair, read, clearMessages,
     reportsForTurn, commitReports,

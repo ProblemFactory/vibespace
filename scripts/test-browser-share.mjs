@@ -8,10 +8,14 @@
 //   ① conversation 1 `new work`, `use work`, browses; the USER pins work for conversation 2 (a rung-D session) and its
 //      first bare command browses ⇒ the SAME Chrome (a process census on the directory: exactly one), each on its own
 //      tab, no SingletonLock anywhere, both strips list work (the strip model), the live view answered
-//   ② one driver at a time: conversation 2 mid-turn while conversation 1 drives ⇒ `browser_busy` naming "First chat"
-//      through the shipped CLI; the turn ends ⇒ it runs
-//   ③ the user takes over from conversation 2's live view (the real bridge): conversation 2 browser_paused,
-//      conversation 1 browser_paused too (lane S2 r6: a takeover is of the BROWSER); the handback frees it
+//   ② lane browser-windows (2026-10-01): TWO CONVERSATIONS AT ONCE — each conversation's tab is in a window of its own
+//      (Chrome's own Browser.getWindowForTarget), conversation 2's command answers WHILE conversation 1's `wait 4000` runs
+//      (no browser_busy: the drive claim is gone), each `tab list` names only its own tabs
+//   ③ the user takes over conversation 2's WINDOW from its live view (the real bridge): conversation 2 browser_paused,
+//      conversation 1 in its own window RUNS ON (userW's D-payments, inc 2026-10-01); the handback frees conversation 2
+//   ③c conversation 1's `tab new` opens a NEW window of its own; its live view's chips: watching ⇒ the VIEW moves (the
+//      agent's current tab untouched), driving ⇒ the real switch; its tab put behind a popup ⇒ the view says it paints
+//      nothing and polls its picture (U0b, userW's inc-muqdohf0-hkjc), the driving chip brings it forward
 //   ④ "Who can use it" is a LIST (2026-09-27): "Only these: [Task Group G, First chat]" ⇒ conversation 2 (in G) opens work
 //      through its group (one Chrome, its own tab), conversation 3 refused not_owner with the list sentence and the CLI's
 //      way-out line (no command line, no temporary browser); the user adds conversation 3 ⇒ admitted; the user unbinds
@@ -43,6 +47,7 @@ const B = require('../src/browser-profiles.js');
 const K = require('../src/server/browser-keeper.js');
 const F = require('../src/browser-facts.js');
 const S = require('../src/browser-stream.js');
+const WIN = require('../src/browser-windows.js'); // verify r1 T2 ⑧: the per-holder window census (the red cell)
 const BE = require('../src/server/browser-env.js');
 const express = require('express');
 const { WebSocket } = require('ws');
@@ -145,14 +150,24 @@ else await (async () => {
     const view = await k.streamPortFor(S.streamTargetFor({ browserKey: KB, set: k.setFor(KB), profiles: k.list().profiles }));
     ok(view.ok && Number.isInteger(view.port) && chromesOn(work.dir) === 1, `① conversation 2's live view is answered (${view.port}) on the same Chrome`, view);
 
-    // ── ② one driver at a time, through the shipped CLI ──
+    // ── ② lane browser-windows: TWO CONVERSATIONS AT ONCE, each in a window of its own (the drive claim is gone) ──
+    const VP = require('../src/server/browser-viewport.js');
+    const recW = k.browserOf(work.id);
+    const pagesW = ((await VP.browserTargets(recW.cdpUrl)).targets || []).filter((t) => t.type === 'page');
+    const tWA = pagesW.find((t) => /WORKA/.test(t.title)), tWB = pagesW.find((t) => /WORKB/.test(t.title));
+    const winA = tWA ? await VP.windowOf(recW.cdpUrl, tWA.targetId) : null, winB = tWB ? await VP.windowOf(recW.cdpUrl, tWB.targetId) : null;
+    ok(winA !== null && winB !== null && winA !== winB && chromesOn(work.dir) === 1, `② ONE Chrome, a window per conversation: conversation 1's page in window ${winA}, conversation 2's in window ${winB} (Chrome's own Browser.getWindowForTarget)`, { winA, winB, pages: pagesW.map((t) => t.title) });
     conv[KA].turn = 'running'; conv[KB].turn = 'running';
-    const d1 = await run(s1, ['get', 'title']);
-    const d2 = await run(s2, ['get', 'title']);
-    ok(d1.ok && !d2.ok && /\[browser_busy\]/.test(d2.err) && /"First chat" is using "work" right now/.test(d2.err) && /driven by: "First chat"/.test(d2.err) && !CMDLINE_RE.test(d2.err), '② conversation 2 mid-turn while conversation 1 drives ⇒ browser_busy BY NAME through the shipped CLI (its command did not run; no command line offered)', d2.err);
-    conv[KA].turn = 'idle';
-    const d3 = await run(s2, ['get', 'title']);
-    ok(d3.ok && /WORKB/.test(titleOf(d3)), '② conversation 1\'s turn ended ⇒ conversation 2\'s command runs (its own tab)', d3);
+    const longA = run(s1, ['wait', '4000']);
+    await sleep(400);
+    const t2 = Date.now(); const d2 = await run(s2, ['get', 'title']); const d2ms = Date.now() - t2;
+    const d1 = await longA;
+    ok(d1.ok && d2.ok && /WORKB/.test(titleOf(d2)) && !/browser_busy/.test(d2.err) && d2ms < 3000, `② conversation 2's command runs WHILE conversation 1's \`wait 4000\` runs on the same browser — answered in ${d2ms} ms, no browser_busy (measured: one daemon each)`, { d1: d1.err, d2: d2.err, d2ms });
+    const lA = await run(s1, ['tab', 'list', '--json']), lB = await run(s2, ['tab', 'list', '--json']);
+    const tabsOf = (r) => { try { const o = JSON.parse(lastLine(r)); return (o && o.data && o.data.tabs) || []; } catch { return []; } };
+    const urlsA = tabsOf(lA).map((x) => x.url).join(' '), urlsB = tabsOf(lB).map((x) => x.url).join(' ');
+    ok(lA.ok && lB.ok && /WORKA/.test(urlsA) && !/WORKB/.test(urlsA) && /WORKB/.test(urlsB) && !/WORKA/.test(urlsB), '② each conversation\'s `tab list` names only its own tabs (the other window\'s are not its)', { urlsA, urlsB });
+    conv[KA].turn = 'idle'; conv[KB].turn = 'idle';
 
     // ── ③ the user takes over from conversation 2's live view (the real bridge) ──
     conv[KA].turn = 'running';
@@ -165,15 +180,135 @@ else await (async () => {
     for (let i = 0; i < 50 && !inbox.some((m) => m.type === 'mode-ack'); i++) await sleep(100);
     const ack = inbox.find((m) => m.type === 'mode-ack');
     const u2 = await run(s2, ['get', 'title']), u1 = await run(s1, ['get', 'title']);
-    // integration 2.369.192: a takeover is of the BROWSER (lane S2 r6, the owner's ruling B-7199) — conversation 1 is taken WITH it
-    ok(ack && ack.ok && !u2.ok && /\[browser_paused\]/.test(u2.err) && !u1.ok && /\[browser_paused\]/.test(u1.err), '③ the user takes over from conversation 2\'s live view: conversation 2 browser_paused (as today), conversation 1 browser_paused too — the takeover is of the browser, never one conversation\'s', { ack, u2: u2.err, u1: u1.err });
+    // lane browser-windows (U2): a takeover is of the WINDOW the view shows — conversation 1, in its own window, runs on
+    ok(ack && ack.ok && !u2.ok && /\[browser_paused\]/.test(u2.err) && /your window of the "work" browser/.test(u2.err) && u1.ok && /WORKA/.test(titleOf(u1)), '③ the user takes over conversation 2\'s WINDOW from its live view: conversation 2 browser_paused ("your window of the "work" browser"), conversation 1 in its own window RUNS ON', { ack, u2: u2.err, u1: u1.err });
     ws.send(JSON.stringify({ type: 'handback' }));
     for (let i = 0; i < 50 && inbox.filter((m) => m.type === 'mode-ack').length < 2; i++) await sleep(100);
     ws.close();
     conv[KB].turn = 'idle';
-    const u3 = await run(s1, ['get', 'title']);
-    ok(u3.ok && /WORKA/.test(titleOf(u3)), '③ the handback frees it — conversation 1 acts again', u3);
+    const u3 = await run(s2, ['get', 'title']);
+    ok(u3.ok && /WORKB/.test(titleOf(u3)), '③ the handback frees conversation 2\'s window — conversation 2 acts again', u3);
     conv[KA].turn = 'idle';
+
+    // ── ③c lane browser-windows (U1 + U3 + U0b) on the real binary: a NEW tab opens in a window of its own; the live
+    //    view's chips — watching: the VIEW moves (the agent's tab untouched); driving: the real switch; a tab put behind a
+    //    popup in its window paints nothing ⇒ the view SAYS it (userW's inc-muqdohf0-hkjc), the chip brings it forward ──
+    {
+      const n1 = await run(s1, ['tab', 'new', PAGE('WORKA2')]);
+      const pg2 = ((await VP.browserTargets(recW.cdpUrl)).targets || []).filter((t) => t.type === 'page');
+      const tA1 = pg2.find((t) => t.title === 'WORKA'), tA2 = pg2.find((t) => t.title === 'WORKA2');
+      const wA2 = tA2 ? await VP.windowOf(recW.cdpUrl, tA2.targetId) : null;
+      // verify r1 T2 ⑧ (the owner: "agent 意外创建多个窗口"): ONE WINDOW PER HOLDER — the second tab opens IN the first tab's window
+      // (the opener rule, measured; never a second window, never conversation 2's)
+      ok(n1.ok && tA1 && tA2 && wA2 !== null && wA2 === winA && wA2 !== winB, `③c T2 ⑧: conversation 1's \`tab new\` opens IN ITS OWN EXISTING window (window ${wA2} = its first tab's ${winA}; conversation 2's is ${winB}) — one window per holder, never another conversation's`, { n1: n1.err, pages: pg2.map((t) => t.title) });
+      { const census = WIN.windowCensus(await Promise.all(pg2.filter((t) => /^WORKA/.test(t.title)).map(async (t) => ({ holder: 'conv1', windowId: await VP.windowOf(recW.cdpUrl, t.targetId) })))); ok(census.conv1 && census.conv1.count === 1 && WIN.multiWindowHolders(census).length === 0, `③c T2 ⑧ the red cell: conversation 1 holds exactly ONE window (${census.conv1 ? census.conv1.count : '?'}) across its ${pg2.filter((t) => /^WORKA/.test(t.title)).length} tabs`, census); }
+      const g1 = await run(s1, ['get', 'title']);
+      ok(/WORKA2/.test(titleOf(g1)), '③c …and the session is bound to it (its next command runs there)', g1);
+      const lv = new WebSocket(`ws://127.0.0.1:${PORT}${S.STREAM_PATH}?session=sess-1&profile=${work.id}`);
+      const box = []; const frames = [];
+      lv.on('message', (d) => { let m = null; try { m = JSON.parse(String(d)); } catch { return; } m._at = Date.now(); if (m.type === 'frame') frames.push(m); else box.push(m); });
+      await new Promise((res, rej) => { lv.once('open', res); lv.once('error', rej); });
+      const waitFor = async (pred, ms) => { for (let i = 0; i < ms / 100 && !pred(); i++) await sleep(100); return !!pred(); };
+      const id1 = tA1 ? String(tA1.targetId).toUpperCase() : '';
+      const ownersOk = await waitFor(() => box.some((m) => m.type === 'tab-owners' && m.owners && m.owners[id1] === 'agent'), 8000);
+      ok(ownersOk, '③c the live view of conversation 1 lists its tabs (its first one is its agent\'s)');
+      lv.send(JSON.stringify({ type: 'watch-tab', targetId: id1 }));
+      const watched = await waitFor(() => frames.some((f) => f.metadata && f.metadata.watched === id1), 6000);
+      const g2 = await run(s1, ['get', 'title']);
+      ok(watched && /WORKA2/.test(titleOf(g2)) && box.some((m) => m.type === 'watching' && m.targetId === id1), '③c U3 WATCHING: a chip click on its other tab moves THE VIEW there (its frames arrive) — the agent\'s current tab is untouched (still WORKA2)', { watched, g2: titleOf(g2), modes: box.filter((m) => m.type === 'watching').map((m) => m.mode || m.refused || 'null') });
+      lv.send(JSON.stringify({ type: 'watch-tab', targetId: null }));
+      await waitFor(() => box.some((m) => m.type === 'watching' && m.targetId === null), 3000);
+      lv.send(JSON.stringify({ type: 'takeover' }));
+      await waitFor(() => box.some((m) => m.type === 'mode-ack' && m.ok), 5000);
+      lv.send(JSON.stringify({ type: 'tab-act', act: 'switch', targetId: id1, rid: 31 }));
+      const sw = await waitFor(() => box.some((m) => m.type === 'tab-ack' && m.rid === 31), 15000);
+      const swAck = box.find((m) => m.type === 'tab-ack' && m.rid === 31) || null;
+      lv.send(JSON.stringify({ type: 'handback' }));
+      await waitFor(() => box.filter((m) => m.type === 'mode-ack').length >= 2, 5000);
+      const g3 = await run(s1, ['get', 'title']);
+      ok(sw && swAck && swAck.ok && /WORKA$/.test(String(titleOf(g3)).trim()), '③c U3 DRIVING: the chip click is the REAL switch — after the handback the agent\'s current tab is the one the user picked (WORKA)', { swAck, g3: titleOf(g3) });
+      // U0b: the page conversation 1 is on opens a popup — it lands in ITS window (Chrome's rule) and takes the show there
+      const pu = VP.pageUrlOf(recW.cdpUrl, id1);
+      await new Promise((res) => { const w = new WebSocket(pu); w.on('open', () => w.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: { expression: `window.open(${JSON.stringify(PAGE('POPUP'))}, '_blank'); 1`, userGesture: true } }))); w.on('message', () => { try { w.close(); } catch { } res(); }); w.on('error', () => res()); setTimeout(res, 4000); });
+      const mark = box.length;
+      const bg = await waitFor(() => box.slice(mark).some((m) => m.type === 'tab-background' && m.targetId === id1), 9000);
+      await sleep(1300);
+      const polled = frames.filter((f) => f.metadata && f.metadata.polled === 'background').length;
+      ok(bg && polled >= 1, `③c U0b: conversation 1's tab went BEHIND a popup in its window — it paints nothing; the live view SAYS so (tab-background) and polls its picture (${polled} captures)`, { bg, polled, last: box.slice(mark).map((m) => m.type).slice(-6) });
+      lv.send(JSON.stringify({ type: 'takeover' }));
+      await waitFor(() => box.filter((m) => m.type === 'mode-ack' && m.ok).length >= 3, 5000);
+      lv.send(JSON.stringify({ type: 'tab-act', act: 'switch', targetId: id1, rid: 32 }));
+      const fw = await waitFor(() => box.some((m) => m.type === 'tab-ack' && m.rid === 32), 15000);
+      const fwAck = box.find((m) => m.type === 'tab-ack' && m.rid === 32) || null;
+      const cleared = await waitFor(() => box.slice(mark).some((m) => m.type === 'tab-background' && m.targetId === null), 8000);
+      ok(fw && fwAck && fwAck.ok && fwAck.broughtForward && cleared, '③c U0b: driving, a click on ITS chip brings it FORWARD (never a silent no-op) — it paints again and the notice clears', { fwAck, cleared });
+      lv.send(JSON.stringify({ type: 'handback' }));
+      await sleep(500);
+      lv.close();
+    }
+
+    // ── ③d verify r2 T1 (lane browser-windows): THE THREE WORST OPENER STATES ON THE REAL BINARY + CHROME — a confirm()
+    //    dialog open on conversation 1's current tab, its current tab closed while another of its tabs lives, and the user
+    //    driving its window. The red cell each time: conversation 1's window count read off Chrome's own getWindowForTarget.
+    {
+      const own1 = async () => ((await VP.browserTargets(recW.cdpUrl)).targets || []).filter((t) => t.type === 'page' && /^WORKA/.test(t.title));
+      const census1 = async () => WIN.windowCensus(await Promise.all((await own1()).map(async (t) => ({ holder: 'conv1', windowId: await VP.windowOf(recW.cdpUrl, t.targetId) }))));
+      const curOf = async () => { const g = await run(s1, ['get', 'title']); const title = String(titleOf(g) || '').trim(); return (await own1()).find((t) => String(t.title).trim() === title) || null; };
+      // (i) a confirm() blocks the current tab (the daemon auto-answers alerts only — browser-stuck): `tab new` still lands IN its window
+      const c0 = await curOf();
+      const dlgSock = c0 ? new WebSocket(VP.pageUrlOf(recW.cdpUrl, c0.targetId)) : null;
+      if (dlgSock) { await new Promise((res) => { dlgSock.once('open', res); dlgSock.once('error', res); }); try { dlgSock.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: { expression: 'confirm("stay?")', userGesture: true } })); } catch { /* */ } await sleep(400); }
+      const before = (await census1()).conv1 || { count: 0 };
+      const nd = await run(s1, ['tab', 'new', PAGE('WORKA4')]);
+      const afterD = (await census1()).conv1 || { count: 0 };
+      try { dlgSock && dlgSock.send(JSON.stringify({ id: 2, method: 'Page.handleJavaScriptDialog', params: { accept: true } })); } catch { /* */ } await sleep(200); try { dlgSock && dlgSock.close(); } catch { /* */ }
+      ok(!!c0 && nd.ok && before.count === 1 && afterD.count === 1 && (await own1()).some((t) => t.title === 'WORKA4'), `③d (i) a confirm() dialog open on conversation 1's current tab: its \`tab new\` still lands IN its one window (${before.count} → ${afterD.count}; never a second window, never refused)`, { c0: c0 && c0.title, nd: nd.err, afterD });
+      // (ii) its current tab CLOSED (another of its tabs lives): the next root anchors the opener, the session re-binds to the new tab
+      const c1 = await curOf();
+      if (c1) await VP.closeTarget(recW.cdpUrl, c1.targetId);
+      await sleep(300);
+      const nc = await run(s1, ['tab', 'new', PAGE('WORKA5')]);
+      const afterC = (await census1()).conv1 || { count: 0 };
+      const g5 = await run(s1, ['get', 'title']);
+      ok(!!c1 && nc.ok && afterC.count === 1 && /WORKA5/.test(titleOf(g5)), `③d (ii) conversation 1's current tab closed while its other tabs live: \`tab new\` lands IN the same window (${afterC.count}) and the session is bound to the new tab`, { c1: c1 && c1.title, nc: nc.err, g5: titleOf(g5), afterC });
+      // (iii) the user drives its window: `tab new` is refused browser_paused BEFORE any create — no window, no tab appears
+      const lv2 = new WebSocket(`ws://127.0.0.1:${PORT}${S.STREAM_PATH}?session=sess-1&profile=${work.id}`);
+      const box2 = []; lv2.on('message', (d) => { let m = null; try { m = JSON.parse(String(d)); } catch { return; } if (m.type !== 'frame') box2.push(m); });
+      await new Promise((res, rej) => { lv2.once('open', res); lv2.once('error', rej); });
+      lv2.send(JSON.stringify({ type: 'takeover' }));
+      for (let i = 0; i < 50 && !box2.some((m) => m.type === 'mode-ack' && m.ok); i++) await sleep(100);
+      const pagesBefore = (await own1()).length;
+      const nt = await run(s1, ['tab', 'new', PAGE('WORKA6')]);
+      const afterT = (await census1()).conv1 || { count: 0 };
+      lv2.send(JSON.stringify({ type: 'handback' })); await sleep(400); lv2.close();
+      ok(!nt.ok && /browser_paused/.test(String(nt.err || nt.out || '')) && afterT.count === 1 && (await own1()).length === pagesBefore, `③d (iii) the user drives conversation 1's window: its \`tab new\` is refused browser_paused before any create — ${afterT.count} window, ${pagesBefore} page(s) unchanged`, { nt: String(nt.err || nt.out || '').slice(0, 200), afterT });
+      // (iv) verify r3 T2 ① — THE RACE on the real binary: EVERY tab of conversation 1 holds a confirm() (the opener rule fails on
+      //      all of them ⇒ rung 2: the window-state cycle + activate + create, serialized) while conversation 2's daemon activates
+      //      ITS window in a loop (`tab <id>` switches — the realistic racer): conversation 1's tab lands IN its window, none of
+      //      its tabs sits in conversation 2's window afterwards, the leaks (if any) are counted, and the act returns within the
+      //      probe's budget (4 anchors × 400 ms + rung 2; never the 10 s of r2's ladder)
+      const holdAll = []; for (const t of await own1()) { const ws = new WebSocket(VP.pageUrlOf(recW.cdpUrl, t.targetId)); await new Promise((res) => { ws.once('open', res); ws.once('error', res); }); try { ws.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: { expression: 'confirm("race?")', userGesture: true } })); } catch { /* */ } holdAll.push(ws); }
+      await sleep(400);
+      // verify r4 ③: conversation 2 holds TWO tabs and its FIRST (not its last) is the one its daemon keeps in front — a stray of
+      // conversation 1 closing in its window would have left its LAST tab in front (Chrome's rule, measured 30/30 per mode)
+      await run(s2, ['tab', 'new', PAGE('WORKB-second'), '--json']);
+      const l2 = await run(s2, ['tab', 'list', '--json']); let id2 = null, id2Last = null; try { const o = JSON.parse(lastLine(l2)); id2 = (o.data.tabs[0] || {}).targetId || null; id2Last = (o.data.tabs[o.data.tabs.length - 1] || {}).targetId || null; } catch { /* */ }
+      const leaks0 = k.list().windowLeaks.count; const t0 = Date.now();
+      let stop = false; const racer = (async () => { let n = 0; while (!stop && n < 40) { if (id2) await run(s2, ['tab', id2]); else await sleep(50); n++; } return n; })();
+      const nr = await run(s1, ['tab', 'new', PAGE('WORKA7'), '--json']); const raceMs = Date.now() - t0; stop = true; const switches = await racer;
+      for (const ws of holdAll) { try { ws.send(JSON.stringify({ id: 2, method: 'Page.handleJavaScriptDialog', params: { accept: true } })); } catch { /* */ } } await sleep(300); for (const ws of holdAll) { try { ws.close(); } catch { /* */ } }
+      const afterR = (await census1()).conv1 || { count: 0 };
+      const pgR = ((await VP.browserTargets(recW.cdpUrl)).targets || []).filter((t) => t.type === 'page');
+      const inB = (await Promise.all(pgR.filter((t) => /^WORKA/.test(t.title)).map(async (t) => (await VP.windowOf(recW.cdpUrl, t.targetId)) === winB))).filter(Boolean).length;
+      const leaks = k.list().windowLeaks.count - leaks0;
+      const rung = (() => { try { return JSON.parse(lastLine(nr)).data.opened.rung; } catch { return null; } })();
+      ok(nr.ok && afterR.count === 1 && inB === 0 && pgR.some((t) => t.title === 'WORKA7') && raceMs < 8000 && rung === 'activate', `③d (iv) verify r3 THE RACE: every tab of conversation 1 held a confirm() while conversation 2 switched its tabs ${switches}× — conversation 1's \`tab new\` landed IN its one window (${afterR.count}; rung ${rung || '(unsaid)'}), none of its tabs in conversation 2's window, ${leaks} leak(s) counted, in ${raceMs} ms (the probe: never r2's 10 s)`, { nr: nr.err.slice(0, 300), out: nr.out.slice(0, 200), afterR, inB, leaks, raceMs });
+      ok(k.list().windowLeaks && typeof k.list().windowLeaks.count === 'number', '③d (iv) the digest carries the leak counter (windowLeaks.count)');
+      // verify r4 ③ (the other holder's foreground): after the race conversation 2's FIRST tab is still its visible one (a background create never takes another window's foreground; a foreground stray's close would have moved it to the last tab)
+      { const vis = async (tid) => { if (!tid) return null; const ws = new WebSocket(VP.pageUrlOf(recW.cdpUrl, tid)); await new Promise((res) => { ws.once('open', res); ws.once('error', res); }); const v = await new Promise((res) => { const t = setTimeout(() => res(null), 2500); ws.on('message', (d) => { try { const m = JSON.parse(String(d)); if (m.id === 1) { clearTimeout(t); res(m.result && m.result.result ? m.result.result.value : null); } } catch { /* */ } }); try { ws.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: { expression: 'document.visibilityState', returnByValue: true } })); } catch { clearTimeout(t); res(null); } }); try { ws.close(); } catch { /* */ } return v; };
+        const vFirst = await vis(id2), vLast = id2Last && id2Last !== id2 ? await vis(id2Last) : null;
+        ok(id2 && id2Last && id2 !== id2Last && vFirst === 'visible' && vLast === 'hidden', `③d (iv) verify r4 ③: conversation 2's foreground tab after the race is still its FIRST tab (visible: ${vFirst}; its last: ${vLast}) — nothing of conversation 1's moved it`, { id2, id2Last, vFirst, vLast }); }
+    }
 
     // ── ③b VERIFY S5 (2026-09-26): the user drives from conversation 2's live view when "Only First chat" takes work from
     //    conversation 2 ⇒ that view ENDS (typed), a takeover from conversation 2 is refused no_lease, conversation 1 is free
@@ -188,7 +323,7 @@ else await (async () => {
     ws3.send(JSON.stringify({ type: 'takeover' }));
     for (let i = 0; i < 50 && !inbox3.some((m) => m.type === 'mode-ack'); i++) await sleep(100);
     const b1 = await run(s1, ['get', 'title']);
-    ok(!b1.ok && /\[browser_paused\]/.test(b1.err), '③b setup: the user drives work from conversation 2\'s live view — conversation 1 is browser_paused (taken WITH it: lane S2 r6)', b1.err);
+    ok(b1.ok && /WORKA/.test(titleOf(b1)), '③b setup: the user drives conversation 2\'s window from its live view — conversation 1 runs on in its own window (lane browser-windows)', b1.err);
     const mark3 = inbox3.length;
     await sleep(5);
     r = await j('PATCH', `/api/browser/profiles/${work.id}`, { use: { mode: 'only', who: [{ kind: 'session', key: KA }] } });
@@ -225,7 +360,7 @@ else await (async () => {
     u0 = (await j('GET', `/api/browser/profiles/${work.id}/use`)).json;
     r = await j('PATCH', `/api/browser/profiles/${work.id}`, { use: { mode: 'only', who: [{ kind: 'task', id: 'T-G' }, { kind: 'session', key: KA }] }, base: u0.base });
     const n3 = await run(s3, ['use', 'work']);
-    ok(!n3.ok && /\[not_owner\]/.test(n3.err) && /kept to some of the user's conversations and Task Groups/.test(n3.err) && /way out: ask the user to add this conversation under "Who can use it" in the Agent browser panel \(Change…\), or to switch it to "All my conversations"/.test(n3.err) && !CMDLINE_RE.test(n3.err) && !k.ephemeralFor(KC), '④ conversation 3 `use work` ⇒ not_owner with the LIST sentence and the CLI\'s way-out line (no command line, no temporary browser)', n3.err);
+    ok(!n3.ok && /\[not_owner\]/.test(n3.err) && /kept to some of the user's conversations and Task Groups/.test(n3.err) && /way out: ask the user to add this conversation under "Who can use it" in the Agent browser panel \(Change…\), or to pick "All agents" there/.test(n3.err) && !CMDLINE_RE.test(n3.err) && !k.ephemeralFor(KC), '④ conversation 3 `use work` ⇒ not_owner with the LIST sentence and the CLI\'s way-out line (no command line, no temporary browser)', n3.err);
     // the five `used by:` forms, as each conversation's `profiles` prints them
     await j('POST', '/api/browser/profiles', { label: 'shop' }); // everyone's
     const pr1 = await run(s1, ['profiles']), pr2 = await run(s2, ['profiles']), pr3 = await run(s3, ['profiles']);

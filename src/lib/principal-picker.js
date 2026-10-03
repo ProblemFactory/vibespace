@@ -26,7 +26,14 @@
 //    `tasks-updated`) never re-creates the box or a row the person is on, and
 //    touches only the nodes that MOVED (a detached row loses the click in
 //    flight on it — verify round 4);
-//  · every name is peer-controlled text ⇒ textContent only.
+//  · every name is peer-controlled text ⇒ textContent only;
+//  · ALL AGENTS (lane everyone-principal, 2026-10-02): `everyone: {key, name?, hint?}` puts THE row "All agents —
+//    every conversation, now and later" FIRST (above Recent, its own section, a search never hides it, its chip first,
+//    never a recent pick, never Enter's first-row fallback — a click, or ↑ / ↓ then Enter; the first ↓ lands on the
+//    first named row); `everyone: 'roster'` = the caller's rows carry a row of kind `everyone` themselves (Notify…:
+//    only while All holds access; window share: checked from the record), drawn the same way. Every permission
+//    surface passes it (scripts/test-everyone-principal.mjs is the census) — the caller maps the row to its own
+//    model's spelling.
 import { t } from './i18n.js';
 import { createPopover } from './utils.js';
 import { icon, el, avatar } from './channel-chrome.js';
@@ -41,6 +48,7 @@ export function readRecent() {
   try { const v = JSON.parse(localStorage.getItem(RECENT_KEY) || '[]'); return Array.isArray(v) ? v.map(String) : []; } catch { return []; }
 }
 function remember(row) {
+  if (PM.isEveryone(row)) return;   // All agents is always first — it never takes a recent slot
   try { localStorage.setItem(RECENT_KEY, JSON.stringify(PM.pushRecent(readRecent(), PM.identityOf(row)))); } catch {}
 }
 
@@ -71,9 +79,13 @@ export function rosterFromApp(app, { agents = true, groups = true } = {}) {
  * the roster's broadcasts when `app` is given). Returns
  * `{el, selected(), setSelected(keys), refresh(), focus(), close()}`.
  */
-export function principalPicker({ items = [], app = null, multi = false, compact = false, selected = [], placeholder = '', label = '', emptyText = '', autofocus = false, onChange = null, cls = '' } = {}) {
+export function principalPicker({ items = [], app = null, multi = false, compact = false, selected = [], placeholder = '', label = '', emptyText = '', autofocus = false, onChange = null, cls = '', everyone = null } = {}) {
   const id = `pp-${++seq}`;
-  const source = typeof items === 'function' ? items : () => items;
+  const raw = typeof items === 'function' ? items : () => items;
+  // THE ALL-AGENTS ROW (the caller's key and words; the device's words by default) — first, unless the roster
+  // already carries an `everyone` row of its own (`everyone: 'roster'`)
+  const allRow = everyone && typeof everyone === 'object' ? PM.everyoneRow({ key: everyone.key || 'everyone:*', name: everyone.name || t('All agents'), hint: everyone.hint != null ? everyone.hint : t('every conversation, now and later') }) : null;
+  const source = () => { const r = raw() || []; return allRow && !r.some((x) => x && PM.isEveryone(x)) ? [allRow, ...r] : r; };
   let rows = source() || [];
   let sel = (selected || []).map(String);
   let query = '';
@@ -105,10 +117,12 @@ export function principalPicker({ items = [], app = null, multi = false, compact
   const nameOf = (k) => { const r = byKey().get(k) || known.get(k); return r ? r.name : k; };
   const fire = (picked) => { if (onChange) { try { onChange(sel.slice(), picked || null); } catch (e) { console.warn('[principal-picker] onChange', e); } } };
 
+  const everyoneKeys = () => rows.filter((r) => PM.isEveryone(r)).map((r) => String(r.key));
+  const glyphOf = (r) => (PM.isEveryone(r) ? 'everyone' : r.kind === 'group' ? 'users' : null);
   function chipOf(r) {
-    const c = el('span', 'pp-chip');
+    const c = el('span', 'pp-chip' + (PM.isEveryone(r) ? ' pp-chip-everyone' : ''));
     c.dataset.key = String(r.key);
-    c.appendChild(avatar({ name: r.name, key: PM.identityOf(r), glyph: r.kind === 'group' ? 'users' : null }, 18, 'pp-chip-av'));
+    c.appendChild(avatar({ name: r.name, key: PM.identityOf(r), glyph: glyphOf(r) }, 18, 'pp-chip-av'));
     c.appendChild(el('span', 'pp-chip-name', r.name));
     const x = document.createElement('button');
     x.type = 'button'; x.className = 'pp-chip-x';
@@ -131,7 +145,7 @@ export function principalPicker({ items = [], app = null, multi = false, compact
   function drawChips() {
     const m = byKey();
     const out = [];
-    for (const k of sel) {
+    for (const k of PM.chipOrder(sel, everyoneKeys())) {   // the All-agents chip first
       const r = m.get(k) || known.get(k) || { key: k, kind: k.startsWith('group:') ? 'group' : 'agent', name: k };
       let c = chipNodes.get(k);
       if (!c || c.dataset.name !== r.name) { c = chipOf(r); c.dataset.name = r.name; chipNodes.set(k, c); }
@@ -165,7 +179,8 @@ export function principalPicker({ items = [], app = null, multi = false, compact
       n.dataset.sig = sig;
       n.textContent = '';
       n.appendChild(el('span', 'pp-check'));
-      if (r.kind === 'group') n.appendChild(avatar({ name: r.name, key: PM.identityOf(r), glyph: 'users' }, 20, 'pp-av'));
+      n.classList.toggle('pp-row-everyone', PM.isEveryone(r));
+      if (r.kind === 'group' || PM.isEveryone(r)) n.appendChild(avatar({ name: r.name, key: PM.identityOf(r), glyph: glyphOf(r) }, 20, 'pp-av'));
       else { const bi = createBackendIcon(r.backend || 'claude', { className: 'pp-backend' }); bi.setAttribute('aria-hidden', 'true'); n.appendChild(bi); }
       n.appendChild(el('span', 'pp-name', r.name));
       if (r.folder) n.appendChild(el('span', 'pp-folder', r.folder));
@@ -199,10 +214,13 @@ export function principalPicker({ items = [], app = null, multi = false, compact
     const out = [];
     visibleKeys = [];
     const add = (r) => { out.push(rowNode(r)); if (!r.disabled) visibleKeys.push(String(r.key)); };
-    if (recent.length) { out.push(headNode('recent', t('Recent'))); recent.forEach(add); }
     const secs = PM.groupPrincipals(rest);
+    // ALL AGENTS first — above Recent, whatever the query
+    for (const s of secs) if (s.kind === 'everyone') s.rows.forEach(add);
+    if (recent.length) { out.push(headNode('recent', t('Recent'))); recent.forEach(add); }
     let sessionsHead = false;
     for (const s of secs) {
+      if (s.kind === 'everyone') continue;
       if (s.kind === 'groups') { out.push(headNode('groups', t('Task Groups'))); s.rows.forEach(add); continue; }
       if (!sessionsHead) { out.push(headNode('sessions', t('Sessions'))); sessionsHead = true; }
       out.push(headNode(s.key, s.kind === 'sessions-other' ? t('Other') : s.title));
@@ -210,14 +228,14 @@ export function principalPicker({ items = [], app = null, multi = false, compact
       if (s.kind === 'sessions-group') heads.get(s.key).classList.add('pp-tghead');   // a Task Group's own title (data)
       s.rows.forEach(add);
     }
-    if (!shown.length) {
+    if (!shown.some((r) => !PM.isEveryone(r))) {
       const e = headNode('empty', query.trim() ? t('No session or group matches “{q}”', { q: query.trim() }) : (emptyText || t('No live session or Task Group to pick')));
       e.classList.add('pp-empty');
       out.push(e);
     }
     const gone = !!(active && !visibleKeys.includes(active));
     if (gone) active = null;
-    if (byPerson) armedFirst = visibleKeys[0] ?? null;
+    if (byPerson) armedFirst = PM.armableFirst(visibleKeys, everyoneKeys());   // never the All-agents row
     else if (gone) armedFirst = null;   // the row the person had highlighted vanished under a patch: Enter picks nothing
     for (const k of visibleKeys) { const n = nodes.get(k); n.classList.toggle('pp-active', k === active); }
     reconcile(list, out);   // the same nodes; only the ones that MOVED are touched (round 4) — never re-created
@@ -236,7 +254,7 @@ export function principalPicker({ items = [], app = null, multi = false, compact
   box.addEventListener('keydown', (e) => {
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
-      active = PM.moveActive(visibleKeys, active, e.key === 'ArrowUp' ? -1 : 1);
+      active = PM.moveActive(visibleKeys, active, e.key === 'ArrowUp' ? -1 : 1, { skip: everyoneKeys() });   // the first ↓ lands on a named row; All is one ↑ above
       drawList();
       const n = active && nodes.get(active);
       if (n && n.scrollIntoView) n.scrollIntoView({ block: 'nearest' });
@@ -247,7 +265,7 @@ export function principalPicker({ items = [], app = null, multi = false, compact
       // stayed down. A repeat picks nothing; a new press does.
       if (e.repeat) return;
       // the highlighted row, else the first row ONLY while it is the one the person was shown (verify round 3)
-      const k = PM.enterTarget({ active, visibleKeys, armedFirst });
+      const k = PM.enterTarget({ active, visibleKeys, armedFirst, skip: everyoneKeys() });
       const r = k && byKey().get(k);
       if (r && !r.disabled) pick(r);
       else if (!k && !active && visibleKeys.length) {
@@ -255,7 +273,9 @@ export function principalPicker({ items = [], app = null, multi = false, compact
         // picked nothing — silently, for ever, until the person typed. Now it HIGHLIGHTS the first row (the rule for a
         // highlighted row is unchanged: the next Enter takes it by key, a patch that removes it disarms), so what a
         // further Enter would take is on the screen first.
-        active = visibleKeys[0];
+        // (lane everyone-principal) never the All-agents row: a second Enter must not grant "every conversation"
+        active = PM.armableFirst(visibleKeys, everyoneKeys());
+        if (!active) return;
         drawList({ byPerson: false });
         const n = nodes.get(active);
         if (n && n.scrollIntoView) n.scrollIntoView({ block: 'nearest' });

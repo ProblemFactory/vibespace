@@ -56,6 +56,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { sameToken } = require('../pairing-token.js'); // B-8dda: the per-boot header is a secret too
 const { parseOtlpLogs } = require('../otel-truth.js');
 
 const MAX_TRUTH = 60000;      // in-memory rid map cap (~a week of heavy storms)
@@ -213,7 +214,7 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
   function gate(req) {
     const a = req.socket?.remoteAddress || '';
     const loop = a === '127.0.0.1' || a === '::1' || a === '::ffff:127.0.0.1';
-    if (loop && req.headers['x-vibespace-otel'] === token) return true;
+    if (loop && sameToken(req.headers['x-vibespace-otel'], token)) return true;
     // A rejected LOOPBACK post is a broken truth stream (stale env after a
     // token file wipe) — say so once instead of dying silently.
     if (loop && ++gate403 === 1) console.warn('[otel] rejecting loopback OTLP posts (token mismatch) — a session is exporting with a stale token');

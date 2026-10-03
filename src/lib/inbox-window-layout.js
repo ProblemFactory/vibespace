@@ -192,7 +192,7 @@ export function itemView(item, ctx = {}) {
   // lane-pairing ⑥: an exit's "ask me each time" item is answered HERE — Allow / Deny first (never a producer button)
   const exitAsk = !resolved && i.action && i.action.type === 'exit-run-ask' && i.action.askId ? { askId: i.action.askId, cmd: String(i.action.cmd || '') } : null;
   // lane browser-propose: the agent's browser proposal is answered HERE too — Approve / Reject first (the plan is the detail)
-  const proposal = !resolved && i.action && i.action.type === 'browser-proposal' && i.action.id ? { id: i.action.id, shown: String(i.action.shown || '') } : null;
+  const proposal = !resolved && i.action && (i.action.type === 'browser-proposal' || i.action.type === 'channel-watch-request') && i.action.id ? { id: i.action.id, shown: String(i.action.shown || '') } : null;   // lane channel-agent-watch: an agent's wake request too
   // Layer 0 apps: an agent's install proposal — Install… (THE install dialog, the plan first) / Not now, answered here too
   const appAsk = !resolved && i.action && i.action.type === 'app-install' && i.action.id ? { id: i.action.id, host: i.action.host || 'local' } : null;
   const actions = resolved ? ['reopen', 'copy'] : [...(exitAsk ? ['exit-allow', 'exit-deny'] : []), ...(proposal ? ['proposal-approve', 'proposal-reject'] : []), ...(appAsk ? ['app-install', 'app-reject'] : []), ...(reply.show ? ['reply'] : []), 'done', 'dismiss', 'copy', ...(producer ? ['producer'] : [])];

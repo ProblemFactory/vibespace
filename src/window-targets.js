@@ -365,7 +365,9 @@ async function screenshotDisplay({ xenv, out, bounds = null, wallMs = TRAVERSAL_
  * ONE injection child, killable by ITS OWN handle. `signal` (an AbortSignal the engine keeps on the lease while the verb
  * injects) aborts it: node kills exactly this ChildProcess (SIGKILL — `child.kill`, never a name, never a group), and so
  * does the `timeout`. Resolves only once the child is GONE (its 'close'), so the release pass that follows cannot race
- * a keystroke the dying child still had in flight. → `{err, stdout, cancelled, killed}`.
+ * a keystroke the dying child still had in flight. → `{err, stdout, cancelled, killed, outside, signal}`.
+ * B-f18a ①: a child killed by a signal NOBODY here sent (`kill <pid>`, the OOM killer, a crash) is `killed` too —
+ * `err.killed` is node's own kill only, so such a death used to skip the release pass and leave a key autorepeating.
  */
 function runInject(bin, args, { env, timeout = 5000, signal = null } = {}) {
   return new Promise((resolve) => {
@@ -374,7 +376,8 @@ function runInject(bin, args, { env, timeout = 5000, signal = null } = {}) {
     try {
       child = execFile(bin, args, { env, timeout, killSignal: 'SIGKILL', maxBuffer: 1024 * 1024, encoding: 'utf8', ...(signal ? { signal } : {}) }, (err, stdout, stderr) => {
         const cancelled = !!(err && (err.name === 'AbortError' || err.code === 'ABORT_ERR'));
-        res = { err, stdout: String(stdout || ''), stderr: String(stderr || ''), cancelled, killed: cancelled || !!(err && err.killed), spawnFailed: !!(err && typeof err.code === 'string' && err.code !== 'ABORT_ERR' && !err.killed) };
+        const outside = !!(err && !cancelled && !err.killed && err.signal);
+        res = { err, stdout: String(stdout || ''), stderr: String(stderr || ''), cancelled, killed: cancelled || !!(err && err.killed) || outside, outside, signal: outside ? String(err.signal) : null, spawnFailed: !!(err && typeof err.code === 'string' && err.code !== 'ABORT_ERR' && !err.killed) };
         finish();
         if (!settled) setTimeout(() => { closed = true; finish(); }, 1000).unref?.(); // a child whose 'close' never comes cannot hold the verb
       });
@@ -489,6 +492,7 @@ function releaseHeld({ bins = null, xenv, keysyms = [], buttons = [], python = '
 async function afterKill(r, { what, timeout, bins, xenv, keysyms = [], buttons = [], python }) {
   const released = await releaseHeld({ bins, xenv, keysyms, buttons, python });
   if (r.cancelled) return refuse('inject_failed', `${what} was cancelled part-way (the lease's holder lost the window) — whatever it had pressed was released`, { cancelled: true, partial: true, released });
+  if (r.outside) return refuse('inject_failed', `${what} was killed part-way by ${r.signal} (not by VibeSpace) — whatever it had pressed was released`, { partial: true, released });
   return refuse('inject_failed', `${what} did not finish within ${timeout} ms and was killed — whatever it had pressed was released`, { partial: true, released });
 }
 
@@ -560,6 +564,16 @@ function firstNonAscii(text) {
   return null;
 }
 const typeTimeoutMs = (n) => 5000 + 2 * TYPE_DELAY_MS * Math.max(0, Number(n) || 0);
+/** B-f18a ③: the stderr lines a refusal may quote — xdotool's own messages, measured 2026-10-03 on xdotool 3 (no display,
+ *  a C locale under a multi-byte text). Anything else is withheld and counted: a tracing wrapper (`set -x`) or a binary
+ *  posing as xdotool on PATH can print its argv — the typed text — back, and the refusal is not where the text goes. */
+const XDO_STDERR_KNOWN = Object.freeze([/^Invalid multi-byte sequence encountered$/, /^xdo_enter_text_window reported an error$/, /^Failed creating new xdo instance$/, /^Error: Can't open display: (\(null\)|:\d{1,5}(\.\d{1,3})?)$/]);
+function xdoStderr(stderr) {
+  const lines = [...new Set(String(stderr || '').split('\n').map((l) => l.trim()).filter(Boolean))];
+  const known = lines.filter((l) => XDO_STDERR_KNOWN.some((re) => re.test(l)));
+  const other = lines.length - known.length;
+  return [...known, ...(other ? [`${other} other line${other === 1 ? '' : 's'} withheld`] : [])].join('; ') || 'no message';
+}
 async function injectType({ bins, xenv, text, replace = false, focus = null, timeout = null, signal = null, python = 'python3', delay = TYPE_DELAY_MS } = {}) {
   if (!bins || !bins.xdotool) return refuse('no_injection_backend', 'xdotool not on PATH');
   const s = String(text ?? '');
@@ -583,7 +597,7 @@ async function injectType({ bins, xenv, text, replace = false, focus = null, tim
   if (r.killed) return afterKill(r, { what: `typing ${s.length} character(s)`, timeout: tmo, bins, xenv, keysyms: keysymsOfText(s, { replace }), python });
   // a type xdotool gave up on AFTER it started may have typed what came before the failure (`partial`); its own message
   // is the why — never the command line, which holds the text (the audit records a length, never the text)
-  if (r.err) return refuse('inject_failed', `xdotool type failed${r.spawnFailed ? ` to start: ${String(r.err.code || r.err.message).split('\n')[0]}` : ` (exit ${r.err.code}): ${([...new Set(String(r.stderr || '').split('\n').map((l) => l.trim()).filter(Boolean))].join('; ') || 'no message').slice(0, 200)} — what it typed before the failure may already be in the window`}`, r.spawnFailed ? {} : { partial: true });
+  if (r.err) return refuse('inject_failed', `xdotool type failed${r.spawnFailed ? ` to start: ${String(r.err.code || r.err.message).split('\n')[0]}` : ` (exit ${r.err.code}): ${xdoStderr(r.stderr).slice(0, 200)} — what it typed before the failure may already be in the window`}`, r.spawnFailed ? {} : { partial: true });
   return { ok: true, did: { verb: 'type', by: 'inject', chars: s.length, backend: 'xtest' } };
 }
 /** The display's size as X states it (`xdotool getdisplaygeometry`) — `{ok, w, h}`; a point beyond it cannot be clicked. */
@@ -628,7 +642,7 @@ module.exports = {
   verbVerdicts, parseChord, pickAction, ACTION_PREFERENCE, NEVER_BY_DEFAULT, NAMED_KEYS, refTableOf, resolveRef, targetRows, nodeView,
   snapshotTarget, actOnNode, focusedNode, screenshotDisplay, injectKey, injectClick,
   // lane E (D7): the pixel road
-  CLICK_BUTTONS, SCROLL_BUTTONS, SCROLL_MAX, TYPE_MAX, injectScroll, injectType, displayGeometry, windowShot, focusNode,
+  CLICK_BUTTONS, SCROLL_BUTTONS, SCROLL_MAX, TYPE_MAX, injectScroll, injectType, xdoStderr, XDO_STDERR_KNOWN, displayGeometry, windowShot, focusNode,
   // lane E verify r2 (L5): the cancellable injection + the release pass
   TYPE_DELAY_MS, typeTimeoutMs, runInject, releaseHeld, keysymsOfText, keysymsOfChord, RELEASE_PY, RELEASE_MAX,
   // lane E verify r3 (F3): the text's first non-ASCII character (the no_utf8_locale refusal names it)

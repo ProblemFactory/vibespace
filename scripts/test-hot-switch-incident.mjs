@@ -102,6 +102,48 @@ console.log('— §A1 the late-record rule (PURE)');
   ok('§A1 lateWords speaks minutes and hours', L.lateWords(35e3) === '35s' && L.lateWords(4 * 60e3) === '4m' && L.lateWords((3 * 60 + 2) * 60e3) === '3h02m');
 }
 
+// ═══ §A7 A SYSTEMATIC OFFSET IS A CLOCK, NOT A BACKLOG (lane reset-path verify r6, reproduced) ═══
+// A CLI whose machine's clock runs behind this server's stamps every record late by the same amount; the §A1 rule
+// alone refused every reading and wall of that session for good (an unsettled reset-credit attempt never settled,
+// the usage menu's ⟳ answered "a backlog record, 5m late" on every press). The offset is told from a backlog by
+// SHAPE: a run of ≥ 3 late records over ≥ 60 s of arrivals whose delays stay within 10 s — a backlog's delays
+// shrink as it drains and it ends in seconds. Once declared it is subtracted; a record earlier than it allows
+// re-learns it (the clock corrected).
+console.log('— §A7 a systematic offset is a clock, not a backlog (PURE)');
+{
+  const now = 1790806000000;
+  const st = (ms) => ({ type: 'assistant', timestamp: iso(ms) });
+  const M = 60e3;
+  // feed rows {arrive, delay} in order → the clock, the first declaration, the correction, judge() per record
+  const feed = (rows, L2 = L, opts = {}) => { let c = null, declared = null, corrected = null; const verdicts = []; rows.forEach((r, i) => { const o = L2.observe(c, st(r.arrive - r.delay), r.arrive, opts); c = o.clock; if (o.skew && o.skew.corrected && !corrected) corrected = o.skew; if (o.skew && !o.skew.corrected && !declared) declared = { ...o.skew, at: i }; verdicts.push(L2.judge(c, st(r.arrive - r.delay), r.arrive, opts).verdict); }); return { clock: c, declared, corrected, verdicts }; };
+  const skewRun = feed([{ arrive: now, delay: 5 * M }, { arrive: now + 30e3, delay: 5 * M + 2e3 }, { arrive: now + 61e3, delay: 5 * M - 1e3 }]);
+  ok('§A7 three records 5 min behind over 61 s of arrivals, delays within 10 s ⇒ the offset is DECLARED at the third (skewMs = the smallest delay) and that record is judged LIVE',
+    !!skewRun.declared && skewRun.declared.at === 2 && skewRun.declared.skewMs === 5 * M - 1e3 && skewRun.declared.n === 3 && JSON.stringify(skewRun.verdicts) === '["late","late","live"]', JSON.stringify(skewRun));
+  const backlog = feed(Array.from({ length: 50 }, (_, i) => ({ arrive: now + i * 60, delay: 3 * 3600e3 - i * (3 * 3600e3 / 49) })));
+  ok('§A7 the incident\'s backlog — 50 records of 3 h delivered in 3 s, delays shrinking to 0 — declares NO offset (arrival span 3 s, spread 3 h): every late one stays late',
+    backlog.declared === null && backlog.verdicts.slice(0, 45).every((v) => v === 'late') && !backlog.clock.skewMs, JSON.stringify({ declared: backlog.declared, skew: backlog.clock.skewMs }));
+  const drip = feed([{ arrive: now, delay: 3 * M }, { arrive: now + 30e3, delay: 3 * M + 25e3 }, { arrive: now + 61e3, delay: 3 * M + 50e3 }]);
+  ok('§A7 a 10-s burst drip-fed over 60 s (the delays GROW with the arrivals, spread 50 s) is a backlog, never an offset', drip.declared === null && drip.verdicts.every((v) => v === 'late'));
+  const mixed = feed([{ arrive: now, delay: 5 * M }, { arrive: now + 30e3, delay: 0 }, { arrive: now + 61e3, delay: 5 * M }, { arrive: now + 90e3, delay: 5 * M }]);
+  ok('§A7 a LIVE record ends the run — a stream late only sometimes never declares an offset', mixed.declared === null && JSON.stringify(mixed.verdicts) === '["late","live","late","late"]');
+  const two = feed([{ arrive: now, delay: 5 * M }, { arrive: now + 61e3, delay: 5 * M }]);
+  ok('§A7 two aligned records are a coincidence (SKEW_MIN_RECORDS = 3): no offset', two.declared === null && L.SKEW_MIN_RECORDS === 3);
+  const short = feed([{ arrive: now, delay: 5 * M }, { arrive: now + 20e3, delay: 5 * M }, { arrive: now + 40e3, delay: 5 * M }]);
+  ok('§A7 three steady records inside 40 s do not span SKEW_SPAN_MS (60 s): a burst so far, not an offset', short.declared === null && L.SKEW_SPAN_MS === 60e3 && L.SKEW_JITTER_MS === 10e3);
+  const after = feed([{ arrive: now, delay: 5 * M }, { arrive: now + 30e3, delay: 5 * M }, { arrive: now + 61e3, delay: 5 * M }, { arrive: now + 120e3, delay: 5 * M + 90e3 }, { arrive: now + 121e3, delay: 5 * M + 3 * 3600e3 }, { arrive: now + 122e3, delay: 5 * M + 1e3 }]);
+  ok('§A7 once declared the offset is SUBTRACTED: 90 s past it is live (under the bound), a 3-h backlog ON the offset stream is still late, the next in-step record live', JSON.stringify(after.verdicts) === '["late","late","live","live","late","live"]', JSON.stringify(after.verdicts));
+  const fixed = feed([{ arrive: now, delay: 5 * M }, { arrive: now + 30e3, delay: 5 * M }, { arrive: now + 61e3, delay: 5 * M }, { arrive: now + 200e3, delay: 500 }]);
+  ok('§A7 the clock CORRECTED (a record earlier than the offset allows — nothing arrives before it was emitted): the offset is re-learned from it, said once', !!fixed.corrected && fixed.corrected.skewMs === 500 && fixed.verdicts[3] === 'live' && fixed.clock.skewMs === 500, JSON.stringify(fixed));
+  const unst = (() => { const r = feed([{ arrive: now, delay: 5 * M }, { arrive: now + 30e3, delay: 5 * M }, { arrive: now + 61e3, delay: 5 * M }]); return { burst: L.judge(r.clock, { type: 'rate_limit_event' }, now + 62e3).verdict, next: L.verdictOfClock(r.clock).verdict }; })();
+  ok('§A7 an UNSTAMPED neighbour and the look-ahead inherit the offset-corrected verdict', unst.burst === 'live' && unst.next === 'live', JSON.stringify(unst));
+  const remote = feed([{ arrive: now, delay: 35 * M }, { arrive: now + 30e3, delay: 35 * M }, { arrive: now + 61e3, delay: 35 * M }], L, { remote: true });
+  ok('§A7 a REMOTE stream 35 min behind (over its 30-min bound) declares the same way', !!remote.declared && remote.declared.skewMs === 35 * M && remote.verdicts[2] === 'live');
+  ok('§A7 the clock object stays small: a run is four numbers, dropped at the declaration', Object.keys(skewRun.clock).sort().join(',') === 'arrivedAt,delayMs,skewMs,stampAt' && Object.keys(short.clock.run).length === 4);
+  const noSkew = mutate('src/record-lateness.js', 'noskew', [['if (x.inBand && run.n >= SKEW_MIN_RECORDS && now - run.firstArrivedAt >= SKEW_SPAN_MS', 'if (false && x.inBand && run.n >= SKEW_MIN_RECORDS && now - run.firstArrivedAt >= SKEW_SPAN_MS']]);
+  const ctl = noSkew.hit ? feed([{ arrive: now, delay: 5 * M }, { arrive: now + 30e3, delay: 5 * M }, { arrive: now + 61e3, delay: 5 * M }], noSkew.mod) : null;
+  ok('§A7 CONTROL: with the declaration removed the same run never declares and the third record stays LATE (the rows above see the rule)', !!noSkew.hit && ctl.declared === null && ctl.verdicts[2] === 'late', JSON.stringify(ctl));
+}
+
 // ═══ §A2–§A6 THE INCIDENT'S BACKLOG THROUGH THE REAL PIPELINE ═══════════════
 // The pool at 15:05 (names neutral): S = the member the link held (quota
 // left), Q = the member that answered the 12:15 Fable rejection,
@@ -420,6 +462,41 @@ console.log('— §A7 wiring');
     /function recordRateLimitEvent\(session, msg\) \{\s*\n\s*return gateLiveFact\(session, msg, 'rate_limit_event'/.test(eng)
     && /function markLimitBanner\(session, text, rec = null\) \{\s*\n\s*return gateLiveFact\(session, rec, 'limit banner'/.test(eng)
     && /function noteTurnEnd\(session, rec = null\) \{[\s\S]{0,900}?if \(recordIsLate\(session, rec\)\)/.test(eng));
+}
+
+// ═══ §A8 THE FIRST MINUTE OF AN OFFSET STREAM IS HELD, NOT DROPPED (lane reset-path verify r7 ④, reproduced) ═══
+// A CLI 5 min behind: its FIRST turn's reading arrived "late" and was dropped for good — nothing replayed it at the
+// declaration a minute later, only the NEXT such record was taken (on the codex feed the first WALL: no arm, no switch
+// until the next wall, said only as a backlog). Now a late fact gated while no offset is declared is HELD with its own
+// replay (newest 32) and re-judged through its gate at the declaration; a live record ending the burst discards it.
+console.log('— §A8 the first minute of an offset stream is held and replayed at the declaration (the real parse + engine)');
+{
+  const SK = 5 * 60e3;
+  const leg = (engineModule) => {
+    const w = mkWorld({ engineModule });
+    if (!w) return null;
+    w.mkSession('sess-4', 's');
+    const one = play(w, chunk(said(Date.now() - SK, 'first turn'), reading(w, 's', 0.95), result(1)));
+    const s = one.s;
+    const after1 = { u5: w.readCache(w.id.s).fiveHour.utilization, held: Array.isArray(s._heldLate) ? s._heldLate.map((h) => h.what) : null, lines: one.lines };
+    if (s._recordClock && s._recordClock.run) s._recordClock.run.firstArrivedAt -= 30e3; // the harness's clock: the run began 30 s ago
+    play(w, chunk(said(Date.now() - SK, 'second turn'), result(2)));
+    if (s._recordClock && s._recordClock.run) s._recordClock.run.firstArrivedAt -= 31e3;
+    const three = play(w, chunk(said(Date.now() - SK, 'third turn'), result(3)));
+    return { after1, after3: { u5: w.readCache(w.id.s).fiveHour.utilization, skew: s._recordClock && s._recordClock.skewMs, held: s._heldLate, lines: three.lines } };
+  };
+  const r = leg(engMod);
+  if (!r) ok('§A8 SKIP — pools unsupported on this platform', true);
+  else {
+    ok('§A8 the first turn\'s reading (stamped 5 min behind) is late and HELD, not taken: S\'s 5 h still reads 7 %', r.after1.u5 === 0.07 && JSON.stringify(r.after1.held) === '["rate_limit_event"]', JSON.stringify({ u5: r.after1.u5, held: r.after1.held }));
+    ok('§A8 …said as "a stalled bridge\'s backlog (or the first minute of a clock offset — the next records decide)"', r.after1.lines.some((l) => /records arriving 5m late — a stalled bridge's backlog \(or the first minute of a clock offset — the next records decide\)/.test(l)), r.after1.lines.filter((l) => /\[stream\]/.test(l)).join(' | ').slice(0, 300));
+    ok('§A8 the third stamped record over 61 s declares the offset and the held reading is REPLAYED through its gate: S\'s 5 h reads 95 % now, nothing held', r.after3.skew === SK && r.after3.u5 === 0.95 && r.after3.held === null, JSON.stringify({ skew: r.after3.skew, u5: r.after3.u5, held: r.after3.held }));
+    ok('§A8 …the journal says the declaration, then the replay by count and kind, then what the first minute did NOT replay (its two turn ends — the next one comes), never "backlog over"', r.after3.lines.some((l) => /a clock offset on the CLI's machine, not a backlog/.test(l)) && r.after3.lines.some((l) => /^\[stream\] sess-4: 1 fact\(s\) held from the offset stream's first minute re-judged live by the offset and taken \(1 rate_limit_event\)/.test(l)) && r.after3.lines.some((l) => /^\[stream\] sess-4: the offset stream's first minute over — 2 fact\(s\) not replayed \(2 turn end; a turn end is never replayed/.test(l)) && !r.after3.lines.some((l) => /backlog over/.test(l)), r.after3.lines.filter((l) => /\[stream\]/.test(l)).join(' | ').slice(0, 500));
+  }
+  const noHold = mutate('src/server/usage-pool-engine.js', 'nohold', [["    replayHeldLate(session); // the first minute's facts, each through its own gate against the offset (verify r7 ④)\n", '']]);
+  ok('§A8 CONTROL: the patch hit the engine', noHold.hit === true, noHold.why || '');
+  const r2 = noHold.hit ? leg(noHold.mod) : null;
+  ok('§A8 CONTROL: with the replay removed the declaration takes nothing back — S still reads 7 % (the rows above see the replay)', !!r2 && r2.after3.skew === SK && r2.after3.u5 === 0.07, r2 && JSON.stringify({ skew: r2.after3.skew, u5: r2.after3.u5 }));
 }
 
 // ═══ §B A WALL WHOSE OWN WINDOW REFUTES THE PIN NEVER DEMOTES THE PIN ═══════

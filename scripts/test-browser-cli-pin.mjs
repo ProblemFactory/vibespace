@@ -503,7 +503,7 @@ const h1 = await h1Leg(K, 'real');
   const keys = ['1 browser still on the previous CLI — it switches when it stops', '{n} browsers still on the previous CLI — they switch when they stop', '1 browser runs on a CLI that is no longer installed — restart it to use the current one', '{n} browsers run on a CLI that is no longer installed — restart them to use the current one'];
   ok(keys.every((k2) => zh[k2] && ja[k2]), 'the four sentences have zh + ja entries');
   const rs = read('src/routes/browser.js');
-  ok(/const cli = b\.cli && typeof b\.cli === 'object' && b\.cli\.version \? \{ version: String\(b\.cli\.version\)/.test(rs) && (rs.match(/\{ const g = await cliGoneVerdict\(k, (e|r)\.browser\); if \(g\) return failVerdict\(res, g\); \}/g) || []).length === 3, 'the agent\'s answers carry the CLI by VERSION only (never the program\'s path) and all three /resolve forms refuse a gone CLI before the agent runs anything (verify r3: the keeper\'s doors\' fact, awaited)');
+  ok(/const cli = b\.cli && typeof b\.cli === 'object' && b\.cli\.version \? \{ version: String\(b\.cli\.version\)/.test(rs) && (rs.match(/\{ const g = await cliGoneVerdict\(k, (e|r)\.browser\); if \(g\) return failVerdict\(res, g\); \}/g) || []).length === 4, 'the agent\'s answers carry the CLI by VERSION only (never the program\'s path) and all four /resolve forms (lane jobs-browser\'s job form joined at the 2.369.202 integration) refuse a gone CLI before the agent runs anything (verify r3: the keeper\'s doors\' fact, awaited)');
 }
 
 // ═══ ⑥ controls ═══════════════════════════════════════════════════════════════

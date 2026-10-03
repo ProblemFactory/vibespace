@@ -46,6 +46,60 @@ srv.on('upgrade', (req, socket, head) => ds.handleUpgrade(req, socket, head, ds.
 await new Promise((r) => srv.listen(0, '127.0.0.1', r));
 const port = srv.address().port;
 
+async function slowReaderLeg(DSmod, PING6 = 300) {
+  // THE MEASUREMENT (K1): the bridge's keepalive is a WebSocket PROTOCOL ping (ws.ping(); the browser's network
+  // stack answers it, a hidden tab's timers never touch it). What delays the pong is the QUEUE: the RFB side pushes
+  // into ws (up to WS_HIGH_WATER = 8 MiB before it pauses), a ping frame is queued BEHIND those bytes, and on a slow
+  // link (8 MiB at ~150 KB/s ≈ 55 s) the pong cannot come back inside two rounds — a live, reading browser was cut.
+  // Here: a "VNC server" that floods, a TCP relay that hands the bridge's bytes to the browser at a THROTTLED rate,
+  // a real ws client that answers pings (autoPong) and reads everything it receives.
+  const flood = net.createServer((s) => { s.write('RFB 003.008\n'); const chunk = Buffer.alloc(64 * 1024, 7); let n = 0; const pump = () => { while (n < 160 && s.write(chunk)) n++; if (n < 160) s.once('drain', pump); }; pump(); });
+  await new Promise((r) => flood.listen(0, '127.0.0.1', r));
+  const fport = flood.address().port;
+  const logs6 = [];
+  // a round long against the relay's pacing (one 64 KiB chunk at RATE = 125 ms) — production rounds are 20 s
+  const SILENT = DS.SILENT_ROUNDS_TO_CUT;
+  const ds6 = DSmod.create({ auth: { requestAuthed: () => true }, resolveTarget: () => ({ kind: 'rfb', port: fport }), log: { log: (m) => logs6.push(m), warn: (m) => logs6.push(m) }, pingMs: PING6 });
+  const srv6 = http.createServer((req, res) => { res.statusCode = 404; res.end(); });
+  srv6.on('upgrade', (req, socket, head) => ds6.handleUpgrade(req, socket, head, ds6.upgradeId(new URL(req.url, 'http://x').pathname)));
+  await new Promise((r) => srv6.listen(0, '127.0.0.1', r));
+  // the slow link: client → relay → bridge; bridge → relay is read at RATE bytes/s (pause/resume), so TCP backpressure
+  // reaches the bridge's socket exactly as a slow WAN would
+  const RATE = 512 * 1024; // 512 KiB/s — slower than the 10 MiB the flood offers
+  const relays = []; let pathDead = false;
+  const relay = net.createServer((c) => {
+    const b = net.connect(srv6.address().port, '127.0.0.1');
+    relays.push(c, b);
+    c.pipe(b);
+    b.on('data', (d) => { if (pathDead) return; c.write(d); b.pause(); setTimeout(() => { if (!pathDead) b.resume(); }, Math.ceil((d.length / RATE) * 1000)); });
+    c.on('data', () => { }); // (the client's pongs ride c.pipe(b) until the path dies)
+    b.on('close', () => c.destroy()); c.on('close', () => b.destroy()); b.on('error', () => { }); c.on('error', () => { });
+  });
+  await new Promise((r) => relay.listen(0, '127.0.0.1', r));
+  const ws = new WebSocket(`ws://127.0.0.1:${relay.address().port}/api/vnc`);
+  let got = 0, closed = null, pings = 0;
+  // like noVNC: after every update it draws it asks for the next one (FramebufferUpdateRequest, 10 bytes)
+  let sinceAsk = 0; const FBU_REQ = Buffer.from([3, 1, 0, 0, 0, 0, 7, 128, 4, 56]);
+  ws.on('message', (m) => { got += m.length; sinceAsk += m.length; if (sinceAsk >= 64 * 1024) { sinceAsk = 0; try { ws.send(FBU_REQ); } catch { } } });
+  ws.on('ping', () => { pings++; });
+  ws.on('close', (code) => { closed = code; });
+  await new Promise((r) => ws.on('open', r));
+  await sleep(PING6 * 12);
+  const cutLine = logs6.find((l) => /closed \(no pong/.test(l));
+  const live = { cut: !(closed === null && ws.readyState === 1 && !cutLine && got > 0), got, pings, cutLine };
+  // …and the same socket, once the browser stops acknowledging anything (the relay stops reading AND stops relaying
+  // pongs — a dead path), IS cut and named
+  pathDead = true; for (const r of relays) { try { r.unpipe(); r.pause(); } catch { } }
+  const cutAt = Date.now();
+  for (let i = 0; i < 40 && !logs6.some((l) => /closed \(no pong/.test(l)); i++) await sleep(PING6);
+  const dead = logs6.find((l) => /closed \(no pong/.test(l));
+  const deadR = { named: !!dead && /nothing acknowledged/.test(dead), inTime: Date.now() - cutAt <= (SILENT + 2) * PING6, dead, waitedMs: Date.now() - cutAt };
+  try { ws.terminate(); } catch { }
+  for (const r of relays) { try { r.destroy(); } catch { } }
+  relay.close(); srv6.close(); flood.close();
+  return { live, dead: deadR };
+}
+
 console.log('§1 a browser that answers pings stays connected; the bridge logs the open');
 {
   const ws = new WebSocket(`ws://127.0.0.1:${port}/api/vnc`);
@@ -73,7 +127,7 @@ console.log('§2 a browser that never answers a ping is terminated after two rou
   await new Promise((r) => ws.on('open', r));
   await sleep(PING * 4 + 30);
   ok('the silent client was terminated (close code 1006 = abnormal, i.e. terminate())', closed === 1006, closed);
-  const line = logs.slice(before).find((l) => /closed \(no pong for 120 ms\)/.test(l));
+  const line = logs.slice(before).find((l) => /closed \(no pong for 120 ms and nothing acknowledged\)/.test(l));
   ok('the close names the ping timeout', !!line, logs.slice(before));
 }
 
@@ -96,6 +150,31 @@ console.log('§4 the client opts in: the singleton Desktop window walks the reco
   const fs = await import('node:fs');
   const dw = fs.readFileSync(path.join(repo, 'src/lib/desktop-window.js'), 'utf8');
   ok('desktop-window.js passes autoReconnect: true (2.369.118 — the Desktop no longer sits on "Disconnected" until a click)', /autoReconnect: true/.test(dw));
+}
+
+console.log('§6 lane desktop-keepalive (userW inc-muoshmqn-dect, "no pong for 40000 ms" ×6 in 12 h): a SLOW but LIVE browser behind a full send queue is never cut — its pong waits behind the bytes it is still reading; a socket that acknowledges NOTHING still is');
+{
+  const RATE = 512 * 1024;
+  const r = await slowReaderLeg(DS);
+  ok(`a live browser reading at ${RATE / 1024} KiB/s behind a full queue (it asks for the next update as noVNC does) is NOT cut after 12 rounds (read ${Math.round(r.live.got / 1024)} KiB, ${r.live.pings} pings seen — they wait in the queue)`, !r.live.cut, r.live);
+  ok(`a path that acknowledges nothing (no pong, no bytes from the browser, no progress) is cut and NAMED within ${DS.SILENT_ROUNDS_TO_CUT} + 1 rounds`, r.dead.named && r.dead.inTime, r.dead);
+  // CONTROL: the pre-lane rule (a pong or nothing) on the same path cuts the live reader — the bug, reproduced
+  // the rule lives in src/ws-keepalive.js since the 2.369.202 integration (THE ONE keepalive both bridges arm, lane
+  // stream-ping): the control patches IT and loads a bridge copy that requires the patched copy
+  const fsm = await import('node:fs');
+  const kaSrc = fsm.readFileSync(path.join(repo, 'src/ws-keepalive.js'), 'utf8');
+  const src = fsm.readFileSync(path.join(repo, 'src/server/desktop-stream.js'), 'utf8');
+  const needle = "  if (pong || Number(inbound) > 0) return 'alive';\n  if (Number(queuedBefore) > 0 && Number(wroteNow) > Number(wroteBefore)) return 'draining';";
+  const kaReq = "require('../ws-keepalive.js')";
+  ok('control: the liveness rule\'s needle is in the shipped source (src/ws-keepalive.js), and the bridge requires it once', kaSrc.includes(needle) && src.split(kaReq).length === 2);
+  const kaOld = MUTK.write('src/ws-keepalive.js', kaSrc.replace(needle, "  if (pong) return 'alive';"), 'pong-only-ka');
+  const OLD = MUTK.load('src/server/desktop-stream.js', src.replace(kaReq, `require(${JSON.stringify(kaOld)})`), 'pong-only');
+  const rc = await slowReaderLeg(OLD);
+  ok('CONTROL: the pong-only rule (2.369.118\'s) CUTS the same live reader — the 40 s cuts of the incident, reproduced', rc.live.cut, rc.live);
+  // the rule as a table
+  const V = DS.livenessVerdict;
+  ok('livenessVerdict: a pong ⇒ alive; bytes from the browser ⇒ alive; kernel progress through a backlog ⇒ draining; progress with NO backlog (our own small write) ⇒ silent; nothing ⇒ silent',
+    V({ pong: true }) === 'alive' && V({ inbound: 3 }) === 'alive' && V({ queuedBefore: 5e6, wroteBefore: 10, wroteNow: 20 }) === 'draining' && V({ queuedBefore: 0, wroteBefore: 10, wroteNow: 12 }) === 'silent' && V({ queuedBefore: 5e6, wroteBefore: 10, wroteNow: 10 }) === 'silent' && V({}) === 'silent');
 }
 
 console.log('§5 the HELD-BYTES CAP (2026-09-22, hole A of the r6 verify): a viewer DECLARING a 2 GiB packet is closed in its first chunk — memory bounded, the upstream and the other viewer untouched');

@@ -173,6 +173,13 @@ const UNGATED = Object.freeze([
   { id: 'consent-profile', why: 'ONE profile read inside that same consent (who signed in); 1 unit, once' },
   { id: 'pubsub', why: 'src/channels/live/gmail.js: the push lane\'s Pub/Sub pull + acknowledge — a different API and quota; one pull in flight per lane, PULL_BACKOFF_MS on failure, the lane parked on a permanent refusal' },
 ]);
+/** THE DELIBERATE SWALLOWS (lane lark-threads verify r3 — the 429 class closed by construction, both adapters): every
+ *  `catch` over a vendor call either re-throws a RATE refusal to the pass's ladder or carries `// rate-ok: <id>` with a row
+ *  here saying why the swallow is BOUNDED; the response census (scripts/vendor-response-census.mjs, run by
+ *  test-channels-gmail-shape over this file and src/channels/live/gmail.js) is red for any other catch. */
+const RATE_OK = Object.freeze([
+  { id: 'consent-profile', why: 'ONE profile read inside a human consent: a refusal of any kind ends that consent as nameless, by name; no pass, nothing retried' },
+]);
 
 const REQUEST_TIMEOUT_MS = 20000;
 const REFRESH_MARGIN_MS = 60 * 1000;
@@ -453,8 +460,8 @@ function encodeHeader(s) {
 function buildMime({ from = null, to, cc = null, subject = '', inReplyTo = null, references = null, messageId = null, text = '', extraHeaders = null } = {}) {
   const lines = [];
   if (from) lines.push(`From: ${encodeHeader(from)}`);
-  lines.push(`To: ${encodeHeader(to)}`);
-  if (cc) lines.push(`Cc: ${encodeHeader(cc)}`);
+  lines.push(`To: ${encodeAddressHeader(to)}`);
+  if (cc) lines.push(`Cc: ${encodeAddressHeader(cc)}`);
   lines.push(`Subject: ${encodeHeader(subject)}`);
   if (messageId) lines.push(`Message-ID: ${String(messageId).replace(/[\r\n]+/g, '')}`);
   // extra headers (R4 verify: `X-VibeSpace-Proposal`) — names and values
@@ -466,14 +473,104 @@ function buildMime({ from = null, to, cc = null, subject = '', inReplyTo = null,
   lines.push(Buffer.from(String(text == null ? '' : text), 'utf-8').toString('base64').replace(/(.{76})/g, '$1\r\n'));
   return lines.join('\r\n');
 }
+/** An address-list header (To / Cc / Reply-To) as its addresses, each kept as written (PURE), by RFC 5322's grammar:
+ *  a comma inside a quoted display name (`"Lee, Sam" <sam@x>`), a comment (`j@x (Doe, John)`), `<…>` or a domain
+ *  literal never splits; a group's label (`Team:`) is dropped and its `;` ends a member; an item whose quote / comment
+ *  / `<` never closes, or that names no address (`addressParts`), is no address (verify r1: a comment's comma split
+ *  `j@x (Doe, John), k@x` into an UNCLOSED comment that swallowed k on the wire; a group member hid us from the self
+ *  filter). A header over ADDRESS_LIST_MAX is `null` — REFUSED, never clipped (a clipped list is another set of
+ *  recipients). ONE pass. */
+const ADDRESS_LIST_MAX = 16 * 1024;
+function addressList(v) {
+  const s = String(v == null ? '' : v);
+  if (s.length > ADDRESS_LIST_MAX) return null;
+  const out = [];
+  let cur = '', quoted = false, angle = false, lit = false, depth = 0, esc = false;
+  const push = () => { const a = cur.trim(); const open = quoted || angle || lit || depth > 0 || esc; cur = ''; if (a && !open && addressParts(a).addr) out.push(a); };
+  for (const ch of s) {
+    if (esc) { cur += ch; esc = false; continue; }
+    if ((quoted || depth) && ch === '\\') { cur += ch; esc = true; continue; }
+    if (quoted) { if (ch === '"') quoted = false; cur += ch; continue; }
+    if (depth) { if (ch === '(') depth++; else if (ch === ')') depth--; cur += ch; continue; }
+    if (angle) { if (ch === '>') angle = false; cur += ch; continue; }
+    if (lit) { if (ch === ']') lit = false; cur += ch; continue; }
+    if (ch === '"') quoted = true;
+    else if (ch === '(') depth = 1;
+    else if (ch === '<') angle = true;
+    else if (ch === '[') lit = true;
+    else if (ch === ':') { cur = ''; continue; }
+    else if (ch === ',' || ch === ';') { push(); continue; }
+    cur += ch;
+  }
+  push();
+  return out;
+}
+/** WHO ONE item of an address list names (PURE, verify r1): `addr` = its `<…>` outside quotes and comments, else its
+ *  bare addr-spec with the comments taken out (`null` = none: no `@`, two `<…>`, a quote / comment / `<` never closed);
+ *  `words` = the rest a reader sees as the name (the display name's words, a comment's). The self / duplicate filter
+ *  and the wire encoding read THIS — never the last `<` (it can sit inside a comment: `j@x (张 <evil@x>)` is j). */
+function addressParts(item) {
+  const s = String(item == null ? '' : item);
+  const none = { addr: null, words: '' };
+  let atoms = '', phrase = '', notes = '', angle = null, i = 0;
+  while (i < s.length) {
+    const ch = s[i];
+    if (ch === '"' || ch === '(') {
+      let d = 1, j = i + 1, w = '';
+      for (; j < s.length; j++) {
+        const c = s[j];
+        if (c === '\\') { w += s[j + 1] || ''; j++; continue; }
+        if (ch === '(' && c === '(') d++;
+        else if (c === (ch === '"' ? '"' : ')') && !--d) break;
+        w += c;
+      }
+      if (j >= s.length) return none;
+      if (ch === '"') { atoms += s.slice(i, j + 1); phrase += w; } else { atoms += ' '; phrase += ` ${w} `; notes += ` ${w}`; }
+      i = j + 1;
+      continue;
+    }
+    if (ch === '<') {
+      const j = s.indexOf('>', i + 1);
+      if (angle !== null || j < 0) return none;
+      angle = s.slice(i + 1, j).trim();
+      i = j + 1;
+      continue;
+    }
+    atoms += ch; phrase += ch; i++;
+  }
+  const sp = (x) => x.replace(/\s+/g, ' ').trim();
+  const addr = angle !== null ? angle : sp(atoms);
+  if (!addr || !addr.includes('@') || /[\s<>()]/.test(addr)) return none;
+  return { addr, words: sp(angle !== null ? phrase : notes) };
+}
+/** An address-list header ON THE WIRE (B-a085): a display name that is not ASCII is encoded ON ITS OWN, the address
+ *  beside it stays bare — one encoded-word over the whole value (`encodeHeader`) hid every address of a reply-all
+ *  with one CJK name in it (RFC 2047 §5: an encoded-word never carries an addr-spec). ASCII values pass as they are. */
+function encodeAddressHeader(v) {
+  const s = String(v == null ? '' : v).replace(/[\r\n]+/g, ' ');
+  if (/^[\x20-\x7e]*$/.test(s)) return s;
+  const list = addressList(s);
+  if (!list || !list.length) return encodeHeader(s);
+  // verify r1: each item rebuilt from ITS address (`addressParts`) — the words around it encoded, the address NEVER
+  // inside an encoded-word (a comment-form `z@x (张三)` was hidden whole) and never the last `<` of a comment
+  return list.map((a) => {
+    if (/^[\x20-\x7e]*$/.test(a)) return a;
+    const { addr, words } = addressParts(a);
+    if (!words) return addr;
+    return `${/^[\x20-\x7e]*$/.test(words) ? `"${words.replace(/[\\"]/g, '\\$&')}"` : encodeHeader(words)} <${addr}>`;
+  }).join(', ');
+}
 /**
  * WHO A REPLY GOES TO, from the anchor message's headers (PURE). Ours (From
  * is the authorizing user) ⇒ reply to its To; anybody else's ⇒ its Reply-To,
  * else its From. Subject gets ONE `Re:`; In-Reply-To/References chain on the
  * anchor's Message-ID (absent ⇒ the thread id alone links, and both stay
  * null rather than invented).
+ * REPLY ALL (B-a085, `all`): To = that same answer plus the anchor's To (ours ⇒ its To alone), Cc = the anchor's
+ * Cc — the account's own address and every duplicate removed (by address, case-blind; To wins over Cc). Nobody
+ * left in To ⇒ the Cc moves up; nobody at all (a note to yourself) ⇒ the plain reply's To.
  */
-function replyHeaders(anchor, selfEmail = null) {
+function replyHeaders(anchor, selfEmail = null, { all = false } = {}) {
   const h = (anchor && anchor.payload && anchor.payload.headers) || [];
   const from = parseAddress(header(h, 'From'));
   const ours = !!selfEmail && from.id === String(selfEmail).toLowerCase();
@@ -482,7 +579,18 @@ function replyHeaders(anchor, selfEmail = null) {
   const subject = /^\s*re:/i.test(subject0) ? subject0.trim() : `Re: ${subject0}`.trim();
   const mid = header(h, 'Message-ID') || null;
   const refs = header(h, 'References') || '';
-  return { to: to || null, cc: null, subject, inReplyTo: mid, references: [refs, mid].filter(Boolean).join(' ') || null, ours };
+  const chain = { subject, inReplyTo: mid, references: [refs, mid].filter(Boolean).join(' ') || null, ours };
+  if (!all) return { to: to || null, cc: null, ...chain };
+  const self = selfEmail ? String(selfEmail).toLowerCase() : null;
+  const seen = new Set();
+  const keep = (list) => list.filter((a) => { const id = String(addressParts(a).addr || '').toLowerCase(); if (id === self || seen.has(id)) return false; seen.add(id); return true; });
+  const lists = [addressList(to), ours ? [] : addressList(header(h, 'To')), addressList(header(h, 'Cc'))];
+  if (lists.some((x) => x === null)) return { to: null, cc: null, ...chain, all: true, tooLong: true };
+  let toL = keep([...lists[0], ...lists[1]]);
+  let ccL = keep(lists[2]);
+  if (!toL.length) { toL = ccL; ccL = []; }
+  if (!toL.length) toL = lists[0];
+  return { to: toL.join(', ') || to || null, cc: ccL.length ? ccL.join(', ') : null, ...chain, all: true };
 }
 
 // ── typed failures ─────────────────────────────────────────────────────
@@ -509,7 +617,8 @@ function typedFailure(status, body, what, retryAfterSec = null) {
   if (status === 429 || RATE_REASONS.includes(reason) || (status === 403 && (domain === 'usageLimits' || RATE_WORDS.test(String(msg))))) return new ChannelError('rate-limited', `${what}: ${msg} (${status})`, { retryable: true, detail: { status, reason: reason || null, retryAfterSec: Number.isFinite(retryAfterSec) ? retryAfterSec : null } });
   if (status === 403) return new ChannelError('forbidden', `${what}: ${msg} (${status})`, { retryable: false, detail: { status, reason } });
   if (status === 404) return new ChannelError('not-found', `${what}: ${msg} (${status})`, { retryable: false, detail: { status, reason } });
-  if (status >= 500) return new ChannelError('transport', `${what}: ${msg} (${status})`, { retryable: true, detail: { status } });
+  // verify r3: a 5xx's Retry-After rides the failure too — the engine's failure ladder waits at least that long
+  if (status >= 500) return new ChannelError('transport', `${what}: ${msg} (${status})`, { retryable: true, detail: { status, ...(Number.isFinite(retryAfterSec) && retryAfterSec > 0 ? { retryAfterSec } : {}) } });
   return new ChannelError('vendor-error', `${what}: ${msg} (${status})`, { retryable: false, detail: { status, reason } });
 }
 async function callJson(fetchFn, url, { method = 'GET', headers = {}, form = null, json = null, what = 'gmail', signal = null } = {}) {
@@ -629,7 +738,7 @@ function create(record = {}, deps = {}) {
    *  is `invalid_grant`, whose stamp then overwrote the sibling's fresh token
    *  with the stale one (the account logged itself out). */
   let refreshing = null;
-  async function accessToken() {
+  async function accessToken(depth = 0) {   // verify r4 F1: `depth` bounds the re-entry (a superseded refresh re-reads ONCE)
     const cred = credential();
     if (!cred.values) throw new ChannelError('auth-expired', `Google OAuth client missing: ${cred.why}`, { retryable: false, detail: { needsCredentials: true } });
     const { token, why } = readToken();
@@ -638,10 +747,15 @@ function create(record = {}, deps = {}) {
     if (unsaved && unsaved.token === token) await persistToken(token, unsaved.supersedes);   // verify r5: the store's next chance at a token it could not persist
     if (token.access_token && Number(token.expiresAt) > now() + REFRESH_MARGIN_MS) return token.access_token;
     if (!token.refresh_token) throw new ChannelError('auth-expired', 'Gmail access token expired and no refresh token is held — re-authorize', { retryable: false });
-    if (refreshing) { await refreshing; return accessToken(); }   // a sibling's refresh: wait for it, then read what it wrote
+    if (refreshing) { await refreshing; return accessToken(depth + 1); }   // a sibling's refresh: wait for it, then read what it wrote
     refreshing = refreshAccessToken(cred, token).finally(() => { refreshing = null; });
     const got = await refreshing;
-    return got || accessToken();   // verify r5: a refresh SUPERSEDED while in flight (a re-authorize landed, a sibling entry's rotation won) wrote nothing — the store's token is the one to use
+    if (got) return got;
+    // verify r5: a refresh SUPERSEDED while in flight (a re-authorize landed, a sibling entry's rotation won) wrote nothing — the store's token is the one to use.
+    // verify r4 F1: that re-read happens ONCE — a stored token that still cannot be used after it is a typed failure, never another refresh (a 200 answer
+    // without an access_token used to be stored as `access_token: ''` and re-entered here for ever: one refresh POST per loop, unbounded, the pass never ending)
+    if (depth >= 1) throw new ChannelError('vendor-error', `gmail: the token refresh did not yield a usable access token (re-entered after a superseded refresh) — re-authorize if it persists`, { retryable: true, detail: { refreshLoop: true } });
+    return accessToken(depth + 1);
   }
   /** Persist a token the vendor answered (verify r5). A write the store refuses (a full disk) used to lose it — and
    *  under a ROTATING refresh token the old one is already retired at the vendor, so the next refresh was
@@ -689,6 +803,8 @@ function create(record = {}, deps = {}) {
       }
       throw e;
     }
+    // verify r4 F1: an answer without an access token is not a token — nothing stored, the request not sent (it used to be stored as '' and refreshed again for ever)
+    if (!d || typeof d.access_token !== 'string' || !d.access_token) throw new ChannelError('vendor-error', `gmail token refresh: the vendor's answer carried no access_token — nothing was stored; re-authorize if it persists`, { retryable: true, detail: { noAccessToken: true } });
     const next = { ...token, access_token: String(d.access_token || ''), expiresAt: now() + Number(d.expires_in || 3600) * 1000, refresh_token: String(d.refresh_token || token.refresh_token) };
     // verify r5: the store is written ONLY while it still holds the token this refresh tried. A disconnect (cleared)
     // or a re-authorize (a different token) that landed while the POST was in flight is never overwritten by this
@@ -795,6 +911,7 @@ function create(record = {}, deps = {}) {
         persistCursor(false);
         return mailbox;
       }
+      mailbox.at = 0;   // verify r4 F3: a refused sync is NO sync — the next pass asks again (the memo used to serve it for MAILBOX_MEMO_MS as if it had succeeded: an ok pass that read nothing, the ladder reset, the card cleared while the vendor still refused)
       throw e;
     }
     return mailbox;
@@ -883,7 +1000,7 @@ function create(record = {}, deps = {}) {
               const me = await callJson(fetchFn, `${API}/profile`, { what: 'gmail profile', headers: { Authorization: `Bearer ${tok.access_token}` } });   // ungated: consent-profile
               tok.email = looksLikeEmail(me.emailAddress) ? String(me.emailAddress).trim().toLowerCase() : null;   // verify r7: whitespace / a bare word is NOBODY
               mailbox.self = tok.email;
-            } catch (e) { throw new ChannelError('vendor-error', namelessSentence('Google', `profile: ${(e && e.message) || e}`), { retryable: false, detail: { nameless: true } }); }
+            } catch (e) { throw new ChannelError('vendor-error', namelessSentence('Google', `profile: ${(e && e.message) || e}`), { retryable: false, detail: { nameless: true } }); }   // rate-ok: consent-profile
             if (!tok.email) throw new ChannelError('vendor-error', namelessSentence('Google', 'the profile carried no email address'), { retryable: false, detail: { nameless: true } });
             // verify r7: `consent.cancelled` — the door refuses, INSIDE its serialized write, a consent whose flow was
             // cancelled meanwhile (a disconnect / cancel / newer sign-in used to be undone by this write landing late)
@@ -915,7 +1032,17 @@ function create(record = {}, deps = {}) {
         let m = meta.get(id);
         if ((!m || now() - m.at >= META_TTL_MS) && budget > 0) {
           budget--;
-          try { m = await metaFor(id); } catch (e) { if (e instanceof ChannelError && e.code === 'auth-expired') throw e; m = null; }
+          // verify r3 (the vendor-budget class, the Gmail twin of r2 F1): a RATE refusal on a title read used to be swallowed —
+          // the listing went on reading the next titles into the vendor's stop (ten of ten refused) and the pass resolved ok,
+          // so the account's rate ladder never saw it; now the READ's 429 is the pass's (the discovery cursor is kept)
+          try { m = await metaFor(id); } catch (e) {
+            if (e instanceof ChannelError && (e.code === 'auth-expired' || e.code === 'rate-limited')) throw e;
+            // verify r4 F2: a vendor 5xx on a title read is the vendor's STOP too (its Retry-After rides the failure ladder) — thrown; a network
+            // blip is not a stop, but the rest of this listing's titles wait for the next pass (it used to send nine more reads into a
+            // dead connection / a 503 window while the pass resolved ok)
+            if (e instanceof ChannelError && e.code === 'transport' && e.detail && Number(e.detail.status) >= 500) throw e;
+            budget = 0; m = null;
+          }
         }
         conversations.push(makeConversation({
           id, vendorId: id,
@@ -962,13 +1089,18 @@ function create(record = {}, deps = {}) {
      * headers through `replyHeaders`. The engine stores the answer on the
      * proposal, the card shows it, `send` sends to exactly it.
      */
-    async replyEnvelope(convId, { anchorId = null } = {}) {
+    async replyEnvelope(convId, { anchorId = null, all = false } = {}) {
       const msgs = await anchorThread(convId);
       const anchor = anchorId ? msgs.find((m) => String(m.id) === String(anchorId)) : null;
       if (!anchor) throw new ChannelError('not-found', `gmail: message ${String(anchorId || '').slice(0, 80)} is not in thread ${convId} — a reply answers a message of its own thread`, { retryable: false, detail: { why: 'reply-anchor-elsewhere', anchorId: anchorId ? String(anchorId) : null } });
-      const h = replyHeaders(anchor, selfEmail());
+      // verify r2 (B-a085): Gmail lists an unsent DRAFT among the thread's messages (the sync stores it, isSelf) — it is no
+      // message anybody received, and answering it addressed ITS unsent To / Cc (a forward being written to counsel), direct
+      if ((Array.isArray(anchor.labelIds) ? anchor.labelIds : []).includes('DRAFT')) throw new ChannelError('not-found', `gmail: message ${anchor.id} is your unsent draft — a reply answers a message that was sent or received (name one with --to <message id>)`, { retryable: false, detail: { why: 'reply-anchor-draft', anchorId: String(anchor.id) } });
+      const h = replyHeaders(anchor, selfEmail(), { all: all === true });
+      if (h.tooLong) throw new ChannelError('vendor-error', `gmail: the message ${anchor.id} lists recipients over ${ADDRESS_LIST_MAX} characters — a reply to everyone is refused (nothing was created)`, { retryable: false, detail: { why: 'reply-all-too-long', anchorId: String(anchor.id) } });
       if (!h.to) throw new ChannelError('vendor-error', `gmail: the anchor message ${anchor.id} names no recipient to reply to`, { retryable: false, detail: { anchorId: String(anchor.id) } });
-      return { anchorId: String(anchor.id), to: h.to, cc: h.cc, subject: h.subject, inReplyTo: h.inReplyTo, references: h.references };
+      // B-a085: `all` is ECHOED — the engine refuses a reply-all whose answer does not say it resolved everyone
+      return { anchorId: String(anchor.id), to: h.to, cc: h.cc, subject: h.subject, inReplyTo: h.inReplyTo, references: h.references, ...(h.all ? { all: true } : {}) };
     },
 
     async send(convId, { text, replyTo = null, idemKey, as = 'user', onHandle = null, envelope = null } = {}) {
@@ -1086,7 +1218,7 @@ function create(record = {}, deps = {}) {
             }
           }
           return { unknown: true, reason: 'no sent message carries this Message-ID or proposal header yet (search can lag — check the Sent folder)', detail: { how: 'not-found-in-sent' } };
-        } catch (e) { return { unknown: true, reason: `the sent mail could not be searched: ${(e && e.message) || e}`, detail: { how: 'search-failed' } }; }
+        } catch (e) { if (e instanceof ChannelError && e.code === 'rate-limited') throw e; return { unknown: true, reason: `the sent mail could not be searched: ${(e && e.message) || e}`, detail: { how: 'search-failed' } }; }   // verify r3: a RATE refusal inside the owner's reconcile is thrown (the account's), never an `unknown` that invites the next press into the stop
       }
       let draftId = handle && handle.draftId ? String(handle.draftId) : null;
       if (!draftId) {
@@ -1094,18 +1226,19 @@ function create(record = {}, deps = {}) {
           const l = await api('/drafts?maxResults=100', { what: 'gmail drafts list' });
           const mine = (l.drafts || []).find((x) => x && x.message && String(x.message.threadId) === String(convId));
           if (mine) draftId = String(mine.id);
-        } catch (e) { return { unknown: true, reason: `the drafts could not be listed: ${(e && e.message) || e}`, detail: { how: 'list-failed' } }; }
+        } catch (e) { if (e instanceof ChannelError && e.code === 'rate-limited') throw e; return { unknown: true, reason: `the drafts could not be listed: ${(e && e.message) || e}`, detail: { how: 'list-failed' } }; }
       }
       if (draftId) {
         let exists = null;
         try { await api(`/drafts/${encodeURIComponent(draftId)}?format=minimal`, { what: 'gmail draft get' }); exists = true; }
         catch (e) {
+          if (e instanceof ChannelError && e.code === 'rate-limited') throw e;   // verify r3
           if (e instanceof ChannelError && e.code === 'not-found') exists = false;
           else return { unknown: true, reason: `the draft could not be read: ${(e && e.message) || e}`, detail: { how: 'draft-get-failed', draftId } };
         }
         if (exists) {
           let discarded = false;
-          try { await api(`/drafts/${encodeURIComponent(draftId)}`, { method: 'DELETE', what: 'gmail draft delete' }); discarded = true; } catch {}
+          try { await api(`/drafts/${encodeURIComponent(draftId)}`, { method: 'DELETE', what: 'gmail draft delete' }); discarded = true; } catch (e) { if (e instanceof ChannelError && e.code === 'rate-limited') throw e; }   // verify r3
           return { landed: false, reason: `the draft was never sent${discarded ? ' — it has been discarded' : ' (it could not be discarded; delete it by hand)'}`, detail: { how: 'draft-still-exists', draftId, discarded } };
         }
       }
@@ -1119,7 +1252,7 @@ function create(record = {}, deps = {}) {
           .sort((a, b) => (Number(b.internalDate) || 0) - (Number(a.internalDate) || 0))[0];
         if (cand) return { landed: true, vendorMessageId: String(cand.id), at: Number(cand.internalDate) || null, detail: { how: byId ? 'draft-message-id' : 'sent-in-thread', draftId } };
         return { unknown: true, reason: draftId ? 'the draft is gone but no sent message of yours is in the thread since the send' : 'no draft and no sent message of yours in the thread since the send', detail: { how: 'no-evidence', draftId } };
-      } catch (e) { return { unknown: true, reason: `the thread could not be read: ${(e && e.message) || e}`, detail: { how: 'thread-failed', draftId } }; }
+      } catch (e) { if (e instanceof ChannelError && e.code === 'rate-limited') throw e; return { unknown: true, reason: `the thread could not be read: ${(e && e.message) || e}`, detail: { how: 'thread-failed', draftId } }; }
     },
 
     /**
@@ -1234,8 +1367,8 @@ async function integrationTest({ resolved } = {}) {
 
 const adapter = { kind: KIND, caps, create, blocksOf, sendCapsOf };
 module.exports = {
-  kind: KIND, caps, create, adapter, label: LABEL, integration: INTEGRATION, integrationTest, OPTIONS, UNGATED,
+  kind: KIND, caps, create, adapter, label: LABEL, integration: INTEGRATION, integrationTest, OPTIONS, UNGATED, RATE_OK,
   EGRESS, SCOPE, SCOPE_SEND, SCOPE_COMPOSE, SCOPE_MODIFY, SCOPE_MAIL, sendVerbsOf, PROPOSAL_HEADER, PUBSUB_SCOPE, TOKEN_URL, AUTH_URL, API, MAILBOX_MEMO_MS, THREAD_MEMO_MS, META_PER_LIST, unitsFor, queryOf, scopeOf, effectiveOptions,
-  toRecord, walkParts, parseAddress, stripHtml, typedFailure, buildMime, replyHeaders, encodeHeader,
+  toRecord, walkParts, parseAddress, addressList, stripHtml, typedFailure, buildMime, replyHeaders, encodeHeader, encodeAddressHeader,
   blocksOf, sendCapsOf,
 };

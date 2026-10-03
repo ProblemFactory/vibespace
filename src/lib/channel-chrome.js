@@ -37,8 +37,9 @@ export function fileIcon(fileName, px = 16, cls = '') {
 /** AN AVATAR (paint — aria-hidden; the name it abbreviates is in the row's
  *  own text): the initials of `name` on the hue of `key` (the accent for
  *  `self`), or a library `glyph` on that hue (a mail thread, an agent group,
- *  an account's kind). `px` = the diameter. */
-export function avatar({ name = '', key = '', self = false, glyph = null } = {}, px = null, cls = '') {
+ *  an account's kind). `px` = the diameter. `badge` (B-5fe1, channel-avatar.js
+ *  accountBadges) = the ACCOUNT's vendor glyph on the account's hue at the corner. */
+export function avatar({ name = '', key = '', self = false, glyph = null, badge = null } = {}, px = null, cls = '') {
   const a = avatarOf({ name, key, self });
   const s = document.createElement('span');
   s.className = 'chan-av' + (a.self ? ' chan-av-self' : '') + (glyph ? ' chan-av-glyph' : '') + (cls ? ' ' + cls : '');
@@ -48,15 +49,25 @@ export function avatar({ name = '', key = '', self = false, glyph = null } = {},
   if (px) s.style.setProperty('--av-size', px + 'px');
   if (glyph) { const g = icon(glyph, 13); g.style.fontSize = ''; s.appendChild(g); }
   else s.textContent = a.text;
+  if (badge && Number.isInteger(badge.hue)) {
+    s.classList.add('chan-av-badged');
+    const b = document.createElement('span');
+    b.className = 'chan-av-badge';
+    b.dataset.hue = String(badge.hue);
+    const g = icon(UI_ICONS[badge.glyph] ? badge.glyph : 'chat', 8);
+    g.style.fontSize = '';
+    b.appendChild(g);
+    s.appendChild(b);
+  }
   return s;
 }
 
 /** A CONVERSATION's avatar (the window's bar, the panel's first-screen row):
  *  an agent group wears the people glyph, a mail thread / mailbox the mail
  *  glyph, anything else the title's initials — on the hue of the key. */
-export function convAvatar({ key = '', title = '', kind = '', group = false } = {}, px = null, cls = '') {
+export function convAvatar({ key = '', title = '', kind = '', group = false, badge = null } = {}, px = null, cls = '') {
   const glyph = group ? 'users' : (kind === 'thread' || kind === 'mailbox') ? 'mail' : null;
-  return avatar({ name: title, key, glyph }, px, cls);
+  return avatar({ name: title, key, glyph, badge }, px, cls);
 }
 
 /** A textContent element (XSS law: every string on these surfaces is vendor-

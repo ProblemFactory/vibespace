@@ -25,15 +25,25 @@
 //   wakeCount       — the post/create/invite answer → the numbers the toast says.
 //   wakePreview     — BEFORE the click: who THIS text, sent as You, would wake
 //                     (the D2 table the engine applies, through the model's
-//                     own `mentionsIn` — one spelling of what an @ is).
+//                     own `scanAts` — one spelling of what an @ is).
+//   pickedSpans / atProblem — B-ff04: the @-picker's choices as places BY ID
+//                     (the server claims them first, never re-reads them by
+//                     name) and the refusal the server would give, said first.
+//   groupBodyRuns / memberName / learnNames — B-ff04: a message body as text
+//                     + mention chips drawn ONLY where the record's own
+//                     server-resolved mentions put one, and the name a member
+//                     (or a member who left) is shown by.
 //   foldsFrom       — the panel's secondary sections' persisted folds.
 //   focusRows / statusTag / firstScreen (R3, 2026-09-26, re-exported from the
 //                     PURE src/lib/channel-focus.js) — the first screen is the
 //                     ATTENTION list: what matters, one tag per row, the full
 //                     list one switch away.
-import { GROUP_ADAPTER_ID, NOTIFY_MODES, DEFAULT_NOTIFY, OWNER, mentionsIn, deliveryOf, DELIVERY_STATES } from '../channel-groups.js';
+import { GROUP_ADAPTER_ID, NOTIFY_MODES, DEFAULT_NOTIFY, OWNER, scanAts, atRefusal, codeSpans, foldCase, deliveryOf, DELIVERY_STATES } from '../channel-groups.js';
+import { nameOf } from '../channel-ref.js'; // B-c127's name ladder (lane channel-names) — memberName climbs it (the 2.369.202 integration)
 // lane group-pending (2026-10-01): the window's line under every message judges by the model's ONE rule — re-exported, never copied
 export { deliveryOf, DELIVERY_STATES };
+// B-5fe1: each conversation row carries its ACCOUNT badge (PURE — the hue per account, the vendor glyph, `multi`)
+import { accountBadges } from './channel-avatar.js';
 
 export { GROUP_ADAPTER_ID, NOTIFY_MODES, DEFAULT_NOTIFY, OWNER };
 export { focusRows, statusTag, filterRows, firstScreen, heldOf, heldPending, FOCUS_WINDOW_MS, HELD_WINDOW_MS, TAG_ORDER } from './channel-focus.js';
@@ -72,6 +82,7 @@ export function groupListRows({ groups = [], conversations = [], adapters = [], 
     (row.archived ? archived : rows).push(row);
   }
   const adapterById = new Map((adapters || []).map((a) => [a.id, a]));
+  const badges = accountBadges(adapters);
   for (const c of conversations || []) {
     if (!c || c.unlisted) continue;
     const a = adapterById.get(c.adapterId);
@@ -80,7 +91,7 @@ export function groupListRows({ groups = [], conversations = [], adapters = [], 
       kind: 'conv', key: `${c.adapterId}/${c.id}`, adapterId: c.adapterId, id: c.id,
       title: c.title || (typeof untitled === 'function' ? untitled(c.kind) : '') || c.id, lastAt: num(c.lastAt), lastText: c.lastText || '',
       unread: num(c.unread), sourceLabel: c.adapterLabel || a.label || a.id,
-      mail: c.kind === 'thread' || c.kind === 'mailbox', conv: c,
+      mail: c.kind === 'thread' || c.kind === 'mailbox', conv: c, account: badges.get(c.adapterId) || null,
     });
   }
   rows.sort(byActivity);
@@ -208,10 +219,10 @@ export function foldsFrom(state) {
  * `mentionsIn` over the members' display names, so the preview and the server
  * cannot disagree about what an @ is. Returns `[{member, name, why}]`.
  */
-export function wakePreview(group, text) {
+export function wakePreview(group, text, { picked = [] } = {}) {
   if (!group || group.archivedAt || !String(text || '').trim()) return [];
   const members = (group.members || []).map((m) => ({ member: m.member, name: m.name || null, notify: m.notify }));
-  const named = new Set(mentionsIn(text, members).map((x) => x.id));
+  const named = new Set(scanAts(text, members, { explicit: picked }).mentions.map((x) => x.id));
   const out = [];
   for (const m of members) {
     if (m.member === OWNER || m.notify === 'mute') continue;
@@ -219,4 +230,110 @@ export function wakePreview(group, text) {
     else if (m.notify === 'always') out.push({ member: m.member, name: m.name || m.member, why: 'always' });
   }
   return out;
+}
+
+/**
+ * THE @-PICKER'S CHOICES AS PLACES (B-ff04 ①: "人在群窗口里发消息时 @ 也走同一个结构（选人，不是打字拼名字）"). `picks`
+ * = `[{id, name}]` in the order the person picked them (the composer inserted `@<name> ` for each); each claims the
+ * first still-unclaimed `@<name>` of `text` that ends at a word end. A pick whose words were deleted claims nothing.
+ * Returns `[{id, start, end}]` — what the post carries; the server checks each sits on an `@` and names a member.
+ */
+export function pickedSpans(text, picks) {
+  const s = String(text || '');
+  const claimed = [];
+  const out = [];
+  for (const p of picks || []) {
+    if (!p || !p.id || !p.name) continue;
+    const needle = '@' + String(p.name);
+    let i = s.indexOf(needle);
+    while (i >= 0 && (claimed.some(([a, b]) => i < b && i + needle.length > a) || /[A-Za-z0-9_]/.test(s[i + needle.length] || ''))) i = s.indexOf(needle, i + 1);
+    if (i < 0) continue;
+    claimed.push([i, i + needle.length]);
+    out.push({ id: p.id, start: i, end: i + needle.length });
+  }
+  return out;
+}
+
+/** The refusal THIS draft would get for its @ (an @ that names no member, or two), said under the box BEFORE the
+ *  click — the server's own `scanAts` + `atRefusal`, so the two cannot disagree. null when every @ resolves. */
+export function atProblem(group, text, { picked = [] } = {}) {
+  if (!group || !String(text || '').trim()) return null;
+  const members = (group.members || []).map((m) => ({ member: m.member, name: m.name || null }));
+  return atRefusal(scanAts(text, members, { explicit: picked }), members);
+}
+
+const LATIN_WORD = /[A-Za-z0-9_]/;
+/** An older record's chips, best effort (B-ff04: "旧消息按名字尽力解析成标签，解析不出就按普通文字显示"): each of the
+ *  record's OWN mentions — resolved by the server when it was sent, never the text read against the member list —
+ *  at every `@<its name>` that opens a word, ends at one and lies outside code. */
+function legacySpans(text, mentions) {
+  const lower = foldCase(text);   // verify r1 F10: the places are read back in `text` — never a lower case of another length
+  const code = text.includes('`') ? codeSpans(text) : [];
+  const out = [];
+  for (const m of mentions) {
+    if (!m.name) continue;
+    const needle = '@' + foldCase(m.name);
+    for (let i = lower.indexOf(needle); i >= 0; i = lower.indexOf(needle, i + 1)) {
+      const prev = i > 0 ? lower[i - 1] : '';
+      const next = lower[i + needle.length];
+      if ((prev && /[a-z0-9_.+-]/.test(prev)) || (next !== undefined && LATIN_WORD.test(next) && LATIN_WORD.test(needle[needle.length - 1]))) continue;
+      if (code.some(([s, e]) => i >= s && i < e)) continue;
+      out.push({ s: i, e: i + needle.length, id: m.id });
+    }
+  }
+  return out;
+}
+
+/**
+ * A GROUP MESSAGE'S BODY AS RUNS (B-ff04 ③): `[{k:'t', text} | {k:'at', id, text}]`. A chip ONLY where the record's
+ * own mentions put one — the places the server stored at send (`mentions[].pos`, each checked to sit on an '@' of
+ * the text), or, for a record sent before places existed (no mention carries any), its mentions' names, best
+ * effort. NEVER the free text read against the member list: an `@name` an agent typed that the server did not
+ * resolve, a Lark `<at …>` tag and an `@_user_N` stay TEXT — a chip cannot be forged for a non-member. The chip's
+ * NAME is the caller's (by id: the member's current one); `text` = the words it covers (copied as they were sent).
+ */
+export function groupBodyRuns(rec) {
+  const text = String((rec && rec.text) || '');
+  const ms = (rec && Array.isArray(rec.mentions) ? rec.mentions : []).filter((m) => m && m.id);
+  const placed = ms.some((m) => Array.isArray(m.pos) && m.pos.length);
+  const spans = [];
+  if (placed) {
+    for (const m of ms) for (const p of Array.isArray(m.pos) ? m.pos : []) {
+      if (Array.isArray(p) && Number.isInteger(p[0]) && Number.isInteger(p[1]) && p[0] >= 0 && p[1] > p[0] + 1 && p[1] <= text.length && text[p[0]] === '@') spans.push({ s: p[0], e: p[1], id: m.id });
+    }
+  } else spans.push(...legacySpans(text, ms));
+  spans.sort((a, b) => (a.s - b.s) || (b.e - a.e));
+  const runs = [];
+  let last = 0;
+  for (const sp of spans) {
+    if (sp.s < last) continue;
+    if (sp.s > last) runs.push({ k: 't', text: text.slice(last, sp.s) });
+    runs.push({ k: 'at', id: sp.id, text: text.slice(sp.s, sp.e) });
+    last = sp.e;
+  }
+  if (last < text.length || !runs.length) runs.push({ k: 't', text: text.slice(last) });
+  return runs;
+}
+
+/**
+ * THE NAME A MEMBER IS SHOWN BY (B-ff04 ③ — folded onto B-c127's ladder at the 2.369.202 integration: src/channel-ref.js
+ * `nameOf`, the ONE spelling — a rung of blanks, controls or hidden characters only says nothing and the ladder goes on):
+ * ① the group's member row (the server's live name) → ② the live session's name (`live`: conversation id → name) →
+ * ③ `snapshot`, the name THIS record wrote down → ④ the last name the log knew (`known`, filled by `learnNames`) →
+ * ⑤ the id, short — never a bare id while any name is known.
+ */
+export function memberName(id, { group = null, live = null, known = null, snapshot = null } = {}) {
+  const key = String(id || '');
+  const row = group && (group.members || []).find((x) => x && x.member === key);
+  return nameOf([row && row.name, live && live.get(key), snapshot, known && known.get(key)], key.slice(0, 8));
+}
+/** Every name a record knows a member by — its author (never the owner), its mentions, a membership record's
+ *  `raw.name` — into `known` (conversation id → the latest name seen). */
+export function learnNames(known, rec) {
+  if (!known || !rec) return known;
+  const put = (id, name) => { if (id && id !== OWNER && typeof name === 'string' && name.trim()) known.set(String(id), name); };
+  if (rec.author) put(rec.author.id, rec.author.name);
+  for (const m of Array.isArray(rec.mentions) ? rec.mentions : []) if (m) put(m.id, m.name);
+  if (rec.raw && rec.raw.member) put(rec.raw.member, rec.raw.name);
+  return known;
 }

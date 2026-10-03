@@ -23,7 +23,7 @@ import { createRequire } from 'node:module';
 import { scratch, freePort, endRootedProcesses } from './scratch.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
 // 2.369.200 integration (lane hooks-create H5 × this suite): with no desktop and Xvfb on the keeper's PATH an UNSET window
-// preference launches the hidden-window rung once H5's switch is on (OFF in 2.369.200, ON in .201 — a headed Chrome); this suite's subject is the dialog / loop watch on the
+// preference launches the hidden-window rung once H5's switch is on (OFF in 2.369.200 and 2.369.202 — red on that rung at the 2.369.202 integration; a headed Chrome); this suite's subject is the dialog / loop watch on the
 // rung it was measured on, so it pins headless — the hidden-window rung's own legs are test-browser-display-chrome's (and
 // the watch on it is HELD: see the 2.369.200 engineering log, integration)
 const HEADLESS_SETTING = (k) => (k === 'browser.noDisplayMode' ? 'headless' : undefined);
@@ -339,12 +339,24 @@ try {
     // nobody's, so B — holding tabs of its own — heard NOTHING: its `open` sat the 25 s timeout with no loop word, its `stop`
     // said "nothing of yours". Now the orphan's loop is told as a kind ([navigation_loop_shared]) and `stop` refuses by name
     console.log('— ⑩ verify r4: a loop in a tab named to nobody (the browser\'s own first tab)');
+    // lane site-reset-windows (2.369.202, lane browser-windows): every holder's session is bound to a tab in a WINDOW OF ITS OWN
+    // at attach, so t1 is no holder's — and the agent's tab fence (lane browser-resume C) switches only to its own tabs: B can no
+    // longer DRIVE the orphan (before this lane B switched there and its own `open` made it loop). The orphan loops the way a
+    // restored first tab does (driven here over CDP — no conversation's command); the rule under test stands: B, holding tabs of
+    // its own, hears of it as a KIND when its own verb fails, and its `stop` is refused by name
     r = await s2.cliB(['tab', 't1']);
-    ok(r.code === 0, 'setup: B switched its session to the browser\'s first tab (t1 — born before any command, nobody\'s)', r);
-    r = await s2.cliB(['open', U('/pd/login')], { timeoutMs: 40000 });
-    ok(r.code !== 0 && /\[navigation_loop_shared\]/.test(r.err) && /named to no conversation/.test(r.err) && !/pd\/(login|app)/.test(r.err.replace(/profile:.*\n/, '')), `⑩ B's \`open\` in the orphan tab is told, after its own wait (${r.ms} ms), that a tab named to no conversation loops — a kind, never the page's address (before: the bare timeout line)`, r);
+    ok(r.code === 1 && /\[not_your_tab\]/.test(r.err), '⑩ B\'s `tab t1` (the browser\'s first tab — nobody\'s: each holder\'s session is in a window of its own) is refused BY NAME — an agent never drives a tab named to nobody', r);
+    const w10 = s2.dialogs._watches.get(s2.prof.id);
+    const sc10 = [[s2.KEY, 'sess-shared'], [s2.KEY_B, 'sess-shared-b']].map(([bk, sid]) => s2.dialogs.scopeFor({ profileId: s2.prof.id, browserKey: bk, sessionId: sid, ephemeral: false }));
+    const orphan10 = w10 ? [...w10.targets.keys()].find((id) => sc10.every((sc) => !(sc instanceof Set && sc.has(id)))) : null;
+    const nav10 = orphan10 ? await require('../src/server/browser-viewport.js').navigateTarget(s2.kk._reg().browsers[s2.prof.id].cdpUrl, orphan10, U('/pd/login')) : null;
+    let f10 = null; for (let i = 0; i < 40; i++) { f10 = s2.dialogs.factFor({ profileId: s2.prof.id, browserKey: s2.KEY_B, sessionId: 'sess-shared-b', ephemeral: false, consume: false }); if (f10 && f10.loopShared) break; await sleep(200); }
+    ok(!!orphan10 && nav10 && nav10.ok && f10 && f10.loopShared === true && !f10.loopAny, 'setup: the orphan tab (named to no holder) loops — for B a loop on a tab it cannot tell is its, never its own', { orphan10, nav10, loopShared: f10 && f10.loopShared, loopAny: !!(f10 && f10.loopAny) });
+    r = await s2.cliB(['open', `http://127.0.0.1:${await freePort()}/refused`], { timeoutMs: 40000 });
+    ok(r.code !== 0 && /\[navigation_loop_shared\]/.test(r.err) && /named to no conversation/.test(r.err) && !/pd\/(login|app)/.test(r.err.replace(/profile:.*\n/, '')), `⑩ B's own verb fails (${r.ms} ms) and B is told that a tab named to no conversation loops — a kind, never the page's address (before r4: the bare failure line)`, r);
     r = await s2.cliB(['stop']);
     ok(r.code === 1 && /\[not_watched\]/.test(r.err) && /named to no conversation/.test(r.err), '⑩ B\'s `stop` is refused BY NAME with the way out (before: "nothing of yours was loading")', r);
+    if (orphan10) { try { await require('../src/server/browser-viewport.js').closeTarget(s2.kk._reg().browsers[s2.prof.id].cdpUrl, orphan10); } catch { } }
     // ⑪ verify r4 #3 (reproduced here before the fix): the browser HEALED (its Chrome killed; the keeper relaunches it in the same
     // daemon on the next command — new target ids): the dead ids stayed on every lease's `tabs` (no lease event on a relaunch,
     // the dead socket sent no targetDestroyed), a ghost-only scope read as attributed. Now the replacement drops them and the

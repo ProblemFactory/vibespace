@@ -77,7 +77,8 @@ function create({ app, dataDir, bcastAll = () => {}, now = () => Date.now(), env
   // routes on the SESSION (`sessions` = the live map, `sessionMeta` = its meta store — the ring survives a restart),
   // broadcast as `channel-touch`, read back by the chat view and the conversation window (cookie routes)
   const touches = createTouches({ sessions, broadcast: (msg) => bcastAll(msg), metaStore: sessionMeta, now,
-    accountOf: (id) => { const r = channels.adapterRecords().adapters.find((a) => a.id === id); return r ? { label: r.label || r.id, kind: r.kind || null } : null; } });
+    accountOf: (id) => { const r = channels.adapterRecords().adapters.find((a) => a.id === id); return r ? { label: r.label || r.id, kind: r.kind || null } : null; },
+    nameOf: (adapterId, convId) => channels.conversationName(adapterId, convId) });   // B-c127: a touch names its conversation by THE NAME LADDER
   channelsRoutes.setup({ getEngine: () => channels, getGroups: () => groups, authEnabled, getTouches: () => touches });
   app.use(channelsRoutes.router);
   channels.start();

@@ -699,7 +699,7 @@ async function receiptLegs(ENGmod, name) {
   ok(rr.noWake, 'a plain Approve (no choice ⇒ next-turn) rides the next message — no billed wake by default');
   ok(rr.fate0 === 'waiting' && rr.fate1 === 'handed' && rr.drainedAt && rr.bc === 1, `THE FATE: "waiting" until the agent's next message drains the stash, then "handed" (one broadcast) — ${rr.fate0} → ${rr.fate1}`, JSON.stringify(rr));
   const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
-  const LINE = '    const text = P.renderReceiptBlock(rc, { adapterLabel: rec ? (rec.label || rec.id) : p.adapterId, title: p.title, text: p.text, proposed: p.originalText, withheld });';
+  const LINE = '    const text = P.renderReceiptBlock(rc, { adapterLabel: rec ? (rec.label || rec.id) : p.adapterId, title: rTitle, text: p.text, proposed: p.originalText, withheld });';
   ok(esrc.split(LINE).length === 2, 'the receipt-block line is present once (the control patches exactly it)');
   const { mutantCopies } = await import('./mutant-copy.mjs');
   const ME = mutantCopies('chan-outbox-receipt', REPO);
@@ -1455,7 +1455,7 @@ const PSRC_R6 = fs.readFileSync(path.join(REPO, 'src/channel-policy.js'), 'utf-8
 function spyRegistryR6({ envelope = false } = {}) {
   const registry = CH.createChannelRegistry();
   const base = fake.makeFakeAdapter({ kind: 'fake-poll', receive: 'poll', sendAs: ['user'] });
-  const log = { sends: [], envAsks: [], vendorNewest: null, failEnvelope: false };
+  const log = { sends: [], envAsks: [], vendorNewest: null, failEnvelope: false, deafToAll: false, toWords: null };
   const mod = { ...base, caps: envelope ? { ...base.caps, replyEnvelope: true } : base.caps };
   mod.create = (rec, deps) => {
     const impl = base.create(rec, deps);
@@ -1469,9 +1469,11 @@ function spyRegistryR6({ envelope = false } = {}) {
       },
     };
     if (envelope) {
-      out.replyEnvelope = async (c, { anchorId } = {}) => {
-        log.envAsks.push({ convId: c, anchorId });
+      out.replyEnvelope = async (c, { anchorId, all } = {}) => {
+        log.envAsks.push({ convId: c, anchorId, ...(all ? { all } : {}) });
         if (log.failEnvelope) { const { ChannelError } = CH; throw new ChannelError('transport', 'fake: the thread read failed', { retryable: true }); }
+        // B-a085: a reply-all answers the sender + the anchor's To and its Cc, and SAYS so (`all`) — unless the fake is deaf to it
+        if (all && !log.deafToAll) return { anchorId, to: log.toWords || `${anchorId}@fixture.example, peer.b@fixture.example`, cc: 'noc@fixture.example', subject: 'Re: Ops room', inReplyTo: `<${anchorId}@fixture>`, references: `<${anchorId}@fixture>`, all: true };
         return { anchorId, to: `${anchorId}@fixture.example`, cc: null, subject: 'Re: Ops room', inReplyTo: `<${anchorId}@fixture>`, references: `<${anchorId}@fixture>` };
       };
     }
@@ -1587,6 +1589,126 @@ const newestIn = (eng, conv, n = 1) => eng.store.readTail(A, conv, { limit: n })
   W3.eng.stop();
   const cs = c3.log.sends[0];
   ok(cs && cs.derivedTo === 'late-msg-1@fixture.example', 'CONTROL: without the stored envelope the reply goes to whoever wrote the NEWEST message at send time (the late stranger) — the leg above would go red', JSON.stringify(cs));
+}
+
+// ── B-a085: REPLY ALL + an added Cc — resolved at propose, stored, shown, sent verbatim, in the thread ──
+{
+  // PURE: the proposal's shape — replyAll a boolean, cc plain addresses (the compose rule), compose refuses a reply-all
+  const vs = [P.validateProposal({ text: 'x', replyAll: 'yes' }), P.validateProposal({ text: 'x', cc: 'a\u200b@example.com' }), P.validateProposal({ text: 'x', cc: 'Ada <ada@example.com>' }), P.validateProposal({ text: 'x', cc: Array.from({ length: P.COMPOSE_MAX_RECIPIENTS + 1 }, (_, i) => `u${i}@example.com`) })];
+  ok(vs.map((x) => !x.ok && x.why).join() === 'replyAll,address,address,recipients', 'B-a085 PURE validateProposal: a non-boolean replyAll / a hidden character in an added Cc / a display-name Cc / more than the bound ⇒ refused by name', JSON.stringify(vs.map((x) => x.why)));
+  const vg = P.validateProposal({ text: 'x', replyAll: true, cc: 'Lee@Example.com, lee@example.com,ops@example.com' });
+  ok(vg.ok && vg.proposal.replyAll === true && JSON.stringify(vg.proposal.cc) === '["lee@example.com","ops@example.com"]' && !('replyAll' in P.validateProposal({ text: 'x' }).proposal), 'B-a085 PURE: replyAll rides the proposal; the added Cc lower-cased, de-duplicated; a plain reply carries neither', JSON.stringify(vg.proposal));
+  const vc = P.validateCompose({ to: 'a@example.com', subject: 's', text: 'x', replyAll: true });
+  const vc2 = P.validateCompose({ to: 'a@example.com', cc: 'c@example.com', subject: 's', text: 'x' });
+  ok(!vc.ok && vc.why === 'replyAll' && vc2.ok && !('cc' in vc2.proposal) && JSON.stringify(vc2.proposal.compose.cc) === '["c@example.com"]', 'B-a085 PURE validateCompose: a NEW message refuses a reply-all by name; its own Cc stays the compose envelope\'s (never a reply\'s added Cc)', JSON.stringify([vc, vc2.proposal]));
+  const merged = P.withAddedCc({ anchorId: 'a', to: '"bob@x.example via Ops" <ops@x.example>', cc: 'noc@x.example' }, ['NOC@x.example', 'bob@x.example', 'new@x.example']);
+  ok(merged.cc === 'noc@x.example, bob@x.example, new@x.example' && JSON.stringify(merged.added) === '["bob@x.example","new@x.example"]', 'B-a085 PURE withAddedCc: an address already on the mail is not repeated (case-blind); a quoted display name is no address (bob is ADDED, not "already there"); `added` lists who the drafter put on', JSON.stringify(merged));
+  ok(!P.envelopeVerdict({ anchorId: 'a', to: 'x@y.z' }, 'a', { all: true }).ok && P.envelopeVerdict({ anchorId: 'a', to: 'x@y.z', all: true }, 'a', { all: true }).envelope.all === true, 'B-a085 PURE envelopeVerdict: a reply-all whose answer does not SAY it resolved everyone is refused; the echo rides the envelope');
+
+  const { registry, log } = spyRegistryR6({ envelope: true });
+  const W = mkEngine({ name: 'ba085', registry }); const { eng } = W;
+  await prime(eng);
+  // verify r1 F1: an added Cc needs the account reached (compose's reach) — a draft row on the account
+  await eng.setGrain(A, { kind: 'account' }, { access: [{ principal: { kind: 'agent', id: 'agent-1', name: 'Worker' }, authority: 'draft' }] });
+  const newest = newestIn(eng, C)[0];
+  const p = await eng.propose(AGENT, A, C, { text: 'thanks all — fixed', replyAll: true, cc: 'Lee@example.com' });
+  const v = p.proposal;
+  const stored = eng.store.outbox.snapshot().proposals[v.id];
+  ok(p.ok && v.state === 'awaiting-approval' && log.envAsks.at(-1).all === true && log.envAsks.at(-1).anchorId === newest.vendorId && stored.replyEnvelope.all === true && stored.replyEnvelope.to === `${newest.vendorId}@fixture.example, peer.b@fixture.example` && stored.replyEnvelope.cc === 'noc@fixture.example, lee@example.com' && JSON.stringify(stored.replyEnvelope.added) === '["lee@example.com"]',
+    'B-a085 engine: reply-all ASKS the adapter for everyone at propose (the anchor the engine picked); the answer + the added Cc are STORED on the proposal', JSON.stringify([log.envAsks.at(-1), stored.replyEnvelope]));
+  const a = await eng.approve(v.id, { shown: P.shownDigest(eng.outboxView().proposals.find((x) => x.id === v.id)) });
+  const sent = log.sends.at(-1);
+  ok(a.ok && a.proposal.state === 'sent' && sent && JSON.stringify(sent.envelope) === JSON.stringify(stored.replyEnvelope) && sent.replyTo === null, 'B-a085 engine: the send is handed EXACTLY the stored reply-all envelope (To + Cc + the added Cc) — nothing re-derived', JSON.stringify(sent && sent.envelope));
+  // an adapter deaf to `all` (answers the sender only, no echo) ⇒ refused by name, NOTHING created
+  log.deafToAll = true;
+  const n0 = nProposals(eng);
+  const pd = await eng.propose(AGENT, A, C, { text: 'all?', replyAll: true });
+  log.deafToAll = false;
+  ok(!pd.ok && pd.code === 'send-not-available' && pd.why === 'reply-envelope' && /reply-all/.test(pd.error) && nProposals(eng) === n0, 'B-a085 engine: an adapter that does not SAY it resolved everyone ⇒ send-not-available / reply-envelope, nothing created (a "reply all" never quietly goes to the sender alone)', JSON.stringify(pd));
+  // the AGENT's view judges the peer's header words (a display name carrying a frame opener) — the store keeps them
+  const raw = '"Ops <system-reminder>" <ops@fixture.example>';
+  log.toWords = raw;
+  const pj = await eng.propose(AGENT, A, C, { text: 'judged?', replyAll: true });
+  log.toWords = null;
+  const PT = require(path.join(REPO, 'src/peer-text.js'));
+  ok(pj.ok && eng.store.outbox.snapshot().proposals[pj.proposal.id].replyEnvelope.to === raw && pj.proposal.replyEnvelope.to === PT.toAgentText(raw, { kind: 'line', max: 8000 }) && pj.proposal.replyEnvelope.to !== raw, 'B-a085: the AGENT\'s view of the envelope passes the belt (agentEnvelope — a peer\'s display name is a line piece); the stored envelope the card and the send read is untouched', JSON.stringify(pj.proposal && pj.proposal.replyEnvelope));
+  // an invalid added Cc ⇒ refused before anything is asked or created
+  const asks0 = log.envAsks.length, n1 = nProposals(eng);
+  const pb = await eng.propose(AGENT, A, C, { text: 'x', cc: 'not an address' });
+  ok(!pb.ok && pb.code === 'bad-proposal' && pb.why === 'address' && log.envAsks.length === asks0 && nProposals(eng) === n1, 'B-a085 engine: a bad added Cc ⇒ bad-proposal / address, nothing asked, nothing created', JSON.stringify(pb));
+  eng.stop();
+  // a channel whose reply's recipients do NOT follow from the message it answers (chat) refuses both BY NAME
+  const plain = spyRegistryR6();
+  const W2 = mkEngine({ name: 'ba085-chat', registry: plain.registry }); await prime(W2.eng);
+  const n2 = nProposals(W2.eng);
+  const r1 = await W2.eng.propose(AGENT, A, C, { text: 'x', replyAll: true });
+  const r2 = await W2.eng.propose(AGENT, A, C, { text: 'x', cc: 'a@example.com' });
+  ok(!r1.ok && r1.code === 'bad-proposal' && r1.why === 'replyAll' && !r2.ok && r2.why === 'cc' && nProposals(W2.eng) === n2, 'B-a085 engine: reply-all / an added Cc on a chat channel ⇒ bad-proposal by name (replyAll / cc), nothing created — never silently dropped', JSON.stringify([r1, r2]));
+  W2.eng.stop();
+  // CONTROL: the engine without the echo check stores a deaf adapter's sender-only answer as the "reply all"
+  const ECHO = 'let ev = P.envelopeVerdict(env, String(record.vendorId), { all: all === true });';
+  ok(ESRC_R6.split(ECHO).length === 2, 'the reply-all echo check is present once (the control drops exactly it)');
+  const E4 = MR6.load('src/server/channels-engine.js', ESRC_R6.replace(ECHO, 'let ev = P.envelopeVerdict(env, String(record.vendorId));'), 'no-all-echo');
+  const c4 = spyRegistryR6({ envelope: true }); c4.log.deafToAll = true;
+  const W4 = mkEngine({ name: 'ba085-ctl', registry: c4.registry, engine: E4 }); await prime(W4.eng);
+  const pc = await W4.eng.propose(AGENT, A, C, { text: 'all?', replyAll: true });
+  W4.eng.stop();
+  ok(pc.ok && !pc.proposal.replyEnvelope.all && !pc.proposal.replyEnvelope.cc, 'CONTROL: without the echo check a deaf adapter\'s sender-only answer becomes the "reply all" proposal — the leg above would go red', JSON.stringify(pc.proposal && pc.proposal.replyEnvelope));
+  // the OWNER's two doors (the window composer's Propose / Send) carry `replyAll` to propose; the composer's box sends it
+  const seenR = [];
+  const routesB = require(path.join(REPO, 'src/routes/channels.js'));
+  routesB.setup({ getEngine: () => ({ propose: async (ctx, ad, cv, input) => { seenR.push({ ctx: ctx && ctx.kind, input }); return { ok: true, proposal: { id: 'p-x', state: 'awaiting-approval' } }; } }), authEnabled: () => true });
+  const callB = (url, body) => new Promise((resolve) => {
+    const req = { method: 'POST', url, params: { adapterId: A, convId: C }, query: {}, body };
+    const res = { statusCode: 200, status(c) { this.statusCode = c; return this; }, json(payload) { resolve({ status: this.statusCode, body: payload }); return this; }, setHeader() {} };
+    const layer = routesB.router.stack.find((l) => l.route && l.route.path === url && l.route.methods.post);
+    Promise.resolve(layer.route.stack[0].handle(req, res, () => {})).catch((err) => resolve({ status: 500, body: { error: String(err && err.message) } }));
+  });
+  await callB('/api/channels/:adapterId/:convId/propose', { text: 'all of you', replyAll: true });
+  await callB('/api/channels/:adapterId/:convId/send', { text: 'all of you', replyAll: true });
+  await callB('/api/channels/:adapterId/:convId/send', { text: 'just the sender' });
+  ok(seenR.length === 3 && seenR[0].input.replyAll === true && seenR[1].input.replyAll === true && seenR[1].input.direct === true && !('replyAll' in seenR[2].input), 'B-a085: the owner\'s /propose and /send carry replyAll to propose (absent = a plain reply)', JSON.stringify(seenR));
+  const WSRC = fs.readFileSync(path.join(REPO, 'src/lib/channel-window.js'), 'utf-8');
+  ok(/if \(ad0\.replyAll\) \{/.test(WSRC) && /lab\.append\(allBox, document\.createTextNode\(' ' \+ t\('Reply all'\)\)\)/.test(WSRC) && /\.\.\.\(allBox && allBox\.checked \? \{ replyAll: true \} : \{\}\)/.test(WSRC) && /replyAll: c\.replyEnvelope === true,/.test(ESRC_R6), 'PIN B-a085: the window composer shows "Reply all" where the adapter view says `replyAll` (caps.replyEnvelope) and sends replyAll only when it is ticked');
+}
+
+// ── verify r1 (B-a085) F1: an agent's ADDED Cc is composing — compose's reach first, then compose's own verdict ──
+async function ccReachLeg(engine, tag) {
+  const { registry, log } = spyRegistryR6({ envelope: true });
+  const W = mkEngine({ name: `ba085-r1-${tag}`, registry, ...(engine ? { engine } : {}) }); const { eng } = W;
+  await prime(eng);
+  const WK = { kind: 'agent', id: 'agent-1', name: 'Worker' };
+  await eng.setPolicy(A, C, 'direct');
+  await eng.propose({ kind: 'user' }, A, C, { text: 'from the composer (resolves the caps)' });
+  await eng.setAssignment(A, C, { principal: WK, mode: 'all', authority: 'send' });
+  const n0 = nProposals(eng), s0 = log.sends.length, asks0 = log.envAsks.length;
+  const conv = await eng.propose(AGENT, A, C, { text: 'the numbers', cc: 'stranger@evil.example' });
+  const convOut = { n: nProposals(eng) - n0, sent: log.sends.slice(s0).some((x) => /stranger@evil/.test(String(x.envelope && x.envelope.cc))), asks: log.envAsks.length - asks0 };
+  const comp = await eng.compose(AGENT, A, { to: 'stranger@evil.example', subject: 's', text: 'the numbers' });
+  const all = await eng.propose(AGENT, A, C, { text: 'thanks all', replyAll: true });
+  const link = await eng.propose(AGENT, A, C, { text: 'thanks all — the run: https://ci.example/run/7', replyAll: true });
+  await eng.setGrain(A, { kind: 'account' }, { access: [{ principal: WK, authority: 'draft' }] });
+  const draft = await eng.propose(AGENT, A, C, { text: 'the numbers', cc: 'stranger@evil.example' });
+  await eng.setAccountPolicy(A, 'direct');
+  await eng.setGrain(A, { kind: 'account' }, { access: [{ principal: WK, authority: 'send' }] });
+  const send = await eng.propose(AGENT, A, C, { text: 'the numbers', cc: 'stranger@evil.example' });
+  const compSend = await eng.compose(AGENT, A, { to: 'stranger@evil.example', subject: 's', text: 'the numbers' });
+  eng.stop();
+  return { conv, convOut, comp, all, link, draft, send, compSend };
+}
+{
+  const r = await ccReachLeg(null, 'head');
+  ok(!r.conv.ok && r.conv.code === 'bad-proposal' && r.conv.why === 'cc' && /whole account/.test(r.conv.error) && r.convOut.n === 0 && !r.convOut.sent && r.convOut.asks === 0 && !r.comp.ok && r.comp.code === 'not-found',
+    'verify r1 F1: an agent reaching ONE conversation (send, direct policy) proposes reply --cc <stranger> ⇒ bad-proposal / cc by name — nothing asked, created or sent (compose to the same address answers not-found)', JSON.stringify([r.conv, r.convOut, r.comp.code]));
+  ok(r.all.ok && r.all.proposal.state === 'sent' && r.all.proposal.replyEnvelope.all === true && r.link.ok && r.link.proposal.state === 'awaiting-approval' && JSON.stringify(r.link.decision.reasons) === '["links"]', 'verify r1 F1: the same agent\'s reply --all (the thread\'s own people, no added Cc) still follows the conversation\'s policy — direct; with a link in it the links guard holds it for review', JSON.stringify([r.all.proposal && r.all.proposal.state, r.link.decision]));
+  ok(r.draft.ok && r.draft.proposal.state === 'awaiting-approval' && r.draft.decision.reasons.includes('authority') && /stranger@evil/.test(r.draft.proposal.replyEnvelope.cc) && r.send.ok && r.send.proposal.state === 'sent' && r.compSend.ok && r.compSend.proposal.state === 'sent',
+    'verify r1 F1: with the account reached, --cc gets COMPOSE\'s verdict — draft authority on the account ⇒ waits (authority, the card lists the added Cc); send there + the account\'s policy direct ⇒ direct, as compose goes', JSON.stringify([r.draft.decision, r.send.proposal && r.send.proposal.state, r.compSend.proposal && r.compSend.proposal.state]));
+  const G1 = "    if (ccByAgent && !ACL.canSee(ACL.effective(ctx, { key: '', adapterId: rec.id }, accountScopeGrants(rec.id)).level)) return";
+  const G2 = "    if (ccByAgent && decision.mode === 'direct') {";
+  ok(ESRC_R6.split(G1).length === 2 && ESRC_R6.split(G2).length === 2, 'the --cc reach gate and the compose-verdict clamp are present once (the control drops exactly them)');
+  const E5 = MR6.load('src/server/channels-engine.js', ESRC_R6.replace(G1, '    if (false) return').replace(G2, '    if (false) {'), 'no-cc-gates');
+  const rc = await ccReachLeg(E5, 'ctl');
+  ok(rc.conv.ok && rc.conv.proposal.state === 'sent' && rc.convOut.sent && rc.draft.ok && rc.draft.proposal.state === 'sent', 'CONTROL: without the two gates (the lane head) the conversation-only agent\'s --cc is SENT to the stranger at once, no card — and a draft-only account row does not hold it either; the legs above would go red', JSON.stringify([rc.conv.proposal && rc.conv.proposal.state, rc.convOut, rc.draft.proposal && rc.draft.proposal.state]));
 }
 
 // ── F6: the approval names what the card SHOWED ──
@@ -1787,6 +1909,28 @@ const newestIn = (eng, conv, n = 1) => eng.store.readTail(A, conv, { limit: n })
       const row = (cls) => find(card, cls)[0] || null;
       ok(row('chan-prop-to') && row('chan-prop-cc') && row('chan-prop-subject') && row('chan-prop-to').textContent.includes('ada@example.com, brook@example.com') && row('chan-prop-cc').textContent.includes('cass@example.com, dee@example.com') && row('chan-prop-subject').textContent.includes(subject) && find(card, 'chan-prop-where').length === 1 && !find(card, 'chan-prop-where')[0].textContent.includes('cass@'),
         'F4 (real card): a composed message\'s To, Cc and Subject are EACH their own line, every address and the 70-character subject whole (the Cc used to fall off a one-line ellipsis)', JSON.stringify(['chan-prop-to', 'chan-prop-cc', 'chan-prop-subject'].map((c) => row(c) && row(c).textContent)));
+      // B-f216 (userW-forensics-2: "Gmail · New message" pressed 17 times): NO LINK LOOK WITHOUT A TARGET — a compose
+      // card with no thread yet draws its envelope as words; the only link a compose card carries is "Open the
+      // conversation", once the vendor named its thread, and it opens THAT conversation
+      const deadLinks = (c) => find(c, 'chan-prop-link').filter((e) => typeof e.onclick !== 'function');
+      const opened = [];
+      const appO = { openChannel: (a, c) => opened.push(`${a}/${c}`), openChannelOutbox() {} };
+      const env0 = find(card, 'chan-prop-env')[0];
+      const sent = CO.renderProposalCard(appO, { ...cp, id: 'p-c2', convId: 'thread-9', state: 'sent' });
+      const sentLinks = find(sent, 'chan-prop-link');
+      if (sentLinks[0] && sentLinks[0].onclick) sentLinks[0].onclick({ preventDefault() {} });
+      ok(deadLinks(card).length === 0 && find(card, 'chan-prop-link').length === 0 && env0 && env0.textContent === 'Gmail · New message' && sentLinks.length === 1 && sentLinks[0].textContent === 'Open the conversation' && opened.join() === `${A}/thread-9`,
+        'B-f216: a compose card\'s envelope is WORDS (no link look without a target); once its thread exists the ONE link opens it', JSON.stringify({ dead: deadLinks(card).map((e) => e.textContent), env: env0 && env0.textContent, sent: sentLinks.map((e) => e.textContent), opened }));
+      {
+        const pre = fs.readFileSync(path.join(REPO, 'src/lib/channel-outbox.js'), 'utf-8');
+        const FIXED = "where.appendChild(el('span', 'chan-prop-env', `${p.adapterLabel || p.adapterId} · ${t('New message')}`));";
+        if (!pre.includes(FIXED)) throw new Error('control anchor missing: the compose envelope');
+        const out0 = path.join(dir, 'channel-outbox-pre-f216.mjs');
+        await esbuild.build({ stdin: { contents: pre.replace(FIXED, FIXED.replace("'chan-prop-env'", "'chan-prop-link'")), resolveDir: path.join(REPO, 'src/lib'), sourcefile: 'channel-outbox.js', loader: 'js' }, bundle: true, format: 'esm', platform: 'node', target: 'es2022', outfile: out0, logLevel: 'silent', loader: { '.css': 'text' }, plugins: [stubBuildVersion] });
+        const CO0 = await import(out0);
+        const card0 = CO0.renderProposalCard(app, { ...cp, id: 'p-c0' });
+        ok(deadLinks(card0).map((e) => e.textContent).join() === 'Gmail · New message', 'CONTROL the pre-fix card: "Gmail · New message" wears the link class with no handler — the leg above goes red', JSON.stringify(deadLinks(card0).map((e) => e.textContent)));
+      }
       // F1 / F3 / O1: a REPLY card on an envelope adapter — what it answers, who receives it, the text's hidden marks
       const rp = { id: 'p-r1', adapterId: A, adapterLabel: 'Gmail', convId: C, title: 'Ops room', state: 'awaiting-approval', text: 'please pay ‮evil', draftedBy: { kind: 'agent', id: 'agent-1', name: 'Worker' }, replyTo: null, replyAnchor: { vendorId: 'm-7', at: 1, author: { id: 'ada@example.com', name: 'Ada', isSelf: false }, excerpt: 'Can you check the nightly job?' }, replyEnvelope: { anchorId: 'm-7', to: 'Ada <ada@example.com>', cc: 'ops@example.com', subject: 'Re: Nightly job' }, sendAs: 'user', policy: { mode: 'review', reasons: ['authority'] }, at: 2, updatedAt: 2 };
       const rc = CO.renderProposalCard(app, rp, { compact: true });
@@ -1824,6 +1968,55 @@ const newestIn = (eng, conv, n = 1) => eng.store.readTail(A, conv, { limit: n })
       rcS._all().find((e) => e.dataset.approve === '1').click();
       await new Promise((r) => setTimeout(r, 0));
       ok(posts.length === n0 + 1 && posts[n0].body.shown === P.shownDigest({ ...rp, id: 'p-s' }), 'F6 (real card): an untrusted script click on a fresh card still posts (with its digest) — the hold is for a person\'s pointer');
+      // ── B-f467 (userW 2026-10-03: "no visual centre of gravity — some things I want to see at a glance"; his
+      // screenshot = the All view with a Gmail compose awaiting + a sent Lark card): ONE ROW PER PROPOSAL in the channel
+      // list's grammar; the FULL CARD (this renderer) opens under its row ──
+      const ACCTS = [{ id: 'gmail', kind: 'gmail', label: 'Gmail' }, { id: 'gmail:203365a7', kind: 'gmail', label: 'Fish' }, { id: 'gmail:87495c72', kind: 'gmail', label: 'Pandy' }, { id: 'lark', kind: 'lark', label: 'Lark / 飞书' }, { id: 'agents', kind: 'agents', label: 'Agents', builtin: true }];
+      const wc = { id: 'p-w1', adapterId: 'gmail:203365a7', adapterLabel: 'Fish', convId: null, state: 'awaiting-approval', text: '马丁，\n\n这封是用 VibeSpace 的 Channels 功能让 agent 起草的。\n\nuserW', draftedBy: { kind: 'agent', id: 'a-1', name: 'Majordomo' }, compose: { to: ['owner@example.com'], cc: [], subject: 'VibeSpace Channels 邮件测试' }, sendAs: 'user', policy: { mode: 'review', reasons: ['channel-policy', 'authority'] }, at: clock0 - 5000, updatedAt: clock0 - 5000, ttlAt: clock0 + 86400e3 };
+      const wl = { id: 'p-w2', adapterId: 'lark', adapterLabel: 'Lark / 飞书', convId: 'oc_e53d5350615a2d77bbfdf83d6075decb', title: 'userW', convKind: 'dm', state: 'sent', text: '马丁，浏览器两次更新都到了：有头模式通了。', draftedBy: { kind: 'agent', id: 'a-1', name: 'Majordomo' }, sendAs: 'user', policy: { mode: 'review', reasons: ['channel-policy'] }, at: clock0 - 9000, updatedAt: clock0 - 9000 };
+      const OB = { proposals: [wc, wl], accounts: ACCTS };
+      const toggled = [], reviewed = [];
+      const hooks = { onToggle: (id) => toggled.push(id), onReview: (id) => reviewed.push(id) };
+      const all0 = CO.outboxNodes(app, null, OB, { view: 'all', open: new Set(), ...hooks });
+      const rowsOf = (ns) => ns.filter((n) => n._cls.has('chan-orow'));
+      const R0 = rowsOf(all0.nodes);
+      const rC = R0.find((r) => r.dataset.orow === 'p-w1'), rL = R0.find((r) => r.dataset.orow === 'p-w2');
+      const txt = (root, cls) => { const e = find(root, cls)[0]; return e ? e.textContent : null; };
+      ok(R0.length === 2 && !all0.nodes.some((n) => n._cls.has('chan-prop')) && all0.nodes.filter((n) => n._cls.has('chan-outbox-sec')).length === 2,
+        'B-f467: the All view is ONE ROW per proposal under its state head — no stacked card until one is opened', JSON.stringify(all0.nodes.map((n) => n.className)));
+      ok(rC && txt(rC, 'chan-orow-title') === 'owner@example.com · VibeSpace Channels 邮件测试' && txt(rC, 'chan-orow-who') === 'owner@example.com' && txt(rC, 'chan-orow-text') === '马丁，' && txt(rC, 'chan-prop-state') === 'awaiting your approval' && txt(rC, 'chan-orow-acct') === 'Fish' && find(rC, 'chan-av-badge').length === 1 && rC._all().filter((e) => e.dataset.review === '1').length === 1 && rC.getAttribute('aria-expanded') === 'false',
+        'B-f467: the compose row says WHO receives it and WHERE in one line (the recipient, then the subject), the first line of the text, the state pill, the account (Fish — Gmail holds 3) on its badged avatar, and ONE primary: "Approve…"', JSON.stringify({ title: rC && txt(rC, 'chan-orow-title'), text: rC && txt(rC, 'chan-orow-text'), acct: rC && txt(rC, 'chan-orow-acct') }));
+      ok(rL && txt(rL, 'chan-orow-title') === 'userW' && !/oc_/.test(rL.textContent) && txt(rL, 'chan-orow-acct') === null && find(rL, 'chan-av-badge').length === 1 && rL._all().filter((e) => e.dataset.review === '1').length === 0 && txt(rL, 'chan-prop-state') === 'sent',
+        'B-f467: the sent Lark row names the person (the ladder name, never oc_…), wears the Lark badge with no account text (one Lark account), and carries no action', JSON.stringify({ title: rL && txt(rL, 'chan-orow-title') }));
+      const badgeHue = (r) => (find(r, 'chan-av-badge')[0] || { dataset: {} }).dataset.hue;
+      ok(badgeHue(rC) !== undefined && badgeHue(rL) !== undefined, 'B-f467: each row\'s avatar wears its account badge (B-5fe1)', JSON.stringify([badgeHue(rC), badgeHue(rL)]));
+      // the routing: the row toggles, Enter toggles, "Approve…" reviews (and never toggles)
+      rC.onclick({ target: rC });
+      rC.onkeydown({ target: rC, key: 'Enter', preventDefault() {} });
+      rC._all().find((e) => e.dataset.review === '1').click();
+      ok(JSON.stringify(toggled) === '["p-w1","p-w1"]' && JSON.stringify(reviewed) === '["p-w1"]', 'B-f467: a click or Enter on the row opens / closes its card; "Approve…" asks to REVIEW (open the card, focus its Approve) and does not toggle', JSON.stringify({ toggled, reviewed }));
+      // open: the FULL card under its row; the row is the SAME element, patched (aria-expanded), never rebuilt
+      const listN = new N('div');
+      for (const n of all0.nodes) listN.appendChild(n);
+      const all1 = CO.outboxNodes(app, listN, OB, { view: 'all', open: new Set(['p-w1']), ...hooks });
+      const iRow = all1.nodes.findIndex((n) => n.dataset && n.dataset.orow === 'p-w1');
+      const card1 = all1.nodes[iRow + 1];
+      ok(all1.nodes[iRow] === rC && rC.getAttribute('aria-expanded') === 'true' && rC._cls.has('chan-orow-open') && card1 && card1._cls.has('chan-prop') && card1.dataset.proposal === 'p-w1' && find(card1, 'chan-prop-to').length === 1 && find(card1, 'chan-prop-meta').length === 1 && card1._all().some((e) => e.dataset.approve === '1'),
+        'B-f467: an opened row keeps its element (patched open) and its FULL card follows it — envelope, meta, the real Approve (the one renderer, two densities)', JSON.stringify(all1.nodes.map((n) => n.className)));
+      const aw = CO.outboxNodes(app, listN, OB, { view: null, open: new Set(), ...hooks });
+      ok(aw.view === 'awaiting' && rowsOf(aw.nodes).length === 1 && rowsOf(aw.nodes)[0] === rC && rC.getAttribute('aria-expanded') === 'false', 'B-f467: the Awaiting view (the first view while one waits) lists the awaiting row — the same element, closed again', JSON.stringify({ view: aw.view, n: aw.nodes.length }));
+      // PRE-FIX CONTROL: the base list (a full card per proposal) — the row legs above would be red
+      const OS = fs.readFileSync(path.join(REPO, 'src/lib/channel-outbox.js'), 'utf-8');
+      const ROWPUSH = "    nodes.push(keyedRow(app, p, rows.get(p.id) || null, { badge: badges.get(p.adapterId) || null, open: isOpen, onToggle, onReview }));\n    if (isOpen) nodes.push(keyedCard(app, p, cards.get(p.id) || null));\n";
+      ok(OS.split(ROWPUSH).length === 2, 'CONTROL setup: the row push is spelled once');
+      // the copy lives in this section's own scratch dir, its relative imports made absolute (esbuild bundles it)
+      const srcF = path.join(dir, 'channel-outbox-bf467-base.js');
+      fs.writeFileSync(srcF, OS.replace(ROWPUSH, '    nodes.push(keyedCard(app, p, cards.get(p.id) || null));\n').replace(/from '\.\/([^']+)'/g, (_, f) => `from '${path.join(REPO, 'src/lib', f)}'`).replace(/from '\.\.\/([^']+)'/g, (_, f) => `from '${path.join(REPO, 'src', f)}'`));
+      const outF = path.join(dir, 'channel-outbox-base.mjs');
+      await esbuild.build({ entryPoints: [srcF], bundle: true, format: 'esm', platform: 'node', target: 'es2022', outfile: outF, logLevel: 'silent', loader: { '.css': 'text' }, plugins: [stubBuildVersion] });
+      const COF = await import(outF);
+      const allF = COF.outboxNodes(app, null, OB, { view: 'all', open: new Set(), ...hooks });
+      ok(rowsOf(allF.nodes).length === 0 && allF.nodes.filter((n) => n._cls.has('chan-prop')).length === 2, 'CONTROL: the base list draws a full stacked card per proposal and no row — the B-f467 legs would be red', JSON.stringify(allF.nodes.map((n) => n.className)));
     } finally { Date.now = realNow; }
   }
   for (const [k, d] of Object.entries(saved)) { try { if (d) Object.defineProperty(globalThis, k, d); else delete globalThis[k]; } catch {} }

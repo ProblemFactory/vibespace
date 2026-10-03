@@ -1640,6 +1640,67 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       ok(res3 && res3.status === 'ran', '…and a boot with nothing manual is a success');
     }
   }
+  // ── 2026-10-design-kit-removed (lane design-docs: the Design window replaces the Claude CLI's /design kit) ──
+  {
+    console.log('2026-10-design-kit-removed');
+    const ID = '2026-10-design-kit-removed';
+    const runOnly = (mm, r) => runMigrations({ ledgerPath: path.join(r, 'data', 'migrations.json'), migrations: mm.MIGRATIONS.filter((x) => x.id === ID), log: () => { }, warn: () => { } });
+    const mkRoot = (tag) => { const r = path.join(tmp, 'dk-' + tag); fs.mkdirSync(path.join(r, 'data'), { recursive: true }); return r; };
+    const put = (f, text) => { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, text); };
+    // (a) the shape the kit left: one dir per CLI version, three files each — and the neighbours that must survive
+    const r1 = mkRoot('dir');
+    const kit = path.join(r1, 'data', 'design-kit');
+    for (const v of ['2.1.238', '2.1.274']) for (const [n, t] of [['SKILL.md', 'x'.repeat(100)], ['seed-canvas.mjs', 'y'.repeat(40)], ['payload.template.html', 'z'.repeat(1000)]]) put(path.join(kit, v, n), t);
+    put(path.join(r1, 'data', 'designs.json'), '{"designs":[]}');
+    put(path.join(r1, 'data', 'published-pages', 'pgabc.html'), '<html>canvas</html>');
+    put(path.join(r1, 'data', 'design-kit-notes.txt'), 'a neighbour whose name starts the same');
+    const outside = path.join(tmp, 'dk-outside'); put(path.join(outside, 'keep.txt'), 'never followed');
+    fs.symlinkSync(outside, path.join(kit, '2.1.274', 'linked'));   // a link INSIDE the kit
+    const mm1 = create({ rootDir: r1, homeDir: scratchHomeDir, serverNotice: () => { } });
+    ok(mm1.MIGRATIONS.some((x) => x.id === ID), 'registered as a ledger-keyed one-shot');
+    const res1 = runOnly(mm1, r1).find((x) => x.id === ID);
+    ok(res1 && res1.status === 'ran' && !fs.existsSync(kit), 'data/design-kit/ is gone (the extracted vendor kit — deleted, not archived)', res1);
+    ok(res1.report && res1.report.removed === true && res1.report.kind === 'dir' && res1.report.versions === 2 && res1.report.files === 7 && res1.report.bytes >= 2280, 'the report counts what went: 2 versions, 6 files + 1 link, the bytes (it rides the ledger)', res1 && res1.report);
+    ok(fs.readFileSync(path.join(outside, 'keep.txt'), 'utf8') === 'never followed', 'a link inside the kit is removed as a link — what it pointed at is untouched');
+    ok(fs.existsSync(path.join(r1, 'data', 'designs.json')) && fs.readFileSync(path.join(r1, 'data', 'published-pages', 'pgabc.html'), 'utf8') === '<html>canvas</html>' && fs.existsSync(path.join(r1, 'data', 'design-kit-notes.txt')), 'everything else in data/ is untouched — the published canvases stay on /p/<id>, a look-alike name stays');
+    ok(!fs.readdirSync(path.join(r1, 'data')).some((f) => /archive/.test(f)), 'nothing is archived (keeping a copy of the vendor text is the thing to stop)');
+    ok(JSON.parse(fs.readFileSync(path.join(r1, 'data', 'migrations.json'), 'utf8')).reports[ID].versions === 2, 'the ledger keeps the report beside the timestamp');
+    ok(runOnly(create({ rootDir: r1, homeDir: scratchHomeDir, serverNotice: () => { } }), r1).find((x) => x.id === ID).status === 'already', 'run-at-most-once (the ledger)');
+    // (b) nothing there
+    const r2 = mkRoot('none');
+    const res2 = runOnly(create({ rootDir: r2, homeDir: scratchHomeDir, serverNotice: () => { } }), r2).find((x) => x.id === ID);
+    ok(res2 && res2.status === 'ran' && res2.report.removed === false && res2.report.why === 'absent' && !fs.existsSync(path.join(r2, 'data', 'design-kit')), 'no kit on disk ⇒ ran, nothing created');
+    // (c) a SYMLINK at data/design-kit: unlinked, never followed
+    const r3 = mkRoot('link');
+    const target = path.join(tmp, 'dk-target'); put(path.join(target, 'SKILL.md'), 'the target survives');
+    fs.symlinkSync(target, path.join(r3, 'data', 'design-kit'));
+    const res3 = runOnly(create({ rootDir: r3, homeDir: scratchHomeDir, serverNotice: () => { } }), r3).find((x) => x.id === ID);
+    let linkGone = false; try { fs.lstatSync(path.join(r3, 'data', 'design-kit')); } catch (e) { linkGone = e.code === 'ENOENT'; }
+    ok(res3 && res3.status === 'ran' && res3.report.kind === 'symlink' && linkGone && fs.readFileSync(path.join(target, 'SKILL.md'), 'utf8') === 'the target survives', 'a link at data/design-kit is unlinked — the directory it named is never entered', res3 && res3.report);
+    // (c2) a link at data/design-kit that NAMES data/published-pages (L4 B④): unlinked, the pages behind it untouched
+    const r3b = mkRoot('link-pages');
+    put(path.join(r3b, 'data', 'published-pages', 'pgxyz.html'), '<html>kept</html>');
+    fs.symlinkSync(path.join(r3b, 'data', 'published-pages'), path.join(r3b, 'data', 'design-kit'));
+    const res3b = runOnly(create({ rootDir: r3b, homeDir: scratchHomeDir, serverNotice: () => { } }), r3b).find((x) => x.id === ID);
+    let linkGone2 = false; try { fs.lstatSync(path.join(r3b, 'data', 'design-kit')); } catch (e) { linkGone2 = e.code === 'ENOENT'; }
+    ok(res3b && res3b.status === 'ran' && res3b.report.kind === 'symlink' && linkGone2 && fs.readFileSync(path.join(r3b, 'data', 'published-pages', 'pgxyz.html'), 'utf8') === '<html>kept</html>' && fs.readdirSync(path.join(r3b, 'data', 'published-pages')).length === 1, 'a link at data/design-kit pointing AT data/published-pages is unlinked — the pages behind it are never entered, nothing of them removed', res3b && res3b.report);
+    // (d) a failure is retried next boot (never recorded, the notice names it)
+    if (typeof process.getuid === 'function' && process.getuid() === 0) ok(true, 'SKIP — running as root: a read-only parent does not refuse root');
+    else {
+      const r4 = mkRoot('fail');
+      put(path.join(r4, 'data', 'design-kit', '2.1.274', 'SKILL.md'), 'x');
+      const ver = path.join(r4, 'data', 'design-kit', '2.1.274');
+      fs.chmodSync(ver, 0o555);   // its file cannot be unlinked
+      const notices = [];
+      const mm4 = create({ rootDir: r4, homeDir: scratchHomeDir, serverNotice: (k, t) => notices.push([k, t]) });
+      const res4 = mm4.runLocalMigrations().find((x) => x.id === ID);
+      const led4 = JSON.parse(fs.readFileSync(path.join(r4, 'data', 'migrations.json'), 'utf8'));
+      ok(res4 && res4.status === 'failed' && !(led4.applied || {})[ID] && notices.some(([k]) => k === 'migration-failed:' + ID), 'a removal the disk refuses FAILS (not recorded; the server notice names it) — retried next boot', res4);
+      fs.chmodSync(ver, 0o755);
+      const res4b = runOnly(create({ rootDir: r4, homeDir: scratchHomeDir, serverNotice: () => { } }), r4).find((x) => x.id === ID);
+      ok(res4b && res4b.status === 'ran' && !fs.existsSync(path.join(r4, 'data', 'design-kit')), '…and the next boot finishes it');
+    }
+  }
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true });
 }

@@ -142,6 +142,7 @@ async function signalProc(hostId, pidRaw, sigRaw) {
   if (!Number.isFinite(pid) || pid <= 1) throw new Error('invalid pid');
   if (!hostId) {
     if (pid === process.pid) throw new Error('that is the VibeSpace server itself — restart it via Update / systemctl, not a kill');
+    if (sig !== 'STOP') { try { require('./unexpected-exit').markAskedByPid(pid, 'user-signal', { refreshOnly: sig === 'CONT' }); } catch { } } // B-f698 verify r1: a user kill is never "unexpected"; r2: a CONT delivers a TERM sent while STOPped — it refreshes the mark
     try { process.kill(pid, 'SIG' + sig); } catch (e) {
       if (e.code === 'ESRCH') throw new Error('no such process (already gone)');
       if (e.code === 'EPERM') throw new Error("permission denied (another user's process)");

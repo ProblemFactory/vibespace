@@ -109,13 +109,16 @@ export function createStashStrip({ sessionId }) {
     const held = Number(summary && summary.held) || 0;
     const reachable = summary && typeof summary.reachable === 'boolean' ? summary.reachable : true;
     const armed = !!(summary && summary.armed);
-    const key = summary && summary.count ? summaryDigest(summary) + '|' + billed + '|' + inFlight + '|' + held + '|' + reachable + '|' + armed + '|' + previewDigest(summary) : '';
+    // B-c198: "your next message" is false while a turn runs — the words say "after this turn ends"; verify r1: `waiting` (paused
+    // on the user — a permission, a question) is INSIDE the turn too: the answer continues it, no UserPromptSubmit
+    const midTurn = turn === 'running' || turn === 'waiting';
+    const key = summary && summary.count ? summaryDigest(summary) + '|' + billed + '|' + inFlight + '|' + held + '|' + reachable + '|' + armed + '|' + midTurn + '|' + previewDigest(summary) : '';
     if (key === st.key) return;
     st.key = key;
     st.summary = key ? summary : null;
     if (!key) { el.hidden = true; return; }
     drawList(summary);
-    const w = stashSummaryWords(summary, t, { billed, inFlight, held, reachable, now: Date.now(), armed });   // `now`: a retrying notice names its next attempt relative to this device's clock
+    const w = stashSummaryWords(summary, t, { billed, inFlight, held, reachable, now: Date.now(), armed, midTurn });   // `now`: a retrying notice names its next attempt relative to this device's clock
     setText(head, w.head);
     setText(parts, ': ' + w.parts.join(', '));
     setText(goLabel, w.button);

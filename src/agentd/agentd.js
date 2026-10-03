@@ -289,67 +289,11 @@ function spawnEnv(extra) {
   merged.PATH = parts.join(':');
   return merged;
 }
-// ── R2 worker pool: deadline → terminate → respawn. runFs() prefers a
-// worker; if worker_threads is unavailable or the pool broke, it degrades to
-// the SAME FS_ACTIONS inline (one implementation, honest fallback). ──
-const workerPool = (() => {
-  let wt = null; try { wt = require('worker_threads'); } catch { }
-  if (!wt || !wt.isMainThread) return null;
-  const idle = [], queue = [];
-  let live = 0;
-  const SIZE = 2;
-  function spawnWorker() {
-    if (live >= SIZE) return;
-    let w;
-    try { w = new wt.Worker(__filename, { workerData: { role: 'agentd-worker' } }); } catch { return; }
-    live++;
-    w.unref();
-    w._jobs = new Map();
-    w.on('message', (m) => {
-      const j = w._jobs.get(m.id);
-      if (j) { w._jobs.delete(m.id); clearTimeout(j.t); j.resolve(m); pump(w); }
-    });
-    const die = () => {
-      live--;
-      for (const j of w._jobs.values()) { clearTimeout(j.t); j.reject(new Error('worker died')); }
-      w._jobs.clear();
-      const i = idle.indexOf(w); if (i >= 0) idle.splice(i, 1);
-      setTimeout(spawnWorker, 500).unref?.();
-    };
-    w.on('error', die); w.on('exit', die);
-    idle.push(w);
-    pump(w);
-  }
-  function pump(w) {
-    if (w._jobs.size) return; // one in-flight per worker — deadline stays attributable
-    const job = queue.shift();
-    if (!job) { if (!idle.includes(w)) idle.push(w); return; }
-    const i = idle.indexOf(w); if (i >= 0) idle.splice(i, 1);
-    w._jobs.set(job.id, job);
-    job.t = setTimeout(() => {
-      // deadline: the op is STUCK (hung mount class). Kill the whole worker —
-      // a thread wedged in a sync fs call can't be cancelled any other way.
-      w._jobs.delete(job.id);
-      job.reject(new Error('fs deadline (' + job.msg.action + ')'));
-      try { w.terminate(); } catch { }
-    }, job.timeoutMs);
-    try { w.postMessage(job.msg); } catch (e) { clearTimeout(job.t); w._jobs.delete(job.id); job.reject(e); }
-  }
-  let nextJob = 1;
-  spawnWorker(); spawnWorker();
-  return {
-    run(action, params, timeoutMs = 10000) {
-      return new Promise((resolve, reject) => {
-        const job = { id: nextJob++, msg: { id: 0, action, ...params }, timeoutMs, resolve, reject };
-        job.msg.id = job.id;
-        queue.push(job);
-        const w = idle[0];
-        if (w) pump(w); else if (live === 0) { queue.pop(); reject(new Error('no workers')); }
-      });
-    },
-    alive: () => live > 0,
-  };
-})();
+// ── R2 worker pool (src/agentd/worker-pool.js): deadline → terminate → respawn, BOUNDED (B-442c: a pool whose respawns
+// all crash — the bundle deleted under the daemon — backs off instead of doubling to 45 GB). runFs() prefers a
+// worker; if worker_threads is unavailable or the pool broke, it degrades to the SAME FS_ACTIONS inline (one
+// implementation, honest fallback). ──
+const workerPool = require('./worker-pool.js').createWorkerPool({ file: __filename, workerData: { role: 'agentd-worker' }, log: (m) => log(m) });
 async function runFs(action, params, timeoutMs) {
   if (workerPool && workerPool.alive()) {
     try {
@@ -369,6 +313,8 @@ async function runFs(action, params, timeoutMs) {
   }
   return FS_ACTIONS[action]({ action, ...params }); // honest inline fallback
 }
+// the daemon's own exits (the self-upgrade's re-exec, SIGTERM): one no fs worker blocked in the kernel can hold (verify r1)
+function exitDaemon(code) { if (workerPool) workerPool.exit(code); process.exit(code); }
 // loop-lag canary: if the DAEMON loop ever stalls, sessions are at risk —
 // log it so a regression that puts weight back on the loop is visible.
 let loopLagMax = 0;
@@ -683,7 +629,7 @@ function beginUpgrade(mux, { version, size }) {
             env: { ...daemonEnv(process.env), VIBESPACE_AGENTD_VERSION: version },
           });
           child.unref();
-          process.exit(0);
+          exitDaemon(0);
         }, 200);
       }
     },
@@ -2292,5 +2238,5 @@ const DIAL_FILE = path.join(STATE, 'dial.json');
   dial();
 })();
 
-process.on('SIGTERM', () => { log('SIGTERM — exiting (sessions unaffected by design)'); process.exit(0); });
+process.on('SIGTERM', () => { log('SIGTERM — exiting (sessions unaffected by design)'); exitDaemon(0); });
 } // end !--stdio / !--dial-check daemon body

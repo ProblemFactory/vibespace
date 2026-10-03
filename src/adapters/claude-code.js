@@ -398,7 +398,8 @@ class ClaudeCodeAdapter extends BackendAdapter {
         const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
         if (!meta.streaming) return; // Interrupt worked — no need for SIGINT
       } catch {}
-      // Still streaming after 2s → force SIGINT
+      // Still streaming after 2s → force SIGINT. The exit it may cause was ASKED for (B-f698: never respawned as unexpected)
+      session._exitAsked = { by: 'interrupt', at: Date.now() };
       try { process.kill(session._childPid, 'SIGINT'); } catch {}
     }, 2000);
   }

@@ -154,6 +154,12 @@ const CHANNELS_GATES = {
   newestStored: 'store.index',
   propose: 'convFor(',
   proposeReaction: 'convFor(',
+  // lane lark-threads: "does the log hold this message" — a boolean, never a served record; asked by the change feed's
+  // by-id fetch and rule 22's recheck, each over a conversation with an index row (the groups adapter has no feed and no
+  // separate thread listing)
+  msgHeld: { callers: ['fetchMissing', 'recheckOne'] },
+  fetchMissing: 'store.index.peek(',
+  recheckOne: 'store.index.peek(',
 };
 function groupLogCensus(src) {
   const out = { outside: [], groupsRaw: [], channelsUngated: [], channelsUnknown: [], groupsNamed: false, sites: 0 };
@@ -283,6 +289,7 @@ const ROUTES = {
   'POST /api/agent/group-admin': 'writes',              // audit entries into the Activity log; answers a brief (no progress)
   'GET /api/agent/msg/peers': 'reads',                  // another session's current status reason
   'POST /api/agent/msg/send': 'writes',
+  'POST /api/agent/msg/dispatch': 'writes',            // lane worker-dispatch: `vibespace-msg dispatch` = send --wake --compact-first (the same post as send; the compaction types /compact, no record's text) — classified at the 2.369.202 integration
   'GET /api/agent/msg/groups': 'meta',                  // names + counts; no lastText
   'GET /api/agent/msg/read': 'folded',
   'POST /api/agent/msg/group': 'writes',
@@ -324,9 +331,9 @@ const ROUTES = {
   'GET /api/agent/channels/status': 'meta',
   'GET /api/agent/docs/:topic': 'meta',                // serveAgentDoc: jobByToken (a jbt_ caller's identity) — the manual text
   'POST /api/agent/pages/publish': 'meta',             // pageAuth: jobByToken
+  'POST /api/agent/pages/unpublish': 'meta',           // lane agent-cli-fixes (B-f694): pageAuth: jobByToken — takes a page down; answers its path + name
+  'POST /api/agent/pages/visibility': 'meta',
   'GET /api/agent/pages': 'meta',
-  'GET /api/agent/design-kit': 'meta',
-  'GET /api/agent/design-kit/file/:name': 'meta',
   'POST /api/channels/:adapterId/:convId/propose': 'meta',   // wakeGuards / ownerPacer: the groups engine's pacer (a wake floor), no record
   'POST /api/channels/:adapterId/:convId/send': 'meta',
   'POST /api/channels/outbox/:id/approve': 'meta',
@@ -337,6 +344,38 @@ const ROUTES = {
   'POST /api/agent/channels/react': 'meta',            // lane channel-threads: msgCaller (the caller's identity + group ids) → a reaction PROPOSAL; no store's text
   'POST /api/agent/channels/:adapterId/:convId/thread/:msg/refresh': 'meta',   // lane channel-threads: msgCaller → the thread walk; no store's text
   'GET /api/hosts/:id/exit-access': 'meta',            // lane-pairing: the exit lists + the roster (session names, Task Group ids + titles) — no record of the five kinds
+  // ── lane design-core: the Design window's agent routes — agentCaller = jobByToken (a jbt_ caller's identity), the answer a design folder's files + the registry ──
+  'POST /api/agent/design/register': 'meta',
+  'POST /api/agent/design/changed': 'meta',
+  'POST /api/agent/design/check': 'meta',
+  'POST /api/agent/design/publish': 'meta',
+  'GET /api/agent/designs': 'meta',
+  // ── the 2.369.202 integration: lane jobs-browser's job principal — agentFacts → jobAgentFacts / refuseAgentBearer ask the
+  //    jobs store jobByToken (a jbt_ caller's identity, as the other agent routes do), never a record's text ──
+  'GET /api/agent/browser/profiles': 'meta',
+  'POST /api/agent/browser/use': 'meta',
+  'POST /api/agent/browser/resolve': 'meta',
+  'POST /api/agent/browser/resume': 'meta',
+  'POST /api/agent/browser/tab': 'meta',
+  'POST /api/agent/browser/new-child': 'meta',
+  'POST /api/agent/browser/audit': 'meta',
+  'GET /api/agent/browser/dialog': 'meta',
+  'POST /api/agent/browser/dialog': 'meta',
+  'POST /api/agent/browser/direct': 'meta',
+  'POST /api/agent/browser/site-reset': 'meta',
+  'GET /api/agent/browser/providers': 'meta',
+  'POST /api/agent/browser/new': 'meta',
+  'POST /api/agent/browser/detach': 'meta',
+  'GET /api/agent/browser/status': 'meta',
+  'POST /api/agent/browser/pin': 'meta',
+  'GET /api/agent/browser/backend': 'meta',
+  'POST /api/agent/browser/backend': 'meta',
+  'POST /api/agent/browser/blocked': 'meta',
+  'POST /api/agent/browser/site-hint': 'meta',
+  'POST /api/browser/cli/install': 'meta',             // refuseAgentBearer: an agent's token (a jbt_ through jobByToken) refused by name before anything runs
+  'GET /api/browser/session/:sessionId': 'exception: a job window\'s helper row names the JOB, its name read live off the jobs store at each GET (lane jobs-browser) — a cleared job (clearedAt) answers its id, so the clear is honoured at the read and nothing keeps the old name; the walk boots no browser keeper to list a job\'s window',
+  'POST /api/agent/channels/watch': 'meta',            // lane channel-agent-watch: agentSession (the caller's identity + its groups) → its OWN watcher row / a wake request; no record's text
+  'POST /api/agent/channels/unwatch': 'meta',
 };
 const CLASSES = new Set(['reads', 'folded', 'echo', 'writes', 'meta']);
 console.log('§C the reader surfaces: every store-touching route is classified, every reader probed by the walk');
@@ -689,7 +728,8 @@ console.log('§H the client (verify r5): storage · titles · the belt · caches
   ok(other.length === 0, 'H1 the client writes NO IndexedDB database, CacheStorage cache, service worker, cookie, window.name, URL or indexed storage slot', other);
   ok(Object.entries(STORAGE).filter(([, [c]]) => c === 'ref').map(([k]) => k).join() === "src/lib/utils.js|localStorage|'vibespace.toastHistory'", 'H1 exactly ONE key can name a record: the toast history');
   const utils = read('src/lib/utils.js');
-  ok(/h\.unshift\(\{ m: String\(message\)\.slice\(0, 500\), type, ts: Date\.now\(\), \.\.\.\(ref && ref\.kind && ref\.id \? \{ ref: \{ kind: String\(ref\.kind\), id: String\(ref\.id\) \} \} : \{\}\) \}\);/.test(utils)
+  // B-3f5d ① (lane for-you-jobs): the entry may carry `seen: true` (shown while the user acted) — a flag, no words
+  ok(/h\.unshift\(\{ m: String\(message\)\.slice\(0, 500\), type, ts: Date\.now\(\), \.\.\.\(ref && ref\.kind && ref\.id \? \{ ref: \{ kind: String\(ref\.kind\), id: String\(ref\.id\) \} \} : \{\}\), \.\.\.\(seen \? \{ seen: true \} : \{\}\) \}\);/.test(utils)
     && /_recordToast\(history && typeof history\.m === 'string' \? history\.m : message, type, history && history\.ref\);/.test(utils), 'H1 …and it keeps what the caller\'s `history.m` says (the head) + a {kind, id} ref');
   // a toast about a record passes `history` — every showToast in the surface files whose message reads a record's words
   const SURF = ['src/lib/task-log.js', 'src/lib/task-detail.js', 'src/lib/user-todos-panel.js', 'src/lib/user-todos-actions.js', 'src/lib/inbox-window.js', 'src/lib/session-props.js', 'src/lib/session-card.js', 'src/lib/sidebar-tasks.js', 'src/lib/jobs-panel.js', 'src/lib/channel-window.js', 'src/lib/channels-panel.js', 'src/lib/record-clear-ui.js'];
@@ -934,6 +974,7 @@ const BELT = [
   ['src/lib/channel-window.js', "const words = (rec.raw && rec.raw.kind && rec.raw.kind !== 'message') ? groupSysText(rec, nameOf) : (rec.text || '');", 'the menu of a message NOT cleared (both doors return on isCleared(rec)); the dialog is spent at the answer'],
   ['src/lib/channels-panel.js', 'const sig = JSON.stringify([\'g\', r.kind, r.id, r.adapterId, r.title, r.lastAt, r.unread, r.archived, r.pair, r.memberCount, r.sourceLabel, r.lastText,', 'a row SIGNATURE (never drawn): lastText + lastCleared rebuild the row'],
   ['src/lib/channels-panel.js', "last.textContent = r.lastText || '';", 'overwritten on the NEXT line with clearedText() when the group\'s last line was cleared (lastCleared)'],
+  ['src/lib/channel-groups-view.js', "const text = String((rec && rec.text) || '');", 'B-ff04 groupBodyRuns: the group window calls it only for a record NOT cleared (renderGroupRecord draws clearedText() for a cleared one first)'],
   ['src/lib/channel-groups-view.js', "title: g.name || g.id, lastAt: num(g.lastAt || g.createdAt), lastText: g.lastText || '',", 'the PURE row model (data): the panel words lastCleared'],
   ['src/lib/channel-groups-view.js', "title: c.title || (typeof untitled === 'function' ? untitled(c.kind) : '') || c.id, lastAt: num(c.lastAt), lastText: c.lastText || '',", 'an ADAPTER conversation (not a group) — lark-search-poll words an untitled one (the .197 integration re-pinned the line)'],
 ];
@@ -981,6 +1022,7 @@ const CACHES = {
   'src/lib/channel-window.js|rxAskedAt': 'lane channel-threads: when each message\'s reactions were last asked (vendor id → an instant)',
   'src/lib/channel-window.js|drawn': 'THE GROUP WINDOW: vendorId → the record behind a drawn row (its menu) — re-set from the broadcast\'s cleared records; an adapter window: vendor ids (Set)',
   'src/lib/channel-window.js|seen': 'vendor ids already drawn',
+  'src/lib/channel-window.js|known': 'B-ff04: a member\'s conversation id → the last NAME the log knew it by (author / mention / raw.name) — names, never words',
   'src/lib/channel-window.js|clearedSeen': 'vendorId → a record a broadcast said was CLEARED (the sentence) — r5 ⑧',
   'src/lib/channels-panel.js|COLLAPSED': 'folded section keys',
   'src/lib/channels-panel.js|EXPANDED': 'expanded section keys',
@@ -990,6 +1032,7 @@ const CACHES = {
   'src/lib/channels-panel.js|memoSeen': 'keys drawn this pass',
   'src/lib/channels-panel.js|boxes': 'section containers by key',
   'src/lib/channels-panel.js|boxSeen': 'keys drawn this pass',
+  'src/lib/session-props.js|ownedJobsMemo': 'conversation id → the owned-jobs rows of its last /api/jobs read (B-70f9 ②: id, name, clearedAt, state) — dropped on every jobs-updated (a clear\'s included) and re-asked; a cleared job paints clearedText() (G2, for-you-jobs verify r1)',
   'src/lib/session-props.js|browserSessionCounts': 'query → a count of browser sessions',
   'src/lib/sidebar-tasks.js|_pendingTaskBinds': 'webuiId → Task Group ids to bind',
   'src/lib/jobs-layout.js|ATTENTION_FAILED': 'a constant set of states',
@@ -1085,6 +1128,7 @@ const ORDER = [
   ['src/lib/sidebar-rail.js', "fetchJson('/api/channel-groups').then((r) => { if (r && Array.isArray(r.groups)) this._railChanBadge(", null, 'counts', 'the rail badge: the groups\' unread counts — no message words'],
   ['src/lib/channel-group-dialogs.js', "const r = await fetchJson('/api/channel-groups/roster');", null, 'no-words', 'the invite roster: live sessions (ids + their own names) — no group message'],
   ['src/lib/user-todos-actions.js', 'const p = fetchJson(`/api/user-todos/${encodeURIComponent(id)}`).then((r) => {', /^[^\n]*\n(?:(?![^\n]*fullById\.set)[^\n]*\n){0,4}?\s*if \(isCleared\(byId\(id\)\) \|\| \(r && r\.item && isCleared\(r\.item\)\)\) return/, 'recheck', 'ensureDetail: the live record AND the answer are asked isCleared after the GET, before the detail is kept — a detail cleared while it was on its way is never kept'],
+  ['src/lib/session-props.js', "fetchJson('/api/jobs').then((r) => {", /^[^\n]*\n\s*if \(gen !== ownedJobsGen\) return;/, 'generation', 'the owned-jobs list (B-70f9 ②): every jobs-updated bumps ownedJobsGen and drops the memo — a read begun before a clear is discarded, the repaint asks again (G2, for-you-jobs verify r1)'],
   ['src/lib/user-todos-actions.js', "if (connected) { const g0 = gen; fetchJson('/api/user-todos')", /^fetchJson\('\/api\/user-todos'\)\.then\(\(d\) => \{ if \(d\?\.todos && gen === g0\) setTodos\(d\.todos\);/, 'generation', 'the For-you reconnect resync: a list older than a snapshot the model applied meanwhile is dropped (r5 ⑧)'],
   ['src/lib/user-todos-actions.js', "fetchJson('/api/user-todos').then((d) => { if (d?.todos && !liveSeen) setTodos(d.todos); });", /^fetchJson\('\/api\/user-todos'\)\.then\(\(d\) => \{ if \(d\?\.todos && !liveSeen\) setTodos\(d\.todos\);/, 'generation', 'the For-you first load: dropped once any broadcast was applied (liveSeen)'],
   ['src/lib/channel-window.js', 'const r = await fetchJson(`/api/channel-groups/${encodeURIComponent(groupId)}/messages?${q}`);', /^[^\n]*\n(?:(?![^\n]*(?:innerHTML|textContent|appendChild))[^\n]*\n){0,4}?\s*return \{ n: place\(recs, \{ prepend \}\) \};/, 'substitute', 'a group page goes straight to place(), which draws every record a clear broadcast named from clearedSeen, never the page\'s copy (r5 ⑧; the substitution is pinned file-wide below)'],
@@ -1324,7 +1368,7 @@ const I_CARRIERS = [
   ['lastText', 'a group\'s last line', 'src/server/groups-engine.js', 'g.lastText = RC.CLEARED_TEXT; g.lastCleared = true;'],
   ['what', 'a job event-ring line (`announced: …`)', 'src/jobs.js', "e.what = 'announced: ' + CLEARED_TEXT;"],
   ['label', 'a published service\'s port forward (`service: <the job\'s name>`)', 'src/jobs.js', "label: 'service: ' + CLEARED_TEXT"],
-  ['cardText', 'the chat card of a delivery (the transcript class; lane group-report-card: a group card rides `group` — its ring copy is re-worded by the groups door, src/normalizers.js redactGroupCards)', 'src/server/conversation-deliver.js', 'emitPeerCard?.(cid, { fromName: opts.fromName || null, text: opts.cardText || text, recorded: text, kind, ...(opts.group ? { group: opts.group } : {}) });'],
+  ['cardText', 'the chat card of a delivery (the transcript class; lane group-report-card: a group card rides `group` — its ring copy is re-worded by the groups door, src/normalizers.js redactGroupCards)', 'src/server/conversation-deliver.js', 'emitPeerCard?.(cid, { fromName: opts.fromName || null, text: opts.cardText || text, recorded: text, kind, ...(opts.channel ? { channel: opts.channel } : {}), ...(opts.group ? { group: opts.group } : {}) });'],
   // verify r8 ④: a Ports SCAN names a listener by its service's job (port-forward.js detect) and the page caches the scan
   ['service', 'a Ports scan row\'s tag: the listening service\'s JOB name (+ `serviceJob`, its id)', 'src/lib/sidebar-rail.js', 'for (const rows of this._portScanCache.values()) for (const p of rows) if (p && p.serviceJob && gone.has(String(p.serviceJob))) p.service = CLEARED_TEXT;'],
 ];
@@ -1644,6 +1688,7 @@ const I_RECV = {
   'src/accounts.js|a': ['account', 'an account'], 'src/accounts.js|target': ['account', 'an account'],
   'src/browser-profiles.js|existing': ['browser profile', 'a profile label'], 'src/browser-profiles.js|profile': ['browser profile', 'a profile label'], 'src/browser-profiles.js|row': ['browser profile', 'a profile label'],
   'src/browser-switch.js|profile': ['browser profile', 'a profile label'], 'src/browser-trace.js|profile': ['browser profile', 'a profile label'],
+  'src/channel-groups.js|c': ['member', 'B-ff04: a candidate MEMBER\'s name in the @ refusal (unknown / ambiguous-mention) — a session name, not a message'],
   'src/channel-groups.js|group': ['agent group', 'a group\'s NAME — the group, not a message (a rename\'s previous name, raw.from, is the cleared field)'],
   'src/channel-record.js|b': ['channel block', 'a render block\'s own kind word'], 'src/channel-record.js|BLOCK_LIMITS': ['constant', 'a length limit'],
   'src/desktop-apps.js|rec': ['desktop app', 'an app label'], 'src/desktop-apps.js|row': ['desktop app', 'an app label'],
@@ -1660,7 +1705,7 @@ const I_RECV = {
   'src/lib/browser-who-dialog.js|r.profile': ['browser profile', 'a profile label'],
   'src/lib/channel-account-dialogs.js|k': ['channel account', 'an integration key label'], 'src/lib/channel-account-dialogs.js|v': ['channel account', 'an account name'],
   'src/lib/channel-group-dialogs.js|group': ['agent group', 'a group\'s name'], 'src/lib/channel-outbox.js|r': ['outbox proposal', 'a send\'s refusal reason'],
-  'src/lib/channels-panel.js|r': ['count', 'a refresh answer\'s pending flag'], 'src/lib/channel-window.js|group': ['agent group', 'a group\'s name'], 'src/lib/channel-window.js|r2.proposal': ['outbox proposal', 'the channel\'s refusal of a send'],
+  'src/lib/channels-panel.js|r': ['count', 'a refresh answer\'s pending flag'], 'src/lib/channel-window.js|group': ['agent group', 'a group\'s name'], 'src/lib/channel-window.js|a': ['channel author', 'lane lark-threads: an author\'s vendor name / id in the "Set a name…" dialog\'s title (the vendor\'s, never a record\'s words)'], 'src/lib/channel-window.js|r2.proposal': ['outbox proposal', 'the channel\'s refusal of a send'],
   'src/lib/chat-view.js|msg.page': ['published page', 'a page\'s name'], 'src/lib/chat-view.js|r': ['codex sub-agent', 'an unresolved sub-agent\'s reason code'],
   'src/lib/desktop-app-launcher.js|end': ['desktop app', 'an app label'], 'src/lib/desktop-manager.js|desk': ['desktop', 'a desktop\'s name'], 'src/lib/file-explorer.js|bk': ['bookmark', 'a bookmark label'],
   'src/lib/integrations-window.js|v': ['integration', 'a key label'],
@@ -1671,7 +1716,7 @@ const I_RECV = {
   'src/lib/open-with.js|fv': ['file', 'a viewer verdict\'s app label'], 'src/lib/open-with.js|OFFICE_MODULES[fv.module]': ['file', 'an office module label'],
   'src/lib/plugin-client.js|def': ['plugin', 'a plugin window\'s label'], 'src/lib/plugin-client.js|d': ['plugin', 'a plugin\'s own notify text'],
   'src/lib/plugins-ui.js|meta': ['plugin', 'a plugin label'], 'src/lib/plugins-ui.js|p': ['plugin', 'a plugin label'], 'src/lib/plugins-ui.js|st': ['plugin', 'a plugin\'s status reason'],
-  'src/lib/reset-credit-dialog.js|p': ['account', 'an account'], 'src/lib/session-lifecycle.js|a': ['account', 'an account'], 'src/lib/session-props.js|s0': ['session', 'the session\'s own name'],
+  'src/lib/session-lifecycle.js|a': ['account', 'an account'], 'src/lib/session-props.js|s0': ['session', 'the session\'s own name'],
   'src/lib/settings-ui.js|schema': ['setting', 'a setting\'s label'], 'src/lib/sidebar-mounts.js|h': ['host', 'a machine name'], 'src/lib/sidebar-mounts.js|s': ['share', 'a share name'], 'src/lib/sidebar-mounts.js|t': ['mount token', 'a token name'],
   'src/lib/window-share.js|r': ['session', 'an agent\'s name'],
   'src/mounts.js|cb': ['mount', 'a storage label'], 'src/mounts.js|head': ['mount', 'a head file\'s name'], 'src/oauth-loopback.js|st': ['integration', 'a consent flow\'s label'],
@@ -1697,6 +1742,9 @@ const I_RECV = {
   'src/server/usage-pool-engine.js|d': ['quota', 'a pool decision\'s reason'], 'src/server/usage-pool-engine.js|hit': ['account', 'a pool member'], 'src/server/usage-pool-engine.js|restartPending': ['account', 'an account'],
   'src/server/usage-pool-engine.js|row': ['account', 'a slot transition\'s from'], 'src/server/usage-pool-engine.js|session': ['session', 'a session\'s name'], 'src/server/usage-pool-engine.js|sh': ['account', 'a lag shadow\'s from'],
   'src/server/usage-pool-engine.js|v': ['quota', 'a reset-credit verdict\'s reason'], 'src/server/usage-pool-engine.js|wr': ['quota', 'a wall reading\'s detail'],
+  // lane reset-path: the helper writer's refusal (the spend ceiling's sentence / why the helper cannot run) and the
+  // usage menu's codex ⟳ toast (codexRefreshToast — the server's numbers and refusal words, never a record's text)
+  'src/server/usage-pool-engine.js|hw': ['quota', 'the reset-credit helper writer\'s refusal detail'], 'src/lib/usage-meter.js|toast': ['quota', 'the codex refresh answer\'s one sentence'],
   'src/server/window-request.js|r': ['window', 'a share request\'s refusal reason'], 'src/server/window-request.js|s': ['session', 'a session\'s name'],
   'src/server/window-targets-engine.js|bRow': ['desktop app', 'an app label'], 'src/server/window-targets-engine.js|drec': ['desktop app', 'an app label'], 'src/server/window-targets-engine.js|e': ['window', 'a window\'s name'],
   'src/server/window-targets-engine.js|holder': ['session', 'a lease holder\'s name'], 'src/server/window-targets-engine.js|l': ['session', 'a lease\'s session name'], 'src/server/window-targets-engine.js|rec': ['desktop app', 'an app label'],
@@ -1751,11 +1799,21 @@ const I_RECV = {
   'src/server/usage-pool-engine.js|out': ['pool verdict', 'a pin\'s placement reason (the engine\'s verdict words)'],
   'src/server/usage-pool-engine.js|ds': ['pool verdict', 'a per-session switch decision (member ids and numbers)'],
   'src/server/usage-pool-engine.js|s': ['session', 'the conversation a removed member held (its own name on the For-you item) — lane pool-pin'],
+  // the 2.369.202 integration: lane reset-path's skip notices, judged by the receiver census .200 widened (r8/r9)
+  'src/server/usage-pool-engine.js|nt': ['quota', 'the reset-credit skip notice (resetCreditSkipNotice: the engine\'s own sentence + its i18n, no record\'s text) — lane reset-path'],
+  'src/server/usage-pool-engine.js|n': ['quota', 'the helper path\'s reset-credit skip notice (resetCreditSkipNotice, the same words) — lane reset-path'],
+  'src/server/unexpected-exit.js|entry': ['session', 'the restarted conversation\'s own name on its For-you item (lane unexpected-exit — composed at the 2.369.202 integration)'],
+  // lane desktop-apps-safety (composed at the 2.369.202 integration): the relaunch refusal names the driving conversation; the stop / close toasts name the app
+  'src/desktop-apps.js|lease': ['session', 'the conversation driving the window, by its session name, in the relaunch refusal'],
+  'src/lib/desktop-app-launcher.js|a': ['desktop app', 'an app label (the stop that asks LibreOffice first)'],
+  'src/lib/desktop-app-window.js|rec': ['desktop app', 'the closed file\'s app label in the window\'s toast'],
   'src/server/groups-engine.js|c': ['group-message', 'a group REPORT card (lane group-report-card): each message a member\'s report carried, drawn at the injection — the ring copy is re-worded by the groups door\'s onCleared'],
   // ── lane custom-app (apps Layer 0) ──
   'src/app-serve.js|r.refused': ['app install', 'the root script\'s refusal (a code + the machine\'s own detail line) — never a record of the five kinds'],
   'src/server/apps-engine.js|p.by': ['session', 'a proposal\'s proposer — the session\'s name on the journal line'],
   'src/server/apps-engine.js|by': ['session', 'the proposer\'s session name on the For-you item it files'],
+  'src/design-model.js|ref': ['design file', 'an image name an artboard references (a file of the design folder) in a verdict sentence — lane design-core, no record of the five kinds'],
+  'src/routes/design.js|b': ['design comment', 'the USER\'s own comment text handed to the engine (it becomes the user\'s message) — lane design-core, no record of the five kinds'],
   // ── verify r9: the receivers of the one-level alias pass (a field copied into a local, then handed to a sink) ──
   'src/agent-routes.js|req.body||{}': ['status', 'the caller\'s OWN status write (the owner\'s route / the agent\'s vibespace-status), destructured — the record itself'],
   'src/desktop-apps.js|s': ['desktop app', 'an install spec\'s label'], 'src/lib/browser-switcher.js|st.view?.profile': ['browser profile', 'a profile label'],

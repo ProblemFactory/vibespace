@@ -1,6 +1,6 @@
 # VibeSpace agent tools — the index (`vibespace-docs`)
 
-Six CLIs on your PATH. One-line teaching lives in your context injections;
+The CLIs on your PATH. One-line teaching lives in your context injections;
 each tool's FULL manual is one command away and always matches the running
 server. `vibespace-docs <topic>` prints it.
 
@@ -10,7 +10,8 @@ server. `vibespace-docs <topic>` prints it.
 | `ask` | `vibespace-ask` | file things the USER must act on (decision/input/review) into their For you tray (bottom right of their screen — call it that, never "your inbox"); resolve when answered | `vibespace-docs ask` |
 | `task` | `vibespace-task` | the Task Group memory: log finished work (progress), park deferred items (backlog), read shared group state | `vibespace-docs task` |
 | `jobs` | `vibespace-job` | background work that OUTLIVES this conversation: services/long tasks/cron, auto-notify, subscriptions, panels | `vibespace-docs jobs` |
-| `pages` | `vibespace-page` | host self-contained HTML on this VibeSpace with a share link; `kit` prepares the design-canvas kit (design requests from the chat status bar) | `vibespace-docs pages` |
+| `pages` | `vibespace-page` | host self-contained HTML on this VibeSpace with a share link (a design the user asked for: `vibespace-design`, below) | `vibespace-docs pages` |
+| `design` | `vibespace-design` | designs, mockups, screens: plain-HTML artboards in a folder of this conversation, shown live in the user's Design window; their comments reach you as `[Design comment]` messages; `publish` makes one shareable page (asks first) — the manual carries the craft rules too | `vibespace-docs design` |
 | `exit` | `vibespace-exit` | borrow a paired machine's network for a single command (region/VPN/fixed-IP egress), or run a command ON it (as the machine's user, ≤ 30 s; the MACHINE picks the shell — cmd.exe on Windows, sh elsewhere) — only machines the user opened to THIS conversation (`list` says network yes/no · commands yes/ask/no; "ask" waits ≤ 60 s for the user's Allow); a refusal names what is missing and that the user can allow it under "Who can use it"; a command that could not start says why; `runs` lists your own runs with their output heads; Background Work jobs cannot use exits | `vibespace-docs exit` |
 | `window` | `vibespace-window` | a NATIVE app as a target: only the windows the user SHARED with you (or you opened with `open`) — the user's shared browser included; each shared in TREE mode (accessibility tree + @refs) or PIXEL mode (screenshot + click --at / type / key / scroll); plus, behind the user's real-desktop switch, their own desktop's applications (marked YOUR DESKTOP, tree verbs only) | `vibespace-docs window` |
 | `browser` | `vibespace-browser` | THE browser tool: every page verb (`open` / `snapshot` / `click @ref` / `fill` …) runs in THIS conversation's own browser (ephemeral, watched, shown live to the user); named profiles + handles for logins that survive; raw CDP / identity flags refused by name | `vibespace-docs browser` |
@@ -24,6 +25,7 @@ server. `vibespace-docs <topic>` prints it.
 - A process/schedule must survive this conversation → `vibespace-job` (never nohup/systemd/harness-cron).
 - Turn-scoped waits → your harness's background Bash; in-session continuation → `/goal`.
 - Need a native desktop app (not a web page) → `vibespace-window list` (windows the user shared with you) or `vibespace-window open <app>`, then `snapshot` / `click @ref` — or, in pixel mode, `screenshot` / `click --at x,y` (`vibespace-docs window`); `not_exposed` = not shared with you: ask the user; a node without an action is refused, never faked; YOUR DESKTOP rows (the user's switch) allow tree verbs only.
+- Asked for a design, a mockup or screens → `vibespace-docs design` (the CLI and the craft rules), then `vibespace-design new <slug>`; every screen is a plain HTML file the user watches in the Design window.
 - Need a web page → `vibespace-browser open <url>`, then `snapshot` and `click @ref` / `fill @ref "…"`; the browser is this conversation's own, so `close --all` is safe, and a login you perform does not survive — `vibespace-browser new <label>` + `use <label>` for one that does (`vibespace-docs browser`).
 
 ## Shared rules

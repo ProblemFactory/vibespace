@@ -41,6 +41,8 @@ const { peerOriginOf } = require('./message-manager'); // peerOriginOf = peerDis
 const fs = require('fs');
 const path = require('path');
 const { sliceTextWindow } = require('./text-window.js'); // PURE: the attach slab (the claude normalizer's twin)
+const { refOf: channelRefOf } = require('./channel-ref.js'); // PURE (B-c127): a channel notice's conversation — `peerChannel`
+const { turnPreviewOf } = require('./assistant-note.js'); // PURE (B-40f8): THE preview of a user turn
 const { groupOf: groupCardOf } = require('./group-card.js'); // PURE (lane group-report-card): a group message's card facts — `peerGroup`
 
 function asArray(v) { return Array.isArray(v) ? v : []; }
@@ -197,10 +199,7 @@ class AcpMessageManager {
       const ti = m.turnIndex ?? 0;
       if (ti === last) continue;
       const entry = { turnIndex: ti, startIdx: i, ts: m.ts, role: m.role };
-      if (m.role === 'user') {
-        const raw = (m.content || []).map((b) => b.text || '').join('').trim();
-        if (raw) entry.preview = raw.length > 10 ? `${raw.slice(0, 10)}…` : raw;
-      }
+      if (m.role === 'user') Object.assign(entry, turnPreviewOf(m)); // B-40f8: THE preview rule
       turns.push(entry);
       last = ti;
     }
@@ -227,7 +226,7 @@ class AcpMessageManager {
   }
 
   /** Server-side peer card (same shape as the claude/codex twins). */
-  injectPeerCard({ fromName, text, kind = null, group = null, exitRun = null }) {
+  injectPeerCard({ fromName, text, kind = null, group = null, exitRun = null, channel = null }) {
     const body = String(text || '').trim();
     if (!body) return null;
     this._currentRk = null;
@@ -239,6 +238,8 @@ class AcpMessageManager {
     msg.peerFrom = fromName && String(fromName).trim() ? String(fromName).trim() : null; // a name is its words, never surrounding whitespace (lane S3)
     if (kind === 'notification' || kind === 'peer') msg.peerVia = kind; // the PATH the card's words took (S3 verify F3)
     if (exitRun && typeof exitRun === 'object') msg.exitRun = exitRun;   // lane-exit-run-output E3: the run's output block (bounded by the producer)
+    const cr = channelRefOf(channel);   // B-c127: a channel notice's conversation — the card's one-click link
+    if (cr) msg.peerChannel = cr;
     const gc = groupCardOf(group);   // lane group-report-card: sender → group, a peer's words
     if (gc) { msg.peerGroup = gc; msg.peerVia = 'peer'; msg.peerFrom = gc.self ? null : (gc.from || msg.peerFrom); }
     this._emit({ op: 'create', message: msg });
@@ -485,6 +486,8 @@ class AcpMessageManager {
       msg.originKind = 'peer-message';
       msg.peerFrom = from;
       if (via) msg.peerVia = via;
+      const cr = channelRefOf(rec.peer.channel);   // B-c127: the channel notice's conversation (its name is the card's link)
+      if (cr) msg.peerChannel = cr;
       this._lastPromptText = text;
       if (emit) this._emit({ op: 'create', message: msg });
       return;

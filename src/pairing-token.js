@@ -35,4 +35,15 @@ function tokenMatches(token, hash) {
   return crypto.timingSafeEqual(Buffer.from(tokenHash(token), 'hex'), Buffer.from(hash, 'hex'));
 }
 
-module.exports = { KINDS, mintToken, tokenHash, tokenMatches };
+/**
+ * Is `presented` (what a request carries) the very `secret` a record holds RAW — a session's `vsst_` token
+ * (`s.agentToken`), the OTel exporter's per-boot header (B-8dda, 2026-10-02: eight lookups compared them with `===`)?
+ * The same constant-time compare: the secret's digest through tokenMatches, so neither its length nor the first
+ * differing character shows; a missing / empty side is `false`. scripts/test-architecture.mjs §68 holds the census.
+ */
+function sameToken(presented, secret) {
+  if (typeof secret !== 'string' || !secret) return false;
+  return tokenMatches(presented, tokenHash(secret));
+}
+
+module.exports = { KINDS, mintToken, tokenHash, tokenMatches, sameToken };

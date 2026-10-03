@@ -9,7 +9,8 @@
 //     `active-sessions` frames (display-only: 40 sessions — three under 运维管理, four under Studio大开发, two on
 //     another machine, one shell, the rest loose) — every row the suite PICKS is a real live session;
 //   · zh at 1280×800 (the panel window 860 px), DejaVu Sans (the Actions runner's face), `vs-onboarded` pre-set:
-//     ① the row reads 我的所有会话, has NO <select>, and 更改… is the house text button;
+//     ① the row reads 所有 agent (lane everyone-principal: the All chip — the old 我的所有会话), has NO <select>, and 更改…
+//        is the house text button;
 //     ② mirror-193's recipe: a write lands while the panel's copy is HELD stale (its housekeeping answers replayed) — the
 //        dialog still draws the SERVER's list (a fresh GET …/use);
 //     ③ type "Studio" ⇒ the Task Group row comes first; two groups picked with the keyboard (↓ Enter), one session with the
@@ -23,6 +24,9 @@
 //        empty list would take + the empty list refused): each a real line (glyph drawn, sentence in its own span, inside
 //        the dialog, never over the other / the remote line / the footer); an in-page control puts the sentence back in
 //        the glyph's span and the judge fails it;
+//     ⑩ (lane everyone-principal, 2026-10-02) ALL AGENTS picked, zh: the dialog's FIRST row (no radios any more) picked with
+//        a real mouse beside a list ⇒ its chip first, the kept sentence, ONE PATCH {mode:'all', who:[the list]}, the row
+//        reads 所有 agent（另有 1 行）; re-opened with All + the kept row picked; its chip's ✕ ⇒ {mode:'only'} = the list restored;
 //     ⑧ ja and en once each; the RECT CENSUS at 860 px (the panel) and 360 px (the dialog on a phone: picker rows ≥ 40 px,
 //        chips ≥ 36 px, nothing past its cell or the viewport, no sideways scroll).
 // Artifacts: PNG + JSON per leg under <tmpdir>/vibespace-who-shots/run-<pid>-<time>/ (the newest three kept;
@@ -350,14 +354,14 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
   const chipsOf = (p, sel) => p.ev(`[...document.querySelectorAll(${J(sel)})].filter((e) => getComputedStyle(e).display !== 'none').map((e) => ({ key: e.dataset.key, name: (e.querySelector('.pp-chip-name, .bprof-who-name') || e).textContent.trim() }))`);
   const useNow = async () => (await api('GET', `/api/browser/profiles/${WORK}/use`)).json;
   try {
-    // ═══ ① zh at 1280×800: the row reads 我的所有会话, NO <select>, 更改… the house text button ═══
+    // ═══ ① zh at 1280×800: the row reads 所有 agent, NO <select>, 更改… the house text button ═══
     console.log('— ① zh: the panel row');
     await p1.load('zh', 1280, 800);
     ok(await p1.openPanel(), '① the Agent browser panel shows the row "work" with its who cell');
     const who0 = await p1.text(`${ROW} .bprof-who-all`);
     const sel0 = await p1.ev(`document.querySelectorAll('.bprof select').length`);
     const chg = await p1.ev(`(() => { const b = document.querySelector('${ROW} .bprof-who-change'); return b ? { text: b.textContent, cls: b.className } : null; })()`);
-    ok(who0 === '我的所有会话' && sel0 === 0 && chg && chg.text === '更改…' && /\bmounts-btn\b/.test(chg.cls) && !/file-tool-btn/.test(chg.cls), `① the row reads "${who0}", the panel has NO <select> (${sel0}), and "${chg && chg.text}" is the house text button (${chg && chg.cls})`);
+    ok(who0 === tr('zh', 'All agents') && sel0 === 0 && chg && chg.text === '更改…' && /\bmounts-btn\b/.test(chg.cls) && !/file-tool-btn/.test(chg.cls), `① the row reads "${who0}", the panel has NO <select> (${sel0}), and "${chg && chg.text}" is the house text button (${chg && chg.cls})`);
     await p1.shot('01-zh-row-all', `${ROW}`);
 
     // ═══ ② the panel's copy HELD stale while a write lands — the dialog draws the SERVER's list ═══
@@ -367,14 +371,15 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     const w1 = await api('PATCH', `/api/browser/profiles/${WORK}`, { use: { mode: 'only', who: [{ kind: 'task', id: TG.ops }, { kind: 'session', key: KEY.west }] }, base: u0.base });
     await sleep(2200); // the broadcast lands, the panel reloads — and is answered with its HELD copy
     const stale = await p1.text(`${ROW} .bprof-who-all`);
-    ok(w1.status === 200 && stale === '我的所有会话', `② a write lands (only 运维管理 + Westcliff) while the panel's copy is held: the row still says "${stale}" (stale on purpose)`, w1.json);
+    ok(w1.status === 200 && stale === tr('zh', 'All agents'), `② a write lands (only 运维管理 + Westcliff) while the panel's copy is held: the row still says "${stale}" (stale on purpose)`, w1.json);
     const g0 = await gets(p1);
     ok(await p1.click(`${ROW} .bprof-who-change`), '② 更改… clicked (a real mouse)');
     const opened = await until(() => p1.ev(`!!document.querySelector('${DLG} .pp-chip')`), 8000, 60);
     const title = await p1.text(`${DLG} .dialog-header h3`);
     const chips1 = await chipsOf(p1, `${DLG} .pp-chip`);
-    const onlyChecked = await p1.ev(`!!document.querySelector('${DLG} .bwho-radio[value="only"]').checked`);
-    ok(opened && title === '谁能使用 work？' && onlyChecked && chips1.map((c) => c.name).join('|') === '运维管理|Westcliff' && (await gets(p1)) === g0 + 1, `② the dialog opens on a FRESH GET: "${title}", 仅以下会话和任务组 chosen, chips ${chips1.map((c) => c.name).join(' · ')} — the server's list, not the panel's`, { chips1, title });
+    // lane everyone-principal: no radios — the list's own chips (no All chip) ARE "only these"
+    const radios = await p1.ev(`document.querySelectorAll('${DLG} input[type="radio"]').length`);
+    ok(opened && title === '谁能使用 work？' && radios === 0 && chips1.map((c) => c.name).join('|') === '运维管理|Westcliff' && (await gets(p1)) === g0 + 1, `② the dialog opens on a FRESH GET: "${title}", no radios (${radios}), chips ${chips1.map((c) => c.name).join(' · ')} — the server's list, not the panel's (no All chip)`, { chips1, title, radios });
     await p1.ev('window.__who.holdHK = false');
     await p1.shot('02-zh-dialog-fresh', DLG);
 
@@ -383,8 +388,10 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     await p1.click(`${DLG} .pp-input`);
     await p1.type('Studio');
     await p1.frames();
-    const firstRow = await p1.ev(`(() => { const r = [...document.querySelectorAll('${DLG} .pp-list .pp-row')].find((e) => e.offsetParent); const head = r ? r.previousElementSibling : null; return r ? { key: r.dataset.key, name: r.querySelector('.pp-name').textContent, head: head && head.classList.contains('pp-sec') ? head.textContent : null } : null; })()`);
-    ok(firstRow && firstRow.key === 'task:' + TG.studio && firstRow.name === 'Studio大开发' && firstRow.head === '任务组', `③ type "Studio" ⇒ the first row is the Task Group "${firstRow && firstRow.name}" under "${firstRow && firstRow.head}"`, firstRow);
+    const firstRow = await p1.ev(`(() => { const r = [...document.querySelectorAll('${DLG} .pp-list .pp-row:not(.pp-row-everyone)')].find((e) => e.offsetParent); const head = r ? r.previousElementSibling : null; return r ? { key: r.dataset.key, name: r.querySelector('.pp-name').textContent, head: head && head.classList.contains('pp-sec') ? head.textContent : null } : null; })()`);
+    const allTop = await p1.ev(`(() => { const r = [...document.querySelectorAll('${DLG} .pp-list .pp-row')].find((e) => e.offsetParent); return r ? { key: r.dataset.key, name: r.querySelector('.pp-name').textContent } : null; })()`);
+    ok(firstRow && firstRow.key === 'task:' + TG.studio && firstRow.name === 'Studio大开发' && firstRow.head === '任务组', `③ type "Studio" ⇒ the first NAMED row is the Task Group "${firstRow && firstRow.name}" under "${firstRow && firstRow.head}"`, firstRow);
+    ok(allTop && allTop.key === 'everyone:*' && allTop.name === tr('zh', 'All agents'), `③ …and the search never hides ALL AGENTS: the list's first row is still "${allTop && allTop.name}" (↓ lands past it on the first match)`, allTop);
     await p1.key('ArrowDown', 'ArrowDown', 40); await p1.key('Enter', 'Enter', 13);
     await p1.frames();
     await p1.type('合规');
@@ -467,10 +474,53 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     await p1.click(`${DLG} .bwho-footer .mounts-btn-primary`);
     await p1.frames();
     const refusal = await p1.ev(`(() => { const l = document.querySelector('${DLG} .bwho-refusal'); return l && getComputedStyle(l).display !== 'none' ? l.textContent.trim() : ''; })()`);
-    ok(refusal === tr('zh', 'Pick at least one conversation or Task Group, or choose “All my conversations”.') && (await patches(p1)).length === n1 && (await p1.ev(`!!document.getElementById('browser-who-dialog')`)), `⑦ Save with 仅以下 and no chip is refused IN PLACE: "${refusal}" — no request, the dialog stays`);
+    ok(refusal === tr('zh', 'Pick All agents, or at least one conversation or Task Group.') && (await patches(p1)).length === n1 && (await p1.ev(`!!document.getElementById('browser-who-dialog')`)), `⑦ Save with no chip (not even All agents) is refused IN PLACE: "${refusal}" — no request, the dialog stays`);
     const n7 = await p1.notes(DLG);
     ok(n7.shown.some((x) => x.cls === 'bwho-refusal') && !n7.problems.length, `⑦ the refusal is a real line (${n7.shown.map((x) => x.cls + ' ' + x.h + ' px').join(', ')}), never over the remote line or the footer`, n7.problems);
     await p1.shot('07-zh-dialog-empty', DLG);
+
+    // ═══ ⑩ ALL AGENTS picked (zh): beside a list, kept, restored ═══
+    console.log('— ⑩ All agents picked beside a list (zh)');
+    await p1.ev(`document.getElementById('browser-who-dialog')?.remove()`);
+    const u10 = await useNow();
+    const w10 = await api('PATCH', `/api/browser/profiles/${WORK}`, { use: { mode: 'only', who: [{ kind: 'task', id: TG.ops }] }, base: u10.base });
+    ok(w10.status === 200, '⑩ the list is 运维管理 alone (written through the route)', w10.json);
+    await p1.front();
+    ok(await p1.click(`${ROW} .bprof-who-change`), '⑩ 更改…');
+    await until(() => p1.ev(`!!document.querySelector('${DLG} .pp-chip')`), 8000, 60);
+    const allRow = `${DLG} .pp-list .pp-row.pp-row-everyone`;
+    const allFacts = await p1.ev(`(() => { const r = document.querySelector('${allRow}'); const first = [...document.querySelectorAll('${DLG} .pp-list > *')][0]; return r ? { first: first === r, name: r.querySelector('.pp-name').textContent, hint: (r.querySelector('.pp-hint') || {}).textContent || '', on: r.getAttribute('aria-selected'), disabled: r.getAttribute('aria-disabled') } : null; })()`);
+    ok(allFacts && allFacts.first && allFacts.name === tr('zh', 'All agents') && allFacts.hint === tr('zh', 'every conversation, now and later') && allFacts.on === 'false' && allFacts.disabled === null, `⑩ the dialog's FIRST row: "${allFacts && allFacts.name}" · "${allFacts && allFacts.hint}", not picked, never greyed`, allFacts);
+    ok(await p1.click(allRow), '⑩ ALL AGENTS clicked (a real mouse)');
+    await p1.frames();
+    const chips10 = await chipsOf(p1, `${DLG} .pp-chip`);
+    const meaning10 = await p1.text(`${DLG} .bwho-meaning:not(.bwho-kept)`);
+    const kept10 = await p1.ev(`(() => { const l = document.querySelector('${DLG} .bwho-kept'); return l && getComputedStyle(l).display !== 'none' ? l.textContent : ''; })()`);
+    ok(chips10.map((c) => c.name).join('|') === `${tr('zh', 'All agents')}|运维管理` && meaning10 === tr('zh', 'Any of your conversations can use this browser and its logins — one browser, each conversation in its own tab.') && kept10 === tr('zh', 'The others you picked are kept for when you take All agents away.'), `⑩ the chips: ${chips10.map((c) => c.name).join(' · ')} (All first); the sentence "${meaning10}" and, on its own line, "${kept10}"`, { chips10, meaning10, kept10 });
+    await p1.shot('11-zh-dialog-all', DLG);
+    await p1.ev(`document.querySelectorAll('.global-toast').forEach((t) => t.remove())`);
+    const n10 = (await patches(p1)).length;
+    await p1.click(`${DLG} .bwho-footer .mounts-btn-primary`);
+    const toast10 = await until(() => p1.ev(`(() => { const t = [...document.querySelectorAll('.global-toast .global-toast-body')].pop(); return t ? t.textContent : null; })()`), 8000, 60);
+    const sent10 = (await patches(p1)).slice(n10);
+    const b10 = sent10[0] || {};
+    ok(sent10.length === 1 && b10.use && b10.use.mode === 'all' && J(b10.use.who) === J([{ kind: 'task', id: TG.ops }]) && toast10 === tr('zh', 'Who can use {label}: All agents', { label: 'work' }), `⑩ ONE PATCH {mode:'all', who:[运维管理]} — the list rides along, kept; the toast "${toast10}"`, { b10, toast10 });
+    const u10b = await useNow();
+    ok(u10b.use.mode === 'all' && u10b.use.who.length === 1 && u10b.use.who[0].id === TG.ops, '⑩ the server: every conversation may (all), 运维管理 KEPT beside it', u10b.use);
+    const row10 = await until(async () => { const v = await p1.text(`${ROW} .bprof-who-all`); return v === tr('zh', 'All agents ({n} more rows)', { n: 1 }) ? v : null; }, 8000, 120);
+    ok(!!row10, `⑩ the panel row reads "${row10}" — All first, the kept row counted`);
+    ok(await p1.click(`${ROW} .bprof-who-change`), '⑩ 更改… again');
+    await until(() => p1.ev(`!!document.querySelector('${DLG} .pp-chip')`), 8000, 60);
+    const chips10b = await chipsOf(p1, `${DLG} .pp-chip`);
+    ok(chips10b.map((c) => c.name).join('|') === `${tr('zh', 'All agents')}|运维管理`, `⑩ re-opened: ${chips10b.map((c) => c.name).join(' · ')} — All and the kept row picked`, chips10b);
+    ok(await p1.click(`${DLG} .pp-chip[data-key="everyone:*"] .pp-chip-x`), '⑩ All\'s chip removed with its × (a real mouse)');
+    await p1.frames();
+    const n10b = (await patches(p1)).length;
+    await p1.click(`${DLG} .bwho-footer .mounts-btn-primary`);
+    await until(() => p1.ev(`!document.getElementById('browser-who-dialog')`), 8000, 60);
+    const b10b = (await patches(p1)).slice(n10b)[0] || {};
+    const u10c = await useNow();
+    ok(b10b.use && b10b.use.mode === 'only' && u10c.use.mode === 'only' && J(u10c.use.who.map((w) => w.id)) === J([TG.ops]), '⑩ taking All away restores EXACTLY the kept list (only 运维管理) — never a silent loss of the rows', { b10b, use: u10c.use });
 
     // ═══ ⑧ the RECT CENSUS at 860 px (the panel) + the dialog at 1280 ═══
     console.log('— ⑧ the rect census');
@@ -506,14 +556,14 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     await p2.shot('08-zh-dialog-360', DLG);
 
     // ═══ ⑧ ja and en once each ═══
-    for (const [lang, want] of [['ja', { title: 'work を使える会話', all: '自分のすべての会話', only: '次の会話とタスクグループだけ', change: '変更…', ph: '会話やタスクグループを追加…' }], ['en', { title: 'Who can use work?', all: 'All my conversations', only: 'Only these', change: 'Change…', ph: 'Add a conversation or Task Group…' }]]) {
+    for (const [lang, want] of [['ja', { title: 'work を使える会話', all: 'すべてのエージェント', change: '変更…', ph: '会話やタスクグループを追加…' }], ['en', { title: 'Who can use work?', all: 'All agents', change: 'Change…', ph: 'Add a conversation or Task Group…' }]]) {
       console.log(`— ⑧ ${lang}`);
       await p1.load(lang, 1280, 800);
       await p1.openPanel();
       const c = await p1.text(`${ROW} .bprof-who-change`);
       await p1.click(`${ROW} .bprof-who-change`);
       await until(() => p1.ev(`!!document.querySelector('${DLG} .pp-chip')`), 8000, 60);
-      const got = { title: await p1.text(`${DLG} .dialog-header h3`), all: await p1.text(`${DLG} .bwho-answer:first-of-type .bwho-answer-head`), only: await p1.text(`${DLG} .bwho-answer:nth-of-type(2) .bwho-answer-head`), change: c, ph: await p1.ev(`document.querySelector('${DLG} .pp-input').placeholder`) };
+      const got = { title: await p1.text(`${DLG} .dialog-header h3`), all: await p1.text(`${DLG} .pp-list .pp-row-everyone .pp-name`), change: c, ph: await p1.ev(`document.querySelector('${DLG} .pp-input').placeholder`) };
       const rL = await p1.rects({ pairs: [[DLG, '.pp-chip, button, .bwho-answer, .pp-input'], [`${DLG} .pp-list`, '.pp-row', { h: true }]], viewport: true });
       ok(J(got) === J(want) && !rL.problems.length, `⑧ ${lang}: ${J(got)}`, { got, want, problems: rL.problems });
       await p1.shot(`09-${lang}-dialog`, DLG);

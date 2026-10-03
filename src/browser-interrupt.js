@@ -30,7 +30,7 @@
  */
 
 const INTERRUPTED_CODE = 'browser_interrupted';
-const HEAD = 'The user took over this browser — your operation was interrupted';
+const HEAD = 'The user took over your window of this browser — your operation was interrupted'; // lane browser-windows: one window, the others run on
 const TAIL = 'Wait for the handback, then run it again.';
 /** THE sentence (the owner's three facts: taken over, interrupted, run it again after the handback). */
 const INTERRUPTED_TEXT = `${HEAD}. ${TAIL}`;
@@ -187,8 +187,10 @@ const whoOf = (label, target = 'browser') => (label ? `the "${label}" ${target =
  *    then run them again."   ·   "The user took over your browser; nothing of yours was running there. Wait for
  *    the handback before using it again."
  */
-function takeoverText({ label = null, n = 0, verbs = [], target = 'browser' } = {}) {
-  const who = whoOf(label, target);
+function takeoverText({ label = null, n = 0, verbs = [], target = 'browser', shared = false } = {}) {
+  // lane browser-windows (U2): the window the user took; verify r2 ⑦ (r1 LOW 6): a lease still in the SHARED window of an older
+  // browser run is told so — its tab is taken WITH that window, it never had a window of its own
+  const who = target !== 'window' && label ? (shared ? `the shared window of the "${label}" browser (your tab is in it)` : `your window of the "${label}" browser`) : whoOf(label, target);
   const k = Math.max(0, Math.floor(num(n)));
   if (!k) return `The user took over ${who}; nothing of yours was running there. Wait for the handback before using it again.`;
   return `The user took over ${who}; ${k} operation${k === 1 ? ' was' : 's were'} interrupted: ${listText(verbs)}. Wait for the handback, then run ${k === 1 ? 'it' : 'them'} again.`;

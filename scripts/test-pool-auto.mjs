@@ -53,6 +53,31 @@ ck('bucket: reset PASSED → full again (stale reading is meaningless)', bucketR
     bucketRemaining(ph, NOW) === 0 && bucketRemaining(ph, NOW + 86400 + RESET_GRACE_SEC + 1) === 100);
   ck('…while one with NO reset at all (the pre-r2 scoped dead mark) would never roll — the shape the ladder now forbids', bucketRemaining({ ...ph, resetsAt: undefined }, NOW + 30 * 86400) === 0);
 }
+// ── B-a4f1: THE ESTIMATOR'S OVERLAY WAITS FOR THE SAME MINUTE (2026-09-18 15:59:15Z) ──
+// The engine reads members through the estimator overlay (usage-pool-engine poolReadCache), and the
+// estimator re-based a weekly bucket on the bare stated instant: the grace above never saw the dead
+// bucket. Production facts: the isolated panel at 15:31:17Z read Personal Max "Current week (Fable):
+// 100% used · resets Sep 18, 8:59am" (= 15:59:00Z; the vendor's wall said 16:00:00Z); at 15:59:15Z
+// nine conversations moved onto it off a Fable-spent Lu Max and every continue was rejected.
+{
+  const EST = require(path.resolve('src/usage-estimator.js'));
+  const QM = require(path.resolve('src/quota-model.js'));
+  const { RESET_GRACE_SEC } = require(path.resolve('src/account-pool-auto.js'));
+  ck('B-a4f1: one grace, two readers — the pool exports the model\'s number', RESET_GRACE_SEC === QM.RESET_GRACE_SEC && RESET_GRACE_SEC === 60);
+  const STATED = 1789747140;
+  const pm = { fiveHour: { utilization: 0 }, sevenDay: { utilization: 0.75, resetsAt: STATED }, scopedWeekly: [{ name: 'Fable', utilization: 1, resetsAt: STATED }], fetchedAt: 1789745477183 };
+  const lu = { fiveHour: { utilization: 0.2, resetsAt: STATED + 4 * H }, sevenDay: { utilization: 0.6, resetsAt: STATED + D }, scopedWeekly: [{ name: 'Fable', utilization: 1, resetsAt: STATED + D }], fetchedAt: (STATED - 60) * 1000 };
+  const RATES = { fiveHour: { rate: 0.0028 }, sevenDay: { rate: 0.00054 }, 'scoped:fable': { rate: 0.00107 } }; // the member's learned rates (rates.json)
+  const b = (x) => (x ? { u: x.utilization, resetsAt: x.resetsAt } : null);
+  const view = (c, nowSec) => EST.overlayCache(c, EST.estimateBuckets({ anchor: { fetchedAt: c.fetchedAt, buckets: { fiveHour: b(c.fiveHour), sevenDay: b(c.sevenDay), scopedWeekly: c.scopedWeekly.map((s) => ({ name: s.name, ...b(s) })) } }, rates: RATES, costFn: () => ({ total: 0, byFamily: {} }), nowMs: nowSec * 1000, lagS: 0 }));
+  const decideAt = (nowSec) => decidePoolSwitch({ currentId: 'lu', members: [{ id: 'lu', name: 'Lu Max' }, { id: 'pm', name: 'Personal Max' }], readCache: (id) => view({ lu, pm }[id], nowSec), nowSec, explain: true });
+  const at = STATED + 15;
+  ck('B-a4f1: 15 s past a stated weekly reset the estimator does NOT re-base it — the overlay keeps the raw dead Fable bucket', view(pm, at).scopedWeekly[0].utilization === 1 && accountRemaining(view(pm, at), at).remaining === 0, JSON.stringify(view(pm, at).scopedWeekly));
+  ck('B-a4f1: …so the pool does NOT move the conversations onto Personal Max at 15:59:15Z', decideAt(at)?.to !== 'pm', JSON.stringify(decideAt(at)));
+  ck('B-a4f1: …at the grace edge it still waits (the estimator and bucketRemaining agree on the edge)', decideAt(STATED + RESET_GRACE_SEC)?.to !== 'pm');
+  ck('B-a4f1: one second past the grace the estimator rolls the week (re-based at 0, next reset a week on) and the pool moves',
+    view(pm, STATED + RESET_GRACE_SEC + 1).scopedWeekly[0].resetsAt === STATED + 7 * D && decideAt(STATED + RESET_GRACE_SEC + 1)?.to === 'pm');
+}
 ck('bucket: garbage → null', bucketRemaining({ utilization: 'x' }, NOW) === null);
 ck('account: min across 5h/7d/scoped (gate incl. 5h)', accountRemaining({ fiveHour: { utilization: 0.5, resetsAt: fut }, sevenDay: { utilization: 0.2, resetsAt: fut }, scopedWeekly: [{ name: 'Fable', utilization: 0.97, resetsAt: fut }] }, NOW).remaining === 3);
 ck('account: no data → unknown', accountRemaining({}, NOW).known === false);

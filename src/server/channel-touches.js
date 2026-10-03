@@ -33,7 +33,7 @@ const { inertFrames } = require('../channel-record.js');
  *  2 s were 200 broadcasts to every client for ONE ring entry (channel-jump verify r2). A NEW touch goes at once. */
 const BROADCAST_MS = 250;
 
-function create({ sessions = () => null, broadcast = () => {}, metaStore = () => null, accountOf = () => null, now = () => Date.now(), log = console, persistDelayMs = 1500, broadcastMs = BROADCAST_MS } = {}) {
+function create({ sessions = () => null, broadcast = () => {}, metaStore = () => null, accountOf = () => null, nameOf = () => null, now = () => Date.now(), log = console, persistDelayMs = 1500, broadcastMs = BROADCAST_MS } = {}) {
   const timers = new Map();   // webuiId → the debounced meta write
   const pendingBc = new Map(); // webuiId → {touches: Map<id, touch>, timer}: merged touches awaiting ONE broadcast
   let seq = 0;
@@ -82,9 +82,13 @@ function create({ sessions = () => null, broadcast = () => {}, metaStore = () =>
       if (!x) continue;
       let acc = null;
       try { acc = accountOf(x.adapterId) || null; } catch { acc = null; }
+      // B-c127 THE NAME LADDER: the conversation's name as the engine knows it NOW (① its title → ② a description) wins
+      // over the agent answer's `title`, which says the raw id when the conversation had no title (agentTitle's fallback)
+      let named = null;
+      try { named = x.convId ? nameOf(x.adapterId, x.convId) || null : null; } catch { named = null; }
       const t = T.normalizeTouch({
         ...x, id: mint(), at,
-        title: inert(x.title, T.TITLE_MAX),
+        title: inert(named || x.title, T.TITLE_MAX),
         account: inert(x.account || (acc && acc.label) || '', T.LABEL_MAX),
         kind: x.kind || (acc && acc.kind) || null,
         ...(x.glyph ? { glyph: inert(x.glyph, 70) } : {}),

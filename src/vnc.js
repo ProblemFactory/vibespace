@@ -29,6 +29,18 @@
  * AND /proc start time, never by the pid file (pids wrap daily on a busy box)
  * and never one it adopted. An installed server keeps the design above: its
  * desktop outlives an app-only restart and the next boot adopts it.
+ *
+ * THE DISPLAY IS TAKEN, NOT ASSUMED (B-956d, 2026-10-02). Desktop apps' X
+ * servers take the lowest free display with `-displayfd` (src/desktop-
+ * display.js), so one of them can hold :7 before the Desktop starts — and a
+ * fixed `:7` then never started at all. The configured display (VIBESPACE_VNC_
+ * DISPLAY, else the historic :7) is now the PREFERRED one: Xvnc is started on
+ * it with `-displayfd 3`, and when it is held (Xvnc exits "server already
+ * active") it is started again with `-displayfd` alone — the X server picks a
+ * free display itself, race-free. The display it reported is RECORDED in
+ * data/vnc.json `{display, port, pid, start}`; a restart that finds the port
+ * listening adopts THAT display (the desktop-singleton rung and the session
+ * run on it), never the configured name.
  */
 
 const fs = require('fs');
@@ -37,7 +49,9 @@ const net = require('net');
 const { spawn, execFileSync } = require('child_process');
 
 const VNC_PORT = parseInt(process.env.VIBESPACE_VNC_PORT || '', 10) || 5901;
-const VNC_DISPLAY = process.env.VIBESPACE_VNC_DISPLAY || ':7';
+const VNC_DISPLAY = process.env.VIBESPACE_VNC_DISPLAY || ':7'; // the PREFERRED display (B-956d) — held ⇒ -displayfd picks one
+const STATE_FILE = 'vnc.json';      // B-956d: the display the running Desktop actually took (adopted after a restart)
+const DISPLAYFD_MS = 10000;         // the X server's answer on fd 3 (measured ~40 ms for Xvfb; a bound, never a sleep)
 const VNC_GEOMETRY = process.env.VIBESPACE_VNC_GEOMETRY || '1920x1080';
 
 function which(cmd) {
@@ -64,13 +78,24 @@ function procStart(pid) {
   } catch { return null; }
 }
 
+/** B-956d: the display recorded for `port` in data/vnc.json, or null (absent, unreadable, another port, not `:N`). */
+function recordedDisplay(file, port) {
+  try {
+    const j = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return j && j.port === port && /^:\d{1,5}$/.test(String(j.display)) ? String(j.display) : null;
+  } catch { return null; }
+}
+
 class VncManager {
-  constructor({ dataDir, stopOnShutdown = false }) {
+  /** `display` / `port` / `xvncBin` default to the env / PATH (server.js passes none; the suites pass stand-ins). */
+  constructor({ dataDir, stopOnShutdown = false, display = VNC_DISPLAY, port = VNC_PORT, xvncBin = null }) {
     this._pidFile = path.join(dataDir, 'vnc.pid');
-    this.port = VNC_PORT;
-    this.display = VNC_DISPLAY;
+    this._stateFile = path.join(dataDir, STATE_FILE);
+    this.port = port;
+    this._preferred = display;
+    this.display = recordedDisplay(this._stateFile, port) || display; // B-956d: a running Desktop is on the display it TOOK
     this._starting = null; // in-flight ensureRunning promise (dedupe)
-    this._xvncBin = null;
+    this._xvncBin = xvncBin;
     this._running = false;  // last status() answer — the desktop-app keeper's `desktop-singleton` rung reads it
     this._stopOnShutdown = !!stopOnShutdown; // server.js: a throwaway (temp-dir) root — see the header
     this._own = null;       // { pid, start } of the Xvnc THIS process spawned (never an adopted one)
@@ -104,29 +129,22 @@ class VncManager {
   }
 
   async _ensureRunning() {
-    if (await portListening(this.port)) return this.status(); // adopt
+    if (await portListening(this.port)) return this.status(); // adopt — on the RECORDED display (constructor), B-956d
     const xvnc = this._findXvnc();
     if (!xvnc) throw new Error('no VNC server installed (Xtigervnc/Xvnc not on PATH)');
-    // -localhost + SecurityTypes None is safe BECAUSE the only route in is the
-    // cookie-authed WS bridge; never expose the raw port.
-    // -UseBlacklist=0 is REQUIRED, not optional: TigerVNC blacklists a source
-    // host after N unauthenticated connect-then-drop attempts (default 5,
-    // timeout doubles each strike). EVERY connection here is 127.0.0.1 (the
-    // bridge), AND our own `portListening` health probe connects+immediately
-    // destroys the socket — which TigerVNC counts as a failed attempt. A few
-    // status polls poisoned the blacklist and locked the desktop out with
-    // "Too many security failures" (real report). Auth is done by the bridge,
-    // so the blacklist protects nothing and only self-DoSes.
-    const xArgs = [this.display, '-localhost', '-SecurityTypes', 'None',
-      '-UseBlacklist', '0',
-      '-rfbport', String(this.port), '-geometry', VNC_GEOMETRY, '-depth', '24'];
-    const x = spawn(xvnc, xArgs, { detached: true, stdio: 'ignore' });
-    // an `error` with no listener is an uncaught exception = the whole server
-    // (the desktop-display.js r2 lesson: a binary gone between probe and spawn)
-    x.on('error', (e) => console.warn(`[vnc] ${path.basename(xvnc)} failed to spawn: ${e.message}`));
-    x.unref();
+    // the flags' reasons (-localhost, SecurityTypes None, -UseBlacklist 0) live on _spawnX
+    // B-956d: the preferred display first; held ⇒ the X server picks a free one itself (-displayfd)
+    let r = await this._spawnX(xvnc, this._preferred);
+    if (!r.display) {
+      console.warn(`[vnc] ${this._preferred} is not free (${r.why}) — starting the Desktop on a display the X server picks (-displayfd)`);
+      r = await this._spawnX(xvnc, null);
+    }
+    if (!r.display) throw new Error(`VNC server failed to start (${r.why})`);
+    const x = r.child;
+    this.display = r.display;
     if (x.pid) this._own = { pid: x.pid, start: procStart(x.pid) };
     try { fs.writeFileSync(this._pidFile, String(x.pid)); } catch {}
+    this._record(x.pid);
     // Wait for the RFB port, then start the desktop session on that display.
     for (let i = 0; i < 50; i++) {
       if (await portListening(this.port)) break;
@@ -135,6 +153,49 @@ class VncManager {
     if (!(await portListening(this.port))) throw new Error('VNC server failed to start');
     this._startSession();
     return this.status();
+  }
+
+  /** Start Xvnc on `display` (null = the X server picks a free one) with `-displayfd 3`: resolves `{ child, display }`
+   *  once the server wrote its display number (it is listening then), `{ display: null, why }` when it exited first
+   *  (a held display: "server already active") or never answered. -localhost + SecurityTypes None is safe BECAUSE
+   *  the only route in is the cookie-authed WS bridge; never expose the raw port. -UseBlacklist=0 is REQUIRED, not
+   *  optional: TigerVNC blacklists a source host after N unauthenticated connect-then-drop attempts (default 5,
+   *  timeout doubles each strike). EVERY connection here is 127.0.0.1 (the bridge), AND our own `portListening`
+   *  health probe connects+immediately destroys the socket — which TigerVNC counts as a failed attempt. A few status
+   *  polls poisoned the blacklist and locked the desktop out with "Too many security failures" (real report). Auth
+   *  is done by the bridge, so the blacklist protects nothing and only self-DoSes. */
+  _spawnX(xvnc, display) {
+    const xArgs = [...(display ? [display] : []), '-displayfd', '3', '-localhost', '-SecurityTypes', 'None',
+      '-UseBlacklist', '0',
+      '-rfbport', String(this.port), '-geometry', VNC_GEOMETRY, '-depth', '24'];
+    return new Promise((resolve) => {
+      let x;
+      try { x = spawn(xvnc, xArgs, { detached: true, stdio: ['ignore', 'ignore', 'ignore', 'pipe'] }); }
+      catch (e) { resolve({ child: null, display: null, why: e.message }); return; }
+      let buf = '', done = false, timer = null;
+      const finish = (v) => {
+        if (done) return; done = true; clearTimeout(timer);
+        try { x.stdio[3].destroy(); } catch {}
+        if (v.display) x.unref(); else if (x.exitCode == null && x.signalCode == null) { try { x.kill('SIGTERM'); } catch {} }
+        resolve(v);
+      };
+      timer = setTimeout(() => finish({ child: null, display: null, why: `no display number within ${DISPLAYFD_MS} ms` }), DISPLAYFD_MS);
+      x.stdio[3].on('data', (d) => { buf += d; const m = /^(\d+)\s/.exec(buf); if (m) finish({ child: x, display: `:${m[1]}` }); });
+      x.stdio[3].on('error', () => { /* the exit below answers */ });
+      x.once('exit', (code, sig) => finish({ child: null, display: null, why: `${path.basename(xvnc)} exited (${sig || `code ${code}`}) before naming a display` }));
+      // an `error` with no listener is an uncaught exception = the whole server
+      // (the desktop-display.js r2 lesson: a binary gone between probe and spawn)
+      x.on('error', (e) => { console.warn(`[vnc] ${path.basename(xvnc)} failed to spawn: ${e.message}`); finish({ child: null, display: null, why: e.message }); });
+    });
+  }
+
+  /** B-956d: the display this Desktop took, for the next boot's adoption (tmp + rename: never a half-written file). */
+  _record(pid) {
+    try {
+      const tmp = `${this._stateFile}.tmp-${process.pid}`;
+      fs.writeFileSync(tmp, JSON.stringify({ display: this.display, port: this.port, pid: pid || null, start: pid ? procStart(pid) : null, at: Date.now() }) + '\n');
+      fs.renameSync(tmp, this._stateFile);
+    } catch (e) { console.warn(`[vnc] could not record the Desktop's display (${e.message}) — a restart adopts ${this._preferred}`); }
   }
 
   /** Desktop session on the VNC display: XFCE preferred, fallbacks probed. */

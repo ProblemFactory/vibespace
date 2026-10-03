@@ -157,6 +157,7 @@ const KNOWN_CALLERS = [
   ['attach', 'src/routes/browser.js', "by: 'pin'", 'attachPin — a bare command opening the conversation\'s own pin through the keeper'],
   ['attach', 'src/routes/browser.js', "alias: req.body?.alias });", 'POST /api/agent/browser/use'],
   ['attach', 'src/routes/browser.js', 'profileId: v.attachment.profileId', 'POST /api/agent/browser/resolve — a command on an attachment'],
+  ['attach', 'src/routes/browser.js', 'profileId: jv.profileId, browserKey: f.browserKey', 'resolveForJob (lane jobs-browser) — a Background Work job\'s OWN lease in its owner conversation\'s pinned / default profile; the key is a child handle, so admission is the owner\'s (src/browser-job-principal.js)'],
   ['setPin', 'src/routes/browser.js', "origin: 'chosen'", 'pinAnswer — the ONE pin implementation (user + agent)'],
   ['setPin', 'src/ws-create.js', 'remote: !!data.hostId', 'ws create — the New Session dialog\'s explicit pick, the remote flag carried'],
   ['copyPin', 'src/ws-create.js', 'copyPin(forkParentKey, bk.key)', 'ws create — a fork\'s copy'],
@@ -171,7 +172,7 @@ const KNOWN_CALLERS = [
   const sites = CALLER_FILES.filter((f) => fs.existsSync(path.join(REPO, f))).flatMap((f) => callerSites(f, read(f)));
   const unknown = sites.filter((s) => !KNOWN_CALLERS.some(([prim, file, needle]) => prim === s.prim && file === s.file && (!needle || s.text.includes(needle))));
   const missing = KNOWN_CALLERS.filter(([prim, file, needle]) => file !== 'src/server/browser-keeper.js' && !sites.some((s) => s.prim === prim && s.file === file && s.text.includes(needle)));
-  ok(sites.length >= 10 && !unknown.length, `every caller of a lease / pin / list primitive across ${CALLER_FILES.length} files (${sites.length} calls) is KNOWN (attach ×4, setPin ×3, copyPin, restorePin, ensureEphemeral ×2, updateProfile)`, unknown.map((s) => `${s.file}:${s.line} ${s.prim}( ${s.text}`));
+  ok(sites.length >= 10 && !unknown.length, `every caller of a lease / pin / list primitive across ${CALLER_FILES.length} files (${sites.length} calls) is KNOWN (attach ×5, setPin ×3, copyPin, restorePin, ensureEphemeral ×2, updateProfile)`, unknown.map((s) => `${s.file}:${s.line} ${s.prim}( ${s.text}`));
   ok(!missing.length, '…and every known caller is still there (a moved door is a door to re-judge)', missing);
   // the raw doors: reshapeStore / _reg are never called outside the keeper, the migrations and the suites
   const rawCallers = [];
@@ -269,7 +270,7 @@ const rsrc = read('src/routes/browser.js');
   const unknownCli = [...new Set(cliCalls)].filter((c) => !(c in AGENT_ROUTES));
   ok(cliCalls.length >= 12 && !unknownCli.length, `every route the shipped CLI calls (${new Set(cliCalls).size} distinct) is a registered, walked route`, unknownCli);
   // the belt's exception: exactly ['drivers'] (owner ruling A (2)), spelled once in the PURE module
-  ok(Array.isArray(B.BELT_EXCEPTIONS) && B.BELT_EXCEPTIONS.length === 1 && B.BELT_EXCEPTIONS[0] === 'drivers' && Object.isFrozen(B.BELT_EXCEPTIONS), 'BELT_EXCEPTIONS is exactly [\'drivers\'] — the ONE stated exception (owner ruling A (2)), frozen');
+  ok(Array.isArray(B.BELT_EXCEPTIONS) && B.BELT_EXCEPTIONS.length === 0 && Object.isFrozen(B.BELT_EXCEPTIONS), 'BELT_EXCEPTIONS is EMPTY and frozen — lane browser-windows retired `$.drivers` (owner ruling A (2)\'s one exception) with the drive claim: no conversation\'s key reaches another, ever');
   // CONTROL (e): a raw agent route registered BEFORE the belt ⇒ RED naming the route and the belt line
   const early = rsrc.replace("const AGENT_PREFIX = '/api/agent/browser';", "router.get('/api/agent/browser/early', (req, res) => res.json(ctx.keeper.list()));\nconst AGENT_PREFIX = '/api/agent/browser';");
   const ve = judgeAgentRoutes(early);
@@ -280,7 +281,7 @@ const rsrc = read('src/routes/browser.js');
   const vf = judgeAgentRoutes(rawProfiles);
   ok(rawProfiles !== rsrc && vf.problems.some((p) => /GET \/api\/agent\/browser\/profiles answers without its view call/.test(p)), 'CONTROL (f): a routes copy whose /profiles answers k.list() raw is RED (the missing view named)', vf.problems);
   // CONTROL (g): a route answering through res.send ⇒ RED
-  const sendRoute = rsrc.replace("router.get('/api/agent/browser/status', (req, res) => {", "router.get('/api/agent/browser/status-raw', (req, res) => { res.send(JSON.stringify(ctx.keeper.list())); });\nrouter.get('/api/agent/browser/status', (req, res) => {");
+  const sendRoute = rsrc.replace("router.get('/api/agent/browser/status', async (req, res) => {", "router.get('/api/agent/browser/status-raw', (req, res) => { res.send(JSON.stringify(ctx.keeper.list())); });\nrouter.get('/api/agent/browser/status', async (req, res) => {"); // lane browser-recipes: the status route is async (it probes the display)
   const vg = judgeAgentRoutes(sendRoute);
   ok(sendRoute !== rsrc && vg.problems.some((p) => /status-raw.*res\.send/.test(p)) && vg.problems.some((p) => /status-raw has NO row in the walk table/.test(p)), 'CONTROL (g): a routes copy with a route answering through res.send (and no walk row) is RED twice, by name', vg.problems);
 }
@@ -472,7 +473,7 @@ async function walkAs(jj, s, { eph = aEph && aEph.profileId, helper = helperKey 
   const w = await walkAs(j, sB);
   ok([...w.routes].sort().join() === Object.keys(AGENT_ROUTES).sort().join(), `the walk drove every route of ③'s table (${w.routes.size})`, [...w.routes]);
   ok(!w.leaks.length, 'B (not admitted): no answer of any agent route names A — key, webui id, conversation id, ephemeral pid, helper pid, helper key, bs-session ids (echoes of B\'s own request excepted)', w.leaks);
-  ok(w.exceptions.length >= 1 && w.exceptions.every((h) => h.p === '/api/agent/browser/profiles'), `THE ONE EXCEPTION is present and alone: $.drivers.<profile>.browserKey names A (its agent drives it) in the profiles digest, nowhere else (${w.exceptions.length} rows)`, w.exceptions);
+  ok(w.exceptions.length === 0, `NO EXCEPTION (lane browser-windows): no $.drivers path names A anywhere any more — the drive claim it relayed is gone (${w.exceptions.length} rows)`, w.exceptions);
   // what the view (not just the belt) does: the digest's browsers map is the state only; another's ephemeral records are gone
   const d = (await j('GET', '/api/agent/browser/profiles', undefined, as(sB))).json;
   const recs = Object.values(d.browsers || {});
@@ -522,17 +523,19 @@ async function walkAs(jj, s, { eph = aEph && aEph.profileId, helper = helperKey 
   const rb = await jB('GET', '/api/agent/browser/raw', undefined, as(sB));
   const vb = judge(rb.json, '/api/agent/browser/raw', undefined);
   const hb = { leaks: vb.leaks.length, exc: vb.exceptions.length, lease: rb.json.leases.some((l) => l.browserKey === B.MASKED_KEY), driver: rb.json.rows.some((x) => x.facts && x.facts.driver === B.MASKED_KEY), started: Object.values(rb.json.browsers).some((x) => x.startedBy === 'attach ' + B.MASKED_KEY) };
-  ok(rb.status === 200 && !vb.leaks.length && vb.exceptions.length >= 1 && hb.lease && hb.driver && hb.started, 'CONTROL (h′): the REAL belt over the same raw route: every key of A masked `bk-********`, the driver masked, `startedBy` masked, the drivers exception kept — GREEN', { hb, rows: (rb.json.rows || []).map((x) => x.facts && x.facts.driver), started: Object.values(rb.json.browsers).map((x) => x.startedBy) });
+  ok(rb.status === 200 && !vb.leaks.length && vb.exceptions.length === 0 && hb.lease && hb.driver && hb.started, 'CONTROL (h′): the REAL belt over the same raw route: every key of A masked `bk-********`, the driver masked, `startedBy` masked, no exception left — GREEN', { hb, rows: (rb.json.rows || []).map((x) => x.facts && x.facts.driver), started: Object.values(rb.json.browsers).map((x) => x.startedBy) });
   const rbA = await jB('GET', '/api/agent/browser/raw', undefined, as(sA));
   ok(rbA.status === 200 && rbA.json.leases.some((l) => l.browserKey === A) && rbA.json.leases.some((l) => l.browserKey === B.MASKED_KEY), 'CONTROL (h″): the belt keeps the ASKER\'s own key in the raw answer and masks B\'s for A', rbA.json.leases.map((l) => l.browserKey));
   srvB.close();
-  // CONTROL (i): a PURE belt copy with a second exception ⇒ the walk's judge RED on it (the exception is the ONLY one)
+  // CONTROL (i): a PURE belt copy that GAINS an exception ⇒ the walk's judge RED on it (lane browser-windows: there is none)
   const bsrc = read('src/browser-profiles.js');
-  const Bx = M.load('src/browser-profiles.js', bsrc.replace("const BELT_EXCEPTIONS = Object.freeze(['drivers']);", "const BELT_EXCEPTIONS = Object.freeze(['drivers', 'leases']);"), 'two-exceptions');
+  const bsrcX = bsrc.replace("const BELT_EXCEPTIONS = Object.freeze([]);", "const BELT_EXCEPTIONS = Object.freeze(['leases']);");
+  ok(bsrcX !== bsrc, 'control: the patched belt copy gained an exception (`leases`)');
+  const Bx = M.load('src/browser-profiles.js', bsrcX, 'two-exceptions');
   const raw = { ...k.list(), me: k.statusFor(Bk) };
   const viaReal = judge(B.agentAnswerView(raw, { me: Bk, foreign: { ids: new Set(['sess-a', sA.claudeSessionId]), pids: new Set([aEph.pid, hEph.pid]) } }), '/x', undefined);
   const viaTwo = judge(Bx.agentAnswerView(raw, { me: Bk, foreign: { ids: new Set(['sess-a', sA.claudeSessionId]), pids: new Set([aEph.pid, hEph.pid]) } }), '/x', undefined);
-  ok(!viaReal.leaks.length && viaTwo.leaks.length >= 1 && viaTwo.leaks.every((h) => /^\$\.leases\[/.test(h.path)), 'CONTROL (i): a belt copy with a second exception (`leases`) hands A\'s key through it and the judge is RED there; the real belt is green over the same raw digest', viaTwo.leaks.slice(0, 3));
+  ok(!viaReal.leaks.length && viaTwo.leaks.length >= 1 && viaTwo.leaks.every((h) => /^\$\.leases\[/.test(h.path)), 'CONTROL (i): a belt copy with an exception (`leases`) hands A\'s key through it and the judge is RED there; the real belt is green over the same raw digest', viaTwo.leaks.slice(0, 3));
 
   // r4: THE BELT'S OWN EDGES — a key inside a longer token, next to a word character, in upper case, as an object KEY, in a
   // string of any length, at any depth; the asker's own family and its echoes kept. CONTROL (i″): the pre-r4 regex restored.

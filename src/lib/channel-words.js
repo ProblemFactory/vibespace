@@ -186,6 +186,7 @@ export function routeErrorText(r, { fallback = null, ruleLabel = (k) => k } = {}
  *  "Group · <title>". */
 export function principalText(p) {
   if (!p) return '';
+  if (p.kind === 'everyone') return t('All agents');   // lane everyone-principal: every conversation, now and later
   const name = p.name || p.id || '';
   return p.kind === 'group' ? t('Group · {name}', { name }) : String(name);
 }
@@ -196,7 +197,8 @@ export function accessAuthorityText(a) {
 /** How a watcher is notified, in words. */
 export function watcherHowText(w) {
   if (!w) return '';
-  const how = w.notify === 'digest' ? t('digest every {m} min', { m: w.digestMinutes }) : t('wake per batch');
+  // lane channel-agent-watch W5: a next-turn row is told on its next turn (free) — never a wake
+  const how = w.delivery === 'next-turn' ? t('on its next turn (free)') : w.notify === 'digest' ? t('digest every {m} min', { m: w.digestMinutes }) : t('wake per batch');
   return w.mode === 'filtered' ? `${how} ${t('on a filter')}` : how;
 }
 /** The name a mention-only filter waits for (`{rules:[{kind:'mention', value}]}` — the Notify dialog's "Only
@@ -271,7 +273,8 @@ export function samePrincipal(a, b) {
  */
 export function notifySentence(w, tr = t, { scope = 'conversation' } = {}) {
   if (!w || !w.principal || !(w.principal.id || w.principal.name)) return tr('Pick who gets woken.');
-  const who = w.principal.name || w.principal.id;
+  const all = w.principal.kind === 'everyone';
+  const who = all ? tr('All agents') : (w.principal.name || w.principal.id);
   const mention = w.mode === 'filtered' ? mentionOnlyName(w.filter) : null;
   const what = w.mode !== 'filtered' ? tr('every message') : mention ? tr('the messages mentioning {name}', { name: mention }) : tr('the messages matching its rule');
   const where = scope === 'account' ? tr('in this account') : scope === 'pattern' ? tr('in the conversations matching the rule') : tr('in this conversation');
@@ -279,16 +282,24 @@ export function notifySentence(w, tr = t, { scope = 'conversation' } = {}) {
   // `F.digestCap` (it delivers once per window) — the preview said "will not be woken" while it billed
   const cap = F.digestCap(w);
   if (cap <= 0) return tr('{who} will not be woken here — at most 0 times a day.', { who });
+  // ALL AGENTS (lane everyone-principal): a FAN-OUT — every running conversation, a billed turn for each, the cap
+  // counted per conversation (the engine's ledger per conversation) — said in the sentence, never folded into one
   if (w.notify === 'digest') {
-    const line = tr('{who} will get one digest every {n} minutes of {what} {where}, woken at most {cap} times a day.', { who, n: Number(w.digestMinutes) || F.DEFAULT_DIGEST_MINUTES, what, where, cap });
+    const line = all
+      ? tr('Every running conversation will get one digest every {n} minutes of {what} {where} — a billed turn for each, at most {cap} times a day each.', { n: Number(w.digestMinutes) || F.DEFAULT_DIGEST_MINUTES, what, where, cap })
+      : tr('{who} will get one digest every {n} minutes of {what} {where}, woken at most {cap} times a day.', { who, n: Number(w.digestMinutes) || F.DEFAULT_DIGEST_MINUTES, what, where, cap });
     return Number(w.dailyWakeCap) === 0 ? line + ' ' + tr('(A digest cannot be capped at 0 — it is read as 1. Set at least 1 to save.)') : line;
   }
+  if (all) return tr('Every running conversation will be woken right away for {what} {where} — a billed turn for each, at most {cap} times a day each.', { what, where, cap });
   return tr('{who} will be woken right away for {what} {where}, at most {cap} times a day.', { who, what, where, cap });
 }
 /** The two facts of a grain (or of a conversation, each principal once) on
  *  ONE line: "Access: A (may send), Group · 工作 (drafts) · Notify: A wake per
  *  batch" — "Notify: nobody" when access stands alone. */
-export function grainSummaryText({ access = [], watchers = [] } = {}) {
+export function grainSummaryText({ access: access0 = [], watchers: watchers0 = [] } = {}) {
+  // ALL AGENTS first (lane everyone-principal — the cards show the All chip first)
+  const allFirst = (list) => [...list.filter((x) => x && x.principal && x.principal.kind === 'everyone'), ...list.filter((x) => !(x && x.principal && x.principal.kind === 'everyone'))];
+  const access = allFirst(access0), watchers = allFirst(watchers0);
   const acc = access.map((a) => t('{name} ({authority})', { name: principalText(a.principal), authority: accessAuthorityText(a.authority) })).join(', ');
   const wat = watchers.map((w) => `${principalText(w.principal)} ${watcherHowText(w)}`).join(', ');
   const parts = [];
@@ -303,7 +314,7 @@ export function clampNoteText(n, which = 'max') {
 
 /** A principal's kind (agent session / Task Group) in words. */
 export function principalKindText(kind) {
-  return kind === 'group' ? t('group') : kind === 'agent' ? t('agent') : String(kind || '');
+  return kind === 'group' ? t('group') : kind === 'agent' ? t('agent') : kind === 'everyone' ? t('all agents') : String(kind || '');
 }
 
 /** A sending policy mode in words (never the raw enum). Contexted: `review`
@@ -343,6 +354,9 @@ export function groupErrorText(r) {
     case 'store-blocked': return t('A channels store file could not be read or set aside — changes are refused until it is fixed or moved (see For you)');
     // r3: a 409 that carries the fresh view has already repainted the preview
     case 'wake-count-mismatch': return r.group ? t('The group changed since the preview (a member was renamed, joined, left or changed its notify mode) — the preview is updated; review it and send again.') : t('The group changed since the preview — this would wake {n} agent(s) now. Review and send again.', { n: Number(r.wakes) || 0 });
+    // B-ff04: an @ is resolved to a member when it is SENT — one that names nobody (or two) is refused before anything is written
+    case 'unknown-mention': return t('"@{token}" is not a member of this group — pick one from the @ list (a literal @word goes in backticks)', { token: String(r.token || '') });
+    case 'ambiguous-mention': return t('"@{token}" names several members — pick the one you mean from the @ list', { token: String(r.token || '') });
     case 'bad-request': return r.error ? t('The request was refused: {error}', { error: String(r.error) }) : t('The request was refused');
     default: return (r.error && String(r.error)) || t('Request failed');
   }
@@ -352,7 +366,7 @@ export function groupErrorText(r) {
 export function notifyModeText(mode) {
   switch (mode) {
     case 'next-turn': return t('Next turn — a report, never woken');
-    case 'mention': return t('When @mentioned — wakes (billed)');
+    case 'mention': return t('Only when @mentioned — wakes (billed); nothing else is queued');
     case 'always': return t('Every message — wakes (billed)');
     case 'mute': return t('Mute — nothing');
     default: return String(mode || '');
@@ -453,7 +467,7 @@ function agoWords(at, now = Date.now(), { t = tDevice } = {}) {
 export function statusTagParts(tag, { now = Date.now(), t = tDevice } = {}) {
   if (!tag) return null;
   // never a raw id (r-verify): a principal / a reader that arrived without a display name is worded by its kind
-  const who = tag.name || (tag.kind === 'group' ? t('a Task Group') : t('an agent'));
+  const who = tag.kind === 'everyone' ? t('All agents') : tag.name || (tag.kind === 'group' ? t('a Task Group') : t('an agent'));
   const agoText = (at) => agoWords(at, now, { t });
   switch (tag.code) {
     case 'awaiting': return { ...around(t('{n} to approve', { n: tag.n || 1 }), ''), tone: 'attn', icon: 'check', title: t('An agent\'s draft here waits for your approval — open the conversation to approve, edit or reject it') };

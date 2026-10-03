@@ -135,9 +135,13 @@ const A = 'fake-poll', C = 'fake-poll-ops', KEY = `${A}/${C}`;
   ok(eng.store.index.snapshot().conversations[KEY].reachEntries.length === 0 && eng.readFor(AG, A, C, {}).code === 'not-found', 'removing the user grant hides it again');
 
   // REQUEST flow: requestable → request → For-you item → approve ⇒ exactly ONE grant
+  // lane channel-agent-watch W2: a group chat is in the account's directory by default (requestable by its title) — the
+  // uniform not-found holds for an account whose directory is off
+  await eng.setAgentDirectory(A, { groups: false });
   ok(eng.request(AG, A, C, 'why').then === undefined || true, 'request is async');
   const rq0 = await eng.request(AG, A, C, 'I need to see the ops room to answer the alert');
-  ok(rq0.code === 'not-found', 'a HIDDEN conversation cannot be requested (uniform not-found — no oracle)');
+  ok(rq0.code === 'not-found', 'a HIDDEN conversation (the account lists no titles) cannot be requested (uniform not-found — no oracle)');
+  await eng.setAgentDirectory(A, { groups: true });
   await eng.setReach(A, C, { principal: { kind: 'group', id: 'g1', name: 'Ops' }, level: 'requestable' });
   const groupBefore = JSON.stringify(eng.store.index.snapshot().conversations[KEY].reachEntries);
   ok(eng.listFor(AG).conversations.some((c) => c.key === KEY && c.level === 'requestable') && eng.readFor(AG, A, C, {}).code === 'not-found', 'requestable: listed as such, still not readable');

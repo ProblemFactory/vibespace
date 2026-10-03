@@ -258,15 +258,29 @@ console.log('⑥ the parser census — size caps + the linear pin on every new p
     ['firstLine / agentPlaceLine / agoText', (n) => ({ a: 'w '.repeat(n), b: { quote: { of: 'p', author: 'A', text: 'w "'.repeat(n), loaded: true }, thread: null }, n }), (x) => { T.firstLine(x.a, 120); T.agentPlaceLine(x.b); T.agoText(x.n, x.n * 2); }, () => { const w = 'w'.repeat(64 * 1024), q = { quote: { of: 'p', author: 'A', text: 'w "'.repeat(64 * 1024), loaded: true }, thread: { key: 't', isRoot: false } }; const a = T.firstLine(w, 120).length <= 120 && T.agentPlaceLine(q).line.length < 200; return a && capLinear((n) => ({ w: 'w'.repeat(n), q: { quote: { of: 'p', author: 'A', text: 'w "'.repeat(n), loaded: true }, thread: { key: 't', isRoot: false } } }), (x) => { T.firstLine(x.w, 120); T.agentPlaceLine(x.q); }, 64 * 1024).ok; }, false],
     ['mergeThreadStats(n replyUsers)', (n) => ({ count: 2, lastAt: 2, replyUsers: Array.from({ length: n }, (_, i) => 'u' + i) }), (x) => T.mergeThreadStats({ count: 1, lastAt: 1, participants: [] }, x), () => { const big = { count: 2, lastAt: 2, replyUsers: Array.from({ length: 2000000 }, (_, i) => 'u' + i) }; const p = T.mergeThreadStats({ count: 1, lastAt: 1, participants: [] }, big).participants.length; return p <= T.THREAD_PARTICIPANTS_MAX && capBounded((n) => ({ count: 2, lastAt: 2, replyUsers: Array.from({ length: n }, (_, i) => 'u' + i) }), (x) => T.mergeThreadStats({ count: 1, lastAt: 1, participants: [] }, x), 500000).ok; }, false],
     ['cmpRecord / chainKeyOf / keyOfRecord / paneMode', (n) => { const recs = recsChain(n); return { recs, byId: new Map(recs.map((r) => [r.vendorId, r])), n }; }, (x) => { const memo = new Map(); for (const r of x.recs) { T.keyOfRecord(r, x.byId, memo); T.chainKeyOf(r, x.byId, memo); T.cmpRecord(r, r); } T.paneMode(x.n); }, () => T.chainKeyOf({ vendorId: 'a', replyTo: 'b' }, new Map([['a', { vendorId: 'a', replyTo: 'b' }], ['b', { vendorId: 'b', replyTo: 'a' }]])) === 'a', true],
+    // lane lark-threads (A1): THE PLACE PATCH — the fold over a conversation's place lines (linear; each field's first
+    // value wins), the compaction (one line per message, the newest `max`), the verdict + the apply (constant; a 64 KiB id is no id)
+    ['foldPlaces(n place lines)', (n) => Array.from({ length: n }, (_, i) => ({ k: 'pl', msg: 'm' + (i % 2000), at: i + 1, src: 'history', threadKey: 'omt_' + i, root: null })), (x) => T.foldPlaces(x), () => T.foldPlaces([{ k: 'pl', msg: 'm', threadKey: 'k'.repeat(64 * 1024) }]).get('m').threadKey === null, true],
+    ['compactPlaces(n place lines)', (n) => Array.from({ length: n }, (_, i) => ({ k: 'pl', msg: 'm' + i, at: i + 1, src: 'history', threadKey: 'omt_' + i, root: null })), (x) => T.compactPlaces(x, 1e9), () => T.compactPlaces(Array.from({ length: 5000 }, (_, i) => ({ k: 'pl', msg: 'm' + i, at: i + 1, threadKey: 't' })), 100).length === 100, true],
+    ['widenPlace / applyPlace / placeIdOk × n', (n) => n, (n) => { for (let i = 0; i < n; i++) { T.widenPlace({}, { threadKey: 'omt_1' }, 'm'); T.applyPlace({ vendorId: 'm', threadKey: null }, { threadKey: 'omt_1' }); T.placeIdOk('omt_1'); } }, () => T.widenPlace({}, { threadKey: 'k'.repeat(64 * 1024) }, 'm') === null && T.placeIdOk('k'.repeat(T.PLACE_ID_MAX + 1)) === false && T.applyPlace({ vendorId: 'm', threadKey: 'a' }, { threadKey: 'b' }).threadKey === 'a', true],
     ['eventToSide(n-char emoji_type)', (n) => ({ event: { message_id: 'm', reaction_type: { emoji_type: 'x'.repeat(n) }, user_id: { open_id: 'u' }, action_time: '1' } }), (x) => LV.eventToSide(x, 'add'), () => R.validateSide(LV.eventToSide({ event: { message_id: 'm', reaction_type: { emoji_type: 'x'.repeat(64 * 1024) }, user_id: { open_id: 'u' }, action_time: '1' } }, 'add')).code === 'bad-key', false],
   ];
   const NOT_A_PARSER = { BY_MAX: 'a constant', QUICK_MAX: 'a constant', DIGEST_LINES_MAX: 'a constant', forAgent: 'a projection over a validated list (≤ 64 entries; covered by agentReactionsLine)', reactionText: 'one glyph or `:key:`', myRidsOf: 'a lookup over a validated snapshot (≤ 64 × 20)',
     THREAD_REPLIES_MAX: 'a constant', THREAD_HOPS_MAX: 'a constant', THREAD_PARTICIPANTS_MAX: 'a constant', QUOTE_MAX: 'a constant', AGENT_QUOTE_MAX: 'a constant', PANE_NARROW_PX: 'a constant', THREAD_KINDS: 'a constant',
     // quote-vs-topic (2026-09-28): THE classifier — a record's own fields + two Map lookups, no walk (placeOf's row times it)
-    PLACE_KINDS: 'a constant', topicOf: 'two Map lookups', placeKindOf: 'a record\'s own fields + two Map lookups (constant; placeOf calls it)' };
+    PLACE_KINDS: 'a constant', topicOf: 'two Map lookups', placeKindOf: 'a record\'s own fields + two Map lookups (constant; placeOf calls it)',
+    PLACE_ID_MAX: 'a constant (lane lark-threads)' };
   // THE METER'S OWN PROOF first: the same call measured twice agrees to the op (a count, not a clock)
+  // (lane mirror-green: the runner's Node 22 read 48363 vs 46363 here — isReactionKey's 2 000 calls, counted by V8's
+  // invocation counter, vanished once TurboFan took the function; the WARM take is pinned equal too: it was the true one)
   const det = deterministic(() => RX.compactSide(distinctKeyDeltas(2000)), FILES);
-  ok(det.ok && det.a.total > 2000, `the work meter is deterministic: compactSide over 2 000 deltas measured twice reads ${det.a.total} = ${det.b.total} ops (blocks ${det.a.blocks} + native ${det.a.native})`, det);
+  ok(det.ok && det.warm.total === det.a.total && det.a.total > 2000, `the work meter is deterministic: compactSide over 2 000 deltas measured three times reads ${det.warm.total} = ${det.a.total} = ${det.b.total} ops (blocks ${det.a.blocks} + native ${det.a.native})`, det);
+  // THE OPTIMIZER PIN (scripts/work-meter.mjs startWorkMeter): a HOT function with no inner block — its count is the
+  // invocation counter an optimized frame never bumps — still counts every call, take after take. CONTROL (f) below
+  // runs the same leg over a meter copy without the pin and reads the calls lost.
+  for (let i = 0; i < 200000; i++) R.isReactionKey('K' + (i % 50));
+  const hot = Array.from({ length: 6 }, () => measure(() => { for (let i = 0; i < 1000; i++) R.isReactionKey('K' + i); }, FILES).blocks);
+  ok(hot.every((b) => b === 1000), `the meter counts a HOT function's every call: 1 000 isReactionKey calls after 200 000 warm ones read ${hot.join(' / ')} blocks over six takes`, hot);
   const rows = [];
   for (const [name, mk, run, cap, scales, n0] of CENSUS) {
     let capOk = false; try { capOk = !!cap(); } catch (e) { capOk = false; }
@@ -329,6 +343,21 @@ const M = mutantCopies('chanrx', REPO);
   ok(mE.r > LINEAR_BOUND && mR.ok, `CONTROL (e): the pre-fix compactSide reads RED on the census's own measurement (one count — no retry, no clock) — n ${mE.n}: ${mE.w1} → ${mE.w2} ops, ×${mE.r.toFixed(2)} (the real one: ${mR.w1} → ${mR.w2}, ×${mR.r.toFixed(2)})`);
   const big = (fn) => fn(Array.from({ length: 3000 }, (_, i) => censusDelta(i, 'add', 'K' + i, 'u')))[0];
   ok(JSON.stringify(big(e.compactSide)).length > R.SIDE_LINE_MAX_BYTES && !big(e.compactSide).truncated && JSON.stringify(big(RX.compactSide)).length <= R.SIDE_LINE_MAX_BYTES, `CONTROL (e'): the pre-fix compactSide's snapshot of 3 000 keys is ${JSON.stringify(big(e.compactSide)).length} bytes, no \`truncated\` — past the ${R.SIDE_LINE_MAX_BYTES}-byte line bound the census cap asserts`);
+  // (f) the optimizer pin (lane mirror-green): the meter WITHOUT it, in a child process of its own (V8's flags are
+  // process-wide), over the hot leg above — an optimized isReactionKey's calls vanish from a take
+  const METER = 'scripts/work-meter.mjs';
+  const meterSrc = fs.readFileSync(path.join(REPO, METER), 'utf8');
+  const fSrc = meterSrc.replace("  v8.setFlagsFromString('--no-turbofan');\n  v8.setFlagsFromString('--no-maglev');\n", '');
+  const fPath = M.write(METER, fSrc, 'meter-optimizing', { esm: true });
+  const { pathToFileURL: fileUrl } = await import('node:url');
+  const hotProbe = (meterPath) => `const { startWorkMeter, measure } = await import(${JSON.stringify(fileUrl(meterPath).href)}); startWorkMeter();`
+    + ` const { createRequire } = await import('node:module'); const R = createRequire(${JSON.stringify(path.join(REPO, 'package.json'))})(${JSON.stringify(path.join(REPO, 'src/channel-record.js'))});`
+    + ` for (let i = 0; i < 200000; i++) R.isReactionKey('K' + (i % 50)); const t = [];`
+    + ` for (let k = 0; k < 12; k++) t.push(measure(() => { for (let i = 0; i < 1000; i++) R.isReactionKey('K' + i); }, ['src/channel-record.js']).blocks);`
+    + ' console.log(JSON.stringify(t));';
+  const runHot = (meterPath) => { const r = spawnSync(process.execPath, ['--input-type=module', '-e', hotProbe(meterPath)], { encoding: 'utf8', timeout: 60000 }); try { return JSON.parse(String(r.stdout).trim().split('\n').pop()); } catch { return null; } };
+  const fT = runHot(fPath), rT = runHot(path.join(REPO, METER));
+  ok(fSrc !== meterSrc && Array.isArray(fT) && fT.some((b) => b < 1000) && Array.isArray(rT) && rT.length === 12 && rT.every((b) => b === 1000), `CONTROL (f): a meter copy without the optimizer pin loses a hot function's calls — 1 000 calls read ${fT && fT.join(' / ')} (the real meter, the same child: ${rT && rT.join(' / ')})`, { fT, rT });
   for (const row of copiesCensus(M.files, M.dir, REPO, { minCopies: 5, label: 'chanrx: ' })) ok(row.pass, row.name, row.detail);
 }
 

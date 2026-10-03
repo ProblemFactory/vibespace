@@ -46,6 +46,10 @@ const SPEND_REASONS = Object.freeze({
   'stop-nudge': { turn: true, what: 'the Stop bookkeeping mini-turn' },
   'job-notification': { turn: true, what: 'a Background Work notification' },
   'peer-message': { turn: true, what: 'a message from another session' },
+  // lane worker-dispatch verify r1 ⑤ (2026-10-02): a WORKER's compaction another session asked for (`vibespace-msg
+  // dispatch`, src/server/worker-dispatch.js) — a model call nobody typed, counted against the same ceiling as the
+  // wake that follows it (the lane's r0 probe was hold-free: the compaction spent tokens the census never saw)
+  'peer-compact': { turn: true, what: "a worker's compaction asked for by another session" },
   'codex-reset-credit': { turn: false, what: 'a stored Codex rate-limit reset credit' },
   // Channels P2 (design-communication-panel §7.4): an assigned conversation's
   // matched message waking an agent through the delivery ladder. Declared in

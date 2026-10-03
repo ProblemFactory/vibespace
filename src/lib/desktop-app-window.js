@@ -135,7 +135,8 @@ import { windowLiveMode, windowModeBadge, leaseTransition, newViewerId } from '.
 import { paneState } from '../desktop-viewers.js';
 import { exitCloseVerdict, outerCloseVerdict, OUTER_CLOSE_AGAIN_MS, scaleKnobs, scaleMenuModel, renderOf, relaunchPaneCss, relaunchVerdict } from '../desktop-apps.js';
 import { memoryText } from '../runaway-guard.js';
-import { launchDpr, launchUiScale, explicitScaleLabel } from './desktop-app-launcher.js';
+import { launchDpr, launchUiScale, explicitScaleLabel, stopDesktopApp, confirmDiscard } from './desktop-app-launcher.js';
+import { startCenterVerdict } from '../office-open.js'; // B-04da ⑤ (PURE)
 import { UI_ICONS } from './icons.js';
 import { registerMenuItem } from './contributions.js';
 import { createBarFold } from './bar-fold.js'; // lane I: the strip folds into ⋯ by priority — never wraps, never overlaps
@@ -358,6 +359,7 @@ export function openDesktopApp(app, id, { syncId } = {}) {
   // seamless (round 3 lane B) — declared before the view exists (its callbacks read them)
   const lsig = winInfo._listenerCtl?.signal;
   let mainMeta = null;          // the app's main X window metadata (decorations 0 = it draws its own title bar)
+  let startCenterEnding = false; // B-04da ⑤: this window already ended its file session for the Start Center
   let viewConnected = false;    // the picture is up (the verdict pauses while it is not)
   let appIconified = false;     // the app minimized itself through its own button (restoring ours tells the display)
   let seamless = { seamless: false, why: 'ssd' };
@@ -429,6 +431,13 @@ export function openDesktopApp(app, id, { syncId } = {}) {
       if (!m.leased || m.mine || seatState() !== 'watch') return;
       const now = Date.now();
       if (now - lastHintAt > WATCH_HINT_EVERY_MS) { lastHintAt = now; showToast(m.mode === 'takeover' ? t('Another viewer holds this window') : t('Watch mode — the agent is driving; press Take over to send input'), { duration: 3500 }); }
+    }, { capture: true, signal: winInfo._listenerCtl?.signal });
+    // B-5ee0 ⑥ (cannot be fixed here): xpra hands its clipboard to ONE client — the first that asked, the active pane —
+    // so a Watch pane never receives what the app copies, and sends nothing. Copy / paste keys in Watch SAY so.
+    view.mount.addEventListener('keydown', (e) => {
+      if (seatState() !== 'watch' || !(e.ctrlKey || e.metaKey) || !/^[cvx]$/i.test(e.key || '')) return;
+      const now = Date.now();
+      if (now - lastHintAt > WATCH_HINT_EVERY_MS) { lastHintAt = now; showToast(t('Copy and paste reach only the window that drives the app — xpra gives its clipboard to one viewer. Take over to copy or paste here.'), { duration: 5000 }); }
     }, { capture: true, signal: winInfo._listenerCtl?.signal });
     lastSeat = null;
     applyViewOnly();
@@ -648,9 +657,9 @@ export function openDesktopApp(app, id, { syncId } = {}) {
   };
   const stopApp = async () => {
     stopBtn.disabled = true;
-    const r = await fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}/stop`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    const r = await stopDesktopApp(id, { name: titleText() }); // B-04da ④: LibreOffice is asked to quit first (its save prompt); "stop anyway" is the person's
     stopBtn.disabled = false;
-    if (!r || r.error) { showToast(r?.error || t('Could not stop the app'), { type: 'error' }); return; }
+    if (!r) return;
     applyRecord(r); // exited + stoppedBy ⇒ the window closes (exitCloseVerdict) — here AND on every other client from the broadcast
   };
   stopBtn.onclick = stopApp;
@@ -750,11 +759,17 @@ export function openDesktopApp(app, id, { syncId } = {}) {
   async function relaunchAt(choice, scale) {
     if (relaunching || !rec) return;
     const name = titleText();
-    const okd = await showConfirmDialog({ title: t('Relaunch {app} at {scale}×?', { app: name, scale }), message: rec && rec.browser ? t('The browser restarts at the new scale with the same profile (logins and tabs kept); unsaved page state is lost.') : t('The app restarts at the new scale; unsaved work in it is lost.'), confirmText: t('Relaunch'), danger: true });
+    // B-04da ④: LibreOffice is asked to quit first (its own save prompt) — the words say so instead of "unsaved work is lost"
+    const okd = await showConfirmDialog({ title: t('Relaunch {app} at {scale}×?', { app: name, scale }), message: rec && rec.browser ? t('The browser restarts at the new scale with the same profile (logins and tabs kept); unsaved page state is lost.') : rec && rec.office ? t('LibreOffice is asked to close first — it asks in its window about any unsaved changes, then restarts at the new scale.') : t('The app restarts at the new scale; unsaved work in it is lost.'), confirmText: t('Relaunch'), danger: !(rec && rec.office) });
     if (!okd || closed) return;
     relaunching = true;
     const geo = relaunchGeometry();
-    const r = await fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}/relaunch`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scale: choice, dpr: launchDpr(), uiScale: launchUiScale() }) });
+    const post = (force) => fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}/relaunch`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scale: choice, dpr: launchDpr(), uiScale: launchUiScale(), ...(force ? { force: true } : {}) }) });
+    let r = await post(false);
+    if (r && r.code === 'app-asked' && !closed) {
+      if (!(await confirmDiscard({ name, act: 'relaunch' })) || closed) { relaunching = false; showToast(t('{app} keeps running — answer its question in its window', { app: name }), { duration: 4000 }); return; }
+      r = await post(true);
+    }
     relaunching = false;
     if (!r || r.error || !r.app || !r.app.id) { showToast(r?.error || t('Could not relaunch the app'), { type: 'error' }); return; }
     showToast(t('{app} relaunched at {scale}×', { app: name, scale: r.app.scale }), { duration: 3500 });
@@ -774,7 +789,7 @@ export function openDesktopApp(app, id, { syncId } = {}) {
     if (view) { try { view.dispose(); } catch {} try { view.container.remove(); } catch {} }
     barFold?.dispose(); barFold = null;
     view = null; rec = null; gone = false; exitDecided = false; closeAskedAt = 0; lastSeat = null;
-    mainMeta = null; viewConnected = false; appIconified = false; applySeamless();
+    mainMeta = null; viewConnected = false; appIconified = false; startCenterEnding = false; applySeamless();
     seats = { known: false, active: null, viewers: [] }; optimistic = null; lease = null; myTag = null;
     applyMinSize(null);
     id = nextId;
@@ -800,7 +815,9 @@ export function openDesktopApp(app, id, { syncId } = {}) {
     const txt = shareable() ? shareChipText(reachView) : '';
     shareChip.textContent = txt;
     shareChip.style.display = txt ? '' : 'none';
-    const names = reachView ? reachView.rows.map((r) => r.principal.name || r.principal.id) : [];
+    // ALL AGENTS first, by its words (lane everyone-principal)
+    const rowsAll = reachView ? [...reachView.rows.filter((r) => r.principal.kind === 'everyone'), ...reachView.rows.filter((r) => r.principal.kind !== 'everyone')] : [];
+    const names = rowsAll.map((r) => (r.principal.kind === 'everyone' ? t('All agents') : r.principal.name || r.principal.id));
     shareChip.title = names.length ? t('Shared with {names} — click to change', { names: names.join(', ') }) : '';
     winInfo._desktopReach = reachView; // the raw handle the heavy suite reads
   }
@@ -902,7 +919,21 @@ export function openDesktopApp(app, id, { syncId } = {}) {
   // mousedown focus never fires for a click on the app — measured on the real rung, round 3 lane B)
   winInfo.element.addEventListener('pointerdown', () => { if (app.wm.activeWindowId !== winInfo.id) app.wm.focusWindow(winInfo.id); }, { capture: true, signal: lsig });
 
-  function onAppMain(meta) { mainMeta = meta || null; applySeamless(); }
+  /** xpra's `class-instance` ([res_name, res_class]) as strings — the protocol may carry them as bytes. */
+  const classesOf = (v) => (Array.isArray(v) ? v.map((x) => (typeof x === 'string' ? x : x && typeof x.length === 'number' ? new TextDecoder().decode(x instanceof Uint8Array ? x : Uint8Array.from(x)) : '')) : []);
+  function onAppMain(meta) {
+    mainMeta = meta || null; applySeamless();
+    // B-04da ⑤: the person closed the document from inside LibreOffice (File ▸ Close, the menu bar's ✕) and its Start
+    // Center took the window — a FILE session ends with its document (PURE startCenterVerdict; the generic row keeps its
+    // Start Center). Only the ACTIVE pane acts (one stop, never one per client); nothing is open, so the ask quits at once.
+    if (!meta || !rec || closed || startCenterEnding) return;
+    const v = startCenterVerdict({ office: rec.office || null, file: rec.file || null, classInstance: classesOf(meta['class-instance']) });
+    winInfo._desktopStartCenter = v; // the raw handle the heavy suite reads
+    if (!v.end || rec.state !== 'ready' || seatState() !== 'active') return;
+    startCenterEnding = true;
+    showToast(t('{file} was closed — LibreOffice ends with it', { file: rec.label || titleText() }), { duration: 4000 });
+    stopApp();
+  }
   /** The app's own header-bar gesture → THIS window (only the driving pane; a dialog's own drag stays the app's). */
   function onAppMoveResize(ev) {
     const a = moveResizeAction(ev && ev.direction);

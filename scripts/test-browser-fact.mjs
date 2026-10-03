@@ -284,7 +284,20 @@ console.log('— ④ the REAL keeper: factFor, the pinned delete, the unpin, the
   const before = k.factFor(BF.sessionFactsOf(s2));
   const n = R.healDanglingPins();
   const after = k.factFor(BF.sessionFactsOf(s2));
-  ok(before.differs === 'pin_gone' && n === 1 && s2._browserProfileId === null && after.differs === 'pin_cleared' && W(after).line === 'a deleted profile was deleted — its pin was cleared · running nothing', '④ the boot heal: a dangling pin (pin_gone) is cleared, the fact says so — no raw id', JSON.stringify({ before: W(before).line, after: W(after).line }));
+  ok(before.differs === 'pin_gone' && n === 1 && s2._browserProfileId === null && after.differs === 'pin_cleared' && W(after).line === 'the pinned profile was deleted — its pin was cleared · running nothing', '④ the boot heal: a dangling pin (pin_gone) is cleared, the fact says so — no raw id, and (B-160d ⑤) never "a deleted profile was deleted"', JSON.stringify({ before: W(before).line, after: W(after).line }));
+  // B-160d ⑤ CONTROL: the base's words (a labelless mark named "a deleted profile") say the word twice — the row above can go red
+  { const MU5 = mutantCopies('browser-fact-words', REPO); const fsrc = fs.readFileSync(path.join(REPO, 'src/browser-fact.js'), 'utf8');
+    const L5 = "    case 'pin_cleared': why = fact.pinCleared && fact.pinCleared.label ? t('{p} was deleted — its pin was cleared', { p: fact.pinCleared.label }) : t('the pinned profile was deleted — its pin was cleared'); break;";
+    ok(fsrc.includes(L5), 'B-160d ⑤ control setup: the pin_cleared words are found');
+    const BF0 = MU5.load('src/browser-fact.js', fsrc.replace(L5, "    case 'pin_cleared': why = t('{p} was deleted — its pin was cleared', { p: fact.pinCleared && fact.pinCleared.label ? fact.pinCleared.label : t('a deleted profile') }); break;"), 'twice');
+    const l0 = BF0.browserFactWords(after).line;
+    ok(/a deleted profile was deleted/.test(l0) && W(after).line !== l0, 'B-160d ⑤ CONTROL: the base\'s words say "' + l0 + '"');
+    // B-160d ③ / ④ — ALREADY FIXED ON THE BASE (OWNER RULING A, 2026-09-26), pinned here: a create never starts a browser (the
+    // pin opens at the agent's first bare command) and no spawn is handed a pinned directory (so no own browser sits on the
+    // deleted profile's cookies after a delete + unpin)
+    const wc = fs.readFileSync(path.join(REPO, 'src/ws-create.js'), 'utf8'), bkey = fs.readFileSync(path.join(REPO, 'src/server/browser-key.js'), 'utf8');
+    ok(!/\.(attach|start)\(\s*\{?\s*profileId/.test(wc) && !/keeper\(\)\??\.(attach|start)\(/.test(wc) && /cwd, pinnedDir: null,/.test(wc) && /pinnedDir: null \}\); \}/.test(bkey), 'B-160d ③/④ (fixed on the base by ruling A): the create path starts no browser and both env compositions pass pinnedDir: null');
+    for (const r of copiesCensus(MU5.files, MU5.dir, REPO, { label: 'B-160d ⑤ control: ' })) ok(r.pass, r.name, r.detail); }
   // the keeper's view: the own browser's last verb is stamped (pin_pending ends at the agent's next command)
   ok(typeof k.factView === 'function' && k.factView(KEY).pin && k.factView(KEY).now > 0, '④ factView is the one registry read the fact is computed over');
   // THE DELETE ROUTE over the real router: leased first (no unpin for a removal that cannot happen), then pinned, then unpin

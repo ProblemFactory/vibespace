@@ -72,7 +72,7 @@ const FIX = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/navigat
 // ═══ THE FAKE CDP BROWSERS — one per ws path (a profile's browser), shaped as measured on 0.38.1's Chrome ═══
 function fakeChromes() {
   const browsers = new Map(); // ws path → {targets: Map, jar: [], calls: [], sessions: Map}
-  const of = (p) => { if (!browsers.has(p)) browsers.set(p, { targets: new Map(), jar: [], calls: [], sessions: new Map(), clients: new Set(), shotHang: false, n: 0 }); return browsers.get(p); };
+  const of = (p) => { if (!browsers.has(p)) browsers.set(p, { targets: new Map(), jar: [], calls: [], sessions: new Map(), clients: new Set(), shotHang: false, n: 0, win: new Map(), nextWin: 1, focusWin: 1 }); return browsers.get(p); };
   const wss = new WebSocketServer({ noServer: true });
   const srv = http.createServer((req, res) => { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ Browser: 'Chrome/146.0.7000.1' })); });
   srv.on('upgrade', (req, sock, head) => wss.handleUpgrade(req, sock, head, (ws) => { ws._bpath = new URL(req.url, 'http://x').pathname; wss.emit('connection', ws); }));
@@ -88,7 +88,12 @@ function fakeChromes() {
         case 'Target.attachToTarget': { if (!b.targets.has(m.params.targetId)) return reply({ error: { code: -32602, message: 'No target' } }); const sid = `S-${m.params.targetId}-${++b.n}`; b.sessions.set(sid, { targetId: m.params.targetId, ws, enabled: false }); return reply({ result: { sessionId: sid } }); }
         case 'Page.enable': if (s) s.enabled = true; return reply({ result: {} });
         case 'Page.stopLoading': { if (b.stopRefuse > 0) { b.stopRefuse--; return reply({ error: { code: -32000, message: 'Not attached to an active page' } }); } const t = s && b.targets.get(s.targetId); if (t && t.replay) { clearTimeout(t.replay); t.replay = null; } return reply({ result: {} }); } // verify r4 #5: Chrome's transient refusal, N times
-        case 'Target.createTarget': { const tid = 'N' + (++b.n); api.addTab(ws._bpath, tid, m.params.url || 'about:blank'); return reply({ result: { targetId: tid } }); }
+        // lane site-reset-windows: THE WINDOW MODEL lane browser-windows measured (src/browser-windows.js WINDOWS_PROOF) — a `newWindow`
+        // create opens a new window (`focus:false` leaves the focus where it was), a plain create lands in the LAST ACTIVATED window,
+        // `Target.activateTarget` activates its tab's window, `Browser.getWindowForTarget` answers a live tab's window (a dead id: refused)
+        case 'Target.createTarget': { const tid = 'N' + (++b.n); const cp = m.params || {}; const wid = cp.newWindow ? ++b.nextWin : b.focusWin; if (cp.newWindow && cp.focus !== false) b.focusWin = wid; api.addTab(ws._bpath, tid, cp.url || 'about:blank', { windowId: wid }); return reply({ result: { targetId: tid } }); }
+        case 'Target.activateTarget': { if (!b.targets.has(m.params.targetId)) return reply({ error: { code: -32602, message: 'No target with given id found' } }); b.focusWin = b.win.get(m.params.targetId) || b.focusWin; return reply({ result: {} }); }
+        case 'Browser.getWindowForTarget': { if (!b.targets.has(m.params.targetId) || !b.win.has(m.params.targetId)) return reply({ error: { code: -32602, message: 'No target with given id found' } }); return reply({ result: { windowId: b.win.get(m.params.targetId), bounds: { windowState: 'normal' } } }); }
         case 'Target.closeTarget': { const t = b.targets.get(m.params.targetId); if (!t) return reply({ error: { code: -32602, message: 'No target with given id found' } }); if (t.replay) clearTimeout(t.replay); b.targets.delete(m.params.targetId); for (const c of b.clients) send(c, { method: 'Target.targetDestroyed', params: { targetId: m.params.targetId } }); return reply({ result: { success: true } }); }
         case 'Page.captureScreenshot': if (b.shotHang) return undefined; return reply({ result: { data: Buffer.from('fake-png-' + (s ? s.targetId : '?')).toString('base64') } }); // a page that never draws: no answer at all (measured)
         case 'Storage.getCookies': return reply({ result: { cookies: b.jar.map((c) => ({ ...c })) } });
@@ -99,8 +104,8 @@ function fakeChromes() {
     });
   });
   const api = {
-    srv, of,
-    addTab(bpath, targetId, url) { const b = of(bpath); b.targets.set(targetId, { info: { targetId, type: 'page', url, title: 'T ' + targetId, attached: false }, replay: null }); for (const c of b.clients) send(c, { method: 'Target.targetCreated', params: { targetInfo: b.targets.get(targetId).info } }); },
+    srv, of, windowOf: (bpath, id) => (of(bpath).win.has(id) ? of(bpath).win.get(id) : null),
+    addTab(bpath, targetId, url, { windowId = null } = {}) { const b = of(bpath); b.win.set(targetId, windowId == null ? b.focusWin : windowId); b.targets.set(targetId, { info: { targetId, type: 'page', url, title: 'T ' + targetId, attached: false }, replay: null }); for (const c of b.clients) send(c, { method: 'Target.targetCreated', params: { targetInfo: b.targets.get(targetId).info } }); },
     removeTab(bpath, targetId) { const b = of(bpath); const t = b.targets.get(targetId); if (!t) return; if (t.replay) clearTimeout(t.replay); b.targets.delete(targetId); for (const c of b.clients) send(c, { method: 'Target.targetDestroyed', params: { targetId } }); },
     pageEvent(bpath, targetId, method, params) { const b = of(bpath); for (const [sid, s] of b.sessions) if (s.targetId === targetId && s.enabled && s.ws.readyState === 1) s.ws.send(JSON.stringify({ sessionId: sid, method, params })); },
     /** replay a MEASURED event shape on a tab (its own timing; the port placeholder → the fixture host). → a promise at its end. */
@@ -292,9 +297,20 @@ try {
     await j('POST', '/api/agent/browser/direct', { profile: own.id, action: 'stop' }, as(sA));
   }
   await chrome.replay(OWNP, 'T1', LOOP);
+  // lane site-reset-windows (2.369.202, lane browser-windows): the keeper opens the conversation's tab in a WINDOW OF ITS OWN at
+  // attach, so the looping T1 is no longer the browser's only page — the close is the looping tab's alone, no blank one. The
+  // only-page rule (a browser left with no page is one the CLI cannot drive again) is judged where it applies, below
+  let cmark = chrome.of(OWNP).calls.length;
   r = await cli(sA, ['tab', 'close']);
-  const closeCalls = chrome.of(OWNP).calls.filter((c) => c.method === 'Target.closeTarget' || c.method === 'Target.createTarget');
-  ok(r.code === 0 && /^closed the looping tab/.test(r.out) && /It was the browser's only tab, so a blank one was opened in its place/.test(r.out) && closeCalls.map((c) => c.method).join() === 'Target.createTarget,Target.closeTarget' && closeCalls[1].params.targetId === 'T1', 'a bare `tab close` while it loops goes DIRECT: a blank tab first (it was the only one), then Target.closeTarget on the looping tab', { r, closeCalls });
+  let closeCalls = chrome.of(OWNP).calls.slice(cmark).filter((c) => c.method === 'Target.closeTarget' || c.method === 'Target.createTarget');
+  ok(r.code === 0 && /^closed the looping tab/.test(r.out) && !/only tab/.test(r.out) && closeCalls.map((c) => c.method).join() === 'Target.closeTarget' && closeCalls[0].params.targetId === 'T1' && chrome.of(OWNP).targets.size >= 1, 'lane site-reset-windows: a bare `tab close` while it loops goes DIRECT — Target.closeTarget on the looping tab alone: the conversation\'s own-window tab (opened at attach) stands beside it, so no blank tab is opened', { r, closeCalls, pages: [...chrome.of(OWNP).targets.keys()] });
+  for (const id of [...chrome.of(OWNP).targets.keys()]) chrome.removeTab(OWNP, id);
+  chrome.addTab(OWNP, 'T1B', 'https://app.bank.test/login'); await sleep(80);
+  await chrome.replay(OWNP, 'T1B', LOOP);
+  cmark = chrome.of(OWNP).calls.length;
+  r = await cli(sA, ['tab', 'close']);
+  closeCalls = chrome.of(OWNP).calls.slice(cmark).filter((c) => c.method === 'Target.closeTarget' || c.method === 'Target.createTarget');
+  ok(r.code === 0 && /^closed the looping tab/.test(r.out) && /It was the browser's only tab, so a blank one was opened in its place/.test(r.out) && closeCalls.map((c) => c.method).join() === 'Target.createTarget,Target.closeTarget' && closeCalls[1].params.targetId === 'T1B', 'a bare `tab close` while it loops goes DIRECT: a blank tab first (it was the only one), then Target.closeTarget on the looping tab', { r, closeCalls });
   chrome.addTab(OWNP, 'T2', 'https://app.bank.test/home');
   await sleep(100);
   // the agent MOVED ON (another tab of its appeared after the loop began): a bare `tab close` / a `screenshot` are its
@@ -549,21 +565,27 @@ try {
     // ack named (text form: `tab list --json`'s active tab; `--json`: data.targetId) and the route binds it
     {
       const binds = []; const origBind = W.dialogs.bindTab; W.dialogs.bindTab = (t, id) => { binds.push({ bk: t.browserKey, id }); return origBind(t, id); };
+      // lane site-reset-windows (2.369.202, lane browser-windows): this shared profile's `tab new` is FENCED — the keeper opens it in
+      // the holder's own window over CDP (the last row of this block); the binary's ack (text form / --json) serves the UNFENCED path
+      // (own browser, mediated, remote), so these rows drive a CLI copy without the fence — the path that ack exists for
+      const cliSrcU = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-browser'), 'utf8');
+      ok(cliSrcU.includes("const tabFenced = r.kind === 'attachment' && !r.mediated;"), 'control setup: the tab fence is found in data/bin/vibespace-browser (the unfenced copy)');
+      const binU = MUT.write('data/bin/vibespace-browser', cliSrcU.replace("const tabFenced = r.kind === 'attachment' && !r.mediated;", 'const tabFenced = false;'), 'r4-unfenced', { esm: false });
       await j('POST', '/api/agent/browser/resolve', { handle: shared.id, argv: ['open', 'https://app.bank.test/slow'], wrapper: true }, as(sA)); // A in flight (no audit yet)
       await sleep(215); // the suite's 200 ms drive hold lapses (one driver at a time); A's verb is still IN FLIGHT for the witness (no audit)
       const opens0 = fake.opens().length;
-      let rb = await cli(sB, ['tab', 'new', 'https://app.bank.test/b-own']);
+      let rb = await cli(sB, ['tab', 'new', 'https://app.bank.test/b-own'], { bin: binU });
       const ob = fake.opens().slice(opens0).find((o) => o.verb === 'tab new');
       const nb = fake.opens().slice(opens0).length;
-      ok(rb.code === 0 && ob && binds.length === 1 && binds[0].bk === sB._browserKey && binds[0].id === ob.targetId && nb === 1, 'verify r4 #1: a `tab new` in text form — the CLI asks the session\'s `tab list --json` for the active tab and the audit binds that id to B (one tab opened, one bind, B\'s key)', { rb: rb.code, err: rb.err.slice(0, 300), ob, binds, nb });
-      rb = await cli(sB, ['tab', 'new', 'https://app.bank.test/b-two', '--json']); // (the fake reads its verb positionally; the CLI reads --json anywhere)
+      ok(rb.code === 0 && ob && binds.length === 1 && binds[0].bk === sB._browserKey && binds[0].id === ob.targetId && nb === 1, 'verify r4 #1 (the unfenced path): a `tab new` in text form — the CLI asks the session\'s `tab list --json` for the active tab and the audit binds that id to B (one tab opened, one bind, B\'s key)', { rb: rb.code, err: rb.err.slice(0, 300), ob, binds, nb });
+      rb = await cli(sB, ['tab', 'new', 'https://app.bank.test/b-two', '--json'], { bin: binU }); // (the fake reads its verb positionally; the CLI reads --json anywhere)
       const ob2 = fake.opens().slice(-1)[0];
       ok(rb.code === 0 && binds.length === 2 && binds[1].id === ob2.targetId && binds[1].bk === sB._browserKey, 'verify r4 #1: …and in `--json` form the binary\'s own ack (data.targetId) is read — no second spawn', { rb: rb.code, err: rb.err.slice(0, 300), out: rb.out.slice(0, 200), ob2, binds });
       // the watch binds a tab it HAS: the fake chrome gets the next id the fake binary will print, then B's `tab new` during A's verb
       const nsOf = ob.ns, nNext = Number(ob2.targetId.split('-').pop()) + 1;
       chrome.addTab(SP, `t-${nsOf}-${nNext}`, 'https://app.bank.test/b-three'); await sleep(60);
       const scN0 = W.dialogs.scopeFor({ profileId: shared.id, browserKey: sB._browserKey, sessionId: 'sess-b', ephemeral: false });
-      rb = await cli(sB, ['tab', 'new', 'https://app.bank.test/b-three']);
+      rb = await cli(sB, ['tab', 'new', 'https://app.bank.test/b-three'], { bin: binU });
       const scN = W.dialogs.scopeFor({ profileId: shared.id, browserKey: sB._browserKey, sessionId: 'sess-b', ephemeral: false });
       const scNA = W.dialogs.scopeFor({ profileId: shared.id, browserKey: sA._browserKey, sessionId: 'sess-a', ephemeral: false });
       ok(rb.code === 0 && !scN0.has(`t-${nsOf}-${nNext}`) && scN.has(`t-${nsOf}-${nNext}`) && !scNA.has(`t-${nsOf}-${nNext}`) && (keeper.list().leases.find((l) => l.profileId === shared.id && l.browserKey === sB._browserKey) || {}).tabs?.includes(`t-${nsOf}-${nNext}`), 'verify r4 #1: a tab born while TWO verbs were in flight (nobody\'s by the witness) is B\'s once B\'s ack names it — in B\'s scope, never A\'s, on B\'s lease record', { before: [...scN0], after: [...scN], a: [...scNA] });
@@ -584,6 +606,23 @@ try {
       rb = await cli(sB, ['tab', 'new', 'https://app.bank.test/b-four'], { bin: binC });
       const scC = W.dialogs.scopeFor({ profileId: shared.id, browserKey: sB._browserKey, sessionId: 'sess-b', ephemeral: false });
       ok(rb.code === 0 && !scC.has(`t-${nsOf}-${nC}`), 'CONTROL: a CLI that hands no ack over leaves the tab born under two verbs nobody\'s — the row above reddens on it', { scope: [...scC] });
+      await j('POST', '/api/agent/browser/audit', { profile: shared.id, verb: 'open', ok: true }, as(sA));
+      // lane site-reset-windows: the FENCED path (this shared profile, the shipped CLI) — B's `tab new` is the KEEPER's: ONE tab in B's
+      // OWN window over CDP (rung 2 of lane browser-windows on the fake window model), B's session bound to it, navigated; the binary's
+      // `tab new` never runs. Born while A's verb is in flight, it is B's (its root + the route's bind of the keeper's ack), never A's
+      await j('POST', '/api/agent/browser/resolve', { handle: shared.id, argv: ['open', 'https://app.bank.test/slow'], wrapper: true }, as(sA));
+      await sleep(215);
+      W.dialogs.bindTab = (t, id) => { binds.push({ bk: t.browserKey, id }); return origBind(t, id); };
+      const c0F = chrome.of(SP).calls.length, o0F = fake.opens().length, t0F = new Set(chrome.of(SP).targets.keys()), b0F = binds.length;
+      rb = await cli(sB, ['tab', 'new', 'https://app.bank.test/b-five']);
+      W.dialogs.bindTab = origBind;
+      const bornF = [...chrome.of(SP).targets.keys()].filter((id) => !t0F.has(id)), idF = bornF[0] || null, bF = binds.slice(b0F);
+      const createsF = chrome.of(SP).calls.slice(c0F).filter((c) => c.method === 'Target.createTarget').length;
+      const tabNewsF = fake.opens().slice(o0F).filter((o) => o.verb === 'tab new').length;
+      const lF = keeper._reg().leases.find((l) => l.profileId === shared.id && l.browserKey === sB._browserKey) || {};
+      const scF = W.dialogs.scopeFor({ profileId: shared.id, browserKey: sB._browserKey, sessionId: 'sess-b', ephemeral: false });
+      const scFA = W.dialogs.scopeFor({ profileId: shared.id, browserKey: sA._browserKey, sessionId: 'sess-a', ephemeral: false });
+      ok(rb.code === 0 && bornF.length === 1 && createsF === 1 && tabNewsF === 0 && bF.length === 1 && bF[0].bk === sB._browserKey && String(bF[0].id).toUpperCase() === String(idF).toUpperCase() && lF.windowId != null && chrome.windowOf(SP, idF) === lF.windowId && scF.has(idF) && !scFA.has(idF), 'lane site-reset-windows: the FENCED `tab new` (this shared profile) opens ONE tab in B\'s OWN window over CDP — never the binary\'s `tab new` — and while A\'s verb is in flight it is B\'s (bound, in its scope), never A\'s', { rb: rb.code, err: rb.err.slice(0, 300), bornF, createsF, tabNewsF, bF, win: idF && chrome.windowOf(SP, idF), leaseWin: lF.windowId, b: [...scF], a: [...scFA] });
       await j('POST', '/api/agent/browser/audit', { profile: shared.id, verb: 'open', ok: true }, as(sA));
     }
   }

@@ -5,7 +5,7 @@
  * docs/design-communication-panel.zh.md §8, §11, decision 16.
  *
  *  level : 'hidden' < 'requestable' < 'visible'
- *  grant : { principal:{kind:'agent'|'group', id}, scope:{kind:'conversation'|'adapter', id},
+ *  grant : { principal:{kind:'agent'|'group'|'everyone', id}, scope:{kind:'conversation'|'adapter', id},
  *            level, origin:'user'|'access'|'request' (| legacy 'assignment'), at, by }
  *
  *  · EVERYTHING DEFAULTS TO `hidden`. There is no "inherit from the platform":
@@ -27,6 +27,13 @@
  *    say WHY a principal sees something. `assignment` is the pre-R4 name of
  *    `access` — still honoured as a row, renamed by the migration.
  *
+ *  · ALL AGENTS (lane everyone-principal, 2026-10-02): `{kind:'everyone', id:'*'}`
+ *    is a principal like any other — ONE row per (everyone, scope, origin),
+ *    applying to EVERY agent conversation, now and later. It joins the MAX:
+ *    an agent's own row (or its group's) never narrows it below All, and
+ *    removing the All row leaves every specific row exactly as it was (they
+ *    are separate rows, never folded into it). `via:'everyone'` names it.
+ *
  *  THE BUILT-IN AGENTS ADAPTER answers reach with msg-acl, not with this
  *  module (§12.3 — that question already has an answer inside); `fromMsgLevel`
  *  is the ONE crosswalk from that ladder onto this one.
@@ -36,7 +43,9 @@ const msgAcl = require('./msg-acl.js');
 const LEVELS = Object.freeze(['hidden', 'requestable', 'visible']);
 const RANK = Object.freeze({ hidden: 0, requestable: 1, visible: 2 });
 const GRANT_ORIGINS = Object.freeze(['user', 'access', 'request', 'assignment']);
-const PRINCIPAL_KINDS = Object.freeze(['agent', 'group']);
+const PRINCIPAL_KINDS = Object.freeze(['agent', 'group', 'everyone']);
+/** THE everyone principal's ONE id (the picker's `EVERYONE_ID`; every list model spells it so). */
+const EVERYONE_ID = '*';
 const SCOPE_KINDS = Object.freeze(['conversation', 'adapter']);
 // The two ladders share a SHAPE (three ranked levels, MAX-combined, widen
 // only); asserting it at load is what keeps the crosswalk below honest.
@@ -69,7 +78,8 @@ function validateGrant(input = {}) {
   const g = input && typeof input === 'object' ? input : {};
   const p = g.principal && typeof g.principal === 'object' ? g.principal : null;
   if (!p || !PRINCIPAL_KINDS.includes(p.kind)) return { ok: false, error: `principal.kind must be ${PRINCIPAL_KINDS.join('|')}` };
-  const pid = String(p.id || '').trim();
+  // the everyone principal has ONE id: whatever the caller sent, it is stored as '*'
+  const pid = p.kind === 'everyone' ? EVERYONE_ID : String(p.id || '').trim();
   if (!pid) return { ok: false, error: 'principal.id is required' };
   const s = g.scope && typeof g.scope === 'object' ? g.scope : null;
   if (!s || !SCOPE_KINDS.includes(s.kind)) return { ok: false, error: `scope.kind must be ${SCOPE_KINDS.join('|')}` };
@@ -78,7 +88,7 @@ function validateGrant(input = {}) {
   if (!LEVELS.includes(g.level)) return { ok: false, error: `level must be ${LEVELS.join('|')}` };
   if (!GRANT_ORIGINS.includes(g.origin)) return { ok: false, error: `origin must be ${GRANT_ORIGINS.join('|')} — every grant says who wrote it` };
   const grant = {
-    principal: { kind: p.kind, id: pid.slice(0, 256), name: p.name ? String(p.name).slice(0, 200) : null },
+    principal: { kind: p.kind, id: pid.slice(0, 256), name: p.kind === 'everyone' ? null : (p.name ? String(p.name).slice(0, 200) : null) },
     scope: { kind: s.kind, id: sid.slice(0, 512) },
     level: g.level, origin: g.origin,
     at: Number.isFinite(Number(g.at)) ? Number(g.at) : null,
@@ -87,10 +97,11 @@ function validateGrant(input = {}) {
   return { ok: true, grant, id: grantId(grant) };
 }
 
-/** Does a grant name THIS principal (itself, or one of its groups)? */
+/** Does a grant name THIS principal (itself, one of its groups, or every agent)? */
 function principalApplies(ctx, grant) {
   const p = grant && grant.principal;
   if (!p) return false;
+  if (p.kind === 'everyone') return !!ctx && ctx.kind === 'agent' && !!ctx.id;
   if (p.kind === 'agent') return !!ctx && ctx.kind === 'agent' && ctx.id === p.id;
   if (p.kind === 'group') return !!ctx && Array.isArray(ctx.groups) && ctx.groups.includes(p.id);
   return false;
@@ -115,7 +126,7 @@ function effective(ctx, target, grants) {
     if (!g || !principalApplies(ctx, g) || !scopeApplies(g.scope, target)) continue;
     const lv = normLevel(g.level);
     // widen only: a row can raise the answer, never lower it
-    if (winner === null || RANK[lv] > RANK[level]) { level = widen(level, lv); via = g.principal.kind === 'agent' ? 'agent' : 'group'; winner = g; }
+    if (winner === null || RANK[lv] > RANK[level]) { level = widen(level, lv); via = g.principal.kind === 'agent' ? 'agent' : g.principal.kind === 'everyone' ? 'everyone' : 'group'; winner = g; }
   }
   return { level, via, grantId: winner ? grantId(winner) : null };
 }
@@ -171,8 +182,30 @@ function grantsFor(target, grants) {
   return (Array.isArray(grants) ? grants : []).filter((g) => g && scopeApplies(g.scope, target)).map((g) => ({ ...g, id: grantId(g) }));
 }
 
+/**
+ * THE DIRECTORY (lane channel-agent-watch W2 — the owner, 2026-10-01: "如果agent没权限他怎么知道申请啥？"). Per ACCOUNT,
+ * may an agent see the LIST of conversations it cannot read — their titles, kind, last activity and member count,
+ * never a message, never a participant's name — so `request <conv>` can name one? Two switches: group chats (default
+ * ON) and single chats (default OFF — a one-to-one chat's title is usually a person's name). A conversation it lists
+ * is REQUESTABLE; the request itself is the same as ever (approving it grants that ONE agent that ONE conversation).
+ */
+const DIRECTORY_DEFAULT = Object.freeze({ groups: true, singles: false });
+function directoryOf(rec) {
+  const d = rec && rec.agentDirectory && typeof rec.agentDirectory === 'object' ? rec.agentDirectory : {};
+  return { groups: typeof d.groups === 'boolean' ? d.groups : DIRECTORY_DEFAULT.groups, singles: typeof d.singles === 'boolean' ? d.singles : DIRECTORY_DEFAULT.singles };
+}
+function validateDirectory(v) {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return { ok: false, error: 'agentDirectory must be {groups: true|false, singles: true|false}' };
+  for (const k of Object.keys(v)) if (k !== 'groups' && k !== 'singles') return { ok: false, error: `agentDirectory has no field "${String(k).slice(0, 40)}" (groups, singles)` };
+  for (const k of ['groups', 'singles']) if (v[k] !== undefined && typeof v[k] !== 'boolean') return { ok: false, error: `agentDirectory.${k} must be true or false` };
+  return { ok: true, directory: directoryOf({ agentDirectory: v }) };
+}
+/** Does the directory list a conversation of this kind? A single chat (`dm`) ⇒ `singles`; a group / thread ⇒ `groups`. */
+function directoryListable(dir, kind) { const d = dir || DIRECTORY_DEFAULT; return kind === 'dm' ? d.singles === true : d.groups === true; }
+
 module.exports = {
-  LEVELS, RANK, GRANT_ORIGINS, PRINCIPAL_KINDS, SCOPE_KINDS, NOT_FOUND_TEXT,
+  DIRECTORY_DEFAULT, directoryOf, validateDirectory, directoryListable,
+  LEVELS, RANK, GRANT_ORIGINS, PRINCIPAL_KINDS, EVERYONE_ID, SCOPE_KINDS, NOT_FOUND_TEXT,
   notFound, canSee, canRequest, widen, fromMsgLevel, grantId, validateGrant, principalApplies, scopeApplies,
   effective, applyGrant, removeGrant, approveRequest, grantsFor,
   accountGrant, patternGrant, grantsForConversation,

@@ -1,6 +1,6 @@
 # Design: Background Work — agent-detachable Services, Long Tasks, and Cron
 
-Status: **IMPLEMENTED 2.342.0** (2026-08-17, owner-approved; per-machine only — cross-machine execution parked pending owner design). This doc remains the authoritative spec; deferred residue: remote hostId, resource caps, --publish deep wiring, port-sweep suppression, taskbar badge segment, Session Properties row, systemd/crontab one-click import, panel tier-2 iframe.
+Status: **IMPLEMENTED 2.342.0** (2026-08-17, owner-approved; per-machine only — cross-machine execution parked pending owner design). This doc remains the authoritative spec; deferred residue: remote hostId, resource caps, --publish deep wiring, port-sweep suppression, taskbar badge segment, Session Properties row, systemd/crontab one-click import, panel tier-2 iframe. Session Properties: the owned-jobs list landed (B-70f9 ②, 2026-10-02); the kill dialog half is open.
 v1→v2: three-lens red team (40 findings, 5 critical) incorporated.
 v2→v3 (owner decisions 2026-08-17): ① services must survive a pod rebuild via
 boot replay — that is sufficient; long tasks need NOT survive pod rebuilds.
@@ -69,10 +69,15 @@ retained logs and exit causes; boot = adopt-first; first-class visualization.
   metered `claude -p` on an API-key account, and that is deferred indefinitely —
   it is NOT part of this design's M1–M3.
 - **§ban-safety by policy + guardrails** (red team: structure alone cannot see
-  inside stored argv): create/edit-time refusal of job argv/env/health-cmd
-  matching vendor hosts or credential-material paths (`api.anthropic.com`,
-  `.credentials.json`, `data/subs`, `CLAUDE_CODE_OAUTH*`, …) with a teaching
-  error; schedule floors (default 15 min for agent-created recurring) +
+  inside stored argv): refusal of every command a job can run — argv/env/cwd/
+  health-cmd/`envFrom` names, a schedule's `action.task` included (B-f8c7) — at
+  create, at start and at every spawn (the one vet, `vetSpec`), matching an obvious read of a subscription
+  sign-in (owner decision 2026-10-03, verify r3: every harness descriptor's
+  account dir, auth file and credential-dir variable, the keychain item,
+  OpenCode's login file, `CLAUDE_CODE_OAUTH*`, pasted `sk-ant-oat…` /
+  `sk-ant-ort…`; test-job-model censuses the descriptors against the list); an
+  API call with the job's own key runs — no vendor-host or timer rule; a
+  reminder against obvious reads, not a sandbox; schedule floors (default 15 min for agent-created recurring) +
   mandatory jitter; health probes run through the same sanitized async spawn
   path (agentEnv-stripped, hard timeout, group-kill) with jittered intervals;
   negative-control tests (a vendor-credential job spec must be refused).

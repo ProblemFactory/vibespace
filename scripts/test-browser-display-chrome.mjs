@@ -273,6 +273,10 @@ console.log('— ⑤ Xvfb installed (a private dir on the PATH), a stale DISPLAY
     ok(ch.length === 1 && !argv.some((a) => /^--headless/.test(a)) && argv.includes('--ozone-platform=x11') && !argv.includes('--ozone-platform=wayland') && xv.length >= 1, 'Chrome runs a WINDOW (no --headless, --ozone-platform=x11) on the Xvfb the browser CLI started as its own child (the stale DISPLAY cleared for the launch)', { chrome: argv.filter((a) => /headless|ozone/.test(a)), xvfb: xv });
     c = await cli(['eval', 'navigator.userAgent'], envH);
     ok(c.status === 0 && /Chrome\/154\./.test(c.stdout) && !/HeadlessChrome/.test(c.stdout), 'navigator.userAgent read through the keeper: Chrome/154 — an ordinary browser to a sign-in page (headless says HeadlessChrome/154)', c.stdout.slice(0, 300));
+    // B-cc68 (lane browser-reliability): WebGL in the hidden window — an Xvfb has no GL (measured: NO-WEBGL without the pair,
+    // GPU or not), so the rung adds the SwiftShader pair and the launch line says WebGL in software
+    c = await cli(['eval', "(() => { const g = document.createElement('canvas').getContext('webgl'); if (!g) return 'NO-WEBGL'; const d = g.getExtension('WEBGL_debug_renderer_info'); return 'webgl: ' + (d ? g.getParameter(d.UNMASKED_RENDERER_WEBGL) : g.getParameter(g.RENDERER)); })()"], envH);
+    ok(c.status === 0 && /webgl: .*SwiftShader/.test(c.stdout) && argv.includes('--use-angle=swiftshader') && argv.includes('--enable-unsafe-swiftshader') && journal.some((j) => /HIDDEN WINDOW.*WebGL in software/.test(j)), 'B-cc68: the hidden window has WebGL — drawn in software (SwiftShader) — and the launch line says so', c.stdout.slice(0, 300));
     const c2 = await cli(['get', 'title'], envH);
     const rec2 = p ? kH.browserOf(p.id) : null;
     const ch2 = rec2 && rec2.pid ? chromesOf(rec2.pid) : [];

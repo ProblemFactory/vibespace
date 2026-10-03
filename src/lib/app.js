@@ -47,6 +47,7 @@ import { openChannelOutbox as openChannelOutboxFn } from './channel-outbox.js';
 import { openIntegrationsWindow } from './integrations-window.js';
 import { openSessionProps as openSessionPropsFn } from './session-props.js';
 import { openWorkflowDetail as openWorkflowDetailFn } from './workflow-detail.js';
+import { openDesign as openDesignFn, openDesignPublishDialog, installDesignWindow } from './design-window.js'; // lane design-window: the Design window (window type `design`) + its publish dialog + the hub's open push
 import { DesktopManager } from './desktop-manager.js';
 import { StageManager, STAGE_ID } from './stage-manager.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
@@ -299,6 +300,9 @@ class App {
         // client acting would race duplicate resumes.
         for (const sess of msg.affected) { try { this._poolColdRestart(sess, msg.poolId); } catch {} }
       }
+      // B-f698: a conversation exited unexpectedly while working and the server picked THIS client (exactly one)
+      // to resume it once — the sidebar Resume's own path; nothing is sent into it (src/server/unexpected-exit.js)
+      if (msg.type === 'unexpected-exit-respawn' && msg.session) { try { this._respawnAfterExit(msg.session); } catch {} }
       if (msg.type === 'layout-restored') {
         // Another client restored a rollback point. Without this our stale
         // in-memory layout would be written back on the next window change,
@@ -545,6 +549,7 @@ class App {
     this._probeVncAvailability();
     installDesktopAppLauncher(this); // ⚙ row + toolbar Apps button + the launch dialog; probes /api/desktop/apps the same way
     installOpenWith(this); // §7.9: "Open with LibreOffice" — the explorer row's door, its menu verdict, the file-changed relay
+    installDesignWindow(this); // lane design-window: the hub's `design-open` push opens / raises the window on a client showing that conversation
 
     // Mobile nav bar + gestures (only on mobile)
     this._mobileNav = this.isMobile ? new MobileNav(this) : null;
@@ -2149,6 +2154,10 @@ class App {
   }
 
   openWorkflowDetail(runId, opts) { return openWorkflowDetailFn(this, runId, opts); }
+  /** The Design window for one design folder ({host, dir, sessionId}) — the chip's Open, the hub's push, layout replay. */
+  openDesign(opts) { return openDesignFn(this, opts || {}); }
+  /** The design publish dialog (the window's Publish… and the chip's). */
+  publishDesign(opts) { return openDesignPublishDialog(this, opts || {}); }
 
   // Session state keys (backend:backendSessionId) of every window currently
   // blinking "waiting for input" — the idle-detection signal the task board

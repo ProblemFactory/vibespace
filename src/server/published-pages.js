@@ -21,6 +21,11 @@ const fs = require('fs');
 const path = require('path');
 
 const ID_RE = /^pg[a-z0-9]{10}$/;
+// B-f694 verify r1: the Pages list's routes are the USER's (any page, no ask) — an agent token (vsst_ / jbt_) is refused
+// there, or `vibespace-page`'s own-pages rule and its ask were one curl away on an instance without a password (the default)
+const isAgentBearer = (req) => /^Bearer\s+(vsst_|jbt_)/i.test(String((req.headers && req.headers.authorization) || ''));
+const PAGE_LIST_IS_USERS = 'changing or taking down a page from the Pages list is the user\'s act — an agent token cannot; for a page your conversation published use `vibespace-page visibility <page> public|private` or `vibespace-page unpublish <page>`';
+const GONE_MAX = 5000; // B-f694: unpublished ids remembered for the 410 (≈ 50 B each)
 const MAX_BYTES = 25 * 1024 * 1024;
 const CSP = "sandbox allow-scripts allow-popups allow-downloads allow-modals allow-forms";
 
@@ -105,6 +110,9 @@ function create({ dataDir, requestAuthed = () => true, publicUrl = () => null, l
   let shimCache = { key: null, buf: null }; // one transformed copy per snapshot
   try { store = JSON.parse(fs.readFileSync(storeFile, 'utf-8')) || { pages: [] }; } catch { }
   if (!Array.isArray(store.pages)) store.pages = [];
+  // B-f694: the ids of UNPUBLISHED pages (id + when, nothing else — a private page's name never reaches an anonymous
+  // viewer), so a link someone still holds answers 410 "unpublished" instead of a bare 404. Newest GONE_MAX kept.
+  if (!Array.isArray(store.gone)) store.gone = [];
   // srcKey (2.366.0): the upsert identity. File publishes are `local:<abs>`;
   // agent uploads are `<host|local>:<abs path on that machine>` — the same
   // design re-published from the same working file keeps its URL anywhere.
@@ -227,6 +235,8 @@ function create({ dataDir, requestAuthed = () => true, publicUrl = () => null, l
     if (i < 0) return { error: 'no such page' };
     const [rec] = store.pages.splice(i, 1);
     const snap = { ...pub(rec), removed: true };
+    store.gone.push({ id: rec.id, at: Date.now() });
+    if (store.gone.length > GONE_MAX) store.gone.splice(0, store.gone.length - GONE_MAX);
     try { fs.unlinkSync(path.join(pagesDir, rec.id + snapExt(rec))); } catch { }
     save();
     notify(snap, { removed: true }); // an unpublished page must leave every client's list
@@ -244,6 +254,7 @@ function create({ dataDir, requestAuthed = () => true, publicUrl = () => null, l
     const id = String(req.params.id || '');
     if (!ID_RE.test(id)) { res.status(404).send('not found'); return null; }
     const rec = store.pages.find((p) => p.id === id);
+    if (!rec && store.gone.some((g) => g.id === id)) { res.status(410).type('text/plain').send('This page was unpublished — whoever published it took it down, so this link no longer shows anything.'); return null; }
     if (!rec) { res.status(404).send('not found'); return null; }
     if (!rec.public && !requestAuthed(req)) {
       // browsers get the login form (mirrors auth.js), not a dead-end 401
@@ -435,18 +446,21 @@ self.addEventListener('fetch', (e) => {
     app.get('/api/pages', (req, res) => (res.json({ pages: list({ sessionId: req.query.sessionId ? String(req.query.sessionId) : undefined, conversationId: req.query.conversationId ? String(req.query.conversationId) : undefined, req }) })));
     app.get('/api/pages/by-path', (req, res) => res.json({ page: bySrcPath(String(req.query.path || ''), req) }));
     app.post('/api/pages/publish', (req, res) => {
+      if (isAgentBearer(req)) return res.status(403).json({ error: 'publishing a file from the Pages dialog is the user\'s act — an agent token cannot; publish with `vibespace-page publish <file>` (it asks the user)', code: 'agent_forbidden' });
       const b = req.body || {};
       const r = publish({ srcPath: b.path, name: b.name, makePublic: b.public, req });
       if (r.error) return res.status(400).json(r);
       res.json(r);
     });
     app.post('/api/pages/:id', (req, res) => {
+      if (isAgentBearer(req)) return res.status(403).json({ error: PAGE_LIST_IS_USERS, code: 'agent_forbidden' });
       const b = req.body || {};
       const r = setFlags(String(req.params.id), { makePublic: b.public, name: b.name, req });
       if (r.error) return res.status(404).json(r);
       res.json(r);
     });
     app.delete('/api/pages/:id', (req, res) => {
+      if (isAgentBearer(req)) return res.status(403).json({ error: PAGE_LIST_IS_USERS, code: 'agent_forbidden' });
       const r = remove(String(req.params.id));
       if (r.error) return res.status(404).json(r);
       res.json(r);

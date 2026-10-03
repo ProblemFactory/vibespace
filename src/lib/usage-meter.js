@@ -1,14 +1,14 @@
 // Taskbar quota pies + usage popup + on-demand quota refresh (mixin split from app.js, 2.82.0 audit seam).
 import { UI_ICONS } from './icons.js'; // the credits chip's money glyph (2.369.189)
 import { createBackendIconHtml } from './agent-meta.js';
-import { t, tc } from './i18n.js';
+import { t, tc, deviceLocale } from './i18n.js';
 import { anchorFixedPopup, escHtml, estDisplayPair, fetchJson, onOutsidePress, showConfirmDialog, showToast } from './utils.js';
 import { backendFeatureCaps } from './agent-meta.js';
 // PURE reading-provenance rules (2026-09-07 readings-by-slot): who produced the
 // panel's latest number, and — for a member that can no longer produce one at
 // all — how old the last REAL reading is. DOM-free so scripts/test-readings-
 // attribution.mjs pins it in node.
-import { corroborationNote, creditsChipHtml, overageChip, readingSource, spendControlChip, stampText, staleSince, windowNotStarted, windowNote, limitRows } from './usage-source.js';
+import { corroborationNote, creditsChipHtml, overageChip, readingSource, spendControlChip, stampText, staleSince, windowNotStarted, windowNote, limitRows, codexRefreshToast } from './usage-source.js';
 // The ONE overage verdict (PURE, CJS — the same function the spend
 // authorizer and the pool's voluntary-target rule read).
 import { overageState, spendControlState } from '../spend-authorizer.js';
@@ -130,15 +130,25 @@ export function installUsageMeter(App, ctx = {}) {
   // codex ⟳ (capability 'session-rpc'): one account/rateLimits/read on a LIVE
   // codex session's own app-server — carries the stored reset-credit count,
   // which the passive push never does. No live session ⇒ honest toast.
-  _refreshCodexQuota(btn) {
-    // The session is picked by the client caps MIRROR (`quotaRefresh:
-    // 'session-rpc'` = the read rides the live wrapper's own app-server), never
-    // by the id — the server's ws case gates the same verb on caps.quotaProbe.
+  // lane reset-path R4: THE PRESS IS ANSWERED. It reads the identity the popup SHOWS (the same selection
+  // rule as _renderUsage) through a live local codex chat session on it — the server's caps-routed rung,
+  // the session's own app-server — and waits for that round trip: one toast naming the reading (or the
+  // refusal / the timeout / the missing session), the popup + the roster repainted at once. The fixed
+  // 2.5 s refresh is only the fallback for an answer that never comes.
+  async _refreshCodexQuota(btn) {
     const live = (this.sidebar?._allSessions || []).find((s) => backendFeatureCaps(s.backend || 'claude').quotaRefresh === 'session-rpc' && s.status === 'live' && s.webuiId && !s.host);
-    if (!live) { showToast(t('Needs a running Codex chat session (the read rides its own app-server)'), { type: 'error' }); return; }
-    try { this.ws.send({ type: 'codex-read-limits', sessionId: live.webuiId }); } catch { }
-    if (btn) { btn.classList.add('spin'); setTimeout(() => btn.classList.remove('spin'), 1500); }
-    setTimeout(() => this.refreshUsage?.(), 2500); // the sidecar/cache updates on the event round-trip
+    const cgl = this._usageCodexGlobal || {};
+    let sel = this._usageAcctSelCodex || 'auto';
+    if (sel === '__global_codex__' && cgl.accountId) sel = cgl.accountId;
+    const key = sel === 'auto' ? (this._accounts?.defaultCodexAccountId || '__global_codex__') : sel;
+    if (btn) btn.classList.add('spin');
+    const fallback = setTimeout(() => this.refreshUsage?.(), 2500);
+    const r = await fetchJson('/api/usage/codex-refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, sessionId: live ? live.webuiId : null }) });
+    if (btn) btn.classList.remove('spin');
+    const fmt = (sec) => { const d = new Date(Number(sec) * 1000); try { return d.toLocaleString(deviceLocale(), { dateStyle: 'medium', timeStyle: 'short' }); } catch { return d.toLocaleString(); } };
+    const toast = codexRefreshToast(r, { t, fmtTime: fmt });
+    showToast(toast.text, toast.error ? { type: 'error' } : undefined);
+    if (r) { clearTimeout(fallback); this.refreshUsage?.(); } // the round trip landed: repaint now (popup + roster ride _renderUsage)
   },
 
   async _refreshQuotaOnDemand(btn, { silent } = {}) {
@@ -448,7 +458,7 @@ export function installUsageMeter(App, ctx = {}) {
       if (!gl.accountId) entries.push({ key: '__global__', label: t('CLI login'), tip: gl.email || t("The machine's own CLI login") });
       for (const a of claudeSubs) entries.push({
         key: a.id, label: (claudeDefId === a.id ? '★ ' : '') + a.name,
-        tip: (a.email || '') + (gl.accountId === a.id ? (a.email ? ' · ' : '') + t('also the CLI login on this machine') : ''),
+        tip: (a.email || '') + (gl.accountId === a.id ? (a.email ? ' · ' : '') + t('same account as this machine’s CLI login — one quota, two separate sign-ins') : ''),
       });
       const switcher = hasSwitch ? `<div class="usage-acct-switch">${entries.map(en =>
         `<button class="usage-acct-chip${en.key === activeKey ? ' active' : ''}" data-key="${escHtml(en.key)}" title="${escHtml(en.tip || '')}">${escHtml(en.label)}</button>`).join('')}</div>` : '';
@@ -544,7 +554,7 @@ export function installUsageMeter(App, ctx = {}) {
         if (!cgl.accountId) cEntries.push({ key: '__global_codex__', label: t('CLI login'), tip: cgl.email || t("The machine's own CLI login") });
         for (const a of codexSubs) cEntries.push({
           key: a.id, label: (codexDefId === a.id ? '★ ' : '') + a.name,
-          tip: (a.email || '') + (cgl.accountId === a.id ? (a.email ? ' · ' : '') + t('also the CLI login on this machine') : ''),
+          tip: (a.email || '') + (cgl.accountId === a.id ? (a.email ? ' · ' : '') + t('same account as this machine’s CLI login — one quota, two separate sign-ins') : ''),
         });
         cSwitcher = `<div class="usage-acct-switch">${cEntries.map(en =>
           `<button class="usage-acct-chip${en.key === cActive ? ' active' : ''}" data-key="${escHtml(en.key)}" data-be="codex" title="${escHtml(en.tip || '')}">${escHtml(en.label)}</button>`).join('')}</div>`;

@@ -24,6 +24,7 @@
 // branch kept it; the subagent maps and every _field are on the session
 // object (src/session-schema.js rows, owner 'stdout') — boot-restore re-arms
 // watchers through session._startSubagentWatcher as before.
+const { notifyCompactionEnd } = require('../../server/compaction-watch.js');   // lane worker-dispatch: endCompaction notifies the ONE observer (spelled from src/ like every require here — patched copies rebase '../../')
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -444,6 +445,9 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
       // this same transition (the dormant `compact_progress` lane below) — two
       // frames for one end would make the client draw the outcome twice.
       if (announce) broadcastToSession(sess, sid, { type: 'compact-progress', sessionId: sid, event: 'compact_end', hookType: null, hint: null, result, error });
+      // lane worker-dispatch: THE ONE OBSERVER of a compaction's end (src/server/compaction-watch.js) hears it HERE, at
+      // the one writer — a dispatch waiting to hand this session its brief is told once, with the CLI's outcome if any
+      notifyCompactionEnd(sid, { result, error });
       return was;
     };
     const retireCompaction = (sess, sid) => (sess._streamingKind === 'compacting' ? endCompaction(sess, sid) : false);

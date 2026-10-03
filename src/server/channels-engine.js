@@ -108,6 +108,7 @@ const { createOAuthLoopback } = require('../oauth-loopback.js');
 // P2: the PURE filter / assignment / renderer (design §7). Everything after
 // `store.append` is PURE except the two ORCH calls at the end of `wake()`.
 const F = require('../channel-filter.js');
+const CR = require('../channel-ref.js');   // B-c127 PURE: THE NAME LADDER every human-visible conversation name takes (① name → ② description → ③ the id) + the card's ref
 // P3: the outbox POLICY (state machine + direct/review + the receipt), the
 // AgentReach ACL and the built-in Agents adapter (design §8, §9, §12.3).
 const P = require('../channel-policy.js');
@@ -127,6 +128,8 @@ const Blocks = require('../channel-blocks.js');
 // lane channel-threads (2026-09-28): a message's PLACE (what it answers, which thread) and its REACTIONS — PURE
 // folds over the log and the side log, read at every page; the schema + bounds are channel-record's
 const Thr = require('../channel-thread.js');
+// lane lark-threads (B): WHO IS THIS — the owner's names for authors, the vendor's way of naming people (PURE)
+const Authors = require('../channel-authors.js');
 const Rx = require('../channel-reactions.js');
 const { validateSide, inertFrames, inertFrameLine, peerName } = require('../channel-record.js');   // verify r2: peerName = THE ONE door for a NAME
 const { toAgentText: agentText } = require('../peer-text.js');   // lane peer-census: THE belt on every record's text as it leaves the store toward an agent (read / thread / search)
@@ -141,6 +144,9 @@ const agentTitle = (en, fallback) => agentText((en && en.title) || fallback, { k
 // (reproduced over the real engine). The belt is a no-op on a real id (no frame, no hidden character), so `--to <id>`
 // round-trips; a hostile id is neutered in the agent's COPY only — the store keeps what a fetch needs (r2 F6's rule).
 const agentId = (v, max = 512) => (v == null ? v : agentText(v, { kind: 'line', max }));
+// B-a085: a mail reply's envelope in an AGENT's view — To / Cc / Subject come from the answered message's headers (a
+// PEER's display names and words), each a line piece; the Message-IDs and the anchor are ids; `added` is the agent's own
+const agentEnvelope = (e) => (e && typeof e === 'object' ? { ...e, anchorId: agentId(e.anchorId), to: agentText(e.to == null ? '' : e.to, { kind: 'line', max: 8000 }), cc: e.cc == null ? e.cc : agentText(e.cc, { kind: 'line', max: 8000 }), subject: e.subject == null ? e.subject : agentText(e.subject, { kind: 'line', max: 1000 }), inReplyTo: agentId(e.inReplyTo), references: agentId(e.references, 8000) } : e);
 const { threadsOf: threadsRow, reactionsOf: reactionsRow } = require('../channels/index.js');
 // lane lark-search-poll (B-5aab, 2026-09-28 — design §27): THE CHANGE FEED's PURE arithmetic (the window, the page's
 // trust verdict, the fold into owed marks / births, the measurement); the scheduling is drain rule 21, the one lane
@@ -300,9 +306,19 @@ const SETTING_BOUNDS = Object.freeze({
   'channels.feedOverlapSec': { dflt: 60, min: 30, max: 600 },
   'channels.feedBackfillDays': { dflt: 7, min: 0, max: 30 },
   'channels.relaxedPollSec': { dflt: 300, min: 60, max: 900 },
+  // lane lark-threads (A2): the recent-roots recheck's cadence per active conversation (drain rule 22a)
+  'channels.threadRecheckSec': { dflt: 3600, min: 300, max: 86400 },
 });
 /** Consecutive failures before the adapter row goes amber and says so. */
 const FAILURES_BEFORE_LOUD = 3;
+/** lane lark-threads (A2): the recent-roots recheck's page (the chat's newest messages, newest first). */
+const RECHECK_PAGE = 50;
+/** lane lark-threads (A4): feed hits the chat read did not find, read BY ID — at most this many per feed tick per
+ *  account; an answer that is not a thread reply (and a refusal) is remembered this long per message id, never re-asked
+ *  per tick; the hits waiting for their conversation's read, bounded (the oldest dropped). */
+const BYID_PER_TICK = 5;
+const BYID_MEMORY_MS = 6 * 3600e3;
+const FEED_MISSING_MAX = 500;
 /** lane lark-search-poll verify r1: chats the change feed saw that a COMPLETE listing did not — remembered (for one cold
  *  cycle) so their hits never re-arm a discovery walk per feed page. */
 const FEED_UNLISTED_MAX = 500;
@@ -815,6 +831,10 @@ function create(deps = {}) {
         // process's first window (the measurement never judges before it), the sliding minute's page instants, the
         // records waiting for a complete window to cover them, the describe budget
         feedSeen: new Map(), feedGroups: new Map(), feedUnlisted: new Map(), feedTokens: { steady: null, catchUp: null }, feedMemStart: null, feedCalls: [], feedPending: [], feedDescribe: { at: 0, n: 0 }, feedPrevSig: null,
+        // lane lark-threads (A4): the feed hits behind an owed chat read (≤ FEED_MISSING_MAX: vendorId → {convId, at,
+        // observedAt}) — one the read did not find is read BY ID; the by-id answers remembered (≤ FEED_MISSING_MAX,
+        // BYID_MEMORY_MS: vendorId → {at, kind}) and the tick's by-id count
+        feedMissing: new Map(), byIdMem: new Map(), byIdTick: { at: 0, n: 0 },
         // r5 verify: the tick found the account busy while its rows were due — the
         // next pass, whatever its origin, does the timer's work (no starvation
         // of the due list by a storm of requests)
@@ -1080,7 +1100,9 @@ function create(deps = {}) {
     const exhausted = !!(e && e.exhaustedAt && t - e.exhaustedAt < 70e3 && w.spent >= b.limit);
     const by = w.by || {};
     const pd = paceDecl(rec);   // lane R5: the per-second figure the budget sentence names beside the minute's
-    return { unit: b.unit, limit: b.limit, spent: Math.round(w.spent), spentBy: { timer: Math.round(by.timer || 0), agent: Math.round(by.agent || 0), owner: Math.round(by.owner || 0) }, exhausted, waiting: exhausted ? (e.waiting || 0) : 0, resetInSeconds: exhausted ? Math.max(0, Math.ceil((w.at + 60e3 - t) / 1000)) : 0, settingKey: b.settingKey, perSec: pd ? Math.round(pd.unitsPerSec * 100) / 100 : null };
+    // verify r3 (T2 ②): the minute's meter is a FIXED window; the per-second bucket (`burst` at once, then `perSec`) is what
+    // bounds a SLIDING minute — at most limit + burst (the day walk measured 64 under 60 + 5): the card names the burst
+    return { unit: b.unit, limit: b.limit, spent: Math.round(w.spent), spentBy: { timer: Math.round(by.timer || 0), agent: Math.round(by.agent || 0), owner: Math.round(by.owner || 0) }, exhausted, waiting: exhausted ? (e.waiting || 0) : 0, resetInSeconds: exhausted ? Math.max(0, Math.ceil((w.at + 60e3 - t) / 1000)) : 0, settingKey: b.settingKey, perSec: pd ? Math.round(pd.unitsPerSec * 100) / 100 : null, burst: pd ? Math.round(pd.burst * 100) / 100 : null };
   }
 
   // ── WHICH CONVERSATIONS ARE OPEN IN A WINDOW RIGHT NOW (hot, §6.2) ───────
@@ -1242,6 +1264,9 @@ function create(deps = {}) {
     if (!(Number(f.strikes) >= 0)) f.strikes = 0;
     if (!f.counters || typeof f.counters !== 'object') f.counters = {};
     for (const k of ['malformed', 'stripped', 'unlistedHits', 'births', 'describeFailed', 'threadOwedDropped', 'pages']) if (!(Number(f.counters[k]) >= 0)) f.counters[k] = 0;
+    // lane lark-threads (A5 — THE MEASUREMENT, zero new calls): search hits that carried a thread id; feed hits the chat
+    // read did not find, read by id (A4) — a thread reply ingested, a refusal, any other answer; the recent-roots rechecks
+    for (const k of ['threadHits', 'missingFetched', 'missingRefused', 'missingOther', 'rechecks', 'recheckWidened']) if (!(Number(f.counters[k]) >= 0)) f.counters[k] = 0;
     if (!f.counters.missedTypes || typeof f.counters.missedTypes !== 'object') f.counters.missedTypes = {};
     if (!Array.isArray(f.counters.malformedFields)) f.counters.malformedFields = [];
     if (!Array.isArray(f.counters.unreadableRecent)) f.counters.unreadableRecent = [];   // verify r2: the last hour's ring
@@ -1489,6 +1514,17 @@ function create(deps = {}) {
     const liveIx = store.index.live();
     const stateOf = (cid) => { const en = liveIx[`${rec.id}/${cid}`]; if (!en) return null; if (en.unlistedAt) return 'unlisted'; if (en.refresh && en.refresh.every === 'paused') return 'paused'; return 'live'; };
     const fold = Feed.foldHits(verdict.hits, { seen: e.feedSeen, stateOf, hasRecord: (cid, vid) => msgConv.get(`${rec.id}\u0000${vid}`) === cid, separateThreads: separate });
+    // lane lark-threads (A5): the measurement — how many of this page's new hits carry a thread id at all
+    f.counters.threadHits += fold.threadHits;
+    // A4: the hits behind an owed chat read (no thread id) wait for that read; one it does not find is read by id —
+    // only where a by-id read is declared (a feed on an adapter whose replies are listed separately), never one remembered
+    if (kind === 'steady' && separate && fold.owedHits.length) {
+      for (const h of fold.owedHits) {
+        if (stateOf(h.convId) !== 'live' || e.byIdMem.has(h.vendorId)) continue;
+        e.feedMissing.delete(h.vendorId); e.feedMissing.set(h.vendorId, { convId: h.convId, at: h.at, observedAt: t });
+      }
+      while (e.feedMissing.size > FEED_MISSING_MAX) e.feedMissing.delete(e.feedMissing.keys().next().value);
+    }
     // the owed instant is WHEN THE FEED SAW IT (our clock): a walk that starts after that holds the message whatever
     // the two clocks disagree by (the vendor's create_time is only the read line of a birth)
     const observed = t;
@@ -1576,6 +1612,8 @@ function create(deps = {}) {
     await store.adapters.update(() => {});
     // NAME what was born (≤ DESCRIBE_MAX per feed tick, best effort, paced + metered through the gate) — never the raw id
     await describeFeedBorn(rec, e, born);
+    // lane lark-threads (A4): the hits a chat read did not find, read by id (≤ BYID_PER_TICK per feed tick)
+    if (separate) await fetchMissing(rec, e);
     const due = [];
     for (const cid of born) due.push({ key: `${rec.id}/${cid}`, dueAt: observed });
     if (kind === 'steady') {
@@ -1607,7 +1645,7 @@ function create(deps = {}) {
       let d = null;
       try { d = await vendor(rec, e, () => e.adapter.describe(cid, { peerIds: Array.isArray(en0.peerIds) ? en0.peerIds : [] })); }
       catch (err) {
-        if (err instanceof ChannelError && err.code === 'auth-expired') throw err;
+        if (err instanceof ChannelError && (err.code === 'auth-expired' || err.code === 'rate-limited')) throw err;   // verify r2 F1: a 429 on a describe is the account's (the pass's ladder), never a counter
         feedRow(rec).counters.describeFailed++;
       }
       e.feedDescribe.n += Math.max(1, Number(d && d.requests) || 1);
@@ -1639,6 +1677,148 @@ function create(deps = {}) {
       });
     }
     return { refused: code, hints: [...e.dueNow] };
+  }
+  /**
+   * A FEED HIT THE CHAT READ DID NOT FIND (lane lark-threads A4, 2026-10-01). The vendor's doc: a chat listing returns a
+   * topic's ROOT only ("对于普通对话群中的话题消息，通过 chat 容器类型仅能获取到话题的根消息") — a REPLY made in a topic
+   * on an OLD root (one the recent-roots page no longer covers) is in the search (IF the search indexes replies — A5
+   * measures it) and in no listing we read. Once the conversation's chat read has run since the feed saw the hit and the
+   * log still lacks it, the message is read BY ID (`messageById`, ONE call): a thread reply is ingested as a record of its
+   * chat (the same log, the same dedup, the same news rule), its root is offered to the place door, its thread is owed.
+   * Bounds: ≤ BYID_PER_TICK per feed tick per account, the minute's budget, the pace (through the gate); every answer
+   * that is not a reply (and every refusal) remembered BYID_MEMORY_MS per message id, never asked again per tick; a
+   * transport failure / a rate refusal leaves the hit waiting (never remembered); a dead token is the account's.
+   */
+  async function fetchMissing(rec, e) {
+    if (!e.feedMissing.size) return;
+    const t = now();
+    if (t - e.byIdTick.at >= feedOpts().everySec * 1000) e.byIdTick = { at: t, n: 0 };
+    for (const [vid, m] of e.byIdMem) { if (t - m.at < BYID_MEMORY_MS && m.at <= t) break; e.byIdMem.delete(vid); }
+    const f = feedRow(rec);
+    for (const [vid, h] of [...e.feedMissing]) {
+      if (e.byIdTick.n >= BYID_PER_TICK || !affordable(rec, e) || outlived(rec, e)) break;
+      const en = store.index.peek(`${rec.id}/${h.convId}`);
+      if (!en || en.unlistedAt || e.byIdMem.has(vid)) { e.feedMissing.delete(vid); continue; }   // gone, or remembered
+      // verify r1 F2: the cheap gate FIRST — `msgHeld` is a whole-log scan for a message the log lacks (`findRecord` reads the
+      // file backwards to its first byte, synchronously), and every waiting hit used to pay it on the page's own pass, before
+      // any read could have landed it (60 hits × the log, per feed page); a hit is asked of the log only once its read ran
+      if (!(Number(en.lane && en.lane.walkStartedAt) >= h.observedAt)) continue;   // its chat read has not run since — it waits
+      if (msgHeld(rec.id, h.convId, vid)) { e.feedMissing.delete(vid); continue; }   // the read found it
+      e.feedMissing.delete(vid);
+      e.byIdTick.n++;
+      let r;
+      try { r = await vendor(rec, e, () => e.adapter.messageById(h.convId, { messageId: vid })); }
+      catch (err) {
+        const code = err instanceof ChannelError ? err.code : 'vendor-error';
+        if (code === 'auth-expired') throw err;
+        if (code === 'transport' || code === 'rate-limited') {
+          e.feedMissing.set(vid, h);   // the hit waits (never remembered as an answer)
+          // verify r1 F1: a RATE refusal is the ACCOUNT's — the pass's failure path (the rate ladder, the bucket emptied),
+          // never a by-id read that goes on calling inside the vendor's hint while the card shows no back-off
+          if (code === 'rate-limited') throw err;
+          break;
+        }
+        rememberById(e, vid, 'refused'); f.counters.missingRefused++;
+        continue;
+      }
+      if (outlived(rec, e)) return;
+      if (r && r.kind === 'reply' && r.record) { await landById(rec, e, h.convId, r); f.counters.missingFetched++; }
+      else if (r && r.kind === 'root' && r.rootPatch) { store.widenPlaces(rec.id, h.convId, [r.rootPatch], { src: 'byid' }); f.counters.missingFetched++; }
+      else f.counters.missingOther++;
+      rememberById(e, vid, (r && r.kind) || 'absent');
+    }
+    if (e.byIdMem.size > FEED_MISSING_MAX) for (const k of [...e.byIdMem.keys()].slice(0, e.byIdMem.size - FEED_MISSING_MAX)) e.byIdMem.delete(k);
+  }
+  function rememberById(e, vid, kind) { e.byIdMem.delete(vid); e.byIdMem.set(vid, { at: now(), kind }); }
+  /** A thread reply read by id becomes a record of its chat: the log (dedup), the root's place, its thread owed, the
+   *  index's derived half, the news funnel (the conversation's own news line), one broadcast. */
+  async function landById(rec, e, convId, r) {
+    const key = `${rec.id}/${convId}`;
+    const w = store.appendRecords(rec.id, convId, [r.record]);
+    if (r.rootPatch) store.widenPlaces(rec.id, convId, [r.rootPatch], { src: 'byid' });
+    const separate = threadsRow(registry.capsOf(rec.kind)).listing === 'separate';
+    const fresh = Array.isArray(w.fresh) ? w.fresh : [];
+    const en0 = store.index.peek(key) || {};
+    await store.index.update(() => {
+      const en = store.index.entry(rec.id, convId, { create: false });
+      if (!en) return;
+      if (separate && r.threadKey) { const prev = en.threadOwed; const mt = Feed.mergeThreadOwed(en.threadOwed, new Map([[r.threadKey, now()]])); en.threadOwed = mt.marks; en.threadReach = Feed.mergeThreadReach(en.threadReach, prev, [r.threadKey], Number(r.record.at) || now(), mt.marks); }
+      if (fresh.length) {
+        en.unread = (Number(en.unread) || 0) + fresh.filter((x) => Number(x.at) > (Number(en.readAt) || 0)).length;
+        en.authors = mergeAuthors(en.authors, fresh);
+        const newest = fresh.reduce((m, x) => (Number(x.at) > m ? Number(x.at) : m), 0);
+        if (newest && (!en.lastAt || newest > en.lastAt)) en.lastAt = newest;
+      }
+    });
+    if (fresh.length) {
+      olderChanged(e, convId);
+      const newsLine = Math.max(Number(rec.linkedAt) || 0, Number(en0.newsSince) || 0);
+      const news = fresh.filter((x) => Number(x.at) > newsLine);
+      if (news.length) track(onFresh(rec, convId, news, { lane: laneFor(rec, {}), origin: 'feed-by-id' }));
+      notify([key], { full: false });
+    }
+  }
+  /**
+   * RULE 22a's ROWS (lane lark-threads A2): the account's conversations as the PURE `Drain.recheckDue` reads them — live
+   * (never paused, never unlisted), the adapter's replies listed separately (the CAPABILITY row), the conversation's mode
+   * (a topic group is never rechecked), walked once, its newest message, its last recheck. Nothing when the row says the
+   * replies ride the listing.
+   */
+  function recheckDueFor(rec, t = now()) {
+    if (threadsRow(registry.capsOf(rec.kind)).listing !== 'separate') return [];
+    const rows = [];
+    for (const en of Object.values(store.index.live())) {
+      if (!en || en.adapterId !== rec.id) continue;
+      const paused = !!(en.refresh && en.refresh.every === 'paused');
+      // verify r1 F4: a conversation the vendor REFUSED the owner (its last read 403d, or gone) is not re-listed — its own
+      // cadence keeps probing it and a read that succeeds clears `lane.lastError` (ingest), which lets the recheck back in
+      const refused = !!(en.lane && en.lane.lastError && (en.lane.lastError.code === 'forbidden' || en.lane.lastError.code === 'not-found'));
+      rows.push({ key: en.key, live: !en.unlistedAt && !paused && !refused, separate: true, mode: ((effectiveConvCaps(rec, en) || {}).threads || {}).mode || null, walked: !!(en.anchor || en.walkedAt), lastRecheckAt: Number(en.threadRecheckAt) || 0, lastAt: Number(en.lastAt) || 0 });
+    }
+    return Drain.recheckDue(rows, { now: t, everyMs: setting('channels.threadRecheckSec') * 1000 });
+  }
+  /**
+   * THE RECENT-ROOTS RECHECK (lane lark-threads A2 — the owner's post, a thread born after its root was stored): ONE
+   * vendor page of the conversation's newest messages, NO anchor stop, offered to the store's place door ONLY — a stored
+   * root that now names a topic WIDENS (the write hook then owes its walk and repaints its row); a message the log does
+   * not hold is left to the conversation's own read (`dueNow` when it is newer than what the log holds). Charged to the
+   * caller (`by`: the timer's rule 22a, or the owner's press, 22b), through the gate (the budget, the pace). The stamp
+   * `threadRecheckAt` is the rule's clock. A conversation-level refusal is `{skip}`; an account failure is thrown (rule 3).
+   */
+  async function recheckOne(rec, e, convId, { by = 'timer' } = {}) {
+    if (threadsRow(registry.capsOf(rec.kind)).listing !== 'separate') return { skip: 'not-supported' };
+    const key = `${rec.id}/${convId}`;
+    const prevBy = e.chargeBy; e.chargeBy = by === 'owner' ? 'owner' : 'timer';
+    let r;
+    try { r = await vendor(rec, e, () => e.adapter.recentRoots(convId, { limit: RECHECK_PAGE })); }
+    catch (err) {
+      const code = err instanceof ChannelError ? err.code : null;
+      if (code === 'not-found' || code === 'forbidden' || code === 'not-supported') { await stampRecheck(rec, convId, by); return { skip: code }; }
+      throw err;
+    } finally { e.chargeBy = prevBy; }
+    if (outlived(rec, e)) return { skip: 'account-changed' };
+    const records = (r.records || []).filter((x) => x && x.vendorId);
+    const offered = records.map((x) => ({ vendorId: String(x.vendorId), threadKey: x.threadKey || null, root: x.root || null }));
+    const w = store.widenPlaces(rec.id, convId, offered.filter((x) => x.threadKey || x.root), { src: 'recheck' });
+    // a message the log does not hold, newer than its newest: the conversation's own read takes it (one ingest path)
+    const en0 = store.index.peek(key) || {};
+    const newest = Number(en0.lastAt) || 0;
+    if (records.some((x) => Number(x.at) > newest && !msgHeld(rec.id, convId, String(x.vendorId)))) e.dueNow.add(key);
+    await stampRecheck(rec, convId, by);
+    const f = rec.feed && feedDecl(rec) ? feedRow(rec) : null;
+    if (f) { f.counters.rechecks = (Number(f.counters.rechecks) || 0) + 1; f.counters.recheckWidened = (Number(f.counters.recheckWidened) || 0) + w.widened.length; }
+    if (w.widened.length) log.log(`[channels] ${key}: the recent-roots recheck found ${w.widened.length} message(s) that now head a thread — their threads are loaded next`);
+    return { widened: w.widened.length };
+  }
+  /** Is this message in the conversation's log? (the message → conversation cache first, else the store's own lookup) */
+  function msgHeld(adapterId, convId, vid) {
+    if (msgConv.get(`${adapterId}\u0000${vid}`) === convId) return true;
+    try { return !!store.findRecord(adapterId, convId, vid); } catch { return false; }
+  }
+  /** Rule 22's clocks: `threadRecheckAt` (any recheck — the timer's cadence reads it) and `threadRecheckPressAt` (the
+   *  owner's press — its own 60 s floor reads it). */
+  async function stampRecheck(rec, convId, by = 'timer') {
+    await store.index.update(() => { const en = store.index.entry(rec.id, convId, { create: false }); if (!en) return; en.threadRecheckAt = now(); if (by === 'owner') en.threadRecheckPressAt = now(); });
   }
   /** THE MEASUREMENT (§2.8): records a FETCH appended (an ingest, a thread walk — never a pushed one) judged against
    *  what the feed saw, once a complete window covers them; the mode moves by the push lane's rule, word for word, and
@@ -1688,7 +1868,11 @@ function create(deps = {}) {
       catchUp: cu, lastFlip: f.lastFlip || null,
       // verify r2: `malformedRecent` / `malformedAt` = the last hour's unreadable hits (the card's line reads these, never the
       // cumulative `malformed`, which is diagnostics)
-      counters: f.counters ? { malformed: f.counters.malformed || 0, malformedFields: Feed.mergeFieldLists(f.counters.malformedFields, []), ...(() => { const r = Feed.recentUnreadableCount(f.counters.unreadableRecent, t); return { malformedRecent: r.n, malformedAt: r.at }; })(), births: f.counters.births || 0, unlistedHits: f.counters.unlistedHits || 0, pages: f.counters.pages || 0, missedTypes: { ...(f.counters.missedTypes || {}) } } : null,
+      counters: f.counters ? { malformed: f.counters.malformed || 0, malformedFields: Feed.mergeFieldLists(f.counters.malformedFields, []), ...(() => { const r = Feed.recentUnreadableCount(f.counters.unreadableRecent, t); return { malformedRecent: r.n, malformedAt: r.at }; })(), births: f.counters.births || 0, unlistedHits: f.counters.unlistedHits || 0, pages: f.counters.pages || 0, missedTypes: { ...(f.counters.missedTypes || {}) },
+        // lane lark-threads (A5): the measurement the card words — "does the search carry thread ids / index thread replies"
+        threadHits: f.counters.threadHits || 0, missingFetched: f.counters.missingFetched || 0, missingRefused: f.counters.missingRefused || 0, missingOther: f.counters.missingOther || 0, rechecks: f.counters.rechecks || 0, recheckWidened: f.counters.recheckWidened || 0,
+        // verify r2 ②: the hits still WAITING for a by-id read (≤ BYID_PER_TICK a tick, behind their chat's read) — said, never a silent queue
+        missingWaiting: (() => { const x = live.get(rec.id); return x && x.feedMissing ? x.feedMissing.size : 0; })() } : null,
     };
   }
   /** What unlocks the CHANGE FEED on this account — the module's `feedGrant` against the held scopes (like reactions). */
@@ -1705,11 +1889,25 @@ function create(deps = {}) {
     const v = opt ? ((rec.options && rec.options[g.option]) || opt.default) : null;
     return { scopes: g.scopes.slice(), missing, refused: missing.filter((x) => refusedBy.has(x)), console: !!g.console, wanted: !opt || v !== 'off' };
   }
+  /** lane lark-threads: what unlocks reading PEOPLE (the module's `peopleGrant`) against the held scopes. */
+  function peopleGrantView(rec) {
+    let mod = null;
+    try { mod = registry.get(rec.kind); } catch { mod = null; }
+    const g = mod && mod.peopleGrant;
+    if (!g) return null;
+    const held = new Set(((rec.auth && rec.auth.scopes) || []).map(String));
+    const refusedBy = new Set(((rec.auth && rec.auth.refusedScopes) || []).map(String));
+    const missing = g.scopes.filter((x) => !held.has(x));
+    return { scopes: g.scopes.slice(), missing, refused: missing.filter((x) => refusedBy.has(x)), console: !!g.console, wanted: true };
+  }
   /** THE ONE GRANT LIST (§5.3): every declared grant the sign-in does not hold — the card says ONE line, ONE Re-authorize. */
   function grantsView(rec) {
     const out = [];
     const rx = reactionsGrantView(rec); if (rx) out.push({ what: 'reactions', ...rx });
     const fd = feedGrantView(rec); if (fd) out.push({ what: 'feed', ...fd });
+    // lane lark-threads (B1/B5, MEASURED): reading people's profiles — the card says "One Re-authorize adds: reading
+    // people's profiles" while the sign-in lacks it (never a silent refusal per person)
+    const pp = peopleGrantView(rec); if (pp) out.push({ what: 'people', ...pp });
     return out;
   }
 
@@ -1787,7 +1985,9 @@ function create(deps = {}) {
         // 5 s doubling to 60 s) that never climbs the failure ladder; the bucket
         // is EMPTIED so the pass that resumes starts paced, never with a burst
         const rate = code === 'rate-limited';
-        const hint = rate && err && err.detail ? Number(err.detail.retryAfterSec) : NaN;
+        // verify r3: a 5xx's Retry-After (typed `transport` with the hint in its detail) is honoured by the FAILURE ladder
+        // too — it waits at least the vendor's hint, never less; the rate ladder is unchanged
+        const hint = (rate || code === 'transport') && err && err.detail ? Number(err.detail.retryAfterSec) : NaN;
         if (rate) {
           e.rateStrikes++;
           const own = RATE_BACKOFF_MS[Math.min(e.rateStrikes - 1, RATE_BACKOFF_MS.length - 1)];
@@ -1796,8 +1996,9 @@ function create(deps = {}) {
           if (paceDecl(rec)) e.paceTok = { tokens: 0, at: paceClock() };
         } else {
           e.failures++;
-          e.nextAt = now() + BACKOFF_MS[Math.min(e.failures, BACKOFF_MS.length - 1)];
-          e.retryAfterSec = null;
+          const ladder = BACKOFF_MS[Math.min(e.failures, BACKOFF_MS.length - 1)];
+          e.nextAt = now() + (Number.isFinite(hint) && hint > 0 ? Math.max(ladder, Math.min(RATE_RETRY_AFTER_MAX_MS, Math.ceil(hint * 1000))) : ladder);
+          e.retryAfterSec = Number.isFinite(hint) && hint > 0 ? hint : null;
         }
         e.backoffKind = rate ? 'rate' : 'failure';
         // THE WINDOW: a back-off that BEGINS here (the account was not in one)
@@ -1865,6 +2066,18 @@ function create(deps = {}) {
           changed.push(key);
           if (act.waiters.length) { notify([key], { full: false }); early.add(key); }   // the broadcast naming the key goes out BEFORE the answer: the window repaints with the toast, not a pass later
         }
+        // lane lark-threads (rule 22b): THE OWNER'S PRESS re-lists the conversation's newest page at once (a stored root that
+        // grew a thread widens before the answer) — never a window's open, never an agent's refresh, never twice inside
+        // RECHECK_FLOOR_MS, only while the minute holds (the floor is the OWNER's previous press — `threadRecheckPressAt` —
+        // never the timer's recheck: a topic born a minute after the timer re-listed the chat is exactly what the owner
+        // presses for). verify r1 F1: a RATE refusal (and a dead token) is the ACCOUNT's, whoever asked — it takes the
+        // pass's failure path (the rate ladder, the bucket emptied) exactly as the timer's recheck and every other call do,
+        // and the owner hears it with the retry instant; the records this fetch landed were broadcast ABOVE, before the
+        // answer, so nothing is lost. Any other failure of the recheck never fails the owner's refresh (said in the log).
+        if (act.recheck && threadsRow(registry.capsOf(rec.kind)).listing === 'separate' && Drain.recheckOnPress((store.index.peek(key) || {}).threadRecheckPressAt, now()) && affordable(rec, e) && !outlived(rec, e)) {
+          try { await recheckOne(rec, e, idOf(key), { by: 'owner' }); }
+          catch (err) { if (err instanceof ChannelError && (err.code === 'auth-expired' || err.code === 'rate-limited')) throw err; log.warn(`[channels] ${key}: the recheck on the owner's Refresh failed (${(err && err.message) || err}) — the next timer recheck tries again`); }
+        }
         // THE ANSWER: this key's own fetch, completed now — after every one of its waiters began
         deliver(act.waiters, { ok: true, appended: got.appended || 0, polledAt: lastPollOf(key) });
         return { ok: true, appended: got.appended || 0, hints: [...e.dueNow] };
@@ -1888,7 +2101,7 @@ function create(deps = {}) {
           if (Drain.wantsTurn(e.dq, e.timerDue)) {
             e.timerDue = false;
             const fd = feedDecl(rec);
-            e.dq = Drain.turn(e.dq, { due: dueList(rec, e, now(), { all: e.dq.pass.force }), discoveryDue: discoveryDue(rec, e), feedDue: feedDue(rec, e, now()), feedPerPass: fd ? fd.pagesPerPass : undefined });
+            e.dq = Drain.turn(e.dq, { due: dueList(rec, e, now(), { all: e.dq.pass.force }), discoveryDue: discoveryDue(rec, e), feedDue: feedDue(rec, e, now()), feedPerPass: fd ? fd.pagesPerPass : undefined, recheckDue: recheckDueFor(rec) });   // lane lark-threads: rule 22a's rows
           }
           const act = Drain.next({ ...e.dq, ...facts(connected) });
           e.dq = Drain.apply(e.dq, act);   // the step is taken (an async action BEGINS)
@@ -1901,6 +2114,7 @@ function create(deps = {}) {
             if (act.type === 'fetch') result = await fetchOne(act);
             else if (act.type === 'discover') { e.chargeBy = 'timer'; await discover(rec, e); result = { due: dueList(rec, e, now(), { all: e.dq.pass.force }) }; }
             else if (act.type === 'feed') { e.chargeBy = 'timer'; result = await feedPage(rec, e); }   // lane lark-search-poll: ONE change-feed page (rule 21)
+            else if (act.type === 'recheck') { e.chargeBy = 'timer'; result = await recheckOne(rec, e, idOf(act.key), { by: 'timer' }); }   // lane lark-threads: ONE recent-roots page (rule 22a)
             else if (act.type === 'scanHost') {
               e.chargeBy = 'timer';
               const hf = await vendor(rec, e, () => e.adapter.scanHost((rec.scan && rec.scan.hostId) || null));
@@ -2353,8 +2567,75 @@ function create(deps = {}) {
     let mod = null;
     try { mod = rec ? registry.get(rec.kind) : null; } catch { mod = null; }
     const fn = mod && typeof mod.recordView === 'function' ? mod.recordView : null;
-    if (!fn || !r) return r;
-    try { return fn(r) || r; } catch { return r; }
+    if (!r) return r;
+    let out = r;
+    if (fn) { try { out = fn(r) || r; } catch { out = r; } }
+    return withAuthor(rec, out);
+  }
+  /**
+   * WHO IS THIS, at the ONE view door (lane lark-threads B2–B5, 2026-10-01): the author as the owner reads it —
+   * `display` = the owner's own name for the author (the VibeSpace 备注, `aliases.json`) › the vendor's way (the
+   * organization's nickname, else the name, then `(department)` / `(job title)` per `channels.larkNameField`) › the id;
+   * the vendor `name` kept (the title, the search key, what a filter matches); `external` when the sender's organization
+   * is not the account's; a bot never "app" (the module's own view ran first; a nameless bot is "Bot <last 4>").
+   */
+  function withAuthor(rec, r) {
+    if (!r || !r.author || typeof r.author !== 'object' || !rec) return r;
+    let a = r.author;
+    if (a.isBot && (!a.name || a.name === 'app')) a = { ...a, name: `Bot ${String(a.id || '').replace(/[^A-Za-z0-9]/g, '').slice(-4)}`.trim() };
+    const alias = aliasOf(rec.id, a.id);
+    let tenantSelf = null;
+    try { const e = live.get(rec.id); tenantSelf = e && e.adapter && typeof e.adapter.selfTenant === 'function' ? e.adapter.selfTenant() : null; } catch { tenantSelf = null; }
+    const v = Authors.authorView(a, { alias, field: larkNameField(), selfTenant: tenantSelf, tenant: r.raw && r.raw.tenant_key });
+    return { ...r, author: v };
+  }
+  /**
+   * THE OWNER'S NAME FOR AN AUTHOR (lane lark-threads B3 — the VibeSpace 备注: Lark's own per-viewer remark is readable by
+   * no API, so the owner writes it here once). Owner-only (the route refuses an agent bearer); `alias` through the name
+   * door (`Authors.cleanAlias`), '' clears it; ≤ ALIASES_MAX per account (the oldest dropped). ONE `channels-updated` with
+   * the result (`authors`) — every window re-spells that author's heads in place, every other client too.
+   */
+  const ALIASES_MAX = 5000;
+  async function setAlias(adapterId, authorId, alias, { by = 'user' } = {}) {
+    const rec = adapterRecords().adapters.find((r) => r.id === adapterId);
+    if (!rec) return { ok: false, code: 'not-found', error: 'No such account' };
+    const id = String(authorId == null ? '' : authorId);
+    if (!id || id.length > 256 || /[\u0000-\u001f\u007f]/.test(id)) return { ok: false, code: 'bad-request', error: 'an author id is required (≤ 256 characters)' };
+    if (alias !== null && alias !== undefined && typeof alias !== 'string') return { ok: false, code: 'bad-request', error: 'alias is a string (empty clears it)' };
+    const clean = Authors.cleanAlias(alias);
+    await store.aliases.update((t) => {
+      if (!t.aliases || typeof t.aliases !== 'object') t.aliases = {};
+      const m = t.aliases[adapterId] && typeof t.aliases[adapterId] === 'object' ? t.aliases[adapterId] : (t.aliases[adapterId] = {});
+      if (clean) { delete m[id]; m[id] = { alias: clean, at: now() }; } else delete m[id];
+      const ks = Object.keys(m);
+      if (ks.length > ALIASES_MAX) for (const k of ks.sort((a, b) => (Number(m[a].at) || 0) - (Number(m[b].at) || 0)).slice(0, ks.length - ALIASES_MAX)) delete m[k];
+    });
+    // the thread index holds viewed records (a quote's author, a pane's participants) — re-derived on the next read
+    for (const k of [...thIx.keys()]) if (k.startsWith(`${adapterId}/`)) thIx.delete(k);
+    audit({ at: now(), kind: 'author-alias', adapterId, author: id.slice(0, 256), set: !!clean, by });
+    notify([], { full: false, extra: { authors: { [adapterId]: { [id]: { alias: clean || null } } } } });
+    return { ok: true, adapterId, authorId: id, alias: clean || null };
+  }
+  /** The owner's names for one account's authors (`{[authorId]: alias}`) — the panel / window prefill. */
+  function aliasesOf(adapterId) {
+    let t = null;
+    try { t = store.aliases.live().aliases; } catch { t = null; }
+    const m = t && t[adapterId] && typeof t[adapterId] === 'object' ? t[adapterId] : {};
+    return Object.fromEntries(Object.entries(m).map(([k, v]) => [k, v && v.alias ? String(v.alias) : '']).filter(([, v]) => v));
+  }
+  /** The owner's name for an author (B3) — '' when none. */
+  function aliasOf(adapterId, authorId) {
+    if (!authorId) return '';
+    let t = null;
+    try { t = store.aliases.live().aliases; } catch { t = null; }
+    const row = t && t[adapterId] && t[adapterId][String(authorId)];
+    return row && typeof row.alias === 'string' ? row.alias : '';
+  }
+  /** `channels.larkNameField` (B5): none | department | jobTitle (default department). */
+  function larkNameField() {
+    let v = null;
+    try { v = serverSetting('channels.larkNameField'); } catch { v = null; }
+    return Authors.NAME_FIELDS.includes(v) ? v : 'department';
   }
   const viewsOf = (rec, records) => (Array.isArray(records) ? records.map((r) => viewOf(rec, r)) : records);
   /** A search hit's record keeps its tree but never its formatted body (the owner's search lists words). */
@@ -2369,6 +2650,15 @@ function create(deps = {}) {
     const out = { ...x, text: agentText(x.text, { kind: 'block' }) };   // lane peer-census: bound → folded → the frame rule per line (a legacy record re-judged on its way out)
     for (const k of ['id', 'vendorId', 'convId', 'replyTo', 'threadKey', 'root']) if (typeof x[k] === 'string') out[k] = agentId(x[k]);   // verify r3 F6: every id as a line piece
     if (x.author && typeof x.author === 'object') out.author = { ...x.author, id: agentId(x.author.id, 256), name: peerName(x.author.name, 200) || '' };
+    // lane lark-threads (B3/B5): the agent reads an author by the head the owner sees — `name` = the read-time `display`
+    // (the owner's own name › Lark's way), the vendor's own name kept as `vendorName`; every name-shaped field through the
+    // name door (the CLI prints `name`, unchanged — no new print)
+    if (out.author) {
+      for (const k of ['display', 'vendorDisplay', 'alias']) if (typeof x.author[k] === 'string') out.author[k] = peerName(x.author[k], 200) || '';
+      if (x.author.alt && typeof x.author.alt === 'object') out.author.alt = Object.fromEntries(Object.entries(x.author.alt).filter(([, v]) => typeof v === 'string').map(([k, v]) => [k, peerName(v, 200) || '']));
+      // an unnamed author keeps its id print (the display there IS the id, and the id's door is agentId's line rule)
+      if (out.author.display && out.author.display !== out.author.name && (out.author.name || out.author.alias)) { out.author.vendorName = out.author.name; out.author.name = out.author.display; }
+    }
     if (Array.isArray(x.mentions)) out.mentions = x.mentions.map((m) => (m && typeof m === 'object' ? { ...m, id: agentId(m.id, 256), name: peerName(m.name, 200) || '' } : m));
     // verify r2 F6 (lane peer-census): an attachment's MIME and ID are the sender's too (a mail part's Content-Type /
     // Content-ID) and the CLI prints them on the name's line (`attachment: <name|id> (<mime>), N bytes`) before the next
@@ -2428,6 +2718,30 @@ function create(deps = {}) {
     const a = (Array.isArray(en.authors) ? en.authors : []).find((x) => x && x.name && (!self || x.id !== self));
     return a ? peerName(String(a.name), 200) : null;
   }
+  /** B-c127 THE NAME LADDER (src/channel-ref.js) — what a HUMAN reads for a conversation: ① its own name (a chat's
+   *  title, a mail's cleaned subject) → ② a single chat's other party, the description / participants the vendor
+   *  listed, the authors seen in it → null, the caller's ③ (the id, only when nothing else is known). */
+  function humanNameOf(rec, en) {
+    if (!rec || !en) return null;
+    let self = null;
+    try { const x = live.get(rec.id); self = x && x.adapter && typeof x.adapter.selfId === 'function' ? x.adapter.selfId() : null; } catch { self = null; }
+    // verify r1 (F1/F5): a title that IS the conversation's id (an adapter's own fallback — lark `name || chat_id`, gmail
+    // `… || id`) or shows nothing (only invisible characters the name door keeps) names nothing — the next rung goes on
+    const said = (s) => (s && s !== en.id && s !== en.vendorId && CR.nameOf([s], '') ? s : null);
+    return said(titleOf(registry.capsOf(rec.kind), en.title)) || said(dmTitleOf(rec, en)) || CR.describeOf(en, { selfId: self }) || null;
+  }
+  /** B-5fe1: the ACCOUNTS as an account badge reads them (id, kind, label, builtin) — every surface that draws a badge
+   *  gets the WHOLE list, because a badge's hue is a function of it (two accounts of one vendor never share a hue). */
+  function accountsBrief() {
+    return adapterRecords().adapters.map((r) => ({ id: r.id, kind: r.kind, label: r.label || r.id, builtin: !!r.builtin }));
+  }
+  /** The same by key, for a caller holding ids only (the touches store, a proposal's view) — null when unknown. */
+  function conversationName(adapterId, convId) {
+    if (!adapterId || !convId) return null;
+    const rec = adapterRecords().adapters.find((r) => r.id === adapterId) || null;
+    const en = store.index.live()[`${adapterId}/${convId}`];   // verify r1 F3: the LIVE map, read-only — a whole-index clone per call was ~15 ms at 1 119 rows, twice per proposal per Outbox broadcast
+    return rec && en ? humanNameOf(rec, en) : null;
+  }
   function rowView(rec, en, ctx = viewCtx()) {
     const t = ctx.t;
     const c = registry.capsOf(rec.kind);
@@ -2437,7 +2751,7 @@ function create(deps = {}) {
     const ob = ctx.outbox.get(en.key) || { awaiting: 0, unknown: 0 };
     const lw = en.stats && Array.isArray(en.stats.wakes) && en.stats.wakes.length ? en.stats.wakes[en.stats.wakes.length - 1] : null;
     return {
-      key: en.key, id: en.id, adapterId: en.adapterId, adapterLabel: rec.label || rec.id, title: titleOf(c, en.title) || dmTitleOf(rec, en), kind: en.kind,
+      key: en.key, id: en.id, adapterId: en.adapterId, adapterLabel: rec.label || rec.id, title: humanNameOf(rec, en), kind: en.kind,   // B-c127: THE NAME LADDER (null = nothing known; the client's ③)
       participants: en.participants, lastAt: en.lastAt, lastText: en.lastText || '', unread: en.unread || 0,
       unlisted: !!en.unlistedAt,
       refresh: en.refresh && typeof en.refresh === 'object' ? { every: en.refresh.every, by: en.refresh.by || null } : null,
@@ -2562,6 +2876,7 @@ function create(deps = {}) {
       // dialogs edit them) and what it inherits from the account and the
       // rules it matches (each grain's own lists)
       own: { access: own.access.map((r) => accessRowView(r, capsNow)), watchers: own.watchers.map((w) => watcherView(w, t)) },
+      eligibleAbove: eligibleAboveView(en),   // lane channel-agent-watch W3: Notify… may name these without a per-chat access row
       inherits: { account: acct ? grainView(rec, acct, t) : null, patterns: pats.map((pa) => grainView(rec, pa, t)) },
       filter: (en.filterId && filterFor(en.filterId)) || null,
       stats: statsView(en, t),
@@ -2673,6 +2988,8 @@ function create(deps = {}) {
       // two-phase adapter drafts in the thread and sends that draft (mail),
       // `direct` = one request; and what would unlock sending here
       sendForm: c.idempotency === 'two-phase' ? 'draft' : 'direct',
+      // B-a085: a reply here may go to EVERYONE on the message it answers (mail — the composer's "Reply all")
+      replyAll: c.replyEnvelope === true,
       sendGrant: sendGrantView(rec),
       // lane channel-threads: what unlocks READING reactions (the scope, the console step) + the trickle's minute
       reactionsGrant: reactionsGrantView(rec),
@@ -2680,6 +2997,7 @@ function create(deps = {}) {
       feed: feedView(rec, t),
       grants: grantsView(rec),
       reactionPolicy: P.reactionPolicyOf(rec.reactionPolicy),
+      agentDirectory: ACL.directoryOf(rec),   // lane channel-agent-watch W2: may agents see the list of conversations (groups / single chats)
       reactions: (() => { const x = live.get(rec.id); const m = x ? Drain.rxMinuteAt(x.rxMinute, t) : { n: 0 }; return { read: reactionsRow(registry.capsOf(rec.kind)).read, add: !!reactionsRow(registry.capsOf(rec.kind)).add, perMinute: reactionsPerMin(), listedThisMinute: m.n, calls60s: x ? (x.rxCalls || []).filter((y) => t - y < 60e3).length : 0 }; })(),
       // P1: what the panel's connect / re-authorize / options controls read.
       connectable: !!mod,
@@ -2839,7 +3157,7 @@ function create(deps = {}) {
       // `patches: {[convKey]: {[vendorId]: {reactions}}}`, `threads: {[convKey]: {[threadKey]: {count, lastAt}}}`,
       // `rereadReactions: [convKey]` past the patch bound — the window applies them IN PLACE (no new message type)
       const more = extra && typeof extra === 'object' ? extra : {};
-      broadcast({ type: 'channels-updated', changed: uniq.map((k) => liveIx[k] ? liveIx[k].id : k.slice(k.indexOf('/') + 1)), changedKeys: uniq, partial, digest: d, ...(more.patches ? { patches: more.patches } : {}), ...(more.threads ? { threads: more.threads } : {}), ...(more.rereadReactions && more.rereadReactions.length ? { rereadReactions: more.rereadReactions } : {}) });
+      broadcast({ type: 'channels-updated', changed: uniq.map((k) => liveIx[k] ? liveIx[k].id : k.slice(k.indexOf('/') + 1)), changedKeys: uniq, partial, digest: d, ...(more.patches ? { patches: more.patches } : {}), ...(more.threads ? { threads: more.threads } : {}), ...(more.rereadReactions && more.rereadReactions.length ? { rereadReactions: more.rereadReactions } : {}), ...(more.authors ? { authors: more.authors } : {}) });
     } catch (err) { console.warn('[channels] broadcast failed:', err && err.message); }
   }
 
@@ -2990,7 +3308,8 @@ function create(deps = {}) {
           // born by push: the row exists before the record's index half lands
           await store.index.update(() => { const en = store.index.entry(rec.id, convId); if (!(Number(en.readAt) > 0)) en.readAt = Number(rec.linkedAt) || 0; if (en.title === undefined) en.title = null; });   // lane lark-search-poll: never the raw id — the client words an untitled row
         }
-        const w = store.appendRecords(rec.id, convId, [ev.record]);   // DURABLE — the ack is this function's return
+        const batch = [ev.record]; batch.placeSrc = 'event';   // verify r1 F6: a push-delivered copy that widens a stored place names its source
+        const w = store.appendRecords(rec.id, convId, batch);   // DURABLE — the ack is this function's return
         if (w.appended) olderChanged(e, convId);   // rule 19 (verify r7): a record the PUSH lane appended forgets the "nothing older" memory, like the poll's
         if (w.appended) { p.samples = caps.pushSamplesAdd(p.samples, { at: t, n: w.appended, p: 0 }); p.missRate = caps.pushMissRate(p.samples, t).rate; }
         afterPush(rec, e, convId, w);
@@ -3656,6 +3975,39 @@ function create(deps = {}) {
       const c = thIx.get(k);
       if (c) { for (const r of w.fresh || []) if (r && r.vendorId) c.recs.set(String(r.vendorId), r); c.ix = null; }
     } else if (w.kind === 'prepend' || w.kind === 'trim') thIx.delete(k);
+    else if (w.kind === 'place') {
+      // lane lark-threads (A1): a stored record's place WIDENED (the store's one door) — the thread index re-derives from
+      // the patched copies at once, and the widened topics are owed a walk + said to every window (`markPlaces`)
+      const c = thIx.get(k);
+      if (c) { for (const p of w.patched || []) { const r0 = c.recs.get(String(p.vendorId)); if (r0) c.recs.set(String(p.vendorId), Thr.applyPlace(r0, p)); } c.ix = null; }
+      track(markPlaces(adapterId, convId, w.patched || []));
+    }
+  }
+  /**
+   * A WIDENED PLACE IS A THREAD OWED (lane lark-threads A1, 2026-10-01): every topic key the place door wrote is owed a
+   * walk exactly as a feed-named key is (drain rule 20 via the timer — `threadOwed`, its reach = one recheck cadence
+   * back: a reply older than that was never news), where replies are listed separately; and the roots' rows grow their
+   * chip in every open window (`notifyThreads` — the result rides the broadcast, no reload). Capability-gated on the
+   * threads row, never an adapter id.
+   */
+  async function markPlaces(adapterId, convId, patched) {
+    const keys = [...new Set((patched || []).map((p) => p && p.threadKey).filter(Boolean).map(String))];
+    if (!keys.length || stopped) return;
+    const rec = adapterRecords().adapters.find((r) => r.id === adapterId);
+    if (!rec) return;
+    const separate = threadsRow(registry.capsOf(rec.kind)).listing === 'separate';
+    if (separate) {
+      const t = now();
+      await store.index.update(() => {
+        const en = store.index.entry(adapterId, convId, { create: false });
+        if (!en || en.unlistedAt) return;
+        const prevOwed = en.threadOwed;
+        const mt = Feed.mergeThreadOwed(en.threadOwed, new Map(keys.map((x) => [x, t])));
+        en.threadOwed = mt.marks;
+        en.threadReach = Feed.mergeThreadReach(en.threadReach, prevOwed, keys, t - setting('channels.threadRecheckSec') * 1000, mt.marks);
+      });
+    }
+    notifyThreads(adapterId, convId, keys);
   }
   /** The conversation's thread index (built from the newest THREAD_IX_RECORDS on first use), with `extra` records
    *  (an older page the window paged to) folded in so their places resolve too. */
@@ -3666,7 +4018,10 @@ function create(deps = {}) {
       c = { recs: new Map(), ix: null };
       // the .197 integration (lane-redact's clear census): the log of a conversation this engine KNOWS (an index row) —
       // never another's; an unknown one's index is built from the records the caller hands (`extra`) alone
-      if (store.index.live()[k]) for (const r of store.readTail(adapterId, convId, { limit: THREAD_IX_RECORDS })) if (r && r.vendorId) { c.recs.set(String(r.vendorId), r); noteMsgConv(adapterId, convId, String(r.vendorId)); }
+      // lane lark-threads (B2/B3): the records through the ONE view door — a quote's author, a pane's participants read the
+      // owner's name / the vendor's way, never "app"
+      const vrec = adapterRecords().adapters.find((x) => x.id === adapterId) || null;
+      if (store.index.live()[k]) for (const r0 of store.readTail(adapterId, convId, { limit: THREAD_IX_RECORDS })) { const r = vrec ? viewOf(vrec, r0) : r0; if (r && r.vendorId) { c.recs.set(String(r.vendorId), r); noteMsgConv(adapterId, convId, String(r.vendorId)); } }
       thIx.set(k, c);
       if (thIx.size > THREAD_IX_LRU) thIx.delete(thIx.keys().next().value);
     } else { thIx.delete(k); thIx.set(k, c); }
@@ -3865,7 +4220,12 @@ function create(deps = {}) {
     let ix = null;
     try { ix = threadIxOf(adapterId, convId); } catch { return; }
     const threads = { [k]: {} };
-    for (const tk of keys) { const e2 = ix.threads.get(tk); if (e2) threads[k][tk] = { count: e2.count, lastAt: e2.lastAt, root: e2.root }; }
+    // lane lark-threads: + whether the thread was ever walked and whether its replies are listed separately — a root that
+    // just became a topic (the place door) grows "in thread · open to load" until its walk lands, never "0 replies"
+    const en = store.index.live()[k];
+    const rec = adapterRecords().adapters.find((r) => r.id === adapterId);
+    const separate = !!rec && threadsRow(registry.capsOf(rec.kind)).listing === 'separate';
+    for (const tk of keys) { const e2 = ix.threads.get(tk); if (e2) threads[k][tk] = { count: e2.count, lastAt: e2.lastAt, root: e2.root, walked: !separate || !!walkedAt(en, tk), separate }; }
     notify([k], { full: false, extra: { threads } });
   }
 
@@ -4000,6 +4360,7 @@ function create(deps = {}) {
           // the stop is durable BEFORE a page that is not the walk's last moves the derived anchor (a crash after it
           // leaves the stop; a crash before it appended nothing)
           if (!last && !cutWritten && stopAt && ours.length) { await writeThreadCut(adapterId, convId, key, stopAt); cutWritten = true; }
+          ours.placeSrc = 'walk';   // verify r1 F6: a side line this walk's repeated root writes names its source (it said `history`)
           const w = store.appendRecords(adapterId, convId, ours);
           appended += w.appended;
           if (Array.isArray(w.fresh)) fresh.push(...w.fresh);
@@ -5341,7 +5702,7 @@ function create(deps = {}) {
     for (const en of Object.values(store.index.live())) {   // B-f32b: a read-only scan of the live rows (was a whole-index copy)
       if (!en) continue;
       if (en.adapterId === adapterId) {
-        for (const r of convGrainOf(en).access) refs.push({ kind: 'access', key: en.key, convId: en.id, title: en.title || en.id, scope: 'conversation', principal: { kind: r.principal.kind, id: r.principal.id, name: r.principal.name || null } });
+        for (const r of convGrainOf(en).access) refs.push({ kind: 'access', key: en.key, convId: en.id, title: conversationName(en.adapterId, en.id) || en.id, scope: 'conversation', principal: { kind: r.principal.kind, id: r.principal.id, name: r.principal.name || null } });
       }
       for (const g of en.reachEntries || []) {
         if (!g || !g.scope || g.scope.kind !== 'adapter' || g.scope.id !== adapterId) continue;
@@ -5857,13 +6218,75 @@ function create(deps = {}) {
   }
   /** A conversation's OWN grain `{access, watchers}` (a pre-split entry read
    *  the same way — merged, never a fallback). */
-  function convGrainOf(en) { return F.grainOf({ access: en && en.access, watchers: en && en.watchers }, legacyConvAssignment(en)); }
+  function convGrainOf(en) { return F.grainOf({ access: en && en.access, watchers: en && en.watchers }, legacyConvAssignment(en), { inherited: en ? convInheritedOf(en) : [] }); }
+  /** lane channel-agent-watch W3 — ACCESS IS MAX OVER THE GRAIN AND ITS ANCESTORS: the principal keys a VISIBLE grant
+   *  names (`grants`; `skipOwn` = leave out the conversation's own access-origin rows, which a write is replacing). */
+  function visibleKeysOf(grants, { skipOwnScope = null } = {}) {
+    const out = [];
+    for (const g of Array.isArray(grants) ? grants : []) {
+      if (!g || !g.principal || g.level !== 'visible') continue;
+      if (skipOwnScope && g.scope && g.scope.kind === skipOwnScope.kind && g.scope.id === skipOwnScope.id && (g.origin === 'access' || g.origin === 'assignment')) continue;
+      const k = pkOf(g.principal.kind === 'everyone' ? { kind: 'everyone', id: '*' } : g.principal);
+      if (k) out.push(k);
+    }
+    return out;
+  }
+  /** The account-scope grants of one account, as keys (`skipAccess` = leave out the account grain's own access rows). */
+  function accountGrantKeys(adapterId, { skipAccess = false } = {}) {
+    const acct = (store.index.table('accountGrants') || []).filter((g) => g && g.scope && g.scope.kind === 'adapter' && g.scope.id === adapterId && (!skipAccess || (g.origin !== 'access' && g.origin !== 'assignment')));
+    return visibleKeysOf(acct);
+  }
+  /** Who holds access ABOVE one conversation: the account grain's rows + its grants, every matching rule's rows, and
+   *  every visible grant that reaches it (an approved request, a hand-written grant) — `skipOwn` leaves out the
+   *  conversation's own access rows (a write replacing them judges by the NEW list). */
+  function convInheritedOf(en, { skipOwn = false } = {}) {
+    const acc = F.grainOf(accountGrainOf(en.adapterId), undefined, { inherited: accountGrantKeys(en.adapterId) }).access;
+    const pats = [];
+    for (const pa of patternsOf(en.adapterId)) if (pa && pa.pattern && F.matchConversation(pa.pattern, convFacts(en)).hit) pats.push(...F.grainOf(pa).access);
+    const grants = visibleKeysOf(grantsOfConversation(en), skipOwn ? { skipOwnScope: { kind: 'conversation', id: en.key } } : {});
+    return [...acc, ...pats, ...grants];
+  }
+  /** Who holds access above a grain being WRITTEN (setGrain's watcher check): a conversation's ancestors, an account's
+   *  own non-access grants, a rule's account. */
+  function siteInheritedOf(site) {
+    if (site.kind === 'conversation') return site.holder ? convInheritedOf(site.holder, { skipOwn: true }) : [];
+    const aid = site.rec && site.rec.id;
+    if (site.kind === 'account') return accountGrantKeys(aid, { skipAccess: true });
+    return [...F.grainOf(accountGrainOf(aid)).access, ...accountGrantKeys(aid)];
+  }
   /** The facts a pattern matches over (PURE input). */
   function convFacts(en) { return { title: (en && en.title) || '', participants: (en && en.participants) || '', kind: (en && en.kind) || '', authors: (en && Array.isArray(en.authors)) ? en.authors : [] }; }
   /** WHO HAS ACCESS AND WHO WATCHES — the ONE answer for a conversation. */
   function effectiveFor(en) {
     if (!en) return null;
-    return F.effectiveGrants({ conversation: convGrainOf(en), patterns: patternsOf(en.adapterId), account: accountGrainOf(en.adapterId) }, convFacts(en));
+    return F.effectiveGrants({ conversation: convGrainOf(en), patterns: patternsOf(en.adapterId), account: accountGrainOf(en.adapterId) }, convFacts(en), { grantKeys: visibleKeysOf(grantsOfConversation(en)), accountKeys: accountGrantKeys(en.adapterId) });
+  }
+  /** The running agent conversations an ALL-AGENTS watcher fans out to (`[{cid, name}]`, the live roster now). */
+  function fanTargets() {
+    let live = [];
+    try { live = liveSessions() || []; } catch (err) { log.warn(`[channels] liveSessions threw: ${(err && err.message) || err}`); }
+    return live.filter((x) => x && x.cid).map((x) => ({ cid: String(x.cid), name: x.name || null }));
+  }
+  /** THE ANSWER EVERY WAKE PATH READS (lane everyone-principal): `effectiveFor` with every ALL-AGENTS watcher fanned
+   *  out to one item per RUNNING conversation (F.fanOutWatchers — each its own key, pending, timers, scope chain and
+   *  pace LEDGER: a cap of N is N wakes per conversation, never N shared and never uncapped). `base` = the answer as
+   *  the views read it (one All row). Every view path keeps `effectiveFor`. */
+  function wakeEffOf(en) {
+    const e = effectiveFor(en);
+    if (!e) return e;
+    const x = F.fanOutWatchers(e, fanTargets());
+    return x === e ? e : { ...x, base: e };
+  }
+  /** A grain's stored watcher for key `pk` — a fan-out key (`everyone:*><cid>`) answers the stored All row as that
+   *  conversation's watcher while the conversation runs (null when it stopped: nobody waits for its hits). */
+  function storedWatcherFor(holder, pk) {
+    const list = holder ? F.grainOf(holder).watchers : [];
+    const fan = F.fanOfKey(pk);
+    if (!fan) return list.find((x) => pkOf(x.principal) === pk) || null;
+    const root = list.find((x) => pkOf(x.principal) === fan.root);
+    if (!root) return null;
+    const tg = fanTargets().find((x) => x.cid === fan.cid);
+    return tg ? F.fanWatcher(root, tg.cid, tg.name) : null;
   }
   /** Is THIS item the watcher of principal `pk`? */
   const itemIs = (item, pk) => !!item && pkOf((item.watcher || item.row).principal) === pk;
@@ -5909,18 +6332,27 @@ function create(deps = {}) {
    *  one its pace ledger is written to (lifting a pre-split record first). */
   function watcherRef(ix, rec, en2, item) {
     const pk = pkOf(item.watcher.principal);
+    // ALL AGENTS (lane everyone-principal): a fan-out target's ledger is ITS OWN — `stats.fan[<cid>]` of the stored
+    // All row, returned as `{stats}` so every writer below (reserve / finalize / refusal / hits) lands there
+    const fan = F.fanOfKey(pk);
     let holder = null;
     if (item.source === 'conversation') holder = en2 ? liftGrainInPlace(ix, en2, 'conversation') : null;
     else if (item.source === 'account') holder = liftGrainInPlace(ix, (ix.accountAssignments || {})[rec.id] || null, 'account');
     else holder = liftGrainInPlace(ix, (ix.patternAssignments || {})[item.patternId] || null, 'pattern');
-    const w = holder && Array.isArray(holder.watchers) ? holder.watchers.find((x) => pkOf(x.principal) === pk) : null;
+    const w = holder && Array.isArray(holder.watchers) ? holder.watchers.find((x) => pkOf(x.principal) === (fan ? fan.root : pk)) : null;
     if (w && (!w.stats || typeof w.stats !== 'object')) w.stats = { wakes: [], hits: [] };
-    return w;
+    if (!w || !fan) return w;
+    if (!w.stats.fan || typeof w.stats.fan !== 'object') w.stats.fan = {};
+    F.pruneFan(w.stats, now());
+    const sub = w.stats.fan[fan.cid] && typeof w.stats.fan[fan.cid] === 'object' ? w.stats.fan[fan.cid] : (w.stats.fan[fan.cid] = { wakes: [], hits: [] });
+    if (!Array.isArray(sub.wakes)) sub.wakes = [];
+    if (!Array.isArray(sub.hits)) sub.hits = [];
+    return { stats: sub, fanOf: w };
   }
   /** One watcher's ledger view (the card's "N wakes / 24 h"). */
   function ledgerView(s0, t) {
     const s = s0 || {};
-    const okWakes = (Array.isArray(s.wakes) ? s.wakes : []).filter((w) => w && w.ok !== false);
+    const okWakes = F.ledgerRowsOf(s).filter((w) => w && w.ok !== false);   // an All row: every conversation's ledger
     return { hits7d: F.countSince(s.hits, t, 7), wakes24h: okWakes.filter((w) => Number(w.at) > t - 86400e3).length, wakes7d: okWakes.filter((w) => Number(w.at) > t - 7 * 86400e3).length, lastRefusal: s.lastRefusal || null };
   }
   function accessRowView(row, capsNow = null) {
@@ -5934,7 +6366,20 @@ function create(deps = {}) {
       principal: { kind: w.principal.kind, id: w.principal.id, name: w.principal.name || null },
       notify: w.notify, mode: w.mode, filterId: w.filterId || null, filter: w.filterId ? filterFor(w.filterId) : null, digestMinutes: w.digestMinutes, dailyWakeCap: w.dailyWakeCap, receiptWake: !!w.receiptWake,
       createdAt: w.createdAt || null, updatedAt: w.updatedAt || null, estimateAtSet: w.estimateAtSet || null, stats: ledgerView(w.stats, t),
+      // lane channel-agent-watch: the row's delivery + who wrote it ride the view — a dialog's whole-list save sends
+      // them back unchanged (a view without them would turn an agent's next-turn row into the owner's wake row)
+      ...(w.delivery ? { delivery: F.deliveryModeOf(w) } : {}), ...(w.origin === 'agent' ? { origin: 'agent' } : {}),
     };
+  }
+  /** lane channel-agent-watch W3: who may be notified on this conversation WITHOUT an access row of its own — access
+   *  above it (the account, a matching rule) or a visible grant here (an approved request); one row per principal. */
+  function eligibleAboveView(en) {
+    const out = new Map();
+    const add = (p, via) => { const k = p && pkOf(p.kind === 'everyone' ? { kind: 'everyone', id: '*' } : p); if (k && !out.has(k)) out.set(k, { principal: { kind: p.kind, id: p.kind === 'everyone' ? '*' : p.id, name: p.name || null }, via }); };
+    for (const r of F.grainOf(accountGrainOf(en.adapterId), undefined, { inherited: accountGrantKeys(en.adapterId) }).access) add(r.principal, 'account');
+    for (const pa of patternsOf(en.adapterId)) if (pa && pa.pattern && F.matchConversation(pa.pattern, convFacts(en)).hit) for (const r of F.grainOf(pa).access) add(r.principal, 'pattern');
+    for (const g of grantsOfConversation(en)) if (g && g.level === 'visible' && g.principal && !(g.scope && g.scope.kind === 'conversation' && (g.origin === 'access' || g.origin === 'assignment'))) add(g.principal, g.scope && g.scope.kind === 'adapter' ? 'account' : 'grant');
+    return [...out.values()];
   }
   /** A grain's two lists as the card and the dialogs read them, + the FIRST
    *  watcher's (else the first access row's) fields flat beside them — the
@@ -5959,8 +6404,11 @@ function create(deps = {}) {
    *  R4: EVERY WATCHER in effect matches with ITS OWN filter and is delivered
    *  on its own (a wake, a digest window, a scope digest), each against its
    *  own pace ledger; ACCESS alone is never on this path. */
-  async function onFresh(rec, convId, fresh, { lane, origin } = {}) {
-    if (stopped || !Array.isArray(fresh) || !fresh.length) return;
+  async function onFresh(rec, convId, fresh0, { lane, origin } = {}) {
+    if (stopped || !Array.isArray(fresh0) || !fresh0.length) return;
+    // lane lark-threads (B2–B5): the batch through the ONE view door — a wake / a For-you item names an author as the owner
+    // reads them (`author.display`: the owner's name › the vendor's way); the vendor `name` (what a rule matches) unchanged
+    const fresh = fresh0.map((r) => viewOf(rec, r));
     const t = now();
     const en = store.index.peek(`${rec.id}/${convId}`);
     if (!en) return;
@@ -5971,9 +6419,9 @@ function create(deps = {}) {
     const ledger = async (what, fn) => { try { await store.index.update(fn); } catch (err) { log.warn(`[channels] ${rec.id}/${convId}: ${what} ledger failed: ${(err && err.message) || err}`); } };
     // msgs7d — the estimate's denominator measured after the fact (§7.2)
     await ledger('msgs', () => { const e2 = store.index.entry(rec.id, convId, { create: false }); if (!e2) return; healP2(e2); e2.stats.msgs.push({ at: t, n: fresh.length }); e2.stats.msgs = F.pruneLedger(e2.stats.msgs, t); e2.stats.msgs7d = F.countSince(e2.stats.msgs, t, 7); });
-    const eff = effectiveFor(en);
+    const eff = wakeEffOf(en);   // ALL AGENTS fanned out: one item per running conversation
     if (!eff || !eff.watchers.length) return;
-    // a named AGENT first, then groups: a group's round-robin skips a session
+    // a named AGENT first, then groups (and the All-agents fan-out): a group's round-robin skips a session
     // this batch already reached (one batch never bills one agent twice)
     const order = eff.watchers.slice().sort((a, b) => (a.watcher.principal.kind === 'agent' ? 0 : 1) - (b.watcher.principal.kind === 'agent' ? 0 : 1));
     const per = [];
@@ -6002,7 +6450,7 @@ function create(deps = {}) {
         placeBase = { owner, threadOf, kindOf, sentBy: en.sentBy && typeof en.sentBy === 'object' ? en.sentBy : {} };
       }
       const mine = new Set(placeBase.owner);
-      const cids = !principal ? [] : principal.kind === 'agent' ? [String(principal.id)] : Object.keys(placeBase.sentBy).filter((k) => k.startsWith('agent:')).map((k) => k.slice(6)).filter((cid) => groupsOfSession(cid).includes(String(principal.id)));
+      const cids = !principal ? [] : principal.kind === 'agent' ? [String(principal.id)] : F.fanTargetOf(principal) ? [F.fanTargetOf(principal)] : principal.kind === 'everyone' ? [] : Object.keys(placeBase.sentBy).filter((k) => k.startsWith('agent:')).map((k) => k.slice(6)).filter((cid) => groupsOfSession(cid).includes(String(principal.id)));
       for (const cid of cids) for (const v of placeBase.sentBy[`agent:${cid}`] || []) mine.add(String(v));
       return { mine, threadOf: placeBase.threadOf, kindOf: placeBase.kindOf };
     };
@@ -6046,6 +6494,10 @@ function create(deps = {}) {
     for (const { item, hits } of per) {
       const w = item.watcher;
       const pk = pkOf(w.principal);
+      // lane channel-agent-watch W5: a NEXT-TURN watcher is never woken — its hits ride its next turn (the ladder's
+      // durable stash, drained at the next injection): no billed turn, no cap spent, no ledger row (F.deliveryModeOf
+      // is the ONE reader; a row written before the choice existed reads `wake`, as it always behaved)
+      if (F.deliveryModeOf(w) === 'next-turn') { runs.push(stashHits(rec, convId, hits, { item, pk, batch })); continue; }
       if (w.notify === 'digest') {
         // an INHERITED digest delivers ONCE per window for its whole scope (§7.3)
         runs.push(item.source !== 'conversation' ? queueScopeWindow(rec, convId, hits, item, { ms: w.digestMinutes * 60e3 }) : queueForWindow(rec, convId, hits, { kind: 'digest', ms: w.digestMinutes * 60e3, pk }));
@@ -6063,6 +6515,37 @@ function create(deps = {}) {
     for (const s of await Promise.allSettled(runs)) if (s.status === 'rejected') log.warn(`[channels] ${rec.id}/${convId}: a notification failed unexpectedly: ${(s.reason && s.reason.message) || s.reason}`);
   }
 
+  /**
+   * lane channel-agent-watch W5: A NEXT-TURN WATCHER'S HITS — the same block a wake carries, handed to the ladder's
+   * durable stash for the watcher's conversation (drained into its next turn's context); never the ladder itself, so
+   * never a billed turn. A group picks its member like a wake does; nobody live ⇒ the hits wait as pending (the next
+   * wake or turn of that watcher carries them). One batch never hands one session the same hit twice.
+   */
+  async function stashHits(rec, convId, hits, { item, pk, batch = null } = {}) {
+    const en = store.index.peek(`${rec.id}/${convId}`);
+    if (!en || stopped) return { ok: false, why: stopped ? 'stopped' : 'gone' };
+    const w = item.watcher;
+    // THE GATE (§65): the watcher is still in effect for this principal NOW — its access (here or above) may have gone
+    // since the batch was matched; a watcher no longer in effect hands nothing
+    const still = stillInEffect(rec, convId, pk);
+    if (!still || !still.watched) { log.log(`[channels] ${rec.id}/${convId}: ${pk} no longer watches — the next-turn notification is dropped`); return { ok: false, why: 'not-watching' }; }
+    const target = resolveTarget(w, batch);
+    if (!target.cid || !deliver || typeof deliver.stashFor !== 'function') { await keepPending(rec, convId, hits, 0, pk); return { ok: false, held: true, why: target.why || 'no stash wired' }; }
+    const seen = batch && batch.got ? batch.got.get(target.cid) : null;
+    const fresh = seen ? hits.filter((h) => !(h.record && seen.has(h.record.id))) : hits;
+    if (!fresh.length) return { ok: true, deduped: true, cid: target.cid, n: 0 };
+    const label = rec.label || rec.id;
+    const title = humanNameOf(rec, en) || convId;   // B-c127 THE NAME LADDER (lane channel-agent-watch's next-turn wake, composed at the 2.369.202 integration)
+    const inherited = item.source === 'conversation' ? null : { kind: item.source, label: item.source === 'pattern' ? F.patternSummary((patternById(item.patternId) || {}).pattern || { rules: [] }) : null };
+    const text = F.renderWakeBlock({ adapterLabel: label, title, convId, hits: fresh, elided: 0, inherited, others: othersFor(wakeEffOf(en), pk) });
+    let st = null;
+    const fromName = `Channels · ${label}`;
+    try { st = deliver.stashFor(target.cid, { source: 'channel', kind: 'notification', fromName, text, about: stashAbout({ keys: [`${rec.id}/${convId}`], cid: target.cid }) }); }
+    catch (err) { log.warn(`[channels] ${rec.id}/${convId}: the next-turn notification for ${pk} could not be stashed: ${(err && err.message) || err}`); await keepPending(rec, convId, fresh, 0, pk); return { ok: false, held: true, why: 'stash-failed' }; }
+    if (batch && batch.got) { const g0 = batch.got.get(target.cid) || new Set(); for (const h of fresh) if (h.record && h.record.id) g0.add(h.record.id); batch.got.set(target.cid, g0); }
+    log.log(`[channels] ${rec.id}/${convId}: ${fresh.length} hit(s) for ${pk} ride its next turn (next-turn notification, no wake)`);
+    return { ok: true, stashed: true, next: true, cid: target.cid, n: fresh.length, stored: st && st.stored };
+  }
   /** Persist hits as PENDING (bounded, elided counted, tagged with the
    *  watcher they wait for) and arm ONE timer per (conversation, watcher)
    *  for the window; a second burst inside the window joins it. The hits are
@@ -6115,11 +6598,14 @@ function create(deps = {}) {
   /** Everyone else on a conversation, for a block's "also on this
    *  conversation" line: `[{name, notify?, authority}]` (R4 — two woken
    *  agents are told about each other). */
-  function othersFor(eff, pk) {
+  function othersFor(eff0, pk) {
+    const eff = eff0 && eff0.base ? eff0.base : eff0;   // the answer as stored (one All row, never its fan-out)
     if (!eff) return [];
+    const fan = F.fanOfKey(pk);
+    const self = (k) => k === pk || (fan && k === fan.root);
     const out = new Map();
-    for (const a of eff.access) { const k = pkOf(a.row.principal); if (k !== pk) out.set(k, { name: a.row.principal.name || a.row.principal.id, authority: a.row.authority, notify: null }); }
-    for (const w of eff.watchers) { const k = pkOf(w.watcher.principal); if (k !== pk && out.has(k)) out.get(k).notify = w.watcher.notify; }
+    for (const a of eff.access) { const k = pkOf(a.row.principal); if (!self(k)) out.set(k, { name: a.row.principal.kind === 'everyone' ? 'all agents' : (a.row.principal.name || a.row.principal.id), authority: a.row.authority, notify: null }); }
+    for (const w of eff.watchers) { const k = pkOf(w.watcher.principal); if (!self(k) && out.has(k)) out.get(k).notify = w.watcher.notify; }
     return [...out.values()];
   }
   /** Deliver ONE scope digest for ONE watcher: every conversation of the
@@ -6137,20 +6623,20 @@ function create(deps = {}) {
       if (stopped) return { ok: false, why: 'stopped', held: true };   // the hits are pending already; the next boot delivers them
       const t = now();
       const holder = source === 'account' ? accountGrainOf(rec.id) : patternById(patternId);
-      const w = holder ? F.grainOf(holder).watchers.find((x) => pkOf(x.principal) === pk) : null;
+      const w = storedWatcherFor(holder, pk);   // an All-agents fan-out key ⇒ that running conversation's own watcher
       if (!w) return { ok: false, why: 'not-watching' };
       const groups = [];
       const held = [];   // [{id, key, carried}]
       let others = null;
       for (const en of Object.values(store.index.live())) {
         if (!en || en.adapterId !== rec.id || !Array.isArray(en.pending) || !en.pending.length) continue;
-        const eff = effectiveFor(en);
+        const eff = wakeEffOf(en);
         const item = eff ? eff.watchers.find((x) => itemIs(x, pk)) : null;
         if (!item || item.source !== source || (source === 'pattern' && item.patternId !== patternId)) continue;
         const pend = pendingOf(en, pk, eff);
         if (!pend.hits.length && !pend.elided) continue;
         if (!others) others = othersFor(eff, pk);
-        groups.push({ title: en.title || en.id, convId: en.id, hits: pend.hits, elided: pend.elided });
+        groups.push({ title: humanNameOf(rec, en) || en.id, convId: en.id, hits: pend.hits, elided: pend.elided });   // B-c127: the ladder
         held.push({ key: en.key, id: en.id, eff, carried: pend });
       }
       if (!groups.length) return { ok: false, why: 'nothing-pending' };
@@ -6183,7 +6669,7 @@ function create(deps = {}) {
       let stashed = false;
       // R4 verify r2: re-ask after the ladder's await (see wakeNow) — a scope
       // digest refused after its watcher lost access is dropped, never stashed
-      const wNow = ok ? w : F.grainOf(source === 'account' ? accountGrainOf(rec.id) : patternById(patternId)).watchers.find((x) => pkOf(x.principal) === pk);
+      const wNow = ok ? w : storedWatcherFor(source === 'account' ? accountGrainOf(rec.id) : patternById(patternId), pk);
       const still = ok ? IN_EFFECT : { watched: !!wNow, targetGone: !!wNow && target.via === 'group' && !groupStillHas(w, target.cid) };
       const stillWatched = ok || still.watched;
       const targetGone = !ok && still.watched && still.targetGone;   // r3: the member died — the hits stay pending for the group's next digest
@@ -6223,12 +6709,12 @@ function create(deps = {}) {
     return billedWake({ conv: `${rec.id}/${convId}` }, async () => {
       const results = [];
       const en0 = store.index.peek(`${rec.id}/${convId}`);
-      const eff0 = effectiveFor(en0);
+      const eff0 = wakeEffOf(en0);
       if (!en0 || !eff0) return { ok: false, why: 'nothing-pending' };
       const pks = pk ? [pk] : eff0.watchers.map((x) => pkOf(x.watcher.principal));
       for (const p of pks) {
         const en = store.index.peek(`${rec.id}/${convId}`);
-        const eff = effectiveFor(en);
+        const eff = wakeEffOf(en);
         const item = eff ? eff.watchers.find((x) => itemIs(x, p)) : null;
         if (!en || !item) continue;
         const pend = pendingOf(en, p, eff);
@@ -6257,6 +6743,14 @@ function create(deps = {}) {
     if (w.principal.kind === 'agent') {
       const s = live.find((x) => x && x.cid === w.principal.id);
       return { cid: w.principal.id, name: (s && s.name) || w.principal.name || w.principal.id, via: 'agent', live: !!s, cursor: null };
+    }
+    // ALL AGENTS (lane everyone-principal): a fan-out item names its ONE running conversation; the stored All row
+    // itself is never a target (the wake paths read the fan-out — this answer is the fail-closed one)
+    if (w.principal.kind === 'everyone') {
+      const cid = F.fanTargetOf(w.principal);
+      const s = cid ? live.find((x) => x && x.cid === cid) : null;
+      if (!cid) return { cid: null, name: null, via: 'everyone', live: false, cursor: null, why: 'all agents — no running conversation named (kept for the next pass)' };
+      return { cid, name: (s && s.name) || w.principal.name || cid, via: 'everyone', live: !!s, cursor: null };
     }
     const all = live.filter((x) => x && Array.isArray(x.groups) && x.groups.includes(w.principal.id)).map((x) => x.cid);
     const got = batch && batch.got ? batch.got : null;
@@ -6328,7 +6822,7 @@ function create(deps = {}) {
     return conv ? serialWake(conv, inner) : inner();
   }
   /** The scope chain of watcher `pk` on this conversation, read NOW (null = the conversation grain, whose chain is its conversation's). */
-  const scopeFor = (rec, convId, pk) => { const eff = effectiveFor(store.index.peek(`${rec.id}/${convId}`)); const item = eff ? eff.watchers.find((x) => itemIs(x, pk)) : null; return item ? scopeKeyOf(item, rec) : null; };
+  const scopeFor = (rec, convId, pk) => { const eff = wakeEffOf(store.index.peek(`${rec.id}/${convId}`)); const item = eff ? eff.watchers.find((x) => itemIs(x, pk)) : null; return item ? scopeKeyOf(item, rec) : null; };
   function wake(rec, convId, freshHits, opts = {}) { return billedWake({ conv: `${rec.id}/${convId}`, scopeOf: () => scopeFor(rec, convId, opts.pk) }, () => wakeNow(rec, convId, freshHits, opts)); }
   let wakeSeq = 0;
   /** RESERVE THE LEDGER ROW BEFORE THE BILL (R4 verify r4, money): the
@@ -6380,7 +6874,7 @@ function create(deps = {}) {
    *  the batch as "access removed" with four live members watching. */
   const IN_EFFECT = Object.freeze({ watched: true, targetGone: false });
   function stillInEffect(rec, convId, pk, target) {
-    const eff = effectiveFor(store.index.peek(`${rec.id}/${convId}`));
+    const eff = wakeEffOf(store.index.peek(`${rec.id}/${convId}`));   // a fan-out target that stopped running is no longer watched
     const item = eff ? eff.watchers.find((x) => itemIs(x, pk)) : null;
     if (!item) return { watched: false, targetGone: false };
     return { watched: true, targetGone: !!(target && target.via === 'group' && !groupStillHas(item.watcher, target.cid)) };
@@ -6404,7 +6898,7 @@ function create(deps = {}) {
   async function wakeNow(rec, convId, freshHits, { origin = null, coalesced = null, elided = 0, digest = false, windowMinutes = null, fromPending = null, pk = null, batch = null } = {}) {
     const t = now();
     const en = store.index.peek(`${rec.id}/${convId}`);
-    const eff = effectiveFor(en);
+    const eff = wakeEffOf(en);
     const item = eff ? eff.watchers.find((x) => itemIs(x, pk)) : null;
     if (!en || !item) return { ok: false, why: 'not-watching' };
     // R4 verify r4: a wake queued behind one in flight when the engine STOPPED
@@ -6453,7 +6947,7 @@ function create(deps = {}) {
       return { ok: false, why: pace.why, held: true };
     }
     const label = rec.label || rec.id;
-    const title = en.title || convId;
+    const title = humanNameOf(rec, en) || convId;   // B-c127 THE NAME LADDER: the id only when nothing else is known (the reply hint keeps it for the CLI)
     const whys = [...new Set(hits.flatMap((h) => h.why || []))];
     const inherited = item.source === 'conversation' ? null : { kind: item.source, label: item.source === 'pattern' ? F.patternSummary((patternById(item.patternId) || {}).pattern || { rules: [] }) : null };
     const others = othersFor(eff, pk);
@@ -6462,7 +6956,11 @@ function create(deps = {}) {
       : F.renderWakeBlock({ adapterLabel: label, title, convId, hits, elided: allElided, coalesced, inherited, others });
     const fromName = `Channels · ${label}`;
     const n = hits.length + allElided;
-    const cardText = `${title}: ${n} message${n === 1 ? '' : 's'} — ${F.whyText(whys)}${coalesced && coalesced.n > 1 ? ` (${coalesced.n} in ${Math.round(coalesced.seconds)} s, one wake)` : ''}`;
+    // B-c127: the card opens with the conversation's NAME (its ref makes it the link) and says who wrote — a mail's sender
+    const senders = [...new Set(hits.map((h) => (h.record && h.record.author && peerName(String(h.record.author.name || ''), 60)) || '').filter(Boolean))];
+    const fromWords = senders.length ? ` from ${senders.slice(0, 3).join(', ')}${senders.length > 3 ? ` +${senders.length - 3}` : ''}` : '';
+    const cardText = `${CR.nameOf([title], convId)}: ${n} message${n === 1 ? '' : 's'}${fromWords} — ${F.whyText(whys)}${coalesced && coalesced.n > 1 ? ` (${coalesced.n} in ${Math.round(coalesced.seconds)} s, one wake)` : ''}`;
+    const channel = CR.refOf({ adapterId: rec.id, convId, name: title, account: label, vendor: rec.kind });
     // a direct wake that carries a window's held hits IS that window's
     // delivery — its timer would otherwise fire into an empty (or worse, a
     // refilled) pending and the panel would show a window that is over
@@ -6482,7 +6980,7 @@ function create(deps = {}) {
       // THE ONE UNATTENDED-TURN DOOR (fence 2). The ladder asks the spend
       // authorizer with THIS reason, charges the identity it authorized and
       // releases its hold in its own finally; nothing is added beside it.
-      try { r = await deliver.deliverToConversation(target.cid, text, { kind: 'notification', spendReason: 'channel-message', fromName, cardText }); }
+      try { r = await deliver.deliverToConversation(target.cid, text, { kind: 'notification', spendReason: 'channel-message', fromName, cardText, channel }); }
       catch (err) { r = { ok: false, reason: `ladder threw: ${(err && err.message) || err}`, refused: 'error' }; }
     }
     const ok = !!(r && r.ok);
@@ -6706,7 +7204,9 @@ function create(deps = {}) {
     const honestyLine = reactionKind ? null : pending ? P.honestyLine({ draftedBy: p.draftedBy, enabled: honestyLineFor(rec) }) : (p.result && p.result.honestyLine ? P.honestyLine({ draftedBy: p.draftedBy, enabled: true }) : null);
     const can = p.state === 'unknown' ? (!c ? { ok: false, code: 'no-adapter', why: 'the adapter no longer exists' } : reactionKind ? (reactionsRow(c).read === 'list' ? { ok: true } : { ok: false, code: 'no-idempotency', why: 'this channel does not list reactions — only a person can check the platform' }) : P.canReconcile(c)) : null;
     return {
-      ...p, adapterLabel: rec ? (rec.label || rec.id) : p.adapterId, identityWarning: c ? caps.identityWarning(c) : null, ttlAt, canDecide: p.state === 'awaiting-approval',
+      ...p, ...(p.convId && conversationName(p.adapterId, p.convId) ? { title: conversationName(p.adapterId, p.convId) } : {}),   // B-c127: the conversation's name NOW (a proposal froze its title — or the raw id — when it was drafted)
+      adapterLabel: rec ? (rec.label || rec.id) : p.adapterId, identityWarning: c ? caps.identityWarning(c) : null, ttlAt, canDecide: p.state === 'awaiting-approval',
+      convKind: (p.key && store.index.live()[p.key] && store.index.live()[p.key].kind) || null,   // B-f467: the Outbox row draws the conversation's own avatar (a mail thread = the mail glyph)
       // r3: how many agents approving this WAKES (a billed turn each) — the
       // card says it and echoes it with the Approve (`expectWakes`)
       wakes: !reactionKind && sendStartsTurn(rec) ? 1 : 0,
@@ -6743,6 +7243,7 @@ function create(deps = {}) {
   function agentIdsOf(v) {
     if (!v || typeof v !== 'object') return v;
     const out = { ...v, convId: agentId(v.convId), threadKey: agentId(v.threadKey), replyTo: agentId(v.replyTo) };
+    if (v.replyEnvelope && typeof v.replyEnvelope === 'object') out.replyEnvelope = agentEnvelope(v.replyEnvelope);   // B-a085: the recipients the agent's CLI prints
     if (v.receipt && typeof v.receipt === 'object') out.receipt = { ...v.receipt, vendorMessageId: agentId(v.receipt.vendorMessageId) };
     if (v.reaction && typeof v.reaction === 'object') out.reaction = { ...v.reaction, msg: agentId(v.reaction.msg), ...(v.reaction.quote && typeof v.reaction.quote === 'object' ? { quote: { ...v.reaction.quote, author: agentText(v.reaction.quote.author, { kind: 'line', max: 200 }) } } : {}) };
     return out;
@@ -6832,6 +7333,7 @@ function create(deps = {}) {
     const all = proposalsFor();
     return {
       proposals: list,
+      accounts: accountsBrief(),   // B-f467: the rows' account badges (a hue is a function of the whole list — B-5fe1)
       awaitingTotal: all.filter((p) => p.state === 'awaiting-approval').length,
       unknownTotal: all.filter((p) => p.state === 'unknown').length,
       at: now(),
@@ -6970,9 +7472,12 @@ function create(deps = {}) {
     try { const tail = store.readTail(adapterId, convId, { limit: 1 }); return tail.length ? tail[tail.length - 1] : null; } catch { return null; }
   }
   /** `{ok:true, anchor, envelope}` (both null for a plain message) or `{ok:false, answer}` — the refusal as propose returns it. */
-  async function replyTargetFor(rec, adapterId, convId, replyTo) {
+  async function replyTargetFor(rec, adapterId, convId, replyTo, { all = false, cc = null } = {}) {
     const c = registry.capsOf(rec.kind);
     const wantsEnvelope = c.replyEnvelope === true;
+    // B-a085: reply-all / an added Cc exist only where a reply's recipients follow from the message it answers (mail)
+    const addCc = Array.isArray(cc) && cc.length ? cc : null;
+    if ((all === true || addCc) && !wantsEnvelope) return { ok: false, answer: { ok: false, code: 'bad-proposal', why: all === true ? 'replyAll' : 'cc', error: `${all === true ? 'reply-all' : 'an added Cc'} is offered only on mail (a channel whose reply goes to the people on the message it answers) — nothing was created` } };
     let record = null;
     if (replyTo !== null && replyTo !== undefined) {
       record = storedRecord(adapterId, convId, replyTo);
@@ -6986,13 +7491,15 @@ function create(deps = {}) {
     const anchor = P.anchorView(record);
     if (!wantsEnvelope) return { ok: true, anchor, envelope: null };
     let env = null;
-    try { env = await adapterFor(rec).adapter.replyEnvelope(convId, { anchorId: String(record.vendorId) }); }
+    try { env = await adapterFor(rec).adapter.replyEnvelope(convId, { anchorId: String(record.vendorId), ...(all === true ? { all: true } : {}) }); }
     catch (err) {
       const why = (err && err.detail && err.detail.why) || (err && err.code) || 'unknown';
-      if (why === 'reply-anchor-elsewhere') return { ok: false, answer: { ok: false, code: 'bad-proposal', why: 'reply-anchor', error: `the message this reply answers is not in this conversation on the platform (${(err && err.message) || why})` } };
+      if (why === 'reply-anchor-elsewhere' || why === 'reply-anchor-draft') return { ok: false, answer: { ok: false, code: 'bad-proposal', why: 'reply-anchor', error: why === 'reply-anchor-draft' ? `the message this reply answers is an unsent draft — nothing was created (${(err && err.message) || why})` : `the message this reply answers is not in this conversation on the platform (${(err && err.message) || why})` } };
       return { ok: false, answer: { ok: false, code: 'send-not-available', why: 'reply-envelope', error: `who this reply would go to could not be resolved (${(err && err.message) || why}) — nothing was created; propose it again` } };
     }
-    const ev = P.envelopeVerdict(env, String(record.vendorId));
+    let ev = P.envelopeVerdict(env, String(record.vendorId), { all: all === true });
+    // the drafter's added Cc joins the envelope the card shows (and the header bound is judged again over it)
+    if (ev.ok && addCc) ev = P.envelopeVerdict(P.withAddedCc(ev.envelope, addCc), String(record.vendorId), { all: all === true });
     if (!ev.ok) return { ok: false, answer: { ok: false, code: 'send-not-available', why: 'reply-envelope', error: `${ev.why} — nothing was created` } };
     return { ok: true, anchor, envelope: ev.envelope };
   }
@@ -7042,7 +7549,12 @@ function create(deps = {}) {
     // r6 verify F1 + F3 (2026-09-28, "what you approve is what runs"): WHAT THIS REPLY ANSWERS and WHO RECEIVES
     // it are decided HERE, from this engine's own store, before anything is created or any wake is granted —
     // stored on the proposal, shown on the card, re-judged at approval and handed to the adapter verbatim
-    const ra = await replyTargetFor(rec, adapterId, convId, v.proposal.replyTo);
+    // verify r1 (B-a085): an agent's ADDED Cc puts people the thread never had on the owner's mail — compose's power,
+    // so compose's gates: reach over the WHOLE account (a conversation grant reached anybody: direct, no card), and
+    // below, direct only when compose's own verdict (the account's policy + its rows' authority) would be direct too
+    const ccByAgent = !!(v.proposal.cc && ctx && ctx.kind === 'agent');
+    if (ccByAgent && !ACL.canSee(ACL.effective(ctx, { key: '', adapterId: rec.id }, accountScopeGrants(rec.id)).level)) return { ok: false, code: 'bad-proposal', why: 'cc', error: 'adding people to a mail (--cc) is composing to them — it needs access to the whole account, like compose; yours covers this conversation — nothing was created (reply without --cc, or ask the user)' };
+    const ra = await replyTargetFor(rec, adapterId, convId, v.proposal.replyTo, { all: v.proposal.replyAll === true, cc: v.proposal.cc || null });
     if (!ra.ok) return ra.answer;
     // THE PLACEMENT (2026-09-28, the owner: "the boolean is Lark-shaped") — decided HERE, before anything exists:
     // the PURE verdict over the adapter's DECLARED placements (its `threads` cap row) and ONE fact about the message
@@ -7088,9 +7600,16 @@ function create(deps = {}) {
       const capsA = authorityCapsFor(rec, enNow, t);
       if (effA && effA.access.some((x) => F.rowNames(x.row, ctx) && F.effectiveAuthority(x.row, capsA).authority === 'send')) authority = 'send';
     }
-    const decision = own
+    let decision = own
       ? { mode: 'direct', reasons: [], detail: { ownMessage: true } }
       : P.decideOutbound({ channelPolicy: policyFor(rec, en), guards: guardsFromSettings(), proposal: { ...v.proposal, authority }, now: t });
+    if (ccByAgent && decision.mode === 'direct') {
+      const effC = effectiveForAccount(rec.id);
+      const capsC = { offersSend: true, sendWhy: null, policyRequiresReview: policyRequiresReview(rec, null) };
+      const authC = effC && effC.access.some((x) => F.rowNames(x.row, ctx) && F.effectiveAuthority(x.row, capsC).authority === 'send') ? 'send' : 'draft';
+      const dC = P.decideOutbound({ channelPolicy: policyFor(rec, null), guards: guardsFromSettings(), proposal: { ...v.proposal, authority: authC }, now: t });
+      if (dC.mode !== 'direct') decision = dC;
+    }
     // verify r2 (IDENTITY): the convCaps lookup above was an await — an agent whose access was removed meanwhile
     // drafts NOTHING (the uniform not-found, before any wake slot is taken)
     if (!stillSees(ctx, adapterId, convId)) return ACL.notFound();
@@ -7217,7 +7736,7 @@ function create(deps = {}) {
   /** The ACCOUNT grain alone, as `effectiveGrants` answers it (a NEW
    *  conversation has no facts for a rule to match, so only the account's
    *  own rows apply to a composed message). */
-  function effectiveForAccount(adapterId) { return F.effectiveGrants({ account: accountGrainOf(adapterId) }, {}); }
+  function effectiveForAccount(adapterId) { return F.effectiveGrants({ account: accountGrainOf(adapterId) }, {}, { accountKeys: accountGrantKeys(adapterId) }); }
   /** The account-scope grants (reach to the WHOLE account). */
   function accountScopeGrants(adapterId) { return (store.index.table('accountGrants') || []).filter((g) => g && g.scope && g.scope.kind === 'adapter' && g.scope.id === adapterId); }
   const COMPOSE_NOT_FOUND = 'no such account (not found, or you have no access to the whole account) — `vibespace-channels status` shows your access';
@@ -7838,16 +8357,19 @@ function create(deps = {}) {
   async function speakUnknown(p) {
     if (!userTodos || typeof userTodos.add !== 'function') return;
     try {
-      const title = String(p.title || p.convId).slice(0, 120);
+      const recU = adapterRecords().adapters.find((r) => r.id === p.adapterId) || null;
+      const adapterLabel = recU ? (recU.label || recU.id) : p.adapterId;
+      const title = String(conversationName(p.adapterId, p.convId) || p.title || p.convId || '').slice(0, 120);   // B-c127: the ladder (a compose: its subject)
       const item = userTodos.add(INBOX_KEY, {
         origin: 'channels', // B-328d
         text: `Outbox: a send to ${title} has an UNKNOWN outcome`,
-        detail: `Proposal ${p.id} (${p.adapterId}): the adapter did not answer whether the message landed. It is NOT retried automatically — a duplicate in somebody else's room is worse than asking. Check the conversation on the platform; the Outbox window shows the proposal.\n\n${p.reason || ''}`,
+        ...(p.convId ? { action: { type: 'open-channel', adapterId: p.adapterId, convId: p.convId, key: `${p.adapterId}/${p.convId}` } } : {}),   // B-c127: a click opens the conversation
+        detail: `A send in ${adapterLabel} · ${title}: the adapter did not answer whether the message landed. It is NOT retried automatically — a duplicate in somebody else's room is worse than asking. Check the conversation on the platform; the Outbox window shows the proposal.\n\n${p.reason || ''}`,
         urgency: 'high', by: 'agent', sessionName: 'Channels',
         i18n: {
           text: { key: i18nKey('Outbox: a send to {title} has an UNKNOWN outcome'), params: { title } },
           detail: [
-            { key: i18nKey('Proposal {id} ({adapter}): the adapter did not answer whether the message landed. It is NOT retried automatically — a duplicate in somebody else\'s room is worse than asking.'), params: { id: p.id, adapter: p.adapterId } },
+            { key: i18nKey('A send in {adapter} · {title}: the adapter did not answer whether the message landed. It is NOT retried automatically — a duplicate in somebody else\'s room is worse than asking.'), params: { adapter: adapterLabel, title } },
             { key: i18nKey('Check the conversation on the platform; the Outbox window shows the proposal.') },
           ],
           source: INBOX_SOURCE,
@@ -7906,7 +8428,9 @@ function create(deps = {}) {
       const anchorR = p.compose ? null : anchorFactsOf(p);
       answer = await e.adapter.reconcile(p.convId, { idemKey: p.id, sentAt: p.attemptAt || p.updatedAt || p.at, text: (p.wire && p.wire.text) || p.text, replyTo: p.replyTo, as: p.sendAs, handle: p.sendHandle || null, ...(p.compose ? { compose: p.compose } : {}), ...(anchorR ? { replyAnchor: anchorR } : {}), ...(p.replyEnvelope ? { envelope: p.replyEnvelope } : {}), ...(p.inThread ? { inThread: true, threadKey: p.threadKey || null } : {}) });
     } catch (err) {
-      answer = { unknown: true, reason: `reconcile threw: ${(err && err.message) || err}`, detail: { threw: true, code: (err && err.code) || null } };
+      // verify r3: a RATE refusal inside the reconcile is thrown by the adapter now (never an `unknown` that invited the next
+      // press into the vendor's stop) — the answer names the wait the vendor gave, so the owner's next look can say it
+      answer = { unknown: true, reason: `reconcile threw: ${(err && err.message) || err}`, detail: { threw: true, code: (err && err.code) || null, ...(err && err.detail && Number(err.detail.retryAfterSec) > 0 ? { retryAfterSec: Number(err.detail.retryAfterSec) } : {}) } };
     }
     const v = P.reconcileVerdict(answer);
     const stamp = (q) => { q.reconcile = { n, lastAt: t, lastBy: by, lastAnswer: v.answer, lastWhy: v.reason || null, detail: v.detail || null, resolvedAt: v.to ? t : null }; };
@@ -8097,13 +8621,16 @@ function create(deps = {}) {
     }
     // verify r2 (IDENTITY): a drafter whose access to the conversation was removed hears the FATE only
     const withheld = !drafterSees(cur);
-    const text = P.renderReceiptBlock(rc, { adapterLabel: rec ? (rec.label || rec.id) : p.adapterId, title: p.title, text: p.text, proposed: p.originalText, withheld });
+    // B-c127: the receipt names the conversation by the ladder (never `proposal p-…`), and its card opens it
+    const rTitle = conversationName(p.adapterId, p.convId) || p.title || p.convId || '';
+    const text = P.renderReceiptBlock(rc, { adapterLabel: rec ? (rec.label || rec.id) : p.adapterId, title: rTitle, text: p.text, proposed: p.originalText, withheld });
     const fromName = 'Channels · Outbox';
-    const cardText = withheld ? `Receipt: proposal ${p.id} ${rc.status} (access removed)` : `Receipt: proposal ${p.id} ${rc.status}${rc.reason ? ` — ${String(rc.reason).slice(0, 160)}` : ''}`;
+    const cardText = withheld ? `Receipt: your proposal — ${rc.status} (access removed)` : `${CR.nameOf([rTitle], p.convId || p.id)}: receipt — ${rc.status}${rc.reason ? ` — ${String(rc.reason).slice(0, 160)}` : ''}`;
+    const channel = !withheld && p.convId ? CR.refOf({ adapterId: p.adapterId, convId: p.convId, name: rTitle, account: rec ? (rec.label || rec.id) : null, vendor: rec ? rec.kind : null }) : null;
     let r = null, stashed = false, stashErr = null;
     if (!deliver || typeof deliver.deliverToConversation !== 'function') r = { ok: false, reason: 'no delivery ladder wired', refused: 'unwired' };
     else {
-      try { r = await deliver.deliverToConversation(cid, text, { kind: 'notification', noWake: !wake, spendReason: 'channel-receipt', fromName, cardText }); }
+      try { r = await deliver.deliverToConversation(cid, text, { kind: 'notification', noWake: !wake, spendReason: 'channel-receipt', fromName, cardText, ...(channel ? { channel } : {}) }); }
       catch (err) { r = { ok: false, reason: `ladder threw: ${(err && err.message) || err}`, refused: 'error' }; }
       if (!(r && r.ok) && typeof deliver.stashFor === 'function') {
         // verify r4: a stash whose disk write failed THROWS (the entry is not stored) — the card says that, never "waiting"
@@ -8165,7 +8692,7 @@ function create(deps = {}) {
     const rec = adapterRecords().adapters.find((r) => r.id === en.adapterId) || null;
     if (awaiting.length) {
       if (!userTodos || typeof userTodos.add !== 'function') return;
-      const title = String(en.title || en.id).slice(0, 120);
+      const title = String((rec && humanNameOf(rec, en)) || en.id).slice(0, 120);   // B-c127: the ladder
       const text = `Proposals awaiting approval in ${title}`;
       const latest = awaiting[0];
       const agentName = latest.draftedBy && latest.draftedBy.kind === 'agent' ? (latest.draftedBy.name || latest.draftedBy.id) : null;
@@ -8184,8 +8711,11 @@ function create(deps = {}) {
         source: INBOX_SOURCE,
       };
       try {
-        const item = userTodos.add(INBOX_KEY, { origin: 'channels', text, detail, urgency: 'normal', by: 'agent', sessionName: 'Channels', i18n });
+        const prevId = en.pendingTodoId || null;
+        const item = userTodos.add(INBOX_KEY, { origin: 'channels', text, detail, urgency: 'normal', by: 'agent', sessionName: 'Channels', i18n, action: { type: 'open-channel', adapterId: en.adapterId, convId: en.id, key: en.key } });   // B-c127: a click opens the conversation; verify r1 F2: `key` = the item's identity
         if (item && item.id) await store.index.update(() => { const e2 = store.index.entry(en.adapterId, en.id, { create: false }); if (e2) e2.pendingTodoId = item.id; });
+        // B-c127: a pointer filed before it carried its action (or under an older name) is a DIFFERENT item now — retract it, never orphan it
+        if (item && item.id && prevId && prevId !== item.id && typeof userTodos.get === 'function') { try { const it = userTodos.get(prevId); if (it && it.status === 'open' && it.sessionKey === INBOX_KEY) userTodos.setStatus(prevId, 'done', RESOLVED_BY); } catch { /* the new pointer stands */ } }
       } catch (e) {
         // DEGRADE, never fail the proposal: the rail badge and the Outbox
         // window are the recorded surfaces; the pointer is a convenience.
@@ -8249,8 +8779,10 @@ function create(deps = {}) {
     const { en, rec } = convFor(adapterId, convId);
     if (!en || !rec || !ctx || ctx.kind !== 'agent') return ACL.notFound();
     const reach = reachFor(ctx, rec, en);
-    if (ACL.canSee(reach.level)) return { ok: true, already: true, level: reach.level };
-    if (!ACL.canRequest(reach.level)) return ACL.notFound();
+    // already allowed — no card (lane everyone-principal: an All-agents grant answers every agent's request here)
+    if (ACL.canSee(reach.level)) return { ok: true, already: true, level: reach.level, via: reach.via || null };
+    // lane channel-agent-watch W2: a conversation the account's directory lists to agents is requestable by its title
+    if (!ACL.canRequest(reach.level) && !directoryLists(rec, en)) return ACL.notFound();
     const t = now();
     const reason = String(why || '').trim().slice(0, 500);
     if (!reason) return { ok: false, code: 'bad-request', error: 'a reason is required — the user reads it' };
@@ -8259,16 +8791,17 @@ function create(deps = {}) {
     const req = { id: `rq-${t.toString(36)}-${Math.random().toString(36).slice(2, 8)}`, principal: { kind: 'agent', id: ctx.id, name: ctx.name || null }, scope: { kind: 'conversation', id: en.key }, why: reason, at: t, status: 'open', todoId: null, decidedAt: null };
     if (userTodos && typeof userTodos.add === 'function') {
       try {
-        const title = String(en.title || en.id).slice(0, 120);
+        const title = String(humanNameOf(rec, en) || en.id).slice(0, 120);   // B-c127: the ladder
         const item = userTodos.add(INBOX_KEY, {
           origin: 'channels', // B-328d
           text: `${ctx.name || ctx.id} requests access to ${title}`,
-          detail: `Agent session ${ctx.name || ''} (${ctx.id}) asks to see ${rec.label || rec.id} · ${en.title || en.id}.\nReason: ${reason}\n\nApprove or deny from the conversation's Reach dialog (rail → Channels → row menu → Reach…). Approving grants that ONE session visibility on that ONE conversation; group defaults are untouched.`,
+          action: { type: 'open-channel', adapterId: en.adapterId, convId: en.id, key: en.key },   // B-c127: a click opens the conversation (its Reach dialog is there)
+          detail: `Agent session ${ctx.name || ''} (${ctx.id}) asks to see ${rec.label || rec.id} · ${title}.\nReason: ${reason}\n\nApprove or deny from the conversation's Reach dialog (rail → Channels → row menu → Reach…). Approving grants that ONE session visibility on that ONE conversation; group defaults are untouched.`,
           urgency: 'normal', by: 'agent', sessionName: 'Channels',
           i18n: {
             text: { key: i18nKey('{agent} requests access to {title}'), params: { agent: ctx.name || ctx.id, title } },
             detail: [
-              { key: i18nKey('Agent session {name} ({id}) asks to see {adapter} · {title}.'), params: { name: ctx.name || '', id: ctx.id, adapter: rec.label || rec.id, title: en.title || en.id } },
+              { key: i18nKey('Agent session {name} ({id}) asks to see {adapter} · {title}.'), params: { name: ctx.name || '', id: ctx.id, adapter: rec.label || rec.id, title } },
               { key: i18nKey('Reason: {reason}'), params: { reason: String(reason) } },
               { key: i18nKey('Approve or deny from the conversation\'s Reach dialog (rail → Channels → row menu → Reach…). Approving grants that ONE session visibility on that ONE conversation; group defaults are untouched.') },
             ],
@@ -8289,6 +8822,7 @@ function create(deps = {}) {
     let hit = null;
     for (const k in live) { const x = live[k]; if (x && (x.reachRequests || []).some((r) => r.id === requestId)) { hit = k; break; } }
     const en = hit ? store.index.peek(hit) : null;
+    if (!en && (store.index.table('watchRequests') || []).some((r) => r && r.id === requestId)) return decideWatchRequest(requestId, approve, by);
     if (!en) return { ok: false, code: 'not-found', error: 'No such request' };
     const req = en.reachRequests.find((r) => r.id === requestId);
     if (req.status !== 'open') return { ok: false, code: 'bad-state', error: `request already ${req.status}` };
@@ -8316,10 +8850,215 @@ function create(deps = {}) {
     return { ok: true, request: { ...req, status: approve ? 'approved' : 'denied' }, grant };
   }
 
+  // ── lane channel-agent-watch (the owner, 2026-10-01): an agent's OWN watch + the directory ──────────────────
+  /** W2: does this account's directory list THIS conversation to agents (its title, kind, age, member count — never a
+   *  message, never a name)? PURE `ACL.directoryOf(rec)`: groups ON, single chats OFF unless the owner flipped them. */
+  function directoryLists(rec, en) {
+    if (!rec || !en || rec.enabled === false) return false;
+    let mod = null; try { mod = registry.get(rec.kind); } catch {}
+    if (mod && mod.builtin) return false;   // the built-in Agents adapter answers reach with msg-acl (§12.3)
+    return ACL.directoryListable(ACL.directoryOf(rec), en.kind);
+  }
+  /** The account's directory switches — the Edit dialog's `PUT {agentDirectory:{groups, singles}}`. */
+  async function setAgentDirectory(adapterId, value) {
+    const rec = adapterRecords().adapters.find((r) => r.id === adapterId);
+    if (!rec) return { ok: false, code: 'not-found', error: 'no such account' };
+    const v = ACL.validateDirectory(value);
+    if (!v.ok) return { ok: false, code: 'bad-request', error: v.error };
+    await store.adapters.update(() => { rec.agentDirectory = v.directory; });
+    try { store.audit({ kind: 'acl', op: 'directory', adapterId, directory: v.directory, at: now(), by: 'user' }); } catch {}
+    notify([]);
+    return { ok: true, agentDirectory: v.directory };
+  }
+  /** W1: what `watch <conv|account>` names, judged for THIS agent — reach FIRST (a hidden conversation is the uniform
+   *  not-found; one it may only REQUEST is refused by name, pointing at `request`: a watch never grants reading). */
+  function watchTargetOf(ctx, ref) {
+    const r0 = String(ref || '').trim();
+    if (!r0) return { ok: false, code: 'bad-request', error: 'name a conversation (<adapter>/<conversation id>, as `list` prints it) or an account (<adapter>)' };
+    const i = r0.indexOf('/');
+    if (i > 0) {
+      const { en, rec } = convFor(r0.slice(0, i), r0.slice(i + 1));
+      if (!en || !rec || rec.enabled === false) return ACL.notFound();
+      const reach = reachFor(ctx, rec, en);
+      if (!ACL.canSee(reach.level)) {
+        if (ACL.canRequest(reach.level) || directoryLists(rec, en)) return { ok: false, code: 'no-access', error: `you cannot read ${r0} yet, so you cannot watch it — \`vibespace-channels request ${r0} "why"\` asks the user for access first (a watch never grants reading)` };
+        return ACL.notFound();
+      }
+      return { ok: true, adapterId: rec.id, rec, en, key: en.key, title: humanNameOf(rec, en) || en.id, grain: { kind: 'conversation', convId: en.id }, grainNow: () => convGrainOf(store.index.peek(en.key)), raw: () => { const e2 = store.index.peek(en.key) || {}; return { access: e2.access || [], watchers: e2.watchers || [] }; } };
+    }
+    const rec = adapterRecords().adapters.find((x) => x.id === r0);
+    let mod = null; try { mod = rec ? registry.get(rec.kind) : null; } catch {}
+    if (!rec || rec.enabled === false || (mod && mod.builtin)) return ACL.notFound();
+    const acctReach = ACL.effective(ctx, { key: '\u0000', adapterId: rec.id }, (store.index.table('accountGrants') || []).filter((g) => g && g.scope && g.scope.kind === 'adapter' && g.scope.id === rec.id));
+    const named = (effectiveForAccount(rec.id) || { access: [] }).access.some((x) => F.rowNames(x.row, ctx));
+    if (!ACL.canSee(acctReach.level) && !named) {
+      // the account is named in nothing this agent sees ⇒ the uniform not-found; else it is told what it lacks
+      const seesSome = Object.values(store.index.live()).some((en) => en && en.adapterId === rec.id && ACL.canSee(reachFor(ctx, rec, en).level));   // B-f32b: a scan reads live(), never a copy of the index (composed at the 2.369.202 integration)
+      return seesSome ? { ok: false, code: 'no-access', error: `you do not have access to the whole account ${rec.id} — watch one conversation you can read (<adapter>/<conversation id>), or ask the user for the account` } : ACL.notFound();
+    }
+    return { ok: true, adapterId: rec.id, rec, en: null, key: null, title: rec.label || rec.id, grain: { kind: 'account' }, grainNow: () => F.grainOf(accountGrainOf(rec.id), undefined, { inherited: accountGrantKeys(rec.id) }), raw: () => { const g = accountGrainOf(rec.id) || {}; return { access: g.access || [], watchers: g.watchers || [] }; } };
+  }
+  /** The keywords → the watch's inline filter (any of them); none = every new message. */
+  function watchFilterOf(keywords) {
+    const kws = (Array.isArray(keywords) ? keywords : []).map((x) => String(x || '').trim()).filter(Boolean).slice(0, 10);
+    if (!kws.length) return { ok: true, filter: null };
+    const fv = F.validateFilter({ match: 'any', rules: kws.map((value) => ({ kind: 'keyword', value })) });
+    return fv.ok ? { ok: true, filter: fv.filter, keywords: kws } : { ok: false, code: 'bad-filter', error: fv.error };
+  }
+  /**
+   * W1 — `vibespace-channels watch <conv|account> [--mode next-turn|wake] [--keyword …]`: the agent's OWN notification on
+   * a grain it can read. `next-turn` (free) is written at once — ONE row per (agent, grain) with `origin:'agent'`, never
+   * over a row the user set for it (widen-only: the user's row stays, said); `wake` (a billed turn) is NOT the agent's
+   * to grant — it files ONE request the user approves with one click (For you; the same decide route as an access
+   * request), naming exactly what Approve writes (grain, mode, keywords, the daily cap it asks for).
+   */
+  async function agentWatch(ctx, ref, { delivery = 'next-turn', keywords = [], dailyWakeCap = null, why = '' } = {}) {
+    if (!ctx || ctx.kind !== 'agent' || !ctx.id) return ACL.notFound();
+    const d = delivery === undefined || delivery === null || delivery === '' ? 'next-turn' : delivery;
+    if (!F.DELIVERY_MODES.includes(d)) return { ok: false, code: 'bad-request', error: '--mode must be next-turn (free: the news rides your next turn) or wake (a billed turn now — the user approves it)' };
+    const tg = watchTargetOf(ctx, ref);
+    if (!tg.ok) return tg;
+    const fl = watchFilterOf(keywords);
+    if (!fl.ok) return fl;
+    const principal = { kind: 'agent', id: ctx.id, name: ctx.name || null };
+    const pk = pkOf(principal);
+    const cur = tg.grainNow();
+    const mine = cur.watchers.find((w) => pkOf(w.principal) === pk);
+    if (mine && F.watchOriginOf(mine) === 'user') {
+      return { ok: true, already: true, setBy: 'user', delivery: F.deliveryModeOf(mine), notify: mine.notify, target: tg.key || tg.adapterId,
+        note: `the user already notifies you here (${F.deliveryModeOf(mine) === 'next-turn' ? 'on your next turn' : mine.notify === 'digest' ? 'a digest' : 'a wake'}) — that row is theirs; nothing was changed` };
+    }
+    // verify r1 F1: the USER removed this agent's own row here (Notify…'s whole-list save) — the removal STICKS: a direct
+    // re-registration is refused by name; a `wake` ask may still be filed (the user decides; their Approve lifts the mark)
+    const scopeW = tg.key ? { kind: 'conversation', id: tg.key } : { kind: 'adapter', id: tg.adapterId };
+    const blk = agentWatchBlockOf(scopeW, pk);
+    if (blk && d !== 'wake') return { ok: false, code: 'removed-by-user', error: `the user removed your notification on ${tg.key ? agentId(tg.key) : tg.adapterId} (${new Date(blk.at).toISOString().slice(0, 16).replace('T', ' ')} UTC) — it is theirs to restore: ask them (vibespace-ask), or file a wake ask (--mode wake) they approve; re-registering it yourself is refused` };
+    // verify r1 F2: a bound on the rows one agent may hold of its OWN across every grain, said with the count
+    if (!(mine && F.watchOriginOf(mine) === 'agent') && agentWatchCount(pk) >= F.MAX_AGENT_WATCHES) return { ok: false, code: 'watch-limit', error: `you already hold ${F.MAX_AGENT_WATCHES} notifications of your own (the limit) — \`vibespace-channels unwatch <conv>\` frees one; the user can set more for you in Notify…` };
+    const cap = dailyWakeCap === null || dailyWakeCap === undefined || dailyWakeCap === '' ? F.DEFAULT_DAILY_WAKE_CAP : Number(dailyWakeCap);
+    const row = { principal, origin: 'agent', delivery: d, notify: 'wake', mode: fl.filter ? 'filtered' : 'all', ...(fl.filter ? { filter: fl.filter } : {}), dailyWakeCap: Number.isFinite(cap) ? Math.max(1, Math.min(F.MAX_DAILY_WAKE_CAP, Math.round(cap))) : F.DEFAULT_DAILY_WAKE_CAP };
+    if (d === 'wake') return fileWatchRequest(ctx, tg, row, why);
+    // the grain AS READ (the legacy lift + the access rule applied) minus this agent's row, plus the new one
+    const r = await setGrain(tg.adapterId, tg.grain, { watchers: [...cur.watchers.filter((w) => w && pkOf(w.principal) !== pk), row] }, { by: `agent:${ctx.id}` });
+    if (!r || !r.ok) return r;
+    try { store.audit({ kind: 'acl', op: 'agent-watch', principal, scope: tg.key ? { kind: 'conversation', id: tg.key } : { kind: 'adapter', id: tg.adapterId }, delivery: d, keywords: fl.keywords || [], at: now(), by: 'agent' }); } catch {}
+    return { ok: true, set: true, delivery: d, target: tg.key ? agentId(tg.key) : tg.adapterId, title: tg.key ? agentTitle(tg.en, tg.en.id) : tg.title, keywords: fl.keywords || [], replaced: !!mine };
+  }
+  /** W1: `unwatch` removes ONLY the agent's own row (`origin:'agent'`) at that grain — the user's rows are theirs. */
+  async function agentUnwatch(ctx, ref) {
+    if (!ctx || ctx.kind !== 'agent' || !ctx.id) return ACL.notFound();
+    const tg = watchTargetOf(ctx, ref);
+    if (!tg.ok && tg.code !== 'no-access') return tg;
+    const r0 = String(ref || '').trim();
+    const i = r0.indexOf('/');
+    const en0 = tg.ok ? tg.en : (i > 0 ? convFor(r0.slice(0, i), r0.slice(i + 1)).en : null);
+    const raw = tg.ok ? tg.raw() : { access: (en0 && en0.access) || [], watchers: (en0 && en0.watchers) || [] };
+    const cur = tg.ok ? tg.grainNow() : convGrainOf(en0);
+    const pk = pkOf({ kind: 'agent', id: ctx.id });
+    const own = raw.watchers.find((w) => w && pkOf(w.principal) === pk && F.watchOriginOf(w) === 'agent');
+    if (!own) return { ok: false, code: 'not-watching', error: 'nothing of yours to remove here — `vibespace-channels status` lists what notifies you (a notification the user set is theirs to remove)' };
+    const adapterId = tg.ok ? tg.adapterId : r0.slice(0, i);
+    const grain = tg.ok ? tg.grain : { kind: 'conversation', convId: r0.slice(i + 1) };
+    const r = await setGrain(adapterId, grain, { watchers: cur.watchers.filter((w) => !(w && pkOf(w.principal) === pk && F.watchOriginOf(w) === 'agent')) }, { by: `agent:${ctx.id}` });
+    if (!r || !r.ok) return r;
+    try { store.audit({ kind: 'acl', op: 'agent-unwatch', principal: { kind: 'agent', id: ctx.id }, scope: grain.kind === 'conversation' ? { kind: 'conversation', id: `${adapterId}/${grain.convId}` } : { kind: 'adapter', id: adapterId }, at: now(), by: 'agent' }); } catch {}
+    return { ok: true, removed: true };
+  }
+  /** verify r1 F1: the mark the USER's removal of an agent's own watch leaves — `agentWatchBlocks[scope|principal] = {at, by}`;
+   *  written by setGrain on a user's whole-list save that drops an origin-agent row, lifted by a row the user writes or
+   *  approves for that agent at that grain. */
+  const blockKey = (scope, pk) => `${scope.kind}:${scope.id}|${pk}`;
+  function agentWatchBlockOf(scope, pk) { const b = store.index.table('agentWatchBlocks');   // B-f32b: the live table, read-only (no copy)
+    const k = blockKey(scope, pk); return b && typeof b === 'object' && b[k] ? b[k] : null; }
+  /** verify r1 F2: how many rows of its OWN (origin agent) one agent holds across every grain. */
+  function agentWatchCount(pk) {
+    let n = 0;   // B-f32b: the live rows and tables, read-only — no copy of the index (composed at the 2.369.202 integration)
+    const count = (ws) => { for (const w of Array.isArray(ws) ? ws : []) if (w && pkOf(w.principal) === pk && F.watchOriginOf(w) === 'agent') n++; };
+    for (const en of Object.values(store.index.live())) count(en && en.watchers);
+    for (const tb of ['accountAssignments', 'patternAssignments']) for (const g of Object.values(store.index.table(tb) || {})) count(g && g.watchers);
+    return n;
+  }
+  function openWatchRequestsOf(pk) { return (store.index.table('watchRequests') || []).filter((r) => r && r.status === 'open' && r.principal && pkOf(r.principal) === pk); }
+  /** W1: a WAKE watch is the user's money — ONE request with the frozen row, a For-you item whose Approve (the existing
+   *  reach-request decide route) writes exactly it; a second ask while one is open is the same request. */
+  async function fileWatchRequest(ctx, tg, row, why) {
+    const t = now();
+    const scope = tg.key ? { kind: 'conversation', id: tg.key } : { kind: 'adapter', id: tg.adapterId };
+    const open = (store.index.table('watchRequests') || []).find((r) => r && r.status === 'open' && r.principal && r.principal.id === ctx.id && r.scope && r.scope.kind === scope.kind && r.scope.id === scope.id);
+    if (open) return { ok: true, proposed: true, already: true, request: { id: open.id, status: open.status } };
+    // verify r1 F2: a bound on the wake asks one agent may have waiting, said with the count; the owner reads the totals
+    const pkR = pkOf(row.principal);
+    const waiting = openWatchRequestsOf(pkR);
+    if (waiting.length >= F.MAX_OPEN_WATCH_REQUESTS) return { ok: false, code: 'watch-request-limit', error: `${waiting.length} wake asks of yours are already waiting for the user — no more until they decide; --mode next-turn (free) needs no approval` };
+    const own = agentWatchCount(pkR);
+    const reason = String(why || '').trim().slice(0, 500);
+    const kws = row.filter ? row.filter.rules.map((x) => x.value) : [];
+    const req = { id: `wr-${t.toString(36)}-${crypto.randomBytes(3).toString('hex')}`, kind: 'watch', principal: row.principal, scope, adapterId: tg.adapterId, grain: tg.grain, watch: row, why: reason, at: t, status: 'open', todoId: null, decidedAt: null };
+    if (userTodos && typeof userTodos.add === 'function') {
+      try {
+        const title = String(tg.title || tg.key || tg.adapterId).slice(0, 120);
+        const where = tg.key ? title : `the whole account ${tg.rec.label || tg.adapterId}`;
+        const what = kws.length ? `on messages with: ${kws.join(', ')}` : 'on every new message';
+        const item = userTodos.add(INBOX_KEY, {
+          origin: 'channels',
+          text: `${ctx.name || ctx.id} asks to be woken by ${where}`,
+          detail: `Approve writes: wake ${ctx.name || ctx.id} now (a billed turn) ${what} in ${where}, at most ${row.dailyWakeCap} wakes a day.${reason ? `\nReason: ${reason}` : ''}\nIt already has ${own} notifications of its own and ${waiting.length} wake asks waiting.\nDeny changes nothing. Without it, the agent can still ask for the news on its next turn (free).`,
+          urgency: 'normal', by: 'agent', sessionName: 'Channels', action: { type: 'channel-watch-request', id: req.id },
+          i18n: {
+            text: { key: i18nKey('{agent} asks to be woken by {where}'), params: { agent: ctx.name || ctx.id, where } },
+            detail: [
+              { key: kws.length ? i18nKey('Approve writes: wake {agent} now (a billed turn) on messages with: {words} — in {where}, at most {cap} wakes a day.') : i18nKey('Approve writes: wake {agent} now (a billed turn) on every new message in {where}, at most {cap} wakes a day.'), params: { agent: ctx.name || ctx.id, words: kws.join(', '), where, cap: row.dailyWakeCap } },
+              ...(reason ? [{ key: i18nKey('Reason: {reason}'), params: { reason } }] : []),
+              { key: i18nKey('It already has {n} notifications of its own and {m} wake asks waiting.'), params: { n: own, m: waiting.length } },
+              { key: i18nKey('Deny changes nothing. Without it, the agent can still ask for the news on its next turn (free).') },
+            ],
+            source: INBOX_SOURCE,
+          },
+        });
+        if (item && item.id) req.todoId = item.id;
+      } catch (e) {
+        // verify r1 F2: the tray's own cap (20 open Channels items) refused the item — nothing is filed (it shipped: the
+        // request was stored open with no item the user could ever decide, and the agent was told the tray showed it)
+        log.warn(`[channels] ${scope.id}: could not file the watch request: ${(e && e.message) || e}`);
+        return { ok: false, code: 'tray-full', error: `the user's For-you tray cannot take another Channels item right now (${String((e && e.message) || e).slice(0, 90)}) — nothing was filed; ask again later, or use --mode next-turn (free, no approval)` };
+      }
+    }
+    // the table keeps at most 100 requests: DECIDED ones go first, an open one is never dropped (verify r1 F2)
+    await store.index.update((ix) => { const list = Array.isArray(ix.watchRequests) ? ix.watchRequests : (ix.watchRequests = []); list.push(req); while (list.length > 100) { const i = list.findIndex((r) => !(r && r.status === 'open')); if (i < 0) break; list.splice(i, 1); } });
+    try { store.audit({ kind: 'acl', op: 'watch-request', principal: req.principal, scope, delivery: 'wake', at: t, by: 'agent' }); } catch {}
+    notify([]);
+    return { ok: true, proposed: true, request: { id: req.id, status: 'open' }, dailyWakeCap: row.dailyWakeCap };
+  }
+  /** Approve = EXACTLY the frozen row, written through `setGrain` (the access rule re-judged now); deny = nothing. */
+  async function decideWatchRequest(requestId, approve, by = 'user') {
+    const req0 = (store.index.table('watchRequests') || []).find((r) => r && r.id === requestId);
+    if (!req0) return { ok: false, code: 'not-found', error: 'No such request' };
+    if (req0.status !== 'open') return { ok: false, code: 'bad-state', error: `request already ${req0.status}` };
+    const t = now();
+    if (approve) {
+      const pk = pkOf(req0.principal);
+      const en1 = req0.grain && req0.grain.kind === 'conversation' ? store.index.peek(`${req0.adapterId}/${req0.grain.convId}`) : null;
+      if (req0.grain && req0.grain.kind === 'conversation' && !en1) return { ok: false, code: 'not-found', error: 'that conversation is gone' };
+      const g = en1 ? convGrainOf(en1) : F.grainOf(accountGrainOf(req0.adapterId), undefined, { inherited: accountGrantKeys(req0.adapterId) });
+      const others = g.watchers.filter((w) => w && pkOf(w.principal) !== pk);
+      const w = await setGrain(req0.adapterId, req0.grain, { watchers: [...others, { ...req0.watch }] }, { by });
+      if (!w || !w.ok) return w || { ok: false, code: 'error', error: 'the notification could not be written' };
+    }
+    let applied = false;
+    await store.index.update((ix) => { const r2 = (Array.isArray(ix.watchRequests) ? ix.watchRequests : []).find((r) => r && r.id === requestId); if (!r2 || r2.status !== 'open') return; applied = true; r2.status = approve ? 'approved' : 'denied'; r2.decidedAt = t; r2.decidedBy = by; });
+    if (!applied) return { ok: false, code: 'bad-state', error: 'request already decided (in another window, a moment ago)' };
+    try { store.audit({ kind: 'acl', op: approve ? 'watch-approve' : 'watch-deny', principal: req0.principal, scope: req0.scope, requestId, at: t, by }); } catch {}
+    if (req0.todoId && userTodos && typeof userTodos.get === 'function') {
+      try { const it = userTodos.get(req0.todoId); if (it && it.status === 'open' && it.sessionKey === INBOX_KEY) userTodos.setStatus(req0.todoId, 'done', RESOLVED_BY); } catch {}
+    }
+    notify([]);
+    return { ok: true, request: { ...req0, status: approve ? 'approved' : 'denied' } };
+  }
+
   // ── the agent-facing reads (§11) — reach FIRST, uniform not-found ────────
   /** Every conversation this principal may SEE or REQUEST — hidden ones are
    *  simply absent (no oracle). Never a message body. */
-  function listFor(ctx) {
+  function listFor(ctx, { all = false } = {}) {
     const t = now();
     const recs = adapterRecords().adapters;
     const byId = new Map(recs.map((r) => [r.id, r]));
@@ -8328,7 +9067,16 @@ function create(deps = {}) {
       const rec = byId.get(en.adapterId);
       if (!rec || rec.enabled === false) continue;
       const reach = reachFor(ctx, rec, en);
-      if (reach.level === 'hidden') continue;
+      if (reach.level === 'hidden') {
+        // lane channel-agent-watch W2: `list --all` — the account's directory names a conversation the agent may not
+        // read: its TITLE (through the belt), kind, last activity and member COUNT, marked requestable; never a message,
+        // never a participant's name
+        if (all && directoryLists(rec, en)) {
+          const members = String(en.participants || '').split(',').map((x) => x.trim()).filter(Boolean).length;
+          out.push({ key: agentId(en.key), adapterId: en.adapterId, adapter: rec.label || rec.id, id: agentId(en.id), title: agentTitle(en, en.id), kind: en.kind, level: 'requestable', directory: true, lastAt: en.lastAt || null, members: members || null });
+        }
+        continue;
+      }
       const c = registry.capsOf(rec.kind);
       const who = sendIdentityFor(rec, en, t);
       // R4: THE TWO FACTS SEPARATELY — the caller's access in effect here
@@ -8345,7 +9093,7 @@ function create(deps = {}) {
         canSend: !!who.as, sendWhy: who.why, sendAs: who.as, identityMarking: c.identityMarking,
         policy: policyFor(rec, en).mode,
         access: acc.length ? { authority, via: acc[0].source, as: acc[0].row.principal.kind } : null,
-        watched: wat.length ? { notify: wat[0].watcher.notify, mode: wat[0].watcher.mode, via: wat[0].source, as: wat[0].watcher.principal.kind } : null,
+        watched: wat.length ? { notify: wat[0].watcher.notify, mode: wat[0].watcher.mode, via: wat[0].source, as: wat[0].watcher.principal.kind, delivery: F.deliveryModeOf(wat[0].watcher), setBy: F.watchOriginOf(wat[0].watcher) } : null,
         // the pre-R4 names (a CLI older than this server reads them)
         assigned: acc.length > 0, assignedVia: acc.length ? acc[0].source : null, authority,
         awaiting: proposalsFor(en.key).filter((p) => p.state === 'awaiting-approval' && p.draftedBy && p.draftedBy.id === ctx.id).length,
@@ -8538,7 +9286,7 @@ function create(deps = {}) {
         if (w.filter && w.mode === 'filtered' && pk) return { ...w, filterId: inlineFilterIdFor(site, pk, prevW.get(pk)) };
         return w;
       });
-      const vw = F.validateWatchers(minted, access);
+      const vw = F.validateWatchers(minted, access, { inherited: siteInheritedOf(site) });   // lane channel-agent-watch W3: access here OR above
       if (!vw.ok) return { ok: false, code: vw.code, error: vw.error, ...(vw.why ? { why: vw.why } : {}), ...(vw.principal ? { principal: vw.principal } : {}), ...(vw.index !== undefined ? { index: vw.index } : {}) };
       watchers = [];
       for (let i = 0; i < vw.watchers.length; i++) {
@@ -8556,8 +9304,9 @@ function create(deps = {}) {
         watchers.push({ ...w, createdAt: pw ? (pw.createdAt || t) : t, updatedAt: t, createdBy: pw ? (pw.createdBy || by) : by, estimateAtSet: estimateOf(src.estimateAtSet, t) || (pw ? pw.estimateAtSet || null : null), stats: pw && pw.stats ? pw.stats : { wakes: [], hits: [] } });
       }
     } else {
-      // access removed ⇒ its watcher goes too (notification needs access)
-      watchers = cur.watchers.filter((w) => granted.has(pkOf(w.principal)));
+      // access removed ⇒ its watcher goes too (notification needs access) — unless access ABOVE this grain still holds it (W3)
+      const keep = F.eligibleKeys({ access, inherited: siteInheritedOf(site) });
+      watchers = cur.watchers.filter((w) => F.eligibleFor(keep, w.principal));
     }
     const beforeA = new Set(cur.access.map((r) => pkOf(r.principal)));
     const beforeW = new Set(cur.watchers.map((w) => pkOf(w.principal)));
@@ -8566,7 +9315,13 @@ function create(deps = {}) {
     const changedW = new Set([...beforeW].filter((pk) => { const nw = watchers.find((w) => pkOf(w.principal) === pk); const ow = prevW.get(pk); return !nw || JSON.stringify({ ...nw, stats: null, updatedAt: null }) !== JSON.stringify({ ...ow, stats: null, updatedAt: null }); }));
     const oldFilterIds = cur.watchers.map((w) => w.filterId).filter(Boolean);
     const empty = !access.length && !watchers.length;
+    // verify r1 F1: a user's whole-list write that DROPS an agent's own row leaves a mark that agent cannot write over
+    // (its `watch` there is refused by name); a row the user writes or approves for that agent here lifts it
+    const byUser = !/^agent:/.test(String(by));
+    const droppedAgent = byUser && p.watchers !== undefined ? cur.watchers.filter((w) => F.watchOriginOf(w) === 'agent' && !watchers.some((nw) => pkOf(nw.principal) === pkOf(w.principal))) : [];
+    const liftBlocks = byUser ? watchers.map((w) => pkOf(w.principal)) : [];
     await store.index.update((ix) => {
+      if (droppedAgent.length || liftBlocks.length) { const b = ix.agentWatchBlocks && typeof ix.agentWatchBlocks === 'object' ? ix.agentWatchBlocks : (ix.agentWatchBlocks = {}); for (const w of droppedAgent) b[blockKey(site.scope, pkOf(w.principal))] = { at: t, by }; for (const pk of liftBlocks) delete b[blockKey(site.scope, pk)]; }
       let holder;
       if (kind === 'conversation') {
         holder = store.index.entry(adapterId, site.convId, { create: false });
@@ -8636,7 +9391,7 @@ function create(deps = {}) {
       const hasElided = en.pendingElidedBy && Object.keys(en.pendingElidedBy).length;
       const hasUntagged = (Array.isArray(en.pending) && en.pending.some((x) => x && !x.for)) || Number(en.pendingElided) > 0;
       if (!hasTagged && !hasElided && !hasUntagged) continue;
-      const eff = effectiveFor(en);
+      const eff = wakeEffOf(en);   // a fan-out target's hits wait only while its conversation runs
       const live = new Set(eff ? eff.watchers.map((x) => pkOf(x.watcher.principal)) : []);
       const gone = new Set([...(en.pending || []).map((x) => x && x.for).filter(Boolean), ...Object.keys(en.pendingElidedBy || {})].filter((pk) => !live.has(pk)));
       if (gone.size || (hasUntagged && !live.size)) drop.push({ key: en.key, gone, untagged: hasUntagged && !live.size });
@@ -8954,7 +9709,7 @@ function create(deps = {}) {
       const en0 = live[k];
       if (!en0 || !Array.isArray(en0.pending) || (!en0.pending.length && !elidedTotal(en0))) continue;
       const en = store.index.peek(k);   // B-f32b: the rows holding hits are copied, never the index
-      const eff = effectiveFor(en);
+      const eff = wakeEffOf(en);
       if (!eff || !eff.watchers.length) continue;
       const rec = adapterRecords().adapters.find((r) => r.id === en.adapterId);
       if (!rec) continue;
@@ -9069,10 +9824,15 @@ function create(deps = {}) {
     const sweep = (ws) => {
       if (!Array.isArray(ws)) return;
       for (const w of ws) {
-        if (!w || !w.stats || !Array.isArray(w.stats.wakes)) continue;
-        const before = w.stats.wakes.length;
-        w.stats.wakes = w.stats.wakes.filter((r) => !(r && r.reserved === true && r.bootId !== BOOT_ID));
-        released += before - w.stats.wakes.length;
+        if (!w || !w.stats) continue;
+        // an All row's fan-out ledgers (one per conversation) hold reservations too
+        const ledgers = [w.stats, ...(w.stats.fan && typeof w.stats.fan === 'object' ? Object.values(w.stats.fan) : [])];
+        for (const l of ledgers) {
+          if (!l || !Array.isArray(l.wakes)) continue;
+          const before = l.wakes.length;
+          l.wakes = l.wakes.filter((r) => !(r && r.reserved === true && r.bootId !== BOOT_ID));
+          released += before - l.wakes.length;
+        }
       }
     };
     return store.index.update((ix) => {
@@ -9164,6 +9924,8 @@ function create(deps = {}) {
     // 2026-09-26: the aggregated IM — the reader surface, the scheduler's
     // override, the agent refresh, the three assignment grains, the migration
     conversationView, setRefresh, refresh, agentRefresh, watch, loadOlder, attachment, search,
+    conversationName,   // B-c127: THE NAME LADDER by key (the touches store names a touch by it)
+    accountsBrief,   // B-5fe1: the account list a badge's hue is computed from
     healSelfAt,   // R3 (§23): the one-shot derivation of the owner's newest message for rows that predate the field
     setScopeAssignment, estimateScope, effectiveFor: (adapterId, convId) => effectiveFor(store.index.peek(`${adapterId}/${convId}`)), migrateAggregated,
     // R4 (2026-09-27): access and notification — two operations, access first; the compose verb; the agent's search
@@ -9177,7 +9939,11 @@ function create(deps = {}) {
       if (pk) return flushScope(rec, source, patternId || null, pk, {});
       const holder = source === 'account' ? accountGrainOf(rec.id) : patternById(patternId);
       const results = [];
-      for (const w of holder ? F.grainOf(holder).watchers : []) results.push(await flushScope(rec, source, patternId || null, pkOf(w.principal), {}));
+      // an ALL-AGENTS watcher is flushed per running conversation (its fan-out keys — each its own window and ledger)
+      for (const w of holder ? F.grainOf(holder).watchers : []) {
+        const pks = w.principal.kind === 'everyone' ? fanTargets().map((x) => pkOf(F.fanWatcher(w, x.cid).principal)) : [pkOf(w.principal)];
+        for (const k of pks) results.push(await flushScope(rec, source, patternId || null, k, {}));
+      }
       const first = results.find((x) => x && x.ok) || results[0] || { ok: false, why: 'not-watching' };
       return { ...first, results };
     },
@@ -9189,6 +9955,8 @@ function create(deps = {}) {
     liveMemSizes: (adapterId) => { const e = live.get(adapterId); if (!e) return null; const out = {}; for (const [name, spec] of Object.entries(LIVE_MEMS)) { const top = e[name]; let n = 0; if (top) { if (spec.nested) { for (const m of top.values()) n += m.size; } else n = top.size; } out[name] = n; } for (const k of ['feedSeen', 'feedGroups', 'feedUnlisted']) if (e[k] && typeof e[k].size === 'number') out[k] = e[k].size; return out; },   // verify r2: + the change feed's bounded memories
     LIVE_MEM_KEEP_MS,
     connect, reauthorize, finishAuth, cancelAuth, narrowAuth, oauthNarrow, disconnect, setEnabled, setOptions, adapterView,
+    // lane lark-threads (B3): the owner's names for authors
+    setAlias, aliasesOf,
     // r4 (design-integrations-per-account): the account's own client, the
     // transient consent, duplicate / remove with its reference check, the
     // owner-only config (D3), the in-place edits and the legacy own → custom copy
@@ -9210,6 +9978,8 @@ function create(deps = {}) {
     // P4: reconcile / the boot sweep / the per-channel honesty switch
     reconcile: (id, o) => onProposal(id, () => reconcile(id, o)), sweepSending, sweepReplaces, setSenderHonesty, honestyLineFor, deprecatedReceiptWakes,   // verify r2: two Check-outcome presses ask the adapter ONCE
     setPolicy, policyFor, setReach, reachView, reachFor, request, decideRequest,
+    agentWatch, agentUnwatch, setAgentDirectory, directoryLists,   // lane channel-agent-watch
+    onFresh,   // lane channel-agent-watch: the hit dispatch, driven by test-channel-agent-watch ⑤ with records the store already holds
     listFor, readFor, statusFor,
     flushPending: (adapterId, convId, opts) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId); return rec ? flushPending(rec, convId, opts || {}) : Promise.resolve({ ok: false, why: 'no-such-adapter' }); },
     // R4: a window is per (conversation | scope, WATCHER) — `key` names the conversation (or `scope:acct:<id>` / `scope:pat:<id>`), `principal` the watcher

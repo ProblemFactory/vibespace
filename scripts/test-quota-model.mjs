@@ -449,6 +449,10 @@ console.log('\n⑨ backend shape detection is by FIELDS, never by key name');
       ['src/weekly-lanes-unfold.js', ['migrated', 'the weekly-lanes repair reads the plan week through limitsOfCache → planLimit → windowOfKind and writes through captureRateLimitEvent; its raw spellings are a parsed event\'s `windows.sevenDay` (a producer field, not a cache bucket) and the report\'s scopedWeekly summary']],
       ['data/bin/vibespace-usage', ['migrated', 'the shipped statusline: carries the byte-identical reading-lag mirror, which skips empty windows']],
       ['src/auto-resume-signal.js', ['spent-only', 'statedBuckets/bucketSpent/windowOpened decide only whether a window is SPENT (utilization >= 1 or status limited); an empty window is 0 % used, so it is never spent and its sliding reset can never become an arm time — driven in §⑬']],
+      // lane reset-path R4: the usage menu's codex ⟳ answer — the engine builds its two windows through
+      // quotaModel.bucketCounts (a window that has not started names no reset); the toast only words that answer
+      ['src/lib/usage-source.js', ['view-only', 'codexRefreshToast reads the ⟳ answer\'s two windows, which the engine built through quotaModel.bucketCounts — an empty window carries no reset and is said "starts on first use"']],
+      ['src/routes/reset-credit.js', ['mention', 'the codex-refresh route\'s doc comment names the answer\'s fields; the route reads no bucket']],
       ['src/server/auto-resume.js', ['mention', 'one comment cites a sevenDay reset while explaining why the loop breaker keys on the WALL and not on a reset instant; it reads no bucket']],
       ['src/lib/manage-agents.js', ['pending', 'the Agents roster donuts read u.fiveHour/u.sevenDay/u.scopedWeekly directly — they show the DERIVED view (now the plan limit, deterministically) but do not yet render the other limits or the not-started note']],
       ['src/lib/session-lifecycle.js', ['pending', "the billing switcher's per-account chips read the legacy pair for a one-line summary"]],

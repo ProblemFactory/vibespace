@@ -257,7 +257,7 @@ const userRec = (n, text, extra = {}) => ({ timestamp: T(n), type: 'response_ite
   // that took the steer lane would render as an anonymous "You" bubble — and
   // each one names the submission (round 3), so the steered card and the
   // app-server's own commit twin cannot become two bubbles.
-  check('wrapper records the peer user message WITH the webui_peer marker (name + body + the frame\'s kind — S3 verify F3) on ALL THREE delivery paths', /webui_peer: \{ name: fromName, body: cardText, kind: peerKind(?:, \.\.\.\(peerGroup \? \{ group: peerGroup \} : \{\}\))? \}/.test(w) && (w.match(/recordPeerMessage\((true|false), /g) || []).length === 3);
+  check('wrapper records the peer user message WITH the webui_peer marker (name + body + the frame\'s kind — S3 verify F3) on ALL THREE delivery paths', /webui_peer: \{ name: fromName, body: cardText, kind: peerKind(?:, \.\.\.\(peerChannel \? \{ channel: peerChannel \} : \{\}\))?(?:, \.\.\.\(peerGroup \? \{ group: peerGroup \} : \{\}\))? \}/.test(w) && (w.match(/recordPeerMessage\((true|false), /g) || []).length === 3);
   // WHICH SIDE OF CODEX'S OWN COPY this record lands on is the rebuild's whole
   // question (2026-09-07 round 2): on the IDLE path `turn/start` has already
   // persisted codex's copy when we get here, so ours is the LATE twin and says

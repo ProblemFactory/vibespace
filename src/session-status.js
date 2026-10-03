@@ -362,6 +362,9 @@ const NOTICE_RENDERERS = Object.freeze({
   'browser-handback': (n) => require('./browser-takeover').renderHandbackNotice(n),
   // the owner's ruling (2026-09-27 — "告知agent发生了打断"): the takeover's zero-spend notice — what it interrupted, read at the agent's next turn
   'browser-takeover': (n) => require('./browser-takeover').renderTakeoverNotice(n),
+  // lane browser-windows verify r5 ②: the user's drive of the browser ENDED — a `tab new` refused window_busy while he drove
+  // can run now; free, at the agent's next turn (it was left to poll blindly before)
+  'browser-window-free': (n) => require('./browser-windows').renderDriveEndedNotice(n),
   // lane browser-stuck (2026-09-28, rule 6): a page dialog opened while the agent ran no browser command — the ONE free
   // next-turn line (never a wake); its next verb says it again, by rule 2
   'browser-dialog': (n) => require('./browser-stuck').renderDialogNotice(n),

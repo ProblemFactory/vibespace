@@ -124,7 +124,7 @@ console.log('— ② the mediation rules: scope, session gate, paused, whole-bro
   ok(code(j({ id: 14, method: 'Page.navigate', params: { url: 'https://x' }, sessionId: 'S-A' }, P)) === 'browser_interrupted' && code(j({ id: 15, method: 'Input.dispatchMouseEvent', params: {}, sessionId: 'S-A' }, P)) === 'browser_interrupted' && code(j({ id: 16, method: 'Input.insertText', params: { text: 'x' }, sessionId: 'S-A' }, P)) === 'browser_interrupted' && code(j({ id: 17, method: 'Page.reload', params: {}, sessionId: 'S-A' }, P)) === 'browser_interrupted' && code(j({ id: 18, method: 'DOM.setFileInputFiles', params: {}, sessionId: 'S-A' }, P)) === 'browser_interrupted' && code(j({ id: 19, method: 'Target.createTarget', params: { url: 'about:blank' } }, P)) === 'browser_interrupted', 'while the USER drives: every Input.*, the navigation family, a file upload and a new tab are browser_interrupted');
   ok(code(j({ id: 20, method: 'Runtime.evaluate', params: { expression: 'document.title' }, sessionId: 'S-A' }, P)) === 'browser_interrupted' && code(j({ id: 22, method: 'Runtime.callFunctionOn', params: {}, sessionId: 'S-A' }, P)) === 'browser_interrupted' && code(j({ id: 21, method: 'Page.captureScreenshot', params: {}, sessionId: 'S-A' }, P)) === 'forward' && code(j({ id: 23, method: 'DOM.getDocument', params: {}, sessionId: 'S-A' }, P)) === 'forward', 'the owner\'s ruling (2026-09-27): script evaluation (Runtime.evaluate / callFunctionOn) is refused while the user drives too — reads (captureScreenshot / DOM.getDocument) still answer');
   const pr = j({ id: 14, method: 'Page.navigate', params: {}, sessionId: 'S-A' }, P).reply;
-  ok(pr.id === 14 && pr.sessionId === 'S-A' && pr.error.code === M.CDP_REFUSAL_CODE && /^browser_interrupted: The user took over this browser — your operation was interrupted \(Page\.navigate\)\. Wait for the handback, then run it again\.$/.test(pr.error.message), 'a refusal is a CDP error by id on the same session: -32000, the typed code as the message prefix, the takeover, the interruption and the way out named (THE sentence, src/browser-interrupt.js)', pr.error.message);
+  ok(pr.id === 14 && pr.sessionId === 'S-A' && pr.error.code === M.CDP_REFUSAL_CODE && /^browser_interrupted: The user took over your window of this browser — your operation was interrupted \(Page\.navigate\)\. Wait for the handback, then run it again\.$/.test(pr.error.message), 'a refusal is a CDP error by id on the same session: -32000, the typed code as the message prefix, the takeover, the interruption and the way out named (THE sentence, src/browser-interrupt.js)', pr.error.message);
   ok(M.judge({ method: 'Target.getTargets' }, sc).kind === 'drop' && M.judge('x', sc).kind === 'drop' && M.refusalCodeOf(M.judge({ id: 1 }, sc).reply) === 'bad_message', 'no id ⇒ dropped silently; no method with an id ⇒ bad_message');
   // createTarget: the measured Chrome ordering (targetCreated BEFORE the reply)
   const sc2 = M.newScope({});
@@ -138,6 +138,31 @@ console.log('— ② the mediation rules: scope, session gate, paused, whole-bro
   ok(M.filterEvent({ method: 'Target.targetCreated', params: { targetInfo: { targetId: 'T-POP', type: 'page', openerId: 'T-N' } } }, sc2) !== null && sc2.targets.has('T-POP'), 'a tab OPENED BY a scoped page (window.open) joins the scope');
   ok(M.filterEvent({ method: 'Target.targetCreated', params: { targetInfo: { targetId: 'T-X', type: 'page', openerId: 'T-ELSE' } } }, sc2) === null && !sc2.targets.has('T-X'), 'a tab opened by somebody else\'s page does not');
   ok(M.judge({ id: 32, method: 'Target.createTarget', params: { url: 'about:blank', browserContextId: 'C-foreign' } }, sc2).kind === 'refuse' && M.refusalCodeOf(M.judge({ id: 32, method: 'Target.createTarget', params: { url: 'about:blank', browserContextId: 'C-foreign' } }, sc2).reply) === 'context_out_of_scope', 'creating into a context this lease did not make: context_out_of_scope');
+  // lane browser-windows (U1, measured on 0.38.1 + Chrome 154): a create names no window — Chrome puts a plain one in its LAST
+  // FOCUSED window, often another conversation's, where it takes the show and hides that page. A lease's every create opens
+  // in a NEW unfocused window of its own (`rewrite` = the params the proxy sends); a window / hidden / tab-type create is
+  // left as written; the context rule still judges first
+  {
+    const RW = [
+      ['a plain create ⇒ a window of its own, unfocused', { url: 'about:blank' }, { url: 'about:blank', newWindow: true, focus: false }],
+      ['an asked focus is kept', { url: 'x', focus: true }, { url: 'x', focus: true, newWindow: true }],
+      ['already a window ⇒ as written', { url: 'x', newWindow: true }, null],
+      ['a hidden target ⇒ as written (Chrome refuses hidden + newWindow)', { url: 'x', hidden: true }, null],
+      ['a tab-type target ⇒ a window of its own TOO (verify r1 ②: a forTab create was MEASURED to land in another holder\'s window, both modes)', { url: 'x', forTab: true }, { url: 'x', forTab: true, newWindow: true, focus: false }],
+    ];
+    const badRW = RW.filter(([, p0, want]) => { const v = M.judge({ id: 90, method: 'Target.createTarget', params: p0 }, sc2); return v.kind !== 'forward' || (want ? JSON.stringify(v.rewrite) !== JSON.stringify(want) || JSON.stringify(v.pending.params) !== JSON.stringify(want) : v.rewrite !== undefined); }).map(([n]) => n);
+    ok(!badRW.length, `U1: the judge rewrites a lease's Target.createTarget into a window of its own (${RW.length} rows) — the pending call records what was SENT`, badRW);
+    const foreignCtx = M.judge({ id: 91, method: 'Target.createTarget', params: { url: 'x', browserContextId: 'C-foreign' } }, sc2);
+    ok(foreignCtx.kind === 'refuse' && foreignCtx.rewrite === undefined, 'U1: a create into a context the lease did not make is still REFUSED first (no rewrite of a refusal)');
+    const MUTW = mutantCopies('mediation-windows', path.resolve(new URL('..', import.meta.url).pathname));
+    const msrc = fs.readFileSync(path.resolve(new URL('..', import.meta.url).pathname, 'src/browser-mediation.js'), 'utf8');
+    const RWX = "    if (ow.rewritten) return { kind: 'forward', pending: { method, params: ow.params, sessionId: sid }, rewrite: ow.params };\n";
+    ok(msrc.includes(RWX), 'control setup: the rewrite is found in the judge');
+    const Mx = MUTW.load('src/browser-mediation.js', msrc.replace(RWX, ''), 'no-window-rewrite');
+    const vx = Mx.judge({ id: 92, method: 'Target.createTarget', params: { url: 'about:blank' } }, Mx.newScope({ targets: ['T-A'] }));
+    ok(vx.kind === 'forward' && vx.rewrite === undefined && !vx.pending.params.newWindow, 'NEGATIVE CONTROL: a judge copy without the rewrite forwards the plain create — the U1 rows above can go red');
+    for (const r of copiesCensus(MUTW.files, MUTW.dir, path.resolve(new URL('..', import.meta.url).pathname), { minCopies: 1, label: 'U1 windows ' })) ok(r.pass, r.name, r.detail);
+  }
   M.admitReply({ id: 33, result: { browserContextId: 'C-1' } }, { method: 'Target.createBrowserContext', params: {} }, sc2);
   ok(sc2.contexts.has('C-1') && M.judge({ id: 34, method: 'Target.createTarget', params: { url: 'about:blank', browserContextId: 'C-1' } }, sc2).kind === 'forward' && M.filterEvent({ method: 'Target.targetCreated', params: { targetInfo: { targetId: 'T-C1', type: 'page', browserContextId: 'C-1' } } }, sc2) !== null, 'a context this lease created admits creation into it and the tabs born in it');
   ok(M.admitReply({ id: 35, result: { browserContextIds: ['C-1', 'C-other'] } }, { method: 'Target.getBrowserContexts', params: {} }, sc2).reply.result.browserContextIds.join() === 'C-1', 'getBrowserContexts lists only the lease\'s contexts');
@@ -293,7 +318,7 @@ console.log('— ⑥ the CDP census: every method of the pinned protocol has a r
   ok(M.judge({ id: 11, method: 'Zzz.newDomainMethod', params: {} }, sc, { paused: true }).why === 'unclassified' && M.judge({ id: 12, method: 'Page.zzzFutureMethod', params: {}, sessionId: 'S-A' }, sc, {}).kind === 'forward' && M.isPausedMethod('Page.zzzFutureMethod') === true && M.pausedVerdict('Page.zzzFutureMethod').why === 'unclassified', '⑥ a whole unknown domain the same; when the agent drives, an unknown method is forwarded (Chrome answers it) — the fence is about the takeover');
   // a page-mutation refusal's words (no setting named any more — the switch is retired) + the sentence
   const swv = M.judge({ id: 13, method: 'Runtime.evaluate', params: { expression: '1' }, sessionId: 'S-A' }, sc, { paused: true, fenceScripts: false });
-  ok(swv.kind === 'refuse' && swv.why === 'page-mutation' && M.refusalCodeOf(swv.reply) === 'browser_interrupted' && !/fenceScriptsWhileDriven/.test(swv.reply.error.message) && /took over this browser/.test(swv.reply.error.message) && /run it again/.test(swv.reply.error.message), '⑥ a page-mutation refusal (even with the retired switch passed OFF) names the takeover and the way out — never a setting', swv.reply && swv.reply.error.message);
+  ok(swv.kind === 'refuse' && swv.why === 'page-mutation' && M.refusalCodeOf(swv.reply) === 'browser_interrupted' && !/fenceScriptsWhileDriven/.test(swv.reply.error.message) && /took over your window of this browser/.test(swv.reply.error.message) && /run it again/.test(swv.reply.error.message), '⑥ a page-mutation refusal (even with the retired switch passed OFF) names the takeover and the way out — never a setting', swv.reply && swv.reply.error.message);
   ok(M.mediationSentence({ profileLabel: 'Team', fenceScripts: true }) === M.mediationSentence({ profileLabel: 'Team' }) && !/fenceScripts/.test(M.mediationSentence({ profileLabel: 'Team' })), '⑥ the one-line sentence is ONE sentence (the retired option changes nothing)');
   ok(M.grantView({ token: TOK, profileId: 'p', browserKey: 'k', scope: M.newScope({}), conns: new Set(), unclassified: new Set(['Page.zzz']) }).unclassified.join() === 'Page.zzz' && M.grantView({ token: TOK, profileId: 'p', browserKey: 'k', scope: M.newScope({}), conns: new Set() }).unclassified.length === 0, '⑥ a grant\'s view lists the methods it refused for lacking a row (the operator\'s signal)');
   // THREE CONTROLS (scripts/mutant-copy.mjs): a row demoted to read; the unknown rule dropped; the switch ignored
@@ -376,7 +401,7 @@ function fakeBrowser() {
       };
       ws.on('message', (d) => {
         const m = JSON.parse(String(d));
-        seen.push({ id: m.id, method: m.method, sessionId: m.sessionId || null, at: Date.now() });
+        seen.push({ id: m.id, method: m.method, sessionId: m.sessionId || null, at: Date.now(), ...(m.method === 'Target.createTarget' ? { params: m.params } : {}) }); // lane browser-windows: what a create SENT upstream
         // ⑦: a call marked `__hold` is answered only when the suite releases it (a script the page is still running)
         if (m.params && m.params.__hold) { held.push(() => answer(m)); return; }
         answer(m);
@@ -433,8 +458,11 @@ const upgradeStatus = (url) => new Promise((res) => { const w = new WebSocket(ur
   ok((await cB.call('Page.captureScreenshot', {}, sid)).result !== undefined, '…while a read still answers');
   paused.b = false;
   ok((await cB.call('Page.navigate', { url: 'about:nav3' }, sid)).result.frameId === 'F1', 'handed back: navigation works again');
+  const nSeen = fake.seen.length;
   const created = await cB.call('Target.createTarget', { url: 'about:new' });
   const tNew = created.result.targetId;
+  { const up = fake.seen.slice(nSeen).find((m) => m.method === 'Target.createTarget');
+    ok(up && up.params && up.params.newWindow === true && up.params.focus === false && up.params.url === 'about:new', 'U1 on the REAL proxy: B\'s plain create reaches the browser as a NEW unfocused window of its own (newWindow:true, focus:false) — never into another conversation\'s window', up); }
   ok(!!tNew && cB.events.some((e) => e.method === 'Target.targetCreated' && e.params.targetInfo.targetId === tNew), 'B creates a tab and sees its targetCreated (replayed from before the reply — Chrome\'s order, reproduced by the fake)');
   ok((await cB.call('Target.getTargets')).result.targetInfos.map((t) => t.targetId).sort().join() === ['T-B', tNew].sort().join(), 'B now sees two tabs: its own');
   ok(M.refusalCodeOf(await cB.call('Browser.close')) === 'method_refused', 'Browser.close through a session url: method_refused');
@@ -694,10 +722,13 @@ for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { reapA
   // ─ the takeover flips A's url (the keeper's input side is the paused reader)
   keeper.takeover({ browserKey: KEY_A, profileId: team.id, viewerId: 7, sessionId: 'sess-a' });
   ok(M.refusalCodeOf(await cA.call('Page.navigate', { url: 'about:a3' }, sA)) === 'browser_interrupted' && M.refusalCodeOf(await cA.call('Input.insertText', { text: 'x' }, sA)) === 'browser_interrupted' && M.refusalCodeOf(await cA.call('Runtime.evaluate', { expression: '1' }, sA)) === 'browser_interrupted', 'the keeper\'s takeover makes A\'s url refuse navigate, Input.* and script evaluation (browser_interrupted) — the same state the CLI\'s cooperative refusal reads');
-  // verify r6 (S2): a takeover is of the BROWSER — B (another conversation on the same Chrome) is taken WITH A: its own url refuses too
-  ok(M.refusalCodeOf(await cB.call('Target.createTarget', { url: 'about:b' })) === 'browser_interrupted' && keeper.inputStateFor(KEY_B, team.id).input === 'user' && keeper.inputStateFor(KEY_B, team.id).takenBy.viewerId === 7, 'r6: B IS paused by A\'s takeover (one Chrome, one user driving it) — its url refuses a new tab too, its lease reads user by the same viewer');
+  // lane browser-windows (U2): a takeover is of ONE WINDOW — B (another conversation on the same Chrome, its tabs in windows
+  // of its own: its lease was attached under this lane) is NOT taken with A: its url still creates a tab, its input side stays its agent's
+  // (verify r6 S2 took B WITH A while every conversation's tab sat in one window — the browser-wide pause userW met)
+  const bNew = await cB.call('Target.createTarget', { url: 'about:b' });
+  ok(!!(bNew.result && bNew.result.targetId) && keeper.inputStateFor(KEY_B, team.id).input === 'agent' && keeper.leasesOn(team.id).every((l) => typeof l.windowIn === 'string'), 'U2: B is NOT paused by A\'s takeover — its window is its own (both mediated leases record their window run); its url still creates a tab', { bNew, inputB: keeper.inputStateFor(KEY_B, team.id).input });
   keeper.handback({ browserKey: KEY_A, profileId: team.id, viewerId: 7, cause: 'explicit' });
-  ok((await cA.call('Page.navigate', { url: 'about:a3' }, sA)).result.frameId === 'F1' && !!(await cB.call('Target.createTarget', { url: 'about:b' })).result.targetId && keeper.inputStateFor(KEY_B, team.id).input === 'agent', 'the handback lets A drive again — and B with it');
+  ok((await cA.call('Page.navigate', { url: 'about:a3' }, sA)).result.frameId === 'F1' && !!(await cB.call('Target.createTarget', { url: 'about:b' })).result.targetId && keeper.inputStateFor(KEY_B, team.id).input === 'agent', 'the handback lets A drive again — B never stopped');
   // ─ edits: sharing cannot flip while leased, never on the legacy record
   refused = null; try { keeper.updateProfile(team.id, { sharing: 'owner' }); } catch (e) { refused = e; }
   ok(refused && refused.code === 'leased' && /2 session/.test(refused.message), 'sharing cannot flip while sessions hold leases (their env names the kind of attachment)', refused && (refused.code + ': ' + refused.message));
@@ -791,7 +822,7 @@ console.log('— ⑦ the owner\'s ruling ("直接打断所有脚本和agent操�
   const [e1, e2, e4] = await Promise.all([pEval, pKey, pNew]);
   const took = Math.max(e1.at, e2.at, e4.at) - tTake;
   ok(tk7.ok && M.refusalCodeOf(e1.r) === 'browser_interrupted' && M.refusalCodeOf(e2.r) === 'browser_interrupted' && M.refusalCodeOf(e4.r) === 'browser_interrupted' && took <= 50, `⑦ the takeover ABORTS the script, the key and the new tab the agent had in flight: browser_interrupted in ${took} ms (≤ 50 — the browser never answered them)`, JSON.stringify([e1.r, e2.r, e4.r]).slice(0, 400));
-  ok(e1.r.error.message === 'browser_interrupted: The user took over this browser — your operation was interrupted (Runtime.evaluate). Wait for the handback, then run it again.' && e1.r.sessionId === s7 && e4.r.sessionId === undefined, '⑦ the words: THE sentence naming the method, on the call\'s own session', e1.r.error.message);
+  ok(e1.r.error.message === 'browser_interrupted: The user took over your window of this browser — your operation was interrupted (Runtime.evaluate). Wait for the handback, then run it again.' && e1.r.sessionId === s7 && e4.r.sessionId === undefined, '⑦ the words: THE sentence naming the method, on the call\'s own session', e1.r.error.message);
   await sleep(60);
   ok(readDone === null, '⑦ a READ in flight (DOM.getDocument) is left to finish — not aborted (the live view\'s own stream rides reads)');
   const term = fake7.seen.filter((x) => x.method === 'Runtime.terminateExecution');
@@ -831,25 +862,27 @@ console.log('— ⑦ the owner\'s ruling ("直接打断所有脚本和agent操�
   const iv = k7.interruptionFor({ browserKey: KEY7, profileId: team7.id, since: tTake - 5 });
   ok(iv && iv.code === 'browser_interrupted' && iv.aborted === true && iv.input === 'agent' && iv.takenAt >= tTake && k7.interruptionFor({ browserKey: KEY7, profileId: team7.id, since: Date.now() + 5 }) === null, '⑦ interruptionFor: a command whose /resolve answered before the takeover WAS interrupted (and cut: aborted), one resolved after it was not');
   ok((await c7.call('Runtime.evaluate', { expression: '1' }, s7)).result !== undefined, '⑦ handed back: the agent\'s script runs again');
-  // VERIFY r6 (S2): the SIBLING conversation on the same mediated browser — its call in flight is cut by the primary's
-  // takeover (the same viewer takes it WITH the primary), its tab switch is refused (the r3 anchor rule holds across
-  // conversations), and the handback frees both
+  // lane browser-windows (U2) — was VERIFY r6 (S2), when every conversation's tab sat in ONE window: the SIBLING conversation
+  // on the same mediated browser holds its tabs in windows of its OWN (its lease records its window run), so the primary's
+  // takeover drives the primary's window only — the sibling's call in flight is NOT cut, its verbs still resolve, and the
+  // primary's handback wakes nothing of it (userW's D-payments, 2026-10-01: one takeover froze every conversation)
   const at7c = await k7.attach({ profileId: team7.id, browserKey: KEY7C, sessionId: 'sess-7c' });
   const c7c = cdpClient(at7c.cdpUrl); await c7c.open;
   const t7c = (await c7c.call('Target.createTarget', { url: 'about:t7c' })).result.targetId;
   const s7c = (await c7c.call('Target.attachToTarget', { targetId: t7c, flatten: true })).result.sessionId;
   const pSib = stamp(c7c.call('Input.insertText', { text: 'sibling-typing', __hold: true }, s7c));
   await until(() => fake7.held.length === 1, 3000);
-  const tSib = Date.now();
   k7.takeover({ browserKey: KEY7, profileId: team7.id, viewerId: 75, sessionId: 'sess-7' });
+  let sibDone = false; pSib.then(() => { sibDone = true; });
+  await sleep(150);
+  ok(!sibDone && k7.inputStateFor(KEY7C, team7.id).input === 'agent', '⑦ U2: the SIBLING conversation\'s Input.insertText in flight is NOT cut by the primary\'s takeover — its window is its own (its input side stays its agent\'s)', { sibDone, input: k7.inputStateFor(KEY7C, team7.id).input });
+  fake7.release();
   const eSib = await pSib;
-  ok(M.refusalCodeOf(eSib.r) === 'browser_interrupted' && eSib.at - tSib <= 50 && k7.inputStateFor(KEY7C, team7.id).input === 'user', `⑦ r6: the SIBLING conversation's Input.insertText in flight on the same browser is cut by the primary's takeover (browser_interrupted in ${eSib.at - tSib} ms) and its lease reads user`, JSON.stringify(eSib.r).slice(0, 300));
-  ok(M.refusalCodeOf(await c7c.call('Target.activateTarget', { targetId: t7c }, undefined)) === 'browser_interrupted' && M.refusalCodeOf(await c7c.call('Runtime.evaluate', { expression: '1' }, s7c)) === 'browser_interrupted' && (await c7c.call('Page.captureScreenshot', {}, s7c)).result !== undefined, '⑦ r6: while the user drives, the sibling cannot switch the tab the user looks at nor run a script — a read still answers');
-  const rSib = k7.resolveFor({ browserKey: KEY7C, verb: 'type' });
-  ok(!rSib.ok && rSib.code === 'browser_paused', '⑦ r6: the sibling\'s next verb is refused browser_paused at /resolve');
+  ok(eSib.r && !eSib.r.error && eSib.r.result !== undefined, '⑦ U2: …it completes when the browser answers (never browser_interrupted)', eSib.r);
+  ok(!M.refusalCodeOf(await c7c.call('Target.activateTarget', { targetId: t7c }, undefined)) && (await c7c.call('Runtime.evaluate', { expression: '1' }, s7c)).result !== undefined && k7.resolveFor({ browserKey: KEY7C, verb: 'type' }).ok, '⑦ U2: while the user drives the PRIMARY\'s window the sibling switches its own tab, runs a script and resolves its next verb');
+  const nEv = ev7.length;
   const hbSib = k7.handback({ browserKey: KEY7, profileId: team7.id, viewerId: 75, cause: 'explicit', url: 'https://x.test/sib', sessionId: 'sess-7' });
-  const hbEvSib = ev7.filter((e) => e.kind === 'handback' && e.browserKey === KEY7C).at(-1);
-  ok(hbSib.ok && hbEvSib && hbEvSib.rerun.join() === 'Input.insertText,type' && !hbSib.rerun.includes('type') && k7.inputStateFor(KEY7C, team7.id).input === 'agent' && (await c7c.call('Runtime.evaluate', { expression: '1' }, s7c)).result !== undefined, '⑦ r6: the handback frees the sibling too, with ITS OWN re-run list (what was cut, then what it tried) — nothing of it in the primary\'s', JSON.stringify({ sib: hbEvSib && hbEvSib.rerun, primary: hbSib.rerun }));
+  ok(hbSib.ok && !ev7.slice(nEv).some((e) => e.kind === 'handback' && e.browserKey === KEY7C), '⑦ U2: the primary\'s handback wakes nothing of the sibling (no handback event, no billed turn for it)');
   fake7.release(); c7c.ws.close();
   // CONTROL — THE OLD PAUSE (the r4 world: a takeover only refuses what comes NEXT): a mediator copy whose interrupt touches nothing
   const MUT7 = mutantCopies('mediation-interrupt', REPO7);

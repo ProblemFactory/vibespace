@@ -40,12 +40,13 @@
 //   C2 verify r1 CONTROL of the capture-element choice: a tab-group copy that captures on the TAB element (not the
 //      strip's title bar) — the tear-off's re-render rebuilds the tab, the capture is lost under the finger and the
 //      drag ENDS at the detach (capture-lost), the window never reaches the pane's cell;
-//   C  CONTROL — the pre-fix tree: the base commit's window.js (git show b924041f:src/lib/window.js; on a shallow
-//      checkout a patched copy of the fixed file with the pre-fix feed restored — document mouse listeners, no
-//      capture, no shield; scripts/mutant-copy.mjs), bundled by an esbuild alias and served in place of /bundle.js
-//      through CDP Fetch — the checkout untouched — reproduces the incident on the Web view, the Desktop and the PDF
-//      viewer's own frame (the live view and the xpra pane as measured, printed: neither stops a mouse release); the
-//      base commit's tab-group.js is overlaid too, so the control reproduces the T / I incidents (verify r1).
+//   C  CONTROL — the pre-fix feed as ONE patched overlay of today's sources, the same on every machine (lane
+//      mirror-green r2: the git-history control and the depth-1 fallback it replaced went red on the Actions mirror
+//      alone): drag-feed.js with no capture, the document's mouse events and no shield, window.js / tab-group.js with
+//      no no-button rule — every patch must find its line — bundled by an esbuild alias and served in place of
+//      /bundle.js through CDP Fetch — the checkout untouched — reproduces the incident on the Web view, the Desktop and
+//      the PDF viewer's own frame (the live view and the xpra pane as measured, printed: neither stops a mouse
+//      release), and the T / I incidents (the torn-off tab stays armed, the icon drag's window stays invisible).
 // Run: node scripts/test-window-drag-ui.mjs   (DRJ_ONLY=D,R,T,I,P,C narrows the legs; the whole suite is the gate)
 import fs from 'node:fs';
 import os from 'node:os';
@@ -523,36 +524,43 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     if (want('P')) { if (ok(await bootAt({ scale: 90, dpr: 2.2 }), 'the page rebooted at uiScale 90 % × DPR 2.2')) await pdfLeg(true, 'P'); }
 
     // ── C: THE CONTROL — the pre-fix feed, served in place of the bundle ──
-    console.log('— C: CONTROL — the pre-fix feed (document mouse listeners, no capture, no shield) in a patched copy of window.js');
+    console.log('— C: CONTROL — the pre-fix feed (document mouse listeners, no capture, no shield) in a patched overlay of drag-feed.js / window.js / tab-group.js');
     if (want('C')) {
-      const BASE_REF = 'b924041f'; // the measured pre-fix tree (2.369.199)
-      let text = null, how = null, baseTg = null;
-      try { text = execFileSync('git', ['-C', repo, 'show', `${BASE_REF}:src/lib/window.js`], { stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 16 * 1024 * 1024 }).toString('utf8'); how = `git show ${BASE_REF}:src/lib/window.js`; } catch { text = null; }
-      try { baseTg = execFileSync('git', ['-C', repo, 'show', `${BASE_REF}:src/lib/tab-group.js`], { stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 16 * 1024 * 1024 }).toString('utf8'); } catch { baseTg = null; } // verify r1: the T / I control needs the base tab-group.js too (a shallow checkout skips those rows)
-      const missed = [];
-      if (!text) {
-        // a shallow checkout: the fixed file with the pre-fix feed restored — no capture, the document's mouse listeners, no shield, no no-button rule
-        const src = fs.readFileSync(path.join(repo, 'src/lib/window.js'), 'utf8');
-        const PATCH = [
+      // THE SAME CONTROL ON EVERY MACHINE (lane mirror-green r2, the .200 mirror red ×2). This leg read the pre-fix tree
+      // from git history (`git show b924041f:src/lib/window.js` + tab-group.js) and patched the fixed window.js only
+      // where that commit is absent. The Actions checkout is depth 1, so ONLY the runner ever took the fallback, and
+      // verify r1 had since moved the feed (captureOn, DRAG_FEED, the shield) into drag-feed.js: 3 of its 4 patches
+      // matched nothing — red on the mirror alone, green on every developer box, where nothing ran that path. Now
+      // the control is ONE overlay of today's sources, built and judged identically everywhere: drag-feed.js with the
+      // pre-fix feed (no capture, the document's MOUSE events, no shield) and window.js / tab-group.js with no no-button
+      // rule. Every patch must find its line on THIS machine too, so a refactor that strands one is red locally.
+      const NO_BUTTON_RULE = [/buttons: e\.buttons, pointerId: e\.pointerId \}, feedState\)\.end\)/g, 'buttons: 1, pointerId: e.pointerId }, feedState).end)'];
+      const PRE_FIX = {
+        'src/lib/drag-feed.js': [
           [/const id = e && e\.pointerId;\n  if \(id == null \|\| !el/, 'const id = null;\n  if (id == null || !el'],
-          [/import \{ dragEndVerdict, DRAG_FEED, SHIELD_CLASS \} from '\.\/drag-end\.js';/, "import { dragEndVerdict, SHIELD_CLASS } from './drag-end.js';\nconst DRAG_FEED = { move: 'mousemove', up: 'mouseup', cancel: 'pointercancel', lost: 'lostpointercapture' };"],
-          [/setDragShield\(true\);/g, '/* control: no shield */;'],
-          [/buttons: e\.buttons, pointerId: e\.pointerId \}, feedState\)\.end\) \{ end/g, 'buttons: 1, pointerId: e.pointerId }, feedState).end) { end'],
-        ];
-        text = src;
-        for (const [re, rp] of PATCH) { if (!new RegExp(re.source).test(text)) missed.push(String(re)); text = text.replace(re, rp); }
-        how = 'the fixed window.js with the pre-fix feed restored (' + PATCH.length + ' patches)';
+          [/import \{ DRAG_FEED, SHIELD_CLASS, dragEndVerdict \} from '\.\/drag-end\.js';/, "import { SHIELD_CLASS, dragEndVerdict } from './drag-end.js';\nconst DRAG_FEED = { move: 'mousemove', up: 'mouseup', cancel: 'pointercancel', lost: 'lostpointercapture' };"],
+          [/if \(on\) cl\.add\(SHIELD_CLASS\);/, 'if (on) { /* control: no shield */ }'],
+        ],
+        'src/lib/window.js': [NO_BUTTON_RULE],
+        'src/lib/tab-group.js': [NO_BUTTON_RULE],
+      };
+      const overlay = {}, missed = [];
+      for (const [rel, patches] of Object.entries(PRE_FIX)) {
+        let t = fs.readFileSync(path.join(repo, rel), 'utf8');
+        for (const [re, rp] of patches) { if (!new RegExp(re.source).test(t)) missed.push(rel + ' ' + String(re)); t = t.replace(re, rp); }
+        overlay[path.basename(rel)] = t;
       }
+      const how = "today's drag-feed.js / window.js / tab-group.js with the pre-fix feed restored (" + Object.values(PRE_FIX).flat().length + ' patches, the same on every machine)';
       console.log('  control source: ' + how);
-      if (!ok(missed.length === 0, 'the control source is whole (the base commit, or every patch of the fallback found its line — a control whose patch missed proves nothing)', missed)) { /* nothing below can be judged */ }
+      if (!ok(missed.length === 0, 'the control source is whole (every patch of the pre-fix overlay found its line in today\'s source — a control whose patch missed proves nothing)', missed)) { /* nothing below can be judged */ }
       else {
         const esbuild = require('esbuild');
-        // overlay window.js with the control TEXT (its relative imports resolve from wt/src/lib — resolveDir —, so no
+        // overlay the three files with the control TEXT (its relative imports resolve from wt/src/lib — resolveDir —, so no
         // copy is written into the tree; §51 holds by construction) and bundle the client on it
         const built = await esbuild.build({ entryPoints: [path.join(wt, 'src/client.js')], bundle: true, write: false, format: 'iife', platform: 'browser', target: 'es2020', loader: { '.css': 'css' }, minify: false, logLevel: 'silent',
-          plugins: [{ name: 'drj-control', setup(b) { b.onLoad({ filter: /src\/lib\/window\.js$/ }, () => ({ contents: text, loader: 'js', resolveDir: path.join(wt, 'src/lib') })); if (baseTg) b.onLoad({ filter: /src\/lib\/tab-group\.js$/ }, () => ({ contents: baseTg, loader: 'js', resolveDir: path.join(wt, 'src/lib') })); } }] });
+          plugins: [{ name: 'drj-control', setup(b) { b.onLoad({ filter: /src\/lib\/(drag-feed|window|tab-group)\.js$/ }, (a) => ({ contents: overlay[path.basename(a.path)], loader: 'js', resolveDir: path.join(wt, 'src/lib') })); } }] });
         const ctlBundle = Buffer.from(built.outputFiles[0].contents).toString('base64');
-        ok(ctlBundle.length > 1000, 'the CONTROL bundle built (window.js overlaid with the pre-fix source)');
+        ok(ctlBundle.length > 1000, 'the CONTROL bundle built (drag-feed.js / window.js / tab-group.js overlaid with the pre-fix feed)');
         await cdp('Fetch.enable', { patterns: [{ urlPattern: '*/bundle.js*', requestStage: 'Request' }] });
         onPaused = (p) => { cdp('Fetch.fulfillRequest', { requestId: p.requestId, responseCode: 200, responseHeaders: [{ name: 'Content-Type', value: 'application/javascript' }, { name: 'Cache-Control', value: 'no-store' }], body: ctlBundle }).catch(() => { }); };
         if (ok(await bootAt({ scale: 100, dpr: 1 }), 'the page rebooted on the CONTROL bundle')) {
@@ -560,8 +568,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
           if (scene2) {
             const res = {};
             for (const row of scene2.rows) { const exp = (row.kind === 'web' || row.kind === 'desktop') ? false : null; res[row.kind] = { drop: await dropLeg(scene2.viewer, row, exp, 'C'), resize: await resizeLeg(scene2.viewer, row, exp, 'C') }; }
-            if (baseTg) { for (const row of scene2.rows) { const exp = (row.kind === 'web' || row.kind === 'desktop') ? false : null; res[row.kind].tab = await tabLeg(scene2.viewer, row, exp, 'C'); res[row.kind].icon = await iconLeg(scene2.viewer, row, exp, 'C'); } }
-            else console.log('  (no base tab-group.js on this checkout — the T / I control rows are skipped)');
+            for (const row of scene2.rows) { const exp = (row.kind === 'web' || row.kind === 'desktop') ? false : null; res[row.kind].tab = await tabLeg(scene2.viewer, row, exp, 'C'); res[row.kind].icon = await iconLeg(scene2.viewer, row, exp, 'C'); }
             console.log('  control table: ' + J(res));
           }
           if (ok(await bootAt({ scale: 90, dpr: 2.2 }), 'the CONTROL page rebooted at uiScale 90 % × DPR 2.2')) console.log('  control pdf: ' + J(await pdfLeg(false, 'C')));

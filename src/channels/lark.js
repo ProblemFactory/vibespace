@@ -127,7 +127,20 @@ const P2P_READ_SCOPE = 'im:message.p2p_msg:get_as_user';
  *  2026-09-28: "one scope dropped per retry, each a click naming the scope"): reactions only colour chips; without the
  *  single-chat read the feed still serves groups and threads; without search there is no feed. Lark refuses a WHOLE
  *  consent naming a scope the app has not enabled (20027, on its own page), so each retry drops the NEXT group. */
-const OPTIONAL_SCOPE_GROUPS = Object.freeze([Object.freeze([REACTIONS_READ_SCOPES[0]]), Object.freeze([P2P_READ_SCOPE]), Object.freeze([SEARCH_SCOPE])]);
+/** lane lark-threads (B1/B5, MEASURED 2026-10-01 — an owner-approved read-only probe): `contact/v3/users/:id` of ANOTHER
+ *  person under the consent's `contact:user.base:readonly` (= the token holder's OWN profile) answered 99991679 "required
+ *  one of these privileges under the user identity: [contact:contact.base:readonly, …]" — the existing name fallback
+ *  could never name anybody. `PEOPLE_SCOPE` reads a person (and a department's name — contact/v3/departments/:id asks
+ *  contact:contact.base:readonly for a user token); the two FIELD scopes add a profile's job title (`job_title` ⇐
+ *  contact:user.employee:readonly) and departments (`department_ids` ⇐ contact:user.department:readonly). All optional. */
+const PEOPLE_SCOPE = 'contact:contact.base:readonly';
+const JOB_SCOPE = 'contact:user.employee:readonly';
+const DEPT_SCOPE = 'contact:user.department:readonly';
+/** The API-level scopes that let a USER token read another person (the users/get doc: any one of them). */
+const PEOPLE_READ_SCOPES = Object.freeze([PEOPLE_SCOPE, 'contact:contact:readonly', DEPT_SCOPE]);
+// lane lark-threads: the profile scopes join the ordered groups AFTER the reactions — the two field scopes (a job title,
+// a department: cosmetic) next, then reading people (it names who left a chat), the feed's two last
+const OPTIONAL_SCOPE_GROUPS = Object.freeze([Object.freeze([REACTIONS_READ_SCOPES[0]]), Object.freeze([JOB_SCOPE]), Object.freeze([DEPT_SCOPE]), Object.freeze([PEOPLE_SCOPE]), Object.freeze([P2P_READ_SCOPE]), Object.freeze([SEARCH_SCOPE])]);
 /** …flat (every optional scope — what a narrowed consent may have dropped). */
 const OPTIONAL_SCOPES = Object.freeze(OPTIONAL_SCOPE_GROUPS.flat());
 const REACTIONS_WRITE_SCOPES = Object.freeze(['im:message', 'im:message.reactions:write_only']);
@@ -218,6 +231,15 @@ const UNGATED = Object.freeze([
   { id: 'consent-exchange', why: 'the fixed-mode loopback consent flow: once per human consent, taken by the flow\'s one-time state' },
   { id: 'consent-user-info', why: 'ONE user_info read inside that same consent (who signed in); once' },
   { id: 'integration-test', why: 'the integrations panel\'s Test button (a human POST): one tenant token per brand, no user token, nothing listed or sent' },
+]);
+/** THE DELIBERATE SWALLOWS (lane lark-threads verify r3 — the 429 class closed by construction): every `catch` over a
+ *  vendor call in this file either re-throws a RATE refusal to the pass's ladder or carries `// rate-ok: <id>` with a row
+ *  here saying why the swallow is BOUNDED; the response census (scripts/vendor-response-census.mjs, run by
+ *  test-channels-lark-shape) reads the file and is red for any other catch — r1 F1 and r2 F1 were this class twice. */
+const RATE_OK = Object.freeze([
+  { id: 'push-names', why: 'the push path must persist the record inside the vendor\'s 3 s ack budget, so a names refusal never fails a message; a RATE refusal pauses the push path\'s lookups for the vendor\'s hint (at most 5 min) instead of one members read per pushed message into the stop' },
+  { id: 'consent-user-info', why: 'ONE user_info read inside a human consent: a refusal of any kind ends that consent as nameless, by name; no pass, nothing retried' },
+  { id: 'integration-test', why: 'the integrations panel\'s Test button (a human POST): the refusal\'s words ARE the answer; no pass, nothing retried' },
 ]);
 
 const caps = Object.freeze({
@@ -535,6 +557,45 @@ function seedAppNamesFrom(item, at = Date.now()) {
     if (m && m.id_type === 'app_id' && m.id && m.name) rememberAppName(String(m.id), Blocks.markupPlainLine(String(m.name)), { at, weak: true });
   }
 }
+// ── lane lark-threads (B1/B5, 2026-10-01): WHO IS THIS — a person's profile, read ONCE per 6 h per id ──────────────
+// `contact/v3/users/:id` (doc: name, en_name, nickname — the organization's alias for the person —, job_title,
+// department_ids; NO per-viewer remark: what the owner wrote in his own Lark client is readable by no API) and the
+// department's name (`contact/v3/departments/:id`, 24 h). Module-wide (an open_id names one person per app, whichever
+// account reads it), bounded; a refusal is remembered as long as a hit, so a missing scope is asked once.
+const PEOPLE = new Map();   // open_id → {name, enName, nickname, jobTitle, deptIds:[], at, why}
+/** What the member / people lookups SAID once (a dissolved chat, a refused privilege) — never a line per pass. */
+const SAID_MEMBERS = new Set();
+const PEOPLE_MAX = 5000;
+const DEPTS = new Map();    // open_department_id → {name, at, why}
+const DEPTS_TTL_MS = 24 * 3600e3;
+/** Contact lookups ONE page may ask (B1: ≤ 3 per pass per conversation — the unnamed first), and per minute per account
+ *  (B5: ≤ 20 — every one paced + metered through the gate). */
+const PEOPLE_LOOKUPS_PER_CALL = 3;
+const PEOPLE_PER_MIN = 20;
+const pName = (v) => (typeof v === 'string' ? (peerName(Blocks.markupPlainLine(v), 200) || '') : '');
+/** THE PROFILE ANSWER'S READER (PURE, bounded): `data.user` → {name, enName, nickname, jobTitle, deptIds ≤ 5}. */
+function readPersonAnswer(data) {
+  const u = data && typeof data === 'object' && data.user && typeof data.user === 'object' ? data.user : null;
+  if (!u) return null;
+  const deptIds = (Array.isArray(u.department_ids) ? u.department_ids.slice(0, 5) : []).filter((x) => typeof x === 'string' && x.length > 0 && x.length <= 128 && !/[\u0000-\u001f]/.test(x));
+  return { name: pName(u.name), enName: pName(u.en_name), nickname: pName(u.nickname), jobTitle: pName(u.job_title), deptIds };
+}
+/** A person's profile alternatives for `author.alt` (only what differs from the head name / is set). */
+function personAltOf(id) {
+  const p = PEOPLE.get(String(id || ''));
+  if (!p || !p.name && !p.nickname && !p.enName) return null;
+  const alt = {};
+  if (p.enName && p.enName !== p.name) alt.enName = p.enName;
+  if (p.nickname && p.nickname !== p.name) alt.nickname = p.nickname;
+  if (p.jobTitle) alt.jobTitle = p.jobTitle;
+  const d = (p.deptIds || []).map((x) => DEPTS.get(x)).find((x) => x && x.name);
+  if (d) alt.department = d.name;
+  return Object.keys(alt).length ? alt : null;
+}
+function rememberPerson(id, v, at) {
+  PEOPLE.delete(id); PEOPLE.set(id, { ...v, at });
+  while (PEOPLE.size > PEOPLE_MAX) PEOPLE.delete(PEOPLE.keys().next().value);
+}
 /** THE READ-TIME VIEW of a stored record (the engine asks it for every read — the window, an agent's read,
  *  a search): a bot a record stored before D3 calls "app" gets its name (or the fallback), and a text a
  *  record stored before D1 carries markup in is read by the same markup reader. The store is never rewritten. */
@@ -547,6 +608,15 @@ function recordView(record) {
     const nm = appNameOf(a.id);
     if (nm !== a.name) out = { ...out, author: { ...a, name: nm } };
   }
+  // lane lark-threads (B1/B5): a PERSON the profile cache knows — an unnamed author gets the profile's name, and every
+  // author its alternatives (the nickname, the department…) for the view's head; the store is never rewritten
+  if (!a.isBot && a.id && PEOPLE.has(String(a.id))) {
+    const p = PEOPLE.get(String(a.id));
+    const alt = personAltOf(a.id);
+    const cur = out.author || a;
+    const name = cur.name || (p && p.name) || '';
+    if (name !== cur.name || (alt && JSON.stringify(alt) !== JSON.stringify(cur.alt || null))) out = { ...out, author: { ...cur, name, ...(alt ? { alt } : {}) } };
+  }
   const type = String((r.raw && r.raw.msg_type) || '');
   if ((type === 'text' || type === 'post' || type === 'system' || type === 'interactive' || !type) && Blocks.carriesTag(r.text)) {
     out = { ...out, text: Blocks.quoteTags(Blocks.larkPlainText(r.text)) };
@@ -554,10 +624,42 @@ function recordView(record) {
   return out;
 }
 
+/**
+ * THE BY-ID ANSWER'S VERDICT (lane lark-threads A4, 2026-10-01) — PURE, bounded before parse. `GET /im/v1/messages/
+ * :message_id` answers `data.items` (the message, plus the children of a merged forward — the doc: "合并转发消息 … 返回
+ * 父消息及 N 条子消息"); each item carries `thread_id` when it lives in a topic ("话题消息包含 thread_id") and
+ * `root_id` / `parent_id` only on a reply. The one item that IS the asked message decides (≤ BYID_ITEMS_MAX read):
+ *   absent   no item names the message (a deleted or recalled message answers no content)
+ *   foreign  the item names ANOTHER chat (never a record of this conversation — the walk's identity belt)
+ *   deleted  `deleted: true`
+ *   reply    a thread REPLY (`thread_id` + `root_id` ≠ itself): the record + the ROOT's patch {vendorId: root_id, threadKey}
+ *   root     a topic ROOT (`thread_id`, no other root): the root's own patch
+ *   plain    no `thread_id` — a message the chat listing does show (counted, never retried)
+ * → { kind, item|null, threadKey|null, rootPatch: {vendorId, threadKey}|null }
+ */
+const BYID_ITEMS_MAX = 20;
+const BYID_ID_MAX = 512;
+const byIdOk = (v) => typeof v === 'string' && v.length > 0 && v.length <= BYID_ID_MAX && !/[\u0000-\u001f\u007f]/.test(v);
+function readByIdAnswer(data, { messageId, convId } = {}) {
+  const none = (kind) => ({ kind, item: null, threadKey: null, rootPatch: null });
+  const items = data && typeof data === 'object' && Array.isArray(data.items) ? data.items.slice(0, BYID_ITEMS_MAX) : [];
+  const want = String(messageId || '');
+  const item = items.find((m) => m && typeof m === 'object' && !Array.isArray(m) && String(m.message_id || '') === want) || null;
+  if (!item) return none('absent');
+  if (item.chat_id !== undefined && item.chat_id !== null && String(item.chat_id) !== String(convId || '')) return none('foreign');
+  if (item.deleted === true) return none('deleted');
+  const tk = byIdOk(item.thread_id) ? item.thread_id : null;
+  if (!tk) return { kind: 'plain', item, threadKey: null, rootPatch: null };
+  const root = byIdOk(item.root_id) && item.root_id !== want ? item.root_id : null;
+  if (root) return { kind: 'reply', item, threadKey: tk, rootPatch: { vendorId: root, threadKey: tk } };
+  return { kind: 'root', item, threadKey: tk, rootPatch: { vendorId: want, threadKey: tk } };
+}
+const BYID_KINDS = Object.freeze(['absent', 'foreign', 'deleted', 'reply', 'root', 'plain']);
+
 /** ONE vendor item → ONE ChannelRecord. `names` maps open_id → display name
  *  (chat members, cached) and app_id → application name (D3); `selfId` is
  *  the authorizing user's open_id. */
-function toRecord(adapterId, convId, item, { names = new Map(), selfId = null } = {}) {
+function toRecord(adapterId, convId, item, { names = new Map(), selfId = null, selfTenant = null } = {}) {
   const sender = item.sender || {};
   const sid = String(sender.id || '');
   const text = textOf(item);
@@ -568,7 +670,11 @@ function toRecord(adapterId, convId, item, { names = new Map(), selfId = null } 
     adapterId, convId,
     vendorId: String(item.message_id || ''),
     at: Number(item.create_time) || 0,
-    author: { id: sid, name: isApp ? appNameOf(sid, names) : (names.get(sid) || ''), isSelf: !!selfId && sid === selfId, isBot: isApp },
+    // lane lark-threads (B1/B4/B5): an unnamed person named by the profile cache; the profile's alternatives; EXTERNAL when
+    // the sender's tenant is not the account's (both known without a call — the sender's `tenant_key`, the account's own)
+    author: { id: sid, name: isApp ? appNameOf(sid, names) : (names.get(sid) || (PEOPLE.get(sid) || {}).name || ''), isSelf: !!selfId && sid === selfId, isBot: isApp,
+      ...(!isApp && personAltOf(sid) ? { alt: personAltOf(sid) } : {}),
+      ...(!isApp && selfTenant && sender.tenant_key && String(sender.tenant_key) !== String(selfTenant) ? { external: true } : {}) },
     text,
     mentions,
     attachments: attachmentsOf(item),
@@ -582,7 +688,7 @@ function toRecord(adapterId, convId, item, { names = new Map(), selfId = null } 
     replyTo: item.parent_id ? String(item.parent_id) : null,
     threadKey: item.thread_id ? String(item.thread_id) : (item.root_id ? String(item.root_id) : null),
     root: item.root_id ? String(item.root_id) : null,
-    raw: { msg_type: item.msg_type || null, chat_id: item.chat_id || null, sender_type: sender.sender_type || null, updated: item.updated || null },
+    raw: { msg_type: item.msg_type || null, chat_id: item.chat_id || null, sender_type: sender.sender_type || null, updated: item.updated || null, ...(typeof sender.tenant_key === 'string' && sender.tenant_key.length <= 64 ? { tenant_key: sender.tenant_key } : {}) },
   });
 }
 
@@ -603,7 +709,10 @@ function typedFailure(status, body, what, retryAfterSec = null) {
   const msg = (body && (body.msg || body.error_description || body.error)) || `HTTP ${status}`;
   if (status === 401 || CODE_AUTH.has(code)) return new ChannelError('auth-expired', `${what}: ${msg} (${code || status})`, { retryable: false, detail: { code, status } });
   // lane R5: the vendor's `x-ogw-ratelimit-reset` (seconds) rides the refusal — the engine waits exactly that, never a 15-minute park
-  if (status === 429 || CODE_RATE.has(code)) return new ChannelError('rate-limited', `${what}: ${msg} (${code || status})`, { retryable: true, detail: { code, status, retryAfterSec: Number.isFinite(retryAfterSec) ? retryAfterSec : null } });
+  // verify r3 (T2 ⑤): 99991400 is the APP's frequency limit, 99991403 THIS USER's (the vendor's error-code list) — the
+  // recorded fixtures carry only 99991400, so the user-level kind is unmeasured; both park the ACCOUNT (the safe reading:
+  // every call of this sign-in rides the same app) and the words say which limit answered
+  if (status === 429 || CODE_RATE.has(code)) return new ChannelError('rate-limited', `${what}: ${msg} (${code || status})${code === 99991403 ? ' — the user-level limit' : code === 99991400 ? ' — the app-level limit' : ''}`, { retryable: true, detail: { code, status, retryAfterSec: Number.isFinite(retryAfterSec) ? retryAfterSec : null } });
   if (status === 403 || CODE_FORBIDDEN.has(code)) {
     // lane lark-search-poll (§2.5): the vendor's own words name the scope it wants ("… one of these privileges …") —
     // read BOUNDED (the first 4 KiB, ≤ 8 names of ≤ 64 characters in the scope alphabet) into `requiredScopes`
@@ -611,7 +720,8 @@ function typedFailure(status, body, what, retryAfterSec = null) {
     return new ChannelError('forbidden', `${what}: ${msg} (${code || status})`, { retryable: false, detail: { code, status, ...(requiredScopes.length ? { requiredScopes } : {}) } });
   }
   if (status === 404 || CODE_NOT_FOUND.has(code)) return new ChannelError('not-found', `${what}: ${msg} (${code || status})`, { retryable: false, detail: { code, status } });
-  if (status >= 500) return new ChannelError('transport', `${what}: ${msg} (${status})`, { retryable: true, detail: { code, status } });
+  // verify r3: a 5xx's Retry-After rides the failure too — the engine's failure ladder waits at least that long
+  if (status >= 500) return new ChannelError('transport', `${what}: ${msg} (${status})`, { retryable: true, detail: { code, status, ...(Number.isFinite(retryAfterSec) && retryAfterSec > 0 ? { retryAfterSec } : {}) } });
   return new ChannelError('vendor-error', `${what}: ${msg} (${code || status})`, { retryable: false, detail: { code, status } });
 }
 
@@ -672,11 +782,11 @@ function create(record = {}, deps = {}) {
   // read (`p2pRead`) and an author is named through the contact lookup (`peerNames`, cached MEMBERS_TTL_MS)
   const p2pIds = new Set();
   const p2pRead = new Map();    // convId -> the last instant its history() answered
-  const peerNames = new Map();  // open_id -> { name, at }
   /** The consent's scope list: the base set + the reactions READ scope unless the owner turned it off (OPTIONS —
    *  on by default); `without` = the optional scopes the one narrowing retry dropped. */
   // lane lark-search-poll: + the change feed's two scopes unless the owner turned the search off (on by default)
-  const consentScopes = (without = []) => [...SCOPES, ...(optionOf(record, 'reactions') === 'read' ? [REACTIONS_READ_SCOPES[0]] : []), ...(optionOf(record, 'search') !== 'off' ? [P2P_READ_SCOPE, SEARCH_SCOPE] : [])].filter((x) => !(Array.isArray(without) && without.includes(x)));
+  // lane lark-threads (B1/B5): + reading people's profiles (and their job title / department) — measured necessary
+  const consentScopes = (without = []) => [...SCOPES, ...(optionOf(record, 'reactions') === 'read' ? [REACTIONS_READ_SCOPES[0]] : []), JOB_SCOPE, DEPT_SCOPE, PEOPLE_SCOPE, ...(optionOf(record, 'search') !== 'off' ? [P2P_READ_SCOPE, SEARCH_SCOPE] : [])].filter((x) => !(Array.isArray(without) && without.includes(x)));
   const sleep = (ms) => new Promise((r) => { const t = setTimeout(r, ms); if (t.unref) t.unref(); });
 
   /** THIS ACCOUNT's credential binding (2026-09-22): `cluster:<k>` / `own`,
@@ -718,7 +828,7 @@ function create(record = {}, deps = {}) {
    *  (`invalidGrantAt`): the account logged itself out and asked the owner to
    *  re-authorize. Now siblings wait for the one refresh and read what it wrote. */
   let refreshing = null;
-  async function accessToken() {
+  async function accessToken(depth = 0) {   // verify r4 F1: `depth` bounds the re-entry (a superseded refresh re-reads ONCE)
     const cred = credential();
     if (!cred.values) throw new ChannelError('auth-expired', `Lark app credential missing: ${cred.why}`, { retryable: false, detail: { needsCredentials: true } });
     const { token, why } = readToken();
@@ -728,10 +838,15 @@ function create(record = {}, deps = {}) {
     if (token.access_token && Number(token.expiresAt) > now() + REFRESH_MARGIN_MS) return token.access_token;
     if (!token.refresh_token) throw new ChannelError('auth-expired', 'Lark access token expired and no refresh token is held — re-authorize', { retryable: false });
     if (Number(token.refreshExpiresAt) && Number(token.refreshExpiresAt) <= now()) throw new ChannelError('auth-expired', 'Lark refresh token expired — re-authorize', { retryable: false });
-    if (refreshing) { await refreshing; return accessToken(); }   // a sibling's refresh: wait for it, then read what it wrote
+    if (refreshing) { await refreshing; return accessToken(depth + 1); }   // a sibling's refresh: wait for it, then read what it wrote
     refreshing = refreshAccessToken(cred, token).finally(() => { refreshing = null; });
     const got = await refreshing;
-    return got || accessToken();   // verify r5: a refresh SUPERSEDED while in flight (a re-authorize landed, a sibling entry's rotation won) wrote nothing — the store's token is the one to use
+    if (got) return got;
+    // verify r5: a refresh SUPERSEDED while in flight (a re-authorize landed, a sibling entry's rotation won) wrote nothing — the store's token is the one to use.
+    // verify r4 F1: that re-read happens ONCE — a stored token that still cannot be used after it is a typed failure, never another refresh (a 200 answer
+    // without an access_token used to be stored as `access_token: ''` and re-entered here for ever: one refresh POST per loop, unbounded, the pass never ending)
+    if (depth >= 1) throw new ChannelError('vendor-error', `lark: the token refresh did not yield a usable access token (re-entered after a superseded refresh) — re-authorize if it persists`, { retryable: true, detail: { refreshLoop: true } });
+    return accessToken(depth + 1);
   }
   /** Persist a token the vendor answered (verify r5). The v2 refresh ROTATES the refresh token — the old one is retired
    *  the moment the vendor answers — so a write the store refuses (a full disk) used to mean the next refresh POSTed a
@@ -790,6 +905,8 @@ function create(record = {}, deps = {}) {
       }
       throw e;
     }
+    // verify r4 F1: an answer without an access token is not a token — nothing stored, the request not sent (it used to be stored as '' and refreshed again for ever)
+    if (!d || typeof d.access_token !== 'string' || !d.access_token) throw new ChannelError('vendor-error', `lark token refresh: the vendor's answer carried no access_token${d && d.code !== undefined ? ` (code ${d.code})` : ''} — nothing was stored; re-authorize if it persists`, { retryable: true, detail: { noAccessToken: true } });
     const next = tokenFromExchange(d, token);
     // verify r5: written ONLY while the store still holds the token this refresh tried — a disconnect (cleared) or a
     // re-authorize (a different token) that landed while the POST was in flight is never overwritten by this late
@@ -822,7 +939,7 @@ function create(record = {}, deps = {}) {
       refresh_token: String(d.refresh_token || prev.refresh_token || ''),
       refreshExpiresAt: d.refresh_token_expires_in ? t + Number(d.refresh_token_expires_in) * 1000 : (prev.refreshExpiresAt || null),
       scopes: String(d.scope || (prev.scopes || []).join(' ')).split(/\s+/).filter(Boolean),
-      openId: prev.openId || null, name: prev.name || null, unionId: prev.unionId || null, userId: prev.userId || null, brand,
+      openId: prev.openId || null, name: prev.name || null, unionId: prev.unionId || null, userId: prev.userId || null, tenantKey: prev.tenantKey || null, brand,
     };
   }
 
@@ -842,55 +959,153 @@ function create(record = {}, deps = {}) {
   /** Chat member names, ONCE per conversation per MEMBERS_TTL_MS — best
    *  effort: a refused lookup leaves the ids bare rather than failing the
    *  pass (a message with an unnamed author is still a message). */
+  /** lane lark-threads (B4): the ACCOUNT's own organization — the consent's user_info `tenant_key` when the token holds
+   *  it, else learned (no call) from the chat members' answer (the owner's own row) or one of the owner's own messages. */
+  let learnedTenant = null;
+  const selfTenant = () => ((readToken().token || {}).tenantKey || learnedTenant || null);
+  const learnTenant = (memberId, tenantKey) => { const me = (readToken().token || {}).openId || null; if (me && String(memberId) === me && typeof tenantKey === 'string' && tenantKey && tenantKey.length <= 64) learnedTenant = tenantKey; };
+  /** lane lark-threads (B1): a DISSOLVED chat (232009) — its members are asked again only after this, and said ONCE. */
+  const DISSOLVED_TTL_MS = 24 * 3600e3;
   async function namesFor(convId) {
     const c = members.get(convId);
-    if (c && now() - c.at < MEMBERS_TTL_MS) return c.names;
+    if (c && (c.until ? now() < c.until : now() - c.at < (c.dissolved ? DISSOLVED_TTL_MS : MEMBERS_TTL_MS))) return c.names;
     const names = new Map();
-    let refused = false;
+    let refused = false, dissolved = false, until = 0;
     try {
       let pageToken = null, pages = 0;
       do {
         const p = new URLSearchParams({ member_id_type: 'open_id', page_size: '100' });
         if (pageToken) p.set('page_token', pageToken);
         const d = await api(`/im/v1/chats/${encodeURIComponent(convId)}/members?${p}`, { what: 'lark chat members' });
-        for (const m of (d.data && d.data.items) || []) if (m && m.member_id) names.set(String(m.member_id), String(m.name || ''));
+        for (const m of (d.data && d.data.items) || []) if (m && m.member_id) { names.set(String(m.member_id), String(m.name || '')); learnTenant(m.member_id, m.tenant_key); }
         pageToken = nextToken(d.data);
       } while (pageToken && ++pages < 10);
     } catch (e) {
       if (e instanceof ChannelError && e.code === 'auth-expired') throw e;   // a dead token is the pass's failure, not a missing name
+      // verify r2 F1 (the vendor-budget class): a RATE refusal on the members page is the READ's 429 — the account's back-off
+      // (the pass's ladder, the vendor's hint), never the chat's refusal remembered MEMBERS_TTL_MS, and never a page that goes
+      // on sending its profile reads into the vendor's stop (it did: three more, then the pass went on at pace)
+      if (e instanceof ChannelError && e.code === 'rate-limited') { peopleRefusedUntil = Math.max(peopleRefusedUntil, now() + peoplePauseMs(e)); throw e; }
       refused = true;
-      if (!p2pIds.has(convId)) log.warn && log.warn(`[channels] lark: member names for ${convId} unavailable (${(e && e.message) || e}) — authors will show their ids`);
+      dissolved = !!(e && e.detail && Number(e.detail.code) === 232009);
+      // verify r4 F4: a transport blip (a 5xx, the network) is the VENDOR's moment, never the chat's — asked again after the vendor's hint
+      // (else a minute, at most five), not remembered as the chat's refusal for MEMBERS_TTL_MS (6 h of authors named by profile reads)
+      if (e instanceof ChannelError && e.code === 'transport') until = now() + peoplePauseMs(e);
+      // lane lark-threads (B1): a dissolved chat answered 232009 on every pass (17 identical lines in production) — said
+      // ONCE per chat, remembered a day; its authors are named by their profiles (peopleFor), never by a member list
+      const sayKey = `${convId}:${dissolved ? 'dissolved' : 'refused'}`;
+      if (!p2pIds.has(convId) && !SAID_MEMBERS.has(sayKey)) {
+        SAID_MEMBERS.add(sayKey); if (SAID_MEMBERS.size > 2000) SAID_MEMBERS.delete(SAID_MEMBERS.values().next().value);
+        log.warn && log.warn(`[channels] lark: member names for ${convId} unavailable (${(e && e.message) || e})${dissolved ? ' — the chat was dissolved; asked again in 24 h' : until ? ` — asked again in ${Math.round((until - now()) / 1000)} s` : ''} — authors are named by their profiles where the sign-in may read them`);
+      }
     }
-    members.set(convId, { names, at: now(), refused });
+    members.set(convId, { names, at: now(), refused, dissolved, until });
     return names;
   }
-  /** ONE person's name by open id (lane lark-search-poll, §3.3): `contact/v3/users/:id` under the user token (scope
-   *  `contact:user.base:readonly`, already in SCOPES) — cached MEMBERS_TTL_MS, a refusal remembered as no name. */
-  async function contactName(openId) {
-    const id = String(openId || '');
-    if (!Feed.idOf(id)) return null;
-    const c = peerNames.get(id);
-    if (c && now() - c.at < MEMBERS_TTL_MS) return c.name;
-    let name = null;
+  /** May this sign-in read ANOTHER person's profile? (the users/get doc: any one of PEOPLE_READ_SCOPES for a user token —
+   *  MEASURED: `contact:user.base:readonly` alone is refused 99991679). Asked before every lookup: nothing is sent
+   *  without it, and the account card says "re-authorize to read people's profiles" (`peopleGrant`). */
+  const canReadPeople = () => { const sc = ((readToken().token || {}).scopes) || []; return PEOPLE_READ_SCOPES.some((x) => sc.includes(x)); };
+  /** …and a department's name (`contact/v3/departments/:id` under a user token asks contact:contact.base:readonly). */
+  const canReadDepts = () => (((readToken().token || {}).scopes) || []).some((x) => x === PEOPLE_SCOPE || x === 'contact:contact:readonly');
+  let peopleRefusedUntil = 0;
+  /** verify r1 F3: how long the account's people lookups pause after a vendor rate refusal / a transport blip — the
+   *  vendor's Retry-After when it gave one, else a minute; never more than five. */
+  const peoplePauseMs = (e) => { const hint = e && e.detail ? Number(e.detail.retryAfterSec) : NaN; return Math.min(300e3, Math.max(1e3, (Number.isFinite(hint) && hint > 0 ? hint : 60) * 1000)); };
+  let peopleMinute = [];
+  const peopleBudget = () => { const t = now(); peopleMinute = peopleMinute.filter((x) => x <= t && t - x < 60e3); return PEOPLE_PER_MIN - peopleMinute.length; };
+  /** ONE person's profile (B1/B5): `contact/v3/users/:id` (+ the first department's name, 24 h) — through the gate, at
+   *  most PEOPLE_PER_MIN a minute per account, cached 6 h (a hit or a refusal); a missing privilege (99991679 / a 403)
+   *  stops every lookup of this account for MEMBERS_TTL_MS and is said once. → the cached entry, or null (not asked). */
+  async function lookupPerson(id) {
+    const key = String(id || '');
+    if (!Feed.idOf(key)) return null;
+    const hit = PEOPLE.get(key);
+    if (hit && now() - hit.at < MEMBERS_TTL_MS) return hit;
+    if (!canReadPeople() || now() < peopleRefusedUntil || peopleBudget() <= 0) return hit || null;
+    peopleMinute.push(now());
     try {
-      const d = await api(`/contact/v3/users/${encodeURIComponent(id)}?user_id_type=open_id`, { what: 'lark user' });
-      const u = (d && d.data && d.data.user) || {};
-      name = typeof u.name === 'string' && u.name.trim() ? u.name.trim().slice(0, 200) : null;
+      const d = await api(`/contact/v3/users/${encodeURIComponent(key)}?user_id_type=open_id&department_id_type=open_department_id`, { what: 'lark user' });
+      const v = readPersonAnswer(d && d.data) || { name: '', enName: '', nickname: '', jobTitle: '', deptIds: [] };
+      rememberPerson(key, { ...v, why: null }, now());
+      if (v.deptIds.length) await departmentName(v.deptIds[0]);
     } catch (e) {
       if (e instanceof ChannelError && e.code === 'auth-expired') throw e;
+      const vc = e && e.detail ? Number(e.detail.code) : null;
+      if (vc === 99991679 || (e && e.code === 'forbidden')) {
+        peopleRefusedUntil = now() + MEMBERS_TTL_MS;
+        if (!SAID_MEMBERS.has(`people:${adapterId}`)) { SAID_MEMBERS.add(`people:${adapterId}`); log.warn && log.warn(`[channels] lark: people's profiles cannot be read (${(e && e.message) || e}) — re-authorize to read people's profiles (${PEOPLE_SCOPE})`); }
+      }
+      // verify r1 F3: a RATE refusal or a transport blip is the VENDOR's moment, never the person's — the id is NOT
+      // remembered as a failure (it used to be, for 6 h, while the page went on asking the next ids into the same 429),
+      // and this account's lookups pause for the vendor's hint (else a minute, at most five)
+      if (e && (e.code === 'rate-limited' || e.code === 'transport')) {
+        peopleRefusedUntil = now() + peoplePauseMs(e);
+        // verify r2 F1: a RATE refusal is the READ's — thrown to the pass, whose ladder honours the vendor's hint (up to 15 min)
+        // and stops every shape; this pause alone re-asked every 5 min into a 3600 s hint while the account kept reading at pace
+        if (e.code === 'rate-limited') throw e;
+        return hit || null;
+      }
+      rememberPerson(key, { name: (hit && hit.name) || '', enName: '', nickname: '', jobTitle: '', deptIds: [], why: (e && e.code) || 'vendor-error' }, now());
+    }
+    return PEOPLE.get(key) || null;
+  }
+  async function departmentName(id) {
+    const k = String(id || '');
+    const c = DEPTS.get(k);
+    if (c && now() - c.at < DEPTS_TTL_MS) return c.name;
+    if (!canReadDepts() || peopleBudget() <= 0) return c ? c.name : null;
+    peopleMinute.push(now());
+    let name = null;
+    try {
+      const d = await api(`/contact/v3/departments/${encodeURIComponent(k)}?department_id_type=open_department_id`, { what: 'lark department' });
+      const dep = (d && d.data && d.data.department) || {};
+      const i18n = dep.i18n_name && typeof dep.i18n_name === 'object' ? dep.i18n_name[lang] : null;
+      name = pName(String(i18n || dep.name || '')) || null;
+    } catch (e) {
+      if (e instanceof ChannelError && e.code === 'auth-expired') throw e;
+      if (e.code === 'rate-limited' || e.code === 'transport') { peopleRefusedUntil = now() + peoplePauseMs(e); if (e.code === 'rate-limited') throw e; return c ? c.name : null; }   // verify r1 F3: the vendor's moment — asked again after the pause, never a day without a name; verify r2 F1: a 429 is the read's (thrown)
       name = null;
     }
-    peerNames.set(id, { name, at: now() });
-    if (peerNames.size > 2000) peerNames.delete(peerNames.keys().next().value);
+    DEPTS.delete(k); DEPTS.set(k, { name, at: now() });
+    while (DEPTS.size > 2000) DEPTS.delete(DEPTS.keys().next().value);
     return name;
   }
-  /** A SINGLE chat's authors, named (U7): the chat's `/members` refused a p2p id ⇒ at most two unknown sender ids are
-   *  looked up by the contact API (a single chat has two people) — otherwise every author shows as a bare `ou_…`. */
-  async function namesWithPeers(convId, items, names) {
-    const m = members.get(convId);
-    if (!p2pIds.has(convId) || !m || !m.refused) return names;
-    const unknown = [...new Set(items.map((x) => String((x.sender && x.sender.id) || '')).filter((x) => x && !names.has(x)))].slice(0, 2);
-    for (const id of unknown) { const n = await contactName(id); if (n) names.set(id, n); }
+  /** ONE person's name (the describe ladder's ②, lane lark-search-poll §3.3) — now through the profile reader. */
+  async function contactName(openId) {
+    const p = await lookupPerson(openId);
+    return p && p.name ? p.name : null;
+  }
+  /**
+   * EVERY AUTHOR OF A PAGE, AS LARK SHOWS THEM (lane lark-threads B1/B5): the person senders the page names, their profile
+   * asked ONCE per 6 h per id — the UNNAMED first (a person who left the chat, an external contact, a dissolved chat's
+   * author: the member list cannot name them), then the rest for their nickname / department — at most
+   * PEOPLE_LOOKUPS_PER_CALL per page, PEOPLE_PER_MIN per minute per account; a name the profile gives fills `names`.
+   */
+  async function peopleFor(convId, items, names) {
+    const me = (readToken().token || {}).openId || null;   // the account's own profile is never looked up (the consent named it)
+    const ids = [...new Set((items || []).filter((m) => m && m.sender && m.sender.sender_type !== 'app' && m.sender.id && String(m.sender.id) !== me).map((m) => String(m.sender.id)))];
+    for (const m of items || []) if (m && m.sender && m.sender.id) learnTenant(m.sender.id, m.sender.tenant_key);
+    const due = ids.filter((id) => { const p = PEOPLE.get(id); return !(p && now() - p.at < MEMBERS_TTL_MS); }).sort((a, b) => Number(!!names.get(a)) - Number(!!names.get(b)));
+    let asked = 0;
+    for (const id of due) {
+      if (asked >= PEOPLE_LOOKUPS_PER_CALL || !canReadPeople() || now() < peopleRefusedUntil || peopleBudget() <= 0) break;
+      asked++;
+      await lookupPerson(id);
+    }
+    // verify r1 F3: a department the last pass could not name (a 429, a blip — never remembered as an answer) is asked for a
+    // person whose profile is known, within the same per-page bound, the minute and the pause
+    for (const id of ids) {
+      if (asked >= PEOPLE_LOOKUPS_PER_CALL || !canReadDepts() || now() < peopleRefusedUntil || peopleBudget() <= 0) break;
+      const p = PEOPLE.get(id);
+      const dep = p && Array.isArray(p.deptIds) && p.deptIds.length ? p.deptIds[0] : null;
+      if (!dep) continue;
+      const c = DEPTS.get(dep);
+      if (c && now() - c.at < DEPTS_TTL_MS) continue;
+      asked++;
+      await departmentName(dep);
+    }
+    for (const id of ids) if (!names.get(id)) { const p = PEOPLE.get(id); if (p && p.name) names.set(id, p.name); }
     return names;
   }
 
@@ -940,6 +1155,7 @@ function create(record = {}, deps = {}) {
           // a TRANSIENT failure (a rate limit, the network) is asked again in 5 minutes, a refusal in MEMBERS_TTL_MS
           const transient = why === 'rate-limited' || why === 'transport';
           rememberAppName(id, prev && prev.name ? prev.name : null, { at: transient ? now() - MEMBERS_TTL_MS + 5 * 60e3 : now(), why });
+          if (why === 'rate-limited') throw e;   // verify r2 F1: a 429 on the application read is the read's (the pass's ladder); the 5-min memo stays as the guard after it
           if (!prev || prev.why !== why) log.warn && log.warn(`[channels] lark: the application name of ${id} is not available (${(e && e.message) || e}) — shown as "${botFallbackName(id)}"; granting the app the scope admin:app.info:readonly names it`);
         }
       })();
@@ -954,6 +1170,8 @@ function create(record = {}, deps = {}) {
     for (const m of items || []) seedAppNamesFrom(m, now());
     const apps = appSendersOf(items);
     if (apps.length) { await appNamesFor(apps); for (const id of apps) { const nm = knownAppName(id); if (nm) names.set(id, nm); } }
+    // lane lark-threads (B1/B5): every person sender named as Lark shows them — a profile per id per 6 h (the unnamed first)
+    await peopleFor(convId, items, names);
     return names;
   }
 
@@ -962,15 +1180,33 @@ function create(record = {}, deps = {}) {
   // push path: the record must be durable inside the vendor's 3 s ack budget,
   // and an author shown by id is still a message (the poll re-reads names
   // into its own cache; the dedup keeps the pushed record).
+  // verify r3 (the vendor-budget class on the PUSH path): a RATE refusal on the push path's names used to be ONE members
+  // read per pushed message into the vendor's stop (six messages = six refused reads, a warn line each, the hint never
+  // honoured) — the push path cannot throw (the record must be durable inside the ack budget), so it PAUSES its lookups
+  // for the vendor's hint (peoplePauseMs: Retry-After, else a minute, at most five) and serves the cached names meanwhile
+  let pushNamesPausedUntil = 0;
+  /** verify r4 (T2 ①): the push path's pause honours the vendor's hint up to the ENGINE's own cap (RATE_RETRY_AFTER_MAX_MS, 15 min) —
+   *  the people-lookup cap of 5 min asked again every 5 min into an hour-long stop (12 refused reads an hour, a warn line each, the
+   *  pass's ladder never seeing them) */
+  const PUSH_PAUSE_MAX_MS = 15 * 60e3;
+  const pushPauseMs = (e) => { const hint = e && e.detail ? Number(e.detail.retryAfterSec) : NaN; return Math.min(PUSH_PAUSE_MAX_MS, Math.max(1e3, (Number.isFinite(hint) && hint > 0 ? hint : 60) * 1000)); };
   const live = createLarkLive({
     adapterId, brand, credential, now, log, sdk: deps.larkSdk || null,
     reconnectMinMs: deps.reconnectMinMs, reconnectMaxMs: deps.reconnectMaxMs,
     toRecord: async (convId, item) => {
-      let names = new Map();
-      try { names = await Promise.race([allNamesFor(convId, [item]), sleep(NAMES_WAIT_MS).then(() => (members.get(convId) || { names: new Map() }).names)]); }
-      catch (e) { log.warn && log.warn(`[channels] lark: member names for ${convId} unavailable on the push path (${(e && e.message) || e})`); }
+      const cached = () => (members.get(convId) || { names: new Map() }).names;
+      let names = cached();
+      if (now() >= pushNamesPausedUntil) {
+        // ONE catch on the lookup itself, so a refusal that lands AFTER the ack-budget race was lost still pauses the path
+        const lookup = allNamesFor(convId, [item]).catch((e) => {   // rate-ok: push-names
+          if (e instanceof ChannelError && e.code === 'rate-limited') { pushNamesPausedUntil = Math.max(pushNamesPausedUntil, now() + pushPauseMs(e)); log.warn && log.warn(`[channels] lark: the vendor rate-limited the push path's member names (${(e && e.message) || e}) — no lookup on the push path for ${Math.round(pushPauseMs(e) / 1000)} s`); }
+          else log.warn && log.warn(`[channels] lark: member names for ${convId} unavailable on the push path (${(e && e.message) || e})`);
+          return null;
+        });
+        names = (await Promise.race([lookup, sleep(NAMES_WAIT_MS).then(cached)])) || cached();
+      }
       const selfId = (readToken().token || {}).openId || null;
-      return toRecord(adapterId, convId, item, { names, selfId });
+      return toRecord(adapterId, convId, item, { names, selfId, selfTenant: selfTenant() });
     },
   });
 
@@ -1055,7 +1291,7 @@ function create(record = {}, deps = {}) {
     const items = all.filter((m) => !m.chat_id || String(m.chat_id) === String(convId));
     const foreign = all.length - items.length;
     if (foreign && log.warn) log.warn(`[channels] lark: thread ${String(threadKey).slice(0, 64)} of ${convId}: ${foreign} message(s) of another chat in its listing — dropped`);
-    const names = items.length ? await namesFor(convId) : new Map();
+    const names = items.length ? await allNamesFor(convId, items) : new Map();   // lane lark-threads: + the profiles (B1/B5)
     const selfId = (readToken().token || {}).openId || null;
     const fresh = [];
     let reached = false;
@@ -1074,8 +1310,40 @@ function create(record = {}, deps = {}) {
     // replies are out of reach here, never a silent "start of the thread"
     const bounded = !reached && !!next && w.count >= max;
     if (done) walks.delete(wk); else w.pageToken = next;
-    const records = fresh.reverse().map((m) => toRecord(adapterId, convId, m, { names, selfId }));
+    const records = fresh.reverse().map((m) => toRecord(adapterId, convId, m, { names, selfId, selfTenant: selfTenant() }));
     return { records: records.slice(-size), anchor: w.newest || w.stopAt || null, reachedAnchor: done, complete: done, ...(foreign ? { foreign } : {}), ...(bounded ? { bounded: true } : {}) };
+  }
+  /**
+   * THE RECENT-ROOTS RECHECK'S PAGE (lane lark-threads A2, 2026-10-01): the chat's NEWEST page, `container_id_type=chat`
+   * newest first, NO anchor stop — the one place the vendor says a stored root now heads a topic (the doc: a chat
+   * listing returns a topic's ROOT only, carrying `thread_id` once the topic exists, "不返回说明该消息不是话题形式的
+   * 消息"). The engine offers every item to the store's place door (a stored root widens) and ingests nothing here.
+   * ONE request (+ the members' names, cached 6 h).
+   */
+  async function recentRootsImpl(convId, { limit = 50 } = {}) {
+    const size = Math.min(50, Math.max(1, Number(limit) || 50));
+    const p = new URLSearchParams({ container_id_type: 'chat', container_id: convId, sort_type: 'ByCreateTimeDesc', page_size: String(size) });
+    const d = await api(`/im/v1/messages?${p}`, { what: 'lark recent roots' });
+    const items = ((d.data && d.data.items) || []).filter((m) => m && m.message_id && (!m.chat_id || String(m.chat_id) === String(convId))).slice(0, size);
+    const names = items.length ? await allNamesFor(convId, items) : new Map();
+    const selfId = (readToken().token || {}).openId || null;
+    return { records: items.reverse().map((m) => toRecord(adapterId, convId, m, { names, selfId, selfTenant: selfTenant() })), topics: items.filter((m) => m.thread_id).length };
+  }
+  /**
+   * ONE MESSAGE BY ITS ID (lane lark-threads A4): a change-feed hit the conversation's chat read did not find — the doc's
+   * thread REPLY ("对于普通对话群中的话题消息，通过 chat 容器类型仅能获取到话题的根消息"). `GET /im/v1/messages/:message_id`
+   * under the user token (the user must be in the chat), ONE paced + metered request; the answer judged by the PURE
+   * `readByIdAnswer` (the asked item, this chat, deleted, reply / root / plain). → `{kind, record|null, rootPatch|null,
+   * threadKey|null}` — a record only for a thread reply (a message of this chat the listing never shows).
+   */
+  async function messageByIdImpl(convId, { messageId } = {}) {
+    if (!byIdOk(messageId)) throw new ChannelError('not-found', 'lark: a message read by id needs its id', { retryable: false });
+    const d = await api(`/im/v1/messages/${encodeURIComponent(String(messageId))}`, { what: 'lark message by id' });
+    const v = readByIdAnswer((d && d.data) || null, { messageId, convId });
+    if (v.kind !== 'reply') return { kind: v.kind, record: null, rootPatch: v.rootPatch, threadKey: v.threadKey };
+    const names = await allNamesFor(convId, [v.item]);
+    const selfId = (readToken().token || {}).openId || null;
+    return { kind: v.kind, record: toRecord(adapterId, convId, v.item, { names, selfId, selfTenant: selfTenant() }), rootPatch: v.rootPatch, threadKey: v.threadKey };
   }
   /** ONE message's reactions (L8): the vendor's list, paged to `has_more === false` but at most REACTION_PAGES_MAX
    *  pages (150); grouped by emoji_type with the reactors' open ids and their reaction ids aligned (the engine keeps
@@ -1178,7 +1446,8 @@ function create(record = {}, deps = {}) {
               tok.name = (me.data && me.data.name) || null;
               tok.unionId = idOf(me.data && me.data.union_id);   // verify r5: the identity the record is bound to — open_id is per app, union_id per developer, user_id per tenant
               tok.userId = idOf(me.data && me.data.user_id);
-            } catch (e) { throw new ChannelError('vendor-error', namelessSentence('Lark', `user_info: ${(e && e.message) || e}`), { retryable: false, detail: { nameless: true } }); }
+              tok.tenantKey = idOf(me.data && me.data.tenant_key);   // lane lark-threads (B4): the account's own organization
+            } catch (e) { throw new ChannelError('vendor-error', namelessSentence('Lark', `user_info: ${(e && e.message) || e}`), { retryable: false, detail: { nameless: true } }); }   // rate-ok: consent-user-info
             if (!tok.openId) throw new ChannelError('vendor-error', namelessSentence('Lark', 'user_info carried no open_id'), { retryable: false, detail: { nameless: true } });
             // verify r7: `consent.cancelled` — the door refuses, INSIDE its serialized write, a consent whose flow was
             // cancelled meanwhile (a disconnect / cancel / newer sign-in used to be undone by this write landing late)
@@ -1315,7 +1584,12 @@ function create(record = {}, deps = {}) {
         const first = items.find((it) => it && it.meta_data && typeof it.meta_data === 'object' && 'create_time' in it.meta_data);
         const form = first ? valueFormOf(first.meta_data.create_time) : 'absent';
         const unread = malformed ? `; ${malformed} of ${items.length} unreadable by this version (${malformedFields.map((l) => l.join(' + ')).join(' | ')})` : `; all ${items.length} readable`;
-        log.log && log.log(`[channels] lark: the message search's first page carries fields ${top.join(', ')}; meta_data: ${meta.join(', ')}; create_time form: ${form}${unread} (names and forms only — the fixture's check against reality)`);
+        // lane lark-threads (A5 + B5): how many hits carry a thread id (does the search name topics / index their replies)
+        // and display_info's sub-field NAMES (never a value — does the search carry a display name?)
+        const threaded = hits.filter((h) => h.threadKey).length;
+        const disp = [...new Set(items.flatMap((it) => (it && it.display_info && typeof it.display_info === 'object' && !Array.isArray(it.display_info) ? Object.keys(it.display_info).filter(nameOk) : [])))].slice(0, 20);
+        const dispForm = disp.length ? disp.join(', ') : (items.some((it) => it && typeof it.display_info === 'string') ? '(a string)' : 'absent');
+        log.log && log.log(`[channels] lark: the message search's first page carries fields ${top.join(', ')}; meta_data: ${meta.join(', ')}; display_info: ${dispForm}; create_time form: ${form}; thread_id on ${threaded} of ${hits.length} hits${unread} (names and forms only — the fixture's check against reality)`);
       }
       const total = Number.isFinite(Number(data.total)) ? Number(data.total) : null;
       return { hits, more: data.has_more === true && !!next, pageToken: next, total, malformed, malformedFields };
@@ -1323,26 +1597,38 @@ function create(record = {}, deps = {}) {
 
     /**
      * NAME A CONVERSATION THE FEED FOUND (§3.3): ① the chat lookup's `name` (U7 — it may refuse a p2p id under a user
-     * token); ② else the PEER — a hit author who is not this account — through the contact lookup; ③ else no title (the
-     * client words "Single chat"). Never the raw chat id. A failure never fails anything but a dead token.
+     * token); ② else a single chat's OTHER MEMBER by the chat's member list (B-64f6); ③ else the PEER — a hit author who
+     * is not this account — through the contact lookup; ④ else no title (the client words "Single chat"). Never the raw
+     * chat id. A failure never fails anything but a dead token.
      */
     async describe(convId, { peerIds = [] } = {}) {
       let requests = 0;
+      let kind = null;
       try {
         requests++;
         const d = await api(`/im/v1/chats/${encodeURIComponent(convId)}`, { what: 'lark chat' });
         const chat = (d && d.data) || {};
-        const kind = chat.chat_mode === 'p2p' ? 'dm' : (chat.chat_mode ? 'group' : (p2pIds.has(convId) ? 'dm' : null));
+        kind = chat.chat_mode === 'p2p' ? 'dm' : (chat.chat_mode ? 'group' : (p2pIds.has(convId) ? 'dm' : null));
         if (kind === 'dm') p2pIds.add(convId);
         if (typeof chat.name === 'string' && chat.name.trim()) return { title: chat.name.trim(), kind, peers: [], requests };
       } catch (e) {
-        if (e instanceof ChannelError && e.code === 'auth-expired') throw e;
+        if (e instanceof ChannelError && (e.code === 'auth-expired' || e.code === 'rate-limited')) throw e;   // verify r2 F1: a 429 on the chat lookup is the account's, never a fall-through to two more reads
       }
       const self = (readToken().token || {}).openId || null;
+      // B-64f6 (the owner's oc_e53d…, 2026-10-03): production's 12 single chats were ALL titled null — the chat lookup
+      // names no single chat and the contact lookup refused every peer, while the chat's member list (the one that names
+      // its authors) named both people. So ② = the OTHER member by that list (cached MEMBERS_TTL_MS, one request when
+      // not): never a group (its name is its own), never without this account's own id (the owner would be "other")
+      if (self && kind !== 'group') {
+        const m0 = members.get(convId);
+        if (!(m0 && now() - m0.at < MEMBERS_TTL_MS)) requests++;
+        const others = [...(await namesFor(convId))].map(([id, n]) => [id, String(n || '').trim().slice(0, 200)]).filter(([id, n]) => id !== self && n).slice(0, 2);
+        if (others.length) return { title: others.map(([, n]) => n).join(', '), kind: kind || (p2pIds.has(convId) ? 'dm' : null), peers: others.map(([id, name]) => ({ id, name })), requests };
+      }
       const peers = [];
       for (const id of (Array.isArray(peerIds) ? peerIds : []).map(String).filter((x) => x && x !== self).slice(0, 2)) {
-        const c = peerNames.get(id);
-        if (!(c && now() - c.at < MEMBERS_TTL_MS)) requests++;
+        const c = PEOPLE.get(id);
+        if (!(c && now() - c.at < MEMBERS_TTL_MS) && canReadPeople()) requests++;
         const name = await contactName(id);
         if (name) peers.push({ id, name });
       }
@@ -1352,7 +1638,12 @@ function create(record = {}, deps = {}) {
 
     /** The account's own open id (a reaction's `mine`). */
     selfId() { return (readToken().token || {}).openId || null; },
+    /** lane lark-threads (B4): the account's own organization (the consent's, else learned without a call) — null unknown. */
+    selfTenant() { return selfTenant(); },
     threadHistory: threadHistoryImpl,
+    // lane lark-threads: the recent-roots recheck's page (A2) and one message by its id (A4)
+    recentRoots: recentRootsImpl,
+    messageById: messageByIdImpl,
     reactions: reactionsImpl,
     react: reactImpl,
     unreact: unreactImpl,
@@ -1400,12 +1691,13 @@ function create(record = {}, deps = {}) {
           pageToken = reachedSince ? null : nextToken(d.data);
           if (!pageToken) reachedSince = true;   // the vendor's last page: everything since `since` was seen
         } while (pageToken && scanned < RECONCILE_SCAN_MAX);
-      } catch (e) { scanErr = e; }
+      } catch (e) { if (e instanceof ChannelError && e.code === 'rate-limited') throw e; scanErr = e; }   // verify r3: a RATE refusal on the scan is the account's — thrown; the owner's reconcile used to swallow it and RE-ISSUE the send into the vendor's stop
       if (now() - sent < UUID_WINDOW_MS) {
         try {
           const r = await sendImpl(convId, { text: wanted, replyTo, idemKey, as: 'user', replyAnchor, inThread });
           return { landed: true, vendorMessageId: r.vendorMessageId, at: r.at, detail: { how: 'reissued-same-uuid', scanned, observed: r.observed || null } };
         } catch (e) {
+          if (e instanceof ChannelError && e.code === 'rate-limited') throw e;   // verify r3: the re-issue's own 429 is the account's too
           return { unknown: true, reason: `the re-issue with the same uuid did not settle it: ${(e && e.message) || e}`, detail: { how: 'reissue-refused', code: (e && e.code) || null, scanned } };
         }
       }
@@ -1437,7 +1729,7 @@ function create(record = {}, deps = {}) {
       w.at = now();
       if (p2pIds.has(convId)) p2pRead.set(convId, now());   // lane lark-search-poll: a single chat we can read (U7's membership evidence)
       const items = ((d.data && d.data.items) || []).filter((m) => m && m.message_id);
-      const names = items.length ? await namesWithPeers(convId, items, await allNamesFor(convId, items)) : new Map();
+      const names = items.length ? await allNamesFor(convId, items) : new Map();   // lane lark-threads: the profiles ride allNamesFor (B1 — every chat, not only single ones)
       const selfId = (readToken().token || {}).openId || null;
       const fresh = [];
       let reached = false;
@@ -1462,7 +1754,7 @@ function create(record = {}, deps = {}) {
       if (done) walks.delete(convId); else w.pageToken = next;
       if (done && w.stopAt && !reached) log.warn && log.warn(`[channels] lark: the stored anchor ${w.stopAt} of ${convId} is no longer served — walked ${w.count} records to ${!next ? "the vendor's last page" : `the ${FIRST_INGEST_MAX}-record bound`} and re-anchored on ${w.newest || w.stopAt}`);
       // Oldest-first within the batch (the store orders by (at, vendorId) anyway).
-      const records = fresh.reverse().map((m) => toRecord(adapterId, convId, m, { names, selfId }));
+      const records = fresh.reverse().map((m) => toRecord(adapterId, convId, m, { names, selfId, selfTenant: selfTenant() }));
       return { records, anchor: w.newest || w.stopAt || null, reachedAnchor: done, complete: done };
     },
 
@@ -1483,7 +1775,7 @@ function create(record = {}, deps = {}) {
       const olderOnes = b ? items.filter((m) => { const at = Number(m.create_time) || 0; return at < Number(b.at) || (at === Number(b.at) && b.vendorId && String(m.message_id) < String(b.vendorId)); }) : items;
       const names = olderOnes.length ? await allNamesFor(convId, olderOnes) : new Map();
       const selfId = (readToken().token || {}).openId || null;
-      const records = olderOnes.reverse().map((m) => toRecord(adapterId, convId, m, { names, selfId }));
+      const records = olderOnes.reverse().map((m) => toRecord(adapterId, convId, m, { names, selfId, selfTenant: selfTenant() }));
       return { records: records.slice(-size), exhausted: !nextToken(d.data) && items.length < size };
     },
 
@@ -1539,7 +1831,7 @@ async function integrationTest({ resolved, signal } = {}, fetchFn = null) {
       const d = await callJson(f, `${HOSTS[b].open}/open-apis/auth/v3/tenant_access_token/internal`, { method: 'POST', what: `lark tenant token (${b})`, body: { app_id: r.values.appId, app_secret: r.values.appSecret }, signal: signal || null });   // ungated: integration-test
       if (d && d.tenant_access_token) return { ok: true, detail: { brand: b, source: r.source, expire: d.expire || null } };
       errors.push(`${b}: no tenant_access_token in the answer`);
-    } catch (e) { errors.push(`${b}: ${(e && e.message) || e}`); }
+    } catch (e) { errors.push(`${b}: ${(e && e.message) || e}`); }   // rate-ok: integration-test
   }
   return { ok: false, error: errors.join('; ') };
 }
@@ -1557,9 +1849,12 @@ const REACTIONS_GRANT = Object.freeze({ scopes: Object.freeze([REACTIONS_READ_SC
 /** lane lark-search-poll (§5.3): WHAT UNLOCKS THE CHANGE FEED — the search + the single-chat read (enabled in the app
  *  console, a version published), then ONE Re-authorize; silent while the account's `search` option is off. */
 const FEED_GRANT = Object.freeze({ scopes: Object.freeze([SEARCH_SCOPE, P2P_READ_SCOPE]), console: true, option: 'search' });
-const adapter = { kind: KIND, caps, create, vendorNameOf, blocksOf: Blocks.larkStoredBlocks, recordView, sendGrant: SEND_GRANT, sendCapsOf, capsOfScopes, reactionsGrant: REACTIONS_GRANT, feedGrant: FEED_GRANT };
+/** lane lark-threads (B1/B5): WHAT UNLOCKS READING PEOPLE'S PROFILES — the measured scope (a person who left a chat, an
+ *  external contact, the organization's nickname, the department) — the card's ONE Re-authorize line names it. */
+const PEOPLE_GRANT = Object.freeze({ scopes: Object.freeze([PEOPLE_SCOPE]), console: true });
+const adapter = { kind: KIND, caps, create, vendorNameOf, blocksOf: Blocks.larkStoredBlocks, recordView, sendGrant: SEND_GRANT, sendCapsOf, capsOfScopes, reactionsGrant: REACTIONS_GRANT, feedGrant: FEED_GRANT, peopleGrant: PEOPLE_GRANT };
 module.exports = {
-  kind: KIND, caps, create, adapter, label: LABEL, integration: INTEGRATION, integrationTest, OPTIONS, UNGATED,
+  kind: KIND, caps, create, adapter, label: LABEL, integration: INTEGRATION, integrationTest, OPTIONS, UNGATED, RATE_OK,
   EGRESS, HOSTS, BRANDS, SCOPES, SEND_SCOPES, FIRST_INGEST_MAX, WALK_TTL_MS, UUID_WINDOW_MS, UUID_MAX, RECONCILE_SLACK_MS, RECONCILE_SCAN_MAX, RENEW_WINDOW_MS,
   toRecord, textOf, mentionsOf, attachmentsOf, typedFailure, nextToken, uuidFor, hasSendScopes, vendorNameOf,
   SEND_GRANT, blocksOf: Blocks.larkStoredBlocks, sendCapsOf,
@@ -1571,4 +1866,8 @@ module.exports = {
   SEARCH_SCOPE, P2P_READ_SCOPE, OPTIONAL_SCOPE_GROUPS, FEED_GRANT, requiredScopesOf,
   // lane lark-p2p: THE ONE search-hit reader (the measured shape) + the probe's value-form words
   readSearchHit, valueFormOf,
+  // lane lark-threads (A4): the by-id answer's verdict
+  readByIdAnswer, BYID_KINDS, BYID_ITEMS_MAX,
+  // lane lark-threads (B): reading people — the measured scope, the field scopes, the grant, the profile reader, the cache
+  PEOPLE_SCOPE, JOB_SCOPE, DEPT_SCOPE, PEOPLE_READ_SCOPES, PEOPLE_GRANT, readPersonAnswer, PEOPLE, DEPTS, personAltOf, PEOPLE_LOOKUPS_PER_CALL, PEOPLE_PER_MIN,
 };

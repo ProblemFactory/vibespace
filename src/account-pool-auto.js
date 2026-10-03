@@ -48,7 +48,7 @@ const { loginUsable, loginSwitchTarget, loginRank, loginWallPhrase, loginBlocked
 // the vendor state a spend" and gates `bucketRemaining`. Asking the deadline
 // predicate about the remaining made a fully FREE member read back as "no usage
 // data" — see the essay in quota-model.js.
-const { bucketCounts, bucketStatesSpend } = require('./quota-model.js');
+const { bucketCounts, bucketStatesSpend, RESET_GRACE_SEC } = require('./quota-model.js');
 
 const SWITCH_THRESHOLD_PCT = 5;
 // PER-BUCKET-KIND thresholds (2.268.2, user-designed: what matters is
@@ -76,8 +76,8 @@ const UNKNOWN_REMAINING_PCT = 50;
 // and every wait this module publishes (`blockedUntil`) ends that long after
 // the stated instant — the reported `resetsAt` stays the stated one, so the arm
 // card can still say when the reset IS and that the continue follows a minute
-// after it.
-const RESET_GRACE_SEC = 60;
+// after it. The number lives in src/quota-model.js (B-a4f1): the estimator's
+// weekly roll waits the same minute, or its overlay undoes this one.
 // Proactive (hot) switches require the candidate's deadline to be sooner by a
 // real margin — absorbs the ±1s scoped-vs-7d rounding and cache skew.
 const PROACTIVE_MARGIN_SEC = 3600;

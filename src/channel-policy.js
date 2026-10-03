@@ -493,7 +493,26 @@ function validateProposal(input = {}) {
   if (requested && requested !== 'chat' && !replyTo) return { ok: false, error: `a reply ${placementWords(requested)} names the message it answers (replyTo)`, why: alias ? 'inThread' : 'replyTo' };
   if (requested === 'chat' && replyTo) return { ok: false, error: 'a message in the chat answers no message — leave out replyTo, or place it as a quote or in the thread', why: 'placement' };
   const inThread = isThreadPlacement(requested);
-  return { ok: true, proposal: { text, replyTo, why, attachments, ...(requested ? { placement: requested } : {}), ...(alias ? { placementAlias: true } : {}), ...(inThread ? { inThread: true } : {}) } };
+  // B-a085 (mail): `replyAll` = everyone on the message it answers (resolved by the adapter at propose); `cc` = plain
+  // addresses the drafter ADDS (the compose rule) — the engine refuses both by name where a reply's recipients do
+  // not follow from the message it answers
+  if (p.replyAll !== undefined && p.replyAll !== null && p.replyAll !== false && p.replyAll !== true) return { ok: false, error: 'replyAll must be true or false', why: 'replyAll' };
+  const cc = addressesOf(p.cc);
+  if (!cc.ok) return cc;
+  if (cc.list.length > COMPOSE_MAX_RECIPIENTS) return { ok: false, error: `at most ${COMPOSE_MAX_RECIPIENTS} added Cc addresses`, why: 'recipients' };
+  return { ok: true, proposal: { text, replyTo, why, attachments, ...(requested ? { placement: requested } : {}), ...(alias ? { placementAlias: true } : {}), ...(inThread ? { inThread: true } : {}), ...(p.replyAll === true ? { replyAll: true } : {}), ...(cc.list.length ? { cc: cc.list } : {}) } };
+}
+/** B-a085: a list of PLAIN addresses (an array, or one comma-separated string) — each refused by name when it hides
+ *  a character or is no plain address (`why: 'address'`); lower-cased, duplicates dropped. */
+function addressesOf(v) {
+  const raw = (Array.isArray(v) ? v : String(v === undefined || v === null ? '' : v).split(',')).map((x) => String(x).trim()).filter(Boolean);
+  for (const a of raw) {
+    // O1: an address with a direction control / a zero-width character / a joiner reads as another one
+    const h = hiddenCharsOf(a, { joiners: true });
+    if (h.length) return { ok: false, error: `an address carries invisible characters (${h.join(', ')}) — it would read as another address`, why: 'address' };
+    if (!ADDRESS_RE.test(a) || a.length > 254) return { ok: false, error: `not a plain address: ${JSON.stringify(a.slice(0, 80))}`, why: 'address' };
+  }
+  return { ok: true, list: [...new Set(raw.map((x) => x.toLowerCase()))] };
 }
 
 /** A NEW message's recipients: at most this many (To + Cc together). */
@@ -511,23 +530,23 @@ const ADDRESS_RE = /^[^\s@<>,;"'()[\]\\]+@[^\s@<>,;"'()[\]\\]+\.[^\s@<>,;"'()[\]
  * `subject`) and names the bad value; nothing is created.
  */
 function validateCompose(input = {}) {
-  const base = validateProposal(input);
-  if (!base.ok) return { ...base, why: 'text' };
   const p = input && typeof input === 'object' ? input : {};
+  // the reply's own `cc` / `replyAll` (B-a085) are not this verb's — its Cc is checked below, a reply-all refused
+  const base = validateProposal({ ...p, cc: undefined, replyAll: undefined });
+  if (!base.ok) return { ...base, why: 'text' };
   const list = (v) => (Array.isArray(v) ? v : String(v === undefined || v === null ? '' : v).split(',')).map((x) => String(x).trim()).filter(Boolean);
   // R4 verify r2: a field this verb does not carry is REFUSED BY NAME, never
   // silently dropped (an agent that asked for a Bcc would believe it was sent)
   if (p.bcc !== undefined && p.bcc !== null && String(Array.isArray(p.bcc) ? p.bcc.join(',') : p.bcc).trim()) return { ok: false, error: 'bcc is not supported — every recipient of a composed message is visible (To / Cc)', why: 'bcc' };
   if (p.replyTo !== undefined && p.replyTo !== null && String(p.replyTo).trim()) return { ok: false, error: 'a NEW message has nothing to reply to — use `reply` inside a conversation', why: 'replyTo' };
+  if (p.replyAll === true) return { ok: false, error: 'a NEW message has nobody to reply to — use `reply --all` inside the conversation', why: 'replyAll' };
   const to = list(p.to), cc = list(p.cc);
   if (!to.length) return { ok: false, error: 'to is required (one or more addresses)', why: 'to' };
   if (to.length + cc.length > COMPOSE_MAX_RECIPIENTS) return { ok: false, error: `at most ${COMPOSE_MAX_RECIPIENTS} recipients (To + Cc)`, why: 'recipients' };
-  for (const a of [...to, ...cc]) {
-    // O1: an address with a direction control / a zero-width character / a joiner reads as another one
-    const h = hiddenCharsOf(a, { joiners: true });
-    if (h.length) return { ok: false, error: `an address carries invisible characters (${h.join(', ')}) — it would read as another address`, why: 'address' };
-    if (!ADDRESS_RE.test(a) || a.length > 254) return { ok: false, error: `not a plain address: ${JSON.stringify(a.slice(0, 80))}`, why: 'address' };
-  }
+  // O1: an address with a direction control / a zero-width character / a joiner reads as another one (the ONE
+  // address rule, `addressesOf` — a reply's added Cc is held to it too)
+  const addr = addressesOf([...to, ...cc]);
+  if (!addr.ok) return addr;
   const subject = String(p.subject === undefined || p.subject === null ? '' : p.subject).replace(/[\r\n\t]+/g, ' ').trim();
   if (!subject) return { ok: false, error: 'subject is required', why: 'subject' };
   const hiddenSubject = hiddenCharsOf(subject);
@@ -578,13 +597,16 @@ function anchorView(record) {
  * a header past its bound, a CR/LF.
  */
 const ENVELOPE_HEADER_MAX = 8000;
-function envelopeVerdict(env, anchorId) {
+function envelopeVerdict(env, anchorId, { all = false } = {}) {
   const e = env && typeof env === 'object' ? env : null;
   if (!e) return { ok: false, why: 'the channel resolved no recipients for this reply' };
   const s = (v) => (v === undefined || v === null ? null : String(v));
-  const view = { anchorId: s(e.anchorId) || '', to: (s(e.to) || '').trim(), cc: s(e.cc) ? s(e.cc).trim() || null : null, subject: s(e.subject) || '', inReplyTo: s(e.inReplyTo), references: s(e.references) };
+  // B-a085: a reply-all says so (`all`, the adapter's echo) and the addresses the drafter ADDED (`added`) ride along
+  const added = Array.isArray(e.added) ? e.added.slice(0, COMPOSE_MAX_RECIPIENTS).map((x) => String(x).slice(0, 254)) : [];
+  const view = { anchorId: s(e.anchorId) || '', to: (s(e.to) || '').trim(), cc: s(e.cc) ? s(e.cc).trim() || null : null, subject: s(e.subject) || '', inReplyTo: s(e.inReplyTo), references: s(e.references), ...(e.all === true ? { all: true } : {}), ...(added.length ? { added } : {}) };
   if (!view.anchorId || String(view.anchorId) !== String(anchorId)) return { ok: false, why: 'the channel resolved the recipients of another message than the one this reply answers' };
   if (!view.to) return { ok: false, why: 'the message this reply answers names nobody to reply to' };
+  if (all === true && view.all !== true) return { ok: false, why: 'the channel did not resolve everyone on the message this reply answers (reply-all)' };
   for (const k of ['to', 'cc', 'subject', 'inReplyTo', 'references']) {
     const v = view[k];
     if (v === null) continue;
@@ -592,6 +614,32 @@ function envelopeVerdict(env, anchorId) {
     if (/[\r\n]/.test(v)) return { ok: false, why: `the reply's ${k} carries a line break` };
   }
   return { ok: true, why: null, envelope: view };
+}
+
+/** The addresses of a To / Cc header value, lower-cased (a quoted display name never counts — `"bob@x via G" <g@x>`
+ *  is g@x alone). */
+function envelopeAddresses(v) {
+  const out = new Set();
+  for (const part of String(v || '').replace(/"(?:[^"\\]|\\.)*"/g, '""').split(',')) {
+    const m = /<([^<>]*)>/.exec(part);
+    const a = (m ? m[1] : part).trim().toLowerCase();
+    if (a.includes('@')) out.add(a);
+  }
+  return out;
+}
+/**
+ * THE DRAFTER'S ADDED Cc (B-a085, `reply --cc`) merged into a reply's resolved envelope (PURE): an address already
+ * among its To / Cc is not repeated; the ones really added are listed (`added`) so the card says who the DRAFTER put
+ * on the mail beside the thread's own people. The reply stays a reply — same thread, same In-Reply-To / References.
+ */
+function withAddedCc(env, cc) {
+  const list = Array.isArray(cc) ? cc.map((x) => String(x).trim().toLowerCase()).filter(Boolean) : [];
+  if (!env || typeof env !== 'object' || !list.length) return env;
+  const have = new Set([...envelopeAddresses(env.to), ...envelopeAddresses(env.cc)]);
+  const added = [];
+  for (const a of list) if (!have.has(a)) { have.add(a); added.push(a); }
+  if (!added.length) return { ...env };
+  return { ...env, cc: [env.cc, ...added].filter(Boolean).join(', '), added };
 }
 
 /**
@@ -1120,6 +1168,6 @@ module.exports = {
   REJECTED_DEFAULT_REASON, outcomeOf, outcomeText, reconcileWhyText,
   // r6 verify (2026-09-28): what you approve is what runs — the reply's anchor (F1), its recipients (F3),
   // the digest of the card (F6), the arming delay (F6), the characters that hide what a line says (O1)
-  replyAnchorVerdict, anchorView, envelopeVerdict, ENVELOPE_HEADER_MAX, shownFields, shownDigest, ARM_MS, armVerdict, rearmVerdict,
+  replyAnchorVerdict, anchorView, envelopeVerdict, ENVELOPE_HEADER_MAX, envelopeAddresses, withAddedCc, addressesOf, shownFields, shownDigest, ARM_MS, armVerdict, rearmVerdict,
   hiddenCharsOf, revealSegments,
 };

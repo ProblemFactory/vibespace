@@ -398,7 +398,19 @@ function fakeR5Caps(receive, env = process.env) {
 const FAKE_FEED = Object.freeze({ via: 'search', scope: null, option: null, pageSize: 30, pagesPerPass: 5, perMin: 10, maxWindowSec: 3600, catchUp: Object.freeze({ chatType: 'p2p', pagesMax: 20 }), describes: true, timeUnit: 'ms' });
 const FAKE_DMS = Object.freeze([{ id: 'dm-ada', peer: PEOPLE[0] }, { id: 'dm-brook', peer: PEOPLE[1] }, { id: 'dm-cass', peer: PEOPLE[2] }]);
 
-function makeFakeAdapter({ kind, receive, sendAs = ['user'], now = () => Date.now(), feed = false }) {
+/**
+ * lane lark-threads (2026-10-01): the NAMED seam `VIBESPACE_CHANNELS_FAKE_TOPICS=<file>` (read at module load for the
+ * declaration, its CONTENTS at every call) turns fake-poll into a vendor whose thread replies are listed SEPARATELY (Lark's
+ * shape): `{topics: {[rootVendorId]: {key, replies: [{vendorId, at, author: {id, name}, text}]}}}` — a root named there
+ * carries `threadKey: key` in every listing from then on (a topic born AFTER the root was read), its replies are NOT in
+ * the chat listing, `threadHistory` answers the root + the replies, `recentRoots` the newest page. A suite writes the
+ * file mid-run to grow a topic on a stored root (the chrome leg of the recent-roots recheck).
+ */
+function readFakeTopics(file) {
+  if (!file) return {};
+  try { const j = JSON.parse(fs.readFileSync(file, 'utf8')); return j && j.topics && typeof j.topics === 'object' ? j.topics : {}; } catch { return {}; }
+}
+function makeFakeAdapter({ kind, receive, sendAs = ['user'], now = () => Date.now(), feed = false, topicsFile = null }) {
   const caps = {
     receive,
     pushTransport: receive === 'push' ? 'ws-long-conn' : null,
@@ -439,7 +451,7 @@ function makeFakeAdapter({ kind, receive, sendAs = ['user'], now = () => Date.no
     // quote (a reply chain); the push fake is read-only and places nothing
     threads: receive === 'scan'
       ? { read: 'chain', replyInto: false, listing: 'none', placements: sendAs.length ? ['chat', 'quote'] : [], rootReply: sendAs.length ? 'quote' : null }
-      : { read: 'vendor', replyInto: sendAs.length > 0, listing: 'inline', placements: sendAs.length ? ['chat', 'quote', 'thread', 'thread+chat'] : [], rootReply: sendAs.length ? 'quote' : null },
+      : { read: 'vendor', replyInto: sendAs.length > 0, listing: topicsFile ? 'separate' : 'inline', placements: sendAs.length ? ['chat', 'quote', 'thread', 'thread+chat'] : [], rootReply: sendAs.length ? 'quote' : null },
     reactions: receive === 'scan' ? { read: 'none', add: false, remove: 'none', vocabulary: 'names', custom: 'none', perMessageMax: null } : { read: 'list', add: true, remove: 'own', vocabulary: 'both', custom: 'image', perMessageMax: null },
   };
 
@@ -455,6 +467,12 @@ function makeFakeAdapter({ kind, receive, sendAs = ['user'], now = () => Date.no
     // lane channel-threads: the NAMED big-room seam (read HERE only) — one room of n messages
     const bigRoom = Number((deps.env || process.env).VIBESPACE_CHANNELS_FAKE_BIG) || 0;
     let world = null;
+    /** lane lark-threads: a root the topics file names carries its topic from now on (the vendor's later listing). */
+    const withTopic = (r) => {
+      if (!topicsFile || !r || r.threadKey) return r;
+      const tp = readFakeTopics(topicsFile)[r.vendorId];
+      return tp && tp.key ? { ...r, threadKey: String(tp.key) } : r;
+    };
     const getWorld = () => {
       if (world) return world;
       world = worldFor(kind, { now: clock(), convs: extraConvs, mail: mailN, mailDir, big: bigRoom });
@@ -549,7 +567,7 @@ function makeFakeAdapter({ kind, receive, sendAs = ['user'], now = () => Date.no
         if (!c) return { records: [], anchor: null, reachedAnchor: true, complete: true };
         // `source` is the RESOLVED one the engine handed down (see above).
         const synthetic = receive === 'scan' && source === 'ui';
-        const all = c.records.map((m) => toRecord(adapterId, convId, m, { synthetic }));
+        const all = c.records.map((m) => withTopic(toRecord(adapterId, convId, m, { synthetic })));
         let idx = 0;
         if (anchor) {
           const at = all.findIndex((r) => r.vendorId === anchor);
@@ -575,13 +593,37 @@ function makeFakeAdapter({ kind, receive, sendAs = ['user'], now = () => Date.no
         };
       },
 
+      // lane lark-threads: the separate-listing seam's two reads (declared only with VIBESPACE_CHANNELS_FAKE_TOPICS)
+      recentRoots: topicsFile ? async (convId, { limit = 50 } = {}) => {
+        meter(1);
+        const c = getWorld().get(convId);
+        if (!c) return { records: [] };
+        return { records: c.records.map((m) => withTopic(toRecord(adapterId, convId, m))).slice(-Math.max(1, Math.min(50, Number(limit) || 50))) };
+      } : undefined,
+      threadHistory: topicsFile ? async (convId, threadKey, { anchor = null, limit = 50 } = {}) => {
+        meter(1);
+        const c = getWorld().get(convId);
+        const topics = readFakeTopics(topicsFile);
+        const rootId = Object.keys(topics).find((k) => topics[k] && topics[k].key === threadKey);
+        const rootMsg = c && rootId ? c.records.find((m) => m.vendorId === rootId) : null;
+        const all = [];
+        if (rootMsg) all.push(withTopic(toRecord(adapterId, convId, rootMsg)));
+        for (const r of (rootId && Array.isArray(topics[rootId].replies) ? topics[rootId].replies : [])) all.push(makeRecord({ adapterId, convId, vendorId: String(r.vendorId), at: Number(r.at) || 0, author: { id: String((r.author && r.author.id) || 'u-ada'), name: String((r.author && r.author.name) || 'Ada'), isSelf: false, isBot: false }, text: String(r.text || ''), replyTo: rootId, threadKey, root: rootId, raw: {} }));
+        all.sort((a, b) => a.at - b.at || (a.vendorId < b.vendorId ? -1 : 1));
+        let idx = 0;
+        if (anchor) { const at = all.findIndex((r) => r.vendorId === anchor); idx = at >= 0 ? at + 1 : 0; }
+        const page = all.slice(idx, idx + Math.max(1, Number(limit) || 50));
+        const done = idx + page.length >= all.length;
+        return { records: page, anchor: page.length ? page[page.length - 1].vendorId : anchor, reachedAnchor: done, complete: done };
+      } : undefined,
+
       /** HISTORY ON DEMAND: the newest `limit` records strictly before
        *  `before` ({at, vendorId}); `exhausted` once nothing older is left. */
       older: receive === 'scan' ? undefined : async (convId, { before = null, limit = 50 } = {}) => {
         meter(1);
         const c = getWorld().get(convId);
         if (!c) return { records: [], exhausted: true };
-        const all = c.records.map((m) => toRecord(adapterId, convId, m));
+        const all = c.records.map((m) => withTopic(toRecord(adapterId, convId, m)));
         const olderThan = before ? all.filter((r) => r.at < Number(before.at) || (r.at === Number(before.at) && before.vendorId && r.vendorId < before.vendorId)) : all;
         const page = olderThan.slice(-Math.max(1, Number(limit) || 50));
         return { records: page, exhausted: page.length === olderThan.length };
@@ -806,7 +848,7 @@ function makeFakeAdapter({ kind, receive, sendAs = ['user'], now = () => Date.no
 }
 
 /** The three modules P0 registers. `fake-push` is deliberately READ-ONLY. */
-const fakePoll = makeFakeAdapter({ kind: 'fake-poll', receive: 'poll', sendAs: ['user'], feed: String(process.env.VIBESPACE_CHANNELS_FAKE_FEED || '') === '1' });
+const fakePoll = makeFakeAdapter({ kind: 'fake-poll', receive: 'poll', sendAs: ['user'], feed: String(process.env.VIBESPACE_CHANNELS_FAKE_FEED || '') === '1', topicsFile: String(process.env.VIBESPACE_CHANNELS_FAKE_TOPICS || '') || null });
 const fakePush = makeFakeAdapter({ kind: 'fake-push', receive: 'push', sendAs: [] });
 const fakeScan = makeFakeAdapter({ kind: 'fake-scan', receive: 'scan', sendAs: ['user'] });
 

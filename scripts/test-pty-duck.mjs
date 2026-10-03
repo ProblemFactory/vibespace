@@ -195,29 +195,56 @@ const ONE_SLOT = /on(?:Data|Exit)\s*:\s*\(\s*cb\s*\)\s*=>\s*\{?\s*[\w.]+\s*=(?!=
   ok(/ptyListeners\(\)/.test(read('src/server/dial-pairing.js')), 'WIRING PIN: daemonPtyShim shares the same SET');
 }
 
-// ── § 4 WHY THE STAMP MATTERS ON THE R6 CREATE PATH (the healer) ───────────
-// ws-create keeps `socketPath` on an R6 session (the cw-* path it never
-// creates), so ws-handler's broken-stdin detector arms on every input: no
-// `_stdin_ack` in 5 s and ptyQuietSince(sentAt) ⇒ reattachLocalPty. With the
-// stamp dropped the second half is ALWAYS true, so the ack alone stood between
-// a healthy pipe session and the healer — whose first act is session.pty.kill(),
-// i.e. the daemon's `kill-pipe-session`. A dial (remote) session never rides
-// these ducks: it is a LOCAL dtach whose program talks to the device through
-// the DialSessionBridge (node-pty, or daemonPtyShim after a restore).
-console.log('— §4 the healer on an R6-shaped session: its first act kills the pipe handle —');
+// ── § 4 THE HEALER ON AN R6 PIPE SESSION (B-b675) ──────────────────────────
+// ws-create kept `socketPath` on an R6 session (the cw-* path it never
+// creates), so ws-handler's broken-stdin detector armed on every input: no
+// `_stdin_ack` in 5 s and ptyQuietSince(sentAt) ⇒ reattachLocalPty — whose
+// first act is session.pty.kill(), i.e. the daemon's `kill-pipe-session`: a
+// late ack and 5 s of quiet ended a healthy pipe. The fix nulls the socketPath
+// in the r6Handle branch (as the ocPty branch does) and the healer REFUSES a
+// pipe duck (`_pipe`) as the belt. A dial (remote) session never rides these
+// ducks: it is a LOCAL dtach whose program talks to the device through the
+// DialSessionBridge (node-pty, or daemonPtyShim after a restore) — and a
+// daemonPtyShim relays a real `dtach -a`, so it stays healable (the attach
+// probe's job). CONTROL: a copy of session-stdout without the refusal kills it.
+console.log('— §4 the healer on an R6-shaped session: it refuses the pipe duck (B-b675); the control kills it —');
 {
-  const h = { pid: 9, write() { }, kill() { h.killed = (h.killed || 0) + 1; } };
-  const d = duck ? duck.pipePtyShim(h) : { onData() { }, onExit() { }, kill() { h.kill(); }, write() { } };
-  const id = 'sess-duck-r6';
-  const session = { mode: 'terminal', backend: 'shell', clients: new Map(), buffer: '', socketPath: path.join(ROOT, 'cw-never-created'), cwd: ROOT };
-  activeSessions.set(id, session);
-  eng.setupSessionPty(session, id, d);
-  let healed = false, err = null;
-  try { healed = eng.reattachLocalPty(id, session, 'test: no ack within 5 s'); } catch (e) { err = e; }
-  activeSessions.delete(id);                                           // the replacement's exit must not tear down a stub engine
-  try { if (session.pty !== d) session.pty?.kill?.(); } catch { }
-  if (err && /ENOENT|spawn/i.test(String(err.message))) console.log(`  - SKIP: dtach is not installed here (${err.message}) — the healer leg needs it`);
-  else ok(healed === true && h.killed === 1, 'reattachLocalPty on an R6-shaped session (socketPath set, never created) KILLS the pipe handle — a false "silent" verdict ends a healthy session', { healed, killed: h.killed, err: err && err.message });
+  const SS = read('src/server/session-stdout.js');
+  const BELT = /^\s*if \(session\.pty && session\.pty\._pipe\) \{[^\n]*return false; \}\n/m;
+  const noBelt = SS.replace(BELT, '');
+  ok(noBelt !== SS, 'control setup: the copy lost exactly the healer\'s pipe-duck refusal');
+  const MUT = (await import(path.join(REPO, 'scripts/mutant-copy.mjs'))).mutantCopies('pty-duck', REPO);
+  const engOf = (mod) => mod.create({
+    rootDir: REPO, BUFFERS_DIR: path.join(ROOT, 'buffers'), META_DIR: path.join(ROOT, 'meta'),
+    DTACH_CMD: 'dtach', USAGE_SCANNER_PATH: '', CLAUDE_STREAM_TYPES: new Set(), _seenStreamTypes: new Set(),
+    activeSessions, engine: {}, checkClaudeGoalStatus: () => { }, broadcastToSession: () => { }, broadcastActiveSessions: () => { },
+    noteModelSeen: () => { }, noteHarnessModels: () => { }, recordUsageAttribution: () => { },
+    daemonPtyShim: dial.daemonPtyShim, agentEnv: () => process.env, sbSeenFirst: () => { },
+    getDeviceMgr: () => null, getHosts: () => null, getUsageHistory: () => null, getTelemetry: () => null,
+    getNoConvoRef: () => null, getDeliver: () => null, getPages: () => null, getPermissionRules: () => null,
+  });
+  const leg = (E, tag) => {
+    const h = { pid: 9, write() { }, kill() { h.killed = (h.killed || 0) + 1; } };
+    const d = duck ? duck.pipePtyShim(h) : { onData() { }, onExit() { }, kill() { h.kill(); }, write() { } };
+    const id = 'sess-duck-r6-' + tag;
+    const session = { mode: 'terminal', backend: 'shell', clients: new Map(), buffer: '', socketPath: path.join(ROOT, 'cw-never-created'), cwd: ROOT };
+    activeSessions.set(id, session);
+    E.setupSessionPty(session, id, d);
+    let healed = false, err = null;
+    try { healed = E.reattachLocalPty(id, session, 'test: no ack within 5 s'); } catch (e) { err = e; }
+    activeSessions.delete(id);                                           // the replacement's exit must not tear down a stub engine
+    try { if (session.pty !== d) session.pty?.kill?.(); } catch { }
+    return { healed, killed: h.killed || 0, still: session.pty === d, err: err && err.message };
+  };
+  const fixed = leg(eng, 'fix');
+  ok(fixed.healed === false && fixed.killed === 0 && fixed.still, 'the healer REFUSES an R6 pipe duck: nothing is killed, the pipe stays the session\'s bridge (B-b675)', fixed);
+  const ctl = leg(engOf(MUT.load('src/server/session-stdout.js', noBelt, 'nobelt')), 'ctl');
+  if (ctl.err && /ENOENT|spawn/i.test(ctl.err)) console.log(`  - SKIP: dtach is not installed here (${ctl.err}) — the control leg needs it`);
+  else ok(ctl.healed === true && ctl.killed === 1, 'CONTROL: without the refusal the healer KILLS the pipe handle (a false "silent" verdict ends a healthy session — the pre-fix shape)', ctl);
+  const wsc = read('src/ws-create.js');
+  const r6 = (/\} else if \(r6Handle\) \{([\s\S]*?)setupSessionPty\(session, id, pipePtyShim\(r6Handle\)\);/.exec(wsc) || [])[1] || '';
+  ok(/^\s*session\.socketPath = null;/m.test(r6), 'ws-create\'s r6Handle branch nulls the socketPath it never creates (the braces: no detector, no dead-bridge watch on a pipe)');
+  ok(/^\s*_pipe: true,/m.test(read('src/pty-duck.js')), 'pipePtyShim marks its duck `_pipe` (what the healer refuses)');
 }
 
 console.log(fail ? `\nFAIL (${fail} failed, ${pass} passed)` : `\nALL PASS (${pass})`);

@@ -34,6 +34,7 @@ const path = require('path');
 const A = require('../app-manifest.js');
 const { liveForkPending, addressableId } = require('../claude-lock-capture.js');
 const { toAgentText } = require('../peer-text.js');
+const { sameToken } = require('../pairing-token.js'); // B-8dda (lane agent-cli-fixes): a raw secret is compared in constant time
 // THE belt on what a PACKAGE wrote (apt's summaries, a .desktop Name, apt's error lines) on its way to an agent: a source
 // the user approved is still a third party's words — one inert line each (test-peer-text-census declares the CLI on it)
 const pkgWords = (v, max = 300) => (v == null ? v : toAgentText(String(v), { kind: 'line', max }));
@@ -195,7 +196,7 @@ function agentCaller(req, res) {
   if (!token.startsWith('vsst_')) { res.status(401).json({ error: 'missing session token (a Background Work job token cannot use vibespace-app)', code: 'unauthorized' }); return null; }
   const sessions = ctx && typeof ctx.activeSessions === 'function' ? ctx.activeSessions() : null;
   for (const [id, s] of sessions || []) {
-    if (s && s.agentToken === token) {
+    if (s && sameToken(token, s.agentToken)) {
       const cid = s.claudeSessionId || s.backendSessionId || null;
       const pending = cid && liveForkPending(s);
       return { session: s, sessionId: id, name: s.name || s.webuiName || null, conversation: cid && !pending ? addressableId(s) : null, borrowed: pending ? 'this session is a fork that has not announced its own conversation id yet — wait a moment and repeat the command' : !cid ? 'this session has no conversation id yet — try again after its first turn' : null, sessionKey: ctx.sessionStatusKey ? ctx.sessionStatusKey(s, id) : null, host: s.hostId || s.host || 'local' };

@@ -26,7 +26,7 @@
 // bridge opens one when it becomes active): noVNC simply waits for the banner.
 import { t } from './i18n.js';
 import { showToast, COUNTER_ZOOM } from './utils.js';
-import { createPictureShell, RECONNECT_LADDER, streamUrl, pageIsSecure } from './picture-shell.js';
+import { createPictureShell, RECONNECT_LADDER, streamUrl, pageIsSecure, closeWordsKey } from './picture-shell.js';
 
 // noVNC uses top-level await, which can't live inside our IIFE bundle — it's
 // built as a SEPARATE ESM file (public/novnc.js, see the build script) and
@@ -69,14 +69,17 @@ export { RECONNECT_LADDER, streamUrl };
  *   onStatus      — optional (state, detail) observer: 'starting' | 'connecting'
  *                   | 'connected' | 'disconnected' | 'error'
  *   loadRFB       — injectable loader (the node suite hands a fake RFB)
+ *   lastClose     — optional async () => {code} | null: the bridge's own record of the stream's last close (the singleton:
+ *                   GET /api/vnc/last-close) — worded into the status chip on a disconnect (lane desktop-keepalive K3)
  * Returns { container, bar, mount, status, connect, disconnect, setStatus,
  *           addControl, focus, get rfb(), dispose }.
  */
-export function createVncView(host, { url, before = null, labels = {}, autoReconnect = false, onStatus = null, loadRFB: loader = loadRFB } = {}) {
-  const shell = createPictureShell(host, { labels, autoReconnect, onStatus, focus: () => focus() });
+export function createVncView(host, { url, before = null, labels = {}, autoReconnect = false, onStatus = null, loadRFB: loader = loadRFB, lastClose = null } = {}) {
+  const shell = createPictureShell(host, { labels, autoReconnect, onStatus, focus: () => focus(), ladderWords: true }); // K3: the ladder rung + the bridge's words in the chip
   const { container, bar, mount, status, pasteBtn, reBtn, labels: L, setStatus, addControl, emit } = shell;
 
   let rfb = null;
+  let rfbLive = false; // K2: noVNC logs "Tried changing state of a disconnected RFB object" for a disconnect() on a dead RFB — never ask
   let mode = 'active'; // x5
 
   const connect = async () => {
@@ -101,16 +104,21 @@ export function createVncView(host, { url, before = null, labels = {}, autoRecon
     try { RFB = await loader(); }
     catch { setStatus(L.unavailable, { error: true, reconnect: true }); emit('error', L.unavailable); return; }
     if (shell.closed) return;
-    try { rfb?.disconnect(); } catch {}
+    try { if (rfb && rfbLive) rfb.disconnect(); } catch {}
     rfb = new RFB(mount, typeof url === 'function' ? url() : url);
+    rfbLive = true;
+    const mine = rfb;
     if (mode !== 'active') { try { rfb.viewOnly = true; } catch {} } // x5: only the active pane drives the display (set BEFORE resizeSession asks)
     rfb.scaleViewport = true;   // fit when the server can't resize
     rfb.resizeSession = true;   // ask the server to match the window (RandR)
-    rfb.addEventListener('connect', () => { shell.resetLadder(); setStatus(t('Connected')); emit('connected'); });
+    rfb.addEventListener('connect', () => { shell.resetLadder(); shell.setCloseWords(''); setStatus(t('Connected')); emit('connected'); });
     rfb.addEventListener('disconnect', (e) => {
+      if (mine === rfb) rfbLive = false;
       if (shell.closed) return;
       setStatus(e.detail?.clean ? t('Disconnected') : t('Connection lost'), { error: !e.detail?.clean, reconnect: true });
       emit('disconnected', { clean: !!e.detail?.clean });
+      // K3: the bridge's own words for this close (a terminate() sends no frame; noVNC never exposes a reason)
+      if (lastClose) Promise.resolve().then(() => lastClose()).then((c) => { const k = c && closeWordsKey(c.code); if (!k || shell.closed || shell.state === 'connected') return; shell.setCloseWords(t(k)); if (!/…/.test(status.textContent)) status.textContent = (e.detail?.clean ? t('Disconnected') : t('Connection lost')) + ' — ' + t(k); }).catch(() => { });
       // A server that DIES is a CLEAN close to noVNC (its connected→close path
       // never calls _fail; measured 2026-09-13 on a SIGKILLed server), so the
       // ladder keys on "do we still want the picture", never on `clean`.
@@ -128,12 +136,19 @@ export function createVncView(host, { url, before = null, labels = {}, autoRecon
   // browser → desktop: the shell's Paste flow (2.369.136: a dead view says so,
   // a refused / empty / API-less clipboard opens the paste box, every send
   // hands the focus back to the desktop)
-  const sendText = (text) => { if (!rfb || !text) return false; rfb.clipboardPasteFrom(text); showToast(t('Clipboard sent')); focus(); return true; };
+  const sendText = (text) => {
+    if (!rfb || !text) return false;
+    // K2: noVNC drops a paste on a view-only RFB without a word — a watching pane says so instead of "Clipboard sent"
+    if (rfb.viewOnly) { showToast(t('This pane is watching — press Resume here to type into the desktop'), { type: 'error' }); return false; }
+    rfb.clipboardPasteFrom(text); showToast(t('Clipboard sent')); focus(); return true;
+  };
   pasteBtn.onclick = () => shell.pasteFromClipboard({
     connected: () => !!rfb && shell.state === 'connected',
     notConnected: t('The desktop is not connected — reconnect first'),
     send: sendText,
     clipboard: typeof navigator !== 'undefined' ? navigator.clipboard : null,
+    // K2: a press is intent — a stream that is not connecting already is (re)started now
+    reconnect: () => { if (shell.state === 'starting' || shell.state === 'connecting') return; shell.resetLadder(); connect(); },
   });
   reBtn.onclick = () => { shell.resetLadder(); connect(); };
 

@@ -420,5 +420,70 @@ console.log('§10 r6 D-F5: monotonic panel identity, the answer names its panel,
   ok(/const version = pending\.version;/.test(jp) && /answers: \{ \.\.\.values, button: o\.id, version \}/.test(jp) && /r2\.code === 'stale-panel'/.test(jp) && /posted\.version/.test(cli), 'WIRING PIN (r6 D-F5): the panel answers with the version it rendered (and re-reads on stale-panel); the CLI prints the panel\'s number');
 }
 
+console.log('§11 B-dfb4: notifications dropped at the 30-entry stash cap are SAID in For you (≤ 1 notice per conversation per hour)');
+{
+  const { UserTodoManager } = require(path.join(ROOT, 'src/user-todos.js'));
+  const dir = mkDir('jobs-triage-drop');
+  const todos = new UserTodoManager({ dataDir: dir, expirySweepMs: 0 });
+  const logs = [];
+  const { app } = fakeApp();
+  const sessions = new Map([['w1', { claudeSessionId: 'conv-drop', name: 'house model', mode: 'chat' }]]);
+  const W = wiring.create({
+    app, dataDir: dir, broadcastAll: () => { }, userTodos: todos, log: (...a) => logs.push(a.join(' ')),
+    serverSetting: () => undefined, taskGroups: null, activeSessions: sessions, deliver: { peerReachable: () => false, deliverToConversation: async () => ({ ok: false, reason: 'no lane' }) },
+  });
+  W.initAfterListen();
+  const jm = W.jm;
+  const job = (i) => ({ id: 'j-drop-' + (i % 3), name: ['nightly', 'scrape', 'build'][i % 3], state: 'done', notifyLog: [] });
+  for (let i = 0; i < 30; i++) jm._stashNotif('conv-drop', job(i), { what: 'result ' + i }, 'not reachable');
+  const items = () => todos.forSession(['claude:conv-drop']).filter((i) => i.origin === 'jobs');
+  ok(items().length === 0, 'thirty waiting (the cap) ⇒ nothing dropped, nothing said');
+  jm._stashNotif('conv-drop', job(30), { what: 'result 30' }, 'not reachable');
+  jm._stashNotif('conv-drop', job(31), { what: 'result 31' }, 'not reachable');
+  const it = items();
+  ok(it.length === 1 && it[0].kind === 'notice' && it[0].origin === 'jobs' && it[0].sessionKey === 'claude:conv-drop' && /were dropped — 30 were already waiting/.test(it[0].text) && /^1 dropped, never delivered \(from: nightly\)/.test(it[0].detail || '') && it[0].sessionName === 'house model · Background Work',
+    'the first eviction files ONE For-you notice (origin jobs, kind notice) under the owner conversation: how many, from which jobs, that the 30 still wait', it.map((i) => ({ text: i.text, detail: i.detail, kind: i.kind, sessionName: i.sessionName })));
+  ok(it[0].i18n && /\{cap\} were already waiting/.test(it[0].i18n.text.key) && it[0].i18n.text.params.cap === 30, '…worded per device (i18n key + params)', it[0].i18n);
+  ok(logs.filter((l) => /fell off the 30-entry cap/.test(l)).length === 2, 'every eviction is still journaled (two lines)', logs.filter((l) => /fell off/.test(l)));
+  ok(items().length === 1 && todos.forSession(['claude:conv-drop']).length === 1, 'the second eviction inside the hour adds NO line (≤ 1 per conversation per hour)');
+  jm._dropNoticeAt.set('conv-drop', Date.now() - 3600e3 - 1);   // an hour later
+  todos.get(it[0].id).createdAt -= 3600e3 + 1;   // …for the store's filing time too (verify r1: the window survives a restart through it)
+  todos.setStatus?.(it[0].id, 'done');
+  jm._stashNotif('conv-drop', job(32), { what: 'result 32' }, 'not reachable');
+  const after = todos.forSession(['claude:conv-drop']).filter((i) => i.origin === 'jobs' && i.status === 'open');
+  ok(after.length === 1, 'an hour later the next eviction says it again (the notice is back in For you)', after);
+  for (let i = 0; i < 31; i++) jm._stashNotif('conv-other', job(i), { what: 'x' + i }, 'not reachable');
+  ok(todos.forSession(['claude:conv-other']).filter((i) => i.origin === 'jobs').length === 1, '…and the window is PER conversation (another conversation\'s first eviction is said at once)');
+  W.shutdown?.();
+  todos.stop();
+
+  // verify r1 — THE HOUR SURVIVES A RESTART: the engine's window is in memory; a restart inside the hour reopened the
+  // notice the user had dismissed (said twice in ten minutes). The store's own filing time is the memory now.
+  {
+    const dir2 = mkDir('jobs-triage-drop-restart');
+    const boot = () => { const t = new UserTodoManager({ dataDir: dir2, expirySweepMs: 0 }); const lg = []; const w = wiring.create({ app: fakeApp().app, dataDir: dir2, broadcastAll: () => { }, userTodos: t, log: (...a) => lg.push(a.join(' ')), serverSetting: () => undefined, taskGroups: null, activeSessions: sessions, deliver: { peerReachable: () => false, deliverToConversation: async () => ({ ok: false, reason: 'no lane' }) } }); w.initAfterListen(); return { t, w, lg }; };
+    const mine = (t, key) => { const s = t.snapshot(); return [...s.open, ...s.resolved].filter((i) => i.sessionKey === key && i.origin === 'jobs'); };
+    const r1 = boot();
+    for (let i = 0; i < 31; i++) r1.w.jm._stashNotif('conv-drop', job(i), { what: 'r' + i }, 'not reachable');
+    const n1 = mine(r1.t, 'claude:conv-drop');
+    r1.t.setStatus(n1[0].id, 'dismissed');
+    r1.w.shutdown?.(); r1.t.stop();
+    const r2 = boot();   // the restart, minutes later
+    r2.w.jm._stashNotif('conv-drop', job(40), { what: 'r40' }, 'not reachable');
+    const n2 = mine(r2.t, 'claude:conv-drop');
+    ok(n1.length === 1 && n2.length === 1 && n2[0].status === 'dismissed' && r2.lg.some((l) => /fell off the 30-entry cap/.test(l)),
+      'verify r1: a RESTART inside the hour does not say it again — the dismissed notice stays dismissed (was: reopened), the eviction is journaled', n2.map((i) => i.status));
+    // a filing the store REFUSES (its 20-open cap) consumes no window: once the user clears their asks, the next eviction is said
+    for (let i = 0; i < 20; i++) r2.t.add('claude:conv-cap', { text: 'ask ' + i, origin: 'agent' });
+    for (let i = 0; i < 31; i++) r2.w.jm._stashNotif('conv-cap', job(i), { what: 'c' + i }, 'not reachable');
+    const refused = r2.lg.filter((l) => /conv-cap: the dropped-notification notice was not filed/.test(l)).length;
+    for (const x of r2.t.forSession(['claude:conv-cap'])) r2.t.setStatus(x.id, 'done');
+    r2.w.jm._stashNotif('conv-cap', job(50), { what: 'c50' }, 'not reachable');
+    ok(refused === 1 && r2.t.forSession(['claude:conv-cap']).filter((i) => i.origin === 'jobs').length === 1,
+      'verify r1: a filing refused at the store\'s 20-open cap (journaled) leaves the hour unspent — the next eviction is said (was: unsaid for the rest of the hour)', { refused });
+    r2.w.shutdown?.(); r2.t.stop();
+  }
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

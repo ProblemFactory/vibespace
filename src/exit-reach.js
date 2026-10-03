@@ -21,6 +21,12 @@
  * per-MACHINE with two independent grants, an "everyone" mode, an ask switch and a run ledger — two closed
  * censuses beat one open one; the principal spelling is shared, which is the part that must not fork.
  *
+ * ALL AGENTS (lane everyone-principal, 2026-10-02): the picker's "All agents" row IS the `everyone` mode — never a
+ * second spelling (a `who` row of kind `everyone` is refused bad_principal at the write and dropped at the read). A
+ * grant in `everyone` mode KEEPS the rows it was given (`who`, never consulted while everyone may — the verdict is
+ * unchanged), so taking All away again restores exactly the conversations and Task Groups that were picked before it
+ * (the owner: "never a silent loss of the per-principal rows"); `nobody` keeps none.
+ *
  * Gate: scripts/test-exit-reach.mjs (fast — the 84-cell grant × access × caller table, the words census with
  * poisoned names, the PATCH / base / ask / run-record tables, the real manager over fakes, patched-copy controls).
  */
@@ -76,11 +82,12 @@ const RUNS_DEFAULT = 50;             // the history's default length
 const RUNS_MAX = 200;
 
 // ── the reader ──────────────────────────────────────────────────────────────
-/** The rows a grant stores: closed kinds, well-formed ids, no name (a name is a live read), dedup, ≤ WHO_MAX. */
+/** The rows a grant stores: closed kinds, well-formed ids, no name (a name is a live read), dedup, ≤ WHO_MAX. An
+ *  `everyone` row is never a row here (All agents is the `everyone` MODE — one spelling). */
 function normWho(list) {
   const out = [], seen = new Set();
   for (const row of Array.isArray(list) ? list : []) {
-    const p = normPrincipal(row && { kind: row.kind, id: row.id });
+    const p = row && row.kind !== 'everyone' ? normPrincipal({ kind: row.kind, id: row.id }) : null;
     if (!p || seen.has(principalKey(p))) continue;
     seen.add(principalKey(p));
     out.push({ kind: p.kind, id: p.id });
@@ -92,7 +99,8 @@ function normWho(list) {
 function normGrant(g, grant) {
   if (!g || typeof g !== 'object' || Array.isArray(g)) return null;
   if (!MODES.includes(g.mode)) return null;
-  const out = { mode: g.mode, who: g.mode === 'only' ? normWho(g.who) : [] };
+  // `everyone` keeps the rows it was given (restored when All is taken away); `nobody` keeps none
+  const out = { mode: g.mode, who: g.mode === 'nobody' ? [] : normWho(g.who) };
   if (grant === 'run') out.ask = g.ask === true;
   return out;
 }
@@ -218,10 +226,11 @@ function patchVerdict(current, body, { now = Date.now(), by = 'user' } = {}) {
     if (!g || typeof g !== 'object' || Array.isArray(g)) return refuse('bad_grant', { grant, error: `${grant} must be {mode, who?${grant === 'run' ? ', ask?' : ''}}` });
     if (!MODES.includes(g.mode)) return refuse('bad_mode', { grant, error: `${grant}.mode is one of ${MODES.join(' | ')}` });
     let who = [];
-    if (g.mode === 'only') {
+    if (g.mode === 'only' || g.mode === 'everyone') {
       if (g.who != null && !Array.isArray(g.who)) return refuse('bad_principal', { grant, error: `${grant}.who must be a list` });
       const seen = new Set();
       for (const row of g.who || []) {
+        if (row && typeof row === 'object' && row.kind === 'everyone') return refuse('bad_principal', { grant, error: `${grant}: All agents is the mode "everyone", not a row of the list` });
         const p = row && typeof row === 'object' && !('session' in row) ? normPrincipal({ kind: row.kind, id: row.id }) : null;
         if (!p) return refuse('bad_principal', { grant, error: `${JSON.stringify(row).slice(0, 80)} is not a conversation or a Task Group` });
         if (seen.has(principalKey(p))) continue;
@@ -229,7 +238,7 @@ function patchVerdict(current, body, { now = Date.now(), by = 'user' } = {}) {
         who.push({ kind: p.kind, id: p.id });
       }
       if (who.length > WHO_MAX) return refuse('too_many', { grant, error: `at most ${WHO_MAX} conversations and Task Groups per list` });
-      if (!who.length) return refuse('empty_list', { grant, error: `${grant}: "only these" with nobody picked — choose nobody instead` });
+      if (!who.length && g.mode === 'only') return refuse('empty_list', { grant, error: `${grant}: "only these" with nobody picked — choose nobody instead` });
     }
     const out = { mode: g.mode, who };
     if (grant === 'run') {
@@ -242,10 +251,11 @@ function patchVerdict(current, body, { now = Date.now(), by = 'user' } = {}) {
   const access = { use: next.use, run: next.run, updatedAt: Number(now) || Date.now(), updatedBy: by, lastRun: cur.lastRun || null };
   return { ok: true, access, changed };
 }
-/** The stored shape of an access (what hosts.json carries under `exit`). */
+/** The stored shape of an access (what hosts.json carries under `exit`) — `everyone` with the rows it keeps. */
 function storedExit(access) {
-  return { use: { mode: access.use.mode, ...(access.use.mode === 'only' ? { who: access.use.who } : {}) },
-    run: { mode: access.run.mode, ask: !!access.run.ask, ...(access.run.mode === 'only' ? { who: access.run.who } : {}) },
+  const kept = (g) => (g.mode === 'only' || (g.mode === 'everyone' && g.who.length) ? { who: g.who } : {});
+  return { use: { mode: access.use.mode, ...kept(access.use) },
+    run: { mode: access.run.mode, ask: !!access.run.ask, ...kept(access.run) },
     updatedAt: access.updatedAt || 0, updatedBy: access.updatedBy || null, ...(access.lastRun ? { lastRun: access.lastRun } : {}) };
 }
 

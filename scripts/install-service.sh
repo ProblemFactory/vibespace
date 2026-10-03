@@ -57,6 +57,13 @@ Environment=PATH=$(dirname "$NODE_BIN"):$HOME/.local/bin:/usr/local/bin:/usr/bin
 EnvironmentFile=-%h/.config/vibespace/env
 # Prefer killing memory hogs (browsers, builds) over the workspace server.
 OOMScoreAdjust=-500
+# An OOM kill of ONE process in this unit must not stop the server (B-442c,
+# 2026-10-02 16:23, the owner's ruling): the unit's cgroup holds everything the
+# server spawned — dtach sessions, agent CLIs and whatever they run — and
+# systemd's default OOMPolicy=stop stopped the WHOLE service when the kernel
+# OOM-killed a 45.7 GB scratch vibespace-device a lane's test had leaked in it.
+# The kernel still kills the runaway; the server stays up.
+OOMPolicy=continue
 # Open-files limit, soft AND hard (one value sets both). node raises its OWN soft
 # limit to the hard one at startup (measured: under 1024:524288 it runs at
 # 524288/524288), so the "LimitNOFILESoft=1024" systemctl shows without this

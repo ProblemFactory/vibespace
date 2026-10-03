@@ -24,9 +24,10 @@ import { assistantNoteOf, noteSentence, toolResultSentence } from './chat-run-su
 import { isVibespaceNotice, noticeCardView, impersonatesVibespace } from '../notification-senders.js'; // lane S3: a VibeSpace notice is titled "VibeSpace · …", never `Message from "…"`; S3 verify F3: decided by the record's PATH (`peerVia`), never its sender's name or first sentence
 import { handbackFacts } from '../browser-takeover.js'; // lane S3: the handback card's title, read back by the module that wrote the words
 import { ownResumable } from '../browser-fact.js'; // lane browser-resume B (§3.9): the newest end card of the conversation's own browser offers Resume when THE fact says it can
+import { wakeFacts as channelWakeFacts, refOf as channelRefOf, splitLead as channelSplitLead } from '../channel-ref.js'; // B-c127: a channel notice names its conversation (THE NAME LADDER) and opens it with one click
 import { handoverFacts } from '../stash-summary.js'; // 2026-09-28: the hand-over card's title + the notices behind its expander, read back by the module that wrote the words
 import { outputPreview } from '../exit-reach.js'; // lane-exit-run-output E3: the command card's first lines of output (stderr first) + "Show output" (PURE, bundled)
-const noticeFacts = (body) => handbackFacts(body) || handoverFacts(body);   // ONE facts hook per producer, tried in order; null = the generic rules
+const noticeFacts = (body) => handbackFacts(body) || handoverFacts(body) || channelWakeFacts(body);   // ONE facts hook per producer, tried in order; null = the generic rules
 // PURE builder (CJS pulled into the bundle, like ssh-key-format.js) — the
 // codex multi-agent collab rows (B-7473). Escaper/translator/icons are
 // injected so the whole surface is unit-testable outside a browser.
@@ -43,10 +44,12 @@ import { askTarget, askSubject, askState, isWaiting, helperAskHead, helperAskSet
 const permissionClassOf = (w) => (w && w.cls === 'allowed' ? 'chat-permission-allowed' : w && w.cls === 'unknown' ? 'chat-permission-unknown' : 'chat-permission-denied');
 // THE one reset-credit confirm dialog (design-reset-credits p2): the wall card /
 // the auto-resume arm card that carries a stored-credit offer gets its button
-import { openResetCreditDialog } from './reset-credit-dialog.js';
+import { openResetCreditDialog, fmtInstant } from './reset-credit-dialog.js';
+import { resetCreditCardView } from '../reset-credit.js';
 import { startCardText, endCardText, endCardReplays, framesGoneText } from './browser-session-words.js'; // 2026-09-27: a browser session's start / end card — the words shared with the live view and the replay window
 import { btn as textBtn } from './channel-chrome.js'; // the house text button (`mounts-btn`): a button says what it does
 import { renderProposalCard, patchProposalCard } from './browser-proposal-card.js'; // lane browser-propose: the agent's proposal, ONE Approve (patched in place)
+import { peerCore, peerCardFold, demoteHeadings, PEER_FOLD_SETTING } from './peer-card-model.js'; // lane peer-card-fold: the ONE fold verdict + preview + demoted headings
 import { parseReply as parseInboxReply } from '../inbox-reply.js'; // PURE: the For-you reply's marker + quote block (design-user-inbox-reply D1.8) — text-derived, so live and history agree
 
 // Agent-memory files get their own card treatment (user ask: a memory write
@@ -434,6 +437,11 @@ function exitRunBlock(x) {
 }
 
 
+// lane peer-card-fold: the fold control's accessible name says WHOSE message it opens
+const peerFoldLabel = (open, who) => (who
+  ? (open ? t('Hide the message from {name}', { name: who }) : t('Show the message from {name}', { name: who }))
+  : (open ? t('Hide the message') : t('Show the message')));
+
 class ChatRenderers {
   /**
    * @param {Object} opts
@@ -444,13 +452,16 @@ class ChatRenderers {
    * @param {HTMLElement} opts.messageList - Message list DOM element
    * @param {Function} [opts.onPermissionResolve] - Called when a permission is resolved (allow/deny)
    */
-  constructor({ ws, sessionId, app, backend = 'claude', compact, messageList, onPermissionResolve, onFork, onMsgMenu, getSessionCtx, onSendText, onQueueChipClick, getQueueCaps, isCollabLive, getPublishedFiles, getWorkflowVerdict, getSourceWinId }) {
+  constructor({ ws, sessionId, app, backend = 'claude', compact, messageList, onPermissionResolve, onFork, onMsgMenu, getSessionCtx, onSendText, onQueueChipClick, getQueueCaps, isCollabLive, getPublishedFiles, getWorkflowVerdict, getSourceWinId, peerFold }) {
     // Is THIS collab card the one the next row would coalesce into, on a turn
     // that is still streaming? Only the VIEW knows (it owns the streaming flag
     // and the message list), and the answer decides live age vs frozen span.
     // Absent (view-only, sub-agent viewers) ⇒ always frozen, which is the
     // truth for a stopped transcript.
     this._isCollabLive = isCollabLive || null;
+    // lane peer-card-fold: a peer card's Show / Hide is the VIEW's state keyed by message id ({isOpen, set}) — a
+    // live patch, a fold pass, a reconnect rebuild and a trim re-render the card from it, never from the element
+    this._peerFold = peerFold || null;
     this._onSendText = onSendText || null; // in-chat action buttons send through the live input (null = view-only)
     this._onQueueChipClick = onQueueChipClick || null; // clicking a 'queued' chip steers that message (live windows only)
     this._getQueueCaps = getQueueCaps || null; // the VIEW's queue capability (harness row ∧ running wrapper); absent = view-only ⇒ inert chip
@@ -705,15 +716,9 @@ class ChatRenderers {
     el._rawMsg = msg;
     // core = message body without the harness's wrapper line and trailing
     // conduct paragraph (both are boilerplate around EVERY peer delivery)
-    let core = String(rawText || '');
-    core = core.replace(/^Another Claude session sent a message:\s*\n/, '');
-    const cut = core.indexOf('\nThis came from another Claude session');
-    if (cut > 0) core = core.slice(0, cut);
-    // server-posted frames (vibespace-msg / Background Work) carry their own
-    // boilerplate — the sender is already in the card head, the trailing
-    // conduct sentence is agent-facing noise (2.363.0)
-    core = core.replace(/^Message from session "[^"]+" \(via vibespace-msg[^)]*\):\s*\n?/, '');
-    core = core.replace(/\s*This is a notification, not a user instruction[\s\S]*$/, '');
+    // server-posted frames (vibespace-msg / Background Work) carry their own boilerplate too — the sender is already
+    // in the card head (2.363.0). ONE implementation: src/lib/peer-card-model.js peerCore (the fold verdict reads it)
+    let core = peerCore(rawText);
     // the .197 integration: a group message the owner CLEARED — its card says so in this device's words (never the words)
     if (msg.peerCleared) core = clearedText();
     // ONE title element (lane S3): the head is a flex row with a 6 px gap, so the
@@ -742,11 +747,13 @@ class ChatRenderers {
           : t('Message from “{name}”', { name: nameSpan });
     const headTip = !g ? '' : g.via === 'wake' ? t('A group message — it woke this agent (its own turn)') : t('A group message — delivered with this turn; nobody was woken for it');
     const groupNotes = !g ? [] : [
-      g.cut ? t('Cut short in the agent’s report — the whole message: vibespace-msg read {group}', { group: g.id }) : null,
-      g.more > 0 ? t('… and {n} more (vibespace-msg read {group})', { n: g.more, group: g.id }) : null,
+      g.cut ? t('Cut short in the agent’s report — the whole message is in {group}', { group: g.name || g.id }) : null,   // B-c127: the group by its NAME (the head's link opens it)
+      g.more > 0 ? t('… and {n} more in {group}', { n: g.more, group: g.name || g.id }) : null,
     ].filter(Boolean);
     if (g) { el.classList.add('chat-group-message'); el.dataset.groupId = g.id; }
-    el.innerHTML = `<div class="chat-peer-head"${headTip ? ` title="${escHtml(headTip)}"` : ''}><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/></svg><span class="chat-peer-title">${nameHtml}</span></div><div class="chat-text">${this.renderMarkdown(core.trim())}</div>${groupNotes.map((n) => `<div class="chat-group-note">${escHtml(n)}</div>`).join('')}`;
+    const body = this._peerBodyHtml(msg, core);
+    el.innerHTML = `<div class="chat-peer-head"${headTip ? ` title="${escHtml(headTip)}"` : ''}><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/></svg><span class="chat-peer-title">${nameHtml}</span></div>${body.html}${groupNotes.map((n) => `<div class="chat-group-note">${escHtml(n)}</div>`).join('')}`;
+    this._wirePeerFold(el, msg, body.who);
     if (g) {
       const open = (e) => { e.stopPropagation(); this.app?.openChannel?.(GROUP_ADAPTER_ID, g.id); };
       const gEl = el.querySelector('.chat-peer-group');
@@ -811,13 +818,24 @@ class ChatRenderers {
     const view = noticeCardView(msg.peerFrom, rawText, { facts: noticeFacts });
     const what = view.title.key ? t(view.title.key, Object.fromEntries(Object.entries(view.title.params || {}).map(([k, v]) => [k, v && typeof v === 'object' && v.key ? t(v.key, v.params || {}) : v]))) : String(view.title.text || '');   // a param that is itself a key is translated (the hand-over's "why it waited", lane notify-retry)
     const head = what ? t('VibeSpace · {what}', { what }) : t('VibeSpace');
+    // B-c127 (the owner: "oc_e53d…: 1 message"): a CHANNEL notice names its conversation — the server's ref
+    // (`peerChannel`: name, account, ids) or, on a card rebuilt from the transcript, the block's own head read back —
+    // and that name is a link through the ONE door. A live card's words open with the name: it becomes the link there.
+    const ref = channelRefOf(msg.peerChannel) || view.ref || null;
+    const lead = ref && !view.folded ? channelSplitLead(view.body, ref.name) : null;
     // `folded`: the title already says what happened FOR THE USER (a producer's
     // own parser read it), so the words the ASSISTANT was given ("Re-orient
     // before continuing …") sit behind an expander — never as conversation
-    const body = !view.body ? ''
+    const body = !view.body || lead ? ''
       : view.folded ? `<details class="chat-vs-notice-told"><summary>${escHtml(view.foldLabel && view.foldLabel.key ? t(view.foldLabel.key, view.foldLabel.params || {}) : t('What the assistant was told'))}</summary><div class="chat-text">${this.renderMarkdown(view.body)}</div></details>`
-        : `<div class="chat-text">${this.renderMarkdown(view.body)}</div>`;
-    el.innerHTML = `<div class="chat-vs-notice-head">${UI_ICONS.info || ''}<span class="chat-vs-notice-title">${escHtml(head)}</span></div>${body}`;
+        : ref ? `<div class="chat-text">${escHtml(view.body)}</div>`   // verify r1 F4: a channel card's words (a title, a sender's name) are TEXT — never markdown that draws a peer's link
+        : null;
+    // lane peer-card-fold: a notice shown whole (a job's report) folds like any peer card — head + preview + Show; a CHANNEL
+    // card's words stay TEXT (B-c127 verify r1 F4), so it never takes the markdown fold (composed at the 2.369.202 integration)
+    const whole = view.body && !view.folded && !ref ? this._peerBodyHtml(msg, view.body, 'VibeSpace') : null;
+    el.innerHTML = `<div class="chat-vs-notice-head">${UI_ICONS.info || ''}<span class="chat-vs-notice-title">${escHtml(head)}</span></div>${ref ? '<div class="chat-vs-notice-conv-line"></div>' : ''}${whole ? whole.html : body || ''}`;
+    if (whole) this._wirePeerFold(el, msg, whole.who);
+    if (ref) this._channelRefLine(el.querySelector('.chat-vs-notice-conv-line'), ref, lead ? lead.rest : '');
     this._appendResetCreditBtn(el, msg); // VibeSpace's usage-limit card offers a stored reset credit (design-reset-credits §5)
     // lane-exit-run-output E3 (the owner: "执行了指令怎么看不到回复"): the "Machines · <machine>" card carries the run's output
     // block — the first three lines of stderr (else stdout) in mono under the exit line, and "Show output" opening the
@@ -825,6 +843,55 @@ class ChatRenderers {
     // card (an expander on the element, never a second card, never re-created on a toggle).
     if (msg.exitRun && typeof msg.exitRun === 'object') el.appendChild(exitRunBlock(msg.exitRun));
     return el;
+  }
+
+  /** lane peer-card-fold: a peer card's body — whole, or folded to ONE preview line behind the house expander
+   *  (`details.chat-diff`, the tool cards' widget); headings demoted either way. `who` = the sender for the label. */
+  _peerBodyHtml(msg, text, who) {
+    const fold = peerCardFold(msg, { setting: this.app?.settings?.get?.(PEER_FOLD_SETTING) !== false, text });
+    const name = who ?? fold.headLine;
+    const md = `<div class="chat-text">${demoteHeadings(this.renderMarkdown(String(text || '').trim()))}</div>`;
+    if (!fold.collapsed) return { html: md, who: name, folded: false };
+    const open = !!(msg?.id && this._peerFold?.isOpen?.(msg.id));
+    return { who: name, folded: true, html: `<details class="chat-diff chat-peer-fold"${open ? ' open' : ''}><summary class="chat-diff-summary chat-peer-fold-summary" aria-label="${escHtml(peerFoldLabel(open, name))}"><span class="chat-peer-preview">${escHtml(fold.previewText)}</span><span class="chat-peer-fold-btn"><span class="chat-peer-fold-show">${escHtml(t('Show'))}</span><span class="chat-peer-fold-hide">${escHtml(t('Hide'))}</span></span></summary>${md}</details>` };
+  }
+
+  /** The fold's toggle reports to the view (the state lives there); the label follows the state. */
+  _wirePeerFold(el, msg, who) {
+    const det = el.querySelector(':scope > details.chat-peer-fold');
+    if (!det) return;
+    el.classList.add('chat-peer-folded');
+    const sum = det.querySelector(':scope > summary');
+    det.addEventListener('toggle', () => {
+      sum?.setAttribute('aria-label', peerFoldLabel(det.open, who));
+      if (msg?.id) this._peerFold?.set?.(msg.id, det.open, el);
+    });
+  }
+
+  /** B-c127: the conversation's name as a link (textContent — a title is vendor words) + the card's own words after it. */
+  _channelRefLine(line, ref, rest) {
+    if (!line) return;
+    const a = document.createElement('span');
+    a.className = 'chat-vs-notice-conv';
+    a.setAttribute('role', 'link');
+    a.tabIndex = 0;
+    a.textContent = ref.name;
+    a.dir = 'auto';   // verify r1 F6: its own bidi island — a right-to-left name never carries the count after it ("1 :שלום")
+    a.title = ref.account ? `${t('Open this conversation')} · ${ref.account}` : t('Open this conversation');
+    const open = (e) => { e.stopPropagation(); this._openChannelRef(ref); };
+    a.onclick = open;
+    a.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(e); } };
+    line.appendChild(a);
+    if (rest) line.appendChild(document.createTextNode(rest));
+  }
+  /** The ONE door. A rebuilt card knows the conversation's id but not its account's: the panel's own list resolves it. */
+  async _openChannelRef(ref) {
+    if (ref.adapterId) { this.app?.openChannel?.(ref.adapterId, ref.convId); return; }
+    const d = await fetchJson('/api/channels');
+    const rows = d && Array.isArray(d.conversations) ? d.conversations : [];
+    const hit = rows.find((c) => c && c.id === ref.convId && (!ref.account || c.adapterLabel === ref.account)) || rows.find((c) => c && c.id === ref.convId);
+    if (hit) this.app?.openChannel?.(hit.adapterId, hit.id);
+    else showToast(t('This conversation is not in Channels any more'), { type: 'error' });
   }
 
   /** lane browser-propose: the proposal card's in-place patch (chat-view `_onEditMessage` — never a swap). */
@@ -918,7 +985,17 @@ class ChatRenderers {
    *  the usage-limit card is VibeSpace speaking, so it wears the notice card). */
   _appendResetCreditBtn(el, msg) {
     const rc = msg && msg.resetCredit;
-    if (rc && rc.accountKey && Number(rc.available) > 0) {
+    // lane reset-path R3: a card a later fact answered (the credit used, the limit reset, the account usable
+    // again) shows ONE line stating the outcome instead of the button — the PURE view decides
+    const view = resetCreditCardView(rc, { fmtTime: fmtInstant });
+    if (view.line) {
+      const line = document.createElement('div');
+      line.className = 'chat-reset-credit-resolved';
+      line.textContent = t(view.line.key, view.line.params || {});
+      el.appendChild(line);
+      return;
+    }
+    if (view.button) {
       const b = document.createElement('button');
       b.type = 'button';
       b.className = 'chat-reset-credit-btn';
@@ -927,6 +1004,14 @@ class ChatRenderers {
       b.onclick = (e) => { e.stopPropagation(); openResetCreditDialog(this.app, { accountKey: rc.accountKey, sessionId: this.sessionId || null }); };
       el.appendChild(b);
     }
+  }
+
+  /** lane reset-path R3: the card's in-place patch (chat-view `_onEditMessage` on a `resetCredit` edit — the
+   *  element, its text and its fold stay; only the button becomes the outcome line). */
+  patchResetCredit(el, msg) {
+    if (!el) return;
+    for (const old of el.querySelectorAll(':scope > .chat-reset-credit-btn, :scope > .chat-reset-credit-resolved')) old.remove();
+    this._appendResetCreditBtn(el, msg);
   }
 
   _renderNotificationMsg(rawText) {
@@ -1278,7 +1363,7 @@ class ChatRenderers {
   /** The one visible line of a tool result the harness wrote for the MODEL
    *  (lane S3): "Helper started: …", "Stopped: …" — '' when the tool's own
    *  first line is fine as it is. PURE table in chat-run-summary. */
-  _resultSentence(block) {
+  _resultSentence(block) { // B-63f1: the caller hands the result's TEXT (a real Agent ack is a text-block list — its JSON never matched)
     const sen = toolResultSentence(block);
     if (!sen) return '';
     return sen.key ? t(sen.key, sen.params || {}) : String(sen.text || '');
@@ -1384,7 +1469,7 @@ class ChatRenderers {
       // <task-notification> wakeup, 2.368.30). Show the lifecycle honestly.
       const ti = msg?.taskInfo;
       const tiChip = taskStatusChipHtml(ti);
-      const firstLine = (ti?.summary ? String(ti.summary).slice(0, 160) : '') || this._resultSentence(block) || resultText.split('\n')[0].substring(0, 120) || t('(empty)');
+      const firstLine = (ti?.summary ? String(ti.summary).slice(0, 160) : '') || this._resultSentence({ ...block, output: resultText }) || resultText.split('\n')[0].substring(0, 120) || t('(empty)');
       const reviewThreadId = msg?.taskInfo?.receiverThreadIds?.[0] || '';
       const agentId = msg?.taskInfo?.id || (resultText.match(/agentId:\s*([a-z0-9]+)/)?.[1]) || '';
       // lane S1: a helper card names BOTH ids — its LIVE view (`sub-<tool_use_id>`, the only one its
@@ -1419,7 +1504,7 @@ class ChatRenderers {
     // Generic tool — harness bookkeeping (a TaskStop's raw JSON, a result that
     // declares itself internal metadata) is said as a sentence (lane S3); the
     // raw record stays behind the expander below
-    const firstLine = this._resultSentence(block) || resultText.split('\n')[0].substring(0, 120) || t('(empty)');
+    const firstLine = this._resultSentence({ ...block, output: resultText }) || resultText.split('\n')[0].substring(0, 120) || t('(empty)');
     return `<div class="chat-tool-use"><span class="chat-tool-label" title="${escHtml(block.toolName)}">${acDone?.browser ? agentBrowserHeadHtml(acDone) : `${toolCardIcon(block.toolName)} ${toolHeaderHtml(block.toolName)}${searchQueryChipHtml(block, msg)}`}</span>${mediaHtml}<details class="chat-diff"><summary class="chat-diff-summary">${t('Input')}</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff"><summary class="chat-diff-summary">\u2713 ${escHtml(firstLine)}</summary><pre>${this.linkifyText(resultText)}</pre></details>${browserTraceHolderHtml(block, msg)}${channelTouchHolderHtml(block)}</div>`;
   }
 
@@ -1542,7 +1627,7 @@ class ChatRenderers {
         det.innerHTML = `<summary>${escHtml(t('Details from the CLI'))}</summary><pre class="chat-pre">${escHtml(b.cliText)}</pre>`;
         el.appendChild(det);
       }
-      return { el, sideEffect: null };
+      return { el, sideEffect: { refusalFallback: { from: b.fallbackFrom || null, to: b.fallbackTo, category: b.refusalCategory || null } } }; // B-c643: the status bar's ⚠ chip names the reroute while `to` serves
     }
     if (msg.noticeKind === 'model-refusal-no-fallback' && msg.content?.[0]) {
       const b = msg.content[0];
@@ -2325,21 +2410,31 @@ class ChatRenderers {
   }
 
   /**
-   * Linkify file paths in HTML that may contain tags (from prior URL linkification).
-   * Splits by tags to avoid matching inside <span> attributes. esc controls escHtml on output.
+   * Run `fn` over the bare TEXT of `html`: never inside a tag, never inside a
+   * `.chat-link` span an earlier pass made (B-2dbc). The path rule matches the
+   * text of a `/p/<id>` page span and the `//host/…` of a URL span; wrapping
+   * it again put a path span INSIDE the link, the click handler's
+   * closest('.chat-link') found that inner span, and a page link copied its
+   * bare path (Cmd+click: "Not found"). Our link spans hold text only, so one
+   * alternation skips each whole.
+   */
+  _linkifyBareText(html, fn) {
+    return html.replace(/(<span class="chat-link[^"]*"[^>]*>[^<]*<\/span>)|(<[^>]*>)|([^<]+)/g, (m, link, tag, txt) => (link || tag || !txt) ? m : fn(txt));
+  }
+
+  /**
+   * Linkify file paths in HTML that may contain tags (from prior URL / page linkification).
+   * Skips tags and the link spans already made (_linkifyBareText). esc controls escHtml on output.
    */
   linkifyPathsTagSafe(html, esc) {
     const e = esc ? escHtml : s => s;
     const pathRe = sharedPathRe(); // src/path-linkify.js — the ONE definition of where a path ends
-    return html.replace(/(<[^>]*>)|([^<]+)/g, (m, tag, txt) => {
-      if (tag || !txt) return m;
-      return txt.replace(pathRe, (raw) => {
-        const fp = this.cleanPath(raw);
-        const after = raw.slice(fp.length);
-        if (fp.length < 4) return raw;
-        return `<span class="chat-link chat-link-path" data-path="${e(fp)}" title="${t('Click to copy, Ctrl+Click to open')}">${e(fp)}</span>${e(after)}`;
-      });
-    });
+    return this._linkifyBareText(html, (txt) => txt.replace(pathRe, (raw) => {
+      const fp = this.cleanPath(raw);
+      const after = raw.slice(fp.length);
+      if (fp.length < 4) return raw;
+      return `<span class="chat-link chat-link-path" data-path="${e(fp)}" title="${t('Click to copy, Ctrl+Click to open')}">${e(fp)}</span>${e(after)}`;
+    }));
   }
 
   /**
@@ -2349,11 +2444,12 @@ class ChatRenderers {
    * so agents are told to write the PATH and the browser resolves it; a
    * server-side guess produced a link that only resolved on the server
    * itself (owner: "你怎么知道我用啥地址能访问你？"). Runs BEFORE the file-path
-   * linkifier, which would otherwise claim it as a filesystem path.
+   * linkifier, which skips the span it makes; it skips a URL's span and tags
+   * itself (`https://x/a-/p/pg…` once rewrote the URL's data-href) — B-2dbc.
    */
   linkifyPagePaths(text) {
-    return text.replace(/(?<![="'\w/])(\/p\/pg[a-z0-9]{10})(\/raw)?\b/g, (m, p) =>
-      `<span class="chat-link" data-href="${absUrl(p)}" title="${t('Click to copy, Ctrl+Click to open')}">${p}</span>`);
+    return this._linkifyBareText(text, (txt) => txt.replace(/(?<![="'\w/])(\/p\/pg[a-z0-9]{10})(\/raw)?\b/g, (m, p) =>
+      `<span class="chat-link" data-href="${absUrl(p)}" title="${t('Click to copy, Ctrl+Click to open')}">${p}</span>`));
   }
 
   /** Combined URL + path linkification on a text segment. */

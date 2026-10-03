@@ -44,7 +44,7 @@ ok('the terminal-only harness declares no protocol at all', capsOf('shell').stre
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-stdout-reg-'));
 const BUFFERS_DIR = path.join(tmp, 'buffers'), META_DIR = path.join(tmp, 'meta');
 fs.mkdirSync(BUFFERS_DIR, { recursive: true });
-const calls = { broadcasts: [], active: 0, turnEnd: [], codexQuota: [], harnessModels: [], sbSeen: [], modelSeen: [], produced: [], events: [], stashed: [] };
+const calls = { broadcasts: [], active: 0, turnEnd: [], codexQuota: [], harnessModels: [], sbSeen: [], modelSeen: [], produced: [], events: [], stashed: [], catchUp: [] };
 const errors = [];
 const origErr = console.error;
 console.error = (...a) => { errors.push(a.join(' ')); };
@@ -77,6 +77,7 @@ const engine = {
   },
   noteSessionProduced(s) { calls.produced.push(s); }, noteTurnEnd(s) { calls.turnEnd.push(s); }, noteWallSignal() { },
   recordRateLimitEvent() { }, recordCodexQuotaSignal(s, p) { calls.codexQuota.push(p); }, resolveUsageKey: () => '__global__',
+  catchUpResetCreditFromBuffer(s, id) { calls.catchUp.push(id); return null; }, // lane reset-path verify r10: the codex consumer reads the wrapper's buffer file back at the attach (the wiring leg below)
   usageEstimator: { noteLive() { } },
 };
 const so = require(path.join(REPO, 'src/server/session-stdout.js')).create({
@@ -1745,6 +1746,10 @@ console.log('— codex-events');
 {
   const s = mkSession('codex', 'w-codex'); const p = fakePty();
   so.setupSessionPty(s, 'w-codex', p);
+  // lane reset-path verify r10 (the word a restart loses): the codex consumer asks the engine to read THIS session's
+  // wrapper buffer file back for its open reset-credit attempts AT the attach — before any live byte (dtach replays
+  // nothing; the wrapper's push / skipped / answer of a press that straddled the restart live only in that file)
+  ok('codex attach → engine.catchUpResetCreditFromBuffer(session, id) once, at the attach, before the first live byte (lane reset-path verify r10)', JSON.stringify(calls.catchUp) === JSON.stringify(['w-codex']) && !calls.codexQuota.length, JSON.stringify(calls.catchUp));
   p.data(J({ type: 'session_meta', payload: { id: 'thr_1', cwd: tmp } }));
   ok('session_meta → thread id adoption persisted to session-meta (claudeSessionId stays null)', s.backendSessionId === 'thr_1' && s.claudeSessionId === null && meta(s)?.backendSessionId === 'thr_1' && meta(s)?.claudeSessionId === null, JSON.stringify(meta(s)));
   ok('…and the meta record reached the REAL codex normalizer through feedLive', s._fed.some((m) => m.type === 'session_meta'));

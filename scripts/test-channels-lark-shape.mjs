@@ -37,7 +37,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { freePort } from './scratch.mjs';
+import { freePort, scratch } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { startWorkMeter, bounded } from './work-meter.mjs';
 const require = createRequire(import.meta.url);
@@ -346,7 +346,7 @@ const world = (() => {
   // CONTROL: the pre-D3 author line (the literal 'app') in a patched copy ⇒ this leg's first assertion goes red
   const M3 = mutantCopies('chan-lark-d3', REPO);
   const srcL = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf-8');
-  const pre = srcL.replace("author: { id: sid, name: isApp ? appNameOf(sid, names) : (names.get(sid) || ''),", "author: { id: sid, name: names.get(sid) || (isApp ? 'app' : ''),");
+  const pre = srcL.replace("author: { id: sid, name: isApp ? appNameOf(sid, names) : (names.get(sid) || (PEOPLE.get(sid) || {}).name || ''),", "author: { id: sid, name: names.get(sid) || (isApp ? 'app' : ''),");
   const modPre = M3.load('src/channels/lark.js', pre, 'pre-d3');
   const cr = modPre.toRecord('lark', 'oc_d3', ITEMS[2], { names: new Map() });
   ok(pre !== srcL && cr.author.name === 'app', 'CONTROL: the pre-D3 author line in a patched copy names the bot "app" — the assertions above would be red on it', cr.author.name);
@@ -450,7 +450,7 @@ function gateCensus(src, { gateRe, ungatedIds }) {
   const L = src.split('\n'); const a0 = L.findIndex((l) => /^  const api = async \(pathq, opts = \{\}\) => \{/.test(l)); const g0 = L.findIndex((l) => GATE.test(l));
   const idx = (re) => L.findIndex((l, i) => i > a0 && i < g0 && re.test(l));
   ok(a0 >= 0 && g0 > a0 && idx(/await accessToken\(\)/) < idx(/await pace\(1\)/) && idx(/await pace\(1\)/) < idx(/^\s*meter\(1\)/) && /bearerNow\(at\)/.test(L[g0]), 'the gate reads token → pace → meter → bearerNow(at) → send');
-  ok(/if \(refreshing\) \{ await refreshing; return accessToken\(\); \}/.test(src) && /refreshing = refreshAccessToken\(cred, token\)\.finally/.test(src) && /cur\.refresh_token \|\| ''\) === String\(token\.refresh_token/.test(src), 'the refresh is SINGLE-FLIGHT and a refused refresh stamps invalidGrantAt only while the stored token is still the one it tried');
+  ok(/if \(refreshing\) \{ await refreshing; return accessToken\(depth \+ 1\); \}/.test(src) && /refreshing = refreshAccessToken\(cred, token\)\.finally/.test(src) && /cur\.refresh_token \|\| ''\) === String\(token\.refresh_token/.test(src), 'the refresh is SINGLE-FLIGHT and a refused refresh stamps invalidGrantAt only while the stored token is still the one it tried');
   // NEGATIVE CONTROLS (patched copies in scratch, never src/)
   const M = mutantCopies('chan-lark-gate', REPO);
   const unpaced = src.replace("      await pace(1);   // lane R5 verify r4: a send is a vendor request like any other — paced, then metered (it was neither)\n      meter(1);\n      if (bearerExpired()) at0 = await accessToken();   // verify r5: an expired bearer is refreshed before the send, never sent\n      const at = bearerNow(at0);", "      const at = at0;");
@@ -1109,14 +1109,17 @@ console.log('\n⑪ owner ruling: reactions read by default; the one narrowing re
   // lane lark-search-poll: the default consent ALSO asks for the change feed's two scopes (its own option, on by
   // default) — the reactions leg reads them as the feed's, the ORDERED optional groups put reactions first
   const FEED2 = [lark.P2P_READ_SCOPE, lark.SEARCH_SCOPE];
+  // lane lark-threads (B1/B5, MEASURED): + reading people's profiles — the two field scopes and the person scope, optional,
+  // after the reactions group (one dropped per refusal, the registry's own narrowing)
+  const PPL3 = [lark.JOB_SCOPE, lark.DEPT_SCOPE, lark.PEOPLE_SCOPE];
   const dflt = await capture(lark, {}), on = await capture(lark, { reactions: 'read' }), off = await capture(lark, { reactions: 'off' });
-  ok(dflt.scopes.includes(OPT) && lark.SCOPES.every((x) => dflt.scopes.includes(x)) && FEED2.every((x) => dflt.scopes.includes(x)) && dflt.scopes.length === lark.SCOPES.length + 3 && JSON.stringify(dflt.optional) === JSON.stringify([[OPT], [lark.P2P_READ_SCOPE], [lark.SEARCH_SCOPE]]), `the DEFAULT consent (a record that never set the option): the five base scopes + ${OPT} + the feed's two, declared OPTIONAL as ordered groups, reactions first (${dflt.scopes.join(' ')})`);
+  ok(dflt.scopes.includes(OPT) && lark.SCOPES.every((x) => dflt.scopes.includes(x)) && FEED2.every((x) => dflt.scopes.includes(x)) && PPL3.every((x) => dflt.scopes.includes(x)) && dflt.scopes.length === lark.SCOPES.length + 6 && JSON.stringify(dflt.optional) === JSON.stringify([[OPT], [lark.JOB_SCOPE], [lark.DEPT_SCOPE], [lark.PEOPLE_SCOPE], [lark.P2P_READ_SCOPE], [lark.SEARCH_SCOPE]]), `the DEFAULT consent (a record that never set the option): the five base scopes + ${OPT} + the three profile scopes + the feed's two, declared OPTIONAL as ordered groups, reactions first (${dflt.scopes.join(' ')})`);
   ok(JSON.stringify(on.scopes) === JSON.stringify(dflt.scopes) && JSON.stringify(on.optional) === JSON.stringify(dflt.optional), 'option "read" = the default');
-  ok(!off.scopes.includes(OPT) && JSON.stringify(off.scopes) === JSON.stringify([...lark.SCOPES, ...FEED2]) && JSON.stringify(off.optional) === JSON.stringify([[lark.P2P_READ_SCOPE], [lark.SEARCH_SCOPE]]), 'option "off": the base scopes + the feed\'s, the reactions group not offered');
+  ok(!off.scopes.includes(OPT) && JSON.stringify(off.scopes) === JSON.stringify([...lark.SCOPES, ...PPL3, ...FEED2]) && JSON.stringify(off.optional) === JSON.stringify([[lark.JOB_SCOPE], [lark.DEPT_SCOPE], [lark.PEOPLE_SCOPE], [lark.P2P_READ_SCOPE], [lark.SEARCH_SCOPE]]), 'option "off": the base scopes + the profile scopes + the feed\'s, the reactions group not offered');
   const narrowed = new URL(dflt.build({ redirectUri: 'http://127.0.0.1:1/cb', state: 's', without: [OPT] })).searchParams.get('scope').split(' ');
-  ok(JSON.stringify(narrowed) === JSON.stringify([...lark.SCOPES, ...FEED2]), 'the first narrowing retry\'s URL (`without` the reactions group) drops nothing else — the search is kept');
+  ok(JSON.stringify(narrowed) === JSON.stringify([...lark.SCOPES, ...PPL3, ...FEED2]), 'the first narrowing retry\'s URL (`without` the reactions group) drops nothing else — the profiles and the search are kept');
   const optDecl = lark.OPTIONS.find((o) => o.key === 'reactions');
-  ok(optDecl && optDecl.default === 'read' && optDecl.choices.includes('off') && lark.REACTIONS_GRANT.option === 'reactions' && JSON.stringify(lark.OPTIONAL_SCOPES) === JSON.stringify([OPT, ...FEED2]), 'the option is declared on by default, the grant names it (so `off` silences the account\'s line), and the optional set is the read scope + the feed\'s two');
+  ok(optDecl && optDecl.default === 'read' && optDecl.choices.includes('off') && lark.REACTIONS_GRANT.option === 'reactions' && JSON.stringify(lark.OPTIONAL_SCOPES) === JSON.stringify([OPT, ...PPL3, ...FEED2]), 'the option is declared on by default, the grant names it (so `off` silences the account\'s line), and the optional set is the read scope + the profile scopes + the feed\'s two');
   const x1 = await dflt.exchange({ code: 'c', redirectUri: 'http://127.0.0.1:1/cb', cancelled: () => null, narrowed: [OPT] });
   ok(JSON.stringify(dflt.tk.st.meta.refusedScopes) === JSON.stringify([OPT]) && JSON.stringify(x1.refusedScopes) === JSON.stringify([OPT]), 'a narrowed consent\'s token write carries what was dropped (meta.refusedScopes) — the engine records it on the account');
   const x2 = await on.exchange({ code: 'c', redirectUri: 'http://127.0.0.1:1/cb', cancelled: () => null, narrowed: [] });
@@ -1136,7 +1139,7 @@ console.log('\n⑪ owner ruling: reactions read by default; the one narrowing re
   const STORE = require(path.join(REPO, 'src/server/integration-store.js'));
   const ENG = require(path.join(REPO, 'src/server/channels-engine.js'));
   const ROOT11 = fs.mkdtempSync(path.join(process.env.TMPDIR || '/tmp', `vs-larkrx-${process.pid}-`));
-  const ENABLED = new Set([...lark.SCOPES, lark.P2P_READ_SCOPE, lark.SEARCH_SCOPE]);   // the fake APP: the base scopes + the feed's two — the reactions read scope NOT enabled yet (owner decision 5: dropping it keeps the search)
+  const ENABLED = new Set([...lark.SCOPES, lark.P2P_READ_SCOPE, lark.SEARCH_SCOPE, lark.JOB_SCOPE, lark.DEPT_SCOPE, lark.PEOPLE_SCOPE]);   // the fake APP: the base scopes + the profile scopes + the feed's two — the reactions read scope NOT enabled yet (owner decision 5: dropping it keeps the search)
   const granted = new Map();              // code → the scopes the fake page granted
   let codeN = 0;
   const fakeAuth = http.createServer((req, res) => {
@@ -1181,7 +1184,7 @@ console.log('\n⑪ owner ruling: reactions read by default; the one narrowing re
     // (2) the ONE retry: the same flow, the consent without the optional scope; a second one refused by name
     const n0 = eng.oauthNarrow(s0.flowId);
     const sc0 = new URL(n0.flow.consentUrl).searchParams.get('scope').split(' ');
-    ok(JSON.stringify(n0.flow.narrowed) === JSON.stringify([OPT]) && !sc0.includes(OPT) && sc0.includes(lark.SEARCH_SCOPE) && n0.flowId === s0.flowId && JSON.stringify(n0.flow.nextNarrow) === JSON.stringify([lark.P2P_READ_SCOPE]), `the narrowing retry (POST /api/channels/oauth/narrow): same flow, the consent without ${OPT} ONLY (the search kept); the next press would name the single-chat read`);
+    ok(JSON.stringify(n0.flow.narrowed) === JSON.stringify([OPT]) && !sc0.includes(OPT) && sc0.includes(lark.SEARCH_SCOPE) && n0.flowId === s0.flowId && JSON.stringify(n0.flow.nextNarrow) === JSON.stringify([lark.JOB_SCOPE]), `the narrowing retry (POST /api/channels/oauth/narrow): same flow, the consent without ${OPT} ONLY (the search kept); the next press would name the job-title field (lane lark-threads' profile scopes come next)`);
     const p1 = await browse(n0.flow.consentUrl);
     for (let i = 0; i < 50 && !eng.oauthStatus(s0.flowId).done; i++) await sleep(20);
     ok(p1.status === 302 && eng.oauthStatus(s0.flowId).ok === true && exchanges === 1, 'the narrowed consent is granted and exchanged once');
@@ -1220,9 +1223,12 @@ console.log('\n⑪ owner ruling: reactions read by default; the one narrowing re
     // the account route's narrow: the running re-authorize of this account, once
     const r4 = await eng.reauthorize(id, {});
     const a4 = eng.narrowAuth(id);
-    const a5 = eng.narrowAuth(id), a5b = eng.narrowAuth(id);
+    // lane lark-threads: the three profile groups sit between the reactions and the feed's two (one press each)
+    const presses = [];
+    for (let i = 0; i < 5; i++) presses.push(eng.narrowAuth(id));
     let a5c = null; try { eng.narrowAuth(id); } catch (e) { a5c = e; }
-    ok(r4.flow.flowId === a4.flow.flowId && JSON.stringify(a4.flow.narrowed) === JSON.stringify([OPT]) && JSON.stringify(a5.flow.narrowed) === JSON.stringify([OPT, lark.P2P_READ_SCOPE]) && JSON.stringify(a5b.flow.narrowed) === JSON.stringify([OPT, lark.P2P_READ_SCOPE, lark.SEARCH_SCOPE]) && a5c && a5c.code === 'already-narrowed', 'the account\'s own narrow (POST /api/channels/adapters/:id/auth/narrow) narrows ITS running re-authorize one group per press (reactions → the single-chat read → the search), then refuses by name');
+    const want = [lark.JOB_SCOPE, lark.DEPT_SCOPE, lark.PEOPLE_SCOPE, lark.P2P_READ_SCOPE, lark.SEARCH_SCOPE];
+    ok(r4.flow.flowId === a4.flow.flowId && JSON.stringify(a4.flow.narrowed) === JSON.stringify([OPT]) && presses.every((x, i) => JSON.stringify(x.flow.narrowed) === JSON.stringify([OPT, ...want.slice(0, i + 1)])) && a5c && a5c.code === 'already-narrowed', 'the account\'s own narrow (POST /api/channels/adapters/:id/auth/narrow) narrows ITS running re-authorize one group per press (reactions → the job title → the department → people → the single-chat read → the search), then refuses by name');
     await eng.cancelAuth(id);
     let a6 = null; try { eng.narrowAuth(id); } catch (e) { a6 = e; }
     ok(a6 && a6.status === 404 && a6.code === 'no-flow', 'no sign-in running ⇒ 404 no-flow');
@@ -1266,9 +1272,11 @@ console.log('\n⑬ the change feed: the search page, the declared unit, the desc
     if (u.pathname === '/open-apis/im/v1/messages/search' && st.envelope) return jsonRes(st.envelope);   // verify r2: a 200 that is not a search page
     if (u.pathname === '/open-apis/im/v1/messages/search' && st.bigPage) { const p0 = pageOf('page1'); return jsonRes({ ...p0, data: { ...p0.data, items: Array.from({ length: st.bigPage }, (_, i) => ({ ...p0.data.items[0], meta_data: { ...p0.data.items[0].meta_data, message_id: `om_big_${i}` } })) } }); }
     if (u.pathname === '/open-apis/im/v1/messages/search') return jsonRes(pageOf(u.searchParams.get('page_token') === 'pt-search-2' ? 'page2' : 'page1'));
-    if (u.pathname.startsWith('/open-apis/contact/v3/users/')) return jsonRes(SX.userPeer);
+    if (u.pathname.startsWith('/open-apis/contact/v3/users/')) return st.contactRefuse ? jsonRes({ code: 41050, msg: 'no user authority' }, 400) : jsonRes(SX.userPeer);   // B-64f6: a contact lookup that refuses
     const cm = /^\/open-apis\/im\/v1\/chats\/([^/]+)$/.exec(u.pathname);
     if (cm) { if (st.chatRefuse.has(cm[1])) return jsonRes(SX.chatP2pRefused.body, SX.chatP2pRefused.status); return jsonRes(SX.chatNamed); }
+    const mm = /^\/open-apis\/im\/v1\/chats\/([^/]+)\/members$/.exec(u.pathname);
+    if (mm && st.members && st.members[mm[1]]) return jsonRes({ code: 0, data: { items: st.members[mm[1]], has_more: false, page_token: '' } });   // B-64f6: a single chat whose member list answers
     if (/\/members$/.test(u.pathname)) return jsonRes(SX.chatP2pRefused.body, SX.chatP2pRefused.status);
     if (u.pathname === '/open-apis/im/v1/messages') return jsonRes({ code: 0, data: { has_more: false, page_token: '', items: [{ message_id: 'om_dm_hist_1', msg_type: 'text', create_time: String(T0 - 15000), chat_id: 'oc_dm_peer_0001', sender: { id: 'ou_peer_c', sender_type: 'user' }, body: { content: JSON.stringify({ text: 'hey' }) } }] } });
     return jsonRes({ code: 404, msg: `unrouted ${u.pathname}` }, 404);
@@ -1277,7 +1285,9 @@ console.log('\n⑬ the change feed: the search page, the declared unit, the desc
   const logS = { log: (m) => said.push(String(m)), warn: (m) => said.push(String(m)), error() {} };
   const reg = CH.createChannelRegistry(); reg.register(lark.adapter);
   const tokens = mkTokens();
-  tokens.st.token = { access_token: 'u-access-0001', expiresAt: now() + 7200e3, refresh_token: 'ur-refresh-0001', refreshExpiresAt: now() + 2592000e3, scopes: [...lark.SCOPES, lark.SEARCH_SCOPE, lark.P2P_READ_SCOPE], openId: 'ou_member_a', name: 'Member A' };
+  // lane lark-threads (MEASURED 2026-10-01): naming another person needs contact:contact.base:readonly — held here (the
+  // re-authorized sign-in); ⑯ pins the sign-in WITHOUT it (no lookup is sent, the card says so)
+  tokens.st.token = { access_token: 'u-access-0001', expiresAt: now() + 7200e3, refresh_token: 'ur-refresh-0001', refreshExpiresAt: now() + 2592000e3, scopes: [...lark.SCOPES, lark.SEARCH_SCOPE, lark.P2P_READ_SCOPE, lark.PEOPLE_SCOPE], openId: 'ou_member_a', name: 'Member A' };
   const metered = { n: 0 };
   const a = reg.create('lark', { id: 'lark' }, { now, fetch: fetchS, tokens, resolveIntegration: () => CRED, log: logS, meter: (u) => { metered.n += u; } });
   ok(CH.validateCaps('lark', lark.caps) === true && lark.caps.changeFeed.via === 'search' && lark.caps.changeFeed.scope === 'search:message' && lark.caps.changeFeed.option === 'search' && lark.caps.changeFeed.timeUnit === 'iso' && lark.caps.changeFeed.reader === 2 && lark.caps.changeFeed.pageSize === 30 && lark.caps.changeFeed.perMin === 10 && lark.caps.pace.cost.feed === 1, 'the declaration: via search, the held scope search:message, the option `search`, the instant an ISO 8601 string (lane lark-p2p — the vendor\'s doc and its answer), hit reader revision 2, 30 a page, 10 pages a sliding minute (10 % of the vendor\'s 100/min tenant tier), a page costs one request');
@@ -1300,7 +1310,7 @@ console.log('\n⑬ the change feed: the search page, the declared unit, the desc
   ok(hd.convId === 'oc_dm_peer_0001' && hd.vendorId === 'om_srch_dm_01' && hd.at === T0 - 50000 && hd.updatedAt === null && hd.isP2p === true && hd.fromId === 'ou_peer_c' && hd.threadKey === null && hg.convId === 'oc_ops_room_0001' && hg.isP2p === false && hg.at === T0 - 40000, 'each hit is a MARK: the chat, the message id (meta_data.message_id), the ISO 8601 instant at +08:00 read to the exact ms, a single chat flagged by the boolean is_p2p_chat, no thread / no edit when the vendor sends none', JSON.stringify(p1.hits.slice(0, 2)));
   ok(!JSON.stringify(p1).includes('SNIPPET-MUST-NOT-LEAK') && !said.some((x) => x.includes('SNIPPET-MUST-NOT-LEAK') || x.includes('om_srch_')), 'THE SNIPPET NEVER LEAVES THE ADAPTER: not in the page, not in any log line (nor a message id)');
   const names = said.filter((x) => /message search's first page carries fields/.test(x));
-  ok(names.length === 1 && names[0].includes("the message search's first page carries fields display_info, id, meta_data; meta_data: chat_id, create_time, from_id, is_p2p_chat, message_id, position, type;") && /create_time form: iso8601; all 5 readable/.test(names[0]), 'lark-p2p: the probe over the fixture prints the PRODUCTION probe\'s field list verbatim, plus the create_time FORM (iso8601, never a value) and what this version could read — the probe and the parser checked against each other', names.join(' | '));
+  ok(names.length === 1 && names[0].includes("the message search's first page carries fields display_info, id, meta_data; meta_data: chat_id, create_time, from_id, is_p2p_chat, message_id, position, type;") && /display_info: [^;]+; create_time form: iso8601; thread_id on 0 of 5 hits; all 5 readable/.test(names[0]), 'lark-p2p: the probe over the fixture prints the PRODUCTION probe\'s field list verbatim, plus display_info\'s sub-field NAMES (lane lark-threads B5 — never a value), the create_time FORM (iso8601, never a value), how many hits carry a thread id (A5) and what this version could read — the probe and the parser checked against each other', names.join(' | '));
   const p2 = await a.changes({ from, to, pageToken: p1.pageToken });
   const c2 = calls[calls.length - 1];
   const [hr, hid] = p2.hits;
@@ -1447,12 +1457,54 @@ console.log('\n⑬ the change feed: the search page, the declared unit, the desc
   st.chatRefuse.add('oc_dm_peer_0001');
   calls.length = 0;
   const d2 = await a.describe('oc_dm_peer_0001', { peerIds: ['ou_member_a', 'ou_peer_c'] });
-  ok(d2.title === 'Peer C' && d2.kind === 'dm' && d2.peers.length === 1 && calls.map((c) => c.path).join() === '/open-apis/im/v1/chats/oc_dm_peer_0001,/open-apis/contact/v3/users/ou_peer_c', 'describe ②: a chat lookup that refuses a single chat (U7) ⇒ the PEER (never this account) named through the contact lookup — never the raw chat id', JSON.stringify({ d2, calls: calls.map((c) => c.path) }));
+  ok(d2.title === 'Peer C' && d2.kind === 'dm' && d2.peers.length === 1 && calls.map((c) => c.path).join() === '/open-apis/im/v1/chats/oc_dm_peer_0001,/open-apis/im/v1/chats/oc_dm_peer_0001/members,/open-apis/contact/v3/users/ou_peer_c', 'describe ②/③: a chat lookup that refuses a single chat (U7) ⇒ its member list (B-64f6; refused here) ⇒ the PEER (never this account) named through the contact lookup — never the raw chat id', JSON.stringify({ d2, calls: calls.map((c) => c.path) }));
   calls.length = 0;
   await a.describe('oc_dm_peer_0001', { peerIds: ['ou_peer_c'] });
   ok(calls.filter((c) => c.path.startsWith('/open-apis/contact/')).length === 0, 'the peer\'s name is cached (MEMBERS_TTL_MS) — a second describe asks the contact API nothing');
   const d3 = await a.describe('oc_dm_peer_0001', { peerIds: ['ou_member_a'] });
   ok(d3.title === null && d3.kind === 'dm', 'describe ③: only the owner wrote ⇒ no title (the client words "Single chat"), the kind still dm', JSON.stringify(d3));
+  // B-64f6 (the owner's oc_e53d…, 2026-10-03: a Lark single chat listed as its oc_ id): production's 12 single chats were
+  // ALL titled null — the chat lookup names no single chat and the contact lookup refused every peer — while the chat's
+  // MEMBER LIST named both authors. describe ② asks the members: the other member's name, stored like a title
+  {
+    const DM = 'oc_dm_members_0001';
+    st.chatRefuse.add(DM); st.contactRefuse = true;
+    st.members = { [DM]: [{ member_id: 'ou_member_a', name: 'Member A' }, { member_id: 'ou_userW', name: ' userW ' }] };
+    calls.length = 0;
+    const dM = await a.describe(DM, { peerIds: ['ou_member_a'] });
+    ok(dM.title === 'userW' && dM.peers.length === 1 && dM.peers[0].id === 'ou_userW' && calls.map((c) => c.path).join() === `/open-apis/im/v1/chats/${DM},/open-apis/im/v1/chats/${DM}/members` && dM.requests === 2, 'B-64f6 describe ②: a single chat the chat lookup and the contact lookup both refuse is named by its MEMBER LIST — the other member (never this account), trimmed; two requests, the contact API not asked', JSON.stringify({ dM, calls: calls.map((c) => c.path) }));
+    calls.length = 0;
+    const dM2 = await a.describe(DM, { peerIds: [] });
+    ok(dM2.title === 'userW' && dM2.requests === 1 && calls.length === 1, 'B-64f6: the member list is cached (MEMBERS_TTL_MS) — a second describe asks only the chat lookup', JSON.stringify({ dM2, n: calls.length }));
+    const G = 'oc_group_unnamed_0001';
+    st.members[G] = [{ member_id: 'ou_member_a', name: 'Member A' }, { member_id: 'ou_x', name: 'Xia' }];
+    const gChat = SX.chatNamed;
+    SX.chatNamed = { code: 0, msg: 'success', data: { name: '', chat_mode: 'group' } };
+    calls.length = 0;
+    const dG = await a.describe(G, { peerIds: [] });
+    SX.chatNamed = gChat;
+    ok(dG.title === null && !calls.some((c) => c.path.endsWith('/members')), 'B-64f6: a GROUP is never named by its members (its name is its own; the client words an unnamed one)', JSON.stringify({ dG, calls: calls.map((c) => c.path) }));
+    const tk0 = tokens.st.token.openId;
+    tokens.st.token.openId = null;
+    const D2 = 'oc_dm_members_0002';
+    st.chatRefuse.add(D2); st.members[D2] = st.members[DM];
+    const dN = await a.describe(D2, { peerIds: [] });
+    tokens.st.token.openId = tk0;
+    ok(dN.title === null, 'B-64f6: without this account\'s own id the member list names nothing (the owner could be the "other" member)', JSON.stringify(dN));
+    // PRE-FIX CONTROL: the base describe (no members rung) — the same world, no name
+    const MB = mutantCopies('chan-lark-b64f6', REPO);
+    const LS = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf-8');
+    const RUNG = LS.slice(LS.indexOf('      // B-64f6 (the owner'), LS.indexOf('      const peers = [];'));
+    ok(RUNG.length > 100 && LS.split(RUNG).length === 2, 'CONTROL setup: the members rung is spelled once');
+    const modB = MB.load('src/channels/lark.js', LS.replace(RUNG, ''), 'b64f6-no-members-rung');
+    const rgB = CH.createChannelRegistry(); rgB.register(modB.adapter);
+    const tkB = mkTokens(); tkB.st.token = { ...tokens.st.token };
+    const aB = rgB.create('lark', { id: 'lark' }, { now, fetch: fetchS, tokens: tkB, resolveIntegration: () => CRED, log: logS, meter() {} });
+    const dB = await aB.describe(DM, { peerIds: ['ou_member_a'] });
+    ok(dB.title === null, 'CONTROL: the copy without the members rung leaves the single chat unnamed (the oc_ id on every agent surface) — the leg above would be red', JSON.stringify(dB));
+    for (const c of copiesCensus(MB.files, MB.dir, REPO, { minCopies: 1, label: 'chan-lark-b64f6: ' })) ok(c.pass, c.name, c.pass ? undefined : c.detail);
+    st.contactRefuse = false; st.members = null;
+  }
   // U7: a single chat's membership = its last good history read
   const cc0 = await a.convCaps('oc_dm_peer_0001');
   const h = await a.history('oc_dm_peer_0001', { limit: 50 });
@@ -1471,13 +1523,14 @@ console.log('\n⑬ the change feed: the search page, the declared unit, the desc
     return { scopes: new URL(u).searchParams.get('scope').split(' '), groups: o.optionalScopes, build: o.buildConsentUrl };
   };
   const on = await capture({}), offS = await capture({ search: 'off' }), offBoth = await capture({ search: 'off', reactions: 'off' });
-  ok(on.scopes.includes('search:message') && on.scopes.includes('im:message.p2p_msg:get_as_user') && JSON.stringify(on.groups) === JSON.stringify([['im:message.reactions:read'], ['im:message.p2p_msg:get_as_user'], ['search:message']]), 'the default consent asks for the search + the single-chat read; the optional groups are ORDERED least valuable first (reactions, the single-chat read, the search)', JSON.stringify(on));
-  ok(!offS.scopes.includes('search:message') && !offS.scopes.includes('im:message.p2p_msg:get_as_user') && JSON.stringify(offS.groups) === JSON.stringify([['im:message.reactions:read']]) && JSON.stringify(offBoth.groups) === '[]', 'the option `search: off` removes BOTH scopes from the consent (and from the retry\'s groups)', JSON.stringify(offS));
+  const PPLG = [[lark.JOB_SCOPE], [lark.DEPT_SCOPE], [lark.PEOPLE_SCOPE]];   // lane lark-threads: the profile groups
+  ok(on.scopes.includes('search:message') && on.scopes.includes('im:message.p2p_msg:get_as_user') && JSON.stringify(on.groups) === JSON.stringify([['im:message.reactions:read'], ...PPLG, ['im:message.p2p_msg:get_as_user'], ['search:message']]), 'the default consent asks for the search + the single-chat read; the optional groups are ORDERED least valuable first (reactions, the profile fields, people, the single-chat read, the search)', JSON.stringify(on));
+  ok(!offS.scopes.includes('search:message') && !offS.scopes.includes('im:message.p2p_msg:get_as_user') && JSON.stringify(offS.groups) === JSON.stringify([['im:message.reactions:read'], ...PPLG]) && JSON.stringify(offBoth.groups) === JSON.stringify(PPLG), 'the option `search: off` removes BOTH scopes from the consent (and from the retry\'s groups); the profile groups stay', JSON.stringify(offS));
   const sOpt = lark.OPTIONS.find((o) => o.key === 'search');
   ok(sOpt && sOpt.default === 'on' && JSON.stringify(sOpt.choices) === JSON.stringify(['off', 'on']) && lark.FEED_GRANT.option === 'search' && JSON.stringify(lark.FEED_GRANT.scopes) === JSON.stringify(['search:message', 'im:message.p2p_msg:get_as_user']) && lark.FEED_GRANT.console === true && lark.adapter.feedGrant === lark.FEED_GRANT, 'the option is declared (on by default, never hidden), and FEED_GRANT names the two scopes, the console step and the option');
   // the gated-call census reads both new calls as the ONE gate (api())
   const src = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf-8');
-  ok(/await api\(`\/im\/v1\/messages\/search\?\$\{q\}`/.test(src) && /await api\(`\/contact\/v3\/users\//.test(src) && !/display_info/.test(src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')), 'the search and the contact lookup go through the ONE gate (api(): token → pace → meter); the code never names `display_info`');
+  ok(/await api\(`\/im\/v1\/messages\/search\?\$\{q\}`/.test(src) && /await api\(`\/contact\/v3\/users\//.test(src) && (() => { const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, ''); const lines = code.split('\n').filter((l) => l.includes('display_info')); return lines.length === 3 && !/display_info\s*(?:\.\s*[A-Za-z_$]|\[)/.test(code) && lines.every((l) => l.includes('Object.keys(it.display_info).filter(nameOk)') || l.includes("typeof it.display_info === 'string'") || l.includes('display_info: ${dispForm}')); })(), 'the search and the contact lookup go through the ONE gate (api(): token → pace → meter); the code names `display_info` only for its sub-field NAMES in the shape line (lane lark-threads B5 — Object.keys, never a value)');
 
   // ═══ ⑬b lane lark-p2p (2026-09-30 — the owner: "我怎么在频道里还是看不到lark私聊？"; production 2.369.198: 241 260 hits
   //      read as malformed, 0 single chats born, 8 043 pages, the card silent). THE ONE READER over the measured shape,
@@ -1564,6 +1617,467 @@ console.log('\n⑬ the change feed: the search page, the declared unit, the desc
     ok(JSON.stringify(rs.slice(0, 5).map((r) => r.fields)) === JSON.stringify([['meta_data.create_time'], ['meta_data.chat_id'], ['meta_data'], ['item'], ['meta_data.create_time']]) && rs[5].ok && rs[5].hit.vendorId === 'om_ok' && rs[5].hit.isP2p === true && ms < 200, `lark-p2p: the ONE reader is bounded before parse (${ms} ms): an over-long time or id, an array for meta_data, a non-object item, a calendar date that does not exist (Feb 30) — each malformed by name; the snippet is never read; the id from \`id\`, the p2p flag from its string`, JSON.stringify(rs.map((r) => r.fields || r.hit)));
   }
   for (const c of copiesCensus(MP.files, MP.dir, REPO, { minCopies: 2, label: 'chan-lark-p2p: ' })) ok(c.pass, c.name, c.pass ? undefined : c.detail);
+}
+
+// ⑮ lane lark-threads (A2 / A4, 2026-10-01 — the owner's post): the two new reads over DOC-SHAPED answers.
+// The vendor's doc (im-v1/message/list): "对于普通对话群中的话题消息，通过 chat 容器类型仅能获取到话题的根消息" and an
+// item's `thread_id` — "不返回说明该消息不是话题形式的消息": a ROOT carries `thread_id` once its topic exists, not before.
+// (im-v1/message/get): `data.items` = the message (+ the children of a merged forward), `thread_id` on a topic message,
+// `root_id` / `parent_id` on a reply. Through the REAL store's place door: a listed root WITH thread_id after a stored
+// key-less copy is patched; a by-id reply is a record and patches its root; `thread_id` absent changes nothing.
+console.log('\n⑮ lane lark-threads: the recent-roots page and the by-id read (doc-shaped)');
+{
+  const S = require(path.join(REPO, 'src/channel-store.js'));
+  const ROOT = scratch('lkt');   // /tmp/vs-lkt-<pid> — this section's own store dirs, removed at exit
+  fs.rmSync(ROOT, { recursive: true, force: true });
+  process.on('exit', () => { try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch {} });
+  const C = 'oc_c20d0141ba9c1d97';
+  const OTHER = 'oc_other_chat_9999';
+  const item = (id, off, { thread = null, root = null, parent = null, chat = C, deleted = false, type = 'text', text = 'x', upper = null } = {}) => ({
+    message_id: id, create_time: String(T0 + off), update_time: String(T0 + off), msg_type: type, chat_id: chat, deleted, updated: false,
+    body: { content: JSON.stringify({ text }) }, sender: { id: 'ou_zin', id_type: 'open_id', sender_type: 'user', tenant_key: '1433ddec23579750' }, mentions: [],
+    ...(thread ? { thread_id: thread } : {}), ...(root ? { root_id: root } : {}), ...(parent ? { parent_id: parent } : {}), ...(upper ? { upper_message_id: upper } : {}),
+  });
+  const BEFORE = [item('om_c', 3000), item('om_post', 2000, { text: 'the post' }), item('om_a', 1000)];   // newest first (ByCreateTimeDesc)
+  const AFTER = [item('om_c', 3000), item('om_post', 2000, { thread: 'omt_193d36', text: 'the post' }), item('om_a', 1000), item('om_x', 500, { chat: OTHER })];
+  const V = { page: AFTER };
+  const calls = [];
+  const fetchFn = async (url, init = {}) => {
+    const u = new URL(String(url));
+    calls.push({ method: init.method || 'GET', path: u.pathname, q: Object.fromEntries(u.searchParams) });
+    if (u.pathname === `/open-apis/im/v1/chats/${C}/members`) return jsonRes({ code: 0, data: { items: [{ member_id_type: 'open_id', member_id: 'ou_zin', name: 'Zin', tenant_key: '1433ddec23579750' }], has_more: false } });
+    if (u.pathname === '/open-apis/im/v1/messages') return jsonRes({ code: 0, data: { items: V.page, has_more: true, page_token: 'pt-more' } });
+    const byId = /^\/open-apis\/im\/v1\/messages\/([^/]+)$/.exec(u.pathname);
+    if (byId) {
+      const id = decodeURIComponent(byId[1]);
+      if (id === 'om_reply') return jsonRes({ code: 0, data: { items: [item('om_reply', 2500, { thread: 'omt_193d36', root: 'om_post', parent: 'om_post', text: 'a reply in the topic' })] } });
+      if (id === 'om_plain') return jsonRes({ code: 0, data: { items: [item('om_plain', 2600)] } });
+      if (id === 'om_gone') return jsonRes({ code: 230110, msg: 'the message was deleted' }, 400);
+      return jsonRes({ code: 230001, msg: 'no such message' }, 400);
+    }
+    return jsonRes({ code: 404, msg: `unrouted ${u.pathname}` }, 404);
+  };
+  const reg = CH.createChannelRegistry(); reg.register(lark.adapter);
+  const tokens = mkTokens();
+  tokens.st.token = { access_token: 'u-access-0001', expiresAt: T0 + 7200e3, refresh_token: 'ur-refresh-0001', refreshExpiresAt: T0 + 2592000e3, scopes: ['im:message', 'im:chat:readonly', 'offline_access'], openId: 'ou_me', name: 'Me' };
+  let paced = 0, metered = 0;
+  const a = reg.create('lark', { id: 'lark', options: {} }, { now: () => T0, fetch: fetchFn, tokens, resolveIntegration: () => CRED, log: { warn() {}, log() {} }, pace: async () => { paced++; }, meter: () => { metered++; } });
+  // A2 — THE RECENT-ROOTS PAGE: ONE chat listing, newest first, a page of 50, NO anchor, NO page token, NO time window
+  calls.length = 0;
+  const rr = await a.recentRoots(C, { limit: 50 });
+  const mc = calls.filter((c) => c.path === '/open-apis/im/v1/messages');
+  ok(mc.length === 1 && mc[0].q.container_id_type === 'chat' && mc[0].q.container_id === C && mc[0].q.sort_type === 'ByCreateTimeDesc' && mc[0].q.page_size === '50' && !('page_token' in mc[0].q) && !('start_time' in mc[0].q) && !('end_time' in mc[0].q) && paced >= 1 && metered >= 1, 'A2 recentRoots: ONE GET im/v1/messages — container_id_type=chat, newest first, page_size 50, no page token / anchor / time window (the vendor says `has_more` — never followed: one page), paced + metered', JSON.stringify(mc.map((c) => c.q)));
+  ok(rr.records.map((r) => r.vendorId).join() === 'om_a,om_post,om_c' && rr.records.find((r) => r.vendorId === 'om_post').threadKey === 'omt_193d36' && !rr.records.some((r) => r.vendorId === 'om_x'), 'A2: oldest first; the root listed WITH its new thread_id carries it; an item naming another chat is never a record of this one', JSON.stringify(rr.records.map((r) => [r.vendorId, r.threadKey])));
+  // THROUGH THE STORE'S PLACE DOOR: the key-less copy stored before the topic existed, then this page
+  const st = S.createChannelStore({ dir: path.join(ROOT, 'lkt-store') });
+  st.appendRecords('lark', C, BEFORE.slice().reverse().map((m) => lark.toRecord('lark', C, m, {})));
+  ok(st.readTail('lark', C, { limit: 10 }).find((r) => r.vendorId === 'om_post').threadKey === null, 'the stored copy (listed before the topic existed) carries no thread');
+  const w = st.widenPlaces('lark', C, rr.records.map((r) => ({ vendorId: r.vendorId, threadKey: r.threadKey, root: r.root || null })), { src: 'recheck' });
+  ok(w.widened.length === 1 && w.widened[0].vendorId === 'om_post' && st.readTail('lark', C, { limit: 10 }).find((r) => r.vendorId === 'om_post').threadKey === 'omt_193d36' && st.readTail('lark', C, { limit: 10 }).find((r) => r.vendorId === 'om_a').threadKey === null, 'a listed root WITH thread_id after a stored key-less copy is PATCHED; the messages whose items carry no thread_id are unchanged', JSON.stringify(w));
+  V.page = BEFORE;
+  const rr2 = await a.recentRoots(C, { limit: 50 });
+  const st2 = S.createChannelStore({ dir: path.join(ROOT, 'lkt-store2') });
+  st2.appendRecords('lark', C, BEFORE.slice().reverse().map((m) => lark.toRecord('lark', C, m, {})));
+  const w2 = st2.widenPlaces('lark', C, rr2.records.map((r) => ({ vendorId: r.vendorId, threadKey: r.threadKey, root: r.root || null })), { src: 'recheck' });
+  ok(w2.widened.length === 0 && st2.readTail('lark', C, { limit: 10 }).every((r) => r.threadKey === null), '`thread_id` absent from every item = nothing widened (a recheck of a chat with no new topic writes nothing)');
+  // A4 — ONE MESSAGE BY ITS ID
+  calls.length = 0;
+  const b1 = await a.messageById(C, { messageId: 'om_reply' });
+  const bc = calls.filter((c) => /^\/open-apis\/im\/v1\/messages\/[^/]+$/.test(c.path));
+  ok(bc.length === 1 && bc[0].method === 'GET' && bc[0].path === '/open-apis/im/v1/messages/om_reply', 'A4 messageById: ONE GET im/v1/messages/:message_id (the user token, through the gate)', JSON.stringify(bc));
+  ok(b1.kind === 'reply' && b1.record && b1.record.vendorId === 'om_reply' && b1.record.threadKey === 'omt_193d36' && b1.record.root === 'om_post' && b1.record.replyTo === 'om_post' && b1.record.convId === C && JSON.stringify(b1.rootPatch) === JSON.stringify({ vendorId: 'om_post', threadKey: 'omt_193d36' }) && b1.threadKey === 'omt_193d36', 'A4: a thread REPLY read by id is a record of its chat (its topic, its root, its parent) + the ROOT\'s patch', JSON.stringify(b1));
+  const st3 = S.createChannelStore({ dir: path.join(ROOT, 'lkt-store3') });
+  st3.appendRecords('lark', C, BEFORE.slice().reverse().map((m) => lark.toRecord('lark', C, m, {})));
+  st3.appendRecords('lark', C, [b1.record]);
+  const w3 = st3.widenPlaces('lark', C, [b1.rootPatch], { src: 'byid' });
+  const ix = require(path.join(REPO, 'src/channel-thread.js'));
+  const recs3 = st3.readTail('lark', C, { limit: 10 });
+  ok(w3.widened.length === 1 && recs3.find((r) => r.vendorId === 'om_post').threadKey === 'omt_193d36' && ix.placeKindOf('om_post', ix.threadIndex(recs3, { convId: C })).kind === 'topic-root', 'A4 through the store: the reply lands, its root is patched and heads its topic', JSON.stringify(w3));
+  const b2 = await a.messageById(C, { messageId: 'om_plain' });
+  ok(b2.kind === 'plain' && b2.record === null && b2.rootPatch === null, 'A4: an answer with no thread_id is `plain` — no record (a message the chat listing does show)', JSON.stringify(b2));
+  let refused = null; try { await a.messageById(C, { messageId: 'om_gone' }); } catch (e) { refused = e; }
+  let missing = null; try { await a.messageById(C, { messageId: 'om_nope' }); } catch (e) { missing = e; }
+  ok(refused && refused.code === 'vendor-error' && missing && missing.code === 'not-found', 'A4: the vendor\'s refusals are typed (230110 deleted, 230001 not found) — the engine counts and remembers them, never retries per tick', JSON.stringify([refused && refused.code, missing && missing.code]));
+  // THE VERDICT TABLE (PURE readByIdAnswer)
+  const R = (items, id = 'om_m') => lark.readByIdAnswer({ items }, { messageId: id, convId: C });
+  const rows = [
+    ['no items', R([]).kind, 'absent'], ['another id', R([item('om_z', 1)]).kind, 'absent'], ['a null data', lark.readByIdAnswer(null, { messageId: 'om_m', convId: C }).kind, 'absent'],
+    ['another chat', R([item('om_m', 1, { chat: OTHER, thread: 'omt_1', root: 'om_r' })]).kind, 'foreign'],
+    ['deleted', R([item('om_m', 1, { deleted: true, thread: 'omt_1' })]).kind, 'deleted'],
+    ['a topic root', JSON.stringify(R([item('om_m', 1, { thread: 'omt_1' })]).rootPatch), JSON.stringify({ vendorId: 'om_m', threadKey: 'omt_1' })],
+    ['a topic reply', R([item('om_m', 1, { thread: 'omt_1', root: 'om_r', parent: 'om_r' })]).kind, 'reply'],
+    ['a quote reply (no thread_id)', R([item('om_m', 1, { root: 'om_r', parent: 'om_r' })]).kind, 'plain'],
+    ['a merged forward: the parent decides', R([item('om_m', 1, { type: 'merge_forward' }), item('om_c1', 1, { upper: 'om_m', thread: 'omt_9' })]).kind, 'plain'],
+    ['a 513-char thread id is no id', R([item('om_m', 1, { thread: 't'.repeat(513) })]).kind, 'plain'],
+    ['the asked item past the 20th', R([...Array.from({ length: 25 }, (_, i) => item('om_k' + i, i)), item('om_m', 1, { thread: 'omt_1' })]).kind, 'absent'],
+  ];
+  for (const [name, got, want] of rows) ok(got === want, `readByIdAnswer: ${name} ⇒ ${want}`, got);
+  ok(JSON.stringify(lark.BYID_KINDS) === JSON.stringify(CH.BY_ID_KINDS), 'the adapter\'s closed set of answers IS the registry\'s (one spelling)');
+  st.close(); st2.close(); st3.close();
+}
+
+// ⑯ lane lark-threads PART B (2026-10-01 — "我在lark里看到的Zin的名字是Susan (Marketing)，你看看哪个接口返回这个了"):
+// WHO IS THIS, over doc-shaped answers. MEASURED (an owner-approved one-off probe): `contact/v3/users/:id` of another
+// person under `contact:user.base:readonly` alone answers 99991679 naming contact:contact.base:readonly — so a sign-in
+// without it sends NO lookup (and the card says so); with it, a person who left the chat (the member list cannot name
+// them) is named, ≤ 3 lookups a page (the unnamed first), the organization's nickname + department carried as `alt`;
+// a refused privilege stops the lookups and is said ONCE; a dissolved chat (232009) is said once and asked again in 24 h;
+// a sender of another organization (tenant_key ≠ the account's own, learned from the member list) is EXTERNAL.
+console.log('\n⑯ lane lark-threads PART B: people named as Lark shows them (doc-shaped)');
+{
+  const Authors = require(path.join(REPO, 'src/channel-authors.js'));
+  const C = 'oc_gtm_eng_0001';
+  const MY_TENANT = 'tn_own_0001', OTHER_TENANT = '1433ddec23579750';
+  const item = (id, off, sender, tenant = MY_TENANT) => ({ message_id: id, create_time: String(T0 + off), msg_type: 'text', chat_id: C, body: { content: JSON.stringify({ text: id }) }, sender: { id: sender, id_type: 'open_id', sender_type: 'user', tenant_key: tenant }, mentions: [] });
+  const PAGE = [item('om_5', 5000, 'ou_zin', OTHER_TENANT), item('om_4', 4000, 'ou_left1'), item('om_3', 3000, 'ou_left2'), item('om_2', 2000, 'ou_left3'), item('om_1', 1000, 'ou_left4'), item('om_0', 500, 'ou_me')];
+  const USERS = { ou_zin: { name: 'Zin', en_name: 'Zin', nickname: 'Susan', job_title: 'GTM lead', department_ids: ['od-mkt'] }, ou_left1: { name: 'Lefty One' }, ou_left2: { name: 'Lefty Two' }, ou_left3: { name: 'Lefty Three' }, ou_left4: { name: 'Lefty Four' } };
+  const V = { refuse: false, dissolved: false };
+  const calls = [];
+  const fetchB = async (url) => {
+    const u = new URL(String(url));
+    calls.push(u.pathname);
+    if (u.pathname === `/open-apis/im/v1/chats/${C}/members`) {
+      if (V.dissolved) return jsonRes({ code: 232009, msg: 'Your request specifies a chat which has already been dissolved.' }, 400);
+      // the member list: the owner (his tenant) and Zin (another organization) — the four who LEFT are not in it
+      return jsonRes({ code: 0, data: { items: [{ member_id_type: 'open_id', member_id: 'ou_me', name: 'Me', tenant_key: MY_TENANT }, { member_id_type: 'open_id', member_id: 'ou_zin', name: 'Zin', tenant_key: OTHER_TENANT }], has_more: false } });
+    }
+    if (u.pathname === '/open-apis/im/v1/messages') return jsonRes({ code: 0, data: { items: PAGE, has_more: false } });
+    const us = /^\/open-apis\/contact\/v3\/users\/([^/]+)$/.exec(u.pathname);
+    if (us) {
+      if (V.refuse) return jsonRes({ code: 99991679, msg: 'Unauthorized. You do not have permission to perform the requested operation on the resource. Please request user re-authorization and try again. required one of these privileges under the user identity: [contact:contact.base:readonly, contact:contact:access_as_app, contact:contact:readonly, contact:contact:readonly_as_app]' }, 400);
+      const x = USERS[decodeURIComponent(us[1])];
+      return x ? jsonRes({ code: 0, data: { user: { open_id: decodeURIComponent(us[1]), ...x } } }) : jsonRes({ code: 41050, msg: 'no user authority' }, 400);
+    }
+    if (u.pathname === '/open-apis/contact/v3/departments/od-mkt') return jsonRes({ code: 0, data: { department: { name: '市场部', i18n_name: { zh_cn: '市场部', en_us: 'Marketing' }, open_department_id: 'od-mkt' } } });
+    return jsonRes({ code: 404, msg: `unrouted ${u.pathname}` }, 404);
+  };
+  const reg = CH.createChannelRegistry(); reg.register(lark.adapter);
+  const warns = [];
+  const mk = (scopes, id, brand = 'lark') => { const tk = mkTokens(); tk.st.token = { access_token: 'u-1', expiresAt: T0 + 7200e3, refresh_token: 'ur-1', refreshExpiresAt: T0 + 2592000e3, scopes, openId: 'ou_me', name: 'Me' }; return reg.create('lark', { id, brand, options: { brand } }, { now: () => T0, fetch: fetchB, tokens: tk, resolveIntegration: () => CRED, log: { warn: (m) => warns.push(String(m)), log() {} }, pace: async () => {}, meter: () => {} }); };
+  for (const k of Object.keys(USERS)) lark.PEOPLE.delete(k);
+  // (1) WITHOUT the measured scope: no lookup is sent, the four who left stay unnamed — the card says why (engine ⑯ / grantsText)
+  calls.length = 0;
+  const a0 = mk([...lark.SCOPES], 'lark-b0');
+  const h0 = await a0.history(C, { limit: 50 });
+  ok(!calls.some((x) => x.startsWith('/open-apis/contact/')) && h0.records.find((r) => r.vendorId === 'om_4').author.name === '', 'B1 (MEASURED): a sign-in without contact:contact.base:readonly sends NO profile lookup (it would be refused 99991679 for everyone) — the authors who left stay unnamed until the account is re-authorized', JSON.stringify(calls));
+  ok(lark.PEOPLE_GRANT.scopes[0] === 'contact:contact.base:readonly' && lark.adapter.peopleGrant === lark.PEOPLE_GRANT, 'the grant names the measured scope (the card\'s "One Re-authorize adds: reading people\'s profiles")');
+  // (2) WITH it: the unnamed first, ≤ 3 per page; Zin's profile carries the nickname + the department (24 h cached)
+  calls.length = 0;
+  const a1 = mk([...lark.SCOPES, lark.PEOPLE_SCOPE, lark.JOB_SCOPE, lark.DEPT_SCOPE], 'lark-b1');
+  const h1 = await a1.history(C, { limit: 50 });
+  const looked = calls.filter((x) => x.startsWith('/open-apis/contact/v3/users/')).map((x) => x.split('/').pop());
+  ok(looked.length === 3 && looked.every((x) => /^ou_left/.test(x)), 'B1: ONE page asks at most 3 profiles, the UNNAMED first (the four who left before Zin, whom the member list names)', JSON.stringify(looked));
+  ok(h1.records.find((r) => r.vendorId === 'om_4').author.name === 'Lefty One' && h1.records.find((r) => r.vendorId === 'om_1').author.name === '', 'B1: a person who LEFT the chat is named by their profile; the fourth waits for the next page (bounded)');
+  calls.length = 0;
+  const h2 = await a1.history(C, { limit: 50 });
+  const looked2 = calls.filter((x) => x.startsWith('/open-apis/contact/')).map((x) => x.split('/').slice(-2).join('/'));
+  const zin = h2.records.find((r) => r.vendorId === 'om_5').author;
+  ok(looked2.includes('users/ou_left4') && looked2.includes('users/ou_zin') && looked2.includes('departments/od-mkt') && !looked2.includes('users/ou_left1'), 'B5: the next page asks the rest (the last unnamed, then the named for their profile — and Zin\'s department once); the ones asked are cached 6 h', JSON.stringify(looked2));
+  ok(zin.name === 'Zin' && zin.alt && zin.alt.nickname === 'Susan' && zin.alt.department === 'Marketing' && zin.alt.jobTitle === 'GTM lead', 'B5: Zin keeps the vendor NAME (the title, the search key); her profile\'s nickname ("Susan"), department ("Marketing", the brand\'s language) and job title ride as `alt`', JSON.stringify(zin));
+  const v = Authors.authorView(zin, { field: 'department' });
+  const vj = Authors.authorView(zin, { field: 'jobTitle' }), vn = Authors.authorView(zin, { field: 'none' }), va = Authors.authorView(zin, { field: 'department', alias: 'Susan from GTM' });
+  ok(v.display === 'Susan (Marketing)' && vj.display === 'Susan (GTM lead)' && vn.display === 'Susan' && va.display === 'Susan from GTM' && v.name === 'Zin', 'B5 THE RENDER (Lark\'s rule): the nickname, then the chosen field in parentheses — "Susan (Marketing)"; job title / none per channels.larkNameField; the owner\'s own name wins over all; the vendor name kept', JSON.stringify([v.display, vj.display, vn.display, va.display]));
+  // (3) B4: Zin's tenant is not the account's (learned from the member list: no call) — EXTERNAL; the owner's colleagues are not
+  ok(zin.external === true && !h2.records.find((r) => r.vendorId === 'om_4').author.external && h2.records.find((r) => r.vendorId === 'om_5').raw.tenant_key === OTHER_TENANT, 'B4: a sender of ANOTHER organization (tenant_key ≠ the account\'s own, learned from the member list — never a new call) is external; the raw keeps the tenant', JSON.stringify(zin));
+  // (4) A REFUSED PRIVILEGE (99991679): the lookups stop and it is said ONCE
+  for (const k of Object.keys(USERS)) lark.PEOPLE.delete(k);
+  V.refuse = true; calls.length = 0; warns.length = 0;
+  const a2 = mk([...lark.SCOPES, lark.PEOPLE_SCOPE], 'lark-b2');
+  await a2.history(C, { limit: 50 }); await a2.history(C, { limit: 50 });
+  const n2 = calls.filter((x) => x.startsWith('/open-apis/contact/')).length;
+  ok(n2 === 1 && warns.filter((w) => /people's profiles cannot be read/.test(w)).length === 1, `B1: a refused privilege (99991679) stops every profile lookup of the account (${n2} sent for two pages) and is said ONCE`, JSON.stringify(warns));
+  // (5) A DISSOLVED CHAT (232009): said once, asked again only after 24 h
+  V.refuse = false; V.dissolved = true; calls.length = 0; warns.length = 0;
+  let clk = T0;
+  const tk3 = mkTokens(); tk3.st.token = { access_token: 'u-1', expiresAt: T0 + 9e9, refresh_token: 'ur-1', refreshExpiresAt: T0 + 9e9, scopes: [...lark.SCOPES], openId: 'ou_me', name: 'Me' };
+  const a3 = reg.create('lark', { id: 'lark-b3', options: {} }, { now: () => clk, fetch: fetchB, tokens: tk3, resolveIntegration: () => CRED, log: { warn: (m) => warns.push(String(m)), log() {} }, pace: async () => {}, meter: () => {} });
+  await a3.history(C, { limit: 50 }); clk += 7 * 3600e3; await a3.history(C, { limit: 50 }); clk += 18 * 3600e3; await a3.history(C, { limit: 50 });
+  const mem = calls.filter((x) => x.endsWith('/members')).length;
+  ok(mem === 2 && warns.filter((w) => /dissolved/.test(w)).length === 1, `B1: a DISSOLVED chat (232009) is said ONCE and its members asked again only after 24 h (${mem} member lookups over 25 h, three pages)`, JSON.stringify(warns));
+  V.dissolved = false;
+  // (7) verify r1 F3: a vendor RATE refusal (429) / a transport blip on a profile read is the vendor's moment, not the
+  //     person's — the page sends ONE read (the account's lookups pause for the vendor's hint, else a minute), the id is NOT
+  //     remembered as a failure (it used to be, for 6 h, while the page went on asking the next two into the same 429), and
+  //     after the pause the same ids are asked again; the same for a department read
+  for (const k of Object.keys(USERS)) lark.PEOPLE.delete(k);
+  lark.DEPTS.delete('od-mkt');
+  {
+    V.refuse = false; V.dissolved = false;
+    let clk7 = T0;
+    const V7 = { mode: 'ok' };
+    const fetch7 = async (url) => { const u = new URL(String(url)); if (/^\/open-apis\/contact\/v3\//.test(u.pathname) && V7.mode !== 'ok') { calls.push(u.pathname); if (V7.mode === 'net') throw new Error('ECONNRESET'); return jsonRes({ code: 99991400, msg: 'request trigger frequency limit' }, 429); } return fetchB(url); };
+    const tk7 = mkTokens(); tk7.st.token = { access_token: 'u-1', expiresAt: T0 + 9e9, refresh_token: 'ur-1', refreshExpiresAt: T0 + 9e9, scopes: [...lark.SCOPES, lark.PEOPLE_SCOPE, lark.JOB_SCOPE, lark.DEPT_SCOPE], openId: 'ou_me', name: 'Me' };
+    const a7 = reg.create('lark', { id: 'lark-b7', brand: 'lark', options: { brand: 'lark' } }, { now: () => clk7, fetch: fetch7, tokens: tk7, resolveIntegration: () => CRED, log: { warn: (m) => warns.push(String(m)), log() {} }, pace: async () => {}, meter: () => {} });
+    const sent = () => calls.filter((x) => x.startsWith('/open-apis/contact/')).map((x) => x.split('/').slice(-2).join('/'));
+    V7.mode = '429'; calls.length = 0;
+    const e7 = await threw(() => a7.history(C, { limit: 50 }));   // verify r2 F1: the page's read THROWS the 429 (the account's ladder)
+    const s1 = sent();
+    const remembered = s1.map((x) => x.split('/')[1]).filter((id) => lark.PEOPLE.has(id));
+    calls.length = 0; clk7 += 30e3;   // inside the pause (no hint on a bare 429 ⇒ a minute): the vendor still refusing, no lookup is sent, the page lands
+    const h2in = await a7.history(C, { limit: 50 });
+    const s2 = sent();
+    V7.mode = 'ok'; calls.length = 0; clk7 += 31e3;   // past it, the vendor fine
+    await a7.history(C, { limit: 50 });
+    const s3 = sent();
+    ok(e7 && e7.code === 'rate-limited' && s1.length === 1 && remembered.length === 0 && h2in.records.length === 6 && s2.length === 0 && s3.length === 3 && s3.includes(s1[0]), `F3 (+ r2 F1): a 429 on a profile read: ONE read sent on that page (${JSON.stringify(s1)}) and the page's read throws rate-limited (the account's ladder), the person not remembered as a failure, nothing sent inside the pause (the page lands), the same id asked again after it (${JSON.stringify(s3)})`, JSON.stringify({ code: e7 && e7.code, s1, remembered, s2, s3 }));
+    // a transport blip: the same shape; a department read's 429: the department is not remembered for a day
+    for (const k of Object.keys(USERS)) lark.PEOPLE.delete(k);
+    V7.mode = 'net'; calls.length = 0; clk7 += 7 * 3600e3;
+    await a7.history(C, { limit: 50 });
+    const n1 = sent();
+    const n1Remembered = n1.length ? lark.PEOPLE.has(n1[0].split('/')[1]) : true;
+    V7.mode = 'ok'; calls.length = 0; clk7 += 61e3;
+    await a7.history(C, { limit: 50 });
+    ok(n1.length === 1 && !n1Remembered && sent().includes(n1[0]), `F3: ECONNRESET on a profile read — one read, not remembered, asked again after the pause`, JSON.stringify({ n1, n1Remembered, after: sent() }));
+    // a 429 on the DEPARTMENT read (the profile answered): the department is asked again after the pause, never a day later
+    for (const k of Object.keys(USERS)) lark.PEOPLE.delete(k); lark.DEPTS.delete('od-mkt');
+    const V8 = { dept: '429' };
+    const fetch8 = async (url) => { const u = new URL(String(url)); if (u.pathname === '/open-apis/contact/v3/departments/od-mkt' && V8.dept === '429') { calls.push(u.pathname); return jsonRes({ code: 99991400, msg: 'request trigger frequency limit' }, 429); } return fetchB(url); };
+    const tk8 = mkTokens(); tk8.st.token = { ...tk7.st.token };
+    const a8 = reg.create('lark', { id: 'lark-b8', brand: 'lark', options: { brand: 'lark' } }, { now: () => clk7, fetch: fetch8, tokens: tk8, resolveIntegration: () => CRED, log: { warn() {}, log() {} }, pace: async () => {}, meter: () => {} });
+    clk7 += 7 * 3600e3; calls.length = 0;
+    await a8.history(C, { limit: 50 });
+    const e8 = await threw(() => a8.history(C, { limit: 50 }));   // the second page reaches Zin (her profile names od-mkt): the department's 429 is thrown (r2 F1)
+    const d1 = calls.filter((x) => x.endsWith('/departments/od-mkt')).length;
+    const notRemembered = !lark.DEPTS.has('od-mkt');
+    V8.dept = 'ok'; calls.length = 0; clk7 += 61e3;
+    await a8.history(C, { limit: 50 });
+    const zin8 = (await a8.history(C, { limit: 50 })).records.find((r) => r.vendorId === 'om_5').author;
+    ok(e8 && e8.code === 'rate-limited' && d1 === 1 && notRemembered && zin8.alt && zin8.alt.department === 'Marketing', `F3 (+ r2 F1): a 429 on the department read throws rate-limited and is not remembered for a day — Zin's department is named after the pause`, JSON.stringify({ code: e8 && e8.code, d1, notRemembered, alt: zin8.alt }));
+  }
+  // (8) verify r2 F1 (the vendor-budget class): a 429 INSIDE a page read — on the members page, a profile or a department
+  //     read — is the READ's 429: history() throws rate-limited carrying the vendor's hint (the pass's ladder honours it, up to
+  //     15 min, and stops every shape); the chat / the person / the department are NOT remembered as refused; the people
+  //     lookups pause for the hint; a members 429 sends NO profile read after it. It used to resolve ok (the pass went on at
+  //     pace), send three profile reads into the vendor's stop, remember the chat refused 6 h, and re-ask a 3600 s hint every 5 min.
+  {
+    for (const k of Object.keys(USERS)) lark.PEOPLE.delete(k); lark.DEPTS.delete('od-mkt');
+    let clk9 = T0 + 30 * 3600e3;
+    const V9 = { members: false, users: false, dept: false };
+    const rl = () => ({ ...jsonRes({ code: 99991400, msg: 'request trigger frequency limit' }, 429), headers: { get: (k) => (String(k).toLowerCase() === 'x-ogw-ratelimit-reset' ? '120' : null) } });
+    const fetch9 = async (url) => { const u = new URL(String(url)); if (V9.members && u.pathname.endsWith('/members')) { calls.push(u.pathname); return rl(); } if (V9.users && /^\/open-apis\/contact\/v3\/users\//.test(u.pathname)) { calls.push(u.pathname); return rl(); } if (V9.dept && u.pathname === '/open-apis/contact/v3/departments/od-mkt') { calls.push(u.pathname); return rl(); } return fetchB(url); };
+    const mk9 = (modL, id) => { const reg9 = CH.createChannelRegistry(); reg9.register(modL.adapter); const tk = mkTokens(); tk.st.token = { access_token: 'u-1', expiresAt: T0 + 9e9, refresh_token: 'ur-1', refreshExpiresAt: T0 + 9e9, scopes: [...lark.SCOPES, lark.PEOPLE_SCOPE, lark.JOB_SCOPE, lark.DEPT_SCOPE], openId: 'ou_me', name: 'Me' }; return reg9.create('lark', { id, brand: 'lark', options: { brand: 'lark' } }, { now: () => clk9, fetch: fetch9, tokens: tk, resolveIntegration: () => CRED, log: { warn() {}, log() {} }, pace: async () => {}, meter: () => {} }); };
+    const profileReads = () => calls.filter((x) => x.startsWith('/open-apis/contact/v3/users/')).length;
+    // (a) the MEMBERS page 429s
+    const a9 = mk9(lark, 'lark-b9');
+    V9.members = true; calls.length = 0;
+    const eM = await threw(() => a9.history(C, { limit: 50 }));
+    const afterM = { threw: eM && eM.code, hint: eM && eM.detail && eM.detail.retryAfterSec, members: calls.filter((x) => x.endsWith('/members')).length, profiles: profileReads() };
+    V9.members = false; calls.length = 0; clk9 += 121e3;
+    const hM = await a9.history(C, { limit: 50 });
+    ok(afterM.threw === 'rate-limited' && afterM.hint === 120 && afterM.members === 1 && afterM.profiles === 0 && calls.filter((x) => x.endsWith('/members')).length === 1 && hM.records.length === 6, `F1 r2: a 429 on the MEMBERS page throws rate-limited with the vendor's hint (120 s) — the page's profile reads are NOT sent into the stop (${afterM.profiles}), the chat is not remembered refused (asked again after the hint), the page then lands`, JSON.stringify({ afterM, again: calls.filter((x) => x.endsWith('/members')).length }));
+    // (b) a PROFILE read 429s
+    for (const k of Object.keys(USERS)) lark.PEOPLE.delete(k);
+    V9.users = true; calls.length = 0;
+    const eU = await threw(() => a9.history(C, { limit: 50 }));
+    const sentU = calls.filter((x) => x.startsWith('/open-apis/contact/v3/users/')).map((x) => x.split('/').pop());
+    const remU = sentU.filter((id) => lark.PEOPLE.has(id));
+    V9.users = false; calls.length = 0; clk9 += 60e3;   // inside the hint: the people lookups pause, the page lands with no profile read
+    const hIn = await a9.history(C, { limit: 50 });
+    const insideU = profileReads();
+    calls.length = 0; clk9 += 61e3;   // past it: the same id asked again
+    await a9.history(C, { limit: 50 });
+    const againU = calls.filter((x) => x.startsWith('/open-apis/contact/v3/users/')).map((x) => x.split('/').pop());
+    ok(eU && eU.code === 'rate-limited' && eU.detail.retryAfterSec === 120 && sentU.length === 1 && remU.length === 0 && hIn.records.length === 6 && insideU === 0 && againU.includes(sentU[0]), `F1 r2: a 429 on a PROFILE read throws rate-limited (hint 120 s): ONE read sent, the person not remembered, the page inside the pause lands with 0 profile reads, the same id asked again past it`, JSON.stringify({ code: eU && eU.code, sentU, remU, insideU, againU }));
+    // (c) the DEPARTMENT read 429s (Zin's profile answered, her department refused)
+    for (const k of Object.keys(USERS)) lark.PEOPLE.delete(k); lark.DEPTS.delete('od-mkt');
+    clk9 += 7 * 3600e3;
+    await a9.history(C, { limit: 50 });   // the unnamed four first (3 per page)
+    V9.dept = true; calls.length = 0;
+    const eD = await threw(() => a9.history(C, { limit: 50 }));   // the second page reaches Zin: her profile, then od-mkt ⇒ 429
+    const deptSent = calls.filter((x) => x.endsWith('/departments/od-mkt')).length;
+    V9.dept = false; clk9 += 121e3; calls.length = 0;
+    await a9.history(C, { limit: 50 });
+    const zin9 = (await a9.history(C, { limit: 50 })).records.find((r) => r.vendorId === 'om_5').author;
+    ok(eD && eD.code === 'rate-limited' && deptSent === 1 && !lark.DEPTS.has('od-mkt') === false && zin9.alt && zin9.alt.department === 'Marketing', `F1 r2: a 429 on the DEPARTMENT read throws rate-limited; the department is not remembered for a day — named after the hint`, JSON.stringify({ code: eD && eD.code, deptSent, dept: lark.DEPTS.get('od-mkt') && lark.DEPTS.get('od-mkt').name }));
+    // CONTROL: a patched copy with the three rethrows removed (the r1 shape) resolves ok under a members 429 and sends the
+    // page's profile reads into the vendor's stop — every assertion above would be red on it
+    const M9b = mutantCopies('chan-lark-r2-rate', REPO);
+    const srcR = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf-8');
+    const THROWS = ["      if (e instanceof ChannelError && e.code === 'rate-limited') { peopleRefusedUntil = Math.max(peopleRefusedUntil, now() + peoplePauseMs(e)); throw e; }\n", "        if (e.code === 'rate-limited') throw e;\n", "if (e.code === 'rate-limited') throw e; return c ? c.name : null; }"];
+    ok(THROWS.every((x) => srcR.split(x).length === 2), 'F1 r2 CONTROL setup: the three rethrows are each present once');
+    const pre = srcR.replace(THROWS[0], '').replace(THROWS[1], '').replace(THROWS[2], 'return c ? c.name : null; }');
+    const modPre = M9b.load('src/channels/lark.js', pre, 'pre-r2-rate');
+    for (const k of Object.keys(USERS)) lark.PEOPLE.delete(k); for (const k of Object.keys(USERS)) modPre.PEOPLE.delete(k);
+    const aPre = mk9(modPre, 'lark-b9pre');
+    V9.members = true; calls.length = 0; clk9 += 7 * 3600e3;
+    const ePre = await threw(() => aPre.history(C, { limit: 50 }));
+    ok(pre !== srcR && ePre === null && profileReads() === 3, `CONTROL: the copy without the rethrows resolves the page ok under a members 429 and sends ${profileReads()} profile reads into the vendor's stop — RED under the fix`, JSON.stringify({ threw: ePre && ePre.code, profiles: profileReads() }));
+    V9.members = false;
+    for (const c of copiesCensus(M9b.files, M9b.dir, REPO, { minCopies: 1 })) ok(c.pass, c.name, c.detail);
+  }
+  // (6) THE PROFILE READER is bounded before parse
+  const big = lark.readPersonAnswer({ user: { name: 'n'.repeat(64 * 1024), nickname: '<b>x</b>', department_ids: Array.from({ length: 50 }, (_, i) => 'od-' + i).concat(['x'.repeat(500)]) } });
+  ok(big.name.length <= 200 && big.nickname === 'x' && big.deptIds.length === 5 && lark.readPersonAnswer(null) === null && lark.readPersonAnswer({ user: [] }).name === '', 'readPersonAnswer: every string through the name door (≤ 200, markup read), ≤ 5 department ids (bounded), junk answers no person', JSON.stringify({ n: big.name.length, nick: big.nickname, d: big.deptIds.length }));
+  // B2 (docs, 2026-10-01): the chat members API does not list bots ("该接口不会返回群组内的机器人成员"; member_id_type
+  // open_id | user_id | union_id — no app_id) — a bot is named only by the application API; a nameless one reads "Bot <last 4>"
+  ok(lark.recordView({ vendorId: 'm', author: { id: 'cli_a5ed0d009', name: 'app', isBot: true }, raw: {} }).author.name === 'Bot d009', 'B2: a stored bot called "app" is never served as "app" (recordView, the read door)');
+}
+
+// ── ⑰ lane lark-threads verify r3 — THE 429 CLASS CLOSED BY CONSTRUCTION (2026-10-01): r1 F1 and r2 F1 were the same class twice —
+//    a vendor's RATE refusal answered somewhere the account's ladder never saw. ONE response judge (callJson → typedFailure)
+//    + a CATCH CENSUS over this file and src/channels/live/lark.js (scripts/vendor-response-census.mjs): every raw send is
+//    judged, every catch over a vendor call re-throws a RATE refusal / ends by re-throwing / is a RATE_OK row; three planted
+//    copies (a bare send, a swallowing catch, a judge that maps 429 to ok) are red. Then the two escapes this round found:
+//    the PUSH path (one members read per pushed message into the stop) and the owner's reconcile (a swallowed scan 429 + a
+//    re-issue send into the stop), each with a patched-copy control.
+console.log('\n⑰ verify r3: one response judge, the catch census, the push path, the reconcile');
+{
+  const { responseCensus, censusLine } = await import('./vendor-response-census.mjs');
+  const src = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf-8');
+  const LL = require(path.join(REPO, 'src/channels/live/lark.js'));
+  const liveSrc = fs.readFileSync(path.join(REPO, 'src/channels/live/lark.js'), 'utf-8');
+  const OPT = () => ({ direct: /\b(?:api|callJson|fetchFn)\s*\(/, raw: /\bfetchFn\s*\(/g, rateOkIds: new Set(lark.RATE_OK.map((r) => r.id)) });
+  const c = responseCensus(src, OPT());
+  console.log('    response census (lark.js): ' + censusLine(c));
+  const cls = (cc, k) => cc.sites.filter((s) => `${s.kind}:${s.cls}` === k).length;
+  ok(c.problems.length === 0 && cls(c, 'catch:RED') === 0, `every raw send is judged and every catch over a vendor call re-throws a RATE refusal, ends by re-throwing, or is a RATE_OK row (${c.sites.length} sites)`, c.problems.join(' ; '));
+  ok(cls(c, 'raw:judge') === 1 && cls(c, 'raw:judged-inline') === 1 && cls(c, 'raw:unjudged') === 0, 'raw sends: exactly the judge\'s own (callJson) and the resource bytes (typedFailure right after) — nothing else touches fetch');
+  ok(c.sites.filter((s) => s.cls === 'rate-ok').map((s) => s.id).sort().join() === 'consent-user-info,integration-test,push-names' && Object.isFrozen(lark.RATE_OK) && lark.RATE_OK.every((r) => typeof r.why === 'string' && r.why.length > 40), 'the deliberate swallows are exactly {push-names, consent-user-info, integration-test}, each a frozen row with its reason');
+  ok(cls(c, 'catch:rethrows-rate') >= 7 && cls(c, 'catch:ends-throw') >= 5 && cls(c, 'catch:raw-fetch') === 2, `the rate re-throws (${cls(c, 'catch:rethrows-rate')}: the members page, a profile, a department, the app name, the chat lookup, the reconcile's scan and re-issue), the end-throws (${cls(c, 'catch:ends-throw')}), the two raw-fetch catches`);
+  const cl = responseCensus(liveSrc, { direct: /\b(?:api|callJson|fetchFn|f)\s*\(/, raw: /\b(?:fetchFn|f)\s*\(/g, rateOkIds: new Set() });
+  ok(cl.problems.length === 0 && cl.sites.length >= 3 && cl.sites.every((s) => s.cls === 'no-vendor') && Array.isArray(LL.EGRESS) && LL.EGRESS.length === 0, `live/lark.js constructs no request (EGRESS empty) and none of its ${cl.sites.length} catches sits over a vendor call — the push path's only vendor touch is the adapter's names, judged there`);
+  // THE JUDGE TABLE: every refusal shape the class names → the typed error the pass's ladder reads
+  const hdr = (o) => ({ get: (k) => (o[k.toLowerCase()] == null ? null : String(o[k.toLowerCase()])) });
+  const J = (status, body, h) => lark.typedFailure(status, body, 'x', CH.retryAfterSeconds(hdr(h || {})));
+  const t1 = J(429, { code: 99991400, msg: 'request trigger frequency limit' }, { 'x-ogw-ratelimit-reset': '52' });
+  const t2 = J(429, { code: 99991403, msg: 'request trigger frequency limit' }, { 'retry-after': '7' });
+  const t3 = J(200, { code: 99991400, msg: 'freq' });
+  const t4 = J(503, { code: 500, msg: 'busy' }, { 'retry-after': '3' });
+  const t5 = J(502, null);
+  ok(t1.code === 'rate-limited' && t1.retryable === true && t1.detail.retryAfterSec === 52 && /the app-level limit/.test(t1.message), 'JUDGE 429 + 99991400 + x-ogw-ratelimit-reset ⇒ rate-limited, retryable, the hint, the words name the APP-level limit');
+  ok(t2.code === 'rate-limited' && t2.detail.retryAfterSec === 7 && /the user-level limit/.test(t2.message), 'JUDGE 429 + 99991403 + Retry-After ⇒ rate-limited with the hint; the words name the USER-level limit (T2 ⑤: unmeasured on the recorded fixtures — the account parks either way, the card says which limit answered)');
+  ok(t3.code === 'rate-limited' && t3.detail.retryAfterSec === null && J(401, { code: 99991663 }).code === 'auth-expired' && J(403, { code: 99991672 }).code === 'forbidden' && J(404, { code: 230001 }).code === 'not-found', 'JUDGE the legacy 200 + 99991400 (no hint) ⇒ rate-limited; 401 / 403 / 404 keep their codes');
+  ok(t4.code === 'transport' && t4.retryable === true && t4.detail.retryAfterSec === 3 && t5.code === 'transport' && !('retryAfterSec' in t5.detail), 'JUDGE a 5xx is transport (retryable); its Retry-After rides the detail (the failure ladder waits at least that long); none given ⇒ no key');
+  // the same judge from the wire: an adapter over a fetch that answers 429 / throws — through history(), the pass's own door
+  const mkA = (fetchFn, mod = lark) => { const tok = { st: { token: { access_token: 'at', expiresAt: now() + 3600e3, refresh_token: 'rt', refreshExpiresAt: now() + 86400e3, scopes: ['im:chat:readonly', 'im:message:readonly', 'im:message', 'im:message.send_as_user', 'im:chat.members:read'], openId: 'ou_me', tenantKey: 'tk1' } }, read() { return { token: tok.st.token, why: null }; }, async write(t) { tok.st.token = t; }, async clear() { tok.st.token = null; } }; return mod.create({ id: 'lark', brand: 'feishu' }, { now, fetch: fetchFn, tokens: tok, resolveIntegration: () => ({ values: { appId: 'cli_x', appSecret: 'sec' }, why: null }), log: { warn() {}, log() {} } }); };
+  const res429 = (h = { 'x-ogw-ratelimit-reset': '45' }) => ({ ok: false, status: 429, headers: hdr(h), json: async () => ({ code: 99991400, msg: 'request trigger frequency limit' }) });
+  const eNet = await threw(() => mkA(async () => { throw new Error('ECONNRESET'); }).history('oc_1', { limit: 5 }));
+  const e429 = await threw(() => mkA(async () => res429()).history('oc_1', { limit: 5 }));
+  ok(eNet && eNet.code === 'transport' && eNet.retryable === true && e429 && e429.code === 'rate-limited' && e429.detail.retryAfterSec === 45, 'FROM THE WIRE: a fetch that throws ⇒ transport (retryable); a 429 page ⇒ rate-limited with the vendor\'s hint — the ONE judge, through the pass\'s own door');
+
+  // THE PLANTED CONTROLS (patched copies in scratch, scripts/mutant-copy.mjs): the census reads their TEXT, the third is judged by behaviour
+  const M17 = mutantCopies('chan-lark-r3', REPO);
+  const anchorApi = '  const api = async (pathq, opts = {}) => {';
+  const anchorMembers = "const d = await api(`/im/v1/chats/${encodeURIComponent(convId)}/members?${p}`, { what: 'lark chat members' });";
+  const anchorJudge = 'if (!r.ok || !parsed || (parsed.code !== undefined && Number(parsed.code) !== 0)) throw typedFailure(r.status, withoutSent(parsed, sent), what, retryAfterSeconds(r.headers));';
+  ok(src.includes(anchorApi) && src.includes(anchorMembers) && src.includes(anchorJudge), 'CONTROL anchors: the gate, the members page, the judge line are in the file');
+  const bare = src.replace(anchorApi, anchorApi + "\n    if (opts.probe) { const z = await fetchFn('https://example.invalid/probe', {}); if (!z.ok) return null; }");
+  M17.write('src/channels/lark.js', bare, 'bare-send');
+  const cb = responseCensus(bare, OPT());
+  ok(bare !== src && cb.problems.some((p) => /raw send whose answer no judge reads/.test(p)) && cls(cb, 'raw:unjudged') === 1, 'CONTROL ①: a bare fetch outside the judge (its answer read by nobody) is RED', cb.problems.join(' ; '));
+  const swallow = src.replace(anchorMembers, "let d; try { d = await api(`/im/v1/chats/${encodeURIComponent(convId)}/members?${p}`, { what: 'lark chat members' }); } catch (e) { d = { data: { items: [] } }; }");
+  M17.write('src/channels/lark.js', swallow, 'swallowing-catch');
+  const cs = responseCensus(swallow, OPT());
+  ok(swallow !== src && cs.problems.some((p) => /can swallow a rate refusal/.test(p)) && cls(cs, 'catch:RED') === 1, 'CONTROL ②: a try/catch around a vendor call that swallows (no re-throw, no row) is RED', cs.problems.join(' ; '));
+  const mapsOk = src.replace(anchorJudge, 'if (r.status !== 429 && (!r.ok || !parsed || (parsed.code !== undefined && Number(parsed.code) !== 0))) throw typedFailure(r.status, withoutSent(parsed, sent), what, retryAfterSeconds(r.headers));');
+  const modOk = M17.load('src/channels/lark.js', mapsOk, 'judge-maps-429-ok');
+  const eOk = await threw(() => mkA(async () => res429(), modOk).history('oc_1', { limit: 5 }));
+  ok(mapsOk !== src && eOk === null && e429 && e429.code === 'rate-limited', 'CONTROL ③: a judge that maps a 429 to ok (history() resolves on a refused page) is RED by behaviour — the real judge throws rate-limited');
+
+  // THE PUSH PATH (r3 L1): a members-page 429 on the push path used to be ONE members read per pushed message into the vendor's
+  // stop (six messages = six refused reads, six warn lines, the hint never honoured) — now one read, then the path's lookups
+  // pause for the vendor's hint (≤ 5 min) and the records carry the cached names; the next lookup goes out after the hint
+  const pushRun = async (mod, { hint = 60, pauseSec = 60 } = {}) => {   // verify r4 T2 ①: the hint and the pause it must say
+    const calls = []; const warns = [];
+    const fetchFn = async (url) => { const u = new URL(String(url)); calls.push(u.pathname); return /\/members$/.test(u.pathname) ? res429({ 'x-ogw-ratelimit-reset': String(hint) }) : { ok: true, status: 200, headers: hdr({}), json: async () => ({ code: 0, data: {} }) }; };
+    const instances = [];
+    const larkSdk = { Domain: { Feishu: 'f', Lark: 'l' }, LoggerLevel: { error: 0 }, WSClient: class { constructor(o) { this.opts = o; instances.push(this); } async start({ eventDispatcher }) { this.dispatcher = eventDispatcher; } close() {} }, EventDispatcher: class { constructor() { this.handles = new Map(); } register(map) { for (const [k, v] of Object.entries(map)) this.handles.set(k, v); return this; } } };
+    const tok = { st: { token: { access_token: 'at', expiresAt: now() + 3600e3, refresh_token: 'rt', refreshExpiresAt: now() + 86400e3, scopes: ['im:chat:readonly', 'im:message:readonly', 'im:chat.members:read'], openId: 'ou_me', tenantKey: 'tk1' } }, read() { return { token: tok.st.token, why: null }; }, async write(t) { tok.st.token = t; }, async clear() {} };
+    const a = mod.create({ id: 'lark', brand: 'feishu' }, { now, fetch: fetchFn, tokens: tok, resolveIntegration: () => ({ values: { appId: 'cli_x', appSecret: 'sec' }, why: null }), larkSdk, log: { warn: (m) => warns.push(String(m)), log() {} } });
+    const events = [];
+    const lane = a.live.start({ onEvent: async (ev) => { events.push(ev); return { ok: true }; }, onState() {} });
+    for (let i = 0; i < 50 && !instances[0]?.dispatcher; i++) await sleep(5);
+    const h = instances[0].dispatcher.handles.get(LL.EVENT);
+    const ev = (i) => ({ header: { event_id: `e${i}` }, event: { message: { message_id: `om_${i}`, chat_id: 'oc_push', create_time: String(now() - 1000), message_type: 'text', content: JSON.stringify({ text: `hi ${i}` }) }, sender: { sender_id: { open_id: 'ou_a' }, sender_type: 'user' } } });
+    const t0 = clock;
+    for (let i = 1; i <= 6; i++) { await h(ev(i)); clock += 5000; }   // six pushed messages over 30 s, inside the 60 s hint
+    const inside = calls.filter((p) => /\/members$/.test(p)).length; const warnsInside = warns.length;
+    clock = t0 + pauseSec * 1000 + 1000; await h(ev(7));             // the hint has passed: the next pushed message looks up again
+    const after = calls.filter((p) => /\/members$/.test(p)).length;
+    lane.stop(); clock = t0;
+    return { persisted: events.length, inside, after, warnsInside, warns: warns.length, said: warns.length > 0 && warns.every((w) => new RegExp(`no lookup on the push path for ${pauseSec} s`).test(w)) };
+  };
+  const pr = await pushRun(lark);
+  ok(pr.persisted === 7 && pr.inside === 1 && pr.after === 2 && pr.warnsInside === 1 && pr.warns === 2 && pr.said, `PUSH PATH: six pushed messages under a members 429 ⇒ every record persisted (bare ids), ONE members read then none inside the vendor's 60 s hint, ONE warn line naming the pause; the lookup resumes after the hint (refused again ⇒ one more read, one more pause said) (${JSON.stringify(pr)})`);
+  const anchorPause = '      if (now() >= pushNamesPausedUntil) {';
+  ok(src.includes(anchorPause), 'CONTROL anchor: the push path\'s pause gate is in the file');
+  const modNoPause = M17.load('src/channels/lark.js', src.replace(anchorPause, '      if (true) {'), 'push-no-pause');
+  const pc = await pushRun(modNoPause);
+  ok(pc.inside === 6 && pc.warnsInside >= 6, `CONTROL: the pre-r3 push path (no pause) sends one members read per pushed message into the stop (${pc.inside} of 6, a warn line each) — RED`);
+
+  // THE OWNER'S RECONCILE (r3 L2): the scan's 429 was swallowed into \`unknown\` and the re-issue send went out INTO the stop (two
+  // calls per press, the ladder blind); now the scan's refusal is thrown (the account's), nothing is re-issued
+  const recRun = async (mod) => { const calls = []; const a = mkA(async (url, init = {}) => { const u = new URL(String(url)); calls.push(`${init.method || 'GET'} ${u.pathname.replace('/open-apis', '')}`); return res429(); }, mod); const e = await threw(() => a.reconcile('oc_1', { idemKey: 'p-1', sentAt: now() - 5000, text: 'hello', as: 'user' })); return { code: e && e.code, calls }; };
+  const rr = await recRun(lark);
+  ok(rr.code === 'rate-limited' && rr.calls.length === 1 && rr.calls[0] === 'GET /im/v1/messages', `RECONCILE under a 429: the scan's refusal is thrown as rate-limited, NO re-issue send (${JSON.stringify(rr.calls)})`);
+  const anchorScan = "      } catch (e) { if (e instanceof ChannelError && e.code === 'rate-limited') throw e; scanErr = e; }";
+  ok(src.includes(anchorScan), 'CONTROL anchor: the scan\'s re-throw is in the file');
+  const anchorReissue = "          if (e instanceof ChannelError && e.code === 'rate-limited') throw e;   // verify r3: the re-issue's own 429 is the account's too\n";
+  ok(src.includes(anchorReissue), 'CONTROL anchor: the re-issue\'s re-throw is in the file');
+  const preScan = src.replace(anchorScan, '      } catch (e) { scanErr = e; }').replace(anchorReissue, '');
+  const modPre = M17.load('src/channels/lark.js', preScan, 'reconcile-swallow');
+  const rc = await recRun(modPre);
+  const cpre = responseCensus(preScan, OPT());
+  ok(rc.code === null && rc.calls.length === 2 && rc.calls[1] === 'POST /im/v1/messages' && cpre.problems.some((p) => /can swallow a rate refusal/.test(p)), `CONTROL: the pre-r3 reconcile swallows the scan's 429 and POSTs a re-issue into the stop (${JSON.stringify(rc.calls)}) — RED by behaviour AND by the census`);
+  // ── verify r4 — THE INJECTION TABLE'S FINDS (2026-10-01): every census site driven by BEHAVIOUR with five vendor shapes (a 429 + Retry-After,
+  //    99991400, 99991403, a 5xx + Retry-After, ECONNRESET) through the real adapter and the real engine; these are what it found here ──
+  // r4 F1 (MED): a token refresh the vendor answered 200 WITHOUT an access_token was stored as `access_token: ''` and re-entered
+  // accessToken() for ever — one refresh POST per loop, unbounded (the pass never ended; both adapters). Now: a typed vendor-error
+  // (detail.noAccessToken), nothing stored, ONE POST; and the superseded-refresh re-read is bounded to one re-entry.
+  {
+    const run = async (mod) => {
+      const calls = [];
+      const tok = { st: { token: { access_token: 'at', expiresAt: now() - 1, refresh_token: 'rt', refreshExpiresAt: now() + 86400e3, scopes: [...lark.SCOPES], openId: 'ou_me', tenantKey: 'tk1' } }, read() { return { token: tok.st.token, why: null }; }, async write(t) { tok.st.token = t; }, async clear() {} };
+      const a = mod.create({ id: 'lark', brand: 'feishu' }, { now, fetch: async (url) => { const u = new URL(String(url)); calls.push(u.pathname); if (calls.length > 12) throw new Error('STOP-SPIN (the fixture bounds what the copy does not)'); return jsonRes({ code: 0, expires_in: 7200 }); }, tokens: tok, resolveIntegration: () => CRED, log: { warn() {}, log() {} } });
+      const e = await threw(() => a.history('oc_1', { limit: 5 }));
+      return { code: e && e.code, noToken: !!(e && e.detail && e.detail.noAccessToken), posts: calls.filter((p) => /oauth\/token$/.test(p)).length, stored: tok.st.token && tok.st.token.access_token };
+    };
+    const f1 = await run(lark);
+    ok(f1.code === 'vendor-error' && f1.noToken && f1.posts === 1 && f1.stored === 'at', `r4 F1: a refresh answered without access_token ⇒ vendor-error (noAccessToken), ONE refresh POST, the stored token untouched (${JSON.stringify(f1)})`);
+    const aGuard = "    if (!d || typeof d.access_token !== 'string' || !d.access_token) throw new ChannelError('vendor-error', `lark token refresh: the vendor's answer carried no access_token";
+    const aGot = '    if (got) return got;\n';
+    const aDepth = "    if (depth >= 1) throw new ChannelError('vendor-error', `lark: the token refresh did not yield a usable access token (re-entered after a superseded refresh) — re-authorize if it persists`, { retryable: true, detail: { refreshLoop: true } });\n    return accessToken(depth + 1);";
+    ok(src.split('\n').some((l) => l.startsWith(aGuard)) && src.includes(aGot) && src.includes(aDepth), 'r4 F1 CONTROL anchors: the answer guard and the bounded re-entry are in the file');
+    const pre = src.split('\n').filter((l) => !l.startsWith(aGuard)).join('\n').replace(aGot, '').replace(aDepth, '    return got || accessToken();');
+    const c1 = await run(M17.load('src/channels/lark.js', pre, 'refresh-loop'));
+    ok(pre !== src && c1.posts >= 12, `r4 F1 CONTROL: the copy without the guard re-enters for ever — ${c1.posts} refresh POSTs before the fixture stopped it (RED)`);
+  }
+  // r4 F4 (LOW): a members-page 5xx / network blip was remembered as the CHAT's refusal for MEMBERS_TTL_MS (6 h of authors named by
+  // profile reads, the page's chat never re-asked) — it is the VENDOR's moment: asked again after its hint (else a minute, at most five)
+  {
+    const run = async (mod) => {
+      let refuse = true; const calls = [];
+      const item = { message_id: 'om_1', chat_id: 'oc_1', create_time: String(now() - 60e3), msg_type: 'text', body: { content: JSON.stringify({ text: 'hi' }) }, sender: { id: 'ou_a', sender_type: 'user' } };
+      const a = mkA(async (url) => { const u = new URL(String(url)); const p = u.pathname.replace('/open-apis', ''); calls.push(p);
+        if (p === '/im/v1/chats/oc_1/members') return refuse ? jsonRes({ code: 500, msg: 'busy' }, 503) : jsonRes({ code: 0, data: { items: [{ member_id: 'ou_a', name: 'Ada' }], has_more: false } });
+        if (p === '/im/v1/messages') return jsonRes({ code: 0, data: { items: [item], has_more: false } });
+        return jsonRes({ code: 0, data: { items: [], has_more: false } }); }, mod);
+      const r1 = await a.history('oc_1', { limit: 50 });
+      const first = calls.filter((p) => /members$/.test(p)).length;
+      refuse = false; const t0 = clock; clock += 2 * 60e3; calls.length = 0;
+      const r2 = await a.history('oc_1', { limit: 50 });
+      const again = calls.filter((p) => /members$/.test(p)).length; clock = t0;
+      return { first, bare: r1.records[0].author.name || null, again, named: r2.records[0].author.name || null };
+    };
+    const f4 = await run(lark);
+    ok(f4.first === 1 && f4.bare === null && f4.again === 1 && f4.named === 'Ada', `r4 F4: a 503 on the members page leaves the author bare for the vendor's moment (a minute) and the chat is asked again two minutes later — named (${JSON.stringify(f4)})`);
+    const aUntil = "      if (e instanceof ChannelError && e.code === 'transport') until = now() + peoplePauseMs(e);\n";
+    ok(src.includes(aUntil), 'r4 F4 CONTROL anchor: the transient memo line is in the file');
+    const c4 = await run(M17.load('src/channels/lark.js', src.replace(aUntil, ''), 'members-blip-6h'));
+    ok(c4.first === 1 && c4.again === 0 && c4.named === null, `r4 F4 CONTROL: the copy remembers the blip as the chat's refusal — not asked again two minutes later, the author still bare (RED)`);
+  }
+  // r4 T2 ① (LOW): the push path's pause honoured a 3600 s hint for 5 min only — twelve refused reads an hour into the stop, a warn line
+  // each, none on the pass's ladder; now the vendor's hint up to the engine's own 15-min cap
+  {
+    const p2 = await pushRun(lark, { hint: 3600, pauseSec: 900 });
+    ok(p2.persisted === 7 && p2.inside === 1 && p2.after === 2 && p2.said, `T2 ①: a 3600 s hint pauses the push path's lookups 900 s (the engine's cap), every record persisted meanwhile (${JSON.stringify(p2)})`);
+    const aCap = '  const PUSH_PAUSE_MAX_MS = 15 * 60e3;';
+    ok(src.includes(aCap), 'T2 ① CONTROL anchor: the push pause cap is in the file');
+    const c2 = await pushRun(M17.load('src/channels/lark.js', src.replace(aCap, '  const PUSH_PAUSE_MAX_MS = 5 * 60e3;'), 'push-pause-5min'), { hint: 3600, pauseSec: 900 });
+    ok(c2.said === false, 'T2 ① CONTROL: the 5-min cap says "for 300 s" and asks again inside the hint (RED)');
+  }
+  for (const x of copiesCensus(M17.files, M17.dir, REPO, { minCopies: 8, label: '⑰ ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

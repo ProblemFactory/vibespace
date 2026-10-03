@@ -160,7 +160,7 @@ console.log('§5 officeRowFor — the facts matrix');
 
 console.log('§6 the closed install set + packageInstallPlan');
 {
-  ok(same(O.INSTALL_WHATS, O.OFFICE_ROW_IDS) && same(M.INSTALL_WHATS, ['xpra', ...O.OFFICE_ROW_IDS]), 'the install set: xpra + one per LibreOffice row');
+  ok(same(O.INSTALL_WHATS, [...O.OFFICE_ROW_IDS, O.FONTS_ID]) && same(M.INSTALL_WHATS, ['xpra', ...O.OFFICE_ROW_IDS, O.FONTS_ID]), 'the install set: xpra + one per LibreOffice row + the faces alone (B-04da ②)');
   ok(O.installSpecFor('rm -rf /') === null && O.installSpecFor('libreoffice-writer; reboot') === null && O.installSpecFor('xpra') === null, 'anything outside the closed set ⇒ no spec (a request never names a package)');
   const f = { platform: 'linux', apt: '/usr/bin/apt-get', sudo: true, distro: 'ubuntu', codename: 'resolute', prettyName: 'Ubuntu 26.04' };
   const p = M.installPlanFor('libreoffice-writer', f);
@@ -392,6 +392,31 @@ console.log('§13 verify-r6 I1 — the install runs the plan the dialog showed, 
     const lines = (await rr.text()).trim().split('\n').map((l) => JSON.parse(l));
     ok(seenD[0] === 'd1' && lines.at(-1).code === 'plan_changed' && lines.at(-1).digest === 'd2' && lines.at(-1).plan.source === 'xpra.org', 'I1: the route hands the shown digest to the access layer and streams plan_changed WITH the new plan and digest', lines.at(-1));
   } finally { sv.close(); }
+}
+
+// ── B-04da: ending a session without losing an edit (④), the Start Center (⑤), the faces alone (②) ──
+console.log('B-04da');
+{
+  const prof = '/srv/vs/data/desktop-apps/da-x/my profile';
+  ok(same(O.officeQuitArgv(prof), ['-env:UserInstallation=file:///srv/vs/data/desktop-apps/da-x/my%20profile', '.uno:Quit']), '④ the quit hand-over = the session\'s OWN profile (the pipe the running LibreOffice listens on) + .uno:Quit (File ▸ Exit — its save prompt)', O.officeQuitArgv(prof));
+  ok(O.officeQuitArgv(null) === null && O.officeQuitArgv('relative/p') === null, '④ no absolute profile ⇒ no hand-over (null — the caller refuses by name, never signals)');
+  const sc = (o) => O.startCenterVerdict(o);
+  ok(sc({ office: 'writer', file: '/d/a.docx', classInstance: ['libreoffice', 'libreoffice-startcenter'] }).end === true, '⑤ a FILE session whose main window is the Start Center ends');
+  ok(sc({ office: 'writer', file: '/d/a.docx', classInstance: ['libreoffice', 'libreoffice-writer'] }).why === 'document' && sc({ office: 'any', file: null, classInstance: ['libreoffice', 'libreoffice-startcenter'] }).why === 'no-file' && sc({ office: null, file: '/d/a.docx', classInstance: ['libreoffice', 'libreoffice-startcenter'] }).why === 'not-office' && sc({ office: 'writer', file: '/d/a.docx', classInstance: null }).end === false, '⑤ CONTROLS: the document window, the generic row\'s own Start Center, a non-office app, no class ⇒ nothing ends');
+  const row = O.OFFICE_ROWS.find((r) => r.office === 'writer');
+  const facts = (fonts) => ({ exec: 'libreoffice', path: '/usr/bin/libreoffice', program: '/usr/lib/libreoffice/program', confinement: null, modules: { writer: true, calc: false, impress: false }, fonts });
+  const r1 = O.officeRowFor(row, facts({ Carlito: false, Caladea: false }));
+  ok(r1.available && same(r1.fontsMissing, ['Carlito', 'Caladea']) && r1.fontRemedy && r1.fontRemedy.what === O.FONTS_ID && same(r1.fontRemedy.packages, ['fonts-crosextra-carlito', 'fonts-crosextra-caladea']), '② LibreOffice present WITHOUT the faces ⇒ the row stays available and names them, the remedy installs the faces alone', r1);
+  const r2 = O.officeRowFor(row, facts({ Carlito: true, Caladea: true })), r3 = O.officeRowFor(row, facts(null)), r4 = O.officeRowFor(row, facts({ Carlito: true, Caladea: false }));
+  ok(same(r2.fontsMissing, []) && r2.fontRemedy === null && same(r3.fontsMissing, []) && same(r4.fontsMissing, ['Caladea']), '② CONTROLS: both faces ⇒ nothing said; not knowable (a snap, an old agent) ⇒ nothing said; one missing ⇒ that one', [r2.fontsMissing, r3.fontsMissing, r4.fontsMissing]);
+  const spec = O.installSpecFor(O.FONTS_ID);
+  ok(spec && same(spec.packages, ['fonts-crosextra-carlito', 'fonts-crosextra-caladea']) && O.INSTALL_WHATS.includes(O.FONTS_ID) && M.INSTALL_WHATS.includes(O.FONTS_ID), '② the faces alone are ONE closed install (installSpecFor, INSTALL_WHATS)', spec);
+  const plan = M.installPlanFor(O.FONTS_ID, { platform: 'linux', apt: true, sudo: true });
+  ok(plan.ok && /apt-get .*install -y fonts-crosextra-carlito fonts-crosextra-caladea/.test(plan.script), '② …its plan is apt over exactly those two packages', plan.script);
+  const reg = [{ id: 'xterm', available: true }, ...O.OFFICE_ROWS.map((r) => O.officeRowFor(r, facts({ Carlito: false, Caladea: true })))];
+  const v = O.openWithVerdict({ file: '/home/u/a.docx', machine: { hostId: 'local', registry: reg } });
+  const v2 = O.openWithVerdict({ file: '/home/u/a.docx', machine: { hostId: 'local', registry: [{ id: 'xterm', available: true }, ...O.OFFICE_ROWS.map((r) => O.officeRowFor(r, facts({ Carlito: true, Caladea: true })))] } });
+  ok(v.ok && same(v.fontsMissing, ['Carlito']) && v.fontRemedy && v.fontRemedy.what === O.FONTS_ID && v2.ok && v2.fontsMissing === undefined, '② the open-with verdict opens AND names the missing face (the menu offers it); with both faces it says nothing', [v, v2]);
 }
 
 for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 11 })) ok(r.pass, '§tree ' + r.name + (r.pass ? '' : ' — ' + r.detail));

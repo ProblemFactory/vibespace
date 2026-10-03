@@ -241,6 +241,57 @@ try {
   ok(await until(() => okNotifs.some((n) => n.text.includes('done')), 15000), '--notify-ok cron child SUCCESS notifies (quiet-success is default, not law)');
   const okChild = [...C.jobs.values()].find((x) => x.cronParent === jo1.id);
   ok(C.events.some((e) => e.jobId === okChild.id && /done/.test(e.what)), 'notify-ok success also emits the event (panel + injection see it)');
+  // B-644d (2026-10-02, jb-ab77fd67): `vibespace-job run … --at … --notify-ok` — the CLI embeds notifyOk in the
+  // cron's spawn-task (the child inherits it: the leg above), but the cron PARENT's record said notifyOk=false, so
+  // `show` printed notifyOk=false and the create line said successful fires are SILENT. The parent's snapshot is what
+  // its fires do: the embedded task's notifyOk.
+  ok(C.snapshot(jo1).notifyOk === true, 'B-644d: a --notify-ok cron PARENT shows notifyOk=true (its fires notify)', JSON.stringify({ parent: C.snapshot(jo1).notifyOk }));
+  ok(C.snapshot(j4).notifyOk === false, 'B-644d: a cron without --notify-ok shows notifyOk=false');
+  {
+    const http = await import('node:http');
+    const { execFile } = await import('node:child_process');
+    let sent = null, answer = null;
+    const srv = http.createServer((req, res) => { let b = ''; req.on('data', (c) => { b += c; }); req.on('end', () => { try { sent = JSON.parse(b); } catch { sent = null; } res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(answer)); }); });
+    await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    const cli = (args) => new Promise((resolve) => execFile(process.execPath, [new URL('../data/bin/vibespace-job', import.meta.url).pathname, ...args], { env: { ...process.env, VIBESPACE_API: `http://127.0.0.1:${srv.address().port}`, VIBESPACE_SESSION_TOKEN: 'vsst_test' }, timeout: 15000 }, (err, so, se) => resolve({ code: err ? (err.code ?? 1) : 0, out: String(so) + String(se) })));
+    // the answer is the REAL engine's create through snapshot (what the route returns), for the body the CLI sent
+    const viaEngine = () => { const r = C.create({ ...sent, owner }, caller); return { success: true, job: C.snapshot(C.jobs.get(r.job.id)) }; };
+    answer = { success: true, job: { id: 'jb-x', kind: 'cron', name: 'x', nextFireAt: Date.now() + 3600e3 } };
+    await cli(['run', 'sh ./check.sh', '--name', 'day-check', '--at', '+2h', '--notify-ok']);
+    ok(sent && sent.action && sent.action.task && sent.action.task.notifyOk === true, 'B-644d: the CLI sends --notify-ok inside the --at spawn-task', JSON.stringify(sent && sent.action));
+    answer = viaEngine();
+    ok(answer.job.notifyOk === true, 'B-644d: the engine stores + answers notifyOk=true for that exact body', JSON.stringify({ notifyOk: answer.job.notifyOk }));
+    const c1 = await cli(['run', 'sh ./check.sh', '--name', 'day-check', '--at', '+2h', '--notify-ok']);
+    ok(/per-fire notify: ON/.test(c1.out) && !/SUCCESSFUL fires are SILENT/.test(c1.out), 'B-644d: the create line says every fire notifies — never "add --notify-ok"', c1.out);
+    await cli(['run', 'sh ./check.sh', '--name', 'day-check', '--at', '+2h']);
+    answer = viaEngine();
+    const c2 = await cli(['run', 'sh ./check.sh', '--name', 'day-check', '--at', '+2h']);
+    ok(answer.job.notifyOk === false && /SUCCESSFUL fires are SILENT/.test(c2.out) && !/per-fire notify: ON/.test(c2.out), 'B-644d: without --notify-ok the line still says successful fires are silent', c2.out);
+    // verify r1 (N2): with auto-notify OFF (Settings / the group / the job's own --notify off) no fire messages anyone —
+    // the per-fire line must say so, never "every fire messages this conversation"
+    for (const source of ['global', 'job']) {
+      answer = { success: true, job: { id: 'jb-y', kind: 'cron', name: 'y', notifyOk: true, nextFireAt: Date.now() + 3600e3 }, notify: { enabled: false, mode: 'off', source, reason: `auto-notify is OFF at the ${source} level` } };
+      const c3 = await cli(['run', 'sh ./check.sh', '--name', 'day-check', '--at', '+2h', '--notify-ok', ...(source === 'job' ? ['--notify', 'off'] : [])]);
+      ok(!/every fire messages this conversation/.test(c3.out) && /NO fire will message this conversation/.test(c3.out) && (source !== 'job' || /vibespace-job notify jb-y on/.test(c3.out)), `B-644d r1: --notify-ok with auto-notify OFF (${source}) — the line says no fire will message, never "every fire messages"`, c3.out);
+    }
+    srv.close();
+  }
+  // verify r1 (N3): a schedule's own --notify off is its FIRES' switch — the child is built from the spawn-task and never
+  // carried the override, so it fell through to the global default and messaged the conversation the line called OFF
+  {
+    C._notifyRate.clear(); okNotifs.length = 0;
+    const roff = C.create({ kind: 'cron', name: 'quiet-off', notify: 'off', schedule: { at: Date.now() + 3600e3 }, action: { type: 'spawn-task', task: { cmd: { argv: ['sh', '-c', 'exit 0'] }, notifyOk: true } }, owner }, caller);
+    const joff = C.jobs.get(roff.job.id);
+    joff.schedule = { everyMs: 3600e3 }; joff.nextFireAt = Date.now() - 1000;
+    await C._cronTick();
+    const fired = await until(() => [...C.jobs.values()].some((x) => x.cronParent === joff.id && x.state === 'done'), 15000);
+    await sleep(800);
+    ok(fired && C.notifyPreview(joff).enabled === false && !okNotifs.some((n) => n.text.includes('quiet-off')), 'B-644d r1: a --notify-ok schedule made with --notify off — its fire messages nobody (the child follows its parent\'s switch)', JSON.stringify(okNotifs.map((n) => n.text.slice(0, 80))));
+    C.jobs.get(joff.id).notify = 'on'; C._notifyRate.clear(); okNotifs.length = 0;
+    joff.nextFireAt = Date.now() - 1000;
+    await C._cronTick();
+    ok(await until(() => okNotifs.some((n) => n.text.includes('quiet-off')), 15000), 'B-644d r1: …and `vibespace-job notify <cron> on` turns its fires back on (the switch is read at fire time)');
+  }
   C._notifyRate.clear(); okNotifs.length = 0;
   const annSub = { conversationId: 'conv-ANN', sessionId: 's', sessionCreatedAt: 3, groups: new Set(['T-g']) };
   C.subscribe(jo1, annSub);
@@ -292,6 +343,93 @@ try {
   // 9. rm --stop on terminal + cleanup
   ok(C.rm(j2, {}).ok, 'rm on a terminal task succeeds');
   C.shutdown();
+
+  // 10. B-f8c7 census (lane job-vendor-ban): EVERY command a job can run passes the ONE vet — a planted vendor command in
+  //     each shape never runs. Offline: each command only appends to a marker file; the vendor host rides as a shell
+  //     comment. Its own dataDir (engines A and C still flush theirs on a timer).
+  const bdir = path.join(dir, 'ban');
+  fs.mkdirSync(path.join(bdir, 'bin'), { recursive: true });
+  fs.copyFileSync(new URL('../data/bin/job-wrapper.js', import.meta.url), path.join(bdir, 'bin', 'job-wrapper.js'));
+  const bdeps = { ...deps, dataDir: bdir };
+  const MARK = path.join(bdir, 'VENDOR-RAN'), CLEAN = path.join(bdir, 'CLEAN-RAN');
+  const vend = (tag) => ({ argv: ['sh', '-c', `echo ${tag} >> ${MARK} # jq .t ~/.claude/.credentials.json`] });
+  const ran = () => { try { return fs.readFileSync(MARK, 'utf-8').trim(); } catch { return ''; } };
+  const D = new JobManager(bdeps); D.init();
+  // (a) create: the CLI's scheduled shapes carry the command ONLY in action.task — refused for an agent AND the owner
+  for (const [who, cl] of [['agent', caller], ['owner', { isUser: true, groups: new Set() }]]) {
+    for (const schedule of [{ cron: '7 * * * *' }, { at: Date.now() + 3600e3 }, { everyMs: 3600e3 }]) {
+      const r = D.create({ kind: 'cron', name: `vend-${who}`, schedule, action: { type: 'spawn-task', task: { cmd: vend('create') } }, owner }, cl);
+      ok(/vendor\/credential/.test(r.error || '') && D.jobs.size === 0, `census: ${who} scheduling (${Object.keys(schedule)[0]}) the vendor command in action.task.cmd is refused, no record`, r.error || `CREATED ${r.job && r.job.id}`);
+    }
+  }
+  // control: the harness sees a run — the CLEAN twin of the same scheduled shape fires and writes its marker
+  const rcl = D.create({ kind: 'cron', name: 'clean-twin', schedule: { everyMs: 3600e3 }, action: { type: 'spawn-task', task: { cmd: { argv: ['sh', '-c', `echo ok >> ${CLEAN}`] } } }, owner }, caller);
+  D.jobs.get(rcl.job.id).nextFireAt = Date.now() - 1000;
+  await D._cronTick();
+  ok(await until(() => fs.existsSync(CLEAN), 15000), 'census control: the clean twin of the scheduled shape fires and runs');
+  // (b) a scheduled record persisted BEFORE the census widened (an older engine stored it): its fire refuses, the timer parks
+  const legacy = { id: 'jb-legacy-cron', kind: 'cron', name: 'legacy-vendor-timer', schedule: { everyMs: 3600e3 }, catchUp: 'once', action: { type: 'spawn-task', task: { cmd: vend('cron-fire') } }, owner, access: { view: 'group', control: 'session' }, desiredUp: true, state: 'scheduled', supervise: { consecutiveFails: 0, parkedAt: null }, runs: [], createdAt: Date.now(), nextFireAt: Date.now() - 1000 };
+  D.jobs.set(legacy.id, legacy);
+  await D._cronTick();
+  await sleep(1500);
+  const lkid = [...D.jobs.values()].find((x) => x.cronParent === legacy.id);
+  ok(!ran() && legacy.state === 'failed' && legacy.desiredUp === false && legacy.nextFireAt == null && lkid && lkid.state === 'failed' && !(lkid.runs || []).length, "census: a pre-census record's cron fire never runs its vendor child — child and timer park", `ran=${ran()} state=${legacy.state} up=${legacy.desiredUp} kid=${lkid && lkid.state}`);
+  const refusals = D.events.filter((e) => /refused to run/.test(e.what || '')).length;
+  legacy.nextFireAt = Date.now() - 1000;
+  await D._cronTick();
+  ok(D.events.filter((e) => /refused to run/.test(e.what || '')).length === refusals && !ran(), 'census: a parked timer does not re-fire (no refusal flood)');
+  // (c) an EDIT of an existing job (no edit verb exists today — this is the record any future one would leave): start refuses
+  const red = D.create({ kind: 'task', name: 'edit-me', cmd: { argv: ['sh', '-c', 'exit 0'] }, owner }, caller);
+  const jed = D.jobs.get(red.job.id);
+  await until(() => jed.state === 'done', 15000);
+  const runsBefore = jed.runs.length;
+  jed.cmd = vend('edit');
+  const rst = D.start(jed);
+  await sleep(800);
+  ok(/vendor\/credential/.test(rst.error || '') && jed.runs.length === runsBefore && !ran() && jed.state === 'failed', 'census: start of an edited job now carrying the vendor command refuses — no run', JSON.stringify(rst));
+  // (c2) start on a LIVE job whose stored command now matches answers "already running" — the live process is never
+  //      re-judged into 'failed' (it would drop out of the sweep's tracking)
+  const rlv = D.create({ kind: 'task', name: 'live-edit', cmd: { argv: ['sh', '-c', 'sleep 30'] }, owner }, caller);
+  const jlv = D.jobs.get(rlv.job.id);
+  await until(() => D._verifyAlive(D._readStamp(jlv)), 15000);
+  jlv.cmd = vend('live');
+  const rlvs = D.start(jlv);
+  ok(/already running/.test(rlvs.error || '') && jlv.state === 'up' && jlv.desiredUp === true, 'census: start on a LIVE job is "already running" — never parked under a live process', `${JSON.stringify(rlvs)} state=${jlv.state}`);
+  D.stop(jlv, { force: true });
+  await until(() => ['interrupted', 'failed'].includes(jlv.state), 15000);
+  // (d) keep-up restart: the supervisor re-spawns the STORED record — refused at the door, the service parks
+  const svc = { id: 'jb-legacy-svc', kind: 'service', name: 'legacy-vendor-svc', cmd: vend('restart'), owner, access: { view: 'group', control: 'session' }, restart: 'always', desiredUp: true, state: 'down', supervise: { consecutiveFails: 0, parkedAt: null }, runs: [], createdAt: Date.now() };
+  D.jobs.set(svc.id, svc);
+  let threw = null;
+  try { D._spawn(svc, 'restart-policy'); } catch (e) { threw = e.message; }
+  await sleep(800);
+  ok(/vendor\/credential/.test(threw || '') && !ran() && svc.state === 'failed' && svc.desiredUp === false && !svc.runs.length, 'census: a keep-up restart of a vendor service is refused at the door and parks', `threw=${threw} state=${svc.state}`);
+  // (e) boot replay: a desiredUp service persisted pre-census is NOT respawned by the next engine generation
+  D.jobs.set('jb-legacy-svc2', { ...svc, id: 'jb-legacy-svc2', name: 'legacy-vendor-svc2', cmd: vend('boot'), desiredUp: true, state: 'down', supervise: { consecutiveFails: 0, parkedAt: null }, runs: [] });
+  D._save();
+  for (const t of D._timers) clearInterval(t);
+  D.shutdown();
+  const E = new JobManager(bdeps); E.init();
+  await sleep(1500);
+  const es2 = E.jobs.get('jb-legacy-svc2');
+  ok(E.ready && !E.readOnly && !ran() && es2 && es2.state === 'failed' && es2.desiredUp === false && !(es2.runs || []).length, 'census: boot replay of a pre-census vendor service refuses — nothing runs', `ran=${ran()} state=${es2 && es2.state}`);
+  // (f) verify r3 (owner decision 2026-10-03): ONLY an obvious read of a subscription sign-in is refused. An agent's --every
+  //     reading codex's login file is refused at create; an agent's --every of an API call with its own key, of `claude -p` and
+  //     of `codex exec` is CREATED and FIRES (r1/r2's host and timer rules refused each).
+  const cred = E.create({ kind: 'cron', name: 'r3-cred', schedule: { everyMs: 1800e3 }, action: { type: 'spawn-task', task: { cmd: { argv: ['sh', '-c', `echo cred >> ${MARK} # jq . ~/.codex/auth.json`] } } }, owner }, caller);
+  ok(cred.error && cred.error.includes('vendor/credential pattern (.codex/auth.json)') && ![...E.jobs.values()].some((j) => j.name === 'r3-cred'), "r3: an agent's --every reading ~/.codex/auth.json is refused at create, named in words", cred.error || 'CREATED');
+  const PASS = path.join(bdir, 'R3-PASS');
+  const tags = { key: 'curl -s https://api.anthropic.com/v1/messages -H "x-api-key: $ANTHROPIC_API_KEY"', print: 'claude -p "summarize the log"', codex: 'codex exec "summarize"' };
+  for (const [tag, shape] of Object.entries(tags)) {
+    const r = E.create({ kind: 'cron', name: `r3-${tag}`, schedule: { everyMs: 1800e3 }, action: { type: 'spawn-task', task: { cmd: { argv: ['sh', '-c', `echo ${tag} >> ${PASS} # ${shape}`] } } }, owner }, caller);
+    ok(!r.error, `r3 pass leg: an agent's --every of ${tag} is created`, r.error);
+    if (!r.error) E.jobs.get(r.job.id).nextFireAt = Date.now() - 1000;
+  }
+  await E._cronTick();
+  const passed = () => (fs.existsSync(PASS) ? fs.readFileSync(PASS, 'utf8') : '');
+  ok(await until(() => Object.keys(tags).every((t) => passed().includes(t)), 15000), 'r3 pass leg: each of them FIRES at the tick', passed() || 'never ran');
+  for (const t of E._timers) clearInterval(t);
+  E.shutdown();
 } finally {
   try { const all = JSON.parse(fs.readFileSync(path.join(dir, 'jobs.json'), 'utf-8')); } catch { }
   try { for (const d of fs.readdirSync(path.join(dir, 'job-logs'))) { } } catch { }

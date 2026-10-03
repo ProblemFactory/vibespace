@@ -1,6 +1,6 @@
 // Manage-Agents dialog + Anthropic/ChatGPT account rosters (mixin split from app.js, 2.82.0 audit seam). Methods run with the App instance as `this`.
 import { UI_ICONS } from './icons.js';
-import { receiptLine, offLine } from './cli-config-chips.js';
+import { receiptLine, offLine, refusalLine, recoveredLine } from './cli-config-chips.js';
 // THE CLI-CONFIG CHIPS on a machine row (design-harness-settings §4.4): one
 // line per managed key from the server's FRESH read (local /api/agent-hooks
 // cliConfig, remote agent-tools cliConfig) — the same wording as the Settings
@@ -9,6 +9,8 @@ import { receiptLine, offLine } from './cli-config-chips.js';
 function cliConfigChipsHtml(cc, { where, remote = false }) {
   if (!cc) return '';
   const lines = [];
+  if (cc.refused) lines.push(refusalLine(cc.refused, { t, remote })); // the root verdict first: this server writes nothing here
+  else if (cc.registeredAfterError) lines.push(recoveredLine(cc.registeredAfterError, { t })); // verify r2 ①: registered after an earlier read error
   for (const r of cc.receipts || []) {
     if (r.state === 'unknown' && !r.key) { lines.push(receiptLine(r, { t, where, remote })); continue; }
     lines.push(receiptLine(r, { t, where, remote, lastWriteAt: cc.lastWrite && (cc.lastWrite.receipts || []).some((x) => x.key === r.key && x.harness === r.harness) ? cc.lastWrite.at : null }));
@@ -184,6 +186,22 @@ export function retickNextLabels(root, now = Date.now()) {
   for (const list of root.querySelectorAll('.acct-list')) markSoonRows(list, now);
 }
 const NEXT_TICK_MS = 30 * 1000;
+
+/** THE MACHINE LOGIN AND A NAMED ACCOUNT OF THE SAME IDENTITY ARE TWO SIGN-INS
+ *  (B-ce1c, PURE: the words only, exported for the gate). One account ⇒ one
+ *  quota, so the usage views merge them, but the credentials are two files:
+ *  the CLI's own (~/.claude, ~/.codex) and the account's copy in VibeSpace.
+ *  Each one expires and is renewed on its own. Owner, 2026-09-07: the row read
+ *  "= “Personal Max”" while Personal Max's copy had expired five days earlier
+ *  and only the machine login was alive. The refresh token ROTATES (the CLI
+ *  stores the one each refresh returns), so the two can never be one file
+ *  copied twice. Callers escape both strings. */
+export function machineLoginLinkHint(name, vendor = 'Anthropic') {
+  return {
+    label: t('same account as “{name}” · a separate sign-in', { name }),
+    tip: t('This machine’s CLI login and “{name}” are the same {vendor} account — one quota, usage shown merged — but two separate sign-ins: each expires and is renewed on its own, and signing in one does not sign in the other.', { name, vendor }),
+  };
+}
 
 /** WHICH SNAPSHOT A ROSTER USAGE CELL SHOWS, resolved from the stamp the render
  *  left on it (PURE, exported for the gate). `maps` = the usage meter's tables:
@@ -1213,7 +1231,7 @@ export function installManageAgents(App, ctx = {}) {
     // The machine's codex login may BE one of the named ChatGPT accounts (same
     // email) — say so; their quota buckets are then merged newest-wins.
     const linkedCx = !selectedHost && gLoggedIn && cgl.accountId ? codexAccts.find(a => a.id === cgl.accountId) : null;
-    if (linkedCx) gIdent += ` <span class="acct-linked-hint" title="${escHtml(t('The machine login and this VibeSpace account are the same ChatGPT account — usage is shown merged'))}">${t('= “{name}”', { name: escHtml(linkedCx.name) })}</span>`;
+    if (linkedCx) { const h = machineLoginLinkHint(linkedCx.name, 'ChatGPT'); gIdent += ` <span class="acct-linked-hint" title="${escHtml(h.tip)}">${escHtml(h.label)}</span>`; }
     // Host actions live in a ⋯ menu (2.245.2 — same [★][⋯] actions width on
     // every row keeps the right-anchored donut column aligned; see the
     // Anthropic roster's note).
@@ -1694,6 +1712,14 @@ export function installManageAgents(App, ctx = {}) {
               + `<div class="agents-note">${t('Sessions run the pristine CLI: no hooks, no injected context, no agent tools. Re-enable it in Settings to restore Task Group context.')}</div>`;
             row.append(left);
             body.appendChild(row);
+          } else if (hs.refused) {
+            // THE ROOT VERDICT (src/server-root.js): a worktree / temp server
+            // registers nothing — say why, offer no Install/Remove (the route
+            // refuses by name), never a ✓ read off the owner's own file.
+            left.innerHTML = `<b>${t('VibeSpace integration')}</b><div><span class="ob-warn">${escHtml(refusalLine(hs.refused, { t }).text)}</span></div>`
+              + cliConfigChipsHtml({ ...hs.cliConfig, refused: null }, { where: t('this machine') });
+            row.append(left);
+            body.appendChild(row);
           } else {
             left.innerHTML = `<b>${t('VibeSpace integration')}</b><div>${stateOf('claude', 'Claude')} &nbsp; ${stateOf('codex', 'Codex')}</div>`
               + cliConfigChipsHtml(hs.cliConfig, { where: t('this machine') })
@@ -1794,7 +1820,7 @@ export function installManageAgents(App, ctx = {}) {
             : `<div class="agents-note">${t('Reporting tools, the Task Group context hook, and the session keeper live under ~/.vibespace on the host. Creating a remote session re-installs them automatically.')}</div>`;
           left.innerHTML = `<b>${t('VibeSpace integration on {host}', { host: escHtml(hostName) })}</b>`
             + `<div title="${escHtml(perTool)}">${toolsHtml} &nbsp; ${hookHtml}${extras.length ? ' &nbsp; ' + extras.join(' &nbsp; ') : ''}</div>`
-            + cliConfigChipsHtml({ receipts: rs.cliConfig || [] }, { where: hostName, remote: true })
+            + cliConfigChipsHtml({ receipts: rs.cliConfig || [], refused: rs.refused || null }, { where: hostName, remote: true })
             + noteHtml;
           const actions = document.createElement('div'); actions.className = 'agent-actions';
           const allGood = presentN === names.length && !outdatedN;
@@ -2280,11 +2306,12 @@ export function installManageAgents(App, ctx = {}) {
         ? escHtml((gEmail || '') + (sub.plan ? (gEmail ? ' · ' : '') + sub.plan : '')) || t('logged in')
         : `<span class="ob-warn">${acct.cliKey?.present ? t('not logged in (a Console login replaced it)') : t('not logged in')}</span>`;
       // The machine's login may BE one of the named accounts (same email) —
-      // say so, since their rows then show the same (merged) usage.
+      // say so, since their rows then show the same (merged) usage, and say
+      // that it is a SEPARATE sign-in (B-ce1c: machineLoginLinkHint).
       const linkedSub = sub.loggedIn && gEmail
         ? claudeAccts.find(a => a.type === 'subscription' && a.email && a.email.toLowerCase() === String(gEmail).toLowerCase())
         : null;
-      if (linkedSub) gIdent += ` <span class="acct-linked-hint" title="${escHtml(t('The machine login and this VibeSpace account are the same Anthropic account — usage is shown merged'))}">${t('= “{name}”', { name: escHtml(linkedSub.name) })}</span>`;
+      if (linkedSub) { const h = machineLoginLinkHint(linkedSub.name); gIdent += ` <span class="acct-linked-hint" title="${escHtml(h.tip)}">${escHtml(h.label)}</span>`; }
     }
     const globalRow = `<div class="acct-key-row${gDef ? ' is-default' : ''}" data-id="__global__">
       <span class="acct-type-icon" title="${selectedHost ? t("This machine's own login — lives on {host}, not in VibeSpace", { host: escHtml(hostLabel) }) : t('The CLI’s own global login on this machine')}">${GLOBE}</span>

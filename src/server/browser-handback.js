@@ -79,6 +79,7 @@ const T = require('../browser-takeover.js');
 const INT = require('../browser-interrupt.js'); // lane browser-admin 2a: the relaunch's words (Change build…)
 const { addressableId } = require('../claude-lock-capture.js');   // verify r6 (lane channel-withdraw): the ONE own-id predicate
 const VERBS = require('../browser-verbs.js'); // the CLI's own verb table: a pending `vibespace-browser status` is never stale, `click` is
+const WIN = require('../browser-windows.js'); // lane browser-windows verify r5 ②: the drive-ended notice's record + words
 
 const FROM_NAME = 'VibeSpace browser';
 
@@ -138,7 +139,7 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
     // the owner's ruling (2026-09-27): the cycle's re-run list (the keeper closed it at this handback) rides every word below
     const rerun = !win && Array.isArray(ev.rerun) ? ev.rerun.map(String).filter(Boolean) : [];
     const userActs = !win && Array.isArray(ev.userActs) ? ev.userActs : []; // lane browser-resume C: the user's tab acts while he drove — said in the same words, never a delivery of their own
-    const args = { cause, label, url: ev.url || '', heldMs: ev.heldMs || 0, idleMs, ...(win ? { target: 'window', handle: ev.handle || null } : {}), ...(rerun.length ? { rerun } : {}), ...(userActs.length ? { userActs } : {}) };
+    const args = { cause, label, url: ev.url || '', heldMs: ev.heldMs || 0, idleMs, ...(win ? { target: 'window', handle: ev.handle || null } : {}), ...(rerun.length ? { rerun } : {}), ...(userActs.length ? { userActs } : {}), ...(!win && ev.sharedWindow === true ? { shared: true } : {}) }; // verify r2 ⑦: the keeper says whether it was the shared window
     const verdict = T.announceVerdict({ cause, announceIdle: announceIdle(), sibling: !win && !!ev.sibling, rerun }); // verify r7: a sibling's handback with nothing to re-run is zero-spend
     const out = { cause, target: win ? 'window' : 'browser', sessionId: sess ? sess.id : null, verdict, delivered: false, stashed: false, noticed: false, inbox: false, why: null };
     if (!sess) { out.why = win ? 'no live session holds this window' : 'no live session carries this browser key'; log.log?.(`[browser] handback (${cause}) for ${win ? ev.handle : ev.browserKey}: ${out.why}`); return out; }
@@ -219,7 +220,8 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
     if (!sess) { out.why = 'no live session carries this browser key'; return out; }
     out.sessionId = sess.id;
     const label = labelOf(ev.profileId);
-    const text = T.takeoverText({ label, n: iv.n || 0, verbs: iv.verbs || [] });
+    const shared = ev.sharedWindow === true; // verify r2 ⑦ (r1 LOW 6): a mate taken WITH a legacy shared window is told so, never "your window"
+    const text = T.takeoverText({ label, n: iv.n || 0, verbs: iv.verbs || [], shared });
     out.text = text;
     // the card is display only — to the live session we hold (a conversation with no id yet still sees it), else by conversation id
     const card = { fromName: FROM_NAME, text, kind: 'notification' };
@@ -228,11 +230,29 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
       if (typeof emitCard === 'function') out.carded = emitCard(sess.s, card) !== false;
       else if (cid && deliver && typeof deliver.emitPeerCard === 'function') { deliver.emitPeerCard(cid, card); out.carded = true; }
     } catch (e) { log.warn?.(`[browser] takeover card not shown — ${e && e.message}`); }
-    out.noticed = queueNotice(sess, T.takeoverNotice({ label, n: iv.n || 0, verbs: iv.verbs || [], at: Date.now() }));
+    out.noticed = queueNotice(sess, T.takeoverNotice({ label, n: iv.n || 0, verbs: iv.verbs || [], at: Date.now(), shared }));
     log.log?.(`[browser] takeover on ${ev.browserKey}${ev.profileId ? ' ' + ev.profileId : ' (ephemeral)'} for ${sess.id}: ${iv.n ? `${iv.n} operation(s) interrupted (${(iv.verbs || []).join(', ')})` : 'nothing in flight'}${out.carded ? '; card shown' : ''}${out.noticed ? '; the notice rides the next turn' : ''} (free — nothing delivered)`);
     return out;
   }
 
+  /**
+   * lane browser-windows verify r5 ② — THE USER'S DRIVE ENDED (the keeper's `drive-ended` event: no window of the browser is
+   * driven any more; `refused` = the holders whose `tab new` was refused window_busy while he drove). Each is told ONCE by
+   * the zero-spend `browser-window-free` notice (src/browser-windows.js's words) at its next turn — no card, no delivery, no
+   * turn: nobody typed it; a holder with no live session is skipped (its lease is gone with it). → {told, skipped}.
+   */
+  function announceDriveEnded(ev) {
+    const out = { told: [], skipped: [], why: null };
+    if (!ev || ev.kind !== 'drive-ended' || !Array.isArray(ev.refused)) { out.why = 'not a drive-ended event'; return out; }
+    const label = labelOf(ev.profileId); const at = Date.now();
+    for (const r of ev.refused) {
+      const sess = r && sessionFor(r.sessionId, r.browserKey);
+      if (!sess) { out.skipped.push(String(r && r.browserKey)); continue; }
+      if (queueNotice(sess, WIN.driveEndedNotice({ label, n: r.n, at }))) out.told.push(sess.id); else out.skipped.push(String(r.browserKey));
+    }
+    log.log?.(`[browser] drive ended on ${ev.profileId}: ${out.told.length} refused holder(s) told by a free notice${out.skipped.length ? `, ${out.skipped.length} without a live session` : ''}`);
+    return out;
+  }
   /**
    * LANE BROWSER-ADMIN 2a — CHANGE BUILD… TELLS (the keeper's `onRelaunch`, one event per conversation leased on the
    * browser it restarts): the takeover's shape — ONE conversation card through the ladder's CARD path (display only:
@@ -410,6 +430,9 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
       if (ev.kind === 'takeover' || ev.kind === 'handback') { try { sweepStale(ev, ev.kind); } catch (e) { log.warn?.(`[browser] stale-approval sweep failed — ${e && e.message}`); } }
       // the owner's ruling (2026-09-27): the takeover TELLS — one card + one zero-spend notice per cycle, nothing billed
       if (ev.kind === 'takeover') { try { announceTakeover(ev); } catch (e) { log.warn?.(`[browser] takeover announce failed — ${e && e.message}`); } return; }
+      // lane browser-windows verify r5 ②: the user's drive of a browser ENDED — every holder refused window_busy while he
+      // drove is told ONCE by a zero-spend notice (free, its next turn); nothing delivered, nobody typed it
+      if (ev.kind === 'drive-ended') { try { announceDriveEnded(ev); } catch (e) { log.warn?.(`[browser] drive-ended notice failed — ${e && e.message}`); } return; }
       if (ev.kind !== 'handback') return;
       // lane browser-resume B: "Hand back and continue" — the stash entry `continueFor` files IS the one carrier (no turn,
       // no zero-spend notice beside it: the same hand-back read twice); the stale sweep above still ran
@@ -422,7 +445,7 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
   }
   function shutdown() { try { unsubInput?.(); unsubConfirm?.(); unsubWindow?.(); unsubRelaunch?.(); } catch { /* */ } unsubInput = null; unsubConfirm = null; unsubWindow = null; unsubRelaunch = null; }
 
-  return { announce, announceTakeover, announceRelaunch, tellProposal, noteConfirmation, install, installWindow, shutdown, announceIdle, sweepStale, takenFor, continueFor, FROM_NAME };
+  return { announce, announceTakeover, announceDriveEnded, announceRelaunch, tellProposal, noteConfirmation, install, installWindow, shutdown, announceIdle, sweepStale, takenFor, continueFor, FROM_NAME };
 }
 
 module.exports = { create, FROM_NAME };

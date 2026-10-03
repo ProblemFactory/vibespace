@@ -7,6 +7,7 @@ import { loadInto, renderInto } from './permission-rules-view.js';
 import { t, deviceLocale } from './i18n.js';
 import { placementNote } from './pool-priority-model.js'; // 2026-09-28 (PURE)
 import { registerOpenAction } from './window-types.js';
+import { ownedJobsView } from '../job-model.js'; // B-70f9 ② (PURE): the jobs this conversation owns, attention first
 import { btn as textBtn } from './channel-chrome.js'; // the house text button (`mounts-btn`)
 
 /** 2026-09-27: how many browser sessions a conversation has, per ask (the window re-renders on every broadcast, so the
@@ -19,6 +20,30 @@ function browserSessionsAsk(s) {
   if (conv && !s.host) q.set('conversation', conv);
   if (/^bk-[0-9a-f]{8}$/.test(String(s.browserKey || ''))) q.set('browserKey', s.browserKey);
   return [...q.keys()].length ? q.toString() : '';
+}
+/** B-70f9 ②: the Background Work jobs this conversation owns — asked like the browser sessions (memoised per
+ *  conversation, re-asked at most every 15 s, `onChange` only when the list moved). */
+const ownedJobsMemo = new Map(); // conversation id → { rows, at, busy, key }
+// G2 (for-you-jobs verify r1): every jobs-updated — a "Clear content…" of a job included — drops the memo and bumps the
+// generation, so a read that began before the clear never paints the words it took (its answer is discarded)
+let ownedJobsGen = 0;
+function dropOwnedJobs() { ownedJobsGen++; ownedJobsMemo.clear(); }
+function ownedJobs(conv, onChange) {
+  if (!conv) return null;
+  const c = ownedJobsMemo.get(conv);
+  if (!c || (!c.busy && Date.now() - c.at > 15000)) {
+    const was = c ? c.key : null;
+    ownedJobsMemo.set(conv, { ...(c || { rows: null, key: null }), at: Date.now(), busy: true });
+    const gen = ownedJobsGen;
+    fetchJson('/api/jobs').then((r) => {
+      if (gen !== ownedJobsGen) return;
+      const rows = r && !r.error && Array.isArray(r.jobs) ? ownedJobsView(r.jobs, conv) : (c ? c.rows : null);
+      const key = JSON.stringify(rows);
+      ownedJobsMemo.set(conv, { rows, at: Date.now(), busy: false, key });
+      if (key !== was) onChange();
+    }).catch(() => { if (gen === ownedJobsGen) ownedJobsMemo.set(conv, { ...(ownedJobsMemo.get(conv) || {}), busy: false, at: Date.now() }); });
+  }
+  return ownedJobsMemo.get(conv);
 }
 function browserSessionsCount(s, onChange) {
   const k = browserSessionsAsk(s);
@@ -709,6 +734,36 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
         ? t('Background jobs owned by this conversation message it when they finish, fail, get parked, or ask for input; while it is closed, notifications queue and inject at resume. Toggle globally in Settings → Integration, per group in the group window.')
         : t('This conversation is NOT notified when its background jobs finish — agents must poll. Toggle globally in Settings → Integration, per group in the group window.');
       bwSec.appendChild(hint);
+      // B-70f9 ② (design §9): the jobs this conversation OWNS — glyph · name · state; a click opens the Background Work
+      // panel at that job. Read-only: what a kill does to them is the panel's (and the job's --stop-with-owner).
+      {
+        const conv = s.backendSessionId || s.claudeSessionId || '';
+        const oj = ownedJobs(conv, () => { if (root.isConnected) render(); });
+        const rows = oj && Array.isArray(oj.rows) ? oj.rows : null;
+        const list = document.createElement('div');
+        list.className = 'session-detail-row sp-owned-jobs';
+        const label = document.createElement('span');
+        label.className = 'session-detail-label';
+        label.textContent = t('Background jobs');
+        const val = document.createElement('span');
+        val.className = 'session-detail-value';
+        if (!rows) val.textContent = conv ? t('Loading…') : t('No conversation id yet');
+        else if (!rows.length) val.textContent = t('None — no background job belongs to this conversation');
+        else for (const j of rows) {
+          const a = document.createElement('button');
+          a.type = 'button';
+          a.className = 'sp-owned-job';
+          a.dataset.jobId = j.id;
+          a.dataset.state = j.state;
+          if (isCleared(j)) a.classList.add('rc-cleared');
+          a.textContent = `${j.glyph} ${isCleared(j) ? clearedText() : j.name} · ${t(j.words)}`;
+          a.title = t('Open it in Background Work');
+          a.onclick = () => app.openJobs?.({ focusJobId: j.id });
+          val.appendChild(a);
+        }
+        list.append(label, val);
+        bwSec.appendChild(list);
+      }
       // HOW a notification reaches a BUSY session — derived from the harness
       // capability row (backend-caps peerDelivery + inputModes.steer), never
       // from a backend id. Owner decision 2026-09-07: notifications STEER,
@@ -789,6 +844,8 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
   // (plus a /api/session-todos fetch) each time. 300ms trailing-edge coalesce.
   let renderTimer = null;
   const onMsg = (msg) => {
+    // G2 (verify r1): the owned-jobs list follows every job change (a clear's jobs-updated included) — dropped, re-asked
+    if (msg.type === 'jobs-updated') { dropOwnedJobs(); clearTimeout(renderTimer); renderTimer = setTimeout(() => { renderTimer = null; render(); }, 300); return; }
     if (!['tasks-updated', 'session-status-updated', 'active-sessions', 'accounts-updated', 'user-state-updated'].includes(msg.type)) return;
     clearTimeout(renderTimer);
     renderTimer = setTimeout(() => { renderTimer = null; render(); }, 300);

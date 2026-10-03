@@ -345,6 +345,8 @@ const PROPOSE = (text) => `(async () => {
   // the second client: panel button + row badge + the Outbox window, same proposal, same store
   const p2ob = await p2.evaljs(`(async () => {
     const w = window.app.openChannelOutbox();
+    // B-f467: the Outbox lists one ROW per proposal; these legs act on its full card — open each row as it appears
+    window.__obRows = window.__obRows || setInterval(() => { for (const r of document.querySelectorAll('.chan-outbox-list .chan-orow[aria-expanded="false"]')) r.click(); }, 100);
     for (let i = 0; i < 80; i++) {
       const card = w.content.querySelector('.chan-outbox-list .chan-prop');
       const btn = document.querySelector('.rail-panel-channels [data-outbox-button]');

@@ -528,14 +528,39 @@ function relaunchPaneCss({ pane, mainPx = null, dpr = 1, from, to } = {}) {
   const q = (v) => Math.round(v * 100) / 100;
   return { w: q(xw / a.perLogical * b.widget / d), h: q(xh / a.perLogical * b.widget / d) };
 }
-/** POST /api/desktop/apps/:id/relaunch `{ scale: 'auto'|1|1.5|2|2.5|3, dpr?, uiScale? }` → { ok, choice, dpr, uiScale } | { ok:false, code, error }. */
+/** POST /api/desktop/apps/:id/relaunch `{ scale: 'auto'|1|1.5|2|2.5|3, dpr?, uiScale?, force? }` → { ok, choice, dpr, uiScale, force } | { ok:false, code, error }.
+ *  `force: true` (B-04da ④) = the person confirmed "relaunch anyway, lose the unsaved edits" after an `app-asked`. */
 function validateRelaunchRequest(body) {
   const b = body && typeof body === 'object' ? body : {};
   const choice = parseScaleChoice(b.scale);
   if (choice === null) return { ok: false, code: 'bad-request', error: `scale must be one of ${SCALE_CHOICES.join(', ')}` };
   if (b.dpr !== undefined && b.dpr !== null && !(Number.isFinite(Number(b.dpr)) && Number(b.dpr) >= 1 && Number(b.dpr) <= 3)) return { ok: false, code: 'bad-request', error: 'dpr must be a number from 1 to 3' };
   if (b.uiScale !== undefined && b.uiScale !== null && !(Number.isFinite(Number(b.uiScale)) && Number(b.uiScale) >= UI_SCALE_RANGE[0] && Number(b.uiScale) <= UI_SCALE_RANGE[1])) return { ok: false, code: 'bad-request', error: `uiScale must be a number from ${UI_SCALE_RANGE[0]} to ${UI_SCALE_RANGE[1]}` };
-  return { ok: true, choice, dpr: normalizeDpr(b.dpr), uiScale: normalizeUiScale(b.uiScale) };
+  if (b.force !== undefined && typeof b.force !== 'boolean') return { ok: false, code: 'bad-request', error: 'force must be true or false' };
+  return { ok: true, choice, dpr: normalizeDpr(b.dpr), uiScale: normalizeUiScale(b.uiScale), force: b.force === true };
+}
+/** B-5ee0 ② — a Scale ▸ relaunch while an AGENT holds the window's lease is refused SERVER-side: the menu disables it
+ *  in the window (scaleMenuModel's 'lease'), and a stale client, a second tab or a script meets the same rule here.
+ *  `lease` = the window engine's leaseOf(id) (null = nobody). → null | { code: 'lease', error } */
+function relaunchLeaseVerdict(rec, lease) {
+  if (!lease) return null;
+  const who = lease.sessionName || lease.sessionId || 'an agent';
+  return { code: 'lease', error: `${who} is driving ${(rec && rec.label) || 'this window'} — a relaunch would end the app under it; take the window back (or let the agent hand it back) first` };
+}
+/**
+ * B-04da ④ — DOES ENDING THIS SESSION ASK THE APP FIRST? (PURE) A LibreOffice session that is running may hold unsaved
+ * edits nobody can see from here: a Stop, a Scale ▸ relaunch or the idle timeout asks it to quit through its OWN
+ * File ▸ Exit (src/office-open.js officeQuitArgv — its "Save changes?" prompt in its window) and signals it only when
+ * the person confirmed the loss (`force`). Never for a session still launching (no document is open yet), one with no
+ * profile to hand the request over (nothing to ask), or any other app (a SIGTERM is its own close path).
+ *   → { ask, why: 'office'|'not-office'|'not-running'|'no-profile'|'forced' }
+ */
+function askCloseVerdict(rec, { force = false } = {}) {
+  if (!rec || !rec.office) return { ask: false, why: 'not-office' };
+  if (rec.state !== 'ready') return { ask: false, why: 'not-running' };
+  if (!rec.profileDir) return { ask: false, why: 'no-profile' };
+  if (force === true) return { ask: false, why: 'forced' };
+  return { ask: true, why: 'office' };
 }
 /** May this record be relaunched at another scale? null = yes, else { code, error } by name. The scale is fixed at
  *  launch (GDK_SCALE is read once), so the relaunch is a NEW app session: only a running xpra app, never a browser
@@ -1398,7 +1423,7 @@ module.exports = {
   fitPolicyOf, keeperFits, topLevelWindows, appWindows, appFitPlan, appMainWindow, windowTitleOf, APP_TITLE_MAX,
   validateAppRow, validateLaunchRequest, DEFAULT_REGISTRY, APP_SCALES, normalizeDpr, appScaleFor, scaleKnobs, SCALE_RULES, scaleRuleOf, renderOf, relaunchPaneCss, // lane D (a)
   BROWSER_EXEC_RE, BROWSER_APP_ID_RE, isBrowserName, launchedProgram, browserLaunchVerdict,
-  SCALE_CHOICES, SCALE_MAX, UI_SCALE_RANGE, normalizeUiScale, normalizeScale, effectiveScale, scalePick, validateRelaunchRequest, relaunchVerdict, relaunchBodyOf, scaleMenuModel,
+  SCALE_CHOICES, SCALE_MAX, UI_SCALE_RANGE, normalizeUiScale, normalizeScale, effectiveScale, scalePick, validateRelaunchRequest, relaunchVerdict, relaunchBodyOf, scaleMenuModel, askCloseVerdict, relaunchLeaseVerdict,
   EXPLICIT_SCALES, SCALE_ORIGINS, parseScaleChoice, scaleChoiceVerdict, // lane D: the per-app default scale + the widened explicit set
   OUTER_CLOSE_AGAIN_MS, windowsLeftCount, exitCloseVerdict, outerCloseVerdict,
   BROWSER_KINDS, BROWSER_BINS, REAL_BROWSER_ROOTS, isForbiddenBrowserArg, browserRowFor, validateBrowserUrl, profileDirVerdict, browserArgv, firefoxUserJs, URL_MAX, BROWSER_A11Y_FLAG, BROWSER_A11Y_ENV, CHROMIUM_A11Y_ENV,

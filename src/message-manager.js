@@ -16,12 +16,14 @@
 const { rewoundByRecord, applyRewound, rewoundOp } = require('./rewind-ops.js');
 const { workflowNameFromAck, shortWorkflowName } = require('./workflow-name.js');
 const { VIBESPACE_NOTICE_HEAD } = require('./notification-senders.js'); // PURE: the head our notifications open with (S3 verify F3: a peer record's PATH, peerOriginOf)
-const { offerOf } = require('./reset-credit.js'); // PURE: the reset-credit offer a peer card may carry (design-reset-credits §5)
+const { offerOf, offerResolution } = require('./reset-credit.js'); // PURE: the reset-credit offer a peer card may carry (design-reset-credits §5) + its resolution (lane reset-path R3)
+const { refOf: channelRefOf } = require('./channel-ref.js'); // PURE (B-c127): a channel notice's conversation — `peerChannel`
 const { groupOf: groupCardOf } = require('./group-card.js'); // PURE (lane group-report-card): a group message's card facts — `peerGroup`
 const { sliceTextWindow } = require('./text-window.js'); // PURE: the attach slab counted in text cards (perf lane A)
 const { staleFromDenyMessage } = require('./browser-stale.js'); // PURE (lane J r2): a deny naming browser_paused = the takeover's stale answer
 const { unknownFields: shapeUnknownFields, carrierOf: shapeCarrierOf, unknownFieldsSample } = require('./record-shape.js'); // §3 schema drift (2026-09-21)
 const { helperAskOf, askRecordOf, askState, pendingAsksOf, asksSignature, askTransition, isWaiting, ASK_INITIAL, ASK_RECORD_EVENTS, RESULT_EVENT_OF, isUnknownOutcome } = require('./helper-ask.js'); // PURE (lane S1): a helper's permission ask — the parent's card, its view, the waiting chip
+const { turnPreviewOf } = require('./assistant-note.js'); // PURE (B-40f8): THE preview of a user turn — the minimap and the outline, every builder
 const { permissionOutcome, outcomeHead } = require('./permission-outcome.js'); // PURE (lane S1 verify r5): the CENSUS of the CLI's own permission-outcome sentences — the ONE reader of a tool_result's word
 
 // System subtypes _processSystem actually renders/consumes — anything else
@@ -152,6 +154,24 @@ function commandNames(commands) {
 // session name since 2.1.23x) → the wrapper tag's from-name attribute (older
 // records) → a non-socket origin.from → null (renderer shows a generic label;
 // a unix socket path is never a user-facing identity).
+// A hook's stdout is usually its PROTOCOL JSON ({"continue":true,…} or
+// {"hookSpecificOutput":{"additionalContext":"…"}}): the human-relevant part is
+// the additionalContext (or a block decision/reason); '' when it says nothing.
+// ONE unwrap for the transcript's hook attachments and the live stream's
+// hook_response (B-40f8 ②).
+function hookPayloadText(raw) {
+  let meaningful = String(raw || '').trim();
+  try {
+    const j = JSON.parse(meaningful);
+    if (j && typeof j === 'object' && !Array.isArray(j)) {
+      const extra = j.hookSpecificOutput?.additionalContext;
+      meaningful = typeof extra === 'string' ? extra.trim() : '';
+      if (!meaningful && (j.decision || j.reason)) meaningful = [j.decision, j.reason].filter(Boolean).join(': ');
+    }
+  } catch { /* not JSON — keep the raw text */ }
+  return meaningful;
+}
+
 function peerDisplayName(origin, text) {
   return peerOriginOf(origin, text).name;
 }
@@ -222,6 +242,17 @@ function splitToolResultContent(content) {
   }
   if (!images.length) return { text: JSON.stringify(content), images: [] };
   return { text: JSON.stringify(rest), images };
+}
+
+/** The TEXT of a tool_result's content (B-63f1). The CLI writes a plain string OR
+ *  a list of blocks — every background Agent's launch ack since 2.1.81 is a
+ *  one-text-block list — and `splitToolResultContent` keeps a list as its JSON
+ *  for the card, which no text reader matches: a HISTORY rebuild (no stream
+ *  task_started) never learned which helper an Agent card launched. */
+function toolResultText(content) {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content.filter((b) => b && b.type === 'text' && typeof b.text === 'string').map((b) => b.text).join('\n');
 }
 
 /** A `<synthetic>`-model record, or one whose usage counts nothing, describes
@@ -300,7 +331,7 @@ class MessageManager {
   // record never crosses stdout, and its body-less result.origin is skipped).
   // No containment dedup: the delivery site posts once per fire (same-body
   // repeats are legitimate — the 2.362.2 review lesson).
-  injectPeerCard({ fromName, text, msgId = null, resetCredit = null, kind = null, group = null, exitRun = null }) {
+  injectPeerCard({ fromName, text, msgId = null, resetCredit = null, kind = null, group = null, exitRun = null, channel = null }) {
     const body = String(text || '').trim();
     if (!body) return null;
     // A harness-delivered message carries the CLI's msg_id (the turn-start
@@ -319,15 +350,43 @@ class MessageManager {
     // a STORED RESET CREDIT the card offers (design-reset-credits §5): the wall
     // card / the auto-resume arm card — two numbers-and-a-mode, never markup
     const rc = offerOf(resetCredit);
-    if (rc) msg.resetCredit = rc;
+    if (rc) { msg.resetCredit = rc; if (!rc.resolved) { const l = this._rcOffers || (this._rcOffers = []); l.push(msg); if (l.length > 64) l.shift(); } } // R3: the open offers a later fact may answer
     // lane-exit-run-output E3: a command's exit line + output heads (exit-reach cardOutput, bounded by the producer) ride
     // the "Machines · <machine>" card so the renderer draws the first lines + "Show output" — never a second card
     if (exitRun && typeof exitRun === 'object') msg.exitRun = exitRun;
+    // a CHANNEL notice (B-c127): the conversation it is about — its name, the card's one-click link (src/channel-ref.js)
+    const cr = channelRefOf(channel);
+    if (cr) msg.peerChannel = cr;
     // a GROUP message (lane group-report-card): a wake's card names the sender → the group — a peer's words, always
     const gc = groupCardOf(group);
     if (gc) { msg.peerGroup = gc; msg.peerVia = 'peer'; msg.peerFrom = gc.self ? null : (gc.from || msg.peerFrom); }
     this._emit({ op: 'create', message: msg });
     return msg;
+  }
+
+  /** THE CARD THE CREDIT OUTLIVED (lane reset-path R3): a later fact about account `keys` — a credit used
+   *  (`{kind:'used', at, untilSec}`) or a reading (`{kind:'reading', at, usable}`) — resolves every OPEN offer
+   *  card on that account drawn before it: the resolution goes ON THE MESSAGE (a slab / page-in re-render
+   *  carries it) and ONE `edit` op per card carries only its resetCredit (the client patches it in place).
+   *  The PURE rule is src/reset-credit.js offerResolution. → how many cards it resolved */
+  resolveResetCreditOffers(keys, ev) {
+    const open = this._rcOffers;
+    if (!open || !open.length) return 0;
+    const ks = new Set((Array.isArray(keys) ? keys : [keys]).filter(Boolean).map(String));
+    let n = 0;
+    for (let i = open.length - 1; i >= 0; i--) {
+      const m = open[i];
+      const rc = m && m.resetCredit;
+      if (!rc || rc.resolved) { open.splice(i, 1); continue; }
+      if (!ks.has(String(rc.accountKey || ''))) continue;
+      const res = offerResolution(rc, m.ts, ev);
+      if (!res) continue;
+      m.resetCredit = { ...rc, resolved: res };
+      open.splice(i, 1);
+      this._emit({ op: 'edit', id: m.id, fields: { resetCredit: m.resetCredit } });
+      n++;
+    }
+    return n;
   }
 
   // R0 (docs/design-three-tier.md): ids derive from CONTENT, not a
@@ -645,33 +704,12 @@ class MessageManager {
       const t = m.turnIndex ?? 0;
       if (t !== lastTurn) {
         const entry = { turnIndex: t, startIdx: i, ts: m.ts, role: m.role };
-        // For user messages: extract preview text (truncate at word boundary ~10 chars)
-        if (m.role === 'user') {
-          const raw = (m.content || []).map(b => b.text || '').join('').trim();
-          if (raw) {
-            // Check for compaction marker
-            if (raw.startsWith('This session is being continued from a previous conversation')) {
-              entry.isCompact = true;
-              entry.preview = 'Context compacted';
-            } else {
-              entry.preview = this._truncateWord(raw, 60);
-            }
-          }
-        }
+        if (m.role === 'user') Object.assign(entry, turnPreviewOf(m)); // B-40f8: THE preview rule (a note says its sentence, never "Stop hook feedback: …")
         turns.push(entry);
         lastTurn = t;
       }
     }
     return turns;
-  }
-
-  /** Truncate text at word boundary, max ~maxLen chars */
-  _truncateWord(text, maxLen) {
-    if (text.length <= maxLen) return text;
-    // Find last space before or at maxLen
-    const cut = text.lastIndexOf(' ', maxLen);
-    if (cut > maxLen * 0.5) return text.substring(0, cut) + '…';
-    return text.substring(0, maxLen) + '…';
   }
 
   /** Search messages by text query → [{index, id, type, preview}] */
@@ -984,15 +1022,20 @@ class MessageManager {
       if (this._lastHookCard && this._lastHookCard.name === name && Math.abs(this._currentTs - this._lastHookCard.ts) < 5000) return;
       const ok = raw.outcome === 'success' || raw.exit_code === 0;
       const icon = ok ? '✓' : '✗';
+      // B-40f8 ②: the stream's `output` is the hook's PROTOCOL JSON — unwrapped by the
+      // same rule as the transcript's attachment, or a VibeSpace SessionStart block
+      // read as a plain hook row (raw JSON behind it) until a rebuild
+      const rawOut = typeof raw.output === 'string' ? raw.output : '';
+      const output = hookPayloadText(rawOut) || (ok ? '' : rawOut);
       const msg = this._create({
         role: 'system', status: ok ? 'complete' : 'error',
-        content: [{ type: 'system_info', text: `${icon} Hook: ${name}`, hookData: { name, event: raw.hook_event, outcome: raw.outcome, exitCode: raw.exit_code, output: raw.output } }],
+        content: [{ type: 'system_info', text: `${icon} Hook: ${name}`, hookData: { name, event: raw.hook_event, outcome: raw.outcome, exitCode: raw.exit_code, output } }],
       });
       // raw.output, NOT bare `output` — the 2.80.0 typo threw ReferenceError on
       // EVERY hook_response during convertHistory, amputating rebuilt history at
       // the first buffer hook record (live path swallowed it per-line; the
       // "restart 之后消息都没了" incident).
-      this._lastHookCard = { name, ts: this._currentTs, msgId: msg.id, outHead: raw.output ? String(raw.output).slice(0, 200) : null };
+      this._lastHookCard = { name, ts: this._currentTs, msgId: msg.id, outHead: output ? output.slice(0, 200) : null };
       if (emit) this._emit({ op: 'create', message: msg });
     }
 
@@ -1496,16 +1539,7 @@ class MessageManager {
       // Unwrap the machine ack: hook stdout is usually a protocol JSON like
       // {"continue":true,"suppressOutput":true} — the only human-relevant part
       // is hookSpecificOutput.additionalContext (or a block decision/reason).
-      let meaningful = raw.trim();
-      try {
-        const j = JSON.parse(meaningful);
-        if (j && typeof j === 'object' && !Array.isArray(j)) {
-          const extra = j.hookSpecificOutput?.additionalContext;
-          meaningful = typeof extra === 'string' ? extra.trim() : '';
-          if (!meaningful && (j.decision || j.reason)) meaningful = [j.decision, j.reason].filter(Boolean).join(': ');
-        }
-      } catch { /* not JSON — keep the raw text */ }
-      const output = meaningful || (ok ? '' : raw); // full output — never truncated (expandable card + scroll cap handle size)
+      const output = hookPayloadText(raw) || (ok ? '' : raw); // full output — never truncated (expandable card + scroll cap handle size)
       // Live/replay double-render dedup — the two copies are ASYMMETRIC: the
       // stdout hook_response usually has NO output while the JSONL attachment
       // carries the FULL injected context. Skipping the newcomer blindly hid
@@ -1581,6 +1615,7 @@ class MessageManager {
       // Read path is on disk) instead of the bytes.
       const split = splitToolResultContent(tr.content);
       const resultText = split.text;
+      const ackText = toolResultText(tr.content); // B-63f1: the launch ack is a TEXT-BLOCK LIST in every real record — its words, never the card's JSON
       existing.status = tr.is_error ? 'error' : 'complete';
       existing.toolStatus = tr.is_error ? 'error' : 'ok';
       // A tool_result implies the pending permission was answered. The
@@ -1612,7 +1647,7 @@ class MessageManager {
       // running/completed background cards again; a live task_started that
       // follows overwrites the same shape harmlessly.
       if (!existing.taskInfo && !tr.is_error) {
-        const syn = parseBackgroundLaunch(pending.block.name, pending.block.input, resultText);
+        const syn = parseBackgroundLaunch(pending.block.name, pending.block.input, ackText);
         if (syn) {
           // SUPERSEDE (the wf_768b7abd residual): a Workflow resumed via
           // resumeFromRunId re-launches under the SAME run id — the resume's
@@ -1640,7 +1675,7 @@ class MessageManager {
         // taskInfoById(runId) found nothing and the View Workflow window stayed
         // on the disk skeleton. Register the ack's id too, and remember it on the
         // card as runId (the short id stays `id` — the CLI's own key).
-        const syn = parseBackgroundLaunch(pending.block.name, pending.block.input, resultText);
+        const syn = parseBackgroundLaunch(pending.block.name, pending.block.input, ackText);
         if (syn && existing.taskInfo.backgrounded !== true) { existing.taskInfo.backgrounded = true; if (emit) this._emit({ op: 'edit', id: existing.id, fields: { taskInfo: existing.taskInfo } }); }
         // the ack's own TYPE wins over whatever task_started spelled (2.369.139)
         if (syn && syn.type && existing.taskInfo.type !== syn.type) { existing.taskInfo.type = syn.type; if (emit) this._emit({ op: 'edit', id: existing.id, fields: { taskInfo: existing.taskInfo } }); } // the ack says background even when task_started lacked the flag (older CLI)
@@ -2218,4 +2253,4 @@ const KNOWN_IGNORED_SYSTEM_SUBTYPES = new Set([
   'bridge_status',          // the TUI's "/remote-control is active" banner (transcript 2.1.81, 11 rows; NOT in the SDK union — record-shape CORPUS_ONLY_SUBTYPES); VibeSpace never runs the remote-control bridge
 ]);
 
-module.exports = { splitToolResultContent, MessageManager, classifyResultError, parseBackgroundLaunch, normalizeTaskType, TASK_TYPE_MAP, peerDisplayName, peerOriginOf, initFrameFacts, commandNames, normalizeWorkflowProgress, HANDLED_SYSTEM_SUBTYPES, KNOWN_IGNORED_RECORD_TYPES, KNOWN_IGNORED_SYSTEM_SUBTYPES, unknownRecordJson };
+module.exports = { splitToolResultContent, toolResultText, MessageManager, classifyResultError, parseBackgroundLaunch, normalizeTaskType, TASK_TYPE_MAP, peerDisplayName, peerOriginOf, initFrameFacts, commandNames, normalizeWorkflowProgress, HANDLED_SYSTEM_SUBTYPES, KNOWN_IGNORED_RECORD_TYPES, KNOWN_IGNORED_SYSTEM_SUBTYPES, unknownRecordJson };

@@ -340,6 +340,10 @@ const BACKEND_CAPS = {
     // a host callback and never reaches us (see the row's essay above).
     turnState: 'authoritative',
     inProgressTools: false,
+    // lane worker-dispatch (2026-10-02): the stream SAYS when a compaction ends — every exit of the 'compacting'
+    // claim goes through the stdout consumer's one writer (`endCompaction`), which notifies src/server/compaction-watch.js.
+    // A dispatch compacts a worker first only where this is 'observed' (src/dispatch-model.js `compactObserved`).
+    compactEnd: 'observed',
     // --settings outputStyle, read once at spawn (stream-json has no
     // /output-style verb) ⇒ a change needs a restart.
     responseStyle: { live: false, closed: false, values: ['Concise', 'Explanatory', 'Learning', 'Proactive'] },
@@ -369,6 +373,9 @@ const BACKEND_CAPS = {
     renameWriteback: true,        // set-thread-name → the thread's own name in codex's store
     streamProtocol: 'codex-events',
     peerDelivery: 'rpc-queue',
+    // null (lane worker-dispatch): the wrapper runs `/compact` as thread/compact/start, but the codex consumer never
+    // retires the 'compacting' claim nor notifies the compaction watch — a dispatch sends the brief without compacting
+    compactEnd: null,
     // thread/queue/{add,list,delete,update,reorder,start} + turn/steer — every
     // shape dumped from the 0.153.4 schema and exercised against a live
     // app-server (the removal verb is `delete` with `queuedSubmissionId`;
@@ -404,6 +411,7 @@ const BACKEND_CAPS = {
     forkAtMessage: false, review: false, renameWriteback: false,
     streamProtocol: null, // terminal-only: no chat parse pipeline
     peerDelivery: 'stash-only',
+    compactEnd: null,      // terminal-only: no compaction to observe
     inputModes: { queue: false, queueVerbs: [] },
     turnState: null, inProgressTools: false, // terminal-only: there is no turn
     responseStyle: { live: false, closed: true, values: [] }, // terminal-only: no agent to style
@@ -423,6 +431,7 @@ const BACKEND_CAPS = {
     pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, fork: false, forkAtMessage: false, review: false, renameWriteback: false,
     streamProtocol: 'acp-events',
     peerDelivery: 'stash-only',
+    compactEnd: null,      // ACP v1 has no compaction verb we send or observe
     frameFile: true,
     // ACP v1 has no queue verb, so the WRAPPER owns the queue (promptQueue) —
     // a plain local array, which makes remove/reorder/edit cheap array ops it
@@ -458,7 +467,7 @@ const BACKEND_CAPS = {
 // row whose `steer` disagrees with its `queueVerbs`.
 for (const row of Object.values(BACKEND_CAPS)) row.inputModes = deriveInputModes(row.inputModes);
 
-const NO_CAPS = Object.freeze({ pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, fork: false, forkAtMessage: false, review: false, renameWriteback: false, streamProtocol: null, worktree: NO_WORKTREE, peerDelivery: 'stash-only', inputModes: deriveInputModes({ queue: false, queueVerbs: [] }), turnState: null, inProgressTools: false, permissionRules: Object.freeze({ source: null, session: false, instance: false, liveVerb: false }), responseStyle: Object.freeze({ live: false, closed: true, values: Object.freeze([]) }), autoResume: NO_AUTO_RESUME });
+const NO_CAPS = Object.freeze({ pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, fork: false, forkAtMessage: false, review: false, renameWriteback: false, streamProtocol: null, worktree: NO_WORKTREE, peerDelivery: 'stash-only', compactEnd: null, inputModes: deriveInputModes({ queue: false, queueVerbs: [] }), turnState: null, inProgressTools: false, permissionRules: Object.freeze({ source: null, session: false, instance: false, liveVerb: false }), responseStyle: Object.freeze({ live: false, closed: true, values: Object.freeze([]) }), autoResume: NO_AUTO_RESUME });
 
 function capsOf(backend) {
   return BACKEND_CAPS[backend || 'claude'] || NO_CAPS;

@@ -1076,6 +1076,28 @@ console.log('§14 lane D (a) (docs/design-desktop-apps-seamless §3.4, the owner
 // one counted them as product code; they are written to this process's scratch
 // dir now (scripts/mutant-copy.mjs).
 console.log('\n§tree the patched copies never touch the tree');
+// ── B-5ee0 ②: a relaunch under an agent's lease is refused SERVER-side ──
+console.log('B-5ee0 ② relaunchLeaseVerdict');
+{
+  const lv = M.relaunchLeaseVerdict({ label: 'Calc' }, { sessionId: 's-1', sessionName: 'alpha' });
+  const winSrc = read('src/lib/desktop-app-window.js');
+  ok(/seatState\(\) !== 'watch' \|\| !\(e\.ctrlKey \|\| e\.metaKey\)/.test(winSrc) && /xpra gives its clipboard to one viewer/.test(winSrc), '⑥ WIRING: a copy / paste key in a Watch pane SAYS that xpra gives its clipboard to one viewer (it cannot be fixed on this side)');
+  ok(lv && lv.code === 'lease' && /alpha is driving Calc/.test(lv.error) && M.relaunchLeaseVerdict({ label: 'Calc' }, null) === null, '② an agent holding the window ⇒ refused by name (who drives what); nobody ⇒ null', lv);
+  const routes = read('src/routes/desktop-apps.js');
+  const body = routes.slice(routes.indexOf("router.post('/api/desktop/apps/:id/relaunch'"), routes.indexOf("router.post('/api/desktop/apps/:id/relaunch'") + 900);
+  ok(/ctx\.windowEngine \? ctx\.windowEngine\.leaseOf\(req\.params\.id\)/.test(body) && /relaunchLeaseVerdict\(/.test(body) && body.indexOf('relaunchLeaseVerdict(') < body.indexOf('ctx.keeper.relaunch(') && /code === 'lease' \? 409|\|\| code === 'lease' \? 409/.test(routes), '② WIRING: the relaunch route asks the window engine for the lease BEFORE the keeper relaunches, and answers 409');
+}
+
+// ── B-04da ④: ending a LibreOffice session ASKS it first ──
+console.log('B-04da ④ askCloseVerdict');
+{
+  const rec = { office: 'writer', state: 'ready', profileDir: '/d/desktop-apps/da-1/profile' };
+  ok(M.askCloseVerdict(rec).ask === true, '④ a running LibreOffice session is asked first (its own File ▸ Exit)');
+  ok(M.askCloseVerdict(rec, { force: true }).why === 'forced' && M.askCloseVerdict({ ...rec, state: 'launching' }).why === 'not-running' && M.askCloseVerdict({ ...rec, profileDir: null }).why === 'no-profile' && M.askCloseVerdict({ state: 'ready' }).why === 'not-office' && M.askCloseVerdict(null).ask === false, '④ CONTROLS: the person confirmed (force), still launching, no profile to hand over to, any other app ⇒ no ask', ['forced', 'not-running', 'no-profile', 'not-office']);
+  const r1 = M.validateRelaunchRequest({ scale: 2, force: true }), r2 = M.validateRelaunchRequest({ scale: 2 }), r3 = M.validateRelaunchRequest({ scale: 2, force: 'yes' });
+  ok(r1.ok && r1.force === true && r2.ok && r2.force === false && !r3.ok && r3.code === 'bad-request', '④ a relaunch carries `force` (true only when the person confirmed; anything but a boolean is refused)', [r1, r2, r3]);
+}
+
 for (const r of copiesCensus(MUTD.files, MUTD.dir, repo, { minCopies: 8 })) ok(r.pass, '§tree ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

@@ -9,9 +9,10 @@ const M = require('../job-model.js');
 const fs = require('fs');
 const path = require('path');
 
-function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, taskGroups, activeSessions, deliver, getTelemetry = () => null, onStash = () => {} }) {
+function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, taskGroups, activeSessions, deliver, getTelemetry = () => null, onStash = () => {}, onRunEnded = () => {} }) {
   const jm = new JobManager({
     dataDir,
+    onRunEnded: (job, run) => onRunEnded(job, run), // lane jobs-browser: a run's end releases its browser lease (the keeper's releaseJob)
     onStash: (cid) => onStash(cid), // every stash write / drain — the conversation's `stash` session fact follows (the strip above its composer)
     // every jobs-updated carries the HELD digest (5b ①): one dirty signal, one
     // computation — the rail badge, the panel summary and every chat window's
@@ -45,6 +46,27 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
           sessionName: ownerCid ? (sessName ? `${sessName} · ${jobName || 'job'}` : (jobName || 'background job')) : (jobName || 'background job'),
         });
       } catch (e) { log('[jobs] notify failed:', e.message); }
+    },
+    // B-dfb4: notifications to a conversation fell off the 30-entry stash cap — ONE For-you notice (≤ 1 per conversation
+    // per hour, decided by the engine), filed under the owner conversation like notifyUser's asks, worded per device
+    noticeDropped: ({ cid, n, cap, jobs, every = 0 }) => {
+      // verify r1: the hour survives a restart — the store keeps when this notice was last FILED (`createdAt`: a first
+      // filing or a reopen), open or resolved (the snapshot keeps every item resolved within the hour)
+      const said = (() => { const s = userTodos.snapshot(); return [...s.open, ...s.resolved].find((i) => i.sessionKey === `claude:${cid}` && i.origin === 'jobs' && i.i18n && i.i18n.text && /^Background Work notifications for this conversation were dropped/.test(i.i18n.text.key)); })();
+      if (said && every && Date.now() - (Number(said.createdAt) || 0) < every) return { recent: true, at: Number(said.createdAt) };
+      let sessName = null;
+      if (activeSessions) for (const s of activeSessions.values()) { if ((s.claudeSessionId || s.backendSessionId) === cid) { sessName = s.name || null; break; } }
+      const names = (Array.isArray(jobs) ? jobs : []).map((x) => String(x).slice(0, 60)).join(', ');
+      userTodos.add(`claude:${cid}`, {
+        origin: 'jobs', kind: 'notice', urgency: 'low', by: 'agent',
+        text: `Background Work notifications for this conversation were dropped — ${cap} were already waiting, the most it keeps`,
+        detail: `${n} dropped, never delivered (from: ${names}). The ${cap} still waiting reach the agent with its next turn; the Background Work panel lists them.`,
+        sessionName: sessName ? `${sessName} · Background Work` : 'Background Work',
+        i18n: {
+          text: { key: 'Background Work notifications for this conversation were dropped — {cap} were already waiting, the most it keeps', params: { cap } },
+          detail: [{ key: '{n} dropped, never delivered (from: {jobs}). The {cap} still waiting reach the agent with its next turn; the Background Work panel lists them.', params: { n, cap, jobs: names } }],
+        },
+      });
     },
     log, getTelemetry, // optional: an archive write failure names itself (jobs-archive-write-failed)
     resolveJobAsk: (jobId, opts) => { try { return userTodos.resolveByJob(jobId, opts); } catch (e) { log('[jobs] inbox resolve failed:', e.message); return 0; } },

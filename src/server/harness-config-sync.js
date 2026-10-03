@@ -12,10 +12,11 @@
 //                                applies with the SHARED applier
 //   syncCliConfig({reason})      apply it on THIS machine (device #0) — in
 //                                process, through the CAS writers; guarded by
-//                                hookRegistrationSafe() (a /tmp worktree server
-//                                must never write the real HOME's CLI config —
-//                                the 2026-07-21 incident class, which the old
-//                                retention write did NOT honour)
+//                                THE ROOT VERDICT (src/server-root.js via the
+//                                server's ownerWriteRefusal/refuseOwnerWrite):
+//                                a git worktree, a temp root or the skip belt
+//                                never writes the owner's CLI config — the
+//                                2026-07-21 + 2026-10-01 incident class
 //   cliConfigStatus()            fresh receipts (D2: every probe re-reads the
 //                                target file; the last local write is kept in
 //                                memory only, never persisted)
@@ -80,7 +81,13 @@ function accessorsFor({ serverSetting, harnesses }) {
   return { harnessSetting, harnessDeclares, harnessSpawnSettings };
 }
 
-function create({ serverSetting, harnesses, adapterRegistry, activeSessions, hookRegistrationSafe = () => true, log = console.log, warn = console.warn, home = null }) {
+function create({ serverSetting, harnesses, adapterRegistry, activeSessions, hookRegistrationSafe = () => true, ownerWriteRefusal = null, refuseOwnerWrite = null, rootRecovery = null, log = console.log, warn = console.warn, home = null }) {
+  // THE ROOT VERDICT (src/server-root.js, read by agent-tool-generators): the
+  // refusal object when this server must not write the owner's CLI config.
+  // Without the server's verdict (tests, tooling) an unsafe flag still refuses.
+  const recoveryNow = () => (typeof rootRecovery === 'function' ? ((rootRecovery() || {}).registeredAfterError || null) : null); // verify r2 ①: the chip's "registered at HH:MM after an earlier read error"
+  const refusalNow = () => (typeof ownerWriteRefusal === 'function' ? ownerWriteRefusal() : null)
+    || (hookRegistrationSafe() ? null : { kind: 'unknown', why: 'this server never writes the owner\'s CLI config' });
   const { harnessSetting, harnessDeclares, harnessSpawnSettings } = accessorsFor({ serverSetting, harnesses });
   /** The persisted paths of every cli-config row of every registered harness. */
   function cliConfigKeys() {
@@ -109,7 +116,10 @@ function create({ serverSetting, harnesses, adapterRegistry, activeSessions, hoo
   }
   function syncCliConfig({ reason = 'boot' } = {}) {
     warnRefusedValues();
-    if (!hookRegistrationSafe()) { log(`[cli-config] skipped (${reason}): throwaway/temp server root never writes the real HOME's CLI config`); return { skipped: true }; }
+    // ONE journal line per boot for every refused writer (refuseOwnerWrite
+    // latches it); without the server's verdict, this module says it itself.
+    const refused = refusalNow();
+    if (refused) { if (typeof refuseOwnerWrite === 'function') refuseOwnerWrite(); else log(`[cli-config] skipped (${reason}): ${refused.why}`); return { skipped: true, refused }; }
     const plan = cliConfigPlan();
     let r;
     try { r = applyConfigPlan(plan, { home }); } catch (e) { warn(`[cli-config] failed (${reason}): ${e.message}`); return { error: e.message }; }
@@ -133,7 +143,8 @@ function create({ serverSetting, harnesses, adapterRegistry, activeSessions, hoo
     for (const h of harnesses.list()) if (h.settings) for (const row of rowsOfKind(h.settings, 'cli-config')) {
       if (!plan.files.some((f) => f.harness === h.id && f.set.some((s) => s.key === row.key))) off.push({ harness: h.id, key: row.key, rel: (h.settings.files[row.apply.file] || {}).rel?.join('/') || null, path: row.apply.path.join('.') });
     }
-    return { safe: hookRegistrationSafe(), files: plan.files.map((f) => ({ harness: f.harness, id: f.id, rel: f.rel.join('/'), format: f.format, keys: f.set.map((s) => s.key) })), receipts, off, lastWrite: lastWrite ? { at: lastWrite.at, reason: lastWrite.reason, receipts: lastWrite.receipts } : null };
+    const refused = refusalNow();
+    return { safe: !refused, refused, registeredAfterError: recoveryNow(), files: plan.files.map((f) => ({ harness: f.harness, id: f.id, rel: f.rel.join('/'), format: f.format, keys: f.set.map((s) => s.key) })), receipts, off, lastWrite: lastWrite ? { at: lastWrite.at, reason: lastWrite.reason, receipts: lastWrite.receipts } : null };
   }
   /** Every spawn row carrying a live verb, with its harness + persisted path. */
   function liveRows() {

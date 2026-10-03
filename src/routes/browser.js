@@ -109,6 +109,7 @@
  * of a user action.
  */
 const express = require('express');
+const { sameToken } = require('../pairing-token.js'); // B-8dda
 const router = express.Router();
 
 let ctx = null;
@@ -128,10 +129,13 @@ const STATUS = { 'not-found': 404, no_lease: 404, 'bad-request': 400, label_requ
   // P10 (§7.6 tier 3, D27 (b)): the consent gate on the local-window row, and "tier 3 is not a profile"
   provider_needs_consent: 403, tier3_is_a_window_target: 409, cdp_unreachable: 502, host_needs_daemon: 409, host_unavailable: 503, op_failed: 502, no_cdp: 502, stop_failed: 502,
   // P6 (§6.2 / §6.5): a mediated profile with no proxy in this process / a browser that answered no CDP url
-  // owner ruling A: a pin is an attachment default now — P6's `pin_refused` is gone; one driver at a time on a shared browser
-  mediation_unavailable: 503, mediation_no_cdp: 502, pinned: 409, browser_busy: 409,
+  // owner ruling A: a pin is an attachment default now — P6's `pin_refused` is gone (lane browser-windows: and `browser_busy`
+  // with the retired drive claim — each conversation works in a window of its own)
+  mediation_unavailable: 503, mediation_no_cdp: 502, pinned: 409,
   // identity verify r2 (2026-09-28): a conversation on another machine never uses / pins / is listed on a profile
   remote_session: 409,
+  // lane jobs-browser (B-dbc1): a Background Work job browses as its owner conversation — its refusals by name
+  job_token: 403, job_not_running: 409, job_no_owner: 409, job_no_profile: 409,
   // BROWSE YOURSELF verify r3: a returning conversation whose new tab could not be bound while its old tab is the user's now
   tab_unbound: 503,
   // §3.7 / §3.8 — the handle refusals are typed so the CLI prints the code and the agent can read why
@@ -184,7 +188,7 @@ const STATUS = { 'not-found': 404, no_lease: 404, 'bad-request': 400, label_requ
   // verify r2: a hand-back with nothing new while the previous one still waits for the agent's next turn (one carrier, once)
   already_handed_back: 409,
   // lane browser-resume C (§3.9, ruling 3): tabs — nothing ran (the verdict precedes every exec); the act itself failed
-  no_such_tab: 404, take_over_first: 409, last_tab: 409, mediated_tabs: 409, tab_failed: 502 };
+  no_such_tab: 404, take_over_first: 409, last_tab: 409, mediated_tabs: 409, tab_failed: 502, window_busy: 409 }; // verify r2 T1: window_busy — the holder's window lives but took no tab right now (retry)
 function fail(res, e) {
   const code = e?.code || null;
   // B-f7ab verify r2 (LOW): a key minted by THIS call rides a refused answer too (`res.locals.minted`, set by needKey) — the
@@ -199,16 +203,17 @@ function fail(res, e) {
     // the rebuilt switch dialog: a switch whose target did not START carries its rollback facts (whatever the code) —
     // the dialog words the answer by them first: `restored` (the profile is back as it was), `from`, `to`
     ...(typeof e?.restored === 'boolean' ? { restored: e.restored, from: e.from || null, to: e.to || null } : {}),
-    ...rulingExtras(e) });
+    ...rulingExtras(e), ...(res.locals && res.locals.recipe ? { recipe: res.locals.recipe } : {}) });
 }
-/** Owner ruling A: the extras a refusal on the sharing paths carries — `browser_busy`'s holder (a NAME: the ruling's "told
- *  so by name") + who drives + the bound to wait; a pin that did not open says `pinned` and which profile. */
+/** Owner ruling A: the extras a refusal on the sharing paths carries — a holder's NAME where a refusal names one + the
+ *  bound to wait; a pin that did not open says `pinned` and which profile (lane browser-windows: `browser_busy`'s `by` went
+ *  with the retired drive claim). */
 function rulingExtras(v) {
-  return { ...(v && v.holder !== undefined && v.holder !== null ? { holder: v.holder } : {}), ...(v && (v.by === 'user' || v.by === 'agent') && v.code === 'browser_busy' ? { by: v.by } : {}),
+  return { ...(v && v.holder !== undefined && v.holder !== null ? { holder: v.holder } : {}),
     ...(v && Number.isFinite(v.retryAfterMs) ? { retryAfterMs: v.retryAfterMs } : {}), ...(v && v.pinned ? { pinned: true, pinnedProfile: v.pinnedProfile || null } : {}) };
 }
 /** A typed `{ok:false, code, …}` verdict → the same wire shape a thrown refusal gets, with its extras kept. */
-function failVerdict(res, v) { return res.status(STATUS[v.code] || 409).json({ error: String(v.error || v.code), code: v.code, handles: v.handles || [], ...(v.default !== undefined ? { default: v.default } : {}), ...(v.was !== undefined ? { was: v.was } : {}), ...(v.now !== undefined ? { now: v.now } : {}), ...(v.takenAt !== undefined ? { takenAt: v.takenAt, lastUserInputAt: v.lastUserInputAt || 0 } : {}), ...(v.remedy ? { remedy: v.remedy } : {}), ...(Number.isInteger(v.holderPid) ? { holderPid: v.holderPid } : {}), ...(Number.isInteger(v.wakes) ? { wakes: v.wakes } : {}), ...(typeof v.digest === 'string' ? { digest: v.digest } : {}), ...rulingExtras(v), ...(res.locals && res.locals.minted ? { minted: res.locals.minted } : {}) }); } // B-f7ab verify r2: + the key this call minted (LOW)
+function failVerdict(res, v) { return res.status(STATUS[v.code] || 409).json({ error: String(v.error || v.code), code: v.code, handles: v.handles || [], ...(v.default !== undefined ? { default: v.default } : {}), ...(v.was !== undefined ? { was: v.was } : {}), ...(v.now !== undefined ? { now: v.now } : {}), ...(v.takenAt !== undefined ? { takenAt: v.takenAt, lastUserInputAt: v.lastUserInputAt || 0 } : {}), ...(v.remedy ? { remedy: v.remedy } : {}), ...(Number.isInteger(v.holderPid) ? { holderPid: v.holderPid } : {}), ...(Number.isInteger(v.wakes) ? { wakes: v.wakes } : {}), ...(typeof v.digest === 'string' ? { digest: v.digest } : {}), ...rulingExtras(v), ...(res.locals && res.locals.minted ? { minted: res.locals.minted } : {}), ...(res.locals && res.locals.recipe ? { recipe: res.locals.recipe } : {}) }); } // B-f7ab verify r2: + the key this call minted (LOW)
 /** P3 (§4.3): resolve the browser a takeover/handback/confirm names — a handle,
  *  a profile id, or (nothing) the set's default / only member / the ephemeral one. */
 function inputTargetFor(k, f, ref) {
@@ -703,7 +708,15 @@ router.get('/api/browser/session/:sessionId', (req, res) => {
   const k = keeperOr503(res); if (!k) return;
   const f = needKey(res, sessionFacts(String(req.params.sessionId || ''))); if (!f) return;
   // MULTIVIEW §4: + the helpers' WITNESSED names (handle → its Task's description) — the strip's list is browser-stream.browserListFor over this one answer
-  try { res.json({ ...k.statusFor(f.browserKey), helperNames: require('../server/browser-helpers.js').namesOf(f.session), backend: f.session.backend || null }); } catch (e) { fail(res, e); }
+  // lane jobs-browser: a job's window is listed as the conversation's helper row, named "Job: <name>" — the NAME read live
+  // off the jobs store here (never persisted with the browsing; a cleared or gone job shows its id)
+  try {
+    const st = k.statusFor(f.browserKey);
+    const jobNames = {};
+    const jm = typeof ctx.getJobs === 'function' ? ctx.getJobs() : null;
+    for (const c of (st.children || [])) if (c && c.job) { const j = jm && jm.jobs && typeof jm.jobs.get === 'function' ? jm.jobs.get(c.job) : null; jobNames[c.handle] = (j && !j.clearedAt && typeof j.name === 'string' && j.name.trim()) ? j.name.trim().slice(0, 40) : String(c.job); }
+    res.json({ ...st, helperNames: require('../server/browser-helpers.js').namesOf(f.session), jobNames, backend: f.session.backend || null });
+  } catch (e) { fail(res, e); }
 });
 /** lane browser-resume (§3.9, the owner's ruling 1): THE KEPT BROWSERS — a conversation's own browser's logins directory +
  *  its tabs after the browser stopped. The user's rows (the Agent browser panel's "Kept browsers"): cookie only — an
@@ -1219,8 +1232,62 @@ function askerOf(req) {
   if (req._agentFacts !== undefined) return req._agentFacts;
   const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '') || req.body?.token;
   let f = null;
-  if (token && token.startsWith('vsst_')) for (const [id, s] of (ctx?.activeSessions || new Map())) if (s && s.agentToken === token) { f = sessionFacts(id); break; }
+  if (token && token.startsWith('vsst_')) for (const [id, s] of (ctx?.activeSessions || new Map())) if (s && sameToken(token, s.agentToken)) { f = sessionFacts(id); break; }
+  if (token && token.startsWith('jbt_')) { const jf = jobFactsOf(token, { mint: false }); f = jf && !jf.refusal ? jf : null; }
   req._agentFacts = f;
+  return f;
+}
+/**
+ * lane jobs-browser (B-dbc1): A BACKGROUND WORK JOB (`jbt_`) BROWSES AS ITS OWNER CONVERSATION — the facts of the
+ * conversation that owns it (msgCaller's rule: its live session lends its Task Groups; a job whose conversation is not
+ * running keeps the groups the store still names for it), the job's OWN lease key = a child handle of the owner's
+ * browser key (src/browser-job-principal.js; `mint` only on an admitted route — the belt never mints). → facts | {refusal}.
+ */
+function jobFactsOf(token, { mint = true } = {}) {
+  const J = require('../browser-job-principal.js'), B = require('../browser-profiles.js');
+  const jm = typeof ctx?.getJobs === 'function' ? ctx.getJobs() : null;
+  if (!jm || !jm.ready || typeof jm.jobByToken !== 'function') return { refusal: { status: 503, code: 'unavailable', error: 'the jobs engine is not ready — retry shortly' } };
+  const job = jm.jobByToken(token);
+  if (!job) return { refusal: { status: 401, code: 'unauthorized', error: 'unknown job token' } };
+  const cid = J.ownerConversationOf(job);
+  let s = null, id = null;
+  // verify r1 (MED, the channel-withdraw r4/r5 class): the owner's LIVE session is the one ADDRESSABLE by the owner's id —
+  // a PENDING FORK still carries its parent's id, and it was taken as the owner (the job's handle minted under the fork's
+  // key, judged by the fork's pin and reach). ONE predicate, the ladder's own: addressableId (a borrowed id is nobody's)
+  const { addressableId } = require('../claude-lock-capture.js');
+  if (cid) for (const [tid, t] of (ctx.activeSessions || new Map())) if (t && addressableId(t) === cid) { s = t; id = tid; break; }
+  let ownerKey = s && B.isBrowserKey(s._browserKey) ? s._browserKey : '';
+  if (!ownerKey && cid && typeof ctx.bindingsLookup === 'function') { try { ownerKey = String(ctx.bindingsLookup(cid) || ''); } catch { ownerKey = ''; } }
+  const v = J.jobPrincipalOf({ job, ownerKey });
+  if (!v.ok) return { refusal: { status: v.code === 'unauthorized' ? 401 : (STATUS[v.code] || 409), code: v.code, error: v.error } };
+  if (s && (s.hostId || s.host || s._browserVariant === B.VARIANTS.H)) return { refusal: { status: 409, code: 'remote_session', error: 'this job\'s conversation runs on another machine — its browser is that machine\'s; VibeSpace cannot act on its pages from here' } };
+  let taskIds = [], groupsUnreadable = false;
+  try {
+    const raw = s ? (ctx.tasksForSession?.(s, id) || []) : (typeof ctx.tasksForConversation === 'function' ? (ctx.tasksForConversation(cid) || []) : []);
+    taskIds = raw.map((t) => (typeof t === 'string' ? t : t && t.id)).filter(Boolean);
+  } catch (e) { taskIds = []; groupsUnreadable = true; }
+  const k = ctx.keeper;
+  let handle = null;
+  if (mint) { try { handle = k.jobHandleFor({ ownerKey, jobId: job.id }); } catch (e) { return { refusal: { status: STATUS[e && e.code] || 409, code: (e && e.code) || 'error', error: String((e && e.message) || e) } }; } }
+  else { try { handle = k && typeof k.findJobHandle === 'function' ? k.findJobHandle({ ownerKey, jobId: job.id }) : null; } catch { handle = null; } }
+  const label = J.jobLabelOf(job);
+  // a job whose conversation is not running has no live session: the facts carry a stub (a name for the browser's
+  // session label; no spawn pairs — a job never starts the conversation's own temporary browser)
+  return { session: s || { name: label, webuiName: label }, sessionId: id, browserKey: handle || ownerKey, ownerKey, taskIds, groupsUnreadable, remote: false, job: { id: String(job.id), cid } };
+}
+/** The /api/agent/browser/<route> a request names (the job's route lists judge it). */
+function agentRouteOf(req) {
+  const p = String((req && (req.originalUrl || req.url)) || '').split('?')[0];
+  const at = p.indexOf(AGENT_PREFIX + '/');
+  return at < 0 ? '' : p.slice(at + AGENT_PREFIX.length + 1).split('/')[0];
+}
+function jobAgentFacts(req, res, token) {
+  const J = require('../browser-job-principal.js');
+  const rv = J.jobRouteVerdict(agentRouteOf(req));
+  if (!rv.ok) { res.status(STATUS[rv.code] || 403).json({ error: rv.error, code: rv.code }); return null; }
+  const f = jobFactsOf(token, { mint: true });
+  if (!f || f.refusal) { const r = (f && f.refusal) || { status: 401, code: 'unauthorized', error: 'unknown job token' }; res.status(r.status).json({ error: r.error, code: r.code }); return null; }
+  req._agentFacts = f; // the belt judges this answer with the job's own key
   return f;
 }
 /**
@@ -1262,6 +1329,7 @@ function agentBelt(req, res, next) {
 router.use(AGENT_PREFIX, agentBelt);
 function agentFacts(req, res) {
   const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '') || req.body?.token;
+  if (token && token.startsWith('jbt_')) return jobAgentFacts(req, res, token); // lane jobs-browser: as its owner conversation
   if (!token || !token.startsWith('vsst_')) { res.status(401).json({ error: 'missing session token', code: 'unauthorized' }); return null; }
   const f = askerOf(req);
   if (f) return needKey(res, f);
@@ -1383,9 +1451,13 @@ function displayNoteOf(browser, since) {
 router.post('/api/agent/browser/resolve', async (req, res) => {
   const k = keeperOr503(res); if (!k) return;
   const f = agentFacts(req, res); if (!f) return;
+  if (f.job) return resolveForJob(req, res, k, f); // lane jobs-browser: the owner's profile, the job's own lease + window
   const B = require('../browser-profiles.js');
   // B-f7ab: a key minted by THIS call (the session had none) is said in the answer — the CLI prints one note line
   const send = (o) => res.json(f.minted ? { ...o, minted: f.minted } : o);
+  // lane browser-recipes: a page verb refused while this conversation has NO browser yet (its first command) names the
+  // recipe too — the refusal answer carries it (`recipe`, beside `minted`); the CLI prints it under the refusal
+  try { const st0 = k.statusFor(f.browserKey); if (!st0.ephemeral && !(st0.leases || []).length) res.locals.recipe = f.remote ? require('../browser-recipes.js').FIRST_VERB_NEXT_REMOTE : require('../browser-recipes.js').FIRST_VERB_NEXT; } catch { /* no pointer */ } // verify r1 F1: a remote conversation's pointer
   try {
     // the owner's ruling (2026-09-27): a verb refused while the user drives goes on the handback's re-run list (its NAME only)
     const verb = require('../browser-profiles.js').auditVerbOf(Array.isArray(req.body?.argv) ? req.body.argv.map(String) : []);
@@ -1447,6 +1519,24 @@ router.post('/api/agent/browser/resolve', async (req, res) => {
     send({ ok: true, kind: 'attachment', handle: v.handle, ...attachAnswer(r, { cdp: req.body?.wrapper === true, agent: agentFactsOf(f) }), ...envBasis(f, { k, pairs: r.env, ephemeral: false }), handles: v.handles, isDefault: !!v.attachment.isDefault, at: resolvedAt, ...(await dialogAnswerFor(k, f, r.profile && r.profile.id, { verb })), ...displayNoteOf(r.browser, resolvedAt) });
   } catch (e) { fail(res, e); }
 });
+/** lane jobs-browser (B-dbc1): a job's command runs in its OWNER conversation's pinned / default profile (the owner's set,
+ *  read — never changed: no pin attach, no `told`, no stamp) under the job's OWN lease (its child handle ⇒ its own
+ *  window); a takeover of the job's window pauses the job alone. No profile ⇒ `job_no_profile`. */
+async function resolveForJob(req, res, k, f) {
+  const B = require('../browser-profiles.js'), J = require('../browser-job-principal.js');
+  try {
+    const verb = B.auditVerbOf(Array.isArray(req.body?.argv) ? req.body.argv.map(String) : []);
+    const jv = J.jobResolveVerdict(B.resolveHandle({ set: k.setFor(f.ownerKey), handle: req.body?.handle || '', subagent: false }));
+    if (!jv.ok) return failVerdict(res, { ...jv, handles: [] });
+    const r = await k.attach({ profileId: jv.profileId, browserKey: f.browserKey, sessionId: f.sessionId || null, taskIds: f.taskIds, groupsUnreadable: f.groupsUnreadable });
+    { const g = await cliGoneVerdict(k, r.browser); if (g) return failVerdict(res, g); }
+    k.tell(f.browserKey);
+    const v = k.resolveFor({ browserKey: f.browserKey, handle: '', verb });
+    if (!v.ok) return failVerdict(res, v);
+    const at = typeof k.clock === 'function' ? k.clock() : Date.now();
+    res.json({ ok: true, kind: 'attachment', job: true, handle: v.handle, ...attachAnswer(r, { cdp: req.body?.wrapper === true, agent: agentFactsOf(f) }), ...envBasis(f, { k, pairs: r.env, ephemeral: false }), handles: v.handles, isDefault: true, at, ...(await dialogAnswerFor(k, f, r.profile && r.profile.id, { verb })), ...displayNoteOf(r.browser, at) });
+  } catch (e) { fail(res, e); }
+}
 /** lane browser-resume B (§3.9): what a start did with the conversation's KEPT browser, as the agent's answer — ONE field
  *  per kind, each with its sentence (PURE src/browser-kept.js): `restored` (its kept tabs reopened by themselves — D2),
  *  `resumed` (the user resumed it / handed it back: the tab that is current; their note when the stash could not take it),
@@ -1677,11 +1767,8 @@ router.post('/api/agent/browser/dialog', async (req, res) => {
     if (action === 'status') { const fct = D.factFor({ ...t, consume: true }); if (!fct.open && (fct.blind || fct.unattributed)) return blindSay(fct); return res.json({ ok: true, watched: fct.watched, open: fct.open, text: fct.open ? fct.text : ST.NO_DIALOG_TEXT, notes: fct.notes }); }
     let st = null; try { st = k.inputStateFor(t.ephemeral ? t.browserKey : f.browserKey, t.ephemeral ? null : t.profileId); } catch { st = null; }
     if (st && st.input === 'user') return res.status(409).json({ error: require('../browser-interrupt.js').interruptedText('dialog ' + action), code: 'browser_interrupted', takenAt: st.takenAt || 0 });
-    // verify r1 A1 (LOW): the SAME belt the resolve applies — one driver at a time on a SHARED profile's browser (owner
-    // ruling A (2)): while the user drives it from another conversation's live view, or another conversation's agent is
-    // mid-work on it, this conversation's answer is refused `browser_busy` by name (the CLI's resolve refused it already;
-    // a direct call to this route did not)
-    if (!t.ephemeral && typeof k.driveVerdictFor === 'function') { let dv = null; try { dv = k.driveVerdictFor(f.browserKey, t.profileId); } catch { dv = null; } if (dv && dv.ok === false) return failVerdict(res, dv); }
+    // lane browser-windows: the verify r1 A1 drive belt is gone with the drive claim — the user driving the window this lease
+    // is in (its own, or an older run's shared one) is THIS lease's input state, refused just above
     { const fct = D.factFor({ ...t, consume: false }); if (!fct.open && (fct.blind || fct.unattributed)) return blindSay(fct); }
     const text = action === 'accept' && typeof req.body?.text === 'string' ? req.body.text.slice(0, 2000) : null;
     const r = await D.answer(t, { accept: action === 'accept', text, by: 'agent' });
@@ -1843,13 +1930,31 @@ router.post('/api/agent/browser/detach', (req, res) => {
     res.json({ ...r, attachments: set.attachments, handles: set.handles, defaultId: set.defaultId });
   } catch (e) { fail(res, e); }
 });
-router.get('/api/agent/browser/status', (req, res) => {
+router.get('/api/agent/browser/status', async (req, res) => {
   const k = keeperOr503(res); if (!k) return;
   const f = agentFacts(req, res); if (!f) return;
   const B = require('../browser-profiles.js');
   // `shared` (D7): the bare verbs of a session on the shared rung reach the machine's browser — status says so
-  try { res.json({ ...k.statusFor(f.browserKey), sessionId: f.sessionId, shared: !B.isolatedVariant(f.session._browserVariant) }); } catch (e) { fail(res, e); }
+  try {
+    const st = k.statusFor(f.browserKey);
+    // lane browser-recipes: what an agent reads when it lacks something also names the recipe (manual §0) — and, on a
+    // machine with no display, that only vibespace-browser works there (userR's agent launched chromium by hand)
+    const R = require('../browser-recipes.js');
+    res.json({ ...st, sessionId: f.sessionId, shared: f.job ? false : !B.isolatedVariant(f.session._browserVariant), recipe: f.remote ? R.REMOTE_POINTER : R.RECIPE_POINTER, noDisplay: (await statusNoDisplayOf(k, f, st)) || null }); // verify r1 F1: on another machine the recipe cannot be followed — say so
+  } catch (e) { fail(res, e); }
 });
+/** lane browser-recipes: the no-display sentence for THIS conversation's `status` — a LIVE browser of its own says what
+ *  its launch found (the recorded fact), else this machine is probed now; a conversation on another machine: nothing
+ *  (its browser runs there, this machine's display is not its). '' = a display is here (or nothing is known). */
+async function statusNoDisplayOf(k, f, st) {
+  const s = f.session || {};
+  if (s.hostId || s.host || s._browserVariant === 'H') return '';
+  const R = require('../browser-recipes.js');
+  const live = [st.ephemeral && st.ephemeral.live ? st.ephemeral : null, ...(st.leases || []).map((l) => (l.browser && l.browser.state === 'ready' ? l.browser : null))].find((b) => b && b.display) || null;
+  if (live) return R.noDisplayLine({ fact: live.display });
+  if (typeof k.machineDisplay !== 'function') return '';
+  try { return R.noDisplayLine({ display: await k.machineDisplay() }); } catch { return ''; }
+}
 router.post('/api/agent/browser/pin', (req, res) => {
   const k = keeperOr503(res); if (!k) return;
   const f = agentFacts(req, res); if (!f) return;

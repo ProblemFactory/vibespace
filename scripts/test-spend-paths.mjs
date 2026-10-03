@@ -371,6 +371,14 @@ const PRIMITIVES = [
   { id: 'deliver-ladder', re: /deliverToConversation\s*\(/g, why: 'the delivery ladder itself (jobs notifications, agent messages)' },
   { id: 'stop-nudge', re: /block:\s*true/g, why: 'the Stop hook arbiter — block+reason IS an extra billed mini-turn' },
   { id: 'reset-credit', re: /type:\s*'codex-reset-credit'/g, why: 'consumes a stored reset credit (money already paid for)' },
+  // lane reset-path: the SAME spend through ONE bounded codex app-server child when no conversation can carry it
+  // (a person's click on Use… — billed-turn-free, but the credit is money and the census must SEE the site)
+  { id: 'reset-credit-helper', re: /consumeResetCreditViaAppServer\s*\(/g, why: 'consumes a stored reset credit through the helper app-server (no conversation carries it)' },
+  // lane worker-dispatch (2026-10-02): THE typing path's CALL — every caller is a site. The owner's two (the ws
+  // chat-input case, the For-you Reply route) are ALLOW rows; an agent's dispatch typing `/compact` into an idle
+  // worker (src/server/worker-dispatch.js) must be GATED at its own site — it asks the authorizer WITH a hold (reason
+  // peer-compact, verify r1 ⑤: the compaction is a counted model call) before the compaction; the wake is the ladder's.
+  { id: 'typed-send', re: /\bsendUserInput\s*\(/g, why: "types a frame into a live session through THE typing path (src/server/user-input.js) — anything but the owner's own keyboard / click is a turn nobody typed" },
 ];
 // GATED = the file ASKS THE GATE. It must be a CALL, never a mention: r2 found
 // `src/server/usage-pool-engine.js` reported GATED because it CONSTRUCTS the
@@ -390,6 +398,9 @@ const HEADER_NAME = /(?:function\s+([A-Za-z_$][\w$]*)|(?:const|let|var)\s+([A-Za
 // round closed — a new `formatChatInput` in src/jobs.js must still be caught by
 // the row that excuses its `deliverToConversation` call.
 const ALLOW = [
+  { file: 'src/ws-handler.js', prim: 'typed-send', why: "the ws chat-input case: the OWNER typing in a chat window (a per-occurrence owner action — never counted, D6)" },
+  { file: 'src/routes/user-todos-reply.js', prim: 'typed-send', why: "the For-you Reply route: the OWNER clicking Reply (owner-only, agent tokens refused — design-user-inbox-reply D1.1)" },
+  { file: 'src/server/design-engine.js', prim: 'typed-send', why: "the Design window's comment: the OWNER's click on an artboard element + their words (POST /api/design/comment — ownerOnly, an agent's bearer refused by name), typed as the owner's own message (origin design-comment, never counted) — lane design-chrome L4 B③, composed with lane worker-dispatch's typed-send row at the 2.369.202 integration" },
   { file: 'src/server/user-input.js', prim: 'user-frame', why: 'THE HUMAN PATH: the ws chat-input case is the owner typing, and the For-you reply route (src/routes/user-todos-reply.js, owner-only, agent tokens refused) is the second caller of the SAME function — the owner clicking Reply. Owner-typed turns are never counted (D6) — this row IS that rule (design-user-inbox-reply D1.1)' },
   { file: 'src/adapters/claude-code.js', prim: 'user-frame', why: 'a FORMATTER: builds the frame, never sends it' },
   { file: 'src/adapters/codex.js', prim: 'user-frame', why: 'a FORMATTER: builds the frame, never sends it' },
@@ -429,6 +440,9 @@ const ALLOW = [
   // 2026-09-27 (the owner: "我在界面里完全看不到'有消息在 queue'这件事情"): the strip's "Hand over now" — the user's click —
   // FORWARDS the whole stash as ONE message to the gated ladder under its own declared reason; a refusal leaves the stash as it was.
   { file: 'src/server/stash-handover.js', prim: 'deliver-ladder', why: "the stash hand-over FORWARDS the waiting notices as ONE message to the gated ladder (spendReason 'stash-handover'); it drains only what was delivered, a refused or unreachable hand-over leaves the stash untouched and says why" },
+  // lane reset-path: the helper module's own definition — the primitive; its ONE caller (the engine's
+  // writeResetCreditViaHelper) asks the gate first, which is what makes the engine's site report GATED
+  { file: 'src/codex-reset-helper.js', prim: 'reset-credit-helper', why: "the PRIMITIVE (one bounded codex app-server child); policy lives at its one caller, the engine's writeResetCreditViaHelper, which asks spendGuard.authorize first (test-vendor-whitelist §8 pins the order)" },
   { file: 'src/server/groups-engine.js', prim: 'deliver-ladder', why: "the agent-groups engine's ONE wake site FORWARDS to the gated ladder (spendReason 'peer-message'); a refusal is journaled and the message rides the member's next-turn report — the engine never stashes and never opens a turn beside the ladder" },
 ];
 
@@ -590,6 +604,20 @@ function trackedServerSource() {
         bh.length === 1 && cbody.length > 400 && !/deliverToConversation|authorizeSpend|spendReason/.test(cbody) && /deliver\.stashFor\(cid, \{ source: 'agent', kind: 'notification', fromName: FROM_NAME, ref: id, text \}\)/.test(cbody) && /emitCard\(sess\.s, card\)/.test(cbody)
           && /if \(ev\.cause === 'continue'\) return;\n      announce\(ev\)/.test(bsrc) && require(path.join(REPO, 'src/browser-takeover.js')).announceVerdict({ cause: 'continue', announceIdle: true }).deliver === false,
         JSON.stringify({ sites: bh.length, body: cbody.length }));
+    }
+
+    // THE DESIGN WINDOW'S COMMENT (lane design-chrome L4 B③): the user's click on an artboard element + their words go
+    // down THE typing sender (src/server/user-input.js — the owner's own message, never counted) or into the durable
+    // stash; the engine names no spend reason, asks no authorizer and never calls the ladder — a design comment cannot
+    // open a turn by itself, and the census finds no producer site in it
+    {
+      const dsrc = read('src/server/design-engine.js');
+      ok('§2 LANE DESIGN-CHROME: the design comment opens no turn nobody typed — design-engine.js holds no ladder call, no authorizer, no spend reason and no frame formatter; its comment goes to the typing sender (sendUserInput, origin design-comment) or the stash (stashFor, source design-comment), and the census finds no producer site in it but that typing sender (its typed-send row is an ALLOW: the owner\'s own click — lane worker-dispatch\'s census, composed at the 2.369.202 integration)',
+        !/deliverToConversation|authorizeSpend|spendReason|formatChatInput|peerPost|postToInbox/.test(dsrc)
+          && /sendUserInput\(sessionId, line, \{ msgId: now\(\) \+ '-design', origin: 'design-comment' \}\)/.test(dsrc)
+          && /deliver\.stashFor\(cid, \{ source: 'design-comment', kind: 'peer', fromName: DESIGN_COMMENT_FROM, text: line \}\)/.test(dsrc)
+          && hits.filter((h) => h.file === 'src/server/design-engine.js' || h.file === 'src/routes/design.js').every((h) => h.file === 'src/server/design-engine.js' && h.prim === 'typed-send' && ALLOW.some((a) => a.file === h.file && a.prim === h.prim)),
+        JSON.stringify(hits.filter((h) => /design/.test(h.file))));
     }
 
     // NEGATIVE CONTROL: a synthetic producer in a scratch tree.
@@ -1781,7 +1809,12 @@ console.log('\n§5e the two calls that must NOT consume the budget: the probe an
       const code = stripLineComments(read(f));
       for (const m of code.matchAll(/hold:\s*false/g)) probes.push(`${f}:${code.slice(0, m.index).split('\n').length}`);
     }
-    ok('§5e the ONLY probe in the tracked server source is auto-resume\'s pre-gate question',
+    // lane worker-dispatch verify r1 ⑤ (2026-10-02): the lane's r0 added a SECOND hold-free probe here (a dispatch asking
+    // about the wake before the worker's compaction) — refuted: a compaction is a model call nobody typed, and a probe
+    // that holds nothing let it run uncounted (and a 3-minute window in which the wake was still unauthorized). The
+    // dispatch now authorizes the compaction WITH a hold under its own reason (peer-compact) and notes it; its only
+    // hold-free call is gone, so auto-resume's pre-gate question is again the ONE probe.
+    ok('§5e the ONLY probe in the tracked server source is auto-resume\'s pre-gate question (a dispatch\'s compaction is HELD + noted under peer-compact, never probed)',
       probes.length === 1 && probes[0].startsWith('src/server/auto-resume.js:'), probes.join(', ') || 'none found');
   }
 
@@ -2417,7 +2450,8 @@ console.log('\n§9 fail closed: an authorizer that throws spends nothing (P8)');
   const creditWorld = (hour, { cold = false } = {}) => {
     const w2 = mkWorld({ settings: { 'codex.limitResetCredit': 'auto', 'spend.unattendedPerIdentityHour': hour } });
     const wrote = [];
-    const s2 = { backend: 'codex', mode: 'chat', _webuiId: 'cx1', _accountId: w2.P, pty: { write: (x) => wrote.push(String(x)) }, name: 'cx',
+    // the stub wrapper says the consume LEFT (`reset_credit_sent`, lane reset-path): the charge is made on the SEND
+    const s2 = { backend: 'codex', mode: 'chat', _webuiId: 'cx1', _accountId: w2.P, pty: { write: (x) => { wrote.push(String(x)); if (/"codex-reset-credit"/.test(String(x))) { try { w2.eng.recordCodexQuotaSignal(s2, { type: 'reset_credit_sent', idempotencyKey: JSON.parse(String(x)).idempotencyKey, attempt: 1 }); } catch { } } } }, name: 'cx',
       ...(cold ? { _isStreaming: false, _turnState: 'idle' } : { _isStreaming: true, _turnState: 'running', _lastPtyDataAt: Date.now() }) };
     w2.sessions.set('cx1', s2);
     // the wall comes LATER than the world's healthy readings (test-codex-pool's

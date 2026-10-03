@@ -498,6 +498,7 @@ const notify = await p1.evaljs(`(async () => {
   const addNote = [...dlg.querySelectorAll('button')].find((b) => b.textContent.trim() === '添加通知');
   [...document.querySelectorAll('.pp-pop .pp-row')].find((o) => /Xi/.test(o.textContent)).click(); await sleep(50);
   row.querySelector('input[type=radio][value=rule]').click(); await sleep(50);   // ② "只有符合规则的消息…"
+  row.querySelector('input[type=radio][value=wake]').click(); await sleep(50);   // lane channel-agent-watch W5: a NEW row starts at next turn (free) — Xi is WOKEN on its filter, so the owner picks "Wake it now"
   [...row.querySelectorAll('button')].find((b) => b.textContent.trim() === '添加规则').click(); await sleep(50);
   const inp = row.querySelector('.chan-af-rule input'); inp.value = 'deploy'; inp.dispatchEvent(new Event('input'));
   for (let i = 0; i < 40; i++) { const st = row.querySelector('.chan-af-stat'); if (st && !/估算中|估计中|Estimating/.test(st.textContent)) break; await sleep(150); }
@@ -556,6 +557,52 @@ const drop = await p1.evaljs(`(async () => {
 ok(drop.closed && drop.note && /Xi/.test(drop.note), 'removing Xi\'s access says BEFORE saving that its notification goes too', JSON.stringify(drop));
 const acc3 = ((await api('GET', '/api/channels')).json.adapters || []).find((x) => x.id === 'fake-poll').accountGrain;
 ok(acc3 && acc3.access.length === 1 && acc3.access[0].principal.name === '工作' && acc3.watchers.length === 0, 'the wire: Xi\'s access AND its notification are gone in one write; 工作 keeps its access', JSON.stringify(acc3));
+// lane everyone-principal (2026-10-02): GRANT ACCESS… WITH ALL AGENTS PICKED (zh) — the picker's FIRST row, its chip
+// first, its access row first; the wire is ONE {kind:'everyone', id:'*'} access row beside 工作's; the account card names
+// 所有 agent FIRST; taking All away again leaves 工作's row exactly as it was (the R3 legs below read that state)
+const allGrant = await p1.evaljs(`(async () => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  document.querySelector('.rail-panel-channels .chan-sec[data-adapter="fake-poll"] .chan-sec-more').click(); await sleep(200);
+  [...document.querySelectorAll('.context-menu .context-menu-item')].find((x) => x.textContent.trim() === '授权访问…').click();
+  for (let i = 0; i < 300 && !document.querySelector('#chan-access-dialog .chan-access-pick .pp-row'); i++) await sleep(100);
+  const dlg = document.getElementById('chan-access-dialog');
+  if (!dlg) return { fail: 'Grant access… did not open' };
+  const list = dlg.querySelector('.chan-access-pick .pp-list');
+  const first = list ? list.querySelector('.pp-row') : null;
+  const allRow = dlg.querySelector('.chan-access-pick .pp-row.pp-row-everyone');
+  if (!allRow) return { fail: 'no ALL AGENTS row', rows: [...dlg.querySelectorAll('.chan-access-pick .pp-row .pp-name')].map((x) => x.textContent) };
+  const facts = { firstIsAll: first === allRow, name: allRow.querySelector('.pp-name').textContent, hint: (allRow.querySelector('.pp-hint') || {}).textContent || '', disabled: allRow.getAttribute('aria-disabled') };
+  allRow.click(); await sleep(80);
+  const chips = [...dlg.querySelectorAll('.chan-access-pick .pp-chip .pp-chip-name')].map((x) => x.textContent);
+  const rows = [...dlg.querySelectorAll('.chan-access-row .chan-access-who')].map((x) => x.textContent);
+  ${TOAST_LOG}
+  const out = await (${SAVE_OUTCOME('chan-access-dialog')})([...dlg.querySelectorAll('button')].find((b) => b.textContent.trim() === '保存'));
+  return { ...facts, chips, rows, ...out };
+})()`);
+ok(!allGrant.fail && allGrant.firstIsAll && allGrant.name === '所有 agent' && allGrant.hint === '每个会话，现在和以后' && allGrant.disabled === null, `授权访问… with ALL AGENTS (zh): the picker's FIRST row is "${allGrant.name}" · "${allGrant.hint}", never greyed`, JSON.stringify(allGrant));
+ok(!allGrant.fail && allGrant.chips.join('|') === '所有 agent|工作' && allGrant.rows[0] === '所有 agent' && allGrant.rows.length === 2 && allGrant.closed && !(allGrant.toasts || []).some((x) => x.error) && (allGrant.toasts || []).some((x) => /访问权限已保存/.test(x.text) && /所有 agent/.test(x.text)), `…its chip and its access row come FIRST (${(allGrant.chips || []).join(' · ')} / ${(allGrant.rows || []).join(' · ')}); Save closes with "访问权限已保存：所有 agent, …"`, JSON.stringify(allGrant));
+const accAll = ((await api('GET', '/api/channels')).json.adapters || []).find((x) => x.id === 'fake-poll').accountGrain;
+ok(accAll && accAll.access.length === 2 && accAll.access.some((r) => r.principal.kind === 'everyone' && r.principal.id === '*' && r.authority === 'draft') && accAll.access.some((r) => r.principal.name === '工作'), 'the wire: ONE {kind:everyone, id:*} access row beside 工作\'s — the payload\'s one spelling', JSON.stringify(accAll && accAll.access));
+const cardAll = await p1.evaljs(`(async () => {
+  for (let i = 0; i < 60; i++) { const l = document.querySelector('.rail-panel-channels .chan-sec[data-adapter="fake-poll"] .chan-grain-line[data-grain="account"]'); if (l && /所有 agent/.test(l.textContent)) return l.textContent; await new Promise((r) => setTimeout(r, 200)); }
+  const l = document.querySelector('.rail-panel-channels .chan-sec[data-adapter="fake-poll"] .chan-grain-line[data-grain="account"]'); return l ? l.textContent : null;
+})()`);
+ok(typeof cardAll === 'string' && /^访问：所有 agent（起草）, 组 · 工作（起草）/.test(cardAll), `the account card names 所有 agent FIRST: "${cardAll}"`, cardAll);
+const allDrop = await p1.evaljs(`(async () => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  document.querySelector('.rail-panel-channels .chan-sec[data-adapter="fake-poll"] .chan-sec-more').click(); await sleep(200);
+  [...document.querySelectorAll('.context-menu .context-menu-item')].find((x) => x.textContent.trim() === '授权访问…').click();
+  for (let i = 0; i < 300 && !document.querySelector('#chan-access-dialog .chan-access-pick .pp-chip'); i++) await sleep(100);
+  const dlg = document.getElementById('chan-access-dialog');
+  const x = dlg.querySelector('.chan-access-pick .pp-chip[data-key="everyone:*"] .pp-chip-x');
+  if (!x) return { fail: 'no All chip to remove' };
+  x.click(); await sleep(80);
+  [...dlg.querySelectorAll('button')].find((b) => b.textContent.trim() === '保存').click();
+  for (let i = 0; i < 50 && document.getElementById('chan-access-dialog'); i++) await sleep(100);
+  return { closed: !document.getElementById('chan-access-dialog') };
+})()`);
+const accBack = ((await api('GET', '/api/channels')).json.adapters || []).find((x) => x.id === 'fake-poll').accountGrain;
+ok(!allDrop.fail && allDrop.closed && accBack && accBack.access.length === 1 && accBack.access[0].principal.name === '工作' && accBack.access[0].authority === 'draft', 'taking ALL AGENTS away (its chip\'s ×) leaves 工作\'s row exactly as it was', JSON.stringify({ allDrop, access: accBack && accBack.access }));
 // (merge of R3 + R4, 2.369.191) R3's r2 checks run AFTER R4's ⑤: the account now holds 工作's ACCESS
 // row only (Xi's access + notification were just removed) — the same "handed over at the account
 // grain, nothing delivered" state D4 is about.
@@ -620,6 +667,7 @@ const OWNER_NOTIFY = (edit, construct = false) => `(async () => {
     // clamp under it) — the owner's two 9999s, each said at its own field (verify round 2: the cap bounds the
     // digest too, so it is no third answer to click)
     const nums = [...row.querySelectorAll('input[type=number]')];
+    row.querySelector('input[type=radio][value=wake]').click();   // lane channel-agent-watch W5: a new row starts at next turn (free) — the owner's digest paces WAKES, so "Wake it now" first
     row.querySelector('input[type=radio][value=digest]').click();
     nums[0].value = '9999'; nums[0].dispatchEvent(new Event('input'));
     nums[1].value = '9999'; nums[1].dispatchEvent(new Event('input'));

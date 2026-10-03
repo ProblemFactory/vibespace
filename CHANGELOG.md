@@ -2,6 +2,90 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.202 — 2026-10-02
+
+### Added
+- A Design window shows each screen as the agent drafts it from your brief; click any part to comment, or publish the design as a link.
+- A scheduled job can use the agent browser the same way its conversation does — the same profile and logins, its own window.
+- Every place that asks which agents may use something now offers All agents — every conversation, now and later — as the first choice.
+- An agent can ask to be told about new messages in a chat it can read; waking it needs your approval.
+- An agent can see the titles of group chats it may ask you to read; you turn this on or off per account.
+- Agents can take down a page they published or switch it between public and private; a removed page's link says it was taken down.
+- Gmail replies can go to everyone on a mail and stay in its thread; the approval card lists every recipient and the window has a Reply all box.
+- When a conversation stops unexpectedly while working, VibeSpace restarts it once by itself at no cost and tells you in For you.
+- You can use a codex reset credit from the Agents list even when no chat session is open on that account.
+- Session Properties lists the background jobs a conversation owns; click one to open it.
+- You can give any Lark author your own name for them from the author's menu; it shows everywhere, including to your agents.
+- Each conversation's picture in Channels carries a small badge coloured by its account; with two accounts of one kind, the row says which.
+
+### Changed
+- When you set up a notification, you choose whether the agent is told on its next turn or woken right away.
+- Giving an agent a whole account lets you set up a notification on any of its chats without granting each one.
+- Several agents and you can use one browser profile at the same time, each in its own window; taking over pauses only the window you take.
+- The live view's tabs switch on a click; while you only watch, a click shows that tab without moving the agent's.
+- The number of browsers allowed to run at once on this machine is a setting (Agent browser, 6 by default).
+- Asked to use your logged-in browser, an agent now knows the steps: a profile, you log in once in the Agent browser window, it works there.
+- Messages from other agents and jobs arrive folded to one line; press Show to read the whole message.
+- The Outbox lists one row per proposal — who gets it, where, its first line, its state and Approve…; click a row to see it whole.
+- A group member set to Mention now receives only the messages that @mention it.
+- An @ that names nobody in an agent group is caught before the message is sent, with the members it could mean.
+- Manage Agents and the usage popup say when this machine's CLI login and an account are one account with two separate sign-ins.
+- When background-job notifications are dropped because 30 are already waiting, For you tells you, at most once an hour.
+- In Watch mode, the copy and paste keys explain that only the window driving the app has its clipboard.
+
+### Fixed
+- A live view whose tab is hidden behind another tab says so and keeps a picture coming; a click on that tab brings it to the front.
+- A VibeSpace started from a git worktree or a temporary folder no longer registers its hooks into your real Claude Code / Codex settings.
+- The Desktop window no longer drops every minute on a slow link, and Paste always says what happened — it waits for a reconnect.
+- A live view whose connection silently dies is noticed within a minute and no longer counts as a viewer.
+- On a phone, the billing chip shows the account's name whole or a short form, never cut in the middle.
+- A message you send while scrolled up in a chat always shows: the chat returns to the newest messages and lands on it.
+- Scrolling up quickly through a long chat no longer stops at the top of the loaded messages; it keeps loading as you scroll.
+- A second message sent while a conversation reconnects no longer goes missing, and a reconnected terminal shows what it missed without a reload.
+- A session using the experimental daemon pipe is no longer ended by a slow acknowledgement.
+- An agent that parks a very long Backlog item is asked to shorten it, instead of being told it failed and saving it twice.
+- A page link (/p/…) in a chat message opens the page again with Cmd/Ctrl+click, and a click copies its full address.
+- A web address shown as code or in a tool's output is copied whole when clicked, and Cmd/Ctrl+click opens it.
+- After VibeSpace restarts, an agent typing into a window you shared in auto mode types as before instead of failing with a setup error.
+- When an agent's typing into a shared window is cut off, no key is left repeating, and Chinese or accented text types on more machines.
+- Channel notices, Outbox cards, For-you items and a chat's channel rows show the conversation's name, not an internal id; clicking it opens it.
+- In the Outbox, a new message's envelope line no longer looks like a link that does nothing.
+- A Lark one-to-one chat is named after the other person everywhere, including what agents see, instead of its internal id.
+- A Lark message that got a thread after VibeSpace had read it now shows the thread; people who left a chat and bots are named.
+- In an agent group an @mention shows as a name tag that opens that agent's conversation.
+- You can select and copy the text of a group message, or use Copy text in its menu.
+- A member removed from a group is shown by name, not by an id.
+- A group message waiting for an agent reaches it with your first message after a restart; while it is busy, the strip says when.
+- For you › Notifications no longer counts your own confirmations, such as Copied or Reply sent, as unread.
+- A terminal session's dot in For you no longer says it is idle.
+- Pooled conversations no longer move to an account in the minute before its weekly reset takes effect, where every continue was rejected.
+- A reset credit that could not be sent no longer starts the ten-minute wait, and the dialog says why it was refused.
+- After you use a reset credit, the chat card that offered it shows that it was used instead of its button.
+- The usage menu's Codex refresh says what it read, or why it could not, and updates the numbers at once.
+- A reset credit is never spent twice on the same limit, and one granted a moment ago is never counted as unused.
+- Codex readings that arrive late, or from a machine whose clock runs behind, no longer undo or block a newer reading of the account.
+- The minimap and message outline no longer show VibeSpace's reminders to the assistant as yours, and a new session's start-up note is folded at once.
+- A background helper reopened from history shows "Helper started: …" and stays linked to its helper.
+- When a model's safeguards hand a message to another model, the status bar's model chip says "refusal" instead of blaming capacity.
+- A remote session's name no longer gains a copy of its folder path each time the page reloads.
+- The workspace no longer stops when one background process runs out of memory.
+- A folder mounted from one of your machines shows a file changed in place, such as a database, within seconds, even to a program keeping it open.
+- An agent browser that closes every few minutes is no longer restarted for ever: after 10 restarts in a day it stops and you get one notice.
+- 3D pages (WebGL) work in an agent browser that runs in a hidden window on a machine with no desktop.
+- The live view says when the agent's tab is not responding, instead of showing a blank picture.
+- On a machine with a VNC desktop, the Agent browser no longer says there is no desktop session; it says the browser is not on it.
+- After a pinned profile is deleted, the browser note no longer reads "a deleted profile was deleted".
+- Stopping or rescaling LibreOffice no longer loses unsaved edits — it asks in its own window first; only "Stop and lose the edits" discards them.
+- Where LibreOffice is installed without Word's look-alike fonts, the file menu offers to install them.
+- Closing the last document inside LibreOffice ends it instead of leaving its Start Center.
+- "Open with LibreOffice" shares the window with agents the way you last shared LibreOffice.
+- The Desktop starts even when a desktop app already took its usual display.
+- A desktop app such as Blender opens inside its VibeSpace window instead of on the machine's own screen.
+
+### Security
+- The keys your agents use to talk to VibeSpace are checked in constant time, so response timing reveals nothing about them.
+- A background job is refused when its command would read your Claude, ChatGPT or OpenCode sign-in files; calling an API with your own key works.
+
 ## 2.369.201 — 2026-10-02
 
 ### Fixed

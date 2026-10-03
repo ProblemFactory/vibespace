@@ -41,6 +41,10 @@ export function readingSource(source, { corroborated = undefined, t = (s) => s }
     // is a pure payload mapper, so the channel has to be named at the write.
     case 'codex-rate-limits':
       return { key: 'session', label: t('own session'), tip: t("A live Codex session on this account's credential slot pushed its own rate limits.") };
+    // lane reset-path: the short-lived codex app-server a person's reset credit ran through from the
+    // Agents list (no conversation could carry it) — its post-consume read, on the account's own login
+    case 'codex-reset-helper':
+      return { key: 'helper', label: t('reset-credit helper'), tip: t("Read right after a reset credit was used from the Agents list, by a short-lived Codex helper process on this account's own login.") };
     case 'codex-rollout':
       return { key: 'transcript', label: t('session transcript'), tip: t('Read from a recent Codex session transcript on this machine — as fresh as that session\'s last turn, not as of now.') };
     case 'limit-banner':
@@ -225,4 +229,27 @@ export function limitRows(model, set, { modelName = null, family = null, t = (s)
       note: w.state === 'empty' ? t('starts on first use') : null,
     })),
   }));
+}
+
+/** THE CODEX ⟳'S ANSWER IN ONE SENTENCE (lane reset-path R4, the owner: the press refreshed the cache and
+ *  nothing said so). `a` = POST /api/usage/codex-refresh's answer (null = the server never answered).
+ *  → { text, error } — the reading (whose, each window's use and reset, the stored credits), the wrapper's
+ *  refusal, the timeout, or the missing session, BY NAME. `fmtTime(sec)` words an instant on this device. */
+export function codexRefreshToast(a, { t = (s, p) => String(s).replace(/\{(\w+)\}/g, (m, k) => (p && p[k] !== undefined ? String(p[k]) : m)), fmtTime = (sec) => new Date(sec * 1000).toISOString() } = {}) {
+  const who = (x) => (!x || !x.name || /^__global/.test(String(x.name)) ? t('CLI login') : String(x.name));
+  if (!a || typeof a !== 'object') return { error: true, text: t('Codex ⟳: the server did not answer — try again') };
+  if (a.ok) {
+    const parts = [];
+    for (const [label, w] of [['5h', a.reading && a.reading.fiveHour], ['7d', a.reading && a.reading.sevenDay]]) {
+      if (!w || w.usedPercent == null) continue;
+      const pct = Math.round(Number(w.usedPercent));
+      parts.push(w.notStarted ? t('{label} {pct}% · starts on first use', { label, pct }) : w.resetsAt ? t('{label} {pct}% · resets {time}', { label, pct, time: fmtTime(w.resetsAt) }) : t('{label} {pct}%', { label, pct }));
+    }
+    const n = Number.isFinite(Number(a.resetCredits)) && a.resetCredits !== null ? Number(a.resetCredits) : null;
+    const credits = n === null ? '' : ' · ' + (n === 1 ? t('1 reset credit stored') : t('{n} reset credits stored', { n }));
+    return { error: false, text: (parts.length ? t('Codex · {account}: {windows}', { account: who(a), windows: parts.join(' · ') }) : t('Codex · {account}: read — the reply named no usage window', { account: who(a) })) + credits };
+  }
+  if (a.code === 'no_live_session') return { error: true, text: a.key ? t('No Codex chat session on {account} is running — the read rides its own app-server', { account: who(a) }) : t('Needs a running Codex chat session (the read rides its own app-server)') };
+  if (a.code === 'timeout') return { error: true, text: t('Codex ⟳ on {account}: no answer from its codex within {sec} s', { account: who(a), sec: Math.round((Number(a.timeoutMs) || 20000) / 1000) }) };
+  return { error: true, text: t('Codex ⟳ on {account} failed — {reason}', { account: who(a), reason: String(a.error || a.code || '?').slice(0, 160) }) };
 }

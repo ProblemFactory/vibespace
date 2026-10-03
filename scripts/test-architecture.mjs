@@ -44,11 +44,12 @@ const resolveRel = (from, spec) => {
 };
 
 // ── Tier membership (path-based; NEW files inherit their directory's tier) ──
-const PURE = new Set(['src/record-lateness.js' /* lane-hot-switch: a late record is not a live fact — the stream clock + the look-ahead, imports nothing */, 'src/hidden-chars.js', 'src/window-desktop.js', 'src/plugin-manifest.js', 'src/account-pool-auto.js', 'src/model-family.js', 'src/task-color-seq.js', 'src/ssh-key-format.js', 'src/session-schema.js', 'src/otel-truth.js', 'src/msg-acl.js', 'src/backend-caps.js',
+const PURE = new Set(['src/record-lateness.js' /* lane-hot-switch: a late record is not a live fact — the stream clock + the look-ahead, imports nothing */, 'src/hidden-chars.js', 'src/assistant-note.js' /* B-40f8: text addressed to the assistant — the note rule + THE turn preview, server builders and client alike; imports nothing */, 'src/window-desktop.js', 'src/plugin-manifest.js', 'src/account-pool-auto.js', 'src/model-family.js', 'src/task-color-seq.js', 'src/ssh-key-format.js', 'src/session-schema.js', 'src/otel-truth.js', 'src/msg-acl.js', 'src/backend-caps.js',
   // AGENT BROWSER (design-agent-browser-v2 §3.6): the identity/spawn-env decisions, the
   // registry + lease model and the keeper's verdicts — imports nothing (P0/P1); and the ONE
   // constants home every process keeper counts and bounds by (src/keeper-limits.js)
   'src/browser-profiles.js', 'src/keeper-limits.js',
+  'src/browser-job-principal.js', // lane jobs-browser: a Background Work job browses AS its owner conversation (child handle, the owner's admission + pin, route lists, the release rule); imports only browser-profiles
   // BROWSER TAKEOVER (design-browser-takeover §3): the ONE browser CLI's verb table — the router,
   // the child env and (r3) the config rule; imports nothing, shipped beside the CLI to hosts
   'src/browser-verbs.js',
@@ -66,15 +67,19 @@ const PURE = new Set(['src/record-lateness.js' /* lane-hot-switch: a late record
   // per-session url/env composition — imports only the sibling PURE census (the proxy does the I/O)
   'src/browser-mediation.js',
   'src/cdp-census.js', // verify S2 r4: ONE row per method of the installed Chrome's protocol, classed — the paused fence reads the class; imports nothing
+  'src/browser-windows.js', // lane browser-windows (2026-10-01): a window per holder — the measured placement (WINDOWS_PROOF), the window mates, the watch mode, the cap setting; imports nothing
   'src/browser-interrupt.js', // the owner's ruling (2026-09-27): the takeover's words (browser_interrupted), what was in flight off the trace, the takeover→handback cycle; imports nothing
   'src/browser-sessions.js', // browser SESSIONS (2026-09-27): markers, pairing, the chat cards of one conversation, the replay model; imports nothing
   'src/browser-recording-retention.js', // the video recordings' own 7 d / 200 MB bound (the trace became size-only, 2026-09-27); imports nothing
+  'src/browser-recipes.js', // lane browser-recipes (2026-10-02): the recipe pointer + the no-display sentence the status route, the first verb's refusal and the tools intro share; imports only browser-display (PURE → PURE)
   'src/browser-display.js', // lane headless-fallback (2026-09-28): headed is a preference, the display is a fact — the display verdict + the launch plan + the words; imports nothing (the keeper, the daemon's browser-serve and the client bundle share it)
   'src/search-card.js', // web-search card renderer + title query + twin key — shared server (codex normalizer) + browser (chat-renderers)
   'src/path-linkify.js', // where a chat file path ENDS (CJK punctuation) — shared browser (chat-renderers) + node tests; imports nothing
   'src/file-disposition.js', // lane raw-filename: THE one Content-Disposition that names a file (both RFC 6266 forms) — files.js + remote-fs.js; imports nothing
   'src/collab-row.js', // codex multi-agent collab row labels/HTML — esc/t/icons injected, so the XSS rule is unit-provable
   'src/model-echo.js', // the CLI's `Set model to` echo — ONE parser for the status bar, the command-card label and the server's model-lock repin
+  'src/design-model.js', // the Design window's canvas model (lane design-core): the manifest, the layout, one artboard's verdict, the ONE bundler, the comment line, the published page's state block — imports nothing (the hub requires it, the window bundles it)
+  'src/server-root.js', // lane hook-root-guard: rootVerdict — is this server the owner's instance (checkout) or a worktree / tmp / override root that must never write the owner's CLI config; imports nothing
   'src/changelog-style.js', // the user changelog's style rules (lint + parity of CHANGELOG.md / .zh / .ja) — test-changelog-style runs them over the three files; imports nothing
   'src/preset-layers.js', // lane cluster-presets: the company presets' per-key merge (cluster < release override), the ONE parser of both preset JSON shapes, the value-free diff + the Integrations line's words — imports only the PURE registry (a row's label); the server reader and the bundle share it
   // login-session lifetime (2026-09-07): the claude harness descriptor reads the
@@ -302,7 +307,7 @@ const SHARED = new Set(['src/discovery-facts.js', 'src/sysinfo.js', 'src/machine
   // lane-pairing verify-r3: THE ONE DOOR of a pairing token (mint / hash / constant-time compare) — node crypto only;
   // the hub's gate + minter and the device's hello share it (the daemon bundles it)
   'src/pairing-token.js']);
-const DEVICE = new Set(['src/agentd/agentd.js', 'src/agentd/mux.js', 'src/agentd/reexec.js', 'src/agentd/version.js', 'src/agentd/ws-min.js']);
+const DEVICE = new Set(['src/agentd/agentd.js', 'src/agentd/mux.js', 'src/agentd/reexec.js', 'src/agentd/version.js', 'src/agentd/worker-pool.js', 'src/agentd/ws-min.js']);
 const ORCH_FILES = ['server.js', 'src/hosts.js', 'src/ws-handler.js', 'src/ws-create.js', 'src/agentd/client.js'];
 const isOrch = (p) => p === 'server.js' || p === 'src/ws-handler.js' || p === 'src/ws-create.js' || p === 'src/hosts.js' || p === 'src/agentd/client.js'
   || p.startsWith('src/routes/') || p.startsWith('src/server/') || p.startsWith('src/channels/') || ['src/mounts.js', 'src/accounts.js', 'src/task-groups.js', 'src/usage-history.js',
@@ -1588,6 +1593,71 @@ for (const [edge] of EXCEPTIONS) {
     '§50 withoutVendorKeys strips all four ambient credentials and keeps everything else');
 }
 
+// §50b THE REAL-CODEX HOME CENSUS (lane hook-root-guard, B-c77a, 2026-10-02).
+//     The owner's ~/.codex/config.toml carried 676 `[projects."/tmp/vs-qs-real-…"]
+//     trust_level = "trusted"` tables (692 in all): test-queue-steer ⑥ ran the
+//     wrapper against a REAL `codex app-server` with the AMBIENT CODEX_HOME,
+//     once per heavy run. A real app-server child owns a config it may write,
+//     so every site that starts one (a spawn / exec whose call text names
+//     `app-server`) pins CODEX_HOME — inline, or through an env variable whose
+//     initializer names it — or declares `// real-cli-home: <why>` within the
+//     three lines above. A stub (`process.execPath, '-e', STUB`) is not a site.
+{
+  const CALL = /\b(?:spawn|spawnSync|execSync|execFile|execFileSync)\(/;
+  // the call's own text: from the token to its matching close paren (strings and
+  // templates skipped), so a multi-line options object is judged whole
+  const callTextAt = (text, at) => {
+    let i = text.indexOf('(', at), depth = 0, q = null;
+    for (; i < text.length; i++) {
+      const c = text[i];
+      if (q) { if (c === '\\') i++; else if (c === q) q = null; continue; }
+      if (c === "'" || c === '"' || c === '`') q = c;
+      else if (c === '(') depth++;
+      else if (c === ')' && --depth === 0) break;
+    }
+    return text.slice(at, i + 1);
+  };
+  const sitesIn = (text) => {
+    const lines = text.split('\n'), out = [];
+    let offset = 0;
+    lines.forEach((l, i) => {
+      const lineAt = offset; offset += l.length + 1;
+      const m = CALL.exec(l);
+      if (!m || /^\s*\/\//.test(l)) return;
+      const call = callTextAt(text, lineAt + m.index);
+      const argv = call.indexOf('{') < 0 ? call : call.slice(0, call.indexOf('{'));
+      if (!/'app-server'|`[^`]*\bapp-server\b/.test(argv)) return;
+      const envVar = (/\benv:\s*([A-Za-z_$][\w$]*)\s*[,}]/.exec(call) || [])[1];
+      const varPins = envVar && new RegExp(`(?:const|let|var)\\s+${envVar.replace(/\$/g, '\\$')}\\s*=[^;]*\\bCODEX_HOME\\b`).test(text);
+      const declared = lines.slice(Math.max(0, i - 3), i).some((x) => /\/\/ real-cli-home: .{10,}/.test(x));
+      out.push({ line: i + 1, text: l.trim().slice(0, 100), pinned: /\bCODEX_HOME\b/.test(call) || !!varPins || declared });
+    });
+    return out;
+  };
+  const files = fs.readdirSync('scripts').filter((f) => /^(test|probe|measure)-.*\.mjs$/.test(f) && f !== 'test-architecture.mjs').map((f) => 'scripts/' + f);
+  const sites = files.flatMap((f) => sitesIn(fs.readFileSync(f, 'utf8')).map((x) => ({ file: f, ...x })));
+  ok(sites.length >= 3 && sites.some((x) => x.file === 'scripts/test-queue-steer.mjs'), `§50b census scope is non-vacuous (${sites.length} real app-server spawn sites: ${sites.map((x) => x.file.replace('scripts/', '') + ':' + x.line).join(', ')})`);
+  const bad = sites.filter((x) => !x.pinned);
+  ok(bad.length === 0, `§50b every real codex app-server child runs on a pinned CODEX_HOME (never the owner's ~/.codex)${bad.length ? ' — ' + bad.map((x) => `${x.file}:${x.line} ${x.text}`).join('; ') : ''}`);
+  const leg6 = sitesIn(fs.readFileSync('scripts/test-queue-steer.mjs', 'utf8')).find((x) => /codex-chat-wrapper\.js'\), buf, sidecar/.test(x.text));
+  ok(leg6 && leg6.pinned, 'test-queue-steer ⑥ (the 676-trust-entries writer) is a site and pins CODEX_HOME');
+  { // THE RETIRED BYTES: the census catches leg ⑥ exactly as it shipped (lane base b924041f)
+    const r = spawnSync('git', ['show', 'b924041f:scripts/test-queue-steer.mjs'], { encoding: 'utf8', env: gitEnvFrom(process.env), maxBuffer: 64 * 1024 * 1024 });
+    if (r.status !== 0) console.log(`  SKIP (LOUD): §50b retired-bytes control — git cannot read b924041f here (${(r.stderr || '').trim().slice(0, 80)})`);
+    else {
+      const old = sitesIn(r.stdout).find((x) => /codex-chat-wrapper\.js'\), buf, sidecar/.test(x.text));
+      ok(old && old.pinned === false, '§50b RETIRED-BYTES CONTROL: leg ⑥ as it shipped (b924041f, ambient CODEX_HOME) is caught by this census');
+    }
+  }
+  const ctl = (src) => sitesIn(src).map((x) => x.pinned);
+  ok(String(ctl("const w = spawn(process.execPath, [W, buf, sc, 'codex', 'app-server'], {\n  env: { ...withoutVendorKeys(process.env), CODEX_WEBUI_CWD: dir },\n});")) === 'false'
+    && String(ctl("const e = { ...process.env, CODEX_HOME: h };\nconst srv = spawn('codex', ['app-server'], { env: e });")) === 'true'
+    && String(ctl("// real-cli-home: reads --version only, writes nothing\nexecSync(`codex app-server --help`);")) === 'true'
+    && String(ctl("const e = { ...process.env };\nconst srv = spawn('codex', ['app-server'], { env: e });")) === 'false'
+    && ctl("const w = spawn(process.execPath, [W, b, m, process.execPath, '-e', STUB], { env: {} });").length === 0,
+  '§50b NEGATIVE CONTROL: the pre-fix leg ⑥ shape is caught, a pinned env variable passes, a reasoned declaration passes, an unpinned variable is caught, a stub is no site');
+}
+
 // §51 A SUITE NEVER WRITES A PATCHED COPY INTO THE TREE (B-0220 generalized,
 // 2.369.164 batch r1). A negative control used to load a copy of a product
 // module written as a SIBLING in src/ (so its relative requires resolved),
@@ -2170,6 +2240,45 @@ console.log('§57 every suite that spawns server.js hands it per-run singleton-D
   for (const f of suites) { const r = judge(fs.readFileSync(path.join(REPO, 'scripts', f), 'utf8')); if (!r.spawns) continue; scope.push(f); for (const x of r.findings) bad.push(`${f} ${x}`); }
   ok(scope.length >= 50 && scope.includes('test-desktop-app-window.mjs'), `§57 census scope is non-vacuous (${scope.length} suites spawn server.js, the incident's suite among them)`);
   ok(bad.length === 0, `§57 every server.js spawn carries the per-run singleton-Desktop names${bad.length ? ' — ' + bad.join(' | ') : ''}`);
+  // §57b B-442c (2026-10-02, the 16:23 OOM that stopped the production service): A SUITE THAT BOOTS A SCRATCH SERVER ENDS WHAT
+  // THAT SERVER STARTED — scratch.mjs endRootedProcesses (cwd / HOME / the daemon's own VIBESPACE_*_ROOT / argv), called by the
+  // suite or by a scripts/ module it imports. The server's device daemon is setsid-detached by design and title-rewritten, so
+  // killing the server or `pkill -f <root>` leaves it; a suite that only deletes its root leaves it running on a deleted
+  // bundle — test-restore-liveness's §4 orphan grew to 45.7 GB (src/agentd/worker-pool.js is bounded since). DEBT: the suites
+  // that predate the rule, by name; the list only SHRINKS (an entry that complies now, or is gone, is red until removed).
+  const ENDS_DEBT = new Set([
+    'test-agents-overview.mjs', 'test-attach-ack.mjs', 'test-attach-rescue.mjs', 'test-ax-budget.mjs', 'test-browser-continuity.mjs', 'test-browser-identity.mjs',
+    'test-browser-live-ui.mjs', 'test-browser-live.mjs', 'test-browser-multiview.mjs', 'test-browser-propose-chrome.mjs', 'test-browser-resume-ui.mjs', 'test-channel-jump.mjs',
+    'test-channel-threads-ui.mjs', 'test-channel-window-render.mjs', 'test-channels-aggregate-ui.mjs', 'test-channels-e2e.mjs', 'test-channels-groups-e2e.mjs', 'test-channels-panel-redraw.mjs',
+    'test-chat-e2e.mjs', 'test-chat-hygiene-ui.mjs', 'test-chat-paging.mjs', 'test-cli-cmd-refresh.mjs', 'test-client-boot.mjs', 'test-collab-live-counter.mjs',
+    'test-cwd-recreate.mjs', 'test-desktop-app-snap.mjs', 'test-desktop-app-window.mjs', 'test-desktop-drop.mjs', 'test-desktop-reorder.mjs', 'test-desktop-resume-paging.mjs',
+    'test-desktop-vnc-fit.mjs', 'test-desktop-xpra-window.mjs', 'test-desktop-xpra.mjs', 'test-fold-ux.mjs', 'test-fork-restore.mjs', 'test-gear-menu.mjs',
+    'test-ghost-host-heal.mjs', 'test-graduate-dial.mjs', 'test-group-report-card.mjs', 'test-harness-honesty.mjs', 'test-helper-ask-ui.mjs', 'test-inbox-reply-ui.mjs',
+    'test-incident.mjs', 'test-integration-toggle.mjs', 'test-integrations-ui.mjs', 'test-jobs-panel.mjs', 'test-minimap-jump.mjs', 'test-mobile-gaps.mjs',
+    'test-new-session-dialog.mjs', 'test-office-desktop.mjs', 'test-opencode-plugin.mjs', 'test-opencode-s9.mjs', 'test-permission-rules.mjs', 'test-profile-blindness-chip.mjs',
+    'test-queue-steer.mjs', 'test-readings-attribution.mjs', 'test-reattach-stagger-ui.mjs', 'test-reconnect-storm.mjs', 'test-restore-smoke.mjs', 'test-resume-breaker.mjs',
+    'test-roster-reset-eta.mjs', 'test-run-collapse-fold.mjs', 'test-sidebar-empty-remote.mjs', 'test-sidebar-rail.mjs', 'test-sidebar-scroll.mjs', 'test-split-close-resurrect.mjs',
+    'test-split-ux.mjs', 'test-stage-overlap.mjs', 'test-stage-preview.mjs', 'test-sys-panel.mjs', 'test-taskbar-group-ui.mjs', 'test-tasks-mirror-race.mjs',
+    'test-title-chips-ui.mjs', 'test-toolbar-resize.mjs', 'test-turn-truth-ui.mjs', 'test-ui-scale.mjs', 'test-update-dialog.mjs', 'test-window-binding.mjs',
+    'test-window-menu.mjs', 'test-worktree-userchan-ui.mjs',
+    // the 2.369.202 integration: server-booting suites the OTHER lanes of this release (and .200) added beside lane
+    // runaway-daemon's rule — the same debt, named; each leaves this list when it calls endRootedProcesses
+    'test-apps-ui.mjs', 'test-channel-lark-threads-ui.mjs', 'test-channel-names-ui.mjs', 'test-chat-send-landing.mjs', 'test-desktop-keepalive-chrome.mjs',
+    'test-mobile-select.mjs', 'test-page-link-ui.mjs', 'test-peer-card-fold-ui.mjs']);
+  const endsIn = (t) => { const data = dataRanges(t); return [...t.matchAll(/\bendRootedProcesses\s*\(/g)].some((m) => !data.some(([a, b]) => m.index >= a && m.index < b)); };
+  const harnesses = fs.readdirSync(path.join(REPO, 'scripts')).filter((f) => /\.mjs$/.test(f) && !/^test-/.test(f) && f !== 'scratch.mjs' && endsIn(fs.readFileSync(path.join(REPO, 'scripts', f), 'utf8')));
+  const endsVia = (t) => endsIn(t) || harnesses.some((h) => new RegExp(`from\\s+['"]\\./${h.replace('.', '\\.')}['"]`).test(t));
+  const noEnd = scope.filter((f) => !endsVia(fs.readFileSync(path.join(REPO, 'scripts', f), 'utf8')));
+  const fresh = noEnd.filter((f) => !ENDS_DEBT.has(f)), stale = [...ENDS_DEBT].filter((f) => !noEnd.includes(f));
+  ok(harnesses.includes('pairing-ui-harness.mjs') && scope.includes('test-restore-liveness.mjs') && !noEnd.includes('test-restore-liveness.mjs'),
+    `§57b the census reads harnesses (${harnesses.length}: ${harnesses.join(', ')}) and the incident's suite (test-restore-liveness) ends what its servers started`);
+  ok(fresh.length === 0, `§57b every server-booting suite ends what its server started (scratch.mjs endRootedProcesses)${fresh.length ? ' — NEW without it: ' + fresh.join(' ') : ''} (${noEnd.length} named debt)`);
+  ok(stale.length === 0, `§57b the debt list only shrinks${stale.length ? ' — complies now or gone, REMOVE from ENDS_DEBT: ' + stale.join(' ') : ''}`);
+  // NEGATIVE CONTROLS: a spawn with vncEnv and no end is named; an end spelled only in a comment or a string still is; a harness import is not
+  const fake = (body) => `import { vncEnv } from './scratch.mjs';\nconst c = spawn(process.execPath, ['server.js'], { env: { ...(await vncEnv()) } });\n${body}\n`;
+  ok(!endsVia(fake('')) && !endsVia(fake('// endRootedProcesses(ROOT)')) && !endsVia(fake("const s = 'endRootedProcesses(ROOT)';")) && endsVia(fake('endRootedProcesses(ROOT);')) && endsVia(fake("import { h } from './pairing-ui-harness.mjs';")),
+    '§57b NEGATIVE CONTROLS: no end / an end in a comment / in a string are named; a real call or a harness import passes');
+  // §57b end
   // NEGATIVE CONTROLS: the incident's own pre-fix shape (a named env, no names), an inline env, a spawn with NO env,
   // the preload and path.join argv forms — caught; the idiom through each route (inline, a variable, a spread of a
   // variable, a function-built env, the two literal names) — passes; a git ls-files ending in 'server.js' is no spawn.
@@ -2425,6 +2534,7 @@ console.log('§62 every path where the user names a window goes through wm.revea
     'src/lib/session-lifecycle.js': [2, '_focusExistingSession (sidebar card, palette, For-you / explorer / chat links, resume-already-open) + the tmux view'],
     'src/lib/chat-view.js': [2, 'the two sub-agent viewer dedupes'],
     'src/lib/workflow-detail.js': [2, 'the workflow window + its agent-log dedupe'],
+    'src/lib/design-window.js': [1, 'the Design window\'s one-per-(host, dir) re-open (a replay passes { replay })'],
     ...Object.fromEntries(['settings-ui', 'usage-window', 'task-log', 'task-detail', 'session-props', 'channel-window', 'channel-outbox', 'channels-panel', 'jobs-panel', 'integrations-window', 'sidebar-rail', 'browser-trace-view', 'desktop-window', 'desktop-app-window', 'browser-live-window', 'inbox-window']
       .map((n) => ['src/lib/' + n + '.js', [1, n === 'browser-live-window' ? 'the fold-back (D3)' : 'the singleton re-open (a replay passes { replay })']])),
   };
@@ -2715,6 +2825,7 @@ console.log('§65 every producer that can carry a conversation\'s facts to an ag
     speakFailure: 'the owner\'s For-you item for a failing account',
     speakUnsaved: 'the owner\'s For-you item for an unsaved token',
     request: 'files the OWNER\'s For-you item for an agent\'s access request (the owner decides it)',
+    fileWatchRequest: 'files the OWNER\'s For-you item for an agent\'s WAKE watch request (lane channel-agent-watch: the owner approves the billed notification)',
   };
   const census = (esrc, asrc, cli) => {
     const code = strip(esrc);
@@ -2785,6 +2896,34 @@ console.log('§65 every producer that can carry a conversation\'s facts to an ag
   const results = controls.map(([name, src, re]) => { const r = src ? census(src, asrc, cli) : { bad: ['(setup) the control\'s anchor was not found once'] }; return { name, ok: !!src && r.bad.some((x) => re.test(x)), bad: r.bad }; });
   ok(results.every((r) => r.ok) && cp.bad.some((x) => /\(A1\) peekFor never asks reach/.test(x)) && cliBad.bad.some((x) => /\(D\) the CLI calls \/api\/channels\/list/.test(x)),
     `§65 NEGATIVE CONTROLS: ${results.map((r) => `${r.name} (${r.ok ? 'RED' : 'missed'})`).join(', ')}, a planted agent route over an ungated read (RED), the CLI pointed at an owner route (RED)`, JSON.stringify(results.filter((r) => !r.ok)));
+}
+
+// §65b lane lark-threads (B3): THE OWNER'S NAME FOR AN AUTHOR is an OWNER surface — its one route (PATCH
+// /api/channels/:adapterId/authors/:id) refuses an agent bearer BY NAME before it reaches the engine, no agent route
+// (src/agent-routes.js) and no CLI path (data/bin/vibespace-channels) names `setAlias` / `/authors/`, and the engine's
+// setter answers through `notify` (the owner's `channels-updated`) — never a ladder / stash. A string copy without the
+// refusal is RED.
+console.log('§65b the owner\'s name for an author: owner-only, never an agent surface');
+{
+  const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' ')).replace(/(^|[^:\\'"`])\/\/.*$/gm, '$1');
+  const judge = (rsrc, asrc, cli, esrc) => {
+    const R = strip(rsrc), E = strip(esrc);
+    const at = R.indexOf("router.patch('/api/channels/:adapterId/authors/:id'");
+    const body = at < 0 ? '' : R.slice(at, R.indexOf('\n});', at));
+    const refuse = body.indexOf('refuseAgentBearer(req, res'), call = body.indexOf('engine().setAlias(');
+    const fn = E.slice(E.indexOf('  async function setAlias('), E.indexOf('\n  }\n', E.indexOf('  async function setAlias(')));
+    return {
+      route: at >= 0 && refuse > 0 && call > refuse,
+      agentFree: !/setAlias|\/authors\//.test(strip(asrc)) && !/\/authors\//.test(cli),
+      ownerOnly: /notify\(\[\], \{ full: false, extra: \{ authors:/.test(fn) && !/deliver\.(?:stashFor|deliverToConversation)\(/.test(fn),
+    };
+  };
+  const rsrc = read('src/routes/channels.js'), asrc = read('src/agent-routes.js'), cli = read('data/bin/vibespace-channels'), esrc = read('src/server/channels-engine.js');
+  const j = judge(rsrc, asrc, cli, esrc);
+  ok(j.route && j.agentFree && j.ownerOnly, '§65b the alias route refuses an agent bearer before the engine; no agent route / CLI path names it; the setter answers the owner\'s broadcast only', JSON.stringify(j));
+  const noRefuse = rsrc.replace("    if (refuseAgentBearer(req, res, 'a name for an author is the owner\\'s — an agent token may not set one')) return;\n", '');
+  const plantedAgent = asrc + "\napp.patch('/api/agent/channels/authors/:id', (req, res) => res.json(eng.setAlias('a', req.params.id, req.body.alias)));\n";
+  ok(noRefuse !== rsrc && !judge(noRefuse, asrc, cli, esrc).route && !judge(rsrc, plantedAgent, cli, esrc).agentFree, '§65b NEGATIVE CONTROLS: the route without its agent refusal (RED), a planted agent route over the setter (RED)');
 }
 
 // §64b lane channel-threads i18n: every t() / tr() literal the lane's client surfaces draw has a zh AND a ja entry
@@ -2951,6 +3090,97 @@ console.log('§69 every root package run goes through the machine\'s ONE package
   ok(p1.pkgLines.some((x) => x.startsWith('src/server/apps-engine.js:')) && p2.argvBuilders.includes('src/desktop-serve.js') && p3.consumers.launcher.includes('src/routes/apps.js') && p4.directSudo.some((x) => x.startsWith('src/server/jobs.js:')) && p5.directSudo.some((x) => x.startsWith('src/server/apps-engine.js:')),
     '§69 NEGATIVE CONTROLS: a `sudo -n apt-get` line outside the slot, a third root-script argv builder, a second launcher caller, a direct sudo of a package manager and of a shell are each caught');
   ok(strip68("  // sudo -n apt-get install y\n   * sudo -n apt-get install z\n").split('\n').every((l) => !/sudo -n/.test(l)), '§69 a comment line naming `sudo -n apt-get` is no site');
+}
+
+// ═══ §70 THE WS KEEPALIVE CENSUS (lane stream-ping, browser-windows BL-r5-2) ═══════════════════════════════════════
+// every long-lived ws bridge (src/server/*-stream.js — grep-derived, a new bridge joins by its name) arms THE ONE keepalive
+// rule (src/ws-keepalive.js: 20 s ping, two silent rounds ⇒ terminated + named) and pings nowhere by hand. A bridge
+// without it kept a half-open viewer counted until the kernel's TCP timeout (the live view, until this lane).
+{
+  const bridges = fs.readdirSync(path.join(REPO, 'src/server')).filter((f) => /-stream\.js$/.test(f));
+  const kaBad = (name, src) => [
+    ...(/require\(['"]\.\.\/ws-keepalive\.js['"]\)/.test(src) ? [] : [`${name}: no require('../ws-keepalive.js')`]),
+    ...(/\bKA\.armKeepalive\(/.test(src) ? [] : [`${name}: never arms the keepalive`]),
+    ...(/\.ping\(\)/.test(src.replace(/\/\/[^\n]*/g, '')) ? [`${name}: pings by hand`] : []),
+  ];
+  const bad = bridges.flatMap((f) => kaBad(f, read('src/server/' + f)));
+  ok(bridges.length >= 2 && bridges.includes('browser-stream.js') && bridges.includes('desktop-stream.js') && !bad.length, `§70 every src/server/*-stream.js arms the ONE ws keepalive (${bridges.join(', ')})${bad.length ? ' — ' + bad.join('; ') : ''}`);
+  ok(kaBad('planted-stream.js', 'const t = setInterval(() => ws.ping(), 20000);').length === 3, '§70 NEGATIVE CONTROL: a planted bridge with its own pinger is red three ways');
+  // verify r1 T1⑤ — THE SCOPE, stated and enforced: every ws server in server.js + src/** is a *-stream.js bridge (above)
+  // or named HERE with the reason it needs no keepalive of this rule; a new long-lived ws server is red until classified
+  const WSS_OUTSIDE = {
+    'server.js': 'the /ws main socket (src/server/ws-heartbeat.js, the stall-aware 2.369.16 heartbeat) + the agentd dial-in (the device mux pings; a re-dial replaces the socket)',
+    'src/server/cdp-mediator.js': 'loopback-only CDP clients on 127.0.0.1 (no NAT or proxy between the ends: no half-open peer)',
+  };
+  const wssSites = /new WebSocketServer\(/.test(read('server.js')) ? ['server.js'] : [];
+  (function walkWss(d) { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const rel = d + '/' + e.name; if (e.isDirectory()) { if (e.name !== 'node_modules') walkWss(rel); } else if (/\.(c|m)?js$/.test(e.name) && /new WebSocketServer\(|new WebSocket\.Server\(/.test(read(rel))) wssSites.push(rel); } })('src');
+  const unclassified = (sites) => sites.filter((f) => !/^src\/server\/[^/]+-stream\.js$/.test(f) && !WSS_OUTSIDE[f]);
+  ok(wssSites.length >= 4 && !unclassified(wssSites).length, `§70 THE SCOPE: every ws server is a *-stream.js bridge or named outside the rule with its reason (${wssSites.join(', ')})${unclassified(wssSites).length ? ' — UNCLASSIFIED: ' + unclassified(wssSites).join(', ') : ''}`);
+  ok(unclassified([...wssSites, 'src/server/agent-mux.js']).join() === 'src/server/agent-mux.js', '§70 NEGATIVE CONTROL: a planted ws server outside *-stream.js and unnamed is red by name');
+}
+
+// §71 A RAW SECRET IS COMPARED THROUGH ONE CONSTANT-TIME DOOR (B-8dda, lane agent-cli-fixes, 2026-10-02). A session's
+// `vsst_` token (`s.agentToken`) is the bearer secret every agent call presents, and the OTel exporter's per-boot header
+// is another; eight lookups compared them with `===`, which stops at the first differing character (lane-pairing r3
+// found two). Every compare of a raw secret goes through src/pairing-token.js `sameToken` (both sides through
+// `tokenMatches`' sha256 digests, timingSafeEqual). Census over server.js + src (comments stripped): no comparison
+// operator touches a token-shaped operand — `agentToken`, the `x-vibespace-otel` header; a presence check against
+// null / undefined and `typeof` stay legal. Planted lines prove the census sees each form.
+console.log('§71 a raw secret is compared only through sameToken');
+{
+  // line-preserving: a JSDoc / block-comment line and a `//` tail go; code is never swallowed (a whole-file `/\*…*\/`
+  // strip eats from a '/api/*' string to the next comment end — server.js's site vanished that way)
+  const strip68 = (t) => t.split('\n').map((ln) => (/^\s*(\/\*|\*)/.test(ln) ? '' : ln.replace(/\/\*.*?\*\//g, '').replace(/(^|\s)\/\/.*$/, '$1'))).join('\n');
+  // verify r1: a SAME-LOGICAL-LINE rule, not an operand grammar — the first census (an operand chain ending in the secret,
+  // beside ===) saw 2 of 11 planted spellings; a template literal, startsWith / endsWith / includes, s['agentToken'],
+  // the OTel header read into a local or through req.get, a job's raw jbt_ and a compare split over two lines all
+  // passed. A line naming a raw secret — `agentToken` in any spelling, a job's `_tokenRaw` — beside ANY compare is a
+  // hit once the door's own calls and the presence checks (typeof, null / undefined) are taken out; the OTel header is
+  // READ only inside sameToken( (a local would carry it past any line rule). Map lookups keyed by the presented value
+  // (auth.js cookie tokens) and digest compares (jobByToken, MountTokens) name no raw secret — legal.
+  const SECRET68 = /(?<![\w$])(?:agentToken|_tokenRaw)(?![\w$])/;
+  const CMP68 = /===|!==|==|!=|\.(?:startsWith|endsWith|includes|indexOf|lastIndexOf|localeCompare)\(|\bObject\.is\(|\bcase\b/;
+  const DOOR68 = /\b(?:sameToken|tokenMatches)\((?:[^()]|\([^()]*\))*\)/g;
+  const CHAIN68 = String.raw`[\w$.?\[\]'"]+`;
+  const PRESENCE68 = new RegExp(String.raw`typeof\s+${CHAIN68}\s*[!=]==?\s*(['"])\w+\1|${CHAIN68}\s*[!=]==?\s*(?:null|undefined)\b|\b(?:null|undefined)\s*[!=]==?\s*${CHAIN68}`, 'g');
+  const OTEL68 = /['"]x-vibespace-otel['"]/;
+  // a line that opens with a compare (or follows one ending in a compare) joins its predecessor, numbered by the first
+  const logical68 = (text) => strip68(text).split('\n').reduce((out, ln, i) => {
+    const prev = out[out.length - 1];
+    if (prev && (/^\s*(?:===|!==|==|!=|\.(?:startsWith|endsWith|includes|indexOf|lastIndexOf|localeCompare)\()/.test(ln) || /(?:===|!==|==|!=)\s*$/.test(prev.t))) prev.t += ' ' + ln.trim();
+    else out.push({ n: i + 1, t: ln });
+    return out;
+  }, []);
+  const bad68 = (t) => { const rest = t.replace(DOOR68, ' ').replace(PRESENCE68, ' '); return (SECRET68.test(rest) && CMP68.test(rest)) || OTEL68.test(rest); };
+  const hits68 = (file, text) => logical68(text).flatMap((l) => (bad68(l.t) ? [`${file}:${l.n}: ${l.t.trim().slice(0, 100)}`] : []));
+  const walk68 = (dir) => fs.readdirSync(path.join(REPO, dir), { withFileTypes: true }).flatMap((d) => (d.isDirectory() ? walk68(dir + '/' + d.name) : /\.(c|m)?js$/.test(d.name) ? [dir + '/' + d.name] : []));
+  const files68 = ['server.js', ...walk68('src')];
+  const found68 = files68.flatMap((f) => hits68(f, read(f)));
+  ok(files68.length > 300 && found68.length === 0, `§71 no compare of a raw secret outside sameToken in server.js + src (${files68.length} files)${found68.length ? ' — ' + found68.join(' | ') : ''}`);
+  const pt = read('src/pairing-token.js');
+  ok(/function sameToken\(presented, secret\) \{[^}]*tokenMatches\(presented, tokenHash\(secret\)\)/.test(pt) && /module\.exports = \{[^}]*\bsameToken\b/.test(pt), '§71 sameToken is tokenMatches over the secret\'s digest, exported from the one door');
+  const SITES68 = ['server.js', 'src/agent-routes.js', 'src/server/window-targets-engine.js', 'src/server/mounts-plugins-wiring.js', 'src/server/exit-routes.js', 'src/routes/browser.js', 'src/server/otel-ingest.js'];
+  const noDoor = SITES68.filter((f) => !/\bsameToken\(/.test(strip68(read(f))));
+  ok(noDoor.length === 0 && (strip68(read('src/agent-routes.js')).match(/\bsameToken\(/g) || []).length >= 2, `§71 every lookup site compares through sameToken${noDoor.length ? ' — missing: ' + noDoor.join(' ') : ''}`);
+  const { sameToken } = (await import('node:module')).createRequire(import.meta.url)(path.join(REPO, 'src/pairing-token.js'));
+  ok(sameToken('vsst_ab12', 'vsst_ab12') && !sameToken('vsst_ab13', 'vsst_ab12') && !sameToken('vsst_ab1', 'vsst_ab12') && !sameToken(undefined, 'vsst_ab12') && !sameToken('vsst_ab12', undefined) && !sameToken('', ''),
+    '§71 sameToken: equal ⇒ true; one character, a prefix, a missing or an empty side ⇒ false');
+  // verify r1: what a request can carry instead of a string (a JSON body's number / array / object, a repeated header) is
+  // false, never a throw — and so is a non-string secret
+  const odd68 = [[123, 'vsst_ab12'], [['vsst_ab12'], 'vsst_ab12'], [{ toString: () => 'vsst_ab12' }, 'vsst_ab12'], [Buffer.from('vsst_ab12'), 'vsst_ab12'], [null, 'vsst_ab12'], ['vsst_ab12', 42], ['vsst_ab12', ['vsst_ab12']], ['vsst_ab12x'.repeat(50), 'vsst_ab12']];
+  const thrown68 = [], yes68 = [];
+  for (const [a, b] of odd68) { try { if (sameToken(a, b) !== false) yes68.push(JSON.stringify([a, b]).slice(0, 40)); } catch (e) { thrown68.push(e.message); } }
+  ok(thrown68.length === 0 && yes68.length === 0, `§71 sameToken: a number, an array, an object, a Buffer, null, a non-string secret, a long mismatch ⇒ false, never a throw${thrown68.length ? ' — threw: ' + thrown68.join(' | ') : ''}${yes68.length ? ' — true for: ' + yes68.join(' | ') : ''}`);
+  // NEGATIVE CONTROLS: each form a lookup has taken — and each spelling verify r1 planted past the first census — is
+  // caught; a presence check, typeof, the door itself, a Map lookup and the exporter's header line are not
+  const caught = ['if (s.agentToken === token) return [s, id];', 'if (token !== sess.agentToken) continue;', 'for (const [id, s] of m) if (s && s.agentToken==tok) return id;', "if (loop && req.headers['x-vibespace-otel'] === token) return true;", 'return a.agentToken != b;',
+    'return `${s.agentToken}` === token;', 'return token.startsWith(s.agentToken);', 'return s.agentToken.endsWith(token);', "return s['agentToken'] === token;", "const h = req.headers['x-vibespace-otel'];", "return req.get('x-vibespace-otel') === token;",
+    'return [s.agentToken].includes(token);', 'return job._tokenRaw === raw;', 'return token == agentToken;', 'return Object.is(s.agentToken, token);', 'switch (token) { case s.agentToken: return true; }', 'return s.agentToken\n    === token;', 'if (token ===\n  s?.agentToken) return s;'];
+  const legal = ["if (typeof s.agentToken === 'string') n++;", 'if (s.agentToken === undefined) continue;', 'if (null == s.agentToken) continue;', 'if (sameToken(token, s.agentToken)) return [s, id];', "const fresh = !!token && token === h.fresh;",
+    "if (loop && sameToken(req.headers['x-vibespace-otel'], token)) return true;", 'const t = byToken.get(token);', "agentToken: 'vsst_' + crypto.randomBytes(12).toString('hex'),", "OTEL_EXPORTER_OTLP_HEADERS: 'x-vibespace-otel=' + token,", "if (!job._tokenRaw) { job._tokenRaw = 'jbt_' + hex; }", "if (token && token.startsWith('vsst_')) for (const [id, s] of m) if (s && sameToken(token, s.agentToken)) break;"];
+  const flagged = (l) => logical68(l).some((x) => bad68(x.t));
+  const missed = caught.filter((l) => !flagged(l)), wrong = legal.filter((l) => flagged(l));
+  ok(missed.length === 0 && wrong.length === 0, `§71 NEGATIVE CONTROLS: ${caught.length} planted compares caught, ${legal.length} legal lines pass${missed.length ? ' — missed: ' + missed.join(' | ') : ''}${wrong.length ? ' — wrongly caught: ' + wrong.join(' | ') : ''}`);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

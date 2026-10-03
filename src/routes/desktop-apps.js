@@ -17,9 +17,10 @@
  *                                     'app'); anything else 400 bad-request HERE, before a paired
  *                                     machine is asked (an older device drops an unknown field)
  *   GET  /api/desktop/apps/:id
- *   POST /api/desktop/apps/:id/stop
+ *   POST /api/desktop/apps/:id/stop        `{ force? }` — B-04da ④: a LibreOffice session is ASKED to quit first (its own
+ *                                     save prompt); still asking ⇒ 409 `app-asked`, `force: true` = the person confirmed the loss
  *   POST /api/desktop/apps/:id/keep-alive   ("keep running" = one explicit action, §5)
- *   POST /api/desktop/apps/:id/relaunch     round 3 A3: `{ scale: 'auto'|1|1.5|2|2.5|3, dpr?, uiScale? }` — the
+ *   POST /api/desktop/apps/:id/relaunch     round 3 A3: `{ scale: 'auto'|1|1.5|2|2.5|3, dpr?, uiScale?, force? }` — the
  *                                     same app started again at that scale (auto = derived from
  *                                     THIS client's dpr × uiScale), the old session stopped with
  *                                     `replacedBy` naming the new one → `{ app, replaced }`;
@@ -134,8 +135,8 @@
  * 200-with-nothing would be a silent failure of a user action.
  */
 const express = require('express');
-const { streamKindOf, scaleChoiceVerdict, INSTALL_WHATS } = require('../desktop-apps');
-const { openWithVerdict, installSpecFor } = require('../office-open'); // §7.9: the ONE open-with verdict
+const { streamKindOf, scaleChoiceVerdict, INSTALL_WHATS, relaunchLeaseVerdict } = require('../desktop-apps');
+const { openWithVerdict, installSpecFor, FONTS_ID } = require('../office-open'); // §7.9: the ONE open-with verdict
 const router = express.Router();
 
 let ctx = null;
@@ -167,7 +168,7 @@ function fail(res, e) {
       || code === 'relative-path' || code === 'not-office-file' || code === 'not-office-app' ? 400
     : code === 'cap' || code === 'no-backend' || code === 'backend-not-wired' || code === 'held' || code === 'not_taken' || code === 'no_lease' || code === 'not-xpra' || code === 'no_viewer' || code === 'not-ready' || code === 'relaunch-browser' || code === 'browser-absent' || code === 'snap-profile-unreachable'
       || code === 'host_needs_daemon' || code === 'no_x11' || code === 'no_apt' || code === 'no_repo' || code === 'no_sudo' || code === 'no_facts' || code === 'busy' || code === 'no_conversation' || code === 'fork_pending' || code === 'wake_paced'
-      || code === 'machine-mismatch' || code === 'app-absent' || code === 'still-absent' ? 409
+      || code === 'machine-mismatch' || code === 'app-absent' || code === 'still-absent' || code === 'app-asked' || code === 'lease' ? 409
       : code === 'agent_forbidden' ? 403 : code === 'not_live' ? 404 : code === 'bad_principal' || code === 'bad_mode' || code === 'share_local_only' ? 400
       : code === 'no-engine' || code === 'xpra-ui-unavailable' || code === 'host_unavailable' || code === 'install_link_lost' || code === 'host-unreachable' ? 503 : code === 'install_timeout' ? 504 : 500;
   res.status(status).json({ error: String(e?.message || e), code, ...(e && e.plan ? { plan: e.plan } : {}), ...(e && e.remedy ? { remedy: e.remedy } : {}) });
@@ -272,7 +273,8 @@ const officeDone = (host, what) => async (r) => {
   const spec = installSpecFor(what);
   try { if (host === 'local') await ctx.keeper.facts?.({ fresh: true }); else await ctx.access.call(host, 'facts', { fresh: true }); } catch { /* the list below answers or throws */ }
   const l = host === 'local' ? await ctx.keeper.list() : await ctx.keeper.list({ host });
-  const row = ((l && l.registry) || []).find((x) => x && x.id === what);
+  // B-04da ②: the faces alone are done when a served LibreOffice row no longer names any as missing
+  const row = what === FONTS_ID ? ((l && l.registry) || []).find((x) => x && x.office && x.available && !(x.fontsMissing && x.fontsMissing.length)) : ((l && l.registry) || []).find((x) => x && x.id === what);
   if (!row || !row.available) { const e = new Error(`the install finished${r.reattached ? ' (it was an install already running there)' : ''}, but ${spec ? spec.label : what} is still not available on ${host === 'local' ? 'this machine' : host}${row && row.reason ? `: ${row.reason}` : ''} — check again`); e.code = 'still-absent'; e.plan = r.plan; throw e; }
   return { done: true, what, available: true, label: spec ? spec.label : what, source: r.plan.source, hostId: r.hostId, reattached: !!r.reattached };
 };
@@ -310,7 +312,8 @@ router.get('/api/desktop/apps/:id', (req, res) => {
 });
 router.post('/api/desktop/apps/:id/stop', async (req, res) => {
   if (!ID_RE.test(req.params.id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
-  try { res.json(await ctx.keeper.stop(req.params.id, { why: 'user' })); } catch (e) { fail(res, e); }
+  // B-04da ④: `{force: true}` = the person confirmed "stop anyway" after an `app-asked` (LibreOffice's save prompt is up)
+  try { res.json(await ctx.keeper.stop(req.params.id, { why: 'user', force: !!(req.body && req.body.force === true) })); } catch (e) { fail(res, e); }
 });
 router.post('/api/desktop/apps/:id/keep-alive', async (req, res) => {
   if (!ID_RE.test(req.params.id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
@@ -319,6 +322,11 @@ router.post('/api/desktop/apps/:id/keep-alive', async (req, res) => {
 
 router.post('/api/desktop/apps/:id/relaunch', async (req, res) => {
   if (!ID_RE.test(req.params.id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
+  // B-5ee0 ②: an agent holding the window's lease ⇒ refused HERE too (the menu's 'lease' is only the window's word)
+  let lease = null;
+  try { lease = ctx.windowEngine ? ctx.windowEngine.leaseOf(req.params.id) : null; } catch { lease = null; }
+  const lv = relaunchLeaseVerdict(ctx.keeper.get(req.params.id), lease);
+  if (lv) return fail(res, { code: lv.code, message: lv.error });
   try { res.json(await ctx.keeper.relaunch(req.params.id, req.body || {})); } catch (e) { fail(res, e); }
 });
 
@@ -484,6 +492,11 @@ router.post('/api/desktop/apps/:id/reach/request', async (req, res) => {
 // the singleton desktop (src/vnc.js) — answers unchanged from server.js
 router.get('/api/vnc/status', async (req, res) => {
   try { res.json(await ctx.vnc.status()); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// lane desktop-keepalive K3: the singleton stream's LAST close as the bridge named it ({why, code, at, afterS} | null) — the
+// Desktop window words `code` in its status chip ("Connection lost — the desktop server closed the stream")
+router.get('/api/vnc/last-close', (req, res) => {
+  try { res.json({ close: ctx.stream && typeof ctx.stream.lastCloseOf === 'function' ? ctx.stream.lastCloseOf('desktop-singleton') : null }); } catch (e) { res.status(500).json({ error: e.message }); }
 });
 router.post('/api/vnc/start', async (req, res) => {
   try { res.json(await ctx.vnc.ensureRunning()); } catch (e) { res.status(500).json({ error: e.message }); }

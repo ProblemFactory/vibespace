@@ -136,6 +136,21 @@ const cs = (total, fable = total) => ({ total, byFamily: { fable, opus: total - 
   ck('roll: cost window starts AT the reset, not the anchor', calls.every((f) => f === RESET * 1000));
   ck('roll: 5h abstains (window start unknowable)', e2.fiveHour === null);
   ck('roll: fable re-based too', approx(e2.scopedWeekly[0].utilization, 8.75 / 875, 0.001));
+  // B-a4f1: a stated reset LANDS a minute late (quota-model RESET_GRACE_SEC) — inside that minute
+  // the weekly buckets abstain, so the overlay keeps the raw reading and bucketRemaining's grace rules it
+  const { RESET_GRACE_SEC } = require(path.resolve('src/quota-model.js'));
+  const e3 = est.estimateBuckets({ lagS: 0, anchor, rates, costFn, nowMs: (RESET + 15) * 1000 });
+  ck('grace: 15 s past the stated reset the weekly buckets abstain (no re-base on a reset that has not landed)', (e3 === null || (!e3.sevenDay && !e3.scopedWeekly.length)));
+  const e4 = est.estimateBuckets({ lagS: 0, anchor, rates, costFn, nowMs: (RESET + RESET_GRACE_SEC + 1) * 1000 });
+  ck('grace: one second past the grace they roll as before', e4 && e4.sevenDay && e4.sevenDay.resetsAt === RESET + WK && e4.scopedWeekly[0].resetsAt === RESET + WK);
+  // verify r1: the NEXT boundary waits too. An anchor a week old crosses RESET (long landed) and
+  // reaches RESET + WK inside its minute: the window is still the one that began at RESET, so a
+  // week of ledger burn keeps the cap spent until bucketRemaining's grace for RESET + WK passes
+  const calls5 = [];
+  const e5 = est.estimateBuckets({ lagS: 0, anchor, rates, costFn: (fromMs) => { calls5.push(fromMs); return cs(1730, 875); }, nowMs: (RESET + WK + 15) * 1000 });
+  ck('grace: 15 s past the NEXT weekly boundary the window is still the one that began at the old reset', e5 && e5.sevenDay && e5.sevenDay.resetsAt === RESET + WK && e5.scopedWeekly[0].resetsAt === RESET + WK && calls5.every((f) => f === RESET * 1000) && approx(e5.scopedWeekly[0].utilization, 1, 0.001));
+  const e6 = est.estimateBuckets({ lagS: 0, anchor, rates, costFn, nowMs: (RESET + WK + RESET_GRACE_SEC + 1) * 1000 });
+  ck('grace: past the next boundary grace it rolls to the week after', e6 && e6.sevenDay && e6.sevenDay.resetsAt === RESET + 2 * WK && e6.scopedWeekly[0].resetsAt === RESET + 2 * WK);
 
   ck('nothing estimable → null', est.estimateBuckets({ lagS: 0, anchor: mkAnchor(T0, {}), rates, costFn, nowMs: T0 + 1 }) === null);
 }

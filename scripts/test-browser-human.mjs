@@ -296,7 +296,7 @@ function pureLegs(H, tag = '') {
   // the WIRING: the window builds ONE keyed chip (never a toast) under the address row and patches its text / visibility
   // from the PURE line on every render of his ends (the digest's broadcast included)
   const wsrc = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
-  ok(/shareLine\.dataset\.key = 'share'/.test(wsrc) && /root\.append\(strip, tabRow, bar, addrRow, shareLine, endLine,/.test(wsrc) && /const words = H\.ended \|\| st\.stopped \? null : humanShareLine\(profileRowOf\(\), t\);/.test(wsrc) && /endLine\.style\.display = line \? '' : 'none';\n    renderShare\(\);/.test(wsrc) && !/showToast\([^)]*humanShareLine/.test(wsrc) && /if \(H\) \{ renderEnds\(\); renderTitle\(\); \}/.test(wsrc),
+  ok(/shareLine\.dataset\.key = 'share'/.test(wsrc) && /root\.append\(strip, tabRow, watchLine, bar, addrRow, shareLine, endLine,/.test(wsrc) && /const words = H\.ended \|\| st\.stopped \? null : humanShareLine\(profileRowOf\(\), t\);/.test(wsrc) && /endLine\.style\.display = line \? '' : 'none';\n    renderShare\(\);/.test(wsrc) && !/showToast\([^)]*humanShareLine/.test(wsrc) && /if \(H\) \{ renderEnds\(\); renderTitle\(\); \}/.test(wsrc),
     'PIN: his window carries ONE keyed chip under the address row, patched in place from humanShareLine at every render of his ends (never a toast) — the digest\'s broadcast re-renders them (verify r3: that call reverted stayed green on the fast tier; the heavy leg (a) flips the SAME node)');
 }
 
@@ -1410,7 +1410,8 @@ console.log('— ③ censuses: no card for him (+ control), the holder readers, 
   // log lines that count conversations — each needs a CONVERSATION (his row has no session, no key an agent could hold)
   const CONVERSATION = { ephEventFields: 1, ephemerals: 1, leasesFor: 1, leasesOn: 1, removeVerdict: 1, updateProfileNow: 1, knownKeysOf: 1, rejudgeLeases: 1, ceilingNow: 1, ownsLive: 1, ownLive: 1, ensureEphemeral: 2, retireEphemeral: 1,
     keepRebound: 1, takeRebound: 1, // verify r3 (F4): the rebound note rides the CONVERSATION's lease until an answer carries it (his row binds no tab of ours)
-    attach: 7 /* lane browser-resume C: + the rebind's new tab as its lease's root; verify r2 F2: the queued rebind re-asks for ITS OWN lease after the wait (conversation-only) */, detach: 3, stop: 1, releaseAll: 1, browse: 1, endHuman: 1, quitHuman: 1, navigateHuman: 1, mirrorLeaseInput: 1, takeover: 1, siblingLeases: 1, noteLeaseUrl: 1, inputSummaryFor: 1, handBackOnStop: 1, statusFor: 2, liveHoldingFor: 1, setFor: 1, driveHolderFacts: 1, noteDrive: 1, dropChild: 3, switcherView: 1, switchBackend: 1, reconcile: 3, boot: 1, tick: 1, ensureTimer: 1, api: 1,
+    attach: 7 /* lane browser-resume C: + the rebind's new tab as its lease's root; verify r2 F2: the queued rebind re-asks for ITS OWN lease after the wait (conversation-only) */, detach: 3, stop: 1, releaseAll: 1, browse: 1, endHuman: 1, quitHuman: 1, navigateHuman: 1, mirrorLeaseInput: 1, takeover: 1, siblingLeases: 1, noteLeaseUrl: 1, inputSummaryFor: 1, handBackOnStop: 1, statusFor: 3 /* + lane jobs-browser: a job's window is its conversation's helper row (the 2.369.202 integration) */, liveHoldingFor: 1, setFor: 1, driveHolderFacts: 1, noteDrive: 1, dropChild: 3, switcherView: 1, switchBackend: 1, reconcile: 3, boot: 1, tick: 1, ensureTimer: 1, api: 1,
+    releaseJobHandle: 1, // lane jobs-browser (the 2.369.202 integration): a job's handle lets go of the leases IT holds — a job is a conversation's child, never his row
     rejudgeAll: 1, // the .197 integration: identity r4's Task Group re-judge asks "does a CONVERSATION lease this profile" (his row belongs to no Task Group)
     // lane browser-propose: a proposal's plan counts the OTHER conversations on the profile it would switch; the approved
     // new profile's page opens in THIS conversation's own lease (his row is no conversation's)
@@ -1430,12 +1431,23 @@ console.log('— ③ censuses: no card for him (+ control), the holder readers, 
     // lane browser-resume C: whose tab it is — the conversations' tab ROOTS are their leases' (his own tab is added from
     // `humans`, never a lease); the agent's own tab verbs need ITS lease; the user's row judges a CONVERSATION's tab; the
     // orphan rule (adoptable) asks whether any conversation leases the browser; the rebind's new tab is its lease's root
-    tabHoldersOf: 1, keepTabRoots: 1, bootstrapTabRoot: 1, agentTabAct: 3, tabOwnersFor: 1, userTabAct: 1,
+    tabHoldersOf: 1, keepTabRoots: 1, bootstrapTabRoot: 1, agentTabAct: 4, tabOwnersFor: 1, userTabAct: 1,
     // lane site-reset verify r3 #2: the PERSISTED WITNESS lives on a CONVERSATION's lease (`l.tabs` — the tabs the dialog watch
     // saw born of its verbs); his row holds no lease — his tabs are his row's own (`ownTab` / `adopted`)
     noteOwnTab: 1, forgetOwnTab: 1, dropLeaseTabs: 1, pruneOwnTabs: 1, // r4 #3: pruned to the browser's tabs at a watch's connect
     tabsLost: 1, // lane profile-lock-roll L2: every CONVERSATION lease of a replaced browser is marked `life` (his row holds no lease — his tab ends with the browser, said by his window)
     holderTabs: 1, // lane site-reset verify r1: a CONVERSATION lease's pinned tab (+ r3's persisted witness); his tabs are read off his row, by his key, before this loop
+    // lane browser-windows: a CONVERSATION lease's own window (its `windowIn` / roots at attach — his tab opens in his own window
+    // through openOwnTab, never a lease), the WINDOW MATES a takeover of a conversation's window takes with it (conversation
+    // leases only: his row is never a mate — his window is his own), and agentTabAct's 4th site (the lease that records the
+    // new tab's window + its label)
+    ownWindowAtAttach: 2, windowMatesOf: 1,
+    // verify r1 T2 ⑧ (one window per holder): openOwnTab reads the CONVERSATION lease's `windowId` + roots to open a later tab IN
+    // its window (his key names no lease ⇒ his first tab is a new window of his own, his popups stay in it by Chrome's rule)
+    openOwnTab: 1,
+    // verify r2 ⑦: sharedWindowOf reads the CONVERSATION lease's windowIn (is its tab in the shared window of an older run?) for
+    // the takeover / handback / paused words — his key names no lease, so his own takeover is never worded as "shared" through it
+    sharedWindowOf: 1,
   };
   // holder: "who holds this browser / is it used" — through holdersOn (the conversations' leases + his row)
   const HOLDER = { list: 1, holdersOn: 1 };
@@ -1444,6 +1456,10 @@ console.log('— ③ censuses: no card for him (+ control), the holder readers, 
   const moved = Object.keys(sites).filter((f) => f in want && want[f] !== sites[f]).map((f) => `${f}: ${sites[f]} (table ${want[f]})`);
   ok(!unclassified.length && !moved.length, `the HOLDER census: every \`reg.leases\` site of browser-keeper.js (${Object.values(sites).reduce((a, b) => a + b, 0)} in ${Object.keys(sites).length} functions) is classified conversation-only or holder — a new or moved site is RED until the table says which it is`, { unclassified, moved });
   ok(/const leasedNow = \(profileId\) => holdersOn\(profileId\)\.length > 0;/.test(src) && /B\.browserIdle\(rec, holdersOn\(rec\.profileId\), t, idleMs\(\)\)/.test(src) && /humans: humanRowsOn\(p\.id\)/.test(src), 'the holder readers go through holdersOn: the idle clock, the heal, the switch\'s hold');
+  // lane browser-windows verify r5 ⑥: "does the USER drive any window of this browser" is a HOLDER question (the conversations'
+  // leases + his row) — r4 read reg.leases by hand and was classified conversation-only; it goes through holdersOn now (each
+  // conversation's drive off the in-memory inputs, his off his row) and has no reg.leases site to classify
+  ok(/const userDrivesAnyWindowOf = \(profileId\) => \{ const pid = String\(profileId \|\| ''\); return holdersOn\(pid\)\.some\(\(h\) => h\.human \? h\.input === 'user' : \(\(inputs\.get\(inputKey\(h\.browserKey, pid\)\) \|\| \{\}\)\.input === 'user'\)\); \};/.test(src) && !('userDrivesAnyWindowOf' in sites), 'verify r5 ⑥ (lane browser-windows): userDrivesAnyWindowOf — a HOLDER question — goes through holdersOn (the conversations\' leases + his row), never reg.leases by hand');
 }
 {
   // verify r4 — THE TAB-RELEASE CENSUS (r3's MED class: a conversation's page he takes must never receive that conversation's

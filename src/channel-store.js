@@ -14,6 +14,9 @@
  *     msgs/groups/<groupId>.ndjson   a group's log: an ordinary append-only conversation log
  *     wake-pace.json                 atomic JSON — the groups' WAKE PACE ledger (r2): who woke whom
  *                                    when, pruned to its windows, so a restart forgets no floor
+ *     dispatch-ledger.json           atomic JSON — THE DISPATCH LEDGER (lane worker-dispatch verify r1 ②): what each
+ *                                    brief (sha256 of sender | worker | text) already did — compactAt / deliveredAt —
+ *                                    so a retry after a restart replays instead of compacting and waking again
  *     <file>.corrupt-<ts>            a JSON store that could not be read at boot, SET ASIDE with its
  *                                    bytes intact (r2) — never unlinked, never overwritten
  *     audit.ndjson                   APPEND-ONLY, rolled by DATE into archive/
@@ -153,7 +156,9 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { sideKey } = require('./channel-record.js');
+const { sideKey, validateSide } = require('./channel-record.js');
+// lane lark-threads (A1): THE PLACE PATCH's PURE rules (widen-only, the fold, the compaction) — imports only channel-record
+const Thr = require('./channel-thread.js');
 const { compactSide } = require('./channel-reactions.js');
 
 /** Side-log dedup set bound per conversation (rebuilt from the whole side log on demand). */
@@ -178,6 +183,11 @@ const SIDE_COMPACT_BYTES = 1024 * 1024;
 const SIDE_KEEP_BYTES = SIDE_COMPACT_BYTES / 2;
 /** The side log's subdirectory under an account's message directory — `~` is never in a `safeSeg` output. */
 const SIDE_DIR = '~side';
+/** lane lark-threads (A1): conversations whose folded place patches stay cached (least recently read first out). */
+const PLACE_CACHE_MAX = 500;
+/** lane lark-threads (A1): place lines a side compaction keeps per conversation (the newest — they are folded into the
+ *  message log at its next trim, so this bounds only a conversation that grows patches faster than it is trimmed). */
+const PLACE_KEEP_MAX = 3000;
 
 /** Decision 14: 90 days or 5,000 records, whichever is SMALLER, floor 7 days. */
 const RETENTION_DAYS = 90;
@@ -335,6 +345,11 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   let interval = null;
   let closed = false;
   const dedup = new Map(); // `${adapterId}/${convId}` -> Set<vendorId>
+  // lane lark-threads (A1): the STORED place of every record the dedup set holds that carries one (sparse:
+  // vendorId → {threadKey, root, replyTo}) — what the place door judges an offer against; REBUILT with the set (every
+  // reader of it asks `dedupSet` first, so a set dropped on a failed write takes this map's next rebuild with it)
+  const basePlaces = new Map();
+  const dropDedup = (k) => { dedup.delete(k); basePlaces.delete(k); };
 
   // ── WHICH ROWS CHANGED (lane channel-index-copy): the incremental write and the engine's kept totals read it ──
   // A row is touched by `entry()` (the door every row write goes through). Reaching the WHOLE map inside an update —
@@ -610,6 +625,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     let s = dedup.get(key);
     if (s) return s;
     s = new Set();
+    const bp = new Map();
     // STRICT (r5): this is the WRITE-side reader. A log that cannot be read
     // is not a log that holds nothing — an EMFILE/EIO/EACCES here used to be
     // an EMPTY set, CACHED, so the next append wrote the whole re-offered
@@ -619,11 +635,19 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     // throws out of `appendRecords`, the pass fails with the anchor unmoved,
     // and the retry re-reads — a re-read costs a page, a guess costs a
     // phantom message nobody removes. The set is NOT cached on the throw.
-    for (const r of readTail(adapterId, convId, { limit: DEDUP_MAX, strict: true })) s.add(r.vendorId);
+    for (const r of readTail(adapterId, convId, { limit: DEDUP_MAX, strict: true })) { s.add(r.vendorId); notePlace(bp, r); }
     dedup.set(key, s);
+    basePlaces.set(key, bp);
     return s;
   }
 
+  /** lane lark-threads: a stored record's own place, kept only when it has one (the door's `cur`). */
+  function notePlace(bp, r) {
+    if (!bp || !r || !r.vendorId) return;
+    if (r.threadKey || r.root || r.replyTo) bp.set(String(r.vendorId), { threadKey: r.threadKey || null, root: r.root || null, replyTo: r.replyTo || null });
+    else bp.delete(String(r.vendorId));
+    if (bp.size > DEDUP_MAX) bp.delete(bp.keys().next().value);
+  }
   function rememberVendorId(set, vendorId) {
     set.add(vendorId);
     if (set.size > DEDUP_MAX) { const it = set.values(); for (let i = set.size - DEDUP_MAX; i > 0; i--) set.delete(it.next().value); }
@@ -655,13 +679,15 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     // never outlive a failed write the way the durable one would.
     const inBatch = new Set();
     let duplicates = 0;
+    const offers = [];   // lane lark-threads (A1): a duplicate that names a place — offered to the place door
     for (const r of list) {
       if (!r || !r.vendorId) continue;
-      if (set.has(r.vendorId) || inBatch.has(r.vendorId)) { duplicates++; continue; }
+      if (set.has(r.vendorId) || inBatch.has(r.vendorId)) { duplicates++; if (set.has(r.vendorId) && (r.threadKey || r.root)) offers.push(r); continue; }
       inBatch.add(r.vendorId);
       fresh.push(r);
     }
-    if (!fresh.length) return { appended: 0, duplicates, lastAt: null, lastText: null, healed: false, freshAt: [], fresh: [] };
+    const widened = offers.length ? widenQuiet(adapterId, convId, offers, { src: placeSrcOf(records) }) : [];
+    if (!fresh.length) return { appended: 0, duplicates, lastAt: null, lastText: null, healed: false, freshAt: [], fresh: [], widened };
     const fp = logPath(adapterId, convId);
     fs.mkdirSync(path.dirname(fp), { recursive: true });
     let healed;
@@ -673,6 +699,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     }
     // DURABLE NOW — and only now may the set claim to hold them.
     for (const r of fresh) rememberVendorId(set, r.vendorId);
+    { const bp = basePlaces.get(`${adapterId}/${convId}`); if (bp) for (const r of fresh) notePlace(bp, r); }
     let lastAt = null, lastText = null;
     for (const r of fresh) if (Number.isFinite(r.at) && (lastAt === null || r.at > lastAt)) { lastAt = r.at; lastText = typeof r.text === 'string' ? r.text : null; }
     // `freshAt`: each appended record's instant (P1 push — the exclusivity
@@ -685,7 +712,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     // appended record's text, so the index can cache the row's LAST LINE beside
     // its `lastAt` (a derived, re-derivable cache like `unread`, never a fact).
     wrote(adapterId, convId, { kind: 'append', fresh });
-    return { appended: fresh.length, duplicates, lastAt, lastText, healed, freshAt: fresh.map((r) => (Number.isFinite(r.at) ? r.at : 0)), fresh: fresh.slice() };
+    return { appended: fresh.length, duplicates, lastAt, lastText, healed, freshAt: fresh.map((r) => (Number.isFinite(r.at) ? r.at : 0)), fresh: fresh.slice(), widened };
   }
 
   /**
@@ -833,7 +860,9 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
       }
     } catch (e) { if (strict) throw e; return []; } finally { try { fs.closeSync(fd); } catch {} }
     out.sort(cmpRecord);
-    return out.slice(-want);
+    // lane lark-threads (A1): every READ serves the record as its place patches make it; the strict reader (the dedup
+    // rebuild) reads the bytes as written — the door judges an offer against the stored copy AND the patches apart
+    return strict ? out.slice(-want) : patched(adapterId, convId, out.slice(-want));
   }
 
   /**
@@ -869,7 +898,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
         while (at >= 0) {
           const ls = chunk.lastIndexOf(0x0a, at) + 1;
           let le = chunk.indexOf(0x0a, at); if (le < 0) le = chunk.length;
-          try { const r = JSON.parse(chunk.subarray(ls, le).toString('utf-8')); if (r && String(r.vendorId) === id) return r; } catch {}
+          try { const r = JSON.parse(chunk.subarray(ls, le).toString('utf-8')); if (r && String(r.vendorId) === id) return patchedOne(adapterId, convId, r); } catch {}
           at = ls > 0 ? chunk.lastIndexOf(needle, ls - 1) : -1;
         }
         end = start;
@@ -905,20 +934,33 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     const byCount = lines.length > maxRecords ? recAt(lines[lines.length - maxRecords]) : -Infinity;
     // …and the floor then pulls it back: nothing newer than `floorDays` is ever dropped.
     const cutoff = Math.min(Math.max(byDays, byCount), t - floorDays * 86400e3);
-    const keep = lines.filter((l) => recAt(l) >= cutoff);
+    const kept = lines.filter((l) => recAt(l) >= cutoff);
+    // lane lark-threads (A1): THE PLACE PATCHES ARE FOLDED INTO THE LINES the trim keeps (the rewrite this trim may do
+    // anyway) — the message line then carries the place itself and its side line goes (after the rename, never before:
+    // a crash between the two leaves the patch applied twice, which is a no-op)
+    const pm = placesOf(adapterId, convId);
+    const folded = new Set();
+    let refolded = 0;
+    const keep = pm.size ? kept.map((l) => {
+      const id = recVendorId(l);
+      const pl = id ? pm.get(id) : null;
+      if (!pl) return l;
+      folded.add(id);
+      try { const r = JSON.parse(l); const a = Thr.applyPlace(r, pl); if (a === r) return l; refolded++; return JSON.stringify(a); } catch { return l; }
+    }) : kept;
     // lane channel-threads: the SIDE log shares the trim — a message dropped here drops its side lines, and each kept
     // message's side lines are compacted (invariant 8: ≤ 2 lines per message after a trim)
     const liveIds = new Set();
     for (const l of keep) { const id = recVendorId(l); if (id) liveIds.add(id); }
-    let side = null;
-    try { side = trimSide(adapterId, convId, { liveIds }); } catch (e) { warn('[channels] side-log trim failed:', (e && e.message) || e); }
-    if (keep.length === lines.length) { if (side && side.removed) wrote(adapterId, convId, { kind: 'trim' }); return { removed: 0, kept: keep.length, side }; }
+    const sideTrim = () => { try { return trimSide(adapterId, convId, { liveIds, folded }); } catch (e) { warn('[channels] side-log trim failed:', (e && e.message) || e); return null; } };
+    if (keep.length === lines.length && !refolded) { const side = sideTrim(); if (side && side.removed) wrote(adapterId, convId, { kind: 'trim' }); return { removed: 0, kept: keep.length, side, folded: folded.size }; }
     const tmp = `${fp}.tmp-${process.pid}`;
     fs.writeFileSync(tmp, keep.length ? keep.join('\n') + '\n' : '');
     fs.renameSync(tmp, fp);
-    dedup.delete(`${adapterId}/${convId}`);
+    dropDedup(`${adapterId}/${convId}`);
+    const side = sideTrim();
     wrote(adapterId, convId, { kind: 'trim' });
-    return { removed: lines.length - keep.length, kept: keep.length, side };
+    return { removed: lines.length - keep.length, kept: keep.length, side, folded: folded.size };
   }
   function recVendorId(line) { try { const v = JSON.parse(line).vendorId; return v ? String(v) : null; } catch { return null; } }
   function recAt(line) { try { const n = Number(JSON.parse(line).at); return Number.isFinite(n) ? n : 0; } catch { return 0; } }
@@ -939,13 +981,15 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     const inBatch = new Set();
     const fresh = [];
     let duplicates = 0;
+    const offers = [];   // lane lark-threads (A1): an older page's copy of a stored message that names a place
     for (const r of list) {
       if (!r || !r.vendorId) continue;
-      if (set.has(r.vendorId) || inBatch.has(r.vendorId)) { duplicates++; continue; }
+      if (set.has(r.vendorId) || inBatch.has(r.vendorId)) { duplicates++; if (set.has(r.vendorId) && (r.threadKey || r.root)) offers.push(r); continue; }
       inBatch.add(r.vendorId);
       fresh.push(r);
     }
-    if (!fresh.length) return { appended: 0, duplicates };
+    const widened = offers.length ? widenQuiet(adapterId, convId, offers, { src: placeSrcOf(records) }) : [];
+    if (!fresh.length) return { appended: 0, duplicates, widened };
     const fp = logPath(adapterId, convId);
     fs.mkdirSync(path.dirname(fp), { recursive: true });
     let lines = [];
@@ -957,8 +1001,9 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     fs.writeFileSync(tmp, merged.map((r) => JSON.stringify(r)).join('\n') + '\n');
     fs.renameSync(tmp, fp);
     for (const r of fresh) rememberVendorId(set, r.vendorId);
+    { const bp = basePlaces.get(`${adapterId}/${convId}`); if (bp) for (const r of fresh) notePlace(bp, r); }
     wrote(adapterId, convId, { kind: 'prepend', fresh });
-    return { appended: fresh.length, duplicates };
+    return { appended: fresh.length, duplicates, widened };
   }
 
   // ── THE SIDE LOG (invariant 8, lane channel-threads) ─────────────────────
@@ -1031,6 +1076,94 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     wrote(adapterId, convId, { kind: 'side', msgs });
     return { appended: fresh.length, duplicates, msgs, ...(compacted ? { compacted } : {}) };
   }
+  // ── THE PLACE DOOR (lane lark-threads A1, 2026-10-01) ──────────────────────────────────────────────────────
+  // The owner's post: a Lark message stored before anyone answered it IN A THREAD carries no thread id, and the log's
+  // dedup keeps that first copy for ever — a later vendor copy that names the thread (the chat listing re-read, the
+  // thread walk's repeated root, a by-id read) was thrown away, so the root never headed its topic. THE ONE DOOR that
+  // WIDENS a stored record's place: `threadKey` null → the vendor's key, `root` null → the vendor's root — never the
+  // reverse, never any other field (src/channel-thread.js P1–P4). Written like a reaction: ONE side line per widening
+  // (`{k:'pl', msg, threadKey, root}`, deduped by its content), folded on EVERY read (`readTail`, `findRecord`,
+  // `oldestRecord`, `search`), folded INTO the message line at the log's own trim (then the side line goes), kept by the
+  // side compaction (never forgotten like an old reaction). The write hook says `{kind:'place', patched}` so the
+  // engine's caches and windows re-derive.
+  const placeCache = new Map();   // `${adapterId}/${convId}` → Map<vendorId, {threadKey, root}> (the folded pl lines)
+  /** verify r1 F5: the conversations whose door already SAID a conflicting thread id once (bounded). */
+  const saidConflict = new Set();
+  /** The conversation's folded place patches (cached; an empty map when it has none). */
+  function placesOf(adapterId, convId) {
+    const k = `${adapterId}/${convId}`;
+    let m = placeCache.get(k);
+    if (m) { placeCache.delete(k); placeCache.set(k, m); return m; }
+    let lines = [];
+    try { lines = sideLines(adapterId, convId).filter((x) => x && x.k === 'pl'); } catch { lines = []; }
+    m = Thr.foldPlaces(lines);
+    placeCache.set(k, m);
+    while (placeCache.size > PLACE_CACHE_MAX) placeCache.delete(placeCache.keys().next().value);
+    return m;
+  }
+  /** A page of records as their patches make them (a new object only where a patch widens one). */
+  function patched(adapterId, convId, recs) {
+    if (!recs.length) return recs;
+    const m = placesOf(adapterId, convId);
+    if (!m.size) return recs;
+    return recs.map((r) => (r && r.vendorId && m.has(String(r.vendorId)) ? Thr.applyPlace(r, m.get(String(r.vendorId))) : r));
+  }
+  const patchedOne = (adapterId, convId, r) => (r ? patched(adapterId, convId, [r])[0] : r);
+  /** Where a batch of offers came from (the side line's `src`): the caller's word, else the chat listing. */
+  const placeSrcOf = (records) => (records && typeof records === 'object' && typeof records.placeSrc === 'string' ? records.placeSrc : 'history');
+  /**
+   * THE DOOR. `offers` = vendor copies of messages (records, or `{vendorId, threadKey, root}`) — only a message the
+   * log holds (the dedup set: its newest DEDUP_MAX) is judged, against its STORED place and its patches (the effective
+   * place); a widening is ONE validated side line. → `{widened: [{vendorId, threadKey, root}], unknown: [vendorId],
+   * conflicts: [{vendorId, stored, offered}]}` (`unknown` = not a stored message — the caller ingests it normally;
+   * `conflicts` = a copy naming another thread than the stored one, refused and said once). Throws only when the side write fails (the
+   * offer is then made again by the next copy the vendor answers).
+   */
+  function widenPlaces(adapterId, convId, offers, { src = 'history' } = {}) {
+    const set = dedupSet(adapterId, convId);
+    const k = `${adapterId}/${convId}`;
+    const bp = basePlaces.get(k) || new Map();
+    const pm = placesOf(adapterId, convId);
+    const sides = [], widened = [], unknown = [], conflicts = [];
+    const inCall = new Map();   // a message offered twice in one call: the second judged against the first's widening
+    const at = now();
+    for (const o of Array.isArray(offers) ? offers : []) {
+      const vid = String((o && o.vendorId) || '');
+      if (!vid) continue;
+      if (!set.has(vid)) { if (!unknown.includes(vid)) unknown.push(vid); continue; }
+      const base = bp.get(vid) || { threadKey: null, root: null, replyTo: null };
+      const p = inCall.get(vid) || pm.get(vid);
+      const cur = { threadKey: base.threadKey || (p && p.threadKey) || null, root: base.root || (p && p.root) || null, replyTo: base.replyTo || null };
+      const w = Thr.widenPlace(cur, { threadKey: o.threadKey || null, root: o.root || null }, vid);
+      if (!w) {
+        // verify r1 F5: a copy naming ANOTHER thread for a message that already heads one is refused (P1: never changed) and
+        // SAID — once per conversation per process, never silently: a vendor correction nobody can apply, or a foreign copy
+        if (cur.threadKey && Thr.placeIdOk(o.threadKey) && o.threadKey !== cur.threadKey) conflicts.push({ vendorId: vid, stored: cur.threadKey, offered: o.threadKey });
+        continue;
+      }
+      const v = validateSide({ k: 'pl', msg: vid, at, src, threadKey: w.threadKey, root: w.root });
+      if (!v.ok) continue;
+      sides.push(v.side);
+      widened.push({ vendorId: vid, threadKey: v.side.threadKey, root: v.side.root });
+      inCall.set(vid, { threadKey: cur.threadKey || v.side.threadKey, root: cur.root || v.side.root });
+    }
+    if (conflicts.length && !saidConflict.has(k)) {
+      saidConflict.add(k); if (saidConflict.size > 2000) saidConflict.delete(saidConflict.values().next().value);
+      warn(`[channels] ${k}: ${conflicts.length} stored message(s) were offered a DIFFERENT thread id than the one they head (e.g. ${conflicts[0].vendorId}: stored ${String(conflicts[0].stored).slice(0, 64)}, offered ${String(conflicts[0].offered).slice(0, 64)}, src ${src}) — a stored place is never changed (widen-only); said once per conversation`);
+    }
+    if (!sides.length) return { widened: [], unknown, conflicts };
+    appendSide(adapterId, convId, sides);   // durable first (it throws on a failed write — nothing below runs)
+    const m = placesOf(adapterId, convId);  // re-read after a compaction the append may have run; then folded in place
+    for (const x of widened) { const c = m.get(x.vendorId) || { threadKey: null, root: null }; m.set(x.vendorId, { threadKey: c.threadKey || x.threadKey, root: c.root || x.root }); }
+    wrote(adapterId, convId, { kind: 'place', patched: widened.map((x) => ({ ...x })) });
+    return { widened, unknown, conflicts };
+  }
+  /** The append paths' use of the door: a failed side write is LOGGED, never the append's failure (its records are
+   *  durable already; the next vendor copy offers the widening again). */
+  function widenQuiet(adapterId, convId, offers, opts) {
+    try { return widenPlaces(adapterId, convId, offers, opts).widened; } catch (e) { warn(`[channels] ${adapterId}/${convId}: a place patch could not be written (offered again by the next copy): ${(e && e.message) || e}`); return []; }
+  }
+
   /** The newest `maxBytes` of a side log as text (a partial first line dropped) — never the whole file. `strict`: an
    *  open error other than ENOENT throws (the dedup rebuild's r5 rule); otherwise it reads as no log. */
   function sideTail(fp, maxBytes, { strict = false } = {}) {
@@ -1048,7 +1181,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   }
   /** The `"msg":"<id>"` of a side line, read off its head without parsing the body (the line begins
    *  `{"k":"rx","msg":` — `validateSide` builds it in that order). Linear: one bounded string match. */
-  const SIDE_HEAD_RE = /^\{"k":"(?:rx|th)","msg":("(?:[^"\\]|\\.){1,1100}")/;
+  const SIDE_HEAD_RE = /^\{"k":"(?:rx|th|pl)","msg":("(?:[^"\\]|\\.){1,1100}")/;
   /**
    * The side records naming `msgs` (a Set of vendorIds), in FILE order (append order), at most `limit` — the
    * newest are kept when there are more. A line naming another message is skipped WITHOUT parsing its body.
@@ -1079,13 +1212,15 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
    * bounded to SIDE_KEEP_BYTES: the least recently changed messages are forgotten (`forgotten`), so a compacted log
    * never outgrows the read window and the next compaction is SIDE_KEEP_BYTES of appends away. Temp + rename.
    */
-  function trimSide(adapterId, convId, { liveIds } = {}) {
+  function trimSide(adapterId, convId, { liveIds, folded = null } = {}) {
     const { lines, cut } = sideWindow(adapterId, convId);
     if (!lines.length && !cut) return { removed: 0, kept: 0, forgotten: 0 };
     const byMsg = new Map();
     const last = new Map();   // message → the index of its newest line (its last change)
+    const places = [];        // lane lark-threads (A1): place lines — never forgotten like a reaction (folded into the log at its trim)
     lines.forEach((x, i) => {
       if (!x || !x.msg || (liveIds && !liveIds.has(String(x.msg)))) return;
+      if (x.k === 'pl') { if (!(folded && folded.has(String(x.msg)))) places.push(x); return; }
       const k = String(x.msg);
       if (!byMsg.has(k)) byMsg.set(k, []);
       byMsg.get(k).push(x);
@@ -1100,7 +1235,8 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
       if (from < groups.length && bytes + b > SIDE_KEEP_BYTES) break;
       bytes += b; from = i;
     }
-    const keep = groups.slice(from).flat();
+    // the place lines LAST (the newest bytes of the file — the read window is its tail), one per message, bounded
+    const keep = groups.slice(from).flat().concat(Thr.compactPlaces(places, PLACE_KEEP_MAX).map((x) => JSON.stringify(x)));
     // (a file longer than the read window is always rewritten — its head is invisible to every reader: verify r2)
     if (keep.length === lines.length && from === 0 && !cut) return { removed: 0, kept: keep.length, forgotten: 0 };
     const fp = sidePath(adapterId, convId);
@@ -1108,6 +1244,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     fs.writeFileSync(tmp, keep.length ? keep.join('\n') + '\n' : '');
     fs.renameSync(tmp, fp);
     sideDedup.delete(`${adapterId}/${convId}`);
+    placeCache.delete(`${adapterId}/${convId}`);
     if (from > 0) log.log && log.log(`[channels] ${adapterId}/${convId}: the side log keeps the ${groups.length - from} most recently changed messages' reactions (${Math.round(bytes / 1024)} KiB); ${from} older folds forgotten — a window that shows them reads them again`);
     return { removed: lines.length - keep.length, kept: keep.length, forgotten: from };
   }
@@ -1148,7 +1285,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
       const size = fs.fstatSync(fd).size;
       const buf = Buffer.allocUnsafe(Math.min(size, 64 * 1024));
       fs.readSync(fd, buf, 0, buf.length, 0);
-      for (const line of buf.toString('utf-8').split('\n')) { if (!line) continue; try { return JSON.parse(line); } catch { continue; } }
+      for (const line of buf.toString('utf-8').split('\n')) { if (!line) continue; try { return patchedOne(adapterId, convId, JSON.parse(line)); } catch { continue; } }
       return null;
     } catch { return null; } finally { try { fs.closeSync(fd); } catch {} }
   }
@@ -1181,7 +1318,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
         if (!line || !line.toLowerCase().includes(needle)) continue;
         let r; try { r = JSON.parse(line); } catch { continue; }
         const hay = `${r.text || ''}\n${(r.author && (r.author.name || '')) || ''}\n${(r.attachments || []).map((a) => (a && a.role !== 'body' ? a.name : '')).join(' ')}`.toLowerCase();
-        if (hay.includes(needle)) hits.push(r);
+        if (hay.includes(needle)) hits.push(r.convId ? patchedOne(adapterId, String(r.convId), r) : r);
       }
       if (hits.length > limit * 4) { hits.sort((a, b) => cmpRecord(b, a)); hits.length = limit * 2; }
     }
@@ -1399,6 +1536,20 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   }
   function groupsSnapshot() { return JSON.parse(JSON.stringify(gr)); }
 
+  // ── lane lark-threads (B3): THE OWNER'S NAMES FOR AUTHORS (the VibeSpace 备注) — `aliases.json`
+  //    `{v:1, aliases: {[adapterId]: {[authorId]: {alias, at}}}}`, ONE serialized owner like groups.json, set aside
+  //    (never overwritten) when unreadable
+  const aliasesFile = path.join(dir, 'aliases.json');
+  const alLoad = loadJsonFamily(aliasesFile, (v) => v && typeof v === 'object' && v.aliases && typeof v.aliases === 'object' && !Array.isArray(v.aliases), () => ({ v: 1, aliases: {} }));
+  let al = alLoad.value;
+  let alChain = Promise.resolve();
+  function aliasesUpdate(fn) {
+    if (alLoad.blocked) return Promise.reject(blockedError(alLoad.blocked));
+    const run = alChain.then(() => fn(al)).then((r) => { writeJsonAtomic(aliasesFile, al); return r; });
+    alChain = run.then(() => {}, () => {});
+    return run;
+  }
+
   // ── the groups' WAKE PACE ledger (r2): who woke whom when — the PURE rules
   // are src/channel-groups.js paceVerdict/paceGrant/paceRefund, the engine
   // owns the calls. Held LIVE, written atomically a moment after a change
@@ -1425,6 +1576,28 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     if (!paceTimer) { paceTimer = setTimeout(paceFlush, 100); if (paceTimer.unref) paceTimer.unref(); }
   }
 
+  // ── THE DISPATCH LEDGER (lane worker-dispatch verify r1 ②): the same shape as the pace ledger — held LIVE, written
+  // atomically a moment after a change and on close, a BLOCKED file never overwritten (said each time). The PURE rules
+  // are src/dispatch-model.js replayVerdict; the groups engine owns the calls and prunes it to the model's windows.
+  const dispatchFile = path.join(dir, 'dispatch-ledger.json');
+  const dlLoad = loadJsonFamily(dispatchFile, (v) => v && typeof v === 'object' && !Array.isArray(v) && v.entries && typeof v.entries === 'object', () => ({ v: 1, entries: {} }));
+  let dl = dlLoad.value;
+  let dlDirty = false;
+  let dlTimer = null;
+  function dispatchFlush() {
+    if (dlTimer) { clearTimeout(dlTimer); dlTimer = null; }
+    if (!dlDirty) return;
+    dlDirty = false;
+    if (dlLoad.blocked) { warn('[channels] dispatch-ledger.json not written: ' + dlLoad.blocked); return; }
+    try { writeJsonAtomic(dispatchFile, dl); } catch (e) { warn('[channels] dispatch-ledger.json not written:', (e && e.message) || e); }
+  }
+  function dispatchSet(next) {
+    dl = next;
+    dlDirty = true;
+    if (closed) { dispatchFlush(); return; }
+    if (!dlTimer) { dlTimer = setTimeout(dispatchFlush, 100); if (dlTimer.unref) dlTimer.unref(); }
+  }
+
   /** The audit log's LIVE tail (today's file), newest last, bounded. A
    *  reader for THIS instance's own record — it never leaves the instance. */
   function auditTail({ limit = 200 } = {}) {
@@ -1447,11 +1620,12 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     if (interval) { clearInterval(interval); interval = null; }
     flush({ full: true });   // B-f32b: the last write is the whole serialization, not the cache
     paceFlush();
+    dispatchFlush();
     lruFlush();
   }
 
   return {
-    dir, indexFile, adaptersFile, auditFile, archiveDir, outboxFile, groupsFile, logPath,
+    dir, indexFile, adaptersFile, auditFile, archiveDir, outboxFile, groupsFile, aliasesFile, logPath,
     // `blocked()` = the refusal sentence while a family's file could not be set aside (null = writable)
     index: {
       update, snapshot, peek, has, live: liveConversations, rows, touch, table: liveTable, entry, flush, isDirty: () => dirty, blocked: () => ixBlocked || null,
@@ -1462,7 +1636,9 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     adapters: { update: adaptersUpdate, live: () => ad, blocked: () => adLoad.blocked || null },
     outbox: { update: outboxUpdate, snapshot: outboxSnapshot, nextId: outboxNextId, live: () => ob },
     groups: { update: groupsUpdate, snapshot: groupsSnapshot, live: () => gr },
+    aliases: { update: aliasesUpdate, live: () => al, blocked: () => alLoad.blocked || null },
     pace: { live: () => pc, set: paceSet, flush: paceFlush },
+    dispatch: { live: () => dl, set: dispatchSet, flush: dispatchFlush },
     quarantined,
     appendRecords, readTail, countSince, trim, audit, auditTail, close,
     // 2026-09-26 (the aggregated IM): backfill, search, attachments
@@ -1471,11 +1647,13 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     findRecord, lruFlush,
     // lane channel-threads: the side log (invariant 8) + which conversation holds a message
     appendSide, readSide, trimSide, sidePath, locateMessage,
+    // lane lark-threads (A1): THE PLACE DOOR (widen-only) + the folded patches a reader applies
+    widenPlaces, placesOf,
   };
 }
 
 module.exports = {
   createChannelStore, writeJsonAtomic, safeSeg, INDEX_CHUNK, SWEEP_CHUNKS,
   RETENTION_DAYS, RETENTION_MAX_RECORDS, RETENTION_FLOOR_DAYS, DEDUP_MAX, TAIL_BYTES, OUTBOX_KEEP, OUTBOX_PRUNABLE, OUTBOX_PRUNE_RANK,
-  SIDE_DEDUP_MAX, SIDE_READ_MAX, SIDE_DIR, SIDE_READ_BYTES, SIDE_COMPACT_BYTES, SIDE_KEEP_BYTES,
+  SIDE_DEDUP_MAX, SIDE_READ_MAX, SIDE_DIR, SIDE_READ_BYTES, SIDE_COMPACT_BYTES, SIDE_KEEP_BYTES, PLACE_CACHE_MAX, PLACE_KEEP_MAX,
 };

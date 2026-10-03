@@ -73,3 +73,30 @@ export function hueOf(key) {
 export function avatarOf({ name = '', key = '', self = false } = {}) {
   return { text: initialsOf(name), hue: self ? null : hueOf(key || name || ''), self: !!self };
 }
+
+// THE ACCOUNT BADGE (B-5fe1 — the owner, 2026-10-01: "channel列表需要在头像上展示来源角标，比如gmail/lark的图标，并且这个
+// 图标得是多色的，因为可能有多个账号属于同一个供应商，或者展示一个小字说这是那个channel标题的"):
+//  · THE GLYPH = the library icon named after the account's KIND (`vendor-<kind>`, src/lib/icons.js — the chat glyph
+//    when the library has none); a kind is a FACT of the digest, never an id a client branches on.
+//  · THE COLOUR = per ACCOUNT, not per vendor: the accounts sorted by id, each takes hueOf('account/' + id) — or, when
+//    an account of the SAME kind already wears that hue, the next free one — so two Lark accounts never share a colour
+//    (up to AVATAR_HUES per kind) and every client draws the same one (a function of the account list alone).
+//  · `multi` = the instance holds ≥ 2 accounts of that kind: a row then says the account's title in small text.
+//  · A badge is paint too: it sits inside the aria-hidden avatar; the account is in the row's words.
+/** `accounts` (the digest's adapters: `{id, kind, label, builtin}`) → Map id → `{hue, glyph, label, multi}`; a
+ *  built-in source (the message watcher) wears none. */
+export function accountBadges(accounts) {
+  const list = (Array.isArray(accounts) ? accounts : []).filter((a) => a && a.id && !a.builtin)
+    .map((a) => ({ id: String(a.id), kind: String(a.kind || ''), label: String(a.label || a.id).slice(0, 80) }))
+    .sort((x, y) => (x.id < y.id ? -1 : x.id > y.id ? 1 : 0));
+  const perKind = new Map(), taken = new Map(), out = new Map();
+  for (const a of list) perKind.set(a.kind, (perKind.get(a.kind) || 0) + 1);
+  for (const a of list) {
+    const used = taken.get(a.kind) || new Set();
+    let hue = hueOf('account/' + a.id);
+    for (let i = 0; i < AVATAR_HUES && used.has(hue); i++) hue = (hue + 1) % AVATAR_HUES;
+    used.add(hue); taken.set(a.kind, used);
+    out.set(a.id, { hue, glyph: 'vendor-' + a.kind, label: a.label, multi: perKind.get(a.kind) >= 2 });
+  }
+  return out;
+}

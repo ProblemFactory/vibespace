@@ -175,6 +175,8 @@ function picturePng(w = 200, h = 120) {
     conv('lark', 'oc_53', 'Fifty-three', 'group', caps(['user'], null));
     // ⑩g (verify round 5): a two-message room that fits its pane WITH an awaiting proposal card inside its list
     conv('lark', 'oc_card', 'Card room', 'group', caps(['user'], null));
+    // ⑩i (B-a085): a ticket thread with an awaiting REPLY-ALL proposal — the card lists every recipient before Approve
+    conv('gmail', 't_replyall', 'Rack 12 PDU alarm', 'thread', caps([], 'send-scope-not-granted'));
     // ⑩h (verify round 6): THE BATTERY room (120 rows: two local pages above the first, then the vendor) and the
     // code-block room (a fitting room whose last message holds a code block over its max-height — a nested scroller)
     conv('lark', 'oc_bat', 'Battery room', 'group', caps(['user'], null));
@@ -252,6 +254,13 @@ function picturePng(w = 200, h = 120) {
     ob.proposals[id] = { id, adapterId: 'lark', convId: 'oc_card', key: 'lark/oc_card', title: 'Card room', text: 'a draft to review', originalText: 'a draft to review', replyTo: null, why: null, attachments: [], draftedBy: { kind: 'user', id: null, name: null }, authority: 'draft', at: NOW - MIN, updatedAt: NOW - MIN, state: 'awaiting-approval', policy: { mode: 'review', reasons: ['policy-review'], detail: null }, sendAs: 'user', identity: { sentAs: 'user', marking: 'none', where: null, text: null }, ttlMs: 7 * 86400e3, awaitingSince: NOW - MIN, edited: false, approvedBy: null, reason: null, result: null, receipt: null, receiptDelivery: null, history: [{ state: 'proposed', at: NOW - MIN, by: 'user' }, { state: 'awaiting-approval', at: NOW - MIN, by: 'policy' }] };
   });
   store.appendRecords('gmail', 't_fold', [mailOf('t_fold', 'm_f1', NOW - 60 * MIN, 'Brook Example <brook@example.com>', 'Fold thread', 'Top reply\n\nOn Sat, Sep 19, 2026 at 3:14 PM Ada Example <ada@example.com> wrote:\n> one\n> two\n> three\n> four\n> five\n> six\n')]);
+  // ⑩i (B-a085): the ticket mail and an agent's reply-all to it (the envelope as the engine stores it: To + Cc resolved
+  // at propose, the agent's own added Cc apart)
+  store.appendRecords('gmail', 't_replyall', [mailOf('t_replyall', 'm_ra1', NOW - 20 * MIN, 'DC Support <support@dc.example>', 'Rack 12 PDU alarm', 'The PDU on rack 12 raised an alarm at 02:10.')]);
+  await store.outbox.update((ob) => {
+    const id = store.outbox.nextId();
+    ob.proposals[id] = { id, adapterId: 'gmail', convId: 't_replyall', key: 'gmail/t_replyall', title: 'Rack 12 PDU alarm', text: 'Replaced the PDU, alarm cleared.', originalText: 'Replaced the PDU, alarm cleared.', replyTo: null, why: null, attachments: [], replyAnchor: { vendorId: 'm_ra1', at: NOW - 20 * MIN, author: { id: 'support@dc.example', name: 'DC Support', isSelf: false }, excerpt: 'The PDU on rack 12 raised an alarm at 02:10.' }, replyEnvelope: { anchorId: 'm_ra1', to: 'tickets+4411@dc.example, ops-list@example.com', cc: 'noc@dc.example, "Lee, Sam" <sam.lee@example.com>, lee.oncall@example.com', subject: 'Re: Rack 12 PDU alarm', inReplyTo: '<t1@dc.example>', references: '<t1@dc.example>', all: true, added: ['lee.oncall@example.com'] }, draftedBy: { kind: 'agent', id: 'agent-ops', name: 'Ops agent' }, authority: 'draft', at: NOW - MIN, updatedAt: NOW - MIN, state: 'awaiting-approval', policy: { mode: 'review', reasons: ['authority'], detail: null }, sendAs: 'user', identity: { sentAs: 'user', marking: 'marked', where: 'raw-headers', text: null }, ttlMs: 7 * 86400e3, awaitingSince: NOW - MIN, edited: false, approvedBy: null, reason: null, result: null, receipt: null, receiptDelivery: null, history: [{ state: 'proposed', at: NOW - MIN, by: 'agent' }, { state: 'awaiting-approval', at: NOW - MIN, by: 'policy' }] };
+  });
   // ⑪ THE LOOK: Ada's run of two within 2 min, Brook, a system line, Ada again (a NEW run after it), you
   {
     const lookNames = new Map([['ou_ada', 'Ada Example'], ['ou_brook', 'Brook'], ['ou_me', 'Member A']]);
@@ -878,6 +887,18 @@ console.log('⑩b/⑩c one list, one writer: three renders in flight; a rebuild\
   ok(ROWKEY.onList && ROWKEY.started === 1 && ROWKEY.older === 1 && ROWKEY.start, `⑩g converse: a trusted click on a ROW then ArrowUp at the top still PAGES — the log read once, the vendor asked ONCE (POST /older: ${ROWKEY.older}), the beginning marked`, J(ROWKEY));
   await p1.evaljs(UNSPY);
   await p1.evaljs(`(() => { const w = window.__w.oc_card; if (w) window.app.wm.closeWindow(w.id); return 1; })()`);
+  // ⑩i (B-a085) THE CARD LISTS EVERY RECIPIENT of a reply-all before Approve — the To (labelled reply-all), the Cc in
+  // full (a quoted "Last, First" whole) and, apart, the address the AGENT added; each row wraps, nothing clipped (zh page)
+  await p1.evaljs(OPEN('gmail', 't_replyall', "w.content.querySelector('.chanwin-outbox .chan-prop-awaiting-approval')"));
+  const RA = await p1.evaljs(`(() => {
+    const w = ${WIN('t_replyall')};
+    const card = w.content.querySelector('.chanwin-outbox .chan-prop-awaiting-approval');
+    const row = (c) => { const r = card && card.querySelector('.' + c); if (!r) return null; const v = r.querySelector('.chan-prop-env-v'); const b = r.getBoundingClientRect(); return { k: (r.querySelector('.chan-prop-env-k') || {}).textContent || '', v: v ? v.textContent : '', all: r.dataset.replyAll || null, h: Math.round(b.height), clipped: v ? v.scrollWidth > v.clientWidth + 1 : true }; };
+    return { card: !!card, to: row('chan-prop-to'), cc: row('chan-prop-cc'), added: row('chan-prop-added'), approve: !!(card && card.querySelector('[data-approve]')) };
+  })()`);
+  ok(RA.card && RA.approve && RA.to && RA.to.all === '1' && RA.to.k === '收件人（回复全部）' && RA.to.v === 'tickets+4411@dc.example, ops-list@example.com' && RA.cc && RA.cc.v === 'noc@dc.example, "Lee, Sam" <sam.lee@example.com>, lee.oncall@example.com' && RA.added && RA.added.k === '起草者添加的抄送' && RA.added.v === 'lee.oncall@example.com' && [RA.to, RA.cc, RA.added].every((x) => x.h > 0 && !x.clipped),
+    '⑩i B-a085: the awaiting reply-all card lists EVERY recipient before Approve — To (labelled reply all), the whole Cc, and apart the address the agent added — each row drawn, none clipped', J(RA));
+  await p1.evaljs(`(() => { const w = ${WIN('t_replyall')}; if (w) window.app.wm.closeWindow(w.id); return 1; })()`);
 }
 
 // ═══ ⑩h THE CENSUS BATTERY (verify round 6, 2026-09-27) — every top-reaching path fired in sequence, the POSTs counted ═══
@@ -1084,13 +1105,13 @@ console.log('⑫ the principal picker: 40 sessions, 3 Task Groups — type, Ente
     const d = document.getElementById('chan-access-dialog');
     if (!d) return { fail: 'no Grant access dialog' };
     const box = d.querySelector('.pp-input');
-    return { focused: document.activeElement === box, rows: d.querySelectorAll('.pp-row').length, secs: [...d.querySelectorAll('.pp-sec')].map((x) => x.textContent), selects: d.querySelectorAll('select').length };
+    return { focused: document.activeElement === box, rows: d.querySelectorAll('.pp-row:not(.pp-row-everyone)').length, allFirst: !!d.querySelector('.pp-list > .pp-row.pp-row-everyone:first-child'), secs: [...d.querySelectorAll('.pp-sec')].map((x) => x.textContent), selects: d.querySelectorAll('select').length };
   })()`);
   ok(!P0.fail && P0.focused, 'Grant access… opens with the picker\'s search box FOCUSED', J(P0));
-  ok(P0.rows === 43 && P0.secs[0] === '任务组' && P0.secs.includes('会话') && P0.secs.includes('Billing') && P0.secs.includes('Frontend') && P0.secs.includes('Ops triage') && P0.secs.includes('其他'), 'the list: 3 Task Groups + 40 sessions, sessions under their Task Group (then 其他) — no dropdown of 43 names', J(P0));
+  ok(P0.rows === 43 && P0.allFirst && P0.secs[0] === '任务组' && P0.secs.includes('会话') && P0.secs.includes('Billing') && P0.secs.includes('Frontend') && P0.secs.includes('Ops triage') && P0.secs.includes('其他'), 'the list: ALL AGENTS first (lane everyone-principal), then 3 Task Groups + 40 sessions, sessions under their Task Group (then 其他) — no dropdown of 43 names', J(P0));
   await p1.cdp('Input.insertText', { text: 'inv' });
   await sleep(150);
-  const P1 = await p1.evaljs(`(() => { const d = document.getElementById('chan-access-dialog'); return [...d.querySelectorAll('.pp-row')].map((r) => r.querySelector('.pp-name').textContent); })()`);
+  const P1 = await p1.evaljs(`(() => { const d = document.getElementById('chan-access-dialog'); return [...d.querySelectorAll('.pp-row:not(.pp-row-everyone)')].map((r) => r.querySelector('.pp-name').textContent); })()`);
   ok(P1.length === 12 && P1.every((n) => /^invoice-\d\d$/.test(n)) && P1[0] === 'invoice-01', `typing 3 characters ("inv") narrows 43 rows to the 12 invoice sessions, in order (${P1.length})`, J(P1));
   const key = async (k) => { for (const type of ['keyDown', 'keyUp']) await p1.cdp('Input.dispatchKeyEvent', { type, key: k, code: k, windowsVirtualKeyCode: k === 'Enter' ? 13 : k === 'ArrowDown' ? 40 : 0, ...(k === 'Enter' && type === 'keyDown' ? { text: '\r' } : {}) }); };
   await key('ArrowDown'); await key('ArrowDown');
@@ -1112,7 +1133,7 @@ console.log('⑫ the principal picker: 40 sessions, 3 Task Groups — type, Ente
     for (let i = 0; i < 40 && !document.querySelector('#chan-access-dialog .pp-input'); i++) await new Promise((r) => setTimeout(r, 100));
     await new Promise((r) => setTimeout(r, 150));
     const d = document.getElementById('chan-access-dialog');
-    return { secs: [...d.querySelectorAll('.pp-sec')].map((x) => x.textContent).slice(0, 2), first: [...d.querySelectorAll('.pp-row .pp-name')].slice(0, 2).map((x) => x.textContent) };
+    return { secs: [...d.querySelectorAll('.pp-sec')].map((x) => x.textContent).slice(0, 2), first: [...d.querySelectorAll('.pp-row:not(.pp-row-everyone) .pp-name')].slice(0, 2).map((x) => x.textContent) };
   })()`);
   ok(P3.secs[0] === '最近' && J(P3.first) === J(['Frontend', 'invoice-02']), 'the next open pins this device\'s RECENT picks on top (newest first)', J(P3));
   await p1.evaljs(`(async () => { const d = document.getElementById('chan-access-dialog'); const b = d.querySelector('.pp-input'); b.focus(); b.value = ''; return 1; })()`);
@@ -1134,11 +1155,11 @@ console.log('⑫ the principal picker: 40 sessions, 3 Task Groups — type, Ente
   await p1.evaljs(`(async () => { const d = document.getElementById('chan-access-dialog'); const b = d.querySelector('.pp-input'); b.focus(); b.value = ''; b.dispatchEvent(new Event('input', { bubbles: true })); return 1; })()`);
   await p1.cdp('Input.insertText', { text: 'pager-0' });
   await sleep(120);
-  const R1 = await p1.evaljs(`(() => { const d = document.getElementById('chan-access-dialog'); return { first: d.querySelector('.pp-row .pp-name').textContent, chips: [...d.querySelectorAll('.pp-chip-name')].map((x) => x.textContent) }; })()`);
+  const R1 = await p1.evaljs(`(() => { const d = document.getElementById('chan-access-dialog'); return { first: d.querySelector('.pp-row:not(.pp-row-everyone) .pp-name').textContent, chips: [...d.querySelectorAll('.pp-chip-name')].map((x) => x.textContent) }; })()`);
   // pager-01 dies; the roster broadcast reaches the picker's listener (the same frame the sidebar would relay)
   await p1.evaljs(`(() => { const sb = window.app.sidebar; const i = sb._webuiSessions.findIndex((x) => x.name === 'pager-01'); if (i >= 0) sb._webuiSessions.splice(i, 1); for (const fn of window.app.ws.globalHandlers) { try { fn({ type: 'active-sessions', sessions: [] }); } catch {} } return 1; })()`);
   await sleep(150);
-  const R2 = await p1.evaljs(`(() => { const d = document.getElementById('chan-access-dialog'); return { first: d.querySelector('.pp-row .pp-name').textContent, active: d.querySelectorAll('.pp-row.pp-active').length, box: d.querySelector('.pp-input').value }; })()`);
+  const R2 = await p1.evaljs(`(() => { const d = document.getElementById('chan-access-dialog'); return { first: d.querySelector('.pp-row:not(.pp-row-everyone) .pp-name').textContent, active: d.querySelectorAll('.pp-row.pp-active').length, box: d.querySelector('.pp-input').value }; })()`);
   await key('Enter');
   await sleep(150);
   const R3 = await p1.evaljs(`(() => { const d = document.getElementById('chan-access-dialog'); const b = d.querySelector('.pp-input'); const ad = b.getAttribute('aria-activedescendant'); return { chips: [...d.querySelectorAll('.pp-chip-name')].map((x) => x.textContent), rows: [...d.querySelectorAll('.chan-access-row .chan-access-who')].map((x) => x.textContent), active: [...d.querySelectorAll('.pp-row.pp-active .pp-name')].map((x) => x.textContent), adName: ad && document.getElementById(ad) ? document.getElementById(ad).querySelector('.pp-name').textContent : null }; })()`);
@@ -1160,10 +1181,10 @@ console.log('⑫ the principal picker: 40 sessions, 3 Task Groups — type, Ente
   await sleep(120);
   await key('ArrowDown'); await key('ArrowDown');   // pager-03 → pager-04 (pager-02 is picked already but still listed)
   await sleep(80);
-  const H1 = await p1.evaljs(`(() => { const d = document.getElementById('chan-access-dialog'); return { rows: [...d.querySelectorAll('.pp-row .pp-name')].map((x) => x.textContent).slice(0, 3), active: [...d.querySelectorAll('.pp-row.pp-active .pp-name')].map((x) => x.textContent) }; })()`);
+  const H1 = await p1.evaljs(`(() => { const d = document.getElementById('chan-access-dialog'); return { rows: [...d.querySelectorAll('.pp-row:not(.pp-row-everyone) .pp-name')].map((x) => x.textContent).slice(0, 3), active: [...d.querySelectorAll('.pp-row.pp-active .pp-name')].map((x) => x.textContent) }; })()`);
   await p1.evaljs(`(() => { const sb = window.app.sidebar; const i = sb._webuiSessions.findIndex((x) => x.name === 'pager-02'); if (i >= 0) sb._webuiSessions.splice(i, 1); for (const fn of window.app.ws.globalHandlers) { try { fn({ type: 'active-sessions', sessions: [] }); } catch {} } return 1; })()`);
   await sleep(150);
-  const H2 = await p1.evaljs(`(() => { const d = document.getElementById('chan-access-dialog'); return { first: d.querySelector('.pp-row .pp-name').textContent, active: [...d.querySelectorAll('.pp-row.pp-active .pp-name')].map((x) => x.textContent), chips: [...d.querySelectorAll('.pp-chip-name')].map((x) => x.textContent), who: [...d.querySelectorAll('.chan-access-row .chan-access-who')].map((x) => x.textContent) }; })()`);
+  const H2 = await p1.evaljs(`(() => { const d = document.getElementById('chan-access-dialog'); return { first: d.querySelector('.pp-row:not(.pp-row-everyone) .pp-name').textContent, active: [...d.querySelectorAll('.pp-row.pp-active .pp-name')].map((x) => x.textContent), chips: [...d.querySelectorAll('.pp-chip-name')].map((x) => x.textContent), who: [...d.querySelectorAll('.chan-access-row .chan-access-who')].map((x) => x.textContent) }; })()`);
   await key('Enter');
   await sleep(150);
   const H3 = await p1.evaljs(`(() => { const d = document.getElementById('chan-access-dialog'); return [...d.querySelectorAll('.pp-chip-name')].map((x) => x.textContent); })()`);
@@ -1179,7 +1200,7 @@ console.log('⑫ the principal picker: 40 sessions, 3 Task Groups — type, Ente
   await sleep(150);
   await key('Enter');
   await sleep(150);
-  const V2 = await p1.evaljs(`(() => { const d = document.getElementById('chan-access-dialog'); return { active: [...d.querySelectorAll('.pp-row.pp-active .pp-name')].map((x) => x.textContent), first: d.querySelector('.pp-row .pp-name').textContent, chips: [...d.querySelectorAll('.pp-chip-name')].map((x) => x.textContent) }; })()`);
+  const V2 = await p1.evaljs(`(() => { const d = document.getElementById('chan-access-dialog'); return { active: [...d.querySelectorAll('.pp-row.pp-active .pp-name')].map((x) => x.textContent), first: d.querySelector('.pp-row:not(.pp-row-everyone) .pp-name').textContent, chips: [...d.querySelectorAll('.pp-chip-name')].map((x) => x.textContent) }; })()`);
   ok(J(V1) === J(['pager-04']) && J(V2.chips) === J(H3) && J(V2.active) === J([V2.first]), 'a highlighted row that VANISHED under a patch disarms the pick: nothing picked — the refused Enter highlights the row now first (round 4: shown, never swallowed)', J([V1, V2]));
   await key('Enter');   // the SECOND Enter takes the highlighted row — the person saw it highlighted first (the ↓ + Enter rule)
   await sleep(150);
@@ -1253,7 +1274,7 @@ console.log('⑫b the picker at 500 sessions and 50 Task Groups: build, keystrok
     box.focus();
     const drawOf = (v) => { const t = performance.now(); box.value = v; box.dispatchEvent(new Event('input')); return performance.now() - t; };
     const typeMs = Math.max(drawOf('l'), drawOf('la'), drawOf('lan'));
-    const narrowed = d.querySelectorAll('.pp-row').length;
+    const narrowed = d.querySelectorAll('.pp-row:not(.pp-row-everyone)').length;   // ALL AGENTS stays visible whatever the query (lane everyone-principal)
     const clearMs = drawOf('');
     const row0 = d.querySelector('.pp-row[data-key="agent:cid-lane-007"]');
     box.value = 'lane-00'; box.dispatchEvent(new Event('input'));

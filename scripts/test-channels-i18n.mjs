@@ -92,6 +92,7 @@ export const DATA_PATH_CLASSES = [
   'chan-row-title', 'chan-row-sub',
   'chan-search-head', 'chan-search-text',   // a search hit's conversation title / author / message text
   'chanmsg-dlv',   // lane group-pending: the line under a group message names a RECIPIENT ("Waiting for beta's next turn") — its words are t()'d, the name is data
+  'chan-orow-title', 'chan-orow-text', 'chan-orow-acct',   // B-f467: an Outbox row's recipients / conversation name, the draft's first line, the account's own label
   'chanwin-bar', 'chanmsg-head', 'chanmsg-body', 'chan-prop-text', 'chan-prop-link', 'chan-prop-orig', 'chan-prop-honesty-line',
   'chan-prop-edit', 'chan-prop-rejectbox',
   'integ-cb-url', 'integ-mask', 'integ-plain', 'chan-flow-input', 'chan-opt-input', 'chan-af-rule',
@@ -324,7 +325,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     ok(!((idx2 && idx2.shots) || []).some((x) => x.name === 'PASS-FAILED'), 'no IM pass failed', JSON.stringify(((idx2 && idx2.shots) || []).filter((x) => x.name === 'PASS-FAILED')));
     const want = ['list-focus-200', 'list-focus-260', 'list-focus-340', 'list-focus-500', 'list-all-260', 'accounts-260', 'win-lark', 'win-lark-top', 'win-lark-hover', 'win-gmail', 'win-gmail-open', 'win-readonly', 'm-list-focus', 'm-win-lark', 'm-win-gmail', 'm-win-readonly',
       // the plain-words dialogs (Grant access… with the picker + the authority answers; Notify… as three questions + the preview)
-      'dlg-access', 'dlg-notify', 'dlg-notify-rule', 'm-dlg-access', 'm-dlg-notify', 'm-dlg-notify-rule'];
+      'dlg-access', 'dlg-notify', 'dlg-notify-rule', 'm-dlg-access', 'm-dlg-notify', 'm-dlg-notify-rule',
+      // B-f467: the Outbox window's rows, and one opened (its full card under it)
+      'outbox-rows', 'outbox-open', 'm-outbox-rows', 'm-outbox-open'];
     for (const lang of IM_LANGS) {
       const tags = [`im-${lang}-desktop-dark`, `im-${lang}-mobile-dark`];
       const missing = want.filter((n) => !imShots.some((x) => tags.includes(x.tag) && x.name === n && !x.missing));

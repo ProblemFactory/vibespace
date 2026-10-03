@@ -24,18 +24,32 @@
  *
  * Mid-turn is NOT a refusal: the frame is written and the session's own send
  * mode takes over (claude's CLI queues it; codex's wrapper `thread/queue/add`).
- * `origin` only names the caller in the log lines ('ws' | 'inbox-reply').
+ * `origin` names the caller in the log lines ('ws' | 'inbox-reply' | 'dispatch'); `by` = {cid, name} of the
+ * dispatching conversation (origin 'dispatch' only) — the compaction label and the live record name it (verify r1 ①).
+ *
+ * THE ONE NON-OWNER CALLER (lane worker-dispatch, 2026-10-02): an agent's
+ * `vibespace-msg dispatch` types `/compact` into an IDLE worker before its
+ * brief (src/server/worker-dispatch.js), because a slash command only exists
+ * on this path. It is NOT the owner typing, so origin 'dispatch' stamps the
+ * MACHINE-turn mark (`_machineInputAt`, as the delivery ladder does) instead
+ * of `_userInputAt`, and never clears the auto-resume loop breaker. Its money
+ * is gated at ITS OWN site (the spend census row for worker-dispatch.js): the
+ * authorizer is asked before the compaction, and the dispatch's one billed
+ * turn is the wake through the ladder.
  */
 const fs = require('fs');
 const path = require('path');
 const { wrapperCaps } = require('./wrapper-files.js');
+const STDIN_CONFIRM_MS = 600;   // the broken-stdin detector's confirm stage (session-stdout's ATTACH_PROBE_CONFIRM_MS, same reason)
 
-function createUserInputSender({ activeSessions, adapterRegistry, BUFFERS_DIR, broadcastToSession, feedLive, autoResume, reattachLocalPty, ptyQuietSince, log = console.log, framesDir = path.join(__dirname, '..', '..', 'data', 'chat-frames') }) {
-  function send(sessionId, text, { msgId: givenMsgId = null, origin = 'ws' } = {}) {
+function createUserInputSender({ activeSessions, adapterRegistry, BUFFERS_DIR, broadcastToSession, feedLive, autoResume, reattachLocalPty, ptyQuietSince, writeSessionInput = (s, line) => s.pty.write(line + '\n'), log = console.log, framesDir = path.join(__dirname, '..', '..', 'data', 'chat-frames') }) {
+  function send(sessionId, text, { msgId: givenMsgId = null, origin = 'ws', by = null } = {}) {
     const session = activeSessions.get(sessionId);
     if (!session) return { ok: false, code: 'no_session', error: 'no live session ' + sessionId };
     if (!(session.pty && session.mode === 'chat')) return { ok: false, code: 'not_chat', error: 'not a live chat session' };
-    session._userInputAt = Date.now();   // the owner's own turn (§22 D2: next-turn reports ride THIS kind of turn only)
+    const human = origin !== 'dispatch';   // lane worker-dispatch: an agent's dispatch typing `/compact` is not the owner
+    if (human) session._userInputAt = Date.now();   // the owner's own turn (§22 D2: next-turn reports ride THIS kind of turn only)
+    else session._machineInputAt = Date.now();      // a machine turn: the next-turn group reports wait for the owner's own
     const adapter = adapterRegistry.get(session.backend);
     if (!adapter) return { ok: false, code: 'send_failed', error: `no adapter for backend "${session.backend}"` };
     // New input means prior interrupt succeeded (or user proceeded) —
@@ -71,7 +85,7 @@ function createUserInputSender({ activeSessions, adapterRegistry, BUFFERS_DIR, b
     // verb and dropped unparseable lines silently) instead of letting
     // the capability gate below say "old wrapper" honestly.
     let payloadLine = stdinPayload;
-    if (stdinPayload.length > 64 * 1024 && !session.host && session.socketPath) {
+    if (stdinPayload.length > 64 * 1024 && !session.host && (session.socketPath || session.agentdSession)) {   // B-b675: a local R6 pipe (agentdSession) has no socketPath now — the same local wrapper, the same file verb
       // WRAPPER CAPABILITY GATE (2.361.1, the c1206711 lost-image
       // incident): the _frame_file pointer is only understood by
       // wrappers spawned from 2.360.0+ code. Wrappers are LONG-LIVED
@@ -119,7 +133,7 @@ function createUserInputSender({ activeSessions, adapterRegistry, BUFFERS_DIR, b
     // conversation over by hand — the one non-turn signal allowed to
     // clear the loop breaker, because a human at the keyboard is
     // exactly who the budget was protecting
-    try { autoResume?.noteRecovered?.(sessionId, 'user sent a prompt'); } catch { }
+    if (human) { try { autoResume?.noteRecovered?.(sessionId, 'user sent a prompt'); } catch { } }
     // /compact turn (2.365.0, the userN "Compaction canceled." case):
     // a large conversation compacts for 1–2 minutes behind a bare
     // "thinking…" spinner, and the CLI's ONLY "Compaction canceled."
@@ -127,16 +141,23 @@ function createUserInputSender({ activeSessions, adapterRegistry, BUFFERS_DIR, b
     // whole attempt away. Label the turn for every client (the label
     // resets with the turn like any other) so Stop can be guarded.
     if (typeof text === 'string' && /^\/compact\b/.test(text.trim())) {
-      session._streamingLabel = 'Compacting context… (a large conversation takes 1–2 minutes — Stop cancels it)';
+      // verify r1 ① (lane worker-dispatch): a compaction an AGENT asked for names its asker in the one label every
+      // viewer sees (the owner's own keeps the plain words) — a card with no author read as the owner's own act
+      session._streamingLabel = human
+        ? 'Compacting context… (a large conversation takes 1–2 minutes — Stop cancels it)'
+        : `Compacting context… — asked by ${(by && by.name) || 'another session'} through vibespace-msg dispatch (1–2 minutes on a large conversation — Stop cancels it)`;
       session._streamingKind = 'compacting';
       broadcastToSession(session, sessionId, { type: 'streaming-label', sessionId, label: session._streamingLabel, kind: 'compacting' });
     }
-    try { session.pty.write(payloadLine + '\n'); }
+    try { writeSessionInput(session, payloadLine); }   // session-stdout's ONE typed-input write: a bridge that never spoke holds it for the heal (B-c20d)
     catch (e) {
       log(`[${sessionId}] chat-input write failed (${origin}): ${e.message}`);
       return { ok: false, code: 'send_failed', error: 'the session did not accept the message: ' + e.message };
     }
     if (userMsg) {
+      // verify r1 ① (lane worker-dispatch): the live record of a frame an AGENT typed carries who typed it — the
+      // owner's viewers and the buffer replay see `origin {kind:'dispatch', name}`, never a user turn of their own
+      if (!human) userMsg.origin = { kind: 'dispatch', name: (by && by.name) || null };
       session.buffer = (session.buffer + JSON.stringify(userMsg) + '\n').slice(-500000);
       feedLive(session, userMsg);
     }
@@ -153,22 +174,27 @@ function createUserInputSender({ activeSessions, adapterRegistry, BUFFERS_DIR, b
     // the shared `reattachLocalPty`, which the restore-path attach
     // probe also uses: two triggers, one implementation.
     if (session.socketPath) {
-      const inputPayload = payloadLine;
       const sentAt = Date.now();
       session._stdinAckReceived = false;
-      setTimeout(() => {
-        if (!activeSessions.has(sessionId)) return;
-        if (session._stdinAckReceived) return;
-        if (!ptyQuietSince(session, sentAt)) return; // bytes came back — the pty is working (old wrapper without ack)
+      const silent = () => activeSessions.has(sessionId) && !session._stdinAckReceived
+        && ptyQuietSince(session, sentAt); // no ack, and no byte came back (an old wrapper sends no ack, but the pty still speaks)
+      setTimeout(() => { if (silent()) setTimeout(() => {
+        // CONFIRMED AFTER A POLL PHASE (verify r1, reproduced on raw dtach): a blocked event loop runs the TIMERS phase
+        // before the poll phase, so after a stall of 5 s or more this verdict ran ahead of the ack and the preamble that
+        // had long since arrived — the bridge HAD connected and forwarded the input, and the heal replayed it: a second
+        // billed turn. Judged again once the pending bytes are read (the attach probe's confirm stage, same reason).
+        if (!silent()) return;
         // RE-SEND ONLY THROUGH A BRIDGE THAT NEVER SPOKE (lane-dead-bridge verify r1, reproduced on raw dtach): a dtach
         // client that spoke its attach preamble CONNECTED to a live master, and the input it forwarded sits in that
         // master's socket queue — read (attach, then every push) even after the client is killed. Re-sending through
         // the new attach then delivered the owner's message TWICE (the 15:05 shape: a stuck master, a connected but
         // never-attached client). A bridge that never spoke since it was opened (the device channel never opened, a
-        // stale socket) has nothing queued — that is the one case the re-send exists for.
+        // stale socket) has nothing queued — that is the one case the re-send exists for. WHAT is re-sent is the healer's
+        // (B-c20d): EVERY input that bridge was handed, in order — this detector's own input re-sent alone lost a second
+        // message typed inside its 5 s (the first re-send's ack ended the second detector).
         const neverSpoke = ptyQuietSince(session, Number(session._ptyOpenedAt) || 0);
-        reattachLocalPty(sessionId, session, `Broken pty stdin detected (${neverSpoke ? 'this bridge never spoke — re-sending the input' : 'this bridge had spoken — its queued input rides the re-attach, nothing re-sent'})`, { resend: neverSpoke ? inputPayload : null });
-      }, 5000);
+        reattachLocalPty(sessionId, session, `Broken pty stdin detected (${neverSpoke ? 'this bridge never spoke — re-sending every input it was handed, in order' : 'this bridge had spoken — its queued input rides the re-attach, nothing re-sent'})`);
+      }, STDIN_CONFIRM_MS); }, 5000);
     }
     return { ok: true, msgId };
   }
