@@ -1,0 +1,37 @@
+{
+ "_note": "The standard emoji the Slack picker offers first (SLACK_QUICK, src/channels/slack-text.js) and their glyphs — pinned by test-channels-slack-shape. Slack has no name → character API (research §2.3); the full table lives in slack-text.js SLACK_EMOJI.",
+ "quick": [
+  [
+   "+1",
+   "👍"
+  ],
+  [
+   "white_check_mark",
+   "✅"
+  ],
+  [
+   "eyes",
+   "👀"
+  ],
+  [
+   "pray",
+   "🙏"
+  ],
+  [
+   "tada",
+   "🎉"
+  ],
+  [
+   "heart",
+   "❤️"
+  ],
+  [
+   "joy",
+   "😂"
+  ],
+  [
+   "raised_hands",
+   "🙌"
+  ]
+ ]
+}

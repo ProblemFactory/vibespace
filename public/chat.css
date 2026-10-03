@@ -368,6 +368,11 @@
 .chat-exit-out-full > summary { cursor: pointer; font-size: 11px; color: var(--text-secondary); }
 .chat-exit-stream { font-size: 10px; color: var(--text-dim); margin-top: 4px; }
 .chat-exit-cut, .chat-exit-none { font-size: 10px; color: var(--text-dim); }
+/* lane exit-see-whole (design 013 piece 1a): the command AS ITSELF above its output — wrapped (a 4 KiB token breaks anywhere), folded at four lines; open = the whole command, scrolling past 60vh. Descendant selectors: the transcript wraps every pre in .chat-pre-wrap (its Copy / Wrap toolbar) */
+.chat-exit-cmd { margin: 0; padding: 5px 8px; font-family: var(--font-mono, monospace); font-size: 11px; line-height: 1.45; color: var(--text); background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm); white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-all; user-select: text; }
+.chat-exit-cmd-folded:not(.chat-exit-cmd-open) .chat-exit-cmd { max-height: calc(4 * 1.45em + 10px); overflow: hidden; }
+.chat-exit-cmd-open .chat-exit-cmd { max-height: 60vh; overflow: auto; }
+.chat-exit-cmd-fold > summary { cursor: pointer; font-size: 11px; color: var(--text-secondary); }
 .chat-browser-session .chat-vs-notice-head { margin-bottom: 0; }
 .chat-browser-session .chat-vs-notice-head svg { flex: 0 0 auto; }
 .chat-browser-session-note { font-size: 11px; margin-top: 4px; }

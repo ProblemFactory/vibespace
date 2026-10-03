@@ -369,9 +369,9 @@ console.log('§6 lane C2 — the install rung\'s PURE plan, the picker verdict, 
   const R = (h) => M.machinePickRow(h);
   ok(R({ hostId: 'local' }).code === 'ready' && R({ hostId: 'a', connected: true, capabilities: ['desktop-serve'], platform: 'linux' }).code === 'ready'
     && R({ hostId: 'a', connected: true, capabilities: ['sysinfo'], platform: 'linux' }).code === 'host_needs_daemon' && !R({ hostId: 'a', connected: true, capabilities: [], platform: 'linux' }).selectable
-    && R({ hostId: 'a', connected: true, capabilities: ['desktop-serve'], platform: 'darwin' }).code === 'no_x11'
+    && R({ hostId: 'a', connected: true, capabilities: ['desktop-serve'], platform: 'darwin' }).code === 'no_vnc' && R({ hostId: 'a', connected: true, platform: 'freebsd' }).code === 'no_x11' // design 014 D1: macOS / Windows get their whole desktop
     && R({ hostId: 'a', transport: 'dial', link: 'offline' }).code === 'offline' && R({ hostId: 'a', transport: 'ssh', link: 'unknown' }).code === 'connect',
-  'the picker verdict: this machine / a capable Linux agent ready; an agent without the capability host_needs_daemon; macOS no_x11; a dial device not dialed in offline; an unconnected ssh machine connect');
+  'the picker verdict: this machine / a capable Linux agent ready; an agent without the capability host_needs_daemon; macOS unprobed no_vnc (design 014 D1 — its whole desktop), another non-Linux no_x11; a dial device not dialed in offline; an unconnected ssh machine connect');
   // the facts op answers the install facts only when asked
   const fd = { ...fakeDisplay, installFacts: async () => ({ platform: 'linux', apt: '/usr/bin/apt-get', aptXpra: '3.1', distro: 'debian', codename: 'bookworm', sudo: false }) };
   const m6 = machine({ display: fd });
@@ -627,6 +627,33 @@ console.log('§9 lane C2 — the routes: host, the machine picker, the install r
   accStub.installBusy = (h) => (h === 'dev-busy' ? { since: 1, running: true } : null);
   const bz = await j('/api/desktop/install-xpra', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ host: 'dev-busy' }) });
   ok(bz.status === 409 && JSON.parse(bz.body).code === 'busy' && !seen.some((x) => x[0] === 'install' && x[1] === 'dev-busy'), 'a machine whose install slot is held (the access layer\'s, kept past a timed-out run) ⇒ 409 busy BEFORE the stream starts, nothing run', bz);
+  // (design 014 D1, verify r2 L1) a machine's WHOLE DESKTOP route refuses an agent token in EVERY channel the stream guard names — the Bearer header, ?token=, the body AND ?vsst= — never only three of them; a cookie (no token) reaches the access layer
+  accStub.openMachineDesktop = async (h) => { seen.push(['open', h]); return { ok: true, id: 'machine-desktop.' + h, hostId: h, platform: 'win32' }; };
+  accStub.runOnDesktop = async (h, cmd) => { seen.push(['run-desktop', h, cmd]); return { ok: true, hostId: h, platform: 'win32', shown: cmd }; };
+  for (const [route, body] of [['/api/desktop/machine-desktop/run', { host: 'win-a', cmd: 'start "" blender' }], ['/api/desktop/machine-desktop/connect', { host: 'win-a' }]]) {
+    const verb = route.endsWith('/run') ? 'run-desktop' : 'open';
+    for (const [how, url, opts] of [
+      ['Bearer vsst_', route, { headers: { Authorization: 'Bearer vsst_x' } }],
+      ['Bearer jbt_', route, { headers: { Authorization: 'Bearer jbt_x' } }],
+      ['?token=', route + '?token=jbt_x', {}],
+      ['?vsst=', route + '?vsst=vsst_x', {}],
+      ['body token', route, { body: { ...body, token: 'vsst_x' } }],
+    ]) {
+      const n0 = seen.length;
+      const r = await j(url, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) }, body: JSON.stringify(opts.body || body) });
+      ok(r.status === 403 && JSON.parse(r.body).code === 'human_only' && seen.length === n0, `${route} with ${how} ⇒ 403 human_only, the access layer never reached`, { how, status: r.status, body: r.body.slice(0, 80) });
+    }
+    const n0 = seen.length;
+    const c = await j(route, { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: 'vs_token=owner' }, body: JSON.stringify(body) });
+    ok(c.status === 200 && seen.length === n0 + 1 && seen[seen.length - 1][0] === verb, `CONTROL ${route}: a cookie (no token) reaches the access layer (${verb})`, { status: c.status, body: c.body.slice(0, 80) });
+  }
+  // a tightvnc install carries the same guard (the Windows one-time setup is the owner's)
+  const tv = await j('/api/desktop/install', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ host: 'win-a', what: 'tightvnc', token: 'vsst_x' }) });
+  ok(tv.status === 403 && JSON.parse(tv.body).code === 'human_only', 'POST /api/desktop/install what=tightvnc with a body token ⇒ 403 human_only', { status: tv.status, body: tv.body.slice(0, 80) });
+  // CONTROL: the guard's own line names ?vsst= (a copy without it would let an agent token in the query through)
+  const routesSrc = read('src/routes/desktop-apps.js');
+  const guardLine = routesSrc.split('\n').find((l) => l.includes('const isAnyBearer =')) || '';
+  ok(/req\.query\.vsst != null/.test(guardLine) && /req\.query\.token != null/.test(guardLine), 'CONTROL: isAnyBearer names BOTH ?token= and ?vsst= (the stream guard bearerOf names both; the routes must match)', guardLine.trim().slice(0, 160));
   srv.close();
 }
 
@@ -644,7 +671,7 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
   const a = ACC.create({ hosts: hostsStub, local: () => null, install: false, log: quiet });
   const rows = await a.machines();
   const by = Object.fromEntries(rows.map((r) => [r.hostId, r]));
-  ok(rows[0].hostId === 'local' && by['dial-on'].code === 'ready' && by['dial-off'].code === 'offline' && by['ssh-cold'].code === 'connect' && by.old.code === 'host_needs_daemon' && by.mac.code === 'no_x11' && by['dial-on'].label === 'Dial on', 'machines(): this machine first; a dialed-in capable agent ready; offline / connect / host_needs_daemon / no_x11 by code', rows.map((r) => [r.hostId, r.code]));
+  ok(rows[0].hostId === 'local' && by['dial-on'].code === 'ready' && by['dial-off'].code === 'offline' && by['ssh-cold'].code === 'connect' && by.old.code === 'host_needs_daemon' && by.mac.code === 'no_vnc' && by.mac.desktop === 'vnc-native' && by['dial-on'].label === 'Dial on', 'machines(): this machine first; a dialed-in capable agent ready; offline / connect / host_needs_daemon by code; a Mac is its whole desktop, no_vnc when its probe finds nothing (design 014 D1)', rows.map((r) => [r.hostId, r.code]));
   ok(!connects.some((c) => c[0] === 'connect' && (c[1] === 'ssh-cold' || c[1] === 'dial-off')), 'drawing the picker never starts a connect ladder to an ssh machine or an offline device', connects);
   // the install rung over a paired machine: the plan decides, run-stream carries the SAME argv
   let factsCalls = 0;

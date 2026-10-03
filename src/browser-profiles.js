@@ -3009,7 +3009,7 @@ function attachmentsFor({ leases = [], profiles = [], browserKey, pin = null, ch
   else if (attachments.length === 1) defaultId = attachments[0].profileId;
   for (const a of attachments) a.isDefault = a.profileId === defaultId;
   const kids = (children || []).filter((c) => c && parentKeyOf(c.handle) === bk && c.handle !== bk)
-    .map((c) => ({ handle: String(c.handle), since: Number(c.since) || 0 }));
+    .map((c) => ({ handle: String(c.handle), since: Number(c.since) || 0, ...(c.job ? { job: String(c.job) } : {}) })); // accept-fixes-jobs F10: a job's handle keeps its tag (the strip names the row by the job's name)
   const fingerprint = `${defaultId || '-'}|${attachments.map((a) => a.profileId).sort().join(',')}`;
   const handles = [
     ...attachments.map((a) => ({ handle: a.alias, profileId: a.profileId, label: a.label, isDefault: a.isDefault, kind: 'attachment' })),

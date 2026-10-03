@@ -102,6 +102,7 @@ const caps = require('../channel-caps.js');
 const fake = require('../channels/fake.js');
 const lark = require('../channels/lark.js');
 const gmail = require('../channels/gmail.js');
+const slack = require('../channels/slack.js');   // design 012 (B-ff09): the fourth adapter — a pasted user token, poll only
 const { secretBox } = require('../secret-box.js');
 const { OWN_KEY, CLUSTER_PREFIX } = require('./integration-store.js');   // the two credential-key forms, spelled ONCE (the store's)
 const R = require('../integration-registry.js');   // PURE: the rows' `bindsPerAccount` + `clientFieldsOf` (the custom client's two fields)
@@ -176,7 +177,7 @@ const Feed = require('../channel-feed.js');
  *  kind: the contract suite's census forbids a branch on an adapter id
  *  anywhere outside src/channels/. A kind with no module here (the fakes) is
  *  seeded by the dev seam and never CONNECTED. */
-const REAL_ADAPTERS = Object.freeze([lark, gmail]);
+const REAL_ADAPTERS = Object.freeze([lark, gmail, slack]);
 const realByKind = new Map(REAL_ADAPTERS.map((m) => [m.kind, m]));
 /** The at-rest key for the adapters' OWN tokens (design §13: a second store
  *  from the integrations layer's — a user's consent, not an admin's
@@ -512,10 +513,16 @@ function create(deps = {}) {
     const mod = realByKind.get(rec && rec.kind) || null;
     const row = rowOf(mod) || (rec && R.rowById(rec.kind)) || null;
     const key = (rec && typeof rec.credentialKey === 'string' && rec.credentialKey) || null;
+    if (row && row.signin === 'paste') return pasteClientOf(row);
     if (row && row.bindsPerAccount && key === CUSTOM_KEY) return customClientOf(rec, row, CUSTOM_KEY);
     if (row && row.bindsPerAccount && key === OWN_KEY) return legacyClientOf(rec, row);
     if (!resolveIntegration) return { id: row ? row.id : null, source: 'none', values: {}, missing: [], why: 'no integration store', whyCode: 'no-store', whyParams: null, credentialKey: key, clusterKey: null, clusterLabel: null };
     return resolveIntegration(row ? row.id : (mod && mod.integration), { credentialKey: key });
+  }
+  /** design 012 (Slack S1): a `signin:'paste'` row has NO client — each person's own app, a pasted token. Nothing to
+   *  resolve, nothing missing: the answer every credential question reads as "ready". */
+  function pasteClientOf(row) {
+    return { id: row.id, label: row.label, credentialKey: null, source: 'paste', values: {}, missing: [], why: null, whyCode: null, whyParams: null, clusterKey: null, clusterLabel: null, savedClusterKey: null, fromEnv: false, testedAt: null, lastOk: null, lastError: null };
   }
   function customClientOf(rec, row, asKey) {
     const cf = R.clientFieldsOf(row);
@@ -573,6 +580,8 @@ function create(deps = {}) {
     // are the same fact as STRUCTURE — the client words them (a3 i18n).
     // `credentialKey` (2026-09-22) = an ACCOUNT's own binding (`cluster:<k>` /
     // `own`); null asks the row's pick — what a NEW account would be bound to.
+    const prow = integrationId ? R.rowById(integrationId) : null;
+    if (prow && prow.signin === 'paste') return { source: 'paste', why: null, whyCode: null, whyParams: null, missing: [], clusterLabel: null, credentialKey: null };
     if (!integrationId || !resolveIntegration) return { source: 'unknown', why: 'no integration store', whyCode: 'no-store', whyParams: null, missing: [], clusterLabel: null, credentialKey: credentialKey || null };
     try {
       const r = resolveIntegration(integrationId, { credentialKey: credentialKey || null });
@@ -1133,6 +1142,10 @@ function create(deps = {}) {
 
   // ── the lane, asked never assumed ───────────────────────────────────────
   function laneFor(rec, entry) { return caps.laneState(registry.capsOf(rec.kind), rec, entry, now(), { feed: feedOpts() }); }
+  /** THE POLL STAMPS' ONE READ (design 011 lane 2): a row's lane with lastPollAt / lastScanAt / walkStartedAt from the
+   *  store's side file over it — the row no longer carries them (a quiet poll writes nothing). Every reader here asks
+   *  this; every writer goes through `store.stamps.set`; channel-caps is handed this view. */
+  const laneOf = (en) => store.stamps.lane(en);
   function scanFor(rec) { return caps.scanState(registry.capsOf(rec.kind), rec, rec.scan && rec.scan.hostFacts, now()); }
 
   /** The resolved lane for a row: `laneState` answers for EVERY adapter and
@@ -1175,7 +1188,7 @@ function create(deps = {}) {
       if (all || named) { out.push({ key: en.key, id: en.id, dueAt: named ? -1 : 0 }); continue; }
       if (owedAt && !cad.paused) { out.push({ key: en.key, id: en.id, dueAt: owedAt }); continue; }
       if (cad.paused || !cad.seconds) continue;
-      const last = Number(en.lane && en.lane.lastPollAt) || 0;
+      const last = Number(laneOf(en).lastPollAt) || 0;
       const dueAt = last + cad.seconds * 1000;
       if (dueAt <= t) out.push({ key: en.key, id: en.id, dueAt });
     }
@@ -1213,6 +1226,7 @@ function create(deps = {}) {
           const en = store.index.entry(rec.id, c.id);
           en.vendorId = c.vendorId; en.title = c.title; en.kind = c.kind;
           en.participants = c.participants;
+          if (c.app === true) en.app = true; else if (en.app) delete en.app;   // design 012: the other side is an app
           if (c.lastAt && (!en.lastAt || c.lastAt > en.lastAt)) en.lastAt = c.lastAt;
           if (isNew) en.readAt = Number(rec.linkedAt) || listedAt;
           en.listedAt = listedAt;
@@ -1724,7 +1738,7 @@ function create(deps = {}) {
       // verify r1 F2: the cheap gate FIRST — `msgHeld` is a whole-log scan for a message the log lacks (`findRecord` reads the
       // file backwards to its first byte, synchronously), and every waiting hit used to pay it on the page's own pass, before
       // any read could have landed it (60 hits × the log, per feed page); a hit is asked of the log only once its read ran
-      if (!(Number(en.lane && en.lane.walkStartedAt) >= h.observedAt)) continue;   // its chat read has not run since — it waits
+      if (!(Number(laneOf(en).walkStartedAt) >= h.observedAt)) continue;   // its chat read has not run since — it waits
       if (msgHeld(rec.id, h.convId, vid)) { e.feedMissing.delete(vid); continue; }   // the read found it
       e.feedMissing.delete(vid);
       e.byIdTick.n++;
@@ -2214,7 +2228,7 @@ function create(deps = {}) {
     return failure ? { ...failure, polledAt: lastPollOf(key) } : { ok: false, code: String(act.code || 'failed'), error: `the refresh failed (${act.code || 'failed'})`, polledAt: lastPollOf(key) };
   }
   /** The instant a conversation was last FETCHED (a poll or a scan read). */
-  function lastPollOf(key) { const en = store.index.peek(key) || {}; return Number(en.lane && (en.lane.lastPollAt || en.lane.lastScanAt)) || null; }
+  function lastPollOf(key) { const l = laneOf(store.index.peek(key) || {}); return Number(l.lastPollAt || l.lastScanAt) || null; }
   /** ONE conversation the vendor refused (it left the chat, the thread is
    *  gone): said on the row, polled again at its own cadence — never the
    *  whole account's failure. */
@@ -2222,7 +2236,8 @@ function create(deps = {}) {
     await store.index.update(() => {
       const en = store.index.entry(rec.id, convId, { create: false });
       if (!en) return;
-      en.lane = { ...(en.lane || {}), lastPollAt: now(), lastError: { code, at: now(), why: String((err && err.message) || err).slice(0, 200) } };
+      en.lane = { ...(en.lane || {}), lastError: { code, at: now(), why: String((err && err.message) || err).slice(0, 200) } };   // the refusal is a real change of the row…
+      store.stamps.set(en.key, { lastPollAt: now() });   // …its poll instant is a stamp (design 011 lane 2)
       // lane lark-search-poll: the vendor REFUSED this conversation — its owed marks go (the feed would otherwise make the
       // account due on every tick for a conversation it cannot read); its own cadence polls it again
       if (en.feedOwedAt) delete en.feedOwedAt;
@@ -2338,11 +2353,13 @@ function create(deps = {}) {
       en.lane = { ...en.lane, via: lane.via };
       // This pass FETCHED (a poll or a scan read), whatever lane the resolver
       // names for the row; `lastPushAt` is stamped by the push path alone.
-      if (lane.via === 'scan') en.lane.lastScanAt = now(); else en.lane.lastPollAt = now();
+      // design 011 lane 2: the instants are STAMPS (the store's side file) — a pass that brought nothing leaves the row's
+      // bytes as they were, and the index is not written
+      store.stamps.set(en.key, { [lane.via === 'scan' ? 'lastScanAt' : 'lastPollAt']: now(), ...(complete ? { walkStartedAt } : {}) });
       if (en.lane.lastError) delete en.lane.lastError;
       // lane lark-search-poll: a COMPLETE walk that started after the feed saw the message clears its owed mark (in the
       // SAME index update that stamps the walk); an incomplete one, a refusal or a cut leaves it owed
-      if (complete) { en.lane.walkStartedAt = walkStartedAt; if (en.feedOwedAt && Feed.owedSatisfied(en.feedOwedAt, walkStartedAt, { skewMs: 0 })) delete en.feedOwedAt; }
+      if (complete) { if (en.feedOwedAt && Feed.owedSatisfied(en.feedOwedAt, walkStartedAt, { skewMs: 0 })) delete en.feedOwedAt; }
       if (appended && (!en.trimmedAt || now() - en.trimmedAt >= TRIM_EVERY_MS)) { en.trimmedAt = now(); trimNow = true; }
       if ('tracked' in en) delete en.tracked;
       readAt = Number(en.readAt) || 0;
@@ -2926,12 +2943,12 @@ function create(deps = {}) {
     const ob = ctx.outbox.get(en.key) || { awaiting: 0, unknown: 0 };
     const lw = en.stats && Array.isArray(en.stats.wakes) && en.stats.wakes.length ? en.stats.wakes[en.stats.wakes.length - 1] : null;
     return {
-      key: en.key, id: en.id, adapterId: en.adapterId, adapterLabel: rec.label || rec.id, title: humanNameOf(rec, en), kind: en.kind,   // B-c127: THE NAME LADDER (null = nothing known; the client's ③)
+      key: en.key, id: en.id, adapterId: en.adapterId, adapterLabel: rec.label || rec.id, title: humanNameOf(rec, en), kind: en.kind, ...(en.app ? { app: true } : {}),   // B-c127: THE NAME LADDER (null = nothing known; the client's ③)
       participants: en.participants, lastAt: en.lastAt, lastText: en.lastText || '', unread: en.unread || 0,
       unlisted: !!en.unlistedAt,
       refresh: en.refresh && typeof en.refresh === 'object' ? { every: en.refresh.every, by: en.refresh.by || null } : null,
       cadence: { seconds: cadence.seconds, tier: cadence.tier, source: cadence.source, paused: !!cadence.paused },
-      freshness: caps.freshnessClaim(c, lane, en, t, { enabled: rec.enabled !== false, cadence }),
+      freshness: caps.freshnessClaim(c, lane, { ...en, lane: laneOf(en) }, t, { enabled: rec.enabled !== false, cadence }),
       offers: {
         sendAsUser: caps.offers(c, effectiveConvCaps(rec, en), 'send-as-user', t),
         sendAsBot: caps.offers(c, effectiveConvCaps(rec, en), 'send-as-bot', t),
@@ -3163,6 +3180,9 @@ function create(deps = {}) {
       // two-phase adapter drafts in the thread and sends that draft (mail),
       // `direct` = one request; and what would unlock sending here
       sendForm: c.idempotency === 'two-phase' ? 'draft' : 'direct',
+      // design 012 (Slack S1): the policy modes the vendor allows (the picker hides the rest), what removing the account
+      // does to its local copy, and the first real install's probe list (`setup`, written by the adapter by name)
+      policyModes: P.policyModesOf(c), retention: c.retention || 'keep', setup: setupView(rec),
       // B-a085: a reply here may go to EVERYONE on the message it answers (mail — the composer's "Reply all")
       replyAll: c.replyEnvelope === true,
       sendGrant: sendGrantView(rec),
@@ -3248,7 +3268,7 @@ function create(deps = {}) {
       const cad = caps.cadenceFor(c, lane, en, t, { tiers: T, watched: isWatched(en.key, t) });
       if (cad.paused) out.paused++; else if (cad.tier === 'hot') out.hot++; else if (cad.tier === 'warm') out.warm++; else out.cold++;
       if (cad.source === 'override') out.overridden++;
-      const last = Number(en.lane && en.lane.lastPollAt) || 0;
+      const last = Number(laneOf(en).lastPollAt) || 0;
       if (!cad.paused && cad.seconds && last + cad.seconds * 1000 <= t) out.due++;
       if (!cad.paused && !(en.lane && en.lane.lastError)) { reading++; if (en.walkedAt) walked++; }
     }
@@ -3862,7 +3882,7 @@ function create(deps = {}) {
     watching.set(key, t + WATCH_TTL_MS);
     for (const [k, exp] of watching) if (exp <= t) watching.delete(k);
     const en = store.index.peek(key) || {};
-    const last = Number(en.lane && en.lane.lastPollAt) || 0;
+    const last = Number(laneOf(en).lastPollAt) || 0;
     let fetched = false;
     // a window opened during a vendor back-off is hot (it is watched) but does
     // not poke the vendor — the timer resumes at `nextAt` (r3). `fetched` says
@@ -6274,6 +6294,38 @@ function create(deps = {}) {
       if (Array.isArray(ix.accountGrants)) ix.accountGrants = ix.accountGrants.filter((g) => !(g && g.scope && g.scope.id === rec.id));
     });
     await store.adapters.update((a) => { const i = a.adapters.indexOf(rec); if (i >= 0) a.adapters.splice(i, 1); });
+    await purgeIfDeclared(rec);
+  }
+  /** design 012: THE SETUP REPORT an adapter writes into its record's state (`state.setup.probes` — the first real
+   *  install's answers, by name): a closed list of names, each value a short word, a boolean or a list of scope names. */
+  const SETUP_PROBES = Object.freeze(['lastRead', 'sendMarker', 'userOnlyManifest', 'scopes', 'planLimited', 'historyTier']);
+  function setupView(rec) {
+    const s = rec && rec.state && rec.state.setup && typeof rec.state.setup === 'object' ? rec.state.setup : null;
+    if (!s || !s.probes || typeof s.probes !== 'object') return null;
+    const probes = {};
+    for (const k of SETUP_PROBES) {
+      const v = s.probes[k];
+      if (typeof v === 'boolean') probes[k] = v;
+      else if (typeof v === 'string' && /^[a-z0-9-]{1,24}$/.test(v)) probes[k] = v;
+      else if (Array.isArray(v)) probes[k] = v.filter((x) => typeof x === 'string' && /^[a-z][a-z0-9_.:-]{1,63}$/.test(x)).slice(0, 60);
+    }
+    return { probes, at: Number(s.at) || null };
+  }
+  /** design 012 (Slack S1, F5 / D12): an adapter whose `caps.retention` is `purge-on-remove` takes its LOCAL COPY with
+   *  the account — the message logs (msgs/<id>/), the fetched files (attachments/<id>/), and every ENDED proposal of the
+   *  account with its staged files (a live one refuses the removal by name first — referencesOf). Slack's Developer
+   *  Policy: the data goes when the app does. Every other adapter keeps its logs (archive-never-destroy). */
+  async function purgeIfDeclared(rec) {
+    let c = null;
+    try { c = registry.capsOf(rec.kind); } catch { c = null; }
+    if (!c || c.retention !== 'purge-on-remove') return { purged: false };
+    const ended = [];
+    await store.outbox.update((ob) => { for (const [id, q] of Object.entries(ob.proposals)) if (q && q.adapterId === rec.id && P.isTerminal(q.state)) { ended.push(id); delete ob.proposals[id]; } });
+    for (const id of ended) { try { OF.remove(store.dir, id); } catch { /* the sweep takes it */ } }
+    const r = store.purgeAccount(rec.id);
+    log.log(`[channels] ${rec.id}: removed with its local copy (${r.logs ? 'message logs' : 'no logs'}, ${r.files ? 'fetched files' : 'no files'}, ${ended.length} ended proposal(s)) — the adapter declares purge-on-remove`);
+    try { store.audit({ kind: 'account', op: 'purge', id: rec.id, proposals: ended.length, at: now() }); } catch {}
+    return { purged: true, proposals: ended.length };
   }
   /** DUPLICATE an account (r4 §8.1 #2, D4): a NEW record of the same type
    *  carrying EXACTLY `DUPLICATE_FIELDS` (the custom secret re-sealed), named
@@ -6487,6 +6539,7 @@ function create(deps = {}) {
   async function setAccountPolicy(adapterId, mode, by = 'user') {
     const rec = recordOrThrow(adapterId);
     if (mode !== null && !P.POLICY_MODES.includes(mode)) return { ok: false, code: 'bad-policy', error: `mode must be ${P.POLICY_MODES.join('|')} (or null to use the adapter's default)` };
+    if (mode !== null && !P.policyModesOf(registry.capsOf(rec.kind)).includes(mode)) return { ok: false, code: 'bad-policy', why: 'mode-not-offered', error: `${vendorNameOf(rec)} does not allow the "${mode}" policy — every message on it waits for your approval` };
     const t = now();
     await store.adapters.update(() => { rec.policy = mode === null ? null : { mode, by, at: t }; });
     try { store.audit({ kind: 'policy', op: 'set', scope: { kind: 'adapter', id: adapterId }, mode, at: t, by }); } catch {}
@@ -6586,16 +6639,17 @@ function create(deps = {}) {
    *  `direct`); anything unreadable is review — fail closed (§9.1). */
   function policyFor(rec, en) {
     const own = en && en.policy && typeof en.policy === 'object' ? en.policy : null;
-    if (own && own.mode) return { mode: P.policyMode(own).mode, source: 'conversation', declared: own.mode };
+    const pc = rec ? (() => { try { return registry.capsOf(rec.kind); } catch { return null; } })() : null;   // design 012: the vendor's allowed modes
+    if (own && own.mode) return { mode: P.policyMode(own, pc).mode, source: 'conversation', declared: own.mode, modes: P.policyModesOf(pc) };
     // R4 (B-6acc): the ACCOUNT's own policy (`PUT /api/channels/adapters/:id
     // {policy}`) — what a NEW message composed on the account reads, and the
     // default of every conversation that sets none
     const acct = rec && rec.policy && typeof rec.policy === 'object' ? rec.policy : null;
-    if (acct && acct.mode) return { mode: P.policyMode(acct).mode, source: 'account', declared: acct.mode };
+    if (acct && acct.mode) return { mode: P.policyMode(acct, pc).mode, source: 'account', declared: acct.mode, modes: P.policyModesOf(pc) };
     let dflt = null;
     try { dflt = registry.get(rec.kind).policyDefault || null; } catch {}
-    const pm = P.policyMode(dflt || 'review');
-    return { mode: pm.mode, source: dflt ? 'adapter-default' : 'default', declared: dflt || null };
+    const pm = P.policyMode(dflt || 'review', pc);
+    return { mode: pm.mode, source: dflt ? 'adapter-default' : 'default', declared: dflt || null, modes: P.policyModesOf(pc) };
   }
   function policyRequiresReview(rec, en) { return policyFor(rec, en).mode === 'review'; }
   /** The two READ-TIME facts `authority:'send'` is capped by (§7.3). */
@@ -8136,6 +8190,18 @@ function create(deps = {}) {
     // answered message's own text, one line, ≤ 120 (`threadQuote` kept beside it for a thread reply — the alias)
     let replyQuote = null;
     if (placement !== 'chat') { try { const par = store.findRecord(adapterId, convId, String(v.proposal.replyTo)); replyQuote = par ? P.reactionQuote(par) : null; } catch { replyQuote = null; } }
+    // design 012 (Slack S1, D21): WHAT THIS TEXT WILL DO, decided ONCE — an adapter that declares `prepareSend` resolves
+    // each @Name to the vendor's id NOW (two people answering one name ⇒ refused, nothing created; a name nobody answers
+    // stays words and notifies nobody); stored on the proposal, shown on the card, handed to the send verbatim. And WHO
+    // WILL SEE it (`convCaps.audience`, D20), as the card's line
+    let prepared = null;
+    if (c0.prepareSend === true) {
+      try { prepared = await adapterFor(rec).adapter.prepareSend(convId, { text: v.proposal.text }); }
+      catch (err) { return { ok: false, code: 'send-not-available', why: 'prepare-send', error: `who this message would notify could not be resolved (${(err && err.code) || 'unknown'}) — nothing was created; propose it again` }; }
+      if (prepared.tooLong) return { ok: false, code: 'bad-proposal', why: 'too-long', error: `this message is longer than ${prepared.sendMax || 4000} characters — nothing was created; split it` };
+      if (prepared.unresolved.length) return { ok: false, code: 'bad-proposal', why: 'mention-ambiguous', ambiguous: prepared.unresolved.slice(0, 10), error: 'a name after @ answers more than one person in this conversation — nothing was created; write the full name' };
+    }
+    const audience = ((effectiveConvCaps(rec, enNow) || {}).audience) || null;
     // The authority the drafter holds HERE: the user's own is `send`; an
     // agent's is its assignment's EFFECTIVE authority (clamped), else draft.
     let authority = 'draft';
@@ -8175,6 +8241,7 @@ function create(deps = {}) {
           id, adapterId, convId, key: en.key, title: agentTitle(en, convId),   // verify r1 F2: the proposal's title is printed by `vibespace-channels status`
           text: v.proposal.text, originalText: v.proposal.text, replyTo: v.proposal.replyTo, why: v.proposal.why, attachments: OF.metaOf(att.files),
           replyAnchor: ra.anchor, replyEnvelope: ra.envelope,
+          ...(prepared ? { prepared: { mentions: prepared.mentions, notifies: prepared.notifies, plain: prepared.plain, at: prepared.at } } : {}), ...(audience ? { audience } : {}),
           placement, ...(placement !== 'chat' ? { replyQuote } : {}), ...(pv.defaulted && placement !== 'chat' ? { placementDefaulted: pv.rule } : {}),
           ...(intoThread ? { inThread: true, threadKey, threadQuote: replyQuote } : {}),
           draftedBy: drafter, ...drafterGroupsOf(ctx), authority, at: t, updatedAt: t, state: 'proposed',
@@ -8505,7 +8572,7 @@ function create(deps = {}) {
     const r = await aroundFor(adapterId, convId, { vendorId: vid, at, by: 'agent' });
     if (!r.ok) return r.code === 'not-found' ? ACL.notFound() : { ok: false, code: r.code, error: r.error, ...(r.retryAfterSec ? { retryAfterSec: r.retryAfterSec } : {}) };
     if (!stillSees(ctx, adapterId, convId)) return ACL.notFound();
-    return { ok: true, conversation: { key: agentId(en.key), adapterId, id: agentId(convId), title: agentTitle(en, convId), polledAt: (en.lane && en.lane.lastPollAt) || null }, records: withView(rec, r.records, { convId, agent: true }), note: '(the messages around it on the vendor — not saved here)' };
+    return { ok: true, conversation: { key: agentId(en.key), adapterId, id: agentId(convId), title: agentTitle(en, convId), polledAt: laneOf(en).lastPollAt || null }, records: withView(rec, r.records, { convId, agent: true }), note: '(the messages around it on the vendor — not saved here)' };
   }
 
   /**
@@ -8516,6 +8583,25 @@ function create(deps = {}) {
    * typed `send-not-available` plus the adapter's own reason, the proposal
    * lands in `failed`, and the receipt carries that reason verbatim.
    */
+  /** slack-core verify r1 (F2): the decision an owner's edit carries (see approve) — `{ok, prepared}` or a refusal. */
+  async function prepareEdit(p0, text) {
+    const rec = adapterRecords().adapters.find((r) => r.id === p0.adapterId) || null;
+    if (!rec) return { ok: true, prepared: null };   // the approval's recheck refuses it by name
+    let fresh;
+    try { fresh = await adapterFor(rec).adapter.prepareSend(p0.convId, { text }); }
+    catch (err) { return { ok: false, code: 'send-not-available', why: 'prepare-send', error: `who the edited message would notify could not be resolved (${(err && err.code) || 'unknown'}) — nothing was sent; approve it again` }; }
+    if (fresh.tooLong) return { ok: false, code: 'bad-proposal', why: 'too-long', error: 'the edited message is longer than one message may be here — nothing was sent; shorten it' };
+    const was = p0.prepared || {};
+    const old = new Map((Array.isArray(was.mentions) ? was.mentions : []).map((m, i) => [m.name, { m, as: (Array.isArray(was.notifies) && was.notifies[i]) || m.name }]));
+    const ambiguous = fresh.unresolved.filter((n) => !old.has(n));
+    if (ambiguous.length) return { ok: false, code: 'bad-proposal', why: 'mention-ambiguous', ambiguous: ambiguous.slice(0, 10), error: 'a name after @ in the edit answers more than one person in this conversation — nothing was sent; write the full name' };
+    const out = { mentions: [], notifies: [], plain: [], at: fresh.at };
+    const keep = (n) => { const o = old.get(n); out.mentions.push(o.m); out.notifies.push(o.as); };
+    fresh.mentions.forEach((m, i) => { if (old.has(m.name)) keep(m.name); else { out.mentions.push(m); out.notifies.push(fresh.notifies[i] || m.name); } });
+    for (const n of fresh.unresolved) keep(n);
+    for (const n of fresh.plain) { if (old.has(n)) keep(n); else out.plain.push(n); }
+    return { ok: true, prepared: out };
+  }
   async function approve(id, { text = null, by = 'user', consent = null, mayWake = null, deliver = null, shown = null } = {}) {
     const p0 = store.outbox.snapshot().proposals[id];
     if (!p0) return { ok: false, code: 'not-found', error: 'no such proposal' };
@@ -8544,6 +8630,15 @@ function create(deps = {}) {
       const v = P.validateProposal({ ...p0, text, attachments: undefined });
       if (!v.ok) return { ok: false, code: 'bad-proposal', error: v.error };
     }
+    // slack-core verify r1 (F2): an OWNER'S EDIT on an adapter that declared `prepareSend` is decided like the proposal
+    // was — an @name the edit ADDS is resolved now (two people answering it ⇒ refused by name, nothing sent), a name the
+    // proposal decided keeps its id (decided once), a name the edit dropped notifies nobody; stored with the edit
+    let prepared = null;
+    if (edited && p0.prepared && !p0.compose) {
+      const pe = await prepareEdit(p0, text);
+      if (!pe.ok) return { ...pe, proposal: proposalView(p0) };
+      prepared = pe.prepared;
+    }
     const composing = !!p0.compose && !p0.result;
     const cf0 = composing ? { en: null, rec: adapterRecords().adapters.find((r) => r.id === p0.adapterId) || null } : convFor(p0.adapterId, p0.convId);
     const { en, rec } = cf0;
@@ -8563,7 +8658,7 @@ function create(deps = {}) {
     if (!stillOffered || targetWhy) {
       const why = targetWhy || (!rec ? 'adapter no longer exists' : ccErr ? `convCaps could not be resolved (${ccErr})` : (cc && cc.why) || 'not-offered');
       await transition(id, 'failed', 'recheck', (p) => {
-        p.approvedBy = by; if (edited) { p.text = text; p.edited = true; }
+        p.approvedBy = by; if (edited) { p.text = text; p.edited = true; if (prepared) p.prepared = prepared; }
         stampReceiptChoice(p, receiptChoice);
         p.reason = `send-not-available: ${why}`; p.failure = { code: 'send-not-available', why, at: now() };
       });
@@ -8582,7 +8677,7 @@ function create(deps = {}) {
     // r4: a THROW after the grant (the transition's or the send's store
     // write refused) gives the slot back unless the request may have left
     try {
-      const tr = await transition(id, 'sending', by, (p) => { p.approvedBy = by; if (edited) { p.text = text; p.edited = true; } stampReceiptChoice(p, receiptChoice); });
+      const tr = await transition(id, 'sending', by, (p) => { p.approvedBy = by; if (edited) { p.text = text; p.edited = true; if (prepared) p.prepared = prepared; } stampReceiptChoice(p, receiptChoice); });
       if (!tr.ok) { wakeRefundIfUnsent(gate, { mayWake }, p0.convId, id); return { ok: false, code: 'bad-state', error: tr.why }; }
       auditOutbox(store.outbox.snapshot().proposals[id], 'approve');
       await sendNow(id);
@@ -8862,7 +8957,7 @@ function create(deps = {}) {
       else if (fv && !fv.ok) r = { ok: false, code: 'attachment-changed', retryable: false, detail: { reason: `${fv.why} — nothing was sent` } };
       else {
         sendLeft.add(id);   // only a request that is really handed to the adapter may have LEFT (r4's refund rule)
-        try { r = p.compose ? await e.adapter.compose({ to: p.compose.to, cc: p.compose.cc, subject: p.compose.subject, text: wire, idemKey: p.id, as: p.sendAs, onHandle, ...files }) : await e.adapter.send(p.convId, { text: wire, replyTo: p.replyTo, idemKey: p.id, as: p.sendAs, onHandle, placement: P.placementOf(p), ...(anchor ? { replyAnchor: anchor } : {}), ...files, ...(p.replyEnvelope ? { envelope: p.replyEnvelope } : {}) }); }
+        try { r = p.compose ? await e.adapter.compose({ to: p.compose.to, cc: p.compose.cc, subject: p.compose.subject, text: wire, idemKey: p.id, as: p.sendAs, onHandle, ...files }) : await e.adapter.send(p.convId, { text: wire, replyTo: p.replyTo, idemKey: p.id, as: p.sendAs, onHandle, placement: P.placementOf(p), ...(anchor ? { replyAnchor: anchor } : {}), ...files, ...(p.prepared ? { prepared: p.prepared } : {}), ...(p.replyEnvelope ? { envelope: p.replyEnvelope } : {}) }); }
         catch (err) {
           r = err && typeof err.toJSON === 'function' ? err.toJSON() : { ok: false, code: (err && err.code) || 'vendor-error', retryable: false, detail: { threw: true, message: (err && err.message) || String(err) } };
           if (err && err.message && !r.message) r.message = err.message;
@@ -9362,6 +9457,8 @@ function create(deps = {}) {
   async function setPolicy(adapterId, convId, mode, by = 'user') {
     if (!known(adapterId, convId)) return { ok: false, code: 'not-found', error: 'No such conversation' };
     if (mode !== null && !P.POLICY_MODES.includes(mode)) return { ok: false, code: 'bad-policy', error: `mode must be ${P.POLICY_MODES.join('|')} (or null to use the adapter's default)` };
+    const prec = adapterRecords().adapters.find((r) => r.id === adapterId) || null;
+    if (mode !== null && prec && !P.policyModesOf(registry.capsOf(prec.kind)).includes(mode)) return { ok: false, code: 'bad-policy', why: 'mode-not-offered', error: `${vendorNameOf(prec)} does not allow the "${mode}" policy — every message on it waits for your approval` };
     const t = now();
     await store.index.update(() => { const e2 = store.index.entry(adapterId, convId, { create: false }); if (e2) e2.policy = mode === null ? null : { mode, by, at: t }; });
     try { store.audit({ kind: 'policy', op: 'set', scope: { kind: 'conversation', id: `${adapterId}/${convId}` }, mode, at: t, by }); } catch {}
@@ -9728,7 +9825,7 @@ function create(deps = {}) {
       const authority = acc.length ? (acc.some((x) => F.effectiveAuthority(x.row, capsL).authority === 'send') ? 'send' : 'draft') : null;
       out.push({
         key: agentId(en.key), adapterId: en.adapterId, adapter: rec.label || rec.id, id: agentId(en.id), title: agentTitle(en, en.id), kind: en.kind,   // verify r1 F2: the title through the belt; r3 F6: the key + id
-        level: reach.level, unread: en.unread || 0, lastAt: en.lastAt || null, polledAt: (en.lane && en.lane.lastPollAt) || null,
+        level: reach.level, unread: en.unread || 0, lastAt: en.lastAt || null, polledAt: laneOf(en).lastPollAt || null,
         canSend: !!who.as, sendWhy: who.why, sendAs: who.as, identityMarking: c.identityMarking,
         policy: policyFor(rec, en).mode,
         access: acc.length ? { authority, via: acc[0].source, as: acc[0].row.principal.kind } : null,
@@ -9754,7 +9851,7 @@ function create(deps = {}) {
     stampAgentRead(en.key, ctx, upTo);
     // §25: an agent reads `text` — the render tree is for the eye only (never a second copy of the body in its context)
     // lane channel-threads (§5.1 / §6.4): the agent's copy — no tree, the place as words, reactions WITHOUT `by`
-    return { ok: true, conversation: { key: agentId(en.key), adapterId, id: agentId(convId), title: agentTitle(en, convId), polledAt: (en.lane && en.lane.lastPollAt) || null }, records: withView(rec, records, { convId, agent: true }) };   // verify r1 F2: the title through the belt; r3 F6: the key + id
+    return { ok: true, conversation: { key: agentId(en.key), adapterId, id: agentId(convId), title: agentTitle(en, convId), polledAt: laneOf(en).lastPollAt || null }, records: withView(rec, records, { convId, agent: true }) };   // verify r1 F2: the title through the belt; r3 F6: the key + id
   }
   /**
    * STAMP AN AGENT'S READ (R3 §23 — the owner: "某个agent刚刚读取了的"): `en.
@@ -9802,7 +9899,7 @@ function create(deps = {}) {
     const recs = r.records || [];
     return {
       ok: true,
-      conversation: { key: agentId(en.key), adapterId, id: agentId(convId), title: agentTitle(en, convId), polledAt: (en.lane && en.lane.lastPollAt) || null },   // verify r2 F4: the thread READ's title (printed by `read --thread`) through the belt — r1 F2 took the thread REFRESH's; r3 F6: the key + id
+      conversation: { key: agentId(en.key), adapterId, id: agentId(convId), title: agentTitle(en, convId), polledAt: laneOf(en).lastPollAt || null },   // verify r2 F4: the thread READ's title (printed by `read --thread`) through the belt — r1 F2 took the thread REFRESH's; r3 F6: the key + id
       thread: { key: agentId(th.key || null), count: Number(th.count) || 0, lastAt: th.lastAt || null, walked: !!th.walked },   // verify r3 F6: the thread key (printed on the head line) as a line piece
       records: recs,
       ...(r.code === 'not-a-thread' ? { note: `(${NOT_A_THREAD})` } : th.walked ? {} : { note: '(thread not loaded here — the user\'s window loads it; ask again after)' }),

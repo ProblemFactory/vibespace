@@ -1229,7 +1229,8 @@ try {
     ok(r.status === 0 && last().argv[1] === path.join(P, 'y.pdf'), 'lane L r5 F3: set ⇒ a path under it writes, wherever the shell stands');
     r = await nodeCli(CLI, ['pdf', './x.pdf'], { env: { ...benv, VIBESPACE_SESSION_CWD: 'r5-proj' }, cwd: ROOT });
     ok(r.status === 1 && /no session directory is known/.test(r.stderr), 'lane L r5 F3: a RELATIVE VIBESPACE_SESSION_CWD is no root', r.stderr);
-    c1 = ctlCopy('r5-fencectl', src.replace('  const v = process.env.VIBESPACE_SESSION_CWD;\n', '  const v = process.env.VIBESPACE_SESSION_CWD || process.cwd();\n'));
+    // the 2.369.204 integration: accept-fixes-jobs F6 made the fence line job-aware — the control patches its SESSION arm
+    c1 = ctlCopy('r5-fencectl', src.replace('  const v = IN_JOB ? process.env.VIBESPACE_JOB_CWD : process.env.VIBESPACE_SESSION_CWD;\n', '  const v = IN_JOB ? process.env.VIBESPACE_JOB_CWD : (process.env.VIBESPACE_SESSION_CWD || process.cwd());\n'));
     r = await nodeCli(c1, ['pdf', './x.pdf'], { env: benv, cwd: ELSE });
     ok(fs.readFileSync(c1, 'utf8') !== src && r.status === 0, 'lane L r5 F3 NEGATIVE CONTROL: the r4 fence (patched copy: the shell\'s cwd when nothing is exported) writes from anywhere the shell stands', r.stderr);
     // ── F5 (LOW): AGENT_BROWSER_SCREENSHOT_DIR never reaches the binary

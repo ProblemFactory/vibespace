@@ -47,7 +47,7 @@ Auth is **off by default** (local single-user use). Enable it by giving the serv
 
 **Import** (⚙ → Backup & migrate… → Import tab, or the wizard) shows what the file contains with per-section checkboxes — each selected section *replaces* the corresponding data (billing accounts merge: existing account ids are never overwritten); sensitive items ask for the passphrase. The page reloads after import. Login tokens are never exported.
 
-**Not in the config file** (by design): the per-request usage **ledger** (`data/usage-history/` — can be tens of MB; copy that directory during migration if you want to keep usage analytics history), session status chips and the For-you inbox (runtime state that decays), and regenerable caches. Live sessions don't migrate either — transcripts live in `~/.claude` / `~/.codex`, so move those separately if the new deployment should see old conversations.
+**Not in the config file** (by design): the per-request usage **ledger** (`data/usage-history/` — can be tens of MB; copy that directory during migration if you want to keep usage analytics history; its SQLite index under `~/.vibespace/db/` is not data — the index rebuilds itself), session status chips and the For-you inbox (runtime state that decays), and regenerable caches. Live sessions don't migrate either — transcripts live in `~/.claude` / `~/.codex`, so move those separately if the new deployment should see old conversations.
 
 > This is a single shared-password model (one workspace = one team). Per-user accounts are part of the collaboration roadmap — see [design-collaboration.md](design-collaboration.md).
 

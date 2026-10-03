@@ -166,6 +166,9 @@ const STATUS = { 'not-found': 404, no_lease: 404, 'bad-request': 400, label_requ
   // lane H verify r2 M1: a profile directory another browser holds (a lock the keeper cannot prove its own orphan's)
   // r4/r5: a profile's browser closed and not started again (a failed / unidentified relaunch), or its heal budget spent
   profile_locked: 409, browser_closed: 409, browser_unstable: 409,
+  // lane remote-profile-start: a paired machine with no browser to run (no agent-browser / no Chrome — `step` names the one
+  // command), an agent too old to remove a profile's folder
+  browser_cli_missing: 409, browser_missing: 409, remove_unsupported: 409,
   // MULTIVIEW (design-browser-multiview §2 / D4): a Stop of a browser that has not started (a view's refusal is lane H's browser_stopped); a shared profile is not one of yours to stop
   browser_released: 409, shared: 409,
   // B-f7ab: a live session that could not get its browser key on first use (the reason in `why`), or is not running any more
@@ -195,7 +198,8 @@ function fail(res, e) {
   const code = e?.code || null;
   // B-f7ab verify r2 (LOW): a key minted by THIS call rides a refused answer too (`res.locals.minted`, set by needKey) — the
   // agent's first command may be refused (not_owner, launch_failed…) and it still needs to know nothing needs restarting
-  res.status(STATUS[code] || 500).json({ error: String(e?.message || e), code, ...(e?.holders ? { holders: e.holders } : {}), ...(e?.why ? { why: e.why } : {}), ...(e?.remedy ? { remedy: e.remedy } : {}), ...(res.locals && res.locals.minted ? { minted: res.locals.minted } : {}),
+  // lane remote-profile-start: a machine's refusal keeps the user's one command (`step`) — never on an agent's route
+  res.status(STATUS[code] || 500).json({ error: String(e?.message || e), code, ...(e?.holders ? { holders: e.holders } : {}), ...(e?.why ? { why: e.why } : {}), ...(e?.remedy ? { remedy: e.remedy } : {}), ...(e?.step && !/^\/api\/agent\//.test(String((res.req && res.req.path) || '')) ? { step: e.step } : {}), ...(res.locals && res.locals.minted ? { minted: res.locals.minted } : {}),
     // P4 (§7.4): a refusal carries its ACTIONABLE way out (`action.openIntegration`), the ways out of a refused downgrade, and whether one human confirmation would do
     // MULTIVIEW D4: WHICH cap refused (this conversation's own, or the machine's) + the counts — never another session's name
     ...(e?.scope ? { scope: e.scope } : {}), ...(Number.isFinite(e?.others) ? { others: e.others } : {}), ...(Number.isFinite(e?.capOwn) ? { own: e.capOwn, cap: e.capOf } : {}),
@@ -458,7 +462,7 @@ router.get('/api/browser/profiles/:id', (req, res) => {
   if (!p) return res.status(404).json({ error: `no profile ${req.params.id}`, code: 'not-found' });
   res.json({ profile: require('../browser-profiles.js').publicProfileView(p), leases: k.leasesOn(p.id), browser: k.browserOf(p.id) ? { ...k.browserOf(p.id), cdpUrl: undefined } : null });
 });
-router.delete('/api/browser/profiles/:id', (req, res) => {
+router.delete('/api/browser/profiles/:id', async (req, res) => {
   if (refuseHost(req, res)) return;
   const k = keeperOr503(res); if (!k) return;
   if (!ID_RE.test(req.params.id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
@@ -469,7 +473,13 @@ router.delete('/api/browser/profiles/:id', (req, res) => {
     if (!rv.ok) return res.status(STATUS[rv.code] || 409).json({ error: rv.error, code: rv.code }); // leased / running first: never an unpin for a removal that cannot happen
     const g = pinGuardFor(req.params.id, unpin); if (g) return res.status(409).json(g);
     const u = unpin ? unpinProfile(req.params.id) : { cleared: 0, sessions: [] };
-    res.json({ ...k.removeProfile(req.params.id, { unpin }), unpinned: u.cleared });
+    // lane remote-profile-start: a paired machine's profile goes with its folder THERE (or the answer says what was left).
+    // verify r1: the record goes FIRST (sync — its verdict judged again), the machine is asked AFTER with the snapshot: a
+    // start can no longer land between the folder's removal and a refused record (logins gone, the profile still listed)
+    const snap = typeof k.profile === 'function' ? k.profile(req.params.id) : null;
+    const r = k.removeProfile(req.params.id, { unpin });
+    const m = typeof k.removeOnMachine === 'function' ? await k.removeOnMachine(req.params.id, { profile: snap }) : null;
+    res.json({ ...r, unpinned: u.cleared, ...(m ? { machine: m } : {}) });
   } catch (e) { fail(res, e); }
 });
 router.post('/api/browser/profiles/:id/stop', async (req, res) => {
@@ -540,7 +550,17 @@ router.post('/api/browser/profiles/:id/restart', async (req, res) => {
   if (!ID_RE.test(req.params.id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
   // the .197 integration (browse-yourself × browser-stuck): never a stop under HIS page — the user browsing it himself closes first
   if (typeof k.humanOf === 'function' && k.humanOf(req.params.id)) { const p0 = typeof k.profile === 'function' ? k.profile(req.params.id) : null; return res.status(409).json({ error: require('../browser-human.js').humanRefusalText('browsing_yourself', { label: (p0 && p0.label) || req.params.id, act: 'restart' }), code: 'browsing_yourself' }); }
-  try { await k.stop(req.params.id, { why: 'user' }); res.json({ browser: await k.start(req.params.id, { why: 'restarted by the user (the page was not responding)' }) }); } catch (e) { fail(res, e); }
+  // lane remote-profile-start (design 014 lane 3b): ONE door that also STARTS from cold — a PAIRED machine's profile never
+  // started (no record: the stop's `not-found`) is started, never refused; the owner's way to start it before any agent.
+  // verify r1: this computer's profile keeps the old answers byte for byte (never started ⇒ still 404, no `cold`)
+  try {
+    const p0 = typeof k.profile === 'function' ? k.profile(req.params.id) : null;
+    const remote = !!(p0 && p0.host);
+    let cold = false;
+    try { await k.stop(req.params.id, { why: 'user' }); } catch (e) { if (!(remote && e && e.code === 'not-found')) throw e; cold = true; }
+    const browser = await k.start(req.params.id, { why: cold ? 'started by the user' : 'restarted by the user (the page was not responding)' });
+    res.json(remote ? { browser, cold } : { browser });
+  } catch (e) { fail(res, e); }
 });
 /** lane browser-admin 2a: CHANGE BUILD… — GET = what the dialog shows (the profile's machine's builds, its choice, the
  *  build its browser RUNS, how many conversations would be told); POST `{choice, confirmed?}` = the user's act (an
@@ -1974,9 +1994,23 @@ router.get('/api/agent/browser/status', async (req, res) => {
     // lane browser-recipes: what an agent reads when it lacks something also names the recipe (manual §0) — and, on a
     // machine with no display, that only vibespace-browser works there (userR's agent launched chromium by hand)
     const R = require('../browser-recipes.js');
+    if (f.job) return res.json({ ...st, sessionId: f.sessionId, shared: false, job: jobBindingOf(k, f, st), recipe: R.RECIPE_POINTER, noDisplay: (await statusNoDisplayOf(k, f, st)) || null }); // accept-fixes-jobs F5
     res.json({ ...st, sessionId: f.sessionId, shared: f.job ? false : !B.isolatedVariant(f.session._browserVariant), recipe: f.remote ? R.REMOTE_POINTER : R.RECIPE_POINTER, noDisplay: (await statusNoDisplayOf(k, f, st)) || null }); // verify r1 F1: on another machine the recipe cannot be followed — say so
   } catch (e) { fail(res, e); }
 });
+/** accept-fixes-jobs F5 (the acceptance of 2.369.202: inside a job `status` said "no profile attached / pin: none" and the
+ *  next `open` landed on the conversation's profile): a JOB's status is ITS binding — the profile its next page verb lands
+ *  on by the ONE verdict resolveForJob runs (the owner's pin / default attachment; read only — nothing attached, nothing
+ *  told), the owner's pin, the job's own lease (its window) once it has one. Its name is read live (never stored). */
+function jobBindingOf(k, f, st) {
+  const B = require('../browser-profiles.js'), J = require('../browser-job-principal.js');
+  const jv = J.jobResolveVerdict(B.resolveHandle({ set: k.setFor(f.ownerKey), handle: '', subagent: false }));
+  const p = jv.ok ? k.profile(jv.profileId) : null;
+  const l = p ? (st.leases || []).find((x) => x && x.profileId === p.id) : null;
+  let job = null;
+  try { const jm = typeof ctx.getJobs === 'function' ? ctx.getJobs() : null; job = jm && jm.jobs && typeof jm.jobs.get === 'function' ? jm.jobs.get(f.job.id) : null; } catch { job = null; }
+  return { id: f.job.id, label: J.jobLabelOf(job || { id: f.job.id }), lands: p ? { profileId: p.id, label: p.label } : null, refused: jv.ok ? null : { code: jv.code, error: jv.error }, pin: k.pinFor(f.ownerKey) || null, lease: l ? { browser: l.browser || null, input: l.input || null, others: Number(l.others) || 0 } : null };
+}
 /** lane browser-recipes: the no-display sentence for THIS conversation's `status` — a LIVE browser of its own says what
  *  its launch found (the recorded fact), else this machine is probed now; a conversation on another machine: nothing
  *  (its browser runs there, this machine's display is not its). '' = a display is here (or nothing is known). */

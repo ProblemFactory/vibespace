@@ -85,6 +85,7 @@ import { validateBrowserUrl } from '../desktop-apps.js';
 import { SCALE_PREF_KEY, scaleKeyOf, scaleChoiceOf, setScaleChoice, launchScaleChoice, scaleDefaultMenuModel } from './desktop-app-scale.js';
 import { wireAppPrefs, appPrefs, appPrefsReady, onAppPrefs, saveAppPrefs } from './desktop-app-prefs.js';
 import { mountLaunchShareRow, launchKeyOf } from './window-share.js';
+import { showMachineDesktopDialog } from './machine-desktop.js'; // design 014 D1: a Windows / macOS machine's whole desktop
 import { OFFICE_MODULES, installSpecFor, FONTS_ID } from '../office-open.js'; // §7.9: the LibreOffice table (PURE)
 import { appPlanBlock, appSummaryBlock, appRefusalText, appDialogTitle, appGoLabel, appPlanNote, appDoneText, renderAppsSection, openDebInstall, openAppSearch, openAgentHelp, appsBannerModel } from './app-install-dialog.js'; // Layer 0 apps: THE install dialog shows an app's plan too
 
@@ -205,6 +206,8 @@ export function machineWhyText(code) {
   if (code === 'offline') return t('offline');
   if (code === 'host_needs_daemon') return t('needs the agent upgraded');
   if (code === 'no_x11') return t('no X11 (macOS / Windows)');
+  if (code === 'desktop_ready') return t('its desktop'); // design 014 D1
+  if (code === 'no_vnc') return t('its desktop — set up once');
   if (code === 'connect') return t('connects when chosen');
   return '';
 }
@@ -231,6 +234,12 @@ export function installOfferFor(av, m) {
 /** lane C2: the install dialog's words for a plan the machine cannot run, by code. §7.9: `what` = the install (xpra by
  *  default — its words unchanged; a LibreOffice install says its own words where they differ). */
 export function installRefusalText(code, what = 'xpra') {
+  if (what === 'tightvnc') { // design 014 D1: the Windows one-time setup
+    if (code === 'no_admin') return t('Windows on that machine granted no administrator rights — nobody clicked Yes there. Click Install again with someone at that machine, or paste the commands above into an administrator PowerShell there.');
+    if (code === 'install_failed') return t('The install failed — the administrator window on that machine said why.');
+    if (code === 'still-absent') return t('The install finished, but nothing answers as a VNC server on port 5900 yet — check again.');
+    if (code === 'not_windows') return t('TightVNC is for Windows machines — a Mac turns on Screen Sharing instead.');
+  }
   if (what !== 'xpra') {
     if (code === 'no_apt') return t('This Linux has no apt-get — install LibreOffice with its own package manager.');
     if (code === 'still-absent') return t('The install finished, but LibreOffice is still not found on this machine — check again.');
@@ -376,10 +385,11 @@ export function installDesktopAppLauncher(app) {
 export async function showInstallDialog(m, { what = 'xpra', onDone = null, request = null, proposalId = null } = {}) {
   const xp = what === 'xpra';
   const isApp = what === 'app';
-  const spec = xp || isApp ? null : installSpecFor(what);
+  const tv = what === 'tightvnc'; // design 014 D1: Windows asks for administrator rights on its own screen
+  const spec = xp || isApp || tv ? null : installSpecFor(what);
   const appLabel = spec ? spec.label : 'LibreOffice';
   const name = xp ? machineName(m) : machineInSentence(m); // xpra's words exactly as before; a LibreOffice install names the machine inside its sentences
-  const { body: ib, close: iclose } = createModalShell({ id: 'desktop-install-dialog', title: isApp ? appDialogTitle(request || { kind: 'apt', packages: [] }, name) : xp ? t('Install xpra on {machine}', { machine: name }) : what === FONTS_ID ? t('Install the Calibri / Cambria look-alike fonts on {machine}', { machine: name }) : t('Install LibreOffice on {machine}', { machine: name }), dialogClass: 'desktop-install', escapeToClose: true });
+  const { body: ib, close: iclose } = createModalShell({ id: 'desktop-install-dialog', title: tv ? t('Install TightVNC Server on {machine}', { machine: name }) : isApp ? appDialogTitle(request || { kind: 'apt', packages: [] }, name) : xp ? t('Install xpra on {machine}', { machine: name }) : what === FONTS_ID ? t('Install the Calibri / Cambria look-alike fonts on {machine}', { machine: name }) : t('Install LibreOffice on {machine}', { machine: name }), dialogClass: 'desktop-install', escapeToClose: true });
   ib.classList.add('desktop-install-body');
   if (isApp) ib.classList.add('desktop-install-app');
   const note = document.createElement('div'); note.className = 'desktop-install-note'; note.textContent = t('Reading what {machine} runs…', { machine: name });
@@ -433,7 +443,7 @@ export async function showInstallDialog(m, { what = 'xpra', onDone = null, reque
   // an install already running there (a restarted hub, another tab) is FOLLOWED, never started twice (verify r2 F3/F4)
   const running = !!((isApp ? r.install : r.facts) && (isApp ? r.install : r.facts).installing);
   if (!plan.canRun && !running) { note.textContent = isApp ? appRefusalText('no_sudo') : installRefusalText('no_sudo', what); note.classList.add('is-bad'); return; }
-  note.textContent = running ? t('An install is already running on {machine} — follow its log here.', { machine: name }) : isApp ? (r.card ? '' : appPlanNote(plan, name)) : t('These commands run on {machine} as root, {source}:', { machine: name, source: src });
+  note.textContent = running ? t('An install is already running on {machine} — follow its log here.', { machine: name }) : tv ? t('Install asks Windows on {machine} for administrator rights: someone at that machine clicks Yes, then types the VNC password into the window that opens there (VibeSpace never sees it). It runs these commands:', { machine: name }) : isApp ? (r.card ? '' : appPlanNote(plan, name)) : t('These commands run on {machine} as root, {source}:', { machine: name, source: src });
   if (isApp) goBtn.textContent = appGoLabel(plan);
   if (running) goBtn.textContent = t('Follow the install');
   goBtn.style.display = '';
@@ -692,7 +702,10 @@ export async function showLaunchDialog(app, opts = {}) {
       if (why && (otherThanFile || m.code !== 'ready')) { const w = document.createElement('span'); w.className = 'desktop-launch-machine-why'; w.textContent = why; b.appendChild(w); }
       b.disabled = otherThanFile || !m.selectable;
       b.title = !b.disabled ? machineName(m) : `${machineName(m)} — ${why}`;
-      b.onclick = () => { if (b.disabled || host === m.hostId) return; host = m.hostId; data = data ? { apps: data.apps } : null; listError = null; renderMachines(); render(); refresh(); mountApps(); };
+      b.onclick = () => {
+        // design 014 D1: a Windows / macOS row opens ITS DESKTOP's dialog — the app catalog stays on the machine it shows
+        if (m.desktop && !b.disabled) { showMachineDesktopDialog(app, m, { install: (mm, o) => showInstallDialog(mm, o), recheck: async (id) => { const r = await fetchJson('/api/desktop/machines'); if (!r || !Array.isArray(r.machines)) return null; if (overlay.isConnected) { machines = r.machines; renderMachines(); } return r.machines.find((x) => x.hostId === id) || null; } }); return; }
+        if (b.disabled || host === m.hostId) return; host = m.hostId; data = data ? { apps: data.apps } : null; listError = null; renderMachines(); render(); refresh(); mountApps(); };
       machinesEl.appendChild(b);
     }
   };

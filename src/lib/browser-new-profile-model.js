@@ -19,7 +19,9 @@ export const PROVIDER_STATES = Object.freeze(['ready', 'needs-port', 'needs-key'
 /** The states a person may pick. */
 export const PICKABLE = Object.freeze(['ready', 'needs-port', 'needs-key']);
 /** The closed set of a machine row's states. */
-export const MACHINE_STATES = Object.freeze(['ready', 'offline', 'no-browser', 'provider-here-only']);
+export const MACHINE_STATES = Object.freeze(['ready', 'offline', 'no-browser', 'provider-here-only', 'needs-browser']); // lane remote-profile-start: + needs-browser (pickable — the step is said)
+/** The states a machine row may be picked in (a machine that needs its one step can still keep a profile; its start says the step). */
+export const MACHINE_PICKABLE = Object.freeze(['ready', 'needs-browser']);
 
 const isCloud = (id) => /^cloud:[a-z0-9-]+$/.test(String(id || ''));
 
@@ -64,21 +66,38 @@ export function providerChoices({ providers = [], install = null, host = null, t
  * greys every other machine with the sentence (`providerOnHost` = the chosen provider's verdict on a paired machine,
  * from the `?host=` rows: `{ok, code}` | null when unknown).
  */
-export function machineChoices({ machines = [], providerOnHost = null, t = (s) => s } = {}) {
+/**
+ * LANE REMOTE-PROFILE-START: a paired machine with NO BROWSER TO RUN, in words — by its CODE (the machine's `ready.step` /
+ * a refused start's `step`: `browser_cli_missing` | `browser_missing`) and its SHELL, with the ONE command to run there (the
+ * machine's own, copied as is). → `{title, note, command}` | null (no step).
+ */
+export function machineStepWords(step, { machine = '', t = (s) => s } = {}) {
+  if (!step || typeof step !== 'object' || !step.command) return null;
+  const m = String(machine || step.machine || '') || t(i18nKey('that machine'));
+  const ps = step.shell === 'powershell';
+  const note = step.code === 'browser_cli_missing'
+    ? (ps ? t(i18nKey('agent-browser is not installed on {machine}, so no browser can start there. Run this once on it, in PowerShell:'), { machine: m }) : t(i18nKey('agent-browser is not installed on {machine}, so no browser can start there. Run this once on it, in a terminal:'), { machine: m }))
+    : (ps ? t(i18nKey('{machine} has no Chrome for agent-browser to run. Run this once on it, in PowerShell:'), { machine: m }) : t(i18nKey('{machine} has no Chrome for agent-browser to run. Run this once on it, in a terminal:'), { machine: m }));
+  return { title: t(i18nKey('No browser on {machine} yet'), { machine: m }), note, command: String(step.command) };
+}
+
+export function machineChoices({ machines = [], providerOnHost = null, ready = null, t = (s) => s } = {}) {
   const out = [];
   for (const m of Array.isArray(machines) ? machines : []) {
     if (!m || !m.hostId) continue;
     const local = m.hostId === 'local';
     const name = local ? t(i18nKey('This computer')) : String(m.label || m.hostId);
-    let state = 'ready', note = null;
+    let state = 'ready', note = null, step = null;
     if (!local) {
       if (!m.connected) { state = 'offline'; note = t(i18nKey('Not connected right now.')); }
       else if (!(Array.isArray(m.capabilities) && m.capabilities.includes('browser-serve'))) { state = 'no-browser'; note = t(i18nKey("Its VibeSpace agent is too old to run a browser — update the agent on it.")); }
       else if (providerOnHost && providerOnHost.ok === false) { state = 'provider-here-only'; note = t(i18nKey('This browser runs only on the computer VibeSpace runs on.')); }
+      // lane remote-profile-start: the machine's own `ready` fact (GET /api/browser/builds?host=) — no CLI / no Chrome there, BY NAME + the step
+      else { const rd = ready && typeof ready === 'object' ? ready[m.hostId] : null; const w = rd && rd.step ? machineStepWords(rd.step, { machine: name, t }) : null; if (w) { state = 'needs-browser'; note = w.note; step = { code: String(rd.step.code || ''), command: w.command }; } }
     }
-    out.push({ hostId: local ? null : String(m.hostId), name, state, pickable: state === 'ready', note });
+    out.push({ hostId: local ? null : String(m.hostId), name, state, pickable: MACHINE_PICKABLE.includes(state), note, step });
   }
-  if (!out.some((m) => m.hostId === null)) out.unshift({ hostId: null, name: t(i18nKey('This computer')), state: 'ready', pickable: true, note: null });
+  if (!out.some((m) => m.hostId === null)) out.unshift({ hostId: null, name: t(i18nKey('This computer')), state: 'ready', pickable: true, note: null, step: null });
   return out;
 }
 

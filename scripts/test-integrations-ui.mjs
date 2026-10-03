@@ -121,7 +121,7 @@ const PRESETS = JSON.stringify([
 const CLUSTER_BB = JSON.stringify([{ id: 'cloud:browserbase', label: 'Cluster Browserbase', values: { apiKey: 'cluster-bb-key-12345678' } }]);
 const CUSTOM_ID = 'dup-client.apps.googleusercontent.com';
 const CUSTOM_SECRET = 'dup-custom-secret-000000';
-const VENDOR_HOSTS = /google\.com|googleapis\.com|feishu\.cn|larksuite\.com/;
+const VENDOR_HOSTS = /google\.com|googleapis\.com|feishu\.cn|larksuite\.com|slack\.com/;
 
 // ── throwaway worktree + WORKING-TREE overlay ──
 try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
@@ -489,7 +489,7 @@ const p2 = await newPage();
   // (a) ONE entry
   ok(await p1.evaljs(panelWait(`() => !!document.querySelector('.rail-panel-channels [data-connect-account]')`)), 'the Channels panel (its window on a phone) draws the ONE `Connect an account` entry');
   const entry = await p1.evaljs(`(() => ({ text: document.querySelector('.rail-panel-channels [data-connect-account]').textContent, perKind: document.querySelectorAll('.rail-panel-channels [data-connect-kind]').length }))()`);
-  ok(/^Connect an account \(Lark \/ 飞书, Gmail\)$|^Connect an account \(Gmail, Lark \/ 飞书\)$/.test(entry.text) && entry.perKind === 0, `the entry names the types and the per-kind buttons are retired (${JSON.stringify(entry)})`);
+  ok(/^Connect an account \((?:Lark \/ 飞书|Gmail|Slack)(?:, (?:Lark \/ 飞书|Gmail|Slack)){2}\)$/.test(entry.text) && entry.perKind === 0, `the entry names the types and the per-kind buttons are retired (${JSON.stringify(entry)})`);
   ok((await accounts()).length === 0, 'FIXTURE: no account exists yet');
 
   // (b) type-first; Gmail's preset preselected
@@ -749,6 +749,54 @@ const p2 = await newPage();
   await p1.evaljs(`(() => { const s = ${DLG('connect')}.querySelector(':scope > select'); s.value = 'lark'; s.dispatchEvent(new Event('change')); return 1; })()`);
   await over('the connect dialog (Lark, custom)');
   await p1.evaljs(`document.querySelector('#mounts-dialog-overlay .dialog-close').click(); 1`);
+
+  // (s) design 012 (Slack S1) — THE SLACK CONNECT CARD + THE PASTE BOX, in 中文: no OAuth client to choose (the four
+  // steps instead), the consent link is Slack's app-manifest link, the paste box takes a SECRET (dots, xoxp- placeholder),
+  // a bot token is refused in the dialog, the right one connects; the account card says where the copy lives (Q2) and
+  // the free plan's hidden history (the setup report)
+  {
+  console.log('  (s) Slack: the connect card and the paste box (zh)');
+  await p1.evaljs(`localStorage.setItem('vibespace.lang', 'zh'); 1`);
+  ok(await p1.load(), 'the page reloads in 中文');
+  ok(await p1.evaljs(panelWait(`() => !!document.querySelector('.rail-panel-channels [data-connect-account]')`)), 'the Channels panel draws its Connect entry (zh)');
+  await p1.evaljs(`document.querySelector('.rail-panel-channels [data-connect-account]').click(); 1`);
+  ok(await p1.evaljs(WAIT_DLG('connect')), 'the connect dialog opens');
+  await p1.evaljs(`(() => { const s = ${DLG('connect')}.querySelector(':scope > select'); s.value = 'slack'; s.dispatchEvent(new Event('change')); return 1; })()`);
+  const sk = await p1.evaljs(`(() => {
+    const d = ${DLG('connect')};
+    const vis = (e) => e && e.style.display !== 'none';
+    const client = [...d.querySelectorAll(':scope > select')].find((s) => vis(s) && [...s.options].some((o) => o.value === 'custom'));
+    const notes = [...d.querySelectorAll(':scope > .mounts-note')].filter(vis).map((n) => n.textContent);
+    const block = [...d.querySelectorAll('.mounts-drive-connect')].find(vis);
+    return { client: !!client, notes, block: block ? block.querySelector('button').textContent : null };
+  })()`);
+  ok(!sk.client && sk.notes.length === 4 && /Slack/.test(sk.notes[0]) && /xoxp-/.test(sk.notes[2]) && /[\u4e00-\u9fff]/.test(sk.notes.join('')), `no OAuth client field — the four steps instead, in 中文 (${JSON.stringify(sk.notes).slice(0, 300)})`);
+  ok(/Slack/.test(sk.block || ''), `the sign-in block's button names Slack (${sk.block})`);
+  await p1.probe('Slack connect dialog (zh) — the four steps', '#mounts-dialog-overlay .dialog');
+  const before = (await p1.evaljs(`(window.__opened || []).length`));
+  await p1.evaljs(`(() => { const d = ${DLG('connect')}; [...d.querySelectorAll('.mounts-drive-connect')].find((b) => b.style.display !== 'none').querySelector('button').click(); return 1; })()`);
+  const pb = await p1.evaljs(`(async () => { for (let i = 0; i < 80; i++) { const b = [...${DLG('connect')}.querySelectorAll('.mounts-drive-connect')].find((x) => x.style.display !== 'none'); const inp = b && b.querySelector('input[placeholder="xoxp-…"]'); if (inp) { const hint = inp.previousElementSibling ? inp.previousElementSibling.textContent : (inp.parentElement.querySelector('.mounts-field-hint') || {}).textContent; return { type: inp.type, autocomplete: inp.autocomplete, hint, opened: (window.__opened || []).slice(-1)[0] || null }; } await new Promise((r) => setTimeout(r, 100)); } return null; })()`);
+  ok(pb && pb.type === 'password' && pb.autocomplete === 'off' && /xoxp-/.test(pb.hint || '') && /[\u4e00-\u9fff]/.test(pb.hint || ''), `the paste box is a SECRET field (dots, no autocomplete) with its own 中文 hint (${JSON.stringify(pb && { type: pb.type, hint: pb.hint })})`);
+  ok(pb && typeof pb.opened === 'string' && pb.opened.startsWith('https://api.slack.com/apps?new_app=1&manifest_json=') && (await p1.evaljs(`(window.__opened || []).length`)) === before + 1, 'the consent opened is Slack\'s app-manifest link (the stubbed window.open got it)');
+  const man = pb && pb.opened ? JSON.parse(decodeURIComponent(pb.opened.split('manifest_json=')[1])) : null;
+  ok(man && Array.isArray(man.oauth_config.scopes.user) && !man.oauth_config.scopes.bot, 'the manifest asks user scopes only');
+  const SLACK_TOKEN = require(path.join(repo, 'scripts/fixtures/slack-vendor.cjs')).TOKEN;
+  const bad = await p1.evaljs(`(async () => { const b = [...${DLG('connect')}.querySelectorAll('.mounts-drive-connect')].find((x) => x.style.display !== 'none'); const inp = b.querySelector('input[placeholder="xoxp-…"]'); inp.value = 'xoxb' + '-1234567890-abcdefghijk'; inp.dispatchEvent(new Event('change')); for (let i = 0; i < 60; i++) { await new Promise((r) => setTimeout(r, 100)); const st = b.querySelector('.mounts-field-hint').textContent; if (/xoxb|bot/.test(st)) return st; } return b.querySelector('.mounts-field-hint').textContent; })()`);
+  ok(/bot token/.test(bad || '') && !(bad || '').includes('abcdefghijk'), `a pasted bot token is refused IN the dialog by name, the value never echoed (${String(bad).slice(0, 120)})`);
+  const good = await p1.evaljs(`(async () => { const d = ${DLG('connect')}; const b = [...d.querySelectorAll('.mounts-drive-connect')].find((x) => x.style.display !== 'none'); const inp = b.querySelector('input[placeholder="xoxp-…"]'); inp.value = ${JSON.stringify(SLACK_TOKEN)}; inp.dispatchEvent(new Event('change')); for (let i = 0; i < 80; i++) { await new Promise((r) => setTimeout(r, 100)); const tok = [...d.querySelectorAll('input[type="hidden"]')].some((h) => h.value); if (tok) return { st: b.querySelector('.mounts-field-hint').textContent }; } return null; })()`);
+  ok(!!good && /[\u4e00-\u9fff]/.test(good.st), `the right token signs in — the block says so in 中文 (${good && good.st})`);
+  await p1.evaljs(`${DLG('connect')}.querySelector('.dialog-actions .btn-create').click(); 1`);
+  const slackAcct = async () => (((await api('GET', '/api/channels')).json || {}).adapters || []).find((a) => a.kind === 'slack') || null;
+  let acct = null;
+  for (let i = 0; i < 60 && !acct; i++) { acct = await slackAcct(); if (!acct) await sleep(200); }
+  ok(acct && acct.auth && acct.auth.state === 'connected' && acct.retention === 'purge-on-remove' && JSON.stringify(acct.policyModes) === '["review"]', `Connect created the Slack account (connected, purge-on-remove, review only) — ${JSON.stringify(acct && { id: acct.id, state: acct.auth && acct.auth.state })}`);
+  const cardText = await p1.evaljs(`(async () => { for (let i = 0; i < 100; i++) { const c = document.querySelector('.rail-panel-channels .chan-account[data-adapter=${JSON.stringify((acct && acct.id) || 'slack')}]'); if (c && /免费版/.test(c.textContent)) return c.textContent; await new Promise((r) => setTimeout(r, 150)); } const c = document.querySelector('.rail-panel-channels .chan-account[data-adapter=${JSON.stringify((acct && acct.id) || 'slack')}]'); return c ? c.textContent : null; })()`);
+  ok(/保存在这台服务器上/.test(cardText || '') && /Anthropic/.test(cardText || ''), 'the account card says where the copy lives and that agents\' reads go to the model provider (owner Q2), in 中文');
+  ok(/免费版/.test(cardText || ''), 'and the setup report\'s free-plan fact (is_limited) — Slack hides older messages');
+  await p1.probe('Slack account card (zh)', `.rail-panel-channels .chan-account[data-adapter=${JSON.stringify((acct && acct.id) || 'slack')}]`);
+  ok(!JSON.stringify(await p1.evaljs(`document.body.innerText`)).includes(SLACK_TOKEN.slice(5, 20)), 'the token is drawn NOWHERE on the page');
+  await p1.evaljs(`localStorage.removeItem('vibespace.lang'); 1`);
+  }
 
   // nothing the page ever opened pointed at a vendor, and every intercepted call was the stub's
   const opened = await p1.evaljs(`window.__opened || []`);

@@ -65,12 +65,15 @@ console.log('— ① PURE: the click verdict, the watch verb, the strip\'s drive
     ['watching, the tab already watched ⇒ none', { owner: 'agent', driving: false, watching: T2 }, 'none'],
     ['watching another, the agent\'s current tab ⇒ follow it again', { owner: 'agent', driving: false, active: true, watching: T3 }, 'follow'],
     ['watching nothing, the agent\'s current tab ⇒ none (it is shown)', { owner: 'agent', driving: false, active: true }, 'none'],
-    ['another conversation\'s tab ⇒ none', { owner: 'other', driving: true }, 'none'],
-    ['nobody\'s tab ⇒ none', { owner: 'orphan', driving: false }, 'none'],
+    ['driving, another conversation\'s tab ⇒ none (the takeover rules)', { owner: 'other', driving: true }, 'none'],
+    ['accept-fixes-strip F8: watching, another conversation\'s tab ⇒ WATCH it (view only)', { owner: 'other', driving: false }, 'watch'],
+    ['F8: watching, nobody\'s tab ⇒ watch it', { owner: 'orphan', driving: false }, 'watch'],
+    ['F8: watching, his own tab (a conversation\'s view) ⇒ watch it', { owner: 'you', driving: false }, 'watch'],
+    ['F8: another conversation\'s tab already watched ⇒ none', { owner: 'other', driving: false, watching: T2 }, 'none'],
     ['his own window ⇒ none (the row\'s own verdict answers)', { owner: 'agent', human: true, driving: true }, 'none'],
   ];
   const bad = rows.filter(([, o, want]) => C(o) !== want).map(([n, o]) => `${n}: ${C(o)}`);
-  ok(!bad.length && W.TAB_CLICK_ACTS.join() === 'front,switch,watch,follow,none', `tabClickVerdict: ${rows.length} rows — bring forward / switch while driving, watch / follow while watching, never another\'s tab`, bad);
+  ok(!bad.length && W.TAB_CLICK_ACTS.join() === 'front,switch,watch,follow,none', `tabClickVerdict: ${rows.length} rows — bring forward / switch while driving, watch / follow while watching, another\'s tab watched (view only) but never switched`, bad);
   const v = S.viewerMessageVerdict({ type: 'watch-tab', targetId: T2.toLowerCase() });
   const v0 = S.viewerMessageVerdict({ type: 'watch-tab', targetId: 'nope' });
   ok(v.kind === 'watch-tab' && v.forward === false && v.targetId === T2 && v0.kind === 'watch-tab' && v0.targetId === null && S.VIEWER_VIEW_TYPES.includes('watch-tab'), 'the viewer verb `watch-tab` {targetId}: never forwarded upstream, the id upper-cased, a malformed one = follow the agent\'s (null)');
@@ -96,8 +99,8 @@ console.log('— ① PURE: the click verdict, the watch verb, the strip\'s drive
   const menuOf = (o, tIn = null) => W.foldMenuRows(MR, (r) => W.tabClickVerdict({ owner: r.owner, driving: !!o.driving, mediated: !!o.mediated, active: r.active, watching: o.watching || null, targetId: r.targetId }), tIn);
   const brief = (o) => menuOf(o).map((m) => m.act + ':' + m.targetId.slice(0, 2)).join(' ');
   const mcases = [
-    ['watching nothing: a folded agent tab ⇒ Watch; the agent\'s current and another conversation\'s ⇒ not listed', {}, 'watch:B2'],
-    ['watching T2: the watched one ⇒ not listed; the agent\'s current ⇒ Back', { watching: T2 }, 'follow:A1'],
+    ['watching nothing: a folded agent tab ⇒ Watch, another conversation\'s ⇒ Watch (F8); the agent\'s current ⇒ not listed', {}, 'watch:B2 watch:C3'],
+    ['watching T2: the watched one ⇒ not listed; the agent\'s current ⇒ Back; another conversation\'s ⇒ Watch', { watching: T2 }, 'follow:A1 watch:C3'],
     ['driving: the current ⇒ bring to the front, another ⇒ switch', { driving: true }, 'front:A1 switch:B2'],
     ['driving a mediated browser: nothing to do ⇒ nothing listed', { driving: true, mediated: true }, ''],
   ];
@@ -105,7 +108,7 @@ console.log('— ① PURE: the click verdict, the watch verb, the strip\'s drive
   const hisMenu = W.foldMenuRows(MR.map((r) => ({ ...r, canSwitch: r.targetId !== T1 })), () => ({ act: 'none' }), null).map((m) => m.act + ':' + m.targetId.slice(0, 2)).join(' ');
   ok(!mbad.length && hisMenu === 'switch:B2 switch:C3', 'G1 the "▾+N" menu asks the chip\'s click verdict: Watch / Back / Switch, his own window keeps the row\'s switch, a row with nothing to do is not listed', { mbad, hisMenu });
   const allE = [{}, { watching: T2 }, { driving: true }, { driving: true, mediated: true }].flatMap((o) => menuOf(o, tOfD(ZH)));
-  ok(allE.length === 4 && allE.every((e) => !('disabled' in e) && /^(查看|回到 agent 的标签页|提到最前面|切换到) — (Docs|Agent now)$/.test(e.label)), 'G1 no menu entry is ever disabled; each says its act and the tab (zh)', allE);
+  ok(allE.length === 6 && allE.every((e) => !('disabled' in e) && /^(查看|回到 agent 的标签页|提到最前面|切换到) — (Docs|Agent now|Other conv)$/.test(e.label)), 'G1 no menu entry is ever disabled; each says its act and the tab (zh)', allE);
   const lwG = read('src/lib/browser-live-window.js');
   const moreSrc = lwG.slice(lwG.indexOf('tabRowMore.onclick'), lwG.indexOf('function clickOf('));
   ok(/foldMenuRows\(rows, \(x\) => clickOf\(x\), t\)/.test(moreSrc) && /action: \(\) => chipClick\(x\)/.test(moreSrc) && !/disabled: true/.test(moreSrc), 'G1 source: the client\'s "▾+N" handler builds its entries from foldMenuRows and runs chipClick — no `disabled: true` left');
@@ -167,7 +170,7 @@ function stubKeeper(U, { visibility = 'hidden' } = {}) {
   const k = {
     setFor: () => ({ attachments: [] }), list: () => ({ profiles: [] }),
     streamPortFor: async () => ({ ok: true, port: U.port }),
-    tabOwnersFor: async () => ({ ok: true, owners: { [T1]: 'agent', [T2]: 'agent', [T3]: 'other' }, mediated: false, adoptable: false }),
+    tabOwnersFor: async () => ({ ok: true, owners: { [T1]: 'agent', [T2]: 'agent', [T3]: 'other' }, mediated: false, adoptable: false, titles: { [T2]: 'Other page', [T3]: 'not listed by this stream', ['E'.repeat(32)]: 'a tab this view does not list' }, whose: { [T2]: { sessionId: 'sess-b' }, ['E'.repeat(32)]: { job: 'jb-1', name: 'collect', sessionId: null } } }), // accept-fixes-strip F7/F8
     tabVisibilityFor: async (t, id) => { calls.vis.push(id); const v = typeof visibility === 'function' ? visibility() : visibility; return v && typeof v === 'object' ? v : { ok: true, visibility: v }; }, // B-d635: an object = the keeper's own answer (a tab that never answers)
     captureTabFor: async (t, id) => { calls.cap.push(id); return { ok: true, data: jpegOf(800, 600, 'bg' + calls.cap.length), clientWidth: 800, clientHeight: 600 }; },
     watchTabFor: async (t, id, hooks) => { if (k.watchFail) return k.watchFail; calls.watch.push(id); watches.push({ id, hooks }); return { ok: true, close: () => { calls.stops++; } }; },
@@ -180,7 +183,7 @@ function stubKeeper(U, { visibility = 'hidden' } = {}) {
   return { k, calls, watches };
 }
 async function bridgeOn(BSmod, keeper) {
-  const activeSessions = new Map([['s1', { _browserKey: 'bk-0000000a', _browserEnv: ['AGENT_BROWSER_SESSION=vs-bk-0000000a', 'AGENT_BROWSER_NAMESPACE=vs-bk-0000000a'] }]]);
+  const activeSessions = new Map([['s1', { _browserKey: 'bk-0000000a', _browserEnv: ['AGENT_BROWSER_SESSION=vs-bk-0000000a', 'AGENT_BROWSER_NAMESPACE=vs-bk-0000000a'] }], ['sess-b', { name: 'office-devices' }]]);
   const logs = [];
   // the background check on SHORT clocks (the shipped ones — 2 s silence, a 1 s tick, a 500 ms poll — are pinned in ①)
   const bridge = BSmod.create({ keeper, activeSessions, requestAuthed: () => true, log: { warn: (m) => logs.push(m), log: (m) => logs.push(m) }, bgSilenceMs: SILENCE, bgTickMs: 100, bgPollMs: 150, bgHungMs: HUNG });
@@ -360,6 +363,7 @@ async function staleLeg(BSmod) {
   const Wv = viewer(B.P), O = viewer(B.P);
   ok(await Wv.ready() && await O.ready(), 'two viewers of the conversation\'s window');
   ok(await until(() => Wv.of('tab-owners').length >= 1, 3000), 'the tab owners reached the viewers (whose each tab is)');
+  { const want = (r) => JSON.stringify(r.titles) === JSON.stringify({ [T2]: 'Other page' }) && JSON.stringify(r.names) === JSON.stringify({ [T2]: { sessionId: 'sess-b', name: 'office-devices' } }); await until(() => Wv.of('tab-owners').some(want), 3000); const r = Wv.of('tab-owners').find(want) || Wv.of('tab-owners').at(-1) || {}; ok(want(r) && Wv.of('tab-owners').every((x) => !JSON.stringify(x).includes('E'.repeat(32))), 'accept-fixes-strip F7/F8: the record carries the pages\' own titles and WHO holds another\'s tab (its conversation\'s name) — only for the tabs this view lists', JSON.stringify({ titles: r.titles, names: r.names })); }
   Wv.send({ type: 'watch-tab', targetId: T2 });
   ok(await until(() => calls.watch.includes(T2), 2000) && await until(() => Wv.of('watching').some((m) => m.targetId === T2), 2000), 'watch-tab T2 ⇒ the keeper\'s watch pump is opened on T2 and the viewer is told `watching T2`');
   watches[0].hooks.onFrame({ data: jpegOf(640, 480, 'watched1'), metadata: { deviceWidth: 640, deviceHeight: 480 } });
@@ -371,7 +375,9 @@ async function staleLeg(BSmod) {
   watches[0].hooks.onMode('polling');
   ok(await until(() => Wv.of('watching').some((m) => m.targetId === T2 && m.mode === 'polling'), 1500), 'the pump\'s mode is said: a tab that paints nothing is shown by captures (polling)');
   Wv.send({ type: 'watch-tab', targetId: T3 });
-  ok(await until(() => Wv.of('watching').some((m) => m.refused === 'not_your_tab'), 1500) && !calls.watch.includes(T3) && B.logs.some((l) => /watch of C3333333 refused not_your_tab/.test(l)), 'another conversation\'s tab is REFUSED by name (no pump opened; journaled)');
+  ok(await until(() => calls.watch.includes(T3) && Wv.of('watching').some((m) => m.targetId === T3), 1500) && B.logs.some((l) => /watches another holder's tab C3333333/.test(l)), 'accept-fixes-strip F8: another conversation\'s tab is WATCHED (view only — a pump opened on it, journaled by whose it is)');
+  Wv.send({ type: 'watch-tab', targetId: 'D'.repeat(32) });
+  ok(await until(() => Wv.of('watching').some((m) => m.refused === 'no_such_tab'), 1500) && !calls.watch.includes('D'.repeat(32)) && B.logs.some((l) => /watch of DDDDDDDD refused no_such_tab/.test(l)), '…a tab that is not one of this browser\'s is REFUSED by name (no pump opened; journaled)');
   Wv.send({ type: 'watch-tab', targetId: T2 });
   await until(() => calls.watch.filter((x) => x === T2).length === 2, 1500);
   const stops0 = calls.stops, nulls0 = Wv.of('watching').filter((m) => m.targetId === null).length, f0 = Wv.frames.length;
@@ -494,7 +500,8 @@ console.log('— ③ verify r1 T1: the window-ownership table (actor × target �
     ['R5 user acts', "a watcher of A's window", "A's window", 'switch', () => userTab({ act: 'switch', owner: 'agent', driving: false }), 'take_over_first'],
     ['R4 watch', "a watcher of A's window", "A's window", 'chip click', () => click({ driving: false, active: false }), 'watch'],
     ['R4 watch', "a takeover viewer of A's window", "A's window", 'chip click', () => click({ driving: true, active: false }), 'switch'],
-    ['R4 watch', "a watcher of A's window", "B's window", 'chip click', () => click({ driving: false, owner: 'other' }), 'none'],
+    ['R4 watch', "a watcher of A's window", "B's window", 'chip click (F8: view only)', () => click({ driving: false, owner: 'other' }), 'watch'],
+    ['R4 watch', "a takeover viewer of A's window", "B's window", 'chip click', () => click({ driving: true, owner: 'other' }), 'none'],
     ['R6 the human', 'the human (Browse yourself)', 'his window', 'switch', () => userTab({ act: 'switch', owner: 'you', human: true }), 'allowed'],
     ['R6 the human', 'the human (Browse yourself)', "A's window", 'switch', () => userTab({ act: 'switch', owner: 'agent', human: true, driving: true }), 'not_your_tab'],
     ['R6 the human', 'the human (Browse yourself)', 'his window — his last tab', 'close', () => userTab({ act: 'close', owner: 'you', human: true, counts: { you: 1 } }), 'last_tab'],
@@ -529,6 +536,9 @@ console.log('— ③ verify r1 T1: the window-ownership table (actor × target �
   ok(win3.windowMates({ leases, profileId: 'bp-1', browserKey: 'bk-0000000a', instance: '1' }).length > 0, 'CONTROL R3: a copy whose takeover takes every lease pauses B in its own window — the takeover-scope cell can go red');
   const win4 = M.load('src/browser-windows.js', wsrc.replace(C4, "  return { act: 'switch', why: 'x' };\n"), 'watch-switches');
   ok(win4.tabClickVerdict({ owner: 'agent', targetId: A2, driving: false, active: false }).act === 'switch', 'CONTROL R4: a copy whose watch click switches the agent\'s tab — the watch cell can go red');
+  const C10 = "    return w && w === id ? { act: 'none', why: 'already-watched' } : { act: 'watch', why: 'view-only' };\n";
+  const win10 = wsrc.includes(C10) ? M.load('src/browser-windows.js', wsrc.replace(C10, "    return { act: 'none', why: 'not-the-agents' };\n"), 'no-watch-others') : null;
+  ok(!!win10 && win10.tabClickVerdict({ owner: 'other', targetId: A2, driving: false }).act === 'none' && W.tabClickVerdict({ owner: 'other', targetId: A2, driving: false }).act === 'watch', 'CONTROL F8 (accept-fixes-strip): a copy whose chip of another conversation\'s tab does nothing (the 2.369.202 rule) — the R4 watch cell can go red');
   const tabs5 = M.load('src/browser-tabs.js', tsrc.replace(C5, ''), 'no-take-over-first');
   ok(tabs5.userTabVerdict({ act: 'switch', owner: 'agent', driving: false, counts: { agent: 2 } }).ok === true, 'CONTROL R5: a copy that lets a watcher switch the agent\'s tab — the user-acts cell can go red');
   const tabs6 = M.load('src/browser-tabs.js', tsrc.replace(C6, "  if (owner === 'other') return no('not_your_tab');\n"), 'human-on-agent-tab');

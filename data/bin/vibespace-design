@@ -257,7 +257,7 @@ function printTweaks(b, { full = false } = {}) {
     if (kind === 'system') console.log('a DESIGN SYSTEM: write system.md (what it is for, type, colour, components, do / don\'t), put every colour and font size in tokens.css as a custom property, one artboard per component group built only from the tokens — check holds them to tokens.css');
     if (sys) console.log(`follows the design system "${sys.system.name}"${sys.viaDefault ? ' (this VibeSpace\'s default — --system none starts without one)' : ''}: ${made.includes('tokens.css') ? `tokens.css copied from ${sys.system.dir}${sys.system.host ? ` on ${sys.system.host}` : ''}` : 'the folder already had a tokens.css (kept)'}; paste tokens.css into each artboard's <style> and write every colour and font size as var(--…) — check warns on any other`);
     if (sysNote) console.log(sysNote);
-    console.log(r.body.opened ? 'the Design window is open on the user\'s screen' : '(no live window to open — the design is listed in the chat\'s design chip)');
+    console.log(r.body.opened ? 'the Design window is open on the user\'s screen' : '(no Design window confirmed it on the user\'s screen — the design is listed in the chat\'s design chip; `vibespace-design sync` says when one watches)');
     return;
   }
 
@@ -335,7 +335,7 @@ function printTweaks(b, { full = false } = {}) {
     if (title === undefined) { try { const j = JSON.parse(fs.readFileSync(path.join(dir, 'design.json'), 'utf8')); if (j && typeof j.title === 'string' && j.title.trim()) title = j.title; } catch { } }
     const r = await call('POST', '/api/agent/design/register', { dir, kind: kindOf(dir), ...(title !== undefined ? { title } : {}) });
     if (!r.ok) refuse(r);
-    console.log(r.body.opened ? `opened the Design window on ${dir}` : `${dir} is registered (no live window to open — the chat's design chip lists it)`);
+    console.log(r.body.opened ? `opened the Design window on ${dir}` : `${dir} is registered (no Design window confirmed it on the user's screen — the chat's design chip lists it; \`vibespace-design sync\` says when one watches)`);
     if (r.body.design && r.body.design.kind === 'system') console.log('(a design system: it holds system.md + tokens.css — vibespace-design systems lists it)');
     return;
   }

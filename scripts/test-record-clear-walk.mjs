@@ -102,6 +102,8 @@ fs.writeFileSync(path.join(DATA, 'task-groups.json'), J({ version: 1, tasks: {
   [W2]: group(W2, 'side', { sessions: [K], contextDir: CTX2, progress: [act('P-0000b1', 5, `side: ${w('b1n')}`, K, w('b1d'))] }),
   [WX]: group(WX, 'other', { sessions: [OTHER], progress: [act('P-0000e1', 4, `not mine: ${w('x1n')}`, OTHER)] }),
 } }, null, 2));
+// 2.369.204: an entry the live 500 no longer holds — MOVED to the group's archive (data/task-groups-archive/<id>/<YYYY-MM>.ndjson)
+{ const a9 = act('P-0000a9', 30, `archived: ${w('a9n')}`, OTHER, w('a9d')); const d = path.join(DATA, 'task-groups-archive', W); fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, new Date(a9.at).toISOString().slice(0, 7) + '.ndjson'), J(a9) + '\n'); }
 // FOR-YOU
 const JOB_ID = 'jb-d00d0001', JOB_RUN_ID = 'jb-d00d0002', JOB_ARCH_ID = 'jb-d00d0003', JOB_OTHER_ID = 'jb-d00d0004';
 const todo = (id, x) => ({ id, sessionKey: K, text: 'x', detail: null, urgency: 'normal', kind: 'action', status: 'open', by: 'agent', sessionName: null, jobId: null, i18n: null, action: null, expiresAt: null, options: null, reply: null, origin: 'agent', createdAt: NOW - 2 * H, resolvedAt: null, resolvedBy: null, ...x });
@@ -303,6 +305,8 @@ const statusCli = fs.existsSync(path.join(DATA, 'bin', 'vibespace-status')) ? pa
 const PROBES = [
   { name: 'file data/job-notifications.json (the held stash, seeded — drained by the first injection below)', call: async () => ({ out: fs.readFileSync(path.join(DATA, 'job-notifications.json'), 'utf8') }), before: ['j1n', 'j5h'], once: true },
   { name: 'GET /api/tasks (cookie)', call: () => raw('/api/tasks'), before: ['a1n', 'a1d', 'a2n', 'a3n', 'a3d', 'b1n', 'b1d', 'x1n'] },
+  { name: 'GET /api/tasks/:id/progress (cookie: the live list, then the archive)', call: () => raw(`/api/tasks/${W}/progress?limit=200`), before: ['a1n', 'a1d', 'a2n', 'a3n', 'a3d', 'a9n', 'a9d'] },
+  { name: 'file data/task-groups-archive/ (the archived Activity log)', call: async () => ({ out: fs.readdirSync(path.join(DATA, 'task-groups-archive', W)).map((f) => fs.readFileSync(path.join(DATA, 'task-groups-archive', W, f), 'utf8')).join('') }), before: ['a9n', 'a9d'] },
   { name: 'GET /api/user-todos (cookie, the snapshot: preview + i18n + options + reply)', call: () => raw('/api/user-todos'), before: ['t1x', 't1d', 't1o', 't6x', 't6d', 't6i', 't6j', 't2x', 't2d', 't3x', 't3s', 't4x', 't4r', 't5x'] },
   { name: 'GET /api/user-todos/:id (cookie, the whole item)', call: () => raw(`/api/user-todos/${T2}`), before: ['t2x', 't2d'] },
   { name: 'GET /api/session-status (cookie, the current records)', call: () => raw('/api/session-status'), before: ['s3r', 's3d', 's4r'] },
@@ -412,7 +416,7 @@ const redact = (body) => agent('/api/agent/task/progress-redact', { method: 'POS
 console.log('\n§3 THE CLEAR: the owner clears everything, then the six brief cases');
 const clearedFrames0 = frames.length;
 const items = [
-  { kind: 'activity', groupId: W, id: 'P-0000a2' }, { kind: 'activity', groupId: W, id: 'P-0000a3' }, { kind: 'activity', groupId: W2, id: 'P-0000b1' }, { kind: 'activity', groupId: WX, id: 'P-0000e1' },
+  { kind: 'activity', groupId: W, id: 'P-0000a2' }, { kind: 'activity', groupId: W, id: 'P-0000a3' }, { kind: 'activity', groupId: W, id: 'P-0000a9' }, { kind: 'activity', groupId: W2, id: 'P-0000b1' }, { kind: 'activity', groupId: WX, id: 'P-0000e1' },
   { kind: 'todo', id: T2 }, { kind: 'todo', id: T4 }, { kind: 'todo', id: T5 }, { kind: 'todo', id: T6 },
   { kind: 'status', sessionKey: K, id: NOW - 2 * H }, { kind: 'status', sessionKey: K, id: NOW - H }, { kind: 'status', sessionKey: K, id: NOW - 30 * 60e3 }, { kind: 'status', sessionKey: OTHER, id: NOW - 20 * 60e3 },
   { kind: 'job', id: JOB_ID }, { kind: 'job', id: JOB_ARCH_ID }, { kind: 'job', id: JOB_OTHER_ID }, { kind: 'job', id: LIVE_JOB }, { kind: 'job', id: SVC_JOB },

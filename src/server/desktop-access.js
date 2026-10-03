@@ -45,6 +45,7 @@ const { spawn } = require('child_process');
 const crypto = require('crypto');
 const S = require('../desktop-serve.js');
 const M = require('../desktop-apps.js');
+const D = require('../desktop-display.js'); // design 014 D1: the PURE RFB greeting read of the vnc-native rung
 
 let installed = null;
 /** The wired layer; an unwired process gets a LOUD refusal, never a no-op. */
@@ -58,6 +59,7 @@ function access() {
     installXpra: async () => { const e = new Error('the desktop access layer is not wired on this instance'); e.code = 'host_unavailable'; throw e; },
     installPackage: async () => { const e = new Error('the desktop access layer is not wired on this instance'); e.code = 'host_unavailable'; throw e; },
     installBusy: () => null, setAppPlanner: () => { },
+    machineDesktopTarget: () => null, machineDesktopGone: () => null, // design 014 D1
   };
 }
 
@@ -68,7 +70,7 @@ const INSTALL_LOG_NAME = `~/.vibespace/${M.INSTALL_FILES.log}`; // how a message
  * @param hosts   HostManager (deviceBounded / get / isLocal) or null (local only)
  * @param local   () => THIS machine's desktop-serve handle (the hub keeper's `machine`)
  */
-function create({ hosts = null, local = null, env = () => process.env, log = console, install = true, connectMs = 8000, installMs = 15 * 60 * 1000, holdMs = 60 * 60 * 1000, pollMs = 15000 } = {}) {
+function create({ hosts = null, local = null, env = () => process.env, log = console, install = true, connectMs = 8000, installMs = 15 * 60 * 1000, holdMs = 60 * 60 * 1000, pollMs = 15000, vncPort = M.MACHINE_DESKTOP_PORT, probeMs = 3000, audit = null } = {}) {
   const forwards = new Map(); // `${hostId}:${remotePort}` → { server, sockets, localPort, hostId, remotePort, refs }
   const opening = new Map();  // key → the in-flight listen (a concurrent second caller joins it)
   const installs = new Map(); // machine key → { since, running } — THIS hub's follower; the machine's own slot is its pidfile (installState)
@@ -137,6 +139,9 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
         h.onClose = () => { try { sock.end(); } catch { /* gone */ } };
         sock.on('data', (b) => { try { h.write(b); } catch { /* gone */ } });
         sock.on('close', () => { try { h.close(); } catch { /* gone */ } });
+        // design 014 D1: the bridge never half-closes — its FIN is its leaving, so the machine-side connection goes with it
+        // (allowHalfOpen kept it open until the LAST viewer left; a Mac's Screen Sharing shows a viewer while one is connected)
+        sock.on('end', () => { try { h.close(); } catch { /* gone */ } try { sock.destroy(); } catch { /* gone */ } });
       });
       const localPort = await new Promise((resolve, reject) => {
         server.once('error', reject);
@@ -187,6 +192,8 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
       const dm = await handleIfConnected(h);
       const info = dm && dm.status ? (dm.status().info || null) : null;
       const row = { hostId: h.id, label: String(h.name || h.id), transport: h.transport === 'dial' ? 'dial' : 'ssh', link: info ? 'online' : link, connected: !!info, capabilities: info && Array.isArray(info.capabilities) ? info.capabilities : null, platform: info ? info.platform || null : null };
+      // design 014 D1: a connected Windows / macOS machine's own VNC server, probed as the launcher opens (Linux rows untouched)
+      if (row.connected && M.DESKTOP_PLATFORMS.includes(row.platform)) row.vnc = await probeDesktop(h.id, dm).catch((e) => ({ ok: false, code: 'no_listener', why: String((e && e.message) || e) }));
       return { ...row, ...M.machinePickRow(row) };
     }));
     return out.concat(rows);
@@ -201,6 +208,11 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
   function setAppPlanner(fn) { appPlanner = typeof fn === 'function' ? fn : null; }
   async function installPlan(hostId, what = 'xpra', planOpts = null) {
     const w = what || 'xpra';
+    if (w === M.TIGHTVNC.id) { // design 014 D1: the Windows one-time setup — planned from the agent's hello (no facts op)
+      if (isLocal(hostId)) throw named('not_windows', 'TightVNC is the one-time setup of a paired Windows machine');
+      const plan = M.tightvncInstallPlan({ platform: platformOfHandle(await deviceOf(hostId)) });
+      return { hostId, facts: null, plan, digest: planDigest(plan) };
+    }
     if (/^app:[a-z0-9][a-z0-9:.+-]{0,80}$/.test(String(w))) {
       if (!appPlanner) throw named('host_unavailable', 'the apps engine is not wired on this instance');
       const r = await appPlanner(hostId, w, planOpts || {});
@@ -324,6 +336,7 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     let held = null;
     try {
       const { plan, facts } = await installPlan(hostId, what, planOpts);
+      if (plan && plan.uac) return await runUacInstall(hostId, plan, { onData, expectDigest }); // design 014 D1: Windows asks on its own screen
       const running = facts && facts.installing && facts.installing.pid ? facts.installing : null;
       if (!running) {
         if (!plan.ok) { const e = named(plan.code, plan.error); e.plan = plan; throw e; }
@@ -354,6 +367,112 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     }
   }
 
+
+  // ── design 014 D1 (lane desktop-vnc-native): a Windows / macOS machine's WHOLE DESKTOP — the `vnc-native` rung ──
+  /** The ONE desktop per machine this hub has opened: hostId → { dm, platform, vnc } (in memory; NOT a keeper record —
+   *  nothing runs to stop, nothing to sample; closing the last viewer releases the picture forward). The handle is the
+   *  one the open resolved (a dialed device's handle is not in the host table's connected cache). */
+  const desktops = new Map();
+  /**
+   * THE PROBE of a machine's own VNC server: ONE connection to its 127.0.0.1:<vncPort> through the agent's existing
+   * tcp-connect (dm.tcpForward — no new op), the greeting read by the PURE src/desktop-display.js rfbGreeting, our
+   * version answered so the server names its sign-in types, then closed before any sign-in. Asked when the launcher
+   * lists machines and when a desktop window first opens on a link — never on a timer. → the greeting verdict, or
+   * `{ok:false, code:'no_listener'}` when nothing listens there.
+   */
+  async function probeDesktop(hostId, dmIn = null) {
+    const dm = dmIn || await deviceOf(hostId);
+    let h;
+    try { h = await dm.tcpForward(vncPort); } catch (e) { return { ok: false, code: 'no_listener', why: `nothing listens on port ${vncPort} there (${(e && e.message) || 'refused'})` }; }
+    return new Promise((resolve) => {
+      let buf = Buffer.alloc(0), replied = false, done = false, timer = null;
+      const finish = (v) => { if (done) return; done = true; clearTimeout(timer); try { h.close(); } catch { /* gone */ } resolve(v); };
+      const ended = (code, why) => { const g = D.rfbGreeting(buf); return g.ok || g.code !== 'truncated' ? g : { ...g, code: buf.length ? g.code : code, why: buf.length ? g.why : why }; };
+      timer = setTimeout(() => finish(ended('silent', `port ${vncPort} answered no VNC greeting within ${spell(probeMs)}`)), probeMs); timer.unref?.();
+      h.onData = (d) => {
+        if (done) return;
+        buf = Buffer.concat([buf, Buffer.isBuffer(d) ? d : Buffer.from(d)]).subarray(0, 2048);
+        const g = D.rfbGreeting(buf);
+        if (!replied && g.reply) { replied = true; try { h.write(Buffer.from(g.reply, 'latin1')); } catch { /* gone */ } }
+        if (g.ok || g.code !== 'truncated') finish(g);
+      };
+      h.onClose = () => finish(ended('no_listener', `nothing listens on port ${vncPort} there`));
+    });
+  }
+  const platformOfHandle = (dm) => { try { const st = dm && dm.status ? dm.status() : null; return st && st.connected && st.info ? st.info.platform || null : null; } catch { return null; } };
+  const notDesktop = (hostId, platform) => named('not_desktop_machine', `${hostId} runs ${platform || 'an unknown system'} — "Its desktop" is for Windows and macOS machines (a Linux machine's apps open in their own windows)`);
+  /** OPEN a machine's desktop (the window's connect gate): the machine is reached (bounded), must be Windows / macOS,
+   *  and its VNC server must answer with a sign-in the viewer speaks — else `no_vnc` by name with the probe. The probe
+   *  is asked once per link (a reconnect of the same link reuses its answer). → { ok, id, hostId, platform, auth, type } */
+  async function openMachineDesktop(hostId) {
+    if (isLocal(hostId)) throw named('not_desktop_machine', 'this machine\'s own desktop is the Desktop window');
+    const dm = await deviceOf(hostId);
+    const platform = platformOfHandle(dm);
+    if (!M.DESKTOP_PLATFORMS.includes(platform)) throw notDesktop(hostId, platform);
+    const have = desktops.get(hostId);
+    const vnc = have && have.dm === dm && have.vnc && have.vnc.ok ? have.vnc : await probeDesktop(hostId, dm);
+    if (!vnc.ok) { desktops.delete(hostId); const e = named('no_vnc', `${hostId}: ${vnc.why || vnc.code}`); e.vnc = vnc; e.platform = platform; throw e; }
+    desktops.set(hostId, { dm, platform, vnc });
+    return { ok: true, id: M.machineDesktopId(hostId), hostId, platform, auth: vnc.auth, type: vnc.type };
+  }
+  /** The bridge's target for a `machine-desktop.<hostId>` id (SYNC): the opened machine while its link is up — `rfb` to
+   *  its 5900 through the picture forward, people only (`humanOnly`: the bridge refuses an agent token by name). */
+  function machineDesktopTarget(id) {
+    const hostId = M.machineDesktopHost(id);
+    const d = hostId ? desktops.get(hostId) : null;
+    return d && M.DESKTOP_PLATFORMS.includes(platformOfHandle(d.dm)) ? { kind: 'rfb', port: vncPort, hostId, humanOnly: true } : null;
+  }
+  /** The bridge's words when a machine desktop's upstream closed: the machine's link is gone ⇒ it went offline. */
+  function machineDesktopGone(id) {
+    const hostId = M.machineDesktopHost(id);
+    const d = hostId ? desktops.get(hostId) : null;
+    return d && !platformOfHandle(d.dm) ? `${hostId} went offline` : null;
+  }
+  /** "RUN ON ITS DESKTOP…" — the OWNER's click (the route refuses an agent token): the PURE plan (src/desktop-apps.js
+   *  desktopRunPlan — the line refused by name, else an argv that starts it detached), run by the agent's existing
+   *  `run-cmd`. → { ok, hostId, platform, shown } — `shown` is the line, as it ran. */
+  // verify r1 F4: every run (and every refusal of a typed line) is ONE line of the exit proxy's audit (`audit` = its ONE
+  // writer, wired in server.js) — the owner's "Commands run on {machine}" list shows it like an exit run; agents never
+  // see it (no conversation key)
+  const auditRun = (hostId, line, extra) => {
+    if (typeof audit !== 'function' || typeof line !== 'string' || !line.trim()) return;
+    let machine = hostId; try { const h = hosts && hosts.get ? hosts.get(hostId) : null; machine = String((h && (h.name || h.id)) || hostId); } catch { /* the id */ }
+    try { audit({ hostId, machine, sessionId: null, sessionKey: null, name: 'you — Run on its desktop', by: 'user', grant: 'run', verb: 'run', via: 'desktop', cmd: line, ...extra }); } catch (e) { log.warn?.(`[desktop] the run on ${hostId} was not audited: ${e && e.message}`); }
+  };
+  async function runOnDesktop(hostId, line) {
+    if (isLocal(hostId)) throw named('not_desktop_machine', 'this machine runs apps through the Apps launcher');
+    const dm = await deviceOf(hostId);
+    const platform = platformOfHandle(dm);
+    const plan = M.desktopRunPlan(platform, line);
+    if (!plan.ok) { auditRun(hostId, line, { ok: false, refusal: plan.code, ...(platform ? { platform } : {}) }); throw named(plan.code, plan.error); }
+    let r;
+    const t0 = Date.now();
+    try { r = await dm.runCmd(plan.argv[0], plan.argv.slice(1), { timeoutMs: 20000, waitMs: 25000 }); }
+    catch (e) { auditRun(hostId, line, { ok: false, refusal: 'host_unavailable', platform, ms: Date.now() - t0 }); throw named('host_unavailable', `${hostId}: ${e && e.message}`); }
+    auditRun(hostId, line, { ok: !!r && r.code === 0, code: r && Number.isInteger(r.code) ? r.code : null, ms: Date.now() - t0, platform, ...(!r || r.code !== 0 ? { refusal: 'run_failed' } : {}) });
+    if (!r || r.code !== 0) throw named('run_failed', `the command did not start on ${hostId} (exit ${r ? r.code : '?'}${r && r.stderr ? `: ${String(r.stderr).trim().split('\n')[0].slice(0, 200)}` : ''})`);
+    log.log?.(`[desktop] started on ${hostId}'s desktop at the owner's click (${String(line).length} characters)`);
+    return { ok: true, hostId, platform, shown: plan.shown };
+  }
+  /** design 014 D1, the owner's option A (2026-10-03): THE WINDOWS INSTALL. The agent runs unelevated, so the plan's
+   *  argv asks Windows for elevation ON THAT MACHINE'S SCREEN and waits: someone there clicks Yes and types the VNC
+   *  password into the administrator window — VibeSpace never carries it. Declined / nobody there ⇒ `no_admin` by name
+   *  with the plan (its commands = the same script for an administrator PowerShell). Done = the 5900 probe, after. */
+  async function runUacInstall(hostId, plan, { onData = () => { }, expectDigest = null } = {}) {
+    if (!plan.ok) { const e = named(plan.code, plan.error); e.plan = plan; throw e; }
+    if (expectDigest != null && planDigest(plan) !== String(expectDigest)) { const e = named('plan_changed', `what would run on ${hostId} changed after it was shown — nothing ran; read the new commands, then press Install again`); e.plan = plan; e.digest = planDigest(plan); throw e; }
+    const dm = await deviceOf(hostId);
+    if (typeof dm.runStream !== 'function') throw named('host_needs_daemon', `${hostId}: its agent cannot stream a command`);
+    log.log?.(`[desktop] installing ${plan.label} on ${hostId}: Windows asks for administrator rights on that machine's screen`);
+    const r = await dm.runStream(plan.argv[0], plan.argv.slice(1), { onData, timeoutMs: installMs });
+    const fail = (code, msg) => { const e = named(code, msg); e.plan = plan; return e; };
+    if (r && r.code === M.TIGHTVNC_NO_ADMIN_EXIT) throw fail('no_admin', `Windows on ${hostId} granted no administrator rights (Yes was not clicked there) — nothing was installed; click Install again with someone at that machine, or run the commands above in an administrator PowerShell there`);
+    if (!r || r.code == null) throw fail(r && r.timedOut ? 'install_timeout' : 'install_link_lost', `the install on ${hostId} reported no exit (${(r && r.error) || (r && r.timedOut ? 'past its deadline' : 'the link dropped')}) — check again`);
+    if (r.code !== 0) throw fail('install_failed', `the install exited ${r.code} on ${hostId} — the administrator window there said why`);
+    desktops.delete(hostId);
+    return { ok: true, what: plan.what, hostId, plan, before: null, after: await probeDesktop(hostId, dm), facts: null, reattached: false };
+  }
+
   /** ONE file of a paired machine, read through its agent (bounded) — the hosted xpra client's files when the hub has
    *  no xpra of its own (src/routes/desktop-apps.js). Never for this machine (the route serves those from disk). */
   async function readFile(hostId, absPath, maxBytes = 8 * 1024 * 1024) {
@@ -373,7 +492,7 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     try { return !!(hosts && typeof hosts.connectedDevice === 'function' && hosts.connectedDevice(hostId)); } catch { return false; }
   }
 
-  const layer = { call, forwardPort, closeForward, forwards: listForwards, hostKnown, isLocal, shutdown, machines, installPlan, installXpra, installPackage, installBusy, runArgv, readFile, connectedNow, setAppPlanner, planDigest };
+  const layer = { call, forwardPort, closeForward, forwards: listForwards, hostKnown, isLocal, shutdown, machines, installPlan, installXpra, installPackage, installBusy, runArgv, readFile, connectedNow, setAppPlanner, planDigest, probeDesktop, openMachineDesktop, machineDesktopTarget, machineDesktopGone, runOnDesktop };
   if (install) installed = layer;
   return layer;
 }

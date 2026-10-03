@@ -163,6 +163,10 @@ const SUPERSEDED_DEFAULTS = {
 // behind a ledger scan again (a 200 MB catch-up used to hold the loop for the
 // whole walk).
 const SCAN_BUDGET_BYTES = 1024 * 1024;
+// L0 (design 011): how often the walk's writer looks for cursor keys whose
+// transcript is gone — one stat per key (~45 ms for production's 37 024 keys,
+// measured 2026-10-03), so at most hourly, and on the first walk after boot.
+const CURSOR_PRUNE_MS = 3600 * 1000;
 
 class UsageHistory {
   // resolveAccount(acctId) → { type:'subscription'|'api'|'codex-subscription', name, tail } | null
@@ -187,7 +191,8 @@ class UsageHistory {
     this.attribFile = path.join(this.dir, 'attribution.ndjson');
     this._resolveAccount = resolveAccount;
     try { fs.mkdirSync(this.dir, { recursive: true }); } catch {}
-    this._cursors = timedSync('usage-cursors.read', () => this._loadJson(this.cursorsFile, {}));
+    this._index = null; // the usage index's push (design 011 L1) — attached by its owner, src/server/usage-index.js
+    this._cursors = timedSync('usage-cursors.read', () => this._loadCursors());
     // Re-read the cursor map from disk (2.369.85): a one-shot migration that
     // PURGES fixture rows also drops their cursors, but this object was built
     // (and loaded _cursors.json) BEFORE runLocalMigrations() ran, so the first
@@ -196,14 +201,14 @@ class UsageHistory {
     // verifier). Same shape as usage-routes' reloadRateLimitCache(): the
     // boot-time consumer re-reads after the repair instead of the repair
     // reaching into a live object.
-    this.reloadCursors = () => { this._cursors = timedSync('usage-cursors.read', () => this._loadJson(this.cursorsFile, {})); };
+    this.reloadCursors = () => { this._cursors = timedSync('usage-cursors.read', () => this._loadCursors()); };
     // …and the same for the EVENTS (2026-09-10). `_loadEvents` keeps a byte
     // watermark per shard and only reads the appended tail, so a migration
     // that REWRITES a shard in place (the origin backfill) is invisible to an
     // already-warm cache — and `_evCache.rids` would keep serving the
     // pre-migration objects for the life of the process. Boot re-reads after
     // runLocalMigrations, exactly like reloadCursors.
-    this.reloadEvents = () => { this._evCache = null; };
+    this.reloadEvents = () => { this._evCache = null; if (this._index) this._index.recover(); }; // …and the index re-checks its shard marks
     this._pricing = this._loadPricing();
     this._scanning = false;
     this._lastScan = 0;
@@ -439,7 +444,7 @@ class UsageHistory {
       }
       if (dirty) this._writeAtomic(fp, out.join('\n') + '\n');
     }
-    if (changed) this._evCache = null; // sizes may match — force a clean reload
+    if (changed) { this._evCache = null; if (this._index) this._index.recover(); } // sizes may match — force a clean reload (the index re-checks its marks)
     try { fs.writeFileSync(marker, JSON.stringify({ at: Date.now(), changed })); } catch {}
     if (changed) console.log(`[usage-history] re-attributed ${changed} events (pre-binding history → global)`);
   }
@@ -560,9 +565,9 @@ class UsageHistory {
       // THE ONE COMMIT POINT — synchronous, so no reader interleaves between
       // the shard appends and the cursor write
       for (const [shard, lines] of Object.entries(shardBuffers)) {
-        if (lines.length) { timedSync('usage-shards.write', () => fs.appendFileSync(shard, lines.join('\n') + '\n')); if (this._evCache) this._evCache.checkedAt = 0; } // our own append ⇒ next _loadEvents re-checks (2.369.36 throttle)
+        if (lines.length) { const text = lines.join('\n') + '\n'; timedSync('usage-shards.write', () => fs.appendFileSync(shard, text)); this._pushIndex(shard, text); if (this._evCache) this._evCache.checkedAt = 0; } // our own append ⇒ next _loadEvents re-checks (2.369.36 throttle)
       }
-      timedSync('usage-cursors.write', () => this._writeAtomic(this.cursorsFile, JSON.stringify(this._cursors)));
+      this._writeCursors();
       this._lastScan = Date.now();
     } catch (e) {
       console.error('[usage-history] scan failed:', e && e.message);
@@ -636,9 +641,76 @@ class UsageHistory {
       added++;
     }
     for (const [shard, lines] of Object.entries(shardBuffers)) {
-      if (lines.length) { timedSync('usage-shards.write', () => fs.appendFileSync(shard, lines.join('\n') + '\n')); if (this._evCache) this._evCache.checkedAt = 0; } // our own append ⇒ next _loadEvents re-checks (2.369.36 throttle)
+      if (lines.length) { const text = lines.join('\n') + '\n'; timedSync('usage-shards.write', () => fs.appendFileSync(shard, text)); this._pushIndex(shard, text); if (this._evCache) this._evCache.checkedAt = 0; } // our own append ⇒ next _loadEvents re-checks (2.369.36 throttle)
     }
     return { added };
+  }
+
+  /** The usage index (design 011 L1 — a SHADOW that feeds nothing) attaches
+   *  here; its owner is src/server/usage-index.js. */
+  setIndex(index) { this._index = index || null; }
+
+  // THE PUSH (design 011 §2, the invariant "a query sees every append made
+  // before it"): right after a commit point's synchronous append, the same
+  // bytes go to the index worker's FIFO, so a query posted after this append
+  // is answered after it. `offset` is where these bytes START in the shard;
+  // the worker takes them only when that equals its mark (and the inode is the
+  // one it marked), else it re-reads the shard from the mark. Never throws.
+  _pushIndex(shard, text) {
+    if (!this._index) return;
+    try {
+      const st = fs.statSync(shard);
+      this._index.ingest(path.basename(shard), st.size - Buffer.byteLength(text), st.ino, text);
+    } catch {}
+  }
+
+  // ── L0: the cursor store (design 011) ──────────────────────────────────────
+  // `_cursors.json` was rewritten whole (6.7 MB) at EVERY walk. It is now
+  // written only when its bytes would change — `_cursorsJson` is the text on
+  // disk (JSON.stringify of a parsed file gives the file back: checked on
+  // production's) — and keys whose transcript is gone are dropped by this
+  // writer: 25 817 of production's 37 024 keys (70 %) named a file that no
+  // longer exists (2026-10-03). A key is dropped only on PROOF: it lies under
+  // one of the walk's two roots, that root is a readable directory, stat of
+  // the key answers ENOENT while the key's OWN directory is there, and that
+  // root still holds a live key — an unreadable root (ENOTCONN) drops nothing,
+  // and neither does an unmounted FUSE root, whose EMPTY mount point answers
+  // ENOENT for every key (verify r1: a dropped LIVE cursor re-walks its
+  // transcript and appends every request again — one 1.1 GB transcript = 21 MB
+  // of duplicate rows; read-time rid dedup hides them, the ledger still grows).
+  // On production 25 000 of the 25 825 dead keys keep their directory.
+  _loadCursors() {
+    let text = null, obj = {};
+    try { text = fs.readFileSync(this.cursorsFile, 'utf-8'); obj = JSON.parse(text) || {}; } catch { text = null; obj = {}; }
+    this._cursorsJson = text;
+    return obj;
+  }
+  _writeCursors() {
+    const now = Date.now();
+    if (now - (this._cursorsPrunedAt || 0) >= CURSOR_PRUNE_MS) { this._cursorsPrunedAt = now; this._pruneDeadCursors(); }
+    const json = JSON.stringify(this._cursors);
+    if (json === this._cursorsJson) return false;
+    timedSync('usage-cursors.write', () => this._writeAtomic(this.cursorsFile, json));   // store-timing's row; its site = this function since usage-index-shadow L0
+    this._cursorsJson = json;
+    return true;
+  }
+  _pruneDeadCursors() {
+    const roots = [this.projectsDir, this.codexSessionsDir].filter((r) => { try { return fs.statSync(r).isDirectory(); } catch { return false; } });
+    if (!roots.length) return 0;
+    const dirOk = new Map(), dead = [], live = new Set();
+    for (const k of Object.keys(this._cursors)) {
+      const r = roots.find((x) => k.startsWith(x + path.sep));
+      if (!r) continue;
+      try { fs.statSync(k); live.add(r); } catch (e) {
+        if (!e || e.code !== 'ENOENT') continue;
+        const d = path.dirname(k);
+        if (!dirOk.has(d)) { let ok = false; try { ok = fs.statSync(d).isDirectory(); } catch { } dirOk.set(d, ok); }
+        if (dirOk.get(d)) dead.push([k, r]);
+      }
+    }
+    let dropped = 0;
+    for (const [k, r] of dead) if (live.has(r)) { delete this._cursors[k]; dropped++; }
+    return dropped;
   }
 
   // Feed a file's UNSCANNED bytes to onLine, in bounded chunks — a rollout can

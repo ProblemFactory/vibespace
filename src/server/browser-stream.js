@@ -489,7 +489,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
       // entry gives back after the browser stops (the recorder's tap rides this relay too, so a traced browser has it with no viewer)
       if (msg.type === 'tabs' && Array.isArray(msg.tabs) && relay.target && relay.target.kind === 'ephemeral' && !relay.target.child && typeof keeper.noteTabs === 'function') keeper.noteTabs({ ...relay.target, browserKey: relay.browserKey }, msg.tabs);
       // lane browser-resume C (§3.9, ruling 3): whose each tab is — the tab row draws its controls from the keeper's answer
-      if (msg.type === 'tabs' && Array.isArray(msg.tabs)) scheduleOwners(relay);
+      if (msg.type === 'tabs' && Array.isArray(msg.tabs)) { relay.titleTries = 0; scheduleOwners(relay); } // accept-fixes-strip F7: a new tabs record re-arms the title re-ask
       // r6 A-F8: the `command` records are remembered by id (bounded) — a confirmation's TARGET is its paired command's params
       if (msg.type === 'command' && msg.id != null) { relay.cmds.set(String(msg.id), msg); if (relay.cmds.size > CMD_MEMORY) relay.cmds.delete(relay.cmds.keys().next().value); }
       const conf = T.confirmationFromUpstream(msg, now(), { command: msg.id != null ? relay.cmds.get(String(msg.id)) || null : null });
@@ -963,6 +963,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
 
   // ── lane browser-resume C (§3.9, the owner's ruling 3): THE TAB ROW — whose each tab is, and the user's switch / ✕ ──
   const OWNERS_DEBOUNCE_MS = 250;
+  const TITLE_RETRIES = 3, TITLE_RETRY_MS = 1500; // accept-fixes-strip F7: a loading page's title is asked again ≤ 3 times, 1.5 s apart
   /** After a `tabs` record (debounced): the keeper judges whose each tab is (ONE CDP read for a shared profile) → ONE
    *  `tab-owners` record to every viewer, kept for a late one. Single flight; a record meanwhile re-asks once. */
   function scheduleOwners(relay, delay = OWNERS_DEBOUNCE_MS) {
@@ -982,7 +983,19 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
       const owners = {};
       if (r.all) { for (const x of tabs) if (x && /^[0-9A-Fa-f]{32}$/.test(String(x.targetId || ''))) owners[String(x.targetId).toUpperCase()] = r.all; }
       else Object.assign(owners, r.owners || {});
-      const text = JSON.stringify({ type: 'tab-owners', owners, mediated: !!r.mediated, adoptable: !!r.adoptable });
+      // accept-fixes-strip F7/F8: the pages' own titles (CDP's — the binary's rows keep a loading tab's address) and, for
+      // another holder's tab, WHO (the conversation's id + its name here, a job's name) — only for the tabs this view lists
+      const listed = new Set(tabs.filter((x) => x && /^[0-9A-Fa-f]{32}$/.test(String(x.targetId || ''))).map((x) => String(x.targetId).toUpperCase()));
+      const titles = {}, names = {};
+      for (const [id, v] of Object.entries(r.titles || {})) if (listed.has(id) && typeof v === 'string' && v) titles[id] = v.slice(0, 300);
+      for (const [id, w] of Object.entries(r.whose || {})) {
+        if (!listed.has(id) || !w || typeof w !== 'object') continue;
+        const s0 = w.sessionId ? activeSessions.get?.(String(w.sessionId)) : null;
+        const nm = w.name || (s0 ? (s0.name || s0.webuiName || '') : '');
+        names[id] = { sessionId: w.sessionId ? String(w.sessionId) : null, name: nm ? String(nm).slice(0, 120) : null, ...(w.job ? { job: String(w.job) } : {}) };
+      }
+      if (r.settling && (relay.titleTries || 0) < TITLE_RETRIES) { relay.titleTries = (relay.titleTries || 0) + 1; const tm = setTimeout(() => { if (relays.get(relay.key) === relay) scheduleOwners(relay, 0); }, TITLE_RETRY_MS); if (tm.unref) tm.unref(); } // a page still loading names itself by its address: ask again (bounded)
+      const text = JSON.stringify({ type: 'tab-owners', owners, titles, names, mediated: !!r.mediated, adoptable: !!r.adoptable });
       if (text === relay.lastOwners) return;
       relay.lastOwners = text;
       for (const v of relay.viewers.values()) send(v.ws, text);
@@ -1129,8 +1142,11 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (!id || (relay.activeTarget && id === String(relay.activeTarget).toUpperCase())) { log.log?.(`[browser-live] ${relay.key}: viewer ${viewer.id} follows the agent's tab again`); if (id) say({ targetId: null }); return; } // live-watch-polish G4: a re-sent watch of the tab the agent is on now is ANSWERED (the view's line clears)
     if (relay.holder === viewer.id) { say({ targetId: null, refused: 'driving', error: 'you drive this window — its chip switches the agent\'s tab' }); return; }
     let owners = {}; try { owners = (JSON.parse(relay.lastOwners || '{}') || {}).owners || {}; } catch { owners = {}; }
-    const mine = isHuman(relay) ? 'you' : 'agent';
-    if (owners[id] !== mine) { log.log?.(`[browser-live] ${relay.key}: viewer ${viewer.id}'s watch of ${id.slice(0, 8)} refused not_your_tab`); say({ targetId: null, refused: 'not_your_tab', error: 'that tab is not this conversation\'s — open its own live view' }); return; }
+    const mine = isHuman(relay) ? 'you' : 'agent'; // the journal's words (whose tab is watched)
+    // accept-fixes-strip F8 (the owner: he may WATCH any tab of his own browser — view only): refused only when the tab is not
+    // one of THIS browser's judged pages (nothing to show); whose it is is said in the journal
+    if (!owners[id]) { log.log?.(`[browser-live] ${relay.key}: viewer ${viewer.id}'s watch of ${id.slice(0, 8)} refused no_such_tab`); say({ targetId: null, refused: 'no_such_tab', error: 'that tab is not one of this browser\'s' }); return; }
+    const whoseTab = owners[id] === mine ? 'the agent\'s tab' : owners[id] === 'orphan' ? 'nobody\'s tab' : owners[id] === 'you' ? 'his own tab' : 'another holder\'s tab';
     if (!keeper || typeof keeper.watchTabFor !== 'function') { say({ targetId: null, refused: 'unavailable', error: 'this server cannot show another tab' }); return; }
     const seq = ++viewer.watchSeq;
     const w = { targetId: id, mode: 'screencast', stop: null, lastAt: 0, pending: null, timer: null };
@@ -1145,7 +1161,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
       w.timer = setTimeout(() => { w.timer = null; if (live() && w.pending) { const p = w.pending; w.pending = null; push(p); } }, wait === null ? RESUME_POLL_MS : Math.max(1, wait));
       if (w.timer.unref) w.timer.unref();
     };
-    log.log?.(`[browser-live] ${relay.key}: viewer ${viewer.id} watches the agent's tab ${id.slice(0, 8)} (its current tab ${String(relay.activeTarget || '?').slice(0, 8)} is unchanged)`);
+    log.log?.(`[browser-live] ${relay.key}: viewer ${viewer.id} watches ${whoseTab} ${id.slice(0, 8)} (its current tab ${String(relay.activeTarget || '?').slice(0, 8)} is unchanged)`);
     say({ targetId: id, mode: 'screencast', pending: true });
     Promise.resolve().then(() => keeper.watchTabFor(relay.target, id, {
       onFrame: (f) => { if (live()) push(JSON.stringify({ type: 'frame', data: f.data, metadata: { ...(f.metadata || {}), watched: id } })); },

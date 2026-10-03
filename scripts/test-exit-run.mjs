@@ -23,6 +23,8 @@
 //   §6 a REAL daemon from THIS tree's bundle (test-sysinfo-op's template): the capability advertised, `{shell}` runs
 //      through `sh -lc` on this box (code / stdout / stderr / interpreter), a child that never started answers
 //      spawnError ENOENT + code 127 — the win32 branch is unit-level only (no Windows box runs this lane)
+//   §8 lane exit-see-whole: the card's block and the audit line carry the WHOLE command (its lines kept), the fold rule,
+//      the owner's rows keep lines while an agent's `runs` keeps one, hidden characters still refused; five controls
 //   §7 CONTROLS (scripts/mutant-copy.mjs, never src/): exit-shell.js whose judge folds a spawn failure back into
 //      nothing; exit-proxy.js sending `sh -lc` whatever the capability; exit-reach.js's heads without the belt; a
 //      daemon built from a copy that never consults the judge (the production shape: code 1, no spawnError)
@@ -975,6 +977,57 @@ await section('§7 controls (patched copies)', async () => {
   const xsMutO = xsSrc.replace("  return !(platform === 'win32' && !(Array.isArray(capabilities) && capabilities.includes(RUN_SHELL_CAP)));", '  return true;');
   ok(xsMutO !== xsSrc && M.load('src/exit-shell.js', xsMutO, 'canrunall').canRunLine('win32', []) === true, 'CONTROL (dus2): a canRunLine that says yes to a Windows agent without run-shell — DUS-3 goes red');
   for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 20, label: 'mutant-copy (exit-run): ' })) ok(r.pass, r.name, r.detail);
+});
+
+// ── §8 lane exit-see-whole (design 013 piece 1, 2026-10-03 — the owner: 「这些指令输入展示不全，也没地方看到完整版」) ──
+await section('§8 exit-see-whole: the card and the owner\'s list carry the WHOLE command as itself; the fold rule; controls', async () => {
+  const one = 'echo ' + 'x'.repeat(4091);                                      // one token, 4 096 bytes
+  const lines200 = Array.from({ length: 200 }, (_, i) => `l${i}`).join('\n');     // a 200-line script (≤ 4 KiB)
+  eq(E.cardOutput({ cmd: one, code: 0 }).cmd, one, 'cardOutput carries the WHOLE 4 KiB command (one token)');
+  ok(E.cardOutput({ cmd: lines200 }).cmd === lines200 && E.cardOutput({ cmd: 'a\tb' }).cmd === 'a\tb', '…its lines and tabs kept (the command as itself)');
+  ok(E.cardOutput({ cmd: 'a\u0007b\u001bc' }).cmd === 'a b c' && !('cmd' in E.cardOutput({})) && !('cmd' in E.cardOutput({ cmd: '  ' })), '…other controls as spaces; no command ⇒ no field (an older card draws no block)');
+  eq(E.cmdFold(lines200), { lines: 200, chars: lines200.length, folded: true }, 'the fold: 200 lines ⇒ folded, the count named');
+  eq(E.cmdFold('a\nb\nc\nd'), { lines: 4, chars: 7, folded: false }, '…four short lines ⇒ shown whole');
+  eq(E.cmdFold('a\nb\nc\nd\ne'), { lines: 5, chars: 9, folded: true }, '…the fifth line folds');
+  ok(!E.cmdFold('x'.repeat(E.CMD_FOLD_CHARS)).folded && E.cmdFold('x'.repeat(E.CMD_FOLD_CHARS + 1)).folded && E.cmdFold('x'.repeat(1365)).lines === 1, '…one line past CMD_FOLD_CHARS folds (it wraps past four lines on a phone)');
+  const row = { verb: 'run', cmd: 'echo a\n\techo b', at: 1 };
+  ok(E.runRow(row).cmd === 'echo a\n\techo b' && E.runRow(row, { agent: true }).cmd === 'echo a  echo b', 'runRow: the owner\'s list keeps the lines; an agent\'s `runs` keeps ONE line (unchanged)');
+  const okReply = async () => ({ code: 0, stdout: 'ok\n', stderr: '', timedOut: false, signal: null, truncated: false, interpreter: 'sh' });
+  const w = world({ tag: 'see', reply: okReply });
+  const r1 = await settle(w.mgr.run(w.sessions.get('wa'), 'wa', 'WINDOWS', one));
+  const c1 = w.cards.at(-1), a1 = w.audit().find((l) => l.verb === 'run');
+  ok(r1.v && c1 && c1.exitRun && c1.exitRun.cmd === one && a1 && a1.cmd === one && c1.text.includes('…') && c1.text.length < 200, 'the REAL manager, a 4 096-byte command: the card\'s block and the audit line carry it whole; the head line keeps its 80 characters', { text: c1 && c1.text, n: c1 && c1.exitRun && (c1.exitRun.cmd || '').length });
+  const r2 = await settle(w.mgr.run(w.sessions.get('wa'), 'wa', 'WINDOWS', lines200));
+  const a2 = w.audit().filter((l) => l.verb === 'run').at(-1);
+  ok(r2.v && w.cards.at(-1).exitRun.cmd === lines200 && a2.cmd === lines200 && E.runRow(a2).cmd === lines200, 'a 200-line script: the card, the audit line and the owner\'s row keep its lines');
+  const n = w.cards.length;
+  const r3 = await settle(w.mgr.run(w.sessions.get('wa'), 'wa', 'WINDOWS', 'echo safe‮;rm -rf ~'));
+  ok(r3.e && r3.e.code === 'bad_command' && w.cards.length === n, 'a command with a hidden character is still refused bad_command, before any card (the block never shows a reordered command)', r3.e && r3.e.code);
+  const wf = world({ tag: 'see-sf', reply: async () => ({ code: 127, stdout: '', stderr: '', spawnError: { code: 'ENOENT', message: 'sh: not found' }, interpreter: 'sh' }) });
+  await settle(wf.mgr.run(wf.sessions.get('wa'), 'wa', 'WINDOWS', 'hostname'));
+  ok(wf.cards.at(-1) && wf.cards.at(-1).exitRun && wf.cards.at(-1).exitRun.cmd === 'hostname', 'a command that could not start: its card carries the command too');
+  // CONTROLS (scripts/mutant-copy.mjs): each lane rule removed from a patched copy goes red
+  const M8 = mutantCopies('exo8', REPO);
+  const erSrc = fs.readFileSync(path.join(REPO, 'src/exit-reach.js'), 'utf8'), epSrc = fs.readFileSync(path.join(REPO, 'src/exit-proxy.js'), 'utf8');
+  const mA = erSrc.replace("...(typeof cmd === 'string' && cmd.trim() ? { cmd: cleanLines(cmd, CMD_MAX) } : {}),", "...(typeof cmd === 'string' && cmd.trim() ? { cmd: cleanCmd(cmd, 80) } : {}),");
+  ok(mA !== erSrc, '(see-a) the patch applies');
+  const EA = M8.load('src/exit-reach.js', mA, 'cmdhead');
+  ok(EA.cardOutput({ cmd: one }).cmd !== one && EA.cardOutput({ cmd: lines200 }).cmd !== lines200, 'CONTROL (see-a): the card\'s command cut to a flattened 80-character head (the pre-fix card) — §8 goes red');
+  const mB = erSrc.replace('folded: lines > CMD_FOLD_LINES || c.length > CMD_FOLD_CHARS', 'folded: lines > CMD_FOLD_LINES');
+  ok(mB !== erSrc && M8.load('src/exit-reach.js', mB, 'nolen').cmdFold('x'.repeat(1365)).folded === false, 'CONTROL (see-b): a fold that counts lines only — a 1 365-character one-liner is never folded (red)');
+  const mC = erSrc.replace('cmd: agent ? cleanCmd(l.cmd, CMD_MAX) : cleanLines(l.cmd, CMD_MAX)', 'cmd: cleanCmd(l.cmd, CMD_MAX)');
+  ok(mC !== erSrc && M8.load('src/exit-reach.js', mC, 'flatrow').runRow(row).cmd !== row.cmd, 'CONTROL (see-c): the reader flattening the owner\'s rows (pre-fix) — the lines are lost (red)');
+  const mD = epSrc.replace('rec.cmd = E.cleanLines(rec.cmd, E.CMD_MAX);', "rec.cmd = rec.cmd.replace(/[\\u0000-\\u001f\\u007f]/g, ' ').slice(0, E.CMD_MAX);");
+  ok(mD !== epSrc, '(see-d) the patch applies');
+  const wD = world({ tag: 'see-d', Mgr: M8.load('src/exit-proxy.js', mD, 'flataudit').ExitProxyManager, reply: okReply });
+  await settle(wD.mgr.run(wD.sessions.get('wa'), 'wa', 'WINDOWS', lines200));
+  ok(wD.audit().find((l) => l.verb === 'run').cmd !== lines200, 'CONTROL (see-d): the audit line flattening the lines (pre-fix) — the owner\'s list reads one line (red)');
+  const mE = epSrc.replace('exitRun: E.cardOutput({ cmd, code, ms,', 'exitRun: E.cardOutput({ code, ms,');
+  ok(mE !== epSrc, '(see-e) the patch applies');
+  const wE = world({ tag: 'see-e', Mgr: M8.load('src/exit-proxy.js', mE, 'nocmd').ExitProxyManager, reply: okReply });
+  await settle(wE.mgr.run(wE.sessions.get('wa'), 'wa', 'WINDOWS', one));
+  ok(wE.cards.at(-1) && wE.cards.at(-1).exitRun && !wE.cards.at(-1).exitRun.cmd, 'CONTROL (see-e): the manager not handing the command to the card (pre-fix) — the card has no block (red)');
+  for (const r of copiesCensus(M8.files, M8.dir, REPO, { minCopies: 5, label: 'mutant-copy (exit-see-whole): ' })) ok(r.pass, r.name, r.detail);
 });
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

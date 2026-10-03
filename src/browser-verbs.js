@@ -647,7 +647,9 @@ function uploadPathVerdict(candidates, roots) {
  *  one); the store rules run on every spelling, the allow-list on the LAST
  *  (the physical path — the one handed to the binary). */
 const SECRET_COMPONENTS = Object.freeze(['.ssh', '.claude', '.codex', '.vibespace', '.git']);
-function writePathVerdict(candidates, { allow = [], homes = [], dataDir = null, sessionRoot = null } = {}) {
+function writePathVerdict(candidates, { allow = [], homes = [], dataDir = null, sessionRoot = null, job = false } = {}) {
+  // accept-fixes-jobs F6: inside a Background Work job the root is the JOB's working directory, and the words say so
+  const place = job ? 'the job\'s working directory' : 'the project';
   const under = (p, d) => p === d || p.startsWith(d === '/' ? '/' : d + '/');
   const root = typeof sessionRoot === 'string' && sessionRoot[0] === '/' && normDir(sessionRoot) !== '/' ? normDir(sessionRoot) : null;
   const allowRoots = [...(Array.isArray(allow) ? allow : []), ...(root ? [root] : [])].map(normDir).filter((d) => d && d[0] === '/');
@@ -672,13 +674,14 @@ function writePathVerdict(candidates, { allow = [], homes = [], dataDir = null, 
   for (const c of Array.isArray(candidates) ? candidates : []) {
     const paths = (c.paths || []).map(normDir).filter(Boolean);
     // the physical spelling (the last) first — the refusal names where the write would really land
-    for (const p of paths.slice().reverse()) { const s = storeHit(p); if (s) return R('write_path_refused', `\`${clip(c.file)}\` is under ${s} — a browser command never writes into your logins, keys, credentials, config or VibeSpace's own data; nothing ran`, 'save under the project, /tmp or ~/Downloads'); }
+    for (const p of paths.slice().reverse()) { const s = storeHit(p); if (s) return R('write_path_refused', `\`${clip(c.file)}\` is under ${s} — a browser command never writes into your logins, keys, credentials, config or VibeSpace's own data; nothing ran`, `save under ${place}, /tmp or ~/Downloads`); }
     const resolved = paths.length ? paths[paths.length - 1] : null;
     if (resolved != null && !allowRoots.some((d) => under(resolved, d))) {
       return R('write_path_refused', root
-        ? `\`${clip(c.file)}\` is outside the places a browser command may write — the project directory (${clip(root, 80)}), /tmp or ~/Downloads; nothing ran`
+        ? `\`${clip(c.file)}\` is outside the places a browser command may write — ${job ? place : 'the project directory'} (${clip(root, 80)}), /tmp or ~/Downloads; nothing ran`
+        : job ? `\`${clip(c.file)}\` is outside the places a browser command may write — this Background Work job's working directory is not known here (VIBESPACE_JOB_CWD is not set: a run started before this VibeSpace version, or a job created without a directory), so only /tmp or ~/Downloads; nothing ran`
         : `\`${clip(c.file)}\` is outside the places a browser command may write — no session directory is known here (VIBESPACE_SESSION_CWD is not set: a shell outside a VibeSpace session, or a session started before this VibeSpace version), so only /tmp or ~/Downloads; nothing ran`,
-      root ? 'save under the project, /tmp or ~/Downloads' : 'save under /tmp or ~/Downloads; a session started before this version writes into its project again once it is restarted');
+      root ? `save under ${place}, /tmp or ~/Downloads` : job ? 'save under /tmp or ~/Downloads; a job run started by this VibeSpace version writes into its working directory too' : 'save under /tmp or ~/Downloads; a session started before this version writes into its project again once it is restarted');
     }
   }
   return null;

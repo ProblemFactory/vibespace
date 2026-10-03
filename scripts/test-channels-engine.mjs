@@ -4699,7 +4699,7 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
   clock += 31e3;
   W.fail = new CH.ChannelError('rate-limited', 'search frequency limit', { retryable: true, detail: { retryAfterSec: 20 } });
   addMsg(W, 'g-dev', 'dev-2', clock - 2000);
-  await eng.store.index.update(() => { const e2 = eng.store.index.entry('feedy', 'g-dev', { create: false }); e2.lane = { ...(e2.lane || {}), lastPollAt: 0 }; });   // g-dev due by the timer
+  eng.store.stamps.set('feedy/g-dev', { lastPollAt: 0 });   // g-dev due by the timer (design 011 lane 2: the poll instant is a stamp)
   const h0 = W.calls.history.length;
   const r4 = await eng.pass('feedy');
   const rec4 = eng.adapterRecords().adapters[0];
@@ -6126,10 +6126,10 @@ console.log('\n㉓ lane lark-threads: a thread born after its root was stored');
     const landed = E8.eng.store.readTail('larky', 'oc_s', { limit: 500 }).filter((r) => /^om_slate/.test(r.vendorId)).length;
     ok(first === 0 && perPass.every((n) => n <= 5) && W8.calls.byId.length === 30 && landed === 30, `(H) the page's own pass scans the log for none of the 30 waiting hits (it was 30 — one whole-file scan each); each later pass scans at most the ${5} it reads by id; every reply lands`, JSON.stringify({ first, perPass, byId: W8.calls.byId.length, landed }));
     // CONTROL: the pre-verify order — the log asked before the gate — pays a scan per waiting hit on the page's own pass
-    const GATE = "      if (!(Number(en.lane && en.lane.walkStartedAt) >= h.observedAt)) continue;   // its chat read has not run since — it waits\n      if (msgHeld(rec.id, h.convId, vid)) { e.feedMissing.delete(vid); continue; }   // the read found it\n";
+    const GATE = "      if (!(Number(laneOf(en).walkStartedAt) >= h.observedAt)) continue;   // its chat read has not run since — it waits\n      if (msgHeld(rec.id, h.convId, vid)) { e.feedMissing.delete(vid); continue; }   // the read found it\n";
     ok(esrc.split(GATE).length === 2, '(H) CONTROL setup: the gate-then-log order is present once');
     const engCopyH = patchPath('src/server', 'channels-engine');
-    writeCopy(engCopyH, esrc.replace(GATE, "      if (msgHeld(rec.id, h.convId, vid)) { e.feedMissing.delete(vid); continue; }\n      if (!(Number(en.lane && en.lane.walkStartedAt) >= h.observedAt)) continue;\n"));
+    writeCopy(engCopyH, esrc.replace(GATE, "      if (msgHeld(rec.id, h.convId, vid)) { e.feedMissing.delete(vid); continue; }\n      if (!(Number(laneOf(en).walkStartedAt) >= h.observedAt)) continue;\n"));
     const PEH = require(engCopyH);
     const W9 = mk();
     say(W9, 'oc_s', 'om_ancient', T0 - 5 * 86400e3, { text: 'an old root' });
@@ -6367,6 +6367,59 @@ console.log('\n§ design 008: the first read\'s scopes, the paged rows, their bo
   ok([ag1, ag2, ag3].every((r) => r.status === 403 && r.body.code === 'agent-forbidden'), `an agent's session / job bearer is refused on both routes by name ("${ag1.body && ag1.body.error}")`);
   await new Promise((r) => srv8.close(r));
   e8.stop && e8.stop();
+}
+
+console.log('\n§ design 011 lane 2: the poll stamps — a restart keeps every due time; a lost side file is said');
+{
+  const base = Date.UTC(2026, 9, 3, 6, 0, 0);
+  let off = 0;
+  const clock = () => base + off;
+  const say = [];
+  const lg = { log() {}, info() {}, warn: (...a) => say.push(a.join(' ')), error() {} };
+  const mkQ = (M, name) => { const e = M.create({ dataDir: path.join(ROOT, name), env: { VIBESPACE_CHANNELS_FAKE: '1' }, broadcast: () => {}, now: clock, log: lg }); engines.push(e); return e; };
+  const A = 'fake-poll';
+  const run = async (M, name, { kill = false } = {}) => {
+    const a = mkQ(M, name);
+    await a.pass(A, { force: true });
+    const n = a.schedulerExact(A, clock()).conversations;
+    const keys = Object.keys(a.store.index.live()).filter((k) => k.startsWith(A + '/'));
+    const was = Object.fromEntries(keys.map((k) => [k, a.store.stamps.lane(a.store.index.peek(k)).lastPollAt]));
+    // kill: the next engine boots on the data dir AS IT STOOD after the index's own (debounced) write — a kill -9 writes
+    // nothing more: no close, no side file
+    if (kill) a.store.index.flush();
+    if (kill) fs.cpSync(path.join(ROOT, name), path.join(ROOT, name + '-killed'), { recursive: true });
+    a.stop();
+    off += 1000;   // one second later: the restart
+    const b = mkQ(M, kill ? name + '-killed' : name);
+    const r = { n, polled: Object.values(was).filter(Boolean).length, due: b.schedulerExact(A, clock()).due, same: keys.every((k) => b.store.stamps.lane(b.store.index.peek(k)).lastPollAt === was[k]) };
+    b.stop();
+    return r;
+  };
+  const h = await run(ENG, 'q011-head');
+  ok(h.n > 0 && h.polled === h.n && h.due === 0 && h.same, `design 011 lane 2: after a restart NO conversation is due early — ${h.n} conversations polled by a pass, the engine stopped, a new one on the same data: ${h.due} due, every lastPollAt read back from the side file`, JSON.stringify(h));
+  // the 2.369.203 heavy run's test-channels-e2e ⑰: a KILL before the side file's 120 s write — the journal keeps every stamp
+  const hk = await run(ENG, 'q011-kill', { kill: true });
+  ok(hk.n > 0 && hk.polled === hk.n && hk.due === 0 && hk.same, `design 011 lane 2: after a KILL (the data dir as the kill left it: no close, no side file) NO conversation is due early either — ${hk.due} of ${hk.n} due, every lastPollAt read back from the journal (a lost one read as "never polled": a restored window fetched it ahead of discovery)`, JSON.stringify(hk));
+  const ssrc = fs.readFileSync(path.join(REPO, 'src/channel-store.js'), 'utf8');
+  const JOURNAL = '    journal(k);\n    armStamps();\n';
+  ok(ssrc.split(JOURNAL).length === 2, 'design 011 lane 2 · CONTROL setup: stamps.set appends the journal line where the control cuts it');
+  const scQ = patchPath('src', 'channel-store'); writeCopy(scQ, ssrc.replace(JOURNAL, '    armStamps();\n'));
+  const ecQ = patchPath('src/server', 'channels-engine'); writeCopy(ecQ, fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8').replace("require('../channel-store.js')", `require(${JSON.stringify(scQ)})`));
+  const c = await run(require(ecQ), 'q011-nojournal', { kill: true });
+  ok(c.n > 0 && c.due === c.n, `design 011 lane 2 · CONTROL: no journal (the side file alone) — after the same kill ${c.due} of ${c.n} conversations are due at once — red`, JSON.stringify(c));
+  {   // the head's data again, its side file deleted
+    fs.rmSync(path.join(ROOT, 'q011-head', 'channels', 'poll-stamps.json'));
+    const n0 = say.length;
+    off += 1000;
+    const e = mkQ(ENG, 'q011-head');
+    const line = say.slice(n0).find((w) => /poll-stamps\.json was not read/.test(w)) || '';
+    const s0 = e.schedulerExact(A, clock()), b0 = e.budgetOf(A);
+    await e.pass(A);   // the timer's pass: every row due at once — fetched through the vendor's budget
+    const s1 = e.schedulerExact(A, clock()), b1 = e.budgetOf(A);
+    ok(/carry no last-poll time: each is due at once, and the vendor's budget paces the re-poll/.test(line) && s0.due === s0.conversations && s0.due > 0, `design 011 lane 2: with the side file deleted the start SAYS it ("${line.slice(0, 150)}") and all ${s0.due} conversations are due`);
+    ok(b1.spent > b0.spent && b1.spent <= b1.limit && s1.due < s0.due, `design 011 lane 2: …and the re-poll is spent through the vendor's budget (${b1.spent - b0.spent} of the minute's ${b1.limit}), ${s0.due} → ${s1.due} due (a large one's pace: test-channel-drain ②c)`, JSON.stringify({ b0: b0.spent, b1: b1.spent, limit: b1.limit, s0: s0.due, s1: s1.due }));
+    e.stop();
+  }
 }
 
 console.log('\ntree: the patched copies never touch the tree');

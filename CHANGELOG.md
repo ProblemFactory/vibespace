@@ -2,6 +2,33 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.204 — 2026-10-03
+
+### Added
+- Slack can be connected in Channels: paste your own Slack app's token, and agents read your Slack and draft replies you approve.
+- Paired Windows and Mac machines open as one window of their whole desktop (Apps → the machine): set it up once, then sign in each time.
+- Run on its desktop… starts a program such as Blender on a paired Windows or Mac machine.
+- A browser profile saved on a paired machine can be started, browsed and deleted, with its folder there, from the Agent browser panel.
+- A paired machine with no browser to run says so and shows the one command to run there.
+- An email's details show the sender's address.
+
+### Changed
+- The Task log keeps every Activity entry: past the newest 500, keep scrolling to read older ones.
+- In a conversation window, each handled proposal folds into one line; open it for the full card or jump to the sent message.
+- Remote commands show in full: the chat card holds the whole command (folded after four lines), and the Commands list shows each with Copy.
+- The Remote panel's machine row opens its Commands list in one click.
+- The live view marks the agent's tab, shows each tab's real page title and whose tab it is, and lets you watch any tab of your browser.
+- The Usage window's numbers are double-checked in the background against a new local index; nothing you see changes yet.
+
+### Fixed
+- The Files view works on paired Windows machines (browse, open, edit, download, copy, move, delete, folder sizes) instead of failing.
+- On Windows, .zip folder downloads and archives say they are not available yet, and a too-old agent says to rerun its install command.
+- Apps that fix their own window size (WeChat's login, Inkscape's welcome) open exactly that size, nothing blank or cut off, and can't be resized.
+- A design comment no longer sticks on "Sending…", and a published design is one row in the chat's design list.
+- A Background Work job using the agent browser shows under its own name in the live view, and its browser window closes when the job ends.
+- A Background Work job can save agent browser screenshots and downloads in its own folder.
+- On servers with many conversations, Channels no longer rewrites its whole index every few seconds when nothing new arrives.
+
 ## 2.369.203 — 2026-10-03
 
 ### Added

@@ -203,7 +203,52 @@ export function openTaskLog(app, taskId, { tab, syncId } = {}) {
   // checkbox and the Find box in use survive another client's clear. A cleared
   // entry keeps its place and time and reads the cleared sentence, dimmed.
   const keyOf = (p) => p.id || ('at-' + p.at);
-  const shownEntries = () => (task.progress || [])
+  // ── OLDER ENTRIES (2.369.204, the owner 2026-10-03): the live list holds the newest 500; older ones are read
+  // page by page from the archive (GET /api/tasks/:id/progress?before=) as the reader nears the END of the list
+  // (newest first: older = further down) — a sentinel row one screen ahead becomes a skeleton row while a page is
+  // read, and its rows join the same keyed paint (Find, Select…, Clear selected act on them too). No button. ──
+  const older = { list: [], done: false, busy: false, gen: 0, pending: 0, clearedAt: (task && task.archiveClearedAt) || 0 };
+  const allEntries = () => older.list.concat(task.progress || []);
+  const moreEl = document.createElement('div');
+  moreEl.className = 'task-log-older';
+  moreEl.setAttribute('aria-hidden', 'true');
+  const checkMore = () => {
+    const body = root.querySelector('.task-log-body');
+    if (!body || state.tab !== 'activity' || !moreEl.isConnected || older.busy || older.done) return;
+    if (moreEl.getBoundingClientRect().top - body.getBoundingClientRect().bottom < body.clientHeight) loadOlder();
+  };
+  /** the next page below the list — or, with `want`, the archive rows already held re-read (a clear reached them) */
+  const loadOlder = async (want = 0) => {
+    if (older.busy) { if (want) older.pending = Math.max(older.pending, want); return; }
+    if (older.done && !want) return;
+    older.busy = true;
+    moreEl.classList.add('task-log-skel');
+    const g0 = older.gen;
+    const got = [];
+    let more = true, before = want ? ((task.progress || [])[0] || {}).at || '' : (allEntries()[0] || {}).at || '';
+    try {
+      do {
+        const r = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/progress?before=${encodeURIComponent(before)}&limit=100`).then((x) => (x.ok ? x.json() : null));
+        if (g0 !== older.gen) return;
+        if (!r || !Array.isArray(r.entries)) return;
+        got.push(...r.entries);
+        more = !!r.more;
+        if (r.entries.length) before = r.entries[r.entries.length - 1].at;
+      } while (want && more && got.length < want);
+      const have = new Set((want ? (task.progress || []) : allEntries()).map(keyOf));
+      const fresh = got.filter((p) => p && !have.has(keyOf(p)) && have.add(keyOf(p))).reverse();
+      older.list = want ? fresh : fresh.concat(older.list);
+      older.done = !more;
+    } catch { /* offline: the next scroll asks again */ } finally {
+      older.busy = false;
+      moreEl.classList.remove('task-log-skel');
+      if (older.pending) { const n = older.pending; older.pending = 0; setTimeout(() => loadOlder(n), 0); }
+    }
+    repaintActivity();
+    requestAnimationFrame(checkMore);
+  };
+  root.addEventListener('scroll', checkMore, true);
+  const shownEntries = () => allEntries()
     .filter((p) => (!state.session || p.session === state.session) && (isCleared(p) ? matches(clearedText()) : (matches(p.note) || matches(p.detail))))
     .slice().reverse();
   /** the Find text matches this entry's DETAIL but not its note: the row alone would not say why it is shown */
@@ -279,7 +324,7 @@ export function openTaskLog(app, taskId, { tab, syncId } = {}) {
     selBar.style.display = on ? '' : 'none';
     if (!on) return;
     // the picks that still exist; the ones SHOWN are the ones a clear acts on
-    const live = new Set((task.progress || []).map(keyOf));
+    const live = new Set(allEntries().map(keyOf));
     for (const k of [...state.picked]) if (!live.has(k)) state.picked.delete(k);
     const clearable = entries.filter((p) => !isCleared(p));
     const shownPicked = entries.filter((p) => state.picked.has(keyOf(p)) && !isCleared(p));
@@ -323,7 +368,7 @@ export function openTaskLog(app, taskId, { tab, syncId } = {}) {
     for (const c of [...body.children]) {
       if (c.dataset && c.dataset.pid) existing.set('p:' + c.dataset.pid, c);
       else if (c.dataset && c.dataset.day) existing.set('d:' + c.dataset.day, c);
-      else c.remove(); // the empty hint (or a stray node from another tab)
+      else if (c !== moreEl) c.remove(); // the empty hint (or a stray node from another tab)
     }
     if (!entries.length) {
       for (const n of existing.values()) n.remove();
@@ -331,6 +376,7 @@ export function openTaskLog(app, taskId, { tab, syncId } = {}) {
       e.className = 'empty-hint';
       e.textContent = t('No matching entries');
       body.appendChild(e);
+      placeMore(body);
       return;
     }
     const perDay = new Map();
@@ -362,6 +408,13 @@ export function openTaskLog(app, taskId, { tab, syncId } = {}) {
       if (n !== slot) body.insertBefore(n, slot);
       prev = n;
     }
+    placeMore(body);
+  };
+  /** the sentinel stays the list's last row until the archive is read to its start */
+  const placeMore = (body) => {
+    if (older.done) { moreEl.remove(); return; }
+    if (body.lastElementChild !== moreEl) body.appendChild(moreEl);
+    requestAnimationFrame(checkMore);
   };
   const repaintActivity = () => {
     const body = root.querySelector('.task-log-body');
@@ -386,7 +439,7 @@ export function openTaskLog(app, taskId, { tab, syncId } = {}) {
   const entryOf = (el) => {
     const row = el && el.closest && el.closest('.task-log-act');
     const k = row && row.dataset.pid;
-    return k ? (task.progress || []).find((p) => keyOf(p) === k) || null : null;
+    return k ? allEntries().find((p) => keyOf(p) === k) || null : null;
   };
   // ONE delegated set of listeners on the window's root (rows come and go; the root stays)
   root.addEventListener('click', (e) => {
@@ -673,7 +726,7 @@ export function openTaskLog(app, taskId, { tab, syncId } = {}) {
   const copyMarkdown = () => {
     let md = '';
     if (state.tab === 'activity') {
-      const entries = (task.progress || [])
+      const entries = allEntries()
         .filter((p) => (!state.session || p.session === state.session) && (matches(p.note) || matches(p.detail)));
       md = entries.map((p) => {
         const who = p.session ? ` _(${sessionLabel(p.session)})_` : '';
@@ -696,7 +749,16 @@ export function openTaskLog(app, taskId, { tab, syncId } = {}) {
   // scroll position are never rebuilt under the user (another client's clear lands mid-selection).
   // A change of the session set behind the filter, or the Backlog tab, still re-renders whole.
   const refresh = () => {
+    const prevLive = (task && task.progress) || [];
     task = sidebar._taskById(taskId);
+    if (task) {
+      // entries that left the live list were MOVED to the archive: they stay where the reader saw them
+      const now = new Set((task.progress || []).map(keyOf)), held = new Set(older.list.map(keyOf)), first = (task.progress || [])[0];
+      const moved = prevLive.filter((p) => !now.has(keyOf(p)) && !held.has(keyOf(p)) && (!first || p.at <= first.at));
+      if (moved.length) older.list = older.list.concat(moved);
+      // a clear reached the archive: the archive rows this window holds are read again (patched in place by key)
+      if ((task.archiveClearedAt || 0) !== older.clearedAt) { older.clearedAt = task.archiveClearedAt || 0; older.gen++; if (older.list.length) loadOlder(older.list.length); }
+    }
     const body = root.querySelector('.task-log-body');
     if (!task || state.tab !== 'activity' || !body) { render(); return; }
     const sessKeys = [...new Set((task.progress || []).map((p) => p.session).filter(Boolean))].sort().join('\u0000');

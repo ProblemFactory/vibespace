@@ -1133,6 +1133,8 @@ body.wm-dragging .window iframe, body.wm-dragging .window canvas, body.wm-draggi
 
 /* Resize Handles */
 .resize-handle { position: absolute; z-index: 10; touch-action: none; } /* lane-drag-release: a touch resize is pointermove, never a pan */
+/* lane app-fit-fixed: a window whose app FIXES its size (WindowManager.setFixedSize) is not resizable — no handles, no maximize */
+.window.window-fixed-size > .resize-handle, .window.window-fixed-size .win-maximize { display: none; }
 .resize-n { top: -3px; left: 8px; right: 8px; height: 6px; cursor: n-resize; }
 .resize-s { bottom: -3px; left: 8px; right: 8px; height: 6px; cursor: s-resize; }
 .resize-e { right: -3px; top: 8px; bottom: 8px; width: 6px; cursor: e-resize; }
@@ -2098,6 +2100,7 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
     left: 0 !important; top: 0 !important;
     width: 100% !important; height: 100% !important;
     border-radius: 0; min-width: 0 !important; min-height: 0 !important; border: none; /* !important: a window's own minimum (desktop-app, 2.369.158) is an inline style — on a phone the window IS the screen and the picture scales instead */
+    max-width: none !important; max-height: none !important; /* lane app-fit-fixed: a fixed-size app's inline max — the window IS the screen here too */
     box-shadow: none; display: none !important;
     position: relative !important;
   }
@@ -4763,6 +4766,10 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .chan-list-end.chan-row-skeleton { height: 28px; margin: 4px 8px; border-radius: 6px; background: linear-gradient(90deg, rgba(127,127,127,.10) 25%, rgba(127,127,127,.22) 50%, rgba(127,127,127,.10) 75%); background-size: 200% 100%; animation: chan-skel 1.2s linear infinite; }
 @keyframes chan-skel { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 @media (prefers-reduced-motion: reduce) { .chan-list-end.chan-row-skeleton { animation: none; } }
+/* 2.369.204: the Task log's older entries — a sentinel at the list's end while idle, a skeleton row while a page of the archive is read */
+.task-log-older { height: 2px; }
+.task-log-older.task-log-skel { height: 28px; margin: 4px 8px; border-radius: 6px; background: linear-gradient(90deg, rgba(127,127,127,.10) 25%, rgba(127,127,127,.22) 50%, rgba(127,127,127,.10) 75%); background-size: 200% 100%; animation: chan-skel 1.2s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .task-log-older.task-log-skel { animation: none; } }
 /* the search dialog */
 .chan-search-row { display: flex; gap: 6px; align-items: center; }
 .chan-search-row input { flex: 1; min-width: 0; }
@@ -5258,6 +5265,25 @@ a.chanmsg-file:hover .chanmsg-att-dl { color: var(--accent); }
 .chan-prop-withdrawn .chan-prop-text { color: var(--text-dim); }
 .chan-prop-who { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chan-prop-when { flex-shrink: 0; margin: 0; }
+/* lane channel-window-tidy: in a conversation window a DECIDED proposal is ONE line (its card's first row — chip · drafter ·
+   when · recipients · first words); a click opens the card in place. More than three ⇒ the settled ones fold under
+   "Handled proposals (N)", which opens in place too */
+.chan-prop-lined > .chan-prop-head { display: none; }
+.chan-prop-lined.chan-prop-shut { padding: 2px 8px; border-color: transparent; background: color-mix(in srgb, var(--text) 3%, transparent); }
+.chan-prop-lined.chan-prop-shut > :not(.chan-prop-line) { display: none; }
+.chan-prop-line { display: flex; align-items: center; gap: 6px; min-width: 0; min-height: 24px; font-size: 11px; color: var(--text-secondary); cursor: pointer; white-space: nowrap; overflow: hidden; border-radius: var(--radius-sm); }
+.chan-prop-line:hover { color: var(--text); }
+.chan-prop-line:focus-visible, .chanwin-outbox-fold:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.chan-prop-line-chev { flex-shrink: 0; color: var(--text-dim); transition: transform var(--transition); }
+.chan-prop-lined:not(.chan-prop-shut) > .chan-prop-line .chan-prop-line-chev, .chanwin-outbox-foldopen > .chanwin-outbox-fold .chan-prop-line-chev { transform: rotate(90deg); }
+.chan-prop-line-who { flex: 0 1 auto; min-width: 0; max-width: 28%; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+.chan-prop-line-at { flex-shrink: 0; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.chan-prop-line-to { flex: 0 1 auto; min-width: 0; max-width: 36%; overflow: hidden; text-overflow: ellipsis; }
+.chan-prop-line-text { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text-dim); }
+.chanwin-outbox-fold { display: flex; align-items: center; gap: 6px; min-height: 24px; padding: 0 8px; font-size: 11px; color: var(--text-secondary); cursor: pointer; border-radius: var(--radius-sm); }
+.chanwin-outbox-fold:hover { background: var(--bg-hover); color: var(--text); }
+.chanwin-outbox:not(.chanwin-outbox-foldopen) > .chan-prop-infold { display: none; }
+@media (hover: none) and (pointer: coarse), (max-width: 480px) { .chan-prop-line, .chanwin-outbox-fold { min-height: 36px; } }
 /* r6 verify F4: the envelope wraps — one fact per line, nothing clipped (a long subject pushed the Cc out of view) */
 .chan-prop-where { font-size: 11px; min-width: 0; overflow-wrap: anywhere; }
 .chan-prop-env { display: flex; align-items: baseline; gap: 6px; font-size: 11px; line-height: 1.4; min-width: 0; }
@@ -5535,7 +5561,12 @@ label.chan-cap-row { cursor: default; }
 .browser-live-tabchip { --av-size: 16px; --av-surface: var(--bg-toolbar); display: inline-flex; align-items: center; gap: 5px; max-width: 240px; padding: 2px 4px 2px 5px; font-size: 11px; color: var(--text-secondary); border: 1px solid transparent; border-radius: var(--radius-sm); white-space: nowrap; flex: none; user-select: none; }
 .browser-live-tabchip.switchable { cursor: pointer; }
 .browser-live-tabchip.switchable:hover { background: var(--hover-overlay); }
+.browser-live-tabchip:not(.switchable):not(.active):not(.working) { color: var(--text-dim); } /* accept-fixes-strip F8: a chip a click does nothing on reads plainly — never like a clickable one */
+.browser-live-tabchip:not(.switchable) .browser-live-tabchip-mark { background: transparent; }
 .browser-live-tabchip.active { color: var(--text); background: var(--bg-window); border-color: var(--border); }
+.browser-live-tabchip.working { border-color: var(--accent); border-style: solid; box-shadow: inset 0 0 0 1px var(--accent); } /* accept-fixes F4: the tab the agent works on (solid) — apart from the one this view watches (dashed) */
+.browser-live-tabchip-here { color: var(--accent); font-weight: 600; white-space: nowrap; }
+.browser-live-tabchip-here:empty { display: none; }
 .browser-live-tabchip.watched { border-color: var(--accent); border-style: dashed; } /* lane browser-windows (U3): the tab THIS view watches (the agent's own stays .active) */
 .browser-live-watch-line { display: flex; align-items: center; gap: 8px; padding: 3px 8px; flex-shrink: 0; font-size: 11px; line-height: 1.4; color: var(--text); background: color-mix(in srgb, var(--accent) 10%, transparent); border-bottom: 1px solid var(--border); overflow-wrap: anywhere; } /* lane browser-windows: the watched tab / the tab on show that paints nothing (U0b) */
 .browser-live-watch-text { flex: 1 1 auto; min-width: 0; }
@@ -6181,6 +6212,9 @@ label.chan-cap-row { cursor: default; }
 .mounts-host-top > .mounts-name { flex: 1 1 auto; min-width: 3em; }
 .mounts-host-top > .mounts-row-actions { flex: 0 1 auto; flex-wrap: wrap; margin-left: auto; min-width: 0; }
 .mounts-exit-line { white-space: normal; overflow-wrap: anywhere; display: block; }
+/* lane exit-see-whole: the last-run line is a button — it opens the machine's command list */
+button.mounts-exit-last { width: 100%; box-sizing: border-box; margin: 0; padding-top: 0; padding-right: 0; padding-bottom: 0; border: 0; background: none; font-family: inherit; line-height: inherit; text-align: left; cursor: pointer; }
+button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: underline; }
 .agents-mach-sum:has(.agents-mach-line2) { flex-wrap: wrap; }
 .agents-mach-line2 { flex-basis: 100%; order: 10; padding-left: 16px; white-space: normal; font-size: 10px; color: var(--text-dim); }
 .agents-mach-line2[data-dial-state="refused"], .agents-mach-line2[data-dial-state="auth-fail"] { color: var(--red); }
@@ -6218,6 +6252,10 @@ label.chan-cap-row { cursor: default; }
 .exit-runs-out { display: flex; flex-direction: column; gap: 2px; padding: 4px 0 4px 2px; }
 .exit-runs-flags, .exit-runs-stream, .exit-runs-cut, .exit-runs-none { font-size: 10px; color: var(--text-dim); }
 .exit-runs-pre { margin: 0; padding: 5px 8px; font-family: var(--font-mono, monospace); font-size: 11px; line-height: 1.45; color: var(--text); background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; user-select: text; }
+/* lane exit-see-whole (design 013 piece 1b): a row opens with the WHOLE command as itself (its lines kept, wrapped) and Copy */
+.exit-runs-cmdbox { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+.exit-runs-cmd-all { align-self: stretch; margin: 0; padding: 5px 8px; font-family: var(--font-mono, monospace); font-size: 11px; line-height: 1.45; color: var(--text); background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; user-select: text; }
+.exit-runs-copy { font-size: 11px; padding: 2px 8px; }
 @media (max-width: 768px) { .exit-runs-body { min-width: 0; } .exit-runs-sum { min-height: 36px; } }
 .ut-action-exit { width: auto; padding: 0 8px; font-size: 11px; font-weight: 600; border-radius: var(--radius-sm); }
 /* naive-user N-ask: the answer is its own line under the command, at full strength (never inside the hover-dimmed .ut-actions) */

@@ -279,6 +279,203 @@ console.log('§5 the HELD-BYTES CAP (2026-09-22, hole A of the r6 verify): a vie
 for (const s of held) s.destroy();
 vnc.close(); srv.close();
 
+// ── design 014 D1 (lane desktop-vnc-native): a Windows / macOS machine's WHOLE DESKTOP through the REAL access layer
+// (src/server/desktop-access.js) and the REAL bridge — the machine is a fake device whose tcpForward pipes into a FAKE
+// RFB server on this host (VNC auth, ARD auth); nothing contacts a real machine ──
+console.log('\n§D014 a machine\'s whole desktop: fake VNC-auth and ARD-auth servers behind a fake tcpForward');
+{
+  const ACC = require(path.join(repo, 'src/server/desktop-access.js'));
+  const A = require(path.join(repo, 'src/desktop-apps.js'));
+  const crypto = require('crypto');
+  const fs = require('fs');
+  const PASSWORD = 'Sekr3t!x';
+  const u32 = (n) => { const b = Buffer.alloc(4); b.writeUInt32BE(n, 0); return b; };
+  const SERVER_INIT = Buffer.concat([Buffer.from([0x05, 0x00, 0x03, 0x20]), Buffer.from([32, 24, 0, 1, 0, 255, 0, 255, 0, 255, 16, 8, 0, 0, 0, 0]), u32(7), Buffer.from('Mac-one')]);
+  /** The server half of the handshake: version → types → the auth exchange (any answer accepted) → OK → ServerInit. */
+  function fakeRfb(kind) {
+    const seen = { conns: 0, closed: 0, fromClient: [], sockets: [] };
+    const server = net.createServer((s) => {
+      seen.conns++; seen.sockets.push(s);
+      let stage = 0, buf = Buffer.alloc(0);
+      s.on('error', () => { });
+      s.on('close', () => { seen.closed++; });
+      s.write(kind === 'ard' ? 'RFB 003.889\n' : 'RFB 003.008\n');
+      s.on('data', (d) => {
+        seen.fromClient.push(Buffer.from(d)); buf = Buffer.concat([buf, d]);
+        if (stage === 0 && buf.length >= 12) { buf = buf.subarray(12); stage = 1; s.write(Buffer.from(kind === 'ard' ? [1, 30] : [1, 2])); }
+        if (stage === 1 && buf.length >= 1) { buf = buf.subarray(1); stage = 2; s.write(kind === 'ard' ? Buffer.concat([Buffer.from([0, 2, 0, 16]), Buffer.alloc(16, 7), Buffer.alloc(16, 9)]) : Buffer.alloc(16, 5)); }
+        const need = kind === 'ard' ? 128 + 16 : 16;
+        if (stage === 2 && buf.length >= need) { buf = buf.subarray(need); stage = 3; s.write(u32(0)); }
+        if (stage === 3 && buf.length >= 1) { buf = buf.subarray(1); stage = 4; s.write(SERVER_INIT); }
+      });
+    });
+    return new Promise((r) => server.listen(0, '127.0.0.1', () => r({ server, port: server.address().port, seen })));
+  }
+  /** A fake paired device: `platform`, a link that can drop, tcp-connect to 127.0.0.1:<port> of this host. */
+  function fakeDevice(platform) {
+    const chans = new Set();
+    const dm = {
+      up: true, opened: 0,
+      status: () => ({ connected: dm.up, info: dm.up ? { platform, capabilities: ['desktop-serve'] } : null }),
+      desktopServe: async () => ({ ok: true }),
+      tcpForward: async (port) => {
+        if (!dm.up) throw new Error('link down');
+        const sock = net.connect({ host: '127.0.0.1', port });
+        await new Promise((res, rej) => { sock.once('connect', res); sock.once('error', rej); });
+        dm.opened++;
+        const h = { onData: null, onClose: null, write: (b) => sock.write(b), close: () => { chans.delete(h); sock.destroy(); } };
+        sock.on('data', (b) => h.onData?.(b)); sock.on('close', () => { chans.delete(h); h.onClose?.(); }); sock.on('error', () => { });
+        chans.add(h); return h;
+      },
+      /** the link drops the way src/agentd/client.js drops it: every channel's onClose, THEN disconnected */
+      drop: () => { for (const h of [...chans]) { chans.delete(h); try { h.onClose?.(); } catch { } } dm.up = false; },
+    };
+    return dm;
+  }
+  const vncSrv = await fakeRfb('vnc'), ardSrv = await fakeRfb('ard');
+  const win = fakeDevice('win32'), mac = fakeDevice('darwin'), lin = fakeDevice('linux');
+  const hosts = (map) => ({ get: (h) => (map[h] ? { id: h } : null), isLocal: (h) => !h || h === 'local', deviceBounded: async (h) => { if (!map[h]) throw new Error('unknown'); return map[h]; }, list: () => Object.keys(map).map((id) => ({ id, name: id, transport: 'dial', online: true })), linkState: () => 'online', connectedDevice: (h) => (map[h] && map[h].up ? map[h] : null) });
+  const accLogs = [];
+  const aLog = { log: (m) => accLogs.push(String(m)), warn: (m) => accLogs.push(String(m)) };
+  // ONE port for the fake 5900 per layer: the Windows box answers VNC auth, the Mac ARD (two layers, two fake ports)
+  const accW = ACC.create({ hosts: hosts({ 'win-a': win, 'lin-a': lin }), install: false, log: aLog, vncPort: vncSrv.port, probeMs: 1500 });
+  const accM = ACC.create({ hosts: hosts({ 'mac-a': mac }), install: false, log: aLog, vncPort: ardSrv.port, probeMs: 1500 });
+  const accOf = (id) => (A.machineDesktopHost(id) === 'mac-a' ? accM : accW);
+  const bLogs = [];
+  const bLog = { log: (m) => bLogs.push(String(m)), warn: (m) => bLogs.push(String(m)) };
+  const mkBridge = (DSmod, opts = {}) => DSmod.create({ auth: { requestAuthed: () => true }, log: bLog, pingMs: 5000,
+    resolveTarget: (id) => accOf(id).machineDesktopTarget(id), forwardPort: (h, p) => (h === 'mac-a' ? accM : accW).forwardPort(h, p), ...opts });
+  const bridge = mkBridge(DS, { upstreamWhy: (id) => accOf(id).machineDesktopGone(id) });
+  const hsrv = http.createServer((q, s) => { s.statusCode = 404; s.end(); });
+  let cur = bridge;
+  hsrv.on('upgrade', (req, socket, head) => cur.handleUpgrade(req, socket, head, cur.upgradeId(new URL(req.url, 'http://x').pathname)));
+  await new Promise((r) => hsrv.listen(0, '127.0.0.1', r));
+  const hport = hsrv.address().port;
+  /** A browser-side RFB client over the bridge: version, the type, the auth answer, ClientInit — then waits for ServerInit. */
+  function client(id, { headers = {}, kind = 'vnc' } = {}) {
+    const ws = new WebSocket(`ws://127.0.0.1:${hport}/api/desktop/${id}/stream`, { headers });
+    const got = []; let status = null, stage = 0;
+    ws.on('unexpected-response', (q, r) => { status = `${r.statusCode} ${r.statusMessage}`; try { q.destroy(); } catch { } ws.terminate(); });
+    ws.on('error', () => { });
+    ws.on('message', (m) => {
+      got.push(Buffer.from(m)); const all = Buffer.concat(got);
+      if (stage === 0 && all.length >= 12) { stage = 1; ws.send(Buffer.from('RFB 003.008\n')); }
+      if (stage === 1 && all.length >= 14) { stage = 2; ws.send(Buffer.from([kind === 'ard' ? 30 : 2])); }
+      if (stage === 2 && all.length >= (kind === 'ard' ? 50 : 30)) { stage = 3; ws.send(kind === 'ard' ? Buffer.concat([crypto.createHash('sha512').update(PASSWORD).digest(), Buffer.alloc(64, 1), Buffer.alloc(16, 2)]) : crypto.createHash('sha256').update(PASSWORD).digest().subarray(0, 16)); } // stands in for the DES / ARD answer
+      if (stage === 3 && all.length >= (kind === 'ard' ? 54 : 34)) { stage = 4; ws.send(Buffer.from([1])); }
+    });
+    return { ws, got: () => Buffer.concat(got), status: () => status, closed: new Promise((r) => ws.on('close', (code, reason) => r({ code, reason: String(reason) }))) };
+  }
+  const until = async (fn, ms = 3000) => { const t = Date.now() + ms; while (Date.now() < t) { if (fn()) return true; await sleep(20); } return false; };
+
+  // the PROBE (the launcher's question) — through tcpForward, never a new op
+  const rows = await accW.machines();
+  const winRow = rows.find((r) => r.hostId === 'win-a'), linRow = rows.find((r) => r.hostId === 'lin-a');
+  ok('the launcher\'s rows: the Windows box probed ⇒ desktop_ready (VNC password); the Linux row carries no probe and keeps its verdict', winRow && winRow.code === 'desktop_ready' && winRow.auth === 'password' && winRow.vnc && winRow.vnc.server === '003.008' && linRow && !('vnc' in linRow) && linRow.code === 'ready', { winRow, linRow });
+  const macOpen = await accM.openMachineDesktop('mac-a');
+  ok('a Mac whose Screen Sharing offers ARD only ⇒ open answers auth ard (the Mac user\'s name + password)', macOpen.ok && macOpen.auth === 'ard' && macOpen.type === 30 && macOpen.id === 'machine-desktop.mac-a', macOpen);
+  let linErr = null; try { await accW.openMachineDesktop('lin-a'); } catch (e) { linErr = e; }
+  ok('a Linux machine is refused not_desktop_machine (its apps keep their own windows)', linErr && linErr.code === 'not_desktop_machine', linErr && linErr.message);
+  const deadVnc = ACC.create({ hosts: hosts({ 'win-b': fakeDevice('win32') }), install: false, log: aLog, vncPort: 1, probeMs: 800 });
+  let noVnc = null; try { await deadVnc.openMachineDesktop('win-b'); } catch (e) { noVnc = e; }
+  ok('nothing listening on the machine\'s 5900 ⇒ no_vnc by name with the probe (no_listener)', noVnc && noVnc.code === 'no_vnc' && noVnc.vnc && noVnc.vnc.code === 'no_listener', noVnc && { code: noVnc.code, vnc: noVnc.vnc });
+
+  // RELAYED: the VNC-auth handshake end to end, through the bridge and the forward
+  await accW.openMachineDesktop('win-a');
+  const c1 = client('machine-desktop.win-a');
+  ok('VNC auth: the whole handshake is relayed — the greeting, the types [2], the challenge, OK, ServerInit with the desktop\'s name', await until(() => c1.got().length >= 34 + SERVER_INIT.length) && c1.got().subarray(34).equals(SERVER_INIT));
+  // TWO WINDOWS, ONE FORWARD
+  const c2 = client('machine-desktop.win-a');
+  await until(() => c2.got().length >= 34 + SERVER_INIT.length);
+  const fw = accW.forwards().filter((f) => f.hostId === 'win-a');
+  ok('two windows on one machine share ONE hub forward (refs 2, two connections through it)', fw.length === 1 && fw[0].refs === 2 && fw[0].remotePort === vncSrv.port && fw[0].connections === 2, fw);
+  // the sieve: a sign-in type it cannot follow ⇒ opaque, every later frame counted (never reaps a live person)
+  const sv = DS.rfbInputSieve();
+  sv.feed(Buffer.from('RFB 003.008\n')); sv.feed(Buffer.from([30]));
+  const after = sv.feed(Buffer.alloc(144, 3));
+  const svVnc = DS.rfbInputSieve(); svVnc.feed(Buffer.from('RFB 003.008\n')); svVnc.feed(Buffer.from([2])); const vncAfter = svVnc.feed(Buffer.alloc(16, 3));
+  ok('the input sieve turns OPAQUE on ARD (type 30: every later frame counts as input) and still follows VNC auth (type 2: the 16-byte answer is not input)', after >= 1 && vncAfter === 0, { after, vncAfter });
+  // ARD relayed
+  await accM.openMachineDesktop('mac-a');
+  const c3 = client('machine-desktop.mac-a', { kind: 'ard' });
+  ok('ARD auth (Apple 3.889, type 30): the DH parameters and the 144-byte answer are relayed, then OK and ServerInit', await until(() => c3.got().length >= 54 + SERVER_INIT.length) && c3.got().subarray(54).equals(SERVER_INIT) && ardSrv.seen.fromClient.reduce((a, b) => a + b.length, 0) >= 12 + 1 + 144 + 1);
+  // THE PASSWORD NEVER IN A LOG, A RECORD OR AN AUDIT LINE: the sign-in happens in the page; the hub relays bytes
+  const answerHex = crypto.createHash('sha256').update(PASSWORD).digest().subarray(0, 16).toString('hex');
+  const everything = JSON.stringify({ accLogs, bLogs, fw: accW.forwards(), close: bridge.lastCloseOf('machine-desktop.win-a'), stats: bridge.stats() });
+  ok('the password (and the answer derived from it) appear in no hub log line, forward record or close record', !everything.includes(PASSWORD) && !everything.toLowerCase().includes(answerHex) && accLogs.length + bLogs.length > 0, { lines: accLogs.length + bLogs.length });
+
+  // AN AGENT TOKEN IS REFUSED BY NAME — a cookie-only request (the control) passes
+  const bearer = client('machine-desktop.win-a', { headers: { Authorization: 'Bearer vsst_abc123' } });
+  const bc = await bearer.closed;
+  ok('an agent token on the upgrade ⇒ 403 human_only, nothing relayed, the refusal named in the log', /^403 .*human_only/.test(bearer.status() || '') && bearer.got().length === 0 && bLogs.some((l) => /machine-desktop\.win-a: an agent token asked for a machine's whole desktop — refused \(human_only\)/.test(l)), { status: bearer.status(), bc });
+  const tokUrl = new WebSocket(`ws://127.0.0.1:${hport}/api/desktop/machine-desktop.win-a/stream?token=vsst_x`); let tokStatus = null;
+  tokUrl.on('unexpected-response', (q, r) => { tokStatus = r.statusCode; try { q.destroy(); } catch { } tokUrl.terminate(); }); tokUrl.on('error', () => { });
+  await new Promise((r) => tokUrl.on('close', r));
+  ok('a token in the url is refused the same way', tokStatus === 403, tokStatus);
+  ok('CONTROL: the same upgrade with the cookie only is relayed (the first two windows above)', c1.ws.readyState === 1 && c2.ws.readyState === 1);
+  const dsSrc = fs.readFileSync(path.join(repo, 'src/server/desktop-stream.js'), 'utf8');
+  const humanLine = dsSrc.split('\n').find((l) => l.includes('if (target.humanOnly && bearerOf(req))'));
+  const noHuman = MUTK.load('src/server/desktop-stream.js', dsSrc.replace(humanLine, '    // (pre-fix: no human_only rule)'), 'nohuman');
+  cur = mkBridge(noHuman);
+  const leak = client('machine-desktop.win-a', { headers: { Authorization: 'Bearer vsst_abc123' } });
+  ok('CONTROL: a bridge copy without the human_only line relays the agent\'s socket (the rule above is what refuses it)', !!humanLine && await until(() => leak.got().length >= 12));
+  leak.ws.close(); cur = bridge;
+  await sleep(300); // the control's own connection on the machine closes first (counted below otherwise)
+
+  // CLOSES, EITHER SIDE: the browser leaves ⇒ the server side closes; the server closes ⇒ the browser is told
+  const closedBefore = vncSrv.seen.closed;
+  c2.ws.close(1000, 'bye');
+  ok('the browser closing one window closes its own connection on the machine (the other window stays)', await until(() => vncSrv.seen.closed === closedBefore + 1) && c1.ws.readyState === 1, { closedBefore, now: vncSrv.seen.closed });
+  await until(() => (accW.forwards().find((f) => f.hostId === 'win-a') || {}).refs === 1);
+  {
+    // CONTROL: an access-layer copy without the `end` line keeps the machine-side connection of a closed window open
+    const accSrc = fs.readFileSync(path.join(repo, 'src/server/desktop-access.js'), 'utf8');
+    const endLine = accSrc.split('\n').find((l) => l.includes("sock.on('end', () => { try { h.close(); }"));
+    const ACC0 = MUTK.load('src/server/desktop-access.js', accSrc.replace(endLine, '        // (pre-fix: half-open until the last viewer)'), 'noend');
+    const w0 = fakeDevice('win32');
+    const acc0 = ACC0.create({ hosts: hosts({ 'win-c': w0 }), install: false, log: aLog, vncPort: vncSrv.port, probeMs: 1500 });
+    await acc0.openMachineDesktop('win-c');
+    const b0 = DS.create({ auth: { requestAuthed: () => true }, log: bLog, pingMs: 5000, resolveTarget: (id) => acc0.machineDesktopTarget(id), forwardPort: (h, p2) => acc0.forwardPort(h, p2) });
+    cur = b0;
+    const x1 = client('machine-desktop.win-c'), x2 = client('machine-desktop.win-c');
+    await until(() => x1.got().length >= 34 + SERVER_INIT.length && x2.got().length >= 34 + SERVER_INIT.length);
+    const cb = vncSrv.seen.closed;
+    x2.ws.close(1000, 'bye');
+    await sleep(400);
+    ok('CONTROL: without the `end` line the closed window\'s connection on the machine stays open until the last viewer leaves', !!endLine && vncSrv.seen.closed === cb, { cb, now: vncSrv.seen.closed });
+    x1.ws.close(); await sleep(50); acc0.shutdown(); cur = bridge;
+  }
+  ok('…and releases its forward reference (refs 2 → 1)', (accW.forwards().find((f) => f.hostId === 'win-a') || {}).refs === 1, accW.forwards());
+  const c4 = client('machine-desktop.win-a');
+  await until(() => c4.got().length >= 34 + SERVER_INIT.length);
+  vncSrv.seen.sockets[vncSrv.seen.sockets.length - 1].destroy();
+  const c4c = await c4.closed;
+  await sleep(30);
+  ok('the machine\'s server closing ⇒ the browser side closes, named "the VNC server closed its socket" (server-closed)', c4c && (bridge.lastCloseOf('machine-desktop.win-a') || {}).code === 'server-closed', bridge.lastCloseOf('machine-desktop.win-a'));
+
+  // OFFLINE MID-VIEW: the machine's link drops ⇒ the window closes NAMING it
+  const c1c = c1.closed;
+  win.drop();
+  await c1c; await sleep(30);
+  const lc = bridge.lastCloseOf('machine-desktop.win-a');
+  ok('the machine going offline mid-view closes the window BY NAME: "win-a went offline" (machine-offline)', lc && lc.why === 'win-a went offline' && lc.code === 'machine-offline' && bLogs.some((l) => /machine-desktop\.win-a: closed \(win-a went offline\)/.test(l)), lc);
+  ok('…and the target is gone while it is offline (a reconnect is refused 404, never a stale socket)', accW.machineDesktopTarget('machine-desktop.win-a') === null);
+  // CONTROL: the same drop through a bridge without `upstreamWhy` says only "server closed"
+  win.up = true;
+  await accW.openMachineDesktop('win-a');
+  const plain = mkBridge(DS); cur = plain;
+  const c5 = client('machine-desktop.win-a');
+  await until(() => c5.got().length >= 34 + SERVER_INIT.length);
+  const c5c = c5.closed; win.drop(); await c5c; await sleep(30);
+  ok('CONTROL: without upstreamWhy the same drop is only "server-closed" (the naming above is the new rule)', (plain.lastCloseOf('machine-desktop.win-a') || {}).code === 'server-closed', plain.lastCloseOf('machine-desktop.win-a'));
+  cur = bridge;
+  for (const c of [c3]) c.ws.close();
+  await sleep(50);
+  accW.shutdown(); accM.shutdown(); deadVnc.shutdown();
+  hsrv.close(); vncSrv.server.close(); ardSrv.server.close();
+  for (const s of [...vncSrv.seen.sockets, ...ardSrv.seen.sockets]) s.destroy();
+}
+
 // ── tree: THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──
 // Measured HERE, while every patched copy this run made still exists (the exit
 // handlers remove them — a census taken after exit passes on the pre-fix

@@ -135,7 +135,9 @@
  * 200-with-nothing would be a silent failure of a user action.
  */
 const express = require('express');
-const { streamKindOf, scaleChoiceVerdict, INSTALL_WHATS, relaunchLeaseVerdict } = require('../desktop-apps');
+const { streamKindOf, scaleChoiceVerdict, INSTALL_WHATS, relaunchLeaseVerdict, TIGHTVNC, machineDesktopId } = require('../desktop-apps');
+/** design 014 D1: the whole-desktop refusals' statuses (by name, like every code below). */
+const D014_STATUS = Object.freeze({ human_only: 403, no_vnc: 409, not_desktop_machine: 409, not_windows: 409, no_admin: 409, run_failed: 409, empty: 400, too_long: 400, multi_line: 400, hidden_chars: 400 });
 const { openWithVerdict, installSpecFor, FONTS_ID } = require('../office-open'); // §7.9: the ONE open-with verdict
 const router = express.Router();
 
@@ -171,7 +173,7 @@ function fail(res, e) {
       || code === 'machine-mismatch' || code === 'app-absent' || code === 'still-absent' || code === 'app-asked' || code === 'lease' ? 409
       : code === 'agent_forbidden' ? 403 : code === 'not_live' ? 404 : code === 'bad_principal' || code === 'bad_mode' || code === 'share_local_only' ? 400
       : code === 'no-engine' || code === 'xpra-ui-unavailable' || code === 'host_unavailable' || code === 'install_link_lost' || code === 'host-unreachable' ? 503 : code === 'install_timeout' ? 504 : 500;
-  res.status(status).json({ error: String(e?.message || e), code, ...(e && e.plan ? { plan: e.plan } : {}), ...(e && e.remedy ? { remedy: e.remedy } : {}) });
+  res.status(D014_STATUS[code] || status).json({ error: String(e?.message || e), code, ...(e && e.plan ? { plan: e.plan } : {}), ...(e && e.remedy ? { remedy: e.remedy } : {}), ...(e && e.vnc ? { vnc: e.vnc, platform: e.platform || null } : {}) });
 }
 const ID_RE = /^[A-Za-z0-9._-]{1,80}$/;
 
@@ -225,7 +227,8 @@ router.get('/api/desktop/install-plan', async (req, res) => {
   if (!ctx.access) return fail(res, { code: 'host_unavailable', message: 'the desktop access layer is not wired on this instance' });
   // §7.9: `what` = which install (absent = xpra, the call exactly as before); a closed set — anything else 400 by name
   const what = req.query.what == null || req.query.what === '' ? null : String(req.query.what);
-  if (what !== null && !INSTALL_WHATS.includes(what)) return fail(res, { code: 'bad-request', message: `unknown install ${JSON.stringify(what.slice(0, 40))} — one of ${INSTALL_WHATS.join(', ')}` });
+  if (what === TIGHTVNC.id && humanOnly(req, res)) return; // design 014 D1: the Windows one-time setup
+  if (what !== null && what !== TIGHTVNC.id && !INSTALL_WHATS.includes(what)) return fail(res, { code: 'bad-request', message: `unknown install ${JSON.stringify(what.slice(0, 40))} — one of ${INSTALL_WHATS.join(', ')}` });
   try { res.json(what === null ? await ctx.access.installPlan(host) : await ctx.access.installPlan(host, what)); } catch (e) { fail(res, e); }
 });
 /** THE STREAMED INSTALL (lane C2; §7.9 shares it for every `what`): the machine's slot asked BEFORE the stream starts
@@ -281,10 +284,47 @@ const officeDone = (host, what) => async (r) => {
 router.post('/api/desktop/install', async (req, res) => {
   const host = hostParam(req, res); if (!host) return;
   const what = req.body && req.body.what != null && req.body.what !== '' ? String(req.body.what) : 'xpra';
+  if (what === TIGHTVNC.id) { if (humanOnly(req, res)) return; return streamInstall(req, res, host, (o) => ctx.access.installPackage(host, { ...o, what, expectDigest: shownDigest(req) }), tightvncDone); } // design 014 D1
   if (!INSTALL_WHATS.includes(what)) return fail(res, { code: 'bad-request', message: `unknown install ${JSON.stringify(what.slice(0, 40))} — one of ${INSTALL_WHATS.join(', ')}` });
   if (what === 'xpra') return streamInstall(req, res, host, (o) => ctx.access.installXpra(host, { ...o, expectDigest: shownDigest(req) }), xpraDone);
   return streamInstall(req, res, host, (o) => ctx.access.installPackage(host, { ...o, what, expectDigest: shownDigest(req) }), officeDone(host, what));
 });
+// ── design 014 D1 (lane desktop-vnc-native): a Windows / macOS machine's WHOLE DESKTOP — people only ──
+/** An agent's token (a Bearer header, a token in the body or the url) is refused by name on every whole-desktop door:
+ *  the picture shows everything on that machine's screen, and a command started there runs as its logged-in user. */
+const isAnyBearer = (req) => /^Bearer\s+\S/i.test(String((req.headers && req.headers.authorization) || '')) || typeof (req.body && req.body.token) === 'string' || (req.query && (req.query.token != null || req.query.vsst != null)); // verify r2 L1: ?vsst= too — the stream guard (desktop-stream bearerOf) names it; the routes must match (an agent token in the query is refused, not only in the header / body / ?token=)
+function humanOnly(req, res) {
+  if (!isAnyBearer(req)) return false;
+  res.status(403).json({ error: 'a machine\'s whole desktop is the owner\'s — an agent token may not view it, run a command on it or set it up', code: 'human_only' });
+  return true;
+}
+const noAccess = (res) => fail(res, { code: 'host_unavailable', message: 'the desktop access layer is not wired on this instance' });
+/** The window's connect gate: the machine reached, Windows / macOS, its VNC server answering (else no_vnc by name). */
+router.post('/api/desktop/machine-desktop/connect', async (req, res) => {
+  if (humanOnly(req, res)) return;
+  const host = hostParam(req, res); if (!host) return;
+  if (!ctx.access) return noAccess(res);
+  try { const r = await ctx.access.openMachineDesktop(host); res.json({ ...r, streamPath: `/api/desktop/${r.id}/stream` }); } catch (e) { fail(res, e); }
+});
+/** "Run on its desktop…": the owner's line, started detached on that machine's desktop (refusals by name). */
+router.post('/api/desktop/machine-desktop/run', async (req, res) => {
+  if (humanOnly(req, res)) return;
+  const host = hostParam(req, res); if (!host) return;
+  if (!ctx.access) return noAccess(res);
+  try { res.json(await ctx.access.runOnDesktop(host, req.body ? req.body.cmd : undefined)); } catch (e) { fail(res, e); }
+});
+/** The bridge's own record of a machine desktop's last close (the window words it — "<machine> went offline"). */
+router.get('/api/desktop/machine-desktop/last-close', (req, res) => {
+  if (humanOnly(req, res)) return;
+  const host = hostParam(req, res); if (!host) return;
+  const id = machineDesktopId(host);
+  res.json({ close: id && ctx.stream && typeof ctx.stream.lastCloseOf === 'function' ? ctx.stream.lastCloseOf(id) : null });
+});
+/** After the TightVNC install: done only once the machine's 5900 answers as a VNC server (else still-absent by name). */
+const tightvncDone = (r) => {
+  if (!r.after || !r.after.ok) { const e = new Error(`the install finished, but port 5900 on ${r.hostId} does not answer as a VNC server (${(r.after && (r.after.why || r.after.code)) || 'no answer'}) — check again`); e.code = 'still-absent'; e.plan = r.plan; throw e; }
+  return { done: true, what: TIGHTVNC.id, label: r.plan.label, hostId: r.hostId, vnc: r.after };
+};
 /** §7.9: the open-with verdict for ONE file without launching — the explorer's menu row asks it (answered 200 either way:
  *  it is a question). The file rule first (no machine is asked about a refused path), then the machine's catalog. */
 router.get('/api/desktop/open-with', async (req, res) => {

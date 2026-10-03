@@ -17,6 +17,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { spawnSync } from 'node:child_process';
 import { scratch } from './scratch.mjs';
 import { mutantCopies, copiesCensus, sweepLegacy } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
@@ -1327,6 +1328,227 @@ console.log('\n⑬ the incremental index write (B-f32b verify r1): an async upda
   ok(!mb.born, '⑬ CONTROL: the sweep without the cycle-end count — the row born past the door never reaches the disk — red');
   const mc = await legs(require(MUTCS.write('src/channel-store.js', src.replace(REBORN, '').replace(TOUCH, '  function touch(key) { touchKey(String(key)); }'), 'ir1-noorder')), 'm-order');
   ok(!mc.reborn && !mc.early, `⑬ CONTROL: without the re-birth / missing-row touch rules the file's order departs from the whole-file bytes (re-born ${mc.reborn}, touched early ${mc.early}) — red`);
+  if (verifyEnv !== undefined) process.env.VIBESPACE_CHANNELS_INDEX_VERIFY = verifyEnv;
+}
+
+// ── ⑭ THE POLL STAMPS LEAVE THE ROW (design 011 lane 2, 2026-10-03) ──
+// userW's 87 MB index was rewritten whole about every 2.3 s: every pass stamped lastPollAt / lastScanAt / walkStartedAt
+// into its row, so a pass that brought nothing still dirtied the file. They live in poll-stamps.json now (memory first,
+// written ≤ every 120 s and at close), the row serializer omits them, a write whose bytes equal the last one is skipped,
+// a legacy row is read and healed. Every rule has a patched-copy control. THE JOURNAL (the 2.369.203 heavy run's
+// test-channels-e2e ⑰): each set appends one line to poll-stamps.log, folded by the side file's write and replayed at the
+// start — a kill -9 before the side file's write keeps every stamp (a lost one read as "never polled": a restored window
+// fetched it at once as the owner's, ahead of discovery, and a vendor's rate refusal held the new conversations back).
+console.log('\n⑭ design 011 lane 2: the poll stamps leave the row — a quiet pass writes nothing');
+{
+  const src = fs.readFileSync(path.join(REPO, 'src/channel-store.js'), 'utf-8');
+  const RT = (k, v) => (k.startsWith('_') ? undefined : v);
+  const verifyEnv = process.env.VIBESPACE_CHANNELS_INDEX_VERIFY; delete process.env.VIBESPACE_CHANNELS_INDEX_VERIFY;
+  const say = [];
+  const slog = { log() {}, info() {}, warn: (...a) => say.push(a.join(' ')), error() {} };
+  const T = Date.UTC(2026, 9, 3, 2, 0, 0);
+  const ino = (f) => { try { return fs.statSync(f).ino; } catch { return null; } };
+  const seed = async (st, n = 600) => { await st.index.update(() => { for (let i = 0; i < n; i++) Object.assign(st.index.entry('a', 'c' + i), { title: 't' + i, lastAt: T - i }); }); st.index.flush(); };
+  // the engine's ingest update for a pass that brought nothing (src/server/channels-engine.js, "the index SECOND")
+  const quietPass = (st, ids, t, inRow) => st.index.update(() => {
+    for (const id of ids) {
+      const en = st.index.entry('a', id);
+      en.lane = { ...en.lane, via: 'poll' };
+      if (inRow) { en.lane.lastPollAt = t; en.lane.walkStartedAt = t; } else st.stamps.set(en.key, { lastPollAt: t, walkStartedAt: t });
+      if (en.lane.lastError) delete en.lane.lastError;
+    }
+  });
+  const quietRun = async (M, tag, inRow) => {
+    const dir = path.join(ROOT, `qs-${tag}`); fs.mkdirSync(dir, { recursive: true });
+    const st = M.createChannelStore({ dir, log: slog });
+    await seed(st);
+    const w0 = st.index.flushStats().writes, i0 = ino(st.indexFile);
+    for (let p = 1; p <= 10; p++) { await quietPass(st, ['c1', 'c300', 'c599'], T + p * 5e3, inRow); st.index.flush(); }
+    const fs1 = st.index.flushStats();
+    const r = { writes: fs1.writes - w0, skipped: fs1.skipped, sameFile: ino(st.indexFile) === i0, stamp: st.stamps.lane(st.index.peek('a/c300')).lastPollAt, disk: fs.readFileSync(st.indexFile, 'utf8') === JSON.stringify(st.index.snapshot(), RT, 1), journal: (st.stamps.stats().journal || {}).lines, jbytes: (st.stamps.stats().journal || {}).bytes };
+    st.close();
+    return r;
+  };
+  const head = await quietRun(S, 'head', false);
+  ok(head.writes === 0 && head.sameFile && head.skipped >= 10 && head.stamp === T + 50e3 && head.journal === 30, `⑭ ten passes that bring nothing (three rows each, the engine's own update shape): ${head.writes} index writes, the same file (inode kept), ${head.skipped} flushes skipped; the last stamp reads back through stamps.lane(); the journal took one line per stamp (${head.journal} lines, ${head.jbytes} bytes)`, JSON.stringify(head));
+  const headRow = await quietRun(S, 'head-inrow', true);
+  ok(headRow.writes === 0 && headRow.stamp === T + 50e3 && headRow.disk, `⑭ a pass that still stamps the ROW (a write past the door) is healed where the row is serialized: ${headRow.writes} writes, the stamp taken into the side map, the file = the whole-file bytes`, JSON.stringify(headRow));
+  const KEEP = ['  const s = JSON.stringify(value, INDEX_KEYS, 1);', '  const s = JSON.stringify(value, RUNTIME_KEYS, 1);'];
+  const HEAL = ['      healRow(k, conv[k]);\n', ''];
+  const SKIP = ['    if (!bytesOwed && top === lastTop) { flushStats.skipped++; return false; }\n', ''];
+  const CLOSE = ['    flush({ full: true });   // B-f32b: the last write is the whole serialization, not the cache\n    stampsFlush();\n', '    flush({ full: true });\n'];
+  const OWED = ['    if (stampsOwed) stampsFlush();\n', ''];
+  const LOADHEAL = ['    for (const k of Object.keys(conv)) if (healRow(k, conv[k])) healed++;\n', ''];
+  const PRUNE = ['      if (!hasOwn(conv, k)) { stampMap.delete(k); continue; }\n', ''];
+  const BIRTH = ['      if (stampMap.delete(key)) { stampsDirty = true; journal(key); }   // design 011 lane 2: a row born under a key that left keeps none of its stamps\n', ''];
+  const SAID = ['      else if (lost) warn(', '      else if (lost && false) warn('];
+  const JOURNAL = ['    journal(k);\n    armStamps();\n', '    armStamps();\n'];
+  const REPLAY = ['      if (Object.keys(st).length) stampMap.set(a[0], st); else stampMap.delete(a[0]);\n', ''];
+  const FOLD = ['    try { fs.truncateSync(stampsLog, 0); journalTorn = false; }', '    try { journalTorn = false; }'];
+  const cuts = { KEEP, HEAL, SKIP, CLOSE, OWED, LOADHEAL, PRUNE, BIRTH, SAID, JOURNAL, REPLAY, FOLD };
+  const missing = Object.entries(cuts).filter(([, [from]]) => src.split(from).length !== 2).map(([k]) => k);
+  ok(!missing.length, `⑭ CONTROL setup: the twelve rules are where the controls cut them (missing: ${missing.join(', ') || 'none'})`);
+  const cutFile = (tag, ...cs) => MUTCS.write('src/channel-store.js', cs.reduce((s, [from, to]) => s.replace(from, to), src), tag);
+  const cut = (tag, ...cs) => require(cutFile(tag, ...cs));
+  const c1 = await quietRun(cut('qs-inrow', KEEP, HEAL), 'c-inrow', true);
+  ok(c1.writes === 10 && !c1.sameFile, `⑭ CONTROL: the stamp back in the row (kept by the serializer, never healed) — each of the ten quiet passes rewrites the index (${c1.writes} writes) — red`);
+  const c2 = await quietRun(cut('qs-noskip', SKIP), 'c-noskip', false);
+  ok(c2.writes === 10, `⑭ CONTROL: without the equal-bytes skip the same quiet passes write ${c2.writes} times (the touched chunk re-serializes to equal bytes; nothing else stops the write) — red`);
+
+  // the stamps survive a restart; the side file is not written per stamp — close() writes it
+  const restartRun = async (M, tag) => {
+    const dir = path.join(ROOT, `qr-${tag}`); fs.mkdirSync(dir, { recursive: true });
+    const st = M.createChannelStore({ dir, log: slog });
+    await seed(st, 40);
+    await quietPass(st, ['c3', 'c7'], T + 1000, false);
+    st.stamps.set('a/c9', { lastScanAt: T + 2000 });
+    st.index.flush();
+    const before = fs.existsSync(st.stamps.file);
+    st.close();
+    const logBytes = fs.existsSync(st.stamps.log) ? fs.statSync(st.stamps.log).size : 0;   // the journal, folded by close()'s write
+    const re = M.createChannelStore({ dir, log: slog });
+    const g = (k) => re.stamps.lane(re.index.peek(k));
+    let shape = null;
+    try { const j = JSON.parse(fs.readFileSync(re.stamps.file, 'utf8')); shape = JSON.stringify(j.fields) + Object.keys(j.stamps).sort().join(','); } catch { }
+    const r = { before, logBytes, c3: g('a/c3').lastPollAt, c7w: g('a/c7').walkStartedAt, c9: g('a/c9').lastScanAt, none: g('a/c5').lastPollAt ?? null, shape };
+    re.close();
+    return r;
+  };
+  const rh = await restartRun(S, 'head');
+  ok(!rh.before && rh.logBytes === 0 && rh.c3 === T + 1000 && rh.c7w === T + 1000 && rh.c9 === T + 2000 && rh.none === null && rh.shape === '["lastPollAt","lastScanAt","walkStartedAt"]a/c3,a/c7,a/c9', '⑭ the stamps survive a restart (lastPollAt, walkStartedAt, lastScanAt read back; an unstamped row stays unstamped); the side file is not written per stamp — close() writes it and folds the journal (0 bytes left)', JSON.stringify(rh));
+  const rc = await restartRun(cut('qr-noclose', CLOSE), 'c-noclose');
+  ok(rc.c3 === T + 1000 && rc.logBytes > 0, `⑭ CONTROL: close() without the side file's write — the journal is left unfolded (${rc.logBytes} bytes; the stamps read back only by replaying it) — red`, JSON.stringify(rc));
+  const rf = await restartRun(cut('qr-nofold', FOLD), 'c-nofold');
+  ok(rf.c3 === T + 1000 && rf.logBytes > 0, `⑭ CONTROL: the side file written without the fold — every journal line stays behind it (${rf.logBytes} bytes, replayed again at every start, growing) — red`, JSON.stringify(rf));
+
+  // THE JOURNAL: a process KILLED (SIGKILL, its own) after three passes' stamps and before the side file's first write
+  const killRun = (file, tag, { tear = false } = {}) => {
+    const dir = path.join(ROOT, `qk-${tag}`); fs.mkdirSync(dir, { recursive: true });
+    const child = `(async () => { const M = require(${JSON.stringify(file)}); const st = M.createChannelStore({ dir: ${JSON.stringify(dir)}, log: { log() {}, info() {}, warn() {}, error() {} } });
+      await st.index.update(() => { for (let i = 0; i < 40; i++) st.index.entry('a', 'c' + i).title = 't' + i; }); st.index.flush();
+      for (let p = 1; p <= 3; p++) for (let i = 0; i < 40; i++) st.stamps.set('a/c' + i, { lastPollAt: ${T} + p * 1000 + i, walkStartedAt: ${T} + p * 1000 });
+      process.kill(process.pid, 'SIGKILL'); })()`;
+    const k = spawnSync(process.execPath, ['-e', child], { encoding: 'utf8', timeout: 30e3 });
+    if (tear) fs.appendFileSync(path.join(dir, 'poll-stamps.log'), '["a/c39",' + (T + 9000));   // a line the kill cut short
+    const M = require(file);
+    const n0 = say.length;
+    const re = M.createChannelStore({ dir, log: slog });
+    const g = (i) => re.stamps.lane(re.index.peek('a/c' + i));
+    const r = { signal: k.signal, side: fs.existsSync(re.stamps.file), exact: 0, walk: 0, torn: (re.stamps.stats().journal || {}).torn || 0, said: say.slice(n0).find((w) => /poll-stamps\.log/.test(w)) || '' };
+    for (let i = 0; i < 40; i++) { if (g(i).lastPollAt === T + 3000 + i) r.exact++; if (g(i).walkStartedAt === T + 3000) r.walk++; }
+    if (tear) {   // the next set after a torn tail starts on its own line, and a second kill keeps it
+      re.stamps.set('a/c0', { lastPollAt: T + 7000 });
+      const re2 = M.createChannelStore({ dir, log: slog });
+      r.after = re2.stamps.get('a/c0').lastPollAt || null; r.torn2 = (re2.stamps.stats().journal || {}).torn;
+      re2.close();
+    }
+    re.close();
+    return r;
+  };
+  const kh = killRun(path.join(REPO, 'src/channel-store.js'), 'head');
+  ok(kh.signal === 'SIGKILL' && !kh.side && kh.exact === 40 && kh.walk === 40 && kh.torn === 0, `⑭ THE JOURNAL: a process killed (SIGKILL) after three passes' stamps, before the side file's first write — the next start reads all ${kh.exact} of 40 last poll instants back (walkStartedAt ${kh.walk}/40), no side file needed`, JSON.stringify(kh));
+  const kt = killRun(path.join(REPO, 'src/channel-store.js'), 'tear', { tear: true });
+  ok(kt.exact === 40 && kt.torn === 1 && /1 line\(s\) unreadable/.test(kt.said) && kt.after === T + 7000 && kt.torn2 === 1, `⑭ …a line the kill cut short is skipped, counted and said ("${kt.said.slice(0, 120)}"), its conversation keeping its older instant; the next stamp after it starts on its own line and survives a second kill`, JSON.stringify(kt));
+  const kj = killRun(cutFile('qk-nojournal', JOURNAL), 'c-nojournal');
+  ok(kj.signal === 'SIGKILL' && kj.exact === 0, `⑭ CONTROL: no journal (the side file alone, ≤ every 120 s) — the same kill loses every stamp (${kj.exact} of 40 read back): each row "never polled" after the restart — red`, JSON.stringify(kj));
+  const kr = killRun(cutFile('qk-noreplay', REPLAY), 'c-noreplay');
+  ok(kr.exact === 0, `⑭ CONTROL: the journal written but not replayed at the start — ${kr.exact} of 40 read back — red`, JSON.stringify(kr));
+
+  // a legacy row (an index written before this lane) is read, said, and healed — the side file lands BEFORE the index
+  const legacyRun = async (M, tag, { kill = false } = {}) => {
+    const dir = path.join(ROOT, `ql-${tag}`); fs.mkdirSync(dir, { recursive: true });
+    const legacy = { v: 1, updatedAt: T, conversations: {} };
+    for (let i = 0; i < 300; i++) legacy.conversations[`a/l${i}`] = { key: `a/l${i}`, id: `l${i}`, adapterId: 'a', title: 'l' + i, lane: { via: 'poll', lastPushAt: null, lastPollAt: T - i * 1000, lastScanAt: null, walkStartedAt: T - i * 1000 - 5, firstSeenByPoll: 0, firstSeenTotal: 0 } };
+    fs.writeFileSync(path.join(dir, 'index.json'), JSON.stringify(legacy, null, 1));
+    const n0 = say.length;
+    const st = M.createChannelStore({ dir, log: slog });
+    const read = st.stamps.lane(st.index.peek('a/l7')).lastPollAt;
+    await st.index.update(() => { st.index.entry('a', 'l1').title = 'changed'; });   // one real change: the index is written
+    st.index.flush();
+    const disk = fs.readFileSync(st.indexFile, 'utf8');
+    const r = { read, said: say.slice(n0).some((w) => /poll times taken out of index\.json/.test(w)), stripped: !/lastPollAt|walkStartedAt|lastScanAt/.test(disk), sideFirst: fs.existsSync(st.stamps.file) };
+    if (!kill) st.close();   // kill: the process dies right after that index write (no close)
+    const re = M.createChannelStore({ dir, log: slog });
+    r.after = re.stamps.lane(re.index.peek('a/l7')).lastPollAt; r.walk = re.stamps.lane(re.index.peek('a/l299')).walkStartedAt;
+    re.close();
+    return r;
+  };
+  const lh = await legacyRun(S, 'head', { kill: true });
+  ok(lh.read === T - 7000 && lh.said && lh.stripped && lh.sideFirst && lh.after === T - 7000 && lh.walk === T - 299000 - 5, '⑭ a legacy row is read (through stamps.lane()), said once, and healed: its first index write carries no stamp and the side file is written BEFORE it — a process killed right after that write keeps every stamp', JSON.stringify(lh));
+  const lc = await legacyRun(cut('ql-noowed', OWED), 'c-noowed', { kill: true });
+  ok(lc.stripped && !lc.after, `⑭ CONTROL: the index written before the side file — killed right after it, the legacy stamps are gone (lastPollAt ${lc.after}) — red`);
+  const lc2 = await legacyRun(cut('ql-noheal', HEAL, LOADHEAL), 'c-noheal');
+  ok(lc2.stripped && !lc2.after, `⑭ CONTROL: no heal — the legacy stamp reads (${lc2.read}) until the first write drops it from the file, and the restart has none (${lc2.after}) — red`);
+
+  // a stamp for a conversation that LEFT the index leaves with it; a row re-born under its key starts unstamped
+  const leftRun = async (M, tag) => {
+    const dir = path.join(ROOT, `qx-${tag}`); fs.mkdirSync(dir, { recursive: true });
+    const st = M.createChannelStore({ dir, log: slog });
+    await seed(st, 20);
+    st.stamps.set('a/c4', { lastPollAt: T }); st.stamps.set('a/c5', { lastPollAt: T });
+    await st.index.update(() => { const r = st.index.rows(); delete r['a/c4']; delete r['a/c5']; st.index.touch('a/c4'); st.index.touch('a/c5'); });
+    await st.index.update(() => { st.index.entry('a', 'c5').title = 'reborn'; });   // re-born before the side file's next write
+    st.stamps.flush();
+    const side = JSON.parse(fs.readFileSync(st.stamps.file, 'utf8')).stamps;
+    const r = { c4: 'a/c4' in side, c5: 'a/c5' in side, reborn: st.stamps.lane(st.index.peek('a/c5')).lastPollAt ?? null };
+    st.close();
+    return r;
+  };
+  const xh = await leftRun(S, 'head');
+  ok(!xh.c4 && !xh.c5 && xh.reborn === null, '⑭ a stamp for a conversation that left the index leaves the side file with it; a row re-born under the key starts unstamped (due by its own cadence)', JSON.stringify(xh));
+  const xp = await leftRun(cut('qx-noprune', PRUNE), 'c-noprune');
+  ok(xp.c4, '⑭ CONTROL: no prune — the side file keeps the stamp of a conversation the index no longer holds — red');
+  const xb = await leftRun(cut('qx-nobirth', BIRTH), 'c-nobirth');
+  ok(xb.reborn === T, `⑭ CONTROL: no birth rule — the re-born row inherits the departed row's stamp (${xb.reborn}) — red`);
+
+  // the side file deleted: the next start SAYS it, by count
+  const lostRun = async (M, tag) => {
+    const dir = path.join(ROOT, `qd-${tag}`); fs.mkdirSync(dir, { recursive: true });
+    const st = M.createChannelStore({ dir, log: slog });
+    await seed(st, 30); await quietPass(st, ['c1', 'c2'], T, false); st.close();
+    fs.rmSync(st.stamps.file);
+    const n0 = say.length;
+    const re = M.createChannelStore({ dir, log: slog });
+    const r = { line: say.slice(n0).find((w) => /poll-stamps\.json was not read/.test(w)) || '', lost: re.stamps.stats().lostAtLoad };
+    re.close();
+    return r;
+  };
+  const dh = await lostRun(S, 'head');
+  ok(/30 conversation\(s\) carry no last-poll time: each is due at once, and the vendor's budget paces the re-poll/.test(dh.line) && dh.lost === 30, `⑭ the side file deleted: the next start says it — "${dh.line.slice(0, 170)}"`);
+  const dc = await lostRun(cut('qd-nosay', SAID), 'c-nosay');
+  ok(!dc.line, '⑭ CONTROL: the line cut — a start that lost every poll time is silent — red');
+
+  // verify r1 (A10): a FOREIGN-shaped side file (another `v`, its columns renamed or gone, entries that are not lists) is
+  // never read as "no stamps" in silence — set aside and said like every family, or counted
+  const foreignRun = async (M, tag) => {
+    const out = {};
+    const bodies = { v2: { v: 2, fields: ['pollAt', 'scanAt', 'walkAt'], stamps: { 'a/c1': [T, T, T] } }, nofields: { v: 1, fields: [], stamps: { 'a/c1': [T] } }, entries: { v: 1, fields: ['lastPollAt', 'lastScanAt', 'walkStartedAt'], stamps: { 'a/c1': { lastPollAt: T }, 'a/c2': [T, null, null] } } };
+    for (const [name, body] of Object.entries(bodies)) {
+      const dir = path.join(ROOT, `qf-${tag}-${name}`); fs.mkdirSync(dir, { recursive: true });
+      const st = M.createChannelStore({ dir, log: slog }); await seed(st, 5); st.close();
+      fs.writeFileSync(st.stamps.file, JSON.stringify(body));
+      const n0 = say.length;
+      const re = M.createChannelStore({ dir, log: slog });
+      out[name] = { said: say.slice(n0).some((w) => /poll-stamps\.json/.test(w) && /no last-poll time/.test(w)), aside: fs.readdirSync(dir).some((f) => f.startsWith('poll-stamps.json.corrupt-')), c2: re.stamps.get('a/c2').lastPollAt || null };
+      re.close();
+    }
+    return out;
+  };
+  const fh = await foreignRun(S, 'head');
+  ok(fh.v2.said && fh.v2.aside && fh.nofields.said && fh.nofields.aside && fh.entries.said && !fh.entries.aside && fh.entries.c2 === T, `⑭ a foreign-shaped poll-stamps.json (v 2 / no columns) is set aside and said; a v1 entry that is not a list is counted, the readable ones kept: ${JSON.stringify(fh)}`);
+  const VALID = ["v.v === 1 && Array.isArray(v.fields) && v.fields.includes('lastPollAt') && v.stamps", 'Array.isArray(v.fields) && v.stamps'];
+  const UNREAD = ['      if (!Array.isArray(arr)) { unreadStamps++; continue; }\n', '      if (!Array.isArray(arr)) continue;\n'];
+  ok([VALID, UNREAD].every(([from]) => src.split(from).length === 2), '⑭ CONTROL setup: the foreign-shape rules are where the control cuts them');
+  const fc = await foreignRun(cut('qf-loose', VALID, UNREAD), 'c-loose');
+  ok(!fc.v2.said && !fc.v2.aside && !fc.nofields.said && !fc.entries.said, `⑭ CONTROL: the loose shape check (lane head f469d942) — every one read as "no stamps" in silence, each conversation due at once unsaid — red: ${JSON.stringify(fc)}`);
+
+  // the engine reads the stamps through ONE door (laneOf) and writes them through ONE (store.stamps.set)
+  const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
+  const census = (s) => ({ past: (s.match(/\blane\??\.(?:lastPollAt|lastScanAt|walkStartedAt)\b|\blane\s*=\s*\{[^}\n]*\b(?:lastPollAt|lastScanAt|walkStartedAt)\s*:/g) || []).length, reads: (s.match(/\blaneOf\(/g) || []).length, writes: (s.match(/\bstore\.stamps\.set\(/g) || []).length });
+  const ce = census(esrc);
+  ok(ce.past === 0 && ce.reads >= 9 && ce.writes === 2, `⑭ census: src/server/channels-engine.js reads the poll stamps through laneOf() only (${ce.reads} sites) and writes them through store.stamps.set() only (${ce.writes}); ${ce.past} reads / writes on the row`);
+  const planted = esrc.replace('const last = Number(laneOf(en).lastPollAt) || 0;', 'const last = Number(en.lane && en.lane.lastPollAt) || 0;');
+  ok(planted !== esrc && census(planted).past === 1, '⑭ CONTROL: the base\'s dueList read planted back on the row is counted — red');
   if (verifyEnv !== undefined) process.env.VIBESPACE_CHANNELS_INDEX_VERIFY = verifyEnv;
 }
 

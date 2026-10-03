@@ -14,6 +14,33 @@ const { spawn, execFile } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const { contentDisposition, fileNameOf } = require('./file-disposition');
+const { agentVersionOf, reinstallStep } = require('./exit-reach');
+
+// lane windows-device-fs — THE HUB ASSUMED `sh` FOR FILES TOO (B-c484, the owner's WIN-DESK1: GET /api/files?host=… →
+// 400 "command failed (127)"). Every device operation below was an `sh -c` line over the device link (the home, the
+// listing's fallback, du, zip, the download streams); a Windows machine has no `sh`. A WINDOWS agent's files now go
+// through the agent's OWN fs ops (`fs-portable`: list / stat / read / write / mkdir / move / copy / rm / du / home, `~`
+// expanded by the device, paths left as the device spells them); what still needs a shell there is refused BY NAME; a
+// Windows agent too old for the ops is told its version and the one step. Every other machine: the paths below, unchanged.
+const FS_PORTABLE_CAP = 'fs-portable';
+const WIN_REFUSED = Object.freeze({
+  zip: 'folder download as .zip is not available on Windows machines yet',
+  'archive-list': 'opening an archive (.zip / .tar) is not available on Windows machines yet',
+  'archive-entry': 'opening a file inside an archive is not available on Windows machines yet',
+  'archive-extract': 'extracting an archive is not available on Windows machines yet',
+  'make-archive': 'making an archive (.zip / .tar) is not available on Windows machines yet',
+});
+const WIN_CHUNK = 4 * 1024 * 1024; // one read-range per chunk (the agent's own worker reads 4 MB at a time)
+/** The words for a Windows agent that predates `fs-portable` — the sentence lane device-upgrade-stuck says for commands. */
+function filesOutdatedText(machine, agentVersion) {
+  return `this machine's agent is ${agentVersionOf(agentVersion) || 'an older version'}, too old to browse files on Windows — ${reinstallStep(machine)}`;
+}
+function daemonInfoOf(dm) { try { const st = typeof dm.status === 'function' ? dm.status() : null; return (st && st.info) || {}; } catch { return {}; } }
+const named = (code, message, status, params) => Object.assign(new Error(message), { code, status, params });
+// verify-r2: the Files view's refusals travel as a CODE (+ its params) beside the English `error` — the client words them
+// in the reader's language (src/lib/file-explorer-ops.js fsErrorText); every other error: `{ error }` as before
+const FS_REFUSALS = Object.freeze(['device_agent_outdated', 'windows_unsupported', 'windows_no_shell']);
+const fsErrorBody = (e) => ({ error: String((e && e.message) || e), ...(e && FS_REFUSALS.includes(e.code) ? { code: e.code, params: e.params || {} } : {}) });
 
 // ONE archive-listing parser for local AND remote (B-b87b: RemoteFs used to
 // return bare-string entries while /api/archive/list returned
@@ -79,12 +106,76 @@ class RemoteFs {
   }
   async _devAbs(id, dm, p) {
     const raw = String(p || '~');
+    const info = daemonInfoOf(dm); // lane windows-device-fs: a Windows agent with the fs ops expands `~` itself (verify-r1 F1: an older one is asked `sh`, as before)
+    if (info.platform === 'win32' && Array.isArray(info.capabilities) && info.capabilities.includes(FS_PORTABLE_CAP)) return raw;
     if (raw === '~') return this._devHome(id, dm);
     if (raw.startsWith('~/')) return (await this._devHome(id, dm)) + raw.slice(1);
     return raw;
   }
 
   _host(id) { return this.hosts.get(id); }
+
+  /** lane windows-device-fs: → null for every machine that is not a Windows agent (the paths below, unchanged), else
+   *  the DeviceManager of a Windows agent that has `fs-portable`. A Windows agent WITHOUT it is refused by name (its
+   *  version + the one step); `op` names what cannot be done without a shell on Windows yet (WIN_REFUSED). */
+  async _win(id, op = null) {
+    const dm = await this._dev(id);
+    if (!dm) return null;
+    const info = daemonInfoOf(dm);
+    if (info.platform !== 'win32') return null;
+    // verify-r1 F1: refused only where the machine HAS NO `sh` — with one (Git for Windows / MSYS2 / Cygwin) the shell
+    // lines below ran before this lane, and still do: a shell-only verb, or every verb for an agent without the fs ops
+    const portable = Array.isArray(info.capabilities) && info.capabilities.includes(FS_PORTABLE_CAP);
+    if (op || !portable) {
+      if (await this._winHasSh(dm, info)) return null;
+      if (op) throw named('windows_unsupported', WIN_REFUSED[op], 501, { op });
+      throw named('device_agent_outdated', filesOutdatedText(this._host(id)?.name || id, info.daemonVersion), 409, { machine: this._host(id)?.name || id, version: agentVersionOf(info.daemonVersion) || '' });
+    }
+    return dm;
+  }
+  /** verify-r1 F1: does this Windows machine have `sh`? Its hello says (`posixShells`); an agent too old to say is ASKED, once
+   *  per link (`sh -c 'exit 0'` — the line it was asked anyway); verify-r2: only an `sh` that RAN it (exit 0, in time) counts —
+   *  a broken or hung one gets the outdated sentence (the agent's update is the way out), never its shell lines' errors. */
+  _winHasSh(dm, info) {
+    if (Array.isArray(info.posixShells)) return info.posixShells.includes('sh');
+    if (!this._shSeen) this._shSeen = new WeakMap();
+    if (!this._shSeen.has(info)) this._shSeen.set(info, dm.runCmd('sh', ['-c', 'exit 0'], { timeoutMs: 5000 }).then((r) => !!r && r.code === 0 && !r.timedOut, (e) => !(e && e.code === 'windows_no_shell')));
+    return this._shSeen.get(info);
+  }
+  /** A Windows agent's file → an HTTP response over read-range (no `cat` there). Same contract as _devStreamTo. */
+  async _winStreamTo(dm, filePath, res, { beforeBody = null } = {}) {
+    const name = () => { if (beforeBody && !res.headersSent) { try { beforeBody(); } catch { } } };
+    let gone = false; res.on('close', () => { gone = true; });
+    let st;
+    try { st = (await dm.fsStat(filePath)).stat; } catch { st = null; }
+    if (!st || st.isDir) { if (!res.headersSent) { res.removeHeader('Content-Disposition'); res.removeHeader('Content-Type'); res.status(404).end(); } return; }
+    try {
+      for (let pos = 0; pos < (st.size || 0) && !gone;) {
+        const rr = await dm.fsReadRange(filePath, pos, Math.min(WIN_CHUNK, st.size - pos));
+        if (!rr.data.length) break;
+        name();
+        if (!res.write(rr.data)) await new Promise((r) => { res.once('drain', r); res.once('close', r); });
+        pos += rr.data.length;
+      }
+      name(); res.end();
+    } catch { try { res.end(); } catch { } }
+  }
+  /** A Windows agent's file → a LOCAL file, bounded (fetchToLocal's twin over read-range). */
+  async _winFetchToLocal(dm, filePath, outPath, cap) {
+    const st = (await dm.fsStat(filePath)).stat;
+    if (st.isDir) throw new Error('file read failed (a folder)');
+    if (st.size > cap) throw Object.assign(new Error(`file too large (>${Math.round(cap / 1048576)}MB)`), { status: 413 });
+    const fd = fs.openSync(outPath, 'w');
+    let written = 0;
+    try {
+      while (written < st.size) {
+        const rr = await dm.fsReadRange(filePath, written, Math.min(WIN_CHUNK, st.size - written));
+        if (!rr.data.length) break;
+        fs.writeSync(fd, rr.data); written += rr.data.length;
+      }
+    } finally { fs.closeSync(fd); }
+    return { size: written };
+  }
 
   // Run a remote command, resolve stdout (Buffer). Rejects on non-zero exit.
   // DIAL hosts have no ssh — route the SAME shell command over the device link
@@ -125,6 +216,7 @@ class RemoteFs {
     // dial devices have no ssh — the device link is the only path (B-0d70:
     // /api/home?host=<dial> used to 400 'has no ssh', so New Session could
     // never learn the device home and defaulted cwd to the LOCAL home).
+    const w = await this._win(id); if (w) return String((await w.fsHome()).home || '');
     const dm = await this._dev(id);
     if (dm) { try { const h = await this._devHome(id, dm); if (h) return h; } catch { /* legacy */ } }
     const out = await this._run(id, 'printf %s "$HOME"');
@@ -136,6 +228,13 @@ class RemoteFs {
   // single round trip (line = "T\tSIZE\tMTIME\tNAME"). Robust vs `ls` parsing.
   async list(id, dir) {
     if (/\n/.test(dir)) throw new Error('invalid path');
+    const w = await this._win(id);
+    if (w) { // the device lists and resolves `~` itself; its errors are the answer (no shell to fall back to)
+      const r = await w.fsList(dir || '~');
+      const items = r.entries.map((e) => ({ name: e.name, isDirectory: !!e.isDir, isSymlink: false, size: e.size || 0, modified: e.mtimeMs || 0, created: 0 }));
+      items.sort((a, b) => (a.isDirectory !== b.isDirectory) ? (a.isDirectory ? -1 : 1) : a.name.localeCompare(b.name));
+      return { path: r.path || dir, items };
+    }
     const dm = await this._dev(id);
     if (dm) {
       try {
@@ -188,7 +287,8 @@ class RemoteFs {
     // reported EVERY existing device dir as nonexistent (the '/Users/<user>
     // 不存在' report). fsStat gives size/mtime/isDir; a small read-range sniffs
     // binary (NUL byte in the head).
-    const dm = await this._dev(id);
+    const w = await this._win(id); // lane windows-device-fs: a Windows agent's errors are the answer (no shell rung)
+    const dm = w || await this._dev(id);
     if (dm) {
       try {
         const abs = await this._devAbs(id, dm, filePath);
@@ -203,7 +303,7 @@ class RemoteFs {
         // a REAL 'not found' from the device must surface as an error (so the
         // preflight offers to mkdir) — don't fall through to the ssh body that
         // would throw the misleading 'has no ssh' for a dial host.
-        if (this._host(id)?.transport === 'dial') throw e;
+        if (w || this._host(id)?.transport === 'dial') throw e;
         /* ssh host: fall through to legacy */
       }
     }
@@ -218,7 +318,8 @@ class RemoteFs {
   }
 
   async readText(id, filePath, maxBytes = 10 * 1024 * 1024) {
-    const dm = await this._dev(id);
+    const w = await this._win(id);
+    const dm = w || await this._dev(id);
     if (dm) {
       try {
         const abs = await this._devAbs(id, dm, filePath);
@@ -226,7 +327,7 @@ class RemoteFs {
         if (st.stat.size > maxBytes) { const e = new Error('File too large (>10MB). Use hex viewer.'); e.size = st.stat.size; throw e; }
         const rr = await dm.fsReadRange(abs, 0, st.stat.size);
         return { path: filePath, content: rr.data.toString('utf-8'), size: st.stat.size };
-      } catch (e) { if (e.size) throw e; /* too-large is REAL; others → legacy */ }
+      } catch (e) { if (e.size || w) throw e; /* too-large is REAL (a Windows agent's every error); others → legacy */ }
     }
     const info = await this.info(id, filePath);
     if (info.size > maxBytes) { const e = new Error('File too large (>10MB). Use hex viewer.'); e.size = info.size; throw e; }
@@ -235,6 +336,7 @@ class RemoteFs {
   }
 
   async readBinary(id, filePath, offset = 0, length = 65536) {
+    const w = await this._win(id); if (w) return (await w.fsReadRange(filePath, Math.max(0, offset), Math.min(length, 1048576))).data;
     const dm = await this._dev(id);
     if (dm) {
       try {
@@ -249,6 +351,7 @@ class RemoteFs {
   }
 
   async write(id, filePath, contentBuffer) {
+    const w = await this._win(id); if (w) { await w.fsWrite(filePath, contentBuffer); return { success: true }; }
     const dm = await this._dev(id);
     if (dm) {
       try {
@@ -269,14 +372,16 @@ class RemoteFs {
   }
 
   async mkdir(id, dirPath) {
+    const w = await this._win(id); if (w) { await w.fsMkdir(dirPath); return { success: true }; }
     const dm = await this._dev(id);
     if (dm) { try { await dm.fsMkdir(await this._devAbs(id, dm, dirPath)); return { success: true }; } catch { } }
     await this._run(id, `mkdir -p ${shqp(dirPath)}`); return { success: true };
   }
 
-  async rename(id, from, to) { await this._run(id, `mv -n ${shqp(from)} ${shqp(to)}`); return { success: true }; }
+  async rename(id, from, to) { const w = await this._win(id); if (w) { await w.fsMove(from, to); return { success: true }; } await this._run(id, `mv -n ${shqp(from)} ${shqp(to)}`); return { success: true }; }
 
   async remove(id, target) {
+    const w = await this._win(id); if (w) { await w.fsRm(target, true); return { success: true }; }
     const dm = await this._dev(id);
     if (dm) { try { await dm.fsRm(await this._devAbs(id, dm, target), true); return { success: true }; } catch { } }
     await this._run(id, `rm -rf ${shq(target)}`); return { success: true };
@@ -287,6 +392,13 @@ class RemoteFs {
     // and error on a macOS/BSD device. fsStat gives the portable core; mode is
     // the raw st_mode (rendered client-side), uid/gid/kind aren't in the
     // fs-op — acceptable for Properties on a device.
+    const w = await this._win(id);
+    if (w) { // lane windows-device-fs: du = the agent's own walk (`du -sk` was an sh line)
+      const st = (await w.fsStat(target)).stat;
+      let du, duPartial;
+      if (withDu && st.isDir) { try { const r = await w.fsDu(target); du = r.bytes; duPartial = r.truncated ? r.entries : undefined; } catch { du = null; } } // verify-r2: a walk that stopped SAYS so (the size is "at least")
+      return { path: target, size: st.size || 0, modified: st.mtimeMs || 0, mode: st.mode, uid: undefined, gid: undefined, kind: st.isDir ? 'directory' : 'regular file', du: withDu ? (du ?? null) : undefined, duPartial };
+    }
     const dm = await this._dev(id);
     if (dm) {
       try {
@@ -309,8 +421,8 @@ class RemoteFs {
   }
 
   // copy/move WITHIN the same host (cross-host relay handled in files.js)
-  async copy(id, from, to) { await this._run(id, `cp -rn ${shqp(from)} ${shqp(to)}`, { timeoutMs: 120000 }); return { success: true }; }
-  async move(id, from, to) { await this._run(id, `mv -n ${shqp(from)} ${shqp(to)}`, { timeoutMs: 120000 }); return { success: true }; }
+  async copy(id, from, to) { const w = await this._win(id); if (w) { await w.fsCopy(from, to); return { success: true }; } await this._run(id, `cp -rn ${shqp(from)} ${shqp(to)}`, { timeoutMs: 120000 }); return { success: true }; }
+  async move(id, from, to) { const w = await this._win(id); if (w) { await w.fsMove(from, to); return { success: true }; } await this._run(id, `mv -n ${shqp(from)} ${shqp(to)}`, { timeoutMs: 120000 }); return { success: true }; }
 
   // Stream a remote file to an HTTP response (download / raw viewer). ALWAYS
   // NAMED (lane raw-filename): `attachment` for /api/download (that header is
@@ -333,7 +445,9 @@ class RemoteFs {
     // the request was never answered (viewer/download hung forever, review
     // finding). Stream over the device link instead.
     if (this._host(id)?.transport === 'dial') {
-      this._devStreamTo(id, 'cat', [filePath], res, { notFoundOnFail: true, beforeBody: nameIt });
+      this._win(id).then((w) => (w ? this._winStreamTo(w, filePath, res, { beforeBody: nameIt }) // lane windows-device-fs: no `cat` there
+        : this._devStreamTo(id, 'cat', [filePath], res, { notFoundOnFail: true, beforeBody: nameIt })),
+      (e) => { if (!res.headersSent) { res.removeHeader('Content-Disposition'); res.removeHeader('Content-Type'); res.status(e.status || 502).json({ error: e.message }); } });
       return;
     }
     this._streamChild(this._spawn(id, `cat ${shq(filePath)}`), res, { beforeBody: nameIt });
@@ -346,7 +460,8 @@ class RemoteFs {
     const zipName = contentDisposition((base || 'archive') + '.zip', 'attachment'); // both forms, ASCII (a CJK folder name threw here)
     if (zipName) res.setHeader('Content-Disposition', zipName);
     if (this._host(id)?.transport === 'dial') {
-      this._devStreamTo(id, 'sh', ['-c', `cd ${shq(parent)} && zip -r - ${shq(base)}`], res, { notFoundOnFail: true });
+      this._win(id, 'zip').then(() => this._devStreamTo(id, 'sh', ['-c', `cd ${shq(parent)} && zip -r - ${shq(base)}`], res, { notFoundOnFail: true }),
+        (e) => { if (!res.headersSent) { res.removeHeader('Content-Disposition'); res.removeHeader('Content-Type'); res.status(e.status || 502).json({ error: e.message }); } }); // a Windows machine: refused by name
       return;
     }
     this._streamChild(this._spawn(id, `cd ${shq(parent)} && zip -r - ${shq(base)}`), res);
@@ -405,6 +520,7 @@ class RemoteFs {
 
   // Archives
   async archiveList(id, archivePath) {
+    await this._win(id, 'archive-list');
     const ap = shq(archivePath);
     const kind = /\.zip$/i.test(archivePath) ? 'zip' : 'tar';
     const cmd = kind === 'zip'
@@ -449,13 +565,15 @@ class RemoteFs {
     return { size: written };
   }
   // Pull one remote file to a local path (bounded).
-  fetchToLocal(id, filePath, outPath, cap = 20 * 1024 * 1024) {
+  async fetchToLocal(id, filePath, outPath, cap = 20 * 1024 * 1024) {
+    const w = await this._win(id); if (w) return this._winFetchToLocal(w, filePath, outPath, cap);
     return this._streamCmdToFile(id, `cat ${shq(filePath)}`, outPath, cap, { what: 'file' });
   }
   // Extract ONE entry off the host into a LOCAL file (the archive viewer's
   // entry-click path — it opens the temp file through the normal viewer
   // pipeline, which is local by definition).
-  archiveExtractEntry(id, archivePath, entry, outPath) {
+  async archiveExtractEntry(id, archivePath, entry, outPath) {
+    await this._win(id, 'archive-entry');
     const ap = shq(archivePath);
     // unzip treats [ ] * ? as globs — escape for a literal member name
     const zipLit = shq(entry.replace(/([\[\]*?])/g, '\\$1'));
@@ -464,12 +582,14 @@ class RemoteFs {
     return this._streamCmdToFile(id, cmd, outPath, 200 * 1024 * 1024, { what: 'entry' });
   }
   async archiveExtract(id, archivePath, destDir) {
+    await this._win(id, 'archive-extract');
     const ap = shq(archivePath), dd = shq(destDir);
     const cmd = `mkdir -p ${dd} && case ${ap} in *.zip) unzip -n ${ap} -d ${dd};; *.tar.gz|*.tgz) tar -xzkf ${ap} -C ${dd};; *.tar) tar -xkf ${ap} -C ${dd};; *) tar -xkf ${ap} -C ${dd};; esac`;
     await this._run(id, cmd, { timeoutMs: 300000 });
     return { success: true };
   }
   async makeArchive(id, destPath, parentDir, names) {
+    await this._win(id, 'make-archive');
     const list = names.map(shq).join(' ');
     const dp = shq(destPath);
     const cmd = `cd ${shq(parentDir)} && case ${dp} in *.zip) zip -r ${dp} ${list};; *.tar.gz|*.tgz) tar -czf ${dp} ${list};; *.tar) tar -cf ${dp} ${list};; *.tar.xz) tar -cJf ${dp} ${list};; esac`;
@@ -481,4 +601,4 @@ class RemoteFs {
   dirComplete(id, input) { return this.hosts.dirComplete(id, input); }
 }
 
-module.exports = { RemoteFs, parseArchiveListing };
+module.exports = { RemoteFs, parseArchiveListing, FS_PORTABLE_CAP, WIN_REFUSED, filesOutdatedText, fsErrorBody };

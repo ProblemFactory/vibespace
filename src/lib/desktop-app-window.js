@@ -64,6 +64,10 @@
 // viewport px and turned into layout px under the UI scale — through
 // WindowManager.setMinSize: the resize drag stops there and a smaller size is
 // raised. On a phone the view scales the picture to fit instead.
+// THE APP'S FIXED SIZE (lane app-fit-fixed, 2026-10-03, the owner: 「对于自己定死尺寸的窗口我们应该遵循他们的尺寸并且禁止缩放」):
+// a window whose size the app FIXES (the view's `onFixedSize` — WeChat's login, Inkscape's welcome) makes THIS window
+// exactly that pane + its chrome through WindowManager.setFixedSize — frame = picture, never capped at the workspace,
+// not resizable (no handles, no maximize, no snap or grid sizing); null gives the window back its size, resizable.
 //
 // THE APP'S EXIT CLOSES THIS WINDOW; THE OUTER ✕ IS THE APP'S OWN CLOSE (round 3
 // A2, docs/design-desktop-apps-seamless §3.2 — the owner: "我关闭内部窗口之后外部
@@ -422,7 +426,7 @@ export function openDesktopApp(app, id, { syncId } = {}) {
   const ensureView = (kind) => {
     if (view) return view;
     view = kind === 'xpra'
-      ? createXpraView(winInfo.content, { ...viewOpts(), workerUrl: `/api/desktop/${encodeURIComponent(id)}/xpra-ui/js/Protocol.js`, onTitle: (text) => { appTitle = String(text || ''); render(); }, onIcon: setAppIcon, onMinSize: applyMinSize, onMain: onAppMain, onState: onAppState, onMoveResize: onAppMoveResize, dpi: () => (rec && Number.isInteger(rec.dpi) ? rec.dpi : 96), pictureScale: () => renderOf(rec).picture }) // lane D (a): the RECORD says what it was drawn at
+      ? createXpraView(winInfo.content, { ...viewOpts(), workerUrl: `/api/desktop/${encodeURIComponent(id)}/xpra-ui/js/Protocol.js`, onTitle: (text) => { appTitle = String(text || ''); render(); }, onIcon: setAppIcon, onMinSize: applyMinSize, onFixedSize: applyFixedSize, fixedFollows: () => !app.wm._mobileLayout(), onMain: onAppMain, onState: onAppState, onMoveResize: onAppMoveResize, dpi: () => (rec && Number.isInteger(rec.dpi) ? rec.dpi : 96), pictureScale: () => renderOf(rec).picture }) // lane D (a): the RECORD says what it was drawn at
       : createVncView(winInfo.content, viewOpts());
     view.mount.classList.add('desktop-app-mount');
     winInfo._desktopAppView = view; // the raw handle the heavy suite reads (never the DOM)
@@ -469,18 +473,23 @@ export function openDesktopApp(app, id, { syncId } = {}) {
   // (the title bar / the status strip — the UI font scale, a wrapping strip), the window becoming visible again
   // (a background tab, another desktop, a minimize: display:none measures nothing — a ResizeObserver fires when
   // it is laid out again, where the old bounded retry gave up after 20 s), and the UI scale (layout = viewport ÷ it).
-  let minPane = null, minRaf = 0;
+  let minPane = null, minRaf = 0, fixedPane = null;
   function applyMinSize(m) { minPane = m || null; applyMinNow(); }
+  function applyFixedSize(f) { fixedPane = f || null; applyMinNow(); }
   function applyMinNow() {
-    if (!minPane) { app.wm.setMinSize(winInfo.id, null); winInfo._desktopMinPane = null; return; }
+    if (!fixedPane && winInfo.fixedSize) { app.wm.setFixedSize(winInfo.id, null); winInfo._desktopFixedPane = null; } // the app's window is resizable again
+    if (!minPane && !fixedPane) { app.wm.setMinSize(winInfo.id, null); winInfo._desktopMinPane = null; return; }
     const paneEl = view && view.pane;
     const er = winInfo.element.getBoundingClientRect(), pr = paneEl ? paneEl.getBoundingClientRect() : null;
     if (!pr || !(er.width > 0) || !(pr.width > 0)) return; // hidden: the observer below re-runs this once it is laid out
+    // lane app-fit-fixed: the FIXED pane + this window's chrome (the minimum's own measure) = the window, exactly
+    if (fixedPane) { winInfo._desktopFixedPane = { ...fixedPane }; app.wm.setFixedSize(winInfo.id, windowMinForPane(fixedPane, { w: er.width - pr.width, h: er.height - pr.height }, uiScale())); }
+    if (!minPane) { app.wm.setMinSize(winInfo.id, null); winInfo._desktopMinPane = null; return; }
     const min = windowMinForPane(minPane, { w: er.width - pr.width, h: er.height - pr.height }, uiScale());
     winInfo._desktopMinPane = { ...minPane }; // the raw handle the heavy suite reads
     app.wm.setMinSize(winInfo.id, min);
   }
-  const scheduleMin = () => { if (!minPane || minRaf) return; minRaf = requestAnimationFrame(() => { minRaf = 0; applyMinNow(); }); };
+  const scheduleMin = () => { if ((!minPane && !fixedPane) || minRaf) return; minRaf = requestAnimationFrame(() => { minRaf = 0; applyMinNow(); }); };
   const minRo = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(scheduleMin) : null;
   minRo?.observe(winInfo.element); minRo?.observe(winInfo.titleBar);
   window.addEventListener('vs:ui-scale', scheduleMin, { signal: winInfo._listenerCtl?.signal });

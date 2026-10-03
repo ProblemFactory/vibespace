@@ -35,7 +35,7 @@ const STORES = Object.freeze({
   'channels-index.write': row('write', 'channels/index', 'src/channel-store.js', ['writeIndex']),
   'channels-index.read': row('read', 'channels/index', 'src/channel-store.js'),
   'usage-shards.write': row('write', 'usage-history/events-<month>', 'src/usage-history.js', ['_walkAndAppend', 'ingestRemoteEvents']),
-  'usage-cursors.write': row('write', 'usage-history/_cursors', 'src/usage-history.js', ['_walkAndAppend']),
+  'usage-cursors.write': row('write', 'usage-history/_cursors', 'src/usage-history.js', ['_writeCursors']),
   'usage-cursors.read': row('read', 'usage-history/_cursors', 'src/usage-history.js'),
   'otel-truth.write': row('write', 'usage-history/otel-truth', 'src/server/otel-ingest.js', ['create']),
   'otel-truth.append': row('write', 'usage-history/otel-truth', 'src/server/otel-ingest.js', ['create']),

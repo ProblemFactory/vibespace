@@ -95,6 +95,7 @@ const STORE_FILES = [
   { token: "'groups.json'", owners: ['src/channel-store.js'], inPlace: [] },
   { token: "join(dir, 'msgs')", owners: ['src/channel-store.js'], inPlace: [] },
   { token: "'TASK.md'", owners: ['src/task-groups.js'], inPlace: [] },
+  { token: "'task-groups-archive'", owners: ['src/task-groups.js'], inPlace: [] },   // 2.369.204: the Activity log's overflow, MOVED (append-only month files); clearProgress rewrites the one month a cleared entry sits in
 ];
 function fileOwnership(src) {
   const rows = [];
@@ -272,6 +273,7 @@ const ROUTES = {
   'POST /api/tasks/:id/bind': 'echo',
   'POST /api/tasks/:id/unbind': 'echo',
   'POST /api/tasks/:id/progress': 'echo',
+  'GET /api/tasks/:id/progress': 'reads',               // 2.369.204: a page of the live list + data/task-groups-archive/ (the walk plants an archived line and reads it back cleared)
   'POST /api/tasks/:id/export': 'exception: the repo task file — a ONE-SHOT export to a path the user picks (last 30 notes, no detail); the product does not track the file, so a later clear cannot follow it (the user deletes or re-exports it)',
   'POST /api/tasks/import': 'writes',                   // declared: a file the user holds re-seeds an EMPTY group's log; an older file restores its own notes (a restore, not a leak)
   'GET /api/user-todos': 'reads',
@@ -699,6 +701,7 @@ const STORAGE = {
   'src/lib/sidebar-state.js|localStorage|\'archivedFolders\'': ['ids', 'archived folder keys'],
   'src/lib/design-changes.js|localStorage|storeKey': ['owner', 'lane design-changes: the Design window\'s pending changes per design on this device — the owner\'s own comments and the before / after of the texts they edited and the nudges they made (previews not yet sent), each with the quote of the artboard element it is about; never a store record of the five kinds'],
   'src/lib/sidebar-state.js|localStorage|\'sessionCustomNames\'': ['owner', 'the names the owner typed for sessions (never a store record)'],
+  'src/lib/machine-desktop.js|localStorage|RUNS_KEY': ['owner', 'design 014 D1: the owner\'s own last 3 "Run on its desktop…" lines per machine (typed by the owner, re-judged by desktopRunPlan before they are offered; never an agent\'s, never a record)'],
   'src/lib/sidebar-state.js|localStorage|\'sessionModes\'': ['ids', 'terminal | chat per session id'],
   'src/lib/sidebar-state.js|localStorage|\'sessionConfigs\'': ['pref', 'per-session model / effort / permission overrides'],
   'src/lib/sidebar-state.js|localStorage|\'sessionGroups\'': ['ids', 'legacy session groups (names the owner typed + ids)'],
@@ -1154,6 +1157,7 @@ const ORDER = [
   ['src/lib/session-card.js', 'fetch(`/api/session-status/history?sessionKey=${encodeURIComponent(keys)}`)', /^[^\n]*\n\s*\.then\(r => r\.json\(\)\)\.then\(d => \{\s*const hist = [^\n]*\n\s*if \(!hist\.length \|\| !histWrap\.isConnected\) return;/, 'own-container', 'the sidebar card\'s history: its container is made by the card render that fetched it, and a status frame (a clear\'s named one included, r5 ②) re-renders the card'],
   ['src/lib/session-props.js', 'fetch(`/api/session-status/history?sessionKey=${encodeURIComponent(keys)}`).then(r => {', /^[^\n]*\n(?:[^\n]*\n){0,3}?\s*\}\)\.then\(d => \{\s*if \(!histList\.isConnected \|\| histList\._fill !== my\) return;/, 'latest', 'Session Properties\' history: the latest fill paints (r5 ④)'],
   ['src/lib/sidebar-tasks.js', "return fetch('/api/session-status').then(", [/const gen = this\._statusGen \|\| 0;\s*return $/, /^fetch\('\/api\/session-status'\)\.then\(r => r\.ok \? r\.json\(\) : null\)\.then\(d => \{\s*if \(!d\?\.statuses \|\| \(this\._statusGen \|\| 0\) !== gen\) return;/], 'generation', 'the status mirror (the page load + the reconnect resync): dropped when a status frame landed meanwhile (verify r6 ②)'],
+  ['src/lib/task-log.js', 'const r = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/progress?before=${encodeURIComponent(before)}&limit=100`).then((x) => (x.ok ? x.json() : null));', /^[^\n]*\n\s*if \(g0 !== older\.gen\) return;/, 'generation', 'the Task log\'s older entries (2.369.204): a clear that reached the archive bumps older.gen (the group\'s archiveClearedAt moved) and re-reads the held rows — a page begun before it is dropped'],
   ['src/lib/sidebar-tasks.js', "const res = await fetch('/api/tasks');", [/const gen = this\._tasksGen \|\| 0;\s*try \{\s*const res = await $/, /^[^\n]*\n(?:(?![^\n]*this\._tasks = )[^\n]*\n){0,3}?\s*if \(\(this\._tasksGen \|\| 0\) !== gen\) \{/], 'generation', 'the Task Group mirror: dropped when a tasks-updated landed meanwhile (R4 verify r1)'],
 ];
 const callArgs = (text, open) => { let d = 0; for (let i = open; i < text.length; i++) { const c = text[i]; if (c === '(') d++; else if (c === ')') { d--; if (d === 0) return text.slice(open + 1, i); } } return ''; };
@@ -1715,6 +1719,7 @@ const I_RECV = {
   'src/lib/app.js|BACKEND_META[h.id]': ['harness', 'a harness label'], 'src/lib/app.js|BACKEND_META[msg.backend]': ['harness', 'a harness label'],
   'src/lib/app.js|lost': ['account', 'an account'], 'src/lib/app.js|msg': ['frame', 'a server-notice / backend-status frame\'s text (its producer is judged at the `notice` sink)'],
   'src/lib/browser-live-window.js|dw': ['words', 'a PURE outcome\'s sentence (browser-switcher-model)'],
+  'src/lib/browser-live-window.js|sw': ['words', 'a PURE step\'s sentence (browser-new-profile-model machineStepWords: a paired machine with no browser — the machine\'s id + its one command; lane remote-profile-start)'],
   'src/lib/browser-profile-picker.js|r.pin': ['browser profile', 'a profile label'], 'src/lib/browser-build-dialog.js|view': ['browser profile', 'a profile label (Change build…, lane browser-admin)'], 'src/lib/browser-new-profile.js|o': ['browser profile', 'an install outcome\'s words (the New profile… dialog, lane browser-admin)'],
   'src/lib/browser-switcher.js|e': ['error', 'an Error\'s name'], 'src/lib/browser-switcher.js|w': ['words', 'a PURE outcome\'s sentence'],
   'src/lib/browser-trace-view.js|e': ['browser profile', 'a profile label'], 'src/lib/browser-trace-view.js|f': ['browser profile', 'a profile / its file'], 'src/lib/browser-trace-view.js|o': ['browser profile', 'an orphan profile dir'],
@@ -1844,6 +1849,10 @@ const I_RECV = {
   'src/lib/sidebar-mounts.js|cfg': ['mount', 'a storage mount\'s name'], 'src/lib/telemetry-client.js|e': ['error', 'an unhandled rejection\'s reason'],
   'src/lib/workflow-detail.js|opts': ['workflow', 'a workflow run\'s name'], 'src/routes/desktop-apps.js|req.query': ['caller', 'the install the caller asked for (a closed set, echoed clipped)'],
   'src/server/groups-engine.js|r': ['session', 'a resolved member\'s name'], 'src/window-reach.js|probe': ['window', 'an accessibility probe\'s reason'],
+  // design 012 (Slack S1): a typed ChannelError of the Slack adapter — its `detail` carries the vendor's error CODE and the closed `why` (src/channels/slack-words.js), never a record's text
+  'src/channels/slack.js|e': ['error', 'a typed ChannelError: detail.error is Slack\'s error code, detail.why a closed word'],
+  // design 011 lane 3: the usage index owner's own words — no record text reaches it
+  'src/server/usage-index.js|m': ['index worker', 'the usage index worker\'s own state message (a reason NAME, a SQLite error text)'], 'src/server/usage-index.js|a': ['index worker', 'the owner\'s own available() verdict (a reason NAME)'],
 };
 // the per-site class of every record / carrier read: `file|sink|read` → [class, why]
 const I_SITES = {

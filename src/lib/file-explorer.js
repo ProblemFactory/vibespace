@@ -1,6 +1,6 @@
 import { formatSize, attachPopoverClose, createPopover, createModalShell, showContextMenu, getStateSync, copyText, escHtml, frontTruncate, uploadFilesBatched, showInputDialog, showConfirmDialog, showToast, collectDroppedFiles, uiScale } from './utils.js';
 import { installExplorerUploads } from './file-explorer-uploads.js';
-import { installExplorerOps } from './file-explorer-ops.js';
+import { installExplorerOps, fsErrorText } from './file-explorer-ops.js';
 import { setupDirAutocomplete } from './autocomplete.js';
 import { startPointerDrag } from './drag-feed.js'; // THE feed for every drag door (lane-drag-release verify r2 census)
 import { getFileIcon, hasDedicatedViewer, getCategory } from './file-types.js';
@@ -639,7 +639,7 @@ class FileExplorer {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       });
       const d = await r.json().catch(() => ({}));
-      if (!r.ok || d.error) { showToast(t('Copy failed: {msg}', { msg: d.error || r.status }), { type: 'error' }); return; }
+      if (!r.ok || d.error) { showToast(t('Copy failed: {msg}', { msg: (d.error && fsErrorText(d)) || r.status }), { type: 'error' }); return; }
       if (d.opId) {
         const out = await this._trackTransferOp(d.opId, t('Copying {name}…', { name: base }), destPath);
         if (out.cancelled) return;
@@ -694,7 +694,7 @@ class FileExplorer {
           const info = await infoRes.json();
           if (!info.isDirectory) { this.app.openFile(dirPath, dirPath.split('/').pop(), { host: this._host || undefined }); return; }
         }
-        throw new Error(data.error);
+        throw new Error(fsErrorText(data)); // verify-r2: a refusal in the reader's language
       }
       if (this.currentPath !== data.path) { this._selection.clear(); this._selAnchor = null; if (this._selectMode) this._exitSelectMode(); }
       this.currentPath = data.path; this.pathInput.value = data.path; this.items = data.items;

@@ -125,7 +125,12 @@ function groupsOf(xs) {
   }
   return { groups, optional: groups.flat() };
 }
-const MODES = Object.freeze(['ephemeral', 'fixed']);
+/** design 012 (Slack S1): `paste` — a vendor whose OAuth cannot redirect to a loopback (Slack needs https) and whose
+ *  person copies a TOKEN from the vendor's own page: no listener, no port, no `state` in a URL; the consent URL is
+ *  whatever the adapter builds (Slack: its app-manifest link) and `forwardCallback(flowId, pasted)` hands the pasted
+ *  text to the adapter's exchange as `code`. A paste the exchange REFUSES leaves the flow running (the person pastes
+ *  the right one); the flow ends when an exchange lands, at cancel and at its timeout like every flow. */
+const MODES = Object.freeze(['ephemeral', 'fixed', 'paste']);
 
 /** The fixed mode's target, parsed ONCE from the registry's literal. */
 function fixedTarget(callbackUrl) {
@@ -300,7 +305,7 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
     flows.set(flowId, st);
     byId.set(id, flowId);
 
-    const srv = http.createServer(async (req, res) => {
+    const srv = mode === 'paste' ? null : http.createServer(async (req, res) => {
       try {
         const u = new URL(req.url, 'http://127.0.0.1');
         // Fixed mode: the registered path is part of the byte-for-byte URL; a
@@ -325,7 +330,9 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
     // (cancel() had no server to release yet: the listener outlived the flow, and in fixed mode held the port)
     const unlist = () => { flows.delete(flowId); if (byId.get(id) === flowId) byId.delete(id); };
     const bound = () => { if (st.cancelled || st.done) { try { srv.close(); } catch {} return; } st.server = srv; st.listening = true; };
-    if (mode === 'ephemeral') {
+    if (mode === 'paste') {
+      // nothing listens: the paste is the callback (`forwardCallback`)
+    } else if (mode === 'ephemeral') {
       try {
         await listen(srv, 0);
         st.port = srv.address().port;
@@ -374,6 +381,7 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
   async function forwardCallback(flowId, url) {
     const st = flows.get(flowId);
     if (!st || st.done || st.cancelled) throw new OAuthFlowError('no-flow', 'no authorization in progress');
+    if (st.mode === 'paste') return pasted(st, String(url == null ? '' : url));
     const u = new URL(String(url));
     if (u.searchParams.get('state') !== st.state) throw new Error('state mismatch — restart the flow');
     const code = u.searchParams.get('code');
@@ -381,6 +389,26 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
     if (!code) throw new Error('no code in that URL');
     await finish(st, code);
     return { ok: !st.error, result: st.result, error: st.error };
+  }
+
+  /** design 012: THE PASTE (a `paste` flow's callback). The exchange runs once at a time; a refusal is SAID on the flow
+   *  (`error`, the adapter's own sentence — never the pasted text) and the flow keeps running for the next paste; a
+   *  landed exchange ends it exactly like a loopback code (`finish`). */
+  async function pasted(st, text) {
+    if (st.exchanging) throw new OAuthFlowError('busy', `the ${st.label} sign-in is already checking a pasted value — wait for its answer`);
+    if (typeof st.exchange !== 'function') throw new OAuthFlowError('no-flow', 'no authorization in progress');
+    st.exchanging = true;
+    let result = null, err = null;
+    try { result = await st.exchange({ code: text, redirectUri: null, state: st.state, flowId: st.flowId, cancelled: () => st.cancelled || null, narrowed: [] }); }
+    catch (e) { err = String((e && e.message) || e); }
+    st.exchanging = false;
+    if (err !== null && !st.cancelled) { st.error = err; return { ok: false, result: null, error: err }; }
+    st.result = err === null ? result : null; st.error = err; st.done = true; st.finishedAt = now();
+    release(st);
+    const cb = forget(st);
+    if (byId.get(st.id) === st.flowId) byId.delete(st.id);
+    await report(cb, { ok: err === null, result: st.result, error: st.error, cancelled: st.cancelled || null, flowId: st.flowId, id: st.id });
+    return { ok: err === null, result: st.result, error: st.error };
   }
 
   /** THE ONE NARROWING RETRY (owner ruling 2026-09-28): the vendor refused the consent on its own page because its

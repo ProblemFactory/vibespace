@@ -33,6 +33,9 @@
 //      the client half in node (JSON.parse + applyFirst + groupListRows + firstScreen < 20 ms, printed; its work bounded).
 //      CONTROL: the old whole list on the route reads ×N and > 50 MB — red. CONTROL: a non-partial broadcast that still
 //      carries every row — red.
+//   ⑩ A QUIET MINUTE (design 011 lane 2 — the poll stamps left the row): 50 274 rows on the real account, the engine's
+//      timer passes every 5 s for 60 s bringing nothing: ZERO index writes (the count printed), the same file. CONTROL: the
+//      stamp back in the row (the engine writes it there, the serializer keeps it) — a write per polling pass — red.
 // The store's 2 s tick is captured, never scheduled (a tick inside a measured window would be counted); the
 // clock is injected and frozen; per-pid scratch dirs (scripts/scratch.mjs).
 import fs from 'node:fs';
@@ -40,6 +43,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
 import { startWorkMeter, measure, measureAsync, BOUNDED_RATIO } from './work-meter.mjs';
+import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 startWorkMeter();   // BEFORE the modules load (a function compiled before coverage has no block counters)
@@ -360,6 +364,63 @@ console.log('⑨ the first read (design 008): bytes, rowViews, work — at both 
   ok(!bounded(fr1.oldWork, fr2.oldWork) && fr2.oldBytes > 50 * MB, `⑨ CONTROL: the old whole list on the route reads ${fr1.oldWork} → ${fr2.oldWork} (×${(fr2.oldWork / fr1.oldWork).toFixed(2)}) — ${(fr1.oldBytes / MB).toFixed(1)} MB at ${fr1.rows} rows (these rows are lighter than userW's 1 542 bytes), ${(fr2.oldBytes / MB).toFixed(1)} MB at ${fr2.rows} — red`);
 }
 try { eng.stop && eng.stop(); } catch {}
+
+console.log(`⑩ design 011 lane 2: a quiet minute over ${N} rows`);
+{
+  const MC = mutantCopies('chan-index-scale', REPO);
+  const ssrc = fs.readFileSync(path.join(REPO, 'src/channel-store.js'), 'utf8');
+  const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
+  // the pre-lane row: the engine's pass stamps the ROW, the serializer keeps the stamps, nothing heals them
+  const KEEP = ['  const s = JSON.stringify(value, INDEX_KEYS, 1);', '  const s = JSON.stringify(value, RUNTIME_KEYS, 1);'];
+  const HEAL = ['      healRow(k, conv[k]);\n', ''];
+  const WRITER = ["      store.stamps.set(en.key, { [lane.via === 'scan' ? 'lastScanAt' : 'lastPollAt']: now(), ...(complete ? { walkStartedAt } : {}) });", "      Object.assign(en.lane, { [lane.via === 'scan' ? 'lastScanAt' : 'lastPollAt']: now(), ...(complete ? { walkStartedAt } : {}) });"];
+  ok([KEEP, HEAL].every(([f]) => ssrc.split(f).length === 2) && esrc.split(WRITER[0]).length === 2, '⑩ CONTROL setup: the omission, the heal and the engine\'s stamp writer are where the control cuts them');
+  const minute = async (M, tag) => {
+    const e = M.create({ dataDir: path.join(ROOT, `quiet-${tag}`), env: { VIBESPACE_CHANNELS_FAKE: '1' }, broadcast: () => {}, now, log: quiet, censusTimer: () => ({ cancel() {} }) });
+    const x = e.store.index;
+    const qid = (i) => `q_${i.toString(16).padStart(12, '0')}`;
+    await x.update(() => {
+      for (let i = 0; i < N; i++) {
+        Object.assign(x.entry(A, qid(i)), {
+          title: `Re: [ops-${i % 997}] quarterly vendor review and the follow-up on invoice #${100000 + i}`, kind: 'group',
+          participants: `Alice Example <alice.${i % 311}@example.com>, Bob Sample <bob.${i % 173}@example.org>, ops-team@example.net`,
+          lastAt: T - 86400e3 - i * 1000, unread: i % 7, readAt: T - 86400e3 * 2, anchor: `msg_${i.toString(36)}`,
+          stats: { hits7d: i % 5, msgs7d: i % 11 }, convCaps: { at: T, read: 'yes', sendAs: [], why: null },
+          lastText: `Thanks — I looked at the numbers again and the ${i % 13} items on page ${i % 29} still do not add up`,
+        });
+      }
+    });
+    for (let i = 0; i < N; i++) e.store.stamps.set(`${A}/${qid(i)}`, { lastPollAt: now() });   // polled a moment ago
+    // the warm-up, the timer's passes: the account's first (discovery complete — the rows it does not list are marked,
+    // its own conversations' first ingest) and a steady one; the filler rows were polled a moment ago, none is due
+    await e.pass(A); x.flush();
+    offset += 61e3; await e.pass(A); x.flush();
+    const own = () => Object.values(x.live()).filter((en) => en.adapterId === A && !en.key.includes('/q_'));
+    const lastPolls = () => own().map((en) => Number(e.store.stamps.lane(en).lastPollAt) || 0).join();
+    const t0 = now();
+    const f0 = x.flushStats(), ino0 = fs.statSync(e.store.indexFile).ino, size = fs.statSync(e.store.indexFile).size;
+    const j0 = (e.store.stamps.stats().journal || {}).bytes || 0;
+    // the TIMER's passes (what the engine runs every 5 s): the account's rows polled as they come due; discovery is
+    // not due inside the minute (its own cycle is coldSec, printed below)
+    let pollSteps = 0;
+    for (let k = 0; k < 12; k++) { offset += 5e3; const b = lastPolls(); await e.pass(A); if (lastPolls() !== b) pollSteps++; x.sweep(); x.flush(); }
+    const f1 = x.flushStats();
+    const r = { rows: Object.keys(x.live()).length, mb: +(size / 1e6).toFixed(1), writes: f1.writes - f0.writes, skipped: f1.skipped - f0.skipped, sameFile: fs.statSync(e.store.indexFile).ino === ino0, pollSteps, polled: own().filter((en) => Number(e.store.stamps.lane(en).lastPollAt) > t0).length, own: own().length, stampsOwed: e.store.stamps.isDirty(), journalBytes: ((e.store.stamps.stats().journal || {}).bytes || 0) - j0 };
+    // discovery's cycle (coldSec): it stamps `listedAt` on every row the vendor lists — outside this lane's three stamps
+    offset += 900e3; const d0 = x.flushStats().writes; await e.pass(A); x.flush(); r.discoveryWrites = x.flushStats().writes - d0;
+    offset -= 61e3 + 60e3 + 900e3;
+    try { e.stop(); } catch {}
+    return r;
+  };
+  const q = await minute(ENG, 'head');
+  ok(q.rows >= N && q.pollSteps > 0 && q.polled === q.own && q.writes === 0 && q.sameFile, `⑩ a quiet minute at ${q.rows} rows (${q.mb} MB on disk): the timer's 12 passes polled the account's ${q.polled} conversations in ${q.pollSteps} of them and brought nothing — ${q.writes} index writes, ${q.skipped} flushes skipped, the same file; the stamps wait in memory for the side file (owed ${q.stampsOwed}), each appended to its journal (${q.journalBytes} bytes in the minute)`, JSON.stringify(q));
+  console.log(`  · printed, not judged: discovery's own cycle (every coldSec = 900 s) stamps listedAt on every listed row — ${q.discoveryWrites} index write(s) per cycle (outside this lane's three stamps)`);
+  const sc = MC.write('src/channel-store.js', ssrc.replace(KEEP[0], KEEP[1]).replace(HEAL[0], HEAL[1]), 'quiet-inrow');
+  const ec = MC.write('src/server/channels-engine.js', esrc.replace(WRITER[0], WRITER[1]).replace("require('../channel-store.js')", `require(${JSON.stringify(sc)})`), 'quiet-inrow');
+  const qc = await minute(require(ec), 'inrow');
+  ok(qc.pollSteps > 0 && qc.writes >= qc.pollSteps && !qc.sameFile, `⑩ CONTROL: the stamp back in the row — the same quiet minute writes the ${qc.mb} MB index ${qc.writes} times (once per pass that polled: ${qc.pollSteps}) — red`, JSON.stringify(qc));
+  for (const c of copiesCensus(MC.files, MC.dir, REPO, { minCopies: 2 })) ok(c.pass, '⑩ ' + c.name + (c.pass ? '' : ' — ' + c.detail));
+}
 console.log(`\ntest-channels-index-scale: ${pass} passed, ${fail} failed`);
 if (!fail) console.log(`ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

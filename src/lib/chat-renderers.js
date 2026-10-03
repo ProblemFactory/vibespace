@@ -26,7 +26,7 @@ import { handbackFacts } from '../browser-takeover.js'; // lane S3: the handback
 import { ownResumable } from '../browser-fact.js'; // lane browser-resume B (§3.9): the newest end card of the conversation's own browser offers Resume when THE fact says it can
 import { wakeFacts as channelWakeFacts, refOf as channelRefOf, splitLead as channelSplitLead } from '../channel-ref.js'; // B-c127: a channel notice names its conversation (THE NAME LADDER) and opens it with one click
 import { handoverFacts } from '../stash-summary.js'; // 2026-09-28: the hand-over card's title + the notices behind its expander, read back by the module that wrote the words
-import { outputPreview } from '../exit-reach.js'; // lane-exit-run-output E3: the command card's first lines of output (stderr first) + "Show output" (PURE, bundled)
+import { outputPreview, cmdFold } from '../exit-reach.js'; // lane-exit-run-output E3: the command card's first lines of output (stderr first) + "Show output" (PURE, bundled)
 const noticeFacts = (body) => handbackFacts(body) || handoverFacts(body) || channelWakeFacts(body);   // ONE facts hook per producer, tried in order; null = the generic rules
 // PURE builder (CJS pulled into the bundle, like ssh-key-format.js) — the
 // codex multi-agent collab rows (B-7473). Escaper/translator/icons are
@@ -401,12 +401,35 @@ function parseUnifiedDiffLines(text) {
   return diffLines;
 }
 
+/** lane exit-see-whole (design 013 piece 1a; the owner: 「这些指令输入展示不全，也没地方看到完整版」): the command card's
+ *  COMMAND BLOCK — the whole command as the run sent it (≤ 4 KiB, its lines kept, hidden characters refused upstream),
+ *  wrapped (a 4 KiB token breaks anywhere), folded at four lines behind an expander that names what it opens. Text only. */
+function exitCmdBlock(cmd) {
+  const f = cmdFold(cmd);
+  const box = document.createElement('div');
+  box.className = 'chat-exit-cmd-box';
+  const pre = document.createElement('pre');
+  pre.className = 'chat-exit-cmd chat-pre-wrapped';
+  pre.textContent = cmd;
+  box.appendChild(pre);
+  if (!f.folded) return box;
+  box.classList.add('chat-exit-cmd-folded');
+  const label = f.lines > 1 ? t('Show the whole command ({n} lines)', { n: f.lines }) : t('Show the whole command ({n} characters)', { n: f.chars });
+  const det = document.createElement('details');
+  det.className = 'chat-exit-cmd-fold';
+  const sum = document.createElement('summary'); sum.textContent = label; det.appendChild(sum);
+  det.addEventListener('toggle', () => { box.classList.toggle('chat-exit-cmd-open', det.open); sum.textContent = det.open ? t('Fold the command') : label; });
+  box.appendChild(det);
+  return box;
+}
+
 /** The command card's OUTPUT BLOCK (lane-exit-run-output E3): `x` = exit-reach cardOutput — bounded by the producer,
  *  still drawn as text only here. The preview = the first three lines of the stream that carries the answer (stderr
  *  first); the expander = both stored heads whole, each cut said. A run with no output says so in one dim line. */
-function exitRunBlock(x) {
+export function exitRunBlock(x) {
   const wrap = document.createElement('div');
   wrap.className = 'chat-exit-run';
+  if (typeof x.cmd === 'string' && x.cmd) wrap.appendChild(exitCmdBlock(x.cmd));   // lane exit-see-whole: the command AS ITSELF above its output
   const heads = { stdout: String(x.stdout || ''), stderr: String(x.stderr || ''), cut: { stdout: !!(x.cut && x.cut.stdout), stderr: !!(x.cut && x.cut.stderr) } };
   const pv = outputPreview(heads, 3);
   if (!pv.stream) {

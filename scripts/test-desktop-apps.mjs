@@ -44,7 +44,8 @@ ok(Number.isInteger(L.CONCURRENT_CAP) && L.CONCURRENT_CAP >= 1, `CONCURRENT_CAP 
   ok(!/require\(/.test(kl), 'keeper-limits imports nothing');
   const da = read('src/desktop-apps.js');
   const reqs = [...da.matchAll(/require\('([^']+)'\)/g)].map((m) => m[1]);
-  ok(same(reqs, ['./keeper-limits', './office-open']), 'desktop-apps.js imports nothing but the constants home and the PURE office table (§7.9 — itself imports nothing)', reqs);
+  // design 014 D1 verify r1: + src/hidden-chars.js, THE hidden-character set "Run on its desktop…" asks (PURE, imports nothing)
+  ok(same(reqs, ['./keeper-limits', './hidden-chars.js', './office-open']) && !/require\(/.test(read('src/hidden-chars.js')), 'desktop-apps.js imports nothing but the constants home, the PURE hidden-character set and the PURE office table (§7.9 — each imports nothing)', reqs);
   // P8-2 x3 (2026-09-22): the guard numbers are IMPORTED, never copied — every consumer of the keeper's
   // ceiling names a guard number ONLY through the home (`limits.X` / `LIMITS.X`) and none re-spells a
   // guard literal. A grep census over the code with comments stripped (a comment may quote "150 %").
@@ -1096,6 +1097,37 @@ console.log('B-04da ④ askCloseVerdict');
   ok(M.askCloseVerdict(rec, { force: true }).why === 'forced' && M.askCloseVerdict({ ...rec, state: 'launching' }).why === 'not-running' && M.askCloseVerdict({ ...rec, profileDir: null }).why === 'no-profile' && M.askCloseVerdict({ state: 'ready' }).why === 'not-office' && M.askCloseVerdict(null).ask === false, '④ CONTROLS: the person confirmed (force), still launching, no profile to hand over to, any other app ⇒ no ask', ['forced', 'not-running', 'no-profile', 'not-office']);
   const r1 = M.validateRelaunchRequest({ scale: 2, force: true }), r2 = M.validateRelaunchRequest({ scale: 2 }), r3 = M.validateRelaunchRequest({ scale: 2, force: 'yes' });
   ok(r1.ok && r1.force === true && r2.ok && r2.force === false && !r3.ok && r3.code === 'bad-request', '④ a relaunch carries `force` (true only when the person confirmed; anything but a boolean is refused)', [r1, r2, r3]);
+}
+
+// ── design 014 D1 (lane desktop-vnc-native): the picker row per platform — every Linux row BYTE-IDENTICAL to ed1e0b83 ──
+console.log('§D014 the machine picker: linux / darwin / win32 × online / offline × probe ready / none');
+{
+  const A = require(path.join(repo, 'src/desktop-apps.js'));
+  // [input, the ed1e0b83 verdict] — computed ONCE from the base's own machinePickRow (git show ed1e0b83:src/desktop-apps.js), frozen here
+  const BASE = [[{"hostId":"local"},{"selectable":true,"code":"ready"}],[{},{"selectable":true,"code":"ready"}],[null,{"selectable":true,"code":"ready"}],[{"hostId":"h","platform":"linux","connected":true,"capabilities":["desktop-serve"]},{"selectable":true,"code":"ready"}],[{"hostId":"h","platform":"linux","connected":true,"capabilities":[]},{"selectable":false,"code":"host_needs_daemon"}],[{"hostId":"h","platform":"linux","connected":true},{"selectable":false,"code":"host_needs_daemon"}],[{"hostId":"h","transport":"dial","link":"offline"},{"selectable":false,"code":"offline"}],[{"hostId":"h","transport":"dial","link":"online"},{"selectable":true,"code":"connect"}],[{"hostId":"h","transport":"dial","link":"unknown"},{"selectable":false,"code":"offline"}],[{"hostId":"h","transport":"ssh","link":"offline"},{"selectable":true,"code":"offline"}],[{"hostId":"h","transport":"ssh","link":"unknown"},{"selectable":true,"code":"connect"}],[{"hostId":"h","transport":"ssh","link":"online"},{"selectable":true,"code":"connect"}],[{"hostId":"h","platform":"linux","connected":false,"transport":"dial","link":"offline"},{"selectable":false,"code":"offline"}],[{"hostId":"h","platform":"freebsd","connected":true,"capabilities":["desktop-serve"]},{"selectable":false,"code":"no_x11"}],[{"hostId":"h","platform":"linux","connected":true,"capabilities":["desktop-serve"],"vnc":{"ok":true,"auth":"ard","type":30}},{"selectable":true,"code":"ready"}]];
+  const linuxSame = (fn) => BASE.every(([inp, want]) => JSON.stringify(fn(inp)) === JSON.stringify(want));
+  ok(linuxSame(A.machinePickRow), `every Linux / unknown-platform row is byte-identical to today's (${BASE.length} rows; a probe answer on a Linux row is ignored)`, BASE.filter(([i, w]) => JSON.stringify(A.machinePickRow(i)) !== JSON.stringify(w)));
+  const appsSrc = fs.readFileSync(path.join(repo, 'src/desktop-apps.js'), 'utf8');
+  const anchor = "return caps.includes('desktop-serve') ? { selectable: true, code: 'ready' } : { selectable: false, code: 'host_needs_daemon' };";
+  const moved = MUTD.load('src/desktop-apps.js', appsSrc.replace(anchor, anchor.replace("code: 'ready' }", "code: 'ready', desktop: null }")), 'd014-linux');
+  ok(appsSrc.includes(anchor) && !linuxSame(moved.machinePickRow), 'CONTROL: a copy that adds ONE key to a Linux row fails the byte-identical check');
+  const R = (o) => A.machinePickRow({ hostId: 'mac-1', transport: 'dial', link: 'online', ...o });
+  const ARD = { ok: true, auth: 'ard', type: 30 }, VNC = { ok: true, auth: 'password', type: 2 }, NONE = { ok: false, code: 'no_listener' };
+  const cases = [
+    [{ platform: 'darwin', connected: true, vnc: ARD }, { selectable: true, code: 'desktop_ready', desktop: 'vnc-native', setup: 'darwin', auth: 'ard', authType: 30 }],
+    [{ platform: 'darwin', connected: true, vnc: NONE }, { selectable: true, code: 'no_vnc', desktop: 'vnc-native', setup: 'darwin', why: 'no_listener' }],
+    [{ platform: 'darwin', connected: true }, { selectable: true, code: 'no_vnc', desktop: 'vnc-native', setup: 'darwin', why: null }],
+    [{ platform: 'darwin', connected: false, link: 'offline', vnc: ARD }, { selectable: false, code: 'offline', desktop: 'vnc-native', setup: 'darwin' }],
+    [{ platform: 'win32', connected: true, vnc: VNC }, { selectable: true, code: 'desktop_ready', desktop: 'vnc-native', setup: 'win32', auth: 'password', authType: 2 }],
+    [{ platform: 'win32', connected: true, vnc: NONE }, { selectable: true, code: 'no_vnc', desktop: 'vnc-native', setup: 'win32', why: 'no_listener' }],
+    [{ platform: 'win32', connected: false, link: 'offline' }, { selectable: false, code: 'offline', desktop: 'vnc-native', setup: 'win32' }],
+    [{ platform: 'win32', connected: true, capabilities: ['desktop-serve'], vnc: { ok: false, code: 'unsupported_auth' } }, { selectable: true, code: 'no_vnc', desktop: 'vnc-native', setup: 'win32', why: 'unsupported_auth' }],
+  ];
+  for (const [inp, want] of cases) ok(JSON.stringify(R(inp)) === JSON.stringify(want), `${inp.platform} ${inp.connected ? 'online' : 'offline'} ${inp.vnc ? (inp.vnc.ok ? 'probe ready' : 'probe ' + inp.vnc.code) : 'no probe'} ⇒ ${want.code}`, R(inp));
+  ok(R({ platform: 'freebsd', connected: true }).code === 'no_x11', 'any other non-Linux platform is still no_x11');
+  ok(A.machineDesktopId('mac-1') === 'machine-desktop.mac-1' && A.machineDesktopHost('machine-desktop.mac-1') === 'mac-1' && A.machineDesktopId('local') === null && A.machineDesktopId('a:b') === null && A.machineDesktopHost('da-123') === null && A.machineDesktopHost('machine-desktop.local') === null, 'machineDesktopId / machineDesktopHost round-trip; local, a colon and an app id are no machine desktop');
+  const DSm = require(path.join(repo, 'src/server/desktop-stream.js'));
+  ok(DSm.upgradeId('/api/desktop/' + A.machineDesktopId('host-b-0d1e2f3a') + '/stream') === 'machine-desktop.host-b-0d1e2f3a', 'the id fits the bridge\'s STREAM_RE (no new path shape)');
 }
 
 for (const r of copiesCensus(MUTD.files, MUTD.dir, repo, { minCopies: 8 })) ok(r.pass, '§tree ' + r.name + (r.pass ? '' : ' — ' + r.detail));

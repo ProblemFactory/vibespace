@@ -141,10 +141,18 @@ function chipsOf(facts, t) {
 
 /** THE DETAILS — a keyed list in the table's order: `{k, label, values:[{text, title}], more, cut}`; a party is
  *  "Name · address" (the address its title), a line its words, a level its chip word, a time an instant the caller
- *  words (`time: ms`). `DETAIL_PARTIES` are the ones shown before the row's "+N" (the caller expands in place). */
-function detailRows(facts, t) {
+ *  words (`time: ms`). `DETAIL_PARTIES` are the ones shown before the row's "+N" (the caller expands in place).
+ *  lane channel-window-tidy (the owner, 2026-10-03: "email thread里还是没有展示每条消息的metadata（cc，收件人，发件人具体
+ *  地址啥的）"): `from` = the message's AUTHOR as a party (`{id, name, self}`) — the FIRST row, "From: Name · address", so
+ *  the sender's address is a fact on the page (the head shows the name only), never only a tooltip. It is not a fact
+ *  kind: the record's author is the record's, every adapter has one; the caller passes it only beside facts. */
+function detailRows(facts, t, { from = null } = {}) {
   const tr = tOf(t);
   const out = [];
+  if (from && typeof from === 'object' && (from.id || from.name)) {
+    const p = { id: String(from.id || ''), name: String(from.name || ''), ...(from.self === true ? { self: true } : {}) };
+    out.push({ k: 'from', label: tr('From'), values: [{ text: partyFull(p, tr), title: p.id }], shown: DETAIL_PARTIES, more: 0, cut: false, cutText: '' });
+  }
   for (const f of kindsOf(facts)) {
     const row = FACT_KINDS[f.k];
     if (!(row.where === 'summary' || row.where === 'details' || row.detail === true)) continue;

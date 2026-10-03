@@ -1485,6 +1485,7 @@ const CENSUS = [
   ['design-window.js', 'textarea', 'text', 'THE DESIGN COMMENT COMPOSER (Comment mode)'],
   ['desktop-app-launcher.js', 'details', 'control', 'design 009: the app install dialog\'s Details fold (the plan\'s facts, the root sentence, the commands)'],
   ['desktop-app-launcher.js', 'input', 'text+control', 'URL / command / arguments / cwd; keep-profile checkbox'],
+  ['machine-desktop.js', 'input', 'text', 'design 014 D1: "Run on its desktop…"\'s command box + the sign-in\'s name / password fields (a page dialog — the picture is not focused while they are)'],
   ['desktop-app-window.js', 'tabindex', 'control', 'the scale chip (role=button)'],
   ['dial-address-picker.js', 'input', 'text+control', 'the pairing sheet\'s address radios; the custom address (lane-pairing)'],
   ['docx-viewer.js', 'iframe', 'frame', 'an altChunk (sandboxed)'],

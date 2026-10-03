@@ -398,5 +398,13 @@ const M = mutantCopies('placement', REPO);
   for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 5, label: 'placement: ' })) ok(r.pass, r.name, r.detail);
 }
 
+// ── design 012 (Slack S1): THE FIXTURE IS THE DECLARATION — the Slack row this table judges equals the shipped adapter's
+// threads row (and S1 receives by poll), so a change to either is a change to both ──
+{
+  const real = require(path.join(REPO, 'src/channels/slack.js')).caps;
+  ok(JSON.stringify(SLACK.threads) === JSON.stringify(real.threads) && SLACK.receive === real.receive && real.receive === 'poll' && SLACK.sendAs.join() === real.sendAs.join(), 'design 012: the Slack fixture row equals src/channels/slack.js\'s declaration (threads, receive poll, sendAs) — a census');
+  ok(JSON.stringify({ ...SLACK.threads, rootReply: 'quote' }) !== JSON.stringify(real.threads), 'NEGATIVE CONTROL: a fixture whose rootReply drifted is not the declaration');
+}
+
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

@@ -1,13 +1,13 @@
 // THE MACHINE'S COMMAND LIST (lane-exit-run-output E4, 2026-10-01 — the owner: "侧边栏也看不到指令和结果历史"). "Commands…"
 // on a machine (the "Who can use it" dialog's button, the Machines card's button) lists the last 50 commands agents ran
-// there — the time, the conversation, the command's head, the verdict (exit N / could not start — why / timed out /
+// there — the time, the conversation, the command's head (the WHOLE command, copyable, opens the row: lane exit-see-whole), the verdict (exit N / could not start — why / timed out /
 // refused), the duration — and a row opens its output: the first 4 KiB of stdout and stderr the audit line keeps (cut
 // SAID). Drawn from a FRESH `GET /api/hosts/:id/exit-runs` (never a broadcast copy), then KEYED ROWS PATCHED IN PLACE
 // on every `exit-audit` broadcast (the ONE audit writer notifies — the 2.309.0 rule): a new run lands on top, a row of
 // the same key is re-worded without being re-created (an open expander stays open), the list keeps 50. Every string
 // of a run (the command, the output, a conversation's name) is textContent — never innerHTML.
 import { t, deviceLocale } from './i18n.js';
-import { createModalShell, showToast } from './utils.js';
+import { createModalShell, showToast, copyText } from './utils.js';
 import { runRow, spawnFailureText, platformLabel, RUNS_DEFAULT, EXIT_RUN_TIMEOUT_MS } from '../exit-reach.js';
 
 const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
@@ -26,23 +26,36 @@ export function runVerdictText(r) {
 /** The row's KEY: the audit line's own id (verify r2 F7 — two runs of one command in the same millisecond were one row);
  *  a line from before the id: the instant + the conversation + the command. */
 export const runKeyOf = (r) => (r.id ? `id:${r.id}` : `${Number(r.at) || 0}:${r.sessionKey || ''}:${String(r.cmd || '').slice(0, 200)}`);
+/** lane exit-see-whole: Copy puts the WHOLE command (never the head) on the clipboard, said by a toast. */
+export function copyCommand(cmd) {
+  return Promise.resolve(copyText(String(cmd || ''))).then(() => { showToast(t('Command copied')); });
+}
 const whenText = (at) => { try { return new Date(Number(at) || 0).toLocaleString(deviceLocale(), { hour12: false }); } catch { return new Date(Number(at) || 0).toISOString(); } };
 
 /** The ONE row painter (keyed; `patchRow` re-words an existing node in place). */
-function paintRow(node, r) {
+export function paintRow(node, r) {
   node.dataset.key = runKeyOf(r);
   node.dataset.outcome = r.outcome;
   let sum = node.querySelector(':scope > summary');
   if (!sum) { sum = el('summary', 'exit-runs-sum'); node.appendChild(sum); }
   sum.textContent = '';
   sum.append(el('span', 'exit-runs-when', whenText(r.at)), el('span', 'exit-runs-who', r.name || '?'));
+  // lane exit-see-whole (design 013 piece 1b; the owner: 「也没地方看到完整版」): the summary keeps the HEAD on one line; the
+  // WHOLE command opens the body as itself (its lines kept, wrapped) with Copy — never a hover `title`
   const cmd = String(r.cmd || '');
-  const code = el('code', 'exit-runs-cmd', cmd.length > CMD_HEAD ? cmd.slice(0, CMD_HEAD - 1) + '…' : cmd);
-  code.title = cmd;
-  sum.append(code, el('span', 'exit-runs-verdict', runVerdictText(r)), el('span', 'exit-runs-ms', secs(r.ms)));
+  const flat = cmd.replace(/\n/g, ' ');
+  sum.append(el('code', 'exit-runs-cmd', flat.length > CMD_HEAD ? flat.slice(0, CMD_HEAD - 1) + '…' : flat), el('span', 'exit-runs-verdict', runVerdictText(r)), el('span', 'exit-runs-ms', secs(r.ms)));
   let body = node.querySelector(':scope > .exit-runs-out');
   if (!body) { body = el('div', 'exit-runs-out'); node.appendChild(body); }
   body.textContent = '';
+  if (cmd) {
+    const box = el('div', 'exit-runs-cmdbox');
+    const copy = el('button', 'btn-cancel exit-runs-copy', t('Copy command'));
+    copy.type = 'button';
+    copy.onclick = (e) => { e.preventDefault(); e.stopPropagation(); copyCommand(cmd); };
+    box.append(el('pre', 'exit-runs-cmd-all', cmd), copy);
+    body.appendChild(box);
+  }
   const flags = [r.asked ? t('asked you first') : '', r.revokedDuringRun ? t('access was removed while it ran') : '', r.interpreter ? r.interpreter : ''].filter(Boolean);
   if (flags.length) body.appendChild(el('div', 'exit-runs-flags', flags.join(' · ')));
   const any = (r.stdout && r.stdout.trim()) || (r.stderr && r.stderr.trim());

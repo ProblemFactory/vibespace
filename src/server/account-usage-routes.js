@@ -26,6 +26,18 @@ function create({ app, rootDir, HOST, CLAUDE_CMD, NODE_CMD,
   const mounts = mk(getMounts);
   const telemetry = mk(getTelemetry);
   const usageHistory = mk(getUsageHistory);
+  // THE USAGE INDEX SHADOW (design 011 lane 3, L1): a SQLite index of the
+  // ledger, owned by one worker thread (src/server/usage-index.js), that feeds
+  // NOTHING — the Usage-window read below is also asked of the index and the
+  // two answers compared; a difference is a telemetry event, never shown.
+  // Started 30 s after boot, off the boot path: node:sqlite loads only inside
+  // the worker, so an older Node simply has no shadow (said by name), and a
+  // short-lived suite that wires these routes never starts one.
+  const usageIndex = require('./usage-index.js').create({
+    getLedger: () => (typeof getUsageHistory === 'function' ? getUsageHistory() : null),
+    onDiff: (d) => { try { if (typeof telemetry.record === 'function') telemetry.record({ kind: 'event', name: 'usage-index-diff', detail: JSON.stringify(d) }); } catch { } },
+  });
+  setTimeout(() => usageIndex.start(), 30000).unref?.();
   // THE MANUAL RESET-CREDIT USE (design-reset-credits p2): the preview + the
   // POST, thin over the engine (src/routes/reset-credit.js)
   require('../routes/reset-credit.js').registerResetCreditRoutes(app, { engine });
@@ -181,7 +193,12 @@ app.get('/api/usage-stats', async (req, res) => {
       : null;
     // host = the DEVICE filter ('local' | a host id) — top-level over the view
     const hostFilter = req.query.host ? String(req.query.host) : null;
-    res.json(usageHistory.aggregate({ from, to, backend, accounts, hostFilter, pivots }));
+    const answer = usageHistory.aggregate({ from, to, backend, accounts, hostFilter, pivots });
+    // the shadow comparison (design 011 L1), posted in this same synchronous
+    // step so the index answers over exactly the appends this answer saw; it
+    // settles off the response and feeds nothing
+    usageIndex.compare(answer, { from, to, backend, accounts, hostFilter, pivots });
+    res.json(answer);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Per-message account attribution for the msg-meta popup (2.266.1, user

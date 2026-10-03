@@ -148,12 +148,24 @@ function canTransition(from, to, by = null) {
 const isTerminal = (state) => TERMINAL_STATES.includes(state);
 
 /** The channel's policy as a MODE, fail closed: anything but a known mode
- *  reads `review`, and says so. */
-function policyMode(policy) {
+ *  reads `review`, and says so. design 012 (Slack S1): `caps` = the adapter's capability row — a mode its
+ *  `caps.policyModes` does not allow (Slack forbids `direct`: every send as the person passes the Outbox card) reads
+ *  `review` too, `clamped: true` (the stored choice is kept, never obeyed). */
+function policyMode(policy, caps = null) {
   const m = policy && typeof policy === 'object' ? policy.mode : policy;
   if (m === undefined || m === null) return { mode: 'review', unknown: false, declared: null };
-  if (POLICY_MODES.includes(m)) return { mode: m, unknown: false, declared: m };
+  if (POLICY_MODES.includes(m)) {
+    if (!policyModesOf(caps).includes(m)) return { mode: 'review', unknown: false, declared: m, clamped: true };
+    return { mode: m, unknown: false, declared: m };
+  }
   return { mode: 'review', unknown: true, declared: String(m).slice(0, 40) };
+}
+/** The policy modes an adapter allows (its `caps.policyModes`, else every mode) — what the picker offers. A row that
+ *  names none of the known modes reads `['review']` (fail closed). */
+function policyModesOf(caps) {
+  const pm = caps && Array.isArray(caps.policyModes) ? caps.policyModes.filter((x) => POLICY_MODES.includes(x)) : null;
+  if (!pm) return POLICY_MODES.slice();
+  return pm.length ? pm : ['review'];
 }
 
 /** Does the text carry a link? Conservative: a scheme or a www. host. */
@@ -1324,7 +1336,7 @@ module.exports = {
   OUTBOX_STATES, TRANSITIONS, TERMINAL_STATES, POLICY_MODES, DECISION_REASONS, RECEIPT_STATUSES, PROPOSAL_TTL_MS, TEXT_MAX_BYTES, HONESTY_LINE_DEFAULT, IDEMPOTENCY_MODES,
   WITHDRAWABLE_STATES, WITHDRAWN_DEFAULT_REASON, withdrawVerdict, withdrawWhy, withdrawReason,
   RECEIPT_DIFF_MAX, RECEIPT_BLOCK_MAX_BYTES, RECEIPT_GUIDANCE, receiptDiff, receiptFeedback, receiptFateOf, receiptFateText, RECEIPT_DELIVERIES, receiptDeliveryVerdict, utf8Bytes,
-  canTransition, isTerminal, policyMode, hasLinks, offHoursVerdict, decideOutbound, validateProposal, validateCompose, COMPOSE_MAX_RECIPIENTS, expiryVerdict, receiptFor, renderReceiptBlock,
+  canTransition, isTerminal, policyMode, policyModesOf, hasLinks, offHoursVerdict, decideOutbound, validateProposal, validateCompose, COMPOSE_MAX_RECIPIENTS, expiryVerdict, receiptFor, renderReceiptBlock,
   ACCESS_REMOVED_NOTE, withheldReceiptLine,
   REACTION_POLICIES, reactionPolicyOf, REACTION_OPS, validateReaction, reactionQuote, decideReaction,
   PLACEMENTS, THREAD_PLACEMENTS, ROOT_REPLIES, PLACEMENT_WHYS, isThreadPlacement, placementsOf, rootReplyOf, placementOf, placementWords, placementVerdict, placementText, placementRefusalText,

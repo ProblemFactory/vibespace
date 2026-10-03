@@ -548,5 +548,29 @@ console.log('\n⑨ optional scopes: the one narrowing retry against a fake autho
   await new Promise((r) => fakeAuth.close(r));
 }
 
+// ── design 012 (Slack S1): THE PASTE MODE — no listener, the consent URL whatever the caller builds, a pasted text
+// handed to the exchange as `code`; a refused paste is said and the flow KEEPS RUNNING; a landed one ends it; cancel
+// and the timeout end it like any flow ──
+{
+  const ol = OL.createOAuthLoopback({ log: { warn() {}, log() {} } });
+  let seen = [];
+  const f = await ol.begin({ id: 'paste-1', mode: 'paste', label: 'Slack', buildConsentUrl: ({ redirectUri }) => `https://api.slack.com/apps?ru=${redirectUri}`, exchange: async ({ code, redirectUri }) => { seen.push([code, redirectUri]); if (code !== 'right') throw new Error('Slack refused it'); return { ok: true }; } });
+  ok(f.mode === 'paste' && f.listening === false && f.port === null && f.redirectUri === null && f.consentUrl === 'https://api.slack.com/apps?ru=null', 'design 012: a paste flow binds nothing (no port, no redirect URI)');
+  const a = await ol.forwardCallback(f.flowId, 'wrong');
+  ok(a.ok === false && a.error === 'Slack refused it' && ol.status(f.flowId).running === true && ol.status(f.flowId).error === 'Slack refused it', 'design 012: a refused paste is said on the flow, which keeps running');
+  const b = await ol.forwardCallback(f.flowId, 'right');
+  ok(b.ok === true && ol.status(f.flowId).done === true && seen.map((x) => `${x[0]}:${x[1]}`).join() === 'wrong:null,right:null', 'design 012: the right paste lands and ends the flow (the text is the exchange\'s code; no URL is parsed, no state)');
+  const e = await (async () => { try { await ol.forwardCallback(f.flowId, 'right'); return null; } catch (x) { return x; } })();
+  ok(e && e.code === 'no-flow', 'design 012: a paste after the landing has no flow to land on');
+  const g = await ol.begin({ id: 'paste-2', mode: 'paste', buildConsentUrl: () => 'https://x.test/', exchange: async () => ({ ok: true }) });
+  ol.cancel(g.flowId, 'cancelled');
+  const e2 = await (async () => { try { await ol.forwardCallback(g.flowId, 'right'); return null; } catch (x) { return x; } })();
+  ok(e2 && e2.code === 'no-flow' && ol.status(g.flowId).cancelled === 'cancelled', 'design 012: a cancelled paste flow takes no paste');
+  const h = await ol.begin({ id: 'paste-3', mode: 'paste', timeoutMs: 30, buildConsentUrl: () => 'https://x.test/', exchange: async () => ({ ok: true }) });
+  await new Promise((r) => setTimeout(r, 80));
+  ok(ol.status(h.flowId).cancelled === OL.CAUSE_TIMEOUT, 'design 012: a paste flow ends at its timeout like any flow');
+  ok(OL.MODES.join() === 'ephemeral,fixed,paste', 'design 012: the modes are ephemeral, fixed, paste');
+}
+
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

@@ -205,7 +205,7 @@ try {
     await P.evalJs(`(() => { const p = document.querySelector('.mounts-panel'); if (p) p.scrollLeft = 0; return true; })()`);
     await sleep(200);
     const rc = await P.evalJs(machineRowCensusJs(HOST));
-    ok(rc.ok && rc.name === 'exmac' && rc.btns === 8 && rc.lines.length === 2, `N-row: the row shows its name (${rc.nameW} px), all ${rc.btns} icons inside it, both exit lines whole, no sideways scroll (row ${rc.rowW} px)`, rc);
+    ok(rc.ok && rc.name === 'exmac' && rc.btns === 9 && rc.lines.length === 2, `N-row: the row shows its name (${rc.nameW} px), all ${rc.btns} icons inside it, both exit lines whole, no sideways scroll (row ${rc.rowW} px)`, rc);
     const real = fs.readFileSync(path.join(REPO, 'public/style.css'), 'utf8');
     ok(ROW_FIX_REVERT.every(([fixed]) => real.split(fixed).length === 2), 'N-row: the fix\'s rules are in public/style.css once each (the control\'s anchors)');
     const MUTR = mutantCopies('exitrow', REPO);
@@ -363,9 +363,38 @@ try {
     ok(await P.waitFor(`!!document.querySelector('#exit-access-dialog .exit-access-runs')`, 8000), 'the dialog again');
     await P.realClick('#exit-access-dialog .exit-access-runs');
     ok(await P.waitFor(`document.querySelectorAll('#exit-runs-dialog .exit-runs-row').length >= 3`, 8000), 'the list again');
-    const pre9 = await P.evalJs(`(() => { const rows = [...document.querySelectorAll('#exit-runs-dialog .exit-runs-row')]; const r = rows.find((x) => (x.querySelector('.exit-runs-cmd')?.title || '').startsWith('head -c 3000')); if (!r) return null; r.open = true; const p = r.querySelector('.exit-runs-pre'); const cs = getComputedStyle(p); return { maxH: cs.maxHeight, ov: cs.overflowY, h: p.offsetHeight, sh: p.scrollHeight }; })()`);
+    const pre9 = await P.evalJs(`(() => { const rows = [...document.querySelectorAll('#exit-runs-dialog .exit-runs-row')]; const r = rows.find((x) => (x.querySelector('.exit-runs-cmd-all')?.textContent || '').startsWith('head -c 3000')); if (!r) return null; r.open = true; const p = r.querySelector('.exit-runs-pre'); const cs = getComputedStyle(p); return { maxH: cs.maxHeight, ov: cs.overflowY, h: p.offsetHeight, sh: p.scrollHeight }; })()`);
     ok(pre9 && pre9.maxH === '320px' && pre9.ov === 'auto' && pre9.h <= 330 && pre9.sh > pre9.h, 'a row\'s output block is bounded at 320 px and scrolls', pre9);
     await P.evalJs(`document.querySelector('#exit-runs-dialog .dialog-close')?.click(); document.querySelector('#exit-access-dialog .dialog-close')?.click(); true`);
+    // ── lane exit-see-whole (design 013 piece 1, the owner: 「这些指令输入展示不全，也没地方看到完整版。remote界面也没法audit…」):
+    //    at 390 px the card shows the command AS ITSELF (wrapped, folded at four lines, the expander naming its count), and the
+    //    Remote panel's machine row opens the command list in ONE click — its icon and its last-run line ──
+    await P.cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 820, deviceScaleFactor: 1, mobile: false });
+    await P.evalJs(`app.sidebar.toggle?.(false); true`);   // the sidebar out of the way of the real click (the harness's chat column measures ~100 px here: a stricter wrap than a phone's)
+    const tok = 'Q'.repeat(1365), multi = Array.from({ length: 12 }, (_, i) => `echo line-${i}`).join('\n');
+    const r10 = await runApi(S[1].token, `echo ${tok}`), r11 = await runApi(S[1].token, multi);
+    ok(r10.status === 200 && r11.status === 200 && /line-11/.test(r11.j.stdout), 'two runs: a 1 370-character one-token command and a 12-line script', [r10.status, r11.status]);
+    const cmdOf = (start) => `([...document.querySelectorAll('.chat-vs-notice .chat-exit-cmd')].find((x) => x.textContent.startsWith(${JSON.stringify(start)})) || null)`;
+    const geo = (start) => P.evalJs(`(() => { const p = ${cmdOf(start)}; if (!p) return null; p.scrollIntoView({ block: 'nearest' }); const box = p.closest('.chat-exit-cmd-box'), sum = box.querySelector('.chat-exit-cmd-fold > summary'), out = p.closest('.chat-exit-run').querySelector('.chat-exit-out'); return { vw: innerWidth, text: p.textContent, w: p.clientWidth, sw: p.scrollWidth, h: p.offsetHeight, sh: p.scrollHeight, summary: sum ? sum.textContent : null, open: box.classList.contains('chat-exit-cmd-open'), titled: !!(p.title || box.title || (sum && sum.title)), outW: out ? out.clientWidth : -1, outSW: out ? out.scrollWidth : -1 }; })()`);
+    ok(await P.waitFor(`!!${cmdOf('echo QQQ')} && !!${cmdOf('echo line-0')}`, 8000), 'both cards carry the command block');
+    const a10 = await geo('echo QQQ');
+    ok(a10 && a10.vw === 390 && a10.w > 50 && a10.text === 'echo ' + tok && a10.sw <= a10.w + 1 && a10.outSW <= a10.outW + 1 && a10.h < 90 && a10.sh > a10.h && a10.summary === '显示完整命令（1370 个字符）' && !a10.titled, 'at 390 px the one-token command is whole in the card, wrapped (no sideways overflow), folded at four lines behind 显示完整命令（1370 个字符）; its 1 365-byte output line wraps too; no hover title', a10);
+    ok(await P.realClick(`(${cmdOf('echo QQQ')}?.closest('.chat-exit-cmd-box').querySelector('.chat-exit-cmd-fold > summary') || null)`), 'a real click on the expander');
+    const b10 = await geo('echo QQQ');
+    ok(b10 && b10.open && b10.h > a10.h * 3 && b10.sw <= b10.w + 1 && b10.summary === '收起命令', 'open: the whole command shows, still wrapped; the expander now reads 收起命令', b10);
+    const a11 = await geo('echo line-0');
+    ok(a11 && a11.text === multi && a11.summary === '显示完整命令（12 行）', 'the 12-line script keeps its lines, folded behind 显示完整命令（12 行）', a11);
+    await P.cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 820, deviceScaleFactor: 1, mobile: false });
+    await openRemote(P);
+    const listIcon = `(${rowOf}?.querySelector('.mounts-row-actions button[title^="在 exmac 上运行过的命令"]') || null)`;
+    ok(await P.realClick(listIcon), 'a real click on the machine row\'s Commands icon (在 exmac 上运行过的命令…)');
+    ok(await P.waitFor(`document.querySelectorAll('#exit-runs-dialog .exit-runs-row').length >= 3`, 8000), '…opens the machine\'s command list in ONE click');
+    const c12 = await P.evalJs(`(() => { const r = [...document.querySelectorAll('#exit-runs-dialog .exit-runs-row')].find((x) => (x.querySelector('.exit-runs-cmd-all')?.textContent || '').startsWith('echo line-0')); if (!r) return null; r.open = true; return { whole: r.querySelector('.exit-runs-cmd-all').textContent, titles: r.querySelectorAll('[title]').length, copy: r.querySelector('.exit-runs-copy')?.textContent }; })()`);
+    ok(c12 && c12.whole === multi && c12.titles === 0 && c12.copy === '复制命令', 'its row holds the WHOLE script with its lines and a 复制命令 button — no hover title', c12);
+    await P.evalJs(`document.querySelector('#exit-runs-dialog .dialog-close')?.click(); true`);
+    ok(await P.realClick(`(${rowOf}?.querySelector('button.mounts-exit-last') || null)`), 'a real click on the machine row\'s last-run line');
+    ok(await P.waitFor(`document.querySelectorAll('#exit-runs-dialog .exit-runs-row').length >= 3`, 8000), '…opens the same list');
+    await P.evalJs(`document.querySelector('#exit-runs-dialog .dialog-close')?.click(); true`);
   }
   ok(P.errors.length === 0 && P2.errors.length === 0, 'no page exception', [...P.errors, ...P2.errors].slice(0, 3));
   try { process.kill(W.lockPid(pair.root), 'SIGTERM'); } catch { }

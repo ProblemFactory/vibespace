@@ -175,13 +175,23 @@ function watchModeVerdict({ framesSeen = 0, waitedMs = 0, firstFrameMs = WATCH_F
  *     switch, `Target.activateTarget` through the session), a mediated browser ⇒ `none` (`mediated_tabs`, as before)
  *   watching (not driving): the viewed tab again ⇒ `none`; the session's current tab while watching another ⇒ `follow`
  *     (back to the agent's); another of ITS tabs ⇒ `watch` (the view moves — the agent's tab is untouched)
- *   another conversation's / nobody's tab, his own window ⇒ `none` (the row's own verdict words it — browser-tabs)
+ *   another conversation's / a job's / his own / nobody's tab (not driving) ⇒ `watch` (accept-fixes-strip F8: view only)
+ *   his own window ⇒ `none` (the row's own verdict words it — browser-tabs)
  */
 const TAB_CLICK_ACTS = Object.freeze(['front', 'switch', 'watch', 'follow', 'none']);
+/** F8: the owner words of a tab he may watch that is not the viewed agent's (browser-tabs OWNER_WORDS less `agent`). */
+const OWNER_SEEN = Object.freeze(['other', 'you', 'orphan']);
 function tabClickVerdict({ owner = 'orphan', human = false, driving = false, mediated = false, active = false, watching = null, targetId = '' } = {}) {
-  if (human || owner !== 'agent') return { act: 'none', why: 'not-the-agents' };
   const id = String(targetId || '').toUpperCase();
   const w = watching ? String(watching).toUpperCase() : null;
+  // accept-fixes-strip F8 (the owner, accepting 2.369.202: 「中间俩不能点，有俩能点的也让人困惑」): every tab of HIS browser is
+  // his to WATCH from a conversation's view — another conversation's, a job's, his own, nobody's — view only (nobody's tab
+  // moves); DRIVING keeps the takeover rules (the bridge refuses a watch while he drives; his own window keeps its row)
+  if (!human && owner !== 'agent' && OWNER_SEEN.includes(owner)) {
+    if (driving) return { act: 'none', why: 'driving-keeps-the-takeover-rules' };
+    return w && w === id ? { act: 'none', why: 'already-watched' } : { act: 'watch', why: 'view-only' };
+  }
+  if (human || owner !== 'agent') return { act: 'none', why: 'not-the-agents' };
   if (driving) {
     if (mediated) return { act: 'none', why: 'mediated_tabs' };
     return active ? { act: 'front', why: 'its-current-tab' } : { act: 'switch', why: 'another-of-its-tabs' };

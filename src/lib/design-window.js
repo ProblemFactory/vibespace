@@ -40,6 +40,10 @@ import { openDesignHome } from './design-home.js'; // lane design-systems-home: 
 
 const RELOAD_COALESCE_MS = 250;
 const CHIP_MS = 10000;
+// accept-fixes F1: a comment's answer is waited for with words — "Still sending…" after SLOW, the composer's own Send back
+// (and the words for a late answer) at WAIT; a server busy for 15 s (owner-seen) or a lost answer never pins "Sending…" again
+const COMMENT_SLOW_MS = 4000;
+const COMMENT_WAIT_MS = 30000;
 const PRINT_FRAME_MS = 10 * 60 * 1000;
 
 const hostKey = (h) => (!h || h === 'local' ? '' : String(h));
@@ -134,6 +138,7 @@ export function openDesign(app, { host = '', dir = '', sessionId = '', syncId } 
   if (existing) {
     if (sessionId && !existing._design.sessionId) { existing._design.sessionId = sessionId; if (existing._openSpec) existing._openSpec.sessionId = sessionId; }
     app.wm.revealWindow(existing.id, { replay: !!syncId });
+    existing._designRewatch?.(); // accept-fixes F3: the agent's open / new re-asserts THIS window's watch (the hub counts it for sync)
     return existing;
   }
   const openSpec = { action: 'openDesign', host: h, dir: d, sessionId: sessionId || '' };
@@ -350,6 +355,7 @@ export function openDesign(app, { host = '', dir = '', sessionId = '', syncId } 
     sayChip(t('Live repaint is off for this design — {why}. Press Reload to re-read it.', { why: liveOff }));
   });
   watch();
+  winInfo._designRewatch = watch; // the hub refcounts per socket — a second watch from the same window is a no-op
   const onState = (connected) => { if (connected && !signal.aborted) { watch(); load(); } };
   app.ws.onStateChange?.(onState);
   let reloadTimer = 0;
@@ -444,20 +450,26 @@ export function openDesign(app, { host = '', dir = '', sessionId = '', syncId } 
     el.style.left = Math.max(8, Math.min(x, sw - W - 8)) + 'px';
     el.style.top = Math.max(8, Math.min(y, sh - 180)) + 'px';
   }
-  let sending = false;
+  let sending = null; // the composer whose comment is on its way
   async function sendComment() {
     if (!composer || sending) return;
     const text = composer.ta.value.trim();
     if (!text) { composer.ta.focus(); sayChip(t('Write what should change first')); return; }
-    const p = composer.pick;
-    sending = true;
-    composer.send.textContent = t('Sending…');
+    const c = composer, p = c.pick; // accept-fixes F1: THIS composer sent it — its button is the one that says so, whatever happens meanwhile
+    sending = c;
+    c.send.textContent = t('Sending…');
+    const ctl = new AbortController();
+    const slow = setTimeout(() => { c.send.textContent = t('Still sending…'); }, COMMENT_SLOW_MS);
+    const late = setTimeout(() => ctl.abort(), COMMENT_WAIT_MS);
     // host + dir ride along (L4 A③b): when no live chat process can take the comment, they name the design whose
     // conversation the STASH entry waits for — without them a killed conversation's comment was refused `no_conversation`
-    const r = await fetchJson('/api/design/comment', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: winInfo._design.sessionId, host: h, dir: d, quote: { file: p.file, path: p.path, tag: p.tag, text: p.text }, text }) });
-    sending = false;
-    if (composer) composer.send.textContent = t('Send');
+    const r = await fetchJson('/api/design/comment', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: winInfo._design.sessionId, host: h, dir: d, quote: { file: p.file, path: p.path, tag: p.tag, text: p.text }, text }), signal: ctl.signal });
+    clearTimeout(slow); clearTimeout(late);
+    sending = null;
+    c.send.textContent = t('Send');
+    if (ctl.signal.aborted) { sayChip(t('No answer from the server yet — the comment may still reach the agent: look at the chat before sending it again')); return; } // the words stay
     if (!r || r.error || r.ok === false) { sayChip(commentRefusalText(r)); return; } // the typed words stay in the box
+    if (composer !== c) { showToast(commentSentText(r)); return; } // closed or re-opened meanwhile: never close the NEXT composer's words
     closeComposer();
     canvas.setPick(false);
     hideChip();

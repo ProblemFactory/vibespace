@@ -828,11 +828,18 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     // failed rename rolls the key back (S76 / S76b: a crash or an unwritable data/ after the rename left the disk naming the old path)
     const lineageKey = exists && typeof keeper.lineageKeyOf === 'function' ? keeper.lineageKeyOf(p.dir, { retireOf: id }) : '';
     if (exists) { to = T.forgottenDirName(p.dir, now()); const mv = moveLineageFirst(lineageKey, to, `profile ${id}`); try { fs.renameSync(p.dir, to); } catch (e) { if (mv.moved) { try { keeper.moveDirLineage(mv.key, p.dir); } catch { /* said by the keeper */ } } throw namedError('forget_failed', `could not move ${p.dir} aside (${e.message}) — nothing was removed`); } }
-    const row = fileForgotten({ profileId: id, label: p.label, dir: p.dir, to, bytes, why: exists ? 'forgotten by the user (directory moved aside, never deleted by itself)' : 'forgotten by the user (its directory was already gone)' });
-    const r = keeper.removeProfile(id, { unpin });
+    // lane remote-profile-start: a PAIRED machine's profile has no folder here — its folder THERE is removed by the machine's
+    // own op (never a path from here), or the ledger + the answer say what was left
+    // verify r1: the record goes FIRST (sync), the machine is asked after with the snapshot (a start never lands between)
+    const r0 = p.host && typeof keeper.removeOnMachine === 'function' ? keeper.removeProfile(id, { unpin }) : null;
+    const m = r0 ? await keeper.removeOnMachine(id, { profile: p }) : null;
+    const why = m ? (m.removed ? `deleted by the user (its folder ${m.dir} on ${m.host} deleted there)` : m.left ? `deleted by the user — ${m.left}` : `deleted by the user (its folder on ${m.host} was already gone)`)
+      : exists ? 'forgotten by the user (directory moved aside, never deleted by itself)' : 'forgotten by the user (its directory was already gone)';
+    const row = fileForgotten({ profileId: id, label: p.label, dir: p.dir, to, bytes, why });
+    const r = r0 || keeper.removeProfile(id, { unpin });
     log.log?.(`[browser-trace] profile ${id} "${p.label}" forgotten: ${p.dir} → ${to || '(no directory)'} (ledger ${row.id})`);
     bc({ type: 'browser-housekeeping-updated', forgotten: row });
-    return { ok: true, removed: r.removed, from: p.dir, to, ledger: row };
+    return { ok: true, removed: r.removed, from: p.dir, to, ledger: row, ...(m ? { machine: m } : {}) };
   }
   /** `forget` an orphan directory (no record): verdict on the path → rename → ledger. */
   function forgetOrphan(dir) {

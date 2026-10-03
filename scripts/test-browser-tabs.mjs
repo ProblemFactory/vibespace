@@ -156,8 +156,40 @@ function pureLegs(TT, tag = '') {
   leg(!walk.length, 'THE ROW MODEL draws exactly what the verdict allows — 16 viewer states × every tab (never a control on another conversation\'s tab)', walk);
   const m0 = TT.tabRowModel({ tabs: rowTabs, owners: owWords, viewer: { human: false }, driving: true });
   const rA = m0.rows.find((r) => r.targetId === T(4));
-  leg(rA.mark === 'The agent’s' && rA.canClose && !rA.canSwitch && m0.rows.find((r) => r.targetId === T(7)).canSwitch && m0.rows.find((r) => r.targetId === T(8)).markTip === 'Another conversation’s — open its live view to use it' && TT.chipTitle('x'.repeat(40), '') === 'x'.repeat(23) + '…' && TT.chipTitle('', 'https://www.shop.example/a') === 'shop.example' && TT.tabRowModel({ tabs: [{ targetId: T(99), title: 'x' }], owners: {} }).rows[0].owner === 'orphan',
+  leg(rA.mark === 'The agent’s' && rA.canClose && !rA.canSwitch && m0.rows.find((r) => r.targetId === T(7)).canSwitch && m0.rows.find((r) => r.targetId === T(8)).markTip === 'Another conversation’s — open its live view to use it' && TT.chipTitle('x'.repeat(40), '') === 'x'.repeat(23) + '…' && TT.chipTitle('', 'https://www.shop.example/a') === 'shop.example' && TT.tabRowModel({ tabs: [{ targetId: T(99), title: 'x', url: 'https://x.example/' }], owners: {} }).rows[0].owner === 'orphan',
     'the row: marks + tooltips in words, the chip title ≤ 24 (the host when the page has none), a tab not judged yet is nobody\'s (nothing drawn on it)');
+  // accept-fixes F4 + F9 (the owner's acceptance of 2.369.202: two chips "en.wikipedia.org/wiki/T… · agent 的", no telling
+  // which one the agent works on): the agent's current tab says so ON its chip; chips that would read the same keep their tails
+  {
+    const tw = [{ targetId: T(1), title: 'en.wikipedia.org/wiki/Tide', url: 'https://en.wikipedia.org/wiki/Tide', active: true }, { targetId: T(2), title: 'en.wikipedia.org/wiki/Tide_pool', url: 'https://en.wikipedia.org/wiki/Tide_pool' }, { targetId: T(3), title: 'Tide - Wikipedia', url: 'https://en.wikipedia.org/wiki/Tide' }];
+    const mm = TT.tabRowModel({ tabs: tw, owners: { [T(1)]: 'agent', [T(2)]: 'agent', [T(3)]: 'other' }, viewer: { human: false } });
+    const [a, b, c] = mm.rows;
+    leg(a.here === true && a.hereText === 'The agent is here' && b.here === false && b.hereText === '' && c.here === false && /Tide$/.test(a.title) && /Tide_pool$/.test(b.title) && a.title !== b.title && Array.from(a.title).length <= 24 && Array.from(b.title).length <= 24 && c.title === 'Tide - Wikipedia',
+      'accept-fixes F4/F9: the agent\'s current tab carries "The agent is here" on its chip (no other chip does); two chips that cut to the same words keep their tails (≤ 24); a short title stays whole', mm.rows.map((r) => ({ title: r.title, here: r.here })));
+  }
+  // accept-fixes-strip F7 (the owner: "en.wikipedia.org/wiki/Tide" where `open` printed "Tide - Wikipedia") — the REAL
+  // 0.38.1's rows, captured: its `tab list --json` (and the stream's `tabs` record) keep the title a tab had while it loaded
+  {
+    const fx = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/agent-browser-0.38.1/tab-list-titles.json'), 'utf8'));
+    const rows = fx.tabList.data.tabs;
+    const mm = TT.tabRowModel({ tabs: rows, owners: Object.fromEntries(rows.map((x) => [x.targetId, 'agent'])), viewer: { human: false }, titles: fx.cdpTitles });
+    const bare = TT.tabRowModel({ tabs: rows, owners: Object.fromEntries(rows.map((x) => [x.targetId, 'agent'])), viewer: { human: false } });
+    leg(rows.every((x) => TT.isUrlTitle(x.title, x.url)) && mm.rows.map((r) => r.title).join('|') === 'Tide - Wikipedia|Late title' && mm.rows.every((r) => !/127\.0\.0\.1/.test(r.title)) && /^Tide - Wikipedia — http/.test(mm.rows[0].tip)
+      && bare.rows.every((r) => /^127\.0\.0\.1/.test(r.title)) && bare.rows[0].title !== bare.rows[1].title && TT.pageTitleOf({ title: 'Docs', url: 'https://d.example/x' }, '') === 'Docs' && TT.pageTitleOf({ title: 'en.wikipedia.org/wiki/Tide', url: 'https://en.wikipedia.org/wiki/Tide' }, 'en.wikipedia.org/wiki/Tide') === ''
+      && !TT.isUrlTitle('Tide - Wikipedia', 'https://en.wikipedia.org/wiki/Tide') && TT.isUrlTitle('www.shop.example/a', 'https://www.shop.example/a') && JSON.stringify(TT.titlesOf([{ targetId: rows[0].targetId, type: 'page', title: 'T' }, { targetId: 'F'.repeat(32), type: 'iframe', title: 'no' }])) === JSON.stringify({ [rows[0].targetId]: 'T' }) && TT.pageRows([{ targetId: rows[1].targetId, title: ' Late title ', url: 'http://x/late' }])[0].title === 'Late title',
+      'accept-fixes-strip F7: the REAL 0.38.1 rows (captured) name each tab by its address; the chip takes the PAGE\'s title (CDP\'s); without one it says the host (two on one host keep their tails, F9) — never an address dressed as a title', mm.rows.map((r) => r.title).concat(bare.rows.map((r) => r.title)));
+  }
+  // accept-fixes-strip F8 (the owner: 「中间俩不能点，有俩能点的也让人困惑」): another holder's tab names its holder by NAME;
+  // a blank tab nobody holds is not a chip (the tab on show always is)
+  {
+    const tb = [{ targetId: T(1), title: 'Tide - Wikipedia', url: 'https://en.wikipedia.org/wiki/Tide', active: true }, { targetId: T(2), title: '', url: 'about:blank' }, { targetId: T(3), title: 'Example Domain', url: 'https://example.com/' }, { targetId: T(4), title: 'Jobs', url: 'https://j.example/' }, { targetId: T(5), title: '', url: 'about:blank' }];
+    const mm = TT.tabRowModel({ tabs: tb, owners: { [T(1)]: 'agent', [T(2)]: 'orphan', [T(3)]: 'other', [T(4)]: 'other', [T(5)]: 'agent' }, viewer: { human: false }, names: { [T(3)]: 'office-devices', [T(4)]: 'a very long conversation name that goes on' } });
+    const by = Object.fromEntries(mm.rows.map((r) => [r.targetId, r]));
+    const anon = TT.tabRowModel({ tabs: tb, owners: { [T(3)]: 'other' }, viewer: { human: false } });
+    leg(!by[T(2)] && !!by[T(5)] && by[T(3)].mark === 'office-devices' && /^office-devices’s tab — watch it here \(view only\)/.test(by[T(3)].markTip) && Array.from(by[T(4)].mark).length === 24 && /…$/.test(by[T(4)].mark)
+      && TT.tabRowModel({ tabs: tb, owners: { [T(3)]: 'other' }, viewer: { human: false } }).rows.find((r) => r.targetId === T(3)).mark === 'Another conversation’s' && anon.rows.some((r) => r.targetId === T(1)) && !anon.rows.some((r) => r.targetId === T(2)) && TT.BLANK_URL_RE.test('chrome://newtab/') && !TT.BLANK_URL_RE.test('https://x.example/'),
+      'accept-fixes-strip F8: another conversation\'s tab says WHOSE by name (≤ 24, the full words in its tip), "Another conversation’s" only when no name is known; a blank tab nobody holds is not drawn — the agent\'s blank tab and the tab on show are', mm.rows.map((r) => r.targetId.slice(0, 2) + ':' + r.mark));
+  }
   // the handback sentence
   const s1 = TT.userActsSentence([{ kind: 'tab-close', title: 'Cart', url: 'https://shop.example/cart' }, { kind: 'tab-switch', title: 'Docs', url: 'https://d.example/' }, { kind: 'tab-close', title: '', url: 'https://x.example/' }]);
   leg(s1 === 'While driving, the user closed 2 of your tabs (“Cart — https://shop.example/cart”, “https://x.example/”) and switched your current tab to “Docs — https://d.example/”.' && TT.userActsSentence([]) === '' && TT.userActsSentence([{ kind: 'x' }]) === '', 'the handback sentence names what the user closed and where he left the agent', s1);
@@ -194,6 +226,15 @@ for (const l of pureLegs(TB)) ok(l.c, l.n, l.extra);
   const c3 = redOf("  for (const h of hs) for (const r of cleanRoots(h.roots)) if (present.has(r) && !out.has(r)) out.set(r, str(h.key));\n  spread();\n  for (const h of hs) { const a = idKey(h.active); if (isTargetId(a) && present.has(a) && !out.has(a)) out.set(a, str(h.key)); }\n",
     "  for (const h of hs) { const a = idKey(h.active); if (isTargetId(a) && present.has(a) && !out.has(a)) out.set(a, str(h.key)); }\n  for (const h of hs) for (const r of cleanRoots(h.roots)) if (present.has(r) && !out.has(r)) out.set(r, str(h.key));\n  spread();\n", 'active-first');
   ok(Array.isArray(c3) && c3.some((n) => /ACTIVE never outranks/.test(n)), 'CONTROL: an ownership rule where a session\'s ACTIVE tab outranks the user\'s root — red', c3);
+  // accept-fixes-strip: the F7 / F8 rules each turn their leg red when taken out
+  const c4 = redOf("    .map((x) => ({ ...x, title: pageTitleOf(x, tt[idKey(x.targetId)]) }))\n", "    .map((x) => ({ ...x }))\n", 'binary-titles');
+  ok(Array.isArray(c4) && c4.some((n) => /F7/.test(n)), 'CONTROL F7: a row model that keeps the binary\'s titles (the 2.369.202 shape) — the F7 leg goes red', c4);
+  const c5 = redOf("  for (const v of [cdpTitle, row && row.title]) { const t = str(v).trim().slice(0, 300); if (t && !isUrlTitle(t, url)) return t; }\n", "  for (const v of [cdpTitle, row && row.title]) { const t = str(v).trim().slice(0, 300); if (t) return t; }\n", 'address-as-title');
+  ok(Array.isArray(c5) && c5.some((n) => /F7/.test(n)), 'CONTROL F7: a title rule that accepts an address dressed as a title — red', c5);
+  const c6 = redOf("  if (owner === 'other') return name ? str(name) : t('Another conversation’s');\n", "  if (owner === 'other') return t('Another conversation’s');\n", 'no-names');
+  ok(Array.isArray(c6) && c6.some((n) => /F8/.test(n)), 'CONTROL F8: a mark that never names the holder ("Another conversation’s", the 2.369.202 words) — red', c6);
+  const c7 = redOf("    .filter((x) => x.active || wordOf(x) !== 'orphan' || !BLANK_URL_RE.test(str(x.url).trim()));\n", "    .filter(Boolean);\n", 'blank-orphans');
+  ok(Array.isArray(c7) && c7.some((n) => /F8/.test(n)), 'CONTROL F8: a row that draws a blank tab nobody holds ("about:blank · Nobody’s") — red', c7);
 }
 
 // ═══ the fake agent-browser: ONE shared Chrome per namespace (the measured 0.38.1 shapes) ═══════════════════════

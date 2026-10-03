@@ -969,9 +969,11 @@ class JobManager {
     job.runs.push({ startedAt: runTs, trigger, log: path.join(ctl, 'current.log') });
     if (job.runs.length > 20) job.runs.splice(0, job.runs.length - 20);
     this._save(); // intent-before-spawn, flushed
+    // accept-fixes-jobs F6: the job's OWN directory (its cmd.cwd — never the server's cwd fallback) is exported as
+    // VIBESPACE_JOB_CWD: vibespace-browser's write fence lets a job save a screenshot / download there
     const spec = {
       argv: job.cmd.argv, cwd: job.cmd.cwd || process.cwd(),
-      env: jobEnv({ ...(job.cmd.env || {}), ...this._secretsFor(job), VIBESPACE_API: this.d.apiBase || `http://127.0.0.1:${process.env.PORT || 3456}`, VIBESPACE_JOB_ID: job.id, VIBESPACE_JOB_TOKEN: this._jobToken(job), PATH: path.join(this.d.dataDir, 'bin') + ':' + (process.env.PATH || '') }),
+      env: jobEnv({ ...(job.cmd.env || {}), ...this._secretsFor(job), VIBESPACE_API: this.d.apiBase || `http://127.0.0.1:${process.env.PORT || 3456}`, VIBESPACE_JOB_ID: job.id, VIBESPACE_JOB_TOKEN: this._jobToken(job), ...(typeof job.cmd.cwd === 'string' && job.cmd.cwd[0] === '/' ? { VIBESPACE_JOB_CWD: job.cmd.cwd } : {}), PATH: path.join(this.d.dataDir, 'bin') + ':' + (process.env.PATH || '') }),
       logCapBytes: 50 * 1024 * 1024, stdinOpen: !!job.stdinOpen,
     };
     const wrapper = path.join(this.d.dataDir, 'bin', 'job-wrapper.js');

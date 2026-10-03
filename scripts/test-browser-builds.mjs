@@ -348,7 +348,7 @@ const S = require('../src/browser-serve.js');
   const ad = read('src/agentd/agentd.js');
   ok(/capabilities: \[[^\]]*'browser-serve', 'browser-builds'/.test(ad) && /require\('\.\/\.\.\/browser-serve\.js'\)/.test(ad), 'the daemon advertises `browser-builds` beside `browser-serve` and runs the SAME op table (the daemon bundles src/browser-serve.js → src/browser-builds.js)');
   const ac = read('src/server/browser-access.js');
-  ok(/e\.code === 'builds_unsupported'\) \? e\.code/.test(ac), 'the access layer keeps the code by name (never folded into host_unavailable)');
+  ok(/e\.code === 'builds_unsupported'( \|\| e\.code === 'remove_unsupported')?\) \? e\.code/.test(ac), 'the access layer keeps the code by name (never folded into host_unavailable)'); // lane remote-profile-start: + remove_unsupported beside it
 }
 function B_ns(pid) { return require('../src/browser-profiles.js').sessionNameFor(pid); }
 

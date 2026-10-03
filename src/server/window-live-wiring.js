@@ -47,14 +47,19 @@ function install({ app, auth, vnc, keeper, DESKTOP_SINGLETON_ID, dataDir, env, a
   const engine = require('./window-targets-engine.js').create({ keeper: keeper.local || keeper, dataDir, env, activeSessions, serverSetting, broadcast: leaseBroadcast, groupsOf, log });
   // lane E (D3): the ONE producer of "Ask <agent> to take control" — free next turn by default, a wake through the gated ladder
   const windowRequest = require('./window-request.js').create({ engine, deliver, activeSessions, log });
-  const governed = (id) => id !== DESKTOP_SINGLETON_ID && typeof keeper.viewerJoined === 'function';
+  // design 014 D1: a Windows / macOS machine's whole desktop (`machine-desktop.<hostId>`) is NOT a keeper session —
+  // the access layer resolves it; like the singleton it is the person's own (never governed, never an agent target)
+  const MD = (id) => !!(access && require('../desktop-apps.js').machineDesktopHost(id));
+  const own = (id) => id === DESKTOP_SINGLETON_ID || MD(id);
+  const governed = (id) => !own(id) && typeof keeper.viewerJoined === 'function';
   const stream = require('./desktop-stream.js').create({
-    auth, onInput: (id) => { keeper.noteInput(id); engine.noteUserInput(id); },
-    onDesktopSize: (id, w, h) => keeper.noteDesktopSize?.(id, w, h), // P8-2 x4: the client asked the display to follow its pane ⇒ the keeper fits the app to it
-    resolveTarget: (id) => (id === DESKTOP_SINGLETON_ID ? { kind: 'rfb', port: vnc.port } : keeper.streamTarget(id)),
+    auth, onInput: (id) => { if (MD(id)) return; keeper.noteInput(id); engine.noteUserInput(id); },
+    onDesktopSize: (id, w, h) => keeper.noteDesktopSize?.(id, w, h), // P8-2 x4 (a machine desktop never asks — its view runs resizeSession off): the client asked the display to follow its pane ⇒ the keeper fits the app to it
+    resolveTarget: (id) => (id === DESKTOP_SINGLETON_ID ? { kind: 'rfb', port: vnc.port } : MD(id) ? access.machineDesktopTarget(id) : keeper.streamTarget(id)),
+    upstreamWhy: access ? (id) => (MD(id) ? access.machineDesktopGone(id) : null) : null, // design 014 D1: "<machine> went offline"
     forwardPort: access ? (hostId, port) => access.forwardPort(hostId, port) : null, // lane C2: a paired machine's picture port, forwarded (src/server/desktop-access.js)
-    inputPolicy: (id, viewerId) => (id === DESKTOP_SINGLETON_ID ? { relay: true } : engine.inputPolicy(id, viewerId)), // the singleton desktop is the user's own — never gated
-    onViewerLeft: (id, viewerId) => { if (id !== DESKTOP_SINGLETON_ID) engine.viewerLeft(id, viewerId); },
+    inputPolicy: (id, viewerId) => (own(id) ? { relay: true } : engine.inputPolicy(id, viewerId)), // the singleton desktop is the user's own — never gated
+    onViewerLeft: (id, viewerId) => { if (!own(id)) engine.viewerLeft(id, viewerId); },
     viewerSeats: { // x5: the singleton desktop is the user's own and never governed ('free')
       join: (id, { viewerId, pane, prev, ua }) => { if (governed(id)) keeper.viewerJoined(id, { viewerId, pane, prev, label: DV.viewerLabel(ua) }); },
       leave: (id, viewerId) => { if (governed(id)) keeper.viewerLeft(id, viewerId); },

@@ -23,6 +23,10 @@
 //      cascade: widen again ⇒ still inside), a capture of a display:none window never writes zeros, stored bounds
 //      land on whole px, a workspace-CAPPED raise stays local — a patched copy with the r2 levers pulled back as the
 //      control.
+//   §5 (lane app-fit-fixed, 2026-10-03 — WeChat's login in a blank window, Inkscape's welcome cut): a window whose app
+//      FIXES its size (WindowManager.setFixedSize) takes it exactly, never capped at the workspace, and is not resizable
+//      (no drag, no maximize, a zone moves it, never sizes it); null releases it — a patched copy without the lock as
+//      the control, wiring pins for the drag's snap branch, the CSS and desktop-app-window.
 // Prerequisite: `npm run build`. Run: node scripts/test-window-minsize.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -413,6 +417,76 @@ console.log('§4b r2 — a box the window manager kept ITSELF, on a workspace th
   ok(same(C.aHiddenBounds, { left: 0, top: 0, width: 0, height: 0 }), `CONTROL: pre-r2, a capture of the display:none window writes ${JSON.stringify(C.aHiddenBounds)}`, C.aHiddenBounds);
   ok(!C.whole.every((v) => /^\d+px$/.test(v)), `CONTROL: pre-r2, stored bounds land on fractional px (${C.whole.join(' ')})`, C.whole);
   ok(!C.capped.boundsKept && C.capped.notified === 1, `CONTROL: pre-r2, the capped raise re-captures the shared bounds and announces them (kept ${C.capped.boundsKept}, notify ×${C.capped.notified})`, C.capped);
+}
+
+console.log('§5 lane app-fit-fixed — a window whose app FIXES its size takes that size and is not resizable (the owner: 「对于自己定死尺寸的窗口我们应该遵循他们的尺寸并且禁止缩放」)');
+{
+  // the measured cases (real xpra 6.5.4, DPR 2, desktop.appScale 2, 2026-10-03): WeChat's login = a 280×380 CSS pane in a
+  // 282×382 window (seamless: no bars), Inkscape's welcome = a 710×678 pane in a 712×743 window; a fixed 1000×900 GTK window
+  // at 2× = a 1002×965 window on an 878 px tall workspace — larger than the screen, kept at the app's size
+  const fixedOn = async (WM) => {
+    const wm = mkWm(WM);
+    const mk = (id, w, h, l, t) => { const el = mkEl(w, h, l, t); const cls = new Set(); el.classList = { add: (c) => cls.add(c), remove: (c) => cls.delete(c), toggle: (c, on) => (on ? cls.add(c) : cls.delete(c)), contains: (c) => cls.has(c) }; el.cls = cls; const win = { id, element: el, onResize() { win.r = (win.r || 0) + 1; }, gridBounds: null, _tabChain: null, isMaximized: false }; wm.windows.set(id, win); wm._setupResize(win); return win; };
+    const box = (win) => { const s = win.element.style; return { left: parseFloat(s.left), top: parseFloat(s.top), width: parseFloat(s.width), height: parseFloat(s.height) }; };
+    const out = {};
+    const a = mk('wx', 900, 620, 130, 130);
+    out.lock = typeof wm.setFixedSize === 'function' ? wm.setFixedSize('wx', { w: 282, h: 382 }) : (a.element.style.width = '282px', a.element.style.height = '382px', true);
+    out.again = typeof wm.setFixedSize === 'function' ? wm.setFixedSize('wx', { w: 282, h: 382 }) : false;
+    out.locked = box(a); out.inline = [a.element.style.minWidth, a.element.style.maxWidth, a.element.style.minHeight, a.element.style.maxHeight]; out.cls = a.element.cls.has('window-fixed-size');
+    out.se = await drag(wm, a, 'se', 300, 200);
+    out.nw = await drag(wm, a, 'nw', -100, -100);
+    wm.toggleMaximize('wx'); out.max = { isMax: a.isMaximized, box: box(a) };
+    if (a.isMaximized) wm.toggleMaximize('wx');
+    await sleep(80);
+    out.half = wm._placeWindow(a, { left: 800, top: 4, width: 796, height: 992 }, 4); out.halfBox = box(a);
+    out.resizeTo = wm.resizeWindowTo('wx', { w: 700, h: 500 }); out.afterResizeTo = box(a);
+    wm.setMinSize('wx', { w: 282, h: 382 }); out.minKept = [a.element.style.minWidth, a.element.style.maxWidth];
+    out.release = typeof wm.setFixedSize === 'function' ? wm.setFixedSize('wx', null) : true;
+    out.released = box(a); out.releasedInline = [a.element.style.minWidth, a.element.style.maxWidth, a.element.style.minHeight, a.element.style.maxHeight]; out.releasedCls = a.element.cls.has('window-fixed-size');
+    out.seAfter = await drag(wm, a, 'se', 100, 50);
+    // larger than the workspace (1600×1000 here): the app's size, never capped, its top-left on the workspace
+    const b = mk('big', 900, 620, 500, 300);
+    if (typeof wm.setFixedSize === 'function') wm.setFixedSize('big', { w: 1702, h: 1065 }); else { b.minWidth = 1702; b.minHeight = 1065; wm._applyOwnMin(b); }
+    out.big = box(b);
+    wm._placeWindow(b, { left: 400, top: 250, width: 400, height: 250 }, 4); out.bigCell = box(b);
+    // a maximized window that becomes fixed is restored first
+    const c = mk('mx', 700, 500, 50, 60); wm.toggleMaximize('mx'); await sleep(60);
+    if (typeof wm.setFixedSize === 'function') wm.setFixedSize('mx', { w: 400, h: 300 });
+    out.mx = { isMax: c.isMaximized, box: box(c) };
+    return out;
+  };
+  const { WindowManager } = await import('../src/lib/window.js');
+  const A = await fixedOn(WindowManager);
+  ok(A.lock === true && A.again === false && same(A.locked, { left: 130, top: 130, width: 282, height: 382 }) && same(A.inline, ['282px', '282px', '382px', '382px']) && A.cls, `setFixedSize: WeChat's 282×382 — the window TAKES the app's size (its top-left kept), min = max inline (the .window floor 320 overruled), class window-fixed-size; the same size again changes nothing (${JSON.stringify(A.locked)})`);
+  ok(same(A.se, A.locked) && same(A.nw, A.locked), `no resize drag: the SE and NW handles leave it at 282×382 (${JSON.stringify(A.se)} / ${JSON.stringify(A.nw)})`);
+  ok(A.max.isMax === false && same(A.max.box, A.locked), 'no maximize: toggleMaximize (the button, the double-click, the command, the app\'s own request) leaves it at its size');
+  ok(same(A.halfBox, { left: 800, top: 4, width: 282, height: 382 }) && same(A.half, A.halfBox), `a zone (a snap half, a grid cell, stored bounds, a layout) MOVES it to the zone's corner and never sizes it (${JSON.stringify(A.halfBox)})`);
+  ok(A.resizeTo === false && same(A.afterResizeTo, A.halfBox) && same(A.minKept, ['282px', '282px']), 'resizeWindowTo (a Scale ▸ relaunch\'s fit) refuses; a new minimum never overwrites the fixed min / max');
+  ok(A.release === true && same(A.released, { left: 700, top: 4, width: 900, height: 620 }) && A.releasedInline[1] === '' && A.releasedInline[3] === '' && A.releasedInline[0] === '320px' && !A.releasedCls, `null RELEASES it (WeChat's login replaced by its resizable main): the size before the lock comes back (900×620, slid inside the workspace), max cleared, the own minimum back under the .window floor, resizable (${JSON.stringify(A.released)})`);
+  ok(A.seAfter.width > 900 && A.seAfter.height > 620, `…and the SE handle resizes it again (${JSON.stringify(A.seAfter)})`);
+  ok(same(A.big, { left: 0, top: 0, width: 1702, height: 1065 }) && same(A.bigCell, { left: 0, top: 0, width: 1702, height: 1065 }), `a fixed window LARGER than the 1600×1000 workspace keeps the app's size (never capped, never scaled), its top-left slid onto the workspace (0,0), the rest past the edge — a grid cell moves it, never shrinks it (${JSON.stringify(A.big)})`);
+  ok(A.mx.isMax === false && same(A.mx.box, { left: 50, top: 60, width: 400, height: 300 }), `a MAXIMIZED window whose app fixes its size is restored first, then takes the size (${JSON.stringify(A.mx.box)})`);
+
+  // CONTROL: a patched copy with the lock's levers pulled back (no setFixedSize — the window only gets the app's size as a
+  // MINIMUM, today's rule: workspace-capped, resizable, maximizable, zone-sized)
+  const src = read('src/lib/window.js');
+  const levers = [
+    ['  setFixedSize(id, size) {', '  _setFixedSizeOff(id, size) { // pre-fix CONTROL'],
+    ['        if (win._resizeOp || win.fixedSize) return false;', '        if (win._resizeOp) return false;'],
+    ['    if (win.fixedSize && !win.isMaximized) return; // lane app-fit-fixed', '    if (false) return; // pre-fix CONTROL'],
+  ];
+  const hits = levers.map(([from]) => src.split(from).length - 1);
+  ok(hits.every((n) => n === 1), `CONTROL: each lock lever is spelled exactly once in window.js (${hits.join(', ')})`);
+  let mut = src; for (const [from, to] of levers) mut = mut.replace(from, to);
+  const C = await fixedOn((await import(MUTW.write('src/lib/window.js', mut, 'fixed'))).WindowManager);
+  ok(!same(C.se, C.locked) && C.max.isMax === true && C.big.width < 1702, `CONTROL: pre-fix the "fixed" window is resized by the handle (${JSON.stringify(C.se)}), maximized (${C.max.isMax}) and capped at the workspace (${C.big.width}×${C.big.height}) — the app's fixed picture then sits in a blank pane or is scaled`);
+
+  // WIRING: the drag never offers a snap / grid zone to a fixed window (both the move and the drop), the CSS hides its
+  // handles + maximize, the phone layout overrules the inline max, desktop-app-window feeds setFixedSize
+  ok(src.split('if (!e.altKey && !shakeBypass && snapEnabled && !win.fixedSize) {').length === 3, 'WIRING: the title-bar drag\'s snap / grid branch is skipped for a fixed window on the move AND on the drop (2 sites)');
+  const css = read('public/style.css'), daw = read('src/lib/desktop-app-window.js');
+  ok(/\.window\.window-fixed-size > \.resize-handle, \.window\.window-fixed-size \.win-maximize \{ display: none; \}/.test(css) && /@media \(max-width: 768px\)[\s\S]*?\.window \{[^}]*max-width: none !important; max-height: none !important;/.test(css), 'WIRING: style.css hides a fixed window\'s resize handles and maximize button; the phone layout forces max none !important (the window IS the screen)');
+  ok(/onFixedSize: applyFixedSize, fixedFollows: \(\) => !app\.wm\._mobileLayout\(\)/.test(daw) && /app\.wm\.setFixedSize\(winInfo\.id, windowMinForPane\(fixedPane, \{ w: er\.width - pr\.width, h: er\.height - pr\.height \}, uiScale\(\)\)\)/.test(daw) && /if \(!fixedPane && winInfo\.fixedSize\) \{ app\.wm\.setFixedSize\(winInfo\.id, null\)/.test(daw), 'WIRING: desktop-app-window turns the view\'s onFixedSize into setFixedSize (pane + the measured chrome, windowMinForPane) and releases it when the view says null; the picture scales only on the phone layout');
 }
 
 // ── tree: THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──

@@ -1048,6 +1048,25 @@ console.log('②b THE PACE (rule 18): the owner\'s 873-conversation first ingest
   ok(D.paceWaitMs(P, 0, 40) === 0 && D.paceWaitMs(D.paceCharge(P, 0, 40), 0, 40) === 1000 && D.paceWaitMs(D.paceCharge(P, 0, 40), 500, 40) === 500 && D.paceWaitMs(D.paceCharge(P, 0, 410), 0, 410) === 1000 && D.paceLevel(D.paceCharge(P, 0, 410), 10250) === 40 && D.paceWaitMs(null, 0, 1e9) === 0, 'the bucket arithmetic: a full bucket sends at once, an empty one waits the shortfall (≤ 1 s per ask), a debt is waited out, a full bucket is capped, no pace never waits');
 }
 
+// ═══ ②c design 011 lane 2: A RESTART after the poll stamps left the row ════════════════════════
+// The stamps live in a side file written at most every 120 s (src/channel-store.js STAMPS_FLUSH_MS) and at close, and
+// every set in between is appended to its journal (poll-stamps.log, replayed at the start). A row is due at
+// `lastPollAt + cadence`, so a restart re-polls exactly what was lost: nothing after a clean stop or a kill -9 (the
+// journal), the rows whose due time fell inside the lost interval when the journal could not be written (said), every
+// row when the file is gone — and that last one is the first ingest's shape, paced (rule 18) and inside the minute (rule 9).
+console.log('②c design 011 lane 2: a restart re-polls only what the side file lost — paced, inside the budget');
+{
+  const { STAMPS_FLUSH_MS } = require(path.join(REPO, 'src/channel-store.js'));
+  const NOWc = T0 + 31e3, CAD = 900e3;   // 873 cold rows (15 min) — userW's shape
+  const restart = (lastOf) => { const sim = account(D0, { keys: 873, limit: 3000, units: 40, pace: GMAIL_PACE, latency: 20, cadenceOf: () => CAD, lastOf }); const p = sim.runPass({ origin: 'timer' }); return { calls: sim.fetches.length, max1s: sim.maxIn(1000), max60s: sim.maxIn(60e3), cut: !!p.cut }; };
+  const spread = (i) => NOWc - (i * 1031) % CAD;   // each row polled within its cadence, spread over it
+  const kept = restart(spread), stale = restart((i) => spread(i) - STAMPS_FLUSH_MS), lost = restart(() => 0);
+  const share = Math.ceil(873 * STAMPS_FLUSH_MS / CAD) + 1;
+  ok(kept.calls === 0, `a clean stop or a kill -9 (the side file written at close, or the journal replayed over it): the restart's timer pass fetches ${kept.calls} of 873 rows`, J(kept));
+  ok(stale.calls > 0 && stale.calls <= share, `a kill -9 while the journal could not be written (the side file ${STAMPS_FLUSH_MS / 1000} s behind): ${stale.calls} rows re-polled early — at most the ${share} whose due time fell in the lost interval, never a storm`, J(stale));
+  ok(lost.calls === 873 && !lost.cut && lost.max1s <= 80 && lost.max60s <= 2440, `the side file deleted: all 873 due at once, and the pace + the minute bound the re-poll (≤ ${lost.max1s} units in any second, ${lost.max60s} in any minute of the 3000 budget, never cut)`, J(lost));
+}
+
 // ═══ ③ FAIRNESS ═══════════════════════════════════════════════════════════════════════════════
 console.log('③ FAIRNESS: the due list under a saturating stream, a lone request behind 873 due rows, the bound');
 {

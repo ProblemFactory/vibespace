@@ -36,7 +36,7 @@
 
 /** The CLOSED failure set. A code outside it is itself a contract violation. */
 // the reply PLACEMENT vocabulary (2026-09-28) — ONE spelling, the PURE outbox policy's (the verdict lives there)
-const { PLACEMENTS, ROOT_REPLIES, isThreadPlacement, placementsOf } = require('../channel-policy.js');
+const { PLACEMENTS, ROOT_REPLIES, isThreadPlacement, placementsOf, POLICY_MODES } = require('../channel-policy.js');
 const ChannelSettings = require('../channel-settings.js');   // B-df40 part 3: the declared per-vendor rows a caps settingKey must name
 
 const CHANNEL_ERROR_CODES = Object.freeze([
@@ -145,6 +145,13 @@ const TOS_RISK = Object.freeze(['none', 'stated', 'prohibited']);
  *  the unit its per-account budget is counted in (`caps.budget.unit`). */
 const OLDER_HISTORY = Object.freeze(['page', 'none']);
 const BUDGET_UNITS = Object.freeze(['request', 'quota-unit']);
+/** design 012 (Slack S1): what happens to the LOCAL copy when the account is removed — `keep` (the default: the logs
+ *  stay on disk, archive-never-destroy) or `purge-on-remove` (the vendor's terms ask the copy to go with the app —
+ *  Slack's Developer Policy). The engine's `removeRecord` reads it; the remove dialog says it. */
+const RETENTION_MODES = Object.freeze(['keep', 'purge-on-remove']);
+/** design 012 D20: the audience kinds `convCaps` may say (a DM, a private conversation, the whole workspace, a
+ *  conversation shared with another organization). CLOSED. */
+const AUDIENCE_KINDS = Object.freeze(['dm', 'private', 'public', 'external']);
 /** Lane R5: the drain actions a `caps.pace.cost` may price (drain rule 18). */
 const PACE_COSTS = Object.freeze(['fetch', 'discover', 'scanHost', 'feed']);
 /**
@@ -289,6 +296,11 @@ const METHOD_GATES = Object.freeze({
   // asks when the reply is PROPOSED (stored, shown on the card, handed back
   // verbatim to `send` as `envelope`) — never decided at send time
   replyEnvelope: (c) => c.replyEnvelope === true && (c.sendAs || []).length > 0,
+  // design 012 (Slack S1): what a proposal's text WILL DO, decided when it is proposed — `caps.prepareSend === true`
+  // declares `prepareSend(convId, {text})` → {text, notifies, unresolved, plain, mentions, tooLong}: each `@Name`
+  // resolved to the vendor's id ONCE (stored on the proposal, shown on the card, handed back verbatim to `send` as
+  // `prepared`), the names it will notify, the ones two people answer (the proposal is refused by name)
+  prepareSend: (c) => c.prepareSend === true && (c.sendAs || []).length > 0,
   // lane message-facts (B-f066): the FACTS of a thread stored before its records carried them — `caps.factsOf === true`
   // declares `factsOf(convId)` → {facts: {[vendorId]: [...]}}, asked only on a person's Details click (engine `messageFacts`)
   factsOf: (c) => c.factsOf === true && Array.isArray(c.facts) && c.facts.length > 0,
@@ -348,6 +360,18 @@ function validateCaps(kind, caps, { channelSettings } = {}) {
     if (new Set(c.facts).size !== c.facts.length) bad('caps.facts names a kind twice');
   }
   if (c.factsOf !== undefined && typeof c.factsOf !== 'boolean') bad('caps.factsOf must be a boolean (true = factsOf(convId) reads a stored thread\'s facts)');
+  // design 012 (Slack S1): THE POLICY MODES the vendor allows (absent = every one of channel-policy's POLICY_MODES) — a
+  // non-empty subset, each once, `review` always among them (fail closed: an account must always be able to ask);
+  // channel-policy's `policyMode(policy, caps)` clamps a declared mode outside it to review and the picker hides it
+  if (c.policyModes !== undefined) {
+    if (!Array.isArray(c.policyModes) || !c.policyModes.length) bad(`caps.policyModes must be a non-empty array of ${POLICY_MODES.join('|')}`);
+    for (const m of c.policyModes) if (!POLICY_MODES.includes(m)) bad(`caps.policyModes holds ${JSON.stringify(m)} — only ${POLICY_MODES.join('|')}`);
+    if (new Set(c.policyModes).size !== c.policyModes.length) bad('caps.policyModes names a mode twice');
+    if (!c.policyModes.includes('review')) bad("caps.policyModes without 'review' — every account must be able to ask before it sends");
+  }
+  if (c.prepareSend !== undefined && typeof c.prepareSend !== 'boolean') bad('caps.prepareSend must be a boolean (true = prepareSend(convId, {text}) decides the mentions when a proposal is made)');
+  if (c.prepareSend === true && !(Array.isArray(c.sendAs) && c.sendAs.length)) bad('caps.prepareSend on a read-only adapter (caps.sendAs is empty)');
+  if (c.retention !== undefined && !RETENTION_MODES.includes(c.retention)) bad(`caps.retention must be one of ${RETENTION_MODES.join('|')}`);
   if (c.factsOf === true && !(Array.isArray(c.facts) && c.facts.length)) bad('caps.factsOf without caps.facts (which kinds would it read?)');
   if (c.budget !== undefined) {
     const b = c.budget;
@@ -659,6 +683,13 @@ function createChannelRegistry({ channelSettings } = {}) {
           if ((r.reactions.read === true && cr.read === 'none') || (r.reactions.add === true && !cr.add)) throw new ChannelError('vendor-error', `${kind}.convCaps returned reactions wider than caps.reactions — a per-conversation resolution may only NARROW`, { retryable: false, detail: { declared: cr, asked: r.reactions } });
           out.reactions = { read: r.reactions.read === true, add: r.reactions.add === true, why: r.reactions.why || null };
         }
+        // design 012 D20: WHO WILL SEE a message sent here — a closed kind, the organizations by NAME (through the name
+        // door: peer-written), a member count; anything else is dropped
+        if (r.audience && typeof r.audience === 'object' && AUDIENCE_KINDS.includes(r.audience.kind)) {
+          const orgs = (Array.isArray(r.audience.orgs) ? r.audience.orgs : []).map((x) => peerName(x, 100)).filter(Boolean).slice(0, 5);
+          const n = Number(r.audience.members);
+          out.audience = { kind: r.audience.kind, orgs, members: Number.isInteger(n) && n >= 0 && n <= 1e7 ? n : null, title: peerName(r.audience.title, 100) || null };
+        }
         return out;
       },
       /** Checks history's own two promises before the caller ever sees it. */
@@ -746,6 +777,14 @@ function createChannelRegistry({ channelSettings } = {}) {
       },
       reconcile: gated('reconcile', impl.reconcile && impl.reconcile.bind(impl)),
       replyEnvelope: gated('replyEnvelope', impl.replyEnvelope && impl.replyEnvelope.bind(impl)),
+      /** design 012: a proposal's mentions and notify line, decided ONCE — bounded here: the names through the name door
+       *  (≤ 50 each list), every mention's id in the id alphabet, the wire text a string (the send re-derives it). */
+      async prepareSend(convId, opts = {}) {
+        const r = (await gated('prepareSend', impl.prepareSend && impl.prepareSend.bind(impl))(convId, opts)) || {};
+        const names = (v) => (Array.isArray(v) ? v : []).map((x) => peerName(x, 100)).filter(Boolean).slice(0, 50);
+        const mentions = (Array.isArray(r.mentions) ? r.mentions : []).filter((x) => x && typeof x.id === 'string' && /^[A-Z0-9][A-Z0-9_]{1,40}$/.test(x.id) && peerName(x.name, 100)).slice(0, 50).map((x) => ({ name: peerName(x.name, 100), id: x.id }));
+        return { text: typeof r.text === 'string' ? r.text : '', notifies: names(r.notifies), unresolved: names(r.unresolved), plain: names(r.plain), mentions, tooLong: r.tooLong === true, sendMax: Number.isInteger(r.sendMax) && r.sendMax > 0 ? r.sendMax : null, at: Number.isFinite(r.at) ? r.at : Date.now() };
+      },
       /** lane message-facts (B-f066): a stored thread's facts — `{facts: {[vendorId]: [...]}}`, each list through the ONE
        *  validator and held to `caps.facts` (an undeclared kind is dropped by name), ≤ 500 messages, ids bounded. */
       async factsOf(convId) {
@@ -891,7 +930,7 @@ function createChannelRegistry({ channelSettings } = {}) {
 
 module.exports = {
   createChannelRegistry, ChannelError, validateCaps, validateMethods,
-  CHANNEL_ERROR_CODES, RECEIVE_MODES, SCAN_SOURCES, HISTORY_MODES, SEND_IDENTITIES, IDENTITY_MARKING, TOS_RISK, METHOD_GATES, OLDER_HISTORY, BUDGET_UNITS, PACE_COSTS, RENDER_MODES, TITLE_FORMS, FEED_METHODS, BY_ID_KINDS,
+  CHANNEL_ERROR_CODES, RETENTION_MODES, AUDIENCE_KINDS, RECEIVE_MODES, SCAN_SOURCES, HISTORY_MODES, SEND_IDENTITIES, IDENTITY_MARKING, TOS_RISK, METHOD_GATES, OLDER_HISTORY, BUDGET_UNITS, PACE_COSTS, RENDER_MODES, TITLE_FORMS, FEED_METHODS, BY_ID_KINDS,
   SEARCH_METHODS, SEARCH_HIT_FIELDS, searchRowOf,
   peerName,
   THREAD_READ, THREAD_LISTING, REACTION_READ, REACTION_REMOVE, REACTION_VOCABULARY, REACTION_CUSTOM, NO_THREADS, NO_REACTIONS, THREAD_REACTION_METHODS, threadsOf, reactionsOf,

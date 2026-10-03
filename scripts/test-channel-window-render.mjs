@@ -187,6 +187,7 @@ function picturePng(w = 200, h = 120) {
     conv('gmail', 't_fold', 'Fold thread', 'thread', caps([], 'send-scope-not-granted'));
     conv('gmail', 't_facts', 'Facts thread', 'thread', caps([], 'send-scope-not-granted'));   // ⑬ lane message-facts
     conv('lark', 'oc_facts', 'Facts room', 'group', caps(['user'], null));   // ⑬b lane message-facts-lark
+    conv('gmail', 't_tidy', 'SMC follow-up', 'thread', caps([], 'send-scope-not-granted'));   // ⑥b lane channel-window-tidy
   });
   // ① the Lark room: a text with a mention + a markdown link + a bare URL, a picture 2 min later by the SAME author, a post by another
   store.appendRecords('lark', 'oc_render', [
@@ -276,6 +277,27 @@ function picturePng(w = 200, h = 120) {
     const id = store.outbox.nextId();
     ob.proposals[id] = { id, adapterId: 'gmail', convId: 't_replyall', key: 'gmail/t_replyall', title: 'Rack 12 PDU alarm', text: 'Replaced the PDU, alarm cleared.', originalText: 'Replaced the PDU, alarm cleared.', replyTo: null, why: null, attachments: [], replyAnchor: { vendorId: 'm_ra1', at: NOW - 20 * MIN, author: { id: 'support@dc.example', name: 'DC Support', isSelf: false }, excerpt: 'The PDU on rack 12 raised an alarm at 02:10.' }, replyEnvelope: { anchorId: 'm_ra1', to: 'tickets+4411@dc.example, ops-list@example.com', cc: 'noc@dc.example, "Lee, Sam" <sam.lee@example.com>, lee.oncall@example.com', subject: 'Re: Rack 12 PDU alarm', inReplyTo: '<t1@dc.example>', references: '<t1@dc.example>', all: true, added: ['lee.oncall@example.com'] }, draftedBy: { kind: 'agent', id: 'agent-ops', name: 'Ops agent' }, authority: 'draft', at: NOW - MIN, updatedAt: NOW - MIN, state: 'awaiting-approval', policy: { mode: 'review', reasons: ['authority'], detail: null }, sendAs: 'user', identity: { sentAs: 'user', marking: 'marked', where: 'raw-headers', text: null }, ttlMs: 7 * 86400e3, awaitingSince: NOW - MIN, edited: false, approvedBy: null, reason: null, result: null, receipt: null, receiptDelivery: null, history: [{ state: 'proposed', at: NOW - MIN, by: 'agent' }, { state: 'awaiting-approval', at: NOW - MIN, by: 'policy' }] };
   });
+  // ⑥b lane channel-window-tidy: a mail thread (17 mails, each with its From / To / Cc) with ONE waiting proposal and FOUR
+  // decided ones — sent (its message IS m_td_sent, in the thread), rejected, withdrawn, expired — a reply-all to 7 people
+  {
+    const tidyMail = (id, at, from, to, body) => gmail.toRecord('gmail', 't_tidy', { id, threadId: 't_tidy', internalDate: String(at), labelIds: ['INBOX'], payload: { mimeType: 'text/plain', headers: [{ name: 'From', value: from }, { name: 'To', value: to }, { name: 'Cc', value: 'Ops Desk <ops@smc.example>' }, { name: 'Subject', value: 'SMC follow-up' }], body: { data: b64u(body) } } }, { selfEmail: 'ada@example.com', threadSubject: 'SMC follow-up' });
+    const KIM = 'Kim Park <kim@smc.example>', ME = 'Ada Example <ada@example.com>';
+    const recs = Array.from({ length: 10 }, (_, i) => tidyMail(`m_td${i}`, NOW - (200 - i * 10) * MIN, i % 2 ? ME : KIM, i % 2 ? KIM : 'ada@example.com', `SMC mail ${i}\n\n` + 'a line of the thread\n'.repeat(4)));
+    recs.push(tidyMail('m_td_sent', NOW - 95 * MIN, ME, KIM, 'Replaced the PDU, alarm cleared.\n'));
+    for (let i = 10; i < 16; i++) recs.push(tidyMail(`m_td${i}`, NOW - (90 - (i - 10) * 10) * MIN, i % 2 ? ME : KIM, i % 2 ? KIM : 'ada@example.com', `SMC mail ${i}\n\n` + 'a line of the thread\n'.repeat(4)));
+    store.appendRecords('gmail', 't_tidy', recs);
+    await store.outbox.update((ob) => {
+      const mk = (state, text, at, extra = {}) => {
+        const id = store.outbox.nextId();
+        ob.proposals[id] = { id, adapterId: 'gmail', convId: 't_tidy', key: 'gmail/t_tidy', title: 'SMC follow-up', text, originalText: text, replyTo: null, why: null, attachments: [], replyEnvelope: { anchorId: 'm_td9', to: 'Kim Park <kim@smc.example>, a1@smc.example, a2@smc.example', cc: 'Ops Desk <ops@smc.example>, b1@smc.example, b2@smc.example, b3@smc.example', subject: 'Re: SMC follow-up', inReplyTo: '<t9@smc.example>', references: '<t9@smc.example>', all: true }, draftedBy: { kind: 'agent', id: 'agent-mail', name: 'Mail agent' }, authority: 'draft', at, updatedAt: at, state, policy: { mode: 'review', reasons: ['authority'], detail: null }, sendAs: 'user', identity: { sentAs: 'user', marking: 'marked', where: 'raw-headers', text: null }, ttlMs: 7 * 86400e3, awaitingSince: at, edited: false, approvedBy: null, reason: null, result: null, receipt: null, receiptDelivery: null, history: [{ state: 'proposed', at, by: 'agent' }, { state, at, by: 'user' }], ...extra };
+      };
+      mk('sent', 'Replaced the PDU, alarm cleared.', NOW - 96 * MIN, { updatedAt: NOW - 95 * MIN, approvedBy: 'user', result: { vendorMessageId: 'm_td_sent', at: NOW - 95 * MIN, sentAs: 'user', lane: null, honestyLine: false, observed: null, handle: null } });
+      mk('rejected', 'A reply in the wrong tone.', NOW - 80 * MIN, { reason: 'rejected by the user' });
+      mk('withdrawn', 'A draft the agent took back.', NOW - 70 * MIN);
+      mk('expired', 'An old draft nobody approved.', NOW - 60 * MIN);
+      mk('awaiting-approval', 'The new draft that still waits.', NOW - 5 * MIN, { history: [{ state: 'proposed', at: NOW - 5 * MIN, by: 'agent' }, { state: 'awaiting-approval', at: NOW - 5 * MIN, by: 'policy' }] });
+    });
+  }
   // ⑪ THE LOOK: Ada's run of two within 2 min, Brook, a system line, Ada again (a NEW run after it), you
   {
     const lookNames = new Map([['ou_ada', 'Ada Example'], ['ou_brook', 'Brook'], ['ou_me', 'Member A']]);
@@ -652,8 +674,8 @@ console.log('⑬ a mail thread\'s facts: the summary, the chips, the details, ke
   ok(X0.sum === '发给 我, "Lee, Sam", Bob +8 · 抄送 Carol' && /收件人: 我 <ada@example\.com>, "Lee, Sam" <sam@example\.com>/.test(X0.title) && X0.expanded === 'false' && !X0.details && X0.underHead, 'zh: ONE dim summary line under the head — names first ("我" for the account), "+8", the Cc; every address in its tooltip; the details closed', J(X0));
   ok(eq(X0.chips, ['邮件列表 dev.lists.example.com', '高重要性']), 'the chips after it: the mailing list, high importance', J(X0.chips));
   await p1.shot('gmail-facts-summary.png', await rectOf('t_facts'));
-  const X1 = await p1.evaljs(`(async () => { const w = ${WIN('t_facts')}; w.content.querySelector('.chanmsg-facts-sum').click(); await new Promise((r) => setTimeout(r, 80)); const dl = w.content.querySelector('.chanmsg-facts-details'); const to = dl && dl.querySelector('dd[data-k="to"]'); return { keys: dl ? [...dl.querySelectorAll('dt')].map((d) => d.textContent) : null, parties: to ? to.querySelectorAll('.chanmsg-fact-party').length : 0, first: to ? to.querySelector('.chanmsg-fact-party').textContent : null, more: to && to.querySelector('.chanmsg-fact-more') ? to.querySelector('.chanmsg-fact-more').textContent : null, expanded: w.content.querySelector('.chanmsg-facts-sum').getAttribute('aria-expanded') }; })()`);
-  ok(eq(X1.keys, ['收件人', '抄送', '回复至', '邮件列表']) && X1.parties === 8 && X1.first === '我 · ada@example.com' && X1.more === '+3' && X1.expanded === 'true', 'a click opens the DETAILS: 收件人 · 抄送 · 回复至 · 邮件列表, each party "名字 · 地址", 8 shown and "+3"', J(X1));
+  const X1 = await p1.evaljs(`(async () => { const w = ${WIN('t_facts')}; w.content.querySelector('.chanmsg-facts-sum').click(); await new Promise((r) => setTimeout(r, 80)); const dl = w.content.querySelector('.chanmsg-facts-details'); const to = dl && dl.querySelector('dd[data-k="to"]'); const fr = dl && dl.querySelector('dd[data-k="from"]'); return { from: fr ? fr.textContent : null, keys: dl ? [...dl.querySelectorAll('dt')].map((d) => d.textContent) : null, parties: to ? to.querySelectorAll('.chanmsg-fact-party').length : 0, first: to ? to.querySelector('.chanmsg-fact-party').textContent : null, more: to && to.querySelector('.chanmsg-fact-more') ? to.querySelector('.chanmsg-fact-more').textContent : null, expanded: w.content.querySelector('.chanmsg-facts-sum').getAttribute('aria-expanded') }; })()`);
+  ok(eq(X1.keys, ['发件人', '收件人', '抄送', '回复至', '邮件列表']) && X1.from === 'Dana Example · dana@example.com' && X1.parties === 8 && X1.first === '我 · ada@example.com' && X1.more === '+3' && X1.expanded === 'true', 'a click opens the DETAILS: 发件人 (lane channel-window-tidy: the sender\'s address, never only a name) · 收件人 · 抄送 · 回复至 · 邮件列表, each party "名字 · 地址", 8 shown and "+3"', J(X1));
   const X2 = await p1.evaljs(`(async () => { const w = ${WIN('t_facts')}; w.content.querySelector('.chanmsg-fact-more').click(); await new Promise((r) => setTimeout(r, 80)); const to = w.content.querySelector('.chanmsg-facts-details dd[data-k="to"]'); return { parties: to.querySelectorAll('.chanmsg-fact-party').length, more: !!to.querySelector('.chanmsg-fact-more'), last: [...to.querySelectorAll('.chanmsg-fact-party')].pop().textContent }; })()`);
   ok(X2.parties === 11 && !X2.more && X2.last === 'Peer 10 · p10@example.com', '"+3" expands IN PLACE (all 11)', J(X2));
   await p1.shot('gmail-facts-details.png', await rectOf('t_facts'));
@@ -1465,6 +1487,85 @@ const P2 = await p1.evaljs(`(() => { const w = ${WIN('oc_ro')}; const b = w.cont
 ok(P.fold >= 36 && P2.reauth >= 36 && !P.overflow && !P2.overflow, 'on a phone the fold toggle and Re-authorize are ≥ 36 px tall, and nothing scrolls sideways', J([P, P2]));
 await sleep(400);
 await p1.shot('phone-readonly.png', null);
+
+// ═══ ⑥b lane channel-window-tidy (the owner, 2026-10-03): decided proposals fold to lines; a mail's sender address ═══
+console.log('⑥b 1 waiting + 4 decided proposals: the card, the fold, a line opened in place, the jump; From · To · Cc as "名字 · 地址" (zh, 390 px)');
+{
+  await p1.evaljs(OPEN('gmail', 't_tidy', "w.content.querySelector('.chanwin-outbox .chanwin-outbox-fold')"));
+  const VIS = 'const vis = (e) => !!e && e.getClientRects().length > 0;';
+  const T1 = await p1.evaljs(`(() => {
+    ${VIS} const w = ${WIN('t_tidy')}; const sec = w.content.querySelector('.chanwin-outbox');
+    const wait = sec.querySelector(':scope > .chan-prop-awaiting-approval');
+    const lined = [...sec.querySelectorAll(':scope > .chan-prop-lined')];
+    const fold = sec.querySelector(':scope > .chanwin-outbox-fold');
+    return { wait: !!wait && !wait.classList.contains('chan-prop-lined') && vis(wait.querySelector('.chan-prop-text')) && vis(wait.querySelector('button[data-approve]')), waitText: wait ? wait.querySelector('.chan-prop-text').textContent : null, lined: lined.length, shut: lined.filter((c) => c.classList.contains('chan-prop-shut')).length, hidden: lined.filter((c) => !vis(c)).length, fold: fold ? fold.textContent : null, foldH: fold ? Math.round(fold.getBoundingClientRect().height) : 0, expanded: fold ? fold.getAttribute('aria-expanded') : null, winW: Math.round(w.element.getBoundingClientRect().width) };
+  })()`);
+  ok(T1.wait && T1.waitText === 'The new draft that still waits.' && T1.lined === 4 && T1.shut === 4 && T1.hidden === 4 && T1.fold === '已处理的提案（4）' && T1.expanded === 'false' && T1.foldH >= 36 && T1.winW <= 390, 'zh 390 px: the waiting proposal is its FULL card; the four decided ones sit folded under ONE line "已处理的提案（4）" (≥ 36 px tall)', J(T1));
+  await p1.evaljs(`(() => { ${WIN('t_tidy')}.content.querySelector('.chanwin-outbox').scrollIntoView({ block: 'end' }); return 1; })()`);
+  await p1.shot('tidy-folded.png', null);
+  const T2 = await p1.evaljs(`(async () => {
+    const w = ${WIN('t_tidy')}; const sec = w.content.querySelector('.chanwin-outbox'); const right = w.content.getBoundingClientRect().right;
+    sec.querySelector(':scope > .chanwin-outbox-fold').click();
+    await new Promise((r) => setTimeout(r, 150));
+    const lines = [...sec.querySelectorAll(':scope > .chan-prop-lined')].map((c) => { const l = c.querySelector(':scope > .chan-prop-line'); const R = l.getBoundingClientRect(); const tx = l.querySelector('.chan-prop-line-text').getBoundingClientRect(); return { state: [...c.classList].find((x) => /^chan-prop-(sent|rejected|withdrawn|expired)$/.test(x)), words: [...l.children].map((x) => x.textContent).filter(Boolean), h: Math.round(c.getBoundingClientRect().height), lineH: Math.round(R.height), textH: Math.round(tx.height), inside: R.right <= right + 1 }; });
+    const L = w.content.querySelector('.chanwin-list').getBoundingClientRect(), last = sec.querySelector(':scope > .chan-prop-lined:last-child').getBoundingClientRect(), fr = sec.querySelector(':scope > .chanwin-outbox-fold').getBoundingClientRect();
+    return { lines, expanded: sec.querySelector(':scope > .chanwin-outbox-fold').getAttribute('aria-expanded'), inView: last.bottom <= L.bottom + 1 && fr.top >= L.top - 1 };
+  })()`);
+  const sentL = (T2.lines || []).find((l) => l.state === 'chan-prop-sent');
+  ok(T2.expanded === 'true' && T2.lines.length === 4 && T2.lines.every((l) => l.h <= 48 && l.lineH >= 36 && l.textH > 0 && l.textH <= 20 && l.inside) && T2.inView, 'the fold opens IN PLACE: four lines, each ONE line (≤ 48 px, a ≥ 36 px target, the words one row tall) inside the window — scrolled into view with the fold line', J(T2));
+  ok(!!sentL && sentL.words[0] === '已发送' && sentL.words[1] === 'Mail agent' && sentL.words[3] === '回复全部 · 7 人' && sentL.words[4] === 'Replaced the PDU, alarm cleared.' && eq(T2.lines.map((l) => l.words[0]), ['已过期', '已撤回', '已拒绝', '已发送']), 'a line = the state chip · who drafted it · when · "回复全部 · 7 人" · the first words (newest first)', J(T2.lines.map((l) => l.words)));
+  await p1.shot('tidy-lines.png', null);
+  const T3 = await p1.evaljs(`(async () => {
+    ${VIS} const w = ${WIN('t_tidy')}; const sec = w.content.querySelector('.chanwin-outbox');
+    const card = sec.querySelector(':scope > .chan-prop-sent');
+    const h0 = card.getBoundingClientRect().height;
+    card.querySelector(':scope > .chan-prop-line').click();
+    await new Promise((r) => setTimeout(r, 150));
+    const b = card.querySelector('button[data-jump]');
+    const L = w.content.querySelector('.chanwin-list').getBoundingClientRect(), C = card.getBoundingClientRect();
+    return { inView: C.bottom <= L.bottom + 1 && C.top >= L.top - 1, open: !card.classList.contains('chan-prop-shut') && card.querySelector(':scope > .chan-prop-line').getAttribute('aria-expanded') === 'true', h0: Math.round(h0), h1: Math.round(card.getBoundingClientRect().height), text: vis(card.querySelector('.chan-prop-text')) ? card.querySelector('.chan-prop-text').textContent : null, to: vis(card.querySelector('.chan-prop-to')) ? card.querySelector('.chan-prop-to').textContent : null, jump: b && vis(b) ? b.textContent : null, jumpH: b ? Math.round(b.getBoundingClientRect().height) : 0, shut: sec.querySelectorAll(':scope > .chan-prop-lined.chan-prop-shut').length, pid: card.dataset.proposal };
+  })()`);
+  ok(T3.open && T3.inView && T3.h1 > T3.h0 + 40 && T3.text === 'Replaced the PDU, alarm cleared.' && /kim@smc\.example/.test(T3.to || '') && T3.jump === '跳到这条消息' && T3.shut === 3, 'a click on the sent line opens ITS card in place (grown: the whole text, every recipient, "跳到这条消息"); the other three stay lines', J(T3));
+  await p1.evaljs(`(() => { ${WIN('t_tidy')}.content.querySelector('.chanwin-outbox .chan-prop-sent').scrollIntoView({ block: 'center' }); return 1; })()`);
+  await p1.shot('tidy-open.png', null);
+  // a REDRAW (the store changed: the waiting one rejected through the route) — the waiting card becomes a line too, the fold
+  // counts five, and the open card + the open fold stay open (the same element)
+  const waitId = await p1.evaljs(`${WIN('t_tidy')}.content.querySelector('.chanwin-outbox .chan-prop-awaiting-approval').dataset.proposal`);
+  await p1.evaljs(`(() => { window.__tidyCard = ${WIN('t_tidy')}.content.querySelector('.chanwin-outbox .chan-prop-sent'); return 1; })()`);
+  const rj = await api('POST', `/api/channels/outbox/${encodeURIComponent(waitId)}/reject`, { reason: 'not now' });
+  const T4 = await p1.evaljs(`(async () => {
+    const w = ${WIN('t_tidy')}; const sec = w.content.querySelector('.chanwin-outbox');
+    for (let i = 0; i < 80 && !sec.querySelector(':scope > .chan-prop-rejected[data-proposal=${J(waitId)}]'); i++) await new Promise((r) => setTimeout(r, 100));
+    const c = sec.querySelector(':scope > .chan-prop-sent');
+    return { rejectedLine: !!sec.querySelector(':scope > .chan-prop-lined.chan-prop-rejected[data-proposal=${J(waitId)}]'), fold: sec.querySelector(':scope > .chanwin-outbox-fold').textContent, foldOpen: sec.classList.contains('chanwin-outbox-foldopen'), same: c === window.__tidyCard, open: !c.classList.contains('chan-prop-shut'), cards: sec.querySelectorAll(':scope > .chan-prop:not(.chan-prop-lined)').length };
+  })()`);
+  ok(rj.status === 200 && T4.rejectedLine && T4.fold === '已处理的提案（5）' && T4.foldOpen && T4.same && T4.open && T4.cards === 0, 'a redraw (the waiting one rejected) makes it a line too ("已处理的提案（5）") and keeps the open card (the same element) and the open fold', J({ rj: rj.status, T4 }));
+  const T5 = await p1.evaljs(`(async () => {
+    const w = ${WIN('t_tidy')}; const list = w.content.querySelector('.chanwin-list');
+    w.content.querySelector('.chanwin-outbox .chan-prop-sent button[data-jump]').click();
+    let row = null;
+    for (let i = 0; i < 40 && !(row = list.querySelector('.chanmsg[data-vid="m_td_sent"].chanmsg-flash')); i++) await new Promise((r) => setTimeout(r, 50));
+    await new Promise((r) => setTimeout(r, 400));
+    row = list.querySelector('.chanmsg[data-vid="m_td_sent"]');
+    const R = row.getBoundingClientRect(), L = list.getBoundingClientRect();
+    return { flashed: !!row, inView: R.top >= L.top - 1 && R.bottom <= L.bottom + 1, body: row.querySelector('.chanmsg-body') ? row.querySelector('.chanmsg-body').textContent.trim().slice(0, 40) : row.textContent.slice(0, 80) };
+  })()`);
+  ok(T5.flashed && T5.inView && /Replaced the PDU/.test(T5.body), '"跳到这条消息" lands on the SENT message in the thread (in view, flashed)', J(T5));
+  await p1.shot('tidy-jump.png', null);
+  // a Gmail message's details at 390 px: From / To / Cc each "名字 · 地址" — no address only in a tooltip
+  const T6 = await p1.evaljs(`(async () => {
+    const w = ${WIN('t_tidy')}; const row = w.content.querySelector('.chanmsg[data-vid="m_td4"]');
+    row.scrollIntoView({ block: 'center' });
+    row.querySelector('.chanmsg-facts-sum').click();
+    await new Promise((r) => setTimeout(r, 150));
+    const dl = w.content.querySelector('.chanmsg[data-vid="m_td4"] .chanmsg-facts-details');
+    const right = w.content.getBoundingClientRect().right;
+    return dl ? { keys: [...dl.querySelectorAll('dt')].map((d) => d.textContent), vals: [...dl.querySelectorAll('dd')].map((d) => d.textContent), inside: [...dl.querySelectorAll('dd')].every((d) => d.getBoundingClientRect().right <= right + 1) } : null;
+  })()`);
+  ok(T6 && eq(T6.keys, ['发件人', '收件人', '抄送']) && eq(T6.vals, ['Kim Park · kim@smc.example', '我 · ada@example.com', 'Ops Desk · ops@smc.example']) && T6.inside, 'a Gmail message\'s details: 发件人 / 收件人 / 抄送, each "名字 · 地址" on the page (the sender\'s address too), inside 390 px', J(T6));
+  await p1.shot('tidy-details.png', null);
+  await p1.evaljs(`(() => { const w = ${WIN('t_tidy')}; if (w) window.app.wm.closeWindow(w.id); return 1; })()`);
+}
 
 // ═══ ⑩h CONTROL (verify round 7, 2026-09-28): THE BATTERY AS A GATE — a product that pages on a clamp reddens here ═══
 // ⑩h counts the POSTs of the SHIPPED bundle exactly; this is the other half of the proof: the scratch worktree's

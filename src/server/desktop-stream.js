@@ -134,7 +134,7 @@ const { livenessVerdict, SILENT_ROUNDS_TO_CUT } = KA;
 /** THE CLOSE, AS A CODE THE PAGE CAN WORD (lane desktop-keepalive K3): the bridge's named close line → a closed set.
  *  noVNC never exposes a close frame's reason, and a terminate() sends none, so the page reads the bridge's own record
  *  (GET /api/vnc/last-close) and words the code itself. */
-const CLOSE_CODES = Object.freeze(['unanswered', 'server-closed', 'browser-closed', 'session-ended', 'blocked', 'other']);
+const CLOSE_CODES = Object.freeze(['unanswered', 'server-closed', 'browser-closed', 'session-ended', 'blocked', 'machine-offline', 'other']);
 function closeCodeOf(why) {
   const w = String(why || '');
   if (/^no pong/.test(w)) return 'unanswered';
@@ -142,6 +142,7 @@ function closeCodeOf(why) {
   if (/^the browser closed/.test(w)) return 'browser-closed';
   if (/app session ended/.test(w)) return 'session-ended';
   if (/blocked|another viewer|Resume here/i.test(w)) return 'blocked';
+  if (/ went offline$/.test(w)) return 'machine-offline'; // design 014 D1: a machine desktop whose machine's link dropped
   return 'other';
 }
 /**
@@ -566,6 +567,11 @@ function netemOfUrl(url) {
 }
 
 /** Which stream id a ws upgrade path names, or null. `/api/vnc` = the singleton. */
+/** design 014 D1: does an upgrade carry an agent's token (a Bearer header, or a token in the url)? */
+function bearerOf(req) {
+  if (/^Bearer\s+\S/i.test(String((req && req.headers && req.headers.authorization) || ''))) return true;
+  try { const q = new URL(String((req && req.url) || ''), 'http://x').searchParams; return q.has('token') || q.has('vsst'); } catch { return false; }
+}
 function upgradeId(pathname) {
   if (pathname === '/api/vnc') return DESKTOP_SINGLETON_ID;
   const m = STREAM_RE.exec(pathname || '');
@@ -607,7 +613,7 @@ function prevOf(url) {
  *                   answering anything but 'free'), never elected, never blocked. `refresh(id)` re-applies it.
  *   log
  */
-function create({ auth, resolveTarget, forwardPort = null, onInput = () => { }, onDesktopSize = null, inputPolicy = null, onViewerLeft = null, viewerSeats = null, log = console, now = Date.now, pingMs = PING_MS, netemEnabled = false, WebSocketClient = WebSocket } = {}) {
+function create({ auth, resolveTarget, forwardPort = null, onInput = () => { }, onDesktopSize = null, inputPolicy = null, onViewerLeft = null, viewerSeats = null, upstreamWhy = null, log = console, now = Date.now, pingMs = PING_MS, netemEnabled = false, WebSocketClient = WebSocket } = {}) {
   if (!auth || typeof auth.requestAuthed !== 'function') throw new Error('desktop-stream: auth.requestAuthed is required');
   if (typeof resolveTarget !== 'function') throw new Error('desktop-stream: resolveTarget is required');
   const wss = new WebSocketServer({ noServer: true, maxPayload: WS_MAX_MESSAGE_BYTES });
@@ -759,7 +765,10 @@ function create({ auth, resolveTarget, forwardPort = null, onInput = () => { }, 
           }, 50);
         }
       });
-      sock.on('close', () => { if (cutDone) return; closedBy = closedBy || 'the VNC server closed its socket'; try { ws.close(); } catch { /* already closed */ } finish('server side'); });
+      // design 014 D1: `upstreamWhy(id)` names WHY the upstream went (a machine desktop's machine went offline), asked a
+      // turn later — the agent link's own teardown closes its channels before it marks itself disconnected
+      const upstreamClosed = () => { closedBy = closedBy || 'the VNC server closed its socket'; try { ws.close(); } catch { /* already closed */ } finish('server side'); };
+      sock.on('close', () => { if (cutDone) return; if (typeof upstreamWhy !== 'function') return upstreamClosed(); setImmediate(() => { try { const w = upstreamWhy(id); if (w) closedBy = closedBy || w; } catch { /* the plain words */ } upstreamClosed(); }); });
       sock.on('error', (e) => { if (cutDone) return; closedBy = closedBy || `VNC server socket error ${(e && e.code) || ''}`.trim(); try { ws.close(); } catch { /* already closed */ } });
     };
     /** x5: this socket became blocked while connected — its TCP side closes and the socket closes 4001 (see the header). */
@@ -949,6 +958,9 @@ function create({ auth, resolveTarget, forwardPort = null, onInput = () => { }, 
     try { target = resolveTarget(id); } catch (e) { log.warn?.(`[desktop-stream] resolveTarget(${id}) threw: ${e.message}`); }
     if (!target || !target.port) { refuse(socket, 404, 'No such display'); return; }
     if (target.kind !== 'rfb' && target.kind !== 'xpra') { refuse(socket, 501, `unknown stream kind ${String(target.kind)}`); return; }
+    // design 014 D1: a machine's WHOLE DESKTOP is for people only — an agent's token is refused by name (a page never
+    // sends one; on an instance without sign-in the cookie check above lets everything through)
+    if (target.humanOnly && bearerOf(req)) { log.warn?.(`[desktop-stream] ${id}: an agent token asked for a machine's whole desktop — refused (human_only)`); refuse(socket, 403, 'Forbidden human_only'); return; }
     const viewerId = viewerOf(req.url);
     // A VIEWER ID IS BOUND TO ITS SOCKET (2026-09-21, the verifier's finding): the id
     // is what inputPolicy and the takeover/handback routes trust, so a second
@@ -991,4 +1003,4 @@ function create({ auth, resolveTarget, forwardPort = null, onInput = () => { }, 
   return { lastCloseOf: (id) => { const c = lastClose.get(String(id)); return c ? { ...c } : null; }, handleUpgrade, streamEndpointFor, upgradeId, streamPath, stats: () => ({ ...stats }), wss, viewersOf, viewerAlive, connections, setNetem, netemOf, netemEnabled: !!netemEnabled, refresh, refreshAll };
 }
 
-module.exports = { livenessVerdict, SILENT_ROUNDS_TO_CUT, CLOSE_CODES, closeCodeOf, create, upgradeId, streamPath, viewerOf, paneOf, prevOf, rfbInputSieve, RFB_INPUT_TYPES, RFB_FIXED_LEN, xpraInputSieve, xpraPacketType, xpraStrings, XPRA_INPUT_TYPES, XPRA_WATCH_TYPES, XPRA_KEYMAP_TYPES, XPRA_KEYMAP_HOLD_BYTES, XPRA_DISPLAY_TYPES, XPRA_DISPLAY_HOLD_BYTES, XPRA_GEOMETRY_TYPES, XPRA_GEOMETRY_HOLD_BYTES, XPRA_HELLO_HOLD_BYTES, XPRA_HELD_KINDS, XPRA_LIFECYCLE_TYPES, XPRA_MAX_PACKET_BYTES, RFB_MAX_MESSAGE_BYTES, WS_MAX_MESSAGE_BYTES, OVERSIZE_CLOSE, OVERSIZE_REASON, parseNetem, netemQueue, netemOfUrl, STREAM_RE, INPUT_REPORT_MS, WS_HIGH_WATER, WS_LOW_WATER, PING_MS, VIEWER_RE };
+module.exports = { livenessVerdict, SILENT_ROUNDS_TO_CUT, CLOSE_CODES, closeCodeOf, create, bearerOf, upgradeId, streamPath, viewerOf, paneOf, prevOf, rfbInputSieve, RFB_INPUT_TYPES, RFB_FIXED_LEN, xpraInputSieve, xpraPacketType, xpraStrings, XPRA_INPUT_TYPES, XPRA_WATCH_TYPES, XPRA_KEYMAP_TYPES, XPRA_KEYMAP_HOLD_BYTES, XPRA_DISPLAY_TYPES, XPRA_DISPLAY_HOLD_BYTES, XPRA_GEOMETRY_TYPES, XPRA_GEOMETRY_HOLD_BYTES, XPRA_HELLO_HOLD_BYTES, XPRA_HELD_KINDS, XPRA_LIFECYCLE_TYPES, XPRA_MAX_PACKET_BYTES, RFB_MAX_MESSAGE_BYTES, WS_MAX_MESSAGE_BYTES, OVERSIZE_CLOSE, OVERSIZE_REASON, parseNetem, netemQueue, netemOfUrl, STREAM_RE, INPUT_REPORT_MS, WS_HIGH_WATER, WS_LOW_WATER, PING_MS, VIEWER_RE };

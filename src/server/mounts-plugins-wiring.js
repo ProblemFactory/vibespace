@@ -769,6 +769,7 @@ function createSessionMessages(session, sessionId) {
       integrations: () => integrations, keys: browserBackend, mediator: cdpMediator,
       liveKeys: () => new Set([...activeSessions.values()].map((s) => s && s._browserKey).filter(Boolean)),
       // lane jobs-browser: a RUNNING job carries its browser handle (its lease outlives its owner conversation until the job ends)
+      jobName: (jobId) => { try { const jm = getJobs ? getJobs() : null; const j = jm && jm.jobs && typeof jm.jobs.get === 'function' ? jm.jobs.get(String(jobId)) : null; return j && j.name ? String(j.name) : null; } catch { return null; } }, // accept-fixes-strip F8: the live view names a job's tab
       jobRunning: (jobId) => { try { const jm = getJobs ? getJobs() : null; const j = jm && jm.jobs && typeof jm.jobs.get === 'function' ? jm.jobs.get(String(jobId)) : null; return require('../browser-job-principal').isRunningJob(j); } catch { return false; } },
       // identity verify r2 (2026-09-28): the keys carried by live sessions on ANOTHER machine (an ssh host / a paired device —
       // rung H): the keeper refuses their `use` / attach (`remote_session`) and never writes them into "Who can use it"

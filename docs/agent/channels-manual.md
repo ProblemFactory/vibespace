@@ -512,6 +512,32 @@ local copy. Both, in two tiers — use the free one first:
   carries `honestyLine: true`. It applies only to text an agent drafted —
   never to the user's own drafts.
 
+## Slack (what the user asked → what you do)
+
+A Slack account is the person's OWN Slack app in their workspace, signed in by a pasted user token: it reads every
+conversation the person can see (channels, private channels, group DMs, DMs) and sends AS THE PERSON. Poll only — new
+messages arrive at the account's refresh pace, and a reply posted inside an existing thread is noticed as "this thread
+grew" (the thread is re-read when its root is re-listed), not instantly.
+
+- "What did Alice say in #launch?" → `vibespace-channels read <slack conv>` like any channel. A message from an app shows
+  as `<name> · app` (a bot may post under any name — an app is never a person); a user group or `@here` mention is its
+  own kind, never "mentions you".
+- "Reply to Bob in Slack" → `vibespace-channels propose <conv> --text "…"`. EVERY Slack proposal waits for the person's
+  approval on the Outbox card — there is no "send directly" on Slack, whatever a policy says.
+- @mentions: write `@Name` (a handle like `@alice.c`, a display name, `@AliceChen`, or a first name). The proposal
+  RESOLVES each name against the conversation's members when you propose and stores the result: one person ⇒ they are
+  notified (the card says "Notifies …"); two people answering one name ⇒ the proposal is REFUSED
+  (`mention-ambiguous`, the names listed) — write the handle or the full name; nobody ⇒ the words go out as plain text
+  and notify nobody. `@here` / `@channel` / `@everyone` are sent as plain words (S1 never broadcasts).
+- A reply to a message lands in its thread (Slack's norm); `--also-in-chat` also shows it in the channel
+  (`reply_broadcast`). Over 4 000 characters is refused — split it.
+- The card also says who will SEE it (a DM, a private channel's members, everyone in the workspace, or "includes
+  people from <other organization>" on a Slack Connect channel). Read it before proposing anything private.
+- A send whose answer was lost stays `unknown`: Slack has no idempotency key, so nothing resends it — the person checks
+  Slack. Never propose the same text again to "retry".
+- Not in this version: sending files, starting a new DM, Slack search, editing or deleting a sent message, live events.
+  Say so plainly when asked.
+
 ## Cost + etiquette
 
 - A message you propose is sent under the USER's name on channels that

@@ -400,6 +400,36 @@ try {
     ok(!!got && leg.want(got), leg.name, got);
   }
 
+  // ── accept-fixes F1 + F3 (the owner's acceptance of 2.369.202) ──
+  section('A③c accept-fixes: a comment whose answer never comes says so (F1) · the agent\'s open re-asserts a lost watch (F3)');
+  {
+    // F1: the server took the comment but the answer never reaches the page (owner-seen: a 15 s server stall) — the
+    // composer must not say "Sending…" forever
+    await ev(`window.__acfFetch = window.fetch; window.fetch = function (u, o) { if (String(u).includes('/api/design/comment')) return new Promise((_, rej) => { const s = o && o.signal; if (s) s.addEventListener('abort', () => rej(new DOMException('aborted', 'AbortError'))); }); return window.__acfFetch.apply(this, arguments); }; return true;`);
+    if (!(await ev(`return ${W}._designCanvas.pick();`))) { await click(await rectOf('.design-btn-comment')); await sleep(300); }
+    await clickInFrame('Main.html', 250, 130);
+    await until(quoteText, 8000);
+    await typeAndSend('ok');
+    const btn = () => ev(`const b = ${W}.element.querySelector('.design-composer .btn-create'); return b ? b.textContent : null;`);
+    await sleep(5000);
+    const at5 = await btn();
+    const back = await until(async () => ((await btn()) === 'Send' ? true : null), 32000, 500);
+    const f1 = { at5, end: await btn(), chip: await ev(`const c = ${W}.element.querySelector('.design-chip'); return c && c.style.display !== 'none' ? c.textContent : null;`), words: await ev(`const t = ${W}.element.querySelector('.design-composer textarea'); return t ? t.value : null;`) };
+    evidence.acfF1 = f1;
+    ok(f1.at5 === 'Still sending…' && !!back && /No answer from the server yet/.test(f1.chip || '') && f1.words === 'ok', 'F1: an answer that never comes — "Still sending…" after 4 s, then Send again with the words kept and the chip saying the comment may still arrive (never "Sending…" forever)', f1);
+    await ev(`window.fetch = window.__acfFetch; const w = ${W}; const c = w.element.querySelector('.design-composer .btn-cancel'); if (c) c.click(); w._designCanvas.setPick(false); return true;`);
+    // F3: the window is open but the hub lost its watch (sync said "no Design window is open on it" while the owner
+    // commented in it) — the agent's open re-asserts it, and open / sync tell the same truth
+    await ev(`app.ws.send({ type: 'design-unwatch', host: '', dir: ${S(DIR)} }); return true;`);
+    await sleep(600);
+    const lost = await stub({ kind: 'sh', cmd: 'vibespace-design', args: ['sync'], cwd: DIR });
+    const rOpen = await stub({ kind: 'sh', cmd: 'vibespace-design', args: ['open', DIR], cwd: DIR });
+    await sleep(400);
+    const healed = await stub({ kind: 'sh', cmd: 'vibespace-design', args: ['sync'], cwd: DIR });
+    evidence.acfF3 = { lost: lost.stdout, open: rOpen.stdout, healed: healed.stdout };
+    ok(/no Design window is open on it/.test(lost.stdout || '') && /opened the Design window on/.test(rOpen.stdout || '') && /1 Design window\(s\) repaint/.test(healed.stdout || ''), 'F3: a lost watch (the hub counts none) — the agent\'s open re-asserts the window\'s watch, so sync then counts the window the owner sees', evidence.acfF3);
+  }
+
   // ── A⑧ the changes strip ──
   section('A⑧ the changes strip: edit in place, Style, Add, remove ⇒ undone, Send all = ONE message');
   {
@@ -641,6 +671,15 @@ try {
   const bundle = M.readBundle(raw);
   ok(bundle.ok && Object.keys(bundle.doc.files).sort().join(',') === 'About.html,Main.html' && bundle.doc.title === 'Design window' && bundle.doc.files['Main.html'].includes('REPAINT-MARK-1'), 'the state block reads back (readBundle: v1, the title, both artboards as on disk)', bundle.ok ? Object.keys(bundle.doc.files) : bundle);
   evidence.page = { path: pathP, csp, bytes: raw.length };
+
+  // ── accept-fixes F2: a design + its publication = ONE row in the chat's design popover ──
+  section('A⑤d accept-fixes F2: one published design is ONE row (the design, its publication, the page acts)');
+  {
+    const rows = await until(() => ev(`for (const v of app.sessions.values()) { if (v.sessionId !== ${S(SIDW)} || !v._statusBar) continue; const sb = v._statusBar; if (!sb._pages.length || !sb._designs.length) return null; const dd = document.createElement('div'); document.body.appendChild(dd); sb._renderDesignPopover(dd); const out = [...dd.querySelectorAll('.chat-design-page')].filter((r) => !r.parentElement.classList.contains('hidden')).map((r) => ({ name: r.querySelector('.chat-design-page-name').textContent, btns: [...r.querySelectorAll('button')].map((b) => b.textContent) })); dd.remove(); return out; } return null;`), 10000);
+    evidence.acfF2 = rows;
+    const mine = (rows || []).filter((r) => r.name === 'Design window');
+    ok(mine.length === 1 && ['Open', 'Publish…', 'Copy link', 'Unpublish'].every((b) => mine[0].btns.includes(b)) && mine[0].btns.some((b) => b === 'Public' || b === 'Private'), 'F2: the published design is ONE row — Open · Publish… · Copy link · Public/Private · Unpublish (no second row with the same title)', rows);
+  }
 
   // ── B① XSS: the hostile artboard ──
   section('B① a hostile artboard: nothing of it reaches the owner\'s page; pick mode survives a flood');

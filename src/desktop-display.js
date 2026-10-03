@@ -1228,6 +1228,68 @@ async function installFacts({ env = process.env, now = Date.now, osRelease = '/e
   return out;
 }
 
+// ── design 014 D1 (lane desktop-vnc-native): THE `vnc-native` RUNG — a Windows / macOS machine's OWN VNC server ───────
+/** No recipe, no process, no keeper record: the "session" is the machine's console desktop, ONE per machine (stream id
+ *  src/desktop-apps.js machineDesktopId), served by the machine's own VNC server on its loopback (macOS Screen Sharing;
+ *  the TightVNC service the owner installs once on Windows). The hub reaches it through the agent's existing
+ *  tcp-connect (device.tcpForward) — no new device op — and reads its greeting (rfbGreeting) to say ready / no-vnc. */
+const VNC_NATIVE = Object.freeze({ id: 'vnc-native', port: require('./desktop-apps').MACHINE_DESKTOP_PORT, stream: 'rfb' });
+/** The security types the BUNDLED noVNC speaks (1.7.0 core/rfb.js _isSupportedSecurityType). noVNC takes the FIRST
+ *  type in the server's order it supports — so does rfbGreeting. */
+const RFB_VIEWER_TYPES = Object.freeze([1, 2, 6, 16, 19, 22, 30, 113, 256]);
+/** What a type asks the person for: 30 = Apple Remote Desktop (the Mac user's name + password), 113 MSLogonII / 256
+ *  Plain = a name + password, 1 = nothing, every other viewer type a VNC password. */
+const rfbAuthOf = (type) => (type === 1 ? 'none' : type === 30 ? 'ard' : type === 113 || type === 256 ? 'user' : 'password');
+/** noVNC's version table (core/rfb.js _negotiateProtocolVersion): the version it answers to each server version
+ *  (Apple's 3.889, Intel AMT's 4.0, RealVNC's 4.1 / 5.0 are spoken as 3.8). */
+const RFB_VERSIONS = Object.freeze({ '003.003': '003.003', '003.006': '003.003', '003.007': '003.007', '003.008': '003.008', '003.889': '003.008', '004.000': '003.008', '004.001': '003.008', '005.000': '003.008' });
+/**
+ * THE GREETING, READ (PURE). `buf` = every byte the SERVER sent so far on a fresh connection: the 12-byte
+ * ProtocolVersion, then — once the client answered `reply` — the security part: 3.7+ a count and that many type bytes
+ * (count 0 = a refusal: a u32 length + its reason), 3.3 one u32 type the server chose (0 = a refusal). →
+ *   { ok:true, server, reply, types, type, auth }          a sign-in the viewer speaks (`type` = the one noVNC picks)
+ *   { ok:false, code:'truncated', reply? }                 not all of it yet (`reply` as soon as the version is known)
+ *   { ok:false, code: not_rfb | unsupported_version | refused | unsupported_auth, why, … }
+ * Never throws; reads only what the shapes declare (≤ 255 types, a reason cut at 200 printable characters).
+ */
+function rfbGreeting(buf) {
+  const b = Buffer.isBuffer(buf) ? buf : Buffer.from(buf || []);
+  const head = b.subarray(0, 12).toString('latin1');
+  const notRfb = { ok: false, code: 'not_rfb', why: 'something answers there, but not a VNC (RFB) server' };
+  if (!'RFB '.startsWith(head.slice(0, 4))) return notRfb;
+  if (b.length < 12) return { ok: false, code: 'truncated', why: `${b.length} of the 12-byte greeting arrived` };
+  const m = /^RFB (\d{3}\.\d{3})\n$/.exec(head);
+  if (!m) return notRfb;
+  const server = m[1], v = RFB_VERSIONS[server];
+  if (!v) return { ok: false, code: 'unsupported_version', server, why: `RFB ${server} is not a version the viewer speaks` };
+  const reply = `RFB ${v}\n`;
+  const rest = b.subarray(12);
+  const truncated = { ok: false, code: 'truncated', server, reply, why: 'the server has not sent its sign-in types yet' };
+  const refusal = (off) => {
+    if (rest.length < off + 4) return truncated;
+    const n = rest.readUInt32BE(off);
+    if (rest.length < off + 4 + Math.min(n, 200)) return truncated;
+    const reason = rest.subarray(off + 4, off + 4 + Math.min(n, 200)).toString('latin1').replace(/[^ -~]/g, '?');
+    return { ok: false, code: 'refused', server, reply, reason, why: `the server refused before sign-in: ${reason || 'no reason given'}` };
+  };
+  let types;
+  if (v === '003.003') {
+    if (rest.length < 4) return truncated;
+    const t = rest.readUInt32BE(0);
+    if (t === 0) return refusal(4);
+    types = [t];
+  } else {
+    if (rest.length < 1) return truncated;
+    const n = rest[0];
+    if (n === 0) return refusal(1);
+    if (rest.length < 1 + n) return truncated;
+    types = [...rest.subarray(1, 1 + n)];
+  }
+  const type = types.find((t) => RFB_VIEWER_TYPES.includes(t));
+  if (type === undefined) return { ok: false, code: 'unsupported_auth', server, reply, types, why: `the server offers only sign-in types the viewer cannot speak (${types.join(', ')})` };
+  return { ok: true, server, reply, types, type, auth: rfbAuthOf(type) };
+}
+
 module.exports = {
   assertLocal, binOnPath, resetBinMemo, forgetBin, assertExecutable, PROBE_BINS, BROWSER_BINS, browserConfinement, hostFacts, officeFacts, x11Env, NO_WAYLAND_DISPLAY, withoutWayland,
   newCookie, writeXauthority, xauthEntry, freePort, rfbBanner, waitForRfb, httpProbe, waitForHttp, waitForListen, portAnswers, LISTEN_PROBES,
@@ -1238,4 +1300,5 @@ module.exports = {
   sessionMembers, refreshSessions, sessionCensus, environHas, sessionSample, sessionSampleSync, markerCensus, environCensus,
   parseWininfoTree, windowTree, viewableWindows, enumerateWindows, displaySize, applyWindowPlan, xpraVersion, installFacts, installState,
   UTF8_LOCALE, utf8Env, utf8LocaleEnv, resetCharmapMemo,
+  VNC_NATIVE, RFB_VIEWER_TYPES, RFB_VERSIONS, rfbAuthOf, rfbGreeting, // design 014 D1
 };

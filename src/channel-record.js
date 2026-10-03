@@ -113,6 +113,10 @@ const OPTIONAL_FIELDS = ['blocks', 'root', 'facts'];   // + `facts` (lane messag
 /** Bounds. A vendor body is peer-controlled and is synced to every client. */
 const MAX_TEXT = 64 * 1024;
 const MAX_MENTIONS = 256;
+/** design 012 D21: WHO a mention names — a person (the default, no field), a BROADCAST (`@here` / `@channel` /
+ *  `@everyone`) or a GROUP (a user group) — stored with its own id, which never equals a person's, so a broadcast or
+ *  a group never reads as "mentions me". CLOSED. */
+const MENTION_KINDS = Object.freeze(['person', 'broadcast', 'group']);
 const MAX_ATTACHMENTS = 64;
 const MAX_RAW_BYTES = 8 * 1024;
 
@@ -585,7 +589,7 @@ function makeRecord(input, opts = {}) {
   if (a.external === true) author.external = true;
 
   const mentions = (Array.isArray(r.mentions) ? r.mentions : []).slice(0, MAX_MENTIONS)
-    .map((m) => ({ id: peerText(m && m.id, 256), name: peerName(m && m.name, 200) || '' }));
+    .map((m) => ({ id: peerText(m && m.id, 256), name: peerName(m && m.name, 200) || '', ...(m && MENTION_KINDS.includes(m.kind) && m.kind !== 'person' ? { kind: m.kind } : {}) }));
   const attachments = (Array.isArray(r.attachments) ? r.attachments : []).slice(0, MAX_ATTACHMENTS)
     .map((x) => {
       const out = { id: peerText(x && x.id, 256), name: peerName(x && x.name, 256) || '', bytes: Number.isFinite(Number(x && x.bytes)) ? Number(x.bytes) : null, mime: peerText(x && x.mime, 128) };
@@ -865,11 +869,14 @@ function makeConversation(input) {
     kind: ['dm', 'group', 'thread'].includes(c.kind) ? c.kind : 'group',
     participants: peerName(c.participants, 300) || '',
     lastAt: Number.isFinite(Number(c.lastAt)) ? Number(c.lastAt) : null,
+    // design 012 (Slack S1): THE OTHER SIDE IS AN APP (a DM with a bot / an integration) — present only when true, so
+    // every other adapter's conversation keeps its shape; an app's DM is never a "Direct" tag (src/channel-focus.js)
+    ...(c.app === true ? { app: true } : {}),
   };
 }
 
 module.exports = {
-  RECORD_FIELDS, OPTIONAL_FIELDS, MAX_TEXT, MAX_RAW_BYTES, FRAME_TAG_RE, FRAME_TAGS,
+  RECORD_FIELDS, OPTIONAL_FIELDS, MAX_TEXT, MAX_RAW_BYTES, FRAME_TAG_RE, FRAME_TAGS, MENTION_KINDS,
   BLOCK_KINDS, RUN_KINDS, ATTACHMENT_ROLES, SYS_WHATS, BLOCK_LIMITS, LINK_SCHEMES,
   makeRecord, makeConversation, resolveMentions, inertFrames, inertFrameLine, inertOpeners, peerText, peerName, carriesFrame, recordKey, isSynthetic,
   safeHref, validateBlocks,

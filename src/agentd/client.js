@@ -17,6 +17,36 @@ const { spawn } = require('child_process');
 const { Mux, PROTO_VERSION } = require('./mux.js');
 const { daemonEnv } = require('../agent-env.js');
 
+// lane windows-device-fs — THE DOOR: a POSIX shell is never asked of a WINDOWS agent THAT HAS NONE. The hub ran `sh -c …`
+// over the device link for the Files view, the home, path completion, the sweeps; a Windows machine without `sh` answered
+// each one "command failed (127)" — a number nobody can act on (GET /api/files?host=<a Windows machine> answered exactly
+// that). verify-r1 F1: the shell is the DEVICE'S FACT, not the platform's — Git for Windows / MSYS2 / Cygwin put `sh.exe` on
+// PATH and those machines ran every one of these lines. The hello says which shells start there (`posixShells`); a shell
+// that list leaves out is refused HERE, by name, before anything is sent (`windows_no_shell`). An agent too old to say is
+// ASKED (today's behaviour) and a spawn that fails there is named afterwards (posixShellFailed). Callers that can do the job
+// without a shell route around it (src/remote-fs.js).
+const winShellOf = (info, cmd) => {
+  if (!info || info.platform !== 'win32') return null;
+  const base = String(cmd || '').split(/[\\/]/).pop().toLowerCase().replace(/\.exe$/, '');
+  return /^(sh|bash|dash|zsh|ksh)$/.test(base) ? base : null;
+};
+function noShellError(base) {
+  const e = new Error(`this needs a POSIX shell (${base}), and this Windows machine has none — not available on Windows machines without one yet`);
+  e.code = 'windows_no_shell'; e.params = { shell: base }; // verify-r2: the client words it (zh / ja)
+  return e;
+}
+function posixShellRefusal(info, cmd) {
+  const base = winShellOf(info, cmd);
+  if (!base || !Array.isArray(info.posixShells) || info.posixShells.includes(base)) return null; // the device has it, or cannot say ⇒ asked
+  return noShellError(base);
+}
+/** a Windows agent was ASKED a shell (it has one, or is too old to say) and the spawn failed — named, not "(127)" */
+function posixShellFailed(info, cmd, r) {
+  const base = winShellOf(info, cmd);
+  if (!base || !r) return null;
+  return (r.spawnError && r.spawnError.code === 'ENOENT') || (r.code === 127 && /ENOENT/.test(String(r.error || ''))) ? noShellError(base) : null;
+}
+
 class DeviceManager {
   /**
    * @param {object} opts
@@ -412,6 +442,7 @@ class DeviceManager {
    */
   async openSession({ cmd, args, cols, rows, cwd, env }) {
     const conn = await this.connect();
+    const noShell = posixShellRefusal(conn.info, cmd); if (noShell) throw noShell; // lane windows-device-fs: THE DOOR
     const chan = conn.nextChan++;
     const handle = { chan, onData: null, onExit: null };
     let resolveReady, rejectReady, readySettled = false;
@@ -443,6 +474,7 @@ class DeviceManager {
    */
   async openPipeSession({ sid, cmd, args, cwd, env, offset = 0 }) {
     const conn = await this.connect();
+    const noShell = cmd === undefined ? null : posixShellRefusal(conn.info, cmd); if (noShell) throw noShell; // lane windows-device-fs: THE DOOR (an attach names no cmd)
     const chan = conn.nextChan++;
     const handle = { chan, sid, onData: null, onExit: null };
     let resolveReady, rejectReady, readySettled = false;
@@ -494,6 +526,17 @@ class DeviceManager {
   fsRename(p, to) { return this._request({ op: 'fs-op', action: 'rename', path: p, to }); }
   fsMkdir(p) { return this._request({ op: 'fs-op', action: 'mkdir', path: p }); }
   fsRm(p, recursive = false) { return this._request({ op: 'fs-op', action: 'rm', path: p, recursive }); }
+  /** lane windows-device-fs: the Files view's ops WITHOUT a shell (`fs-portable`; `~` expanded by the device) — what a
+   *  Windows agent does with its own fs. Capability-gated: an older agent is never asked an op it lacks (it would hang). */
+  async _fsPortable(payload, waitMs) {
+    const conn = await this.connect();
+    if (!conn.info?.capabilities?.includes?.('fs-portable')) { const e = new Error('daemon lacks fs-portable (capabilities gate) -- upgrade the agent on this machine'); e.code = 'host_needs_daemon'; throw e; }
+    return this._request({ op: 'fs-op', ...payload, ...(waitMs ? { waitMs } : {}) });
+  }
+  fsHome() { return this._fsPortable({ action: 'home', path: '~' }); }
+  fsCopy(p, to) { return this._fsPortable({ action: 'copy', path: p, to }, 130000); }
+  fsMove(p, to) { return this._fsPortable({ action: 'move', path: p, to }, 130000); }
+  fsDu(p) { return this._fsPortable({ action: 'du', path: p }, 70000); }
   /** read [start, start+len) — resolves a Buffer (the transcript-slab primitive).
    *  COUNT-GATED: fs-done rides the credit-EXEMPT control channel, so it can
    *  OVERTAKE data still queued daemon-side behind the 256KB credit window —
@@ -618,8 +661,12 @@ class DeviceManager {
   }
   /** `waitMs` (lane-pairing ⑥): how long THIS side waits for the reply — the daemon kills the child at `timeoutMs`
    *  (capped at 30 s there) and still has to send the result, so a caller that uses the cap itself waits past it. */
-  runCmd(cmd, args = [], { stdin, env, timeoutMs, waitMs } = {}) {
-    return this._request({ op: 'run-cmd', cmd, args, env, timeoutMs, ...(waitMs ? { waitMs } : {}), stdin64: stdin ? Buffer.from(stdin).toString('base64') : undefined });
+  async runCmd(cmd, args = [], { stdin, env, timeoutMs, waitMs } = {}) {
+    const { info } = await this.connect();
+    const noShell = posixShellRefusal(info, cmd); if (noShell) throw noShell; // lane windows-device-fs: THE DOOR (the device's fact)
+    const r = await this._request({ op: 'run-cmd', cmd, args, env, timeoutMs, ...(waitMs ? { waitMs } : {}), stdin64: stdin ? Buffer.from(stdin).toString('base64') : undefined });
+    const failed = posixShellFailed(info, cmd, r); if (failed) throw failed; // verify-r1 F1: asked, and it was not there ⇒ named
+    return r;
   }
   /** lane-exit-run-output E1: a SHELL LINE run under the interpreter the DEVICE has (cmd.exe on Windows, sh elsewhere —
    *  PURE src/exit-shell.js decides THERE); the reply carries `interpreter`, and `spawnError` when the child never
@@ -637,8 +684,12 @@ class DeviceManager {
    *  credit-gated tail can't be overtaken and silently dropped (truncated
    *  usage harvests / streamed downloads). Old daemons omit it → resolve at
    *  exit as before. A 15s post-exit stall resolves {truncated:true}. */
-  runStream(cmd, args = [], { env, cwd, stdin, onData, timeoutMs } = {}) {
-    return this._streamOp({ op: 'run-stream', cmd, args, env, cwd, stdin64: stdin ? Buffer.from(stdin).toString('base64') : undefined }, { onData, timeoutMs });
+  async runStream(cmd, args = [], { env, cwd, stdin, onData, timeoutMs } = {}) {
+    const { info } = await this.connect();
+    const noShell = posixShellRefusal(info, cmd); if (noShell) throw noShell; // lane windows-device-fs: THE DOOR (the device's fact)
+    const r = await this._streamOp({ op: 'run-stream', cmd, args, env, cwd, stdin64: stdin ? Buffer.from(stdin).toString('base64') : undefined }, { onData, timeoutMs });
+    const failed = posixShellFailed(info, cmd, r); if (failed) throw failed; // verify-r1 F1: asked, and it was not there ⇒ named
+    return r;
   }
   /** ONE streaming-op consumer (run-stream + usage-scan): count-gated settle
    *  (stream-exit's `sent` vs received), link-death settles, deadline belt. */
@@ -751,6 +802,8 @@ class DeviceManager {
     // lane browser-admin 2a: the Chrome build list is its own capability — an older agent is never asked (it would refuse
     // the action by name; a start carrying a build it ignores would run its default build), said by name here
     if ((action === 'builds' || (action === 'start' && params && params.browser && params.browser.kind && params.browser.kind !== 'default')) && !conn.info.capabilities.includes('browser-builds')) { const e = new Error('this machine\'s agent cannot list Chrome builds (it predates the list) -- upgrade the agent on this machine'); e.code = 'builds_unsupported'; throw e; }
+    // lane remote-profile-start: removing a profile's folder is its own capability — an older agent is never asked (said by name)
+    if (action === 'remove' && !conn.info.capabilities.includes('browser-remove')) { const e = new Error('this machine\'s agent cannot remove a profile\'s folder (it predates it) -- upgrade the agent on this machine'); e.code = 'remove_unsupported'; throw e; }
     const r = await this._request({ op: 'browser-serve', action, params, timeoutMs });
     if (r.error) throw new Error(r.error);
     return r.result || {};
@@ -889,4 +942,4 @@ class DeviceManager {
   stop() { this._stopped = true; this._conn?.mux?.destroy(); this._conn = null; }
 }
 
-module.exports = { DeviceManager };
+module.exports = { posixShellRefusal, posixShellFailed, DeviceManager };

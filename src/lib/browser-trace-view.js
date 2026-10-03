@@ -858,7 +858,7 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
     }
     // lane H verify r5: a live NAMED profile's browser can be stopped here — the remedy the "keeps closing" notice names
     // (a Stop ends the record and its restart count); its logins stay in the profile, the next command starts it again
-    if (r.live && !r.host) {
+    if (r.live) { // lane remote-profile-start: a paired machine's browser too (its own op stops it there)
       const stop = el('button', 'file-tool-btn bprof-btn bprof-stop', t('Stop'));
       stop.disabled = st.busy;
       stop.title = t('Stop this profile\'s browser now — its logins stay in the profile; the next command starts it again (this also resets a browser that keeps closing)');
@@ -919,10 +919,13 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
       const users = usersOf(r);
       const names = users.map((u) => u.name).filter(Boolean);
       const warn = users.length ? t('{n} conversation(s) use it — they go back to a temporary browser.', { n: users.length }) + (names.length ? ' (' + names.slice(0, 8).join(', ') + ')' : '') + ' ' : '';
-      const yes = await showConfirmDialog({ title: t('Delete {label}?', { label: String(r.label || r.id) }), message: warn + t('Its logins are kept aside under “Deleted profiles” until you press Delete permanently there.'), confirmText: t('Delete'), danger: users.length > 0 });
+      // lane remote-profile-start: a paired machine's profile is deleted WITH its folder there (no set-aside on another machine) — said before the click
+      const yes = await showConfirmDialog({ title: t('Delete {label}?', { label: String(r.label || r.id) }), message: warn + (r.host ? t('Its folder on {machine} is deleted with its logins — this cannot be undone.', { machine: String(r.host) }) : t('Its logins are kept aside under “Deleted profiles” until you press Delete permanently there.')), confirmText: t('Delete'), danger: users.length > 0 || !!r.host });
       if (!yes) return;
       const res = await act(`/api/browser/profiles/${encodeURIComponent(r.id)}/forget`, jsonInit('POST', { release: true, unpin: true }), t('Could not delete'));
-      if (res) showToast(t('Deleted {label} — kept aside until you delete it permanently', { label: String(r.label || r.id) }) + (res.detached || res.unpinned ? ' · ' + t('{n} conversation(s) no longer use it', { n: Math.max(Number(res.detached) || 0, Number(res.unpinned) || 0) }) : ''), { duration: 7000 });
+      if (res && res.machine && res.machine.left) showToast(t('Deleted {label}, but its folder on {machine} was left there: {why}', { label: String(r.label || r.id), machine: String(res.machine.host || r.host || ''), why: String(res.machine.left) }), { type: 'warn', duration: 12000 });
+      else if (res && res.machine) showToast(t('Deleted {label} and its folder on {machine}', { label: String(r.label || r.id), machine: String(res.machine.host || r.host || '') }), { duration: 7000 });
+      else if (res) showToast(t('Deleted {label} — kept aside until you delete it permanently', { label: String(r.label || r.id) }) + (res.detached || res.unpinned ? ' · ' + t('{n} conversation(s) no longer use it', { n: Math.max(Number(res.detached) || 0, Number(res.unpinned) || 0) }) : ''), { duration: 7000 });
       load();
     };
     actions.appendChild(forget);

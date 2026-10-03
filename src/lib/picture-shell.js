@@ -76,6 +76,7 @@ export function closeWordsKey(code) {
       : code === 'browser-closed' ? 'the connection dropped'
         : code === 'session-ended' ? 'the desktop session ended'
           : code === 'blocked' ? 'another window is driving it'
+            : code === 'machine-offline' ? 'the machine went offline' // design 014 D1
             : null;
 }
 

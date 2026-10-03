@@ -500,6 +500,16 @@ function sendWhyText(why, { t = defaultT } = {}) {
     case 'read-only-adapter': return t('this channel is read-only');
     case 'read-only-mailbox': return t('this conversation is read-only');
     case 'not-a-member': return t('you are not a member of this conversation');
+    // design 012 (Slack S1): a conversation the vendor narrows by its own state
+    case 'archived': return t('this channel is archived');
+    case 'frozen': return t('this channel is frozen');
+    case 'read-only-channel': return t('only some people may post in this channel');
+    case 'thread-only-channel': return t('in this channel you may only reply in threads');
+    case 'team-access-not-granted': return t('your organization has not granted this app access to this conversation');
+    case 'restricted': return t('your workspace\'s settings do not allow this');
+    case 'ekm': return t('your organization\'s key management hides this content');
+    case 'missing-scope': return t('the app was installed without a permission this needs — add it on the app\'s page and paste the new token (Re-authorize)');
+    case 'token-revoked': return t('the token was revoked or the app was removed — paste a new token (Re-authorize)');
     case 'left-group': return t('you left this conversation');
     case 'bot-not-in-chat': return t('the bot is not in this chat');
     case 'not-declared-for-this-identity': return t('this identity cannot send on this channel');
@@ -521,6 +531,7 @@ function threadWhyText(why, { t = defaultT } = {}) {
     case 'topic-forbidden': return t('This group does not allow replies in threads');
     case 'no-threads': return t('this channel has no threads');
     case 'thread-reply-not-declared': return t('this channel cannot reply into a thread');
+    case 'no-threads-here': return t('this channel does not allow threads');
     case 'thread-not-loaded': return t('this thread is not loaded yet — opening it loads it');
     default: return sendWhyText(why, { t });
   }

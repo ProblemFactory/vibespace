@@ -89,7 +89,7 @@ function pureLegs(H, tag = '') {
   const rows = [
     ['not-found', { profile: null }],
     ['not_attachable', { profile: P({ ephemeral: true }) }],
-    ['remote_profile', { profile: P({ host: 'dev-1' }) }],
+    ['remote_profile', { profile: P({ host: 'dev-1' }), hostKnown: false }], // lane remote-profile-start: a machine no longer paired (a known one is browsed)
     ['not_ours', { row: { starts: false } }],
     ['not_ours', { row: { starts: true, leaseKind: 'window-target' } }],
     ['backend_unavailable', { control: { ok: false, error: 'cloakbrowser is not installed' } }],
@@ -102,7 +102,7 @@ function pureLegs(H, tag = '') {
   leg(!bad.length && H.REFUSAL_CODES.join() === 'not-found,not_attachable,remote_profile,not_ours,backend_unavailable,browser_restarting,profile_locked,browser_unstable,cap', `every refusal code, each named (${rows.length} rows)`, bad);
   const order = [
     ['an ephemeral record on a paired machine ⇒ not_attachable', { profile: P({ ephemeral: true, host: 'dev-1' }) }, 'not_attachable'],
-    ['a paired machine\'s profile at the ceiling ⇒ remote_profile', { profile: P({ host: 'dev-1' }), running: 9 }, 'remote_profile'],
+    ['a no-longer-paired machine\'s profile at the ceiling ⇒ remote_profile', { profile: P({ host: 'dev-1' }), hostKnown: false, running: 9 }, 'remote_profile'],
     ['a cdp profile whose control refuses ⇒ not_ours', { row: { starts: false }, control: { ok: false } }, 'not_ours'],
     ['mid-switch and locked ⇒ browser_restarting', { switching: true, closed: { code: 'profile_locked', holderPid: 1 } }, 'browser_restarting'],
     ['locked while he drives it from a live window ⇒ profile_locked (never a focus on a browser another program holds)', { closed: { code: 'profile_locked', holderPid: 1 }, human: { state: 'driving', alive: true }, live: true }, 'profile_locked'],
@@ -187,7 +187,7 @@ function pureLegs(H, tag = '') {
   const controls = [
     ['asks-who-list', "  if (!key) return no('not-found');", "  if (!key) return no('not-found');\n  if (p.owner && p.owner.kind === 'only') return no('not_ours');", /Who can use it/],
     ['join-counts-ceiling', "  if (!live && num(running) >= (num(cap) || 6)) return no('cap', { n: num(running) });", "  if (num(running) >= (num(cap) || 6)) return no('cap', { n: num(running) });", /JOIN at 6\/6/],
-    ['allows-remote', "  if (p.host) return no('remote_profile', { machine: str(p.host) });", '', /every refusal code|ORDER is the decision/],
+    ['allows-remote', "  if (p.host && hostKnown === false) return no('remote_profile', { machine: str(p.host) });", '', /every refusal code|ORDER is the decision/],
     ['idle-lapses-his-tab', "    case 'idle': return { state: s, effects: [] };", "    case 'idle': return s === 'driving' ? { state: 'away', effects: ['away-clock'] } : { state: s, effects: [] };", /NEVER lapses by the idle clock/],
     ['keeps-the-text', "const PLACEHOLDER = '•';", "const PLACEHOLDER = '•';\nconst __keep = true;", null],
   ];
@@ -875,10 +875,12 @@ let work, solo, shop;
 // the refusals: remote, cdp, an ephemeral record, the ceiling, the lock
 {
   let e = null;
-  const kr = mkKeeper(K, { dataDir: path.join(ROOT, 'data-r'), hostKnown: () => true });
+  let paired = true; // lane remote-profile-start: a KNOWN machine's profile is browsed (test-remote-profile-start) — this one is unpaired after its create
+  const kr = mkKeeper(K, { dataDir: path.join(ROOT, 'data-r'), hostKnown: () => paired });
   const rp = kr.createProfile({ label: 'Remote', host: 'dev-1' }, { owner: { kind: 'instance', id: null } });
+  paired = false;
   try { await kr.browse(rp.id); } catch (x) { e = x; }
-  ok(e && e.code === 'remote_profile' && /saved on dev-1/.test(e.message), 'a paired machine\'s profile: remote_profile by name (v1)', e && e.message);
+  ok(e && e.code === 'remote_profile' && /saved on dev-1/.test(e.message), 'a machine this VibeSpace no longer knows: remote_profile by name', e && e.message);
   const cp = kr.createProfile({ label: 'Ext', provider: 'cdp', cdpPort: 9333 }, { owner: { kind: 'instance', id: null } });
   e = null; try { await kr.browse(cp.id); } catch (x) { e = x; }
   ok(e && e.code === 'not_ours', 'a browser VibeSpace only connects to (cdp): not_ours', e && e.message);
@@ -1435,7 +1437,7 @@ console.log('— ③ censuses: no card for him (+ control), the holder readers, 
     // lane browser-resume C: whose tab it is — the conversations' tab ROOTS are their leases' (his own tab is added from
     // `humans`, never a lease); the agent's own tab verbs need ITS lease; the user's row judges a CONVERSATION's tab; the
     // orphan rule (adoptable) asks whether any conversation leases the browser; the rebind's new tab is its lease's root
-    tabHoldersOf: 1, keepTabRoots: 1, bootstrapTabRoot: 1, agentTabAct: 4, tabOwnersFor: 1, userTabAct: 1,
+    tabHoldersOf: 1, keepTabRoots: 1, bootstrapTabRoot: 1, agentTabAct: 4, tabOwnersFor: 1, userTabAct: 1, whoseOf: 1, // accept-fixes-strip F8: another holder's tab is named by ITS lease's conversation (a conversation reader)
     // lane site-reset verify r3 #2: the PERSISTED WITNESS lives on a CONVERSATION's lease (`l.tabs` — the tabs the dialog watch
     // saw born of its verbs); his row holds no lease — his tabs are his row's own (`ownTab` / `adopted`)
     noteOwnTab: 1, forgetOwnTab: 1, dropLeaseTabs: 1, pruneOwnTabs: 1, // r4 #3: pruned to the browser's tabs at a watch's connect

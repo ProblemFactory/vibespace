@@ -84,3 +84,5 @@ clusterSecret: vibespace-cluster-presets
 MINE-OWN-browserless-key-0000
 env-browserless-key-0000000
 cb_env_license_Z{16}
+# the Windows built-in group named in an ACL description (desktop-vnc-native: the TightVNC MSI folder), not the credentials-store value it contains:
+\(SYSTEM \+ Admin[i]strators

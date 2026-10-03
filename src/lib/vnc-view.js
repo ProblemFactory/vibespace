@@ -74,11 +74,12 @@ export { RECONNECT_LADDER, streamUrl };
  * Returns { container, bar, mount, status, connect, disconnect, setStatus,
  *           addControl, focus, get rfb(), dispose }.
  */
-export function createVncView(host, { url, before = null, labels = {}, autoReconnect = false, onStatus = null, loadRFB: loader = loadRFB, lastClose = null } = {}) {
+export function createVncView(host, { url, before = null, labels = {}, autoReconnect = false, onStatus = null, loadRFB: loader = loadRFB, lastClose = null, credentials = null, resizeSession = true } = {}) {
   const shell = createPictureShell(host, { labels, autoReconnect, onStatus, focus: () => focus(), ladderWords: true }); // K3: the ladder rung + the bridge's words in the chip
   const { container, bar, mount, status, pasteBtn, reBtn, labels: L, setStatus, addControl, emit } = shell;
 
   let rfb = null;
+  let refused = null; // design 014 D1: the RFB whose sign-in was refused / cancelled (its words stay, no retry)
   let rfbLive = false; // K2: noVNC logs "Tried changing state of a disconnected RFB object" for a disconnect() on a dead RFB — never ask
   let mode = 'active'; // x5
 
@@ -111,10 +112,24 @@ export function createVncView(host, { url, before = null, labels = {}, autoRecon
     if (mode !== 'active') { try { rfb.viewOnly = true; } catch {} } // x5: only the active pane drives the display (set BEFORE resizeSession asks)
     rfb.scaleViewport = true;   // fit when the server can't resize
     rfb.resizeSession = true;   // ask the server to match the window (RandR)
+    if (!resizeSession) rfb.resizeSession = false; // design 014 D1: never a machine's whole PHYSICAL desktop — its picture is scaled
+    // design 014 D1: a server that asks for a sign-in (a Mac's Screen Sharing, a TightVNC service) — the page asks the
+    // person (`credentials(types)`) and hands the answer to noVNC ONLY; a refused sign-in stops the ladder (no retry loop)
+    if (credentials) {
+      rfb.addEventListener('credentialsrequired', async (e) => {
+        let c = null;
+        try { c = await credentials((e.detail && e.detail.types) || ['password']); } catch { c = null; }
+        if (mine !== rfb || shell.closed) return;
+        if (!c) { refused = mine; shell.unwant(); try { rfb.disconnect(); } catch {} setStatus(t('Sign-in cancelled'), { reconnect: true }); return; }
+        try { rfb.sendCredentials(c); } catch {}
+      });
+      rfb.addEventListener('securityfailure', (e) => { refused = mine; shell.unwant(); setStatus(t('The machine refused the sign-in: {why}', { why: (e.detail && e.detail.reason) || t('wrong name or password') }), { error: true, reconnect: true }); emit('error', 'securityfailure'); });
+    }
     rfb.addEventListener('connect', () => { shell.resetLadder(); shell.setCloseWords(''); setStatus(t('Connected')); emit('connected'); });
     rfb.addEventListener('disconnect', (e) => {
       if (mine === rfb) rfbLive = false;
       if (shell.closed) return;
+      if (refused === mine) { emit('disconnected', { clean: false }); return; } // design 014 D1: the sign-in's own words stay
       setStatus(e.detail?.clean ? t('Disconnected') : t('Connection lost'), { error: !e.detail?.clean, reconnect: true });
       emit('disconnected', { clean: !!e.detail?.clean });
       // K3: the bridge's own words for this close (a terminate() sends no frame; noVNC never exposes a reason)
@@ -160,7 +175,7 @@ export function createVncView(host, { url, before = null, labels = {}, autoRecon
     const next = m === 'watch' || m === 'blocked' ? m : 'active';
     if (next === mode) return;
     mode = next;
-    try { if (rfb) { rfb.viewOnly = mode !== 'active'; if (mode === 'active') rfb.resizeSession = true; } } catch {}
+    try { if (rfb) { rfb.viewOnly = mode !== 'active'; if (mode === 'active') rfb.resizeSession = resizeSession; } } catch {}
   };
 
   return { container, bar, mount, status, copyChip: shell.copyChip, connect, disconnect, setStatus, addControl, focus, dispose, setMode, get mode() { return mode; }, get rfb() { return rfb; }, get state() { return shell.state; }, get wanted() { return shell.wanted; }, get pasteOpen() { return shell.pasteOpen; }, get copiedText() { return shell.copiedText; } };

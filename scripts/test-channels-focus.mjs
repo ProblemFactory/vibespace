@@ -540,5 +540,21 @@ console.log('⑦ the R3 × R4 seam (2.369.191): a DIGEST watcher\'s open window 
   ok(/touch: touchView\(en, lw, ob\),/.test(ENGINE_SRC) && /return \{ read, wake, pending, pendingFor, refusalAt, selfAt \};/.test(ENGINE_SRC) && /x = slot\(h\.for \|\| null\)/.test(ENGINE_SRC), 'PIN: touchView groups the pending hits by the watcher they wait for (`for`) and sends pendingFor');
 }
 
+// ── design 012 (Slack S1): AN APP'S DM IS NEVER "SOMEBODY WROTE TO YOU" — the row's `app` (the other side is a bot or
+// an integration) withholds the Direct tag and the candidate rule; a person's DM keeps both (the control) ──
+{
+  const F = require(path.join(REPO, 'src/channel-focus.js'));
+  const t = Date.now();
+  const dm = { key: 'slack/D1', kind: 'dm', unread: 2, lastAt: t - 1000 };
+  ok(F.statusTag(dm, t) && F.statusTag(dm, t).code === 'direct', 'design 012 CONTROL: a person\'s DM with unread messages wears the Direct tag');
+  ok(!F.statusTag({ ...dm, app: true }, t), 'design 012: an app\'s DM with unread messages does NOT');
+  ok(F.candidateOf({ ...dm }, null, t) === true && F.candidateOf({ ...dm, app: true }, null, t) === false, 'design 012: …and is not a first-screen candidate for that reason either');
+  const fsrc = fs.readFileSync(path.join(REPO, 'src/channel-focus.js'), 'utf8');
+  const RULE = "  if (c.kind === 'dm' && !c.app && num(c.unread) > 0";
+  ok(fsrc.includes(RULE), 'design 012: the patch site of the app control is in channel-focus.js');
+  const F2 = require(MUT.write('src/channel-focus.js', fsrc.replace(RULE, "  if (c.kind === 'dm' && num(c.unread) > 0"), 'app-dm'));
+  ok(F2.statusTag({ ...dm, app: true }, t) && F2.statusTag({ ...dm, app: true }, t).code === 'direct', 'design 012 NEGATIVE CONTROL: a copy without the `app` test tags a GitHub bot\'s DM "Direct"');
+}
+
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

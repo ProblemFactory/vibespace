@@ -408,6 +408,7 @@ function renderRecord(rec, { cont = false, base = null, folds = null, mail = nul
   // W3 (lane channel-threads): the REACTION STRIP — chips keyed by key, only where the message HAS reactions
   if (ctx) { const strip = renderReactionStrip(rec, ctx.strip(rec)); if (strip) row.appendChild(strip); }
   row._place = rec.place || null;
+  row._author = rec.author || null;   // lane channel-window-tidy: the facts a later ask fills name the sender (From) too
   // lane reaction-hover: THE ACTION BAR — an overlay at the right edge (CSS), last in the row so the keyboard reaches it
   // after the message's own controls; `_acts` = the row's actions NOW (a re-sync after the offers change, the phone's
   // long-press menu)
@@ -925,7 +926,7 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
       for (const row of rowsFor(vid)) {
         const ask = row.querySelector(':scope > .chanmsg-facts-ask');
         if (!ask) continue;
-        const next = renderFacts({ vendorId: vid, facts: Array.isArray(facts) ? facts : [] }, { folds });
+        const next = renderFacts({ vendorId: vid, author: row._author || null, facts: Array.isArray(facts) ? facts : [] }, { folds });
         if (next && next.classList.contains('chanmsg-facts-inline') && row.querySelector(':scope > .chanmsg-head')) { row.querySelector(':scope > .chanmsg-head').appendChild(next); ask.remove(); } else if (next) ask.replaceWith(next); else ask.remove();
       }
     }
@@ -962,14 +963,17 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
     const find = () => list.querySelector(`.chanmsg[data-vid="${CSS.escape(String(vid))}"]`);
     let row = find();
     if (row) { flash(row); return; }
-    const pages = place && place.quote && place.quote.loaded === false ? 1 : JUMP_PAGES_MAX;
+    // lane channel-window-tidy: a SENT proposal's message (`place.sent` = its instant) newer than the oldest drawn row
+    // is not older — no page up finds it; it is drawn once the conversation's next read brings it
+    const notYet = !!(place && place.sent && oldest !== null && Number(place.sent) >= oldest);
+    const pages = notYet ? 0 : place && place.quote && place.quote.loaded === false ? 1 : JUMP_PAGES_MAX;
     for (let i = 0; i < pages && !row; i++) {
       const n = await serial(async () => { const before = list.scrollHeight; const k = await loadPage({ prepend: true }); if (k) list.scrollTop = list.scrollHeight - before; return k; });
       row = find();
       if (!n) break;
     }
     if (row) flash(row);
-    else showToast(t('That message is older than what is loaded'), { type: 'warn' });
+    else showToast(notYet ? t('The sent message has not reached this window yet') : t('That message is older than what is loaded'), { type: 'warn' });
   }
 
   // THE REACTION TRICKLE (spec §3.3 source 2, drain rule 20b): the rows INSIDE the viewport — of the list and of the
@@ -1211,12 +1215,15 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
   // P3: this conversation's proposals, rendered INLINE from the same store
   // the Outbox window reads (§9.2). Re-read on `channel-outbox-updated`.
   const outboxSec = el('div', 'chanwin-outbox-slot');
+  // lane channel-window-tidy: which decided lines are open and whether the handled ones are unfolded — the WINDOW's, so
+  // every redraw (a broadcast, a rebuild, an emptied section) keeps them
+  const outboxUi = { open: new Set(), fold: false };
   async function renderOutbox() {
     const r = await fetchJson(`/api/channels/outbox?conv=${encodeURIComponent(`${adapterId}/${convId}`)}`);
     if (!r || r.error) { outboxSec.textContent = ''; return; }
     // KEYED (2026-09-27): the section the last render drew is patched in place
     const prev = outboxSec.firstElementChild;
-    const sec = renderInlineProposals(app, r.proposals || [], prev);
+    const sec = renderInlineProposals(app, r.proposals || [], prev, { ui: outboxUi, onJump: (vid, at) => jumpTo(vid, { sent: at }) });
     if (!sec) { outboxSec.textContent = ''; return; }
     if (sec !== prev) outboxSec.replaceChildren(sec);
   }

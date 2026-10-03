@@ -64,6 +64,8 @@
  */
 
 const TEST_KINDS = Object.freeze(['credential-exchange', 'shape-only', 'reachability']);
+/** design 012: how an account of a bindsPerAccount row signs in when it is not the row's OAuth client. */
+const SIGNIN_KINDS = Object.freeze(['paste']);
 
 /** What the Test button SAYS, per kind — the English key the client hands
  *  to `t()`. A button's words are decided by what it does, never by a row. */
@@ -248,6 +250,30 @@ const ROWS = Object.freeze([
     signinName: 'Google',
     clientHint: i18nKey('The Google OAuth client this account signs in through. A refresh token is bound to the client it was issued under — switching the client means signing in again.'),
     docs: 'docs/design-communication-panel.zh.md',
+  },
+
+  // ── SLACK — a PASTE row (design 012, lane S1, B-ff09) ──────────────────
+  // No client at all: each person creates their OWN internal Slack app from the link the account dialog builds
+  // (src/channels/slack-manifest.js) and pastes its User OAuth Token — Slack's OAuth needs an https redirect our
+  // loopback cannot give, and a distributed (non-Marketplace) app is held to 1 history read a minute. So the row
+  // declares NO fields, no cluster env and no presets; the account dialog hides the client block and shows the paste
+  // box (`signin: 'paste'`); the engine answers every credential question for it as ready (`source: 'paste'`). The
+  // pasted token is judged by its SHAPE (`xoxp-`) before the one `auth.test` the paste costs.
+  {
+    id: 'slack',
+    label: 'Slack',
+    fields: [],
+    signin: 'paste',
+    test: {
+      kind: 'shape-only',
+      describe: i18nKey('Checks that a pasted value is a Slack user token (it starts xoxp-) before the one call that asks Slack who it belongs to.'),
+      caveat: i18nKey('Shape only. Whether the token reads every conversation depends on the scopes the app was installed with — the account card lists them.'),
+    },
+    consumers: ['src/channels/slack.js'],
+    usedBy: i18nKey('Used by the Slack channel'),
+    bindsPerAccount: true,
+    clientHint: i18nKey('No client to choose: every person makes their own Slack app in their workspace and pastes its token.'),
+    docs: 'docs/agent/channels-manual.md',
   },
 
   // ── THE AGENT-BROWSER TRACK'S SIX KEY ROWS (docs/design-agent-browser-v2.md §7.5, P4 second half) ──
@@ -548,17 +574,22 @@ function oauthClientVendorOf(row) {
 function checkRow(row) {
   const errs = [];
   if (row.bindsPerAccount !== undefined && typeof row.bindsPerAccount !== 'boolean') errs.push('bindsPerAccount must be a boolean');
+  // design 012: `signin` = how an account of the row signs in — absent = the OAuth client the row declares; 'paste' = no
+  // client at all (the person pastes a token from the vendor's own page): no fields, no cluster env, no delegate
+  if (row.signin !== undefined && !SIGNIN_KINDS.includes(row.signin)) errs.push(`signin must be one of ${SIGNIN_KINDS.join('|')}`);
+  const paste = row.signin === 'paste';
+  if (paste && (row.bindsPerAccount !== true || (row.fields || []).length || row.clusterEnv || row.delegate || row.setup)) errs.push('a signin:\'paste\' row is a bindsPerAccount row with no fields, no clusterEnv / delegate and no setup (nothing to configure: the person pastes a token)');
   if (row.bindsPerAccount === true) {
     if (typeof row.clientHint !== 'string' || !row.clientHint.trim()) errs.push('a bindsPerAccount row declares its clientHint (the one hint line under the account dialog\'s OAuth client field)');
-    if ((row.fields || []).filter((f) => f.secret).length !== 1) errs.push('a bindsPerAccount row declares exactly ONE secret field: the custom client\'s secret');
-    if (!(row.fields || []).some((f) => !f.secret)) errs.push('a bindsPerAccount row declares a non-secret field: the custom client\'s id');
+    if (!paste && (row.fields || []).filter((f) => f.secret).length !== 1) errs.push('a bindsPerAccount row declares exactly ONE secret field: the custom client\'s secret');
+    if (!paste && !(row.fields || []).some((f) => !f.secret)) errs.push('a bindsPerAccount row declares a non-secret field: the custom client\'s id');
   } else if (row.clientHint !== undefined) errs.push('clientHint belongs to a bindsPerAccount row only (a card has no account dialog)');
   if (row.signinName !== undefined && (row.bindsPerAccount !== true || typeof row.signinName !== 'string' || !row.signinName.trim())) errs.push('signinName is a non-empty brand on a bindsPerAccount row only');
   if (!row.id || !/^[a-z][a-z0-9:-]*$/.test(row.id)) errs.push('id must be lowercase [a-z0-9:-]');
   if (!row.label) errs.push('label required');
-  if (!Array.isArray(row.fields) || !row.fields.length) errs.push('fields required');
+  if (!Array.isArray(row.fields) || (!row.fields.length && !paste)) errs.push('fields required');
   for (const f of row.fields || []) if (typeof f.validate !== 'function') errs.push(`field ${f.key}: validate must be a function`);
-  if (!row.clusterEnv && !row.delegate) errs.push('clusterEnv or delegate required');
+  if (!row.clusterEnv && !row.delegate && !paste) errs.push('clusterEnv or delegate required');
   if (row.clusterEnv && row.delegate) errs.push('clusterEnv and delegate are a UNION — declare one');
   if (row.delegate && row.delegate.to !== 'drive-presets') errs.push('delegate.to must be drive-presets');
   if (!row.test || !TEST_KINDS.includes(row.test.kind)) errs.push(`test.kind must be one of ${TEST_KINDS.join('|')}`);
@@ -570,7 +601,7 @@ function checkRow(row) {
 }
 
 module.exports = {
-  ROWS, TEST_KINDS, TEST_BUTTON_LABEL, LARK_CALLBACK_URL, MASK, MASK_TAIL_MIN,
+  ROWS, TEST_KINDS, SIGNIN_KINDS, TEST_BUTTON_LABEL, LARK_CALLBACK_URL, MASK, MASK_TAIL_MIN,
   rowById, rowIds, maskValue, validateValues, missingFields, resolvePrecedence, pickPreset,
   fieldDecls, checkRow, TRIM_NOTE, credentialWhyText, clientFieldsOf, bindsPerAccount, oauthClientVendorOf,
 };

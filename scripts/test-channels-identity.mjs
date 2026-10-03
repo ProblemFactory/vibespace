@@ -297,5 +297,18 @@ console.log('⑦ the receipt block neuters every vendor-controlled field');
   ok(/L{59}…/.test(longTitle) && /T{119}…/.test(longTitle) && !/L{60}/.test(longTitle) && !/T{120}/.test(longTitle), 'label clipped to 60, title to 120 — the wake block\'s numbers');
 }
 
+// ── design 012 (Slack S1, D11): a Slack account is a PERSON IN A WORKSPACE — `userId` = `T…/U…`; a re-authorize that
+// pastes a token of another workspace is another identity, refused like any other mismatch ──
+{
+  const ID = require(path.join(REPO, 'src/channel-identity.js'));
+  const held = ID.identityOf({ userId: 'T0ACME001/U0SELF001' });
+  const same = ID.identityOf({ userId: 'T0ACME001/U0SELF001' });
+  const other = ID.identityOf({ userId: 'T0GLOBEX1/U0SELF001' });
+  ok(held.userId === 't0acme001/u0self001' && !ID.identityMismatch(held, same), 'design 012: the same person in the same workspace is the same identity');
+  const mm = ID.identityMismatch(held, other);
+  ok(!!mm, 'design 012: T2/U1 ≠ T1/U1 — a token of ANOTHER workspace (same user id) is a mismatch, refused by name', JSON.stringify(mm));
+  ok(!!ID.identityMismatch(ID.identityOf({ userId: 'E0ORG0001/T0ACME001/U0SELF001' }), held), '…and an Enterprise Grid org prefix (`E…/`) is part of the identity');
+}
+
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

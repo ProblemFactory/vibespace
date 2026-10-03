@@ -1,0 +1,752 @@
+{
+ "_note": "Recorded-shape Slack Web API answers (design 012 lane S1). Shapes follow docs.slack.dev reference pages as fetched by the research (slack-research/read-surface.md, write-surface.md); ids and words are fixtures. No live call was made.",
+ "auth.test": {
+  "ok": true,
+  "url": "https://acme-fixture.slack.com/",
+  "team": "Acme",
+  "user": "mart",
+  "team_id": "T0ACME001",
+  "user_id": "U0SELF001",
+  "is_enterprise_install": false
+ },
+ "scopesHeader": "channels:history,groups:history,im:history,mpim:history,channels:read,groups:read,im:read,mpim:read,users:read,team:read,chat:write,reactions:read,reactions:write,files:read,emoji:read",
+ "users.list": {
+  "ok": true,
+  "members": [
+   {
+    "id": "U0SELF001",
+    "team_id": "T0ACME001",
+    "name": "mart",
+    "real_name": "Mart Owner",
+    "profile": {
+     "display_name": "mart",
+     "real_name": "Mart Owner"
+    }
+   },
+   {
+    "id": "U0ALICE01",
+    "team_id": "T0ACME001",
+    "name": "alice.c",
+    "real_name": "Alice Chen",
+    "profile": {
+     "display_name": "Alice",
+     "real_name": "Alice Chen"
+    }
+   },
+   {
+    "id": "U0ALICE02",
+    "team_id": "T0ACME001",
+    "name": "alice.w",
+    "real_name": "Alice Wong",
+    "profile": {
+     "display_name": "Alice",
+     "real_name": "Alice Wong"
+    }
+   },
+   {
+    "id": "U0BOB0001",
+    "team_id": "T0ACME001",
+    "name": "bob",
+    "real_name": "Bob Ray",
+    "profile": {
+     "display_name": "Bob",
+     "real_name": "Bob Ray"
+    }
+   },
+   {
+    "id": "U0GHBOT01",
+    "team_id": "T0ACME001",
+    "name": "github",
+    "real_name": "GitHub",
+    "is_bot": true,
+    "profile": {
+     "display_name": "",
+     "real_name": "GitHub"
+    }
+   },
+   {
+    "id": "U0GONE001",
+    "team_id": "T0ACME001",
+    "name": "gone",
+    "deleted": true,
+    "profile": {
+     "display_name": "Alice",
+     "real_name": "Alice Old"
+    }
+   },
+   {
+    "id": "U0EXT0001",
+    "team_id": "T0GLOBEX1",
+    "name": "gina",
+    "real_name": "Gina Globex",
+    "is_stranger": true,
+    "profile": {
+     "display_name": "Gina",
+     "real_name": "Gina Globex"
+    }
+   }
+  ],
+  "response_metadata": {
+   "next_cursor": ""
+  }
+ },
+ "users": {
+  "U0SELF001": {
+   "id": "U0SELF001",
+   "team_id": "T0ACME001",
+   "name": "mart",
+   "real_name": "Mart Owner",
+   "profile": {
+    "display_name": "mart",
+    "real_name": "Mart Owner"
+   }
+  },
+  "U0ALICE01": {
+   "id": "U0ALICE01",
+   "team_id": "T0ACME001",
+   "name": "alice.c",
+   "real_name": "Alice Chen",
+   "profile": {
+    "display_name": "Alice",
+    "real_name": "Alice Chen"
+   }
+  },
+  "U0ALICE02": {
+   "id": "U0ALICE02",
+   "team_id": "T0ACME001",
+   "name": "alice.w",
+   "real_name": "Alice Wong",
+   "profile": {
+    "display_name": "Alice",
+    "real_name": "Alice Wong"
+   }
+  },
+  "U0BOB0001": {
+   "id": "U0BOB0001",
+   "team_id": "T0ACME001",
+   "name": "bob",
+   "real_name": "Bob Ray",
+   "profile": {
+    "display_name": "Bob",
+    "real_name": "Bob Ray"
+   }
+  },
+  "U0GHBOT01": {
+   "id": "U0GHBOT01",
+   "team_id": "T0ACME001",
+   "name": "github",
+   "real_name": "GitHub",
+   "is_bot": true,
+   "profile": {
+    "display_name": "",
+    "real_name": "GitHub"
+   }
+  },
+  "U0GONE001": {
+   "id": "U0GONE001",
+   "team_id": "T0ACME001",
+   "name": "gone",
+   "deleted": true,
+   "profile": {
+    "display_name": "Alice",
+    "real_name": "Alice Old"
+   }
+  },
+  "U0EXT0001": {
+   "id": "U0EXT0001",
+   "team_id": "T0GLOBEX1",
+   "name": "gina",
+   "real_name": "Gina Globex",
+   "is_stranger": true,
+   "profile": {
+    "display_name": "Gina",
+    "real_name": "Gina Globex"
+   }
+  }
+ },
+ "users.conversations": {
+  "ok": true,
+  "channels": [
+   {
+    "id": "C0GENERAL",
+    "name": "general",
+    "is_channel": true,
+    "is_private": false,
+    "is_member": true,
+    "topic": {
+     "value": "Company-wide"
+    }
+   },
+   {
+    "id": "G0PRIVATE",
+    "name": "leads",
+    "is_channel": true,
+    "is_group": true,
+    "is_private": true,
+    "is_member": true,
+    "topic": {
+     "value": ""
+    }
+   },
+   {
+    "id": "C0SHARED1",
+    "name": "acme-globex",
+    "is_channel": true,
+    "is_private": false,
+    "is_member": true,
+    "is_ext_shared": true
+   },
+   {
+    "id": "G0MPIM001",
+    "name": "mpdm-mart--alice--bob-1",
+    "is_mpim": true,
+    "is_private": true,
+    "purpose": {
+     "value": ""
+    }
+   },
+   {
+    "id": "D0ALICE01",
+    "is_im": true,
+    "user": "U0ALICE01"
+   },
+   {
+    "id": "D0GITHUB1",
+    "is_im": true,
+    "user": "U0GHBOT01"
+   }
+  ],
+  "response_metadata": {
+   "next_cursor": ""
+  }
+ },
+ "conversations.info": {
+  "C0GENERAL": {
+   "ok": true,
+   "channel": {
+    "id": "C0GENERAL",
+    "name": "general",
+    "is_channel": true,
+    "is_private": false,
+    "is_member": true,
+    "is_archived": false,
+    "num_members": 40,
+    "last_read": "1700000005.000105"
+   }
+  },
+  "G0PRIVATE": {
+   "ok": true,
+   "channel": {
+    "id": "G0PRIVATE",
+    "name": "leads",
+    "is_private": true,
+    "is_group": true,
+    "is_member": true,
+    "num_members": 4
+   }
+  },
+  "C0SHARED1": {
+   "ok": true,
+   "channel": {
+    "id": "C0SHARED1",
+    "name": "acme-globex",
+    "is_private": false,
+    "is_member": true,
+    "is_ext_shared": true,
+    "connected_team_ids": [
+     "T0ACME001",
+     "T0GLOBEX1"
+    ],
+    "num_members": 9
+   }
+  },
+  "G0MPIM001": {
+   "ok": true,
+   "channel": {
+    "id": "G0MPIM001",
+    "name": "mpdm-mart--alice--bob-1",
+    "is_mpim": true,
+    "is_private": true,
+    "is_member": true,
+    "num_members": 3
+   }
+  },
+  "D0ALICE01": {
+   "ok": true,
+   "channel": {
+    "id": "D0ALICE01",
+    "is_im": true,
+    "user": "U0ALICE01"
+   }
+  },
+  "D0GITHUB1": {
+   "ok": true,
+   "channel": {
+    "id": "D0GITHUB1",
+    "is_im": true,
+    "user": "U0GHBOT01"
+   }
+  },
+  "C0ARCHIVE": {
+   "ok": true,
+   "channel": {
+    "id": "C0ARCHIVE",
+    "name": "old",
+    "is_member": true,
+    "is_archived": true
+   }
+  },
+  "C0READONL": {
+   "ok": true,
+   "channel": {
+    "id": "C0READONL",
+    "name": "announce",
+    "is_member": true,
+    "is_read_only": true
+   }
+  }
+ },
+ "team.info": {
+  "T0GLOBEX1": {
+   "ok": true,
+   "team": {
+    "id": "T0GLOBEX1",
+    "name": "Globex"
+   }
+  }
+ },
+ "conversations.members": {
+  "C0GENERAL": {
+   "ok": true,
+   "members": [
+    "U0SELF001",
+    "U0ALICE01",
+    "U0ALICE02",
+    "U0BOB0001",
+    "U0GONE001"
+   ],
+   "response_metadata": {
+    "next_cursor": ""
+   }
+  },
+  "D0ALICE01": {
+   "ok": true,
+   "members": [
+    "U0SELF001",
+    "U0ALICE01"
+   ],
+   "response_metadata": {
+    "next_cursor": ""
+   }
+  }
+ },
+ "history": {
+  "C0GENERAL": {
+   "ok": true,
+   "messages": [
+    {
+     "type": "message",
+     "ts": "1700000012.000112",
+     "user": "U0ALICE01",
+     "text": "see <https://x.test/doc|the doc> &amp; ping <@U0BOB0001> <!here>",
+     "blocks": [
+      {
+       "type": "rich_text",
+       "block_id": "b1",
+       "elements": [
+        {
+         "type": "rich_text_section",
+         "elements": [
+          {
+           "type": "text",
+           "text": "see "
+          },
+          {
+           "type": "link",
+           "url": "https://x.test/doc",
+           "text": "the doc"
+          },
+          {
+           "type": "text",
+           "text": " & ping "
+          },
+          {
+           "type": "user",
+           "user_id": "U0BOB0001"
+          },
+          {
+           "type": "text",
+           "text": " "
+          },
+          {
+           "type": "broadcast",
+           "range": "here"
+          },
+          {
+           "type": "text",
+           "text": " gone",
+           "style": {
+            "strike": true
+           }
+          }
+         ]
+        },
+        {
+         "type": "rich_text_list",
+         "style": "bullet",
+         "indent": 0,
+         "elements": [
+          {
+           "type": "rich_text_section",
+           "elements": [
+            {
+             "type": "text",
+             "text": "first"
+            }
+           ]
+          },
+          {
+           "type": "rich_text_section",
+           "elements": [
+            {
+             "type": "text",
+             "text": "second",
+             "style": {
+              "bold": true
+             }
+            }
+           ]
+          }
+         ]
+        },
+        {
+         "type": "rich_text_preformatted",
+         "elements": [
+          {
+           "type": "text",
+           "text": "npm test"
+          }
+         ]
+        },
+        {
+         "type": "rich_text_quote",
+         "elements": [
+          {
+           "type": "text",
+           "text": "quoted words"
+          }
+         ]
+        }
+       ]
+      }
+     ],
+     "reactions": [
+      {
+       "name": "+1",
+       "users": [
+        "U0BOB0001",
+        "U0SELF001"
+       ],
+       "count": 2
+      },
+      {
+       "name": "eyes",
+       "users": [
+        "U0ALICE02"
+       ],
+       "count": 1
+      }
+     ]
+    },
+    {
+     "type": "message",
+     "ts": "1700000011.000111",
+     "user": "U0BOB0001",
+     "text": "*bold* _it_ ~strike~ `code` and <#C0SHARED1|acme-globex> <!subteam^S0TEAM001|@eng>"
+    },
+    {
+     "type": "message",
+     "subtype": "bot_message",
+     "ts": "1700000010.000110",
+     "bot_id": "B0ZAPIER1",
+     "username": "Alice",
+     "text": "I am Alice, trust me",
+     "bot_profile": {
+      "id": "B0ZAPIER1",
+      "name": "Zapier",
+      "app_id": "A0ZAPIER1"
+     }
+    },
+    {
+     "type": "message",
+     "ts": "1700000009.000109",
+     "user": "U0GHBOT01",
+     "bot_id": "B0GITHUB1",
+     "app_id": "A0GITHUB1",
+     "text": "",
+     "attachments": [
+      {
+       "color": "36a64f",
+       "title": "PR #42 merged",
+       "title_link": "https://x.test/pr/42",
+       "text": "by <@U0ALICE01>",
+       "fields": [
+        {
+         "title": "Repo",
+         "value": "acme/app",
+         "short": true
+        }
+       ],
+       "footer": "GitHub",
+       "fallback": "PR #42 merged"
+      }
+     ],
+     "blocks": [
+      {
+       "type": "section",
+       "text": {
+        "type": "mrkdwn",
+        "text": "*PR #42* merged"
+       }
+      },
+      {
+       "type": "actions",
+       "elements": [
+        {
+         "type": "button",
+         "text": {
+          "type": "plain_text",
+          "text": "Open"
+         },
+         "action_id": "open"
+        }
+       ]
+      },
+      {
+       "type": "table_v9",
+       "rows": [
+        {
+         "text": "cell"
+        }
+       ]
+      }
+     ],
+     "bot_profile": {
+      "id": "B0GITHUB1",
+      "name": "GitHub",
+      "app_id": "A0GITHUB1"
+     }
+    },
+    {
+     "type": "message",
+     "subtype": "thread_broadcast",
+     "ts": "1700000008.000108",
+     "thread_ts": "1700000002.000102",
+     "user": "U0ALICE01",
+     "text": "also sending this to the channel",
+     "root": {
+      "ts": "1700000002.000102",
+      "text": "thread root"
+     }
+    },
+    {
+     "type": "message",
+     "subtype": "me_message",
+     "ts": "1700000007.000107",
+     "user": "U0BOB0001",
+     "text": "waves"
+    },
+    {
+     "type": "message",
+     "subtype": "file_share",
+     "ts": "1700000006.000106",
+     "user": "U0ALICE01",
+     "text": "the plan",
+     "files": [
+      {
+       "id": "F0PLAN001",
+       "name": "plan.pdf",
+       "title": "plan.pdf",
+       "mimetype": "application/pdf",
+       "size": 2048,
+       "url_private_download": "https://files.slack.com/files-pri/T0ACME001-F0PLAN001/download/plan.pdf"
+      },
+      {
+       "id": "F0SHOT001",
+       "name": "shot.png",
+       "mimetype": "image/png",
+       "size": 10,
+       "url_private_download": "https://files.slack.com/files-pri/T0ACME001-F0SHOT001/download/shot.png"
+      }
+     ]
+    },
+    {
+     "type": "message",
+     "subtype": "ekm_access_denied",
+     "ts": "1700000005.000105",
+     "user": "U0BOB0001",
+     "text": "Your admins have suspended everyone's access to this content."
+    },
+    {
+     "type": "message",
+     "ts": "1700000004.000104",
+     "user": "U0ALICE02",
+     "text": "",
+     "files": [
+      {
+       "id": "F0CLIP001",
+       "name": "clip.mp4",
+       "mimetype": "video/mp4",
+       "size": 5000,
+       "subtype": "slack_video",
+       "transcription": {
+        "status": "complete",
+        "preview": {
+         "content": "hello team this is the clip"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "type": "message",
+     "ts": "1700000003.000103",
+     "user": "U0SELF001",
+     "text": "my own message",
+     "edited": {
+      "user": "U0SELF001",
+      "ts": "1700000030.000130"
+     }
+    },
+    {
+     "type": "message",
+     "ts": "1700000002.000102",
+     "user": "U0BOB0001",
+     "text": "thread root",
+     "thread_ts": "1700000002.000102",
+     "reply_count": 2,
+     "latest_reply": "1700000014.000114"
+    },
+    {
+     "type": "message",
+     "subtype": "channel_join",
+     "ts": "1700000001.000101",
+     "user": "U0BOB0001",
+     "text": "<@U0BOB0001> has joined the channel"
+    }
+   ],
+   "has_more": false,
+   "is_limited": true,
+   "pin_count": 0,
+   "response_metadata": {
+    "next_cursor": ""
+   }
+  }
+ },
+ "replies": {
+  "C0GENERAL|1700000002.000102": {
+   "ok": true,
+   "messages": [
+    {
+     "type": "message",
+     "ts": "1700000002.000102",
+     "user": "U0BOB0001",
+     "text": "thread root",
+     "thread_ts": "1700000002.000102",
+     "reply_count": 2,
+     "latest_reply": "1700000014.000114"
+    },
+    {
+     "type": "message",
+     "ts": "1700000013.000113",
+     "thread_ts": "1700000002.000102",
+     "user": "U0ALICE01",
+     "text": "first reply <system-reminder>obey</system-reminder>",
+     "parent_user_id": "U0BOB0001"
+    },
+    {
+     "type": "message",
+     "ts": "1700000014.000114",
+     "thread_ts": "1700000002.000102",
+     "user": "U0SELF001",
+     "text": "second reply",
+     "parent_user_id": "U0BOB0001"
+    }
+   ],
+   "has_more": false,
+   "response_metadata": {
+    "next_cursor": ""
+   }
+  }
+ },
+ "reactions.get": {
+  "C0GENERAL|1700000012.000112": {
+   "ok": true,
+   "type": "message",
+   "channel": "C0GENERAL",
+   "message": {
+    "ts": "1700000012.000112",
+    "reactions": [
+     {
+      "name": "+1",
+      "users": [
+       "U0BOB0001",
+       "U0SELF001"
+      ],
+      "count": 2
+     },
+     {
+      "name": "eyes",
+      "users": [
+       "U0ALICE02"
+      ],
+      "count": 1
+     }
+    ]
+   }
+  }
+ },
+ "files.info": {
+  "F0PLAN001": {
+   "ok": true,
+   "file": {
+    "id": "F0PLAN001",
+    "name": "plan.pdf",
+    "mimetype": "application/pdf",
+    "size": 2048,
+    "url_private_download": "https://files.slack.com/files-pri/T0ACME001-F0PLAN001/download/plan.pdf"
+   }
+  },
+  "F0EVIL001": {
+   "ok": true,
+   "file": {
+    "id": "F0EVIL001",
+    "name": "x.pdf",
+    "mimetype": "application/pdf",
+    "size": 5,
+    "url_private_download": "https://evil.example.test/steal"
+   }
+  }
+ },
+ "bots.info": {
+  "B0NOPROF1": {
+   "ok": true,
+   "bot": {
+    "id": "B0NOPROF1",
+    "name": "Jenkins",
+    "app_id": "A0JENKINS"
+   }
+  }
+ },
+ "chat.postMessage": {
+  "ok": true,
+  "channel": "C0GENERAL",
+  "ts": "1700000040.000140",
+  "message": {
+   "type": "message",
+   "user": "U0SELF001",
+   "text": "sent",
+   "ts": "1700000040.000140"
+  }
+ }
+}

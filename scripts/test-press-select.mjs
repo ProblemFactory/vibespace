@@ -357,6 +357,8 @@ const OPT_INS = {
   '.iw-exit-cmd': 'the same command in the For-you window',
   '.chat-exit-out, .chat-exit-out-all': 'a command\'s output on its exit-run chat card (lane exit-run-output — read and copied; joined at the 2.369.200 integration)',
   '.exit-runs-pre': 'a command\'s output in the machine\'s Commands… list (lane exit-run-output; joined at the 2.369.200 integration)',
+  '.chat-exit-cmd': 'the command itself on its exit-run chat card, folded at four lines (lane exit-see-whole — read and copied)',
+  '.exit-runs-cmd-all': 'the whole command in a row of the machine\'s Commands… list, beside Copy (lane exit-see-whole)',
   '.ut-proposal-plan': 'what Approve runs, line for line (lane browser-propose)',
   '.file-viewer': 'a file\'s text in the viewer',
   '.file-viewer-table': 'a CSV / spreadsheet table in the viewer',

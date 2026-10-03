@@ -212,7 +212,7 @@ function create({
   sendUserInput = null,
   broadcastAll = () => { }, broadcastToSession = () => { },
   log = () => { }, now = () => Date.now(),
-  timers = { setInterval, clearInterval },
+  timers = { setInterval, clearInterval, setTimeout },
   pollMs = POLL_MS,
   serverSetting = () => undefined,   // lane design-systems-home: `design.defaultSystem`
 } = {}) {
@@ -534,6 +534,17 @@ function create({
     bySocket.set(ws, mine);
     ensureTicker();
     return { ok: true, watchers: w.sockets.size, polled: !h };
+  }
+  /** accept-fixes F3: does a Design window watch this folder (within `ms`)? — THE fact `sync` counts, so `new` / `open`
+   *  say a window is open only when the hub sees one (a push is not a window). */
+  async function watchedSoon(host, dir, ms = 1500) {
+    const key = keyOf(hostOf(host), dirOf(dir));
+    for (const end = Date.now() + ms; ;) {
+      const w = watches.get(key);
+      if (w && w.sockets.size) return true;
+      if (Date.now() >= end) return false;
+      await new Promise((r) => (timers.setTimeout || setTimeout)(r, 100));
+    }
   }
   function unwatch(ws, host, dir) {
     const d = dirOf(dir);
@@ -991,7 +1002,7 @@ function create({
 
   return {
     register, list, openOn, agentRow, find: (host, dir) => { const d = dirOf(dir); const r = d ? find(hostOf(host), d) : null; return r ? pub(r) : null; }, pageOf: (host, dir) => pageOf(find(hostOf(host), dirOf(dir))),
-    read, readDesign, watch, unwatch, unwatchSocket, sweepOnce, changed, comment, changes, publish, agentView,
+    read, readDesign, watch, unwatch, unwatchSocket, watchedSoon, sweepOnce, changed, comment, changes, publish, agentView,
     bundle, // lane design-present: the publish bundle as a file (GET /api/design/bundle)
     ask, pendingAsk, answer, preview, previewLink, previewByTicket,
     tweaks, setTweaks, requestTweaks,

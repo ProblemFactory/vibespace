@@ -12,7 +12,7 @@
 //
 // The arithmetic is PURE (src/lib/browser-new-profile-model.js); the words are the device's t().
 import { t } from './i18n.js';
-import { fetchJson, showToast, createModalShell, showConfirmDialog } from './utils.js';
+import { fetchJson, showToast, createModalShell, showConfirmDialog, copyText } from './utils.js';
 import { btn, el, noteLine, noteText } from './channel-chrome.js';
 import { principalPicker } from './principal-picker.js';
 import { folderTail } from './principal-picker-model.js';
@@ -175,7 +175,7 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
     if (adopt === 'keep') return;
     const list = machWrap.querySelector('.bnew-machines');
     const chosen = (st.hostRows || []).find((r) => r && r.id === st.provider);
-    const choices = machineChoices({ machines: st.machines, providerOnHost: chosen ? (chosen.onHost || null) : null, t });
+    const choices = machineChoices({ machines: st.machines, providerOnHost: chosen ? (chosen.onHost || null) : null, ready: st.ready || null, t });
     if (!choices.some((m) => m.hostId === st.host && m.pickable)) st.host = null;
     const keep = new Map([...list.children].map((n) => [n.dataset.host, n]));
     const order = [];
@@ -196,6 +196,10 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
       const [head, note] = row.querySelectorAll('.bwho-answer-text > span');
       if (head.textContent !== m.name) head.textContent = m.name;
       const nt = m.note || ''; if (note.textContent !== nt) note.textContent = nt; note.style.display = nt ? '' : 'none';
+      // lane remote-profile-start: no browser there — the ONE command for that machine, shown and copyable
+      let sp = row.querySelector('.bnew-step');
+      if (m.step && !sp) { sp = el('span', 'bwho-answer-sub bnew-step'); const code = el('code', 'bnew-step-cmd'); const cp = btn(t('Copy'), () => { copyText(code.textContent || ''); showToast(t('Copied'), { duration: 2000 }); }, 'bnew-step-copy'); sp.append(code, ' ', cp); row.querySelector('.bwho-answer-text').appendChild(sp); }
+      if (sp) { sp.style.display = m.step ? '' : 'none'; const code = sp.querySelector('.bnew-step-cmd'); const cmd = m.step ? m.step.command : ''; if (code.textContent !== cmd) code.textContent = cmd; }
       order.push(row);
     }
     list.replaceChildren(...order);
@@ -268,6 +272,9 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
     // transport — are the same on every paired machine): asked once, of the first machine that could run one
     const remote = st.machines.find((m) => m && m.hostId && m.hostId !== 'local');
     if (remote) { const hv = await fetchJson(`/api/browser/providers?host=${encodeURIComponent(remote.hostId)}`); if (st.closed) return; st.hostRows = hv && Array.isArray(hv.providers) ? hv.providers : null; }
+    // lane remote-profile-start: can a browser run on each paired machine at all (its CLI, a Chrome) — its own answer, asked once per open
+    const serving = st.machines.filter((m) => m && m.hostId && m.hostId !== 'local' && m.connected && Array.isArray(m.capabilities) && m.capabilities.includes('browser-serve'));
+    if (serving.length) { const rs = await Promise.all(serving.map((m) => fetchJson(`/api/browser/builds?host=${encodeURIComponent(m.hostId)}`))); if (st.closed) return; st.ready = {}; serving.forEach((m, i) => { const r = rs[i]; if (r && !r.error && r.ready) st.ready[m.hostId] = r.ready; }); }
     if (!st.providers.length && !(pv && pv.error)) st.providers = [{ id: 'chromium', control: { ok: true } }];
     if (pv && pv.error) say(t('Could not read which browsers this VibeSpace offers — {reason}', { reason: String(pv.error) }));
     drawProviders(); drawMachines(); loadBuilds();

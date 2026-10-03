@@ -74,6 +74,24 @@ const CHANNEL_SETTINGS = deepFreeze({
       },
     ],
   },
+  // Slack (design 012, lane S1): each person's OWN internal app — Slack meters every method on its own (history 50 a
+  // minute, reactions.remove 20, users.info 100 — the adapter's per-method buckets, src/channels/slack-limits.js); this
+  // is the account's whole minute across them: 40 (a fifth of the four busiest methods' floors), 2 a second
+  slack: {
+    vendor: 'slack', vendorName: t('Slack'),
+    rows: [
+      {
+        key: 'budgetSlackPerMin', role: 'budget', type: 'number', default: 40, min: 5, max: 300, step: 5,
+        label: t('Slack: requests per minute per account'),
+        description: t('Slack limits every method on its own (reading a conversation\'s history: 50 a minute for your own app). This is the account\'s whole minute across all of them; when an account reaches it, its refreshes wait for the next minute and the account card says so.'),
+      },
+      {
+        key: 'slackRequestsPerSec', role: 'pace', type: 'number', default: 2, min: 1, max: 20, step: 1,
+        label: t('Slack: requests per second per account'),
+        description: t('Requests are spread evenly: at most this many a second, and never faster than the per-minute budget above allows.'),
+      },
+    ],
+  },
 });
 
 /** The persisted settings path of a row — TODAY's spelling (`channels.budgetLarkPerMin`). */

@@ -46,7 +46,7 @@ console.log('§1 the table ⇔ the schema ⇔ the words');
   ok(kinds.filter((k) => R.FACT_SCHEMA[k].type === 'level').every((k) => J(CF.FACT_KINDS[k].levels) === J(R.FACT_SCHEMA[k].levels) && R.FACT_SCHEMA[k].levels.every((l) => CF.FACT_KINDS[k].chipWords && CF.FACT_KINDS[k].chipWords[l])), 'a level kind words every one of its declared levels');
   const words = new Set();
   for (const k of kinds) { const r = CF.FACT_KINDS[k]; words.add(r.label); if (r.word) words.add(r.word); if (r.chipWord) words.add(r.chipWord); for (const w of Object.values(r.chipWords || {})) words.add(w); }
-  for (const w of ['me', 'too long to list', 'Show all', 'and {n} more', 'Details', 'Show who this message was sent to', 'This message names no recipients.']) words.add(w);
+  for (const w of ['From', 'me', 'too long to list', 'Show all', 'and {n} more', 'Details', 'Show who this message was sent to', 'This message names no recipients.']) words.add(w);
   const viewSrc = fs.readFileSync(path.join(REPO, 'src/lib/channel-facts-view.js'), 'utf-8');
   const viewKeys = [...viewSrc.matchAll(/\bt\('([^']+)'/g)].map((m) => m[1]);
   for (const w of viewKeys) words.add(w);
@@ -146,6 +146,39 @@ console.log('§4 the summary, the details, the chips, the agent line');
   ok(CF.summaryOf(four, zh).text.startsWith('发给 我, Person 1'), 'the words go through the caller\'s t (zh)', CF.summaryOf(four, zh).text);
   const rows = CF.detailRows(R.validateFacts([{ k: 'to', v: ps(12) }, { k: 'reply-to', v: [{ id: 'desk@x', name: 'desk@x' }] }, { k: 'sender', v: { id: 'bot@x', name: 'Bot' } }, { k: 'list', v: 'dev.lists.example' }, { k: 'subject', v: 'Re: Q3' }, { k: 'importance', v: 'high' }]).facts);
   ok(J(rows.map((r) => r.label)) === J(['To', 'Reply-To', 'Sent by', 'Mailing list', 'Subject']) && rows[0].values.length === 12 && rows[0].shown === CF.DETAIL_PARTIES && rows[0].values[1].text === 'Person 1 · p1@x.com' && rows[1].values[0].text === 'desk@x', 'details: the keyed rows in the table\'s order ("Name · address", the address alone when the name is it; a chip-only kind is no row)', J(rows.map((r) => [r.label, r.values[0] && r.values[0].text])));
+  // lane channel-window-tidy (the owner, 2026-10-03: "email thread里还是没有展示每条消息的metadata（cc，收件人，发件人具体地址啥的）"):
+  // the SENDER is the details' first row — "From: Name · address" — the message head shows the name only, so without it the
+  // From address lived nowhere on the page. The record's author, passed by the view; not a fact kind (every adapter has one)
+  const two = R.validateFacts([{ k: 'to', v: ps(2) }, { k: 'cc', v: [{ id: 'carol@x.com', name: 'Carol' }] }]).facts;
+  const fromJudge = (M) => {
+    const bad = [];
+    const fr = M.detailRows(two, null, { from: { id: 'alice@x.com', name: 'Alice Chen' } });
+    if (!(fr[0] && fr[0].k === 'from' && fr[0].label === 'From' && fr[0].values.length === 1 && fr[0].values[0].text === 'Alice Chen · alice@x.com')) bad.push('no "From: Alice Chen · alice@x.com" first row: ' + J(fr[0] || null));
+    if (J(fr.map((r) => r.label)) !== J(['From', 'To', 'Cc']) || fr[1].values[1].text !== 'Person 1 · p1@x.com' || fr[2].values[0].text !== 'Carol · carol@x.com') bad.push('the rows after it: ' + J(fr.map((r) => [r.label, r.values.map((v) => v.text)])));
+    const own = M.detailRows(two, null, { from: { id: 'me@x.com', name: 'Me Myself', self: true } })[0];
+    if (!(own && own.values[0].text === 'me · me@x.com')) bad.push('the account\'s own mail: ' + J(own || null));
+    const bare = M.detailRows(two, null, { from: { id: 'a@x.com', name: 'a@x.com' } })[0];
+    if (!(bare && bare.values[0].text === 'a@x.com')) bad.push('a bare address: ' + J(bare || null));
+    return bad;
+  };
+  ok(!fromJudge(CF).length, 'lane channel-window-tidy: the details\' FIRST row is the sender — "From: Alice Chen · alice@x.com" (the account\'s own: "me · address"; a bare address once), then To / Cc as before', J(fromJudge(CF)));
+  ok(J(CF.detailRows(two, null).map((r) => r.label)) === J(['To', 'Cc']) && J(CF.detailRows(two, null, { from: {} }).map((r) => r.label)) === J(['To', 'Cc']), 'no author passed (or one with neither id nor name) ⇒ no From row — every older caller unchanged');
+  const viewSrc = fs.readFileSync(path.join(REPO, 'src/lib/channel-facts-view.js'), 'utf-8');
+  ok(/function detailsList\(vid, facts, folds, from = null\)[\s\S]{0,120}CF\.detailRows\(facts, t, \{ from \}\)/.test(viewSrc) && /detailsList\(vid, facts, folds, fromOf\(rec\)\)/.test(viewSrc) && /dl\.replaceWith\(detailsList\(vid, facts, folds, from\)\)/.test(viewSrc) && /author: row\._author \|\| null, facts:/.test(fs.readFileSync(path.join(REPO, 'src/lib/channel-window.js'), 'utf-8')),
+    'PIN: the view passes the record\'s author to the details (and through "+N"), and the window\'s ask fills a row with its author');
+  {
+    // PATCHED-COPY CONTROL: the table without the From row (the shipped 2.369.203 details) — the judge above goes red
+    const CFS = fs.readFileSync(path.join(REPO, 'src/channel-facts.js'), 'utf-8');
+    const PUSH = "    out.push({ k: 'from', label: tr('From'), values: [{ text: partyFull(p, tr), title: p.id }], shown: DETAIL_PARTIES, more: 0, cut: false, cutText: '' });\n";
+    ok(CFS.split(PUSH).length === 2, 'CONTROL setup: the From row is pushed once');
+    const cdir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-facts-from-'));
+    const cf = path.join(cdir, 'channel-facts-nofrom.js');
+    fs.writeFileSync(cf, CFS.replace(PUSH, '').replace("require('./channel-record.js')", `require(${J(path.join(REPO, 'src/channel-record.js'))})`));
+    const CF0 = require(cf);
+    const red = fromJudge(CF0);
+    ok(red.length >= 1 && /From/.test(red[0]), 'CONTROL: a table with no From row is caught by the same judge (the sender\'s address lived nowhere but a name)', J(red));
+    fs.rmSync(cdir, { recursive: true, force: true });
+  }
   const chips = CF.chipsOf(R.validateFacts([{ k: 'list', v: 'a-very-long-mailing-list-name.lists.example.com.extra' }, { k: 'importance', v: 'urgent' }, { k: 'automated', v: 'bulk' }]).facts);
   ok(chips.length === 3 && chips[0].text.length <= 'mailing list '.length + 40 && chips[0].title.endsWith('.extra') && chips[1].text === 'urgent' && chips[2].text === 'bulk mail', 'chips: the list (clipped, the whole id its title), the importance, the automated word', J(chips));
   const line = CF.agentFactLines(R.validateFacts([{ k: 'to', v: [{ id: 'alice@x', name: 'Alice Chen' }, { id: 'me@x', name: 'Me', self: true }] }, { k: 'cc', v: ps(1), more: 2 }, { k: 'reply-to', v: [{ id: 'desk@x', name: 'desk@x' }] }, { k: 'list', v: 'dev.lists.example' }, { k: 'importance', v: 'high' }]).facts);

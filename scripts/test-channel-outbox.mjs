@@ -2017,6 +2017,74 @@ async function ccReachLeg(engine, tag) {
       const COF = await import(outF);
       const allF = COF.outboxNodes(app, null, OB, { view: 'all', open: new Set(), ...hooks });
       ok(rowsOf(allF.nodes).length === 0 && allF.nodes.filter((n) => n._cls.has('chan-prop')).length === 2, 'CONTROL: the base list draws a full stacked card per proposal and no row — the B-f467 legs would be red', JSON.stringify(allF.nodes.map((n) => n.className)));
+      // ── lane channel-window-tidy (the owner, 2026-10-03, the SMC Gmail thread window: "这个已经处理过的提案堆在最下面有点浪费
+      // 空间和交互起来很麻烦"): in the CONVERSATION WINDOW a waiting proposal keeps its full card, a DECIDED one is ONE line
+      // (chip · drafter · when · recipients in a few words · first words) whose click opens the card IN PLACE; > 3 decided ⇒
+      // the settled ones fold under "Handled proposals (N)"; an unknown / failed outcome is never folded; a sent one's card
+      // jumps to the message; the open state is the window's (`ui`) and survives every redraw ──
+      const T0 = { adapterId: 'gmail', adapterLabel: 'Gmail', convId: 't-tidy', title: 'Tidy thread', draftedBy: { kind: 'agent', id: 'a-1', name: 'Mail agent' }, sendAs: 'user', identity: { sentAs: 'user', marking: 'none' }, policy: { mode: 'review', reasons: ['authority'] } };
+      const ENV7 = { anchorId: 'm-1', to: 'Ada <ada@example.com>, b@example.com', cc: '"Lee, Sam" <sam@example.com>, c@example.com, d@example.com, e@example.com, f@example.com', subject: 'Re: Q3', all: true };
+      const TIDY = [
+        { ...T0, id: 'p-t-wait', state: 'awaiting-approval', text: 'still waiting', at: 50 },
+        { ...T0, id: 'p-t-sent', state: 'sent', text: 'Replaced the PDU.\nsecond line', replyEnvelope: ENV7, result: { vendorMessageId: 'm-sent', at: 41 }, at: 40, updatedAt: 41 },
+        { ...T0, id: 'p-t-rej', state: 'rejected', text: 'rejected words', at: 30 },
+        { ...T0, id: 'p-t-wd', state: 'withdrawn', text: 'withdrawn words', at: 20 },
+        { ...T0, id: 'p-t-exp', state: 'expired', text: 'expired words', replyEnvelope: { to: '"Lee, Sam" <sam@example.com>' }, draftedBy: { kind: 'user' }, at: 10 },
+      ];
+      const tidyJudge = (M) => {
+        const bad = [], jumps = [];
+        const ui = { open: new Set(), fold: false };
+        const onJump = (vid, at) => jumps.push([vid, at]);
+        const s1 = M.renderInlineProposals(app, TIDY, null, { ui, onJump });
+        const cardOf = (sec, id) => sec.children.find((c) => c.dataset.proposal === id) || null;
+        const wait = cardOf(s1, 'p-t-wait');
+        if (!wait || wait._cls.has('chan-prop-lined') || !wait._all().some((e) => e.dataset.approve === '1')) bad.push('the waiting proposal is not its full card');
+        const ids = ['p-t-sent', 'p-t-rej', 'p-t-wd', 'p-t-exp'];
+        const dec = ids.map((id) => cardOf(s1, id));
+        if (!dec.every((c) => c && c._cls.has('chan-prop-lined') && c._cls.has('chan-prop-shut') && c._cls.has('chan-prop-infold') && c.children[0] && c.children[0]._cls.has('chan-prop-line'))) bad.push('a decided proposal is not a shut line under the fold: ' + JSON.stringify(dec.map((c) => c && c.className)));
+        const fold = s1.children.find((c) => c._cls.has('chanwin-outbox-fold')) || null;
+        if (!fold || fold.textContent !== 'Handled proposals (4)' || fold.getAttribute('aria-expanded') !== 'false' || s1._cls.has('chanwin-outbox-foldopen') || s1.children.indexOf(fold) > s1.children.indexOf(dec[0])) bad.push('no closed fold line "Handled proposals (4)" above the lines');
+        const words = dec[0] && dec[0].children[0] ? dec[0].children[0].children.map((c) => c.textContent).filter(Boolean) : [];
+        if (JSON.stringify(words) !== JSON.stringify(['sent', 'Mail agent', words[2], 'Reply all · 7 people', 'Replaced the PDU.'])) bad.push('the sent line: ' + JSON.stringify(words));
+        const expWords = dec[3] && dec[3].children[0] ? dec[3].children[0].children.map((c) => c.textContent).filter(Boolean) : [];
+        if (!(expWords[0] === 'expired' && expWords[1] === 'You' && expWords.includes('Reply · Lee, Sam'))) bad.push('the expired line: ' + JSON.stringify(expWords));
+        if (fold) fold.click();
+        if (!(s1._cls.has('chanwin-outbox-foldopen') && fold.getAttribute('aria-expanded') === 'true' && ui.fold === true)) bad.push('the fold line does not open in place');
+        if (dec[0]) dec[0].children[0].click();
+        if (!(dec[0] && !dec[0]._cls.has('chan-prop-shut') && dec[0].children[0].getAttribute('aria-expanded') === 'true' && ui.open.has('p-t-sent'))) bad.push('a click on the line does not open its card in place');
+        const jb = dec[0] ? dec[0]._all().find((e) => e.dataset.jump === '1') : null;
+        if (jb) jb.click();
+        if (!(jb && jb.textContent === 'Jump to this message' && JSON.stringify(jumps) === '[["m-sent",41]]')) bad.push('the sent card does not jump to its message: ' + JSON.stringify(jumps));
+        if (dec.slice(1).some((c) => c && c._all().some((e) => e.dataset.jump === '1'))) bad.push('an unsent card offers the jump');
+        // a redraw (same records) keeps every element and both open states; a CHANGED record redraws its card, still open
+        const s2 = M.renderInlineProposals(app, TIDY, s1, { ui, onJump });
+        if (!(s2 === s1 && cardOf(s2, 'p-t-sent') === dec[0] && !dec[0]._cls.has('chan-prop-shut') && s2._cls.has('chanwin-outbox-foldopen') && cardOf(s2, 'p-t-rej') === dec[1] && dec[1]._cls.has('chan-prop-shut'))) bad.push('a redraw lost an element or an open state');
+        const s3 = M.renderInlineProposals(app, TIDY.map((p) => (p.id === 'p-t-sent' ? { ...p, updatedAt: 42 } : p)), s2, { ui, onJump });
+        const sent3 = cardOf(s3, 'p-t-sent');
+        if (!(sent3 && sent3 !== dec[0] && !sent3._cls.has('chan-prop-shut'))) bad.push('a changed record\'s card came back shut');
+        // three decided ⇒ no fold; an unknown outcome is a line OUTSIDE the fold, above it
+        const s4 = M.renderInlineProposals(app, TIDY.slice(0, 4), null, {});
+        if (s4.children.some((c) => c._cls.has('chanwin-outbox-fold') || c._cls.has('chan-prop-infold')) || !cardOf(s4, 'p-t-rej') || !cardOf(s4, 'p-t-rej')._cls.has('chan-prop-lined')) bad.push('three decided were folded');
+        const s5 = M.renderInlineProposals(app, [...TIDY, { ...T0, id: 'p-t-unk', state: 'unknown', text: 'lost answer', at: 5 }], null, {});
+        const unk = cardOf(s5, 'p-t-unk'), fold5 = s5.children.find((c) => c._cls.has('chanwin-outbox-fold'));
+        if (!(unk && unk._cls.has('chan-prop-lined') && !unk._cls.has('chan-prop-infold') && fold5 && s5.children.indexOf(unk) < s5.children.indexOf(fold5) && fold5.textContent === 'Handled proposals (4)')) bad.push('an unknown outcome was folded away');
+        return bad;
+      };
+      const tidyBad = tidyJudge(CO);
+      ok(!tidyBad.length, 'lane channel-window-tidy: 1 waiting + 4 decided ⇒ the waiting card in full, the decided ones ONE line each (chip · drafter · when · "Reply all · 7 people" · the first words) under ONE closed line "Handled proposals (4)"', JSON.stringify(tidyBad));
+      ok(!tidyBad.length, 'lane channel-window-tidy: the fold and a line open IN PLACE (same elements), a sent card offers "Jump to this message" (→ its vendor id + instant), a redraw keeps both open states; ≤ 3 decided never fold; an unknown outcome stays outside the fold');
+      ok(CO.lineGist({ compose: { to: ['a@x.example'], cc: [] } }) === 'New message · a@x.example' && CO.lineGist({ compose: { to: ['a@x.example', 'B <b@x.example>'], cc: ['c@x.example'] } }) === 'New message · 3 people' && CO.lineGist({ replyEnvelope: { to: 'Bob <bob@x.example>' } }) === 'Reply · Bob' && CO.lineGist({ text: 'a chat reply' }) === '',
+        'lane channel-window-tidy: the recipients in a few words — a compose to one names it, to many counts them; a mail reply says Reply / Reply all; a chat reply says nothing (its room is the window)');
+      // PATCHED-COPY CONTROL: the shipped 2.369.203 inline section (a decided proposal drawn as its full card) — red here
+      const OS2 = fs.readFileSync(path.join(REPO, 'src/lib/channel-outbox.js'), 'utf-8');
+      const LINED = "{ compact: true, line: true, onLine, onJump }";
+      ok(OS2.split(LINED).length === 2, 'CONTROL setup: the decided line is asked for once');
+      const srcT = path.join(dir, 'channel-outbox-tidy-base.js');
+      fs.writeFileSync(srcT, OS2.replace(LINED, '{ compact: true }').replace(/from '\.\/([^']+)'/g, (_, f) => `from '${path.join(REPO, 'src/lib', f)}'`).replace(/from '\.\.\/([^']+)'/g, (_, f) => `from '${path.join(REPO, 'src', f)}'`));
+      const outT = path.join(dir, 'channel-outbox-tidy-base.mjs');
+      await esbuild.build({ entryPoints: [srcT], bundle: true, format: 'esm', platform: 'node', target: 'es2022', outfile: outT, logLevel: 'silent', loader: { '.css': 'text' }, plugins: [stubBuildVersion] });
+      const tidyRed = tidyJudge(await import(outT));
+      ok(tidyRed.length >= 1 && /not a shut line/.test(tidyRed[0] || ''), 'CONTROL: decided proposals drawn as full cards (the window the owner screenshotted) are caught by the same judge', JSON.stringify(tidyRed));
     } finally { Date.now = realNow; }
   }
   for (const [k, d] of Object.entries(saved)) { try { if (d) Object.defineProperty(globalThis, k, d); else delete globalThis[k]; } catch {} }

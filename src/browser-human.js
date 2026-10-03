@@ -87,7 +87,9 @@ function keepFor({ launched = false, keepMs = DEFAULT_HUMAN_KEEP_MS, joinKeepMs 
 
 /**
  * MAY THE USER BROWSE THIS PROFILE NOW? The first match wins (the order is the decision):
- *   1 not-found · 2 not_attachable (a conversation's own temporary browser) · 3 remote_profile (a paired machine's — not
+ *   1 not-found · 2 not_attachable (a conversation's own temporary browser) · 3 remote_profile (a paired machine this
+ *   VibeSpace does not know any more — lane remote-profile-start: a KNOWN machine's profile is browsed like a local one, its
+ *   start() refusals (offline, an older agent, no browser there + the one step) passing through by name — was: not
  *   in v1) · 4 not_ours (a provider that only connects: `cdp`, tier 3) · 5 backend_unavailable (the machine's provider
  *   control refused) · 6 browser_restarting (a backend switch in flight) · 7 profile_locked (another browser — maybe the
  *   user's own Chrome — holds its folder) · 8 browser_unstable (its heal budget is spent) · 9 focus (a window of the
@@ -100,13 +102,13 @@ function keepFor({ launched = false, keepMs = DEFAULT_HUMAN_KEEP_MS, joinKeepMs 
  *   holderPid}) · live bool · human {state, alive} | null · running (live browsers + other holders) · cap
  * → {ok:true, how:'launch'|'join'|'rejoin'|'focus', key, syncId} | {ok:false, code, error, …extra}
  */
-function browseYourselfVerdict({ profile = null, row = null, control = null, switching = false, closed = null, live = false, human = null, running = 0, cap = 6 } = {}) {
+function browseYourselfVerdict({ profile = null, row = null, control = null, switching = false, closed = null, live = false, human = null, running = 0, cap = 6, hostKnown = true } = {}) {
   const p = isObj(profile) ? profile : null;
   const label = p ? str(p.label || p.id) : '';
   const no = (code, facts = {}) => ({ ok: false, code, error: humanRefusalText(code, { label, ...facts }), ...facts });
   if (!p) return no('not-found');
   if (p.ephemeral === true) return no('not_attachable');
-  if (p.host) return no('remote_profile', { machine: str(p.host) });
+  if (p.host && hostKnown === false) return no('remote_profile', { machine: str(p.host) });
   const r = isObj(row) ? row : {};
   if (r.starts === false || r.leaseKind === 'window-target') return no('not_ours');
   if (isObj(control) && control.ok === false) return { ...no('backend_unavailable'), detail: str(control.error).slice(0, 400) };
@@ -402,7 +404,7 @@ function humanRefusalText(code, facts = {}, tIn) {
   switch (code) {
     case 'not-found': return t('This profile no longer exists.');
     case 'not_attachable': return t("This is a conversation's own temporary browser — open its live view and take over instead.");
-    case 'remote_profile': return t('“{label}” is saved on {machine}; browsing it yourself works only for profiles on the computer VibeSpace runs on.', { label, machine: str(f.machine) || t('another computer') });
+    case 'remote_profile': return t('“{label}” is saved on {machine}, which is not paired with this VibeSpace any more — pair it again to browse it.', { label, machine: str(f.machine) || t('another computer') });
     case 'not_ours': return t('VibeSpace only connects to this browser — open it where it runs.');
     case 'backend_unavailable': return t("“{label}”'s browser can't run on this computer right now — open its switch dialog to see why.", { label });
     case 'browser_restarting': return t('The browser is restarting on another backend — try again in a moment.');

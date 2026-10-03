@@ -476,8 +476,11 @@ function uploadRefusal(files) {
  *  OS temp dir and ~/Downloads are writable (r4 fell back to process.cwd(), so
  *  `cd /etc && … pdf ./cron.d/x` passed). A relative word still means "from
  *  here" — it is resolved from this shell's directory, then fenced. */
+// accept-fixes-jobs F6: inside a Background Work job (its token, no session's) the root is the JOB's working directory —
+// VIBESPACE_JOB_CWD, exported by the jobs engine's spawn (src/jobs.js) — and the refusal names the job's case
+const IN_JOB = !process.env.VIBESPACE_SESSION_TOKEN && !!process.env.VIBESPACE_JOB_TOKEN;
 function sessionRoot() {
-  const v = process.env.VIBESPACE_SESSION_CWD;
+  const v = IN_JOB ? process.env.VIBESPACE_JOB_CWD : process.env.VIBESPACE_SESSION_CWD;
   if (typeof v !== 'string' || !isAbsWord(v)) return null;
   const r = V.physicalPath(v, { base: '/', home: HOMES.home, ...FSOPS });
   return r.ok && r.path !== '/' ? r.path : null;
@@ -491,7 +494,7 @@ function writeRefusal(files) {
     if (!r.ok) return { code: 'write_path_refused', error: `\`${String(f).slice(0, 120)}\` could not be resolved (${r.error}); nothing ran`, remedy: 'save under the project, /tmp or ~/Downloads, spelled without a symbolic-link loop' };
     cands.push({ file: String(f), paths: r.lexical === r.path ? [r.path] : [r.lexical, r.path] });
   }
-  return V.writePathVerdict(cands, { allow, homes, dataDir: spellings(DATA_DIR), sessionRoot: sessionRoot() });
+  return V.writePathVerdict(cands, { allow, homes, dataDir: spellings(DATA_DIR), sessionRoot: sessionRoot(), job: IN_JOB });
 }
 
 /** lane L r5 F1 (CRITICAL) — THE BINARY IS HANDED THE PATH THAT WAS JUDGED.
@@ -1098,6 +1101,17 @@ async function runOursPage(cls, { r, head, profileId, wantsJson }) {
 
   if (verb === 'status') {
     const r = await call('GET', '/api/agent/browser/status');
+    // accept-fixes-jobs F5: inside a Background Work job the answer is the JOB's binding — the profile its next page verb
+    // lands on (its conversation's pin / default), in a window of its own — never the empty set of its own handle
+    if (r.job) {
+      const j = r.job, l = j.lease;
+      console.log(`this is Background Work ${j.label || 'job'} (${j.id}): it browses as its conversation — in the conversation's pinned profile, in a window of its own`);
+      if (j.lands) console.log(`its page verbs land on ${j.lands.label} (${j.lands.profileId}) · its window: ${l ? (l.browser ? l.browser.state + (l.browser.pid ? ' pid ' + l.browser.pid : '') : 'browser not running') + ' · input: ' + (l.input || '?') + ' · ' + l.others + ' other holder(s)' : 'not opened yet — its first page verb opens it'}`);
+      else console.log(`its page verbs are refused ${j.refused ? j.refused.code + ' — ' + j.refused.error : 'job_no_profile'}`);
+      console.log(j.pin ? `the conversation's pin: ${j.pin.label} (${j.pin.profileId}) — origin: ${j.pin.origin}, set ${when(j.pin.at)}` : 'the conversation\'s pin: none — pin a profile FROM the conversation (vibespace-browser pin <profile>)');
+      if (r.noDisplay) console.log(r.noDisplay);
+      return;
+    }
     const set = r.attachments || [];
     const eph = r.ephemeral || null;
     const ephWords = eph ? `ephemeral: ${eph.state === 'not-started' ? 'not started yet' : eph.state}${eph.startedAt ? ', started ' + ago(eph.startedAt) : ''}${eph.live && eph.pid ? ', pid ' + eph.pid : ''}` : 'ephemeral: not started yet — your first command starts it';

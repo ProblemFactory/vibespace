@@ -297,6 +297,13 @@ function accountLines(app, a, kinds) {
       const cl = chanCaps.feedCatchUpText(a.feed.catchUp, { t });
       if (cl) { const n = noteLine('chan-sec-note', cl); n.dataset.chanFeedCatchup = a.id; out.push(n); }
     }
+    // design 012 (Slack S1): an account whose vendor's terms take the local copy with it says WHERE the copy lives and who
+    // reads it (the owner's Q2: agents read what the person can see — the model provider is named); the setup report's
+    // facts the person must know: the free plan's hidden history, the distributed-app history cap (an alarm)
+    if (a.retention === 'purge-on-remove') { const n = noteLine('chan-sec-note', t('Stored on this server. Messages an agent reads are sent to that agent’s model provider (Anthropic for Claude, OpenAI for Codex) to answer, not for training. Removing the account deletes this copy.')); n.dataset.chanCopy = a.id; out.push(n); }
+    const probes = a.setup && a.setup.probes ? a.setup.probes : null;
+    if (probes && probes.planLimited === true) { const n = noteLine('chan-sec-note', t('Free plan: {vendor} hides messages older than 90 days.', { vendor: vendorW })); n.dataset.chanPlan = a.id; out.push(n); }
+    if (probes && probes.historyTier === 'limited-15') out.push(noteLine('chan-sec-note', t('{vendor} serves this app only 15 messages a minute (the limit for an app shared outside its workspace) — make your own app from the Connect link in this workspace.', { vendor: vendorW }), { warn: true }));
     const left = Number(auth.expiresAt) - Date.now();
     const eta = auth.expiresAt ? reauthEta(auth.expiresAt) : null;
     // a sliding token shows its countdown only once renewals have STOPPED (<1 day left)

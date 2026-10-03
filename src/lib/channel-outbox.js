@@ -64,6 +64,15 @@
 // the card and focuses ITS Approve: a decision is taken where the whole text,
 // the identity warning and the delivery choice are drawn (§9.5, verify r3 —
 // the approval rules are unchanged). The inline section keeps cards.
+//
+// lane channel-window-tidy (the owner, 2026-10-03: "这个已经处理过的提案堆在最下面有点浪费空间和交互起来很麻烦"):
+// in the CONVERSATION WINDOW a proposal that still waits keeps its full card; a DECIDED one (sent / rejected /
+// withdrawn / expired / failed / unknown) is ONE LINE — the state chip · who drafted it · when · its recipients in
+// a few words ("Reply all · 7 people") · the first words — and a click opens the full card IN PLACE (the line is
+// the card's own first row; the open state lives in the window's `ui`, so a redraw keeps it). A sent one's card
+// offers "Jump to this message" (it is a message of the thread now). More than `INLINE_FOLD_OVER` decided ⇒ the
+// settled ones sit under ONE folded line "Handled proposals (N)" that opens in place; an unknown / failed outcome
+// is never folded away (it still asks something of the owner). The Outbox window is unchanged.
 import { fetchJson, showToast, showContextMenu } from './utils.js';
 import { t } from './i18n.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
@@ -114,8 +123,10 @@ export function rejectLabel(deliver, { box = false } = {}) {
   if (deliver === 'wake-now') return box ? t('Reject and wake now') : t('Reject with a reason and wake now');
   return box ? t('Reject') : t('Reject — tell on its next message');
 }
-/** Decided-and-closed cards the inline section keeps (the newest N). */
-const INLINE_RECENT = 2;
+/** lane channel-window-tidy: the decided proposals the inline section lists as lines (the newest N — the rest are
+ *  counted into its Outbox link), and how many it shows before the settled ones fold under one line. */
+const INLINE_DECIDED = 20;
+const INLINE_FOLD_OVER = 3;
 
 /** O1 (r6 verify, 2026-09-28): `s` into `node` as text, each invisible direction / zero-width character drawn as a
  *  visible mark (`U+202E`) — never the character itself, so the line reads in the order it is SENT. Returns the
@@ -198,6 +209,24 @@ function appendReplyTarget(card, p) {
     if (Array.isArray(e.added) && e.added.length) card.appendChild(envRow('chan-prop-added', t('Cc added by the drafter'), e.added.join(', ')));
     if (e.subject) card.appendChild(envRow('chan-prop-subject', t('Subject'), e.subject));
   }
+  // design 012 (Slack S1, D20 / D21): WHO WILL SEE IT and WHO IT NOTIFIES — both decided when it was proposed (the ids
+  // sent are the ones decided then); an @name that matched nobody is said, it goes out as plain words
+  if (p.audience && p.audience.kind) card.appendChild(envRow('chan-prop-audience', t('Seen by'), audienceText(p.audience)));
+  const pr = p.prepared;
+  if (pr && typeof pr === 'object') {
+    card.appendChild(envRow('chan-prop-notifies', t('Notifies'), Array.isArray(pr.notifies) && pr.notifies.length ? pr.notifies.join(', ') : t('nobody (no @name here was resolved)')));
+    if (Array.isArray(pr.plain) && pr.plain.length) card.appendChild(envRow('chan-prop-plain', t('Not a member here'), t('{names} — sent as plain words, nobody is notified', { names: pr.plain.map((n) => '@' + n).join(', ') })));
+  }
+}
+/** design 012 D20: the audience in words — a DM, a private conversation's members, the whole workspace, or a
+ *  conversation shared with other organizations (named). */
+function audienceText(a) {
+  const orgs = Array.isArray(a.orgs) ? a.orgs : [];
+  const title = a.title ? `${a.title} · ` : '';
+  if (a.kind === 'dm') return t('only the person in this direct message');
+  if (a.kind === 'private') return title + (Number.isInteger(a.members) ? t('its {n} members', { n: a.members }) : t('its members'));
+  if (a.kind === 'external') return title + t('everyone in it — includes people from {orgs}', { orgs: orgs.slice(1).join(', ') || t('another organization') });
+  return title + (orgs[0] ? t('everyone in {org}', { org: orgs[0] }) : t('everyone in the workspace')) + (Number.isInteger(a.members) ? ` (${a.members})` : '');
 }
 /** F6 (r6 verify): a card that just appeared or moved takes no decision for `P.ARM_MS` — it LOOKS inert
  *  (`chan-prop-arming`) and a person's click on it does nothing but say so; the verdict is PURE (`P.armVerdict`). */
@@ -276,9 +305,12 @@ async function post(pathname, body) {
  * conversation). Decisions POST and let the broadcast repaint; nothing here
  * waits for the echo (the multi-client law).
  */
-export function renderProposalCard(app, p, { compact = false } = {}) {
+export function renderProposalCard(app, p, { compact = false, line = false, onLine = null, onJump = null } = {}) {
   const card = el('div', `chan-prop chan-prop-${p.state}`);
   card.dataset.proposal = p.id;
+  // lane channel-window-tidy: a decided proposal in a conversation window is its LINE first; the rest of the card shows
+  // only while it is open (`setLineOpen`) — the line stands in for the head
+  if (line) { card.classList.add('chan-prop-lined', 'chan-prop-shut'); card.appendChild(proposalLine(p, onLine)); }
   // ── head: state pill · drafter · age ──
   const head = el('div', 'chan-prop-head');
   head.appendChild(el('span', `chan-prop-state chan-prop-state-${p.state}`, stateLabel(p.state)));
@@ -431,6 +463,15 @@ export function renderProposalCard(app, p, { compact = false } = {}) {
       showToast(r.resolved ? (r.state === 'sent' ? t('It landed — marked as sent') : t('It never landed — marked as failed')) : t('Still unknown: {why}', { why: r.reason || t('no evidence either way') }), { type: r.resolved ? 'info' : 'warn' });
     };
     act.appendChild(chk);
+    card.appendChild(act);
+  }
+  // lane channel-window-tidy: a SENT proposal is a message of the thread now — its card takes the reader there
+  const sentVid = p.state === 'sent' && p.result && p.result.vendorMessageId ? String(p.result.vendorMessageId) : '';
+  if (sentVid && typeof onJump === 'function') {
+    const act = el('div', 'chan-prop-actions');
+    const go = btn(t('Jump to this message'), () => onJump(sentVid, Number(p.result.at) || Number(p.updatedAt) || 0));
+    go.dataset.jump = '1';
+    act.appendChild(go);
     card.appendChild(act);
   }
   // DECISIONS — only while awaiting. An AGENT's draft is decided with the
@@ -594,11 +635,58 @@ function fateStamp(ms) {
   const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   return d.toDateString() === n.toDateString() ? hm : `${stamp(ms)}`;
 }
+/** lane channel-window-tidy: WHO receives a decided proposal, in a few words — "Reply all · 7 people", "Reply · Ada",
+ *  "New message · 3 people"; '' for a reply whose recipients are the conversation itself (a chat). */
+export function lineGist(p) {
+  const e = p && p.replyEnvelope && typeof p.replyEnvelope === 'object' ? p.replyEnvelope : null;
+  const cp = p && p.compose && typeof p.compose === 'object' ? p.compose : null;
+  if (!e && !cp) return '';
+  const heads = cp ? [...(cp.to || []), ...(cp.cc || [])].map(String) : [e.to, e.cc].filter(Boolean).map(String);
+  const n = P.envelopeAddresses(heads.join(', ')).size;
+  const one = heads.find((h) => P.envelopeAddresses(h).size) || heads[0] || '';
+  const nm = /^\s*"?((?:[^"\\<]|\\.)*?)"?\s*<([^<>]*)>\s*$/.exec(one);   // one mailbox: its display name, else the address
+  const who = n > 1 ? t('{n} people', { n }) : nm ? (nm[1].trim() || nm[2].trim()) : one.trim();
+  const verb = cp ? t('New message') : e.all ? t('Reply all') : t('Reply');
+  return who ? `${verb} · ${who}` : verb;
+}
+/** lane channel-window-tidy: THE LINE of a decided proposal — chip · drafter · when · recipients · first words; a click
+ *  (or Enter / Space) asks the window to open / close the card (`onLine(id)`). Every string textContent. */
+function proposalLine(p, onLine) {
+  const row = el('div', 'chan-prop-line');
+  row.tabIndex = 0;
+  row.setAttribute('role', 'button');
+  row.setAttribute('aria-expanded', 'false');
+  row.appendChild(icon('chevronRight', 10, 'chan-prop-line-chev'));
+  row.appendChild(el('span', `chan-prop-state chan-prop-state-${p.state}`, stateLabel(p.state)));
+  const d = p.draftedBy || {};
+  row.appendChild(el('span', 'chan-prop-line-who', d.kind === 'agent' ? (d.name || d.id || t('an agent')) : t('You')));
+  row.appendChild(el('span', 'chan-prop-line-at', fateStamp(p.updatedAt || p.at)));
+  const gist = lineGist(p);
+  if (gist) row.appendChild(el('span', 'chan-prop-line-to', gist));
+  const text = el('span', 'chan-prop-line-text');
+  revealInto(text, rowFirstLine(p).slice(0, 200));
+  row.appendChild(text);
+  row.onclick = () => { if (onLine) onLine(p.id); };
+  row.onkeydown = (ev) => { if (ev.target !== row || (ev.key !== 'Enter' && ev.key !== ' ')) return; ev.preventDefault(); if (onLine) onLine(p.id); };
+  return row;
+}
+/** lane channel-window-tidy: what an opened line / fold revealed is brought into view (the section sits at the bottom of
+ *  the list, so it opens BELOW the fold of the screen) — its last part, then the line pressed (kept on screen first). */
+function reveal(last, keep) {
+  if (last && typeof last.scrollIntoView === 'function') last.scrollIntoView({ block: 'nearest' });
+  if (keep && typeof keep.scrollIntoView === 'function') keep.scrollIntoView({ block: 'nearest' });
+}
+/** A lined card's open state, patched IN PLACE (the element and its focus stay). */
+function setLineOpen(card, open) {
+  card.classList.toggle('chan-prop-shut', !open);
+  const line = card.querySelector(':scope > .chan-prop-line');
+  if (line) line.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
 /** A card's signature WITHOUT its fate (a fate-only change patches the line). */
-function cardSig(p, compact) {
+function cardSig(p, compact, line = false) {
   const q = { ...p };
   delete q.receiptDelivery; delete q.receiptDrainedAt; delete q.receiptDrainedHow; delete q.receiptEvictedAt; delete q.receiptEvictedHeld;
-  return JSON.stringify([q, !!compact, rememberedDelivery()]);
+  return JSON.stringify([q, !!compact, rememberedDelivery(), !!line]);
 }
 const fateSig = (p) => JSON.stringify([p.receiptDelivery || null, p.receiptDrainedAt || null, p.receiptDrainedHow || null, p.receiptEvictedAt || null]);
 /** Is the user in the middle of deciding on this card (an editor or a reject box open)? */
@@ -608,8 +696,8 @@ const inUse = (card) => !!card.querySelector('.chan-prop-edit, .chan-prop-reject
  * not change (its fate line patched in place when only the fate moved; left
  * alone while the user edits it and it still awaits), else a fresh one.
  */
-function keyedCard(app, p, prev, { compact = false } = {}) {
-  const sig = cardSig(p, compact);
+function keyedCard(app, p, prev, { compact = false, line = false, onLine = null, onJump = null } = {}) {
+  const sig = cardSig(p, compact, line);
   if (prev && (prev.dataset.sig === sig || (inUse(prev) && p.state === 'awaiting-approval' && prev.dataset.state === 'awaiting-approval'))) {
     if (prev.dataset.fateSig !== fateSig(p)) {
       const text = fateLineText(p);
@@ -633,7 +721,7 @@ function keyedCard(app, p, prev, { compact = false } = {}) {
     }
     return prev;
   }
-  const card = renderProposalCard(app, p, { compact });
+  const card = renderProposalCard(app, p, { compact, line, onLine, onJump });
   card.dataset.sig = sig;
   card.dataset.fateSig = fateSig(p);
   card.dataset.state = p.state;
@@ -722,7 +810,7 @@ function setRowOpen(row, open) {
 }
 /** The signature of what a row PRINTS (its open state is patched, never rebuilt). */
 function rowSig(p, badge) {
-  return JSON.stringify([p.state, p.adapterId, p.convId || null, p.title || null, p.convKind || null, p.compose || null, p.replyEnvelope ? p.replyEnvelope.to || null : null, p.kind || null, p.reaction || null, p.text || '', p.updatedAt || p.at || 0, badge]);
+  return JSON.stringify([p.state, p.adapterId, p.convId || null, p.title || null, p.convKind || null, p.compose || null, p.replyEnvelope ? p.replyEnvelope.to || null : null, p.audience ? p.audience.kind : null, p.prepared ? (p.prepared.notifies || []).join() : null, p.kind || null, p.reaction || null, p.text || '', p.updatedAt || p.at || 0, badge]);
 }
 function keyedRow(app, p, prev, opts) {
   const sig = rowSig(p, opts.badge);
@@ -778,21 +866,25 @@ export function outboxNodes(app, list, ob, { view = null, open = new Set(), onTo
   return { nodes, view: v, awaiting, proposals: ps };
 }
 
-/** The section a conversation window draws above its composer (design C4):
- *  the cards that need the user — awaiting first, then an unknown or failed
- *  outcome — plus the newest two decided ones (the outcome of a click stays
- *  in view), with a link to the rest in the Outbox. Empty ⇒ nothing. */
-export function renderInlineProposals(app, proposals, prev = null) {
+/** The section a conversation window draws above its composer (design C4): the cards that still wait (awaiting /
+ *  sending) in full, then — lane channel-window-tidy — every DECIDED one as its line (the newest `INLINE_DECIDED`;
+ *  the rest counted into the Outbox link): an unknown / failed outcome first, then the settled ones, which fold under
+ *  ONE line "Handled proposals (N)" when more than `INLINE_FOLD_OVER` are decided. `ui` = `{open: Set, fold}` — the
+ *  window's, kept across redraws (default: the section's own); `onJump(vid, at)` = the window's jump to a message.
+ *  Empty ⇒ nothing. */
+export function renderInlineProposals(app, proposals, prev = null, { ui = null, onJump = null } = {}) {
   const all = (proposals || []).slice().sort((a, b) => (b.at || 0) - (a.at || 0));
   if (!all.length) return null;
   const awaiting = all.filter((p) => p.state === 'awaiting-approval' || p.state === 'sending');
-  const attention = all.filter((p) => p.state === 'unknown' || p.state === 'failed');
-  const recent = all.filter((p) => !awaiting.includes(p) && !attention.includes(p)).slice(0, INLINE_RECENT);
-  const shown = [...awaiting, ...attention, ...recent];
-  const hidden = all.length - shown.length;
+  const decided = all.filter((p) => !awaiting.includes(p)).slice(0, INLINE_DECIDED);
+  const attention = decided.filter((p) => p.state === 'unknown' || p.state === 'failed');
+  const settled = decided.filter((p) => !attention.includes(p));
+  const folding = decided.length > INLINE_FOLD_OVER && settled.length > 0;
+  const hidden = all.length - awaiting.length - decided.length;
   // KEYED (2026-09-27): the section a previous render drew is patched — its
   // head re-worded, each card kept unless its record changed
   const sec = prev && prev.classList && prev.classList.contains('chanwin-outbox') ? prev : el('div', 'chanwin-outbox');
+  const st = ui || sec._ui || (sec._ui = { open: new Set(), fold: false });
   let head = sec.querySelector(':scope > .chanwin-outbox-head');
   if (!head) {
     head = el('div', 'chanwin-outbox-head');
@@ -807,7 +899,48 @@ export function renderInlineProposals(app, proposals, prev = null) {
   if (head.firstElementChild.textContent !== title) head.firstElementChild.textContent = title;
   if (head.lastElementChild.textContent !== linkText) head.lastElementChild.textContent = linkText;
   const byId = new Map([...sec.querySelectorAll(':scope > .chan-prop')].map((c) => [c.dataset.proposal, c]));
-  placeArmed(sec, [head, ...shown.map((p) => keyedCard(app, p, byId.get(p.id) || null, { compact: true }))]);
+  // a line's click: its card opens / closes in place (found by id — a kept card's handler never holds a stale record)
+  const onLine = (id) => {
+    if (st.open.has(id)) st.open.delete(id); else st.open.add(id);
+    const card = sec.children && [...sec.children].find((c) => c.dataset && c.dataset.proposal === id);
+    if (card) setLineOpen(card, st.open.has(id));
+    if (card && st.open.has(id)) reveal(card, card.querySelector(':scope > .chan-prop-line'));
+  };
+  const lineOf = (p, infold) => {
+    const c = keyedCard(app, p, byId.get(p.id) || null, { compact: true, line: true, onLine, onJump });
+    setLineOpen(c, st.open.has(p.id));
+    c.classList.toggle('chan-prop-infold', !!infold);
+    return c;
+  };
+  let fold = folding ? sec.querySelector(':scope > .chanwin-outbox-fold') : null;
+  if (folding && !fold) {
+    fold = el('div', 'chanwin-outbox-fold');
+    fold.tabIndex = 0;
+    fold.setAttribute('role', 'button');
+    fold.appendChild(icon('chevronRight', 10, 'chan-prop-line-chev'));
+    fold.appendChild(el('span', 'chanwin-outbox-fold-text'));
+    const flip = () => {
+      st.fold = !st.fold;
+      sec.classList.toggle('chanwin-outbox-foldopen', st.fold);
+      fold.setAttribute('aria-expanded', st.fold ? 'true' : 'false');
+      if (st.fold) reveal([...sec.children].filter((c) => c.classList.contains('chan-prop-infold')).pop(), fold);
+    };
+    fold.onclick = flip;
+    fold.onkeydown = (ev) => { if (ev.target !== fold || (ev.key !== 'Enter' && ev.key !== ' ')) return; ev.preventDefault(); flip(); };
+  }
+  if (fold) {
+    const words = t('Handled proposals ({n})', { n: settled.length });
+    if (fold.lastElementChild.textContent !== words) fold.lastElementChild.textContent = words;
+    fold.setAttribute('aria-expanded', st.fold ? 'true' : 'false');
+  }
+  sec.classList.toggle('chanwin-outbox-foldopen', !!(folding && st.fold));
+  placeArmed(sec, [
+    head,
+    ...awaiting.map((p) => keyedCard(app, p, byId.get(p.id) || null, { compact: true })),
+    ...attention.map((p) => lineOf(p, false)),
+    ...(fold ? [fold] : []),
+    ...settled.map((p) => lineOf(p, folding)),
+  ]);
   return sec;
 }
 

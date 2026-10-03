@@ -153,18 +153,22 @@ function registerDesignRoutes(app, { design, activeSessions, getJobs = () => nul
   });
 
   // ── agent ──
-  app.post('/api/agent/design/register', (req, res) => {
+  app.post('/api/agent/design/register', async (req, res) => {
     const a = agentCaller(req, res); if (!a) return;
     const b = body(req);
     const r = design.register({ host: a.host, dir: b.dir, title: b.title, sessionId: a.sessionId, conversationId: a.conversationId, kind: b.kind === 'system' || b.kind === 'design' ? b.kind : null });
     if (!r.ok) return answer(res, r);
     // the window opens (or comes to the front) on the owning session's clients — the openSpec rides the push
-    let opened = false;
+    let asked = false;
     if (a.session && a.sessionId) {
       const d = r.design;
-      try { design.openOn(a.session, a.sessionId, d); opened = true; } catch { opened = false; }
+      try { design.openOn(a.session, a.sessionId, d); asked = true; } catch { asked = false; }
     }
-    res.json({ ...r, opened });
+    // accept-fixes F3: `opened` = the hub SEES a window watching the folder (≤ 1.5 s) — the fact `sync` counts; a push
+    // to a session no screen shows (or a window whose watch was lost) is not "open on the user's screen"
+    const clients = a.session && a.session.clients && a.session.clients.size;
+    const opened = asked && !!clients && typeof design.watchedSoon === 'function' ? await design.watchedSoon(a.host, r.design.dir, 1500) : false;
+    res.json({ ...r, opened, asked });
   });
   app.post('/api/agent/design/changed', async (req, res) => {
     const a = agentCaller(req, res); if (!a) return;

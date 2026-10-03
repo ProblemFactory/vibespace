@@ -285,7 +285,7 @@ export function renderFields(body, fields) {
 // `callback({url})` → `{token?, error?}`. `extra()` adds body fields beside the
 // client id/secret (the channel side's preset key); `provider` names the
 // sign-in page; `pastePlaceholder` / `finishText` replace the storage words.
-export function wireOAuthConnect(ctx, { tokenKey, backend, label, clientIdKey, clientSecretKey, endpoints = MOUNT_OAUTH_ENDPOINTS, extra = null, provider = null, pastePlaceholder = null, finishText = null } = {}) {
+export function wireOAuthConnect(ctx, { tokenKey, backend, label, clientIdKey, clientSecretKey, endpoints = MOUNT_OAUTH_ENDPOINTS, extra = null, provider = null, pastePlaceholder = null, finishText = null, pasteHint = null, pasteSecret = false } = {}) {
   const PROVIDER_LABELS = { onedrive: 'Microsoft', drive: 'Google', dropbox: 'Dropbox', box: 'Box', pcloud: 'pCloud', yandex: 'Yandex', jottacloud: 'Jottacloud', hidrive: 'HiDrive' };
   const tokenInput = ctx.inputs[tokenKey];
   if (!tokenInput) return;
@@ -319,8 +319,9 @@ export function wireOAuthConnect(ctx, { tokenKey, backend, label, clientIdKey, c
       if (r.notice) status.textContent = r.notice;
       if (!pasteBox) {
         pasteBox = document.createElement('div');
-        pasteBox.innerHTML = `<div class="mounts-field-hint">${escHtml(tr("If the final page fails to load (address starts with 127.0.0.1 — VibeSpace runs on another machine, or you authorized in a different browser), copy that address and paste it here:"))}</div>`;
+        pasteBox.innerHTML = `<div class="mounts-field-hint">${pasteHint ? escHtml(pasteHint) : escHtml(tr("If the final page fails to load (address starts with 127.0.0.1 — VibeSpace runs on another machine, or you authorized in a different browser), copy that address and paste it here:"))}</div>`;
         const inp = document.createElement('input'); inp.placeholder = pastePlaceholder || 'http://127.0.0.1:53682/?state=…&code=…';
+        if (pasteSecret) { inp.type = 'password'; inp.autocomplete = 'off'; inp.spellcheck = false; }   // design 012: a pasted TOKEN is a secret — never drawn in the clear
         inp.onchange = async () => { try { status.textContent = tr('Completing…'); const fr = await post(endpoints.callback, { url: inp.value }); if (fr.error) throw new Error(fr.error); if (fr.token) finish(fr.token); } catch (e) { status.textContent = e.message || tr('Failed'); } };
         pasteBox.appendChild(inp); wrap.appendChild(pasteBox);
       }
@@ -341,7 +342,7 @@ export function wireOAuthConnect(ctx, { tokenKey, backend, label, clientIdKey, c
 // → `{token}`, and `finish(token, {close})` applies the new sign-in. `fields`
 // (optional) render through `renderFields` between the hint and the button —
 // the channel accounts' OAuth-client select.
-export function reauthDialog({ id = 'mount-reauth-dialog', title, hint: hintText, signinLabel, provider, fields = null, start, status: statusOf, callback, finish: apply, savingText = null, pastePlaceholder = 'http://127.0.0.1:53682/?state=…&code=…' }) {
+export function reauthDialog({ id = 'mount-reauth-dialog', title, hint: hintText, signinLabel, provider, fields = null, start, status: statusOf, callback, finish: apply, savingText = null, pasteHint = null, pasteSecret = false, pastePlaceholder = 'http://127.0.0.1:53682/?state=…&code=…' }) {
   const { body, close } = createModalShell({ id, title, bodyClass: 'mounts-dialog-body', escapeToClose: true });
   const hint = document.createElement('div');
   hint.className = 'mounts-field-hint';
@@ -376,9 +377,10 @@ export function reauthDialog({ id = 'mount-reauth-dialog', title, hint: hintText
       if (r.notice) status.textContent = r.notice;
       if (!pasteBox) {
         pasteBox = document.createElement('div');
-        pasteBox.innerHTML = `<div class="mounts-field-hint">${escHtml(tr("If the final page fails to load (address starts with 127.0.0.1 — VibeSpace runs on another machine, or you authorized in a different browser), copy that address and paste it here:"))}</div>`;
+        pasteBox.innerHTML = `<div class="mounts-field-hint">${pasteHint ? escHtml(pasteHint) : escHtml(tr("If the final page fails to load (address starts with 127.0.0.1 — VibeSpace runs on another machine, or you authorized in a different browser), copy that address and paste it here:"))}</div>`;
         const inp = document.createElement('input');
         inp.placeholder = pastePlaceholder;
+        if (pasteSecret) { inp.type = 'password'; inp.autocomplete = 'off'; inp.spellcheck = false; }
         inp.onchange = async () => {
           try {
             status.textContent = tr('Completing…');

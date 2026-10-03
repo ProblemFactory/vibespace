@@ -1,0 +1,46 @@
+{
+ "measured": "2026-10-03, lane accept-fixes-strip: the REAL agent-browser 0.38.1 + headless Chrome on a scratch HOME; a local server whose pages carry a real <title> (/wiki/Tide = \"Tide - Wikipedia\"; /late sets \"Late title\" 800 ms after load); `open /wiki/Tide`, `tab new /wiki/Tide_pool`, `open /late`, 2.5 s later `tab list --json` (raw below) and CDP /json/list at the same moment (cdpTitles, matched by url). The stream server's `tabs` record listed the SAME titles as tab list.",
+ "tabList": {
+  "success": true,
+  "data": {
+   "lifecycle": {
+    "effectiveLaunch": {
+     "browserLaunched": true,
+     "engine": "chrome",
+     "launchHash": 11677035664275010974
+    },
+    "launched": false,
+    "relaunchedBrowser": false,
+    "restartedBackground": false,
+    "restoreStatus": "not_configured",
+    "reused": true,
+    "saveStatus": "not_attempted"
+   },
+   "tabs": [
+    {
+     "active": false,
+     "label": null,
+     "tabId": "t1",
+     "targetId": "02CE4721892D6AD4927DFF4CB5630B35",
+     "title": "127.0.0.1:38001/wiki/Tide",
+     "type": "page",
+     "url": "http://127.0.0.1:38001/wiki/Tide"
+    },
+    {
+     "active": true,
+     "label": null,
+     "tabId": "t2",
+     "targetId": "CE83415C367AED223D3EF3EC6F42EEAE",
+     "title": "127.0.0.1:38001/late",
+     "type": "page",
+     "url": "http://127.0.0.1:38001/late"
+    }
+   ]
+  },
+  "error": null
+ },
+ "cdpTitles": {
+  "02CE4721892D6AD4927DFF4CB5630B35": "Tide - Wikipedia",
+  "CE83415C367AED223D3EF3EC6F42EEAE": "Late title"
+ }
+}

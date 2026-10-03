@@ -195,7 +195,7 @@ console.log('§7 the per-vendor channel rows (B-df40 part 3), derived from src/c
   const vendorPaths = (sec) => sec.rows.filter((r) => r.schema.channel).map((r) => r.path).join(',');
   ok(vendorPaths(view(new Set())) === '' && vendorPaths(view(new Set(['lark']))) === 'channels.budgetLarkPerMin,channels.larkRequestsPerSec' && vendorPaths(view(new Set(['lark', 'gmail']))).split(',').length === 4,
     'a vendor without a linked account hides its rows (switch ON — relevance, not tier); with a Lark account the Lark pair draws, the Gmail pair stays hidden; both accounts ⇒ all four');
-  ok(vendorPaths(view(null)).split(',').length === 4, '…and an unanswered accounts read (a 401, a timeout) hides none of them (ignorance hides nothing)');
+  ok(vendorPaths(view(null)).split(',').length === Object.values(CS.CHANNEL_SETTINGS).reduce((n, tbl) => n + tbl.rows.length, 0) && vendorPaths(view(null)).includes('channels.budgetSlackPerMin'), '…and an unanswered accounts read (a 401, a timeout) hides none of them — every vendor\'s rows, Slack\'s included (ignorance hides nothing)');
   const off = view(new Set(['lark', 'gmail']), { showAdvanced: false });
   ok(vendorPaths(off) === '' && off.hiddenAdvanced >= 4, `switch OFF ⇒ the vendor rows fold into the category's hidden-count line with the engine's advanced rows (${off.hiddenAdvanced})`);
   const mod = view(new Set(['lark']), { showAdvanced: false, isModified: (p) => p === 'channels.budgetGmailPerMin' });

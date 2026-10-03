@@ -1232,6 +1232,98 @@ console.log('§7 lane D (a) (docs/design-desktop-apps-seamless §3.4 — the own
   }
 }
 
+console.log('§8 lane app-fit-fixed (2026-10-03, the owner: WeChat\'s login in a blank window, Inkscape\'s welcome cut): the app\'s FIXED window (minimum = maximum) is named, a lone fixed dialog is the picture at 0,0, the view never scales it');
+{
+  // ── the PURE word: the hints as xpra 6.5.4 stated them at 2× on this machine (measured by the lane's reproducer) ──
+  const WXC = { increment: [2, 2], gravity: 10, 'minimum-size': [560, 760], 'maximum-size': [560, 760] };
+  const INKC = { 'base-size': [0, 0], increment: [2, 2], gravity: 1, 'minimum-size': [1420, 1356], 'maximum-size': [1420, 1356] };
+  ok(same(P.fixedSizeOf(WXC), { w: 560, h: 760 }) && same(P.fixedSizeOf(INKC), { w: 1420, h: 1356 }), 'fixedSizeOf: WeChat 4.1\'s login (560×760) and Inkscape 1.4.3\'s welcome (1420×1356) — minimum = maximum');
+  ok(P.fixedSizeOf({ 'minimum-size': [720, 1232] }) === null && P.fixedSizeOf({ 'minimum-size': [400, 300], 'maximum-size': [800, 300] }) === null && P.fixedSizeOf(null) === null && P.fixedSizeOf({ 'minimum-size': [0, 0], 'maximum-size': [0, 0] }) === null, 'a minimum alone (the calculator), a range, no hints, an unusable pair ⇒ null (resizable: today\'s fit)');
+  const WX = { title: 'Weixin', 'size-constraints': WXC, decorations: 0, 'window-type': ['_KDEOVERRIDE', 'NORMAL'] };
+  const INK = { title: 'Inkscape 1.4.3', 'size-constraints': INKC, decorations: 0, 'window-type': ['DIALOG'], modal: true };
+  const runFixed = async (mod) => {
+    FakeWorker.instances.length = 0;
+    const fixed = [];
+    const c = mod.createXpraClient({ url: 'ws://x/s', workerUrl: '/w.js', screen: { width: 900, height: 555 }, ratio: () => 2, dpi: 96, Worker: FakeWorker, decode: async () => ({ close() {} }), log: null, on: { fixed: (f) => fixed.push(f) } });
+    c.connect();
+    const w = await until(() => FakeWorker.instances[0]);
+    await until(() => w.sent('hello').length);
+    w.feed(['hello', { 'packet-types': ['keyboard-config', 'display-configure'] }]);
+    return { c, w, fixed };
+  };
+  { // WeChat: a fixed MAIN — fitted to its own size at 0,0, named; the login replaced by a resizable main ⇒ null
+    const A = await runFixed(C);
+    A.w.feed(['new-window', 7, 1768, 772, 560, 760, WX]);
+    ok(same(A.w.sent('map-window')[0].slice(1, 6), [7, 0, 0, 560, 760]) && same(A.fixed, [{ wid: 7, w: 560, h: 760 }]) && same(A.c.fixed, { wid: 7, w: 560, h: 760 }), `WeChat's login (a NORMAL main, min = max 560×760) is mapped at 0,0 at its own size and on.fixed names it once (${JSON.stringify(A.fixed)})`);
+    A.w.feed(['window-metadata', 7, { title: 'Weixin ' }]);
+    ok(A.fixed.length === 1, 'a metadata change that is not the constraints announces nothing');
+    A.w.feed(['new-window', 9, 0, 0, 1000, 700, { title: 'Weixin', 'size-constraints': { 'minimum-size': [800, 600] }, 'window-type': ['NORMAL'] }]);
+    A.w.feed(['lost-window', 7]);
+    ok(same(A.fixed, [{ wid: 7, w: 560, h: 760 }, null]) && A.c.mainWid === 9 && A.c.fixed === null, `the login replaced by the resizable main window ⇒ on.fixed(null) — the window becomes resizable again (${JSON.stringify(A.fixed)})`);
+    A.c.close();
+  }
+  { // Inkscape: a LONE fixed DIALOG (no main) — at 0,0 (X centred it at 188,0), named, contained by the display, kept there
+    const B = await runFixed(C);
+    B.w.feed(['new-window', 9, 188, 0, 1420, 1356, INK]);
+    const disp = B.w.sent('display-configure').slice(-1)[0];
+    ok(same(B.w.sent('map-window')[0].slice(1, 6), [9, 0, 0, 1420, 1356]) && same(B.fixed, [{ wid: 9, w: 1420, h: 1356 }]) && B.c.mainWid === 0, `Inkscape's welcome (DIALOG + modal, no transient-for, the app's only window) is mapped at 0,0 — never where X centred it — and named (${JSON.stringify(B.fixed)})`);
+    ok(!!disp && disp[1]['desktop-size'][0] >= 1420 && disp[1]['desktop-size'][1] >= 1356, `the display CONTAINS it before the map (${disp && disp[1]['desktop-size']}) — never a 1110 px display under a 1356 px dialog (the pointer would clamp at its last row)`);
+    B.w.feed(['window-move-resize', 9, 188, 0, 1420, 1356]);
+    ok(same(B.w.sent('configure-window').slice(-1)[0].slice(1, 6), [9, 0, 0, 1420, 1356]), 'X moving it back to its centre ⇒ the belt returns it to 0,0');
+    B.w.feed(['lost-window', 9]);
+    ok(same(B.fixed.slice(-1), [null]) && B.c.fixed === null, 'the welcome closed ⇒ on.fixed(null)');
+    B.c.close();
+  }
+  { // a fixed dialog OF a resizable main is never the picture (today's dialog rule)
+    const D = await runFixed(C);
+    D.w.feed(['new-window', 1, 0, 0, 800, 600, { title: 'Inkscape', 'size-constraints': { 'minimum-size': [600, 400] }, 'window-type': ['NORMAL'] }]);
+    D.w.feed(['new-window', 2, 1700, 300, 400, 300, { title: 'About', 'transient-for': 1, 'window-type': ['DIALOG'], 'size-constraints': { 'minimum-size': [400, 300], 'maximum-size': [400, 300] } }]);
+    ok(D.fixed.every((f) => f === null) && D.c.fixed === null && same(D.w.sent('map-window')[1].slice(1, 6), [2, 1400, 300, 400, 300]), `a resizable main + a fixed dialog OF it: nothing is fixed, the dialog is nudged inside as before (${JSON.stringify(D.w.sent('map-window')[1].slice(1, 6))})`);
+    D.c.close();
+  }
+  // CONTROL: the lone-dialog levers pulled back (only a main can be the picture; a dialog is placed where X put it)
+  const csrc = read('src/lib/xpra-client.js');
+  const lone = "  const loneFixed = () => { const f = fixedWindow(); return f && f.kind !== 'main' ? f : null; };";
+  const subj = "    const subject = main || [...windows.values()].filter((w) => w.kind === 'dialog' && !w.meta['transient-for']).sort((a, b) => (b.w * b.h - a.w * a.h) || (a.wid - b.wid))[0] || null;";
+  ok(csrc.split(lone).length === 2 && csrc.split(subj).length === 2, 'CONTROL: the two lone-dialog levers are spelled once in xpra-client.js');
+  const cm = MUTXC.write('src/lib/xpra-client.js', csrc.replace(lone, '  const loneFixed = () => null; // pre-fix CONTROL').replace(subj, '    const subject = main; // pre-fix CONTROL'), 'fixed');
+  {
+    const M = await runFixed(await import(cm));
+    M.w.feed(['new-window', 9, 188, 0, 1420, 1356, INK]);
+    ok(same(M.w.sent('map-window')[0].slice(1, 6), [9, 188, 0, 1420, 1356]) && !M.fixed.some(Boolean), `CONTROL: pre-fix the welcome is mapped where X centred it (${M.w.sent('map-window')[0].slice(2, 4)}) and nothing names its size — the owner's bands either side and a 1356 px dialog cut by a 1110 px pane`);
+    M.c.close();
+  }
+
+  // ── the view: the fixed pane (CSS px) to the window; never scaled while the window adopts it; scaled on the phone ──
+  const runFixedView = async (mod, follows) => {
+    FakeWorker.instances.length = 0;
+    const host = new El('div'); const got = [];
+    const view = mod.createXpraView(host, { url: () => 'ws://x/stream', workerUrl: '/w.js', Worker: FakeWorker, decode: async () => ({ close() {} }), pixelRatio: () => 2, dpi: 96, onFixedSize: (f) => got.push(f), fixedFollows: () => follows });
+    const pane = view.pane; pane.clientWidth = 700; pane.clientHeight = 450; pane.rect = { left: 10, top: 20 };
+    await view.connect();
+    const w = await until(() => FakeWorker.instances[0]);
+    await until(() => w.sent('hello').length);
+    w.feed(['hello', { 'packet-types': ['keyboard-config', 'display-configure'] }]);
+    w.feed(['new-window', 1, 0, 0, 2000, 1800, { title: 'aff-fixed 1000x900', 'size-constraints': { 'base-size': [0, 0], increment: [2, 2], 'minimum-size': [2000, 1800], 'maximum-size': [2000, 1800] }, 'window-type': ['NORMAL'] }]);
+    return { view, w, got };
+  };
+  {
+    const A = await runFixedView(V, true);
+    ok(same(A.got, [{ w: 1000, h: 900 }]) && same(A.view.fixedSize(), { w: 1000, h: 900 }) && A.view.stageScale === 1 && A.view.fitBadge.style.display === 'none' && A.view.stage.style.transform === '', `a fixed 2000×1800 window at ratio 2 ⇒ onFixedSize 1000×900 CSS, and in a 700×450 pane (before the window adopts it) the picture is NOT scaled — no badge (stage ${A.view.stageScale})`);
+    A.view.dispose();
+    const Ph = await runFixedView(V, false);
+    ok(Ph.view.stageScale < 1 && Ph.view.fitBadge.style.display === '', `the phone layout (fixedFollows false: the window IS the screen) keeps today's scale-to-fit with the badge (stage ${Ph.view.stageScale.toFixed(3)})`);
+    Ph.view.dispose();
+    const vsrc8 = read('src/lib/xpra-view.js');
+    const vfx = "      } else if (minSize && !(fixedCss && fixedFollows())) {";
+    ok(vsrc8.split(vfx).length === 2, 'CONTROL: the view\'s no-scale lever is spelled once');
+    const vm = MUTXC.write('src/lib/xpra-view.js', vsrc8.replace(vfx, '      } else if (minSize) { // pre-fix CONTROL'), 'fixedv');
+    const M = await runFixedView(await import(vm), true);
+    ok(M.view.stageScale < 1 && M.view.fitBadge.style.display === '', `CONTROL: pre-fix the fixed window is scaled to fit with the badge (stage ${M.view.stageScale.toFixed(3)}) — the "75 %" the owner refused`);
+    M.view.dispose();
+  }
+}
+
 console.log('§4 the census (grep over src/lib + style.css)');
 {
   const lib = path.join(repo, 'src/lib');

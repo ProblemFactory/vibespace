@@ -84,6 +84,12 @@
 //   minimize (`window-metadata {maximized|iconic}`); `setMainState({maximized|
 //   iconified})` tells the display what OUR window did (configure-window's
 //   state dict — the ui driver's, measured in xpra 6.5.3 seamless.py).
+// • THE APP'S FIXED SIZE (lane app-fit-fixed, 2026-10-03 — the owner's WeChat login in the top-left ~45 % of a blank
+//   window, Inkscape's welcome cut at the bottom between two bands): a window whose size constraints FIX its size
+//   (minimum = maximum, P.fixedSizeOf) is named by `on.fixed({wid, w, h}|null)` (device px) — the MAIN, else the
+//   largest dialog with no parent when the app has no main (Inkscape 1.4.3's welcome is typed DIALOG, modal, with
+//   no transient-for — it used to be placed where X centred it and never fitted). Such a lone fixed dialog is mapped
+//   at 0,0, kept there by the belt, and the display contains it; the VIEW's window adopts the size (never scaled).
 import * as P from './xpra-proto.js';
 
 const HELLO_TIMEOUT_MS = 15000;
@@ -109,6 +115,7 @@ export function defaultDecode(bytes, mime) {
  *   on.main(win|null)          the MAIN window (its `meta` included) — when the main changes or its metadata does
  *   on.state(win, changed)     `window-metadata` carrying `maximized` / `iconic` (the keys that changed, as sent)
  *   on.moveresize(ev)          {wid, xRoot, yRoot, direction, button, source, main} — the app asked its window manager to move/resize it
+ *   on.fixed(size|null)        {wid, w, h} (device px) — the app FIXED this window's size (min = max); null = no such window
  * Returns the session handle (see the tail).
  */
 export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, cover = false, layout = 'us', uuid = null, on = {}, Worker: WorkerCtor = (typeof Worker !== 'undefined' ? Worker : null), decode = defaultDecode, now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now()), log = null, helloTimeoutMs = HELLO_TIMEOUT_MS, pasteKeyDelayMs = PASTE_KEY_DELAY_MS, beltGapMs = BELT_GAP_MS, beltFightMs = BELT_FIGHT_MS, beltMaxFights = BELT_MAX_FIGHTS, refreshDelaysMs = REFRESH_DELAYS_MS } = {}) {
@@ -124,6 +131,7 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
   let cssPane = { width: Math.max(1, Math.floor(screen?.width || 1)), height: Math.max(1, Math.floor(screen?.height || 1)) };
   let pane = P.devicePane(cssPane, ratioNow(), { cover: coverNow() }); // DEVICE px — what X, the fit and the pointer speak
   let lastConstraints; // the main window's size constraints last announced (undefined = never)
+  let lastFixed; // the fixed window's size last announced, 'WxH' | null (undefined = never)
   let mainWid = 0, focusedWid = 0, zTop = 0;
   let helloTimer = null, pingTimer = null;
   let lastPaste = null, lastReceived = null, viewOnly = false;
@@ -153,10 +161,28 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
     lastConstraints = key;
     emit('constraints', c ? { ...c } : null);
   };
+  /** THE APP'S FIXED WINDOW (see the header; MEASURED on xpra 6.5.4 at 2×: WeChat's login = a NORMAL main, min = max
+   *  560×760; Inkscape's welcome = the app's ONLY top-level, DIALOG + modal + no transient-for, min = max 1420×1356): the
+   *  window the picture is ABOUT — the main, else the largest dialog with no parent — when its constraints FIX its size. */
+  const fixedWindow = () => {
+    const main = mainWid ? windows.get(mainWid) : null;
+    const subject = main || [...windows.values()].filter((w) => w.kind === 'dialog' && !w.meta['transient-for']).sort((a, b) => (b.w * b.h - a.w * a.h) || (a.wid - b.wid))[0] || null;
+    return subject && P.fixedSizeOf(P.sizeHintsOf(subject.meta)) ? subject : null;
+  };
+  /** The fixed window when it is a LONE DIALOG (the app has no main): placed at 0,0, contained by the display. */
+  const loneFixed = () => { const f = fixedWindow(); return f && f.kind !== 'main' ? f : null; };
+  /** on.fixed — the fixed window's size (device px) whenever it changes; null when there is none any more. */
+  const announceFixed = () => {
+    const f = fixedWindow(), s = f ? P.fixedSizeOf(P.sizeHintsOf(f.meta)) : null;
+    const key = s ? `${s.w}x${s.h}` : null;
+    if (key === lastFixed) return;
+    lastFixed = key;
+    emit('fixed', s ? { wid: f.wid, w: s.w, h: s.h } : null);
+  };
   /** The display size (device px): the pane, grown to CONTAIN the main window's fit (its minimum may be larger than the pane). */
   const displayFor = () => {
-    const main = mainWid ? windows.get(mainWid) : null;
-    const g = main && main.kind === 'main' ? P.fitGeometry({ paneW: pane.width, paneH: pane.height }, P.sizeHintsOf(main.meta)) : null;
+    const main = mainWid ? windows.get(mainWid) : null, lone = main ? null : loneFixed();
+    const g = main && main.kind === 'main' ? P.fitGeometry({ paneW: pane.width, paneH: pane.height }, P.sizeHintsOf(main.meta)) : lone ? { x: 0, y: 0, w: lone.w, h: lone.h } : null;
     return { width: Math.max(pane.width, g ? g.x + g.w : 0), height: Math.max(pane.height, g ? g.y + g.h : 0) };
   };
   /** Ask for `displayFor()` when it differs from what this client last asked (or always, `force`) — never in Watch/before the hello. */
@@ -172,8 +198,9 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
     const next = [...windows.values()].find((w) => w.kind === 'main') || null;
     mainWid = next ? next.wid : 0;
     if (next) { emit('title', next.title); refit(next); }
-    else { emit('title', ''); syncDisplay(); } // no main: the display is the pane again
+    else { emit('title', ''); syncDisplay(); } // no main: the display is the pane again (or contains a lone fixed dialog)
     announceConstraints();
+    announceFixed();
     emit('main', next);
   };
   /** The main window follows the pane: a new fit ⇒ configure-window (the server confirms with window-move-resize / window-resized). */
@@ -216,6 +243,7 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
       const within = win.x === 0 && win.y === 0 && Math.abs(win.w - g.w) < inc[0] && Math.abs(win.h - g.h) < inc[1];
       return within ? null : g;
     }
+    if (win === loneFixed()) return win.x === 0 && win.y === 0 ? null : { x: 0, y: 0, w: win.w, h: win.h }; // the app's fixed window IS the picture: at 0,0
     const placed = P.placeInside(win, { paneW: pane.width, paneH: pane.height });
     return placed.moved ? { x: placed.x, y: placed.y, w: win.w, h: win.h } : null;
   };
@@ -254,10 +282,12 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
     if (isMain) { mainWid = wid; emit('title', win.title); emit('main', win); announceConstraints(); }
     if (watch) { /* x5 Watch: drawn where the server has it — the geometry is the active viewer's */ }
     else if (isMain) g = P.fitGeometry({ paneW: pane.width, paneH: pane.height }, P.sizeHintsOf(meta));
+    else if (win === loneFixed()) g = { x: 0, y: 0, w: g.w, h: g.h }; // the app's FIXED lone dialog (Inkscape's welcome) IS the picture: at 0,0, never where X centred it
     else if (kind !== 'popup') { const placed = P.placeInside(g, { paneW: pane.width, paneH: pane.height }); g = { x: placed.x, y: placed.y, w: placed.w, h: placed.h }; } // a dialog OR a second top-level: inside, never lost off the pane
     Object.assign(win, g);
     win.premap = false;
-    if (isMain) syncDisplay(); // the display contains the fit before the map
+    if (isMain || win === loneFixed()) syncDisplay(); // the display contains the fit (or the fixed dialog) before the map
+    if (kind !== 'popup') announceFixed();
     emit('window', 'new', win);
     if (!overrideRedirect) { send(P.mapWindow(wid, g)); focusWindow(wid); }
   };
@@ -270,6 +300,9 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
     emit('window', 'lost', win);
     if (focusedWid === wid) focusedWid = 0;
     if (mainWid === wid) { mainWid = 0; pickMain(); }
+    const lone = loneFixed(); // the main gone, a lone fixed dialog left: it becomes the picture
+    if (lone) { syncDisplay(); belt(lone, 'the fixed window'); }
+    announceFixed();
   };
   const moveResize = (wid, x, y, w, h) => {
     const win = windows.get(wid);
@@ -368,7 +401,7 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
         if (!win) return;
         Object.assign(win.meta, meta);
         if ('title' in meta) { win.title = winTitle(meta); if (win.wid === mainWid) emit('title', win.title); }
-        if ('size-constraints' in meta || 'size-hints' in meta) { resetBelt(win); refit(win); if (win.wid === mainWid) announceConstraints(); }
+        if ('size-constraints' in meta || 'size-hints' in meta) { resetBelt(win); refit(win); if (win.wid === mainWid) announceConstraints(); announceFixed(); if (win === loneFixed()) { syncDisplay(); belt(win, 'the fixed window'); } }
         emit('window', 'meta', win);
         if (win.wid === mainWid) emit('main', win);
         if ('maximized' in meta || 'iconic' in meta) { const changed = {}; if ('maximized' in meta) changed.maximized = !!meta.maximized; if ('iconic' in meta) changed.iconic = !!meta.iconic; emit('state', win, changed); }
@@ -545,6 +578,7 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
     beltState: (wid) => { const w = windows.get(wid); return w && w.belt ? { at: w.belt.at, fights: w.belt.fights, gaveUp: w.belt.gaveUp, pending: !!w.belt.timer } : null; },
     get pane() { return pane; }, get display() { return sentDisplay ? { ...sentDisplay } : null; }, get cssPane() { return cssPane; }, get ratio() { return ratioNow(); }, get dpi() { return dpi; },
     get mainConstraints() { const m = mainWid ? windows.get(mainWid) : null; const c = m ? P.sizeHintsOf(m.meta) : null; return c ? { ...c } : null; },
+    get fixed() { const f = fixedWindow(), s = f ? P.fixedSizeOf(P.sizeHintsOf(f.meta)) : null; return s ? { wid: f.wid, w: s.w, h: s.h } : null; },
     get serverCaps() { return serverCaps; }, get packetTypes() { return packetTypes; },
     get viewOnly() { return viewOnly; }, set viewOnly(v) { viewOnly = !!v; },
     get watch() { return watch; }, set watch(v) { setWatch(v); }, get dormant() { return dormant; }, set dormant(v) { setDormant(v); },

@@ -160,7 +160,8 @@ class ExitProxyManager {
     // the audit line is the ONE durable record of what ran: the WHOLE command (≤ CMD_MAX bytes, control characters
     // as spaces) — verify-r1 A1: cut at 120 chars, a 4 KB command's payload past the head was in no record at all
     // (the row's lastRun and the card keep their 120 / 80-char heads by design)
-    if (typeof rec.cmd === 'string') rec.cmd = rec.cmd.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, E.CMD_MAX);
+    // lane exit-see-whole: its LINES and tabs kept (the owner's Commands list shows the command as itself; JSON holds them)
+    if (typeof rec.cmd === 'string') rec.cmd = E.cleanLines(rec.cmd, E.CMD_MAX);
     if (this.dataDir) {
       try {
         fs.mkdirSync(this.dataDir, { recursive: true });
@@ -605,7 +606,7 @@ class ExitProxyManager {
       try { this.hosts.setLastRun?.(h.id, rec); } catch (e) { this.log(`last run not recorded: ${e.message}`); }
       this.audit({ hostId: h.id, machine, sessionId, sessionKey: by.key, name: session && session.name || null, grant: 'run', verb: 'run', cmd, code: null, ms, ok: false, refusal: 'spawn_failed', spawnError: sf, interpreter, ...(platform ? { platform } : {}), via: again.via, asked });
       this.log(`${machine}: could not start "${cmd.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 80)}" for ${(session && session.name) || sessionId} — ${XS.spawnFailureText(sf, { interpreter })} (${sf.code}, ${ms} ms)`);
-      card({ outcome: 'spawn_failed', cmd, spawnError: sf, interpreter, ms, exitRun: E.cardOutput({ code: null, ms, spawnError: sf, interpreter }) });
+      card({ outcome: 'spawn_failed', cmd, spawnError: sf, interpreter, ms, exitRun: E.cardOutput({ cmd, code: null, ms, spawnError: sf, interpreter }) });
       try { this.bcastAll({ type: 'hosts-updated' }); } catch { }
       throw namedError('spawn_failed', E.refusalText('spawn_failed', { machine, cmd, spawnError: sf, interpreter, platform }), { grant: 'run', spawnError: sf, interpreter, platform, exitCode: XS.spawnExitCode(sf) });
     }
@@ -624,7 +625,7 @@ class ExitProxyManager {
     try { this.hosts.setLastRun?.(h.id, rec); } catch (e) { this.log(`last run not recorded: ${e.message}`); }
     this.audit({ hostId: h.id, machine, sessionId, sessionKey: by.key, name: session && session.name || null, grant: 'run', verb: 'run', cmd, code, ms, ok: true, via: again.via, asked, interpreter, ...(platform ? { platform } : {}), ...(timedOut ? { timedOut: true } : {}), ...(truncated ? { truncated: true } : {}), ...(revokedDuringRun ? { 'revoked-during-run': true } : {}), stdout: heads.stdout, stderr: heads.stderr, ...(anyCut ? { cut: heads.cut } : {}) });
     this.log(`${machine}: ran "${cmd.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 80)}" for ${(session && session.name) || sessionId} — ${timedOut ? 'timed out' : 'exit ' + code}, ${ms} ms (${interpreter})`);
-    card({ outcome: 'ran', cmd, code, ms, timedOut: !!timedOut, revokedDuringRun, exitRun: E.cardOutput({ code, ms, timedOut: !!timedOut, truncated: !!truncated, interpreter, heads }) });
+    card({ outcome: 'ran', cmd, code, ms, timedOut: !!timedOut, revokedDuringRun, exitRun: E.cardOutput({ cmd, code, ms, timedOut: !!timedOut, truncated: !!truncated, interpreter, heads }) });
     try { this.bcastAll({ type: 'hosts-updated' }); } catch { }
     return { machine, code, stdout: String(r.stdout || ''), stderr: String(r.stderr || ''), ms, timedOut, truncated, asked, revokedDuringRun, interpreter, platform, line: E.cliLine({ outcome: 'ran', code, ms, timedOut: !!timedOut, truncated: !!truncated }, { machine }) };
   }

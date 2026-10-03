@@ -329,7 +329,7 @@ for (const { kind, caps } of REGISTERED) {
   const lark = require(path.join(REPO, 'src/channels/lark.js'));
   const gmail = require(path.join(REPO, 'src/channels/gmail.js'));
   const agents = require(path.join(REPO, 'src/channels/agents.js'));
-  const all = [fake.fakePoll, fake.fakePush, fake.fakeScan, lark.adapter, gmail.adapter, agents];
+  const all = [fake.fakePoll, fake.fakePush, fake.fakeScan, lark.adapter, gmail.adapter, require(path.join(REPO, 'src/channels/slack.js')).adapter, agents];
   const bad = [];
   for (const m of all) { try { CH.validateCaps(m.kind, m.caps); CH.validateMethods(m.kind, m.caps, m.create({ id: m.kind }, {})); } catch (e) { bad.push(`${m.kind}: ${e.message}`); } }
   ok(!bad.length, `every production adapter module (${all.map((m) => m.kind).join(', ')}) implements exactly the thread / reaction methods its rows declare`, bad.join('; '));
@@ -504,7 +504,7 @@ for (const { kind, caps } of REGISTERED) {
   // V3: registration refuses, by name, a key the table does not declare for that vendor
   const good = { receive: 'poll', pollInterval: { hot: 30, cold: 300, floor: 10 }, history: 'page', sendAs: [], identityMarking: 'none' };
   const planted = [
-    ['slack', { ...good, budget: { unit: 'request', default: 60, settingKey: 'channels.budgetSlackPerMin', metered: true } }, /"channels\.budgetSlackPerMin" is not declared — the "slack" adapter has no budget row in src\/channel-settings\.js/],
+    ['teams', { ...good, budget: { unit: 'request', default: 60, settingKey: 'channels.budgetTeamsPerMin', metered: true } }, /"channels\.budgetTeamsPerMin" is not declared — the "teams" adapter has no budget row in src\/channel-settings\.js/],
     ['lark', { ...good, budget: { unit: 'request', metered: true, default: 60, settingKey: 'channels.budgetLarkPerMinute' } }, /"channels\.budgetLarkPerMinute" is not the budget row src\/channel-settings\.js declares for "lark" \(channels\.budgetLarkPerMin\)/],
     ['lark', { ...good, budget: { unit: 'request', metered: true, ...CS.budgetOf(CS.CHANNEL_SETTINGS.lark) }, pace: { unitsPerSec: 5, settingKey: 'channels.gmailUnitsPerSec' } }, /caps\.pace\.settingKey "channels\.gmailUnitsPerSec" is not the pace row src\/channel-settings\.js declares for "lark" \(channels\.larkRequestsPerSec\)/],
   ];
@@ -526,7 +526,7 @@ for (const { kind, caps } of REGISTERED) {
 
   // the tables themselves
   const errs = CS.checkChannelTables(CS.CHANNEL_SETTINGS);
-  ok(!errs.length && JSON.stringify(Object.keys(CS.CHANNEL_SETTINGS)) === '["lark","gmail"]' && Object.isFrozen(CS.CHANNEL_SETTINGS.lark.rows[0]), 'the shipped tables (lark, gmail) are valid and frozen', errs.join('; '));
+  ok(!errs.length && JSON.stringify(Object.keys(CS.CHANNEL_SETTINGS)) === '["lark","gmail","slack"]' && Object.isFrozen(CS.CHANNEL_SETTINGS.lark.rows[0]), 'the shipped tables (lark, gmail, slack) are valid and frozen', errs.join('; '));
   const row = { key: 'budgetXPerMin', role: 'budget', type: 'number', default: 60, min: 5, max: 1000, label: 'x', description: 'y' };
   const tbl = (rows, o = {}) => ({ vendor: 'x', vendorName: 'X', rows, ...o });
   const BAD = [
@@ -573,6 +573,51 @@ for (const { kind, caps } of REGISTERED) {
   const withPlant = prod.map((f) => (f.rel === esrcRel ? { rel: f.rel, src: fs.readFileSync(plantedCall, 'utf8') } : f));
   ok(J.seam(withPlant).some((h) => h.startsWith(esrcRel)), 'NEGATIVE CONTROL — an engine copy that passes channelSettings to its registry is reported by name (the census can go red)', J.seam(withPlant).join('; '));
   for (const r of copiesCensus(MC.files, MC.dir, REPO, { minCopies: 4 })) ok(r.pass, r.name, r.detail);
+}
+
+// ── ⑩ design 012 (Slack S1): THE THREE NEW ROWS — `policyModes` (the modes a vendor allows; `review` always among
+// them), `prepareSend` (a proposal's mentions decided once), `retention` (keep | purge-on-remove) — refused by name when
+// malformed; the policy clamp reads them; the prepareSend gate and its bounds ──
+{
+  const P = require(path.join(REPO, 'src/channel-policy.js'));
+  const slackMod = require(path.join(REPO, 'src/channels/slack.js'));
+  const good = { receive: 'poll', pollInterval: { hot: 30, cold: 300, floor: 10 }, history: 'page', sendAs: ['user'], identityMarking: 'none' };
+  const refusal = (caps) => { try { CH.validateCaps('x', caps); return null; } catch (e) { return e.message; } };
+  const cases = [
+    [{ policyModes: [] }, /policyModes must be a non-empty array/],
+    [{ policyModes: ['direct'] }, /without 'review'/],
+    [{ policyModes: ['review', 'yolo'] }, /policyModes holds "yolo"/],
+    [{ policyModes: ['review', 'review'] }, /names a mode twice/],
+    [{ prepareSend: 'yes' }, /prepareSend must be a boolean/],
+    [{ prepareSend: true, sendAs: [] }, /prepareSend on a read-only adapter/],
+    [{ retention: 'forever' }, /retention must be one of keep\|purge-on-remove/],
+  ];
+  const got = cases.map(([extra, re]) => re.test(refusal({ ...good, ...extra }) || ''));
+  ok(got.every(Boolean), 'a malformed policyModes / prepareSend / retention row is refused at registration, by name', JSON.stringify(got));
+  ok(refusal({ ...good, policyModes: ['review'], prepareSend: true, retention: 'purge-on-remove' }) === null && refusal(good) === null, '…while the Slack shape and the absent rows (every other adapter) validate');
+  ok(slackMod.caps.policyModes.join() === 'review' && slackMod.caps.prepareSend === true && slackMod.caps.retention === 'purge-on-remove', 'the Slack adapter declares review only, prepareSend, purge-on-remove');
+  const clamp = P.policyMode({ mode: 'direct' }, slackMod.caps);
+  ok(clamp.mode === 'review' && clamp.clamped === true && clamp.declared === 'direct' && P.policyMode({ mode: 'direct' }, null).mode === 'direct' && P.policyModesOf(slackMod.caps).join() === 'review' && P.policyModesOf({}).join() === 'direct,review', 'policyMode clamps a stored "direct" to review on a vendor that forbids it (fail closed), and leaves every other adapter\'s direct alone');
+  const psrc = fs.readFileSync(path.join(REPO, 'src/channel-policy.js'), 'utf-8');
+  const CLAMP = "    if (!policyModesOf(caps).includes(m)) return { mode: 'review', unknown: false, declared: m, clamped: true };\n";
+  ok(psrc.includes(CLAMP), 'the patch site of the clamp control is in channel-policy.js');
+  const MC10 = mutantCopies('chan-contract-slack', REPO);
+  const P2 = require(MC10.write('src/channel-policy.js', psrc.replace(CLAMP, ''), 'noclamp'));
+  ok(P2.policyMode({ mode: 'direct' }, slackMod.caps).mode === 'direct', 'NEGATIVE CONTROL — a channel-policy copy without the clamp obeys a stored "direct" on Slack (the rule is what refuses it)');
+  // the wrapper: gated by the row, bounded
+  const r = CH.createChannelRegistry();
+  r.register({ kind: 'prep', caps: { ...good, prepareSend: true }, create: () => ({ auth: { state: async () => ({ state: 'connected' }) }, convCaps: async () => ({ read: 'yes', sendAs: ['user'] }), history: async () => ({ records: [], reachedAnchor: true }), send: async () => ({ ok: true }), reconcile: async () => ({}), prepareSend: async () => ({ text: 'x', notifies: ['Bob\u202e', 'A'.repeat(500)], unresolved: [], mentions: [{ name: 'Bob', id: 'U1BOB' }, { name: 'Eve', id: 'not an id' }], tooLong: false, sendMax: 4000 }) }) });
+  const pr = await r.create('prep', { id: 'prep' }).prepareSend('c', { text: 'x' });
+  ok(pr.mentions.length === 1 && pr.mentions[0].id === 'U1BOB' && !pr.notifies[0].includes('\u202e') && pr.notifies[1].length <= 100, 'the wrapper bounds the answer: a mention id outside the id alphabet is dropped, names through the name door (bidi gone, ≤ 100)');
+  r.register({ kind: 'noprep', caps: good, create: () => ({ auth: {}, convCaps: async () => ({ read: 'yes', sendAs: [] }), history: async () => ({ records: [], reachedAnchor: true }), send: async () => ({}), reconcile: async () => ({}) }) });
+  const e = await threw(() => r.create('noprep', { id: 'noprep' }).prepareSend('c', { text: 'x' }));
+  ok(e && e.code === 'not-supported', 'an adapter that does not declare prepareSend answers not-supported (the engine never asks it)');
+  ok(CH.METHOD_GATES.prepareSend({ prepareSend: true, sendAs: ['user'] }) && !CH.METHOD_GATES.prepareSend({ prepareSend: true, sendAs: [] }), 'the gate: declared AND sendable');
+  // the audience pass-through: closed kinds, names through the door
+  r.register({ kind: 'aud', caps: good, create: () => ({ auth: {}, convCaps: async (id) => ({ read: 'yes', sendAs: ['user'], audience: id === 'bad' ? { kind: 'everyone-on-earth', orgs: ['x'] } : { kind: 'external', orgs: ['Acme', 'Glo\u202ebex'], members: 9, title: '#x' } }), history: async () => ({ records: [], reachedAnchor: true }), send: async () => ({}), reconcile: async () => ({}) }) });
+  const ia = r.create('aud', { id: 'aud' });
+  const au = (await ia.convCaps('ok')).audience;
+  ok(au && au.kind === 'external' && au.orgs.join('|') === 'Acme|Globex' && au.members === 9 && !('audience' in (await ia.convCaps('bad'))), 'convCaps carries `audience` (closed kind, organizations through the name door); an unknown kind is dropped');
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

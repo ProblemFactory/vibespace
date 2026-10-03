@@ -19,6 +19,8 @@
 // implementation: the worker servant runs it, and the daemon's inline
 // fallback (worker_threads unavailable / pool dead) runs the SAME object —
 // no twin to drift.
+// verify-r2: an errno in words (a move across drives says what stopped it)
+const FS_WHY = { EACCES: 'permission denied', EPERM: 'permission denied', EBUSY: 'a file is in use by another program', ENOSPC: 'the drive is full', EDQUOT: 'the drive is full', EROFS: 'the drive is read-only', ENOENT: 'a file vanished meanwhile', ENAMETOOLONG: 'a path is too long', EEXIST: 'something already exists there', ERR_FS_CP_EEXIST: 'something already exists there', EIO: 'the drive failed to read or write' };
 const FS_ACTIONS = {
   'read-range': (m) => {
     const f = require('fs');
@@ -48,11 +50,46 @@ const FS_ACTIONS = {
       let st = null; try { st = f.statSync(pt.join(m.path, e.name)); } catch { }
       return { name: e.name, isDir: e.isDirectory(), size: st?.size ?? 0, mtimeMs: st?.mtimeMs ?? 0 };
     });
-    return { entries };
+    return { entries, path: m.path }; // lane windows-device-fs: the folder as the DEVICE resolved it (`~` ⇒ its home)
   },
   mkdir: (m) => { require('fs').mkdirSync(m.path, { recursive: true }); return { ok: true }; },
   rename: (m) => { require('fs').renameSync(m.path, String(m.to)); return { ok: true }; },
   rm: (m) => { require('fs').rmSync(m.path, { recursive: !!m.recursive, force: true }); return { ok: true }; },
+  // lane windows-device-fs (`fs-portable`): the Files view's ops the hub used to run as `sh` lines (`echo "$HOME"`,
+  // `cp -rn`, `mv -n`, `du -sk`) — a Windows machine has no `sh`, so every one answered "command failed (127)". The
+  // DEVICE does them with its own fs, on its own paths (C:\Users\…); `~` is expanded by the fs-op handler below.
+  home: () => ({ home: require('os').homedir() }),
+  copy: (m) => { require('fs').cpSync(m.path, String(m.to), { recursive: true, force: false, errorOnExist: false }); return { ok: true }; }, // = cp -rn: an existing file is kept
+  move: (m) => {
+    const f = require('fs'), to = String(m.to);
+    if (f.existsSync(to)) { const e = new Error('already exists: ' + to); e.code = 'EEXIST'; throw e; } // = mv -n, said
+    try { f.renameSync(m.path, to); } catch (e) {
+      if (e.code !== 'EXDEV') throw e; // another volume (C: → D:): copy, then remove the source
+      // verify-r2: a failure on the way SAYS what is left where — never a raw errno (the destination did not exist a moment ago)
+      const why = (x) => FS_WHY[x && x.code] || 'the device refused it';
+      try { f.cpSync(m.path, to, { recursive: true, force: false, errorOnExist: true }); } catch (ce) {
+        let left = 'nothing was moved'; try { f.rmSync(to, { recursive: true, force: true }); } catch { left = `a partial copy is left at ${to}`; }
+        throw Object.assign(new Error(`could not copy to the other drive (${why(ce)}) — ${left}; ${m.path} is unchanged`), { code: 'move_copy_failed' });
+      }
+      try { f.rmSync(m.path, { recursive: true, force: true }); } catch (re) {
+        throw Object.assign(new Error(`moved a full copy to ${to}, but removing ${m.path} stopped (${why(re)}) — what could not be removed is still at ${m.path}`), { code: 'move_source_kept' });
+      }
+    }
+    return { ok: true };
+  },
+  du: (m) => { // = du: the bytes under a folder, symlinks / junctions NOT followed, bounded by entries (the worker's deadline bounds time)
+    const f = require('fs'), pt = require('path');
+    let bytes = 0, entries = 0, truncated = false;
+    const stack = [m.path];
+    while (stack.length) {
+      const d = stack.pop();
+      let st; try { st = f.lstatSync(d); } catch { continue; }
+      bytes += st.size;
+      if (++entries >= 1000000) { truncated = true; break; }
+      if (st.isDirectory()) { let names = []; try { names = f.readdirSync(d); } catch { } for (const n of names) stack.push(pt.join(d, n)); }
+    }
+    return { bytes, entries, truncated };
+  },
   ping: () => ({ ok: true }),
 };
 {
@@ -275,6 +312,32 @@ const ROOT = process.env.VIBESPACE_DEVICE_ROOT || process.env.VIBESPACE_AGENTD_R
 // oauth token); HOME/USER/LANG/PATH — what a device child really needs from
 // the daemon's own environment — survive, because remote daemons run under
 // launchd/systemd with an env the server never sees.
+// lane windows-device-fs verify-r1 F1: WHICH POSIX SHELLS THIS MACHINE HAS — the device's fact, said in the hello
+// (`posixShells`). A Windows machine with Git for Windows / MSYS2 / Cygwin on PATH HAS `sh` (libuv resolves `sh` to sh.exe
+// on PATH) and the hub's `sh` lines ran there; the hub's door refuses a shell only where this list says it is absent.
+// verify-r2: a shell COUNTS only when it RAN a POSIX line (`echo vs-$((40+2))` answered `vs-42`, exit 0) within POSIX_PROBE_MS —
+// WSL's bash.exe booting a distro or asking for a user, a broken Git sh, a hung one, an sh.cmd shim (node never starts a
+// .cmd without a shell, and neither does run-cmd) are NOT here. Started the way run-cmd starts a child (spawnEnv's PATH,
+// no argv but the line), all five in PARALLEL and ASYNC (the agent keeps serving its links meanwhile), each killed at the
+// bound: first at boot, then again at EVERY hello — a shell installed since is seen at the next link; a hello waits for
+// it ≤ POSIX_PROBE_MS (one probe in flight serves every hello that arrives meanwhile).
+const POSIX_PROBE_MS = 3000;
+let posixShellsRun = null;
+function posixShells() {
+  if (posixShellsRun) return posixShellsRun;
+  const { execFile } = require('child_process');
+  const one = (c) => new Promise((resolve) => {
+    let child = null, done = false;
+    const end = (v) => { if (!done) { done = true; clearTimeout(tm); resolve(v); } };
+    const tm = setTimeout(() => { end(null); try { child.kill('SIGKILL'); } catch { } }, POSIX_PROBE_MS);
+    try {
+      child = execFile(c, ['-c', 'echo vs-$((40+2))'], { env: spawnEnv(), windowsHide: true, maxBuffer: 4096 }, (err, out) => end(!err && String(out).trim() === 'vs-42' ? c : null));
+      child.on('error', () => end(null)); child.stdin.end(); // a prompt (WSL's first run) reads EOF, never a hub byte
+    } catch { end(null); }
+  });
+  posixShellsRun = Promise.all(['sh', 'bash', 'dash', 'zsh', 'ksh'].map(one)).then((l) => l.filter(Boolean)).finally(() => { posixShellsRun = null; });
+  return posixShellsRun;
+}
 function spawnEnv(extra) {
   const home = os.homedir();
   const nodeDir = path.dirname(process.execPath);
@@ -1300,14 +1363,15 @@ function serveConnection(sock) {
         authed = true;
         authedServers++;
         this._countedServer = true;
-        mux.control({
+        posixShells().then((shells) => mux.control({ // verify-r2: measured now (≤ POSIX_PROBE_MS, async) — a shell installed since this agent started counts
           op: 'hello-ack', protoVersion: PROTO_VERSION, daemonVersion: VERSION,
           platform: process.platform, arch: process.arch, nodeVersion: process.version,
+          posixShells: shells, // lane windows-device-fs verify-r1 F1: the shells THIS machine starts (the hub's door keys on it)
           // per-op capability gating (three-tier design): consumers check the
           // capability, NEVER parse daemonVersion — unknown ops on an old
           // daemon get no reply and hang the request until its timeout
-          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo', 'session-events', 'proc-list', 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'desktop-serve', 'dial-status', 'run-shell', 'app-install'],
-        });
+          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo', 'session-events', 'proc-list', 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'desktop-serve', 'dial-status', 'run-shell', 'app-install', 'fs-portable'],
+        }));
         return;
       }
       if (!authed) { sock.end(); return; }
@@ -1344,7 +1408,10 @@ function serveConnection(sock) {
         (async () => {
           const rid = msg.id;
           try {
-            const p = String(msg.path || '');
+            // lane windows-device-fs: `~` is the DEVICE's home — the hub asked `sh -c 'echo "$HOME"'` for it, and a Windows
+            // machine has no `sh`; node's path module is the device's own (C:\Users\… on Windows)
+            const devPath = (x) => { const t = String(x || ''); return t === '~' || /^~[\\/]/.test(t) ? path.join(os.homedir(), t.slice(1)) : t; };
+            const p = devPath(msg.path);
             if (!path.isAbsolute(p)) throw new Error('absolute path required');
             // R2: every fs action executes in a WORKER with a deadline —
             // a hung mount kills a worker, never the session-pipe loop.
@@ -1377,7 +1444,8 @@ function serveConnection(sock) {
               }
               mux.control({ op: 'fs-done', id: rid, chan: msg.chan, sent });
             } else if (FS_ACTIONS[msg.action]) {
-              const r = await runFs(msg.action, { path: p, to: msg.to, recursive: msg.recursive, data64: msg.data64 }, 12000);
+              const slow = msg.action === 'copy' || msg.action === 'move' ? 120000 : msg.action === 'du' ? 60000 : 12000; // a folder copy / walk outlives a stat
+              const r = await runFs(msg.action, { path: p, to: msg.to === undefined ? undefined : devPath(msg.to), recursive: msg.recursive, data64: msg.data64 }, slow);
               const { data, ...rest } = r;
               mux.control({ op: 'fs-result', id: rid, ...rest });
             } else throw new Error('unknown fs action: ' + msg.action);
@@ -2160,6 +2228,7 @@ if (SOCK_PICK && SOCK_PICK.via !== 'natural') {
 }
 server.listen(SOCK, () => {
   try { fs.chmodSync(SOCK, 0o600); } catch { }
+  posixShells(); // verify-r2: the first measure starts at boot, so the first hello rarely waits for it
   if (SOCK_PICK) {
     // the WITNESS: the bridge and the hub read where we REALLY listen (atomic, 0600)
     try { const w = SOCKP.witnessPathOf(ROOT), tmp = w + '.' + process.pid + '.tmp'; fs.writeFileSync(tmp, SOCK + '\n', { mode: 0o600 }); fs.renameSync(tmp, w); } catch (e) { log('socket witness not written: ' + e.message); }

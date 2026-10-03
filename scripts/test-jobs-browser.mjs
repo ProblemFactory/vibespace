@@ -259,6 +259,14 @@ console.log('— ④ the real routes + keeper: a job gets its own lease + window
   const leasesOf = (bk) => k._reg().leases.filter((l) => l.browserKey === bk).map((l) => l.profileId);
   const handleOf = (jobId) => J.jobHandleOf(k._reg().children, jobId, KA);
 
+  // accept-fixes-jobs: the REAL CLI inside the job (its token, no session's) against this server — spawned, never blocking it
+  const CLI = path.join(REPO, 'data/bin/vibespace-browser');
+  const cliRun = (args, extra = {}) => new Promise((res) => { const c = spawn(process.execPath, [CLI, ...args], { env: { PATH: env.PATH, HOME, VIBESPACE_API: base, ...extra } }); let o = ''; c.stdout.on('data', (d) => { o += d; }); c.stderr.on('data', (d) => { o += d; }); c.on('close', (code) => res(o + `[exit ${code}]`)); });
+  const windowTabs = (w) => [...(model.windows.get(w) || [])];
+  const until = async (fn, ms = 3000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await fn()) return true; await new Promise((r) => setTimeout(r, 25)); } return !!(await fn()); };
+  // accept-fixes-jobs F5 (the acceptance of 2.369.202): BEFORE its first page verb, a job's status names the profile that verb lands on
+  { const rs = await fetch(base + '/api/agent/browser/status', { headers: { Authorization: 'Bearer jbt_aaaa' } }); const j = await rs.json();
+    ok(rs.status === 200 && j.job && j.job.lands && j.job.lands.profileId === pBank.id && j.job.pin && j.job.pin.profileId === pBank.id && j.job.lease === null && j.job.label === 'job daily reconcile', 'F5: a job\'s status BEFORE any page verb names the profile its next verb lands on (Bank — the owner\'s pin), the owner\'s pin and "no window yet" — it answered its bare handle\'s empty set ("no profile attached / pin: none")', j.job || j); }
   const r1 = await call('/api/agent/browser/resolve', 'jbt_aaaa', { argv: ['open', 'https://bank.test'] });
   const H = handleOf('jb-0000aaaa');
   ok(r1.status === 200 && r1.j && r1.j.ok && r1.j.job === true && r1.j.kind === 'attachment', 'a jbt_ resolve is ADMITTED (200, kind attachment, job:true) — it was 401 "missing session token" before', r1);
@@ -268,6 +276,14 @@ console.log('— ④ the real routes + keeper: a job gets its own lease + window
   const lw = (bk) => { const l = B.findLease(k._reg().leases, pBank.id, bk); return l ? l.windowId : undefined; };
   { const rOwner = await call('/api/agent/browser/resolve', 'vsst_owner', { argv: ['open', 'https://bank.test/home'] }); ok(rOwner.status === 200 && leasesOf(KA).includes(pBank.id), 'the owner conversation still resolves to Bank, its own lease beside the job\'s', rOwner); }
   ok(lw(H) !== undefined && lw(KA) !== undefined && String(lw(H)) !== String(lw(KA)), `ITS OWN WINDOW: the job's lease and the owner's hold different windows (${lw(H)} vs ${lw(KA)})`);
+  const winKA = lw(KA);
+  { const out = await cliRun(['status'], { VIBESPACE_JOB_TOKEN: 'jbt_aaaa' });
+    ok(/this is Background Work job daily reconcile \(jb-0000aaaa\)/.test(out) && /its page verbs land on Bank \(/.test(out) && /its window: ready/.test(out) && /the conversation's pin: Bank/.test(out) && !/no profile attached|pin: none/.test(out), 'F5: the REAL CLI\'s `status` inside the job prints the job\'s binding — lands on Bank, its window live, the conversation\'s pin — never "no profile attached / pin: none"', out); }
+  // accept-fixes-jobs F10: the live view's browsers row names the job's window by the JOB's name (the route's own answer → the strip's list)
+  { const S = require('../src/browser-stream.js');
+    const rs = await fetch(base + '/api/browser/session/w-owner'); const j = await rs.json();
+    const row = rs.status === 200 ? S.browserListFor(j).find((x) => x.ref === H) : null;
+    ok(j.jobNames && j.jobNames[H] === 'daily reconcile' && row && row.helper && row.helper.job === true && row.helper.name === 'daily reconcile', 'F10: the browsers row of the job\'s window is the JOB by its name ("daily reconcile", job) — it read a bare "Helper 1" (the attachment set dropped the job tag, so the route named nothing)', { status: rs.status, jobNames: j.jobNames, helper: row && row.helper }); }
   // verify r1 (MED): a PENDING FORK carrying the owner's conversation id, first in the live set, with its own browser key and
   // no pin — before the fix the job was judged as the FORK (its handle minted under bk-f0f0f0f0, refused job_no_profile)
   { const fork = { claudeSessionId: 'conv-userW-1', _browserKey: 'bk-f0f0f0f0', _forkRequested: true, _forkSourceId: 'conv-userW-1', agentToken: 'vsst_fork', name: 'fork-pending' };
@@ -300,17 +316,55 @@ console.log('— ④ the real routes + keeper: a job gets its own lease + window
   const r3 = await call('/api/agent/browser/resolve', 'jbt_aaaa', { argv: ['snapshot'] });
   ok(r3.status === 200 && r3.j && r3.j.ok, '…and it still resolves (the owner\'s recorded key + its pin) — it keeps browsing until the job ends', r3);
   // the job's end: finalize releases (what onRunEnded calls), the evidence rule releases what a missed finalize left
+  const winH = lw(H), tabsH = windowTabs(winH), tabsKA = windowTabs(winKA);
   jobs.get('jb-0000aaaa').state = 'done';
   const released = k.releaseJob('jb-0000aaaa', 'the job run ended');
+  // accept-fixes-jobs F11 (the acceptance of 2.369.202: after `vibespace-job stop` the job's window stayed open in the shared profile)
+  ok(tabsH.length > 0 && await until(() => !model.windows.has(winH)) && tabsH.every((t) => model.targets.get(t).state === 'closed') && tabsKA.length > 0 && tabsKA.every((t) => model.targets.get(t).state !== 'closed'), `F11: AT FINALIZE the job's WINDOW closes (window ${winH}: ${tabsH.length} tab(s) closed over CDP) — the owner's page in its own window is untouched; the window stayed open before`, { winH, tabsH, open: windowTabs(winH), tabsKA });
+  ok(!Object.values(k._reg().leftTabs || {}).some((m) => m && m[H]), 'F11: no "left tab" is kept for the released job handle (a job never comes back for its page)', k._reg().leftTabs);
   ok(released.includes(H) && !leasesOf(H).length && !k._reg().children[H], 'AT FINALIZE the job\'s lease and handle are gone (its window closes with the lease)', { released, leases: leasesOf(H) });
   await call('/api/agent/browser/resolve', 'jbt_bbbb', { argv: ['snapshot'] });
   const H2 = handleOf('jb-0000bbbb');
+  const winH2 = lw(H2), tabsH2 = windowTabs(winH2);
   jobs.get('jb-0000bbbb').state = 'failed';
   k.reconcile({ graceMs: 120000 });
+  ok(tabsH2.length > 0 && await until(() => !model.windows.has(winH2)), `F11: THE SWEEP closes the window too (a job that ended without its finalize: window ${winH2}, ${tabsH2.length} tab(s))`, { winH2, open: windowTabs(winH2) });
   ok(H2 && !k._reg().children[H2] && !leasesOf(H2).length, 'THE SWEEP: a job that ended without its finalize hook is released at the next reconcile (evidence: not running)', { H2, children: Object.keys(k._reg().children) });
   ok(jl.some((x) => /job jb-0000aaaa uses the conversation's browser as bk-00000a01\.\d+/.test(x)) && jl.some((x) => /job handle released \(the job run ended\)/.test(x)), 'the journal names the job by its ID at the mint and the release (never its name)', jl.filter((x) => /job/.test(x)));
 }
 
+
+// ── ⑥ accept-fixes-jobs F6 + F11's engine seam: a REAL jobs engine runs the REAL CLI ──
+console.log('— ⑥ a job\'s own working directory is a write root of its browser commands (the words name the job); every run end calls the release seam');
+{
+  const { JobManager } = require('../src/jobs.js');
+  const { scratch } = await import('./scratch.mjs');
+  // the jobs' OWN temp dir (TMPDIR) is not the scratch root: the job's cwd (D/work) is then writable ONLY as the job's directory
+  const D = scratch('jbrw-f6'); const WD = path.join(D, 'work'), TMP = path.join(D, 'tmp'); for (const d of [path.join(D, 'bin'), WD, TMP]) fs.mkdirSync(d, { recursive: true });
+  process.on('exit', () => { try { fs.rmSync(D, { recursive: true, force: true }); } catch { } });
+  fs.copyFileSync(path.join(REPO, 'data/bin/job-wrapper.js'), path.join(D, 'bin', 'job-wrapper.js'));
+  const ended = [];
+  const jm = new JobManager({ dataDir: D, broadcast() { }, notifyUser() { }, log() { }, apiBase: 'http://127.0.0.1:9', onRunEnded: (job) => ended.push(job.id) });
+  jm.init();
+  const caller = { conversationId: 'conv-T', sessionId: 'sess-T', sessionCreatedAt: 1, groups: new Set(['T-g']) };
+  const owner = { conversation: { backend: 'claude', id: 'conv-T' }, sessionId: 'sess-T', sessionCreatedAt: 1, createdBy: 'agent', groupsSnapshot: ['T-g'] };
+  const CLI = path.join(REPO, 'data/bin/vibespace-browser');
+  const until = async (fn, ms = 30000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await fn()) return true; await new Promise((r) => setTimeout(r, 200)); } return false; };
+  const runJob = async (name, argv, cwd) => { const r = jm.create({ kind: 'task', name, cmd: { argv, env: { TMPDIR: TMP }, ...(cwd ? { cwd } : {}) }, owner }, caller); const j = jm.jobs.get(r.job.id); await until(() => ['done', 'failed', 'interrupted'].includes(j.state)); let log = ''; try { log = fs.readFileSync(j.runs[j.runs.length - 1].log, 'utf8'); } catch { } return { j, log }; };
+  const inWd = await runJob('shot-in-wd', [process.execPath, CLI, 'screenshot', path.join(WD, 'shot.png')], WD);
+  ok(!/write_path_refused/.test(inWd.log) && /127\.0\.0\.1:9|ECONNREFUSED|fetch failed|unreachable|not answer/i.test(inWd.log), 'F6: inside a job, `screenshot <the job\'s cwd>/shot.png` PASSES the write fence (it reaches the server call — refused write_path_refused before: a job had no VIBESPACE_SESSION_CWD)', inWd.log.slice(0, 600));
+  const outside = await runJob('shot-outside', [process.execPath, CLI, 'screenshot', path.join(D, 'elsewhere.png')], WD);
+  ok(/write_path_refused/.test(outside.log) && /the job's working directory \(/.test(outside.log) && !/session started before|session directory/.test(outside.log), 'F6: a path OUTSIDE the job\'s cwd is still refused — the words name "the job\'s working directory", never a session restart', outside.log.slice(0, 600));
+  const noCwd = await runJob('shot-no-cwd', ['sh', '-c', `cd ${JSON.stringify(WD)} && exec ${JSON.stringify(process.execPath)} ${JSON.stringify(CLI)} screenshot ./x.png`]);
+  ok(/write_path_refused/.test(noCwd.log) && /Background Work job's working directory is not known here/.test(noCwd.log) && !/session started before this VibeSpace version|once it is restarted/.test(noCwd.log), 'F6: a job with NO directory of its own (never the server\'s cwd, never the shell\'s `cd`) is refused in the JOB\'s words — never "your session is too old, restart it"', noCwd.log.slice(0, 600));
+  // F11's engine seam: an exit 0, a crash (exit 3) and a stop each call onRunEnded once (server.js wires it to the keeper's releaseJob)
+  const crash = await runJob('crash', ['sh', '-c', 'exit 3']);
+  const st = jm.create({ kind: 'task', name: 'stopped', cmd: { argv: ['sh', '-c', 'sleep 30'] }, owner }, caller); const sj = jm.jobs.get(st.job.id);
+  await until(() => sj.state === 'up' && sj.proc && sj.proc.pid); jm.stop(sj); await until(() => ['interrupted', 'failed'].includes(sj.state));
+  const once = (id) => ended.filter((x) => x === id).length === 1;
+  ok(once(inWd.j.id) && once(crash.j.id) && crash.j.state === 'failed' && once(sj.id) && sj.state === 'interrupted', 'F11: every run end — exit, crash (exit 3), stop (interrupted) — calls the release seam exactly once', { ended, crash: crash.j.state, stopped: sj.state });
+  try { jm.shutdown(); } catch { }
+}
 
 // ── ⑤ wiring pins + the trace names the job by ID ──
 console.log('— ⑤ the wiring: the CLI reads the job token, a run\'s end releases, the keeper knows which jobs run, the trace stores the job id');

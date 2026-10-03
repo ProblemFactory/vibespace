@@ -222,6 +222,42 @@ function userTabVerdict({ act = 'switch', owner = 'orphan', human = false, drivi
 }
 /** The host a tab's badge names (its initial + hue come from the channel avatar's rule on the client), '' for none. */
 function hostOf(url) { try { const u = new URL(str(url)); return u.protocol === 'http:' || u.protocol === 'https:' ? u.hostname.replace(/^www\./, '') : ''; } catch { return ''; } }
+/** accept-fixes-strip F7 — MEASURED on the real agent-browser 0.38.1 (a scratch profile, pages with a real <title>,
+ *  scripts/fixtures/agent-browser-0.38.1/tab-list.json): `tab list --json` AND the stream server's `tabs` record keep the
+ *  title Chrome gave the tab WHILE IT LOADED — the address without its scheme ("127.0.0.1:38001/wiki/Tide") — long after
+ *  the page named itself; CDP's Target.getTargets says "Tide - Wikipedia" at the same moment. A title that only repeats the
+ *  address is no title. */
+function isUrlTitle(title, url) {
+  const t = str(title).trim();
+  if (!t) return true;
+  const u = str(url).trim();
+  if (!u) return false;
+  // the 2.369.204 integration (test-peer-parsers): the trailing-slash strip is a loop — `/\/+$/` re-scanned every slash run
+  // from each start (a page-chosen url `////…x`: 64 KB took 3.9 s, ×3.3 per doubling)
+  const bare = (v) => { v = v.replace(/^[a-z][a-z0-9+.-]*:\/\//i, ''); let e = v.length; while (e > 0 && v.charCodeAt(e - 1) === 47) e--; return v.slice(0, e).toLowerCase(); };
+  const a = bare(t), b = bare(u);
+  return a === b || a === b.replace(/^www\./, '') || a === bare(u.replace(/[?#].*$/, ''));
+}
+/** The tab's PAGE title: CDP's (fresh — Target.getTargets), else the binary's, never an address dressed as a title ('' —
+ *  the chip then says the host). Both are page-chosen text: bounded like the rows (300). */
+function pageTitleOf(row, cdpTitle) {
+  const url = str(row && row.url);
+  for (const v of [cdpTitle, row && row.title]) { const t = str(v).trim().slice(0, 300); if (t && !isUrlTitle(t, url)) return t; }
+  return '';
+}
+/** The page titles a CDP read gives (`{targetId: title}`), bounded — the keeper's answer the bridge sends the view. */
+function titlesOf(targets) {
+  const out = {};
+  for (const x of pageRows(targets)) if (x.title) out[x.targetId] = x.title;
+  return out;
+}
+/** The page targets WITH their title and url (pageTargets keeps only the ownership facts), bounded like the rows. */
+function pageRows(targets) {
+  return (Array.isArray(targets) ? targets : []).filter((x) => isObj(x) && str(x.type || 'page') === 'page' && isTargetId(x.targetId))
+    .map((x) => ({ targetId: idKey(x.targetId), title: str(x.title).trim().slice(0, 300), url: str(x.url).slice(0, 2048) }));
+}
+/** F8: an unowned tab with nothing on it (a session's spare blank tab) is not a chip — nothing to watch, nothing to say. */
+const BLANK_URL_RE = /^(?:about:blank|chrome:\/\/(?:newtab|new-tab-page)\/?|)$/i;
 /** A title for the chip: ≤ 24 characters (the full title rides the tooltip). */
 function chipTitle(title, url) {
   // verify r1 F4 (bound before parse): a page chose the title — cut to TITLE_CHIP × 4 code units BEFORE the code-point walk
@@ -230,21 +266,36 @@ function chipTitle(title, url) {
   const g = Array.from(s);
   return g.length > TITLE_CHIP ? g.slice(0, TITLE_CHIP - 1).join('') + '…' : s;
 }
+/** accept-fixes F9: chips that cut to the SAME words keep their head AND tail (`en.wikipe…/wiki/Tide_pool`) — what tells
+ *  two pages of one site apart is usually the end of the title or address. Bounded like chipTitle (a page chose both). */
+function chipTitleTail(title, url) {
+  const full = str(title).trim() || str(url).trim().replace(/^[a-z][a-z0-9+.-]*:\/\//i, '') || '—';
+  const head = Array.from(full.slice(0, TITLE_CHIP * 4)), tail = Array.from(full.slice(-TITLE_CHIP * 4));
+  if (full.length <= TITLE_CHIP * 4 && head.length <= TITLE_CHIP) return full;
+  return head.slice(0, 9).join('') + '…' + tail.slice(-(TITLE_CHIP - 10)).join('');
+}
 /**
  * THE TAB ROW's model — the client's ONE reader (no control is drawn that the verdict refuses). `tabs` = the stream's
  * `tabs` record rows; `owners` = {targetId: OWNER_WORDS} (the bridge's `tab-owners`; a tab it has not judged yet is
  * `orphan` — nothing is drawn on it); `viewer` = {human}; `driving`; `mediated`; `adoptable` (his window: the orphans
  * are his to take). → {rows:[…], counts, anyAgent}
  */
-function tabRowModel({ tabs = [], owners = {}, viewer = {}, driving = false, mediated = false, adoptable = false } = {}, tIn) {
+function tabRowModel({ tabs = [], owners = {}, viewer = {}, driving = false, mediated = false, adoptable = false, titles = {}, names = {} } = {}, tIn) {
   const t = tOf(tIn);
   const human = !!(viewer && viewer.human);
-  const list = (Array.isArray(tabs) ? tabs : []).filter((x) => isObj(x) && isTargetId(x.targetId));
   const ow = isObj(owners) ? owners : {};
   const wordOf = (x) => { const w = str(ow[idKey(x.targetId)] || ow[str(x.targetId)]); return OWNER_WORDS.includes(w) ? w : 'orphan'; };
+  const tt = isObj(titles) ? titles : {}, nm = isObj(names) ? names : {};
+  // accept-fixes-strip F7: the PAGE's title (CDP's, else the binary's — never an address dressed as one); F8: a blank
+  // tab nobody holds is not drawn (the tab on show always is)
+  const list = (Array.isArray(tabs) ? tabs : []).filter((x) => isObj(x) && isTargetId(x.targetId))
+    .map((x) => ({ ...x, title: pageTitleOf(x, tt[idKey(x.targetId)]) }))
+    .filter((x) => x.active || wordOf(x) !== 'orphan' || !BLANK_URL_RE.test(str(x.url).trim()));
   const counts = { agent: 0, you: 0, other: 0, orphan: 0 };
   for (const x of list) counts[wordOf(x)]++;
-  const rows = list.map((x) => {
+  const plain = list.map((x) => chipTitle(x.title, x.url));
+  const twin = new Set(plain.filter((v, i) => plain.indexOf(v) !== i)); // F9: two chips that would read the same
+  const rows = list.map((x, i) => {
     const owner = wordOf(x);
     const facts = { owner, human, driving, mediated, counts, active: !!x.active, adoptable };
     const sw = userTabVerdict({ act: 'switch', ...facts }, tIn);
@@ -253,8 +304,11 @@ function tabRowModel({ tabs = [], owners = {}, viewer = {}, driving = false, med
     const url = str(x.url).slice(0, 2048);
     const full = str(x.title).trim().slice(0, 300) || url;
     return {
-      targetId: idKey(x.targetId), tabId: str(x.tabId), title: chipTitle(x.title, x.url), tip: full === url ? full : `${full} — ${url}`, url, host: hostOf(x.url), active: !!x.active, owner,
-      mark: ownerMarkText(owner, { human }, tIn), markTip: ownerTipText(owner, { human }, tIn),
+      targetId: idKey(x.targetId), tabId: str(x.tabId), title: twin.has(plain[i]) ? chipTitleTail(x.title, x.url) : plain[i], tip: full === url ? full : `${full} — ${url}`, url, host: hostOf(x.url), active: !!x.active, owner,
+      mark: ownerMarkText(owner, { human, name: nameOfHolder(nm[idKey(x.targetId)]) }, tIn), markTip: ownerTipText(owner, { human, name: nameOfHolder(nm[idKey(x.targetId)]) }, tIn),
+      // accept-fixes F4: the tab the agent is WORKING ON says so on its chip (never only a border) — apart from the one
+      // this view watches (the dashed chip)
+      here: owner === 'agent' && !!x.active, hereText: owner === 'agent' && x.active ? t('The agent is here') : '',
       canSwitch: sw.ok && !sw.noop, canClose: cl.ok,
       switchTip: sw.ok && !sw.noop ? t('Switch to this tab') : '', closeTip: cl.ok ? t('Close tab') : '',
     };
@@ -263,20 +317,22 @@ function tabRowModel({ tabs = [], owners = {}, viewer = {}, driving = false, med
 }
 
 // ── THE WORDS (en; the client passes its t() — every key has zh + ja rows) ─────────────────────────────────────────
+/** F8: another holder's REAL name (the conversation's, the job's) — page-free text, still bounded (≤ 24 on the chip). */
+function nameOfHolder(v) { const n = str(v && typeof v === 'object' ? v.name : v).replace(/\s+/g, ' ').trim(); if (!n) return ''; const g = Array.from(n.slice(0, TITLE_CHIP * 4)); return g.length > TITLE_CHIP ? g.slice(0, TITLE_CHIP - 1).join('') + '…' : n; }
 /** The chip's short owner mark. */
-function ownerMarkText(owner, { human = false } = {}, tIn) {
+function ownerMarkText(owner, { human = false, name = '' } = {}, tIn) {
   const t = tOf(tIn);
   if (owner === 'agent') return t('The agent’s');
   if (owner === 'you') return t('Yours');
-  if (owner === 'other') return t('Another conversation’s');
+  if (owner === 'other') return name ? str(name) : t('Another conversation’s');
   return human ? t('Nobody’s') : t('Nobody’s');
 }
 /** The mark's tooltip: the fact and, where it has one, the way to act. */
-function ownerTipText(owner, { human = false } = {}, tIn) {
+function ownerTipText(owner, { human = false, name = '' } = {}, tIn) {
   const t = tOf(tIn);
   if (owner === 'agent') return t('The agent’s tab — take over to switch or close it; the agent is told at the handback');
   if (owner === 'you') return human ? t('Your tab') : t('Your own tab (Browse yourself)');
-  if (owner === 'other') return t('Another conversation’s — open its live view to use it');
+  if (owner === 'other') return name ? t('{name}’s tab — watch it here (view only); open its own live view to drive it', { name }) : t('Another conversation’s — open its live view to use it');
   return human ? t('Nobody’s tab') : t('Nobody’s tab — open Browse yourself on this profile to take it');
 }
 /** Every refusal's words. `f.agent` = the agent-facing sentence (never t()-wrapped by the server). */
@@ -372,6 +428,7 @@ module.exports = {
   pageTargets, cleanRoots, addRoot, tabOwners, ownSetOf, ownerWord,
   rebindPick, reboundNoteText, // lane profile-lock-roll L2: the rebind after a replaced browser
   parseTabArgv, resolveTabRef, newTabUrlVerdict, tabRow, agentTabView, agentTabVerdict,
-  userTabVerdict, hostOf, chipTitle, tabRowModel,
+  userTabVerdict, hostOf, chipTitle, chipTitleTail, tabRowModel,
+  isUrlTitle, pageTitleOf, titlesOf, pageRows, nameOfHolder, BLANK_URL_RE, // accept-fixes-strip F7 (the page's own title) + F8 (whose, by name)
   ownerMarkText, ownerTipText, tabRefusalText, userActsSentence, noteUserActIn, agentTabLines,
 };

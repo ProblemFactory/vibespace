@@ -798,7 +798,7 @@ console.log('controls (patched copies)');
   // (h) the audit cut back to 120 chars (the pre-verify shape) ⇒ the whole-command leg goes red
   {
     const msrcH = fs.readFileSync(path.join(REPO, 'src/exit-proxy.js'), 'utf8');
-    const msH = msrcH.replace("if (typeof rec.cmd === 'string') rec.cmd = rec.cmd.replace(/[\\u0000-\\u001f\\u007f]/g, ' ').slice(0, E.CMD_MAX);", "if (typeof rec.cmd === 'string') rec.cmd = rec.cmd.replace(/[\\u0000-\\u001f\\u007f]/g, ' ').slice(0, 120);");
+    const msH = msrcH.replace("if (typeof rec.cmd === 'string') rec.cmd = E.cleanLines(rec.cmd, E.CMD_MAX);", "if (typeof rec.cmd === 'string') rec.cmd = E.cleanLines(rec.cmd, 120);");   // lane exit-see-whole: the audit line keeps lines now (E.cleanLines)
     ok(msH !== msrcH, '(h) the patch applies');
     const MH = M.load('src/exit-proxy.js', msH, 'audit120').ExitProxyManager;
     const wH = world({ Mgr: MH });

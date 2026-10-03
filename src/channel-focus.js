@@ -140,7 +140,8 @@ function statusTag(row, now = Date.now()) {
   }
   if (held) return { code: 'held', n: heldPending(touch, now, c.watchers) };
   // lane lark-search-poll (owner decision 1): a single chat somebody wrote in and the owner has not read
-  if (c.kind === 'dm' && num(c.unread) > 0 && within(c.lastAt, now, FOCUS_WINDOW_MS)) return { code: 'direct', n: num(c.unread) };
+  // design 012 (Slack S1): an APP's DM (a bot, an integration) is never "somebody wrote to you"
+  if (c.kind === 'dm' && !c.app && num(c.unread) > 0 && within(c.lastAt, now, FOCUS_WINDOW_MS)) return { code: 'direct', n: num(c.unread) };
   if (touch && within(touch.selfAt, now, FOCUS_WINDOW_MS)) return { code: 'replied', at: num(touch.selfAt) };
   return null;
 }
@@ -221,7 +222,7 @@ function candidateOf(en, ob, now = Date.now()) {
   // read / new-since-read — ANY agent read inside the window (touchView keeps the newest)
   for (const r of Array.isArray(en.agentReads) ? en.agentReads : []) if (r && within(r.at, now, FOCUS_WINDOW_MS)) return true;
   // direct — a single chat with unread messages, the newest inside the window
-  if (en.kind === 'dm' && num(en.unread) > 0 && within(en.lastAt, now, FOCUS_WINDOW_MS)) return true;
+  if (en.kind === 'dm' && !en.app && num(en.unread) > 0 && within(en.lastAt, now, FOCUS_WINDOW_MS)) return true;
   // replied — the owner's own message (a record of theirs, or a send from here)
   return within(en.selfAt, now, FOCUS_WINDOW_MS) || !!(ob && within(ob.ownSentAt, now, FOCUS_WINDOW_MS));
 }

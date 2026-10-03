@@ -1215,7 +1215,7 @@ console.log('— §6c every kill door is declared: an actor marked before the ki
     'src/server/bridge-watch.js': [2, "attach: shutdown's endAttachPtys + orphaned dtach -a clients (alias)"],
     'src/pty-duck.js': [1, "attach: a device handle's pty duck"],
     'src/server/boot-restore.js': [1, 'unregistered: a duplicate husk retired at boot before adoption'],
-    'src/agentd/agentd.js': [5, "device: the daemon's own pipe / pty sessions"],
+    'src/agentd/agentd.js': [6, "device: the daemon's own pipe / pty sessions + the posixShells probe's 3 s stop of a shell that never answered (windows-device-fs r2)"],
     'src/agentd/attach-cli.js': [1, 'device: an attach client'],
     'src/agentd/client.js': [1, 'device: an attach client'],
     'src/dial-session-bridge.js': [4, 'device: dial bridge handles'],
@@ -1238,6 +1238,8 @@ console.log('— §6c every kill door is declared: an actor marked before the ki
     'src/codex-reset-helper.js': [2, 'not a conversation: the bounded codex app-server child of a reset-credit press (lane reset-path), its own process group, ended at its deadline'],
     'src/vnc.js': [2, 'not a conversation: VNC (lane desktop-apps-safety B-956d added the held-display retry\'s end — composed at the 2.369.202 integration)'],
     'src/window-targets.js': [2, 'not a conversation: X helpers'],
+    // the 2.369.204 integration — usage-index-shadow (on the .202 base) re-raises the server's OWN exit: at process exit the index worker is joined; past its 2 s bound the server ends itself (SIGTERM, then SIGKILL if ignored) — never a conversation
+    'src/server/usage-index.js': [2, "not a conversation: the server's own exit, re-raised past the index worker's 2 s join bound (usage-index-shadow)"],
   };
   // the actor pins: the mark is set BEFORE the kill it names (the teardown reads it; the kill case deletes the session late)
   const ACTOR_PINS = [

@@ -546,6 +546,91 @@ console.log('§8 the link dies MID-OP, and a long run past its deadline (C2 veri
   dmPre6.stop(); killDaemon(home6);
   for (const r of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 3 })) ok(r.pass, '§tree ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 }
+// ── design 014 D1 (lane desktop-vnc-native): a Windows / macOS machine's WHOLE DESKTOP over a REAL agent. The daemon
+// is this Linux box's; a handle that REPORTS darwin / win32 (its status only — every op is the real daemon's) stands in
+// for the owner's machines, and the machine's "5900" is a FAKE RFB server on this host. Needs no xpra. ──
+console.log('§D014 the whole desktop over a real agent: the probe through its tcp-connect, Run on its desktop through its run-cmd, the TightVNC install slot');
+{
+  const net = require('net');
+  const A = require(path.join(REPO, 'src/desktop-apps.js'));
+  const home7 = scratchHome('dsremote-home7', fs, ['.vibespace']);
+  process.on('exit', () => { killDaemon(home7); try { fs.rmSync(home7, { recursive: true, force: true }); } catch { } });
+  const real = deviceOn(home7);
+  await real.connect();
+  const as = (platform, over = {}) => new Proxy(real, { get(t, k) { if (k === 'status') return () => { const s = t.status(); return { ...s, info: s.info ? { ...s.info, platform } : s.info }; }; if (k in over) return over[k]; const v = t[k]; return typeof v === 'function' ? v.bind(t) : v; } });
+  // the machine's own VNC server: Apple's greeting, ARD only (a Mac with Screen Sharing on, no VNC-password option)
+  const vncConns = [];
+  const fakeMac = net.createServer((s) => { vncConns.push(s); s.on('error', () => { }); s.write('RFB 003.889\n'); s.once('data', () => s.write(Buffer.from([1, 30]))); });
+  await new Promise((r) => fakeMac.listen(0, '127.0.0.1', r));
+  const macPort = fakeMac.address().port;
+  const logs = [];
+  const quiet = { log: (m) => logs.push(String(m)), warn: (m) => logs.push(String(m)) };
+  const mk = (map, opts = {}) => ACC.create({ hosts: { ...hostsFor(map), list: () => Object.keys(map).map((id) => ({ id, name: id, transport: 'dial', online: true })), linkState: () => 'online', connectedDevice: (h) => map[h] || null }, install: false, log: quiet, vncPort: macPort, probeMs: 3000, ...opts });
+  const accR = mk({ 'mac-r': as('darwin'), 'win-r': as('win32'), 'lin-r': real });
+  const rows = await accR.machines();
+  const macRow = rows.find((r) => r.hostId === 'mac-r'), linRow = rows.find((r) => r.hostId === 'lin-r');
+  const brief = (x) => x && { code: x.code, auth: x.auth, vnc: x.vnc, platform: x.platform };
+  ok(macRow && macRow.code === 'desktop_ready' && macRow.auth === 'ard' && macRow.vnc.server === '003.889' && linRow && linRow.code === 'ready' && !('vnc' in linRow), 'the probe rides the REAL agent\'s tcp-connect: the Mac row is desktop_ready (ARD), the Linux row unchanged', { mac: brief(macRow), lin: brief(linRow) });
+  ok(vncConns.length === 2 && await until(() => vncConns.every((s) => s.destroyed || s.readableEnded), 3000), 'ONE probe connection per Windows / macOS row (the Mac, the Windows box — the Linux row none), each closed before any sign-in', vncConns.length);
+  const accDead = mk({ 'mac-r': as('darwin') }, { vncPort: 9 });
+  let dead = null; try { await accDead.openMachineDesktop('mac-r'); } catch (e) { dead = e; }
+  ok(dead && dead.code === 'no_vnc' && dead.vnc.code === 'no_listener', 'nothing on the machine\'s port ⇒ no_vnc / no_listener through the real agent', dead && dead.vnc);
+  ok(JSON.stringify(real.status().info.capabilities) === JSON.stringify(['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo', 'session-events', 'proc-list', 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'desktop-serve', 'dial-status', 'run-shell', 'app-install', 'fs-portable']), 'no new device op: the agent\'s hello names the capabilities it named at ed1e0b83 + the two this release\'s other lanes added (remote-profile-start browser-remove, windows-device-fs fs-portable — the 2.369.204 integration); the rung rides tcp-connect + run-cmd', real.status().info.capabilities);
+
+  // RUN ON ITS DESKTOP — the darwin argv runs for real (the agent's run-cmd; /bin/sh exists here too)
+  const out = path.join(work, 'd014-run.txt');
+  const line = `printf a > '${out}' && sleep 2 && printf b >> '${out}'`;
+  const t0 = Date.now();
+  const r = await accR.runOnDesktop('mac-r', line);
+  const took = Date.now() - t0;
+  ok(r.ok && r.shown === line && took < 1800, `the answer comes at once (${took} ms — the command is DETACHED: its sleep 2 still runs) and shows the command as itself`, { r, took });
+  ok(await until(() => fs.existsSync(out) && fs.readFileSync(out, 'utf8') === 'a', 1500), 'the first half ran…');
+  ok(await until(() => fs.existsSync(out) && fs.readFileSync(out, 'utf8') === 'ab', 5000), '…and the `&&` half after it: the line ran WHOLE, as ONE command');
+  const hid = path.join(work, 'd014-hidden.txt');
+  let e1 = null; try { await accR.runOnDesktop('mac-r', `touch '${hid}'${String.fromCodePoint(0x202e)}`); } catch (e) { e1 = e; }
+  let e2 = null; try { await accR.runOnDesktop('mac-r', `touch '${hid}'\ntouch '${hid}2'`); } catch (e) { e2 = e; }
+  await sleep(300);
+  ok(e1 && e1.code === 'hidden_chars' && /U\+202E/.test(e1.message) && e2 && e2.code === 'multi_line' && !fs.existsSync(hid) && !fs.existsSync(hid + '2'), 'a hidden character / a line break is refused BY NAME before anything runs (nothing was created)', [e1 && e1.code, e2 && e2.code]);
+  let e3 = null; try { await accR.runOnDesktop('lin-r', 'xterm'); } catch (e) { e3 = e; }
+  ok(e3 && e3.code === 'not_desktop_machine', 'a Linux machine is refused not_desktop_machine (its apps keep their own windows)', e3 && e3.code);
+  ok(!logs.some((l) => l.includes('printf a')), 'the hub log says a command ran (its length), never its text', logs.filter((l) => /started on/.test(l)));
+  // verify r1 F4: audited like an exit run — ONE line of the exit proxy's audit per run / refused line, a row of the owner's
+  // "Commands run on {machine}" list (exit-reach runRow), no conversation key (an agent's `vibespace-exit runs` never lists it)
+  { const aud = []; const accA = mk({ 'mac-r': as('darwin') }, { audit: (l) => aud.push(l) }); const ER = require(path.join(REPO, 'src/exit-reach.js'));
+    const okLine = `printf c > '${path.join(work, 'd014-audit.txt')}'`;
+    await accA.runOnDesktop('mac-r', okLine); let ref = null; try { await accA.runOnDesktop('mac-r', `echo a${String.fromCodePoint(0xe0041)}`); } catch (e) { ref = e; }
+    const rows = aud.map((l) => ER.runRow({ ...l, at: 1, id: 'x' }));
+    ok(aud.length === 2 && aud[0].cmd === okLine && aud[0].by === 'user' && aud[0].ok === true && aud[0].code === 0 && aud[0].sessionKey === null && rows[0] && rows[0].outcome === 'ran' && ref && ref.code === 'hidden_chars' && aud[1].refusal === 'hidden_chars' && rows[1] && rows[1].outcome === 'refused', 'every run and every refused line is ONE exit-audit line, a row of the owner\'s Commands list (verify r1 F4)', aud);
+    const srvSrc = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
+    ok(/desktop-access\.js'\)\.create\(\{[^\n]*audit: \(line\) => \{ try \{ return exitProxy\.audit\(line\);/.test(srvSrc), 'server.js hands the access layer the exit proxy\'s ONE audit writer'); }
+
+  // THE TIGHTVNC INSTALL: the plan from the agent's hello, the frozen flags, the ONE slot, no_admin, done = the probe
+  const plan = await accR.installPlan('win-r', 'tightvnc');
+  const starter = Buffer.from(plan.plan.argv[plan.plan.argv.length - 1], 'base64').toString('utf16le');
+  const inner = Buffer.from(/'-EncodedCommand','([^']+)'/.exec(starter)[1], 'base64').toString('utf16le');
+  ok(plan.plan.ok && plan.plan.flags.join(' ') === A.TIGHTVNC.flags.join(' ') && inner.includes(`/qn /norestart ${A.TIGHTVNC.flags.join(' ')} VALUE_OF_PASSWORD="' + $p + '"`) && inner === plan.plan.commands.join('\n') && plan.digest, 'the plan names the frozen flags, and what Windows runs elevated IS the shown commands');
+  let macPlan = null; try { macPlan = (await accR.installPlan('mac-r', 'tightvnc')).plan; } catch (e) { macPlan = { code: e.code }; }
+  ok(macPlan && macPlan.code === 'not_windows', 'a Mac is planned not_windows (it switches Screen Sharing on instead)', macPlan);
+  let release = null; const runs = [];
+  const accI = mk({ 'win-r': as('win32', { runStream: (cmd, args, o) => { runs.push([cmd, args.length]); o.onData?.(Buffer.from('Windows granted no administrator rights: The operation was canceled by the user.\n')); return new Promise((res) => { release = res; }); } }) });
+  const first = accI.installPackage('win-r', { what: 'tightvnc', expectDigest: plan.digest });
+  await until(() => !!release, 3000);
+  let busy = null; try { await accI.installPackage('win-r', { what: 'tightvnc' }); } catch (e) { busy = e; }
+  ok(busy && busy.code === 'busy' && accI.installBusy('win-r'), 'ONE install per machine: a second press while Windows waits for its Yes is busy', busy && busy.code);
+  release({ code: A.TIGHTVNC_NO_ADMIN_EXIT });
+  let na = null; try { await first; } catch (e) { na = e; }
+  ok(na && na.code === 'no_admin' && na.plan && na.plan.commands && !accI.installBusy('win-r') && runs.length === 1 && runs[0][0] === 'powershell.exe', 'nobody clicked Yes there ⇒ no_admin by name, the plan handed back (its commands for an administrator PowerShell), the slot free', na && na.code);
+  let pc = null; try { await accI.installPackage('win-r', { what: 'tightvnc', expectDigest: 'not-the-shown-plan' }); } catch (e) { pc = e; }
+  ok(pc && pc.code === 'plan_changed' && runs.length === 1, 'a press naming another plan than the one shown ⇒ plan_changed, nothing run', pc && pc.code);
+  const accOk = mk({ 'win-r': as('win32', { runStream: async () => ({ code: 0 }) }) });
+  const done = await accOk.installPackage('win-r', { what: 'tightvnc', expectDigest: plan.digest });
+  ok(done.ok && done.after && done.after.ok && done.after.auth === 'ard', 'the install exits 0 ⇒ done is judged by the 5900 probe afterwards (through the real agent)', done.after);
+  const everything = JSON.stringify(logs);
+  ok(!/VALUE_OF_PASSWORD="?[^"' ]/.test(everything) && logs.some((l) => /Windows asks for administrator rights on that machine's screen/.test(l)), 'the hub log names the install and the UAC step — no password anywhere (it is typed on that machine)');
+  for (const s of vncConns) s.destroy();
+  fakeMac.close(); accR.shutdown(); accDead.shutdown(); accI.shutdown(); accOk.shutdown();
+  real.stop(); killDaemon(home7);
+}
 process.env.HOME = realHome;
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed, ${skipped} skipped)` : `\nALL PASS (${pass}${skipped ? `, ${skipped} skipped` : ''})`);

@@ -17,6 +17,9 @@
  *     dispatch-ledger.json           atomic JSON — THE DISPATCH LEDGER (lane worker-dispatch verify r1 ②): what each
  *                                    brief (sha256 of sender | worker | text) already did — compactAt / deliveredAt —
  *                                    so a retry after a restart replays instead of compacting and waking again
+ *     poll-stamps.json               atomic JSON — each row's poll stamps (design 011 lane 2), written at most
+ *                                    every 120 s and at close; poll-stamps.log = APPEND-ONLY, one line per stamp
+ *                                    set since that write (a kill -9 keeps every stamp), folded by the next one
  *     <file>.corrupt-<ts>            a JSON store that could not be read at boot, SET ASIDE with its
  *                                    bytes intact (r2) — never unlinked, never overwritten
  *     audit.ndjson                   APPEND-ONLY, rolled by DATE into archive/
@@ -240,6 +243,30 @@ const SWEEP_CHUNKS = 2;
 const DRIFT_SAY_MS = 10 * 60 * 1000;
 /** `_`-prefixed keys are runtime-only — never on disk (both index writers use this replacer). */
 const RUNTIME_KEYS = (k, v) => (k.startsWith('_') ? undefined : v);
+// THE POLL STAMPS LEAVE THE ROW (design 011 lane 2, 2026-10-03): a pass that brought nothing changed nothing but these
+// three instants, and stamping them into the row kept the index dirty on every poll — userW's 87 MB file rewritten whole
+// about every 2.3 s. They live in a side file (poll-stamps.json, one line per conversation) flushed at most every
+// STAMPS_FLUSH_MS and at close, and the index's serializer omits them. They must still PERSIST: a row is due at
+// `lastPollAt + cadence`, so losing them makes every conversation due at once after a restart (a long, metered re-poll
+// — the vendor's budget paces it, and the store says it). A row that still carries them (an index written before this
+// lane, or a write past the door) is read, and loses them where it is next serialized — no migration.
+// THE JOURNAL (2026-10-03, the 2.369.203 heavy run's test-channels-e2e ⑰): a stamp a kill -9 took before its 120 s write
+// read as "never polled" after the restart, and a restored window's open fetches such a row at once as the owner's —
+// ahead of discovery (drain rule 12) — so a vendor refusing that first fetch (Retry-After 20 s) held every NEW
+// conversation back for the whole wait. Each set appends ONE line to poll-stamps.log — `[key, lastPollAt, lastScanAt,
+// walkStartedAt]`, the key's whole triple (null = none): O(the change), never the index; the side file's write folds it
+// (truncated after the rename), a start replays it over the side file in order (the last line per key wins). A kill
+// keeps every stamp, as the row did; a line a kill cut short is counted and said.
+const STAMP_KEYS = Object.freeze(['lastPollAt', 'lastScanAt', 'walkStartedAt']);
+const STAMPS_FLUSH_MS = 120 * 1000;
+const NO_STAMPS = Object.freeze({});
+/** The index's replacer: RUNTIME_KEYS, and a row's `lane` without the poll stamps (the belt — `serializeChunk` heals a
+ *  row of them first; this catches one written between two serializations). */
+const INDEX_KEYS = (k, v) => {
+  if (k.startsWith('_')) return undefined;
+  if (k === 'lane' && v && typeof v === 'object' && STAMP_KEYS.some((f) => hasOwn(v, f))) { const o = { ...v }; for (const f of STAMP_KEYS) delete o[f]; return o; }
+  return v;
+};
 
 /** Atomic JSON write (tmp + rename). `_`-prefixed keys are runtime-only. */
 function writeJsonAtomic(file, obj, { mode = null } = {}) {
@@ -259,12 +286,29 @@ function writeBuffersAtomic(file, parts) {
   fs.renameSync(tmp, file);
 }
 
+/** Two lists of buffers joined with `,\n` (the chunk separator) — the same byte stream? (a whole rebuild's equal-bytes
+ *  check: chunk boundaries may move, the bytes are what is compared; no concatenated copy is made) */
+function sameJoined(a, b) {
+  const SEP = Buffer.from(',\n');
+  const flat = (l) => { const o = []; l.forEach((x, i) => { if (i) o.push(SEP); o.push(x); }); return o; };
+  const x = flat(a), y = flat(b);
+  let i = 0, j = 0, oi = 0, oj = 0;
+  for (;;) {
+    while (i < x.length && oi >= x[i].length) { i++; oi = 0; }
+    while (j < y.length && oj >= y[j].length) { j++; oj = 0; }
+    if (i >= x.length || j >= y.length) return i >= x.length && j >= y.length;
+    const n = Math.min(x[i].length - oi, y[j].length - oj);
+    if (x[i].compare(y[j], oj, oj + n, oi, oi + n) !== 0) return false;
+    oi += n; oj += n;
+  }
+}
+
 /** One row of `conversations` exactly as `JSON.stringify(ix, RUNTIME_KEYS, 1)` prints it (depth 2), or null when the
  *  whole-file write would omit it. A JSON string never holds a raw newline, so re-indenting on '\n' is exact (a string
  *  pattern, never a /g regex: same bytes, one linear pass). */
 function rowLine(key, value) {
   if (key.startsWith('_')) return null;
-  const s = JSON.stringify(value, RUNTIME_KEYS, 1);
+  const s = JSON.stringify(value, INDEX_KEYS, 1);
   return s === undefined ? null : `  ${JSON.stringify(key)}: ${s.replaceAll('\n', '\n  ')}`;
 }
 const hasOwn = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
@@ -348,6 +392,80 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   let interval = null;
   let closed = false;
   const dedup = new Map(); // `${adapterId}/${convId}` -> Set<vendorId>
+
+  // ── THE POLL STAMPS' SIDE FILE (design 011 lane 2): `{v, fields, stamps: {key: [lastPollAt, lastScanAt,
+  // walkStartedAt]}}`, memory authoritative, written at most every STAMPS_FLUSH_MS and at close; a key whose row left
+  // the index leaves with the next write; an unreadable file is set aside like every family here ──
+  const stampsFile = path.join(dir, 'poll-stamps.json');
+  const stampsLog = path.join(dir, 'poll-stamps.log');   // THE JOURNAL (above): every set since the side file's last write
+  // verify r1 (A10): a file this build cannot read as ITS shape (another `v`, the columns renamed or gone) is set aside
+  // and said like every family here — never read as "no stamps", a silent re-poll of every conversation
+  const psLoad = loadJsonFamily(stampsFile, (v) => v && typeof v === 'object' && v.v === 1 && Array.isArray(v.fields) && v.fields.includes('lastPollAt') && v.stamps && typeof v.stamps === 'object' && !Array.isArray(v.stamps), () => null);
+  const stampMap = new Map();   // key -> { lastPollAt?, lastScanAt?, walkStartedAt? } (an instant > 0, or absent)
+  let unreadStamps = 0;        // entries of a readable file that are not a row of instants — said by count below
+  if (psLoad.value) {
+    const at = psLoad.value.fields.map((f) => STAMP_KEYS.indexOf(f));
+    for (const [k, arr] of Object.entries(psLoad.value.stamps)) {
+      if (!Array.isArray(arr)) { unreadStamps++; continue; }
+      const st = {};
+      at.forEach((x, i) => { if (x >= 0 && Number(arr[i]) > 0) st[STAMP_KEYS[x]] = Number(arr[i]); });
+      if (Object.keys(st).length) stampMap.set(k, st);
+    }
+  }
+  let stampsDirty = false;
+  let stampsOwed = false;      // a row's OWN stamps were taken into the map: the side file lands before the next index write
+  let stampsTimer = null;
+  const stampStats = { writes: 0, healed: 0, lostAtLoad: 0 };
+  let journalFd = null, journalTorn = false, journalSaidAt = 0;
+  const journalStats = { replayed: 0, torn: 0, lines: 0, bytes: 0 };
+  {   // the journal replayed over the side file, in order — a kill since its last write lost no stamp
+    let text = '';
+    try { text = fs.readFileSync(stampsLog, 'utf8'); } catch { /* none: the side file is the whole truth */ }
+    if (text && !text.endsWith('\n')) journalTorn = true;   // a tail a kill cut short: the next line starts on its own
+    for (const ln of text.split('\n')) {
+      if (!ln) continue;
+      let a = null;
+      try { a = JSON.parse(ln); } catch { /* a line a kill cut short */ }
+      if (!Array.isArray(a) || a.length !== 1 + STAMP_KEYS.length || typeof a[0] !== 'string') { journalStats.torn++; continue; }
+      const st = {};
+      STAMP_KEYS.forEach((f, i) => { if (Number(a[i + 1]) > 0) st[f] = Number(a[i + 1]); });
+      if (Object.keys(st).length) stampMap.set(a[0], st); else stampMap.delete(a[0]);
+      journalStats.replayed++;
+    }
+    if (journalStats.replayed) stampsDirty = true;   // the side file's next write folds them (armed below)
+    if (journalStats.torn) warn(`[channels] poll-stamps.log: ${journalStats.torn} line(s) unreadable (a write cut short) — skipped; the conversation(s) they stamped keep their older poll time`);
+  }
+  /** Take a row's own stamps into the side map — the NEWER instant wins per key — and strip them from the row (a legacy
+   *  row, or one written past the door). Returns whether the map took one. */
+  function healRow(key, en) {
+    const l = en && en.lane;
+    if (!l || typeof l !== 'object') return false;
+    let took = false;
+    for (const f of STAMP_KEYS) {
+      if (!hasOwn(l, f)) continue;
+      const v = Number(l[f]) || 0;
+      delete l[f];
+      if (!v) continue;
+      let st = stampMap.get(key);
+      if (st && Number(st[f]) >= v) continue;
+      if (!st) stampMap.set(key, st = {});
+      st[f] = v; took = true;
+    }
+    if (took) { stampsDirty = true; stampsOwed = true; stampStats.healed++; }
+    return took;
+  }
+  {
+    const conv = ix.conversations;
+    let healed = 0;
+    for (const k of Object.keys(conv)) if (healRow(k, conv[k])) healed++;
+    if (!psLoad.value) {
+      const lost = healed ? 0 : Object.keys(conv).filter((k) => !stampMap.has(k)).length;
+      stampStats.lostAtLoad = lost;
+      if (healed) warn(`[channels] poll-stamps.json: ${healed} conversation(s)' poll times taken out of index.json (an index written before the side file) — the side file is written before the index's next write`);
+      else if (lost) warn(`[channels] poll-stamps.json was not read (${psLoad.blocked ? 'blocked' : 'missing or set aside'}) — ${lost} conversation(s) carry no last-poll time: each is due at once, and the vendor's budget paces the re-poll`);
+    } else if (unreadStamps) warn(`[channels] poll-stamps.json: ${unreadStamps} entr${unreadStamps === 1 ? 'y is' : 'ies are'} not a list of instants — that many conversation(s) carry no last-poll time: each is due at once, and the vendor's budget paces the re-poll`);
+    if (stampsDirty) armStamps();
+  }
   // lane lark-threads (A1): the STORED place of every record the dedup set holds that carries one (sparse:
   // vendorId → {threadKey, root, replyTo}) — what the place door judges an offer against; REBUILT with the set (every
   // reader of it asks `dedupSet` first, so a set dropped on a failed write takes this map's next rebuild with it)
@@ -363,7 +481,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   let layout = null;           // { chunks: [{ keys, buf, n }], chunkOf: Map<key, chunk> } — the cached rows
   let sweepAt = 0;
   const touchHooks = [];
-  const flushStats = { full: 0, incremental: 0, fallback: 0, swept: 0, drift: 0, lastFull: 'boot' };
+  const flushStats = { full: 0, incremental: 0, fallback: 0, swept: 0, drift: 0, lastFull: 'boot', writes: 0, skipped: 0 };
   let driftSaidAt = 0;         // the sweep's line: the first drift, then at most one per DRIFT_SAY_MS
   // VIBESPACE_CHANNELS_INDEX_VERIFY=1|<file> (the gates' census): every incremental write is compared with the
   // whole-file serialization; a difference is said (and appended to <file>) and the whole file is written instead
@@ -410,23 +528,26 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     if (!dirty) return false;
     // every refusal is said (r3: a once-only line went silent after the first)
     if (ixBlocked) { warn('[channels] index.json not written: ' + ixBlocked); return false; }
-    ix.updatedAt = now();
-    writeIndex(full);
-    dirty = false;   // only once it is on disk — a failed write stays owed (lane-dead-bridge)
-    return true;
+    const wrote = writeIndex(full);
+    dirty = false;   // only once it is on disk (or equal to it) — a failed write stays owed (lane-dead-bridge)
+    return wrote;
   }
 
   // ── THE INCREMENTAL WRITE (B-f32b): the same bytes as `writeJsonAtomic(indexFile, ix)`, from cached chunks ──
   const plainRows = (c) => !!c && typeof c === 'object' && !Array.isArray(c);
+  /** Re-serialize one chunk (each row healed of its own poll stamps first); returns whether its bytes changed. */
   function serializeChunk(c, conv) {
     const lines = [], kept = [];
     for (const k of c.keys) {
       if (!hasOwn(conv, k)) { if (layout && layout.chunkOf.get(k) === c) layout.chunkOf.delete(k); continue; }
       kept.push(k);
+      healRow(k, conv[k]);
       const line = rowLine(k, conv[k]);
       if (line !== null) lines.push(line);
     }
+    const old = c.buf;
     c.keys = kept; c.n = lines.length; c.buf = Buffer.from(lines.join(',\n'), 'utf8');
+    return !old || !old.equals(c.buf);
   }
   function buildLayout(conv) {
     const keys = Object.keys(conv);
@@ -452,7 +573,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
       }
       stale.add(c);
     }
-    for (const c of stale) serializeChunk(c, conv);
+    for (const c of stale) if (serializeChunk(c, conv)) bytesOwed = true;
   }
   function assemble() {
     const parts = [], top = [];
@@ -477,15 +598,29 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     flushTop();
     return parts;
   }
+  // QUIET IS FREE (design 011 lane 2): a write whose bytes equal the last one is skipped — `bytesOwed` says a chunk's
+  // bytes changed since (a touched chunk compared with its cached bytes, a whole rebuild with the previous layout), and
+  // the top-level tables are compared as text; `updatedAt` moves only with a real write
+  let bytesOwed = true;
+  let lastTop = null;
+  const topText = () => { let t = ''; for (const k of Object.keys(ix)) { if (k === 'conversations' || k === 'updatedAt' || k.startsWith('_')) continue; t += JSON.stringify(k) + ':' + JSON.stringify(ix[k], INDEX_KEYS) + ','; } return t; };
+  const liveBufs = () => layout.chunks.filter((c) => c.n > 0).map((c) => c.buf);
   function writeIndex(full) {
     const conv = ix.conversations;
-    if (!plainRows(conv)) { flushStats.fallback++; layout = null; allDirty = true; timedSync('channels-index.write', () => writeJsonAtomic(indexFile, ix)); allDirty = false; dirtyKeys.clear(); return; }
-    if (full || allDirty || !layout) { buildLayout(conv); flushStats.full++; } else { applyTouched(conv); flushStats.incremental++; }
+    if (!plainRows(conv)) { flushStats.fallback++; layout = null; allDirty = true; ix.updatedAt = now(); timedSync('channels-index.write', () => writeBuffersAtomic(indexFile, [Buffer.from(JSON.stringify(ix, INDEX_KEYS, 1), 'utf8')])); allDirty = false; dirtyKeys.clear(); bytesOwed = true; lastTop = null; flushStats.writes++; return true; }
+    if (full || allDirty || !layout) {
+      const before = layout ? liveBufs() : null;
+      buildLayout(conv); flushStats.full++;
+      if (!before || !sameJoined(before, liveBufs())) bytesOwed = true;
+    } else { applyTouched(conv); flushStats.incremental++; }
     const wasFull = full || allDirty;
     allDirty = false; dirtyKeys.clear();   // the cache now holds memory; a failed disk write below stays owed via `dirty`
+    const top = topText();
+    if (!bytesOwed && top === lastTop) { flushStats.skipped++; return false; }
+    ix.updatedAt = now();
     let parts = assemble();
     if (verifyTo && !wasFull) {
-      const want = JSON.stringify(ix, RUNTIME_KEYS, 1);
+      const want = JSON.stringify(ix, INDEX_KEYS, 1);
       const got = Buffer.concat(parts).toString('utf8');
       if (got !== want) {
         let at = 0; while (at < want.length && want[at] === got[at]) at++;
@@ -495,7 +630,11 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
         buildLayout(conv); parts = [Buffer.from(want, 'utf8')];
       }
     }
+    // a row's own stamps taken into the map land in the side file BEFORE the index that no longer holds them
+    if (stampsOwed) stampsFlush();
     timedSync('channels-index.write', () => writeBuffersAtomic(indexFile, parts));
+    bytesOwed = false; lastTop = top; flushStats.writes++;
+    return true;
   }
   /** THE SWEEP (every interval tick): re-serialize the next SWEEP_CHUNKS cached chunks and compare. A difference is a
    *  row changed OUTSIDE `update()`/`entry()` (the one-door rule broken somewhere): it is written, and said once per
@@ -512,7 +651,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
       flushStats.swept++;
       serializeChunk(c, conv);
       if (old && c.buf.equals(old)) continue;
-      drift++;
+      drift++; bytesOwed = true;
       if (!firstKey) {
         const a = old ? old.toString('utf8').split(/,\n(?=  ")/) : [], b = c.buf.toString('utf8').split(/,\n(?=  ")/);
         const j = b.findIndex((row, x) => row !== a[x]);
@@ -524,7 +663,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     // verify r1: a row BORN outside `entry()` sits in no chunk — each cycle's end counts the map against the cache
     if (!drift && sweepAt >= layout.chunks.length && !dirtyKeys.size && Object.keys(conv).length !== layout.chunkOf.size) {
       drift = 1; firstKey = Object.keys(conv).find((k) => !layout.chunkOf.has(k)) || '?';
-      touchAll('sweep: a row born outside entry()');
+      touchAll('sweep: a row born outside entry()'); bytesOwed = true;
     }
     if (drift) {
       flushStats.drift += drift;
@@ -608,13 +747,14 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     if (!e && !create) return null;
     if (!e) {
       if (layout && layout.chunkOf.has(key)) touchAll('a row re-born before its old place was rewritten');   // verify r1: the file keeps the map's order
+      if (stampMap.delete(key)) { stampsDirty = true; journal(key); }   // design 011 lane 2: a row born under a key that left keeps none of its stamps
       e = ix.conversations[key] = {
         key, id: convId, adapterId, vendorId: convId, title: '', kind: 'group',
         participants: '', lastAt: null, unread: 0, tracked: false, anchor: null,
         access: [], watchers: [], filterId: null, policy: null, pendingTodoId: null,
         reachEntries: [], stats: { hits7d: 0, msgs7d: 0 },
         convCaps: null,
-        lane: { via: 'poll', lastPushAt: null, lastPollAt: null, lastScanAt: null, firstSeenByPoll: 0, firstSeenTotal: 0 },
+        lane: { via: 'poll', lastPushAt: null, firstSeenByPoll: 0, firstSeenTotal: 0 },   // the poll stamps: `stamps` (design 011 lane 2)
         readAt: 0, createdAt: now(),
       };
     }
@@ -1629,6 +1769,69 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     return out.slice(-Math.max(1, limit));
   }
 
+  // ── THE POLL STAMPS' DOOR (design 011 lane 2): `set` is the ONE writer, `lane(row)` the ONE merged read (the engine's
+  // `laneOf`; channel-caps is handed that view) — the row's lane with the side map's stamps over it, the newer instant
+  // winning per key where a row still carries its own (as at its heal) ──
+  function stampsGet(key) { return stampMap.get(String(key)) || NO_STAMPS; }
+  function stampsLane(en) {
+    const out = { ...(en && en.lane && typeof en.lane === 'object' ? en.lane : {}) };
+    const st = en && en.key != null ? stampMap.get(String(en.key)) : null;
+    if (st) for (const f of STAMP_KEYS) if (st[f] && !(Number(out[f]) >= st[f])) out[f] = st[f];
+    return out;
+  }
+  /** `patch` = some of the three keys; an instant ≤ 0 / null removes that stamp. */
+  function stampsSet(key, patch) {
+    const k = String(key);
+    let st = stampMap.get(k);
+    for (const f of STAMP_KEYS) {
+      if (!patch || !hasOwn(patch, f)) continue;
+      const v = Number(patch[f]) || 0;
+      if (v > 0) { if (!st) stampMap.set(k, st = {}); st[f] = v; } else if (st) delete st[f];
+    }
+    if (st && !Object.keys(st).length) stampMap.delete(k);
+    stampsDirty = true;
+    if (closed) { stampsFlush(); return; }
+    journal(k);
+    armStamps();
+  }
+  /** THE JOURNAL'S ONE WRITER: the key's whole triple after a change (null = none), one line, appended now (a kept fd,
+   *  O_APPEND). Never throws — a failure is said at most once a minute, and the side file's next write still carries
+   *  the stamp; the next line after a failed one starts on its own line. A BLOCKED family is never written. */
+  function journal(k) {
+    if (closed || psLoad.blocked || ixBlocked) return;
+    const st = stampMap.get(k);
+    const b = Buffer.from(`${journalTorn ? '\n' : ''}${JSON.stringify([k, ...STAMP_KEYS.map((f) => (st && st[f]) || null)])}\n`, 'utf8');
+    try {
+      if (journalFd === null) journalFd = fs.openSync(stampsLog, 'a');
+      let o = 0;
+      while (o < b.length) o += fs.writeSync(journalFd, b, o, b.length - o);
+      journalTorn = false; journalStats.lines++; journalStats.bytes += b.length;
+    } catch (e) {
+      journalTorn = true;
+      if (now() - journalSaidAt >= 60e3) { journalSaidAt = now(); warn(`[channels] poll-stamps.log not written (${(e && e.code) || (e && e.message) || e}) — the stamp is kept in memory and in the side file's next write`); }
+    }
+  }
+  function armStamps() { if (stampsTimer || closed) return; stampsTimer = setTimeout(stampsFlush, STAMPS_FLUSH_MS); if (stampsTimer.unref) stampsTimer.unref(); }
+  /** Write the side file (tmp + rename) when a stamp changed; a key whose row left the index is dropped here. Never
+   *  throws (a failure is said, kept in memory and retried); a BLOCKED family or index is never written. */
+  function stampsFlush() {
+    if (stampsTimer) { clearTimeout(stampsTimer); stampsTimer = null; }
+    if (!stampsDirty) return false;
+    if (psLoad.blocked || ixBlocked) { warn('[channels] poll-stamps.json not written: ' + (psLoad.blocked || ixBlocked)); return false; }
+    const conv = ix.conversations, lines = [];
+    for (const [k, st] of stampMap) {
+      if (!hasOwn(conv, k)) { stampMap.delete(k); continue; }
+      lines.push(`${JSON.stringify(k)}:${JSON.stringify(STAMP_KEYS.map((f) => st[f] || null))}`);
+    }
+    try { writeBuffersAtomic(stampsFile, [Buffer.from(`{"v":1,"fields":${JSON.stringify(STAMP_KEYS)},"stamps":{${lines.length ? `\n${lines.join(',\n')}\n` : ''}}}\n`, 'utf8')]); }
+    catch (e) { warn(`[channels] poll-stamps.json not written (${(e && e.code) || (e && e.message) || e}) — kept in memory, retried`); armStamps(); return false; }
+    stampsDirty = false; stampsOwed = false; stampStats.writes++;
+    // the journal is FOLDED — every line it holds is in the file just renamed (a kill between the two replays them over
+    // it: the same stamps)
+    try { fs.truncateSync(stampsLog, 0); journalTorn = false; } catch (e) { if (e && e.code !== 'ENOENT') warn(`[channels] poll-stamps.log not folded (${e.code || e.message || e}) — replayed over the side file at the next start`); }
+    return true;
+  }
+
   interval = setInterval(() => {   // every tick sweeps (B-f32b), then the same guarded write (lane-dead-bridge)
     try { sweep(); } catch (e) { warn('[channels] index sweep failed:', (e && e.message) || e); }
     if (dirty && !debounce) flushFromTimer();
@@ -1640,13 +1843,30 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     if (debounce) { clearTimeout(debounce); debounce = null; }
     if (interval) { clearInterval(interval); interval = null; }
     flush({ full: true });   // B-f32b: the last write is the whole serialization, not the cache
+    stampsFlush();
+    if (journalFd !== null) { try { fs.closeSync(journalFd); } catch { } journalFd = null; }
     paceFlush();
     dispatchFlush();
     lruFlush();
   }
 
+  /** design 012 (Slack S1, `caps.retention: 'purge-on-remove'`): ONE account's LOCAL COPY goes — its message logs and
+   *  side logs (msgs/<id>/), its fetched files (attachments/<id>/) and every cache this store keeps for it. Called by
+   *  the engine AFTER the account's index rows and record left (nothing reads the account any more). → {logs, files}. */
+  function purgeAccount(adapterId) {
+    const seg = safeSeg(adapterId);
+    if (!seg) return { logs: false, files: false };
+    const pre = `${adapterId}/`;
+    for (const m of [dedup, sideDedup, placeCache, basePlaces, sideCompactFailedAt]) for (const k of [...m.keys()]) if (String(k).startsWith(pre)) m.delete(k);
+    for (const k of [...stampMap.keys()]) if (String(k).startsWith(pre)) { stampMap.delete(k); stampsDirty = true; }
+    lruCache.delete(adapterId);
+    lruDirty.delete(adapterId);
+    const gone = (p) => { const had = fs.existsSync(p); try { fs.rmSync(p, { recursive: true, force: true }); } catch { /* reported below */ } return had && !fs.existsSync(p); };
+    return { logs: gone(path.join(msgsDir, seg)), files: gone(path.join(attRoot, seg)) };
+  }
+
   return {
-    dir, indexFile, adaptersFile, auditFile, archiveDir, outboxFile, groupsFile, aliasesFile, logPath,
+    dir, indexFile, adaptersFile, auditFile, archiveDir, outboxFile, groupsFile, aliasesFile, logPath, purgeAccount,
     // `blocked()` = the refusal sentence while a family's file could not be set aside (null = writable)
     index: {
       update, snapshot, peek, has, live: liveConversations, rows, touch, table: liveTable, entry, flush, isDirty: () => dirty, blocked: () => ixBlocked || null,
@@ -1654,6 +1874,8 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
       // engine's kept unread total); `sweep()` / `flushStats()` for the gates
       onTouch: (fn) => { if (typeof fn === 'function') touchHooks.push(fn); }, sweep, flushStats: () => ({ ...flushStats, chunks: layout ? layout.chunks.length : 0 }),
     },
+    // design 011 lane 2: the poll stamps (lastPollAt / lastScanAt / walkStartedAt) — `set` writes, `lane(row)` reads
+    stamps: { get: stampsGet, set: stampsSet, lane: stampsLane, flush: stampsFlush, file: stampsFile, log: stampsLog, isDirty: () => stampsDirty, stats: () => ({ ...stampStats, keys: stampMap.size, journal: { ...journalStats } }) },
     adapters: { update: adaptersUpdate, live: () => ad, blocked: () => adLoad.blocked || null },
     outbox: { update: outboxUpdate, snapshot: outboxSnapshot, nextId: outboxNextId, live: () => ob },
     groups: { update: groupsUpdate, snapshot: groupsSnapshot, live: () => gr },
@@ -1674,7 +1896,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
 }
 
 module.exports = {
-  createChannelStore, writeJsonAtomic, safeSeg, INDEX_CHUNK, SWEEP_CHUNKS,
+  createChannelStore, writeJsonAtomic, safeSeg, INDEX_CHUNK, SWEEP_CHUNKS, STAMP_KEYS, STAMPS_FLUSH_MS,
   RETENTION_DAYS, RETENTION_MAX_RECORDS, RETENTION_FLOOR_DAYS, DEDUP_MAX, TAIL_BYTES, OUTBOX_KEEP, OUTBOX_PRUNABLE, OUTBOX_PRUNE_RANK,
   SIDE_DEDUP_MAX, SIDE_READ_MAX, SIDE_DIR, SIDE_READ_BYTES, SIDE_COMPACT_BYTES, SIDE_KEEP_BYTES, PLACE_CACHE_MAX, PLACE_KEEP_MAX,
 };

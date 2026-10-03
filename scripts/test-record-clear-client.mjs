@@ -115,6 +115,17 @@ fs.writeFileSync(path.join(DATA, 'task-groups.json'), J({ version: 1, tasks: { [
   ],
   sessions: [K], folders: [], contextDir: null, color: null, injectContext: true, colorSeq: 0, createdAt: NOW - 30 * H, updatedAt: NOW - 3 * H, contentUpdatedAt: NOW - 3 * H,
 } } }, null, 2));
+// 2.369.204: a group whose Activity log runs past the live 500 into the archive (leg ⑦ scrolls into it on the zh client)
+const W_ARC = 'T-261003-archive', ARC_WORD = 'ARCHWORD-q7', ARC_PID = 'P-b1001e';
+{ const live = Array.from({ length: 500 }, (_, i) => ({ id: 'P-a' + (0x10000 + i).toString(16), at: NOW - (500 - i) * 60e3, note: `live entry ${i}`, session: K }));
+  const arch = Array.from({ length: 120 }, (_, i) => ({ id: 'P-b' + (0x10000 + i).toString(16), at: NOW - (700 - i) * 60e3, note: i === 30 ? `archived ${ARC_WORD}` : `archived entry ${i}`, session: K }));
+  const tg = JSON.parse(fs.readFileSync(path.join(DATA, 'task-groups.json'), 'utf8'));
+  tg.tasks[W_ARC] = { ...tg.tasks[W], id: W_ARC, title: 'archive group', progress: live, sessions: [], colorSeq: 1 };
+  fs.writeFileSync(path.join(DATA, 'task-groups.json'), J(tg));
+  const d = path.join(DATA, 'task-groups-archive', W_ARC); fs.mkdirSync(d, { recursive: true });
+  const by = new Map(); for (const p of arch) { const m = new Date(p.at).toISOString().slice(0, 7); by.set(m, (by.get(m) || '') + J(p) + '\n'); }
+  for (const [m, t] of by) fs.writeFileSync(path.join(d, m + '.ndjson'), t);
+}
 const todo = (id, x) => ({ id, sessionKey: K, text: 'x', detail: null, urgency: 'normal', kind: 'action', status: 'open', by: 'agent', sessionName: null, jobId: null, i18n: null, action: null, expiresAt: null, options: null, reply: null, origin: 'agent', createdAt: NOW - 2 * H, resolvedAt: null, resolvedBy: null, ...x });
 // + each job's ASK item, as jobs-wiring files it for a user-created job: under 'jobs', its `sessionName` = the job's name (the
 // label nameFor() falls back to — and so the head of its arrival toast; verify r5)
@@ -574,6 +585,24 @@ try {
   check('CONTROL: …while the layout file stays wordless all the same (the server\'s choke point keeps the record, whatever a client draws)', await saveLayout(P1) && !layoutsHave('B'));
   const heapB = await heapHolds(P1, 'B');
   check('CONTROL: …and the HEAP judge sees it too — the product reaches the word (the window\'s title), so excluding Chrome\'s layout cache hides nothing the page holds', heapB.holds, { browserOnly: heapB.browserOnly });
+  console.log('⑦ 2.369.204 — client 2 (zh): the Task log scrolled past the live 500 into the archive; a clear of an archived entry');
+  await front(P2, t2.id);
+  const LOGW = `[...app.wm.windows.values()].find((w) => w._taskLogId === ${J(W_ARC)})`;
+  await P2.evalJs(`window.__skel = 0; new MutationObserver((ms) => { for (const m of ms) if (m.target.classList && m.target.classList.contains('task-log-skel')) window.__skel++; }).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['class'] }); app.openTaskLog(${J(W_ARC)}, { tab: 'activity' }); true`);
+  check('⑦ the zh Task log window opens on the 500 live entries', await P2.waitFor(`(() => { const w = ${LOGW}; return !!w && w.element.querySelectorAll('.task-log-act').length >= 500; })()`, 20000));
+  let reached = false;
+  for (let i = 0; i < 60 && !reached; i++) {
+    reached = await P2.evalJs(`(() => { const w = ${LOGW}; const b = w.element.querySelector('.task-log-body'); b.scrollTop = b.scrollHeight; b.dispatchEvent(new Event('scroll')); return !!w.element.querySelector('[data-pid="${ARC_PID}"]') && !w.element.querySelector('.task-log-older'); })()`);
+    if (!reached) await sleep(300);
+  }
+  const st = await P2.evalJs(`(() => { const w = ${LOGW}; const rows = [...w.element.querySelectorAll('.task-log-act')]; const pids = rows.map((r) => r.dataset.pid); const ats = pids.map((p) => p.startsWith('P-a') ? 1000 + parseInt(p.slice(3), 16) : parseInt(p.slice(3), 16)); return { n: rows.length, uniq: new Set(pids).size, word: w.element.textContent.includes(${J(ARC_WORD)}), newestFirst: ats.every((x, i) => !i || ats[i - 1] > x), buttons: [...w.element.querySelectorAll('.task-log-body button')].map((b) => b.textContent).filter((x) => /more|older|更多|更早/i.test(x)), skel: window.__skel, lang: localStorage.getItem('vibespace.lang') }; })()`);
+  check('⑦ scrolling down the zh list reads the archive seamlessly: 620 rows each once, newest first, the archived entry there — no "more" button; a skeleton row showed while a page was read', reached && st.n === 620 && st.uniq === 620 && st.newestFirst && st.word && !st.buttons.length && st.skel > 0 && st.lang === 'zh', st);
+  await shot(P2, 'progress-archive-zh');
+  const cr = await api('/api/records/clear', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: J({ kind: 'activity', groupId: W_ARC, id: ARC_PID }) });
+  check('⑦ the owner clears the archived entry (the request the dialog posts)', cr && cr.ok && cr.cleared === 1, cr);
+  const patchedInPlace = await P2.waitFor(`(() => { const w = ${LOGW}; const r = w && w.element.querySelector('[data-pid="${ARC_PID}"]'); return !!r && r.textContent.includes(${J(ZH)}) && !w.element.textContent.includes(${J(ARC_WORD)}) && w.element.querySelectorAll('.task-log-act').length === 620; })()`, 15000);
+  const disk = fs.readdirSync(path.join(DATA, 'task-groups-archive', W_ARC)).map((f) => fs.readFileSync(path.join(DATA, 'task-groups-archive', W_ARC, f), 'utf8')).join('');
+  check('⑦ …the open zh window re-reads that archive row and patches it in place to the cleared sentence (620 rows kept); the archive file no longer holds the word', patchedInPlace && !disk.includes(ARC_WORD) && disk.includes(CT), await P2.evalJs(`(() => { const w = ${LOGW}; const r = w && w.element.querySelector('[data-pid="${ARC_PID}"]'); return r ? r.textContent : null; })()`));
   for (const row of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 3, label: 'CONTROL: ' })) check(row.name, row.pass, row.detail);
   try { P2.sock.close(); await fetch(`http://127.0.0.1:${CDP_PORT}/json/close/${t2.id}`, { method: 'PUT' }); } catch {}
 } catch (e) {

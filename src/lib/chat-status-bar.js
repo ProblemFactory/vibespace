@@ -485,8 +485,9 @@ export class ChatStatusBar {
     const list = this._designListEl;
     if (list && list.isConnected) {
       list.replaceChildren();
-      for (const p of this._pages.slice().sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))) list.appendChild(this._designPageRow(p));
-      list.classList.toggle('hidden', !this._pages.length);
+      const shown = this._pages.filter((p) => !this._designs.some((d) => this._pageOfDesign(d) === p)); // F2: a design's page is on ITS row
+      for (const p of shown.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))) list.appendChild(this._designPageRow(p));
+      list.classList.toggle('hidden', !shown.length);
     }
     const dl = this._designsEl;
     if (dl && dl.isConnected) {
@@ -780,7 +781,7 @@ export class ChatStatusBar {
     // discoverable way to ask for a design drafted by the agent and HOSTED
     // by this VibeSpace; the count = pages published from this session
     if (this._onDesignRequest) {
-      const n = this._pages.length + this._designs.length;
+      const n = this._designs.length + this._pages.filter((p) => !this._designs.some((d) => this._pageOfDesign(d) === p)).length; // F2: a published design is ONE
       const dTitle = n ? t('{n} design(s) and page(s) from this session — click to open one or request a design', { n }) : t('Request a design canvas — drafted by the agent, hosted by this VibeSpace, shareable by link');
       chip('design', `chat-status-design chat-status-clickable${n ? '' : ' chat-status-design-empty'}`, dTitle, `${UI_ICONS.design}${n ? ` ${n}` : ''}`);
     }
@@ -1063,7 +1064,7 @@ export class ChatStatusBar {
     this._designsEl = designs; // refilled in place on designs-updated while the popover is open
     box.appendChild(designs);
     const list = document.createElement('div');
-    list.className = 'chat-design-pages' + (this._pages.length ? '' : ' hidden');
+    list.className = 'chat-design-pages hidden'; // _refillDesignList shows it when a page is not a design's
     this._designListEl = list; // refilled in place on page-published while the popover is open
     box.appendChild(list);
     const all = document.createElement('button'); // lane design-systems-home: the Design window's home (every design, every system)
@@ -1098,7 +1099,17 @@ export class ChatStatusBar {
     pub.textContent = t('Publish…');
     pub.onclick = () => this._onPublishDesign?.(d);
     row.append(name, open, pub);
+    // accept-fixes F2: ONE row per design — its publication's actions (Copy link · Public/Private · Unpublish) ride the
+    // design's own row; the pages list below never repeats that page (it was a second row with the same title)
+    const page = this._pageOfDesign(d);
+    if (page) { row.classList.add('chat-design-published'); name.title += '\n' + absUrl(page.url || page.path); row.append(...this._pageActs(page)); }
     return row;
+  }
+  /** The published page of one design (its srcKey `<host|local>:<dir>`, or the id GET /api/designs named) — from the
+   *  live pages list only (an unpublished page leaves it at once). */
+  _pageOfDesign(d) {
+    const key = `${d.host || 'local'}:${d.dir}`, id = d.page && d.page.id;
+    return this._pages.find((p) => p && (p.srcKey === key || (id && p.id === id))) || null;
   }
 
   _designPageRow(p) {
@@ -1113,6 +1124,12 @@ export class ChatStatusBar {
     open.className = 'btn-cancel';
     open.textContent = t('Open');
     open.onclick = () => window.open(abs(p), '_blank', 'noopener');
+    row.append(name, open, ...this._pageActs(p));
+    return row;
+  }
+  /** A published page's own acts — Copy link · Public/Private · Unpublish (its row, or its design's row). */
+  _pageActs(p) {
+    const abs = (p) => absUrl(p.url || p.path);
     const copy = document.createElement('button');
     copy.className = 'btn-cancel';
     copy.textContent = t('Copy link');
@@ -1142,8 +1159,7 @@ export class ChatStatusBar {
       showToast(t('Page unpublished'));
       this.notePagePublished({ ...page, removed: true });
     };
-    row.append(name, open, copy, vis, unpub);
-    return row;
+    return [copy, vis, unpub];
   }
 
   _fmtElapsed(ms) {

@@ -294,6 +294,18 @@ export function minPaneCss(constraints, ratio = 1) {
 /** The size hints of a window's metadata under either name xpra has used. */
 export function sizeHintsOf(meta = {}) { return meta['size-constraints'] || meta['size-hints'] || null; }
 
+/**
+ * THE APP FIXED ITS SIZE (lane app-fit-fixed, 2026-10-03 — the owner: 「对于自己定死尺寸的窗口我们应该遵循他们的尺寸并且禁止
+ * 缩放」): the window's size constraints state a minimum EQUAL to its maximum (X's WM_NORMAL_HINTS min = max — what GTK's
+ * set_resizable(False) and Qt's setFixedSize write; MEASURED on xpra 6.5.4 at 2×: WeChat 4.1's login 560×760, Inkscape
+ * 1.4.3's welcome 1420×1356). Returns that size {w, h} (device px), else null (no hints, a range, an unusable pair).
+ */
+export function fixedSizeOf(constraints) {
+  const c = constraints || {};
+  const min = sizePair(c['minimum-size']), max = sizePair(c['maximum-size']);
+  return min && max && min[0] === max[0] && min[1] === max[1] ? { w: min[0], h: min[1] } : null;
+}
+
 /** The kind of a window from its metadata: 'popup' (override-redirect —
  *  menus, tooltips, combos), 'dialog' (transient for another window, or a
  *  DIALOG/UTILITY type), else 'main'. */

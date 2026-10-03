@@ -235,6 +235,9 @@ const PURE = new Set(['src/timed-sync.js' /* design 011 lane 1 (store-timing): t
   // verify r1 F1 (2026-10-01): THE SECRET SHAPES a stored command head never keeps — imports only browser-trace's
   // CREDENTIAL_WORDS (PURE); exit-reach's outputHeads calls it once; the bundle carries it with exit-reach
   'src/secret-shapes.js',
+  // design 011 lane 3 (the usage index SHADOW): what a ledger row becomes in the index, the shard-mark verdict, the ONE
+  // grouped aggregate pass, its fold, the comparison of two answers — imports nothing (the worker and the owner ask it)
+  'src/usage-index-model.js',
   'src/workflow-disk.js']);
 const SHARED = new Set(['src/discovery-facts.js', 'src/sysinfo.js', 'src/machine-probes.js', 'src/usage-walker.js',
   'src/transcript-service.js', 'src/ctx-sync.js', 'src/writer-sweep.js', 'src/remote-shell.js', 'src/account-material.js',
@@ -1218,9 +1221,9 @@ for (const [edge] of EXCEPTIONS) {
     };
     const chErrs = channelCensus(SETTINGS_SCHEMA, CST.CHANNEL_SETTINGS);
     const derivedN = Object.values(SETTINGS_SCHEMA).filter((r) => r.channel).length;
-    ok(derivedN === 4 && !chErrs.length && !whenCensus(SETTINGS_SCHEMA).length, `44e the per-vendor rows derived from src/channel-settings.js (${derivedN}) are advanced and carry \`when: { channel }\` of their own vendor${chErrs.length ? ' — ' + chErrs.join('; ') : ''}`);
+    ok(derivedN === 6 && !chErrs.length && !whenCensus(SETTINGS_SCHEMA).length, `44e the per-vendor rows derived from src/channel-settings.js (${derivedN}) are advanced and carry \`when: { channel }\` of their own vendor${chErrs.length ? ' — ' + chErrs.join('; ') : ''}`);
     const lk = SETTINGS_SCHEMA['channels.budgetLarkPerMin'], gm = SETTINGS_SCHEMA['channels.gmailUnitsPerSec'];
-    const plantedCh = { ...SETTINGS_SCHEMA, 'channels.budgetLarkPerMin': { ...lk, tier: undefined }, 'channels.gmailUnitsPerSec': { ...gm, when: { channel: 'lark' } }, 'channels.zz': { category: 'Channels', channel: 'slack' } };
+    const plantedCh = { ...SETTINGS_SCHEMA, 'channels.budgetLarkPerMin': { ...lk, tier: undefined }, 'channels.gmailUnitsPerSec': { ...gm, when: { channel: 'lark' } }, 'channels.zz': { category: 'Channels', channel: 'teams' } };
     ok(channelCensus(plantedCh, CST.CHANNEL_SETTINGS).length === 3, 'NEGATIVE CONTROL: a derived row without its tier, one whose `when` names another vendor, and a row claiming an undeclared vendor are each reported');
   }
   ok(/for \(const cat of SETTINGS_CATEGORIES\)/.test(ui) && /grouped\[cat\]/.test(ui),
@@ -2577,9 +2580,9 @@ console.log('§60 the browser tool writes in the session\'s frame; no browser da
   ok((wc.match(/buildRemoteExec\(\{/g) || []).length === 5 && (wc.match(/VIBESPACE_SESSION_CWD=/g) || []).length === 1, `§60a all five remote builders compose buildRemoteExec and ws-create spells the variable once — the local pair (${(wc.match(/buildRemoteExec\(\{/g) || []).length} builders, ${(wc.match(/VIBESPACE_SESSION_CWD=/g) || []).length} spelling)`);
   const cli = read('data/bin/vibespace-browser');
   const fnBody = (src, name) => { const a = src.indexOf(`function ${name}(`); if (a < 0) return ''; let d = 0; for (let i = src.indexOf('{', a); i >= 0 && i < src.length; i++) { if (src[i] === '{') d++; else if (src[i] === '}' && --d === 0) return src.slice(a, i + 1); } return ''; };
-  const judgeCli = (src) => { const sr = fnBody(src, 'sessionRoot'); return sr.includes('process.env.VIBESPACE_SESSION_CWD') && !/process\.cwd\(\)/.test(sr) && /spawn\(bin\.path, argv, \{[^}]*\bcwd: runCwd\.dir/.test(src) && /const argv = closeAllScoped \? framed\.argv\.filter\(\(x\) => x !== '--all'\) : \[\.\.\.framed\.argv\];/.test(src) && /writeRefusal\(framed\.writes\)/.test(src); };
-  ok(judgeCli(cli), '§60b the CLI fences writes to VIBESPACE_SESSION_CWD only (never process.cwd()), re-judges and hands the IN-FRAME argv, and spawns the binary in the private cwd');
-  ok(!judgeCli(cli.replace('const v = process.env.VIBESPACE_SESSION_CWD;', 'const v = process.env.VIBESPACE_SESSION_CWD || process.cwd();')) && !judgeCli(cli.replace('{ stdio, env, cwd: runCwd.dir }', '{ stdio, env }')) && !judgeCli(cli.replace("const argv = closeAllScoped ? framed.argv.filter((x) => x !== '--all') : [...framed.argv];", "const argv = closeAllScoped ? rest.filter((x) => x !== '--all') : [...rest];")), '§60b NEGATIVE CONTROL: the r4 fence (the shell\'s cwd), a spawn with no cwd, and the r4 hand-over (words as typed — lane H\'s close --all filter over `rest`) are each caught');
+  const judgeCli = (src) => { const sr = fnBody(src, 'sessionRoot'); return sr.includes('process.env.VIBESPACE_SESSION_CWD') && sr.includes('process.env.VIBESPACE_JOB_CWD') && !/process\.cwd\(\)/.test(sr) && /spawn\(bin\.path, argv, \{[^}]*\bcwd: runCwd\.dir/.test(src) && /const argv = closeAllScoped \? framed\.argv\.filter\(\(x\) => x !== '--all'\) : \[\.\.\.framed\.argv\];/.test(src) && /writeRefusal\(framed\.writes\)/.test(src); };
+  ok(judgeCli(cli), '§60b the CLI fences writes to VIBESPACE_SESSION_CWD (a job: VIBESPACE_JOB_CWD — accept-fixes-jobs F6) only (never process.cwd()), re-judges and hands the IN-FRAME argv, and spawns the binary in the private cwd');
+  ok(!judgeCli(cli.replace('const v = IN_JOB ? process.env.VIBESPACE_JOB_CWD : process.env.VIBESPACE_SESSION_CWD;', 'const v = (IN_JOB ? process.env.VIBESPACE_JOB_CWD : process.env.VIBESPACE_SESSION_CWD) || process.cwd();')) && !judgeCli(cli.replace('{ stdio, env, cwd: runCwd.dir }', '{ stdio, env }')) && !judgeCli(cli.replace("const argv = closeAllScoped ? framed.argv.filter((x) => x !== '--all') : [...framed.argv];", "const argv = closeAllScoped ? rest.filter((x) => x !== '--all') : [...rest];")), '§60b NEGATIVE CONTROL: the r4 fence (the shell\'s cwd), a spawn with no cwd, and the r4 hand-over (words as typed — lane H\'s close --all filter over `rest`) are each caught');
   const bf = read('src/browser-facts.js');
   const judgeRt = (src) => /execFileImpl\(bin, args, \{[^}]*\bcwd: dc\.dir \}/.test(src) && /const dc = runDir\(daemonCwd\);/.test(src);
   const srcJs = [];
@@ -2673,6 +2676,7 @@ console.log('§62 every path where the user names a window goes through wm.revea
     'src/lib/workflow-detail.js': [2, 'the workflow window + its agent-log dedupe'],
     'src/lib/design-window.js': [1, 'the Design window\'s one-per-(host, dir) re-open (a replay passes { replay })'],
     'src/lib/design-home.js': [1, 'the Design window home\'s one-per-client re-open (a replay passes { replay }) — lane design-systems-home'],
+    'src/lib/machine-desktop.js': [1, 'a machine\'s whole-desktop window: one per machine per page, a second open reveals it — design 014 D1'],
     ...Object.fromEntries(['settings-ui', 'usage-window', 'task-log', 'task-detail', 'session-props', 'channel-window', 'channel-outbox', 'channels-panel', 'jobs-panel', 'integrations-window', 'sidebar-rail', 'browser-trace-view', 'desktop-window', 'desktop-app-window', 'browser-live-window', 'inbox-window']
       .map((n) => ['src/lib/' + n + '.js', [1, n === 'browser-live-window' ? 'the fold-back (D3)' : 'the singleton re-open (a replay passes { replay })']])),
   };
@@ -3406,6 +3410,79 @@ console.log('§72 every write of a named store is timed (src/timed-sync.js STORE
   const jobsBare = strip72(read('src/jobs.js')).replace("timedSync('jobs.write', () => writeJsonAtomic(this.file, [...this.jobs.values()]));", 'writeJsonAtomic(this.file, [...this.jobs.values()]);');
   const hit = unwrapped72(body72(jobsBare, '_save').text, ['jobs.write', 'jobs-notifs.write']);
   ok(hit.length === 1 && /writeJsonAtomic\(this\.file/.test(hit[0]), `§72 CONTROL: the real jobs.js _save with its jobs.json write unwrapped is printed (${hit.join(' | ')})`);
+}
+
+// §73 THE USAGE INDEX IS A SHADOW, ON ITS OWN THREAD (design 011 lane 3, L1 — 2026-10-03). The ledger's SQLite index
+// feeds NOTHING in this release: its one reader is the comparer beside the Usage window's read. And the database is
+// touched from ONE thread: `node:sqlite` is named in exactly one file (src/usage-index-worker.js), DatabaseSync is
+// spelled nowhere else, that file is never require()d (it refuses to run on the main thread) and only the owner
+// (src/server/usage-index.js) spawns it; the owner's read doors (queryAggregate, workerStats) are called nowhere but
+// inside the owner, and the owner is wired by account-usage-routes.js alone, which asks it only to start and compare.
+// DERIVED over server.js + src/** with comments stripped; NEGATIVE CONTROLS plant each forbidden line in a real file.
+console.log('§73 the usage index: node:sqlite in one file, never on the main thread, and no reader but the comparer');
+{
+  const strip72 = (t) => t.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:'"\\])\/\/.*$/gm, '$1');
+  const walk72 = (d) => fs.readdirSync(path.join(REPO, d), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk72(d + '/' + e.name) : /\.(c|m)?js$/.test(e.name) ? [d + '/' + e.name] : []));
+  const files72 = ['server.js', ...walk72('src')];
+  const WORKER = 'src/usage-index-worker.js', OWNER = 'src/server/usage-index.js', WIRING = 'src/server/account-usage-routes.js';
+  const judge72 = (texts) => {
+    const bad = [];
+    for (const [f, raw] of Object.entries(texts)) {
+      const t = strip72(raw);
+      if (f !== WORKER && /['"`]node:sqlite['"`]/.test(t)) bad.push(`${f} names node:sqlite`);
+      if (f !== WORKER && /\bDatabaseSync\b/.test(t)) bad.push(`${f} spells DatabaseSync`);
+      if (/require\(\s*[^)]*usage-index-worker/.test(t)) bad.push(`${f} require()s the worker`);
+      if (f !== OWNER && f !== WORKER && /usage-index-worker/.test(t)) bad.push(`${f} spawns the worker`);
+      if (f !== OWNER && /\b(?:queryAggregate|workerStats)\s*\(/.test(t)) bad.push(`${f} reads the index`);
+      if (f !== WIRING && f !== OWNER && /require\(\s*['"`][^'"`]*server\/usage-index(?:\.js)?['"`]|require\(\s*['"`]\.\/usage-index(?:\.js)?['"`]/.test(t)) bad.push(`${f} wires the owner`);
+    }
+    const w = strip72(texts[WIRING] || '');
+    const asked = [...w.matchAll(/\busageIndex\.(\w+)/g)].map((m) => m[1]).filter((n) => n !== 'compare' && n !== 'start');
+    if (asked.length) bad.push(`${WIRING} asks the owner for ${[...new Set(asked)].join(', ')}`);
+    return bad;
+  };
+  const texts72 = Object.fromEntries(files72.map((f) => [f, read(f)]));
+  const found72 = judge72(texts72);
+  ok(files72.length > 300 && texts72[WORKER] && texts72[OWNER] && found72.length === 0, `§73 the census over ${files72.length} files is clean${found72.length ? ' — ' + found72.join(' | ') : ''}`);
+  ok(/['"]node:sqlite['"]/.test(strip72(texts72[WORKER])) && /if \(isMainThread\) throw new Error\(/.test(texts72[WORKER]) && /new Worker\(workerFile/.test(texts72[OWNER]),
+    '§73 the worker names node:sqlite, refuses the main thread, and the owner spawns it as a Worker');
+  ok(/usageIndex\.compare\(answer, \{ from, to, backend, accounts, hostFilter, pivots \}\);\n\s*res\.json\(answer\);/.test(texts72[WIRING]),
+    '§73 the comparer is asked in the same synchronous step as the Usage window\'s own answer, before it is sent');
+  ok(/this\._pushIndex\(shard, text\);/.test(texts72['src/usage-history.js']) && (texts72['src/usage-history.js'].match(/(?:timedSync\('usage-shards\.write', \(\) => fs\.appendFileSync\(shard, text\)\)|fs\.appendFileSync\(shard, text\)); this\._pushIndex\(shard, text\);/g) || []).length === 2,   // int204: store-timing's span around the append
+    '§73 both commit points (the walk, the remote harvest) push right after their append');
+  const plant = (f, line) => ({ ...texts72, [f]: texts72[f] + '\n' + line + '\n' });
+  const PLANTS = [
+    ['src/server/usage-pool-engine.js', 'const sums = await usageIndex.queryAggregate({ from });'],
+    ['src/usage-estimator.js', 'const st = await getUsageIndex().workerStats();'],
+    ['server.js', "const { DatabaseSync } = require('node:sqlite');"],
+    ['src/usage-history.js', "const db = new DatabaseSync(':memory:');"],
+    [OWNER, "require('../usage-index-worker.js');"],
+    ['src/server/session-stdout.js', "const ix = require('./usage-index.js').create({});"],
+    [WIRING, 'usageIndex.queryAggregate({}).then((x) => res.json(x));'],
+  ];
+  const missed72 = PLANTS.filter(([f, l]) => judge72(plant(f, l)).length === 0).map(([f, l]) => `${f}: ${l}`);
+  const legal72 = judge72(plant('src/server/usage-pool-engine.js', '// the usage index (node:sqlite, DatabaseSync, queryAggregate) feeds nothing yet'));
+  ok(missed72.length === 0 && legal72.length === 0, `§73 NEGATIVE CONTROLS: ${PLANTS.length} planted readers / openers caught, a comment naming them passes${missed72.length ? ' — missed: ' + missed72.join(' | ') : ''}${legal72.length ? ' — wrongly flagged: ' + legal72.join(' | ') : ''}`);
+}
+
+// ── design 014 D1 (lane desktop-vnc-native): a Windows / macOS machine's WHOLE DESKTOP rides EXISTING doors — no new
+// device op (the agent's tcp-connect + run-cmd / run-stream), and the kind is NOT a keeper session (no idle verdict, no
+// resource sample, no record): the access layer holds it, the bridge relays it ──
+console.log('§D014 the vnc-native rung: no new device op, no keeper rows');
+{
+  const rd = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
+  const RUNG = /vnc-native|machine-desktop|machineDesktop|MACHINE_DESKTOP|VNC_NATIVE|tightvnc/i;
+  const census = (s) => ['src/agentd/agentd.js', 'src/agentd/client.js', 'src/desktop-serve.js', 'src/server/desktop-app-keeper.js'].filter((f) => RUNG.test(s[f]));
+  const srcs = Object.fromEntries(['src/agentd/agentd.js', 'src/agentd/client.js', 'src/desktop-serve.js', 'src/server/desktop-app-keeper.js'].map((f) => [f, rd(f)]));
+  const hit = census(srcs);
+  ok(hit.length === 0, `§D014 the agent (agentd.js + its client), the desktop-serve op table and the keeper name nothing of the rung${hit.length ? ' — ' + hit.join(', ') : ''}`);
+  const acc = rd('src/server/desktop-access.js');
+  const a = acc.indexOf('// ── design 014 D1'), b = acc.indexOf('/** ONE file of a paired machine');
+  const calls = a > 0 && b > a ? [...new Set([...acc.slice(a, b).matchAll(/\bdm\.(\w+)\(/g)].map((m) => m[1]))].sort() : null;
+  ok(JSON.stringify(calls) === '["runCmd","runStream","status","tcpForward"]', `§D014 the access layer reaches the machine ONLY through existing agent calls (tcpForward, runCmd, runStream — and the handle's own status()): ${JSON.stringify(calls)}`);
+  const wiring = rd('src/server/window-live-wiring.js');
+  ok(/MD\(id\) \? access\.machineDesktopTarget\(id\) : keeper\.streamTarget\(id\)/.test(wiring) && /onInput: \(id\) => \{ if \(MD\(id\)\) return; keeper\.noteInput\(id\);/.test(wiring), '§D014 the bridge resolves a machine desktop through the access layer, never the keeper, and its input never reaches the keeper\'s idle clock');
+  ok(census({ ...srcs, 'src/agentd/agentd.js': srcs['src/agentd/agentd.js'] + "\nif (msg.op === 'machine-desktop') { }" }).length === 1 && census({ ...srcs, 'src/server/desktop-app-keeper.js': srcs['src/server/desktop-app-keeper.js'] + '\n// a vnc-native idle row' }).length === 1, '§D014 CONTROL: a planted daemon op / keeper row naming the rung is caught');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

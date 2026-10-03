@@ -976,7 +976,8 @@ console.log('③h the vendor rows declared once: schema row ⇄ adapter caps ⇄
   const derived = Object.entries(S).filter(([, r]) => r.channel).map(([k, r]) => [k, r.channel]);
   const noRow = [...readBy].filter(([k, kind]) => !S[k] || S[k].channel !== kind);
   const unread = derived.filter(([k, v]) => readBy.get(k) !== v);
-  ok(readBy.size === 4 && derived.length === 4 && !noRow.length && !unread.length, `every REAL adapter's budget / pace key (${[...readBy.keys()].join(', ')}) has its derived schema row (channel = the adapter's kind) — and every derived row is read by a REAL adapter`, JSON.stringify({ noRow, unread }));
+  // slack-core (2.369.204): three REAL adapters (Lark, Gmail, Slack) × budget + pace = 6 rows (test-architecture 44e counts the same 6)
+  ok(readBy.size === 6 && derived.length === 6 && !noRow.length && !unread.length, `every REAL adapter's budget / pace key (${[...readBy.keys()].join(', ')}) has its derived schema row (channel = the adapter's kind) — and every derived row is read by a REAL adapter`, JSON.stringify({ noRow, unread }));
   // V1 — the numbers at base 798d938a: SETTING_BOUNDS min / max literal, `dflt: null` = the adapter's caps default
   const BEFORE = { 'channels.budgetLarkPerMin': [60, 5, 1000, 5], 'channels.budgetGmailPerMin': [3000, 100, 6000, 100], 'channels.gmailUnitsPerSec': [40, 5, 100, 5], 'channels.larkRequestsPerSec': [5, 1, 50, 1] };
   const diff = Object.entries(BEFORE).flatMap(([k, [d, mn, mx, st]]) => [

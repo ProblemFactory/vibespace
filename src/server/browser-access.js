@@ -88,9 +88,10 @@ function create({ hosts = null, env = () => ({}), homeDir = undefined, local = n
     else {
       const dm = await deviceOf(hostId);
       try { r = await dm.browserServe(action, params); }
-      catch (e) { throw named(e && (e.code === 'host_needs_daemon' || e.code === 'builds_unsupported') ? e.code : 'host_unavailable', `${hostId}: ${e && e.message}`); } // lane browser-admin 2a: an agent too old to list builds says so by name
+      catch (e) { throw named(e && (e.code === 'host_needs_daemon' || e.code === 'builds_unsupported' || e.code === 'remove_unsupported') ? e.code : 'host_unavailable', `${hostId}: ${e && e.message}`); } // lane browser-admin 2a: an agent too old to list builds says so by name
     }
-    if (!r || r.ok === false) throw named((r && r.code) || 'op_failed', (r && r.error) || `browser-serve ${action} failed on ${hostId || 'this machine'}`);
+    // lane remote-profile-start: a machine's refusal keeps its ONE step (`{code, command, shell}`) for whoever says it
+    if (!r || r.ok === false) throw Object.assign(named((r && r.code) || 'op_failed', (r && r.error) || `browser-serve ${action} failed on ${hostId || 'this machine'}`), r && r.step ? { step: r.step } : {});
     return r;
   }
 

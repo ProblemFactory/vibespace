@@ -578,9 +578,9 @@ function housekeepingVerdict({ profiles = [], leases = [], browsers = {}, dirFac
     // paired machine's in v1, never a browser VibeSpace only connects to), and does it record his own actions (the owner's
     // opt-out, absent = on) — structure for the row's button and checkbox
     const row = rowOf(p.provider) || {};
-    const canBrowse = !p.host && row.starts !== false && row.leaseKind !== 'window-target';
+    const canBrowse = row.starts !== false && row.leaseKind !== 'window-target'; // lane remote-profile-start: a paired machine's profile too (started there, seen here)
     const base = { id: p.id, label: p.label, dir: p.dir || null, provider: p.provider, host: p.host || null, legacy: !!p.legacy, record: !!p.record, recordMine: p.recordMine !== false, canBrowse, sharing: p.sharing === 'instance' ? 'instance' : 'owner', mediated: B.isMediatedProfile(p), bytes: Number.isFinite(facts.bytes) ? facts.bytes : null, lastUsedAt: Number(p.lastUsedAt) || 0, ageMs, held, live, browserClosed, closedHow };
-    if (!q.ok) return { ...base, state: 'not-ours', why: q.error, canForget: false };
+    if (!q.ok && !remoteOwned(p, rowOf)) return { ...base, state: 'not-ours', why: q.error, canForget: false }; // lane remote-profile-start: a paired machine's profile is the user's to browse / delete (through its machine)
     if (held) return { ...base, state: 'in-use', why: `attached by ${held} session(s)${closedWhy}`, canForget: false };
     if (live) return { ...base, state: 'live', why: browserClosed ? `its daemon is running${closedWhy}` : 'its browser is running', canForget: false };
     if (ageMs !== null && ageMs < graceMs) return { ...base, state: 'recent', why: `written ${Math.round(ageMs / 60000)} min ago — may be in flight (grace ${Math.round(graceMs / 60000)} min)`, canForget: true };
@@ -589,9 +589,12 @@ function housekeepingVerdict({ profiles = [], leases = [], browsers = {}, dirFac
   });
 }
 /** May a profile be forgotten now? (archived first, then removed — never while held or live) */
+/** LANE REMOTE-PROFILE-START: a PAIRED machine's profile of a provider that owns its directory — never this machine's sweep's
+ *  (queueVerdict keeps refusing it: no dir here), but the user's Delete… removes it, its folder THERE by the machine's own op. */
+function remoteOwned(profile, rowOf = B.providerRow) { return !!(profile && profile.host && !B.isEphemeralProfile(profile) && (rowOf(profile.provider) || {}).ownsDir); }
 function forgetVerdict({ profile, leases = [], browsers = {}, rowOf = B.providerRow } = {}) {
   if (!profile) return { ok: false, code: 'not-found', error: 'no such profile' };
-  const q = queueVerdict(profile, rowOf);
+  const q = remoteOwned(profile, rowOf) ? { ok: true } : queueVerdict(profile, rowOf);
   if (!q.ok) return q;
   const held = (leases || []).filter((l) => l.profileId === profile.id);
   if (held.length) return { ok: false, code: 'leased', error: `profile "${profile.label}" is attached by ${held.length} session(s) (${held.map((l) => l.browserKey).join(', ')}) — detach them first` };

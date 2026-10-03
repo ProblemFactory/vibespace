@@ -131,6 +131,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   // lane jobs-browser (B-dbc1): is this Background Work job's run alive (state starting | up)? A running job CARRIES its
   // browser handle (src/browser-job-principal.js), so its lease outlives its owner conversation until the job ends
   jobRunning = () => false,
+  jobName = () => null, // accept-fixes-strip F8: a Background Work job's name (the live view names a job's tab by it)
   facts = null, runtime = null, limits = LIMITS, log = console, now = Date.now, tickMs = TICK_MS, guardSampleMs = null, install = true,
   // lane H: how long a verb waits for the lease seam's listeners (the recorder ARMING its tap) before it runs
   armWaitMs = ARM_WAIT_MS,
@@ -934,7 +935,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
    *  client refuses an agent without the `browser-builds` capability BY NAME — never asked, never a hang). */
   async function buildsFor(hostId = null) {
     if (!hostId) return BB.buildsView(buildsHere());
-    try { const r = await acc().call(hostId, 'builds', {}); return r && r.listing ? r.listing : { ok: false, code: 'builds_unreadable', error: `${hostId} answered no build list` }; }
+    try { const r = await acc().call(hostId, 'builds', {}); return r && r.listing ? (r.ready ? { ...r.listing, ready: r.ready } : r.listing) : { ok: false, code: 'builds_unreadable', error: `${hostId} answered no build list` }; } // lane remote-profile-start: + the machine's `ready`
     catch (e) { return { ok: false, code: e && e.code === 'builds_unsupported' ? 'builds_unsupported' : (e && e.code) || 'host_unavailable', error: String(e && e.message) }; }
   }
   /** The verdict at a CREATE: a choice that is not the default is the user's, chromium's, and on that machine's list
@@ -1028,6 +1029,20 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (isEph(p)) log.log?.(`[browser] ephemeral browser record ${id} "${p.label}" removed with its conversation ${p.owner.id}${p.dir ? ' (its scratch directory ' + p.dir + ' is browser-env\'s sweep to reclaim)' : ''}`);
     else log.log?.(`[browser] profile ${id} "${p.label}" removed from the registry (its directory ${p.dir} is kept — deletion is a human act)`);
     return { removed: id, dir: p.dir };
+  }
+  /** LANE REMOTE-PROFILE-START (design 014 lane 3b): a PAIRED machine's profile goes WITH its folder there — the machine's
+   *  `remove` op (it composes ~/.agent-browser/vs-bp-<id> from the id itself; the hub never names a path), asked BEFORE the
+   *  record goes; anything it could not remove (offline, an older agent, its browser running there) is SAID in `left` and
+   *  the record still goes (the user asked). null = nothing lives on a machine (this computer's profile, a `cdp` one).
+   *  verify r1: `profile` = the record's snapshot taken before removeProfile — the callers remove the record FIRST (no start
+   *  can land between the folder's removal and a refused record), then ask the machine. */
+  async function removeOnMachine(id, { profile: snap = null } = {}) {
+    ensureLoaded();
+    const p = snap && snap.id === id ? snap : profile(id);
+    if (!p || !p.host || !(B.providerRow(p.provider) || {}).starts) return null;
+    const where = `~/.agent-browser/${B.profileDirName(p.id)}`;
+    try { const r = await acc().call(p.host, 'remove', { profileId: p.id }); log.log?.(`[browser] profile ${p.id} "${p.label}": its folder on ${p.host} ${r.removed ? 'deleted' : 'was already gone'} (${r.dir || where})`); return { host: p.host, removed: !!r.removed, dir: r.dir || where, left: null }; }
+    catch (e) { const left = `its folder ${where} on ${p.host} was left there (${e && e.message})`; log.warn?.(`[browser] profile ${p.id} "${p.label}": ${left}`); return { host: p.host, removed: false, dir: where, code: (e && e.code) || 'remove_failed', left }; }
   }
   /** P5: the editable fields of a record — `record` (the per-profile screencast
    *  opt-in, D7), `label` (validated like a create: free text, unique, never a
@@ -2894,11 +2909,18 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   async function tabOwnersFor(target, { activeTarget = null } = {}) {
     ensureLoaded();
     if (!target || !target.kind) return { ok: false };
-    if (target.kind === 'ephemeral' || target.kind === 'child') return { ok: true, all: 'agent', mediated: false, adoptable: false };
+    // accept-fixes-strip F7: every view gets the PAGES' OWN titles from the one CDP read (the binary's rows keep the title a
+    // tab had while it loaded — measured on 0.38.1); `settling` = a page still names itself by its address (ask again soon)
+    const titled = (targets) => (targets ? { titles: TBS.titlesOf(targets), settling: TBS.pageRows(targets).some((x) => !TBS.BLANK_URL_RE.test(x.url.trim()) && TBS.isUrlTitle(x.title, x.url)) } : {});
+    if (target.kind === 'ephemeral' || target.kind === 'child') {
+      const e = ephemeralFor(target.kind === 'child' ? String(target.handle || '') : String(target.ns || target.sessionName || '').replace(/^vs-/, ''));
+      const r0 = e ? reg.browsers[e.profileId] : null;
+      return { ok: true, all: 'agent', mediated: false, adoptable: false, ...titled(r0 && B.isLiveBrowser(r0) && isLocalRec(r0) ? await tabTargetsOf(r0.cdpUrl) : null) };
+    }
     const p = profile(target.profileId);
     const rec = p ? reg.browsers[p.id] : null;
     if (!p || isEph(p) || !B.isLiveBrowser(rec) || !isLocalRec(rec)) return { ok: false };
-    if (target.kind !== 'human' && isMediated(p)) return { ok: true, all: 'agent', mediated: true, adoptable: false };
+    if (target.kind !== 'human' && isMediated(p)) return { ok: true, all: 'agent', mediated: true, adoptable: false, ...titled(await tabTargetsOf(rec.cdpUrl)) };
     const targets = await tabTargetsOf(rec.cdpUrl);
     if (!targets) return { ok: false };
     const bk = target.kind === 'human' ? null : String(target.sessionName || '').replace(/^vs-/, '');
@@ -2907,8 +2929,17 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (bk) keepTabRoots(p.id, bk, TBS.ownSetOf(owners, bk));
     const h = humans.get(p.id);
     const words = {};
-    for (const [id, k] of owners) words[id] = TBS.ownerWord(k, { me: bk, humanKey: h ? h.key : null });
-    return { ok: true, owners: words, mediated: false, adoptable: target.kind === 'human' && !reg.leases.some((l) => l.profileId === p.id) };
+    const whose = {};
+    for (const [id, k] of owners) { words[id] = TBS.ownerWord(k, { me: bk, humanKey: h ? h.key : null }); if (words[id] === 'other') { const w = whoseOf(p.id, k); if (w) whose[id] = w; } }
+    return { ok: true, owners: words, whose, mediated: false, adoptable: target.kind === 'human' && !reg.leases.some((l) => l.profileId === p.id), ...titled(targets) };
+  }
+  /** accept-fixes-strip F8: WHO holds another holder's tab — `{sessionId}` (the view names the conversation as its sidebar
+   *  does) or `{job, name}` (a Background Work job's handle: its job's name, read live). null = not known. */
+  function whoseOf(profileId, key) {
+    const c = reg.children[String(key || '')];
+    if (c && c.job) { let n = null; try { n = jobName(String(c.job)); } catch { n = null; } return { job: String(c.job), name: n ? String(n).slice(0, 120) : null, sessionId: null }; }
+    const l = B.findLease(reg.leases, profileId, String(key || ''));
+    return l && l.sessionId ? { sessionId: String(l.sessionId) } : null;
   }
   /**
    * THE USER'S ✕ AND SWITCH on a tab row (the bridge's `tab-act`; the facts are re-read HERE — never the client's words):
@@ -3220,7 +3251,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
           const bl = await buildsFor(p.host);
           if (!bl || bl.ok === false) throw failed((bl && bl.code) || 'builds_unsupported', `${p.host}: ${(bl && bl.error) || 'its Chrome builds could not be listed'}`);
         }
-        try { r = await acc().call(p.host, 'start', { profileId, idleMs: 0, headed: headedSetting(), noDisplayMode: noDisplayMode(), ...(remoteChoice && remoteChoice.kind !== 'default' ? { browser: remoteChoice } : {}) }); } catch (e) { throw failed(e.code || 'launch_failed', `${p.host}: ${e.message}`); }
+        try { r = await acc().call(p.host, 'start', { profileId, idleMs: 0, headed: headedSetting(), noDisplayMode: noDisplayMode(), ...(remoteChoice && remoteChoice.kind !== 'default' ? { browser: remoteChoice } : {}) }); } catch (e) { throw Object.assign(failed(e.code || 'launch_failed', `${p.host}: ${e.message}`), e && e.step ? { step: { ...e.step, machine: p.host } } : {}); } // lane remote-profile-start: the machine's one step rides the refusal (+ which machine)
         if (!r.cdpPort) throw failed('launch_failed', `${p.host} started the browser but reported no CDP url — the hub cannot reach it`);
         let fwd;
         try { fwd = await acc().forwardCdp(p.host, r.cdpPort, { remoteUrl: r.cdpUrl }); } catch (e) { throw failed(e.code || 'host_unavailable', `${p.host}: ${e.message}`); }
@@ -3809,7 +3840,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       const rec = p ? reg.browsers[p.id] || null : null;
       const h0 = p ? humans.get(p.id) || null : null;
       const running = Object.values(reg.browsers).filter(B.isLiveBrowser).length + othersNow().length;
-      const v = HM.browseYourselfVerdict({ profile: p ? { ...p, ephemeral: isEph(p) } : null, row: p ? rowOf(p.provider) : null, control: p && !isEph(p) && !p.host ? control(p.provider, { host: null }) : null,
+      // lane remote-profile-start: a paired machine's profile is browsed through the same start() (`hostKnown`: refused only for a machine no longer paired)
+      const v = HM.browseYourselfVerdict({ profile: p ? { ...p, ephemeral: isEph(p) } : null, row: p ? rowOf(p.provider) : null, hostKnown: p && p.host ? knownHost(p.host) : true, control: p && !isEph(p) && !p.host ? control(p.provider, { host: null }) : null,
         switching: !!p && switching.has(p.id), closed: p ? closedRefusalOf(p.id) : null, live: B.isLiveBrowser(rec), human: h0 ? { state: h0.state, alive: h0.state === 'driving' && !!(h0.input && h0.input.takenBy) && viewerAliveOf(h0.input.takenBy.viewerId) } : null,
         running, cap: machineCap() });
       if (!v.ok) { log.log?.(`[browser] ${id}: browse yourself refused (${v.code})`); throw namedError(v.code, v.error, { ...(Number.isInteger(v.pid) ? { holderPid: v.pid } : {}), ...(v.detail ? { detail: v.detail } : {}) }); }
@@ -4725,8 +4757,34 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     return mine.map((x) => x.handle);
   }
   function releaseJobHandle(handle, why) {
-    for (const l of reg.leases.filter((x) => x.browserKey === handle)) { try { detach({ profileId: l.profileId, browserKey: handle, by: 'user' }); } catch (e) { log.warn?.(`[browser] ${handle}: its lease on ${l.profileId} not detached — ${e && e.message}`); } }
+    for (const l of reg.leases.filter((x) => x.browserKey === handle)) {
+      const closeWindow = jobWindowCloser(l, why); // accept-fixes-jobs F11: its holders read while its lease still stands
+      // the job never comes back for its page (its handle goes below): no "left tab" is kept for it, its window closes
+      if (closeWindow) { closeWindow().catch((e) => log.warn?.(`[browser] ${handle}: its window on ${l.profileId} not closed — ${e && e.message}`)); }
+      try { detach({ profileId: l.profileId, browserKey: handle, by: 'user' }); } catch (e) { log.warn?.(`[browser] ${handle}: its lease on ${l.profileId} not detached — ${e && e.message}`); }
+      const lt = reg.leftTabs && reg.leftTabs[l.profileId]; if (lt && lt[handle]) { delete lt[handle]; commit(); }
+    }
     if (dropChild(handle)) log.log?.(`[browser] ${handle}: job handle released (${why})`);
+  }
+  /** accept-fixes-jobs F11 (the acceptance of 2.369.202: a stopped job's window stayed open in the shared profile — the
+   *  detach keeps a conversation's page for its return, and a job never returns): THE JOB'S WINDOW CLOSES WITH ITS RUN.
+   *  Its own tabs, by the ONE ownership rule its `tab list` reads (TBS.tabOwners over one CDP read, the holders as they
+   *  stand BEFORE the detach), are closed over CDP — the window goes with its last tab; the user's tabs, another holder's
+   *  and an orphan are never touched. A mediated lease's tabs close in its revoke; a browser not running has no window.
+   *  → an async closer (→ tabs closed), or null. */
+  function jobWindowCloser(l, why) {
+    const p = profile(l.profileId); const rec = p ? reg.browsers[p.id] : null;
+    if (!p || isEph(p) || isMediated(p) || !B.isLiveBrowser(rec) || !isLocalRec(rec) || !rec.cdpUrl) return null;
+    const holders = tabHoldersOf(p.id), key = String(l.browserKey), cdp = rec.cdpUrl;
+    return async () => {
+      const targets = await tabTargetsOf(cdp);
+      const own = targets ? TBS.ownSetOf(TBS.tabOwners({ targets, holders }), key) : null;
+      if (!own) { log.warn?.(`[browser] ${key} on ${p.id}: its window could not be read (${why}) — its tabs are left to the browser's next start`); return 0; }
+      let n = 0;
+      for (const id of own) { try { const r = await (typeof closeTargetFn === 'function' ? closeTargetFn(cdp, id) : require('./browser-viewport.js').closeTarget(cdp, id)); if (!r || r.ok !== false) n++; } catch { /* gone already */ } }
+      log.log?.(`[browser] ${key} on ${p.id}: the job's window closed — ${n} tab(s) (${why})`);
+      return n;
+    };
   }
   /** The live set every carrier rule reads: the live sessions' keys + the handles of RUNNING jobs. */
   function liveKeys() {
@@ -5962,7 +6020,9 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     return b ? `${/[\s"'$`\\]/.test(b) ? JSON.stringify(b) : b} install` : bare;
   }
   /** The New profile… dialog's build section: a machine's builds before any profile exists. */
-  async function machineBuilds(hostId = null) { return { host: hostId || null, listing: await buildsFor(hostId || null), installCommand: installCommandFor(hostId || null), download: downloadOffer(hostId || null) }; }
+  // lane remote-profile-start: + `ready` — can a browser run on that machine at all (its CLI, a Chrome), with the ONE step for
+  // ITS platform; null for this computer (its own CLI flows) and for an agent that predates the fact (never claimed missing)
+  async function machineBuilds(hostId = null) { const listing = await buildsFor(hostId || null); return { host: hostId || null, listing, installCommand: installCommandFor(hostId || null), download: downloadOffer(hostId || null), ready: hostId && listing && listing.ready ? listing.ready : null }; }
   /**
    * CHANGE BUILD… (lane browser-admin 2a). THE verdict (well-formed · the user's · chromium · on that machine's list /
    * a runnable file · the §7.4 version ladder when the directory was ever written — a downgrade refused by name, an
@@ -6888,7 +6948,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     ensureEphemeral, retireEphemeral, ephemerals, ephemeralFor, isEphemeral: (id) => isEph(profile(id)), nsOf,
     restoreRebound: keepRebound, // verify r3 (F4): the route puts a note back when the answer that carried it could not be delivered (the client gone)
     liveHoldingFor, // lane H: the session card / status chip's `browserLive` fact
-    factView, factFor, pinnedBy, clearPin, removeVerdict, onChange, creditUserInput, // lane S2: THE browser fact, the delete's refuse-or-warn, the re-publish hook, the input receipt's credit
+    factView, factFor, pinnedBy, clearPin, removeVerdict, removeOnMachine, onChange, creditUserInput, // lane S2: THE browser fact, the delete's refuse-or-warn, the re-publish hook, the input receipt's credit
     holdersFor: (browserKey) => { ensureLoaded(); return holders(B.leasesOf(reg.leases, String(browserKey || ''), { children: true })); }, // lane H: THE holder rows of one conversation (the recorder arms only on a holder)
     socketRootOf, // takeover r2: the root every command of a browser this keeper runs must land under
     configFileFor, machineConfigFile, // takeover r3: the config a command on a browser this keeper runs is NAMED with

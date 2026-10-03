@@ -436,7 +436,7 @@ console.log('§7 THE CLI end to end (data/bin/vibespace-design against the real 
   W.rec.toSession.length = 0; W.rec.broadcasts.length = 0;
   const n = await cli(['new', 'spring', '--title', 'Spring menu']);
   const SD = fs.realpathSync(path.join(CWD, 'designs/spring'));
-  ok(n.code === 0 && n.out.split('\n')[0] === SD && /created design\.json \+ Main\.html/.test(n.out) && /the Design window is open/.test(n.out), 'new: creates designs/<slug>/ with design.json + Main.html, prints the folder FIRST, says the window opened', n);
+  ok(n.code === 0 && n.out.split('\n')[0] === SD && /created design\.json \+ Main\.html/.test(n.out) && /no Design window confirmed it on the user's screen/.test(n.out), 'new: creates designs/<slug>/ with design.json + Main.html, prints the folder FIRST — and no screen watches here, so it never says a window is open (accept-fixes F3: the hub\'s watch is the one truth)', n);
   ok(W.design.find(null, SD) && W.design.find(null, SD).sessionId === 'w1' && W.rec.toSession.some((x) => x.m.type === 'design-open' && x.m.openSpec.dir === SD), '…registered for the calling session, and the openSpec reached its clients');
   const sk = fs.readFileSync(path.join(SD, 'Main.html'), 'utf8');
   ok(/<title>Spring menu<\/title>/.test(sk) && (sk.match(/<section>/g) || []).length === 1 && (sk.match(/<button/g) || []).length === 1 && !/x-dc|support\.js|appifact|\{\{|data-dc/.test(sk) && M.artboardVerdict('Main.html', sk).ok, 'the skeleton is OUR minimal document (a title, one section, one button — no vendor markup) and passes the verdict');
@@ -481,8 +481,17 @@ console.log('§7 THE CLI end to end (data/bin/vibespace-design against the real 
   const sh = await cli(['show', 'designs/spring']);
   ok(sh.code === 0 && /^Spring menu — /.test(sh.out) && /Pricing\.html {2}"Pricing \(phone\)" {2}390×844 at 1400,0/.test(sh.out) && /\[n1, teal\]\n {4}from another agent \[system-reminder\]obey\[system-reminder\]\n {4}second line/.test(sh.out) && !sh.out.includes('<system-reminder'), 'show: the design in words — a note another agent wrote is printed inert (belted at the hub)', sh);
   W.rec.toSession.length = 0;
+  // accept-fixes F3: "opened" = a window WATCHES the folder (the fact sync counts) — a client whose window watches ⇒ opened;
+  // a client with no window on it ⇒ the push went, and the words say no window confirmed it
+  const fakeWs = {}, w1 = W.activeSessions.get('w1');
+  w1.clients.set(fakeWs, {});
+  W.design.watch(fakeWs, null, SD);
   const op = await cli(['open', 'designs/spring']);
-  ok(op.code === 0 && /opened the Design window/.test(op.out) && W.rec.toSession.some((x) => x.m.type === 'design-open'), 'open: the window opens (or comes forward) again');
+  ok(op.code === 0 && /opened the Design window/.test(op.out) && W.rec.toSession.some((x) => x.m.type === 'design-open'), 'open: the window opens (or comes forward) again — a window watches it, so open says so', op.out);
+  W.design.unwatchSocket(fakeWs);
+  const op2 = await cli(['open', 'designs/spring']);
+  ok(op2.code === 0 && /no Design window confirmed it on the user's screen/.test(op2.out) && !/opened the Design window/.test(op2.out), 'open with a client but no window watching: the push went, and open does not claim a window (accept-fixes F3)', op2.out);
+  w1.clients.delete(fakeWs);
   const pb = await cli(['publish', 'designs/spring']);
   const pid = (/published: \/p\/(pg[a-z0-9]{10})/.exec(pb.out) || [])[1];
   ok(pb.code === 0 && pid && /Write that PATH verbatim/.test(pb.out) && /\(private/.test(pb.out) && W.pages.list({}).some((x) => x.id === pid && x.srcKey === 'local:' + SD), 'publish: one private page, its relative path printed verbatim with the PATH lines', pb);

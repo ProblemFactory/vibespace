@@ -891,6 +891,19 @@ app.post('/api/tasks/:id/progress', (req, res) => {
   try { res.json({ success: true, task: tasks.addProgress(req.params.id, req.body || {}) }); }
   catch (e) { res.status(e.message === 'task not found' ? 404 : 400).json({ error: e.message }); }
 });
+// OLDER ACTIVITY (2.369.204): one page of a group's Activity log older than ?before=<ms> (≤ ?limit=200) — the live
+// list, then data/task-groups-archive/ — for the Task log window's scroll. The owner (cookie); an agent's token reads
+// only a group it belongs to (the vibespace-task scope), a job token none.
+app.get('/api/tasks/:id/progress', (req, res) => {
+  const bearer = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  if (/^(vsst_|jbt_)/.test(bearer)) {
+    const hit = bearer.startsWith('vsst_') ? [...activeSessions].find(([, s]) => sameToken(bearer, s.agentToken)) : null;
+    const mine = !!hit && tasks.groupsForSession({ sessionKey: sessionStatusKey(hit[1], hit[0]), cwd: hit[1].cwd, initialGroupId: hit[1]._initialGroupId }).some((g) => g.id === req.params.id);
+    if (!mine) return res.status(403).json({ error: 'this session does not belong to that Task Group', code: 'not_member' });
+  }
+  try { res.json({ success: true, ...tasks.readProgress(req.params.id, { before: req.query.before, limit: req.query.limit }) }); }
+  catch (e) { res.status(e.message === 'task not found' ? 404 : 400).json({ error: e.message }); }
+});
 // P4 repo task files: export a task to a committable markdown file / import one.
 app.post('/api/tasks/:id/export', (req, res) => {
   try { res.json({ success: true, path: tasks.exportToFile(req.params.id, req.body?.path) }); }
@@ -1799,7 +1812,7 @@ const desktopKeeper = require('./src/server/desktop-app-keeper.js').create({
   access: () => desktopAccess, hostLabel: (h) => { try { return hosts.get(h).name || h; } catch { return h; } }, // lane C2: a paired machine's apps (late-bound — the access layer needs this keeper's machine half)
   remoteHosts: () => { try { return hosts.list().filter((h) => (h.transport === 'dial' ? h.online : h.dialLive)).map((h) => h.id); } catch { return []; } }, // boot: every dialed-in machine is asked what it runs
 });
-const desktopAccess = require('./src/server/desktop-access.js').create({ hosts, local: () => desktopKeeper.machine, env: () => require('./src/ws-handler').agentEnv(), log: console }); // lane C1 (design-desktop-apps-seamless §3.5): the ONE transport to an app's machine — device #0 in-process against the keeper's OWN machine half, a paired device / an ssh host (its daemon installed over ssh) through the `desktop-serve` agentd op, a handle that cannot run the op refused host_needs_daemon
+const desktopAccess = require('./src/server/desktop-access.js').create({ hosts, local: () => desktopKeeper.machine, env: () => require('./src/ws-handler').agentEnv(), log: console, audit: (line) => { try { return exitProxy.audit(line); } catch { return null; } } }); // lane C1 (design-desktop-apps-seamless §3.5): the ONE transport to an app's machine — device #0 in-process against the keeper's OWN machine half, a paired device / an ssh host (its daemon installed over ssh) through the `desktop-serve` agentd op, a handle that cannot run the op refused host_needs_daemon
 const appsWiring = require('./src/server/apps-wiring.js').install({ app, access: desktopAccess, userTodos, deliver, activeSessions: () => activeSessions, sessionStatusKey, broadcast: (m) => bcastAll(m), dataDir: path.join(__dirname, 'data'), log: console, throwawayRoot }); // Layer 0 apps (docs/design-app-persistence.zh.md §3.1): the user's door + an agent's proposals over the machine's ONE package slot; the rebuilt machine's replay runs after listen
 // P9 window targets (design-agent-browser-v2 §4.9 / §6.6): ONE wiring — the RFB bridge's input policy IS the engine's lease verdict, the routes (user + agent) and the shared handback announcer ride the same engine (src/server/window-live-wiring.js)
 const { desktopStream, windowEngine, boot: bootWindowLeases, shutdown: shutdownWindowLeases } = require('./src/server/window-live-wiring.js').install({

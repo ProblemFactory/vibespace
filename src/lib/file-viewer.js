@@ -11,6 +11,7 @@ import { openWithVerdict } from '../office-open.js'; // §7.9: the viewer's "Ope
 import { init as initPptx } from 'pptx-preview';
 import { t } from './i18n.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
+import { fsErrorText } from './file-explorer-ops.js'; // verify-r2: a Files refusal in the reader's language
 
 /** The viewer types renderInto draws itself (its if-chain, one entry each —
  *  scripts/test-window-binding-model.mjs pins the two lists equal); any other
@@ -140,7 +141,7 @@ class FileViewer {
       } else if (viewerType === 'xlsx') {
         const res = await fetch(`/api/file/excel?path=${encodeURIComponent(filePath)}${hq}`);
         const data = await res.json();
-        if (data.error) throw new Error(data.error);
+        if (data.error) throw new Error(fsErrorText(data));
         // Sheet tabs + table viewer
         const viewer = document.createElement('div'); viewer.className = 'sheet-viewer';
         const tableWrap = document.createElement('div'); tableWrap.className = 'sheet-table-wrap';
@@ -239,7 +240,7 @@ class FileViewer {
     const root = document.createElement('div'); root.className = 'archive-viewer';
     if (!res.ok || data.error) {
       const err = document.createElement('div'); err.className = 'archive-empty';
-      err.textContent = t('Cannot read archive: {msg}', { msg: data.error || t('unknown error') });
+      err.textContent = t('Cannot read archive: {msg}', { msg: (data.error && fsErrorText(data)) || t('unknown error') });
       root.appendChild(err);
       container.appendChild(root);
       return;
@@ -286,7 +287,7 @@ class FileViewer {
             try {
               const r = await fetch('/api/archive/extract-entry', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: filePath, entry: e.name, ...(host ? { host } : {}) }) });
               const d = await r.json().catch(() => ({}));
-              if (!r.ok) { showToast(t('Open failed: {msg}', { msg: d.error || '' }), { type: 'error' }); return; }
+              if (!r.ok) { showToast(t('Open failed: {msg}', { msg: (d.error && fsErrorText(d)) || '' }), { type: 'error' }); return; }
               app.openFile(d.path, e.name.split('/').pop(), { via: { kind: 'archive-entry', archive: filePath, entry: e.name }, ...(host ? { host } : {}) });
             } finally { row.style.opacity = ''; }
           };
@@ -310,7 +311,7 @@ class FileViewer {
       showToast(t('Extracting\u2026'));
       const r = await fetch('/api/archive/extract', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: filePath, dest: d.trim(), overwrite: false, ...(host ? { host } : {}) }) }).catch(() => null);
       const dd = await r?.json().catch(() => ({}));
-      if (!r?.ok) showToast(t('Extract failed: {msg}', { msg: dd?.error || '' }), { type: 'error' });
+      if (!r?.ok) showToast(t('Extract failed: {msg}', { msg: (dd?.error && fsErrorText(dd)) || '' }), { type: 'error' });
       else showToast(t('Extracted to {name}', { name: d.trim() }));
     };
 
@@ -700,7 +701,7 @@ class FileViewer {
       const p = (async () => {
         const res = await fetch(`/api/file/csv?path=${encodeURIComponent(filePath)}&offset=${offset}&limit=${PAGE_SIZE}&sep=${encodeURIComponent(sep)}${hq}`);
         const data = await res.json();
-        if (data.error) throw new Error(data.error);
+        if (data.error) throw new Error(fsErrorText(data));
         if (!header && data.header) header = data.header;
         if (data.total && data.total > total) {
           total = data.total;

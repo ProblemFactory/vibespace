@@ -58,6 +58,10 @@
 // forwarded, and the button release still reaches X once — from wherever the pointer is let go (a document-level
 // pointerup, per-press AbortController) — so the app never sees a button stuck down. `onMain(meta|null)` and
 // `onState(changed)` name the main window's metadata (its `decorations`) and the app's own maximize / minimize.
+// THE APP'S FIXED SIZE (lane app-fit-fixed, 2026-10-03, the owner: 「对于自己定死尺寸的窗口我们应该遵循他们的尺寸并且禁止缩放」):
+// the client's `on.fixed` (a window whose size the app fixes — WeChat's login, Inkscape's welcome) is handed to the
+// window in CSS px (`onFixedSize({w,h}|null)` — device ÷ the ratio, rounded up) and the window ADOPTS it; while
+// `fixedFollows()` says the window does (off the phone layout) the picture is NEVER scaled to fit — no badge.
 import { t } from './i18n.js';
 import { dragEndVerdict } from './drag-end.js'; // the hand-over's hold ends as the WM's drag does (verify r1)
 import { showToast } from './utils.js';
@@ -111,6 +115,8 @@ export function startingText(ms) {
  *   onStatus      — (state, detail) observer: 'starting' | 'connecting' | 'connected' | 'disconnected' | 'error'
  *   onTitle(text) / onIcon(dataUrl|null) — the app window's own title and icon
  *   onMinSize({w,h}|null) — the smallest pane (CSS px) the app fits in unscaled (its minimum ÷ the ratio)
+ *   onFixedSize({w,h}|null) — the pane (CSS px) the app's FIXED window needs (lane app-fit-fixed); null = none
+ *   fixedFollows  — () => true when the window adopts that size (then the picture is never scaled); default true
  *   dpi           — the DISPLAY's font dpi (the record's `dpi`) — the client's hello/display dpi (a number or a function)
  *   onMain(meta|null) / onState(changed) — the main window's metadata; the app's own maximize / minimize (seamless)
  *   onMoveResize(ev) — the app's header bar moves/resizes its window: {direction, button, main, press:{clientX,clientY}|null}
@@ -121,7 +127,7 @@ export function startingText(ms) {
  * Returns { container, bar, mount, pane, status, connect, disconnect, setStatus, addControl,
  *           focus, dispose, setViewOnly, get client, get state, get wanted, windows() }.
  */
-export function createXpraView(host, { url, workerUrl, before = null, labels = {}, autoReconnect = false, onStatus = null, onTitle = null, onIcon = null, onMinSize = null, onMain = null, onState = null, onMoveResize = null, dpi = 96, pixelRatio = () => (typeof devicePixelRatio === 'number' ? devicePixelRatio : 1), pictureScale = () => 1, Worker: WorkerCtor = undefined, decode = defaultDecode, now = undefined, secure = null, clipboardApi = null, log = console } = {}) {
+export function createXpraView(host, { url, workerUrl, before = null, labels = {}, autoReconnect = false, onStatus = null, onTitle = null, onIcon = null, onMinSize = null, onMain = null, onState = null, onMoveResize = null, onFixedSize = null, fixedFollows = () => true, dpi = 96, pixelRatio = () => (typeof devicePixelRatio === 'number' ? devicePixelRatio : 1), pictureScale = () => 1, Worker: WorkerCtor = undefined, decode = defaultDecode, now = undefined, secure = null, clipboardApi = null, log = console } = {}) {
   const shell = createPictureShell(host, { labels: { starting: t('Starting application…'), unavailable: t('Desktop app unavailable'), ...labels }, autoReconnect, onStatus, background: 'var(--bg-primary)', focus: () => focus() });
   const { container, bar, mount, status, pasteBtn, reBtn, labels: L, setStatus, addControl, emit } = shell;
 
@@ -154,6 +160,7 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
   let stageOffset = { x: 0, y: 0 };
   let minSize = null; // the smallest pane (CSS px) — minPaneCss(the main's constraints, the ratio)
   let constraints = null; // the main window's size constraints (device px), as the client last named them
+  let fixedDev = null, fixedCss = null; // lane app-fit-fixed: the app's FIXED window (device px, as the client named it) and its pane (CSS px)
   // LANE D (a): the SCREEN's ratio and the picture's own scale — the windows are laid out at their quotient: X px per CSS
   // px = devicePixelRatio ÷ pictureScale (1.5× on a 2× screen = a GDK_SCALE-2 picture at 2.667 X px per CSS px, shown
   // at 0.75); a pictureScale of 1 is the 1:1 picture of 2.369.158, bit for bit
@@ -190,7 +197,7 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
       let bw = 0, bh = 0;
       if (mode === 'watch') {
         for (const w of client.windows.values()) if (w.kind !== 'popup') { bw = Math.max(bw, (w.x + w.w) / drawRatio); bh = Math.max(bh, (w.y + w.h) / drawRatio); }
-      } else if (minSize) {
+      } else if (minSize && !(fixedCss && fixedFollows())) { // a FIXED window the window adopts is never scaled (lane app-fit-fixed)
         const main = client.mainWid ? client.windows.get(client.mainWid) : null;
         if (main && !main.premap) { bw = (main.x + main.w) / drawRatio; bh = (main.y + main.h) / drawRatio; } // a main being announced has no fit yet (lane D (a) F3)
       }
@@ -221,6 +228,15 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
     if ((m && minSize && m.w === minSize.w && m.h === minSize.h) || (!m && !minSize)) return;
     minSize = m;
     try { onMinSize?.(m ? { ...m } : null); } catch {}
+    fitStage();
+  };
+  /** lane app-fit-fixed: the app's FIXED window (device px) → the pane it needs (CSS px, rounded up) → the window (onFixedSize). */
+  const applyFixed = (f) => {
+    fixedDev = f ? { w: f.w, h: f.h } : null;
+    const m = fixedDev ? { w: Math.ceil(fixedDev.w / drawRatio - 1e-9), h: Math.ceil(fixedDev.h / drawRatio - 1e-9) } : null;
+    if ((m && fixedCss && m.w === fixedCss.w && m.h === fixedCss.h) || (!m && !fixedCss)) return;
+    fixedCss = m;
+    try { onFixedSize?.(m ? { ...m } : null); } catch {}
     fitStage();
   };
   const wins = new Map(); // wid → { el, canvas, ctx }
@@ -441,6 +457,7 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
       drawRatio = r; drawK = pictureK();
       for (const win of client.windows.values()) { const w = wins.get(win.wid); if (w) place(win, w); }
       applyConstraints(constraints);
+      applyFixed(fixedDev);
     }
     const s = paneSize(); client.resize(s.width, s.height); fitStage();
   };
@@ -525,6 +542,7 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
         icon: ({ data }) => { const u = pngDataUrl(data); if (u) { try { onIcon?.(u); } catch {} } },
         clipboard: onClipboard,
         constraints: applyConstraints,
+        fixed: applyFixed,
         // the cursor image is device px: at a ratio > 1 it is declared at that density (image-set) so it keeps its
         // size on screen — assigned after the plain url(), which stays when a browser rejects the image-set form
         cursor: (cur) => {
@@ -564,5 +582,5 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
   const closeApp = () => (client ? client.closeMain() : false);
   /** seamless: the display is told what our window did (maximized / iconified) — the client's setMainState. */
   const setAppState = (st) => (client ? client.setMainState(st) : false);
-  return { container, bar, mount, pane, stage, ime, status, chip, fitBadge, resnap, connect, disconnect, setStatus: statusFromOutside, starting: () => waitWords(L.starting), addControl, focus, dispose, setViewOnly, setMode, windows, closeApp, setAppState, rootToClient, setFloatingChip: shell.setFloatingChip, get wmHeld() { return !!wmHold; }, get mode() { return mode; }, get stageScale() { return stageScale; }, get ratio() { return drawRatio; }, get pictureScale() { return drawK; }, get minSize() { return minSize ? { ...minSize } : null; }, get stageOffset() { return { ...stageOffset }; }, get client() { return client; }, get state() { return shell.state; }, get wanted() { return shell.wanted; }, get chipText() { return shell.copiedText; }, get hintShown() { return shell.hintShown; }, get copyHint() { return shell.copyHint; }, get pasteOpen() { return shell.pasteOpen; } };
+  return { container, bar, mount, pane, stage, ime, status, chip, fitBadge, resnap, connect, disconnect, setStatus: statusFromOutside, starting: () => waitWords(L.starting), addControl, focus, dispose, setViewOnly, setMode, windows, closeApp, setAppState, rootToClient, fixedSize: () => (fixedCss ? { ...fixedCss } : null), setFloatingChip: shell.setFloatingChip, get wmHeld() { return !!wmHold; }, get mode() { return mode; }, get stageScale() { return stageScale; }, get ratio() { return drawRatio; }, get pictureScale() { return drawK; }, get minSize() { return minSize ? { ...minSize } : null; }, get stageOffset() { return { ...stageOffset }; }, get client() { return client; }, get state() { return shell.state; }, get wanted() { return shell.wanted; }, get chipText() { return shell.copiedText; }, get hintShown() { return shell.hintShown; }, get copyHint() { return shell.copyHint; }, get pasteOpen() { return shell.pasteOpen; } };
 }

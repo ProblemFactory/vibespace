@@ -9,6 +9,7 @@ import { classifyPrivateKey } from '../ssh-key-format.js'; // shared with the se
 import { dialRowState, pairNameVerdict, pairNameShown, deviceIdOf, commandOsOf } from '../dial-facts.js'; // lane-pairing ③: THE one dial state of a machine row (PURE, bundled); verify-r4 F6: the name rule + its collision verdict
 import { dialAddressPicker, dialStateText, generateConsequenceText } from './dial-address-picker.js'; // lane-pairing ①③: the address choice + the state's words
 import { openExitAccessDialog, exitSummaryText, lastRunText, agentUpgradeText } from './exit-access-dialog.js'; // lane-pairing ⑥: "Who can use it" 
+import { openExitRunsDialog } from './exit-runs-dialog.js'; // lane exit-see-whole: the machine's command list, ONE click from its row (the icon + the last-run line)
 import { platformLabel } from '../exit-shell.js'; // lane-exit-run-output E1: the device's stated platform on its row (its shell follows it: Windows ⇒ cmd.exe)
 
 
@@ -38,6 +39,8 @@ const MI = {
   // on-demand exit / egress: a box (the agent) with an arrow leaving it
   exit: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2H3v12h6"/><path d="M7 8h7M11 5l3 3-3 3"/></svg>',
   wrench: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2.5a3.5 3.5 0 00-3.3 4.6L2.5 10.8a1.4 1.4 0 002 2l3.7-3.7a3.5 3.5 0 004.5-4.4L10.5 7 9 5.5l2.3-2.2a3.5 3.5 0 00-1.8-.8z"/></svg>',
+  // lane exit-see-whole: the machine's command list (bulleted lines)
+  list: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4h8M6 8h8M6 12h8"/><path d="M2.5 4h.01M2.5 8h.01M2.5 12h.01"/></svg>',
   termNew: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M4 6l2.5 2L4 10M8.5 10.5h3.5"/></svg>',
   key: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="8" r="3"/><path d="M8 8h6M11.5 8v2.5M14 8v2"/></svg>',
 };
@@ -741,6 +744,8 @@ export function installSidebarMounts(Sidebar) {
         ibtn(MI.exit, tr('Who can use "{name}" as an exit…', { name: h.name }),
           async () => { openExitAccessDialog(this.app, { hostId: h.id, name: h.name }); },
           (h.exit && ((h.exit.use && h.exit.use.mode && h.exit.use.mode !== 'nobody') || (h.exit.run && h.exit.run.mode && h.exit.run.mode !== 'nobody'))) ? 'mounts-icon-accent' : ''),
+        // lane exit-see-whole (design 013 piece 1c): the machine's command list ONE click from its row (it was two deep, under the exit icon)
+        ibtn(MI.list, tr('Commands run on {machine}', { machine: h.name }) + '…', async () => { openExitRunsDialog(this.app, { hostId: h.id, name: h.name }); }),
         ibtn(MI.termNew, isDial ? tr('New session on this device') : 'New session on this host', () => { this.app.showNewSessionDialog?.({ hostId: h.id, hostName: h.name }); }),
         ibtn(MI.cross, isDial ? tr('Unpair (the device can no longer dial in)') : 'Remove host', async () => {
           const ok = await showConfirmDialog(isDial
@@ -781,10 +786,12 @@ export function installSidebarMounts(Sidebar) {
         ex.textContent = exitSummaryText(h.exit);
         row.appendChild(ex);
         if (h.exit && h.exit.lastRun) {
-          const lr = document.createElement('div');
+          // lane exit-see-whole: the last-run line IS a way in — it opens the command list (the whole command there, no hover title)
+          const lr = document.createElement('button');
+          lr.type = 'button';
           lr.className = 'mounts-path mounts-exit-line mounts-exit-last';
           lr.textContent = lastRunText(h.exit.lastRun);
-          lr.title = h.exit.lastRun.cmd || '';
+          lr.onclick = (e) => { e.stopPropagation(); openExitRunsDialog(this.app, { hostId: h.id, name: h.name }); };
           row.appendChild(lr);
         }
         // lane device-upgrade-stuck: the agent's failed update stays on the row until the device reports the version

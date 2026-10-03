@@ -54,6 +54,9 @@ function refuse(code, extra = {}) {
   return { ok: false, code, ...extra };
 }
 const cleanCmd = (s, max) => String(s == null ? '' : s).replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, max);
+// lane exit-see-whole: THE COMMAND AS ITSELF on the owner's surfaces (the card, the audit line, the Commands list) — its
+// lines and tabs kept, a CR as a line end, the other C0 controls and DEL as spaces (hidden characters never get here: `run` refuses them)
+const cleanLines = (s, max) => String(s == null ? '' : s).replace(/\r\n?/g, '\n').replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, ' ').slice(0, max);
 const cmdBytes = (s) => (typeof Buffer !== 'undefined' ? Buffer.byteLength(String(s), 'utf8') : unescape(encodeURIComponent(String(s))).length);
 // verify-r5 X2 — CHARACTERS THAT CHANGE THE ORDER A COMMAND IS DISPLAYED IN ("Trojan Source": the Unicode bidi embedding /
 // override / isolate controls U+202A–E and U+2066–9, the marks U+200E / U+200F / U+061C). `echo hi<RLO><LRI> ; touch ~/m
@@ -355,14 +358,26 @@ function withoutHalfMarker(t) {
   return REDACTED.startsWith(t.slice(i)) ? t.slice(0, i) : t;
 }
 /** The structured block the chat card carries beside its words (exit-proxy builds it, the renderer draws it). */
-function cardOutput({ code = null, ms = 0, timedOut = false, truncated = false, spawnError = null, interpreter = null, heads = null } = {}) {
+function cardOutput({ code = null, ms = 0, timedOut = false, truncated = false, spawnError = null, interpreter = null, heads = null, cmd = null } = {}) {
   const h = heads && typeof heads === 'object' ? heads : { stdout: '', stderr: '', cut: { stdout: false, stderr: false } };
   return {
     code: Number.isInteger(code) ? code : null, ms: Number(ms) || 0, timedOut: !!timedOut, truncated: !!truncated,
     spawnError: spawnErrorOf(spawnError), interpreter: knownInterpreter(interpreter),
     stdout: judgeHead(h.stdout), stderr: judgeHead(h.stderr),
     cut: { stdout: !!(h.cut && h.cut.stdout), stderr: !!(h.cut && h.cut.stderr) },
+    // lane exit-see-whole (design 013 piece 1a): the WHOLE command the run sent (≤ CMD_MAX, its lines kept) — the card draws it
+    // above the output, folded by `cmdFold`; the head line (`cardText`) keeps its 80 characters
+    ...(typeof cmd === 'string' && cmd.trim() ? { cmd: cleanLines(cmd, CMD_MAX) } : {}),
   };
+}
+/** lane exit-see-whole (design 013 piece 1a): THE FOLD of a shown command — folded past CMD_FOLD_LINES lines, or one line
+ *  longer than CMD_FOLD_CHARS (it wraps past four lines on a phone); the expander names what it opens: the line count, or
+ *  the length of a one-line command. → `{lines, chars, folded}`. */
+const CMD_FOLD_LINES = 4, CMD_FOLD_CHARS = 240;
+function cmdFold(cmd) {
+  const c = String(cmd == null ? '' : cmd);
+  const lines = c ? c.split('\n').length : 0;
+  return { lines, chars: c.length, folded: lines > CMD_FOLD_LINES || c.length > CMD_FOLD_CHARS };
 }
 /**
  * ONE history row off an audit line (the owner's `GET /api/hosts/:id/exit-runs`, the agent's `vibespace-exit runs`):
@@ -379,7 +394,7 @@ function runRow(l, { agent = false } = {}) {
     id: typeof l.id === 'string' ? l.id.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 32) || null : null,   // verify r2 F7: the line's own key (an older line has none)
     at: Number(l.at) || 0, hostId: typeof l.hostId === 'string' ? l.hostId.slice(0, 120) : null, machine: cleanCmd(l.machine, 120),
     ...(agent ? {} : { name: cleanCmd(l.name, 120), sessionKey: typeof l.sessionKey === 'string' ? l.sessionKey.slice(0, 200) : null }),
-    cmd: cleanCmd(l.cmd, CMD_MAX), outcome,
+    cmd: agent ? cleanCmd(l.cmd, CMD_MAX) : cleanLines(l.cmd, CMD_MAX), outcome,   // lane exit-see-whole: the owner's list keeps the lines; an agent's `runs` one line
     code: Number.isInteger(l.code) ? l.code : null, ms: Number(l.ms) || 0,
     timedOut: !!l.timedOut, truncated: !!l.truncated, asked: !!l.asked, revokedDuringRun: !!l['revoked-during-run'],
     refusal: outcome === 'refused' ? refusal : null, spawnError: sf,
@@ -521,9 +536,9 @@ function migrateExitAccess(h, { now = Date.now() } = {}) {
 module.exports = {
   agentVersionOf, reinstallStep,
   GRANTS, MODES, WHO_MAX, REFUSALS, EXIT_RUN_TIMEOUT_MS, ASK_TTL_MS, CMD_MAX, LAST_RUN_CMD_MAX, ASK_STATES, WAY_OUT,
-  OUTPUT_HEAD_BYTES, RUNS_DEFAULT, RUNS_MAX, RUN_SHELL_CAP,
+  OUTPUT_HEAD_BYTES, RUNS_DEFAULT, RUNS_MAX, RUN_SHELL_CAP, CMD_FOLD_LINES, CMD_FOLD_CHARS,
   sessionKeyOf, callerKeys, principalsNow, cmdBytes, hiddenOrderOf,
   exitAccessOf, exitVerdict, agentView, exitStamp, exitBaseVerdict, patchVerdict, storedExit,
   askState, answerVerdict, runRecord, resolveMachine, refusalText, cardText, cliLine, summaryOf, anyGrant, migrateExitAccess,
-  spawnErrorOf, outputHeads, outputPreview, cardOutput, runRow, platformLabel, interpreterOf, knownInterpreter, spawnFailureText,
+  spawnErrorOf, outputHeads, outputPreview, cardOutput, cmdFold, cleanLines, runRow, platformLabel, interpreterOf, knownInterpreter, spawnFailureText,
 };

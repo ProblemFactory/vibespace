@@ -70,6 +70,7 @@ class FakeRFB {
   disconnect() { this.disconnected++; }
   clipboardPasteFrom(t) { this.pasted.push(t); }
   focus() { this.focused = (this.focused || 0) + 1; }
+  sendCredentials(c) { (this.sent ||= []).push(c); } // design 014 D1
 }
 FakeRFB.instances = [];
 const loadRFB = async () => FakeRFB;
@@ -569,6 +570,43 @@ process.on('SIGTERM', () => { try { fs.unlinkSync(lock(n)); } catch {} process.e
     await sleep(100);
     try { fs.rmSync(dataDir, { recursive: true, force: true }); fs.rmSync(xdir, { recursive: true, force: true }); } catch { }
   }
+}
+
+// ── design 014 D1 (lane desktop-vnc-native): a Windows / macOS machine's whole desktop through the same view ──
+console.log('§D014 a machine\'s whole desktop: the sign-in is asked in the page and handed to noVNC only; a refused sign-in stops the ladder; the server is never asked to resize');
+{
+  const nap = (ms) => new Promise((r) => setTimeout(r, ms));
+  FakeRFB.instances.length = 0;
+  const asked = [];
+  let answer = { username: 'mart', password: 'Sekr3t!x' };
+  const view = V.createVncView(new El('div'), { url: 'wss://vibe.example/api/desktop/machine-desktop.mac-a/stream', autoReconnect: true, resizeSession: false, loadRFB, credentials: async (types) => { asked.push(types); return answer; } });
+  await view.connect();
+  const rfb = FakeRFB.instances[0];
+  ok(rfb && rfb.resizeSession === false && rfb.scaleViewport === true, 'a whole desktop is SCALED into the window and the server is never asked to resize (resizeSession off)');
+  view.setMode('watch'); view.setMode('active');
+  ok(rfb.resizeSession === false, 'becoming active again keeps resizeSession off (setMode honours the option)');
+  rfb.emit('credentialsrequired', { types: ['username', 'password'] });
+  await nap(5);
+  ok(asked.length === 1 && JSON.stringify(asked[0]) === '["username","password"]' && JSON.stringify(rfb.sent) === JSON.stringify([answer]), 'credentialsrequired ⇒ the page asks ONCE with the server\'s types (ARD: name + password) and noVNC gets exactly the answer');
+  rfb.emit('securityfailure', { reason: 'Authentication failed' });
+  rfb.emit('disconnect', { clean: false });
+  await nap(1300);
+  ok(FakeRFB.instances.length === 1 && view.wanted === false && /refused the sign-in: Authentication failed/.test(view.status.textContent), 'a refused sign-in is NAMED and the reconnect ladder does not run (no password loop)', view.status.textContent);
+  answer = null;
+  await view.connect();
+  const rfb2 = FakeRFB.instances[1];
+  rfb2.emit('credentialsrequired', { types: ['password'] });
+  await nap(5);
+  rfb2.emit('disconnect', { clean: true });
+  await nap(1300);
+  ok(rfb2 && rfb2.disconnected === 1 && !rfb2.sent && FakeRFB.instances.length === 2 && view.wanted === false && /Sign-in cancelled/.test(view.status.textContent), 'a cancelled sign-in disconnects, sends nothing, says so, and does not retry', { st: view.status.textContent, n: FakeRFB.instances.length });
+  view.dispose();
+  const plain = V.createVncView(new El('div'), { url: 'wss://vibe.example/api/vnc', loadRFB });
+  await plain.connect();
+  const r3 = FakeRFB.instances[FakeRFB.instances.length - 1];
+  r3.emit('credentialsrequired', { types: ['password'] });
+  ok(r3.resizeSession === true && !r3.sent, 'CONTROL: without the options a view still asks the server to resize (every app window as before) and answers no sign-in');
+  plain.dispose();
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

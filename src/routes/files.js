@@ -55,7 +55,7 @@ function remoteStream(res, fn) {
 // (no isolation, but file browsing keeps working). Timeouts surface as
 // err.status===503 → the routes map that to a "storage not responding" reply.
 const { runOp: _runOpInline } = require('../safe-fs-worker');
-const { parseArchiveListing } = require('../remote-fs');
+const { parseArchiveListing, fsErrorBody } = require('../remote-fs'); // verify-r2: a Files refusal travels as a code the client words
 const { contentDisposition, fileNameOf } = require('../file-disposition');
 function sfs(req) {
   return req.app.locals.safeFs || {
@@ -90,7 +90,7 @@ router.use((req, res, next) => {
 
 router.get('/api/home', async (req, res) => {
   const R = rfs(req);
-  if (R) { try { return res.json({ home: await R.fs.home(R.host) }); } catch (e) { return res.status(400).json({ error: e.message }); } }
+  if (R) { try { return res.json({ home: await R.fs.home(R.host) }); } catch (e) { return res.status(400).json(fsErrorBody(e)); } }
   // repoDir: where THIS server runs from — the ⚙ "Update VibeSpace…" action
   // runs scripts/update.sh there (the client can't know the install path).
   // harnesses: installed-state per backend (S8) — the New Session picker hides
@@ -190,7 +190,7 @@ router.get('/api/dir-complete', async (req, res) => {
 
 router.get('/api/files', async (req, res) => {
   const R = rfs(req);
-  if (R) { try { return res.json(await R.fs.list(R.host, remotePath(req.query.path))); } catch (e) { return res.status(400).json({ error: e.message }); } }
+  if (R) { try { return res.json(await R.fs.list(R.host, remotePath(req.query.path))); } catch (e) { return res.status(400).json(fsErrorBody(e)); } }
   const dirPath = safePath(req.query.path || os.homedir());
   try {
     const { items } = await sfs(req).call('listDir', { path: dirPath });
@@ -205,7 +205,7 @@ router.get('/api/files', async (req, res) => {
 // File info (size + binary detection) without reading full content
 router.get('/api/file/info', async (req, res) => {
   const R = rfs(req);
-  if (R) { try { return res.json(await R.fs.info(R.host, remotePath(req.query.path))); } catch (e) { return res.status(400).json({ error: e.message }); } }
+  if (R) { try { return res.json(await R.fs.info(R.host, remotePath(req.query.path))); } catch (e) { return res.status(400).json(fsErrorBody(e)); } }
   const filePath = safePath(req.query.path);
   try {
     const info = await sfs(req).call('fileInfo', { path: filePath });
@@ -216,7 +216,7 @@ router.get('/api/file/info', async (req, res) => {
 // Read text file content (limit raised to 10MB)
 router.get('/api/file/content', async (req, res) => {
   const R = rfs(req);
-  if (R) { try { return res.json(await R.fs.readText(R.host, remotePath(req.query.path))); } catch (e) { return res.status(400).json({ error: e.message, size: e.size }); } }
+  if (R) { try { return res.json(await R.fs.readText(R.host, remotePath(req.query.path))); } catch (e) { return res.status(400).json({ ...fsErrorBody(e), size: e.size }); } }
   const filePath = safePath(req.query.path);
   try {
     const r = await sfs(req).call('readText', { path: filePath, maxSize: 10 * 1024 * 1024 });
@@ -383,28 +383,28 @@ function roMountHint(req, p, err) {
 
 router.post('/api/mkdir', async (req, res) => {
   const R = rfs(req);
-  if (R) { try { return res.json(await R.fs.mkdir(R.host, remotePath(req.body.path))); } catch (e) { return res.status(400).json({ error: e.message }); } }
+  if (R) { try { return res.json(await R.fs.mkdir(R.host, remotePath(req.body.path))); } catch (e) { return res.status(400).json(fsErrorBody(e)); } }
   try { await sfs(req).call('mkdir', { path: safePath(req.body.path) }); res.json({ success: true }); }
   catch (err) { res.status(err.status || 400).json({ error: err.message + roMountHint(req, req.body.path, err) }); }
 });
 
 router.post('/api/file/write', async (req, res) => {
   const R = rfs(req);
-  if (R) { try { return res.json(await R.fs.write(R.host, remotePath(req.body.path), Buffer.from(req.body.content || ''))); } catch (e) { return res.status(400).json({ error: e.message }); } }
+  if (R) { try { return res.json(await R.fs.write(R.host, remotePath(req.body.path), Buffer.from(req.body.content || ''))); } catch (e) { return res.status(400).json(fsErrorBody(e)); } }
   try { await sfs(req).call('writeFile', { path: safePath(req.body.path), content: req.body.content || '' }); res.json({ success: true }); }
   catch (err) { res.status(err.status || 400).json({ error: err.message + roMountHint(req, req.body.path, err) }); }
 });
 
 router.post('/api/rename', async (req, res) => {
   const R = rfs(req);
-  if (R) { try { return res.json(await R.fs.rename(R.host, remotePath(req.body.oldPath), remotePath(req.body.newPath))); } catch (e) { return res.status(400).json({ error: e.message }); } }
+  if (R) { try { return res.json(await R.fs.rename(R.host, remotePath(req.body.oldPath), remotePath(req.body.newPath))); } catch (e) { return res.status(400).json(fsErrorBody(e)); } }
   try { await sfs(req).call('rename', { oldPath: safePath(req.body.oldPath), newPath: safePath(req.body.newPath) }); res.json({ success: true }); }
   catch (err) { res.status(err.status || 400).json({ error: err.message + roMountHint(req, req.body.oldPath, err) }); }
 });
 
 router.delete('/api/file', async (req, res) => {
   const R = rfs(req);
-  if (R) { try { return res.json(await R.fs.remove(R.host, remotePath(req.query.path))); } catch (e) { return res.status(400).json({ error: e.message }); } }
+  if (R) { try { return res.json(await R.fs.remove(R.host, remotePath(req.query.path))); } catch (e) { return res.status(400).json(fsErrorBody(e)); } }
   const filePath = safePath(req.query.path);
   try {
     await sfs(req).call('remove', { path: filePath });
@@ -680,7 +680,7 @@ router.post('/api/archive', async (req, res) => {
       const names = paths.map(p => path.posix.basename(p));
       await R.fs.makeArchive(R.host, remotePath(dest), parent, names);
       return res.json({ success: true, dest });
-    } catch (e) { return res.status(400).json({ error: e.message }); }
+    } catch (e) { return res.status(400).json(fsErrorBody(e)); }
   }
   const absPaths = paths.map(safePath);
   const destPath = safePath(dest);
@@ -713,7 +713,7 @@ router.post('/api/archive', async (req, res) => {
 // List archive contents (preview without extracting)
 router.get('/api/archive/list', async (req, res) => {
   const R = rfs(req);
-  if (R) { try { return res.json(await R.fs.archiveList(R.host, remotePath(req.query.path))); } catch (e) { return res.status(400).json({ error: e.message }); } }
+  if (R) { try { return res.json(await R.fs.archiveList(R.host, remotePath(req.query.path))); } catch (e) { return res.status(400).json(fsErrorBody(e)); } }
   const fp = safePath(req.query.path || '');
   const type = archiveType(fp);
   if (!type) return res.status(400).json({ error: 'unsupported archive type' });
@@ -750,7 +750,7 @@ router.post('/api/archive/extract-entry', (req, res) => {
     const rOut = path.join(rTmp, path.basename(entry) || 'entry');
     return R.fs.archiveExtractEntry(R.host, remotePath(ap), entry, rOut)
       .then((r) => res.json({ path: rOut, size: r.size }))
-      .catch((e) => { try { fs.rmSync(rTmp, { recursive: true }); } catch {} res.status(e.status || 400).json({ error: e.message }); });
+      .catch((e) => { try { fs.rmSync(rTmp, { recursive: true }); } catch {} res.status(e.status || 400).json(fsErrorBody(e)); });
   }
   const fp = safePath(ap);
   const type = archiveType(fp);
@@ -819,7 +819,7 @@ function hadInterruptedExtract(fp, destDir) {
 router.get('/api/archive/extract-status', (req, res) => {
   const op = extractOps.get(String(req.query.id || ''));
   if (!op) return res.status(404).json({ error: 'unknown op' });
-  res.json({ done: op.done, total: op.total, status: op.status, error: op.error, dest: op.dest });
+  res.json({ done: op.done, total: op.total, status: op.status, error: op.error, dest: op.dest, code: op.code, params: op.params });
 });
 router.delete('/api/archive/extract-status', (req, res) => {
   const op = extractOps.get(String(req.query.id || ''));
@@ -846,11 +846,11 @@ router.post('/api/archive/extract', async (req, res) => {
       res.json({ success: true, opId });
       R.fs.archiveExtract(R.host, remotePath(ap), remotePath(dest))
         .then(() => { if (op.status !== 'cancelled') op.status = 'done'; })
-        .catch((e) => { if (op.status !== 'cancelled') { op.status = 'error'; op.error = String(e.message || e).split('\n')[0]; } })
+        .catch((e) => { if (op.status !== 'cancelled') { op.status = 'error'; op.error = String(e.message || e).split('\n')[0]; Object.assign(op, fsErrorBody(e), { error: op.error }); } })
         .finally(() => setTimeout(() => extractOps.delete(opId), 5 * 60 * 1000));
       return;
     }
-    try { return res.json(await R.fs.archiveExtract(R.host, remotePath(ap), remotePath(dest))); } catch (e) { return res.status(400).json({ error: e.message }); }
+    try { return res.json(await R.fs.archiveExtract(R.host, remotePath(ap), remotePath(dest))); } catch (e) { return res.status(400).json(fsErrorBody(e)); }
   }
   const fp = safePath(ap);
   const destDir = safePath(dest);
@@ -937,7 +937,7 @@ const PARTIAL_SUFFIX = '.vs-partial';
 router.get('/api/file/transfer-status', (req, res) => {
   const op = transferOps.get(String(req.query.id || ''));
   if (!op) return res.status(404).json({ error: 'unknown op' });
-  res.json({ done: op.done, total: op.total, status: op.status, error: op.error, dest: op.dest });
+  res.json({ done: op.done, total: op.total, status: op.status, error: op.error, dest: op.dest, code: op.code, params: op.params });
 });
 router.delete('/api/file/transfer-status', (req, res) => {
   const op = transferOps.get(String(req.query.id || ''));
@@ -972,7 +972,7 @@ function attachDuPoll(op, duFn) {
 function opSink(op, opId) {
   const done = (o) => {
     if (op.status === 'cancelled') return;
-    if (o && o.error) { op.status = 'error'; op.error = o.error; op.dest = o.dest || op.dest; }
+    if (o && o.error) { op.status = 'error'; op.error = o.error; op.dest = o.dest || op.dest; if (o.code) { op.code = o.code; op.params = o.params; } }
     else { op.status = 'done'; op.dest = o?.dest || op.dest; if (op.total) op.done = op.total; }
     setTimeout(() => transferOps.delete(opId), 5 * 60 * 1000);
   };
@@ -1142,7 +1142,7 @@ async function doCopy(req, res) {
       stop = attachDuPoll(op, () => remoteDuBytes(R.fs, R.host, req.body.dest));
     }
     try { return res.json(await R.fs.copy(R.host, remotePath(req.body.src), remotePath(req.body.dest))); }
-    catch (e) { return res.status(400).json({ error: e.message }); }
+    catch (e) { return res.status(400).json(fsErrorBody(e)); }
     finally { stop?.(); }
   }
   const { src, dest, overwrite } = req.body || {};
@@ -1169,7 +1169,7 @@ async function doMove(req, res) {
   const op = req._transferOp || null;
   if ((srcHost || destHost) && srcHost !== destHost) return crossHostTransfer(req, res, { move: true });
   const R = srcHost ? { fs: req.app.locals.getRemoteFs(), host: srcHost } : null;
-  if (R) { try { return res.json(await R.fs.move(R.host, remotePath(req.body.src), remotePath(req.body.dest))); } catch (e) { return res.status(400).json({ error: e.message }); } }
+  if (R) { try { return res.json(await R.fs.move(R.host, remotePath(req.body.src), remotePath(req.body.dest))); } catch (e) { return res.status(400).json(fsErrorBody(e)); } }
   const { src, dest, overwrite } = req.body || {};
   if (!src || !dest) return res.status(400).json({ error: 'src and dest required' });
   const s = safePath(src), d = safePath(dest);
@@ -1218,8 +1218,8 @@ router.get('/api/file/stat', async (req, res) => {
       // `du` here meant every REMOTE folder showed "unknown" after a du that
       // had run, shipped, and was dropped (B-b87b shape-drift class). `du` is
       // kept for any older client.
-      return res.json({ path: s.path, isDirectory: s.kind === 'directory', size: s.size, modified: s.modified, created: 0, mode: s.mode, uid: s.uid, gid: s.gid, du: s.du, duSize: s.du });
-    } catch (e) { return res.status(400).json({ error: e.message }); }
+      return res.json({ path: s.path, isDirectory: s.kind === 'directory', size: s.size, modified: s.modified, created: 0, mode: s.mode, uid: s.uid, gid: s.gid, du: s.du, duSize: s.du, duPartial: s.duPartial });
+    } catch (e) { return res.status(400).json(fsErrorBody(e)); }
   }
   const fp = safePath(req.query.path || '');
   try {

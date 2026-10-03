@@ -1013,6 +1013,7 @@ const GEOM_MACHINE = [
   ['stage-manager.js', '_giveHome', "the Stage hands a split borrowed frame's half its HOME (lane stage-blank r3–r5: a re-maximize over the home px, as _handBackHero does) — the Stage's own placement, never a user act (2.369.199 integration)"],
   ['window.js', '_putBackAfterRefusedDrop', 'a refused drop puts the window back where the drag began — the drag stamped its own witness'],
   ['window.js', '_setupDrag', "the title-bar drag's drop (snap / grid cell / range) — stamped at its pointerup above the drop"],
+  ['window.js', 'setFixedSize', "app-fit-fixed (the 2.369.204 integration): a window whose APP fixes its size is restored from maximized before the lock — the app's own size hints (xpra), applied alike on every client, never a user act"],
 ];
 function geomDoorCensus(files) {
   const out = [];

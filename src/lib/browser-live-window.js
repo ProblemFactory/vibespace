@@ -124,7 +124,8 @@
 import { t, tc } from './i18n.js';
 import { claimWords, backendName, dismissOutcomeWords } from './browser-switcher-model.js'; // the rebuilt switch dialog: the claim's words, a backend's name, the Dismiss answer (PURE)
 import { btn as textBtn } from './channel-chrome.js'; // the house text button (mounts-btn): the blocked banner's controls say what they do
-import { escHtml, fetchJson, showToast, showContextMenu, createPopover, showConfirmDialog, showInputDialog, COUNTER_ZOOM } from './utils.js';
+import { escHtml, fetchJson, showToast, showContextMenu, createPopover, showConfirmDialog, showInputDialog, COUNTER_ZOOM, copyText } from './utils.js';
+import { machineStepWords } from './browser-new-profile-model.js'; // lane remote-profile-start: a paired machine with no browser — the one step, copyable
 import { MODAL_OPEN_EVENT } from './utils.js'; // lane dialog-keys: every app modal says it opened (createModalShell, app._showDialog)
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { registerMenuItem } from './contributions.js';
@@ -309,6 +310,9 @@ export async function browseYourself(app, profileId, { label = null } = {}) {
   const r = await fetchJson(`/api/browser/profiles/${encodeURIComponent(String(profileId || ''))}/browse`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
   if (!r || r.error) {
     const code = r && r.code;
+    // lane remote-profile-start: the profile's machine has no browser to run — said by name with ITS one command (Copy)
+    const sw = r && r.step ? machineStepWords(r.step, { t }) : null;
+    if (sw) { if (await showConfirmDialog({ title: sw.title, message: sw.note + '\n\n' + sw.command, confirmText: t('Copy') })) { copyText(sw.command); showToast(t('Copied'), { duration: 2000 }); } return null; }
     const words = code && !LAUNCH_CODES.includes(code) ? humanRefusalText(code, { label: label || profileId, pid: r && r.holderPid, machine: r && r.machine, n: r && r.n }, t) : '';
     showToast(words || (r && r.error) || t('server unreachable'), { type: 'error', duration: 8000 });
     return null;
@@ -370,7 +374,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
     // offered), the note dialog open (the keys stay out of the page), the last hand-back from here
     resumeOffer: false, resuming: false, resumedHere: false, noteOpen: false, handedBack: false,
     // lane browser-resume C: the bridge's `tab-owners` (targetId → agent|you|other|orphan), the tab row's model + fold, the acts in flight
-    tabOwners: {}, tabMediated: false, tabAdoptable: false, tabRow: null, tabFolded: [], tabRid: 0, tabActs: new Map(), tabError: null, quitAsked: null,
+    tabOwners: {}, tabTitles: {}, tabNames: {}, tabMediated: false, tabAdoptable: false, tabRow: null, tabFolded: [], tabRid: 0, tabActs: new Map(), tabError: null, quitAsked: null,
     // lane browser-windows: the tab THIS viewer watches instead of the agent's ({targetId, mode, pending}) and the bridge's
     // "the tab on show paints nothing" verdict ({targetId, since}) — both said on the watch line
     watch: null, bg: null,
@@ -1026,11 +1030,18 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
     const x = stoppableRows(st.rows && st.rows.length ? st.rows : computeRows(), { browsing: ((app._browserProfiles && app._browserProfiles.leases) || []).filter((l) => l && l.human).map((l) => l.profileId) }).find((r) => r.ref === curRef());
     return x && !x.shared && !x.yours ? x : null;
   }
+  /** accept-fixes-strip F8: another holder's tab is named by the name the sidebar shows (a rename first), else the server's
+   *  (a job's name, a conversation this client has not listed) — never "another conversation's" when a name is known. */
+  function tabNamesNow() {
+    const out = {};
+    for (const [id, v] of Object.entries(st.tabNames || {})) { const n = (v && v.sessionId ? nameOfSession(String(v.sessionId)) : '') || (v && v.name ? String(v.name) : ''); if (n) out[id] = n; }
+    return out;
+  }
   let tabRaf = 0;
   function renderTabRow() {
     if (st.closed) return;
     const driving = st.mode === 'takeover' && st.mine;
-    const m = tabRowModel({ tabs: st.tabs, owners: st.tabOwners, viewer: { human: !!H }, driving, mediated: st.tabMediated, adoptable: st.tabAdoptable }, t);
+    const m = tabRowModel({ tabs: st.tabs, owners: st.tabOwners, viewer: { human: !!H }, driving, mediated: st.tabMediated, adoptable: st.tabAdoptable, titles: st.tabTitles, names: tabNamesNow() }, t);
     st.tabRow = m;
     const show = m.rows.length > 0 && !st.stopped && !st.hollow && !st.sessionEnded;
     const want = show ? '' : 'none';
@@ -1050,7 +1061,8 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
         const av = document.createElement('span'); av.className = 'chan-av browser-live-tabchip-av'; av.setAttribute('aria-hidden', 'true');
         const ti = document.createElement('span'); ti.className = 'browser-live-tabchip-title';
         const mk = document.createElement('span'); mk.className = 'browser-live-tabchip-mark';
-        el.append(av, ti, mk);
+        const hr = document.createElement('span'); hr.className = 'browser-live-tabchip-here'; // accept-fixes F4: "the agent is here"
+        el.append(av, ti, hr, mk);
         el.addEventListener('click', (e) => { if (e.target.closest('.browser-live-tabchip-close')) return; const row = (st.tabRow && st.tabRow.rows || []).find((x) => x.targetId === el.dataset.target); if (row) chipClick(row); });
         el.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && el.getAttribute('role') === 'button') { e.preventDefault(); el.click(); } });
       }
@@ -1061,11 +1073,13 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
       const ti = el.querySelector('.browser-live-tabchip-title'); if (ti.textContent !== r.title) ti.textContent = r.title;
       const mk = el.querySelector('.browser-live-tabchip-mark'); if (mk.textContent !== r.mark) mk.textContent = r.mark; mk.title = r.markTip;
       el.classList.toggle('active', r.active);
+      const hr = el.querySelector('.browser-live-tabchip-here'); if (hr.textContent !== r.hereText) hr.textContent = r.hereText;
+      el.classList.toggle('working', r.here);
       el.dataset.owner = r.owner;
       // lane browser-windows (U3/U0b): what a click does here — the PURE verdict (bring forward / switch while driving,
       // watch / follow while watching); the row's own verdict still answers his own window and the close buttons
       const cv = clickOf(r, driving);
-      const clickTip = cv.act === 'front' ? t('Bring this tab to the front of its window') : cv.act === 'switch' ? r.switchTip || t('Switch to this tab') : cv.act === 'watch' ? t('Watch this tab — the agent’s tab is not changed (take over to switch it)') : cv.act === 'follow' ? t('Back to the agent’s current tab') : (r.canSwitch ? r.switchTip : '');
+      const clickTip = cv.act === 'front' ? t('Bring this tab to the front of its window') : cv.act === 'switch' ? r.switchTip || t('Switch to this tab') : cv.act === 'watch' ? (r.owner === 'agent' ? t('Watch this tab — the agent’s tab is not changed (take over to switch it)') : t('Watch this tab — view only; nobody’s tab moves')) : cv.act === 'follow' ? t('Back to the agent’s current tab') : (r.canSwitch ? r.switchTip : '');
       const clickable = cv.act !== 'none' || r.canSwitch;
       const tip = (clickTip ? clickTip + '\n' : '') + r.tip + '\n' + r.markTip;
       if (el.title !== tip) el.title = tip;
@@ -1852,7 +1866,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
         break;
       // lane browser-resume C (§3.9, ruling 3): whose each tab is (the keeper's answer, replayed to a late viewer) and one act's answer
       case 'tab-owners':
-        st.tabOwners = m.owners && typeof m.owners === 'object' ? { ...m.owners } : {}; st.tabMediated = !!m.mediated; st.tabAdoptable = !!m.adoptable;
+        st.tabOwners = m.owners && typeof m.owners === 'object' ? { ...m.owners } : {}; st.tabTitles = m.titles && typeof m.titles === 'object' ? { ...m.titles } : {}; st.tabNames = m.names && typeof m.names === 'object' ? { ...m.names } : {}; st.tabMediated = !!m.mediated; st.tabAdoptable = !!m.adoptable; // accept-fixes-strip F7/F8: the pages' own titles + the holders' names
         renderTabRow();
         break;
       case 'tab-ack': onTabAck(m); break;
@@ -1888,7 +1902,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
     st.profileRef = profileRef || '';
     st.error = null; st.target = null; // the next hello names the pane (MULTIVIEW: a strip tab may name a helper's browser or EPHEMERAL_REF)
     if (st.stopped || st.hollow) { st.stopped = false; st.stoppedHow = null; st.hollow = false; renderMode(); } // a new pane has no last frame to grey
-    st.frames = 0; st.url = ''; st.tabs = []; st.tabOwners = {}; st.tabActs.clear(); st.console = []; st.running = false; st.reconnects = 0;
+    st.frames = 0; st.url = ''; st.tabs = []; st.tabOwners = {}; st.tabTitles = {}; st.tabNames = {}; st.tabActs.clear(); st.console = []; st.running = false; st.reconnects = 0;
     st.fit = null; st.fitSent = null; st.navAt = 0; st.lastFrameAt = 0; st.openAt = 0; st.picture = 'ok'; st.pictureStale = false; root.classList.remove('picture-stale'); renderFit(); setZoom(ZOOM_NONE); // lane S4: a new pane has its own size and picture
     img.removeAttribute('src');
     timeline.clear(); renderTraceBtn(); // the next hello names the pane and re-seeds

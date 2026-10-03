@@ -63,6 +63,21 @@ export const CHANNEL_OAUTH_ENDPOINTS = Object.freeze({
 });
 const enc = encodeURIComponent;
 const PASTE_PLACEHOLDER = 'http://127.0.0.1:…/?state=…&code=…';
+/** design 012 (Slack S1): an account type that signs in by PASTING a token (the registry row's `signin: 'paste'` —
+ *  Slack: each person's own app, no OAuth client to choose): the client field becomes the steps, the paste box
+ *  takes a secret (drawn as dots) with its own hint and placeholder. Gated on the ROW, never on a kind. */
+const isPasteSpec = (x) => { const row = x ? R.rowById(x.integration || x.kind) : null; return !!(row && row.signin === 'paste'); };
+function pasteSteps(spec) {
+  return [
+    tr('1. Press “Connect {label}” — Slack opens a page that makes your own app (pick your workspace, press Create).', { label: signinOf(spec) }),
+    tr('2. Press “Install to Workspace”, then Allow.'),
+    tr('3. Copy the User OAuth Token (it starts xoxp-) from “OAuth & Permissions” and paste it in the box below.'),
+    tr('Your workspace admin may have to approve the app; your company’s data policy comes first. The token stays on this server, sealed.'),
+  ];
+}
+const pasteOpts = (spec) => (isPasteSpec(spec)
+  ? { pastePlaceholder: 'xoxp-…', pasteSecret: true, pasteHint: tr('Paste the User OAuth Token from your Slack app’s “OAuth & Permissions” page (it starts xoxp-).') }
+  : { pastePlaceholder: PASTE_PLACEHOLDER });
 
 /** A channel route that THROWS (the component's contract: a thrown Error
  *  lands in the dialog's `.cfg-err` / the consent block's status line),
@@ -160,6 +175,7 @@ function mountOptionLabel(m) {
 }
 /** THE `OAuth client` FIELD + its custom inputs (+ the setup copy row). */
 function clientFieldSpecs(spec, { sfx = '', when = null, value, custom = null, secretType = 'password', hint, secretHint } = {}) {
+  if (isPasteSpec(spec)) return pasteSteps(spec).map((value, i) => ({ key: `pnote${i}${sfx}`, type: 'note', value, when: when || undefined }));   // design 012: no client to choose — the steps, one line each
   const presets = spec.presets || [];
   const mounts = spec.mountClients || [];
   const options = presets.map((p) => [p.key, tr('Preset: {name}', { name: p.label })]);
@@ -196,6 +212,7 @@ function choiceBody(vals, sfx = '') {
 /** Does the chosen client differ from the account's own? (a same-id custom
  *  client with a new secret is the SAME client — its secret is replaced in place) */
 function switchesClient(a, vals, sfx = '', presets) {
+  if (isPasteSpec(a)) return false;   // design 012: a paste account has no client to switch
   const cur = clientValueOf(a, presets);
   const next = vals[`client${sfx}`];
   if (next !== cur) return true;
@@ -332,9 +349,9 @@ export async function showConnectAccountDialog(app, kinds) {
     let flowId = null;
     wireOAuthConnect(ctx, {
       tokenKey: `flow${sfx}`, backend: k.kind, label: tr('Connect {label}', { label: signinOf(k) }),
-      clientIdKey: `cid${sfx}`, clientSecretKey: `csec${sfx}`, provider: signinOf(k), pastePlaceholder: PASTE_PLACEHOLDER,
+      clientIdKey: `cid${sfx}`, clientSecretKey: `csec${sfx}`, provider: signinOf(k), ...pasteOpts(k),
       // a storage mount's client is named by its id ALONE — a stale hidden custom id/secret never rides beside it
-      extra: () => ({ ...(mountOf(ctx.inputs[`client${sfx}`].value) ? { fromMount: mountOf(ctx.inputs[`client${sfx}`].value), clientId: undefined, clientSecret: undefined } : { clientPreset: ctx.inputs[`client${sfx}`].value }), options: optionValues(Object.fromEntries(Object.entries(ctx.inputs).map(([key, e]) => [key, e.value])), k.optionsSchema, sfx, 1) }),
+      extra: () => (!ctx.inputs[`client${sfx}`] ? { options: optionValues(Object.fromEntries(Object.entries(ctx.inputs).map(([key, x]) => [key, x.value])), k.optionsSchema, sfx, 1) } : { ...(mountOf(ctx.inputs[`client${sfx}`].value) ? { fromMount: mountOf(ctx.inputs[`client${sfx}`].value), clientId: undefined, clientSecret: undefined } : { clientPreset: ctx.inputs[`client${sfx}`].value }), options: optionValues(Object.fromEntries(Object.entries(ctx.inputs).map(([key, e]) => [key, e.value])), k.optionsSchema, sfx, 1) }),
       endpoints: {
         start: async (body) => { const r = await post(CHANNEL_OAUTH_ENDPOINTS.start, body); flowId = r.flowId; return { url: r.url, notice: flowNotice(r.flow), narrow: narrowOf(r.flow, () => post(CHANNEL_OAUTH_ENDPOINTS.narrow, { flowId })) }; },
         status: () => capi(`${CHANNEL_OAUTH_ENDPOINTS.status}?flowId=${enc(flowId || '')}`),
@@ -371,7 +388,7 @@ export async function showReauthAccountDialog(app, a, { kinds = null, preselect 
     provider: signin,
     fields: clientFieldSpecs(spec, { value: preselect ? preselect.client : clientValueOf(a, spec.presets), custom, hint: tr('The account’s own client by default; pick another and the new token is minted under it.') }),
     savingText: tr('Signed in — reconnecting…'),
-    pastePlaceholder: PASTE_PLACEHOLDER,
+    ...pasteOpts(spec),
     start: async (vals) => {
       const r = await post(`/api/channels/adapters/${enc(a.id)}/reauthorize`, choiceBody(vals));
       if (watcher) watcher.off();
@@ -521,7 +538,7 @@ export async function showDuplicateAccountDialog(app, a, { kinds = null } = {}) 
   });
   ctx.body.dataset.chanDialog = 'duplicate';
   wireOAuthConnect(ctx, {
-    tokenKey: 'flow', backend: a.kind, label: tr('Connect {label}', { label: signin }), provider: signin, pastePlaceholder: PASTE_PLACEHOLDER,
+    tokenKey: 'flow', backend: a.kind, label: tr('Connect {label}', { label: signin }), provider: signin, ...pasteOpts(spec),
     finishText: tr('✓ Connected — finish with the “Create & connect” button below.'),
     endpoints: {
       start: async () => {
@@ -550,7 +567,9 @@ export async function showDuplicateAccountDialog(app, a, { kinds = null } = {}) 
 export async function removeAccount(app, a) {
   const name = accountName(a);
   const provider = providerOf(a);
-  const yes = await showConfirmDialog({ title: tr('Remove "{name}"?', { name }), message: tr('The account record and its conversation list go away (the message logs stay on disk). Nothing is deleted on {provider}.', { provider }), confirmText: tr('Remove'), danger: true });
+  // design 012: an adapter that declares `retention: 'purge-on-remove'` (Slack) takes its local copy with it — said here
+  const purge = a.retention === 'purge-on-remove';
+  const yes = await showConfirmDialog({ title: tr('Remove "{name}"?', { name }), message: purge ? tr('The account record, its conversation list AND its local copy go away: the saved messages, the fetched files and its ended outbox proposals are deleted from this server ({provider}\'s terms ask for it). Nothing is deleted on {provider}.', { provider }) : tr('The account record and its conversation list go away (the message logs stay on disk). Nothing is deleted on {provider}.', { provider }), confirmText: tr('Remove'), danger: true });
   if (!yes) return false;
   const r = await fetchJson(`/api/channels/adapters/${enc(a.id)}`, { method: 'DELETE' });
   if (r && r.code === 'account-referenced') { showRemoveRefusedDialog(app, a, (r.detail && r.detail.refs) || []); return false; }

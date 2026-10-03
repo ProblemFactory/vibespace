@@ -2,8 +2,8 @@
  * A MESSAGE'S FACTS IN THE WINDOW (lane message-facts, B-f066 — design 007, docs/design-communication-panel.zh.md §26).
  * ONE element per message under its head: the SUMMARY — a one-line button, "to me, Alice Chen, Bob +3 · cc Carol" (names
  * first; every address in its tooltip) — the CHIPS after it ("mailing list dev@…", "high importance", "automated"), and
- * on a click the DETAILS: a keyed list (To · Cc · Bcc · Reply-To · Sent by · Mailing list · Delivered to · Subject), each
- * party "Name · address". Drawn by VALUE TYPE from src/channel-facts.js — no kind is named here; textContent only (every
+ * on a click the DETAILS: a keyed list (From · To · Cc · Bcc · Reply-To · Sent by · Mailing list · Delivered to · Subject),
+ * each party "Name · address" — From is the record's author (lane channel-window-tidy). Drawn by VALUE TYPE from src/channel-facts.js — no kind is named here; textContent only (every
  * string is a stranger's header).
  *
  * The open state lives in the window's `folds` (`facts:<vid>`), so a repaint — a new message arriving — never closes it;
@@ -33,10 +33,15 @@ export function factsChips(facts) {
   return box;
 }
 
-/** The DETAILS list (a `dl`): one row per fact the table words for the details, its "+N" expanding in place. */
-function detailsList(vid, facts, folds) {
+/** lane channel-window-tidy: the record's author as the details' From party (the vendor's own name, never the owner's
+ *  alias; "me" for the account's own), or null. */
+const fromOf = (rec) => { const a = rec && rec.author; return a && typeof a === 'object' && (a.id || a.name) ? { id: a.id || '', name: a.name || '', self: a.isSelf === true } : null; };
+
+/** The DETAILS list (a `dl`): the sender first ("From: Name · address"), then one row per fact the table words for the
+ *  details, its "+N" expanding in place. */
+function detailsList(vid, facts, folds, from = null) {
   const dl = el('dl', 'chanmsg-facts-details');
-  for (const row of CF.detailRows(facts, t)) {
+  for (const row of CF.detailRows(facts, t, { from })) {
     const dd = el('dd', 'chanmsg-fact-val');
     dd.dataset.k = row.k;
     const fk = `facts:${vid}:${row.k}`;
@@ -52,7 +57,7 @@ function detailsList(vid, facts, folds) {
       const b = el('button', 'chanmsg-fact-more', `+${hidden}`);
       b.type = 'button';
       b.title = t('Show all');
-      b.addEventListener('click', (ev) => { ev.stopPropagation(); foldSet(folds, fk, true); dl.replaceWith(detailsList(vid, facts, folds)); });
+      b.addEventListener('click', (ev) => { ev.stopPropagation(); foldSet(folds, fk, true); dl.replaceWith(detailsList(vid, facts, folds, from)); });
       dd.appendChild(b);
     }
     if (row.more) dd.appendChild(el('span', 'chanmsg-fact-note', t('and {n} more', { n: row.more })));
@@ -98,6 +103,6 @@ export function renderFacts(rec, { folds = null, ask = null } = {}) {
   tog.addEventListener('click', (ev) => { ev.stopPropagation(); foldSet(folds, key, !open); box.replaceWith(renderFacts(rec, { folds, ask })); });
   box.appendChild(tog);
   if (chips) box.appendChild(chips);
-  if (open) box.appendChild(detailsList(vid, facts, folds));
+  if (open) box.appendChild(detailsList(vid, facts, folds, fromOf(rec)));
   return box;
 }

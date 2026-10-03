@@ -112,6 +112,53 @@ function mintProgressId(taken) {
   taken.add(id);
   return id;
 }
+// PROGRESS ARCHIVE (2.369.204, the owner 2026-10-03: "进展记录不再删除"): the live list keeps the newest
+// LIVE_PROGRESS entries; an entry leaving it is MOVED — appended to data/task-groups-archive/<taskId>/<YYYY-MM>.ndjson
+// (the entry's own `at`, UTC month), one JSON line per entry, by _archiveProgress (THE one writer) BEFORE the live
+// list is trimmed: a crash between the two leaves the entry twice (every reader dedups by id), never nowhere. A month
+// file is only ever appended to, except by a clear and a config import (each rewrites ONE month file, tmp + rename);
+// a Task Group delete removes its directory. Reads page backwards by `before` (readProgress), bounded per request.
+const LIVE_PROGRESS = 500;
+const ARCHIVE_DIR = 'task-groups-archive';
+const MONTH_FILE_RE = /^(\d{4}-\d{2})\.ndjson$/;
+const ARCHIVE_CHUNK = 128 * 1024;          // ≥ one entry's line (note 2000 + detail 6000 chars, JSON-escaped)
+const ARCHIVE_READ_BUDGET = 4 * 1024 * 1024; // bytes one page may read from the archive
+const monthOf = (at) => { const d = new Date(Number(at) || 0); return isNaN(d) ? '1970-01' : d.toISOString().slice(0, 7); };
+const archivableId = (id) => typeof id === 'string' && /^[\w-]{1,80}$/.test(id);
+const parseLine = (ln) => { try { const p = JSON.parse(ln); return p && typeof p === 'object' && p.id ? p : null; } catch { return null; } };
+function readAt(fd, pos, len) { const b = Buffer.alloc(len); const n = fs.readSync(fd, b, 0, len, pos); return b.subarray(0, n); }
+/** the first whole line starting at or after `pos` (pos 0 = the file's first line): {start, end, at} or null */
+function lineFrom(fd, pos, size) {
+  const from = Math.max(0, pos - 1);
+  const b = readAt(fd, from, Math.min(ARCHIVE_CHUNK, size - from));
+  const nl = pos === 0 ? -1 : b.indexOf(10);
+  if (pos !== 0 && nl < 0) return null;
+  const s = pos === 0 ? 0 : nl + 1;
+  const e = b.indexOf(10, s);
+  if (e < 0) return null;
+  const p = parseLine(b.subarray(s, e).toString('utf8'));
+  return { start: from + s, end: from + e + 1, at: p ? Number(p.at) : -Infinity };
+}
+/** the byte offset just past the last line older than `lim` in a time-ordered month file (binary search, then ≤ 3 chunks) */
+function monthCut(fd, size, lim) {
+  if (!Number.isFinite(lim)) return size;
+  let lo = 0, hi = size;
+  while (hi - lo > 2 * ARCHIVE_CHUNK) {
+    const mid = Math.floor((lo + hi) / 2);
+    const ln = lineFrom(fd, mid, size);
+    if (!ln || ln.at >= lim) hi = ln ? ln.start : mid; else lo = ln.end;
+  }
+  const b = readAt(fd, lo, Math.min(size, hi + ARCHIVE_CHUNK) - lo);
+  let at = 0;
+  while (at < b.length) {
+    const e = b.indexOf(10, at);
+    if (e < 0) break;
+    const p = parseLine(b.subarray(at, e).toString('utf8'));
+    if (p && Number(p.at) >= lim) return lo + at;
+    at = e + 1;
+  }
+  return lo + at;
+}
 
 function slugify(title) {
   return String(title || '')
@@ -153,6 +200,7 @@ class TaskGroupManager {
     // break existing files for no user-visible gain).
     this._file = path.join(dataDir, 'task-groups.json');
     this._legacyFile = path.join(dataDir, 'tasks.json');
+    this._archiveRoot = path.join(dataDir, ARCHIVE_DIR);
     this._onChange = onChange || (() => {});
     this._state = { version: 1, tasks: {} };
     this._lastMd = new Map(); // groupId → last written TASK.md content (skip no-op writes)
@@ -1223,6 +1271,8 @@ class TaskGroupManager {
 
   remove(id) {
     this.get(id); // throws if missing
+    // its archived Activity log goes with it (first: a failed delete keeps the group, never orphaned words)
+    if (archivableId(id)) fs.rmSync(path.join(this._archiveRoot, id), { recursive: true, force: true });
     delete this._state.tasks[id];
     this._save();
     this._notify();
@@ -1268,12 +1318,110 @@ class TaskGroupManager {
     const cleanDetail = typeof detail === 'string' && detail.trim() ? detail.trim().slice(0, CAPS.detail) : null;
     const taken = new Set((t.progress || []).map((p) => p && p.id).filter(Boolean));
     t.progress.push({ id: mintProgressId(taken), at: Date.now(), note: clean, ...(cleanDetail ? { detail: cleanDetail } : {}), session: typeof session === 'string' ? session.slice(0, 200) : null });
-    if (t.progress.length > 500) t.progress = t.progress.slice(-500);
+    t.progress = this._keepLive(id, t.progress);
     t.updatedAt = Date.now();
     t.contentUpdatedAt = t.updatedAt; // progress is injected content
     this._save();
     this._notify();
     return { ...t };
+  }
+
+  /** THE archive writer: `entries` (oldest first) appended to their month files. Throws on a failed write. */
+  _archiveProgress(id, entries) {
+    if (!archivableId(id)) throw new Error('no archive for this group id');
+    const byMonth = new Map();
+    for (const p of entries) if (p && typeof p === 'object') { const m = monthOf(p.at); byMonth.set(m, (byMonth.get(m) || '') + JSON.stringify(p) + '\n'); }
+    if (!byMonth.size) return;
+    const dir = path.join(this._archiveRoot, id);
+    fs.mkdirSync(dir, { recursive: true });
+    for (const [m, text] of byMonth) fs.appendFileSync(path.join(dir, m + '.ndjson'), text);
+  }
+  /** `list` capped to the live LIVE_PROGRESS: the overflow MOVES to the archive first; a failed archive write keeps it live. */
+  _keepLive(id, list) {
+    if (list.length <= LIVE_PROGRESS) return list;
+    try { this._archiveProgress(id, list.slice(0, list.length - LIVE_PROGRESS)); }
+    catch (e) { console.error(`[task-groups] ${id}: the Activity-log archive write failed (${(e && e.code) || 'error'}) — the overflow stays live`); return list; }
+    return list.slice(-LIVE_PROGRESS);
+  }
+  _archiveMonths(id) {
+    if (!archivableId(id)) return [];
+    try { return fs.readdirSync(path.join(this._archiveRoot, id)).filter((f) => MONTH_FILE_RE.test(f)).sort().reverse(); } catch { return []; }
+  }
+  /** one month file's entries (deduped by id, a cleared copy wins), or [] */
+  _monthEntries(id, file) {
+    let text = '';
+    try { text = fs.readFileSync(path.join(this._archiveRoot, id, file), 'utf8'); } catch { return []; }
+    const byId = new Map();
+    for (const ln of text.split('\n')) { const p = parseLine(ln); if (p && (!byId.has(p.id) || p.clearedAt)) byId.set(p.id, p); }
+    return [...byId.values()];
+  }
+  /** the archived entries `ref` names (a P- id: every month; an ms `at`: its month) — one per id */
+  _archiveFind(id, ref) {
+    const r = String(ref == null ? '' : ref).trim();
+    if (PROGRESS_ID_RE.test(r)) {
+      for (const f of this._archiveMonths(id)) { const hit = this._monthEntries(id, f).find((p) => p.id === r); if (hit) return [hit]; }
+      return [];
+    }
+    if (/^\d{10,}$/.test(r)) return this._monthEntries(id, monthOf(Number(r)) + '.ndjson').filter((p) => Number(p.at) === Number(r));
+    return [];
+  }
+  /** a clear's archive half: every line of month `m` whose id is in `ids` cleared, the ONE file rewritten (tmp + rename) → the ids changed */
+  _archiveClear(id, m, ids, { by, at }) {
+    const f = path.join(this._archiveRoot, id, m + '.ndjson');
+    let text;
+    try { text = fs.readFileSync(f, 'utf8'); } catch { return []; }
+    const changed = new Set();
+    const lines = text.split('\n').map((ln) => {
+      const p = parseLine(ln);
+      if (!p || !ids.has(p.id)) return ln;
+      if (applyClear(p, { kind: 'activity', by, at }).changed) changed.add(p.id);
+      return JSON.stringify(p);
+    });
+    if (changed.size) { fs.writeFileSync(f + '.tmp', lines.join('\n')); fs.renameSync(f + '.tmp', f); }
+    return [...changed];
+  }
+  /**
+   * ONE PAGE of group `id`'s Activity log older than `before` (ms; absent = from the newest), newest first: the live
+   * list, then the archive months newest-first — ≤ `limit` (1..200) entries (an instant shared with the page's last
+   * entry rides along, so a `before` cursor never skips one), deduped by id, ≤ ARCHIVE_READ_BUDGET bytes read.
+   * `more` = an older entry may exist (ask again with before = the last entry's `at`).
+   */
+  readProgress(id, { before = null, limit = 100 } = {}) {
+    const t = this.get(id);
+    const cap = Math.max(1, Math.min(200, Math.floor(Number(limit)) || 100));
+    const lim = before === null || before === undefined || before === '' || !Number.isFinite(Number(before)) ? Infinity : Number(before);
+    const out = [], seen = new Set();
+    let stop = false;
+    const add = (p) => {
+      if (!p || !(Number(p.at) < lim)) return;
+      if (out.length >= cap && Number(p.at) !== Number(out[out.length - 1].at)) { stop = true; return; }
+      if (p.id && seen.has(p.id)) return;
+      if (p.id) seen.add(p.id);
+      out.push(p);
+    };
+    const live = Array.isArray(t.progress) ? t.progress : [];
+    for (let i = live.length - 1; i >= 0 && !stop; i--) add(live[i]);
+    let budget = ARCHIVE_READ_BUDGET;
+    const top = Number.isFinite(lim) ? monthOf(lim) : null;
+    for (const f of this._archiveMonths(id)) {
+      if (stop || budget <= 0) break;
+      if (top && f.slice(0, 7) > top) continue;
+      let fd;
+      try { fd = fs.openSync(path.join(this._archiveRoot, id, f), 'r'); } catch { continue; }
+      try {
+        let end = monthCut(fd, fs.fstatSync(fd).size, lim), carry = Buffer.alloc(0);
+        while (end > 0 && !stop && budget > 0) {
+          const from = Math.max(0, end - ARCHIVE_CHUNK);
+          const b = Buffer.concat([readAt(fd, from, end - from), carry]);
+          budget -= end - from;
+          const lines = b.toString('utf8').split('\n');
+          carry = from > 0 ? Buffer.from(lines.shift(), 'utf8') : Buffer.alloc(0);
+          for (let i = lines.length - 1; i >= 0 && !stop; i--) add(parseLine(lines[i]));
+          end = from;
+        }
+      } finally { fs.closeSync(fd); }
+    }
+    return { entries: out.map((p) => ({ ...p })), more: out.length > 0 && (stop || budget <= 0) };
   }
 
   /** The Activity-log entries `ref` names in group `id`: a `P-<hex>` id (at most
@@ -1306,16 +1454,30 @@ class TaskGroupManager {
   clearProgress(id, refs, { by = 'owner', at = Date.now(), allow = null } = {}) {
     const t = this.get(id);
     const out = { cleared: [], already: [], unknown: [], ambiguous: [], refused: [] };
+    const targets = [];
+    const months = new Map(); // archive month → the ids a clear looks for there
     for (const ref of Array.isArray(refs) ? refs : [refs]) {
-      const hits = this.findProgress(id, ref);
+      let hits = this.findProgress(id, ref), live = true;
+      if (!hits.length) { hits = this._archiveFind(id, ref); live = false; }   // 2.369.204: an entry the live list no longer holds
       if (!hits.length) { out.unknown.push(String(ref)); continue; }
       if (hits.length > 1) { out.ambiguous.push(String(ref)); continue; }
       const p = hits[0];
       const v = allow ? allow(p) : { ok: true };
       if (!v || !v.ok) { out.refused.push({ ref: String(ref), id: p.id, code: (v && v.code) || 'not_yours', why: (v && v.why) || '', status: (v && v.status) || 403 }); continue; }
-      const r = applyClear(p, { kind: 'activity', by, at });
-      (r.changed ? out.cleared : out.already).push(p.id);
+      targets.push({ p, live });
+      // every archive copy too — a live entry's (a crash between the archive append and the trim leaves one)
+      const m = monthOf(p.at);
+      if (!months.has(m)) months.set(m, new Set());
+      months.get(m).add(p.id);
     }
+    // ARCHIVE FIRST: each month file a target may sit in is rewritten once — a failed write changes nothing live
+    const archived = new Set();
+    for (const [m, ids] of archivableId(id) ? months : []) for (const x of this._archiveClear(id, m, ids, { by, at })) archived.add(x);
+    for (const { p, live } of targets) {
+      const r = live ? applyClear(p, { kind: 'activity', by, at }) : { changed: false };
+      (r.changed || archived.has(p.id) ? out.cleared : out.already).push(p.id);
+    }
+    if (archived.size) t.archiveClearedAt = Date.now(); // the Task log window re-reads the archive rows it holds
     if (out.cleared.length) {
       t.updatedAt = Date.now();
       this._save();
@@ -1492,7 +1654,7 @@ class TaskGroupManager {
       // the file caps at the last 30); otherwise seed from the file.
       progress: (() => {
         // every entry keeps (or gets) its stable P- id — a file-seeded log is minted here
-        const list = (existing?.progress?.length ? existing.progress : parsedProgress).slice(-500);
+        const list = this._keepLive(id, existing?.progress?.length ? existing.progress : parsedProgress);
         const taken = new Set();
         return list.map((p) => ({ ...p, id: (typeof p.id === 'string' && PROGRESS_ID_RE.test(p.id) && !taken.has(p.id)) ? (taken.add(p.id), p.id) : mintProgressId(taken) }));
       })(),
@@ -1509,7 +1671,32 @@ class TaskGroupManager {
   }
 
   // ── Config transfer (same contract as hosts/mounts) ──
-  exportBundle() { return { version: 1, tasks: Object.values(this._state.tasks) }; }
+  // 2.369.204: the archived Activity log rides along — { <taskId>: { <YYYY-MM>: ndjson } } (Backup & migrate)
+  exportBundle() {
+    const archive = {};
+    for (const id of Object.keys(this._state.tasks)) for (const f of this._archiveMonths(id)) {
+      try { (archive[id] = archive[id] || {})[f.slice(0, 7)] = fs.readFileSync(path.join(this._archiveRoot, id, f), 'utf8'); } catch { /* gone meanwhile */ }
+    }
+    return { version: 1, tasks: Object.values(this._state.tasks), ...(Object.keys(archive).length ? { archive } : {}) };
+  }
+  /** an imported group's archive months, MERGED into this instance's (by id, a cleared copy wins, time order), one tmp + rename per month */
+  _importArchive(id, months) {
+    if (!archivableId(id) || !months || typeof months !== 'object') return;
+    for (const [m, text] of Object.entries(months)) {
+      if (!/^\d{4}-\d{2}$/.test(m) || typeof text !== 'string') continue;
+      const byId = new Map(this._monthEntries(id, m + '.ndjson').map((p) => [p.id, p]));
+      for (const ln of text.split('\n')) {
+        const p = parseLine(ln);
+        if (!p || !PROGRESS_ID_RE.test(p.id) || !Number(p.at) || monthOf(p.at) !== m) continue;
+        const e = { id: p.id, at: Number(p.at), note: String(p.note || '').slice(0, CAPS.note), ...(typeof p.detail === 'string' && p.detail && !p.clearedAt ? { detail: p.detail.slice(0, CAPS.detail) } : {}), session: typeof p.session === 'string' ? p.session.slice(0, 200) : null, ...(Number(p.clearedAt) ? { clearedAt: Number(p.clearedAt), clearedBy: String(p.clearedBy || 'owner').slice(0, 200) } : {}) };
+        if (!byId.has(e.id) || (e.clearedAt && !byId.get(e.id).clearedAt)) byId.set(e.id, e);
+      }
+      const dir = path.join(this._archiveRoot, id), f = path.join(dir, m + '.ndjson');
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(f + '.tmp', [...byId.values()].sort((a, b) => a.at - b.at).map((p) => JSON.stringify(p) + '\n').join(''));
+      fs.renameSync(f + '.tmp', f);
+    }
+  }
 
   importBundle(bundle) {
     const items = Array.isArray(bundle?.tasks) ? bundle.tasks : [];
@@ -1517,6 +1704,7 @@ class TaskGroupManager {
     for (const raw of items) {
       if (!raw || typeof raw !== 'object' || typeof raw.id !== 'string' || !/^T-[\w-]{1,60}$/.test(raw.id)) continue;
       const now = Date.now();
+      this._importArchive(raw.id, bundle.archive && bundle.archive[raw.id]);
       this._state.tasks[raw.id] = {
         id: raw.id,
         title: String(raw.title || raw.id).slice(0, CAPS.title),
@@ -1546,11 +1734,11 @@ class TaskGroupManager {
         // an entry keeps its P- id and, when it was cleared, its clear stamp (the sentence is its note)
         progress: (() => {
           const taken = new Set();
-          return Array.isArray(raw.progress) ? raw.progress.slice(-500).map((p) => ({
+          return Array.isArray(raw.progress) ? this._keepLive(raw.id, raw.progress.map((p) => ({
             id: (typeof p?.id === 'string' && PROGRESS_ID_RE.test(p.id) && !taken.has(p.id)) ? (taken.add(p.id), p.id) : mintProgressId(taken),
             at: Number(p?.at) || now, note: String(p?.note || '').slice(0, CAPS.note), session: typeof p?.session === 'string' ? p.session.slice(0, 200) : null,
             ...(Number(p?.clearedAt) ? { clearedAt: Number(p.clearedAt), clearedBy: String(p?.clearedBy || 'owner').slice(0, 200) } : {}),
-          })) : [];
+          }))) : [];
         })(),
         sessions: sanitizeStrArray(raw.sessions, 2000),
         folders: this._sanitizeFolders(raw.folders),

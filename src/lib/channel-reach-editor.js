@@ -91,14 +91,17 @@ export async function showReachDialog(app, conv0) {
     body.appendChild(el('div', 'chan-opt-label', t('Sending policy')));
     const pol = current.policy || { mode: 'review', source: 'default' };
     const sel = el('select', 'chan-opt-input');
+    // design 012 (Slack S1): a vendor that allows only some modes (`policy.modes` — Slack: review) is offered only those
+    const modes = Array.isArray(pol.modes) && pol.modes.length ? pol.modes : ['review', 'direct'];
     for (const o of [
       { value: 'review', label: t('review — every proposal waits for your approval') },
       { value: 'direct', label: t('direct — a proposal with send authority goes out at once (guards still apply)') },
       { value: '', label: t('the adapter\'s default') },
-    ]) { const op = el('option', '', o.label); op.value = o.value; sel.appendChild(op); }
-    sel.value = pol.source === 'conversation' ? pol.mode : '';
+    ].filter((o) => !o.value || modes.includes(o.value))) { const op = el('option', '', o.label); op.value = o.value; sel.appendChild(op); }
+    sel.value = pol.source === 'conversation' && modes.includes(pol.mode) ? pol.mode : '';
     sel.onchange = async () => { const r = await api(`${base}/policy`, { mode: sel.value === '' ? null : sel.value }); if (r) showToast(t('Policy saved')); };
     body.appendChild(sel);
+    if (!modes.includes('direct')) body.appendChild(el('div', 'chan-flow-note', t('This channel offers no “send directly”: every message an agent drafts here waits for your approval on the Outbox card.')));
     body.appendChild(el('div', 'chan-flow-note', t('Reads as: {mode} ({source}). Guards on top can only tighten it: a link, an attachment or off-hours always needs your approval (Settings → Channels).', { mode: policyModeText(pol.mode), source: pol.source === 'conversation' ? t('set here') : pol.source === 'adapter-default' ? t('the adapter\'s default') : t('the default: review') })));
 
     // ── REACH ──

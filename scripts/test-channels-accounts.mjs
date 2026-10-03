@@ -671,7 +671,8 @@ console.log('⑩ the routes');
   const d404 = await api('DELETE', '/api/channels/adapters/gmail%3Anope');
   ok(d404.status === 404 && d404.body.code === 'no-such-adapter', 'DELETE an unknown id → 404');
   const dg = await api('GET', '/api/channels');
-  ok(dg.status === 200 && dg.body.kinds.length === 2, 'GET /api/channels carries the dialog\'s `kinds`');
+  // the 2.369.204 integration: slack-core adds Slack to the dialog's kinds (Lark, Gmail, Slack)
+  ok(dg.status === 200 && dg.body.kinds.length === 3 && dg.body.kinds.some((k) => (k && (k.kind || k.id || k)) === 'slack'), 'GET /api/channels carries the dialog\'s `kinds` (Lark, Gmail, Slack)', dg.body.kinds);
   ok(!bodies.some((b) => b.includes(CUSTOM_SECRET) || b.includes(CUSTOM_SECRET2)), `NO route answer but the owner-only config carries a custom secret (${bodies.length} bodies checked)`);
   ok(!frames.some((f) => JSON.stringify(f).includes(CUSTOM_SECRET) || JSON.stringify(f).includes(CUSTOM_SECRET2)) && !logLines.some((l) => l.includes(CUSTOM_SECRET) || l.includes(CUSTOM_SECRET2)), 'no broadcast frame and no log line ever carried one');
   await eng.setAssignment(idR, 'thr_b', null);

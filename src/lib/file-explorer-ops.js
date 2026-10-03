@@ -7,6 +7,23 @@ import { isOfficeFile } from '../office-open.js'; // §7.9: which files offer "O
  * paste), rename/delete/duplicate, archive compress/extract, properties,
  * new file/folder. Extracted from file-explorer.js (2.92.0 split).
  */
+// lane windows-device-fs verify-r2: a Files refusal the hub sent as a CODE (src/remote-fs.js fsErrorBody), in the reader's
+// language — the English `error` beside it is for older clients and agents. Any other error: its own text, as before.
+const WIN_UNSUPPORTED = {
+  zip: () => t('folder download as .zip is not available on Windows machines yet'),
+  'archive-list': () => t('opening an archive (.zip / .tar) is not available on Windows machines yet'),
+  'archive-entry': () => t('opening a file inside an archive is not available on Windows machines yet'),
+  'archive-extract': () => t('extracting an archive is not available on Windows machines yet'),
+  'make-archive': () => t('making an archive (.zip / .tar) is not available on Windows machines yet'),
+};
+export function fsErrorText(d) {
+  const p = (d && d.params) || {};
+  if (d && d.code === 'device_agent_outdated') return t("this machine's agent is {version}, too old to browse files on Windows — rerun the device's install command (Remote → {machine} → Pairing command)", { version: p.version || t('an older version'), machine: p.machine || '?' });
+  if (d && d.code === 'windows_unsupported' && WIN_UNSUPPORTED[p.op]) return WIN_UNSUPPORTED[p.op]();
+  if (d && d.code === 'windows_no_shell') return t('this needs a POSIX shell ({shell}), and this Windows machine has none — not available on Windows machines without one yet', { shell: p.shell || 'sh' });
+  return String((d && d.error) || '');
+}
+
 export function installExplorerOps(FileExplorer) {
   Object.assign(FileExplorer.prototype, {
     async createFile() {
@@ -18,7 +35,7 @@ export function installExplorerOps(FileExplorer) {
       // Show WHY (the server appends e.g. a read-only-mount hint) — the bare
       // "failed" toast hid the actual cause (real report).
       const d = await r?.json().catch(() => null);
-      showToast(t('Create file failed') + (d?.error ? `: ${d.error}` : ''), { type: 'error' });
+      showToast(t('Create file failed') + (d?.error ? `: ${fsErrorText(d)}` : ''), { type: 'error' });
     }
     this.refresh();
   },
@@ -30,7 +47,7 @@ export function installExplorerOps(FileExplorer) {
     const r = await fetch('/api/mkdir', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(here.hb({ path: here.path(n.trim()) })) }).catch(() => null);
     if (!r?.ok) {
       const d = await r?.json().catch(() => null);
-      showToast(t('Create folder failed') + (d?.error ? `: ${d.error}` : ''), { type: 'error' });
+      showToast(t('Create folder failed') + (d?.error ? `: ${fsErrorText(d)}` : ''), { type: 'error' });
     }
     this.refresh();
   },
@@ -313,7 +330,7 @@ export function installExplorerOps(FileExplorer) {
         const r = await post(src, dest, overwrite);
         const d = await r?.json().catch(() => ({}));
         if (r && r.status === 409) return { ok: false, error: 'exists' };
-        if (!r?.ok) return { ok: false, error: d?.error || t('unknown error') };
+        if (!r?.ok) return { ok: false, error: (d?.error && fsErrorText(d)) || t('unknown error') };
         if (d?.opId) return await this._trackTransferOp(d.opId, label, dest);
         return { ok: true };
       };
@@ -364,7 +381,7 @@ export function installExplorerOps(FileExplorer) {
           }
           setTimeout(() => { this._activeUploads.delete(key); this._updateUploadRing(); this.refresh(); }, ok ? 1200 : 3000);
         }
-        resolve({ ok, error: st?.error || null, cancelled });
+        resolve({ ok, error: (st?.error && fsErrorText(st)) || null, cancelled });
       };
       const poll = setInterval(async () => {
         let st = null;
@@ -418,7 +435,7 @@ export function installExplorerOps(FileExplorer) {
     // r === null = network-level failure (server restart mid-compress): the
     // zip/tar child can outlive the server and complete anyway (#28)
     if (!r) showToast(t('Compress failed: server unreachable — it may still have completed'), { type: 'error' });
-    else if (!r.ok) showToast(t('Compress failed: {msg}', { msg: d?.error || t('unknown error') }), { type: 'error' });
+    else if (!r.ok) showToast(t('Compress failed: {msg}', { msg: (d?.error && fsErrorText(d)) || t('unknown error') }), { type: 'error' });
     else showToast(t('Created {name} ({size})', { name: out.trim(), size: formatSize(d.size || 0) }));
     this.refresh();
   },
@@ -441,7 +458,7 @@ export function installExplorerOps(FileExplorer) {
     // pre-2.111.18 bug, surviving remote-only.
     const r = await fetch('/api/archive/extract', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(at.hb({ path: src, dest, overwrite: false, progress: 1 })) }).catch(() => null);
     const dd = await r?.json().catch(() => ({}));
-    if (!r?.ok) { showToast(t('Extract failed: {msg}', { msg: dd?.error || t('unknown error') }), { type: 'error' }); return; }
+    if (!r?.ok) { showToast(t('Extract failed: {msg}', { msg: (dd?.error && fsErrorText(dd)) || t('unknown error') }), { type: 'error' }); return; }
     if (dd.opId) { this._trackExtractOp(dd.opId, name, dest); return; }
     showToast(here ? t('Extracted here') : t('Extracted to {name}', { name: dest.split('/').pop() }));
     this.refresh();
@@ -473,7 +490,7 @@ export function installExplorerOps(FileExplorer) {
       // may have died mid-file (the server-side journal forces a repairing
       // overwrite on the next extract into this dest) or completed (#28)
       else if (!st) showToast(t('Extract status lost (server restarted) — it may still have completed'), { type: 'error' });
-      else if (st.status !== 'cancelled') showToast(t('Extract failed: {msg}', { msg: st.error || t('unknown error') }), { type: 'error' });
+      else if (st.status !== 'cancelled') showToast(t('Extract failed: {msg}', { msg: (st.error && fsErrorText(st)) || t('unknown error') }), { type: 'error' });
       setTimeout(() => { this._activeUploads.delete(key); this._updateUploadRing(); this.refresh(); }, ok ? 1200 : 4000);
     };
     const poll = setInterval(async () => {
@@ -537,7 +554,7 @@ export function installExplorerOps(FileExplorer) {
     body.appendChild(table);
     // fast stat (no recursive size) fills everything visible immediately…
     fetch(`/api/file/stat?path=${encodeURIComponent(fp)}${this._hp()}`).then(r => r.json()).then((d) => {
-      if (!d || d.error) { cells.Type.textContent = t('Could not read properties'); return; }
+      if (!d || d.error) { cells.Type.textContent = t('Could not read properties') + (d?.code ? ` — ${fsErrorText(d)}` : ''); return; }
       cells.Type.textContent = d.isDirectory ? t('Folder ({n} items)', { n: d.entryCount ?? '?' }) : t('File');
       cells.Size.textContent = d.isDirectory ? t('calculating…') : formatSize(d.size);
       cells.Modified.textContent = d.modified ? new Date(d.modified).toLocaleString() : '-';
@@ -550,7 +567,8 @@ export function installExplorerOps(FileExplorer) {
           // `du` = the REMOTE branch's field name for the same number (shape
           // drift: the remote du ran, shipped, and was dropped as 'unknown')
           const du = d2?.duSize ?? d2?.du;
-          cells.Size.textContent = du != null ? t('{size} (recursive)', { size: formatSize(du) }) : t('unknown');
+          // verify-r2: a walk the device stopped at its bound SAYS so — the size is a floor, never the folder's whole size
+          cells.Size.textContent = du == null ? t('unknown') : d2.duPartial ? t('at least {size} (stopped counting after {n} entries)', { size: formatSize(du), n: Number(d2.duPartial).toLocaleString() }) : t('{size} (recursive)', { size: formatSize(du) });
         }).catch(() => { if (overlay.isConnected) cells.Size.textContent = t('unknown'); });
       }
     }).catch(() => { cells.Type.textContent = t('Could not read properties'); });

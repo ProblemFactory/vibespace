@@ -463,7 +463,7 @@ class WindowManager {
 
       const snapEnabled = this._settings?.get('layout.enableDragSnap') ?? true;
       const shiftDragEnabled = this._settings?.get('layout.enableShiftDragSelection') ?? true;
-      if (!e.altKey && !shakeBypass && snapEnabled) {
+      if (!e.altKey && !shakeBypass && snapEnabled && !win.fixedSize) { // a window whose app FIXES its size never snaps (lane app-fit-fixed)
         if (e.shiftKey && this.grid && shiftDragEnabled) {
           if (shiftDragStart < 0) shiftDragStart = this._getGridCell(e.clientX, e.clientY);
           const current = this._getGridCell(e.clientX, e.clientY);
@@ -740,7 +740,7 @@ class WindowManager {
       const snapEnabled = this._settings?.get('layout.enableDragSnap') ?? true;
       const shiftDragEnabled = this._settings?.get('layout.enableShiftDragSelection') ?? true;
       let snapped = false;
-      if (!e.altKey && !shakeBypass && snapEnabled) {
+      if (!e.altKey && !shakeBypass && snapEnabled && !win.fixedSize) { // a window whose app FIXES its size never snaps (lane app-fit-fixed)
         if (shiftDragStart >= 0 && e.shiftKey && this.grid && shiftDragEnabled) {
           const endCell = this._getGridCell(e.clientX, e.clientY);
           if (endCell >= 0) { this._snapToGridRange(win.id, shiftDragStart, endCell); snapped = true; }
@@ -877,7 +877,7 @@ class WindowManager {
     // lost, the window's blur, the page hidden, a move with no button held; the shield covers every window's content
     // meanwhile (a corner dragged inward over the window's OWN iframe used to lose every move: it could grow, not shrink)
     const startResize = (dir, sX, sY, { pointerId = null, el = null, at = null } = {}) => {
-        if (win._resizeOp) return false;
+        if (win._resizeOp || win.fixedSize) return false; // lane app-fit-fixed: the app fixed the size — no handle, no edge drag
         const sW = win.element.offsetWidth, sH = win.element.offsetHeight, sL = win.element.offsetLeft, sT = win.element.offsetTop;
         const sBounds = { left: win.element.style.left, top: win.element.style.top, width: win.element.style.width, height: win.element.style.height };
         const SNAP_T = 15;
@@ -1030,6 +1030,53 @@ class WindowManager {
   }
 
   /**
+   * THE APP FIXED ITS SIZE (lane app-fit-fixed, 2026-10-03 — the owner, WeChat's login in the top-left ~45 % of a blank
+   * window and Inkscape's welcome cut at the bottom: 「对于自己定死尺寸的窗口我们应该遵循他们的尺寸并且禁止缩放」): `size` =
+   * the window box {w, h} (layout px) that holds the app's fixed window exactly (desktop-app-window.js: the view's
+   * fixed pane + the measured chrome). The window TAKES it and is not resizable while it holds: min = max inline (so
+   * every path that writes a size lands on it, the .window floor included), `window-fixed-size` (style.css hides the
+   * resize handles and the maximize button), no resize drag, no maximize, no snap or grid zone on a drag, and every
+   * programmatic zone (a cell, a half, stored bounds, a layout) MOVES it without sizing it (_placeWindow). NEVER capped
+   * at the workspace: a fixed window larger than the screen keeps the app's size, its top-left kept on the workspace,
+   * the rest past the edge (movable; the window's Scale ▸ is the lever). A maximized window is restored first. null
+   * releases it: the size it had before the lock comes back (slid inside), resizable again. Returns whether it changed.
+   */
+  setFixedSize(id, size) {
+    const win = this.windows.get(id); if (!win) return false;
+    const w = size && Number(size.w) > 0 ? Math.ceil(size.w) : 0, h = size && Number(size.h) > 0 ? Math.ceil(size.h) : 0;
+    const next = w && h ? { w, h } : null, cur = win.fixedSize || null;
+    if (next ? !!cur && cur.w === w && cur.h === h : !cur) return false;
+    const el = win.element;
+    if (next && !cur) {
+      if (win.isMaximized) this.toggleMaximize(win.id);
+      win._preFixedSize = { width: el.style.width, height: el.style.height };
+    }
+    win.fixedSize = next;
+    el.classList.toggle('window-fixed-size', !!next);
+    const at = this._layoutBoxOf(el) || { left: el.offsetLeft, top: el.offsetTop };
+    if (next) {
+      el.style.minWidth = el.style.maxWidth = el.style.width = w + 'px';
+      el.style.minHeight = el.style.maxHeight = el.style.height = h + 'px';
+    } else {
+      const p = win._preFixedSize || {}; win._preFixedSize = null;
+      el.style.maxWidth = ''; el.style.maxHeight = ''; el.style.minWidth = ''; el.style.minHeight = '';
+      if (p.width) el.style.width = p.width;
+      if (p.height) el.style.height = p.height;
+      this._applyOwnMin(win); // the app's own minimum (if any) is the window's again
+    }
+    if (!this._mobileLayout()) {
+      const k = keepInside({ left: at.left, top: at.top, width: el.offsetWidth || w, height: el.offsetHeight || h }, this._workspaceBox());
+      if (k.moved) { el.style.left = k.left + 'px'; el.style.top = k.top + 'px'; }
+    }
+    if (win.gridBounds) this._captureGridBounds(win);
+    if (win._tabChain) this._syncChainBounds(win._tabChain);
+    if (win.onResize) win.onResize();
+    this._scheduleOverlapUpdate();
+    this._notify();
+    return true;
+  }
+
+  /**
    * Resize a window to {w, h} (LAYOUT px) keeping its top-left (lane D (a): a desktop-app window after a Scale ▸
    * relaunch takes the size that shows the same app content at the new scale — desktop-app-window.js
    * fitAfterRelaunch): never below its own minimum, capped at the workspace and slid inside it (keepInside), the
@@ -1039,7 +1086,7 @@ class WindowManager {
    */
   resizeWindowTo(id, { w, h } = {}) {
     const win = this.windows.get(id); if (!win) return false;
-    if (win.isMaximized || win.isMinimized || win._tabChain || this._mobileLayout()) return false;
+    if (win.isMaximized || win.isMinimized || win._tabChain || win.fixedSize || this._mobileLayout()) return false;
     if (!(Number(w) > 0) || !(Number(h) > 0)) return false;
     const el = win.element, ws = this._workspaceBox(), min = this._ownMinOf(win);
     const q = (v) => Math.round(v * 100) / 100;
@@ -1099,6 +1146,11 @@ class WindowManager {
    */
   _placeWindow(win, zone, gap = 0) {
     const el = win.element, ws = this._workspaceBox();
+    if (win.fixedSize && !this._mobileLayout()) { // lane app-fit-fixed: a zone MOVES a window whose app fixed its size — never sizes it, never caps it
+      const k = keepInside({ left: zone.left, top: zone.top, width: win.fixedSize.w, height: win.fixedSize.h }, ws);
+      el.style.left = k.left + 'px'; el.style.top = k.top + 'px'; el.style.width = k.width + 'px'; el.style.height = k.height + 'px';
+      return { left: k.left, top: k.top, width: k.width, height: k.height };
+    }
     const box = ws && !this._mobileLayout() ? zoneBox(zone, this._ownMinOf(win), ws, gap) : { ...zone };
     el.style.left = box.left + 'px'; el.style.top = box.top + 'px'; el.style.width = box.width + 'px'; el.style.height = box.height + 'px';
     return box;
@@ -1110,6 +1162,7 @@ class WindowManager {
    * layout and unless maximized, a window below it RAISED now and slid inside the workspace when it fits.
    */
   _applyOwnMin(win) {
+    if (win.fixedSize) return; // lane app-fit-fixed: the app's fixed size owns min AND max (setFixedSize)
     const el = win.element, own = !!(win.minWidth || win.minHeight), min = this._ownMinOf(win);
     // measured BEFORE the inline min (which would already report the raised box); a window that is not rendered
     // (minimized = display:none ⇒ offset 0) is judged by its inline size — never "raised" from a zero measurement
@@ -1546,6 +1599,7 @@ class WindowManager {
       win = this.windows.get(win._tabChain.tabs[0]);
       if (!win) return;
     }
+    if (win.fixedSize && !win.isMaximized) return; // lane app-fit-fixed: a window whose app fixed its size is never maximized
     const el = win.element;
     if (win.isMaximized) {
       // the restored box through the ONE placement (inc-muhmqvzf-jodk): a pre-maximize zone below the window's minimum
