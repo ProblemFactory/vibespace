@@ -58,6 +58,8 @@ does it).
   30 s cap; a recorded line on stderr says `# ran on <machine> — exit N, 1.2 s (recorded)`.
 - On Windows a `run` line is at most 8191 characters (cmd.exe's own limit) and ONE line — a longer or
   multi-line command is refused by name before anything runs.
+- On Windows the output is decoded per the machine's console code page (GBK on a Chinese system, …)
+  unless it is already UTF-8; the reply's `encoding` names the decoding used.
 - **A command that could not START is said by name** — `could not start `hostname` on "<machine>" —
   sh: not found on that machine (ENOENT); nothing ran.` — and the CLI exits with the shell's own code:
   `127` not found, `126` not executable. Never a bare "exit 1" for a child that never ran.

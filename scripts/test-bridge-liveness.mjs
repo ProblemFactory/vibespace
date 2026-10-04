@@ -196,21 +196,32 @@ console.log('\n§E the watch (ORCH) over a fake /proc and fake sessions');
   ok(lines.length === quietLines, '…said once, not every tick');
   W.stop();
   // verify r2 (L3): `session.deadBridgeMinutes` changed at RUNTIME — the watch re-reads it after every tick and re-arms
-  // its interval (real timers: 0.034 min ⇒ a 2 s tick; then 3 min ⇒ 30 s — the 2 s cadence must stop at once)
+  // its interval (0.034 min ⇒ a 2 s tick; then 3 min ⇒ 30 s — the 2 s cadence must stop at once). Judged on the watch's
+  // OWN setInterval / clearInterval calls, captured and fired by hand (lane fast-budget: the real-timer version slept
+  // 10.5 s of this 12 s suite, and its counts slipped on a loaded box)
   let minutes = 0.034, reads = 0;
-  const W2 = BW.create({ activeSessions: new Map(), BUFFERS_DIR: BUFS, SOCKETS_DIR: SOCKS, procRoot: proc, selfPid: 500,
-    serverSetting: (k) => { if (k === 'session.deadBridgeMinutes') reads++; return k === 'session.deadBridgeMinutes' ? minutes : undefined; },
-    log: { log() { }, warn() { } }, reattachLocalPty: () => false });
-  W2.start();
-  await new Promise((r) => setTimeout(r, 5000));
-  const r1 = reads;                       // start's arm + the intervals (tick + arm each) at 2 s and 4 s (a loaded box may slip one)
-  minutes = 3;                            // ⇒ silence 180 s, tick 30 s: the next 2 s interval re-arms, then silence
-  await new Promise((r) => setTimeout(r, 3000));
-  const r2 = reads;                       // the one interval at 6 s that re-armed (2 s of slack)
-  await new Promise((r) => setTimeout(r, 2500));
-  const r3 = reads;                       // nothing: the 2 s interval is gone (a 30 s one fires at 36 s)
-  W2.stop();
-  ok(r1 >= 3 && r2 > r1 && r3 === r2, `the setting changed at runtime re-arms the watch: ${r1} reads in the first 5 s at a 2 s tick, ${r2 - r1} at the next tick (the re-arm), ${r3 - r2} in the 2.5 s after (the old cadence is gone)`);
+  const realSI = globalThis.setInterval, realCI = globalThis.clearInterval;
+  const ivs = [];
+  globalThis.setInterval = (fn, ms) => { const h = { fn, ms, cleared: false, unref() { return h; }, ref() { return h; }, hasRef() { return false; } }; ivs.push(h); return h; };
+  globalThis.clearInterval = (h) => { if (ivs.includes(h)) h.cleared = true; else realCI(h); };
+  const live = () => ivs.filter((h) => !h.cleared);
+  const fire = async () => { live()[0].fn(); await new Promise((r) => setImmediate(r)); };
+  try {
+    const W2 = BW.create({ activeSessions: new Map(), BUFFERS_DIR: BUFS, SOCKETS_DIR: SOCKS, procRoot: proc, selfPid: 500,
+      serverSetting: (k) => { if (k === 'session.deadBridgeMinutes') reads++; return k === 'session.deadBridgeMinutes' ? minutes : undefined; },
+      log: { log() { }, warn() { } }, reattachLocalPty: () => false });
+    W2.start();
+    const armed = live().map((h) => h.ms);
+    await fire(); await fire();             // two 2 s ticks on the same setting: each re-reads it, nothing re-arms
+    const r1 = reads, kept = ivs.length === 1 && live().length === 1;
+    minutes = 3;                            // ⇒ silence 180 s, tick 30 s: the next 2 s tick re-arms
+    const old = live()[0];
+    await fire();
+    const after = live().map((h) => h.ms), r2 = reads;
+    W2.stop();
+    ok(armed.length === 1 && armed[0] === BL.tickMsOf(BL.silenceMsOf(0.034)) && armed[0] <= 2000 && r1 >= 3 && kept && old.cleared && after.length === 1 && after[0] === BL.tickMsOf(BL.silenceMsOf(3)) && after[0] >= 30000 && r2 > r1 && live().length === 0,
+      `the setting changed at runtime re-arms the watch: armed at ${armed.join()} ms, ${r1} reads over start + two ticks with no re-arm, then the next tick cleared the ${old.ms} ms interval and armed ${after.join()} ms (the old cadence is gone); stop clears it`);
+  } finally { globalThis.setInterval = realSI; globalThis.clearInterval = realCI; }
 }
 
 // ── §F the wiring ──

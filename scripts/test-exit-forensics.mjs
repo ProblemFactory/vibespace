@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // EXIT FORENSICS (B-3052) — a session's death leaves a record that names its actor.
 // §6 (B-f698): an UNEXPECTED exit while working is resumed ONCE by itself + one For-you item.
+// §6d (lane exit-item-heal): a resume answers that item — read off the store, one pass per new live session.
 //
 // The 2026-09-24 incident: three chat sessions died in one 40 ms window and
 // the journal held only `[session] exited <id> "<name>" mode=chat
@@ -1316,7 +1317,113 @@ console.log('— §6c every kill door is declared: an actor marked before the ki
   }
 }
 
-for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 26 })) ok(r.pass, r.name, r.detail);
+console.log('— §6d lane exit-item-heal: a resume answers the "resume it" item — read off the store, one pass per new live session —');
+{
+  const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
+  const UER = 'src/server/unexpected-exit.js';
+  const ueSrc = read(UER);
+  const quiet = { log() { }, warn() { } };
+  const keyOf = (s, id) => (s.claudeSessionId ? `${s.backend || 'claude'}:${s.claudeSessionId}` : `webui:${id}`); // server.js sessionStatusKey's shape
+  const CRASH = { code: 1, signal: null, wrapperFate: 'finalized' };
+  // THE LEGS, judged on a module (the real one, or a patched copy): items filed by the REAL orchestrator into the REAL store
+  const healLegs = (UE, tag) => {
+    const dir = path.join(ROOT, 'heal-' + tag);
+    fs.mkdirSync(dir, { recursive: true });
+    let store = new UserTodoManager({ dataDir: dir, onChange() { }, expirySweepMs: 0 });
+    const live = new Map();
+    let clock = Date.now();
+    const install = () => UE.install({ userTodos: store, sessionKeyFor: keyOf, activeSessions: live, clients: () => [], log: quiet, now: () => clock, pendMaxMs: 1000 });
+    install();
+    const die = (cid, id) => UE.onExit({ name: 'conv ' + (cid || id), mode: 'chat', backend: 'claude', claudeSessionId: cid, clients: new Map(), cwd: ROOT }, id, CRASH, { midTurn: true });
+    // four conversations die while working, no VibeSpace window open ⇒ "no window was open … resume it" (the 15:45 shape)
+    for (const c of ['a', 'b', 'c', 'd']) die('conv-' + c, 'dead-' + c);
+    clock += 1000; UE.tick();
+    die('conv-d', 'dead-d2');                                    // conv-d dies AGAIN: "… again … resume it" supersedes nothing filed — a second item
+    die(null, 'dead-nc');                                        // no conversation: nothing to resume
+    store.rekey('webui:dead-nc', 'claude:conv-nc');              // (a placeholder item moved onto a real key later)
+    const itemOf = (cid, outcome) => store.forSession('claude:' + cid).find((i) => i.i18n && i.i18n.text && i.i18n.text.key === UE.TEXTS[outcome]) || null;
+    const A = itemOf('conv-a', 'no-window'), B = itemOf('conv-b', 'no-window'), C = itemOf('conv-c', 'no-window'), D1 = itemOf('conv-d', 'no-window'), D2 = itemOf('conv-d', 'again'), NC = itemOf('conv-nc', 'no-conversation');
+    const r = { filed: [A, B, C, D1, D2, NC].filter(Boolean).length };
+    // ① a CLIENT resumes conv-a 28 min later (a create carrying its id); conv-c was resumed BEFORE its item was filed;
+    //   conv-nc runs again too; conv-b is not running
+    const startA = A ? A.createdAt + 28 * 60000 : 0;
+    live.set('live-a', { name: 'conv a', mode: 'chat', backend: 'claude', claudeSessionId: 'conv-a', createdAt: startA });
+    live.set('live-c', { name: 'conv c', mode: 'chat', backend: 'claude', claudeSessionId: 'conv-c', createdAt: C ? C.createdAt - 60000 : 0 });
+    live.set('live-nc', { name: 'conv nc', mode: 'chat', backend: 'claude', claudeSessionId: 'conv-nc', createdAt: NC ? NC.createdAt + 60000 : 0 });
+    live.set('live-x', { name: 'other', mode: 'chat', backend: 'claude', claudeSessionId: 'conv-x', createdAt: Date.now() + 60000 });
+    let saves = 0; const save0 = store._save.bind(store); store._save = () => { saves++; save0(); };
+    const heard = []; store.onStatus((it, o) => heard.push(o.by));
+    r.first = UE.healResumed();
+    const a = A && store.get(A.id);
+    r.a = a && { status: a.status, by: a.resolvedBy, fact: a.resolvedFact, saves };
+    r.heard = heard.join(',');
+    r.b = B && store.get(B.id).status; r.c = C && store.get(C.id).status; r.nc = NC && store.get(NC.id).status;
+    // ② the next publish (an unrelated broadcast): the same live sessions are passed over — one pass per new live session
+    const savesBefore = saves;
+    r.second = UE.healResumed(); r.secondSaves = saves - savesBefore;
+    // ③ a SERVER RESTART: a fresh manager over the same file, a fresh install (the pending map gone); conv-b and conv-d
+    //   come back as RESTORED sessions started after their items were filed
+    store.flush();
+    store = new UserTodoManager({ dataDir: dir, onChange() { }, expirySweepMs: 0 });
+    live.clear();
+    install();
+    const startB = B ? B.createdAt + 31 * 60000 : 0;
+    live.set('restored-b', { name: 'conv b', mode: 'chat', backend: 'claude', claudeSessionId: 'conv-b', createdAt: startB });
+    live.set('restored-d', { name: 'conv d', mode: 'chat', backend: 'claude', claudeSessionId: 'conv-d', createdAt: (D2 ? D2.createdAt : 0) + 1000 });
+    r.restart = UE.healResumed();
+    store.flush();
+    const disk = JSON.parse(fs.readFileSync(path.join(dir, 'user-todos.json'), 'utf8'));
+    const onDisk = (it) => it && (disk.items || []).find((x) => x.id === it.id);
+    r.bDisk = onDisk(B) && { status: onDisk(B).status, by: onDisk(B).resolvedBy, at: onDisk(B).resolvedFact && onDisk(B).resolvedFact.resumedAt };
+    r.d = [D1, D2].map((it) => it && store.get(it.id).status).join(',');
+    r.ncAfter = NC && store.get(NC.id).status; r.cAfter = C && store.get(C.id).status;
+    store.stop?.();
+    UE.install({});
+    return { r, A, B, startA, startB };
+  };
+  const { r, A, B, startA, startB } = healLegs(require(path.join(REPO, UER)), 'real');
+  ok(r.filed === 6, 'setup: the REAL orchestrator filed six items into the REAL store (4 × no-window, 1 × again, 1 × no-conversation)', r);
+  ok(r.a && r.a.status === 'done' && r.a.by === 'resumed' && r.a.fact && r.a.fact.resumedAt === startA && r.first.length === 1 && r.first[0] === A.id && r.a.saves === 1 && r.heard === 'resumed',
+    '① filed, then the conversation resumed by a client ⇒ the item is done, resolvedBy "resumed" (the system, never the user), its fact = the new session\'s start; ONE save; the status listeners hear it', r);
+  ok(r.c === 'open', '① a conversation resumed BEFORE its item was filed ⇒ the item is untouched', r);
+  ok(r.b === 'open', '① another conversation\'s item ⇒ untouched (conv-b is not running)', r);
+  ok(r.nc === 'open' && r.ncAfter === 'open', '① a no-conversation item stays even under a running conversation\'s key (nothing to resume)', r);
+  ok(r.second.length === 0 && r.secondSaves === 0, '② the next publish passes the same live sessions over — one pass per new live session, nothing written', r);
+  ok(r.restart.length === 3 && r.bDisk && r.bDisk.status === 'done' && r.bDisk.by === 'resumed' && r.bDisk.at === startB && r.d === 'done,done',
+    '③ after a server restart (fresh install, store kept) the restored conversations\' items are resolved off the STORE — conv-b on disk, both of conv-d\'s (no-window + again)', r);
+  ok(r.cAfter === 'open', '③ the item of a conversation resumed before it was filed is still untouched after the restart', r);
+  // the words: the row renderer + the For-you window pane say it plainly, zh + ja carry the sentence
+  const R = await import(path.join(REPO, 'src/lib/user-todos-row.js'));
+  const L = await import(path.join(REPO, 'src/lib/inbox-window-layout.js'));
+  const tt = (s, p) => s.replace(/\{(\w+)\}/g, (m, k) => (p && p[k] != null ? String(p[k]) : m));
+  const hm = (ms) => { const d = new Date(ms); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+  const item = { id: 'u1', status: 'done', resolvedBy: 'resumed', resolvedFact: { resumedAt: startA }, createdAt: startA - 1, resolvedAt: startA, text: 'x' };
+  const pane = L.itemView(item, { t: tt, resolvedBy: (by, it) => R.resolvedByText(by, tt, it) });
+  ok(R.resolvedByText('resumed', tt, item) === `running again (resumed ${hm(startA)})` && R.resolvedByText('resumed', tt) === 'running again'
+    && pane.meta.some((m) => m.kind === 'by' && m.text === `running again (resumed ${hm(startA)})`),
+    'the resolution says it: "running again (resumed HH:MM)" on the row and in the For-you window pane (no fact ⇒ "running again")', pane.meta);
+  const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
+  ok(['running again', 'running again (resumed {time})'].every((k) => zh.includes(JSON.stringify(k) + ':') && ja.includes(JSON.stringify(k) + ':')), 'the resolution\'s words have zh + ja');
+  // ONE entry point: the active-sessions payload builder (every broadcast + a fresh client's first list) — no other caller
+  const srv = read('server.js');
+  const builder = srv.split('function activeSessionsPayload() {')[1] || '';
+  ok(/^\s*try \{ require\('\.\/src\/server\/unexpected-exit'\)\.healResumed\(\); \}/.test(builder), 'PIN: server.js activeSessionsPayload (the publish every create / resume / restore passes through) runs the heal pass first');
+  const callers = spawnSync('git', ['-C', REPO, 'grep', '-l', 'healResumed(', '--', 'src', 'server.js'], { encoding: 'utf8' }).stdout.trim().split('\n').filter(Boolean).sort();
+  ok(callers.join(',') === 'server.js,src/server/unexpected-exit.js', 'census: healResumed is called from the ONE entry point only (never per call site)', callers);
+  // CONTROLS — patched copies judged by the same legs
+  const noHook = ueSrc.replace(/function healResumed\(\) \{\n/, 'function healResumed() { return [];\n');
+  const ctl = healLegs(M.load(UER, noHook, 'noheal'), 'noheal').r;
+  ok(noHook !== ueSrc && !(ctl.a && ctl.a.status === 'done') && ctl.restart.length === 0 && ctl.b === 'open',
+    'control: a copy WITHOUT the heal pass leaves the resumed conversation\'s item open, before and after the restart (the legs go red)', ctl);
+  const noOrder = ueSrc.replace('&& Number(it.createdAt) < startedAt', '');
+  const ctl2 = healLegs(M.load(UER, noOrder, 'noorder'), 'noorder').r;
+  ok(noOrder !== ueSrc && ctl2.c === 'done', 'control: a copy without "filed BEFORE the session started" resolves the item of a conversation resumed before it was filed (the leg goes red)', ctl2);
+  const readsWords = (src) => /\bit\.(?:text|detail)\b/.test(src.split('function healResumed')[1].split('\n}\n')[0]);
+  const byWords = ueSrc.replace("HEAL_KEYS.has(it.i18n && it.i18n.text && it.i18n.text.key)", "/resume it|say continue/.test(it.text)");
+  ok(!readsWords(ueSrc) && byWords !== ueSrc && readsWords(byWords), 'census: the heal pass never reads an item\'s words — found by i18n.text.key + sessionKey (control: a words-matching copy is caught)');
+}
+
+for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 28 })) ok(r.pass, r.name, r.detail);
 
 console.log(`\n${fail ? '✗' : '✓'} test-exit-forensics: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

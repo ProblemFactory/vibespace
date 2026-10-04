@@ -535,6 +535,11 @@ class ExitProxyManager {
     // verify-r5 X2: a command whose DISPLAY order differs from what runs (bidi controls) is never asked about, run or shown
     const hidden = E.hiddenOrderOf(cmd);
     if (hidden.length) throw namedError('bad_command', E.refusalText('bad_command', { hidden }), { hidden });
+    // lane machine-card-fold: a PowerShell -EncodedCommand is SHOWN as its decoded script (the card, the Commands list, the
+    // ask) — so the SCRIPT passes the same belt as a plain command, and a line whose script cannot be shown never runs unread
+    const encoded = E.encodedCommandOf(cmd);
+    if (encoded && !encoded.ok) throw namedError('bad_command', E.refusalText('bad_command', { encoded }), { encoded: encoded.code });
+    if (encoded && encoded.hidden.length) throw namedError('bad_command', E.refusalText('bad_command', { hidden: encoded.hidden, encoded }), { hidden: encoded.hidden, encoded: 'hidden' });
     const j = this._judge(session, sessionId, ref, 'run');
     if (j.refusal) throw this._refused(session, sessionId, { code: j.refusal.code, grant: 'run', cmd, error: j.refusal.error });
     const h = j.h, machine = h.name || h.id;
@@ -880,10 +885,10 @@ class ExitProxyManager {
         try {
           const text = `Allow "${String(name).slice(0, 80)}" to run a command on ${machine}?`;
           const it = this.userTodos.add(sessionKey, {
-            text, detail: cmd, // the WHOLE command (the store caps a detail at 8 000); the row words the rest itself
+            text, detail: E.askDetailOf(cmd), // the WHOLE command (the store caps a detail at 8 000; a PowerShell -EncodedCommand = its decoded script, then its line — lane machine-card-fold); the row words the rest itself
             urgency: 'high', kind: 'action', by: 'agent', origin: 'machines', sessionName: String(name).slice(0, 120),
             expiresAt: askedAt + E.ASK_TTL_MS,
-            action: { type: 'exit-run-ask', askId, hostId: h.id, machine, cmd: cmd.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 120) },
+            action: { type: 'exit-run-ask', askId, hostId: h.id, machine, cmd: E.commandHeadOf(cmd).replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 120) },
             i18n: { text: { key: ASK_KEY, params: { name: String(name).slice(0, 80), machine } } },
           });
           k.todoId = it && it.id;
@@ -944,7 +949,7 @@ class ExitProxyManager {
     // it (a merge, a re-file, an edit) ⇒ refused, nothing runs, the ask settles as not allowed
     if (v.state === 'allowed' && k.todoId && this.userTodos && typeof this.userTodos.get === 'function') {
       let it = null; try { it = this.userTodos.get(k.todoId); } catch { }
-      const shown = !!(it && it.status === 'open' && it.action && it.action.type === 'exit-run-ask' && it.action.askId === k.askId && String(it.detail || '') === String(k.cmd).trim());
+      const shown = !!(it && it.status === 'open' && it.action && it.action.type === 'exit-run-ask' && it.action.askId === k.askId && String(it.detail || '') === E.askDetailOf(k.cmd));
       // verify-r6 W1: settled as CHANGED, never "denied" — the chat card said "you denied it" and the CLI "the user did not
       // allow" while the user had pressed Allow on a request that changed under it
       if (!shown) { this._settleAsk(k, 'changed', 'item-changed'); throw namedError('ask_changed', 'the request changed after it was shown — nothing ran; the agent can ask again'); }

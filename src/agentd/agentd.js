@@ -369,6 +369,26 @@ function posixShells() {
   posixShellsRun = Promise.all(['sh', 'bash', 'dash', 'zsh', 'ksh'].map(one)).then((l) => l.filter(Boolean)).finally(() => { posixShellsRun = null; });
   return posixShellsRun;
 }
+// lane win-run-codepage: the console's code page a run-cmd child writes in — asked ONCE per daemon (one cmd.exe spawn,
+// the registry's OEMCP when chcp names none), cached even when unknown (null ⇒ XS.decodeRunOutput keeps UTF-8).
+let consoleCodePageP = null;
+function consoleCodePage() {
+  if (!consoleCodePageP) consoleCodePageP = new Promise((resolve) => {
+    const { execFile } = require('child_process');
+    const ask = (i) => {
+      if (i >= XS.CODEPAGE_PROBES.length) return resolve(null);
+      const p = XS.shellPlan('win32', XS.CODEPAGE_PROBES[i]);
+      try {
+        execFile(p.file, p.args, { timeout: 5000, maxBuffer: 64 * 1024, encoding: 'buffer', env: spawnEnv(), windowsVerbatimArguments: true }, (err, out) => {
+          const cp = err ? null : XS.parseCodePage(out);
+          if (cp) resolve(cp); else ask(i + 1);
+        });
+      } catch { ask(i + 1); }
+    };
+    ask(0);
+  });
+  return consoleCodePageP;
+}
 function spawnEnv(extra) {
   const home = os.homedir();
   const nodeDir = path.dirname(process.execPath);
@@ -2125,6 +2145,10 @@ function serveConnection(sock) {
       if (msg.op === 'run-cmd') {
         try {
           const { execFile } = require('child_process');
+          // lane win-run-codepage: on win32 the streams arrive as BYTES and are decoded per the console's code page
+          // (PURE XS.decodeRunOutput — valid UTF-8 stays UTF-8, else chcp's code page; asked once per daemon).
+          const win = process.platform === 'win32';
+          if (win) consoleCodePage();
           // lane-exit-run-output E1: THE SHELL IS THE DEVICE'S FACT — `{shell: <line>}` runs under the interpreter THIS
           // machine has (PURE src/exit-shell.js: win32 ⇒ cmd.exe /d /s /c "<line>" + windowsVerbatimArguments, else
           // sh -lc); the hub never names it (it used to send `sh -lc` to a Windows box: ENOENT in 8 ms, read as exit 1).
@@ -2133,7 +2157,7 @@ function serveConnection(sock) {
           if (!plan.ok) { mux.control({ op: 'cmd-result', id: msg.id, code: XS.spawnExitCode(plan), spawnError: { code: plan.code, message: plan.message }, interpreter: plan.interpreter, stdout: '', stderr: '', timedOut: false, signal: null, truncated: false }); return; }
           const child = execFile(plan.file, plan.args, {
             timeout: Math.min(Number(msg.timeoutMs) || 10000, 30000), maxBuffer: 2 * 1024 * 1024,
-            env: spawnEnv(msg.env), ...(plan.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
+            env: spawnEnv(msg.env), ...(plan.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}), ...(win ? { encoding: 'buffer' } : {}),
           }, (err, stdout, stderr) => {
             // lane-pairing ⑥: a command the 30 s cap killed says so (`timedOut` + the signal) — it read as a bare `code 1`.
             // verify-r1 A5: `code` is ALWAYS a number (node's maxBuffer overflow set it to the STRING
@@ -2145,9 +2169,15 @@ function serveConnection(sock) {
             // it used to fold into `code 1` with empty streams and the message dropped.
             const overflow = !!(err && err.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER');
             const sf = XS.spawnFailure(err);
-            const so = String(stdout), se = String(stderr);
-            mux.control({ op: 'cmd-result', id: msg.id, code: sf ? XS.spawnExitCode(sf) : err ? (Number.isInteger(err.code) ? err.code : 1) : 0, ...(sf ? { spawnError: sf } : {}), ...(plan.interpreter ? { interpreter: plan.interpreter } : {}), stdout: so.slice(0, 1024 * 1024), stderr: se.slice(0, 65536),
-              timedOut: !!(err && err.killed && !overflow), signal: (err && err.signal) || null, truncated: overflow || so.length > 1024 * 1024 || se.length > 65536 });
+            const send = (cp) => {
+              // lane win-run-codepage: decoded BEFORE the cut (a character is never split); POSIX keeps String() byte for byte
+              const dec = win ? XS.decodeRunOutput(stdout, stderr, cp, { cut: overflow || !!(err && err.killed) }) : null;
+              const so = dec ? dec.stdout : String(stdout), se = dec ? dec.stderr : String(stderr);
+              mux.control({ op: 'cmd-result', id: msg.id, code: sf ? XS.spawnExitCode(sf) : err ? (Number.isInteger(err.code) ? err.code : 1) : 0, ...(sf ? { spawnError: sf } : {}), ...(plan.interpreter ? { interpreter: plan.interpreter } : {}),
+                stdout: dec ? XS.cutText(so, 1024 * 1024) : so.slice(0, 1024 * 1024), stderr: dec ? XS.cutText(se, 65536) : se.slice(0, 65536), ...(dec ? { encoding: dec.encoding } : {}),
+                timedOut: !!(err && err.killed && !overflow), signal: (err && err.signal) || null, truncated: overflow || so.length > 1024 * 1024 || se.length > 65536 });
+            };
+            if (win) consoleCodePage().then(send, () => send(null)); else send();
           });
           if (msg.stdin64) { try { child.stdin.end(Buffer.from(msg.stdin64, 'base64')); } catch { } } else { try { child.stdin.end(); } catch { } }
         } catch (e) { mux.control({ op: 'cmd-result', id: msg.id, code: 127, error: e.message }); }

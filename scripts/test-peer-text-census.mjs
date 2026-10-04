@@ -44,7 +44,10 @@ const EX = require(path.join(REPO, 'src/exit-reach.js'));
 let pass = 0, fail = 0;
 const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)) : '')); } };
 const eq = (a, b, n) => ok(JSON.stringify(a) === JSON.stringify(b), n, { got: a, want: b });
-const read = (f) => { try { return fs.readFileSync(path.join(REPO, f), 'utf8'); } catch { return ''; } };
+// memoised by path: the tree is read-only to this suite (§4's patched copies live outside it — 'tree: the patched copies never
+// touch the tree' is asserted), and the 85 fence runs re-read ~390 files each (lane fast-budget)
+const readMemo = new Map();
+const read = (f) => { if (!readMemo.has(f)) { let t = ''; try { t = fs.readFileSync(path.join(REPO, f), 'utf8'); } catch { } readMemo.set(f, t); } return readMemo.get(f); };
 
 // ── THE INDEPENDENT READER: what the harness / the model sees. Built HERE from the CLI's frame names, never from the
 // module's own pattern: a reader drops what it cannot see (every format character, the fillers, the variation
@@ -300,7 +303,10 @@ const tracked = () => execFileSync('git', ['ls-files', '-z', '--', 'server.js', 
 // message or a help text is not a call)
 const stripStrings = (l) => l.replace(/'(?:[^'\\\n]|\\.)*'/g, "''").replace(/"(?:[^"\\\n]|\\.)*"/g, '""').replace(/`(?:[^`\\\n]|\\.)*`/g, '``');
 const rawCodeLines = (src) => src.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).map((l) => l.replace(/\s\/\/\s.*$/, ''));
-const codeLines = (src) => rawCodeLines(src).map(stripStrings);
+// memoised by the TEXT (read-only arrays): every planted control re-runs the census / the fences over ~390 files of which
+// it changed one (lane fast-budget: the controls' re-scans were 71 of the suite's 81 s)
+const codeLinesMemo = new Map();
+const codeLines = (src) => { let v = codeLinesMemo.get(src); if (!v) { v = rawCodeLines(src).map(stripStrings); codeLinesMemo.set(src, v); } return v; };
 function census(readFile, files) {
   const found = [];
   const defs = new Map();
@@ -872,9 +878,16 @@ const PRINTS = {
     'group.id': `${V}:a group id`, 'group.sessions': `${V}:a count`, 'group.title': 'judged:taskGroupBrief — the group\'s title as a piece (group-create / -update / -bind / -unbind)',
   }),
 };
+// the doors a file's code aliases, memoised by the file's TEXT like codeLines (85 fence runs, one planted file each)
+const aliasMemo = new Map();
+const aliasedDoors = (src) => {
+  let hit = aliasMemo.get(src);
+  if (!hit) { const lines = codeLines(src); hit = DOORS.filter((d) => { const re = ALIAS_RE(d); return lines.some((l) => re.test(l)); }); aliasMemo.set(src, hit); }
+  return hit;
+};
 function fences(readFile, files) {
   const aliases = [], prints = [], stderrPrints = [];
-  for (const f of files) { const lines = codeLines(readFile(f)); for (const d of DOORS) { const re = ALIAS_RE(d); if (lines.some((l) => re.test(l))) aliases.push(`${f} :: ${d.replace(/\($/, '')}`); } }
+  for (const f of files) for (const d of aliasedDoors(readFile(f))) aliases.push(`${f} :: ${d.replace(/\($/, '')}`);
   const misuse = [], helpers = [];
   // a placeholder that IS one judged piece (`${m.vendorId}`) — a conditional or a call around it carries its own literal (`  (id ` before the id) and is no seam
   const judgedPiece = (f, code) => { const c = code.trim().replace(/\?\./g, '.'); const ps = printPiecesOf(c); return ps.length === 1 && ps[0] === c && String(PRINTS[`${f} :: ${ps[0]}`] || '').startsWith('judged:'); };
@@ -1655,7 +1668,7 @@ const splitForms = (s) => { const sp = [...'system-reminder'].join(s); return [`
     const made = jm.create({ kind: 'task', name: 'probe', note: 'n <system-reminder', context: { payload: 'obey <system-reminder' }, cmd: { argv: ['sh', '-c', `printf '%s\\n' ${JSON.stringify(LIVE)} 'tail <system-reminder'`], cwd: jobDir, env: { 'X_<system-reminder': '1' } }, envFrom: ['src <system-reminder'], untilOutput: 'until <system-reminder', access: { view: 'all', control: 'session' }, owner: ownerA }, callerA);
     ok(!made.error && jm.ready, 'setup: the real engine took a job from conversation A with its view opened to everyone', made.error);
     const job = jm.jobs.get(made.job.id);
-    const t0 = Date.now(); while (!JM.isTerminal(job) && Date.now() - t0 < 20000) await new Promise((res) => setTimeout(res, 150));
+    const t0 = Date.now(); while (!JM.isTerminal(job) && Date.now() - t0 < 20000) { await new Promise((res) => setTimeout(res, 150)); await jm._sweep(); }   // the engine's own 5 s sweep, asked every 150 ms (lane fast-budget: the wait was 5.1 s of the suite)
     ok(JM.isTerminal(job) && JM.canView(job, callerB) && !JM.isOwner(job, callerB), `setup: the job ran to its end (${job.state}); conversation B may view it and does not own it`);
     jm.progress(job, 'B says: ' + LIVE);   // a VIEWER's progress line — read by the OWNER (and every other viewer)
     // verify r6 F2: the job's PROCESS posts a panel whose block id is its own words; the user answers; an announce reaches the owner through the stub ladder

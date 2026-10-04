@@ -167,7 +167,7 @@ export function itemView(item, ctx = {}) {
   const urgency = URGENCIES.includes(i.urgency) ? i.urgency : 'normal';
   const meta = [];
   if (resolved) {
-    const by = typeof ctx.resolvedBy === 'function' ? ctx.resolvedBy(i.resolvedBy) : '';
+    const by = typeof ctx.resolvedBy === 'function' ? ctx.resolvedBy(i.resolvedBy, i) : '';
     meta.push({ kind: 'status', text: i.status === 'dismissed' ? t('dismissed') : t('done') });
     if (by) meta.push({ kind: 'by', text: by });
   } else {

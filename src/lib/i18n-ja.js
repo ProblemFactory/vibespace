@@ -6134,6 +6134,8 @@ export default {
   "access removed": "アクセスが取り消されました",
   "expired (no answer in 60 s)": "期限切れ（60 秒以内に回答なし）",
   "the conversation ended before you answered": "回答する前に会話が終了しました",
+  "running again": "再び実行中",
+  "running again (resumed {time})": "再び実行中（{time} に再開）",
   "Nothing runs until you answer. After 60 s it is refused.": "回答するまで何も実行されません。60 秒で拒否されます。",
   "Allow \"{name}\" to run a command on {machine}?": "\"{name}\" に {machine} でコマンドの実行を許可しますか？",
   // verify r6 (what you approve is what runs): the whole request, hidden characters, every Always-Allow update
@@ -7735,4 +7737,16 @@ export default {
   "A workspace app lets every member just press Allow; without one, make your own Slack app with a one-time setup token.": "ワークスペースのアプリがあれば、メンバーは Allow を押すだけです。なければ一回限りの設定トークンで自分の Slack アプリを作ります。",
   "Slack: relay page": "Slack：中継ページ",
   "The https page Slack sends a member back to after they press Allow, for a workspace app whose Client ID and Secret were typed here (a company preset names its own). The page only returns the browser to a VibeSpace on a private network; anywhere else it shows the code to paste back. Register the same address under the app’s Redirect URLs. Empty = this instance’s own https address, else the code is pasted back.": "メンバーが Slack で Allow を押したあとに送られる https ページです（ここに Client ID と Secret を入力したワークスペースのアプリ用。会社のプリセットは独自の中継ページを持ちます）。このページはブラウザをプライベートネットワーク上の VibeSpace にだけ戻し、それ以外はコードを表示して貼り戻してもらいます。空欄 = このインスタンス自身の https アドレス。なければコードを貼り戻します。",
+  // lane machine-card-fold (2026-10-04): the Machines run head + the decoded PowerShell script
+  "{n} commands": "{n} 件のコマンド", // lane machine-card-compact: the short counts ("{n} files" is the house key)
+  "last: exit {code}": "最後：終了コード {code}",
+  "last: timed out": "最後：タイムアウト",
+  "last: did not run": "最後：実行されず",
+  "last: copy failed": "最後：コピー失敗",
+  "last: copied": "最後：コピー済み",
+  "PowerShell script (decoded from {flag})": "PowerShell スクリプト（{flag} からデコード）",
+  "PowerShell -EncodedCommand, not decoded: {why}": "PowerShell -EncodedCommand、デコードできません：{why}",
+  "The script carries characters that change the order it reads in or are not drawn at all: {codes}": "スクリプトに読む順序を変える文字、または表示されない文字が含まれています：{codes}",
+  "Show full command": "コマンド全体を表示",
+  "Hide full command": "コマンド全体を隠す",
 };

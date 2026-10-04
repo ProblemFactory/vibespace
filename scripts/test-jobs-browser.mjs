@@ -357,7 +357,8 @@ console.log('— ⑥ a job\'s own working directory is a write root of its brows
   const caller = { conversationId: 'conv-T', sessionId: 'sess-T', sessionCreatedAt: 1, groups: new Set(['T-g']) };
   const owner = { conversation: { backend: 'claude', id: 'conv-T' }, sessionId: 'sess-T', sessionCreatedAt: 1, createdBy: 'agent', groupsSnapshot: ['T-g'] };
   const CLI = path.join(REPO, 'data/bin/vibespace-browser');
-  const until = async (fn, ms = 30000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await fn()) return true; await new Promise((r) => setTimeout(r, 200)); } return false; };
+  // the engine's own 5 s sweep (what notices a run's end) asked every 200 ms — lane fast-budget: four 5 s waits were 15 of the suite's 30 s
+  const until = async (fn, ms = 30000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await fn()) return true; await new Promise((r) => setTimeout(r, 200)); await jm._sweep(); } return false; };
   const runJob = async (name, argv, cwd) => { const r = jm.create({ kind: 'task', name, cmd: { argv, env: { TMPDIR: TMP }, ...(cwd ? { cwd } : {}) }, owner }, caller); const j = jm.jobs.get(r.job.id); await until(() => ['done', 'failed', 'interrupted'].includes(j.state)); let log = ''; try { log = fs.readFileSync(j.runs[j.runs.length - 1].log, 'utf8'); } catch { } return { j, log }; };
   const inWd = await runJob('shot-in-wd', [process.execPath, CLI, 'screenshot', path.join(WD, 'shot.png')], WD);
   ok(!/write_path_refused/.test(inWd.log) && /127\.0\.0\.1:9|ECONNREFUSED|fetch failed|unreachable|not answer/i.test(inWd.log), 'F6: inside a job, `screenshot <the job\'s cwd>/shot.png` PASSES the write fence (it reaches the server call — refused write_path_refused before: a job had no VIBESPACE_SESSION_CWD)', inWd.log.slice(0, 600));

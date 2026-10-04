@@ -331,7 +331,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
   const viewOf = (it, e) => itemView(it, {
     t, words: it.card && it.action && it.action.type === 'app-install' ? cardWords(it.card, t, resolveLang()).title : model.wordsOf(it), detail: model.detailOf(it), replyOpen: st.replyOpen === it.id, name: model.nameFor(it.sessionKey, [it]),
     origin: { origin: originOf(it), label: ORIGIN_LABELS[originOf(it)] || '' }, notice: isNotice(it), resolved: !!(e && e.resolved) || it.status !== 'open',
-    reply: model.replyState(it), ago: (ts) => agoText(ts, t), expires: (ts) => expiresText(ts, t), resolvedBy: (by) => resolvedByText(by, t),
+    reply: model.replyState(it), ago: (ts) => agoText(ts, t), expires: (ts) => expiresText(ts, t), resolvedBy: (by, item) => resolvedByText(by, t, item),
     detailState: !it.detailTruncated ? 'whole' : (st.loadErr && st.loadErr.id === it.id ? 'failed' : 'loading'), loadError: st.loadErr && st.loadErr.id === it.id ? st.loadErr.why : '',
   });
   /** The session's board chip beside its name (the popup's chunk-4 chip: needs input / blocked / review / working). */

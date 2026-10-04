@@ -9,6 +9,8 @@
 import { t, deviceLocale } from './i18n.js';
 import { createModalShell, showToast, copyText } from './utils.js';
 import { runRow, spawnFailureText, platformLabel, RUNS_DEFAULT, EXIT_RUN_TIMEOUT_MS, fmtBytes } from '../exit-reach.js';
+import { encodedCommandOf } from '../encoded-command.js'; // lane machine-card-fold: a PowerShell -EncodedCommand row reads as its script
+import { revealHidden } from '../hidden-chars.js';
 
 const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
 const secs = (ms) => `${(Math.max(0, Number(ms) || 0) / 1000).toFixed(1)} s`;
@@ -45,7 +47,8 @@ export function paintRow(node, r) {
   // lane exit-see-whole (design 013 piece 1b; the owner: 「也没地方看到完整版」): the summary keeps the HEAD on one line; the
   // WHOLE command opens the body as itself (its lines kept, wrapped) with Copy — never a hover `title`
   const cmd = String(r.cmd || '');
-  const flat = cmd.replace(/\n/g, ' ');
+  const enc = encodedCommandOf(cmd);   // lane machine-card-fold: the head reads "PowerShell: <the script's first line>"
+  const flat = (enc && enc.ok ? `PowerShell: ${enc.head}` : cmd).replace(/\n/g, ' ');
   sum.append(el('code', 'exit-runs-cmd', flat.length > CMD_HEAD ? flat.slice(0, CMD_HEAD - 1) + '…' : flat), el('span', 'exit-runs-verdict', runVerdictText(r)), el('span', 'exit-runs-ms', secs(r.ms)));
   let body = node.querySelector(':scope > .exit-runs-out');
   if (!body) { body = el('div', 'exit-runs-out'); node.appendChild(body); }
@@ -55,6 +58,15 @@ export function paintRow(node, r) {
     const copy = el('button', 'btn-cancel exit-runs-copy', t('Copy command'));
     copy.type = 'button';
     copy.onclick = (e) => { e.preventDefault(); e.stopPropagation(); copyCommand(cmd); };
+    // lane machine-card-fold: an encoded command's body = its decoded script (hidden characters spelled ⟦U+XXXX⟧ under an
+    // alert line), the line itself behind "Show full command"; Copy still copies the line that ran
+    if (enc && enc.ok) {
+      const raw = el('details', 'exit-runs-raw');
+      raw.append(el('summary', null, t('Show full command')), el('pre', 'exit-runs-cmd-all', cmd));
+      box.append(el('div', 'exit-runs-stream', t('PowerShell script (decoded from {flag})', { flag: enc.flag })));
+      if (enc.hidden.length) box.append(el('div', 'exit-runs-hidden', t('The script carries characters that change the order it reads in or are not drawn at all: {codes}', { codes: enc.hidden.slice(0, 6).join(', ') })));
+      box.append(el('pre', 'exit-runs-cmd-all exit-runs-script', revealHidden(enc.shown)), raw, copy);
+    } else
     box.append(el('pre', 'exit-runs-cmd-all', cmd), copy);
     body.appendChild(box);
   }

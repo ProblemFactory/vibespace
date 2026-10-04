@@ -1172,6 +1172,25 @@ console.log('\n§8 lanes, the serial table, the impact scope, the full-tier cloc
   ok(plan.parallel[0].name === 'test-eml', 'the previous marker\'s longest suite is scheduled FIRST');
   ok(plan.serial.length === SERIAL.length && plan.serial.every((s) => SERIAL.some((r) => r.name === s.name)) && plan.parallel.every((s) => !SERIAL.some((r) => r.name === s.name)),
     'the SERIAL rows are the serial lane and nothing else is');
+  // FAST LANES (lane fast-budget, 2026-10-04): the fast tier's lane count, its serial lane and its closing report
+  {
+    const { fastLaneCount, scheduleFastLanes, fastTimingReport, FAST_SERIAL } = ci;
+    const fastRows = SUITES.filter((s) => s.tier === 'fast');
+    ok(fastLaneCount({ cpus: 32, env: {} }) === 4 && fastLaneCount({ cpus: 4, env: {} }) === 4 && fastLaneCount({ cpus: 2, env: {} }) === 2 && fastLaneCount({ cpus: 1, env: {} }) === 1
+      && fastLaneCount({ cpus: 32, env: { VIBESPACE_CI_FAST_LANES: '1' } }) === 1 && fastLaneCount({ cpus: 32, env: { VIBESPACE_CI_FAST_LANES: 'x' } }) === 4,
+      'fastLaneCount = min(4, cpus) — 4 on the 4-cpu runner — and VIBESPACE_CI_FAST_LANES overrides it (1 = the sequential tier; a non-number is ignored)');
+    ok(FAST_SERIAL.every((r) => fastRows.some((s) => s.name === r.name) && (r.why || '').length > 20) && new Set(FAST_SERIAL.map((r) => r.name)).size === FAST_SERIAL.length,
+      `every FAST_SERIAL row names a FAST suite once and says why it runs alone (${FAST_SERIAL.length} rows)`);
+    const fp = scheduleFastLanes(fastRows, { sourceOf: () => '' });
+    const timed = (s) => fastRuleFindings(s, '').measuredMs || 0;
+    ok(fp.parallel.length + fp.serial.length === fastRows.length && fp.parallel.every((s) => !FAST_SERIAL.some((r) => r.name === s.name)) && FAST_SERIAL.every((r) => fp.serial.some((s) => s.name === r.name)),
+      'the FAST_SERIAL rows are the fast serial lane, the rest are parallel, nothing dropped');
+    ok(fp.serial[fp.serial.length - 1].name === 'test-fixture-isolation' && timed(fp.parallel[0]) === Math.max(...fp.parallel.map(timed)),
+      `test-fixture-isolation runs LAST, and the parallel lanes start with the longest measured row (${fp.parallel[0].name})`);
+    const rep = fastTimingReport([{ name: 'a', ms: 12000 }, { name: 'b', ms: 500 }, { name: 'c', ms: 10000 }]);
+    ok(/the 3 slowest fast suites: a 12\.0 s · c 10\.0 s · b 0\.5 s/.test(rep[0]) && rep.length === 2 && /WARNING: a took 12\.0 s/.test(rep[1]),
+      'the closing report names the slowest first and warns once per fast suite OVER 10 s (10.0 s is not over)');
+  }
   // the flagged SHAPE comes from the fixture file, not a literal here — §6
   // scans this suite's own source (a verbatim control made it report itself)
   const flaggedSrc = fs.readFileSync(path.join(REPO, 'scripts', 'fixtures', 'machine-global-shapes', 'flagged.js.txt'), 'utf-8');
@@ -1465,7 +1484,10 @@ console.log('\n§9 the scratch-orphan reaper');
   const asSelf = scratchOrphans({ procRoot: root, now: NOW, self: 310 });
   ok(!asSelf.some((o) => o.pid === 310 || o.pid === 300), 'this process and its ancestors are never candidates (a reaper does not reap itself)');
   const wired = fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf-8');
-  ok(/const ms = Date\.now\(\) - t;\n\s*try \{ reapScratchOrphans\(\{\}\); \}/.test(wired), 'WIRING: every suite run of the SYNC runner (the fast tier) is followed by a sweep');
+  // lane fast-budget (2026-10-04): the fast tier runs over lanes too — its laneWorker sweeps after every suite like the heavy one,
+  // and the sync runner this pin used to hold (`const ms = Date.now() - t; try { reapScratchOrphans({}); }`) is gone
+  const fastAt = wired.indexOf('async function fastGate('), fastBody = fastAt < 0 ? '' : wired.slice(fastAt, wired.indexOf('\n}\n', fastAt));
+  ok(/runSuiteAsync\(/.test(fastBody) && /console\.log\(r\.lines\.join\('\\n'\)\);\n(?:\s*\/\/[^\n]*\n)*\s*try \{ await reapScratchOrphansAsync\(\{\}\); \}/.test(fastBody) && !/function runSuite\(/.test(wired), 'WIRING: every suite of the FAST tier\'s lanes is followed by a sweep (the async twin), and no sync suite runner is left to skip one');
   ok(/function heavyLaunch\(sha, \{ dir, only, lock, lockWaitMs, range \} = \{\}\) \{\n\s*const d = markerDir\(dir\);\n\s*try \{ reapScratchOrphans\(/.test(wired), 'WIRING: a heavy launch sweeps before it starts');
   // …AND THE LANES (2026-09-16): the heavy tier runs every suite through runSuiteAsync from laneWorker, never through runSuite — the sync pin above would stay green while the lanes reaped nothing (the verifier's integration finding)
   ok(/console\.log\(r\.lines\.join\('\\n'\)\);\n(?:\s*\/\/[^\n]*\n)*\s*try \{ await reapScratchOrphansAsync\(\{\}\); \}/.test(wired), 'WIRING: every LANE sweeps after each suite completes (the async twin — the sync reaper would block the other lanes)');

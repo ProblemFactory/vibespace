@@ -373,6 +373,39 @@
 .chat-exit-cmd-folded:not(.chat-exit-cmd-open) .chat-exit-cmd { max-height: calc(4 * 1.45em + 10px); overflow: hidden; }
 .chat-exit-cmd-open .chat-exit-cmd { max-height: 60vh; overflow: auto; }
 .chat-exit-cmd-fold > summary { cursor: pointer; font-size: 11px; color: var(--text-secondary); }
+/* lane machine-card-fold: a PowerShell -EncodedCommand drawn as its decoded script; the line itself one click away; a hidden character a visible mark */
+.chat-exit-cmd-what { font-size: 10px; color: var(--text-dim); margin: 0 0 2px; }
+.chat-exit-cmd-hidden { font-size: 11px; color: var(--red); margin: 0 0 2px; }
+.chat-exit-cmd-mark { color: var(--red); font-weight: 600; }
+.chat-exit-cmd-raw > summary { cursor: pointer; font-size: 11px; color: var(--text-secondary); }
+.chat-exit-cmd-raw[open] > .chat-exit-cmd { max-height: 30vh; overflow: auto; margin-top: 2px; }
+/* lane machine-card-compact: inside its machine's group a Machines card is ONE line (the head names the machine) — the line is
+   drawn only there; the card's head and words hide; a click on the line opens THIS call's detail (.chat-exit-run) under it */
+.chat-vs-notice:not(.chat-machine-compact) > .chat-mline, .chat-vs-notice:not(.chat-machine-compact) > .chat-mline-err { display: none; }
+.chat-machine-compact:not(.chat-mline-open) > :not(.chat-mline):not(.chat-mline-err) { display: none; }
+.chat-machine-compact.chat-mline-open > .chat-vs-notice-head, .chat-machine-compact.chat-mline-open > .chat-mline-err { display: none; }
+.chat-machine-compact.chat-machine-run.chat-mline-open > :not(.chat-mline):not(.chat-exit-run) { display: none; }
+.chat-vs-notice.chat-machine-compact { padding-top: 0; padding-bottom: 0; }
+.chat-mline { display: flex; align-items: center; gap: 6px; min-width: 0; min-height: 30px; cursor: pointer; font-size: 12px; color: var(--text-secondary); }
+.chat-mline:hover .chat-mline-what, .chat-mline:focus-visible .chat-mline-what { color: var(--text); }
+.chat-mline-arrow { flex: none; font-size: 9px; color: var(--text-dim); transition: var(--transition); }
+.chat-mline-open > .chat-mline .chat-mline-arrow { transform: rotate(90deg); }
+.chat-mline-what { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono, monospace); font-size: 11px; unicode-bidi: isolate; }
+.chat-mline-out { flex: 0 0 auto; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--text-dim); unicode-bidi: isolate; }
+.chat-mline-alert .chat-mline-out { color: var(--red); font-weight: 600; }
+.chat-mline-err { margin: 0 0 6px 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono, monospace); font-size: 11px; color: var(--red); unicode-bidi: isolate; }
+.chat-machine-compact.chat-mline-open > .chat-exit-run { margin-top: 0; }
+.chat-vs-notice.chat-machine-compact.chat-mline-open { padding-bottom: 8px; }
+@media (max-width: 768px) { .chat-mline { min-height: 40px; } } /* a phone row: a tap target that still reads as a list */
+/* r2 (主开发 03:24Z: "整个组只有一个外框，组内每条是一行，行与行之间用细分隔线"): an OPEN group's compact rows are ONE framed
+   list — the rows touch (the list's gap undone: --chat-list-gap mirrors the three .chat-message-list gap rules), the frame
+   runs round the whole, a thin divider between rows; rows ~30 px on a desktop, ~40 px on a phone */
+.chat-message-list { --chat-list-gap: 12px; }
+.chat-compact .chat-message-list { --chat-list-gap: 2px; }
+[data-role-indicator="border"] .chat-message-list { --chat-list-gap: 0px; }
+.chat-msg.chat-vs-notice.chat-machine-compact.chat-run-member { margin: 0; padding-left: 10px; padding-right: 10px; }
+.chat-msg.chat-vs-notice.chat-machine-compact.chat-run-member:has(+ .chat-machine-compact.chat-run-member) { border-bottom-width: 0; border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.chat-msg.chat-vs-notice.chat-machine-compact.chat-run-member + .chat-machine-compact.chat-run-member { margin-top: calc(-1 * var(--chat-list-gap, 12px)); border-top-color: color-mix(in srgb, var(--border) 50%, transparent); border-top-left-radius: 0; border-top-right-radius: 0; }
 .chat-browser-session .chat-vs-notice-head { margin-bottom: 0; }
 .chat-browser-session .chat-vs-notice-head svg { flex: 0 0 auto; }
 .chat-browser-session-note { font-size: 11px; margin-top: 4px; }
@@ -1419,6 +1452,10 @@ body.hide-empty-thinking .chat-compact .chat-msg.chat-empty-thinking { display: 
   border-top-left-radius: 0; border-bottom-left-radius: 0;
 }
 .chat-run-header:hover { color: var(--text-secondary); border-color: var(--accent); }
+/* lane machine-card-fold: a run holding a FAILED Machines card says so in the alert style (the failed card also stays on screen) */
+.chat-run-header.chat-run-alert { color: var(--red); border-color: var(--red); border-style: solid; }
+/* lane machine-card-compact: a machine run's time span never shrinks — at 390 px the counts are cut first */
+.chat-run-header .chat-run-time { flex: none; white-space: nowrap; }
 .chat-run-header .chat-run-arrow { display: inline-block; transition: var(--transition); font-size: 9px; }
 .chat-run-header.open .chat-run-arrow { transform: rotate(90deg); }
 .chat-msg.chat-run-collapsed,

@@ -500,6 +500,24 @@ class UserTodoManager {
     return { changed, unknown };
   }
 
+  /** A PRODUCER'S ANSWER to its own OPEN items (lane exit-item-heal): each id still open becomes done with
+   *  `resolvedBy: by` and `resolvedFact` = the fact that answered it, which the client words (an unexpected-exit
+   *  item's `{resumedAt}` ⇒ "running again (resumed 16:16)"). An item the user already resolved or dismissed is left
+   *  exactly as it is. ONE save + ONE broadcast; the status listeners hear it as they hear setStatus.
+   *  @returns the ids resolved */
+  resolveAnswered(ids, by, fact = null) {
+    const went = [], now = Date.now();
+    for (const id of new Set(Array.isArray(ids) ? ids : [])) {
+      const item = this._state.items.find((i) => i.id === id);
+      if (!item || item.status !== 'open') continue;
+      item.status = 'done'; item.resolvedAt = now; item.resolvedBy = by;
+      if (fact) item.resolvedFact = { ...fact };
+      went.push(item);
+    }
+    if (went.length) { this._save(); this._notify(); this._emitStatus(went, by); }
+    return went.map((i) => i.id);
+  }
+
   /** The user REPLIED to this item from the inbox and the reply reached the
    *  session (src/routes/user-todos-reply.js calls this only after the send
    *  succeeded). An OPEN item becomes done with `resolvedBy:'reply'`; an item

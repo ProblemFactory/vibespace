@@ -72,6 +72,20 @@ const cmdBytes = (s) => (typeof Buffer !== 'undefined' ? Buffer.byteLength(Strin
 // (no CR, no joiners): whatever the row / window / card would not show as itself is refused
 const HC = require('./hidden-chars.js');
 const hiddenOrderOf = (s) => HC.hiddenCharsOf(String(s == null ? '' : s), { max: 64 });
+// lane machine-card-fold (2026-10-04): a PowerShell `-EncodedCommand` line is SHOWN as its decoded script (the card's head,
+// the agent's `runs` row, the ask's detail) — src/encoded-command.js (PURE) decodes it; the door refuses a script the belt
+// would refuse in a plain command, and a line whose script cannot be shown (exit-proxy `run`)
+const EC = require('./encoded-command.js');
+const { encodedCommandOf, commandHeadOf } = EC;   // re-exported by name (node's CJS export lexer stops at a `key: a.b` pair)
+/** The ask's detail (what the For-you row and window draw verbatim, and what the Allow is checked against): the command
+ *  itself — for an encoded command, its decoded script FIRST, then the line that runs. */
+function askDetailOf(cmd) {
+  const c = String(cmd == null ? '' : cmd).trim();
+  const e = EC.encodedCommandOf(c);
+  return e && e.ok ? `PowerShell script (decoded from ${e.flag}):\n${e.shown.replace(/^\n+|\s+$/g, '')}\n\nThe line that runs:\n${c}` : c;
+}
+/** The agent's `runs` row of an encoded command reads as its script (one line, hidden characters spelled ⟦U+XXXX⟧). */
+const agentScriptOf = (cmd) => { const e = EC.encodedCommandOf(cmd); return e && e.ok ? { cmd: cleanCmd(`PowerShell: ${HC.revealHidden(e.shown)}`, CMD_MAX) } : {}; };
 // lane-exit-run-output (2026-10-01): a command's OUTPUT is text a MACHINE wrote, toward the user (the card, the
 // machine's command list) and toward agents (the CLI's `runs`) — it goes through THE belt (src/peer-text.js: bound →
 // fold → frames inert) and browser-trace's URL-secret cut before it is stored; one writer (exit-proxy's audit line)
@@ -401,6 +415,7 @@ function runRow(l, { agent = false } = {}) {
     at: Number(l.at) || 0, hostId: typeof l.hostId === 'string' ? l.hostId.slice(0, 120) : null, machine: cleanCmd(l.machine, 120),
     ...(agent ? {} : { name: cleanCmd(l.name, 120), sessionKey: typeof l.sessionKey === 'string' ? l.sessionKey.slice(0, 200) : null }),
     cmd: agent ? cleanCmd(l.cmd, CMD_MAX) : cleanLines(l.cmd, CMD_MAX), outcome,   // lane exit-see-whole: the owner's list keeps the lines; an agent's `runs` one line
+    ...(agent ? agentScriptOf(l.cmd) : {}),   // lane machine-card-fold: an agent's row of a PowerShell -EncodedCommand = its decoded script
     code: Number.isInteger(l.code) ? l.code : null, ms: Number(l.ms) || 0,
     timedOut: !!l.timedOut, truncated: !!l.truncated, asked: !!l.asked, revokedDuringRun: !!l['revoked-during-run'],
     refusal: outcome === 'refused' ? refusal : null, spawnError: sf,
@@ -563,7 +578,7 @@ const head = (cmd, n = 80) => { const c = cleanCmd(cmd, 100000).replace(/`/g, "'
  * never another conversation's name, a Task Group title or a key (the words census poisons all three).
  * `has` = the other grant this caller DOES hold (`{use}` / `{run}`) — the sentence offers it.
  */
-function refusalText(code, { machine = '', grant = 'run', has = {}, cmd = '', error = '', where = '', same = false, hidden = null, spawnError = null, interpreter = null, platform = null, agentVersion = null, verb = 'run', path: tp = '', side = 'remote', why = '', size = 0, max = 0 } = {}) {
+function refusalText(code, { machine = '', grant = 'run', has = {}, cmd = '', error = '', where = '', same = false, hidden = null, encoded = null, spawnError = null, interpreter = null, platform = null, agentVersion = null, verb = 'run', path: tp = '', side = 'remote', why = '', size = 0, max = 0 } = {}) {
   const M = q(machine);
   const at = side === 'local' ? 'here' : `on ${M}`;
   switch (code) {
@@ -618,8 +633,10 @@ function refusalText(code, { machine = '', grant = 'run', has = {}, cmd = '', er
       : `this conversation runs on ${where ? q(where) : 'another machine'}, not on the VibeSpace machine — a borrowed network is a port on the VibeSpace machine only, unreachable from there; ${has && has.run ? `run the command ON ${M} instead (vibespace-exit run ${String(machine).slice(0, 60)} -- <command>)` : `the user can open "Run commands on it" on ${M} for this conversation under "Who can use it" (Remote tab)`}`;
     case 'offline': return `${M} is offline — its daemon is not dialed in`;
     case 'session_token_required': return 'Background Work jobs cannot use exits — run it from a live conversation';
-    case 'bad_command': return hidden && hidden.length
-      ? `cmd carries characters that change the order it is displayed in or are not displayed at all (${hidden.slice(0, 6).join(', ')} — Unicode direction controls or invisible characters): the user would not read what runs; remove them`
+    // lane machine-card-fold: an -EncodedCommand whose script cannot be SHOWN (not base64 / not UTF-16LE / over 64 KiB) never runs unread
+    case 'bad_command': if (encoded && encoded.ok === false) return `cmd's ${encoded.error} — the user could not read the script that would run; pass the script as UTF-16LE base64, or run it plainly`;
+      return hidden && hidden.length
+      ? `${encoded ? 'the decoded -EncodedCommand script' : 'cmd'} carries characters that change the order it is displayed in or are not displayed at all (${hidden.slice(0, 6).join(', ')} — Unicode direction controls or invisible characters): the user would not read what runs; remove them`
       : `cmd (a shell command string, ≤ ${CMD_MAX} bytes) is required`;
     case 'run_failed': return `the link to ${M} failed while the command ran — it may or may not have run (${String(error || '').slice(0, 120)})`;
     case 'no_machine': case 'ambiguous': case 'no_exits': return String(error || '').slice(0, 300) || code;
@@ -630,7 +647,7 @@ const secs = (ms) => `${(Math.max(0, Number(ms) || 0) / 1000).toFixed(1)} s`;
 /** The chat card's words for one attempt (display-only, never billed, never in the transcript). */
 function cardText(rec, { machine = '' } = {}) {
   const r = rec || {};
-  const c = head(r.cmd);
+  const c = head(EC.commandHeadOf(r.cmd));   // lane machine-card-fold: "PowerShell: <the script's first line>" for an -EncodedCommand line
   const tail = r.revokedDuringRun ? ' (access was removed while it ran)' : '';
   if (r.outcome === 'ran' && r.timedOut) return `ran \`${c}\` on ${machine} — timed out after ${EXIT_RUN_TIMEOUT_MS / 1000} s${tail}`;
   if (r.outcome === 'ran') return `ran \`${c}\` on ${machine} — exit ${r.code == null ? '?' : r.code} · ${secs(r.ms)}${tail}`;
@@ -676,7 +693,8 @@ module.exports = {
   agentVersionOf, reinstallStep,
   GRANTS, MODES, WHO_MAX, REFUSALS, EXIT_RUN_TIMEOUT_MS, ASK_TTL_MS, CMD_MAX, LAST_RUN_CMD_MAX, ASK_STATES, WAY_OUT,
   OUTPUT_HEAD_BYTES, RUNS_DEFAULT, RUNS_MAX, RUN_SHELL_CAP, CMD_FOLD_LINES, CMD_FOLD_CHARS,
-  sessionKeyOf, callerKeys, principalsNow, cmdBytes, hiddenOrderOf,
+  sessionKeyOf, callerKeys, principalsNow, cmdBytes, hiddenOrderOf, askDetailOf,
+  encodedCommandOf, commandHeadOf,   // lane machine-card-fold
   exitAccessOf, exitVerdict, agentView, exitStamp, exitBaseVerdict, patchVerdict, storedExit,
   askState, answerVerdict, runRecord, resolveMachine, refusalText, cardText, cliLine, summaryOf, anyGrant, migrateExitAccess,
   spawnErrorOf, outputHeads, outputPreview, cardOutput, cmdFold, cleanLines, runRow, platformLabel, interpreterOf, knownInterpreter, spawnFailureText,

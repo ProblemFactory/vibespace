@@ -28,6 +28,9 @@
 //   §7 CONTROLS (scripts/mutant-copy.mjs, never src/): exit-shell.js whose judge folds a spawn failure back into
 //      nothing; exit-proxy.js sending `sh -lc` whatever the capability; exit-reach.js's heads without the belt; a
 //      daemon built from a copy that never consults the judge (the production shape: code 1, no spawnError)
+//   §9 lane win-run-codepage: a Windows run's bytes decoded per the console's code page (GBK / Shift-JIS / UTF-8 byte
+//      fixtures, the whole-stream judge, an invalid sequence, the cut, no-ICU fallback), a REAL daemon made a fake
+//      Windows box (chcp asked once, 2.2 MB of GBK cut clean), POSIX byte-identical; two controls (String(stdout))
 // Run: node scripts/test-exit-run.mjs
 import fs from 'node:fs';
 import os from 'node:os';
@@ -279,6 +282,8 @@ await section('§2b PURE secret-shapes: what a stored head never keeps (verify r
 // ── §2c verify r3: what r2 ADDED, attacked (the fold-first order, the value extent, the continuation rule, the marks, the id) ──
 // verify r4 F4's WORK witness: the `\n` searches one call makes (a cached memchr is invisible to the clock)
 const countNl = (fn, t) => { const orig = String.prototype.indexOf; let c = 0; String.prototype.indexOf = function (q, ...r) { if (q === '\n') c++; return orig.call(this, q, ...r); }; try { fn(t); } finally { String.prototype.indexOf = orig; } return c; };
+// a CONTROL takes its ×8 side ONCE (k = 1): noise only ever adds time there, which can only make a quadratic copy read MORE
+// quadratic — the best-of-3 matters on the small side and on the legs that must read linear (lane fast-budget: 3 × ~1.5 s per control)
 const bestOf = (fn, mk, n, k = 3) => { let b = Infinity; for (let i = 0; i < k; i++) { const t = mk(n); const t0 = process.hrtime.bigint(); fn(t); b = Math.min(b, Number(process.hrtime.bigint() - t0) / 1e6); } return b; };
 // the clock at ×8 input (linear ≈ 8, quadratic ≈ 64; bound 16): the work meter (scripts/work-meter.mjs) is the wrong witness for
 // this module both ways — it charges `exec` / `test` the receiver's LENGTH per call (a global-regex replace on a patched
@@ -896,12 +901,12 @@ await section('§7 controls (patched copies)', async () => {
   const ssMutJ = ssSrc.replace('const REG_RE = /^([ \\t]*)(\\S+)([ \\t]{2,}REG_', 'const REG_RE = /^([ \\t]*)(\\S*(?:password|passwd|secret|token|key|cred|auth|cookie|session)\\S*)([ \\t]{2,}REG_');
   ok(ssMutJ !== ssSrc, '(j) the patch applies');
   const SSj = M.load('src/secret-shapes.js', ssMutJ, 'regback');
-  { const a = bestOf(SSj.redactSecrets, R3_SHAPES.keyRun, 8192), b = bestOf(SSj.redactSecrets, R3_SHAPES.keyRun, 65536); ok(b / Math.max(0.05, a) >= 12, `CONTROL (j): the backtracking R6 reads quadratic — ${a.toFixed(1)} ms → ${b.toFixed(1)} ms at ×8 input (the §2c leg goes red)`); }
+  { const a = bestOf(SSj.redactSecrets, R3_SHAPES.keyRun, 8192), b = bestOf(SSj.redactSecrets, R3_SHAPES.keyRun, 65536, 1); ok(b / Math.max(0.05, a) >= 12, `CONTROL (j): the backtracking R6 reads quadratic — ${a.toFixed(1)} ms → ${b.toFixed(1)} ms at ×8 input (the §2c leg goes red)`); }
   // (k) verify r3 F2: the pre-check with its two blank runs restored — the §2c colonSpacesX leg goes red (×28 at ×8)
   const ssMutK = ssSrc.replace('const CONT_ANY_RE = /[:=][ \\t]*(?:[|>][+-]?\\d*[ \\t]*|["\'][^\\n]*)?(?:\\r?\\n|$)/;', 'const CONT_ANY_RE = /[:=][ \\t]*(?:[|>][+-]?\\d*|["\'][^\\n]*)?[ \\t]*(?:\\r?\\n|$)/;');
   ok(ssMutK !== ssSrc, '(k) the patch applies');
   const SSk = M.load('src/secret-shapes.js', ssMutK, 'precheckback');
-  { const a = bestOf(SSk.redactSecrets, R3_SHAPES.colonSpacesX, 8192), b = bestOf(SSk.redactSecrets, R3_SHAPES.colonSpacesX, 65536); ok(b / Math.max(0.05, a) >= 12, `CONTROL (k): the two-run pre-check reads quadratic — ${a.toFixed(1)} ms → ${b.toFixed(1)} ms at ×8 input (the §2c leg goes red)`); }
+  { const a = bestOf(SSk.redactSecrets, R3_SHAPES.colonSpacesX, 8192), b = bestOf(SSk.redactSecrets, R3_SHAPES.colonSpacesX, 65536, 1); ok(b / Math.max(0.05, a) >= 12, `CONTROL (k): the two-run pre-check reads quadratic — ${a.toFixed(1)} ms → ${b.toFixed(1)} ms at ×8 input (the §2c leg goes red)`); }
   // (l) verify r3 F3: the joiner fold removed — a joiner inside a secret name keeps its value (the §2c JOINED rows go red)
   const ssMutL = ssSrc.replace("  if (text.includes('\\u200C') || text.includes('\\u200D')) text = text.replace(JOINER_IN_WORD_RE, '');", '');
   ok(ssMutL !== ssSrc, '(l) the patch applies');
@@ -916,7 +921,7 @@ await section('§7 controls (patched copies)', async () => {
   const ssMutN = ssSrc.replace("\\3[ \\t]*[:=][ \\t]*([^\\n]*)$/;", '\\3[ \\t]*[:=][ \\t]*(.*)$/;');
   ok(ssMutN !== ssSrc, '(n) the patch applies');
   const SSn = M.load('src/secret-shapes.js', ssMutN, 'contdot');
-  { const a = bestOf(SSn.redactSecrets, R3_SHAPES.contCR, 8192), b = bestOf(SSn.redactSecrets, R3_SHAPES.contCR, 65536); ok(/hunter2/.test(SSn.redactSecrets('password:\r\n  hunter2\r\n').text) && b / Math.max(0.05, a) >= 12, `CONTROL (n): with \`.*\` the CRLF continuation keeps hunter2 and contCR reads quadratic — ${a.toFixed(1)} ms → ${b.toFixed(1)} ms at ×8 (the §2c rows go red)`); }
+  { const a = bestOf(SSn.redactSecrets, R3_SHAPES.contCR, 8192), b = bestOf(SSn.redactSecrets, R3_SHAPES.contCR, 65536, 1); ok(/hunter2/.test(SSn.redactSecrets('password:\r\n  hunter2\r\n').text) && b / Math.max(0.05, a) >= 12, `CONTROL (n): with \`.*\` the CRLF continuation keeps hunter2 and contCR reads quadratic — ${a.toFixed(1)} ms → ${b.toFixed(1)} ms at ×8 (the §2c rows go red)`); }
   // (o) verify r3 F6: the indent compared by characters again — the tab row goes red
   const ssMutO = ssSrc.replace('      if (indentCols(l) <= indent) break;', '      if (indentChars(l) <= indentChars(lines[i])) break;');
   ok(ssMutO !== ssSrc, '(o) the patch applies');
@@ -931,17 +936,17 @@ await section('§7 controls (patched copies)', async () => {
   const ssMutQ = ssSrc.replace('    const trimmed = val.trimEnd();', "    const trimmed = val.replace(/\\s+$/, '');");
   ok(ssMutQ !== ssSrc, '(q) the patch applies');
   const SSq = M.load('src/secret-shapes.js', ssMutQ, 'trimre');
-  { const a = bestOf(SSq.redactSecrets, R4_SHAPES.trimNbspBare, 8192), b = bestOf(SSq.redactSecrets, R4_SHAPES.trimNbspBare, 65536); ok(b / Math.max(0.05, a) >= 12, `CONTROL (q): the regex trim reads quadratic — ${a.toFixed(1)} ms → ${b.toFixed(1)} ms at ×8 input (the §2d trim legs go red)`); }
+  { const a = bestOf(SSq.redactSecrets, R4_SHAPES.trimNbspBare, 8192), b = bestOf(SSq.redactSecrets, R4_SHAPES.trimNbspBare, 65536, 1); ok(b / Math.max(0.05, a) >= 12, `CONTROL (q): the regex trim reads quadratic — ${a.toFixed(1)} ms → ${b.toFixed(1)} ms at ×8 input (the §2d trim legs go red)`); }
   // (r) verify r4 F2: the PEM label regexes restored — the §2d pem legs go red (×70–100 at ×8)
   const ssMutR = ssSrc.replace("function pemLine(line, word) {\n", "const PEM_RES = { BEGIN: /^\\s*-----BEGIN [A-Z0-9 ]*PRIVATE KEY[A-Z0-9 ]*-----\\s*$/, END: /^\\s*-----END [A-Z0-9 ]*PRIVATE KEY[A-Z0-9 ]*-----\\s*$/ };\nfunction pemLine(line, word) {\n  return PEM_RES[word].test(line);\n");
   ok(ssMutR !== ssSrc, '(r) the patch applies');
   const SSr = M.load('src/secret-shapes.js', ssMutR, 'pemre');
-  { const a = bestOf(SSr.redactSecrets, R4_SHAPES.pemBeginStorm, 8192), b = bestOf(SSr.redactSecrets, R4_SHAPES.pemBeginStorm, 65536); ok(b / Math.max(0.05, a) >= 12 && !/MIIEpAIBAAKCAQEA/.test(SSr.redactSecrets('-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA\n-----END RSA PRIVATE KEY-----').text), `CONTROL (r): the label regex reads quadratic — ${a.toFixed(1)} ms → ${b.toFixed(1)} ms at ×8 input, the plain block still hidden (the §2d pem legs go red)`); }
+  { const a = bestOf(SSr.redactSecrets, R4_SHAPES.pemBeginStorm, 8192), b = bestOf(SSr.redactSecrets, R4_SHAPES.pemBeginStorm, 65536, 1); ok(b / Math.max(0.05, a) >= 12 && !/MIIEpAIBAAKCAQEA/.test(SSr.redactSecrets('-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA\n-----END RSA PRIVATE KEY-----').text), `CONTROL (r): the label regex reads quadratic — ${a.toFixed(1)} ms → ${b.toFixed(1)} ms at ×8 input, the plain block still hidden (the §2d pem legs go red)`); }
   // (s) verify r4 F3: the JWT alternative restored into PREFIX_RE, the scan removed — the §2d jwt legs go red (×65 at ×8)
   const ssMutS = ssSrc.replace("|jbt_[A-Za-z0-9_\\-]{8,255})(?![A-Za-z0-9_\\-])/g;", "|jbt_[A-Za-z0-9_\\-]{8,255}|eyJ[A-Za-z0-9_\\-]{8,65536}\\.eyJ[A-Za-z0-9_\\-]{8,65536}\\.[A-Za-z0-9_\\-]{8,65536})(?![A-Za-z0-9_\\-])/g;").replace("    const jwt = redactJwt(text); text = jwt.text; n += jwt.n;", '').replace("|vsmt_|jbt_)/;", "|vsmt_|jbt_|eyJ)/;");
   ok(ssMutS !== ssSrc && ssMutS.includes('eyJ[A-Za-z0-9_') && !ssMutS.includes('const jwt = redactJwt(text)'), '(s) the patch applies');
   const SSs = M.load('src/secret-shapes.js', ssMutS, 'jwtre');
-  { const a = bestOf(SSs.redactSecrets, R4_SHAPES.jwtDashStorm, 8192), b = bestOf(SSs.redactSecrets, R4_SHAPES.jwtDashStorm, 65536); ok(b / Math.max(0.05, a) >= 12 && SSs.redactSecrets('x-eyJaaaaaaaa.eyJbbbbbbbb.cccccccc y').text === 'x-eyJ«redacted» y', `CONTROL (s): the JWT alternative reads quadratic — ${a.toFixed(1)} ms → ${b.toFixed(1)} ms at ×8 input, the plain token still hidden (the §2d jwt legs go red)`); }
+  { const a = bestOf(SSs.redactSecrets, R4_SHAPES.jwtDashStorm, 8192), b = bestOf(SSs.redactSecrets, R4_SHAPES.jwtDashStorm, 65536, 1); ok(b / Math.max(0.05, a) >= 12 && SSs.redactSecrets('x-eyJaaaaaaaa.eyJbbbbbbbb.cccccccc y').text === 'x-eyJ«redacted» y', `CONTROL (s): the JWT alternative reads quadratic — ${a.toFixed(1)} ms → ${b.toFixed(1)} ms at ×8 input, the plain token still hidden (the §2d jwt legs go red)`); }
   // (t) verify r4 F4: the per-head line-end search restored — the §2d work witness goes red (6 553 searches for one line)
   const ssMutT = ssSrc.replace("    if (headEnd > lineEnd) { const nl = text.indexOf('\\n', headEnd); lineEnd = nl < 0 ? text.length : nl; }", "    { const nl = text.indexOf('\\n', headEnd); lineEnd = nl < 0 ? text.length : nl; }");
   ok(ssMutT !== ssSrc, '(t) the patch applies');
@@ -1343,6 +1348,122 @@ await section('§8c controls (patched copies of exit-proxy.js)', async () => {
   go7(); await pa7;
   ok(!(rb7.e && rb7.e.code === 'target_busy') && reading7.has('/srv/ob.bin'), 'CONTROL (x7): without the check the second pull runs into the target being written — §8 (o) goes red', rb7.e ? rb7.e.code : 'landed');
   for (const r of copiesCensus(M8.files, M8.dir, REPO, { minCopies: 7, label: 'mutant-copy (exit-transfer §8): ' })) ok(r.pass, r.name, r.detail);
+});
+
+// ── §9 lane win-run-codepage ──
+// The owner's Chinese Windows box (2026-10-04): `vibespace-exit run WIN-DESK1 -- 'dir … 2>nul'` and a PowerShell error came back
+// as mojibake — cmd.exe writes in the console's code page (936 = GBK) and run-cmd read the bytes as UTF-8 (`String(stdout)`).
+// Every fixture is BYTES (Buffer.from([...]), from python's codecs) — the expected text is the real sentence.
+const GBK_PATH = Buffer.from([0xcf, 0xb5, 0xcd, 0xb3, 0xd5, 0xd2, 0xb2, 0xbb, 0xb5, 0xbd, 0xd6, 0xb8, 0xb6, 0xa8, 0xb5, 0xc4, 0xc2, 0xb7, 0xbe, 0xb6, 0xa1, 0xa3, 0x0d, 0x0a]); // 系统找不到指定的路径。\r\n
+const SJIS_PATH = Buffer.from([0x8e, 0x77, 0x92, 0xe8, 0x82, 0xb3, 0x82, 0xea, 0x82, 0xbd, 0x83, 0x70, 0x83, 0x58, 0x82, 0xaa, 0x8c, 0xa9, 0x82, 0xc2, 0x82, 0xa9, 0x82, 0xe8, 0x82, 0xdc, 0x82, 0xb9, 0x82, 0xf1, 0x81, 0x42, 0x0d, 0x0a]); // 指定されたパスが見つかりません。\r\n
+const CHCP_GBK = Buffer.from([0xbb, 0xee, 0xb6, 0xaf, 0xb4, 0xfa, 0xc2, 0xeb, 0xd2, 0xb3, 0x3a, 0x20, 0x39, 0x33, 0x36, 0x0d, 0x0a]); // 活动代码页: 936\r\n
+const CHCP_SJIS = Buffer.from([0x8c, 0xbb, 0x8d, 0xdd, 0x82, 0xcc, 0x83, 0x52, 0x81, 0x5b, 0x83, 0x68, 0x20, 0x83, 0x79, 0x81, 0x5b, 0x83, 0x57, 0x3a, 0x20, 0x39, 0x33, 0x32, 0x0d, 0x0a]); // 現在のコード ページ: 932\r\n
+const ZH_UTF8 = Buffer.from([0xe4, 0xb8, 0xad, 0xe6, 0x96, 0x87]); // 中文
+const ZHONG_GBK = Buffer.from([0xd6, 0xd0]); // 中 (GBK 路 = c2 b7 is a valid UTF-8 middle dot — never a fixture for the judge)
+const ZH_PATH = '系统找不到指定的路径。\r\n';
+const mojibake = (s) => /\uFFFD/.test(s);
+const cpTable = (X) => {
+  const rows = [];
+  const g = X.decodeRunOutput(Buffer.alloc(0), GBK_PATH, 936);
+  rows.push([g.stderr === ZH_PATH && g.stdout === '' && g.encoding === 'gbk', 'a GBK stream on a 936 console reads as the sentence (encoding gbk)', g]);
+  const j = X.decodeRunOutput(SJIS_PATH, Buffer.alloc(0), 932);
+  rows.push([j.stdout === '指定されたパスが見つかりません。\r\n' && j.encoding === 'shift_jis', 'a Shift-JIS stream on a 932 console (encoding shift_jis)', j]);
+  const u = X.decodeRunOutput(Buffer.concat([ZH_UTF8, Buffer.from(' ok\r\n')]), GBK_PATH, 936);
+  rows.push([u.stdout === '中文 ok\r\n' && u.stderr === ZH_PATH && u.encoding === 'gbk', 'a UTF-8 stdout from a GBK console STAYS UTF-8 while its GBK stderr is decoded as GBK (each stream judged alone)', u]);
+  const p = X.decodeRunOutput(GBK_PATH.subarray(0, 4), Buffer.alloc(0), 936);
+  rows.push([p.stdout === '\u03f5\u0373' && p.encoding === 'utf-8', '…the judge is the WHOLE stream: GBK 系统 alone (cf b5 cd b3) IS valid UTF-8 — only the full sentence proves GBK', p]);
+  const bad = X.decodeRunOutput(Buffer.from([0x61, 0xff, 0x62]), Buffer.alloc(0), 65001);
+  rows.push([bad.stdout === 'a\uFFFDb' && bad.encoding === 'utf-8', 'an invalid sequence on a 65001 console: the replacement character, encoding utf-8', bad]);
+  const unk = X.decodeRunOutput(GBK_PATH, Buffer.alloc(0), null);
+  rows.push([unk.stdout === GBK_PATH.toString('utf8') && unk.encoding === 'utf-8-fallback', 'an unknown code page keeps UTF-8 and says utf-8-fallback', unk.encoding]);
+  const l1 = X.decodeRunOutput(Buffer.from([0x41, 0x82]), Buffer.alloc(0), 437);
+  rows.push([l1.stdout === 'A\u0082' && l1.encoding === 'latin1', 'a code page with no label (437) ⇒ latin1, byte for byte', l1]);
+  const cutG = X.decodeRunOutput(Buffer.concat([ZHONG_GBK, ZHONG_GBK.subarray(0, 1)]), Buffer.alloc(0), 936, { cut: true });
+  const fullG = X.decodeRunOutput(Buffer.concat([ZHONG_GBK, ZHONG_GBK.subarray(0, 1)]), Buffer.alloc(0), 936);
+  rows.push([cutG.stdout === '中' && cutG.encoding === 'gbk' && fullG.stdout === '中\uFFFD', 'a GBK stream CUT mid-character drops the unfinished one (an uncut stream ending so shows U+FFFD)', [cutG, fullG]]);
+  const cutU = X.decodeRunOutput(Buffer.concat([ZH_UTF8, ZH_UTF8.subarray(0, 2)]), Buffer.alloc(0), 936, { cut: true });
+  rows.push([cutU.stdout === '中文' && cutU.encoding === 'utf-8', 'a UTF-8 stream cut mid-character stays UTF-8 (never mis-judged as GBK for its torn tail)', cutU]);
+  rows.push([X.cutText('a😀b', 2) === 'a' && X.cutText('中'.repeat(10), 4) === '中中中中' && X.cutText('ab', 5) === 'ab', 'cutText never splits a surrogate pair', X.cutText('a😀b', 2)]);
+  rows.push([X.parseCodePage(CHCP_GBK) === 936 && X.parseCodePage(CHCP_SJIS) === 932 && X.parseCodePage('Active code page: 65001\r\n') === 65001 && X.parseCodePage('\r\nHKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\Nls\\CodePage\r\n    OEMCP    REG_SZ    936\r\n') === 936 && X.parseCodePage('') === null && X.parseCodePage('ERROR: x') === null, 'parseCodePage reads chcp in the console\'s own bytes (zh GBK, ja Shift-JIS, en) and reg\'s OEMCP line; nothing ⇒ null']);
+  rows.push([JSON.stringify([936, 932, 949, 950, 1252, 65001, 437, 850].map(X.codePageLabel)) === JSON.stringify(['gbk', 'shift_jis', 'euc-kr', 'big5', 'windows-1252', 'utf-8', 'latin1', 'latin1']), 'codePageLabel: 936 gbk · 932 shift_jis · 949 euc-kr · 950 big5 · 1252 windows-1252 · 65001 utf-8 · else latin1']);
+  return rows;
+};
+await section('§9 lane win-run-codepage: a Windows run\'s bytes are decoded per the console\'s code page, before the cut', async () => {
+  for (const [c, n, d] of cpTable(XS)) ok(c, n, d);
+  // full ICU: every label decodes on this node; the Windows daemon runs nodejs.org's own build (vibespace-agentd-install.ps1), full-icu since Node 13
+  const labels = ['gbk', 'shift_jis', 'euc-kr', 'big5', 'windows-1252'];
+  ok(labels.every((l) => { try { return !!new TextDecoder(l); } catch { return false; } }) && !!process.versions.icu, `this node (${process.version}, ICU ${process.versions.icu}) decodes every label — full ICU`);
+  ok(/nodejs\.org\/dist/.test(fs.readFileSync(path.join(REPO, 'scripts/vibespace-agentd-install.ps1'), 'utf8')), '…and the Windows installer provisions node from nodejs.org/dist (the official full-icu build)');
+  const RealTD = globalThis.TextDecoder;
+  globalThis.TextDecoder = class extends RealTD { constructor(l, o) { if (!/^utf-?8$/i.test(String(l))) { const e = new RangeError(`The "${l}" encoding is not supported`); e.code = 'ERR_ENCODING_NOT_SUPPORTED'; throw e; } super(l, o); } };
+  let noIcu;
+  try { noIcu = XS.decodeRunOutput(GBK_PATH, Buffer.from('ok'), 936); } finally { globalThis.TextDecoder = RealTD; }
+  ok(noIcu.stdout === GBK_PATH.toString('utf8') && noIcu.stderr === 'ok' && noIcu.encoding === 'utf-8-fallback', 'a node WITHOUT the gbk label (small ICU) keeps UTF-8 and says utf-8-fallback in the record', noIcu.encoding);
+
+  // a REAL daemon from this tree's bundle, made a fake Windows box for the run: a wrapper entry flips process.platform to
+  // win32 while a flag file exists (after the hello) and answers `cmd.exe` with a node fixture that writes the console's bytes
+  const fakeCmd = path.join(SCR, 'fake-cmd.cjs');
+  fs.writeFileSync(fakeCmd, `const a = process.argv.slice(2); const line = String(a[3] || '').replace(/^"|"$/g, '');
+const B = (x) => Buffer.from(x);
+if (line === 'chcp') process.stdout.write(B(${JSON.stringify([...CHCP_GBK])}));
+else if (line === 'dir-missing') { process.stderr.write(B(${JSON.stringify([...GBK_PATH])})); process.exitCode = 1; }
+else if (line === 'utf8') process.stdout.write(B(${JSON.stringify([...ZH_UTF8])}));
+else if (line === 'flood') { const b = Buffer.alloc(1 + 2 * 1100000); b[0] = 0x61; for (let i = 1; i < b.length; i += 2) { b[i] = 0xd6; b[i + 1] = 0xd0; } process.stdout.write(b); }
+`);
+  const fakeWin = (agentdFile, tag) => {
+    const flag = path.join(SCR, `win-flag-${tag}`), log = path.join(SCR, `cmd-log-${tag}`);
+    const entry = path.join(SCR, `fake-win-${tag}.cjs`);
+    fs.writeFileSync(entry, `const fs = require('fs'); const cp = require('child_process'); const real = process.platform;
+Object.defineProperty(process, 'platform', { get: () => (fs.existsSync(${JSON.stringify(flag)}) ? 'win32' : real), configurable: true });
+const execFile = cp.execFile;
+cp.execFile = function (file, args, opts, cb) { if (file !== 'cmd.exe') return execFile.apply(this, arguments); fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify(args) + '\\n'); return execFile.call(this, process.execPath, [${JSON.stringify(fakeCmd)}, ...args], opts, cb); };
+require(${JSON.stringify(agentdFile)});
+`);
+    return { bundle: bundleFrom(entry, tag), flag, log };
+  };
+  const runWin = async (agentdFile, tag, lines = ['dir-missing', 'utf8', 'flood']) => {
+    const fw = fakeWin(agentdFile, tag);
+    const { dm } = await realDaemon(fw.bundle, tag);
+    const out = {};
+    try {
+      fs.writeFileSync(fw.flag, '1');
+      for (const l of lines) out[l] = await dm.runShell(l, { timeoutMs: 30000, waitMs: 40000 });
+    } finally { try { fs.unlinkSync(fw.flag); } catch { } try { dm.stop(); } catch { } }
+    out.cmdLog = fs.existsSync(fw.log) ? fs.readFileSync(fw.log, 'utf8').trim().split('\n').map((x) => JSON.parse(x)) : [];
+    return out;
+  };
+  const w = await runWin(path.join(REPO, 'src/agentd/agentd.js'), 'win');
+  const dm1 = w['dir-missing'];
+  ok(dm1 && dm1.code === 1 && dm1.stderr === ZH_PATH && dm1.encoding === 'gbk' && dm1.interpreter === 'cmd.exe', 'the fake Windows daemon: `dir-missing` answers 系统找不到指定的路径。 on stderr, encoding gbk (pre-fix: the GBK bytes read as UTF-8)', dm1);
+  const u1 = w.utf8;
+  ok(u1 && u1.stdout === '中文' && u1.encoding === 'utf-8', '…a UTF-8 program on the same GBK console stays UTF-8', u1);
+  const f1 = w.flood;
+  ok(f1 && f1.truncated === true && f1.stdout.length === 1024 * 1024 && f1.stdout.startsWith('a中中') && !mojibake(f1.stdout) && f1.encoding === 'gbk', '…2.2 MB of GBK past the 2 MiB maxBuffer: decoded before the 1 MiB cut, no torn character, truncated named', f1 && { len: f1.stdout.length, truncated: f1.truncated, encoding: f1.encoding, tail: f1.stdout.slice(-3) });
+  const chcps = w.cmdLog.filter((a) => a[3] === '"chcp"').length;
+  ok(chcps === 1 && w.cmdLog.length === 4, `the code page is asked ONCE per daemon (chcp ran ${chcps}× for 3 runs)`, w.cmdLog);
+  // POSIX unchanged: the real daemon of §6's bundle, bytes through String() as before and no \`encoding\` key
+  const { dm: dmP } = await realDaemon(bundleFrom('src/agentd/agentd.js', 'posix9'), 'posix9');
+  try {
+    const r = await dmP.runShell("printf '\\344\\270\\255\\317\\265\\315\\263\\325\\322'", { timeoutMs: 30000, waitMs: 40000 });
+    ok(r && r.stdout === Buffer.from([0xe4, 0xb8, 0xad, 0xcf, 0xb5, 0xcd, 0xb3, 0xd5, 0xd2]).toString() && !('encoding' in r), 'POSIX: the bytes ride String() byte for byte, no `encoding` key (a byte-identical leg)', r);
+  } finally { try { dmP.stop(); } catch { } }
+
+  // CONTROLS (patched copies, never src/)
+  const M9 = mutantCopies('exo9', REPO);
+  const xsSrc9 = fs.readFileSync(path.join(REPO, 'src/exit-shell.js'), 'utf8');
+  const xsMut9 = xsSrc9.replace("  const label = cp == null ? null : codePageLabel(cp);", "  return { stdout: String(stdout), stderr: String(stderr), encoding: 'utf-8' };");
+  ok(xsMut9 !== xsSrc9, '(w1) the patch applies');
+  const reds = cpTable(M9.load('src/exit-shell.js', xsMut9, 'string')).filter(([c]) => !c).length;
+  ok(reds >= 5, `CONTROL (w1): a decoder that is String(stdout) — ${reds} rows of the table go red`);
+  const adSrc9 = fs.readFileSync(path.join(REPO, 'src/agentd/agentd.js'), 'utf8');
+  const adMut9 = adSrc9.replace('const dec = win ? XS.decodeRunOutput(', 'const dec = false ? XS.decodeRunOutput(');
+  ok(adMut9 !== adSrc9, '(w2) the patch applies');
+  const adCopy9 = path.join(M9.dir, 'agentd-string.cjs');
+  fs.writeFileSync(adCopy9, adMut9.replace(/require\('\.\.\//g, `require('${path.join(REPO, 'src')}/`).replace(/require\('\.\//g, `require('${path.join(REPO, 'src/agentd')}/`));
+  M9.files.push(adCopy9);
+  const wc = await runWin(adCopy9, 'winctl', ['dir-missing']);
+  ok(wc['dir-missing'] && mojibake(wc['dir-missing'].stderr) && wc['dir-missing'].stderr !== ZH_PATH && !wc['dir-missing'].encoding, 'CONTROL (w2): a daemon whose run-cmd keeps String(stdout) answers the production mojibake — the fake-Windows leg goes red', wc['dir-missing']);
+  for (const r of copiesCensus(M9.files, M9.dir, REPO, { minCopies: 2, label: 'mutant-copy (win-run-codepage): ' })) ok(r.pass, r.name, r.detail);
 });
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

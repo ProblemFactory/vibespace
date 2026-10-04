@@ -107,12 +107,20 @@ check('the pure module imports nothing but the PURE note rule (DOM-free by const
 
 // ── wiring pins (a pure fix with an unstaged call site is dead: the 2.355.0 lesson) ──
 const cv = read('src/lib/chat-view.js');
-check('chat-view imports the classifier + composer from chat-run-summary.js', /import \{ mcpParts, messageKind, foldToggleFor, countKinds, runSummaryLabel, foldPassMode \} from '\.\/chat-run-summary\.js';/.test(cv));
+// the names chat-view takes from the pure module (any import line, any order — later lanes add names: machine-card-fold's
+// machineRunPart / splitRuns, machine-card-compact's machineCompact)
+const fromSummary = new Set([...cv.matchAll(/^import \{([^}]*)\} from '\.\/chat-run-summary\.js';/gm)].flatMap((m) => m[1].split(',').map((x) => x.trim()).filter(Boolean)));
+check('chat-view imports the classifier + composer from chat-run-summary.js', ['mcpParts', 'messageKind', 'foldToggleFor', 'countKinds', 'runSummaryLabel', 'foldPassMode'].every((n) => fromSummary.has(n)));
 // …and the ONE composer also positions the collab traffic segment (2026-09-07):
 // chat-view hands it a PRE-COMPOSED string from the pure collab module, so this
 // module still imports nothing and the order never forks between the header,
 // the floating bar and the footer.
-check('chat-view builds the label ONLY through runSummaryLabel (no inline per-kind t() lines left)', /runSummaryLabel\(\{\s*\n?\s*byKind, mcpServers, files, nErr, running,(?: notes,)?\s*\n?\s*collabPart: collabRunPart\(collabStats, \{ now, live, t \}\),\s*\n?\s*\}, t\)/.test(cv) && !cv.includes("t('{n} MCP'") && !cv.includes("t('{n} Bash'"));
+// the ONE call hands over the run's counts + the pre-composed collab part (extra parts — notes, machinePart — may ride along)
+const labelCalls = [...cv.matchAll(/runSummaryLabel\(\{([\s\S]*?)\}, t\)/g)].map((m) => m[1]);
+check('chat-view builds the label ONLY through runSummaryLabel (no inline per-kind t() lines left)', labelCalls.length === 1
+  && /^\s*byKind, mcpServers, files, nErr, running,/.test(labelCalls[0])
+  && /\bcollabPart: collabRunPart\(collabStats, \{ now, live, t \}\),\s*$/.test(labelCalls[0])
+  && !cv.includes("t('{n} MCP'") && !cv.includes("t('{n} Bash'"));
 check('memberKind delegates to messageKind; folding gates on foldToggleFor', /messageKind\(el\._rawMsg, \{ toolCard: el\.classList\.contains\('chat-msg-tool-result'\), isMemoryPath \}\)/.test(cv) && /kinds\.has\(foldToggleFor\(mk\)\)/.test(cv));
 check('chat-renderers re-exports the ONE mcpParts from the pure module', /import \{ mcpParts \} from '\.\/chat-run-summary\.js';/.test(read('src/lib/chat-renderers.js')) && /export \{ mcpParts \};/.test(read('src/lib/chat-renderers.js')));
 // legibility affordances

@@ -13,7 +13,7 @@ import { NOTE_MARKER, noteKindOfText, userNoteOf } from '../assistant-note.js'; 
 // each one — an unlisted kind used to count `undefined++` = NaN and vanish
 // from the label (2.369.34); countKinds() now zero-fills from this list and
 // the test asserts SUMMARY_ORDER covers it.
-export const RUN_KINDS = ['note', 'thinking', 'bash', 'read', 'search', 'image', 'write', 'memory', 'mcp', 'lookup', 'agent', 'report', 'group', 'peer', 'skill', 'unknown'];
+export const RUN_KINDS = ['note', 'thinking', 'bash', 'read', 'search', 'image', 'write', 'memory', 'mcp', 'lookup', 'agent', 'report', 'group', 'peer', 'machine', 'skill', 'unknown'];
 
 // Counts the CALLER supplies that are not card kinds — they are never
 // produced by messageKind() and never zero-filled, so an unset one simply
@@ -51,6 +51,9 @@ const SUMMARY_ORDER = [
   ['group', '{n} group messages'],
   // lane peer-card-fold: any other message a peer sent (an agent, a worker, a job) — CONTENT, ships UNCHECKED like 'group'
   ['peer', '{n} agent messages'],
+  // lane machine-card-fold: a "Machines · <machine>" card (a command / a copy on a paired machine) has no count line — the
+  // run's MACHINE PART says it (machineRunPart: the machine, its counts, the last outcome, the time span), first in the label
+  ['machine', null],
   ['skill', null],
   ['unknown', '{n} unknown events / new fields'], // 2.369.120: the fall-back card (a record VibeSpace does not know) + the §3 schema-drift card (a known record that grew); ships UNCHECKED — visible until the user folds it
 ];
@@ -119,6 +122,7 @@ export function messageKind(m, { toolCard, isMemoryPath = () => false }) {
   if (m?.role === 'assistant' && Array.isArray(m.content) && m.content.length
       && m.content.every((b) => b.type === 'thinking')) return 'thinking';
   if (assistantNoteOf(m)) return 'note'; // lane S3: text VibeSpace addressed to the ASSISTANT — its own fold kind, default on
+  if (machineCardOf(m)) return 'machine'; // lane machine-card-fold: a Machines card folds with the run it sits in (the Bash toggle), one machine per run
   if (m?.originKind === 'peer-message' && m.peerGroup && m.peerGroup.id) return 'group'; // lane group-report-card: its own fold kind, default OFF (the owner asked to see them)
   if (m?.originKind === 'peer-message') return 'peer'; // lane peer-card-fold: every other peer card (agent, worker, job) — default OFF, so it still breaks a run unless ticked
   if (m?.noticeKind === 'unknown-record' || m?.noticeKind === 'unknown-fields') return 'unknown'; // 2.369.120: the fall-back card has its own toggle; the §3 drift card shares it
@@ -219,7 +223,7 @@ export function toolResultSentence(block) {
  * exactly what they fold today), only the LABEL changed.
  */
 export function foldToggleFor(kind) {
-  return kind === 'lookup' ? 'mcp' : kind;
+  return kind === 'lookup' ? 'mcp' : kind === 'machine' ? 'bash' : kind; // a command on a machine folds as a command (lane machine-card-fold)
 }
 
 /** Zero-filled per-kind counter over a list of kinds (null/undefined skipped). */
@@ -265,8 +269,9 @@ export function runSummaryParts(byKind, mcpServers, t, notes = []) {
  *   notes = the `what` of every note member (assistantNoteOf), in render order
  *   files = display names in render order (writes already prefixed '✎ '), deduped by the caller
  */
-export function runSummaryLabel({ byKind, mcpServers, files = [], nErr = 0, running = false, collabPart = '', notes = [] }, t) {
+export function runSummaryLabel({ byKind, mcpServers, files = [], nErr = 0, running = false, collabPart = '', notes = [], machinePart = '', machineTime = '' }, t) {
   const kindParts = runSummaryParts(byKind, mcpServers, t, notes);
+  if (machinePart) kindParts.unshift(machinePart); // lane machine-card-fold: the machine part (machineRunPart) leads — it names what the run is
   if (collabPart) kindParts.push(collabPart);
   let label = kindParts.join(' · ');
   // touched files (user ask: don't lose the paths), capped at 4 + "+N"
@@ -279,7 +284,8 @@ export function runSummaryLabel({ byKind, mcpServers, files = [], nErr = 0, runn
   // fine, but the header says they exist)
   if (nErr) label += ` · ${nErr} ✗`;
   // live state on the fold: a running member shows through the header
-  if (running) label += ' · ' + t('running…');
+  if (running && !machinePart) label += ' · ' + t('running…'); // a machine part already says "still running"
+  if (machineTime) label += ' · ' + machineTime; // lane machine-card-compact: a machine run's time span closes the label
   return label;
 }
 
@@ -312,6 +318,122 @@ export function foldPassMode(records) {
     return 'debounce';
   }
   return live ? 'raf' : 'debounce';
+}
+
+// ── MACHINES CARDS (lane machine-card-fold, 2026-10-04 — the owner's phone: "这个spam比较厉害 可以进行一下折叠 连续的同一个机器上的
+// 指令可以折叠起来"). An agent working on a paired machine (vibespace-exit run / push / pull, many per turn) put one
+// "VibeSpace · Machines · <machine>" card per call into the chat. Those cards are the 'machine' kind: they ride the Bash
+// toggle (foldToggleFor), join the run they sit in like any tool card, and the fold pass starts a NEW run when the machine
+// changes. A FAILED card (a non-zero exit, a timeout, a refusal, a spawn error, a copy that did not land) is never hidden:
+// the pass keeps it on screen (an inline member) and the head says "N failed" in the alert style.
+// Recognised by the card's sender as exit-proxy names it ("Machines · <machine>", a VibeSpace notice — never a peer's
+// own path, never a group message) and its words / its output block as src/exit-reach.js writes them.
+const MACHINE_FROM = 'Machines · ';
+const MACHINE_TEXT_MAX = 400;
+/** → `{machine, verb: 'run'|'copy', outcome: 'ok'|'exit'|'timed_out'|'failed', code, failed, ts}` | null (not a Machines card). */
+export function machineCardOf(m) {
+  if (!m || m.originKind !== 'peer-message' || m.peerVia === 'peer' || (m.peerGroup && m.peerGroup.id)) return null;
+  const from = typeof m.peerFrom === 'string' ? m.peerFrom : '';
+  if (!from.startsWith(MACHINE_FROM) || from.length <= MACHINE_FROM.length) return null;
+  const b0 = Array.isArray(m.content) ? m.content.find((b) => b && b.type === 'text') : null;
+  const text = String((b0 && b0.text) || '').slice(0, MACHINE_TEXT_MAX).trimStart();
+  const x = m.exitRun && typeof m.exitRun === 'object' ? m.exitRun : null;
+  let verb = 'run', outcome = 'failed', code = null;
+  if (text.startsWith('ran ')) {
+    const said = / — exit (-?\d+) · /.exec(text);
+    code = x && Number.isInteger(x.code) ? x.code : said ? Number(said[1]) : null;
+    outcome = (x && x.timedOut) || / — timed out after /.test(text) ? 'timed_out' : code === 0 ? 'ok' : 'exit';
+  } else if (/^(pulled|pushed) /.test(text)) { verb = 'copy'; outcome = 'ok'; }
+  else if (/^did not (pull|push) /.test(text)) verb = 'copy';
+  return { machine: from.slice(MACHINE_FROM.length), verb, outcome, code, failed: outcome !== 'ok', ts: Number(m.ts) || 0 };
+}
+// the machine part's words (one table, so the i18n census sees every key)
+export const MACHINE_WORDS = Object.freeze({
+  runs: '{n} commands', copies: '{n} files', failed: '{n} failed', running: 'still running', // lane machine-card-compact: the short counts (390 px)
+  exit: 'last: exit {code}', timed_out: 'last: timed out', refused: 'last: did not run', copyFailed: 'last: copy failed', copied: 'last: copied',
+});
+const hhmm = (ts) => { const d = new Date(ts); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+/**
+ * The run head's machine part — ONE line: the machine, the counts, the last outcome (or "still running"), the time span:
+ * "WIN-DESK1 · 6 commands · 2 files · last: exit 0" + the time span "19:39–19:42". `cards` = machineCardOf of the run's
+ * Machines members in order (ONE machine — the fold pass splits on a change); `running` = a member is still live.
+ * → `{text, failed, time}` (failed = the count the head shows in the alert style; time = the span, its OWN field — the
+ * label puts it last and the head draws it in a span that never shrinks, lane machine-card-compact), or null for no cards.
+ */
+export function machineRunPart({ cards = [], running = false, time = hhmm } = {}, t) {
+  const cs = (cards || []).filter(Boolean);
+  if (!cs.length) return null;
+  const runs = cs.filter((c) => c.verb === 'run').length, copies = cs.filter((c) => c.verb === 'copy' && !c.failed).length;
+  const failed = cs.filter((c) => c.failed).length;
+  const last = cs[cs.length - 1];
+  const parts = [cs[0].machine];
+  if (runs) parts.push(t(MACHINE_WORDS.runs, { n: runs }));
+  if (copies) parts.push(t(MACHINE_WORDS.copies, { n: copies }));
+  if (failed) parts.push(t(MACHINE_WORDS.failed, { n: failed }));
+  parts.push(running ? t(MACHINE_WORDS.running)
+    : last.verb === 'copy' ? t(last.failed ? MACHINE_WORDS.copyFailed : MACHINE_WORDS.copied)
+    : last.outcome === 'timed_out' ? t(MACHINE_WORDS.timed_out)
+    : last.code != null ? t(MACHINE_WORDS.exit, { code: last.code }) : t(MACHINE_WORDS.refused));
+  const a = cs[0].ts, b = last.ts;
+  const span = a && b ? (time(a) === time(b) ? time(a) : `${time(a)}–${time(b)}`) : '';
+  return { text: parts.join(' · '), failed, time: span };
+}
+
+// ── THE COMPACT LINE (lane machine-card-compact, 2026-10-04 — the owner: "如果整体已经显示了是win-desk1 每个指令没必要都展示吧").
+// Inside a machine group the head already names the machine, so each Machines card there is ONE line: what it did (the
+// readable command — "PowerShell: <first line>" for an encoded one — or "pulled <there> → <here>") and the outcome, read
+// back from the card's own words (src/exit-reach.js cardText / transferCardText) with the machine taken out; a failed
+// call adds its first error line. The detail (the script, the output) stays one click away on the card itself.
+const MACHINE_LEAD = /^(ran|did not run|could not finish|could not start|pulled|pushed|did not pull|did not push) `([^`]*)`/;
+const firstLineOf = (s) => String(s || '').split('\n').map((l) => l.trim()).find(Boolean) || '';
+/** → `{what, outcome, error, failed, text}` | null (not a Machines card); `text` = the whole line ("what · outcome"). */
+export function machineLineOf(m) {
+  const mc = machineCardOf(m);
+  if (!mc) return null;
+  const b0 = Array.isArray(m.content) ? m.content.find((b) => b && b.type === 'text') : null;
+  const words = firstLineOf(String((b0 && b0.text) || '').slice(0, 2000));
+  const lead = MACHINE_LEAD.exec(words);
+  if (!lead) return { what: words, outcome: '', error: '', failed: mc.failed, text: words };
+  let rest = words.slice(lead[0].length);
+  for (const w of [' on ', ' from ', ' to ']) if (rest.startsWith(w + mc.machine)) { rest = rest.slice(w.length + mc.machine.length); break; }
+  const to = /^ → `([^`]*)`/.exec(rest);
+  if (to) rest = rest.slice(to[0].length);
+  const said = rest.replace(/^ — /, '').trim();
+  const verb = lead[1], copy = mc.verb === 'copy';
+  const what = copy ? `${verb} ${lead[2]}${to ? ` → ${to[1]}` : ''}` : lead[2];
+  // a copy that landed: its size · its time (the hash check is in the detail); a run: its exit · its time as said; a call
+  // that never ran: what stopped it
+  const segs = said.split(' · ');
+  const outcome = copy && mc.outcome === 'ok' && segs.length > 2 ? `${segs[0]} · ${segs[segs.length - 1]}`
+    : verb === 'ran' || copy ? said : `${verb} — ${said}`;
+  const x = m.exitRun && typeof m.exitRun === 'object' ? m.exitRun : null;
+  const error = mc.failed && x ? (firstLineOf(x.stderr) || firstLineOf(x.stdout)).slice(0, 300) : '';
+  return { what, outcome, error, failed: mc.failed, text: outcome ? `${what} · ${outcome}` : what };
+}
+/** THE compact rule (lane machine-card-compact): a run's Machines cards draw as one line each when the run holds ≥ 2 of
+ *  them (its head names the machine); a lone card (a run of one, another machine between) stays whole. `cards` =
+ *  machineCardOf of the run's members (null for a member that is not a Machines card). */
+export const machineCompact = (cards) => (cards || []).filter(Boolean).length >= 2;
+
+/**
+ * THE RUN SPLIT of the fold pass (ChatView._updateRuns), PURE: `items` in list order; `kindOf(item)` → 'skip' (hidden —
+ * transparent, never breaks a run) | null (not foldable — ends the run) | a run kind; `machineOf(item)` → the machine of a
+ * Machines card | null. Consecutive items of one kind form a run — and a Machines card of ANOTHER machine than the run's
+ * starts a new one (lane machine-card-fold). → the runs, each an array of items in order (never empty).
+ */
+export function splitRuns(items, kindOf, machineOf = () => null) {
+  const runs = [];
+  let run = [], runKind = null, runMachine = null;
+  for (const it of items || []) {
+    const k = kindOf(it);
+    if (k === 'skip') continue;
+    const m = k ? machineOf(it) : null;
+    if (k && k === runKind && !(m && runMachine && m !== runMachine)) { run.push(it); if (m) runMachine = m; continue; }
+    if (run.length) runs.push(run);
+    run = k ? [it] : []; runKind = k || null; runMachine = m || null;
+  }
+  if (run.length) runs.push(run);
+  return runs;
 }
 
 export { SUMMARY_ORDER };

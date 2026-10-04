@@ -1742,6 +1742,7 @@ function sessionAuth(s) {
 // anywhere means new fields silently vanish for freshly-(re)connected clients
 // until the next organic broadcast (bit us twice: host badges, then auth/todo).
 function activeSessionsPayload() {
+  try { require('./src/server/unexpected-exit').healResumed(); } catch (e) { console.warn('[unexpected-exit] heal pass failed:', e.message); } // lane exit-item-heal: a live session new to the list answers its conversation's "resume it" items (one pass per session; every create / resume / restore and a fresh client's first list pass through here)
   const getSessionKey = (session = {}) => {
     const backend = session.backend || 'claude';
     const backendSessionId = session.backendSessionId || session.sessionId || session.claudeSessionId || null;

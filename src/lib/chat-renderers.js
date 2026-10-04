@@ -26,6 +26,9 @@ import { handbackFacts } from '../browser-takeover.js'; // lane S3: the handback
 import { ownResumable } from '../browser-fact.js'; // lane browser-resume B (§3.9): the newest end card of the conversation's own browser offers Resume when THE fact says it can
 import { wakeFacts as channelWakeFacts, refOf as channelRefOf, splitLead as channelSplitLead } from '../channel-ref.js'; // B-c127: a channel notice names its conversation (THE NAME LADDER) and opens it with one click
 import { handoverFacts } from '../stash-summary.js'; // 2026-09-28: the hand-over card's title + the notices behind its expander, read back by the module that wrote the words
+import { encodedCommandOf } from '../encoded-command.js'; // lane machine-card-fold: a PowerShell -EncodedCommand drawn as the script it runs (PURE, bundled)
+import { revealParts as hiddenPartsOf } from '../hidden-chars.js'; // …its hidden characters as visible U+XXXX marks (THE one set)
+import { machineLineOf } from './chat-run-summary.js'; // lane machine-card-compact: a Machines card's ONE line inside its machine's group (PURE)
 import { outputPreview, cmdFold } from '../exit-reach.js'; // lane-exit-run-output E3: the command card's first lines of output (stderr first) + "Show output" (PURE, bundled)
 const noticeFacts = (body) => handbackFacts(body) || handoverFacts(body) || channelWakeFacts(body);   // ONE facts hook per producer, tried in order; null = the generic rules
 // PURE builder (CJS pulled into the bundle, like ssh-key-format.js) — the
@@ -404,13 +407,15 @@ function parseUnifiedDiffLines(text) {
 /** lane exit-see-whole (design 013 piece 1a; the owner: 「这些指令输入展示不全，也没地方看到完整版」): the command card's
  *  COMMAND BLOCK — the whole command as the run sent it (≤ 4 KiB, its lines kept, hidden characters refused upstream),
  *  wrapped (a 4 KiB token breaks anywhere), folded at four lines behind an expander that names what it opens. Text only. */
-function exitCmdBlock(cmd) {
+function exitCmdBlock(cmd, { raw = false, marks = false } = {}) {
+  if (!raw) { const enc = encodedCommandOf(cmd); if (enc) return encodedCmdBlock(cmd, enc); }   // lane machine-card-fold
   const f = cmdFold(cmd);
   const box = document.createElement('div');
   box.className = 'chat-exit-cmd-box';
   const pre = document.createElement('pre');
   pre.className = 'chat-exit-cmd chat-pre-wrapped';
-  pre.textContent = cmd;
+  if (marks) for (const p of hiddenPartsOf(cmd)) { if (p.code) { const m = document.createElement('span'); m.className = 'chat-exit-cmd-mark'; m.textContent = p.code; pre.appendChild(m); } else pre.append(p.text); }
+  else pre.textContent = cmd;
   box.appendChild(pre);
   if (!f.folded) return box;
   box.classList.add('chat-exit-cmd-folded');
@@ -421,6 +426,35 @@ function exitCmdBlock(cmd) {
   det.addEventListener('toggle', () => { box.classList.toggle('chat-exit-cmd-open', det.open); sum.textContent = det.open ? t('Fold the command') : label; });
   box.appendChild(det);
   return box;
+}
+
+/** lane machine-card-fold (the owner's phone: 700 characters of `-EncodedCommand WwBDAG8A…` nobody can read): a PowerShell
+ *  `-EncodedCommand` line is drawn as the SCRIPT it runs (src/encoded-command.js — a strict shape, bounded, UTF-16LE): a dim
+ *  line naming what it is, the script in the command box (folded like any command; each hidden character a visible
+ *  U+XXXX mark under one alert line naming them — what the user reads is what runs), and the line itself one click away
+ *  ("Show full command"). A line that cannot be decoded is drawn as itself, with the reason. Text only. */
+function encodedCmdBlock(cmd, enc) {
+  const wrap = document.createElement('div');
+  wrap.className = 'chat-exit-cmd-enc';
+  const what = document.createElement('div');
+  what.className = 'chat-exit-cmd-what';
+  what.textContent = enc.ok ? t('PowerShell script (decoded from {flag})', { flag: enc.flag }) : t('PowerShell -EncodedCommand, not decoded: {why}', { why: enc.error });
+  wrap.appendChild(what);
+  if (!enc.ok) { wrap.appendChild(exitCmdBlock(cmd, { raw: true })); return wrap; }
+  if (enc.hidden.length) {
+    const h = document.createElement('div');
+    h.className = 'chat-exit-cmd-hidden';
+    h.textContent = t('The script carries characters that change the order it reads in or are not drawn at all: {codes}', { codes: enc.hidden.slice(0, 6).join(', ') });
+    wrap.appendChild(h);
+  }
+  wrap.appendChild(exitCmdBlock(enc.shown, { raw: true, marks: enc.hidden.length > 0 }));
+  const det = document.createElement('details');
+  det.className = 'chat-exit-cmd-raw';
+  const sum = document.createElement('summary'); sum.textContent = t('Show full command'); det.appendChild(sum);
+  const pre = document.createElement('pre'); pre.className = 'chat-exit-cmd chat-pre-wrapped'; pre.textContent = cmd; det.appendChild(pre);
+  det.addEventListener('toggle', () => { sum.textContent = det.open ? t('Hide full command') : t('Show full command'); });
+  wrap.appendChild(det);
+  return wrap;
 }
 
 /** The command card's OUTPUT BLOCK (lane-exit-run-output E3): `x` = exit-reach cardOutput — bounded by the producer,
@@ -875,7 +909,36 @@ class ChatRenderers {
     // stored heads (4 KiB per stream, a cut SAID). Text a machine wrote: textContent only. The block is part of THIS
     // card (an expander on the element, never a second card, never re-created on a toggle).
     if (msg.exitRun && typeof msg.exitRun === 'object') el.appendChild(exitRunBlock(msg.exitRun));
+    // lane machine-card-compact: …and its ONE line for inside its machine's group (drawn only there — chat.css)
+    const ml = machineLineOf(msg);
+    if (ml) this._machineLine(el, msg, ml);
     return el;
+  }
+
+  /** lane machine-card-compact (the owner: "如果整体已经显示了是win-desk1 每个指令没必要都展示吧"): a Machines card's ONE line,
+   *  drawn only inside its machine's group (the fold pass sets .chat-machine-compact; the head names the machine) — what it
+   *  did + the outcome (alert style when it failed), the whole line's text ON the line (one line, cut with "…", never a
+   *  hover title), a failure's first error line under it. The line toggles THIS call's detail in place (the decoded
+   *  script, Show full command, the output heads); the open state is the per-message fold state (_peerFold). Text only. */
+  _machineLine(el, msg, ml) {
+    el.classList.add('chat-machine-card');
+    if (msg.exitRun && typeof msg.exitRun === 'object') el.classList.add('chat-machine-run');
+    const line = document.createElement('div');
+    line.className = 'chat-mline' + (ml.failed ? ' chat-mline-alert' : '');
+    line.setAttribute('role', 'button');
+    line.tabIndex = 0;
+    const arrow = document.createElement('span'); arrow.className = 'chat-mline-arrow'; arrow.setAttribute('aria-hidden', 'true'); arrow.textContent = '▸';
+    const what = document.createElement('span'); what.className = 'chat-mline-what'; what.textContent = ml.what;
+    line.append(arrow, what);
+    if (ml.outcome) { const out = document.createElement('span'); out.className = 'chat-mline-out'; out.textContent = '· ' + ml.outcome; line.appendChild(out); }
+    const head = el.querySelector(':scope > .chat-vs-notice-head');
+    el.insertBefore(line, head ? head.nextSibling : el.firstChild);
+    if (ml.error) { const err = document.createElement('div'); err.className = 'chat-mline-err'; err.textContent = ml.error; line.after(err); }
+    const set = (open) => { el.classList.toggle('chat-mline-open', open); line.setAttribute('aria-expanded', String(open)); };
+    set(!!(msg.id && this._peerFold?.isOpen?.(msg.id)));
+    const toggle = (e) => { e.stopPropagation(); const open = !el.classList.contains('chat-mline-open'); set(open); if (msg.id) this._peerFold?.set?.(msg.id, open, el); };
+    line.onclick = toggle;
+    line.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(e); } };
   }
 
   /** lane peer-card-fold: a peer card's body — whole, or folded to ONE preview line behind the house expander

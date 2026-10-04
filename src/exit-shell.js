@@ -25,6 +25,15 @@
  * which cmd does not read). cmd runs ONE line: a CR or LF inside the line would run its first line and drop the rest
  * in silence, so such a line is refused by name BEFORE a spawn (`ESHELLLINE` — "join them with & or &&"); so is a line
  * past cmd's own 8191 characters (verify r1 F6 — cmd would print "The input line is too long" and exit with nothing named).
+ *
+ * THE CONSOLE'S CODE PAGE (lane win-run-codepage, 2026-10-04): on the owner's Chinese Windows box `dir … 2>nul` and a
+ * PowerShell error came back as mojibake — cmd.exe and console programs write in the console's OEM code page (936 =
+ * GBK) and the daemon read every byte as UTF-8 (`String(stdout)`). On win32 the daemon now takes the streams as bytes
+ * and `decodeRunOutput` decodes EACH one: valid UTF-8 stays UTF-8 (PowerShell with UTF8 output, node, git…), anything
+ * else is decoded with the code page `chcp` names (read once per daemon, `parseCodePage`; the registry's OEMCP when chcp
+ * answers nothing) — BEFORE the 1 MiB / 64 KiB cut, so a character is never split; a stream cut by maxBuffer or a kill
+ * drops its unfinished last character instead. The record names the decoding (`encoding`): a code page this node cannot
+ * decode (no full ICU) or an unknown one keeps UTF-8 and says `utf-8-fallback`. POSIX streams are never touched.
  */
 const RUN_SHELL_CAP = 'run-shell';
 const POSIX_SHELL = 'sh';
@@ -98,4 +107,42 @@ function spawnFailureText(sf, { interpreter = POSIX_SHELL } = {}) {
   return `${code || 'spawn failed'}: ${String((sf && sf.message) || 'the command could not be started').slice(0, 200)}`;
 }
 
-module.exports = { RUN_SHELL_CAP, RUN_SHELL_SINCE, POSIX_SHELL, WIN_SHELL, WIN_LINE_MAX, PLATFORM_LABELS, canRunLine, interpreterOf, knownInterpreter, platformLabel, shellPlan, spawnFailure, spawnExitCode, spawnFailureText };
+// lane win-run-codepage: the code pages a Windows console names → node's TextDecoder labels (full ICU); any other ⇒ latin1
+const CODEPAGE_LABELS = Object.freeze({ 936: 'gbk', 932: 'shift_jis', 949: 'euc-kr', 950: 'big5', 1252: 'windows-1252', 65001: 'utf-8' });
+const UTF8_FALLBACK = 'utf-8-fallback';
+// the lines the daemon asks ONCE for its console's code page, in order (shellPlan('win32', line) runs each)
+const CODEPAGE_PROBES = Object.freeze(['chcp', 'reg query HKLM\\SYSTEM\\CurrentControlSet\\Control\\Nls\\CodePage /v OEMCP']);
+function codePageLabel(cp) { return Object.prototype.hasOwnProperty.call(CODEPAGE_LABELS, cp) ? CODEPAGE_LABELS[cp] : 'latin1'; }
+/** The code page in a probe's output (`Active code page: 936` / `活动代码页: 936` in the console's own bytes /
+ *  `OEMCP    REG_SZ    936`): its LAST number — the words around it are localized, the digits are ASCII. → number | null. */
+function parseCodePage(out) {
+  const t = Buffer.isBuffer(out) ? out.toString('latin1') : String(out == null ? '' : out);
+  const all = t.match(/\d+/g);
+  const n = all ? Number(all[all.length - 1]) : NaN;
+  return Number.isInteger(n) && n > 0 && n < 65536 ? n : null;
+}
+function decodeStream(buf, label, cut) {
+  if (!Buffer.isBuffer(buf)) return { text: String(buf == null ? '' : buf), encoding: 'utf-8' };
+  try { return { text: new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(buf, { stream: cut }), encoding: 'utf-8' }; } catch { }
+  if (label === 'latin1') return { text: buf.toString('latin1'), encoding: 'latin1' };
+  if (label) { try { return { text: new TextDecoder(label, { ignoreBOM: true }).decode(buf, { stream: cut }), encoding: label }; } catch { } } // RangeError: this node lacks the label
+  return { text: buf.toString('utf8'), encoding: UTF8_FALLBACK };
+}
+/** A win32 run's two streams (Buffers) → `{stdout, stderr, encoding}`, decoded per THE CONSOLE'S CODE PAGE rule above.
+ *  `cp` = the console's code page (null: unknown ⇒ UTF-8, `utf-8-fallback`); `cut` = the child was killed or overflowed
+ *  maxBuffer (an unfinished last character is dropped, never decoded as garbage). `encoding` = the decoding a stream
+ *  needed beyond UTF-8 (both streams share the code page), else 'utf-8'. */
+function decodeRunOutput(stdout, stderr, cp, { cut = false } = {}) {
+  const label = cp == null ? null : codePageLabel(cp);
+  const o = decodeStream(stdout, label, !!cut), e = decodeStream(stderr, label, !!cut);
+  return { stdout: o.text, stderr: e.text, encoding: o.encoding !== 'utf-8' ? o.encoding : e.encoding };
+}
+/** `text` bounded at `max` UTF-16 units without splitting a surrogate pair (the win32 cut runs on decoded text). */
+function cutText(text, max) {
+  const s = String(text);
+  if (s.length <= max) return s;
+  const c = s.charCodeAt(max - 1);
+  return s.slice(0, c >= 0xD800 && c <= 0xDBFF ? max - 1 : max);
+}
+
+module.exports = { CODEPAGE_LABELS, CODEPAGE_PROBES, UTF8_FALLBACK, codePageLabel, parseCodePage, decodeRunOutput, cutText, RUN_SHELL_CAP, RUN_SHELL_SINCE, POSIX_SHELL, WIN_SHELL, WIN_LINE_MAX, PLATFORM_LABELS, canRunLine, interpreterOf, knownInterpreter, platformLabel, shellPlan, spawnFailure, spawnExitCode, spawnFailureText };

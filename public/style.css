@@ -6605,3 +6605,6 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
 }
 .bprof-fold-v.bprof-build { font-size: inherit; color: var(--text-secondary); white-space: normal; } /* design 015: the Chrome build line lives in the row's fold */
 .bprof-fold-v.bprof-build.warn { color: var(--warn-text); }
+/* lane machine-card-fold: the Commands list's decoded PowerShell script — the hidden-character alert, the raw line behind an expander */
+.exit-runs-hidden { font-size: 11px; color: var(--red); margin: 2px 0; }
+.exit-runs-raw > summary { cursor: pointer; font-size: 11px; color: var(--text-secondary); }

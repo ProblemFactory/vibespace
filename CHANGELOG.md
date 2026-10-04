@@ -2,6 +2,15 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.207 — 2026-10-03
+
+### Changed
+- Commands an agent runs on a machine now fold into one line per machine, one short line per command inside; PowerShell encoded commands show their script.
+- An "exited unexpectedly" item in For you now clears itself once that conversation is running again, whoever resumed it.
+
+### Fixed
+- On a Chinese, Japanese or Korean Windows machine, command output and error messages now read as text instead of garbled characters.
+
 ## 2.369.206 — 2026-10-03
 
 ### Added

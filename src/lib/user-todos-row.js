@@ -48,8 +48,9 @@ export function expiresText(ts, t) {
   return m < 60 ? t('expires in {n} min', { n: m }) : t('expires in {n} h', { n: Math.round(m / 60) });
 }
 /** Who resolved it, in words ('expired' = the store's sweep, 'reply' = the
- *  user's own inbox reply, design-user-inbox-reply D1.4). */
-export function resolvedByText(by, t) {
+ *  user's own inbox reply, design-user-inbox-reply D1.4). `item` = the
+ *  resolved item, for a resolution worded with its fact ('resumed'). */
+export function resolvedByText(by, t, item = null) {
   if (by === 'agent') return t('by the agent');
   if (by === 'system') return t('automatically');
   if (by === 'expired') return t('expired');
@@ -62,6 +63,13 @@ export function resolvedByText(by, t) {
   if (by === 'ask-changed') return t('not run — it changed after it was shown'); // verify-r6 W1
   if (by === 'ask-over') return t('this request is over — the agent can ask again'); // verify-r6 W2: a reopened ask that is over
   if (by === 'conversation-gone') return t('the conversation ended before you answered');
+  // lane exit-item-heal: an unexpected-exit item answered by the conversation running again (its new session's start, this device's clock)
+  if (by === 'resumed') {
+    const at = item && item.resolvedFact && Number(item.resolvedFact.resumedAt);
+    if (!at) return t('running again');
+    const d = new Date(at);
+    return t('running again (resumed {time})', { time: String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0') });
+  }
   return by && by !== 'user' ? by : '';
 }
 
@@ -158,7 +166,7 @@ function partsOf(entry, ctx) {
     ? `<div class="ut-opts">${i.options.map((o, k) => `<button type="button" class="ut-opt" data-idx="${k}">${escHtml(o)}</button>`).join('')}</div>` : '';
   let meta;
   if (resolved) {
-    const by = resolvedByText(i.resolvedBy, t);
+    const by = resolvedByText(i.resolvedBy, t, i);
     const replied = i.reply && typeof i.reply.text === 'string' && i.reply.text
       ? ' · ' + escHtml(t('You replied: {text}', { text: i.reply.text.length > REPLY_SNIPPET ? i.reply.text.slice(0, REPLY_SNIPPET) + '…' : i.reply.text })) : '';
     meta = (tail ? `<span class="ut-sess" title="${escHtml(t('Go to this session'))}">${escHtml(ctx.nameFor(i.sessionKey, [i]))}</span> · ` : '')

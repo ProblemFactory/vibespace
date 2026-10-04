@@ -27,11 +27,18 @@
  * not work"; no client within `pendMaxMs` ⇒ "no VibeSpace window was open";
  * a second exit ⇒ "exited unexpectedly again … not restarted". The item is
  * worded per device (`i18n`), origin `agent`, under the conversation's own key.
+ *
+ * A RESUME ANSWERS IT (lane exit-item-heal, owner 2026-10-03): after the 15:45
+ * freeze three "… resume it if you need it" items sat in For you for hours
+ * although all three conversations were resumed minutes after the reboot. An
+ * item whose only ask is "resume it" is answered the moment the conversation
+ * is live again, whoever resumed it: `healResumed` resolves it `resumed`.
  */
 const fs = require('fs');
 const path = require('path');
 const { unexpectedExitVerdict, RESPAWN_ONCE_MS } = require('../exit-facts.js');
 const { readPpid, readChildPids } = require('../cli-identity.js');
+const { addressableId } = require('../claude-lock-capture.js');
 
 const WS_OPEN = 1;
 const RESPAWNED_MAX = 500; // conversation ids remembered for the once-rule (oldest fall off)
@@ -39,11 +46,12 @@ let deps = null;
 const respawnedAt = new Map(); // conversation id → when VibeSpace asked for its respawn
 const pending = new Map();     // conversation id → the respawn waiting for a client / for its landing
 let ticker = null;
+let healed = new WeakMap();  // live session → the conversation key its ONE heal pass ran for (an id adopted later ⇒ a new pass)
 
 function install({ userTodos = null, sessionKeyFor = null, activeSessions = null, clients = () => [], log = console, buffersDir = null,
   now = () => Date.now(), tickMs = 5000, landMs = 60 * 1000, pendMaxMs = RESPAWN_ONCE_MS } = {}) {
   deps = { userTodos, sessionKeyFor, activeSessions, clients, log, buffersDir, now, tickMs, landMs, pendMaxMs };
-  respawnedAt.clear(); pending.clear();
+  respawnedAt.clear(); pending.clear(); healed = new WeakMap();
   if (ticker) { clearInterval(ticker); ticker = null; }
 }
 
@@ -59,6 +67,9 @@ const TEXTS = Object.freeze({
   'no-window': i18nKey('"{name}" exited unexpectedly at {time}; no VibeSpace window was open to restart it — resume it if you need it'),
   'no-conversation': i18nKey('"{name}" exited unexpectedly at {time}, before it had a conversation to resume'),
 });
+// the items a resume answers — `no-conversation` had nothing to resume, so it stays
+const HEALS = Object.freeze(['failed', 'no-window', 'again', 'respawned']);
+const HEAL_KEYS = new Set(HEALS.map((o) => TEXTS[o]));
 const fill = (s, p) => s.replace(/\{(\w+)\}/g, (m, k) => (p[k] != null ? String(p[k]) : m));
 
 function file(entry, outcome) {
@@ -114,6 +125,35 @@ function tick() {
   if (!pending.size && ticker) { clearInterval(ticker); ticker = null; }
 }
 
+/** A RESUME ANSWERS THE ITEM — the active-sessions publish's call (server.js activeSessionsPayload: every create,
+ *  resume and restore is published through it, a fresh client's first list included). ONE pass per live session
+ *  and conversation key: each OPEN item of ours under the conversation's key, filed BEFORE this session started, is
+ *  resolved `resumed` with the session's start as the fact. Read off the STORE, never `pending` (gone after a
+ *  restart); found by the stored words' KEY (`i18n.text.key`), never by words; a pending fork still carrying its
+ *  parent's id answers nothing (addressableId). → the ids resolved */
+function healResumed() {
+  if (!deps || !deps.userTodos || !deps.activeSessions || !deps.sessionKeyFor) return [];
+  const out = [];
+  for (const [sid, s] of deps.activeSessions) {
+    if (!s || !addressableId(s)) continue;
+    let key = null;
+    try { key = deps.sessionKeyFor(s, sid); } catch { }
+    if (!key || healed.get(s) === key) continue;
+    healed.set(s, key);
+    const startedAt = Number(s.createdAt) || 0;
+    let ids = [];
+    try {
+      ids = deps.userTodos.forSession(key).filter((it) => it.origin === 'agent' && HEAL_KEYS.has(it.i18n && it.i18n.text && it.i18n.text.key)
+        && Number(it.createdAt) < startedAt).map((it) => it.id);
+      if (ids.length) ids = deps.userTodos.resolveAnswered(ids, 'resumed', { resumedAt: startedAt });
+    } catch (e) { deps.log?.warn?.(`[unexpected-exit] ${sid}: For-you items not resolved — ${e && e.message}`); continue; }
+    if (!ids.length) continue;
+    deps.log?.log?.(`[unexpected-exit] ${sid} "${s.name || key}": running again (resumed ${hhmm(startedAt)}) — ${ids.length} For-you item(s) resolved`);
+    out.push(...ids);
+  }
+  return out;
+}
+
 /** A USER's kill through a pid door (the System panel's signal — sysinfo-wiring signalProc; /api/kill-pid) marks
  *  every session whose process tree it hits — the wrapper (meta.pid), its CLI (meta.childPid) or a child of it, the
  *  dtach master above the wrapper — so the exit record names the actor (verify r1: the panel's SIGTERM of a WORKING
@@ -162,4 +202,4 @@ function onExit(session, id, facts, { midTurn = false } = {}) {
   return v;
 }
 
-module.exports = { install, onExit, tick, markAskedByPid, TEXTS };
+module.exports = { install, onExit, tick, markAskedByPid, healResumed, TEXTS, HEALS };

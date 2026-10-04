@@ -315,7 +315,8 @@ const S = require('../src/browser-serve.js');
   const seen = [];
   const rt = {
     launch: async (ns, o) => { seen.push({ op: 'launch', env: { ...(o.extraEnv || {}) } }); return { ok: true }; },
-    info: async () => ({ ok: true, active: true, pid: process.pid, socketDir: '/tmp', version: '0.38.1' }),
+    // the daemon's pid is one that is GONE (as after a real close --all): this suite's own pid kept `stop` in its 8 s grace (lane fast-budget)
+    info: async () => ({ ok: true, active: true, pid: 2147483000, socketDir: '/tmp', version: '0.38.1' }),
     cdpUrl: async (ns, o) => { seen.push({ op: 'cdp-url', env: { ...(o.extraEnv || {}) } }); return { ok: true, url: 'ws://127.0.0.1:9333/devtools/browser/x' }; },
     closeAll: async (ns, o) => { seen.push({ op: 'stop', env: { ...(o.extraEnv || {}) } }); return { ok: true }; },
   };

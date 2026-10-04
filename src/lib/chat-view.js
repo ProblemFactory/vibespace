@@ -18,7 +18,7 @@ import { registerCommand, registerKeybinding, runCommand, hasCommand } from './c
 // wrapper-files.js). Imported, never re-typed: the two ends disagreeing about
 // "no list" is the bug this constant now prevents.
 import { LEGACY_QUEUE_VERBS, worktreeLatchWrite } from '../backend-caps.js';
-import { mcpParts, messageKind, foldToggleFor, countKinds, runSummaryLabel, foldPassMode } from './chat-run-summary.js';
+import { mcpParts, messageKind, foldToggleFor, countKinds, runSummaryLabel, foldPassMode, machineCardOf, machineRunPart, splitRuns, machineCompact } from './chat-run-summary.js';
 import { assistantNoteOf } from './chat-run-summary.js'; // lane S3: a run's note members say which note they were
 import { turnPreviewOf } from '../assistant-note.js'; // PURE (B-40f8): THE preview of a user turn — the server's turnMap builders read the same rule
 import { collabTrafficStats, collabHeadText, collabRunPart, subAgentStreamLabel } from '../collab-row.js';
@@ -4778,7 +4778,7 @@ class ChatView {
     // every run record that named the old element names the new one (a folded
     // member stays display:none with no pass needed). ② A RENDERED card is laid
     // out at its real height in its first frame (the fresh-slab reservation).
-    const RUN_CLASSES = ['chat-run-collapsed', 'chat-run-member', 'chat-run-first', 'chat-run-last'];
+    const RUN_CLASSES = ['chat-run-collapsed', 'chat-run-member', 'chat-run-first', 'chat-run-last', 'chat-machine-compact']; // + lane machine-card-compact
     for (const c of RUN_CLASSES) if (oldEl.classList?.contains(c)) newEl.classList.add(c);
     if (this._runs?.length) {
       for (const run of this._runs) {
@@ -4986,7 +4986,7 @@ class ChatView {
       if (label === run.label) continue;
       run.label = label;
       const headLabel = run.header?.querySelector('.chat-run-label');
-      if (headLabel) headLabel.textContent = label;
+      if (headLabel) headLabel.textContent = run.headTime ? run.mkLabel({ now, live, time: false }) : label; // lane machine-card-compact: the time has its own span
       const footLabel = run.footer?.querySelector('.chat-run-label');
       if (footLabel) footLabel.textContent = `${t('Collapse')} · ${label}`;
       if (this._runBarRun === run) this._scheduleRunBar();
@@ -6510,6 +6510,7 @@ class ChatView {
     try {
       list.querySelectorAll(':scope > .chat-run-header, :scope > .chat-run-footer').forEach((h) => h.remove());
       list.querySelectorAll(':scope > .chat-run-collapsed, :scope > .chat-run-member').forEach((el) => el.classList.remove('chat-run-collapsed', 'chat-run-member', 'chat-run-first', 'chat-run-last'));
+      list.querySelectorAll(':scope > .chat-machine-compact').forEach((el) => el.classList.remove('chat-machine-compact')); // lane machine-card-compact: re-decided every pass (a card that left its group is whole again)
       // run bookkeeping (headers ↔ members ↔ footer) — rebuilt every pass; the
       // floating run bar (_updateRunBar) reads it, never the DOM tree
       this._runs = [];
@@ -6603,6 +6604,10 @@ class ChatView {
         // lane peer-card-fold: a FOLDED peer card is already one line (head + preview + Show) — it keeps its fold kind
         // (the run stays joined, the summary counts it) but stays on screen, so its Show is one press away
         for (const el of members) if (el.classList.contains('chat-peer-folded')) inline.add(el);
+        // lane machine-card-fold: …but a Machines card folds whole (the run's head says it), and a FAILED one stays on screen —
+        // a failure is never hidden inside a closed fold (the head also says "N failed" in the alert style)
+        const machineCards = members.map((el) => machineCardOf(el._rawMsg));
+        members.forEach((el, i) => { const mc = machineCards[i]; if (mc && mc.failed) inline.add(el); else if (mc) inline.delete(el); });
         if (inline.size === members.length) { run = []; runKind = null; return; }
         if (members.length >= (hasTool ? 1 : 2)) {
           const header = document.createElement('div');
@@ -6661,8 +6666,15 @@ class ChatView {
           const collabStats = collabTrafficStats({ rows: collabRows });
           const liveCollabEl = this._elements.get(this._liveCollabId());
           const notes = members.filter((el, i) => memberKinds[i] === 'note').map((el) => assistantNoteOf(el._rawMsg)?.what || 'note');
-          const mkLabel = ({ now = Date.now(), live = false } = {}) => runSummaryLabel({
-            byKind, mcpServers, files, nErr, running, notes,
+          const machinePart = machineRunPart({ cards: machineCards, running }, t); // lane machine-card-fold: "WIN-DESK1 · 6 commands run · … · 19:39–19:42"
+          if (machinePart && machinePart.failed) header.classList.add('chat-run-alert');
+          // lane machine-card-compact: inside a group of ≥ 2 Machines cards the head names the machine, so each card there is ONE
+          // line (chat-renderers _machineLine; a failed one too, on screen while the group is closed); a lone card stays whole
+          const compact = machineCompact(machineCards);
+          members.forEach((el, i) => { if (machineCards[i]) el.classList.toggle('chat-machine-compact', compact); });
+          const mkLabel = ({ now = Date.now(), live = false, time = true } = {}) => runSummaryLabel({
+            byKind, mcpServers, files, nErr, running, notes, machinePart: machinePart ? machinePart.text : '',
+            machineTime: time && machinePart ? machinePart.time : '', // lane machine-card-compact: the span closes the label (the head draws it apart)
             collabPart: collabRunPart(collabStats, { now, live, t }),
           }, t);
           const collabLive = !!liveCollabEl && members.includes(liveCollabEl);
@@ -6690,7 +6702,11 @@ class ChatView {
           const agentsHtml = agents.length
             ? `${label ? ' · ' : ' '}<span class="chat-run-agents">${agents.slice(0, 4).map((a) => `<span class="chat-collab-name" role="link" tabindex="0" data-agent-path="${escHtml(a.path)}"${a.threadId ? ` data-thread-id="${escHtml(a.threadId)}"` : ''}>${escHtml(a.name)}</span>`).join(', ')}${agents.length > 4 ? `, +${agents.length - 4}` : ''}</span>`
             : '';
-          header.innerHTML = `<span class="chat-run-arrow" aria-hidden="true">▸</span><span class="chat-run-label">${escHtml(label)}</span>${agentsHtml}`;
+          // lane machine-card-compact: a machine run's time span is its OWN span that never shrinks — at 390 px the counts are
+          // cut, never the time (the footer and the run bar keep the whole label)
+          const headTime = machinePart && machinePart.time ? machinePart.time : '';
+          const headText = headTime ? mkLabel({ live: collabLive, time: false }) : label;
+          header.innerHTML = `<span class="chat-run-arrow" aria-hidden="true">▸</span><span class="chat-run-label">${escHtml(headText)}</span>${headTime ? `<span class="chat-run-time">· ${escHtml(headTime)}</span>` : ''}${agentsHtml}`;
           for (const nameEl of header.querySelectorAll('.chat-collab-name')) {
             nameEl.onclick = (ev) => {
               ev.stopPropagation();
@@ -6698,6 +6714,7 @@ class ChatView {
             };
           }
           const rec = { header, members, inline, footer: null, label, open: false, mkLabel, collabStats, _collabWasLive: collabLive };
+          rec.headTime = headTime; // lane machine-card-compact: the live label refresh keeps the head's time in its own span
           // Rebuilds happen on every list mutation — remember runs the user
           // opened so a new message doesn't re-collapse what they're reading.
           // Keyed by ANY member, not just the first: scroll-up pagination
@@ -6712,14 +6729,9 @@ class ChatView {
         }
         run = []; runKind = null;
       };
-      for (const el of kids) {
-        const k = kindOf(el);
-        if (k === 'skip') continue; // hidden card — transparent to the run
-        if (k && k === runKind) { run.push(el); continue; }
-        flush();
-        if (k) { run = [el]; runKind = k; }
-      }
-      flush();
+      // THE split is PURE (chat-run-summary splitRuns): a null kind ends a run, a hidden card ('skip') is transparent, and
+      // a Machines card of ANOTHER machine starts a new run (lane machine-card-fold)
+      for (const r of splitRuns(kids, kindOf, (el) => machineCardOf(el._rawMsg)?.machine || null)) { run = r; runKind = 'noise'; flush(); }
       // While PINNED (following live output) only the LAST run keeps an
       // opened state: a run expanded to watch one command's output used to
       // inherit the open flag as it grew and stayed expanded FOREVER (user

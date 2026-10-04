@@ -20,10 +20,14 @@ on:
 jobs:
   fast:
     runs-on: ubuntu-latest
-    # 15 again (B-f4cb): 2.369.192 raised it to 30 when the grown fast tier
-    # (184 suites, ~17 min here at 1051 s locally) was cancelled at 15; under
-    # THE TIER RULE it measures ~4 min locally (235–249 s), ~6.5 min at the
-    # runner's ~1.6× plus ~2 min of apt/npm setup — about half this budget.
+    # 15 (B-f4cb). It was CANCELLED at 15 on .202/.203/.205: the tier had
+    # grown back to 269 suites run one after another (792 s summed locally,
+    # 1.3× that here). Lane fast-budget (2026-10-04) fixed or moved every
+    # suite over 10 s and runs the tier over min(4, cpus) lanes + a serial
+    # lane for the clock judges (scripts/ci.mjs FAST LANES). Measured in this
+    # runner's shape (depth-1 clone, node 22, taskset 0-3): 165 s for build +
+    # suites (was ≈ 845 s), ≈ 215 s at this runner's 1.3× plus ~35 s of
+    # setup — about 4 min, under a third of this budget.
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4

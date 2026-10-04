@@ -6135,6 +6135,8 @@ export default {
   "access removed": "权限已撤销",
   "expired (no answer in 60 s)": "已过期（60 秒内未回答）",
   "the conversation ended before you answered": "在你回答之前该对话已结束",
+  "running again": "已重新运行",
+  "running again (resumed {time})": "已重新运行（{time} 恢复）",
   "Nothing runs until you answer. After 60 s it is refused.": "你回答之前什么都不会运行。60 秒后自动拒绝。",
   "Allow \"{name}\" to run a command on {machine}?": "允许 \"{name}\" 在 {machine} 上运行命令？",
   // verify r6 (what you approve is what runs): the whole request, hidden characters, every Always-Allow update
@@ -7736,4 +7738,16 @@ export default {
   "A workspace app lets every member just press Allow; without one, make your own Slack app with a one-time setup token.": "有工作区应用时，每个成员只需按 Allow；没有的话，用一次性设置令牌自己建一个 Slack 应用。",
   "Slack: relay page": "Slack：中转页",
   "The https page Slack sends a member back to after they press Allow, for a workspace app whose Client ID and Secret were typed here (a company preset names its own). The page only returns the browser to a VibeSpace on a private network; anywhere else it shows the code to paste back. Register the same address under the app’s Redirect URLs. Empty = this instance’s own https address, else the code is pasted back.": "成员在 Slack 按 Allow 之后跳到的 https 页面，用于在这里填入了 Client ID 和 Secret 的工作区应用（公司预设自带自己的中转页）。这个页面只会把浏览器送回内网里的 VibeSpace，否则显示一串码让你粘回。留空 = 用这台实例自己的 https 地址，没有的话就把码粘回。",
+  // lane machine-card-fold (2026-10-04): the Machines run head + the decoded PowerShell script
+  "{n} commands": "{n} 条命令", // lane machine-card-compact: the short counts ("{n} files" is the house key)
+  "last: exit {code}": "最后：退出码 {code}",
+  "last: timed out": "最后：超时",
+  "last: did not run": "最后：未运行",
+  "last: copy failed": "最后：复制失败",
+  "last: copied": "最后：已复制",
+  "PowerShell script (decoded from {flag})": "PowerShell 脚本（由 {flag} 解码）",
+  "PowerShell -EncodedCommand, not decoded: {why}": "PowerShell -EncodedCommand，未能解码：{why}",
+  "The script carries characters that change the order it reads in or are not drawn at all: {codes}": "脚本含有会改变阅读顺序或根本不显示的字符：{codes}",
+  "Show full command": "显示完整命令",
+  "Hide full command": "收起完整命令",
 };
