@@ -635,6 +635,12 @@ function setup(ctx) {
     return _sessionsCache;
   };
 
+  // the boot phase's `sessions-index` step (src/server/boot-phase.js): the FIRST sweep runs at boot, not on the first
+  // page's request — a page that reloads into a fresh server finds it cached (or joins it in flight)
+  _warmSweep = () => {
+    if (!_sweepInFlight) _sweepInFlight = _runSessionsSweep().finally(() => { _sweepInFlight = null; });
+    return _sweepInFlight;
+  };
   router.get('/api/sessions', async (req, res) => {
     try {
       // 4500ms: clients poll at 5s — a 2s TTL guaranteed every poll missed
@@ -697,4 +703,5 @@ function setup(ctx) {
   });
 }
 
-module.exports = { router, setup };
+let _warmSweep = null;
+module.exports = { router, setup, warmSessions: () => (_warmSweep ? _warmSweep() : Promise.resolve()) };

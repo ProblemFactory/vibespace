@@ -50,6 +50,10 @@ export function appRefusalText(code) {
     case 'install_timeout': return t('It did not finish in time and is still running on the machine — VibeSpace never stops apt halfway. Check again once it ends.');
     case 'install_link_lost': return t('The link to the machine dropped during the install. It keeps running there — check again once the machine is back.');
     case 'install_failed': return t('The install failed — the log above says why.');
+    case 'no_app_system': return t('This machine keeps no app system.'); // Layer 1 (design §3.2)
+    case 'exists': return t('This machine already has an app system.');
+    case 'no_rung': return t('An app system cannot be created on this machine — its image carries neither a base system nor debootstrap.');
+    case 'prev_exists': return t('Delete the previous app system first — it is kept until you do.');
     default: return '';
   }
 }
@@ -63,12 +67,17 @@ export function appDialogTitle(request, name) {
   if (r.kind === 'source-remove') return t('Remove a package source from {machine}', { machine: name });
   if (r.kind === 'deb') return t('Install a .deb file on {machine}', { machine: name });
   if (r.kind === 'replay') return t('Put your apps back on {machine}', { machine: name });
+  if (r.kind === 'sys-create') return t('Set up the app system on {machine}', { machine: name }); // Layer 1 (design §3.2)
+  if (r.kind === 'repair') return t('Repair the app system on {machine}', { machine: name });
+  if (r.kind === 'rebase') return t('Move your apps to the new system on {machine}', { machine: name });
+  if (r.kind === 'rollback') return t('Roll back the app system on {machine}', { machine: name });
+  if (r.kind === 'sys-drop-prev') return t('Delete the previous app system on {machine}', { machine: name });
   return t('Install {app} on {machine}', { app: (r.packages || []).join(' '), machine: name });
 }
 /** The go button's label for a plan. */
 export function appGoLabel(plan) {
   const k = plan && plan.kind;
-  return k === 'remove' || k === 'source-remove' ? t('Remove') : k === 'refresh' ? t('Refresh') : k === 'adopt' ? t('Keep them') : k === 'source' ? t('Add the source') : k === 'replay' ? t('Put back') : t('Install');
+  return k === 'remove' || k === 'source-remove' ? t('Remove') : k === 'refresh' ? t('Refresh') : k === 'adopt' ? t('Keep them') : k === 'source' ? t('Add the source') : k === 'replay' ? t('Put back') : k === 'sys-create' ? t('Set up') : k === 'repair' ? t('Repair') : k === 'rebase' ? t('Migrate') : k === 'rollback' ? t('Roll back') : k === 'sys-drop-prev' ? t('Delete') : t('Install');
 }
 /** The sentence above the commands. */
 export function appPlanNote(plan, name) {
@@ -89,6 +98,7 @@ export function appDoneText(end, name) {
   if (end.kind === 'source') return t('The package source {app} is added to {machine}', { app: end.label || '', machine: name });
   if (end.kind === 'source-remove') return t('The package source {app} is removed', { app: end.label || '' });
   if (end.kind === 'replay') return t('Your apps are back on {machine}', { machine: name });
+  if (['sys-create', 'repair', 'rebase', 'rollback', 'sys-drop-prev'].includes(end.kind)) return t('The app system on {machine} is ready', { machine: name });
   return (end.rows || []).length ? t('{app} is installed on {machine} — it is in Apps', { app: end.rows.map((r) => r.label).join(', '), machine: name }) : t('{app} is installed on {machine}', { app: end.label || '', machine: name });
 }
 
@@ -117,7 +127,7 @@ export function appPlanBlock(plan, { proposal = null } = {}) {
       d.appendChild(el('div', 'app-plan-pkg-list', names.join(' ')));
       box.appendChild(d);
     }
-    line(t('After this machine is rebuilt, VibeSpace puts it back from its saved packages — about {s} s after the server starts.', { s: plan.replaySeconds || 1 }), 'app-plan-replay');
+    line(plan.layer === 'sys' ? t('It goes into the app system on this machine’s disk — after a rebuild it is simply there, nothing is reinstalled.') : t('After this machine is rebuilt, VibeSpace puts it back from its saved packages — about {s} s after the server starts.', { s: plan.replaySeconds || 1 }), 'app-plan-replay');
   } else if (k === 'source' && plan.sourceSpec) {
     line(t('Address: {uri}', { uri: plan.sourceSpec.uris.join(' ') }), 'app-plan-mono');
     line(t('Suites: {suites}', { suites: [...plan.sourceSpec.suites, ...(plan.sourceSpec.components || [])].join(' ') }), 'app-plan-mono');
@@ -166,6 +176,19 @@ export function appsBannerModel(st) {
   return { text: t('The last install was interrupted'), label: t('Repair'), request: { kind: 'repair' } };
 }
 
+/** Layer 1 (design §3.2): the app system's own rows in the section — Set up… (the pod may keep one, none yet), the
+ *  previous app system after a Migrate (Roll back… / Delete…), a blocked one (another architecture). PURE. */
+export function appSystemRows(st) {
+  const a = st && st.appSystem;
+  if (!a || !a.enabled) return [];
+  const out = [];
+  if (a.canCreate) out.push({ text: t('Keep the apps you install in an app system on this machine’s disk — after a rebuild they are simply there.'), buttons: [{ label: t('Set up…'), request: { kind: 'sys-create' }, primary: true }] });
+  if (a.blocked === 'arch') out.push({ text: t('Your app system was made for another kind of processor — its apps cannot run here until you migrate it.'), buttons: [] });
+  else if (a.created && a.blocked && a.blocked !== 'not-enabled') out.push({ text: t('Your app system cannot be used right now ({why}).', { why: a.blocked }), buttons: [] });
+  if (a.canRollback) out.push({ text: t('The previous app system is kept.'), buttons: [{ label: t('Roll back…'), request: { kind: 'rollback' } }, { label: t('Delete…'), request: { kind: 'sys-drop-prev' } }] });
+  return out;
+}
+
 /** "N updates · last refreshed N days ago" (D5) — never an automatic upgrade. */
 export function updatesChipText(st, now = Date.now()) {
   const n = st && st.updates && Number.isFinite(st.updates.count) ? st.updates.count : null;
@@ -190,6 +213,7 @@ export function renderAppsSection(app, root, { host = 'local', machine = null, o
   const refreshBtn = btn(t('Check for updates…'), 'file-tool-btn app-sec-refresh', t('Shows the plan first — nothing runs until you confirm'));
   refreshBtn.onclick = () => showInstallDialog(m, { what: 'app', request: { kind: 'refresh' }, onDone: done });
   const rebaseRow = el('div', 'app-sec-row app-sec-rebase');
+  const sysRow = el('div', 'app-sec-sys'); // Layer 1: Set up the app system… / Roll back… / Delete the previous one…
   foot.append(chip, refreshBtn);
   const actions = el('div', 'app-sec-actions');
   const bInstall = btn(t('Install an app…'), 'btn-create app-sec-install');
@@ -207,7 +231,7 @@ export function renderAppsSection(app, root, { host = 'local', machine = null, o
   const props = el('div', 'app-sec-proposals');
   const drift = el('div', 'app-sec-drift');
   const list = el('div', 'app-sec-list');
-  root.replaceChildren(actions, status, back, props, drift, list, rebaseRow, foot);
+  root.replaceChildren(actions, status, sysRow, back, props, drift, list, rebaseRow, foot);
   const render = (st) => {
     if (!alive || !root.isConnected) return;
     try { onState?.(st && !st.error ? st : null); } catch { } // design 009 §C: the dialog's banner reads the same state
@@ -229,6 +253,13 @@ export function renderAppsSection(app, root, { host = 'local', machine = null, o
       const go = btn(sm.rebase.label, 'file-tool-btn app-sec-rebase-go', t('Shows the plan first — nothing runs until you confirm'));
       go.onclick = () => showInstallDialog(m, { what: 'app', request: sm.rebase.request, onDone: done });
       rebaseRow.append(el('span', 'app-sec-label', sm.rebase.text), go);
+    }
+    sysRow.replaceChildren();
+    for (const m0 of appSystemRows(st)) {
+      const row = el('div', 'app-sec-row app-sec-sys-row');
+      row.appendChild(el('span', 'app-sec-label', m0.text));
+      for (const b of m0.buttons) { const go = btn(b.label, b.primary ? 'btn-create app-sec-sys-go' : 'file-tool-btn app-sec-sys-go', t('Shows the plan first — nothing runs until you confirm')); go.onclick = () => showInstallDialog(m, { what: 'app', request: b.request, onDone: done }); row.appendChild(go); }
+      sysRow.appendChild(row);
     }
     status.textContent = st.replaying ? t('Putting your apps back after this machine was rebuilt…') : st.manifestError ? t('The apps list on this machine could not be read: {why}', { why: st.manifestError }) : '';
     // verify-r1 F4: entries root keeps that are not installed here (a replay that could not put them back, a paired machine
@@ -280,7 +311,7 @@ export function renderAppsSection(app, root, { host = 'local', machine = null, o
       row.dataset.entry = e.id;
       const rows = (st.rows || []).filter((r) => r.app === e.id);
       row.appendChild(el('span', 'app-sec-label', rows.length ? rows.map((r) => r.label).join(', ') : (e.label || e.packages.join(' '))));
-      row.appendChild(el('span', 'app-sec-sub', [e.packages.join(' '), e.kind === 'deb' ? t('from a .deb file') : '', e.by && e.by.kind === 'agent' ? t('proposed by {name}', { name: e.by.name || t('an agent') }) : ''].filter(Boolean).join(' · ')));
+      row.appendChild(el('span', 'app-sec-sub', [e.packages.join(' '), e.layer === 'sys' ? t('in the app system') : '', e.kind === 'deb' ? t('from a .deb file') : '', e.by && e.by.kind === 'agent' ? t('proposed by {name}', { name: e.by.name || t('an agent') }) : ''].filter(Boolean).join(' · ')));
       const unsaved = unsavedText(((st.entries || []).find((x) => x.id === e.id) || {}).uncached);
       if (unsaved) row.appendChild(el('span', 'app-sec-sub app-plan-warn app-sec-unsaved', unsaved));
       const rm = btn(t('Remove…'), 'file-tool-btn app-sec-remove');

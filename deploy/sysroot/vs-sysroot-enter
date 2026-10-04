@@ -1,25 +1,48 @@
-#!/bin/bash
+#!/bin/bash -p
 # vs-sysroot-enter — enter the user's persistent APP SYSTEM (a same-release minbase userland on the
 # home PVC) in a private mount namespace and exec a command in it.
 #
-# Reference implementation of docs/design-app-persistence.zh.md §3.2 (Layer 1), the one that passed the
-# §5 probes P2/P3/P5/P6/P7/P8 on a test pod (2026-09-27). Installed root-owned at every boot by the server
-# (or by hand for a probe) together with a sudoers drop-in:
-#   Defaults!<this path> !use_pty, !pam_session, !pam_setcred, env_keep += "DISPLAY XAUTHORITY VIBESPACE_DESKTOP_APP LANG TZ"
+# docs/design-app-persistence.zh.md §3.2 (Layer 1) — grown from the reference implementation that passed the §5
+# probes P2/P3/P5/P6/P7/P8 on a test pod (2026-09-27). Installed root-owned at /usr/local/libexec/vibespace/ by the
+# server after listen (only when VIBESPACE_APP_SYSTEM is set — src/app-system-serve.js) together with the sudoers
+# drop-in deploy/sysroot/vibespace-sysroot.sudoers (= src/app-system.js SUDOERS_TEXT, `visudo -cf` first, 0440):
+#   Defaults!<this path> !use_pty, !pam_session, !pam_setcred, env_keep += "DISPLAY XAUTHORITY VIBESPACE_DESKTOP_APP LANG LANGUAGE LC_ALL TZ TERM COLORTERM"
+#   #<uid> ALL=(root) NOPASSWD:NOSETENV: <this path>   (the server user's uid; NOSETENV: no variable from the sudo command line
+#   beyond env_keep — the user's `ALL` rule would imply SETENV; the file sorts after every user-named drop-in)
 # The drop-in grants nothing new (the pod user is already NOPASSWD: ALL); it makes sudo EXEC this helper on
 # the caller's pid (no monitor fork) and keeps the X environment. Every later hop is an exec on the same pid:
 #   shim (setsid) → sudo → this helper → unshare → this helper (stage 2) → chroot → env → sh → the app
 # so a keeper that recorded the shim's pid holds the app itself (handle, starttime, group kill, marker, PSS).
 #
-# Usage:  sudo -n vs-sysroot-enter [--cwd DIR] -- CMD [ARGS...]     # as the user (shims)
-#         sudo -n vs-sysroot-enter --root -- CMD [ARGS...]          # as root inside (apt/dpkg; the server only)
+# Usage:  sudo -n vs-sysroot-enter [--cwd DIR] -- CMD [ARGS...]           # as the user (shims)
+#         sudo -n vs-sysroot-enter --root [--next] -- CMD [ARGS...]       # as root inside: apt-get/apt-cache/apt-mark/
+#                                                                         # dpkg/dpkg-query ONLY (the server's slot);
+#                                                                         # --next = rootfs.next (a Rebase being built)
 #
 # Contract: the invoking user comes from SUDO_UID (never from the environment); the app system lives at
 # <that user's passwd HOME>/.vibespace/sysroot/rootfs and must be root-owned, canonical (no symlink in the
-# path), carry etc/vibespace-sysroot.json, and match this machine's dpkg architecture. The namespace dies with
-# its last process: nothing to unmount, a crash leaves no stale mount.
+# path), carry etc/vibespace-sysroot.json of THIS helper's contract, and match this machine's dpkg architecture.
+# The namespace dies with its last process: nothing to unmount, a crash leaves no stale mount. Every refusal is
+# `vs-sysroot-enter: <why>` on stderr and exit 111 (scripts/test-app-system-enter.mjs names each one).
+# The environment crossing sudo: root code starts from `env -i` + the allowlist (= src/app-system.js ENV_KEEP), whatever
+# sudo passed — a variable set on the sudo command line (LD_*, PATH, IFS, BASH_ENV, a locale…) never reaches the code
+# below. `bash -p` reads no BASH_ENV and imports no function; nothing but builtins runs before the re-exec (same pid);
+# the allowlisted values travel as VS_KEEP_<name> to the app's environment only — root code runs LC_ALL=C on PATH_ROOT.
+IFS=$' \t\n'
+KEEP="DISPLAY XAUTHORITY VIBESPACE_DESKTOP_APP LANG LANGUAGE LC_ALL TZ TERM COLORTERM"
+PATH_ROOT=/usr/sbin:/usr/bin:/sbin:/bin
+dirty=
+for v in $(compgen -e); do case $v in PATH|LC_ALL|SUDO_UID|VS_SYSROOT_ENV|VS_KEEP_*|PWD|OLDPWD|SHLVL|_) ;; *) dirty=1;; esac; done
+if [ -n "$dirty" ] || [ "${VS_SYSROOT_ENV:-}" != clean ] || [ "$PATH" != "$PATH_ROOT" ] || [ "${LC_ALL:-}" != C ]; then
+  [ "${VS_SYSROOT_ENV:-}" != clean ] || { echo "vs-sysroot-enter: the environment is not the allowlist after env -i" >&2; exit 111; }
+  E=(PATH="$PATH_ROOT" LC_ALL=C VS_SYSROOT_ENV=clean SUDO_UID="${SUDO_UID:-}")
+  for k in $KEEP; do [ -n "${!k:-}" ] && E+=("VS_KEEP_$k=${!k}"); done
+  exec /usr/bin/env -i "${E[@]}" /bin/bash -p -- "$0" "$@"
+fi
 set -euo pipefail
 umask 022
+CONTRACT=1   # = src/app-system.js HELPER_CONTRACT (an identity of another contract is refused)
+unset VIBESPACE_SESSION_TOKEN || true   # belt: the env -i allowlist below never carries it anyway
 
 die() { echo "vs-sysroot-enter: $*" >&2; exit 111; }
 
@@ -29,67 +52,105 @@ case "${SUDO_UID:-}" in ''|*[!0-9]*) die "no SUDO_UID — run through sudo";; es
 
 SELF=$(realpath -e -- "$0") || die "cannot resolve own path"
 [ "$(stat -c %u "$SELF")" = 0 ] || die "helper not root-owned: $SELF"
+(( ( 8#$(stat -c %a "$SELF") & 8#022 ) == 0 )) || die "helper writable by others: $SELF"
 
 IFS=: read -r U_NAME _ U_UID U_GID _ U_HOME U_SHELL < <(getent passwd "$SUDO_UID") || die "uid $SUDO_UID has no passwd entry"
 [ "$U_UID" = "$SUDO_UID" ] || die "passwd lookup mismatch"
 G_LINE=$(getent group "$U_GID") || die "gid $U_GID has no group entry"
-R="$U_HOME/.vibespace/sysroot/rootfs"
-ID_FILE="$R/etc/vibespace-sysroot.json"
+
+# Every path root touches INSIDE the app system is walked component by component from $R (a link would resolve against
+# the pod's / before the chroot): no component may be a symlink (refused by name), every directory on the way is
+# root's and not writable by group/others (nobody else can swap it afterwards). `inside REL dir` = REL itself is such
+# a directory, missing levels created one at a time (mkdir never follows a link); `inside REL parent` = only the
+# directories above REL (they must exist) — the caller handles REL's last component without following it.
+inside() {   # inside REL dir|parent
+  local p=$R rest=${1#/} c
+  while [ -n "$rest" ]; do
+    c=${rest%%/*}; if [ "$c" = "$rest" ]; then rest=; else rest=${rest#*/}; fi
+    case $c in ''|.|..) die "bad path inside the app system: $1";; esac
+    p=$p/$c
+    if [ -z "$rest" ] && [ "$2" = parent ]; then return 0; fi
+    [ ! -L "$p" ] || die "a symlink inside the app system: $p"
+    if [ -n "$rest" ] || [ "$2" = dir ]; then
+      if [ "$2" = dir ] && [ ! -e "$p" ]; then mkdir -m 0755 -- "$p"; fi
+      [ -d "$p" ] || die "not a directory inside the app system: $p"
+    fi
+    if [ -n "$rest" ]; then
+      [ "$(stat -c %u "$p")" = 0 ] && (( ( 8#$(stat -c %a "$p") & 8#022 ) == 0 )) || die "not root's directory inside the app system: $p"
+    fi
+  done
+}
 
 check_root() {
   [ -d "$R" ] || die "no app system at $R"
   [ "$(realpath -e -- "$R")" = "$R" ] || die "app system path is not canonical (a symlink in $R)"
   [ "$(stat -c %u "$R")" = 0 ] || die "app system root is not root-owned: $R"
   (( ( 8#$(stat -c %a "$R") & 8#002 ) == 0 )) || die "app system root is world-writable: $R"
+  inside /etc/vibespace-sysroot.json parent
   [ -f "$ID_FILE" ] && [ ! -L "$ID_FILE" ] && [ "$(stat -c %u "$ID_FILE")" = 0 ] || die "no root-owned identity file $ID_FILE"
+  grep -q "\"helperContract\":$CONTRACT[,}]" "$ID_FILE" || die "identity of another helper contract (this helper: $CONTRACT) — update VibeSpace or Rebase"
   local want have
   want=$(sed -n 's/.*"arch"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$ID_FILE" | head -1)
   have=$(dpkg --print-architecture)
   [ -n "$want" ] && [ "$want" = "$have" ] || die "architecture mismatch: app system '$want', machine '$have' — Rebase"
 }
 
-MODE=user CWD=""
+MODE=user CWD="" NEXT=""
 if [ "${1:-}" = "--stage2" ]; then STAGE=2; shift; else STAGE=1; fi
 while [ $# -gt 0 ]; do
   case "$1" in
     --root) MODE=root; shift;;
-    --cwd) CWD="${2:-}"; shift 2;;
+    --next) NEXT=1; shift;;
+    --cwd) [ $# -ge 2 ] || die "--cwd needs a directory"; CWD="$2"; shift 2;;
     --) shift; break;;
-    *) die "unknown option $1 (usage: [--root] [--cwd DIR] -- CMD ARGS...)";;
+    *) die "unknown option $1 (usage: [--root [--next]] [--cwd DIR] -- CMD ARGS...)";;
   esac
 done
 [ $# -gt 0 ] || die "no command"
+case "$CWD" in ''|/*) ;; *) die "--cwd must be an absolute path";; esac
+if [ -n "$NEXT" ] && [ "$MODE" != root ]; then die "--next is for --root only (a Rebase being built)"; fi
+if [ "$MODE" = root ]; then
+  [ -z "$CWD" ] || die "--cwd is for the user mode only"
+  # --root runs apt/dpkg ONLY (= src/app-system.js ROOT_COMMANDS) — the server's package slot, never a shim
+  case "$1" in apt-get|apt-cache|apt-mark|dpkg|dpkg-query|/usr/bin/apt-get|/usr/bin/apt-cache|/usr/bin/apt-mark|/usr/bin/dpkg|/usr/bin/dpkg-query) ;;
+    *) die "--root runs apt-get / apt-cache / apt-mark / dpkg / dpkg-query only, not $1";; esac
+fi
+R="$U_HOME/.vibespace/sysroot/rootfs${NEXT:+.next}"
+ID_FILE="$R/etc/vibespace-sysroot.json"
 
 check_root
 
 if [ "$STAGE" = 1 ]; then
   # same pid: unshare execs this helper again inside a fresh, private mount namespace
-  if [ "$MODE" = root ]; then set -- --root -- "$@"; else set -- --cwd "$CWD" -- "$@"; fi
+  if [ "$MODE" = root ]; then set -- --root ${NEXT:+--next} -- "$@"; else set -- --cwd "$CWD" -- "$@"; fi
   exec unshare --mount --propagation private -- "$SELF" --stage2 "$@"
 fi
 
 # stage 2: refuse to bind anything in the pod's own namespace (a direct --stage2 call would leak mounts)
 [ "$(readlink /proc/self/ns/mnt)" != "$(readlink /proc/1/ns/mnt)" ] || die "stage 2 outside a private mount namespace"
 
-no_symlink() { [ ! -L "$1" ] || die "bind target is a symlink: $1"; }
-bind_dir() {   # bind_dir SRC DST [ro]
+bind_dir() {   # bind_dir SRC DST [ro] — DST checked (and created) level by level inside the app system
   local src=$1 dst=$R$2
   [ -d "$src" ] || return 0
-  no_symlink "$dst"; [ -d "$dst" ] || mkdir -p "$dst"
+  inside "$2" dir
   mount --rbind "$src" "$dst"
   if [ "${3:-}" = ro ]; then mount -o remount,bind,ro "$dst"; fi
 }
 bind_file_ro() {   # a regular-file target is created once; a symlink target (e.g. etc/localtime) is replaced
   local src=$1 dst=$R$1
   [ -e "$src" ] || return 0
+  inside "$1" parent
   if [ -L "$dst" ]; then rm -f "$dst"; fi
   [ -e "$dst" ] || : > "$dst"
+  [ -f "$dst" ] || die "bind target is not a regular file: $dst"
   mount --bind "$src" "$dst"
   mount -o remount,bind,ro "$dst"
 }
 
-# one writer at a time for the persistent edits (target creation, passwd/group upsert)
-exec 9>"$R/etc/.vibespace-sysroot.lock"
+# one writer at a time for the persistent edits (target creation, passwd/group upsert): the lock is the app system's
+# own etc DIRECTORY (opened read-only, checked first) — no lock file is created or truncated through a planted link
+inside /etc/passwd parent
+exec 9<"$R/etc"
 flock 9
 
 bind_dir /proc /proc
@@ -106,6 +167,7 @@ if [ "$MODE" = user ]; then
   P_LINE="$U_NAME:x:$U_UID:$U_GID::$U_HOME:$([ -x "$R$U_SHELL" ] && echo "$U_SHELL" || echo /bin/sh)"
   upsert() {   # upsert FILE LINE NAME ID-FIELD-INDEX
     local file=$1 line=$2 name=$3 idx=$4 tmp
+    [ -f "$file" ] && [ ! -L "$file" ] || die "not a regular file: $file"   # never read or replaced through a link
     grep -qxF -- "$line" "$file" && return 0
     tmp=$(mktemp "$file.vs.XXXXXX")
     awk -F: -v n="$name" -v id="$(echo "$line" | cut -d: -f"$idx")" -v i="$idx" '$1!=n && $i!=id' "$file" > "$tmp"
@@ -118,17 +180,17 @@ fi
 flock -u 9; exec 9>&-
 
 SYS_PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-if [ "$MODE" = root ]; then
+if [ "$MODE" = root ]; then   # root code: a fixed environment (no allowlisted value reaches apt / dpkg)
   exec chroot "$R" /usr/bin/env -i PATH="$SYS_PATH" HOME=/root USER=root LOGNAME=root \
-    DEBIAN_FRONTEND=noninteractive LANG="${LANG:-C.UTF-8}" TERM="${TERM:-dumb}" "$@"
+    DEBIAN_FRONTEND=noninteractive LANG=C.UTF-8 TERM=dumb "$@"
 fi
 
 # the environment is an ALLOWLIST: nothing else crosses (never VIBESPACE_SESSION_TOKEN, never the host PATH)
 ENVV=(PATH="$SYS_PATH" HOME="$U_HOME" USER="$U_NAME" LOGNAME="$U_NAME" SHELL="$U_SHELL")
-for k in DISPLAY XAUTHORITY VIBESPACE_DESKTOP_APP LANG LANGUAGE LC_ALL TZ TERM COLORTERM; do
-  [ -n "${!k:-}" ] && ENVV+=("$k=${!k}")
+for k in $KEEP; do
+  v=VS_KEEP_$k; [ -n "${!v:-}" ] && ENVV+=("$k=${!v}")
 done
-if [ -n "${DISPLAY:-}" ]; then ENVV+=(GDK_BACKEND=x11 QT_QPA_PLATFORM=xcb); fi
+if [ -n "${VS_KEEP_DISPLAY:-}" ]; then ENVV+=(GDK_BACKEND=x11 QT_QPA_PLATFORM=xcb); fi
 [ -d "/run/user/$U_UID" ] && ENVV+=(XDG_RUNTIME_DIR="/run/user/$U_UID")
 
 exec chroot --userspec="$U_UID:$U_GID" "$R" /usr/bin/env -i "${ENVV[@]}" \

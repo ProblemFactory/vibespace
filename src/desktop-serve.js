@@ -414,6 +414,8 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     // absent ⇒ greyed with its code (the hub's apps engine words it: restoring… after a rebuild, or why not)
     const appRows = (apps && typeof apps.catalogRows === 'function' ? apps.catalogRows() : []).filter((r) => !registryRows.some((x) => x.id === r.id)).map((row) => {
       const p = row.exec.includes('/') ? (fs.existsSync(row.exec) ? row.exec : null) : binOf(row.exec);
+      // Layer 1: an app-system row is greyed while its app system cannot run here (not enabled, another architecture, no helper…)
+      if (row.blocked) return { ...row, args: [...row.args], available: false, path: p, reason: row.blocked === 'shim-not-ours' ? `${row.label}: its launcher in ~/.vibespace/sysroot/bin is not VibeSpace's — it is not run` : `${row.label} lives in the app system, which cannot run here (${row.blocked})`, reasonCode: 'app-system' };
       return { ...row, args: [...row.args], available: !!p, path: p, reason: p ? null : `${row.label} is not installed on this machine (yet)`, reasonCode: p ? null : 'app-missing' };
     });
     return registryRows.map((row) => {
@@ -585,6 +587,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     if (row.needsWayland) throw namedError('needs-wayland', `${row.label} needs a Wayland compositor and cannot run on a private X display`);
     if (row.browser && !row.path) throw namedError('browser-absent', row.reason || `${row.label} is not installed`); // the catalog's own verdict (browserRowFor), never a guessed binary
     if (row.office && !row.available) { const e = namedError(row.reasonCode || 'app-absent', row.reason || `${row.label} is not installed`); if (row.remedy) e.remedy = row.remedy; throw e; } // §7.9: the catalog's own verdict (officeRowFor) — the binary AND the module
+    if (row.layer === 'sys' && !row.available) throw namedError(row.reasonCode || 'app-system', row.reason || `${row.label} cannot run from the app system here`); // Layer 1: a blocked app-system row (its launcher not VibeSpace's, no helper…) never launches
     const execPath = resolveExec(row.exec);
     const cwd = resolveCwd(row.cwd);
     const id = opts.id || newId(); // a relaunch mints the successor's id first (the old record names it before it stops)

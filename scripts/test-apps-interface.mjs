@@ -136,7 +136,7 @@ console.log('§8 Layer 1\'s three places (words + slots)');
   const rb = M({ ...e(2), appSystem: { rebase: true } });
   ok(rb.rebase && rb.rebase.text === 'The system was upgraded; your apps still run in their original environment' && rb.rebase.label === 'Migrate…' && same(rb.rebase.request, { kind: 'rebase' }), 'after a base change: one more line + [Migrate…] (Rebase)');
   ok(Am.appsBannerModel(null) === null && Am.appsBannerModel({ appSystem: {} }) === null && same(Am.appsBannerModel({ appSystem: { interrupted: true } }), { text: 'The last install was interrupted', label: 'Repair', request: { kind: 'repair' } }), 'the banner: "The last install was interrupted — [Repair]", only when the state says so');
-  ok(/root\.replaceChildren\(actions, status, back, props, drift, list, rebaseRow, foot\);/.test(aid) && /try \{ onState\?\.\(st && !st\.error \? st : null\); \} catch \{ \}/.test(aid) && /onState: renderBanner/.test(lau), 'WIRING: the status line is the section\'s FOOT; the dialog\'s banner reads the same state');
+  ok(/root\.replaceChildren\(actions, status, sysRow, back, props, drift, list, rebaseRow, foot\);/.test(aid) && /try \{ onState\?\.\(st && !st\.error \? st : null\); \} catch \{ \}/.test(aid) && /onState: renderBanner/.test(lau), 'WIRING: the status line is the section\'s FOOT; the dialog\'s banner reads the same state');
   ok(zh['The last install was interrupted'] === '上次安装被中断' && zh['Repair'] === '修复' && zh['{n} apps'] === '{n} 个应用' && zh['apps::{n} updates'] === '{n} 个更新' && zh['The system was upgraded; your apps still run in their original environment'] === '系统已升级；你的应用仍在原来的环境里正常运行', 'zh: 上次安装被中断 — [修复] · 5 个应用 · 3 个更新');
 }
 

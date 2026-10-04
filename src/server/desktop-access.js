@@ -45,6 +45,7 @@ const { spawn } = require('child_process');
 const crypto = require('crypto');
 const S = require('../desktop-serve.js');
 const M = require('../desktop-apps.js');
+const SYS = require('../app-system.js'); // Layer 1: a sys plan's digest binds what it runs (sysDigestPart)
 const D = require('../desktop-display.js'); // design 014 D1: the PURE RFB greeting read of the vnc-native rung
 
 let installed = null;
@@ -229,9 +230,13 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
    *  as root) is refused `plan_changed` with the new plan, nothing run. null for a refused plan. */
   function planDigest(plan) {
     if (!plan || !plan.ok) return null;
+    // the app system (Layer 1): a sys plan also binds its RUN (SYS_SCRIPT's argv, the nonce aside) and its layer — a host
+    // plan never stands in for a sys plan; a plan whose layer and argv disagree has no digest and never runs
+    const sys = SYS.sysDigestPart(plan);
+    if (!sys) return null;
     // an app plan also binds its CLOSURE (every package + version apt would install — `closureKey`): the same commands
     // over a moved archive are another plan; an xpra / LibreOffice plan carries none, so its digest is unchanged
-    return crypto.createHash('sha256').update(JSON.stringify({ commands: plan.commands || [], source: plan.source || null, packages: plan.packages || [], ...(plan.closureKey != null ? { closure: String(plan.closureKey) } : {}) })).digest('hex').slice(0, 32);
+    return crypto.createHash('sha256').update(JSON.stringify({ commands: plan.commands || [], source: plan.source || null, packages: plan.packages || [], ...(plan.closureKey != null ? { closure: String(plan.closureKey) } : {}), ...sys })).digest('hex').slice(0, 32);
   }
   const machineKey = (hostId) => (isLocal(hostId) ? 'local' : String(hostId));
   const machineName = (hostId) => (isLocal(hostId) ? 'this machine' : String(hostId));
@@ -343,6 +348,7 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
         if (!plan.canRun) { const e = named('no_sudo', plan.error); e.plan = plan; throw e; }
         // verify-r6 I1: the plan that runs is the plan that was SHOWN (a caller that names none — an older client, the
         // API — keeps the pre-r6 behaviour)
+        if (planDigest(plan) == null) { const e = named('refused', 'this plan does not run what it shows (an app-system plan runs its own script, nothing else) — nothing ran'); e.plan = plan; throw e; }
         if (expectDigest != null && planDigest(plan) !== String(expectDigest)) { const e = named('plan_changed', `what would run on ${machineName(hostId)} changed after it was shown (${plan.source}: ${(plan.packages || []).join(' ')}) — nothing ran; read the new commands, then press Install again`); e.plan = plan; e.digest = planDigest(plan); throw e; }
         log.log?.(`[desktop] installing ${plan.label || 'xpra'} on ${hostId || 'this machine'} from ${plan.source} (${(plan.packages || []).join(' ')}), detached`);
       } else {

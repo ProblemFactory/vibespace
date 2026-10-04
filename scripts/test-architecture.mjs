@@ -3223,7 +3223,9 @@ console.log('§69 every root package run goes through the machine\'s ONE package
   ok(Object.keys(files).length > 150 && c.argvBuilders.length >= 2, `§69 census scope: the server tree (${Object.keys(files).length} files)`);
   const undeclared = c.pkgLines.filter((x) => !DECLARED[x.split(':')[0]]);
   ok(undeclared.length === 0 && c.pkgLines.some((x) => x.startsWith('src/hosts.js:')), `§69a a package manager under \`sudo -n\` only in a declared row (${c.pkgLines.join(' ')})${undeclared.length ? ' — UNDECLARED: ' + undeclared.join(' ') : ''}`);
-  ok(JSON.stringify(c.argvBuilders) === JSON.stringify(['src/app-manifest.js', 'src/desktop-apps.js']), `§69b the root-script argv ['sudo', '-n', …] is built only by the two plan builders (${c.argvBuilders.join(' ')})`);
+  // app-system-l1 (2.369.210): src/app-system.js is the THIRD plan builder — the app system's SYS_SCRIPT / INSTALL_SCRIPT
+  // (design §3.2), run through the same package slot (sysArgv) and the boot install (installArgv, app-system-serve.js)
+  ok(JSON.stringify(c.argvBuilders) === JSON.stringify(['src/app-manifest.js', 'src/app-system.js', 'src/desktop-apps.js']), `§69b the root-script argv ['sudo', '-n', …] is built only by the three plan builders (${c.argvBuilders.join(' ')})`);
   ok(JSON.stringify(c.consumers.installArgv) === JSON.stringify(['src/server/desktop-access.js']) && JSON.stringify(c.consumers.planArgv) === JSON.stringify(['src/server/desktop-access.js']) && JSON.stringify(c.consumers.launcher) === JSON.stringify(['src/server/desktop-access.js']) && JSON.stringify(c.consumers.appArgv) === JSON.stringify(['src/app-serve.js']),
     `§69c their argv reaches a machine only through the slot (installArgv / plan.argv / installLauncherArgv in desktop-access.js; appArgv in the machine half): ${JSON.stringify(c.consumers)}`);
   ok(c.directSudo.length === 0, `§69d no direct sudo exec of a package manager or a shell${c.directSudo.length ? ' — ' + c.directSudo.join(' ') : ''}`);

@@ -1,4 +1,5 @@
 import { track } from './telemetry-client.js';
+import { bootJson } from './boot-splash.js';
 import { cssVarDefault, showToast } from './utils.js';
 import { t } from './i18n.js';
 import { isTransientWindowType } from './window-types.js';
@@ -1075,14 +1076,12 @@ class LayoutManager {
     let activeSessions = [];
     let allSessions = [];
     try {
-      const res = await fetch('/api/active');
-      const data = await res.json();
+      const data = await this._bootJson('/api/active');
       activeSessions = data.sessions || [];
     } catch {}
     // Also fetch all sessions (including stopped) for view-only fallback
     try {
-      const res = await fetch('/api/sessions');
-      const data = await res.json();
+      const data = await this._bootJson('/api/sessions');
       allSessions = data.sessions || data || [];
     } catch {}
 
@@ -1392,13 +1391,18 @@ class LayoutManager {
   }
 
   // Load auto-saved state on startup
+  /** A first-paint request (B-0ece): at boot it rides the splash's retry ladder (boot-splash.js) — never an
+   *  unbounded wait; afterwards (a desktop switch's restoreState) the plain fetch. */
+  _bootJson(url) {
+    return this._booting ? bootJson(url) : fetch(url).then((r) => r.json());
+  }
+
   async loadAutoSave() {
     this._restoring = true;
     this._booting = true;
     this._bootStoppedSessions = []; // arm the resume-all collector (see restoreState)
     try {
-      const res = await fetch('/api/layouts');
-      const data = await res.json();
+      const data = await this._bootJson('/api/layouts');
       this._savedPresets = data.saved || {};
       this._currentName = data.current || null;
 
@@ -1423,8 +1427,8 @@ class LayoutManager {
         try {
           if (this._bootStoppedSessions) {
             const [act, all] = await Promise.all([
-              fetch('/api/active').then((r) => r.json()).catch(() => ({})),
-              fetch('/api/sessions').then((r) => r.json()).catch(() => ({})),
+              this._bootJson('/api/active').catch(() => ({})),
+              this._bootJson('/api/sessions').catch(() => ({})),
             ]);
             const activeId = this.app.desktopManager.activeDesktopId;
             const found = scanStoppedInDesktopStates(data, activeId, act.sessions || [],

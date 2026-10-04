@@ -11,6 +11,12 @@
  */
 function install({ app, access, userTodos = null, deliver = null, activeSessions = () => new Map(), sessionStatusKey = null, broadcast = () => { }, dataDir, log = console, throwawayRoot = false, env = process.env }) {
   let acc = access;
+  // Layer 1 (design §3.2): the app system's launchers sit at the END of PATH (an image binary of the same name wins; a
+  // catalog row names its shim by absolute path) — only where the chart enables the app system
+  if (env.VIBESPACE_APP_SYSTEM && env === process.env) {
+    const shims = require('path').join(require('os').homedir(), '.vibespace', 'sysroot', 'bin');
+    if (!String(env.PATH || '').split(':').includes(shims)) env.PATH = `${env.PATH || '/usr/bin:/bin'}:${shims}`;
+  }
   const stub = env.VIBESPACE_APPS_STUB;
   if (stub) {
     if (!throwawayRoot) log.warn?.(`[apps] VIBESPACE_APPS_STUB is ignored — only a throwaway server (a checkout under the system temp dir) may run the apps stub`);

@@ -1911,8 +1911,9 @@ server.on('upgrade', (req, socket, head) => {
 });
 
 // ── Ops routes (src/server/ops-routes.js, decomposition #11): version/update/maintenance ──
+const bootPhase = require('./src/server/boot-phase.js').create({ sessionsCount: () => activeSessions.size, record: (ev) => telemetry.record(ev), testHoldMs: Number(process.env.VIBESPACE_TEST_BOOT_HOLD_MS) || 0 }), bootRestored = bootPhase.step('restore'), bootSessionsIndexed = bootPhase.step('sessions-index'); // B-0ece (src/server/boot-phase.js): `booting` → `ready` once the steps the first page needs are done
 const { versionInfo, maintState,
-} = require('./src/server/ops-routes.js').create({ app, rootDir: __dirname, wss, WS_OPEN });
+} = require('./src/server/ops-routes.js').create({ app, rootDir: __dirname, wss, WS_OPEN, bootPhase });
 // ── Prometheus /metrics exporter (opt-in, generic): a SEPARATE listener on
 // VIBESPACE_METRICS_PORT, meant for in-cluster scrapes via pod annotations —
 // it is never routed through the app ingress/auth, so keep the port un-exposed
@@ -1994,6 +1995,7 @@ server.listen(PORT, HOST, () => {
   setInterval(() => { try { const rep = repairIdentityAnchors('hourly'); if (rep && rep.changed) usage.reloadRateLimitCache?.(); } catch (e) { console.warn('[usage] hourly identity repair failed:', e.message); } }, 3600e3).unref();
   migrateLegacyHomeProjects();
   restoreSessions(); bootBrowserKeeper(); bootWindowLeases(); hooksLate.ready(); // hooksLate.ready() (lane hooks-create): the live-session set is final — a hook file the boot registration created is told to the sessions just restored. agent browser P1 (§3.5) + P9b window leases (the same rule: after the live-session set is final): leases reconciled + browsers adopted only AFTER the live-key set is final (async, logged, never blocks the boot — mounts-plugins-wiring)
+  bootRestored(); require('./src/routes/sessions').warmSessions().catch((e) => console.warn('[boot] first sessions sweep failed:', e.message)).finally(bootSessionsIndexed); bootPhase.arm(); // B-0ece: pages reload onto `ready`, not onto `listening`
   try { fdGauge.bootLine({ sessions: [...activeSessions.values()].filter((x) => x.socketPath).length }); fdGauge.start(); } catch (e) { console.warn('[fd] gauge failed to start:', e.message); } // lane-dead-bridge: the limit node REALLY runs at + the estimate; refuses nothing
   setTimeout(() => { try { bridgeWatch.bootSweep(); bridgeWatch.start(); } catch (e) { console.warn('[bridge] boot sweep failed:', e.message); } }, 1500); // AFTER the restore's attaches connected: end a dead server's orphaned attach clients, then watch (lane-dead-bridge)
   // Plan C boot reconciliation: a per-session pool link whose session did not

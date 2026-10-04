@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const { execFileSync, spawn } = require('child_process');
 
-function create({ app, rootDir, wss, WS_OPEN }) {
+function create({ app, rootDir, wss, WS_OPEN, bootPhase = null }) {
 // ── Version / update visibility (⚙ menu shows current + latest at the Update entry) ──
 // Latest = the canonical repo's master package.json — fetched LAZILY on
 // request only (never a background timer), cached 6h, best-effort: offline
@@ -194,7 +194,13 @@ app.get('/api/version', async (req, res) => {
     const r = await canonicalFile('package.json', 5000);
     if (r.ok) { try { versionInfo.latest = JSON.parse(r.text).version || null; } catch {} }
   }
-  res.json({ version: require(require('path').join(rootDir, 'package.json')).version, commit: versionInfo.commit || null, latest: versionInfo.latest });
+  res.json({ version: require(require('path').join(rootDir, 'package.json')).version, commit: versionInfo.commit || null, latest: versionInfo.latest, phase: bootPhase ? bootPhase.snapshot().phase : 'ready' });
+});
+// The boot phase (B-0ece): cheap, no network — the boot splash, the update dialog and the stale-tab reload poll it
+// and reload / restore only on `ready`. An older server has no route (404) = ready, the pre-phase rule.
+app.get('/api/boot', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({ version: require(require('path').join(rootDir, 'package.json')).version, ...(bootPhase ? bootPhase.snapshot() : { phase: 'ready', waitingOn: [], stuck: [], sessions: 0 }) });
 });
 
 // Changelog diff for the update-confirm dialog (user directive: clicking

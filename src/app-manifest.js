@@ -174,7 +174,7 @@ function normLabels(l) {
   return Object.keys(out).length ? out : null;
 }
 function normRow(r) {
-  if (!isObj(r) || typeof r.id !== 'string' || !r.id.startsWith(APP_ID_PREFIX)) return null;
+  if (!isObj(r) || typeof r.id !== 'string' || !(r.id.startsWith(APP_ID_PREFIX) || r.id.startsWith('sys.'))) return null; // `sys.` = a row of the app system (Layer 1, src/app-system.js ROW_PREFIX)
   const out = { id: r.id.slice(0, 64), label: str(r.label, 80) || r.id, exec: str(r.exec, 512) || '', args: Array.isArray(r.args) ? r.args.filter((a) => typeof a === 'string').slice(0, 64) : [] };
   for (const k of ['icon', 'desktop', 'category', 'package']) if (typeof r[k] === 'string' && r[k]) out[k] = r[k].slice(0, 512);
   const labels = normLabels(r.labels);
@@ -193,6 +193,7 @@ function normEntry(e) {
     rows: (Array.isArray(e.rows) ? e.rows : []).map(normRow).filter(Boolean).slice(0, 16), services: (Array.isArray(e.services) ? e.services : []).filter((u) => typeof u === 'string' && /^[A-Za-z0-9@._-]{1,120}\.service$/.test(u)).slice(0, 16) };
   if (typeof e.why === 'string' && e.why) out.why = e.why.slice(0, 500);
   if (typeof e.label === 'string' && e.label) out.label = e.label.slice(0, 80);
+  if (e.layer === 'sys' && (e.kind === 'apt' || e.kind === 'deb')) out.layer = 'sys'; // installed INTO the app system (Layer 1) — nothing to replay
   if (e.kind === 'deb') {
     const d = e.deb;
     if (!isObj(d) || !SHA256_RE.test(String(d.sha256 || '')) || !PKG_RE.test(String(d.package || ''))) return { ok: false, error: `entry ${e.id}: a deb entry carries {package, sha256, name}` };

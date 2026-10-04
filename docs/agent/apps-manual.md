@@ -1,5 +1,7 @@
 # vibespace-app — apps that survive a rebuilt machine
 
+A machine can have TWO userspaces: the image's own (rebuilt with the pod — `sudo apt` in a terminal lands there and is lost) and, on a pod with an app system, the app system (a persistent userland on the home disk — what VibeSpace installs into; its apps run through `~/.vibespace/sysroot/bin/<name>` and show as `sys.<entry>` rows). You never pick one: `vibespace-app install` proposes, the user approves, VibeSpace installs where it lasts. An IDE inside the app system sees the app system's tools, not the image's.
+
 ## The user asked for an app → what you do
 
 1. `vibespace-app search <name>` — the machine's package sources, plus VibeSpace's short list of well-known apps (WeChat /

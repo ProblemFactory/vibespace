@@ -1217,6 +1217,9 @@ async function discoverClaudeSessions({ activeSessions, webuiPids = new Set(), d
     }));
     for (const hit of probed) {
       if (!hit) continue;
+      // a live lock that names no cwd (a stub CLI's, another CLI version's) is no session we can place: skipped, never
+      // thrown — one such lock answered EVERY GET /api/sessions 500, and the page's boot ladder gives up there (B-0ece)
+      if (typeof hit.data.cwd !== 'string' || !hit.data.cwd) continue;
       const projDirName = cwdToProjectDir(hit.data.cwd);
       const claudeSessionId = webuiPidToSessionId.get(hit.data.pid) || null;
       if (!runningByProjDir.has(projDirName)) runningByProjDir.set(projDirName, []);

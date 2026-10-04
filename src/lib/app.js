@@ -1,4 +1,6 @@
 import { ThemeManager, THEMES, BUILTIN_THEMES } from './themes.js';
+import { waitServerReady, reasonOf } from './boot-ladder.js';
+import { awaitBootReady, bootDeps, startingLine, retryLine } from './boot-splash.js';
 import { installPluginClient } from './plugin-client.js';
 import { installKeybindings, registerKeybinding, runCommand } from './contributions.js';
 import { buildGearMenu } from './gear-menu.js';
@@ -494,6 +496,9 @@ class App {
     // Restore layout after WebSocket is connected (needs active sessions)
     this.ready = new Promise(resolve => {
       setTimeout(async () => {
+        // B-0ece: restore only once the server is ready for a page (GET /api/boot) — a page opened mid-boot
+        // says "VibeSpace is starting…" and loads by itself; gave up = the splash shows the reason + Reload
+        if (!await awaitBootReady()) return;
         await this.layoutManager.loadAutoSave();
         resolve();
       }, 1500);
@@ -1172,7 +1177,14 @@ class App {
     if (!r?.success) { setPhase(r?.error || t('Failed'), 'ob-bad'); return; }
     const t0 = Date.now();
     let done = false, wasDown = false, restartSeen = false;
-    const reload = (msg) => { done = true; setPhase(msg, 'ob-ok'); setTimeout(() => location.reload(), 1200); };
+    // B-0ece: the new server LISTENING is not the new server READY — reload only when its boot phase says so
+    // (a page reloaded into a booting fleet server sat on the loading screen); the line counts the sessions back
+    const reload = async (msg) => {
+      done = true;
+      const r = await waitServerReady({ ...bootDeps(), onStatus: (b) => setPhase(startingLine(b)), onRetry: (x) => setPhase(retryLine(x)) });
+      if (!r.ok) { const why = reasonOf(r.fail); setPhase(t('The server did not answer {what} ({reason}) after {n} tries.', { what: r.url, reason: t(why.key, why.params), n: r.tries }), 'ob-bad'); reloadBtn.style.display = ''; return; }
+      setPhase(msg, 'ob-ok'); setTimeout(() => location.reload(), 1200);
+    };
     const tick = async () => {
       if (done || !body.isConnected) return;
       const st = await fetchJson('/api/self-update/status');
@@ -2079,6 +2091,9 @@ class App {
       // "the fix didn't work". sessionStorage is per-tab and survives the
       // reload within it, preserving the anti-loop property where it matters.
       if (sessionStorage.getItem(key)) return;
+      // B-0ece: reload onto a server READY for a page, not one still booting (else the tab sits on the splash)
+      if (!(await waitServerReady({ ...bootDeps() })).ok) return; // gave up — the next reconnect checks again
+      if (sessionStorage.getItem(key)) return; // another reconnect's check won the wait
       sessionStorage.setItem(key, String(Date.now()));
       try { track('event', 'stale-bundle-reload', BUILD_VERSION + ' -> ' + srv); } catch { }
       showToast(t('VibeSpace was updated — reloading this tab…'));

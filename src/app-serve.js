@@ -40,9 +40,11 @@ const { execFile } = require('child_process');
 const A = require('./app-manifest.js');
 const M = require('./desktop-apps.js');
 const SQ = require('./app-squashfs.js');
+const SS = require('./app-system-serve.js'); // Layer 1 (design §3.2): the app system's machine half — its rows, plans, boot step
+const SYS = require('./app-system.js');
 
 const APP_OPS = Object.freeze(['app-status', 'app-plan', 'app-install', 'app-remove', 'app-refresh', 'app-adopt-drift', 'app-fetch', 'app-unstage']);
-const PLAN_KINDS = Object.freeze(['search', 'apt', 'deb', 'appimage', 'source', 'source-remove', 'remove', 'refresh', 'adopt', 'replay']);
+const PLAN_KINDS = Object.freeze(['search', 'apt', 'deb', 'appimage', 'source', 'source-remove', 'remove', 'refresh', 'adopt', 'replay', ...SYS.SYS_KINDS]);
 /** A file VibeSpace staged for a proposal: `<16 hex>.deb` / `.AppImage` / `.icon.png|svg` (a download in flight: `.part`). */
 const STAGED_RE = /^[0-9a-f]{16}\.(?:deb|AppImage|icon\.(?:png|svg))$/;
 const STAGED_ANY_RE = /^[0-9a-f]{16}\.(?:deb|AppImage|part|key|icon\.(?:png|svg))$/;
@@ -205,6 +207,8 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
   let catalog = { rows: [], sig: null, at: 0 };
   let baseMemo = { mtime: null, size: null, list: null, sha: null };
   let listsFlight = null;
+  // Layer 1: the app system (a persistent userland on this disk) — active only where VIBESPACE_APP_SYSTEM is set
+  const sys = SS.create({ home, env, runner, log, now, which, validate: M.validateAppRow });
 
   async function ensureDirs() {
     await fsp.mkdir(appsDir, { recursive: true, mode: 0o700 });
@@ -352,17 +356,20 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
    *  manifest.json; the plan's digest does not carry the id): root's record of exactly these packages keeps its id; an id
    *  the index offers (or the caller asks) is taken only when root holds no record under it or root's record is these
    *  same packages; a new id is free in BOTH. */
-  async function entryIdFor(packages, manifest, { kind = 'apt', asked = null } = {}) {
+  async function entryIdFor(packages, manifest, { kind = 'apt', asked = null, layer = null } = {}) {
     const key = packages.join(' ');
-    const rootE = await rootEntries();
+    // Layer 1: an install INTO the app system keys root's record inside the userland; an id the other layer holds is taken
+    const [hostE, sysE] = [await rootEntries(), await sys.entries()];
+    const rootE = layer === 'sys' ? sysE : hostE;
+    const otherIds = new Set((layer === 'sys' ? hostE : sysE).map((e) => e.id));
     const rootBy = new Map(rootE.map((e) => [e.id, e.packages.join(' ')]));
-    const fits = (id) => A.ENTRY_ID_RE.test(String(id || '')) && (!rootBy.has(id) || rootBy.get(id) === key);
+    const fits = (id) => A.ENTRY_ID_RE.test(String(id || '')) && !otherIds.has(id) && (!rootBy.has(id) || rootBy.get(id) === key);
     const mine = rootE.find((e) => e.packages.join(' ') === key);
     if (mine) return mine.id;
     if (asked && fits(asked)) return asked;
     const idx = manifest.entries.find((e) => (kind === 'deb' ? e.kind === 'deb' && e.deb && e.deb.package === packages[0] : e.kind === 'apt' && e.packages.join(' ') === key) && fits(e.id));
     if (idx) return idx.id;
-    return A.entryIdFor(packages[0], [...rootBy.keys(), ...manifest.entries.map((e) => e.id)]);
+    return A.entryIdFor(packages[0], [...rootBy.keys(), ...otherIds, ...manifest.entries.map((e) => e.id)]);
   }
   /** The package sources root holds (sys/sources/<id>.sources, root-owned) — their names are taken. */
   async function rootSourceIds() {
@@ -398,11 +405,12 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
     const dir = path.join(sysDir, 'entries');
     let sig = '';
     try { const names = (await fsp.readdir(dir)).sort(); for (const n of names) sig += `${n}:${await mtimeOf(path.join(dir, n))};`; } catch { sig = 'none'; }
-    sig += `|m:${await mtimeOf(manifestFile)}`;
+    sig += `|m:${await mtimeOf(manifestFile)}|s:${await sys.signature()}`;
     if (sig === catalog.sig) return catalog.rows;
     const rows = [];
     for (const e of await rootEntries()) rows.push(...await rowsFor(e));
     rows.push(...await homeRows());
+    rows.push(...await sys.catalog()); // Layer 1: `sys.<entry>` rows — each runs its shim (the export table keeps ~/.vibespace/sysroot/bin current)
     catalog = { rows, sig, at: now() };
     return rows;
   }
@@ -421,12 +429,14 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
     return out;
   }
   /** The rows as desktop-serve's registry() last saw them (refreshCatalog keeps them current). */
-  function catalogRows() { return catalog.rows.map((r) => ({ ...r, args: [...r.args] })); }
+  function catalogRows() { return catalog.rows.map((r) => sys.verifyRow({ ...r, args: [...r.args] })); } // Layer 1: a sys row's launcher is re-checked at every read (= at launch)
   /** The icon file a row may show → {file, type} | null: a PNG / SVG under /usr/share/{icons,pixmaps}, a regular file. */
   async function iconFile(rowId) {
     const row = catalog.rows.find((r) => r.id === rowId);
     if (!row || !row.icon) return null;
-    for (const c of A.iconCandidates(row.icon, { appsDir })) {
+    for (const c0 of A.iconCandidates(row.icon, { appsDir })) {
+      const c = row.layer === 'sys' ? (c0.startsWith('/usr/share/') ? await sys.inRoot(sys.rootfs, c0) : null) : c0; // an app-system row's icon lives in its userland (no link on the way)
+      if (!c) continue;
       try { const st = await fsp.stat(c); if (st.isFile() && st.size <= 1024 * 1024) return { file: c, type: c.endsWith('.svg') ? 'image/svg+xml' : 'image/png' }; } catch { /* next */ }
     }
     return null;
@@ -476,11 +486,14 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
       const managed = new Set([...entries.flatMap((e) => e.packages), ...manifest.resolved.debs.map((d) => d.package)]);
       drift = A.driftVerdict({ touchedAt, slotEndedAt: await mtimeOf(marker(A.SLOT_ENDED)), last: lastTxt == null ? null : A.parseDpkgList(lastTxt), now: now0.list || [], managed: [...managed] });
     }
+    const f0 = await facts();
+    const appSystem = await sys.view({ facts: f0, slot: await slotState() }); // Layer 1: the dialog's Set up… / Repair / Migrate… / Roll back… read this
+    const sysE = await sys.entries();
     return {
-      appsDir, manifest, manifestError: error, state, rows, facts: await facts(),
+      appsDir, manifest, manifestError: error, state, rows, facts: f0, appSystem,
       // `uncached`: an entry's own packages with no saved .deb and not in the image's base — the replay can never put them
       // back (an app adopted from a .deb that exists in no archive); the row says so (verify-r1 F6)
-      entries: entries.map((e) => ({ id: e.id, packages: e.packages, rows: rows.filter((r) => r.app === e.id).map((r) => r.id), indexed: manifest.entries.some((m) => m.id === e.id), uncached: e.packages.filter((p) => !cached.has(p) && !baseSet.has(p)) })),
+      entries: entries.map((e) => ({ id: e.id, packages: e.packages, rows: rows.filter((r) => r.app === e.id).map((r) => r.id), indexed: manifest.entries.some((m) => m.id === e.id), uncached: e.packages.filter((p) => !cached.has(p) && !baseSet.has(p)) })).concat(sysE.map((e) => ({ id: e.id, layer: 'sys', packages: e.packages, rows: rows.filter((r) => r.app === e.id).map((r) => r.id), indexed: manifest.entries.some((m) => m.id === e.id), uncached: [] }))),
       replay: { markerAt: replayedAt, decision, missing, baseShaNow: now0.sha, baseShaStored: baseShaStored || null, last: state.replay || null },
       drift, updates: state.updates || null, refreshedAt: state.refreshedAt || null, slot: await slotState(), stateDir,
     };
@@ -509,7 +522,12 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
     const { manifest } = await readManifest();
     const nonce = nonceOf();
     const canRun = !!(f.root || f.sudo);
-    const ret = (pl) => ({ plan: { ...pl, nonce }, facts: f, install });
+    // Layer 1: where the app system is usable, an apt / .deb install goes INTO it (simulated against its own apt state)
+    const sysV = ['apt', 'deb', 'remove', 'refresh', ...SYS.SYS_KINDS].includes(kind) ? await sys.view({ facts: f, slot }) : null;
+    const intoSys = !!(sysV && sysV.usable) && (kind === 'apt' || kind === 'deb');
+    const simOpts = async () => (intoSys ? SYS.simOpts(sys.rootfs) : aptOpts());
+    const ret = (pl) => ({ plan: { ...(intoSys ? sys.retarget(pl, nonce) : pl), nonce }, facts: f, install });
+    if (SYS.SYS_KINDS.includes(kind)) return ret(await sys.sysPlan(kind, { facts: f, nonce, canRun, view: sysV }));
     if (kind === 'search') {
       const words = A.searchWords(p.query);
       if (!words) throw named('bad-request', 'search for plain words (letters, digits, + . -)');
@@ -523,7 +541,7 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
       const packages = (Array.isArray(p.packages) ? p.packages : String(p.packages || '').split(/[\s,]+/)).map(String).filter(Boolean).slice(0, 32);
       const bad = packages.find((x) => !A.PKG_RE.test(x));
       if (!packages.length || bad !== undefined) return ret({ ok: false, code: 'bad_name', error: bad !== undefined ? `${JSON.stringify(String(bad).slice(0, 64))} is not a Debian package name` : 'no package named', kind, packages });
-      const entryId = await entryIdFor(packages, manifest, { kind: 'apt', asked: p.entryId });
+      const entryId = await entryIdFor(packages, manifest, { kind: 'apt', asked: p.entryId, layer: intoSys ? 'sys' : null });
       if (kind === 'adopt') {
         const now0 = await dpkgNow();
         const have = new Set((now0.list || []).map((x) => x.package));
@@ -531,12 +549,12 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
         if (missing.length) return ret({ ok: false, code: 'not_found', error: `${missing.join(', ')} is not installed here — nothing to adopt`, kind, packages });
         return ret({ ok: true, code: canRun ? null : 'no_sudo', error: canRun ? null : 'this machine has no passwordless sudo — run the commands below yourself', canRun, kind, mode: 'adopt', packages, entryId, source: 'apt', closure: [], closureKey: packages.slice().sort().join(' '), commands: A.appCommands({ mode: 'adopt', packages }), argv: A.appArgv({ mode: 'adopt', appsDir, id: entryId, nonce, args: packages, root: f.root }), label: label0(packages) });
       }
-      const opts = await aptOpts();
+      const opts = await simOpts();
       const sim = await runner('apt-get', [...opts, '-s', 'install', ...packages], { env: env() });
       const uris = await runner('apt-get', [...opts, '--print-uris', '-y', 'install', ...packages], { env: env() });
-      const pl = A.parsePlan(both(sim), both(uris), { requested: packages, facts: f, kind: 'apt' });
+      const pl = A.parsePlan(both(sim), both(uris), { requested: packages, facts: intoSys ? { ...f, rootFree: f.homeFree } : f, kind: 'apt' });
       if (!pl.ok) return ret(pl);
-      const recorded = (await rootEntries()).some((e) => e.packages.join(' ') === packages.join(' ')); // root keeps exactly these already (an agent's "nothing to install" proposal is refused by the hub)
+      const recorded = (intoSys ? await sys.entries() : await rootEntries()).some((e) => e.packages.join(' ') === packages.join(' ')); // root keeps exactly these already (an agent's "nothing to install" proposal is refused by the hub)
       return ret({ ...pl, mode: 'install', entryId, recorded, source: 'apt', commands: A.appCommands({ mode: 'install', packages }), argv: A.appArgv({ mode: 'install', appsDir, id: entryId, nonce, args: packages, root: f.root }), label: label0(packages) });
     }
     if (kind === 'deb') {
@@ -561,13 +579,13 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
       for (const l of ctl.stdout.split('\n')) { const m = /^([A-Za-z-]+): (.*)$/.exec(l); if (m) fields[m[1]] = m[2]; }
       if (info.code !== 0 || !A.PKG_RE.test(fields.Package || '')) { await drop(); return ret({ ok: false, code: 'bad_name', error: `${path.basename(file)} is not a Debian package (dpkg-deb cannot read it)`, kind }); }
       const scripts = ['preinst', 'postinst', 'prerm', 'postrm', 'config'].filter((x) => new RegExp(`\\blines\\s+\\*?\\s*${x}\\b`).test(info.stdout)); // dpkg-deb -I's control-archive listing: "<n> bytes, <n> lines  *  postinst  #!/bin/sh"
-      const opts = await aptOpts();
+      const opts = await simOpts();
       const sim = await runner('apt-get', [...opts, '-s', 'install', staged], { env: env() });
       const uris = await runner('apt-get', [...opts, '--print-uris', '-y', 'install', staged], { env: env() });
-      const pl = A.parsePlan(both(sim), both(uris), { requested: [fields.Package], facts: f, kind: 'deb' });
+      const pl = A.parsePlan(both(sim), both(uris), { requested: [fields.Package], facts: intoSys ? { ...f, rootFree: f.homeFree } : f, kind: 'deb' });
       const deb = { package: fields.Package, version: fields.Version || null, arch: fields.Architecture || null, sha256, size: st.size, name: path.basename(file), maintainer: (fields.Maintainer || '').slice(0, 120), scripts };
       if (!pl.ok) { await drop(); return ret({ ...pl, deb }); }
-      const entryId = await entryIdFor([deb.package], manifest, { kind: 'deb' });
+      const entryId = await entryIdFor([deb.package], manifest, { kind: 'deb', layer: intoSys ? 'sys' : null });
       const app = own ? await debApp(staged, deb.package) : null;
       return ret({ ...pl, mode: 'deb', entryId, source: 'local-file', deb, staged, ...(own ? { stagedName: p.staged, app, downloadBytes: (pl.downloadBytes || 0) + (/^'file:/m.test(both(uris)) ? 0 : st.size) /* apps-joint r1 F5: apt lists the local file itself */ } : {}), packages: [deb.package], commands: A.appCommands({ mode: 'deb', deb }), argv: A.appArgv({ mode: 'deb', appsDir, id: entryId, nonce, args: [staged, sha256], root: f.root }), label: (app && app.name) || deb.package });
     }
@@ -609,6 +627,8 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
       return ret({ ok: true, code: canRun ? null : 'no_sudo', error: canRun ? null : 'no passwordless sudo', canRun, kind, mode: 'source-remove', entryId: s.id, source: `source:${s.id}`, packages: [], closure: [], closureKey: `remove ${s.id}`, commands: A.appCommands({ mode: 'source-remove', source: s }), argv: A.appArgv({ mode: 'source-remove', appsDir, id: s.id, nonce, args: [], root: f.root }), label: s.id });
     }
     if (kind === 'remove') {
+      const se = (await sys.entries()).find((x) => x.id === p.entryId); // Layer 1: an entry of the app system is removed from it
+      if (se) { const me = manifest.entries.find((x) => x.id === se.id); return ret(await sys.removePlan(se, { facts: f, nonce, canRun, label: (me && me.label) || null, both })); }
       const entries = await rootEntries();
       const e = entries.find((x) => x.id === p.entryId);
       const homeE = !e && manifest.entries.find((x) => x.id === p.entryId && A.HOME_KINDS.includes(x.kind));
@@ -636,6 +656,11 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
         return ret({ ok: true, code: canRun ? null : 'no_sudo', canRun, kind, mode, rung, entryId: 'replay', source: 'apt', packages: entries.flatMap((e) => e.packages), closure: [], closureKey: `${mode} ${entries.map((e) => e.id).join(' ')}`, decision: st.replay.decision,
           commands: rung === 1 ? ['# VibeSpace puts your apps back from ~/.vibespace/apps/debs, offline', `sudo apt-get install -y ${entries.flatMap((e) => e.packages).join(' ')}  # from the local repository only`] : A.appCommands({ mode: 'refresh', packages: pk }),
           argv: A.appArgv({ mode, appsDir, id: 'replay', nonce, args: [], root: f.root }), label: 'replay' });
+      }
+      if (sysV && sysV.usable) { // Layer 1: the image never patches the app system — its Refresh upgrades it (D5: shown first, never automatic)
+        const r = await sys.refreshPlan({ nonce, canRun, both });
+        await writeState({ updates: { count: r.updates.length, list: r.updates.slice(0, 100), at: now() } });
+        return ret(r.plan);
       }
       let updates = [];
       if (pk.length) {
@@ -893,13 +918,14 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
   async function recordEntry({ entryId, nonce, kind = 'apt', by, why = null, label = null, deb = null, source = null, staged = null, icon = null }) {
     if (!A.ENTRY_ID_RE.test(String(entryId || ''))) throw named('bad-request', 'bad entry id');
     const run0 = await runOf(entryId, nonce);
-    const entry = (await rootEntries()).find((e) => e.id === entryId);
+    const entry = [...await rootEntries(), ...await sys.entries()].find((e) => e.id === entryId);
     if (!entry) throw named('not_recorded', `the install ran but root did not record ${entryId} in ${path.join(sysDir, 'entries')} — check the log`);
+    if (entry.layer === 'sys') await sys.afterRun();
     catalog.sig = null;
     const rows = (await refreshCatalog()).filter((r) => r.app === entryId);
     const { manifest, corrupt } = await readManifest();
     const prev = manifest.entries.find((e) => e.id === entryId);
-    let m = A.withEntry(manifest, { id: entryId, kind: kind === 'deb' ? 'deb' : 'apt', packages: entry.packages, source: kind === 'deb' ? 'local-file' : (source || null), addedAt: (prev && prev.addedAt) || now(), by: byOf(by), approvedAt: now(), rows, services: run0.services.map((s) => s.unit), ...(why ? { why } : {}), ...(label ? { label } : {}), ...(kind === 'deb' && deb ? { deb } : {}) });
+    let m = A.withEntry(manifest, { id: entryId, kind: kind === 'deb' ? 'deb' : 'apt', packages: entry.packages, source: kind === 'deb' ? 'local-file' : (source || null), addedAt: (prev && prev.addedAt) || now(), by: byOf(by), approvedAt: now(), rows, services: run0.services.map((s) => s.unit), ...(entry.layer === 'sys' ? { layer: 'sys' } : {}), ...(why ? { why } : {}), ...(label ? { label } : {}), ...(kind === 'deb' && deb ? { deb } : {}) });
     m = A.withPins({ ...m, resolved: { ...m.resolved, ...(run0.debs.length ? { debs: run0.debs } : {}), baseSha: run0.base || m.resolved.baseSha, at: now() } }, run0.pins);
     await writeManifest(m, { corrupt });
     if (staged || icon) await unstage({ names: [staged, icon] }); // design 009: root keeps its own copy in debs/ — the staged one goes at once
@@ -907,6 +933,7 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
   }
   async function recordRemove({ entryId, nonce }) {
     const run0 = await runOf(entryId, nonce);
+    await sys.afterRun();
     catalog.sig = null; await refreshCatalog();
     const { manifest, corrupt } = await readManifest();
     let m = A.withoutEntry(manifest, entryId);
@@ -916,6 +943,12 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
   }
   async function recordRefresh({ nonce, id = 'refresh', mode = 'refresh' }) {
     const run0 = await runOf(id, nonce);
+    await sys.afterRun();
+    if (id === SYS.SYS_RUN_ID) { // Layer 1: the app system's own run (create / repair / rebase / rollback / drop-prev)
+      const st = await writeState({ sys: { at: now(), mode, ok: run0.ok, partial: run0.partial, entries: run0.entries, missing: run0.missing.slice(0, 50) } });
+      catalog.sig = null; await refreshCatalog();
+      return { state: st, run: { ok: run0.ok, partial: run0.partial, entries: run0.entries, missing: run0.missing } };
+    }
     const { manifest, corrupt } = await readManifest();
     if (run0.debs.length || run0.base || Object.keys(run0.pins).length) await writeManifest(A.withPins({ ...manifest, generation: manifest.generation + 1, resolved: { ...manifest.resolved, ...(run0.debs.length ? { debs: run0.debs } : {}), baseSha: run0.base || manifest.resolved.baseSha, at: now() } }, run0.pins), { corrupt });
     const patch = id === 'replay' ? { replay: { at: now(), mode, ok: run0.ok, partial: run0.partial, entries: run0.entries, missing: run0.missing.slice(0, 50) } } : { refreshedAt: now(), updates: { count: 0, list: [], at: now() } };
@@ -943,7 +976,7 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
     return { source: remove ? null : m.sources.find((s) => s.id === sourceId), removed: remove ? sourceId : null };
   }
 
-  return { appsDir, sysDir, stagingDir, manifestFile, stateFile, listsRoot, facts, plan, status, fetchInstaller, unstage, installAppImage, removeHome, appImageInfo, readManifest, writeManifest, readState, writeState, recordEntry, recordRemove, recordRefresh, recordSource, recordUserKind, refreshCatalog, catalogRows, iconFile, rootEntries, dpkgNow, aptOpts, slotState };
+  return { sys, appsDir, sysDir, stagingDir, manifestFile, stateFile, listsRoot, facts, plan, status, fetchInstaller, unstage, installAppImage, removeHome, appImageInfo, readManifest, writeManifest, readState, writeState, recordEntry, recordRemove, recordRefresh, recordSource, recordUserKind, refreshCatalog, catalogRows, iconFile, rootEntries, dpkgNow, aptOpts, slotState };
 }
 
 const bad = (error) => ({ ok: false, code: 'bad-request', error });
@@ -959,7 +992,7 @@ const bad = (error) => ({ ok: false, code: 'bad-request', error });
  *   app-unstage     {names?: [staged…], keep?: [staged…]}           → {ok, removed}
  *                   {sourceId, nonce, source, by} (kind 'source')  → {ok, source}
  *   app-remove      {entryId, nonce} | {sourceId, nonce, kind:'source'} | {entryId, home: true}  → {ok, removed, run?}
- *   app-refresh     {nonce, id: 'refresh'|'replay', mode}           → {ok, state, run}
+ *   app-refresh     {nonce, id: 'refresh'|'replay'|'sysroot', mode}  → {ok, state, run}   ('sysroot' = an app-system run, Layer 1)
  *   app-adopt-drift {entryId, nonce, by}                            → {ok, entry, rows, run}
  */
 async function runAppOp(apps, action, params = {}) {
@@ -987,7 +1020,7 @@ async function runAppOp(apps, action, params = {}) {
       return { ok: true, ...(await apps.recordRemove({ entryId: p.entryId, nonce: p.nonce })) };
     }
     // app-refresh
-    return { ok: true, ...(await apps.recordRefresh({ nonce: p.nonce, id: p.id === 'replay' ? 'replay' : 'refresh', mode: String(p.mode || 'refresh') })) };
+    return { ok: true, ...(await apps.recordRefresh({ nonce: p.nonce, id: p.id === 'replay' ? 'replay' : p.id === SYS.SYS_RUN_ID ? SYS.SYS_RUN_ID : 'refresh', mode: String(p.mode || 'refresh') })) };
   } catch (e) {
     return { ok: false, code: (e && e.code) || 'op_failed', error: String((e && e.message) || e) };
   }

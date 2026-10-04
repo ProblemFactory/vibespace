@@ -94,7 +94,7 @@ const steerDir = path.join(share, 'steer-pre');
 fs.cpSync(path.join(repo, 'src'), path.join(steerDir, 'src'), { recursive: true });
 const steerFile = path.join(steerDir, 'src', 'app-serve.js');
 const steerText = fs.readFileSync(steerFile, 'utf8');
-const STEER_LINE = 'const rootE = await rootEntries();\n    const rootBy';
+const STEER_LINE = 'const rootE = layer === \'sys\' ? sysE : hostE;\n    const otherIds'; // Layer 1 (2.369.210): root's records = the host's or the app system's
 const SRC_CHECK = ' || (await rootSourceIds()).includes(src.id)';
 // verify-r1 F7 CONTROL: the tripwire read from the apt hook's marker alone (the pre-fix rule)
 const driftDir = path.join(share, 'drift-pre');
@@ -103,7 +103,7 @@ const driftFile = path.join(driftDir, 'src', 'app-serve.js');
 const driftText = fs.readFileSync(driftFile, 'utf8');
 const HOOK_ONLY = 'const touchedAt = hookAt == null && statusAt == null ? null : Math.max(hookAt || 0, statusAt || 0);';
 fs.writeFileSync(driftFile, driftText.replace(HOOK_ONLY, 'const touchedAt = hookAt;'));
-fs.writeFileSync(steerFile, steerText.replace(STEER_LINE, 'const rootE = [];\n    const rootBy').replace(SRC_CHECK, ''));
+fs.writeFileSync(steerFile, steerText.replace(STEER_LINE, 'const rootE = [];\n    const otherIds').replace(SRC_CHECK, ''));
 console.log('§1 the first machine (network): install, a .deb, the drift + Adopt, xterm\'s rows, a removal');
 const SUDO_PREP = 'apt-get update -qq >/dev/null && apt-get install -y -qq sudo >/dev/null && cp /var/cache/apt/archives/sudo_*.deb /share/ 2>/dev/null || (cd /share && apt-get download -qq sudo)';
 const c1 = container({

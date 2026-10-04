@@ -648,6 +648,37 @@ const hasTmux = !!require(path.join(REPO, 'src/session-store.js')).tmuxOnPath();
   ident.resetProcTables();
 }
 
+// ── §9c A LIVE LOCK THAT NAMES NO cwd (int210, 2.369.210). A stub CLI's lock — or another CLI version's — that
+//    carries {pid, sessionId} and no cwd threw `cwd.replace` out of the sweep: EVERY GET /api/sessions answered 500
+//    (test-group-report-card's stub after a restart), and since B-0ece the page's boot ladder gives up on that 500
+//    (the splash's Reload, app.ready never resolves). The sweep skips such a lock; the one beside it is still found.
+//    CONTROL: the same session-store with the skip removed throws on the same fixture.
+console.log('\n§9c a live lock with no cwd never fails the sweep');
+{
+  const H2 = scratchHome('disc-cwdless', fs);
+  const sd = path.join(H2, '.claude', 'sessions');
+  const fake = path.join(H2, 'claude');
+  fs.copyFileSync(fs.realpathSync('/bin/sh'), fake);
+  fs.chmodSync(fake, 0o755);
+  const two = [0, 1].map(() => { const k = spawn(fake, ['-c', 'read x'], { stdio: ['pipe', 'ignore', 'ignore'] }); kids.push(k); return k; });
+  fs.writeFileSync(path.join(sd, `${two[0].pid}.json`), JSON.stringify({ pid: two[0].pid, sessionId: 'cccccccc-0000-4000-8000-000000000000' }));   // NO cwd
+  fs.writeFileSync(path.join(sd, `${two[1].pid}.json`), JSON.stringify({ pid: two[1].pid, sessionId: 'cccccccc-0000-4000-8000-000000000001', cwd: path.join(H2, 'placed') }));
+  const arm2 = (impl) => {
+    const r = spawnSync(process.execPath, [new URL(import.meta.url).pathname], { env: { ...process.env, HOME: H2, VS_DISC_ARM: JSON.stringify({ impl, sessions: [] }) }, encoding: 'utf8', timeout: 120000 });
+    if (r.status !== 0) return { error: `arm exited ${r.status}: ${(r.stderr || '').split('\n').find((l) => /Error/.test(l)) || ''}` };
+    try { return JSON.parse(r.stdout); } catch { return { error: 'unparseable arm output' }; }
+  };
+  const got = arm2('src/session-store.js');
+  ok(!got.error && got.sessions === 1 && got.running === 1, `the sweep skips the cwd-less lock and still finds the placed one (${JSON.stringify(got)})`);
+  const SKIP = "      if (typeof hit.data.cwd !== 'string' || !hit.data.cwd) continue;\n";
+  const src = fs.readFileSync(path.join(REPO, 'src/session-store.js'), 'utf8');
+  ok(src.split(SKIP).length === 2, 'the skip is ONE line in the sweep (the control removes exactly it)');
+  controlsRan++;
+  const ctl = arm2(MUTS.write('src/session-store.js', src.replace(SKIP, ''), 'cwdless', { esm: false }));
+  ok(/cwd|replace/.test(ctl.error || ''), `CONTROL: without the skip the same fixture throws out of the sweep (${ctl.error || JSON.stringify(ctl)})`);
+  try { fs.rmSync(H2, { recursive: true, force: true }); } catch { }
+}
+
 // ── §10 THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──────────
 // Measured HERE, while §4's pre-fix copy still exists (the exit handler
 // removes it — a census after exit passes on the pre-fix placement too). It

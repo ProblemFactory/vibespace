@@ -2,6 +2,14 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.210 — 2026-10-04
+
+### Added
+- Where supported, apps you install can live in an app system on the machine’s disk: set it up once in Desktop apps and they survive a rebuild.
+
+### Fixed
+- After an update the page reloads once VibeSpace has finished starting, and a loading screen that gets no answer retries by itself, then offers Reload.
+
 ## 2.369.209 — 2026-10-04
 
 ### Fixed

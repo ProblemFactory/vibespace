@@ -49,7 +49,10 @@ const TERMINAL = new Set(['done', 'failed', 'rejected', 'withdrawn']);
 /** verify-r1 H3 — a boot replay that meets the machine's package slot busy waits it out (polling), this long at most. */
 const REPLAY_BUSY_WAIT_MS = 10 * 60 * 1000;
 const REPLAY_BUSY_POLL_MS = 15 * 1000;
-const REQUEST_KINDS = Object.freeze(['apt', 'deb', 'appimage', 'installer', 'source', 'source-remove', 'remove', 'refresh', 'adopt', 'replay']);
+// Layer 1 (design §3.2): the app system's own requests — Set up · Repair · Migrate (rebase) · Roll back · Delete the old one —
+// the USER's clicks only (never in AGENT_KINDS: an agent still only proposes an install)
+const SYS_REQUEST_KINDS = Object.freeze(['sys-create', 'repair', 'rebase', 'rollback', 'sys-drop-prev']);
+const REQUEST_KINDS = Object.freeze(['apt', 'deb', 'appimage', 'installer', 'source', 'source-remove', 'remove', 'refresh', 'adopt', 'replay', ...SYS_REQUEST_KINDS]);
 // what an agent may PROPOSE — design 009 (owner 2026-10-02 22:22 PDT) overturns D4's "a .deb is the user's door only": a
 // vendor's .deb / AppImage by its ADDRESS or a FILE on that machine (`installer`; a `deb` / `appimage` the agent names
 // is the same ask) — never a file VibeSpace staged (that is the machine's own word, after its fetch)
@@ -117,7 +120,7 @@ function recordOf(rq, pl, { by, why = null } = {}) {
   if (k === 'source') return ['app-install', { kind: 'source', sourceId: pl.entryId, nonce: pl.nonce, source: pl.sourceSpec, by }];
   if (k === 'source-remove') return ['app-remove', { kind: 'source', sourceId: pl.entryId, nonce: pl.nonce }];
   if (k === 'remove') return ['app-remove', { entryId: pl.entryId, nonce: pl.nonce }];
-  return ['app-refresh', { nonce: pl.nonce, id: k === 'replay' ? 'replay' : 'refresh', mode: pl.mode }];
+  return ['app-refresh', { nonce: pl.nonce, id: k === 'replay' ? 'replay' : SYS_REQUEST_KINDS.includes(k) ? 'sysroot' : 'refresh', mode: pl.mode }];
 }
 
 /**
@@ -554,4 +557,4 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
   return { plan, planProposal, search, status, propose, recordUserKind, run, approve, card: (id) => { const p = get(id); return p ? cardViewOf(p) : null; }, reject, withdraw, sweep, proposalIcon, wait, proposalsOf, get: (id) => { const p = get(id); return p ? view(p) : null; }, outcomeText: (id) => { const p = get(id); return p ? outcomeText(p) : null; }, afterListen, decorate, isReplaying, addHelper, dropHelper, helperIds, helpers: () => store.helpers.slice(), planner, storeFile: file };
 }
 
-module.exports = { create, normRequest, recordOf, whatOf, STORE_FILE, FROM_NAME, INBOX_KEY, WAIT_MAX_MS, PROPOSAL_STATES, REQUEST_KINDS, AGENT_KINDS, KIND_VIEW, EXPIRE_MS, WORDS };
+module.exports = { create, normRequest, recordOf, whatOf, SYS_REQUEST_KINDS, STORE_FILE, FROM_NAME, INBOX_KEY, WAIT_MAX_MS, PROPOSAL_STATES, REQUEST_KINDS, AGENT_KINDS, KIND_VIEW, EXPIRE_MS, WORDS };

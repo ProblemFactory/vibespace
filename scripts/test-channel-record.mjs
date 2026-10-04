@@ -219,7 +219,10 @@ const base = { adapterId: 'a', convId: 'c', vendorId: 'v1', at: 1700000000000, t
       'app-id', 'per-session', 'vs-key',
       // exit transfers (2.369.205): `vibespace-exit pull <machine> <remote-path> [<local-path>]` / `push <local-path> …` —
       // usage placeholders in data/bin/vibespace-exit's help and its refusal line.
-      'remote-path', 'local-path']);
+      'remote-path', 'local-path',
+      // app system Layer 1 (2.369.210): `sudo -n sh -c INSTALL_SCRIPT vs-sys-install <helper> <sudoers> <helper-sha256>
+      // <sudoers-sha256>` — the boot install's argv placeholders in src/app-system.js's comment.
+      'helper-sha256', 'sudoers-sha256']);
     const seen = new Map();
     for (const f of files) {
       let txt; try { txt = fsx.readFileSync(path.join(REPO, f), 'utf-8'); } catch { continue; }

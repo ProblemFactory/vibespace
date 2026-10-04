@@ -1,0 +1,7 @@
+# VibeSpace app system (docs/design-app-persistence.zh.md §3.2) — installed by the server after listen.
+# Grants nothing new (the user is already NOPASSWD: ALL): sudo EXECs the helper on the caller's pid and keeps the X environment.
+Defaults!/usr/local/libexec/vibespace/vs-sysroot-enter !use_pty, !pam_session, !pam_setcred, env_keep += "DISPLAY XAUTHORITY VIBESPACE_DESKTOP_APP LANG LANGUAGE LC_ALL TZ TERM COLORTERM"
+# Only this user's sudo of the helper, NOSETENV (the user's own `ALL` rule implies SETENV): a variable on the sudo command
+# line (LD_PRELOAD, BASH_ENV, PATH…) is refused unless env_keep names it. The installer writes the server user's uid for
+# VS_UID; the file is `~vibespace-sysroot` so sudo reads it AFTER every user-named drop-in (byte order; the last match wins).
+#VS_UID ALL=(root) NOPASSWD:NOSETENV: /usr/local/libexec/vibespace/vs-sysroot-enter
