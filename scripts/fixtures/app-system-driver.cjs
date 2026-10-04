@@ -1,6 +1,6 @@
 'use strict';
 // THE APP SYSTEM's heavy driver — runs ONLY inside the disposable container of scripts/test-app-system-enter.mjs, as
-// the non-root user `node` (NOPASSWD sudo, HOME /home/u = the volume standing in for the PVC). Prints one
+// the image's uid-1000 user (`node`; `vibe` in the fleet image) (NOPASSWD sudo, HOME /home/u = the volume standing in for the PVC). Prints one
 // `@@ {"leg", "ok", "detail"}` line per check; the suite judges them. Never run it anywhere else.
 const { spawnSync, spawn } = require('child_process');
 const fs = require('fs');
@@ -11,6 +11,11 @@ const AS = require('/repo/src/app-serve.js');
 const A = require('/repo/src/app-manifest.js');
 const M = require('/repo/src/desktop-apps.js');
 const H = '/home/u', SYSD = `${H}/.vibespace/sysroot`, R = `${SYSD}/rootfs`, HP = S.HELPER_PATH, SHIMS = `${SYSD}/bin`, LIB = '/usr/local/libexec/vibespace';
+/** an image that BAKES rung A (the fleet image) keeps its own tarball; otherwise the driver takes one from its rung B */
+const BAKED = fs.existsSync(S.MINBASE_TARBALL);
+const binSum = (f) => { try { return crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex'); } catch { return null; } };
+/** the image's own hello / xterm before any install (the fleet image ships xterm): an install INTO the app system leaves them as they were */
+const IMG_BINS = Object.fromEntries(['hello', 'xterm'].map((b) => [b, binSum(`/usr/bin/${b}`)]));
 const FACTS = { distro: 'debian', codename: 'bookworm', arch: 'amd64', sudo: true };
 const out = (leg, ok, detail = null) => console.log('@@ ' + JSON.stringify({ leg, ok: !!ok, detail }));
 const run = (cmd, args, o = {}) => { const r = spawnSync(cmd, args, { encoding: 'utf8', timeout: o.timeout || 900000, env: o.env || process.env, maxBuffer: 256 << 20 }); return { code: r.status, stdout: r.stdout || '', stderr: r.stderr || '' }; };
@@ -43,6 +48,15 @@ const setId = (patch) => { const j = JSON.parse(su('cat', `${R}/etc/vibespace-sy
 const resetId = () => su('install', '-m', '0644', '-o', 'root', '-g', 'root', '/tmp/id.orig', `${R}/etc/vibespace-sysroot.json`);
 
 (async () => {
+  // ── lane app-system-env: THE REAL WIRING, FIRST (nothing installed yet) — a child whose OWN env carries the flag, the
+  // machine half built over agentEnv() as server.js builds it; its after-listen replay installs the helper; the status read ──
+  {
+    const w = run('node', ['/repo/scripts/fixtures/app-system-wired.cjs'], { env: { ...process.env, VIBESPACE_APP_SYSTEM: '1' }, timeout: 120000 });
+    let j = {}; try { j = JSON.parse(w.stdout.trim().split('\n').pop()); } catch { j = { parse: w.stdout.slice(-300), stderr: w.stderr.slice(-300) }; }
+    const line = (j.lines || []).find((m) => /^\[apps\] app system: helper \+ sudoers installed in \d+ ms$/.test(m)) || null;
+    const hs0 = su('stat', '-c', '%u %a', HP).stdout.trim();
+    out('app-system-env: a process with VIBESPACE_APP_SYSTEM in ITS env, wired as server.js (agentEnv()), reports the app system enabled after listen and installs the helper', w.code === 0 && j.enabled === true && j.helper && j.helper.installed === true && !!line && j.sanitizedHasFlag === false && hs0 === '0 755', { enabled: j.enabled, blocked: j.blocked, helper: j.helper, line, sanitizedHasFlag: j.sanitizedHasFlag, helperStat: hs0, code: w.code, error: j.error, lines: (j.lines || []).slice(0, 6) });
+  }
   const sys = SS.create({ home: H, env: () => ({ ...process.env, VIBESPACE_APP_SYSTEM: '1' }), runner, which: (n) => run('sh', ['-c', `command -v ${n}`]).stdout.trim() || null, validate: M.validateAppRow, helperSrcDir: '/repo/deploy/sysroot' });
   // ── boot: the helper + the sudoers drop-in, through INSTALL_SCRIPT ──
   await sys.boot();
@@ -54,7 +68,7 @@ const resetId = () => su('install', '-m', '0644', '-o', 'root', '-g', 'root', '/
   const bad = run(ia[0], ia.slice(1));
   out('control: a broken drop-in is refused by visudo -cf BEFORE install (the live one untouched)', /^= refused sudoers-invalid$/m.test(bad.stdout) && su('sha256sum', S.SUDOERS_PATH).stdout === before, tail(bad));
   const v0 = await sys.view({ facts: FACTS });
-  out('no app system yet: Set up offered (rung B — debootstrap on PATH)', v0.canCreate === true && v0.rung === 'b' && !v0.created, { canCreate: v0.canCreate, rung: v0.rung });
+  out(`no app system yet: Set up offered (${BAKED ? 'rung A — the tarball the image bakes' : 'rung B — debootstrap on PATH'})`, v0.canCreate === true && v0.rung === (BAKED ? 'a' : 'b') && !v0.created, { canCreate: v0.canCreate, rung: v0.rung });
 
   // ── create, rung B ──
   const c = slot('create', 'sysroot', ['b', 'bookworm', 'http://deb.debian.org/debian']);
@@ -64,12 +78,12 @@ const resetId = () => su('install', '-m', '0644', '-o', 'root', '-g', 'root', '/
   out(`create (rung B, debootstrap): ok in ${Math.round(c.ms / 1000)} s; rootfs root:root 0755; its identity reads back`, c.log.ok && su('stat', '-c', '%u:%g %a', R).stdout.trim() === '0:0 755' && id1.ok && id1.identity.createdFrom === 'debootstrap' && id1.identity.codename === 'bookworm', { ms: c.ms, id: id1, tail: c.log.ok ? null : tail(c) });
   if (!c.log.ok) { out('done', false, 'create failed — nothing after it can run'); return; }
   out('§5 P3: nothing in the userland inherited the PVC root\'s group or setgid (fsGroup shape root:<user> 2775 above it)', sgid.length === 0 && (su('stat', '-c', '%a', H).stdout.trim() === '2775'), { setgid: sgid.slice(0, 5) });
-  su('mkdir', '-p', '/usr/share/vibespace');
-  su('tar', '-C', R, '--exclude=./etc/vibespace-sysroot.json', '--exclude=./var/lib/vibespace', '--exclude=./var/cache/apt/archives/*.deb', '-czpf', S.MINBASE_TARBALL, '.');
+  if (!BAKED) su('mkdir', '-p', '/usr/share/vibespace');
+  if (!BAKED) su('tar', '-C', R, '--exclude=./etc/vibespace-sysroot.json', '--exclude=./var/lib/vibespace', '--exclude=./var/cache/apt/archives/*.deb', '-czpf', S.MINBASE_TARBALL, '.');
 
   // ── installs (a CLI + a GUI) through the slot; the catalog rows + the shims ──
   const i1 = slot('install', 'hello', ['hello']), i2 = slot('install', 'xterm', ['xterm']);
-  out(`install hello (CLI) + xterm (GUI) INTO the app system: ok (${Math.round(i1.ms / 1000)} s + ${Math.round(i2.ms / 1000)} s); the image has neither`, i1.log.ok && i2.log.ok && i2.log.desktops.length > 0 && !fs.existsSync('/usr/bin/hello') && !fs.existsSync('/usr/bin/xterm'), { t1: i1.log.ok ? null : tail(i1), t2: i2.log.ok ? null : tail(i2) });
+  out(`install hello (CLI) + xterm (GUI) INTO the app system: ok (${Math.round(i1.ms / 1000)} s + ${Math.round(i2.ms / 1000)} s); the image's own /usr/bin/hello · xterm as before (${Object.entries(IMG_BINS).map(([b, h]) => `${b} ${h ? 'present' : 'absent'}`).join(', ')})`, i1.log.ok && i2.log.ok && i2.log.desktops.length > 0 && Object.entries(IMG_BINS).every(([b, h]) => binSum(`/usr/bin/${b}`) === h), { t1: i1.log.ok ? null : tail(i1), t2: i2.log.ok ? null : tail(i2) });
   const rows = await sys.catalog();
   const xr = rows.find((r) => r.id === 'sys.xterm');
   out('catalog: sys.xterm runs its shim by absolute path; shims for xterm and hello, the template\'s exact bytes', xr && xr.exec === `${SHIMS}/xterm` && fs.readFileSync(`${SHIMS}/xterm`, 'utf8') === S.shimText('/usr/bin/xterm') && fs.readFileSync(`${SHIMS}/hello`, 'utf8') === S.shimText('/usr/bin/hello') && (fs.statSync(`${SHIMS}/hello`).mode & 0o777) === 0o755, { rows: rows.map((r) => r.id) });
@@ -137,7 +151,7 @@ const resetId = () => su('install', '-m', '0644', '-o', 'root', '-g', 'root', '/
   su('mv', R, `${SYSD}/rootfs.hold`);
   const ca = slot('create', 'sysroot', ['a', 'bookworm']);
   const ida = ident();
-  out(`create (rung A, the image's minbase tarball, offline): ok in ${Math.round(ca.ms / 1000)} s; the helper enters it`, ca.log.ok && ida.ok && ida.identity.createdFrom === 'minbase-tarball' && enter(['--', 'true']).code === 0, { ms: ca.ms, tail: ca.log.ok ? null : tail(ca) });
+  out(`create (rung A, the image's minbase tarball${BAKED ? ' — BAKED into the image' : ''}, offline): ok in ${Math.round(ca.ms / 1000)} s; the helper enters it`, ca.log.ok && ida.ok && ida.identity.createdFrom === 'minbase-tarball' && enter(['--', 'true']).code === 0, { ms: ca.ms, tail: ca.log.ok ? null : tail(ca) });
   su('rm', '-rf', '--one-file-system', R); su('mv', `${SYSD}/rootfs.hold`, R);
 
   // ── Rebase (rename) + Roll back + drop ──
@@ -260,10 +274,143 @@ const resetId = () => su('install', '-m', '0644', '-o', 'root', '-g', 'root', '/
   await sleep(1200);
   const uc = (/^Uid:\s+(.*)$/m.exec(statusOf(Pc.pid)) || [])[1] || '';
   let readable = true; try { fs.readFileSync(`/proc/${Pc.pid}/smaps_rollup`); } catch { readable = false; }
-  su('kill', '-TERM', `-${Pc.pid}`); await waitGone(Pc.pid);
+  // the shell's builtin with `--`: node:22-slim has no /usr/bin/kill (this kill was a silent no-op there), and the fleet
+  // image's procps-ng 4.0.2 kill misreads `kill -TERM -<pgid>` without `--` — it took the driver's whole session down
+  su('sh', '-c', 'kill -s TERM -- "$1"', 'sh', `-${Pc.pid}`); await waitGone(Pc.pid);
   su('mv', '/tmp/sd.hold', S.SUDOERS_PATH);
   out('CONTROL the sudoers drop-in (P7): with it a sleep shim\'s pid is the app (Uids 1000); without it that pid is sudo (euid 0) — PSS unreadable to the user', ur.split(/\s+/).every((u) => u === '1000') && /^1000\s+0\b/.test(uc) && !readable, { real: ur, uids: uc, readable });
   su('sh', '-c', `rm -f ${LIB}/ctl-*`);
   try { process.kill(-X.pid, 'SIGTERM'); } catch { /* gone */ }
+  // ── design 019 (lane app-layers-tidy): the REAL `forget` as root, and a real move of one small package (sl) ──
+  {
+    const SD = '/tmp/d019-state'; fs.mkdirSync(SD, { recursive: true });
+    const LOGF = `${SD}/${M.INSTALL_FILES.log}`;
+    const bop = (n) => run('sh', ['-c', `command -v ${n}`]).stdout.trim() || null;
+    const host = AS.create({ home: H, stateDir: SD, env: () => ({ ...process.env, VIBESPACE_APP_SYSTEM: '' }), binOnPath: bop });
+    const mv = AS.create({ home: H, stateDir: SD, env: () => ({ ...process.env, VIBESPACE_APP_SYSTEM: '1' }), binOnPath: bop });
+    const go = (pl) => { const r = run(pl.argv[0], pl.argv.slice(1), { timeout: 1500000 }); fs.appendFileSync(LOGF, r.stdout); return r; };
+    const HE = `${H}/.vibespace/apps/sys/entries`, DEBS = `${H}/.vibespace/apps/debs`;
+    const ph = (await host.plan({ kind: 'apt', packages: ['sl'] })).plan;
+    const rh = ph.ok ? go(ph) : { stdout: '', stderr: '' };
+    const ih = ph.ok ? await AS.runAppOp(host, 'app-install', { entryId: ph.entryId, nonce: ph.nonce, kind: 'apt', by: { kind: 'user' }, label: 'Steam Locomotive' }) : null;
+    const debsBefore = fs.readdirSync(DEBS).filter((n) => n.startsWith('sl_') && n.endsWith('.deb'));
+    out('design 019: a host entry to move (sl, recorded by root on the base, its .deb cached)', ph.ok && !ph.layer && ih && ih.ok && fs.existsSync(`${HE}/sl.list`) && debsBefore.length === 1, { plan: ph.ok ? null : ph, tail: tail(rh), ih, debsBefore });
+    const pf0 = (await mv.plan({ kind: 'forget', entryId: 'sl' })).plan;
+    out('design 019: forget is refused by name until the app system holds the same packages (not_moved) — nothing ran', !pf0.ok && pf0.code === 'not_moved' && fs.existsSync(`${HE}/sl.list`), pf0);
+    const pm = (await mv.plan({ kind: 'apt', packages: ['sl'] })).plan;
+    const rm1 = pm.ok ? go(pm) : { stdout: '', stderr: '' };
+    const im = pm.ok ? await AS.runAppOp(mv, 'app-install', { entryId: pm.entryId, nonce: pm.nonce, kind: 'apt', by: { kind: 'user' }, keep: true }) : null;
+    const pf = (await mv.plan({ kind: 'forget', entryId: 'sl' })).plan;
+    su('mv', HE, `${HE}.real`); su('ln', '-s', `${HE}.real`, HE);
+    const rl = pf.ok ? run(pf.argv[0], pf.argv.slice(1)) : { stdout: '', stderr: '' };
+    su('rm', HE); su('mv', `${HE}.real`, HE);
+    out('design 019: forget through a symlinked entries dir is refused as root (not-root-owned) — the record stays', /^= refused not-root-owned /m.test(rl.stdout) && fs.existsSync(`${HE}/sl.list`), { tail: tail(rl), pf: pf.ok ? null : pf, im, sys: tail(rm1) });
+    const rf = pf.ok ? go(pf) : { stdout: '', stderr: '' };
+    const fo = pf.ok ? await AS.runAppOp(mv, 'app-forget', { entryId: 'sl', nonce: pf.nonce }) : null;
+    const st = await mv.status();
+    const dpkgSl = run('dpkg-query', ['-W', '-f=${Status}', 'sl']).stdout;
+    const debsAfter = fs.readdirSync(DEBS).filter((n) => n.startsWith('sl_') && n.endsWith('.deb'));
+    const ie = st.manifest.entries.filter((e) => e.id === 'sl');
+    out('design 019: a REAL move of sl — the app system holds it, root\'s host record is gone with NO apt (still installed on the base until the rebuild), its cached .deb pruned, ONE index entry (layer sys, its label kept), the boot replay says no-entries', pm.ok && pm.layer === 'sys' && pm.forgets === 'sl' && im && im.ok && fo && fo.ok && /^= ok$/m.test(rf.stdout) && !/apt-get/.test(rf.stdout) && !fs.existsSync(`${HE}/sl.list`) && /install ok installed/.test(dpkgSl) && debsAfter.length === 0 && st.entries.some((e) => e.id === 'sl' && e.layer === 'sys') && ie.length === 1 && ie[0].layer === 'sys' && ie[0].label === 'Steam Locomotive' && st.replay.decision.why === 'no-entries', { tail: tail(rf), dpkgSl, debsAfter, why: st.replay.decision.why, ie, fo, pm: pm.ok ? pm.forgets : pm });
+  }
+  // ── verify r1 (app-layers-tidy): 1 forget refusals as root · 2 a real replay under a lying index · 3 a move interrupted + restart · 5 a REAL Roll back + status() ──
+  {
+    const AM = require('/repo/src/app-manifest.js'); // the driver's `A` is a path string in this scope (line 181)
+    const SD = '/tmp/d019-state', LOGF = `${SD}/${M.INSTALL_FILES.log}`;
+    const bop = (n) => run('sh', ['-c', `command -v ${n}`]).stdout.trim() || null;
+    const mkH = () => AS.create({ home: H, stateDir: SD, env: () => ({ ...process.env, VIBESPACE_APP_SYSTEM: '' }), binOnPath: bop });
+    const mkS = () => AS.create({ home: H, stateDir: SD, env: () => ({ ...process.env, VIBESPACE_APP_SYSTEM: '1' }), binOnPath: bop });
+    const go = (pl) => { const r = run(pl.argv[0], pl.argv.slice(1), { timeout: 1500000 }); fs.appendFileSync(LOGF, r.stdout); return r; };
+    const HE = `${H}/.vibespace/apps/sys/entries`, SE = `${R}/var/lib/vibespace/entries`, APPS = `${H}/.vibespace/apps`;
+    const idx = async (a) => (await a.readManifest()).manifest.entries;
+    const brief = (es) => es.map((e) => `${e.id}:${e.layer || 'host'}:${e.label || ''}:${(e.by || {}).kind || ''}`);
+    let Dm = null; try { Dm = await import('/repo/src/lib/app-install-dialog.js'); } catch (e) { out('d019 r1 dialog module import (banner judged by its own filter instead)', true, String(e.message).slice(0, 200)); }
+    const banner = (st) => (Dm ? Dm.appsMoveModel(st) : (st.appSystem.usable && st.entries.filter((e) => !e.layer).length ? { n: st.entries.filter((e) => !e.layer).length } : null));
+    const dpkgOk = (p) => /install ok installed/.test(run('dpkg-query', ['-W', '-f=${Status}', p]).stdout);
+    let host = mkH(), mv = mkS();
+    // setup: xterm leaves the app system (so it can be a fresh HOST entry), then the host installs it
+    const prx = (await mv.plan({ kind: 'remove', entryId: 'xterm' })).plan;
+    const rrx = prx.ok ? go(prx) : { stdout: '' };
+    const irx = prx.ok ? await AS.runAppOp(mv, 'app-remove', { entryId: 'xterm', nonce: prx.nonce }) : null;
+    const phx = (await host.plan({ kind: 'apt', packages: ['xterm'] })).plan;
+    const rhx = phx.ok ? go(phx) : { stdout: '' };
+    const ihx = phx.ok ? await AS.runAppOp(host, 'app-install', { entryId: phx.entryId, nonce: phx.nonce, kind: 'apt', by: { kind: 'user' }, label: 'XTerm' }) : null;
+    const st0 = await mv.status();
+    const hostRows0 = st0.rows.filter((r) => r.app === 'xterm');
+    out('d019 r1 setup: xterm removed from the app system, then installed on the BASE as host entry xterm (its rows in the catalog)', prx.ok && irx && irx.ok && phx.ok && phx.entryId === 'xterm' && !phx.layer && ihx && ihx.ok && fs.existsSync(`${HE}/xterm.list`) && !fs.existsSync(`${SE}/xterm.list`) && hostRows0.length > 0, { prx: prx.ok ? null : prx, rrx: tail(rrx), phx: phx.ok ? phx.entryId : phx, rhx: tail(rhx), rows: st0.rows.map((r) => `${r.id}<${r.app || ''}`) });
+    // ── check 1 at root: the REAL root script refuses a forget with a bad id / extra args BEFORE acting; the record stays ──
+    const badIds = ['../xterm', 'xterm/..', 'XTERM', '-xterm', 'xterm.list', ''];
+    const jsRefused = badIds.filter((id) => { try { AM.appArgv({ mode: 'forget', appsDir: APPS, id, nonce: 'abcdef12' }); return false; } catch { return true; } }).length;
+    const fArgv = (id, nonce) => { const a = AM.appArgv({ mode: 'forget', appsDir: APPS, id: 'xterm', nonce }); a[a.indexOf('vs-app') + 3] = id; return a; }; // the bad id put straight into root's argv (past appArgv's own refusal)
+    const debs0 = fs.readdirSync(`${APPS}/debs`).sort().join(' '); // the cache before the refusals (closure − base: no xterm .deb on an image that ships xterm)
+    const rb1 = badIds.map((id) => { const a = fArgv(id, 'abcdef12'); return run(a[0], a.slice(1)); });
+    const ax = AM.appArgv({ mode: 'forget', appsDir: APPS, id: 'xterm', nonce: 'abcdef13' }); const rx = run(ax[0], [...ax.slice(1), 'extra']);
+    const an = AM.appArgv({ mode: 'forget', appsDir: APPS, id: 'nosuch', nonce: 'abcdef14' }); const rn = run(an[0], an.slice(1));
+    out(`d019 r1 check 1 (root): appArgv refuses ${jsRefused}/6 bad ids; past it, the real forget as root refuses 6 bad ids (bad-id), extra args (bad-args), an id with no record (no-entry) — xterm\'s host record and the cached .debs stay as they were (xterm\'s own .deb among them unless the image ships xterm)`, jsRefused === badIds.length && rb1.every((r) => /^= refused bad-id/m.test(r.stdout) && !/forgot/.test(r.stdout)) && /^= refused bad-args/m.test(rx.stdout) && /^= refused no-entry nosuch/m.test(rn.stdout) && fs.existsSync(`${HE}/xterm.list`) && fs.readdirSync(`${APPS}/debs`).sort().join(' ') === debs0 && (IMG_BINS.xterm || debs0.split(' ').some((n) => n.startsWith('xterm_'))), { debs0: debs0.slice(0, 300), imgXterm: !!IMG_BINS.xterm, bad: rb1.map((r) => (r.stdout.match(/^= refused .*/m) || [tail(r)])[0]), extra: tail(rx), none: tail(rn) });
+    const pfx = (await mv.plan({ kind: 'forget', entryId: 'xterm' })).plan, pfp = (await mv.plan({ kind: 'forget', entryId: '../sys/entries/xterm' })).plan;
+    out('d019 r1 check 1 (server): forget xterm before the app system holds it → not_moved; a path id → not_found (both by name, no argv run)', !pfx.ok && pfx.code === 'not_moved' && !pfp.ok && pfp.code === 'not_found' && fs.existsSync(`${HE}/xterm.list`), { pfx, pfp });
+    // ── check 2: the index LIES (xterm claimed layer sys); the rebuild's loss; the REAL replay reinstalls it from root's host record ──
+    const lie = async () => { const m = (await host.readManifest()).manifest; const e = m.entries.find((x) => x.id === 'xterm'); await host.writeManifest(AM.withEntry(m, { ...e, layer: 'sys' })); };
+    await lie();
+    const rmx = su('dpkg', '-r', 'xterm');
+    const gone = !dpkgOk('xterm');
+    const prp = (await host.plan({ kind: 'replay' })).plan; // (the replay plan reads status() — its reconcile corrects the index first)
+    const fixedByPlan = !((await idx(host)).find((e) => e.id === 'xterm') || {}).layer;
+    await lie(); // the lie again, so root's run happens WHILE the index claims sys
+    const lied = (await idx(host)).find((e) => e.id === 'xterm');
+    const rrp = prp.ok ? go(prp) : { stdout: '' };
+    const back = dpkgOk('xterm');
+    const stillLied = (await idx(host)).find((e) => e.id === 'xterm');
+    out('d019 r1 check 2: with the index claiming xterm is layer sys, the base loses xterm (dpkg -r) and the REAL replay reinstalls it from root\'s host record — the index is not the authority', lied && lied.layer === 'sys' && gone && prp.ok && /^= ok$/m.test(rrp.stdout) && back && stillLied.layer === 'sys', { back, fixedByPlan, still: stillLied && stillLied.layer, said: (rrp.stdout.match(/^= (?!deb ).*/gm) || []).slice(-6), rrp: tail(rrp).slice(0, 400), lied: lied && lied.layer, gone, prp: prp.ok ? prp.argv.slice(-4) : prp, rmx: rmx.code });
+    const st2 = await mv.status();
+    const i2 = (await idx(mv)).filter((e) => e.id === 'xterm');
+    out('d019 r1 check 2: status() then corrects the index (xterm host, label kept); the banner offers its move', i2.length === 1 && !i2[0].layer && i2[0].label === 'XTerm' && banner(st2) && banner(st2).n === 1, { i2: brief(i2), banner: banner(st2) });
+    // ── check 3: a Move interrupted between its two steps (the sys install recorded, forget never ran), then a server restart ──
+    const mp = (await mv.plan({ kind: 'move' })).plan;
+    const me1 = mp.ok && mp.entries.find((e) => e.id === 'xterm');
+    const pli = me1 ? (await mv.plan(me1.request)).plan : { ok: false };
+    const rli = pli.ok ? go(pli) : { stdout: '' };
+    const ili = pli.ok ? await AS.runAppOp(mv, 'app-install', { entryId: pli.entryId, nonce: pli.nonce, kind: 'apt', by: { kind: 'user' }, keep: true }) : null;
+    out('d019 r1 check 3 setup: the Move\'s step 1 — xterm installed INTO the app system (same id, forgets xterm), recorded; then the server dies', mp.ok && me1 && !me1.recorded && pli.ok && pli.layer === 'sys' && pli.forgets === 'xterm' && pli.entryId === 'xterm' && ili && ili.ok, { mp: mp.ok ? mp.entries.map((e) => e.id) : mp, pli: pli.ok ? { f: pli.forgets, id: pli.entryId } : pli, rli: tail(rli) });
+    host = mkH(); mv = mkS(); // the restart
+    const st3 = await mv.status();
+    const i3 = (await idx(mv)).filter((e) => e.id === 'xterm');
+    const xr = st3.rows.filter((r) => r.app === 'xterm' || /xterm/.test(r.id));
+    const pkgRows = (rows) => { const by = {}; for (const r of rows) if (r.package) by[r.package] = (by[r.package] || 0) + 1; return by; };
+    out('d019 r1 check 3: after the restart BOTH records exist, ONE index entry (sys, label kept), the catalog carries NO host row for xterm (only the sys rows), the banner still offers the move', fs.existsSync(`${HE}/xterm.list`) && fs.existsSync(`${SE}/xterm.list`) && st3.entries.filter((e) => e.id === 'xterm').length === 2 && i3.length === 1 && i3[0].layer === 'sys' && i3[0].label === 'XTerm' && xr.length > 0 && xr.every((r) => r.id.startsWith('sys.')) && banner(st3) && banner(st3).n === 1, { i3: brief(i3), rows: xr.map((r) => `${r.id}<${r.package || ''}`), all: st3.rows.map((r) => r.id), byPkg: pkgRows(st3.rows), banner: banner(st3) });
+    const mp2 = (await mv.plan({ kind: 'move' })).plan;
+    const pf2 = (await mv.plan({ kind: 'forget', entryId: 'xterm' })).plan;
+    const rf2 = pf2.ok ? go(pf2) : { stdout: '' };
+    const fo2 = pf2.ok ? await AS.runAppOp(mv, 'app-forget', { entryId: 'xterm', nonce: pf2.nonce }) : null;
+    const st3b = await mv.status();
+    const i3b = (await idx(mv)).filter((e) => e.id === 'xterm');
+    out('d019 r1 check 3: the second click — the Move plan says xterm is recorded (forget only); the real forget drops the host record; one sys entry, no banner, replay no-entries, still one set of xterm rows', mp2.ok && mp2.entries.length === 1 && mp2.entries[0].recorded === true && fo2 && fo2.ok && /^= ok$/m.test(rf2.stdout) && !fs.existsSync(`${HE}/xterm.list`) && fs.existsSync(`${SE}/xterm.list`) && i3b.length === 1 && i3b[0].layer === 'sys' && !banner(st3b) && st3b.replay.decision.why === 'no-entries' && st3b.rows.filter((r) => r.app === 'xterm' || /xterm/.test(r.id)).every((r) => r.id.startsWith('sys.')), { mp2: mp2.ok ? mp2.entries : mp2, rf2: tail(rf2), i3b: brief(i3b), why: st3b.replay.decision.why, rows: st3b.rows.map((r) => r.id) });
+    // ── check 5: a REAL Rebase, then hello in / sl out of the new userland, then the REAL Roll back → status() on a fresh server ──
+    const rb = slot('rebase', 'sysroot', ['a', 'bookworm']);
+    mv = mkS(); await mv.status();
+    const ph = (await mv.plan({ kind: 'apt', packages: ['hello'] })).plan;
+    const rh = ph.ok ? go(ph) : { stdout: '' };
+    const ih = ph.ok ? await AS.runAppOp(mv, 'app-install', { entryId: ph.entryId, nonce: ph.nonce, kind: 'apt', by: { kind: 'user' }, label: 'Hello' }) : null;
+    const prs = (await mv.plan({ kind: 'remove', entryId: 'sl' })).plan;
+    const rrs = prs.ok ? go(prs) : { stdout: '' };
+    const irs = prs.ok ? await AS.runAppOp(mv, 'app-remove', { entryId: 'sl', nonce: prs.nonce }) : null;
+    const i5a = await idx(mv);
+    out('d019 r1 check 5 setup: a real Rebase (sl + xterm replayed into the new userland), then hello installed into it and sl removed from it (the index follows: hello sys, no sl)', rb.log.ok && ph.ok && ph.layer === 'sys' && ih && ih.ok && prs.ok && irs && irs.ok && i5a.some((e) => e.id === 'hello' && e.layer === 'sys') && !i5a.some((e) => e.id === 'sl') && fs.existsSync(`${SYSD}/rootfs.prev/var/lib/vibespace/entries/sl.list`), { rb: rb.log.ok ? rb.log.entries : tail(rb), ph: ph.ok ? ph.entryId : ph, rh: tail(rh), prs: prs.ok ? null : prs, rrs: tail(rrs), idx: brief(i5a) });
+    const prb = (await mv.plan({ kind: 'rollback' })).plan;
+    const rrb = prb.ok ? go(prb) : { stdout: '' };
+    mv = mkS(); // a fresh server: no app-refresh record of the Roll back — status() alone must reconcile
+    const st5 = await mv.status();
+    const i5 = await idx(mv);
+    const sysRows5 = Dm ? Dm.appSystemRows(st5).map((r) => r.text) : [];
+    out('d019 r1 check 5: the REAL Roll back, then status(): the ghost hello dropped from the index and named in state.sys.gone, the unindexed sl record indexed (sys, by user), xterm untouched', prb.ok && /^= ok$/m.test(rrb.stdout) && fs.existsSync(`${SE}/sl.list`) && !fs.existsSync(`${SE}/hello.list`) && !i5.some((e) => e.id === 'hello') && i5.some((e) => e.id === 'sl' && e.layer === 'sys' && e.by.kind === 'user') && i5.some((e) => e.id === 'xterm' && e.layer === 'sys' && e.label === 'XTerm') && st5.state.sys && st5.state.sys.gone && JSON.stringify(st5.state.sys.gone.ids) === '["hello"]', { prb: prb.ok ? null : prb, rrb: tail(rrb), idx: brief(i5), gone: st5.state.sys && st5.state.sys.gone, entries: st5.entries.map((e) => `${e.id}:${e.layer || 'host'}:${e.indexed}`) });
+    const st5b = await mv.status();
+    const sysRows5b = Dm ? Dm.appSystemRows(st5b).map((r) => r.text) : [];
+    out('d019 r1 check 5: a second status() changes nothing — hello named once (gone = [hello], one dialog line), the index stable', JSON.stringify(st5b.state.sys.gone.ids) === '["hello"]' && JSON.stringify(brief(await idx(mv))) === JSON.stringify(brief(i5)) && (!Dm || sysRows5b.filter((t) => /hello/.test(t)).length === 1), { rows: sysRows5b, first: sysRows5 });
+    const prb2 = (await mv.plan({ kind: 'rollback' })).plan;
+    const rrb2 = prb2.ok ? go(prb2) : { stdout: '' };
+    const rec2 = prb2.ok ? await AS.runAppOp(mv, 'app-refresh', { nonce: prb2.nonce, id: S.SYS_RUN_ID, mode: 'rollback' }) : null;
+    const i5c = await idx(mv);
+    out('d019 r1 check 5: rolling back again through the engine\'s record (app-refresh sysroot): gone = [sl], hello indexed again — the record path agrees with status()', rec2 && rec2.ok && JSON.stringify(rec2.run.gone) === '["sl"]' && JSON.stringify(rec2.run.indexed) === '["hello"]' && !i5c.some((e) => e.id === 'sl') && i5c.some((e) => e.id === 'hello' && e.layer === 'sys') && JSON.stringify(rec2.state.sys.gone.ids) === '["sl"]', { rec2: rec2 && { ok: rec2.ok, run: rec2.run, gone: rec2.state && rec2.state.sys && rec2.state.sys.gone }, rrb2: tail(rrb2), idx: brief(i5c) });
+  }
   out('done', mounts().length === 0, null);
 })().catch((e) => { out('driver crashed', false, String(e && e.stack || e).slice(0, 1500)); process.exitCode = 1; });

@@ -3149,10 +3149,16 @@ console.log('§67 the hot-switch verdict is a measurement with its record');
 // (read-only binaries, never profiles; os.homedir() now, like test-browser-live). DERIVED over every scripts/*.mjs: no
 // `userInfo().homedir` outside a comment (test-browser-verbs' preload DESCRIBES the passwd read it pins — a comment line); a
 // literal /home/<name> is red only when <name> is a REAL account of this machine (/etc/passwd, a home under /home/) — the scripts'
-// fixture homes (/home/u, /home/user, /home/tester, /home/vibe, …) are strings, never a reach.
+// fixture homes (/home/u, /home/user, /home/tester, …) are strings, never a reach. THE FLEET IMAGE'S BUILD ACCOUNT counts as
+// real everywhere (lane fleet-image-chart): the image build runs this census (`npm run build` in the seed step) where the
+// Dockerfile's `useradd … vibe` IS an account under /home — test-machine-migrate's '/home/vibe/…' fixture failed every image
+// build of 2.369.200…210 there while every dev box passed it.
 console.log('§68 a suite reaches a home through $HOME only');
 {
   let locals = new Set(); try { locals = new Set(fs.readFileSync('/etc/passwd', 'utf8').split('\n').map((l) => l.split(':')).filter((p) => p[5] && p[5].startsWith('/home/')).map((p) => p[0])); } catch { locals = new Set(); }
+  const imageAcct = (read('deploy/docker/Dockerfile').match(/\buseradd\b[^\n;]*?\s([a-z_][a-z0-9_-]*);/) || [])[1];
+  ok(!!imageAcct, `§68 the fleet image's build account is read from deploy/docker/Dockerfile (${imageAcct || 'no useradd found'}) and judged as a real account`);
+  if (imageAcct) locals.add(imageAcct);
   const judge = (src, accounts = locals) => { const hits = []; const code = src.split('\n').map((l) => (/^\s*\/\//.test(l) ? '' : l)).join('\n'); for (const m of code.matchAll(/userInfo\(\)\s*\.\s*homedir/g)) hits.push(`${code.slice(0, m.index).split('\n').length}: userInfo().homedir`); for (const m of code.matchAll(/['"`]\/home\/([^/'"`\s]+)/g)) if (accounts.has(m[1])) hits.push(`${code.slice(0, m.index).split('\n').length}: /home/${m[1]}`); return hits; };
   const scope = fs.readdirSync('scripts').filter((f) => f.endsWith('.mjs') && f !== 'test-architecture.mjs').map((f) => 'scripts/' + f);
   const bad = scope.map((f) => [f, judge(fs.readFileSync(f, 'utf8'))]).filter(([, h]) => h.length);

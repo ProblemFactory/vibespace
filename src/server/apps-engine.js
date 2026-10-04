@@ -52,7 +52,7 @@ const REPLAY_BUSY_POLL_MS = 15 * 1000;
 // Layer 1 (design §3.2): the app system's own requests — Set up · Repair · Migrate (rebase) · Roll back · Delete the old one —
 // the USER's clicks only (never in AGENT_KINDS: an agent still only proposes an install)
 const SYS_REQUEST_KINDS = Object.freeze(['sys-create', 'repair', 'rebase', 'rollback', 'sys-drop-prev']);
-const REQUEST_KINDS = Object.freeze(['apt', 'deb', 'appimage', 'installer', 'source', 'source-remove', 'remove', 'refresh', 'adopt', 'replay', ...SYS_REQUEST_KINDS]);
+const REQUEST_KINDS = Object.freeze(['apt', 'deb', 'appimage', 'installer', 'source', 'source-remove', 'remove', 'refresh', 'adopt', 'replay', 'move', ...SYS_REQUEST_KINDS]); // design 019 M2: `move` (the host apps INTO the app system) is the USER's click
 // what an agent may PROPOSE — design 009 (owner 2026-10-02 22:22 PDT) overturns D4's "a .deb is the user's door only": a
 // vendor's .deb / AppImage by its ADDRESS or a FILE on that machine (`installer`; a `deb` / `appimage` the agent names
 // is the same ask) — never a file VibeSpace staged (that is the machine's own word, after its fetch)
@@ -80,6 +80,7 @@ function normRequest(r, { agent = false } = {}) {
   const x = r && typeof r === 'object' ? r : {};
   const kind = String(x.kind || 'apt');
   if (!REQUEST_KINDS.includes(kind)) return { ok: false, code: 'bad-request', error: `unknown request kind ${JSON.stringify(kind.slice(0, 20))}` };
+  if (agent && kind === 'move') return { ok: false, code: 'agent_forbidden', error: 'moving apps into the app system is the user\'s click (Desktop apps → Move) — an agent cannot propose a move' };
   if (agent && !AGENT_KINDS.includes(kind)) return { ok: false, code: 'agent_forbidden', error: `an agent may propose ${AGENT_KINDS.join(' / ')} — ${kind} is the user's` };
   if (kind === 'apt' || kind === 'adopt') {
     const packages = (Array.isArray(x.packages) ? x.packages : String(x.packages || '').split(/[\s,]+/)).map(String).filter(Boolean);
@@ -107,6 +108,7 @@ function normRequest(r, { agent = false } = {}) {
   if (kind === 'source-remove') { const id = String(x.sourceId || ''); return A.ENTRY_ID_RE.test(id) ? { ok: true, request: { kind, sourceId: id } } : { ok: false, code: 'bad-request', error: 'name the source' }; }
   if (kind === 'remove') { const id = String(x.entryId || ''); return A.ENTRY_ID_RE.test(id) ? { ok: true, request: { kind, entryId: id } } : { ok: false, code: 'bad-request', error: 'name the app (its entry id)' }; }
   if (kind === 'replay') return { ok: true, request: { kind, ...(x.rung === 1 || x.rung === 2 ? { rung: x.rung } : {}) } };
+  if (kind === 'move') { const ids = Array.isArray(x.entryIds) ? x.entryIds.map(String).filter((id) => A.ENTRY_ID_RE.test(id)).slice(0, 64) : null; return { ok: true, request: { kind, ...(ids && ids.length ? { entryIds: ids } : {}) } }; }
   return { ok: true, request: { kind } };
 }
 const labelOf = (rq, plan = null) => (plan && plan.label) || (rq.packages ? rq.packages.join(' ') : rq.source ? rq.source.id : rq.entryId || rq.sourceId || (rq.debPath ? path.basename(rq.debPath) : rq.name || rq.kind));
@@ -340,6 +342,7 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
       if (!v.ok) throw named(v.code, v.error);
       rq = v.request;
     }
+    if (rq.kind === 'move') return runMove(host, rq, { expectDigest, onData });
     // design 009: an AppImage and the removal of a home-level app (AppImage / uv / npm) need no root — planned fresh here,
     // the shown digest checked, then ONE app op on the machine as the user (no package slot)
     let home = null;
@@ -374,13 +377,16 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
     const pl = r.plan || {};
     const [op, params] = recordOf(rq, pl, { by: p ? { kind: 'agent', conversation: p.by.conversation, name: p.by.name } : by, why: p ? p.why : null });
     let rec;
-    try { rec = homeRec || await access.call(host, op, params); }
+    try { rec = homeRec || await access.call(host, op, pl.forgets ? { ...params, keep: true } : params); } // design 019: a move keeps who asked and why
     catch (e) {
       const err = e && e.code === 'not_run' && r.reattached ? named('not_run', 'another install was running on that machine — it finished; press Install again') : e;
       if (p) setState(p, err.code === 'not_run' ? 'proposed' : 'failed', { result: { code: err.code || 'record_failed', error: String(err.message || err).slice(0, 500), step: AC.stepOf(err.code, { recorded: true }) } }, { tell: err.code !== 'not_run' });
       throw err;
     }
-    const out = { done: true, host: host || 'local', kind: rq.kind, entryId: pl.entryId || null, label: labelOf(rq, pl), rows: (rec.rows || []).map((x) => ({ id: x.id, label: x.label })), reattached: !!r.reattached, run: rec.run || null, state: rec.state || null };
+    // design 019 M3: an install INTO the app system of exactly a host entry's packages IS its move — the host record goes now
+    let moved = null;
+    if (pl.forgets && (rq.kind === 'apt' || rq.kind === 'deb')) moved = [await moveTail(host, { id: pl.forgets, label: labelOf(rq, pl) }, onData)];
+    const out = { done: true, host: host || 'local', kind: rq.kind, entryId: pl.entryId || null, label: labelOf(rq, pl), rows: (rec.rows || []).map((x) => ({ id: x.id, label: x.label })), reattached: !!r.reattached, run: rec.run || null, state: rec.state || null, ...(moved ? { moved } : {}) };
     if (p) {
       if (userTodos && p.todoId) { try { userTodos.setStatus(p.todoId, 'done', 'apps'); } catch { /* resolved already */ } }
       setState(p, 'done', { result: { entryId: out.entryId, rows: out.rows } }, { tell: true });
@@ -388,6 +394,54 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
     lastStatus.delete(host || 'local');
     bump(host);
     return out;
+  }
+
+  /** design 019 M2 — the second step of a move: root's HOST record of `e.id` goes (no apt) only after the app system
+   *  recorded the same packages (the machine refuses `forget` otherwise). A failure leaves both records — one row (M3),
+   *  the host copy still replayed — and is said, never thrown: the install itself succeeded. */
+  async function moveTail(host, e, onData) {
+    try {
+      onData(Buffer.from(`${e.label}: no longer put back at every rebuild …\n`));
+      const r = await access.installPackage(host, { what: `app:forget:${e.id}`, planOpts: { kind: 'forget', entryId: e.id }, onData });
+      await access.call(host, 'app-forget', { entryId: e.id, nonce: (r.plan || {}).nonce });
+      return { id: e.id, label: e.label, ok: true };
+    } catch (err) {
+      onData(Buffer.from(`${e.label}: its host record stays (${(err && err.code) || 'forget_failed'}) — it is still put back at every rebuild; Move again finishes it\n`));
+      return { id: e.id, label: e.label, ok: false, code: (err && err.code) || 'forget_failed', step: 'forget', error: String((err && err.message) || err).slice(0, 300) };
+    }
+  }
+  /** design 019 M2 — MOVE (the user's click): the plan shown names each host app; per app, ONE transaction through the
+   *  machine's one package slot — the install INTO the app system (its plan fresh, `forgets` = this entry), recorded, then
+   *  `forget`. A failed install leaves the host entry replaying; an entry refused at plan time (a changed cached .deb) is
+   *  named and the others proceed; an entry the app system already holds (an interrupted move) runs only `forget`. */
+  async function runMove(host, rq, { expectDigest = null, onData = () => { } } = {}) {
+    const shown = await plan(host, rq);
+    const mp = shown.plan;
+    if (!mp || !mp.ok) throw named((mp && mp.code) || 'refused', (mp && mp.error) || 'the machine refused the move', { plan: mp });
+    if (expectDigest != null && shown.digest !== String(expectDigest)) throw named('plan_changed', 'what would run changed after it was shown — nothing ran', { plan: mp, digest: shown.digest });
+    bump(host);
+    const moved = [];
+    for (const e of mp.entries || []) {
+      if (e.refused) { onData(Buffer.from(`${e.label}: not moved — ${e.refused.error}\n`)); moved.push({ id: e.id, label: e.label, ok: false, code: e.refused.code, step: 'plan', error: e.refused.error }); continue; }
+      if (!e.recorded) {
+        try {
+          onData(Buffer.from(`moving ${e.label} into the app system …\n`));
+          const r = await access.installPackage(host, { what: whatOf(e.request, { label: e.label }), planOpts: e.request, onData });
+          const pl = r.plan || {};
+          if (pl.forgets !== e.id) throw named('not_moved', `the plan for ${e.id} was not its move (${pl.layer === 'sys' ? 'another entry holds those packages' : 'the app system is not usable'}) — nothing is forgotten`);
+          const [op, params] = recordOf(e.request, pl, { by: { kind: 'user' } });
+          await access.call(host, op, { ...params, keep: true });
+        } catch (err) {
+          onData(Buffer.from(`${e.label}: not moved (${(err && err.code) || 'install_failed'}) — it is still put back at every rebuild\n`));
+          moved.push({ id: e.id, label: e.label, ok: false, code: (err && err.code) || 'install_failed', step: 'install', error: String((err && err.message) || err).slice(0, 300) });
+          continue;
+        }
+      }
+      moved.push(await moveTail(host, e, onData));
+    }
+    lastStatus.delete(host || 'local');
+    bump(host);
+    return { done: true, host: host || 'local', kind: 'move', entryId: 'move', label: 'move', rows: [], moved, reattached: false, run: null, state: null };
   }
 
   /** THE ONE CLICK (design 009 §2 A): the card's Install, nothing in between. `shown` = the digest of the card the user

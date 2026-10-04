@@ -29,8 +29,18 @@
 //   kubectl patch); the same model on the 2.369.200 chart REPRODUCES the
 //   field finding (the key stays projected). CONTROL: a copy that renders
 //   the override Secret through `stringData:` keeps the dropped key.
+// I THE APP-SYSTEM SWITCH (lane fleet-image-chart, App persistence Layer 1):
+//   appSystem.enabled off (the default) ⇒ no VIBESPACE_APP_SYSTEM, no
+//   container securityContext, and A / C / D render BYTE-IDENTICAL to the
+//   pre-lane chart (2.369.210) when the history is present; on ⇒ the env "1"
+//   + the $sysadmin branch FORCED (capabilities.add SYS_ADMIN + AppArmor
+//   Unconfined), never a seccompProfile; on together with fuse / cephfs ⇒ ONE
+//   SYS_ADMIN (no duplicate), with tun ⇒ SYS_ADMIN + NET_ADMIN; the presets
+//   volume stays present by default either way.
 // CONTROLS (chart copies in scratch): a subPath mount, a source without
-//   optional, an env rendered beside the volume — each turns its assert red.
+//   optional, an env rendered beside the volume — each turns its assert red;
+//   the app system's env without the forced caps, a second SYS_ADMIN, the env
+//   rendered while off, a seccompProfile — each turns its I assert red.
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -43,6 +53,7 @@ const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
 const CHART = path.join(REPO, 'deploy/helm/vibespace-user');
 const BASE_SHA = 'b924041f';            // 2.369.199 — the last chart before the volume form
 const PRE_FIX_SHA = '0e7dc5b4';         // 2.369.200 — the volume form with the override in the release Secret's stringData (B-8145)
+const PRE_APPSYS_SHA = '8d934bb1';      // 2.369.210 — the last chart before appSystem.enabled
 const REL_OV = 'vibespace-alice-preset-override';
 const ROOT = scratch('cpr');
 fs.rmSync(ROOT, { recursive: true, force: true }); fs.mkdirSync(ROOT, { recursive: true });
@@ -226,6 +237,56 @@ const A2 = { ...A, gdrive: { clients: [] } };   // the migration step: the legac
   }
 }
 
+console.log('I the app-system switch (appSystem.enabled)');
+/** The switch's verdict on a render, as named failures ([] = good): `on` = the env expected, `caps` = capabilities.add expected (in order). */
+function appSysVerdict(out, { on, caps }) {
+  const dep = depOf(out); const bad = [];
+  const n = envNames(dep).filter((e) => e === 'VIBESPACE_APP_SYSTEM').length;
+  if (on && !/- name: VIBESPACE_APP_SYSTEM\n\s+value: "1"\n/.test(dep)) bad.push('VIBESPACE_APP_SYSTEM "1" missing');
+  if (!on && n) bad.push('VIBESPACE_APP_SYSTEM rendered while off');
+  if (n > 1) bad.push(`VIBESPACE_APP_SYSTEM rendered ${n} times`);
+  const blocks = [...dep.matchAll(/^\s+capabilities:\n\s+add: (\[.*\])$/gm)];
+  const got = blocks.length ? JSON.parse(blocks[0][1]) : [];
+  if (blocks.length > 1) bad.push(`${blocks.length} capabilities blocks`);
+  if (new Set(got).size !== got.length) bad.push(`a duplicate capability ${JSON.stringify(got)}`);
+  else if (got.join() !== caps.join()) bad.push(`capabilities.add ${JSON.stringify(got)}, want ${JSON.stringify(caps)}`);
+  const aa = /appArmorProfile:\n\s+type: Unconfined$/m.test(dep);
+  if (caps.includes('SYS_ADMIN') !== aa) bad.push(aa ? 'AppArmor Unconfined without SYS_ADMIN' : 'SYS_ADMIN without AppArmor Unconfined');
+  if (/^\s+seccompProfile:/m.test(dep)) bad.push('a seccompProfile is set (it must allow mount / unshare / chroot — the chart sets none)');
+  return bad;
+}
+const ON = ['--set', 'appSystem.enabled=true'];
+const say = (b) => (b.length ? ' — ' + b.join('; ') : '');
+{
+  const vOff = appSysVerdict(rC, { on: false, caps: [] });
+  ok(!vOff.length && !/^\s+securityContext:\n\s+capabilities:/m.test(depOf(rC)), `off (the default): no VIBESPACE_APP_SYSTEM, no capability, no AppArmor override${say(vOff)}`);
+  ok(render(CHART, C, ['--set', 'appSystem.enabled=false']) === rC, 'appSystem.enabled=false renders the same as leaving it out');
+  const have = spawnSync('git', ['-C', REPO, 'cat-file', '-e', `${PRE_APPSYS_SHA}^{commit}`], { env: gitEnvFrom(process.env) }).status === 0;
+  if (!have) console.log(`  … SKIP the byte comparison with the pre-switch chart: ${PRE_APPSYS_SHA} is not in this checkout's history (a shallow clone)`);
+  else {
+    const preDir = path.join(ROOT, 'preappsys'); fs.mkdirSync(preDir, { recursive: true });
+    spawnSync('tar', ['-x', '-C', preDir], { input: execFileSync('git', ['-C', REPO, 'archive', PRE_APPSYS_SHA, 'deploy/helm/vibespace-user'], { env: gitEnvFrom(process.env), maxBuffer: 16 << 20 }) });
+    const PRE = path.join(preDir, 'deploy/helm/vibespace-user');
+    ok([A, C, D].every((v) => render(PRE, v) === render(CHART, v)), `off renders A, C, D BYTE-IDENTICAL to the ${PRE_APPSYS_SHA} chart — a release that never sets it sees no change on upgrade`);
+    const noComments = (o) => o.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+    const shapes = [['fuse', ['--set', 'fuse.enabled=true']], ['cephfs', ['--set', 'cephfs.mons=10.0.0.1', '--set', 'cephfs.secret=k']], ['tun', ['--set', 'tun.enabled=true']]];
+    ok(shapes.every(([, x]) => noComments(render(PRE, C, x)) === noComments(render(CHART, C, x))), `fuse / cephfs / tun alone render as the ${PRE_APPSYS_SHA} chart did, comment lines aside (the shared securityContext essay grew)`);
+  }
+  const rOn = render(CHART, C, ON);
+  const vOn = appSysVerdict(rOn, { on: true, caps: ['SYS_ADMIN'] });
+  ok(!vOn.length, `on: VIBESPACE_APP_SYSTEM "1" + capabilities.add [SYS_ADMIN] + AppArmor Unconfined, no seccompProfile — the $sysadmin branch forced without fuse or cephfs${say(vOn)}`);
+  const vFuse = appSysVerdict(render(CHART, C, [...ON, '--set', 'fuse.enabled=true']), { on: true, caps: ['SYS_ADMIN'] });
+  ok(!vFuse.length && /github\.com\/fuse: 1/.test(depOf(render(CHART, C, [...ON, '--set', 'fuse.enabled=true']))), `on + fuse: ONE SYS_ADMIN (no duplicate), one AppArmor override, the fuse device still requested${say(vFuse)}`);
+  const vCeph = appSysVerdict(render(CHART, C, [...ON, '--set', 'cephfs.mons=10.0.0.1', '--set', 'cephfs.secret=k']), { on: true, caps: ['SYS_ADMIN'] });
+  ok(!vCeph.length, `on + cephfs: ONE SYS_ADMIN${say(vCeph)}`);
+  const vTun = appSysVerdict(render(CHART, C, [...ON, '--set', 'tun.enabled=true']), { on: true, caps: ['SYS_ADMIN', 'NET_ADMIN'] });
+  ok(!vTun.length, `on + tun: [SYS_ADMIN, NET_ADMIN]${say(vTun)}`);
+  const vTunOff = appSysVerdict(render(CHART, C, ['--set', 'tun.enabled=true']), { on: false, caps: ['NET_ADMIN'] });
+  ok(!vTunOff.length, `(tun alone, switch off: [NET_ADMIN] and no AppArmor override — the switch leaks into no other branch)${say(vTunOff)}`);
+  const vPre = volumeVerdict(rOn, { release: REL_OV });
+  ok(!vPre.length && !volumeVerdict(rC, { release: REL_OV }).length, `the presets volume is present by default with the switch on and off${say(vPre)}`);
+}
+
 console.log('CONTROLS (chart copies)');
 const sub = chartCopy('subpath', (s) => s.replace('              mountPath: {{ $presets.mountPath | default "/etc/vibespace/presets" }}\n              readOnly: true', '              mountPath: {{ $presets.mountPath | default "/etc/vibespace/presets" }}/integrations.json\n              subPath: integrations.json\n              readOnly: true'));
 ok(volumeVerdict(render(sub, A), { release: REL_OV }).some((b) => /subPath/.test(b)), 'CONTROL: a subPath mount (the form that never updates) is RED');
@@ -236,6 +297,15 @@ ok(volumeVerdict(render(both, A), { release: REL_OV }).some((b) => /VIBESPACE_IN
 const sdata = chartCopy('stringdata', (s) => s.replace('data:\n  {{- if $ovG }}\n  gdriveClients: {{ $ovG | toJson | b64enc | quote }}', 'stringData:\n  {{- if $ovG }}\n  gdriveClients: {{ $ovG | toJson | quote }}'));
 const us = upgrade([sdata, A], [sdata, A2]);
 ok(us.before.includes('gdriveClients') && us.after.includes('gdriveClients'), `CONTROL: an override Secret rendered through stringData KEEPS the dropped gdriveClients projected (after: ${us.after.join()}) — H's first assert is red on it`);
+
+const capsOff = chartCopy('appsys-nocaps', (s) => s.replace('(and .Values.cephfs .Values.cephfs.mons) $appsys }}', '(and .Values.cephfs .Values.cephfs.mons) }}'));
+ok(appSysVerdict(render(capsOff, C, ON), { on: true, caps: ['SYS_ADMIN'] }).some((b) => /capabilities\.add|SYS_ADMIN without/.test(b)), 'CONTROL: the env without the forced $sysadmin branch (no SYS_ADMIN, no AppArmor override) is RED');
+const capsDup = chartCopy('appsys-dup', (s) => s.replace('add: [{{ if $sysadmin }}"SYS_ADMIN"', 'add: [{{ if $appsys }}"SYS_ADMIN", {{ end }}{{ if $sysadmin }}"SYS_ADMIN"'));
+ok(appSysVerdict(render(capsDup, C, [...ON, '--set', 'fuse.enabled=true']), { on: true, caps: ['SYS_ADMIN'] }).some((b) => /duplicate/.test(b)), 'CONTROL: a second SYS_ADMIN for the app system beside fuse is RED');
+const envOn = chartCopy('appsys-always', (s) => s.replace('{{- if $appsys }}\n            # App persistence Layer 1', '{{- if true }}\n            # App persistence Layer 1'));
+ok(appSysVerdict(render(envOn, C), { on: false, caps: [] }).some((b) => /while off/.test(b)), 'CONTROL: VIBESPACE_APP_SYSTEM rendered while the switch is off is RED');
+const secc = chartCopy('appsys-seccomp', (s) => s.replace('            appArmorProfile:\n              type: Unconfined\n', '            appArmorProfile:\n              type: Unconfined\n            seccompProfile:\n              type: RuntimeDefault\n'));
+ok(appSysVerdict(render(secc, C, ON), { on: true, caps: ['SYS_ADMIN'] }).some((b) => /seccompProfile/.test(b)), 'CONTROL: a seccompProfile on the container is RED');
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

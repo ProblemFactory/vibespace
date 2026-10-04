@@ -67,6 +67,7 @@ export function appDialogTitle(request, name) {
   if (r.kind === 'source-remove') return t('Remove a package source from {machine}', { machine: name });
   if (r.kind === 'deb') return t('Install a .deb file on {machine}', { machine: name });
   if (r.kind === 'replay') return t('Put your apps back on {machine}', { machine: name });
+  if (r.kind === 'move') return t('Move your apps into the app system on {machine}', { machine: name }); // design 019 M2
   if (r.kind === 'sys-create') return t('Set up the app system on {machine}', { machine: name }); // Layer 1 (design §3.2)
   if (r.kind === 'repair') return t('Repair the app system on {machine}', { machine: name });
   if (r.kind === 'rebase') return t('Move your apps to the new system on {machine}', { machine: name });
@@ -77,7 +78,7 @@ export function appDialogTitle(request, name) {
 /** The go button's label for a plan. */
 export function appGoLabel(plan) {
   const k = plan && plan.kind;
-  return k === 'remove' || k === 'source-remove' ? t('Remove') : k === 'refresh' ? t('Refresh') : k === 'adopt' ? t('Keep them') : k === 'source' ? t('Add the source') : k === 'replay' ? t('Put back') : k === 'sys-create' ? t('Set up') : k === 'repair' ? t('Repair') : k === 'rebase' ? t('Migrate') : k === 'rollback' ? t('Roll back') : k === 'sys-drop-prev' ? t('Delete') : t('Install');
+  return k === 'move' ? tc('apps', 'Move') : k === 'remove' || k === 'source-remove' ? t('Remove') : k === 'refresh' ? t('Refresh') : k === 'adopt' ? t('Keep them') : k === 'source' ? t('Add the source') : k === 'replay' ? t('Put back') : k === 'sys-create' ? t('Set up') : k === 'repair' ? t('Repair') : k === 'rebase' ? t('Migrate') : k === 'rollback' ? t('Roll back') : k === 'sys-drop-prev' ? t('Delete') : t('Install');
 }
 /** The sentence above the commands. */
 export function appPlanNote(plan, name) {
@@ -93,6 +94,11 @@ export function appDoneText(end, name) {
   if (!end) return '';
   const unsaved = unsavedText(end.run && end.run.missing);
   if (unsaved) return `${appDoneText({ ...end, run: null }, name)} — ${unsaved}`;
+  // design 019 M2/M5: a move names what moved and what did not; a result card says what an app system install cannot do
+  const mv = Array.isArray(end.moved) ? end.moved : null;
+  if (end.kind === 'move' && mv) return movedText(mv, name) || t('Nothing was moved');
+  const notes = [mv ? movedText(mv, name) : '', ...resultNotes(end.run)].filter(Boolean);
+  if (notes.length) return [appDoneText({ ...end, moved: null, run: { ...end.run, services: [], layer: null } }, name), ...notes].join(' — ');
   if (end.kind === 'remove') return t('{app} is removed from {machine}', { app: end.label || end.entryId || '', machine: name });
   if (end.kind === 'refresh') return t('The apps on {machine} are refreshed', { machine: name });
   if (end.kind === 'source') return t('The package source {app} is added to {machine}', { app: end.label || '', machine: name });
@@ -102,6 +108,20 @@ export function appDoneText(end, name) {
   return (end.rows || []).length ? t('{app} is installed on {machine} — it is in Apps', { app: end.rows.map((r) => r.label).join(', '), machine: name }) : t('{app} is installed on {machine}', { app: end.label || '', machine: name });
 }
 
+/** design 019 M2: "X moved into the app system" + "Not moved: Y" (each by its label). PURE. */
+export function movedText(moved, name) {
+  const ok = (moved || []).filter((x) => x && x.ok).map((x) => x.label || x.id), no = (moved || []).filter((x) => x && !x.ok).map((x) => x.label || x.id);
+  return [ok.length ? t('{apps} moved into the app system on {machine}', { apps: ok.join(', '), machine: name }) : '', no.length ? t('Not moved: {apps}', { apps: no.join(', ') }) : ''].filter(Boolean).join(' — ');
+}
+/** design 019 M5: the result card's honest notes — a background service nothing starts; an app-system install that
+ *  exported nothing launchable. PURE → sentences. */
+export function resultNotes(run) {
+  const r = run || {};
+  const out = [];
+  if ((r.services || []).length) out.push(t('This package brings a background service; nothing starts it — use a kept-up job'));
+  if (r.layer === 'sys' && r.exports === 0) out.push(t('Installed; nothing can be started from outside — its files are only in the app system'));
+  return out;
+}
 /** THE PLAN'S FACTS (the block above the commands): who proposed it and why, the packages, the sizes, a source's key
  *  fingerprint, a .deb's own install scripts, and how the app comes back after a rebuild. textContent only. */
 export function appPlanBlock(plan, { proposal = null } = {}) {
@@ -127,6 +147,8 @@ export function appPlanBlock(plan, { proposal = null } = {}) {
       d.appendChild(el('div', 'app-plan-pkg-list', names.join(' ')));
       box.appendChild(d);
     }
+    if ((plan.moves || []).length) line(t('This moves {app} into the app system — it is no longer reinstalled at every rebuild', { app: plan.moves.map((x) => x.label).join(', ') }), 'app-plan-move'); // design 019 M3
+    if ((plan.overlap || []).length) line(t('{pkgs} is also installed on the base ({apps})', { pkgs: [...new Set(plan.overlap.map((x) => x.package))].join(' '), apps: [...new Set(plan.overlap.map((x) => x.entry))].join(', ') }), 'app-plan-overlap');
     line(plan.layer === 'sys' ? t('It goes into the app system on this machine’s disk — after a rebuild it is simply there, nothing is reinstalled.') : t('After this machine is rebuilt, VibeSpace puts it back from its saved packages — about {s} s after the server starts.', { s: plan.replaySeconds || 1 }), 'app-plan-replay');
   } else if (k === 'source' && plan.sourceSpec) {
     line(t('Address: {uri}', { uri: plan.sourceSpec.uris.join(' ') }), 'app-plan-mono');
@@ -135,8 +157,12 @@ export function appPlanBlock(plan, { proposal = null } = {}) {
     line(t('Compare the fingerprint with the one the publisher shows. Packages come from this source only when you install them later.'), 'app-plan-warn');
   } else if (k === 'remove') {
     line((plan.removes || []).length ? t('Removes: {pkgs}', { pkgs: plan.removes.join(' ') }) : t('Its packages stay (another of your apps uses them); only the record goes.'));
+  } else if (k === 'move') { // design 019 M2
+    for (const x of plan.entries || []) line(x.refused ? t('{app}: not moved — {why}', { app: x.label, why: x.refused.error }) : x.recorded ? t('{app}: already in the app system — only its record on the base goes', { app: x.label }) : `${x.label}: ${(x.packages || []).join(' ')}`, x.refused ? 'app-plan-warn' : 'app-plan-move-row');
+    line(t('Each app goes into the app system first; only then is it no longer reinstalled at every rebuild. Its programs stay on the base until the next rebuild.'), 'app-plan-replay');
   } else if (k === 'refresh') {
     const u = plan.updates || [];
+    if ((plan.skippedHost || []).length) line(t('{n} apps on the base are not in this update — Move… puts them into the app system: {names}', { n: plan.skippedHost.length, names: plan.skippedHost.map((x) => x.label).join(', ') }), 'app-plan-warn app-plan-skipped'); // design 019 M5
     line(u.length ? t('{n} updates: {list}', { n: u.length, list: u.slice(0, 30).map((x) => `${x.package} ${x.from} → ${x.to}${x.origin ? ` (${x.origin})` : ''}`).join(', ') }) : t('Everything is up to date — Refresh still checks again and saves the packages.'));
   }
   return box;
@@ -182,6 +208,10 @@ export function appSystemRows(st) {
   const a = st && st.appSystem;
   if (!a || !a.enabled) return [];
   const out = [];
+  const mv = appsMoveModel(st); // design 019 M2: the host apps still reinstalled at every rebuild — Move…
+  if (mv) out.push({ text: mv.text, buttons: [{ label: mv.label, request: mv.request, primary: true }], move: true });
+  const gone = st.state && st.state.sys && st.state.sys.gone;
+  if (gone && (gone.ids || []).length) out.push({ text: t('Not in the app system you went back to: {names}', { names: gone.ids.join(', ') }), buttons: [] }); // design 019 M1
   if (a.canCreate) out.push({ text: t('Keep the apps you install in an app system on this machine’s disk — after a rebuild they are simply there.'), buttons: [{ label: t('Set up…'), request: { kind: 'sys-create' }, primary: true }] });
   if (a.blocked === 'arch') out.push({ text: t('Your app system was made for another kind of processor — its apps cannot run here until you migrate it.'), buttons: [] });
   else if (a.created && a.blocked && a.blocked !== 'not-enabled') out.push({ text: t('Your app system cannot be used right now ({why}).', { why: a.blocked }), buttons: [] });
@@ -189,6 +219,22 @@ export function appSystemRows(st) {
   return out;
 }
 
+/** design 019 M2: the banner while the app system is usable AND root still replays host apps at every rebuild. PURE. */
+export function appsMoveModel(st) {
+  const a = st && st.appSystem;
+  const n = ((st && st.entries) || []).filter((e) => e && !e.layer).length;
+  if (!a || !a.usable || !n) return null;
+  return { text: n === 1 ? t('1 app is reinstalled at every rebuild — move it into the app system') : t('{n} apps are reinstalled at every rebuild — move them into the app system', { n }), label: tc('apps', 'Move…'), request: { kind: 'move' }, n };
+}
+/** design 019 M4: the drift card's acts — with a usable app system the PRIMARY is an install into it (it stays after a
+ *  rebuild); Adopt on the base (reinstalled at every rebuild) is the secondary. PURE. */
+export function driftActs(st, pk) {
+  const packages = (pk || []).slice(0, 32);
+  const adopt = { label: t('Adopt…'), title: t('Keeps them: VibeSpace saves their packages so they come back after a rebuild'), request: { kind: 'adopt', packages } };
+  if (!(st && st.appSystem && st.appSystem.usable)) return [{ ...adopt, primary: true }];
+  return [{ label: t('Install into the app system…'), title: t('It stays after a rebuild — nothing is reinstalled'), request: { kind: 'apt', packages }, primary: true },
+    { ...adopt, label: t('Keep on the base only…'), title: t('Reinstalled at every rebuild') }];
+}
 /** "N updates · last refreshed N days ago" (D5) — never an automatic upgrade. */
 export function updatesChipText(st, now = Date.now()) {
   const n = st && st.updates && Number.isFinite(st.updates.count) ? st.updates.count : null;
@@ -296,9 +342,7 @@ export function renderAppsSection(app, root, { host = 'local', machine = null, o
       const pk = st.drift.added.map((x) => x.package);
       const row = el('div', 'app-sec-row app-sec-drift-row');
       row.appendChild(el('span', 'app-sec-label', t('Installed outside VibeSpace — lost when this machine is rebuilt: {pkgs}', { pkgs: pk.slice(0, 12).join(' ') + (pk.length > 12 ? ` (+${pk.length - 12})` : '') })));
-      const ad = btn(t('Adopt…'), 'file-tool-btn app-sec-adopt', t('Keeps them: VibeSpace saves their packages so they come back after a rebuild'));
-      ad.onclick = () => showInstallDialog(m, { what: 'app', request: { kind: 'adopt', packages: pk.slice(0, 32) }, onDone: done });
-      row.appendChild(ad);
+      for (const a0 of driftActs(st, pk)) { const ad = btn(a0.label, a0.request.kind === 'adopt' ? 'file-tool-btn app-sec-adopt' : 'file-tool-btn app-sec-drift-sys', a0.title); ad.onclick = () => showInstallDialog(m, { what: 'app', request: a0.request, onDone: done }); row.appendChild(ad); } // design 019 M4
       drift.appendChild(row);
     }
     // the installed entries + package sources

@@ -75,8 +75,8 @@ s3:
 
 # All-flash CephFS "My storage" (native kernel mount, per-user quota enforced
 # on the CephFS subdir). REPLACES the S3 "My storage" when both are set.
-# Requires the same securityContext as fuse (SYS_ADMIN + AppArmor Unconfined)
-# + passwordless sudo (in the image). The scoped cephx key is minted with
+# Requires the same securityContext as fuse / appSystem (SYS_ADMIN + AppArmor
+# Unconfined) + passwordless sudo (in the image). The scoped cephx key is minted with
 # `ceph fs authorize <fs> client.<user> <path> rw`.
 cephfs:
   mons: ""       # comma list, e.g. "10.0.0.1,10.0.0.2,10.0.0.3"
@@ -84,6 +84,22 @@ cephfs:
   path: ""       # the per-user subtree, e.g. "/vibespace/<user>"
   user: ""       # scoped cephx client name (without the "client." prefix)
   secret: ""     # the cephx key (base64, from `ceph auth get-key client.<user>`)
+
+# The app system — App persistence Layer 1 (VibeSpace ≥ 2.369.210 inside the
+# pod; docs/design-app-persistence.zh.md §3.2). enabled: true sets
+# VIBESPACE_APP_SYSTEM=1, so the server installs its sudo helper
+# (/usr/local/libexec/vibespace/vs-sysroot-enter) + a sudoers drop-in after
+# listen, and Desktop apps → Your installed apps offers "Set up…": a Debian
+# userland on the home PVC (~/.vibespace/sysroot) that apps install into and
+# that survives pod rebuilds. It FORCES the same securityContext as fuse /
+# cephfs (capabilities.add SYS_ADMIN + AppArmor Unconfined — the helper uses
+# unshare, bind mounts and chroot); seccomp stays unset. Needs an image with
+# sudo + debootstrap (and, for an offline Set up, the baked
+# /usr/share/vibespace/sysroot-minbase.tar.gz) — deploy/docker/Dockerfile.
+# false (default) = no env, no extra capability: the pod is exactly as before.
+# Turning it off later greys the rows; the userland stays on the PVC.
+appSystem:
+  enabled: false
 
 # /dev/fuse for in-container rclone mounts (Storage/Mounts UI). Requires a
 # fuse device plugin on the cluster exposing the resource named below

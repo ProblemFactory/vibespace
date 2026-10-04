@@ -4,8 +4,27 @@
 # runs from there, so users can fork/modify VibeSpace and it survives pod
 # rebuilds. See docs/design-k8s-deployment.md §4.
 #
-#   build:  docker build -f deploy/docker/Dockerfile -t <registry>/vibespace:<ver> .
+#   build:  docker build -f deploy/docker/Dockerfile --build-arg VIBESPACE_IMAGE_VERSION=<ver> -t <registry>/vibespace:<ver> .
 #   (build context = repo root)
+
+# ── Rung A of the app system (App persistence Layer 1, docs/design-app-persistence.zh.md §3.2) ──
+# A minbase userland of THIS image's own release and arch (the same base image ⇒ the same VERSION_CODENAME and
+# dpkg architecture as the final stage), taken in its OWN stage so the layer is cached apart from everything below
+# (it changes only with the base image or the mirror argument). The server unpacks it into
+# ~/.vibespace/sysroot/rootfs on Set up… (offline, seconds) instead of running debootstrap there (rung B, ~20 s +
+# network). debootstrap needs no extra privilege for a minbase here: its proc mount inside the target fails as a
+# warning only, and nothing in the tarball depends on it. Dropped before the tar: debootstrap's download cache
+# (var/cache/apt/archives/*.deb) and the package lists — Set up runs apt-get update inside the app system first anyway.
+FROM node:22-bookworm-slim AS minbase
+ARG DEBIAN_MIRROR=http://deb.debian.org/debian
+RUN set -e; . /etc/os-release; test -n "$VERSION_CODENAME"; \
+    apt-get update && apt-get install -y --no-install-recommends debootstrap ca-certificates; \
+    rm -rf /var/lib/apt/lists/*; \
+    debootstrap --variant=minbase "$VERSION_CODENAME" /sysroot "$DEBIAN_MIRROR"; \
+    test -f /sysroot/etc/os-release; \
+    rm -f /sysroot/var/cache/apt/archives/*.deb; rm -rf /sysroot/var/lib/apt/lists/*; \
+    mkdir -p /out && tar -C /sysroot -czpf /out/sysroot-minbase.tar.gz --numeric-owner . && rm -rf /sysroot
+
 FROM node:22-bookworm-slim
 
 # Runtime deps (same set as the single-container Dockerfile):
@@ -13,10 +32,12 @@ FROM node:22-bookworm-slim
 # git/curl = tooling + self-update; python3/make/g++ = node-pty native fallback;
 # fontconfig = /api/fonts; openssh-client = remote hosts; rclone/fuse3 = S3 mounts.
 # tini = pid 1 (see ENTRYPOINT below): a real init that REAPS every orphan.
+# sudo (with visudo — the app system's boot install checks its drop-in with `visudo -cf` before installing it) +
+# debootstrap = the app system's rung B (a userland built on the PVC when no tarball is baked; found in /usr/sbin).
 RUN apt-get update && apt-get install -y --no-install-recommends \
       dtach procps psmisc zip unzip tar git curl ca-certificates \
       python3 make g++ fontconfig openssh-client rclone fuse3 sudo ceph-common kmod \
-      tini \
+      tini debootstrap \
     && rm -rf /var/lib/apt/lists/*
 
 # In-container desktop (noVNC through VibeSpace's own auth — src/vnc.js):
@@ -172,6 +193,21 @@ RUN git clone https://github.com/ProblemFactory/vibespace /opt/vibespace-dist \
 COPY deploy/docker/entrypoint.sh /usr/local/bin/vibespace-entrypoint
 COPY deploy/docker/boot-root.sh /usr/local/bin/vibespace-boot
 RUN chmod +x /usr/local/bin/vibespace-entrypoint /usr/local/bin/vibespace-boot
+
+# The app system's rung A tarball (the minbase stage above) + THE BASE-ID STAMP (design §3.7): image.json
+# {version, built, codename} and base-packages.tsv (every installed package of THIS image: name, arch, version — tab
+# separated, sorted; the apt layers above are the last to install any) so "the base moved" is a fact, never a guess.
+# The build fails by name when /etc/os-release carries no VERSION_CODENAME (the app system's identity and its Rebase
+# verdict read it) or when sudo / visudo / debootstrap / the tarball is missing.
+COPY --from=minbase /out/sysroot-minbase.tar.gz /usr/share/vibespace/sysroot-minbase.tar.gz
+ARG VIBESPACE_IMAGE_VERSION=dev
+RUN set -e; . /etc/os-release; \
+    if [ -z "${VERSION_CODENAME:-}" ]; then echo "/etc/os-release carries no VERSION_CODENAME" >&2; exit 1; fi; \
+    for f in /usr/bin/sudo /usr/sbin/visudo /usr/sbin/debootstrap; do [ -x "$f" ] || { echo "missing $f" >&2; exit 1; }; done; \
+    tar -tzf /usr/share/vibespace/sysroot-minbase.tar.gz ./etc/os-release > /dev/null; \
+    printf '{"version":"%s","built":"%s","codename":"%s"}\n' "$VIBESPACE_IMAGE_VERSION" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$VERSION_CODENAME" > /usr/share/vibespace/image.json; \
+    dpkg-query -W -f='${db:Status-Abbrev}\t${Package}\t${Architecture}\t${Version}\n' | awk -F'\t' '$1 ~ /^ii/ { print $2 "\t" $3 "\t" $4 }' | sort > /usr/share/vibespace/base-packages.tsv; \
+    [ -s /usr/share/vibespace/base-packages.tsv ]
 
 # Container starts as ROOT for one purpose: the boot wrapper renames `vibe`
 # to the instance name (guarded — only when the PVC is mounted at the new

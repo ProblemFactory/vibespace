@@ -151,7 +151,7 @@ const machine = (extra = {}) => DS.install({ dataDir: path.join(root, `m${++seq}
 console.log('§1 the census');
 const OPS = DS.DESKTOP_SERVE_OPS;
 const AS = require('../src/app-serve.js');
-ok(Array.isArray(OPS) && Object.isFrozen(OPS) && JSON.stringify(OPS) === JSON.stringify(['facts', 'launch', 'stop', 'status', 'list', 'windows', 'fit', 'keep-alive', 'relaunch', ...AS.APP_OPS]) && JSON.stringify(AS.APP_OPS) === JSON.stringify(['app-status', 'app-plan', 'app-install', 'app-remove', 'app-refresh', 'app-adopt-drift', 'app-fetch', 'app-unstage']), `the closed op set is the design's nine + Layer 0's eight app ops (design 009: app-fetch, app-unstage) (${OPS.join(' ')})`);
+ok(Array.isArray(OPS) && Object.isFrozen(OPS) && JSON.stringify(OPS) === JSON.stringify(['facts', 'launch', 'stop', 'status', 'list', 'windows', 'fit', 'keep-alive', 'relaunch', ...AS.APP_OPS]) && JSON.stringify(AS.APP_OPS) === JSON.stringify(['app-status', 'app-plan', 'app-install', 'app-remove', 'app-refresh', 'app-adopt-drift', 'app-fetch', 'app-unstage', 'app-forget']), `the closed op set is the design's nine + Layer 0's nine app ops (design 009: app-fetch, app-unstage; design 019: app-forget) (${OPS.join(' ')})`);
 const serveSrc = read('src/desktop-serve.js');
 const runnerSrc = serveSrc.slice(serveSrc.indexOf('async function runDesktopServeOp('));
 const appRunnerSrc = read('src/app-serve.js').slice(read('src/app-serve.js').indexOf('async function runAppOp('));

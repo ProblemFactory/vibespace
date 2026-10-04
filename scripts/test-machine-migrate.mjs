@@ -36,7 +36,7 @@ fs.writeFileSync(path.join(dataDir, 'host-mounts.json'), JSON.stringify({
   mounts: [{ id: 'hm-1111', hostId: 'host-11223344', folder: '/srv/x', mountpoint: '/home/u/vibespace-remote/x', mode: 'ro', os: 'linux', method: 'rclone-webdav', tokenId: 'tk1', tunnelPort: 40001, mountedAt: 3 }],
 }));
 fs.writeFileSync(path.join(dataDir, 'device-mounts.json'), JSON.stringify({
-  mounts: [{ id: 'dvm-2222', deviceId: 'mac1', remotePath: '/Users/me/docs', mountpoint: '/home/vibe/vibespace-devices/mac1-docs', createdAt: 4 }],
+  mounts: [{ id: 'dvm-2222', deviceId: 'mac1', remotePath: '/Users/me/docs', mountpoint: '/home/u/vibespace-devices/mac1-docs', createdAt: 4 }],
 }));
 
 // ── run the migrations the way server.js does (hosts first, then mounts) ──

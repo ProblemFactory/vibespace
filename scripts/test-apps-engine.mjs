@@ -679,5 +679,134 @@ console.log('§12 apps-joint r1 — a crash mid-install settles (F3), a failed d
   ok(it && faces.every((s) => { HC.HIDDEN_RE.lastIndex = 0; return typeof s === 'string' && !HC.HIDDEN_RE.test(s) && !/[\u0000-\u001f]/.test(s); }) && it.card.app.labels.zh === '微信', 'F4 (V3): a vendor\'s .desktop names reach the view, the card and the For-you line with no hidden / reordering / control character', faces);
 }
 
+console.log('§13 design 019 — MOVE the host apps into the app system: the REAL machine half (src/app-serve.js) over a fake root (a fixture tree of this user stands in for root\'s: rootUid)');
+{
+  const AS = require('../src/app-serve.js'), SY = require('../src/app-system.js'), DA = require('../src/desktop-apps.js'), AM = require('../src/app-manifest.js');
+  const me = process.getuid();
+  process.umask(0o022); // root's tree is never group-writable (the machine half refuses one that is)
+  const base = path.join(dir, 'move'), home = path.join(base, 'home'), stateDir = path.join(base, 'state');
+  const appsD = path.join(home, '.vibespace/apps'), HE = path.join(appsD, 'sys/entries'), RF = path.join(home, '.vibespace/sysroot/rootfs'), SE = path.join(RF, 'var/lib/vibespace/entries');
+  for (const d of [HE, SE, path.join(RF, 'etc'), stateDir, path.join(base, 'eng'), path.join(appsD, 'debs')]) fs.mkdirSync(d, { recursive: true, mode: 0o755 });
+  fs.chmodSync(appsD, 0o700);
+  fs.writeFileSync(path.join(RF, 'etc/vibespace-sysroot.json'), JSON.stringify({ v: 1, id: 'debian', codename: 'bookworm', arch: 'amd64', createdFrom: 'debootstrap', helperContract: SY.HELPER_CONTRACT, createdAt: 1 }));
+  const osr = path.join(base, 'os-release'); fs.writeFileSync(osr, 'ID=debian\nVERSION_CODENAME=bookworm\nPRETTY_NAME="Debian GNU/Linux 12 (bookworm)"\n');
+  const fxa = (f) => fs.readFileSync(path.join(repo, 'scripts/fixtures/apt', f), 'utf8');
+  const host = (id, pk) => fs.writeFileSync(path.join(HE, `${id}.list`), pk.join('\n') + '\n');
+  const has = (d, id) => fs.existsSync(path.join(d, `${id}.list`));
+  const logF = path.join(stateDir, DA.INSTALL_FILES.log);
+  const runner = async (cmd, args) => {
+    const a = [cmd, ...args].join(' ');
+    if (a.includes('vs-sys-install')) return { code: 0, stdout: '= helper installed\n= sudoers installed\n= ok\n', stderr: '' };
+    if (a.includes('--print-architecture')) return { code: 0, stdout: 'amd64\n', stderr: '' };
+    const g = a.includes('gimp') ? 'gimp' : 'hello';
+    if (cmd === 'apt-get' && a.includes('--print-uris')) return { code: 0, stdout: fxa(`debian-${g}.uris.txt`), stderr: '' };
+    if (cmd === 'apt-get' && / -s /.test(a)) return { code: 0, stdout: fxa(`debian-${g}.sim.txt`), stderr: '' };
+    return { code: 0, stdout: '', stderr: '' };
+  };
+  const apps = AS.create({ home, stateDir, env: () => ({ VIBESPACE_APP_SYSTEM: '1', PATH: '/usr/bin:/bin' }), osRelease: osr, binOnPath: (n) => ({ 'apt-get': '/usr/bin/apt-get', sudo: '/usr/bin/sudo' })[n] || null, runner, isRoot: true, rootUid: me, dpkgStatus: path.join(base, 'no-status'), markerDir: path.join(base, 'markers'), log: quiet });
+  const failing = new Set(), ran = [];
+  // THE FAKE ROOT: what the package slot's script would leave — root's records in the layer the argv names + the run log
+  const fakeRoot = (pl) => {
+    const i = pl.argv.findIndex((x) => x === 'vs-app' || x === 'vs-sys'), sysRun = pl.argv[i] === 'vs-sys';
+    const [mode, id, nonce] = sysRun ? pl.argv.slice(i + 1, i + 4) : pl.argv.slice(i + 2, i + 5);
+    const args = pl.argv.slice(pl.argv.indexOf('--', i) + 1);
+    ran.push(`${sysRun ? 'sys' : 'host'}:${mode}:${id}`);
+    const head = `= run ${id} ${nonce} ${mode}\n`;
+    if (failing.has(`${sysRun ? 'sys' : 'host'}:${mode}`)) { fs.appendFileSync(logF, head + '= refused fake-failure\n'); throw Object.assign(new Error('the install exited 1'), { code: 'install_failed' }); }
+    if (sysRun && (mode === 'install' || mode === 'deb')) { fs.writeFileSync(path.join(SE, `${id}.list`), (mode === 'deb' ? [pl.deb.package] : args).join('\n') + '\n'); fs.writeFileSync(path.join(SE, `${id}.desktop`), ''); fs.writeFileSync(path.join(SE, `${id}.bin`), mode === 'deb' ? '' : '/usr/bin/hello\n'); }
+    if (!sysRun && mode === 'forget') fs.rmSync(path.join(HE, `${id}.list`));
+    fs.appendFileSync(logF, head + (mode === 'forget' ? `= forgot ${id}\n` : '') + '= ok\n');
+  };
+  const call = async (h, op, params) => { const r = await AS.runAppOp(apps, op, params); if (!r.ok) throw Object.assign(new Error(r.error), { code: r.code }); return r; };
+  const access = { call, installPackage: async (h, { planOpts }) => { const { plan: pl } = await apps.plan(planOpts); if (!pl.ok) throw Object.assign(new Error(pl.error), { code: pl.code, plan: pl }); fakeRoot(pl); return { plan: pl, reattached: false }; } };
+  const eng = E.create({ access, dataDir: path.join(base, 'eng'), log: quiet });
+  const idx = async () => (await apps.readManifest()).manifest.entries;
+  // M3: the same set as a host entry = its move (the id kept, the forget its second step); a partial overlap is named
+  host('hello', ['hello']);
+  await apps.writeManifest(AM.withEntry(AM.emptyManifest(), { id: 'hello', kind: 'apt', packages: ['hello'], by: { kind: 'agent', conversation: 'c1', name: 'S1' }, why: 'needed for the demo', label: 'Hello', rows: [], services: [] }));
+  const ps = (await apps.plan({ kind: 'apt', packages: ['hello'] })).plan;
+  ok(ps.ok && ps.layer === 'sys' && ps.forgets === 'hello' && ps.entryId === 'hello' && ps.moves[0].label === 'Hello' && ps.commands.some((c) => /stops putting Hello back after a rebuild/.test(c)), 'same set: installing a host entry\'s exact packages into the app system IS its move (the id kept, the forget shown in the commands)', ps);
+  // M2 happy path through the engine: the sys install, then forget; the index relayered; who asked and why kept
+  ran.length = 0;
+  const o1 = await eng.run({ request: { kind: 'apt', packages: ['hello'] } });
+  const i1 = (await idx()).filter((e) => e.id === 'hello');
+  ok(same(ran, ['sys:install:hello', 'host:forget:hello']) && o1.moved && o1.moved[0].ok && !has(HE, 'hello') && has(SE, 'hello'), 'the move: the install INTO the app system ran first, then forget — the host record is gone, the userland holds it', { ran, moved: o1.moved });
+  ok(i1.length === 1 && i1[0].layer === 'sys' && i1[0].by.kind === 'agent' && i1[0].why === 'needed for the demo', 'the index: ONE entry, layer sys (who asked and why kept)', i1);
+  const st1 = await apps.status();
+  ok(st1.replay.decision.why === 'no-entries' && st1.entries.filter((e) => !e.layer).length === 0, `no host entry left: the boot replay says no-entries (${st1.replay.decision.why})`);
+  ok(o1.run && o1.run.layer === 'sys' && o1.run.exports === 1, 'the result carries what the app system install exported (the "nothing launchable" sentence reads it)', o1.run);
+  host('hx', ['hello', 'gimp']);
+  const po = (await apps.plan({ kind: 'apt', packages: ['hello'] })).plan;
+  fs.rmSync(path.join(HE, 'hx.list'));
+  ok(po.ok && !po.forgets && same(po.overlap, [{ package: 'hello', entry: 'hx' }]), 'a partial overlap is allowed and named (no move)', po.overlap);
+  // an agent's move: refused by name
+  const ag = E.normRequest({ kind: 'move' }, { agent: true });
+  ok(ag.code === 'agent_forbidden' && /move/.test(ag.error) && E.normRequest({ kind: 'move' }).ok && !E.AGENT_KINDS.includes('move'), 'an agent asking a move is refused by name (agent_forbidden); the user\'s request passes', ag);
+  // M5: Refresh skips the host apps and says so; M4: the drift card's primary (an apt install) is planned INTO the app system
+  host('gimp', ['gimp']);
+  const pr = (await apps.plan({ kind: 'refresh' })).plan;
+  ok(pr.ok && pr.layer === 'sys' && same(pr.skippedHost, [{ id: 'gimp', label: 'gimp' }]), 'Refresh with a host app: the app system\'s upgrade, and `skippedHost` names the host app it does not touch', pr.skippedHost);
+  const pd = (await apps.plan({ kind: 'apt', packages: ['hello'] })).plan;
+  ok(pd.ok && pd.layer === 'sys' && !pd.forgets, 'the drift card\'s primary act (an apt install of the same packages) is planned INTO the app system');
+  // a failed sys install leaves the host entry replaying
+  failing.add('sys:install'); ran.length = 0;
+  const o2 = await eng.run({ request: { kind: 'move' } });
+  failing.clear();
+  const st2 = await apps.status();
+  ok(o2.moved.length === 1 && !o2.moved[0].ok && o2.moved[0].step === 'install' && has(HE, 'gimp') && !has(SE, 'gimp') && !ran.includes('host:forget:gimp'), 'the sys install fails ⇒ no forget ran, the host entry is untouched', { ran, moved: o2.moved });
+  ok(st2.replay.decision.why !== 'no-entries' && st2.entries.some((e) => e.id === 'gimp' && !e.layer), `…and still counted by the boot replay (${st2.replay.decision.why})`);
+  // a failed forget leaves both records and ONE index entry; the banner still offers the move; a second click finishes it
+  failing.add('host:forget'); ran.length = 0;
+  const o3 = await eng.run({ request: { kind: 'move' } });
+  failing.clear();
+  const st3 = await apps.status();
+  ok(!o3.moved[0].ok && o3.moved[0].step === 'forget' && has(HE, 'gimp') && has(SE, 'gimp') && (await idx()).filter((e) => e.id === 'gimp').length === 1 && (await idx()).find((e) => e.id === 'gimp').layer === 'sys', 'forget fails ⇒ both records stay, the index has ONE entry (layer sys)', { moved: o3.moved, idx: await idx() });
+  ok(st3.entries.filter((e) => e.id === 'gimp').length === 2 && st3.entries.filter((e) => !e.layer).length === 1, '…the host copy still counts as a host app (the banner still offers the move)');
+  host('mydeb', ['mydeb']);
+  fs.writeFileSync(path.join(appsD, 'debs', 'mydeb_1.0_all.deb'), 'not the file that was installed');
+  const m0 = (await apps.readManifest()).manifest;
+  await apps.writeManifest(AM.withEntry(m0, { id: 'mydeb', kind: 'deb', packages: ['mydeb'], deb: { package: 'mydeb', sha256: 'a'.repeat(64), name: 'mydeb.deb' }, by: { kind: 'user' }, rows: [], services: [] }));
+  const pm = (await eng.plan('local', { kind: 'move' })).plan;
+  const g = pm.entries.find((e) => e.id === 'gimp'), d = pm.entries.find((e) => e.id === 'mydeb');
+  ok(g && g.recorded === true && d && d.refused && d.refused.code === 'deb_changed', 'the next Move plan: gimp is already recorded on the sys side (only its forget runs); a .deb whose saved file changed is refused by name', pm.entries);
+  ran.length = 0;
+  const o4 = await eng.run({ request: { kind: 'move' } });
+  ok(same(ran, ['host:forget:gimp']) && o4.moved.find((x) => x.id === 'gimp').ok && !o4.moved.find((x) => x.id === 'mydeb').ok && !has(HE, 'gimp') && has(HE, 'mydeb'), 'the second click finishes gimp (forget only) and leaves the changed .deb\'s entry replaying — the others proceed', { ran, moved: o4.moved });
+  // after a Roll back the index follows the userland: the ghost dropped (named once), the unindexed record indexed
+  fs.rmSync(path.join(SE, 'hello.list')); fs.writeFileSync(path.join(SE, 'oldapp.list'), 'oldapp\n');
+  fs.appendFileSync(logF, `= run ${SY.SYS_RUN_ID} abcdef99 rollback\n= ok\n`);
+  const rb = await call('local', 'app-refresh', { nonce: 'abcdef99', id: SY.SYS_RUN_ID, mode: 'rollback' });
+  const i5 = await idx();
+  ok(same(rb.run.gone, ['hello']) && !i5.some((e) => e.id === 'hello') && i5.some((e) => e.id === 'oldapp' && e.layer === 'sys' && e.by.kind === 'user') && same(rb.state.sys.gone.ids, ['hello']), 'after a Roll back: the index loses the ghost (state.sys.gone names it) and gains the unindexed entry', { run: rb.run, idx: i5.map((e) => e.id + ':' + (e.layer || '-')) });
+  // verify r1: ONE boot with the app system flag off (its userland still on this disk) does not read that layer — its index
+  // entries are left alone (they were dropped, label / who / why lost, and named "not in the app system you went back to")
+  fs.writeFileSync(path.join(SE, 'sl.list'), 'sl\n');
+  await apps.writeManifest(AM.withEntry((await apps.readManifest()).manifest, { id: 'sl', kind: 'apt', packages: ['sl'], layer: 'sys', label: 'Steam Locomotive', why: 'fun', by: { kind: 'agent', conversation: 'c1', name: 'S1' }, rows: [], services: [] }));
+  const off = AS.create({ home, stateDir, env: () => ({ VIBESPACE_APP_SYSTEM: '', PATH: '/usr/bin:/bin' }), osRelease: osr, binOnPath: (n) => ({ 'apt-get': '/usr/bin/apt-get', sudo: '/usr/bin/sudo' })[n] || null, runner, isRoot: true, rootUid: me, dpkgStatus: path.join(base, 'no-status'), markerDir: path.join(base, 'markers'), log: quiet });
+  const so = await off.status();
+  const i6 = (await idx()).find((e) => e.id === 'sl'), gone6 = (so.state.sys && so.state.sys.gone && so.state.sys.gone.ids) || [];
+  ok(i6 && i6.layer === 'sys' && i6.label === 'Steam Locomotive' && i6.why === 'fun' && i6.by.kind === 'agent' && !gone6.includes('sl'), 'a boot with the app system flag off leaves its index entries alone (label / who / why kept, nothing named gone)', { i6, gone6 });
+}
+
+console.log('§14 lane app-system-env — THE REAL WIRING after listen: the machine half built as server.js builds it (env: () => agentEnv(), the pod\'s flag in the PROCESS env only), the replay\'s status read boots the app system');
+{
+  const AS = require('../src/app-serve.js'), { agentEnv } = require('../src/agent-env.js');
+  const base = path.join(dir, 'wired'), home = path.join(base, 'home'), stateDir = path.join(base, 'state');
+  for (const d of [path.join(home, '.vibespace'), stateDir, path.join(base, 'eng')]) fs.mkdirSync(d, { recursive: true });
+  const osr = path.join(base, 'os-release'); fs.writeFileSync(osr, 'ID=debian\nVERSION_CODENAME=bookworm\n');
+  const lines = [], seen = { log: (m) => lines.push(String(m)), warn: (m) => lines.push(String(m)), error: () => { } };
+  const runner = async (cmd, args) => ([cmd, ...args].join(' ').includes('vs-sys-install') ? { code: 0, stdout: '= helper installed\n= sudoers installed\n= ok\n', stderr: '' } : { code: 0, stdout: '', stderr: '' });
+  const prev = process.env.VIBESPACE_APP_SYSTEM;
+  process.env.VIBESPACE_APP_SYSTEM = '1';
+  const apps = AS.create({ home, stateDir, env: () => agentEnv(process.env), osRelease: osr, binOnPath: () => null, runner, dpkgStatus: path.join(base, 'no-status'), markerDir: path.join(base, 'markers'), log: seen });
+  const call = async (h, op, params) => { const r = await AS.runAppOp(apps, op, params); if (!r.ok) throw Object.assign(new Error(r.error), { code: r.code }); return r; };
+  const eng = E.create({ access: { call }, dataDir: path.join(base, 'eng'), log: seen });
+  const r = await eng.afterListen();
+  const bootAt = lines.findIndex((m) => /^\[apps\] app system: helper \+ sudoers installed in \d+ ms$/.test(m)), replayAt = lines.findIndex((m) => m.startsWith('[apps] boot: '));
+  const st = await eng.status('local');
+  if (prev === undefined) delete process.env.VIBESPACE_APP_SYSTEM; else process.env.VIBESPACE_APP_SYSTEM = prev;
+  ok(!r.error && bootAt >= 0 && replayAt > bootAt && st.appSystem && st.appSystem.enabled === true && st.appSystem.helper.installed === true, 'after listen (no dialog opened): the replay\'s status read runs the boot step — "[apps] app system: helper + sudoers installed in N ms" before the "[apps] boot:" line; GET /api/apps reads appSystem.enabled', { r, lines, appSystem: st.appSystem });
+}
+
 console.log(`\n${fail ? `${fail} FAILED` : 'ALL PASS'} (${pass}) in ${Date.now() - T0} ms`);
 process.exit(fail ? 1 : 0);

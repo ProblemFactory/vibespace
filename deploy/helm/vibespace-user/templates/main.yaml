@@ -136,15 +136,20 @@ spec:
         - name: vibespace
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          {{- $sysadmin := or (and .Values.fuse .Values.fuse.enabled) (and .Values.cephfs .Values.cephfs.mons) }}
+          {{- $appsys := and .Values.appSystem .Values.appSystem.enabled }}
+          {{- $sysadmin := or (and .Values.fuse .Values.fuse.enabled) (and .Values.cephfs .Values.cephfs.mons) $appsys }}
           {{- $tun := and .Values.tun .Values.tun.enabled }}
           {{- if or $sysadmin $tun }}
-          # fuse AND cephfs need the same gates: CAP_SYS_ADMIN in the bounding
-          # set (setuid fusermount3 / mount -t ceph transition into it) +
-          # AppArmor unconfined — the containerd default profile denies mount()
-          # even with the cap. K8s ≥1.30 GA field; the old beta annotation is
-          # REMOVED on 1.35 and silently did nothing. (fuse also needs the
-          # /dev/fuse device below; cephfs uses the host kernel ceph client.)
+          # fuse, cephfs AND the app system need the same gates: CAP_SYS_ADMIN
+          # in the bounding set (setuid fusermount3 / mount -t ceph / the app
+          # system's sudo helper — unshare, bind mounts, chroot — transition
+          # into it) + AppArmor unconfined — the containerd default profile
+          # denies mount() even with the cap. K8s ≥1.30 GA field; the old beta
+          # annotation is REMOVED on 1.35 and silently did nothing. (fuse also
+          # needs the /dev/fuse device below; cephfs uses the host kernel ceph
+          # client.) No seccompProfile on purpose (unset = no filter unless the
+          # kubelet runs --seccomp-default): a profile set here must allow
+          # mount / unshare / chroot or every app-system enter fails.
           # tun (optional, .Values.tun.enabled): NET_ADMIN + a /dev/net/tun
           # device-plugin resource — kernel-mode Tailscale (plugins, 2.140.0).
           securityContext:
@@ -253,6 +258,14 @@ spec:
             {{- end }}
             - name: VIBESPACE_INSTANCE_NAME
               value: {{ .Values.user | quote }}
+            {{- if $appsys }}
+            # App persistence Layer 1 (docs/design-app-persistence.zh.md §3.2):
+            # the server installs its sudo helper + sudoers drop-in after listen
+            # and offers Desktop apps → Your installed apps → Set up…. Unset =
+            # the pod behaves exactly as without it (Layer 0 replay only).
+            - name: VIBESPACE_APP_SYSTEM
+              value: "1"
+            {{- end }}
             {{- if and .Values.metrics .Values.metrics.enabled }}
             - name: VIBESPACE_METRICS_PORT
               value: {{ .Values.metrics.port | default 3457 | quote }}

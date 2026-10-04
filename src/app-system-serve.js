@@ -28,8 +28,10 @@ function create({ home, env = () => process.env, runner, log = console, now = Da
   const rootfs = path.join(base, 'rootfs');
   const shimDir = path.join(base, 'bin');
   // a bare-metal / systemd install never keeps an app system: systemd names every process of a unit (INVOCATION_ID) —
-  // under it the gate stays shut even with the flag set (no helper, no sudoers file is ever written there)
-  const enabled = () => { const e = env() || {}; const v = String(e.VIBESPACE_APP_SYSTEM || ''); return platform === 'linux' && !e.INVOCATION_ID && v !== '' && v !== '0' && v !== 'false'; };
+  // under it the gate stays shut even with the flag set (no helper, no sudoers file is ever written there).
+  // The flag is a fact about THIS process (the chart sets it on the pod): read from the process's own env too — server.js
+  // hands this module the agent-sanitized env (src/agent-env.js), which drops every VIBESPACE_* an agent child must not see
+  const enabled = () => { const e = env() || {}; const v = String(e.VIBESPACE_APP_SYSTEM || process.env.VIBESPACE_APP_SYSTEM || ''); return platform === 'linux' && !e.INVOCATION_ID && v !== '' && v !== '0' && v !== 'false'; };
   const myUid = typeof process.getuid === 'function' ? process.getuid() : -1;
   let helper = { installed: null, error: null, at: null };
   let audit = null;
@@ -248,6 +250,21 @@ function create({ home, env = () => process.env, runner, log = console, now = Da
 
   // ── plans ──
   const no = (kind, code, error) => ({ ok: false, code, error, kind, layer: 'sys' });
+  /** design 019 M2 — a host .deb entry's MOVE installs the file root saved in ~/.vibespace/apps/debs (root-owned) whose
+   *  sha256 is the one the install recorded → {ok, file} | {ok:false, code, error} (that entry's move is refused by name). */
+  async function cachedDeb(dir, pkg, sha256, { hash }) { // hash: (file) → its sha256 hex (the machine half's own reader)
+    if (!A.PKG_RE.test(String(pkg || '')) || !/^[0-9a-f]{64}$/.test(String(sha256 || ''))) return { ok: false, code: 'deb_missing', error: 'the index names no saved file for it — it is not moved' };
+    let names = [];
+    try { if (await rootDir(dir)) names = (await fsp.readdir(dir)).filter((n) => n.startsWith(`${pkg}_`) && n.endsWith('.deb')).sort(); } catch { names = []; }
+    if (!names.length) return { ok: false, code: 'deb_missing', error: `no saved ${pkg} .deb is kept on this machine — it is not moved` };
+    for (const n of names) {
+      const p = path.join(dir, n), st = await lst(p);
+      if (!st || !st.isFile() || st.uid !== rootUid) continue;
+      const h = await hash(p).catch(() => null);
+      if (h === sha256) return { ok: true, file: p };
+    }
+    return { ok: false, code: 'deb_changed', error: `the saved ${pkg} .deb is not the file that was installed (its sha256 changed) — it is not moved` };
+  }
   /** Layer 0's apt / deb plan, retargeted INTO the app system (its simulations already read the userland — simOpts). */
   function retarget(pl, nonce) {
     if (!pl || !pl.ok || !['install', 'deb'].includes(pl.mode)) return pl;
@@ -303,7 +320,7 @@ function create({ home, env = () => process.env, runner, log = console, now = Da
     return ok({ prev: prev.identity, closureKey: `${mode} ${word}`, commands: S.sysCommands({ mode }), argv: S.sysArgv({ mode, id: S.SYS_RUN_ID, nonce }) });
   }
 
-  return { base, rootfs, shimDir, enabled, identity, entries, rows, catalog, signature, syncShims, inRoot, existsIn, verifyRow, boot, auditNow, afterRun, view, retarget, removePlan, refreshPlan, sysPlan, helperState: () => ({ ...helper }), auditState: () => audit };
+  return { base, rootfs, shimDir, enabled, identity, entries, rows, catalog, signature, syncShims, inRoot, existsIn, verifyRow, boot, auditNow, afterRun, view, retarget, cachedDeb, removePlan, refreshPlan, sysPlan, helperState: () => ({ ...helper }), auditState: () => audit };
 }
 
 module.exports = { create };

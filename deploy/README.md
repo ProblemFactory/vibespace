@@ -17,9 +17,17 @@ controller, and (optionally) cert-manager. Each user gets an isolated pod + PVC.
 ## Build & push the image
 
 ```
-docker build -f deploy/docker/Dockerfile -t <your-registry>/vibespace:<tag> .
+docker build -f deploy/docker/Dockerfile --build-arg VIBESPACE_IMAGE_VERSION=<tag> \
+  -t <your-registry>/vibespace:<tag> .
 docker push <your-registry>/vibespace:<tag>
 ```
+
+The image carries a base-id stamp: `/usr/share/vibespace/image.json`
+(`{version, built, codename}` — `version` is the build argument above) and
+`/usr/share/vibespace/base-packages.tsv` (every installed package: name, arch,
+version). The build fails by name when `/etc/os-release` has no
+`VERSION_CODENAME`, or sudo / visudo / debootstrap / the app-system tarball is
+missing (see "App system" below).
 
 ## Add a user
 
@@ -209,6 +217,41 @@ cluster.
 Values are never copied into the instance's `data/`, so rotating the Secret
 rotates every consumer on every instance; a withdrawn default leaves the row
 answering "not configured" with the reason, never serving a stale value.
+
+## App system — installed apps that survive a pod rebuild (optional)
+
+`--set appSystem.enabled=true` turns on App persistence Layer 1 (VibeSpace ≥
+2.369.210 in the PVC): the pod gets `VIBESPACE_APP_SYSTEM=1` plus the same
+securityContext fuse / cephfs already use — `capabilities.add: [SYS_ADMIN]` and
+AppArmor `Unconfined` (one SYS_ADMIN when fuse is on too); seccomp stays unset
+(a profile, if you ever set one, must allow mount / unshare / chroot). After
+listen the server installs its sudo helper and a sudoers drop-in on the pod's
+ephemeral rootfs, and Desktop apps → Your installed apps offers **Set up…**: a
+Debian userland of the image's own release on the home PVC
+(`~/.vibespace/sysroot`) that apt / .deb installs go into. Default `false` =
+no env, no extra capability — a release that never sets it renders exactly as
+before.
+
+It needs an image built from this Dockerfile (sudo + visudo, debootstrap, and
+the baked minbase tarball `/usr/share/vibespace/sysroot-minbase.tar.gz`, which
+makes Set up offline — a few seconds instead of a network debootstrap).
+
+Rolling it out:
+
+1. Build the image (above) and enable it on ONE test release first:
+   `helm upgrade <release> deploy/helm/vibespace-user --reuse-values --set image.tag=<tag> --set appSystem.enabled=true`.
+   The pod's log after start says `[apps] app system: helper + sudoers installed in N ms`
+   (or `NOT installed (<code>)` — `sudoers-invalid` / `no-visudo` / `not-root` name the cause).
+2. On that pod: Desktop apps → Your installed apps → **Set up…** (the plan
+   names the tarball), install `hello` and `xterm` into it, delete the pod, and
+   after Ready run `~/.vibespace/sysroot/bin/hello` (no apt, no network); open
+   xterm from the catalog (`sys.xterm`).
+3. Then the other releases, the same two `--set`s. Watch PVC usage: the
+   userland lives on the same disk as the user's data.
+
+Turning it off: `--set appSystem.enabled=false`. The rows grey out
+(`not-enabled`); the userland stays on the PVC untouched, and the helper and its
+drop-in are gone with the next pod (they were on the ephemeral rootfs).
 
 ## Public URLs / NAT relay (optional)
 

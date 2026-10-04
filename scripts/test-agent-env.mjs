@@ -58,6 +58,10 @@ const secrets = ['VIBESPACE_PASSWORD', 'VIBESPACE_S3_SECRET_KEY', 'VIBESPACE_FRP
 check('ALL instance secrets stripped', !secrets.some((k) => k in out), secrets.filter((k) => k in out).join(','));
 check('server-only VIBESPACE config stripped', !('VIBESPACE_OPSLOG_DIR' in out) && !('VIBESPACE_METRICS_PORT' in out));
 check('agent-needed allowlist survives', out.VIBESPACE_API && out.VIBESPACE_SESSION_TOKEN && out.VIBESPACE_INSTANCE_NAME === 'him188');
+// lane app-system-env: the chart's app-system switch is a fact about the SERVER process (src/app-system-serve.js reads
+// it from its own env) — an agent child never sees it; widening the keep set is not the fix for the 2.369.210 fleet bug
+const { daemonEnv } = require('../src/agent-env.js');
+check('VIBESPACE_APP_SYSTEM stripped from agent + daemon child envs', !('VIBESPACE_APP_SYSTEM' in agentEnv({ VIBESPACE_APP_SYSTEM: '1', PATH: '/bin' })) && !('VIBESPACE_APP_SYSTEM' in daemonEnv({ VIBESPACE_APP_SYSTEM: '1' })));
 // The spawn sites spread per-session env AFTER agentEnv() — an explicit
 // per-session value must always beat the filter (the "set-after wins" layer).
 const layered = { ...agentEnv(fake), NODE_ENV: 'test' };

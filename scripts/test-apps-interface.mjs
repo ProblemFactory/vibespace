@@ -182,5 +182,23 @@ console.log('§11 an app with no cwd starts in HOME');
   } finally { fs.rmSync(home, { recursive: true, force: true }); }
 }
 
+console.log('§D019 design 019 — the Move banner, the drift card\'s two acts, the honest sentences (en / zh / ja)');
+{
+  const st = (o) => ({ appSystem: { enabled: true, usable: true }, entries: [{ id: 'hello', packages: ['hello'] }, { id: 'gimp', layer: 'sys', packages: ['gimp'] }], ...o });
+  const mv = Am.appsMoveModel(st());
+  ok(mv && mv.n === 1 && mv.request.kind === 'move' && /1 app is reinstalled at every rebuild/.test(mv.text) && Am.appSystemRows(st()).some((r) => r.move && r.buttons[0].request.kind === 'move'), 'the Move banner: one host app + a usable app system → "1 app is reinstalled at every rebuild" + Move…');
+  ok(!Am.appsMoveModel(st({ appSystem: { enabled: true, usable: false } })) && !Am.appsMoveModel(st({ entries: [{ id: 'gimp', layer: 'sys', packages: ['gimp'] }] })) && !Am.appSystemRows(st({ entries: [] })).some((r) => r.move), 'CONTROL: no banner when the app system is not usable, or no host app is left');
+  ok(/Not in the app system you went back to: hello/.test(Am.appSystemRows(st({ state: { sys: { gone: { ids: ['hello'], at: 1 } } } })).map((r) => r.text).join(' | ')), 'after a Roll back the apps the index lost are named');
+  const acts = Am.driftActs(st(), ['htop']), acts0 = Am.driftActs({ appSystem: null }, ['htop']);
+  ok(acts[0].primary && acts[0].request.kind === 'apt' && acts[1].request.kind === 'adopt' && !acts[1].primary && acts0.length === 1 && acts0[0].request.kind === 'adopt', 'the drift card: with a usable app system the PRIMARY act installs into it, Adopt on the base is second; without one, Adopt alone');
+  const notes = Am.resultNotes({ services: [{ unit: 'pg.service' }], layer: 'sys', exports: 0 });
+  ok(notes.length === 2 && /background service/.test(notes[0]) && /nothing can be started from outside/.test(notes[1]) && !Am.resultNotes({ layer: 'sys', exports: 2 }).length && /background service/.test(Am.appDoneText({ kind: 'apt', label: 'pg', rows: [], run: { services: [{ unit: 'pg.service' }], missing: [] } }, 'box')), 'the result card: a service nothing starts + "nothing launchable from outside" (neither for an app that exports something)');
+  const dt = Am.appDoneText({ kind: 'move', moved: [{ id: 'hello', label: 'hello', ok: true }, { id: 'x', label: 'xapp', ok: false }] }, 'box');
+  ok(/hello moved into the app system/.test(dt) && /Not moved: xapp/.test(dt) && Am.appGoLabel({ kind: 'move' }) === 'Move', 'a move names what moved and what did not');
+  const KEYS = ["1 app is reinstalled at every rebuild — move it into the app system", "{n} apps are reinstalled at every rebuild — move them into the app system", "apps::Move…", "apps::Move", "Not in the app system you went back to: {names}", "Install into the app system…", "It stays after a rebuild — nothing is reinstalled", "Keep on the base only…", "Reinstalled at every rebuild", "Move your apps into the app system on {machine}", "{app}: not moved — {why}", "{app}: already in the app system — only its record on the base goes", "Each app goes into the app system first; only then is it no longer reinstalled at every rebuild. Its programs stay on the base until the next rebuild.", "This moves {app} into the app system — it is no longer reinstalled at every rebuild", "{pkgs} is also installed on the base ({apps})", "{n} apps on the base are not in this update — Move… puts them into the app system: {names}", "{apps} moved into the app system on {machine}", "Not moved: {apps}", "Nothing was moved", "This package brings a background service; nothing starts it — use a kept-up job", "Installed; nothing can be started from outside — its files are only in the app system"];
+  const miss = KEYS.filter((k) => !zh[k] || !ja[k] || zh[k] === k || ja[k] === k);
+  ok(!miss.length, `every design 019 sentence has its zh + ja (${KEYS.length})`, miss);
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

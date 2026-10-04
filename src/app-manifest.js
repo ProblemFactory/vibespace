@@ -84,7 +84,7 @@ const LAST_LIST = `${MARKER_DIR}/last-dpkg.list`;
 const DRIFT_HOOK = '/etc/apt/apt.conf.d/99vibespace-apps';
 const APP_ID_PREFIX = 'app.';
 /** The modes of the root script (APP_SCRIPT). */
-const SCRIPT_MODES = Object.freeze(['install', 'deb', 'remove', 'replay', 'replay-online', 'refresh', 'adopt', 'source', 'source-remove']);
+const SCRIPT_MODES = Object.freeze(['install', 'deb', 'remove', 'replay', 'replay-online', 'refresh', 'adopt', 'source', 'source-remove', 'forget']); // design 019 M2: `forget` = drop root's record only (a move into the app system), no apt
 /** How long a tripwire touch may trail VibeSpace's own last run and still be VibeSpace's (dpkg's hook fires inside it). */
 const DRIFT_SLACK_MS = 2000;
 /** verify-r1 H1 — the pin's two priorities: everything from an approved source's host LOW (apt_preferences: 0 < P < 100
@@ -236,6 +236,52 @@ function withEntry(m, entry) {
   return bump({ ...m, entries: [...m.entries.filter((e) => e.id !== v.entry.id), v.entry] });
 }
 function withoutEntry(m, id) { return bump({ ...m, entries: m.entries.filter((e) => e.id !== id) }); }
+const pkgSet = (l) => [...new Set(l || [])].sort().join(' ');
+/**
+ * design 019 M1 — THE INDEX FOLLOWS ROOT. `host` / `sys` = root's records in each layer (`[{id, packages}]`; null = that
+ * layer could not be read — its entries are left alone). An apt / deb index entry's `layer` follows where root's record
+ * is (host ⇒ no flag, sys ⇒ 'sys'; in BOTH with the same packages = a move in flight ⇒ 'sys', the copy that persists);
+ * one with a record in neither readable layer is DROPPED (a ghost: a Roll back swapped its userland away); a record with
+ * no index entry gets a minimal one (by the user, label = the id). The same id in both layers over DIFFERENT packages is
+ * a collision: named, never merged. Home kinds untouched. PURE → {manifest, changed, dropped, indexed, relayered, collisions}.
+ */
+function reconcileIndex(m, { host = null, sys = null } = {}) {
+  const out = { manifest: m, changed: false, dropped: [], indexed: [], relayered: [], collisions: [] };
+  if (!m || !Array.isArray(m.entries)) return out;
+  const by = (l) => new Map((l || []).filter((e) => e && ENTRY_ID_RE.test(String(e.id || ''))).map((e) => [e.id, e]));
+  const H = host ? by(host) : null, S = sys ? by(sys) : null;
+  const entries = [];
+  for (const e of m.entries) {
+    if (e.kind !== 'apt' && e.kind !== 'deb') { entries.push(e); continue; }
+    const h = H && H.get(e.id), s = S && S.get(e.id);
+    let layer;
+    if (h && s) { if (pkgSet(h.packages) !== pkgSet(s.packages)) { out.collisions.push(e.id); entries.push(e); continue; } layer = 'sys'; }
+    else if (s) layer = 'sys';
+    else if (h) layer = null;
+    else if ((e.layer === 'sys' ? S : H) && H && S) { out.dropped.push(e.id); continue; }
+    else { entries.push(e); continue; } // its layer could not be read: left alone
+    if ((e.layer || null) !== layer) { out.relayered.push(e.id); const { layer: _l, ...rest } = e; entries.push(layer ? { ...rest, layer } : rest); } else entries.push(e);
+  }
+  const have = new Set(entries.map((e) => e.id));
+  for (const [map, layer] of [[H, null], [S, 'sys']]) {
+    for (const r of map ? map.values() : []) {
+      if (have.has(r.id)) continue;
+      const packages = (r.packages || []).filter((p) => PKG_RE.test(p));
+      if (!packages.length) continue;
+      const v = normEntry({ id: r.id, kind: 'apt', packages, label: r.id, by: { kind: 'user' }, rows: [], services: [], ...(layer ? { layer } : {}) });
+      if (v.ok) { entries.push(v.entry); have.add(r.id); out.indexed.push(r.id); }
+    }
+  }
+  out.changed = !!(out.dropped.length || out.indexed.length || out.relayered.length);
+  if (out.changed) out.manifest = bump({ ...m, entries });
+  return out;
+}
+/** design 019 M3 — ONE ROW PER APP: a host row whose `package` an app-system row also carries is dropped (the sys row
+ *  persists; the host copy is gone at the next rebuild). PURE. */
+function dedupeRows(hostRows, sysRows) {
+  const pk = new Set((sysRows || []).map((r) => r && r.package).filter(Boolean));
+  return (hostRows || []).filter((r) => !(r && r.package && pk.has(r.package)));
+}
 function withSource(m, src) {
   const v = validateSourceSpec(src);
   if (!v.ok) throw new Error(v.error);
@@ -637,12 +683,13 @@ const APP_SCRIPT = [
   'case $NONCE in ""|*[!a-z0-9]*) refuse bad-nonce ;; esac',
   'case $MODE in ""|*[!a-z-]*) refuse bad-mode ;; esac',
   'say run "$ID" "$NONCE" "$MODE"', // FIRST after the three names that key it: every refusal below is attributable to this run
-  'case $MODE in install|deb|remove|replay|replay-online|refresh|adopt|source|source-remove) ;; *) refuse bad-mode ;; esac',
+  'case $MODE in install|deb|remove|replay|replay-online|refresh|adopt|source|source-remove|forget) ;; *) refuse bad-mode ;; esac',
   'case $A in /*) ;; *) refuse bad-apps-dir ;; esac',
   'case $A in *[!A-Za-z0-9._/@+-]*|*/../*|*/..) refuse bad-apps-dir ;; esac',
   // every positional argument is judged BEFORE anything is touched (and before root is even asked): a name that is not a
   // package is refused here, never handed to apt; nothing here is ever expanded as code
   'case $MODE in',
+  'forget) [ $# -eq 0 ] || refuse bad-args ;;',
   'install|adopt) [ $# -gt 0 ] || refuse no-packages; for p in "$@"; do pkgok "$p" || refuse bad-name "$p"; done ;;',
   'deb) case ${1:-} in "$A"/staging/*.deb) ;; *) refuse bad-deb-path ;; esac; case $1 in */../*|*[!A-Za-z0-9._/@+-]*) refuse bad-deb-path ;; esac; case ${2:-} in *[!0-9a-f]*|"") refuse bad-sha ;; esac; [ ${#2} -eq 64 ] || refuse bad-sha ;;',
   'source) case ${1:-} in https://*) ;; *) refuse bad-source not-https ;; esac; case $1 in *[!A-Za-z0-9._~:/%+-]*) refuse bad-source uri ;; esac; case "${2:-}${3:-}" in *[!A-Za-z0-9._/\\ -]*) refuse bad-source suites ;; esac; [ -n "${2:-}" ] || refuse bad-source suites; case ${4:-} in *[!0-9a-f]*|"") refuse bad-sha ;; esac; [ ${#4} -eq 64 ] || refuse bad-sha; case ${5:-} in "$A"/staging/*.key) ;; *) refuse bad-key-path ;; esac; case $5 in */../*|*[!A-Za-z0-9._/@+-]*) refuse bad-key-path ;; esac ;;',
@@ -847,7 +894,16 @@ const APP_SCRIPT = [
   '  echo "+ apt-get update"',
   '  if ! apt-get $LOCK update; then rm -f "/etc/apt/sources.list.d/vibespace-$ID.sources" "/etc/apt/keyrings/vibespace-$ID.$x" "$R/sources/$ID.sources" "$R/keys/$ID.$x" "/etc/apt/preferences.d/vibespace-$ID.pref" "$R/sources/$ID.pref"; refuse source-update-failed; fi',
   '  hook; finish; say ok ;;',
-  'source-remove)',
+  'forget)', // design 019 M2: the host record goes (its app now lives in the app system) — NO apt: the ephemeral root keeps the packages until the next rebuild
+  '  [ -f "$R/entries/$ID.list" ] || refuse no-entry "$ID"',
+  '  rm -f "$R/entries/$ID.list" "$R/entries/$ID.desktop" "$R/entries/$ID.pin"; say forgot "$ID"',
+  // the saved .debs no remaining entry needs (its closure against the image's base, or its own names) leave the cache; a
+  // closure apt cannot simulate keeps every one (a replay must never lose a package it needs)
+  '  : > "$T/need"; k=1',
+  '  if [ -n "$(all)" ]; then if [ -s "$R/base/status" ] && apt-get -s -o Dir::State::status="$R/base/status" install $(all) > "$T/sim" 2>/dev/null; then awk \'$1 == "Inst" { sub(/:.*/, "", $2); print $2 }\' "$T/sim" > "$T/need"; all >> "$T/need"; else k=0; fi; fi',
+  '  if [ $k = 1 ]; then for s in "$D"/*.stanza; do [ -f "$s" ] || continue; p=$(field Package "$s"); if ! grep -qxF "$p" "$T/need"; then rm -f "$s" "${s%.stanza}.deb"; say gc "$p"; fi; done; else say kept-cache; fi',
+  '  index; debs; finish; say ok ;;',
+'source-remove)',
   '  rm -f "/etc/apt/sources.list.d/vibespace-$ID.sources" "/etc/apt/keyrings/vibespace-$ID.asc" "/etc/apt/keyrings/vibespace-$ID.gpg" "$R/sources/$ID.sources" "$R/keys/$ID.asc" "$R/keys/$ID.gpg" "/etc/apt/preferences.d/vibespace-$ID.pref" "$R/sources/$ID.pref"',
   '  echo "+ apt-get update"; apt-get $LOCK update || true',
   '  finish; say ok ;;',
@@ -863,6 +919,7 @@ function appArgv({ mode, appsDir, id, nonce, args = [], root = false }) {
   if (!NONCE_RE.test(String(nonce))) throw new Error('bad nonce');
   const a = (Array.isArray(args) ? args : []).map(String);
   if (mode === 'install' || mode === 'adopt') { if (!a.length || !a.every((p) => PKG_RE.test(p))) throw new Error('packages must be Debian package names'); }
+  if (mode === 'forget' && a.length) throw new Error('forget takes the entry id only');
   const body = ['sh', '-c', APP_SCRIPT, 'vs-app', appsDir, mode, String(id), String(nonce), '--', ...a];
   return root ? body : ['sudo', '-n', ...body];
 }
@@ -887,6 +944,7 @@ function appCommands({ mode, packages = [], deb = null, source = null, entryLabe
       `sudo tee /etc/apt/preferences.d/vibespace-${source.id}.pref  # Package: * · Pin: origin "${pinHost(source.uris[0]) || '?'}" · Pin-Priority: ${PIN_LOW} — VibeSpace takes a package from this source only when nothing installed has that name; the packages you install from it later get its updates (${PIN_APPROVED})`,
       `sudo apt-get ${lock} update`];
   }
+  if (mode === 'forget') return [`# VibeSpace stops putting ${entryLabel || 'the app'} back after a rebuild: its record leaves ~/.vibespace/apps/sys (root-owned) — no apt runs, nothing is uninstalled now`, '# the saved .deb files no other app needs leave ~/.vibespace/apps/debs'];
   if (mode === 'source-remove' && source) return [`sudo rm /etc/apt/sources.list.d/vibespace-${source.id}.sources /etc/apt/keyrings/vibespace-${source.id}.asc /etc/apt/preferences.d/vibespace-${source.id}.pref`, `sudo apt-get ${lock} update`];
   return [];
 }
@@ -1071,6 +1129,7 @@ module.exports = {
   MARKER_DIR, REPLAY_MARKER, DRIFT_MARKER, SLOT_ENDED, LAST_LIST, DRIFT_HOOK, APP_ID_PREFIX, SCRIPT_MODES, DRIFT_SLACK_MS, DESKTOP_DIRS,
   PIN_LOW, PIN_APPROVED, GRAB_MAX_MB, pinHost, sourcePin, originOf, withPins,
   emptyManifest, validateManifest, withEntry, withoutEntry, withSource, withoutSource, entryIdFor, validateSourceSpec, sourceDeb822,
+  reconcileIndex, dedupeRows, // design 019 M1 / M3
   parseSize, parseSim, parseUris, parsePlan, diskVerdict, replayEstimate, parseSearch, searchWords, updatesOf, fmtBytes,
   unescapeValue, execWords, stripFieldCodes, categoryOf, rowIdFor, parseDesktopFile, desktopPathOk, iconCandidates,
   parseDpkgStatus, dpkgLines, dpkgListText, parseDpkgList, dpkgDelta,

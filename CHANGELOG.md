@@ -2,6 +2,14 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.211 — 2026-10-04
+
+### Added
+- Apps reinstalled at every rebuild can now move into the app system in one click (Desktop apps → Move…); each moves only once it is installed there.
+
+### Fixed
+- The app system can now be set up on machines where it is enabled — it previously always read as unavailable.
+
 ## 2.369.210 — 2026-10-04
 
 ### Added

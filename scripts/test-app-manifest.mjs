@@ -573,6 +573,43 @@ console.log('§D9 design 009 — an installer by address / file: the verdicts, t
   await hz.close();
   ok(xz && xz.code === 'unsupported' && /xz/.test(xz.message) && viaLink === null && hw && hw.code === 'hostile' && /`\.\.`/.test(hw.message) && !fs.existsSync(path.join(path.dirname(hd), 'f')), 'refused BY NAME: an xz-packed AppImage (`unsupported`); a desktop file that is a symlink to /etc/passwd is never read; a tree holding a `..` name is refused before anything lands outside');
 }
+console.log('§D019 design 019 — reconcileIndex (the index follows root), dedupeRows (one row per app), the forget mode');
+{
+  const E0 = (id, o = {}) => ({ id, kind: 'apt', packages: [id + 'pkg'], by: { kind: 'user' }, rows: [], services: [], ...o });
+  const M0 = (entries) => ({ ...A.emptyManifest(), generation: 3, entries });
+  const R0 = (id) => ({ id, packages: [id + 'pkg'] });
+  const L = (r) => r.manifest.entries.map((e) => `${e.id}:${e.layer || '-'}`).join(' ');
+  const rows = [ // [name, manifest, host, sys, check, the control's (host, sys): the deciding layer unreadable]
+    ['flag lost: an entry whose record is in the app system gets layer sys', M0([E0('a')]), [], [R0('a')], (r) => same(r.relayered, ['a']) && L(r) === 'a:sys', [[], null]],
+    ['flag wrong: an entry claiming sys whose record is on the host loses the flag', M0([E0('b', { layer: 'sys' })]), [R0('b')], [], (r) => same(r.relayered, ['b']) && L(r) === 'b:-', [null, []]],
+    ['ghost after a Roll back: a record in NEITHER layer drops the entry', M0([E0('g', { layer: 'sys' })]), [], [], (r) => same(r.dropped, ['g']) && L(r) === '', [[], null]],
+    ['unindexed record: a minimal entry (by the user, label = id) in its layer', M0([]), [], [R0('n')], (r) => same(r.indexed, ['n']) && L(r) === 'n:sys' && r.manifest.entries[0].by.kind === 'user' && r.manifest.entries[0].label === 'n', [[], null]],
+    ['a move in flight (the same packages in both layers) = ONE entry, layer sys', M0([E0('m')]), [R0('m')], [R0('m')], (r) => L(r) === 'm:sys' && !r.collisions.length, [[R0('m')], null]],
+    ['the same id over DIFFERENT packages in both layers is named, never merged', M0([E0('c')]), [R0('c')], [{ id: 'c', packages: ['otherpkg'] }], (r) => same(r.collisions, ['c']) && L(r) === 'c:-' && !r.changed, null],
+  ];
+  for (const [name, m, host, sys, check, ctl] of rows) {
+    const r = A.reconcileIndex(m, { host, sys });
+    ok(check(r) && (!r.changed || r.manifest.generation === 4), name, { r: L(r), d: r.dropped, i: r.indexed, rl: r.relayered, c: r.collisions });
+    if (ctl) { const c = A.reconcileIndex(m, { host: ctl[0], sys: ctl[1] }); ok(!c.changed && c.manifest === m, `CONTROL (${name.split(':')[0]}): the layer that decides it cannot be read → the entry is left alone`, L(c)); }
+  }
+  const rh = A.reconcileIndex(M0([E0('h'), { id: 'u', kind: 'npm', packages: [], label: 'u', by: { kind: 'user' }, rows: [], services: [] }]), { host: [], sys: [] });
+  ok(same(rh.dropped, ['h']) && rh.manifest.entries.some((e) => e.id === 'u' && e.kind === 'npm'), 'home kinds untouched (an npm entry has no root record and stays)');
+  const once = A.reconcileIndex(M0([E0('a'), E0('g')]), { host: [], sys: [R0('a'), R0('n')] });
+  const twice = A.reconcileIndex(once.manifest, { host: [], sys: [R0('a'), R0('n')] });
+  ok(once.changed && !twice.changed && twice.manifest === once.manifest, 'idempotent: a second reconcile over the same records changes nothing');
+  const hr = [{ id: 'app.hello', package: 'hello' }, { id: 'app.gimp', package: 'gimp' }], sr = [{ id: 'sys.hello', package: 'hello' }];
+  ok(same(A.dedupeRows(hr, sr).map((r) => r.id), ['app.gimp']) && same(A.dedupeRows(hr, []).map((r) => r.id), ['app.hello', 'app.gimp']), 'dedupeRows: a host row whose package an app-system row carries is no row (CONTROL: no sys rows → every host row stays)');
+  const fa = A.appArgv({ mode: 'forget', appsDir: '/home/u/.vibespace/apps', id: 'hello', nonce: 'abcdef123' });
+  ok(same(fa.slice(5), ['vs-app', '/home/u/.vibespace/apps', 'forget', 'hello', 'abcdef123', '--']) && A.SCRIPT_MODES.includes('forget'), 'forget argv: the entry id only, as a POSITION');
+  let threw = 0; for (const o of [{ id: '../x' }, { id: 'X' }, { args: ['hello'] }]) { try { A.appArgv({ mode: 'forget', appsDir: '/a', id: 'hello', nonce: 'abcdef123', ...o }); } catch { threw++; } }
+  ok(threw === 3, 'forget argv judged before root: a bad id / an extra argument throws');
+  const fb = A.APP_SCRIPT.split('\nforget)\n')[1].split('\nsource-remove)')[0];
+  ok(!/apt-get \$LOCK/.test(fb) && /rm -f "\$R\/entries\/\$ID\.list"/.test(fb) && /refuse no-entry/.test(fb) && /k=0/.test(fb), 'the forget branch runs NO apt install/remove, drops the three record files, refuses an unknown id, keeps the cache when apt cannot simulate the closure');
+  const dirF = myDir('app-manifest-forget'), shF = path.join(dirF, 'app.sh'); fs.writeFileSync(shF, A.APP_SCRIPT);
+  const appsF = path.join(dirF, 'home/.vibespace/apps'); fs.mkdirSync(appsF, { recursive: true });
+  const runF = (...a) => { const r = spawnSync('sh', [shF, ...a], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: path.join(dirF, 'home') } }); return (r.stdout || '') + (r.stderr || ''); };
+  ok(/= refused bad-id/.test(runF(appsF, 'forget', '-x', 'abcdefgh1', '--')) && /= refused bad-args/.test(runF(appsF, 'forget', 'hello', 'abcdefgh1', '--', 'other')) && /= run hello abcdefgh1 forget\n= refused not-root/.test(runF(appsF, 'forget', 'hello', 'abcdefgh1', '--')), 'the script: forget with a bad id / an extra argument is refused before root; valid arguments reach the root check (nothing touched here)');
+}
 for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 8 })) ok(r.pass, '§tree ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 console.log(`\n${fail ? `${fail} FAILED` : 'ALL PASS'} (${pass}) in ${Date.now() - T0} ms`);
 process.exit(fail ? 1 : 0);

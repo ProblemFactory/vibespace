@@ -287,6 +287,20 @@ const gPod = await gate({ VIBESPACE_APP_SYSTEM: '1' });
 ok(gs.every((g) => !g.on && g.ran === 0) && gPod.on && gPod.argv && same(gPod.argv.slice(-2), [S.HELPER_SHA256, S.SUDOERS_SHA256]), 'item 8: off by default; this host\'s shape (a systemd unit: INVOCATION_ID) installs NOTHING — even with the flag set; a pod (tini, the flag) installs with this release\'s digests');
 const mUnit = spatch('!e.INVOCATION_ID && ', '', 'no-systemd-rule');
 ok((await gate({ ...UNIT, VIBESPACE_APP_SYSTEM: '1' }, mUnit)).ran > 0, 'CONTROL: a gate without the systemd rule installs the helper + sudoers on a systemd host whose env file sets the flag');
+// lane app-system-env — THE REAL WIRING: server.js hands the machine half `env: () => agentEnv()` (src/ws-handler.js → src/agent-env.js),
+// which drops every VIBESPACE_* an agent child must not see; the pod's flag is in the PROCESS's env (the chart's container env)
+{
+  const { agentEnv } = require('../src/agent-env.js');
+  const prev = process.env.VIBESPACE_APP_SYSTEM;
+  process.env.VIBESPACE_APP_SYSTEM = '1';
+  const wired = async (mod = SS) => { const lines = [], n0 = calls.length; const g = mod.create({ home, env: () => agentEnv(process.env), runner: stub({ 'vs-sys-install': { code: 0, stdout: '= ok\n', stderr: '' } }), platform: 'linux', log: { log: (m) => lines.push(m), warn: (m) => lines.push(m) } }); await g.boot(); return { on: g.enabled(), ran: calls.length - n0, line: lines.find((m) => /^\[apps\] app system: helper \+ sudoers installed in \d+ ms$/.test(m)) || null }; };
+  const w = await wired();
+  const mSan = spatch(' || process.env.VIBESPACE_APP_SYSTEM', '', 'sanitized-env-only');
+  const wm = await wired(mSan);
+  if (prev === undefined) delete process.env.VIBESPACE_APP_SYSTEM; else process.env.VIBESPACE_APP_SYSTEM = prev;
+  ok(!('VIBESPACE_APP_SYSTEM' in agentEnv({ VIBESPACE_APP_SYSTEM: '1' })) && w.on && w.ran > 0 && w.line, 'app-system-env: the serve built as server.js builds it (env: () => agentEnv(), the flag in the process env only) is ENABLED and its boot step logs "[apps] app system: helper + sudoers installed in N ms"', w);
+  ok(!wm.on && wm.ran === 0 && !wm.line, 'CONTROL (sanitized-env-only): an enabled() that reads the sanitized env alone never turns on in a pod (the 2.369.210 fleet bug)', wm);
+}
 }
 for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 6 })) ok(r.pass, '§tree ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 console.log(`\n${fail ? `${fail} FAILED` : 'ALL PASS'} (${pass}) in ${Date.now() - T0} ms`);
