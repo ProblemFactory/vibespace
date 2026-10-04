@@ -430,6 +430,94 @@ try {
   ok(await until(() => Object.keys(tags).every((t) => passed().includes(t)), 15000), 'r3 pass leg: each of them FIRES at the tick', passed() || 'never ran');
   for (const t of E._timers) clearInterval(t);
   E.shutdown();
+  // 11. lane job-publish-stable: a published service whose process listens LATE is published http (the publish waits for
+  //     the port, never probes a silent one), keeps its URL across stop/start, the CLI prints it (show/list/poll), and a
+  //     URL that changes is SAID to the owner conversation once. Real PortForwardManager + a fake frp plugin.
+  {
+    const net = require('net'), http = require('http');
+    const { PortForwardManager } = require('../src/port-forward.js');
+    const { probeProto } = require('../src/plugins.js');
+    const pdir = path.join(dir, 'pub');
+    fs.mkdirSync(path.join(pdir, 'bin'), { recursive: true });
+    fs.copyFileSync(new URL('../data/bin/job-wrapper.js', import.meta.url), path.join(pdir, 'bin', 'job-wrapper.js'));
+    const P = await new Promise((res) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
+    const answers = () => new Promise((res) => { const s = net.connect(P, '127.0.0.1'); s.once('connect', () => { s.destroy(); res(true); }); s.once('error', () => res(false)); });
+    const calls = []; let seq = 0;
+    const fakePlugins = {
+      async frpPublish(name, port, { preferSub = '', proto = '' } = {}) {
+        const answered = await answers();
+        const p = ['http', 'https', 'tcp'].includes(proto) ? proto : await probeProto(port).catch(() => 'http');
+        calls.push({ answered, proto: p, preferSub });
+        if (p !== 'http') return { name, remotePort: 22100 + (++seq), proto: p, url: `tcp://relay.test:${22100 + seq}` };
+        const sub = preferSub || 'vs' + (++seq).toString(16).padStart(10, 'b');
+        return { name, subdomain: sub, proto: p, url: `https://${sub}.relay.test/` };
+      },
+      async frpUnpublish() { return { ok: true }; },
+    };
+    const pf = new PortForwardManager({ hosts: { list: () => [] }, dataDir: pdir, plugins: fakePlugins, broadcast: () => { }, log: () => { } });
+    const said = [];
+    const late = (ms) => ({ argv: [process.execPath, '-e', `setTimeout(() => require('http').createServer((q, s) => s.end('ok')).listen(${P}, '127.0.0.1'), ${ms})`] });
+    const mkF = (JM = JobManager) => { const F = new JM({ ...deps, dataDir: pdir, getPorts: () => pf, publishWaitMs: 20000, publishRecheckMs: 500 }); F.init(); const orig = F._notifyOwner.bind(F); F._notifyOwner = (job, ev) => { said.push(ev.what); return orig(job, ev); }; return F; };
+    const F = mkF();
+    const cr = F.create({ kind: 'service', name: 'late-web', cmd: late(2500), ports: [P], publish: true, restart: 'never', owner }, caller);
+    ok(!cr.error, 'publish leg: a --keep-up --port --publish service is created', cr.error);
+    const job = F.jobs.get(cr.job.id);
+    await sleep(600);
+    const early = F.snapshot(job);
+    ok(early.publishState === 'publishing' && !early.publishedUrl && !calls.length, 'while the service is still starting: publishState=publishing, nothing published yet', JSON.stringify({ s: early.publishState, calls }));
+    ok(await until(() => !!job.publishedUrl, 20000), 'the late listener gets a public URL');
+    const U = job.publishedUrl;
+    ok(calls.length === 1 && calls[0].answered && calls[0].proto === 'http' && /^https:\/\//.test(U), 'the probe ran only once the port answered → http, https://<sub> (no TCP)', JSON.stringify(calls));
+    // the CLI prints it — show / list / poll against a stand-in agent API serving the engine's own snapshot
+    const api = http.createServer((q, s) => {
+      const snap = { ...jobModel.agentJobView(F.snapshot(job, { tail: 5 }), { mine: true }), mine: true, mySubscription: null };
+      s.setHeader('Content-Type', 'application/json');
+      s.end(JSON.stringify(q.url.startsWith('/api/agent/jobs/') ? { success: true, job: snap } : { success: true, jobs: [snap] }));
+    });
+    await new Promise((r) => api.listen(0, '127.0.0.1', r));
+    const cli = (...a) => new Promise((res) => {
+      const c = spawn(process.execPath, [new URL('../data/bin/vibespace-job', import.meta.url).pathname, ...a], { env: { PATH: process.env.PATH, VIBESPACE_API: `http://127.0.0.1:${api.address().port}`, VIBESPACE_SESSION_TOKEN: 'vst_test' } });
+      let out = ''; c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { out += d; }); c.on('close', () => res(out));
+    });
+    const showOut = await cli('show', job.id), listOut = await cli('list'), pollOut = await cli('poll', job.id);
+    ok(showOut.includes(`public URL: ${U}`) && /anyone with the link/.test(showOut), 'vibespace-job show prints the public URL (with the public caution)', showOut);
+    ok(listOut.includes(`↗ ${U}`), 'vibespace-job list appends ↗ <url>', listOut);
+    ok(pollOut.includes(`public URL: ${U}`), 'vibespace-job poll prints the public URL', pollOut);
+    // stop → start: the same URL comes back, no notice
+    F.stop(job);
+    ok(await until(() => !job.publishedUrl && job.state !== 'up', 15000), 'stop takes the URL down');
+    const downOut = await cli('show', job.id);
+    ok(downOut.includes(`the next start publishes ${U} again`), 'show of a stopped service names the URL its next start brings back', downOut);
+    F.start(job);
+    ok(await until(() => !!job.publishedUrl, 20000) && job.publishedUrl === U && !said.length, 'stop → start (a late listener again) republishes the SAME URL — no change notice', JSON.stringify({ u: job.publishedUrl, said }));
+    // a URL that changes is said: the user explicitly unpublishes (the name is forgotten), the next start gets a new one
+    await pf.unpublish(job._pfId);
+    F.stop(job);
+    await until(() => job.state !== 'up', 15000);
+    F.start(job);
+    ok(await until(() => !!job.publishedUrl, 20000) && job.publishedUrl !== U, 'after an explicit unpublish the next start has a NEW URL', job.publishedUrl);
+    ok(said.length === 1 && said[0].includes(U) && said[0].includes(job.publishedUrl) && /CHANGED/.test(said[0]), 'the owner conversation gets ONE notice naming the old and the new URL', JSON.stringify(said));
+    F.stop(job);
+    await until(() => job.state !== 'up', 15000);
+    // NEGATIVE CONTROL (patched copy, outside the tree): without the wait the publish probes a port that does not answer yet
+    const { mutantCopies } = await import('./mutant-copy.mjs');
+    const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+    const JS = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf-8');
+    const WAIT = 'const up = await this._portAnswers(job, job.ports[0], waitMs, gen);';
+    ok(JS.split(WAIT).length === 2, 'the wait-for-the-port line is present once');
+    const JMmut = mutantCopies('jobs-publish', ROOT).load('src/jobs.js', JS.replace(WAIT, 'const up = true;'), 'no-wait').JobManager;
+    calls.length = 0;
+    const G = mkF(JMmut);
+    const cg = G.create({ kind: 'service', name: 'late-web-ctl', cmd: late(2500), ports: [P], publish: true, restart: 'never', owner }, caller);
+    const gj = G.jobs.get(cg.job.id);
+    await until(() => calls.length > 0, 10000);
+    ok(calls.length && !calls[0].answered, 'NEGATIVE CONTROL: without the wait the first publish runs while the port is still silent', JSON.stringify(calls));
+    G.stop(gj);
+    await until(() => gj.state !== 'up', 15000);
+    api.close();
+    for (const t of [...(F._timers || []), ...(G._timers || [])]) clearInterval(t);
+    F.shutdown(); G.shutdown();
+  }
 } finally {
   try { const all = JSON.parse(fs.readFileSync(path.join(dir, 'jobs.json'), 'utf-8')); } catch { }
   try { for (const d of fs.readdirSync(path.join(dir, 'job-logs'))) { } } catch { }

@@ -737,7 +737,7 @@ console.log('— ⑩ version markers resolve; this branch squats nothing');
     for (const line of git('log', '--format=%s', '-400', REF).split('\n')) {
       const t = line.trim(); if (re.test(t)) out.push(t);
     }
-    for (const line of git('show', REF_LOG).split('\n')) {
+    for (const line of String(refChangelog || '').split('\n')) {
       const m = /^## (.+)$/.exec(line.trim());
       if (m && re.test(m[1].trim())) out.push(m[1].trim());
     }
@@ -763,7 +763,7 @@ console.log('— ⑩ version markers resolve; this branch squats nothing');
     //    the branch, never declared: highest released 2.369.N on REF, plus one.
     const releasedNs = [];
     for (const line of git('log', '--format=%s', '-400', REF).split('\n')) { const m = /^2\.369\.(\d+)(?![\d.])/.exec(line.trim()); if (m) releasedNs.push(+m[1]); }
-    for (const line of git('show', REF_LOG).split('\n')) { const m = /^## 2\.369\.(\d+)(?![\d.])/.exec(line.trim()); if (m) releasedNs.push(+m[1]); }
+    for (const line of String(refChangelog || '').split('\n')) { const m = /^## 2\.369\.(\d+)(?![\d.])/.exec(line.trim()); if (m) releasedNs.push(+m[1]); }
     const latestN = Math.max(...releasedNs);
     // THE RELEASE BEING CUT IS CLAIMED BY THIS TREE (2.369.70 gate, the second
     // time this leg blocked a release for naming ITSELF): every release names

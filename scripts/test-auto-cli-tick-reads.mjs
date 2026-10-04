@@ -165,13 +165,12 @@ for (const explicit of [true, false]) {
 // ── §2 the engine's answers, fixed vs reverted, on ONE world (both engines read the same files and sessions) ──
 console.log('§2 the engine answers the same as the reverted copy');
 const NOW = () => Date.now();
-const engineAnswers = (w, eng, viaIndex) => {
+const engineAnswers = (w, eng, viaIndex, now) => {
   const out = { billing: {}, fire: {}, proj: {} };
   for (const [sid, s] of w.sessions) {
     out.billing[sid] = settle(() => eng.sessionBillingMember(s, w.P));
     out.fire[sid] = settle(() => eng.fireIdentityFor(s));
   }
-  const now = Math.floor(NOW() / 60e3) * 60e3; // one instant for both engines
   const idx = viaIndex ? eng.projectionBillingIndex() : null;
   for (const id of [...w.ids, w.P, 'sub-nope', null]) out.proj[id] = settle(() => eng.projectionRereadFor(id, now, idx));
   return out;
@@ -184,7 +183,8 @@ for (const hot of [true, false]) {
   for (const [st, apply] of Object.entries(STATES)) {
     for (const victim of [w.ids[0], w.ids[7]]) { // ids[0] holds linked conversations AND is the pool default; ids[7] holds linked conversations
       apply(w, victim);
-      const A = engineAnswers(w, pre, false), B = engineAnswers(w, w.eng, false), C = engineAnswers(w, w.eng, true);
+      const now = Math.floor(NOW() / 60e3) * 60e3; // ONE instant for the round's three answers (each taking its own straddled a minute boundary now and then)
+      const A = engineAnswers(w, pre, false, now), B = engineAnswers(w, w.eng, false, now), C = engineAnswers(w, w.eng, true, now);
       rounds++;
       if (!isDeepStrictEqual(A, B)) bad.push(`${st}: per-call ${JSON.stringify(Object.entries(A.proj).filter(([k, v]) => !isDeepStrictEqual(v, B.proj[k])).slice(0, 1))}`);
       if (!isDeepStrictEqual(A, C)) bad.push(`${st}: via index`);

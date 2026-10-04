@@ -315,6 +315,7 @@ console.log('⑧ two pastes through the engine');
   const baseScan = path.join(ROOT, 'secret-scan-base.mjs');
   let based = false;
   try { fs.writeFileSync(baseScan, execFileSync('git', ['-C', REPO, 'show', '9d448a44:scripts/secret-scan.mjs'])); based = true; } catch {}
+  if (!based) console.log('  SKIP the base scanner legs: 9d448a44 is not in this checkout (a depth-1 clone)');
   const cur = path.join(REPO, 'scripts/secret-scan.mjs');
   const got = [scan(cur, planted), scan(cur, refresh), based ? scan(baseScan, planted) : null, based ? scan(baseScan, refresh) : null];
   ok(got[0] === 1 && got[1] === 1 && (!based || (got[2] === 1 && got[3] === 0)), `scripts/secret-scan.mjs finds a setup token and a refresh token (rc ${got[0]}/${got[1]}); the base's scanner caught the setup token only through its xoxp- rule and missed the refresh token (${based ? `rc ${got[2]}/${got[3]}` : 'base not readable here — skipped'})`);

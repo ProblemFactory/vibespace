@@ -990,25 +990,83 @@ class JobManager {
   // THE JOURNAL NAMES A JOB BY ITS ID (lane-redact verify r8, reproduced in chrome): every console line rides the server's
   // in-memory ring (src/server/incident-wiring.js) into each incident captured later — an automatic freeze capture too —
   // so `publish unavailable for <name>` put a job's name in data/incidents/<id>/bundle.json after the job was cleared
+  // lane job-publish-stable (the 2026-10-04 incident): the protocol probe never races the service start — the publish
+  // waits (bounded, backoff) until the port answers; a port still silent publishes with the forward's LAST protocol and is
+  // re-checked; a URL that changes or breaks is SAID to the owner conversation (one notice, the job notification path)
   async _ensurePublish(job) {
+    const gen = job._pubGen = (job._pubGen || 0) + 1; // a later publish or a teardown supersedes this one
     try {
       const pf = this.d.getPorts && this.d.getPorts();
       if (!pf) return;
       const rec = await pf.forward('__local__', job.ports[0], { label: 'service: ' + job.name });
       job._pfId = rec && rec.id;
+      job._publish = { state: 'publishing' }; this._touch(job);
+      const waitMs = this.d.publishWaitMs ?? 60_000;
+      const up = await this._portAnswers(job, job.ports[0], waitMs, gen);
+      if (gen !== job._pubGen) return;
+      if (!up) this.d.log(`[jobs] ${job.id} port ${job.ports[0]} silent after ${Math.round(waitMs / 1000)} s — publishing with the forward's last protocol, re-checking`);
       try {
         const r = await pf.publish(job._pfId);
-        job.publishedUrl = r && r.publicUrl || null;
-      } catch (e) { this.d.log('[jobs] publish unavailable for', job.id, '—', e.message); job.publishedUrl = null; }
+        if (gen !== job._pubGen) return;
+        job._publish = null;
+        this._adoptJobUrl(job, r && r.publicUrl || null);
+        if (!up || (r && (r.pending || r.proto === 'tcp'))) this._publishRecheck(job, gen, 30);
+      } catch (e) {
+        this.d.log('[jobs] publish unavailable for', job.id, '—', e.message); job.publishedUrl = null;
+        job._publish = { state: 'failed', error: String(e.message || e).slice(0, 300) };
+        if (job.lastPublicUrl) this._notifyOwner(job, { what: `public URL ${job.lastPublicUrl} is DOWN — publish failed: ${job._publish.error}` });
+      }
       this._touch(job);
     } catch (e) { this.d.log('[jobs] forward failed for', job.id, '—', e.message); }
   }
-  async _teardownPublish(job) {
+  /** true once a loopback TCP connect to the job's port succeeds; false after budgetMs (or when superseded/stopped). */
+  async _portAnswers(job, port, budgetMs, gen) {
+    const net = require('net');
+    const t0 = Date.now();
+    for (let delay = 250; ; delay = Math.min(delay * 2, 4000)) {
+      const ok = await new Promise((res) => {
+        const s = net.connect({ host: '127.0.0.1', port: Number(port) });
+        const fin = (v) => { try { s.destroy(); } catch { } res(v); };
+        s.once('connect', () => fin(true)); s.once('error', () => fin(false)); s.setTimeout(1500, () => fin(false));
+      });
+      if (ok) return true;
+      if (gen !== job._pubGen || job.state !== 'up' || Date.now() - t0 + delay > budgetMs) return false;
+      await new Promise((r) => { const t = setTimeout(r, delay); t.unref?.(); });
+    }
+  }
+  /** After a publish the probe could not settle (silent port) or settled as TCP: re-probe every 10 s (≤ tries) — once the
+   *  port answers, a wrong mode is repaired under the SAME name (port-forward reprobe). */
+  _publishRecheck(job, gen, tries) {
+    const t = setTimeout(async () => {
+      if (gen !== job._pubGen || job.state !== 'up' || !job._pfId) return;
+      const pf = this.d.getPorts && this.d.getPorts();
+      let r = null;
+      try { r = pf && pf.reprobe ? await pf.reprobe(job._pfId) : null; } catch (e) { this.d.log('[jobs] re-probe failed for', job.id, '—', e.message); }
+      if (gen !== job._pubGen) return;
+      if (r && r.publicUrl && r.publicUrl !== job.publishedUrl) { this._adoptJobUrl(job, r.publicUrl); this._touch(job); }
+      if (r && r.pending && tries > 1) this._publishRecheck(job, gen, tries - 1);
+    }, this.d.publishRecheckMs ?? 10_000);
+    t.unref?.();
+  }
+  /** The job's live URL + its last one (`lastPublicUrl` survives a stop); a URL different from the last one is said. */
+  _adoptJobUrl(job, url) {
+    const before = job.lastPublicUrl || null;
+    job.publishedUrl = url;
+    if (!url) return;
+    job.lastPublicUrl = url;
+    if (before && before !== url) {
+      this.d.log(`[jobs] ${job.id} public URL changed`);
+      this._notifyOwner(job, { what: `public URL CHANGED: ${before} → ${url} (the old link no longer works — share the new one)` });
+    }
+  }
+  /** forget = the public name goes too (never on a stop / park: the next start publishes the same name). */
+  async _teardownPublish(job, { forget = false } = {}) {
     try {
       const pf = this.d.getPorts && this.d.getPorts();
+      job._pubGen = (job._pubGen || 0) + 1; job._publish = null;
       if (!pf || !job._pfId) return;
-      try { await pf.unpublish(job._pfId); } catch { }
-      try { await pf.unforward(job._pfId); } catch { }
+      try { await pf.unpublish(job._pfId, { keepName: !forget }); } catch { }
+      try { await pf.unforward(job._pfId, { keepName: !forget }); } catch { }
       job._pfId = null; job.publishedUrl = null;
       this._touch(job);
     } catch { }
@@ -1422,6 +1480,7 @@ class JobManager {
     const run = job.runs && job.runs[job.runs.length - 1];
     const out = {
       id: job.id, kind: job.kind, name: job.name, note: job.note, state: job.state, publishedUrl: job.publishedUrl || null,
+      publishState: job._publish ? job._publish.state : null, publishError: (job._publish && job._publish.error) || null, lastPublicUrl: job.lastPublicUrl || null,
       desiredUp: job.desiredUp, progress: job.progress || null, ports: job.ports, publish: job.publish,
       schedule: job.schedule, nextFireAt: job.nextFireAt || null, context: job.context || null,
       owner: { createdBy: job.owner?.createdBy, groups: job.owner?.groupsSnapshot || [] },

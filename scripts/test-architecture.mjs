@@ -3546,5 +3546,105 @@ console.log('§S2 a satellite window opens no connection of its own');
   ok(missed.length === 0 && legal.length === 0, `§S2 NEGATIVE CONTROLS: ${PLANTS.length} planted openers caught, a comment naming them passes${missed.length ? ' — missed: ' + missed.join(' | ') : ''}${legal.length ? ' — wrongly flagged: ' + legal.join(' | ') : ''}`);
 }
 
+// §75 A SUITE THAT READS AN OLD GIT OBJECT SURVIVES A DEPTH-1 CHECKOUT (lane mirror-green-207 — 2026-10-04). The Actions
+// checkout is depth 1 (ci.yml sets no fetch-depth): HEAD's commit is the only one there. test-windows-device-fs read its
+// base with an unguarded top-level `git show 296a748f:…` and died in 163 ms on the mirror. It was a fast suite, and the fast
+// job was cancelled at 15 min from .202 to .206, so the red stayed hidden for five releases. The class: every
+// `git show <ref>:` / `git cat-file` / `git rev-parse <ref>` call in scripts/test-*.mjs reads an object a shallow clone may
+// not hold (HEAD itself and rev-parse's layout flags are exempt). Each call must sit behind a GUARD: inside a try block,
+// a spawnSync whose answer is tested (`x.status` / `x === null`), or the availability probe itself (cat-file -e /
+// rev-parse --verify). A suite with such a call must also print a SKIP line by name when it degrades. The per-file SKIP word
+// is a proxy; whether a skipped control counts as a pass is each suite's business (the 2.369.164 r2 rule).
+console.log('§75 every old-object git read in a suite is guarded and degrades to a named SKIP (depth-1 checkouts)');
+{
+  const GIT_CALL = /(?:execFileSync|execFile|spawnSync|spawn)\(\s*'git'|\bgit\(|\bgitIn\(|\bspawnSyncGit\(/;
+  const OBJ_READ = new RegExp("'show',\\s*(?=\\S)(?![`'\"]-)(?![`'\"]HEAD:)|'cat-file'|'rev-parse',\\s*(?=\\S)(?!'--(?:show-toplevel|git-dir|git-common-dir|is-shallow-repository|path-format)\\b)(?!'HEAD')");
+  const PROBE = /'cat-file',\s*'-e'|'rev-parse',\s*'--verify'/;
+  // is each offset inside a try block? one light JS scan (strings, templates + ${}, comments, regex literals skipped)
+  const inTryAt = (src, offsets) => {
+    const want = [...offsets].sort((a, b) => a - b), out = new Map();
+    const stack = []; let i = 0, k = 0, last = '', word = '';
+    const mode = ['code'];
+    const settle = () => { while (k < want.length && want[k] <= i) { out.set(want[k], stack.some((e) => e === 'try')); k++; } };
+    while (i < src.length && k < want.length) {
+      settle(); if (k >= want.length) break;
+      const c = src[i], d = src[i + 1];
+      if (mode[mode.length - 1] === 'tmpl') {
+        if (c === '\\') { i += 2; continue; }
+        if (c === '`') { mode.pop(); i++; last = 'x'; continue; }
+        if (c === '$' && d === '{') { mode.push('code'); stack.push('tmpl'); i += 2; last = '{'; continue; }
+        i++; continue;
+      }
+      if (c === '/' && d === '/') { const n = src.indexOf('\n', i); i = n < 0 ? src.length : n; continue; }
+      if (c === '/' && d === '*') { const n = src.indexOf('*/', i + 2); i = n < 0 ? src.length : n + 2; continue; }
+      if (c === "'" || c === '"') { i++; while (i < src.length && src[i] !== c && src[i] !== '\n') i += src[i] === '\\' ? 2 : 1; i++; last = 'x'; continue; }
+      if (c === '`') { mode.push('tmpl'); i++; continue; }
+      if (c === '/' && (/[(,=:[!&|?{};+\-*%<>~^]/.test(last) || last === '' || /^(?:return|typeof|of|in)$/.test(word))) {
+        i++; let cls = false; while (i < src.length && src[i] !== '\n') { const e = src[i]; if (e === '\\') { i += 2; continue; } if (e === '[') cls = true; else if (e === ']') cls = false; else if (e === '/' && !cls) break; i++; }
+        i++; while (/[a-z]/i.test(src[i] || '')) i++; last = 'x'; continue;
+      }
+      if (c === '{') { stack.push(word === 'try' && last === 'y' ? 'try' : 'blk'); i++; last = '{'; word = ''; continue; }
+      if (c === '}') { const top = stack.pop(); i++; if (top === 'tmpl') mode.pop(); last = '}'; word = ''; continue; }
+      if (/\s/.test(c)) { i++; continue; }
+      if (/[\w$]/.test(c)) { let j = i; while (j < src.length && /[\w$]/.test(src[j])) j++; word = src.slice(i, j); last = src[j - 1]; i = j; continue; }
+      last = c; word = ''; i++;
+    }
+    settle(); for (const o of want) if (!out.has(o)) out.set(o, false);
+    return out;
+  };
+  const judgeSrc = (src) => {
+    const lines = src.split('\n'), sites = [];
+    let off = 0;
+    for (let n = 0; n < lines.length; off += lines[n].length + 1, n++) {
+      const l = lines[n], t = l.trim();
+      if (t.startsWith('//') || t.startsWith('*') || !GIT_CALL.test(l)) continue;
+      const m = OBJ_READ.exec(l); if (!m) continue;
+      const g = GIT_CALL.exec(l);
+      sites.push({ line: n + 1, text: t.slice(0, 120), at: off + Math.min(g.index, m.index), l });
+    }
+    const tries = inTryAt(src, sites.map((s) => s.at));
+    for (const s of sites) {
+      const sp = /(?:const|let)\s+(\w+)\s*=\s*(?:spawnSync|spawnSyncGit)\(/.exec(s.l);
+      s.guard = PROBE.test(s.l) ? 'probe' : tries.get(s.at) ? 'try' : sp && new RegExp('\\b' + sp[1] + '(?:\\.status\\b|\\s*===?\\s*null\\b)').test(src.slice(s.at)) ? 'status' : null;
+      delete s.l;
+    }
+    return { sites, bad: sites.filter((s) => !s.guard), named: !sites.length || /['"`][^'"`\n]*\bSKIP(?:PED)?\b/.test(src) };
+  };
+  const SCRIPTS = path.join(REPO, 'scripts');
+  const files = fs.readdirSync(SCRIPTS).filter((f) => /^test-.*\.mjs$/.test(f)).sort();
+  const judged = files.map((f) => ({ f, ...judgeSrc(fs.readFileSync(path.join(SCRIPTS, f), 'utf8')) })).filter((j) => j.sites.length);
+  const unguarded = judged.flatMap((j) => j.bad.map((s) => `${j.f}:${s.line} ${s.text}`));
+  const unnamed = judged.filter((j) => !j.named).map((j) => j.f);
+  const nSites = judged.reduce((a, j) => a + j.sites.length, 0);
+  ok(nSites >= 30 && judged.some((j) => j.f === 'test-windows-device-fs.mjs'), `§75 the census sees the old-object reads (${nSites} sites in ${judged.length} suites, test-windows-device-fs among them)`);
+  ok(unguarded.length === 0, `§75 every old-object git read sits behind a guard (try / a tested spawnSync / the probe itself)${unguarded.length ? ' — unguarded: ' + unguarded.join(' | ') : ''}`);
+  ok(unnamed.length === 0, `§75 every suite with such a read says SKIP by name when it degrades${unnamed.length ? ' — no SKIP line: ' + unnamed.join(', ') : ''}`);
+  // NEGATIVE CONTROLS: the shipped 94f0c1ea line, planted unguarded reads, and lookalikes that must stay quiet
+  const SH = "'sh" + "ow'", CF = "'cat" + "-file'", RP = "'rev" + "-parse'";
+  const wdfs = fs.readFileSync(path.join(SCRIPTS, 'test-windows-device-fs.mjs'), 'utf8');
+  const GUARDED = 'const baseOf = (file) => { try { return execFileSync(';
+  const shipped = wdfs.replace(/const baseOf = \(file\) => \{ try \{ return (execFileSync\([^\n]*?\}\)); \} catch \{ return null; \} \};/, 'const baseOf = (file) => $1;');
+  const sj = judgeSrc(shipped);
+  ok(wdfs.includes(GUARDED) && shipped !== wdfs && sj.bad.length === 1 && /baseOf/.test(sj.bad[0].text), `§75 NEGATIVE CONTROL: test-windows-device-fs with its 94f0c1ea baseOf (no try) is red — ${JSON.stringify(sj.bad.map((s) => s.line))}`);
+  ok(!judgeSrc(wdfs.replace(/SKIP/g, 'sk1p')).named, '§75 NEGATIVE CONTROL: the same suite without a SKIP line is red');
+  const PLANTS = [
+    [`const a = execFileSync('git', [${SH}, 'deadbeef:src/x.js']);`, 1],
+    [`for (const l of git(${SH}, REF_LOG).split('\\n')) {}`, 1],
+    [`if (x) { const b = spawnSync('git', [${RP}, 'HEAD~1']); use(b.stdout); }`, 1],
+    [`// try {\nconst c = execFileSync('git', ['-C', R, ${CF}, '-p', 'deadbeef:x']);`, 1],
+    [`const s = 'try {'; const d = execFileSync('git', [${SH}, \`\${BASE}:x\`]);`, 1],
+    [`try { const e = execFileSync('git', [${SH}, 'deadbeef:x']); } catch { console.log('SKIP x'); }`, 0],
+    [`const f = (p) => { try { return git([${SH}, \`\${ref}:\${p}\`]); } catch { return null; } };`, 0],
+    [`const r = spawnSync('git', [${SH}, 'deadbeef:x']);\nif (r.status !== 0) console.log('SKIP');`, 0],
+    [`const o = spawnSyncGit([${SH}, 'deadbeef:x']); if (o === null) console.log('SKIP');`, 0],
+    [`const h = git(${CF}, '-e', \`\${ref}^{commit}\`);`, 0],
+    [`const t = execFileSync('git', [${SH}, 'HEAD:src/x.js']); const u = git(${RP}, '--show-toplevel'); const v = git(${RP}, 'HEAD');`, 0],
+    [`const w = execFileSync('git', [${SH}, '-s', '--format=%ct', sha]);`, 0],
+    [`const re = /}/; try { x(); } catch {} const z = execFileSync('git', [${SH}, 'deadbeef:x']);`, 1],
+  ];
+  const wrong = PLANTS.filter(([p, n]) => judgeSrc(p).bad.length !== n).map(([p, n]) => `${p.slice(0, 70)} (want ${n})`);
+  ok(wrong.length === 0, `§75 NEGATIVE CONTROLS: ${PLANTS.length} plants — unguarded reads caught (a commented or quoted "try {" is no guard), guarded ones and HEAD / layout reads pass${wrong.length ? ' — wrong: ' + wrong.join(' | ') : ''}`);
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

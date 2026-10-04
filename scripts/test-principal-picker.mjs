@@ -193,7 +193,7 @@ console.log('② the census: every principal pick is the picker; no <select> of 
   const plantedExit = exitSrc.replace("const pickerWrap = el('div', 'exit-access-picker');", "const pickerWrap = el('div', 'exit-access-picker');\n      const whoSel = el('select', 'exit-who');\n      for (const r of roster()) { const op = el('option', '', r.name); whoSel.appendChild(op); }");
   ok(plantedExit !== exitSrc && judge(plantedExit).length === 1 && judge(exitSrc).length === 0, 'CONTROL: a `<select>` planted into exit-access-dialog.js (filled from its roster) is flagged; the real dialog is clean');
   if (pre && /whoSel = el\('select'/.test(pre)) ok(judge(pre).length >= 1, 'CONTROL: the pre-picker reach editor (git HEAD~1) is flagged — the census has teeth on the real shape');
-  else console.log('  … (the pre-picker reach editor is not reachable at HEAD~1 here — the planted control stands alone)');
+  else console.log('  SKIP CONTROL: the pre-picker reach editor is not reachable at HEAD~1 here (a depth-1 clone) — the planted control stands alone');
 }
 
 // ═══ ③ patched-copy controls ═══

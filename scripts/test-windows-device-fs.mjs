@@ -27,6 +27,11 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const BASE = '296a748f';
+// mirror-green-207: the Actions checkout is depth 1, so BASE is not there. Every leg that needs the base tree SKIPs by
+// name (counted apart, never as a pass: the 2.369.164 r2 rule) and every leg on this tree still runs.
+let HAVE_BASE = false; try { execFileSync('git', ['-C', REPO, 'cat-file', '-e', `${BASE}^{commit}`], { stdio: 'ignore' }); HAVE_BASE = true; } catch { }
+const SKIPPED = [];
+const skip = (n) => { SKIPPED.push(n); console.log(`  SKIP ${n} — base ${BASE} not in this checkout — depth-1 clone`); };
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra === undefined ? '' : ' — ' + JSON.stringify(extra).slice(0, 400))); } };
 const SCR = path.join(os.tmpdir(), `vs-wdfs-${process.pid}`);
@@ -36,7 +41,7 @@ const cleanup = () => { for (const p of daemonPids) { try { process.kill(p, 'SIG
 process.on('exit', cleanup);
 const rel = (src) => src.replace(/require\('\.\.\//g, `require('${path.join(REPO, 'src')}/`).replace(/require\('\.\//g, `require('${path.join(REPO, 'src/agentd')}/`);
 const relTop = (src) => src.replace(/require\('\.\//g, `require('${path.join(REPO, 'src')}/`);
-const baseOf = (file) => execFileSync('git', ['-C', REPO, 'show', `${BASE}:${file}`], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+const baseOf = (file) => { try { return execFileSync('git', ['-C', REPO, 'show', `${BASE}:${file}`], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return null; } };
 const writeCopy = (name, src) => { const f = path.join(SCR, name); fs.writeFileSync(f, src); return f; };
 
 // ── §1 THE CENSUS ──
@@ -192,10 +197,8 @@ class FakeRes {
 }
 const rejects = async (p) => { try { await p; return null; } catch (e) { return e; } };
 const RFS = require(path.join(REPO, 'src/remote-fs.js'));
-const baseRfsFile = writeCopy('remote-fs-base.cjs', relTop(baseOf('src/remote-fs.js')));
-const BaseRFS = require(baseRfsFile);
-const baseClientFile = writeCopy('client-base.cjs', rel(baseOf('src/agentd/client.js')));
-const BaseCL = require(baseClientFile);
+const BaseRFS = HAVE_BASE ? require(writeCopy('remote-fs-base.cjs', relTop(baseOf('src/remote-fs.js')))) : null;
+const BaseCL = HAVE_BASE ? require(writeCopy('client-base.cjs', rel(baseOf('src/agentd/client.js')))) : null;
 const seed = (home) => {
   fs.mkdirSync(path.join(home, 'docs', 'sub'), { recursive: true });
   fs.writeFileSync(path.join(home, 'a.txt'), 'hello from the device\n');
@@ -271,18 +274,20 @@ ok(Array.isArray(win.conn.info.posixShells) && win.conn.info.posixShells.length 
   ok(ds && ds.code === 'windows_no_shell', '…runStream too');
   ok(String((await dm.runCmd(process.execPath, ['-e', 'process.stdout.write("argv ok")'])).stdout) === 'argv ok', '…a non-shell argv still runs');
   // the pre-fix hub (base remote-fs + base client) over the SAME agent = the owner's report
+  if (!BaseCL) skip('PRE-FIX (the base hub over this agent): list("~") ⇒ "command failed (127)"'); else {
   const bdm = secondManager(win, BaseCL);
   const brf = new BaseRFS.RemoteFs(hostsOf(bdm));
   const be = await rejects(brf.list(ID, '~'));
   ok(be && /command failed \(127\)/.test(be.message), 'PRE-FIX (the base hub over this agent): list("~") ⇒ "command failed (127)" — the owner\'s 400', be && be.message);
+  }
 }
 
 // ── §4 an OLD Windows agent ──
 console.log('§4 an old Windows agent (the base tree\'s agent, hello win32)');
-const oldBundle = bundleFrom(writeCopy('agentd-old-win.cjs', rel(asWindows(baseOf('src/agentd/agentd.js')))), 'oldwin');
-const old = await realDaemon(oldBundle, 'oldwin', { windows: true });
-seed(old.home);
-{
+const old = HAVE_BASE ? await realDaemon(bundleFrom(writeCopy('agentd-old-win.cjs', rel(asWindows(baseOf('src/agentd/agentd.js')))), 'oldwin'), 'oldwin', { windows: true }) : null;
+if (!old) skip('§4 an old Windows agent (the base tree\'s agent): every leg');
+else seed(old.home);
+if (old) {
   const dm = old.dm, asked = record(dm);
   const rf = new RFS.RemoteFs(hostsOf(dm));
   ok(!old.conn.info.capabilities.includes('fs-portable'), 'the old agent lacks fs-portable');
@@ -322,9 +327,10 @@ seed(wsh.home);
   const ae = await rejects(rf.archiveList('h', path.join(wsh.home, 'nope.tar')));
   ok(!(ae && ae.code === 'windows_unsupported') && asked.some((a) => a.op === 'run-cmd' && a.cmd === 'sh'), 'F1: a shell-only verb (an archive) is asked of the machine that has `sh` — not refused by name', ae && ae.message);
 }
-const oldSh = await realDaemon(bundleFrom(writeCopy('agentd-old-win-sh.cjs', rel(asWindowsWithSh(baseOf('src/agentd/agentd.js')))), 'oldwinsh'), 'oldwinsh');
-seed(oldSh.home);
-{
+const oldSh = HAVE_BASE ? await realDaemon(bundleFrom(writeCopy('agentd-old-win-sh.cjs', rel(asWindowsWithSh(baseOf('src/agentd/agentd.js')))), 'oldwinsh'), 'oldwinsh') : null;
+if (!oldSh) skip('§4b an old Windows agent WITH `sh` (the base tree\'s agent): every leg');
+else seed(oldSh.home);
+if (oldSh) {
   const dm = oldSh.dm, asked = record(dm);
   ok(oldSh.conn.info.platform === 'win32' && oldSh.conn.info.posixShells === undefined && !oldSh.conn.info.capabilities.includes('fs-portable'), 'F1: an old Windows agent: says neither its shells nor fs-portable');
   const r = await dm.runCmd('sh', ['-c', 'printf %s "$HOME"']);
@@ -338,7 +344,7 @@ seed(oldSh.home);
 console.log('§5 the POSIX path unchanged (a real Linux agent from this tree)');
 const lin = await realDaemon(headBundle, 'linux');
 seed(lin.home);
-{
+if (!BaseRFS) skip('§5 the POSIX path: the head and the base RemoteFs answer alike (every parity leg)'); else {
   const dm = lin.dm, asked = record(dm);
   const head = new RFS.RemoteFs(hostsOf(dm, 'linux-box')), base = new BaseRFS.RemoteFs(hostsOf(dm, 'linux-box'));
   const H = lin.home;
@@ -379,14 +385,16 @@ console.log('§6 controls — each rule removed');
   const ByPlatform = require(writeCopy('client-byplatform.cjs', rel(src.replace(FACT, 'if (!base) return null;'))));
   const pe = await rejects(secondManager(wsh, ByPlatform).runCmd('sh', ['-c', 'echo "$HOME"']));
   ok(pe && pe.code === 'windows_no_shell', 'CONTROL c6 — the door keyed on the PLATFORM (the lane head e90dfd88): the Windows machine WITH `sh` is refused what it ran (F1)', pe && pe.message);
-  const pe2 = await rejects(secondManager(oldSh, ByPlatform).runCmd('sh', ['-c', 'echo "$HOME"']));
-  ok(pe2 && pe2.code === 'windows_no_shell', 'CONTROL c6 — …and the old agent with `sh` too', pe2 && pe2.message);
+  if (!oldSh) skip('CONTROL c6 — …and the old agent with `sh` too'); else { const pe2 = await rejects(secondManager(oldSh, ByPlatform).runCmd('sh', ['-c', 'echo "$HOME"']));
+  ok(pe2 && pe2.code === 'windows_no_shell', 'CONTROL c6 — …and the old agent with `sh` too', pe2 && pe2.message); }
   const GATE = "if (!conn.info?.capabilities?.includes?.('fs-portable')) { const e = new Error('daemon lacks fs-portable (capabilities gate) -- upgrade the agent on this machine'); e.code = 'host_needs_daemon'; throw e; }";
   ok(src.includes(GATE), '(c2) the gate line is there');
   const NoGate = require(writeCopy('client-nogate.cjs', rel(src.replace(GATE, ''))));
+  if (!old) skip('CONTROL c2 — no gate: the old agent IS asked an op it lacks'); else {
   const gdm = secondManager(old, NoGate); const asked = record(gdm);
   const ge = await rejects(gdm.fsHome());
   ok(asked.some((a) => a.action === 'home') && !(ge && ge.code === 'host_needs_daemon'), 'CONTROL c2 — no gate: the old agent IS asked an op it lacks', { asked, e: ge && ge.message });
+  }
   const rsrc = fs.readFileSync(path.join(REPO, 'src/remote-fs.js'), 'utf8');
   const ROUTE = "if (info.platform !== 'win32') return null;";
   ok(rsrc.includes(ROUTE), '(c3) the route line is there');
@@ -396,13 +404,13 @@ console.log('§6 controls — each rule removed');
   const CAPLINE = "throw named('device_agent_outdated', filesOutdatedText(this._host(id)?.name || id, info.daemonVersion), 409, { machine: this._host(id)?.name || id, version: agentVersionOf(info.daemonVersion) || '' });";
   ok(rsrc.split(CAPLINE).length === 2, '(c4) the outdated refusal is there');
   const NoOld = require(writeCopy('rfs-noold.cjs', relTop(rsrc.replace(CAPLINE, 'return null;'))));
-  const oe = await rejects(new NoOld.RemoteFs(hostsOf(old.dm)).list('h', '~'));
-  ok(oe && oe.code !== 'device_agent_outdated' && !/too old to browse files/.test(oe.message), 'CONTROL c4 — no outdated refusal: the old agent answers a bare refusal nobody can act on', oe && oe.message);
+  if (!old) skip('CONTROL c4 — no outdated refusal (the old agent)'); else { const oe = await rejects(new NoOld.RemoteFs(hostsOf(old.dm)).list('h', '~'));
+  ok(oe && oe.code !== 'device_agent_outdated' && !/too old to browse files/.test(oe.message), 'CONTROL c4 — no outdated refusal: the old agent answers a bare refusal nobody can act on', oe && oe.message); }
   const SHFACT = 'if (await this._winHasSh(dm, info)) return null;';
   ok(rsrc.includes(SHFACT), '(c7) the Files route asks whether the machine has `sh`');
   const NoSh = require(writeCopy('rfs-nosh.cjs', relTop(rsrc.replace(SHFACT, ''))));
-  const se = await rejects(new NoSh.RemoteFs(hostsOf(oldSh.dm)).list('h', '~'));
-  ok(se && se.code === 'device_agent_outdated', 'CONTROL c7 — refused by platform (the lane head): the old agent WITH `sh` loses the Files view it had (F1)', se && se.message);
+  if (!oldSh) skip('CONTROL c7 — refused by platform: the old agent WITH `sh`'); else { const se = await rejects(new NoSh.RemoteFs(hostsOf(oldSh.dm)).list('h', '~'));
+  ok(se && se.code === 'device_agent_outdated', 'CONTROL c7 — refused by platform (the lane head): the old agent WITH `sh` loses the Files view it had (F1)', se && se.message); }
   const ze = await rejects(new NoSh.RemoteFs(hostsOf(wsh.dm)).archiveList('h', path.join(wsh.home, 'nope.tar')));
   ok(ze && ze.code === 'windows_unsupported', 'CONTROL c7 — …and the machine WITH `sh` is refused its archives by name', ze && ze.message);
   const asrc = fs.readFileSync(path.join(REPO, 'src/agentd/agentd.js'), 'utf8');
@@ -441,8 +449,8 @@ let r2;
   ok(conn3.info.posixShells.includes('sh') && rr.code === 0 && rr.stdout.trim() === 'installed-later', 'r2: a `sh` installed after the agent started is seen at the NEXT link (and runs)', { sh: conn3.info.posixShells, rr });
   m3.stop();
 }
-let r2old;
-{
+let r2old = null;
+if (!HAVE_BASE) skip('r2: an old agent whose `sh` RAN but failed gets the outdated sentence (the base tree\'s agent)'); else {
   fakeShells('r2old', { sh: 'exit 3' }); // an old Windows agent whose `sh` is broken
   r2old = await realDaemon(bundleFrom(writeCopy('agentd-r2old.cjs', rel(asWindowsWithSh(baseOf('src/agentd/agentd.js')))), 'r2old'), 'r2old');
   const asked = record(r2old.dm), rf = new RFS.RemoteFs(hostsOf(r2old.dm));
@@ -457,7 +465,9 @@ const opsSrc = fs.readFileSync(path.join(REPO, 'src/lib/file-explorer-ops.js'), 
 const fnSrc = opsSrc.slice(opsSrc.indexOf('const WIN_UNSUPPORTED = {'), opsSrc.indexOf('export function installExplorerOps')).replace('export function fsErrorText', 'function fsErrorText');
 const tOf = (dict) => (k, p = {}) => String(dict[k] || k).replace(/\{(\w+)\}/g, (m, n) => (n in p ? String(p[n]) : m));
 const wordIn = (dict) => new Function('t', fnSrc + '\nreturn fsErrorText;')(tOf(dict));
-const outdated = await rejects(new RFS.RemoteFs(hostsOf(old.dm)).list('h', '~'));
+// no base tree (depth 1): an agent too old for fs-portable whose `sh` probe fails stands in for the old agent's hello
+const oldDuck = { status: () => ({ info: { platform: 'win32', capabilities: [], daemonVersion: '2.369.0' } }), runCmd: async () => ({ code: 127, stdout: '', stderr: '' }) };
+const outdated = await rejects(new RFS.RemoteFs(hostsOf(old ? old.dm : oldDuck)).list('h', '~'));
 const zipE = await rejects(new RFS.RemoteFs(hostsOf(win.dm)).archiveList('h', path.join(win.home, 'x.zip')));
 const noSh = await rejects(win.dm.runCmd('sh', ['-c', 'exit 0']));
 const bodies = [outdated, zipE, noSh].map((e) => RFS.fsErrorBody(e));
@@ -515,8 +525,8 @@ else {
   const OLDJ = '.then((r) => !!r && r.code === 0 && !r.timedOut,';
   ok(rsrc.includes(OLDJ), '(c10) the old-agent probe judges by the exit');
   const R10 = require(writeCopy('rfs-r2c10.cjs', relTop(rsrc.replace(OLDJ, '.then(() => true,'))));
-  const e10 = await rejects(new R10.RemoteFs(hostsOf(secondManager(r2old, CL))).list('h', '~'));
-  ok(!(e10 && e10.code === 'device_agent_outdated'), 'CONTROL c10 — judged by "no ENOENT": the old agent with a broken `sh` gets its shell line\'s failure, not the way out', e10 && e10.message);
+  if (!r2old) skip('CONTROL c10 — judged by "no ENOENT" (the old agent with a broken `sh`)'); else { const e10 = await rejects(new R10.RemoteFs(hostsOf(secondManager(r2old, CL))).list('h', '~'));
+  ok(!(e10 && e10.code === 'device_agent_outdated'), 'CONTROL c10 — judged by "no ENOENT": the old agent with a broken `sh` gets its shell line\'s failure, not the way out', e10 && e10.message); }
   // c11 — the route body without the code (r1): the client can only show the English sentence
   const BODY = "...(e && FS_REFUSALS.includes(e.code) ? { code: e.code, params: e.params || {} } : {})";
   ok(rsrc.includes(BODY), '(c11) the body carries the code');
@@ -541,6 +551,7 @@ else {
   }
 }
 
+if (SKIPPED.length) console.log(`\n${SKIPPED.length} skipped (never counted as passed) — base ${BASE} not in this checkout — depth-1 clone`);
 console.log(`\ntest-windows-device-fs: ${pass} passed, ${fail} failed`);
 if (fail) { console.log('FAIL'); process.exit(1); }
 console.log(`ALL PASS (${pass})`);

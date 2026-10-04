@@ -125,6 +125,15 @@ enters agent context — gate your endpoints (URL token / auth) or don't
 publish. High-frequency interactions: write events to a file, announce "new
 batch, read <path>".
 
+**How to find the URL:** `vibespace-job show <id>` and `vibespace-job poll <id>`
+print a `public URL:` line (`list` appends `↗ <url>`). While the service is
+still starting it says `publishing…` (the publish waits up to 60 s for the
+port to answer before it decides http vs tcp); a failed publish says why.
+The URL is STABLE: stop / start / restart / server restart / reboot keep the
+same name (only an explicit unpublish in the Ports panel forgets it). If it
+ever does change, your conversation gets one notice with the old and the new
+URL — share the new one.
+
 ## 7. Self-inspection & control
 
 - `vibespace-job list [--mine|--subscribed|--archived]` — ★mine / ✓sub markers;

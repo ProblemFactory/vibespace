@@ -76,7 +76,7 @@ try {
   const pre = execFileSync('git', ['-C', REPO, 'show', 'b924041f:public/style.css'], { encoding: 'utf8' });
   const bad = cssCensus(pre);
   ok(bad.some((b) => /chat-status-billing: caps its width/.test(b)), 'CONTROL: the pre-fix stylesheet FAILS the census (the 90 px cap + ellipsis that cut "⣿ 全部 → Beta Ma")', bad.join('; '));
-} catch (e) { console.log(`  (control skipped: the pre-fix bytes are not readable here — ${String(e.message).split('\n')[0]})`); }
+} catch (e) { console.log(`  SKIP CONTROL: the pre-fix bytes (b924041f) are not readable here — ${String(e.message).split('\n')[0]}`); }
 
 console.log('④ wiring');
 {

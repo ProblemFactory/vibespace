@@ -1,5 +1,9 @@
 # KB: Bug-fix invariants (incident essays)
 
+## A RED HIDDEN BY A TIMEOUT (lane mirror-green-207, 2026-10-04 — test-windows-device-fs on the depth-1 Actions checkout)
+
+The suite read its base with an unguarded `git show 296a748f:…`, so it died in 163 ms on the depth-1 checkout. The red stayed hidden for five releases because the fast job it ran in was cancelled at 15 min (.202–.206). 不变量 = a suite reads an old git object only behind a guard that SKIPs by name and is never counted as a pass (test-architecture §75), and a job cancelled by a timeout never counts as green: every suite in it is unproven.
+
 ## THE NEWEST CHANGE CHIP'S × SAT PAST THE STRIP'S EDGE IN DEJAVU SANS (lane mirror-green-ui, 2026-10-03 — test-design-window 9–10 ✗ on the 2.369.203 / .204 Actions heavy job)
 
 Eight of the nine reds were one cascade from A⑧ "removing that chip (its × in the strip) UNDOES its preview" ({"x2":{"x":817.25,"y":237},"undone":null}); reproduced exactly (9 ✗, 153 ✓) with the runner's fonts alone (a fontconfig of DejaVu + Liberation + Noto CJK), green with this box's fonts. In DejaVu Sans two text chips (181 + 166 px + the gap) overflowed the 339 px chips list of a 502 px strip by 14 px; the list scrolls sideways (`overflow-x: auto`) but a new chip lands at its END and the list never moved, so the newest chip's × lay past the edge — `elementFromPoint` there was the strip itself, and a real click removed nothing. A real product bug on any wide-font desktop (and on every desktop once the chips outnumber the strip): the change just made was out of sight.

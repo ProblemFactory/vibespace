@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.208 — 2026-10-04
+
+### Fixed
+- A published Background Work service keeps its public URL across restarts, and `vibespace-job show` prints it.
+
 ## 2.369.207 — 2026-10-03
 
 ### Changed

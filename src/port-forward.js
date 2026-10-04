@@ -91,18 +91,44 @@ class PortForwardManager {
     const key = `${hostId}:${targetHost || ''}:${port}`;
     const hit = this._protoCache.get(key);
     if (!fresh && hit && Date.now() - hit.ts < 5 * 60 * 1000) return hit.proto;
-    const lan = targetHost && targetHost !== '127.0.0.1' && targetHost !== 'localhost' ? targetHost : null;
     let proto;
-    try {
-      proto = hostId === LOCAL_ID
-        // LAN target from THIS instance → probe targetHost:port directly (the
-        // service is NOT on loopback; probing loopback mislabeled it TCP)
-        ? (lan ? await probeProto({ connect: () => this._localSocket(lan, port) }, { timeoutMs: 1800 })
-               : await probeProto(port, { timeoutMs: 1800 }))
-        : await probeProto({ connect: () => this._remoteSocket(hostId, port, targetHost) }, { timeoutMs: 2500 });
-    } catch { return hit?.proto || null; } // unreachable — keep last knowledge
+    try { proto = await this._probeRaw(hostId, port, targetHost); } catch { return hit?.proto || null; } // unreachable — keep last knowledge
     this._protoCache.set(key, { proto, ts: Date.now() });
     return proto;
+  }
+
+  /** One uncached probe; THROWS when nothing answers (undecided — never 'tcp'). */
+  async _probeRaw(hostId, port, targetHost = '') {
+    const lan = targetHost && targetHost !== '127.0.0.1' && targetHost !== 'localhost' ? targetHost : null;
+    return hostId === LOCAL_ID
+      // LAN target from THIS instance → probe targetHost:port directly (the
+      // service is NOT on loopback; probing loopback mislabeled it TCP)
+      ? (lan ? probeProto({ connect: () => this._localSocket(lan, port) }, { timeoutMs: 1800 })
+             : probeProto(port, { timeoutMs: 1800 }))
+      : probeProto({ connect: () => this._remoteSocket(hostId, port, targetHost) }, { timeoutMs: 2500 });
+  }
+
+  /** The publish protocol (lane job-publish-stable, the 2026-10-04 incident: a boot-replayed service probed before it
+   *  listened was republished TCP and lost its subdomain): the user's override wins; else a FRESH probe; a probe that
+   *  cannot decide (nothing answers yet) keeps the forward's LAST known protocol — never a TCP fallback — and marks
+   *  the forward `protoPending` so reprobe() / the heal sweep settle it once the backend answers. */
+  async _decideProto(rec) {
+    if (rec.protoOverride) return { proto: rec.protoOverride, why: 'override' };
+    let proto = null;
+    try { proto = await this._probeRaw(rec.hostId, rec.remotePort, rec.targetHost || ''); } catch { }
+    if (proto) return { proto, why: 'probe' };
+    const last = rec.publicProto || rec.proto || '';
+    return { proto: last || 'http', why: last ? 'nothing answers yet, kept the last protocol' : 'nothing answers yet, http by default', pending: true };
+  }
+
+  /** Adopt a relay answer. The public NAME is sticky (lane job-publish-stable): a publish in the other mode never
+   *  discards the subdomain (or the TCP port) the user or the broker gave this forward — only an explicit unpublish
+   *  clears them — so a forward that comes back as http gets its old https://<sub>.… URL again. */
+  _adoptPublish(rec, r) {
+    rec.publicUrl = r.url; rec.publicName = r.name; rec.publicProto = r.proto || null;
+    rec.publicSub = r.subdomain || rec.publicSub || null;
+    rec.publicPort = r.remotePort || rec.publicPort || null;
+    this._published.add(rec.id);
   }
 
   /** A fresh direct TCP socket to <host>:<port> from THIS instance (used to
@@ -455,7 +481,13 @@ class PortForwardManager {
     const isLan = targetHost && targetHost !== '127.0.0.1' && targetHost !== 'localhost';
     const key = isLan ? `${targetHost}:${remotePort}` : String(remotePort);
     let rec = this._state.forwards.find((r) => r.hostId === hostId && r.remotePort === remotePort && (r.targetHost || '') === (isLan ? targetHost : ''));
-    if (!rec) { rec = { id: 'pf-' + hostId + '-' + key.replace(/[^\w.-]/g, '_'), hostId, remotePort, label, ...(isLan ? { targetHost } : {}) }; this._state.forwards.push(rec); this._persist(); }
+    if (!rec) {
+      rec = { id: 'pf-' + hostId + '-' + key.replace(/[^\w.-]/g, '_'), hostId, remotePort, label, ...(isLan ? { targetHost } : {}) };
+      // a stopped service's forward left its public name behind (unforward keepName) — its next start gets it back
+      const kept = this._state.names && this._state.names[rec.id];
+      if (kept) { rec.publicSub = kept.sub || null; rec.publicPort = kept.port || null; if (kept.proto) rec.proto = kept.proto; delete this._state.names[rec.id]; }
+      this._state.forwards.push(rec); this._persist();
+    }
     else if (label) { rec.label = label; this._persist(); }
     await this._start(rec);
     this._probeForward(rec);
@@ -530,8 +562,11 @@ class PortForwardManager {
   }
 
   /** Tear down a forward and forget it. */
-  async unforward(id) {
+  async unforward(id, { keepName = false } = {}) {
     const rec = this._state.forwards.find((r) => r.id === id);
+    // keepName = a Background Work service stopping: its public name waits for the next start (forward() restores it)
+    if (keepName && rec && (rec.publicSub || rec.publicPort)) (this._state.names = this._state.names || {})[id] = { sub: rec.publicSub || null, port: rec.publicPort || null, proto: rec.publicProto || rec.proto || null };
+    else if (this._state.names) delete this._state.names[id];
     if (rec?.publicUrl && this.plugins) { try { await this.plugins.frpUnpublish(rec.publicName || id); } catch {} }
     const l = this._live.get(id);
     if (l) {
@@ -562,21 +597,42 @@ class PortForwardManager {
     if (!l?.rec?.localPort) await this._start(rec); // ensure a local port exists
     const localPort = this._live.get(id)?.rec?.localPort;
     if (!localPort) throw new Error('the forward is not active (is the machine online?)');
-    // effective proto: the user's override wins; otherwise frpPublish probes
-    // the backend itself (authoritative at publish time)
-    const r = await this.plugins.frpPublish(id, localPort, { preferPort: rec.publicPort || 0, preferSub: rec.publicSub || '', proto: rec.protoOverride || '' });
-    rec.publicUrl = r.url; rec.publicName = r.name; rec.publicPort = r.remotePort; rec.publicSub = r.subdomain || null; rec.publicProto = r.proto || null;
-    if (!rec.protoOverride && r.proto) rec.proto = r.proto; // publish probe refreshes detection
-    this._published.add(rec.id);
+    const d = await this._decideProto(rec);
+    const previousUrl = rec.publicUrl || null;
+    const r = await this.plugins.frpPublish(id, localPort, { preferPort: rec.publicPort || 0, preferSub: rec.publicSub || '', proto: d.proto });
+    this._adoptPublish(rec, r);
+    if (d.why === 'probe' && r.proto) rec.proto = r.proto; // publish probe refreshes detection
+    if (d.pending) rec.protoPending = true; else delete rec.protoPending;
+    this.log(`[ports] publish ${id}: ${r.proto || d.proto} (${d.why}) → ${r.url}`);
     this._persist(); this._emit();
-    return { publicUrl: r.url };
+    return { publicUrl: r.url, proto: r.proto || d.proto, pending: !!d.pending, previousUrl };
   }
 
-  async unpublish(id) {
+  /** Re-probe a published forward; a decision that differs from the published mode republishes under the SAME name
+   *  (a TCP publish of a web service that answered late is repaired to http). Undecided → { pending: true }. */
+  async reprobe(id) {
+    const rec = this._state.forwards.find((r) => r.id === id);
+    if (!rec || !rec.publicUrl || rec.protoOverride || !this.plugins) return { changed: false };
+    let proto = null;
+    try { proto = await this._probeRaw(rec.hostId, rec.remotePort, rec.targetHost || ''); } catch { }
+    if (!proto) return { changed: false, pending: true };
+    if (proto === rec.publicProto) {
+      if (rec.protoPending) { delete rec.protoPending; rec.proto = proto; this.log(`[ports] reprobe ${id}: ${proto} confirmed`); this._persist(); }
+      return { changed: false, publicUrl: rec.publicUrl };
+    }
+    this.log(`[ports] reprobe ${id}: answers ${proto}, published ${rec.publicProto || '?'} — republishing under the same name`);
+    const r = await this.publish(id);
+    return { changed: r.publicUrl !== r.previousUrl, publicUrl: r.publicUrl, previousUrl: r.previousUrl };
+  }
+
+  /** Take a forward's public URL down. An EXPLICIT unpublish (the user, the API) is the one act that forgets the public
+   *  name (lane job-publish-stable); keepName = a stopping service, whose next start publishes the same name again. */
+  async unpublish(id, { keepName = false } = {}) {
     const rec = this._state.forwards.find((r) => r.id === id);
     if (!rec) return;
     try { if (this.plugins) await this.plugins.frpUnpublish(rec.publicName || id); } catch { }
-    rec.publicUrl = null; rec.publicName = null; rec.publicPort = null;
+    rec.publicUrl = null; rec.publicName = null; delete rec.protoPending;
+    if (!keepName) { rec.publicSub = null; rec.publicPort = null; rec.publicProto = null; if (this._state.names) delete this._state.names[id]; }
     this._published.delete(id);
     this._persist(); this._emit();
   }
@@ -630,8 +686,7 @@ class PortForwardManager {
     if (!localPort) return false; // not active — nothing to bind the proxy to
     try {
       const r = await this.plugins.frpPublish(rec.id, localPort, { preferPort: rec.publicPort || 0, preferSub: rec.publicSub || '', proto: rec.protoOverride || rec.publicProto || '' });
-      rec.publicUrl = r.url; rec.publicName = r.name; rec.publicPort = r.remotePort; rec.publicSub = r.subdomain || null; rec.publicProto = r.proto || null;
-      this._published.add(rec.id);
+      this._adoptPublish(rec, r);
       return true;
     } catch (e) {
       this.log('re-publish ' + rec.id + ': ' + e.message);
@@ -703,6 +758,10 @@ class PortForwardManager {
         if (pubOk) { this._healRetryAt.delete(rec.id); rec.error = null; }
         changed = true;
       } catch (e) { if (rec.error !== e.message) { rec.error = e.message; changed = true; } }
+    }
+    // a publish the probe could not settle (nothing answered yet) is re-probed each sweep until the backend answers
+    for (const rec of this._state.forwards.filter((r) => r.protoPending && r.publicUrl && this._published.has(r.id))) {
+      try { await this.reprobe(rec.id); } catch (e) { this.log('reprobe ' + rec.id + ': ' + e.message); }
     }
     if (changed) { this._persist(); this._emit(); }
   }

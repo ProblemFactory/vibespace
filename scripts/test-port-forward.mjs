@@ -3,12 +3,14 @@
 // end-to-end piping through a MOCK device (tcpForward → a real loopback echo
 // server standing in for the device's service). No daemon/ssh needed.
 import net from 'node:net';
+import http from 'node:http';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { PortForwardManager } = require('../src/port-forward.js');
+import { mutantCopies } from './mutant-copy.mjs';
 
 let failed = 0;
 const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n      ' + e : ''}`); } };
@@ -250,6 +252,133 @@ try {
     check('killOrphan terminates the orphan', !!kr.ok && gone);
   } else {
     console.log('  (skipping orphan e2e — /proc is linux-only)');
+  }
+  // ── lane job-publish-stable: a published forward keeps its public NAME, and the protocol probe never races a
+  //    service start (the 2026-10-04 incident: a boot-replayed service probed before it listened was republished TCP
+  //    and lost its subdomain). A fake frp plugin decides like the real one (hint, else probe → unreachable = http).
+  {
+    const { probeProto } = require('../src/plugins.js');
+    const freePort = () => new Promise((res) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
+    const P = await freePort();
+    let srv = null;
+    const up = (kind) => new Promise((res) => {
+      srv = kind === 'http' ? http.createServer((q, s) => s.end('ok')) : net.createServer((c) => c.on('data', (d) => c.write(Buffer.concat([Buffer.from('echo:'), d]))));
+      srv.listen(P, '127.0.0.1', res);
+    });
+    const down = () => new Promise((res) => { if (!srv) return res(); srv.close(() => res()); srv.closeAllConnections?.(); srv = null; });
+    let seq = 0;
+    const calls = [];
+    const fakePlugins = {
+      async frpPublish(name, port, { preferPort = 0, preferSub = '', proto = '' } = {}) {
+        const p = ['http', 'https', 'tcp'].includes(proto) ? proto : await probeProto(port).catch(() => 'http');
+        calls.push({ name, port, preferSub, preferPort, proto: p });
+        if (p === 'http') { const sub = /^[a-z0-9][a-z0-9-]{1,62}$/.test(preferSub) ? preferSub : 'vs' + (++seq).toString(16).padStart(10, 'a'); return { name, subdomain: sub, proto: p, url: `https://${sub}.relay.test/`, publicHost: sub + '.relay.test' }; }
+        const remotePort = preferPort || 22000 + (++seq);
+        return { name, remotePort, proto: p, url: p === 'tcp' ? `tcp://relay.test:${remotePort}` : `${p}://relay.test:${remotePort}/` };
+      },
+      async frpUnpublish() { return { ok: true }; },
+    };
+    const pdir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-pfpub-'));
+    const logs = [];
+    const mk = (PF = PortForwardManager) => new PF({ hosts, dataDir: pdir, plugins: fakePlugins, broadcast: () => {}, log: (l) => logs.push(l) });
+    const disk = () => JSON.parse(fs.readFileSync(path.join(pdir, 'port-forwards.json'), 'utf-8'));
+    const id = 'pf-__local__-' + P;
+
+    // the probe: a port nobody listens on is UNDECIDED (throws), not 'tcp'
+    let thrown = null; try { await probeProto(P, { timeoutMs: 800 }); } catch (e) { thrown = e; }
+    check('probeProto: a refused port is undecided (throws EUNREACHABLE), never "tcp"', thrown && thrown.code === 'EUNREACHABLE', String(thrown));
+    await up('tcp');
+    check('probeProto: a raw-TCP listener still reads "tcp"', (await probeProto(P, { timeoutMs: 800 })) === 'tcp');
+    await down();
+
+    // 1. a web service published http gets subdomain S
+    await up('http');
+    const pa = mk();
+    await pa.forward('__local__', P, { label: 'service: demo' });
+    const r1 = await pa.publish(id);
+    const S = pa.list().find((f) => f.id === id).publicSub;
+    check('publish of a live web service → https://<sub>', /^https:\/\/vs[0-9a-f]+\.relay\.test\/$/.test(r1.publicUrl) && !r1.pending, JSON.stringify(r1));
+    // 2. server restart (a new manager over the same data/) keeps the subdomain
+    const pb = mk();
+    await pb.restore();
+    check('server restart: the restored forward republishes the SAME subdomain', pb.list().find((f) => f.id === id).publicUrl === r1.publicUrl && calls.at(-1).preferSub === S, JSON.stringify(calls.at(-1)));
+    // 3. reboot: the service is not listening yet when the job publishes — the probe cannot decide → the LAST protocol
+    await down();
+    const r3 = await pb.publish(id);
+    check('nothing answers yet: publish keeps the last protocol (http) and the same name — no TCP fallback', r3.publicUrl === r1.publicUrl && r3.proto === 'http' && r3.pending === true, JSON.stringify(r3));
+    check('…the forward is marked protoPending (re-probed by the heal sweep / reprobe)', pb.list().find((f) => f.id === id) && disk().forwards.find((f) => f.id === id).protoPending === true);
+    check('…one log line names the decision', logs.some((l) => l.includes(`publish ${id}: http (nothing answers yet, kept the last protocol)`)), logs.slice(-3).join(' | '));
+    // 4. the late listener answers → reprobe confirms http, same URL, pending cleared
+    await up('http');
+    const r4 = await pb.reprobe(id);
+    check('late listener: reprobe confirms http under the same URL, pending cleared', !r4.changed && r4.publicUrl === r1.publicUrl && !disk().forwards.find((f) => f.id === id).protoPending, JSON.stringify(r4));
+    // 5. a protocol change never discards the name: a raw-TCP answer publishes TCP, the subdomain stays on the record…
+    await down(); await up('tcp');
+    const r5 = await pb.reprobe(id);
+    const rec5 = disk().forwards.find((f) => f.id === id);
+    check('a TCP decision publishes tcp:// and KEEPS publicSub on the record', r5.changed && /^tcp:\/\//.test(r5.publicUrl) && rec5.publicSub === S, JSON.stringify(rec5));
+    // …and a web answer repairs the TCP publish to http with the SAME subdomain
+    await down(); await up('http');
+    const r6 = await pb.reprobe(id);
+    check('repair: a wrong TCP publish goes back to http with the same subdomain', r6.changed && r6.publicUrl === r1.publicUrl, JSON.stringify(r6));
+    // 6. a stopping service (unpublish + unforward keepName) gets its name back at its next start
+    await pb.unpublish(id, { keepName: true }); await pb.unforward(id, { keepName: true });
+    check('stop: the forward is gone, its public name waits in the store', !pb.list().some((f) => f.id === id) && disk().names[id].sub === S, JSON.stringify(disk().names));
+    await pb.forward('__local__', P, { label: 'service: demo' });
+    const r7 = await pb.publish(id);
+    check('start: the recreated forward publishes the SAME URL', r7.publicUrl === r1.publicUrl && !disk().names[id], JSON.stringify(r7));
+    // 7. an EXPLICIT unpublish forgets the name — the next publish gets a new one
+    await pb.unpublish(id);
+    const rec8 = disk().forwards.find((f) => f.id === id);
+    check('explicit unpublish clears publicSub / publicPort', rec8.publicSub === null && rec8.publicPort === null && !rec8.publicUrl, JSON.stringify(rec8));
+    const r8 = await pb.publish(id);
+    check('…and the next publish has a NEW subdomain', /^https:\/\/vs/.test(r8.publicUrl) && r8.publicUrl !== r1.publicUrl, r8.publicUrl);
+    await pb.unpublish(id);
+
+    // PATCHED-COPY CONTROLS (outside the tree): each fix reverted on its own reproduces the incident
+    const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+    const M = mutantCopies('port-forward-publish', ROOT);
+    const PF_SRC = fs.readFileSync(path.join(ROOT, 'src/port-forward.js'), 'utf-8');
+    const PL_SRC = fs.readFileSync(path.join(ROOT, 'src/plugins.js'), 'utf-8');
+    // item 1 — the pre-fix adopt line: a TCP publish drops the subdomain, the repair gets a random one
+    const STICKY = 'rec.publicSub = r.subdomain || rec.publicSub || null;';
+    check('the sticky adopt line is present once', PF_SRC.split(STICKY).length === 2);
+    const PF1 = M.load('src/port-forward.js', PF_SRC.replace(STICKY, 'rec.publicSub = r.subdomain || null;'), 'pre-sticky').PortForwardManager;
+    const drive = async (PF) => {
+      fs.rmSync(path.join(pdir, 'port-forwards.json'), { force: true });
+      const pm = mk(PF);
+      await down(); await up('http');
+      await pm.forward('__local__', P, { label: 'service: demo' });
+      const a = await pm.publish(id);
+      await down(); await up('tcp'); await pm.reprobe(id);
+      await down(); await up('http'); const c = await pm.reprobe(id);
+      await pm.unpublish(id);
+      return { a: a.publicUrl, c: c.publicUrl };
+    };
+    const real1 = await drive(PortForwardManager), mut1 = await drive(PF1);
+    check('CONTROL item 1: with the fix, http → tcp → http comes back to the same URL', real1.a === real1.c, JSON.stringify(real1));
+    check('NEGATIVE CONTROL item 1: the pre-fix adopt line loses the subdomain across the protocol change', mut1.a !== mut1.c, JSON.stringify(mut1));
+    // item 2 — the pre-fix probe (a refused port reads "tcp") + the pre-fix decision (frpPublish probes, no last protocol)
+    const THROW = "  if (!isHttp && !reached) throw Object.assign(new Error('nothing answers on that port'), { code: 'EUNREACHABLE' });\n";
+    check('the undecided-probe throw is present once', PL_SRC.split(THROW).length === 2);
+    const plugMut = M.write('src/plugins.js', PL_SRC.replace(THROW, ''), 'pre-throw');
+    const PF2 = M.load('src/port-forward.js', PF_SRC.replace("require('./plugins')", `require(${JSON.stringify(plugMut)})`), 'pre-probe').PortForwardManager;
+    const drive2 = async (PF) => {
+      fs.rmSync(path.join(pdir, 'port-forwards.json'), { force: true });
+      const pm = mk(PF);
+      await down(); await up('http');
+      await pm.forward('__local__', P, { label: 'service: demo' });
+      const a = await pm.publish(id);
+      await down();
+      const b = await pm.publish(id); // the job publishes before the service listens
+      await pm.unpublish(id);
+      return { a: a.publicUrl, b: b.publicUrl, proto: b.proto };
+    };
+    const real2 = await drive2(PortForwardManager), mut2 = await drive2(PF2);
+    check('CONTROL item 2: a publish before the service listens keeps http + the URL', real2.a === real2.b && real2.proto === 'http', JSON.stringify(real2));
+    check('NEGATIVE CONTROL item 2: the pre-fix probe reads the refused port as TCP and publishes tcp://', mut2.proto === 'tcp' && /^tcp:\/\//.test(mut2.b), JSON.stringify(mut2));
+    await down();
+    fs.rmSync(pdir, { recursive: true, force: true });
   }
 } catch (e) {
   failed++; console.error('  ✗ harness threw:', e.stack || e.message);

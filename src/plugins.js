@@ -732,6 +732,8 @@ class PluginManager {
     // Detect the backend protocol: HTTP/HTTPS can ride a routed subdomain; a
     // raw-TCP service (DB/VNC/SSH — no Host/SNI) can ONLY be an IP:port, so it
     // falls through to TCP mode even when a subdomain host is configured.
+    // An UNREACHABLE backend (nothing listens yet) throws in the probe and rides as http — never a TCP fallback
+    // (lane job-publish-stable); port-forward decides first and passes the hint, keeping a forward's last protocol.
     const proto = ['http', 'https', 'tcp'].includes(protoHint) ? protoHint
       : await this._probeProto(localPort).catch(() => 'http');
 
@@ -818,12 +820,16 @@ class PluginManager {
  *  through the device tunnel; each probe pass gets its OWN fresh stream). */
 async function probeProto(target, { timeoutMs = 2500 } = {}) {
   const net = require('net'), tls = require('tls');
-  const mk = typeof target === 'object' && target && target.connect
+  // lane job-publish-stable: a backend that NEVER accepted a connection is UNDECIDED (throws), not 'tcp' — a refused
+  // port used to read as a raw-TCP service, so a service probed before it listened was published TCP
+  let reached = false;
+  const mk0 = typeof target === 'object' && target && target.connect
     ? target.connect
     : () => new Promise((res, rej) => {
       const s = net.connect({ host: '127.0.0.1', port: target, timeout: timeoutMs }, () => res(s));
       s.on('error', rej); s.on('timeout', () => { s.destroy(); rej(new Error('timeout')); });
     });
+  const mk = async () => { const s = await mk0(); reached = true; return s; };
   // TLS? a completed handshake = the backend serves TLS (its own https)
   const isTls = await new Promise(async (res) => {
     let done = false; const fin = (v) => { if (!done) { done = true; res(v); } };
@@ -846,6 +852,7 @@ async function probeProto(target, { timeoutMs = 2500 } = {}) {
     s.on('close', () => end(/^HTTP\//.test(buf)));
     if (s.setTimeout) s.setTimeout(timeoutMs, () => end(/^HTTP\//.test(buf)));
   });
+  if (!isHttp && !reached) throw Object.assign(new Error('nothing answers on that port'), { code: 'EUNREACHABLE' });
   return isHttp ? 'http' : 'tcp';
 }
 
