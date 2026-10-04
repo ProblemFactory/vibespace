@@ -28,6 +28,8 @@ eval "$(vibespace-exit use <machine>)"   export ALL_PROXY / HTTPS_PROXY / HTTP_P
 vibespace-exit url <machine>             just the socks5h url (for --proxy)
 vibespace-exit run <machine> -- <cmd>    run <cmd> ON the machine (≤ 30 s)
 vibespace-exit runs [<machine>] [--limit N]   your own recent runs there, newest first
+vibespace-exit pull <machine> <remote-path> [<local-path>] [--overwrite]   copy ONE file from the machine to here
+vibespace-exit push <local-path> <machine> <remote-path> [--overwrite]     copy ONE file from here to the machine
 ```
 
 `<machine>` = its id, its exact name or a unique substring of either; omit it when only one machine is
@@ -68,6 +70,31 @@ does it).
   YOUR runs only — one line per run (the verdict, the duration, the interpreter, the command) and the
   first line of its output. You never see another conversation's runs.
 - A revoke while a command runs cannot stop it (no cancel); the record says access was removed.
+
+## Files: `pull` / `push`
+
+- One regular file per call, under the SAME grant as `run` (and its "ask me each time": the ask shows
+  `pull <remote> → <local>`). The machine's agent reads / writes it with its own file operations — no
+  shell, so it works the same on Windows; no 30 s cap and no output bound: the bound is the user's
+  setting (default 1 GiB; a bigger file is refused `too_big` with both sizes).
+- The remote path is absolute in the machine's own spelling (`C:\Users\me\out.zip`, `/home/me/out.zip`;
+  `~/…` when its agent expands it). A folder: archive it first with `run` (`tar -czf`, `Compress-Archive`).
+- A pull lands at `<local-path>` (default `./<the remote file's name>`; an existing folder takes the
+  file inside it) — only under this conversation's project directory, /tmp or ~/Downloads, never in
+  ~/.ssh, ~/.claude, a `.git` or VibeSpace's data (`local_path_refused`). An existing file is replaced
+  only with `--overwrite` (`exists` otherwise), on either side.
+- Every 8 MiB window is checked against the machine's sha256 (an agent older than this checks the
+  size: "size verified"); the CLI prints where it landed, the size and the whole sha256. A push needs
+  the machine's agent 2.369.205 or later (`device_agent_outdated` says so; pull works with any agent).
+- Not resumable: any failure (`hash_mismatch`, `transfer_failed` — a stall, the file changing while it
+  is read, your access removed mid-way) keeps NOTHING on the receiving side; run it again.
+- A pull's local folder is judged again when the bytes are written and when the file is put in
+  place: a folder moved, replaced or removed since you asked is refused (`local_path_refused`, with
+  the reason) and never re-made. One pull per local file at a time: a second pull into the same file
+  is refused `target_busy` until the first one ends.
+- Each transfer is ONE card in the chat and ONE row in the machine's command list (`runs` shows
+  `pulled N bytes`). A conversation running on another machine cannot pull (`remote_session`: the local
+  path would be the VibeSpace machine's disk).
 
 ## Rules
 

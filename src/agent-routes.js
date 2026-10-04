@@ -2500,7 +2500,7 @@ function sessionToolsIntro(T, facts = {}) {
     'If a request needs a DIFFERENT machine\'s network position (a region, an internal/VPN network, a fixed source IP), you can borrow a paired machine\'s network for that ONE command with `vibespace-exit` (default: go direct — only reach for an exit deliberately):',
     '  vibespace-exit list                     machines the user enabled as exits',
     '  eval "$(vibespace-exit use <machine>)"; curl https://ifconfig.me   (borrow its egress via SOCKS for proxy-aware TCP tools)',
-    '  vibespace-exit run <machine> -- <cmd>   run the command ON that machine (universal: ICMP/UDP/proxy-unaware tools/its own DNS)',
+    '  vibespace-exit run <machine> -- <cmd>   run the command ON that machine (ICMP/UDP/its DNS); a file: vibespace-exit pull / push',
     '  (SOCKS can\'t carry ping/UDP and needs a proxy-aware tool — when `use` won\'t work, `run` will. Nothing is available until the user enables a machine as an exit.)');
   if (T.task) L.push('(If this session is later linked to a VibeSpace task, you will also get `vibespace-task` for task-level progress/plan/status — you have no task right now, so it is not active yet.)');
   L.push('</vibespace-session-tools>');

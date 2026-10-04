@@ -640,14 +640,17 @@ function exitCloseVerdict(rec, { leased = false } = {}) {
  *  may ask "save?" — nothing closes then); 'stop' = the second ✕ within `againMs` of
  *  an ask (the existing Stop); 'close' = today's behaviour, the pane only (a record not
  *  running, a rung with no per-window protocol, an agent lease, a pane that is not the
- *  active viewer, no main window to ask). */
-function outerCloseVerdict({ state, stream, seat, connected, mainWid, leased = false, askedAt = 0, now = 0, againMs = OUTER_CLOSE_AGAIN_MS } = {}) {
+ *  active viewer, no main window to ask). 'ask-front' (design 016 S1c) = close-window to the FRONT
+ *  window when it is not the main (`frontWid` — WeChat's Moments over its main): that window
+ *  closes, the app and the pane stay; the app is asked only when its main is in front. */
+function outerCloseVerdict({ state, stream, seat, connected, mainWid, frontWid = 0, leased = false, askedAt = 0, now = 0, againMs = OUTER_CLOSE_AGAIN_MS } = {}) {
   if (state !== 'ready') return { act: 'close', why: 'not-running' };
   if (askedAt > 0 && now >= askedAt && now - askedAt <= againMs) return { act: 'stop', why: 'again' };
   if (stream !== 'xpra') return { act: 'close', why: 'no-window-protocol' };
   if (leased) return { act: 'close', why: 'lease' };
   if (seat !== 'active') return { act: 'close', why: 'not-active' };
   if (!connected || !(mainWid > 0)) return { act: 'close', why: 'no-main-window' };
+  if (frontWid > 0 && frontWid !== mainWid) return { act: 'ask-front', why: 'front-window' };
   return { act: 'ask-app', why: 'close-window' };
 }
 

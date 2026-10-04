@@ -13,6 +13,8 @@
 // CONTROL: the pre-fix chat-status-bar.js + style.css (git show b924041f) under the same scene ⇒ the owner's cut
 // (the chip's text overflows its 90 px box).
 // SKIPs with evidence without chrome. Scratch: /tmp/vs-pchip-<pid>/ only.
+// Cleanup kills Chrome's whole process group and waits for it to be empty before removing the scratch (a lone
+// browser-pid SIGKILL left its network service writing into Default/: ENOTEMPTY on the runner).
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -63,10 +65,21 @@ try {
 } catch (e) { console.log(`  (control: the pre-fix bytes are not readable here — ${String(e.message).slice(0, 400)})`); }
 
 const CDP = await freePort();
-const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--allow-file-access-from-files', `--user-data-dir=${path.join(ROOT, 'chrome')}`, 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
-const done = () => { try { chrome.kill('SIGKILL'); } catch { } fs.rmSync(ROOT, { recursive: true, force: true }); };
+const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--allow-file-access-from-files', `--user-data-dir=${path.join(ROOT, 'chrome')}`, 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'], detached: true });
+// THE WHOLE CHROME, THEN THE FOLDER (lane mirror-green-ui, 2.369.205): `chrome.kill('SIGKILL')` killed the browser
+// process ALONE — its 10–11 other processes (network service, storage, renderers) outlived it for ~40 ms and the network
+// service still wrote `Default/.com.google.Chrome.*` temp files after the kill (measured), so rmSync's walk met a
+// directory that had gained an entry: ENOTEMPTY on the Actions runner (disk-backed /tmp, Node 22's JS rimraf, and the
+// depth-1 checkout skipping the CONTROL leg, so the cleanup ran seconds sooner). Chrome runs in its own process group;
+// the group is killed, the browser reaped, and the folder removed only once no process of the group is left.
+const done = async () => {
+  try { process.kill(-chrome.pid, 'SIGKILL'); } catch { }
+  if (chrome.exitCode === null && chrome.signalCode === null) await new Promise((r) => { chrome.once('exit', r); setTimeout(r, 5000); });
+  for (let i = 0; i < 200; i++) { try { process.kill(-chrome.pid, 0); } catch { break; } await sleep(25); } // ESRCH = the group is empty
+  fs.rmSync(ROOT, { recursive: true, force: true });
+};
 let target = null; for (let i = 0; i < 120 && !target; i++) { try { target = (await (await fetch(`http://127.0.0.1:${CDP}/json`)).json()).find((t) => t.type === 'page'); } catch { } if (!target) await sleep(250); }
-if (!target) { console.log('SKIP: chrome exposed no CDP page target'); done(); process.exit(0); }
+if (!target) { console.log('SKIP: chrome exposed no CDP page target'); await done(); process.exit(0); }
 const cdp = new WebSocket(target.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
 await new Promise((r, e) => { cdp.on('open', r); cdp.on('error', e); });
 let seq = 0; const pend = new Map();
@@ -130,6 +143,6 @@ if (pagePre) {
   const r = await ev(READ);
   ok(r && r.overflow > 0, `CONTROL: the pre-fix chip CUTS the owner's name (its text overflows its box by ${r && r.overflow} px — "⣿ 全部 → Beta Ma…")`, JSON.stringify(r));
 }
-done();
+await done();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

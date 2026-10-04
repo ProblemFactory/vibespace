@@ -2453,6 +2453,9 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
 /* x5 (design-desktop-apps §7 P8-2): the windows ride a STAGE — identity while this pane drives the app, a fit-scale
    (contain, never cropped) in Watch; the pane isolates its stacking so the blocked overlay sits above every window */
 .xpra-stage { position: absolute; inset: 0; transform-origin: 0 0; }
+/* design 016 S2: a satellite window's pane (a viewport of its app's session) and its one-line note (Watch / Blocked) */
+.desktop-satellite-mount { position: relative; flex: 1 1 auto; min-height: 0; width: 100%; height: 100%; overflow: hidden; }
+.xpra-satellite-note { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 12px; text-align: center; color: var(--text-secondary); font-size: 12px; background: var(--bg-dialog); }
 .xpra-win { position: absolute; overflow: hidden; background: transparent; }
 .xpra-win > canvas { display: block; }
 .xpra-ime { position: absolute; left: 0; top: 0; width: 1px; height: 1px; opacity: 0; border: 0; padding: 0; margin: 0; resize: none; overflow: hidden; pointer-events: none; background: transparent; color: transparent; caret-color: transparent; z-index: 0; }
@@ -4788,7 +4791,8 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .chan-search-chip { font-size: 9px; padding: 0 5px; border-radius: 8px; border: 1px solid var(--border); color: var(--text-dim); white-space: nowrap; flex: none; }
 .chan-search-skel { height: 34px; margin: 2px 7px; border-radius: var(--radius-sm); background: var(--bg-hover); opacity: .6; }
 .chan-search-sentinel { height: 1px; }
-.chan-around .chan-around-list { max-height: 60vh; overflow: auto; display: flex; flex-direction: column; }
+/* lane around-sheet-fix: the list IS a .chanwin-list (gutter, padding, scroll, column) — the sheet only caps its height */
+.chan-around .chan-around-list { flex: 0 1 auto; max-height: 60vh; }
 .chan-around .chan-around-open { margin-top: 8px; align-self: flex-start; }
 .chanmsg.chanmsg-found { background: var(--bg-hover); border-radius: var(--radius-sm); }
 /* the narrow rail (the 200px sidebar = 143px of content): the two needs-you
@@ -5110,6 +5114,10 @@ a.chanmsg-file:hover .chanmsg-att-dl { color: var(--accent); }
 .chanmsg-att-failed { border-color: color-mix(in srgb, var(--yellow, #e5c07b) 45%, var(--border)); }
 .chanmsg-att-failed .chanmsg-att-why { color: var(--warn-text); }
 .chanmsg-att-wait { color: var(--text-secondary); }
+/* a file of a record never stored (the around sheet): no link — its words wrap on a phone rather than widen the row */
+.chanmsg-att-unsaved { border-radius: var(--radius); cursor: default; }
+.chanmsg-att-unsaved:hover { border-color: var(--border); }
+.chanmsg-att-unsaved .chanmsg-att-why { white-space: normal; overflow-wrap: anywhere; min-width: 0; }
 .chanmsg-att-retry { font: inherit; font-size: 10px; padding: 0 6px; line-height: 15px; border-radius: 999px; border: 1px solid var(--border); background: var(--bg-input); color: var(--accent); cursor: pointer; }
 .chanmsg-att-retry:hover { border-color: var(--accent); }
 .chanmsg-body.chanmsg-body-empty { display: none; }
@@ -5946,6 +5954,68 @@ label.chan-cap-row { cursor: default; }
 .bprof-kept-live { font-size: 11px; }
 .bprof-kept-resume-hint { font-size: 11px; } /* lane browser-resume B: a stopped conversation's kept row says how to reopen it (no dead Resume) */
 .bprof-row.focus { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+/* design 015 §2b (lane browser-panel-tidy): THE PROFILE TABLE — ONE template; the column titles and every row are
+   SUBGRIDS of it, so a cell's left edge is the table's track, never a per-row result. The four sized tracks' minimums
+   = GRID in src/lib/browser-panel-model.js (pinned by its suite); the acts track is max-content — the widest row's
+   buttons, shared by every row. Every cell is two lines (l1 24 px, l2 16 px, always present); the fold is the row's
+   third line. Below the grid's need the view sets .bprof-stacked: the re-flow (a phone, a narrow window). */
+.bprof { position: relative; }
+.bprof-table { display: grid; grid-template-columns: minmax(140px, 1.5fr) minmax(100px, 1fr) minmax(170px, 1.3fr) 120px max-content; column-gap: 10px; } /* who ≥ 170: one zh chip + "+n" + 更改… at the minimum */
+.bprof-head, .bprof-table > .bprof-row.bprof-profile { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: start; }
+.bprof-head { padding: 2px 0 4px; border-bottom: 1px solid var(--border); font-size: 11px; color: var(--text-dim); }
+.bprof-th { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bprof-table > .bprof-row.bprof-profile { padding: 6px 0; row-gap: 2px; border-radius: 0; }
+.bprof-profile > .bprof-cell { display: flex; flex-direction: column; min-width: 0; overflow: hidden; color: var(--text-secondary); }
+.bprof-profile > .bprof-ident { align-items: stretch; flex-wrap: nowrap; gap: 0; }
+.bprof-l1 { display: flex; align-items: center; gap: 6px; min-width: 0; height: 24px; white-space: nowrap; overflow: hidden; }
+.bprof-l2 { display: flex; align-items: center; gap: 4px; min-width: 0; height: 16px; font-size: 10px; color: var(--text-dim); white-space: nowrap; overflow: hidden; }
+.bprof-profile .bprof-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.bprof-chev { flex: 0 0 16px; width: 16px; height: 16px; padding: 0; border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-dim); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; transition: transform .12s; }
+.bprof-chev:hover { color: var(--text); }
+.bprof-row.open .bprof-chev, .bprof-section-fold.open .bprof-chev { transform: rotate(90deg); }
+.bprof-chips { padding-left: 22px; }
+.bprof-chips > * { flex: 0 0 auto; }
+.bprof-chips .browser-chip { font-size: 10px; }
+.bprof-chip-more { color: var(--text-secondary); cursor: default; }
+.bprof-profile > .bprof-state .bprof-l1 { color: inherit; }
+.bprof-state-word { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.bprof-dot { flex: 0 0 7px; width: 7px; height: 7px; box-sizing: border-box; border-radius: 50%; border: 1px solid currentColor; }
+.bprof-state.state-in-use .bprof-dot, .bprof-state.state-live .bprof-dot { background: currentColor; }
+.bprof-profile .bprof-why { display: block; line-height: 16px; color: var(--text-dim); text-overflow: ellipsis; }
+.bprof-profile .bprof-why.warn { color: var(--warn-text); }
+.bprof-profile .bprof-size { color: var(--text); font-variant-numeric: tabular-nums; }
+.bprof-profile .bprof-trace { display: block; line-height: 16px; text-overflow: ellipsis; }
+.bprof-profile .bprof-trace .bprof-rec-live, .bprof-profile .bprof-trace .bprof-rec-refused { margin-left: 0; }
+.bprof-act { justify-content: flex-start; }
+.bprof-profile > .bprof-act { flex-direction: row; justify-content: flex-end; align-items: center; gap: 6px; height: 24px; overflow: visible; }
+.file-tool-btn.bprof-more { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; }
+.bprof-fold { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 3px 24px; padding: 4px 0 2px 22px; font-size: 11px; }
+.bprof-fold[hidden] { display: none; }
+.bprof-fold-item { display: flex; gap: 8px; flex: 1 1 320px; min-width: 0; }
+.bprof-fold-k { flex: 0 0 auto; color: var(--text-dim); white-space: nowrap; }
+.bprof-fold-v { min-width: 0; color: var(--text-secondary); overflow-wrap: anywhere; }
+.bprof-fold-v.warn { color: var(--warn-text); }
+.bprof-fold-v.accent { color: var(--accent); }
+.bprof-section-fold { cursor: pointer; user-select: none; }
+.file-tool-btn.bprof-info { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; color: var(--text-secondary); }
+.bprof-info-pop { position: absolute; z-index: 20; box-sizing: border-box; max-width: min(440px, calc(100% - 16px)); padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-dialog); color: var(--text-secondary); font-size: 11px; line-height: 1.45; box-shadow: 0 4px 16px rgba(0, 0, 0, .3); }
+.bprof-sweep { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
+/* the re-flow (design 015 §2b, phone): one column, no titles; a row's five lines in a fixed order — the name + the acts,
+   the chips, the state + its sentence, the who line, the size + its counts; nothing hidden, only re-stacked */
+.bprof-stacked .bprof-table { grid-template-columns: minmax(0, 1fr); }
+.bprof-stacked .bprof-head { display: none; }
+.bprof-stacked .bprof-table > .bprof-row.bprof-profile { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name act" "state state" "who who" "use use" "fold fold"; column-gap: 8px; row-gap: 1px; }
+.bprof-stacked .bprof-profile > .bprof-ident { grid-area: name; }
+.bprof-stacked .bprof-profile > .bprof-state { grid-area: state; }
+.bprof-stacked .bprof-profile > .bprof-who { grid-area: who; }
+.bprof-stacked .bprof-profile > .bprof-use { grid-area: use; }
+.bprof-stacked .bprof-profile > .bprof-act { grid-area: act; align-self: start; }
+.bprof-stacked .bprof-profile > .bprof-fold { grid-area: fold; padding-left: 0; }
+.bprof-stacked .bprof-profile > .bprof-state, .bprof-stacked .bprof-profile > .bprof-use { flex-direction: row; align-items: center; gap: 8px; }
+.bprof-stacked .bprof-profile > .bprof-state > .bprof-l1, .bprof-stacked .bprof-profile > .bprof-use > .bprof-l1 { flex: 0 1 auto; }
+.bprof-stacked .bprof-profile > .bprof-state > .bprof-l2, .bprof-stacked .bprof-profile > .bprof-use > .bprof-l2 { flex: 1 1 0; height: 24px; line-height: 24px; }
+.bprof-stacked .bprof-profile > .bprof-who > .bprof-l2:empty { display: none; }
+.bprof-stacked .bprof-chips { padding-left: 22px; }
 .bprof-ident { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
 .bprof-label { font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
 .bprof-mono { font-family: var(--font-mono, monospace); font-size: 11px; overflow-wrap: anywhere; }
@@ -5975,24 +6045,26 @@ label.chan-cap-row { cursor: default; }
 .bprof-human { display: block; font-size: 10px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bprof-human.driving { color: var(--accent); }
 .bprof-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; min-width: 0; } /* owner ruling A: record · who can use it · stop · rename · delete */
-/* "WHO CAN USE IT" (2026-09-27, a LIST — src/lib/browser-trace-view.js whoCell): the row's own full-width line — the
-   label, "All my conversations" or one chip per row of the list (a conversation: backend glyph · name, dim with a hollow
-   dot when not running; a Task Group: the people glyph · title, amber when deleted/archived), "+N more", the house text
-   button Change… and the amber "Nobody can use it now" line. Chips shrink with an ellipsis, never past the row. */
-.bprof-who { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; padding: 2px 0 1px; font-size: 11px; color: var(--text-secondary); }
-.bprof-who-label { white-space: nowrap; flex: 0 0 auto; }
-.bprof-who-value { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; max-width: 100%; }
+/* "WHO CAN USE IT" (2026-09-27, a LIST — src/lib/browser-trace-view.js whoCell; design 015: the table's third column):
+   l1 = "All agents" or one chip per row of the list (a conversation: backend glyph · name, dim with a hollow dot when not
+   running; a Task Group: the people glyph · title, amber when deleted/archived), folded by WIDTH into "+N more", then the
+   house text button Change… — ONE line that never wraps (the value and the chips box are display:contents so the line's
+   flex items are the chips themselves: the bar-fold arithmetic); l2 = the amber "Nobody can use it now" line. */
+.bprof-who { min-width: 0; font-size: 11px; color: var(--text-secondary); }
+.bprof-who-line { gap: 4px; }
+.bprof-who-value, .bprof-who-chips { display: contents; }
 .bprof-who-all { color: var(--text); white-space: nowrap; }
-.bprof-who-chips { display: inline-flex; flex-wrap: wrap; gap: 4px; min-width: 0; max-width: 100%; }
-.bprof-who-chip { display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 220px; padding: 1px 8px 1px 5px; border-radius: 999px; border: 1px solid var(--border); background: color-mix(in srgb, var(--accent) 8%, transparent); color: var(--text); font-size: 11px; line-height: 16px; }
+.bprof-who-chip.bprof-who-all { flex: 0 1 auto; } /* the ONE value (All agents…) shrinks with an ellipsis before Change… is cut (ja at 860 px) */
+.bprof-who-chip { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 4px; min-width: 0; max-width: 220px; padding: 1px 8px 1px 5px; border-radius: 999px; border: 1px solid var(--border); background: color-mix(in srgb, var(--accent) 8%, transparent); color: var(--text); font-size: 11px; line-height: 16px; }
 .bprof-who-chip .bprof-who-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bprof-who-chip .bprof-who-glyph { flex: 0 0 auto; width: 12px; height: 12px; font-size: 12px; }
 .bprof-who-chip.is-stopped { color: var(--text-dim); background: transparent; }
 .bprof-who-dot { flex: 0 0 7px; width: 7px; height: 7px; box-sizing: border-box; border-radius: 50%; border: 1px solid var(--text-dim); }
 .bprof-who-chip.is-amber { color: var(--warn-text); border-color: color-mix(in srgb, var(--warn-text) 45%, var(--border)); background: transparent; }
-.bprof-who-more { white-space: nowrap; color: var(--text-secondary); cursor: default; }
+.bprof-who-more { flex: 0 0 auto; white-space: nowrap; color: var(--text-secondary); cursor: default; }
 .mounts-btn.bprof-who-change { white-space: nowrap; flex: 0 0 auto; }
-.bprof-who-nobody { flex: 1 0 100%; display: flex; align-items: center; gap: 4px; color: var(--warn-text); font-size: 11px; }
+.bprof-who-nobody { gap: 4px; color: var(--warn-text); }
+.bprof-who-nobody > span:not(.chan-ic) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 /* the dialog (src/lib/browser-who-dialog.js): two answers, the principal picker under "Only these", the "will lose it" line */
 .dialog.bwho-dialog { width: min(520px, calc(92vw / var(--ui-scale, 1))); }
 .bwho-body { display: flex; flex-direction: column; gap: 8px; }
@@ -6039,7 +6111,7 @@ label.chan-cap-row { cursor: default; }
 .bprof-row.deleted { opacity: .6; }
 .bprof-empty, .bprof-sweep { padding: 6px 4px; font-size: 11px; }
 .bprof-error { padding: 12px; color: var(--red, #e55); }
-@media (max-width: 768px) { .bprof-row, .bprof-row.bprof-orphan, .bprof-row.bprof-forgotten, .bprof-row.bprof-kept { grid-template-columns: 1fr 1fr; } .bprof-ident { grid-column: 1 / -1; } }
+@media (max-width: 768px) { .bprof-row, .bprof-row.bprof-orphan, .bprof-row.bprof-forgotten, .bprof-row.bprof-kept { grid-template-columns: 1fr 1fr; } .bprof-row:not(.bprof-profile) > .bprof-ident { grid-column: 1 / -1; } } /* design 015: a profile row is the table's subgrid (or the stacked re-flow) — never this two-column fallback */
 
 /* ── TAB CHAIN SPLIT (agent browser P7, docs/design-agent-browser-v2.md §4.6) ──
    A split is a RENDERING of the chain: the host's element becomes a grid — the
@@ -6497,3 +6569,5 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
   .design-bar > .design-home-find { height: 36px; font-size: 16px; }
   .chat-design-all { min-height: 44px; }
 }
+.bprof-fold-v.bprof-build { font-size: inherit; color: var(--text-secondary); white-space: normal; } /* design 015: the Chrome build line lives in the row's fold */
+.bprof-fold-v.bprof-build.warn { color: var(--warn-text); }

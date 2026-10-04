@@ -2,7 +2,9 @@
 # A FIXED-SIZE X11 window for scripts/test-desktop-app-fixed.mjs (lane app-fit-fixed): GTK 3 set_resizable(False) writes
 # WM_NORMAL_HINTS minimum = maximum = the requested size (what WeChat's login and Inkscape's welcome state). The picture is
 # a pale grid inside a 6 px RED border, so a screenshot shows whether every edge is on screen.
-# argv: W H [normal|dialog]  — `dialog` = a DIALOG-typed, modal window with no parent (Inkscape 1.4's welcome).
+# argv: W H [normal|dialog|workarea]  — `dialog` = a DIALOG-typed, modal window with no parent (Inkscape 1.4's welcome);
+# `workarea` = WeChat's MAIN window (lane desktop-workarea): resizable, W×H at first, its MAXIMUM = the root's _NET_WORKAREA
+# re-read every 250 ms (WeChat 4.x stated max 1574×974 = the work area on the owner's 1660×1296 root).
 # SIGUSR1 replaces it with a RESIZABLE 600×400 main window (WeChat's login → its main window).
 import signal, sys, gi
 gi.require_version('Gtk', '3.0')
@@ -23,6 +25,22 @@ def picture(w, h):
         return False
     da.connect('draw', draw)
     return da
+if mode == 'workarea':
+    import subprocess
+    win = Gtk.Window(title='workarea main'); win.set_default_size(W, H); win.add(picture(100, 80))
+    win.connect('destroy', Gtk.main_quit); win.show_all()
+    seen = [None]
+    def cap():
+        try: out = subprocess.run(['xprop', '-root', '_NET_WORKAREA'], capture_output=True, text=True, timeout=5).stdout
+        except Exception: return True
+        nums = [int(t) for t in out.split('=')[-1].replace(',', ' ').split() if t.isdigit()][:4]
+        if len(nums) == 4 and nums != seen[0]:
+            seen[0] = nums; s = win.get_scale_factor() or 1  # GDK_SCALE: hints are logical px, the work area device px
+            g = Gdk.Geometry(); g.max_width = max(1, nums[2] // s); g.max_height = max(1, nums[3] // s)
+            win.set_geometry_hints(None, g, Gdk.WindowHints.MAX_SIZE)
+        return True
+    cap(); GLib.timeout_add(250, cap)
+    Gtk.main(); sys.exit(0)
 win = Gtk.Window(title='fixed %dx%d %s' % (W, H, mode))
 if mode == 'dialog':  # Inkscape 1.4.3's welcome: typed DIALOG, modal, no parent
     win.set_type_hint(Gdk.WindowTypeHint.DIALOG); win.set_modal(True)

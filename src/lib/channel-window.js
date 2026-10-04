@@ -122,12 +122,14 @@ const dayKey = (ms) => {
 };
 /** The separator's words: today / yesterday / the date in the DEVICE's language
  *  (`deviceLocale()` — the app's language choice, never the browser's: a zh/ja
- *  device on an en browser drew "Sep 22" between zh messages; the census caught it). */
+ *  device on an en browser drew "Sep 22" between zh messages; the census caught it). Another year's day carries its
+ *  year (lane around-sheet-fix: the search's "Around this message" sheet reaches the vendor's history years back). */
 function dayLabel(ms, now = Date.now()) {
   const k = dayKey(ms);
   if (k === dayKey(now)) return t('Today');
   if (k === dayKey(now - 86400e3)) return t('Yesterday');
-  try { return new Date(Number(ms) || 0).toLocaleDateString(deviceLocale(), { month: 'short', day: 'numeric' }); } catch { return k; }
+  const other = k.slice(0, 4) !== dayKey(now).slice(0, 4);
+  try { return new Date(Number(ms) || 0).toLocaleDateString(deviceLocale(), other ? { year: 'numeric', month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric' }); } catch { return k; }
 }
 const authorKey = (rec) => (rec.author && (rec.author.id || rec.author.name)) || '';
 /** A message's full instant in the DEVICE's language (a time's tooltip). */
@@ -193,13 +195,26 @@ function attachmentNode(rec, a, base) {
   card.appendChild(thumbOf(a, url, { attempt: 0, chipOf }));
   return card;
 }
-function renderAttachments(rec, base, { skip = null } = {}) {
+function renderAttachments(rec, base, { skip = null, unsaved = false } = {}) {
   // a message's formatted BODY (`role: 'body'`, a mail's text/html part) is the mail frame, never a file chip
   const list = Array.isArray(rec.attachments) ? rec.attachments.filter((a) => a && a.id && a.role !== 'body' && !(skip && skip.has(a.id))) : [];
-  if (!list.length || !base) return null;
+  if (!list.length || !(base || unsaved)) return null;
   const box = el('div', 'chanmsg-atts');
-  for (const a of list) box.appendChild(attachmentNode(rec, a, base));
+  for (const a of list) box.appendChild(unsaved ? unsavedChip(a) : attachmentNode(rec, a, base));
   return box;
+}
+/** lane around-sheet-fix: a file of a record VibeSpace NEVER STORED (the search's "Around this message" sheet). The
+ *  attachment route serves only a record of OURS (channel-attachments `fetchVerdict` rule 3 — the route is not a proxy),
+ *  so a thumbnail there could only fail as "not found · Retry": nothing is asked, the chip names the file and says
+ *  where to see it. No link, no Retry. */
+function unsavedChip(a) {
+  const pic = Att.isImage(a);
+  const c = el('span', 'chanmsg-att chanmsg-att-unsaved');
+  c.appendChild(pic ? icon('image', 11) : fileIcon(a.name, 16, 'chanmsg-att-type'));
+  const named = a.name && !/^image$/i.test(String(a.name));
+  c.appendChild(el('span', 'chanmsg-att-name', named ? a.name : pic ? t('image') : t('attachment')));
+  c.appendChild(el('span', 'chanmsg-att-why', t('not saved — open the conversation to see it')));
+  return c;
 }
 
 /** ONE picture: the thumbnail, its retry, its named refusal (see above). */
@@ -305,7 +320,7 @@ function authorTitle(a) {
  *  on hover in the avatar's gutter). `base` = the conversation's route prefix
  *  (its attachments load through it). `folds` = the window's memory of which
  *  quotes the person opened. */
-function renderRecord(rec, { cont = false, base = null, folds = null, mail = null, ctx = null } = {}) {
+function renderRecord(rec, { cont = false, base = null, folds = null, mail = null, ctx = null, unsaved = false } = {}) {
   const sys = isSysRow(rec);
   const self = !!(rec.author && rec.author.isSelf);
   const row = el('div', 'chanmsg' + (sys ? ' chanmsg-sysrow' : cont ? ' chanmsg-cont' : '') + (rec.author && rec.author.isBot ? ' chanmsg-agent' : '') + (self && !sys ? ' chanmsg-self' : ''));
@@ -389,8 +404,9 @@ function renderRecord(rec, { cont = false, base = null, folds = null, mail = nul
   const body = renderBlocks(blocks, {
     t, folds, foldKey: rec.vendorId || rec.id || '', fallbackText: rec.text || '',
     attachment: (id) => {
-      const a = base ? atts.find((x) => x.id === id) : null;
+      const a = base || unsaved ? atts.find((x) => x.id === id) : null;
       if (!a) return null;
+      if (unsaved) { placed.add(id); return unsavedChip(a); }   // a record never stored: the named chip, nothing asked
       placed.add(id);
       return attachmentNode(rec, a, base);
     },
@@ -403,7 +419,7 @@ function renderRecord(rec, { cont = false, base = null, folds = null, mail = nul
   if (slot) row.insertBefore(slot, body);
   // what the tree did not place (a mail's attachments, a fixture's files) goes in the strip below
   for (const id of placedAttachments(blocks)) if (atts.some((a) => a.id === id)) placed.add(id);
-  const rest = renderAttachments(rec, base, { skip: placed });
+  const rest = renderAttachments(rec, base, { skip: placed, unsaved });
   if (rest) row.appendChild(rest);
   // W3 (lane channel-threads): the REACTION STRIP — chips keyed by key, only where the message HAS reactions
   if (ctx) { const strip = renderReactionStrip(rec, ctx.strip(rec)); if (strip) row.appendChild(strip); }
@@ -443,14 +459,18 @@ function daySeparator(ms) {
  */
 /** design 010 (B-c9be): THE WINDOW'S OWN ROW RENDERER for the search dialog's "around this message" sheet — the
  *  vendor's records around a found message (never stored), each a `renderRecord` row (a run of one author folds like
- *  the window's), the found one marked. Everything textContent, like every row. */
-export function renderAroundRows(records, { base = null, focus = null } = {}) {
+ *  the window's), the found one marked. Everything textContent, like every row. lane around-sheet-fix: NEVER STORED ⇒
+ *  `unsaved` (a file is a named chip — our attachment route serves only our records), a day separator where the day
+ *  changes, and the caller puts the rows in a `.chanwin-list` (the gutter + padding the row lays out against). */
+export function renderAroundRows(records, { focus = null } = {}) {
   const out = [];
   let prev = null;
   for (const rec of Array.isArray(records) ? records : []) {
     if (!rec) continue;
-    const cont = !!(prev && prev.author && rec.author && prev.author.id === rec.author.id && Number(rec.at) - Number(prev.at) < 5 * 60e3);
-    const row = renderRecord(rec, { cont, base });
+    // the window's DAY SEPARATOR too (lane around-sheet-fix): the vendor's history reaches back years — a bare "10:12" says nothing
+    if (!prev || dayKey(prev.at) !== dayKey(rec.at)) out.push(daySeparator(rec.at));
+    const cont = !!(prev && prev.author && rec.author && prev.author.id === rec.author.id && dayKey(prev.at) === dayKey(rec.at) && Number(rec.at) - Number(prev.at) < 5 * 60e3);
+    const row = renderRecord(rec, { cont, unsaved: true });
     if (focus && rec.vendorId === focus) row.classList.add('chanmsg-found');
     out.push(row);
     prev = rec;

@@ -931,14 +931,27 @@ console.log('§12 round 3 A2 (docs/design-desktop-apps-seamless §3.2): the app 
     [{ askedAt: 100000 + 50 }, 'ask-app', 'close-window'],              // a clock that went back is not "again"
     [{ askedAt: 100000 - 1, state: 'exited' }, 'close', 'not-running'], // the app already went: the ✕ just closes
     [{ askedAt: 100000 - 1, mainWid: 0 }, 'stop', 'again'],             // the app closed its window and kept running: the second ✕ stops it
+    [{ frontWid: 9 }, 'ask-front', 'front-window'],                     // design 016 S1c: WeChat's Moments in front — close THAT window
+    [{ frontWid: 7 }, 'ask-app', 'close-window'],                       // the main in front: today's ask
+    [{ frontWid: 9, askedAt: 100000 - 1 }, 'stop', 'again'],            // asked the app, its save dialog in front: the second ✕ stays the Stop
+    [{ frontWid: 9, seat: 'watch' }, 'close', 'not-active'],
+    [{ frontWid: 9, leased: true }, 'close', 'lease'],
+    [{ frontWid: 9, mainWid: 0 }, 'close', 'no-main-window'],           // no main (a lone dialog): today's pane-only close
   ];
   const obad = otable.map(([o, act, why]) => ({ o, want: [act, why], got: O(o) })).filter((x) => x.got.act !== x.want[0] || x.got.why !== x.want[1]);
   ok(M.OUTER_CLOSE_AGAIN_MS === 5000 && obad.length === 0, `outerCloseVerdict: ${otable.length} rows — ask the app first, a second ✕ within ${M.OUTER_CLOSE_AGAIN_MS} ms stops it, today's pane-only close everywhere the app cannot be asked`, obad);
+  { // design 016 S1c CONTROL: the pre-lane verdict asks the WHOLE app to close while its second window (Moments) is in front
+    const srcV = read('src/desktop-apps.js');
+    const FR = "  if (frontWid > 0 && frontWid !== mainWid) return { act: 'ask-front', why: 'front-window' };\n";
+    ok(srcV.split(FR).length === 2, 'CONTROL: the front-window rule is spelled once in desktop-apps.js');
+    const Mc = require(MUTD.write('src/desktop-apps.js', srcV.replace(FR, ''), 'front'));
+    ok(Mc.outerCloseVerdict({ ...base, frontWid: 9 }).act === 'ask-app', 'CONTROL: pre-fix the ✕ with Moments in front asks WeChat ITSELF to close (close-window to its main) — the whole app, not the window in front');
+  }
   // (d) WIRING PINS — the keeper stamps the census BEFORE the teardown; the window decides with the PURE verdicts; every
   // user close of a window goes through the ONE veto point (programmatic closes — layout sync, the auto-close — do not)
   const keeper = keeperSrc(), win = read('src/lib/desktop-app-window.js'), wm = read('src/lib/window.js');
   ok(/rec\.windowsAtExit = await windowsLeftAtExit\(rec\);/.test(keeper) && /return M\.windowsLeftCount\(rows\);/.test(keeper) && /rec\.windowsAtExit = await windowsLeftAtExit\(rec\);\s*await teardown\(rec, handles\);\s*commit\(\);/.test(keeper), 'WIRING PIN: the keeper counts the windows left at an app exit through M.windowsLeftCount, BEFORE the teardown (X is still up) and before the commit that broadcasts it');
-  ok(/import \{ exitCloseVerdict, outerCloseVerdict, OUTER_CLOSE_AGAIN_MS[, \w]*\} from '\.\.\/desktop-apps\.js';/.test(win) && /exitCloseVerdict\(r, \{ leased: !!lease \}\)/.test(win) && /outerCloseVerdict\(\{/.test(win) && /winInfo\.onCloseRequest = /.test(win), 'WIRING PIN: the window decides its close with the PURE verdicts and answers the WM\'s close request');
+  ok(/import \{ exitCloseVerdict, outerCloseVerdict, OUTER_CLOSE_AGAIN_MS[, \w]*\} from '\.\.\/desktop-apps\.js';/.test(win) && /exitCloseVerdict\(r, \{ leased: !!lease \}\)/.test(win) && /outerCloseVerdict\(\{/.test(win) && /winInfo\.onCloseRequest = /.test(win) && /frontWid: front \? front\.wid : 0/.test(win) && /if \(v\.act === 'ask-front'\) return !view\.closeFront\(\);/.test(win), 'WIRING PIN: the window decides its close with the PURE verdicts and answers the WM\'s close request');
   ok(/requestClose\(id\) \{/.test(wm) && /\.win-close'\)\.onclick = \(e\) => \{ e\.stopPropagation\(\); this\.requestCloseGroup\(winInfo\.id\); \}/.test(wm) && /return Promise\.resolve\(this\.requestClose\(id\)\);/.test(read('src/lib/tab-group.js')) && /for \(const tid of doomed\) if \(this\.windows\.has\(tid\)\) this\.requestClose\(tid\);/.test(read('src/lib/tab-group.js')), 'WIRING PIN: the title bar ✕ asks requestCloseGroup (B-a67c: a group is asked first), whose every close — a lone window, each member of a confirmed group — is WindowManager.requestClose (the veto point), never closeWindow directly');
   const userCloses = { 'src/lib/taskbar.js': /run: \(c\) => \(c\.group \? c\.app\.wm\.requestCloseGroup\(c\.id\) : c\.app\.wm\.requestClose\(c\.id\)\)/, 'src/lib/command-mode.js': /wm\.requestClose\(wm\.activeWindowId\)/, 'src/lib/mobile-nav.js': /app\.wm\.requestClose\(activeId\)/, 'src/lib/tab-group.js': /closeBtn\.addEventListener\('click', \(e\) => \{ e\.stopPropagation\(\); this\.requestClose\(tabWinId\); \}\)/ };
   const missing = Object.entries(userCloses).filter(([f, re]) => !re.test(read(f))).map(([f]) => f);

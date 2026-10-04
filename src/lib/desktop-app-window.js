@@ -86,6 +86,23 @@
 // second ✕ within OUTER_CLOSE_AGAIN_MS is the Stop; everywhere the app cannot be
 // asked (a blocked / Watch pane, an agent lease, the RFB rung, no main window, an
 // ended record) the ✕ closes the pane as it always did.
+// AN APP'S SECOND WINDOW (design 016 S1, lane app-guest-window, 2026-10-03 — WeChat's
+// Moments drawn over its main window, cut at the bottom): this window's minimum is the
+// union of every app window's (the view's onMinSize), the title names the FRONT window
+// ("微信 · 朋友圈" while Moments is in front, the taskbar following setTitle), and the ✕
+// closes THAT window (`ask-front`: close-window to it) — the app is asked only when its
+// main window is in front.
+// A WINDOW PER TOP-LEVEL (design 016 S2, lane app-satellite-windows, 2026-10-03 — the owner's YES to 「应用再打开的顶层窗口
+// （比如微信的朋友圈）要不要变成 VibeSpace 里一个独立的窗口」): an app's second NORMAL window opens its OWN window of type
+// `desktop-app` — a SATELLITE (`openSatelliteWindow`, openSpec `{action:'openDesktopApp', id, wid, title}`): titled
+// "{app} · {window}" ("微信 · 朋友圈"), its own taskbar entry, opened focused BESIDE this window (or where the person
+// last left one of this app — desktopAppSatellite), its size the X window's (fixed when the app fixes it, else resizable
+// with its minimum), folded by ITS decorations (windowSeamless), moved by its own header bar. Its pane is a viewport of
+// THIS window's session (xpra-view attachSatellite): ONE xpra connection per app session — a satellite never opens a
+// stream (test-architecture's census). It closes when its X window goes ("朋友圈 已关闭" only if it was in front), when
+// the main window adopts its window (the app's main lost) and when this window goes; its ✕ asks the app to close that X
+// window (a second ✕ hands the window back to this pane). A reload / another client replays it from the layout and
+// RE-BINDS it by wid; a wid the session no longer has closes it quietly. Watch and Blocked draw one picture here.
 //
 // THE SCALE, DERIVED AND PER WINDOW (round 3 A3, docs/design-desktop-apps-seamless §3.4 — the owner: "内部app的dpi
 // 也应该是可调的，最好是能从vibespace自身的dpi自动推导"): the launch carries this client's UI scale beside its
@@ -151,9 +168,10 @@ import { UI_ICONS } from './icons.js';
 import { registerMenuItem } from './contributions.js';
 import { createBarFold } from './bar-fold.js'; // lane I: the strip folds into ⋯ by priority — never wraps, never overlaps
 import { shortModeBadge } from './live-bar-layout.js';
-import { seamlessVerdict, isCsd, isPaused, revealStep, revealInitial, HOT_ZONE_PX, moveResizeAction, windowStateAction, frameKeyOf, frameChoiceOf, setFrameChoice, frameMenuModel, userToggleOfFrame } from './desktop-seamless.js';
+import { minPaneCss } from './xpra-proto.js';
+import { seamlessVerdict, windowSeamless, isCsd, isPaused, revealStep, revealInitial, HOT_ZONE_PX, moveResizeAction, windowStateAction, frameKeyOf, frameChoiceOf, setFrameChoice, frameMenuModel, userToggleOfFrame } from './desktop-seamless.js';
 import { SCALE_PREF_KEY, scaleChoiceOf, setScaleChoice, appDefaultModel } from './desktop-app-scale.js';
-import { wireAppPrefs, appPrefs, onAppPrefs, saveAppPrefs } from './desktop-app-prefs.js';
+import { wireAppPrefs, appPrefs, onAppPrefs, saveAppPrefs, SATELLITE_PREF_KEY, satellitePlacement, setSatelliteOffset } from './desktop-app-prefs.js';
 import { openShareDialog, openAskDialog, shareChipText } from './window-share.js';
 
 const WATCH_HINT_EVERY_MS = 8000;
@@ -334,10 +352,20 @@ export function frameRowLabel(row) {
   return mark + (row.choice === 'on' ? t('On') : row.choice === 'off' ? t('Off') : t('Auto'));
 }
 
-export function openDesktopApp(app, id, { syncId } = {}) {
+// ── S2: the main windows' xpra views by app id — a satellite binds to its session's ONE view (no socket of its own) ──
+const mainViews = new Map();   // app id → { view, winInfo }
+const viewWaiters = new Map(); // app id → Set(fn) — satellites replayed before their main window's view exists
+function announceMainView(id, entry) {
+  if (entry) mainViews.set(id, entry); else mainViews.delete(id);
+  for (const fn of [...(viewWaiters.get(id) || [])]) { try { fn(entry); } catch { /* one satellite's error never stops another */ } }
+}
+const mainWindowOf = (app, id) => [...app.wm.windows.values()].find((w) => w._desktopAppId === id && !w._desktopSatelliteWid) || null;
+
+export function openDesktopApp(app, id, { syncId, wid = 0, title = '' } = {}) {
   if (typeof id !== 'string' || !id) return null;
-  for (const [wid, win] of app.wm.windows) {
-    if (win._desktopAppId === id) { app.wm.revealWindow(wid, { replay: !!syncId }); return win; }
+  if (Number.isInteger(wid) && wid > 0) return openSatelliteWindow(app, id, wid, { syncId, title }); // S2: a satellite (a replay / another client)
+  for (const [winId, win] of app.wm.windows) {
+    if (win._desktopAppId === id && !win._desktopSatelliteWid) { app.wm.revealWindow(winId, { replay: !!syncId }); return win; }
   }
   app._hideWelcome();
   const winInfo = app.wm.createWindow({
@@ -406,6 +434,7 @@ export function openDesktopApp(app, id, { syncId } = {}) {
   // first record answers, so the view is built then; both kinds share the shell.
   let view = null;
   let appTitle = '';      // the app window's own title, from the xpra protocol ('' = none yet)
+  let front = null;       // design 016 S1c: the FRONT X window when it is NOT the app's main ({wid, title} — WeChat's Moments)
   const streamKindOf = (r) => (r && r.stream === 'xpra' ? 'xpra' : 'rfb');
   const viewOpts = () => ({
     url: () => { viewerId = newViewerId(); winInfo._windowViewerId = viewerId; return streamUrl(`/api/desktop/${encodeURIComponent(id)}/stream`) + `?viewer=${encodeURIComponent(viewerId)}&pane=${encodeURIComponent(paneKey)}` + (prevPane ? `&prev=${encodeURIComponent(prevPane)}` : ''); }, // the ONE bridge path (test-vnc-view's census) + a fresh per-socket viewer id + the stable pane key (x5) + its predecessor (the grace)
@@ -426,10 +455,11 @@ export function openDesktopApp(app, id, { syncId } = {}) {
   const ensureView = (kind) => {
     if (view) return view;
     view = kind === 'xpra'
-      ? createXpraView(winInfo.content, { ...viewOpts(), workerUrl: `/api/desktop/${encodeURIComponent(id)}/xpra-ui/js/Protocol.js`, onTitle: (text) => { appTitle = String(text || ''); render(); }, onIcon: setAppIcon, onMinSize: applyMinSize, onFixedSize: applyFixedSize, fixedFollows: () => !app.wm._mobileLayout(), onMain: onAppMain, onState: onAppState, onMoveResize: onAppMoveResize, dpi: () => (rec && Number.isInteger(rec.dpi) ? rec.dpi : 96), pictureScale: () => renderOf(rec).picture }) // lane D (a): the RECORD says what it was drawn at
+      ? createXpraView(winInfo.content, { ...viewOpts(), workerUrl: `/api/desktop/${encodeURIComponent(id)}/xpra-ui/js/Protocol.js`, onTitle: (text) => { appTitle = String(text || ''); render(); }, onIcon: setAppIcon, onMinSize: applyMinSize, onFixedSize: applyFixedSize, fixedFollows: () => !app.wm._mobileLayout(), onFront: (f) => { front = f && !f.main ? { wid: f.wid, title: String(f.title || '') } : null; render(); }, onSatellite: ({ wid, title }) => { openSatelliteWindow(app, id, wid, { title, beside: winInfo, fresh: true }); }, onMain: onAppMain, onState: onAppState, onMoveResize: onAppMoveResize, dpi: () => (rec && Number.isInteger(rec.dpi) ? rec.dpi : 96), pictureScale: () => renderOf(rec).picture }) // lane D (a): the RECORD says what it was drawn at
       : createVncView(winInfo.content, viewOpts());
     view.mount.classList.add('desktop-app-mount');
     winInfo._desktopAppView = view; // the raw handle the heavy suite reads (never the DOM)
+    if (kind === 'xpra') announceMainView(id, { view, winInfo }); // S2: satellites replayed before this view bind to it now
     for (const el of [view.bar, view.pane]) if (el && minRo) minRo.observe(el); // the status strip's height is chrome; the pane shown again re-measures (the RFB view has no pane)
     for (const el of controls) view.addControl(el);
     // lane I: the strip never wraps — every child at its natural width on one line, the status alone flexing; the rest
@@ -626,7 +656,8 @@ export function openDesktopApp(app, id, { syncId } = {}) {
   const render = () => {
     if (!rec) return;
     const label = titleText(); // the app window's own title — xpra's protocol names it, on a keeper-fitted rung (and for a blocked xpra pane) the record does — else the label
-    app.wm.setTitle(winInfo.id, hostTitleText(lease ? t('{label} — agent window', { label }) : label, rec));
+    const named = front && front.title && seatState() !== 'blocked' ? `${label} · ${front.title}` : label; // design 016 S1c: "微信 · 朋友圈" while an app's second window is in front (the taskbar follows setTitle)
+    app.wm.setTitle(winInfo.id, hostTitleText(lease ? t('{label} — agent window', { label: named }) : named, rec));
     const hc = hostChipText(rec); hostChip.textContent = hc; hostChip.style.display = hc ? '' : 'none';
     hostChip.classList.toggle('is-offline', rec.state === 'unknown-host-offline');
     hostChip.title = rec.state === 'unknown-host-offline' ? t('The machine this app runs on is not answering — the app may still be running there; the window reconnects when it returns') + (rec.hostError ? ` (${rec.hostError})` : '') : '';
@@ -648,7 +679,13 @@ export function openDesktopApp(app, id, { syncId } = {}) {
       if (!gone) { gone = true; view?.disconnect(); }
       view?.setStatus(endedText(rec), { error: rec.state === 'failed', reconnect: false });
     }
+    pokeSatellites(); // S2: their titles carry this window's name (and the agent / machine words)
   };
+  /** S2: what a satellite of this window reads — its full title, the seamless context, the app key — and the poke. */
+  const pokeSatellites = () => { for (const w of app.wm.windows.values()) if (w._desktopAppId === id && w._desktopSatelliteWid) w._desktopSatelliteRender?.(); };
+  winInfo._desktopAppName = () => titleText();
+  winInfo._desktopSatelliteTitle = (title) => { const label = titleText(), named = title ? `${label} · ${title}` : label; return rec ? hostTitleText(lease ? t('{label} — agent window', { label: named }) : named, rec) : named; };
+  winInfo._desktopAppKey = () => frameKey();
   /** round 3 A2: a record in a terminal state, decided ONCE (exitCloseVerdict): close this window with a toast, or keep it
    *  (failed / a lease / a window still on the display) with the ended sentence. `first` = the first GET answered (the
    *  window has not painted: a replayed dead record opens nothing). Returns true when the window closed. */
@@ -699,11 +736,12 @@ export function openDesktopApp(app, id, { syncId } = {}) {
     const now = Date.now();
     const v = outerCloseVerdict({
       state: rec ? rec.state : null, stream: rec ? rec.stream : null, seat: seatState(), leased: !!lease,
-      connected: !!view && view.state === 'connected', mainWid: view && view.client ? view.client.mainWid : 0, askedAt: closeAskedAt, now,
+      connected: !!view && view.state === 'connected', mainWid: view && view.client ? view.client.mainWid : 0, frontWid: front ? front.wid : 0, askedAt: closeAskedAt, now,
     });
     winInfo._desktopCloseVerdict = v; // the raw handle the heavy suite reads
     if (v.act === 'close') return true;
     if (v.act === 'stop') { closeAskedAt = 0; stopApp(); return false; }
+    if (v.act === 'ask-front') return !view.closeFront(); // S1c: the app's second window (WeChat's Moments) closes — the app and this window stay; a refused packet = today's pane-only close
     if (!view.closeApp()) return true; // the socket refused the packet: today's pane-only close, never a dead button
     closeAskedAt = now;
     showToast(t('Asked {app} to close — press ✕ again within {n} s to stop it', { app: titleText(), n: Math.round(OUTER_CLOSE_AGAIN_MS / 1000) }), { duration: OUTER_CLOSE_AGAIN_MS });
@@ -817,7 +855,8 @@ export function openDesktopApp(app, id, { syncId } = {}) {
   function retarget(nextId) {
     if (closed || typeof nextId !== 'string' || !nextId || nextId === id) return;
     // another window already shows the successor (a second client's replay, a manual open): this one goes quietly
-    for (const [, w] of app.wm.windows) if (w !== winInfo && w._desktopAppId === nextId) { closed = true; app.wm.closeWindow(winInfo.id); return; }
+    for (const [, w] of app.wm.windows) if (w !== winInfo && w._desktopAppId === nextId && !w._desktopSatelliteWid) { closed = true; app.wm.closeWindow(winInfo.id); return; }
+    if (mainViews.get(id)?.winInfo === winInfo) announceMainView(id, null); // S2: the old session's satellites go with its view
     if (view) { try { view.dispose(); } catch {} try { view.container.remove(); } catch {} }
     barFold?.dispose(); barFold = null;
     view = null; rec = null; gone = false; exitDecided = false; closeAskedAt = 0; lastSeat = null;
@@ -888,7 +927,7 @@ export function openDesktopApp(app, id, { syncId } = {}) {
   let offPrefs = null;
   winInfo._listenerCtl?.signal.addEventListener('abort', () => { try { off?.(); } catch {} try { app.ws.offStateChange?.(onWs); } catch {} clearInterval(tick); clearTimeout(revealTimer); try { offPrefs?.(); } catch {} });
   winInfo.onMoved = () => view?.resnap?.(); // a moved window puts the picture back on the device-pixel grid (r2)
-  winInfo.onClose = () => { minRo?.disconnect(); if (minRaf) cancelAnimationFrame(minRaf); view?.dispose(); };
+  winInfo.onClose = () => { minRo?.disconnect(); if (minRaf) cancelAnimationFrame(minRaf); if (mainViews.get(id)?.winInfo === winInfo) announceMainView(id, null); view?.dispose(); }; // S2: the view's dispose closes this app's satellites
 
   // ── SEAMLESS: the verdict, the hot zone, the header bar driving this window, the app's own maximize / minimize ──
   function applySeamless() {
@@ -903,7 +942,9 @@ export function openDesktopApp(app, id, { syncId } = {}) {
     winInfo.element.classList.toggle('seamless', v.seamless);
     view?.setFloatingChip?.(v.seamless);
     if (was && !v.seamless) stepReveal({ type: 'reset' });
+    pokeSatellites();
   }
+  winInfo._desktopSeamlessCtx = () => ({ setting: app.settings.get('desktop.seamless'), userToggle: rec && rec.stream === 'xpra' ? userToggleOfFrame(frameChoice()) : 'auto', lease: !!lease, phone: !!phoneMq?.matches, connected: viewConnected });
   function stepReveal(ev) {
     const r = revealStep(revealState, ev, performance.now());
     revealState = r.state;
@@ -1014,10 +1055,152 @@ export function openDesktopApp(app, id, { syncId } = {}) {
   return winInfo;
 }
 
+/**
+ * S2 (design 016) — A SATELLITE WINDOW: one VibeSpace window per secondary top-level of an app, bound to `wid` for the
+ * session's lifetime (see the header). `fresh` = opened by the main window for a window that just mapped (focused, placed
+ * beside the main); a replay (`syncId`) keeps the layout's place. Its pane is the main window's view's attachSatellite —
+ * never a socket. Raw handles the heavy suite reads: _desktopSatellite (the pane handle), _desktopSatelliteWid,
+ * _desktopSatelliteGone (why it closed itself), _desktopSeamless, _desktopCloseVerdict, _desktopMinPane / _desktopFixedPane.
+ */
+function openSatelliteWindow(app, id, wid, { syncId, title = '', beside = null, fresh = false } = {}) {
+  const inFront = (w) => { if (fresh) app.wm.revealWindow(w.id); return w; }; // a window the app just opened comes to the front (on a phone: the shown window)
+  for (const w of app.wm.windows.values()) if (w._desktopAppId === id && w._desktopSatelliteWid === wid) return inFront(w);
+  const main = beside || mainWindowOf(app, id);
+  const entry0 = mainViews.get(id), c0 = entry0 && entry0.view.client, r0 = entry0 ? entry0.view.ratio : 1;
+  const x0 = c0 ? c0.windows.get(wid) : null, m0 = c0 ? minPaneCss(c0.constraintsOf(wid), r0) : null;
+  // its pane: the X window's own size (CSS px), never under the minimum of its pane; the chrome is measured once mounted
+  const paneCss = x0 ? { w: Math.max(Math.ceil(x0.w / r0 - 1e-9), m0 ? m0.w : 0), h: Math.max(Math.ceil(x0.h / r0 - 1e-9), m0 ? m0.h : 0) } : { w: 640, h: 480 };
+  const ws = app.wm.workspace, key = main && typeof main._desktopAppKey === 'function' ? main._desktopAppKey() : null;
+  const at = !syncId && main && ws ? satellitePlacement({ x: main.element.offsetLeft, y: main.element.offsetTop, w: main.element.offsetWidth, h: main.element.offsetHeight }, { w: paneCss.w, h: paneCss.h + 32 }, { w: ws.clientWidth, h: ws.clientHeight }, key ? appPrefs(SATELLITE_PREF_KEY)[key] : null) : null;
+  const winInfo = app.wm.createWindow({ title: title || t('Desktop app'), type: 'desktop-app', syncId, width: paneCss.w, height: paneCss.h + 32, ...(at || {}), openSpec: { action: 'openDesktopApp', id, wid, title: String(title || '') } });
+  winInfo._desktopAppId = id;
+  winInfo._desktopSatelliteWid = wid;
+  const lsig = winInfo._listenerCtl?.signal;
+  const mount = document.createElement('div'); mount.className = 'desktop-app-mount desktop-satellite-mount';
+  winInfo.content.appendChild(mount);
+  const chromeOf = () => { const er = winInfo.element.getBoundingClientRect(), pr = mount.getBoundingClientRect(); return er.width > 0 && pr.width > 0 ? { w: Math.max(0, er.width - pr.width), h: Math.max(0, er.height - pr.height) } : null; };
+  const ch0 = fresh ? chromeOf() : null;
+  if (ch0) app.wm.resizeWindowTo(winInfo.id, windowMinForPane(paneCss, ch0, uiScale())); // the frame holds the X window exactly
+  let handle = null, closed = false, winTitle = String(title || ''), meta = null, minPane = null, fixedPane = null, askedAt = 0, iconified = false, lastPointer = null;
+  let seamless = { seamless: false, why: 'ssd' }, revealState = revealInitial(), revealTimer = null;
+  const render = () => {
+    const m = mainWindowOf(app, id);
+    app.wm.setTitle(winInfo.id, m && typeof m._desktopSatelliteTitle === 'function' ? m._desktopSatelliteTitle(winTitle) : winTitle || t('Desktop app'));
+    if (winTitle && winInfo._openSpec && winInfo._openSpec.title !== winTitle) winInfo._openSpec.title = winTitle; // the layout replays it with its last title
+    applySeamless();
+  };
+  const applyMin = () => {
+    if (!fixedPane && winInfo.fixedSize) app.wm.setFixedSize(winInfo.id, null);
+    const ch = chromeOf();
+    if (!ch) return; // hidden: re-applied when it is laid out again
+    winInfo._desktopFixedPane = fixedPane ? { ...fixedPane } : null; winInfo._desktopMinPane = minPane ? { ...minPane } : null;
+    if (fixedPane) app.wm.setFixedSize(winInfo.id, windowMinForPane(fixedPane, ch, uiScale()));
+    app.wm.setMinSize(winInfo.id, minPane ? windowMinForPane(minPane, ch, uiScale()) : null);
+  };
+  function stepReveal(ev) {
+    const r = revealStep(revealState, ev, performance.now());
+    revealState = r.state;
+    winInfo.element.classList.toggle('seamless-revealed', r.revealed && seamless.seamless);
+    clearTimeout(revealTimer); revealTimer = null;
+    if (r.wakeAt != null) revealTimer = setTimeout(() => { revealTimer = null; stepReveal({ type: 'tick' }); }, Math.max(0, r.wakeAt - performance.now()) + 1);
+  }
+  function applySeamless() {
+    const m = mainWindowOf(app, id), ctx = m && typeof m._desktopSeamlessCtx === 'function' ? m._desktopSeamlessCtx() : {};
+    const v = windowSeamless(meta, { ...ctx, chain: !!winInfo._tabChain, connected: !!ctx.connected && !!handle && handle.bound });
+    const was = seamless.seamless;
+    seamless = v;
+    winInfo._desktopSeamless = { ...v, csd: isCsd(meta) }; // the raw handle the suites read
+    winInfo.element.classList.toggle('seamless', v.seamless);
+    if (was && !v.seamless) stepReveal({ type: 'reset' });
+  }
+  winInfo._desktopSatelliteRender = render;
+  // the hot zone of a folded satellite: the same PURE reveal as the main window's (hover the top edge 250 ms, or Alt)
+  winInfo.element.addEventListener('pointermove', (e) => {
+    lastPointer = { clientX: e.clientX, clientY: e.clientY, pointerId: e.pointerId };
+    if (!seamless.seamless) return;
+    const r = winInfo.element.getBoundingClientRect();
+    const onBar = revealState.revealed && !!(e.target && e.target.closest && e.target.closest('.window-titlebar'));
+    const inZone = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top - 2 && e.clientY <= r.bottom && (e.clientY - r.top <= HOT_ZONE_PX * uiScale() || onBar);
+    if (inZone !== revealState.inZone) stepReveal({ type: inZone ? 'zone-enter' : 'zone-leave' });
+  }, { signal: lsig });
+  winInfo.element.addEventListener('pointerleave', () => { if (seamless.seamless || revealState.revealed) stepReveal({ type: 'window-leave' }); }, { signal: lsig });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Alt' && !e.repeat && seamless.seamless && app.wm.activeWindowId === winInfo.id) stepReveal({ type: 'alt', down: true }); }, { capture: true, signal: lsig });
+  document.addEventListener('keyup', (e) => { if (e.key === 'Alt' && revealState.alt) stepReveal({ type: 'alt', down: false }); }, { capture: true, signal: lsig });
+  winInfo.element.addEventListener('pointerdown', () => { if (app.wm.activeWindowId !== winInfo.id) app.wm.focusWindow(winInfo.id); }, { capture: true, signal: lsig });
+  const minRo = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => { if (minPane || fixedPane) applyMin(); }) : null;
+  minRo?.observe(winInfo.element);
+  const cb = {
+    onTitle: (text) => { winTitle = String(text || ''); render(); },
+    onMinSize: (m) => { minPane = m || null; applyMin(); },
+    onFixedSize: (f) => { fixedPane = f || null; applyMin(); },
+    onMeta: (m) => { meta = m || null; applySeamless(); },
+    // its own header bar moves / resizes THIS window (the view routes the gesture of a satellite's window here)
+    onMoveResize: (ev) => {
+      const a = moveResizeAction(ev && ev.direction);
+      const log = (winInfo._desktopMoveResizeLog ||= []);
+      const entry = { direction: ev && ev.direction, op: a ? a.op : null, at: Date.now(), started: false };
+      log.push(entry); if (log.length > 20) log.shift();
+      if (!a) return;
+      if (a.op === 'cancel') { entry.started = app.wm.cancelPointerOp(winInfo.id); return; }
+      const opts = { press: ev.press || null, at: lastPointer };
+      entry.started = a.op === 'move' ? app.wm.beginDragFromPointer(winInfo.id, opts) : app.wm.beginResizeFromPointer(winInfo.id, a.dir, opts);
+    },
+    onState: (changed) => {
+      const act = windowStateAction(changed, { maximized: !!winInfo.isMaximized, minimized: !!winInfo.isMinimized });
+      if (act) app.wm.witnessGeometry?.(winInfo.id);
+      if (act === 'maximize' || act === 'restore') app.wm.toggleMaximize(winInfo.id);
+      else if (act === 'minimize') { iconified = true; app.wm.minimize(winInfo.id); }
+    },
+    onGone: (why) => {
+      if (closed) return;
+      closed = true;
+      winInfo._desktopSatelliteGone = why; // the raw handle the heavy suite reads
+      if (why === 'lost' && winTitle && app.wm.activeWindowId === winInfo.id) showToast(t('{window} closed', { window: winTitle }), { duration: 3000 }); // only the window the person had in front says so
+      app.wm.closeWindow(winInfo.id);
+    },
+  };
+  winInfo.onResize = () => { if (iconified && !winInfo.isMinimized && handle) { iconified = false; handle.setAppState({ iconified: false }); } };
+  // where the person leaves it is where this app's next satellite opens (relative to the main window)
+  winInfo.onMoved = () => {
+    handle?.resnap();
+    const m = mainWindowOf(app, id), k = m && typeof m._desktopAppKey === 'function' ? m._desktopAppKey() : null;
+    if (!k || app.wm._mobileLayout() || winInfo.isMaximized) return;
+    const off = { dx: winInfo.element.offsetLeft - m.element.offsetLeft, dy: winInfo.element.offsetTop - m.element.offsetTop }, cur = appPrefs(SATELLITE_PREF_KEY)[k];
+    if (!cur || cur.dx !== off.dx || cur.dy !== off.dy) saveAppPrefs(SATELLITE_PREF_KEY, (map) => setSatelliteOffset(map, k, off), t('Could not save the choice'));
+  };
+  // its ✕ asks the app to close THAT X window (it closes when the window goes); nothing to ask — or a second ✕ within the
+  // ask window — closes this pane and hands the X window back to the main window's pane
+  winInfo.onCloseRequest = () => {
+    const now = Date.now();
+    if (!handle || !handle.bound || (askedAt && now - askedAt <= OUTER_CLOSE_AGAIN_MS)) { winInfo._desktopCloseVerdict = { act: 'close', why: handle && handle.bound ? 'again' : 'not-bound' }; return true; }
+    if (!handle.close()) { winInfo._desktopCloseVerdict = { act: 'close', why: 'refused' }; return true; }
+    askedAt = now; winInfo._desktopCloseVerdict = { act: 'ask-window', wid };
+    return false;
+  };
+  winInfo.onClose = () => { closed = true; off(); clearTimeout(revealTimer); minRo?.disconnect(); try { handle?.dispose(); } catch {} handle = null; };
+  // bind to the session's ONE view — now, or when the main window's view appears (a replay may come first)
+  const bindTo = (entry) => {
+    if (closed || handle || !entry || !entry.view || typeof entry.view.attachSatellite !== 'function') return;
+    off();
+    handle = entry.view.attachSatellite(mount, wid, cb);
+    winInfo._desktopSatellite = handle; // the raw handle the heavy suite reads
+    render();
+    if (fresh) handle.focus();
+  };
+  const waiters = viewWaiters.get(id) || viewWaiters.set(id, new Set()).get(id);
+  let lonely = null;
+  function off() { waiters.delete(bindTo); clearTimeout(lonely); }
+  waiters.add(bindTo);
+  lonely = setTimeout(() => { if (!handle && !closed) { closed = true; winInfo._desktopSatelliteGone = 'no-main'; app.wm.closeWindow(winInfo.id); } }, 15000); // no main window of this app ever came: nothing to show
+  bindTo(mainViews.get(id));
+  render();
+  return inFront(winInfo);
+}
+
 // ── WINDOW-TYPE REGISTRATION (Plugin Ph1) ── one window per app session
 registerWindowType({
   type: 'desktop-app', label: 'Desktop app', icon: ICON,
-  action: 'openDesktopApp', replay: (app, spec, { syncId } = {}) => app.openDesktopApp(spec?.id, { syncId }),
+  action: 'openDesktopApp', replay: (app, spec, { syncId } = {}) => app.openDesktopApp(spec?.id, { syncId, wid: Number(spec?.wid) || 0, title: typeof spec?.title === 'string' ? spec.title : '' }),
 });
 
 // round 3 A3: the same Scale ▸ rows on the title-bar / taskbar / window-list menu of a desktop-app window

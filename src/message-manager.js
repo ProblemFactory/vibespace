@@ -25,6 +25,7 @@ const { unknownFields: shapeUnknownFields, carrierOf: shapeCarrierOf, unknownFie
 const { helperAskOf, askRecordOf, askState, pendingAsksOf, asksSignature, askTransition, isWaiting, ASK_INITIAL, ASK_RECORD_EVENTS, RESULT_EVENT_OF, isUnknownOutcome } = require('./helper-ask.js'); // PURE (lane S1): a helper's permission ask — the parent's card, its view, the waiting chip
 const { turnPreviewOf } = require('./assistant-note.js'); // PURE (B-40f8): THE preview of a user turn — the minimap and the outline, every builder
 const { permissionOutcome, outcomeHead } = require('./permission-outcome.js'); // PURE (lane S1 verify r5): the CENSUS of the CLI's own permission-outcome sentences — the ONE reader of a tool_result's word
+const { safetyStopOf } = require('./safety-stop.js'); // PURE (lane classifier-stop-card): the CENSUS of the CLI's own safety-stop sentences — the stop card's one reader
 
 // System subtypes _processSystem actually renders/consumes — anything else
 // trips the unhandled-subtype breadcrumb (2.227.5). Keep in sync when adding
@@ -67,6 +68,7 @@ const HANDLED_SYSTEM_SUBTYPES = new Set([
   'background_tasks_changed', // a LEVEL signal (the full live set): reconciles the task cards + the status-bar chip meta op
   'task_updated',            // {task_id, patch:{status}} → applied to the task card (closes a failed task without waiting for task_notification)
   'code_change_published',   // ONE small "PR #608 pushed" card (escaped link) — the same fact as the transcript's pr-link row
+  'informational',           // the CLI's text banner → a dim card, its words verbatim at `level`; the SAFETY STOP line (src/safety-stop.js) + its model-only nudge → ONE worded stop card (lane classifier-stop-card — was the red Unknown-event card)
 ]);
 
 // ── THE claude INIT FRAME (2.1.257 `system`/`init`) ─────────────────────────
@@ -1166,6 +1168,23 @@ class MessageManager {
       if (emit) this._emit({ op: 'create', message: msg });
       return;
     }
+    // THE CLI'S TEXT BANNER (`system`/`informational`, lane classifier-stop-card;
+    // binary: "Generic text banner emitted by the loop — non-error status lines,
+    // hook feedback …, slash-command output. Hosts render `content` as plaintext
+    // at the given level"): a dim card, the CLI's words VERBATIM (escaped on the
+    // client — CLI text is not an i18n key), `level` kept for its colour. It was
+    // the red Unknown-event card. The SAFETY STOP line is read from the census
+    // and becomes the worded stop card (_safetyStopCard). Both carriers: the
+    // stream's snake_case and the transcript row carry the same two fields.
+    if (raw.subtype === 'informational' && typeof raw.content === 'string' && raw.content.trim()) {
+      const text = raw.content.slice(0, 4000);
+      const stop = safetyStopOf(text);
+      if (stop && stop.kind === 'notice') { this._safetyStopCard({ notice: text, model: stop.model, noticeRow: stop.row.id }, emit); return; }
+      const level = ['info', 'notice', 'suggestion', 'warning'].includes(raw.level) ? raw.level : 'notice';
+      const msg = this._create({ role: 'system', status: 'complete', noticeKind: 'harness-informational', content: [{ type: 'harness_informational', text, level }] });
+      if (emit) this._emit({ op: 'create', message: msg });
+      return;
+    }
     // THE TUI USER'S SLASH COMMAND (`system`/`local_command`, history-only; not
     // in the SDK union — the REPL's own persisted row `<command-name>/x</command-
     // name>…`): rendered through the existing command bubble (renderUserMsg's
@@ -1362,6 +1381,25 @@ class MessageManager {
         }
       }
     }
+  }
+
+  /** THE SAFETY STOP CARD (lane classifier-stop-card): ONE card per stop,
+   *  whichever of the CLI's two records lands first — the notice (names the
+   *  model) or the nudge (the model-only text). The other half MERGES into the
+   *  open card of the same turn (an edit op); a half the open card already
+   *  holds is the next stop, a card of its own. */
+  _safetyStopCard(half, emit) {
+    const open = this._openSafetyStop && this._openSafetyStop.turn === this.turnIndex ? this.messageIndex.get(this._openSafetyStop.id) : null;
+    const b = open && open.content && open.content[0];
+    if (b && (half.notice ? !b.notice : !b.nudge)) {
+      Object.assign(b, half);
+      this._openSafetyStop = null;
+      if (emit) this._emit({ op: 'edit', id: open.id, fields: { content: open.content } });
+      return;
+    }
+    const msg = this._create({ role: 'system', status: 'complete', noticeKind: 'safety-stop', content: [{ type: 'safety_stop', notice: null, model: null, noticeRow: null, nudge: null, nudgeRow: null, ...half }] });
+    this._openSafetyStop = { id: msg.id, turn: this.turnIndex };
+    if (emit) this._emit({ op: 'create', message: msg });
   }
 
   /** ONE small card per published change ("PR #608 pushed"), the link ESCAPED
@@ -1758,6 +1796,19 @@ class MessageManager {
         att.synthetic = true;
         if (emit) this._emit({ op: 'create', message: att });
         return;
+      }
+
+      // THE SAFETY STOP'S NUDGE (lane classifier-stop-card): the CLI's note to the
+      // MODEL after a classifier stop (isMeta + turnCompanion in the transcript,
+      // isSynthetic on the stream) rendered as a "You" bubble in history and a
+      // bare notification live, and counted as a turn. Read from the census TEXT
+      // (a transport may drop the flags; the flags only widen who is asked): it
+      // joins the stop card's expander — no bubble, no turn. A sentence the user
+      // TYPED (promptSource / ours, no meta stamp) or a delivery stays itself.
+      if (!raw.origin && (raw.isMeta === true || raw.isSynthetic === true || raw.turnCompanion === true || !(raw.promptSource || raw._fromWebui))
+          && normalizedContent.every((b) => b.type === 'text')) {
+        const nudge = safetyStopOf(normalizedContent.map((b) => b.text).join(''));
+        if (nudge && nudge.kind === 'nudge') { this._safetyStopCard({ nudge: normalizedContent.map((b) => b.text).join('').trim().slice(0, 4000), nudgeRow: nudge.row.id }, emit); return; }
       }
 
       // A peer record whose msg_id is already on screen (the turn-start card,

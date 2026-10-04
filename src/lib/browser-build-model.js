@@ -51,7 +51,11 @@ export function buildRows(listing, { choice = null, lastChromiumMajor = null, lo
   const cur = normalize(choice);
   const rows = [{ key: 'default', kind: 'default', label: t(i18nKey("The browser CLI's default build")), pickable: true, note: t(i18nKey('Whatever the browser CLI picks — usually the newest Chrome it installed.')), current: cur.kind === 'default' }];
   const l = listing && typeof listing === 'object' ? listing : null;
-  if (!l || l.ok === false) {
+  // ASKED, NOT YET ANSWERED (lane mirror-green-ui, 2.369.205): `{pending:true}` — the dialog drew its build section
+  // before the list came back and said "could not be read" about a list it had not even asked for yet (a paired
+  // machine answers through its agent: seconds of a false failure). Waiting is said as waiting.
+  if (l && l.pending) rows.push({ key: 'note', kind: 'note', label: t(i18nKey('Reading the list of Chrome builds…')), pickable: false, note: null, current: false });
+  else if (!l || l.ok === false) {
     const why = !l ? t(i18nKey('The list of Chrome builds could not be read.'))
       : l.code === 'builds_unsupported' ? t(i18nKey("{machine}'s VibeSpace agent can't list Chrome builds yet — update the agent on it."), { machine: machine || t(i18nKey('This computer')) })
         : t(i18nKey('The list of Chrome builds could not be read.'));

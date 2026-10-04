@@ -545,8 +545,13 @@ class DeviceManager {
    *  cached as a 256KB prefix and stamped complete = permanently ancient chat
    *  history). Resolve only once the expected byte count (ack.sending,
    *  adjusted down by fs-done's `sent` if the file shrank mid-read) has
-   *  actually arrived; a 30s data stall rejects so callers can fall back. */
-  async fsReadRange(p, start, len) {
+   *  actually arrived; a 30s data stall rejects so callers can fall back.
+   *  lane exit-transfer — THE SINK FORM (`{sink}`): every piece goes to `sink(buf)` as it arrives and nothing is kept;
+   *  a sink that returns a promise (the file write) is CREDITED back only once it settles — the device then sends no
+   *  faster than the disk takes the bytes (in flight ≤ the link's 256 KiB window, the tcp-forward rule) →
+   *  `{size, sent, sha256}`; `{sha256: true}` asks the device for the hash of the bytes it sent (an older daemon ignores
+   *  the flag ⇒ `sha256: null`). */
+  async fsReadRange(p, start, len, { sink = null, sha256 = false } = {}) {
     const conn = await this.connect();
     const chan = conn.nextChan++;
     const chunks = [];
@@ -554,7 +559,7 @@ class DeviceManager {
     // a big read the burst is [ack, ~window of data, fs-done] and the awaited
     // ack's continuation (a microtask) runs only AFTER fs-done was handled —
     // never derive the target from "bytes seen at done time".
-    let received = 0, sending = null, sentDone = null, doneSeen = false, legacy = false, stall = null;
+    let received = 0, sending = null, sentDone = null, doneSeen = false, legacy = false, stall = null, doneSha = null;
     let resolveP, rejectP;
     const donePromise = new Promise((res, rej) => { resolveP = res; rejectP = rej; });
     donePromise.catch(() => {}); // a stall while still awaiting the ack must not be an unhandled rejection
@@ -566,17 +571,74 @@ class DeviceManager {
       if (t != null ? received >= t : legacy) { cleanup(); resolveP(); }
     };
     conn.sessions.set(chan, {
-      onData: (b) => { chunks.push(b); received += b.length; bumpStall(); maybeFinish(); },
-      onDone: (m) => { doneSeen = true; if (typeof m?.sent === 'number') sentDone = m.sent; maybeFinish(); },
+      manualCredit: !!sink,
+      onData: (b) => {
+        if (sink) {
+          let done;
+          try { done = sink(b); } catch (e) { cleanup(); rejectP(e); return; }
+          Promise.resolve(done).then(() => { try { conn.mux.credit(chan, b.length); } catch { } }, (e) => { cleanup(); rejectP(e); });
+        } else chunks.push(b);
+        received += b.length; bumpStall(); maybeFinish();
+      },
+      onDone: (m) => { doneSeen = true; if (typeof m?.sent === 'number') sentDone = m.sent; if (typeof m?.sha256 === 'string' && /^[0-9a-f]{64}$/.test(m.sha256)) doneSha = m.sha256; maybeFinish(); },
     });
     bumpStall();
-    const ack = await this._request({ op: 'fs-op', action: 'read-range', path: p, start, len, chan });
+    const ack = await this._request({ op: 'fs-op', action: 'read-range', path: p, start, len, chan, ...(sha256 ? { sha256: true } : {}) });
     if (ack?.error) { cleanup(); throw new Error(ack.error); }
     if (typeof ack?.sending === 'number') sending = ack.sending;
     else legacy = true; // ancient daemon without counts: resolve on fs-done like before
     maybeFinish();
     await donePromise;
+    if (sink) return { size: ack.size, sent: received, sha256: doneSha };
     return { size: ack.size, data: Buffer.concat(chunks) };
+  }
+  /** lane exit-transfer — an agent's PUSH: `source` (a Readable: the CLI's request body) streamed onto the device's
+   *  `write-stream` (`fs-write-stream`; an older agent is NEVER asked — it would hang — `host_needs_daemon` by name):
+   *  open ⇒ `<path>.vs-part` made new; the bytes on a byte channel under the window (the source PAUSED while the window
+   *  is full); `end` with the count and the sha256 THIS side computed ⇒ the device compares both, renames, answers.
+   *  `size` is announced up front: more or fewer bytes is a failure, never a short file. `check()` is asked every
+   *  window (8 MiB) — a throw (the grant revoked, the caller gone) aborts. Any failure removes the part. → `{size, sha256}`. */
+  async fsWriteStream(p, { source, size, overwrite = false, check = null, windowBytes = 8 * 1024 * 1024 } = {}) {
+    const conn = await this.connect();
+    if (!conn.info?.capabilities?.includes?.('fs-write-stream')) { const e = new Error('daemon lacks fs-write-stream (capabilities gate) -- upgrade the agent on this machine'); e.code = 'host_needs_daemon'; throw e; }
+    const chan = conn.nextChan++;
+    const crypto = require('crypto');
+    const contentHash = crypto.createHash('sha256'); // the bytes of a file (the device compares it at `end`)
+    let sent = 0, nextCheck = windowBytes, waitW = null;
+    conn.sessions.set(chan, { onWritable: () => { const f = waitW; waitW = null; f?.(); } });
+    const linkGone = () => this._stopped || this._conn !== conn;
+    const abort = async () => { if (linkGone()) return; try { await this._request({ op: 'fs-op', action: 'write-stream', step: 'abort', path: p, chan, waitMs: 15000 }); } catch { } }; // a dropped link: the agent removes the part itself
+    try {
+      await this._request({ op: 'fs-op', action: 'write-stream', step: 'open', path: p, chan, size, overwrite: !!overwrite, waitMs: 20000 });
+      // never destroyOnReturn: a refusal mid-body must still answer the HTTP request the body arrived on
+      const it = typeof source.iterator === 'function' ? source.iterator({ destroyOnReturn: false }) : source;
+      for await (const piece of it) {
+        const b = Buffer.isBuffer(piece) ? piece : Buffer.from(piece);
+        sent += b.length;
+        if (sent > size) throw Object.assign(new Error(`more than the ${size} bytes announced arrived`), { code: 'size_changed' });
+        contentHash.update(b);
+        for (let o = 0; o < b.length; o += 65536) {
+          if (!conn.mux.data(chan, b.subarray(o, Math.min(o + 65536, b.length)))) {
+            // the window is full: wait for the device's credit (the dead-link belt: a link that never answers fails)
+            await new Promise((res, rej) => {
+              const t0 = Date.now();
+              const iv = setInterval(() => {
+                const why = linkGone() ? 'the link to the machine dropped' : Date.now() - t0 > 60000 ? 'the machine stopped taking bytes for 60 s' : null;
+                if (why) { clearInterval(iv); waitW = null; rej(Object.assign(new Error(why), { code: 'stalled' })); }
+              }, 250);
+              waitW = () => { clearInterval(iv); res(); };
+            });
+          }
+        }
+        if (linkGone()) throw Object.assign(new Error('the link to the machine dropped'), { code: 'stalled' });
+        if (sent >= nextCheck) { nextCheck += windowBytes; if (check) await check(sent); }
+      }
+      if (sent !== size) throw Object.assign(new Error(`${sent} bytes arrived of the ${size} announced`), { code: 'size_changed' });
+      if (check) await check(sent);
+      const r = await this._request({ op: 'fs-op', action: 'write-stream', step: 'end', path: p, chan, sent, sha256: contentHash.digest('hex'), waitMs: 120000 });
+      return { size: r.size, sha256: r.sha256 };
+    } catch (e) { await abort(); throw e; }
+    finally { conn.sessions.delete(chan); }
   }
   discoverySnapshot() { return this._request({ op: 'discovery-snapshot' }); }
   /** R5 `discovery.v2` (DARK): the device interprets its OWN snapshot into

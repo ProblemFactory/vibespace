@@ -867,7 +867,7 @@ let work, solo, shop;
     const rdc = await fetch(`http://127.0.0.1:${sd.address().port}/api/browser/profiles/${dp2.id}/forget`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ release: true, unpin: true }) });
     ok(trsrc.includes('browsing_yourself: 409, ') && rdc.status === 500, 'CONTROL: the trace routes copy without the STATUS row answers the refusal as a 500 — red', rdc.status);
     const tv = fs.readFileSync(path.join(REPO, 'src/lib/browser-trace-view.js'), 'utf8');
-    const pinD = (x) => /forget\.onclick = async \(\) => \{\n(?:\s*\/\/[^\n]*\n)*\s*if \(r\.human\) \{ showToast\(humanRefusalText\('browsing_yourself', \{ label: String\(r\.label \|\| r\.id\) \}, t\)/.test(x);
+    const pinD = (x) => /delete: async \(r\) => \{\n(?:\s*\/\/[^\n]*\n)*\s*if \(r\.human\) \{ showToast\(humanRefusalText\('browsing_yourself', \{ label: String\(r\.label \|\| r\.id\) \}, t\)/.test(x);
     ok(pinD(tv) && !pinD(tv.replace('      if (r.human) { showToast(', '      if (false) { showToast(')), 'PIN: the panel\'s Delete… says the refusal AT ONCE in the device\'s words from the row\'s `human` fact (before any confirm or request); CONTROL the pre-fix handler fails the pin');
     await k.closeHuman(HM.humanKeyFor(dp2.id)); await k.stop(dp2.id, { why: 'user' });
   }

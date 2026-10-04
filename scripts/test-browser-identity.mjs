@@ -292,10 +292,13 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     await until(() => ev(`return !!chat(${S(SID.D)});`), 10000);
     await until(async () => { const c = await chipOf(SID.D); return c && /gone/.test(c.text); }, 8000);
     await ev('app.openBrowserProfiles(); return true;');
-    const setAside = await until(() => ev(`const pr = document.querySelector('.bprof-profile[data-profile-id="${GONE.id}"]'); const b = pr && pr.querySelector('.bprof-forget'); return !!(b && !b.disabled);`), 10000);
-    ok(setAside, 'the Browser panel lists "gone" with an enabled Set aside', S(await ev(`const pr = document.querySelector('.bprof-profile[data-profile-id="${GONE.id}"]'); const b = pr && pr.querySelector('.bprof-forget'); return { row: !!pr, rows: [...document.querySelectorAll('.bprof-profile')].map((x) => x.dataset.profileId), b: !!b, disabled: b ? b.disabled : null, title: b ? b.title : null };`)));
+    const setAside = await until(() => ev(`const pr = document.querySelector('.bprof-profile[data-profile-id="${GONE.id}"]'); const b = pr && pr.querySelector('.bprof-more'); return !!b;`), 10000); // design 015: Delete… is the row's ⋯ menu item
+    ok(setAside, 'the Browser panel lists "gone" with its ⋯ menu (Delete… inside)', S(await ev(`const pr = document.querySelector('.bprof-profile[data-profile-id="${GONE.id}"]'); const b = pr && pr.querySelector('.bprof-forget'); return { row: !!pr, rows: [...document.querySelectorAll('.bprof-profile')].map((x) => x.dataset.profileId), b: !!b, disabled: b ? b.disabled : null, title: b ? b.title : null };`)));
     await ev(`document.querySelector('.bprof-profile[data-profile-id="${GONE.id}"]').scrollIntoView({ block: 'center' }); return true;`);
-    const fr = await ev(`return rect(document.querySelector('.bprof-profile[data-profile-id="${GONE.id}"] .bprof-forget'));`);
+    const fr0 = await ev(`return rect(document.querySelector('.bprof-profile[data-profile-id="${GONE.id}"] .bprof-more'));`);
+    await click(centre(fr0));
+    await until(() => ev(`return !!document.querySelector('.context-menu .bprof-forget');`), 5000);
+    const fr = await ev(`return rect(document.querySelector('.context-menu .bprof-forget'));`);
     await click(centre(fr));
     const hintJs = `[...document.querySelectorAll('.dialog-hint')].find((h) => /use it — they go back to a temporary browser/.test(h.textContent))`; // owner ruling A (6) + lane S2: the ONE Delete… dialog counts the chats that pin / hold it BEFORE the act
     const dlg = await until(() => ev(`return !!${hintJs};`), 5000);

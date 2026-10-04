@@ -44,6 +44,16 @@
 //     is drawn IN PLACE of its "[image]" line (§25: the words never drawn); a click opens the shared overlay; a picture the vendor
 //     rate-limits once draws on its own retry; a refused one is the chip that NAMES the reason (zh) with a
 //     Retry that asks again
+//   ⑪b lane around-sheet-fix (the owner's 2026-10-03 screenshot: "李天雨" drawn as "雨", the avatar ON the name and the
+//     first line, a sideways scrollbar, a picture "未找到 重试"): THE AROUND SHEET'S RECT CENSUS in zh / en / ja, desktop
+//     and a 390 px phone — every row's avatar, name, first line and file chip inside the list's box, the avatar on none
+//     of them, `scrollWidth <= clientWidth`, the found row centred vertically (the page never scrolled), and the vendor's
+//     picture (a record never stored) the named chip "not saved — open the conversation to see it" that asked nothing
+//   ⑪c mirror-green-channels (2026-10-03, the 2.369.203/.204 Actions mirror: ⑪ red as "30 at the first look" and as
+//     "the scroll to the end asked nothing"): the search dialog's next vendor page is asked by the person's SCROLL
+//     (each scroll looks where section two's end is), never by an IntersectionObserver crossing — constructed on every
+//     machine's fonts (list 400 px, rows 22 px: the end inside one screen ahead, the list still scrolls); CONTROL = the
+//     ⑧ control bundle with the observer put back.
 //
 // Per-pid scratch (scripts/scratch.mjs); the server gets vncEnv() (§57), a
 // scratch HOME, VIBESPACE_CHANNELS_FAKE=1 and VIBESPACE_CHANNELS_FAKE_CONVS=3
@@ -196,15 +206,15 @@ async function newPage() {
     if (!r2.result || !r2.result.result || !('value' in r2.result.result)) throw new Error('no value from page: ' + JSON.stringify(r2).slice(0, 600));
     return r2.result.result.value;
   };
-  const load = async () => {
-    // THE UI IN ZH (the owner's language): the per-device language key before the app reads it
+  const load = async (lang = 'zh') => {
+    // THE UI IN ZH (the owner's language): the per-device language key before the app reads it (⑪b: en / ja too)
     await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
-    await cdp('Page.addScriptToEvaluateOnNewDocument', { source: "try { localStorage.setItem('vibespace.lang', 'zh'); } catch {}" });
+    await cdp('Page.addScriptToEvaluateOnNewDocument', { source: `try { localStorage.setItem('vibespace.lang', ${JSON.stringify(lang)}); } catch {}` });
     await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
     for (let i = 0; i < 160; i++) { try { if (await evaljs('!!(window.app && window.app.wm && window.app.sidebar)')) return true; } catch {} await sleep(250); }
     return false;
   };
-  return { cdp, evaljs, load, reload: load, close: () => { try { ws.close(); } catch {} } };
+  return { id: t.id, cdp, evaljs, load, reload: () => load(), close: () => { try { ws.close(); } catch {} } };
 }
 for (let i = 0; i < 120; i++) { try { await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json(); break; } catch { await sleep(250); } }
 const p1 = await newPage();
@@ -404,6 +414,150 @@ ok(fsr && fsr.heads && fsr.heads[0] === '已保存的消息' && /^更早的消�
 ok(fsr && fsr.n1 === 20 && fsr.chips === fsr.n1 && fsr.chip === '未保存在本机' && fsr.unknown >= 1 && !fsr.snippetMarkup && fsr.vstat.some((x) => /又向.+查了全部历史：找到 20 条更早的/.test(x)), '⑪ two pages of the vendor\'s older hits, each chipped 未保存在本机, a conversation never synced named 一个尚未同步的对话, the snippet\'s markup stripped, the status line counts them', JSON.stringify(fsr && { n1: fsr.n1, chips: fsr.chips, chip: fsr.chip, unknown: fsr.unknown, vstat: fsr.vstat }));
 ok(fsr && fsr.n2 > fsr.n1 && fsr.pageAsks >= 1 && fsr.s1Moved === 0 && fsr.s1Same, '⑪ scrolling to the end loads the next page by itself (no "Show more"), section one never moves', JSON.stringify(fsr && { n1: fsr.n1, n2: fsr.n2, pageAsks: fsr.pageAsks, moved: fsr.s1Moved }));
 ok(fsr && fsr.sheet && fsr.sheetTitle && fsr.sheetNote && fsr.found && fsr.openBtn === false && fsr.storedArchive === 0, '⑪ a click opens 这条消息前后 — the found message marked among the vendor\'s records, said not saved, no "open" for a conversation never synced; nothing was stored', JSON.stringify(fsr && { sheet: fsr.sheet, title: fsr.sheetTitle, note: fsr.sheetNote, found: fsr.found, open: fsr.openBtn, stored: fsr.storedArchive }));
+// ── ⑪c lane mirror-green-channels (the Actions mirror, 2.369.203/.204: ⑪ red as "30 at the first look" AND as "the scroll
+//    to the end asked nothing"): the dialog's next page hung on an IntersectionObserver CROSSING. With the runner's fonts a
+//    vendor row is 40 px and the first answer left section two's end at 904 px of the observer's 914 px reach (one screen
+//    ahead of a 457 px list) — inside it, so it never crossed again: stuck; when the observer's first look came after that
+//    answer landed it asked the next page with nobody scrolling. 42 px rows (this machine's fonts) put the end at 944 px —
+//    outside — and ⑪ passed here. THE CONSTRUCTION, on any machine's fonts: the list pinned to 400 px and the rows to
+//    22 px, so the end lands inside one screen ahead while the list still scrolls. Nothing may ask a page before the
+//    person scrolls; the scroll to the end must ask one. The same leg on the pre-fix bundle is a CONTROL at the end.
+const GEO_LEG = `(async () => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const asked = []; const f0 = window.fetch; window.fetch = (u, o) => { if (String(u).includes('/api/channels/search/full')) asked.push(String(u)); return f0.call(window, u, o); };
+  const css = document.createElement('style');
+  css.textContent = '.chan-search-results{height:400px!important;max-height:400px!important;min-height:400px!important;flex:none!important}.chan-search-hit,.chan-search-vhit{height:22px!important;min-height:0!important;max-height:22px!important;overflow:hidden!important;box-sizing:border-box!important;padding-top:0!important;padding-bottom:0!important}';
+  document.head.appendChild(css);
+  try {
+    const box = document.querySelector('.rail-panel-channels input[data-channel-filter]');
+    if (!box) return { fail: 'no filter box' };
+    box.value = 'budget'; box.dispatchEvent(new Event('input', { bubbles: true }));
+    let sm = null;
+    for (let i = 0; i < 40 && !sm; i++) { sm = [...document.querySelectorAll('.rail-panel-channels .chan-more-btn')].find((b) => /budget/.test(b.textContent)); if (!sm) await sleep(150); }
+    if (!sm) return { fail: 'no "search messages for" toggle' };
+    sm.click();
+    const dlg = () => document.getElementById('chan-search-dialog');
+    for (let i = 0; i < 100; i++) { if (dlg() && dlg().querySelector('.chan-search-vendor .chan-search-vhit') && /找到|可能相关/.test(dlg().textContent)) break; await sleep(150); }
+    const d = dlg();
+    if (!d) return { fail: 'no dialog' };
+    const list = d.querySelector('.chan-search-results'), sent = d.querySelector('.chan-search-sentinel');
+    const vh = () => d.querySelectorAll('.chan-search-vendor .chan-search-vhit').length;
+    const pages = () => asked.filter((u) => u.includes('page=')).length;
+    await sleep(1500);   // a late first look of an observer, a re-layout: whatever would ask with nobody scrolling has had its chance
+    const out = { n1: vh(), before: pages(), ch: list.clientHeight, sh: list.scrollHeight, end: Math.round(sent.getBoundingClientRect().top - list.getBoundingClientRect().top) };
+    list.scrollTop = list.scrollHeight;
+    for (let i = 0; i < 80 && vh() === out.n1; i++) await sleep(150);
+    out.n2 = vh(); out.after = pages() - out.before;
+    return out;
+  } finally {
+    window.fetch = f0; css.remove();
+    document.querySelectorAll('#chan-around-sheet, #chan-search-dialog').forEach((x) => { const c = x.closest('.modal-overlay') || x; c.remove(); });
+    const box = document.querySelector('.rail-panel-channels input[data-channel-filter]');
+    if (box) { box.value = ''; box.dispatchEvent(new Event('input', { bubbles: true })); }
+    await sleep(400);
+  }
+})()`;
+const geo = await p1.evaljs(GEO_LEG);
+ok(geo && !geo.fail && geo.sh > geo.ch && geo.end <= 2 * geo.ch, `⑪c CONSTRUCTION: after the first answer section two's end is INSIDE one screen ahead (${geo && geo.end} px ≤ 2 × ${geo && geo.ch} px) and the list still scrolls (${geo && geo.sh} px of content)`, JSON.stringify(geo));
+ok(geo && geo.before === 0 && geo.n1 > 0 && geo.after >= 1 && geo.n2 > geo.n1, `⑪c no page is asked before the person scrolls (${geo && geo.before}), and the scroll to the end asks one (${geo && geo.after}: ${geo && geo.n1} → ${geo && geo.n2} older hits)`, JSON.stringify(geo));
+
+// ── ⑪b lane around-sheet-fix: THE AROUND SHEET'S RECT CENSUS — zh / en / ja (a fresh page each), the desktop window
+//    and a 390 px phone; the hit = the fake vendor's `ops-old-2`, whose window holds the archive's picture row (李天雨) ──
+const AROUND_RECT = (vid) => `(async () => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const asked = []; const f0 = window.fetch; window.fetch = (u, o) => { asked.push(String(u)); return f0.call(window, u, o); };
+  try {
+    let d = document.getElementById('chan-search-dialog');
+    if (!d) {
+      const box = document.querySelector('.rail-panel-channels input[data-channel-filter]');
+      if (!box) return { fail: 'no filter box' };
+      box.value = 'budget'; box.dispatchEvent(new Event('input', { bubbles: true }));
+      let sm = null;
+      for (let i = 0; i < 40 && !sm; i++) { sm = [...document.querySelectorAll('.rail-panel-channels .chan-more-btn')].find((b) => /budget/.test(b.textContent)); if (!sm) await sleep(150); }
+      if (!sm) return { fail: 'no "search messages for" toggle' };
+      sm.click();
+    }
+    let hit = null;
+    for (let i = 0; i < 120 && !hit; i++) { d = document.getElementById('chan-search-dialog'); hit = d && d.querySelector('.chan-search-vendor .chan-search-vhit[data-vid="${vid}"]'); if (!hit) await sleep(150); }
+    if (!hit) return { fail: 'no vendor hit ${vid}', text: d ? d.textContent.slice(0, 300) : null };
+    hit.click();
+    let sheet = null, pic = null;
+    for (let i = 0; i < 80; i++) { sheet = document.getElementById('chan-around-sheet'); pic = sheet && sheet.querySelector('.chanmsg[data-vid$="-ops-old-pic"]'); if (pic) break; await sleep(150); }
+    if (!pic) return { fail: 'no picture row in the sheet', text: sheet ? sheet.textContent.slice(0, 300) : null };
+    await sleep(1500);   // a thumbnail that would fail has failed (its chip drawn) — the pre-fix "未找到 重试"
+    const list = sheet.querySelector('.chan-around-list');
+    const L = list.getBoundingClientRect();
+    const inner = { l: L.left + list.clientLeft, r: L.left + list.clientLeft + list.clientWidth };
+    const R = (x) => { const r = x.getBoundingClientRect(); return { l: r.left, r: r.right, t: r.top, b: r.bottom }; };
+    const firstLine = (row) => {
+      const body = row.querySelector(':scope > .chanmsg-body');
+      if (!body) return null;
+      const w = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+      for (let n = w.nextNode(); n; n = w.nextNode()) {
+        if (!n.textContent.trim()) continue;
+        const rg = document.createRange(); rg.selectNodeContents(n);
+        const rs = [...rg.getClientRects()].filter((q) => q.width > 0);
+        if (rs.length) return { l: rs[0].left, r: rs[0].right, t: rs[0].top, b: rs[0].bottom };
+      }
+      return null;
+    };
+    const meet = (a, b) => a.l < b.r - 0.5 && b.l < a.r - 0.5 && a.t < b.b - 0.5 && b.t < a.b - 0.5;
+    const rows = [...list.querySelectorAll(':scope > .chanmsg')];
+    const bad = [];
+    for (const row of rows) {
+      const vidR = row.dataset.vid;
+      const av = row.querySelector(':scope > .chanmsg-av'), who = row.querySelector(':scope > .chanmsg-head .chanmsg-who');
+      const parts = { avatar: av && R(av), name: who && R(who), line: firstLine(row) };
+      row.querySelectorAll('.chanmsg-att').forEach((c, i) => { parts['chip' + i] = R(c); });
+      for (const [k, q] of Object.entries(parts)) {
+        if (!q) continue;
+        if (q.l < inner.l - 0.5) bad.push(vidR + ' ' + k + ' starts left of the list (' + Math.round(q.l) + ' < ' + Math.round(inner.l) + ')');
+        if (q.r > inner.r + 0.5) bad.push(vidR + ' ' + k + ' ends right of the list (' + Math.round(q.r) + ' > ' + Math.round(inner.r) + ')');
+        if (k !== 'avatar' && parts.avatar && meet(parts.avatar, q)) bad.push(vidR + ' the avatar covers the ' + k);
+      }
+    }
+    const f = list.querySelector('.chanmsg-found');
+    const fr = f && f.getBoundingClientRect();
+    const mid = L.top + list.clientTop + list.clientHeight / 2;
+    const dy = fr ? Math.round((fr.top + fr.height / 2) - mid) : null;
+    const top = list.scrollTop <= 0, end = list.scrollTop >= list.scrollHeight - list.clientHeight - 1;
+    const dlg = sheet.querySelector('.dialog').getBoundingClientRect();
+    const picChip = pic.querySelector('.chanmsg-att-unsaved');
+    const out = {
+      rows: rows.length, named: rows.filter((r) => r.querySelector(':scope > .chanmsg-head .chanmsg-who')).length, bad,
+      scroll: { sw: list.scrollWidth, cw: list.clientWidth, sl: list.scrollLeft },
+      centred: !!fr && (Math.abs(dy) <= 2 || (dy < 0 && top) || (dy > 0 && end)), dy, st: list.scrollTop,
+      page: { x: Math.round(document.scrollingElement.scrollLeft), y: Math.round(document.scrollingElement.scrollTop) },
+      dialog: { l: Math.round(dlg.left), r: Math.round(dlg.right), vw: innerWidth }, dialogIn: dlg.left >= 0 && dlg.right <= innerWidth,
+      pic: { who: (pic.querySelector('.chanmsg-who') || {}).textContent || '', chip: picChip ? (picChip.querySelector('.chanmsg-att-why') || {}).textContent : null,
+        thumb: !!pic.querySelector('img.chanmsg-thumb'), refused: !!pic.querySelector('[data-refused]'), retry: !!pic.querySelector('.chanmsg-att-retry'), words: pic.textContent },
+      // asks naming THIS picture (a fetch or an <img> load — resource timing sees both); the page's restored windows
+      // load their own thumbnails, which are not the sheet's
+      attAsks: asked.filter((u) => u.includes('ops-old-pic-img')).length + performance.getEntriesByType('resource').filter((e) => e.name.includes('ops-old-pic-img')).length,
+      picYear: new Date(Number(pic.dataset.at)).getFullYear(), days: [...list.querySelectorAll(':scope > .chanmsg-day')].map((x) => x.textContent), dayBefore: (() => { let e = pic.previousElementSibling; while (e && !e.classList.contains('chanmsg-day')) e = e.previousElementSibling; return e ? e.textContent : null; })(),
+    };
+    sheet.querySelector('.dialog-close').click();
+    return out;
+  } finally { window.fetch = f0; }
+})()`;
+const AROUND_CHIP = { zh: '未保存 — 打开对话查看', en: 'not saved — open the conversation to see it', ja: '未保存 — 会話を開いて確認できます' };
+for (const lang of ['zh', 'en', 'ja']) {
+  const pc = await newPage();
+  ok(await pc.load(lang), `⑪b a fresh page loaded the app (${lang})`);
+  const pp = await pc.evaljs(PANEL);
+  ok(pp.ok, `⑪b ${lang}: the Channels panel renders`, JSON.stringify(pp).slice(0, 200));
+  for (const [tag, metrics] of [['desktop', null], ['390 px', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true }]]) {
+    if (metrics) { await pc.cdp('Emulation.setDeviceMetricsOverride', metrics); await sleep(600); }
+    const c = await pc.evaljs(AROUND_RECT('fake-poll-ops-old-2'));
+    ok(c && !c.fail && c.rows >= 10 && c.named >= 10 && !c.bad.length && c.scroll.sw <= c.scroll.cw && c.scroll.sl === 0, `⑪b ${lang} ${tag}: every row's avatar, name, first line and chip inside the list (${c && c.rows} rows), the avatar on none of them, scrollWidth ${c && c.scroll && c.scroll.sw} <= clientWidth ${c && c.scroll && c.scroll.cw}`, JSON.stringify(c && { fail: c.fail, text: c.text, n: (c.bad || []).length, bad: (c.bad || []).slice(0, 6), scroll: c.scroll, rows: c.rows, named: c.named }));
+    ok(c && c.centred && c.page && c.page.x === 0 && c.page.y === 0 && c.dialogIn, `⑪b ${lang} ${tag}: the found row centred in the list, vertically only — the page never scrolled, the sheet inside the screen`, JSON.stringify(c && { centred: c.centred, dy: c.dy, st: c.st, page: c.page, dialog: c.dialog }));
+    // the fake archive is 400 days old: the picture's day is ANOTHER year's, so its separator names the year
+    ok(c && c.days && c.days.length >= 2 && c.dayBefore && c.picYear < new Date().getFullYear() && c.dayBefore.includes(String(c.picYear)), `⑪b ${lang} ${tag}: the window's day separators — the picture row's day is named above it WITH its year (${c && c.dayBefore}), ${c && c.days && c.days.length} days in the sheet`, JSON.stringify(c && { days: c.days, dayBefore: c.dayBefore, picYear: c.picYear }));
+    ok(c && c.pic && c.pic.who === '李天雨' && c.pic.chip === AROUND_CHIP[lang] && !c.pic.thumb && !c.pic.refused && !c.pic.retry && c.attAsks === 0, `⑪b ${lang} ${tag}: the vendor's picture VibeSpace never stored is the named chip "${AROUND_CHIP[lang]}" — no thumbnail, no "not found · Retry", our attachment route never asked for it`, JSON.stringify(c && { pic: c.pic, attAsks: c.attAsks }));
+  }
+  pc.close();
+  try { await fetch(`http://127.0.0.1:${CDP_PORT}/json/close/${pc.id}`); } catch {}
+}
 
 // ── ④ the override from the row menu, persisted, on a second client, after a reload ──
 const pick = await p1.evaljs(`(async () => {
@@ -1400,6 +1554,14 @@ ok(race.bars >= 3 && race.barsParsed === race.bars && race.parsed === race.start
   ];
   ok(READY.every((c) => psrc.split(c).length === 2), 'CONTROL setup: the list-ready rule and the three scroll-event clauses are each spelled once in the paging verdict');
   fs.writeFileSync(PMOD, READY.reduce((acc, c) => acc.replace(c, ''), psrc));
+  // ⑪c's pre-fix dialog in the same bundle (lane mirror-green-channels): the next page asked by an IntersectionObserver alone
+  const SMOD = path.join(wt, 'src/lib/channels-panel.js');
+  const ssrc = fs.readFileSync(SMOD, 'utf8');
+  const LOOK_AT = ssrc.indexOf("    // the end of section two, ONE screen ahead: each account's next page, one request each — asked by the person's\n");
+  const LOOK_END = "    observer = { disconnect() { list.removeEventListener('scroll', look); list.removeEventListener('wheel', onWheel); } };\n";
+  ok(LOOK_AT > 0 && ssrc.split(LOOK_END).length === 2 && ssrc.indexOf(LOOK_END) > LOOK_AT, 'CONTROL setup: the search dialog\'s scroll look is one block where the control puts the pre-fix observer back');
+  const IO_ONLY = "    // the end of section two, ONE screen ahead: each account's next page, one request each\n    if (typeof IntersectionObserver === 'function') {\n      observer = new IntersectionObserver((ents) => {\n        if (my !== gen || !ents.some((en) => en.isIntersecting)) return;\n        for (const st of states) if (st.next && !st.busy) ask(st, st.next);\n      }, { root: list, rootMargin: '0px 0px 100% 0px' });\n      observer.observe(sentinel);\n    }\n";
+  fs.writeFileSync(SMOD, ssrc.slice(0, LOOK_AT) + IO_ONLY + ssrc.slice(ssrc.indexOf(LOOK_END) + LOOK_END.length));
   execSync('npx esbuild src/client.js --bundle --outfile=public/bundle.js --format=iife --platform=browser --target=es2020 --loader:.css=css', { cwd: wt, stdio: 'ignore' });
   ok(await p1.reload(), 'CONTROL: page 1 reloaded on the pre-fix bundle');
   const cp = await p1.evaljs(PANEL);
@@ -1417,6 +1579,8 @@ ok(race.bars >= 3 && race.barsParsed === race.bars && race.parsed === race.start
   ok(rpc.before > 0 && rpc.cleared && rpc.after > rpc.before, `CONTROL (⑨b): without the queue and the ready rule the rebuild's clear asks for the page above a reset boundary — the tail again — and the window draws ${rpc.after} for ${rpc.before} (pages read: ${rpc.urls.join(' ')})`, JSON.stringify(rpc));
   const rc = await p1.evaljs(RACE(baseRooms[1]));
   ok(rc.bars >= 3 && rc.started >= 2 && rc.parsed === rc.started && rc.page > 0 && rc.shown >= 2 * rc.page, `CONTROL (⑨): without the serial queue the same three list writers draw the page ${Math.round(rc.shown / Math.max(1, rc.page) * 10) / 10}× (${rc.shown} for ${rc.page}) — the slow runner's duplicate list; the leg above would go red`, JSON.stringify(rc));
+  const cgeo = await p1.evaljs(GEO_LEG);
+  ok(cgeo && !cgeo.fail && (cgeo.before > 0 || (cgeo.after === 0 && cgeo.end <= 2 * cgeo.ch && cgeo.sh > cgeo.ch)), `CONTROL (⑪c): the pre-fix dialog (an IntersectionObserver alone) under the same construction asks a page with nobody scrolling (${cgeo && cgeo.before}) or none at the scroll to the end (${cgeo && cgeo.after}) — the runner's two ⑪ reds; ⑪b would go red`, JSON.stringify(cgeo));
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

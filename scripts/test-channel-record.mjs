@@ -216,7 +216,10 @@ const base = { adapterId: 'a', convId: 'c', vendorId: 'v1', at: 1700000000000, t
       // variant table + remote prelude). (`<agent-browser args…>` left with the browser takeover:
       // vibespace-browser's help no longer names the CLI it hides.) (`<short-slug>` left at 2.369.202 with the
       // retired Claude CLI canvas request: the chip's request names `vibespace-design new` instead.)
-      'app-id', 'per-session', 'vs-key']);
+      'app-id', 'per-session', 'vs-key',
+      // exit transfers (2.369.205): `vibespace-exit pull <machine> <remote-path> [<local-path>]` / `push <local-path> …` —
+      // usage placeholders in data/bin/vibespace-exit's help and its refusal line.
+      'remote-path', 'local-path']);
     const seen = new Map();
     for (const f of files) {
       let txt; try { txt = fsx.readFileSync(path.join(REPO, f), 'utf-8'); } catch { continue; }

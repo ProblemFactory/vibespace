@@ -591,6 +591,10 @@ const GRAD_ARGS = '--bundle-url "http://hub.example:3456/vibespace-device.js" --
   const EXEMPT = [
     { file: 'scripts/vibespace-agentd-install.sh', re: /"vsht_"\+require\("crypto"\)\.randomBytes\(24\)/, why: 'a STANDALONE install (no pairing) mints its own device key ON the device; it never leaves the machine' },
     { file: 'src/agentd/client.js', re: /this\._tokens\.local !== sha/, why: 'the hub\'s own record of device #0\'s hash: "changed ⇒ rewrite the file", not an authentication' },
+    // lane exit-transfer: the sha256 of a FILE's bytes (pull / push: each end hashes what it sent / received) — never a token
+    { file: 'src/agentd/agentd.js', re: /const hash = msg\.sha256 \? require\('crypto'\)\.createHash\('sha256'\) : null;/, why: 'a pull window\'s content hash (read-range `sha256: true`) — the bytes of a file, not a token' },
+    { file: 'src/agentd/agentd.js', re: /received: 0, hash: require\('crypto'\)\.createHash\('sha256'\), buf: \[\]/, why: 'a push\'s content hash (write-stream) — the bytes of a file, not a token' },
+    { file: 'src/agentd/client.js', re: /const contentHash = crypto\.createHash\('sha256'\);/, why: 'a push\'s content hash on the hub side (fsWriteStream) — the bytes of a file, not a token' },
   ];
   const exempt = (file, line) => EXEMPT.some((x) => x.file === file && x.re.test(line));
   function doorCensus(files) {
@@ -793,6 +797,7 @@ const CENSUS_ROWS = [
   ['src/server/mounts-plugins-wiring.js', /hostname: os\.hostname\(\), interfaces: os\.networkInterfaces\(\), port: PORT/, ['os.hostname(', 'os.networkInterfaces(', 'PORT'], 1, 'server (what the MACHINE has), filtered by the bind (F3)', 'the candidate rows — a paired device\'s default is its OWN stated address (F1/N-sheet), never these'],
   ['src/exit-proxy.js', /socks5h:\/\/\$\{cred\.user\}:\$\{cred\.pass\}@127\.0\.0\.1|socks5h:\/\/127\.0\.0\.1:\$\{/, ['127.0.0.1'], 5, 'server (the VibeSpace machine\'s own loopback)', 'the `use` url — handed ONLY to a conversation running on this machine (F2 refuses session.host)'],
   ['src/exit-proxy.js', /server\.listen\(0, '127\.0\.0\.1', \(\) => resolve\(server\.address\(\)\.port\)\)/, ['127.0.0.1', 'server.address('], 1, 'server', 'the forward\'s own listener (loopback only)'],
+  ['src/exit-proxy.js', /const home = os\.homedir\(\);|allow: \[os\.tmpdir\(\), path\.join\(home, 'Downloads'\)\]/, null, 2, 'server (the VibeSpace machine\'s own disk — a pull writes HERE)', 'a pull\'s local fence (lane exit-transfer): this machine\'s home and temp dir — a conversation on another machine is refused remote_session before it'],
   ['src/sock-path.js', /function witnessOrRule\(\{ root, platform = process\.platform/, ['process.platform'], 1, 'the CALLER\'s machine (a daemon on its device; the hub for its own device #0)', 'a socket path on the machine that listens on it'],
   ['src/agentd/agentd.js', /process\.platform === 'win32' \? null : SOCKP\.daemonSocketPath|^\s+root: ROOT, platform: process\.platform, tmpdir: os\.tmpdir\(\), xdgRuntimeDir|const SOCK = process\.platform === 'win32'/, null, 3, 'receiver (the daemon runs ON the device)', 'its own socket path + the witness it writes'],
   ['src/agentd/agentd.js', /const bridgeSock = \(\) =>/, ['process.platform', 'process.platform', 'os.tmpdir(', 'process.env.XDG_RUNTIME_DIR'], 1, 'receiver (the --stdio bridge runs ON the device)', 'the daemon\'s socket (witness first)'],

@@ -321,6 +321,29 @@ console.log('§6 lane D (a) item C — CHROME draws its own frame (MEASURED 2026
   ok(serve.indexOf('await seedChromiumFrame(rec.profileDir)') > 0 && serve.indexOf('await seedChromiumFrame(rec.profileDir)') < serve.indexOf('display.startApp(') && /if \(rec\.browser === 'chromium' && rec\.profileDir\) \{/.test(serve), 'WIRING PIN: the keeper seeds a chromium profile inside bringUp, BEFORE display.startApp (so a carried profile is seeded where it lands)');
 }
 
+console.log('§7 design 016 S2 (lane app-satellite-windows): a verdict PER WINDOW — the main window folds by the main\'s decorations, a satellite by its own');
+{
+  const ctx = { setting: 'auto', userToggle: 'auto', lease: false, chain: false, phone: false, connected: true };
+  const SSD = { decorations: 1 }, CSD = { decorations: 0 };
+  const rows = [
+    ['an SSD main (Weixin drawn by xpra) keeps its frame', S.windowSeamless(SSD, ctx), { seamless: false, why: 'ssd' }],
+    ['…while its CSD satellite (a window drawing its own title bar) folds', S.windowSeamless(CSD, ctx), { seamless: true, why: 'csd' }],
+    ['a CSD main with an SSD satellite: the reverse', [S.windowSeamless(CSD, ctx).seamless, S.windowSeamless(SSD, ctx).seamless], [true, false]],
+    ['the per-app "Off" holds for every window of the app', S.windowSeamless(CSD, { ...ctx, userToggle: 'off' }), { seamless: false, why: 'user' }],
+    ['the per-app "On" folds an SSD satellite too', S.windowSeamless(SSD, { ...ctx, userToggle: 'on' }), { seamless: true, why: 'user' }],
+    ['an agent lease pauses every window of the app', S.windowSeamless(CSD, { ...ctx, lease: true }), { seamless: false, why: 'lease' }],
+    ['a satellite not bound to its session (connected = false) shows its frame', S.windowSeamless(CSD, { ...ctx, connected: false }), { seamless: false, why: 'disconnected' }],
+    ['a satellite in a tab chain shows its frame (its own chain, not the main\'s)', S.windowSeamless(CSD, { ...ctx, chain: true }), { seamless: false, why: 'chain' }],
+    ['no metadata yet ⇒ SSD', S.windowSeamless(null, ctx), { seamless: false, why: 'ssd' }],
+  ];
+  const bad = rows.filter(([, got, want]) => !same(got, want));
+  ok(bad.length === 0, `PURE windowSeamless: ${rows.length} rows — each window by ITS decorations under the app's shared choice / setting / pauses`, bad);
+  const daw = read('src/lib/desktop-app-window.js');
+  const satBody = daw.slice(daw.indexOf('function openSatelliteWindow('), daw.indexOf('// ── WINDOW-TYPE REGISTRATION'));
+  ok(/windowSeamless\(meta, \{ \.\.\.ctx, chain: !!winInfo\._tabChain, connected: !!ctx\.connected && !!handle && handle\.bound \}\)/.test(satBody) && /winInfo\.element\.classList\.toggle\('seamless', v\.seamless\)/.test(satBody) && /beginDragFromPointer\(winInfo\.id, opts\)/.test(satBody),
+    'WIRING: the satellite window folds by ITS window\'s metadata (the main\'s context, its own chain and binding) and its header bar drags IT');
+}
+
 for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 2 })) ok(r.pass, 'tree: ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 console.log(`${fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`}`);
 process.exit(fail ? 1 : 0);

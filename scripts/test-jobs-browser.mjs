@@ -343,6 +343,14 @@ console.log('— ⑥ a job\'s own working directory is a write root of its brows
   const D = scratch('jbrw-f6'); const WD = path.join(D, 'work'), TMP = path.join(D, 'tmp'); for (const d of [path.join(D, 'bin'), WD, TMP]) fs.mkdirSync(d, { recursive: true });
   process.on('exit', () => { try { fs.rmSync(D, { recursive: true, force: true }); } catch { } });
   fs.copyFileSync(path.join(REPO, 'data/bin/job-wrapper.js'), path.join(D, 'bin', 'job-wrapper.js'));
+  // lane mirror-green-channels (the Actions mirror, 2.369.204): the CLI looks the REAL browser CLI up on PATH after the
+  // write fence and BEFORE the server call — the runner has none, so the first leg answered binary_absent and never reached
+  // the server it judges (green here only because this machine has agent-browser on PATH). A job's PATH starts with its
+  // engine's data bin (src/jobs.js: `<dataDir>/bin:` + the server's PATH — D/bin here), so a stand-in there that answers
+  // `--version` like the flag table's build is found first: the leg reaches the server call on every machine, and a run of
+  // the stand-in past `--version` says so in the job's log.
+  const STAND_IN = path.join(D, 'bin');
+  fs.writeFileSync(path.join(STAND_IN, 'agent-browser'), `#!/bin/sh\nif [ "$1" = --version ]; then echo 'agent-browser ${require(path.join(REPO, 'src/browser-verbs.js')).TABLE_VERSION}'; exit 0; fi\necho 'the stand-in agent-browser ran past --version' >&2; exit 9\n`, { mode: 0o755 });
   const ended = [];
   const jm = new JobManager({ dataDir: D, broadcast() { }, notifyUser() { }, log() { }, apiBase: 'http://127.0.0.1:9', onRunEnded: (job) => ended.push(job.id) });
   jm.init();

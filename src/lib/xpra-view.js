@@ -62,12 +62,24 @@
 // the client's `on.fixed` (a window whose size the app fixes — WeChat's login, Inkscape's welcome) is handed to the
 // window in CSS px (`onFixedSize({w,h}|null)` — device ÷ the ratio, rounded up) and the window ADOPTS it; while
 // `fixedFollows()` says the window does (off the phone layout) the picture is NEVER scaled to fit — no badge.
+// AN APP'S SECOND WINDOW (design 016 S1, lane app-guest-window): `onFront({wid, title, kind, main}|null)` names the FRONT
+// window (the window titles "{app} · {front}" and its ✕ closes that window — `closeFront()`); the minimum `onMinSize` hands
+// over is the union of every held window's (the client's), so the window grows to hold WeChat's Moments.
+// A WINDOW PER TOP-LEVEL (design 016 S2, lane app-satellite-windows, 2026-10-03): with `onSatellite` the client lays every
+// secondary NORMAL window into its own SLOT of the root and this view asks the caller to open a SATELLITE window for it
+// (`onSatellite({wid, title})`); that window mounts `attachSatellite(host, wid, callbacks)` — a viewport pane onto the SAME
+// session (no socket of its own: ONE connection per app session stays), which draws every canvas of its pane (P.paneOf:
+// the window, its dialogs, the popups opened in it) offset by the window's origin, maps its pointer and keys to that
+// window, and hands ITS title / minimum / fixed size / metadata / header-bar gesture / maximize-minimize to its window.
+// The main pane no longer draws a window that has a bound satellite. Watch and Blocked draw everything in the main pane
+// (one picture) and say so in the satellite; a slot lost closes its satellite ('lost' | 'adopted' | 'released'), a
+// satellite waiting for a window the session no longer has closes once the window list is in ('missing').
 import { t } from './i18n.js';
 import { dragEndVerdict } from './drag-end.js'; // the hand-over's hold ends as the WM's drag does (verify r1)
 import { showToast } from './utils.js';
 import { createPictureShell, streamUrl, copyViaSelection } from './picture-shell.js';
 import { createXpraClient, defaultDecode } from './xpra-client.js';
-import { minPaneCss, pixelRatioOf, backingSize } from './xpra-proto.js';
+import { minPaneCss, pixelRatioOf, backingSize, fixedSizeOf, sizeHintsOf } from './xpra-proto.js';
 
 export { streamUrl, copyViaSelection };
 
@@ -116,6 +128,8 @@ export function startingText(ms) {
  *   onTitle(text) / onIcon(dataUrl|null) — the app window's own title and icon
  *   onMinSize({w,h}|null) — the smallest pane (CSS px) the app fits in unscaled (its minimum ÷ the ratio)
  *   onFixedSize({w,h}|null) — the pane (CSS px) the app's FIXED window needs (lane app-fit-fixed); null = none
+ *   onFront({wid,title,kind,main}|null) — the FRONT window (the topmost non-popup; `main` false = an app's second window)
+ *   onSatellite({wid,title}) — S2: a secondary top-level got its slot — open (or re-bind) a satellite window for it
  *   fixedFollows  — () => true when the window adopts that size (then the picture is never scaled); default true
  *   dpi           — the DISPLAY's font dpi (the record's `dpi`) — the client's hello/display dpi (a number or a function)
  *   onMain(meta|null) / onState(changed) — the main window's metadata; the app's own maximize / minimize (seamless)
@@ -127,7 +141,7 @@ export function startingText(ms) {
  * Returns { container, bar, mount, pane, status, connect, disconnect, setStatus, addControl,
  *           focus, dispose, setViewOnly, get client, get state, get wanted, windows() }.
  */
-export function createXpraView(host, { url, workerUrl, before = null, labels = {}, autoReconnect = false, onStatus = null, onTitle = null, onIcon = null, onMinSize = null, onMain = null, onState = null, onMoveResize = null, onFixedSize = null, fixedFollows = () => true, dpi = 96, pixelRatio = () => (typeof devicePixelRatio === 'number' ? devicePixelRatio : 1), pictureScale = () => 1, Worker: WorkerCtor = undefined, decode = defaultDecode, now = undefined, secure = null, clipboardApi = null, log = console } = {}) {
+export function createXpraView(host, { url, workerUrl, before = null, labels = {}, autoReconnect = false, onStatus = null, onTitle = null, onIcon = null, onMinSize = null, onMain = null, onState = null, onMoveResize = null, onFixedSize = null, onFront = null, onSatellite = null, fixedFollows = () => true, dpi = 96, pixelRatio = () => (typeof devicePixelRatio === 'number' ? devicePixelRatio : 1), pictureScale = () => 1, Worker: WorkerCtor = undefined, decode = defaultDecode, now = undefined, secure = null, clipboardApi = null, log = console } = {}) {
   const shell = createPictureShell(host, { labels: { starting: t('Starting application…'), unavailable: t('Desktop app unavailable'), ...labels }, autoReconnect, onStatus, background: 'var(--bg-primary)', focus: () => focus() });
   const { container, bar, mount, status, pasteBtn, reBtn, labels: L, setStatus, addControl, emit } = shell;
 
@@ -183,10 +197,10 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
    *  RESAMPLES the canvas across the half pixel (1.3–1.9 % of the pixels off a 1:1 copy; an integer DPR never shows it).
    *  The stage is nudged right/down by less than one device px so its origin lands ON the device grid. Re-read at every
    *  fit, when the pointer enters the pane and when the window is moved (`resnap`, the window's onMoved). */
-  const gridNudge = (ox, oy) => {
+  const gridNudge = (ox, oy, el = pane) => {
     const r = drawRatio;
     if (!(r > 0) || r === 1 || drawK !== 1) return { x: 0, y: 0 }; // a resampled picture (lane D (a)) has no 1:1 grid to land on
-    let pr = null; try { pr = pane.getBoundingClientRect(); } catch {}
+    let pr = null; try { pr = el.getBoundingClientRect(); } catch {}
     if (!pr || !Number.isFinite(pr.left) || !Number.isFinite(pr.top)) return { x: 0, y: 0 };
     const nudge = (v) => { const d = v * r; const f = Math.ceil(d - 1e-3) - d; return f > 1e-3 ? f / r : 0; };
     return { x: nudge(pr.left + ox), y: nudge(pr.top + oy) };
@@ -239,8 +253,14 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
     try { onFixedSize?.(m ? { ...m } : null); } catch {}
     fitStage();
   };
-  const wins = new Map(); // wid → { el, canvas, ctx }
+  const wins = new Map(); // wid → { el, canvas, ctx, home (the stage it is drawn on) }
   const clearWindows = () => { for (const w of wins.values()) { clearTimeout(w.shrinkTimer); w.el.remove(); } wins.clear(); };
+  // ── S2: the panes that draw this session — the main pane and every SATELLITE (wid → its handle) ──
+  const sats = new Map();
+  /** The stage a window is drawn on: its satellite's while one is bound and this pane drives the app, else the main one. */
+  const stageFor = (win) => { const o = client && mode === 'active' && sats.size ? client.ownerOf(win) : 0; const sat = o ? sats.get(o) : null; return sat && sat.bound ? sat.stage : stage; };
+  const home = (win, w) => { const target = stageFor(win); if (w.home !== target) { w.el.remove(); target.appendChild(w.el); w.home = target; } };
+  const rehome = () => { if (!client) return; for (const win of client.windows.values()) { const w = wins.get(win.wid); if (w) home(win, w); } fitStage(); for (const sat of sats.values()) sat.refresh(); };
 
   const paneSize = () => ({ width: Math.max(1, pane.clientWidth || 1), height: Math.max(1, pane.clientHeight || 1) });
 
@@ -284,15 +304,17 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
       const w = { el, canvas, ctx: canvas.getContext('2d') };
       wins.set(win.wid, w);
       place(win, w);
-      stage.appendChild(el);
+      home(win, w);
       if (wins.size === 1) { everMapped = true; stopWait(); setStatus(t('Connected')); }
       fitStage();
+      for (const sat of sats.values()) sat.refresh();
       return;
     }
     const w = wins.get(win.wid);
-    if (!w) return;
-    if (kind === 'geometry' || kind === 'raise') { place(win, w); fitStage(); }
+    if (!w) { if (kind === 'meta') for (const sat of sats.values()) sat.refresh(); return; }
+    if (kind === 'geometry' || kind === 'raise') { place(win, w); home(win, w); fitStage(); }
     else if (kind === 'lost') { clearTimeout(w.shrinkTimer); w.el.remove(); wins.delete(win.wid); fitStage(); if (!wins.size && client && client.state === 'connected') setStatus(t('The application closed its window')); }
+    for (const sat of sats.values()) sat.refresh();
   };
   const onPaint = (win, op) => {
     const w = wins.get(win.wid);
@@ -348,25 +370,31 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
     if (text) sendPaste(text);
   });
 
-  // ── keyboard through the IME textarea ────────────────────────────────────
-  ime.addEventListener('keydown', (e) => {
-    if (!client || e.isComposing || e.keyCode === 229) return;
-    const r = client.keyDown(keyInputOf(e));
-    if (r === 'sent') e.preventDefault();
-    else if (r === 'copy' && e.isTrusted === true && !e.repeat) copyGestureAt = clock(); // forwarded to the app: its token may follow
-  });
-  ime.addEventListener('keyup', (e) => {
-    if (!client || e.isComposing || e.keyCode === 229) return;
-    const r = client.keyUp(keyInputOf(e));
-    if (r === 'sent') e.preventDefault();
-  });
-  ime.addEventListener('compositionend', (e) => { const text = e.data || ime.value; ime.value = ''; if (client && text) client.typeText(text); });
-  ime.addEventListener('input', (e) => {
-    if (e.isComposing || (e.inputType && e.inputType.startsWith('insertComposition'))) return;
-    const text = e.inputType === 'insertText' && e.data ? e.data : (e.inputType ? '' : ime.value);
-    ime.value = '';
-    if (client && text) client.typeText(text);
-  });
+  // ── keyboard through the IME textarea (one per pane: the main's and each satellite's) ──
+  /** S2: a pane's keys reach a window OF that pane — the X focus is moved there first when another pane holds it. */
+  const aim = (owner) => { if (client && sats.size && !viewOnly && mode === 'active') client.focusPane(owner); };
+  const wireIme = (el, owner) => {
+    el.addEventListener('keydown', (e) => {
+      if (!client || e.isComposing || e.keyCode === 229) return;
+      aim(owner);
+      const r = client.keyDown(keyInputOf(e));
+      if (r === 'sent') e.preventDefault();
+      else if (r === 'copy' && e.isTrusted === true && !e.repeat) copyGestureAt = clock(); // forwarded to the app: its token may follow
+    });
+    el.addEventListener('keyup', (e) => {
+      if (!client || e.isComposing || e.keyCode === 229) return;
+      const r = client.keyUp(keyInputOf(e));
+      if (r === 'sent') e.preventDefault();
+    });
+    el.addEventListener('compositionend', (e) => { const text = e.data || el.value; el.value = ''; if (client && text) { aim(owner); client.typeText(text); } });
+    el.addEventListener('input', (e) => {
+      if (e.isComposing || (e.inputType && e.inputType.startsWith('insertComposition'))) return;
+      const text = e.inputType === 'insertText' && e.data ? e.data : (e.inputType ? '' : el.value);
+      el.value = '';
+      if (client && text) { aim(owner); client.typeText(text); }
+    });
+  };
+  wireIme(ime, 0);
 
   // ── pointer, from the pane's own rect (viewport px == layout px at net zoom 1) ──
   // → the stage's own coordinates (the fit's offset and scale undone) → DEVICE px (× the ratio): what X speaks
@@ -375,43 +403,48 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
     const x = (e.clientX - r.left - stageOffset.x) / stageScale, y = (e.clientY - r.top - stageOffset.y) / stageScale;
     return [x * drawRatio, y * drawRatio];
   };
-  let moveRaf = 0, lastMove = null;
-  // the press in flight (for a window-manager gesture the app starts in the middle of it) and, once one started, the
-  // window manager's hold on the pointer: { pointerId, button, xy (the last pane point), ctl (its document listener) }
-  let press = null, wmHold = null;
-  const releaseWmHold = (e) => {
-    const h = wmHold; wmHold = null;
+  // ONE POINTER PER PANE (S2: the main's and each satellite's): `xy` maps a pointer event to the ROOT (device px); the press
+  // in flight (for a window-manager gesture the app starts in the middle of it) and, once one started, the window
+  // manager's hold on the pointer: { pointerId, button, xy (the last pane point), ctl (its document listener) }
+  const pointerOf = (el, xy) => ({ el, xy, press: null, wmHold: null, raf: 0, last: null });
+  const mainPtr = pointerOf(pane, paneXY);
+  const releaseWmHold = (ptr, e) => {
+    const h = ptr.wmHold; ptr.wmHold = null;
     if (!h) return;
     try { h.ctl.abort(); } catch {}
     // the button is still down in X (the app handed the gesture over mid-press): release it once, where it was let go
-    if (client) { const xy = e && pane.isConnected ? paneXY(e) : h.xy; client.pointerButton(xy[0], xy[1], h.button, false, e ? pointerMods(e) : {}); }
+    if (client) { const xy = e && ptr.el.isConnected ? ptr.xy(e) : h.xy; client.pointerButton(xy[0], xy[1], h.button, false, e ? pointerMods(e) : {}); }
+  };
+  const wirePointer = (ptr, imeEl) => {
+    const pane = ptr.el; // THIS pointer's pane (the main's, or a satellite's)
+    pane.addEventListener('pointerdown', (e) => {
+      imeEl.focus({ preventScroll: true });
+      e.preventDefault();
+      if (!client) return;
+      try { pane.setPointerCapture(e.pointerId); } catch {}
+      const [x, y] = ptr.xy(e);
+      ptr.press = { pointerId: e.pointerId, button: e.button, xy: [x, y], client: { clientX: e.clientX, clientY: e.clientY, pointerId: e.pointerId } }; // the pointerId rides with the hand-over: the title bar / handle CAPTURES it (lane-drag-release)
+      client.pointerButton(x, y, e.button, true, pointerMods(e));
+    });
+    pane.addEventListener('pointerup', (e) => {
+      if (!client) return;
+      if (ptr.wmHold) return; // the window manager's gesture owns this press — its document listener releases the button in X
+      ptr.press = null;
+      const [x, y] = ptr.xy(e);
+      client.pointerButton(x, y, e.button, false, pointerMods(e));
+      try { pane.releasePointerCapture(e.pointerId); } catch {}
+    });
+    pane.addEventListener('pointermove', (e) => {
+      if (!client || ptr.wmHold) return;
+      ptr.last = e;
+      if (ptr.raf) return;
+      ptr.raf = requestAnimationFrame(() => { ptr.raf = 0; const ev = ptr.last; ptr.last = null; if (!ev || !client) return; const [x, y] = ptr.xy(ev); client.pointerMove(x, y, pointerMods(ev)); });
+    });
+    pane.addEventListener('wheel', (e) => { e.preventDefault(); if (!client) return; const [x, y] = ptr.xy(e); client.wheel(x, y, e.deltaX, e.deltaY, e.deltaMode, pointerMods(e)); }, { passive: false });
+    pane.addEventListener('contextmenu', (e) => e.preventDefault());
   };
   pane.addEventListener('pointerenter', () => { if (client) fitStage(); }); // the window may have moved: back onto the device grid
-  pane.addEventListener('pointerdown', (e) => {
-    ime.focus({ preventScroll: true });
-    e.preventDefault();
-    if (!client) return;
-    try { pane.setPointerCapture(e.pointerId); } catch {}
-    const [x, y] = paneXY(e);
-    press = { pointerId: e.pointerId, button: e.button, xy: [x, y], client: { clientX: e.clientX, clientY: e.clientY, pointerId: e.pointerId } }; // the pointerId rides with the hand-over: the title bar / handle CAPTURES it (lane-drag-release)
-    client.pointerButton(x, y, e.button, true, pointerMods(e));
-  });
-  pane.addEventListener('pointerup', (e) => {
-    if (!client) return;
-    if (wmHold) return; // the window manager's gesture owns this press — its document listener releases the button in X
-    press = null;
-    const [x, y] = paneXY(e);
-    client.pointerButton(x, y, e.button, false, pointerMods(e));
-    try { pane.releasePointerCapture(e.pointerId); } catch {}
-  });
-  pane.addEventListener('pointermove', (e) => {
-    if (!client || wmHold) return;
-    lastMove = e;
-    if (moveRaf) return;
-    moveRaf = requestAnimationFrame(() => { moveRaf = 0; const ev = lastMove; lastMove = null; if (!ev || !client) return; const [x, y] = paneXY(ev); client.pointerMove(x, y, pointerMods(ev)); });
-  });
-  pane.addEventListener('wheel', (e) => { e.preventDefault(); if (!client) return; const [x, y] = paneXY(e); client.wheel(x, y, e.deltaX, e.deltaY, e.deltaMode, pointerMods(e)); }, { passive: false });
-  pane.addEventListener('contextmenu', (e) => e.preventDefault());
+  wirePointer(mainPtr, ime);
 
   // ── seamless: the app's header bar hands its move / resize to OUR window ──
   /** The X root point (device px; the root is the pane's stage) → viewport px. */
@@ -421,11 +454,16 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
   };
   const onClientMoveResize = (ev) => {
     const cancel = ev.direction === 11;
-    if (!cancel && press && !wmHold) {
+    // S2: the gesture belongs to the pane that draws its window — a satellite's header bar moves THAT window
+    const o = client && sats.size ? client.ownerOf(client.windows.get(ev.wid)) : 0, sat = o ? sats.get(o) : null;
+    const viaSat = !!(sat && sat.bound && mode === 'active');
+    const ptr = viaSat ? sat.ptr : mainPtr;
+    const press = ptr.press;
+    if (!cancel && press && !ptr.wmHold) {
       // the window manager owns the pointer from here: no capture, no motion to X, the release sent once
       const ctl = new AbortController();
-      wmHold = { pointerId: press.pointerId, button: press.button, xy: press.xy, ctl };
-      try { pane.releasePointerCapture(press.pointerId); } catch {}
+      ptr.wmHold = { pointerId: press.pointerId, button: press.button, xy: press.xy, ctl };
+      try { ptr.el.releasePointerCapture(press.pointerId); } catch {}
       // THE HOLD ENDS WHEN THE WINDOW MANAGER'S DRAG ENDS (lane-drag-release verify r1, finding #2): the same PURE verdict
       // the WM's doors ask (src/lib/drag-end.js) — the release / cancel of THIS pointer, a move of it with no button (a
       // release the page never saw), the window's blur, the page hidden. It used to wait for a pointerup alone, so a
@@ -434,8 +472,8 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
       const endHold = (e) => {
         const v = dragEndVerdict({ type: e && e.type, buttons: e && e.buttons, pointerId: e && e.pointerId, hidden: typeof document !== 'undefined' && document.hidden === true }, st);
         if (!v.end) return;
-        st.active = false; press = null;
-        releaseWmHold(v.why === 'release' || v.why === 'cancel' || v.why === 'released-unseen' ? e : null); // no point ⇒ released where the press was
+        st.active = false; ptr.press = null;
+        releaseWmHold(ptr, v.why === 'release' || v.why === 'cancel' || v.why === 'released-unseen' ? e : null); // no point ⇒ released where the press was
       };
       for (const k of ['pointerup', 'pointercancel', 'pointermove', 'visibilitychange']) document.addEventListener(k, endHold, { signal: ctl.signal });
       if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') window.addEventListener('blur', endHold, { signal: ctl.signal });
@@ -444,8 +482,9 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
     // the gesture starts where the pointer WENT DOWN in this pane (its own press, viewport px) — the app's x_root/y_root
     // only when no press is in flight (a keyboard move): Chrome 153 reports its root point +10,+5 off the real press
     // (measured, both frame modes), so the window moved 110/59 for a 120/64 drag; GNOME Calculator's was exact
-    const pressAt = !cancel && press && press.client ? { ...press.client } : hasRoot ? rootToClient(ev.xRoot, ev.yRoot) : null;
-    try { onMoveResize?.({ direction: ev.direction, button: ev.button, main: ev.main, wid: ev.wid, press: pressAt, held: !!wmHold }); } catch (e) { log?.warn?.(`[xpra] onMoveResize threw: ${e && e.message}`); }
+    const pressAt = !cancel && press && press.client ? { ...press.client } : hasRoot ? (viaSat ? sat.rootToClient(ev.xRoot, ev.yRoot) : rootToClient(ev.xRoot, ev.yRoot)) : null;
+    const out = { direction: ev.direction, button: ev.button, main: ev.main, wid: ev.wid, press: pressAt, held: !!ptr.wmHold };
+    try { if (viaSat) sat.cb.onMoveResize?.(out); else onMoveResize?.(out); } catch (e) { log?.warn?.(`[xpra] onMoveResize threw: ${e && e.message}`); }
   };
 
   // ── the pane follows the window: debounce, then the session re-fits ──────
@@ -510,6 +549,7 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
     emit('connecting');
     try { client?.close(); } catch {}
     clearWindows();
+    for (const sat of sats.values()) sat.unbind(); // S2: a new session — each satellite re-binds by wid once its slot is named
     const s = paneSize();
     drawRatio = ratio(); drawK = pictureK();
     constraints = null; minSize = null;
@@ -517,10 +557,11 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
       url: typeof url === 'function' ? url() : url,
       workerUrl: typeof workerUrl === 'function' ? workerUrl() : workerUrl,
       screen: s, ratio: () => drawRatio, cover: () => drawK !== 1, dpi: typeof dpi === 'function' ? dpi() : dpi, Worker: WorkerCtor, decode, now, log,
+      slots: () => typeof onSatellite === 'function', // S2: a window per top-level only where the caller can open one
       on: {
         status: (st, detail) => {
           if (shell.closed) return;
-          if (st === 'connected') { shell.resetLadder(); waitWords(t('Waiting for the application window…')); emit('connected', detail); ime.focus({ preventScroll: true }); return; }
+          if (st === 'connected') { shell.resetLadder(); waitWords(t('Waiting for the application window…')); emit('connected', detail); ime.focus({ preventScroll: true }); listWait(); return; }
           if (st === 'closed') {
             const reason = detail && detail !== 'closed by the window' ? String(detail) : '';
             const ours = detail === 'closed by the window';
@@ -537,12 +578,15 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
         // F3 (lane D (a)): the window hears the main's metadata (a CSD app folds its bars) and the client gets the pane of
         // AFTER that, inside this call — a main being announced is fitted and mapped at the final pane (no re-fit, no snap-back)
         main: (win) => { try { onMain?.(win ? { ...win.meta } : null); } catch {} if (client && win && mode === 'active') { const s = paneSize(); client.resize(s.width, s.height); } },
-        state: (win, changed) => { if (client && win && win.wid === client.mainWid) { try { onState?.({ ...changed }); } catch {} } },
+        state: (win, changed) => { if (client && win && win.wid === client.mainWid) { try { onState?.({ ...changed }); } catch {} } else { const sat = win && sats.get(win.wid); if (sat && sat.bound) { try { sat.cb.onState?.({ ...changed }); } catch {} } } },
+        slot: onSlot,
+        ready: () => { sessionListed = true; for (const sat of [...sats.values()]) sat.settle(); },
         moveresize: onClientMoveResize,
         icon: ({ data }) => { const u = pngDataUrl(data); if (u) { try { onIcon?.(u); } catch {} } },
         clipboard: onClipboard,
         constraints: applyConstraints,
         fixed: applyFixed,
+        front: (win) => { try { onFront?.(win ? { wid: win.wid, title: win.title, kind: win.kind, main: !!client && win.wid === client.mainWid } : null); } catch {} },
         // the cursor image is device px: at a ratio > 1 it is declared at that density (image-set) so it keeps its
         // size on screen — assigned after the plain url(), which stays when a browser rejects the image-set form
         cursor: (cur) => {
@@ -559,8 +603,8 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
   };
   reBtn.onclick = () => { shell.resetLadder(); connect(); };
 
-  const disconnect = () => { shell.unwant(); releaseWmHold(null); press = null; try { client?.close(); } catch {} client = null; clearWindows(); try { onMain?.(null); } catch {} };
-  const dispose = () => { stopWait(); shell.close(); disconnect(); ro?.disconnect(); clearTimeout(resizeTimer); if (moveRaf) cancelAnimationFrame(moveRaf); try { dprMq?.removeEventListener?.('change', onRatio); } catch {} };
+  const disconnect = () => { shell.unwant(); releaseWmHold(mainPtr, null); mainPtr.press = null; try { client?.close(); } catch {} client = null; clearWindows(); for (const sat of sats.values()) sat.unbind(); try { onMain?.(null); } catch {} try { onFront?.(null); } catch {} };
+  const dispose = () => { stopWait(); shell.close(); disconnect(); for (const sat of [...sats.values()]) sat.gone('main-closed'); ro?.disconnect(); clearTimeout(resizeTimer); clearTimeout(listTimer); if (mainPtr.raf) cancelAnimationFrame(mainPtr.raf); try { dprMq?.removeEventListener?.('change', onRatio); } catch {} };
   const focus = () => { try { ime.focus({ preventScroll: true }); } catch {} };
   const setViewOnly = (v) => { viewOnly = !!v; if (client) client.viewOnly = viewOnly || mode !== 'active'; pane.classList.toggle('xpra-view-only', viewOnly || mode !== 'active'); };
   /** x5: 'active' (this pane drives the app) | 'watch' (an agent drives: fit-scaled, nothing sent) | 'blocked' (another client is active: dormant). */
@@ -573,14 +617,150 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
     pane.classList.toggle('xpra-watch', mode === 'watch');
     if (mode === 'active' && client) { const s = paneSize(); client.resize(s.width, s.height); }
     fitStage();
+    rehome(); // S2: Watch / Blocked draw every window in this pane (one picture); active hands them back to their satellites
   };
   /** A DOM-free snapshot of the windows (for the suite / diagnostics). */
   const windows = () => (client ? [...client.windows.values()].map((w) => ({ wid: w.wid, x: w.x, y: w.y, w: w.w, h: w.h, kind: w.kind, title: w.title })) : []);
 
+  // ── S2: THE SATELLITE PANE (design 016 §4 lane B, `createSatellitePane`) ──────────────────────────────────────────────
+  let sessionListed = false, listTimer = null;
+  /** The session's window list is in at the server's startup-complete — or 3 s after the hello, whichever comes first. */
+  function listWait() { sessionListed = false; clearTimeout(listTimer); listTimer = setTimeout(() => { if (client && client.state === 'connected') { sessionListed = true; for (const sat of [...sats.values()]) sat.settle(); } }, 3000); }
+  /** The client named a slot (a secondary top-level laid beside the main) or took one away. */
+  function onSlot(wid, rect) {
+    const sat = sats.get(wid);
+    if (rect) {
+      if (sat) sat.bind();
+      // asked AFTER the client's own step (a new window is mapped first; the satellite's pane size then fits it in its slot)
+      else if (mode === 'active' && !viewOnly && typeof onSatellite === 'function') queueMicrotask(() => {
+        const win = client && client.slotOf(wid) && !sats.has(wid) && mode === 'active' ? client.windows.get(wid) : null;
+        if (win) { try { onSatellite({ wid, title: win.title || '' }); } catch (e) { log?.warn?.(`[xpra] onSatellite threw: ${e && e.message}`); } }
+      });
+    } else if (sat && client) sat.gone(!client.windows.has(wid) ? 'lost' : client.mainWid === wid ? 'adopted' : 'released');
+    rehome();
+  }
+  /**
+   * attachSatellite(host, wid, cb) — a viewport pane onto THIS session at X window `wid`, mounted in another window's `host`.
+   *   cb.onTitle(text) / onMinSize({w,h}|null) / onFixedSize({w,h}|null) (CSS px) / onMeta(meta) — the window's own facts
+   *   cb.onMoveResize(ev) / onState(changed) — its header-bar gesture and its own maximize / minimize
+   *   cb.onGone(why) — 'lost' (the app closed it) | 'adopted' (it became the main) | 'released' | 'missing' (not in the
+   *                    session's window list) | 'main-closed' (this view went) | 'replaced'
+   * Returns { wid, pane, stage, ime, bound, close (close-window), focus, dispose (the person closed the pane: the window
+   * goes back to the main pane), setAppState, resnap, scale, offset, origin }.
+   */
+  function attachSatellite(host, wid, cb = {}) {
+    sats.get(wid)?.gone('replaced');
+    const sp = document.createElement('div'); sp.className = 'xpra-pane xpra-satellite';
+    const sst = document.createElement('div'); sst.className = 'xpra-stage';
+    const sime = document.createElement('textarea'); sime.className = 'xpra-ime';
+    sime.setAttribute('aria-label', t('Keyboard input for the application'));
+    sime.setAttribute('autocomplete', 'off'); sime.setAttribute('autocorrect', 'off'); sime.setAttribute('autocapitalize', 'off'); sime.setAttribute('spellcheck', 'false');
+    const badge = document.createElement('div'); badge.className = 'xpra-fit-badge'; badge.style.display = 'none';
+    const note = document.createElement('div'); note.className = 'xpra-satellite-note'; note.style.display = 'none';
+    sp.append(sst, sime, badge, note);
+    host.appendChild(sp);
+    let scale = 1, off = { x: 0, y: 0 }, origin = { x: 0, y: 0 }, timer = null, done = false;
+    const last = { title: null, min: null, fixed: null };
+    // the pane's point → the ROOT (device px): the fit's offset and scale undone, then the window's origin added back
+    const xy = (e) => { const r = sp.getBoundingClientRect(); return [((e.clientX - r.left - off.x) / scale) * drawRatio + origin.x, ((e.clientY - r.top - off.y) / scale) * drawRatio + origin.y]; };
+    const sat = {
+      wid, cb, pane: sp, stage: sst, bound: false, ptr: pointerOf(sp, xy),
+      rootToClient: (xr, yr) => { const r = sp.getBoundingClientRect(); return { clientX: r.left + off.x + ((xr - origin.x) / drawRatio) * scale, clientY: r.top + off.y + ((yr - origin.y) / drawRatio) * scale }; },
+      bind() {
+        if (done) return;
+        if (client && mode === 'active' && client.slotOf(wid) && !sat.bound) { sat.bound = true; rehome(); }
+        sat.report(); sat.refresh();
+      },
+      unbind() { if (!sat.bound) return; sat.bound = false; releaseWmHold(sat.ptr, null); sat.ptr.press = null; last.min = last.fixed = null; rehome(); },
+      /** the pane's size → the session (its window is fitted to it, in its slot) — never a pane that is not laid out */
+      report() { if (sat.bound && client && sp.clientWidth > 1 && sp.clientHeight > 1) client.setSlotPane(wid, { width: sp.clientWidth, height: sp.clientHeight }); },
+      /** the window list is in: a satellite whose window the session no longer has goes (no toast — a reload's leftover) */
+      settle() { if (done || sat.bound || !client) return; if (!client.windows.has(wid)) sat.gone('missing'); else if (client.mainWid === wid) sat.gone('adopted'); },
+      refresh() {
+        if (done) return;
+        const win = client && client.windows.get(wid);
+        const st = !client || client.state !== 'connected' ? 'connecting' : mode !== 'active' ? mode : sat.bound ? 'bound' : 'connecting';
+        const words = st === 'blocked' ? t('Active on another client') : st === 'watch' ? t('Shown in the main window while an agent drives') : st === 'connecting' ? t('Connecting…') : '';
+        if (note.textContent !== words) note.textContent = words;
+        note.style.display = words ? '' : 'none';
+        if (win && sat.bound) {
+          if (win.title !== last.title) { last.title = win.title; try { cb.onTitle?.(win.title || ''); } catch {} }
+          const m = minPaneCss(client.constraintsOf(wid), drawRatio), mk = m ? `${m.w}x${m.h}` : '';
+          if (mk !== last.min) { last.min = mk; try { cb.onMinSize?.(m ? { ...m } : null); } catch {} }
+          const f = fixedSizeOf(sizeHintsOf(win.meta)), fc = f ? { w: Math.ceil(f.w / drawRatio - 1e-9), h: Math.ceil(f.h / drawRatio - 1e-9) } : null, fk = fc ? `${fc.w}x${fc.h}` : '';
+          if (fk !== last.fixed) { last.fixed = fk; try { cb.onFixedSize?.(fc); } catch {} }
+          try { cb.onMeta?.({ ...win.meta }); } catch {}
+        }
+        sat.fit();
+      },
+      /** the viewport: the window at the pane's origin, 1:1 — scaled to fit (never cropped) only when it is larger */
+      fit() {
+        const win = client && sat.bound ? client.windows.get(wid) : null;
+        let s = 1, ox = 0, oy = 0;
+        if (win) {
+          const pw = Math.max(1, sp.clientWidth || 1), ph = Math.max(1, sp.clientHeight || 1), bw = win.w / drawRatio, bh = win.h / drawRatio;
+          if (bw > pw + FIT_SLACK_CSS - 1e-9 || bh > ph + FIT_SLACK_CSS - 1e-9) { s = Math.min(1, pw / bw, ph / bh); ox = Math.max(0, Math.floor((pw - bw * s) / 2)); oy = Math.max(0, Math.floor((ph - bh * s) / 2)); }
+          origin = { x: win.x, y: win.y };
+        }
+        if (!(s > 0) || !Number.isFinite(s)) s = 1;
+        const g = gridNudge(ox, oy, sp); ox += g.x; oy += g.y;
+        scale = s; off = { x: ox, y: oy };
+        const parts = [];
+        if (ox || oy) parts.push(`translate(${+ox.toFixed(4)}px, ${+oy.toFixed(4)}px)`);
+        if (s !== 1) parts.push(`scale(${s})`);
+        if (origin.x || origin.y) parts.push(`translate(${+(-origin.x / drawRatio).toFixed(4)}px, ${+(-origin.y / drawRatio).toFixed(4)}px)`);
+        sst.style.transform = parts.join(' ');
+        badge.style.display = s < 1 ? '' : 'none';
+        if (s < 1 && last.min) { const [w, h] = last.min.split('x'); badge.textContent = t('Scaled to fit — the app needs at least {w}×{h}', { w, h }); }
+      },
+      gone(why) {
+        if (done) return;
+        done = true; clearTimeout(timer); ro2?.disconnect(); releaseWmHold(sat.ptr, null);
+        sats.delete(wid); sp.remove(); rehome();
+        try { cb.onGone?.(why); } catch {}
+      },
+    };
+    wireIme(sime, wid);
+    wirePointer(sat.ptr, sime);
+    sime.addEventListener('paste', (e) => {
+      const text = e.clipboardData ? e.clipboardData.getData('text/plain') : '';
+      e.preventDefault();
+      if (!text || !connectedNow()) return;
+      aim(wid);
+      if (client.pasteText(text)) { showToast(t('Pasted into the application')); sime.focus({ preventScroll: true }); }
+    });
+    sp.addEventListener('pointerenter', () => sat.fit());
+    const ro2 = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => { clearTimeout(timer); timer = setTimeout(() => { sat.report(); sat.fit(); }, RESIZE_DEBOUNCE_MS); }) : null;
+    ro2?.observe(sp);
+    sats.set(wid, sat);
+    if (client && client.slotOf(wid)) sat.bind();
+    else { if (sessionListed) sat.settle(); sat.refresh(); }
+    return {
+      wid, pane: sp, stage: sst, ime: sime, note,
+      get bound() { return sat.bound; }, get scale() { return scale; }, get offset() { return { ...off }; }, get origin() { return { ...origin }; },
+      close: () => (client && sat.bound ? client.closeWindow(wid) : false),
+      focus: () => { try { sime.focus({ preventScroll: true }); } catch {} },
+      setAppState: (st) => (client && sat.bound ? client.setWindowState(wid, st) : false),
+      resnap: () => sat.fit(),
+      /** the person closed this satellite's window while its X window lives (a refused or impossible close-window): the
+       *  window goes back to the main pane as a guest for this session (S1's shape) — never left drawn nowhere */
+      dispose: () => {
+        if (done) return;
+        const keep = sat.bound && client && client.windows.has(wid) && client.mainWid !== wid;
+        done = true; clearTimeout(timer); ro2?.disconnect(); releaseWmHold(sat.ptr, null);
+        sats.delete(wid); sp.remove();
+        if (keep) client.releaseSlot(wid);
+        rehome();
+      },
+    };
+  }
+
   const resnap = () => { if (client) fitStage(); };
   /** round 3 A2: the outer ✕ — ask the app to close its main window (xpra-client closeMain); false = nothing to ask. */
   const closeApp = () => (client ? client.closeMain() : false);
+  /** S1c: the outer ✕ while an app's second window is in front — close THAT window (xpra-client closeFront). */
+  const closeFront = () => (client ? client.closeFront() : false);
   /** seamless: the display is told what our window did (maximized / iconified) — the client's setMainState. */
   const setAppState = (st) => (client ? client.setMainState(st) : false);
-  return { container, bar, mount, pane, stage, ime, status, chip, fitBadge, resnap, connect, disconnect, setStatus: statusFromOutside, starting: () => waitWords(L.starting), addControl, focus, dispose, setViewOnly, setMode, windows, closeApp, setAppState, rootToClient, fixedSize: () => (fixedCss ? { ...fixedCss } : null), setFloatingChip: shell.setFloatingChip, get wmHeld() { return !!wmHold; }, get mode() { return mode; }, get stageScale() { return stageScale; }, get ratio() { return drawRatio; }, get pictureScale() { return drawK; }, get minSize() { return minSize ? { ...minSize } : null; }, get stageOffset() { return { ...stageOffset }; }, get client() { return client; }, get state() { return shell.state; }, get wanted() { return shell.wanted; }, get chipText() { return shell.copiedText; }, get hintShown() { return shell.hintShown; }, get copyHint() { return shell.copyHint; }, get pasteOpen() { return shell.pasteOpen; } };
+  return { container, bar, mount, pane, stage, ime, status, chip, fitBadge, resnap, connect, disconnect, setStatus: statusFromOutside, starting: () => waitWords(L.starting), addControl, focus, dispose, setViewOnly, setMode, windows, closeApp, closeFront, setAppState, rootToClient, attachSatellite, satellites: () => [...sats.keys()], fixedSize: () => (fixedCss ? { ...fixedCss } : null), setFloatingChip: shell.setFloatingChip, get wmHeld() { return !!mainPtr.wmHold; }, get mode() { return mode; }, get stageScale() { return stageScale; }, get ratio() { return drawRatio; }, get pictureScale() { return drawK; }, get minSize() { return minSize ? { ...minSize } : null; }, get stageOffset() { return { ...stageOffset }; }, get client() { return client; }, get state() { return shell.state; }, get wanted() { return shell.wanted; }, get chipText() { return shell.copiedText; }, get hintShown() { return shell.hintShown; }, get copyHint() { return shell.copyHint; }, get pasteOpen() { return shell.pasteOpen; } };
 }

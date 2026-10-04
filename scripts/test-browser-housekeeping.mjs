@@ -586,7 +586,7 @@ console.log('— ⑥ the client half: the PURE card helpers, the wiring pins, th
   ok(!/\b(?:window\.)?(?:confirm|prompt|alert)\(/.test(tv) && (tv.match(/showConfirmDialog\(/g) || []).length >= 3 && /showInputDialog\(/.test(tv), 'set aside / delete / adopt each go through the in-app dialogs — never a native confirm/prompt');
   ok(/danger: true/.test(tv) && /forgotten\/\$\{encodeURIComponent\(f\.id\)\}\/delete/.test(tv) && !/orphans\/delete|profiles\/[^`]*\/delete/.test(tv), 'the ONE permanent deletion is the forgotten row\'s click (danger-styled confirm); no other route here deletes');
   ok(/'browser-housekeeping-updated' \|\| m\.type === 'browser-profiles-updated' \|\| m\.type === 'browser-trace-appended'/.test(tv) && /app\.ws\?\.offGlobal\?\.\(onGlobal\)/.test(tv), 'the panel re-renders from the three broadcasts and removes its ws handler on close');
-  ok(/\{ record: cb\.checked \}/.test(tv) && /method: 'PATCH'|jsonInit\('PATCH'/.test(tv), 'the per-profile screencast opt-in is the PATCH the keeper answers (D7)');
+  ok(/record: \(r\) => patchSwitch\(r, \{ record: !r\.record \}\)/.test(tv) && /method: 'PATCH'|jsonInit\('PATCH'/.test(tv), 'the per-profile screencast opt-in (design 015: the ⋯ menu\'s check row) is the PATCH the keeper answers (D7)');
   const llits = [...lw.matchAll(/\bt\('((?:[^'\\]|\\.)*)'/g)].map((m) => m[1].replace(/\\'/g, "'"));
   const lmissing = llits.filter((k) => !zh.has(k) || !ja.has(k));
   ok(llits.length >= 40 && lmissing.length === 0, `every t() literal in browser-live-window.js has zh + ja entries (${llits.length} literals)`, lmissing.join(' | '));

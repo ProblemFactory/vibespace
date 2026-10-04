@@ -34,6 +34,8 @@
 // RESUME_SETTLE_MS = 0, which cannot host a timing-dependent repro).
 //
 // ROUND 3 adds three TRUSTED-INPUT legs (§4b): everything above dispatches
+// (the wheel leg reads the pin AT the wheel's own dispatch — a window listener —
+// never a fixed sleep after the CDP call: the 4-CPU Actions runner ran past 60 ms)
 // synthetic events or writes scrollTop, and the finding this branch fixes was
 // only visible with REAL input — a plain left-click during the settle used to
 // run the full _endResumeSettle() and hand the resume's own displacement a
@@ -658,17 +660,30 @@ if (good?.ok) {
   //      atBottom re-pin owns that, as round 2 measured.)
   const a3 = await armAt(300);
   const wx = a3.rect.left + a3.rect.w / 2, wy = a3.rect.top + a3.rect.h / 2;
+  // "IMMEDIATELY" = at the end of the wheel event's OWN dispatch, never a wall-clock 60 ms after the CDP call (lane
+  // mirror-green-ui, 2.369.205): a trusted wheel reaches the page's main thread through the compositor, asynchronously —
+  // on the 4-CPU Actions runner the 60 ms sample landed BEFORE the event ({"wheelPinned":true} while the same wheel's
+  // trace shows userPos/wheel, the unpin, and the page). A one-shot listener on window (bubble: after the message
+  // list's own listeners) records the pin as the event leaves the page.
   let wheelPinned = null;
   for (let i = 0; i < 6; i++) {
     await evaljs('window.__vs.top()');                    // park at the top edge: a wheel-up there PAGES
+    let armedAt = null;
+    if (wheelPinned === null) armedAt = await evaljs(`(() => { window.__vsWheelSeen = null; window.addEventListener('wheel', () => { window.__vsWheelSeen = { pinned: window.__vs.view._pinned, at: performance.now() }; }, { once: true, passive: true }); return performance.now(); })()`);
     await mouse('mouseWheel', wx, wy, { deltaX: 0, deltaY: -300 });
     await sleep(60);
-    if (wheelPinned === null) wheelPinned = await evaljs('window.__vs.view._pinned');
+    if (wheelPinned === null) {
+      let seen = null;
+      for (let k = 0; k < 100 && !seen; k++) { seen = await evaljs('window.__vsWheelSeen'); if (!seen) await sleep(50); }
+      wheelPinned = seen ? seen.pinned : 'no wheel event reached the page';
+      trusted.wheelLagMs = seen && armedAt != null ? Math.round(seen.at - armedAt) : null; // page time: armed → the event's own dispatch (the old sample read at ~60 ms + one evaljs)
+    }
     await sleep(600);
     const tr = await evaljs('(window.__vs.view._traceRing || []).map((e) => e.tag)');
     if (tr.includes('extendTop:done')) break;
   }
   trusted.wheelPinned = wheelPinned;
+  console.log(`  [trusted] the wheel reached the page ${trusted.wheelLagMs} ms after it was armed (the CDP call came right after) — pinned at its own dispatch: ${wheelPinned}`);
   trusted.wheel = await evaljs('window.__vs.finish(300)');
 
   // (iii) THE SCROLLBAR DRAG at +300ms: press on the native scrollbar (which

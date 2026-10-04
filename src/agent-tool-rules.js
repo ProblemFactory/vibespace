@@ -136,7 +136,7 @@ const AGENT_TOOL_RULES = Object.freeze([
 
 /** `vibespace-*` agent tools that are never pre-approved, and why. */
 const HELD_TOOLS = Object.freeze({
-  'vibespace-exit': 'runs an arbitrary command on another machine (`run <machine> -- …`) or hands out its network',
+  'vibespace-exit': 'runs an arbitrary command on another machine (`run <machine> -- …`), copies files to and from it (`pull` / `push`) or hands out its network',
   'vibespace-usage': 'the statusline command — the CLI runs it, never the agent',
   'vibespace-remote-keeper': 'the remote chat keeper — a VibeSpace process, never an agent verb',
   'vibespace-claude-subscription-login.mjs': 'the login helper — the user\'s act',

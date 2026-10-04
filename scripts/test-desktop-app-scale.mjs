@@ -249,14 +249,14 @@ console.log('§7 wiring pins');
   const lib = fs.readdirSync(path.join(repo, 'src/lib')).filter((f) => f.endsWith('.js'));
   const codeOf = (f) => read(`src/lib/${f}`).replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1'); // comments out (a comment naming the key is not a writer)
   // a payload naming either map outside the loader would be a second writer (a second cache that drifts)
-  const payloads = lib.filter((f) => /\{\s*(?:desktopAppFrame|desktopAppScale|\[SCALE_PREF_KEY\])\s*:/.test(codeOf(f)));
+  const payloads = lib.filter((f) => /\{\s*(?:desktopAppFrame|desktopAppScale|desktopAppSatellite|\[SCALE_PREF_KEY\]|\[SATELLITE_PREF_KEY\])\s*:/.test(codeOf(f))); // + design 016 S2's satellite place
   const savers = lib.filter((f) => /saveAppPrefs\(/.test(codeOf(f)) && f !== 'desktop-app-prefs.js');
-  ok(payloads.length === 0 && /method: 'PATCH', headers: \{ 'Content-Type': 'application\/json' \}, body: JSON\.stringify\(\{ \[key\]: next \}\)/.test(prefs) && /APP_PREF_KEYS = Object\.freeze\(\['desktopAppFrame', 'desktopAppScale'\]\)/.test(prefs) && same(savers.sort(), ['desktop-app-launcher.js', 'desktop-app-window.js']), `ONE loader writes both per-app maps (desktop-app-prefs.js, merge-only PATCH of its one key) — the window and the dialog save through it (${savers.join(', ')}); no other file builds a payload for either map`, { payloads, savers });
+  ok(payloads.length === 0 && /method: 'PATCH', headers: \{ 'Content-Type': 'application\/json' \}, body: JSON\.stringify\(\{ \[key\]: next \}\)/.test(prefs) && /APP_PREF_KEYS = Object\.freeze\(\['desktopAppFrame', 'desktopAppScale', 'desktopAppSatellite'\]\)/.test(prefs) && same(savers.sort(), ['desktop-app-launcher.js', 'desktop-app-window.js']), `ONE loader writes both per-app maps (desktop-app-prefs.js, merge-only PATCH of its one key) — the window and the dialog save through it (${savers.join(', ')}); no other file builds a payload for either map`, { payloads, savers });
   // lane D verify: every save is an EDIT of one app's entry (the loader applies it to the server's current map) — a caller
   // that hands the loader a whole map built from its own copy is the stale-map clobber again
   const calls = savers.flatMap((f) => (codeOf(f).match(/saveAppPrefs\([^\n]*/g) || []).map((c) => [f, c]));
-  const bad = calls.filter(([, c]) => !/^saveAppPrefs\((?:SCALE_PREF_KEY|'desktopAppFrame'), \(map\) => set(?:Scale|Frame)Choice\(map, /.test(c));
-  ok(calls.length === 3 && bad.length === 0, `every saveAppPrefs call (${calls.length}) passes an EDIT \`(map) => setXChoice(map, key, …)\`, never a whole map`, bad);
+  const bad = calls.filter(([, c]) => !/^saveAppPrefs\((?:SCALE_PREF_KEY|'desktopAppFrame'), \(map\) => set(?:Scale|Frame)Choice\(map, |^saveAppPrefs\(SATELLITE_PREF_KEY, \(map\) => setSatelliteOffset\(map, /.test(c)); // design 016 S2: a satellite's remembered place
+  ok(calls.length === 4 && bad.length === 0, `every saveAppPrefs call (${calls.length}) passes an EDIT \`(map) => setXChoice(map, key, …)\` / setSatelliteOffset, never a whole map`, bad);
   ok(/\.desktop-app-chip-scale\.is-control \{ cursor: pointer; \}/.test(css) && /\.desktop-launch-card-wrap \{ display: flex; min-width: 0; \}/.test(css) && !/#[0-9a-f]{3,6}\b/i.test(css.slice(css.indexOf('.desktop-launch-card-wrap'), css.indexOf('.desktop-launch-card-scale:focus-visible'))), 'CSS: the control chip has a pointer, the card + its control are one split button, theme vars only');
 }
 

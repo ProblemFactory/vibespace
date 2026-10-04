@@ -890,6 +890,9 @@ function fakeArchive(kind, t, env) {
   const who = [{ id: 'ou_fake_ada', name: 'Ada' }, { id: 'ou_fake_brook', name: 'Brook' }];
   const out = [
     { convId: `${kind}-ops`, m: { vendorId: `${kind}-ops-old-1`, at: base + 60e3, author: who[0], text: 'Quarterly budget review: the travel line moves to Q3' } },
+    // lane around-sheet-fix: a PICTURE in the vendor's history VibeSpace never stored (the owner's 2026-10-03 case: a
+    // CJK-named author, a Lark-shaped image) — the "Around this message" sheet's chip; '[image]' never matches a search
+    { convId: `${kind}-ops`, m: { vendorId: `${kind}-ops-old-pic`, at: base + 90e3, author: { id: 'ou_fake_li', name: '李天雨' }, text: '[image]', attachments: [{ id: `${kind}-ops-old-pic-img`, name: null, bytes: null, mime: 'image/*', placeholder: '[image]' }] } },
     { convId: `${kind}-ops`, m: { vendorId: `${kind}-ops-old-2`, at: base + 120e3, author: who[1], text: 'Budget sign-off is due Friday' } },
     { convId: `${kind}-archived-chat`, m: { vendorId: `${kind}-arch-1`, at: base + 180e3, author: who[1], text: 'The budget from last year, for the record' } },
   ];

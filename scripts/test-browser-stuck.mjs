@@ -1223,8 +1223,11 @@ async function noticeCase(scenario, { Dmod = D, SSmod = null } = {}) {
   // VERIFY r2 (the builder's open question 2): the same row offers ONE click to make such a browser hold dialogs — the human
   // Restart (a confirm first: its tabs close), only where the unresponsive Restart is not already offered
   const HOLD_KEYS = ['Restart to hold dialogs', 'Restart this browser so VibeSpace holds leave-page dialogs for a decision instead of the browser accepting them — its tabs close, logins stay', 'Restart {label}?', 'Its open tabs close (logins in the profile stay). From its next start VibeSpace holds leave-page dialogs for a decision, so nothing typed on a page is lost without a word.'];
-  const holdBlock = (src.match(/\} else if \(autoDialogsOf\(r\)\) \{[\s\S]*?actions\.appendChild\(hold\);\n    \}/) || [''])[0];
-  ok(/if \(psw && psw\.action && r\.live && !r\.host\) \{[\s\S]{0,600}\} else if \(autoDialogsOf\(r\)\) \{/.test(src) && /showConfirmDialog\(/.test(holdBlock) && /if \(!yes\) return;/.test(holdBlock) && holdBlock.includes('/api/browser/profiles/${encodeURIComponent(r.id)}/restart') && holdBlock.split('\n').length <= 20 && HOLD_KEYS.every((k2) => holdBlock.includes(`t('${k2}'`) && k2 in zh && k2 in ja),
+  // design 015 (lane browser-panel-tidy): the row's acts are the ⋯ menu's — WHICH one is offered is the PURE model's
+  // rowMenu (Restart while the page is stuck, ELSE Restart to hold dialogs); the view runs it by its id (RUN)
+  const model = fs.readFileSync(path.join(REPO, 'src/lib/browser-panel-model.js'), 'utf8');
+  const holdBlock = (src.match(/    'restart-hold': async \(r\) => \{[\s\S]*?\n    \},\n/) || [''])[0];
+  ok(/if \(x\.stuck && x\.stuck\.action && r\.live && !r\.host\) out\.push\(\{ id: 'restart'[^\n]*\n\s*else if \(x\.autoDialogs\) out\.push\(\{ id: 'restart-hold'/.test(model) && /autoDialogs: !!autoText, autoText/.test(src) && /showConfirmDialog\(/.test(holdBlock) && /if \(!yes\) return;/.test(holdBlock) && holdBlock.includes('/api/browser/profiles/${encodeURIComponent(r.id)}/restart') && holdBlock.split('\n').length <= 20 && HOLD_KEYS.every((k2) => (holdBlock.includes(`t('${k2}'`) || model.includes(`t('${k2}'`)) && k2 in zh && k2 in ja), /* design 015: the label + its title are the model's menu item, the confirm the view's act */
     'r2 pin: a pre-lane browser\'s row offers "Restart to hold dialogs" — a confirm (its tabs close), then the human Restart route; never beside the unresponsive Restart; every word zh + ja', holdBlock.split('\n').length);
 }
 // CONTROL 4: a watch that does not accept alerts leaves the page held and says nothing

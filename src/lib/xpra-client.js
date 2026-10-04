@@ -13,8 +13,8 @@
 // • the app window IS the picture (owner acceptance 1): the FIRST top-level
 //   window is mapped at 0,0 with the pane's size under its own size hints
 //   (`fitGeometry`) — the app never appears small in a corner of a root — and
-//   `resize(w,h)` re-fits it (`display-configure` first so the virtual screen
-//   follows, then `configure-window`); every OTHER non-popup window — a
+//   `resize(w,h)` re-fits it (the display packet first so the virtual screen
+//   and its work area follow, then `configure-window`); every OTHER non-popup window — a
 //   dialog, a second top-level — keeps its size and is nudged INSIDE the pane
 //   when it maps, when X moves it and when the pane shrinks; popups
 //   (override-redirect: menus, tooltips) are drawn where X put them, never
@@ -90,6 +90,22 @@
 //   largest dialog with no parent when the app has no main (Inkscape 1.4.3's welcome is typed DIALOG, modal, with
 //   no transient-for — it used to be placed where X centred it and never fitted). Such a lone fixed dialog is mapped
 //   at 0,0, kept there by the belt, and the display contains it; the VIEW's window adopts the size (never scaled).
+// • AN APP'S SECOND WINDOW (design 016 S1, lane app-guest-window, 2026-10-03 — WeChat's Moments drawn over its main
+//   window, cut at the bottom): `on.constraints` carries the main's hints with the minimum raised to the UNION of every
+//   held window's (P.unionMin — a second top-level or a dialog grows the pane, never cut); a second NORMAL window is
+//   mapped CENTRED over the main (P.placeGuest; the belt keeps it inside as before); `on.front(win|null)` names the FRONT
+//   window (P.frontOf — the topmost non-popup by z) on new / raise / lost / its title; `closeFront()` sends close-window
+//   to it (the window's ✕ when the front is not the main — closeMain stays the app's own close).
+// • A WINDOW PER TOP-LEVEL (design 016 S2, lane app-satellite-windows, 2026-10-03 — the owner's YES): with `slots` on (the
+//   view asks for it when it can open satellite windows) every secondary NORMAL window gets a SLOT of the X root to the
+//   right of the main's display (P.slotFor — side by side, never overlapping; the root = their union, one display packet),
+//   mapped at its slot's origin at its own size, then fitted to its SATELLITE pane once one is attached (`setSlotPane`;
+//   the belt keeps it in its slot, P.inSlot); `on.slot(wid, rect|null)` names every slot gained, moved or lost. A dialog
+//   transient for a slotted window, and a popup whose origin lies in a slot, belong to that slot (P.paneOf — `ownerOf`):
+//   placed inside the slot, counted in ITS minimum (`constraintsOf`), never in the main pane's union or front. The main
+//   lost ⇒ the next main is ADOPTED (unslotted, fitted at 0,0); `releaseSlot` hands a window back to the main pane as a
+//   guest (its satellite was closed while the X window lives); Watch slots nothing (the windows stay where the active
+//   viewer put them) and leaving Watch slots what came meanwhile. ONE connection: a satellite is a pane, never a socket.
 import * as P from './xpra-proto.js';
 
 const HELLO_TIMEOUT_MS = 15000;
@@ -116,9 +132,11 @@ export function defaultDecode(bytes, mime) {
  *   on.state(win, changed)     `window-metadata` carrying `maximized` / `iconic` (the keys that changed, as sent)
  *   on.moveresize(ev)          {wid, xRoot, yRoot, direction, button, source, main} — the app asked its window manager to move/resize it
  *   on.fixed(size|null)        {wid, w, h} (device px) — the app FIXED this window's size (min = max); null = no such window
+ *   on.front(win|null)         the FRONT window (the topmost non-popup by z) — on a new window, a raise, a loss, its title
+ *   on.slot(wid, rect|null)    S2 (`slots` on): a secondary top-level's slot of the root (device px) — gained, moved, lost
  * Returns the session handle (see the tail).
  */
-export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, cover = false, layout = 'us', uuid = null, on = {}, Worker: WorkerCtor = (typeof Worker !== 'undefined' ? Worker : null), decode = defaultDecode, now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now()), log = null, helloTimeoutMs = HELLO_TIMEOUT_MS, pasteKeyDelayMs = PASTE_KEY_DELAY_MS, beltGapMs = BELT_GAP_MS, beltFightMs = BELT_FIGHT_MS, beltMaxFights = BELT_MAX_FIGHTS, refreshDelaysMs = REFRESH_DELAYS_MS } = {}) {
+export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, cover = false, slots = false, layout = 'us', uuid = null, on = {}, Worker: WorkerCtor = (typeof Worker !== 'undefined' ? Worker : null), decode = defaultDecode, now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now()), log = null, helloTimeoutMs = HELLO_TIMEOUT_MS, pasteKeyDelayMs = PASTE_KEY_DELAY_MS, beltGapMs = BELT_GAP_MS, beltFightMs = BELT_FIGHT_MS, beltMaxFights = BELT_MAX_FIGHTS, refreshDelaysMs = REFRESH_DELAYS_MS } = {}) {
   const emit = (name, ...args) => { try { on[name]?.(...args); } catch (e) { log?.warn?.(`[xpra] on.${name} threw: ${e && e.message}`); } };
   const windows = new Map();
   const ime = new P.ImeKeymap();
@@ -132,12 +150,18 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
   let pane = P.devicePane(cssPane, ratioNow(), { cover: coverNow() }); // DEVICE px — what X, the fit and the pointer speak
   let lastConstraints; // the main window's size constraints last announced (undefined = never)
   let lastFixed; // the fixed window's size last announced, 'WxH' | null (undefined = never)
+  let lastFront; // the front window last announced, 'wid/main/title' | null (undefined = never)
   let mainWid = 0, focusedWid = 0, zTop = 0;
   let helloTimer = null, pingTimer = null;
   let lastPaste = null, lastReceived = null, viewOnly = false;
   let watch = false, dormant = false; // x5 (see the header)
   let sentDisplay = null; // the display size this client last asked for (device px) — the hello's desktop size first
   const unknownTypes = new Set();
+  // design 016 S2: the secondary top-levels a satellite draws, in the order they mapped; each one's satellite pane (device
+  // px) once attached; the windows handed back to the main pane for this session; the slots as last laid out
+  const slotsOn = () => !!(typeof slots === 'function' ? slots() : slots);
+  const slotOrder = [], slotPanes = new Map(), noSlot = new Set();
+  let slotRects = new Map();
 
   const send = (packet) => { if (!worker || state === 'closed') return false; try { worker.postMessage({ c: 's', p: packet }); return true; } catch (e) { log?.warn?.(`[xpra] send failed: ${e && e.message}`); return false; } };
   const finish = (reason) => {
@@ -152,10 +176,16 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
 
   // ── windows ──────────────────────────────────────────────────────────────
   const winTitle = (meta) => P.bytesToString(meta && meta.title != null ? meta.title : '');
-  /** HiDPI / min size: tell the view the MAIN window's constraints (device px) when they change. */
+  /** S2: which pane draws a window — a slot's wid (a satellite) or 0 (the main pane); the windows of one pane. */
+  const ownerOf = (win) => P.paneOf(win, slotRects, windows);
+  const paneWindows = (owner = 0) => [...windows.values()].filter((w) => ownerOf(w) === owner);
+  /** HiDPI / min size: tell the view the MAIN window's constraints (device px) when they change — the minimum raised to
+   *  the UNION of every held window's (design 016 S1a: WeChat's Moments, min 880×1120 over a main of 840×816). */
   const announceConstraints = () => {
     const main = mainWid ? windows.get(mainWid) : null;
-    const c = main ? P.sizeHintsOf(main.meta) : null;
+    const own = main ? P.sizeHintsOf(main.meta) : null;
+    const mine = main ? P.unionMin([main]) : null, all = main ? P.unionMin(paneWindows(0)) : null; // S2: a satellite's windows grow ITS window, not this one
+    const c = all && (!mine || all.w > mine.w || all.h > mine.h) ? { ...own, 'minimum-size': [all.w, all.h] } : own;
     const key = c ? JSON.stringify(c) : null;
     if (key === lastConstraints) return;
     lastConstraints = key;
@@ -169,6 +199,15 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
     const subject = main || [...windows.values()].filter((w) => w.kind === 'dialog' && !w.meta['transient-for']).sort((a, b) => (b.w * b.h - a.w * a.h) || (a.wid - b.wid))[0] || null;
     return subject && P.fixedSizeOf(P.sizeHintsOf(subject.meta)) ? subject : null;
   };
+  /** S1c: on.front — the FRONT window (P.frontOf) whenever it, its title or whether it is the main changes. */
+  const announceFront = () => {
+    // S2: the main pane's front — a satellite's window is in front in its own window
+    const f = P.frontOf(paneWindows(0));
+    const key = f ? `${f.wid}/${f.wid === mainWid}/${f.title}` : null;
+    if (key === lastFront) return;
+    lastFront = key;
+    emit('front', f);
+  };
   /** The fixed window when it is a LONE DIALOG (the app has no main): placed at 0,0, contained by the display. */
   const loneFixed = () => { const f = fixedWindow(); return f && f.kind !== 'main' ? f : null; };
   /** on.fixed — the fixed window's size (device px) whenever it changes; null when there is none any more. */
@@ -180,14 +219,42 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
     emit('fixed', s ? { wid: f.wid, w: s.w, h: s.h } : null);
   };
   /** The display size (device px): the pane, grown to CONTAIN the main window's fit (its minimum may be larger than the pane). */
-  const displayFor = () => {
+  const mainDisplay = () => {
     const main = mainWid ? windows.get(mainWid) : null, lone = main ? null : loneFixed();
     const g = main && main.kind === 'main' ? P.fitGeometry({ paneW: pane.width, paneH: pane.height }, P.sizeHintsOf(main.meta)) : lone ? { x: 0, y: 0, w: lone.w, h: lone.h } : null;
     return { width: Math.max(pane.width, g ? g.x + g.w : 0), height: Math.max(pane.height, g ? g.y + g.h : 0) };
   };
+  /** S2: a slot's size — the satellite pane grown to its window's fit, else the window's own size. */
+  const slotSizeOf = (win) => {
+    const p = slotPanes.get(win.wid);
+    if (!p) return { w: win.w, h: win.h };
+    const g = P.fitGeometry({ paneW: p.width, paneH: p.height }, P.sizeHintsOf(win.meta));
+    return { w: Math.max(p.width, g.w), h: Math.max(p.height, g.h) };
+  };
+  /** S2: lay the slots out again (P.slotFor) and name every slot gained, moved or lost (on.slot). */
+  const layoutSlots = () => {
+    const before = slotRects;
+    if (!slotOrder.length) slotRects = new Map();
+    else { const m = mainDisplay(); slotRects = P.slotFor({ w: m.width, h: m.height }, slotOrder.filter((wid) => windows.has(wid)).map((wid) => ({ wid, ...slotSizeOf(windows.get(wid)) }))).slots; }
+    for (const wid of new Set([...before.keys(), ...slotRects.keys()])) {
+      const a = before.get(wid), b = slotRects.get(wid);
+      if (a && b && a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h) continue;
+      emit('slot', wid, b ? { ...b } : null);
+    }
+  };
+  /** The display (device px): the main pane's — then, S2, grown to hold every slot. */
+  const displayFor = () => {
+    const d = mainDisplay();
+    for (const s of slotRects.values()) { d.width = Math.max(d.width, s.x + s.w); d.height = Math.max(d.height, s.y + s.h); }
+    return d;
+  };
+  /** S2: a window leaves the slots (adopted as the main, handed back, lost) — the others close up. */
+  const unslot = (wid) => { const i = slotOrder.indexOf(wid); if (i < 0) return false; slotOrder.splice(i, 1); slotPanes.delete(wid); layoutSlots(); return true; };
+  const beltOthers = (why) => { for (const win of windows.values()) if (win.wid !== mainWid && win.kind !== 'popup') belt(win, why); };
   /** Ask for `displayFor()` when it differs from what this client last asked (or always, `force`) — never in Watch/before the hello. */
   function syncDisplay(force = false) {
     if (state !== 'connected' || watch) return;
+    if (slotOrder.length || slotRects.size) layoutSlots(); // S2: the slots follow the main's display (and their panes)
     const d = displayFor();
     if (!force && sentDisplay && sentDisplay.width === d.width && sentDisplay.height === d.height) return;
     sentDisplay = d;
@@ -197,6 +264,7 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
     if (mainWid && windows.has(mainWid)) return;
     const next = [...windows.values()].find((w) => w.kind === 'main') || null;
     mainWid = next ? next.wid : 0;
+    if (next) unslot(next.wid); // S2: the next main is ADOPTED by the main pane — its slot (and satellite) goes
     if (next) { emit('title', next.title); refit(next); }
     else { emit('title', ''); syncDisplay(); } // no main: the display is the pane again (or contains a lone fixed dialog)
     announceConstraints();
@@ -244,6 +312,16 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
       return within ? null : g;
     }
     if (win === loneFixed()) return win.x === 0 && win.y === 0 ? null : { x: 0, y: 0, w: win.w, h: win.h }; // the app's fixed window IS the picture: at 0,0
+    const slot = slotRects.get(win.wid);
+    if (slot) { // S2: a slotted window — at its slot's origin, fitted to its satellite's pane (its own size until one is attached)
+      const p = slotPanes.get(win.wid), hints = P.sizeHintsOf(win.meta);
+      const g = p ? P.fitGeometry({ paneW: p.width, paneH: p.height }, hints) : { w: win.w, h: win.h };
+      const inc = Array.isArray(hints && hints.increment) ? hints.increment.map((v) => Math.max(1, Number(v) || 1)) : [1, 1];
+      const at = P.inSlot(win, slot);
+      return !at.moved && Math.abs(win.w - g.w) < inc[0] && Math.abs(win.h - g.h) < inc[1] ? null : { x: slot.x, y: slot.y, w: g.w, h: g.h };
+    }
+    const owner = ownerOf(win);
+    if (owner) { const inSat = P.placeInRect(win, slotRects.get(owner)); return inSat.moved ? { x: inSat.x, y: inSat.y, w: win.w, h: win.h } : null; } // a satellite's dialog: inside ITS slot
     const placed = P.placeInside(win, { paneW: pane.width, paneH: pane.height });
     return placed.moved ? { x: placed.x, y: placed.y, w: win.w, h: win.h } : null;
   };
@@ -273,6 +351,7 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
     const isMain = kind === 'main' && !(mainWid && windows.has(mainWid));
     const win = { wid, ...g, meta, kind, title: winTitle(meta), z: ++zTop, mapped: !overrideRedirect, q: Promise.resolve(), premap: isMain && !watch };
     windows.set(wid, win);
+    if (!isMain && kind === 'main' && !watch && slotsOn() && !noSlot.has(wid)) { slotOrder.push(wid); layoutSlots(); } // S2: a second top-level gets its slot
     // LANE D (a) F3 — THE MAIN IS NAMED BEFORE IT IS FITTED: `on.main` carries its metadata (a CSD app's
     // `decorations: 0` folds the window's bars — the pane GROWS) and the view answers with resize() INSIDE that call,
     // so the fit and the map below use the FINAL pane. Fitted first, the map was the pane with the bars still up,
@@ -283,11 +362,14 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
     if (watch) { /* x5 Watch: drawn where the server has it — the geometry is the active viewer's */ }
     else if (isMain) g = P.fitGeometry({ paneW: pane.width, paneH: pane.height }, P.sizeHintsOf(meta));
     else if (win === loneFixed()) g = { x: 0, y: 0, w: g.w, h: g.h }; // the app's FIXED lone dialog (Inkscape's welcome) IS the picture: at 0,0, never where X centred it
-    else if (kind !== 'popup') { const placed = P.placeInside(g, { paneW: pane.width, paneH: pane.height }); g = { x: placed.x, y: placed.y, w: placed.w, h: placed.h }; } // a dialog OR a second top-level: inside, never lost off the pane
+    else if (slotRects.has(wid)) { const s = slotRects.get(wid); g = { x: s.x, y: s.y, w: g.w, h: g.h }; } // S2: mapped at its slot's origin, its own size
+    else if (kind === 'main') { const m = windows.get(mainWid); const placed = P.placeGuest(g, { paneW: pane.width, paneH: pane.height }, m && m.wid !== wid ? m : null); g = { x: placed.x, y: placed.y, w: placed.w, h: placed.h }; } // S1b: a SECOND top-level (WeChat's Moments) centred over the main, inside the pane
+    else if (kind !== 'popup' && ownerOf(win)) { const placed = P.placeInRect(g, slotRects.get(ownerOf(win))); g = { x: placed.x, y: placed.y, w: placed.w, h: placed.h }; } // S2: a satellite's dialog, inside ITS slot
+    else if (kind !== 'popup') { const placed = P.placeInside(g, { paneW: pane.width, paneH: pane.height }); g = { x: placed.x, y: placed.y, w: placed.w, h: placed.h }; } // a dialog: inside, never lost off the pane
     Object.assign(win, g);
     win.premap = false;
-    if (isMain || win === loneFixed()) syncDisplay(); // the display contains the fit (or the fixed dialog) before the map
-    if (kind !== 'popup') announceFixed();
+    if (isMain || win === loneFixed() || slotRects.has(wid)) syncDisplay(); // the display contains the fit (or the fixed dialog, or S2 the slot) before the map
+    if (kind !== 'popup') { announceFixed(); announceConstraints(); } // S1a: a second window's minimum grows the pane
     emit('window', 'new', win);
     if (!overrideRedirect) { send(P.mapWindow(wid, g)); focusWindow(wid); }
   };
@@ -299,10 +381,15 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
     for (const t of win.refreshTimers || []) clearTimeout(t);
     emit('window', 'lost', win);
     if (focusedWid === wid) focusedWid = 0;
+    noSlot.delete(wid);
+    const hadSlot = unslot(wid); // S2: its slot goes (on.slot null), the slots to its right close up
     if (mainWid === wid) { mainWid = 0; pickMain(); }
+    if (hadSlot || slotRects.size) { syncDisplay(); beltOthers('slots moved'); } // the root shrinks; every slot keeps its window
     const lone = loneFixed(); // the main gone, a lone fixed dialog left: it becomes the picture
     if (lone) { syncDisplay(); belt(lone, 'the fixed window'); }
     announceFixed();
+    announceConstraints(); // S1a: the union shrinks back
+    announceFront();
   };
   const moveResize = (wid, x, y, w, h) => {
     const win = windows.get(wid);
@@ -310,6 +397,7 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
     if (x != null) { win.x = x; win.y = y; }
     win.w = Math.max(1, w); win.h = Math.max(1, h);
     emit('window', 'geometry', win);
+    if (slotRects.has(wid) && !slotPanes.has(wid)) { syncDisplay(); beltOthers('slot resized'); } // S2: a slot follows its own window until a satellite holds it
     belt(win, 'server geometry'); // the app moved/resized itself (or X snapped our fit): back to the fit, bounded
   };
   const focusWindow = (wid) => {
@@ -319,6 +407,7 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
     win.z = ++zTop;
     send(P.focusPacket(wid));
     emit('window', 'raise', win);
+    announceFront();
   };
   /** The topmost window under a pane point (popups above dialogs above main), or null. */
   const windowAt = (x, y) => {
@@ -394,14 +483,15 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
       case 'window-move-resize': moveResize(p[1], p[2], p[3], p[4], p[5]); return;
       case 'configure-override-redirect': moveResize(p[1], p[2], p[3], p[4], p[5]); return;
       case 'window-resized': moveResize(p[1], null, null, p[2], p[3]); return;
-      case 'raise-window': { const w = windows.get(p[1]); if (w) { w.z = ++zTop; emit('window', 'raise', w); } return; }
+      case 'raise-window': { const w = windows.get(p[1]); if (w) { w.z = ++zTop; emit('window', 'raise', w); announceFront(); } return; }
       case 'window-metadata': {
         const win = windows.get(p[1]);
         const meta = p[2] && typeof p[2] === 'object' ? p[2] : {};
         if (!win) return;
         Object.assign(win.meta, meta);
         if ('title' in meta) { win.title = winTitle(meta); if (win.wid === mainWid) emit('title', win.title); }
-        if ('size-constraints' in meta || 'size-hints' in meta) { resetBelt(win); refit(win); if (win.wid === mainWid) announceConstraints(); announceFixed(); if (win === loneFixed()) { syncDisplay(); belt(win, 'the fixed window'); } }
+        if ('size-constraints' in meta || 'size-hints' in meta) { resetBelt(win); refit(win); announceConstraints(); announceFixed(); if (win === loneFixed()) { syncDisplay(); belt(win, 'the fixed window'); } if (slotPanes.has(win.wid)) { syncDisplay(); beltOthers('size hints'); } }
+        if ('title' in meta) announceFront();
         emit('window', 'meta', win);
         if (win.wid === mainWid) emit('main', win);
         if ('maximized' in meta || 'iconic' in meta) { const changed = {}; if ('maximized' in meta) changed.maximized = !!meta.maximized; if ('iconic' in meta) changed.iconic = !!meta.iconic; emit('state', win, changed); }
@@ -461,6 +551,7 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
   function setWatch(v) {
     const was = watch; watch = !!v;
     if (!was || watch || state !== 'connected') return;
+    if (slotsOn()) for (const win of windows.values()) if (win.kind === 'main' && win.wid !== mainWid && !slotOrder.includes(win.wid) && !noSlot.has(win.wid)) slotOrder.push(win.wid); // S2: what mapped during Watch gets its slot now
     syncDisplay(true); // the watched viewer set the display — this pane's is asked for again, whatever it last sent
     for (const win of windows.values()) resetBelt(win);
     refit(windows.get(mainWid));
@@ -554,12 +645,73 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
     if (state !== 'connected' || viewOnly || watch || !mainWid || !windows.has(mainWid)) return false;
     return send(P.closeWindow(mainWid));
   };
+  /** S1c (design 016): the outer ✕ while the FRONT window is not the main (WeChat's Moments over its main) — close-window
+   *  to THAT window; the app is asked to close only when its main is in front (closeMain). Same guards. false = nothing sent. */
+  const closeFront = () => {
+    const f = P.frontOf(paneWindows(0));
+    if (state !== 'connected' || viewOnly || watch || !f) return false;
+    return send(P.closeWindow(f.wid));
+  };
+
+  /** S2: the satellite's ✕ — close-window to ITS X window (the app may refuse: nothing closes then). Same guards. */
+  const closeWindow = (wid) => {
+    if (state !== 'connected' || viewOnly || watch || !windows.has(wid)) return false;
+    return send(P.closeWindow(wid));
+  };
+  /** S2: a satellite's pane (CSS px; null = detached) — its window is fitted to it inside its slot (the root follows). */
+  const setSlotPane = (wid, size) => {
+    const win = windows.get(wid);
+    if (!win || !slotOrder.includes(wid)) return false;
+    const p = size ? P.devicePane({ width: Math.max(1, Math.floor(size.width || 1)), height: Math.max(1, Math.floor(size.height || 1)) }, ratioNow(), { cover: coverNow() }) : null;
+    const cur = slotPanes.get(wid) || null;
+    if (p ? cur && cur.width === p.width && cur.height === p.height : !cur) return true;
+    if (p) slotPanes.set(wid, p); else slotPanes.delete(wid);
+    if (state !== 'connected' || watch) return true;
+    syncDisplay();
+    resetBelt(win);
+    beltOthers('satellite pane');
+    return true;
+  };
+  /** S2: hand a slotted window back to the main pane for this session (its satellite was closed while it lives) — S1's guest. */
+  const releaseSlot = (wid) => {
+    const win = windows.get(wid);
+    if (!win || !slotOrder.includes(wid)) return false;
+    noSlot.add(wid); unslot(wid);
+    if (state === 'connected' && !watch) {
+      syncDisplay();
+      const m = windows.get(mainWid), placed = P.placeGuest(win, { paneW: pane.width, paneH: pane.height }, m && m.wid !== wid ? m : null);
+      if (placed.moved) { Object.assign(win, { x: placed.x, y: placed.y }); beltOf(win).at = now(); send(P.configureWindow(wid, { x: win.x, y: win.y, w: win.w, h: win.h })); emit('window', 'geometry', win); }
+      beltOthers('slot released');
+    }
+    announceConstraints(); announceFront();
+    return true;
+  };
+  /** S2: keys typed into a pane reach a window OF that pane — the X focus moves to that pane's front when another pane's
+   *  window holds it (owner 0 = the main pane). true = a focus packet was sent. */
+  const focusPane = (owner = 0) => {
+    if (viewOnly || watch || state !== 'connected') return false;
+    const f = windows.get(focusedWid);
+    if (f && ownerOf(f) === owner) return false;
+    const to = P.frontOf(paneWindows(owner));
+    if (!to) return false;
+    focusWindow(to.wid);
+    return true;
+  };
+  /** S2: a satellite's constraints — its window's hints, the minimum raised to the union of every window of its pane. */
+  const constraintsOf = (owner) => {
+    const win = windows.get(owner);
+    if (!win) return null;
+    const own = P.sizeHintsOf(win.meta), all = P.unionMin(paneWindows(owner));
+    return all ? { ...own, 'minimum-size': [all.w, all.h] } : own ? { ...own } : null;
+  };
 
   /** Tell the display what OUR window did to the app's main window (`{maximized}` / `{iconified}` — the state dict of
    *  configure-window, applied for the ui driver): the app's own header bar then shows the right button (restore vs
    *  maximize) and an app minimized by its own button draws again once our window is back. Never from Watch / view-only. */
-  const setMainState = (st) => {
-    const main = mainWid ? windows.get(mainWid) : null;
+  const setMainState = (st) => setWindowState(mainWid, st);
+  /** …the same for any held window (S2: a satellite tells the display what its window did — un-minimized). */
+  const setWindowState = (wid, st) => {
+    const main = wid ? windows.get(wid) : null;
     if (!main || state !== 'connected' || viewOnly || watch || dormant || !st || typeof st !== 'object') return false;
     const clean = {};
     if ('maximized' in st) clean.maximized = !!st.maximized;
@@ -573,9 +725,10 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
   };
 
   return {
-    connect, close: () => finish('closed by the window'), send, resize, closeMain, setMainState, keyDown, keyUp, typeText, pointerMove, pointerButton, wheel: wheelAt, pasteText, focusWindow, windowAt,
-    get state() { return state; }, get closedReason() { return closedReason; }, get windows() { return windows; }, get mainWid() { return mainWid; }, get focusedWid() { return focusedWid; },
+    connect, close: () => finish('closed by the window'), send, resize, closeMain, closeFront, closeWindow, setSlotPane, releaseSlot, constraintsOf, ownerOf, paneWindows, focusPane, setMainState, setWindowState, keyDown, keyUp, typeText, pointerMove, pointerButton, wheel: wheelAt, pasteText, focusWindow, windowAt,
+    get state() { return state; }, get closedReason() { return closedReason; }, get windows() { return windows; }, get mainWid() { return mainWid; }, get focusedWid() { return focusedWid; }, get frontWid() { const f = P.frontOf(windows.values()); return f ? f.wid : 0; },
     beltState: (wid) => { const w = windows.get(wid); return w && w.belt ? { at: w.belt.at, fights: w.belt.fights, gaveUp: w.belt.gaveUp, pending: !!w.belt.timer } : null; },
+    slotOf: (wid) => { const r = slotRects.get(wid); return r ? { ...r } : null; }, get slots() { return new Map([...slotRects].map(([k, v]) => [k, { ...v }])); },
     get pane() { return pane; }, get display() { return sentDisplay ? { ...sentDisplay } : null; }, get cssPane() { return cssPane; }, get ratio() { return ratioNow(); }, get dpi() { return dpi; },
     get mainConstraints() { const m = mainWid ? windows.get(mainWid) : null; const c = m ? P.sizeHintsOf(m.meta) : null; return c ? { ...c } : null; },
     get fixed() { const f = fixedWindow(), s = f ? P.fixedSizeOf(P.sizeHintsOf(f.meta)) : null; return s ? { wid: f.wid, w: s.w, h: s.h } : null; },

@@ -351,7 +351,7 @@ console.log('— ⑤ the client words (en / zh / ja) + the panel wiring');
   const noZh = [...said].filter((k2) => !(k2 in zh)), noJa = [...said].filter((k2) => !(k2 in ja));
   ok(said.size > 15 && !noZh.length && !noJa.length, `every sentence the CLI model says (${said.size}) has a zh and a ja entry`, { noZh, noJa });
   const tv = read('src/lib/browser-trace-view.js');
-  ok(/root\.append\(bar, cliRow, hint, body\)/.test(tv) && /fetchJson\('\/api\/browser\/cli'\)/.test(tv) && /fetchJson\('\/api\/browser\/cli\/install', jsonInit\('POST', \{ version \}\)\)/.test(tv) && /showConfirmDialog\(\{ \.\.\.cliConfirmWords\(f, t, \{ version \}\) \}\)/.test(tv) && /app\.settings\?\.set\?\.\('browser\.cli', 'path'\)/.test(tv),
+  ok(/root\.append\(bar, body\)/.test(tv) && /mt\.append\(cliRow, swl, hint\)/.test(tv) /* design 015: the Maintenance section */ && /fetchJson\('\/api\/browser\/cli'\)/.test(tv) && /fetchJson\('\/api\/browser\/cli\/install', jsonInit\('POST', \{ version \}\)\)/.test(tv) && /showConfirmDialog\(\{ \.\.\.cliConfirmWords\(f, t, \{ version \}\) \}\)/.test(tv) && /app\.settings\?\.set\?\.\('browser\.cli', 'path'\)/.test(tv),
     'the Agent browser panel: the Browser CLI row (its own fetch), the install behind the download confirm, the setting written by the row\'s act');
   ok(/'browser\.cli': \{\s*type: 'string', default: 'path',/.test(read('src/lib/settings-schema.js')) && /serverSetting\('browser\.cli'\)/.test(read('src/server/browser-keeper.js')), 'the setting is declared (Agent browser) and read by the keeper');
 }

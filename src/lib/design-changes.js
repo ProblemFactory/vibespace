@@ -138,7 +138,20 @@ export function mountDesignChanges(ctx) {
   const dock = () => stage.style.setProperty('--design-top-dock', strip.offsetParent ? strip.offsetTop + strip.offsetHeight + 'px' : '0px');
   if (typeof ResizeObserver === 'function') { const ro = new ResizeObserver(dock); ro.observe(strip); signal.addEventListener('abort', () => ro.disconnect(), { once: true }); }
 
-  function draw() {
+  // THE CHIP JUST MADE IS IN VIEW (lane mirror-green-ui, 2.369.205): the chips scroll sideways and a new chip lands at
+  // the end — in DejaVu Sans (the Actions runner's sans, and many a Linux desktop's) two text chips already overflowed a
+  // 500 px strip by 14 px, the newest chip's × sat past the edge (the point under it was the strip) and a real click
+  // there removed nothing. Scroll the list (only the list) so the chip lies whole inside it; the client rect is the
+  // zoomed one, so the overflow is converted back to the list's own px.
+  function reveal(key) {
+    const el = key && [...chips.children].find((e) => e.dataset.key === key);
+    if (!el) return;
+    const a = el.getBoundingClientRect(), b = chips.getBoundingClientRect();
+    const k = b.width ? chips.offsetWidth / b.width : 1;
+    if (a.right > b.right) chips.scrollLeft += (a.right - b.right) * k;
+    else if (a.left < b.left) chips.scrollLeft -= (b.left - a.left) * k;
+  }
+  function draw(show) {
     const n = list.length;
     strip.style.display = n || (picking && !phone) ? '' : 'none'; // the phone: the strip appears with a chip (the hint would cover the page)
     strip.classList.toggle('design-changes-empty', !n);
@@ -160,6 +173,7 @@ export function mountDesignChanges(ctx) {
       el.append(words, x);
       return el;
     }));
+    reveal(show);
   }
   function remove(key) {
     const c = list.find((x) => chipKey(x) === key);
@@ -181,8 +195,9 @@ export function mountDesignChanges(ctx) {
     if (r.op === 'full') { canvas.tell(m.file, { kind: 'design-undo', ref: m.ref, edit: m.edit, prop: m.prop }); full(); return; }
     if (r.op === 'same') return;
     if (r.op === 'added') seq += 1;
+    const made = r.list.find((c) => !list.includes(c)); // the chip added or changed (an 'updated' row is a new object)
     list = r.list;
-    save(); draw();
+    save(); draw(made ? chipKey(made) : null);
   });
   signal.addEventListener('abort', () => off(), { once: true });
 
@@ -258,7 +273,7 @@ export function mountDesignChanges(ctx) {
       if (list.length >= CHANGES_MAX) { full(); return; }
       seq += 1;
       list = [...list, { id: 'c' + seq, edit: 'comment', file: p.file, path: p.path, tag: p.tag, text: p.text || '', comment: text }];
-      save(); draw();
+      save(); draw(chipKey(list[list.length - 1]));
     }
     closeComposer(); // Comment mode stays on: pick the next element
     sayChip(list.length === 1 ? t('Added — 1 change waits. Pick the next element, or Send all.') : t('Added — {n} changes wait. Pick the next element, or Send all.', { n: list.length }));

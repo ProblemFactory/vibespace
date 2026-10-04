@@ -102,6 +102,18 @@
 //     on the pane (the document sees pointerdown and click, never mousedown); a finger drag across the picture is not a
 //     tap (the menu stays), a finger tap closes it. CONTROL = a copy whose onOutsidePress is the pre-lane closer (a
 //     bubble-phase document mousedown): every surface stays open over the same clicks, the digits still land.
+//   • §18 (design 016 S1 + S2, lanes app-guest-window + app-satellite-windows — the owner: 「对于这种app又打开一个窗口的情况你似乎
+//     没有处理好」, then YES to a window per top-level) scripts/fixtures/two-windows.py (GTK 3, ONE process; a resizable main,
+//     a second NORMAL top-level with a minimum taller than the pane, sized from the measured workspace; key logs per window,
+//     a right-click menu in the second, re-open / third / drop-main triggers): the second opens its OWN window (a satellite
+//     of the same session — one viewer socket) titled "{main} · {second}" with its own taskbar entry, drawn there and not in
+//     the main pane, in its own slot of the root (X agrees), the pane holding it 1:1; typing reaches ITS window (and the
+//     main's, the main); its menu is drawn in it; a reload REPLAYS the same satellite and re-binds it by wid; an agent's lease
+//     (Watch) is ONE scaled picture in the main window, a window opened meanwhile opens no satellite until the agent
+//     detaches; a 390 px phone shows one window at a time; the satellite's ✕ closes only its window ("… closed" toast);
+//     S1 where a window has no satellite (its satellite closed while it lives): back in the main pane, "{main} · {second}",
+//     grown to its minimum, the main ✕ = ask-front; the app dropping its main ⇒ the main window ADOPTS the second. The
+//     pre-fix CONTROLS are test-xpra-client §9 / §10's patched copies. SKIPPED without python3 + GTK 3 (gi).
 // SKIPs with evidence without chrome / xpra / xauth / xterm; the xclip legs
 // SKIP without xclip; the plain-http leg SKIPs when the hostname does not
 // resolve. Worktree-isolated (own data/, scratch HOME, VIBESPACE_SKIP_AGENT_HOOKS=1),
@@ -511,15 +523,19 @@ try {
     const atOrigin = await until(async () => { const x = await mainNow(); return fitsPane(x) && (await xFits(x.s.pane)) ? x : null; }, 8000, 200);
     const xm = await xOf(xid.id);
     check(`the app MOVING itself (xdotool windowmove 400,300 — the client used to follow it off the pane) is put back at 0,0 (X: ${xm && `${xm.x},${xm.y}`})`, !!atOrigin && xm && xm.x === 0 && xm.y === 0, { atOrigin: atOrigin && atOrigin.m, x: xm });
-    // a second top-level of the app's own display far off the screen (xpra clamps it to 20×20 px visible): placed inside
+    // a second top-level of the app's own display far off the screen — design 016 S2 (lane app-satellite-windows): it opens its
+    // OWN VibeSpace window (a satellite of the same session) and lies in its slot of the root beside the main (S1 placed it inside)
     const second = spawn(XTERM, ['-T', 'vs-second-top', '-geometry', '40x10+2000+1500'], { env: xenv, stdio: 'ignore', detached: true }); xclipKids.push(second);
-    const inside = await until(async () => { const s = await p1.evalJs(WIN(appId)); const w = s && s.windows.find((x) => x.title === 'vs-second-top'); return w && w.x >= 0 && w.y >= 0 && w.x + w.w <= s.pane.w && w.y + w.h <= s.pane.h ? { w, pane: s.pane } : null; }, 12000, 250);
-    const xSecond = inside && ((await p1.evalJs(`fetch('/api/desktop/apps/${appId}/windows').then((r) => r.json())`)).windows || []).find((x) => x.title === 'vs-second-top');
-    console.log(`  a second top-level at +2000+1500 ⇒ ${inside ? `${inside.w.w}×${inside.w.h} at ${inside.w.x},${inside.w.y} in ${inside.pane.w}×${inside.pane.h}` : 'NOT inside'}; X says ${xSecond && `+${xSecond.x}+${xSecond.y}`}`);
-    check('a second top-level the app opened at +2000+1500 (kind main, not transient) is placed WHOLLY inside the pane, and X agrees', !!inside && !!xSecond && xSecond.x + xSecond.w <= inside.pane.w && xSecond.y + xSecond.h <= inside.pane.h, { inside, x: xSecond });
+    const SATS = `[...app.wm.windows.values()].filter((w) => w._desktopAppId === ${JSON.stringify(appId)} && w._desktopSatelliteWid).map((w) => ({ title: w.title, wid: w._desktopSatelliteWid, bound: !!(w._desktopSatellite && w._desktopSatellite.bound), slot: [...app.wm.windows.values()].find((m) => m._desktopAppId === ${JSON.stringify(appId)} && !m._desktopSatelliteWid)._desktopAppView.client.slotOf(w._desktopSatelliteWid) }))`;
+    const own = await until(async () => { const s = await p1.evalJs(WIN(appId)); const w = s && s.windows.find((x) => x.title === 'vs-second-top'); const sats = await p1.evalJs(SATS); const main = s && s.windows.find((x) => x.title === 'vs-xpra-title'); return w && main && sats.length === 1 && sats[0].bound && sats[0].wid === w.wid && sats[0].slot && w.x === sats[0].slot.x && w.y === sats[0].slot.y ? { w, main, sat: sats[0] } : null; }, 12000, 250);
+    const xSecond = own && await until(async () => { const x = ((await p1.evalJs(`fetch('/api/desktop/apps/${appId}/windows').then((r) => r.json())`)).windows || []).find((x) => x.title === 'vs-second-top'); return x && Math.abs(x.x - own.w.x) <= 2 && Math.abs(x.y - own.w.y) <= 2 ? x : null; }, 6000, 250);
+    console.log(`  a second top-level at +2000+1500 ⇒ ${own ? `its own window "${own.sat.title}", ${own.w.w}×${own.w.h} at ${own.w.x},${own.w.y} (slot ${JSON.stringify(own.sat.slot)}, the main ${own.main.w}×${own.main.h})` : 'NO satellite'}; X says ${xSecond ? `+${xSecond.x}+${xSecond.y}` : 'elsewhere'}`);
+    check('a second top-level the app opened at +2000+1500 (kind main, not transient) opens its OWN window (design 016 S2: titled "vs-xpra-title · vs-second-top") and lies in its slot of the root beside the main, and X agrees', !!own && own.sat.title === 'vs-xpra-title · vs-second-top' && own.w.x >= own.main.w && !!xSecond, { own, x: xSecond });
     const m4 = await mainNow();
-    check('…the first window stays the main and the picture (the title bar keeps its title)', fitsPane(m4) && m4.s.title === 'vs-xpra-title', m4 && { m: m4.m, title: m4.s.title });
+    check('…the first window stays the main and the picture, titled "vs-xpra-title" — the second is in front in its own window, not named here (S1c is for a window with no satellite: §18)', fitsPane(m4) && m4.s.title === 'vs-xpra-title', m4 && { m: m4.m, title: m4.s.title });
     try { process.kill(-second.pid, 'SIGKILL'); } catch {}
+    const back4 = await until(async () => { const s = await p1.evalJs(WIN(appId)); return s && s.title === 'vs-xpra-title' && !(await p1.evalJs(SATS)).length ? s : null; }, 8000, 200);
+    check('…and with the second top-level gone its own window closes and the title is the main\'s alone', !!back4);
     await until(async () => { const s = await p1.evalJs(WIN(appId)); return s && !s.windows.some((x) => x.title === 'vs-second-top') ? true : null; }, 6000, 200);
   }
   // GNOME Calculator resizes its OWN window on a mode switch (measured by the verifier: 898×616 ⇒ 700×616 ⇒ 370×616, 40 % of
@@ -2884,6 +2900,176 @@ try {
       for (const id of ids13) await fetch(`${O13}/api/desktop/apps/${id}/stop`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {});
       await A?.p?.evalJs?.(`app.settings.set('desktop.seamless', 'auto'); true`).catch(() => {});
       await dropPage(A);
+    }
+  }
+  // ── §18 design 016 S1 + S2 (lanes app-guest-window + app-satellite-windows, 2026-10-03 — WeChat's Moments drawn over its
+  // main window, cut at the bottom; then the owner's YES to a window per top-level). scripts/fixtures/two-windows.py maps a
+  // resizable main, then — on the trigger file — a second NORMAL window (no transient-for) whose minimum is taller than the
+  // default pane. S2: it opens its OWN VibeSpace window (a SATELLITE of the same session) titled "{app} · {window}", the X
+  // window's size, its keys and its menu in it, its ✕ closing only it; a reload re-binds it by wid; an agent's Watch is ONE
+  // picture and opens no satellite; a phone shows one window at a time; the main lost ⇒ the main window adopts the second.
+  // S1 still holds where a window has no satellite (its satellite closed while it lives): the main window grows to its
+  // minimum, names it, and its ✕ closes it first. The pre-fix CONTROLS are test-xpra-client §9 / §10's patched copies. ──
+  console.log('§18 design 016 S1 + S2 — an app\'s second top-level opens its own window (a satellite of the same session): title, size, keys, menu, ✕, reload, Watch, phone, adopt; S1 where it has none');
+  const PY18 = bin('python3');
+  const gtk18 = (() => { if (!PY18) return false; try { execFileSync(PY18, ['-c', "import gi; gi.require_version('Gtk', '3.0'); from gi.repository import Gtk"], { stdio: 'ignore', timeout: 20000, env: { ...process.env, GDK_BACKEND: 'x11' } }); return true; } catch { return false; } })();
+  if (!gtk18) skip('§18 the second-window legs', 'python3 + GTK 3 (gi) not available');
+  else {
+    const G = await newPage();
+    const trig18 = path.join(fakeHome, 'two-trigger'), closed18 = path.join(fakeHome, 'two-closed');
+    const keysOf = (k) => { try { return fs.readFileSync(`${closed18}.${k}-keys`, 'utf8'); } catch { return ''; } };
+    const poke = (name) => fs.writeFileSync(trig18 + name, '1\n');
+    const MIN18 = [420, 0], T1 = 'vs-two-main', T2 = 'vs-two-second', T3 = 'vs-two-third', BOTH = `${T1} · ${T2}`; // the height: from the workspace, below
+    let id18 = null;
+    try {
+      const l = await G.p.evalJs(`fetch('/api/desktop/apps', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: ${JSON.stringify(JSON.stringify({ exec: PY18, args: [path.join(repo, 'scripts/fixtures/two-windows.py'), trig18, closed18, T1, T2], label: 'two-windows' }))} }).then((r) => r.json())`);
+      id18 = l && l.id;
+      const r18 = id18 ? await until(() => G.p.evalJs(`fetch('/api/desktop/apps/${id18}').then((r) => r.json()).then((r) => (r.state === 'ready' ? r : null))`), 30000) : null;
+      check('§18 the two-windows fixture reaches ready on the xpra rung', !!r18 && r18.stream === 'xpra', l);
+      if (r18) {
+        await G.p.evalJs(`app.openDesktopApp(${JSON.stringify(id18)}); true`);
+        // the app's windows as the page holds them: the main window (its view, its client) and every SATELLITE (its pane handle)
+        const S18 = `(() => { const ws = [...app.wm.windows.values()].filter((w) => w._desktopAppId === ${JSON.stringify(id18)}); const m = ws.find((w) => !w._desktopSatelliteWid); if (!m) return null; const v = m._desktopAppView, c = v && v.client; const box = (el) => { if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; }; const shown = (el) => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden'; const kids = (st) => [...st.children].map((e) => ({ wid: +e.dataset.wid, popup: e.classList.contains('xpra-win-popup') })); const px = (st) => { const cv = st && st.querySelector('.xpra-win-main canvas'); if (!cv || !cv.width) return null; const d = cv.getContext('2d').getImageData(Math.floor(cv.width / 2), Math.floor(cv.height / 2), 1, 1).data; return [d[0], d[1], d[2]]; }; return { title: m.title, status: v.status.textContent, mode: v.mode, ratio: v.ratio, stageScale: v.stageScale, minPane: m._desktopMinPane || null, verdict: m._desktopCloseVerdict || null, viewers: m._desktopSeats ? m._desktopSeats.viewers.length : null, mainWid: c ? c.mainWid : 0, display: c ? c.display : null, slots: c ? [...c.slots].map(([wid, r]) => ({ wid, ...r })) : [], wins: c ? [...c.windows.values()].filter((x) => x.kind !== 'popup').map((x) => ({ wid: x.wid, kind: x.kind, x: x.x, y: x.y, w: x.w, h: x.h, title: x.title })) : [], mainStage: kids(v.stage), pane: box(v.pane), close: box(m.element.querySelector('.win-close')), shown: shown(m.element), taskbar: [...document.querySelectorAll('[title]')].filter((e) => !e.closest('.window')).map((e) => e.title), sats: ws.filter((w) => w._desktopSatelliteWid).map((w) => { const h = w._desktopSatellite; return { id: w.id, wid: w._desktopSatelliteWid, title: w.title, bound: !!(h && h.bound), stage: h ? kids(h.stage) : [], px: h ? px(h.stage) : null, pane: h ? box(h.pane) : null, note: h && h.note.style.display !== 'none' ? h.note.textContent : '', close: box(w.element.querySelector('.win-close')), shown: shown(w.element) }; }) }; })()`;
+        const st = () => G.p.evalJs(S18).catch(() => null);
+        const toasts18 = () => G.p.evalJs(`[...document.querySelectorAll('#global-toasts > *')].map((e) => e.textContent)`);
+        const typeIn = async (text) => { for (const ch of text) { const k = keyOf(ch); await G.p.cdp('Input.dispatchKeyEvent', { type: 'keyDown', ...k }); await G.p.cdp('Input.dispatchKeyEvent', { type: 'keyUp', ...k }); } };
+        const s0 = await until(async () => { const s = await st(); return s && s.status === 'Connected' && s.wins.length === 1 ? s : null; }, 30000, 250);
+        check(`§18 the main window connects (${s0 && s0.wins.map((x) => `${x.title} ${x.w}×${x.h}`)}), titled "${s0 && s0.title}"`, !!s0 && s0.title === T1, s0);
+        if (s0) {
+          // the second's minimum: taller than this pane, and a pane the WORKSPACE can hold (setMinSize caps a window's minimum there)
+          const cap = await G.p.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(id18)}); const ws = app.wm._workspaceBox(); return { ws, chrome: w.element.offsetHeight - w._desktopAppView.pane.clientHeight }; })()`);
+          MIN18[1] = Math.floor(Math.min(s0.pane.h + 120, cap.ws.h - cap.chrome - 12) * s0.ratio);
+          console.log(`  workspace ${JSON.stringify(cap.ws)}, chrome ${cap.chrome} CSS px ⇒ the second's minimum ${MIN18.join('×')} device px`);
+          check(`§18 the default pane is SHORTER than the second's minimum (${s0.pane.h} CSS px < ${MIN18[1]} device px at ratio ${s0.ratio}) — the sizes below are not vacuous`, s0.pane.h * s0.ratio + 20 < MIN18[1], { pane: s0.pane, cap });
+          fs.writeFileSync(trig18 + '.tmp', `${MIN18[0]} ${MIN18[1]}\n`); fs.renameSync(trig18 + '.tmp', trig18);
+          // ── S2: its OWN window ──
+          // (bound, titled, and its first picture painted — the canvas centre is no longer transparent)
+          const s1 = await until(async () => { const s = await st(); return s && s.sats.length === 1 && s.sats[0].bound && s.sats[0].title === BOTH && s.sats[0].stage.length && s.sats[0].px && s.sats[0].px.some((v) => v > 0) ? s : null; }, 20000, 250) || await st();
+          const sec = s1.wins.find((x) => x.wid !== s1.mainWid && x.kind === 'main'), sat = s1.sats[0], slot = sec && s1.slots.find((x) => x.wid === sec.wid);
+          console.log(`  second ${JSON.stringify(sec)} in slot ${JSON.stringify(slot)}; root ${JSON.stringify(s1.display)}; satellite "${sat && sat.title}" pane ${sat && sat.pane && `${sat.pane.w}×${sat.pane.h}`} at ratio ${s1.ratio}; pixel ${JSON.stringify(sat && sat.px)}; main "${s1.title}"`);
+          check(`§18 S2: the second top-level opens its OWN VibeSpace window titled "${sat && sat.title}" with its own taskbar entry; the main window keeps "${s1.title}"`, !!sat && sat.title === BOTH && s1.title === T1 && s1.taskbar.includes(BOTH) && s1.taskbar.includes(T1), { sats: s1.sats, taskbar: s1.taskbar });
+          check('§18 S2: the satellite draws the second (its own colour at its centre) and the main pane does not', !!sec && sat.stage.some((x) => x.wid === sec.wid) && !s1.mainStage.some((x) => x.wid === sec.wid) && s1.mainStage.some((x) => x.wid === s1.mainWid) && !!sat.px && Math.abs(sat.px[0] - 242) <= 14 && Math.abs(sat.px[1] - 214) <= 14 && Math.abs(sat.px[2] - 214) <= 14, { sat, mainStage: s1.mainStage });
+          check(`§18 S2: the second lies in its own SLOT of the root, to the right of the main (x ${sec && sec.x} ≥ ${s1.wins.find((x) => x.wid === s1.mainWid).w}), and the root holds both (${JSON.stringify(s1.display)})`, !!sec && !!slot && sec.x === slot.x && sec.y === slot.y && sec.x >= s1.wins.find((x) => x.wid === s1.mainWid).w && s1.display.width >= sec.x + sec.w, { sec, slot });
+          { // the X root itself, read on the app's display (xwininfo with its Xauthority): the size the slots asked, the corrals
+            const xenv18 = { ...process.env, DISPLAY: r18.display, XAUTHORITY: path.join(wt, 'data', 'desktop-apps', id18, 'Xauthority') };
+            let root = '', tree = '';
+            try { root = (execFileSync('xwininfo', ['-root'], { env: xenv18, encoding: 'utf8', timeout: 5000 }).match(/-geometry\s+(\S+)/) || [])[1] || ''; } catch (e) { root = 'xwininfo failed: ' + e.message; }
+            try { tree = execFileSync('xwininfo', ['-root', '-tree'], { env: xenv18, encoding: 'utf8', timeout: 5000 }).split('\n').filter((x) => /vs-two|Corral/.test(x)).map((x) => x.trim().replace(/\s+/g, ' ')).join(' | '); } catch {}
+            console.log(`  X root ${root}; ${tree}`);
+          }
+          const xw18 = await G.p.evalJs(`fetch('/api/desktop/apps/${id18}/windows').then((r) => r.json())`).catch(() => null);
+          const xs = xw18 && Array.isArray(xw18.windows) ? xw18.windows.find((x) => x.title === T2) : null;
+          if (xs && Number.isFinite(xs.x)) check(`§18 S2: …and the X server agrees (${xs.x},${xs.y})`, Math.abs(xs.x - sec.x) <= 2 && Math.abs(xs.y - sec.y) <= 2, { xs, sec });
+          check(`§18 S2: the satellite holds the X window 1:1 (pane ${sat.pane.w}×${sat.pane.h} CSS × ${s1.ratio} = ${sec.w}×${sec.h} ± 2 device px, never below the minimum ${MIN18[1]})`, Math.abs(sat.pane.w * s1.ratio - sec.w) <= 2 && Math.abs(sat.pane.h * s1.ratio - sec.h) <= 2 && sec.h >= MIN18[1], { pane: sat.pane, sec });
+          check(`§18 S2: ONE connection — the app still has one viewer socket from this page (${s1.viewers})`, s1.viewers === 1, s1.viewers);
+          // ── typing reaches ITS window ──
+          await trustedClickAt(G.p, sat.pane.x + sat.pane.w / 2, sat.pane.y + sat.pane.h / 2);
+          await sleep(400);
+          await typeIn('s2');
+          const typed2 = await until(() => keysOf('second').includes('s2'), 8000, 200);
+          check(`§18 S2: typing in the satellite reaches ITS window (the second logged ${JSON.stringify(keysOf('second'))}, the main ${JSON.stringify(keysOf('main'))})`, !!typed2 && !keysOf('main').includes('s'));
+          await trustedClickAt(G.p, s1.pane.x + 20, s1.pane.y + 40);
+          await sleep(400);
+          await typeIn('m1');
+          const typed1 = await until(() => keysOf('main').includes('m1'), 8000, 200);
+          check(`§18 S2: …and typing in the main window reaches the main again (${JSON.stringify(keysOf('main'))}; the second ${JSON.stringify(keysOf('second'))})`, !!typed1 && !keysOf('second').includes('m'));
+          // ── a menu opened in it is drawn in it ──
+          const menuUp = async () => { const s = await st(); return s && s.sats[0] && s.sats[0].stage.some((x) => x.popup) ? s : null; };
+          await trustedClickAt(G.p, sat.pane.x + 60, sat.pane.y + 60, 0, 'right');
+          let m2 = await until(menuUp, 5000, 200);
+          if (!m2) { console.log('  (no menu 5 s after the first right-click — pressed once more)'); await trustedClickAt(G.p, sat.pane.x + 70, sat.pane.y + 70, 0, 'right'); m2 = await until(menuUp, 6000, 200); }
+          m2 = m2 || await st();
+          check(`§18 S2: the app's menu opened in the satellite (a right-click popup) is drawn IN it, not in the main pane (${JSON.stringify(m2 && m2.sats[0] && m2.sats[0].stage)})`, !!m2 && m2.sats[0].stage.some((x) => x.popup) && !m2.mainStage.some((x) => x.popup), m2 && { sat: m2.sats[0].stage, main: m2.mainStage });
+          await G.p.cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }); await G.p.cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+          await until(async () => { const s = await st(); return s && s.sats[0] && !s.sats[0].stage.some((x) => x.popup) ? s : null; }, 5000, 200);
+          // ── a reload re-binds it by wid ──
+          await sleep(3000); // the layout autosave carries the satellite
+          await openPage(G.p, `http://127.0.0.1:${PORT}`);
+          const r3 = await until(async () => { const s = await st(); return s && s.status === 'Connected' && s.sats.length === 1 && s.sats[0].bound && s.sats[0].stage.length ? s : null; }, 30000, 300) || await st();
+          check(`§18 S2: a reload REPLAYS the satellite from the layout (the same window ${sat.id}) and re-binds it by wid ${sec.wid} — one window for the second, bound, titled, drawing it`, !!r3 && r3.sats.length === 1 && r3.sats[0].id === sat.id && r3.sats[0].wid === sec.wid && r3.sats[0].bound && r3.sats[0].title === BOTH && r3.sats[0].stage.some((x) => x.wid === sec.wid), r3 && r3.sats);
+          // ── an AGENT drives: Watch is ONE picture, and opens no satellite ──
+          if (!fs.existsSync(FAKE_CLAUDE)) skip('§18 the Watch leg', 'no fake claude');
+          else {
+            const wsA = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
+            const msgs = []; wsA.on('message', (d) => { try { msgs.push(JSON.parse(d)); } catch {} });
+            await new Promise((r, e) => { wsA.on('open', r); wsA.on('error', e); });
+            wsA.send(JSON.stringify({ type: 'create', backend: 'claude', mode: 'chat', cwd: fakeHome, cols: 80, rows: 24, reqId: 'x18', name: 'x18-agent' }));
+            const created = await until(() => msgs.find((m) => m.type === 'created' && m.reqId === 'x18'), 20000, 100);
+            const token = created && await until(() => { for (const f of fs.readdirSync(path.join(wt, 'data', 'session-meta'))) { try { const j = JSON.parse(fs.readFileSync(path.join(wt, 'data', 'session-meta', f), 'utf8')); if (j.agentToken && j.webuiSessionId === created.sessionId) return j.agentToken; } catch {} } return null; }, 10000, 200);
+            if (token) agentTokens.push(token);
+            wsA.close();
+            const agent = (verb, body) => fetch(`http://127.0.0.1:${PORT}/api/agent/window/${verb}`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(body) }).then(async (r) => ({ status: r.status, j: await r.json().catch(() => null) }));
+            if (token) await fetch(`http://127.0.0.1:${PORT}/api/desktop/apps/${id18}/reach`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ principal: { kind: 'session', id: created.sessionId } }) });
+            const at = token ? await agent('attach', { handle: id18 }) : null;
+            check(`§18 the agent attaches to the app (lease ${at && at.j && at.j.lease && at.j.lease.input})`, !!at && at.status === 200 && at.j.lease && at.j.lease.input === 'agent', at);
+            const w5 = await until(async () => { const s = await st(); return s && s.mode === 'watch' && s.mainStage.some((x) => x.wid === sec.wid) ? s : null; }, 15000, 250) || await st();
+            check(`§18 S2: an agent drives ⇒ Watch is ONE picture — the main pane draws both windows, scaled to fit (${w5 && w5.stageScale}), the satellite says where its window went ("${w5 && w5.sats[0] && w5.sats[0].note}")`, !!w5 && w5.mode === 'watch' && w5.mainStage.some((x) => x.wid === sec.wid) && w5.mainStage.some((x) => x.wid === w5.mainWid) && w5.stageScale < 1 && !w5.sats[0].stage.length && /main window while an agent drives/.test(w5.sats[0].note), w5);
+            poke('.third');
+            await until(async () => { const s = await st(); return s && s.wins.some((x) => x.title === T3) ? s : null; }, 10000, 200);
+            await sleep(1500);
+            const w6 = await st();
+            const third = w6 && w6.wins.find((x) => x.title === T3);
+            check(`§18 S2: a window the app opens during Watch opens NO satellite — it is drawn in the one picture (${w6 && w6.sats.length} satellite(s))`, !!third && w6.sats.length === 1 && w6.mainStage.some((x) => x.wid === third.wid), w6);
+            const dt = token ? await agent('detach', { handle: id18 }) : null;
+            const w7 = await until(async () => { const s = await st(); return s && s.mode === 'active' && s.sats.length === 2 && s.sats.every((x) => x.bound && x.stage.length) ? s : null; }, 15000, 250) || await st();
+            check(`§18 S2: the agent detaches (${dt && dt.status}) ⇒ active again — the second back in its satellite, and the third (opened during Watch) gets its own now`, !!w7 && w7.mode === 'active' && w7.sats.length === 2 && !!third && w7.sats.some((x) => x.wid === third.wid && x.title === `${T1} · ${T3}`) && w7.sats.some((x) => x.wid === sec.wid && x.stage.some((y) => y.wid === sec.wid)), w7 && w7.sats);
+            const s3sat = w7 && w7.sats.find((x) => third && x.wid === third.wid);
+            if (s3sat) {
+              await trustedClickAt(G.p, s3sat.close.x + s3sat.close.w / 2, s3sat.close.y + s3sat.close.h / 2);
+              const w8 = await until(async () => { const s = await st(); return s && s.sats.length === 1 && !s.wins.some((x) => x.title === T3) ? s : null; }, 10000, 200) || await st();
+              check('§18 S2: the third\'s ✕ closes the third alone (its X window gone, its satellite gone; the second and the main stay)', !!w8 && w8.sats.length === 1 && w8.sats[0].wid === sec.wid && !w8.wins.some((x) => x.title === T3), w8 && { sats: w8.sats, wins: w8.wins });
+            }
+          }
+          // ── a phone (390 px): one window at a time ──
+          await G.p.cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+          await sleep(1000);
+          const satId = (await st()).sats[0].id, mainId = await G.p.evalJs(`[...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(id18)} && !w._desktopSatelliteWid).id`);
+          await G.p.evalJs(`app.wm.revealWindow(${JSON.stringify(satId)}); true`);
+          const ph1 = await until(async () => { const s = await st(); return s && s.sats[0] && s.sats[0].shown && !s.shown ? s : null; }, 5000, 200) || await st();
+          await G.p.evalJs(`app.wm.revealWindow(${JSON.stringify(mainId)}); true`);
+          const ph2 = await until(async () => { const s = await st(); return s && s.shown && s.sats[0] && !s.sats[0].shown ? s : null; }, 5000, 200) || await st();
+          check(`§18 S2: a phone (390 px) shows ONE window at a time — the satellite alone (${ph1 && ph1.sats[0] && ph1.sats[0].shown}/${ph1 && ph1.shown}), then the main alone (${ph2 && ph2.shown}/${ph2 && ph2.sats[0] && ph2.sats[0].shown})`, !!ph1 && ph1.sats[0].shown && !ph1.shown && !!ph2 && ph2.shown && !ph2.sats[0].shown, { ph1: ph1 && { main: ph1.shown, sat: ph1.sats[0] && ph1.sats[0].shown }, ph2: ph2 && { main: ph2.shown, sat: ph2.sats[0] && ph2.sats[0].shown } });
+          await G.p.cdp('Emulation.clearDeviceMetricsOverride', {});
+          await sleep(1500);
+          // ── its ✕ closes only it ──
+          const c8 = await until(async () => { const s = await st(); return s && s.sats.length === 1 && s.sats[0].bound && s.sats[0].close && s.sats[0].close.w > 0 ? s : null; }, 8000, 200) || await st();
+          const s8 = c8.sats[0];
+          await G.p.evalJs(`(() => { window.__v18 = []; const w = app.wm.windows.get(${JSON.stringify(s8.id)}); const orig = w.onCloseRequest; w.onCloseRequest = () => { const r = orig(); window.__v18.push(w._desktopCloseVerdict); return r; }; app.wm.focusWindow(w.id); return true; })()`);
+          await trustedClickAt(G.p, s8.close.x + s8.close.w / 2, s8.close.y + s8.close.h / 2);
+          const gone8 = await until(() => fs.existsSync(closed18), 10000, 200);
+          const c9 = await until(async () => { const s = await st(); return s && s.sats.length === 0 && s.wins.length === 1 ? s : null; }, 10000, 200) || await st();
+          const v8 = await G.p.evalJs('window.__v18 || []'), rec9 = await G.p.evalJs(`fetch('/api/desktop/apps/${id18}').then((r) => r.json())`), t9 = await toasts18();
+          check(`§18 S2: the satellite's ✕ asks the app to close THAT window (${JSON.stringify(v8)}) — it closes (CLOSED ${!!gone8}), its window goes, "${T2} closed" said (it was in front); the main window and the app stay (${rec9 && rec9.state})`, !!gone8 && v8.some((v) => v && v.act === 'ask-window') && !!c9 && c9.sats.length === 0 && c9.title === T1 && rec9.state === 'ready' && t9.some((x) => x.includes(`${T2} closed`)), { v8, c9: c9 && { sats: c9.sats, title: c9.title }, t9 });
+          // ── S1 where a window has NO satellite: its satellite closed while it lives (a layout removal) ──
+          fs.rmSync(closed18, { force: true });
+          poke('.again');
+          const c10 = await until(async () => { const s = await st(); return s && s.sats.length === 1 && s.sats[0].bound && s.sats[0].stage.length ? s : null; }, 15000, 250) || await st();
+          check('§18 S2: the app opening its second window again opens a new satellite', !!c10 && c10.sats.length === 1 && c10.sats[0].bound, c10 && c10.sats);
+          const sec2 = c10 && c10.wins.find((x) => x.wid !== c10.mainWid);
+          if (c10 && c10.sats.length === 1 && sec2) {
+            await G.p.evalJs(`app.wm.closeWindow(${JSON.stringify(c10.sats[0].id)}); true`);
+            const c11 = await until(async () => { const s = await st(); return s && s.sats.length === 0 && s.mainStage.some((x) => x.wid === sec2.wid) && s.title === BOTH && s.minPane && s.minPane.h * s.ratio >= MIN18[1] ? s : null; }, 10000, 200) || await st();
+            check(`§18 S1 where a window has no satellite: back in the main pane (${JSON.stringify(c11 && c11.mainStage)}), the main window titled "${c11 && c11.title}" (S1c) and grown to hold its minimum (${JSON.stringify(c11 && c11.minPane)}, S1a)`, !!c11 && c11.sats.length === 0 && c11.mainStage.some((x) => x.wid === sec2.wid) && c11.title === BOTH && !!c11.minPane && c11.minPane.h * c11.ratio >= MIN18[1], c11);
+            await trustedClickAt(G.p, c11.close.x + c11.close.w / 2, c11.close.y + c11.close.h / 2);
+            const gone11 = await until(() => fs.existsSync(closed18), 10000, 200);
+            const c12 = await until(async () => { const s = await st(); return s && s.wins.length === 1 && s.title === T1 ? s : null; }, 10000, 200) || await st();
+            check(`§18 S1d: …and the main window's ✕ with it in front decides ask-front (${JSON.stringify(c12 && c12.verdict)}) — only that window closes (CLOSED ${!!gone11}), the main window stays`, !!c12 && !!c12.verdict && c12.verdict.act === 'ask-front' && !!gone11 && c12.title === T1, c12);
+          }
+          // ── the main lost: the main window ADOPTS the second ──
+          fs.rmSync(closed18, { force: true });
+          poke('.again');
+          const c13 = await until(async () => { const s = await st(); return s && s.sats.length === 1 && s.sats[0].bound ? s : null; }, 15000, 250) || await st();
+          const sec3 = c13 && c13.wins.find((x) => x.wid !== c13.mainWid);
+          poke('.dropmain');
+          const c14 = await until(async () => { const s = await st(); return s && s.sats.length === 0 && s.wins.length === 1 && s.title === T2 ? s : null; }, 15000, 200) || await st();
+          const rec14 = await G.p.evalJs(`fetch('/api/desktop/apps/${id18}').then((r) => r.json())`);
+          check(`§18 S2: the app drops its MAIN window ⇒ the main VibeSpace window ADOPTS the second (titled "${c14 && c14.title}", drawing it), its satellite closes, the app keeps running (${rec14 && rec14.state})`, !!c14 && !!sec3 && c14.sats.length === 0 && c14.mainWid === sec3.wid && c14.mainStage.some((x) => x.wid === sec3.wid) && c14.title === T2 && rec14.state === 'ready', c14);
+        }
+      }
+    } catch (e) { failed++; console.error('  ✗ §18 threw:', e.stack || e.message); }
+    finally {
+      if (id18) await fetch(`http://127.0.0.1:${PORT}/api/desktop/apps/${id18}/stop`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ force: true }) }).catch(() => {});
+      await dropPage(G);
     }
   }
 } catch (e) {

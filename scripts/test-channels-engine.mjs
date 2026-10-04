@@ -2901,7 +2901,7 @@ console.log('\n⑭ the server belt under /older: one flight, the floor, the reme
   const DRAIN_SRC = fs.readFileSync(path.join(REPO, 'src/channel-drain.js'), 'utf-8');
   const ENGINE_SRC = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
   const DRAIN_REQUIRE = "const Drain = require('../channel-drain.js');";
-  const worldOf = () => { const convs = new Map(); const at0 = Date.now() - 3600e3; const add = (id, count) => { const recs = []; for (let i = 0; i < count; i++) recs.push({ vendorId: `${id}-m${String(i).padStart(4, '0')}`, at: at0 - (count - 1 - i) * 60e3, author: { id: `u-${i % 3}`, name: ['Ada', 'Brook', 'Cass'][i % 3] }, text: `message ${i} in ${id}` }); convs.set(id, { id, recs }); }; add('deep', 260); add('flat', 3); return { convs, older: 0, log: [], delayMs: 0, failNext: null }; };
+  const worldOf = () => { const convs = new Map(); const at0 = Date.now() - 3600e3; const add = (id, count) => { const recs = []; for (let i = 0; i < count; i++) recs.push({ vendorId: `${id}-m${String(i).padStart(4, '0')}`, at: at0 - (count - 1 - i) * 60e3, author: { id: `u-${i % 3}`, name: ['Ada', 'Brook', 'Cass'][i % 3] }, text: `message ${i} in ${id}` }); convs.set(id, { id, recs }); }; add('deep', 260); add('flat', 3); return { convs, older: 0, log: [], delayMs: 0, failNext: null, arrived: 0, holdFor: 0 }; };
   const modFor = (world, receive = 'poll') => ({
     kind: 'belt',
     caps: { ...(receive === 'push' ? fake.fakePush.caps : fake.fakePoll.caps), receive, attachments: 'fetch', olderHistory: 'page', budget: { unit: 'request', default: 600, settingKey: null, metered: true } },
@@ -2923,6 +2923,8 @@ console.log('\n⑭ the server belt under /older: one flight, the floor, the reme
         async older(id, { before = null, limit = 50 } = {}) {
           meter(1); world.older++; world.log.push({ id, before: before && before.vendorId });
           if (world.delayMs) await sleep(world.delayMs);
+          // the vendor answers once every concurrent ask has reached loadOlder's verdict (synchronous up to it) — never a race against a timer
+          if (world.holdFor) { const t0 = Date.now(); while (world.arrived < world.holdFor && Date.now() - t0 < 10000) await sleep(2); }
           if (world.failNext) { const code = world.failNext; world.failNext = null; throw new CH.ChannelError(code, 'HTTP 503 Service Unavailable', { retryable: true }); }
           const x = world.convs.get(id); const all = x ? x.recs : [];
           const olderOnes = before ? all.filter((m) => m.at < before.at || (m.at === before.at && m.vendorId < before.vendorId)) : all;
@@ -2961,7 +2963,9 @@ console.log('\n⑭ the server belt under /older: one flight, the floor, the reme
     engines.push(eng);
     for (let i = 0; i < 5; i++) { await eng.pass('sc', { force: true }); if (Object.values(eng.store.index.live()).filter((e) => e.adapterId === 'sc').every((e) => e.anchor)) break; }
     const express = require(path.join(REPO, 'node_modules/express'));
-    const app = express(); app.use(express.json()); routes.setup({ getEngine: () => eng }); app.use(routes.router);
+    // lane mirror-green-channels: the routes' engine counts each /older that reaches loadOlder (world.arrived) — the hold above
+    const front = Object.create(eng); front.loadOlder = (...a) => { world.arrived++; return eng.loadOlder(...a); };
+    const app = express(); app.use(express.json()); routes.setup({ getEngine: () => front }); app.use(routes.router);
     const server = await new Promise((resolve) => { const s0 = app.listen(0, '127.0.0.1', () => resolve(s0)); });
     const base = `http://127.0.0.1:${server.address().port}`;
     const post = async (conv, body) => { const r = await fetch(`${base}/api/channels/sc/${conv}/older`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); return { status: r.status, json: await r.json() }; };
@@ -2972,9 +2976,14 @@ console.log('\n⑭ the server belt under /older: one flight, the floor, the reme
   const B = await belt('belt');
   ok(B.localCount('deep') === 50 && B.world.older === 0, 'FIXTURE: the first ingest took the newest 50 of 260; the vendor\'s older() untouched');
   // ① ONE FLIGHT: 20 concurrent /older at one boundary — one vendor call, nineteen joiners carrying the page it landed
-  B.world.delayMs = 30;
+  // lane mirror-green-channels (the Actions mirror, 2.369.204: "1 vendor, 15 joined, 4 local"): 30 ms was a guess at how
+  // long twenty fetches take to arrive — on the runner's loaded 4 cpus the last four reached the engine AFTER the page
+  // landed and were answered `local` (correctly: the log already held it). The vendor's answer is now HELD until all
+  // twenty asks have taken their verdict, so the nineteen joins are constructed, not raced.
+  B.world.delayMs = 30; B.world.arrived = 0; B.world.holdFor = 20;
   const b1 = B.boundary('deep');
   const rs = await Promise.all(Array.from({ length: 20 }, () => B.post('deep', b1)));
+  B.world.holdFor = 0;
   const srcs = rs.map((r) => r.json.source);
   ok(B.world.older === 1 && rs.every((r) => r.status === 200 && r.json.ok && (r.json.records || []).length === 50 && !r.json.refused) && srcs.filter((x) => x === 'vendor').length === 1 && srcs.filter((x) => x === 'joined').length === 19 && B.localCount('deep') === 100, `① 20 concurrent /older at one boundary: the vendor asked ONCE (${B.world.older}), one answer \`vendor\`, nineteen \`joined\` — every one carries the 50-row page (100 local)`, JSON.stringify({ older: B.world.older, srcs, n: rs.map((r) => (r.json.records || []).length) }));
   // ② THE FLOOR: the next ask inside OLDER_FLOOR_MS is refused by name with the wait, the local page still answered; past it the vendor is asked
@@ -3062,14 +3071,14 @@ console.log('\n⑭ the server belt under /older: one flight, the floor, the reme
     ok(sites.length === 1 && /^src\/server\/channels-engine\.js:/.test(sites[0]) && at > 0 && verdictAt > fnAt && at > verdictAt, `⑨ CENSUS: the vendor's older() has ONE caller in src/ (${sites.join(', ')}), inside loadOlder after the rule-19 verdict`, JSON.stringify({ sites, at, verdictAt, fnAt }));
     const BY = await belt('belt-bypass', { engineEdits: [['      let v = Drain.olderVerdict(olderMemOf(e, convId), now());\n', "      let v = { act: 'vendor' }; olderMemOf(e, convId);\n"]] });   // (the memory still minted: the verdict alone is skipped)
     ok(BY.setup, 'CONTROL setup · bypass: the verdict is asked on one line');
-    if (BY.setup) { BY.world.delayMs = 30; const rs = await Promise.all(Array.from({ length: 20 }, () => BY.post('deep', BY.boundary('deep')))); ok(BY.world.older >= 19 && rs.every((r) => r.status === 200), `CONTROL bypass: an engine that skips the verdict lets 20 concurrent asks reach the vendor ${BY.world.older} times — ① would redden`, JSON.stringify(rs.map((r) => [r.status, r.json.source || r.json.code, r.json.error]).slice(0, 3))); }
+    if (BY.setup) { BY.world.delayMs = 30; BY.world.arrived = 0; BY.world.holdFor = 20; const rs = await Promise.all(Array.from({ length: 20 }, () => BY.post('deep', BY.boundary('deep')))); ok(BY.world.older >= 19 && rs.every((r) => r.status === 200), `CONTROL bypass: an engine that skips the verdict lets 20 concurrent asks reach the vendor ${BY.world.older} times — ① would redden`, JSON.stringify(rs.map((r) => [r.status, r.json.source || r.json.code, r.json.error]).slice(0, 3))); }
     BY.close();
   }
   // CONTROLS: the engine over a patched drain, each clause reverted — the reproduction returns
   const CTL = [
     // (the join is the COURTESY: without it the floor still holds the money — one vendor call — but nineteen callers get a
     //  refusal with an empty page instead of the page the flight landed; the floor and the memory are the money clauses)
-    { name: 'nojoin', edits: [["  if (m.inflight) return { act: 'join' };\n", '']], leg: async (C) => { C.world.delayMs = 30; const rs = await Promise.all(Array.from({ length: 20 }, () => C.post('deep', C.boundary('deep')))); return { calls: C.world.older, joined: rs.filter((r) => r.json.source === 'joined').length, refused: rs.filter((r) => r.json.refused === 'older-floor' && (r.json.records || []).length === 0).length }; }, red: (n) => n.calls === 1 && n.joined === 0 && n.refused === 19, say: (n) => `20 concurrent asks: ${n.calls} vendor call (the floor holds the money), but ${n.refused} callers refused with an EMPTY page and ${n.joined} joined (the shipped belt: 19 joined, each carrying the page)` },
+    { name: 'nojoin', edits: [["  if (m.inflight) return { act: 'join' };\n", '']], leg: async (C) => { C.world.delayMs = 30; C.world.arrived = 0; C.world.holdFor = 20; const rs = await Promise.all(Array.from({ length: 20 }, () => C.post('deep', C.boundary('deep')))); return { calls: C.world.older, joined: rs.filter((r) => r.json.source === 'joined').length, refused: rs.filter((r) => r.json.refused === 'older-floor' && (r.json.records || []).length === 0).length }; }, red: (n) => n.calls === 1 && n.joined === 0 && n.refused === 19, say: (n) => `20 concurrent asks: ${n.calls} vendor call (the floor holds the money), but ${n.refused} callers refused with an EMPTY page and ${n.joined} joined (the shipped belt: 19 joined, each carrying the page)` },
     { name: 'nomemory', edits: [["  if (ex > 0 && t - ex < OLDER_MEMORY_MS) return { act: 'exhausted' };\n", '']], leg: async (C) => { for (let i = 0; i < 8; i++) { C.tick(2000); const r = await C.post('deep', C.boundary('deep')); if (r.json.exhausted && r.json.source === 'vendor') break; } const c0 = C.world.older; for (let i = 0; i < 3; i++) { C.tick(2000); await C.post('deep', C.boundary('deep')); } return C.world.older - c0; }, red: (n) => n >= 3, say: (n) => `three asks at the dawn reached the vendor ${n} times` },
     { name: 'nofloor', edits: [["  if (asked > 0 && t - asked < OLDER_FLOOR_MS) return { act: 'floor', retryAfterMs: Math.min(OLDER_FLOOR_MS, Math.max(1, OLDER_FLOOR_MS - (t - asked))) };   // never longer than the floor (a clock that went backwards)\n", '']], leg: async (C) => { const c0 = C.world.older; for (let i = 0; i < 4; i++) { C.tick(100); await C.post('deep', C.boundary('deep')); } return C.world.older - c0; }, red: (n) => n >= 4, say: (n) => `four asks 100 ms apart reached the vendor ${n} times` },
   ];

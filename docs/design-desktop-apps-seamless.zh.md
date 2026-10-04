@@ -300,6 +300,20 @@ seamless ⇔ connected ∧ ¬lease ∧ ¬chain ∧ ¬phone ∧ (userToggle==='on
 - **F4（low）—— `list` 晚一个 await 交出了已撤销窗口的那一行。** 现在它在最后一个 await 之后重新判定可达性（`stillListed`，逐调用点普查的第 15 处）。门禁：§5 一条竞态用例。
 - **F5（low）—— 启动审计把存储读不出来的任务组算成 `unmatched`。** 一个组行在某次成员关系读取抛异常时谁也没找到，记为 `undecided`（纯函数 `reachedState` / `launchCounts`；共享视图把这一行标为 `undecided`）。门禁：test-window-reach §2c + 对照 (g)，test-window-targets §5 + 对照。
 
+### 3.7 一个顶层窗口一个 VibeSpace 窗口（design 016 S2，lane app-satellite-windows，2026-10-03，按实际建成）
+
+owner 2026-10-03 对「应用再打开的顶层窗口（比如微信的朋友圈）要不要变成 VibeSpace 里一个独立的窗口」答「没问题」。S1（lane app-guest-window）把朋友圈留在主窗口里（窗口长到装得下、居中、标题写明前面的窗口）；它的局限就是 S2 的理由：主窗口铺满画面，点一下主窗口就把朋友圈盖住。
+
+- **一个连接，多个画面。** 每个 app 会话仍然只有一条 xpra 连接（x5 规则不变：一个连接一个活跃 viewer）。主窗口的 view 持有会话；第二个及之后的 NORMAL 顶层窗口各自打开一个「卫星」窗口（类型仍是 `desktop-app`，openSpec `{action:'openDesktopApp', id, wid, title}`），它的画面是同一会话的一个取景框（xpra-view `attachSatellite`），自己从不开 socket —— test-architecture §S2 普查。
+- **根窗口里的槽位。** X 根窗口按「主窗口在 0,0，其余窗口依次排在右边」长大（PURE `slotFor`：主窗口的显示宽度 + 32 px 间隔，依次累加；上限 8192 px，超出的窗口仍按 S1 留在主窗口里）。窗口之间在根坐标里从不重叠；腰带规则变成「在自己的槽位里」（`inSlot`）。根尺寸随窗口增减，由同一个 display 包发出（lane desktop-workarea 的完整 `desktop_size`，_NET_WORKAREA 跟着走）。
+- **谁画哪个窗口。** PURE `paneOf`：有槽位的窗口画在自己的卫星里；transient-for 它（沿链上溯）的对话框也画在那里、放在它的槽位内；弹出菜单 / tooltip 画在包含其原点的槽位里；其余画在主窗口。主窗口的最小尺寸并集、标题里的「前面窗口」、✕ 的 ask-front 只看主窗口自己的窗口。
+- **卫星窗口。** 标题「{应用} · {窗口}」（「微信 · 朋友圈」），自己的任务栏项；打开时获得焦点，放在主窗口旁边（右侧，放不下就左侧），或者放在这个应用上次留下卫星的相对位置（user state `desktopAppSatellite[应用]`）；大小 = X 窗口的大小（应用定死尺寸时固定，否则可调并有最小尺寸）；按它自己的 `decorations` 决定是否 seamless（`windowSeamless`），它自己的标题栏拖动移动这个卫星；应用自己的最小化作用于卫星。指针和按键进卫星的窗口：在卫星里打字前，X 焦点先移到卫星的窗口（`focusPane`）。
+- **关闭与归属。** 卫星的 ✕ = 对它的 X 窗口发 close-window（应用可以拒绝）；同一窗口 5 s 内再按一次 ✕，或无法询问时，只关卫星，X 窗口回到主窗口里当 S1 的客人（`releaseSlot`），绝不画在无处。X 窗口没了 ⇒ 卫星关闭，只有它在前面时才 toast「朋友圈 已关闭」。主 X 窗口没了而还有别的窗口 ⇒ 主窗口接管下一个主窗口（`pickMain`），它的卫星关闭。主窗口关掉 ⇒ 它的卫星一起关。
+- **重新载入 / 另一个客户端。** 布局同步把卫星带到每个客户端；重新载入时卫星按 wid 重新绑定（同一个窗口 id）；会话的窗口清单里（startup-complete，或 hello 后 3 s）已经没有这个 wid ⇒ 安静地关掉。被挡住（Blocked）的客户端，卫星显示「正在另一个客户端上使用」。
+- **Watch（agent 在操作）。** 一张图：所有窗口都画回主窗口（按比例缩放），卫星里写「智能体操作期间在主窗口中显示」；Watch 期间新开的窗口不开卫星，回到 active 时才开。
+- **手机。** 卫星就是 Stage 里又一个窗口，一次只显示一个；新窗口打开时显示它。
+- **没做（有意）。** 卫星没有自己的状态条 / ⋯（Stop、Scale、共享都在主窗口上）；对话框不开卫星；Watch 时卫星不各自显示只读画面（设计说「一张图」）。
+
 ## 4. 精简集（建议就建这些）
 
 | 建 | 内容 | 需要先定 |

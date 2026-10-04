@@ -936,5 +936,90 @@ console.log('naive-user N-ja: the summary\'s "nobody" says NOBODY in every langu
   for (const r of copiesCensus(M2.files, M2.dir, REPO, { minCopies: 1, label: 'mutant-copy (N-ja): ' })) ok(r.pass, r.name, r.detail);
 }
 
+// ── lane exit-transfer (design 013 B): the PURE parts of pull / push ──
+console.log('lane exit-transfer (design 013 B): the PURE parts of pull / push — the verdict table, the path shapes, the bound, the words, the row');
+{
+  const F = (kind, size = 10) => ({ kind, size, mtimeMs: 1 });
+  const NONE = { kind: 'none', size: 0, mtimeMs: 0 };
+  const MAX = 100;
+  const TABLE = [
+    ['pull: a regular file within the bound', { verb: 'pull', max: MAX, remote: F('file', 99), local: NONE }, 'ok'],
+    ['pull: exactly the bound', { verb: 'pull', max: MAX, remote: F('file', 100), local: NONE }, 'ok'],
+    ['pull: the bound + 1 byte', { verb: 'pull', max: MAX, remote: F('file', 101), local: NONE }, 'too_big'],
+    ['pull: 0 bytes', { verb: 'pull', max: MAX, remote: F('file', 0), local: NONE }, 'ok'],
+    ['pull: the remote file is absent', { verb: 'pull', max: MAX, remote: NONE, local: NONE }, 'not_a_file', 'remote'],
+    ['pull: the remote path is a folder', { verb: 'pull', max: MAX, remote: F('dir', 4096), local: NONE }, 'not_a_file', 'remote'],
+    ['pull: the remote path is a device (/dev/zero: size 0, endless)', { verb: 'pull', max: MAX, remote: F('other', 0), local: NONE }, 'not_a_file', 'remote'],
+    ['pull: the local file exists, no --overwrite', { verb: 'pull', max: MAX, remote: F('file'), local: F('file') }, 'exists', 'local'],
+    ['pull: the local file exists, --overwrite', { verb: 'pull', max: MAX, remote: F('file'), local: F('file'), overwrite: true }, 'ok'],
+    ['pull: the local path is a folder (even with --overwrite)', { verb: 'pull', max: MAX, remote: F('file'), local: F('dir'), overwrite: true }, 'not_a_file', 'local'],
+    ['push: a regular file within the bound', { verb: 'push', max: MAX, local: F('file', 100), remote: NONE }, 'ok'],
+    ['push: the bound + 1 byte', { verb: 'push', max: MAX, local: F('file', 101), remote: NONE }, 'too_big'],
+    ['push: the local path is not a regular file', { verb: 'push', max: MAX, local: F('other', 0), remote: NONE }, 'not_a_file', 'local'],
+    ['push: the remote file exists, no --overwrite', { verb: 'push', max: MAX, local: F('file'), remote: F('file') }, 'exists', 'remote'],
+    ['push: the remote file exists, --overwrite', { verb: 'push', max: MAX, local: F('file'), remote: F('file'), overwrite: true }, 'ok'],
+    ['push: the remote path is a folder', { verb: 'push', max: MAX, local: F('file'), remote: F('dir'), overwrite: true }, 'not_a_file', 'remote'],
+  ];
+  const judgeT = (X) => TABLE.map(([name, a, want, side]) => { const v = X.transferVerdict(a); return { name, pass: want === 'ok' ? v.ok === true && v.size === (a.verb === 'pull' ? a.remote.size : a.local.size) : v.ok === false && v.code === want && (!side || v.side === side), v }; });
+  for (const r of judgeT(E)) ok(r.pass, `transferVerdict — ${r.name}`, r.v);
+  ok(E.transferVerdict({ verb: 'pull', max: MAX, remote: F('file', 101) }).size === 101 && E.transferVerdict({ verb: 'pull', max: MAX, remote: F('file', 101) }).max === MAX, 'too_big carries both numbers (the sentence names them)');
+  let threw = false; try { E.transferVerdict({ verb: 'copy' }); } catch { threw = true; }
+  ok(threw, 'an unknown verb throws (a closed set)');
+  // the device's stat answer → kinds (mode bits — a device / pipe / socket is never a "file")
+  eq([E.statFacts({ size: 5, mode: 0o100644, isDir: false }).kind, E.statFacts({ size: 0, mode: 0o020666, isDir: false }).kind, E.statFacts({ size: 0, mode: 0o010644 }).kind, E.statFacts({ size: 4096, mode: 0o040755, isDir: true }).kind, E.statFacts(null).kind, E.statFacts(fs.statSync(path.join(REPO, 'package.json'))).kind, E.statFacts(fs.statSync(REPO)).kind], ['file', 'other', 'other', 'dir', 'none', 'file', 'dir'], 'statFacts: a regular file / a char device / a FIFO / a folder / absent / a real fs.Stats file / folder');
+  // the bound (MB → bytes)
+  const G = 1024 * 1024 * 1024;
+  eq([E.transferMaxOf(undefined), E.transferMaxOf(''), E.transferMaxOf('junk'), E.transferMaxOf(0), E.transferMaxOf(2048), E.transferMaxOf(1e12)], [G, G, G, 1024 * 1024, 2 * G, 1024 * G], 'transferMaxOf: absent / junk ⇒ 1 GiB; at least 1 MB; MB → bytes; at most the row\'s 1 TiB');
+  // the path shapes
+  const P = [
+    ['/home/me/out.bin', {}, true], ['C:\\Users\\me\\out.zip', {}, true], ['C:/Users/me/out.zip', {}, true], ['\\\\srv\\share\\f.bin', {}, true],
+    ['~/out.bin', { tilde: true }, true], ['~/out.bin', { tilde: false }, false], ['rel/x.bin', {}, false], ['', {}, false], [42, {}, false],
+    ['/home/me/', {}, false], ['C:\\Users\\', {}, false], ['~', { tilde: true }, false], ['/a\nb', {}, false], ['/a\u202eb.txt', {}, false], ['/a\u200bb', {}, false], ['/' + 'x'.repeat(5000), {}, false],
+    ['/home/me/x', { side: 'local' }, true], ['C:\\x\\y', { side: 'local' }, false], ['~/x', { side: 'local' }, false],
+  ];
+  const judgeP = (X) => P.map(([p, o, want]) => { const v = X.transferPathVerdict(p, o); return { p, o, pass: want ? v.ok === true : v.ok === false && v.code === 'bad_path' && typeof v.error === 'string' && v.error.length > 10, v }; });
+  for (const r of judgeP(E)) ok(r.pass, `transferPathVerdict ${JSON.stringify(r.p).slice(0, 40)} ${JSON.stringify(r.o)} ⇒ ${r.v.ok ? 'ok' : 'bad_path'}`, r.v);
+  ok(/does not expand ~/.test(E.transferPathVerdict('~/x', {}).error) && /U\+202E|202e/i.test(E.transferPathVerdict('/a\u202eb', {}).error), 'the sentences say why: an agent that does not expand ~; the hidden character by its code point');
+  // the words: every new refusal names what, where, that nothing moved — never "undefined" / "null"
+  const W1 = { machine: 'BOX', path: '/srv/x.bin', size: 5 * G, max: G, why: 'is a folder', error: 'read-range stalled', side: 'remote' };
+  for (const code of ['too_big', 'not_a_file', 'exists', 'hash_mismatch', 'transfer_failed']) {
+    const t = E.refusalText(code, W1);
+    ok(t.includes('"/srv/x.bin"') && /nothing (was copied|was kept)/.test(t) && !/undefined|null/.test(t), `refusalText(${code}) names the path and says nothing moved: ${t.slice(0, 110)}…`, t);
+  }
+  ok(/5\.0 GiB — more than the 1\.0 GiB/.test(E.refusalText('too_big', W1)) && /add --overwrite/.test(E.refusalText('exists', W1)) && /on "BOX"/.test(E.refusalText('exists', W1)) && / here /.test(E.refusalText('exists', { ...W1, side: 'local' })), 'too_big names both sizes; exists names the side and --overwrite');
+  const pushOld = E.refusalText('device_agent_outdated', { machine: 'BOX', verb: 'push', agentVersion: '2.369.200' });
+  ok(pushOld.includes(E.PUSH_SINCE) && /pull works/.test(pushOld) && /2\.369\.200/.test(pushOld) && /Pairing command/.test(pushOld) && !/run commands on Windows/.test(pushOld), 'device_agent_outdated for a push: the agent, the first version that can, "pull works", the one step — not the run sentence', pushOld);
+  ok(E.REFUSALS.includes('too_big') && E.REFUSALS.includes('bad_path') && E.REFUSALS.includes('local_path_refused'), 'the new codes are in the closed refusal set');
+  // the line, the card, the CLI line
+  eq([E.transferLine({ verb: 'pull', remote: 'C:\\a.bin', local: '/p/a.bin' }), E.transferLine({ verb: 'push', remote: '/r/b', local: '/p/b' })], ['pull C:\\a.bin → /p/a.bin', 'push /p/b → /r/b'], 'the transfer line (the ask\'s detail, the audit\'s cmd, the list\'s command)');
+  const SHA = 'ab'.repeat(32);
+  ok(/^pulled `C:\\nomad\.bin` from WIN-DESK1 → `\/p\/nomad\.bin` — 812\.0 MiB · sha256 abababababab… verified · 41\.0 s$/.test(E.transferCardText({ verb: 'pull', remote: 'C:\\nomad.bin', local: '/p/nomad.bin', outcome: 'done', bytes: 851443712, sha256: SHA, verified: 'sha256', ms: 41000 }, { machine: 'WIN-DESK1' })), 'the card of a pull that landed: what, from where, where to, the size, the check, the time');
+  ok(/size verified \(its agent predates sha256\)/.test(E.transferCardText({ verb: 'pull', outcome: 'done', bytes: 1, verified: 'size', ms: 1 }, { machine: 'M' })) && /^did not push `\/p\/x` to M — its agent cannot receive files/.test(E.transferCardText({ verb: 'push', local: '/p/x', outcome: 'agent_outdated' }, { machine: 'M' })) && /over the 1\.0 GiB/.test(E.transferCardText({ verb: 'pull', outcome: 'too_big', size: 2 * G, max: G }, { machine: 'M' })), 'the card says "size verified" for an old agent, and every refusal by name');
+  ok(/^pulled C:\\a\.bin from "M" → \/p\/a\.bin — 1\.0 KiB \(1024 bytes\) · sha256 a{0}(ab){32} verified · 0\.5 s$/.test(E.transferCliLine({ verb: 'pull', remote: 'C:\\a.bin', local: '/p/a.bin', bytes: 1024, sha256: SHA, verified: 'sha256', ms: 500 }, { machine: 'M' })), 'the CLI line carries the whole sha256', E.transferCliLine({ verb: 'pull', remote: 'C:\\a.bin', local: '/p/a.bin', bytes: 1024, sha256: SHA, verified: 'sha256', ms: 500 }, { machine: 'M' }));
+  // the row (the machine's command list, the agent's `runs`)
+  const line = { at: 5, id: 'abc', hostId: 'h', machine: 'M', name: 'agent A', sessionKey: 'claude:A', verb: 'pull', cmd: 'pull C:\\a.bin → /p/a.bin', path: 'C:\\a.bin', localPath: '/p/a.bin', bytes: 1024, sha256: SHA, verified: 'sha256', ms: 500, ok: true };
+  const row = E.runRow(line);
+  ok(row && row.outcome === 'ran' && row.verb === 'pull' && row.transfer.remote === 'C:\\a.bin' && row.transfer.local === '/p/a.bin' && row.transfer.bytes === 1024 && row.transfer.sha256 === SHA && row.transfer.verified === 'sha256' && row.stdout === '' && row.name === 'agent A', 'a pull line is a row of the command list (its two ends, the size, the hash)', row);
+  const bad = E.runRow({ ...line, verb: 'push', sha256: 'not-a-hash', bytes: -3, verified: 'trust me', refusal: 'exists', ok: false });
+  ok(bad && bad.outcome === 'refused' && bad.refusal === 'exists' && bad.transfer.sha256 === null && bad.transfer.bytes === null && bad.transfer.verified === null, 'a hand-written line is re-bounded (a junk hash / size / verification ⇒ null); a refused push is "refused"', bad);
+  ok(E.runRow({ ...line, verb: 'copy' }) === null && !('name' in E.runRow(line, { agent: true })), 'an unknown verb is no row; the agent\'s row drops the name');
+  // CONTROLS (patched copies of exit-reach.js)
+  const MX = mutantCopies('exitxfer', REPO);
+  const src = fs.readFileSync(path.join(REPO, 'src/exit-reach.js'), 'utf8');
+  const ctl = (tag, from, to, judge, name) => {
+    const mut = src.replace(from, to);
+    ok(mut !== src, `CONTROL (${tag}): the patch applies`);
+    const X = MX.load('src/exit-reach.js', mut, tag);
+    ok(judge(X), `CONTROL (${tag}): ${name}`);
+  };
+  const red = (X, which) => judgeT(X).some((r) => !r.pass && r.name.includes(which));
+  ctl('xt1', "  if (src.size > max) return refuse('too_big', { size: src.size, max });\n", '', (X) => red(X, 'the bound + 1'), 'the bound removed — "the bound + 1 byte" goes red (pull AND push)');
+  ctl('xt2', "  if (dst.kind === 'file' && !overwrite) return refuse('exists', { side: dstSide });", '', (X) => red(X, 'no --overwrite'), 'the overwrite guard removed — "exists, no --overwrite" goes red');
+  ctl('xt3', "  if (src.kind !== 'file') return refuse('not_a_file',", "  if (src.kind === 'none') return refuse('not_a_file',", (X) => red(X, '/dev/zero'), 'a kind check that knows only "absent" — the /dev/zero row goes red (an endless read)');
+  ctl('xt4', "  if (/[\\u0000-\\u001f\\u007f]/.test(p) || hidden.length) return refuse('bad_path'", "  if (false) return refuse('bad_path'", (X) => judgeP(X).some((r) => !r.pass && /\\u202e|\\n|\\u200b/.test(JSON.stringify(r.p))), 'the hidden / control check removed — the RLO / newline / zero-width rows go red');
+  ctl('xt5', "  if (/[\\\\/]$/.test(p) || tl && p.length <= 2) return refuse('bad_path'", "  if (false) return refuse('bad_path'", (X) => judgeP(X).some((r) => !r.pass && /\/home\/me\/"|Users\\\\\\\\"/.test(JSON.stringify(r.p))), 'the folder-spelling check removed — "/home/me/" goes red');
+  for (const r of copiesCensus(MX.files, MX.dir, REPO, { minCopies: 5, label: 'mutant-copy (exit-transfer): ' })) ok(r.pass, r.name, r.detail);
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

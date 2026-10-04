@@ -316,6 +316,87 @@ export function windowKind(meta = {}, overrideRedirect = false) {
   return 'main';
 }
 
+// ── AN APP'S SECOND WINDOW (design 016 S1, lane app-guest-window, 2026-10-03 — the owner: 「对于这种app又打开一个窗口的情况你似乎
+// 没有处理好」: WeChat's Moments drawn over the main window, cut at the bottom). MEASURED on the owner's :4 (xprop): Weixin
+// NORMAL 1574×974 (min 840×816, max 1574×974); Moments NORMAL, no transient-for, 880×974 at 324,0, min 880×1120; a 138×44
+// override-redirect tooltip. The pane HOLDS every mapped window that is not a popup (menus and tooltips stay where X put them).
+const heldWindow = (win) => !!win && win.kind !== 'popup' && win.mapped !== false;
+/** The pane's minimum (device px): the UNION of every held window's minimum (`minimum-size`, else `base-size` — the
+ *  rule of minPaneCss), {w, h} — or null when none states one. Weixin + Moments ⇒ 880×1120: the window grows to hold
+ *  Moments instead of cutting it. */
+export function unionMin(windows) {
+  let w = 0, h = 0;
+  for (const win of windows || []) {
+    if (!heldWindow(win)) continue;
+    const c = sizeHintsOf(win.meta || {}) || {};
+    const m = sizePair(c['minimum-size']) || sizePair(c['base-size']);
+    if (m) { w = Math.max(w, m[0]); h = Math.max(h, m[1]); }
+  }
+  return w && h ? { w, h } : null;
+}
+/** A SECOND top-level (a NORMAL window that is not the app's main) is placed CENTRED over `over` (the main's rectangle,
+ *  else the pane), then kept inside the pane (`placeInside`: one larger than the pane is pinned to the origin). */
+export function placeGuest({ x, y, w, h }, { paneW, paneH }, over = null) {
+  const o = over && over.w > 0 && over.h > 0 ? over : { x: 0, y: 0, w: paneW, h: paneH };
+  const placed = placeInside({ x: Math.floor(o.x + (o.w - w) / 2), y: Math.floor(o.y + (o.h - h) / 2), w, h }, { paneW, paneH });
+  return { ...placed, moved: placed.x !== x || placed.y !== y };
+}
+/** The FRONT window: the topmost held window by `z` (a dialog counts — what a desktop's title and ✕ name), or null. */
+export function frontOf(windows) {
+  let best = null;
+  for (const win of windows || []) if (heldWindow(win) && (!best || win.z > best.z)) best = win;
+  return best;
+}
+
+// ── A WINDOW PER TOP-LEVEL (design 016 S2, lane app-satellite-windows, 2026-10-03 — the owner's YES to 「应用再打开的顶层窗口
+// （比如微信的朋友圈）要不要变成 VibeSpace 里一个独立的窗口」): ONE xpra connection still holds every X window of the session;
+// the X ROOT grows to hold each top-level side by side — the main at 0,0 (the main pane's display), every secondary NORMAL
+// window in its own SLOT to the right — so windows never overlap in root space and a satellite pane is a viewport onto
+// its slot. Bounded: the root never passes SLOT_ROOT_MAX (xpra's max screen size); a window that would is a guest (S1).
+export const SLOT_GAP = 32;          // device px between two slots (and after the main's display)
+export const SLOT_ROOT_MAX = 8192;   // the root's widest (device px)
+/** The ROOT SLOTS: `main` = the main pane's display {w, h} at 0,0; `secondaries` = [{wid, w, h}] in the order they
+ *  mapped, each placed to the right (x = the main's width + Σ the earlier slots' widths + gaps, y 0). A slot whose right
+ *  edge would pass `max` is not given (that window stays a guest of the main pane). → { slots: Map wid→{x,y,w,h}, root }. */
+export function slotFor(main, secondaries, { gap = SLOT_GAP, max = SLOT_ROOT_MAX } = {}) {
+  const mw = Math.max(1, Math.floor(Number(main && main.w) || 1)), mh = Math.max(1, Math.floor(Number(main && main.h) || 1));
+  const slots = new Map();
+  let x = mw + gap, width = mw, height = mh;
+  for (const s of secondaries || []) {
+    const w = Math.max(1, Math.ceil(Number(s && s.w) || 1)), h = Math.max(1, Math.ceil(Number(s && s.h) || 1));
+    if (x + w > max) continue;
+    slots.set(s.wid, { x, y: 0, w, h });
+    width = x + w; height = Math.max(height, h);
+    x += w + gap;
+  }
+  return { slots, root: { width, height } };
+}
+/** The belt's rule for a slotted window: its origin IS the slot's origin (its size is the fit's). */
+export function inSlot({ x, y, w, h }, slot) {
+  return { x: slot.x, y: slot.y, w, h, moved: x !== slot.x || y !== slot.y };
+}
+/** `placeInside` within a rectangle of the root (a slot): {x,y,w,h,moved} in root coordinates. */
+export function placeInRect(g, rect) {
+  const p = placeInside({ x: g.x - rect.x, y: g.y - rect.y, w: g.w, h: g.h }, { paneW: rect.w, paneH: rect.h });
+  return { x: p.x + rect.x, y: p.y + rect.y, w: g.w, h: g.h, moved: p.moved };
+}
+/** WHICH PANE DRAWS A WINDOW: the wid of the slot it belongs to (a satellite's), or 0 (the main pane). A slotted window
+ *  is its own; a dialog belongs to the pane of the window it is transient for (followed up its chain); a popup to the
+ *  slot that contains its origin (a menu opened from a satellite's window); everything else to the main pane. */
+export function paneOf(win, slots, windows) {
+  if (!win || !slots || !slots.size) return 0;
+  if (slots.has(win.wid)) return win.wid;
+  if (win.kind === 'popup') { for (const [wid, s] of slots) if (win.x >= s.x && win.y >= s.y && win.x < s.x + s.w && win.y < s.y + s.h) return wid; return 0; }
+  let cur = win;
+  for (let i = 0; i < 8 && cur && cur.meta; i++) {
+    const tf = Number(cur.meta['transient-for']) || 0;
+    if (!tf) return 0;
+    if (slots.has(tf)) return tf;
+    cur = windows && typeof windows.get === 'function' ? windows.get(tf) : null;
+  }
+  return 0;
+}
+
 // ── bytes ↔ strings (rencodeplus hands text as strings, bytes as Uint8Array) ──
 export function bytesToString(v) {
   if (v == null) return '';
@@ -333,19 +414,17 @@ export function stringToBytes(s) { return new TextEncoder().encode(String(s ?? '
  */
 export function helloCaps({ width, height, dpi = 96, uuid = 'vibespace', layout = 'us', share = true } = {}) {
   const w = Math.max(1, Math.floor(width || 1)), h = Math.max(1, Math.floor(height || 1));
-  const wmm = Math.round(25.4 * w / dpi), hmm = Math.round(25.4 * h / dpi);
-  const screen = ['VibeSpace', w, h, wmm, hmm, [['Canvas', 0, 0, w, h, wmm, hmm]], 0, 0, w, h];
   return {
     version: '21', client_type: 'HTML5', 'session-type': 'VibeSpace', 'session-type.full': 'VibeSpace desktop-app window', username: '', uuid, argv: [],
     share, steal: true, 'mouse.show': true, 'setting-change': true, 'xdg-menu': false, 'xdg-menu-update': false, 'file-chunks': 0,
-    display: { desktop_size: [w, h], desktop_mode_size: [w, h], screen_sizes: [screen] },
+    display: { desktop_size: [w, h], desktop_mode_size: [w, h], screen_sizes: screenSizes(w, h, dpi) },
     rencodeplus: true, lz4: true, brotli: true, compression_level: 1, network: { pings: 5 }, 'connection-data': {},
     'metadata.supported': [...METADATA_SUPPORTED],
     encodings: { '': [...ENCODINGS], core: [...ENCODINGS], rgb_formats: ['RGBX', 'RGBA', 'RGB'], 'window-icon': ['png'], cursor: ['png'], packet: true },
     encoding: { icons: { max_size: [32, 32] } },
     clipboard: { enabled: true, want_targets: true, greedy: true, selections: ['CLIPBOARD'], 'preferred-targets': ['UTF8_STRING', 'text/plain', 'TEXT', 'STRING'] },
     pointer: { double_click: {} }, keyboard: true, windows: true, 'window.pre-map': false,
-    screen_sizes: [screen], dpi: { x: dpi, y: dpi },
+    screen_sizes: screenSizes(w, h, dpi), dpi: { x: dpi, y: dpi },
     notifications: { enabled: false }, cursors: true, bell: false, system_tray: false, named_cursors: false,
     audio: { receive: false, send: false }, file: { enabled: false, printing: false, 'open-url': false }, wants: ['packet-types'],
     keymap: keymapCaps({ layout }),
@@ -377,15 +456,30 @@ export function keyboardConfigPacket(serverPacketTypes, { layout = 'us', extra =
   if (Array.isArray(serverPacketTypes) && serverPacketTypes.includes('keyboard-config')) return ['keyboard-config', caps];
   return ['keymap-changed', caps, true];
 }
-/** The pane became w×h: 6.5.3's `display-configure` (or its alias) when the
- *  server names it, else the legacy `desktop_size`. */
+/** The screen as xpra's `screen_sizes` rows: ONE monitor filling the w×h desktop, its WORK AREA (the last four) that
+ *  whole desktop. The hello and every pane change (`displayPacket`) carry the same rows. */
+export function screenSizes(w, h, dpi = 96) {
+  const wmm = Math.round(25.4 * w / dpi), hmm = Math.round(25.4 * h / dpi);
+  return [['VibeSpace', w, h, wmm, hmm, [['Canvas', 0, 0, w, h, wmm, hmm]], 0, 0, w, h]];
+}
+/** The pane became w×h. THE WORK AREA (lane desktop-workarea, 2.369.205): xpra 6.5.4 sets the root's `_NET_WORKAREA`
+ *  from the client's `screen_sizes` rows ALONE (server/subsystem/display.py `calculate_workarea`: the new size ∩ every
+ *  row's work area), and `display-configure` takes desktop-size / monitors / dpi but never new rows — so a pane that
+ *  grew after the hello got a bigger root under the HELLO's work area (measured on the owner's WeChat, which caps
+ *  itself at the work area: root 1660×1296, `_NET_WORKAREA` 0,0,1573,973 ⇒ a blank strip under it). New rows ride only
+ *  in the legacy `desktop_size` (registered under 6.5.4's default BACKWARDS_COMPATIBLE), whose FULL form re-dispatches
+ *  the same desktop size and dpi as a display-configure: that ONE packet (the keeper holds one display packet per
+ *  viewer) whenever the server names it, or names neither modern spelling; `display-configure` (or its alias) only
+ *  when it is all the server takes — the root follows, the work area cannot. */
 export function displayPacket(serverPacketTypes, { width, height, dpi = 96 }) {
   const w = Math.max(1, Math.floor(width)), h = Math.max(1, Math.floor(height));
   const types = Array.isArray(serverPacketTypes) ? serverPacketTypes : [];
   const name = types.includes('display-configure') ? 'display-configure' : types.includes('configure-display') ? 'configure-display' : null;
-  if (name) return [name, { 'desktop-size': [w, h], dpi: { x: dpi, y: dpi } }];
-  const wmm = Math.round(25.4 * w / dpi), hmm = Math.round(25.4 * h / dpi);
-  return ['desktop_size', w, h, [['VibeSpace', w, h, wmm, hmm, [['Canvas', 0, 0, w, h, wmm, hmm]], 0, 0, w, h]]];
+  const rowsTaken = types.includes('desktop_size') || !name;
+  if (!rowsTaken) return [name, { 'desktop-size': [w, h], dpi: { x: dpi, y: dpi } }];
+  const d = Math.round(dpi); // u16 on the server; the worker's rencode writes every number as an int
+  // w, h, screen_sizes, desktops (0 = keep), desktop names, unscaled w, h, dpi x, y, refresh rate (0 = keep), monitors ({} = keep)
+  return ['desktop_size', w, h, screenSizes(w, h, d), 0, [], w, h, d, d, 0, {}];
 }
 
 // ── packets the client sends ───────────────────────────────────────────────

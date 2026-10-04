@@ -5,7 +5,8 @@
 // /json/version answers the build the last launch ran), a fake builds folder in the server's HOME, headless chrome:
 //
 //   ① en 1280×800: the Agent browser panel's New profile… opens THE dialog — every provider a row (CloakBrowser, not
-//      installed, offers Install… and is not pickable), the machine section, the build section, "All my conversations";
+//      installed, offers Install… and is not pickable), the machine section, the build section (its first answer HELD by
+//      the leg: "Reading the list of Chrome builds…" + aria-busy while asked, then the builds), "All my conversations";
 //      a name + "Chrome 151.0.7922.34" + Create ⇒ ONE POST carrying the build; the panel gains the row IN PLACE (the row
 //      that was there is the same node) and says "Chrome 151.0.7922.34 (pinned)";
 //   ② Change build… under a HOLDER: the live conversation leases the profile (its browser runs build 151); the dialog
@@ -21,6 +22,15 @@
 //      (the scratch copy's record names reserved `.test` hosts, VIBESPACE_TEST_EGRESS_MAP points them at it): the Stable row's
 //      chips and THE confirm in zh / ja / en; in en the download runs through the UI (the progress line) and Change build…
 //      comes back with the new build picked.
+//   ⑧ design 015 (lane browser-panel-tidy): THE PANEL — the RECT CENSUS at 860 and 1280 px in zh / ja / en over hostile
+//      fixtures (a 40-character name listing twelve Task Groups, a paired machine's unmeasured row, a running and a stopped
+//      one): every row's five cell left edges = the column titles', every cell's right edge inside the list, each l1 one
+//      line, the who line never wraps (twelve chips fold by width into "+N more"), nothing clipped or sideways; CONTROLS:
+//      the mockup's minimums (200 · 150 · 190 · 140 · 150) and per-row grids with an `auto` acts column both go red; the
+//      walk: a fold open survives a load (the same row node), a who-change patches the cell in place, the ⋯ menu's record
+//      check row PATCHes and re-reads, its Delete… runs the two-step dialog on a row whose fold was open, a paired
+//      machine's row has no primary and no Stop / record, the ⓘ popover; 390 px: titles hidden, the row's five lines in
+//      order, the acts on the name's line, nothing sideways.
 // Artifacts: PNG per leg under <tmpdir>/vibespace-badm-shots/run-<pid>-<time>/ (the newest three kept). SKIPs without
 // chrome or dtach. Run: node scripts/test-browser-profiles-ui.mjs
 import fs from 'node:fs';
@@ -74,7 +84,10 @@ function PAGE_WRAPPERS() {
     const method = String((init && init.method) || 'GET').toUpperCase();
     let body = null; try { body = init && typeof init.body === 'string' ? JSON.parse(init.body) : null; } catch { body = null; }
     S.calls.push({ url, method, body, at: Date.now() });
-    return realFetch(input, init);
+    const res = await realFetch(input, init);
+    // design 015 census fixture: `__badm.doctor(view)` rewrites the housekeeping answer the panel draws (display data only)
+    if (S.doctor && /\/api\/browser\/housekeeping$/.test(url.split('?')[0])) { try { const j = await res.clone().json(); S.doctor(j); return new Response(JSON.stringify(j), { status: res.status, headers: { 'Content-Type': 'application/json' } }); } catch { /* the real answer */ } }
+    return res;
   };
 }
 // the RECT census (in the page): a dialog inside the viewport, its parts inside it, no sideways scroll, no clipped button
@@ -92,6 +105,66 @@ function RECTS(sel) {
     if (el.tagName === 'BUTTON' && el.scrollWidth > el.clientWidth + 1) out.problems.push(`button clipped: "${el.textContent.trim()}"`);
   }
   if (document.documentElement.scrollWidth > innerWidth + 1) out.problems.push(`the page scrolls sideways (${document.documentElement.scrollWidth} > ${innerWidth})`);
+  return out;
+}
+
+// design 015 §2b — THE PANEL'S RECT CENSUS (in the page): the grid's columns, the cells inside the list, one-line l1s
+function PANEL_CENSUS() {
+  const out = { problems: [], rows: 0 };
+  const table = document.querySelector('.bprof-table');
+  if (!table) return { problems: ['no .bprof-table'], rows: 0 };
+  const tb = table.getBoundingClientRect();
+  const vis = (e) => !!e && getComputedStyle(e).display !== 'none' && e.getBoundingClientRect().width > 0;
+  out.stacked = !!document.querySelector('.bprof.bprof-stacked');
+  const head = table.querySelector('.bprof-head');
+  const hs = vis(head) ? [...head.children].map((c) => Math.round(c.getBoundingClientRect().left)) : null;
+  out.head = hs;
+  for (const row of table.querySelectorAll('.bprof-profile')) {
+    out.rows++;
+    const id = row.dataset.profileId;
+    const cells = [...row.children].filter((c) => c.classList.contains('bprof-cell'));
+    if (cells.length !== 5) out.problems.push(`${id}: ${cells.length} cells`);
+    const lefts = cells.map((c) => Math.round(c.getBoundingClientRect().left));
+    if (!out.stacked && hs) for (let i = 0; i < Math.min(5, cells.length); i++) if (Math.abs(lefts[i] - hs[i]) > 1) out.problems.push(`${id}: cell ${i} left ${lefts[i]} ≠ the title's ${hs[i]}`);
+    for (const c of cells) { const b = c.getBoundingClientRect(); if (b.right > tb.right + 1) out.problems.push(`${id}: a cell's right edge ${Math.round(b.right)} > the list's ${Math.round(tb.right)}`); }
+    for (const l of row.querySelectorAll('.bprof-cell > .bprof-l1')) { const b = l.getBoundingClientRect(); if (b.height > 26) out.problems.push(`${id}: an l1 is ${Math.round(b.height)} px tall`); }
+    const wl = row.querySelector('.bprof-who-line');
+    if (wl) {
+      const parts = [...wl.querySelectorAll('.bprof-who-chip, .bprof-who-more, .bprof-who-change')].filter(vis);
+      const mids = parts.map((e) => { const b = e.getBoundingClientRect(); return Math.round(b.top + b.height / 2); });
+      if (mids.length && Math.max(...mids) - Math.min(...mids) > 3) out.problems.push(`${id}: the who line wraps`);
+      const lb = wl.getBoundingClientRect();
+      for (const e of parts) { const b = e.getBoundingClientRect(); if (b.right > lb.right + 1) out.problems.push(`${id}: "${e.textContent.trim().slice(0, 20)}" cut at the who cell's end`); }
+    }
+    for (const b of row.querySelectorAll('button')) { if (!vis(b)) continue; if (b.scrollWidth > b.clientWidth + 1) out.problems.push(`${id}: button clipped "${b.textContent.trim()}"`); }
+    const fold = row.querySelector('.bprof-fold');
+    if (!out.stacked && fold && fold.hidden && row.getBoundingClientRect().height > 60) out.problems.push(`${id}: a closed row is ${Math.round(row.getBoundingClientRect().height)} px tall`);
+  }
+  const body = document.querySelector('.bprof-body');
+  if (body && body.scrollWidth > body.clientWidth + 1) out.problems.push(`the list scrolls sideways (${body.scrollWidth} > ${body.clientWidth})`);
+  if (document.documentElement.scrollWidth > innerWidth + 1) out.problems.push('the page scrolls sideways');
+  return out;
+}
+// design 015 §2b — the phone: no titles, a row's five lines in order, the acts on the name's line
+function PHONE_ROWS() {
+  const out = { problems: [], rows: 0 };
+  const head = document.querySelector('.bprof-head');
+  if (head && getComputedStyle(head).display !== 'none') out.problems.push('the column titles show on a phone');
+  for (const row of document.querySelectorAll('.bprof-profile')) {
+    out.rows++;
+    const id = row.dataset.profileId, q = (s) => row.querySelector(s);
+    const top = (e) => (e ? Math.round(e.getBoundingClientRect().top) : null);
+    const n1 = q('.bprof-ident > .bprof-l1'), act = q('.bprof-act');
+    const tops = [top(n1), top(q('.bprof-chips')), top(q('.bprof-state')), top(q('.bprof-who')), top(q('.bprof-use'))];
+    if (!(tops[0] < tops[1] && tops[1] < tops[2] && tops[2] < tops[3] && tops[3] < tops[4])) out.problems.push(`${id}: the five lines out of order ${tops}`);
+    const nb = n1.getBoundingClientRect(), ab = act.getBoundingClientRect(), rb = row.getBoundingClientRect();
+    if (Math.abs(ab.top + ab.height / 2 - (nb.top + nb.height / 2)) > 4) out.problems.push(`${id}: the acts are not on the name's line`);
+    if (ab.right > rb.right + 1) out.problems.push(`${id}: the acts past the row`);
+    for (const c of row.querySelectorAll('.bprof-cell')) if (c.getBoundingClientRect().right > innerWidth + 1) out.problems.push(`${id}: a cell past the screen`);
+  }
+  const body = document.querySelector('.bprof-body');
+  if (body && body.scrollWidth > body.clientWidth + 1) out.problems.push('the list scrolls sideways');
+  if (document.documentElement.scrollWidth > innerWidth + 1) out.problems.push('the page scrolls sideways');
   return out;
 }
 
@@ -242,6 +315,13 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
   }
   const shot = async (name) => { try { const r = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(SHOTS, name + '.png'), Buffer.from(r.result.data, 'base64')); } catch { /* best effort */ } };
   const text = (sel) => ev(`(() => { const el = document.querySelector(${J(sel)}); return el ? el.textContent.replace(/\\s+/g, ' ').trim() : null; })()`);
+  // design 015: a row's acts other than the primary live in its ⋯ menu (showContextMenu); each item carries its act's class
+  const menuAct = async (pid, cls) => {
+    if (!(await click(`.bprof-profile[data-profile-id=${J(pid)}] .bprof-more`))) return false;
+    if (!(await until(() => ev(`!!document.querySelector('.context-menu .${cls}')`), 5000, 50))) return false;
+    return click(`.context-menu .${cls}`);
+  };
+  const shotEl = async (name, sel) => { try { const q = await ev(`(() => { const r = document.querySelector(${J(sel)}).getBoundingClientRect(); return { x: r.left, y: r.top, width: r.width, height: r.height }; })()`); const r = await send('Page.captureScreenshot', { format: 'png', clip: { ...q, scale: 1 } }); fs.writeFileSync(path.join(SHOTS, name + '.png'), Buffer.from(r.result.data, 'base64')); } catch { /* best effort */ } };
   const openPanel = async () => { await ev('window.app.openBrowserProfiles()'); return until(() => ev("!!document.querySelector('.bprof-new') && !!document.querySelector('.bprof-profile')"), 15000, 100); };
 
   // ═══ ① New profile… → the row ═══
@@ -249,13 +329,23 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
   await load('en', 1280, 800);
   ok(await openPanel(), 'the Agent browser panel opens with its New profile… button');
   await ev(`(() => { const r = document.querySelector('.bprof-profile[data-profile-id=${J(ex.json.profile.id)}]'); if (r) r.__badmKept = 1; })()`);
+  // THE BUILD LIST IS ASKED AFTER THE PROVIDER ROWS DRAW (lane mirror-green-ui, 2.369.205): this leg used to judge the
+  // builds the moment the rows existed — on the Actions runner (and once in a while here) the answer had not landed and
+  // the section held only default + path, while the dialog SAID "The list of Chrome builds could not be read." about a
+  // list it had not asked for yet. The race is made deterministic: the page's first builds answer is HELD until the
+  // suite releases it — the waiting section is judged, then the answered one.
+  await ev(`(() => { const f = window.fetch; window.__bprofFetch = f; let held = false; window.fetch = function (u, o) { if (!held && /\\/api\\/browser\\/builds(\\?|$)/.test(String(u))) { held = true; return new Promise((r) => { window.__bprofRelease = r; }).then(() => f.call(this, u, o)); } return f.call(this, u, o); }; })()`);
   ok(await click('.bprof-new'), 'New profile… is clicked (a real mouse)');
   const nProv = (await api('GET', '/api/browser/providers')).json.providers.length;
-  const dlg = await until(() => ev(`(() => { const d = document.querySelector('#browser-new-profile-dialog'); if (!d) return null; const rows = [...d.querySelectorAll('.bnew-provider')]; return rows.length ? { rows: rows.map((r) => ({ id: r.dataset.provider, state: r.dataset.state, off: r.classList.contains('is-off'), install: !!(r.querySelector('.bnew-install') && getComputedStyle(r.querySelector('.bnew-install')).display !== 'none') })), builds: [...d.querySelectorAll('.bnew-build')].map((x) => x.dataset.key), who: !!d.querySelector('.pp-chip[data-key="everyone:*"]') && !d.querySelector('input[name=bnew-who]'), title: d.querySelector('.dialog-header h3').textContent } : null; })()`), 15000, 100);
+  const dlg = await until(() => ev(`(() => { const d = document.querySelector('#browser-new-profile-dialog'); if (!d) return null; const rows = [...d.querySelectorAll('.bnew-provider')]; return rows.length ? { rows: rows.map((r) => ({ id: r.dataset.provider, state: r.dataset.state, off: r.classList.contains('is-off'), install: !!(r.querySelector('.bnew-install') && getComputedStyle(r.querySelector('.bnew-install')).display !== 'none') })), builds: [...d.querySelectorAll('.bnew-build')].map((x) => x.dataset.key), who: !!d.querySelector('.pp-chip[data-key="everyone:*"]') && !d.querySelector('input[name=bnew-who]'), title: d.querySelector('.dialog-header h3').textContent, busy: d.querySelector('.bnew-builds-wrap')?.getAttribute('aria-busy') || null, notes: [...d.querySelectorAll('.bnew-builds .bbuild-note')].map((x) => x.textContent) } : null; })()`), 15000, 100);
   ok(dlg && dlg.title === 'New profile' && dlg.rows.length === nProv && dlg.rows.find((r) => r.id === 'chromium').state === 'ready', `the dialog draws EVERY provider as a row (${dlg && dlg.rows.length} of ${nProv}) — never hidden`, dlg);
   const ck = dlg && dlg.rows.find((r) => r.id === 'cloak');
   ok(ck && ck.state === 'needs-install' && ck.off && ck.install, 'CloakBrowser (not installed here): shown, not pickable, its ONE step offered (Install…)', ck);
-  ok(dlg && dlg.builds.includes('default') && dlg.builds.includes('v:151.0.7922.34') && dlg.builds.includes('v:152.0.1.2') && dlg.who === true, 'the build section lists this computer\'s builds (default first); ALL AGENTS (the picker\'s All chip — no radios since the 2.369.202 integration) is the default', dlg && dlg.builds);
+  const asked = await ev(`typeof window.__bprofRelease === 'function'`);
+  ok(dlg && asked && dlg.busy === 'true' && dlg.notes.length === 1 && dlg.notes[0] === 'Reading the list of Chrome builds…' && !dlg.builds.some((k) => k.startsWith('v:')), 'while the build list is ASKED and not answered (held): the section is aria-busy and says "Reading the list of Chrome builds…" — never "could not be read"', dlg && { asked, busy: dlg.busy, notes: dlg.notes, builds: dlg.builds });
+  await ev(`(() => { if (window.__bprofRelease) window.__bprofRelease(); window.fetch = window.__bprofFetch; return true; })()`);
+  const dlgB = await until(() => ev(`(() => { const d = document.querySelector('#browser-new-profile-dialog'); const w = d && d.querySelector('.bnew-builds-wrap'); if (!w || w.getAttribute('aria-busy') !== 'false') return null; return { builds: [...d.querySelectorAll('.bnew-build')].map((x) => x.dataset.key), notes: [...d.querySelectorAll('.bnew-builds .bbuild-note')].map((x) => x.textContent), who: !!d.querySelector('.pp-chip[data-key="everyone:*"]') && !d.querySelector('input[name=bnew-who]') }; })()`), 15000, 100);
+  ok(dlgB && dlgB.builds[0] === 'default' && dlgB.builds.includes('v:151.0.7922.34') && dlgB.builds.includes('v:152.0.1.2') && !dlgB.notes.length && dlgB.who === true, 'the build section lists this computer\'s builds (default first) once the list answered; ALL AGENTS (the picker\'s All chip — no radios since the 2.369.202 integration) is the default', dlgB || dlg);
   await ev(`(() => { const i = document.querySelector('#browser-new-profile-dialog .bnew-label'); i.focus(); i.value = ''; })()`);
   await send('Input.insertText', { text: 'Vendor portal' });
   ok(await click('#browser-new-profile-dialog .bnew-build[data-key="v:151.0.7922.34"] input'), 'the build "Chrome 151.0.7922.34" is picked');
@@ -283,8 +373,8 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     await ev(`window.app.attachSession(${J(SID)}, 'Vendor work', ${J(WORK)}, { mode: 'chat', backend: 'claude' })`);
     await until(() => ev(`[...window.app.wm.windows.values()].some((x) => x.type === 'chat' && window.app.sessions.get(x.id) && window.app.sessions.get(x.id).sessionId === ${J(SID)})`), 15000, 150);
     await ev('window.app.openBrowserProfiles()');
-    await until(() => ev(`!!document.querySelector('.bprof-profile[data-profile-id=${J(VP)}] .bprof-build-btn')`), 15000, 100);
-    ok(await click(`.bprof-profile[data-profile-id=${J(VP)}] .bprof-build-btn`), 'Change build… on the row');
+    await until(() => ev(`!!document.querySelector('.bprof-profile[data-profile-id=${J(VP)}] .bprof-more')`), 15000, 100);
+    ok(await menuAct(VP, 'bprof-build-btn'), 'Change build… from the row\'s ⋯ menu');
     const bd = await until(() => ev(`(() => { const d = document.querySelector('#browser-build-dialog'); if (!d) return null; return { title: d.querySelector('.dialog-header h3').textContent, rows: [...d.querySelectorAll('.bbuild-row')].map((r) => [r.dataset.key, !r.classList.contains('is-off')]), change: [...d.querySelectorAll('.bbuild-change')].map((x) => x.textContent), btn: d.querySelector('.bbuild-change-btn').textContent, now: (d.querySelector('.bbuild-now') || {}).textContent || null }; })()`), 15000, 100);
     ok(bd && bd.title === 'Chrome build for Vendor portal' && bd.btn === 'Change and restart' && /1 conversation\(s\) using it are told/.test(bd.change.join(' ')) && /running Chrome 151\.0\.7922\.34/.test(bd.now || ''), 'the dialog says the build it runs now, that the browser restarts and that 1 conversation is told — before the button', bd);
     ok(await click('#browser-build-dialog .bbuild-row[data-key="v:152.0.1.2"] input'), 'Chrome 152.0.1.2 picked');
@@ -317,8 +407,8 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     await shot(`3-new-profile-${lang}`);
     await ev("document.querySelector('#browser-new-profile-dialog .bnew-cancel').click()");
     if (VP) {
-      await until(() => ev(`!!document.querySelector('.bprof-profile[data-profile-id=${J(VP)}] .bprof-build-btn')`), 10000, 100);
-      await click(`.bprof-profile[data-profile-id=${J(VP)}] .bprof-build-btn`);
+      await until(() => ev(`!!document.querySelector('.bprof-profile[data-profile-id=${J(VP)}] .bprof-more')`), 10000, 100);
+      await menuAct(VP, 'bprof-build-btn');
       const b = await until(() => ev(`(() => { const d = document.querySelector('#browser-build-dialog'); return d ? { title: d.querySelector('.dialog-header h3').textContent, def: (d.querySelector('.bbuild-row[data-key=default] .bwho-answer-head') || {}).textContent || '' } : null; })()`), 15000, 100);
       ok(b && b.title === tr(lang, 'Chrome build for {label}', { label: 'Vendor portal' }) && b.def === tr(lang, "The browser CLI's default build"), `${lang}: Change build… speaks it too`, b);
       await shot(`3-change-build-${lang}`);
@@ -331,8 +421,8 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
   if (VP) for (const lang of ['zh', 'ja', 'en']) {
     await load(lang, 1280, 800);
     await openPanel();
-    await until(() => ev(`!!document.querySelector('.bprof-profile[data-profile-id=${J(VP)}] .bprof-build-btn')`), 10000, 100);
-    await click(`.bprof-profile[data-profile-id=${J(VP)}] .bprof-build-btn`);
+    await until(() => ev(`!!document.querySelector('.bprof-profile[data-profile-id=${J(VP)}] .bprof-more')`), 10000, 100);
+    await menuAct(VP, 'bprof-build-btn');
     const row = await until(() => ev(`(() => { const r = document.querySelector('#browser-build-dialog .bbuild-download'); return r ? { head: r.querySelector('.bwho-answer-head').textContent, last: r === [...r.parentElement.children].at(-1) } : null; })()`), 15000, 100);
     ok(row && row.head === tr(lang, 'Download another build…') && row.last, `${lang}: Change build… ends with the row "Download another build…"`, row);
     const lists0 = cftHits.filter((h) => h.includes('last-known-good')).length;
@@ -364,6 +454,116 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     await ev("document.querySelector('#browser-build-dialog .bbuild-cancel').click()");
   }
 
+  // ═══ ⑧ design 015 (lane browser-panel-tidy): the panel — rect census, controls, walk, phone ═══
+  console.log('— ⑧ design 015: the panel\'s grid (the rect census + its controls), the fold, the ⋯ menu, the phone');
+  {
+    const TGS = [];
+    const titles = ['运维管理', '采购自动化', 'Design studio', 'Compliance', 'Research desk', 'Q4 launch', 'Finance ops', 'Vendor audit', 'Field sales', 'Support rota', 'Hiring loop', 'Legal review'];
+    for (let i = 0; i < titles.length; i++) { const d = path.join(ROOT, 'tg-' + i); fs.mkdirSync(d, { recursive: true }); const r = await api('POST', '/api/tasks', { title: titles[i], folders: [{ path: d, recursive: true }] }); TGS.push(r.json && r.json.task ? r.json.task.id : null); }
+    const LONG = '市场部共享账号（仅限周报与采购平台，勿登录个人微信或支付宝）Vendor-EU-01';
+    const mk = async (label) => { const r = await api('POST', '/api/browser/profiles', { label }); return r.json && r.json.profile ? r.json.profile.id : null; };
+    const HP = await mk(LONG), OD = await mk('office-devices'), DOOM = await mk('Doomed');
+    const u0 = HP ? (await api('GET', `/api/browser/profiles/${HP}/use`)).json : null;
+    const w12 = HP && u0 ? await api('PATCH', `/api/browser/profiles/${HP}`, { use: { mode: 'only', who: TGS.filter(Boolean).map((id) => ({ kind: 'task', id })) }, base: u0.base }) : null;
+    ok(TGS.every(Boolean) && HP && OD && DOOM && w12 && w12.status === 200 && LONG.length >= 40, 'fixtures: twelve Task Groups; a 41-character name listing all twelve; "office-devices" (a paired machine\'s row, unmeasured — the page-side doctor); "Doomed"', w12 && w12.json);
+    const EXID = ex.json.profile.id;
+    const DOC = `window.__badm.doctor = (j) => { for (const p of j.profiles || []) if (p.id === ${J(OD)}) { p.host = 'Mac-one'; p.canBrowse = false; p.bytes = null; } }; true`;
+    const panelAt = async (lang, w) => {
+      await load(lang, w === 860 ? 1280 : 1720, w === 860 ? 800 : 1000);
+      await ev(DOC);
+      await openPanel();
+      await ev(`[...window.app.wm.windows.values()].find((w) => w.type === 'browser-profiles')._browserProfiles.load().then(() => true)`); // a panel the layout replay reopened fetched before the doctor
+      if (w !== 860) await ev(`(() => { const win = document.querySelector('.bprof').closest('.window'); win.style.left = '10px'; win.style.width = '${w}px'; return true; })()`);
+      ok(await until(() => ev(`document.querySelectorAll('.bprof-profile').length >= 5 && !!document.querySelector('.bprof-profile[data-profile-id=${J(OD)}]:not(:has(.bprof-browse))')`), 10000, 100), `${lang} ${w}: the panel drew the fixtures (the paired machine's row without a primary)`);
+      await frame(); await frame();
+    };
+    const census = () => ev(`(${PANEL_CENSUS.toString()})()`);
+    for (const lang of ['zh', 'ja', 'en']) for (const w of [860, 1280]) {
+      await panelAt(lang, w);
+      const winW = await ev(`Math.round(document.querySelector('.bprof').closest('.window').getBoundingClientRect().width)`);
+      const c = await census();
+      ok(Math.abs(winW - w) <= 12 && c.rows >= 5 && !c.stacked && !c.problems.length, `${lang} ${w} px (the window ${winW} px): ${c.rows} rows — every cell's left edge = its column title's, every right edge inside the list, each l1 one line, the who line never wraps, nothing clipped or sideways`, c);
+      const nm = await ev(`(() => { const e = document.querySelector('.bprof-profile[data-profile-id=${J(HP)}] .bprof-label'); return e ? { cut: e.scrollWidth > e.clientWidth + 1, title: e.title } : null; })()`);
+      const wf = await ev(`(() => { const r = document.querySelector('.bprof-profile[data-profile-id=${J(HP)}]'); const shown = [...r.querySelectorAll('.bprof-who-chip')].filter((e) => getComputedStyle(e).display !== 'none').length; const m = r.querySelector('.bprof-who-more'); const n = m && getComputedStyle(m).display !== 'none' ? Number((m.textContent.match(/\\d+/) || [0])[0]) : 0; return { shown, n, tip: m ? m.title.split('\\n').length : 0, pill: m ? m.textContent : '' }; })()`);
+      ok(nm && nm.cut && nm.title === LONG && wf.shown >= 1 && wf.shown + wf.n === 12 && wf.tip === wf.n && wf.pill === '+' + wf.n, `${lang} ${w}: the 41-character name is cut with its whole in the title; twelve chips = ${wf.shown} shown + "+${wf.n}" (its title names the ${wf.n})`, { nm, wf });
+      if (w === 860) {
+        // the WIDEST primary the panel can draw ("Open your browsing window" while you browse it) + the ⋯, measured in this
+        // language, still fits the 860 px window's list with the grid's minimums (GRID + gaps — src/lib/browser-panel-model.js)
+        const M = await import('../src/lib/browser-panel-model.js');
+        const wide = await ev(`(() => { const a = document.querySelector('.bprof-profile .bprof-act'); const b = document.createElement('button'); b.className = 'file-tool-btn bprof-btn bprof-browse open'; b.textContent = ${J(tr(lang, 'Open your browsing window'))}; a.prepend(b); const px = b.getBoundingClientRect().width + 6 + a.querySelector('.bprof-more').getBoundingClientRect().width; b.remove(); return { px: Math.ceil(px), list: document.querySelector('.bprof-table').clientWidth }; })()`);
+        ok(M.gridNeed(wide.px) <= wide.list, `${lang} 860: the widest acts (${wide.px} px: "${tr(lang, 'Open your browsing window')}" + ⋯) need ${M.gridNeed(wide.px)} px ≤ the list's ${wide.list} px — the grid never stacks at the width the panel opens at`, wide);
+      }
+      if (lang === 'zh') {
+        await click(`.bprof-profile[data-profile-id=${J(VP)}] .bprof-chev`); await frame();
+        await shotEl(`after-${w}-zh`, '.bprof');
+        await click(`.bprof-profile[data-profile-id=${J(VP)}] .bprof-chev`);
+      }
+    }
+    // CONTROLS (zh 860): the mockup's minimums; per-row grids with an `auto` acts column (the first mockup's fault)
+    await panelAt('zh', 860);
+    const ctl = async (css) => { await ev(`(() => { let s = document.getElementById('bp-control'); if (!s) { s = document.createElement('style'); s.id = 'bp-control'; document.head.appendChild(s); } s.textContent = ${J(css)}; return true; })()`); await frame(); await frame(); return census(); };
+    const c1 = await ctl('.bprof-table { grid-template-columns: minmax(200px, 1.5fr) minmax(150px, 1fr) minmax(190px, 1.3fr) 140px 150px !important; }');
+    ok(c1.problems.some((p) => /right edge/.test(p)), 'CONTROL: the mockup\'s minimums (200 · 150 · 190 · 140 · 150 + gaps) at 860 px put a cell past the list — the census goes red', c1.problems.slice(0, 3));
+    const c2 = await ctl('.bprof-head, .bprof-table > .bprof-row.bprof-profile { grid-template-columns: minmax(150px, 1.5fr) minmax(110px, 1fr) minmax(150px, 1.3fr) 120px auto !important; }');
+    ok(c2.problems.some((p) => /≠ the title/.test(p)), 'CONTROL: per-row grids with an `auto` acts column shift the columns row by row — the census goes red', c2.problems.slice(0, 3));
+    await ev(`document.getElementById('bp-control').remove()`); await frame();
+    ok(!(await census()).problems.length, 'the control style removed, the census is green again');
+    // the walk ── a fold open survives a load (the same row node, still open)
+    ok(await click(`.bprof-profile[data-profile-id=${J(VP)}] .bprof-chev`), 'the chevron of the running row (a real mouse)');
+    const fo = await ev(`(() => { const r = document.querySelector('.bprof-profile[data-profile-id=${J(VP)}]'); r.__kept = 1; const f = r.querySelector('.bprof-fold'); return { open: !f.hidden, keys: [...f.querySelectorAll('.bprof-fold-item')].map((i) => i.dataset.key), h: Math.round(r.getBoundingClientRect().height) }; })()`);
+    await ev(`[...window.app.wm.windows.values()].find((w) => w.type === 'browser-profiles')._browserProfiles.load().then(() => true)`); await frame();
+    const fo2 = await ev(`(() => { const r = document.querySelector('.bprof-profile[data-profile-id=${J(VP)}]'); return { same: r.__kept === 1, open: !r.querySelector('.bprof-fold').hidden }; })()`);
+    ok(fo.open && fo.keys.includes('build') && fo.keys.includes('records') && fo2.same && fo2.open, `the fold opens under the row (${fo.keys.join(' · ')}; the row ${fo.h} px) and a load keeps the SAME row with its fold open`, { fo, fo2 });
+    await click(`.bprof-profile[data-profile-id=${J(VP)}] .bprof-chev`);
+    // a who-change patches the cell in place
+    await ev(`(() => { document.querySelector('.bprof-profile[data-profile-id=${J(HP)}] .bprof-who').__kept = 1; return true; })()`);
+    const u1 = (await api('GET', `/api/browser/profiles/${HP}/use`)).json;
+    const w11 = await api('PATCH', `/api/browser/profiles/${HP}`, { use: { mode: 'only', who: TGS.slice(1).map((id) => ({ kind: 'task', id })) }, base: u1.base });
+    const wsame = await until(() => ev(`(() => { const r = document.querySelector('.bprof-profile[data-profile-id=${J(HP)}]'); const c = r.querySelector('.bprof-who'); const shown = [...r.querySelectorAll('.bprof-who-chip')].filter((e) => getComputedStyle(e).display !== 'none').length; const m = r.querySelector('.bprof-who-more'); const n = m && getComputedStyle(m).display !== 'none' ? Number((m.textContent.match(/\\d+/) || [0])[0]) : 0; return shown + n === 11 ? { same: c.__kept === 1, shown, n } : null; })()`), 10000, 150);
+    ok(w11.status === 200 && wsame && wsame.same, 'a who-change (12 → 11 rows) PATCHES the who cell in place (the same element)', wsame);
+    // the ⋯ menu's record check row PATCHes and re-reads
+    const nCalls = await ev('window.__badm.calls.length');
+    ok(await menuAct(EXID, 'bprof-record'), '⋯ → 录制屏幕 on the stopped row');
+    const patch = await until(() => ev(`window.__badm.calls.slice(${nCalls}).find((c) => c.method === 'PATCH' && c.body && 'record' in c.body) || null`), 8000, 100);
+    await until(() => ev(`(window.app._browserProfiles && true)`), 1000);
+    await sleep(600);
+    ok(await click(`.bprof-profile[data-profile-id=${J(EXID)}] .bprof-more`), 'the ⋯ again');
+    const on = await until(() => ev(`(() => { const it = document.querySelector('.context-menu .bprof-record'); return it ? { on: !!it.parentElement.querySelector('.chan-menu-check-on'), items: [...document.querySelectorAll('.context-menu .bprof-mi')].map((x) => x.dataset.act), disabled: document.querySelectorAll('.context-menu .context-menu-item.disabled').length } : null; })()`), 5000, 80);
+    ok(patch && patch.body.record === true && on && on.on && on.disabled === 0, `the record check row PATCHed {record: true} and the re-read row shows it checked; the menu (${on && on.items.join(' · ')}) has no disabled item`, { patch, on });
+    await ev(`document.querySelectorAll('.context-menu').forEach((m) => m.remove())`);
+    // a paired machine's row: no primary; its menu has no Stop and no record switch
+    ok(await click(`.bprof-profile[data-profile-id=${J(OD)}] .bprof-more`), 'the paired machine\'s ⋯');
+    const pm = await until(() => ev(`(() => { const r = document.querySelector('.bprof-profile[data-profile-id=${J(OD)}]'); const items = [...document.querySelectorAll('.context-menu .bprof-mi')].map((x) => x.dataset.act); return items.length ? { primary: !!r.querySelector('.bprof-browse'), items, size: r.querySelector('.bprof-size').textContent, chips: [...r.querySelectorAll('.bprof-chips > [data-key]')].map((c) => c.dataset.key) } : null; })()`), 5000, 80);
+    ok(pm && !pm.primary && !pm.items.includes('stop') && !pm.items.includes('record') && pm.items.includes('delete') && pm.size === tr('zh', 'not measured') && pm.chips.includes('host'), 'a paired machine\'s row: no primary (absent, never greyed), no Stop / record in its menu, its machine chip, "未测量"', pm);
+    await ev(`document.querySelectorAll('.context-menu').forEach((m) => m.remove())`);
+    // Delete… from the ⋯ menu runs the two-step dialog — on a row whose fold is open
+    await click(`.bprof-profile[data-profile-id=${J(DOOM)}] .bprof-chev`);
+    ok(await menuAct(DOOM, 'bprof-forget'), '⋯ → 删除… (its fold open)');
+    const dlg = await until(() => ev(`(() => { const b = [...document.querySelectorAll('.dialog button')].find((x) => x.textContent === ${J(tr('zh', 'Delete'))}); const h = [...document.querySelectorAll('.dialog h3, .dialog .dialog-header')].map((x) => x.textContent).join(' '); return b ? { h } : null; })()`), 8000, 80);
+    ok(dlg && dlg.h.includes(tr('zh', 'Delete {label}?', { label: 'Doomed' })), 'the same confirm as before ("删除 Doomed？") — step one of two', dlg);
+    await ev(`[...document.querySelectorAll('.dialog button')].find((x) => x.textContent === ${J(tr('zh', 'Delete'))}).click()`);
+    const gone = await until(() => ev(`(() => !document.querySelector('.bprof-profile[data-profile-id=${J(DOOM)}]') && [...document.querySelectorAll('.bprof-forgotten')].some((r) => r.textContent.includes('Doomed')))()`), 12000, 150);
+    ok(gone, 'the row left the list and waits under 已删除（搁置） — the second step stays the user\'s click', gone);
+    // the ⓘ: the retention sentence on press, gone on an outside press
+    ok(await click('.bprof-info'), 'the ⓘ');
+    const pop = await until(() => ev(`(() => { const p = document.querySelector('.bprof-info-pop'); return p ? { text: p.textContent, inside: p.getBoundingClientRect().right <= document.querySelector('.bprof').getBoundingClientRect().right + 1 } : null; })()`), 4000, 60);
+    await click('.bprof-summary');
+    const popGone = await until(() => ev(`!document.querySelector('.bprof-info-pop')`), 4000, 60);
+    ok(pop && pop.inside && pop.text === (await text('.bprof-hint')) && popGone, 'the ⓘ shows the retention sentence (the Maintenance text, word for word) inside the panel and an outside press closes it', pop);
+    const mt = await ev(`(() => { const s = [...document.querySelectorAll('.bprof-section')].at(-1); return { title: s.querySelector('.bprof-section-title').textContent, sweep: !!s.querySelector('.bprof-sweep button'), hint: !!s.querySelector('.bprof-hint'), cli: !!s.querySelector('.bprof-cli') }; })()`);
+    ok(mt.title === tr('zh', 'Maintenance') && mt.sweep && mt.hint && mt.cli, '维护 is the last section: the Browser CLI row, the last sweep + 立即清扫, the retention text', mt);
+    // 390 px: the re-flow
+    await load('zh', 390, 844, true);
+    await ev(DOC);
+    await openPanel();
+    await ev(`[...window.app.wm.windows.values()].find((w) => w.type === 'browser-profiles')._browserProfiles.load().then(() => true)`); // a panel the layout replay reopened fetched before the doctor
+    await until(() => ev(`document.querySelectorAll('.bprof-profile').length >= 4`), 10000, 100);
+    await frame(); await frame();
+    const ph = await ev(`(${PHONE_ROWS.toString()})()`);
+    ok(ph.rows >= 4 && !ph.problems.length && (await ev(`!!document.querySelector('.bprof.bprof-stacked')`)), `390 px: ${ph.rows} rows re-flowed — the titles hidden, each row's five lines in order, the acts on the name's line, nothing sideways`, ph);
+    await shotEl('after-390-zh', '.bprof');
+  }
+
   // ═══ ④ 390 px ═══
   console.log('— ④ a 390 px phone: both dialogs inside the screen');
   await load('en', 390, 844, true);
@@ -377,8 +577,8 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
   await shot('4-new-profile-390');
   await ev("document.querySelector('#browser-new-profile-dialog .bnew-cancel').click()");
   if (VP) {
-    await until(() => ev(`!!document.querySelector('.bprof-profile[data-profile-id=${J(VP)}] .bprof-build-btn')`), 10000, 100);
-    await ev(`document.querySelector('.bprof-profile[data-profile-id=${J(VP)}] .bprof-build-btn').click()`);
+    await until(() => ev(`!!document.querySelector('.bprof-profile[data-profile-id=${J(VP)}] .bprof-more')`), 10000, 100);
+    await menuAct(VP, 'bprof-build-btn');
     await until(() => ev("!!document.querySelector('#browser-build-dialog .bbuild-row')"), 15000, 100);
     await frame();
     const r2 = await ev(`(${RECTS.toString()})('#browser-build-dialog .dialog')`);

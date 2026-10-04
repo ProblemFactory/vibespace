@@ -17,6 +17,9 @@
 //   ③ Not now: a second proposal declined from the For-you window; the agent's `wait` hears it
 //   ④ an agent's token on the user's install route ⇒ 403 agent_forbidden
 //   ⑤ the phone (390 px): the apps section fits — nothing wider than the screen
+//   ⑦ design 009: the Apps dialog's rect census in zh at 390 px and en at 1440 px; a planted long name clamps at two
+//      lines — its length is GROWN until it needs ≥ 3 lines in the card it lands in (the card's width is the machine's:
+//      no xpra ⇒ no default-scale control beside it ⇒ a wider name box, as on the Actions runner)
 // SKIPs by name: no chrome / no dtach. VS_SHOT_DIR=<dir> keeps screenshots. ~40 s.
 import { execSync, spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -268,11 +271,22 @@ try {
   check('zh 390: "安装应用…" sits on the first screen, a phone-sized target', !!zh390 && !!zh390.install && zh390.install.text === '安装应用…' && zh390.install.bottom <= zh390.install.vh && zh390.install.h >= 36, zh390 && zh390.install);
   check(`zh 390: rect census over ${zh390 ? zh390.n : 0} cards — every name inside its card, ≤ 2 lines, shown whole; no two cards overlap; no permanent 自动`, !!zh390 && zh390.n > 2 && zh390.bad.length === 0 && !zh390.autoWord, zh390 && zh390.bad.slice(0, 5));
   check('zh 390: the section\'s foot says how many apps in words (N 个应用 · …, never 条进展)', !!zh390 && /^\d+ 个应用/.test(zh390.status) && !/进展/.test(zh390.status), zh390 && zh390.status);
-  const planted = await evalJs(`(() => { const c = document.querySelector('#desktop-launch-dialog .desktop-launch-card'); const l = c.querySelector('.desktop-launch-card-label'); c.dataset.planted = '1'; l.textContent = '一个名字特别特别长的应用程序，用来确认名字最多显示两行而且不会跑出卡片之外，也不会盖住旁边的卡片'; return true; })()`);
+  // the planted name's PREMISE is constructed, never assumed (lane mirror-green-ui, 2.369.205): it must need ≥ 3 lines
+  // in THIS card. A fixed 48-glyph name was "long" only beside the default-scale control — on the Actions runner (no
+  // xpra ⇒ no scaling rung ⇒ no control; no xterm ⇒ the first card is dimmed) the name box is 288.5 px = exactly 24
+  // glyphs a line, the name filled two lines, nothing was cut, and the leg went red for the machine alone. The name
+  // grows until an unclamped copy of the label (same box width, same font) measures three lines or more.
+  const planted = await evalJs(`(() => { const c = document.querySelector('#desktop-launch-dialog .desktop-launch-card'); const l = c.querySelector('.desktop-launch-card-label'); c.dataset.planted = '1';
+    const base = '一个名字特别特别长的应用程序，用来确认名字最多显示两行而且不会跑出卡片之外，也不会盖住旁边的卡片';
+    const lh = parseFloat(getComputedStyle(l).lineHeight);
+    const free = () => { const k = l.cloneNode(true); k.style.cssText = 'display:block;-webkit-line-clamp:none;line-clamp:none;overflow:visible;position:absolute;visibility:hidden;width:' + l.getBoundingClientRect().width + 'px'; l.parentElement.appendChild(k); const h = k.getBoundingClientRect().height; k.remove(); return h; };
+    let text = base; l.textContent = text;
+    while (free() < 3 * lh - 1 && text.length < 1000) { text += base; l.textContent = text; }
+    return { lines: Math.round(free() / lh), chars: text.length }; })()`);
   await sleep(150);
   const zhLong = await evalJs(appsCensus);
   const clamp = await evalJs(`(() => { const l = document.querySelector('#desktop-launch-dialog .desktop-launch-card[data-planted] .desktop-launch-card-label'); const lh = parseFloat(getComputedStyle(l).lineHeight); return { h: l.getBoundingClientRect().height, lh, cut: l.scrollHeight > l.clientHeight + 1 }; })()`);
-  check('zh 390: a planted long name clamps at EXACTLY two lines, inside its card, overlapping nothing (the census sees it)', planted && !!zhLong && zhLong.bad.length === 0 && clamp.cut && Math.abs(clamp.h - 2 * clamp.lh) <= 2, { bad: zhLong && zhLong.bad.slice(0, 3), clamp });
+  check('zh 390: a planted long name (≥ 3 lines unclamped in its own card — constructed) clamps at EXACTLY two lines, inside its card, overlapping nothing (the census sees it)', !!planted && planted.lines >= 3 && !!zhLong && zhLong.bad.length === 0 && clamp.cut && Math.abs(clamp.h - 2 * clamp.lh) <= 2, { planted, bad: zhLong && zhLong.bad.slice(0, 3), clamp });
   await shot('apps-zh-390');
   await evalJs(`document.querySelectorAll('.dialog-overlay').forEach((o) => o.remove()); localStorage.setItem('vibespace.lang', 'en'); true`);
   await cdp('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });

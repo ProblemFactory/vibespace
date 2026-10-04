@@ -421,7 +421,8 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     ok(await p2.openPanel(), '⑤ page 2 (700 px wide) shows the row');
     const p2chips0 = await chipsOf(p2, `${ROW} .bprof-who-chip`);
     const marked = await p2.ev(`(() => { const c = document.querySelector('${ROW} .bprof-who-chip[data-key="task:${TG.ops}"]'); if (!c) return false; c.__who_mark = 'kept'; document.querySelector('${ROW} .bprof-who').__who_mark = 'kept'; return true; })()`);
-    ok(marked && p2chips0.map((c) => c.name).join('|') === '运维管理|Westcliff', `⑤ page 2 draws the list as chips (${p2chips0.map((c) => c.name).join(' · ')}); its 运维管理 chip is marked`, p2chips0);
+    const p2more0 = await p2.ev(`(() => { const m = document.querySelector('${ROW} .bprof-who-more'); return m && getComputedStyle(m).display !== 'none' ? Number((m.textContent.match(/\\d+/) || [0])[0]) : 0; })()`);
+    ok(marked && p2chips0.length >= 1 && p2chips0[0].name === '运维管理' && p2chips0.length + p2more0 === 2 && (p2chips0.length === 2 ? p2chips0[1].name === 'Westcliff' : true), `⑤ page 2 draws the list as chips (${p2chips0.map((c) => c.name).join(' · ')}${p2more0 ? ' + "+' + p2more0 + '"' : ''} — folded by the cell's width); its 运维管理 chip is marked`, { p2chips0, cell: await p2.ev(`(() => { const r = document.querySelector('${ROW}'); const l = r && r.querySelector('.bprof-who-line'); return l ? { stacked: !!document.querySelector('.bprof-stacked'), lineW: l.clientWidth, rowW: r.clientWidth, kids: [...l.querySelectorAll('.bprof-who-chip, .bprof-who-more, .bprof-who-change')].map((e) => [e.className, getComputedStyle(e).display, Math.round(e.getBoundingClientRect().width)]) } : null; })()`) });
 
     // ═══ ④ Save ⇒ ONE PATCH (session:<webui id> rows + base), the toast, the lease gone ═══
     console.log('— ④ Save');
@@ -441,10 +442,11 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
 
     // ═══ ⑤ page 2: the unchanged chip is the SAME node; the rest fold into the dictionary's "+N more" ═══
     await p2.front();
-    const p2done = await until(async () => { const c = await chipsOf(p2, `${ROW} .bprof-who-chip`); return c.length === 2 && c[1].key === 'task:' + TG.studio ? c : null; }, 10000, 150);
+    const moreN = (p, sel) => p.ev(`(() => { const m = document.querySelector(${J(sel)}); return m && getComputedStyle(m).display !== 'none' ? Number((m.textContent.match(/\\d+/) || [0])[0]) : 0; })()`);
+    const p2done = await until(async () => { const c = await chipsOf(p2, `${ROW} .bprof-who-chip`); return c.length >= 1 && c[0].key === 'task:' + TG.ops && (c.length < 2 || c[1].key === 'task:' + TG.studio) && c.length + (await moreN(p2, `${ROW} .bprof-who-more`)) === 4 ? c : null; }, 10000, 150);
     const same = await p2.ev(`(() => { const c = document.querySelector('${ROW} .bprof-who-chip[data-key="task:${TG.ops}"]'); const cell = document.querySelector('${ROW} .bprof-who'); return { chip: !!c && c.__who_mark === 'kept', cell: !!cell && cell.__who_mark === 'kept' }; })()`);
     const more = await p2.text(`${ROW} .bprof-who-more`);
-    ok(p2done && same.chip && same.cell && more === tr('zh', '+{n} more', { n: 2 }), `⑤ page 2 after the broadcast: ${p2done && p2done.map((c) => c.name).join(' · ')} + "${more}"; the 运维管理 chip and the cell are the SAME nodes (keyed in place)`, { p2done, same, more });
+    ok(p2done && same.chip && same.cell && (p2done.length === 4 ? !more || (await moreN(p2, `${ROW} .bprof-who-more`)) === 0 : more === '+' + (4 - p2done.length)), `⑤ page 2 after the broadcast: ${p2done && p2done.map((c) => c.name).join(' · ')}${more ? ' + "' + more + '"' : ''} (the four rows, folded by the cell's width); the 运维管理 chip and the cell are the SAME nodes (keyed in place)`, { p2done, same, more });
     await p2.shot('05-zh-page2-700', ROW);
 
     // ═══ ⑥ the 409 leg: a write between open and Save ⇒ the sentence, re-opened on the list as it is now ═══
@@ -529,11 +531,13 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     const w8 = await api('PATCH', `/api/browser/profiles/${WORK}`, { use: { mode: 'only', who: [{ kind: 'task', id: TG.ops }, { kind: 'task', id: TG.studio }, { kind: 'task', id: TG.comp }, { kind: 'session', key: KEY.kaixu }, { kind: 'session', key: KEY.draft }, { kind: 'session', key: KEY.west }] }, base: u4.base });
     ok(w8.status === 200 && w8.json.profile.use.who.length === 6, '⑧ a six-row list written (three Task Groups, three conversations)', w8.json);
     await p1.front();
-    await until(async () => (await p1.text(`${ROW} .bprof-who-more`)) === tr('zh', '+{n} more', { n: 2 }), 8000, 150);
+    const shownOf = async () => (await chipsOf(p1, `${ROW} .bprof-who-chip`)).length;
+    await until(async () => (await shownOf()) + (await moreN(p1, `${ROW} .bprof-who-more`)) === 6, 8000, 150);
     const winW = await p1.ev(`Math.round(document.querySelector('${ROW}').closest('.window').getBoundingClientRect().width)`);
     const r860 = await p1.rects({ pairs: [[`${ROW} .bprof-who`, '.bprof-who-chip, .bprof-who-more, button, .bprof-who-label'], ['.bprof-body', '.bprof-profile, .bprof-who']], viewport: true });
     const more860 = await p1.text(`${ROW} .bprof-who-more`);
-    ok(winW >= 850 && winW <= 870 && r860.n >= 6 && !r860.problems.length && more860 === tr('zh', '+{n} more', { n: 2 }), `⑧ 860 px (the panel window ${winW} px): ${r860.n} parts inside their cells and the viewport, no sideways overflow; 4 chips + "${more860}"`, r860.problems);
+    const shown860 = await shownOf(), n860 = await moreN(p1, `${ROW} .bprof-who-more`);
+    ok(winW >= 850 && winW <= 870 && r860.n >= 3 && !r860.problems.length && shown860 >= 1 && shown860 + n860 === 6 && n860 >= 2 && more860 === '+' + n860, `⑧ 860 px (the panel window ${winW} px): ${r860.n} parts inside their cells and the viewport, no sideways overflow; ${shown860} chips + "${more860}" (six rows folded by the who column's WIDTH — design 015 §2b)`, r860.problems);
     await p1.shot('08-zh-row-860', ROW);
     ok(await p1.click(`${ROW} .bprof-who-change`), '⑧ the dialog at 1280');
     await until(() => p1.ev(`!!document.querySelector('${DLG} .pp-chip')`), 8000, 60);

@@ -226,6 +226,7 @@ Object.assign(SHAPES, {
   'claude:transcript:system/model_refusal_no_fallback': sh(['originalModel', 'requestId', 'apiRefusalCategory', 'apiRefusalExplanation', 'refusedUserMessageUuid', 'content']),
   'claude:transcript:system/local_command': sh(['content']),          // not in the SDK union — the REPL's own persisted slash-command row
   'claude:transcript:system/away_summary': sh(['content']),
+  'claude:transcript:system/informational': sh(['content', 'toolUseID', 'preventContinuation', 'highlight']), // lane classifier-stop-card: seen 2026-10-03 (level + isMeta ride the envelope); highlight = the TUI's span on the line (2.1.288 lC third argument) — the dim card shows the text, nothing paints a range
   'claude:transcript:system/notification': sh(['key', 'text', 'priority', 'color', 'timeoutMs', 'timeout_ms'], { enums: { priority: ['low', 'medium', 'high', 'immediate'] } }),
   'claude:transcript:system/vcs_state_changed': sh(['kind', 'branch'], { enums: { kind: ['commit', 'push', 'merge', 'rebase'] } }),
   'claude:transcript:system/code_change_published': sh(['provider', 'url', 'repo', 'identifier', 'action', 'branch']),
@@ -290,7 +291,6 @@ const DECLARED_UPSTREAM_UNSEEN = Object.freeze({
   system: Object.freeze({
     post_turn_summary: '@internal background classifier summary per assistant turn — a dim notice if it ever appears (needs_action flag is the interesting bit)',
     task_summary: '@internal mid-turn progress line from the debounced classifier — spinner label candidate',
-    informational: 'generic text banner (hook block reasons, slash-command output) — a dim system card',
     permission_retry: '@internal "retrying with <commands>" after a permission-mode change — a dim system card',
     memory_saved: '@internal "<verb> N memories" banner — a dim system card',
     agents_killed: '@internal background agents terminated on interrupt — close every running task card',

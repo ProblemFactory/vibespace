@@ -8,7 +8,7 @@
 // of a run (the command, the output, a conversation's name) is textContent — never innerHTML.
 import { t, deviceLocale } from './i18n.js';
 import { createModalShell, showToast, copyText } from './utils.js';
-import { runRow, spawnFailureText, platformLabel, RUNS_DEFAULT, EXIT_RUN_TIMEOUT_MS } from '../exit-reach.js';
+import { runRow, spawnFailureText, platformLabel, RUNS_DEFAULT, EXIT_RUN_TIMEOUT_MS, fmtBytes } from '../exit-reach.js';
 
 const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
 const secs = (ms) => `${(Math.max(0, Number(ms) || 0) / 1000).toFixed(1)} s`;
@@ -21,6 +21,8 @@ export function runVerdictText(r) {
   if (r.outcome === 'timed_out') return t('timed out after {s} s', { s: EXIT_RUN_TIMEOUT_MS / 1000 });
   if (r.outcome === 'refused' && r.refusal === 'device_agent_outdated') return t('not run — the agent is too old to run commands on Windows; rerun the install command'); // lane device-upgrade-stuck
   if (r.outcome === 'refused') return t('refused ({code})', { code: r.refusal || '?' });
+  // lane exit-transfer: a pull / push row says what moved and how it was checked — never "exit ?"
+  if (r.transfer) return t(r.transfer.verb === 'push' ? 'pushed {size} · {check}' : 'pulled {size} · {check}', { size: fmtBytes(r.transfer.bytes), check: r.transfer.verified === 'sha256' ? t('sha256 verified') : t('size verified') });
   return t('exit {code}', { code: r.code == null ? '?' : r.code });
 }
 /** The row's KEY: the audit line's own id (verify r2 F7 — two runs of one command in the same millisecond were one row);
@@ -58,6 +60,14 @@ export function paintRow(node, r) {
   }
   const flags = [r.asked ? t('asked you first') : '', r.revokedDuringRun ? t('access was removed while it ran') : '', r.interpreter ? r.interpreter : ''].filter(Boolean);
   if (flags.length) body.appendChild(el('div', 'exit-runs-flags', flags.join(' · ')));
+  // lane exit-transfer: a transfer row's body is its two ends, the size and the sha256 (it has no output)
+  if (r.transfer) {
+    const x = r.transfer;
+    body.appendChild(el('div', 'exit-runs-stream', x.verb === 'push' ? t('from here → on the machine') : t('on the machine → here')));
+    body.appendChild(el('pre', 'exit-runs-pre', x.verb === 'push' ? `${x.local}\n→ ${x.remote}` : `${x.remote}\n→ ${x.local}`));
+    if (x.bytes != null) body.appendChild(el('div', 'exit-runs-flags', `${fmtBytes(x.bytes)} (${x.bytes})${x.sha256 ? ' · sha256 ' + x.sha256 : ''}`));
+    return node;
+  }
   const any = (r.stdout && r.stdout.trim()) || (r.stderr && r.stderr.trim());
   for (const stream of ['stderr', 'stdout']) {
     const text = String(r[stream] || '');

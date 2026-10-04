@@ -35,7 +35,8 @@
 //       agent's stdin, hidden characters folded, a `[Design comment]` head inside the quoted text softened ·
 //       ③ money + bounds — a comment is the user's own message (the spend ledger never moves; an agent bearer on the
 //       owner route is 403); a client that opens 17 design windows holds 16 watches and the refused windows SAY it
-//       (watch_limit in the stamp + chip); an artboard using 300 images is refused BY NAME (the 200-image read cap),
+//       (watch_limit in the stamp + chip — judged by the hub's own sentence, never a digit a clock or pid can print);
+//       an artboard using 300 images is refused BY NAME (the 200-image read cap),
 //       13 × 1.9 MB images ⇒ refused by name (24 MB a read).
 //   A⑩ (lane design-present) ▶ Present in the window: the page's artboards in reading order, one at a time, whole and
 //       fitted (fullscreen when Chrome grants it), → / a real click / a real swipe step, the frame stays shielded, Esc
@@ -745,9 +746,17 @@ try {
   const refused = (acks || []).filter((a) => !a.ok);
   evidence.acks = { total: (acks || []).length, refused: refused.map((a) => ({ dir: a.dir.split('/').pop(), code: a.code })) };
   ok(!!acks && refused.length === 2 && refused.every((a) => a.code === 'watch_limit') && (acks || []).filter((a) => a.ok).length === 15, `this socket already watched one folder: 15 of the 17 new watches were granted and 2 refused by name (watch_limit — 16 per window set)`, evidence.acks);
-  const said = await ev(`const out = []; for (const w of app.wm.windows.values()) { if (!w._design || !/\\/designs\\/w\\d\\d$/.test(w._design.dir)) continue; const st = w.element.querySelector('.design-stamp'); const chip = w.element.querySelector('.design-chip'); out.push({ dir: w._design.dir.split('/').pop(), stamp: st ? st.textContent : '', title: st ? st.title : '', chip: chip && chip.style.display !== 'none' ? chip.textContent : '' }); } return out;`);
-  const saidRefused = said.filter((s) => /watch|live|16/i.test(s.stamp + ' ' + s.chip + ' ' + s.title));
-  ok(saidRefused.length === 2 && refused.every((a) => saidRefused.some((s) => s.dir === a.dir.split('/').pop())), 'the two refused windows SAY it — the stamp reads "Live repaint off" and the chip names the limit (16 designs per window set) with the way out (Reload)', said.filter((s) => s.stamp || s.chip).slice(0, 4));
+  // THE REFUSAL IS JUDGED BY ITS OWN WORDS (lane mirror-green-ui, 2.369.205): this census used to match
+  // /watch|live|16/ over stamp + chip + title — and a GRANTED window's title is "Last read from /tmp/vs-dwin-<pid>/…/wNN
+  // at <date>, hh:mm:ss": a read at second (or minute) 16, or a scratch pid holding "16", counted it as a third refused
+  // window (red at load 37 here, 17 windows opening over several seconds). Now: the stamp says "Live repaint off" and
+  // the title names the hub's limit and the way out on EXACTLY the refused windows — waited for, since a window's first
+  // read can land after its ack (the stamp is drawn by whichever comes last).
+  const saidNow = () => ev(`const out = []; for (const w of app.wm.windows.values()) { if (!w._design || !/\\/designs\\/w\\d\\d$/.test(w._design.dir)) continue; const st = w.element.querySelector('.design-stamp'); const chip = w.element.querySelector('.design-chip'); out.push({ dir: w._design.dir.split('/').pop(), stamp: st ? st.textContent : '', title: st ? st.title : '', chip: chip && chip.style.display !== 'none' ? chip.textContent : '' }); } return out;`);
+  const saysOff = (s) => /^Live repaint off · read /.test(s.stamp) && /^This window is not watching its folder: one window set watches at most 16 designs\. Press Reload to re-read it\./.test(s.title);
+  const said = (await until(async () => { const l = await saidNow(); return l.filter(saysOff).length >= 2 ? l : null; }, 10000, 200)) || await saidNow();
+  const saidRefused = said.filter(saysOff);
+  ok(saidRefused.length === 2 && refused.every((a) => saidRefused.some((s) => s.dir === a.dir.split('/').pop())) && said.filter((s) => !saysOff(s)).every((s) => !/Live repaint|not watching/.test(s.stamp + ' ' + s.title + ' ' + s.chip)), 'the two refused windows SAY it — the stamp reads "Live repaint off" and the title names the limit (16 designs per window set) with the way out (Reload); no granted window says it', { refused: saidRefused, granted: said.filter((s) => !saysOff(s)).slice(0, 3) });
   // close them: every close unwatches (the refcount goes back down)
   await ev(`for (const w of [...app.wm.windows.values()]) if (w._design && /\\/designs\\/w\\d\\d$/.test(w._design.dir)) app.wm.closeWindow(w.id); return true;`);
   const unwatched = await until(() => ev(`const a = window.__acks.filter((m) => m.op === 'unwatch'); return a.length >= 17 ? a.length : null;`), 10000, 300);

@@ -1365,7 +1365,7 @@ console.log('\n⑭ design 011 lane 2: the poll stamps leave the row — a quiet 
     const w0 = st.index.flushStats().writes, i0 = ino(st.indexFile);
     for (let p = 1; p <= 10; p++) { await quietPass(st, ['c1', 'c300', 'c599'], T + p * 5e3, inRow); st.index.flush(); }
     const fs1 = st.index.flushStats();
-    const r = { writes: fs1.writes - w0, skipped: fs1.skipped, sameFile: ino(st.indexFile) === i0, stamp: st.stamps.lane(st.index.peek('a/c300')).lastPollAt, disk: fs.readFileSync(st.indexFile, 'utf8') === JSON.stringify(st.index.snapshot(), RT, 1), journal: (st.stamps.stats().journal || {}).lines, jbytes: (st.stamps.stats().journal || {}).bytes };
+    const r = { writes: fs1.writes - w0, skipped: fs1.skipped, sameFile: ino(st.indexFile) === i0, lastOnDisk: fs.readFileSync(st.indexFile, 'utf8').includes(String(T + 50e3)), stamp: st.stamps.lane(st.index.peek('a/c300')).lastPollAt, disk: fs.readFileSync(st.indexFile, 'utf8') === JSON.stringify(st.index.snapshot(), RT, 1), journal: (st.stamps.stats().journal || {}).lines, jbytes: (st.stamps.stats().journal || {}).bytes };
     st.close();
     return r;
   };
@@ -1391,7 +1391,12 @@ console.log('\n⑭ design 011 lane 2: the poll stamps leave the row — a quiet 
   const cutFile = (tag, ...cs) => MUTCS.write('src/channel-store.js', cs.reduce((s, [from, to]) => s.replace(from, to), src), tag);
   const cut = (tag, ...cs) => require(cutFile(tag, ...cs));
   const c1 = await quietRun(cut('qs-inrow', KEEP, HEAL), 'c-inrow', true);
-  ok(c1.writes === 10 && !c1.sameFile, `⑭ CONTROL: the stamp back in the row (kept by the serializer, never healed) — each of the ten quiet passes rewrites the index (${c1.writes} writes) — red`);
+  // lane mirror-green-channels (the Actions mirror, 2.369.204): the rewrite is witnessed by its BYTES (the tenth pass's
+  // stamp in the file), never by the inode number. An ext4 /tmp (the runner's) hands a freed inode to the next tmp file:
+  // the ten tmp + rename writes alternate between TWO numbers and the tenth lands on the first again (measured on ext4:
+  // 8783115, 8783114, … 8783114 = i0), so `!sameFile` read "never rewritten" there; tmpfs (this machine's /tmp) never
+  // reuses one. (`sameFile` stays the witness of NO write above: no rename, no new inode, on any filesystem.)
+  ok(c1.writes === 10 && c1.lastOnDisk, `⑭ CONTROL: the stamp back in the row (kept by the serializer, never healed) — each of the ten quiet passes rewrites the index (${c1.writes} writes, the tenth pass's stamp in the file on disk) — red`, JSON.stringify(c1));
   const c2 = await quietRun(cut('qs-noskip', SKIP), 'c-noskip', false);
   ok(c2.writes === 10, `⑭ CONTROL: without the equal-bytes skip the same quiet passes write ${c2.writes} times (the touched chunk re-serializes to equal bytes; nothing else stops the write) — red`);
 

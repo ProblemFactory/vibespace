@@ -30,6 +30,10 @@
 // such interpreter, not executable) is said by name and this CLI exits with the shell's own code (127 / 126) —
 // never a bare "exit 1". The first 4 KiB of stdout and stderr of every run are kept on the machine's command list
 // and shown in the user's chat card; `runs` lists this conversation's own runs with those heads.
+// FILES (lane exit-transfer, 2026-10-03): `pull` / `push` move ONE regular file between here and the machine under the
+// SAME grant as `run` (and its "ask me each time"), through the machine's own file ops — no shell, no 30 s cap, no
+// output bound: up to the user's limit (default 1 GiB), sha256-checked on both ends, never half-kept on failure. A pull
+// lands under this conversation's project directory, /tmp or ~/Downloads (default: ./<the remote file's name>).
 const api = process.env.VIBESPACE_API;
 const token = process.env.VIBESPACE_SESSION_TOKEN;
 if (!api || !token) { console.error('vibespace-exit: not running inside a VibeSpace session (missing env)'); process.exit(2); }
@@ -51,6 +55,16 @@ const USAGE = [
   '                                          this conversation\'s own recent runs there (newest first): the verdict, the duration and',
   '                                            the first line of output — the machine keeps the first 4 KiB of stdout and stderr of',
   '                                            every run (the user sees them on the chat card and the machine\'s command list)',
+  '',
+  '  vibespace-exit pull <machine> <remote-path> [<local-path>] [--overwrite]',
+  '                                          copy ONE file from the machine to here (needs "run"; no shell, no 30 s cap): the',
+  '                                            remote path is absolute (C:\\Users\\me\\out.zip or /home/me/out.zip); it lands at',
+  '                                            <local-path> (default ./<its name>) under the project, /tmp or ~/Downloads;',
+  '                                            sha256-checked; an existing file is replaced only with --overwrite. A folder: archive',
+  '                                            it first with `run`. Bounded by the user\'s limit (default 1 GiB).',
+  '  vibespace-exit push <local-path> <machine> <remote-path> [--overwrite]',
+  '                                          copy ONE file from here to the machine (same rules; the machine\'s agent must be',
+  '                                            2.369.205 or later). Prints where it landed, the size and the sha256.',
   '',
   '  <machine> = id / name / unique name substring (omit if only one machine is open to you).',
   '  The user decides who may: Remote tab → the machine\'s exit icon → "Who can use it" (network and commands are two grants).',
@@ -89,6 +103,26 @@ async function post(path, body) {
   if (!res.ok) fail(data, res.status);
   return data;
 }
+// a POST whose answer may be minutes away (a pull answers once the file landed): plain http(s).request, which sets no
+// deadline — global fetch gives up on an answer's headers after 300 s (UND_ERR_HEADERS_TIMEOUT), and the hub then stops
+// the transfer between windows (verify r2: a pull longer than 5 min never landed)
+function postLong(path, body) {
+  const u = new URL(api + path), raw = Buffer.from(JSON.stringify(body));
+  return new Promise((resolve, reject) => {
+    const req = require(u.protocol === 'https:' ? 'https' : 'http').request(u, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': raw.length, Authorization: 'Bearer ' + token } }, (res) => {
+      const chunks = [];
+      res.on('data', (d) => chunks.push(d));
+      res.on('end', () => {
+        let data = {};
+        try { data = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { }
+        if (res.statusCode >= 400) fail(data, res.statusCode); else resolve(data);
+      });
+      res.on('error', reject);
+    });
+    req.on('error', reject);
+    req.end(raw);
+  });
+}
 
 async function main() {
   const [cmd, ...rest] = args;
@@ -114,12 +148,59 @@ async function main() {
     for (const r of runs) {
       const when = new Date(r.at).toISOString().replace('T', ' ').slice(0, 19);
       const verdict = r.outcome === 'spawn_failed' ? `could not start — ${r.spawnError && r.spawnError.code ? describeSpawn(r) : '?'}`
-        : r.outcome === 'timed_out' ? 'timed out after 30 s' : r.outcome === 'refused' ? `refused (${r.refusal})` : `exit ${r.code == null ? '?' : r.code}`;
+        : r.outcome === 'timed_out' ? 'timed out after 30 s' : r.outcome === 'refused' ? `refused (${r.refusal})`
+        : r.transfer ? `${r.transfer.verb === 'push' ? 'pushed' : 'pulled'} ${r.transfer.bytes} bytes` : `exit ${r.code == null ? '?' : r.code}`;
       const secs = `${(Math.max(0, Number(r.ms) || 0) / 1000).toFixed(1)} s`;
       console.log(`  ${when}  ${r.machine}  ${verdict} · ${secs}${r.interpreter ? ' · ' + r.interpreter : ''}  ${r.cmd.length > 100 ? r.cmd.slice(0, 99) + '…' : r.cmd}`);
       const first = (r.stderr && r.stderr.trim() ? r.stderr : r.stdout || '').split('\n').find((l) => l.trim());
       if (first) console.log(`      ${r.stderr && r.stderr.trim() ? 'stderr' : 'stdout'}: ${first.slice(0, 200)}${(r.cut && (r.cut.stdout || r.cut.stderr)) ? '  (cut at 4 KiB)' : ''}`);
     }
+    return;
+  }
+
+  if (cmd === 'pull' || cmd === 'push') {
+    const fs = require('fs'), path = require('path');
+    const overwrite = rest.includes('--overwrite');
+    const words = rest.filter((a) => a !== '--overwrite');
+    const nameOf = (p) => String(p).split(/[\\/]/).filter(Boolean).pop() || '';
+    const need = cmd === 'pull' ? 'vibespace-exit pull <machine> <remote-path> [<local-path>] [--overwrite]' : 'vibespace-exit push <local-path> <machine> <remote-path> [--overwrite]';
+    if (words.length < (cmd === 'pull' ? 2 : 3) || words.length > 3) { console.error('usage: ' + need); process.exit(2); }
+    // "ask me each time": the call waits for the user's Allow first — said once it outlives a second
+    const note = setTimeout(() => console.error("# waiting for the user's approval (up to 60 s) if the machine asks…"), 1000);
+    if (cmd === 'pull') {
+      const [machine, remote, word] = words;
+      let local = path.resolve(word || nameOf(remote));
+      try { if (fs.statSync(local).isDirectory()) local = path.join(local, nameOf(remote)); } catch { }
+      const r = await postLong('/api/agent/exit/pull', { machine, remote, local, overwrite });
+      clearTimeout(note);
+      console.log(r.line);
+      return;
+    }
+    const [word, machine, remote] = words;
+    const local = path.resolve(word);
+    let st = null;
+    try { st = fs.statSync(local); } catch { }
+    if (!st || !st.isFile()) { clearTimeout(note); console.error('vibespace-exit push: not a regular file here: ' + local); process.exit(1); }
+    const u = new URL(api + '/api/agent/exit/push?' + new URLSearchParams({ machine: machine || '', remote, local, size: String(st.size), ...(overwrite ? { overwrite: '1' } : {}) }).toString());
+    // the request BODY is the file, streamed; the answer may come before the last byte (a refusal) — then sending stops
+    const r = await new Promise((resolve, reject) => {
+      const src = fs.createReadStream(local);
+      const req = require(u.protocol === 'https:' ? 'https' : 'http').request(u, { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/octet-stream' } }, (res) => {
+        const chunks = [];
+        res.on('data', (d) => chunks.push(d));
+        res.on('end', () => {
+          let data = {};
+          try { data = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { }
+          src.destroy(); req.destroy();
+          clearTimeout(note);
+          if (res.statusCode >= 400) fail(data, res.statusCode); else resolve(data);
+        });
+      });
+      req.on('error', (e) => { if (!req.res) reject(e); });
+      src.on('error', (e) => { req.destroy(); reject(e); });
+      src.pipe(req);
+    });
+    console.log(r.line);
     return;
   }
 

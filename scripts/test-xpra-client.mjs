@@ -158,6 +158,42 @@ console.log('§1 the PURE words (xpra-proto.js)');
   ok(same(w.feed(0, 100), []) && same(w.feed(0, 30), [[5, 1]]) && same(w.feed(0, -250), [[4, 2]]) && same(w.feed(130, 0), [[7, 1]]) && same(w.feed(0, 2, 1), []) && same(w.feed(0, 1, 2), [[5, 4]]), 'the wheel: deltas accumulate to 120-unit notches ⇒ button 4/5 (vertical) and 6/7 (horizontal) clicks; line and page modes scale (a trackpad\'s small deltas add up)');
   ok(same(P.displayPacket(['display-configure'], { width: 640, height: 480 }), ['display-configure', { 'desktop-size': [640, 480], dpi: { x: 96, y: 96 } }]) && P.displayPacket(['configure-display'], { width: 1, height: 1 })[0] === 'configure-display' && P.displayPacket([], { width: 640, height: 480 })[0] === 'desktop_size', 'the pane resize speaks 6.5.3\'s display-configure (its legacy alias when that is what the server names), else the pre-5 desktop_size');
   ok(P.keyboardConfigPacket(['keyboard-config'])[0] === 'keyboard-config' && P.keyboardConfigPacket([])[0] === 'keymap-changed', 'the keymap speaks keyboard-config on 6.5.3, keymap-changed before');
+  { // THE WORK AREA FOLLOWS EVERY PANE (lane desktop-workarea, 2.369.205; the owner's 2.369.203 WeChat: root 1660×1296,
+    // _NET_WORKAREA 0,0,1573,973, the app capped at it ⇒ a blank strip under it). xpra 6.5.4 computes the work area from the
+    // client's screen_sizes rows ALONE (server/subsystem/display.py calculate_workarea: the size ∩ each row's last four) and
+    // takes new rows only from the hello and the legacy desktop_size — modelled here as that server, fed what the client sends.
+    const T654 = ['hello', 'display-configure', 'configure-display', 'desktop_size', 'keyboard-config', 'configure-window'];
+    const serverAfter = (Pm, hello, sizes) => {
+      let rows = Pm.helloCaps({ width: hello[0], height: hello[1] }).screen_sizes, size = hello;
+      for (const [w, h] of sizes) {
+        const p = Pm.displayPacket(T654, { width: w, height: h, dpi: 96 });
+        if (p[0] === 'desktop_size') { rows = p[3]; if (p.length > 4) size = [p[1], p[2]]; } else size = p[1]['desktop-size'];
+      }
+      let wa = [0, 0, size[0], size[1]];
+      for (const r of rows) { if (r.length < 10) continue; const [x, y, w, h] = r.slice(6, 10); const x2 = Math.min(wa[0] + wa[2], x + w), y2 = Math.min(wa[1] + wa[3], y + h); wa = [Math.max(wa[0], x), Math.max(wa[1], y), 0, 0]; wa[2] = x2 - wa[0]; wa[3] = y2 - wa[1]; }
+      return { size, wa };
+    };
+    const SIZES = [1, 2, 320, 641, 974, 1573, 1574, 1660, 2560, 3321, 7680];
+    let bad = null, n = 0;
+    for (const w of SIZES) for (const h of SIZES) {
+      n++;
+      const p = P.displayPacket(T654, { width: w, height: h, dpi: 96 }), row = p[3] && p[3][0];
+      const good = p[0] === 'desktop_size' && p.length === 12 && p[1] === w && p[2] === h && p[3].length === 1 && same(row.slice(1, 3), [w, h]) && same(row.slice(6, 10), [0, 0, w, h]) && same(row[5][0].slice(1, 5), [0, 0, w, h])
+        && p[4] === 0 && same(p[5], []) && p[6] === w && p[7] === h && p[8] === 96 && p[9] === 96 && p[10] === 0 && same(p[11], {}) && same(p[3], P.helloCaps({ width: w, height: h }).screen_sizes);
+      if (!good && !bad) bad = { w, h, p };
+    }
+    ok(!bad, `the display packet carries the WORK AREA for every size (${n} sizes, 1..7680 per axis): 6.5.4 names desktop_size ⇒ its FULL form — the rows (one monitor, work area 0,0,w,h — the hello's own shape), then the same desktop size / dpi it re-dispatches as a display-configure`, bad);
+    const seq = [[1574, 974], [1200, 800], [1660, 1296]];
+    const ours = serverAfter(P, seq[0], seq.slice(1));
+    ok(same(ours.wa, [0, 0, 1660, 1296]) && same(ours.size, [1660, 1296]), `the owner's sizes through the modelled 6.5.4 server: hello 1574×974 → 1200×800 → 1660×1296 ⇒ the work area ${ours.wa.join(',')} = the root`, ours);
+    // CONTROL: the pre-lane rule (display-configure whenever the server names it) — the root follows, the work area stays at the hello's
+    const src = read('src/lib/xpra-proto.js'), line = "  const rowsTaken = types.includes('desktop_size') || !name;";
+    ok(src.split(line).length === 2, 'CONTROL anchor: the rows rule is one line in xpra-proto.js');
+    const Ppre = await import(pathToFileURL(MUTXC.write('src/lib/xpra-proto.js', src.replace(line, '  const rowsTaken = !name;'), 'workarea')).href);
+    const pre = serverAfter(Ppre, seq[0], seq.slice(1));
+    ok(same(pre.size, [1660, 1296]) && same(pre.wa, [0, 0, 1574, 974]) && Ppre.displayPacket(T654, { width: 1660, height: 1296 })[0] === 'display-configure', `CONTROL: the pre-lane packet on the same sizes — root ${pre.size.join('×')}, work area ${pre.wa.join(',')} (the hello's: the owner's blank strip)`, pre);
+    ok(P.displayPacket(T654, { width: 640, height: 480, dpi: 143.6 })[8] === 144, 'the legacy form\'s dpi fields are whole numbers (xpra reads them as u16; the worker\'s rencode writes every number as an int)');
+  }
   const ime = new P.ImeKeymap();
   const p1 = ime.plan('a中文');
   ok(p1.changed && same(p1.rows, [['U4E2D', 226], ['U6587', 227]]) && p1.keys.length === 3 && p1.keys[0].keyname === 'a' && p1.keys[0].keycode === 65 && p1.keys[1].keycode === 226, 'IME: composed characters outside the keymap get PUBLISHED keycode rows (U<hex> from 226) before their presses; a keymap character presses its own keycode');
@@ -329,7 +365,7 @@ console.log('§2b THE BELT (2026-09-22): a second top-level placed inside, the a
   ok(same(wk.sent('map-window')[0].slice(1, 6), [1, 0, 0, 1098, 653]), 'the first top-level is fitted to the pane (1098x653 at 0,0)');
   // (a) a SECOND top-level (kind main, not transient) where xpra clamped it: mapped INSIDE the pane
   wk.feed(['new-window', 5, 1078, 633, 484, 316, { title: 'xterm', 'window-type': ['NORMAL'] }]);
-  ok(client.windows.get(5).kind === 'main' && client.mainWid === 1 && same(wk.sent('map-window')[1].slice(1, 6), [5, 614, 337, 484, 316]), 'a second top-level at xpra\'s clamp 1078,633 (20x20 px visible) is mapped at 614,337 — its own size, wholly inside; the first stays the main');
+  ok(client.windows.get(5).kind === 'main' && client.mainWid === 1 && same(wk.sent('map-window')[1].slice(1, 6), [5, 307, 168, 484, 316]), 'a second top-level at xpra\'s clamp 1078,633 (20x20 px visible) is mapped CENTRED over the main at 307,168 (design 016 S1b) — its own size, wholly inside; the first stays the main');
   // (b) X moves it off the pane later (the zenity repro): nudged back inside at once
   wk.feed(['window-move-resize', 5, 950, 600, 484, 316, 0]);
   ok(same(cfg(5), [[614, 337, 484, 316]]) && client.windows.get(5).x === 614, 'a secondary window X moved to 950,600 ⇒ ONE configure-window back to 614,337 (it used to follow off the pane)');
@@ -1321,6 +1357,316 @@ console.log('§8 lane app-fit-fixed (2026-10-03, the owner: WeChat\'s login in a
     const M = await runFixedView(await import(vm), true);
     ok(M.view.stageScale < 1 && M.view.fitBadge.style.display === '', `CONTROL: pre-fix the fixed window is scaled to fit with the badge (stage ${M.view.stageScale.toFixed(3)}) — the "75 %" the owner refused`);
     M.view.dispose();
+  }
+}
+
+console.log('§9 design 016 S1 (lane app-guest-window, 2026-10-03 — WeChat\'s Moments drawn over its main window, cut at the bottom): the pane\'s minimum is the UNION of every held window\'s, a second NORMAL window is centred over the main, the FRONT window is named and closed by the ✕');
+{
+  // ── the PURE words with the owner's :4 numbers (xprop, MEASURED): Weixin NORMAL 1574×974 (min 840×816, max 1574×974);
+  // Moments NORMAL, no transient-for, 880×974 at 324,0, min 880×1120; a 138×44 override-redirect tooltip ──
+  const WXM = { title: '微信', 'size-constraints': { 'minimum-size': [840, 816], 'maximum-size': [1574, 974] }, 'window-type': ['NORMAL'] };
+  const MOM = { title: '朋友圈', 'size-constraints': { 'minimum-size': [880, 1120] }, 'window-type': ['NORMAL'] };
+  const wx = { wid: 1, kind: 'main', mapped: true, z: 1, x: 0, y: 0, w: 1574, h: 974, meta: WXM };
+  const mo = { wid: 2, kind: 'main', mapped: true, z: 2, x: 324, y: 0, w: 880, h: 974, meta: MOM };
+  const tip = { wid: 3, kind: 'popup', mapped: false, z: 3, x: 500, y: 500, w: 138, h: 44, meta: { 'size-constraints': { 'minimum-size': [2000, 2000] } } };
+  const table = [
+    ['unionMin: Weixin alone', P.unionMin([wx]), { w: 840, h: 816 }],
+    ['unionMin: Weixin + Moments + the tooltip (the owner\'s :4) ⇒ 880×1120', P.unionMin([wx, mo, tip]), { w: 880, h: 1120 }],
+    ['unionMin: a popup\'s hints never count', P.unionMin([tip]), null],
+    ['unionMin: a dialog\'s base-size counts when it states no minimum (minPaneCss\'s rule)', P.unionMin([{ kind: 'dialog', meta: { 'size-hints': { 'base-size': [900, 200] } } }, wx]), { w: 900, h: 816 }],
+    ['unionMin: nothing stated', P.unionMin([{ kind: 'main', meta: {} }]), null],
+    ['placeGuest: Moments (X put it at 324,0) centred over Weixin ⇒ 347,0', P.placeGuest({ x: 324, y: 0, w: 880, h: 974 }, { paneW: 1574, paneH: 974 }, wx), { x: 347, y: 0, w: 880, h: 974, moved: true }],
+    ['placeGuest: no main ⇒ centred in the pane', P.placeGuest({ x: 0, y: 0, w: 400, h: 300 }, { paneW: 1000, paneH: 700 }), { x: 300, y: 200, w: 400, h: 300, moved: true }],
+    ['placeGuest: a main held under its maximum (smaller than the pane) ⇒ centred over the MAIN', P.placeGuest({ x: 0, y: 0, w: 200, h: 100 }, { paneW: 1600, paneH: 1200 }, { x: 0, y: 0, w: 1000, h: 600 }), { x: 400, y: 250, w: 200, h: 100, moved: true }],
+    ['placeGuest: larger than the pane ⇒ pinned to the origin (placeInside)', P.placeGuest({ x: 50, y: 50, w: 1200, h: 900 }, { paneW: 1000, paneH: 700 }, { x: 0, y: 0, w: 1000, h: 700 }), { x: 0, y: 0, w: 1200, h: 900, moved: true }],
+    ['placeGuest: already centred ⇒ not moved', P.placeGuest({ x: 347, y: 0, w: 880, h: 974 }, { paneW: 1574, paneH: 974 }, wx), { x: 347, y: 0, w: 880, h: 974, moved: false }],
+    ['frontOf: the topmost held window by z (Moments)', P.frontOf([wx, mo, tip])?.wid, 2],
+    ['frontOf: the main raised over it', P.frontOf([{ ...wx, z: 9 }, mo, tip])?.wid, 1],
+    ['frontOf: popups only ⇒ null', P.frontOf([tip]), null],
+  ];
+  const bad = table.filter(([, got, want]) => !same(got, want));
+  ok(bad.length === 0, `PURE: ${table.length} rows — unionMin / placeGuest / frontOf, the owner's numbers as fixture cases`, bad.map(([n, got, want]) => ({ n, got, want })));
+
+  // ── the session: Weixin, then Moments, then a tooltip ──
+  const runGuest = async (mod) => {
+    FakeWorker.instances.length = 0;
+    const ev = { cons: [], front: [] };
+    const c = mod.createXpraClient({ url: 'ws://x/s', workerUrl: '/w.js', screen: { width: 1574, height: 974 }, Worker: FakeWorker, decode: async () => ({ close() {} }), log: null, on: { constraints: (h) => ev.cons.push(h), front: (f) => ev.front.push(f ? [f.wid, f.title] : null) } });
+    c.connect();
+    const w = await until(() => FakeWorker.instances[0]);
+    await until(() => w.sent('hello').length);
+    w.feed(['hello', { 'packet-types': ['keyboard-config', 'display-configure'] }]);
+    w.feed(['new-window', 1, 0, 0, 1574, 974, structuredClone(WXM)]); // a copy per run: the client merges metadata INTO the packet's object
+    w.feed(['new-window', 2, 324, 0, 880, 974, structuredClone(MOM)]);
+    w.feed(['new-override-redirect', 3, 600, 300, 138, 44, { 'override-redirect': true }]);
+    return { c, w, ev };
+  };
+  {
+    const A = await runGuest(C);
+    ok(same(A.ev.cons.map((h) => h && h['minimum-size']), [[840, 816], [880, 1120]]) && same(A.ev.cons[1]['maximum-size'], [1574, 974]), `S1a: on.constraints names Weixin's minimum, then — Moments mapped — the UNION 880×1120 (the main's other hints kept): ${JSON.stringify(A.ev.cons)}`);
+    ok(same(A.w.sent('map-window')[1].slice(1, 6), [2, 347, 0, 880, 974]) && A.c.mainWid === 1, `S1b: Moments (X put it at 324,0) is mapped CENTRED over Weixin at 347,0, its own size; Weixin stays the main (${A.w.sent('map-window')[1].slice(2, 6)})`);
+    ok(same(A.ev.front, [[1, '微信'], [2, '朋友圈']]) && A.c.frontWid === 2, `S1c: on.front names Weixin, then Moments as it maps on top — the tooltip never (${JSON.stringify(A.ev.front)})`);
+    A.c.focusWindow(1); // a press into the main (pointerButton → focusWindow)
+    ok(same(A.ev.front.slice(-1), [[1, '微信']]) && A.c.frontWid === 1, 'the main raised (a press into it) ⇒ front = Weixin');
+    A.w.feed(['raise-window', 2]);
+    ok(same(A.ev.front.slice(-1), [[2, '朋友圈']]), 'X raising Moments ⇒ front = Moments again');
+    A.w.feed(['window-metadata', 2, { title: '朋友圈 · 2' }]);
+    ok(same(A.ev.front.slice(-1), [[2, '朋友圈 · 2']]), 'the front window\'s title changing ⇒ named again');
+    const n = A.ev.front.length;
+    A.w.feed(['window-metadata', 1, { title: '微信 ' }]);
+    ok(A.ev.front.length === n, 'a title change on a window BEHIND the front announces nothing');
+    ok(A.c.closeFront() === true && same(A.w.sent('close-window'), [['close-window', 2]]), 'closeFront() ⇒ ONE close-window naming Moments (2) — never the main');
+    A.w.feed(['lost-window', 2]);
+    ok(same(A.ev.front.slice(-1), [[1, '微信 ']]) && same(A.ev.cons.slice(-1)[0]['minimum-size'], [840, 816]), `Moments closed ⇒ front = Weixin and the minimum back to Weixin's 840×816 (${JSON.stringify(A.ev.cons.slice(-1))})`);
+    A.c.watch = true;
+    ok(A.c.closeFront() === false && A.w.sent('close-window').length === 1, 'x5 Watch: closeFront sends nothing');
+    A.c.close();
+  }
+  { // the main lost while Moments is left: Moments becomes the main (pickMain) — re-announced as the MAIN (the title drops the " · ")
+    const B = await runGuest(C);
+    B.w.feed(['lost-window', 1]);
+    ok(B.c.mainWid === 2 && same(B.ev.front.slice(-1), [[2, '朋友圈']]) && B.ev.front.length === 3, `the main lost ⇒ Moments is elected the main and on.front fires again for it (now the main) (${JSON.stringify(B.ev.front)})`);
+    B.c.close();
+  }
+
+  // ── the view: the union as the window's minimum, onFront to the window, closeFront, null on disconnect ──
+  {
+    FakeWorker.instances.length = 0;
+    const host = new El('div'); const fronts = [], mins = [];
+    const view = V.createXpraView(host, { url: () => 'ws://x/stream', workerUrl: '/w.js', Worker: FakeWorker, decode: async () => ({ close() {} }), pixelRatio: () => 2, dpi: 96, onFront: (f) => fronts.push(f), onMinSize: (m) => mins.push(m) });
+    const pane = view.pane; pane.clientWidth = 787; pane.clientHeight = 487; pane.rect = { left: 0, top: 0 };
+    await view.connect();
+    const w = await until(() => FakeWorker.instances[0]);
+    await until(() => w.sent('hello').length);
+    w.feed(['hello', { 'packet-types': ['keyboard-config', 'display-configure'] }]);
+    w.feed(['new-window', 1, 0, 0, 1574, 974, structuredClone(WXM)]);
+    w.feed(['new-window', 2, 324, 0, 880, 974, structuredClone(MOM)]);
+    ok(same(mins, [{ w: 420, h: 408 }, { w: 440, h: 560 }]), `the window's minimum (CSS px at ratio 2): Weixin's 420×408, then the union 440×560 — Moments is 1120 device px tall (${JSON.stringify(mins)})`);
+    ok(same(fronts.map((f) => f && [f.wid, f.title, f.main]), [[1, '微信', true], [2, '朋友圈', false]]), `onFront: Weixin (the main), then Moments (main: false — the window titles "微信 · 朋友圈") (${JSON.stringify(fronts)})`);
+    ok(view.closeFront() === true && same(w.sent('close-window'), [['close-window', 2]]), 'view.closeFront() ⇒ close-window to Moments');
+    view.disconnect();
+    ok(fronts.slice(-1)[0] === null, 'disconnect ⇒ onFront(null) — the title drops the second window');
+    view.dispose();
+  }
+
+  // ── CONTROLS: the pre-lane client — the minimum is the main's alone, a second top-level stays where X put it, the front is the main ──
+  const gsrc = read('src/lib/xpra-client.js');
+  const UNION = "    const c = all && (!mine || all.w > mine.w || all.h > mine.h) ? { ...own, 'minimum-size': [all.w, all.h] } : own;";
+  const GUEST = "    else if (kind === 'main') { const m = windows.get(mainWid);";
+  const FRONT = "    const f = P.frontOf(paneWindows(0));\n    const key = f ?"; // S2 (lane app-satellite-windows): the main pane's windows
+  ok(gsrc.split(UNION).length === 2 && gsrc.split(GUEST).length === 2 && gsrc.split(FRONT).length === 2, 'CONTROL: the union, the guest placement and the front naming are each spelled once in xpra-client.js');
+  const gm = MUTXC.write('src/lib/xpra-client.js', gsrc.replace(UNION, '    const c = own; // pre-fix CONTROL: the main alone').replace(GUEST, '    else if (false /* pre-fix CONTROL */) { const m = windows.get(mainWid);').replace(FRONT, '    const f = mainWid ? windows.get(mainWid) : null; // pre-fix CONTROL: the title is always the main\'s\n    const key = f ?'), 'guest');
+  {
+    const M = await runGuest(await import(gm));
+    ok(same(M.ev.cons.map((h) => h && h['minimum-size']), [[840, 816]]), `CONTROL: pre-fix Moments' minimum enters nowhere — the constraints stay Weixin's 840×816, a 974-px pane cuts the 1120-px Moments (the owner's report) (${JSON.stringify(M.ev.cons)})`);
+    ok(same(M.w.sent('map-window')[1].slice(1, 6), [2, 324, 0, 880, 974]), `CONTROL: pre-fix Moments stays where X put it (${M.w.sent('map-window')[1].slice(2, 4)}), not centred`);
+    ok(M.ev.front.length >= 1 && M.ev.front.every((f) => !f || f[0] === 1), `CONTROL: pre-fix the front is always the main — the title never names Moments (${JSON.stringify(M.ev.front)})`);
+    M.c.close();
+  }
+}
+
+console.log('§10 design 016 S2 (lane app-satellite-windows, 2026-10-03 — the owner\'s YES: WeChat\'s Moments as its OWN VibeSpace window): the root\'s SLOTS side by side, the satellite PANE over the same session (one connection), its pointer / keys / dialogs / popups, lost / adopted / released / missing');
+{
+  const WXM = { title: '微信', 'size-constraints': { 'minimum-size': [840, 816], 'maximum-size': [1574, 974] }, 'window-type': ['NORMAL'] };
+  const MOM = { title: '朋友圈', 'size-constraints': { 'minimum-size': [880, 1120] }, 'window-type': ['NORMAL'] };
+  // ── the PURE words ──
+  const slots = new Map([[2, { x: 1606, y: 0, w: 880, h: 1120 }]]);
+  const wins = new Map([[1, { wid: 1, kind: 'main', meta: {} }], [2, { wid: 2, kind: 'main', meta: {} }], [4, { wid: 4, kind: 'dialog', meta: { 'transient-for': 2 } }], [6, { wid: 6, kind: 'dialog', meta: { 'transient-for': 4 } }], [7, { wid: 7, kind: 'dialog', meta: { 'transient-for': 1 } }]]);
+  const sf = (m, list, o) => { const r = P.slotFor(m, list, o); return { slots: [...r.slots], root: r.root }; };
+  const table = [
+    ['slotFor: Weixin\'s display 1574×974 + Moments 880×1120 ⇒ Moments at 1606,0 (after a 32 px gap); the root 2486×1120', sf({ w: 1574, h: 974 }, [{ wid: 2, w: 880, h: 1120 }]), { slots: [[2, { x: 1606, y: 0, w: 880, h: 1120 }]], root: { width: 2486, height: 1120 } }],
+    ['slotFor: a third window to the right of the second', sf({ w: 1000, h: 700 }, [{ wid: 2, w: 500, h: 400 }, { wid: 3, w: 300, h: 900 }]), { slots: [[2, { x: 1032, y: 0, w: 500, h: 400 }], [3, { x: 1564, y: 0, w: 300, h: 900 }]], root: { width: 1864, height: 900 } }],
+    ['slotFor: a window past SLOT_ROOT_MAX gets NO slot (it stays a guest); a later small one still fits', sf({ w: 1000, h: 700 }, [{ wid: 2, w: 7200, h: 400 }, { wid: 3, w: 300, h: 200 }]), { slots: [[3, { x: 1032, y: 0, w: 300, h: 200 }]], root: { width: 1332, height: 700 } }],
+    ['slotFor: no secondaries ⇒ the main\'s display', sf({ w: 800, h: 600 }, []), { slots: [], root: { width: 800, height: 600 } }],
+    ['inSlot: at the slot\'s origin ⇒ not moved', P.inSlot({ x: 1606, y: 0, w: 880, h: 1120 }, { x: 1606, y: 0 }), { x: 1606, y: 0, w: 880, h: 1120, moved: false }],
+    ['inSlot: the app moved it ⇒ back to the slot\'s origin', P.inSlot({ x: 40, y: 30, w: 880, h: 1120 }, { x: 1606, y: 0 }), { x: 1606, y: 0, w: 880, h: 1120, moved: true }],
+    ['placeInRect: a dialog of the satellite placed off its slot ⇒ inside it', P.placeInRect({ x: 10, y: 10, w: 300, h: 200 }, { x: 1606, y: 0, w: 880, h: 1120 }), { x: 1606, y: 10, w: 300, h: 200, moved: true }],
+    ['paneOf: the slotted window ⇒ its own wid', P.paneOf(wins.get(2), slots, wins), 2],
+    ['paneOf: the main ⇒ 0', P.paneOf(wins.get(1), slots, wins), 0],
+    ['paneOf: a dialog transient for the slotted window ⇒ that slot', P.paneOf(wins.get(4), slots, wins), 2],
+    ['paneOf: a dialog of that dialog ⇒ the same slot (the chain)', P.paneOf(wins.get(6), slots, wins), 2],
+    ['paneOf: a dialog transient for the main ⇒ 0', P.paneOf(wins.get(7), slots, wins), 0],
+    ['paneOf: a popup whose origin lies in the slot (a menu opened in Moments) ⇒ 2', P.paneOf({ wid: 8, kind: 'popup', x: 1700, y: 40, meta: {} }, slots, wins), 2],
+    ['paneOf: a popup over the main ⇒ 0', P.paneOf({ wid: 9, kind: 'popup', x: 100, y: 40, meta: {} }, slots, wins), 0],
+    ['paneOf: no slots ⇒ 0 for everything', P.paneOf(wins.get(4), new Map(), wins), 0],
+  ];
+  const DP = await import('../src/lib/desktop-app-prefs.js');
+  const ws = { w: 1600, h: 900 };
+  table.push(
+    ['satellitePlacement: beside the main (its right), top edges aligned', DP.satellitePlacement({ x: 40, y: 60, w: 700, h: 500 }, { w: 500, h: 400 }, ws), { x: 752, y: 60 }],
+    ['satellitePlacement: no room on the right ⇒ its left', DP.satellitePlacement({ x: 900, y: 60, w: 600, h: 500 }, { w: 500, h: 400 }, ws), { x: 388, y: 60 }],
+    ['satellitePlacement: room on neither side ⇒ the workspace\'s right edge', DP.satellitePlacement({ x: 100, y: 60, w: 1300, h: 500 }, { w: 500, h: 400 }, ws), { x: 1100, y: 60 }],
+    ['satellitePlacement: the remembered offset of this app wins', DP.satellitePlacement({ x: 100, y: 60, w: 700, h: 500 }, { w: 500, h: 400 }, ws, { dx: 200, dy: 120 }), { x: 300, y: 180 }],
+    ['satellitePlacement: kept on the workspace (top-left inside)', DP.satellitePlacement({ x: 100, y: 700, w: 700, h: 500 }, { w: 500, h: 400 }, ws, { dx: 1400, dy: 50 }), { x: 1100, y: 500 }],
+    ['setSatelliteOffset: set one app\'s, keep the others; null forgets', [DP.setSatelliteOffset({ a: { dx: 1, dy: 2 } }, 'b', { dx: 3.4, dy: -5 }), DP.setSatelliteOffset({ a: { dx: 1, dy: 2 } }, 'a', null)], [{ a: { dx: 1, dy: 2 }, b: { dx: 3, dy: -5 } }, {}]],
+  );
+  const bad = table.filter(([, got, want]) => !same(got, want));
+  ok(bad.length === 0, `PURE: ${table.length} rows — slotFor / inSlot / placeInRect / paneOf / satellitePlacement, the owner's numbers as fixture cases`, bad.map(([n, got, want]) => ({ n, got, want })));
+
+  // ── the session with slots: Weixin, then Moments ──
+  const runSlots = async (mod, { slots: on = true, watch = false } = {}) => {
+    FakeWorker.instances.length = 0;
+    const ev = { slot: [], cons: [], front: [] };
+    const c = mod.createXpraClient({ url: 'ws://x/s', workerUrl: '/w.js', screen: { width: 1574, height: 974 }, slots: on, Worker: FakeWorker, decode: async () => ({ close() {} }), log: null, beltGapMs: 0, on: { slot: (wid, r) => ev.slot.push([wid, r && [r.x, r.y, r.w, r.h]]), constraints: (h) => ev.cons.push(h && h['minimum-size']), front: (f) => ev.front.push(f ? f.wid : null) } });
+    c.connect();
+    const w = await until(() => FakeWorker.instances[0]);
+    await until(() => w.sent('hello').length);
+    w.feed(['hello', { 'packet-types': ['keyboard-config', 'display-configure'] }]);
+    if (watch) c.watch = true;
+    w.feed(['new-window', 1, 0, 0, 1574, 974, structuredClone(WXM)]);
+    w.feed(['new-window', 2, 324, 0, 880, 1120, structuredClone(MOM)]);
+    return { c, w, ev };
+  };
+  const cfg = (w, wid) => w.sent('configure-window').filter((p) => p[1] === wid).map((p) => p.slice(1, 6));
+  {
+    const A = await runSlots(C);
+    ok(same(A.ev.slot, [[2, [1606, 0, 880, 1120]]]) && same(A.c.slotOf(2), { x: 1606, y: 0, w: 880, h: 1120 }), `S2a: Moments gets a SLOT to the right of Weixin's display — 1606,0 880×1120 (${JSON.stringify(A.ev.slot)})`);
+    ok(same(A.w.sent('map-window')[1].slice(1, 6), [2, 1606, 0, 880, 1120]) && A.c.mainWid === 1, `S2a: Moments is MAPPED at its slot's origin, its own size — never over Weixin (${A.w.sent('map-window')[1].slice(2, 6)})`);
+    ok(same(A.c.display, { width: 2486, height: 1120 }), `S2a: the root holds both side by side — 2486×1120 (${JSON.stringify(A.c.display)})`);
+    ok(same(A.ev.cons, [[840, 816]]) && same(A.ev.front, [1]), `S2: Moments grows NOT the main window (its minimum stays Weixin's) and is never the main window's front (${JSON.stringify(A.ev)})`);
+    ok(A.c.ownerOf(A.c.windows.get(2)) === 2 && A.c.ownerOf(A.c.windows.get(1)) === 0 && same(A.c.constraintsOf(2)['minimum-size'], [880, 1120]), 'ownerOf: Moments is its own pane\'s; constraintsOf(2) carries Moments\' 880×1120');
+    ok(A.c.setSlotPane(2, { width: 900, height: 1200 }) === true && same(cfg(A.w, 2).slice(-1), [[2, 1606, 0, 900, 1200]]) && same(A.c.display, { width: 2506, height: 1200 }), `setSlotPane: the satellite's pane 900×1200 ⇒ Moments fitted to it IN its slot, the root grows (${JSON.stringify(cfg(A.w, 2))}, ${JSON.stringify(A.c.display)})`);
+    A.w.feed(['window-move-resize', 2, 1606, 0, 900, 1200]);
+    A.w.feed(['window-move-resize', 2, 300, 40, 900, 1200]); // the app (or X) moved it
+    ok(same(cfg(A.w, 2).slice(-1), [[2, 1606, 0, 900, 1200]]), 'the belt keeps it in its slot: an app move to 300,40 ⇒ ONE corrective configure back to 1606,0');
+    A.w.feed(['new-window', 4, 10, 10, 300, 200, { title: 'dlg', 'transient-for': 2 }]);
+    ok(same(A.w.sent('map-window').slice(-1)[0].slice(1, 6), [4, 1606, 10, 300, 200]) && A.c.ownerOf(A.c.windows.get(4)) === 2, 'a dialog transient for Moments is placed inside ITS slot and belongs to its pane');
+    A.w.feed(['new-override-redirect', 8, 1700, 60, 120, 80, { 'override-redirect': true }]);
+    A.w.feed(['new-override-redirect', 9, 100, 60, 120, 80, { 'override-redirect': true }]);
+    ok(A.c.ownerOf(A.c.windows.get(8)) === 2 && A.c.ownerOf(A.c.windows.get(9)) === 0, 'a popup opened in Moments (origin in its slot) is drawn in its pane; one over Weixin in the main pane');
+    A.w.feed(['lost-window', 4]); A.w.feed(['lost-window', 8]); A.w.feed(['lost-window', 9]);
+    A.c.focusWindow(1);
+    const f0 = A.w.sent('focus').length;
+    ok(A.c.focusPane(2) === true && same(A.w.sent('focus').slice(-1)[0].slice(1, 2), [2]) && A.c.focusPane(2) === false && A.w.sent('focus').length === f0 + 1, 'focusPane(2): keys typed into the satellite move the X focus to Moments ONCE (a second ask sends nothing)');
+    A.w.feed(['new-window', 5, 0, 0, 400, 300, { title: 'third', 'window-type': ['NORMAL'] }]);
+    ok(same(A.c.slotOf(5), { x: 2538, y: 0, w: 400, h: 300 }), `a third top-level gets the next slot (${JSON.stringify(A.c.slotOf(5))})`);
+    A.w.feed(['lost-window', 2]);
+    ok(same(A.ev.slot.filter(([wid]) => wid === 2).slice(-1), [[2, null]]) && same(A.c.slotOf(5), { x: 1606, y: 0, w: 400, h: 300 }) && same(cfg(A.w, 5).slice(-1), [[5, 1606, 0, 400, 300]]) && same(A.c.display, { width: 2006, height: 974 }), `Moments lost ⇒ its slot goes (on.slot null), the third closes up to 1606 (configure-window), the root shrinks (${JSON.stringify(A.c.display)})`);
+    ok(A.c.closeWindow(5) === true && same(A.w.sent('close-window').slice(-1), [['close-window', 5]]), 'closeWindow(5) ⇒ close-window to THAT window (the satellite\'s ✕)');
+    A.w.feed(['lost-window', 1]);
+    ok(A.c.mainWid === 5 && A.c.slotOf(5) === null && same(cfg(A.w, 5).slice(-1), [[5, 0, 0, 1574, 974]]) && same(A.ev.slot.slice(-1), [[5, null]]), `ADOPT: the main lost ⇒ the third window is the main, its slot goes and it is FITTED to the main pane at 0,0 (no hints: 1574×974) (${JSON.stringify(cfg(A.w, 5).slice(-1))})`);
+    A.c.close();
+  }
+  {
+    const B = await runSlots(C);
+    ok(B.c.releaseSlot(2) === true && B.c.slotOf(2) === null && same(cfg(B.w, 2).slice(-1), [[2, 347, 0, 880, 1120]]) && same(B.ev.cons.slice(-1), [[880, 1120]]), `releaseSlot: a satellite closed while Moments lives ⇒ Moments is S1's guest again (centred over Weixin; the main's minimum the union) (${JSON.stringify(cfg(B.w, 2))})`);
+    B.w.feed(['window-move-resize', 2, 0, 0, 880, 1120]);
+    ok(B.c.slotOf(2) === null, '…and stays a guest for this session (no slot on its next move)');
+    B.c.close();
+    const W = await runSlots(C, { watch: true });
+    ok(W.ev.slot.length === 0 && W.c.slotOf(2) === null && W.w.sent('map-window').length === 2, 'x5 Watch: no slot for a window that maps meanwhile (the active viewer placed it)');
+    W.c.watch = false;
+    ok(same(W.c.slotOf(2), { x: 1606, y: 0, w: 880, h: 1120 }) && same(cfg(W.w, 2).slice(-1), [[2, 1606, 0, 880, 1120]]), 'leaving Watch slots what mapped meanwhile and moves it there');
+    W.c.close();
+    const N = await runSlots(C, { slots: false });
+    ok(N.ev.slot.length === 0 && same(N.w.sent('map-window')[1].slice(1, 6), [2, 347, 0, 880, 1120]), 'slots off (no satellite possible — the default) ⇒ S1 exactly: Moments centred over Weixin');
+    N.c.close();
+  }
+
+  // ── the view: the satellite pane over the SAME session ──
+  {
+    FakeWorker.instances.length = 0;
+    const host = new El('div'); const asked = [], mainMoves = [];
+    const view = V.createXpraView(host, { url: () => 'ws://x/stream', workerUrl: '/w.js', Worker: FakeWorker, decode: async () => ({ close() {} }), pixelRatio: () => 2, dpi: 96, onSatellite: (s) => asked.push(s), onMoveResize: (e) => mainMoves.push(e) });
+    const pane = view.pane; pane.clientWidth = 787; pane.clientHeight = 487; pane.rect = { left: 0, top: 0 };
+    await view.connect();
+    const w = await until(() => FakeWorker.instances[0]);
+    await until(() => w.sent('hello').length);
+    w.feed(['hello', { 'packet-types': ['keyboard-config', 'display-configure'] }]);
+    w.feed(['new-window', 1, 0, 0, 1574, 974, structuredClone(WXM)]);
+    w.feed(['new-window', 2, 324, 0, 880, 1120, structuredClone(MOM)]);
+    await sleep(0);
+    ok(same(asked, [{ wid: 2, title: '朋友圈' }]), `onSatellite({wid: 2, title: '朋友圈'}) — the window is asked to open a satellite (${JSON.stringify(asked)})`);
+    const host2 = new El('div'); const got = { title: [], min: [], fixed: [], gone: [], moves: [], meta: 0 };
+    const sat = view.attachSatellite(host2, 2, { onTitle: (x) => got.title.push(x), onMinSize: (m) => got.min.push(m), onFixedSize: (f) => got.fixed.push(f), onMeta: () => got.meta++, onGone: (why) => got.gone.push(why), onMoveResize: (e) => got.moves.push(e) });
+    sat.pane.clientWidth = 440; sat.pane.clientHeight = 560; sat.pane.rect = { left: 1000, top: 100 };
+    ok(sat.bound && sat.stage.children.some((el) => el.dataset.wid === '2') && !view.stage.children.some((el) => el.dataset.wid === '2') && view.stage.children.some((el) => el.dataset.wid === '1'), 'attachSatellite: the satellite\'s stage draws Moments; the main pane no longer does (Weixin stays)');
+    ok(same(got.title, ['朋友圈']) && same(got.min, [{ w: 440, h: 560 }]) && same(got.fixed, [null]) && got.meta > 0, `its title, its minimum (CSS px at ratio 2: 440×560) and its metadata reach ITS window (${JSON.stringify(got)})`);
+    ok(FakeWorker.instances.length === 1, 'ONE connection: the satellite opened no socket (one worker for the session)');
+    sat.resnap();
+    ok(/translate\(-803px, 0px\)|translate\(-803px, -0px\)/.test(sat.stage.style.transform), `the viewport: the stage shifted by Moments' origin (1606 device px = 803 CSS px) — ${sat.stage.style.transform}`);
+    const b0 = w.sent('button-action').length;
+    sat.pane.fire('pointerdown', { clientX: 1010, clientY: 120, button: 0, pointerId: 7 });
+    const press = w.sent('button-action').slice(b0)[0];
+    ok(!!press && press[1] === 2 && press[4][0] === 1606 + 20 && press[4][1] === 40, `a press in the satellite reaches Moments at its ROOT point (1626,40 = its origin + 10,20 CSS × 2): ${JSON.stringify(press && press.slice(1, 6))}`);
+    sat.pane.fire('pointerup', { clientX: 1010, clientY: 120, button: 0, pointerId: 7 });
+    w.feed(['focus', 0]); view.client.focusWindow(1);
+    const k0 = w.all.length;
+    sat.ime.fire('keydown', { key: 'a', code: 'KeyA', keyCode: 65 });
+    const after = w.all.slice(k0);
+    ok(after[0] && after[0][0] === 'focus' && after[0][1] === 2 && after.some((p) => p[0] === 'key-action' && p[1] === 2), `a key in the satellite: the X focus moves to Moments FIRST, then the key goes to it (${JSON.stringify(after.map((p) => p.slice(0, 2)))})`);
+    const k1 = w.all.length;
+    view.ime.fire('keydown', { key: 'b', code: 'KeyB', keyCode: 66 });
+    const after2 = w.all.slice(k1);
+    ok(after2[0] && after2[0][0] === 'focus' && after2[0][1] === 1 && after2.some((p) => p[0] === 'key-action' && p[1] === 1), `a key in the main pane goes back to Weixin (${JSON.stringify(after2.map((p) => p.slice(0, 2)))})`);
+    sat.pane.fire('pointerdown', { clientX: 1010, clientY: 105, button: 0, pointerId: 8 });
+    w.feed(['initiate-moveresize', 2, 1626, 10, 8, 1, 1]);
+    ok(got.moves.length === 1 && got.moves[0].wid === 2 && mainMoves.length === 0 && got.moves[0].press && got.moves[0].press.clientX === 1010, `Moments' own header-bar drag moves the SATELLITE (its callback, from its press), never the main window (${JSON.stringify(got.moves)})`);
+    document.dispatch?.('pointerup');
+    view.setMode('watch');
+    ok(view.stage.children.some((el) => el.dataset.wid === '2') && !sat.stage.children.length && sat.note.style.display === '' && /main window while an agent drives/.test(sat.note.textContent), 'Watch: ONE picture — Moments drawn in the main pane again, the satellite says where it is');
+    view.setMode('active');
+    ok(sat.stage.children.some((el) => el.dataset.wid === '2') && sat.note.style.display === 'none', 'active again: Moments back in its satellite');
+    w.feed(['lost-window', 2]);
+    ok(same(got.gone, ['lost']) && !view.satellites().length, `Moments closed by the app ⇒ the satellite hears 'lost' (its window closes) (${JSON.stringify(got.gone)})`);
+    // a window that maps and is handed back: the person closed the satellite while the X window lives
+    w.feed(['new-window', 3, 0, 0, 600, 400, { title: 'third', 'window-type': ['NORMAL'] }]);
+    await sleep(0);
+    const host3 = new El('div'); const sat3 = view.attachSatellite(host3, 3, {});
+    ok(sat3.bound && sat3.stage.children.some((el) => el.dataset.wid === '3'), 'a third top-level: its satellite draws it');
+    sat3.dispose();
+    ok(view.stage.children.some((el) => el.dataset.wid === '3') && view.client.slotOf(3) === null, 'the person closes that satellite (the app keeps the window) ⇒ it is drawn in the main pane again (released), never nowhere');
+    // adopt: Moments-like window slotted, then the main lost
+    w.feed(['new-window', 6, 0, 0, 500, 300, { title: 'six', 'window-type': ['NORMAL'] }]);
+    await sleep(0);
+    const g6 = []; view.attachSatellite(new El('div'), 6, { onGone: (why) => g6.push(why) });
+    w.feed(['lost-window', 3]); w.feed(['lost-window', 1]);
+    ok(same(g6, ['adopted']) && view.client.mainWid === 6 && view.stage.children.some((el) => el.dataset.wid === '6'), `the main lost ⇒ the next main is ADOPTED by the main window: its satellite hears 'adopted' and the main pane draws it (${JSON.stringify(g6)})`);
+    // missing: a replayed satellite for a wid the session does not have
+    view.disconnect();
+    const gm = []; view.attachSatellite(new El('div'), 77, { onGone: (why) => gm.push(why) });
+    await view.connect();
+    const w2 = await until(() => FakeWorker.instances[1]);
+    await until(() => w2.sent('hello').length);
+    w2.feed(['hello', { 'packet-types': ['keyboard-config', 'display-configure'] }]);
+    w2.feed(['new-window', 1, 0, 0, 1574, 974, structuredClone(WXM)]);
+    ok(gm.length === 0, 'a replayed satellite waits while the window list arrives…');
+    w2.feed(['startup-complete']);
+    ok(same(gm, ['missing']), `…and closes quietly once it is in without its wid (${JSON.stringify(gm)})`);
+    const gd = []; w2.feed(['new-window', 2, 0, 0, 880, 1120, structuredClone(MOM)]); await sleep(0);
+    view.attachSatellite(new El('div'), 2, { onGone: (why) => gd.push(why) });
+    view.dispose();
+    ok(same(gd, ['main-closed']), 'the main window\'s view goes ⇒ its satellites go with it');
+  }
+
+  // ── CONTROLS: the pre-lane client (no slot ⇒ Moments over Weixin, no satellite) and a view that never hands a canvas over ──
+  const csrc = read('src/lib/xpra-client.js');
+  const SLOT = "    if (!isMain && kind === 'main' && !watch && slotsOn() && !noSlot.has(wid)) { slotOrder.push(wid); layoutSlots(); } // S2: a second top-level gets its slot";
+  ok(csrc.split(SLOT).length === 2, 'CONTROL: the slot is given in ONE line of xpra-client.js');
+  const cm = MUTXC.write('src/lib/xpra-client.js', csrc.replace(SLOT, '    // pre-lane CONTROL: no slot'), 'noslot');
+  {
+    const M = await runSlots(await import(cm));
+    ok(M.ev.slot.length === 0 && same(M.w.sent('map-window')[1].slice(1, 6), [2, 347, 0, 880, 1120]) && same(M.ev.cons.slice(-1), [[880, 1120]]), `CONTROL: pre-lane Moments is S1's guest — centred OVER Weixin in the one pane, growing it (${JSON.stringify(M.w.sent('map-window')[1].slice(2, 6))})`);
+    M.c.close();
+  }
+  const vsrc = read('src/lib/xpra-view.js');
+  const HOME = "return sat && sat.bound ? sat.stage : stage; };";
+  ok(vsrc.split(HOME).length === 2, 'CONTROL: the satellite\'s stage is chosen in ONE place of xpra-view.js');
+  const vm = MUTXC.write('src/lib/xpra-view.js', vsrc.replace(HOME, 'return stage; }; // pre-lane CONTROL'), 'nohome');
+  {
+    const VM = await import(vm);
+    FakeWorker.instances.length = 0;
+    const view = VM.createXpraView(new El('div'), { url: () => 'ws://x/stream', workerUrl: '/w.js', Worker: FakeWorker, decode: async () => ({ close() {} }), pixelRatio: () => 2, dpi: 96, onSatellite: () => {} });
+    view.pane.clientWidth = 787; view.pane.clientHeight = 487; view.pane.rect = { left: 0, top: 0 };
+    await view.connect();
+    const w = await until(() => FakeWorker.instances[0]);
+    await until(() => w.sent('hello').length);
+    w.feed(['hello', { 'packet-types': ['keyboard-config', 'display-configure'] }]);
+    w.feed(['new-window', 1, 0, 0, 1574, 974, structuredClone(WXM)]);
+    w.feed(['new-window', 2, 324, 0, 880, 1120, structuredClone(MOM)]);
+    const sat = view.attachSatellite(new El('div'), 2, {});
+    ok(!sat.stage.children.length && view.stage.children.some((el) => el.dataset.wid === '2'), 'CONTROL: a view that never re-homes leaves the satellite EMPTY and Moments in the main pane (outside its visible area)');
+    view.dispose();
   }
 }
 

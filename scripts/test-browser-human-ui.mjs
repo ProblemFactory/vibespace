@@ -245,7 +245,8 @@ await E.ev('window.app.openBrowserProfiles(); true');
 const rowBtn = `.bprof-profile[data-profile-id="${PID}"] .bprof-browse`;
 const btnText = await until(() => E.ev(`(() => { const b = document.querySelector(${JSON.stringify(rowBtn)}); return b ? b.textContent : null; })()`), 15000, 200);
 ok(btnText === 'Browse yourself', `the row's first act reads "${btnText}"`);
-const mineBox = await E.ev(`(() => { const b = document.querySelector(${JSON.stringify(`.bprof-profile[data-profile-id="${PID}"] .bprof-record-mine input`)}); return b ? { checked: b.checked } : null; })()`);
+await E.ev(`(() => { document.querySelector(${JSON.stringify(`.bprof-profile[data-profile-id="${PID}"] .bprof-more`)}).click(); return true; })()`); // design 015: the switch is the ⋯ menu's check row
+const mineBox = await until(() => E.ev(`(() => { const it = document.querySelector('.context-menu .bprof-record-mine'); if (!it) return null; const r = { checked: !!it.parentElement.querySelector('.chan-menu-check-on') }; document.querySelectorAll('.context-menu').forEach((m) => m.remove()); return r; })()`), 5000, 100);
 ok(mineBox && mineBox.checked === true, '"Also record my own actions" is on by default (the owner, 4: an opt-out)', JSON.stringify(mineBox));
 ok(await E.clickSel(rowBtn), 'a real click on Browse yourself');
 const w1 = await until(() => E.h('if (!L) return null; const s = L.state(); return s.mode === "takeover" && s.mine && s.frames >= 1 ? { badge: s.badge, addrShown: s.addrShown, focus: document.activeElement && document.activeElement.className, close: s.closeText, quit: s.quitText, key: s.humanKey } : null;').catch(() => null), 40000, 200);

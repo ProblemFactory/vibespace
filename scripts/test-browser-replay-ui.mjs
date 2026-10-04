@@ -447,16 +447,21 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     ok(r5 && r5.chosen === S1, `⑤ …opens the replay window on the conversation's sessions, the newest chosen (${r5 && r5.chosen})`);
     await p1.ev(`(() => { for (const [id, w] of window.app.wm.windows) if (w.type === 'browser-replay') window.app.wm.closeWindow(id); return true; })()`);
     await p1.ev('window.app.openBrowserProfiles()');
-    const rpBtn = await until(() => p1.ev(`(() => { const b = document.querySelector('.bprof-profile[data-profile-id="${PW}"] .bprof-replay'); return b ? { text: b.textContent, cls: b.className } : null; })()`), 10000, 150);
-    ok(rpBtn && rpBtn.text === '回放…' && /\bmounts-btn\b/.test(rpBtn.cls), `⑤ the Agent browser panel's profile row offers "${rpBtn && rpBtn.text}" (the house text button)`);
+    await until(() => p1.ev(`!!document.querySelector('.bprof-profile[data-profile-id="${PW}"] .bprof-more')`), 10000, 150);
+    ok(await p1.click(`.bprof-profile[data-profile-id="${PW}"] .bprof-more`), '⑤ the row\'s ⋯ (design 015: one menu for every act but the primary)');
+    const rpBtn = await until(() => p1.ev(`(() => { const b = document.querySelector('.context-menu .bprof-replay'); return b ? { text: b.textContent, item: !!b.closest('.context-menu-item') } : null; })()`), 5000, 100);
+    ok(rpBtn && rpBtn.text === '回放…' && rpBtn.item, `⑤ the Agent browser panel's profile row offers "${rpBtn && rpBtn.text}" (a ⋯ menu row)`);
+    await p1.ev(`document.querySelectorAll('.context-menu').forEach((m) => m.remove())`);
+    await p1.click(`.bprof-profile[data-profile-id="${PW}"] .bprof-chev`); // its fold: the records against the limit
     const usedTxt = await p1.text(`.bprof-profile[data-profile-id="${PW}"] .bprof-trace`);
-    const usedLine = await p1.text(`.bprof-profile[data-profile-id="${PW}"] .bprof-trace-used`);
-    const usedFits = await p1.ev(`(() => { const e = document.querySelector('.bprof-profile[data-profile-id="${PW}"] .bprof-trace-used'); return !!e && e.scrollWidth <= e.clientWidth + 1; })()`);
-    ok(String(usedTxt).startsWith('1209 个操作') && /* 9 + ③c's 1 200 */ /^\d+(\.\d)? (B|KB|MB) \/ 1 GB$/.test(String(usedLine)) && usedFits, `⑤ the row says what its records use against the limit, on its own line, whole ("${usedTxt}" · "${usedLine}")`);
+    const usedLine = await p1.text(`.bprof-profile[data-profile-id="${PW}"] .bprof-fold-item[data-key="records"] .bprof-fold-v`);
+    const usedFits = await p1.ev(`(() => { const e = document.querySelector('.bprof-profile[data-profile-id="${PW}"] .bprof-fold-item[data-key="records"] .bprof-fold-v'); return !!e && e.clientWidth > 0 && e.scrollWidth <= e.clientWidth + 1; })()`);
+    ok(String(usedTxt).startsWith('1209 个操作') && /* 9 + ③c's 1 200 */ /^1209 个操作 · \d+(\.\d)? (B|KB|MB) \/ 1 GB( · |$)/.test(String(usedLine)) && usedFits, `⑤ the row says its actions; its fold says what its records use against the limit, whole ("${usedTxt}" · "${usedLine}")`);
     const hint = await p1.text('.bprof-hint');
     ok(String(hint).startsWith(tr('zh', 'Each profile keeps its records up to {size}; over it, the oldest sessions\' frames are removed first and every action list stays. Recordings are kept {days} days or {mb} MB. Frames of a logged-in page are secrets. Nothing here deletes a profile by itself: setting one aside moves its directory beside itself, and only your click on a set-aside row deletes it.', { size: '1 GB', days: 7, mb: 200 }).slice(0, 20)) && !/保留 7 天或 200 MB\(以先到者为准\)/.test(String(hint)), '⑤ the panel\'s hint is by size (1 GB), no "7 days or 200 MB, whichever first" for the traces');
     await p1.shot('05b-zh-panel-row', `.bprof-profile[data-profile-id="${PW}"]`);
-    ok(await p1.click(`.bprof-profile[data-profile-id="${PW}"] .bprof-replay`), '⑤ 回放… clicked');
+    await p1.click(`.bprof-profile[data-profile-id="${PW}"] .bprof-chev`);
+    ok(await p1.click(`.bprof-profile[data-profile-id="${PW}"] .bprof-more`) && await until(() => p1.ev(`!!document.querySelector('.context-menu .bprof-replay')`), 5000, 80) && await p1.click('.context-menu .bprof-replay'), '⑤ ⋯ → 回放… clicked');
     const r5b = await until(async () => { const s = await rs(); return s && s.sessions === 4 ? s : null; }, 8000, 100); // the three of KA + ③c's long one
     ok(r5b && r5b.chosen === S1, '⑤ …the replay window of the PROFILE: every session on it (4)');
 

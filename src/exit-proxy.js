@@ -31,6 +31,7 @@ const fs = require('fs');
 const net = require('net');
 const path = require('path');
 const crypto = require('crypto');
+const os = require('os');
 const E = require('./exit-reach.js');
 const XS = require('./exit-shell.js');
 const R = require('./window-reach.js');
@@ -96,7 +97,7 @@ function socksAuth(sock, check) {
 
 class ExitProxyManager {
   /** @param deps { hosts, log, groupsOf(session, webuiId), userTodos, emitCard(session, card), dataDir, now, sessionsMap(), bcastAll } */
-  constructor({ hosts, log, groupsOf = null, userTodos = null, emitCard = null, dataDir = null, now = () => Date.now(), sessionsMap = null, bcastAll = null, auditMaxBytes = AUDIT_MAX_BYTES,
+  constructor({ hosts, log, groupsOf = null, userTodos = null, emitCard = null, dataDir = null, now = () => Date.now(), sessionsMap = null, bcastAll = null, auditMaxBytes = AUDIT_MAX_BYTES, settingOf = null,
     timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (h) => clearTimeout(h) } } = {}) {
     this.timers = timers; // the ask's 60 s clock (a suite drives it with a fake one)
     this.hosts = hosts;
@@ -108,8 +109,10 @@ class ExitProxyManager {
     this.now = now;
     this.sessionsMap = sessionsMap || (() => new Map());
     this.bcastAll = bcastAll || (() => {});
+    this.settingOf = typeof settingOf === 'function' ? settingOf : () => undefined; // lane exit-transfer: the user's transfer bound (exit.transferMaxBytes)
     this.auditMaxBytes = Math.max(64 * 1024, Number(auditMaxBytes) || AUDIT_MAX_BYTES);
     this._live = new Map(); // hostId → { server, sockets:Set, localPort, deviceSocksPort, users:Set<sessionId> }
+    this._pullTargets = new Set(); // fix r1: the local paths a pull is writing now — one pull per local target at a time
     this._asks = new Map(); // askId → { askId, hostId, machine, sessionKey, sessionId, name, cmd, askedAt, timer, resolve, todoId }
     this._settled = new Map(); // askId → outcome — a SECOND answer says settled / expired by name (bounded: the last 256)
     // THE ITEM AND THE ASK ARE ONE STATE (verify-r2 ask-b): the For-you item leaving 'open' by any door but our own
@@ -187,7 +190,7 @@ class ExitProxyManager {
     const out = [];
     // verify r1 F2: the predicate rides INTO the tail read — a quiet machine's (or conversation's) rows are found behind
     // another machine's storm (the old 2 MiB window held ~240 lines of 8 KiB heads: the owner's list of B read 0 of 1)
-    const want = (l) => !!l && l.verb === 'run' && typeof l.cmd === 'string'
+    const want = (l) => !!l && (l.verb === 'run' || E.TRANSFER_VERBS.includes(l.verb)) && typeof l.cmd === 'string'
       && (!keys || keys.has(String(l.sessionKey || '')))
       && (!ref || String(l.hostId || '') === String(machine) || String(l.machine || '').toLowerCase().includes(ref) || String(l.hostId || '').toLowerCase().includes(ref));
     // verify r2 F6: the agent's read carries its keys as RAW marks too — without them every line of the ring was JSON.parsed
@@ -394,10 +397,11 @@ class ExitProxyManager {
     const has = { [other]: !!E.exitVerdict(access, other, ctx).ok };
     return { h, access, verdict, ctx, has };
   }
-  _refused(session, sessionId, { code, grant, h = null, has = {}, cmd = '', error = '', where = '', same = false }) {
+  _refused(session, sessionId, { code, grant, h = null, has = {}, cmd = '', error = '', where = '', same = false, verb = null, line = null }) {
     const machine = h ? (h.name || h.id) : '';
     const sentence = E.refusalText(code, { machine, grant, has, cmd, error, where, same });
-    this.audit({ hostId: h ? h.id : null, machine, sessionId, sessionKey: this.keyOf(session, sessionId), name: session && session.name || null, grant, verb: grant, ...(cmd ? { cmd } : {}), ok: false, refusal: code });
+    // lane exit-transfer: a pull / push refusal is a row of the machine's list too (`verb` + its paths in `line`)
+    this.audit({ hostId: h ? h.id : null, machine, sessionId, sessionKey: this.keyOf(session, sessionId), name: session && session.name || null, grant, verb: verb || grant, ...(cmd ? { cmd } : {}), ...(line || {}), ok: false, refusal: code });
     return namedError(code, sentence, { grant, has });
   }
   /** vibespace-exit use / url: ensure the SOCKS forward to the machine → its local proxy URL. */
@@ -628,6 +632,230 @@ class ExitProxyManager {
     card({ outcome: 'ran', cmd, code, ms, timedOut: !!timedOut, revokedDuringRun, exitRun: E.cardOutput({ cmd, code, ms, timedOut: !!timedOut, truncated: !!truncated, interpreter, heads }) });
     try { this.bcastAll({ type: 'hosts-updated' }); } catch { }
     return { machine, code, stdout: String(r.stdout || ''), stderr: String(r.stderr || ''), ms, timedOut, truncated, asked, revokedDuringRun, interpreter, platform, line: E.cliLine({ outcome: 'ran', code, ms, timedOut: !!timedOut, truncated: !!truncated }, { machine }) };
+  }
+  // ── pull / push (lane exit-transfer, design 013 B) ─────────────────────────
+  /**
+   * vibespace-exit pull / push: ONE regular file between this machine and a paired one, under the `run` grant (its
+   * lists, its ask mode — `run` can already read and write any file there), through the device's OWN file ops (never a
+   * shell): judge → (ask, judge again) → stat → the PURE transfer verdict (bound, kinds, overwrite) → the bytes in 8 MiB
+   * windows (pull: `read-range` into `<local>.vs-part` piece by piece, each window's sha256 compared with the device's;
+   * push: `write-stream`, the device compares) — the grant, the caller and the conversation asked again between
+   * windows — → ONE audit line + ONE card. Not a run: no 30 s cap (the per-window stall is the clock). Not resumable: a
+   * failure keeps nothing. The local path of a pull is THIS machine's disk, fenced like the browser CLI's writes
+   * (`_localTarget`). → `{machine, verb, remote, local, bytes, sha256, verified, ms, asked}` | a named error.
+   */
+  pull(session, sessionId, ref, { remote, local, overwrite = false, signal = null } = {}) {
+    return this._transfer(session, sessionId, ref, { verb: 'pull', remote, local, overwrite: !!overwrite, signal });
+  }
+  push(session, sessionId, ref, { remote, local, size, source, overwrite = false, signal = null } = {}) {
+    return this._transfer(session, sessionId, ref, { verb: 'push', remote, local, size: Number(size), source, overwrite: !!overwrite, signal });
+  }
+  /** Where a pull may land on THIS machine: the conversation's project directory, the OS temp directory or ~/Downloads,
+   *  judged PHYSICALLY (a symlink is followed before any `..` after it) — the browser CLI's write rule (src/browser-verbs.js
+   *  `physicalPath` + `writePathVerdict`: never ~/.ssh / ~/.claude / .git / VibeSpace's data / a dot-entry of a home).
+   *  → `{ok: true, path}` (the physical path: the one written) | `{ok: false, code: 'local_path_refused', error}`. */
+  _localTarget(session, local) {
+    const BV = require('./browser-verbs.js');
+    const ops = { lstat: (x) => fs.lstatSync(x), readlink: (x) => fs.readlinkSync(x) };
+    const home = os.homedir();
+    const words = (t) => String(t || '').replace(/a browser command/g, 'a pull').replace(/nothing ran/g, 'nothing was copied');
+    const r = BV.physicalPath(local, { base: '/', home, ...ops });
+    if (!r.ok) return { ok: false, code: 'local_path_refused', error: `\`${String(local).slice(0, 120)}\` could not be resolved here (${r.error}); nothing was copied` };
+    const spell = (d) => { let x = null; try { x = fs.realpathSync(d); } catch { x = null; } return x && x !== d ? [d, x] : [d]; };
+    const cwd = session && typeof session.cwd === 'string' && session.cwd[0] === '/' ? BV.physicalPath(session.cwd, { base: '/', home, ...ops }) : null;
+    const lexical = path.resolve(local);
+    const v = BV.writePathVerdict([{ file: String(local), paths: lexical === r.path ? [r.path] : [lexical, r.path] }], {
+      allow: [os.tmpdir(), path.join(home, 'Downloads')].flatMap(spell), homes: spell(home),
+      dataDir: this.dataDir ? spell(this.dataDir) : null, sessionRoot: cwd && cwd.ok ? cwd.path : null });
+    if (v) return { ok: false, code: 'local_path_refused', error: words(v.error) };
+    return { ok: true, path: r.path };
+  }
+  async _transfer(session, sessionId, ref, o) {
+    const held = [];   // fix r1: the local target this pull holds — given back however the transfer ends
+    try { return await this._transferHeld(session, sessionId, ref, o, held); }
+    finally { for (const t of held) this._pullTargets.delete(t); }
+  }
+  async _transferHeld(session, sessionId, ref, o, held) {
+    const verb = o.verb, remote = o.remote;
+    const rs = E.transferPathVerdict(remote, { side: 'remote', tilde: true });
+    if (!rs.ok) throw namedError('bad_path', rs.error);
+    const ls = E.transferPathVerdict(o.local, { side: 'local' });
+    if (!ls.ok) throw namedError('bad_path', ls.error);
+    if (verb === 'push' && (!Number.isSafeInteger(o.size) || o.size < 0)) throw namedError('bad_path', 'push: the size of the local file is required');
+    let local = o.local;
+    const line0 = () => E.transferLine({ verb, remote, local });
+    const j = this._judge(session, sessionId, ref, 'run');
+    if (j.refusal) throw this._refused(session, sessionId, { code: j.refusal.code, grant: 'run', cmd: line0(), error: j.refusal.error, verb, line: { path: remote, localPath: local } });
+    const h = j.h, machine = h.name || h.id;
+    const by = { key: this.keyOf(session, sessionId), name: (session && session.name) || '' };
+    const card = (rec) => { if (!this.emitCard || !session) return false; try { return !!this.emitCard(session, { fromName: `Machines · ${machine}`, kind: 'notification', text: E.transferCardText({ verb, remote, local, ...rec }, { machine }) }); } catch (e) { this.log(`card not shown: ${e.message}`); return false; } };
+    const refusedNamed = (code, outcome) => { if (outcome) card({ outcome }); return this._refused(session, sessionId, { code, grant: 'run', h, has: j.has, cmd: line0(), verb, line: { path: remote, localPath: local } }); };
+    if (!j.verdict.ok) throw refusedNamed(j.verdict.code, j.verdict.code === 'not_granted' ? 'not_granted' : null);
+    // the local path is THIS machine's disk: a conversation running on another machine names a disk that is not its own
+    if (session && session.host) {
+      const where = (() => { try { const x = this._raw(session.host); return x ? (x.name || x.id) : String(session.host); } catch { return String(session.host); } })();
+      throw this._refused(session, sessionId, { code: 'remote_session', grant: 'run', h, has: j.has, where, same: session.host === h.id, cmd: line0(), verb, line: { path: remote, localPath: local } });
+    }
+    let asked = false, t0 = this.now();
+    // ONE refusal of a transfer: the audit line (its paths, the reason), the card, the agent's sentence
+    const fail = (code, extra = {}, outcome = code) => {
+      const sideOf = extra.side || (verb === 'pull' ? 'remote' : 'local');
+      const shown = sideOf === 'local' ? local : remote;
+      const sentence = E.refusalText(code, { machine, grant: 'run', verb, path: shown, ...extra });
+      this.audit({ hostId: h.id, machine, sessionId, sessionKey: by.key, name: by.name || null, grant: 'run', verb, cmd: line0(), path: remote, localPath: local, ok: false, refusal: code, ms: this.now() - t0, asked,
+        ...(extra.error ? { error: String(extra.error).replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 200) } : {}), ...(extra.size != null ? { bytes: extra.size } : {}) });
+      card({ outcome, ...extra });
+      try { this.bcastAll({ type: 'hosts-updated' }); } catch { }
+      return namedError(code, sentence, { grant: 'run', ...(code === 'device_agent_outdated' ? { agentVersion: extra.agentVersion || null, needVersion: E.PUSH_SINCE } : {}) }); // the version push needs, even when the agent names none
+    };
+    let target = null, dirId = null;
+    const dirIdOf = (d) => { try { const s = fs.statSync(d); return s.isDirectory() ? { dev: s.dev, ino: s.ino } : null; } catch { return null; } };
+    if (verb === 'pull') {
+      const tg = this._localTarget(session, local);
+      if (!tg.ok) throw fail('local_path_refused', { error: tg.error });
+      target = tg.path; local = tg.path;
+      // fix r1: ONE pull per local target at a time — a second one never touches the first one's part or file
+      if (this._pullTargets.has(target)) throw fail('target_busy', { side: 'local' });
+      this._pullTargets.add(target); held.push(target);
+      dirId = dirIdOf(path.dirname(target));   // the folder as judged (null: none yet — made, judged and pinned when the bytes come)
+    }
+    if (h.transport === 'dial' && !h.online) { card({ outcome: 'offline' }); throw this._refused(session, sessionId, { code: 'offline', grant: 'run', h, cmd: line0(), verb, line: { path: remote, localPath: local } }); }
+    if (j.access.run.ask) {
+      asked = true;
+      const answer = await this._ask(session, sessionId, h, line0(), { signal: o.signal });
+      if (answer && answer.refusal) { if (answer.refusal === 'ask_unfiled') card({ outcome: 'unfiled' }); throw this._refused(session, sessionId, { code: answer.refusal, grant: 'run', h, cmd: line0(), error: answer.error || '', verb, line: { path: remote, localPath: local } }); }
+      if (answer === 'gone') throw this._refused(session, sessionId, { code: 'conversation_gone', grant: 'run', h, cmd: line0(), verb, line: { path: remote, localPath: local } });
+      const named = { denied: 'ask_denied', changed: 'ask_changed', expired: 'ask_expired', revoked: 'not_granted' }[answer];
+      if (named) throw refusedNamed(named, answer === 'revoked' ? 'not_granted' : answer);
+    }
+    if (!this._stillLive(session, sessionId)) throw this._refused(session, sessionId, { code: 'conversation_gone', grant: 'run', h, cmd: line0(), verb, line: { path: remote, localPath: local } });
+    const again = E.exitVerdict(this.access(h.id), 'run', this.ctxFor(session, sessionId));
+    if (!again.ok) throw refusedNamed(again.code, 'not_granted');
+    t0 = this.now();
+    // between windows: the caller, the conversation, the grant — asked AGAIN (a revoke stops the transfer, nothing kept)
+    const stillOn = async () => {
+      if (o.signal && o.signal.aborted) throw Object.assign(new Error('the vibespace-exit call ended'), { code: 'caller_gone' });
+      if (!this._stillLive(session, sessionId)) throw Object.assign(new Error('the conversation ended'), { code: 'conversation_gone' });
+      if (!E.exitVerdict(this.access(h.id), 'run', this.ctxFor(session, sessionId)).ok) throw Object.assign(new Error('access was removed during the transfer'), { code: 'not_granted' });
+    };
+    const named = (e) => e && e.code === 'not_granted' ? fail('not_granted', {}, 'not_granted') : e && e.code === 'conversation_gone' ? this._refused(session, sessionId, { code: 'conversation_gone', grant: 'run', h, cmd: line0(), verb, line: { path: remote, localPath: local } }) : null;
+    let dm, caps = [], platform = null, info = {};
+    try {
+      dm = await this.hosts.deviceBounded(h.id, 8000);
+      info = this._daemonInfo(dm);
+      caps = Array.isArray(info.capabilities) ? info.capabilities : [];
+      platform = typeof info.platform === 'string' ? info.platform.replace(/[^a-z0-9]/gi, '').slice(0, 16) || null : null;
+    } catch (e) {
+      const offline = /offline|not dialed in|unreachable|timed out connecting|ECONNREFUSED/i.test(String(e && e.message));
+      if (offline) { card({ outcome: 'offline' }); throw this._refused(session, sessionId, { code: 'offline', grant: 'run', h, cmd: line0(), verb, line: { path: remote, localPath: local } }); }
+      throw fail('transfer_failed', { error: e && e.message });
+    }
+    if (/^~/.test(remote) && !caps.includes('fs-portable')) throw fail('bad_path', { error: `the agent on "${machine}" does not expand ~ — spell the home folder out` });
+    // push needs the device's write-stream op: an older agent is never asked an op it lacks (it would hang)
+    if (verb === 'push' && !caps.includes(E.PUSH_CAP)) throw fail('device_agent_outdated', { agentVersion: E.agentVersionOf(info.daemonVersion) }, 'agent_outdated');
+    const statOf = async (p) => {
+      try { const r = await dm.fsStat(p); return E.statFacts(r && r.stat); }
+      catch (e) { if (/^ENOENT\b|no such file/i.test(String(e && e.message))) return E.statFacts(null); throw e; }
+    };
+    let rf, lf;
+    try {
+      rf = await statOf(remote);
+      if (verb === 'pull') { let st = null; try { st = fs.statSync(target); } catch { st = null; } lf = E.statFacts(st); }
+      else lf = { kind: 'file', size: o.size, mtimeMs: 0 };   // the CLI read it: a regular file of `size` bytes
+    } catch (e) { throw fail('transfer_failed', { error: e && e.message }); }
+    const max = E.transferMaxOf(this.settingOf(E.TRANSFER_SETTING));
+    const tv = E.transferVerdict({ verb, max, remote: rf, local: lf, overwrite: o.overwrite });
+    if (!tv.ok) throw fail(tv.code, { side: tv.side, why: tv.why, size: tv.size, max: tv.max });
+    let bytes = 0, sha256 = null, verified = 'sha256';
+    if (verb === 'pull') {
+      // fix r1: the part is THIS transfer's own (a fresh name made O_EXCL | O_NOFOLLOW: only it creates it, only it
+      // removes it), and where it lands is judged AGAIN when the bytes are written and when it is renamed — the same
+      // physical path still allowed (`_localTarget`), the folder judged at the verdict (dev + inode), the part the handle
+      // holds (its fstat = the name's lstat, one link). A folder moved, replaced or gone since ⇒ local_path_refused, nothing kept.
+      const size = tv.size, part = `${target}.${crypto.randomBytes(4).toString('hex')}.vs-part`, whole = crypto.createHash('sha256');
+      const dir = path.dirname(target);
+      const changed = (t) => Object.assign(new Error(t), { code: 'local_path_refused', changed: true });
+      const mine = (p, f) => { let s = null; try { s = fs.lstatSync(p); } catch { s = null; } return !!s && s.dev === f.dev && s.ino === f.ino; };
+      const inPlace = (fd) => {
+        const again = this._localTarget(session, target);
+        if (!again.ok) throw changed(`the local path changed after it was judged — ${again.error}`);
+        if (again.path !== target) throw changed(`the local folder of \`${target}\` changed after it was judged (it leads to \`${again.path}\` now); nothing was kept`);
+        const d = dirIdOf(dir);
+        if (!d && (dirId || fd != null)) throw changed(`the local folder \`${dir}\` is gone (moved or removed after it was judged); nothing was kept`);
+        if (d && dirId && (d.dev !== dirId.dev || d.ino !== dirId.ino)) throw changed(`the local folder \`${dir}\` was replaced after it was judged; nothing was kept`);
+        if (fd != null) { const f = fs.fstatSync(fd); if (f.nlink !== 1 || !mine(part, f)) throw changed(`the part file of \`${target}\` was moved or replaced during the pull; nothing was kept`); }
+      };
+      let fh = null;
+      try {
+        inPlace(null);                              // judged again before anything is made
+        fs.mkdirSync(dir, { recursive: true });     // a folder missing at the verdict is made now (judged just above) and pinned
+        if (!dirId) dirId = dirIdOf(dir);
+        const C = fs.constants;
+        fh = await fs.promises.open(part, C.O_WRONLY | C.O_CREAT | C.O_EXCL | (C.O_NOFOLLOW || 0));   // made new: never through a link planted at its name
+        inPlace(fh.fd);                             // the file we hold is the one at the part's name, in the folder judged
+        let pos = 0;
+        do {
+          const n = Math.min(E.TRANSFER_WINDOW_BYTES, size - pos);
+          const wh = crypto.createHash('sha256');
+          let got = 0, chain = Promise.resolve();
+          // the sink: each piece to the file and both hashes as it arrives — nothing of the window is kept beyond its writes
+          const r = await dm.fsReadRange(remote, pos, n, { sha256: true, sink: (b) => { wh.update(b); whole.update(b); got += b.length; const f = fh; chain = chain.then(() => f.write(b)); return chain; } });
+          await chain;
+          if (Number(r.size) !== rf.size) throw Object.assign(new Error(`the file changed size while it was read (${rf.size} → ${r.size} bytes)`), { code: 'transfer_failed' });
+          if (got !== n || Number(r.sent) !== n) throw Object.assign(new Error(`${got} of ${n} bytes of a window arrived`), { code: 'transfer_failed' });
+          if (r.sha256) { if (r.sha256 !== wh.digest('hex')) throw Object.assign(new Error('a window\'s sha256 differs'), { code: 'hash_mismatch' }); }
+          else verified = 'size';   // an agent from before the flag: the count is what was compared
+          pos += n;
+          await stillOn();
+          inPlace(fh.fd);   // fix r1: where the next window's bytes go is still the folder judged
+        } while (pos < size);
+        const after = await statOf(remote);
+        if (after.kind !== 'file' || after.size !== rf.size || after.mtimeMs !== rf.mtimeMs) throw Object.assign(new Error('the file changed while it was read'), { code: 'transfer_failed' });
+        await fh.sync();
+        // "verified" only for the bytes in the final file: the part holds exactly what was counted and hashed …
+        const sz = fs.fstatSync(fh.fd).size;
+        if (sz !== size) throw Object.assign(new Error(`the part file holds ${sz} bytes, not the ${size} written`), { code: 'transfer_failed' });
+        inPlace(fh.fd);   // … and is judged again right before the rename: still allowed, the same folder, our own part
+        if (!o.overwrite && fs.existsSync(target)) throw Object.assign(new Error('appeared meanwhile'), { code: 'exists' });
+        fs.renameSync(part, target);
+        const landed = fh; fh = null; await landed.close();
+        bytes = size; sha256 = whole.digest('hex');
+      } catch (e) {
+        if (fh) {
+          // only OUR part goes: by its name while that name still holds the handle's file; moved away with its folder ⇒ its
+          // bytes are cut through the handle, and the name it has now (Linux: /proc/self/fd) removed when it is the same file
+          try {
+            const f = fs.fstatSync(fh.fd);
+            if (mine(part, f)) fs.unlinkSync(part);
+            else { await fh.truncate(0); let now = null; try { now = fs.readlinkSync(`/proc/self/fd/${fh.fd}`); } catch { now = null; } if (now && mine(now, f)) fs.unlinkSync(now); }
+          } catch { }
+          try { await fh.close(); } catch { }
+        }
+        const nm = named(e); if (nm) throw nm;
+        if (e && e.code === 'caller_gone') throw fail('transfer_failed', { error: e.message });
+        if (e && e.changed) throw fail('local_path_refused', { error: e.message }, 'local_changed');
+        if (e && (e.code === 'hash_mismatch' || e.code === 'exists' || e.code === 'local_path_refused')) throw fail(e.code, e.code === 'exists' ? { side: 'local' } : { error: e.message });
+        throw fail('transfer_failed', { error: e && e.message });
+      }
+    } else {
+      try {
+        const r = await dm.fsWriteStream(remote, { source: o.source, size: tv.size, overwrite: o.overwrite, check: stillOn, windowBytes: E.TRANSFER_WINDOW_BYTES });
+        bytes = Number(r.size) || 0; sha256 = typeof r.sha256 === 'string' ? r.sha256 : null;
+      } catch (e) {
+        const nm = named(e); if (nm) throw nm;
+        const m = String(e && e.message || '');
+        if (/hash_mismatch/.test(m)) throw fail('hash_mismatch');
+        if (/already exists/.test(m)) throw fail('exists', { side: 'remote' });
+        if (/is a folder|not a regular file/.test(m)) throw fail('not_a_file', { side: 'remote', why: /folder/.test(m) ? 'is a folder' : undefined });
+        throw fail('transfer_failed', { error: m });
+      }
+    }
+    const ms = this.now() - t0;
+    this.audit({ hostId: h.id, machine, sessionId, sessionKey: by.key, name: by.name || null, grant: 'run', verb, cmd: line0(), path: remote, localPath: local, bytes, sha256, verified, ms, ok: true, via: again.via, asked, ...(platform ? { platform } : {}) });
+    this.log(`${machine}: ${verb === 'pull' ? 'pulled' : 'pushed'} ${remote.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 120)} (${bytes} bytes, ${verified}) for ${(session && session.name) || sessionId} — ${ms} ms`);
+    card({ outcome: 'done', bytes, sha256, verified, ms });
+    try { this.bcastAll({ type: 'hosts-updated' }); } catch { }
+    return { machine, verb, remote, local, bytes, sha256, verified, ms, asked, line: E.transferCliLine({ verb, remote, local, bytes, sha256, verified, ms }, { machine }) };
   }
   /** The display-only card in the calling chat; `rec.exitRun` (E.cardOutput) rides beside the words so the renderer
    *  draws the exit line + the first lines of output + "Show output" — never a second card, never re-created. */

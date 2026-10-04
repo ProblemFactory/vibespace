@@ -114,6 +114,7 @@ const PURE = new Set(['src/timed-sync.js' /* design 011 lane 1 (store-timing): t
   'src/inbox-reply.js', // a reply to a For-you item (design-user-inbox-reply D1): the quote block, its parser, the ONE availability verdict — the route and the panel ask the same rule (lane S1 verify r3: its card_item rung is a lookup into helper-ask.js's table)
   'src/helper-ask.js', // lane S1: a helper's permission ask — the record, the Agent call, the chip / card / inbox words, and (verify r3) THE ask's transition table every consumer looks up
   'src/permission-outcome.js', // lane S1 verify r5: the CENSUS of the CLI's own permission-outcome sentences — the one reader of a tool_result's word (a main card and a helper's ask); unknown is never allowed
+  'src/safety-stop.js', // lane classifier-stop-card: the CENSUS of the CLI's own safety-stop sentences — the claude normalizer's one reader of a stop (the notice + its model-only nudge → ONE card)
   'src/turn-state.js', // authoritative turn state: the live consumer and the attach reconciliation must decide identically
   'src/opencode-remote.js', // S9 remainder: the OpenCode-serve OP TABLE + runOpencodeOp — one definition the local rung, the agentd op and the shipped ssh script all obey
   'src/permission-rules.js', // READ-ONLY permission-rule model + DOM-free tree renderer (owner ruling 10) — shared server (readers) + browser (the view)
@@ -2660,7 +2661,7 @@ console.log('§62 every path where the user names a window goes through wm.revea
     'src/lib/layout.js': [4, 2, 'boot restore / remote apply / preset re-apply — the RECORD decides the tab (§6b)'],
     'src/lib/stage-manager.js': [3, 0, 'the stage raising its own hero (_stageBypass ×2) + materialize named a guest of the hero\'s own group: its plain raise-only focus (verify r2 of inc-munl8jkl-gaih — shouldIntercept says no, so focusWindow never re-enters materialize)'],
     'src/lib/command-mode.js': [1, 1, 'the Tab cycle steps FRAMES (each group on the tab it shows) — it names no tab'],
-    'src/lib/desktop-app-window.js': [1, 0, 'the capture pointerdown — a PRESS keeps the tab'],
+    'src/lib/desktop-app-window.js': [2, 0, 'the capture pointerdowns of the main window and of a satellite (design 016 S2) — a PRESS keeps the tab'],
     'src/lib/browser-live-window.js': [1, 0, 'the fallback for an app without goToWinId (a stub app in a suite) — goToWinId IS the door'],
     'src/lib/taskbar.js': [0, 1, 'the window menu\'s Restore — a frame\'s own menu restores the frame'],
     'src/lib/session-lifecycle.js': [0, 1, '_focusExistingSession\'s REPLAY branch (a layout replay found the window already open)'],
@@ -2677,7 +2678,8 @@ console.log('§62 every path where the user names a window goes through wm.revea
     'src/lib/design-window.js': [1, 'the Design window\'s one-per-(host, dir) re-open (a replay passes { replay })'],
     'src/lib/design-home.js': [1, 'the Design window home\'s one-per-client re-open (a replay passes { replay }) — lane design-systems-home'],
     'src/lib/machine-desktop.js': [1, 'a machine\'s whole-desktop window: one per machine per page, a second open reveals it — design 014 D1'],
-    ...Object.fromEntries(['settings-ui', 'usage-window', 'task-log', 'task-detail', 'session-props', 'channel-window', 'channel-outbox', 'channels-panel', 'jobs-panel', 'integrations-window', 'sidebar-rail', 'browser-trace-view', 'desktop-window', 'desktop-app-window', 'browser-live-window', 'inbox-window']
+    'src/lib/desktop-app-window.js': [2, 'the singleton re-open (a replay passes { replay }) + a satellite the app just opened, in front — design 016 S2'],
+    ...Object.fromEntries(['settings-ui', 'usage-window', 'task-log', 'task-detail', 'session-props', 'channel-window', 'channel-outbox', 'channels-panel', 'jobs-panel', 'integrations-window', 'sidebar-rail', 'browser-trace-view', 'desktop-window', 'browser-live-window', 'inbox-window']
       .map((n) => ['src/lib/' + n + '.js', [1, n === 'browser-live-window' ? 'the fold-back (D3)' : 'the singleton re-open (a replay passes { replay })']])),
   };
   const judge = (srcs) => {
@@ -3483,6 +3485,65 @@ console.log('§D014 the vnc-native rung: no new device op, no keeper rows');
   const wiring = rd('src/server/window-live-wiring.js');
   ok(/MD\(id\) \? access\.machineDesktopTarget\(id\) : keeper\.streamTarget\(id\)/.test(wiring) && /onInput: \(id\) => \{ if \(MD\(id\)\) return; keeper\.noteInput\(id\);/.test(wiring), '§D014 the bridge resolves a machine desktop through the access layer, never the keeper, and its input never reaches the keeper\'s idle clock');
   ok(census({ ...srcs, 'src/agentd/agentd.js': srcs['src/agentd/agentd.js'] + "\nif (msg.op === 'machine-desktop') { }" }).length === 1 && census({ ...srcs, 'src/server/desktop-app-keeper.js': srcs['src/server/desktop-app-keeper.js'] + '\n// a vnc-native idle row' }).length === 1, '§D014 CONTROL: a planted daemon op / keeper row naming the rung is caught');
+}
+
+// lane exit-transfer (design 013 B): a NEW device op is THREE touches + a capability gate — the daemon's handler, the
+// hub client's method that asks the capability BEFORE it sends the op (an unknown op hangs an old agent until its
+// timeout), and the capability string in the hello-ack list. Derived for `write-stream` (an agent's push).
+console.log('§74 a new device op is three touches + its capability gate (write-stream)');
+{
+  const ad70 = read('src/agentd/agentd.js'), cl70 = read('src/agentd/client.js');
+  const three = (adSrc, clSrc) => {
+    const caps = (adSrc.match(/capabilities: \[([^\]]*)\]/) || [])[1] || '';
+    const i = clSrc.indexOf('async fsWriteStream('), body = i >= 0 ? clSrc.slice(i, i + 2500) : '';
+    const gate = body.indexOf("capabilities?.includes?.('fs-write-stream')"), op = body.indexOf("action: 'write-stream'");
+    return { handler: /\} else if \(msg\.action === 'write-stream'\) \{\s*\n\s*await writeStreamOp\(msg, p, rid\);/.test(adSrc) && /async function writeStreamOp\(msg, p, rid\)/.test(adSrc),
+      client: i >= 0 && gate >= 0, gateFirst: gate >= 0 && op > gate, capability: /'fs-write-stream'/.test(caps) };
+  };
+  const t70 = three(ad70, cl70);
+  ok(t70.handler && t70.client && t70.capability, `§74 write-stream: the daemon's handler, the client's gated method and the capability string are all present (${JSON.stringify(t70)})`);
+  ok(t70.gateFirst, '§74 the client asks the capability BEFORE the op is sent (an old agent is never asked an op it lacks)');
+  const noCap = three(ad70.replace("'fs-portable', 'fs-write-stream']", "'fs-portable']"), cl70);
+  const noGate = three(ad70, cl70.replace("capabilities?.includes?.('fs-write-stream')", 'capabilities'));
+  const late = three(ad70, cl70.replace("    if (!conn.info?.capabilities?.includes?.('fs-write-stream'))", "    await this._request({ op: 'fs-op', action: 'write-stream', step: 'probe' });\n    if (!conn.info?.capabilities?.includes?.('fs-write-stream'))"));
+  ok(noCap.capability === false && noGate.client === false && late.gateFirst === false, `§74 NEGATIVE CONTROLS: the capability dropped from the hello-ack, the gate removed, an op sent before the gate — each caught (${JSON.stringify([noCap.capability, noGate.client, late.gateFirst])})`);
+}
+
+// ── design 016 S2 (lane app-satellite-windows, 2026-10-03): ONE xpra CONNECTION PER APP SESSION — an app's second top-level
+// opens its own VibeSpace window (a SATELLITE), whose pane is a viewport of the main window's session: the x5 rule (one
+// active viewer per connection) and the belt hold only while no satellite opens a stream. DERIVED: the satellite window's
+// body (desktop-app-window.js openSatelliteWindow) and the view's satellite pane (xpra-view.js attachSatellite) name no
+// stream url, no view, no client, no worker; xpra-view.js builds ONE client per view; CONTROLS plant each opener. ──
+console.log('§S2 a satellite window opens no connection of its own');
+{
+  const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:'"\\])\/\/.*$/gm, '$1');
+  const OPENERS = /streamUrl\(|\/stream\b|createXpraView\(|createVncView\(|createXpraClient\(|new\s+(?:WorkerCtor|Worker|WebSocket)\(|\bworkerUrl\b/;
+  const bodyOf = (src, start, end) => { const a = src.indexOf(start), b = src.indexOf(end, a + 1); return a >= 0 && b > a ? src.slice(a, b) : ''; };
+  const judge = (daw, xv) => {
+    const bad = [];
+    const sat = strip(bodyOf(daw, 'function openSatelliteWindow(', '// ── WINDOW-TYPE REGISTRATION'));
+    const pane = strip(bodyOf(xv, 'function attachSatellite(', '  const resnap = '));
+    if (!sat || !pane) bad.push('the satellite bodies are not found');
+    if (OPENERS.test(sat)) bad.push(`openSatelliteWindow opens a stream (${sat.match(OPENERS)[0]})`);
+    if (OPENERS.test(pane)) bad.push(`attachSatellite opens a stream (${pane.match(OPENERS)[0]})`);
+    const clients = (strip(xv).match(/createXpraClient\(/g) || []).length;
+    if (clients !== 1) bad.push(`xpra-view.js builds ${clients} clients (one per view)`);
+    if (!/handle = entry\.view\.attachSatellite\(mount, wid, cb\);/.test(sat)) bad.push('the satellite does not bind to the main window\'s view');
+    return bad;
+  };
+  const daw = read('src/lib/desktop-app-window.js'), xv = read('src/lib/xpra-view.js');
+  const found = judge(daw, xv);
+  ok(found.length === 0, `§S2 the satellite window and its pane open nothing — they bind to the main window's ONE view${found.length ? ' — ' + found.join(' | ') : ''}`);
+  const plantIn = (src, start, line) => { const i = src.indexOf('{', src.indexOf(start)); return src.slice(0, i + 1) + '\n  ' + line + '\n' + src.slice(i + 1); };
+  const PLANTS = [
+    ['daw', "const v2 = createXpraView(mount, { url: () => streamUrl(`/api/desktop/${id}/stream`) });"],
+    ['daw', 'const ws2 = new WebSocket(location.href);'],
+    ['xv', "const c2 = createXpraClient({ url: typeof url === 'function' ? url() : url });"],
+    ['xv', 'const w2 = new Worker(workerUrl);'],
+  ];
+  const missed = PLANTS.filter(([f, l]) => judge(f === 'daw' ? plantIn(daw, 'function openSatelliteWindow(', l) : daw, f === 'xv' ? plantIn(xv, 'function attachSatellite(', l) : xv).length === 0).map(([f, l]) => `${f}: ${l}`);
+  const legal = judge(plantIn(daw, 'function openSatelliteWindow(', '// a satellite never calls createXpraView( or streamUrl( — the main window does'), xv);
+  ok(missed.length === 0 && legal.length === 0, `§S2 NEGATIVE CONTROLS: ${PLANTS.length} planted openers caught, a comment naming them passes${missed.length ? ' — missed: ' + missed.join(' | ') : ''}${legal.length ? ' — wrongly flagged: ' + legal.join(' | ') : ''}`);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

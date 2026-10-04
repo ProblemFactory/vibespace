@@ -38,7 +38,9 @@ function agentOr401(req, res) {
   if (!e) { res.status(401).json({ error: 'missing or unknown session token', code: 'session_token_required' }); return null; }
   return e;
 }
-const STATUS = { not_granted: 403, ask_denied: 403, ask_changed: 409, ask_expired: 403, ask_unfiled: 409, groups_unreadable: 409, fork_pending: 409, ask_pending: 409, no_machine: 404, no_exits: 404, ambiguous: 400, offline: 503, run_failed: 502, spawn_failed: 502, bad_command: 400, unknown_shape: 409, conversation_gone: 410, remote_session: 409 };
+const STATUS = { not_granted: 403, ask_denied: 403, ask_changed: 409, ask_expired: 403, ask_unfiled: 409, groups_unreadable: 409, fork_pending: 409, ask_pending: 409, no_machine: 404, no_exits: 404, ambiguous: 400, offline: 503, run_failed: 502, spawn_failed: 502, bad_command: 400, unknown_shape: 409, conversation_gone: 410, remote_session: 409,
+  // lane exit-transfer: pull / push refusals
+  too_big: 413, not_a_file: 409, local_path_refused: 403, exists: 409, hash_mismatch: 502, transfer_failed: 502, bad_path: 400, target_busy: 409 };
 // lane-exit-run-output E2: a spawn failure's answer carries the error, the interpreter, the platform and the shell's exit code (the CLI exits by it)
 const agentFail = (res, e) => res.status(STATUS[e && e.code] || 400).json({ error: (e && e.message) || 'failed', code: (e && e.code) || 'failed', ...(e && e.grant ? { grant: e.grant } : {}), ...(e && e.has ? { has: e.has } : {}), ...(e && e.spawnError ? { spawnError: e.spawnError, interpreter: e.interpreter || null, platform: e.platform || null, exitCode: e.exitCode } : {}) });
 app.get('/api/agent/exit', (req, res) => {
@@ -68,6 +70,30 @@ app.post('/api/agent/exit/run', async (req, res) => {
   res.on('close', () => { if (!res.writableFinished) ac.abort(); });
   try { res.json(await exitProxy.run(e[1], e[0], machine, cmd, { signal: ac.signal })); }
   catch (err) { agentFail(res, err); }
+});
+// lane exit-transfer (design 013 B): ONE file between this machine and a paired one, under the `run` grant, through the
+// device's own file ops — never a shell, no 30 s cap (a transfer is not a run). PULL: the answer comes once the file landed
+// on this machine's disk (the project / tmp / ~/Downloads fence is the manager's). The CLI's call ending gives up the ask
+// and stops the transfer between windows (nothing is kept).
+app.post('/api/agent/exit/pull', async (req, res) => {
+  const e = agentOr401(req, res); if (!e) return;
+  const { machine, remote, local, overwrite } = req.body || {};
+  const ac = new AbortController();
+  res.on('close', () => { if (!res.writableFinished) ac.abort(); });
+  try { res.json(await exitProxy.pull(e[1], e[0], machine, { remote, local, overwrite: overwrite === true, signal: ac.signal })); }
+  catch (err) { agentFail(res, err); }
+});
+// PUSH: the request BODY is the file (application/octet-stream — the agent's own process reads it; the hub never opens a
+// local path on an agent's behalf), the names ride the query. A refusal before the first byte is read answers at once and
+// closes the connection (the CLI stops sending on the answer).
+app.post('/api/agent/exit/push', async (req, res) => {
+  const e = agentOr401(req, res); if (!e) return;
+  const q = req.query || {};
+  const ac = new AbortController();
+  res.on('close', () => { if (!res.writableFinished) ac.abort(); });
+  try {
+    res.json(await exitProxy.push(e[1], e[0], q.machine ? String(q.machine) : undefined, { remote: String(q.remote || ''), local: String(q.local || ''), size: Number(q.size), overwrite: q.overwrite === '1', source: req, signal: ac.signal }));
+  } catch (err) { agentFail(res, err); try { if (!req.readableEnded) req.resume(); } catch { } } // the unread rest is drained; the CLI stops on the answer
 });
 // ── the user's side (cookie) ──
 const COOKIE_STATUS = { 'not-found': 404, list_changed: 409, bad_mode: 400, bad_grant: 400, bad_principal: 400, empty_list: 400, too_many: 400, 'session-gone': 410, human_only: 403, ask_unknown: 404, ask_settled: 409, ask_changed: 409, ask_expired: 410, conversation_gone: 410 };

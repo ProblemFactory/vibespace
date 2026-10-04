@@ -24,9 +24,14 @@
 //     handles come back, the window returns to its size before the lock and the new main fills the pane;
 //   • BIG 1000×900 at DPR 2 (2000×1800 device px — larger than the 878 px workspace): the window keeps the app's size
 //     (never capped, never scaled, no badge), its top on the workspace; the CSS px past the bottom edge are printed.
+//   • WORK AREA (lane desktop-workarea, the owner's 2.369.203 WeChat: 「下面有条空白」 — root 1660×1296, _NET_WORKAREA
+//     0,0,1573,973, the main window's maximum 1574×974): a resizable main that caps itself at the root's _NET_WORKAREA
+//     (fixture mode `workarea`), the window sized twice — smaller, then larger than the pane the client said hello with:
+//     after each, X's root is the pane and _NET_WORKAREA is that whole root (xprop / xwininfo on the app's display), and
+//     the capped app fills the larger pane (no blank strip under it).
 // CONTROL = a scratch tree with the levers pulled back (the client's lone-dialog rule, the view's no-scale rule, the window's
-// onFixedSize wiring), DPR 2: NORMAL leaves most of the pane blank, DIALOG is cut at the bottom of a pane that is not it, BIG is
-// scaled with the badge.
+// onFixedSize wiring, the display packet's work-area rows), DPR 2: NORMAL leaves most of the pane blank, DIALOG is cut at the
+// bottom of a pane that is not it, BIG is scaled with the badge, WORK AREA stays at the hello's pane with a strip under the app.
 // SKIPs with evidence without chrome / xpra / xauth / dbus-run-session / python3 + GTK 3 (gi).
 // Run: node scripts/test-desktop-app-fixed.mjs
 import { execSync, execFileSync, spawn } from 'node:child_process';
@@ -41,10 +46,10 @@ const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const D = require('../src/desktop-display.js');
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
 const bin = (n) => D.binOnPath(n, { env: process.env });
-const XPRA = bin('xpra'), XAUTH = bin('xauth'), DBUS = bin('dbus-run-session'), PY = bin('python3');
+const XPRA = bin('xpra'), XAUTH = bin('xauth'), DBUS = bin('dbus-run-session'), PY = bin('python3'), XPROP = bin('xprop'), XWININFO = bin('xwininfo');
 const FIXTURE = path.join(repo, 'scripts/fixtures/fixed-size-window.py');
 const gtkOk = () => { try { execFileSync(PY, ['-c', "import gi; gi.require_version('Gtk', '3.0'); from gi.repository import Gtk"], { stdio: 'ignore', timeout: 20000 }); return true; } catch { return false; } };
-const skipWhy = !CHROME ? 'no chrome/chromium' : !XPRA ? 'xpra not on PATH (apt install xpra)' : !XAUTH ? 'xauth not on PATH' : !DBUS ? 'dbus-run-session not on PATH' : !PY ? 'python3 not on PATH' : !gtkOk() ? 'python3 cannot import GTK 3 (apt install python3-gi gir1.2-gtk-3.0)' : null;
+const skipWhy = !CHROME ? 'no chrome/chromium' : !XPRA ? 'xpra not on PATH (apt install xpra)' : !XAUTH ? 'xauth not on PATH' : !DBUS ? 'dbus-run-session not on PATH' : !PY ? 'python3 not on PATH' : !XPROP || !XWININFO ? 'xprop / xwininfo not on PATH (apt install x11-utils)' : !gtkOk() ? 'python3 cannot import GTK 3 (apt install python3-gi gir1.2-gtk-3.0)' : null;
 if (skipWhy) { console.log(`SKIP: ${skipWhy}`); process.exit(0); }
 const VW = 1920, VH = 963, SIDEBAR = 470;
 
@@ -62,6 +67,7 @@ const LEVERS = [
   ['src/lib/xpra-client.js', "    const subject = main || [...windows.values()].filter((w) => w.kind === 'dialog' && !w.meta['transient-for']).sort((a, b) => (b.w * b.h - a.w * a.h) || (a.wid - b.wid))[0] || null;", '    const subject = main; // CONTROL'],
   ['src/lib/xpra-view.js', '      } else if (minSize && !(fixedCss && fixedFollows())) {', '      } else if (minSize) { // CONTROL'],
   ['src/lib/desktop-app-window.js', 'onFixedSize: applyFixedSize, ', ''],
+  ['src/lib/xpra-proto.js', "  const rowsTaken = types.includes('desktop_size') || !name;", '  const rowsTaken = !name; // CONTROL'],
 ];
 const mkTree = (name, levers = []) => {
   const t = path.join(ROOT, name); fs.mkdirSync(t, { recursive: true }); trees.push(t);
@@ -226,7 +232,7 @@ async function page(origin, { dpr, lang }) {
 }
 
 /** ONE configuration on a tree's server */
-async function runConfig(origin, { dpr, lang, label, control = false }) {
+async function runConfig(origin, { dpr, lang, label, tree, control = false }) {
   const tag = `${label} DPR ${dpr} (${lang})`;
   await page(origin, { dpr, lang });
   const out = {};
@@ -294,22 +300,56 @@ async function runConfig(origin, { dpr, lang, label, control = false }) {
       await stop(origin, L.id);
     }
   }
+  // ── WORK AREA (lane desktop-workarea): WeChat's main window — resizable, its MAXIMUM the root's _NET_WORKAREA, re-read as
+  // it changes — and the VibeSpace window sized twice: smaller, then LARGER than the pane the client said hello with ──
+  L = await launch(origin, [600, 400, 'workarea'], `${tag} WORK AREA`);
+  if (L) {
+    const xenv = { ...process.env, DISPLAY: L.rec.display, XAUTHORITY: path.join(tree, 'data/desktop-apps', L.id, 'Xauthority') };
+    const x11 = () => {
+      try {
+        const wa = execFileSync(XPROP, ['-root', '_NET_WORKAREA'], { env: xenv, encoding: 'utf8', timeout: 10000 }), r = execFileSync(XWININFO, ['-root'], { env: xenv, encoding: 'utf8', timeout: 10000 });
+        return { wa: wa.split('=').pop().split(',').map((s) => parseInt(s, 10)).slice(0, 4), root: [+(/Width: (\d+)/.exec(r) || [0, 0])[1], +(/Height: (\d+)/.exec(r) || [0, 0])[1]] };
+      } catch (err) { return { wa: [], root: [0, 0], err: String(err).slice(0, 300) }; }
+    };
+    /** X's root is the pane (device px, ±2) and _NET_WORKAREA is that whole root */
+    const follows = (x, m) => !!(m && m.pane) && Math.abs(x.root[0] - m.pane.w * dpr) <= 2 && Math.abs(x.root[1] - m.pane.h * dpr) <= 2 && x.wa.join() === [0, 0, ...x.root].join();
+    const sizeWin = (cw, ch) => ev(`(() => { const w = ${FIND(L.id)}; app.wm.focusWindow(w.id); w.element.style.left = '20px'; w.element.style.top = '10px'; w.element.style.width = '${cw}px'; w.element.style.height = '${ch}px'; if (w.onResize) w.onResize(); return true; })()`);
+    const m0 = await settle(L.id), x0 = x11();
+    console.log(`  ${tag} WORK AREA: hello pane ${fmt(m0.pane)} ⇒ root ${x0.root.join('×')}, _NET_WORKAREA ${x0.wa.join(',')}${x0.err ? ` (${x0.err})` : ''}`);
+    const steps = [];
+    for (const [cw, ch] of [[Math.round(m0.win.w * 0.7), Math.round(m0.win.h * 0.7)], [Math.round(m0.ws.w - 60), Math.round(m0.ws.h - 30)]]) {
+      await sizeWin(cw, ch);
+      await until(async () => { const m = await ev(MEAS(L.id)); return follows(x11(), m) && framed(m); }, control ? 6000 : 20000, 400);
+      const m = await settle(L.id, 8000), x = x11();
+      steps.push({ x, follows: follows(x, m), framed: framed(m), strip: m.pic ? +(m.pane.b - m.pic.b).toFixed(1) : null, pane: m.pane, pic: m.pic, xwin: m.xwin });
+      console.log(`  ${tag} WORK AREA: window ${cw}×${ch} ⇒ pane ${fmt(m.pane)} (${Math.round(m.pane.w * dpr)}×${Math.round(m.pane.h * dpr)} device), root ${x.root.join('×')}, _NET_WORKAREA ${x.wa.join(',')}; picture ${fmt(m.pic)} — ${steps.at(-1).strip} CSS px blank under it`);
+    }
+    out.workarea = steps;
+    if (!control) {
+      check(`${tag} WORK AREA: after the 1st resize (smaller) X's root is the pane and _NET_WORKAREA is that whole root`, steps[0].follows, steps[0]);
+      check(`${tag} WORK AREA: after the 2nd resize (larger than the hello's pane) _NET_WORKAREA still equals the pane (${steps[1].x.wa.join(',')} on a ${steps[1].x.root.join('×')} root)`, steps[1].follows, steps[1]);
+      check(`${tag} WORK AREA: the app that caps itself at the work area fills the larger pane — no blank strip under it (${steps[1].strip} CSS px)`, steps[1].framed, steps[1]);
+    }
+    await stop(origin, L.id);
+  }
   return out;
 }
 
 console.log('§1 ours — frame = picture, not resizable, never scaled (DPR 2 in zh, DPR 1 in en)');
-await runConfig(S.origin, { dpr: 2, lang: 'zh', label: 'ours' });
-await runConfig(S.origin, { dpr: 1, lang: 'en', label: 'ours' });
+await runConfig(S.origin, { dpr: 2, lang: 'zh', label: 'ours', tree: T });
+await runConfig(S.origin, { dpr: 1, lang: 'en', label: 'ours', tree: T });
 
-console.log('§2 CONTROL — a tree with the levers pulled back (the client\'s lone-dialog rule, the view\'s no-scale rule, the window\'s onFixedSize wiring)');
+console.log('§2 CONTROL — a tree with the levers pulled back (the client\'s lone-dialog rule, the view\'s no-scale rule, the window\'s onFixedSize wiring, the display packet\'s work-area rows)');
 {
   const Tc = mkTree('control', LEVERS);
   const Sc = await bootServer(Tc, 'deskapp-fixed-chome');
   check('CONTROL: the control tree\'s server boots', Sc.up);
-  const c = await runConfig(Sc.origin, { dpr: 2, lang: 'zh', label: 'CONTROL', control: true });
+  const c = await runConfig(Sc.origin, { dpr: 2, lang: 'zh', label: 'CONTROL', tree: Tc, control: true });
   check(`CONTROL: NORMAL — the 400×300 picture in a larger pane, ${blankPct(c.normal)} % of it blank (the owner's WeChat)`, !!c.normal && !framed(c.normal) && blankPct(c.normal) >= 50, c.normal);
   check(`CONTROL: DIALOG — the lone fixed dialog is never adopted: the pane is not the picture (${blankPct(c.dialog)} % blank) and ${c.dialog && c.dialog.pic ? (c.dialog.pic.b - c.dialog.pane.b).toFixed(0) : '?'} CSS px of it are cut at the pane's bottom (the owner's Inkscape)`, !!c.dialog && !framed(c.dialog) && !!c.dialog.pic && c.dialog.pic.b > c.dialog.pane.b + 1, c.dialog);
   check(`CONTROL: BIG — scaled to fit with the badge (stage ${c.big && c.big.stage}, "${c.big && c.big.badge}")`, !!c.big && c.big.stage < 1 && !!c.big.badge, c.big);
+  const cw = c.workarea && c.workarea[1];
+  check(`CONTROL: WORK AREA — the pre-lane display packet (display-configure alone) leaves _NET_WORKAREA at the hello's pane after the larger resize (${cw && cw.x.wa.join(',')} on a ${cw && cw.x.root.join('×')} root) and ${cw && cw.strip} CSS px blank under the app (the owner's WeChat)`, !!cw && !cw.follows && !cw.framed && cw.strip > 1, cw);
 }
 
 console.log(`${failed ? `\n${failed} FAILED (${passed} passed)` : `\nALL PASS (${passed})`}`);

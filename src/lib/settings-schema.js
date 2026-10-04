@@ -785,6 +785,15 @@ const SETTINGS_SCHEMA = {
     when: { setting: 'agents.vibespaceIntegration', is: true },
     category: t('Integration'), liveApply: true,
   },
+  // lane exit-transfer (design 013 B, 2026-10-03): THE bound of an agent's `vibespace-exit pull` / `push` (one file between
+  // this machine and a paired one) — in MB (the browser trace's precedent); src/exit-reach.js transferMaxOf reads it
+  // (absent ⇒ 1 GiB, at least 1 MB). A bigger file is refused `too_big` by name with both numbers.
+  'exit.transferMaxBytes': {
+    type: 'number', default: 1024, min: 1, max: 1048576, step: 64,
+    label: t('Largest file an agent may pull or push, in MB'),
+    description: t('Agents with "Run commands on it" on a paired machine can copy one file at a time between that machine and this one (vibespace-exit pull / push — sha256-checked, shown as a card and in the machine\'s command list). A bigger file is refused and nothing is copied. Default 1024 MB (1 GB).'),
+    category: t('Integration'), liveApply: true,
+  },
   'agents.jobNotify': {
     type: 'boolean', default: true,
     label: t('Background jobs: notify the owner conversation'),

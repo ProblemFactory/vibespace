@@ -2,6 +2,24 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.205 — 2026-10-03
+
+### Added
+- Agents can copy a file between a paired machine and this one, with the same permission as running commands; the size limit is in Settings → Integration.
+
+### Changed
+- When an app opens another window (WeChat's Moments), it opens as its own window titled "WeChat · Moments", and closing it closes only that window.
+- The Agent browser panel is tidier: one aligned row per profile, its actions in a ⋯ menu and the details in a fold.
+
+### Fixed
+- Desktop apps such as WeChat now fill their window after you resize it — no more blank strip along the bottom.
+- When a safety check stops the agent's reply, the chat says so in a plain notice instead of a red "Unknown event" card.
+- In Channels search, "Around this message" shows each message whole: avatar beside the name, nothing cut off, no sideways scrolling, a date line per day.
+- In "Around this message", a picture VibeSpace didn't save says so instead of "Not found · Retry".
+- Scrolling to the end of Channels search results now always loads older matches.
+- In the Design window, Changes to send keeps the newest change in view.
+- Change build… says it is reading the list of Chrome builds instead of saying the list could not be read before asking for it.
+
 ## 2.369.204 — 2026-10-03
 
 ### Added

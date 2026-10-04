@@ -1030,5 +1030,320 @@ await section('§8 exit-see-whole: the card and the owner\'s list carry the WHOL
   for (const r of copiesCensus(M8.files, M8.dir, REPO, { minCopies: 5, label: 'mutant-copy (exit-see-whole): ' })) ok(r.pass, r.name, r.detail);
 });
 
+// ── §8 ──
+// lane exit-transfer (design 013 B): `pull` / `push` — the REAL manager over a fake device that serves files from memory
+// (windows recorded), the REAL routes and the REAL CLI. The real agent leg is scripts/test-agentd-transfer.mjs.
+const crypto8 = require('crypto');
+const sha8 = (b) => crypto8.createHash('sha256').update(b).digest('hex');
+function xworld({ caps = ['run-shell', 'fs-portable', E.PUSH_CAP], hashes = true, ask = false, settingMb, Mgr = ExitProxyManager, hooks = {} } = {}) {
+  const recs = [{ id: 'host-box', name: 'BOX', transport: 'dial', deviceId: 'BOX', online: true, exit: { use: { mode: 'nobody' }, run: { mode: 'everyone', ask } } }];
+  const files = new Map(); // the machine's disk: path → { data } | { dir } | { dev }
+  const reads = [], writes = [];
+  const dm = {
+    status: () => ({ info: { capabilities: caps, platform: 'linux', daemonVersion: '2.369.200' } }),
+    fsStat: async (p) => {
+      const f = files.get(p);
+      if (!f) throw new Error(`ENOENT: no such file or directory, stat '${p}'`);
+      return { ok: true, stat: { size: f.data ? f.data.length : 0, mtimeMs: f.mtimeMs || 1, isDir: !!f.dir, mode: f.dir ? 0o040755 : f.dev ? 0o020666 : 0o100644 } };
+    },
+    fsReadRange: async (p, start, len, opts = {}) => {
+      reads.push({ start, len, sink: typeof opts.sink === 'function', sha256: !!opts.sha256 });
+      if (hooks.read) await hooks.read(reads.length, p);
+      const f = files.get(p);
+      const part = f.data.subarray(start, start + len);
+      let out = part;
+      if (hooks.corrupt && reads.length === hooks.corrupt) { out = Buffer.from(part); out[0] ^= 0xff; }
+      for (let o = 0; o < out.length; o += 65536) opts.sink(out.subarray(o, Math.min(o + 65536, out.length)));
+      return { size: hooks.size ? hooks.size(reads.length, f.data.length) : f.data.length, sent: out.length, sha256: hashes && opts.sha256 ? sha8(part) : null };
+    },
+    fsWriteStream: async (p, { source, size, overwrite, check, windowBytes }) => {
+      if (!caps.includes(E.PUSH_CAP)) { const e = new Error('daemon lacks fs-write-stream (capabilities gate) -- upgrade the agent on this machine'); e.code = 'host_needs_daemon'; throw e; }
+      const chunks = []; let n = 0, next = windowBytes;
+      for await (const c of source) { chunks.push(c); n += c.length; if (n >= next) { next += windowBytes; await check(n); } }
+      await check(n);
+      const data = Buffer.concat(chunks);
+      if (files.get(p) && !overwrite) throw new Error('already exists: ' + p);
+      files.set(p, { data }); writes.push({ p, size: data.length });
+      return { size: data.length, sha256: sha8(data) };
+    },
+  };
+  const hosts = { list: () => recs.map((h) => ({ ...h })), get: (id) => recs.find((x) => x.id === id), setLastRun: () => {}, deviceBounded: async () => dm };
+  const proj = path.join(SCR, 'proj-' + Math.random().toString(36).slice(2, 8)); fs.mkdirSync(proj, { recursive: true });
+  const sessions = new Map([['wa', { name: 'agent A', backend: 'claude', claudeSessionId: 'A', cwd: proj }]]);
+  const dataDir = path.join(SCR, 'xdata-' + Math.random().toString(36).slice(2, 8)); fs.mkdirSync(dataDir, { recursive: true });
+  const cards = [], items = [];
+  const userTodos = { add: (key, it) => { const x = { id: 'todo' + items.length, status: 'open', ...it }; items.push(x); return x; }, onStatus: () => {}, get: (id) => items.find((x) => x.id === id), setStatus: (id, st) => { const x = items.find((y) => y.id === id); if (x) x.status = st; } };
+  const mgr = new Mgr({ hosts, log: () => {}, dataDir, sessionsMap: () => sessions, emitCard: (s2, c) => { cards.push(c); return true; }, userTodos, settingOf: (k) => (k === E.TRANSFER_SETTING ? settingMb : undefined) });
+  return { mgr, recs, files, reads, writes, dm, sessions, A: sessions.get('wa'), proj, cards, items, dataDir, audit: () => { try { return fs.readFileSync(path.join(dataDir, 'exit-audit.jsonl'), 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } } };
+}
+const MiB8 = 1024 * 1024;
+// fix r1: each pull's part is its OWN fresh name (`<target>.<8 hex>.vs-part`) — "no part left" = no part of any name
+const partsIn = (...dirs) => dirs.flatMap((d) => { try { return fs.readdirSync(d).filter((f) => /\.vs-part$/.test(f)).map((f) => path.join(d, f)); } catch { return []; } });
+await section('§8 lane exit-transfer: pull / push over a fake device — windows, hashes, bounds, the fence, the ask, refusals by name', async () => {
+  // (a) a 40 MiB pull lands in 8 MiB windows through the sink, each window's hash compared
+  const w = xworld();
+  const big = crypto8.randomBytes(40 * MiB8); w.files.set('C:\\data\\nomad.bin', { data: big });
+  const dst = path.join(w.proj, 'nomad.bin');
+  const r = await settle(w.mgr.pull(w.A, 'wa', 'BOX', { remote: 'C:\\data\\nomad.bin', local: dst }));
+  ok(r.v && r.v.bytes === big.length && r.v.sha256 === sha8(big) && r.v.verified === 'sha256' && fs.readFileSync(dst).equals(big) && partsIn(w.proj).length === 0, 'a 40 MiB pull lands whole, sha256 verified, no .vs-part left', r.e ? r.e.message : { ...r.v, line: undefined });
+  ok(w.reads.length === 5 && w.reads.every((x) => x.sink && x.sha256 && x.len <= E.TRANSFER_WINDOW_BYTES) && w.reads.map((x) => x.start).join() === [0, 1, 2, 3, 4].map((i) => i * E.TRANSFER_WINDOW_BYTES).join(), 'five 8 MiB windows, each through the sink form with the sha256 flag (never the whole file in one read)', w.reads);
+  const a = w.audit().filter((l) => l.verb === 'pull');
+  ok(a.length === 1 && a[0].ok === true && a[0].grant === 'run' && a[0].bytes === big.length && a[0].sha256 === sha8(big) && a[0].verified === 'sha256' && a[0].path === 'C:\\data\\nomad.bin' && a[0].localPath === dst && a[0].cmd === `pull C:\\data\\nomad.bin → ${dst}` && !('stdout' in a[0]), 'ONE audit line: verb pull, the two paths, the size, the hash, no content', a);
+  ok(w.cards.length === 1 && w.cards[0].kind === 'notification' && w.cards[0].fromName === 'Machines · BOX' && /^pulled `C:\\data\\nomad\.bin` from BOX → `.*nomad\.bin` — 40\.0 MiB · sha256 [0-9a-f]{12}… verified · /.test(w.cards[0].text), 'ONE card: what, from where, where to, the size, the check', w.cards);
+  const own = w.mgr.runsFor(w.A, 'wa', {}), owner = w.mgr.runsOf('host-box', {});
+  ok(own.length === 1 && own[0].transfer && own[0].transfer.bytes === big.length && owner.length === 1 && owner[0].verb === 'pull' && owner[0].name === 'agent A', 'a row in the machine\'s command list (owner) and in the agent\'s own `runs`', { own, owner });
+  // (b) an agent from before the flag ⇒ "size verified"
+  const wb = xworld({ hashes: false }); wb.files.set('/srv/a.bin', { data: Buffer.from('hello') });
+  const rb = await settle(wb.mgr.pull(wb.A, 'wa', 'BOX', { remote: '/srv/a.bin', local: path.join(wb.proj, 'a.bin') }));
+  ok(rb.v && rb.v.verified === 'size' && /size verified \(its agent predates sha256\)/.test(wb.cards[0].text), 'an agent that ignores the sha256 flag ⇒ "size verified" (never a hang, never "sha256")', rb.e ? rb.e.message : wb.cards);
+  // (c) a window whose bytes differ from the device's hash ⇒ hash_mismatch, nothing kept
+  const wc = xworld({ hooks: { corrupt: 2 } }); wc.files.set('/srv/c.bin', { data: crypto8.randomBytes(20 * MiB8) });
+  const rc = await settle(wc.mgr.pull(wc.A, 'wa', 'BOX', { remote: '/srv/c.bin', local: path.join(wc.proj, 'c.bin') }));
+  ok(rc.e && rc.e.code === 'hash_mismatch' && !fs.existsSync(path.join(wc.proj, 'c.bin')) && partsIn(wc.proj).length === 0 && wc.audit().some((l) => l.verb === 'pull' && l.refusal === 'hash_mismatch'), 'a corrupted window ⇒ hash_mismatch by name, nothing kept, the audit says it', rc.e && rc.e.message);
+  // (d) a stall mid-transfer ⇒ transfer_failed, the part removed
+  const wd = xworld({ hooks: { read: async (n) => { if (n === 2) throw new Error('read-range stalled'); } } }); wd.files.set('/srv/d.bin', { data: crypto8.randomBytes(12 * MiB8) });
+  const rd = await settle(wd.mgr.pull(wd.A, 'wa', 'BOX', { remote: '/srv/d.bin', local: path.join(wd.proj, 'd.bin') }));
+  ok(rd.e && rd.e.code === 'transfer_failed' && /read-range stalled/.test(rd.e.message) && /nothing was kept/.test(rd.e.message) && partsIn(wd.proj).length === 0, 'a stall in the second window ⇒ transfer_failed, the part removed', rd.e && rd.e.message);
+  // (e) `run` revoked mid-transfer ⇒ the next window refuses, the part removed
+  const we = xworld({ hooks: { read: async (n) => { if (n === 1) we.recs[0].exit = { use: { mode: 'nobody' }, run: { mode: 'nobody', ask: false } }; } } }); we.files.set('/srv/e.bin', { data: crypto8.randomBytes(20 * MiB8) });
+  const re = await settle(we.mgr.pull(we.A, 'wa', 'BOX', { remote: '/srv/e.bin', local: path.join(we.proj, 'e.bin') }));
+  ok(re.e && re.e.code === 'not_granted' && we.reads.length === 1 && !fs.existsSync(path.join(we.proj, 'e.bin')) && partsIn(we.proj).length === 0, '`run` revoked during the first window ⇒ refused before the second, nothing kept', { e: re.e && re.e.message, reads: we.reads.length });
+  // (f) a file that changes size between windows ⇒ transfer_failed
+  const wf = xworld({ hooks: { size: (n, len) => (n === 2 ? len + 1 : len) } }); wf.files.set('/srv/f.bin', { data: crypto8.randomBytes(10 * MiB8) });
+  const rf = await settle(wf.mgr.pull(wf.A, 'wa', 'BOX', { remote: '/srv/f.bin', local: path.join(wf.proj, 'f.bin') }));
+  ok(rf.e && rf.e.code === 'transfer_failed' && /changed size while it was read/.test(rf.e.message) && !fs.existsSync(path.join(wf.proj, 'f.bin')), 'a file that grows during the pull ⇒ transfer_failed by name, nothing kept', rf.e && rf.e.message);
+  // (g) the bound: the user's setting (MB) — exactly the bound lands, one byte more is too_big with both numbers
+  const wg = xworld({ settingMb: 1 }); wg.files.set('/srv/max.bin', { data: Buffer.alloc(MiB8, 1) }); wg.files.set('/srv/max1.bin', { data: Buffer.alloc(MiB8 + 1, 1) });
+  const g1 = await settle(wg.mgr.pull(wg.A, 'wa', 'BOX', { remote: '/srv/max.bin', local: path.join(wg.proj, 'max.bin') }));
+  const g2 = await settle(wg.mgr.pull(wg.A, 'wa', 'BOX', { remote: '/srv/max1.bin', local: path.join(wg.proj, 'max1.bin') }));
+  ok(g1.v && g1.v.bytes === MiB8 && g2.e && g2.e.code === 'too_big' && /1\.0 MiB — more than the 1\.0 MiB/.test(g2.e.message) && wg.reads.length === 1, 'exit.transferMaxBytes = 1 MB: 1 MiB lands, 1 MiB + 1 byte is too_big by name before a byte is read', g2.e && g2.e.message);
+  // (h) refusals before a byte: not a file / a folder / exists / overwrite / bad paths
+  const wh = xworld(); wh.files.set('/dev/zero', { dev: true }); wh.files.set('/srv/dir', { dir: true }); wh.files.set('/srv/h.bin', { data: Buffer.from('new') });
+  fs.writeFileSync(path.join(wh.proj, 'h.bin'), 'old');
+  const h1 = await settle(wh.mgr.pull(wh.A, 'wa', 'BOX', { remote: '/dev/zero', local: path.join(wh.proj, 'z') }));
+  const h2 = await settle(wh.mgr.pull(wh.A, 'wa', 'BOX', { remote: '/srv/dir', local: path.join(wh.proj, 'z') }));
+  const h3 = await settle(wh.mgr.pull(wh.A, 'wa', 'BOX', { remote: '/srv/nope.bin', local: path.join(wh.proj, 'z') }));
+  const h4 = await settle(wh.mgr.pull(wh.A, 'wa', 'BOX', { remote: '/srv/h.bin', local: path.join(wh.proj, 'h.bin') }));
+  const h4kept = fs.readFileSync(path.join(wh.proj, 'h.bin'), 'utf8');
+  const h5 = await settle(wh.mgr.pull(wh.A, 'wa', 'BOX', { remote: '/srv/h.bin', local: path.join(wh.proj, 'h.bin'), overwrite: true }));
+  const h6 = await settle(wh.mgr.pull(wh.A, 'wa', 'BOX', { remote: 'rel/x', local: path.join(wh.proj, 'z') }));
+  const h7 = await settle(wh.mgr.pull(wh.A, 'wa', 'BOX', { remote: '/srv/h.bin', local: path.join(wh.proj, 'a\nb') }));
+  ok(h1.e && h1.e.code === 'not_a_file' && /device, a pipe or a socket/.test(h1.e.message) && h2.e && h2.e.code === 'not_a_file' && /is a folder/.test(h2.e.message) && h3.e && h3.e.code === 'not_a_file' && /does not exist/.test(h3.e.message), '/dev/zero, a folder, a missing file ⇒ not_a_file, each said', [h1.e && h1.e.message, h2.e && h2.e.message, h3.e && h3.e.message]);
+  ok(h4.e && h4.e.code === 'exists' && h4kept === 'old' && h5.v && fs.readFileSync(path.join(wh.proj, 'h.bin'), 'utf8') === 'new', 'an existing local file ⇒ exists; --overwrite replaces it', h4.e && h4.e.message);
+  ok(h6.e && h6.e.code === 'bad_path' && h7.e && h7.e.code === 'bad_path' && /control or invisible/.test(h7.e.message) && wh.reads.length === 1, 'a relative remote path, a newline in the local path ⇒ bad_path before anything is asked', [h6.e && h6.e.message, h7.e && h7.e.message]);
+  // (i) THE FENCE: the local side is the project, /tmp or ~/Downloads — physically
+  const wi = xworld(); wi.files.set('/srv/i.bin', { data: Buffer.from('x') });
+  const sshDir = path.join(os.homedir(), '.ssh');
+  fs.symlinkSync(sshDir, path.join(wi.proj, 'keys'));
+  const fence = [
+    ['~/.ssh/authorized_keys', path.join(sshDir, 'vs-exo-never')], ['a link in the project into ~/.ssh', path.join(wi.proj, 'keys', 'vs-exo-never')],
+    ['/etc', '/etc/vs-exo-never'], ['.. out of the project into /proc', path.join(wi.proj, '..', '..', '..', 'proc', 'vs-exo-never')],
+    ['the hub\'s own data dir', path.join(wi.dataDir, 'bin', 'vs-exo-never')], ['a .git directory', path.join(wi.proj, '.git', 'hooks', 'pre-commit')],
+  ];
+  for (const [name, p] of fence) {
+    const v = await settle(wi.mgr.pull(wi.A, 'wa', 'BOX', { remote: '/srv/i.bin', local: p }));
+    ok(v.e && v.e.code === 'local_path_refused' && !fs.existsSync(p) && /nothing was copied/.test(v.e.message) && !/browser/.test(v.e.message), `the fence: ${name} ⇒ local_path_refused, nothing written`, v.e ? v.e.message : v.v);
+  }
+  ok(wi.reads.length === 0 && wi.audit().filter((l) => l.refusal === 'local_path_refused').length === fence.length && wi.cards.every((c) => /outside the project, \/tmp and ~\/Downloads/.test(c.text)), '…refused before the machine is asked; each attempt is an audit line and a card', wi.cards.map((c) => c.text));
+  // (j) the ask: "ask me each time" files the transfer line; Allow lands it, Deny refuses
+  const wj = xworld({ ask: true }); wj.files.set('/srv/j.bin', { data: Buffer.from('jjj') });
+  const pj = settle(wj.mgr.pull(wj.A, 'wa', 'BOX', { remote: '/srv/j.bin', local: path.join(wj.proj, 'j.bin') }));
+  await new Promise((res) => setTimeout(res, 30));
+  const [ak] = wj.mgr.listAsks();
+  ok(ak && ak.cmd === `pull /srv/j.bin → ${path.join(wj.proj, 'j.bin')}`.slice(0, 120) && wj.items[0] && wj.items[0].detail === `pull /srv/j.bin → ${path.join(wj.proj, 'j.bin')}` && wj.reads.length === 0, 'ask mode: ONE For-you item whose detail is the transfer line — nothing read before the answer', { ak, item: wj.items[0] });
+  wj.mgr.answerAsk(ak.askId, { answer: 'allow', by: 'user' });
+  const rj = await pj;
+  ok(rj.v && rj.v.asked === true && fs.readFileSync(path.join(wj.proj, 'j.bin'), 'utf8') === 'jjj', '…Allow ⇒ it lands (asked: true)', rj.e && rj.e.message);
+  const pj2 = settle(wj.mgr.pull(wj.A, 'wa', 'BOX', { remote: '/srv/j.bin', local: path.join(wj.proj, 'j2.bin') }));
+  await new Promise((res) => setTimeout(res, 30));
+  wj.mgr.answerAsk(wj.mgr.listAsks()[0].askId, { answer: 'deny', by: 'user' });
+  const rj2 = await pj2;
+  ok(rj2.e && rj2.e.code === 'ask_denied' && !fs.existsSync(path.join(wj.proj, 'j2.bin')) && /^did not pull `\/srv\/j\.bin` from BOX — you denied it$/.test(wj.cards.at(-1).text), '…Deny ⇒ ask_denied, nothing copied, the card says so', rj2.e && rj2.e.message);
+  // (k) a conversation on another machine: the local path would be the hub's disk ⇒ remote_session, nothing asked
+  const wk = xworld(); wk.files.set('/srv/k.bin', { data: Buffer.from('k') }); wk.A.host = 'gpu-box';
+  const rk = await settle(wk.mgr.pull(wk.A, 'wa', 'BOX', { remote: '/srv/k.bin', local: path.join(wk.proj, 'k.bin') }));
+  ok(rk.e && rk.e.code === 'remote_session' && wk.reads.length === 0, 'a conversation running on another machine ⇒ remote_session (the local path is the VibeSpace machine\'s disk)', rk.e && rk.e.message);
+  // (l) push: an old agent is never asked (device_agent_outdated, the body unread); a new one lands; exists / overwrite
+  const wl = xworld({ caps: ['run-shell', 'fs-portable'] });
+  let pulled = 0;
+  async function* body(b) { pulled++; yield b; }
+  const l1 = await settle(wl.mgr.push(wl.A, 'wa', 'BOX', { remote: '/srv/up.bin', local: '/p/up.bin', size: 3, source: body(Buffer.from('abc')) }));
+  ok(l1.e && l1.e.code === 'device_agent_outdated' && l1.e.needVersion === E.PUSH_SINCE && /pull works/.test(l1.e.message) && pulled === 0 && /its agent cannot receive files/.test(wl.cards.at(-1).text), 'push to an agent without fs-write-stream ⇒ device_agent_outdated by name; the body is never read', l1.e && l1.e.message);
+  // int205 (the coordinator): an agent that names NO version is still refused WITH the version a push needs (2.369.205)
+  const wl0 = xworld({ caps: ['run-shell', 'fs-portable'] }); wl0.dm.status = () => ({ info: { capabilities: ['run-shell', 'fs-portable'], platform: 'linux' } });
+  const l0 = await settle(wl0.mgr.push(wl0.A, 'wa', 'BOX', { remote: '/srv/up.bin', local: '/p/up.bin', size: 3, source: body(Buffer.from('abc')) }));
+  ok(l0.e && l0.e.code === 'device_agent_outdated' && l0.e.needVersion === E.PUSH_SINCE && E.PUSH_SINCE === '2.369.205' && l0.e.message.includes(E.PUSH_SINCE) && wl0.reads.length === 0, 'push to an agent that names no version ⇒ device_agent_outdated WITH needVersion 2.369.205 (the first agent with fs-write-stream) in the error and its sentence', l0.e && { code: l0.e.code, needVersion: l0.e.needVersion, agentVersion: l0.e.agentVersion });
+  const wm = xworld(); wm.files.set('/srv/exists.bin', { data: Buffer.from('theirs') });
+  const m1 = await settle(wm.mgr.push(wm.A, 'wa', 'BOX', { remote: '/srv/up.bin', local: '/p/up.bin', size: 3, source: body(Buffer.from('abc')) }));
+  const m2 = await settle(wm.mgr.push(wm.A, 'wa', 'BOX', { remote: '/srv/exists.bin', local: '/p/up.bin', size: 3, source: body(Buffer.from('abc')) }));
+  const m2kept = wm.files.get('/srv/exists.bin').data.toString();
+  const m3 = await settle(wm.mgr.push(wm.A, 'wa', 'BOX', { remote: '/srv/exists.bin', local: '/p/up.bin', size: 3, source: body(Buffer.from('abc')), overwrite: true }));
+  ok(m1.v && m1.v.verb === 'push' && m1.v.sha256 === sha8(Buffer.from('abc')) && wm.files.get('/srv/up.bin').data.toString() === 'abc' && /^pushed `\/p\/up\.bin` to BOX → `\/srv\/up\.bin` — 3 bytes · sha256/.test(wm.cards[0].text), 'push lands: the bytes on the machine, the sha256, the card', m1.e ? m1.e.message : wm.cards);
+  ok(m2.e && m2.e.code === 'exists' && m2kept === 'theirs' && m3.v && wm.files.get('/srv/exists.bin').data.toString() === 'abc', 'push onto an existing file ⇒ exists; --overwrite replaces it', m2.e && m2.e.message);
+  // (m) NEVER A SHELL: the transfer code calls no run / shell / stream op (static census over the manager's transfer and the agent's write-stream)
+  const px = fs.readFileSync(path.join(REPO, 'src/exit-proxy.js'), 'utf8');
+  const tx = px.slice(px.indexOf('  async _transfer('), px.indexOf('  /** The display-only card in the calling chat;'));
+  const ax = fs.readFileSync(path.join(REPO, 'src/agentd/agentd.js'), 'utf8');
+  const wsx = ax.slice(ax.indexOf('  const writeStreams = new Map();'), ax.indexOf('  const mux = new Mux(sock, {')) + ax.slice(ax.indexOf("  'part-open': (m) => {"), ax.indexOf('{\n  let wt = null; try { wt = require'));
+  // (n) fix r1 ①: where a pull writes is judged WHEN it writes — the destination folder moved away while the ask waits ⇒
+  //     refused by name; no file anywhere (the old name is not re-made, nothing lands in the moved folder); the audit line,
+  //     the card and the agent's sentence say why
+  const wn = xworld({ ask: true }); wn.files.set('/srv/n.bin', { data: crypto8.randomBytes(3 * MiB8) });
+  const nDir = path.join(wn.proj, 'out'), nAway = path.join(wn.proj, 'away'); fs.mkdirSync(nDir);
+  const pn = settle(wn.mgr.pull(wn.A, 'wa', 'BOX', { remote: '/srv/n.bin', local: path.join(nDir, 'n.bin') }));
+  await new Promise((res) => setTimeout(res, 30));
+  fs.renameSync(nDir, nAway);
+  wn.mgr.answerAsk(wn.mgr.listAsks()[0].askId, { answer: 'allow', by: 'user' });
+  const rn = await pn;
+  const an = wn.audit().filter((l) => l.verb === 'pull');
+  ok(rn.e && rn.e.code === 'local_path_refused' && /is gone \(moved or removed after it was judged\); nothing was kept/.test(rn.e.message) && !fs.existsSync(nDir) && fs.readdirSync(nAway).length === 0 && partsIn(wn.proj, nAway).length === 0 && wn.reads.length === 0,
+    'fix r1 ①: the folder moved away while the ask waited ⇒ local_path_refused by name — the folder is not re-made, nothing lands in the moved one, no byte read', rn.e ? rn.e.message : rn.v);
+  ok(an.length === 1 && an[0].refusal === 'local_path_refused' && /is gone/.test(an[0].error || '') && /the local folder changed after it was judged — nothing was kept/.test(wn.cards.at(-1).text), '…the audit line carries the reason; the card says the folder changed', { an, card: wn.cards.at(-1) });
+  // (n2) …the folder swapped, while the ask waits, for a link into the hub's own data dir ⇒ refused before a byte; nothing is
+  //      ever written there (not even a part — before fix r1 the part was made through the link and removed at the rename)
+  const inData = [];
+  const wn2 = xworld({ ask: true, hooks: { read: async () => { inData.push(...partsIn(fbd)); } } });
+  const fbd = path.join(wn2.dataDir, 'bin'); fs.mkdirSync(fbd, { recursive: true });
+  wn2.files.set('/srv/n2.bin', { data: crypto8.randomBytes(MiB8) });
+  const n2Dir = path.join(wn2.proj, 'out'); fs.mkdirSync(n2Dir);
+  const pn2 = settle(wn2.mgr.pull(wn2.A, 'wa', 'BOX', { remote: '/srv/n2.bin', local: path.join(n2Dir, 'n2.bin') }));
+  await new Promise((res) => setTimeout(res, 30));
+  fs.renameSync(n2Dir, path.join(wn2.proj, 'away')); fs.symlinkSync(fbd, n2Dir);
+  wn2.mgr.answerAsk(wn2.mgr.listAsks()[0].askId, { answer: 'allow', by: 'user' });
+  const rn2 = await pn2;
+  ok(rn2.e && rn2.e.code === 'local_path_refused' && /changed after it was judged/.test(rn2.e.message) && inData.length === 0 && fs.readdirSync(fbd).length === 0 && wn2.reads.length === 0, '…the folder swapped for a link into VibeSpace\'s data while the ask waited ⇒ refused before a byte; nothing was ever written there (no part either)', { e: rn2.e ? rn2.e.message : rn2.v, inData, reads: wn2.reads.length });
+  // (o) fix r1 ②: ONE pull per local target — a second pull into a target being written (here by another spelling of it: a
+  //     link to the project) is refused target_busy at once, before a byte; the first lands whole and its "sha256 verified"
+  //     is the file on disk; once the first ended the target is free again
+  let goA, goB; const gateA = new Promise((res) => { goA = res; }), gateB = new Promise((res) => { goB = res; });
+  const reading = new Set();
+  const wo = xworld({ hooks: { read: async (n, p) => { reading.add(p); if (p === '/srv/oa.bin') await gateA; if (p === '/srv/ob.bin') await gateB; } } });
+  const oa = crypto8.randomBytes(3 * MiB8), ob = crypto8.randomBytes(3 * MiB8);
+  wo.files.set('/srv/oa.bin', { data: oa }); wo.files.set('/srv/ob.bin', { data: ob });
+  const oDst = path.join(wo.proj, 'same.bin'); fs.symlinkSync(wo.proj, path.join(wo.proj, 'alias'));
+  const poa = settle(wo.mgr.pull(wo.A, 'wa', 'BOX', { remote: '/srv/oa.bin', local: oDst }));
+  for (let i = 0; i < 200 && !reading.has('/srv/oa.bin'); i++) await new Promise((res) => setTimeout(res, 5));
+  let bDone = false; const pob = settle(wo.mgr.pull(wo.A, 'wa', 'BOX', { remote: '/srv/ob.bin', local: path.join(wo.proj, 'alias', 'same.bin') })).then((x) => { bDone = true; return x; });
+  for (let i = 0; i < 200 && !bDone && !reading.has('/srv/ob.bin'); i++) await new Promise((res) => setTimeout(res, 5));
+  const bEarly = bDone;
+  goA(); const roa = await poa; goB(); const rob = await pob;
+  const onDisk = fs.existsSync(oDst) ? sha8(fs.readFileSync(oDst)) : null;
+  ok(bEarly && rob.e && rob.e.code === 'target_busy' && !reading.has('/srv/ob.bin') && /being written by another pull right now — nothing was copied/.test(rob.e.message), 'fix r1 ②: a second pull into a target being written (another spelling of it) ⇒ target_busy at once, before a byte', rob.e ? rob.e.message : rob.v);
+  ok(roa.v && roa.v.sha256 === sha8(oa) && onDisk === sha8(oa) && partsIn(wo.proj).length === 0, '…the first lands whole: its "sha256 verified" is the file on disk; no part left', { roa: roa.e ? roa.e.message : roa.v.sha256, onDisk, want: sha8(oa) });
+  ok(fs.existsSync(oDst) && wo.audit().some((l) => l.refusal === 'target_busy' && l.localPath === fs.realpathSync(oDst)) && /another pull is writing that local file right now/.test((wo.cards.find((c) => /did not pull `\/srv\/ob\.bin`/.test(c.text)) || {}).text || ''), '…the refusal is an audit line and a card that say why', wo.cards.map((c) => c.text));
+  const rfree = await settle(wo.mgr.pull(wo.A, 'wa', 'BOX', { remote: '/srv/ob.bin', local: oDst, overwrite: true }));
+  ok(rfree.v && rfree.v.sha256 === sha8(ob) && sha8(fs.readFileSync(oDst)) === sha8(ob), '…and once the first ended the target is free again (--overwrite replaces it whole)', rfree.e && rfree.e.message);
+  ok(tx.length > 3000 && !/runCmd\(|runShell\(|runStream\(|child_process|spawn\(|exec(File)?\(/.test(tx) && wsx.length > 3000 && !/child_process|spawn\(|exec(File)?\(|runCmd|shellPlan/.test(wsx), 'the transfer path never starts a process: the manager\'s _transfer and the agent\'s write-stream + part-* hold no run / shell / spawn call', { tx: tx.length, wsx: wsx.length });
+});
+
+await section('§8b the routes + the CLI: pull / push end to end, a refusal before the body answers at once', async () => {
+  const express = require(path.join(REPO, 'node_modules/express'));
+  const app = express(); app.use(express.json());
+  const w = xworld({ hooks: { read: async (n, p) => { if (p === '/srv/slow.bin') await new Promise((r) => setTimeout(r, 1500)); } } });   // verify r2: one slow file
+  const active = new Map([['wa', { ...w.A, agentToken: 'vsst_A' }]]);
+  w.mgr.sessionsMap = () => active;
+  require(path.join(REPO, 'src/server/exit-routes.js')).create({ app, rootDir: REPO, AGENT_BIN_DIR: path.join(REPO, 'data/bin'), activeSessions: active, auth: {}, wss: { clients: new Set() }, WS_OPEN: 1, bcastAll: () => {}, integrationEnabled: () => true, unpairDialDevice: () => {}, hosts: { list: () => w.recs, get: (id) => w.recs.find((x) => x.id === id), keyInfo: () => ({}), sweepJsonlCache: () => {} }, getExitProxy: () => w.mgr, getMounts: () => null, getPortForwards: () => null, getTasks: () => ({ list: () => [] }) });
+  const srv = http.createServer(app); await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${srv.address().port}`;
+  const cli = (args, pre = [], bin = path.join(REPO, 'data/bin/vibespace-exit')) => new Promise((res) => { const c = spawn(process.execPath, [...pre, bin, ...args], { cwd: w.proj, env: { ...process.env, VIBESPACE_API: base, VIBESPACE_SESSION_TOKEN: 'vsst_A' } }); const out = [], err = []; c.stdout.on('data', (d) => out.push(d)); c.stderr.on('data', (d) => err.push(d)); c.on('exit', (code) => res({ code, out: Buffer.concat(out).toString(), err: Buffer.concat(err).toString() })); });
+  try {
+    const data = crypto8.randomBytes(3 * MiB8 + 7); w.files.set('C:\\Users\\me\\out.zip', { data });
+    const c1 = await cli(['pull', 'BOX', 'C:\\Users\\me\\out.zip']);
+    const landed = path.join(w.proj, 'out.zip');
+    ok(c1.code === 0 && fs.existsSync(landed) && fs.readFileSync(landed).equals(data) && c1.out.startsWith(`pulled C:\\Users\\me\\out.zip from "BOX" → ${landed} — 3.0 MiB (${data.length} bytes) · sha256 ${sha8(data)} verified`), 'CLI pull with no local path ⇒ ./<the remote name> (a Windows path\'s basename), stdout names where, the size and the whole sha256', c1);
+    fs.mkdirSync(path.join(w.proj, 'into'));
+    const c2 = await cli(['pull', 'BOX', 'C:\\Users\\me\\out.zip', 'into']);
+    ok(c2.code === 0 && fs.existsSync(path.join(w.proj, 'into', 'out.zip')), 'CLI pull into an existing folder ⇒ the file lands inside it', c2.err);
+    const c3 = await cli(['pull', 'BOX', 'C:\\Users\\me\\out.zip']);
+    ok(c3.code === 1 && /already exists here — nothing was copied; add --overwrite/.test(c3.err), 'CLI pull onto an existing file ⇒ exit 1 with the sentence', c3.err);
+    const c4 = await cli(['push', 'out.zip', 'BOX', '/srv/back.zip']);
+    ok(c4.code === 0 && w.files.get('/srv/back.zip') && w.files.get('/srv/back.zip').data.equals(data) && /^pushed .*out\.zip to "BOX" → \/srv\/back\.zip — 3\.0 MiB/.test(c4.out), 'CLI push streams the file as the request body; the machine has the same bytes', c4);
+    // a refusal before the body is read: a 64 MiB local file to an existing remote path answers at once (never read whole)
+    const bigL = path.join(w.proj, 'big.bin'); fs.writeFileSync(bigL, Buffer.alloc(64 * MiB8));
+    const t0 = Date.now();
+    const c5 = await cli(['push', 'big.bin', 'BOX', '/srv/back.zip']);
+    ok(c5.code === 1 && /already exists on "BOX" — nothing was copied/.test(c5.err) && Date.now() - t0 < 8000, `CLI push onto an existing remote file ⇒ refused at once (${Date.now() - t0} ms), exit 1`, c5);
+    const c6 = await cli(['push', 'nope.bin', 'BOX', '/srv/x']);
+    ok(c6.code === 1 && /not a regular file here/.test(c6.err), 'CLI push of a missing local file ⇒ said, nothing sent', c6.err);
+    const c7 = await cli(['pull', 'BOX', 'relative.bin']);
+    ok(c7.code === 1 && /is not an absolute path on the machine/.test(c7.err), 'CLI pull of a relative remote path ⇒ bad_path said', c7.err);
+    const c8 = await cli(['runs']);
+    ok(c8.code === 0 && /pushed 3145735 bytes/.test(c8.out) && /pulled 3145735 bytes/.test(c8.out) && /refused \(exists\)/.test(c8.out), 'CLI `runs` lists the transfers with what moved (never "exit ?")', c8.out);
+    const h = await cli(['help']);
+    ok(/vibespace-exit pull <machine> <remote-path>/.test(h.out) && /vibespace-exit push <local-path> <machine> <remote-path>/.test(h.out) && /1 GiB/.test(h.out) && h.out.includes(E.PUSH_SINCE) && /2\.369\.205/.test(h.out), 'the help names both verbs, the bound and the agent version push needs');
+    const ow = await fetch(base + '/api/hosts/host-box/exit-runs?limit=50').then((x) => x.json());
+    ok(ow.runs.some((x) => x.verb === 'push' && x.transfer.bytes === data.length) && ow.runs.some((x) => x.verb === 'pull' && x.outcome === 'refused' && x.refusal === 'exists'), 'the owner\'s command list carries every transfer and every refusal', ow.runs.map((x) => [x.verb, x.outcome, x.refusal]));
+    // verify r2: a pull answers once the file LANDED — the CLI must wait for it as long as it takes (no 30 s cap, no client
+    // deadline). The CLI runs with every timer 1000× faster: any client deadline up to ~25 min fires inside this 1.5 s pull
+    const warp = path.join(SCR, 'warp-timers.cjs');
+    fs.writeFileSync(warp, "const st = globalThis.setTimeout, si = globalThis.setInterval;\nglobalThis.setTimeout = function (f, d, ...a) { return st.call(this, f, Math.max(1, Math.floor((Number(d) || 0) / 1000)), ...a); };\nglobalThis.setInterval = function (f, d, ...a) { return si.call(this, f, Math.max(1, Math.floor((Number(d) || 0) / 1000)), ...a); };\n");
+    const slow = crypto8.randomBytes(MiB8); w.files.set('/srv/slow.bin', { data: slow });
+    const c9 = await cli(['pull', 'BOX', '/srv/slow.bin'], ['--require', warp]);
+    ok(c9.code === 0 && fs.existsSync(path.join(w.proj, 'slow.bin')) && sha8(fs.readFileSync(path.join(w.proj, 'slow.bin'))) === sha8(slow) && /^pulled \/srv\/slow\.bin/.test(c9.out), 'verify r2: a pull that outlasts any client deadline (CLI timers ×1000: global fetch would give up at "300 s") is waited for — it lands, exit 0', { code: c9.code, err: c9.err.slice(0, 300) });
+    // CONTROL (x8): the pre-fix CLI (the pull's POST through global fetch) under the same clock gives up before the file lands — the leg above goes red
+    const MC = mutantCopies('exo8b', REPO);
+    const cliSrc = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-exit'), 'utf8');
+    const cliMut = cliSrc.replace("await postLong('/api/agent/exit/pull'", "await post('/api/agent/exit/pull'");
+    ok(cliMut !== cliSrc, '(x8) the patch applies');
+    const c10 = await cli(['pull', 'BOX', '/srv/slow.bin', 'slow-x8.bin'], ['--require', warp], MC.write('data/bin/vibespace-exit', cliMut, 'fetchpull'));
+    ok(c10.code === 1 && /fetch failed/.test(c10.err), 'CONTROL (x8): the pull through global fetch gives up at its 300 s headers deadline (here ×1000) — the verify r2 leg goes red', { code: c10.code, err: c10.err.slice(0, 300) });
+    for (const r of copiesCensus(MC.files, MC.dir, REPO, { minCopies: 1, label: 'mutant-copy (exit-transfer §8b): ' })) ok(r.pass, r.name, r.detail);
+  } finally { srv.close(); }
+});
+
+await section('§8c controls (patched copies of exit-proxy.js)', async () => {
+  const M8 = mutantCopies('exo8', REPO);
+  const src = fs.readFileSync(path.join(REPO, 'src/exit-proxy.js'), 'utf8');
+  const load = (tag, from, to) => { const m = src.replace(from, to); ok(m !== src, `(${tag}) the patch applies`); return M8.load('src/exit-proxy.js', m, tag).ExitProxyManager; };
+  // (x1) the per-window hash compare removed ⇒ the corrupted pull lands
+  const X1 = load('nohash', "if (r.sha256) { if (r.sha256 !== wh.digest('hex')) throw", "if (false) { if (r.sha256 !== wh.digest('hex')) throw");
+  const w1 = xworld({ Mgr: X1, hooks: { corrupt: 1 } }); w1.files.set('/srv/c.bin', { data: crypto8.randomBytes(MiB8) });
+  const r1 = await settle(w1.mgr.pull(w1.A, 'wa', 'BOX', { remote: '/srv/c.bin', local: path.join(w1.proj, 'c.bin') }));
+  ok(r1.v && fs.existsSync(path.join(w1.proj, 'c.bin')), 'CONTROL (x1): without the window hash compare a corrupted pull LANDS — §8 (c) goes red', r1.e && r1.e.message);
+  // (x2) the between-windows re-judge removed ⇒ a revoke mid-transfer does not stop it
+  const X2 = load('nostill', '          await stillOn();\n', '');
+  const w2 = xworld({ Mgr: X2, hooks: { read: async (n) => { if (n === 1) w2.recs[0].exit = { use: { mode: 'nobody' }, run: { mode: 'nobody', ask: false } }; } } }); w2.files.set('/srv/e.bin', { data: crypto8.randomBytes(20 * MiB8) });
+  const r2 = await settle(w2.mgr.pull(w2.A, 'wa', 'BOX', { remote: '/srv/e.bin', local: path.join(w2.proj, 'e.bin') }));
+  ok(r2.v && w2.reads.length === 3, 'CONTROL (x2): without the re-judge between windows the revoked transfer runs to the end — §8 (e) goes red', r2.e && r2.e.message);
+  // (x3) the local fence removed (its judge answers yes — asked at the verdict AND again where the bytes are written) ⇒ /proc is attempted (nothing can be written there): not local_path_refused
+  const X3 = load('nofence', "    if (v) return { ok: false, code: 'local_path_refused', error: words(v.error) };", "    if (false) return { ok: false, code: 'local_path_refused', error: words(v.error) };");
+  const w3 = xworld({ Mgr: X3 }); w3.files.set('/srv/i.bin', { data: Buffer.from('x') });
+  const r3 = await settle(w3.mgr.pull(w3.A, 'wa', 'BOX', { remote: '/srv/i.bin', local: '/proc/vs-exo-never' }));
+  ok(r3.e && r3.e.code === 'transfer_failed' && /\/proc\/vs-exo-never\.[0-9a-f]{8}\.vs-part/.test(r3.e.message), 'CONTROL (x3): without the fence the manager goes on to write the part file in /proc (refused only by the kernel) — the §8 (i) fence rows go red', r3.e && r3.e.message);
+  // (x4) the push capability gate removed ⇒ an old agent is asked an op it lacks
+  const X4 = load('nopushcap', "if (verb === 'push' && !caps.includes(E.PUSH_CAP))", "if (false)");
+  const w4 = xworld({ Mgr: X4, caps: ['run-shell'] });
+  async function* b4() { yield Buffer.from('abc'); }
+  const r4 = await settle(w4.mgr.push(w4.A, 'wa', 'BOX', { remote: '/srv/up.bin', local: '/p/up.bin', size: 3, source: b4() }));
+  ok(r4.e && r4.e.code !== 'device_agent_outdated', 'CONTROL (x4): without the gate the old agent is asked (a real one would hang) — §8 (l) goes red', r4.e && r4.e.code);
+  // (x5) the size-per-window check removed ⇒ a growing file lands
+  const X5 = load('nosize', 'if (Number(r.size) !== rf.size) throw', 'if (false) throw');
+  const w5 = xworld({ Mgr: X5, hooks: { size: (n, len) => (n === 2 ? len + 1 : len) } }); w5.files.set('/srv/f.bin', { data: crypto8.randomBytes(10 * MiB8) });
+  const r5 = await settle(w5.mgr.pull(w5.A, 'wa', 'BOX', { remote: '/srv/f.bin', local: path.join(w5.proj, 'f.bin') }));
+  ok(r5.v, 'CONTROL (x5): without the size check a file that changed between windows lands — §8 (f) goes red', r5.e && r5.e.message);
+  // (x6) fix r1 ①: the write-time judge removed ⇒ the folder moved away during the ask is re-made at its old name and the file lands in it
+  const X6 = load('nowherenow', '      const inPlace = (fd) => {\n', '      const inPlace = (fd) => { return;\n');
+  const w6 = xworld({ Mgr: X6, ask: true }); w6.files.set('/srv/n.bin', { data: crypto8.randomBytes(MiB8) });
+  const d6 = path.join(w6.proj, 'out'); fs.mkdirSync(d6);
+  const p6 = settle(w6.mgr.pull(w6.A, 'wa', 'BOX', { remote: '/srv/n.bin', local: path.join(d6, 'n.bin') }));
+  await new Promise((res) => setTimeout(res, 30));
+  fs.renameSync(d6, path.join(w6.proj, 'away'));
+  w6.mgr.answerAsk(w6.mgr.listAsks()[0].askId, { answer: 'allow', by: 'user' });
+  const r6 = await p6;
+  ok(r6.v && fs.existsSync(path.join(d6, 'n.bin')), 'CONTROL (x6): without the write-time judge the moved folder is re-made and the file lands in it — §8 (n) goes red', r6.e && r6.e.message);
+  // (x7) fix r1 ②: the one-pull-per-target check removed ⇒ a second pull into the target being written is not refused: it reads its file and writes
+  const X7 = load('nobusy', 'if (this._pullTargets.has(target)) throw', 'if (false) throw');
+  let go7; const gate7 = new Promise((res) => { go7 = res; }); const reading7 = new Set();
+  const w7 = xworld({ Mgr: X7, hooks: { read: async (n, p) => { reading7.add(p); if (p === '/srv/oa.bin') await gate7; } } });
+  w7.files.set('/srv/oa.bin', { data: crypto8.randomBytes(MiB8) }); w7.files.set('/srv/ob.bin', { data: crypto8.randomBytes(MiB8) });
+  const t7 = path.join(w7.proj, 'same.bin');
+  const pa7 = settle(w7.mgr.pull(w7.A, 'wa', 'BOX', { remote: '/srv/oa.bin', local: t7 }));
+  for (let i = 0; i < 200 && !reading7.has('/srv/oa.bin'); i++) await new Promise((res) => setTimeout(res, 5));
+  const rb7 = await settle(w7.mgr.pull(w7.A, 'wa', 'BOX', { remote: '/srv/ob.bin', local: t7 }));
+  go7(); await pa7;
+  ok(!(rb7.e && rb7.e.code === 'target_busy') && reading7.has('/srv/ob.bin'), 'CONTROL (x7): without the check the second pull runs into the target being written — §8 (o) goes red', rb7.e ? rb7.e.code : 'landed');
+  for (const r of copiesCensus(M8.files, M8.dir, REPO, { minCopies: 7, label: 'mutant-copy (exit-transfer §8): ' })) ok(r.pass, r.name, r.detail);
+});
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

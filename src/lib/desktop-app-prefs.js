@@ -13,7 +13,7 @@ import { t } from './i18n.js';
 import { fetchJson, showToast } from './utils.js';
 
 /** The per-app maps this loader holds. */
-export const APP_PREF_KEYS = Object.freeze(['desktopAppFrame', 'desktopAppScale']);
+export const APP_PREF_KEYS = Object.freeze(['desktopAppFrame', 'desktopAppScale', 'desktopAppSatellite']);
 const asMap = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? { ...v } : {});
 const okState = (st) => !!st && typeof st === 'object' && !Array.isArray(st) && !st.error;
 
@@ -107,6 +107,28 @@ export function createAppPrefs({ fetchJson: fj, toast, failDefault = () => 'Coul
     on: (fn) => { subs.add(fn); return () => subs.delete(fn); },
     save,
   };
+}
+
+// ── design 016 S2: WHERE AN APP'S SATELLITE WINDOW OPENS (user state `desktopAppSatellite[<app key>]` = {dx, dy}) ──
+export const SATELLITE_PREF_KEY = 'desktopAppSatellite';
+/** PURE: a satellite's top-left (layout px) — at the offset from its main window where the person last left one of this
+ *  app (`remembered` {dx, dy}), else BESIDE the main (its right, else its left; top edges aligned), else at the
+ *  workspace's right edge; the top-left always on the workspace (a window larger than it overhangs right / bottom). */
+export function satellitePlacement(main, size, ws, remembered = null, gap = 12) {
+  const w = Math.max(1, Number(size && size.w) || 1), h = Math.max(1, Number(size && size.h) || 1);
+  let x, y = main.y;
+  if (remembered && Number.isFinite(remembered.dx) && Number.isFinite(remembered.dy)) { x = main.x + remembered.dx; y = main.y + remembered.dy; }
+  else if (main.x + main.w + gap + w <= ws.w) x = main.x + main.w + gap;
+  else if (main.x - gap - w >= 0) x = main.x - gap - w;
+  else x = ws.w - w;
+  return { x: Math.round(Math.max(0, Math.min(x, ws.w - w))), y: Math.round(Math.max(0, Math.min(y, ws.h - h))) };
+}
+/** PURE: the map with this app's remembered offset set (or forgotten: `off` null). */
+export function setSatelliteOffset(map, key, off) {
+  const m = { ...(map && typeof map === 'object' ? map : {}) };
+  if (!key) return m;
+  if (off && Number.isFinite(off.dx) && Number.isFinite(off.dy)) m[key] = { dx: Math.round(off.dx), dy: Math.round(off.dy) }; else delete m[key];
+  return m;
 }
 
 // the page's ONE loader

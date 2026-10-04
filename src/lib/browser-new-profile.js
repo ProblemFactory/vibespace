@@ -33,7 +33,7 @@ const jsonPost = (body) => ({ method: 'POST', headers: { 'Content-Type': 'applic
  */
 export function openNewProfileDialog(app, { label = '', fromSession = null, onCreated = null, onDismissed = null } = {}) {
   const adopt = adoptFormOf(fromSession); // verify r1 (F7): the server's plan (the picker asked it), never the rung's guess
-  const st = { providers: [], install: null, machines: [{ hostId: 'local' }], hostRows: null, provider: 'chromium', host: null, busy: false, closed: false, created: false, handoff: false, builds: null, buildsFor: undefined, buildKey: 'default', buildHint: null };
+  const st = { providers: [], install: null, machines: [{ hostId: 'local' }], hostRows: null, provider: 'chromium', host: null, busy: false, closed: false, created: false, handoff: false, builds: { pending: true }, buildsFor: undefined, buildKey: 'default', buildHint: null };
   const names = nameHelpers(app);
   const sb = (app && app.sidebar) || {};
   const shell = createModalShell({ id: DIALOG_ID, title: adopt ? t('New persistent profile') : t('New profile'), dialogClass: 'bwho-dialog bnew-dialog', bodyClass: 'bwho-body bnew-body', escapeToClose: true,
@@ -211,6 +211,7 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
     if (adopt === 'keep') return;
     const show = st.provider === 'chromium';
     buildWrap.style.display = show ? '' : 'none';
+    buildWrap.setAttribute('aria-busy', st.builds && st.builds.pending ? 'true' : 'false'); // the list is asked, not answered yet
     if (!show) return;
     const rows = buildRows(st.builds, { choice: null, local: !st.host, machine: st.host || '', t, download: st.buildDownload || null });
     if (!rows.some((r) => r.key === st.buildKey && r.pickable)) st.buildKey = 'default';
@@ -247,6 +248,7 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
     const h = st.host || null;
     if (st.buildsFor === h) { drawBuilds(); return; }
     st.buildsFor = h;
+    st.builds = { pending: true }; st.buildHint = null; st.buildDownload = null; drawBuilds(); // never the last machine's list while this one's is asked
     const r = await fetchJson('/api/browser/builds' + (h ? `?host=${encodeURIComponent(h)}` : ''));
     if (st.closed || st.buildsFor !== h) return;
     st.builds = r && !r.error ? r.listing : (r && r.code ? { ok: false, code: r.code, error: r.error } : null);

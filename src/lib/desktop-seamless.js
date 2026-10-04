@@ -49,6 +49,11 @@ export function seamlessVerdict({ csd = false, setting = 'auto', userToggle = 'a
   if (chain) return { seamless: false, why: 'chain' };
   return { seamless: true, why: wantWhy };
 }
+/** A WINDOW PER TOP-LEVEL (design 016 S2): each VibeSpace window of an app folds by ITS X window's decorations — the main
+ *  window by the main's, a satellite by its own — under the same per-app choice, setting and pauses. */
+export function windowSeamless(meta, ctx = {}) {
+  return seamlessVerdict({ ...ctx, csd: isCsd(meta) });
+}
 /** A verdict that WANTED seamless but is held by a pause (the menu's "paused" line). */
 export const isPaused = (v) => !!v && !v.seamless && (v.why === 'phone' || v.why === 'disconnected' || v.why === 'lease' || v.why === 'chain');
 

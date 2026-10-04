@@ -1433,7 +1433,7 @@ const CENSUS = [
   ['browser-new-profile.js', 'input', 'text+control', 'New profile…: the name, the CDP port and a chrome file\'s path (text); the provider / machine / build radios (control) — lane browser-admin 1, classified at verify r2; its who radios became the one picker at the 2.369.202 integration'],
   ['browser-new-profile.js', 'inputmode', 'text', 'New profile…: the CDP port box (`inputMode=numeric` — the phone keyboard\'s hint on that text box)'],
   ['browser-replay-window.js', 'tabindex', 'widget', 'the replay window (← → Home End Space)'],
-  ['browser-trace-view.js', 'input', 'control', 'the Agent browser panel\'s record checkbox'],
+  ['browser-trace-view.js', 'input', 'control', 'the actions pane\'s "show page-size changes" checkbox (fitsToggle; the panel\'s record switches became ⋯ menu check rows — design 015)'],
   // browser-who-dialog.js's "Who can use it" radios (control) left with lane everyone-principal (one picker; its search box is principal-picker.js's)
   ['browser-window.js', 'input', 'text', 'the Web view\'s URL bar'],
   ['browser-window.js', 'iframe', 'frame', 'the Web view\'s page'],

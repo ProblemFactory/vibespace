@@ -992,7 +992,10 @@ const geomDoorsPin2 = (W, TG, DA, L) => [
   /this\.witnessGeometry\(w\.id\);[^\n]*\n\s*this\._positionToCell\(w, cellIdx, true\);/.test(W),
   /this\.witnessGeometry\(win\.id\);[^\n]*\n\s*this\._positionToCell\(win, cellIdx, true\);/.test(W),
   /this\.witnessGeometry\(winId\);[^\n]*\n\s*let snapped = false;/.test(TG),
-  /if \(act\) app\.wm\.witnessGeometry\?\.\(winInfo\.id\);[^\n]*\n\s*if \(act === 'maximize' \|\| act === 'restore'\) app\.wm\.toggleMaximize\(winInfo\.id\);/.test(DA),
+  // every act-door of desktop-app-window.js (the main window's onAppState, a satellite's onState — 2.369.205) stamps first
+  ((DA.match(/if \(act === 'maximize' \|\| act === 'restore'\) app\.wm\.toggleMaximize\(winInfo\.id\);/g) || []).length >= 1
+    && (DA.match(/if \(act\) app\.wm\.witnessGeometry\?\.\(winInfo\.id\);[^\n]*\n\s*if \(act === 'maximize' \|\| act === 'restore'\) app\.wm\.toggleMaximize\(winInfo\.id\);/g) || []).length
+      === (DA.match(/if \(act === 'maximize' \|\| act === 'restore'\) app\.wm\.toggleMaximize\(winInfo\.id\);/g) || []).length),
   /this\.app\.wm\.witnessGeometry\?\.\(winInfo\.id\);[^\n]*\n\s*\/\/ Restore from minimized if preset says it should be visible/.test(L),
   /this\.app\.wm\.witnessGeometry\?\.\(id\);[^\n]*\n\s*this\.app\.wm\.minimize\(id\);/.test(L),
 ];
@@ -1362,6 +1365,7 @@ console.log('— §7 negative controls (patched copies, scripts/mutant-copy.mjs)
       ['window.js snapActiveToCell', geomDoorsPin2(WSRC.replace("    this.witnessGeometry(win.id); // command mode's digits", "    // command mode's digits"), TGSRC, DASRC, LSRC)],
       ['tab-group.js tear-off', geomDoorsPin2(WSRC, TGSRC.replace("      this.witnessGeometry(winId); // the tear-off's drop", "      // the tear-off's drop"), DASRC, LSRC)],
       ['desktop-app-window.js onAppState', geomDoorsPin2(WSRC, TGSRC, DASRC.replace("    if (act) app.wm.witnessGeometry?.(winInfo.id);", "    //"), LSRC)],
+      ['desktop-app-window.js a satellite\'s onState (2.369.205)', geomDoorsPin2(WSRC, TGSRC, DASRC.replace("      if (act) app.wm.witnessGeometry?.(winInfo.id);\n      if (act === 'maximize'", "      //\n      if (act === 'maximize'"), LSRC)],
       ['layout.js loadPreset', geomDoorsPin2(WSRC, TGSRC, DASRC, LSRC.replace("      this.app.wm.witnessGeometry?.(winInfo.id); // a named preset", "      // a named preset"))],
     ];
     for (const [name, d] of cases) ok(!d.every(Boolean), `control door-unwitnessed (r5 ③): ${name} without its stamp is RED by the doors pin`, J(d));

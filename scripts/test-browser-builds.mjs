@@ -415,6 +415,10 @@ console.log('— ④ the client words (en / zh / ja) + wiring');
     'Change build… rows: the default first; every build a row; an older one / one that cannot run greyed WITH why; a chosen build gone from the list still shown (what it was set to); a path row on this computer', rows.map((r) => [r.key, r.pickable, r.note]));
   const unsup = W.buildRows({ ok: false, code: 'builds_unsupported' }, { machine: 'mac', local: false, t });
   ok(unsup.length === 2 && unsup[0].pickable && /can't list Chrome builds/.test(unsup[1].label) && !unsup.some((r) => r.key === 'path'), 'a machine whose agent cannot list builds: the default stays, one sentence says why (no path row off this computer)');
+  // lane mirror-green-ui (2.369.205): a list ASKED and not yet answered is said as waiting — never "could not be read"
+  const pend = W.buildRows({ pending: true }, { t });
+  ok(pend[0].key === 'default' && pend.some((r) => r.kind === 'note' && /^Reading the list of Chrome builds/.test(r.label)) && !pend.some((r) => /could not be read/.test(r.label || '')) && !pend.some((r) => r.kind === 'build') && pend.some((r) => r.key === 'path'),
+    'a list asked and not yet answered: the default, ONE "Reading the list…" note (never "could not be read"), no build rows yet', pend.map((r) => [r.key, r.label]));
   ok(JSON.stringify(W.choiceOfRow(byKey['v:152.0.1.2'])) === JSON.stringify({ kind: 'build', version: '152.0.1.2' }) && W.choiceOfRow(byKey.path, 'rel') === null && W.choiceOfRow(byKey.path, ' /opt/c/chrome ').path === '/opt/c/chrome' && W.choiceOfRow(byKey['v:146.0.7680.153']) === null, 'a picked row → the choice sent (an unpickable row / a relative path send nothing)');
   ok(/2 conversation\(s\)/.test(W.changeSentences({ live: true, holders: 2 }, t)[0].text) && /next start/.test(W.changeSentences({ live: false }, t)[0].text), 'the sentence above the button: a running browser restarts and N conversations are told; a stopped one changes at its next start');
   ok(/agent-browser install/.test(W.installHint({ command: 'agent-browser install', local: false }, t)) && W.installHint({ command: '' }, t) === null, 'how to add a build: the command, where to run it (installing is the user\'s act, held for a later lane)');
@@ -423,7 +427,7 @@ console.log('— ④ the client words (en / zh / ja) + wiring');
   const said = new Set(); const rec = (k) => { said.add(k); return k; };
   for (const o of [{ choice: { kind: 'build', version: '1.2.3.4' } }, { choice: null }, { choice: { kind: 'path', path: '/a' } }, { choice: null, live: true, running: '1.2.3' }, { choice: { kind: 'build', version: '1.2.3.4' }, missing: {} }]) W.cardBuildLine(o, rec);
   W.buildRows({ ok: true, builds: [{ version: '152.0.1.2', usable: true }, { version: '146.0.1.1', usable: true }, { version: '139.0.1.1', usable: false, why: 'not-executable' }, { version: '138.0.1.1', usable: false, why: 'missing' }] }, { choice: { kind: 'build', version: '151.0.1.1' }, lastChromiumMajor: 151, t: rec });
-  W.buildRows({ ok: true, builds: [] }, { t: rec }); W.buildRows({ ok: false, code: 'builds_unsupported' }, { t: rec }); W.buildRows(null, { t: rec });
+  W.buildRows({ ok: true, builds: [] }, { t: rec }); W.buildRows({ ok: false, code: 'builds_unsupported' }, { t: rec }); W.buildRows(null, { t: rec }); W.buildRows({ pending: true }, { t: rec });
   W.changeSentences({ live: true, holders: 1 }, rec); W.changeSentences({ live: true, holders: 0 }, rec); W.changeSentences({ live: false }, rec);
   W.installHint({ command: 'x', local: true }, rec); W.installHint({ command: 'x', local: false }, rec);
   W.changedWords({ restarted: false }, rec); W.changedWords({ restarted: true, told: 1 }, rec); W.changedWords({ restarted: true, told: 0 }, rec);
@@ -431,7 +435,7 @@ console.log('— ④ the client words (en / zh / ja) + wiring');
   const noZh = [...said].filter((k) => !(k in zh)), noJa = [...said].filter((k) => !(k in ja));
   ok(said.size > 25 && !noZh.length && !noJa.length, `every sentence the build model says (${said.size}) has a zh and a ja entry`, { noZh, noJa });
   const tv = read('src/lib/browser-trace-view.js');
-  ok(/cardBuildLine\(\{ provider: r\.provider, choice: r\.browser, running: runningBuildOf\(r\.id\), missing: r\.buildMissing, live: !!r\.live \}, t\)/.test(tv) && /t\('Change build…'\)[\s\S]{0,300}openBuildDialog\(app, r\.id,/.test(tv) && /runningBuildOf\(r\.id\)\]\); \};/.test(tv),
+  ok(/cardBuildLine\(\{ provider: r\.provider, choice: r\.browser, running: runningBuildOf\(r\.id\), missing: r\.buildMissing, live: !!r\.live \}, t\)/.test(tv) && /build: \(r\) => openBuildDialog\(app, r\.id,/.test(tv) && /id: 'build', label: t\('Change build…'\)/.test(read('src/lib/browser-panel-model.js')) /* design 015: the ⋯ menu's act */ && /runningBuildOf\(r\.id\)\]\); \};/.test(tv),
     'the Agent browser panel row: the build line (its fact in the row\'s signature) + Change build… opening THE dialog');
   const sw = read('src/lib/browser-switcher.js');
   ok(/st\.view\.build \? cardBuildLine\(/.test(sw) && /a\.kind === 'build'\) \{ close\(\); openBuildDialog\(app, profileId,/.test(sw), 'the switch dialog gains the build row and its ONE act');

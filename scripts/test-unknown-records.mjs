@@ -14,6 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -289,6 +290,100 @@ console.log('§9 the CLI 2.1.280 pass (2026-09-22): records the corpus PROVES ar
   const n = createMessageManager('claude', 'test-unknown-280-n');
   n.convertHistory([{ ...env, uuid: 'nx', type: 'system', subtype: 'scheduled_task_fired', content: 'x' }, { type: 'frame-links', sessionId: 's' }]);
   ok('NEGATIVE CONTROL: an undeclared neighbour (system/scheduled_task_fired, type frame-links) is still the Unknown-event card, one each', cards(n).length === 2 && cards(n).map((m) => m.content[0].name).join(',') === 'scheduled_task_fired,frame-links', cards(n).map((m) => m.content[0].name));
+}
+
+console.log('§10 lane classifier-stop-card: system/informational is HANDLED on both carriers (a dim card, the CLI\'s words) — the SAFETY STOP is ONE worded card and its model-only nudge is never a "You" bubble');
+{
+  const SS = require(path.join(REPO, 'src/safety-stop.js'));
+  const NOTICE = "Opus 5.5's safeguards stopped the response above · continuing once with that noted"; // verbatim, a 2.1.288 lane transcript
+  const NUDGE = SS.SAFETY_STOP_ROWS.find((r) => r.id === 'err').text;
+  const NUDGE_RUN = SS.SAFETY_STOP_ROWS.find((r) => r.id === 't9r').text;
+  const SID = 'e2e00000-0000-4000-8000-00000000c1a5'; // fixture-guard's synthetic id family + a /tmp/vs- cwd
+  const env = (uuid, extra) => ({ parentUuid: 'p-' + uuid, isSidechain: false, timestamp: '2026-10-03T11:50:03.912Z', uuid, userType: 'external', entrypoint: 'sdk-cli', cwd: '/tmp/vs-classifier-stop', sessionId: SID, version: '2.1.288', gitBranch: 'HEAD', ...extra });
+  const txAsk = (u) => env(u, { type: 'user', message: { role: 'user', content: 'write the tests' }, promptSource: 'sdk' });
+  const txNotice = (u, content = NOTICE) => env(u, { type: 'system', subtype: 'informational', content, isMeta: false, level: 'notice' });
+  const txNudge = (u, text = NUDGE) => env(u, { promptId: 'pr-' + u, type: 'user', message: { role: 'user', content: text }, isMeta: true, turnCompanion: true });
+  const stAsk = (u) => ({ type: 'user', message: { role: 'user', content: 'write the tests' }, promptSource: 'sdk', uuid: u, session_id: SID });
+  const stNotice = (u, content = NOTICE, level = 'notice') => ({ type: 'system', subtype: 'informational', content, level, uuid: u, session_id: SID });
+  const stNudge = (u, text = NUDGE) => ({ type: 'user', message: { role: 'user', content: text }, parent_tool_use_id: null, session_id: SID, uuid: u, timestamp: '2026-10-03T11:50:03.912Z', isSynthetic: true });
+  const stops = (mm) => mm.messages.filter((m) => m.noticeKind === 'safety-stop');
+  const infos = (mm) => mm.messages.filter((m) => m.noticeKind === 'harness-informational');
+  const users = (mm) => mm.messages.filter((m) => m.role === 'user');
+  const drift = (mm) => mm.messages.filter((m) => m.noticeKind === 'unknown-fields');
+  const whole = (b) => b && b.notice === NOTICE && b.model === 'Opus 5.5' && b.noticeRow === 'notice' && b.nudge === NUDGE && b.nudgeRow === 'err';
+
+  // the census (PURE)
+  const n = SS.safetyStopOf(NOTICE), f = SS.safetyStopOf(NOTICE.replace('Opus 5.5', 'Fable 5.1'));
+  ok('census: the notice names its model (Opus 5.5 / Fable 5.1 — the two the corpus carries), both nudge variants are nudges (t9r = err + the Interrupted exception, the more specific row first)', n && n.kind === 'notice' && n.model === 'Opus 5.5' && f.model === 'Fable 5.1' && SS.safetyStopOf(NUDGE).row.id === 'err' && SS.safetyStopOf(NUDGE_RUN).row.id === 't9r' && SS.safetyStopOf(NUDGE_RUN).kind === 'nudge');
+  ok('census: a near-miss line, a bare suffix (no model), a multi-line or 81-char "model", null / a number ⇒ no stop', [NOTICE.replace('stopped', 'flagged'), SS.SAFETY_STOP_ROWS[0].text, 'a\nb' + SS.SAFETY_STOP_ROWS[0].text, 'm'.repeat(81) + SS.SAFETY_STOP_ROWS[0].text, null, 42, 'Your response above was stopped'].every((x) => SS.safetyStopOf(x) === null));
+  ok('census: every row is dated (since ≤2.1.280, measured on SAFETY_STOP_CLI_VERSION 2.1.288) and says where the binary writes it', SS.SAFETY_STOP_CLI_VERSION === '2.1.288' && SS.SAFETY_STOP_ROWS.length === 3 && SS.SAFETY_STOP_ROWS.every((r) => r.since === '≤2.1.280' && r.evidence.length > 30 && Object.isFrozen(r)));
+
+  // TRANSCRIPT carrier (history): the CLI's own pair, verbatim shapes
+  const h = createMessageManager('claude', 'test-stop-history');
+  h.convertHistory([txAsk('u0'), txNotice('u1'), txNudge('u2')]);
+  ok('history: the pair is ONE safety-stop card carrying the model, the notice, the nudge and both census rows', stops(h).length === 1 && whole(stops(h)[0].content[0]), h.messages.map((m) => m.noticeKind || m.role));
+  ok('history: the nudge is NOT a user message (only the real turn is) and is not a turn; no red card, no drift card', users(h).length === 1 && h.turnIndex === 1 && cards(h).length === 0 && drift(h).length === 0, { users: users(h).length, turn: h.turnIndex });
+
+  // STREAM carrier (live): the re-emitted notice + the isSynthetic nudge
+  const s1 = createMessageManager('claude', 'test-stop-live');
+  const ops = []; s1.listeners.push((e) => ops.push(e));
+  [stAsk('a0'), stNotice('a1'), stNudge('a2')].forEach((r) => s1.processLive(r));
+  const sc = stops(s1)[0];
+  ok('live: ONE card, created by the notice and EDITED by the nudge (an open window sees both halves); nothing else', stops(s1).length === 1 && whole(sc.content[0]) && ops.filter((o) => (o.op === 'create' && (o.message || o.msg)?.id === sc.id) || (o.op === 'edit' && o.id === sc.id)).map((o) => o.op).join() === 'create,edit' && users(s1).length === 1 && cards(s1).length === 0 && drift(s1).length === 0, ops.map((o) => o.op));
+  const s2 = createMessageManager('claude', 'test-stop-live-rev');
+  [stAsk('b0'), stNudge('b1'), stNotice('b2')].forEach((r) => s2.processLive(r));
+  ok('live, the nudge FIRST: still ONE card, the notice merges in (model + line)', stops(s2).length === 1 && whole(stops(s2)[0].content[0]) && users(s2).length === 1);
+  const s3 = createMessageManager('claude', 'test-stop-live-run');
+  [stAsk('c0'), stNotice('c1'), stNudge('c2', NUDGE_RUN)].forEach((r) => s3.processLive(r));
+  ok('live: the Interrupted-exception nudge (t9r) folds the same way', stops(s3).length === 1 && stops(s3)[0].content[0].nudgeRow === 't9r' && users(s3).length === 1);
+  const s4 = createMessageManager('claude', 'test-stop-two');
+  s4.convertHistory([txAsk('d0'), txNotice('d1'), txNudge('d2'), txAsk('d3'), txNotice('d4'), txNudge('d5')]);
+  ok('two stops in two turns ⇒ two whole cards (a half never pairs across a turn)', stops(s4).length === 2 && stops(s4).every((m) => whole(m.content[0])) && users(s4).length === 2);
+  const s5 = createMessageManager('claude', 'test-stop-typed');
+  s5.processLive({ ...stAsk('e0'), message: { role: 'user', content: NUDGE } });
+  ok('a user who TYPES the nudge sentence (promptSource, no meta stamp) keeps their own message', stops(s5).length === 0 && users(s5).length === 1 && users(s5)[0].typed === true);
+
+  // the GENERIC banner: any other informational line
+  const g = createMessageManager('claude', 'test-info-live');
+  g.processLive(stNotice('f1', 'PreToolUse:Bash hook says: blocked <b>x</b>', 'warning'));
+  g.processLive(stNotice('f2', "Opus 5.5's safeguards flagged this message", 'loud'));
+  g.processLive({ type: 'system', subtype: 'informational', content: '   ', level: 'notice', uuid: 'f3', session_id: SID });
+  ok('live: an unrecognized line is the dim harness-informational card — the CLI text verbatim, its level kept (warning), an undeclared level read as notice, an empty line no card; never the red card, never a stop', infos(g).length === 2 && infos(g)[0].content[0].text === 'PreToolUse:Bash hook says: blocked <b>x</b>' && infos(g)[0].content[0].level === 'warning' && infos(g)[1].content[0].level === 'notice' && stops(g).length === 0 && cards(g).length === 0 && drift(g).length === 0, g.messages.map((m) => m.noticeKind));
+  const gh = createMessageManager('claude', 'test-info-history');
+  gh.convertHistory([env('g1', { type: 'system', subtype: 'informational', content: 'Memory is still paused from earlier', isMeta: false, level: 'info', toolUseID: 'toolu_x', preventContinuation: false, highlight: [0, 6] })]);
+  ok('history: the transcript row (envelope level + isMeta, toolUseID / preventContinuation / highlight) is the same card, no drift card', infos(gh).length === 1 && infos(gh)[0].content[0].level === 'info' && drift(gh).length === 0 && cards(gh).length === 0, gh.messages.map((m) => m.noticeKind));
+  const gd = createMessageManager('claude', 'test-info-drift');
+  gd.convertHistory([env('g2', { type: 'system', subtype: 'informational', content: 'x', isMeta: false, level: 'notice', brandNewField: 1 })]);
+  ok('…the transcript shape is LIVE: a row that grew a field is a drift card naming it (negative control)', drift(gd).length === 1 && drift(gd)[0].content[0].fields.join() === 'brandNewField', drift(gd).map((m) => m.content[0]));
+  ok('record-shape: informational LEFT declared-upstream-unseen (now seen + handled) and has a transcript row', !('informational' in require(path.join(REPO, 'src/record-shape.js')).DECLARED_UPSTREAM_UNSEEN.system) && !!require(path.join(REPO, 'src/record-shape.js')).SHAPES['claude:transcript:system/informational'] && MM.HANDLED_SYSTEM_SUBTYPES.has('informational'));
+
+  // the renderer + its words
+  const cr = read('src/lib/chat-renderers.js');
+  const br = (kind) => { const i = cr.indexOf(`noticeKind === '${kind}'`); return i >= 0 ? cr.slice(i, i + 1600) : ''; };
+  ok('renderer: the banner escapes the CLI text and titles the level through t(); the stop card escapes the model and the CLI lines (in a details expander) and words its head through t()', /escHtml\(b\.text \|\| ''\)/.test(br('harness-informational')) && /t\('Harness message · \{level\}'/.test(br('harness-informational')) && /escHtml\(b\.model\)/.test(br('safety-stop')) && /<details|createElement\('details'\)/.test(br('safety-stop')) && /escHtml\(cli\)/.test(br('safety-stop')) && /t\('A safety check stopped the reply above — the rest was withheld and the agent was told not to repeat it'\)/.test(br('safety-stop')));
+  const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
+  ok('zh / ja carry both new keys (the zh head is the owner\'s wording)', zh.includes('"A safety check stopped the reply above — the rest was withheld and the agent was told not to repeat it": "安全检查拦下了上面这条回复——其余内容已被扣下，agent 已被告知不要重复"') && /"Harness message · \{level\}": "/.test(zh) && /"A safety check stopped the reply above[^"]*": "安全チェック/.test(ja) && /"Harness message · \{level\}": "/.test(ja));
+
+  // PATCHED-COPY CONTROLS: each rule removed reproduces what the owner saw
+  const M = mutantCopies('stop-card', REPO);
+  const mmSrc = read('src/message-manager.js');
+  const handled = "  'informational',";
+  const branch = "    if (raw.subtype === 'informational' && typeof raw.content === 'string' && raw.content.trim()) {";
+  const fold = "        if (nudge && nudge.kind === 'nudge') {";
+  ok('the three patch sites exist (a control is meaningful only if its line does)', mmSrc.includes(handled) && mmSrc.includes(branch) && mmSrc.includes(fold));
+  const live = (MMx, recs) => { const x = new MMx.MessageManager('test-stop-ctl'); recs.forEach((r) => x.processLive(r)); return x; };
+  const hist = (MMx, recs) => { const x = new MMx.MessageManager('test-stop-ctl-h'); x.convertHistory(recs); return x; };
+  const noHandle = require(M.write('src/message-manager.js', mmSrc.replace(handled, '').replace(branch, '    if (false) {'), 'no-handler'));
+  const a = live(noHandle, [stAsk('m0'), stNotice('m1')]);
+  ok('CONTROL: without the handler the notice is the red Unknown-event card again (the owner\'s report)', cards(a).length === 1 && cards(a)[0].content[0].name === 'informational' && stops(a).length === 0, a.messages.map((m) => m.noticeKind));
+  const noFold = require(M.write('src/message-manager.js', mmSrc.replace(fold, '        if (false) {'), 'no-fold'));
+  const b = hist(noFold, [txAsk('n0'), txNotice('n1'), txNudge('n2')]);
+  ok('CONTROL: without the fold the history nudge is a user message ("You") and a second turn', users(b).length === 2 && b.turnIndex === 2 && users(b)[1].typed !== true, { users: users(b).length, turn: b.turnIndex });
+  const ssCopy = M.write('src/safety-stop.js', read('src/safety-stop.js').replace("'s safeguards stopped the response above · continuing once with that noted\", '≤2.1.280'", "'s safeguards stopped the response above\", '≤2.1.280'"), 'row-drift');
+  const rowDrift = require(M.write('src/message-manager.js', mmSrc.replace("require('./safety-stop.js')", `require(${JSON.stringify(ssCopy)})`), 'on-row-drift'));
+  const c = live(rowDrift, [stAsk('o0'), stNotice('o1')]);
+  ok('CONTROL: with the census row mis-spelled the notice is the generic banner, not the stop card (the TABLE decides)', infos(c).length === 1 && stops(c).length === 0 && cards(c).length === 0, c.messages.map((m) => m.noticeKind));
+  ok('the copies live outside the tree', M.files.length === 4 && M.files.every((x) => !x.startsWith(REPO)));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

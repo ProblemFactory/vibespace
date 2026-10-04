@@ -91,6 +91,37 @@ const FS_ACTIONS = {
     return { bytes, entries, truncated };
   },
   ping: () => ({ ok: true }),
+  // lane exit-transfer (`fs-write-stream`): an agent's PUSH lands in `<path>.vs-part` — made NEW ('wx': a stale part of a
+  // dead transfer is removed first, and an exclusive create never follows a link planted at that name) —, is written in
+  // place by offset, and becomes `<path>` only after the hub's byte count and sha256 matched (`part-commit`: fsync, the
+  // size, then ONE rename). An existing destination is replaced only when the hub says `overwrite`; a folder never.
+  'part-open': (m) => {
+    const f = require('fs'), pt = require('path');
+    let st = null; try { st = f.statSync(m.to); } catch { }
+    if (st && st.isDirectory()) throw Object.assign(new Error('is a folder: ' + m.to), { code: 'EISDIR' });
+    if (st && !st.isFile()) throw Object.assign(new Error('not a regular file: ' + m.to), { code: 'ENOTFILE' });
+    if (st && !m.overwrite) throw Object.assign(new Error('already exists: ' + m.to), { code: 'EEXIST' });
+    f.mkdirSync(pt.dirname(m.path), { recursive: true });
+    f.rmSync(m.path, { force: true });
+    f.closeSync(f.openSync(m.path, 'wx'));
+    return { ok: true };
+  },
+  'part-write': (m) => {
+    const f = require('fs');
+    const fd = f.openSync(m.path, 'r+');
+    try { const b = m.data; let o = 0; while (o < b.length) o += f.writeSync(fd, b, o, b.length - o, Number(m.pos) + o); } finally { f.closeSync(fd); }
+    return { ok: true };
+  },
+  'part-commit': (m) => {
+    const f = require('fs');
+    const fd = f.openSync(m.path, 'r+');
+    let size = 0;
+    try { f.fsyncSync(fd); size = f.fstatSync(fd).size; } finally { f.closeSync(fd); }
+    if (size !== Number(m.size)) throw Object.assign(new Error(`the part holds ${size} bytes, ${m.size} were sent`), { code: 'ESIZE' });
+    if (!m.overwrite && f.existsSync(m.to)) throw Object.assign(new Error('already exists: ' + m.to), { code: 'EEXIST' });
+    f.renameSync(m.path, m.to);
+    return { ok: true, size };
+  },
 };
 {
   let wt = null; try { wt = require('worker_threads'); } catch { }
@@ -1350,6 +1381,93 @@ function serveConnection(sock) {
     list.push(res); writableWaiters.set(chan, list);
     setTimeout(res, 60000); // dead-link belt: never wedge the handler forever
   });
+  // ── lane exit-transfer (`fs-write-stream`): an agent's PUSH. The hub's bytes arrive on a byte channel, are hashed as
+  // they come and written into `<path>.vs-part` by a WORKER in 1 MiB steps (R2 — a hung disk starves a worker, never this
+  // loop); the channel is credited back only as fast as the disk takes them (memory ≤ two steps + the window). `end`
+  // is COUNT-GATED — it rides the credit-exempt control channel and can overtake data still queued hub-side (the
+  // read-range contract, inverted) — and commits by rename only when the count and the sha256 match; a mismatch, an
+  // abort, 60 s without a byte or the link's death remove the part. Never a shell.
+  const writeStreams = new Map(); // chan → { path, part, size, overwrite, received, hash, buf, bufLen, pos, flushing, owed, failed, idle, waiters }
+  const WS_STEP = 1024 * 1024, WS_IDLE_MS = 60000;
+  const wsWake = (w) => { for (const f of w.waiters.splice(0)) { try { f(); } catch { } } };
+  const wsDrop = (chan, why) => {
+    const w = writeStreams.get(chan);
+    if (!w) return;
+    writeStreams.delete(chan); clearTimeout(w.idle);
+    w.failed = w.failed || why; wsWake(w);
+    runFs('rm', { path: w.part }, 12000).catch(() => { });
+  };
+  const wsIdle = (chan) => {
+    const w = writeStreams.get(chan);
+    if (!w) return;
+    clearTimeout(w.idle);
+    w.idle = setTimeout(() => { log(`write-stream ${w.path}: no bytes for ${WS_IDLE_MS / 1000} s — part removed`); wsDrop(chan, 'stalled'); }, WS_IDLE_MS);
+    w.idle.unref?.();
+  };
+  const wsFlush = (chan) => {
+    const w = writeStreams.get(chan);
+    if (!w || w.flushing || !w.bufLen || w.failed) return;
+    const data = Buffer.concat(w.buf, w.bufLen), pos = w.pos;
+    w.buf = []; w.bufLen = 0; w.pos += data.length;
+    w.flushing = runFs('part-write', { path: w.part, pos, data }, 15000).then(() => {
+      w.flushing = null;
+      if (w.owed) { const n = w.owed; w.owed = 0; try { mux.credit(chan, n); } catch { } }
+      wsWake(w);
+      if (w.bufLen >= WS_STEP) wsFlush(chan);
+    }, (e) => { w.flushing = null; w.failed = w.failed || `the device could not write the file (${e.message})`; wsWake(w); });
+  };
+  const wsData = (chan, buf) => {
+    const w = writeStreams.get(chan);
+    if (!w) return false;
+    if (!w.failed) {
+      w.received += buf.length;
+      if (w.received > w.size) w.failed = `more bytes than the ${w.size} announced`;
+    }
+    if (w.failed) { mux.credit(chan, buf.length); wsWake(w); return true; } // drained and dropped: the end answers the failure
+    w.hash.update(buf); w.buf.push(buf); w.bufLen += buf.length;
+    // credit now — unless a write is in flight AND a whole step already waits: then once the disk took it (bounded memory)
+    if (w.flushing && w.bufLen >= WS_STEP) w.owed += buf.length; else mux.credit(chan, buf.length);
+    if (w.bufLen >= WS_STEP) wsFlush(chan);
+    wsIdle(chan); wsWake(w);
+    return true;
+  };
+  async function writeStreamOp(msg, p, rid) {
+    const chan = msg.chan;
+    if (msg.step === 'open') {
+      if (writeStreams.has(chan)) throw new Error('channel busy');
+      for (const x of writeStreams.values()) if (x.path === p) throw new Error('another transfer is writing ' + p);
+      const size = Number(msg.size);
+      if (!Number.isSafeInteger(size) || size < 0) throw new Error('size required');
+      const part = p + '.vs-part';
+      await runFs('part-open', { path: part, to: p, overwrite: !!msg.overwrite }, 12000);
+      writeStreams.set(chan, { path: p, part, size, overwrite: !!msg.overwrite, received: 0, hash: require('crypto').createHash('sha256'), buf: [], bufLen: 0, pos: 0, flushing: null, owed: 0, failed: null, idle: null, waiters: [] });
+      wsIdle(chan);
+      mux.control({ op: 'fs-result', id: rid, ready: true, part });
+      return;
+    }
+    const w = writeStreams.get(chan);
+    if (msg.step === 'abort') { if (w) wsDrop(chan, 'aborted'); mux.control({ op: 'fs-result', id: rid, ok: true, aborted: true }); return; }
+    if (msg.step !== 'end') throw new Error('unknown write-stream step');
+    if (!w || w.path !== p) throw new Error('no such transfer (it stalled or the link dropped) — nothing was kept');
+    const sent = Number(msg.sent), t0 = Date.now();
+    while (!w.failed && w.received < sent) {   // COUNT-GATED: the last data frames may still be on their way
+      if (Date.now() - t0 > 30000) { w.failed = `${w.received} of ${sent} bytes arrived`; break; }
+      await new Promise((r) => { w.waiters.push(r); setTimeout(r, 1000).unref?.(); });
+    }
+    while (!w.failed && (w.flushing || w.bufLen)) { if (w.flushing) await w.flushing; else wsFlush(chan); }
+    const digest = w.hash.digest('hex');
+    const why = w.failed || (w.received !== sent || sent !== w.size ? `${w.received} bytes arrived, ${w.size} were announced and ${sent} sent` : null)
+      || (typeof msg.sha256 === 'string' && msg.sha256 !== digest ? 'hash_mismatch' : null);
+    if (why) {
+      wsDrop(chan, why);
+      throw new Error(why === 'hash_mismatch' ? 'hash_mismatch: the bytes that arrived do not match the sha256 that was sent — the part was removed' : `${why} — the part was removed`);
+    }
+    writeStreams.delete(chan); clearTimeout(w.idle);
+    let r;
+    try { r = await runFs('part-commit', { path: w.part, to: p, size: w.size, overwrite: w.overwrite }, 60000); }
+    catch (e) { runFs('rm', { path: w.part }, 12000).catch(() => { }); throw e; }
+    mux.control({ op: 'fs-result', id: rid, ok: true, size: r.size, sha256: digest });
+  }
   const mux = new Mux(sock, {
     onControl(msg) {
       if (msg.op === 'hello') {
@@ -1370,7 +1488,7 @@ function serveConnection(sock) {
           // per-op capability gating (three-tier design): consumers check the
           // capability, NEVER parse daemonVersion — unknown ops on an old
           // daemon get no reply and hang the request until its timeout
-          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo', 'session-events', 'proc-list', 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'desktop-serve', 'dial-status', 'run-shell', 'app-install', 'fs-portable'],
+          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo', 'session-events', 'proc-list', 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'desktop-serve', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream'],
         }));
         return;
       }
@@ -1426,6 +1544,9 @@ function serveConnection(sock) {
               const want = Math.max(0, Math.min(Number(msg.len) || 0, size - start0));
               mux.control({ op: 'fs-result', id: rid, size, sending: want });
               let pos = start0, sent = 0;
+              // lane exit-transfer: `sha256: true` ⇒ fs-done carries the hash of the bytes SENT (a pull compares it with what
+              // arrived); an older daemon ignores the flag and the hub says "size verified"
+              const hash = msg.sha256 ? require('crypto').createHash('sha256') : null;
               const WCHUNK = 4 * 1024 * 1024, CHUNK = 65536;
               while (pos < start0 + want) {
                 const n = Math.min(WCHUNK, start0 + want - pos);
@@ -1434,6 +1555,7 @@ function serveConnection(sock) {
                 if (!buf.length) break;
                 for (let o = 0; o < buf.length; o += CHUNK) {
                   const piece = buf.subarray(o, Math.min(o + CHUNK, buf.length));
+                  if (hash) hash.update(piece);
                   const ok = mux.data(msg.chan, piece);
                   sent += piece.length;
                   if (!ok) await waitWritable(msg.chan);
@@ -1442,7 +1564,9 @@ function serveConnection(sock) {
                 pos += buf.length;
                 if (buf.length < n) break; // EOF shrank under us
               }
-              mux.control({ op: 'fs-done', id: rid, chan: msg.chan, sent });
+              mux.control({ op: 'fs-done', id: rid, chan: msg.chan, sent, ...(hash ? { sha256: hash.digest('hex') } : {}) });
+            } else if (msg.action === 'write-stream') {
+              await writeStreamOp(msg, p, rid); // lane exit-transfer: an agent's push (open / end / abort on one channel)
             } else if (FS_ACTIONS[msg.action]) {
               const slow = msg.action === 'copy' || msg.action === 'move' ? 120000 : msg.action === 'du' ? 60000 : 12000; // a folder copy / walk outlives a stat
               const r = await runFs(msg.action, { path: p, to: msg.to === undefined ? undefined : devPath(msg.to), recursive: msg.recursive, data64: msg.data64 }, slow);
@@ -2167,6 +2291,7 @@ function serveConnection(sock) {
       const sx = sessions.get(chan);
       if (sx) { try { sx.proc.write(buf.toString('utf-8')); } catch { } mux.credit(chan, buf.length); return; }
       if (pipeSessions.writeStdin(mux, chan, buf)) { mux.credit(chan, buf.length); return; }
+      if (wsData(chan, buf)) return; // lane exit-transfer: a push's bytes (credited as the disk takes them)
       const t = tcpChans.get(chan);
       if (t) {
         // credit only after the socket drains — otherwise a fast peer piles a
@@ -2189,6 +2314,7 @@ function serveConnection(sock) {
     },
     onDead(reason) {
       if (this._countedServer) { authedServers = Math.max(0, authedServers - 1); this._countedServer = false; }
+      for (const chan of [...writeStreams.keys()]) wsDrop(chan, 'the link dropped'); // lane exit-transfer: a push never half-lands
       // run-stream children outlive THIS link: their stdout resumes into a bounded log, never left paused (verify r2 F2)
       for (const rec of streamChans.values()) orphanRunStream(rec, reason);
       streamChans.clear();

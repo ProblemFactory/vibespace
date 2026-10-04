@@ -39,7 +39,11 @@ const WHO_MAX = 64;
 const REFUSALS = Object.freeze(['not_granted', 'groups_unreadable', 'unknown_shape', 'fork_pending', 'no_machine', 'ambiguous',
   'no_exits', 'offline', 'ask_pending', 'ask_denied', 'ask_changed', 'ask_expired', 'ask_settled', 'ask_unfiled', 'human_only',
   'session_token_required', 'bad_command', 'bad_grant', 'bad_mode', 'bad_principal', 'empty_list',
-  'too_many', 'list_changed', 'run_failed', 'conversation_gone', 'remote_session', 'spawn_failed', 'device_agent_outdated']);
+  'too_many', 'list_changed', 'run_failed', 'conversation_gone', 'remote_session', 'spawn_failed', 'device_agent_outdated',
+  // lane exit-transfer (design 013 B): pull / push refusals, each by name
+  'too_big', 'not_a_file', 'local_path_refused', 'exists', 'hash_mismatch', 'transfer_failed', 'bad_path',
+  // fix r1: a second pull into a local file another pull is writing
+  'target_busy']);
 /** THE run bound: the device daemon kills a `run-cmd` child at 30 s (src/agentd/agentd.js `Math.min(…, 30000)`);
  *  the exit route used to promise 120 s and never got it. ONE number: the daemon's cap, the CLI's help, the card
  *  (test-architecture pins the daemon's literal to this). */
@@ -385,7 +389,9 @@ function cmdFold(cmd) {
  * hand-written line is still a line, and its heads pass the belt + the secret rule again on the way out). `agent: true` drops the conversation's name and key (the agent's rows are its own). null = not a run.
  */
 function runRow(l, { agent = false } = {}) {
-  if (!l || typeof l !== 'object' || l.verb !== 'run' || typeof l.cmd !== 'string') return null;
+  if (!l || typeof l !== 'object' || typeof l.cmd !== 'string') return null;
+  const xfer = TRANSFER_VERBS.includes(l.verb);   // lane exit-transfer: a pull / push line is a row of the same list
+  if (l.verb !== 'run' && !xfer) return null;
   const sf = spawnErrorOf(l.spawnError);
   const refusal = typeof l.refusal === 'string' && l.refusal ? l.refusal.slice(0, 40) : null;
   const outcome = sf ? 'spawn_failed' : refusal && refusal !== 'spawn_failed' ? 'refused' : l.timedOut ? 'timed_out' : 'ran';
@@ -400,7 +406,130 @@ function runRow(l, { agent = false } = {}) {
     refusal: outcome === 'refused' ? refusal : null, spawnError: sf,
     interpreter: knownInterpreter(l.interpreter),   // verify r1 F5a: the closed set, never a stored string as itself
     stdout: judgeHead(l.stdout), stderr: judgeHead(l.stderr), cut,   // verify r1 F5b: judged at read, never trusted raw
+    ...(xfer ? { verb: l.verb, transfer: transferOf(l) } : {}),
   };
+}
+
+// ── transfers (lane exit-transfer, design 013 B, 2026-10-03) ─────────────────
+// The owner: 「agent有能力在远程机器上生成一个大文件并pull回本地吗？还是只能通过命令行一点一点读？」 — an agent copied files with
+// many `run` calls (8 MiB base64 chunks) and the `use` proxy aimed at the machine's own loopback. `vibespace-exit pull` /
+// `push` move ONE regular file through the device's own fs ops (never a shell), under the `run` grant (equal authority:
+// `run` reads and writes any file the machine's user can), size-bounded, sha256-checked, one audit line + one card each.
+// Not resumable: a failed transfer keeps nothing. These are the PURE parts: the bound, the path shapes, the verdict, the
+// words, the row; src/exit-proxy.js does the I/O.
+const TRANSFER_VERBS = Object.freeze(['pull', 'push']);
+const TRANSFER_WINDOW_BYTES = 8 * 1024 * 1024;   // one read-range / one accounting step; memory on the hub ≤ one window
+const TRANSFER_SETTING = 'exit.transferMaxBytes'; // the user's bound, in MB (the browser trace's precedent: a "Bytes" key in MB)
+const TRANSFER_MAX_DEFAULT_MB = 1024;            // 1 GiB
+const TRANSFER_MAX_MB = 1048576;                 // the row's ceiling (1 TiB)
+const PATH_MAX_BYTES = 4096;
+const PUSH_SINCE = '2.369.205';                  // the first agent with the `fs-write-stream` op (this release; 2.369.204's has none)
+const PUSH_CAP = 'fs-write-stream';
+/** The bound in BYTES from the setting's MB (absent / junk ⇒ 1 GiB; at least 1 MB; at most the row's ceiling). */
+function transferMaxOf(mb) {
+  const n = Number(mb);
+  const m = mb === undefined || mb === null || mb === '' || !Number.isFinite(n) ? TRANSFER_MAX_DEFAULT_MB : Math.min(TRANSFER_MAX_MB, Math.max(1, Math.floor(n)));
+  return m * 1024 * 1024;
+}
+/** A byte count in words (812.0 MiB). */
+function fmtBytes(n) {
+  const b = Math.max(0, Number(n) || 0);
+  if (b < 1024) return `${b} bytes`;
+  const u = ['KiB', 'MiB', 'GiB', 'TiB']; let v = b / 1024, i = 0;
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+  return `${v.toFixed(1)} ${u[i]}`;
+}
+const S_IFMT = 0o170000, S_IFREG = 0o100000;
+/** A device's `stat` answer (or a local fs.Stats) → `{kind: 'file'|'dir'|'other'|'none', size, mtimeMs}`. A device
+ *  (/dev/zero), a pipe or a socket is `other`: its size says nothing about what a read returns. */
+function statFacts(st) {
+  if (!st || typeof st !== 'object') return { kind: 'none', size: 0, mtimeMs: 0 };
+  const mode = Number(st.mode) || 0;
+  const isDir = typeof st.isDirectory === 'function' ? st.isDirectory() : !!st.isDir;
+  const kind = isDir ? 'dir' : (mode & S_IFMT) === S_IFREG ? 'file' : 'other';
+  return { kind, size: Math.max(0, Number(st.size) || 0), mtimeMs: Number(st.mtimeMs) || 0 };
+}
+const KIND_WHY = Object.freeze({ none: 'does not exist', dir: 'is a folder', other: 'is not a regular file (a device, a pipe or a socket)' });
+/**
+ * The SHAPE of a path a transfer names (before anything is asked or sent): a string, ≤ 4 KiB, no control or hidden
+ * characters (src/hidden-chars.js — a path is shown to the user on the ask, the card and the list as itself), absolute.
+ * `side: 'remote'` = the machine's spelling (POSIX `/…`, Windows `C:\…` / `C:/…` / `\\server\share\…`; `~` / `~/…` only
+ * when its agent expands it — `tilde`); `side: 'local'` = this machine's (`/…`; the CLI resolves a relative word).
+ * Never a folder spelling (a trailing separator). → `{ok: true}` | bad_path with the sentence.
+ */
+function transferPathVerdict(p, { side = 'remote', tilde = false } = {}) {
+  const where = side === 'local' ? 'here' : 'on the machine';
+  if (typeof p !== 'string' || !p.trim()) return refuse('bad_path', { error: side === 'local' ? 'name the local file by a path' : 'name the file on the machine by its absolute path (e.g. /home/me/out.bin or C:\\Users\\me\\out.bin)' });
+  if (cmdBytes(p) > PATH_MAX_BYTES) return refuse('bad_path', { error: `the path ${where} is longer than ${PATH_MAX_BYTES} bytes` });
+  const hidden = HC.hiddenCharsOf(p, { max: 64 });
+  if (/[\u0000-\u001f\u007f]/.test(p) || hidden.length) return refuse('bad_path', { error: `the path ${where} carries control or invisible characters${hidden.length ? ` (${hidden.slice(0, 6).join(', ')})` : ''} — the user would not read what is copied; nothing was copied` });
+  const tl = p === '~' || /^~[\\/]/.test(p);
+  const abs = side === 'local' ? p[0] === '/' : (p[0] === '/' || /^[A-Za-z]:[\\/]/.test(p) || /^\\\\[^\\]/.test(p) || (tilde && tl));
+  if (!abs) return refuse('bad_path', { error: side === 'remote' && tl ? `its agent does not expand ~ — spell the home folder out (${head(p, 60)})` : `"${head(p, 120)}" is not an absolute path ${where}` });
+  if (/[\\/]$/.test(p) || tl && p.length <= 2) return refuse('bad_path', { error: `"${head(p, 120)}" names a folder — pull and push move one file` });
+  return { ok: true };
+}
+/**
+ * THE TRANSFER VERDICT (after the grant, before a byte moves): `remote` / `local` = statFacts of each end (`kind: 'none'`
+ * when absent). pull: the remote must be a regular file within `max`; an existing local file is replaced only with
+ * `overwrite`. push: the local must be a regular file within `max`; an existing remote file only with `overwrite`, never a
+ * folder. → `{ok: true, size}` | too_big / not_a_file / exists (with `side`, `why`, `size`, `max`).
+ */
+function transferVerdict({ verb, max = transferMaxOf(), remote = null, local = null, overwrite = false } = {}) {
+  if (!TRANSFER_VERBS.includes(verb)) throw new Error(`exit-reach: unknown transfer verb ${verb}`);
+  const R0 = remote || { kind: 'none', size: 0 }, L0 = local || { kind: 'none', size: 0 };
+  const [src, srcSide, dst, dstSide] = verb === 'pull' ? [R0, 'remote', L0, 'local'] : [L0, 'local', R0, 'remote'];
+  if (src.kind !== 'file') return refuse('not_a_file', { side: srcSide, why: KIND_WHY[src.kind] || KIND_WHY.other });
+  if (src.size > max) return refuse('too_big', { size: src.size, max });
+  if (dst.kind === 'dir' || dst.kind === 'other') return refuse('not_a_file', { side: dstSide, why: KIND_WHY[dst.kind] });
+  if (dst.kind === 'file' && !overwrite) return refuse('exists', { side: dstSide });
+  return { ok: true, size: src.size };
+}
+/** The line a transfer is shown and stored as (the ask's detail, the audit's `cmd`, the list's command). */
+function transferLine({ verb, remote = '', local = '' } = {}) {
+  return verb === 'push' ? `push ${local} → ${remote}` : `pull ${remote} → ${local}`;
+}
+const isSha = (x) => typeof x === 'string' && /^[0-9a-f]{64}$/.test(x);
+/** A stored transfer line's facts, re-bounded (a hand-written line is still a line). */
+function transferOf(l) {
+  const bytes = Number(l && l.bytes);
+  return { verb: TRANSFER_VERBS.includes(l && l.verb) ? l.verb : null, remote: cleanCmd(l && l.path, CMD_MAX), local: cleanCmd(l && l.localPath, CMD_MAX),
+    bytes: Number.isFinite(bytes) && bytes >= 0 ? Math.floor(bytes) : null, sha256: isSha(l && l.sha256) ? l.sha256 : null,
+    verified: l && (l.verified === 'sha256' || l.verified === 'size') ? l.verified : null };
+}
+/** The verification in words: a sha256 compared on both ends, or only the size (an agent from before the hash flag). */
+const verifiedText = (verified, sha) => verified === 'sha256' && isSha(sha) ? `sha256 ${sha.slice(0, 12)}… verified` : verified === 'size' ? 'size verified (its agent predates sha256)' : 'unverified';
+/** The CLI's line for a transfer that landed (stdout: what landed where, the size, the verification, the time). */
+function transferCliLine(rec, { machine = '' } = {}) {
+  const r = rec || {};
+  const what = r.verb === 'push' ? `pushed ${cleanCmd(r.local, CMD_MAX)} to "${cleanCmd(machine, 120)}" → ${cleanCmd(r.remote, CMD_MAX)}` : `pulled ${cleanCmd(r.remote, CMD_MAX)} from "${cleanCmd(machine, 120)}" → ${cleanCmd(r.local, CMD_MAX)}`;
+  const v = r.verified === 'sha256' && isSha(r.sha256) ? `sha256 ${r.sha256} verified` : 'size verified (the machine\'s agent predates sha256)';
+  return `${what} — ${fmtBytes(r.bytes)} (${Math.max(0, Number(r.bytes) || 0)} bytes) · ${v} · ${secs(r.ms)}`;
+}
+/** The chat card's words for one transfer attempt (display-only, never billed, never in the transcript). */
+function transferCardText(rec, { machine = '' } = {}) {
+  const r = rec || {};
+  const verb = r.verb === 'push' ? 'push' : 'pull';
+  const rem = head(r.remote), loc = head(r.local);
+  if (r.outcome === 'done') return verb === 'pull'
+    ? `pulled \`${rem}\` from ${machine} → \`${loc}\` — ${fmtBytes(r.bytes)} · ${verifiedText(r.verified, r.sha256)} · ${secs(r.ms)}`
+    : `pushed \`${loc}\` to ${machine} → \`${rem}\` — ${fmtBytes(r.bytes)} · ${verifiedText(r.verified, r.sha256)} · ${secs(r.ms)}`;
+  const what = verb === 'pull' ? `did not pull \`${rem}\` from ${machine}` : `did not push \`${loc}\` to ${machine}`;
+  const why = {
+    denied: 'you denied it', changed: 'the request changed after it was shown', expired: 'no answer in 60 s',
+    unfiled: 'its approval could not be put in For you', offline: `${machine} is offline`,
+    too_big: `${fmtBytes(r.size)} is over the ${fmtBytes(r.max)} a transfer may move`,
+    not_a_file: `${r.side === 'local' ? 'the local' : 'the'} file ${r.why || 'is not a regular file'}`,
+    exists: `${r.side === 'local' ? 'the local file' : 'the file there'} already exists (nothing replaced)`,
+    hash_mismatch: 'the bytes did not match (sha256) — nothing was kept',
+    transfer_failed: `it stopped${r.error ? ` (${String(r.error).slice(0, 120)})` : ''} — nothing was kept`,
+    agent_outdated: `its agent cannot receive files (${PUSH_SINCE} or later can)`,
+    local_path_refused: 'the local path is outside the project, /tmp and ~/Downloads',
+    local_changed: 'the local folder changed after it was judged — nothing was kept',
+    target_busy: 'another pull is writing that local file right now (nothing replaced)',
+    bad_path: String(r.error || 'the path is not one a transfer takes').slice(0, 160),
+  }[r.outcome] || 'this conversation may not run commands there';
+  return `${what} — ${why}`;
 }
 
 // ── machines ────────────────────────────────────────────────────────────────
@@ -434,12 +563,22 @@ const head = (cmd, n = 80) => { const c = cleanCmd(cmd, 100000).replace(/`/g, "'
  * never another conversation's name, a Task Group title or a key (the words census poisons all three).
  * `has` = the other grant this caller DOES hold (`{use}` / `{run}`) — the sentence offers it.
  */
-function refusalText(code, { machine = '', grant = 'run', has = {}, cmd = '', error = '', where = '', same = false, hidden = null, spawnError = null, interpreter = null, platform = null, agentVersion = null } = {}) {
+function refusalText(code, { machine = '', grant = 'run', has = {}, cmd = '', error = '', where = '', same = false, hidden = null, spawnError = null, interpreter = null, platform = null, agentVersion = null, verb = 'run', path: tp = '', side = 'remote', why = '', size = 0, max = 0 } = {}) {
   const M = q(machine);
+  const at = side === 'local' ? 'here' : `on ${M}`;
   switch (code) {
+    // lane exit-transfer: the refusals of pull / push, by name — what, where, that nothing was copied, the way on
+    case 'too_big': return `${q(tp)} is ${fmtBytes(size)} — more than the ${fmtBytes(max)} one transfer may move (the user sets it: Settings → Integration → "Largest file an agent may pull or push"); nothing was copied`;
+    case 'not_a_file': return `${q(tp)} ${at} ${why || KIND_WHY.other} — pull and push move one regular file (archive a folder first with vibespace-exit run); nothing was copied`;
+    case 'exists': return `${q(tp)} already exists ${at} — nothing was copied; add --overwrite to replace it`;
+    case 'hash_mismatch': return `the bytes of ${q(tp)} that arrived do not match what was sent (sha256) — nothing was kept; run it again`;
+    case 'target_busy': return `${q(tp)} here is being written by another pull right now — nothing was copied; wait until that one ends, or pull to another local path`;
+    case 'transfer_failed': return `the ${verb === 'push' ? 'push of' : 'pull of'} ${q(tp)} ${verb === 'push' ? 'to' : 'from'} ${M} stopped — ${String(error || 'the link failed').slice(0, 200)}; nothing was kept, run it again`;
+    case 'local_path_refused': case 'bad_path': return String(error || code).slice(0, 400);
     // lane device-upgrade-stuck: a Windows agent without run-shell CANNOT run a line (no `sh` there; it cannot pick cmd.exe)
     // — refused BEFORE anything is sent, by name: the machine, its agent, the first agent that can, the one step
     case 'device_agent_outdated':
+      if (verb === 'push') return `did not push to ${M} — its device agent (${agentVersionOf(agentVersion) || 'an older version'}) cannot receive files; agents from ${PUSH_SINCE} on can (pull works with every agent). Nothing was copied. Ask the user to ${reinstallStep(machine)} — its automatic update did not take.`;
       return `did not run \`${head(cmd)}\` on ${M} — its device agent (${agentVersionOf(agentVersion) || 'an older version'}) cannot run commands on Windows; agents from ${XS.RUN_SHELL_SINCE} on can. Nothing ran. Ask the user to ${reinstallStep(machine)} — its automatic update did not take.`;
     // lane-exit-run-output: the child NEVER STARTED (the owner's Windows box had no `sh`) — why, that nothing ran, what
     // the machine runs commands under, and that an `sh` failure on a Windows machine means its agent is older than this
@@ -541,4 +680,6 @@ module.exports = {
   exitAccessOf, exitVerdict, agentView, exitStamp, exitBaseVerdict, patchVerdict, storedExit,
   askState, answerVerdict, runRecord, resolveMachine, refusalText, cardText, cliLine, summaryOf, anyGrant, migrateExitAccess,
   spawnErrorOf, outputHeads, outputPreview, cardOutput, cmdFold, cleanLines, runRow, platformLabel, interpreterOf, knownInterpreter, spawnFailureText,
+  TRANSFER_VERBS, TRANSFER_WINDOW_BYTES, TRANSFER_SETTING, TRANSFER_MAX_DEFAULT_MB, TRANSFER_MAX_MB, PATH_MAX_BYTES, PUSH_SINCE, PUSH_CAP,
+  transferMaxOf, fmtBytes, statFacts, transferPathVerdict, transferVerdict, transferLine, transferCardText, transferCliLine, verifiedText,
 };

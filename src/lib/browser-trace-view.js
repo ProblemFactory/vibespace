@@ -35,12 +35,12 @@
 // SVG icons only. A frame is a SECRET of a logged-in page (§6.4): the dialog
 // says how long it is kept, and nothing here caches a byte.
 import { t, tc } from './i18n.js';
-import { fetchJson, createModalShell, showToast, showConfirmDialog, showInputDialog } from './utils.js';
+import { fetchJson, createModalShell, showToast, showConfirmDialog, showInputDialog, showContextMenu, escHtml, attachPopoverClose } from './utils.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { registerMenuItem } from './contributions.js';
 import { btn, el as chromeEl, icon as chromeIcon } from './channel-chrome.js';
 import { createBackendIcon } from './agent-meta.js';
-import { whoChips, foldChips, CHIPS_WIDE, CHIPS_NARROW } from './browser-who-model.js';
+import { whoChips, foldChips, CHIPS_WIDE } from './browser-who-model.js';
 import { openWhoDialog, nameHelpers } from './browser-who-dialog.js';
 import { openNewProfileDialog } from './browser-new-profile.js'; // lane browser-admin: the panel's New profile…
 import { openBuildDialog } from './browser-build-dialog.js'; // lane browser-admin 2a: a row's Change build…
@@ -53,7 +53,9 @@ import { frameUrl, bytesText, traceSummary, timelineLabel, positionText, overlay
 import { sessionOfEntry, sessionOrdinals } from '../browser-sessions.js'; // 2026-09-27: the live view's session dividers + Sessions list (PURE)
 import { humanStateLine, humanRefusalText } from '../browser-human.js'; // BROWSE YOURSELF (B-6ae8): the row's "You are browsing it" line (PURE)
 import { dividerText, sessionRowText, sessionReplays, retentionText, sizeText } from './browser-session-words.js'; // the words every session surface shares
-import { displayFactText } from './browser-display-words.js'; // lane headless-fallback: a browser that runs headless because the machine has no desktop session says so
+import { displayFactText } from './browser-display-words.js';
+import { rowLine, rowFold, rowMenu, gridNeed, orphanOrder } from './browser-panel-model.js'; // design 015 (lane browser-panel-tidy): the row's line / fold / menu (PURE)
+import { barLayout } from './live-bar-layout.js'; // design 015 §2b: a cell's line never wraps — what does not fit folds by width (the bar-fold rule) // lane headless-fallback: a browser that runs headless because the machine has no desktop session says so
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 const STRIP_MAX = 12;
@@ -625,19 +627,39 @@ export function rowWhyText(r) {
     default: return String(x.why || '');
   }
 }
+/**
+ * design 015 §2b (lane browser-panel-tidy): ONE cell line that never wraps — every item keeps its width; what does not
+ * fit folds, from the end, into the line's "+n" pill (the bar-fold rule, PURE barLayout: priority 0 never folds).
+ * `items` = [{el, priority}] in DOM order (the line's flex items, one gap). → the folded items ([] while unlaid).
+ */
+export function fitLine(line, items, more, moreText) {
+  const width = line.getBoundingClientRect().width;
+  if (!(width > 0)) return [];
+  for (const it of items) it.el.style.display = '';
+  more.textContent = moreText(items.filter((it) => it.priority > 0).length); more.style.display = '';
+  const px = (e) => e.getBoundingClientRect().width;
+  const gap = parseFloat(getComputedStyle(line).columnGap) || 0;
+  const plan = barLayout({ widthPx: width, items: items.map((it, i) => ({ key: String(i), px: px(it.el), priority: it.priority })), gapPx: gap, overflowPx: px(more) });
+  const folded = new Set(plan.overflow.map(Number));
+  items.forEach((it, i) => { it.el.style.display = folded.has(i) ? 'none' : ''; });
+  more.style.display = 'none';
+  return items.filter((_, i) => folded.has(i));
+}
 // ── OWNER RULING A (2026-09-26): WHO CAN USE a profile — the row's "Who can use it" cell, Rename…, Delete… ──
 /**
- * THE "WHO CAN USE IT" CELL of one profile row (2026-09-27 — a LIST of conversations and Task Groups): the label, the
- * VALUE ("All agents" — lane everyone-principal: the All chip, "(N more rows)" when rows are kept beside it — or one chip per row of the list — a conversation by its backend glyph and name, dim
- * with a hollow dot when not running; a Task Group by the people glyph and its title, amber when deleted — folded into
- * "+N more" past 4, past 2 at ≤ 768 px), the amber "Nobody can use it now…" line when every row is dead, and the
- * house text button "Change…" (the dialog, src/lib/browser-who-dialog.js). KEYED IN PLACE: the cell element and its
- * chips are kept across loads and broadcasts — chips reconciled by `data-key`, a text replaced only when it changed —
- * so a who-change never re-creates the row or a chip that did not change. Returns `{el, patch(row)}`.
+ * THE "WHO CAN USE IT" CELL of one profile row (2026-09-27 — a LIST of conversations and Task Groups; design 015: the
+ * table's third column): l1 = the VALUE ("All agents" — lane everyone-principal: the All chip, "(N more rows)" when
+ * rows are kept beside it — or one chip per row of the list — a conversation by its backend glyph and name, dim with a
+ * hollow dot when not running; a Task Group by the people glyph and its title, amber when deleted — at most CHIPS_WIDE,
+ * then folded by WIDTH into "+N more" (`fit`, the bar-fold rule: nothing wraps, nothing is cut) and the house text
+ * button "Change…" (never folds; the dialog, src/lib/browser-who-dialog.js); l2 = the amber "Nobody can use it now…"
+ * line when every row is dead. KEYED IN PLACE: the cell element and its chips are kept across loads and broadcasts —
+ * chips reconciled by `data-key`, a text replaced only when it changed — so a who-change never re-creates the row or a
+ * chip that did not change. Returns `{el, patch(row), fit()}`.
  */
 export function whoCell(app, { onChange = null } = {}) {
-  const root = chromeEl('div', 'bprof-who');
-  root.appendChild(chromeEl('span', 'bprof-who-label', t('Who can use it')));
+  const root = chromeEl('div', 'bprof-cell bprof-who');
+  const line = chromeEl('div', 'bprof-l1 bprof-who-line');
   const value = chromeEl('span', 'bprof-who-value');
   // ALL AGENTS (lane everyone-principal): the value's first chip — the everyone glyph + "All agents"
   const allText = chromeEl('span', 'bprof-who-all bprof-who-chip is-everyone');
@@ -647,13 +669,14 @@ export function whoCell(app, { onChange = null } = {}) {
   const chips = chromeEl('span', 'bprof-who-chips');
   const more = chromeEl('span', 'bprof-who-more');
   value.append(allText, chips, more);
-  let rowNow = null;
+  let rowNow = null, countRest = [];
   const change = btn(t('Change…'), () => { if (rowNow) openWhoDialog(app, rowNow.id, { label: String(rowNow.label || rowNow.id), onSaved: onChange }); }, 'bprof-who-change');
-  const note = chromeEl('div', 'bprof-who-nobody');
+  line.append(value, change);
+  const note = chromeEl('div', 'bprof-l2 bprof-who-nobody');
   note.appendChild(chromeIcon('alert', 11));
   const noteText = chromeEl('span', '');
   note.appendChild(noteText);
-  root.append(value, change, note);
+  root.append(line, note);
   const nodes = new Map();   // chip key → node
   const setText = (n, v) => { if (n.textContent !== v) n.textContent = v; };
   function chipNode(c) {
@@ -675,27 +698,37 @@ export function whoCell(app, { onChange = null } = {}) {
     rowNow = r;
     const h = nameHelpers(app);
     const m = whoChips(r && r.use, { t, nameOfConversation: h.nameOfConversation, taskOf: h.taskOf });
-    const narrow = typeof window !== 'undefined' && window.matchMedia ? window.matchMedia('(max-width: 768px)').matches : false;
-    const f = foldChips(m.chips, narrow ? CHIPS_NARROW : CHIPS_WIDE, { t });
+    const f = foldChips(m.chips, CHIPS_WIDE, { t }); // CHIPS_WIDE is the upper bound; the cell's WIDTH folds the rest (fit)
     allText.style.display = m.mode === 'all' ? '' : 'none';
     setText(allWords, m.mode === 'all' ? (m.allText || t('All agents')) : '');
+    allText.title = allWords.textContent; // design 015: a narrow column ellipsizes the one value before Change… is cut
     const out = f.shown.map(chipNode);
     const kids = chips.childNodes;
     for (let i = 0; i < out.length; i++) if (kids[i] !== out[i]) chips.insertBefore(out[i], kids[i] || null);
     while (kids.length > out.length) chips.removeChild(kids[kids.length - 1]);
     for (const k of [...nodes.keys()]) if (!m.chips.some((c) => c.key === k)) nodes.delete(k);
     chips.style.display = out.length ? '' : 'none';
-    more.style.display = f.more ? '' : 'none';
-    setText(more, f.more ? f.more.text : '');
-    more.title = f.more ? f.more.tooltip : '';
+    countRest = m.chips.slice(f.shown.length);
     setText(noteText, m.nobody || '');
     note.style.display = m.nobody ? '' : 'none';
     // BROWSE YOURSELF (B-6ae8): the list names conversations and Task Groups — never the user, who may always browse it
     const tip = (m.mode === 'all' ? t('Any of your conversations can use this browser and its logins — one browser, each conversation in its own tab.') : t('Only the conversations and Task Groups listed here can use it. Picking it for another conversation (New Session, Session properties) adds that conversation.')) + ' ' + t('You can always browse it yourself.');
     if (root.title !== tip) root.title = tip;
     root.dataset.mode = m.mode;
+    fit();
   }
-  return { el: root, patch, chipNodes: nodes };
+  /** design 015 §2b: the chips fold by WIDTH into "+N more" (its title names every folded row); Change… never folds. */
+  function fit() {
+    const shown = [...chips.childNodes];
+    const items = [...(allText.style.display === 'none' ? [] : [{ el: allText, priority: 0 }]), ...shown.map((el) => ({ el, priority: 1 })), { el: change, priority: 0 }];
+    const folded = fitLine(line, items, more, (n) => '+' + (n + countRest.length));
+    const rest = [...folded.filter((it) => it.priority > 0).map((it) => (it.el.querySelector('.bprof-who-name') || it.el).textContent), ...countRest.map((c) => c.name)];
+    more.style.display = rest.length ? '' : 'none';
+    setText(more, rest.length ? '+' + rest.length : ''); // the mockup's "+n" pill (its title names every folded row)
+    more.title = rest.join('\n');
+    more.setAttribute('aria-label', rest.length ? t('+{n} more', { n: rest.length }) : '');
+  }
+  return { el: root, patch, fit, chipNodes: nodes };
 }
 /** The live conversations that USE a profile (a lease or a pin) — the Delete… warning's and the narrowing's count. */
 export function usersOf(row) { return (Array.isArray(row && row.usedBy) ? row.usedBy : []).filter((u) => u && (u.leased || u.pinned)); }
@@ -711,7 +744,7 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
   for (const [, w] of app.wm.windows) if (w.type === PANEL_TYPE) { app.wm.revealWindow(w.id, { replay: !!syncId }); if (focus && w._browserProfiles) w._browserProfiles.focusRow(focus); return w; }
   app._hideWelcome?.();
   const winInfo = app.wm.createWindow({ title: t('Agent browser'), type: PANEL_TYPE, syncId, openSpec: { action: 'openBrowserProfiles' }, width: 860, height: 600 });
-  const st = { view: null, error: null, busy: false, closed: false, timer: null, focus };
+  const st = { view: null, error: null, busy: false, closed: false, timer: null, focus, orphansOpen: false };
   // KEYED (2026-09-27): each profile's "Who can use it" cell and its row are kept across loads — a load whose only change
   // for a row is its list PATCHES the cell in place; a row whose other facts moved is rebuilt around the SAME cell
   const whoCells = new Map();   // profileId → whoCell
@@ -725,6 +758,11 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
   const root = el('div', 'bprof');
   const bar = el('div', 'bprof-bar');
   const summary = el('span', 'bprof-summary', t('Loading…'));
+  // design 015 (c): the header is ONE line — the summary, an ⓘ that says how long records are kept (opened on press,
+  // closed on an outside press), New profile… and ⟳; the Browser CLI row, the sweep and the retention text in full live
+  // in the Maintenance section at the bottom
+  const info = el('button', 'file-tool-btn bprof-info'); info.type = 'button';
+  info.appendChild(chromeIcon('info', 13)); info.title = t('How long records are kept'); info.setAttribute('aria-label', info.title);
   const spacer = el('span'); spacer.style.flex = '1';
   const sweepBtn = el('button', 'file-tool-btn bprof-btn', t('Sweep now')); sweepBtn.title = t('Apply the size limit now: over it, the oldest sessions\' frames are removed and every action list stays; recordings keep their own limit — profiles are never touched');
   const refreshBtn = el('button', 'file-tool-btn bprof-btn', '⟳'); refreshBtn.title = t('Refresh');
@@ -733,18 +771,30 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
   const newBtn = el('button', 'file-tool-btn bprof-btn bprof-new', t('New profile…'));
   newBtn.title = t('Create a profile: its name, which browser, the computer it runs on and who can use it');
   newBtn.onclick = () => openNewProfileDialog(app, { onCreated: (p) => { if (p && p.id) st.focus = p.id; load(); } });
-  bar.append(summary, spacer, newBtn, sweepBtn, refreshBtn);
+  bar.append(summary, info, spacer, newBtn, refreshBtn);
   const hint = el('div', 'bprof-hint chat-status-dim');
   // lane browser-admin 2b: THE BROWSER CLI ROW — which agent-browser VibeSpace drives (the measured version, the one on
-  // PATH, drift) and its ONE act; a keyed line, patched in place (its own fetch, GET /api/browser/cli)
+  // PATH, drift) and its ONE act; a keyed line, patched in place (its own fetch, GET /api/browser/cli); design 015: it
+  // sits in the Maintenance section
   const cliRow = el('div', 'bprof-cli');
   const cliText = el('span', 'bprof-cli-text');
   const cliBtn = el('button', 'file-tool-btn bprof-btn bprof-cli-btn', '');
   cliRow.append(cliText, cliBtn);
   cliRow.style.display = 'none';
   const body = el('div', 'bprof-body');
-  root.append(bar, cliRow, hint, body);
+  root.append(bar, body);
   winInfo.content.appendChild(root);
+  info.onclick = (ev) => {
+    ev.stopPropagation();
+    const had = root.querySelector('.bprof-info-pop');
+    if (had) { had.remove(); return; }
+    const pop = el('div', 'bprof-info-pop', hint.textContent);
+    pop.dataset.popover = '1'; // the global Escape closes it
+    root.appendChild(pop);
+    pop.style.top = (bar.offsetTop + bar.offsetHeight + 2) + 'px';
+    pop.style.left = Math.max(8, Math.min(info.offsetLeft - 8, root.clientWidth - pop.offsetWidth - 8)) + 'px';
+    attachPopoverClose(pop, info);
+  };
 
   const section = (title, sub) => { const s = el('div', 'bprof-section'); const h = el('div', 'bprof-section-head'); h.appendChild(el('span', 'bprof-section-title', title)); if (sub) h.appendChild(el('span', 'bprof-section-sub chat-status-dim', sub)); s.appendChild(h); body.appendChild(s); return s; };
   const cell = (row, cls, text, title) => { const c = el('span', 'bprof-cell ' + cls, text); if (title) c.title = title; row.appendChild(c); return c; };
@@ -773,7 +823,8 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
     const bytes = rows.reduce((s, r) => s + (Number(r.bytes) || 0), 0);
     const traces = rows.reduce((s, r) => s + (r.trace ? r.trace.n : 0), 0) + (v?.ephemeral?.trace?.n || 0);
     const recs = rows.reduce((s, r) => s + (r.recordings ? r.recordings.length : 0), 0);
-    summary.textContent = t('{n} profile(s) · {size} on disk · {traces} traced action(s) · {recs} recording(s)', { n: rows.length, size: bytesText(bytes), traces, recs }) + (v?.orphans?.length ? ' · ' + t('{n} unregistered director(ies)', { n: v.orphans.length }) : '');
+    summary.textContent = t('{n} profile(s) · {size} on disk', { n: rows.length, size: bytesText(bytes) }) + (v?.orphans?.length ? ' · ' + t('{n} unregistered director(ies)', { n: v.orphans.length }) : '');
+    summary.dataset.traces = String(traces); summary.dataset.recordings = String(recs); // design 015: the counts live on the rows
     summary.title = summary.textContent; // a narrow window ellipsizes the line; the whole of it is here (a phone wraps it — style.css)
   }
   /** lane browser-admin 2a: the build a profile's browser REPORTS (the digest's browser record — the fact, not the choice). */
@@ -783,137 +834,118 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
   /** verify r1 A6: a running local browser launched BEFORE the lane (its record carries no `holdDialogs` launch stamp) still
    *  has 0.38.1 accept alert + leave-page dialogs by itself until its next start — the row SAYS which mode it runs in. */
   function autoDialogsOf(r) { const b = r && app._browserProfiles && app._browserProfiles.browsers ? app._browserProfiles.browsers[r.id] : null; return !!(r && r.live && !r.host && b && b.state === 'ready' && !b.holdDialogs); }
+  // design 015 (lane browser-panel-tidy): THE PROFILE ROW — one grid line of five cells (each two lines: `l1` the
+  // one-glance fact, `l2` the secondary), a chevron fold for everything else, ONE primary act and ONE ⋯ menu. The words
+  // and which acts exist come from the PURE model (src/lib/browser-panel-model.js); the acts themselves stay here (RUN,
+  // below). A fold's open state is per row and survives a rebuild (it is not in the row signature).
+  const WORDS = { t, state: stateText, why: rowWhyText, ago: agoText, bytes: bytesText, size: sizeText, memory: memoryText, display: displayFactText, human: humanStateLine };
+  const openFolds = new Set();   // profileId → its fold is open
   function profileRow(r, v) {
     const row = el('div', 'bprof-row bprof-profile'); row.dataset.profileId = r.id;
-    const ident = el('div', 'bprof-ident');
-    ident.appendChild(el('span', 'bprof-label', String(r.label || r.id)));
-    if (r.legacy) ident.appendChild(el('span', 'bprof-chip', t('legacy')));
-    // P6 (§6.2): a MEDIATED profile — every conversation on it sees and drives only its own tabs (owner ruling A: "shared"
-    // now means WHO MAY USE it — the switch below — so the isolation chip says what it is)
-    if (r.mediated) { const c = el('span', 'bprof-chip', t('separate tabs')); c.title = t('Each conversation sees and drives only its own tabs through a mediated CDP endpoint; while you drive, its input and navigation are refused.'); ident.appendChild(c); }
-    if (r.host) ident.appendChild(el('span', 'bprof-chip', String(r.host)));
-    // lane profile-lock-roll (L3): a takeover of a previous name's lock is said for a day ("renamed from <old>"), and a
-    // record launched under another name than this machine's shows that name (the digest's `machine.host` is ours)
-    { const rf = r.renamedFrom && typeof r.renamedFrom === 'object' && r.renamedFrom.host ? r.renamedFrom : null;
-      const mine = app._browserProfiles && app._browserProfiles.machine ? String(app._browserProfiles.machine.host || '') : '';
-      if (rf) { const c = el('span', 'bprof-chip bprof-renamed', t('renamed from {host}', { host: String(rf.host) })); c.title = t('This machine was renamed (a pod restarted under a new name) — the lock its previous name {from} left on this profile was taken over; its browser runs here as {host}.', { from: String(rf.host), host: mine || String(r.launchHost || '') }); ident.appendChild(c); }
-      else if (r.launchHost && mine && String(r.launchHost) !== mine) { const c = el('span', 'bprof-chip', String(r.launchHost)); c.title = t('The machine this profile\'s browser last started on'); ident.appendChild(c); } }
-    const chip = app.browserChipFor ? app.browserChipFor(r.id) : null;
-    ident.appendChild(el('span', 'browser-chip', chip || String(r.provider || '')));
-    row.appendChild(ident);
     const ps = pageStuckOf(r.id);
     const psw = ps ? stuckWords(ps, t) : null;
-    const why = [psw ? psw.line : null, autoDialogsOf(r) ? t('Accepts leave-page dialogs by itself (typed input is lost) until its next start') : null, rowWhyText(r)].filter(Boolean).join(' · ');
-    const state = cell(row, 'bprof-state state-' + String(r.state || '').replace(/[^a-z-]/g, ''), stateText(r.state), why);
-    state.appendChild(el('span', 'bprof-why', why));
-    // BROWSE YOURSELF (B-6ae8): the user browses it himself — his own line on the row
-    { const hl = humanStateLine(r.human, t); if (hl) { const h = el('span', 'bprof-human' + (r.human.state === 'driving' ? ' driving' : ''), hl); h.title = r.human.state === 'driving' ? t('Your own tab in this browser — its window is open') : t('Your tab is kept for a while — Browse yourself to continue where you were'); state.appendChild(h); } }
-    usageLine(state, r.usage);
-    displayLine(state, r.display);
-    // lane browser-admin 2a: WHICH CHROME BUILD — the choice ("Chrome 151.0.7922.34 (pinned)" / the CLI's default build /
-    // a path) and, while it runs, the build the browser itself reports; a chosen build that vanished says so (amber)
-    { const bl = cardBuildLine({ provider: r.provider, choice: r.browser, running: runningBuildOf(r.id), missing: r.buildMissing, live: !!r.live }, t); if (bl) { const b = el('span', 'bprof-build' + (bl.warn ? ' warn' : ''), bl.text); b.title = bl.text; state.appendChild(b); } }
-    cell(row, 'bprof-size', r.bytes === null || r.bytes === undefined ? t('not measured') : bytesText(r.bytes), r.dir ? String(r.dir) : '');
-    const tr = r.trace || { n: 0, bytes: 0 };
-    // 2026-09-27: what this profile's records take against its limit (the sweep's measure: frames + action lists)
-    const usedOf = t('{used} of {size}', { used: bytesText(Number(tr.used) || 0), size: sizeText(Number(tr.limit) || v?.limits?.bytesPerProfile || TRACE_BYTES_PER_PROFILE) });
-    const trCell = cell(row, 'bprof-trace', tr.n ? t('{n} action(s)', { n: tr.n }) : t('no actions'), tr.last ? t('last {ago}', { ago: agoText(Date.now() - tr.last) }) : '');
-    trCell.appendChild(el('span', 'bprof-trace-used', usedOf)); // its own line: the size is never the part an ellipsis eats
-    trCell.dataset.used = String(Number(tr.used) || 0);
-    fitsLine(trCell, tr);
-    const recs = Array.isArray(r.recordings) ? r.recordings : [];
-    const recCell = cell(row, 'bprof-recs', recs.length ? t('{n} recording(s)', { n: recs.length }) + ' · ' + bytesText(r.recordingBytes || 0) : t('no recordings'));
-    if (r.recording) { const live = el('span', 'bprof-rec-live', t('recording')); live.title = String(r.recording.file || ''); recCell.appendChild(live); }
-    if (r.recordingRefused) { const ref = el('span', 'bprof-rec-refused', t('refused: {why}', { why: String(r.recordingRefused.error || r.recordingRefused.code || '') })); recCell.appendChild(ref); }
-    // D7: the per-profile screencast opt-in — a checkbox the keeper's PATCH answers; not ours / remote ⇒ disabled with the reason
-    const recWrap = el('label', 'bprof-record');
-    const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !!r.record;
-    const ours = r.state !== 'not-ours' && !r.host;
-    cb.disabled = !ours || st.busy;
-    recWrap.title = ours ? t('Record this profile\'s screen (30 fps WebM, needs agent-browser ≥ {floor}) whenever its browser is live — a video of a logged-in profile is a secret with a storage bill', { floor: String(v?.limits?.recordingFloor || '0.37.0') }) : rowWhyText(r);
-    cb.onchange = async () => { st.busy = true; cb.disabled = true; const ok = await act(`/api/browser/profiles/${encodeURIComponent(r.id)}`, jsonInit('PATCH', { record: cb.checked }), t('Could not change recording')); st.busy = false; if (!ok) cb.checked = !cb.checked; load(); };
-    recWrap.append(cb, document.createTextNode(' ' + t('record')));
-    // owner ruling A: the row's controls live in ONE wrapping cell (record · who can use it · stop · rename · delete)
-    const actions = el('div', 'bprof-actions');
-    row.appendChild(actions);
-    // BROWSE YOURSELF (B-6ae8, the owner 2026-09-28): the FIRST act of a local profile whose provider starts a browser — his
-    // own tab in its browser (started or joined; the agents on it keep working); with his browsing open, it goes to that
-    // window. No button (never a greyed one) for a paired machine's profile or a browser VibeSpace only connects to.
-    if (r.canBrowse && r.state !== 'not-ours') {
-      const open = !!r.human;
-      const bb = el('button', 'file-tool-btn bprof-btn bprof-browse' + (open ? ' open' : ''), open ? t('Open your browsing window') : t('Browse yourself'));
-      bb.title = open ? t('Your own tab in this browser — its window') : t('Open this profile\'s browser and browse it yourself — its logins are there; conversations using it keep working in their own tabs');
+    const autoText = autoDialogsOf(r) ? t('Accepts leave-page dialogs by itself (typed input is lost) until its next start') : null;
+    // lane browser-admin 2a: WHICH CHROME BUILD — the choice and, while it runs, the build the browser itself reports (the fold)
+    const buildLine = cardBuildLine({ provider: r.provider, choice: r.browser, running: runningBuildOf(r.id), missing: r.buildMissing, live: !!r.live }, t);
+    const x = { w: WORDS, chip: app.browserChipFor ? app.browserChipFor(r.id) : null, mine: app._browserProfiles && app._browserProfiles.machine ? String(app._browserProfiles.machine.host || '') : '', stuck: psw, autoDialogs: !!autoText, autoText, buildLine, limits: v?.limits || null, now: Date.now() };
+    const L = rowLine(r, x);
+    const isOpen = openFolds.has(r.id);
+    // ① the profile: the chevron + the name (cut, never wrapped — whole in its title and the fold), then its chips
+    const ident = el('div', 'bprof-cell bprof-ident');
+    const n1 = el('div', 'bprof-l1');
+    const chev = el('button', 'bprof-chev'); chev.type = 'button'; chev.appendChild(chromeIcon('chevronRight', 12));
+    const name = el('span', 'bprof-label', L.name.l1); name.title = L.name.title;
+    n1.append(chev, name);
+    const n2 = el('div', 'bprof-l2 bprof-chips');
+    for (const c of L.name.chips) { const s = el('span', c.cls || 'bprof-chip', c.text); s.dataset.key = c.key; if (c.title) s.title = c.title; n2.appendChild(s); }
+    n2.appendChild(el('span', 'bprof-chip bprof-chip-more'));
+    ident.append(n1, n2);
+    // ② the state: the dot + the word, then its ONE secondary sentence by priority (the fold lists every one)
+    const state = el('div', 'bprof-cell bprof-state state-' + L.state.tone); state.title = L.state.title;
+    const s1 = el('div', 'bprof-l1'); s1.append(el('span', 'bprof-dot'), el('span', 'bprof-state-word', L.state.l1));
+    state.append(s1, el('div', 'bprof-l2 bprof-why' + (L.state.l2 && L.state.l2.tone ? ' ' + L.state.l2.tone : ''), L.state.l2 ? L.state.l2.text : ''));
+    // ③ "WHO CAN USE IT" (2026-09-27, a LIST): the KEPT cell (patched in place, never re-created for a who-change); the
+    // legacy record has no list — its words say so
+    let who;
+    if (L.who.kind === 'list') { const wc = whoCellFor(r.id); wc.patch(r); who = wc.el; }
+    else { who = el('div', 'bprof-cell bprof-who bprof-who-legacy'); who.append(el('div', 'bprof-l1 chat-status-dim', L.who.l1), el('div', 'bprof-l2')); }
+    // ④ the size on disk (never cut) and the counts (cut at the cell's end; "recording" in red)
+    const use = el('div', 'bprof-cell bprof-use'); use.title = r.dir ? String(r.dir) : '';
+    const u2 = el('div', 'bprof-l2 bprof-trace');
+    L.usage.l2.forEach((p, i) => { if (i) u2.appendChild(document.createTextNode(' · ')); u2.appendChild(el('span', p.tone === 'rec' ? 'bprof-rec-live' : p.tone === 'warn' ? 'bprof-rec-refused' : '', p.text)); });
+    use.append(el('div', 'bprof-l1 bprof-size', L.usage.l1), u2);
+    // ⑤ the acts: BROWSE YOURSELF (B-6ae8, the owner 2026-09-28) — his own tab in its browser, or his open browsing
+    // window — ABSENT (never greyed) where it cannot run; then the ⋯ menu with every other act
+    const acts = el('div', 'bprof-cell bprof-act');
+    if (L.primary) {
+      const bb = el('button', 'file-tool-btn bprof-btn bprof-browse' + (L.primary.open ? ' open' : ''), L.primary.label);
+      bb.title = L.primary.title;
       bb.onclick = () => { if (app.browseYourself) app.browseYourself(r.id, { label: String(r.label || r.id) }); };
-      actions.appendChild(bb);
+      acts.appendChild(bb);
     }
-    actions.appendChild(recWrap);
-    // BROWSE YOURSELF (the owner, 4): "Also record my own actions" — on by default (an opt-out); the recorder follows the switch
-    if (r.canBrowse && r.state !== 'not-ours') {
-      const mineWrap = el('label', 'bprof-record bprof-record-mine');
-      const mcb = document.createElement('input'); mcb.type = 'checkbox'; mcb.checked = r.recordMine !== false; mcb.disabled = st.busy;
-      mineWrap.title = t('When you browse this profile yourself, record what you do like an agent\'s actions (before / after frames; typed text is kept as a length only) — off keeps only when you started and stopped');
-      mcb.onchange = async () => { st.busy = true; mcb.disabled = true; const ok = await act(`/api/browser/profiles/${encodeURIComponent(r.id)}`, jsonInit('PATCH', { recordMine: mcb.checked }), t('Could not change recording')); st.busy = false; if (!ok) mcb.checked = !mcb.checked; load(); };
-      mineWrap.append(mcb, document.createTextNode(' ' + t('Also record my own actions')));
-      actions.appendChild(mineWrap);
-    }
-    // lane H verify r5: a live NAMED profile's browser can be stopped here — the remedy the "keeps closing" notice names
-    // (a Stop ends the record and its restart count); its logins stay in the profile, the next command starts it again
-    if (r.live) { // lane remote-profile-start: a paired machine's browser too (its own op stops it there)
-      const stop = el('button', 'file-tool-btn bprof-btn bprof-stop', t('Stop'));
-      stop.disabled = st.busy;
-      stop.title = t('Stop this profile\'s browser now — its logins stay in the profile; the next command starts it again (this also resets a browser that keeps closing)');
-      stop.onclick = async () => { stop.disabled = true; const res = await act(`/api/browser/profiles/${encodeURIComponent(r.id)}/stop`, jsonInit('POST'), t('Could not stop the browser')); if (res) showToast(t('Stopped {label}', { label: String(r.label || r.id) }), { duration: 4000 }); load(); };
-      actions.appendChild(stop);
-    }
-    // lane browser-stuck: a page that does not respond — the user's Restart (never automatic)
-    if (psw && psw.action && r.live && !r.host) {
-      const re = el('button', 'file-tool-btn bprof-btn bprof-restart', psw.action);
-      re.disabled = st.busy; re.title = psw.tooltip || '';
-      re.onclick = async () => { re.disabled = true; const res = await act(`/api/browser/profiles/${encodeURIComponent(r.id)}/restart`, jsonInit('POST'), t('Could not restart the browser')); if (res) showToast(t('Restarted {label}', { label: String(r.label || r.id) }), { duration: 4000 }); load(); };
-      actions.appendChild(re);
-    } else if (autoDialogsOf(r)) {
-      // verify r2 (the builder's open question 2): a browser launched before the lane still accepts leave-page dialogs
-      // itself until its next start — ONE click starts that next start (the same human Restart; its tabs close, logins stay)
-      const hold = el('button', 'file-tool-btn bprof-btn bprof-restart-hold', t('Restart to hold dialogs'));
-      hold.disabled = st.busy;
-      hold.title = t('Restart this browser so VibeSpace holds leave-page dialogs for a decision instead of the browser accepting them — its tabs close, logins stay');
-      hold.onclick = async () => {
-        const yes = await showConfirmDialog({ title: t('Restart {label}?', { label: String(r.label || r.id) }), message: t('Its open tabs close (logins in the profile stay). From its next start VibeSpace holds leave-page dialogs for a decision, so nothing typed on a page is lost without a word.'), confirmText: t('Restart') });
-        if (!yes) return;
-        hold.disabled = true;
-        const res = await act(`/api/browser/profiles/${encodeURIComponent(r.id)}/restart`, jsonInit('POST'), t('Could not restart the browser'));
-        if (res) showToast(t('Restarted {label}', { label: String(r.label || r.id) }), { duration: 4000 });
-        load();
-      };
-      actions.appendChild(hold);
-    }
+    const menuBtn = el('button', 'file-tool-btn bprof-more'); menuBtn.type = 'button';
+    menuBtn.appendChild(chromeIcon('more', 14)); menuBtn.title = t('More actions'); menuBtn.setAttribute('aria-label', menuBtn.title);
+    menuBtn.onclick = (ev) => { ev.stopPropagation(); openRowMenu(r, x, menuBtn); };
+    acts.appendChild(menuBtn);
+    row.append(ident, state, who, use, acts);
+    // the FOLD: every fact the line leaves out, each under its label
+    const fold = el('div', 'bprof-fold');
+    for (const f of rowFold(r, x)) { const it = el('div', 'bprof-fold-item'); const fv = el('span', 'bprof-fold-v bprof-fold-' + f.key + (f.key === 'build' ? ' bprof-build' : '') + (f.mono ? ' bprof-mono' : '') + (f.tone ? ' ' + f.tone : ''), f.v); if (f.title) fv.title = f.title; it.dataset.key = f.key; it.append(el('span', 'bprof-fold-k', f.k), fv); fold.appendChild(it); }
+    const setOpen = (on) => { fold.hidden = !on; row.classList.toggle('open', on); chev.setAttribute('aria-expanded', String(on)); chev.title = on ? t('Hide details') : t('Show details'); };
+    setOpen(isOpen);
+    chev.onclick = () => { const on = !openFolds.has(r.id); if (on) openFolds.add(r.id); else openFolds.delete(r.id); setOpen(on); };
+    row.appendChild(fold);
+    return row;
+  }
+  /** The ⋯ menu (showContextMenu): the model's items in order — the record switches as check rows, Delete… last in the
+   *  warn colour; each row carries its act's class (`bprof-replay`, `bprof-stop`, `bprof-restart`, `bprof-forget`, …). */
+  const ACT_CLASS = { record: 'bprof-record', 'record-mine': 'bprof-record-mine', replay: 'bprof-replay', build: 'bprof-build-btn', rename: 'bprof-rename', stop: 'bprof-stop', restart: 'bprof-restart', 'restart-hold': 'bprof-restart-hold', delete: 'bprof-forget' };
+  function openRowMenu(r, x, anchor) {
+    const items = rowMenu(r, x).map((m) => {
+      if (m.sep) return { separator: true };
+      const check = m.check === undefined ? '' : `<span class="chan-menu-check${m.check ? ' chan-menu-check-on' : ''}">${m.check ? UI_ICONS.check : ''}</span>`;
+      return { label: m.label, labelHtml: `${check}<span class="bprof-mi ${ACT_CLASS[m.id] || ''}" data-act="${escHtml(m.id)}">${escHtml(m.label)}</span>`, title: m.title || '', style: m.warn ? 'color: var(--red, #e55)' : '', action: () => { if (!st.busy && RUN[m.id]) RUN[m.id](r); } };
+    });
+    const rc = anchor.getBoundingClientRect();
+    showContextMenu(rc.left, rc.bottom + 2, items);
+  }
+  /** One PATCH of a profile's switch (D7: the screencast opt-in; BROWSE YOURSELF (the owner, 4): "Also record my own
+   *  actions"); the keeper answers and the row re-reads. */
+  const patchSwitch = async (r, body) => { st.busy = true; await act(`/api/browser/profiles/${encodeURIComponent(r.id)}`, jsonInit('PATCH', body), t('Could not change recording')); st.busy = false; load(); };
+  // THE ACTS by the model's ids — the ⋯ menu's rows run these (the primary and the who cell's Change… are their own buttons)
+  const RUN = {
+    record: (r) => patchSwitch(r, { record: !r.record }),
+    'record-mine': (r) => patchSwitch(r, { recordMine: r.recordMine === false }),
+    // 2026-09-27: every browser session on this profile, each with its replay (the replay window, this profile's list)
+    replay: (r) => app.openBrowserReplay?.({ profileId: r.id }),
     // lane browser-admin 2a: Change build… — a Chromium profile's Chrome build (a running browser restarts; its
     // conversations are told; the dialog says so before the button)
-    if (String(r.provider || 'chromium') === 'chromium' && r.state !== 'not-ours') {
-      const cb2 = el('button', 'file-tool-btn bprof-btn bprof-build-btn', t('Change build…'));
-      cb2.disabled = st.busy;
-      cb2.title = t('Choose which installed Chrome build this profile runs');
-      cb2.onclick = () => openBuildDialog(app, r.id, { label: String(r.label || r.id), onDone: () => load() });
-      actions.appendChild(cb2);
-    }
+    build: (r) => openBuildDialog(app, r.id, { label: String(r.label || r.id), onDone: () => load() }),
     // Rename… — validated like a new profile's name (unique, a human name, never a path)
-    const rename = el('button', 'file-tool-btn bprof-btn bprof-rename', t('Rename…'));
-    rename.disabled = st.busy;
-    rename.onclick = async () => {
+    rename: async (r) => {
       const name = await showInputDialog({ title: t('Rename {label}', { label: String(r.label || r.id) }), label: t('Name'), value: String(r.label || ''), confirmText: t('Rename') });
       if (name === null || name === undefined || !String(name).trim() || String(name).trim() === String(r.label || '')) return;
       const res = await act(`/api/browser/profiles/${encodeURIComponent(r.id)}`, jsonInit('PATCH', { label: String(name).trim() }), t('Could not rename'));
       if (res) showToast(t('Renamed to {label}', { label: String(res.profile?.label || name) }), { duration: 4000 });
       load();
-    };
-    actions.appendChild(rename);
+    },
+    // lane H verify r5: a live NAMED profile's browser can be stopped here — the remedy the "keeps closing" notice names
+    // (a Stop ends the record and its restart count); its logins stay in the profile, the next command starts it again
+    stop: async (r) => { const res = await act(`/api/browser/profiles/${encodeURIComponent(r.id)}/stop`, jsonInit('POST'), t('Could not stop the browser')); if (res) showToast(t('Stopped {label}', { label: String(r.label || r.id) }), { duration: 4000 }); load(); },
+    // lane browser-stuck: a page that does not respond — the user's Restart (never automatic)
+    restart: async (r) => { const res = await act(`/api/browser/profiles/${encodeURIComponent(r.id)}/restart`, jsonInit('POST'), t('Could not restart the browser')); if (res) showToast(t('Restarted {label}', { label: String(r.label || r.id) }), { duration: 4000 }); load(); },
+    // verify r2 (the builder's open question 2): a browser launched before the lane still accepts leave-page dialogs
+    // itself until its next start — ONE click starts that next start (the same human Restart; its tabs close, logins stay)
+    'restart-hold': async (r) => {
+      const yes = await showConfirmDialog({ title: t('Restart {label}?', { label: String(r.label || r.id) }), message: t('Its open tabs close (logins in the profile stay). From its next start VibeSpace holds leave-page dialogs for a decision, so nothing typed on a page is lost without a word.'), confirmText: t('Restart') });
+      if (!yes) return;
+      const res = await act(`/api/browser/profiles/${encodeURIComponent(r.id)}/restart`, jsonInit('POST'), t('Could not restart the browser'));
+      if (res) showToast(t('Restarted {label}', { label: String(r.label || r.id) }), { duration: 4000 });
+      load();
+    },
     // Delete… — the existing two steps (set aside now, "Delete permanently" below later), and it no longer waits for you to
     // detach anything: every conversation using it is told, loses it, and its pin is cleared (owner ruling A (6))
-    const forget = el('button', 'file-tool-btn bprof-btn bprof-forget', t('Delete…'));
-    const notOurs = r.state === 'not-ours';
-    forget.disabled = notOurs || st.busy;
-    forget.title = notOurs ? rowWhyText(r) : t('Stop it, take it away from every conversation that uses it, and move its directory beside itself — nothing is deleted for good until you click Delete permanently below');
-    forget.onclick = async () => {
+    delete: async (r) => {
       // verify r1 (H4): Delete… while he browses it himself is refused by name (the server too) — his Close / Quit first
       if (r.human) { showToast(humanRefusalText('browsing_yourself', { label: String(r.label || r.id) }, t), { type: 'warn', duration: 9000 }); return; }
       const users = usersOf(r);
@@ -927,16 +959,8 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
       else if (res && res.machine) showToast(t('Deleted {label} and its folder on {machine}', { label: String(r.label || r.id), machine: String(res.machine.host || r.host || '') }), { duration: 7000 });
       else if (res) showToast(t('Deleted {label} — kept aside until you delete it permanently', { label: String(r.label || r.id) }) + (res.detached || res.unpinned ? ' · ' + t('{n} conversation(s) no longer use it', { n: Math.max(Number(res.detached) || 0, Number(res.unpinned) || 0) }) : ''), { duration: 7000 });
       load();
-    };
-    actions.appendChild(forget);
-    // 2026-09-27: every browser session on this profile, each with its replay (the replay window, this profile's list)
-    if (r.trace && r.trace.n) { const rp = btn(t('Replay…'), () => app.openBrowserReplay?.({ profileId: r.id }), 'bprof-replay'); rp.title = t('Every browser session on this profile, action by action'); actions.appendChild(rp); }
-    // "WHO CAN USE IT" (2026-09-27, a LIST): the row's own full-width line — the label, the chips (or "All my
-    // conversations"), Change… and the amber "Nobody can use it now" line; the cell is KEPT per profile across loads
-    // (patched in place, never re-created for a who-change); the legacy record has no list (its chip says so)
-    if (!r.legacy) { const wc = whoCellFor(r.id); wc.patch(r); row.appendChild(wc.el); }
-    return row;
-  }
+    },
+  };
   /** takeover C3 (design-browser-takeover §5.3): one managed EPHEMERAL browser —
    *  the record, whose conversation, its state, and the user's Stop (the
    *  profile stop route; the conversation's next command starts it again). */
@@ -1056,7 +1080,12 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
     if (st.error) { body.appendChild(el('div', 'bprof-error', t('Browser profiles unavailable: {why}', { why: String(st.error) }))); return; }
     const v = st.view; if (!v) return;
     renderHint(v); renderSummary(v);
-    const prof = section(t('Profiles'), t('state · size on disk · traced actions · recordings · the per-profile screencast opt-in'));
+    const prof = section(t('Profiles'), '');
+    // design 015 §2b: THE TABLE — one template; the column titles and every row are subgrids of it
+    const table = el('div', 'bprof-table');
+    const head = el('div', 'bprof-head');
+    for (const h of [t('Profile'), t('State'), t('Who can use it'), t('Disk · records'), '']) head.appendChild(el('span', 'bprof-th', h));
+    table.appendChild(head);
     const rows = v.profiles || [];
     if (!rows.length) prof.appendChild(el('div', 'bprof-empty chat-status-dim', t('No profiles yet — create one with New profile… above; an agent can make one too, or keep a conversation\'s browser from its session card.')));
     const seen = new Set();
@@ -1066,19 +1095,15 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
       let row;
       if (had && had.sig === sig) { row = had.row; if (!r.legacy) whoCellFor(r.id).patch(r); }
       else { row = profileRow(r, v); rowsById.set(r.id, { row, sig }); }
-      prof.appendChild(row);
+      table.appendChild(row);
     }
-    for (const id of [...rowsById.keys()]) if (!seen.has(id)) { rowsById.delete(id); whoCells.delete(id); }
-    const eph = el('div', 'bprof-row bprof-ephemeral');
-    const ei = el('div', 'bprof-ident'); ei.appendChild(el('span', 'bprof-label', t('Browsers without a profile'))); ei.appendChild(el('span', 'bprof-chip', t('ephemeral'))); eph.appendChild(ei);
-    cell(eph, 'bprof-state', ''); cell(eph, 'bprof-size', '');
-    const et = v.ephemeral?.trace || { n: 0, bytes: 0 };
-    const ec = cell(eph, 'bprof-trace', et.n ? t('{n} action(s)', { n: et.n }) : t('no actions'));
-    ec.appendChild(el('span', 'bprof-trace-used', t('{used} of {size}', { used: bytesText(Number(et.used) || 0), size: sizeText(Number(et.limit) || v?.limits?.bytesPerProfile || TRACE_BYTES_PER_PROFILE) })));
-    fitsLine(ec, et);
-    prof.appendChild(eph);
+    if (rows.length) prof.appendChild(table);
+    for (const id of [...rowsById.keys()]) if (!seen.has(id)) { rowsById.delete(id); whoCells.delete(id); openFolds.delete(id); }
     // takeover C3: every conversation's managed ephemeral browser — watched like a profile, gone with its conversation
-    const ephs = section(t('Ephemeral browsers'), t('one per conversation that browses without a profile — started by its first command, stopped after its idle timeout, removed with the conversation'));
+    // design 015 (a): the browsers without a profile — their records' count and size in this section's head (no pseudo-row)
+    const et = v.ephemeral?.trace || { n: 0, bytes: 0 };
+    const ephs = section(t('Ephemeral browsers'), t('one per conversation that browses without a profile — started by its first command, stopped after its idle timeout, removed with the conversation') + ' · ' + (et.n ? t('{n} action(s)', { n: et.n }) : t('no actions')) + ' · ' + t('{used} of {size}', { used: bytesText(Number(et.used) || 0), size: sizeText(Number(et.limit) || v?.limits?.bytesPerProfile || TRACE_BYTES_PER_PROFILE) }));
+    fitsLine(ephs.firstChild, et);
     const erows = Array.isArray(v.ephemeralBrowsers) ? v.ephemeralBrowsers : [];
     if (!erows.length) ephs.appendChild(el('div', 'bprof-empty chat-status-dim', t('None — no conversation has browsed without a profile since its start.')));
     for (const e of erows) ephs.appendChild(ephemeralRow(e));
@@ -1105,18 +1130,54 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
       keptSec.appendChild(row);
     }
     for (const kk of [...keptRows.keys()]) if (!kseen.has(kk)) keptRows.delete(kk);
-    const orph = section(t('Unregistered directories'), v.orphansBase ? t('under {base} — a Chromium profile no record names; adopt the ones worth keeping, set the rest aside', { base: String(v.orphansBase) }) : '');
+    // design 015 (d): the unregistered directories FOLD by default — the head says how many and how much; open, they
+    // list by size (largest first), each with Adopt… / Set aside
+    const ol = orphanOrder(v.orphans || []);
+    const orph = section(t('Unregistered directories'), ol.length ? t('{n} director(ies) · {size}', { n: ol.length, size: bytesText(ol.reduce((s2, o) => s2 + (Number(o.bytes) || 0), 0)) }) : '');
+    if (ol.length) {
+      const oh = orph.firstChild; oh.classList.add('bprof-section-fold');
+      const oc = el('button', 'bprof-chev'); oc.type = 'button'; oc.appendChild(chromeIcon('chevronRight', 12));
+      oc.setAttribute('aria-expanded', String(!!st.orphansOpen)); oc.title = st.orphansOpen ? t('Hide details') : t('Show details');
+      oh.prepend(oc); oh.classList.toggle('open', !!st.orphansOpen);
+      oh.onclick = () => { st.orphansOpen = !st.orphansOpen; render(); };
+    }
     if (v.orphansWhy) orph.appendChild(el('div', 'bprof-empty chat-status-dim', String(v.orphansWhy)));
-    else if (!(v.orphans || []).length) orph.appendChild(el('div', 'bprof-empty chat-status-dim', t('None — every profile directory here is named by a record.')));
-    for (const o of v.orphans || []) orph.appendChild(orphanRow(o));
+    else if (!ol.length) orph.appendChild(el('div', 'bprof-empty chat-status-dim', t('None — every profile directory here is named by a record.')));
+    else if (st.orphansOpen) {
+      if (v.orphansBase) orph.appendChild(el('div', 'bprof-empty chat-status-dim', t('under {base} — a Chromium profile no record names; adopt the ones worth keeping, set the rest aside', { base: String(v.orphansBase) })));
+      for (const o of ol) orph.appendChild(orphanRow(o));
+    }
     const fg = section(t('Deleted profiles (kept aside)'), t('moved beside themselves, never deleted by a sweep — only by your click'));
     if (!(v.forgotten || []).length) fg.appendChild(el('div', 'bprof-empty chat-status-dim', t('Nothing set aside.')));
     for (const f of v.forgotten || []) fg.appendChild(forgottenRow(f));
-    const sw = section(t('Sweep'), '');
+    // design 015 (c): MAINTENANCE — the Browser CLI row, the last sweep + Sweep now, the retention text in full
+    const mt = section(t('Maintenance'), '');
     const s = v.sweep;
-    sw.appendChild(el('div', 'bprof-sweep chat-status-dim', s ? t('Last sweep {ago}: removed the frames of {n} action(s) ({bytes}) and {r} recording(s) ({rbytes}); every action list is kept.', { ago: agoText(Date.now() - Number(s.at || 0)), n: s.removed || 0, bytes: bytesText(s.bytesRemoved || 0), r: s.recordingsRemoved || 0, rbytes: bytesText(s.recordingBytesRemoved || 0) }) : t('No sweep has run yet (it runs at boot and every hour).')));
+    const swl = el('div', 'bprof-sweep');
+    swl.append(el('span', 'chat-status-dim', s ? t('Last sweep {ago}: removed the frames of {n} action(s) ({bytes}) and {r} recording(s) ({rbytes}); every action list is kept.', { ago: agoText(Date.now() - Number(s.at || 0)), n: s.removed || 0, bytes: bytesText(s.bytesRemoved || 0), r: s.recordingsRemoved || 0, rbytes: bytesText(s.recordingBytesRemoved || 0) }) : t('No sweep has run yet (it runs at boot and every hour).')), sweepBtn);
+    mt.append(cliRow, swl, hint);
     if (st.focus) focusRow(st.focus);
+    layout();
   }
+  /** design 015 §2b: what the CSS cannot know — the stacked re-flow when the grid's minimums plus the widest row's acts
+   *  pass the list's width (a phone, a narrow window), and every line that folds by WIDTH (a row's chips past the
+   *  browser chip into "+n"; the who chips into "+N more"). Run after each render and on every resize. */
+  function layout() {
+    const table = body.querySelector('.bprof-table');
+    if (!table || !table.clientWidth) return;
+    const actsPx = Math.max(0, ...[...table.querySelectorAll('.bprof-act')].map((a) => [...a.children].reduce((sum, c) => sum + Math.ceil(c.getBoundingClientRect().width), 0) + 6 * Math.max(0, a.children.length - 1)));
+    root.classList.toggle('bprof-stacked', table.clientWidth < gridNeed(actsPx));
+    for (const line of table.querySelectorAll('.bprof-profile .bprof-chips')) {
+      const kids = [...line.children], tail = kids.pop();
+      const folded = fitLine(line, kids.map((c) => ({ el: c, priority: c.dataset.key === 'browser' ? 0 : 1 })), tail, (n) => '+' + n);
+      tail.style.display = folded.length ? '' : 'none';
+      tail.textContent = folded.length ? '+' + folded.length : '';
+      tail.title = folded.map((f) => f.el.textContent).join('\n');
+    }
+    for (const [, wc] of whoCells) wc.fit();
+  }
+  const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(() => layout()) : null;
+  if (ro) ro.observe(body);
   function focusRow(profileId) {
     st.focus = null;
     const row = body.querySelector(`.bprof-profile[data-profile-id="${String(profileId).replace(/[^a-z0-9-]/gi, '')}"]`);
@@ -1171,8 +1232,8 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
   app.ws?.onGlobal?.(onGlobal);
   sweepBtn.onclick = async () => { sweepBtn.disabled = true; const r = await act('/api/browser/housekeeping/sweep', jsonInit('POST'), t('Sweep failed')); sweepBtn.disabled = false; if (r) showToast(t('Sweep: removed the frames of {n} action(s) ({bytes}) and {r} recording(s) ({rbytes})', { n: r.removed || 0, bytes: bytesText(r.bytesRemoved || 0), r: r.recordingsRemoved || 0, rbytes: bytesText(r.recordingBytesRemoved || 0) }), { duration: 6000 }); load(); };
   refreshBtn.onclick = () => load();
-  winInfo.onClose = () => { st.closed = true; if (st.timer) clearTimeout(st.timer); try { app.ws?.offGlobal?.(onGlobal); } catch { /* optional */ } };
-  winInfo._browserProfiles = { focusRow, load, whoCell: (id) => whoCells.get(id) || null, keptRow: (bk) => (keptRows.get(bk) || {}).row || null, state: () => ({ error: st.error, profiles: (st.view?.profiles || []).length, orphans: (st.view?.orphans || []).length, forgotten: (st.view?.forgotten || []).length, kept: (st.view?.kept || []).map((k) => ({ browserKey: k.browserKey, tabs: (k.tabs || []).length, kind: k.kind, live: !!k.live })) }) };
+  winInfo.onClose = () => { st.closed = true; if (st.timer) clearTimeout(st.timer); try { ro?.disconnect(); } catch { /* optional */ } try { app.ws?.offGlobal?.(onGlobal); } catch { /* optional */ } };
+  winInfo._browserProfiles = { focusRow, load, layout, whoCell: (id) => whoCells.get(id) || null, keptRow: (bk) => (keptRows.get(bk) || {}).row || null, state: () => ({ error: st.error, profiles: (st.view?.profiles || []).length, orphans: (st.view?.orphans || []).length, forgotten: (st.view?.forgotten || []).length, kept: (st.view?.kept || []).map((k) => ({ browserKey: k.browserKey, tabs: (k.tabs || []).length, kind: k.kind, live: !!k.live })) }) };
   load();
   return winInfo;
 }

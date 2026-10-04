@@ -319,7 +319,7 @@ if (srv) await new Promise((r) => srv.close(r));
 console.log('— ④ wiring: the panel\'s New profile… and the picker\'s adopt rows open THE dialog');
 {
   const tv = read('src/lib/browser-trace-view.js');
-  ok(/newBtn = el\('button', 'file-tool-btn bprof-btn bprof-new', t\('New profile…'\)\)/.test(tv) && /newBtn\.onclick = \(\) => openNewProfileDialog\(app, \{ onCreated: \(p\) => \{ if \(p && p\.id\) st\.focus = p\.id; load\(\); \} \}\)/.test(tv) && /bar\.append\(summary, spacer, newBtn,/.test(tv),
+  ok(/newBtn = el\('button', 'file-tool-btn bprof-btn bprof-new', t\('New profile…'\)\)/.test(tv) && /newBtn\.onclick = \(\) => openNewProfileDialog\(app, \{ onCreated: \(p\) => \{ if \(p && p\.id\) st\.focus = p\.id; load\(\); \} \}\)/.test(tv) && /bar\.append\(summary, info, spacer, newBtn,/.test(tv),
     'the Agent browser panel\'s bar carries New profile…, which opens the dialog and focuses the new row in place');
   const pk = read('src/lib/browser-profile-picker.js');
   ok(/App\.prototype\.adoptBrowserProfile = function \(s\) \{[\s\S]{0,1200}openNewProfileDialog\(this, \{ label: name, fromSession,/.test(pk) && !/showInputDialog/.test(pk), 'the picker\'s two "New persistent profile…" rows open the SAME dialog with the conversation\'s name prefilled (the label-only prompt is gone)');

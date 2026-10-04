@@ -398,14 +398,14 @@ console.log(`⑩ design 011 lane 2: a quiet minute over ${N} rows`);
     const own = () => Object.values(x.live()).filter((en) => en.adapterId === A && !en.key.includes('/q_'));
     const lastPolls = () => own().map((en) => Number(e.store.stamps.lane(en).lastPollAt) || 0).join();
     const t0 = now();
-    const f0 = x.flushStats(), ino0 = fs.statSync(e.store.indexFile).ino, size = fs.statSync(e.store.indexFile).size;
+    const f0 = x.flushStats(), ino0 = fs.statSync(e.store.indexFile).ino, size = fs.statSync(e.store.indexFile).size, bytes0 = fs.readFileSync(e.store.indexFile);
     const j0 = (e.store.stamps.stats().journal || {}).bytes || 0;
     // the TIMER's passes (what the engine runs every 5 s): the account's rows polled as they come due; discovery is
     // not due inside the minute (its own cycle is coldSec, printed below)
     let pollSteps = 0;
     for (let k = 0; k < 12; k++) { offset += 5e3; const b = lastPolls(); await e.pass(A); if (lastPolls() !== b) pollSteps++; x.sweep(); x.flush(); }
     const f1 = x.flushStats();
-    const r = { rows: Object.keys(x.live()).length, mb: +(size / 1e6).toFixed(1), writes: f1.writes - f0.writes, skipped: f1.skipped - f0.skipped, sameFile: fs.statSync(e.store.indexFile).ino === ino0, pollSteps, polled: own().filter((en) => Number(e.store.stamps.lane(en).lastPollAt) > t0).length, own: own().length, stampsOwed: e.store.stamps.isDirty(), journalBytes: ((e.store.stamps.stats().journal || {}).bytes || 0) - j0 };
+    const r = { rows: Object.keys(x.live()).length, mb: +(size / 1e6).toFixed(1), writes: f1.writes - f0.writes, skipped: f1.skipped - f0.skipped, sameFile: fs.statSync(e.store.indexFile).ino === ino0, moved: !fs.readFileSync(e.store.indexFile).equals(bytes0), pollSteps, polled: own().filter((en) => Number(e.store.stamps.lane(en).lastPollAt) > t0).length, own: own().length, stampsOwed: e.store.stamps.isDirty(), journalBytes: ((e.store.stamps.stats().journal || {}).bytes || 0) - j0 };
     // discovery's cycle (coldSec): it stamps `listedAt` on every row the vendor lists — outside this lane's three stamps
     offset += 900e3; const d0 = x.flushStats().writes; await e.pass(A); x.flush(); r.discoveryWrites = x.flushStats().writes - d0;
     offset -= 61e3 + 60e3 + 900e3;
@@ -418,7 +418,10 @@ console.log(`⑩ design 011 lane 2: a quiet minute over ${N} rows`);
   const sc = MC.write('src/channel-store.js', ssrc.replace(KEEP[0], KEEP[1]).replace(HEAL[0], HEAL[1]), 'quiet-inrow');
   const ec = MC.write('src/server/channels-engine.js', esrc.replace(WRITER[0], WRITER[1]).replace("require('../channel-store.js')", `require(${JSON.stringify(sc)})`), 'quiet-inrow');
   const qc = await minute(require(ec), 'inrow');
-  ok(qc.pollSteps > 0 && qc.writes >= qc.pollSteps && !qc.sameFile, `⑩ CONTROL: the stamp back in the row — the same quiet minute writes the ${qc.mb} MB index ${qc.writes} times (once per pass that polled: ${qc.pollSteps}) — red`, JSON.stringify(qc));
+  // lane mirror-green-channels (2.369.204): a rewrite is witnessed by the file's BYTES, never its inode number — an ext4
+  // /tmp (the Actions runner's) hands the freed inode to the next tmp + rename, so an EVEN number of writes ends on the
+  // first inode again (test-channel-store ⑭'s control went red there for exactly that; this one held only while odd)
+  ok(qc.pollSteps > 0 && qc.writes >= qc.pollSteps && qc.moved, `⑩ CONTROL: the stamp back in the row — the same quiet minute writes the ${qc.mb} MB index ${qc.writes} times (once per pass that polled: ${qc.pollSteps}) — red`, JSON.stringify(qc));
   for (const c of copiesCensus(MC.files, MC.dir, REPO, { minCopies: 2 })) ok(c.pass, '⑩ ' + c.name + (c.pass ? '' : ' — ' + c.detail));
 }
 console.log(`\ntest-channels-index-scale: ${pass} passed, ${fail} failed`);

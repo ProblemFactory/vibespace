@@ -1617,6 +1617,35 @@ class ChatRenderers {
       el.innerHTML = `<span class="chat-system-text" title="${escHtml(b.key ? t('Harness notification · {key} · {priority}', { key: b.key, priority: pri }) : t('Harness notification · {priority}', { priority: pri }))}">${pri === 'immediate' || pri === 'high' ? UI_ICONS.alert : UI_ICONS.info || ''} ${escHtml(b.text || '')}${hint}</span>`;
       return { el, sideEffect: null };
     }
+    // THE CLI'S TEXT BANNER (claude system/informational, lane classifier-stop-
+    // card): a dim notice, the CLI's words verbatim (escaped); `level` warning
+    // takes the yellow notice colour, the others stay dim. Was the red card.
+    if (msg.noticeKind === 'harness-informational' && msg.content?.[0]?.type === 'harness_informational') {
+      const b = msg.content[0];
+      const lv = ['info', 'notice', 'suggestion', 'warning'].includes(b.level) ? b.level : 'notice';
+      const el = document.createElement('div');
+      el.className = `chat-msg chat-msg-system chat-system-notification chat-harness-notice chat-harness-info-${lv}${lv === 'warning' ? ' chat-harness-notice-high' : ''}`;
+      el.innerHTML = `<span class="chat-system-text" title="${escHtml(t('Harness message · {level}', { level: lv }))}">${lv === 'warning' ? UI_ICONS.alert : UI_ICONS.info || ''} ${escHtml(b.text || '')}</span>`;
+      return { el, sideEffect: null };
+    }
+    // THE SAFETY STOP (lane classifier-stop-card): a classifier stopped the
+    // agent's reply. ONE card for the CLI's notice + its model-only nudge (the
+    // census in src/safety-stop.js paired them): the head in the device's words,
+    // the model from the CLI's line, both CLI texts verbatim behind the expander.
+    if (msg.noticeKind === 'safety-stop' && msg.content?.[0]?.type === 'safety_stop') {
+      const b = msg.content[0];
+      const el = document.createElement('div');
+      el.className = 'chat-msg chat-msg-system chat-system-notification chat-harness-notice chat-safety-stop';
+      const model = b.model ? ` <span class="chat-status-dim">· ${escHtml(b.model)}</span>` : '';
+      el.innerHTML = `<span class="chat-system-text">${UI_ICONS.alert || ''} ${escHtml(t('A safety check stopped the reply above — the rest was withheld and the agent was told not to repeat it'))}${model}</span>`;
+      const cli = [b.notice, b.nudge].filter((s) => typeof s === 'string' && s).join('\n\n');
+      if (cli) {
+        const det = document.createElement('details');
+        det.innerHTML = `<summary>${escHtml(t('Details from the CLI'))}</summary><pre class="chat-pre">${escHtml(cli)}</pre>`;
+        el.appendChild(det);
+      }
+      return { el, sideEffect: null };
+    }
     // RECAP (claude system/away_summary, history-only): "what happened while
     // you were away" — model text, so markdown through the ONE sanitizing
     // renderer (renderMarkdown = marked + sanitizeHtml), never raw.

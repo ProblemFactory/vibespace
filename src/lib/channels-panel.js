@@ -401,7 +401,10 @@ function showSearchDialog(app, a, { q: initial = '' } = {}) {
   const openAround = async (acc, hit) => {
     const { body: sb, close: sclose } = createModalShell({ id: 'chan-around-sheet', title: t('Around this message'), dialogClass: 'chan-dialog chan-around', escapeToClose: true });
     const note = chanLine('chan-flow-status', t("This is {vendor}'s history — VibeSpace did not save it", { vendor: vendorOf(acc) }));
-    const box = document.createElement('div'); box.className = 'chan-around-list';
+    // lane around-sheet-fix (the owner's 2026-10-03 screenshot: names cut at the left, the avatar ON the name and the first
+    // line, a sideways scrollbar): the rows sit in THE WINDOW'S LIST CLASS — `.chanmsg` lays out against its gutter
+    // (`--chan-gutter`, undefined outside it ⇒ the row's padding fell to 0 under a −6 px margin) and its padding (the outbox's way)
+    const box = document.createElement('div'); box.className = 'chanwin-list chan-around-list';
     sb.append(note, box);
     if (hit.known) { const open = btn(t('Open the conversation'), () => { sclose(); close(); app.openChannel(acc.id, hit.convId); }, 'mounts-btn-primary'); open.classList.add('chan-around-open'); sb.appendChild(open); }
     const k = `${acc.id}\u0000${hit.convId}\u0000${hit.vendorId}`;
@@ -413,10 +416,10 @@ function showSearchDialog(app, a, { q: initial = '' } = {}) {
     }
     box.textContent = '';
     if (!x || !x.ok) { box.appendChild(chanLine('chan-search-cov', x && x.code ? routeErrorText(x) : t('Could not read the messages around it'))); return; }
-    const base = `/api/channels/${encodeURIComponent(acc.id)}/${encodeURIComponent(hit.convId)}`;
-    for (const r of renderAroundRows(x.records || [], { base, focus: hit.vendorId })) box.appendChild(r);
+    for (const r of renderAroundRows(x.records || [], { focus: hit.vendorId })) box.appendChild(r);
+    // the found row CENTRED IN THE LIST, vertically only (`scrollIntoView` also scrolls every ancestor, the page included)
     const f = box.querySelector('.chanmsg-found');
-    if (f && f.scrollIntoView) f.scrollIntoView({ block: 'center' });
+    if (f) { const br = box.getBoundingClientRect(), fr = f.getBoundingClientRect(); box.scrollTop += (fr.top - br.top - box.clientTop) - (box.clientHeight - fr.height) / 2; }
   };
   const run = async () => {
     const q = input.value.trim();
@@ -498,14 +501,25 @@ function showSearchDialog(app, a, { q: initial = '' } = {}) {
       say(st, { state: 'done', found: st.found, match: st.match, adds: st.adds });
     };
     for (const st of states) { if (st.offered) ask(st); else say(st, { state: 'refused', code: 'not-supported' }); }
-    // the end of section two, ONE screen ahead: each account's next page, one request each
-    if (typeof IntersectionObserver === 'function') {
-      observer = new IntersectionObserver((ents) => {
-        if (my !== gen || !ents.some((en) => en.isIntersecting)) return;
-        for (const st of states) if (st.next && !st.busy) ask(st, st.next);
-      }, { root: list, rootMargin: '0px 0px 100% 0px' });
-      observer.observe(sentinel);
-    }
+    // the end of section two, ONE screen ahead: each account's next page, one request each — asked by the person's
+    // SCROLL (lane mirror-green-channels, the Actions mirror 2.369.203/.204). An IntersectionObserver speaks only when
+    // the end CROSSES into that screen: where the first answer's rows left the end inside it (the runner's 40 px rows:
+    // the end at 904 px of a 914 px reach; 944 px with 42 px rows elsewhere) it never crossed again, and a scroll to the
+    // very end asked nothing (no "Show more" to press instead); where the observer's first look came after that answer
+    // landed, it asked the next page with nobody scrolling (a metered vendor search, charged to the owner). Every scroll
+    // of the list now looks where the end is (once a frame), and so does a wheel down at a list too short to scroll;
+    // nothing else asks.
+    const endNear = () => sentinel.isConnected && sentinel.getBoundingClientRect().top <= list.getBoundingClientRect().bottom + list.clientHeight;
+    let looking = false;
+    const look = () => {
+      if (looking) return;
+      looking = true;
+      raf(() => { looking = false; if (my === gen && list.isConnected && endNear()) for (const st of states) if (st.next && !st.busy) ask(st, st.next); });
+    };
+    const onWheel = (e) => { if (e.deltaY > 0 && list.scrollHeight <= list.clientHeight) look(); };
+    list.addEventListener('scroll', look, { passive: true });
+    list.addEventListener('wheel', onWheel, { passive: true });
+    observer = { disconnect() { list.removeEventListener('scroll', look); list.removeEventListener('wheel', onWheel); } };
   };
   go.onclick = run;
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); if (!e.repeat) run(); } });
