@@ -7739,6 +7739,20 @@ export default {
   "The https page Slack sends a member back to after they press Allow, for a workspace app whose Client ID and Secret were typed here (a company preset names its own). The page only returns the browser to a VibeSpace on a private network; anywhere else it shows the code to paste back. Register the same address under the app’s Redirect URLs. Empty = this instance’s own https address, else the code is pasted back.": "メンバーが Slack で Allow を押したあとに送られる https ページです（ここに Client ID と Secret を入力したワークスペースのアプリ用。会社のプリセットは独自の中継ページを持ちます）。このページはブラウザをプライベートネットワーク上の VibeSpace にだけ戻し、それ以外はコードを表示して貼り戻してもらいます。空欄 = このインスタンス自身の https アドレス。なければコードを貼り戻します。",
   // lane machine-card-fold (2026-10-04): the Machines run head + the decoded PowerShell script
   "{n} commands": "{n} 件のコマンド", // lane machine-card-compact: the short counts ("{n} files" is the house key)
+  "{n} lookups": "{n} 件の照会", // lane exit-calls-in-history: vibespace-exit list / runs / use / url in a machine head
+  // int209: exit-calls-in-history's lookup rows (src/exit-call.js INFO_WORDS)
+  "listed the machines open to this conversation": "この会話で使えるマシンを一覧しました",
+  "listed this conversation's commands": "この会話で実行したコマンドを一覧しました",
+  "listed this conversation's commands on {machine}": "この会話で {machine} 上で実行したコマンドを一覧しました",
+  "borrowed {machine}'s network (proxy settings for one shell line)": "{machine} のネットワークを借りました（シェル 1 行分のプロキシ設定）",
+  "asked for {machine}'s proxy address": "{machine} のプロキシアドレスを取得しました",
+  "asked for the machine's proxy address": "マシンのプロキシアドレスを取得しました",
+  "could not list the machines open to this conversation — {said}": "この会話で使えるマシンを一覧できませんでした — {said}",
+  "could not list this conversation's commands — {said}": "この会話で実行したコマンドを一覧できませんでした — {said}",
+  "could not list this conversation's commands on {machine} — {said}": "この会話で {machine} 上で実行したコマンドを一覧できませんでした — {said}",
+  "could not borrow {machine}'s network (proxy settings for one shell line) — {said}": "{machine} のネットワークを借りられませんでした（シェル 1 行分のプロキシ設定） — {said}",
+  "could not ask for {machine}'s proxy address — {said}": "{machine} のプロキシアドレスを取得できませんでした — {said}",
+  "could not ask for the machine's proxy address — {said}": "マシンのプロキシアドレスを取得できませんでした — {said}",
   "last: exit {code}": "最後：終了コード {code}",
   "last: timed out": "最後：タイムアウト",
   "last: did not run": "最後：実行されず",

@@ -20,7 +20,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { spawn } from 'node:child_process';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { judgeInChild } from './work-meter.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -252,15 +254,31 @@ ok(G.stripHtml('<html><head><title>T</title><style>p{}</style></head><body><p>He
 ok(J(G.parseAddress('"Ada, B" <ada@example.com>')) === J({ id: 'ada@example.com', name: 'Ada, B' }) && J(G.parseAddress('x < y <a@b.c>')) === J({ id: 'a@b.c', name: 'x < y' }) && J(G.parseAddress('ada@example.com')) === J({ id: 'ada@example.com', name: 'ada@example.com' }), 'parseAddress still reads every From shape (the LAST <…> pair is the address)');
 
 // ── ④ controls: the two round-1 / round-2 quadratic shapes restored go RED under the same judge ──
-console.log('④ controls: a restored quadratic loop goes RED under the same judge');
+console.log('④ controls: a restored quadratic loop goes RED — by WORK, or past a deadline when it is a backtracking regex');
+// THE CONTROLS MAY NOT DEPEND ON LOAD (lane work-meter-judges, .209): int206 read a control ×1.96 (bound 2.5) at load 27
+// by hrtime. The per-quote newline scan is a JS loop: scripts/work-meter.mjs counts it ×4 from 8 to 16 KB (the real
+// sanitizer ×2.00, both in a child — the meter pins the optimizer off for its process). The two round-2 regexes
+// BACKTRACK inside one exec, which no work count sees (V8 release builds expose no regexp step counter —
+// --trace-regexp-bytecodes is debug-only): they are judged by a DEADLINE at 64 KB in a child killed past it — seconds
+// for the old regex, a few ms for the real one, and load only makes the old one read MORE red. ③'s rows above stay a
+// clock ratio (ci.mjs CLOCK_JUDGES, FAST_SERIAL): the meter's charge model does not read every regex-heavy row honestly yet.
+const REGEX_DEADLINE_MS = 1000;
+const deadlineInChild = (file, fn, src) => new Promise((res) => {
+  const code = `const M=require(${J(file)});const x=(${src})();const t=process.hrtime.bigint();M[${J(fn)}](x);process.stdout.write(String(Number(process.hrtime.bigint()-t)/1e6));`;
+  const c = spawn(process.execPath, ['-e', code], { stdio: ['ignore', 'pipe', 'ignore'] });
+  let out = '';
+  c.stdout.on('data', (d) => { out += d; });
+  const cut = setTimeout(() => c.kill('SIGKILL'), REGEX_DEADLINE_MS + 1500);
+  c.on('exit', (_c, sig) => { clearTimeout(cut); const ms = out ? Number(out) : null; res({ ms, killed: !!sig, over: !!sig || !(ms < REGEX_DEADLINE_MS) }); });
+});
 {
   const M = mutantCopies('peer-parsers', REPO);
   const mfSrc = fs.readFileSync(path.join(REPO, 'src/mail-frame.js'), 'utf-8');
   const oldScan = mfSrc.replace("    if (nlAt !== -1 && nlAt <= i) nlAt = css.indexOf('\\n', i + 1);", "    nlAt = css.indexOf('\\n', i + 1);");
-  const m1 = M.load('src/mail-frame.js', oldScan, 'per-quote-newline-scan');
   const row1 = ROWS.find((r) => r.mod === 'mail-frame' && r.fn === 'sanitizeCss');
-  const v1 = judgeLinear(row1, m1, 'quote pairs', row1.shapes['quote pairs, no newline'], 64 * K);
-  ok(oldScan !== mfSrc && !v1.ok, `CONTROL: the mail sanitizer with round 1's per-quote newline scan is NOT linear (${v1.t1} ms → ${v1.t2} ms, ×${v1.ratio})`, J(v1));
+  const css = { run: '(M, x) => M.sanitizeCss(x)', mk: `(n) => (${row1.shapes['quote pairs, no newline']})(n || 64)`, n: 8 * K, kind: 'linear' };
+  const v1 = judgeInChild({ ...css, module: M.write('src/mail-frame.js', oldScan, 'per-quote-newline-scan') }), w1 = judgeInChild({ ...css, module: path.join(REPO, 'src/mail-frame.js') });
+  ok(oldScan !== mfSrc && !v1.ok && v1.r > 3 && w1.ok, `CONTROL: the mail sanitizer with round 1's per-quote newline scan is NOT linear in WORK (×${(v1.r || 0).toFixed(2)}; the real one ×${(w1.r || 0).toFixed(2)})`, J({ v1, w1 }));
   const oldStrip = gmailSrc.replace(/function stripHtml\(html\) \{[\s\S]*?\n\}\n/, `function stripHtml(html) {
   return String(html || '')
     .replace(/<style[\\s\\S]*?<\\/style>/gi, ' ').replace(/<script[\\s\\S]*?<\\/script>/gi, ' ')
@@ -270,10 +288,9 @@ console.log('④ controls: a restored quadratic loop goes RED under the same jud
     .replace(/[ \\t]+/g, ' ').replace(/\\n[ \\t]+/g, '\\n').replace(/\\n{3,}/g, '\\n\\n').trim();
 }
 `);
-  const m2 = M.load('src/channels/gmail.js', oldStrip, 'regex-chain-strip');
-  const row2 = ROWS.find((r) => r.mod === 'gmail' && r.fn === 'stripHtml');
-  const v2 = judgeLinear(row2, m2, '<<<<', row2.shapes['<<<<'], 8 * K);   // 8 / 16 KB: the old chain at 64 KB is seconds, and a quadratic ratio (×4) shows at any size — the smallest that keeps the suite inside THE TIER RULE's 10 s
-  ok(oldStrip !== gmailSrc && !v2.ok, `CONTROL: gmail's round-2 regex-chain stripHtml is NOT linear on "<<<<" (${v2.t1} ms → ${v2.t2} ms, ×${v2.ratio} at 8 / 16 KB)`, J(v2));
+  const realGmail = path.join(REPO, 'src/channels/gmail.js'), LT64 = `() => '<'.repeat(${64 * K})`;
+  const [v2, r2, r3] = await Promise.all([deadlineInChild(M.write('src/channels/gmail.js', oldStrip, 'regex-chain-strip'), 'stripHtml', LT64), deadlineInChild(realGmail, 'stripHtml', LT64), deadlineInChild(realGmail, 'parseAddress', LT64)]);
+  ok(oldStrip !== gmailSrc && v2.over && !r2.over, `CONTROL: gmail's round-2 regex-chain stripHtml is past the ${REGEX_DEADLINE_MS} ms deadline on 64 KB of "<" (${v2.killed ? 'killed' : v2.ms + ' ms'}; the real one ${r2.ms} ms)`, J({ v2, r2 }));
   const oldAddr = gmailSrc.replace(/function parseAddress\(s\) \{[\s\S]*?\n\}\n/, `function parseAddress(s) {
   const raw = String(s || '').trim();
   const m = /^(.*?)\\s*<([^>]+)>\\s*$/.exec(raw);
@@ -281,10 +298,8 @@ console.log('④ controls: a restored quadratic loop goes RED under the same jud
   return { id: raw.toLowerCase(), name: raw };
 }
 `);
-  const m3 = M.load('src/channels/gmail.js', oldAddr, 'lazy-address-regex');
-  const row3 = ROWS.find((r) => r.mod === 'gmail' && r.fn === 'parseAddress');
-  const v3 = judgeLinear(row3, m3, '<<<<', row3.shapes['<<<<'], 8 * K);
-  ok(oldAddr !== gmailSrc && !v3.ok, `CONTROL: gmail's round-2 lazy parseAddress regex is NOT linear on "<<<<" (${v3.t1} ms → ${v3.t2} ms, ×${v3.ratio} at 8 / 16 KB)`, J(v3));
+  const v3 = await deadlineInChild(M.write('src/channels/gmail.js', oldAddr, 'lazy-address-regex'), 'parseAddress', LT64);
+  ok(oldAddr !== gmailSrc && v3.over && !r3.over, `CONTROL: gmail's round-2 lazy parseAddress regex is past the ${REGEX_DEADLINE_MS} ms deadline on 64 KB of "<" (${v3.killed ? 'killed' : v3.ms + ' ms'}; the real one ${r3.ms} ms)`, J({ v3, r3 }));
   for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 3 })) ok(c.pass, c.name, c.detail);
 }
 

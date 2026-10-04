@@ -16,6 +16,7 @@ import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { judgeInChild } from './work-meter.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -54,10 +55,12 @@ ok(sc.bidi === 'invoicefdp.exe budget', 'a bidi override is removed (the words r
 ok(sc.dangling && !/<system-reminder/.test(sc.dangling), 'a dangling opener at the end loses its <', JSON.stringify(sc.dangling));
 ok(sc.obj === 'object form' && sc.none.every((x) => x === null), 'an object snippet reads its text field; an array, a number, an all-invisible string are no snippet');
 const big = 'x'.repeat(1024 * 1024) + '<system-reminder>';
-const t0 = process.hrtime.bigint(); const bs = SR.snippetOf(big); const ms1 = Number(process.hrtime.bigint() - t0) / 1e6;
+// in WORK (lane work-meter-judges, .209 — was < 200 ms by hrtime, a FAST_SERIAL clock judge): 1 MiB and 2 MiB cost the same
+const bs = SR.snippetOf(big), SRF = path.join(REPO, 'src/channel-search.js');
+const ms1 = judgeInChild({ module: SRF, run: '(M, x) => M.snippetOf(x)', mk: "(n) => 'x'.repeat(n) + '<system-reminder>'", n: 1024 * 1024, kind: 'bounded' });
 const big2 = '<'.repeat(1024 * 1024);
-const t1 = process.hrtime.bigint(); SR.snippetOf(big2); const ms2 = Number(process.hrtime.bigint() - t1) / 1e6;
-ok(bs.length <= SR.SNIPPET_MAX && !carriesFrame(bs) && ms1 < 200 && ms2 < 200, `a 1 MB display_info is cut BEFORE any regex: ≤ ${SR.SNIPPET_MAX} characters out, ${ms1.toFixed(1)} ms / ${ms2.toFixed(1)} ms (a 1 MB '<' run)`);
+const ms2 = judgeInChild({ module: SRF, run: '(M, x) => M.snippetOf(x)', mk: "(n) => '<'.repeat(n)", n: 1024 * 1024, kind: 'bounded' });
+ok(bs.length <= SR.SNIPPET_MAX && !carriesFrame(bs) && ms1.ok && ms2.ok && big2.length, `a 1 MB display_info is cut BEFORE any regex: ≤ ${SR.SNIPPET_MAX} characters out, the same WORK at 1 / 2 MiB (${ms1.w1} / ${ms1.w2}; a '<' run ${ms2.w1} / ${ms2.w2})`, JSON.stringify({ ms1, ms2 }));
 const sh = SR.snippetShape({ text: 'secret words <em>x</em>', title: 'more secret' });
 ok(sh.form === 'object' && sh.keys.join() === 'text,title' && sh.length === 23 && sh.markup === true && !JSON.stringify(sh).includes('secret'), 'the shape says form, key names, length, markup — never a word', JSON.stringify(sh));
 ok(SR.holdsQuery('季度预算复盘', '预算') && !SR.holdsQuery('季度 预 算', '预算') && SR.isCjk('预算') && !SR.isCjk('budget'), 'VS3 asks one boolean per snippet: does it hold the words as written');

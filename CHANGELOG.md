@@ -2,6 +2,12 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.209 — 2026-10-04
+
+### Fixed
+- A machine's Commands list now fits its window: long commands, PowerShell scripts and output wrap, and a copy's duration sits on its result line.
+- In a conversation's history, an agent's commands on your machines show as machine cards too, folded per machine — one card per command.
+
 ## 2.369.208 — 2026-10-04
 
 ### Fixed

@@ -209,7 +209,7 @@ function sentenceTable(S, { log = false } = {}) {
   ok(`CENSUS: no visible line of ${lines.length} agent-op results contains "internal metadata" / "never quote" / a \`{"\` head at column 0`, lines.every((l) => !LEAK.test(l) && !/^\{"/.test(l)), lines);
   const cr = read('src/lib/chat-renderers.js');
   ok('the renderer uses the sentence on the Agent card and on the generic card, over the result\'s TEXT (B-63f1: a real ack is a text-block list) — the raw record stays in the expander', /\|\| this\._resultSentence\(\{ \.\.\.block, output: resultText \}\) \|\| resultText\.split\('\\n'\)\[0\]\.substring\(0, 120\)/.test(cr) && /const firstLine = this\._resultSentence\(\{ \.\.\.block, output: resultText \}\) \|\| resultText\.split/.test(cr));
-  ok('…and the pure table imports nothing but the PURE note rule (DOM-free by construction — B-40f8 moved the text rule to src/assistant-note.js)', (read('src/lib/chat-run-summary.js').match(/^\s*import .*$/gm) || []).every((l) => /from '\.\.\/assistant-note\.js';/.test(l)));
+  ok('…and the pure table imports nothing but PURE modules — the note rule and the exit-call reader (DOM-free by construction — B-40f8 moved the text rule to src/assistant-note.js; lane exit-calls-in-history reads a vibespace-exit call with src/exit-call.js, int209)', (read('src/lib/chat-run-summary.js').match(/^\s*import .*$/gm) || []).every((l) => /from '\.\.\/(?:assistant-note|exit-call)\.js';/.test(l)));
 }
 
 /** Codex rollout-only rebuild of a delivered notification / a peer / a quote (S3 verify r1). */
@@ -462,6 +462,7 @@ console.log('§4b WHO MAY BE A NOTICE — a peer is never VibeSpace, whatever it
     for (const m of src.matchAll(/\b(?:emitPeerCard|feedPeerCard)\?*\.?\(([^;\n]*)/g)) {
       if (/^\s*(?:cid|card|s|session|c)\s*,\s*card\)/.test(m[1]) || /^\s*cid, card\)/.test(m[1])) continue; // the pass-through wiring (server.js / the ladder's own export)
       if (/^function|^\s*\(session, card\)/.test(m[1])) continue;
+      if (/^\s*s, \{ \.\.\.card, belongsTo: require\('\.\/src\/exit-call\.js'\)\.cardMatcher\(card\) \}\)/.test(m[1])) continue; // server.js emitCard: the pass-through + the live matcher (lane exit-calls-in-history; exit-proxy's card states kind 'notification') — int209
       sites.push([f, m[1].slice(0, 160)]);
     }
     for (const m of src.matchAll(/\bstashFor\?*\.?\(([^;\n]*)/g)) {

@@ -13,7 +13,21 @@ import { encodedCommandOf } from '../encoded-command.js'; // lane machine-card-f
 import { revealHidden } from '../hidden-chars.js';
 
 const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
-const secs = (ms) => `${(Math.max(0, Number(ms) || 0) / 1000).toFixed(1)} s`;
+/** lane exit-runs-dialog-fit (2.369.209): a run's duration in tenths — one that rounds to nothing reads "<0.1 s", never "0.0 s". */
+export function durationText(ms) {
+  const s = (Math.max(0, Number(ms) || 0) / 1000).toFixed(1);
+  return Number(s) === 0 ? '<0.1 s' : `${s} s`;
+}
+/** lane exit-runs-dialog-fit: a script / output pre WRAPS by default (the chat's `chat-pre-wrapped`, the class the chat's
+ *  machine cards draw their command with); the chat's Wrap toggle (`chat-wrap-toggle`, the same words) switches it to
+ *  no-wrap, where the pre scrolls sideways INSIDE itself — never the dialog. */
+function wrapPre(cls, text) {
+  const pre = el('pre', cls + ' chat-pre-wrapped', text);
+  const btn = el('button', 'chat-wrap-toggle exit-runs-wrap', t('No Wrap'));
+  btn.type = 'button';
+  btn.onclick = (e) => { e.preventDefault(); e.stopPropagation(); const on = pre.classList.toggle('chat-pre-wrapped'); btn.textContent = on ? t('No Wrap') : t('Wrap'); };
+  return { pre, btn };
+}
 const CMD_HEAD = 80;
 
 /** The verdict of a run in the device's words. */
@@ -49,7 +63,14 @@ export function paintRow(node, r) {
   const cmd = String(r.cmd || '');
   const enc = encodedCommandOf(cmd);   // lane machine-card-fold: the head reads "PowerShell: <the script's first line>"
   const flat = (enc && enc.ok ? `PowerShell: ${enc.head}` : cmd).replace(/\n/g, ' ');
-  sum.append(el('code', 'exit-runs-cmd', flat.length > CMD_HEAD ? flat.slice(0, CMD_HEAD - 1) + '…' : flat), el('span', 'exit-runs-verdict', runVerdictText(r)), el('span', 'exit-runs-ms', secs(r.ms)));
+  // lane exit-runs-dialog-fit (the owner: 「这个界面展示不全」): the row is time · who · ONE flexible column — the head
+  // (two lines at most, the whole command one click away in the body) over its outcome line (the verdict, a transfer's
+  // size, the duration: never a lone "0.0 s" line)
+  const main = el('div', 'exit-runs-main');
+  const outcome = el('div', 'exit-runs-outcome');
+  outcome.append(el('span', 'exit-runs-verdict', runVerdictText(r)), ' · ', el('span', 'exit-runs-ms', durationText(r.ms)));
+  main.append(el('code', 'exit-runs-cmd', flat.length > CMD_HEAD ? flat.slice(0, CMD_HEAD - 1) + '…' : flat), outcome);
+  sum.append(main);
   let body = node.querySelector(':scope > .exit-runs-out');
   if (!body) { body = el('div', 'exit-runs-out'); node.appendChild(body); }
   body.textContent = '';
@@ -58,16 +79,22 @@ export function paintRow(node, r) {
     const copy = el('button', 'btn-cancel exit-runs-copy', t('Copy command'));
     copy.type = 'button';
     copy.onclick = (e) => { e.preventDefault(); e.stopPropagation(); copyCommand(cmd); };
+    const tools = el('div', 'exit-runs-tools');
     // lane machine-card-fold: an encoded command's body = its decoded script (hidden characters spelled ⟦U+XXXX⟧ under an
     // alert line), the line itself behind "Show full command"; Copy still copies the line that ran
     if (enc && enc.ok) {
       const raw = el('details', 'exit-runs-raw');
-      raw.append(el('summary', null, t('Show full command')), el('pre', 'exit-runs-cmd-all', cmd));
+      raw.append(el('summary', null, t('Show full command')), el('pre', 'exit-runs-cmd-all chat-pre-wrapped', cmd));
       box.append(el('div', 'exit-runs-stream', t('PowerShell script (decoded from {flag})', { flag: enc.flag })));
       if (enc.hidden.length) box.append(el('div', 'exit-runs-hidden', t('The script carries characters that change the order it reads in or are not drawn at all: {codes}', { codes: enc.hidden.slice(0, 6).join(', ') })));
-      box.append(el('pre', 'exit-runs-cmd-all exit-runs-script', revealHidden(enc.shown)), raw, copy);
-    } else
-    box.append(el('pre', 'exit-runs-cmd-all', cmd), copy);
+      const w = wrapPre('exit-runs-cmd-all exit-runs-script', revealHidden(enc.shown));
+      tools.append(copy, w.btn);
+      box.append(w.pre, raw, tools);
+    } else {
+      const w = wrapPre('exit-runs-cmd-all', cmd);
+      tools.append(copy, w.btn);
+      box.append(w.pre, tools);
+    }
     body.appendChild(box);
   }
   const flags = [r.asked ? t('asked you first') : '', r.revokedDuringRun ? t('access was removed while it ran') : '', r.interpreter ? r.interpreter : ''].filter(Boolean);
@@ -76,7 +103,7 @@ export function paintRow(node, r) {
   if (r.transfer) {
     const x = r.transfer;
     body.appendChild(el('div', 'exit-runs-stream', x.verb === 'push' ? t('from here → on the machine') : t('on the machine → here')));
-    body.appendChild(el('pre', 'exit-runs-pre', x.verb === 'push' ? `${x.local}\n→ ${x.remote}` : `${x.remote}\n→ ${x.local}`));
+    body.appendChild(el('pre', 'exit-runs-pre chat-pre-wrapped', x.verb === 'push' ? `${x.local}\n→ ${x.remote}` : `${x.remote}\n→ ${x.local}`));
     if (x.bytes != null) body.appendChild(el('div', 'exit-runs-flags', `${fmtBytes(x.bytes)} (${x.bytes})${x.sha256 ? ' · sha256 ' + x.sha256 : ''}`));
     return node;
   }
@@ -84,8 +111,10 @@ export function paintRow(node, r) {
   for (const stream of ['stderr', 'stdout']) {
     const text = String(r[stream] || '');
     if (!text.trim()) continue;
-    body.appendChild(el('div', 'exit-runs-stream', stream));
-    body.appendChild(el('pre', 'exit-runs-pre', text));
+    const w = wrapPre('exit-runs-pre', text);
+    const head = el('div', 'exit-runs-head');
+    head.append(el('span', 'exit-runs-stream', stream), w.btn);
+    body.append(head, w.pre);
     if (r.cut && r.cut[stream]) body.appendChild(el('div', 'exit-runs-cut', t('cut at 4 KiB')));
   }
   // verify r1 F4: blank-only output is said as such, and its cut too

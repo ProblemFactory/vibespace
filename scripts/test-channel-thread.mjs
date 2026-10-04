@@ -345,10 +345,10 @@ console.log('⑦ bound before parse — thread ids, quotes, the linear pin');
   const huge = 'omt_' + 'x'.repeat(64 * 1024);
   const r = R.makeRecord({ adapterId: 'a', convId: 'c', vendorId: 'v', at: T0, threadKey: huge, replyTo: huge, root: huge });
   ok(r.threadKey.length === 512 && r.replyTo.length === 512 && r.root.length === 512, 'a 64 KiB thread id / parent / root is cut to 512 at the record (ids, never prose)');
-  const timeOf = (n) => { const p = R.makeRecord({ adapterId: 'a', convId: 'c', vendorId: 'p', at: T0, text: 'y' }); p.text = 'w '.repeat(n) + '\n'; const k = R.makeRecord({ adapterId: 'a', convId: 'c', vendorId: 'k', at: T0 + 1, replyTo: 'p', text: 'k' }); const ix = T.threadIndex([p, k]); const t0 = process.hrtime.bigint(); for (let i = 0; i < 20; i++) T.agentPlaceLine(T.placeOf(k, ix), {}); return Number(process.hrtime.bigint() - t0) / 1e6; };
-  timeOf(1000);
-  const a = timeOf(64 * 1024), b = timeOf(512 * 1024);
-  ok(b < Math.max(5, a) * 16, `the quote path is LINEAR in the parent's text (64 KiB: ${a.toFixed(2)} ms, 512 KiB: ${b.toFixed(2)} ms — 8× the input ≤ 16× the time)`);
+  // in WORK (lane work-meter-judges, .209 — the clock ratio 8× input ≤ 16× time was a load-sensitive judge)
+  const quoteOf = (n) => { const p = R.makeRecord({ adapterId: 'a', convId: 'c', vendorId: 'p', at: T0, text: 'y' }); p.text = 'w '.repeat(n) + '\n'; const k = R.makeRecord({ adapterId: 'a', convId: 'c', vendorId: 'k', at: T0 + 1, replyTo: 'p', text: 'k' }); return { k, ix: T.threadIndex([p, k]) }; };
+  const qL = linear(quoteOf, (x) => T.agentPlaceLine(T.placeOf(x.k, x.ix), {}), 64 * 1024, TFILES);
+  ok(qL.ok, `the quote path is LINEAR in the parent's text, in WORK (64 → 128 KiB: ${qL.w1} → ${qL.w2}, ×${qL.r.toFixed(2)} ≤ ${LINEAR_BOUND})`, JSON.stringify(qL));
 }
 
 // ═══ ⑧ CONTROLS ═════════════════════════════════════════════════════════════════════════════════

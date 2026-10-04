@@ -102,8 +102,9 @@ for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { clean
 const bootServer = async (wt, name) => {
   const [port] = await freePorts(1);
   const home = scratchHome(name, fs); homes.push(home);
+  const rt = path.join(home, 'run'); fs.mkdirSync(rt, { recursive: true }); fs.chmodSync(rt, 0o700); // the private session's own runtime dir (test-architecture §76)
   const log = [];
-  const s = spawn(DBUS, ['--', process.execPath, 'server.js'], { cwd: wt, detached: true, env: { ...process.env, ...(await vncEnv()), PORT: String(port), HOME: home, VIBESPACE_SKIP_AGENT_HOOKS: '1', NO_AUTO_UPDATE: '1', CLAUDE_CMD: '/bin/false', CODEX_CMD: '/bin/false', DBUS_SESSION_BUS_ADDRESS: '' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const s = spawn(DBUS, ['--', process.execPath, 'server.js'], { cwd: wt, detached: true, env: { ...process.env, ...(await vncEnv()), PORT: String(port), HOME: home, XDG_RUNTIME_DIR: rt, VIBESPACE_SKIP_AGENT_HOOKS: '1', NO_AUTO_UPDATE: '1', CLAUDE_CMD: '/bin/false', CODEX_CMD: '/bin/false', DBUS_SESSION_BUS_ADDRESS: '' }, stdio: ['ignore', 'pipe', 'pipe'] });
   s.stdout.on('data', (d) => log.push(String(d))); s.stderr.on('data', (d) => log.push(String(d)));
   servers.push(s);
   let up = false; for (let i = 0; i < 160 && !up; i++) { try { await fetch(`http://127.0.0.1:${port}/api/home`); up = true; } catch { await sleep(250); } }

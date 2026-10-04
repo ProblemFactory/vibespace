@@ -46,7 +46,7 @@ import { startWorkMeter, measure, measureAsync, BOUNDED_RATIO } from './work-met
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
-startWorkMeter();   // BEFORE the modules load (a function compiled before coverage has no block counters)
+startWorkMeter({ scan: 'whole' });   // ⑨'s bounds were calibrated on the pre-.209 whole-receiver scan charges (work-meter.mjs WHOLE_SCAN); BEFORE the modules load (a function compiled before coverage has no block counters)
 const ENG = require(path.join(REPO, 'src/server/channels-engine.js'));
 const S = require(path.join(REPO, 'src/channel-store.js'));
 const { makeRecord } = require(path.join(REPO, 'src/channel-record.js'));

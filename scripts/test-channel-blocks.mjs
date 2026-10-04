@@ -63,6 +63,7 @@ import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { scratch } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { judgeInChild, LINEAR_BOUND } from './work-meter.mjs';
 
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
@@ -1153,26 +1154,31 @@ console.log('⑰ an unclosed drop tag is a word, never a drop to the end of the 
 // asked `/\n$/.test(last.text)` on the run every `<li>` / `<br>` had just been appended to, and V8 flattens the rope
 // for every regex — 128 KB of `<li>` = 430 ms of the server's event loop, at ingest; the post element had no bound
 // at all (a megabyte = half a minute). Now the tail character is tracked beside the run (O(1)) and the element's text
-// goes through bounded(). CONTROL: a copy that re-reads the run is over 2.5× from 32 to 64 KB.
+// goes through bounded(). CONTROL: a copy that re-reads the run is not linear.
+// JUDGED BY WORK (lane work-meter-judges, .209): the clock ratio here read the CONTROL ×2.37 at int208's runner-shape
+// load (×2.52–2.62 alone, bound 2.5) — scripts/work-meter.mjs counts the reader's blocks + native element work in a
+// child (judgeInChild: the optimizer pin stays out of this suite's deadline legs): the real reader reads ×2.00 from
+// 8 to 16 KB on every shape, the re-reading copy ×4 (each `/\n$/.test` charged the run it scans).
 console.log('⑱ the inline reader is linear on <li> / <br> / <td> (the tail character tracked, the post element bounded)');
 {
   const hr = () => Number(process.hrtime.bigint()) / 1e6;
   const best = (fn, x) => { let b = Infinity; for (let r = 0; r < 5; r++) { const t = hr(); fn(x); b = Math.min(b, hr() - t); } return b; };
   const post = (text) => ({ message_id: 'om_li', msg_type: 'post', create_time: '1', chat_id: 'oc', sender: { id: 'ou_x', sender_type: 'user' }, body: { content: JSON.stringify({ title: '', content: [[{ tag: 'text', text }]] }) } });
-  const judge = (mod, label, shape) => { const t1 = best((x) => mod.markupRead(x, { mode: 'inline' }), shape(32 * 1024)), t2 = best((x) => mod.markupRead(x, { mode: 'inline' }), shape(64 * 1024)); return { label, t1: +t1.toFixed(1), t2: +t2.toFixed(1), ratio: +(t2 / Math.max(t1, 0.01)).toFixed(2), ok: t2 < 15 || t2 / Math.max(t1, 0.01) <= 2.5 }; };
-  const SHAPES = [['<li>', (n) => '<li>'.repeat(n / 4)], ['<br>', (n) => '<br>'.repeat(n / 4)], ['<td>x', (n) => '<td>x'.repeat(n / 5)], ['<p>x</p>', (n) => '<p>x</p>'.repeat(n / 8)]];
-  const got = SHAPES.map(([l, sh]) => judge(B, l, sh));
-  ok(got.every((g) => g.ok), `inline markupRead: linear from 32 to 64 KB on ${SHAPES.map((x) => x[0]).join(' / ')} (${got.map((g) => `${g.label} ${g.t1}→${g.t2} ms ×${g.ratio}`).join('; ')})`, J(got));
+  const judge = (file, label, shape) => { const v = judgeInChild({ module: file, run: "(M, x) => M.markupRead(x, { mode: 'inline' })", mk: shape, n: 8 * 1024, kind: 'linear' }); return { label, w1: v.w1, w2: v.w2, ratio: +(v.r || 0).toFixed(2), ok: v.ok === true, err: v.err }; };
+  const SHAPES = [['<li>', "(n) => '<li>'.repeat(n / 4)"], ['<br>', "(n) => '<br>'.repeat(n / 4)"], ['<td>x', "(n) => '<td>x'.repeat(n / 5)"], ['<p>x</p>', "(n) => '<p>x</p>'.repeat(n / 8)"]];
+  const got = SHAPES.map(([l, sh]) => judge(path.join(REPO, 'src/channel-blocks.js'), l, sh));
+  ok(got.every((g) => g.ok), `inline markupRead: linear in WORK from 8 to 16 KB on ${SHAPES.map((x) => x[0]).join(' / ')} (${got.map((g) => `${g.label} ×${g.ratio}`).join('; ')}, bound ${LINEAR_BOUND})`, J(got));
   const big = best((x) => B.larkToBlocks(post(x)), '<li>'.repeat(256 * 1024));
+  // a DEADLINE, not a ratio (ci.mjs CLOCK_JUDGES): the megabyte's JSON.parse precedes the cut, so the meter's bounded()
+  // would charge the parse; 250 ms is ~10× the reading here — it tells "cut, then linear" from half a minute
   ok(big < 250, `a 1 MB post element of <li> through larkToBlocks: ${big.toFixed(0)} ms (bounded to BLOCK_LIMITS.text, then linear)`);
   ok(eq(B.markupRead('a<br>b<li>c<li>d<table><tr><td>e</td><td>f</td></tr></table><p>g</p>', { mode: 'inline' }), [{ k: 't', text: 'a\nb\n• c\n• d\ne  f\ng\n' }]), 'the inline shape is unchanged: a break once, a bullet per item, two spaces between cells, a block boundary a newline');
   const src = read('src/channel-blocks.js');
   ok(/const t = bounded\(String\(el\.text \|\| ''\)\);/.test(src) && /if \(mode === 'inline'\) \{ if \(runs\.length && tail !== '\\n'\) pushRun/.test(src) && !/\/\\n\$\/\.test\(last\.text\)/.test(src.replace(/^\s*\/\/.*$/gm, '')), 'WIRING: the post text element is bounded(); brk() reads the tracked tail, never the run (the comment naming the old test aside)');
   const M = mutantCopies('channel-blocks-inline-tail', REPO);
   const reread = src.replace("    if (mode === 'inline') { if (runs.length && tail !== '\\n') pushRun({ k: 't', text: '\\n' }); return; }", "    if (mode === 'inline') { const last = runs[runs.length - 1]; if (runs.length && !(last && last.k === 't' && /\\n$/.test(last.text))) pushRun({ k: 't', text: '\\n' }); return; }");
-  const m = M.load('src/channel-blocks.js', reread, 'reread-run');
-  const c = judge(m, '<li>', SHAPES[0][1]);
-  ok(reread !== src && !c.ok, `CONTROL: a reader that re-reads the run on every <li> is NOT linear (${c.t1} → ${c.t2} ms, ×${c.ratio})`, J(c));
+  const c = judge(M.write('src/channel-blocks.js', reread, 'reread-run'), '<li>', SHAPES[0][1]);
+  ok(reread !== src && !c.ok && !c.err && c.ratio > 3, `CONTROL: a reader that re-reads the run on every <li> is NOT linear in WORK (×${c.ratio})`, J(c));
   for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(x.pass, x.name, x.detail);
 }
 

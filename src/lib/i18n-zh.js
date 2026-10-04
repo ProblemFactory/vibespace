@@ -7740,6 +7740,20 @@ export default {
   "The https page Slack sends a member back to after they press Allow, for a workspace app whose Client ID and Secret were typed here (a company preset names its own). The page only returns the browser to a VibeSpace on a private network; anywhere else it shows the code to paste back. Register the same address under the app’s Redirect URLs. Empty = this instance’s own https address, else the code is pasted back.": "成员在 Slack 按 Allow 之后跳到的 https 页面，用于在这里填入了 Client ID 和 Secret 的工作区应用（公司预设自带自己的中转页）。这个页面只会把浏览器送回内网里的 VibeSpace，否则显示一串码让你粘回。留空 = 用这台实例自己的 https 地址，没有的话就把码粘回。",
   // lane machine-card-fold (2026-10-04): the Machines run head + the decoded PowerShell script
   "{n} commands": "{n} 条命令", // lane machine-card-compact: the short counts ("{n} files" is the house key)
+  "{n} lookups": "{n} 次查询", // lane exit-calls-in-history: vibespace-exit list / runs / use / url in a machine head
+  // int209: exit-calls-in-history's lookup rows (src/exit-call.js INFO_WORDS)
+  "listed the machines open to this conversation": "列出了此会话可用的机器",
+  "listed this conversation's commands": "列出了此会话运行过的命令",
+  "listed this conversation's commands on {machine}": "列出了此会话在 {machine} 上运行过的命令",
+  "borrowed {machine}'s network (proxy settings for one shell line)": "借用了 {machine} 的网络（为一行 shell 命令设置代理）",
+  "asked for {machine}'s proxy address": "获取了 {machine} 的代理地址",
+  "asked for the machine's proxy address": "获取了机器的代理地址",
+  "could not list the machines open to this conversation — {said}": "未能列出此会话可用的机器 — {said}",
+  "could not list this conversation's commands — {said}": "未能列出此会话运行过的命令 — {said}",
+  "could not list this conversation's commands on {machine} — {said}": "未能列出此会话在 {machine} 上运行过的命令 — {said}",
+  "could not borrow {machine}'s network (proxy settings for one shell line) — {said}": "未能借用 {machine} 的网络（为一行 shell 命令设置代理） — {said}",
+  "could not ask for {machine}'s proxy address — {said}": "未能获取 {machine} 的代理地址 — {said}",
+  "could not ask for the machine's proxy address — {said}": "未能获取机器的代理地址 — {said}",
   "last: exit {code}": "最后：退出码 {code}",
   "last: timed out": "最后：超时",
   "last: did not run": "最后：未运行",

@@ -6343,26 +6343,38 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
 .exit-access-last { color: var(--text-dim); overflow-wrap: anywhere; }
 .exit-access-runs { margin-left: 6px; font-size: 11px; padding: 1px 8px; }
 /* lane-exit-run-output E4: the machine's command list — keyed rows, a row opens its output */
-.exit-runs-body { display: flex; flex-direction: column; gap: 6px; min-width: min(640px, 92vw); max-height: 70vh; overflow: auto; }
+/* lane exit-runs-dialog-fit (2.369.209, the owner: 「这个界面展示不全」): the body's min-width (640) sat inside the 440 px
+   .dialog and everything past 440 was cut. The DIALOG is wide (≤ 960, the viewport less its margins); nothing inside is
+   wider than it — text wraps, the row's command column is min-width 0, a pre scrolls itself; the body scrolls down. */
+.dialog.exit-runs-dialog { width: 960px; max-width: calc((100vw - 32px) / var(--ui-scale, 1)); }
+.exit-runs-body { display: flex; flex-direction: column; gap: 6px; min-width: 0; max-height: 70vh; overflow-x: hidden; overflow-y: auto; }
 .exit-runs-note, .exit-runs-platform, .exit-runs-empty { margin: 0; }
-.exit-runs-list { display: flex; flex-direction: column; gap: 2px; }
+.exit-runs-list { display: flex; flex-direction: column; gap: 2px; container-type: inline-size; min-width: 0; }
 .exit-runs-row { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 2px 6px; font-size: 12px; }
 .exit-runs-row[data-outcome="spawn_failed"], .exit-runs-row[data-outcome="refused"], .exit-runs-row[data-outcome="timed_out"] { border-left: 2px solid var(--red); }
-.exit-runs-sum { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; cursor: pointer; min-height: 24px; }
+.exit-runs-sum { display: grid; grid-template-columns: max-content fit-content(14em) minmax(0, 1fr); gap: 2px 10px; align-items: baseline; cursor: pointer; min-height: 24px; }
+.exit-runs-main { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.exit-runs-outcome { overflow-wrap: anywhere; }
 .exit-runs-when { color: var(--text-dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .exit-runs-who { color: var(--text-secondary); overflow-wrap: anywhere; }
-.exit-runs-cmd { font-family: var(--font-mono, monospace); font-size: 11px; overflow-wrap: anywhere; flex: 1 1 200px; min-width: 0; }
-.exit-runs-verdict { white-space: nowrap; }
+.exit-runs-cmd { font-family: var(--font-mono, monospace); font-size: 11px; overflow-wrap: anywhere; min-width: 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .exit-runs-row[data-outcome="spawn_failed"] .exit-runs-verdict, .exit-runs-row[data-outcome="refused"] .exit-runs-verdict, .exit-runs-row[data-outcome="timed_out"] .exit-runs-verdict { color: var(--red); }
-.exit-runs-ms { color: var(--text-dim); font-variant-numeric: tabular-nums; }
-.exit-runs-out { display: flex; flex-direction: column; gap: 2px; padding: 4px 0 4px 2px; }
-.exit-runs-flags, .exit-runs-stream, .exit-runs-cut, .exit-runs-none { font-size: 10px; color: var(--text-dim); }
+.exit-runs-ms { color: var(--text-dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* below ~560 px the row stacks: time + who on one line, the command + its outcome under them */
+@container (max-width: 560px) { .exit-runs-sum { grid-template-columns: max-content minmax(0, 1fr); } .exit-runs-main { grid-column: 1 / -1; } }
+.exit-runs-out { display: flex; flex-direction: column; gap: 2px; padding: 4px 0 4px 2px; min-width: 0; }
+.exit-runs-head, .exit-runs-tools { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+/* the Wrap toggle off: the pre keeps its lines and scrolls sideways INSIDE itself */
+.exit-runs-pre:not(.chat-pre-wrapped), .exit-runs-cmd-all:not(.chat-pre-wrapped) { white-space: pre; overflow-wrap: normal; word-break: normal; }
+/* wrapped: break a line only where it must (overflow-wrap: anywhere, the base rule), never mid-word as chat's break-all does */
+.exit-runs-pre.chat-pre-wrapped, .exit-runs-cmd-all.chat-pre-wrapped { word-break: normal; }
+.exit-runs-flags, .exit-runs-stream, .exit-runs-cut, .exit-runs-none { font-size: 10px; color: var(--text-dim); overflow-wrap: anywhere; }
 .exit-runs-pre { margin: 0; padding: 5px 8px; font-family: var(--font-mono, monospace); font-size: 11px; line-height: 1.45; color: var(--text); background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; user-select: text; }
 /* lane exit-see-whole (design 013 piece 1b): a row opens with the WHOLE command as itself (its lines kept, wrapped) and Copy */
-.exit-runs-cmdbox { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+.exit-runs-cmdbox { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; }
 .exit-runs-cmd-all { align-self: stretch; margin: 0; padding: 5px 8px; font-family: var(--font-mono, monospace); font-size: 11px; line-height: 1.45; color: var(--text); background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; user-select: text; }
 .exit-runs-copy { font-size: 11px; padding: 2px 8px; }
-@media (max-width: 768px) { .exit-runs-body { min-width: 0; } .exit-runs-sum { min-height: 36px; } }
+@media (max-width: 768px) { .exit-runs-sum { min-height: 36px; } }
 .ut-action-exit { width: auto; padding: 0 8px; font-size: 11px; font-weight: 600; border-radius: var(--radius-sm); }
 /* naive-user N-ask: the answer is its own line under the command, at full strength (never inside the hover-dimmed .ut-actions) */
 .ut-exit-answer { display: flex; gap: 6px; margin-top: 4px; clear: none; }

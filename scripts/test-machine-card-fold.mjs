@@ -15,6 +15,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { mutantCopies } from './mutant-copy.mjs';
+import { judgeInChild } from './work-meter.mjs';
 
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const require = createRequire(import.meta.url);
@@ -63,8 +64,9 @@ const DECODE = (M) => {
 for (const r of DECODE(EC)) ok(r.good, r.name, r.got);
 {
   const big = `powershell -enc ${'A'.repeat(1024 * 1024)}`;
-  const t0 = process.hrtime.bigint(); const r = EC.encodedCommandOf(big); const ms = Number(process.hrtime.bigint() - t0) / 1e6;
-  ok(r && r.code === 'too_big' && ms < 50, `a 1 MiB line is refused too_big without a decode (${ms.toFixed(1)} ms < 50)`, r);
+  // in WORK (lane work-meter-judges, .209 — was < 50 ms by hrtime, a FAST_SERIAL clock judge): 1 MiB and 2 MiB cost the same
+  const r = EC.encodedCommandOf(big), w = judgeInChild({ module: path.join(REPO, 'src/encoded-command.js'), run: '(M, x) => M.encodedCommandOf(x)', mk: "(n) => 'powershell -enc ' + 'A'.repeat(n)", n: 1024 * 1024, kind: 'bounded' });
+  ok(r && r.code === 'too_big' && w.ok, `a 1 MiB line is refused too_big without a decode (WORK at 1 / 2 MiB: ${w.w1} / ${w.w2})`, JSON.stringify({ r, w }));
   ok(EC.commandHeadOf(ENC) === 'PowerShell: Write-Output "hi"' && EC.commandHeadOf('ls -la') === 'ls -la', 'commandHeadOf: "PowerShell: <first line>", a plain command as itself');
 }
 
@@ -182,7 +184,7 @@ ok(Object.values(W).every(Boolean), 'the fold pass splits by machine via splitRu
   const CSS = read('public/chat.css');
   const ml = /\n  _machineLine\(el, msg, ml\) \{[\s\S]*?\n  \}\n/.exec(CR_)?.[0] || '';
   const C = {
-    rule: CV.includes('const compact = machineCompact(machineCards);') && CV.includes("members.forEach((el, i) => { if (machineCards[i]) el.classList.toggle('chat-machine-compact', compact); });"),
+    rule: CV.includes('const compact = machineCompact(machineCards);') && CV.includes("members.forEach((el, i) => { if (machineCards[i]) el.classList.toggle('chat-machine-compact', compact || machineCards[i].verb === 'info'); });"),
     reset: CV.includes("list.querySelectorAll(':scope > .chat-machine-compact').forEach((el) => el.classList.remove('chat-machine-compact'));") && CV.includes("'chat-run-last', 'chat-machine-compact']"),
     time: CV.includes('<span class="chat-run-time">· ${escHtml(headTime)}</span>') && CV.includes('run.headTime ? run.mkLabel({ now, live, time: false }) : label'),
     line: CR_.includes('if (ml) this._machineLine(el, msg, ml);') && ml.includes('this._peerFold?.set?.(msg.id, open, el)') && ml.includes("e.key === 'Enter'") && !/\.title\b|'title'/.test(ml),

@@ -356,9 +356,21 @@ class MessageManager {
   // record never crosses stdout, and its body-less result.origin is skipped).
   // No containment dedup: the delivery site posts once per fire (same-body
   // repeats are legitimate — the 2.362.2 review lesson).
-  injectPeerCard({ fromName, text, msgId = null, resetCredit = null, kind = null, group = null, exitRun = null, channel = null }) {
+  injectPeerCard({ fromName, text, msgId = null, resetCredit = null, kind = null, group = null, exitRun = null, channel = null, belongsTo = null }) {
     const body = String(text || '').trim();
     if (!body) return null;
+    // lane exit-calls-in-history: a "Machines · <machine>" card of a call this conversation's OWN Bash card is still running
+    // (`vibespace-exit run …` / pull / push) is not a second card — it UPGRADES that Bash card in place (`exitCard`: the
+    // card's words + its output block, until the call's own result lands; the renderer draws the call as the machine
+    // card, live and in history alike — src/exit-call.js). No such pending call (a terminal session, a script, a helper's
+    // call) ⇒ the card as before. `belongsTo(command)` = the producer's matcher (server.js: exit-call cardMatcher) — this
+    // file names no exit module (it is bundled into the device agent, test-architecture §52b)
+    const host = !msgId && kind === 'notification' && typeof belongsTo === 'function' ? this._exitCallHost(fromName, belongsTo) : null;
+    if (host) {
+      host.exitCard = { from: String(fromName).trim(), text: body, ...(exitRun && typeof exitRun === 'object' ? { exitRun } : {}) };
+      this._emit({ op: 'edit', id: host.id, fields: { exitCard: host.exitCard } });
+      return host;
+    }
     // A harness-delivered message carries the CLI's msg_id (the turn-start
     // lookup, inc-mu6bfv1t-4drq): note it so the result-rung mining and a
     // device-fed JSONL copy of the same record dedup against THIS card, and
@@ -387,6 +399,19 @@ class MessageManager {
     if (gc) { msg.peerGroup = gc; msg.peerVia = 'peer'; msg.peerFrom = gc.self ? null : (gc.from || msg.peerFrom); }
     this._emit({ op: 'create', message: msg });
     return msg;
+  }
+
+  /** lane exit-calls-in-history: the ONE pending Bash call (newest 64 messages) the Machines card belongs to (`belongsTo`
+   *  = PURE src/exit-call.js cardMatcher: its verb, machine and command agree), or null — two candidates ⇒ null (never guess). */
+  _exitCallHost(fromName, belongsTo) {
+    if (!String(fromName || '').trim().startsWith('Machines · ')) return null;
+    const hits = [];
+    for (let i = this.messages.length - 1, seen = 0; i >= 0 && seen < 64; i--, seen++) {
+      const m = this.messages[i], b0 = m && m.role === 'tool' && m.status === 'pending' && Array.isArray(m.content) ? m.content[0] : null;
+      if (!b0 || b0.type !== 'tool_call' || b0.toolName !== 'Bash' || m.exitCard || typeof b0.input?.command !== 'string') continue;
+      if (belongsTo(b0.input.command)) hits.push(m);
+    }
+    return hits.length === 1 ? hits[0] : null;
   }
 
   /** THE CARD THE CREDIT OUTLIVED (lane reset-path R3): a later fact about account `keys` — a credit used

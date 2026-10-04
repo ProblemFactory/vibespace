@@ -7,6 +7,8 @@
 //      line; the body OPENS with the whole command as itself (its lines kept) in a pre; no element of the row carries
 //      a hover `title`; Copy puts the WHOLE command on the clipboard stub + a toast; a re-paint of a keyed row keeps
 //      the node, its open state, one summary and one command (patched in place)
+//   §1b (lane exit-runs-dialog-fit, 2.369.209) the duration words: a run that rounds to nothing reads "<0.1 s" (never
+//      "0.0 s"), tenths otherwise; a 0 ms transfer row's size and duration share ONE outcome line
 //   §2 the chat card's command block (src/lib/chat-renderers.js exitRunBlock): a 4 096-byte one-token command whole,
 //      folded behind "Show the whole command (4096 characters)"; a 200-line script folded behind "(200 lines)"; the
 //      toggle opens / folds and re-words the expander; four short lines unfolded; a card without `cmd` (an older
@@ -16,7 +18,7 @@
 //      wrap anywhere, the card's fold clamps four lines
 //   §4 CONTROLS (patched copies of the source, bundled in memory — src/ never touched): the painter's hover title back;
 //      the body's command cut to the head; the card without its command block; the fold never folding; a row
-//      without the icon — each goes red
+//      without the icon; the 2.369.207 duration words (f) — each goes red
 // Run: node scripts/test-exit-runs-dialog.mjs
 import fs from 'node:fs';
 import os from 'node:os';
@@ -98,6 +100,13 @@ ok(p1.clip.length === 1 && p1.clip[0] === MULTI && p1.toasts.includes('Command c
 ok(p1.same && p1.open && p1.sums === 1 && p1.wholes === 1 && p1.out2, 'a re-paint of the keyed row is IN PLACE: the same node, still open, one summary, one whole command, the new output', p1);
 
 // ── §2 the chat card's command block ──
+// §1b (lane exit-runs-dialog-fit, DOM-free): the duration words — a run that rounds to nothing reads "<0.1 s", never a
+// "0.0 s"; tenths otherwise; junk / negative = nothing
+const DUR = (f) => { const got = [0, 12, 49, 50, 100, 1234, -5, NaN, undefined, '2500'].map((ms) => f(ms)); return { ok: JSON.stringify(got) === JSON.stringify(['<0.1 s', '<0.1 s', '<0.1 s', '0.1 s', '0.1 s', '1.2 s', '<0.1 s', '<0.1 s', '<0.1 s', '2.5 s']), got }; };
+{ const r = DUR(D.durationText); ok(r.ok, `§1b durationText: 0 / 12 / 49 ms → "<0.1 s", 50 / 100 ms → "0.1 s", 1234 → "1.2 s", junk → "<0.1 s" (${r.got.join(' | ')})`); }
+{ const n = D.paintRow(document.createElement('details'), { at: 1, name: 'n', cmd: 'pull /a → /b', ms: 0, outcome: 'ok', transfer: { verb: 'pull', bytes: 2048, verified: 'sha256', local: '/b', remote: '/a' } }); const o = n.querySelector('.exit-runs-outcome'); const ms = o && o.querySelector('.exit-runs-ms'), v = o && o.querySelector('.exit-runs-verdict');
+  ok(!!(ms && v && ms.textContent === '<0.1 s' && /2/.test(v.textContent)), `§1b a 0 ms transfer row: its size and "<0.1 s" in ONE outcome line (${v && v.textContent} · ${ms && ms.textContent})`); }
+
 console.log('§2 the chat card: the whole command above its output, folded at four lines, the expander naming its count');
 const R = await bundle('src/lib/chat-renderers.js');
 const ONE = 'echo ' + 'Q'.repeat(4091), L200 = Array.from({ length: 200 }, (_, i) => `l${i}`).join('\n');
@@ -135,11 +144,13 @@ ok(/max-height: calc\(4 \* 1\.45em \+ 10px\); overflow: hidden/.test(rule(CSS, '
 
 // ── §4 controls ──
 console.log('§4 controls (patched copies, bundled in memory)');
-const pa = patched('src/lib/exit-runs-dialog.js', "  sum.append(el('code', 'exit-runs-cmd',", "  sum.title = cmd; // CONTROL: the hover title back\n  sum.append(el('code', 'exit-runs-cmd',");
-const pb = patched('src/lib/exit-runs-dialog.js', "box.append(el('pre', 'exit-runs-cmd-all', cmd), copy);", "box.append(el('pre', 'exit-runs-cmd-all', flat.slice(0, CMD_HEAD)), copy); // CONTROL: the head again");
+const pa = patched('src/lib/exit-runs-dialog.js', "  main.append(el('code', 'exit-runs-cmd',", "  sum.title = cmd; // CONTROL: the hover title back\n  main.append(el('code', 'exit-runs-cmd',");
+const pb = patched('src/lib/exit-runs-dialog.js', "const w = wrapPre('exit-runs-cmd-all', cmd);", "const w = wrapPre('exit-runs-cmd-all', flat.slice(0, CMD_HEAD)); // CONTROL: the head again");
+const pf = patched('src/lib/exit-runs-dialog.js', "return Number(s) === 0 ? '<0.1 s' : `${s} s`;", "return `${s} s`; // CONTROL: the 2.369.207 words");
 const pc = patched('src/lib/chat-renderers.js', "  if (typeof x.cmd === 'string' && x.cmd) wrap.appendChild(exitCmdBlock(x.cmd));", '');
 const pd = patched('src/exit-reach.js', 'folded: lines > CMD_FOLD_LINES || c.length > CMD_FOLD_CHARS', 'folded: false');
-ok(pa.applies && pb.applies && pc.applies && pd.applies, 'every patch applies');
+ok(pa.applies && pb.applies && pc.applies && pd.applies && pf.applies, 'every patch applies');
+ok(!DUR((await bundle('src/lib/exit-runs-dialog.js', pf)).durationText).ok, 'CONTROL (f): the old duration words ("0.0 s" for a 0 ms transfer) — §1b goes red');
 ok((await painterCase(await bundle('src/lib/exit-runs-dialog.js', pa))).titles > 0, 'CONTROL (a): the hover title back on the row — §1\'s title census goes red');
 const pbr = await painterCase(await bundle('src/lib/exit-runs-dialog.js', pb));
 ok(pbr.whole !== MULTI, 'CONTROL (b): the body\'s command cut to the head — §1\'s whole-command row goes red');

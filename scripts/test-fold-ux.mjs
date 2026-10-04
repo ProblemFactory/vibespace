@@ -76,7 +76,7 @@ check('countKinds zero-fills every kind and still counts an unlisted one (never 
 })());
 check('files/errors/running composition', S.runSummaryLabel({ byKind: S.countKinds(['read', 'read']), files: ['a.js', 'b.js', 'c.js', 'd.js', 'e.js'], running: true }, t) === '2 file reads — a.js, b.js, c.js, d.js, +1 · running…');
 check('mcpParts splits mcp__server__tool and rejects the rest', JSON.stringify(S.mcpParts('mcp__a__b_c')) === '{"server":"a","tool":"b_c"}' && S.mcpParts('Bash') === null && S.mcpParts('') === null);
-check('the pure module imports nothing but the PURE note rule (DOM-free by construction; B-40f8: src/assistant-note.js)', (read('src/lib/chat-run-summary.js').match(/^\s*import .*$/gm) || []).every((l) => /from '\.\.\/assistant-note\.js';/.test(l)));
+check('the pure module imports nothing but PURE rules (DOM-free by construction; B-40f8: src/assistant-note.js; lane exit-calls-in-history: src/exit-call.js)', (read('src/lib/chat-run-summary.js').match(/^\s*import .*$/gm) || []).every((l) => /from '\.\.\/(?:assistant-note|exit-call)\.js';/.test(l)));
 
 // ── inc-mudv05ja-n5rv: WHEN THE FOLD PASS RUNS — the PURE classifier ─────────
 {
@@ -141,7 +141,7 @@ check('the sticky (user-opened) mark rides EVERY element swap — ONE helper, an
   (cv.match(/if \(this\._runStickyOpen\?\.has\(oldEl\)\) this\._runStickyOpen\.add\(newEl\);/g) || []).length === 1
   && (cv.match(/if \(this\._runExpanded\?\.has\(oldEl\)\) this\._runExpanded\.add\(newEl\);/g) || []).length === 1
   && /_swapMessageEl\(oldEl, newEl, id\) \{/.test(cv)
-  && (cv.match(/this\._swapMessageEl\(/g) || []).length === 4 // the 4th site (2.369.118): a live Workflow card — since inc-mudv05ja only the in-place patch's structural fallback
+  && (cv.match(/this\._swapMessageEl\(/g) || []).length === 5 // the 5th (lane exit-calls-in-history): the live Machines card upgrading a pending Bash call (an `exitCard` edit); the 4th site (2.369.118): a live Workflow card — since inc-mudv05ja only the in-place patch's structural fallback
   && (cv.match(/\.replaceWith\(/g) || []).length === 2
   && (cv.match(/oldEl\.replaceWith\(newEl\);/g) || []).length === 1
   && (cv.match(/old\.replaceWith\(chip\);/g) || []).length === 1

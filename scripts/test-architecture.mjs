@@ -44,7 +44,7 @@ const resolveRel = (from, spec) => {
 };
 
 // ── Tier membership (path-based; NEW files inherit their directory's tier) ──
-const PURE = new Set(['src/timed-sync.js' /* design 011 lane 1 (store-timing): the store-write clock — performance.now + counters, imports nothing; §72 */, 'src/channel-search.js' /* design 010 (B-c9be): the vendor snippet's ONE reader, the merge, the full-search refusal table, the dialog's coverage / status words — the store, the engine, the adapters and the dialog share them; imports only channel-record (PURE → PURE) */, 'src/channel-focus.js' /* design 008 (B-3cf8): the first screen's predicate (statusTag) + the first read's candidate test + the page rules — the engine's first read and the panel's keyed store share them; imports nothing */, 'src/app-recipes.js' /* design 009: the recipes table — imports nothing */, 'src/app-card.js' /* design 009: THE one card of an app install — its view + the digest of what it showed, shared by the engine and the client; imports nothing */, 'src/record-lateness.js' /* lane-hot-switch: a late record is not a live fact — the stream clock + the look-ahead, imports nothing */, 'src/hidden-chars.js', 'src/encoded-command.js' /* lane machine-card-fold: a PowerShell -EncodedCommand decoded for display (imports only hidden-chars) */, 'src/assistant-note.js' /* B-40f8: text addressed to the assistant — the note rule + THE turn preview, server builders and client alike; imports nothing */, 'src/window-desktop.js', 'src/plugin-manifest.js', 'src/account-pool-auto.js', 'src/model-family.js', 'src/task-color-seq.js', 'src/ssh-key-format.js', 'src/session-schema.js', 'src/otel-truth.js', 'src/msg-acl.js', 'src/backend-caps.js',
+const PURE = new Set(['src/timed-sync.js' /* design 011 lane 1 (store-timing): the store-write clock — performance.now + counters, imports nothing; §72 */, 'src/channel-search.js' /* design 010 (B-c9be): the vendor snippet's ONE reader, the merge, the full-search refusal table, the dialog's coverage / status words — the store, the engine, the adapters and the dialog share them; imports only channel-record (PURE → PURE) */, 'src/channel-focus.js' /* design 008 (B-3cf8): the first screen's predicate (statusTag) + the first read's candidate test + the page rules — the engine's first read and the panel's keyed store share them; imports nothing */, 'src/app-recipes.js' /* design 009: the recipes table — imports nothing */, 'src/app-card.js' /* design 009: THE one card of an app install — its view + the digest of what it showed, shared by the engine and the client; imports nothing */, 'src/record-lateness.js' /* lane-hot-switch: a late record is not a live fact — the stream clock + the look-ahead, imports nothing */, 'src/hidden-chars.js', 'src/encoded-command.js' /* lane machine-card-fold: a PowerShell -EncodedCommand decoded for display (imports only hidden-chars) */, 'src/exit-call.js' /* lane exit-calls-in-history: a vibespace-exit Bash call + its result read as the machine call it is, and the card it draws — the server's live pairing and the bundle share it; imports only exit-reach + hidden-chars (PURE → PURE) */, 'src/assistant-note.js' /* B-40f8: text addressed to the assistant — the note rule + THE turn preview, server builders and client alike; imports nothing */, 'src/window-desktop.js', 'src/plugin-manifest.js', 'src/account-pool-auto.js', 'src/model-family.js', 'src/task-color-seq.js', 'src/ssh-key-format.js', 'src/session-schema.js', 'src/otel-truth.js', 'src/msg-acl.js', 'src/backend-caps.js',
   // AGENT BROWSER (design-agent-browser-v2 §3.6): the identity/spawn-env decisions, the
   // registry + lease model and the keeper's verdicts — imports nothing (P0/P1); and the ONE
   // constants home every process keeper counts and bounds by (src/keeper-limits.js)
@@ -3644,6 +3644,49 @@ console.log('§75 every old-object git read in a suite is guarded and degrades t
   ];
   const wrong = PLANTS.filter(([p, n]) => judgeSrc(p).bad.length !== n).map(([p, n]) => `${p.slice(0, 70)} (want ${n})`);
   ok(wrong.length === 0, `§75 NEGATIVE CONTROLS: ${PLANTS.length} plants — unguarded reads caught (a commented or quoted "try {" is no guard), guarded ones and HEAD / layout reads pass${wrong.length ? ' — wrong: ' + wrong.join(' | ') : ''}`);
+}
+
+// ── THE CLOCK-JUDGE CENSUS (lane work-meter-judges, .209 — ci.mjs clockJudgeLines / CLOCK_JUDGES): a complexity claim
+// is judged by WORK (scripts/work-meter.mjs). A NEW suite that judges linear / quadratic by a clock is red here until it
+// is converted or listed with the reason it stays on the clock; a listed suite no longer found is red too ──
+console.log('\nclock-judge census: every clock read beside a complexity claim is a listed CLOCK_JUDGES suite');
+{
+  const { clockJudgeLines, CLOCK_JUDGES } = await import('./ci.mjs');
+  const dir = path.join(REPO, 'scripts');
+  const found = fs.readdirSync(dir).filter((f) => /^test-.*\.mjs$/.test(f)).map((f) => ({ name: f.slice(0, -4), lines: clockJudgeLines(fs.readFileSync(path.join(dir, f), 'utf-8')) })).filter((x) => x.lines.length);
+  const listed = new Map(CLOCK_JUDGES.map((x) => [x.name, x.why]));
+  const unlisted = found.filter((x) => !listed.has(x.name)), stale = [...listed.keys()].filter((n) => !found.some((x) => x.name === n));
+  ok(!unlisted.length, `no suite judges complexity by the clock off the list (${found.length} listed: ${found.map((x) => `${x.name}:${x.lines.join(',')}`).join(' ')})${unlisted.length ? ' — UNLISTED: ' + unlisted.map((x) => `${x.name}:${x.lines.join(',')}`).join(' ') + ' (convert it to scripts/work-meter.mjs, or list it in ci.mjs CLOCK_JUDGES with why)' : ''}`);
+  ok(!stale.length && CLOCK_JUDGES.every((x) => String(x.why).length >= 40), `every CLOCK_JUDGES row is still found and says why it stays on the clock${stale.length ? ' — STALE: ' + stale.join(', ') : ''}`);
+  // PATCHED-COPY CONTROL: test-channel-thread with its pre-.209 clock-ratio quote judge restored is found (and unlisted ⇒ red)
+  const thread = fs.readFileSync(path.join(dir, 'test-channel-thread.mjs'), 'utf-8');
+  const OLD = "  const timeOf = (n) => { const t0 = HR.bigint(); for (let i = 0; i < 20; i++) T.agentPlaceLine(T.placeOf(k, ix), {}); return Number(HR.bigint() - t0) / 1e6; };\n  const a = timeOf(64 * 1024), b = timeOf(512 * 1024);\n  ok(b < Math.max(5, a) * 16, `the quote path is LINEAR in the parent's text (8× the input ≤ 16× the time)`);\n".replaceAll('HR', ['process', 'hrtime'].join('.'));   // never the clock word itself here: this suite is censused too
+  const cut = thread.indexOf('  const qL = linear(');
+  const mutant = cut > 0 ? thread.slice(0, cut) + OLD + thread.slice(cut) : '';
+  ok(cut > 0 && clockJudgeLines(thread).length === 0 && clockJudgeLines(mutant).length > 0 && !listed.has('test-channel-thread'), `CONTROL: test-channel-thread with its old hrtime ratio restored is found (lines ${clockJudgeLines(mutant).join(',')}) and is not on the list ⇒ red; as committed (WORK) it is not found`);
+}
+
+// §76 A PRIVATE BUS NEVER SHARES THE OWNER'S RUNTIME DIR (lane xpra-control-judge, 2026-10-04). Apps on a private
+// dbus-run-session activate their own org.a11y.Bus launcher, and it binds `$XDG_RUNTIME_DIR/at-spi/bus`: with the owner's
+// /run/user/<uid> inherited it REPLACED the desktop's accessibility socket (2.369.198 test-desktop-app-snap; again
+// 2026-10-04 08:55Z, a loaded rerun of test-desktop-xpra-window). Every script that starts a dbus-run-session or resolves a
+// real GTK app / builds a GTK window as a fixture hands its children a private XDG_RUNTIME_DIR (an `XDG_RUNTIME_DIR: <expr>`
+// entry that is not the inherited process.env one). DERIVED over every scripts/*.{mjs,js,cjs} on disk (untracked included);
+// NEGATIVE CONTROLS: a patched copy of a passing private-bus suite and of a passing GTK-fixture suite, the entry stripped.
+console.log('§76 every private-bus / GTK-fixture script gives its children a private XDG_RUNTIME_DIR');
+{
+  const DBUS = /(?:bin|binOnPath)\(\s*['"]dbus-run-session['"]|(?:spawn|spawnSync|execFile|execFileSync|execSync)\(\s*[`'"]dbus-run-session/;
+  const GTK = /(?:bin|binOnPath)\(\s*['"](?:gnome-calculator|gnome-text-editor|gedit|zenity)['"]|Gtk\.(?:Window|ApplicationWindow|Dialog)\(/;
+  const PRIV = /XDG_RUNTIME_DIR\s*:\s*(?!process\.env|undefined\b|null\b|''|"")[\w$`'"(]/;
+  const fixture = (t) => DBUS.test(t) || GTK.test(t);
+  const unsafe = (t) => fixture(t) && !PRIV.test(t);
+  const files = fs.readdirSync(path.join(REPO, 'scripts')).filter((f) => /\.(mjs|js|cjs)$/.test(f) && f !== 'test-architecture.mjs');
+  const fixtures = files.filter((f) => fixture(read('scripts/' + f)));
+  const bad = fixtures.filter((f) => unsafe(read('scripts/' + f)));
+  ok(fixtures.length >= 6 && bad.length === 0, `§76: ${fixtures.length} private-bus / GTK-fixture scripts (${fixtures.join(', ')}), each hands its children a private XDG_RUNTIME_DIR${bad.length ? ' — MISSING in: ' + bad.join(', ') : ''}`);
+  const strip = (t) => t.replace(/XDG_RUNTIME_DIR\s*:\s*(?!process\.env)[^,}]+,?/g, '');
+  const ctl = [['test-desktop-app-snap.mjs', 'private bus'], ['test-desktop-xpra-window.mjs', 'GTK fixture']].map(([f, k]) => { const t = read('scripts/' + f); return { f, k, asWritten: unsafe(t), patched: unsafe(strip(t)) }; });
+  ok(ctl.every((c) => !c.asWritten && c.patched), `§76 NEGATIVE CONTROLS: ${ctl.map((c) => `${c.f} (${c.k}) passes as written and is caught with its XDG_RUNTIME_DIR entries stripped`).join('; ')}${ctl.some((c) => c.asWritten || !c.patched) ? ' — ' + JSON.stringify(ctl) : ''}`);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

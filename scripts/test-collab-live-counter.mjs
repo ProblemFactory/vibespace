@@ -287,8 +287,8 @@ console.log('— ④ wiring pins (a pure composer with an unstaged call site is 
     !!roLine && roLine === ciLine
     && /if \(roLabel && !this\._streamStatus\.classList\.contains\('hidden'\)\) \{/.test(cv),
     `read-only: ${roLine} · chat-input: ${ciLine}`);
-  check('the run label takes a PRE-COMPOSED collab segment — chat-run-summary still imports nothing but the PURE note rule (B-40f8: src/assistant-note.js)',
-    /collabPart: collabRunPart\(collabStats, \{ now, live, t \}\)/.test(cv) && /collabPart = ''/.test(rs) && (rs.match(/^\s*import .*$/gm) || []).every((l) => /from '\.\.\/assistant-note\.js';/.test(l)));
+  check('the run label takes a PRE-COMPOSED collab segment — chat-run-summary still imports nothing but PURE modules (B-40f8: src/assistant-note.js; int209: src/exit-call.js, lane exit-calls-in-history)',
+    /collabPart: collabRunPart\(collabStats, \{ now, live, t \}\)/.test(cv) && /collabPart = ''/.test(rs) && (rs.match(/^\s*import .*$/gm) || []).every((l) => /from '\.\.\/(?:assistant-note|exit-call)\.js';/.test(l)));
   check('the run record carries the label recipe so the ticker never builds a second kind table',
     /const rec = \{ header, members, inline, footer: null, label, open: false, mkLabel, collabStats/.test(cv)
     && /run\.mkLabel\(\{ now, live \}\)/.test(cv));

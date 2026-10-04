@@ -91,7 +91,8 @@ fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
 execSync('npm run build', { cwd: wt, stdio: 'ignore' });
 const PASSWORD = 'hunter2'; // a fake, like every suite's
-const srvEnv = { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: home, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: PASSWORD };
+const RUNTIME = path.join(home, 'run'); fs.mkdirSync(RUNTIME, { recursive: true }); fs.chmodSync(RUNTIME, 0o700); // a private runtime dir for the apps (test-architecture §76)
+const srvEnv = { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: home, XDG_RUNTIME_DIR: RUNTIME, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: PASSWORD };
 let srv = null;
 const srvLog = [];
 const bootServer = () => { srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: srvEnv, stdio: ['ignore', 'pipe', 'pipe'] }); srv.stdout.on('data', (d) => srvLog.push(String(d))); srv.stderr.on('data', (d) => srvLog.push(String(d))); return srv; };

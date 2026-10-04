@@ -158,6 +158,16 @@ const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; 
 const skip = (n, why) => { skipped++; console.log(`  ⚠ SKIP ${n}: ${why}`); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 20000, step = 200) => { const t = Date.now() + ms; while (Date.now() < t) { let v = null; try { v = await fn(); } catch {} if (v) return v; await sleep(step); } return null; };
+// EVIDENCE DEADLINES (lane xpra-control-judge, 2.369.208): the pre-fix CONTROLS reddened at load 35–67 in int205–int207 and
+// were green alone — they judged on the wall clock (a 20 s boot loop, a 3 s nap before reading X, a one-shot X read, a 45 s
+// title bound). A wait now ends on the event it is about; its deadline only fails a leg whose evidence NEVER
+// comes, so each deadline is several times the old bound (the slack), and a dead copy fails at once instead of waiting it out.
+const BOOT_DEADLINE_MS = 120000;  // a scratch server copy answering /api/home — slack 6× the old 80 × 250 ms loop
+const SETTLE_DEADLINE_MS = 60000; // a window settled where the leg needs it (X agrees with the view / the pane) — slack 20× the old 3 s nap
+const XAGREE_DEADLINE_MS = 20000; // the X server reports a window where our client put it (xpra moves the corral after the first paint)
+const TITLE_DEADLINE_MS = 120000; // a real browser's page title reaching the title bar — slack 2.7× the old 45 s
+/** a scratch server copy is up: /api/home answers (true), or the copy exited (false, at once), or BOOT_DEADLINE_MS passed (false) */
+const bootedCopy = async (child, port) => (await until(async () => { if (child.exitCode !== null || child.signalCode) return 'dead'; await fetch(`http://127.0.0.1:${port}/api/home`); return 'up'; }, BOOT_DEADLINE_MS, 250)) === 'up';
 
 try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
@@ -176,7 +186,11 @@ fs.mkdirSync(FAKE_BIN, { recursive: true });
   fs.writeFileSync(FAKE_CLAUDE, `#!/bin/sh\ncase " $* " in *" --output-format "*) sleep 1; printf '%s\\n' '${init}';; esac\nexec sleep 600\n`, { mode: 0o755 });
 }
 const agentTokens = [];
-const srvEnv = { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', CLAUDE_CMD: FAKE_CLAUDE, PATH: FAKE_BIN + ':' + (process.env.PATH || '') };
+// the apps this suite runs (GNOME Calculator, the §18 GTK window) get a PRIVATE runtime dir: under a private bus their
+// org.a11y.Bus launcher binds `$XDG_RUNTIME_DIR/at-spi/bus`, and with the owner's /run/user/<uid> it REPLACED the desktop's
+// accessibility socket (2026-10-04 08:55Z, a loaded rerun of this suite) — test-architecture §76 holds every fixture to it
+const RUNTIME = path.join(fakeHome, 'run'); fs.mkdirSync(RUNTIME, { recursive: true }); fs.chmodSync(RUNTIME, 0o700);
+const srvEnv = { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, XDG_RUNTIME_DIR: RUNTIME, VIBESPACE_SKIP_AGENT_HOOKS: '1', CLAUDE_CMD: FAKE_CLAUDE, PATH: FAKE_BIN + ':' + (process.env.PATH || '') };
 let srv = null;
 const srvLog = [];
 const bootServer = () => { srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: srvEnv, stdio: ['ignore', 'pipe', 'pipe'] }); srv.stdout.on('data', (d) => srvLog.push(String(d))); srv.stderr.on('data', (d) => srvLog.push(String(d))); return srv; };
@@ -722,28 +736,29 @@ try {
     const [PORTC] = await freePorts(1);
     const homeC = scratchHome('deskxpra-x5ctl-home', fs);
     const sc = spawn(process.execPath, ['server.js'], { cwd: wtc, env: { ...srvEnv, ...VNC_ENV, PORT: String(PORTC), HOME: homeC }, stdio: 'ignore' }); ctlServers.push(sc);
-    let upC = false; for (let i = 0; i < 80 && !upC; i++) { try { await fetch(`http://127.0.0.1:${PORTC}/api/home`); upC = true; } catch { await sleep(250); } }
+    let upC = await bootedCopy(sc, PORTC);
     check('CONTROL: the pre-x5 copy boots', upC);
     if (upC) {
       const ctlPage = async () => { const t = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, { method: 'PUT' })).json(); const p = await page(t); await openPage(p, `http://127.0.0.1:${PORTC}`); return { p, t }; };
       const CA = await ctlPage();
       const lc = await CA.p.evalJs(`fetch('/api/desktop/apps', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: ${JSON.stringify(JSON.stringify({ exec: XTERM, args: ['-T', 'vs-x5-ctl', '-geometry', '80x24'], label: 'vs-x5-ctl' }))} }).then((r) => r.json())`);
       const idc = lc && lc.id;
-      const rc = idc && await until(() => CA.p.evalJs(`fetch('/api/desktop/apps/${idc}').then((r) => r.json()).then((r) => (r.state === 'ready' ? r : null))`), 30000);
+      const rc = idc && await until(() => CA.p.evalJs(`fetch('/api/desktop/apps/${idc}').then((r) => r.json()).then((r) => (r.state === 'ready' ? r : null))`), SETTLE_DEADLINE_MS);
       const xMainC = async () => { const ws = (await CA.p.evalJs(`fetch('/api/desktop/apps/${idc}/windows').then((r) => r.json())`)).windows || []; return ws.slice().sort((a, b) => b.w * b.h - a.w * a.h)[0] || null; };
       const sizeC = (p, W, H) => p.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(idc)}); app.wm.focusWindow(w.id); w.element.style.left = '30px'; w.element.style.top = '20px'; w.element.style.width = '${W}px'; w.element.style.height = '${H}px'; if (w.onResize) w.onResize(); return true; })()`);
       if (rc) {
         await CA.p.evalJs(`app.openDesktopApp(${JSON.stringify(idc)}); true`);
         await sizeC(CA.p, 700, 500);
-        const ca = await until(async () => { const s = await CA.p.evalJs(SEAT(idc)); const x = await xMainC(); return s && s.status === 'Connected' && fitsX(x, s.pane) ? s : null; }, 30000, 300);
+        const ca = await until(async () => { const s = await CA.p.evalJs(SEAT(idc)); const x = await xMainC(); return s && s.status === 'Connected' && fitsX(x, s.pane) ? s : null; }, SETTLE_DEADLINE_MS, 300);
         const CB = await ctlPage();
         const hasB = await until(() => CB.p.evalJs(`!!${SEAT(idc)}`), 15000, 250); if (!hasB) await CB.p.evalJs(`app.openDesktopApp(${JSON.stringify(idc)}); true`);
         await until(async () => { const s = await CB.p.evalJs(SEAT(idc)); return s && s.status === 'Connected' ? s : null; }, 20000, 250);
         await sizeC(CB.p, 820, 560); // the same real change as the x5 leg's B
-        await sleep(3000);
-        const xc = await xMainC();
-        const cb = await CB.p.evalJs(SEAT(idc));
-        console.log(`  CONTROL (pre-x5): A's pane ${ca && `${ca.pane.w}×${ca.pane.h}`}, B's pane ${cb && cb.pane && `${cb.pane.w}×${cb.pane.h}`}, X ${xc && `${xc.w}×${xc.h}`} 3 s after B resized; B's mode ${cb && cb.mode}, overlay ${cb && cb.overlay && cb.overlay.shown}`);
+        // evidence, never a nap: wait for what the control is about — B unblocked and X no longer fitting A's pane — until
+        // SETTLE_DEADLINE_MS; a pre-x5 copy that never takes the app away fails there (the last read is what is judged)
+        let xc = null, cb = null; const tB = Date.now();
+        await until(async () => { xc = await xMainC(); cb = await CB.p.evalJs(SEAT(idc)); return !!ca && !!cb && cb.overlay && !cb.overlay.shown && !fitsX(xc, ca.pane); }, SETTLE_DEADLINE_MS, 300);
+        console.log(`  CONTROL (pre-x5): A's pane ${ca && `${ca.pane.w}×${ca.pane.h}`}, B's pane ${cb && cb.pane && `${cb.pane.w}×${cb.pane.h}`}, X ${xc && `${xc.w}×${xc.h}`} ${Date.now() - tB} ms after B resized; B's mode ${cb && cb.mode}, overlay ${cb && cb.overlay && cb.overlay.shown}`);
         check('CONTROL: through the pre-x5 server the second page is NOT blocked and its pane TAKES the app away from the first (X no longer fits A\'s pane — the leg "B\'s pane changes nothing" fails there)', !!ca && !!cb && cb.overlay && !cb.overlay.shown && !fitsX(xc, ca.pane), { a: ca && ca.pane, b: cb && cb.pane, x: xc });
         await closePage(CB);
         await CA.p.evalJs(`fetch('/api/desktop/apps/${idc}/stop', { method: 'POST' }).then((r) => r.status)`);
@@ -1003,7 +1018,7 @@ try {
     const [PORTH] = await freePorts(1);
     const homeH = scratchHome('deskxpra-hidpictl-home', fs);
     const sh = spawn(process.execPath, ['server.js'], { cwd: wtc, env: { ...srvEnv, ...VNC_ENV, PORT: String(PORTH), HOME: homeH }, stdio: 'ignore' }); ctlServers.push(sh);
-    let upH = false; for (let i = 0; i < 80 && !upH; i++) { try { await fetch(`http://127.0.0.1:${PORTH}/api/home`); upH = true; } catch { await sleep(250); } }
+    let upH = await bootedCopy(sh, PORTH);
     check('CONTROL: the pre-fix copy boots', upH);
     if (upH) {
       const B6 = await runHi(`http://127.0.0.1:${PORTH}`, wtc, 'ctl');
@@ -1157,7 +1172,7 @@ try {
     const [PORTR] = await freePorts(1);
     const homeR = scratchHome('deskxpra-r2ctl-home', fs);
     const sr = spawn(process.execPath, ['server.js'], { cwd: wtr, env: { ...srvEnv, ...VNC_ENV, PORT: String(PORTR), HOME: homeR }, stdio: 'ignore' }); ctlServers.push(sr);
-    let upR = false; for (let i = 0; i < 80 && !upR; i++) { try { await fetch(`http://127.0.0.1:${PORTR}/api/home`); upR = true; } catch { await sleep(250); } }
+    let upR = await bootedCopy(sr, PORTR);
     check('CONTROL (r1): the r1 copy boots', upR);
     if (upR) {
       const Q = await runR2(`http://127.0.0.1:${PORTR}`, wtr, 'r1-ctl');
@@ -1236,7 +1251,7 @@ try {
         const cmd = (() => { try { return fs.readFileSync(`/proc/${recB.pids.app}/cmdline`, 'utf8').split('\0').filter(Boolean).join(' ').split(' ').filter(Boolean); } catch { return []; } })();
         check(`${row.id}: the RUNNING browser process (pid ${recB.pids.app}) carries that profile and that URL in its argv — and no automation flag`, cmd.some((a) => a === `--user-data-dir=${profWant}` || a === profWant) && cmd.includes(url) && !cmd.some((a) => /^--?(remote-debugging|enable-automation|headless|marionette)/.test(a)), cmd);
         // the window maps (our xpra client draws it) and the title bar carries the PAGE title xpra reports
-        const winB = await until(async () => { const s = await p1.evalJs(WIN(recB.id)); return s && s.status === 'Connected' && s.windows.length && s.title && s.title.includes(PAGE_TITLE) ? s : null; }, 45000, 400);
+        const winB = await until(async () => { const s = await p1.evalJs(WIN(recB.id)); return s && s.status === 'Connected' && s.windows.length && s.title && s.title.includes(PAGE_TITLE) ? s : null; }, TITLE_DEADLINE_MS, 400);
         const winAny = winB || await p1.evalJs(WIN(recB.id));
         check(`${row.id}: the window maps in VibeSpace (status Connected, ${winAny && winAny.windows.length} window(s) in the session)`, !!winAny && winAny.status === 'Connected' && winAny.windows.length > 0, winAny && { status: winAny.status, windows: winAny.windows.length });
         check(`${row.id}: the VibeSpace title bar carries the page title xpra reports ("${winAny && winAny.title}")`, !!winB, winAny && winAny.title);
@@ -1591,7 +1606,7 @@ try {
       const [PORTA] = await freePorts(1);
       const homeA = scratchHome('deskxpra-a2ctl-home', fs);
       const sa = spawn(process.execPath, ['server.js'], { cwd: wtc, env: { ...srvEnv, ...VNC_ENV, PORT: String(PORTA), HOME: homeA }, stdio: 'ignore' }); ctlServers.push(sa);
-      let upA = false; for (let i = 0; i < 80 && !upA; i++) { try { await fetch(`http://127.0.0.1:${PORTA}/api/home`); upA = true; } catch { await sleep(250); } }
+      let upA = await bootedCopy(sa, PORTA);
       check('CONTROL: the pre-A2 copy boots', upA);
       if (upA) {
         const CT = await mkPage(`http://127.0.0.1:${PORTA}`, { width: 1200, height: 850, deviceScaleFactor: 1, mobile: false });
@@ -1731,7 +1746,7 @@ try {
       const [PORTC] = await freePorts(1);
       const homeC = scratchHome('deskxpra-a3ctl-home', fs);
       const sc = spawn(process.execPath, ['server.js'], { cwd: wtc, env: { ...srvEnv, ...VNC_ENV, PORT: String(PORTC), HOME: homeC }, stdio: 'ignore' }); ctlServers.push(sc);
-      let upC = false; for (let i = 0; i < 80 && !upC; i++) { try { await fetch(`http://127.0.0.1:${PORTC}/api/home`); upC = true; } catch { await sleep(250); } }
+      let upC = await bootedCopy(sc, PORTC);
       check('CONTROL: the pre-A3 copy boots', upC);
       if (upC) {
         await A.p.cdp('Page.navigate', { url: 'about:blank' }).catch(() => {});
@@ -2077,7 +2092,7 @@ try {
       const [PORTC] = await freePorts(1);
       const homeC = scratchHome('deskxpra-seamctl-home', fs);
       const sc = spawn(process.execPath, ['server.js'], { cwd: wtc, env: { ...srvEnv, ...VNC_ENV, PORT: String(PORTC), HOME: homeC }, stdio: 'ignore' }); ctlServers.push(sc);
-      let upC = false; for (let i = 0; i < 80 && !upC; i++) { try { await fetch(`http://127.0.0.1:${PORTC}/api/home`); upC = true; } catch { await sleep(250); } }
+      let upC = await bootedCopy(sc, PORTC);
       check('CONTROL: the forced-false copy boots', upC);
       if (upC) {
         await A.p.cdp('Page.navigate', { url: 'about:blank' }).catch(() => {});
@@ -2260,7 +2275,7 @@ try {
       const [PORTD] = await freePorts(1);
       const homeD = scratchHome('deskxpra-lanedctl-home', fs);
       const sd = spawn(process.execPath, ['server.js'], { cwd: wtc, env: { ...srvEnv, PORT: String(PORTD), HOME: homeD }, stdio: 'ignore' }); ctlServers.push(sd);
-      let upD = false; for (let i = 0; i < 80 && !upD; i++) { try { await fetch(`http://127.0.0.1:${PORTD}/api/home`); upD = true; } catch { await sleep(250); } }
+      let upD = await bootedCopy(sd, PORTD);
       check('CONTROL: the lane-D-less copy boots', upD);
       if (upD) {
         await A.p.cdp('Page.navigate', { url: 'about:blank' }).catch(() => {});
@@ -2656,7 +2671,7 @@ try {
     const [PORTD] = await freePorts(1);
     const homeD = scratchHome('deskxpra-dctl-home', fs);
     const sd = spawn(process.execPath, ['server.js'], { cwd: wtd, env: { ...srvEnv, PORT: String(PORTD), HOME: homeD }, stdio: 'ignore' }); ctlServers.push(sd);
-    let upD = false; for (let i = 0; i < 80 && !upD; i++) { try { await fetch(`http://127.0.0.1:${PORTD}/api/home`); upD = true; } catch { await sleep(250); } }
+    let upD = await bootedCopy(sd, PORTD);
     check('§15/§16 CONTROL: the pre-lane-D copy boots', upD);
     if (upD) {
       const OD = `http://127.0.0.1:${PORTD}`;
@@ -2876,7 +2891,7 @@ try {
       const [PORTM] = await freePorts(1);
       const homeM = scratchHome('deskxpra-mctl-home', fs);
       const sm = spawn(process.execPath, ['server.js'], { cwd: wtm, env: { ...srvEnv, PORT: String(PORTM), HOME: homeM }, stdio: 'ignore' }); ctlServers.push(sm);
-      let upM = false; for (let i = 0; i < 80 && !upM; i++) { try { await fetch(`http://127.0.0.1:${PORTM}/api/home`); upM = true; } catch { await sleep(250); } }
+      let upM = await bootedCopy(sm, PORTM);
       check('CONTROL: the pre-lane-closer copy boots', upM);
       if (upM) {
         const OM = `http://127.0.0.1:${PORTM}`;
@@ -2912,7 +2927,7 @@ try {
   // minimum, names it, and its ✕ closes it first. The pre-fix CONTROLS are test-xpra-client §9 / §10's patched copies. ──
   console.log('§18 design 016 S1 + S2 — an app\'s second top-level opens its own window (a satellite of the same session): title, size, keys, menu, ✕, reload, Watch, phone, adopt; S1 where it has none');
   const PY18 = bin('python3');
-  const gtk18 = (() => { if (!PY18) return false; try { execFileSync(PY18, ['-c', "import gi; gi.require_version('Gtk', '3.0'); from gi.repository import Gtk"], { stdio: 'ignore', timeout: 20000, env: { ...process.env, GDK_BACKEND: 'x11' } }); return true; } catch { return false; } })();
+  const gtk18 = (() => { if (!PY18) return false; try { execFileSync(PY18, ['-c', "import gi; gi.require_version('Gtk', '3.0'); from gi.repository import Gtk"], { stdio: 'ignore', timeout: 20000, env: { ...process.env, XDG_RUNTIME_DIR: RUNTIME, GDK_BACKEND: 'x11' } }); return true; } catch { return false; } })();
   if (!gtk18) skip('§18 the second-window legs', 'python3 + GTK 3 (gi) not available');
   else {
     const G = await newPage();
@@ -2957,8 +2972,10 @@ try {
             try { tree = execFileSync('xwininfo', ['-root', '-tree'], { env: xenv18, encoding: 'utf8', timeout: 5000 }).split('\n').filter((x) => /vs-two|Corral/.test(x)).map((x) => x.trim().replace(/\s+/g, ' ')).join(' | '); } catch {}
             console.log(`  X root ${root}; ${tree}`);
           }
-          const xw18 = await G.p.evalJs(`fetch('/api/desktop/apps/${id18}/windows').then((r) => r.json())`).catch(() => null);
-          const xs = xw18 && Array.isArray(xw18.windows) ? xw18.windows.find((x) => x.title === T2) : null;
+          // X reports the corral's place only after the window's first paint (a read before it says 0,0 — a race, never the bug):
+          // wait for the agreement until XAGREE_DEADLINE_MS; a slot X never takes fails there (the last read is what is judged)
+          let xs = null;
+          await until(async () => { const xw18 = await G.p.evalJs(`fetch('/api/desktop/apps/${id18}/windows').then((r) => r.json())`).catch(() => null); xs = xw18 && Array.isArray(xw18.windows) ? xw18.windows.find((x) => x.title === T2) : null; return !!xs && Math.abs(xs.x - sec.x) <= 2 && Math.abs(xs.y - sec.y) <= 2; }, XAGREE_DEADLINE_MS, 200);
           if (xs && Number.isFinite(xs.x)) check(`§18 S2: …and the X server agrees (${xs.x},${xs.y})`, Math.abs(xs.x - sec.x) <= 2 && Math.abs(xs.y - sec.y) <= 2, { xs, sec });
           check(`§18 S2: the satellite holds the X window 1:1 (pane ${sat.pane.w}×${sat.pane.h} CSS × ${s1.ratio} = ${sec.w}×${sec.h} ± 2 device px, never below the minimum ${MIN18[1]})`, Math.abs(sat.pane.w * s1.ratio - sec.w) <= 2 && Math.abs(sat.pane.h * s1.ratio - sec.h) <= 2 && sec.h >= MIN18[1], { pane: sat.pane, sec });
           check(`§18 S2: ONE connection — the app still has one viewer socket from this page (${s1.viewers})`, s1.viewers === 1, s1.viewers);

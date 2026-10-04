@@ -27,6 +27,7 @@ import http from 'node:http';
 import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { judgeInChild, LINEAR_BOUND } from './work-meter.mjs';
 const require = createRequire(import.meta.url);
 const REPO = new URL('..', import.meta.url).pathname;
 const TB = require('../src/browser-tabs.js');
@@ -203,17 +204,18 @@ for (const l of pureLegs(TB)) ok(l.c, l.n, l.extra);
 // page-chosen title / url is cut before it is walked — measured, not trusted (the peer-parser census carries the rows)
 {
   const hex = (i) => i.toString(16).toUpperCase().padStart(32, '0');
-  const ms = (fn) => { let best = Infinity; for (let r = 0; r < 3; r++) { const t0 = process.hrtime.bigint(); fn(); best = Math.min(best, Number(process.hrtime.bigint() - t0) / 1e6); } return best; };
+  // in WORK (lane work-meter-judges, .209): scripts/work-meter.mjs in a child — the clock judged these at their bounds
+  const TBF = path.join(REPO, 'src/browser-tabs.js'), HEX = "const hex = (i) => i.toString(16).toUpperCase().padStart(32, '0');";
   const chain = (n) => Array.from({ length: n }, (_, i) => ({ targetId: hex(i), type: 'page', openerId: i + 1 < n ? hex(i + 1) : undefined }));
-  const t4 = ms(() => TB.tabOwners({ targets: chain(4000), holders: [{ key: KA, roots: [hex(3999)] }] })), t8 = ms(() => TB.tabOwners({ targets: chain(8000), holders: [{ key: KA, roots: [hex(7999)] }] }));
+  const own = judgeInChild({ module: TBF, run: '(M, x) => M.tabOwners(x)', mk: `(n) => { ${HEX} return { targets: Array.from({ length: n }, (_, i) => ({ targetId: hex(i), type: 'page', openerId: i + 1 < n ? hex(i + 1) : undefined })), holders: [{ key: 'k', roots: n ? [hex(n - 1)] : [] }] }; }`, n: 4000, kind: 'linear' });
   const o8 = TB.tabOwners({ targets: chain(8000), holders: [{ key: KA, roots: [hex(7999)] }] });
-  ok(t8 < 100 && t8 / Math.max(t4, 0.5) < 2.6 && o8.size === 8000 && [...o8.values()].every((k) => k === KA), `tabOwners is LINEAR on a chain of 8 000 popups (${t4.toFixed(1)} ms → ${t8.toFixed(1)} ms; the fixpoint it replaced took 1.2 s) and still owns the whole chain`, { t4, t8 });
-  const c8 = ms(() => TB.cleanRoots(Array.from({ length: 8000 }, (_, i) => hex(i))));
-  ok(c8 < 20 && TB.cleanRoots([hex(1), hex(1).toLowerCase(), hex(2)]).join() === [hex(1), hex(2)].join(), `cleanRoots dedupes 8 000 ids in ${c8.toFixed(1)} ms (a Set, never includes-per-item)`);
+  ok(own.ok && o8.size === 8000 && [...o8.values()].every((k) => k === KA), `tabOwners is LINEAR in WORK on a chain of 4 000 → 8 000 popups (×${(own.r || 0).toFixed(2)} ≤ ${LINEAR_BOUND}; the fixpoint it replaced took 1.2 s) and still owns the whole chain`, own);
+  const cr = judgeInChild({ module: TBF, run: '(M, x) => M.cleanRoots(x)', mk: `(n) => { ${HEX} return Array.from({ length: n }, (_, i) => hex(i)); }`, n: 4000, kind: 'linear' });
+  ok(cr.ok && TB.cleanRoots([hex(1), hex(1).toLowerCase(), hex(2)]).join() === [hex(1), hex(2)].join(), `cleanRoots dedupes 4 000 → 8 000 ids linearly in WORK (×${(cr.r || 0).toFixed(2)}: a Set, never includes-per-item)`, cr);
   const big = 'T'.repeat(1024 * 1024);
-  const ct = ms(() => TB.chipTitle(big, 'https://x.example/'));
+  const ct = judgeInChild({ module: TBF, run: "(M, x) => M.chipTitle(x, 'https://x.example/')", mk: "(n) => 'T'.repeat(n)", n: 1024 * 1024, kind: 'bounded' });
   const rm = TB.tabRowModel({ tabs: [{ targetId: hex(1), title: big, url: 'https://x.example/' + 'a'.repeat(100000), active: true }], owners: { [hex(1)]: 'agent' }, viewer: {}, driving: true });
-  ok(ct < 5 && TB.chipTitle(big, '').length === 24 && rm.rows[0].tip.length <= 300 + 3 + 2048 && rm.rows[0].url.length === 2048, `a 1 MiB page title is cut before the code-point walk (${ct.toFixed(2)} ms); the row's tip / url are bounded (300 / 2048)`, { ct, tip: rm.rows[0].tip.length, url: rm.rows[0].url.length });
+  ok(ct.ok && TB.chipTitle(big, '').length === 24 && rm.rows[0].tip.length <= 300 + 3 + 2048 && rm.rows[0].url.length === 2048, `a 1 MiB page title is cut before the code-point walk (WORK at 1 / 2 MiB: ${ct.w1} / ${ct.w2}); the row's tip / url are bounded (300 / 2048)`, { ct, tip: rm.rows[0].tip.length, url: rm.rows[0].url.length });
 }
 {
   // CONTROLS (patched copies, scripts/mutant-copy.mjs): each must turn a leg above red

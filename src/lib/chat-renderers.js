@@ -29,6 +29,7 @@ import { handoverFacts } from '../stash-summary.js'; // 2026-09-28: the hand-ove
 import { encodedCommandOf } from '../encoded-command.js'; // lane machine-card-fold: a PowerShell -EncodedCommand drawn as the script it runs (PURE, bundled)
 import { revealParts as hiddenPartsOf } from '../hidden-chars.js'; // …its hidden characters as visible U+XXXX marks (THE one set)
 import { machineLineOf } from './chat-run-summary.js'; // lane machine-card-compact: a Machines card's ONE line inside its machine's group (PURE)
+import { exitCallCardOf } from './chat-run-summary.js'; // lane exit-calls-in-history: a vibespace-exit Bash call drawn as its machine card (PURE)
 import { outputPreview, cmdFold } from '../exit-reach.js'; // lane-exit-run-output E3: the command card's first lines of output (stderr first) + "Show output" (PURE, bundled)
 const noticeFacts = (body) => handbackFacts(body) || handoverFacts(body) || channelWakeFacts(body);   // ONE facts hook per producer, tried in order; null = the generic rules
 // PURE builder (CJS pulled into the bundle, like ssh-key-format.js) — the
@@ -484,7 +485,7 @@ export function exitRunBlock(x) {
     const sum = document.createElement('summary'); sum.textContent = t('Show output'); det.appendChild(sum);
     for (const stream of ['stdout', 'stderr']) {
       if (!heads[stream].trim()) continue;
-      const lab = document.createElement('div'); lab.className = 'chat-exit-stream'; lab.textContent = stream; det.appendChild(lab);
+      const lab = document.createElement('div'); lab.className = 'chat-exit-stream'; lab.textContent = x.merged ? 'output' : stream; det.appendChild(lab); // lane exit-calls-in-history: a call read from the transcript has ONE text (claude merged the streams)
       const full = document.createElement('pre'); full.className = 'chat-exit-out-all chat-pre-wrapped'; full.textContent = heads[stream]; det.appendChild(full);
       if (heads.cut[stream]) { const c = document.createElement('div'); c.className = 'chat-exit-cut'; c.textContent = t('cut at 4 KiB'); det.appendChild(c); }
     }
@@ -1308,6 +1309,21 @@ class ChatRenderers {
 
   renderToolMsg(msg) {
     if (msg.collab) return this._renderCollabMsg(msg);
+    // lane exit-calls-in-history (the owner: "对话历史里的exit指令似乎没有正确识别和渲染"): a vibespace-exit call IS its machine
+    // card — the live card's own words and output block, read from the call's command + result (or, while it runs, the
+    // live card that upgraded it) — the same card live and after a rebuild, folding with its machine's group
+    const xc = exitCallCardOf(msg);
+    if (xc) {
+      // int209: a lookup's words are ours (exit-call INFO_WORDS) — drawn in the UI's language, ON the card itself (the fold
+      // knows its cards by identity); the hub's sentence stays as said
+      const xw = xc.exitCall && xc.exitCall.words;
+      if (xw) xc.content[0].text = t(xw.key, xw.params);
+      const el = this._renderVibespaceNotice(xc, xc.content[0].text);
+      el._rawMsg = msg;
+      el.classList.add('chat-exit-call');
+      if (msg.toolCallId) el.dataset.toolId = msg.toolCallId;
+      return el;
+    }
     const block = msg.content?.[0];
     if (!block) return null;
     const el = document.createElement('div');

@@ -3980,6 +3980,14 @@ class ChatView {
       return;
     }
 
+    // lane exit-calls-in-history: the live Machines card upgraded THIS pending Bash call (message-manager `exitCard`) — the
+    // call is re-drawn as its machine card (renderToolMsg → exitCallCardOf), never a second card
+    if ('exitCard' in fields && !fields.status) {
+      const el = this._elements.get(id);
+      if (el && msg.role === 'tool') { const newEl = this._renderers.renderToolMsg(msg); if (newEl) this._swapMessageEl(el, newEl, id); }
+      return;
+    }
+
     // Queue chip: a cheap in-place swap. A full re-render here would rebuild
     // the whole bubble (markdown, images, fold state) for a one-word badge.
     if ('queueState' in fields) {
@@ -6655,7 +6663,7 @@ class ChatView {
               }
             });
           }
-          const nErr = members.filter((el) => el._rawMsg?.toolStatus === 'error').length;
+          const nErr = members.filter((el, i) => el._rawMsg?.toolStatus === 'error' && !machineCards[i]).length; // lane exit-calls-in-history: a failed machine call is counted by the machine part ("N failed"), never twice
           const running = members.some((el) => el._rawMsg?.status === 'pending' || el._rawMsg?.status === 'streaming');
           // LIVE SUB-AGENT TRAFFIC (2026-09-07): the run's whole traffic — how
           // many agents, how many events, and while the burst is still growing
@@ -6671,7 +6679,7 @@ class ChatView {
           // lane machine-card-compact: inside a group of ≥ 2 Machines cards the head names the machine, so each card there is ONE
           // line (chat-renderers _machineLine; a failed one too, on screen while the group is closed); a lone card stays whole
           const compact = machineCompact(machineCards);
-          members.forEach((el, i) => { if (machineCards[i]) el.classList.toggle('chat-machine-compact', compact); });
+          members.forEach((el, i) => { if (machineCards[i]) el.classList.toggle('chat-machine-compact', compact || machineCards[i].verb === 'info'); }); // lane exit-calls-in-history: a lookup (list / runs / use / url) is always the one row
           const mkLabel = ({ now = Date.now(), live = false, time = true } = {}) => runSummaryLabel({
             byKind, mcpServers, files, nErr, running, notes, machinePart: machinePart ? machinePart.text : '',
             machineTime: time && machinePart ? machinePart.time : '', // lane machine-card-compact: the span closes the label (the head draws it apart)

@@ -1584,7 +1584,7 @@ const { ExitProxyManager } = require('./src/exit-proxy');
 const deviceUpgradeWatch = require('./src/server/device-upgrade-watch.js').create({ userTodos, dataDir: path.join(__dirname, 'data'), log: (...a) => console.log(...a), bcast: () => { try { bcastAll({ type: 'hosts-updated' }); } catch { } } });
 hosts.onAgentUpgrade = (event, facts) => deviceUpgradeWatch.onAgentUpgrade(event, facts); hosts.agentUpgradeOf = (id) => deviceUpgradeWatch.rowOf(id);
 const exitProxy = new ExitProxyManager({ hosts, log: (m) => console.log('[exit]', m), dataDir: path.join(__dirname, 'data'), userTodos, settingOf: (k) => serverSetting(k), sessionsMap: () => activeSessions, bcastAll: (...a) => bcastAll(...a),
-  emitCard: (s, card) => feedPeerCard(s, card), groupsOf: (s, id) => tasks.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, initialGroupId: s._initialGroupId }).map((g) => g.id) });
+  emitCard: (s, card) => feedPeerCard(s, { ...card, belongsTo: require('./src/exit-call.js').cardMatcher(card) }), groupsOf: (s, id) => tasks.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, initialGroupId: s._initialGroupId }).map((g) => g.id) });
 hosts.onReachChange = (why) => exitProxy.rejudgeAll(`hosts-${why}`); // verify-r3 A-r3a: an import / a removal / a reshape of hosts.json re-judges every lent machine (the PATCH was the only writer that did)
 setTimeout(() => { try { const n = exitProxy.reconcileAsks(); if (n) console.log(`[exit] ${n} "ask me" item(s) from before the restart resolved expired`); } catch { } }, 3000).unref?.();
 // ── Exit routes + RemoteFs singletons (src/server/exit-routes.js, decomposition #10) ──

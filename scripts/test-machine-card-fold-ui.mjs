@@ -260,6 +260,71 @@ try {
   await clickHead();
   c = await evalJs(MCENSUS);
   check('④ 1280 px open: the seven WIN-DESK1 calls are one ~30 px row each in ONE framed list (the failed one in the alert style), linux-box whole', c.cards.filter((x) => x.id !== OTHER.id).every((x) => x.compact && x.lineShown && x.oneLine && !x.headShown && !x.detailShown && x.h >= 28 && x.h <= (x.errShown ? 56 : 34)) && framed(c.cards.filter((x) => x.id !== OTHER.id)) && c.cards.find((x) => x.id === FAILED.id)?.alert && c.cards.find((x) => x.id === OTHER.id)?.headShown && c.hs.find((h) => h.label.startsWith(M))?.timeIn, c.cards.map((x) => [x.id, x.compact, x.lineShown, x.oneLine, x.headShown, x.detailShown, x.h, x.bt, x.bb, Math.round(x.top), Math.round(x.bottom), x.errShown, x.btc === x.brc]));
+  // ── ⑤ lane exit-calls-in-history: a HISTORY of vibespace-exit Bash calls (no injected card exists after a rebuild) ──
+  console.log('⑤ a rebuilt history: the vibespace-exit Bash calls are machine cards (zh)');
+  const XM = 'BOX-STUDIO', X_SID = '5c3a0000-0000-4000-8000-0000000000ec', X_CWD = path.join(fakeHome, 'xc');
+  fs.mkdirSync(X_CWD, { recursive: true });
+  const xdir = path.join(fakeHome, '.claude', 'projects', X_CWD.replace(/[/._]/g, '-'));
+  fs.mkdirSync(xdir, { recursive: true });
+  // what the CLI prints (data/bin/vibespace-exit: stdout, then stderr ending in its own line), merged as claude records it
+  const xres = (stdout, stderr, code) => { const b = [stdout, stderr].filter(Boolean).join('\n'); return code ? `Exit code ${code}\n${b}` : b; };
+  const XCALLS = [
+    ['vibespace-exit list', xres(`  ${XM}   network: yes · commands: yes   id=host-dial-${XM}`, '', 0)],
+    [`vibespace-exit run ${XM} -- hostname`, xres(XM, E.cliLine({ outcome: 'ran', code: 0, ms: 412 }, { machine: XM }), 0)],
+    [`vibespace-exit run ${XM} -- 'nvidia-smi -L'`, xres('', 'nvidia-smi: command not found\n' + E.cliLine({ outcome: 'ran', code: 127, ms: 90 }, { machine: XM }), 127)],
+    [`vibespace-exit pull ${XM} /home/me/render/frame-12.png /tmp/frame-12.png`, xres(E.transferCliLine({ verb: 'pull', remote: '/home/me/render/frame-12.png', local: '/tmp/frame-12.png', bytes: 3355443, sha256: 'cd'.repeat(32), verified: 'sha256', ms: 1240 }, { machine: XM }), '', 0)],
+    [`vibespace-exit run ${XM} -- 'blender -b scene.blend -f 12'`, xres('Blender 4.2 (hash 1)\nFra:12 Mem:812M', E.cliLine({ outcome: 'ran', code: null, ms: 30010, timedOut: true }, { machine: XM }), 124)],
+  ];
+  const xts = (k) => new Date(T0 + 3600000 + k * 7000).toISOString();
+  const xrecs = [{ type: 'user', uuid: 'xc-u0', sessionId: X_SID, cwd: X_CWD, timestamp: xts(0), message: { role: 'user', content: '在 BOX-STUDIO 上渲染第 12 帧并取回' } }];
+  XCALLS.forEach(([command, content], k) => {
+    xrecs.push({ type: 'assistant', uuid: `xc-a${k}`, sessionId: X_SID, cwd: X_CWD, timestamp: xts(2 * k + 1), message: { id: `msg_xc${k}`, type: 'message', role: 'assistant', model: 'claude-opus-5-5', content: [{ type: 'tool_use', id: `toolu_xc${k}`, name: 'Bash', input: { command, description: 'machine' } }], stop_reason: 'tool_use', usage: { input_tokens: 1, output_tokens: 1 } } });
+    xrecs.push({ type: 'user', uuid: `xc-r${k}`, sessionId: X_SID, cwd: X_CWD, timestamp: xts(2 * k + 2), message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: `toolu_xc${k}`, content, is_error: /^Exit code /.test(content) }] } });
+  });
+  xrecs.push({ type: 'assistant', uuid: 'xc-t', sessionId: X_SID, cwd: X_CWD, timestamp: xts(20), message: { id: 'msg_xct', type: 'message', role: 'assistant', model: 'claude-opus-5-5', content: [{ type: 'text', text: '帧已取回；渲染超时了，我换个分辨率再试。' }], stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 } } });
+  xrecs.push({ type: 'assistant', uuid: 'xc-l', sessionId: X_SID, cwd: X_CWD, timestamp: xts(21), message: { id: 'msg_xcl', type: 'message', role: 'assistant', model: 'claude-opus-5-5', content: [{ type: 'tool_use', id: 'toolu_xcl', name: 'Bash', input: { command: 'ls -la /tmp/frame-12.png' } }], stop_reason: 'tool_use', usage: { input_tokens: 1, output_tokens: 1 } } });
+  xrecs.push({ type: 'user', uuid: 'xc-lr', sessionId: X_SID, cwd: X_CWD, timestamp: xts(22), message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_xcl', content: '-rw-r--r-- 1 me me 3355443 Oct  4 10:40 /tmp/frame-12.png', is_error: false }] } });
+  fs.writeFileSync(path.join(xdir, X_SID + '.jsonl'), xrecs.map((r) => JSON.stringify(r)).join('\n') + '\n');
+  await cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+  await evalJs(`(async () => { window.__sid = ${JSON.stringify(X_SID)}; window.app.viewSession(${JSON.stringify(X_SID)}, ${JSON.stringify(X_CWD)}, 'exit history'); return true; })()`);
+  check('⑤ the rebuilt conversation opens', await waitFor(`!!(${VIEW}) && (${VIEW})._messageList.querySelectorAll(':scope > .chat-msg').length >= 7`, 20000));
+  await sleep(800);
+  const XCENSUS = `(() => { const v = ${VIEW}; const list = v._messageList; const vis = (x) => !!x && x.checkVisibility();
+    const calls = [...list.querySelectorAll(':scope > .chat-exit-call')].map((el) => { const line = el.querySelector(':scope > .chat-mline'), w = line && line.querySelector('.chat-mline-what');
+      return { shown: el.offsetParent !== null, compact: el.classList.contains('chat-machine-compact'), lineShown: vis(line), what: w ? w.textContent : '', out: line?.querySelector('.chat-mline-out')?.textContent || '', alert: !!line && line.classList.contains('chat-mline-alert'),
+        oneLine: !!w && w.getClientRects().length === 1 && w.getBoundingClientRect().height < parseFloat(getComputedStyle(w).fontSize) * 2, h: Math.round(el.getBoundingClientRect().height), title: el.querySelector('.chat-vs-notice-title')?.textContent || '', toolId: el.dataset.toolId || '' }; });
+    const bash = [...list.querySelectorAll(':scope > .chat-msg-tool-result')].map((el) => el.textContent);
+    const hs = [...list.querySelectorAll(':scope > .chat-run-header')].map((h) => ({ label: h.querySelector('.chat-run-label')?.textContent || '', alert: h.classList.contains('chat-run-alert'), open: h.classList.contains('open'), cut: h.scrollWidth > h.clientWidth + 1, h: Math.round(h.getBoundingClientRect().height) }));
+    return { calls, bash, hs }; })()`;
+  let xc = await evalJs(XCENSUS);
+  check('⑤ the five vibespace-exit calls are five machine cards (keyed to their tool calls); no Bash card says vibespace-exit; the plain ls stays a Bash card', xc.calls.length === 5 && xc.calls.every((x) => /^toolu_xc\d$/.test(x.toolId)) && !xc.bash.some((t) => t.includes('vibespace-exit')) && xc.bash.length === 1 && xc.bash[0].includes('ls -la'), xc);
+  const xh = xc.hs.filter((h) => h.label.startsWith(XM));
+  check('⑤ ONE machine head for them: the machine, 3 commands, 1 file, 1 lookup, 2 failed (alert), the last outcome — the failures counted once (no extra "2 ✗")', xh.length === 1 && xh[0].alert && /3 条命令/.test(xh[0].label) && /1 个文件/.test(xh[0].label) && /1 次查询/.test(xh[0].label) && /2 个失败/.test(xh[0].label) && !/✗/.test(xh[0].label), xc.hs);
+  check('⑤ closed: the two failures (exit 127, the timeout) stay on screen, the three others folded', xc.calls.filter((x) => x.shown).length === 2 && xc.calls.filter((x) => x.shown).every((x) => x.alert), xc.calls);
+  await shot('history-1280-zh');
+  await clickHead();
+  xc = await evalJs(XCENSUS);
+  check('⑤ 1280 px open: five one-line rows (command · outcome); list is a row too, in the UI language (int209); failures red', xc.calls.every((x) => x.shown && x.compact && x.lineShown && x.oneLine && x.h <= 60) && xc.calls[0].what === '列出了此会话可用的机器' && xc.calls[1].what === 'hostname' && xc.calls[3].what.startsWith('pulled /home/me/render/frame-12.png') && xc.calls.filter((x) => x.alert).length === 2, xc.calls);
+  await shot('history-1280-zh-open');
+  await cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 780, deviceScaleFactor: 2, mobile: true });
+  await sleep(600);
+  xc = await evalJs(XCENSUS);
+  check('⑤ 390 px open: the same five one-line rows, the head one line', xc.calls.every((x) => x.shown && x.compact && x.oneLine) && xc.hs.filter((h) => h.label.startsWith(XM)).every((h) => h.h <= 64), xc);
+  await shot('history-390-zh-open');
+  await clickHead();
+  await shot('history-390-zh');
+  // LIVE (client): the pending Bash call, then the server's edit that upgrades it (exitCard), then its result — ONE card
+  console.log('⑤ live: the pending call upgraded in place, then its result — one card');
+  const LC = `vibespace-exit run ${XM} -- uptime`, LT = E.cardText({ outcome: 'ran', cmd: 'uptime', code: 0, ms: 300 }, { machine: XM });
+  const LX = E.cardOutput({ cmd: 'uptime', code: 0, ms: 300, heads: E.outputHeads({ stdout: ' 10:41:02 up 3 days\n' }) });
+  const liveCount = `(() => { const l = (${VIEW})._messageList; return { calls: l.querySelectorAll(':scope > .chat-exit-call').length, bash: [...l.querySelectorAll(':scope > .chat-msg-tool-result')].filter((e) => e.textContent.includes('uptime')).length, cards: [...l.querySelectorAll(':scope > .chat-msg')].filter((e) => String(e._rawMsg?.peerFrom || '').startsWith('Machines · ')).length, text: [...l.querySelectorAll(':scope > .chat-exit-call')].pop()?.textContent || '' }; })()`;
+  await evalJs(`(async () => { const v = ${VIEW}; v._onCreateMessage({ id: 'xc-live', role: 'tool', status: 'pending', ts: Date.now(), toolCallId: 'toolu_live', content: [{ type: 'tool_call', toolCallId: 'toolu_live', toolName: 'Bash', input: { command: ${JSON.stringify(LC)} } }] }); await new Promise((r) => setTimeout(r, 300)); return true; })()`);
+  const lc0 = await evalJs(liveCount);
+  await evalJs(`(async () => { const v = ${VIEW}; v._onEditMessage('xc-live', { exitCard: { from: ${JSON.stringify('Machines · ' + XM)}, text: ${JSON.stringify(LT)}, exitRun: ${JSON.stringify(LX)} } }); await new Promise((r) => setTimeout(r, 300)); return true; })()`);
+  const lc1 = await evalJs(liveCount);
+  await evalJs(`(async () => { const v = ${VIEW}; v._onEditMessage('xc-live', { status: 'complete', content: [{ type: 'tool_result', toolCallId: 'toolu_live', toolName: 'Bash', input: { command: ${JSON.stringify(LC)} }, output: ${JSON.stringify(' 10:41:02 up 3 days\n' + E.cliLine({ outcome: 'ran', code: 0, ms: 300 }, { machine: XM }))}, status: 'success' }] }); await new Promise((r) => setTimeout(r, 300)); return true; })()`);
+  const lc2 = await evalJs(liveCount);
+  check('⑤ live: running = a Bash card; the server\'s upgrade = the SAME message drawn as the machine card; its result = still ONE card, the same words', lc0.calls === 5 && lc0.bash === 1 && lc1.calls === 6 && lc1.bash === 0 && lc1.cards === 0 && lc2.calls === 6 && lc2.bash === 0 && lc2.cards === 0 && lc2.text.includes('uptime') && lc2.text.includes('exit 0'), { lc0, lc1, lc2 });
   check('no page exception', pageErrors.length === 0, pageErrors.slice(0, 3));
 } catch (e) {
   failed++;

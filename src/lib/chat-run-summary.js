@@ -8,6 +8,7 @@
 // foldToggleFor).
 
 import { NOTE_MARKER, noteKindOfText, userNoteOf } from '../assistant-note.js'; // B-40f8: the note TEXT rule is PURE and shared — the server's turn previews read the same one
+import { exitCallOf, exitCallCard } from '../exit-call.js'; // lane exit-calls-in-history: a vibespace-exit Bash call read as the machine call it is (PURE, shared with the server)
 
 // Every kind the classifier can return. The summary ORDER below must list
 // each one — an unlisted kind used to count `undefined++` = NaN and vanish
@@ -87,7 +88,7 @@ export function messageKind(m, { toolCard, isMemoryPath = () => false }) {
       return ck;
     }
     const tn = m?.content?.[0]?.toolName;
-    if (tn === 'Bash') return 'bash';
+    if (tn === 'Bash') return machineCardOf(m) ? 'machine' : 'bash'; // lane exit-calls-in-history: a vibespace-exit call folds as its machine's
     // Skill launches (2.227.9, user report "技能卡片无法参与折叠") — a
     // "Launching skill: x" card is pure harness noise, same class as a Bash
     // line; it fell through to null and so BROKE the surrounding run.
@@ -330,8 +331,32 @@ export function foldPassMode(records) {
 // own path, never a group message) and its words / its output block as src/exit-reach.js writes them.
 const MACHINE_FROM = 'Machines · ';
 const MACHINE_TEXT_MAX = 400;
-/** → `{machine, verb: 'run'|'copy', outcome: 'ok'|'exit'|'timed_out'|'failed', code, failed, ts}` | null (not a Machines card). */
+// ── THE CALL IN THE TRANSCRIPT (lane exit-calls-in-history, 2026-10-04 — the owner: "对话历史里的exit指令似乎没有正确识别和渲染").
+// The Machines card is injected live; a rebuild had only the Bash card. A claude Bash card whose command is ONE
+// vibespace-exit call and whose result carries the CLI's own lines IS that machine call: PURE src/exit-call.js reads it
+// and builds the card the live one is (words, output block); while the call still runs, the live card's words ride the
+// Bash card (`exitCard`, message-manager — never a second card). Anything else stays a Bash card.
+const _exitCalls = new WeakMap(); // the tool block → {x: the exitCard it saw, card}
+const _exitCards = new WeakSet(); // the cards built here (their `exitCall` is ours, never a wire field)
+/** A tool message → the Machines card its vibespace-exit call draws, or null (not one — a plain Bash card). */
+export function exitCallCardOf(m) {
+  const b0 = m && m.role === 'tool' && Array.isArray(m.content) ? m.content[0] : null;
+  if (!b0 || b0.toolName !== 'Bash' || typeof b0.input?.command !== 'string') return null;
+  const x = m.exitCard && typeof m.exitCard === 'object' ? m.exitCard : null;
+  const hit = _exitCalls.get(b0);
+  if (hit && hit.x === x) return hit.card;
+  let card = b0.type === 'tool_result' ? exitCallCard(exitCallOf(b0.input.command, String(b0.output || ''), { error: b0.status === 'error' || m.toolStatus === 'error' }), { id: m.id, ts: m.ts }) : null;
+  if (card) _exitCards.add(card);
+  else if (x && typeof x.from === 'string' && typeof x.text === 'string') {
+    card = { id: m.id, ts: m.ts, role: 'user', status: 'complete', originKind: 'peer-message', peerVia: 'notification', peerFrom: x.from, content: [{ type: 'text', text: x.text }], ...(x.exitRun && typeof x.exitRun === 'object' ? { exitRun: x.exitRun } : {}) };
+  }
+  _exitCalls.set(b0, { x, card });
+  return card;
+}
+/** → `{machine, verb: 'run'|'copy'|'info', outcome: 'ok'|'exit'|'timed_out'|'failed', code, failed, ts}` | null (not a Machines card). */
 export function machineCardOf(m) {
+  if (m && m.role === 'tool') { m = exitCallCardOf(m); if (!m) return null; } // lane exit-calls-in-history
+  if (_exitCards.has(m) && m.exitCall) { const c = m.exitCall; return { machine: c.machine || '', verb: c.verb, outcome: c.outcome, code: c.code == null ? null : c.code, failed: !!c.failed, ts: Number(m.ts) || 0 }; }
   if (!m || m.originKind !== 'peer-message' || m.peerVia === 'peer' || (m.peerGroup && m.peerGroup.id)) return null;
   const from = typeof m.peerFrom === 'string' ? m.peerFrom : '';
   if (!from.startsWith(MACHINE_FROM) || from.length <= MACHINE_FROM.length) return null;
@@ -350,6 +375,7 @@ export function machineCardOf(m) {
 // the machine part's words (one table, so the i18n census sees every key)
 export const MACHINE_WORDS = Object.freeze({
   runs: '{n} commands', copies: '{n} files', failed: '{n} failed', running: 'still running', // lane machine-card-compact: the short counts (390 px)
+  lookups: '{n} lookups', // lane exit-calls-in-history: list / runs / use / url — informational, never the last outcome
   exit: 'last: exit {code}', timed_out: 'last: timed out', refused: 'last: did not run', copyFailed: 'last: copy failed', copied: 'last: copied',
 });
 const hhmm = (ts) => { const d = new Date(ts); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
@@ -365,16 +391,20 @@ export function machineRunPart({ cards = [], running = false, time = hhmm } = {}
   if (!cs.length) return null;
   const runs = cs.filter((c) => c.verb === 'run').length, copies = cs.filter((c) => c.verb === 'copy' && !c.failed).length;
   const failed = cs.filter((c) => c.failed).length;
-  const last = cs[cs.length - 1];
-  const parts = [cs[0].machine];
+  // lane exit-calls-in-history: a lookup (list / runs / use / url) is counted apart and never the "last:" outcome; a card
+  // the CLI named no machine on (list, a refusal) takes the run's machine
+  const looks = cs.filter((c) => c.verb === 'info').length;
+  const last = cs.filter((c) => c.verb !== 'info').pop() || null;
+  const parts = [(cs.find((c) => c.machine) || cs[0]).machine].filter(Boolean);
   if (runs) parts.push(t(MACHINE_WORDS.runs, { n: runs }));
   if (copies) parts.push(t(MACHINE_WORDS.copies, { n: copies }));
+  if (looks) parts.push(t(MACHINE_WORDS.lookups, { n: looks }));
   if (failed) parts.push(t(MACHINE_WORDS.failed, { n: failed }));
-  parts.push(running ? t(MACHINE_WORDS.running)
+  if (running || last) parts.push(running ? t(MACHINE_WORDS.running)
     : last.verb === 'copy' ? t(last.failed ? MACHINE_WORDS.copyFailed : MACHINE_WORDS.copied)
     : last.outcome === 'timed_out' ? t(MACHINE_WORDS.timed_out)
     : last.code != null ? t(MACHINE_WORDS.exit, { code: last.code }) : t(MACHINE_WORDS.refused));
-  const a = cs[0].ts, b = last.ts;
+  const a = cs[0].ts, b = cs[cs.length - 1].ts;
   const span = a && b ? (time(a) === time(b) ? time(a) : `${time(a)}–${time(b)}`) : '';
   return { text: parts.join(' · '), failed, time: span };
 }
@@ -388,6 +418,7 @@ const MACHINE_LEAD = /^(ran|did not run|could not finish|could not start|pulled|
 const firstLineOf = (s) => String(s || '').split('\n').map((l) => l.trim()).find(Boolean) || '';
 /** → `{what, outcome, error, failed, text}` | null (not a Machines card); `text` = the whole line ("what · outcome"). */
 export function machineLineOf(m) {
+  if (m && m.role === 'tool') { m = exitCallCardOf(m); if (!m) return null; } // lane exit-calls-in-history: the call's own card
   const mc = machineCardOf(m);
   if (!mc) return null;
   const b0 = Array.isArray(m.content) ? m.content.find((b) => b && b.type === 'text') : null;
