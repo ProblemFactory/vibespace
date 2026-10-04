@@ -1125,6 +1125,17 @@ const SETTINGS_SCHEMA = {
     when: { channel: 'lark' },
     category: t('Channels'), liveApply: true,
   },
+  // design 018: the relay page a workspace Slack app typed into THIS instance sends members back through (a company
+  // preset names its own relayUrl). The default is the project's own static page; empty = this instance's own https
+  // address, else the member pastes the code the app's page shows. Read by the hub (serverSetting).
+  'channels.slackRelayUrl': {
+    type: 'string', default: 'https://problemfactory.github.io/vibespace/slack/',
+    label: t('Slack: relay page'),
+    description: t('The https page Slack sends a member back to after they press Allow, for a workspace app whose Client ID and Secret were typed here (a company preset names its own). The page only returns the browser to a VibeSpace on a private network; anywhere else it shows the code to paste back. Register the same address under the app’s Redirect URLs. Empty = this instance’s own https address, else the code is pasted back.'),
+    when: { channel: 'slack' },
+    tier: 'advanced',
+    category: t('Channels'), liveApply: true,
+  },
   // lane lark-search-poll (B-5aab, design §8 + owner decision 4): THE CHANGE FEED — one account-wide search per tick
   // names every conversation with a new message (Lark: groups, single chats, thread replies)
   'channels.feedEverySec': {

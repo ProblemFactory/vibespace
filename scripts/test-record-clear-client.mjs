@@ -276,6 +276,9 @@ async function page(P, { lang = null } = {}) {
   await sleep(900);
 }
 const reload = async (P) => { await P.cdp('Page.reload', { ignoreCache: true }); await sleep(500); await P.waitApp(); await sleep(900); };
+// int206 (channels-fold): "VibeSpace internal" is FOLDED by default — the census group is an internal row, so the owner's own
+// unfold (the panel's PATCH, merge-only) keeps it on the Channels window's screen for every page below
+check('the owner unfolded "VibeSpace internal" (the census group\'s row stays on the Channels window)', (await api('/api/user-state', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: J({ channelsPanelFolds: { internal: false } }) })).success === true && (await api('/api/user-state')).channelsPanelFolds?.internal === false);
 const P1 = await connect(target.webSocketDebuggerUrl);
 let BROWSER = null;
 const newPage = async () => {

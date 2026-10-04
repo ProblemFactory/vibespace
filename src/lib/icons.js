@@ -170,6 +170,12 @@ export const UI_ICONS = {
   download:  _s('<path d="M8 2.5v7.5M4.5 6.5L8 10l3.5-3.5"/><path d="M3 12.5h10"/>'),
   // B-5fe1: an account's VENDOR glyph on a conversation avatar's badge (`vendor-<kind>`, drawn ≤ 10 px — a silhouette)
   'vendor-gmail': _s('<path d="M2 12.5v-8l6 4.6 6-4.6v8"/><path d="M2 12.5h3V8.2M14 12.5h-3V8.2"/>', { sw: 1.8 }),
+  // lane channels-badges: VIBESPACE's own mark (public/index.html's favicon — three stacked windows) on the badge of
+  // VibeSpace's own talk (agent groups, agent chats, the built-in agents source); currentColor only
+  vibespace: _s('<rect x="5.5" y="1.5" width="9" height="6.5" rx="1" opacity=".45"/><rect x="3.5" y="4" width="9" height="6.5" rx="1" opacity=".7"/><rect x="1.5" y="6.5" width="9" height="7" rx="1"/>', { fill: true }),
   'vendor-lark': _s('<path d="M2.5 9.2c2.6-.4 4.8.4 6.6 2.4l5-5c-2.2-1-4.5-.7-6.4.9"/><path d="M4.6 3.4h3.6l3.2 3.1"/>', { sw: 1.8 }),
+  // lane channels-fold: SLACK's silhouette — its "#": each bar covers ONE crossing out to its edge, each line's other
+  // end is a dot; no two pieces touch (no brand colours)
+  'vendor-slack': _s('<path d="M2.9 6.4h3.5M9.6 2.9v3.5M13.1 9.6H9.6M6.4 13.1V9.6"/><path d="M6.4 2.9h0M13.1 6.4h0M9.6 13.1h0M2.9 9.6h0"/>', { sw: 1.8 }),
   forkBranch: _s('<path d="M5 5.372v.878c0 .414.336.75.75.75h4.5a.75.75 0 0 0 .75-.75v-.878a2.25 2.25 0 1 1 1.5 0v.878a2.25 2.25 0 0 1-2.25 2.25h-1.5v2.128a2.251 2.251 0 1 1-1.5 0V8.5h-1.5A2.25 2.25 0 0 1 3.5 6.25v-.878a2.25 2.25 0 1 1 1.5 0ZM5 3.25a.75.75 0 1 0-1.5 0 .75.75 0 0 0 1.5 0Zm6.75.75a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5Zm-3 8.75a.75.75 0 1 0-1.5 0 .75.75 0 0 0 1.5 0Z"/>', { fill: true }),
 };

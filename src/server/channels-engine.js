@@ -106,7 +106,8 @@ const slack = require('../channels/slack.js');   // design 012 (B-ff09): the fou
 const { secretBox } = require('../secret-box.js');
 const { OWN_KEY, CLUSTER_PREFIX } = require('./integration-store.js');   // the two credential-key forms, spelled ONCE (the store's)
 const R = require('../integration-registry.js');   // PURE: the rows' `bindsPerAccount` + `clientFieldsOf` (the custom client's two fields)
-const { createOAuthLoopback } = require('../oauth-loopback.js');
+const { createOAuthLoopback, OPTIONAL_SCOPES_MAX } = require('../oauth-loopback.js');
+const SlackManifest = require('../channels/slack-manifest.js');   // PURE (design 018): the workspace app's state + relay rule
 // P2: the PURE filter / assignment / renderer (design §7). Everything after
 // `store.append` is PURE except the two ORCH calls at the end of `wake()`.
 const F = require('../channel-filter.js');
@@ -476,6 +477,17 @@ function create(deps = {}) {
   }
   const box = secretBox(path.join(dataDir, KEY_FILE));
   const flows = oauth || createOAuthLoopback({ now, log });
+  // design 018: THE WORKSPACE APP'S CONSENT FACTS — a per-boot HMAC key signs each Slack consent's state (a restart
+  // ends every flow anyway), the custom rung's relay page is a setting (the schema's default beside it here)
+  const consentKey = crypto.randomBytes(32);
+  const signState = (clear) => crypto.createHmac('sha256', consentKey).update(String(clear)).digest('base64url');
+  const SLACK_RELAY_DEFAULT = 'https://problemfactory.github.io/vibespace/slack/';
+  function slackRelayUrl() {
+    let v;
+    try { v = serverSetting('channels.slackRelayUrl'); } catch { v = undefined; }
+    return v === undefined || v === null ? SLACK_RELAY_DEFAULT : String(v).trim();
+  }
+  const slackConsent = Object.freeze({ sign: signState, relayUrl: slackRelayUrl });
 
   // Built-ins. The three fakes exercise BOTH axes; the real adapters register
   // the same way and nothing downstream learns their names.
@@ -513,12 +525,14 @@ function create(deps = {}) {
     const mod = realByKind.get(rec && rec.kind) || null;
     const row = rowOf(mod) || (rec && R.rowById(rec.kind)) || null;
     const key = (rec && typeof rec.credentialKey === 'string' && rec.credentialKey) || null;
-    if (row && row.signin === 'paste') return pasteClientOf(row);
+    if (row && row.signin === 'paste' && !isClientKey(key)) return pasteClientOf(row);   // design 018: a key-less Slack account is the paste rung
     if (row && row.bindsPerAccount && key === CUSTOM_KEY) return customClientOf(rec, row, CUSTOM_KEY);
     if (row && row.bindsPerAccount && key === OWN_KEY) return legacyClientOf(rec, row);
     if (!resolveIntegration) return { id: row ? row.id : null, source: 'none', values: {}, missing: [], why: 'no integration store', whyCode: 'no-store', whyParams: null, credentialKey: key, clusterKey: null, clusterLabel: null };
     return resolveIntegration(row ? row.id : (mod && mod.integration), { credentialKey: key });
   }
+  /** design 018: a key that names a CLIENT (a preset or the account's own) — anything else on a paste row is the paste. */
+  const isClientKey = (k) => k === CUSTOM_KEY || (typeof k === 'string' && k.startsWith(CLUSTER_PREFIX));
   /** design 012 (Slack S1): a `signin:'paste'` row has NO client — each person's own app, a pasted token. Nothing to
    *  resolve, nothing missing: the answer every credential question reads as "ready". */
   function pasteClientOf(row) {
@@ -581,7 +595,7 @@ function create(deps = {}) {
     // `credentialKey` (2026-09-22) = an ACCOUNT's own binding (`cluster:<k>` /
     // `own`); null asks the row's pick — what a NEW account would be bound to.
     const prow = integrationId ? R.rowById(integrationId) : null;
-    if (prow && prow.signin === 'paste') return { source: 'paste', why: null, whyCode: null, whyParams: null, missing: [], clusterLabel: null, credentialKey: null };
+    if (prow && prow.signin === 'paste' && !isClientKey(credentialKey)) return { source: 'paste', why: null, whyCode: null, whyParams: null, missing: [], clusterLabel: null, credentialKey: null };
     if (!integrationId || !resolveIntegration) return { source: 'unknown', why: 'no integration store', whyCode: 'no-store', whyParams: null, missing: [], clusterLabel: null, credentialKey: credentialKey || null };
     try {
       const r = resolveIntegration(integrationId, { credentialKey: credentialKey || null });
@@ -723,8 +737,10 @@ function create(deps = {}) {
   // the stamped expiry and the scopes. Written through the store's serialized
   // door like every other byte of adapters.json; decrypted only for the
   // adapter that owns it. `publicView` never carries it (see `digest`).
-  /** The scopes a consent dropped (bounded strings; never a secret). */
-  const refusedScopesOf = (xs) => [...new Set((Array.isArray(xs) ? xs : []).filter((x) => typeof x === 'string' && x && x.length <= 200))].slice(0, 16);
+  /** The scopes a consent dropped (bounded strings; never a secret). lane slack-scopes-lark-reauth verify r1: bounded by the
+   *  consent machine's OWN optional bound (one constant) — at 16, a Lark consent narrowed through every group (17 scopes with
+   *  the wide one) lost the feed's search scope from the record, and the card named only half of what Lark refused. */
+  const refusedScopesOf = (xs) => [...new Set((Array.isArray(xs) ? xs : []).filter((x) => typeof x === 'string' && x && x.length <= 200))].slice(0, OPTIONAL_SCOPES_MAX);
   function tokensFor(rec) {
     const read = () => {
       const a = rec.auth || {};
@@ -822,7 +838,7 @@ function create(deps = {}) {
       // `pace` (lane R5): the adapter AWAITS it before every request it sends
       // (drain rule 18's bucket, the SAME one the pass's `wait` reads) and
       // then meters it — the per-second shape is enforced call by call.
-      const adapterDeps = { fetch: fetchFn, log, tokens: tokensFor(rec), state: stateFor(rec), oauth: flows, onAuthDone: (adapterId, r) => onAuthDone(adapterId, r), deliver, liveSessions, credentialKey: rec.credentialKey || null, meter: (units) => { const x = live.get(rec.id) || paceCarry.get(rec.id); if (x) charge(x, units); }, pace: (units) => paceWait(rec.id, units, rec) };
+      const adapterDeps = { fetch: fetchFn, log, tokens: tokensFor(rec), state: stateFor(rec), oauth: flows, slackConsent, onAuthDone: (adapterId, r) => onAuthDone(adapterId, r), deliver, liveSessions, credentialKey: rec.credentialKey || null, meter: (units) => { const x = live.get(rec.id) || paceCarry.get(rec.id); if (x) charge(x, units); }, pace: (units) => paceWait(rec.id, units, rec) };
       // r4: the resolver is PER RECORD (`resolverFor`) — an account's own
       // (`custom`) client lives on its record, a preset in the store.
       const adapter = registry.create(rec.kind, rec, { now, resolveIntegration: resolverFor(rec), ...adapterDeps });
@@ -5689,6 +5705,7 @@ function create(deps = {}) {
    *  offers RIGHT NOW (`400 unknown-credential` / `invalid-client` / `own-
    *  retired` by name). `null` when the request names none and
    *  `allowDefault` is off (re-authorize keeps the account's own). */
+  const PASTE_CHOICE = 'paste';
   function clientChoice(mod, input = {}, { allowDefault = true } = {}) {
     const b = input && typeof input === 'object' ? input : {};
     // 2.369.195: `fromMount` = a storage mount's own client, copied server-side.
@@ -5696,6 +5713,8 @@ function create(deps = {}) {
     // refused by name (the dialog never sends both — a stale hidden custom
     // input must not decide which client an account signs in under).
     if (namesMount(b)) return clientFromMount(mod, b.fromMount);
+    // design 018: a paste row's key-less rung, named — the per-person app (never a preset picked by default)
+    if (rowOf(mod) && rowOf(mod).signin === 'paste' && (b.clientPreset === PASTE_CHOICE || b.credentialKey === PASTE_CHOICE)) return { credentialKey: null, credential: null };
     let key = typeof b.credentialKey === 'string' && b.credentialKey ? b.credentialKey : null;
     let cred = b.credential && typeof b.credential === 'object' ? b.credential : null;
     if (!key && typeof b.clientPreset === 'string' && b.clientPreset) key = b.clientPreset === CUSTOM_KEY ? CUSTOM_KEY : CLUSTER_PREFIX + b.clientPreset;
@@ -5859,7 +5878,7 @@ function create(deps = {}) {
   const latestPending = () => { let best = null; for (const p of pendingFlows.values()) if (!p.targetId && (!best || p.startedAt >= best.startedAt)) best = p; return best; };
   /** verify r8: does the pending flow's TARGET hold a sign-in right now (the refusal's tail says so). */
   const targetHolds = (p) => { const t = p.targetId ? adapterRecords().adapters.find((x) => x.id === p.targetId) : null; return !!(t && t.auth && t.auth.tokenEnc); };
-  async function beginPending(mod, choice, { target = null, options = null } = {}) {
+  async function beginPending(mod, choice, { target = null, options = null, origin = null } = {}) {
     sweepPending();
     const id = target ? target.id : `pending:${crypto.randomBytes(6).toString('hex')}`;
     const rec = newRecord(mod, { id, credentialKey: choice.credentialKey });
@@ -5887,8 +5906,8 @@ function create(deps = {}) {
       async clear() { p.tokenEnc = null; p.tokenMeta = null; },
     };
     const memState = { read: () => ({}), write: async () => {} };
-    p.adapter = registry.create(mod.kind, rec, { now, resolveIntegration: resolverFor(rec), fetch: fetchFn, log, tokens: memTokens, state: memState, oauth: flows, onAuthDone: (_id, r) => onPendingDone(p, r), deliver, liveSessions, credentialKey: rec.credentialKey || null });
-    const flow = await p.adapter.auth.begin();
+    p.adapter = registry.create(mod.kind, rec, { now, resolveIntegration: resolverFor(rec), fetch: fetchFn, log, tokens: memTokens, state: memState, oauth: flows, slackConsent, onAuthDone: (_id, r) => onPendingDone(p, r), deliver, liveSessions, credentialKey: rec.credentialKey || null });
+    const flow = await p.adapter.auth.begin({ origin });   // design 018: the browser's own origin rides the Slack state (the relay's way back)
     p.flowId = flow.flowId;
     pendingFlows.set(p.flowId, p);
     return { flowId: p.flowId, kind: mod.kind, credentialKey: choice.credentialKey, flow: safeFlow(flow) };
@@ -5927,6 +5946,7 @@ function create(deps = {}) {
     const mm = identityMismatch(held, offered) || (Object.keys(held).length && !Object.keys(offered).length ? { nameless: true } : null);
     if (mm) {
       const s = mm.nameless ? namelessSentence(rec.label || rec.id, 'the sign-in named no account') : mismatchSentence(rec.label || rec.id, mm);
+      p.ok = false; p.error = s;   // slack-workspace-app verify r1: the pending says it too (the GET landing page / a paste-back answer read it — they said "connected" over this refusal)
       await store.adapters.update(() => { rec.lastAuthError = s; rec.lastAuthAt = now(); });
       log.warn(`[channels] ${rec.id}: re-authorize under ${p.choice.credentialKey} refused: ${s} — the account keeps its client and token`);
       if (!stopped) notify([]);
@@ -5957,7 +5977,7 @@ function create(deps = {}) {
     const mod = connectableFor(String(input.kind || input.backend || ''));
     normalizeOptions(mod, input.options, {});   // verify r2: a body refused on its options never opens a mount's secret (judged again, on the record, in beginPending)
     const choice = clientChoice(mod, input);
-    const r = await beginPending(mod, choice, { options: input.options });
+    const r = await beginPending(mod, choice, { options: input.options, origin: typeof input.origin === 'string' ? input.origin : null });
     auditMountCopy(choice, mod);
     return withMount({ ...r, url: r.flow && r.flow.consentUrl }, choice);   // verify r3: the answer names the client copied
   }
@@ -5983,15 +6003,42 @@ function create(deps = {}) {
       user: p.user, flow: safeFlow(st), token: p.done && p.ok ? p.flowId : null,
     };
   }
-  /** PASTE-BACK for a pending flow: the redirect URL the browser landed on. */
-  async function oauthCallback({ url, flowId = null } = {}) {
+  /** design 018: THE LANDING ROUTE (`GET /api/channels/oauth/cb/:kind?code&state[&error]`) — the browser Slack (or the
+   *  relay page) sent back. The state is judged FIRST (shape, this boot's HMAC, its age), then the flow it names must
+   *  be a running consent of `kind`, found by the WHOLE state (oauth-loopback `finishByState`): a code is exchanged at
+   *  most once. → `{ok, why, user, error}` — never the code, the state or a secret; refusals in STATE_REFUSALS + used. */
+  async function oauthLanding({ kind, code = null, state = null, error = null } = {}) {
+    const v = SlackManifest.stateVerdict(state, { sign: signState, now: now(), ttlMs: PENDING_FLOW_TTL_MS });
+    if (!v.ok) { log.warn(`[channels] ${String(kind).slice(0, 20)}: a consent landing was refused (${v.why})`); return { ok: false, why: v.why, user: null, error: null }; }
+    const st = flows.status(v.parts.flowId);
+    const p = pendingFlows.get(v.parts.flowId) || null;
+    const owner = p ? p.kind : (st ? ((adapterRecords().adapters.find((r) => r.id === st.id) || {}).kind || null) : null);
+    if (!st || owner !== kind) { log.warn(`[channels] ${String(kind).slice(0, 20)}: a consent landing named no running ${String(kind).slice(0, 20)} sign-in (wrong-flow)`); return { ok: false, why: 'wrong-flow', user: null, error: null }; }
+    const r = await flows.finishByState(state, code, { error });
+    // verify r1: the exchange landed but the pending's own step refused it (a re-point onto ANOTHER Slack person /
+    // workspace: applyRebind keeps the record's client + token) — the page says that refusal, never "connected"
+    const refused = !!r.ok && !!p && p.ok === false;
+    const ok = !!r.ok && !refused;
+    if (!ok) log.warn(`[channels] ${st.id}: a consent landing ended ${refused ? 'refused' : (r.why || 'failed')}`);
+    return { ok, why: ok ? null : (refused ? 'failed' : (r.why || 'failed')), user: ok && r.result ? (r.result.user || null) : null, error: ok ? null : (refused ? (p.error || 'the sign-in was refused') : (r.error || null)) };
+  }
+  /** PASTE-BACK for a pending flow: the redirect URL the browser landed on. design 017: `box` = which box of a
+   *  stepped paste card it came from; a STEP that landed (`step`) answers its public facts and NO token — the sign-in
+   *  is not finished; a refusal carries its closed `why` (`detail.code`) for the card's words. */
+  async function oauthCallback({ url, flowId = null, box = null } = {}) {
     const p = pendingOrThrow(flowId);
     if (!url || typeof url !== 'string') throw httpErr(400, 'bad-request', 'url is required (the redirect URL your browser landed on)');
     let r;
-    try { r = await p.adapter.auth.finish(p.flowId, url); }
-    catch (e) { if (e && e.status) throw e; throw httpErr(400, (e && e.code) || 'bad-callback', String((e && e.message) || e)); }
+    try { r = await p.adapter.auth.finish(p.flowId, url, { box: typeof box === 'string' ? box : null }); }
+    catch (e) {
+      if (e && e.status) throw e;
+      const err = httpErr(400, (e && e.code) || 'bad-callback', String((e && e.message) || e));
+      if (e && e.detail && typeof e.detail.why === 'string') err.detail = { code: e.detail.why };
+      throw err;
+    }
+    if (r && r.ok && r.step) return { ok: true, error: null, flowId: p.flowId, step: r.step, stepFacts: r.stepFacts || null, user: null, token: null };
     const ok = !!(r && r.ok) && p.ok !== false;
-    return { ok, error: ok ? null : ((r && r.error) || p.error || 'the consent flow failed'), flowId: p.flowId, user: p.user, token: ok ? p.flowId : null };
+    return { ok, error: ok ? null : ((r && r.error) || p.error || 'the consent flow failed'), why: ok ? null : ((r && r.why) || null), flowId: p.flowId, user: p.user, token: ok ? p.flowId : null };
   }
 
   /** CONNECT (r4): with `flowId` — THE account dialog's Connect — the record
@@ -6091,13 +6138,14 @@ function create(deps = {}) {
     const rec = recordOrThrow(adapterId);
     const mod = connectableFor(rec.kind);
     const choice = clientChoice(mod, input, { allowDefault: false });
-    if (!choice && !rec.credentialKey) {
+    const origin = typeof input.origin === 'string' ? input.origin : null;
+    if (!choice && !rec.credentialKey && !(rowOf(mod) && rowOf(mod).signin === 'paste')) {   // design 018: a key-less Slack account IS the paste rung — never stamped with a preset
       const ev = credentialKeyEvidence(rec, mod);
       if (ev.key) await store.adapters.update(() => { rec.credentialKey = ev.key; });
     }
     if (rec.enabled === false) await store.adapters.update(() => { rec.enabled = true; });
     if (choice && !sameClient(rec, choice)) {
-      const r = await beginPending(mod, choice, { target: rec });
+      const r = await beginPending(mod, choice, { target: rec, origin });
       auditMountCopy(choice, mod, rec.id);
       await store.adapters.update(() => { rec.lastAuthError = null; });
       notify([]);
@@ -6108,7 +6156,7 @@ function create(deps = {}) {
     if (rec.credentialKey === OWN_KEY) await inlineLegacyClient(rec);
     const e = adapterFor(rec);
     assertResolvable(mod, rec);
-    const flow = await e.adapter.auth.begin();
+    const flow = await e.adapter.auth.begin({ origin });
     await store.adapters.update(() => { rec.lastAuthError = null; });
     notify([]);
     return withMount({ adapter: adapterView(rec), flow: safeFlow(flow) }, choice);
@@ -6122,7 +6170,7 @@ function create(deps = {}) {
    *  secret, never the exchange result. */
   function safeFlow(st) {
     if (!st) return null;
-    return { flowId: st.flowId, mode: st.mode, running: !!st.running, done: !!st.done, ok: st.ok, error: st.error || null, cancelled: st.cancelled || null, consentUrl: st.consentUrl, redirectUri: st.redirectUri, port: st.port, listening: !!st.listening, refusal: st.refusal || null, pasteBack: true, startedAt: st.startedAt, expiresAt: st.expiresAt, optional: Array.isArray(st.optional) ? st.optional.slice() : [], narrowed: Array.isArray(st.narrowed) ? st.narrowed.slice() : null, groups: Array.isArray(st.groups) ? st.groups.map((g) => (Array.isArray(g) ? g.slice() : [])) : [], nextNarrow: Array.isArray(st.nextNarrow) ? st.nextNarrow.slice() : null };
+    return { flowId: st.flowId, mode: st.mode, running: !!st.running, done: !!st.done, ok: st.ok, error: st.error || null, why: st.why || null, cancelled: st.cancelled || null, step: st.step || null, stepFacts: st.stepFacts && typeof st.stepFacts === 'object' ? { ...st.stepFacts } : null, consentUrl: st.consentUrl, redirectUri: st.redirectUri, port: st.port, listening: !!st.listening, refusal: st.refusal || null, pasteBack: true, startedAt: st.startedAt, expiresAt: st.expiresAt, optional: Array.isArray(st.optional) ? st.optional.slice() : [], narrowed: Array.isArray(st.narrowed) ? st.narrowed.slice() : null, groups: Array.isArray(st.groups) ? st.groups.map((g) => (Array.isArray(g) ? g.slice() : [])) : [], nextNarrow: Array.isArray(st.nextNarrow) ? st.nextNarrow.slice() : null };
   }
   /** Paste-back (§12.4): the user pastes the redirect URL their browser
    *  landed on; the adapter's own `auth.finish` runs the state check. A
@@ -6135,6 +6183,8 @@ function create(deps = {}) {
     const p = pendingFlows.get(running.flowId);
     const a = p ? p.adapter : adapterFor(rec).adapter;
     const r = await a.auth.finish(running.flowId, url);
+    // slack-workspace-app verify r1: a re-point the rebind refused (another identity) is not ok — the dialog toasted "re-authorized" over it
+    if (r.ok && p && p.ok === false) return { ok: false, error: p.error || 'the sign-in was refused' };
     return { ok: !!r.ok, error: r.error || null };
   }
   /** THE ONE NARROWING RETRY (owner ruling 2026-09-28) of an account's running sign-in: the vendor refused the
@@ -10699,7 +10749,7 @@ function create(deps = {}) {
     // r4 (design-integrations-per-account): the account's own client, the
     // transient consent, duplicate / remove with its reference check, the
     // owner-only config (D3), the in-place edits and the legacy own → custom copy
-    clientFor, startOAuth, oauthStatus, oauthCallback, duplicate, referencesOf, remove, setLabel, setCustomSecret, adapterConfig, mountClientsFor,
+    clientFor, startOAuth, oauthStatus, oauthCallback, oauthLanding, duplicate, referencesOf, remove, setLabel, setCustomSecret, adapterConfig, mountClientsFor,
     inlineLegacyClient, inlineLegacyClients, DUPLICATE_FIELDS, DUPLICATE_NEVER,
     // a fresh record of a connectable type, never stored — the suites' baseline for "a copy differs only where DUPLICATE_FIELDS says"
     blankRecord: (kind) => newRecord(connectableFor(kind), { id: kind }),

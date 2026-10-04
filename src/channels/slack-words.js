@@ -58,6 +58,37 @@ function failureOf(error, { status = 200 } = {}) {
   if ((e && TRANSPORT.has(e)) || status >= 500) return { code: 'transport', retryable: true, why: 'transport', error: e };
   return { code: 'vendor-error', retryable: false, why: (e && WHY[e]) || 'vendor', error: e };
 }
+/** design 017: `apps.manifest.create`'s refusals → step 1's closed words (the card says each; the vendor's code rides
+ *  `detail.error`). An expired / revoked / unknown setup token is one sentence — Slack's codes do not tell them apart. */
+const CREATE_WHY = Object.freeze({
+  invalid_auth: 'config-token-expired', not_authed: 'config-token-expired', token_expired: 'config-token-expired', token_revoked: 'config-token-expired', account_inactive: 'config-token-expired',
+  missing_scope: 'config-token-scope', not_allowed_token_type: 'config-token-scope',
+  ratelimited: 'rate-limited',
+});
+const CREATE_WHYS = Object.freeze([...new Set([...Object.values(CREATE_WHY), 'app-create-refused', 'transport'])]);
+function createWhyOf(error, { status = 200 } = {}) {
+  const f = failureOf(error, { status });
+  if (f.code === 'rate-limited' || f.code === 'transport') return f.why;
+  return (f.error && CREATE_WHY[f.error]) || 'app-create-refused';
+}
+/** design 018: `oauth.v2.access`'s refusals → the closed words the landing page and the dialog say (Slack's own code
+ *  rides `detail.error`). `invalid_client` after a preset rotated mid-flow is "the app's credentials changed". */
+const EXCHANGE_WHY = Object.freeze({
+  invalid_code: 'code-invalid', code_already_used: 'code-invalid', code_expired: 'code-invalid',
+  bad_redirect_uri: 'redirect-mismatch', invalid_redirect_uri: 'redirect-mismatch',
+  invalid_client_id: 'client-invalid', invalid_client: 'client-invalid', bad_client_secret: 'client-invalid',
+  ratelimited: 'rate-limited',
+});
+const EXCHANGE_WHYS = Object.freeze([...new Set([...Object.values(EXCHANGE_WHY), 'exchange-refused'])]);
+const exchangeWhyOf = (error) => (typeof error === 'string' && EXCHANGE_WHY[error]) || 'exchange-refused';
+const EXCHANGE_SENTENCE = Object.freeze({
+  'code-invalid': 'the sign-in code was already used or has expired — sign in again',
+  'redirect-mismatch': 'the redirect address does not match the one registered on the Slack app (OAuth & Permissions → Redirect URLs)',
+  'client-invalid': 'the workspace app\'s client id or secret was refused (were its credentials changed?) — try again, or ask whoever set the app up',
+  'rate-limited': 'Slack asked to slow down — try again in a minute',
+  'exchange-refused': 'Slack refused the code',
+});
+const exchangeSentenceOf = (why, error) => `${EXCHANGE_SENTENCE[why] || EXCHANGE_SENTENCE['exchange-refused']}${error ? ` (${String(error).slice(0, 40).replace(/[^a-z0-9_]/gi, '_')})` : ''}`;
 /** The scopes a `missing_scope` answer names (`needed`, a comma list), bounded — what the card's Re-authorize line says. */
 function neededScopes(body) {
   const n = body && typeof body.needed === 'string' ? body.needed.slice(0, 1000) : '';
@@ -67,4 +98,22 @@ function neededScopes(body) {
 
 /** THE DECLARED EGRESS (test-channels-egress): a PURE module — it constructs no request of its own (slack.js does). */
 const EGRESS = Object.freeze([]);
-module.exports = { EGRESS, WHY, WHYS, AUTH, NOT_FOUND, FORBIDDEN, TRANSPORT, failureOf, neededScopes };
+/** design 018: THE LANDING PAGE the member's browser shows after Slack's Allow (src/routes/channels.js), in en / zh /
+ *  ja at once (the server has no language of its own). `r` = the engine's `{ok, why, user, error}`; every piece
+ *  escaped; the code and the state never appear. */
+const LANDING = Object.freeze({
+  ok: ['Slack is connected{user}. Go back to VibeSpace — you can close this tab.', '已连接 Slack{user}。回到 VibeSpace 即可，这个标签页可以关掉。', 'Slack に接続しました{user}。VibeSpace に戻ってください。このタブは閉じて構いません。'],
+  denied: ['You declined on Slack — nothing was connected.', '你在 Slack 上拒绝了，没有连接任何账号。', 'Slack で拒否されたため、何も接続されていません。'],
+  refused: ['This sign-in link is not valid here ({why}). Start again from VibeSpace’s Connect dialog.', '这个登录链接在这里无效（{why}）。请回到 VibeSpace 的连接对话框重新开始。', 'このサインインリンクはここでは無効です（{why}）。VibeSpace の接続ダイアログからやり直してください。'],
+  failed: ['Slack did not finish the sign-in: {error}', 'Slack 没有完成登录：{error}', 'Slack でサインインが完了しませんでした：{error}'],
+});
+const LANDING_WHY = Object.freeze({ 'bad-shape': 'malformed', 'bad-hmac': 'not signed by this VibeSpace', 'wrong-flow': 'no such sign-in is running', expired: 'expired', used: 'already used' });
+const escHtml = (x) => String(x).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+function landingHtml(r = {}) {
+  const kind = r.ok ? 'ok' : r.why === 'denied' ? 'denied' : r.why === 'failed' ? 'failed' : 'refused';
+  const user = r.ok && typeof r.user === 'string' && r.user ? ` (${r.user.slice(0, 200)})` : '';
+  const fill = (t) => t.replace('{user}', user).replace('{why}', LANDING_WHY[r.why] || 'refused').replace('{error}', String(r.error || 'no answer').slice(0, 300));
+  const lines = LANDING[kind].map((t, i) => `<p lang="${['en', 'zh', 'ja'][i]}">${escHtml(fill(t))}</p>`).join('');
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta name="referrer" content="no-referrer"><title>VibeSpace · Slack</title><style>body{font:16px/1.5 system-ui,sans-serif;max-width:36em;margin:3em auto;padding:0 1em;color:#222}</style></head><body data-landing="${kind}">${lines}</body></html>`;
+}
+module.exports = { EGRESS, WHY, WHYS, AUTH, NOT_FOUND, FORBIDDEN, TRANSPORT, CREATE_WHY, CREATE_WHYS, EXCHANGE_WHY, EXCHANGE_WHYS, failureOf, createWhyOf, exchangeWhyOf, exchangeSentenceOf, neededScopes, LANDING, landingHtml };

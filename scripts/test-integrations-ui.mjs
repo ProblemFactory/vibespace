@@ -750,51 +750,107 @@ const p2 = await newPage();
   await over('the connect dialog (Lark, custom)');
   await p1.evaljs(`document.querySelector('#mounts-dialog-overlay .dialog-close').click(); 1`);
 
-  // (s) design 012 (Slack S1) — THE SLACK CONNECT CARD + THE PASTE BOX, in 中文: no OAuth client to choose (the four
-  // steps instead), the consent link is Slack's app-manifest link, the paste box takes a SECRET (dots, xoxp- placeholder),
-  // a bot token is refused in the dialog, the right one connects; the account card says where the copy lives (Q2) and
-  // the free plan's hidden history (the setup report)
+  // (s) design 012 (Slack S1) + design 017 (lane slack-connect-easy) — THE SLACK CONNECT CARD AS THREE NUMBERED STEPS,
+  // in 中文: no OAuth client to choose; ① opens Slack's app page and takes the setup token (a SECRET box), the wrong
+  // token is refused in the dialog by name, the right one makes the app over the vendor stub's apps.manifest.create;
+  // ② opens the app's own install page; a dialog closed and reopened resumes at ②; ③ + the dialog's Connect make the
+  // account; the fallback fold's "Copy app setup" is the link's own JSON; inactive steps FOLDED (no greyed control) at
+  // 375 and 860 px; the account card says where the copy lives (Q2) and the free plan's hidden history
   {
-  console.log('  (s) Slack: the connect card and the paste box (zh)');
-  await p1.evaljs(`localStorage.setItem('vibespace.lang', 'zh'); 1`);
+  console.log('  (s) Slack: the connect card as three steps (zh)');
+  const FX_ = require(path.join(repo, 'scripts/fixtures/slack-vendor.cjs'));
+  const SLACK_TOKEN = FX_.TOKEN, SETUP = FX_.CONFIG_TOKEN;
+  await p1.evaljs(`localStorage.setItem('vibespace.lang', 'zh'); localStorage.removeItem('vs-paste-app:slack'); 1`);
   ok(await p1.load(), 'the page reloads in 中文');
-  ok(await p1.evaljs(panelWait(`() => !!document.querySelector('.rail-panel-channels [data-connect-account]')`)), 'the Channels panel draws its Connect entry (zh)');
-  await p1.evaljs(`document.querySelector('.rail-panel-channels [data-connect-account]').click(); 1`);
-  ok(await p1.evaljs(WAIT_DLG('connect')), 'the connect dialog opens');
-  await p1.evaljs(`(() => { const s = ${DLG('connect')}.querySelector(':scope > select'); s.value = 'slack'; s.dispatchEvent(new Event('change')); return 1; })()`);
-  const sk = await p1.evaljs(`(() => {
-    const d = ${DLG('connect')};
-    const vis = (e) => e && e.style.display !== 'none';
+  const openSlack = async () => {
+    ok(await p1.evaljs(panelWait(`() => !!document.querySelector('.rail-panel-channels [data-connect-account]')`)), 'the Channels panel draws its Connect entry (zh)');
+    await p1.evaljs(`document.querySelector('.rail-panel-channels [data-connect-account]').click(); 1`);
+    ok(await p1.evaljs(WAIT_DLG('connect')), 'the connect dialog opens');
+    await p1.evaljs(`(() => { const s = ${DLG('connect')}.querySelector(':scope > select'); s.value = 'slack'; s.dispatchEvent(new Event('change')); return 1; })()`);
+  };
+  const STEPS = `[...${DLG('connect')}.querySelectorAll('.chan-paste-steps')].find((x) => x.style.display !== 'none')`;
+  const look = () => p1.evaljs(`(() => {
+    const d = ${DLG('connect')}, w = ${STEPS};
+    const vis = (e) => !!e && e.style.display !== 'none' && !e.hidden && e.getClientRects().length > 0;
     const client = [...d.querySelectorAll(':scope > select')].find((s) => vis(s) && [...s.options].some((o) => o.value === 'custom'));
-    const notes = [...d.querySelectorAll(':scope > .mounts-note')].filter(vis).map((n) => n.textContent);
-    const block = [...d.querySelectorAll('.mounts-drive-connect')].find(vis);
-    return { client: !!client, notes, block: block ? block.querySelector('button').textContent : null };
+    if (!w) return { client: !!client, steps: null };
+    const dr = d.getBoundingClientRect();
+    const btns = [...w.querySelectorAll('button')].filter(vis);
+    return {
+      client: !!client, clientValue: client ? client.value : null, notes: [...d.querySelectorAll(':scope > .mounts-note')].filter(vis).length,
+      steps: [...w.querySelectorAll('.chan-paste-step')].map((x) => x.dataset.state).join(),
+      titles: [...w.querySelectorAll('.chan-paste-step-title')].map((x) => x.textContent),
+      text: w.innerText, made: (w.querySelector('.chan-paste-made') || {}).textContent || null,
+      greyed: btns.filter((x) => x.disabled).length, small: btns.filter((x) => x.getBoundingClientRect().height < 36).map((x) => x.textContent),
+      outside: [...w.querySelectorAll('.chan-paste-step, button, input')].filter(vis).filter((x) => { const r = x.getBoundingClientRect(); return r.left < dr.left - 1 || r.right > dr.right + 1; }).length,
+      overflow: w.scrollWidth > w.clientWidth + 1,
+      boxes: [...w.querySelectorAll('input.chan-paste-input')].map((i) => ({ type: i.type, auto: i.autocomplete, ph: i.placeholder, shown: vis(i) })),
+    };
   })()`);
-  ok(!sk.client && sk.notes.length === 4 && /Slack/.test(sk.notes[0]) && /xoxp-/.test(sk.notes[2]) && /[\u4e00-\u9fff]/.test(sk.notes.join('')), `no OAuth client field — the four steps instead, in 中文 (${JSON.stringify(sk.notes).slice(0, 300)})`);
-  ok(/Slack/.test(sk.block || ''), `the sign-in block's button names Slack (${sk.block})`);
-  await p1.probe('Slack connect dialog (zh) — the four steps', '#mounts-dialog-overlay .dialog');
-  const before = (await p1.evaljs(`(window.__opened || []).length`));
-  await p1.evaljs(`(() => { const d = ${DLG('connect')}; [...d.querySelectorAll('.mounts-drive-connect')].find((b) => b.style.display !== 'none').querySelector('button').click(); return 1; })()`);
-  const pb = await p1.evaljs(`(async () => { for (let i = 0; i < 80; i++) { const b = [...${DLG('connect')}.querySelectorAll('.mounts-drive-connect')].find((x) => x.style.display !== 'none'); const inp = b && b.querySelector('input[placeholder="xoxp-…"]'); if (inp) { const hint = inp.previousElementSibling ? inp.previousElementSibling.textContent : (inp.parentElement.querySelector('.mounts-field-hint') || {}).textContent; return { type: inp.type, autocomplete: inp.autocomplete, hint, opened: (window.__opened || []).slice(-1)[0] || null }; } await new Promise((r) => setTimeout(r, 100)); } return null; })()`);
-  ok(pb && pb.type === 'password' && pb.autocomplete === 'off' && /xoxp-/.test(pb.hint || '') && /[\u4e00-\u9fff]/.test(pb.hint || ''), `the paste box is a SECRET field (dots, no autocomplete) with its own 中文 hint (${JSON.stringify(pb && { type: pb.type, hint: pb.hint })})`);
-  ok(pb && typeof pb.opened === 'string' && pb.opened.startsWith('https://api.slack.com/apps?new_app=1&manifest_json=') && (await p1.evaljs(`(window.__opened || []).length`)) === before + 1, 'the consent opened is Slack\'s app-manifest link (the stubbed window.open got it)');
-  const man = pb && pb.opened ? JSON.parse(decodeURIComponent(pb.opened.split('manifest_json=')[1])) : null;
-  ok(man && Array.isArray(man.oauth_config.scopes.user) && !man.oauth_config.scopes.bot, 'the manifest asks user scopes only');
-  const SLACK_TOKEN = require(path.join(repo, 'scripts/fixtures/slack-vendor.cjs')).TOKEN;
-  const bad = await p1.evaljs(`(async () => { const b = [...${DLG('connect')}.querySelectorAll('.mounts-drive-connect')].find((x) => x.style.display !== 'none'); const inp = b.querySelector('input[placeholder="xoxp-…"]'); inp.value = 'xoxb' + '-1234567890-abcdefghijk'; inp.dispatchEvent(new Event('change')); for (let i = 0; i < 60; i++) { await new Promise((r) => setTimeout(r, 100)); const st = b.querySelector('.mounts-field-hint').textContent; if (/xoxb|bot/.test(st)) return st; } return b.querySelector('.mounts-field-hint').textContent; })()`);
-  ok(/bot token/.test(bad || '') && !(bad || '').includes('abcdefghijk'), `a pasted bot token is refused IN the dialog by name, the value never echoed (${String(bad).slice(0, 120)})`);
-  const good = await p1.evaljs(`(async () => { const d = ${DLG('connect')}; const b = [...d.querySelectorAll('.mounts-drive-connect')].find((x) => x.style.display !== 'none'); const inp = b.querySelector('input[placeholder="xoxp-…"]'); inp.value = ${JSON.stringify(SLACK_TOKEN)}; inp.dispatchEvent(new Event('change')); for (let i = 0; i < 80; i++) { await new Promise((r) => setTimeout(r, 100)); const tok = [...d.querySelectorAll('input[type="hidden"]')].some((h) => h.value); if (tok) return { st: b.querySelector('.mounts-field-hint').textContent }; } return null; })()`);
-  ok(!!good && /[\u4e00-\u9fff]/.test(good.st), `the right token signs in — the block says so in 中文 (${good && good.st})`);
+  const fit = (g, label) => ok(g.steps && g.greyed === 0 && !g.small.length && g.outside === 0 && !g.overflow, `${label}: no greyed control, every button ≥ 36 px, nothing outside the dialog (${JSON.stringify({ greyed: g.greyed, small: g.small, outside: g.outside, overflow: g.overflow })})`);
+  const press = (step, label) => p1.evaljs(`(() => { const b = [...${STEPS}.querySelectorAll('.chan-paste-step[data-step="${step}"] button, .chan-paste-fallback button')].find((x) => x.textContent === ${JSON.stringify(label)}); if (!b) return false; b.click(); return true; })()`);
+  const fill = (step, v) => p1.evaljs(`(() => { const i = ${STEPS}.querySelector('.chan-paste-step[data-step="${step}"] input.chan-paste-input'); i.value = ${JSON.stringify(v)}; return 1; })()`);
+  const statusOf = (step) => p1.evaljs(`(async () => { for (let i = 0; i < 60; i++) { const t = (${STEPS}.querySelector('.chan-paste-step[data-step="${step}"] .chan-paste-status') || {}).textContent || ''; if (t && !/正在/.test(t)) return t; await new Promise((r) => setTimeout(r, 100)); } return null; })()`);
+  await openSlack();
+  const g0 = await look();
+  ok(g0.client && g0.clientValue === 'paste' && g0.notes === 0 && g0.steps === 'open,folded,folded' && g0.titles.join('|') === '拿一个一次性的设置令牌|装进工作区|粘贴令牌，连接', `design 018: no preset ⇒ the Slack app field opens at "Another way" — three numbered steps, ① open, ② ③ FOLDED, in 中文 (${JSON.stringify({ client: g0.clientValue, steps: g0.steps, titles: g0.titles })})`);
+  const sw = await p1.evaljs(`(async () => { const d = ${DLG('connect')}; const s = [...d.querySelectorAll(':scope > select')].find((x) => [...x.options].some((o) => o.value === 'paste')); const vis = (e) => !!e && e.style.display !== 'none' && !e.hidden && e.getClientRects().length > 0; const set = async (v) => { s.value = v; s.dispatchEvent(new Event('input', { bubbles: true })); s.dispatchEvent(new Event('change', { bubbles: true })); await new Promise((r) => setTimeout(r, 200)); }; await set('custom'); const out = { steps: vis(${STEPS}), cid: [...d.querySelectorAll('input')].some((i) => vis(i) && /^[0-9]/.test(i.placeholder || '')), btn: [...d.querySelectorAll('.mounts-drive-connect button')].some(vis), opts: [...s.options].map((o) => o.value).join() }; await set('paste'); out.back = vis(${STEPS}); return out; })()`);
+  ok(sw && !sw.steps && sw.cid && sw.btn && sw.opts === 'custom,paste' && sw.back, `design 018: "Your workspace app" swaps the steps for Client ID / Secret and the Connect button; "Another way" brings the steps back (${JSON.stringify(sw)})`);
+  ok(/Slack Tooling Tokens Vendor/.test(g0.text) && /12 小时/.test(g0.text) && g0.boxes[0].type === 'password' && g0.boxes[0].auto === 'off' && g0.boxes[0].ph === 'xoxe.xoxp-…' && g0.boxes[0].shown, 'step ① says what Generate Token adds and that the token expires in 12 hours; its box is a SECRET field');
+  fit(g0, 'at 375 px');
+  await p1.probe('Slack connect dialog (zh) — step 1 at 375 px', '#mounts-dialog-overlay .dialog');
+  await p1.cdp('Emulation.setDeviceMetricsOverride', { width: 860, height: 900, deviceScaleFactor: 1, mobile: false });
+  await sleep(150);
+  fit(await look(), 'at 860 px');
+  await p1.cdp('Emulation.setDeviceMetricsOverride', { width: 375, height: 667, deviceScaleFactor: 1, mobile: true });
+  await sleep(150);
+  const before = await p1.evaljs(`(window.__opened || []).length`);
+  ok(await press(1, '打开 Slack 的应用页面') && (await p1.evaljs(`(window.__opened || []).slice(-1)[0]`)) === 'https://api.slack.com/apps' && (await p1.evaljs(`(window.__opened || []).length`)) === before + 1, 'step ①\'s button opens Slack\'s app page (the stubbed window.open got it)');
+  await fill(1, SLACK_TOKEN);
+  await press(1, '创建应用');
+  const wrongBox = await statusOf(1);
+  ok(/第 3 步/.test(wrongBox || '') && !(wrongBox || '').includes(SLACK_TOKEN.slice(5, 20)), `a User OAuth Token pasted into step ① is refused IN the dialog by name, the value never echoed (${wrongBox})`);
+  await fill(1, SETUP);
+  await press(1, '创建应用');
+  let g1 = null;
+  for (let i = 0; i < 60; i++) { g1 = await look(); if (g1.made) break; await sleep(100); }
+  ok(g1.made && /VibeSpace/.test(g1.made) && g1.steps === 'folded,open,open' && (await p1.evaljs(`${STEPS}.querySelector('.chan-paste-step[data-step="1"] input').value`)) === '', `the setup token makes the app over the stub: ① folds to "${g1 && g1.made}", ② and ③ open, the box emptied`);
+  const kept = await p1.evaljs(`localStorage.getItem('vs-paste-app:slack')`);
+  ok(kept && JSON.parse(kept).appId === 'A0VIBEAPP1' && !kept.includes('xox'), `the browser remembers the made app — its id and name, never a token (${kept})`);
+  fit(g1, 'step ② at 375 px');
+  await p1.probe('Slack connect dialog (zh) — steps 2 and 3', '#mounts-dialog-overlay .dialog');
+  ok(await press(2, '打开安装页面') && (await p1.evaljs(`(window.__opened || []).slice(-1)[0]`)) === 'https://api.slack.com/apps/A0VIBEAPP1/oauth', 'step ② opens the made app\'s own install page by its id');
+  await p1.evaljs(`document.querySelector('#mounts-dialog-overlay .dialog-close').click(); 1`);
+  await openSlack();
+  const g2 = await look();
+  ok(g2.steps === 'folded,open,open' && /VibeSpace/.test(g2.made || ''), `a dialog closed after step ① and opened again RESUMES at ② with the same app (${g2.steps}, ${g2.made})`);
+  await fill(3, SETUP);
+  await p1.evaljs(`${DLG('connect')}.querySelector('.dialog-actions .btn-create').click(); 1`);
+  const wrong3 = await p1.evaljs(`(async () => { for (let i = 0; i < 60; i++) { const t = (${DLG('connect')}.querySelector('.cfg-err') || {}).textContent || ''; if (t) return t; await new Promise((r) => setTimeout(r, 100)); } return null; })()`);
+  ok(/第 1 步/.test(wrong3 || '') && !(wrong3 || '').includes(SETUP.slice(10, 30)), `the setup token pasted into step ③ is refused by Connect, by name (${wrong3})`);
+  // the fallback fold: the link and "Copy app setup" carry the same JSON
+  await p1.evaljs(`(() => { window.__copied = null; if (navigator.clipboard) navigator.clipboard.writeText = (t) => { window.__copied = String(t); return Promise.resolve(); }; ${STEPS}.querySelector('.chan-paste-fallback').open = true; return 1; })()`);
+  await press(0, '打开创建链接');
+  await sleep(300);
+  const link = await p1.evaljs(`(window.__opened || []).slice(-1)[0]`);
+  await press(0, '复制应用配置');
+  let copied = null;
+  for (let i = 0; i < 30 && !copied; i++) { copied = await p1.evaljs(`window.__copied`); if (!copied) await sleep(100); }
+  const linkJson = link && link.includes('manifest_json=') ? JSON.parse(decodeURIComponent(link.split('manifest_json=')[1])) : null;
+  ok(linkJson && copied && JSON.stringify(JSON.parse(copied)) === JSON.stringify(linkJson) && !linkJson.oauth_config.scopes.bot, 'the fallback fold: "复制应用配置" copies exactly the JSON the create link carries (user scopes only)');
+  await fill(3, SLACK_TOKEN);
   await p1.evaljs(`${DLG('connect')}.querySelector('.dialog-actions .btn-create').click(); 1`);
   const slackAcct = async () => (((await api('GET', '/api/channels')).json || {}).adapters || []).find((a) => a.kind === 'slack') || null;
   let acct = null;
   for (let i = 0; i < 60 && !acct; i++) { acct = await slackAcct(); if (!acct) await sleep(200); }
-  ok(acct && acct.auth && acct.auth.state === 'connected' && acct.retention === 'purge-on-remove' && JSON.stringify(acct.policyModes) === '["review"]', `Connect created the Slack account (connected, purge-on-remove, review only) — ${JSON.stringify(acct && { id: acct.id, state: acct.auth && acct.auth.state })}`);
+  ok(acct && acct.auth && acct.auth.state === 'connected' && acct.retention === 'purge-on-remove' && JSON.stringify(acct.policyModes) === '["review"]', `step ③ + Connect created the Slack account (connected, purge-on-remove, review only) — ${JSON.stringify(acct && { id: acct.id, state: acct.auth && acct.auth.state })}`);
+  ok((await p1.evaljs(`localStorage.getItem('vs-paste-app:slack')`)) === null, 'connected: the remembered app is forgotten');
   const cardText = await p1.evaljs(`(async () => { for (let i = 0; i < 100; i++) { const c = document.querySelector('.rail-panel-channels .chan-account[data-adapter=${JSON.stringify((acct && acct.id) || 'slack')}]'); if (c && /免费版/.test(c.textContent)) return c.textContent; await new Promise((r) => setTimeout(r, 150)); } const c = document.querySelector('.rail-panel-channels .chan-account[data-adapter=${JSON.stringify((acct && acct.id) || 'slack')}]'); return c ? c.textContent : null; })()`);
   ok(/保存在这台服务器上/.test(cardText || '') && /Anthropic/.test(cardText || ''), 'the account card says where the copy lives and that agents\' reads go to the model provider (owner Q2), in 中文');
   ok(/免费版/.test(cardText || ''), 'and the setup report\'s free-plan fact (is_limited) — Slack hides older messages');
   await p1.probe('Slack account card (zh)', `.rail-panel-channels .chan-account[data-adapter=${JSON.stringify((acct && acct.id) || 'slack')}]`);
-  ok(!JSON.stringify(await p1.evaljs(`document.body.innerText`)).includes(SLACK_TOKEN.slice(5, 20)), 'the token is drawn NOWHERE on the page');
+  const page = JSON.stringify(await p1.evaljs(`document.body.innerText + document.body.innerHTML`));
+  ok(!page.includes(SLACK_TOKEN.slice(5, 20)) && !page.includes(SETUP.slice(10, 30)), 'neither token is drawn or kept ANYWHERE on the page');
   await p1.evaljs(`localStorage.removeItem('vibespace.lang'); 1`);
   }
 

@@ -556,5 +556,38 @@ console.log('⑦ the R3 × R4 seam (2.369.191): a DIGEST watcher\'s open window 
   ok(F2.statusTag({ ...dm, app: true }, t) && F2.statusTag({ ...dm, app: true }, t).code === 'direct', 'design 012 NEGATIVE CONTROL: a copy without the `app` test tags a GitHub bot\'s DM "Direct"');
 }
 
+// ── lane channels-badges: VIBESPACE'S OWN TALK FOLDS — one block under its head at its newest row's place, folded = the
+// head alone (with the block's unread / @-you counts); a row that @-mentions the owner or awaits the owner NEVER folds:
+// it keeps its own row, on top of the list ──
+{
+  const F = require(path.join(REPO, 'src/channel-focus.js'));
+  const t = NOW;
+  const grp = (id, extra = {}) => ({ kind: 'group', key: `groups/${id}`, id, group: { id }, title: id, unread: 0, ...extra });
+  const cv = (id, extra = {}, conv = {}) => ({ kind: 'conv', key: `lark/${id}`, id, title: id, unread: 0, ...extra, conv: { kind: 'group', lastAt: extra.lastAt, ...conv } });
+  const L = [cv('people-1', { lastAt: t - 10 }), grp('g1', { lastAt: t - 20, unread: 3 }), cv('people-2', { lastAt: t - 30 }), grp('g2', { lastAt: t - 40, unread: 2, atYou: 1 }),
+    cv('watch', { lastAt: t - 50, internal: true, unread: 1 }, { outbox: { awaiting: 1 } }), grp('g3', { lastAt: t - 60 }), cv('people-3', { lastAt: t - 70 }, { outbox: { awaiting: 2 } })];
+  const keys = (o) => o.rows.map((r) => (r.kind === 'internal-head' ? 'HEAD' : r.id)).join(',');
+  const U = F.internalBlock(L, { folded: false, now: t });
+  ok(keys(U) === 'people-1,HEAD,g1,g2,watch,g3,people-2,people-3' && JSON.stringify(U.block) === '{"n":4,"unread":6,"atYou":1,"pinned":0,"folded":false}',
+    'channels-badges: UNFOLDED, the internal rows (agent groups + a row stamped `internal`) stand as ONE block under its head at the place of the newest; every other row keeps its order', keys(U) + ' ' + JSON.stringify(U.block));
+  const Fd = F.internalBlock(L, { folded: true, now: t });
+  ok(keys(Fd) === 'g2,watch,people-1,HEAD,people-2,people-3' && Fd.block.pinned === 2 && Fd.block.folded === true && Fd.block.unread === 6 && Fd.block.atYou === 1,
+    'channels-badges: FOLDED, the head alone stands for the block (its unread 6 and @-you 1 still said) — the row that @-mentions the owner and the row awaiting the owner keep their OWN rows, on top', keys(Fd));
+  ok(keys(F.internalBlock([cv('p', { lastAt: t - 1 }), grp('only', { lastAt: t - 2, atYou: 2 })], { folded: true, now: t })) === 'only,HEAD,p',
+    'channels-badges: a block whose every row needs the owner still draws its head (the fold stays reachable) right under the pinned rows');
+  const none = [cv('a', { lastAt: t - 1 }), cv('b', { lastAt: t - 2 })];
+  const N = F.internalBlock(none, { folded: true, now: t });
+  ok(N.block === null && keys(N) === 'a,b' && N.rows !== none, 'channels-badges: a list with no internal row is drawn as it is (no head)');
+  ok(F.isInternal({ kind: 'group', key: 'lark/oc_1', conv: { kind: 'group' } }) === false && F.isInternal(grp('g')) && F.isInternal({ kind: 'conv', internal: true }),
+    'channels-badges: a vendor GROUP CHAT (a digest row of kind "group") is not internal — an agent group (its `group`) and a stamped row are');
+  ok(F.needsOwner(cv('u', { lastAt: t - 1 }, { outbox: { unknown: 1 } }), t) && !F.needsOwner(cv('h', { lastAt: t - 1 }, { touch: { pending: 2 } }), t) && !F.needsOwner(grp('q', { unread: 9 }), t),
+    'channels-badges: a send of unknown outcome needs the owner; a held wake, unread agent talk do not');
+  const fsrc = fs.readFileSync(path.join(REPO, 'src/channel-focus.js'), 'utf8');
+  const PIN = '  if (num(r.atYou) > 0) return true;\n';
+  ok(fsrc.split(PIN).length === 2, 'channels-badges CONTROL setup: the @-you clause is spelled once');
+  const F0 = require(MUT.write('src/channel-focus.js', fsrc.replace(PIN, ''), 'badges-no-at'));
+  ok(!keys(F0.internalBlock(L, { folded: true, now: t })).includes('g2'), 'channels-badges NEGATIVE CONTROL: a copy without the @-you clause folds the group that @-mentions the owner away — the leg above would be red');
+}
+
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

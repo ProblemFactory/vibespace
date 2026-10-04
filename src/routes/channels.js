@@ -24,6 +24,7 @@
 const fs = require('fs');
 const express = require('express');
 const { contentDisposition } = require('../file-disposition.js');   // lane-raw-filename: THE Content-Disposition builder
+const SlackWords = require('../channels/slack-words.js');   // PURE (design 018): the consent landing page's words
 const router = express.Router();
 
 let ctx = null;
@@ -116,6 +117,15 @@ function fail(res, e) {
  *  | `custom`), `clientPreset` (the storage dialog's spelling), `credential
  *  {appId, appSecret}` / `clientId` + `clientSecret` (a custom client — the
  *  plaintext reaches the engine, is sealed there and is never echoed). */
+/** design 018: the origin the BROWSER used to reach this instance (its `Origin` header on the dialog's POST, else the
+ *  Host it asked) — the Slack consent state carries it so the relay page can send the browser back. Judged again by
+ *  slack-manifest's `originOf` before it is signed. */
+function requestOrigin(req) {
+  const o = req.headers && req.headers.origin;
+  if (typeof o === 'string' && o && o !== 'null') return o.slice(0, 300);
+  const h = typeof req.get === 'function' ? req.get('host') : null;
+  return h ? `${req.protocol}://${String(h).slice(0, 255)}` : null;
+}
 function choiceOf(b) {
   const out = {};
   // 2.369.195: a storage mount's own client, copied SERVER-SIDE (never a secret in this body)
@@ -145,7 +155,7 @@ router.post('/api/channels/oauth/start', async (req, res) => {
     if (refuseAgentBearer(req, res, SIGNIN_IS_OWNERS)) return;   // verify r4
     if (refuseMalformedMount(req, res)) return;
     const b = req.body || {};
-    res.json({ ok: true, ...(await engine().startOAuth({ kind: typeof b.kind === 'string' ? b.kind : (typeof b.backend === 'string' ? b.backend : ''), ...choiceOf(b), options: b.options })) });
+    res.json({ ok: true, ...(await engine().startOAuth({ kind: typeof b.kind === 'string' ? b.kind : (typeof b.backend === 'string' ? b.backend : ''), ...choiceOf(b), options: b.options, origin: requestOrigin(req) })) });
   } catch (e) { fail(res, e); }
 });
 /** THE STORAGE MOUNTS WHOSE OWN OAUTH CLIENT AN ACCOUNT OF `kind` MAY
@@ -181,13 +191,30 @@ router.post('/api/channels/oauth/narrow', (req, res) => {
     res.json({ ok: true, ...engine().oauthNarrow(typeof b.flowId === 'string' ? b.flowId : null) });
   } catch (e) { fail(res, e); }
 });
+/** design 018: THE CONSENT LANDING — Slack (or the relay page) sends the member's browser here with `code` + `state`
+ *  (`error=access_denied` when they declined). A top-level GET behind the instance's own cookie (SameSite=Lax rides
+ *  the redirect); the STATE is the flow's credential: this boot's HMAC, its age, a running flow of `:kind`, used once.
+ *  Answers a small page in en / zh / ja — never the code, the state, a stack or a secret. */
+router.get('/api/channels/oauth/cb/:kind', async (req, res) => {
+  const q = req.query || {};
+  const one = (v) => (typeof v === 'string' ? v.slice(0, 2048) : null);
+  let r;
+  try {
+    forHost(req);
+    if (refuseAgentBearer(req, res, SIGNIN_IS_OWNERS)) return;
+    r = await engine().oauthLanding({ kind: String(req.params.kind || '').slice(0, 20), code: one(q.code), state: one(q.state), error: one(q.error) });
+  } catch { r = { ok: false, why: 'failed', user: null, error: null }; }
+  res.status(r.ok || r.why === 'denied' ? 200 : 400)
+    .set({ 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'" })
+    .send(SlackWords.landingHtml(r));
+});
 router.post('/api/channels/oauth/callback', async (req, res) => {
   try {
     forHost(req);
     if (refuseAgentBearer(req, res, SIGNIN_IS_OWNERS)) return;   // verify r4
     const b = req.body || {};
-    const r = await engine().oauthCallback({ url: b.url, flowId: typeof b.flowId === 'string' ? b.flowId : null });
-    if (!r.ok) return bad(res, 400, r.error || 'the consent flow failed', { code: 'auth-failed' });
+    const r = await engine().oauthCallback({ url: b.url, flowId: typeof b.flowId === 'string' ? b.flowId : null, box: typeof b.box === 'string' ? b.box : null });
+    if (!r.ok) return bad(res, 400, r.error || 'the consent flow failed', { code: 'auth-failed', ...(r.why ? { detail: { code: r.why } } : {}) });
     res.json(r);
   } catch (e) { fail(res, e); }
 });
@@ -227,7 +254,7 @@ router.post('/api/channels/adapters/:id/reauthorize', async (req, res) => {
     if (refuseAgentMountChoice(req, res)) return;
     if (refuseAgentBearer(req, res, SIGNIN_IS_OWNERS)) return;   // verify r4
     if (refuseMalformedMount(req, res)) return;
-    res.json(await engine().reauthorize(req.params.id, choiceOf(req.body || {})));
+    res.json(await engine().reauthorize(req.params.id, { ...choiceOf(req.body || {}), origin: requestOrigin(req) }));
   } catch (e) { fail(res, e); }
 });
 /** DUPLICATE (r4 §8.1 #2): `{name?}` → `{adapter}` — a NEW, UNAUTHORIZED

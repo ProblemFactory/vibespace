@@ -285,7 +285,55 @@ function textMatches(fields, s) {
   return false;
 }
 
+// ── VIBESPACE'S OWN TALK FOLDS (lane channels-badges — the owner, 2026-10-03: "提供一个选项可以把vibespace内部沟通收缩起来，
+// 这样避免agent互相沟通内容太多挤占实际沟通空间"). INTERNAL = an agent group (a pair: an agent private chat) or a row
+// stamped `internal` (the built-in agents source). The panel draws a list's internal rows as ONE block under a head
+// ("VibeSpace internal (N)") at the place of its newest row — every other row keeps the input order. FOLDED (the
+// default since lane channels-fold — the owner, 2026-10-03; an unfold is user state `channelsPanelFolds.internal:
+// false`, synced to every client) the head alone stands for the block, with the block's unread and @-you counts.
+// NOTHING THAT NEEDS THE OWNER FOLDS AWAY: a row that @-mentions the owner (`atYou`) or awaits the owner (the awaiting /
+// unknown tags) keeps its OWN row, on top of the list.
+
+/** Is this row VibeSpace's own talk? */
+function isInternal(r) { return !!(r && (r.internal === true || (r.kind === 'group' && r.group))); }
+/** Does this row need the OWNER (it never folds)? An @ of the owner, or a draft / a send awaiting the owner. */
+function needsOwner(r, now = Date.now()) {
+  if (!r) return false;
+  if (num(r.atYou) > 0) return true;
+  const st = statusTag(r, now);
+  return !!(st && (st.code === 'awaiting' || st.code === 'unknown'));
+}
+/**
+ * THE INTERNAL BLOCK of a list about to be drawn: `{rows, block}`. `rows` = the list as drawn — ONE
+ * `{kind:'internal-head', key, block}` marker where the block stands; unfolded, the block's rows right under it;
+ * folded, the rows that need the owner FIRST (in the input order) and the rest of the block gone. `block` =
+ * `{n, unread, atYou, pinned, folded}` over EVERY internal row of the list (null: the list holds none).
+ */
+function internalBlock(rows, { folded = false, now = Date.now() } = {}) {
+  const list = Array.isArray(rows) ? rows : [];
+  const inner = list.filter(isInternal);
+  if (!inner.length) return { rows: list.slice(), block: null };
+  const pinned = folded ? inner.filter((r) => needsOwner(r, now)) : [];
+  const block = {
+    n: inner.length, unread: inner.reduce((s, r) => s + num(r.unread), 0), atYou: inner.reduce((s, r) => s + num(r.atYou), 0),
+    pinned: pinned.length, folded: !!folded,
+  };
+  const head = { kind: 'internal-head', key: 'internal-head', block };
+  const out = pinned.slice();
+  let placed = false;
+  for (const r of list) {
+    if (!isInternal(r)) { out.push(r); continue; }
+    if (placed || pinned.includes(r)) continue;
+    placed = true;
+    out.push(head);
+    if (!folded) out.push(...inner);
+  }
+  if (!placed) out.splice(pinned.length, 0, head);
+  return { rows: out, block };
+}
+
 module.exports = {
   FOCUS_WINDOW_MS, HELD_WINDOW_MS, TAG_ORDER, heldPending, heldOf, statusTag, focusRows, filterRows, firstScreen,
   ATTENTION_MAX, HEAD_ROWS, PAGE_ROWS, PAGE_MAX, QUERY_MAX, candidateOf, pageOrder, pageCursor, afterCursor, selectPage, queryOf, textMatches,
+  isInternal, needsOwner, internalBlock,
 };

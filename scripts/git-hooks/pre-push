@@ -92,6 +92,8 @@ is_code_path() {
     docs/getting-started.md) return 0 ;;
     # the r4 integrations mockups: test-oauth-field-parity reads the Edit dialog's button order off one (2.369.165)
     docs/mockups/*) return 0 ;;
+    # the Slack relay page ships as a static file: test-slack-relay drives it and holds its rule to slack-manifest.js (design 018)
+    docs/slack-relay|docs/slack-relay/*) return 0 ;;
     # (b) documentation: nothing the gate reads.
     docs/*|*.md) return 1 ;;
   esac

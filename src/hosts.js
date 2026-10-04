@@ -1130,6 +1130,8 @@ class HostManager {
       // lane device-upgrade-stuck: the same door as a dial device (src/server/device-upgrade-watch.js)
       onUpgradeStuck: (from, to, info) => this.onAgentUpgrade?.('stuck', { ...(info || {}), hostKey: id, machine: h.name || id, from, to }),
       onVersionMatch: (v) => this.onAgentUpgrade?.('matched', { hostKey: id, version: v }),
+      onUpgradeBegin: (from, to) => this.onAgentUpgrade?.('begun', { hostKey: id, machine: h.name || id, from, to }), // lane win-upgrade-pipe
+      onAnswer: (v) => this.onAgentUpgrade?.('answered', { hostKey: id, version: v }),
     });
     await dm.connect();
     this._devices.set(id, dm);

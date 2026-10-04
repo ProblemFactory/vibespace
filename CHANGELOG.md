@@ -2,6 +2,22 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.206 — 2026-10-03
+
+### Added
+- Slack can use one app for the whole workspace: set it up once, then everyone just presses Connect and Allow.
+
+### Changed
+- Connecting Slack now takes two copies and nothing to choose inside Slack.
+- Connecting Slack now asks for every permission once, so a new feature won't need a re-install.
+- Lark's sign-in now asks for every permission it can use, so new features no longer ask you to re-authorize.
+- In Channels, each account under Accounts shows the same badge its conversations wear; hover it for the account's name.
+- VibeSpace's own agent talk in Channels wears a VibeSpace badge and is folded into one row by default; click to open it, and every device keeps your choice.
+- Slack accounts in Channels have their own icon.
+
+### Fixed
+- A Windows device no longer loses its agent when it updates itself, and VibeSpace tells you if a device stops answering after an update.
+
 ## 2.369.205 — 2026-10-03
 
 ### Added

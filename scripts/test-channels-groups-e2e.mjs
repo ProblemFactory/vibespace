@@ -223,6 +223,22 @@ ok(dlg.win && dlg.win.spec.action === 'openChannel' && /^g-[0-9a-f]{8}$/.test(dl
 ok(dlg.toast && /woke 2 agent\(s\) = 2 billed turn\(s\)/.test(dlg.toast), 'the toast says what the SERVER did — woke 2 agents = 2 billed turns', String(dlg.toast));
 const gid = dlg.win ? dlg.win.spec.convId : null;
 
+// ── ①b lane channels-fold (the owner, 2026-10-03): VibeSpace internal is FOLDED BY DEFAULT — on a fresh user state the
+// new group stands under the folded head, no row of its own; the owner's unfold is an EXPLICIT choice in user state
+// (every later leg reads the open block; ⑧ reloads it, ⑪ syncs it to a second client) ──
+const IHEAD = `(() => { const P = document.querySelector('.rail-panel-channels'); const ih = P && P.querySelector('.chan-groups .chan-ihead'); if (!ih) return null;
+  return { folded: ih.classList.contains('chan-ihead-folded'), expanded: ih.getAttribute('aria-expanded'), groups: P.querySelectorAll('.chan-groups .chan-grow[data-group]').length, count: ih.querySelector('.chan-ihead-count').textContent }; })()`;
+const us0 = (await api('GET', '/api/user-state')).body;
+const fd0 = await until(IHEAD);
+ok(fd0 && fd0.folded === true && fd0.expanded === 'false' && fd0.groups === 0 && /^\([1-9]\d*\)$/.test(fd0.count) && !(us0 && us0.channelsPanelFolds && 'internal' in us0.channelsPanelFolds),
+  '①b THE DEFAULT IS FOLDED: on a fresh user state (no `internal` key) the new group stands under the folded "VibeSpace internal (N)" head — no row of its own', JSON.stringify({ fd0, folds: us0 && us0.channelsPanelFolds }));
+await p1.evaljs(`(() => { document.querySelector('.rail-panel-channels .chan-groups .chan-ihead').click(); return 1; })()`);
+let usU = null;
+for (let i = 0; i < 20; i++) { usU = (await api('GET', '/api/user-state')).body; if (usU && usU.channelsPanelFolds && usU.channelsPanelFolds.internal === false) break; await sleep(250); }
+const fd1 = await until(`(() => { const v = ${IHEAD}; return v && v.folded === false && v.groups >= 1 ? v : null; })()`);
+ok(usU && usU.channelsPanelFolds && usU.channelsPanelFolds.internal === false && fd1 && fd1.expanded === 'true' && fd1.count === fd0.count,
+  '①b the owner\'s UNFOLD is an explicit choice — user state `channelsPanelFolds.internal: false` — and the group\'s row stands under the open head', JSON.stringify({ fd1, folds: usU && usU.channelsPanelFolds }));
+
 // ── ② the hostile name is TEXT ──
 const xss = await p1.evaljs(`(() => ({ pwned: window.__pwned === 1, rowText: [...document.querySelectorAll('.rail-panel-channels .chan-grow[data-group="${gid}"] .chan-grow-title')].map((n) => n.textContent)[0] || null, imgs: document.querySelectorAll('.rail-panel-channels .chan-groups img, .chanwin img, .taskbar img[src="x"]').length, title: [...window.app.wm.windows.values()].find((w) => w._openSpec && w._openSpec.convId === '${gid}').title }))()`);
 ok(xss.rowText === HOSTILE && dlg.win.title === HOSTILE && xss.title === HOSTILE, 'a HOSTILE group name renders as TEXT in the list row, the window bar and the window title', JSON.stringify(xss));
@@ -467,6 +483,8 @@ ok(await p1.load(), 'page reloaded');
 ok(await p1.evaljs(OPEN_PANEL), 'the panel renders again after the reload');
 const persisted = await until(`(() => { const p = document.querySelector('.rail-panel-channels .chan-part[data-part="accounts"]'); return p ? { folded: p.classList.contains('chan-part-collapsed'), bodyShown: getComputedStyle(p.querySelector('.chan-part-body')).display !== 'none' } : null; })()`);
 ok(persisted && persisted.folded === true && persisted.bodyShown === false, 'after the reload the Accounts section is STILL folded (its body hidden)', JSON.stringify(persisted));
+const keptOpen = await until(`(() => { const v = ${IHEAD}; return v && v.folded === false && v.groups >= 1 ? v : null; })()`);
+ok(keptOpen && keptOpen.expanded === 'true', '⑧ lane channels-fold: the owner\'s explicit UNFOLD (①b) survives the reload — VibeSpace internal stays open, though the default folds it', JSON.stringify(keptOpen));
 const watcher = await p1.evaljs(`(() => document.querySelector('.rail-panel-channels .chan-part[data-part="watcher"]').classList.contains('chan-part-collapsed'))()`);
 ok(watcher === false, 'CONTROL: the Message watcher section (never folded) is open — the fold is per section');
 
@@ -720,6 +738,69 @@ ok(watcher === false, 'CONTROL: the Message watcher section (never folded) is op
   let fr2 = [];
   for (let i = 0; i < 40 && !(fr2 = frames(BETA).slice(fr1).filter((f) => /Channel receipt/.test(JSON.stringify(f)))).length; i++) await sleep(250);
   ok(fr2.length === 1, `⑩ r3: ONE woken receipt reached beta's stub for the press (${fr2.length})`);
+}
+
+// ── ⑪ lane channels-badges: ONE badge per account (each account card's icon = its conversations' corner badge), the
+// VibeSpace badge on VibeSpace's own talk, the internal fold PERSISTED and SYNCED to a second client (no reload) ──
+{
+  const fg = await api('POST', '/api/channel-groups', { name: 'fold lane', members: AGENTS.map((a) => a.cid), quiet: true });
+  const fgid = fg.body && fg.body.group && fg.body.group.id;
+  const p2 = await newPage();
+  ok(!!fgid && (await p2.load()) && (await p2.evaljs(OPEN_PANEL)) && (await p1.evaljs(OPEN_PANEL)), '⑪ FIXTURE: a fresh agent group + a SECOND client with the panel open');
+  const CENSUS = `(() => {
+    const P = document.querySelector('.rail-panel-channels'); if (!P) return null;
+    const sig = (b) => (b ? [b.dataset.hue || '', b.dataset.vs || '', (b.querySelector('svg') || {}).innerHTML || ''].join('|') : null);
+    const rows = [...P.querySelectorAll('.chan-groups .chan-grow')];
+    const conv = rows.filter((r) => !r.dataset.group).map((r) => ({ key: r.dataset.grow, b: sig(r.querySelector('.chan-av-badge')), t: (r.querySelector('.chan-av-badge') || {}).title || '' }));
+    const groups = rows.filter((r) => r.dataset.group).map((r) => ({ id: r.dataset.group, b: sig(r.querySelector('.chan-av-badge')) }));
+    const heads = {};
+    for (const s of P.querySelectorAll('.chan-sec[data-adapter]')) { const b = s.querySelector('.chan-sec-head .chan-av-badge'); heads[s.dataset.adapter] = { b: sig(b), t: b ? b.title : '', kindTile: !!s.querySelector('.chan-sec-head .chan-av.chan-sec-kind') }; }
+    const ih = P.querySelector('.chan-groups .chan-ihead');
+    if (!conv.length || !groups.some((g) => g.id === ${JSON.stringify(fgid)}) || !ih) return null;
+    return { conv, groups, heads, ihead: sig(ih.querySelector('.chan-av-badge')) };
+  })()`;
+  const cs = await until(CENSUS);
+  const adapterOf = (k) => { const i = k.lastIndexOf('/'); return k.slice(0, i); };
+  ok(cs && cs.conv.every((c) => { const h = cs.heads[adapterOf(c.key)]; return h && h.b && h.b === c.b && h.t && c.t === h.t; }) && Object.values(cs.heads).every((h) => h.b && !h.kindTile),
+    `⑪ BADGE CENSUS: every conversation row's badge (glyph + hue) is EXACTLY its account card's icon, and both hovers name the account (${cs ? cs.conv.length : 0} rows, ${cs ? Object.keys(cs.heads).length : 0} cards)`, JSON.stringify(cs));
+  ok(cs && cs.groups.length >= 1 && cs.groups.every((g) => g.b && g.b === cs.ihead && g.b.split('|')[1] === '1') && Object.values(cs.heads).some((h) => h.b === cs.ihead),
+    '⑪ every agent group row wears the VibeSpace badge — the same one the internal head and the built-in agents card wear', JSON.stringify(cs && { groups: cs.groups, ihead: cs.ihead }));
+  const shots = process.env.VS_SHOTS_DIR || '';
+  // the account cards folded for this page only (their heads — icon · name — in one view with the internal block)
+  const shoot = async (name) => {
+    if (!shots) return;
+    const r = await p2.evaljs(`(() => { for (const h of document.querySelectorAll('.rail-panel-channels .chan-sec[data-adapter]:not(.chan-collapsed) > .chan-sec-head')) h.click(); const e = document.querySelector('.sidebar'); const ih = document.querySelector('.rail-panel-channels .chan-ihead'); if (ih) ih.scrollIntoView({ block: 'start' }); const b = e.getBoundingClientRect(); return { x: b.x, y: b.y, width: b.width, height: Math.min(b.height, 1400) }; })()`);
+    const png = await p2.cdp('Page.captureScreenshot', { format: 'png', clip: { ...r, scale: 1 } });
+    fs.writeFileSync(path.join(shots, name), Buffer.from(png.result.data, 'base64'));
+  };
+  if (shots) {
+    await p2.evaljs(`(() => { localStorage.setItem('vibespace.lang', 'zh'); return 1; })()`);
+    await p2.cdp('Emulation.setDeviceMetricsOverride', { width: 1100, height: 1300, deviceScaleFactor: 1, mobile: false });
+    await p2.load(); await p2.evaljs(OPEN_PANEL);
+    await p2.evaljs(`(() => { const s = document.querySelector('.sidebar'); s.style.width = '440px'; const a = document.querySelector('.rail-panel-channels .chan-part[data-part="accounts"]'); if (a && a.classList.contains('chan-part-collapsed')) a.querySelector('.chan-part-head').click(); return 1; })()`);
+    await sleep(1500);
+  }
+  const FOLDED = `(() => { const P = document.querySelector('.rail-panel-channels'); const ih = P && P.querySelector('.chan-groups .chan-ihead'); if (!ih) return null;
+    return { folded: ih.classList.contains('chan-ihead-folded'), expanded: ih.getAttribute('aria-expanded'), groups: P.querySelectorAll('.chan-groups .chan-grow[data-group]').length, convs: P.querySelectorAll('.chan-groups .chan-grow:not([data-group])').length, count: ih.querySelector('.chan-ihead-count').textContent }; })()`;
+  const on = (pg, want, ms = 15000) => (async () => { const end = Date.now() + ms; let v = null; while (Date.now() < end) { try { v = await pg.evaljs(FOLDED); } catch {} if (v && v.folded === want) return v; await sleep(250); } return v; })();
+  const before = await p1.evaljs(FOLDED), before2 = await on(p2, false);
+  ok(before && before.folded === false && before.expanded === 'true' && before.groups >= 1 && before2 && before2.folded === false && before2.groups >= 1,
+    '⑪ lane channels-fold: the owner\'s explicit UNFOLD (①b) holds here AND on the SECOND client\'s fresh load (user state, not this page)', JSON.stringify({ before, before2 }));
+  await shoot('after-unfolded-zh.png');
+  await p1.evaljs(`(() => { document.querySelector('.rail-panel-channels .chan-groups .chan-ihead').click(); return 1; })()`);
+  let us2 = null;
+  for (let i = 0; i < 20; i++) { us2 = (await api('GET', '/api/user-state')).body; if (us2 && us2.channelsPanelFolds && us2.channelsPanelFolds.internal === true) break; await sleep(250); }
+  ok(us2 && us2.channelsPanelFolds && us2.channelsPanelFolds.internal === true, '⑪ folding VibeSpace internal PATCHes user state (`channelsPanelFolds.internal: true`)', JSON.stringify(us2 && us2.channelsPanelFolds));
+  const f1 = await on(p1, true), f2 = await on(p2, true);
+  ok(f1 && f1.folded && f1.groups === 0 && f1.convs >= 1 && f1.count === before.count, '⑪ folded: the head ALONE stands for the internal rows (its count kept); the people\'s conversations stay', JSON.stringify(f1));
+  ok(f2 && f2.folded && f2.groups === 0, '⑪ …and the SECOND client folds too — the user-state broadcast, no reload', JSON.stringify(f2));
+  await shoot('after-zh.png');
+  await p2.evaljs(`(() => { document.querySelector('.rail-panel-channels .chan-groups .chan-ihead').click(); return 1; })()`);
+  const u1 = await on(p1, false);
+  let us3 = null;
+  for (let i = 0; i < 20; i++) { us3 = (await api('GET', '/api/user-state')).body; if (us3 && us3.channelsPanelFolds && us3.channelsPanelFolds.internal === false) break; await sleep(250); }
+  ok(u1 && u1.folded === false && u1.groups >= 1 && us3 && us3.channelsPanelFolds && us3.channelsPanelFolds.internal === false,
+    '⑪ unfolding on the second client unfolds the first (synced both ways) — and it is the explicit `internal: false` again', JSON.stringify({ u1, folds: us3 && us3.channelsPanelFolds }));
 }
 
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);

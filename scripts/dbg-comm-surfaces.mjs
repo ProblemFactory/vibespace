@@ -240,7 +240,7 @@ const MEASURE = `(function (rootSel, probes) {
     if (est.display === 'none' || est.visibility === 'hidden') continue;
     const eb = el.getBoundingClientRect();
     if (!eb.width && !eb.height) continue;
-    for (const a of ['title', 'placeholder']) { const v = el.getAttribute(a); if (v) attrs.push({ attr: a, text: v.slice(0, 160), latin: /[A-Za-z]{3,}/.test(v), cjk: /[\\u3040-\\u30ff\\u3400-\\u9fff]/.test(v), tag: el.tagName.toLowerCase(), cls: typeof el.className === 'string' ? el.className : '' }); }
+    for (const a of ['title', 'placeholder']) { const v = el.getAttribute(a); if (v) attrs.push({ attr: a, text: v.slice(0, 600), latin: /[A-Za-z]{3,}/.test(v), cjk: /[\\u3040-\\u30ff\\u3400-\\u9fff]/.test(v), tag: el.tagName.toLowerCase(), cls: typeof el.className === 'string' ? el.className : '' }); }
   }
   return { rect: R(root), scroll: { w: root.scrollWidth, h: root.scrollHeight, cw: root.clientWidth, ch: root.clientHeight }, els, texts, attrs, viewport: { w: innerWidth, h: innerHeight }, theme: document.documentElement.getAttribute('data-theme'), lang: localStorage.getItem('vibespace.lang') };
 })`;

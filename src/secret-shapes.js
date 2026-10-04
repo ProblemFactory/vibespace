@@ -30,7 +30,9 @@
  *      `Private-Lines: N`: the deeper-indented lines after it (the N lines) are the value
  *   R3 an HTTP credential — `Bearer <token>` (6+ chars) / `Basic <base64>` (16+ chars: "Basic Latin" stays)
  *   R4 a known prefix — gh[pousr]_ / github_pat_ (GitHub), sk- (OpenAI / Anthropic), sk_live_ / sk_test_ / rk_live_ /
- *      rk_test_ (Stripe, verify r2 F4), xox[abprs]- (Slack), AKIA /
+ *      rk_test_ (Stripe, verify r2 F4), xox[abprs]- (Slack), xoxe. / xoxe- (Slack's app configuration token and
+ *      its refresh token, design 017 — Slack's family up to 512 characters, the whole length slack-manifest's
+ *      tokenShapeOf accepts, so a long token is never left whole), AKIA /
  *      ASIA (AWS), AIza (Google), glpat- (GitLab), npm_, hf_, vsst_ / vsmt_ / jbt_ (our own tokens), a JWT
  *      (`eyJ….eyJ….sig`, a scan in code since verify r4 F3): the prefix stays, the material goes
  *   R5 a secret word followed by its token with no separator — `password hunter2` (a .netrc), `token eyJ…`: the
@@ -182,8 +184,8 @@ function redactKv(text) {
 // R3: an HTTP credential
 const HTTP_RE = /\b(bearer[ \t]+)[A-Za-z0-9_\-.=+/]{6,65536}|\b(basic[ \t]+)[A-Za-z0-9+/]{16,65536}={0,2}/gi;   // verify r2 F2: a run is consumed WHOLE (a 6 KB bearer kept its tail past 4096)
 // R4: a known prefix (the prefix stays)
-const PREFIX_RE = /\b(?:gh[pousr]_[A-Za-z0-9]{20,255}|github_pat_[A-Za-z0-9_]{20,255}|sk-[A-Za-z0-9_\-]{16,255}|(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,255}|xox[abprs]-[A-Za-z0-9\-]{10,255}|(?:AKIA|ASIA)[0-9A-Z]{16}|AIza[0-9A-Za-z_\-]{35}|glpat-[A-Za-z0-9_\-]{20,255}|npm_[A-Za-z0-9]{36}|hf_[A-Za-z0-9]{20,255}|vs(?:st|mt)_[A-Za-z0-9_\-]{8,255}|jbt_[A-Za-z0-9_\-]{8,255})(?![A-Za-z0-9_\-])/g;
-const PREFIX_HEAD = /^(github_pat_|gh[pousr]_|sk-|(?:sk|rk)_(?:live|test)_|xox[abprs]-|AKIA|ASIA|AIza|glpat-|npm_|hf_|vsst_|vsmt_|jbt_)/;
+const PREFIX_RE = /\b(?:gh[pousr]_[A-Za-z0-9]{20,255}|github_pat_[A-Za-z0-9_]{20,255}|sk-[A-Za-z0-9_\-]{16,255}|(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,255}|xoxe[.\-][A-Za-z0-9.+/=_\-]{10,512}|xox[abprs]-[A-Za-z0-9\-]{10,512}|(?:AKIA|ASIA)[0-9A-Z]{16}|AIza[0-9A-Za-z_\-]{35}|glpat-[A-Za-z0-9_\-]{20,255}|npm_[A-Za-z0-9]{36}|hf_[A-Za-z0-9]{20,255}|vs(?:st|mt)_[A-Za-z0-9_\-]{8,255}|jbt_[A-Za-z0-9_\-]{8,255})(?![A-Za-z0-9_\-])/g;
+const PREFIX_HEAD = /^(github_pat_|gh[pousr]_|sk-|(?:sk|rk)_(?:live|test)_|xoxe[.\-]|xox[abprs]-|AKIA|ASIA|AIza|glpat-|npm_|hf_|vsst_|vsmt_|jbt_)/;
 // verify r4 F3 (the regex census): the JWT was PREFIX_RE's one unbounded alternative, `\beyJ[A-Za-z0-9_\-]{8,}\.eyJ…\.…` — its run class holds
 // `-`, a non-word character that re-opens `\b` INSIDE the run: `-eyJ-eyJ-eyJ…` is a start at every `eyJ` and every start walks the run to its
 // end before the `.` fails (1.3 s at the 64 KiB bound, 27 ms per 8 KiB head at the write; `eyJeyJ…` read linear because it has no boundary).

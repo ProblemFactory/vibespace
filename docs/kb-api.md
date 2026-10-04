@@ -885,6 +885,20 @@ and restored at boot.
 - `POST /api/channels/oauth/start {kind:'slack'}` → `{flow:{mode:'paste', consentUrl: <Slack's manifest link>, listening:false}}`;
   `POST /api/channels/oauth/callback {flowId, url:<the pasted xoxp- token>}` (a bot / app token or junk = 400 `forbidden`,
   `detail.why:'not-a-user-token'`, the flow stays open); Connect as usual. Re-authorize = a new paste through `…/auth/finish`.
+- design 017 (two pastes): the callback takes `box: 'config' | 'user'` (which step's box). `{box:'config', url:<xoxe.xoxp-…>}`
+  → ONE `apps.manifest.create` → `{ok:true, step:'created', stepFacts:{appId, appName, teamId, teamName, installUrl},
+  token:null}` — the flow keeps running; `GET …/oauth/status` then carries `flow.step` + `flow.stepFacts`; Connect before
+  step 3 = 409 `flow-not-done`. A token in the wrong box or a refused create = 400 with `detail.code` = the closed why
+  (`user-token-wrong-box`, `config-token-wrong-box`, `refresh-token-not-config`, `not-a-config-token`,
+  `config-token-expired`, `config-token-scope`, `app-create-refused`, `rate-limited`, `transport`).
+- design 018 (one Slack app per workspace): `POST …/oauth/start` and `…/reauthorize` read the browser's `Origin` (else
+  Host) into the Slack state; `clientPreset: 'paste'` names the per-person rung (a Slack account with no client key);
+  `clientPreset: '<preset>'` / `'custom'` + `clientId`/`clientSecret` start Slack's consent (`flow.mode: 'public'`,
+  `url` = slack.com/oauth/v2/authorize). `GET /api/channels/oauth/cb/:kind?code&state[&error]` = the landing (behind the
+  instance cookie; the state is the flow's credential): an html page in en/zh/ja — 200 connected / declined, 400 refused
+  (`bad-shape`, `bad-hmac`, `wrong-flow`, `expired`, `used`, `failed`); never echoes the code or the state. The POST
+  callback of a `public` flow takes the landed address, its query, or the bare code a relay page showed (a foreign
+  state = 400 `state-mismatch`). A preset without `relayUrl` on an http origin = refused `no-https`.
 - The account view adds `policyModes` (`['review']` for Slack), `retention` (`purge-on-remove`) and `setup {probes, at}`.
 - `PUT …/policy {mode:'direct'}` on a Slack conversation or account = `{ok:false, code:'bad-policy', why:'mode-not-offered'}`.
 - A Slack proposal carries `prepared {mentions:[{name,id}], notifies, plain, at}` and `audience {kind: dm|private|public|external,

@@ -13,6 +13,13 @@
 //      left), a 429 holds that method for its Retry-After, a clock that steps back frees nothing
 //   ⑥ files: only files.slack.com ever sees the token
 //   ⑦ patched-copy controls for each new rule
+//   ⑧ TWO PASTES (design 017): the token shapes, the closed step table, the install link, the create request; one
+//      apps.manifest.create with the pasted setup token (a JSON POST), the flow running at `created` with the app's
+//      public facts, the step-3 user token connects; every refusal (wrong box, refresh token, expired, no scope, 429,
+//      no answer) by its closed why with nothing called or written; the setup token and the create's credentials in no
+//      flow status, record, call record, log line or error — a planted leak as the control
+//   ⑨ every user scope Slack's validator accepted, asked once (the 51 measured); the create answer's team_domain names
+//      the workspace; Slack tokens of every length tokenShapeOf accepts redacted (300 / 480 bodies; a 255-bound control)
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -32,7 +39,7 @@ const Words = require(path.join(REPO, 'src/channels/slack-words.js'));
 const OL = require(path.join(REPO, 'src/oauth-loopback.js'));
 const R = require(path.join(REPO, 'src/integration-registry.js'));
 const REC = require(path.join(REPO, 'src/channel-record.js'));
-const { createSlackVendor, FX, TOKEN } = require(path.join(REPO, 'scripts/fixtures/slack-vendor.cjs'));
+const { createSlackVendor, FX, TOKEN, CONFIG_TOKEN, CLIENT_SECRET } = require(path.join(REPO, 'scripts/fixtures/slack-vendor.cjs'));
 const EMOJI = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/slack-emoji.json'), 'utf-8'));
 const MC = mutantCopies('slack-shape', REPO);
 const quiet = { log() {}, warn() {}, error() {} };
@@ -45,15 +52,15 @@ function mkTokens() {
   return { st, read: () => ({ token: st.token, why: st.token ? null : 'never-authenticated' }), write: async (t, meta) => { st.token = t; st.writes++; st.metas.push(meta); }, clear: async () => { st.token = null; } };
 }
 function mkState() { const h = { s: {} }; return { h, read: () => ({ ...h.s }), write: async (p) => { h.s = { ...h.s, ...p }; } }; }
-function mkAdapter({ mode = {}, connected = true, mod = slack, record = { id: 'slack', label: 'Slack' }, buckets = null } = {}) {
+function mkAdapter({ mode = {}, connected = true, mod = slack, record = { id: 'slack', label: 'Slack' }, buckets = null, log = quiet, OLmod = OL } = {}) {
   const v = createSlackVendor({ mode });
   const tokens = mkTokens();
   const state = mkState();
   if (connected) tokens.st.token = { access_token: TOKEN, user: 'U0SELF001', team: 'T0ACME001', teamName: 'Acme', userId: 'T0ACME001/U0SELF001', label: 'Acme · @mart', scopes: FX.scopesHeader.split(',') };
   const reg = CH.createChannelRegistry(); reg.register(mod.adapter);
-  const oauth = OL.createOAuthLoopback({ now, log: quiet });
+  const oauth = OLmod.createOAuthLoopback({ now, log: quiet });
   const meters = { n: 0 };
-  const a = reg.create('slack', record, { now, fetch: v.fetchFn, tokens, oauth, state, log: quiet, meter: (u) => { meters.n += u; }, ...(buckets ? { slackBuckets: buckets } : {}) });
+  const a = reg.create('slack', record, { now, fetch: v.fetchFn, tokens, oauth, state, log, meter: (u) => { meters.n += u; }, ...(buckets ? { slackBuckets: buckets } : {}) });
   return { a, v, tokens, state, oauth, meters };
 }
 
@@ -69,12 +76,14 @@ console.log('⓪ the module');
   ok(JSON.stringify(c.threads) === JSON.stringify({ read: 'vendor', replyInto: true, listing: 'separate', placements: ['chat', 'thread', 'thread+chat'], rootReply: 'thread' }), 'threads: vendor, listed separately, chat / thread / thread+chat, a reply\'s norm is the thread (F3)');
   ok(c.reactions.read === 'list' && c.reactions.add === true && c.reactions.remove === 'own' && c.reactions.vocabulary === 'names', 'reactions: a per-message list (an inline read would drop them — F4), add, remove own, names');
   ok(c.facts.join() === 'via,edited' && c.budget.settingKey === 'channels.budgetSlackPerMin' && c.budget.default === 40, 'facts via + edited; the budget row is the slack table\'s (40 a minute)');
-  ok(slack.EGRESS.join() === 'slack.com,files.slack.com' && Manifest.EGRESS.join() === 'api.slack.com', 'egress: the Web API host and the files host (the manifest link\'s host is the person\'s browser page)');
+  ok(slack.EGRESS.join() === 'slack.com,files.slack.com' && Manifest.EGRESS.join() === 'api.slack.com,slack.com', 'egress: the Web API host and the files host (the manifest link\'s host and design 018\'s consent page are the person\'s browser pages)');
   const src = fs.readFileSync(path.join(REPO, 'src/channels/slack.js'), 'utf-8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   ok(!/process\.env/.test(src), 'it never reads process.env');
   const row = R.rowById('slack');
-  ok(row && row.signin === 'paste' && row.bindsPerAccount === true && row.fields.length === 0 && !row.clusterEnv && !row.delegate && !R.checkRow(row).length, 'the integration row is a PASTE row: no fields, no cluster env, no presets — and the registry accepts it');
-  ok(R.checkRow({ ...row, fields: [{ key: 'x', label: 'x', secret: true, validate: () => ({ ok: true }) }] }).some((e) => /paste/.test(e)), 'NEGATIVE CONTROL: a paste row that declares a field is refused by name');
+  ok(row && row.signin === 'paste' && row.bindsPerAccount === true && row.fields.map((f) => `${f.key}${f.secret ? '*' : ''}${f.required ? '!' : ''}`).join() === 'clientId!,clientSecret*!,relayUrl,teamDomain' && !!row.clusterEnv && !row.delegate && !(row.setup && row.setup.callbackUrl) && !R.checkRow(row).length, 'design 018: the row is the paste rung PLUS a workspace client (id, secret, relay page, workspace; a cluster env; no callback literal) — and the registry accepts it');
+  ok(R.checkRow({ ...row, clusterEnv: undefined }).some((e) => /paste/.test(e)) && R.checkRow({ ...row, delegate: { to: 'drive-presets' } }).some((e) => /paste/.test(e)) && R.checkRow({ ...row, fields: [] }).some((e) => /paste/.test(e)), 'NEGATIVE CONTROL: a paste row with a client but no cluster env, with a delegate, or with an env but no fields is refused by name');
+  const V = (k, v) => row.fields.find((f) => f.key === k).validate(v).ok;
+  ok(V('clientId', '1234567890.1234567890') && !V('clientId', 'cli_abc') && !V('clientId', '12.34 ') && V('relayUrl', '') && V('relayUrl', 'https://relay.example.test/slack/') && !V('relayUrl', 'http://relay.example.test/') && V('teamDomain', 'acme-ai') && !V('teamDomain', 'acme.slack.com'), 'the client id is <digits>.<digits>; the relay page is https or empty (http refused: Slack redirects only to https); the workspace is a subdomain');
   ok(Text.SLACK_QUICK.join() === EMOJI.quick.map((x) => x[0]).join() && EMOJI.quick.every(([k, g]) => Text.emojiText(k) === g), 'the picker\'s quick set and its glyphs equal the pinned fixture');
 }
 
@@ -342,14 +351,14 @@ console.log('⑦ controls');
   const { a } = mkAdapter({ mod: S2 });
   const e = await threw(() => a.fetchAttachment('C0GENERAL', { attachmentId: 'F0EVIL001' }));
   ok(e && /evil\.example\.test was not expected/.test(e.message), 'NEGATIVE CONTROL — a copy without the host check sends the token to the foreign host (the fixture catches the request)');
-  const SHAPE = "        if (shape !== 'user') {";
+  const SHAPE = "        if (act.act === 'refuse') {";
   ok(ssrc.includes(SHAPE), 'the patch site of the paste-shape control is in slack.js');
   const S3 = require(MC.write('src/channels/slack.js', ssrc.replace(SHAPE, '        if (false) {'), 'noshape'));
   const m3 = mkAdapter({ mod: S3, connected: false });
   const f3 = await m3.a.auth.begin();
   await m3.a.auth.finish(f3.flowId, 'xoxb' + '-1234567890-abcdefghij').catch(() => null);
   ok(m3.v.calls.length === 0, 'the exchange keeps its own shape belt (a copy without the finish check still sends nothing)');
-  const EXB = "            if (Manifest.tokenShapeOf(pasted) !== 'user') throw";
+  const EXB = "            if (act.act !== 'connect') throw";
   ok(ssrc.includes(EXB), 'the patch site of the exchange belt is in slack.js');
   const S4 = require(MC.write('src/channels/slack.js', ssrc.replace(SHAPE, '        if (false) {').replace(EXB, '            if (false) throw'), 'noshape2'));
   const m4 = mkAdapter({ mod: S4, connected: false });
@@ -368,6 +377,207 @@ console.log('⑦ controls');
   const r5 = S5.toRecord('slack', 'C0GENERAL', FX.history.C0GENERAL.messages.find((m) => m.ts === ts(10)), {});
   ok(r5.author.isBot === false && r5.author.id === '', 'NEGATIVE CONTROL — a copy that reads a bot_message as a person loses the app\'s identity');
   for (const c of copiesCensus(MC.files, MC.dir, REPO, { minCopies: 6, label: 'slack-shape: ' })) ok(c.pass, c.name, c.detail);
+}
+
+// ── ⑧ TWO PASTES (design 017) ──
+console.log('⑧ two pastes: the setup token makes the app, the user token connects');
+{
+  const REFRESH = 'xoxe' + '-1-' + 'refreshfixture0123456789abcdef';
+  const shapes = [[CONFIG_TOKEN, 'config'], [REFRESH, 'refresh'], [TOKEN, 'user'], ['xoxb' + '-1234567890-abcdefghij', 'bot'], ['xapp' + '-1-A0-1234567890-abcdef', 'app'], ['xoxe.' + 'nottoken', 'other'], ['hello', 'other'], ['  ', 'empty']];
+  ok(shapes.every(([s, want]) => Manifest.tokenShapeOf(s) === want), `the shapes: setup token (xoxe.xoxp-) / refresh (xoxe-) / user / bot / app / junk / empty (${shapes.map(([s]) => Manifest.tokenShapeOf(s)).join(',')})`);
+  const table = [];
+  for (const box of ['config', 'user', null]) for (const sh of ['config', 'refresh', 'user', 'bot', 'app', 'other', 'empty']) { const x = Manifest.pasteAction(box, sh); table.push(`${box}:${sh}=${x.act === 'refuse' ? x.why : x.act}`); }
+  const WANT = 'config:config=create,config:refresh=refresh-token-not-config,config:user=user-token-wrong-box,config:bot=not-a-config-token,config:app=not-a-config-token,config:other=not-a-config-token,config:empty=not-a-config-token,'
+    + 'user:config=config-token-wrong-box,user:refresh=config-token-wrong-box,user:user=connect,user:bot=not-a-user-token,user:app=not-a-user-token,user:other=not-a-user-token,user:empty=not-a-user-token,'
+    + 'null:config=config-token-wrong-box,null:refresh=config-token-wrong-box,null:user=connect,null:bot=not-a-user-token,null:app=not-a-user-token,null:other=not-a-user-token,null:empty=not-a-user-token';
+  ok(table.join() === WANT, 'THE CLOSED STEP TABLE: only a setup token in step 1\'s box creates, only a user token in step 3\'s (or an older dialog\'s) connects, every other pair is a named refusal', table.join());
+  ok(Manifest.installLink('A0VIBEAPP1') === 'https://api.slack.com/apps/A0VIBEAPP1/oauth' && ['B0VIBEAPP1', 'A12', '../A0VIBEAPP1', 'A0VIBEAPP1/../x', '', null].every((x) => Manifest.installLink(x) === null), 'the install link is the app\'s own page by id; an id that is not A… makes no link');
+  const man = Manifest.manifestFor({ ownerName: 'mart' });
+  const req = Manifest.createRequest(man);
+  ok(req.method === 'apps.manifest.create' && Object.keys(req.body).join() === 'manifest' && req.body.manifest === JSON.stringify(man), 'the create request carries the manifest verbatim (a JSON string) and nothing else');
+  ok(JSON.parse(decodeURIComponent(Manifest.createLink(man).slice(Manifest.CREATE_URL.length))).display_information.name === JSON.parse(req.body.manifest).display_information.name, 'the fallback link and the create carry the same manifest');
+
+  const lines = [];
+  const cap = { log: (...a) => lines.push(a.join(' ')), warn: (...a) => lines.push(a.join(' ')), error: (...a) => lines.push(a.join(' ')) };
+  const { a, v, tokens, oauth } = mkAdapter({ connected: false, record: { id: 'slack', label: 'mart' }, log: cap });
+  const f = await a.auth.begin();
+  const seen = [];   // everything this leg could leak through: answers, errors, statuses
+  for (const [paste, box, why] of [[TOKEN, 'config', 'user-token-wrong-box'], [REFRESH, 'config', 'refresh-token-not-config'], ['hello', 'config', 'not-a-config-token'], [CONFIG_TOKEN, 'user', 'config-token-wrong-box'], [CONFIG_TOKEN, null, 'config-token-wrong-box']]) {
+    const e = await threw(() => a.auth.finish(f.flowId, paste, { box }));
+    seen.push(e && e.message);
+    ok(e && e.code === 'forbidden' && e.detail.why === why && !e.message.includes(paste.trim()), `${box || 'no'} box ← ${Manifest.tokenShapeOf(paste)}: refused as ${e && e.detail.why}, the value not echoed`);
+  }
+  ok(v.calls.length === 0 && tokens.st.writes === 0, '…none reached Slack, nothing was written');
+  const r1 = await a.auth.finish(f.flowId, CONFIG_TOKEN, { box: 'config' });
+  seen.push(r1);
+  const cc = v.calls.filter((c) => c.method === 'apps.manifest.create');
+  ok(r1.ok === true && r1.step === 'created' && r1.stepFacts && r1.stepFacts.appId === 'A0VIBEAPP1' && r1.stepFacts.installUrl === 'https://api.slack.com/apps/A0VIBEAPP1/oauth' && r1.stepFacts.appName === 'VibeSpace (mart)', `step 1 makes the app: ${JSON.stringify(r1.stepFacts)}`);
+  ok(cc.length === 1 && cc[0].json === true && cc[0].auth === 'ok' && v.calls.length === 1 && JSON.parse(cc[0].params.manifest).oauth_config.scopes.user.join() === Manifest.USER_SCOPES.join(), 'ONE apps.manifest.create — a JSON POST, the pasted setup token its Bearer, the user-scope manifest inside; no other call');
+  ok(r1.stepFacts.teamId === 'T0ACME001' && r1.stepFacts.teamName === 'acme-ai.slack.com', `the MEASURED answer (team_id + team_domain, q-017-probe): step 1 names the workspace by its domain, no second call (${r1.stepFacts.teamName})`);
+  const st = oauth.status(f.flowId);
+  seen.push(st);
+  ok(st.running === true && st.done === false && st.step === 'created' && st.stepFacts.appId === 'A0VIBEAPP1' && tokens.st.writes === 0, 'the flow RUNS ON at step `created` with the app\'s facts (a dialog closed now resumes at step 2); nothing written');
+  const e3 = await threw(() => a.auth.finish(f.flowId, CONFIG_TOKEN, { box: 'user' }));
+  ok(e3 && e3.detail.why === 'config-token-wrong-box' && cc.length === 1 && v.calls.length === 1, 'the setup token pasted again into step 3\'s box: refused by shape, no second create');
+  const r3 = await a.auth.finish(f.flowId, TOKEN, { box: 'user' });
+  seen.push(r3);
+  ok(r3.ok === true && !r3.step && tokens.st.writes === 1 && tokens.st.token.label === 'Acme · @mart' && v.calls.map((c) => c.method).join() === 'apps.manifest.create,auth.test', 'step 3: the user token connects (one auth.test, ONE write) — the flow ends');
+  const said = JSON.stringify([seen, lines, v.calls.map((c) => ({ ...c })), tokens.st, oauth.status(f.flowId)]);
+  ok(!said.includes(CONFIG_TOKEN) && !said.includes(CONFIG_TOKEN.slice(10, 30)) && !said.includes(CLIENT_SECRET) && !/credentials|signing_secret|oauth_authorize_url/.test(said), 'the setup token (or a piece of it) and the create\'s credentials are in NO answer, status, call record, record, log line or error');
+  ok(lines.some((l) => /made the app A0VIBEAPP1/.test(l)), 'CONTROL (the census reads the log): the create IS logged — by app id');
+  // two creates in a row: two apps, the flow names the second
+  const m2 = mkAdapter({ connected: false });
+  const f2 = await m2.a.auth.begin();
+  await m2.a.auth.finish(f2.flowId, CONFIG_TOKEN, { box: 'config' });
+  const r22 = await m2.a.auth.finish(f2.flowId, CONFIG_TOKEN, { box: 'config' });
+  ok(r22.stepFacts.appId === 'A0VIBEAPP2' && m2.v.state.created.length === 2 && m2.oauth.status(f2.flowId).stepFacts.appId === 'A0VIBEAPP2', 'a second create makes a SECOND app (Slack has no idempotency) — the flow names the new one; the card says "another app"');
+  // the refusals of the create, each by its closed why, the flow left running, nothing written
+  for (const [mode, paste, why, code] of [[{}, 'xoxe.' + 'xoxp-1-' + 'expiredfixture0123456789', 'config-token-expired', 'invalid_auth'], [{ fail: { 'apps.manifest.create': 'missing_scope' } }, CONFIG_TOKEN, 'config-token-scope', 'missing_scope'], [{ fail: { 'apps.manifest.create': 'invalid_manifest' } }, CONFIG_TOKEN, 'app-create-refused', 'invalid_manifest'], [{ status429: { 'apps.manifest.create': 30 } }, CONFIG_TOKEN, 'rate-limited', 'ratelimited'], [{ lose: { 'apps.manifest.create': true } }, CONFIG_TOKEN, 'transport', null]]) {
+    const m = mkAdapter({ connected: false, mode });
+    const fx = await m.a.auth.begin();
+    const r = await m.a.auth.finish(fx.flowId, paste, { box: 'config' });
+    const s = m.oauth.status(fx.flowId);
+    ok(r.ok === false && r.why === why && s.running === true && s.why === why && s.step === null && m.tokens.st.writes === 0 && !JSON.stringify([r, s]).includes(paste) && (!code || r.error.includes(code)), `create refused (${code || 'no answer'}): why ${r.why}, "${String(r.error).slice(0, 50)}", the flow still open, the token not said`);
+  }
+  // with a workspace in the answer, the card names it before step 2
+  const m3 = mkAdapter({ connected: false, mode: { createTeam: { team_id: 'T0ACME001', team_name: 'Acme' } } });
+  const f3 = await m3.a.auth.begin();
+  const r33 = await m3.a.auth.finish(f3.flowId, CONFIG_TOKEN, { box: 'config' });
+  ok(r33.stepFacts.teamId === 'T0ACME001' && r33.stepFacts.teamName === 'Acme', 'an answer that names its workspace: the step names it (the card says where the app went before step 2)');
+  for (const [team, want] of [[{}, null], [{ team_id: 'T0ACME001', team_domain: 'Not A Domain!' }, null], [{ team_id: 'T0ACME001', team_domain: 'x'.repeat(70) }, null]]) {
+    const m5 = mkAdapter({ connected: false, mode: { createTeam: team } });
+    const f5 = await m5.a.auth.begin();
+    const r5 = await m5.a.auth.finish(f5.flowId, CONFIG_TOKEN, { box: 'config' });
+    ok(r5.ok === true && r5.stepFacts.teamName === want, `an answer without a usable workspace domain (${JSON.stringify(team).slice(0, 60)}): no workspace is invented`);
+  }
+  // a flow cancelled while the create was in flight still records what exists in Slack
+  const m4 = mkAdapter({ connected: false });
+  const f4 = await m4.a.auth.begin();
+  const p4 = m4.a.auth.finish(f4.flowId, CONFIG_TOKEN, { box: 'config' });
+  m4.oauth.cancel(f4.flowId, 'cancelled');
+  const r4 = await p4;
+  const s4 = m4.oauth.status(f4.flowId);
+  ok(r4.ok === true && s4.step === 'created' && s4.stepFacts.appId === 'A0VIBEAPP1' && s4.running === false, 'a flow ended while the create was in flight still RECORDS the app Slack made (never lost silently)');
+  // THE CONTROLS (patched copies)
+  const lsrc = fs.readFileSync(path.join(REPO, 'src/oauth-loopback.js'), 'utf-8');
+  const FACTS = "      st.stepFacts = stepFactsOf(result.facts);";
+  ok(lsrc.includes(FACTS), 'the patch site of the step-facts filter is in oauth-loopback.js');
+  const OL2 = require(MC.write('src/oauth-loopback.js', lsrc.replace(FACTS, '      st.stepFacts = result.facts;'), 'rawfacts'));
+  const ssrc = fs.readFileSync(path.join(REPO, 'src/channels/slack.js'), 'utf-8');
+  const LEAK = "    return { continue: true, step: 'created', facts: { appId,";
+  ok(ssrc.includes(LEAK), 'the patch site of the planted-leak control is in slack.js');
+  const S6 = require(MC.write('src/channels/slack.js', ssrc.replace(LEAK, "    return { continue: true, step: 'created', facts: { token: { v: setupToken }, appId,"), 'leakfacts'));
+  const m6 = mkAdapter({ connected: false, mod: S6, OLmod: OL2 });
+  const f6 = await m6.a.auth.begin();
+  await m6.a.auth.finish(f6.flowId, CONFIG_TOKEN, { box: 'config' });
+  ok(JSON.stringify(m6.oauth.status(f6.flowId)).includes(CONFIG_TOKEN), 'NEGATIVE CONTROL — a copy that plants the token in the step facts, over a loopback without the facts filter, shows it in the status (the census sees a leak)');
+  const m6b = mkAdapter({ connected: false, mod: S6 });
+  const f6b = await m6b.a.auth.begin();
+  await m6b.a.auth.finish(f6b.flowId, CONFIG_TOKEN, { box: 'config' });
+  ok(!JSON.stringify(m6b.oauth.status(f6b.flowId)).includes(CONFIG_TOKEN), '…and the real loopback\'s facts filter drops the planted object (strings only)');
+  const ERRW = "`Slack did not create the app: ${error || (ce && ce.code === 'transport' ? 'no answer' : 'refused')}`";
+  ok(ssrc.includes(ERRW), 'the patch site of the error-words control is in slack.js');
+  const S7 = require(MC.write('src/channels/slack.js', ssrc.replace(ERRW, '`Slack did not create the app with ${setupToken}: ${error}`'), 'leakerror'));
+  const m7 = mkAdapter({ connected: false, mod: S7 });
+  const f7 = await m7.a.auth.begin();
+  const bad7 = 'xoxe.' + 'xoxp-1-' + 'expiredfixture0123456789';
+  const r7 = await m7.a.auth.finish(f7.flowId, bad7, { box: 'config' });
+  ok(String(r7.error).includes(bad7) && JSON.stringify(m7.oauth.status(f7.flowId)).includes(bad7), 'NEGATIVE CONTROL — a copy that words the refusal with the token leaks it into the flow\'s status (what ⑧\'s census catches)');
+  const TBL = "    if (shape === 'user') return { act: 'refuse', why: 'user-token-wrong-box' };";
+  const msrc = fs.readFileSync(path.join(REPO, 'src/channels/slack-manifest.js'), 'utf-8');
+  ok(msrc.includes(TBL), 'the patch site of the step-table control is in slack-manifest.js');
+  const M8 = require(MC.write('src/channels/slack-manifest.js', msrc.replace(TBL, ''), 'nowrongbox'));
+  ok(M8.pasteAction('config', 'user').act !== 'refuse' || M8.pasteAction('config', 'user').why !== 'user-token-wrong-box', 'NEGATIVE CONTROL — a table without the wrong-box row no longer names a user token pasted into step 1');
+  for (const c of copiesCensus(MC.files, MC.dir, REPO, { minCopies: 10, label: 'slack-shape ⑧: ' })) ok(c.pass, c.name, c.detail);
+}
+
+// ── ⑨ EVERY SCOPE ONCE, AND SLACK TOKENS OF ANY ACCEPTED LENGTH REDACTED (lane slack-scopes-lark-reauth) ──
+{
+  // design-desk q-017-probe.md "Wide scopes": the 51 user scopes `apps.manifest.validate` accepted on 2026-10-03
+  const MEASURED = [
+    'channels:history', 'groups:history', 'im:history', 'mpim:history', 'channels:read', 'groups:read', 'im:read',
+    'mpim:read', 'users:read', 'users:read.email', 'users.profile:read', 'usergroups:read', 'team:read',
+    'search:read', 'reactions:read', 'reactions:write', 'files:read', 'files:write', 'pins:read', 'pins:write',
+    'bookmarks:read', 'bookmarks:write', 'stars:read', 'stars:write', 'reminders:read', 'reminders:write',
+    'emoji:read', 'dnd:read', 'links:read', 'remote_files:read', 'chat:write', 'im:write', 'mpim:write',
+    'channels:write', 'groups:write', 'calls:read', 'calls:write', 'dnd:write', 'users:write', 'users.profile:write',
+    'usergroups:write', 'canvases:read', 'canvases:write', 'lists:read', 'lists:write', 'remote_files:share',
+    'team.preferences:read', 'channels:write.invites', 'groups:write.invites', 'channels:write.topic',
+    'groups:write.topic',
+  ];
+  ok(Manifest.USER_SCOPES.join() === MEASURED.join(), `the manifest asks for the 51 user scopes Slack's validator accepted (${Manifest.USER_SCOPES.length})`);
+  ok(new Set(Manifest.USER_SCOPES).size === 51 && !Manifest.USER_SCOPES.includes('remote_files:write') && [...Manifest.READ_SCOPES, ...Manifest.SEND_SCOPES].every((x) => Manifest.USER_SCOPES.includes(x)), 'no duplicate, not the one Slack refused (remote_files:write), and the read / send scopes the account needs are among them');
+  ok(Manifest.manifestFor({ ownerName: 'mart' }).oauth_config.scopes.user.join() === MEASURED.join() && JSON.parse(Manifest.createRequest(Manifest.manifestFor({})).body.manifest).oauth_config.scopes.user.length === 51, 'manifestFor and the create request carry every one');
+  const worst = Manifest.createLink(Manifest.manifestFor({ ownerName: '\u{1F600}'.repeat(Manifest.OWNER_NAME_MAX + 5) }));
+  ok(Buffer.byteLength(worst, 'utf8') <= Manifest.LINK_MAX, `the "Another way" link still fits its bound with the longest owner name (${Buffer.byteLength(worst, 'utf8')} ≤ ${Manifest.LINK_MAX} bytes)`);
+  // verify r1 LOW 1 (slack-connect-easy): R4 bounded Slack's family at 255 characters, tokenShapeOf accepts up to 500
+  const SS = require(path.join(REPO, 'src/secret-shapes.js'));
+  const body = (n) => Array.from({ length: n }, (_, i) => 'Ab0-x9Q_'[i % 8]).join('').replace(/_/g, 'z');
+  const longs = [];
+  for (const n of [300, 480]) for (const [head, shape] of [['xoxe.xoxp-1-', 'config'], ['xoxe-1-', 'refresh'], ['xoxp-1-', 'user']]) longs.push({ tok: head + body(n), shape, n });
+  const leftWhole = (lib, tok) => { const out = lib.redactSecrets(`slack said: ${tok} — done`).text; return out.includes(tok.slice(-40)) || out.includes(tok.slice(20, 60)); };
+  for (const { tok, shape, n } of longs) ok(Manifest.tokenShapeOf(tok) === shape && !leftWhole(SS, tok), `a ${shape} token with a ${n}-character body (tokenShapeOf accepts it) is redacted — none of its material stays`);
+  const short = 'xoxe.' + 'xoxp-1-' + body(40);
+  ok(!leftWhole(SS, short) && SS.redactSecrets(`t ${short}`).text.includes('xoxe.'), 'a short one too, the prefix kept');
+  const ssrc = fs.readFileSync(path.join(REPO, 'src/secret-shapes.js'), 'utf8');
+  const BOUND = 'xoxe[.\\-][A-Za-z0-9.+/=_\\-]{10,512}|xox[abprs]-[A-Za-z0-9\\-]{10,512}';
+  ok(ssrc.includes(BOUND), 'the bound the control patches is in the source');
+  const SS2 = require(MC.write('src/secret-shapes.js', ssrc.replace(BOUND, BOUND.replace(/512/g, '255')), 'bound255'));
+  const whole = longs.filter(({ tok }) => leftWhole(SS2, tok));
+  ok(whole.length === longs.length && !leftWhole(SS2, short), `CONTROL — the old 255 bound leaves every long token whole (${whole.length}/${longs.length}), a short one still redacted`);
+}
+
+// ── design 018: ONE APP PER WORKSPACE — the state, the consent URL, the redirect, THE RELAY RULE (PURE) ──
+console.log('design 018: the workspace app (state, consent URL, relay rule)');
+{
+  const crypto = require('crypto');
+  const signer = (k) => (clear) => crypto.createHmac('sha256', k).update(clear).digest('base64url');
+  const sign = signer('key-a'), other = signer('key-b');
+  const T0 = 1790000000000;
+  const st = Manifest.stateOf({ origin: 'http://192.168.1.9:3000', flowId: '0123456789abcdef', issuedAt: T0 }, sign);
+  const p = Manifest.stateParts(st);
+  ok(/^v1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}$/.test(st) && p && p.origin === 'http://192.168.1.9:3000' && p.flowId === '0123456789abcdef' && p.issuedAt === T0, 'stateOf → v1.<b64url {u, f, t}>.<hmac>; stateParts reads it back');
+  const vd = (s, o = {}) => Manifest.stateVerdict(s, { sign, now: T0 + 1000, ttlMs: 30 * 60e3, ...o }).why;
+  const flip = st.slice(0, -1) + (st.endsWith('A') ? 'B' : 'A');
+  const forgedClear = (() => { const parts = st.split('.'); const j = JSON.parse(Buffer.from(parts[1], 'base64url').toString()); j.u = 'https://evil.example.com'; return `v1.${Buffer.from(JSON.stringify(j)).toString('base64url')}.${parts[2]}`; })();
+  const rows = [
+    ['ok', vd(st), null], ['bad-shape', vd('v2.' + st.slice(3)), 'bad-shape'], ['bad-shape (not a state)', vd('hello'), 'bad-shape'], ['bad-shape (>1024)', vd(st + 'x'.repeat(1100)), 'bad-shape'],
+    ['bad-hmac (flipped)', vd(flip), 'bad-hmac'], ['bad-hmac (another pod\'s key)', vd(st, { sign: other }), 'bad-hmac'], ['bad-hmac (clear part rewritten)', vd(forgedClear), 'bad-hmac'],
+    ['wrong-flow', vd(st, { flowId: 'ffffffffffffffff' }), 'wrong-flow'], ['expired', vd(st, { now: T0 + 31 * 60e3 }), 'expired'], ['future', vd(st, { now: T0 - 5 * 60e3 }), 'expired'],
+  ];
+  const bad = rows.filter(([, got, want]) => got !== want);
+  ok(!bad.length && Manifest.STATE_REFUSALS.join() === 'bad-shape,bad-hmac,wrong-flow,expired', `stateVerdict: ok + the four closed refusals over ${rows.length} rows (another pod's key, a rewritten clear part, a foreign flow, past the TTL)`, JSON.stringify(bad));
+  ok(Manifest.stateParts(Manifest.stateOf({ origin: 'http://192.168.1.9:3000/x', flowId: '0123456789abcdef', issuedAt: T0 }, sign)).origin === null && Manifest.originOf('HTTP://Box.LAN') === null && Manifest.originOf('http://box.lan') === 'http://box.lan', 'only a canonical bare origin rides the state (a path or a non-canonical spelling rides as none)');
+  const url = Manifest.authorizeUrl({ clientId: '1111111111.9999999999', redirectUri: 'https://relay.example.test/slack/', state: st });
+  const q = new URL(url).searchParams;
+  ok(url.startsWith(Manifest.AUTHORIZE_URL + '?') && q.get('client_id') === '1111111111.9999999999' && q.get('user_scope') === Manifest.USER_SCOPES.join(',') && q.get('redirect_uri') === 'https://relay.example.test/slack/' && q.get('state') === st && !q.has('scope'), 'authorizeUrl carries exactly USER_SCOPES as user_scope (no bot scope), the redirect and the state');
+  const wide = Array.from({ length: 51 }, (_, i) => `scope${i}:write.invites`);
+  const longUrl = Manifest.authorizeUrl({ clientId: '1111111111.9999999999', redirectUri: 'https://relay.example.test/slack/', state: st, scopes: wide });
+  ok(Buffer.byteLength(longUrl) < Manifest.LINK_MAX && !new URL(Manifest.authorizeUrl({ clientId: '1111111111.9999999999', state: st })).searchParams.has('redirect_uri'), `the consent URL stays under 2 048 bytes with 51 long scopes (${Buffer.byteLength(longUrl)} bytes); no redirect_uri when none is known`);
+  const rf = Manifest.redirectFor;
+  ok(rf({ relayUrl: 'https://relay.example.test/slack/', origin: 'https://pod.example.test' }).via === 'relay' && rf({ relayUrl: '', origin: 'https://pod.example.test' }).uri === 'https://pod.example.test/api/channels/oauth/cb/slack' && rf({ relayUrl: '', origin: 'http://192.168.1.9:3000' }).via === 'none' && rf({ relayUrl: 'http://relay.example.test/' }).via === 'bad-relay', 'redirectFor: the relay › the own https origin + the callback path › none; an http relay is bad-relay');
+  const m = Manifest.manifestFor({ ownerName: 'Acme', redirectUrls: ['https://relay.example.test/slack/', 'http://no.example.test/'] });
+  ok(JSON.stringify(m.oauth_config.redirect_urls) === '["https://relay.example.test/slack/"]' && m.oauth_config.scopes.user.join() === Manifest.USER_SCOPES.join() && !('redirect_urls' in Manifest.manifestFor({}).oauth_config), 'manifestFor({redirectUrls}) registers the https ones only; the per-person manifest registers none');
+  // THE RELAY RULE — the private table, the public controls, the allow suffix and a look-alike
+  const RT = [
+    ['http://127.0.0.1:3000', 'redirect'], ['http://10.1.2.3', 'redirect'], ['http://172.20.0.5:8080', 'redirect'], ['http://192.168.1.9:3000', 'redirect'],
+    ['http://[::1]:3000', 'redirect'], ['http://[fd00::1]', 'redirect'], ['http://localhost:3000', 'redirect'], ['http://box.local', 'redirect'], ['http://box.lan', 'redirect'], ['http://nas.home:8080', 'redirect'],
+    ['https://example.com', 'show-code'], ['http://8.8.8.8', 'show-code'], ['http://172.32.0.1', 'show-code'], ['http://172.15.255.1', 'show-code'], ['http://192.169.1.1', 'show-code'],
+    ['http://local', 'show-code'], ['http://evil.com/.lan', 'show-code'], ['javascript:alert(1)', 'show-code'], ['http://u:p@10.0.0.1', 'show-code'], ['', 'show-code'],
+    ['https://a.pods.example.test', 'redirect', ['pods.example.test']], ['https://pods.example.test', 'redirect', ['.pods.example.test']], ['http://a.pods.example.test', 'show-code', ['pods.example.test']],
+    ['https://pods.example.test.evil.net', 'show-code', ['pods.example.test']], ['https://evilpods.example.test', 'show-code', ['pods.example.test']], ['https://a.pods.example.test', 'show-code', ['test']],
+  ];
+  const off = RT.filter(([o, want, allow]) => Manifest.relayTargetVerdict(o, { allow: allow || [] }) !== want);
+  ok(!off.length, `relayTargetVerdict over ${RT.length} rows: private networks back, public hosts / look-alikes / http under an allow suffix / a one-label suffix shown the code`, JSON.stringify(off));
+  globalThis.__SLACK_RELAY_TABLE = RT;
+  // the custom rung's relay default: ONE address in the settings schema and the engine
+  const schemaSrc = fs.readFileSync(path.join(REPO, 'src/lib/settings-schema.js'), 'utf-8'), engSrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const d1 = (/'channels\.slackRelayUrl': \{\s*type: 'string', default: '([^']+)'/.exec(schemaSrc) || [])[1], d2 = (/const SLACK_RELAY_DEFAULT = '([^']+)';/.exec(engSrc) || [])[1];
+  ok(d1 && d1 === d2 && Manifest.redirectFor({ relayUrl: d1 }).via === 'relay', `the relay page default is one https address in the schema and the engine (${d1})`);
+  // the fixture the deploy side runs its admin relay against (scripts/fixtures/slack-state.json)
+  const FXS = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/slack-state.json'), 'utf-8'));
+  const fsign = signer(FXS.key);
+  ok(FXS.rows.length >= 5 && FXS.rows.every((r) => Manifest.stateVerdict(r.state, { sign: fsign, now: FXS.now, ttlMs: 30 * 60e3 }).why === r.verdict && (r.relay ? Manifest.relayTargetVerdict(Manifest.stateParts(r.state) ? Manifest.stateParts(r.state).origin : '', { allow: r.allow || [] }) === r.relay : true)), `scripts/fixtures/slack-state.json: each state's verdict under its key and its relay answer hold (${FXS.rows.length} rows)`);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

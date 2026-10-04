@@ -1,0 +1,52 @@
+{
+  "about": "design 018: Slack consent states signed with `key` (HMAC-SHA256, base64url) at `now`; `verdict` = slack-manifest stateVerdict (null = ok), `relay` = relayTargetVerdict of the clear part u (with `allow`). The deploy side runs its admin relay over these.",
+  "key": "fixture-state-key-not-a-secret",
+  "now": 1790000000000,
+  "rows": [
+    {
+      "what": "a private-network instance: the relay redirects, the instance accepts",
+      "state": "v1.eyJ1IjoiaHR0cDovLzE5Mi4xNjguMS45OjMwMDAiLCJmIjoiMDEyMzQ1Njc4OWFiY2RlZiIsInQiOjE3ODk5OTk5NDB9.Dk85SOYrTUG-03i2Eu7z4cT8ossVItkWRcLDuahadW0",
+      "verdict": null,
+      "relay": "redirect"
+    },
+    {
+      "what": "a public instance origin: the relay shows the code",
+      "state": "v1.eyJ1IjoiaHR0cHM6Ly9wb2QtNy5leGFtcGxlLnRlc3QiLCJmIjoiMTEyMzQ1Njc4OWFiY2RlZiIsInQiOjE3ODk5OTk5NDB9.QdVvCDa7J1p_851WAp9mVkBEn8yn722vPgw0Mj26ENo",
+      "verdict": null,
+      "relay": "show-code"
+    },
+    {
+      "what": "a fleet pod under the allow suffix: redirect",
+      "state": "v1.eyJ1IjoiaHR0cHM6Ly9wb2QtNy5wb2RzLmV4YW1wbGUudGVzdCIsImYiOiIyMTIzNDU2Nzg5YWJjZGVmIiwidCI6MTc4OTk5OTk0MH0.tQkThP0UrVxZBKykJfhSd8WofSsJd-gv4PponW8SHtA",
+      "verdict": null,
+      "relay": "redirect",
+      "allow": [
+        "pods.example.test"
+      ]
+    },
+    {
+      "what": "a look-alike of the allow suffix: the code",
+      "state": "v1.eyJ1IjoiaHR0cHM6Ly9wb2RzLmV4YW1wbGUudGVzdC5ldmlsLm5ldCIsImYiOiIzMTIzNDU2Nzg5YWJjZGVmIiwidCI6MTc4OTk5OTk0MH0.Obr2H6kcO1SP7ro-AIWcXt35hDpIc6is28WWEAtQues",
+      "verdict": null,
+      "relay": "show-code",
+      "allow": [
+        "pods.example.test"
+      ]
+    },
+    {
+      "what": "the signature changed: the instance refuses",
+      "state": "v1.eyJ1IjoiaHR0cDovLzE5Mi4xNjguMS45OjMwMDAiLCJmIjoiMDEyMzQ1Njc4OWFiY2RlZiIsInQiOjE3ODk5OTk5NDB9.Dk85SOYrTUG-03i2Eu7z4cT8ossVItkWRcLDuahadAA",
+      "verdict": "bad-hmac"
+    },
+    {
+      "what": "older than 30 minutes: the instance refuses",
+      "state": "v1.eyJ1IjoiaHR0cDovLzE5Mi4xNjguMS45OjMwMDAiLCJmIjoiNDEyMzQ1Njc4OWFiY2RlZiIsInQiOjE3ODk5OTgxNDB9.5ToxKzCoYwE4yWedaGPUmvkS7IvudUcCnIXkKkCkpno",
+      "verdict": "expired"
+    },
+    {
+      "what": "not a state",
+      "state": "hello",
+      "verdict": "bad-shape"
+    }
+  ]
+}

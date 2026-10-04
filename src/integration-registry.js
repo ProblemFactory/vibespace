@@ -128,6 +128,24 @@ const V = {
     if (!/^https?:\/\/[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*(:\d{1,5})?(\/.*)?$/i.test(s)) return bad('must be an http(s) URL with a host');
     return okV;
   },
+  /** design 018: a Slack app's Client ID (Basic Information → App Credentials) is `<digits>.<digits>`. */
+  slackClientId: (v) => {
+    const s = String(v);
+    if (!s) return bad('must not be empty');
+    if (/\s/.test(s)) return bad('must not contain whitespace');
+    if (!/^\d{3,20}\.\d{3,20}$/.test(s)) return bad('a Slack Client ID is two runs of digits joined by a dot (Basic Information → App Credentials)');
+    return okV;
+  },
+  /** design 018: an https page address, or empty (empty = no relay: the member pastes the code back). */
+  httpsUrlOrEmpty: (v) => {
+    const s = String(v);
+    if (!s) return okV;
+    if (/\s/.test(s)) return bad('must not contain whitespace');
+    if (!/^https:\/\/[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*(:\d{1,5})?(\/[^?#]*)?$/i.test(s) || s.length > 300) return bad('must be an https URL (Slack redirects only to https)');
+    return okV;
+  },
+  /** design 018: a Slack workspace's subdomain (`acme` of acme.slack.com), or empty. */
+  slackTeamDomain: (v) => (/^([a-z0-9][a-z0-9-]{0,61})?$/i.test(String(v)) ? okV : bad('the workspace\'s subdomain, e.g. acme for acme.slack.com')),
   /** `true` / `false` — each vendor's own stealth switch is a VALUE, not a capability promise (§7.5). */
   boolWord: (v) => (/^(true|false|1|0)$/i.test(String(v)) ? okV : bad('true or false')),
   awsRegion: (v) => (/^[a-z]{2}-[a-z]+-\d$/.test(String(v)) ? okV : bad('an AWS region id such as us-east-1')),
@@ -252,27 +270,46 @@ const ROWS = Object.freeze([
     docs: 'docs/design-communication-panel.zh.md',
   },
 
-  // ── SLACK — a PASTE row (design 012, lane S1, B-ff09) ──────────────────
-  // No client at all: each person creates their OWN internal Slack app from the link the account dialog builds
-  // (src/channels/slack-manifest.js) and pastes its User OAuth Token — Slack's OAuth needs an https redirect our
-  // loopback cannot give, and a distributed (non-Marketplace) app is held to 1 history read a minute. So the row
-  // declares NO fields, no cluster env and no presets; the account dialog hides the client block and shows the paste
-  // box (`signin: 'paste'`); the engine answers every credential question for it as ready (`source: 'paste'`). The
-  // pasted token is judged by its SHAPE (`xoxp-`) before the one `auth.test` the paste costs.
+  // ── SLACK — ONE APP PER WORKSPACE + the PASTE rung (design 012 lane S1; design 017; design 018) ──
+  // THREE RUNGS, the Lark stored / custom shape plus Slack's own: (1) a CLUSTER PRESET ("stored": the company's
+  // workspace app — client id, secret, the relay page on the fleet's admin host, the workspace's subdomain; the
+  // members press Allow); (2) a CUSTOM client ("custom": the id / secret of the person's own workspace app, typed in the
+  // account dialog; its relay page is the `channels.slackRelayUrl` setting); (3) no client (`signin: 'paste'`): each
+  // person's own app made with a one-time setup token, and the pasted User OAuth Token — the engine answers every
+  // credential question of a key-less account as ready (`source: 'paste'`). Slack redirects only to https: the
+  // redirect is the relay page, or the instance's own https origin + /api/channels/oauth/cb/slack (slack-manifest.js
+  // `redirectFor`) — never a literal here.
   {
     id: 'slack',
     label: 'Slack',
-    fields: [],
+    fields: [
+      { key: 'clientId', label: i18nKey('Client ID'), secret: false, required: true, placeholder: '1234567890.1234567890',
+        help: i18nKey('The workspace app’s Basic Information page → App Credentials.'), validate: V.slackClientId },
+      { key: 'clientSecret', label: i18nKey('Client Secret'), secret: true, required: true,
+        help: i18nKey('Same page. It is only ever written here, never read back.'), validate: V.minLen(8) },
+      { key: 'relayUrl', label: i18nKey('Relay page'), secret: false, required: false, placeholder: 'https://…',
+        help: i18nKey('The https page Slack sends members back to; it returns them to their own VibeSpace. Empty = this instance’s own https address, else the code is pasted back.'), validate: V.httpsUrlOrEmpty },
+      { key: 'teamDomain', label: i18nKey('Workspace'), secret: false, required: false, placeholder: 'acme',
+        help: i18nKey('The workspace’s subdomain (acme for acme.slack.com) — the name the connect card shows.'), validate: V.slackTeamDomain },
+    ],
     signin: 'paste',
+    clusterEnv: { json: 'VIBESPACE_INTEGRATIONS', prefix: 'VIBESPACE_INTEGRATION_SLACK_' },
+    setup: {
+      callbackNote: i18nKey('Slack → your app → OAuth & Permissions → Redirect URLs: add the relay page (or this instance’s https address + /api/channels/oauth/cb/slack). It must match exactly or be a sub-path.'),
+      prerequisites: [
+        i18nKey('The relay page (or this instance’s https callback) is registered under Redirect URLs'),
+        i18nKey('The app asks for the user scopes VibeSpace lists (node scripts/slack-manifest.mjs prints the whole manifest)'),
+      ],
+    },
     test: {
       kind: 'shape-only',
-      describe: i18nKey('Checks that a pasted value is a Slack user token (it starts xoxp-) before the one call that asks Slack who it belongs to.'),
-      caveat: i18nKey('Shape only. Whether the token reads every conversation depends on the scopes the app was installed with — the account card lists them.'),
+      describe: i18nKey('Checks the client id / secret shape (Slack has no exchange that proves a secret alone) and, for the paste rung, each pasted value by its shape first: a one-time setup token (xoxe.) makes your own app with one apps.manifest.create request and is not kept; the user token (xoxp-) costs one request that asks Slack who it belongs to.'),
+      caveat: i18nKey('Shape only. Whether the consent succeeds depends on the redirect URL and scopes registered on the app; whether the token reads every conversation depends on the scopes it was installed with — the account card lists them.'),
     },
     consumers: ['src/channels/slack.js'],
     usedBy: i18nKey('Used by the Slack channel'),
     bindsPerAccount: true,
-    clientHint: i18nKey('No client to choose: every person makes their own Slack app in their workspace and pastes its token.'),
+    clientHint: i18nKey('A workspace app lets every member just press Allow; without one, make your own Slack app with a one-time setup token.'),
     docs: 'docs/agent/channels-manual.md',
   },
 
@@ -574,15 +611,17 @@ function oauthClientVendorOf(row) {
 function checkRow(row) {
   const errs = [];
   if (row.bindsPerAccount !== undefined && typeof row.bindsPerAccount !== 'boolean') errs.push('bindsPerAccount must be a boolean');
-  // design 012: `signin` = how an account of the row signs in — absent = the OAuth client the row declares; 'paste' = no
-  // client at all (the person pastes a token from the vendor's own page): no fields, no cluster env, no delegate
+  // design 012: `signin` = how an account of the row signs in — absent = the OAuth client the row declares; 'paste' = an
+  // account with NO client key pastes a token from the vendor's own page. design 018: a paste row MAY also declare a
+  // workspace client (fields + clusterEnv, never a delegate) — then the client is a rung beside the paste
   if (row.signin !== undefined && !SIGNIN_KINDS.includes(row.signin)) errs.push(`signin must be one of ${SIGNIN_KINDS.join('|')}`);
   const paste = row.signin === 'paste';
-  if (paste && (row.bindsPerAccount !== true || (row.fields || []).length || row.clusterEnv || row.delegate || row.setup)) errs.push('a signin:\'paste\' row is a bindsPerAccount row with no fields, no clusterEnv / delegate and no setup (nothing to configure: the person pastes a token)');
+  const pasteOnly = paste && !(row.fields || []).length;
+  if (paste && (row.bindsPerAccount !== true || row.delegate || (pasteOnly && (row.clusterEnv || row.setup)) || (!pasteOnly && !row.clusterEnv))) errs.push('a signin:\'paste\' row is a bindsPerAccount row with no delegate; with no fields it has no clusterEnv / setup (nothing to configure: the person pastes a token), with a workspace client it declares its clusterEnv');
   if (row.bindsPerAccount === true) {
     if (typeof row.clientHint !== 'string' || !row.clientHint.trim()) errs.push('a bindsPerAccount row declares its clientHint (the one hint line under the account dialog\'s OAuth client field)');
-    if (!paste && (row.fields || []).filter((f) => f.secret).length !== 1) errs.push('a bindsPerAccount row declares exactly ONE secret field: the custom client\'s secret');
-    if (!paste && !(row.fields || []).some((f) => !f.secret)) errs.push('a bindsPerAccount row declares a non-secret field: the custom client\'s id');
+    if (!pasteOnly && (row.fields || []).filter((f) => f.secret).length !== 1) errs.push('a bindsPerAccount row declares exactly ONE secret field: the custom client\'s secret');
+    if (!pasteOnly && !(row.fields || []).some((f) => !f.secret)) errs.push('a bindsPerAccount row declares a non-secret field: the custom client\'s id');
   } else if (row.clientHint !== undefined) errs.push('clientHint belongs to a bindsPerAccount row only (a card has no account dialog)');
   if (row.signinName !== undefined && (row.bindsPerAccount !== true || typeof row.signinName !== 'string' || !row.signinName.trim())) errs.push('signinName is a non-empty brand on a bindsPerAccount row only');
   if (!row.id || !/^[a-z][a-z0-9:-]*$/.test(row.id)) errs.push('id must be lowercase [a-z0-9:-]');

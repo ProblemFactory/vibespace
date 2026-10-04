@@ -12,6 +12,21 @@
  * The token never expires (rotation off in the manifest); it is written only through the engine's sealed token store,
  * never logged, echoed or carried in an error (`withoutSent` scrubs the Bearer by value from every vendor answer).
  *
+ * TWO PASTES (design 017): the SAME flow first takes an app configuration token in step 1's box (`box: 'config'`) —
+ * ONE `apps.manifest.create` with it as the Bearer (a JSON POST), the app id kept, `credentials` never read, the token
+ * dropped in `finally` (no record, log, error or flow holds it) — and answers `{continue: true, step: 'created',
+ * facts}`: the flow keeps running at step 2 (the app's install page by id); step 3's box takes the `xoxp-` as above.
+ * A token in the wrong box is refused by its shape before any call (slack-manifest.js `pasteAction`).
+ *
+ * ONE APP PER WORKSPACE (design 018): an account bound to a workspace app — `cluster:<k>` (a preset: client id,
+ * secret, relay page, workspace) or `custom` (the client id / secret typed for the person's own workspace app) — signs in
+ * on Slack's consent page (oauth-loopback `public`): `auth.begin({origin})` builds the authorize URL with the redirect
+ * (the relay › this instance's https origin › none) and a state the engine signs; the code comes back through the
+ * instance's GET landing route (or a paste) and the exchange is ONE `oauth.v2.access` (client id + secret as HTTP Basic,
+ * read from the resolved client INSIDE the call, the same `redirect_uri` the consent carried) then the paste path's own
+ * `auth.test` with the new `xoxp-` — the account record is the paste path's, byte for byte. An account with no client
+ * key is the per-person path above, unchanged.
+ *
  * POLL ONLY (S1). `users.conversations` lists every conversation the person is in (channels, private channels, group
  * DMs, DMs — an app's DM flagged `app`, never a "Direct" tag); `conversations.history` pages newest-first to the
  * stored anchor (`oldest`); `conversations.replies` walks a thread; reactions are a per-message list
@@ -142,18 +157,20 @@ function vendorNameOf() { return i18nKey('Slack'); }
 
 /** ONE Web API round trip: POST form → `{body, scopes}`. Typed failures (slack-words.js); the Bearer scrubbed by value
  *  from every refusal's words; a 429's `Retry-After` rides `detail.retryAfterSec`. */
-async function callSlack(fetchFn, method, params, { token, signal = null } = {}) {
+async function callSlack(fetchFn, method, params, { token, signal = null, json = false, basic = null } = {}) {
   const what = `slack ${method}`;
-  const headers = { Authorization: `Bearer ${token}` };
-  const sent = sentSecrets({ headers });
+  // design 018: `oauth.v2.access` authenticates the APP (client id + secret as HTTP Basic), never a token
+  const pair = basic ? Buffer.from(`${basic.id}:${basic.secret}`, 'utf8').toString('base64') : null;
+  const headers = { Authorization: pair ? `Basic ${pair}` : `Bearer ${token}` };
+  const sent = pair ? [...sentSecrets({ fields: { client_secret: String(basic.secret) } }), { name: 'client_secret', value: pair }] : sentSecrets({ headers });
   const form = new URLSearchParams();
   for (const [k, v] of Object.entries(params || {})) if (v !== undefined && v !== null && v !== '') form.set(k, String(v));
   let r;
   try {
     r = await fetchFn(API + method, {
       method: 'POST',
-      headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded; charset=utf-8', ...headers },
-      body: form.toString(),
+      headers: { Accept: 'application/json', 'Content-Type': json ? 'application/json; charset=utf-8' : 'application/x-www-form-urlencoded; charset=utf-8', ...headers },
+      body: json ? JSON.stringify(params || {}) : form.toString(),
       signal: signal || AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
   } catch (e) {
@@ -258,6 +275,11 @@ function create(record = {}, deps = {}) {
   const tokens = deps.tokens || null;
   const oauth = deps.oauth || null;
   const state = deps.state || null;
+  // design 018: the workspace app's client (the engine's per-record resolver) and the instance's consent facts
+  // (`sign` = the per-boot state HMAC, `relayUrl()` = the custom rung's relay page setting, `ttlMs`)
+  const resolveIntegration = typeof deps.resolveIntegration === 'function' ? deps.resolveIntegration : null;
+  const consent = deps.slackConsent || null;
+  const clientKey = () => { const k = deps.credentialKey || record.credentialKey || null; return k === 'custom' || (typeof k === 'string' && k.startsWith('cluster:')) ? k : null; };
   const log = deps.log || console;
   const meter = typeof deps.meter === 'function' ? deps.meter : () => {};
   const pace = typeof deps.pace === 'function' ? deps.pace : async () => {};
@@ -297,6 +319,76 @@ function create(record = {}, deps = {}) {
     if (cur[name] !== undefined && cur[name] !== null && JSON.stringify(cur[name]) === JSON.stringify(value)) return;
     if (cur[name] !== undefined && cur[name] !== null && name !== 'scopes' && name !== 'planLimited') return;   // a probe is answered once (scopes / plan follow the token)
     Promise.resolve(state.write({ setup: { probes: { ...cur, [name]: value }, at: now() } })).catch(() => {});
+  }
+
+  /** design 017 STEP 1: ONE `apps.manifest.create` with the pasted setup token (once per human paste, like the
+   *  consent's auth.test). Kept from the answer: the app id and the workspace (`team_id`, named by `team_domain`); `credentials`
+   *  and `oauth_authorize_url` are never read. The caller drops the token. */
+  async function createApp(setupToken, ownerName) {
+    const manifest = Manifest.manifestFor({ ownerName });
+    const req = Manifest.createRequest(manifest);
+    let r;
+    try { r = await callSlack(fetchFn, req.method, req.body, { token: setupToken, json: true }); }   // ungated: consent-app-create (once per human paste)
+    catch (e) {
+      const ce = e instanceof ChannelError ? e : null;
+      const error = ce && ce.detail && typeof ce.detail.error === 'string' ? ce.detail.error : null;
+      const why = Words.createWhyOf(error, { status: ce && ce.detail && ce.detail.status ? ce.detail.status : (ce && ce.code === 'transport' ? 503 : 200) });
+      throw new ChannelError(ce ? ce.code : 'vendor-error', `Slack did not create the app: ${error || (ce && ce.code === 'transport' ? 'no answer' : 'refused')}`, { retryable: false, detail: { why, error, ...(ce && ce.detail && ce.detail.requiredScopes ? { requiredScopes: ce.detail.requiredScopes } : {}) } });
+    }   // rate-ok: consent-app-create
+    const a = r.body || {};
+    const appId = typeof a.app_id === 'string' && Manifest.APP_ID_RE.test(a.app_id) ? a.app_id : null;
+    if (!appId) throw new ChannelError('vendor-error', 'Slack answered the create without an app id — no app to install', { retryable: false, detail: { why: 'app-create-refused', error: null } });
+    const teamId = typeof a.team_id === 'string' && ID_RE.test(a.team_id) ? a.team_id : null;
+    // design-desk q-017-probe (measured 2026-10-03): the answer carries `team_id` + `team_domain` (the workspace's
+    // subdomain) and no name — the step names the workspace by its domain, with no second call
+    const domain = typeof a.team_domain === 'string' && /^[a-z0-9][a-z0-9-]{0,62}$/.test(a.team_domain) ? `${a.team_domain}.slack.com` : '';
+    const teamName = peerName(typeof a.team_name === 'string' ? a.team_name : (a.team && typeof a.team.name === 'string' ? a.team.name : domain), 100) || null;
+    log.log && log.log(`[slack] ${adapterId}: made the app ${appId}${teamId ? ` in ${teamId}` : ''} from a pasted setup token (the token is not kept)`);
+    return { continue: true, step: 'created', facts: { appId, appName: manifest.display_information.name, teamId, teamName, installUrl: Manifest.installLink(appId) } };
+  }
+
+  /** design 018: the account's workspace app, resolved NOW (a preset rotated mid-flow is read at exchange time). */
+  function workspaceClient() {
+    const k = clientKey();
+    const r = k && resolveIntegration ? resolveIntegration(INTEGRATION, { credentialKey: k }) : null;
+    const v = (r && r.values) || {};
+    if (!r || r.source === 'none' || !v.clientId || !v.clientSecret) throw new ChannelError('auth-expired', `the Slack workspace app is not usable: ${(r && r.why) || 'no client id / secret'}`, { retryable: false, detail: { why: 'client-missing' } });
+    return { source: r.source, clientId: String(v.clientId), secret: () => String(v.clientSecret), relayUrl: typeof v.relayUrl === 'string' ? v.relayUrl : '', teamDomain: typeof v.teamDomain === 'string' ? v.teamDomain : '' };
+  }
+  /** THE TOKEN, CONNECTED: one `auth.test` names who it is; the record the paste path and the workspace consent share. */
+  async function connectUserToken(pasted, cancelled) {
+    let r;
+    try { r = await callSlack(fetchFn, 'auth.test', {}, { token: pasted }); }   // ungated: consent-auth-test (once per human paste)
+    catch (e) { throw new ChannelError(e instanceof ChannelError ? e.code : 'vendor-error', `Slack refused the pasted token: ${e instanceof ChannelError && e.detail && e.detail.error ? e.detail.error : 'no answer'}`, { retryable: false, detail: { why: e instanceof ChannelError && e.detail ? e.detail.why : 'vendor' } }); }   // rate-ok: consent-auth-test
+    const a = r.body || {};
+    const team = typeof a.team_id === 'string' && ID_RE.test(a.team_id) ? a.team_id : null;
+    const user = typeof a.user_id === 'string' && ID_RE.test(a.user_id) ? a.user_id : null;
+    if (!team || !user) throw new ChannelError('vendor-error', 'Slack answered the pasted token without naming a workspace and a person — nothing was connected', { retryable: false, detail: { nameless: true } });
+    const ent = typeof a.enterprise_id === 'string' && ID_RE.test(a.enterprise_id) ? a.enterprise_id : null;
+    const scopes = r.scopes || [];
+    const teamName = peerName(a.team, 100) || team;
+    const handle = peerName(a.user, 100) || user;
+    const tok = { access_token: pasted, user, team, ...(ent ? { enterprise: ent } : {}), userId: `${ent ? `${ent}/` : ''}${team}/${user}`, teamName, name: handle, label: `${teamName} · @${handle}`, scopes, url: typeof a.url === 'string' && /^https:\/\/[a-z0-9.-]+\.slack\.com\/$/i.test(a.url) ? a.url : null };
+    if (tokens) await tokens.write(tok, { expiresAt: null, scopes, user: tok.label, consent: { cancelled } });
+    probe('userOnlyManifest', 'accepted');
+    probe('scopes', scopes);
+    return { ok: true, user: tok.label, scopes };
+  }
+  /** design 018: THE CODE EXCHANGE — ONE `oauth.v2.access` (the app's id + secret as HTTP Basic, the code, the SAME
+   *  redirect_uri the consent carried — Slack refuses a mismatch and, with several registered, needs it on both steps). */
+  async function exchangeCode(code, redirectUri, cancelled) {
+    const c = workspaceClient();
+    let r;
+    try { r = await callSlack(fetchFn, Manifest.EXCHANGE_METHOD, { code: String(code), ...(redirectUri ? { redirect_uri: redirectUri } : {}) }, { basic: { id: c.clientId, secret: c.secret() } }); }   // ungated: consent-code-exchange (once per human Allow)
+    catch (e) {
+      const error = e instanceof ChannelError && e.detail && typeof e.detail.error === 'string' ? e.detail.error : null;
+      const why = Words.exchangeWhyOf(error);
+      throw new ChannelError(e instanceof ChannelError ? e.code : 'vendor-error', `Slack did not finish the sign-in: ${Words.exchangeSentenceOf(why, error)}`, { retryable: false, detail: { why, error } });
+    }   // rate-ok: consent-code-exchange
+    const u = (r.body && r.body.authed_user) || {};
+    const tok = typeof u.access_token === 'string' ? u.access_token : '';
+    if (Manifest.tokenShapeOf(tok) !== 'user') throw new ChannelError('vendor-error', 'Slack finished the sign-in without a user token (the app asks for no user scopes?) — nothing was connected', { retryable: false, detail: { why: 'no-user-token' } });
+    return connectUserToken(tok, cancelled);
   }
 
   // ── THE GATE: token → the method's bucket → the pace → the meter → the request ──
@@ -519,52 +611,73 @@ function create(record = {}, deps = {}) {
     auth: {
       async state() {
         const { token, why } = readToken();
-        if (!token) return { state: 'unknown', expiresAt: null, scopes: [], why, credentialSource: 'paste', credentialKey: null };
-        if (token.revokedAt) return { state: 'needs-reauth', expiresAt: null, scopes: token.scopes || [], why: 'token-revoked', credentialSource: 'paste', credentialKey: null };
+        const k = clientKey();
+        const src = k ? (k === 'custom' ? 'custom' : 'cluster') : 'paste';   // design 018: a workspace app's account names its rung
+        if (!token) return { state: 'unknown', expiresAt: null, scopes: [], why, credentialSource: src, credentialKey: k };
+        if (token.revokedAt) return { state: 'needs-reauth', expiresAt: null, scopes: token.scopes || [], why: 'token-revoked', credentialSource: src, credentialKey: k };
         probe('userOnlyManifest', 'accepted');   // a held user token proves Slack accepted the user-scope-only manifest (the consent's own write ran on a record that did not exist yet)
         const missing = READ_SCOPES.filter((s) => !has(token.scopes, s));
-        return { state: 'connected', expiresAt: null, scopes: token.scopes || [], why: missing.length ? `scopes-missing:${missing.join(',')}` : null, credentialSource: 'paste', credentialKey: null, user: token.label || null };
+        return { state: 'connected', expiresAt: null, scopes: token.scopes || [], why: missing.length ? `scopes-missing:${missing.join(',')}` : null, credentialSource: src, credentialKey: k, user: token.label || null };
       },
       /** THE PASTE FLOW (oauth-loopback `paste`): the consent URL is the manifest link; nothing listens. */
-      async begin() {
+      async begin({ origin = null } = {}) {
         if (!oauth) throw new ChannelError('not-supported', 'slack.auth.begin: no sign-in machine was handed to this adapter', { retryable: false });
         const label = record && typeof record.label === 'string' && record.label !== LABEL ? record.label : '';
+        if (clientKey()) {
+          // design 018: THE WORKSPACE APP — Slack's consent page, the member presses Allow
+          if (!consent || typeof consent.sign !== 'function') throw new ChannelError('not-supported', 'slack.auth.begin: no state signer was handed to this adapter', { retryable: false });
+          const c = workspaceClient();
+          const own = Manifest.originOf(origin);
+          const relay = c.source === 'cluster' ? c.relayUrl : (typeof consent.relayUrl === 'function' ? String(consent.relayUrl() || '') : '');
+          const to = Manifest.redirectFor({ relayUrl: relay, origin: own });
+          if (to.via === 'bad-relay') throw new ChannelError('forbidden', 'the Slack relay page address is not an https URL — fix it (the company preset\'s relayUrl, or Settings → Channels → Slack relay page)', { retryable: false, detail: { why: 'bad-relay' } });
+          if (!to.uri && c.source === 'cluster') throw new ChannelError('not-supported', 'this VibeSpace has no https address and the company Slack app names no relay page — use "make your own app" instead', { retryable: false, detail: { why: 'no-https' } });
+          return oauth.begin({
+            id: adapterId, mode: 'public', label: 'Slack', timeoutMs: 15 * 60 * 1000, redirectUri: to.uri,
+            stateFor: ({ flowId, issuedAt }) => Manifest.stateOf({ origin: own, flowId, issuedAt }, consent.sign),
+            buildConsentUrl: ({ redirectUri, state: st }) => Manifest.authorizeUrl({ clientId: c.clientId, redirectUri, state: st }),
+            exchange: async ({ code, redirectUri, cancelled = null }) => exchangeCode(code, redirectUri, cancelled),
+            onDone: deps.onAuthDone ? (r) => deps.onAuthDone(adapterId, r) : null,
+          });
+        }
         return oauth.begin({
           id: adapterId, mode: 'paste', label: 'Slack', timeoutMs: 30 * 60 * 1000,   // making the app takes a few minutes
           buildConsentUrl: () => Manifest.createLink(Manifest.manifestFor({ ownerName: label })),
-          exchange: async ({ code, cancelled = null }) => {
-            const pasted = String(code == null ? '' : code).trim();
-            if (Manifest.tokenShapeOf(pasted) !== 'user') throw new ChannelError('forbidden', 'that is not a Slack user token (it starts xoxp-)', { retryable: false, detail: { why: 'not-a-user-token' } });
-            let r;
-            try { r = await callSlack(fetchFn, 'auth.test', {}, { token: pasted }); }   // ungated: consent-auth-test (once per human paste)
-            catch (e) { throw new ChannelError(e instanceof ChannelError ? e.code : 'vendor-error', `Slack refused the pasted token: ${e instanceof ChannelError && e.detail && e.detail.error ? e.detail.error : 'no answer'}`, { retryable: false, detail: { why: e instanceof ChannelError && e.detail ? e.detail.why : 'vendor' } }); }   // rate-ok: consent-auth-test
-            const a = r.body || {};
-            const team = typeof a.team_id === 'string' && ID_RE.test(a.team_id) ? a.team_id : null;
-            const user = typeof a.user_id === 'string' && ID_RE.test(a.user_id) ? a.user_id : null;
-            if (!team || !user) throw new ChannelError('vendor-error', 'Slack answered the pasted token without naming a workspace and a person — nothing was connected', { retryable: false, detail: { nameless: true } });
-            const ent = typeof a.enterprise_id === 'string' && ID_RE.test(a.enterprise_id) ? a.enterprise_id : null;
-            const scopes = r.scopes || [];
-            const teamName = peerName(a.team, 100) || team;
-            const handle = peerName(a.user, 100) || user;
-            const tok = { access_token: pasted, user, team, ...(ent ? { enterprise: ent } : {}), userId: `${ent ? `${ent}/` : ''}${team}/${user}`, teamName, name: handle, label: `${teamName} · @${handle}`, scopes, url: typeof a.url === 'string' && /^https:\/\/[a-z0-9.-]+\.slack\.com\/$/i.test(a.url) ? a.url : null };
-            if (tokens) await tokens.write(tok, { expiresAt: null, scopes, user: tok.label, consent: { cancelled } });
-            probe('userOnlyManifest', 'accepted');
-            probe('scopes', scopes);
-            return { ok: true, user: tok.label, scopes };
+          exchange: async ({ code, cancelled = null, box = null }) => {
+            let pasted = String(code == null ? '' : code).trim();
+            const act = Manifest.pasteAction(box, Manifest.tokenShapeOf(pasted));
+            if (act.act === 'create') {
+              try { return await createApp(pasted, label); } finally { pasted = null; }   // design 017: the setup token goes HERE — never stored, logged or said
+            }
+            if (act.act !== 'connect') throw new ChannelError('forbidden', 'that is not a Slack user token (it starts xoxp-)', { retryable: false, detail: { why: act.why } });
+            return connectUserToken(pasted, cancelled);
           },
           onDone: deps.onAuthDone ? (r) => deps.onAuthDone(adapterId, r) : null,
         });
       },
-      /** The paste lands here: its SHAPE is judged first (the flow stays open for a wrong one), then the exchange. */
-      async finish(flowId, pasted) {
+      /** The paste lands here: its SHAPE is judged first against the BOX it was pasted into (step 1's `config`, step
+       *  3's `user`; none = an older dialog) — the flow stays open for a wrong one — then the exchange. */
+      async finish(flowId, pasted, { box = null } = {}) {
         if (!oauth) throw new ChannelError('not-supported', 'slack.auth.finish: no sign-in machine was handed to this adapter', { retryable: false });
-        const shape = Manifest.tokenShapeOf(typeof pasted === 'string' ? pasted : '');
-        if (shape !== 'user') {
-          const what = shape === 'bot' ? 'a bot token (xoxb-)' : shape === 'app' ? 'an app-level token (xapp-)' : shape === 'empty' ? 'nothing' : 'not a Slack token';
-          throw new ChannelError('forbidden', `that is ${what} — paste the User OAuth Token from the app's "OAuth & Permissions" page; it starts xoxp-`, { retryable: false, detail: { why: 'not-a-user-token', shape } });
+        const fl = typeof oauth.status === 'function' ? oauth.status(flowId) : null;
+        if (fl && fl.mode === 'public') {   // design 018: the code a relay page showed, or the address the browser landed on
+          const r = await oauth.forwardCallback(flowId, typeof pasted === 'string' ? pasted : '');
+          return { ok: r.ok, error: r.error || null, why: r.why || null, record: r.result || null, step: null, stepFacts: null };
         }
-        const r = await oauth.forwardCallback(flowId, pasted.trim());
-        return { ok: r.ok, error: r.error || null, record: r.result || null };
+        const b = Manifest.BOXES.includes(box) ? box : null;
+        const shape = Manifest.tokenShapeOf(typeof pasted === 'string' ? pasted : '');
+        const act = Manifest.pasteAction(b, shape);
+        if (act.act === 'refuse') {
+          const what = shape === 'bot' ? 'a bot token (xoxb-)' : shape === 'app' ? 'an app-level token (xapp-)' : shape === 'empty' ? 'nothing' : shape === 'user' ? 'the User OAuth Token (xoxp-)' : shape === 'config' ? 'the setup token (xoxe.)' : shape === 'refresh' ? 'the refresh token (xoxe-)' : 'not a Slack token';
+          const want = act.why === 'user-token-wrong-box' ? 'paste it in step 3; this box takes the setup token (it starts xoxe.xoxp-)'
+            : act.why === 'refresh-token-not-config' ? 'copy the token above it on the same page (it starts xoxe.xoxp-)'
+              : act.why === 'not-a-config-token' ? 'paste the setup token from "Your App Configuration Tokens" (it starts xoxe.xoxp-)'
+                : act.why === 'config-token-wrong-box' ? 'paste it in step 1; this box takes the User OAuth Token (it starts xoxp-)'
+                  : 'paste the User OAuth Token from the app\'s "OAuth & Permissions" page; it starts xoxp-';
+          throw new ChannelError('forbidden', `that is ${what} — ${want}`, { retryable: false, detail: { why: act.why, shape } });
+        }
+        const r = await oauth.forwardCallback(flowId, pasted.trim(), { box: b });
+        return { ok: r.ok, error: r.error || null, why: r.why || null, record: r.result || null, step: r.step || null, stepFacts: r.stepFacts || null };
       },
     },
 

@@ -83,11 +83,26 @@ export function avatarOf({ name = '', key = '', self = false } = {}) {
 //    (up to AVATAR_HUES per kind) and every client draws the same one (a function of the account list alone).
 //  · `multi` = the instance holds ≥ 2 accounts of that kind: a row then says the account's title in small text.
 //  · A badge is paint too: it sits inside the aria-hidden avatar; the account is in the row's words.
-/** `accounts` (the digest's adapters: `{id, kind, label, builtin}`) → Map id → `{hue, glyph, label, multi}`; a
- *  built-in source (the message watcher) wears none. */
+//  · lane channels-badges (the owner, 2026-10-03: "这个角标的含义不明确，至少应该在账号下面把图标对应上吧。其次对于vibespace
+//    自己的内部沟通也应该提供角标，就用vibespace图标就行"): the SAME record is the account card's icon in the 账号 section
+//    (channel-chrome.js `accountBadge` draws both), `title` = the account's name (the hover says which account a badge
+//    is); VibeSpace's OWN talk — an agent group, an agent private chat, the built-in agents source — wears
+//    INTERNAL_BADGE: the product's mark (icons.js `vibespace`) on the theme's teal (`internal`, no hue).
+/** VibeSpace's own badge (word-free: the client words its title). */
+export const INTERNAL_BADGE = Object.freeze({ hue: null, glyph: 'vibespace', label: 'VibeSpace', title: '', multi: false, internal: true });
+/** The account's NAME as its card heads it ("Office · ada@example.com"): the label, then the signed-in user when the
+ *  token names one (channel-account-dialogs.js accountName's first rung asks HERE). */
+export function accountTitle(a) {
+  const label = String((a && (a.label || a.id)) || '');
+  const user = a && a.auth && !a.auth.self && a.auth.user ? String(a.auth.user) : '';
+  return user && user !== label ? `${label} · ${user}` : label;
+}
+/** `accounts` (the digest's adapters: `{id, kind, label, auth, builtin}`) → Map id → `{hue, glyph, label, title,
+ *  multi}`; a built-in source (the message watcher) wears INTERNAL_BADGE. */
 export function accountBadges(accounts) {
-  const list = (Array.isArray(accounts) ? accounts : []).filter((a) => a && a.id && !a.builtin)
-    .map((a) => ({ id: String(a.id), kind: String(a.kind || ''), label: String(a.label || a.id).slice(0, 80) }))
+  const all = (Array.isArray(accounts) ? accounts : []).filter((a) => a && a.id);
+  const list = all.filter((a) => !a.builtin)
+    .map((a) => ({ id: String(a.id), kind: String(a.kind || ''), label: String(a.label || a.id).slice(0, 80), title: accountTitle(a).slice(0, 200) }))
     .sort((x, y) => (x.id < y.id ? -1 : x.id > y.id ? 1 : 0));
   const perKind = new Map(), taken = new Map(), out = new Map();
   for (const a of list) perKind.set(a.kind, (perKind.get(a.kind) || 0) + 1);
@@ -96,7 +111,8 @@ export function accountBadges(accounts) {
     let hue = hueOf('account/' + a.id);
     for (let i = 0; i < AVATAR_HUES && used.has(hue); i++) hue = (hue + 1) % AVATAR_HUES;
     used.add(hue); taken.set(a.kind, used);
-    out.set(a.id, { hue, glyph: 'vendor-' + a.kind, label: a.label, multi: perKind.get(a.kind) >= 2 });
+    out.set(a.id, { hue, glyph: 'vendor-' + a.kind, label: a.label, title: a.title, multi: perKind.get(a.kind) >= 2 });
   }
+  for (const a of all) if (a.builtin) out.set(String(a.id), INTERNAL_BADGE);
   return out;
 }

@@ -48,7 +48,9 @@ import { registerMenuItem, menuItems } from './contributions.js';
 import { registerWindowType } from './window-types.js';
 import { UI_ICONS } from './icons.js';
 // the shared chrome primitives (one SVG helper, one textContent element, one house button)
-import { icon, btn, noteLine, el as chanEl, avatar, convAvatar } from './channel-chrome.js';
+import { icon, btn, noteLine, el as chanEl, convAvatar, accountBadge } from './channel-chrome.js';
+// lane channels-badges: ONE badge per account — the rows' corner and the account card's icon read the same record
+import { accountBadges, INTERNAL_BADGE } from './channel-avatar.js';
 // PURE, bundled directly (the task-color-seq / quota-model pattern). THE
 // SENTENCE IS COMPOSED HERE (r2): `freshnessClaim` used to build it server
 // side with no translator, so the chip this feature calls its honesty
@@ -64,7 +66,7 @@ import * as R from '../integration-registry.js';
 // a3 i18n: a route failure is worded by its CODE here, never by the engine's sentence.
 import { routeErrorText, groupErrorText, statusTagParts, viewSwitchText } from './channel-words.js';
 // g3 (design §22): the IM-first list's arithmetic and the group dialogs.
-import { groupListRows, foldsFrom, GROUP_ADAPTER_ID, firstScreen, statusTag, filterRows } from './channel-groups-view.js';
+import { groupListRows, foldsFrom, GROUP_ADAPTER_ID, firstScreen, statusTag, filterRows, internalBlock } from './channel-groups-view.js';
 // design 008 (B-3cf8): the rows this panel HOLDS — the first read + every page read, keyed (PURE)
 import { createRowStore, applyFirst, applyPage, applyBroadcast, listRows, focusRowsOf, ensureList, pageQueryOf, accountList } from './channel-rows.js';
 import { afterCursor, PAGE_MAX } from '../channel-focus.js';
@@ -144,12 +146,6 @@ function chanLine(cls, text) { const el = document.createElement('div'); el.clas
 /** The glyph a section carries: the built-in row is the robot; a channel whose
  *  rows are mail threads / mailboxes is mail; anything else is a chat. Read
  *  from the DIGEST'S FACTS (`builtin`, the rows' record `kind`), never an id. */
-function kindGlyph(a, convs) {
-  if (a && a.builtin) return 'robot';
-  const kinds = (convs || []).map((c) => c.kind).filter(Boolean);
-  if (kinds.length && kinds.every((k) => k === 'thread' || k === 'mailbox')) return 'mail';
-  return 'chat';
-}
 // ── THE ACCOUNT CARD (docs/design-integrations-per-account.zh.md r4 §2.5,
 // §8.1 #1 / #3 / #6 / #7 / #10; lane integrations chunk 3). A section whose
 // adapter is CONNECTABLE (`connectable` — a Lark / Gmail account, never the
@@ -1252,6 +1248,7 @@ export function renderChannelsPanel(app, c) {
     const top = [];
     const into = { appendChild: (x) => { top.push(x); return x; } };
     const adapters = (d && d.adapters) || [];
+    const badges = accountBadges(adapters);   // lane channels-badges: this build's ONE map — the rows and the cards read it
     // design 008: the ATTENTION rows the store holds — the server's list (verify r1: a held row's stale tag never draws
     //  it here); All and each account draw their own lists below
     const convs = focusRowsOf(store, Date.now());
@@ -1317,7 +1314,11 @@ export function renderChannelsPanel(app, c) {
     }
     // the ALL view is the server's pages — its end reads the next one as it comes near (design 008; owner 2026-10-03:
     //  seamless, no button); the attention list is short by construction
-    for (const r of fs.shown) list.appendChild(groupRow(r, now));
+    // lane channels-badges: VibeSpace's own talk is ONE block under its head (PURE internalBlock); folded the head alone
+    //  stands for it — a row that needs the owner keeps its own row on top. A query searches everything: nothing folds
+    //  under it. lane channels-fold: FOLDED BY DEFAULT (foldsFrom) — the user's unfold is user state, synced
+    const ib = internalBlock(fs.shown, { folded: (FOLDS || foldsFrom(null)).internal && !q.trim(), now });
+    for (const r of ib.rows) list.appendChild(r.kind === 'internal-head' ? internalHead(r.block) : groupRow(r, now));
     const allEnd = fs.view === 'all' ? endOfList(allName) : null;
     if (allEnd) list.appendChild(allEnd);
     if (fs.moreInAll > 0) {
@@ -1356,7 +1357,7 @@ export function renderChannelsPanel(app, c) {
     const kinds = (d && Array.isArray(d.kinds)) ? d.kinds : [];
     into.appendChild(part('accounts', t('Accounts'), accounts.length ? String(accounts.length) : '', (b) => {
       if (!accounts.length && !kinds.length) b.appendChild(chanLine('empty-hint empty-hint-inline', t('No account connected.')));
-      for (const a of accounts) b.appendChild(section(a, listRows(store, accountList(a.id)), siblings, ordinal));
+      for (const a of accounts) b.appendChild(section(a, listRows(store, accountList(a.id)), siblings, ordinal, badges.get(a.id)));
       // ONE entry at the bottom (r4 §8.1 #6/#11 — the storage footer's
       // "Connect storage"): the type-first dialog serves every type, so the
       // per-kind buttons and "Add account…" are retired
@@ -1380,10 +1381,41 @@ export function renderChannelsPanel(app, c) {
     if (watcher.length) {
       into.appendChild(part('watcher', t('Message watcher'), '', (b) => {
         b.appendChild(chanLine('chan-part-note', t('Follow a live agent session as a source: assign or filter it for another agent. To talk WITH agents, use a group.')));
-        for (const a of watcher) b.appendChild(section(a, listRows(store, accountList(a.id)), siblings, ordinal));
+        for (const a of watcher) b.appendChild(section(a, listRows(store, accountList(a.id)), siblings, ordinal, badges.get(a.id)));
       }));
     }
     return top;
+  }
+
+  /** lane channels-badges: THE HEAD of VibeSpace's own talk — chevron · the VibeSpace badge (the same element its rows
+   *  wear) · "VibeSpace internal" · (N) · @-you · unread — a BUTTON: a click (Enter / Space) folds or unfolds the block. A KEPT
+   *  node patched in place (the account head's rule): a press in flight survives a broadcast. */
+  function internalHead(b) {
+    const h = keep('internal-head', () => {
+      const el = document.createElement('button');
+      el.type = 'button';
+      el.className = 'chan-ihead';
+      el.dataset.internalHead = '1';
+      el.appendChild(icon('chevronDown', 10, 'chan-part-chev'));
+      el.appendChild(accountBadge(INTERNAL_BADGE, 'chan-ihead-badge'));
+      el.append(chanEl('span', 'chan-ihead-name'), chanEl('span', 'chan-ihead-count'), chanEl('span', 'chan-ihead-at'), chanEl('span', 'chan-grow-unread chan-ihead-unread'));
+      return el;
+    });
+    const [, , nm, cnt, at, un] = h.childNodes;
+    h.classList.toggle('chan-ihead-folded', b.folded);
+    h.setAttribute('aria-expanded', String(!b.folded));
+    nm.textContent = t('VibeSpace internal');
+    cnt.textContent = `(${b.n})`;
+    at.textContent = b.atYou ? t('@you {n}', { n: b.atYou }) : '';
+    at.style.display = b.atYou ? '' : 'none';
+    un.textContent = String(b.unread);
+    un.style.display = b.unread ? '' : 'none';
+    un.title = t('{n} unread', { n: b.unread });
+    h.title = b.folded ? t('Show VibeSpace internal talk — your agent groups and agent chats')
+      : t('Fold VibeSpace internal talk into this one row — anything that @-mentions you or awaits you keeps its own row');
+    const toggle = () => { setFold('internal', !b.folded); draw(); };
+    h.onclick = toggle;
+    return h;
   }
 
   /** ONE row of the first screen: an agent group or a conversation of a linked account. */
@@ -1499,7 +1531,7 @@ export function renderChannelsPanel(app, c) {
    *  account / pattern grains (R4 §7.3: "Access: … · Notify: …", each rule
    *  on its own line), then EVERY conversation as ↳ rows
    *  (newest first, the rest behind "Show all"). */
-  function accountCard(a, mine, siblings, ordinal) {
+  function accountCard(a, mine, siblings, ordinal, badge) {
     const kinds = (digest && digest.kinds) || [];
     const listed = mine.filter((x) => !x.unlisted).sort((x, y) => (y.lastAt || 0) - (x.lastAt || 0));
     const secEl = keep('sec:' + a.id, () => { const el = document.createElement('div'); el.dataset.adapter = a.id; return el; });
@@ -1531,10 +1563,11 @@ export function renderChannelsPanel(app, c) {
       return el;
     });
     const [, tileSlot, nm, cc, dot, cnt, edit, more] = h.childNodes;
-    // THE LOOK (channel-polish): the account's kind as a small tile on its hue (paint — the name follows)
-    const tile = avatar({ name: a.label || a.kind || '', key: `kind/${a.kind || ''}`, glyph: kindGlyph(a, mine) }, null, 'chan-sec-kind');
-    if (!tileSlot.isEqualNode(tile)) tileSlot.replaceWith(tile);
     const name = accountName(a, siblings.get(a.kind) || 1, ordinal.get(a.id) || 1);
+    // lane channels-badges (the owner: "至少应该在账号下面把图标对应上"): the account's icon IS the badge its conversations
+    //  wear — ONE record (accountBadges: the same glyph on the same hue), ONE element (accountBadge), titled by its name
+    const tile = accountBadge(badge, 'chan-sec-kind', name);
+    if (!tileSlot.isEqualNode(tile)) tileSlot.replaceWith(tile);
     if (nm.textContent !== name) nm.textContent = name;
     if (h.title !== name) h.title = name;
     // the CLIENT chip: the OAuth client this account signs in through (a preset by its label, or its own)
@@ -1625,8 +1658,8 @@ export function renderChannelsPanel(app, c) {
   /** One ADAPTER section: an ACCOUNT (connectable) is the credential-first
    *  card (`accountCard`); a SOURCE — the built-in agents watcher, a
    *  scan-only fixture — lists every conversation it discovered. */
-  function section(a, mine, siblings, ordinal) {
-    if (a.connectable) return accountCard(a, mine, siblings, ordinal);
+  function section(a, mine, siblings, ordinal, badge) {
+    if (a.connectable) return accountCard(a, mine, siblings, ordinal, badge);
     const secEl = keep('sec:' + a.id, () => { const el = document.createElement('div'); el.dataset.adapter = a.id; return el; });
     const secKids = [];
     const sec = { appendChild: (x) => { secKids.push(x); return x; }, classList: secEl.classList };
@@ -1642,7 +1675,7 @@ export function renderChannelsPanel(app, c) {
     h.className = 'chan-sec-head folder-header';
     h.appendChild(icon('chevronDown', 10, 'chan-sec-chev'));
     // THE LOOK (channel-polish): the account's kind as a small tile on its hue (paint — the name follows)
-    h.appendChild(avatar({ name: a.label || a.kind || '', key: `kind/${a.kind || ''}`, glyph: kindGlyph(a, mine) }, null, 'chan-sec-kind'));
+    h.appendChild(accountBadge(badge, 'chan-sec-kind', a.label || a.id));   // lane channels-badges: the card's icon = its rows' badge
     const nm = document.createElement('b');
     nm.className = 'chan-sec-name';
     const kindCount = siblings.get(a.kind) || 1;

@@ -14,6 +14,7 @@
 import { UI_ICONS } from './icons.js';
 import { getFileIcon } from './file-types.js';
 import { avatarOf } from './channel-avatar.js';
+import { t } from './i18n.js';
 
 /** An icon from the library, sized in px (the SVG is 1em). */
 export function icon(name, px = 13, cls = '') {
@@ -49,17 +50,30 @@ export function avatar({ name = '', key = '', self = false, glyph = null, badge 
   if (px) s.style.setProperty('--av-size', px + 'px');
   if (glyph) { const g = icon(glyph, 13); g.style.fontSize = ''; s.appendChild(g); }
   else s.textContent = a.text;
-  if (badge && Number.isInteger(badge.hue)) {
+  if (badge && (Number.isInteger(badge.hue) || badge.internal)) {
     s.classList.add('chan-av-badged');
-    const b = document.createElement('span');
-    b.className = 'chan-av-badge';
-    b.dataset.hue = String(badge.hue);
-    const g = icon(UI_ICONS[badge.glyph] ? badge.glyph : 'chat', 8);
-    g.style.fontSize = '';
-    b.appendChild(g);
-    s.appendChild(b);
+    s.appendChild(accountBadge(badge));
   }
   return s;
+}
+
+/** THE BADGE ITSELF (B-5fe1; lane channels-badges — ONE element for one account everywhere): the account's glyph on its
+ *  hue (accountBadges), or VibeSpace's mark for VibeSpace's own talk (`internal`, `data-vs`). At an avatar's corner it
+ *  is paint inside the aria-hidden avatar; standing alone it IS the account card's icon (`cls`). Its hover `title`
+ *  names the account ("Office · ada@example.com") — the owner's "which badge is which account". */
+export function accountBadge(badge, cls = '', title = '') {
+  badge = badge || {};
+  const b = document.createElement('span');
+  b.className = 'chan-av-badge';
+  if (cls) b.classList.add(cls);
+  if (badge.internal) b.dataset.vs = '1';
+  else if (Number.isInteger(badge.hue)) b.dataset.hue = String(badge.hue);
+  const g = icon(UI_ICONS[badge.glyph] ? badge.glyph : 'chat', 8);
+  g.style.fontSize = '';
+  b.appendChild(g);
+  const tip = title || (badge.internal ? t('VibeSpace internal') : badge.title) || '';
+  if (tip) b.title = tip;
+  return b;
 }
 
 /** A CONVERSATION's avatar (the window's bar, the panel's first-screen row):

@@ -2725,6 +2725,95 @@ The owner's report on the polished Channels window: "lark 有些消息里混入�
 - **Where a reply lands — the PLACEMENT (2026-09-28, the owner: "the boolean is Lark-shaped").** A reply is `chat` (a plain message), `quote` (answers a message, shown in the main list), `thread` (inside its thread) or `thread+chat` (inside the thread AND shown in the conversation — Slack's reply_broadcast). Each channel DECLARES which in its `threads` cap row (`placements` + `rootReply`, its norm for a message outside a thread): Lark chat / quote / thread (norm: quote), Gmail chat / quote, the built-in Agents chat only, the fake all four; Slack (chat / thread / thread+chat, norm thread) and Telegram (chat / quote, norm quote) are fixture rows. An agent's `reply --to <id>` alone follows the norm — a message already inside a vendor thread is answered in the thread, else `rootReply`; `--in-thread` / `--also-in-chat` ask; an undeclared placement (or a quote of a threaded message) is `placement-not-offered`, worded with what IS offered, and creates nothing. The approval card (inline and in the Outbox) says "Quoted reply — to Ada: …" / "Reply in thread — under Ada: …" / "Reply in thread, also shown in the chat — …" (nothing for a plain message); the agent's tool-card row says "drafted a quoted reply / a reply in a thread …"; the receipt says "placed …". A proposal stored before the enum keeps `inThread` as its read alias (= thread) and is sent that way; the registry hands an adapter only a declared placement.
 - Gates: test-channel-placement (the placement table per channel, the caps-row census, the send contract, the engine, the words, controls), test-channel-thread, test-channel-reactions, test-channel-outbox §6, test-channels-engine ⑰⑱⑲, test-channels-agent-cli, test-channels-lark-shape, test-architecture §64 / §64b / §65 (fast); test-channel-threads-ui (heavy, chrome).
 
+### Communication panel — ONE SLACK APP PER WORKSPACE (lane slack-workspace-app, design 018, 2.369.206)
+
+The owner asked why every Slack member needs an app of their own when Lark has one company app. Slack allows it: one
+INTERNAL app in a workspace, each member pressing Allow gets their own `xoxp-`. The Slack account type now has THREE
+RUNGS, the Lark stored / custom shape plus Slack's own: ① a CLUSTER PRESET (the `slack` row's `clientId`,
+`clientSecret`, `relayUrl`, `teamDomain` in the presets Secret's integrations.json — the fleet's company app, its relay
+on the admin host); ② a CUSTOM client (the Client ID / Secret of the person's own workspace app, typed in the Connect
+dialog; its relay page = the `channels.slackRelayUrl` setting, default the project's GitHub Pages copy of
+docs/slack-relay/, empty = this instance's own https address, else the code is pasted back); ③ the per-person app made
+with a setup token (design 017) under "Another way" — the default when the instance has no preset. ①/② sign in on
+Slack's own consent page (oauth-loopback `public`): the authorize URL carries the user scopes, the redirect (the relay ›
+the instance's own https origin + `/api/channels/oauth/cb/slack` › none) and a state `v1.<b64url {u, f, t}>.<HMAC>` —
+`u` = the origin the browser used, signed with a per-boot key. Slack redirects to the relay page, which only sends the
+browser back to a private-network `u` (127/8, 10/8, 172.16/12, 192.168/16, fc00::/7, ::1, localhost, *.local / *.lan /
+*.home) or an https host under its `data-allow` suffixes, else shows the code with Copy. The instance's GET route judges
+the state (shape, HMAC, age), finds the running flow by the WHOLE state (used once), exchanges the code with ONE
+`oauth.v2.access` (client id + secret as HTTP Basic, the SAME redirect_uri) and the paste path's `auth.test` — the
+account record is the paste path's. Re-authorize on a paste account can pick the workspace app: the same record, re-bound
+(identity checked). The admin prints the app's manifest with `node scripts/slack-manifest.mjs --relay <url> --name
+"Acme"`. Gates: test-channels-slack-shape (state table, relay table with public + look-alike controls), test-oauth-
+loopback (public mode), test-channels-slack-send ⑨ (the whole consent through the engine and the REAL relay script,
+refusals by name, the secret leak census with a planted control, two members, the re-point), test-vendor-whitelist §13,
+NEW test-slack-relay (headless Chrome, a CDP no-network census).
+
+### Communication panel — CONNECTING SLACK IN TWO PASTES (lane slack-connect-easy, design 017, 2.369.206)
+
+The owner tried 2.369.204's link-and-paste and landed on Slack's "Create new app" chooser and an empty scope page. The
+Connect dialog's Slack type is now THREE NUMBERED STEPS (drawn by mounts-dialog.js `wireStepPaste`; the words, the
+endpoints and the memory come from channel-account-dialogs.js): ① "Open Slack's app page" + a password box for the app
+configuration token (`xoxe.xoxp-…`, Generate Token, 12 h) + "Create the app" — the server makes the app with ONE
+`apps.manifest.create` (slack.js `createApp`: a JSON POST, the pasted token the Bearer, the app id kept, `credentials` /
+`oauth_authorize_url` never read, the token dropped in the exchange's `finally`); ② "Open the install page"
+(`https://api.slack.com/apps/<app_id>/oauth`, Install to Workspace → Allow; approval-required workspaces said); ③ the
+`xoxp-` box, sent by the dialog's Connect. A step not reached yet is folded, never greyed. The fallback fold "Another
+way: make the app yourself" keeps the 2.369.204 share link + "Copy app setup" (the link's own JSON) + the exact clicks.
+The flow: oauth-loopback `paste` mode accepts an exchange answer `{continue:true, step, facts}` — the flow RUNS ON at
+`step:'created'` with the app's public facts (`stepFactsOf`: ≤ 8 short strings), shown by `status()` / the engine's
+`safeFlow`; each paste names its BOX (`config` / `user`) and slack-manifest.js `pasteAction` (the closed step table)
+refuses a token in the wrong box by its shape (`user-token-wrong-box`, `config-token-wrong-box`,
+`refresh-token-not-config`, …) before any call; the create's refusals map to `config-token-expired` /
+`config-token-scope` / `app-create-refused` / `rate-limited` / `transport` (slack-words.js `createWhyOf`), worded on
+the card from `detail.code`. The made app (id, name, workspace — never a token) is remembered in the browser
+(`vs-paste-app:<kind>`, 30 days) so a dialog closed after ① opens at ②; Connect forgets it. secret-shapes + secret-scan
+know `xoxe.` / `xoxe-`. NOT built: the https variant (redirect_urls + `oauth.v2.access`, design 017 step 6 — no https
+instance at hand). The create's answer carries `team_id` + `team_domain` (measured 2026-10-03, design-desk
+q-017-probe.md): step 1's done line names the workspace as `<team_domain>.slack.com` (lane slack-scopes-lark-reauth).
+- Gates: test-channels-slack-shape ⑧ (shapes, the step table, the install link, the create, every refusal, the leak
+  census with planted-leak controls), test-channels-slack-send ⑧ (the whole flow through the engine over the fake
+  Slack; the data-dir / log / frame census), test-vendor-whitelist §12 (the `apps.manifest.create` row + 3 controls),
+  test-record-clear-census H1 (the new storage key), test-oauth-field-parity §6 (the stepper is the shared renderer's);
+  test-integrations-ui (s) (heavy, chrome: the stepper at 375 / 860 px, the resume, Copy app setup = the link's JSON).
+
+### Communication panel — EVERY PERMISSION ASKED ONCE (lane slack-scopes-lark-reauth, 2.369.206)
+
+The owner (2026-10-03): 「你最好多申请一些权限防止以后有什么新功能需要新权限（比如现在lark就是老让我重新auth）」 — a new
+feature must never need a new consent.
+- **Why Lark kept asking (production journal 14 days + data/channels/adapters.json, read-only):** 2 consents (09-26
+  04:58 on 2.369.181, 10-03 15:26 on 2.369.204 — the owner wrote the quote two minutes before it); 0 from the token:
+  no refresh refusal, no refresh-token expiry, no identity mismatch (the 09-26 token renewed itself for 7 days 9 hours;
+  user-token reads ran until 14:04 on 10-03). The prompts were the card's "One Re-authorize adds: …" lines (engine
+  `grantsView`) that each release which grew the consent drew: 2.369.197 (09-29) +3 scopes (reactions read, the
+  search, single-chat reads), 2.369.202 (10-03 03:58) +3 (people's profiles, job title, department). The 10-03
+  consent answered 2.369.202's line (the old token lacked `contact:contact.base:readonly`, measured 10-01).
+- **Lark:** lark.js `WIDE_SCOPES` — the 11 scopes Lark's OWN token answer named for the owner's app beyond what a
+  feature reads today (`auth:user.id:read`, `im:message:readonly`, `im:message.group_msg:get_as_user`, `im:chat:read`,
+  `docx:document` + `:readonly`, `drive:drive`, `sheets:spreadsheet`, `bitable:app`, `wiki:wiki:readonly`,
+  `calendar:calendar:readonly`: vendor-spelled, enabled on that app) — are in EVERY default consent as the FIRST
+  optional group. An app that has not enabled one refuses the whole consent (20027 on Lark's page); ONE press ("Sign in
+  without the 11 extra permissions", the list in the row's title) signs in with what every consent asked before.
+  oauth-loopback's optional-scope bound 16 → 64 (`OPTIONAL_SCOPES_MAX`: at 16 the feed's two groups fell silently out
+  of the narrowing chain).
+  Verify r1: `im:message:readonly` also READS who reacted (`REACTIONS_READ_SCOPES`, `capsOfScopes`), so the wide group
+  asks for it only while the Reactions option is "Also read who reacted" — "Add and remove only" asks 10 and its token
+  cannot read reactions. The account's record of what a consent dropped (`auth.refusedScopes`, channels-engine
+  `refusedScopesOf`) is bounded by the same `OPTIONAL_SCOPES_MAX`: at its old 16, a consent narrowed through all 7
+  groups (17 scopes) lost `search:message` and the card named only the single-chat scope.
+- **Slack:** slack-manifest.js `USER_SCOPES` = the 51 user scopes `apps.manifest.validate` accepted on 2026-10-03
+  (q-017-probe.md "Wide scopes"; `remote_files:write` is the one Slack refuses for a user token); READ / SEND
+  unchanged; the "Another way" link still fits LINK_MAX (1 895 bytes at the longest owner name). secret-shapes R4
+  bounds Slack's token family at 512 characters — tokenShapeOf's whole length (it was 255: a 300-character body was
+  left whole, slack-connect-easy verify r1 LOW 1).
+- **Designed, not built:** a Slack account connected with fewer scopes than `USER_SCOPES` (every account made before
+  this lane) — the card names the features that need the new scopes and offers ONE "Add permissions…" (a pasted setup
+  token ⇒ `apps.manifest.update` on the app id the account remembers, then the reinstall + the new `xoxp-` paste;
+  without one, the install page). See the lane report.
+- Gates: test-channels-slack-shape ⑨ (the 51, the link bound, the workspace domain, 300 / 480-character tokens + a
+  255-bound control), test-channels-lark-shape (WIDE in every consent, the first press drops it, a no-WIDE control,
+  the narrowing chain through all 7 groups — red at the old 16 bound).
+
 ### Communication panel — SLACK, the fourth adapter (lane S1 slack-core, design 012 / B-ff09, 2.369.204)
 
 Each person's OWN internal Slack app (a distributed off-Marketplace app reads history at 1/min × 15; Slack's OAuth needs

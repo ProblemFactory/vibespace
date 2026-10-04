@@ -69,7 +69,10 @@ export async function api(url, opts = {}) {
 export function narrowRow({ provider, narrow, onUrl }) {
   const row = document.createElement('div');
   row.className = 'mounts-field-hint mounts-oauth-narrow';
-  const scopes = (narrow.scopes || []).join(' + ');
+  // lane slack-scopes-lark-reauth: a big group (Lark's every-usable-scope group) is said by its count, the list in the title
+  const list = narrow.scopes || [];
+  const scopes = list.length > 3 ? tr('the {n} extra permissions', { n: list.length }) : list.join(' + ');
+  if (list.length > 3) row.title = list.join(' ');
   // lane lark-search-poll (owner decision 5): ONE optional scope per press, least valuable first — a later press says
   // it drops this one TOO (the earlier ones stay dropped)
   const again = Array.isArray(narrow.dropped) && narrow.dropped.length > 0;
@@ -327,6 +330,127 @@ export function wireOAuthConnect(ctx, { tokenKey, backend, label, clientIdKey, c
       }
       poll = setInterval(async () => { try { const st = await get(endpoints.status); if (st.token) finish(st.token); else if (st.error) { stopPoll(); status.textContent = st.error; btn.disabled = false; } else if (!st.running) { stopPoll(); btn.disabled = false; } } catch {} }, 1500);
     } catch (e) { status.textContent = e.message || tr('Failed to start authorization'); btn.disabled = false; }
+  };
+}
+
+// NUMBERED PASTE STEPS (design 017 — Slack's two pastes; the channel account dialogs hand in the words, the endpoints
+// and the memory, this module draws). ① a one-time setup token + "Create the app" (the paste names its box `config`);
+// ② the made app's install page; ③ the user token (box `user`), sent when the dialog's own Connect asks
+// `connectFlow()`. A step not reached yet is FOLDED (its title only — never a greyed control); the fallback fold holds
+// the share link, "Copy app setup" (the link's own JSON) and the clicks, and unfolds ③. `memory` remembers the made
+// app (never a token) so a dialog closed after ① opens at ②. → `{connectFlow(), connected()}`.
+export function wireStepPaste(ctx, { tokenKey, configPage, start, callback, whyText, manifestOf, memory, words: w }) {
+  const tokenInput = ctx.inputs[tokenKey];
+  if (!tokenInput) return null;
+  let flowId = null, consentUrl = null, app = memory.recall();
+  const mk = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+  const button = (label, onClick, primary = false) => { const b = mk('button', primary ? 'mounts-btn mounts-btn-primary' : 'mounts-btn', label); b.type = 'button'; b.onclick = onClick; return b; };
+  const hint = (text) => mk('div', 'mounts-field-hint', text);
+  const secretBox = (ph) => { const i = mk('input', 'chan-paste-input'); i.type = 'password'; i.autocomplete = 'off'; i.spellcheck = false; i.placeholder = ph; return i; };
+  const wrap = mk('div', 'chan-paste-steps');
+  wrap.dataset.pasteSteps = tokenKey;
+  tokenInput.before(wrap);
+  const sync = () => { wrap.style.display = tokenInput.style.display; };
+  new MutationObserver(sync).observe(tokenInput, { attributes: true, attributeFilter: ['style'] });
+  sync();
+  const step = (n, title) => {
+    const s = mk('section', 'chan-paste-step');
+    s.dataset.step = String(n);
+    const head = mk('div', 'chan-paste-step-head');
+    head.append(mk('span', 'chan-paste-step-num', String(n)), mk('span', 'chan-paste-step-title', title));
+    const body = mk('div', 'chan-paste-step-body');
+    s.append(head, body);
+    wrap.append(s);
+    return { s, body };
+  };
+  const fold = (x, folded) => { x.s.dataset.state = folded ? 'folded' : 'open'; x.body.hidden = !!folded; };
+  async function ensureFlow() {
+    if (flowId) return flowId;
+    const r = await start();
+    flowId = r.flowId || (r.flow && r.flow.flowId) || null;
+    consentUrl = r.url || (r.flow && r.flow.consentUrl) || null;
+    return flowId;
+  }
+  async function paste(box, value) {
+    for (let i = 0; i < 2; i++) {
+      await ensureFlow();
+      try { return await callback({ url: value, flowId, box }); }
+      catch (e) { if (e && e.code === 'no-flow' && i === 0) { flowId = null; continue; } throw new Error(whyText(e)); }   // a flow past its time: one fresh flow
+    }
+    throw new Error(w.failed);
+  }
+  // ① the setup token
+  const s1 = step(1, w.step1);
+  const in1 = secretBox('xoxe.xoxp-…');
+  const st1 = hint('');
+  st1.classList.add('chan-paste-status');
+  const again = hint('');
+  const make = button(w.create, async () => {
+    const v = in1.value.trim();
+    if (!v) { st1.textContent = w.pasteSetupFirst; return; }
+    make.disabled = true; st1.textContent = w.creating;
+    try {
+      const r = await paste('config', v);
+      in1.value = '';
+      if (!r || r.step !== 'created' || !r.stepFacts) throw new Error(w.failed);
+      const prev = app;
+      app = memory.save(r.stepFacts);
+      st1.textContent = ''; again.textContent = '';
+      showMade(prev);
+    } catch (e) { st1.textContent = e.message || w.failed; }
+    finally { make.disabled = false; }
+  }, true);
+  s1.body.append(button(w.openConfig, () => window.open(configPage, '_blank', 'noopener')), hint(w.step1Hint), hint(w.vendorApp), again, in1, make, st1);
+  const made = mk('div', 'chan-paste-step-done');
+  s1.s.append(made);
+  // ② the install page
+  const s2 = step(2, w.step2);
+  s2.body.append(button(w.openInstall, () => { if (app && app.installUrl) window.open(app.installUrl, '_blank', 'noopener'); }, true), hint(w.step2Hint), hint(w.approval));
+  // ③ the user token — sent by the dialog's own Connect
+  const s3 = step(3, w.step3);
+  const in3 = secretBox('xoxp-…');
+  const st3 = hint('');
+  s3.body.append(hint(w.step3Hint), in3, st3);
+  // the fallback: the app made on Slack's own pages
+  const fb = mk('details', 'chan-paste-fallback');
+  const fbErr = hint('');
+  const withFlow = (fn) => async () => { try { await ensureFlow(); fbErr.textContent = ''; await fn(); } catch (e) { fbErr.textContent = e.message || w.failed; } };
+  fb.append(mk('summary', null, w.fallback),
+    button(w.openLink, withFlow(async () => { if (consentUrl) window.open(consentUrl, '_blank', 'noopener'); })),
+    button(w.copySetup, withFlow(async () => {
+      const json = manifestOf(consentUrl);
+      if (!json) { fbErr.textContent = w.copyFailed; return; }
+      try { await copyText(json); showToast(w.copied); }   // copyText: the clipboard API, or the textarea fallback on a plain-http instance
+      catch { fbErr.textContent = w.copyFailed; }
+    })),
+    hint(w.clicks), fbErr);
+  fb.addEventListener('toggle', () => { if (fb.open) fold(s3, false); });
+  wrap.append(fb, hint(w.finePrint));
+  function showMade(prev = null) {
+    made.textContent = '';
+    made.append(mk('div', 'mounts-field-hint chan-paste-made', w.made(app)));
+    if (prev && prev.appId !== app.appId) made.append(hint(w.madeAnother(prev)));
+    made.append(button(w.another, () => { fold(s1, false); again.textContent = w.makesAnother(app); }));
+    made.hidden = false;
+    fold(s1, true); fold(s2, false); fold(s3, false);
+  }
+  if (app) showMade(); else { made.hidden = true; fold(s1, false); fold(s2, true); fold(s3, true); }
+  return {
+    /** The dialog's Connect: ③'s token lands on the flow (box `user`) → the flow id Connect submits. */
+    async connectFlow() {
+      if (tokenInput.value) return tokenInput.value;
+      const v = in3.value.trim();
+      if (!v) { fold(s3, false); throw new Error(w.pasteUserFirst); }
+      st3.textContent = w.checking;
+      try {
+        const r = await paste('user', v);
+        if (!r || !r.token) throw new Error(w.failed);
+        in3.value = ''; st3.textContent = '';
+        tokenInput.value = r.token;
+        return r.token;
+      } catch (e) { st3.textContent = e.message || w.failed; throw e; }
+    },
+    connected() { memory.forget(); },
   };
 }
 

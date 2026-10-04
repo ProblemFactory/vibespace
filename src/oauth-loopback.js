@@ -112,14 +112,17 @@ const PORT_BUSY_CODE = 'port-busy';
 const VENDOR_ERROR_MAX = 64;
 const vendorErrorOf = (v) => String(v == null ? '' : v).slice(0, VENDOR_ERROR_MAX).replace(/[^A-Za-z0-9_.:-]/g, '_') || 'error';
 /** Scopes as a caller hands them: strings, bounded, deduped. */
-const scopeList = (xs) => [...new Set((Array.isArray(xs) ? xs : []).filter((x) => typeof x === 'string' && x && x.length <= 200))].slice(0, 16);
+/** lane slack-scopes-lark-reauth: 16 → 64 — Lark's consent now asks for every usable scope (18 optional), and a bound
+ *  below that silently cut the LAST groups (the feed's) out of the narrowing chain. */
+const OPTIONAL_SCOPES_MAX = 64;
+const scopeList = (xs) => [...new Set((Array.isArray(xs) ? xs : []).filter((x) => typeof x === 'string' && x && x.length <= 200))].slice(0, OPTIONAL_SCOPES_MAX);
 /** The optional scopes as ORDERED GROUPS (lane lark-search-poll): an element that is an array is one group, a bare
- *  string a group of one; a scope appears once (its first group), empty groups vanish; ≤ 16 scopes in all. */
+ *  string a group of one; a scope appears once (its first group), empty groups vanish; ≤ OPTIONAL_SCOPES_MAX in all. */
 function groupsOf(xs) {
   const seen = new Set();
   const groups = [];
   for (const g of Array.isArray(xs) ? xs : []) {
-    const list = scopeList(Array.isArray(g) ? g : [g]).filter((x) => !seen.has(x) && seen.size < 16);
+    const list = scopeList(Array.isArray(g) ? g : [g]).filter((x) => !seen.has(x) && seen.size < OPTIONAL_SCOPES_MAX);
     for (const x of list) seen.add(x);
     if (list.length) groups.push(list);
   }
@@ -129,8 +132,26 @@ function groupsOf(xs) {
  *  person copies a TOKEN from the vendor's own page: no listener, no port, no `state` in a URL; the consent URL is
  *  whatever the adapter builds (Slack: its app-manifest link) and `forwardCallback(flowId, pasted)` hands the pasted
  *  text to the adapter's exchange as `code`. A paste the exchange REFUSES leaves the flow running (the person pastes
- *  the right one); the flow ends when an exchange lands, at cancel and at its timeout like every flow. */
-const MODES = Object.freeze(['ephemeral', 'fixed', 'paste']);
+ *  the right one); the flow ends when an exchange lands, at cancel and at its timeout like every flow.
+ *  design 017 (Slack's two pastes): an exchange may answer `{continue: true, step, facts}` — a STEP landed, not the
+ *  sign-in: the flow keeps running, records `step` and the step's public `facts` (`stepFactsOf`: short strings
+ *  only — never a credential) for status() and the dialog's resume; the paste's `box` reaches the exchange. */
+/** design 018 (one Slack app per workspace): `public` — the vendor redirects to an https URL that is NOT this machine's
+ *  loopback (the instance's own https origin, or a static relay page that sends the browser back to it): no listener,
+ *  no port; the adapter hands in `redirectUri` (null = the app's registered one) and `stateFor({flowId, issuedAt})` —
+ *  the state the landing route can verify (an HMAC over its clear part, the adapter's vendor contract). The code lands
+ *  through `finishByState(state, code)` (the instance's GET route, found by the WHOLE state, compared over its full
+ *  length) or a paste-back (`forwardCallback`: the landed address, its query, or the bare code a relay page showed). */
+const MODES = Object.freeze(['ephemeral', 'fixed', 'paste', 'public']);
+const STATE_FOR_MAX = 1024;
+const STEP_FACTS_MAX = 8;
+/** A step's public facts: at most STEP_FACTS_MAX keys, each a string ≤ 300 characters or null — nothing else rides. */
+function stepFactsOf(facts) {
+  if (!facts || typeof facts !== 'object' || Array.isArray(facts)) return null;
+  const out = {};
+  for (const [k, v] of Object.entries(facts).slice(0, STEP_FACTS_MAX)) if (/^[a-zA-Z]{1,40}$/.test(k) && (v === null || (typeof v === 'string' && v.length <= 300))) out[k] = v;
+  return out;
+}
 
 /** The fixed mode's target, parsed ONCE from the registry's literal. */
 function fixedTarget(callbackUrl) {
@@ -275,10 +296,11 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
    *                   beside ok:true = a cancel that arrived AFTER the exchange resolved (carried for a consumer
    *                   whose durable write is still ahead; the record's own door reads ok as landed)
    */
-  async function begin({ id, mode, callbackUrl = null, buildConsentUrl, exchange, successText = 'VibeSpace: connected — you can close this tab.', timeoutMs = FLOW_TIMEOUT_MS, onDone = null, label = null, optionalScopes = [] } = {}) {
+  async function begin({ id, mode, callbackUrl = null, buildConsentUrl, exchange, successText = 'VibeSpace: connected — you can close this tab.', timeoutMs = FLOW_TIMEOUT_MS, onDone = null, label = null, optionalScopes = [], redirectUri = null, stateFor = null } = {}) {
     if (!id || typeof id !== 'string') throw new OAuthFlowError('bad-request', 'oauth-loopback: `id` is required');
     if (!MODES.includes(mode)) throw new OAuthFlowError('bad-request', `oauth-loopback: mode must be one of ${MODES.join('|')} (got ${JSON.stringify(mode)})`);
     if (typeof buildConsentUrl !== 'function' || typeof exchange !== 'function') throw new OAuthFlowError('bad-request', 'oauth-loopback: buildConsentUrl and exchange are required');
+    if (mode === 'public' && typeof stateFor !== 'function') throw new OAuthFlowError('bad-request', 'oauth-loopback: a public flow needs stateFor (the state its landing route verifies)');
     sweep();
     // One flow per id at a time — the same rule gmail-sync's startAuth() has.
     if (byId.has(id)) cancel(byId.get(id), 'superseded');
@@ -292,20 +314,21 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
       log.warn && log.warn(`[oauth-loopback] ${old.id}: ended (${CAUSE_OVER_LIMIT}) — ${MAX_RUNNING_FLOWS} consent flows were already running; the oldest is ended so the set stays bounded`);
     }
 
-    const state = crypto.randomBytes(12).toString('hex');
     const flowId = crypto.randomBytes(8).toString('hex');
+    const state = mode === 'public' ? String(stateFor({ flowId, issuedAt: now() })) : crypto.randomBytes(12).toString('hex');
+    if (mode === 'public' && (!state || state.length > STATE_FOR_MAX)) throw new OAuthFlowError('bad-request', `oauth-loopback: a public flow's state must be 1–${STATE_FOR_MAX} characters`);
     const st = {
       flowId, id, mode, label: label || id, state, exchange, onDone, build: buildConsentUrl,
       ...groupsOf(optionalScopes), narrowed: null, narrowedGroups: 0,
       consentUrl: null, redirectUri: null, port: null, pathname: null,
       server: null, listening: false, refusal: null,
-      result: null, error: null, done: false, exchanging: false, cancelled: null,
+      result: null, error: null, why: null, done: false, exchanging: false, cancelled: null, step: null, stepFacts: null,
       startedAt: now(), finishedAt: null, expiresAt: now() + timeoutMs, timer: null,
     };
     flows.set(flowId, st);
     byId.set(id, flowId);
 
-    const srv = mode === 'paste' ? null : http.createServer(async (req, res) => {
+    const srv = mode === 'paste' || mode === 'public' ? null : http.createServer(async (req, res) => {
       try {
         const u = new URL(req.url, 'http://127.0.0.1');
         // Fixed mode: the registered path is part of the byte-for-byte URL; a
@@ -332,6 +355,8 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
     const bound = () => { if (st.cancelled || st.done) { try { srv.close(); } catch {} return; } st.server = srv; st.listening = true; };
     if (mode === 'paste') {
       // nothing listens: the paste is the callback (`forwardCallback`)
+    } else if (mode === 'public') {
+      st.redirectUri = typeof redirectUri === 'string' && redirectUri ? redirectUri : null;   // design 018: the vendor lands on the instance route / the relay
     } else if (mode === 'ephemeral') {
       try {
         await listen(srv, 0);
@@ -378,10 +403,11 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
   /** Remote / port-busy paste-back: the user pastes the redirect URL their
    *  browser landed on; the code inside is all we need. The `state` check is
    *  gmail-sync's, verbatim. */
-  async function forwardCallback(flowId, url) {
+  async function forwardCallback(flowId, url, { box = null } = {}) {
     const st = flows.get(flowId);
     if (!st || st.done || st.cancelled) throw new OAuthFlowError('no-flow', 'no authorization in progress');
-    if (st.mode === 'paste') return pasted(st, String(url == null ? '' : url));
+    if (st.mode === 'paste') return pasted(st, String(url == null ? '' : url), typeof box === 'string' ? box.slice(0, 20) : null);
+    if (st.mode === 'public') return pastedLanding(st, String(url == null ? '' : url).trim());
     const u = new URL(String(url));
     if (u.searchParams.get('state') !== st.state) throw new Error('state mismatch — restart the flow');
     const code = u.searchParams.get('code');
@@ -391,18 +417,59 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
     return { ok: !st.error, result: st.result, error: st.error };
   }
 
+  /** design 018: a `public` flow's paste-back — the address the browser landed on, its query (`code=…&state=…`), or
+   *  the BARE code a relay page showed. A state, when the paste carries one, must be this flow's (the whole string). */
+  async function pastedLanding(st, text) {
+    let code = null, stateIn = null, err = null;
+    if (/^[A-Za-z0-9._-]{8,300}$/.test(text)) code = text;
+    else {
+      let q = null;
+      try { q = /^https?:\/\//i.test(text) ? new URL(text).searchParams : new URLSearchParams(text.replace(/^[?#]/, '')); } catch { q = null; }
+      if (q) { code = q.get('code'); stateIn = q.get('state'); err = !code && q.has('error') ? vendorErrorOf(q.get('error')) : null; }
+    }
+    if (stateIn != null && !sameState(stateIn, st.state)) throw new OAuthFlowError('state-mismatch', 'that address belongs to another sign-in — paste the one from this sign-in, or start again');
+    if (err) { await declined(st, err); return { ok: false, result: null, error: st.error, why: 'denied' }; }
+    if (!code || code.length > 300) throw new OAuthFlowError('no-code', `no ${st.label} code in that text — paste the code the page showed, or the address it landed on`);
+    await finish(st, code);
+    return { ok: !st.error, result: st.result, error: st.error };
+  }
+  const sameState = (a, b) => typeof a === 'string' && typeof b === 'string' && a.length === b.length && crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
+  /** design 018: THE LANDING ROUTE's door — the flow is found by its WHOLE state (a public flow only); a code for a
+   *  flow that is over is never exchanged. → `{ok, why, result, error}`: why ∈ wrong-flow | used | expired | denied | failed. */
+  async function finishByState(state, code, { error = null } = {}) {
+    sweep();
+    const st = [...flows.values()].find((x) => x.mode === 'public' && sameState(String(state || ''), x.state)) || null;
+    if (!st) return { ok: false, why: 'wrong-flow', result: null, error: 'no sign-in with that state is known here' };
+    if (st.done) return { ok: false, why: 'used', result: null, error: `the ${st.label} sign-in already finished — its code is used once` };
+    if (st.cancelled) return { ok: false, why: 'expired', result: null, error: st.error || `the ${st.label} sign-in was ${st.cancelled === CAUSE_TIMEOUT ? 'not finished in time' : st.cancelled}` };
+    if (st.exchanging) return { ok: false, why: 'used', result: null, error: `the ${st.label} sign-in is already exchanging its code` };
+    if (!code && error) { await declined(st, vendorErrorOf(error)); return { ok: false, why: 'denied', result: null, error: st.error }; }
+    if (!code || typeof code !== 'string' || code.length > 300) return { ok: false, why: 'failed', result: null, error: `no ${st.label} code arrived` };
+    await finish(st, code);
+    return { ok: !st.error, why: st.error ? 'failed' : null, result: st.result, error: st.error, flowId: st.flowId, id: st.id };
+  }
+
   /** design 012: THE PASTE (a `paste` flow's callback). The exchange runs once at a time; a refusal is SAID on the flow
    *  (`error`, the adapter's own sentence — never the pasted text) and the flow keeps running for the next paste; a
    *  landed exchange ends it exactly like a loopback code (`finish`). */
-  async function pasted(st, text) {
+  async function pasted(st, text, box = null) {
     if (st.exchanging) throw new OAuthFlowError('busy', `the ${st.label} sign-in is already checking a pasted value — wait for its answer`);
     if (typeof st.exchange !== 'function') throw new OAuthFlowError('no-flow', 'no authorization in progress');
     st.exchanging = true;
-    let result = null, err = null;
-    try { result = await st.exchange({ code: text, redirectUri: null, state: st.state, flowId: st.flowId, cancelled: () => st.cancelled || null, narrowed: [] }); }
-    catch (e) { err = String((e && e.message) || e); }
+    let result = null, err = null, why = null;
+    try { result = await st.exchange({ code: text, box, redirectUri: null, state: st.state, flowId: st.flowId, cancelled: () => st.cancelled || null, narrowed: [] }); }
+    catch (e) { err = String((e && e.message) || e); why = e && e.detail && typeof e.detail.why === 'string' ? e.detail.why.slice(0, 60) : null; }
     st.exchanging = false;
-    if (err !== null && !st.cancelled) { st.error = err; return { ok: false, result: null, error: err }; }
+    // design 017: a STEP landed (the vendor made something the next paste needs) — recorded even on a flow ended
+    // meanwhile (what exists on the vendor's side is said, never lost), and the flow runs on when it still can
+    if (err === null && result && result.continue === true) {
+      st.step = typeof result.step === 'string' ? result.step.slice(0, 40) : null;
+      st.stepFacts = stepFactsOf(result.facts);
+      st.error = null; st.why = null;
+      if (st.cancelled && !st.done) { st.done = true; st.finishedAt = now(); release(st); forget(st); }
+      return { ok: true, result: null, error: null, step: st.step, stepFacts: st.stepFacts ? { ...st.stepFacts } : null };
+    }
+    if (err !== null && !st.cancelled) { st.error = err; st.why = why; return { ok: false, result: null, error: err, why }; }
     st.result = err === null ? result : null; st.error = err; st.done = true; st.finishedAt = now();
     release(st);
     const cb = forget(st);
@@ -443,7 +510,7 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
     return {
       flowId: st.flowId, id: st.id, mode: st.mode, label: st.label,
       running: !st.done && !st.cancelled, done: st.done, ok: st.done ? !st.error : null,
-      error: st.error, cancelled: st.cancelled,
+      error: st.error, why: st.why || null, cancelled: st.cancelled, step: st.step || null, stepFacts: st.stepFacts ? { ...st.stepFacts } : null,
       consentUrl: st.consentUrl, redirectUri: st.redirectUri, port: st.port,
       listening: st.listening, refusal: st.refusal,
       optional: st.optional.slice(), narrowed: st.narrowed ? st.narrowed.slice() : null,
@@ -478,7 +545,7 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
   function stopAll() { for (const id of [...flows.keys()]) cancel(id, 'shutdown'); }
   const runningFor = (id) => (byId.has(id) ? status(byId.get(id)) : null);
 
-  return { begin, status, forwardCallback, take, cancel, stopAll, runningFor, narrow, FLOW_TIMEOUT_MS, FLOW_RETIRE_MS, MAX_RUNNING_FLOWS };
+  return { begin, status, forwardCallback, finishByState, take, cancel, stopAll, runningFor, narrow, FLOW_TIMEOUT_MS, FLOW_RETIRE_MS, MAX_RUNNING_FLOWS };
 }
 
-module.exports = { createOAuthLoopback, OAuthFlowError, fixedTarget, FLOW_TIMEOUT_MS, FLOW_RETIRE_MS, MAX_RUNNING_FLOWS, CAUSE_TIMEOUT, CAUSE_OVER_LIMIT, PORT_BUSY_CODE, MODES, VENDOR_ERROR_MAX };
+module.exports = { createOAuthLoopback, OAuthFlowError, fixedTarget, stepFactsOf, STEP_FACTS_MAX, FLOW_TIMEOUT_MS, FLOW_RETIRE_MS, MAX_RUNNING_FLOWS, CAUSE_TIMEOUT, CAUSE_OVER_LIMIT, PORT_BUSY_CODE, MODES, VENDOR_ERROR_MAX, OPTIONAL_SCOPES_MAX };

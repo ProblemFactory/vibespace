@@ -101,8 +101,8 @@ console.log('§1 channel-groups-view (PURE)');
     const a0 = B.get(pairIds[0]), a1 = B.get(pairIds[1]), gm = B.get('gmail:1');
     ok(!!pairIds && a0 && a1 && a0.hue !== a1.hue && Number.isInteger(a0.hue) && Number.isInteger(a1.hue) && a0.glyph === 'vendor-lark' && a1.glyph === 'vendor-lark' && a0.multi && a1.multi && a0.label === 'Home' && a1.label === 'Work',
       `B-5fe1: two Lark accounts whose ids HASH to the same hue (${pairIds && pairIds.join(' / ')}) still wear DIFFERENT hues (${a0 && a0.hue} / ${a1 && a1.hue}), the vendor glyph by kind, \`multi\` (2 accounts of one kind), each its own title`, JSON.stringify([...B]));
-    ok(gm && gm.glyph === 'vendor-gmail' && gm.multi === false && !B.has('agents') && JSON.stringify([...B].sort()) === JSON.stringify([...B2].sort()),
-      'B-5fe1: a single Gmail account is not `multi` (no small title); the built-in watcher wears no badge; the table is a function of the account LIST, not its order (every client draws the same hues)', JSON.stringify([...B2]));
+    ok(gm && gm.glyph === 'vendor-gmail' && gm.multi === false && B.get('agents') && B.get('agents').internal === true && JSON.stringify([...B].sort()) === JSON.stringify([...B2].sort()),
+      'B-5fe1: a single Gmail account is not `multi` (no small title); the built-in watcher wears the VibeSpace badge (lane channels-badges); the table is a function of the account LIST, not its order (every client draws the same hues)', JSON.stringify([...B2]));
     const own = AV.accountBadges([{ id: pairIds[0], kind: 'lark' }]).get(pairIds[0]);
     ok(own.hue === AV.hueOf('account/' + pairIds[0]), 'B-5fe1: an account no sibling crowds keeps its OWN hash hue (adding an unrelated vendor\'s account never repaints it)', JSON.stringify(own));
     const many = AV.accountBadges(Array.from({ length: AV.AVATAR_HUES }, (_, i) => ({ id: `lark:${i}`, kind: 'lark' })));
@@ -159,9 +159,79 @@ console.log('§1 channel-groups-view (PURE)');
   ok(JSON.stringify(secs.map((s) => s.title)) === '["Api","Backend",null]' && secs.flatMap((s) => s.sessions).length === 4, 'picker: one section per Task Group (by title), sessions in no group LAST, each session ONCE (a duplicate roster row and a two-group member are listed once)', JSON.stringify(secs));
   ok(secs.find((s) => s.title === 'Backend').sessions.find((x) => x.cid === 'x4').disabled === true && secs.every((s) => !('selected' in s) && s.sessions.every((x) => !('checked' in x))), 'an existing member is DISABLED; nothing — no section, no session — arrives pre-selected (D1: a Task Group is never added whole)');
 
+  // lane channels-badges: ONE badge per account — the account card's icon IS its rows' badge (one record, one element),
+  // titled by the account's name; VibeSpace's own talk wears the VibeSpace badge; the internal fold is a persisted part
+  {
+    const AV = await import(path.join(REPO, 'src/lib/channel-avatar.js'));
+    const IC = await import(path.join(REPO, 'src/lib/icons.js'));
+    const accts = [{ id: 'gmail:a', kind: 'gmail', label: 'Office', auth: { user: 'ada@example.com' } }, { id: 'gmail:b', kind: 'gmail', label: 'Gmail', auth: { user: 'Gmail' } },
+      { id: 'lark:1', kind: 'lark', label: 'Lark', auth: { self: true, user: 'me' } }, { id: 'agents', kind: 'agents', label: 'Agents', builtin: true }];
+    const B = AV.accountBadges(accts);
+    ok(B.get('gmail:a').title === 'Office · ada@example.com' && B.get('gmail:b').title === 'Gmail' && B.get('lark:1').title === 'Lark',
+      'channels-badges: a badge\'s title NAMES its account as its card does (label · the signed-in user; a self token or a user equal to the label adds nothing)', JSON.stringify([...B]));
+    ok(B.get('agents') === AV.INTERNAL_BADGE && AV.INTERNAL_BADGE.internal === true && AV.INTERNAL_BADGE.glyph === 'vibespace' && AV.INTERNAL_BADGE.hue === null && Object.isFrozen(AV.INTERNAL_BADGE),
+      'channels-badges: the built-in agents source wears the VibeSpace badge (the product mark, no account hue)');
+    const svg = IC.UI_ICONS.vibespace || '';
+    ok(/^<svg /.test(svg) && (svg.match(/<rect /g) || []).length === 3 && !/#[0-9a-f]{3,8}\b|rgb\(|hsl\(/i.test(svg) && /fill="currentColor"/.test(svg),
+      'channels-badges: the VibeSpace mark is a library SVG (the favicon\'s three stacked windows) in currentColor — never a literal colour');
+    const R = V.groupListRows({ groups: [{ id: 'g1', name: 'lane', members: [], lastAt: 5 }, { id: 'p1', name: 'a · b', pair: ['x', 'y'], members: [], lastAt: 4 }],
+      conversations: [{ key: 'gmail:a/c', id: 'c', adapterId: 'gmail:a', title: 'Ticket', lastAt: 3 }], adapters: accts }).rows;
+    const byId = Object.fromEntries(R.map((r) => [r.id, r]));
+    ok(byId.g1.account === AV.INTERNAL_BADGE && byId.p1.account === AV.INTERNAL_BADGE && byId.g1.internal === true && byId.p1.internal === true && !byId.c.internal
+      && JSON.stringify(byId.c.account) === JSON.stringify(B.get('gmail:a')),
+      'channels-badges: an agent group and an agent private chat (a pair) are VibeSpace\'s own talk — the VibeSpace badge, `internal`; a mail thread wears its ACCOUNT\'s badge, the very record its card draws', JSON.stringify(R.map((r) => [r.id, r.account, r.internal])));
+    const MC = mutantCopies('chan-badges', REPO);
+    const VS = read('src/lib/channel-groups-view.js');
+    const STAMP = '      internal: true, account: INTERNAL_BADGE, atYou: num(g.atYou),\n';
+    ok(VS.split(STAMP).length === 2, 'channels-badges CONTROL setup: the group row\'s internal stamp is spelled once');
+    const V0 = await import(MC.write('src/lib/channel-groups-view.js', VS.replace(STAMP, ''), 'badges-no-internal', { esm: true }));
+    const R0 = V0.groupListRows({ groups: [{ id: 'g1', name: 'lane', members: [], lastAt: 5 }], conversations: [], adapters: accts }).rows;
+    ok(R0.length === 1 && !R0[0].account && !R0[0].internal, 'channels-badges CONTROL: the base group row carries no badge and is not internal — the leg above would be red');
+    for (const c of copiesCensus(MC.files, MC.dir, REPO, { minCopies: 1, label: 'chan-badges: ' })) ok(c.pass, c.name, c.pass ? undefined : c.detail);
+    const PS = read('src/lib/channels-panel.js'), CS = read('src/lib/channel-chrome.js'), DS = read('src/lib/channel-account-dialogs.js');
+    ok(/const badges = accountBadges\(adapters\);/.test(PS) && PS.split('siblings, ordinal, badges.get(a.id)));').length === 3 && /const tile = accountBadge\(badge, 'chan-sec-kind', name\);/.test(PS) && /h\.appendChild\(accountBadge\(badge, 'chan-sec-kind', /.test(PS) && !/kindGlyph\(/.test(PS)
+      && /s\.appendChild\(accountBadge\(badge\)\);/.test(CS) && /if \(badge\.internal\) b\.dataset\.vs = '1';/.test(CS) && /if \(user\) return accountTitle\(a\);/.test(DS),
+      'channels-badges PIN: both account card heads draw the SAME badge element their rows wear (accountBadge over ONE accountBadges map — no kind tile left); the card\'s name and the badge\'s title are one spelling');
+    ok(/const ib = internalBlock\(fs\.shown, \{ folded: \(FOLDS \|\| foldsFrom\(null\)\)\.internal && !q\.trim\(\), now \}\);/.test(PS) && /r\.kind === 'internal-head' \? internalHead\(r\.block\) : groupRow\(r, now\)/.test(PS)
+      && /const toggle = \(\) => \{ setFold\('internal', !b\.folded\); draw\(\); \};/.test(PS) && V.PANEL_PARTS.includes('internal'),
+      'channels-badges PIN: the first screen draws through internalBlock; its head folds through setFold (user state `channelsPanelFolds.internal`, broadcast to every client); lane channels-fold: before the folds load it is the default (folded)');
+  }
+  // lane channels-fold (the owner, 2026-10-03 — channels-badges gap 2: Slack had no glyph, so two glyph-less vendors
+  // looked alike): THE GLYPH CENSUS — every adapter kind that can be CONNECTED (the engine's REAL_ADAPTERS, each
+  // module's own `kind`) has its `vendor-<kind>` silhouette in the library, the one the account badge and the account
+  // card both draw (the chat fallback is the dev fakes' only); a kind without one is RED (control: a library copy
+  // without Slack's)
+  {
+    const AV = await import(path.join(REPO, 'src/lib/channel-avatar.js'));
+    const IC = await import(path.join(REPO, 'src/lib/icons.js'));
+    const ES = read('src/server/channels-engine.js');
+    const arr = ES.match(/^const REAL_ADAPTERS = Object\.freeze\(\[([^\]]*)\]\);$/m);
+    const kinds = (arr ? arr[1].split(',').map((s) => s.trim()).filter(Boolean) : []).map((id) => {
+      const r = ES.match(new RegExp(`^const ${id} = require\\('\\.\\./channels/([a-z0-9-]+)\\.js'\\);`, 'm'));
+      return r ? require(path.join(REPO, 'src/channels', `${r[1]}.js`)).kind : null;
+    });
+    const missing = (lib) => kinds.filter((k) => { const g = AV.accountBadges([{ id: k, kind: k, label: k }]).get(k).glyph; return !(typeof lib[g] === 'string' && /^<svg /.test(lib[g])); });
+    ok(kinds.length >= 3 && kinds.every((k) => typeof k === 'string' && k) && kinds.includes('slack') && missing(IC.UI_ICONS).length === 0,
+      `channels-fold GLYPH CENSUS: every connectable kind (${kinds.join(', ')}) wears its OWN vendor glyph — none falls back to the chat glyph`, JSON.stringify({ kinds, missing: missing(IC.UI_ICONS) }));
+    const sl = IC.UI_ICONS['vendor-slack'] || '', lk = IC.UI_ICONS['vendor-lark'] || '', gm = IC.UI_ICONS['vendor-gmail'] || '';
+    const box = (s) => `${(s.match(/viewBox="[^"]*"/) || [''])[0]} ${(s.match(/stroke-width="[^"]*"/) || [''])[0]}`;
+    ok(/stroke="currentColor"/.test(sl) && !/#[0-9a-f]{3,8}\b|rgb\(|hsl\(/i.test(sl) && !/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u.test(sl) && box(sl) === box(lk) && box(sl) === box(gm) && sl !== lk && sl !== gm,
+      'channels-fold: the Slack glyph is a library SVG in the house style — currentColor, the Lark / Gmail box and stroke, no brand colour, no emoji, a shape of its own', box(sl));
+    const MC = mutantCopies('chan-fold', REPO);
+    const IS = read('src/lib/icons.js');
+    const SLACK = IS.split('\n').find((l) => l.startsWith("  'vendor-slack': ")) || null;
+    ok(!!SLACK && IS.split(`${SLACK}\n`).length === 2, 'channels-fold CONTROL setup: the Slack glyph is spelled once');
+    const IC0 = await import(MC.write('src/lib/icons.js', IS.replace(`${SLACK}\n`, ''), 'fold-no-slack', { esm: true }));
+    ok(JSON.stringify(missing(IC0.UI_ICONS)) === '["slack"]', 'channels-fold CONTROL: a library copy without the Slack glyph is RED — the census names slack (its badge would draw the chat fallback)', JSON.stringify(missing(IC0.UI_ICONS)));
+    for (const c of copiesCensus(MC.files, MC.dir, REPO, { minCopies: 1, label: 'chan-fold: ' })) ok(c.pass, c.name, c.pass ? undefined : c.detail);
+  }
   // wake echo + folds
   ok(JSON.stringify(V.wakeCount({ woke: [1, 2], refused: [3], later: [] })) === '{"woke":2,"refused":1,"later":0}' && JSON.stringify(V.wakeCount(null)) === '{"woke":0,"refused":0,"later":0}', 'wakeCount: the answer\'s woke / refused / later counts, zero when absent');
-  ok(JSON.stringify(V.foldsFrom({ channelsPanelFolds: { accounts: true, watcher: 'yes', junk: true } })) === '{"accounts":true,"watcher":false}' && JSON.stringify(V.foldsFrom(null)) === '{"accounts":false,"watcher":false}', 'foldsFrom: only the KNOWN parts, only a literal true folds (user state never grows from this map)');
+  ok(JSON.stringify(V.foldsFrom({ channelsPanelFolds: { accounts: true, watcher: 'yes', junk: true } })) === '{"accounts":true,"watcher":false,"internal":true}' && JSON.stringify(V.foldsFrom(null)) === '{"accounts":false,"watcher":false,"internal":true}', 'foldsFrom: only the KNOWN parts, only a literal true folds Accounts / the watcher (user state never grows from this map)');
+  // lane channels-fold (the owner, 2026-10-03: VibeSpace internal is FOLDED by default; an explicit choice still wins)
+  ok(V.foldsFrom({}).internal === true && V.foldsFrom({ channelsPanelFolds: { internal: 'no' } }).internal === true && V.foldsFrom({ channelsPanelFolds: { internal: 0 } }).internal === true
+    && V.foldsFrom({ channelsPanelFolds: { internal: false } }).internal === false && V.foldsFrom({ channelsPanelFolds: { internal: true } }).internal === true && JSON.stringify(V.FOLDED_BY_DEFAULT) === '["internal"]',
+    'channels-fold: VibeSpace internal is FOLDED unless the user unfolded it — absent / junk = folded, only a literal false (the user\'s unfold) opens it; Accounts and the watcher keep their open default');
 
   // THE PARITY: wakePreview ≡ the engine's wakeVerdict over notify × mention
   const names = { a: 'alpha', b: 'beta', c: 'gamma lane' };

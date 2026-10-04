@@ -43,10 +43,10 @@ import { nameOf } from '../channel-ref.js'; // B-c127's name ladder (lane channe
 // lane group-pending (2026-10-01): the window's line under every message judges by the model's ONE rule — re-exported, never copied
 export { deliveryOf, DELIVERY_STATES };
 // B-5fe1: each conversation row carries its ACCOUNT badge (PURE — the hue per account, the vendor glyph, `multi`)
-import { accountBadges } from './channel-avatar.js';
+import { accountBadges, INTERNAL_BADGE } from './channel-avatar.js';
 
 export { GROUP_ADAPTER_ID, NOTIFY_MODES, DEFAULT_NOTIFY, OWNER };
-export { focusRows, statusTag, filterRows, firstScreen, heldOf, heldPending, FOCUS_WINDOW_MS, HELD_WINDOW_MS, TAG_ORDER } from './channel-focus.js';
+export { focusRows, statusTag, filterRows, firstScreen, heldOf, heldPending, FOCUS_WINDOW_MS, HELD_WINDOW_MS, TAG_ORDER, isInternal, needsOwner, internalBlock } from './channel-focus.js';
 
 /** Is this (adapterId, convId) pair an agent GROUP rather than a channel
  *  conversation? The group log's namespace (the store files a group's log
@@ -78,6 +78,9 @@ export function groupListRows({ groups = [], conversations = [], adapters = [], 
       title: g.name || g.id, lastAt: num(g.lastAt || g.createdAt), lastText: g.lastText || '',
       unread: num(g.unread), pair: !!(g.pair && g.pair.length), memberCount: Array.isArray(g.members) ? g.members.length : 0,
       archived: !!g.archivedAt, group: g,
+      // lane channels-badges: VibeSpace's own talk — the VibeSpace badge, the internal fold (`atYou` = the owner's @s the
+      // group list names; the group model refuses an @ of the owner today, so none yet)
+      internal: true, account: INTERNAL_BADGE, atYou: num(g.atYou),
     };
     (row.archived ? archived : rows).push(row);
   }
@@ -203,11 +206,14 @@ export function wakeCount(r) {
 /** The panel's secondary sections, persisted in user state
  *  (`channelsPanelFolds`, PATCH merge-only): `true` = folded. Only the known
  *  parts, only booleans — user state never grows from this map. */
-export const PANEL_PARTS = Object.freeze(['accounts', 'watcher']);
+export const PANEL_PARTS = Object.freeze(['accounts', 'watcher', 'internal']);   // lane channels-badges: `internal` = VibeSpace's own talk folded
+/** lane channels-fold (the owner, 2026-10-03): the parts FOLDED until the user unfolds them — absent = folded, only a
+ *  literal `false` (the user's own unfold, synced like any fold) opens one. */
+export const FOLDED_BY_DEFAULT = Object.freeze(['internal']);
 export function foldsFrom(state) {
   const f = state && state.channelsPanelFolds && typeof state.channelsPanelFolds === 'object' ? state.channelsPanelFolds : {};
   const out = {};
-  for (const p of PANEL_PARTS) out[p] = f[p] === true;
+  for (const p of PANEL_PARTS) out[p] = FOLDED_BY_DEFAULT.includes(p) ? f[p] !== false : f[p] === true;
   return out;
 }
 

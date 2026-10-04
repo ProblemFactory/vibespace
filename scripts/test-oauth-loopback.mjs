@@ -569,7 +569,37 @@ console.log('\n⑨ optional scopes: the one narrowing retry against a fake autho
   const h = await ol.begin({ id: 'paste-3', mode: 'paste', timeoutMs: 30, buildConsentUrl: () => 'https://x.test/', exchange: async () => ({ ok: true }) });
   await new Promise((r) => setTimeout(r, 80));
   ok(ol.status(h.flowId).cancelled === OL.CAUSE_TIMEOUT, 'design 012: a paste flow ends at its timeout like any flow');
-  ok(OL.MODES.join() === 'ephemeral,fixed,paste', 'design 012: the modes are ephemeral, fixed, paste');
+  ok(OL.MODES.join() === 'ephemeral,fixed,paste,public', 'design 012 / 018: the modes are ephemeral, fixed, paste, public');
+}
+
+// ── design 018: a PUBLIC flow — no listener; the code lands by the WHOLE state (finishByState) or a paste ──
+console.log('design 018: public mode');
+{
+  const quiet2 = { log() {}, warn() {}, error() {} };
+  const threw = async (fn) => { try { await fn(); return null; } catch (e) { return e; } };
+  let t = 1000;
+  const ol = OL.createOAuthLoopback({ log: quiet2, now: () => t });
+  const seen = [];
+  const mk = async (id, extra = {}) => ol.begin({ id, mode: 'public', label: 'Slack', redirectUri: 'https://relay.example.test/slack/', stateFor: ({ flowId }) => `v1.${flowId}.sigsigsigsigsigsig`, buildConsentUrl: ({ redirectUri, state }) => `https://slack.example.test/authorize?r=${encodeURIComponent(redirectUri)}&state=${state}`, exchange: async (a) => { seen.push({ id, code: a.code, redirectUri: a.redirectUri }); return { ok: true, user: 'u' }; }, ...extra });
+  const a = await mk('a');
+  ok(a.mode === 'public' && a.port === null && a.listening === false && a.redirectUri === 'https://relay.example.test/slack/' && a.consentUrl.includes(`state=v1.${a.flowId}.`), 'begin(public): no listener, no port; the state from stateFor names the flow; the redirect is the adapter\'s');
+  const w = await ol.finishByState(`v1.${a.flowId}.sigsigsigsigsigsiX`, 'CODE1');
+  const r1 = await ol.finishByState(`v1.${a.flowId}.sigsigsigsigsigsig`, 'CODE1');
+  const r2 = await ol.finishByState(`v1.${a.flowId}.sigsigsigsigsigsig`, 'CODE2');
+  ok(w.why === 'wrong-flow' && r1.ok === true && r2.why === 'used' && seen.length === 1 && seen[0].code === 'CODE1' && seen[0].redirectUri === 'https://relay.example.test/slack/', 'finishByState: a state one character off is wrong-flow; the right one exchanges ONCE with the consent\'s redirect_uri; a replay is `used`', JSON.stringify({ w: w.why, r1: r1.ok, r2: r2.why, seen }));
+  const b = await mk('b');
+  const fe = await threw(() => ol.forwardCallback(b.flowId, `https://relay.example.test/slack/?code=C3&state=v1.${a.flowId}.sigsigsigsigsigsig`));
+  const fb = await ol.forwardCallback(b.flowId, 'C3.bare-code-xyz');
+  ok(fe && fe.code === 'state-mismatch' && fb.ok === true && seen.at(-1).code === 'C3.bare-code-xyz', 'a paste-back carrying ANOTHER flow\'s state is refused by name; a bare code (what the relay page shows) finishes the flow');
+  const c = await mk('c');
+  const dn = await ol.finishByState(`v1.${c.flowId}.sigsigsigsigsigsig`, null, { error: 'access_denied' });
+  const d = await mk('d', { timeoutMs: 50 });
+  await new Promise((r) => setTimeout(r, 120));
+  const ex = await ol.finishByState(`v1.${d.flowId}.sigsigsigsigsigsig`, 'C4');
+  ok(dn.why === 'denied' && /did not grant/.test(ol.status(c.flowId).error) && ex.why === 'expired' && seen.length === 2, 'error=access_denied ends the flow by name (denied); a code after the timeout is `expired` and never exchanged');
+  const nf = await threw(() => ol.begin({ id: 'e', mode: 'public', buildConsentUrl: () => 'x', exchange: async () => ({}) }));
+  ok(nf && nf.code === 'bad-request', 'a public flow without stateFor is refused by name');
+  ol.stopAll();
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

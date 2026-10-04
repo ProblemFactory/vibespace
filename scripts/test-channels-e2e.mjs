@@ -1228,12 +1228,25 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
 
 // ── ⑰ LANE R5: a vendor RATE refusal and the FIRST READ, said on the account's section (zh) ──
 {
+  // int206: NO conversation window across the reboot — a window's open (and its minute heartbeat) is a HUMAN refresh
+  // (`watch` → origin 'open') that goes AHEAD of discovery (Drain rule 12) in a request pass doing no timer work: the
+  // ②/⑥ windows the reload restored took the seam's one refusal before the 40 rooms were listed (the rows route
+  // answered 2 for the whole wait — red whenever the reload beat the engine's first 5 s tick). Closed on both pages,
+  // the layout autosaved (a real pointerdown, as ③), then the kill.
+  const CHAN_WINS = `[...window.app.wm.windows.values()].filter((x) => x.type === 'channel')`;
+  for (const p of [p1, p2]) await p.evaljs(`(() => { for (const w of ${CHAN_WINS}) window.app.wm.closeWindow(w.id); return 1; })()`);
+  await p1.cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: 700, y: 20, button: 'left', clickCount: 1 });
+  await p1.cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: 700, y: 20, button: 'left', clickCount: 1 });
+  await p1.evaljs('window.app.layoutManager.scheduleAutoSave(), 1');
+  await sleep(3500);
   try { srv.kill('SIGKILL'); } catch {}
   await sleep(400);
   srv = bootServer({ VIBESPACE_CHANNELS_FAKE_PACE: '2', VIBESPACE_CHANNELS_FAKE_VENDOR: 'Google', VIBESPACE_CHANNELS_FAKE_RATE_LIMIT: '1:20', VIBESPACE_CHANNELS_FAKE_CONVS: '40' });
   ok(await waitServer(), '⑰ the server rebooted with the fixture seams: the poll fake paced at 2/s, named Google, refusing its first read (Retry-After 20 s), 40 new rooms');
   await p1.evaljs(`(() => { localStorage.setItem('vibespace.lang', 'zh'); return 1; })()`);
   ok(await p1.load(), '⑰ page 1 reloaded in zh');
+  const wins = await p1.evaljs(`${CHAN_WINS}.map((w) => w._openSpec && w._openSpec.convId)`);
+  ok(Array.isArray(wins) && wins.length === 0, '⑰ …with no conversation window restored (a window\'s open would be a human refresh ahead of the listing)', JSON.stringify(wins));
   const CARD = `(async () => {
     const sb = window.app.sidebar; if (!sb.isOpen) sb.toggle(true); if (sb._activeTab !== 'channels') sb._railGo('channels');
     const sec = document.querySelector('.rail-panel-channels .chan-sec[data-adapter="fake-poll"]');

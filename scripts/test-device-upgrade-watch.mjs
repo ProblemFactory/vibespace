@@ -99,6 +99,56 @@ console.log('— controls (patched copies) —');
   ok(B.open().length === 1, 'CONTROL (b): a match that does not retract leaves the item open after the device updated — DUS-W8 goes red');
   for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 2, label: 'mutant-copy (device-upgrade-watch): ' })) ok(r.pass, r.name, r.detail);
 }
+console.log('— lane win-upgrade-pipe: a device that never dials back after its upgrade began (fake clock) —');
+{
+  let clock = 1_000_000;
+  const gw = (Watch = DW, dir = fs.mkdtempSync(path.join(SCR, 'g-'))) => {
+    const todos = new UserTodoManager({ dataDir: dir });
+    const lines = [];
+    const w = Watch.create({ userTodos: todos, dataDir: dir, log: (l) => lines.push(l), now: () => clock, tickMs: 0 });
+    const open = () => todos._state.items.filter((t) => t.status === 'open' && t.sessionKey === 'machines');
+    return { dir, todos, w, open, lines };
+  };
+  const K = 'host-dial-WIN-DESK1';
+  const { w, todos, open, dir, lines } = gw();
+  ok(w.onAgentUpgrade('answered', { hostKey: K, version: '2.369.204' }) === false && w.onAgentUpgrade('begun', { hostKey: K, machine: 'WIN-DESK1', from: '2.369.204', to: '2.369.205' }) === true, 'GONE-1: the door takes `begun` (the hub started an upgrade) and `answered` (any hello)');
+  clock += 60_000; w.sweep();
+  ok(open().length === 0, 'GONE-2: one minute of silence files nothing (a healthy device re-dials within seconds; the Linux box: 17 s)');
+  clock += DW.GONE_AFTER_MS; w.sweep(); w.sweep();
+  const o = open();
+  ok(o.length === 1 && o[0].origin === 'machines' && o[0].urgency === 'high' && o[0].text === 'WIN-DESK1 stopped answering after its upgrade to 2.369.205 began — rerun its install command (Remote → WIN-DESK1 → Pairing command)', 'GONE-3: silent past the deadline ⇒ ONE For-you item in the brief\'s words (two sweeps, still one)', o.map((t) => t.text));
+  ok(o[0] && o[0].i18n && o[0].i18n.text.key.includes('{machine}') && /resolves itself when it connects again/.test(o[0].detail) && lines.some((l) => /no dial-in \d+ s after its upgrade to 2\.369\.205 began — told the user/.test(l)), '…with the words as structure, the self-resolve promise, and a journal line');
+  const w2 = DW.create({ userTodos: todos, dataDir: dir, log: () => {}, now: () => clock, tickMs: 0 }); // a hub restart
+  w2.sweep();
+  ok(open().length === 1, 'GONE-4: a hub restart files nothing new (the record is on disk)');
+  ok(w2.answered({ hostKey: K, version: '2.369.205' }) === true && open().length === 0 && todos._state.items.find((t) => t.id === o[0].id).status === 'done', 'GONE-5: the device dials in — the item resolves itself (done, by the watch)');
+  w2.begun({ hostKey: K, machine: 'WIN-DESK1', from: '2.369.204', to: '2.369.205' }); clock += DW.GONE_AFTER_MS + 1; w2.sweep();
+  ok(open().length === 0, 'GONE-6: ONE item per (machine, version) — the same version going silent again files no second one');
+  w2.begun({ hostKey: K, machine: 'WIN-DESK1', from: '2.369.205', to: '2.369.206' }); clock += DW.GONE_AFTER_MS + 1; w2.sweep();
+  ok(open().length === 1 && /2\.369\.206/.test(open()[0].text), 'GONE-7: a newer version going silent files again');
+  const p = gw(); p.w.begun({ hostKey: 'k', machine: 'm', from: '1.0.0', to: '1.0.1' });
+  const w3 = DW.create({ userTodos: p.todos, dataDir: p.dir, log: () => {}, now: () => clock, tickMs: 0 }); // restart INSIDE the window
+  clock += DW.GONE_AFTER_MS + 1; w3.sweep();
+  ok(p.open().length === 1, 'GONE-8: a deadline armed before a hub restart still fires after it (persisted)');
+  const q = gw(); q.w.begun({ hostKey: 'k', machine: 'm', from: '1.0.0', to: '1.0.1' }); clock += 17_000; q.w.answered({ hostKey: 'k', version: '1.0.1' }); clock += DW.GONE_AFTER_MS; q.w.sweep();
+  ok(q.open().length === 0 && Object.keys(q.w.gone()).length === 0, 'GONE-9: the healthy shape (back in 17 s) files nothing and leaves no record');
+  const wsrc = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
+  ok(/try \{ this\._onAnswer\?\.\(msg\.daemonVersion\); \} catch \{ \}/.test(wsrc('src/agentd/client.js')) && /this\._onUpgradeBegin\?\.\(msg\.daemonVersion, expected/.test(wsrc('src/agentd/client.js')) && wsrc('src/server/dial-pairing.js').includes("hosts.onAgentUpgrade?.('begun', {") && wsrc('src/server/dial-pairing.js').includes("hosts.onAgentUpgrade?.('answered', {") && wsrc('src/hosts.js').includes("this.onAgentUpgrade?.('begun', {"), 'GONE-10: every hello and every upgrade start reach the door (client.js → dial-pairing / hosts)');
+  // CONTROLS (patched copies)
+  const M = mutantCopies('dusg', REPO);
+  const src = fs.readFileSync(path.join(REPO, 'src/server/device-upgrade-watch.js'), 'utf8');
+  const mC = src.replace('    const had = !!g.itemId;\n    retract(g);', '    const had = !!g.itemId;');
+  const mD = src.replace("if (g.filedFor === g.to) {", 'if (false) {');
+  const mE = src.replace("event === 'begun' ? begun(facts) : ", '');
+  ok(mC !== src && mD !== src && mE !== src, '(c/d/e) the patches apply');
+  const C = gw(M.load('src/server/device-upgrade-watch.js', mC, 'noresolve')); C.w.begun({ hostKey: 'k', machine: 'm', from: '1', to: '2' }); clock += DW.GONE_AFTER_MS + 1; C.w.sweep(); C.w.answered({ hostKey: 'k' });
+  ok(C.open().length === 1, 'CONTROL (c): an answer that does not retract leaves the item open after the device came back — GONE-5 red');
+  const D = gw(M.load('src/server/device-upgrade-watch.js', mD, 'nodedupe')); D.w.begun({ hostKey: 'k', machine: 'm', from: '1', to: '2' }); clock += DW.GONE_AFTER_MS + 1; D.w.sweep(); D.w.answered({ hostKey: 'k' }); D.w.begun({ hostKey: 'k', machine: 'm', from: '1', to: '2' }); clock += DW.GONE_AFTER_MS + 1; D.w.sweep();
+  ok(D.open().length === 1, 'CONTROL (d): without the (machine, version) rule the same version is filed again (the store reopens the resolved item) — GONE-6 red');
+  const E = gw(M.load('src/server/device-upgrade-watch.js', mE, 'nobegun')); E.w.onAgentUpgrade('begun', { hostKey: 'k', machine: 'm', from: '1', to: '2' }); clock += DW.GONE_AFTER_MS + 1; E.w.sweep();
+  ok(E.open().length === 0, 'CONTROL (e): the pre-fix door (no `begun`) — a device that never came back files nothing: the incident\'s silence (GONE-3 red)');
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 3, label: 'mutant-copy (device-upgrade-watch gone): ' })) ok(r.pass, r.name, r.detail);
+}
 fs.rmSync(SCR, { recursive: true, force: true });
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

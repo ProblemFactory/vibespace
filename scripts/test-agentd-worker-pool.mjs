@@ -214,8 +214,8 @@ console.log('— §4 the daemon runs THIS pool —');
 const agentd = fs.readFileSync(path.join(REPO, 'src/agentd/agentd.js'), 'utf8');
 ok(/require\('\.\/worker-pool\.js'\)\.createWorkerPool\(\{ file: __filename, workerData: \{ role: 'agentd-worker' \}/.test(agentd), "WIRING PIN: agentd.js builds its pool with createWorkerPool over its OWN bundle (__filename, role 'agentd-worker')");
 ok(!/new wt\.Worker\(/.test(agentd), 'WIRING PIN: agentd.js spawns no Worker of its own (one pool implementation, the bounded one)');
-ok(/child\.unref\(\);\n\s*exitDaemon\(0\);/.test(agentd) && /SIGTERM — exiting \(sessions unaffected by design\)'\); exitDaemon\(0\);/.test(agentd) && /function exitDaemon\(code\) \{ if \(workerPool\) workerPool\.exit\(code\);/.test(agentd),
-  'WIRING PIN (verify r1): the self-upgrade\'s re-exec and SIGTERM exit through exitDaemon → pool.exit (a wedged worker cannot hold them)');
+ok(/handOver\(\{ server, log, exit: exitDaemon, spawnNext: /.test(agentd) && /try \{ spawnNext\(\); \} finally \{ exit\(0\); \}/.test(fs.readFileSync(path.join(REPO, 'src/agentd/reexec.js'), 'utf8')) && /SIGTERM — exiting \(sessions unaffected by design\)'\); exitDaemon\(0\);/.test(agentd) && /function exitDaemon\(code\) \{ if \(workerPool\) workerPool\.exit\(code\);/.test(agentd),
+  'WIRING PIN (verify r1): the self-upgrade\'s re-exec (reexec.js handOver: spawnNext, then exit = exitDaemon — int206) and SIGTERM exit through exitDaemon → pool.exit (a wedged worker cannot hold them)');
 
 console.log('\n§tree the patched copy never touches the tree');
 for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(r.pass, r.name, r.detail);

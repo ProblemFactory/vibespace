@@ -42,6 +42,7 @@ const GENERIC = [
   { id: 'github-token', re: /\bgh[pousr]_[A-Za-z0-9]{30,}/, d: 'GitHub token' },
   { id: 'gitlab-token', re: /\bglpat-[A-Za-z0-9_-]{20,}/, d: 'GitLab token' },
   { id: 'slack-token', re: /\bxox[baprs]-[A-Za-z0-9-]{10,}/, d: 'Slack token' },
+  { id: 'slack-config-token', re: /\bxoxe[.-][A-Za-z0-9.+/=_-]{10,}/, d: 'Slack app configuration / refresh token' },
   { id: 'aws-akid', re: /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/, d: 'AWS access key id' },
   { id: 'google-api', re: /\bAIza[0-9A-Za-z_-]{35}\b/, d: 'Google API key' },
   { id: 'cephx-key', re: /\bAQ[A-Za-z0-9+/]{20,}={0,2}\b/, d: 'cephx key' },

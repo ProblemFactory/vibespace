@@ -906,5 +906,78 @@ console.log('§FS-G design 010 S6: Gmail\'s search requests live in its search /
   ok(jp && jp.searchCallers === 'listConversations' && jw && jw.words === 'history,search', 'CONTROL: a search planted in the listing, and a words query planted in the history read, are each caught by name', JSON.stringify({ planted: jp && jp.searchCallers, words: jw && jw.words }));
 }
 
+// ── 12: SLACK'S APP CREATE WITH A PASTED SETUP TOKEN (lane slack-connect-easy, design 017) ──
+// One more vendor method, allowlisted HERE with its rules (a function of the source text — a patched copy written by
+// scripts/mutant-copy.mjs turns each red):
+//   ONE SITE   the method name lives only in src/channels/slack-manifest.js (`CREATE_METHOD`); slack.js builds the request
+//              once (`Manifest.createRequest(`) inside `createApp`, a JSON POST with the PASTED token as the Bearer;
+//   ONE PER HUMAN ACT  `createApp(` is invoked once — the paste exchange's `create` branch, reached only through
+//              `oauth.forwardCallback(` from `finish()` (a person pressed "Create the app"), and the token is dropped in
+//              that branch's `finally`;
+//   KEPT / DROPPED  the answer's `app_id` (and a workspace when named) is read; `credentials` / `client_secret` /
+//              `signing_secret` / `oauth_authorize_url` are never read on this (http) path.
+{
+  const { mutantCopies, copiesCensus } = await import('./mutant-copy.mjs');
+  const strip = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/([^:'"\\])\/\/[^'"\n]*$/gm, '$1');
+  const bodyOf = (S, head) => { const at = S.indexOf(head); if (at < 0) return ''; const end = S.indexOf('\n  }\n', at); return end < 0 ? '' : S.slice(at, end); };
+  const census = (slackSrc, serverTexts) => {
+    const rows = [];
+    const S = strip(slackSrc);
+    // a user-facing i18nKey('…') sentence may NAME the method (the registry row's describe); a request cannot be built from one
+    const where = []; for (const [rel, text] of Object.entries(serverTexts)) { const n = (strip(text).replace(/i18nKey\('(?:[^'\\]|\\.)*'\)/g, '').match(/apps\.manifest\.create/g) || []).length; if (n) where.push(`${rel}:${n}`); }
+    rows.push(['ONE SITE: the method name `apps.manifest.create` appears once in the server tree — slack-manifest.js\'s CREATE_METHOD', where.join() === 'src/channels/slack-manifest.js:1', where.join()]);
+    const ca = bodyOf(S, '  async function createApp(setupToken, ownerName) {');
+    rows.push(['ONE SITE: slack.js builds the create request once, inside createApp — a JSON POST whose Bearer is the pasted token', (S.match(/Manifest\.createRequest\(/g) || []).length === 1 && /const req = Manifest\.createRequest\(manifest\);/.test(ca) && (S.match(/callSlack\(fetchFn, req\.method, req\.body, \{ token: setupToken, json: true \}\)/g) || []).length === 1 && /callSlack\(fetchFn, req\.method, req\.body, \{ token: setupToken, json: true \}\)/.test(ca), `createApp body ${ca.length} chars`]);
+    const calls = (S.match(/(?<![.\w$])createApp\(/g) || []).length;
+    rows.push(['ONE PER HUMAN ACT: createApp is invoked once — the paste exchange\'s `create` branch, the token dropped in its finally', calls === 2 && /if \(act\.act === 'create'\) \{\n\s*try \{ return await createApp\(pasted, label\); \} finally \{ pasted = null; \}/.test(S), `bare occurrences ${calls}`]);
+    rows.push(['ONE PER HUMAN ACT: the exchange is reached only through finish() → oauth.forwardCallback (a paste)', (S.match(/\.forwardCallback\(/g) || []).length === 2 && /if \(fl && fl\.mode === 'public'\) \{[^\n]*\n\s*const r = await oauth\.forwardCallback\(flowId, typeof pasted === 'string' \? pasted : ''\);/.test(S) && /async finish\(flowId, pasted, \{ box = null \} = \{\}\) \{[\s\S]*?const r = await oauth\.forwardCallback\(flowId, pasted\.trim\(\), \{ box: b \}\);/.test(S), '']);
+    // design 018: `client_secret` may name the workspace app's OWN secret only inside callSlack's Basic-auth scrub
+    const cs0 = S.indexOf('async function callSlack('), S2 = cs0 < 0 ? S : S.slice(0, cs0) + S.slice(S.indexOf('\n}\n', cs0));
+    rows.push(['KEPT / DROPPED: createApp reads the app id and never the credentials, the client / signing secret or the authorize URL', /a\.app_id/.test(ca) && !/credentials|client_secret|signing_secret|verification_token|oauth_authorize_url/.test(ca) && !/\.credentials\b|client_secret|oauth_authorize_url/.test(S2), '']);
+    return rows;
+  };
+  const serverTexts = {};
+  for (const f of files) { const rel = path.relative(REPO, f); try { serverTexts[rel] = fs.readFileSync(f, 'utf-8'); } catch { } }
+  const slackRel = 'src/channels/slack.js';
+  const slackSrc = serverTexts[slackRel];
+  ok(typeof slackSrc === 'string' && typeof serverTexts['src/channels/slack-manifest.js'] === 'string', '§12 slack.js and slack-manifest.js are in the server census');
+  for (const [name, pass_, detail] of census(slackSrc, serverTexts)) ok(pass_, '§12 ' + name, detail);
+  const MUT = mutantCopies('vendor-whitelist-slack', REPO);
+  const reds = (rows) => rows.filter((r) => !r[1]).map((r) => r[0]);
+  const mut = (tag, from, to) => { if (!slackSrc.includes(from)) return null; const f = MUT.write(slackRel, slackSrc.replace(from, to), tag); return fs.readFileSync(f, 'utf-8'); };
+  const keeps = mut('keeps-credentials', '    const appId = typeof a.app_id', '    const kept = a.credentials && a.credentials.client_secret; void kept;\n    const appId = typeof a.app_id');
+  ok(keeps && reds(census(keeps, { ...serverTexts, [slackRel]: keeps })).some((n) => /KEPT/.test(n)), '§12 CONTROL: a copy that reads the create\'s credentials is RED');
+  const twice = mut('second-caller', '    async listConversations({ cursor = null, limit = 100 } = {}) {\n', '    async listConversations({ cursor = null, limit = 100 } = {}) {\n      if (cursor === \'x\') await createApp(\'\', \'\');\n');
+  ok(twice && reds(census(twice, { ...serverTexts, [slackRel]: twice })).some((n) => /ONE PER HUMAN ACT/.test(n)), '§12 CONTROL: a copy that also creates from the conversation listing is RED');
+  const keepsToken = mut('no-drop', 'try { return await createApp(pasted, label); } finally { pasted = null; }', 'return await createApp(pasted, label);');
+  ok(keepsToken && reds(census(keepsToken, { ...serverTexts, [slackRel]: keepsToken })).some((n) => /ONE PER HUMAN ACT/.test(n)), '§12 CONTROL: a copy that does not drop the setup token is RED');
+  // ── 13: THE WORKSPACE APP'S CODE EXCHANGE (lane slack-workspace-app, design 018) ──
+  //   ONE SITE   `oauth.v2.access` lives only in slack-manifest.js (`EXCHANGE_METHOD`); slack.js calls it once, inside
+  //              `exchangeCode`, the app's id + secret as HTTP Basic and the consent's own redirect_uri beside the code
+  //              (Slack refuses a mismatch; with several registered URLs it needs it on both steps);
+  //   ONE PER HUMAN ACT  `exchangeCode(` is invoked once — the public begin's `exchange` closure, which oauth-loopback
+  //              runs at most once per state (the landing route or a paste);
+  //   THE SECRET  `.secret()` is read once, inside that call's arguments — never kept in a variable.
+  const census13 = (slackText, texts) => {
+    const S = strip(slackText), rows = [];
+    const where = []; for (const [rel, text] of Object.entries(texts)) { const n = (strip(text).replace(/i18nKey\('(?:[^'\\]|\\.)*'\)/g, '').match(/oauth\.v2\.access/g) || []).length; if (n) where.push(`${rel}:${n}`); }
+    rows.push(['ONE SITE: the method name `oauth.v2.access` appears once in the server tree — slack-manifest.js\'s EXCHANGE_METHOD', where.join() === 'src/channels/slack-manifest.js:1', where.join()]);
+    const ex = bodyOf(S, '  async function exchangeCode(code, redirectUri, cancelled) {');
+    rows.push(['ONE SITE: exchangeCode posts the code with the consent\'s redirect_uri, the app authenticated by HTTP Basic', (S.match(/Manifest\.EXCHANGE_METHOD/g) || []).length === 1 && /callSlack\(fetchFn, Manifest\.EXCHANGE_METHOD, \{ code: String\(code\), \.\.\.\(redirectUri \? \{ redirect_uri: redirectUri \} : \{\}\) \}, \{ basic: \{ id: c\.clientId, secret: c\.secret\(\) \} \}\)/.test(ex), '']);
+    const calls13 = (S.match(/(?<![.\w$])exchangeCode\(/g) || []).length;
+    rows.push(['ONE PER HUMAN ACT: exchangeCode is invoked once — the public begin\'s exchange closure', calls13 === 2 && /exchange: async \(\{ code, redirectUri, cancelled = null \}\) => exchangeCode\(code, redirectUri, cancelled\),/.test(S), `bare occurrences ${calls13}`]);
+    rows.push(['THE SECRET: read once, inside the exchange call\'s arguments', (S.match(/\.secret\(\)/g) || []).length === 1 && !/=\s*c\.secret\(\)/.test(S), '']);
+    return rows;
+  };
+  for (const [name, pass_, detail] of census13(slackSrc, serverTexts)) ok(pass_, '§13 ' + name, detail);
+  const noRedirect = mut('no-redirect', '{ code: String(code), ...(redirectUri ? { redirect_uri: redirectUri } : {}) }', '{ code: String(code) }');
+  ok(noRedirect && reds(census13(noRedirect, { ...serverTexts, [slackRel]: noRedirect })).some((n) => /ONE SITE: exchangeCode/.test(n)), '§13 CONTROL: a copy that drops the redirect_uri from the exchange is RED');
+  const twice13 = mut('exchange-twice', '    async listConversations({ cursor = null, limit = 100 } = {}) {\n', '    async listConversations({ cursor = null, limit = 100 } = {}) {\n      if (cursor === \'x\') await exchangeCode(\'c\', null, null);\n');
+  ok(twice13 && reds(census13(twice13, { ...serverTexts, [slackRel]: twice13 })).some((n) => /ONE PER HUMAN ACT/.test(n)), '§13 CONTROL: a copy that also exchanges from the conversation listing is RED');
+  const keeps13 = mut('keeps-secret', '    const c = workspaceClient();\n    let r;\n    try { r = await callSlack(fetchFn, Manifest.EXCHANGE_METHOD', '    const c = workspaceClient();\n    const kept = c.secret(); void kept;\n    let r;\n    try { r = await callSlack(fetchFn, Manifest.EXCHANGE_METHOD');
+  ok(keeps13 && reds(census13(keeps13, { ...serverTexts, [slackRel]: keeps13 })).some((n) => /THE SECRET/.test(n)), '§13 CONTROL: a copy that keeps the secret in a variable is RED');
+  for (const x of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 3, label: '§12 ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
+}
+
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

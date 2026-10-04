@@ -98,6 +98,7 @@ function census(files, allow) {
 // every other construction the tree held when the census was born, each with
 // its reason. A NEW pair fails the suite until it is added HERE with one.
 const ALLOW = {
+  'src/server/channels-engine.js|problemfactory.github.io': 'design 018: the DEFAULT of the `channels.slackRelayUrl` setting — the static relay page Slack sends a member\'s BROWSER back through (a redirect_uri); this server never requests it',
   // ── the two seeds §3.1 names ──
   'src/gmail-sync.js|oauth2.googleapis.com': 'Gmail-as-a-folder mount (2.134.0): the OAuth code exchange + refresh for the read-only mail sync, under the user\'s own consent — the ORIGINAL of oauth-loopback\'s ephemeral mode',
   'src/gmail-sync.js|accounts.google.com': 'the consent page the loopback flow opens for the Gmail mount',

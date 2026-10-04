@@ -559,7 +559,7 @@ function pidCmdline(pid) {
 // EVERY original flag (--dial/--dial-token/--host-token/…). Extracted to a
 // side-effect-free module so the regression test can import it without
 // executing the daemon.
-const { reExecArgv, repointCurrent } = require('./reexec');
+const { reExecArgv, repointCurrent, handOver, listenWithRetry } = require('./reexec');
 
 // Exec-PROOF process identity: the start time survives execve while cmdline
 // does NOT — a pipe child spawned as `sh -lc '… exec env … claude …'` rewrites
@@ -716,23 +716,26 @@ function beginUpgrade(mux, { version, size }) {
         // winning the race — lost under rapid upgrade churn).
         setTimeout(() => {
           const { spawn } = require('child_process');
-          try { fs.unlinkSync(LOCK); } catch { }
-          try { fs.unlinkSync(SOCK); } catch { }
-          // The re-exec is the one moment a RUNNING daemon's environ can be
-          // cleaned: THIS code hands the next process the SANITIZED env
-          // (src/agent-env.js). Honest count: the re-exec that INSTALLS this
-          // bundle is run by the OLDER daemon's code (raw env), so a daemon
-          // born under an older build is cleaned at the FOLLOWING re-exec or
-          // a restart — while its CHILDREN are protected from the moment this
-          // bundle runs, because spawnEnv() sanitizes its base regardless.
-          const child = spawn(process.execPath, reExecArgv(path.join(dir, path.basename(process.argv[1] || 'agentd.js'))), {
-            // windowsHide (lane device-upgrade-stuck): a DETACHED child on Windows gets its own console window — a
-            // visible black window whose close kills the daemon; the installer starts it hidden, so must the re-exec
-            detached: true, stdio: 'ignore', windowsHide: true,
-            env: { ...daemonEnv(process.env), VIBESPACE_AGENTD_VERSION: version },
-          });
-          child.unref();
-          exitDaemon(0);
+          // lane win-upgrade-pipe: FREE THE ADDRESS, THEN START THE SUCCESSOR (src/agentd/reexec.js handOver) — on Windows
+          // SOCK is a named pipe no unlink frees; the successor's listen died EADDRINUSE while this process still held it
+          handOver({ server, log, exit: exitDaemon, spawnNext: () => {
+            try { fs.unlinkSync(LOCK); } catch { }
+            try { fs.unlinkSync(SOCK); } catch { }
+            // The re-exec is the one moment a RUNNING daemon's environ can be
+            // cleaned: THIS code hands the next process the SANITIZED env
+            // (src/agent-env.js). Honest count: the re-exec that INSTALLS this
+            // bundle is run by the OLDER daemon's code (raw env), so a daemon
+            // born under an older build is cleaned at the FOLLOWING re-exec or
+            // a restart — while its CHILDREN are protected from the moment this
+            // bundle runs, because spawnEnv() sanitizes its base regardless.
+            const child = spawn(process.execPath, reExecArgv(path.join(dir, path.basename(process.argv[1] || 'agentd.js'))), {
+              // windowsHide (lane device-upgrade-stuck): a DETACHED child on Windows gets its own console window — a
+              // visible black window whose close kills the daemon; the installer starts it hidden, so must the re-exec
+              detached: true, stdio: 'ignore', windowsHide: true,
+              env: { ...daemonEnv(process.env), VIBESPACE_AGENTD_VERSION: version },
+            });
+            child.unref();
+          } });
         }, 200);
       }
     },
@@ -2352,7 +2355,10 @@ if (SOCK_PICK && SOCK_PICK.via !== 'natural') {
   if (!dv.ok) { const line = `socket_dir_hijacked — ${SOCKP.socketDirOf(SOCK_PICK)}: ${dv.why}`; log(line); process.stderr.write('vibespace-device: ' + line + '\n'); process.exit(8); }
   try { fs.unlinkSync(SOCK); } catch { }
 }
-server.listen(SOCK, () => {
+// lane win-upgrade-pipe: a busy address is RETRIED (250 ms, ≤ 15 s) while the singleton lock names this pid — the
+// previous daemon of a self-upgrade may still hold a Windows named pipe (src/agentd/reexec.js listenWithRetry)
+const lockIsOurs = () => { try { return fs.readFileSync(LOCK, 'utf-8').trim() === String(process.pid); } catch { return false; } };
+listenWithRetry(server, SOCK, { log, lockIsOurs, onFatal: (e) => { log('server error: ' + e.message); process.exit(1); }, onListening: () => {
   try { fs.chmodSync(SOCK, 0o600); } catch { }
   posixShells(); // verify-r2: the first measure starts at boot, so the first hello rarely waits for it
   if (SOCK_PICK) {
@@ -2360,8 +2366,7 @@ server.listen(SOCK, () => {
     try { const w = SOCKP.witnessPathOf(ROOT), tmp = w + '.' + process.pid + '.tmp'; fs.writeFileSync(tmp, SOCK + '\n', { mode: 0o600 }); fs.renameSync(tmp, w); } catch (e) { log('socket witness not written: ' + e.message); }
     log(`listening on ${SOCK} (${SOCK_PICK.via}, ${SOCK_PICK.bytes}/${SOCK_PICK.max} bytes)`);
   } else log('listening on ' + SOCK);
-});
-server.on('error', (e) => { log('server error: ' + e.message); process.exit(1); });
+} });
 // desktop apps (lane C1): a daemon restarted (a self-upgrade, a crash) with a LIVE app session on its record re-adopts
 // it at boot — owning a detached session must not wait for the hub's next op (its idle/tick/teardown would lapse)
 try {

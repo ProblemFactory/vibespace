@@ -3428,6 +3428,18 @@ label.cfg-row {
 
 .mounts-field-hint { font-size: 10px; color: var(--text-dim); margin: -2px 0 6px; line-height: 1.4; }
 .mounts-drive-connect { margin-bottom: 6px; display: flex; flex-direction: column; gap: 4px; }
+.chan-paste-steps { display: flex; flex-direction: column; gap: 6px; margin-bottom: 6px; }
+.chan-paste-step { border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; display: flex; flex-direction: column; gap: 4px; }
+.chan-paste-step-head { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; }
+.chan-paste-step-num { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; border-radius: 9px; background: var(--accent); color: var(--accent-fg); font-size: 11px; }
+.chan-paste-step[data-state="folded"] .chan-paste-step-num { background: var(--border); color: var(--text); }
+.chan-paste-step-body { display: flex; flex-direction: column; gap: 4px; }
+.chan-paste-step-body[hidden], .chan-paste-step-done[hidden] { display: none; }
+.chan-paste-step-body .mounts-btn, .chan-paste-step-done .mounts-btn, .chan-paste-fallback .mounts-btn { align-self: flex-start; min-height: 36px; }
+.chan-paste-input { width: 100%; box-sizing: border-box; }
+.chan-paste-made { color: var(--text); font-size: 11px; margin: 0; }
+.chan-paste-fallback { font-size: 11px; display: flex; flex-direction: column; gap: 4px; }
+.chan-paste-fallback summary { cursor: pointer; color: var(--text-dim); min-height: 24px; }
 .mounts-rclone-warn { border-color: var(--yellow, #b58900); }
 
 .mounts-conf-list { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
@@ -4677,6 +4689,17 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .chan-av-badge[data-hue="5"] { --acct: var(--cyan, #56b6c2); }
 .chan-av-badge[data-hue="6"] { --acct: color-mix(in srgb, var(--blue, #3b82f6) 50%, var(--magenta, #c678dd)); }
 .chan-av-badge[data-hue="7"] { --acct: color-mix(in srgb, var(--red, #ef4444) 50%, var(--yellow, #f59e0b)); }
+/* lane channels-badges: VibeSpace's OWN talk wears the product's mark on the theme's teal (a mix of theme variables);
+   the hover title names the account; the ACCOUNT CARD's icon is the SAME badge element standing alone at tile size —
+   one badge per account, used everywhere */
+.chan-av-badge[data-vs] { --acct: color-mix(in srgb, var(--cyan, #56b6c2) 65%, var(--green, #22c55e)); }
+.chan-av-badge[title] { pointer-events: auto; }
+.chan-av-badge.chan-sec-kind, .chan-av-badge.chan-ihead-badge {
+  --av-surface: var(--bg-window, #1a1a30); position: static; flex: 0 0 auto; width: 18px; height: 18px;
+  box-shadow: none; color: var(--av-surface);
+}
+.sidebar .chan-av-badge.chan-sec-kind, .sidebar .chan-av-badge.chan-ihead-badge { --av-surface: var(--bg-sidebar, #0e0e1e); }
+.chan-av-badge.chan-sec-kind .chan-ic, .chan-av-badge.chan-ihead-badge .chan-ic { font-size: 11px; }
 
 /* the rail panel */
 /* a NAMED container: the rows are `session-item-card`s, themselves inline-size containers, so an
@@ -4844,6 +4867,17 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 @container chan-panel (max-width: 300px) { .chan-newgroup-label { display: none; } }
 .chan-groups { display: flex; flex-direction: column; gap: 2px; }
 .chan-groups-empty { font-size: 11px; line-height: 1.45; }
+/* lane channels-badges: the HEAD of VibeSpace's own talk (a fold, the part-head grammar) — folded, it alone stands for
+   the block, with its unread and @-you counts */
+.chan-ihead { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 30px; margin: 0; padding: 4px 8px; border: 0; background: none; border-radius: var(--radius-sm); cursor: pointer; user-select: none; text-align: left; font: inherit; font-size: 11px; font-weight: 600; color: var(--text-secondary); }
+.chan-ihead:hover { background: var(--bg-hover); }
+.chan-ihead .chan-part-chev { transition: transform var(--transition); }
+.chan-ihead.chan-ihead-folded .chan-part-chev { transform: rotate(-90deg); }
+.chan-ihead-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chan-ihead-count { flex: 1 1 auto; color: var(--text-dim); font-weight: 400; font-variant-numeric: tabular-nums; }
+.chan-ihead-at { flex-shrink: 0; font-size: 10px; font-weight: 700; color: var(--accent); }
+.chan-ihead .chan-ihead-unread { flex-shrink: 0; }
+@media (max-width: 600px) { .chan-ihead { min-height: 36px; } }
 /* THE LOOK (channel-polish, 2026-09-27): an IM row — the conversation's AVATAR, the name (bold when
    unread), the time right; line 2 = the ONE tag · the last message (one line, dim) · the unread count.
    A GRID so the avatar can span both lines where there is room (≥ 220 px of panel: the 340 / 500 px rails,

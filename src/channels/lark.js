@@ -140,9 +140,19 @@ const JOB_SCOPE = 'contact:user.employee:readonly';
 const DEPT_SCOPE = 'contact:user.department:readonly';
 /** The API-level scopes that let a USER token read another person (the users/get doc: any one of them). */
 const PEOPLE_READ_SCOPES = Object.freeze([PEOPLE_SCOPE, 'contact:contact:readonly', DEPT_SCOPE]);
+/** lane slack-scopes-lark-reauth (owner 2026-10-03: 「你最好多申请一些权限防止以后有什么新功能需要新权限（比如现在lark就是老让我
+ *  重新auth）」): EVERY USABLE SCOPE, ASKED FOR ONCE. Production (journal + the account record, read-only): 2 consents in
+ *  14 days, 0 refresh failures — the token renewed itself for 7 days 9 hours; the second consent was the Re-authorize the
+ *  people scopes 2.369.202 added asked for (2.369.197 had added three more). These are the scopes Lark's OWN token
+ *  answer named for the owner's app on 2026-10-03 beyond the ones a feature reads today — spelled by the vendor and
+ *  enabled on that app (Lark refuses a whole consent naming one an app has not enabled, 20027): reads of every group's
+ *  and chat's history, documents, sheets, bases, the wiki, drive, the calendar — held before the feature that needs
+ *  them ships. ONE optional group, dropped FIRST: one press signs in without all of them (what every consent asked
+ *  before), and nothing a feature uses today is lost. */
+const WIDE_SCOPES = Object.freeze(['auth:user.id:read', 'im:message:readonly', 'im:message.group_msg:get_as_user', 'im:chat:read', 'docx:document', 'docx:document:readonly', 'drive:drive', 'sheets:spreadsheet', 'bitable:app', 'wiki:wiki:readonly', 'calendar:calendar:readonly']);
 // lane lark-threads: the profile scopes join the ordered groups AFTER the reactions — the two field scopes (a job title,
 // a department: cosmetic) next, then reading people (it names who left a chat), the feed's two last
-const OPTIONAL_SCOPE_GROUPS = Object.freeze([Object.freeze([REACTIONS_READ_SCOPES[0]]), Object.freeze([JOB_SCOPE]), Object.freeze([DEPT_SCOPE]), Object.freeze([PEOPLE_SCOPE]), Object.freeze([P2P_READ_SCOPE]), Object.freeze([SEARCH_SCOPE])]);
+const OPTIONAL_SCOPE_GROUPS = Object.freeze([Object.freeze([...WIDE_SCOPES]), Object.freeze([REACTIONS_READ_SCOPES[0]]), Object.freeze([JOB_SCOPE]), Object.freeze([DEPT_SCOPE]), Object.freeze([PEOPLE_SCOPE]), Object.freeze([P2P_READ_SCOPE]), Object.freeze([SEARCH_SCOPE])]);
 /** …flat (every optional scope — what a narrowed consent may have dropped). */
 const OPTIONAL_SCOPES = Object.freeze(OPTIONAL_SCOPE_GROUPS.flat());
 const REACTIONS_WRITE_SCOPES = Object.freeze(['im:message', 'im:message.reactions:write_only']);
@@ -833,7 +843,11 @@ function create(record = {}, deps = {}) {
    *  on by default); `without` = the optional scopes the one narrowing retry dropped. */
   // lane lark-search-poll: + the change feed's two scopes unless the owner turned the search off (on by default)
   // lane lark-threads (B1/B5): + reading people's profiles (and their job title / department) — measured necessary
-  const consentScopes = (without = []) => [...SCOPES, ...(optionOf(record, 'reactions') === 'read' ? [REACTIONS_READ_SCOPES[0]] : []), JOB_SCOPE, DEPT_SCOPE, PEOPLE_SCOPE, ...(optionOf(record, 'search') !== 'off' ? [P2P_READ_SCOPE, SEARCH_SCOPE] : [])].filter((x) => !(Array.isArray(without) && without.includes(x)));
+  // lane slack-scopes-lark-reauth: + every other scope the app grants (WIDE_SCOPES) — the next feature needs no Re-authorize.
+  // verify r1: a wide scope that ALSO reads who reacted (im:message:readonly is in REACTIONS_READ_SCOPES — capsOfScopes) is
+  // asked only while the reactions option is 'read': "Add and remove only" stays a consent that cannot read reactions
+  const wideScopes = () => WIDE_SCOPES.filter((x) => optionOf(record, 'reactions') === 'read' || !REACTIONS_READ_SCOPES.includes(x));
+  const consentScopes = (without = []) => [...SCOPES, ...(optionOf(record, 'reactions') === 'read' ? [REACTIONS_READ_SCOPES[0]] : []), JOB_SCOPE, DEPT_SCOPE, PEOPLE_SCOPE, ...(optionOf(record, 'search') !== 'off' ? [P2P_READ_SCOPE, SEARCH_SCOPE] : []), ...wideScopes()].filter((x) => !(Array.isArray(without) && without.includes(x)));
   const sleep = (ms) => new Promise((r) => { const t = setTimeout(r, ms); if (t.unref) t.unref(); });
 
   /** THIS ACCOUNT's credential binding (2026-09-22): `cluster:<k>` / `own`,
@@ -1991,6 +2005,8 @@ module.exports = {
   LARK_EMOJI, LARK_QUICK, capsOfScopes, REACTIONS_GRANT, REACTIONS_READ_SCOPES, REACTIONS_WRITE_SCOPES, REACTION_PAGES_MAX, TOPIC_FORBIDDEN_TTL_MS, OPTIONAL_SCOPES, optionOf,
   // lane lark-search-poll: the change feed's scopes, the ordered optional groups, what unlocks it, the refusal's scope reader
   SEARCH_SCOPE, P2P_READ_SCOPE, OPTIONAL_SCOPE_GROUPS, FEED_GRANT, requiredScopesOf,
+  // lane slack-scopes-lark-reauth: every usable scope, asked once (the first optional group)
+  WIDE_SCOPES,
   // lane lark-p2p: THE ONE search-hit reader (the measured shape) + the probe's value-form words
   readSearchHit, valueFormOf,
   // lane lark-threads (A4): the by-id answer's verdict

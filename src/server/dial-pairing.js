@@ -275,6 +275,9 @@ async function deviceForDial(deviceId, _retried = false) {
       // lane device-upgrade-stuck: THE door (hosts.onAgentUpgrade → src/server/device-upgrade-watch.js)
       onUpgradeStuck: (from, to, info) => { const h = hosts.findByDeviceId(deviceId); hosts.onAgentUpgrade?.('stuck', { ...(info || {}), hostKey: h ? h.id : 'host-dial-' + deviceId, machine: (h && h.name) || deviceId, from, to }); },
       onVersionMatch: (v) => { const h = hosts.findByDeviceId(deviceId); hosts.onAgentUpgrade?.('matched', { hostKey: h ? h.id : 'host-dial-' + deviceId, version: v }); },
+      // lane win-upgrade-pipe: an upgrade started / the device answered — a device that never dials back reaches the user
+      onUpgradeBegin: (from, to) => { const h = hosts.findByDeviceId(deviceId); hosts.onAgentUpgrade?.('begun', { hostKey: h ? h.id : 'host-dial-' + deviceId, machine: (h && h.name) || deviceId, from, to }); },
+      onAnswer: (v) => { const h = hosts.findByDeviceId(deviceId); hosts.onAgentUpgrade?.('answered', { hostKey: h ? h.id : 'host-dial-' + deviceId, version: v }); },
     });
     agentdDialDevices.set(deviceId, dm);
   }

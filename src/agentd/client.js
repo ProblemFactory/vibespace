@@ -55,7 +55,7 @@ class DeviceManager {
    *  version      release version (= daemonVersion expected)
    *  log          logger fn
    */
-  constructor({ dataDir, bundlePath, version, nodeModules, transport, log = console.log, upgradeLedger = null, onUpgradeStuck = null, onVersionMatch = null } = {}) {
+  constructor({ dataDir, bundlePath, version, nodeModules, transport, log = console.log, upgradeLedger = null, onUpgradeStuck = null, onVersionMatch = null, onUpgradeBegin = null, onAnswer = null } = {}) {
     this._tokFile = path.join(dataDir, 'agentd-tokens.json');
     this._bundlePath = bundlePath;
     this._version = version;
@@ -70,6 +70,10 @@ class DeviceManager {
     // hosts.onAgentUpgrade → src/server/device-upgrade-watch.js). Pre-fix nothing ever assigned `_onUpgradeStuck`.
     this._onUpgradeStuck = typeof onUpgradeStuck === 'function' ? onUpgradeStuck : null;
     this._onVersionMatch = typeof onVersionMatch === 'function' ? onVersionMatch : null;
+    // lane win-upgrade-pipe: an upgrade the hub STARTED and every hello (the device answered) — the same door, so a device
+    // that never dials back after its re-exec reaches the user (src/server/device-upgrade-watch.js begun / answered)
+    this._onUpgradeBegin = typeof onUpgradeBegin === 'function' ? onUpgradeBegin : null;
+    this._onAnswer = typeof onAnswer === 'function' ? onAnswer : null;
     // The version a freshly-upgraded daemon will REPORT is the one baked into
     // the bundle we ship — not this server's package version. They diverge
     // whenever the repo is rebuilt without restarting the server (or vice
@@ -280,6 +284,7 @@ class DeviceManager {
           if (msg.op === 'hello-ack') {
             clearTimeout(timer);
             const expected = this._expectedVersion();
+            try { this._onAnswer?.(msg.daemonVersion); } catch { }
             // LOOP BREAKER (2.330.0): an upgrade that does not change the
             // reported version can never converge — a daemon that fails to
             // install, a stale singleton that will not die, a host missing
@@ -299,6 +304,7 @@ class DeviceManager {
               led.tries += 1; this._ledgerWrite(expected, led);
               // version drift → stream the new bundle (self-upgrade), then reconnect
               this._log(`[agentd] daemon ${msg.daemonVersion} ≠ ${expected} — upgrading (attempt ${led.tries}/3)`);
+              try { this._onUpgradeBegin?.(msg.daemonVersion, expected, { platform: msg.platform }); } catch { }
               this._upgrade(mux).then(() => {
                 settled = true;
                 try { sock.destroy(); } catch { }

@@ -519,6 +519,20 @@ conversation the person can see (channels, private channels, group DMs, DMs) and
 messages arrive at the account's refresh pace, and a reply posted inside an existing thread is noticed as "this thread
 grew" (the thread is re-read when its root is re-listed), not instantly.
 
+A workspace can also have ONE Slack app for everybody (2.369.206): a company preset or a Client ID / Secret typed in the
+Connect dialog. Then the person presses Connect → Allow on Slack's page and is connected — nothing to copy; on an
+instance without https, Slack's page hands back through a small relay page, or shows a code to paste into the dialog.
+Without a workspace app, the person makes their own app with a one-time setup token ("Another way").
+
+- "How do I connect Slack?" → Channels ▸ Connect an account ▸ Slack. Two copies, nothing to choose inside Slack: ① on
+  api.slack.com/apps press Generate Token under "Your App Configuration Tokens", pick the workspace, paste the
+  `xoxe.xoxp-…` token into step 1 and press Create the app (VibeSpace makes the person's own app with it once and keeps
+  nothing; Slack adds its "Slack Tooling Tokens Vendor" app to the workspace when the token is generated); ② Open the
+  install page → Install to Workspace → Allow; ③ copy the User OAuth Token (`xoxp-…`) into step 3 and press Connect.
+  A workspace that needs an admin's approval shows Install only after the admin approves — the dialog remembers the
+  app made in step 1. "Another way" in the dialog is the manual path (a link + Copy app setup for Slack's "From a
+  manifest" box). You never handle either token yourself: the person pastes them into the dialog.
+
 - "What did Alice say in #launch?" → `vibespace-channels read <slack conv>` like any channel. A message from an app shows
   as `<name> · app` (a bot may post under any name — an app is never a person); a user group or `@here` mention is its
   own kind, never "mentions you".

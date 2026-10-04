@@ -608,6 +608,76 @@ console.log('— lane-pairing ④: a 120-byte root — the socket rung + the wit
   finally { if (prevRoot === undefined) delete process.env.VIBESPACE_AGENTD_ROOT; else process.env.VIBESPACE_AGENTD_ROOT = prevRoot; }
   check('the hub\'s local DeviceManager connects over the short socket and completes hello', !!info && (info.capabilities || []).includes('dial-status'), JSON.stringify(info && info.daemonVersion));
 }
+// ── lane win-upgrade-pipe (2026-10-04): a REAL self-upgrade re-exec on POSIX — two real daemons through the REAL dial
+// gate: the old one (reporting 2.369.1) is upgraded, CLOSES its listener and only then starts the successor, which
+// listens, dials back and reports the shipped version; the hub's door saw answered → begun → answered → matched; a
+// third daemon on the same root is still refused by the singleton lock (exit 3). ──
+console.log('— lane win-upgrade-pipe: a REAL re-exec hands over (close, then start); a third daemon is refused —');
+{
+  const { HostManager } = require('../src/hosts.js');
+  const dataE = path.join(tmp, 'server-e', 'data'); fs.mkdirSync(path.join(dataE, 'bin'), { recursive: true });
+  fs.copyFileSync(bundle, path.join(dataE, 'bin', 'vibespace-agentd.js')); // what deviceForDial SHIPS: reports `version`
+  const HE = new HostManager({ dataDir: dataE });
+  const events = []; HE.onAgentUpgrade = (e, f) => { events.push(e + ':' + ((f && (f.version || f.to)) || '')); };
+  const HOST_E = 'vsht_e' + crypto.randomBytes(6).toString('hex');
+  const DPE = require('../src/server/dial-pairing.js').create({ rootDir: path.join(tmp, 'server-e'), AGENTD_DIR: path.join(dataE, 'agentd'), agentdHostToken: () => HOST_E,
+    getHosts: () => HE, getMounts: () => null, getMachineMounts: () => ({ onMachineUnpaired() {} }), getPortForwards: () => ({ onMachineUnpaired() {} }), getExitProxy: () => ({ onMachineUnpaired() {} }), bcastAll: () => {} });
+  HE.dialOnline = (d) => DPE.agentdDials.has(d);
+  const wssE = new WebSocketServer({ noServer: true });
+  const srvE = http.createServer((req, res) => { res.writeHead(404); res.end(); });
+  srvE.on('upgrade', (req, socket, head) => {
+    const gate = DPE.gateDialUpgrade(req, socket);
+    if (!gate) return;
+    DPE.admitDial(gate.deviceId, gate.facts, socket).then((admit) => { if (!admit) return;
+    wssE.handleUpgrade(req, socket, head, (ws) => {
+      const L = { data: [], close: [], error: [] };
+      ws.on('message', (d) => L.data.forEach((f) => f(Buffer.isBuffer(d) ? d : Buffer.from(d))));
+      ws.on('close', () => L.close.forEach((f) => f()));
+      ws.on('error', () => L.error.forEach((f) => f()));
+      const stream = { write: (d) => { try { ws.send(d); return true; } catch { return false; } }, on: (ev, fn) => { L[ev]?.push(fn); }, destroy: () => { try { ws.close(); } catch { } } };
+      DPE.agentdDials.set(gate.deviceId, stream);
+      DPE.noteDialEvent(gate.deviceId, 'accepted', gate.facts);
+      DPE.deviceForDial(gate.deviceId).catch(() => { }); // server.js: the hello NOW
+      ws.on('close', () => { if (DPE.agentdDials.get(gate.deviceId) === stream) { DPE.agentdDials.delete(gate.deviceId); DPE.noteDialEvent(gate.deviceId, 'disconnected', {}); } });
+    });
+    });
+  });
+  await new Promise((r) => srvE.listen(0, '127.0.0.1', r));
+  const PE = srvE.address().port;
+  const pairE = DPE.agentdMintDialPair('devE', { host: `127.0.0.1:${PE}` });
+  const rootE = path.join(tmp, 'agentd-e'); const stE = path.join(rootE, 'state');
+  fs.mkdirSync(stE, { recursive: true, mode: 0o700 });
+  fs.writeFileSync(path.join(stE, 'token'), HOST_E, { mode: 0o600 });
+  fs.writeFileSync(path.join(stE, 'dial.json'), JSON.stringify({ url: `ws://127.0.0.1:${PE}/api/device-dial?device=devE`, token: pairE.dialToken }), { mode: 0o600 });
+  const instE = path.join(rootE, '2.369.1'); fs.mkdirSync(instE, { recursive: true });
+  fs.copyFileSync(bundle, path.join(instE, 'vibespace-device.js'));
+  fs.symlinkSync(instE, path.join(rootE, 'current'));
+  const envE = { ...process.env, VIBESPACE_AGENTD_ROOT: rootE, VIBESPACE_DEVICE_ROOT: rootE };
+  const dE = spawn(process.execPath, [path.join(rootE, 'current', 'vibespace-device.js')], { detached: true, stdio: 'ignore', env: { ...envE, VIBESPACE_AGENTD_VERSION: '2.369.1' } });
+  dE.unref(); daemonsToKill.push(stE);
+  const oldPid = dE.pid;
+  const readLog = () => { try { return fs.readFileSync(path.join(stE, 'agentd.log'), 'utf8'); } catch { return ''; } };
+  await waitFor(() => events.includes('matched:' + version), 30000);
+  const log = readLog();
+  const at = (re) => { const m = re.exec(log); return m ? m.index : -1; };
+  const landed = at(/upgrade to [\d.]+ landed — re-exec/), handed = at(/upgrade hand-over: listener closed — starting the successor/), newStart = log.indexOf(`vibespace-device ${version} starting`);
+  check('REAL: the old daemon landed the upgrade, CLOSED its listener, and only then the successor started', landed >= 0 && handed > landed && newStart > handed, log.split('\n').filter((l) => /upgrade|hand-over|starting|listen|server error/.test(l)).join('\n    '));
+  check('REAL: both daemons listened (old, then the successor), no "server error" anywhere', (log.match(/listening on /g) || []).length === 2 && !/server error/.test(log));
+  const newPid = lockPidOf(stE);
+  check('REAL: the successor holds the singleton lock (a new pid) and the old process is gone', newPid > 0 && newPid !== oldPid && (() => { try { process.kill(oldPid, 0); return false; } catch { return true; } })(), JSON.stringify({ oldPid, newPid }));
+  const iA = events.indexOf('answered:2.369.1'), iB = events.indexOf('begun:' + version), iC = events.lastIndexOf('answered:' + version), iM = events.indexOf('matched:' + version);
+  check('REAL: the hub\'s door saw answered (2.369.1) → begun (→ the shipped version) → answered → matched — the never-came-back watch is armed and disarmed by the real path', iA >= 0 && iB > iA && iC > iB && iM > iB, JSON.stringify(events));
+  const third = await new Promise((resolve) => {
+    const c = spawn(process.execPath, [path.join(rootE, 'current', 'vibespace-device.js')], { stdio: ['ignore', 'ignore', 'pipe'], env: envE });
+    let err = ''; c.stderr.on('data', (d) => { err += d; });
+    const t = setTimeout(() => { try { c.kill('SIGKILL'); } catch { } resolve({ code: 'timeout', err }); }, 15000);
+    c.on('exit', (code) => { clearTimeout(t); resolve({ code, err }); });
+  });
+  check('REAL: a THIRD daemon on the same root is refused by the singleton lock (exit 3, "already running") — the retry never makes a second instance', third.code === 3 && /already running/.test(third.err), JSON.stringify(third));
+  for (const d of DPE.agentdDialDevices.values()) { try { d.stop(); } catch { } }
+  killDaemon(stE);
+  srvE.close();
+}
 for (const st of daemonsToKill) {
   try { const p = lockPidOf(st); if (p) process.kill(p, 'SIGTERM'); } catch { }
   // a socket on a SHORT rung lives outside the scratch root (XDG_RUNTIME_DIR / /tmp/vs-dev-<uid>): remove the one this run made

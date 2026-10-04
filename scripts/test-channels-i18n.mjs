@@ -84,6 +84,7 @@ export const ALLOWED_PATTERNS = [
   /^\[\[fake:[a-z]+\]\]$/,             // the fixture's own directives
   /^[A-Z]{2,5}$/,                      // an acronym (ID, URL, HH:MM's parts)
   /^\d[\d:.\s%/×-]*[a-z]{0,2}$/i,     // a number with a unit (5m, 30s, 12.5%)
+  /^[a-z][\w.-]*(:[\w.-]+)+(\s+[a-z][\w.-]*(:[\w.-]+)+)*$/, // an OAuth scope list — the vendor's scope NAMES (int206: the narrowing row's title lists Lark's wide scopes)
 ];
 // A text node is DATA — vendor / user content — when its DOM path carries one
 // of these classes (or a tag under one): a conversation's title / participants,
@@ -243,6 +244,12 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   // (the URL sits on a CHROME path here so the pattern rule — not the data-path rule — is what excuses it)
   const excusedData = census([{ text: 'Ops room', paths: ['span.chan-row-title < div.chan-row-line'], surfaces: ['panel-02-rows'] }, { text: LARK_CALLBACK_URL, paths: ['code < div.mounts-field-hint'], surfaces: ['wizard-02-connect-lark-custom'] }, { text: 'Lark / 飞书', paths: ['b < div.chan-sec-head'], surfaces: ['panel-02-rows'] }]);
   ok(excusedData.violations.length === 0 && excusedData.excused['data-path:chan-row-title'] === 1 && Object.keys(excusedData.excused).some((k) => k.startsWith('pattern:')), 'CONTROL: a fixture title (by path), a callback URL (by pattern) and a brand beside CJK are excused, each by a NAMED rule', JSON.stringify(excusedData.excused));
+  {   // int206: a vendor scope list (the narrowing row's title) is excused by the scope-list pattern — and a prose word inside it is not
+    const SCOPES = 'auth:user.id:read im:message:readonly im:message.group_msg:get_as_user docx:document drive:drive';
+    const sl = census([{ text: SCOPES, paths: ['div.mounts-oauth-narrow'], surfaces: ['wizard-04-reauth-port-busy'] }]);
+    const prose = census([{ text: SCOPES + ' then retry', paths: ['div.mounts-oauth-narrow'], surfaces: ['wizard-04-reauth-port-busy'] }, { text: 'Note: retry later', paths: ['div.mounts-field-hint'], surfaces: ['wizard-04-reauth-port-busy'] }]);
+    ok(sl.violations.length === 0 && Object.keys(sl.excused).some((k) => k.startsWith('pattern:^[a-z][\\w.-]*(:')) && prose.violations.length === 2, 'CONTROL: an OAuth scope list is excused by the scope-list pattern; a prose word in it, or a "Label: words" sentence, is still a leak', JSON.stringify({ sl, prose: prose.violations.map((v) => v.why) }));
+  }
   // the rect census's negative control (④ below): every rule fires on a planted shot
   {
     const planted = { tag: 'control', name: 'planted', im: { viewport: [375, 667], groups: [

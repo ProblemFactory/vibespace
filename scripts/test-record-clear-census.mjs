@@ -719,6 +719,7 @@ const STORAGE = {
   'src/lib/sidebar.js|localStorage|\'hostFilter\'': ['ids', 'host filter (host ids)'],
   'src/lib/sidebar.js|sessionStorage|AGENT_KIND_FILTER_KEY': ['pref', 'the agent-kind filter (this tab)'],
   'src/lib/telemetry-client.js|localStorage|PENDING_KEY': ['telemetry', 'unsent telemetry events: names / stacks / versions, never content (the module\'s privacy rule)'],
+  'src/lib/channel-account-dialogs.js|localStorage|rememberKey(kind)': ['owner', 'the Slack app the owner made in step 1 of Connect (design 017): its id, its name and the workspace\'s name — never a token, never a record\'s words'],
   'src/lib/themes.js|localStorage|\'theme\'': ['pref', 'the theme'],
   'src/lib/usage-meter.js|localStorage|\'vibespace.usageAccountCodex\'': ['ids', 'the chosen usage account id'],
   'src/lib/usage-meter.js|localStorage|\'vibespace.usageAccount\'': ['ids', 'the chosen usage account id'],
