@@ -1,0 +1,33 @@
+<!doctype html>
+<!-- THE SLACK RELAY PAGE (VibeSpace design 018): static, no network, no storage — see relay.js. A fleet serving it from
+     its own https host may list its pods' domain in data-allow (space-separated suffixes, https hosts only). -->
+<html lang="en" data-allow="">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src 'none'; connect-src 'none'; base-uri 'none'; form-action 'none'">
+<title>VibeSpace · Slack</title>
+<style>body{font:16px/1.5 system-ui,sans-serif;max-width:36em;margin:3em auto;padding:0 1em;color:#222}code{display:block;padding:.6em;margin:.6em 0;background:#f2f2f2;border-radius:4px;word-break:break-all;user-select:all}button{font:inherit;padding:.3em 1em}</style>
+</head>
+<body>
+<div id="paste" hidden>
+  <p lang="en">Paste this code back into VibeSpace’s connect box.</p>
+  <p lang="zh">把这串码粘回 VibeSpace 的连接框。</p>
+  <p lang="ja">このコードを VibeSpace の接続ボックスに貼り付けてください。</p>
+  <code id="code"></code>
+  <button id="copy" type="button">Copy · 复制 · コピー</button> <span id="copied" hidden>✓</span>
+</div>
+<div id="denied" hidden>
+  <p lang="en">You declined on Slack — nothing was connected.</p>
+  <p lang="zh">你在 Slack 上拒绝了，没有连接任何账号。</p>
+  <p lang="ja">Slack で拒否されたため、何も接続されていません。</p>
+</div>
+<div id="nothing" hidden>
+  <p lang="en">This page returns you to VibeSpace after Slack’s Allow. Start from VibeSpace’s Connect dialog.</p>
+  <p lang="zh">这个页面在 Slack 授权后把你送回 VibeSpace。请从 VibeSpace 的连接对话框开始。</p>
+  <p lang="ja">このページは Slack の許可のあと VibeSpace に戻すためのものです。VibeSpace の接続ダイアログから始めてください。</p>
+</div>
+<script src="relay.js"></script>
+</body>
+</html>
