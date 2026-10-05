@@ -13,6 +13,7 @@ import net from 'node:net';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { endDaemonsAndWait } from './scratch.mjs';
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.join(dir, '..');
@@ -142,7 +143,7 @@ try {
 } finally {
   try { origin?.close(); } catch {}
   dm.stop();
-  try { const pid = Number(fs.readFileSync(path.join(process.env.VIBESPACE_AGENTD_ROOT, 'state', 'agentd.pid'), 'utf8')); process.kill(pid, 'SIGTERM'); } catch {}
+  endDaemonsAndWait(process.env.VIBESPACE_AGENTD_ROOT);
   await sleep(200);
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
 }

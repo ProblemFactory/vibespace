@@ -511,7 +511,7 @@ class ChatRenderers {
    * @param {HTMLElement} opts.messageList - Message list DOM element
    * @param {Function} [opts.onPermissionResolve] - Called when a permission is resolved (allow/deny)
    */
-  constructor({ ws, sessionId, app, backend = 'claude', compact, messageList, onPermissionResolve, onFork, onMsgMenu, getSessionCtx, onSendText, onQueueChipClick, getQueueCaps, isCollabLive, getPublishedFiles, getWorkflowVerdict, getSourceWinId, peerFold }) {
+  constructor({ ws, sessionId, app, backend = 'claude', compact, messageList, onPermissionResolve, onFork, onMsgMenu, getSessionCtx, onSendText, onQueueChipClick, getQueueCaps, isCollabLive, getPublishedFiles, onOpenArtifact = null, getWorkflowVerdict, getSourceWinId, peerFold }) {
     // Is THIS collab card the one the next row would coalesce into, on a turn
     // that is still streaming? Only the VIEW knows (it owns the streaming flag
     // and the message list), and the answer decides live age vs frozen span.
@@ -527,6 +527,7 @@ class ChatRenderers {
     this.ws = ws;
     this.sessionId = sessionId;
     this.app = app;
+    this._onOpenArtifact = onOpenArtifact; // lane artifacts-registries: a card opens through the view's ONE door (its kind's: /p/ link · Design window · file)
     this.backend = backend;
     this._compact = compact;
     this._messageList = messageList;
@@ -1643,7 +1644,7 @@ class ChatRenderers {
     // LANE ARTIFACTS-MODEL: a deliverable the agent wrote (derived from the harness's write record) — ONE card per file,
     // patched in place on every later write / edit; one click opens it beside the chat (the Cmd+click door, no Cmd)
     if (msg.noticeKind === 'artifact' && msg.content?.[0]?.type === 'artifact') {
-      return { el: renderArtifactCard(msg, { open: (b) => this.app?.openFile(b.path, b.name || b.path.split('/').pop(), { host: b.host || undefined, from: this._sourceWinId() }) }), sideEffect: null };
+      return { el: renderArtifactCard(msg, { open: (b) => (this._onOpenArtifact ? this._onOpenArtifact(b) : this.app?.openFile(b.path, b.name || b.path.split('/').pop(), { host: b.host || undefined, from: this._sourceWinId() })) }), sideEffect: null };
     }
     // UNKNOWN EVENT — the fall-back card (2.369.119/.120, owner): a harness
     // record VibeSpace does not recognize sits in the flow like any other

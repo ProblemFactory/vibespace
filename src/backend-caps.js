@@ -165,6 +165,12 @@
 //                      AGENT's own store (codex `set-thread-name` →
 //                      thread/setName). claude's transcript has no title
 //                      field to write, so a rename stays ours.
+//   titleRecord      — the system subtype the harness NAMES the session
+//                      with (claude 2.1.288 `session_title_changed`, lane
+//                      session-title-record) — the name ladder's middle rung
+//                      (src/session-name.js). null = the harness has no such
+//                      record: the rung is absent by declaration, never an
+//                      id branch.
 //   forkAtMessage    — fork from ONE MESSAGE (claude
 //                      `--resume-session-at <uuid> --fork-session`), which is
 //                      NOT `fork` above: codex's thread/fork branches the
@@ -329,6 +335,7 @@ const BACKEND_CAPS = {
     forkAtMessage: true,          // --resume-session-at <uuid> --fork-session (the per-message boundary the CLI accepts)
     review: false,                // no review verb on the stream-json control protocol
     renameWriteback: false,       // the JSONL transcript has no title to write back
+    titleRecord: 'session_title_changed', // 2.1.288: the CLI names the session itself (session-brain noteSessionTitle → cliTitle)
     streamProtocol: 'stream-json',
     peerDelivery: 'cli-inbox',
     // The CLI queues stdin messages itself and reports nothing about it —
@@ -371,6 +378,7 @@ const BACKEND_CAPS = {
     forkAtMessage: false,         // thread/fork takes no message boundary — a per-message button here would be a dead control
     review: true,                 // review/start: working tree / base branch / commit / custom, inline or detached
     renameWriteback: true,        // set-thread-name → the thread's own name in codex's store
+    titleRecord: null,            // no title record (the thread name is OURS, written back) — the ladder's CLI-title rung is absent
     streamProtocol: 'codex-events',
     peerDelivery: 'rpc-queue',
     // null (lane worker-dispatch): the wrapper runs `/compact` as thread/compact/start, but the codex consumer never
@@ -408,7 +416,7 @@ const BACKEND_CAPS = {
   },
   shell: {
     pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, fork: false,
-    forkAtMessage: false, review: false, renameWriteback: false,
+    forkAtMessage: false, review: false, renameWriteback: false, titleRecord: null,
     streamProtocol: null, // terminal-only: no chat parse pipeline
     peerDelivery: 'stash-only',
     compactEnd: null,      // terminal-only: no compaction to observe
@@ -428,7 +436,7 @@ const BACKEND_CAPS = {
   // claude flag — so review/renameWriteback/forkAtMessage stay false until a
   // PROBE proves otherwise (setVerifiedCap is how `fork` flips), never guessed.
   opencode: {
-    pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, fork: false, forkAtMessage: false, review: false, renameWriteback: false,
+    pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, fork: false, forkAtMessage: false, review: false, renameWriteback: false, titleRecord: null,
     streamProtocol: 'acp-events',
     peerDelivery: 'stash-only',
     compactEnd: null,      // ACP v1 has no compaction verb we send or observe
@@ -467,7 +475,7 @@ const BACKEND_CAPS = {
 // row whose `steer` disagrees with its `queueVerbs`.
 for (const row of Object.values(BACKEND_CAPS)) row.inputModes = deriveInputModes(row.inputModes);
 
-const NO_CAPS = Object.freeze({ pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, fork: false, forkAtMessage: false, review: false, renameWriteback: false, streamProtocol: null, worktree: NO_WORKTREE, peerDelivery: 'stash-only', compactEnd: null, inputModes: deriveInputModes({ queue: false, queueVerbs: [] }), turnState: null, inProgressTools: false, permissionRules: Object.freeze({ source: null, session: false, instance: false, liveVerb: false }), responseStyle: Object.freeze({ live: false, closed: true, values: Object.freeze([]) }), autoResume: NO_AUTO_RESUME });
+const NO_CAPS = Object.freeze({ pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, fork: false, forkAtMessage: false, review: false, renameWriteback: false, titleRecord: null, streamProtocol: null, worktree: NO_WORKTREE, peerDelivery: 'stash-only', compactEnd: null, inputModes: deriveInputModes({ queue: false, queueVerbs: [] }), turnState: null, inProgressTools: false, permissionRules: Object.freeze({ source: null, session: false, instance: false, liveVerb: false }), responseStyle: Object.freeze({ live: false, closed: true, values: Object.freeze([]) }), autoResume: NO_AUTO_RESUME });
 
 // A CONTRIBUTED harness's row (src/harnesses/index.js register(), lane
 // dc-ws-create): the shipped table above stays the built-in truth; a register()ed

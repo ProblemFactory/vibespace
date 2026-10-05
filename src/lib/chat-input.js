@@ -457,6 +457,7 @@ export class ChatInput {
       const { uploaded, failed } = await uploadFilesBatched(files, {
         destDir,
         host: this._getHost(), // remote sessions: upload lands on the host, not locally
+        sessionId: this._sessionId, // lane artifacts-registries: the attachments are this conversation's `upload` rows
         onProgress: (d, total) => this._uploadToast(t('Uploading {d}/{total}…', { d, total })),
       });
       if (uploaded.length) this._insertUploadedPaths(destDir, uploaded);

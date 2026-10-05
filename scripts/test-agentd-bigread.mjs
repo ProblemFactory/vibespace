@@ -15,6 +15,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { endDaemonsAndWait } from './scratch.mjs';
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.join(dir, '..');
@@ -78,7 +79,7 @@ try {
   failed++; console.error('  ✗ threw:', e.stack || e.message);
 } finally {
   dm.stop();
-  try { const pid = Number(fs.readFileSync(path.join(process.env.VIBESPACE_AGENTD_ROOT, 'state', 'agentd.pid'), 'utf8')); process.kill(pid, 'SIGTERM'); } catch {}
+  endDaemonsAndWait(process.env.VIBESPACE_AGENTD_ROOT);
   await sleep(200);
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
 }

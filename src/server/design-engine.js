@@ -217,6 +217,7 @@ function create({
   timers = { setInterval, clearInterval, setTimeout },
   pollMs = POLL_MS,
   serverSetting = () => undefined,   // lane design-systems-home: `design.defaultSystem`
+  onDesign = () => { },              // lane artifacts-registries: every registry write → its conversation's `design` row (src/server/artifact-registry.js)
 } = {}) {
   const fsp = fs.promises;
   const storeFile = path.join(dataDir, 'designs.json');
@@ -232,7 +233,10 @@ function create({
   };
   const pub = (r) => ({ id: r.id, sessionId: r.sessionId || null, conversationId: r.conversationId || null, host: r.host || null, dir: r.dir, title: r.title || '', kind: r.kind === 'system' ? 'system' : 'design', createdAt: r.createdAt, openedAt: r.openedAt });
   const find = (host, dir) => store.designs.find((r) => (r.host || null) === (host || null) && r.dir === dir) || null;
-  const notify = (row, extra = {}) => { try { broadcastAll({ type: 'designs-updated', design: pub(row), ...extra }); } catch (e) { log('[design] designs-updated broadcast failed:', e.message); } };
+  const notify = (row, extra = {}) => {
+    try { broadcastAll({ type: 'designs-updated', design: pub(row), ...extra }); } catch (e) { log('[design] designs-updated broadcast failed:', e.message); }
+    try { onDesign(pub(row), extra); } catch (e) { log('[design] artifacts row not fed:', e.message); }
+  };
   const lastRead = new Map();   // key → {at, mtimes:{name: ms}} — primes a new watch, so a change after the read is seen
 
   // ── registry ──

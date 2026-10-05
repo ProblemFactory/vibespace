@@ -7,7 +7,10 @@
 //   ② turn 2 Edits it ⇒ the SAME card element patched in place (a mark set on it survives; still one card node; its
 //     words say the change), and no second window (an edit never re-opens);
 //   ③ the setting OFF, turn 3 Writes docs/NOTES.md ⇒ a second card, nothing opens; one CLICK on the card opens it;
-//   ④ a reload shows the same two cards (the server's messages; the replay itself is test-artifacts ⑤).
+//   ④ a reload shows the same two cards (the server's messages; the replay itself is test-artifacts ⑤);
+//   ⑤ lane artifacts-registries: turn 4 Writes site.html and runs the REAL vibespace-page publish + vibespace-design new
+//     ⇒ ONE page card (its write and its publish are one row) + a design card; the composer attaches a file ⇒ an
+//     upload card; each card opens its own door (/p/ link · Design window · the file); a reload replays all three.
 // Run: node scripts/test-artifacts-chrome.mjs   (SKIPs without chrome)
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -28,6 +31,7 @@ fs.mkdirSync(stubDir, { recursive: true });
 const CWD = path.join(fakeHome, 'proj');
 fs.mkdirSync(path.join(CWD, 'docs'), { recursive: true });
 const BRIEF = path.join(CWD, 'docs/BRIEF.md'), NOTES = path.join(CWD, 'docs/NOTES.md');
+const SITE = path.join(CWD, 'site.html'), LANDING = path.join(CWD, 'designs/landing'), ATT = path.join(CWD, 'attach.pdf'); // lane artifacts-registries
 const LIVE_SID = '5c3a0000-0000-4000-8000-0000000af001';
 let failed = 0, passed = 0;
 const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
@@ -45,8 +49,9 @@ const TURNS = [
   [A('msg_a1', [{ type: 'text', text: 'Writing the brief.' }]), A('msg_a2', [{ type: 'tool_use', id: 'toolu_af1', name: 'Write', input: { file_path: BRIEF, content: '# Brief\n\nfirst draft\n' } }]), R('toolu_af1'), A('msg_a3', [{ type: 'text', text: 'Brief written.' }])],
   [A('msg_b1', [{ type: 'tool_use', id: 'toolu_af2', name: 'Edit', input: { file_path: BRIEF, old_string: 'first draft', new_string: 'second draft' } }]), R('toolu_af2'), A('msg_b2', [{ type: 'text', text: 'Brief edited.' }])],
   [A('msg_c1', [{ type: 'tool_use', id: 'toolu_af3', name: 'Write', input: { file_path: NOTES, content: '# Notes\n' } }]), R('toolu_af3'), A('msg_c2', [{ type: 'text', text: 'Notes written.' }])],
+  [A('msg_d1', [{ type: 'tool_use', id: 'toolu_af4', name: 'Write', input: { file_path: SITE, content: '<!doctype html><title>Site</title><h1>Site</h1>' } }]), R('toolu_af4'), A('msg_d2', [{ type: 'text', text: 'Published and designed.' }])],
 ];
-const DISK = [[BRIEF, '# Brief\n\nfirst draft\n'], [BRIEF, '# Brief\n\nsecond draft\n'], [NOTES, '# Notes\n']];
+const DISK = [[BRIEF, '# Brief\n\nfirst draft\n'], [BRIEF, '# Brief\n\nsecond draft\n'], [NOTES, '# Notes\n'], [SITE, '<!doctype html><title>Site</title><h1>Site</h1>']];
 const stubPath = path.join(stubDir, 'claude');
 fs.writeFileSync(stubPath, `#!${process.execPath}
 const fs = require('fs');
@@ -69,6 +74,13 @@ process.stdin.on('data', (d) => {
     const k = n++;
     const P = TURNS[k] || [];
     if (DISK[k]) fs.writeFileSync(DISK[k][0], DISK[k][1]); // the tool's own write, on disk before its record (the viewer reads it)
+    if (k === 3) { // lane artifacts-registries: the agent's REAL CLIs over its session env (VIBESPACE_API + its token)
+      const cp = require('child_process'), BIN = ${JSON.stringify(path.join(wt, 'data/bin'))};
+      for (const a of [['vibespace-page', 'publish', ${JSON.stringify(SITE)}, '--title', 'Site'], ['vibespace-design', 'new', 'landing', '--title', 'Landing']]) {
+        try { fs.appendFileSync(${JSON.stringify(path.join(stubDir, 'cli.log'))}, cp.execFileSync(process.execPath, [BIN + '/' + a[0], ...a.slice(1)], { cwd: ${JSON.stringify(CWD)}, encoding: 'utf8' })); }
+        catch (e) { fs.appendFileSync(${JSON.stringify(path.join(stubDir, 'cli.log'))}, 'FAIL ' + a[0] + ': ' + (e.stderr || e.message) + '\\n'); }
+      }
+    }
     let j = 0;
     const next = () => {
       if (j < P.length) { out({ ...P[j], session_id: SID, uuid: 'af-' + k + '-' + j }); j++; setTimeout(next, 60); return; }
@@ -197,6 +209,35 @@ try {
   const kinds = await evalJs(`(${CARDS}).map((e) => e.querySelector('.chat-artifact-kind')?.textContent)`);
   check('a zh UI: each document card names its kind 文档 (never the English word)', kinds.length === 2 && kinds.every((k) => k === '文档'), kinds);
   await evalJs(`localStorage.removeItem('vibespace.lang'); true`);
+  console.log('⑤ lane artifacts-registries — a published page, a design, an attached file ⇒ their cards; a reload replays all three');
+  await cdp('Page.reload', {});
+  await waitApp();
+  await sleep(1000);
+  await evalJs(`window.__sid = ${JSON.stringify(sid)}; if (!${VIEW}) app.attachSession(${JSON.stringify(sid)}, 'artifacts', ${JSON.stringify(CWD)}, { mode: 'chat', backend: 'claude' }); true`);
+  await waitFor(`!!(${VIEW}) && (${CARDS}).length >= 2`, 20000);
+  check('turn 4 played (Write site.html, then the real vibespace-page publish + vibespace-design new)', await turn('Publish a site and start a design', /Published and designed/));
+  await waitFor(`(${CARDS}).length >= 4`, 10000);
+  await evalJs(`(${VIEW})._chatInput.uploadFiles([new File(['attached\\n'], 'attach.pdf', { type: 'application/pdf' })]); true`);
+  await waitFor(`(${CARDS}).length >= 5 && /Artifacts · 5/.test(document.querySelector('.chat-status-artifacts')?.textContent || '')`, 10000);
+  const five = () => evalJs(`(${CARDS}).map((e) => ({ key: e.dataset.key, kind: e.dataset.kind, name: e.querySelector('.chat-artifact-name')?.textContent, meta: e.querySelector('.chat-artifact-meta')?.textContent }))`);
+  const c5 = await five();
+  let cli = ''; try { cli = fs.readFileSync(path.join(stubDir, 'cli.log'), 'utf8'); } catch {}
+  const pc = c5.filter((c) => c.key === ':' + SITE);
+  check('ONE page card on site.html — its Write and its publish are one row — saying "Published"', pc.length === 1 && pc[0].kind === 'page' && /^Published/.test(pc[0].meta || ''), { c5, cli });
+  check('a design card on the design folder, named by its title', c5.some((c) => c.key === ':' + LANDING && c.kind === 'design' && c.name === 'Landing'), { c5, cli });
+  check('an upload card on the attached file, "Attached by you"', c5.some((c) => c.key === ':' + ATT && c.kind === 'upload' && /^Attached by you/.test(c.meta || '')), c5);
+  check('the chip reads "Artifacts · 5"', /Artifacts · 5/.test(await evalJs(`document.querySelector('.chat-status-artifacts')?.textContent || ''`)));
+  await evalJs(`window.__af = []; app.openBrowser = (u) => window.__af.push(['browser', u]); app.openDesign = (o) => window.__af.push(['design', o.dir, o.sessionId]); true`); // the doors, spied (the Design window / browser windows have their own suites)
+  for (const k of [SITE, LANDING, ATT]) await evalJs(`(${CARDS}).find((e) => e.dataset.key === ${JSON.stringify(':' + k)})?.click(); true`);
+  const doors = await evalJs('window.__af');
+  check('each card opens its own door: the page its /p/ link, the design the Design window (this chat), the upload the file', doors.length === 2 && doors[0][0] === 'browser' && /\/p\/pg/.test(doors[0][1]) && doors[1][0] === 'design' && doors[1][1] === LANDING && doors[1][2] === sid && await waitFor(`${wins(ATT)} >= 1`, 8000), doors);
+  await cdp('Page.reload', {});
+  await waitApp();
+  await sleep(1000);
+  await evalJs(`window.__sid = ${JSON.stringify(sid)}; if (!${VIEW}) app.attachSession(${JSON.stringify(sid)}, 'artifacts', ${JSON.stringify(CWD)}, { mode: 'chat', backend: 'claude' }); true`);
+  await waitFor(`!!(${VIEW}) && (${CARDS}).length >= 5`, 20000);
+  const r5 = await five();
+  check('after a reload all three replay (page · design · upload beside the two documents)', r5.length === 5 && ['page', 'design', 'upload'].every((k) => r5.some((c) => c.kind === k)), r5);
   check('no page error', pageErrors.length === 0, pageErrors.slice(0, 3));
 } catch (e) {
   failed++; console.error('✗ threw:', e && e.stack || e);

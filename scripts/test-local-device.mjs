@@ -13,6 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { endDaemonsAndWait } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 
@@ -67,10 +68,10 @@ try { await hosts.device(null); } catch (e) { threw = e; }
 ok(threw && /local device/.test(threw.message), 'no local daemon ⇒ device(null) throws (callers keep their legacy fallback)');
 
 try { dm.stop?.(); } catch { }
-try {
-  const pidF = path.join(process.env.VIBESPACE_AGENTD_ROOT, 'state', 'agentd.pid');
-  const pid = parseInt(fs.readFileSync(pidF, 'utf-8')); if (pid) process.kill(pid);
-} catch { }
+// device #0 must be GONE before its root goes: its SIGTERM handler's last log line re-creates agentd/state/agentd.log
+// under a racing rmSync (ENOTEMPTY, the 2.369.217 runner red)
+const end = endDaemonsAndWait(root);
+ok(end.pids.length >= 1 && end.gone && !end.killed, 'device #0 ends on SIGTERM and is gone before its root is removed');
 fs.rmSync(root, { recursive: true, force: true });
 fs.rmSync(dataDir, { recursive: true, force: true });
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);

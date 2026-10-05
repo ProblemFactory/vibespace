@@ -7887,6 +7887,8 @@ export default {
   "Changed {n} times": "已改 {n} 次",
   "Written by the agent": "智能体写的",
   "last by you": "最后由你修改",
+  "Unpublished": "已取消发布",
+  "Attached by you": "你附上的",
   "Open {name} beside the chat": "在聊天旁打开 {name}",
   "No documents yet — only code.": "还没有文档 — 只有代码。",
   "Code ({n})": "代码（{n}）",

@@ -477,6 +477,7 @@ class ChatView {
     this._renderers = new ChatRenderers({
       getSessionCtx: () => this._getSessionIds(), // view-only/terminated windows keep host+cwd via openSpec
       getSourceWinId: () => this.winInfo?.id || null, // split tabs v2 (F2): a path opened here is born beside THIS window — never the active one
+      onOpenArtifact: (b) => this._openArtifact(b), // lane artifacts-registries: the card and the chip's row share ONE door
       // In-chat ACTION buttons (Compact now): product-authored text, so the
       // send owns neither the draft slot nor the store — `carriesUserText`
       // stays false EXPLICITLY (round-8: the flag is the difference between
@@ -3957,9 +3958,12 @@ class ChatView {
 
   // Edit an existing message → re-render in place
   // ── LANE ARTIFACTS-MODEL: the deliverables (src/artifacts.js rows; the server's registry) ──
-  /** Open a deliverable in its kind's viewer BESIDE this chat (`from` — the Cmd+click door). */
+  /** Open a deliverable in its kind's viewer BESIDE this chat (`from` — the Cmd+click door). lane artifacts-registries: a
+   *  published page opens its /p/ link (an unpublished one its source file), a design the Design window. */
   _openArtifact(b) {
     if (!b || !b.path) return;
+    if (b.kind === 'page' && b.url && b.state === 'published') { const u = new URL(b.url, location.origin).href; if (this.app.openBrowser) this.app.openBrowser(u); else window.open(u, '_blank'); return; }
+    if (b.kind === 'design') { this.app.openDesign({ host: b.host || '', dir: b.path, sessionId: this.sessionId }); return; }
     this.app.openFile(b.path, b.name || b.path.split('/').pop(), { host: b.host || undefined, from: this.winInfo?.id || null });
   }
   /** The Artifacts chip: the server's list for the WHOLE conversation (debounced; a burst of edits = one read). */

@@ -212,7 +212,24 @@ ok('a fresh instance reloads the persisted store', pages2.list().length === 1 &&
 {
   const read2 = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
   const sv = read2('server.js');
-  okc(sv.includes("onPublished: (page) =>") && sv.includes("type: 'page-published'"), 'server.js: onPublished broadcasts page-published to the publishing session (ONE notify point)');
+  okc(sv.includes("onPublished: (page, extra) =>") && sv.includes("type: 'page-published'"), 'server.js: onPublished broadcasts page-published to the publishing session (ONE notify point)');
+  // lane artifacts-registries: the ONE notify point also feeds the conversation's artifacts registry (a `page` row)
+  okc(/onPublished: \(page, extra\) => \{[^\n]*require\('\.\/src\/server\/artifact-registry\.js'\)\.notePage\(page, extra\); \}/.test(sv) && sv.includes("pages: () => publishedPages, designs: () => designEngine"), 'server.js: onPublished hands every page notification to artifact-registry.notePage, and the registry reads pages + designs back at a rebuild');
+  {
+    const REG = require(path.join(REPO, 'src/server/artifact-registry.js'));
+    const N = require(path.join(REPO, 'src/normalizers.js'));
+    const live = { backend: 'claude', cwd: '/home/u', host: '', _historyLoaded: true, _normalizer: N.createMessageManager('claude', 'sess-9') };
+    REG.configure({ activeSessions: () => new Map([['sess-9', live]]), log: { log() {}, warn() {} } });
+    const dir9 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-pages9-'));
+    const pg9 = require(path.join(REPO, 'src/server/published-pages.js')).create({ dataDir: dir9, onPublished: (p, x) => REG.notePage(p, x) });
+    const a = pg9.publishContent({ html: '<!doctype html><title>r</title>', srcKey: 'local:/home/u/report.html', sessionId: 'sess-9' });
+    pg9.publishContent({ html: '<!doctype html><title>r2</title>', srcKey: 'local:/home/u/report.html', sessionId: 'sess-9' });
+    const row = live._artifacts && live._artifacts[':/home/u/report.html'];
+    okc(row && row.kind === 'page' && row.url === '/p/' + a.page.id && row.state === 'published' && Object.keys(live._artifacts).length === 1, 'a publish reaches the registry: ONE page row on the source file with its /p/ link (published twice = one row)', JSON.stringify(row));
+    pg9.remove(a.page.id);
+    okc(live._artifacts[':/home/u/report.html'].state === 'unpublished', 'an unpublish reaches it too: the row says unpublished (never deleted)');
+    clearTimeout(live._artifactsTimer); fs.rmSync(dir9, { recursive: true, force: true });
+  }
   okc(sv.includes('getPublishedPages: () => publishedPages, ') && !/designKit|design-kit\.js/.test(sv), 'server.js hands publishedPages to the agent routes as a LAZY getter (created later in the file — TDZ at boot otherwise; caught by the design-flow E2E); the Claude CLI kit is no longer created or handed over (lane design-docs)');
   const ar = read2('src/agent-routes.js');
   okc(ar.includes("'/api/agent/pages/publish'") && ar.includes("express.raw({ type: () => true, limit: '25mb' })"), 'agent publish route takes the raw HTML body (remote hosts upload content)');

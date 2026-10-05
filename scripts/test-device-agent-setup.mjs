@@ -14,6 +14,7 @@ import net from 'node:net';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { endDaemonsAndWait } from './scratch.mjs';
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.join(dir, '..');
@@ -80,7 +81,7 @@ try {
   failed++; console.error('  ✗ threw:', e.message);
 } finally {
   try { srv.close(); } catch {}
-  try { const dpid = Number(fs.readFileSync(path.join(process.env.VIBESPACE_AGENTD_ROOT, 'state', 'agentd.pid'), 'utf8')); process.kill(dpid, 'SIGTERM'); } catch {}
+  endDaemonsAndWait(process.env.VIBESPACE_AGENTD_ROOT);
   dm.stop();
   execFileSync('node', ['-e', `require('fs').writeFileSync('src/agentd/version.js', 'module.exports = { VERSION: ' + JSON.stringify(require('./package.json').version) + ' };\\n')`], { cwd: repo });
   fs.rmSync(tmp, { recursive: true, force: true });

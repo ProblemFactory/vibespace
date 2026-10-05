@@ -47,6 +47,10 @@ const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
 const W = await bootWorld('pairdlg');
 const mints = (P) => P.requests.filter((r) => r.method === 'POST' && /\/api\/(device|agentd)\/dial-pair$/.test(r.url));
 const openRemote = async (P) => { await P.evalJs(`(() => { const s = app.sidebar; s.toggle?.(true); if (s._railEl) { if (s._activeTab !== 'mounts') s._railGo('mounts'); else s._render(); } else { s._activeTab = 'mounts'; s._updateTabs?.(); s._render(); } return true; })()`); return P.waitFor(`!!document.querySelector('.mounts-panel') && !!document.querySelector('.mounts-panel').offsetParent`, 15000); };
+// the sheet opens from the CLIENT's hosts cache (app.sidebar._hostsData — set by the re-render each hosts-updated push
+// starts, after its /api/hosts fetch), not from the server row a leg just read: a leg asserting a dial fact waits for
+// the cached row to carry it (int216's heavy at load: the sheet opened on the pre-accept row ⇒ no keep box ⇒ a throw)
+const cachedRow = (P, id, pred, ms = 15000) => P.waitFor(`(() => { const h = (app.sidebar._hostsData?.hosts || []).find((x) => x.id === ${JSON.stringify(id)}); return !!h && (${pred})(h); })()`, ms);
 const rowOf = (id) => `([...document.querySelectorAll('.mounts-row')].find((r) => r._hostId === ${JSON.stringify(id)}) || null)`;
 
 try {
@@ -294,6 +298,7 @@ try {
     let on = false; for (let i = 0; i < 80 && !on; i++) { on = !!(await W.hostRow('relaymac'))?.online; if (!on) await sleep(250); }
     const la = (await W.hostRow('relaymac'))?.dial?.lastAccept || {};
     ok(on && la.host === '127.0.0.1' && la.dialed === relayBase, `F1: dialed in through the relay — the Host header reached the server as 127.0.0.1, the device states ${relayBase}`, la);
+    ok(await cachedRow(E, 'host-dial-relaymac', `(h) => !!h.online && h.dial?.lastAccept?.dialed === ${JSON.stringify(relayBase)}`), 'F1: the page\'s hosts cache carries the accepted dial (online, dialed through the relay) before the sheet opens');
     await E.evalJs(`app.sidebar._showDevicePairDialog((app.sidebar._hostsData?.hosts || []).find((h) => h.id === 'host-dial-relaymac')); true`);
     await E.waitFor(`!!document.querySelector('#device-pair-dialog .dap-row input:checked')`, 8000);
     const pickR = await E.evalJs(`(() => { const r = [...document.querySelectorAll('#device-pair-dialog .dap-row')].find((x) => x.querySelector('input').checked); return r ? { kind: r.dataset.kind, custom: r.querySelector('.dap-custom')?.value || null, own: r.querySelector('.dap-own')?.textContent || '' } : null; })()`);
@@ -319,6 +324,7 @@ try {
       let onC = false; for (let i = 0; i < 80 && !onC; i++) { onC = !!(await W.hostRow('claimmac'))?.online; if (!onC) await sleep(250); }
       const rowC = await W.hostRow('claimmac');
       ok(onC && rowC?.dial?.lastAccept?.dialed === relayBase && rowC?.dial?.mintedBase === lanBase, `C1: claimmac was paired on ${lanBase} and dials through ${relayBase} (not a row this server offers)`, rowC?.dial);
+      ok(await cachedRow(E, 'host-dial-claimmac', `(h) => !!h.online && h.dial?.lastAccept?.dialed === ${JSON.stringify(relayBase)} && h.dial?.mintedBase === ${JSON.stringify(lanBase)}`), 'C1: the page\'s hosts cache carries the accepted dial (online, dialed through the relay, minted on the LAN row) before the sheet opens');
       await E.evalJs(`app.sidebar._showDevicePairDialog((app.sidebar._hostsData?.hosts || []).find((h) => h.id === 'host-dial-claimmac')); true`);
       await E.waitFor(`!!document.querySelector('#device-pair-dialog .dap-row input:checked')`, 8000);
       const pickC = await E.evalJs(`(() => { const rows = [...document.querySelectorAll('#device-pair-dialog .dap-row')]; const r = rows.find((x) => x.querySelector('input').checked); const tag = r && r.querySelector('.dap-own'); const cr = rows.find((x) => x.querySelector('input').dataset.base === ${JSON.stringify(relayBase)}); const ct = cr && cr.querySelector('.dap-claim'); return r ? { kind: r.dataset.kind, base: r.querySelector('input').dataset.base || null, own: tag ? tag.textContent : null, claimRow: cr ? { kind: cr.dataset.kind, checked: cr.querySelector('input').checked, words: ct ? ct.textContent : null } : null } : null; })()`);

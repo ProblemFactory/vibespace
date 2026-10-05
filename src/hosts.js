@@ -2336,6 +2336,9 @@ class HostManager {
         # often an injected <vibespace-task-context>/<system-reminder>; the JS side
         # skips those and takes the first REAL message (matches local naming).
         grep -m6 '"type":"user"' "$f" 2>/dev/null | while IFS= read -r u; do printf 'N %s\\t' "$f"; printf '%s' "$u" | head -c 2000; printf '\\n'; done
+        # TT = the CLI's own title records (2.1.288 session_title_changed) in the head 256 KB + tail 64 KB windows —
+        # the last 3; the JS side takes the newest parseable (discovery-facts titleFromText, ONE rule with local)
+        { head -c 262144 -- "$f"; echo; tail -c 65536 -- "$f"; } 2>/dev/null | grep -F '"subtype":"session_title_changed"' | tail -n 3 | while IFS= read -r u; do printf 'TT %s\\t' "$f"; printf '%s' "$u" | head -c 2000; printf '\\n'; done
         # T = sessionIds seen in the file TAIL (last = current writer; records
         # carry the CURRENT id even when a resume kept the ORIGINAL filename).
         # uniq collapses runs (records from one session are consecutive).

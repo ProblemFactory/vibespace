@@ -64,7 +64,7 @@ const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
 const doc = (body, head = '') => `<!doctype html><html><head><meta charset="utf-8">${head}</head><body>${body}</body></html>`;
 
 /** One world: a data dir, the engine over fakes, the routes on an express app on 127.0.0.1:0. */
-async function world(name, { Engine = DE, Routes = registerDesignRoutes, sendResult = null, settings = {}, device = null } = {}) {
+async function world(name, { Engine = DE, Routes = registerDesignRoutes, sendResult = null, settings = {}, device = null, onDesign = null } = {}) {
   const base = path.join(ROOT, name);
   const dataDir = path.join(base, 'data');
   fs.mkdirSync(dataDir, { recursive: true });
@@ -103,6 +103,7 @@ async function world(name, { Engine = DE, Routes = registerDesignRoutes, sendRes
     dataDir, rootDir: base, activeSessions, getRemoteFs: () => rfs, getPublishedPages: () => pages, getDeliver: () => deliver,
     sendUserInput, broadcastAll: (m) => rec.broadcasts.push(m), broadcastToSession: (s, sid, m) => rec.toSession.push({ sid, m }), timers,
     serverSetting: (k) => settings[k],   // lane design-systems-home: design.defaultSystem
+    ...(onDesign ? { onDesign } : {}),   // lane artifacts-registries: the registry's write → the artifacts registry
   });
   const app = express();
   app.use(express.json({ limit: '5mb' }));
@@ -1104,6 +1105,23 @@ console.log('§8 controls (one patched copy per rule — each RED)');
     await real.close(); await mut.close();
   }
   for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: RULES.length })) ok(c.pass, c.name, c.detail);
+}
+
+console.log('lane artifacts-registries — every designs.json write reaches the artifacts registry (a `design` row per conversation + folder)');
+{
+  const REG = require(path.join(REPO, 'src/server/artifact-registry.js'));
+  const N = require(path.join(REPO, 'src/normalizers.js'));
+  const live = { backend: 'claude', cwd: W.base, host: '', _historyLoaded: true, _normalizer: N.createMessageManager('claude', 'w1') };
+  REG.configure({ activeSessions: () => new Map([['w1', live]]), log: { log() {}, warn() {} } });
+  const A = await world('af-rows', { onDesign: (d, x) => REG.noteDesign(d, x) });
+  A.design.register({ dir: DIR, title: 'Spring', sessionId: 'w1', conversationId: 'conv-local' });
+  A.design.register({ dir: DIR, sessionId: 'w1', conversationId: 'conv-local' });   // the re-open
+  A.design.rename({ dir: DIR, title: 'Spring sale' });
+  const rows = Object.values(live._artifacts || {});
+  ok(rows.length === 1 && rows[0].kind === 'design' && rows[0].path === DIR && rows[0].name === 'Spring sale', 'registration + re-open + rename = ONE design row on the folder, named by the registry\'s title', rows);
+  const sv = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
+  ok(sv.includes("onDesign: (d, extra) => require('./src/server/artifact-registry.js').noteDesign(d, extra)"), 'server.js wires the engine\'s onDesign to artifact-registry.noteDesign');
+  clearTimeout(live._artifactsTimer); await A.close();
 }
 
 await W.close();

@@ -23,6 +23,7 @@ import net from 'node:net';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { endDaemonsAndWait } from './scratch.mjs';
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.join(dir, '..');
@@ -147,7 +148,7 @@ console.log('— T6 reverseUnforward frees the device port —');
   check('device port refused after unforward', refused, '');
 }
 
-try { const dpid = Number(fs.readFileSync(path.join(AGENTD_ROOT, 'state', 'agentd.pid'), 'utf8')); process.kill(dpid, 'SIGTERM'); } catch {}
+endDaemonsAndWait(AGENTD_ROOT);
 dm.stop();
 localEcho.close();
 execFileSync('node', ['-e', `require('fs').writeFileSync('src/agentd/version.js', 'module.exports = { VERSION: ' + JSON.stringify(require('./package.json').version) + ' };\\n')`], { cwd: repo });

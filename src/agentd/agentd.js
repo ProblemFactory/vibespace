@@ -167,7 +167,7 @@ const fs = require('fs');
 // scan on its own loop — the exact stall the child exists to prevent.
 const os = require('os');
 const path = require('path');
-const { extractTailIds, pidLooksClaude, interpretDiscoveryLines, synthesizeDiscoveryLines } = require('./../discovery-facts.js');
+const { extractTailIds, pidLooksClaude, interpretDiscoveryLines, synthesizeDiscoveryLines, titleLinesOf, TITLE_HEAD_BYTES, TITLE_TAIL_BYTES } = require('./../discovery-facts.js');
 const machineProbes = require('./../machine-probes.js');
 const { ClaudeCodeAdapter: { parseLimitBanner } } = require('./../adapters/claude-code.js');
 const { repointPoolSymlink } = require('./../account-material.js');
@@ -251,6 +251,11 @@ function computeDiscoverySnapshot() {
         const tailB = Buffer.alloc(j.size - tailStart);
         fs.readSync(fd, tailB, 0, tailB.length, tailStart);
         j.tailIds = extractTailIds(tailB.toString('utf-8')); // ONE rule (discovery-facts)
+        // the CLI's own title (lane session-title-record): the head 256 KB + tail 64 KB windows, ONE rule (discovery-facts)
+        const tHeadB = Buffer.alloc(Math.min(TITLE_HEAD_BYTES, j.size));
+        fs.readSync(fd, tHeadB, 0, tHeadB.length, 0);
+        const tTail = j.size - tailStart > TITLE_TAIL_BYTES ? tailB.subarray(tailB.length - TITLE_TAIL_BYTES) : tailB;
+        j.titleLines = titleLinesOf(tHeadB.toString('utf-8') + '\n' + tTail.toString('utf-8'));
       } finally { fs.closeSync(fd); }
     } catch { }
   }

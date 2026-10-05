@@ -7,7 +7,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { execFile } = require('child_process');
-const { extractTailIds, nameFromUserRecord } = require('./discovery-facts');
+const { extractTailIds, nameFromUserRecord, titleFromText, titleLinesOf, TITLE_NEEDLE, TITLE_HEAD_BYTES, TITLE_TAIL_BYTES } = require('./discovery-facts');
 // THE process reader (B-3185): identity, and since 2026-09-09 the two
 // process-tree facts this sweep used to buy with one child process per item.
 const { isCliProcess, hasProcfs, readPpid, readChildPids } = require('./cli-identity.js');
@@ -511,6 +511,24 @@ const _sessionMetaCache = new Map();
 const META_SCAN_CHUNK = 65536;
 const META_SCAN_MAX = 2 * 1024 * 1024;
 
+// The CLI's own title (lane session-title-record): the head + tail windows — ONE rule with the ssh scanner's TT lines
+// and the device snapshot (discovery-facts titleLinesOf → titleFromText). A file with no title record costs one
+// raw-byte search per window (no utf-8 decode).
+function readCliTitle(filePath, size) {
+  if (!size) return null;
+  try {
+    const fd = fs.openSync(filePath, 'r');
+    try {
+      const head = Buffer.alloc(Math.min(TITLE_HEAD_BYTES, size));
+      fs.readSync(fd, head, 0, head.length, 0);
+      const tail = Buffer.alloc(Math.min(TITLE_TAIL_BYTES, size));
+      fs.readSync(fd, tail, 0, tail.length, size - tail.length);
+      if (head.indexOf(TITLE_NEEDLE) < 0 && tail.indexOf(TITLE_NEEDLE) < 0) return null;
+      return titleFromText(titleLinesOf(head.toString('utf-8') + '\n' + tail.toString('utf-8')).join('\n'));
+    } finally { fs.closeSync(fd); }
+  } catch { return null; }
+}
+
 function extractSessionMeta(filePath) {
   let st = null;
   try { st = fs.statSync(filePath); } catch {}
@@ -522,8 +540,9 @@ function extractSessionMeta(filePath) {
   // the head; past the cap the answer cannot change.
   const resume = cached && st && !cached.meta.name && cached.ino === st.ino && st.size >= cached.size ? cached : null;
   if (resume && resume.pos >= META_SCAN_MAX) {
-    _sessionMetaCache.set(filePath, { ...resume, mtimeMs: st.mtimeMs, size: st.size });
-    return resume.meta;
+    const meta = { ...resume.meta, cliTitle: readCliTitle(filePath, st.size) }; // a nameless worker is exactly who the CLI's title names
+    _sessionMetaCache.set(filePath, { ...resume, mtimeMs: st.mtimeMs, size: st.size, meta });
+    return meta;
   }
 
   let cwd = resume ? resume.meta.cwd : '', name = '';
@@ -570,7 +589,7 @@ function extractSessionMeta(filePath) {
     } finally { fs.closeSync(fd); }
   } catch {}
 
-  const meta = { cwd, name };
+  const meta = { cwd, name, cliTitle: readCliTitle(filePath, st ? st.size : 0) };
   try {
     _sessionMetaCache.set(filePath, { mtimeMs: st ? st.mtimeMs : fs.statSync(filePath).mtimeMs, size: st ? st.size : 0, ino: st ? st.ino : 0, pos, meta });
     if (_sessionMetaCache.size > 8192) _sessionMetaCache.delete(_sessionMetaCache.keys().next().value);
@@ -1317,6 +1336,7 @@ async function discoverClaudeSessions({ activeSessions, webuiPids = new Set(), d
           startedAt: mtime,
           status,
           name: meta.name || '',
+          cliTitle: meta.cliTitle || null, // the CLI's own title (lane session-title-record) — the name ladder's middle rung
           tmuxTarget,
         };
 

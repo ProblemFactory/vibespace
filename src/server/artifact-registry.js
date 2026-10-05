@@ -9,6 +9,13 @@
  *     (`artifactsOf`, src/harnesses/artifacts-of.js — never an id branch here; a `null` hook never produces).
  *   · touch({sessionId, host, path, summary}) — the user's own save in an editor window linked to the chat
  *     (ws `artifact-touch`): the row gets `by: user, edits+1` and the conversation hears ONE next-turn note.
+ * THE REGISTRIES (lane artifacts-registries) — the three stores' ONE notification points hand their records here; the
+ * registry is a VIEW over them (each keeps its store and its own list — the Pages list, the Design window's Home):
+ *   · notePage(page, extra)  — src/server/published-pages.js `onPublished` (server.js): a `page` row, unpublish = its state
+ *   · noteDesign(design)     — src/server/design-engine.js `onDesign` (designs.json at registration / open / rename)
+ *   · noteUploads({sessionId, host, files}) — POST /api/upload when the composer names its chat (src/routes/files.js)
+ *   At every rebuild the pages + designs rows come back from THEIR stores (`storeRowsOf`, normalizers' store-rows seam);
+ *   the uploads live in the persisted rows (the composer's attachment record IS this registry).
  * THE CONTRACT TOWARD doc-window (spelled in src/artifacts.js's header + kb-file-structure):
  *   ownerOf({host, path}) → {sessionId, row} | null     noteEdit({sessionId, host, path, summary}) → boolean
  */
@@ -16,9 +23,14 @@ const AF = require('../artifacts.js');
 const { toAgentText: agentText } = require('../peer-text.js');
 const DOC_EDIT_FROM = 'Doc edit'; // the stash's `doc-edit` source (lane doc-window): drained as "the user edited a document:" + the re-read hint
 
-let deps = { activeSessions: () => new Map(), deliver: null, sessionMeta: null, log: console };
-/** server.js's ONE line: the live sessions, the delivery ladder (stashFor) and the session-meta store. */
-function configure(d = {}) { deps = { ...deps, ...d }; return api; }
+let deps = { activeSessions: () => new Map(), deliver: null, sessionMeta: null, pages: () => null, designs: () => null, log: console };
+/** server.js's ONE line: the live sessions, the delivery ladder (stashFor), the session-meta store and the two stores
+ *  a rebuild reads its pages / designs rows from. */
+function configure(d = {}) {
+  deps = { ...deps, ...d };
+  try { normalizers().setArtifactStoreSource(storeRowsOf); } catch (e) { deps.log.warn?.(`[artifacts] store-rows seam not set: ${e.message}`); }
+  return api;
+}
 const sessions = () => { try { const m = deps.activeSessions(); return m && typeof m.entries === 'function' ? m : new Map(); } catch { return new Map(); } };
 const normalizers = () => require('../normalizers.js'); // lazy: the normalizers require the harness registry
 
@@ -40,7 +52,7 @@ function persistSoon(session) {
 
 /** Fold ONE op into the session's rows; a deliverable's card is fed (born or patched in place). */
 function noteOp(session, op) {
-  const r = AF.apply(session._artifacts || {}, { host: session.host || '', cwd: session.cwd || '', ...op, at: Date.now() });
+  const r = AF.apply(session._artifacts || {}, { host: session.host || '', cwd: session.cwd || '', ...op, at: Number(op.at) || Date.now() });
   if (r.skipped || !r.row) return r;
   session._artifacts = r.rows;
   if (r.evicted.length) deps.log.log?.(`[artifacts] ${session.sockName || '?'}: ${r.evicted.length} row(s) evicted past ${AF.MAX_ROWS} (oldest code first): ${r.evicted.slice(0, 3).join(', ')}`);
@@ -65,6 +77,34 @@ function observe(session, record) {
   return n;
 }
 
+// ── THE REGISTRIES (lane artifacts-registries) ──
+/** A published page's notification (onPublished: publish / re-publish / flags / unpublish) → its conversation's row. */
+function notePage(page, extra = {}) {
+  const session = page && page.sessionId ? sessions().get(page.sessionId) : null;
+  const op = session ? AF.pageOp(page, { removed: !!(extra && extra.removed) }) : null;
+  return op ? noteOp(session, op) : null;
+}
+/** A design's registry write (designs.json: registration / open / rename) → its conversation's row; a removal leaves it. */
+function noteDesign(design, extra = {}) {
+  const session = design && design.sessionId && !(extra && extra.removed) ? sessions().get(design.sessionId) : null;
+  const op = session ? AF.designOp(design) : null;
+  return op ? noteOp(session, op) : null;
+}
+/** The composer's upload (the route's result rows) → one `upload` row by: user per file. */
+function noteUploads({ sessionId, host = '', files = [] } = {}) {
+  const session = sessionId ? sessions().get(String(sessionId)) : null;
+  if (!session) return 0;
+  let n = 0;
+  for (const f of files || []) { const op = AF.uploadOp(f, { host: host || session.host || '' }); if (op && !noteOp(session, op).skipped) n++; }
+  return n;
+}
+/** The rebuild's third input (normalizers' store-rows seam): this conversation's pages + designs, from their stores. */
+function storeRowsOf(session, sessionId) {
+  const id = sessionId || (session && session.sockName);
+  if (!id) return {};
+  const ask = (store) => { try { const s = store && store(); return s && typeof s.list === 'function' ? s.list({ sessionId: id }) || [] : []; } catch { return []; } };
+  return AF.storeRows({ pages: ask(deps.pages), designs: ask(deps.designs) });
+}
 
 function registries() {
   const out = [];
@@ -100,5 +140,5 @@ function listFor(sessionId) {
 }
 function mount(app) { app.get('/api/artifacts', (req, res) => res.json(listFor(req.query && req.query.sessionId))); return api; }
 
-const api = { configure, mount, listFor, observe, ownerOf, noteEdit, touch, DOC_EDIT_FROM };
+const api = { configure, mount, listFor, observe, ownerOf, noteEdit, touch, notePage, noteDesign, noteUploads, storeRowsOf, DOC_EDIT_FROM };
 module.exports = api;

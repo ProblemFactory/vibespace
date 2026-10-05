@@ -8,6 +8,7 @@
 const path = require('path');
 
 const { mk } = require('./lazy.js');
+const { titleFromRecord } = require('../discovery-facts.js'); // lane session-title-record: ONE title rule (discovery too)
 
 function create({ engine, applyTaskToolUpdate, updateSessionTodos, getUsageHistory,
   // design-unknown-records (2026-09-21) — the chrome-signal consumers' deps, ALL lazy/optional so the
@@ -75,6 +76,16 @@ function noteVcsState(session, sid, msg) {
   try { broadcastAll?.({ type: 'session-vcs', sessionId: sid, host: session.host || null, ...fact }); } catch { }
   try { broadcastActiveSessions?.(); } catch { }
   try { if (typeof sessionStatusKey === 'function' && sessionStatus?.noteEvent) sessionStatus.noteEvent(sessionStatusKey(session, sid), { event: 'vcs', kind: fact.kind, branch: fact.branch, at: fact.at }); } catch { }
+}
+// THE CLI'S OWN TITLE (`system`/`session_title_changed` {title}, claude 2.1.288 — lane session-title-record) → a
+// session FACT `cliTitle`: the name ladder's middle rung (src/session-name.js — the user's rename › a given name ›
+// THIS › the first message). Card-less (known-ignored); the newest title wins; persisted so a restart keeps the name.
+function noteSessionTitle(session, sid, msg) {
+  const title = titleFromRecord(msg);
+  if (!title || title === session._cliTitle) return;
+  session._cliTitle = title;
+  persistMeta(session, { cliTitle: title });
+  try { broadcastActiveSessions?.(); } catch { }
 }
 // A PUBLISHED CHANGE (`system`/`code_change_published` {provider, url, repo,
 // identifier, action, branch?}) → session meta `prLinks[]` (the card chip). The
@@ -217,6 +228,7 @@ function claudeSideEffects(session, sid, msg) {
     if (msg.type === 'system' && msg.subtype === 'api_error') noteApiErrorAuth(session, sid, msg);
     if (msg.type === 'system' && msg.subtype === 'vcs_state_changed') noteVcsState(session, sid, msg);
     if (msg.type === 'system' && msg.subtype === 'code_change_published') notePublishedChange(session, sid, msg);
+    if (msg.type === 'system' && msg.subtype === 'session_title_changed') noteSessionTitle(session, sid, msg); // lane session-title-record
     // lane artifacts-model: the deliverable rows — the parse makes the SAME call (the row moves once per call id)
     if (msg.type === 'assistant') { try { require('./artifact-registry.js').observe(session, msg); } catch { } }
     // todo/task families mirror the parse's exact consumption (lines above):
@@ -235,6 +247,6 @@ function claudeSideEffects(session, sid, msg) {
     }
   } catch (e) { console.warn('[session-brain] device side-effects failed:', e.message); }
 }
-  return { sbNoteServerOp, sbCompare, sbSeenFirst, claudeSideEffects, _sbRing, _sbMidCore, SB_RING_MAX, noteHarnessNotification, noteApiErrorAuth, noteVcsState, notePublishedChange };
+  return { sbNoteServerOp, sbCompare, sbSeenFirst, claudeSideEffects, _sbRing, _sbMidCore, SB_RING_MAX, noteHarnessNotification, noteApiErrorAuth, noteVcsState, notePublishedChange, noteSessionTitle };
 }
 module.exports = { create };

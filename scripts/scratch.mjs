@@ -207,6 +207,25 @@ export function endDaemonsOf(root, { signal = 'SIGKILL', procRoot = '/proc', pas
   return [...hit];
 }
 
+/** mirror-green-217 (the 2.369.217 Actions red, ENOTEMPTY rmdir of agentd/state): END a daemon root's daemon(s) AND WAIT
+ *  until each is gone — only then may the caller delete the root. The daemon's SIGTERM handler appends "SIGTERM — exiting"
+ *  to <root>/state/agentd.log, so an rmSync racing that exit re-creates the file between rimraf's unlink and its rmdir.
+ *  Gone = no /proc entry, or a zombie (state Z: every fd closed — a daemon this process spawned stays one while this
+ *  synchronous wait holds the loop that would reap it). Bounded: SIGKILL at `timeoutMs`, then the same wait. Synchronous
+ *  (an 'exit' handler may call it); returns { pids, gone, killed }. */
+export function endDaemonsAndWait(root, { signal = 'SIGTERM', timeoutMs = 5000, pollMs = 10, procRoot = '/proc' } = {}) {
+  const goneOne = (pid) => { try { return fs.readFileSync(`${procRoot}/${pid}/stat`, 'utf8').replace(/^.*\) /s, '')[0] === 'Z'; } catch { return true; } };
+  const waitGone = (pids) => {
+    const until = Date.now() + timeoutMs;
+    while (!pids.every(goneOne) && Date.now() < until) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, pollMs);
+    return pids.every(goneOne);
+  };
+  const pids = endDaemonsOf(root, { signal, procRoot });
+  let killed = false;
+  if (!waitGone(pids)) { killed = true; for (const pid of pids) try { process.kill(pid, 'SIGKILL'); } catch { } }
+  return { pids, gone: waitGone(pids), killed };
+}
+
 /** The ambient vendor credentials a REAL agent CLI would bill against instead
  *  of the login the leg means to use (B-5f0b, the 2.369.69 lesson): a fake
  *  CODEX_HOME / HOME removes the LOGIN, never an env key — a leaked

@@ -23,11 +23,24 @@
 // Both live on the server (src/server/artifact-registry.js); this file owns their PURE halves: `ownerOfIn` (the pick
 // over every live registry) and `editNoteText` (the one line). Until doc-window lands the raw code editor's save calls
 // noteEdit with "+a −b lines" (`lineDelta`).
+//
+// THE REGISTRIES (lane artifacts-registries, the owner's "统一产物"): the three stores that already list a conversation's
+// things feed THIS reducer — never a second list. A published page (src/server/published-pages.js `onPublished`) is a
+// `page` row on its SOURCE file carrying the /p/ link (`url`) and `state` published | unpublished (an unpublish never
+// deletes the row); a design (src/server/design-engine.js designs.json, at registration / open) is a `design` row on its
+// folder; a file attached in the composer (POST /api/upload with the chat's sessionId) is an `upload` row by: user.
+// Their ops (REG_OPS) never count as a write or an edit; their kind outranks an extension's (KIND_RANK: a published
+// design stays a design, an uploaded .md the agent then edits stays an upload). `pageOp` / `designOp` / `uploadOp` turn
+// a store's record into the op; `storeRows` folds a conversation's pages + designs at every rebuild (the uploads live in
+// the persisted rows — the composer's record IS this registry).
 const { FILE_TYPES } = require('./file-type-table.js');
 
 const KINDS = Object.freeze(['doc', 'page', 'design', 'media', 'upload', 'code', 'other']);
 const VIEW_ORDER = Object.freeze(['doc', 'page', 'design', 'media', 'upload', 'other']);
 const OPS = Object.freeze(['write', 'edit']);
+const REG_OPS = Object.freeze(['publish', 'unpublish', 'open', 'upload']); // a store's fact: births / names a row, never counts
+const KIND_RANK = Object.freeze({ design: 3, page: 2, upload: 1 }); // a registry's kind over an extension's (and design › page › upload)
+const outranks = (a, b) => (KIND_RANK[a] || 0) > (KIND_RANK[b] || 0);
 const BY = Object.freeze(['agent', 'user']);
 const MAX_ROWS = 500;
 // a category of the extension table → the deliverable kind
@@ -84,7 +97,7 @@ function apply(rows, op) {
   const o = op || {};
   const path = absPath(o.path, o.cwd);
   if (!path) return { rows: cur, row: null, born: false, evicted: [], skipped: 'no-path' };
-  if (!OPS.includes(o.op)) return { rows: cur, row: null, born: false, evicted: [], skipped: 'bad-op' };
+  if (!OPS.includes(o.op) && !REG_OPS.includes(o.op)) return { rows: cur, row: null, born: false, evicted: [], skipped: 'bad-op' };
   const by = BY.includes(o.by) ? o.by : 'agent';
   const at = Number.isFinite(o.at) && o.at > 0 ? o.at : 0;
   const host = normHost(o.host);
@@ -92,8 +105,9 @@ function apply(rows, op) {
   const prev = cur[key] || null;
   if (prev && o.id && prev.lastId === o.id) return { rows: cur, row: prev, born: false, evicted: [], skipped: 'seen' };
   const row = prev ? { ...prev } : { key, host, path, name: baseName(path), kind: isKind(o.kind) ? o.kind : kindOf(path, o.op), firstAt: at, lastAt: at, by, writes: 0, edits: 0, lastOp: o.op, bytes: null, lastId: null };
-  if (prev && isKind(o.kind) && o.kind !== 'code' && row.kind !== o.kind) row.kind = o.kind; // a registry's kind (page / design / upload) names it better than an extension
-  if (o.op === 'write' && by === 'agent') row.writes += 1; else row.edits += 1;
+  if (prev && isKind(o.kind) && o.kind !== 'code' && row.kind !== o.kind && !outranks(row.kind, o.kind)) row.kind = o.kind; // a registry's kind (page / design / upload) names it better than an extension
+  if (REG_OPS.includes(o.op)) { if (o.url !== undefined) row.url = o.url ? String(o.url) : null; if (o.state) row.state = String(o.state); if (o.name) row.name = String(o.name).slice(0, 200); }
+  else if (o.op === 'write' && by === 'agent') row.writes += 1; else row.edits += 1;
   row.by = by; row.lastOp = o.op;
   if (at) { row.lastAt = Math.max(row.lastAt || 0, at); if (!row.firstAt) row.firstAt = at; }
   if (Number.isFinite(o.bytes)) row.bytes = o.bytes;
@@ -122,7 +136,11 @@ function merge(a, b) {
     const p = out[k];
     if (!p) { out[k] = { ...r }; continue; }
     const later = (r.lastAt || 0) > (p.lastAt || 0) ? r : p;
-    out[k] = { ...p, writes: Math.max(p.writes || 0, r.writes || 0), edits: Math.max(p.edits || 0, r.edits || 0),
+    const reg = {}; // the registries' facts: the later side's, else whichever side has them; the higher-ranked kind
+    for (const f of ['url', 'state']) { const v = later[f] !== undefined ? later[f] : (p[f] !== undefined ? p[f] : r[f]); if (v !== undefined) reg[f] = v; }
+    if (outranks(r.kind, p.kind)) reg.kind = r.kind;
+    if (r.name && (outranks(r.kind, p.kind) || (r.kind === p.kind && later === r))) reg.name = r.name; // a design's newer title
+    out[k] = { ...p, ...reg, writes: Math.max(p.writes || 0, r.writes || 0), edits: Math.max(p.edits || 0, r.edits || 0),
       firstAt: Math.min(p.firstAt || Infinity, r.firstAt || Infinity) === Infinity ? 0 : Math.min(p.firstAt || Infinity, r.firstAt || Infinity),
       lastAt: Math.max(p.lastAt || 0, r.lastAt || 0), by: later.by, lastOp: later.lastOp, bytes: later.bytes ?? p.bytes ?? null, lastId: later.lastId ?? null };
   }
@@ -143,12 +161,13 @@ const cardWorthy = (row) => !!(row && row.kind !== 'code');
 function cardBlock(row) {
   if (!row || !row.key) return null;
   return { type: 'artifact', key: row.key, host: row.host || '', path: row.path, name: row.name, kind: row.kind,
-    by: row.by, writes: row.writes || 0, edits: row.edits || 0, lastOp: row.lastOp, firstAt: row.firstAt || 0, lastAt: row.lastAt || 0 };
+    by: row.by, writes: row.writes || 0, edits: row.edits || 0, lastOp: row.lastOp, firstAt: row.firstAt || 0, lastAt: row.lastAt || 0,
+    ...(row.url ? { url: row.url } : {}), ...(row.state ? { state: row.state } : {}) };
 }
 /** The card's / list row's FACTS (the client words them through t()): `changes` = re-writes + edits. */
 function cardFacts(b) {
   const w = (b && b.writes) || 0, e = (b && b.edits) || 0;
-  return { name: (b && b.name) || '', kind: (b && b.kind) || 'other', path: (b && b.path) || '', changes: Math.max(0, w - 1) + e, byUser: !!(b && b.by === 'user'), lastAt: (b && b.lastAt) || 0 };
+  return { name: (b && b.name) || '', kind: (b && b.kind) || 'other', path: (b && b.path) || '', changes: Math.max(0, w - 1) + e, byUser: !!(b && b.by === 'user'), lastAt: (b && b.lastAt) || 0, state: (b && b.state) || '', url: (b && b.url) || '' };
 }
 /** AUTO-OPEN (setting artifacts.autoOpenDocs): only the BIRTH of a doc by the agent's write — an edit never re-opens. */
 const autoOpenVerdict = ({ born, row } = {}) => !!(born && row && row.kind === 'doc' && row.by === 'agent' && row.lastOp === 'write');
@@ -176,7 +195,36 @@ function lineDelta(before, after) {
   for (const [l, n] of a) del += Math.max(0, n - (b.get(l) || 0));
   return { add, del, text: `+${add} −${del} lines` };
 }
+// ── THE REGISTRIES' OPS (a store's record → the reducer's op; null = nothing to say) ──
+/** A published page (the pages store's public record; `removed` = the unpublish notification): a `page` row on its
+ *  source file. The host is the srcKey's prefix only when the key IS `<host>:<srcPath>` (a namespaced key — the
+ *  SendUserFile channel's — names no machine). Same page ⇒ same key ⇒ one row, however often it is re-published. */
+function pageOp(page, { removed = false } = {}) {
+  if (!page || !page.id) return null;
+  const gone = !!(removed || page.removed);
+  const k = String(page.srcKey || ''), i = k.indexOf(':'), src = String(page.srcPath || '');
+  const host = i > 0 && k.slice(i + 1) === src && k.slice(0, i) !== 'local' ? k.slice(0, i) : '';
+  return { op: gone ? 'unpublish' : 'publish', kind: 'page', host, path: src, url: String(page.path || '/p/' + page.id), state: gone ? 'unpublished' : 'published',
+    at: gone ? 0 : Number(page.updatedAt) || 0, id: `page:${page.id}:${gone ? 'gone' : Number(page.updatedAt) || 0}` };
+}
+/** A design (designs.json's public row, at registration / open / rename): a `design` row on its folder, named by its title. */
+function designOp(d) {
+  if (!d || !d.dir) return null;
+  return { op: 'open', kind: 'design', host: d.host || '', path: String(d.dir), name: String(d.title || ''), at: Number(d.openedAt) || 0, id: `design:${d.id || d.dir}:${Number(d.openedAt) || 0}:${String(d.title || '')}` }; // a rename moves the row (same openedAt)
+}
+/** A file the user attached in the composer (the upload route's result row): an `upload` row by: user. */
+function uploadOp(f, { host = '', at = 0 } = {}) {
+  if (!f || typeof f.path !== 'string' || !f.path) return null;
+  return { op: 'upload', kind: 'upload', by: 'user', host, path: f.path, bytes: Number.isFinite(f.size) ? f.size : undefined, at };
+}
+/** A conversation's rows from the STORES (not the transcript) — the rebuild's third merge input. */
+function storeRows({ pages = [], designs = [] } = {}) {
+  let rows = {};
+  for (const op of [...(pages || []).map((p) => pageOp(p)), ...(designs || []).map(designOp)]) if (op) rows = fold(rows, op);
+  return rows;
+}
 const kindWord = (kind, lang = 'en') => (KIND_WORDS[kind] || KIND_WORDS.other)[lang] || (KIND_WORDS[kind] || KIND_WORDS.other).en;
 
-module.exports = { KINDS, VIEW_ORDER, OPS, BY, MAX_ROWS, CATEGORY_KIND, KIND_WORDS, kindOf, absPath, keyOf, apply, fold, merge, view,
-  cardWorthy, cardBlock, cardFacts, autoOpenVerdict, ownerOfIn, editNoteText, lineDelta, kindWord, baseName };
+module.exports = { KINDS, VIEW_ORDER, OPS, REG_OPS, KIND_RANK, BY, MAX_ROWS, CATEGORY_KIND, KIND_WORDS, kindOf, absPath, keyOf, apply, fold, merge, view,
+  cardWorthy, cardBlock, cardFacts, autoOpenVerdict, ownerOfIn, editNoteText, lineDelta, kindWord, baseName,
+  pageOp, designOp, uploadOp, storeRows };

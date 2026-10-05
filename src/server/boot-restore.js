@@ -99,6 +99,7 @@ function sessionFromMeta(meta, transportFacts) {
     _outputStyle: meta.outputStyle || null, // 2.369.58: the chip must not report "default" for a session really running a style
     _worktree: !!meta.worktree, _worktreePath: meta.worktreePath || null,
     _vcs: meta.vcs && typeof meta.vcs === 'object' ? meta.vcs : null, _prLinks: Array.isArray(meta.prLinks) ? meta.prLinks : null, // design-unknown-records: the git chip + PR chips survive a restart
+    _cliTitle: typeof meta.cliTitle === 'string' && meta.cliTitle ? meta.cliTitle : null, // lane session-title-record: the CLI's own title survives a restart
     // agent-browser P0 (§3.2.1): the CONVERSATION's browser identity and the
     // user-data-dir rung it spawned on. Restored so a later resume of this
     // conversation finds its key and the orphan sweep sees this session as

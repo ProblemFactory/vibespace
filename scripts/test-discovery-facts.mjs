@@ -111,8 +111,41 @@ ok(bundle.includes('pidLooksClaude') || bundle.includes('PID-reuse guard'), 'bui
   ok(/_nameExplicit: typeof data\.sessionName === 'string' && !!data\.sessionName\.trim\(\),/.test(wc) && /nameExplicit: session\._nameExplicit \|\| undefined, \/\/ lane peer-card-sender/.test(wc), 'ws-create: a name GIVEN at creation is explicit (`sessionName` — the client\'s "Session N" default never travels) and persisted in the meta');
   ok(((s, r) => (s.match(new RegExp(r.source, 'g')) || []).length === 1 && r.test((s.match(/\nfunction sessionFromMeta\(meta, transportFacts\) \{[\s\S]*?\n\}\n/) || [''])[0]) && (s.match(/= sessionFromMeta\(meta, \{/g) || []).length === 3)(br, /_nameExplicit: meta\.nameExplicit === true/), 'boot-restore: every restore path (dtach, chat, remote keeper) restores it');
   ok(/\n      (?:name: s\.name, )?nameExplicit: !!s\._nameExplicit, /.test(srv) && /nameExplicit: \{ digest: \(v\) => \(v \? '1' : ''\) \},/.test(sb), 'the live payload carries it and LIVE_SESSION_FACTS carries + gates it (a rename re-renders the card)');
-  const CHAIN = "const originalName = (s.nameExplicit && s.webuiName) || s.name || s.webuiName || cwdFolder || s.sessionId.substring(0, 12) + '...';";
-  ok(card.includes(CHAIN), 'the card: a custom name, else the GIVEN live name, else the first message, else the live default');
+  // lane session-title-record moved the chain into THE name ladder (src/session-name.js — its PURE table below)
+  const CHAIN = "const originalName = sessionDisplayName(s, '');";
+  ok(card.includes(CHAIN) && card.includes("import { sessionDisplayName } from '../session-name.js';"), 'the card: a custom name, else THE ladder (the GIVEN live name, the CLI title, the first message, the live default)');
+
+  console.log('lane session-title-record: THE name ladder (src/session-name.js) — PURE table');
+  const NM = require('../src/session-name.js'), D = require('../src/discovery-facts.js');
+  const ladderRows = (L) => {
+    const row = { sessionId: 'abcdef0123456789', cwd: '/w/proj/', name: 'first message', webuiName: 'live default' };
+    return [
+      [{ ...row }, '', 'first message', 'no title: the first message'],
+      [{ ...row, cliTitle: 'Fix the login' }, '', 'Fix the login', 'the CLI title outranks the first message'],
+      [{ ...row, cliTitle: 'Fix the login', nameExplicit: true, webuiName: 'given' }, '', 'given', 'a GIVEN live name outranks the CLI title (peer-card-sender)'],
+      [{ ...row, cliTitle: 'Fix the login' }, 'my rename', 'my rename', 'a rename (customName) outranks the CLI title — before or after it arrived'],
+      [{ ...row, name: '' }, '', 'live default', 'no first message: the live default'],
+      [{ sessionId: 'abcdef0123456789', cwd: '/w/proj/' }, '', 'proj', 'then the folder'],
+      [{ sessionId: 'abcdef0123456789' }, '', 'abcdef012345...', 'then the id'],
+    ].map(([s0, c, want, what]) => ({ got: L.sessionDisplayName(s0, c), want, what }));
+  };
+  for (const r of ladderRows(NM)) ok(r.got === r.want, `ladder: ${r.what} → ${JSON.stringify(r.got)}`);
+  ok(NM.sessionGivenName({ name: 'first message' }, '') === '' && NM.sessionGivenName({ name: 'm', cliTitle: 'X' }, '') === 'X', 'sessionGivenName: rungs ①–③ only (a window title keeps its own fallbacks)');
+  const titleRow = (t, extra = {}) => JSON.stringify({ parentUuid: null, sessionId: 's1', type: 'system', subtype: 'session_title_changed', title: t, uuid: 'u-' + t, ...extra });
+  ok(D.titleFromText([titleRow('Older'), titleRow('Newer')].join('\n')) === 'Newer', 'a LATER title wins (the newest record in the windows)');
+  ok(D.titleFromText(titleRow('  Fix\n  the   login ')) === 'Fix the login' && D.titleFromText(titleRow('   ')) === null && D.titleFromText(titleRow('x', { subtype: 'other' })) === null, 'a title is whitespace-collapsed; a blank title / another subtype names nothing');
+  // ONE rule local vs remote: the same transcript through extractSessionMeta AND synthesize → interpret (TT lines)
+  const tdir = scratch('df-title'); const tproj = path.join(tdir, 'p'); fs.mkdirSync(tproj, { recursive: true });
+  const tfp = path.join(tproj, '7d1e0000-0000-4000-8000-00000000t001.jsonl'.replace('t', 'a'));
+  const firstU = JSON.stringify({ type: 'user', cwd: '/w/proj', sessionId: 's1', message: { role: 'user', content: 'please fix login' } });
+  fs.writeFileSync(tfp, [firstU, titleRow('Head title'), JSON.stringify({ type: 'assistant', pad: 'x'.repeat(400000) }), titleRow('Tail title')].join('\n') + '\n');
+  const { extractSessionMeta: esm } = require('../src/session-store.js');
+  const tbuf = fs.readFileSync(tfp);
+  const winText = tbuf.subarray(0, D.TITLE_HEAD_BYTES).toString('utf-8') + '\n' + tbuf.subarray(Math.max(0, tbuf.length - D.TITLE_TAIL_BYTES)).toString('utf-8');
+  const remote = D.interpretDiscoveryLines(D.synthesizeDiscoveryLines({ jsonls: [{ projDir: 'p', file: path.basename(tfp), mtimeMs: 1, size: tbuf.length, headCwd: '/w/proj', userLines: [firstU], titleLines: D.titleLinesOf(winText) }] }), { hostId: 'h', hostName: 'h', claimJsonls: () => new Map() });
+  const rs = (remote.sessions || remote).find?.((x) => x.cliTitle) || null;
+  ok(esm(tfp).cliTitle === 'Tail title' && rs && rs.cliTitle === 'Tail title' && rs.name === 'please fix login', `local discovery and the remote TT lines read the SAME newest title (local ${JSON.stringify(esm(tfp).cliTitle)}, remote ${JSON.stringify(rs && rs.cliTitle)})`);
+  fs.rmSync(tdir, { recursive: true, force: true });
 
   console.log('lane peer-card-sender ③ ws rename-session → customNames, on every client');
   const wh = read('src/ws-handler.js');
@@ -142,6 +175,12 @@ ok(bundle.includes('pidLooksClaude') || bundle.includes('PID-reuse guard'), 'bui
   ok(D0.nameFromUserRecord(WAKE) === 'Another Claude session sent a message:', 'CONTROL the pre-fix rule: a worker is named "Another Claude session sent a message:" (① can go red)');
   const oldCard = card.replace(CHAIN, "const originalName = s.name || s.webuiName || cwdFolder || s.sessionId.substring(0, 12) + '...';");
   ok(oldCard !== card && !oldCard.includes(CHAIN), 'CONTROL the pre-fix card chain fails the ② pin (the first message beats the given name)');
+  const nmSrc = read('src/session-name.js'), nmAnchor = '  if (s.nameExplicit && s.webuiName) return s.webuiName;\n  return s.cliTitle || \'\';\n';
+  ok(nmSrc.includes(nmAnchor), 'control anchor present (the ladder\'s ② ③ rungs)');
+  const NM0 = require(MUT.write('src/session-name.js', nmSrc.replace(nmAnchor, "  if (s.cliTitle) return s.cliTitle;\n  if (s.nameExplicit && s.webuiName) return s.webuiName;\n  return '';\n"), 'title-over-given'));
+  ok(ladderRows(NM0).some((r) => r.got !== r.want), 'CONTROL a ladder whose CLI title outranks the given name fails the PURE table');
+  const NM1 = require(MUT.write('src/session-name.js', nmSrc.replace(nmAnchor, "  if (s.nameExplicit && s.webuiName) return s.webuiName;\n  return '';\n"), 'no-title-rung'));
+  ok(ladderRows(NM1).some((r) => r.got !== r.want), 'CONTROL a ladder without the CLI-title rung fails the PURE table');
 }
 
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);

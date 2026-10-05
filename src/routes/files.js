@@ -414,6 +414,13 @@ router.delete('/api/file', async (req, res) => {
 
 // File upload
 const upload = multer({ dest: '/tmp/claude-webui-uploads/' });
+// lane artifacts-registries: the composer names its chat (`sessionId`) ⇒ each landed file is that conversation's `upload`
+// row (src/server/artifact-registry.js); a file-explorer upload names none and feeds nothing
+function noteChatUploads(req, files) {
+  const sessionId = req.body && req.body.sessionId ? String(req.body.sessionId) : '';
+  if (!sessionId || !files.length) return;
+  try { require('../server/artifact-registry.js').noteUploads({ sessionId, host: req.query.host ? String(req.query.host) : '', files }); } catch (e) { console.warn('[upload] artifacts rows not fed:', e.message); }
+}
 router.post('/api/upload', upload.array('files'), async (req, res) => {
   const destDir = req.body.destDir || os.homedir();
   const preservePaths = req.body.preservePaths === '1'; // folder upload: keep relative paths
@@ -434,6 +441,7 @@ router.post('/api/upload', upload.array('files'), async (req, res) => {
         fs.unlinkSync(file.path);
         results.push({ name, path: dest, size: file.size });
       }
+      noteChatUploads(req, results);
       return res.json({ success: true, files: results });
     } catch (e) {
       for (const f of req.files || []) { try { fs.unlinkSync(f.path); } catch {} }
@@ -463,6 +471,7 @@ router.post('/api/upload', upload.array('files'), async (req, res) => {
       fs.unlinkSync(file.path);
       results.push({ name, path: dest, size: file.size });
     }
+    noteChatUploads(req, results);
     res.json({ success: true, files: results });
   } catch (err) {
     // Clean up remaining multer temp files on failure (they leaked in /tmp)

@@ -2214,6 +2214,10 @@ const KNOWN_IGNORED_SYSTEM_SUBTYPES = new Set([
   // 2026-09-22 (CLI 2.1.280 pass), each corpus-verified by a read-only grep before it was declared:
   'scheduled_task_fire',    // a /loop (cron) timer firing — "resuming /loop wakeup (<time>)"; the harness's own bookkeeping: the turn it opens renders as itself, the fire line adds nothing (transcript 2.1.118, 1 row; in the 2.1.280 SDK union). Was wrongly listed as declared-upstream-unseen, so a /loop history rendered a red Unknown-event card
   'bridge_status',          // the TUI's "/remote-control is active" banner (transcript 2.1.81, 11 rows; NOT in the SDK union — record-shape CORPUS_ONLY_SUBTYPES); VibeSpace never runs the remote-control bridge
+  // 2026-10-05 (CLI 2.1.288, lane session-title-record): the CLI names the session itself — card-less BY DESIGN (the quiet
+  // choice: the name IS the surface — the sidebar row, the window title and the taskbar follow it; a "named …" note in the
+  // flow would repeat it). The server consumer owns it: session-brain noteSessionTitle → `cliTitle` (src/session-name.js)
+  'session_title_changed',
 ]);
 
 module.exports = { splitToolResultContent, toolResultText, MessageManager, classifyResultError, parseBackgroundLaunch, normalizeTaskType, TASK_TYPE_MAP, peerDisplayName, peerOriginOf, PEER_RECORDED, initFrameFacts, commandNames, normalizeWorkflowProgress, HANDLED_SYSTEM_SUBTYPES, KNOWN_IGNORED_RECORD_TYPES, KNOWN_IGNORED_SYSTEM_SUBTYPES, unknownRecordJson };

@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { endDaemonsAndWait } from './scratch.mjs';
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.join(dir, '..');
@@ -138,7 +139,7 @@ try {
   failed++; console.error('  ✗ device mount threw:', e.message);
 } finally {
   if (handle) { try { await handle.teardown(); } catch {} await sleep(1000); }
-  try { const dpid = Number(fs.readFileSync(path.join(process.env.VIBESPACE_AGENTD_ROOT, 'state', 'agentd.pid'), 'utf8')); process.kill(dpid, 'SIGTERM'); } catch {}
+  endDaemonsAndWait(process.env.VIBESPACE_AGENTD_ROOT);
   dm.stop();
   execFileSync('node', ['-e', `require('fs').writeFileSync('src/agentd/version.js', 'module.exports = { VERSION: ' + JSON.stringify(require('./package.json').version) + ' };\\n')`], { cwd: repo });
   try { execSync(`fusermount -uz ${JSON.stringify(mountpoint)} 2>/dev/null`); } catch {}

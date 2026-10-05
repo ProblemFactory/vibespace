@@ -16,6 +16,7 @@ import http from 'node:http';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { endDaemonsAndWait } from './scratch.mjs';
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.join(dir, '..');
@@ -685,7 +686,7 @@ for (const st of daemonsToKill) {
 }
 
 // cleanup
-try { const dpid = Number(fs.readFileSync(path.join(stateDir, 'agentd.pid'), 'utf8')); process.kill(dpid, 'SIGTERM'); } catch {}
+endDaemonsAndWait(path.dirname(stateDir));
 httpSrv.close();
 execFileSync('node', ['-e', `require('fs').writeFileSync('src/agentd/version.js', 'module.exports = { VERSION: ' + JSON.stringify(require('./package.json').version) + ' };\\n')`], { cwd: repo });
 if (process.env.KEEP_TMP) console.log('tmp:', tmp); else fs.rmSync(tmp, { recursive: true, force: true });

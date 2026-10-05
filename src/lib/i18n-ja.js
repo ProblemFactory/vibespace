@@ -7886,6 +7886,8 @@ export default {
   "Changed {n} times": "{n} 回変更",
   "Written by the agent": "エージェントが作成",
   "last by you": "最後の変更はあなた",
+  "Unpublished": "公開停止済み",
+  "Attached by you": "あなたが添付",
   "Open {name} beside the chat": "{name} をチャットの横に開く",
   "No documents yet — only code.": "まだドキュメントはありません — コードだけです。",
   "Code ({n})": "コード（{n}）",

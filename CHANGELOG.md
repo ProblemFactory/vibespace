@@ -2,6 +2,14 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.218 — 2026-10-05
+
+### Added
+- Published pages, designs and files you attach show up in the conversation's Artifacts list too.
+
+### Changed
+- Claude Code's own session titles name your conversations in the sidebar; the 'Unknown event' card for that record is gone.
+
 ## 2.369.217 — 2026-10-05
 
 ### Fixed

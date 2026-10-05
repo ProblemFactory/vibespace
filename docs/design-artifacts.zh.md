@@ -44,5 +44,14 @@
 - **编辑摘要**：每次保存（含从它打开的 Raw 编辑器）调用 `noteEdit({sessionId, host, path, summary})`，summary = 「+a −b lines; sections: <变动的标题 ≤ 3>」——免费的下一轮提示，从不开启新一轮。由 src/server/artifact-registry.js 实现（lane artifacts-e2e 接入；原 stub 已删）：注册表里有这一行 ⇒ `touch`（行得到 `by: user, edits+1`，卡片原地修补，并发这条注记）；只有 `from` 见证 ⇒ 只发 `noteEdit`。注记整条经 peer-text 带子（小节标题是文件里的字）。
 - **门禁**：`scripts/test-doc-model.mjs`（快，纯函数 + 六个补丁副本对照）、`scripts/test-doc-window.mjs`（重，chrome 1280 px 与 390 px，中文截图）。
 
+## 注册表（as-built，lane artifacts-registries）
+三个早已列着对话产物的存储喂同一个 reducer——不另建列表；产物注册表是它们之上的 VIEW，各自保留存储与界面（Pages 列表仍读 published-pages.json，Design 窗口首页仍读 designs.json）。
+- **page**——src/server/published-pages.js 的 `onPublished`（唯一通知点：发布、重发、改可见性、取消发布）⇒ server.js 交给 `artifact-registry.notePage` ⇒ 源文件上的一行 `page`（键 `host:srcPath`：同一页面发两次、或智能体先写后发，都是一行），带 `url`（/p/ 链接）与 `state` published | unpublished——取消发布从不删行。只有 srcKey 恰为 `<host>:<srcPath>` 时前缀才算机器。
+- **design**——src/server/design-engine.js 的 `onDesign`（登记、再次打开、改名）⇒ `noteDesign` ⇒ 每个（对话，文件夹）一行 `design`，名字取登记表的标题。
+- **upload**——输入框的附件：chat-input → `uploadFilesBatched({sessionId})` → POST /api/upload 的表单写明所属对话 ⇒ `noteUploads` ⇒ 每个落地文件一行 by: user 的 `upload`（文件浏览器上传不带对话，不产生行）。
+- **reducer**（src/artifacts.js）：REG_OPS publish / unpublish / open / upload 只生出或命名一行，从不计作写或改；KIND_RANK design › page › upload › 扩展名的 kind（发布过的设计仍是设计；智能体改过的上传文件仍是上传）。`pageOp` / `designOp` / `uploadOp` / `storeRows` 是 PURE 的存储→op 翻译。
+- **重放**——重建合并三路：转录推导 ∪ 持久化行 ∪ `storeRows`（normalizers 的 store-rows 接缝，由 artifact-registry.configure 设置：从各自存储读回本对话的页面与设计）。上传没有别的存储：持久化行就是输入框的附件记录。合并取较晚的事实（持久化的取消发布胜过较旧的存储记录；之后的重发又胜过它）与较高等级的 kind。
+- **卡片**经同一个函数打开（ChatView._openArtifact——芯片列表行与卡片共用）：已发布页面开 /p/ 链接（app.openBrowser），设计开 Design 窗口（app.openDesign，带本对话），其余（已取消发布的页面、上传）在聊天旁打开文件。说明行写 已发布 / 已取消发布 / 你附上的。
+- **未做：**已结束对话的只读历史（ws-handler 的读取）只推导转录行——那里没有存储行。
+
 ## 未做 / 后续
-- published / design / upload 三种 kind 的行尚未从既有注册表（published-pages 的 onPublished、designs.json、聊天上传）经同一 reducer 导入——reducer 已接受 registry 的 `kind`；Design 窗口首页与 Pages 列表保持原样。

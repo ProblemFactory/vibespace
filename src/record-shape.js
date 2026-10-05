@@ -138,6 +138,10 @@ const SHAPES = {
   "claude:stream:system/upgrade_relay_marker": sh(['content']),
   // NEW in 2.1.281 — `known` is that build's own declaration (there is no 2.1.274 row to diff against)
   "claude:stream:system/per_turn_effort_changed": sh(['per_turn_effort_active']),
+  // NEW in 2.1.288 (lane session-title-record, B-fbef) — read 2026-10-05 off the artifacts e2e run, verbatim: the CLI
+  // names the session itself a few turns in, on the live stream AND in the JSONL (the transcript row below). Card-less
+  // (message-manager KNOWN_IGNORED_SYSTEM_SUBTYPES); session-brain noteSessionTitle → `cliTitle`, the name ladder's middle rung
+  "claude:stream:system/session_title_changed": sh(['title']),
   "claude:stream:result": sh(['duration_ms', 'duration_api_ms', 'ttft_ms', 'ttft_stream_ms', 'time_to_request_ms', 'user_message_uuid', 'user_message_uuids', 'resume_reason', 'local_command', 'request_sent_wall_ms', 'first_content_frame_ms', 'first_stream_post_ms', 'first_stream_post_ack_ms', 'first_stream_post_wall_ms', 'time_to_request_from_spawn_ms', 'warm_spare_claimed', 'time_origin_ms', 'is_error', 'api_error_status', 'api_error_code', 'num_turns', 'result', 'stop_reason', 'total_cost_usd', 'usage', 'modelUsage', 'subagent_stats', 'permission_denials', 'queued_turn_count', 'structured_output', 'deferred_tool_use', 'terminal_reason', 'result_index', 'fast_mode_state', 'fast_mode_disabled_reason', 'origin', 'errors', 'runner_exit', 'startup_failure_reason'], { ignored: { 'first_stream_post_queue_wait_ms': LATENCY_UNREAD, 'first_stream_post_queued_behind': LATENCY_UNREAD, 'frame_received_wall_ms': LATENCY_UNREAD, 'frame_enqueued_wall_ms': LATENCY_UNREAD, 'turn_started_wall_ms': LATENCY_UNREAD, 'first_text_post_ms': LATENCY_UNREAD, 'first_text_post_wall_ms': LATENCY_UNREAD } }),
   "claude:stream:user": sh(['message', 'parent_tool_use_id', 'isSynthetic', 'tool_use_result', 'priority', 'origin', 'client_platform', 'inbound_origin', 'historical', 'shouldQuery', 'timestamp', 'is_meta', 'seeded_summon', 'client_composed', 'is_visible_in_transcript_only', 'is_virtual', 'is_compact_summary', 'summarize_metadata', 'mcp_meta', 'tool_result_meta', 'source_tool_use_id', 'source_tool_assistant_uuid', 'image_paste_ids', 'plan_content', 'permission_mode', 'interrupted_message_id'], { ignored: { 'initiator': 'who started the turn (2.1.280) — 2.1.280 — no consumer yet (declared so the drift card stays quiet; move to known with the consumer)' } }),
   "claude:stream:bash_command": sh(['command', 'cwd']),
@@ -234,6 +238,7 @@ Object.assign(SHAPES, {
   // and the TUI's remote-control banner (2.1.81, 11 rows) — both card-less (message-manager KNOWN_IGNORED_SYSTEM_SUBTYPES)
   'claude:transcript:system/scheduled_task_fire': sh(['content']),
   'claude:transcript:system/bridge_status': sh(['content', 'url']),
+  'claude:transcript:system/session_title_changed': sh(['title']), // 2.1.288 (lane session-title-record) — discovery's title rung (discovery-facts titleFromRecord)
   'claude:transcript:user': sh([], { blocks: CONTENT_BLOCK_TYPES }),
   'claude:transcript:assistant': sh([], { blocks: CONTENT_BLOCK_TYPES }),
   'claude:transcript:pr-link': sh(['sessionId', 'prNumber', 'prUrl', 'prRepository', 'timestamp']), // the same fact as code_change_published, persisted last-wins
@@ -350,6 +355,7 @@ const DECLARED_UPSTREAM_UNSEEN = Object.freeze({
 // stay strict on every build.
 const SHAPE_SINCE = Object.freeze({
   'system/per_turn_effort_changed': '2.1.281',
+  'system/session_title_changed': '2.1.288', // lane session-title-record — read on the artifacts e2e run's 2.1.288
 });
 // Names the corpus carries that are NOT in the SDK union (the REPL's own rows): the oracle's reverse
 // check excuses them so a handled/ignored list entry is never called dead by mistake.

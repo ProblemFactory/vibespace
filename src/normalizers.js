@@ -361,6 +361,14 @@ function artifactDeriver(mm, { artifactsOf, cwd = '', host = '' }) {
   };
   return { before: (raw) => { if (prev) fold(prev); prev = raw; }, end: () => { if (prev) fold(prev); prev = null; return rows; } };
 }
+// lane artifacts-registries: the pages / designs rows a rebuild reads from THEIR stores (src/server/artifact-registry.js
+// storeRowsOf, set by its configure) — the third merge input beside the transcript's derivation and the persisted rows
+let artifactStoreSource = null;
+function setArtifactStoreSource(fn) { artifactStoreSource = typeof fn === 'function' ? fn : null; }
+function artifactStoreRows(session, sessionId) {
+  if (!artifactStoreSource) return {};
+  try { return artifactStoreSource(session, sessionId) || {}; } catch (e) { console.warn('[normalizer] registry rows not read:', e && e.message); return {}; }
+}
 /** After the derivation merged with the persisted rows: every deliverable's card says the merged counts (a user's save
  *  lives only in the persisted rows) — patched, or placed at the end when the transcript no longer holds its write. */
 function settleArtifactCards(mm, rows) {
@@ -591,7 +599,8 @@ function rebuildHistory(session, sessionId, records, { budgetMs, onProgress, rep
       // lane group-report-card: + the group messages this conversation was handed with a turn (the ring's report cards)
       await convertWithCards(mm, records, [...browserCardsFor({ session }), ...GC.ringCards(session._groupCards)], { artifacts: artifactsOptsOf(session), ...(budgetMs ? { budgetMs } : {}), onSlice: (done) => { session._rebuildProgress = { done, total: records?.length || 0 }; try { onProgress?.(session._rebuildProgress); } catch { } } });
       // lane artifacts-model: the re-derived deliverable rows ∪ the persisted ones (the user's saves) — every card says the merge
-      try { session._artifacts = AF.merge(mm.derivedArtifacts || {}, session._artifacts || {}); settleArtifactCards(mm, session._artifacts); } catch (err) { console.error('[normalizer] deliverable rows not merged:', err.message); }
+      // lane artifacts-registries: ∪ the pages / designs rows from their own stores (a page published twice = one row)
+      try { session._artifacts = AF.merge(AF.merge(mm.derivedArtifacts || {}, session._artifacts || {}), artifactStoreRows(session, sessionId)); settleArtifactCards(mm, session._artifacts); } catch (err) { console.error('[normalizer] deliverable rows not merged:', err.message); }
       // the persisted task records (2.369.140) — silent, after the history, before the live queue
       for (const { record, at } of taskReplayRecords(replay || session._taskRecords)) { try { mm.replay(record, { at }); } catch (err) { console.error('[normalizer] task record replay skipped:', err.message); } }
       // verify r3: the helpers' tool_results (session-store helperResults — the record list skips every sidechain
@@ -632,5 +641,5 @@ function rebuildHistory(session, sessionId, records, { budgetMs, onProgress, rep
 module.exports = { createMessageManager, NORMALIZERS, feedLive, feedPeerCard, rebuildHistory, taskReplayRecords, pendingPermissions, pendingHelperApprovals, notePermissionStale, routeToHelperView, seedHelperView, setAsksObserver, noteHelperResults, HELD_PEER_CARDS_CAP,
   setBrowserCardSource, browserCardsFor, placeBrowserCard, convertWithCards, feedBrowserCard,
   setProposalCardSource, placeProposalCard, patchProposalCard, feedProposalCard,
-  placeArtifactCard, patchArtifactCard, feedArtifactCard, artifactCardId, artifactDeriveOpts, // lane artifacts-model: the deliverable card // lane browser-propose: the proposal card
+  placeArtifactCard, patchArtifactCard, feedArtifactCard, artifactCardId, artifactDeriveOpts, setArtifactStoreSource, artifactStoreRows, // lane artifacts-model: the deliverable card // lane browser-propose: the proposal card
   setGroupCardPersist, feedGroupCard, placeGroupCard, upgradeWakeCards, redactGroupCards };

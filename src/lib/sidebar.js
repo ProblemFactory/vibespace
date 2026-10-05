@@ -89,6 +89,9 @@ const LIVE_SESSION_FACTS = Object.freeze({
   // lane peer-card-sender: the live name was GIVEN (at creation / by a rename) — the card shows it before the first
   // message; a scalar that flips at most once per session (a rename), so it gates the re-render
   nameExplicit: { digest: (v) => (v ? '1' : '') },
+  // lane session-title-record: the CLI's own title (2.1.288 session_title_changed) — the name ladder's middle rung
+  // (src/session-name.js); a scalar that changes a few times per session at most, and the card draws it, so it gates
+  cliTitle: { digest: (v) => v || '' },
   // The B-6b6d spawn knobs and the origin each one came from. CARRIED-ONLY:
   // nothing on the CARD draws them (Session Properties does, and it re-reads
   // the merged row when it opens), so gating on them would buy a re-render
@@ -917,6 +920,8 @@ class Sidebar {
         // LIVE_SESSION_FACTS): billing identity, the agent's TodoWrite pill,
         // the transport chip, the response style and the worktree badge/path.
         ...liveSessionFacts(wm),
+        // the CLI's title: the live fact (the newest) else the transcript's (discovery) — an absent live row must not blank it
+        cliTitle: wm?.cliTitle || s.cliTitle || null,
       };
     });
 

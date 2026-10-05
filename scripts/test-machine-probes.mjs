@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { endDaemonsAndWait } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 
@@ -70,7 +71,7 @@ const viaCli = await dm.probeCli();
 ok(!!viaCli?.facts?.claude, 'daemon answers probe-cli');
 ok(viaCli.facts.claude.loginMethod === 'console-key', 'daemon cli login ladder matches');
 
-try { const pid = parseInt(fs.readFileSync(path.join(process.env.VIBESPACE_AGENTD_ROOT, 'state', 'agentd.pid'), 'utf-8')); if (pid) process.kill(pid); } catch { }
+endDaemonsAndWait(process.env.VIBESPACE_AGENTD_ROOT);
 fs.rmSync(home, { recursive: true, force: true });
 fs.rmSync(root, { recursive: true, force: true });
 fs.rmSync(dataDir, { recursive: true, force: true });

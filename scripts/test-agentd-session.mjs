@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { endDaemonsAndWait } from './scratch.mjs';
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.join(dir, '..');
@@ -283,7 +284,7 @@ if (!fs.existsSync('/proc/self/environ')) {
 // restore version stamp + cleanup
 execFileSync('node', ['-e', `require('fs').writeFileSync('src/agentd/version.js', 'module.exports = { VERSION: ' + JSON.stringify(require('./package.json').version) + ' };\\n')`], { cwd: repo });
 for (const pid of extraDaemons) { try { process.kill(pid, 'SIGTERM'); } catch {} }
-try { const pid = Number(fs.readFileSync(path.join(tmp, 'agentd', 'state', 'agentd.pid'), 'utf8')); process.kill(pid, 'SIGTERM'); } catch {}
+endDaemonsAndWait(path.join(tmp, 'agentd'));
 // the daemon just got SIGTERM and may still be writing its state files while
 // the recursive rm walks the tree — ENOTEMPTY blocked a push (2.369.109);
 // rmSync retries on ENOTEMPTY/EBUSY when asked to

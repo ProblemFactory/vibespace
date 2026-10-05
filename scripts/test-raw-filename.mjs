@@ -578,5 +578,32 @@ if (process.env.RAWNAME_PRINT_CENSUS) {
 
 for (const row of copiesCensus(M.files, M.dir, REPO, { minCopies: 2 })) ok(row.pass, row.name, row.detail);
 
+console.log('⑨ lane artifacts-registries — the composer\'s upload (POST /api/upload naming its chat) reaches the artifacts registry');
+{
+  const REG = require(path.join(REPO, 'src/server/artifact-registry.js'));
+  const N = require(path.join(REPO, 'src/normalizers.js'));
+  const live = { backend: 'claude', cwd: DIR, host: '', _historyLoaded: true, _normalizer: N.createMessageManager('claude', 'u1') };
+  REG.configure({ activeSessions: () => new Map([['u1', live]]), log: { log() {}, warn() {} } });
+  const S = await serve(filesRouter, null);
+  const up = async (name, sessionId) => {
+    const fd = new FormData();
+    fd.append('files', new Blob([Buffer.from('attached\n')]), name);
+    fd.append('destDir', path.join(DIR, 'up'));
+    fd.append('fileNames', JSON.stringify([name]));
+    if (sessionId) fd.append('sessionId', sessionId);
+    const r = await fetch(S.base + '/api/upload', { method: 'POST', body: fd });
+    return r.json();
+  };
+  const j = await up('brief.pdf', 'u1');
+  const k = ':' + path.join(DIR, 'up', 'brief.pdf');
+  const row = live._artifacts && live._artifacts[k];
+  ok(j.success && row && row.kind === 'upload' && row.by === 'user' && row.bytes === 9, 'an upload naming its chat ⇒ that conversation\'s `upload` row by: user (its size)', row);
+  await up('loose.txt', '');
+  ok(Object.keys(live._artifacts || {}).length === 1, 'a file-explorer upload (no chat named) feeds nothing');
+  const cli = fs.readFileSync(path.join(REPO, 'src/lib/chat-input.js'), 'utf8'), ut = fs.readFileSync(path.join(REPO, 'src/lib/utils.js'), 'utf8');
+  ok(cli.includes('sessionId: this._sessionId, // lane artifacts-registries') && ut.includes("if (sessionId) fd.append('sessionId', sessionId);"), 'the composer\'s upload names its chat (chat-input → uploadFilesBatched → the form\'s sessionId)');
+  clearTimeout(live._artifactsTimer); await S.close();
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -1251,6 +1251,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
           if (msg.type === 'system' && msg.subtype === 'api_error') { try { brainRef?.noteApiErrorAuth?.(session, id, msg); } catch (e) { console.warn('[claude] api_error consumer failed:', e.message); } } // forward-compat: declared on the stream union, observed only in transcripts (the live twin is api_retry above)
           if (msg.type === 'system' && msg.subtype === 'vcs_state_changed') { try { brainRef?.noteVcsState?.(session, id, msg); } catch (e) { console.warn('[claude] vcs consumer failed:', e.message); } }
           if (msg.type === 'system' && msg.subtype === 'code_change_published') { try { brainRef?.notePublishedChange?.(session, id, msg); } catch (e) { console.warn('[claude] code-change consumer failed:', e.message); } }
+          if (msg.type === 'system' && msg.subtype === 'session_title_changed') { try { brainRef?.noteSessionTitle?.(session, id, msg); } catch (e) { console.warn('[claude] session-title consumer failed:', e.message); } } // lane session-title-record: the CLI's own title → cliTitle
           // Event-driven remote ledger harvest (owner question "为什么15分钟
           // 不实时"): a remote session's turn just ENDED — its usage now
           // exists in the remote transcript, so harvest promptly (60s/host

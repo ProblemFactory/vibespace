@@ -16,6 +16,7 @@ import path from 'node:path';
 import net from 'node:net';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { endDaemonsAndWait } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 
@@ -69,7 +70,7 @@ const rr3 = await dm.fsReadRange(p3, 0, 64);
 ok(rr3.data.toString() === 'healed', 'pool self-heals after terminating the wedged worker');
 
 srv.close();
-try { const pid = parseInt(fs.readFileSync(path.join(process.env.VIBESPACE_AGENTD_ROOT, 'state', 'agentd.pid'), 'utf8')); if (pid) process.kill(pid); } catch { }
+endDaemonsAndWait(process.env.VIBESPACE_AGENTD_ROOT);
 fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); // a worker may still be flushing agentd/state when the suite tears down: ENOTEMPTY once on the Actions mirror (2.369.125 r8), node retries it
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

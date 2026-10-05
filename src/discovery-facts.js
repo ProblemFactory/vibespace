@@ -211,6 +211,43 @@ function nameFromUserLine(line) {
   return opensWithCliFrame(text) ? null : nameFromText(text);
 }
 
+// ── THE CLI'S OWN TITLE (lane session-title-record, B-fbef) ──
+// claude 2.1.288 names the session itself a few turns in: `{"type":"system","subtype":"session_title_changed",
+// "title":"…"}` on the live stream AND in the transcript JSONL (record-shape pins both carriers). It is the name
+// ladder's middle rung (src/session-name.js — the user's rename › a given name › THIS › the first message). ONE rule
+// for every machine, like the first-message rule above: the NEWEST title among the transcript's head window
+// (TITLE_HEAD_BYTES) and its tail window (TITLE_TAIL_BYTES) — local discovery (session-store extractSessionMeta),
+// the ssh scanner's TT lines (hosts.js) and the device snapshot (agentd) all read those same two windows.
+const TITLE_NEEDLE = '"subtype":"session_title_changed"';
+const TITLE_HEAD_BYTES = 256 * 1024; // NOT the 2 MB name cap: local discovery reads EVERY transcript (the scanners only the newest 60)
+const TITLE_TAIL_BYTES = 65536;
+/** A PARSED record → its title (string) or null. The live stream and the transcript row share the field. */
+function titleFromRecord(d) {
+  if (!d || d.type !== 'system' || d.subtype !== 'session_title_changed' || typeof d.title !== 'string') return null;
+  const t = d.title.replace(/\s+/g, ' ').trim().slice(0, NAME_MAX).trim();
+  return t || null;
+}
+/** RAW text (the two windows, joined by a newline; or the scanner's TT lines) → the NEWEST parseable title, or null.
+ *  A line cut at a window edge does not parse and is skipped — the same on every machine. */
+function titleFromText(text) {
+  const s = String(text || '');
+  if (!s.includes(TITLE_NEEDLE)) return null;
+  const lines = s.split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (!lines[i].includes(TITLE_NEEDLE)) continue;
+    let d = null; try { d = JSON.parse(lines[i]); } catch { continue; }
+    const t = titleFromRecord(d);
+    if (t) return t;
+  }
+  return null;
+}
+/** The title lines of a window text (what a device ships as TT lines) — the last 3, newest last. */
+function titleLinesOf(text) {
+  const s = String(text || '');
+  if (!s.includes(TITLE_NEEDLE)) return [];
+  return s.split('\n').filter((l) => l.includes(TITLE_NEEDLE)).slice(-3).map((l) => l.slice(0, 2000));
+}
+
 /** THE codex naming rule (moved here verbatim from adapters/codex.js in S3
  *  so the ssh script's NC lines and the daemon snapshot name a thread exactly
  *  like the local listing): first line that is not an injected instruction
@@ -610,6 +647,7 @@ function interpretDiscoveryLines(out, { hostId, hostName, claimJsonls }) {
   const codexRollouts = []; // B-10ed: codex rollout files on the host
   const codexCwd = new Map(); // rollout path -> cwd
   const codexNames = new Map(); // rollout path -> name (S3: NC lines, codex naming rule)
+  const titleText = new Map(); // jsonl path -> its TT lines (the CLI's own title — titleFromText picks the newest)
   const codexOpen = new Set(); // thread ids held open by a codex process (S3: CO lines)
   const codexAgent = new Map(); // rollout path -> SC tokens (sub-agent classification, 2026-09-24)
   const tailIds = new Map(); // jsonl path -> [sessionIds in tail, last = current writer]
@@ -672,6 +710,10 @@ function interpretDiscoveryLines(out, { hostId, hostName, claimJsonls }) {
       const t = line.indexOf('\t');
       const m = t > 2 && line.slice(t + 1).match(/^"cwd":"([^"]*)"/);
       if (m) heads.set(line.slice(2, t), { ...(heads.get(line.slice(2, t)) || {}), cwd: m[1] });
+    } else if (line.startsWith('TT ')) {
+      // the CLI's own title lines (lane session-title-record): the newest parseable one names the card's middle rung
+      const t = line.indexOf('\t');
+      if (t > 3) { const fp = line.slice(3, t); titleText.set(fp, (titleText.get(fp) || '') + line.slice(t + 1) + '\n'); }
     } else if (line.startsWith('N ')) {
       const t = line.indexOf('\t');
       if (t > 2) {
@@ -737,7 +779,7 @@ function interpretDiscoveryLines(out, { hostId, hostName, claimJsonls }) {
     const sid = path.basename(j.path, '.jsonl');
     if (runningIds.has(sid)) continue; // already listed via a lock
     const head = heads.get(j.path);
-    sessions.push({ sessionId: sid, cwd: head?.cwd || null, name: head?.name || null, projDir: path.basename(path.dirname(j.path)), status: 'remote-stopped', host: hostId, hostName: hostName, mtime: j.mtime });
+    sessions.push({ sessionId: sid, cwd: head?.cwd || null, name: head?.name || null, cliTitle: titleFromText(titleText.get(j.path)) || null, projDir: path.basename(path.dirname(j.path)), status: 'remote-stopped', host: hostId, hostName: hostName, mtime: j.mtime });
   }
   // Codex rollouts → resumable cards (B-10ed). threadId = the uuid tail of
   // the rollout filename (CODEX_TID_RE, .jsonl or .jsonl.zst — the same rule
@@ -798,7 +840,7 @@ function interpretDiscoveryLines(out, { hostId, hostName, claimJsonls }) {
 
 
 /**
- * synthesizeDiscoveryLines — device SNAPSHOT (raw facts) → the LOCK/J/H/N/T/
+ * synthesizeDiscoveryLines — device SNAPSHOT (raw facts) → the LOCK/J/H/N/TT/T/
  * C/HC/NC/SC/CO line format interpretDiscoveryLines consumes. It was inline in
  * hosts.discoverSessions; extracted with the interpreter (R5) so the whole
  * chain (snapshot → synthesize → interpret) can run ON the device — the
@@ -813,6 +855,7 @@ function synthesizeDiscoveryLines(snap) {
     lines.push(`J ${(j.mtimeMs / 1000).toFixed(4)} ${j.size} ${fp}`);
     if (j.headCwd !== undefined) lines.push(`H ${fp}\t"cwd":"${j.headCwd || ''}"`);
     for (const u of j.userLines || []) lines.push(`N ${fp}\t${u}`);
+    for (const u of j.titleLines || []) lines.push(`TT ${fp}\t${u}`); // the CLI's own title (lane session-title-record)
     if (j.tailIds) lines.push(`T ${fp}\t${j.tailIds.join(',')},`);
   }
   for (const r of (snap?.codexRollouts || [])) {
@@ -826,7 +869,7 @@ function synthesizeDiscoveryLines(snap) {
 }
 
 module.exports = {
-  extractTailIds, nameFromUserRecord, nameFromUserLine, nameFromText, pidLooksClaude, interpretDiscoveryLines, synthesizeDiscoveryLines, NAME_MAX,
+  extractTailIds, nameFromUserRecord, nameFromUserLine, nameFromText, titleFromRecord, titleFromText, titleLinesOf, TITLE_NEEDLE, TITLE_HEAD_BYTES, TITLE_TAIL_BYTES, pidLooksClaude, interpretDiscoveryLines, synthesizeDiscoveryLines, NAME_MAX,
   // S3 (codex facts + zstd rollouts)
   deriveCodexSessionName, nameFromCodexUserLine,
   // codex thread classification (2026-09-24): ONE rule for local/daemon/ssh

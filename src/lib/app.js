@@ -65,6 +65,7 @@ import { installBrowserTrace } from './browser-trace-view.js'; // agent browser 
 import { installBrowserReplay } from './browser-replay-window.js'; // 2026-09-27: a browser session's replay (window type browser-replay)
 import { permissionModeOptions } from './permission-mode-labels.js'; // lane L: permission modes in plain words, the raw value as a hint
 import { BACKEND_META, createBackendIconHtml, getSessionKey, pickAgentIdentity, settingsPrefixFor, effortLabel, effortOptions, noteModelCatalog, worktreeCapsFor, backendFeatureCaps, billingRow } from './agent-meta.js';
+import { sessionGivenName } from '../session-name.js'; // lane session-title-record: THE name ladder's given rungs (the window title)
 
 const BACKEND_SESSION_OPTIONS = {
   claude: {
@@ -2491,7 +2492,9 @@ class App {
         if (JSON.stringify(win._openSpec) !== specWas) this.layoutManager?.scheduleAutoSave?.();
       }
       if (win._openSpec?.action === 'viewSession' || win._openSpec?.action === 'attachSession') {
-        const displayName = this.sidebar.getCustomName?.(match) || match.webuiName || match.name || win._openSpec?.name || win.title || t('Session');
+        // THE name ladder's given rungs (src/session-name.js: the rename › a given name › the CLI's own title — lane
+        // session-title-record), then the window's own fallbacks — a title the CLI picks mid-session renames the window live
+        const displayName = sessionGivenName(match, this.sidebar.getCustomName?.(match)) || match.webuiName || match.name || win._openSpec?.name || win.title || t('Session');
         const cwd = match.cwd || win._openSpec?.cwd || '';
         this.wm.setTitle(winId, cwd ? `${displayName} — ${cwd}` : displayName);
       }

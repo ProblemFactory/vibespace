@@ -16,9 +16,10 @@ const span = (cls) => { const n = document.createElement('span'); n.className = 
 /** "Edited 3 times · 2min ago · last by you" (the card's meta line and the list row's words). */
 export function artifactMetaText(b) {
   const f = cardFacts(b);
-  const parts = [f.changes ? t('Changed {n} times', { n: f.changes }) : t('Written by the agent')];
+  const upload = f.kind === 'upload' && f.byUser && !f.changes; // lane artifacts-registries: the registries' rows say their store's fact
+  const parts = [f.state === 'unpublished' ? t('Unpublished') : f.state === 'published' ? t('Published') : upload ? t('Attached by you') : f.changes ? t('Changed {n} times', { n: f.changes }) : t('Written by the agent')];
   if (f.lastAt) parts.push(agoText(f.lastAt, t));
-  if (f.byUser) parts.push(t('last by you'));
+  if (f.byUser && !upload) parts.push(t('last by you'));
   return parts.join(' · ');
 }
 

@@ -4,6 +4,7 @@ import { registerCommand, registerMenuItem, menuItems } from './contributions.js
 import { SESSION_STATE_META, SESSION_URGENCY_META } from './sidebar-tasks.js';
 import { UI_ICONS } from './icons.js';
 import { shownText } from './record-clear-ui.js'; // "Clear content…": a cleared status reason is worded in this device's language
+import { sessionDisplayName } from '../session-name.js'; // lane session-title-record: THE name ladder
 import { browserFactWords } from '../browser-fact.js'; // lane S2: THE browser fact's words (the card's chip prints them)
 import { stashHintChip } from './stash-strip.js'; // 2026-09-27: "N waiting" — what waits for this agent's next turn (the stash fact)
 import { createBackendIcon, createAgentKindIcon, createModeBackendIcon, getBackendMeta, getAgentKindMeta, getAgentRoleLabel, getAgentRoleShortLabel, getSessionKey, backendFeatureCaps, settingsPrefixFor, billingRow } from './agent-meta.js';
@@ -245,10 +246,9 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
   if (expandedCardId === s.sessionId) card.classList.add('expanded');
   const date = new Date(s.startedAt);
   const customName = state.getCustomName(s);
-  const cwdFolder = s.cwd ? s.cwd.replace(/\/+$/, '').split('/').pop() : '';
-  // a name GIVEN to the live session (at creation / by a rename — `nameExplicit`, lane peer-card-sender) outranks the
-  // first message: a worker's first user record is a delivery, and its creator named it
-  const originalName = (s.nameExplicit && s.webuiName) || s.name || s.webuiName || cwdFolder || s.sessionId.substring(0, 12) + '...';
+  // THE name ladder (src/session-name.js): a GIVEN live name (lane peer-card-sender) › the CLI's own title (lane
+  // session-title-record) › the first message › … — the user's rename (customName) outranks all of them
+  const originalName = sessionDisplayName(s, '');
   const displayName = customName || originalName;
   const backendMeta = getBackendMeta(s.backend || 'claude');
   const agentKindMeta = getAgentKindMeta(s.agentKind || 'primary');

@@ -308,7 +308,7 @@ export async function collectDroppedFiles(dt) {
   return out;
 }
 
-export async function uploadFilesBatched(files, { destDir, preservePaths, onProgress, host } = {}) {
+export async function uploadFilesBatched(files, { destDir, preservePaths, onProgress, host, sessionId = '' } = {}) {
   const list = (files || []).filter(Boolean);
   const CHUNK_FILES = 40, CHUNK_BYTES = 64 * 1024 * 1024;
   const chunks = [];
@@ -325,6 +325,7 @@ export async function uploadFilesBatched(files, { destDir, preservePaths, onProg
     for (const f of chunkFiles) { fd.append('files', f); names.push(_uploadName(f)); }
     fd.append('destDir', destDir);
     fd.append('fileNames', JSON.stringify(names));
+    if (sessionId) fd.append('sessionId', sessionId); // lane artifacts-registries: the composer's chat ⇒ the files are its `upload` rows
     if (preservePaths || names.some((n) => n.includes('/'))) fd.append('preservePaths', '1');
     // Remote sessions: route the upload to the host so destDir resolves on the
     // remote (and its ~ is the remote home) — without ?host= a remote-session

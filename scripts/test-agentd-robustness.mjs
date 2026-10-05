@@ -22,6 +22,7 @@ import net from 'node:net';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { endDaemonsAndWait } from './scratch.mjs';
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.join(dir, '..');
@@ -214,7 +215,7 @@ console.log('— 5. CONCURRENCY: fat transfer on one session must not starve ano
   conn.mux.destroy();
 }
 
-try { const dpid = Number(fs.readFileSync(path.join(stateDir, 'agentd.pid'), 'utf8')); process.kill(dpid, 'SIGTERM'); } catch {}
+endDaemonsAndWait(path.dirname(stateDir));
 execFileSync('node', ['-e', `require('fs').writeFileSync('src/agentd/version.js', 'module.exports = { VERSION: ' + JSON.stringify(require('./package.json').version) + ' };\\n')`], { cwd: repo });
 fs.rmSync(tmp, { recursive: true, force: true });
 if (failed) { console.error(`\n${failed} FAILED`); process.exit(1); }

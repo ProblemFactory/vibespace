@@ -20,6 +20,7 @@ import net from 'node:net';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { endDaemonsAndWait } from './scratch.mjs';
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.join(dir, '..');
@@ -170,7 +171,7 @@ console.log('— M5 shape: device-owned long-lived mount-class process lifecycle
   check('teardown kills the device process', probe2.code !== 0, JSON.stringify(probe2.code));
 }
 
-try { const dpid = Number(fs.readFileSync(path.join(AGENTD_ROOT, 'state', 'agentd.pid'), 'utf8')); process.kill(dpid, 'SIGTERM'); } catch {}
+endDaemonsAndWait(AGENTD_ROOT);
 dm.stop();
 execFileSync('node', ['-e', `require('fs').writeFileSync('src/agentd/version.js', 'module.exports = { VERSION: ' + JSON.stringify(require('./package.json').version) + ' };\\n')`], { cwd: repo });
 fs.rmSync(tmp, { recursive: true, force: true });
