@@ -207,9 +207,12 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
     machWrap.style.display = choices.length > 1 ? '' : 'none';
   }
 
+  // lane dc-browser-providers: a Chrome build is offered by the picked row's `buildChoice` cell (the /providers rows) — no
+  // rows yet (or none readable) = the default provider's, which offers one
+  const buildChoiceOf = (id) => { const r = st.providers.find((x) => x && x.id === id); return r ? !!r.buildChoice : !st.providers.length; };
   function drawBuilds() {
     if (adopt === 'keep') return;
-    const show = st.provider === 'chromium';
+    const show = buildChoiceOf(st.provider);
     buildWrap.style.display = show ? '' : 'none';
     buildWrap.setAttribute('aria-busy', st.builds && st.builds.pending ? 'true' : 'false'); // the list is asked, not answered yet
     if (!show) return;
@@ -277,7 +280,7 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
     // lane remote-profile-start: can a browser run on each paired machine at all (its CLI, a Chrome) — its own answer, asked once per open
     const serving = st.machines.filter((m) => m && m.hostId && m.hostId !== 'local' && m.connected && Array.isArray(m.capabilities) && m.capabilities.includes('browser-serve'));
     if (serving.length) { const rs = await Promise.all(serving.map((m) => fetchJson(`/api/browser/builds?host=${encodeURIComponent(m.hostId)}`))); if (st.closed) return; st.ready = {}; serving.forEach((m, i) => { const r = rs[i]; if (r && !r.error && r.ready) st.ready[m.hostId] = r.ready; }); }
-    if (!st.providers.length && !(pv && pv.error)) st.providers = [{ id: 'chromium', control: { ok: true } }];
+    if (!st.providers.length && !(pv && pv.error)) st.providers = [{ id: 'chromium', buildChoice: true, control: { ok: true } }];
     if (pv && pv.error) say(t('Could not read which browsers this VibeSpace offers — {reason}', { reason: String(pv.error) }));
     drawProviders(); drawMachines(); loadBuilds();
   }
@@ -290,7 +293,7 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
     const who = whoMode() === 'only' ? draftWho(sel, model.wire) : [];
     // lane browser-admin 2a: the build chosen for a Chromium profile (a path row with no absolute path is said, nothing sent)
     let browser = null;
-    if (adopt !== 'keep' && st.provider === 'chromium' && st.buildKey !== 'default') {
+    if (adopt !== 'keep' && buildChoiceOf(st.provider) && st.buildKey !== 'default') {
       const row = buildRows(st.builds, { choice: null, local: !st.host, t }).find((r) => r.key === st.buildKey);
       browser = choiceOfRow(row, buildPath ? buildPath.value : '');
       if (!browser) { say(buildRefusalWords({ code: 'browser_choice_invalid' }, t)); if (buildPath) buildPath.focus(); return; }

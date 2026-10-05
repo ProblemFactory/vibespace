@@ -1486,10 +1486,8 @@ open"; empty = it opens nothing, and the switch dialog says so); the download,
 update and licence hosts are refused (over http the page reads `egress refused:
 <host> is not in the egress allowlist (…)`), and the pinned install runs its
 download through a second proxy admitting only the three download hosts. The
-**cloakserve container** remains a plan behind `browser.cloak.enabled` (the
-container form only) with the same allowlist, a pinned image, an internal
-docker network, 9222 on the hub's loopback only and the hub's proxy as the
-only way out. **The remote `cdp` provider** reaches somebody else's
+cloakserve container plan (and its `browser.cloak.enabled` switch) is gone —
+it was a plan nobody ran (lane dc-browser-providers). **The remote `cdp` provider** reaches somebody else's
 browser: a profile with `host` + `cdpPort` names a loopback port on a paired
 machine (or on this one), the hub forwards it over `device.tcpForward`
 (reference-counted, PortForwardManager's shape) and probes `/json/version`

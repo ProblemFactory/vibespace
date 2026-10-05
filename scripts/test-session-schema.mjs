@@ -96,8 +96,9 @@ const bc = SESSION_FIELDS._browserCap, bh = SESSION_FIELDS._browserHelpers;
 const src = (f) => { try { return fs.readFileSync(path.join(REPO, f), 'utf-8'); } catch { return ''; } };
 ok(bc && bc.persisted === 'meta' && bc.owner === 'ws' && writes.has('_browserCap')
   && /browserCap: Number\.isInteger\(session\._browserCap\)/.test(src('src/ws-create.js'))
-  && (src('src/server/boot-restore.js').match(/_browserCap: Number\.isInteger\(meta\.browserCap\)/g) || []).length === 3,
-  '_browserCap: registered (owner ws, persisted meta), written to the session meta at spawn and restored by all three boot-restore paths');
+  && (src('src/server/boot-restore.js').match(/_browserCap: Number\.isInteger\(meta\.browserCap\)/g) || []).length === 1
+  && (src('src/server/boot-restore.js').match(/= sessionFromMeta\(meta, \{/g) || []).length === 3,
+  '_browserCap: registered (owner ws, persisted meta), written to the session meta at spawn and restored by sessionFromMeta, which all three boot-restore paths call');
 ok(bh && bh.persisted === null && bh.owner === 'stdout' && writes.has('_browserHelpers') && [...writes.get('_browserHelpers')].includes('src/server/browser-helpers.js'),
   '_browserHelpers: registered (in memory), written only by src/server/browser-helpers.js (the stdout witness + the new-child mint)');
 

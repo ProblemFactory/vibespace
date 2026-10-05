@@ -208,7 +208,7 @@ console.log('— ③ effort enum: ultra offered when the served model reports it
   const app = read('src/lib/app.js'), sb = read('src/lib/chat-status-bar.js');
   ok(/const rank = \['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'\];/.test(app) && /label: effortLabel\('codex', e, \{ capitalize: true \}\)/.test(app) && /SETTINGS_SCHEMA\['codex\.defaultEffort'\]\.options = efforts\.map/.test(app), 'New-Session + settings pickers build the codex ladder from the served models\' union (ultra last) with the hinted label');
   ok(/label: effortLabel\(this\._backend, v\)/.test(sb) && /cur\?\.efforts\?\.length \? cur\.efforts/.test(sb), 'status-bar dropdown prefers the CURRENT model\'s reported levels and labels them through effortLabel');
-  ok(/efforts: \(m\.supported_reasoning_levels \|\| \[\]\)\.map\(l => l && l\.effort\)/.test(read('server.js')), '/api/available-models carries each model\'s supported_reasoning_levels (the ultra source)');
+  ok(/efforts: \(m\.supported_reasoning_levels \|\| \[\]\)\.map\(l => l && l\.effort\)/.test(read('src/harnesses/codex-models.js')), '/api/available-models carries each model\'s supported_reasoning_levels (the ultra source)');
   const key = 'delegates to sub-agents (multi-agent), extra usage';
   ok(read('src/lib/i18n-zh.js').includes(`"${key}":`) && read('src/lib/i18n-ja.js').includes(`"${key}":`), 'zh + ja carry the hint');
 }

@@ -71,7 +71,7 @@ const INSTALL_LOG_NAME = `~/.vibespace/${M.INSTALL_FILES.log}`; // how a message
  * @param hosts   HostManager (deviceBounded / get / isLocal) or null (local only)
  * @param local   () => THIS machine's desktop-serve handle (the hub keeper's `machine`)
  */
-function create({ hosts = null, local = null, env = () => process.env, log = console, install = true, connectMs = 8000, installMs = 15 * 60 * 1000, holdMs = 60 * 60 * 1000, pollMs = 15000, vncPort = M.MACHINE_DESKTOP_PORT, probeMs = 3000, audit = null } = {}) {
+function create({ hosts = null, local = null, env = () => process.env, log = console, install = true, connectMs = 8000, installMs = 15 * 60 * 1000, holdMs = 60 * 60 * 1000, pollMs = 15000, vncPort = D.VNC_NATIVE.port, probeMs = 3000, audit = null } = {}) {
   const forwards = new Map(); // `${hostId}:${remotePort}` → { server, sockets, localPort, hostId, remotePort, refs }
   const opening = new Map();  // key → the in-flight listen (a concurrent second caller joins it)
   const installs = new Map(); // machine key → { since, running } — THIS hub's follower; the machine's own slot is its pidfile (installState)
@@ -426,7 +426,7 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
   function machineDesktopTarget(id) {
     const hostId = M.machineDesktopHost(id);
     const d = hostId ? desktops.get(hostId) : null;
-    return d && M.DESKTOP_PLATFORMS.includes(platformOfHandle(d.dm)) ? { kind: 'rfb', port: vncPort, hostId, humanOnly: true } : null;
+    return d && M.DESKTOP_PLATFORMS.includes(platformOfHandle(d.dm)) ? { kind: D.VNC_NATIVE.stream, port: vncPort, hostId, humanOnly: true } : null;
   }
   /** The bridge's words when a machine desktop's upstream closed: the machine's link is gone ⇒ it went offline. */
   function machineDesktopGone(id) {

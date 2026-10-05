@@ -630,7 +630,8 @@ app.delete('/api/mounts/shares/:id', async (req, res) => {
 app.post('/api/mounts/:id/mount', async (req, res) => {
   try {
     const ok = await mounts.mount(req.params.id);
-    res.json({ success: ok, mounts: mounts.list() });
+    // 'starting' = the daemon lives and rebuilds its cache index — the row says so
+    res.json({ success: ok === 'starting' || ok, starting: ok === 'starting', mounts: mounts.list() });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.post('/api/mounts/:id/unmount', async (req, res) => {
@@ -712,7 +713,6 @@ function createSessionMessages(session, sessionId) {
   let browserHandback = null;
   let browserProposals = null; // lane browser-propose: the proposal runner (src/server/browser-propose.js)
   let browserAccess = null;
-  let egressProxy = null;
   try {
     const { agentEnv } = require('../ws-handler');
     // P4 (§3.6 / §7.3 / D5 (b)): ONE way to reach a profile browser on any
@@ -720,18 +720,6 @@ function createSessionMessages(session, sessionId) {
     // paired device, a CDP port tunnelled over tcpForward. `hostId` is a
     // parameter the layer dispatches on; the keeper never asks "is this remote".
     browserAccess = require('./browser-access').create({ hosts, env: () => agentEnv(), log: console });
-    // P4 (§7.2.1): the allowlisting egress proxy — started LAZILY, only when
-    // the cloak opt-in is on and a plan is asked for (nothing listens on a
-    // fresh instance); the allowlist is re-read per request (liveApply).
-    const cloakPlan = () => {
-      const B = require('../browser-profiles.js');
-      const enabled = serverSetting('browser.cloak.enabled') === true;
-      if (enabled && !egressProxy) {
-        try { egressProxy = require('./egress-proxy').create({ allowlist: () => serverSetting('browser.cloak.egressAllowlist') || '', log: console }); egressProxy.listen().catch((e) => { console.warn('[browser] egress proxy failed to listen — ' + (e && e.message)); egressProxy = null; }); }
-        catch (e) { console.warn('[browser] egress proxy unavailable — ' + (e && e.message)); egressProxy = null; }
-      }
-      return B.cloakservePlan({ enabled, allowlist: serverSetting('browser.cloak.egressAllowlist') || '', proxyPort: egressProxy ? egressProxy.port() || 0 : 0 });
-    };
     // P4 second half (§7.5): THE key consumer — one module declares this
     // track's registry rows' consumer, registers their six Test runners and
     // resolves their keys (`keyFor`, the ONE resolve the keeper asks through
@@ -923,8 +911,8 @@ function createSessionMessages(session, sessionId) {
       traceDialogAct: (act) => browserStream?.tapDialogAct?.(act),
       // the agent's `new --adopt <dir>` may register a directory ONLY under these roots (browser-profiles.adoptDirVerdict)
       adoptRoots: { homeDir: os.homedir(), dataDir: path.join(rootDir, 'data') },
-      // P4: the providers route's cloakserve plan (or its typed refusal) + the live CDP forwards
-      cloakPlan, forwards: () => browserAccess.forwards(),
+      // P4: the providers route's live CDP forwards
+      forwards: () => browserAccess.forwards(),
       // P4 second half (§7.4): a switch PROPOSAL (another session holds a lease, or somebody drives the browser) is ONE
       // "For you" item to the owner — zero billed turns, the inbox is the channel
       propose: (sessionId, session, { text, detail, by = 'agent' } = {}) => {

@@ -15,7 +15,7 @@
 // RULES (direction of knowledge): DEVICE/SHARED/PURE know nothing of ORCH or
 // CLIENT. ORCH may use everything below it. CLIENT may use only PURE (via the
 // esbuild bundle) — never ORCH internals.
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -24,7 +24,18 @@ import { GIT_REDIRECTORS, gitEnvFrom } from './git-env.mjs';
 
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
+const ROOT_DIR_DCHS = new URL('..', import.meta.url).pathname;
 const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
+// §78's dead-code censuses take ~4 s (a raw scan of ~20 MB per unused-key candidate + two esbuild metafiles): they run as
+// a CHILD from here, alongside every other section, and §78 awaits the file it writes (no pipe: a busy parent never stalls it)
+const DEAD78 = (() => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'arch78-')), out = path.join(dir, 'dead.json'), errFd = fs.openSync(path.join(dir, 'err'), 'w');
+  return new Promise((resolve) => {
+    const c = spawn(process.execPath, [path.join(REPO, 'scripts/dead-code-census.mjs'), '--json', out], { stdio: ['ignore', 'ignore', errFd] });
+    const done = (code) => { fs.closeSync(errFd); resolve({ code, out, dir, err: fs.readFileSync(path.join(dir, 'err'), 'utf8') }); };
+    c.on('exit', done); c.on('error', () => done(-1));
+  });
+})();
 
 const rel = (p) => path.relative(REPO, p).replace(/\\/g, '/');
 const read = (f) => { try { return fs.readFileSync(path.join(REPO, f), 'utf-8'); } catch { return ''; } };
@@ -1642,6 +1653,44 @@ for (const [edge] of EXCEPTIONS) {
   //      ONE generic legacy row (auto-resume, category Spending since 2.369.202).
   const literalRows = [...schema.matchAll(/^  '(claude|codex|opencode)\.[a-zA-Z]+':/gm)].map((m) => m[0].trim());
   ok(literalRows.length === 1 && literalRows[0] === "'claude.autoResumeOnLimit':", `the schema hand-writes exactly ONE harness-prefixed row — the generic legacy auto-resume default (found: ${literalRows.join(', ')})`);
+  // 46d. THE SPAWN-SITE CENSUS (lane dc-ws-create, the 2026-10-04 decoupling
+  //      plan rows rv-harnesses H1 / rv-server H1-H2). The create path and
+  //      server.js's billing + model seams gate on the DESCRIPTOR — spawn rows /
+  //      hooks (src/harnesses/index.js SPAWN_ROWS), caps rows, billingIdentity(),
+  //      models() — never on a spelled harness id: src/ws-create.js carried 26
+  //      such lines, sessionAuth 2 and the codex model refresh lived in
+  //      server.js. ZERO now — except the four sites lane dc-harness-store moved
+  //      onto the descriptor's STORE hooks in the same wave (the writer sweep's
+  //      protect list + local gate, the codex fork-chain env, the remote chat
+  //      flags; HANDED below, matched verbatim so they cannot grow and match
+  //      nothing once int213 merges it) — with a planted offender for each spelling; and
+  //      every DECLARED spawn row has a reader (derived from SPAWN_ROWS, so a
+  //      row nobody consults is red). The live proof — a register()ed fake
+  //      harness spawning through the real handler — is scripts/test-harness-spawn.mjs.
+  {
+    const ID_BRANCH = /[!=]==?\s*'(?:claude|codex|opencode|acp|shell)'|case\s+'(?:claude|codex|opencode|acp|shell)'\s*:/;
+    const branchLines = (txt) => txt.split('\n').filter((l) => !/^\s*\/\//.test(l) && ID_BRANCH.test(l));
+    const wc = read('src/ws-create.js'), srv = read('server.js');
+    const HANDED = ["const sweepOpts = (hostId) => backend === 'codex'", "(es.backend || 'claude') === 'codex' && (es.host || null) === (hostId || null)",
+      "if (backend === 'codex' && data.resumeId && sessionSpec.env) {", "            if (backend === 'claude') {\n              for (const fl of [['--output-format', 'stream-json']",
+      "&& (backend === 'claude' || backend === 'codex') && /^[\\w-]+$/.test(data.resumeId) && hosts) {"];
+    const handedLines = (txt) => HANDED.filter((h) => txt.includes(h)).map((h) => h.split('\n')[0].trim());
+    const wcHits = branchLines(wc).filter((l) => !handedLines(wc).some((h) => l.trim().startsWith(h) || l.includes(h)));
+    ok(wc.length > 50000 && wcHits.length === 0 && branchLines(wc).length <= HANDED.length, `46d src/ws-create.js branches on no harness id outside dc-harness-store's ${handedLines(wc).length} handed sites — every per-harness spawn fact is a descriptor row (was 26)${wcHits.length ? ' — ' + wcHits.slice(0, 3).map((l) => l.trim().slice(0, 90)).join(' ; ') : ''}`);
+    const a0 = srv.indexOf('function sessionAuth(s) {'), authBody = a0 >= 0 ? srv.slice(a0, srv.indexOf('\n}\n', a0)) : '';
+    ok(authBody.length > 300 && branchLines(authBody).length === 0 && /h\.billingIdentity\(s, \{ accounts, withHost, poolAuth \}\)/.test(authBody),
+      '46d server.js sessionAuth asks the harness (descriptor billingIdentity) — no claude/codex rungs inline');
+    ok(!/refreshCodexModels|AVAILABLE_MODELS\.codex|models_cache\.json/.test(srv) && /h\.models\(\{ dataDir: /.test(srv),
+      '46d server.js refreshes the model lists through every descriptor\'s models() (codex: src/harnesses/codex-models.js)');
+    const { createRequire } = await import('node:module');
+    const { SPAWN_ROWS } = createRequire(import.meta.url)('../src/harnesses/index.js');
+    const readers = wc + read('src/server/otel-ingest.js');
+    const unread = Object.keys(SPAWN_ROWS).filter((k) => !new RegExp(`\\b(?:SP|spawnOf\\([^)]*\\))\\.${k}\\b`).test(readers));
+    ok(Object.keys(SPAWN_ROWS).length >= 10 && unread.length === 0, `46d every declared spawn row has a reader (${Object.keys(SPAWN_ROWS).length} rows)${unread.length ? ' — unread: ' + unread.join(', ') : ''}`);
+    ok(branchLines("          if (backend === 'claude' && sessionMode === 'terminal' && data.hostId) {").length === 1
+      && branchLines("    switch (be) { case 'codex': return poolAuth(a); }").length === 1 && branchLines("          if (SP.statusline && sessionMode === 'terminal') {").length === 0,
+      'NEGATIVE CONTROL: the pre-lane gate and a case label are both offenders; a row read is not (46d can go red)');
+  }
 }
 
 // 47. THE ONBOARDED-FLAG CENSUS (2.369.125 r7, the Actions mirror on cc89d748).
@@ -3534,6 +3583,8 @@ console.log('§73 the usage index: node:sqlite in one file, never on the main th
 // resource sample, no record): the access layer holds it, the bridge relays it ──
 console.log('§D014 the vnc-native rung: no new device op, no keeper rows');
 {
+  const { createRequire } = await import('node:module');
+  const wiringFolds = () => { const w = fs.readFileSync(path.join(REPO, 'src/server/window-live-wiring.js'), 'utf8'); return /resolveTarget: \(id\) => src\(id\)\.target\(id\)/.test(w) && /onInput: \(id\) => \{ src\(id\)\.onInput\?\.\(id\); \}/.test(w) && !/DESKTOP_SINGLETON_ID \?|machineDesktopHost/.test(w); };
   const rd = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
   const RUNG = /vnc-native|machine-desktop|machineDesktop|MACHINE_DESKTOP|VNC_NATIVE|tightvnc/i;
   const census = (s) => ['src/agentd/agentd.js', 'src/agentd/client.js', 'src/desktop-serve.js', 'src/server/desktop-app-keeper.js'].filter((f) => RUNG.test(s[f]));
@@ -3544,8 +3595,13 @@ console.log('§D014 the vnc-native rung: no new device op, no keeper rows');
   const a = acc.indexOf('// ── design 014 D1'), b = acc.indexOf('/** ONE file of a paired machine');
   const calls = a > 0 && b > a ? [...new Set([...acc.slice(a, b).matchAll(/\bdm\.(\w+)\(/g)].map((m) => m[1]))].sort() : null;
   ok(JSON.stringify(calls) === '["runCmd","runStream","status","tcpForward"]', `§D014 the access layer reaches the machine ONLY through existing agent calls (tcpForward, runCmd, runStream — and the handle's own status()): ${JSON.stringify(calls)}`);
-  const wiring = rd('src/server/window-live-wiring.js');
-  ok(/MD\(id\) \? access\.machineDesktopTarget\(id\) : keeper\.streamTarget\(id\)/.test(wiring) && /onInput: \(id\) => \{ if \(MD\(id\)\) return; keeper\.noteInput\(id\);/.test(wiring), '§D014 the bridge resolves a machine desktop through the access layer, never the keeper, and its input never reaches the keeper\'s idle clock');
+  // lane dc-desktop-caps: the bridge folds over STREAM_SOURCES (src/server/stream-sources.js) — judged by BEHAVIOUR over stubs
+  const SS = createRequire(import.meta.url)(path.join(REPO, 'src/server/stream-sources.js'));
+  const srcCalls = [];
+  const srcs2 = SS.create({ vnc: { port: 5901 }, keeper: { noteInput: (id) => srcCalls.push('keeper ' + id), streamTarget: (id) => (srcCalls.push('keeper-target ' + id), null) }, engine: { noteUserInput: (id) => srcCalls.push('engine ' + id) }, access: { machineDesktopTarget: (id) => (srcCalls.push('access ' + id), { kind: 'rfb' }), machineDesktopGone: () => 'gone' } });
+  const md = SS.sourceOf(srcs2, 'machine-desktop.h1');
+  md.target('machine-desktop.h1'); md.onInput?.('machine-desktop.h1');
+  ok(wiringFolds() && md.name === 'machine-desktop' && md.personal && JSON.stringify(srcCalls) === '["access machine-desktop.h1"]' && SS.sourceOf(srcs2, 'da-1').name === 'keeper', '§D014 the bridge resolves a machine desktop through the access layer, never the keeper, and its input never reaches the keeper\'s idle clock (STREAM_SOURCES, by behaviour)');
   ok(census({ ...srcs, 'src/agentd/agentd.js': srcs['src/agentd/agentd.js'] + "\nif (msg.op === 'machine-desktop') { }" }).length === 1 && census({ ...srcs, 'src/server/desktop-app-keeper.js': srcs['src/server/desktop-app-keeper.js'] + '\n// a vnc-native idle row' }).length === 1, '§D014 CONTROL: a planted daemon op / keeper row naming the rung is caught');
 }
 
@@ -3735,6 +3791,33 @@ console.log('\nclock-judge census: every clock read beside a complexity claim is
 // real GTK app / builds a GTK window as a fixture hands its children a private XDG_RUNTIME_DIR (an `XDG_RUNTIME_DIR: <expr>`
 // entry that is not the inherited process.env one). DERIVED over every scripts/*.{mjs,js,cjs} on disk (untracked included);
 // NEGATIVE CONTROLS: a patched copy of a passing private-bus suite and of a passing GTK-fixture suite, the entry stripped.
+// §DB1 A DISPLAY BACKEND IS ONE ROW (lane dc-desktop-caps, 2026-10-04 — rv-desktop F-B1/F-B2/F-B3, rv-client F2). The rungs
+// declare CAPABILITY CELLS on DISPLAY_BACKENDS (src/desktop-apps.js CAP_KEYS); every reader asks `capsOf(rec)` (server) or
+// the record's served `caps` (client). The census: a comparison / case on a rung id or a stream kind (DERIVED from the
+// table) or on DESKTOP_SINGLETON_ID, in any src file outside its owners — the table (src/desktop-apps.js), the bring-up
+// recipes (src/desktop-display.js), the relays per stream kind (src/server/desktop-stream.js — rv-desktop F-B4, wave-2
+// lane dc-seams) and the singleton SOURCE owning its fixed stream id (src/server/stream-sources.js). Lines comparing an
+// install `what` are the install slot (rv-desktop F-I1, wave-2 lane dc-apps-rows), not a rung. Baseline 0 (was 37 lines in 8 files at 8d934bb1).
+console.log('§DB1 a display backend is one row: no rung-id / stream-kind branch outside its owners');
+{
+  const { createRequire } = await import('node:module');
+  const DA = createRequire(import.meta.url)(path.join(REPO, 'src/desktop-apps.js'));
+  const IDS = [...new Set([...DA.BACKEND_IDS, ...DA.DISPLAY_BACKENDS.map((b) => b.stream)])];
+  const alt = IDS.map((s) => s.replace(/[-]/g, '\\-')).join('|');
+  const BRANCH = new RegExp(`[!=]==\\s*['"](?:${alt})['"]|['"](?:${alt})['"]\\s*[!=]==|case\\s+['"](?:${alt})['"]|[!=]==\\s*(?:M\\.)?DESKTOP_SINGLETON_ID\\b`);
+  const OWNERS = new Set(['src/desktop-apps.js', 'src/desktop-display.js', 'src/server/desktop-stream.js', 'src/server/stream-sources.js']);
+  const INSTALL_WHAT = /\bwhat\s*[!=]==\s*'/;
+  const walk = (d) => fs.readdirSync(path.join(REPO, d), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : /\.(c?js|mjs)$/.test(e.name) ? [path.join(d, e.name)] : []));
+  const scan = (files) => { const hits = []; for (const [f, t] of files) if (!OWNERS.has(f)) t.split('\n').forEach((l, i) => { if (BRANCH.test(l) && !INSTALL_WHAT.test(l)) hits.push(`${f}:${i + 1}`); }); return hits; };
+  const files = [...walk('src'), 'server.js'].map((f) => [f, read(f)]);
+  const hits = scan(files);
+  ok(IDS.length === 4 && hits.length === 0, `§DB1 no file outside the owners branches on a rung id / stream kind (${IDS.join(', ')} — derived from DISPLAY_BACKENDS): ${hits.length}${hits.length ? ' — ' + hits.join(', ') + ' (read the row: capsOf(rec).<cell>)' : ''}`);
+  const daw = files.find(([f]) => f === 'src/lib/desktop-app-window.js')[1];
+  const planted = scan([['src/lib/desktop-app-window.js', daw.replaceAll("if (!cap(rec, 'scales')) return '';", "if (!rec || rec.stream !== 'xpra') return '';")], ['src/desktop-serve.js', "const own = rec.backend !== M.DESKTOP_SINGLETON_ID;"]]);
+  ok(planted.length === 3, `§DB1 CONTROL: the restored \`rec.stream !== 'xpra'\` (scaleChipText, scaleChipTitle) and a planted singleton-id branch are caught (${planted.length})`);
+  ok(DA.DISPLAY_BACKENDS.every((b) => DA.CAP_KEYS.every((k) => typeof b[k] === 'boolean')) && !DA.DISPLAY_BACKENDS.some((b) => 'adaptive' in b), `§DB1 every rung declares every cell (${DA.CAP_KEYS.join(', ')}) as a boolean; the unread \`adaptive\` column is gone`);
+}
+
 console.log('§76 every private-bus / GTK-fixture script gives its children a private XDG_RUNTIME_DIR');
 {
   const DBUS = /(?:bin|binOnPath)\(\s*['"]dbus-run-session['"]|(?:spawn|spawnSync|execFile|execFileSync|execSync)\(\s*[`'"]dbus-run-session/;
@@ -3784,6 +3867,98 @@ console.log('§77 the raw API core names no vendor: no VENDORS / KIND_VENDOR tab
   ];
   const r = ctl.map(([n, files]) => ({ n, red: census77(files).length > 0 }));
   ok(r.every((x) => x.red), `§77 CONTROLS: ${r.map((x) => `${x.n} (${x.red ? 'RED' : 'missed'})`).join(', ')}`);
+}
+
+// §78 THE RATCHET: LITERAL-ID BRANCHES AND DEAD CODE ONLY SHRINK (lane dc-ratchet, 2026-10-04; the decoupling review's
+// rv-harnesses T18 + rv-client-chrome F3 / F10 + rv-server-core's export census). The owner's standard is a member = ONE
+// file + ONE registration line, the core gating on declared rows. Four DERIVED censuses, each pinned per file in a
+// baseline written from master 8d934bb1 (the numbers are printed as a table below):
+//   id-branch     scripts/id-branch-census.mjs: lines that branch on a quoted member id (=== / !== / case / a dispatch map
+//                 keyed by ≥2 member ids), per family (harness / channel / display / browser / plugin), outside the
+//                 family's owner (folder, file or table) — baseline scripts/fixtures/id-branch-baseline.json
+//   i18n-unused · export-dead · lib-unreached: scripts/dead-code-census.mjs (run as a child at the top of this suite, it
+//                 takes ~4 s) — baseline scripts/fixtures/dead-code-baseline.json
+// RED on a rise (the delta names the new lines / keys / exports / files) and RED on a fall: the lane that removed a branch
+// or a dead key lowers the baseline in the same commit (`node scripts/<census>.mjs --lower` writes min(baseline, now) and
+// never raises a row; a genuine false positive is an ALLOW row with its reason in id-branch-census.mjs, not a raised count).
+// NEGATIVE CONTROLS: planted texts per regex shape (counted), an owner folder / owner table / comment / lone property key /
+// ALLOW row (not counted); a planted dead export ESM + CJS among live ones; planted dictionary keys judged by the raw fallback.
+console.log('§78 literal-id branches per family + unused i18n keys + unreferenced exports + unreached src/lib only shrink (ratchet)');
+{
+  const IB = await import('./id-branch-census.mjs');
+  const DC = await import('./dead-code-census.mjs');
+  const baseIB = JSON.parse(read('scripts/fixtures/id-branch-baseline.json') || '{}');
+  const baseDC = JSON.parse(read('scripts/fixtures/dead-code-baseline.json') || '{}');
+  const ib = IB.census(REPO);
+  const jIB = IB.judge(baseIB, ib.counts);
+  const run = await DEAD78;
+  let dc = null; try { dc = JSON.parse(fs.readFileSync(run.out, 'utf8')); } catch {}
+  fs.rmSync(run.dir, { recursive: true, force: true });
+  ok(run.code === 0 && dc, `§78 the dead-code census child ran (exit ${run.code}${run.err ? ' — ' + run.err.slice(0, 300) : ''})`);
+  dc = dc || { counts: {}, i18nKeys: {}, exportRows: [], libFiles: [] };
+  const jDC = IB.judge(baseDC, dc.counts);
+  const files = (byFile) => Object.keys(byFile || {}).length;
+  const rows = [
+    ...Object.keys(IB.FAMILIES).map((f) => [`id-branch ${f}`, IB.total(ib.counts[f]), IB.total(baseIB[f]), files(ib.counts[f]), `owner ${ib.owners[f].join(' ')}${ib.allowed[f] ? ` · ${ib.allowed[f]} allowed` : ''}`]),
+    ['i18n-unused', IB.total(dc.counts['i18n-unused']), IB.total(baseDC['i18n-unused']), files(dc.counts['i18n-unused']), `zh + ja; raw scan over ${dc.corpusFiles} production files`],
+    ['export-dead', IB.total(dc.counts['export-dead']), IB.total(baseDC['export-dead']), files(dc.counts['export-dead']), `src/** + server.js exports; ${dc.exportFiles} files read`],
+    ['lib-unreached', IB.total(dc.counts['lib-unreached']), IB.total(baseDC['lib-unreached']), files(dc.counts['lib-unreached']), `of ${dc.lib} src/lib files; ${(dc.libFiles || []).join(' ')}`],
+  ];
+  const W = [20, 6, 9, 6];
+  console.log('    ' + ['census', 'now', 'baseline', 'files'].map((h, i) => h.padEnd(W[i])).join(' ') + ' scope');
+  for (const r of rows) console.log('    ' + r.slice(0, 4).map((c, i) => String(c).padEnd(W[i])).join(' ') + ' ' + r[4]);
+  const newLines = (r) => ib.lines[r.family].filter((l) => l.file === r.file).map((l) => `      ${l.file}:${l.line}  ${l.text}`).join('\n');
+  ok(jIB.rises.length === 0, `§78 no file branches on a member id more often than its baseline${jIB.rises.length ? ' — RISES (read a declared row / move the branch into the owner instead):\n' + jIB.rises.map((r) => `    ${r.family} ${r.file}: ${r.base} → ${r.now}\n${newLines(r)}`).join('\n') : ''}`);
+  ok(jIB.falls.length === 0, `§78 the id-branch baseline is current${jIB.falls.length ? ' — FALLS (good): lower the baseline in this commit with `node scripts/id-branch-census.mjs --lower`: ' + jIB.falls.map((r) => `${r.family} ${r.file} ${r.base} → ${r.now}`).join(' | ') : ''}`);
+  const dcDetail = (r) => r.family === 'i18n-unused' ? (dc.i18nKeys[r.file] || []).slice(-(r.now - r.base)).map((k) => `      ${r.file}:${k.line} ${JSON.stringify(k.key).slice(0, 100)}`).join('\n')
+    : r.family === 'export-dead' ? dc.exportRows.filter((x) => x.startsWith(r.file + ' ')).map((x) => '      ' + x).join('\n') : '      ' + r.file;
+  ok(jDC.rises.length === 0, `§78 no new dead text: unused i18n keys, unreferenced exports and unreached src/lib files stay at or under baseline${jDC.rises.length ? ' — RISES (use it or delete it):\n' + jDC.rises.map((r) => `    ${r.family} ${r.file}: ${r.base} → ${r.now}\n${dcDetail(r)}`).join('\n') : ''}`);
+  ok(jDC.falls.length === 0, `§78 the dead-code baseline is current${jDC.falls.length ? ' — FALLS (good): lower the baseline in this commit with `node scripts/dead-code-census.mjs --lower`: ' + jDC.falls.map((r) => `${r.family} ${r.file} ${r.base} → ${r.now}`).join(' | ') : ''}`);
+  ok(Object.values(ib.owners).flat().every((o) => !/NOT FOUND/.test(o)) && ib.owners.display.some((o) => /^src\/desktop-apps\.js:\d+-\d+$/.test(o)) && ib.owners.browser.some((o) => /^src\/browser-profiles\.js:\d+-\d+$/.test(o)) && ib.owners.plugin.some((o) => /^src\/plugins\.js:\d+-\d+$/.test(o)),
+    `§78 every owner table is found (a renamed table would silently count its own rows): ${['display', 'browser', 'plugin'].map((f) => ib.owners[f].join(' ')).join(' · ')}`);
+  ok((dc.libFiles || []).includes('src/lib/usage-pace.js') && IB.total(dc.counts['i18n-unused']) >= 400, `§78 POSITIVE CONTROL: the census re-derives the review's findings (usage-pace.js unreached — rv-client F10; ${IB.total(dc.counts['i18n-unused'])} unused dictionary entries — F3's 243 × 2 + the test-only ones)`);
+  // dc-browser-providers' CONTROL (its §79, folded into this family at int213): the keeper with ONE `=== 'chromium'` ladder
+  // restored rises above its browser row — the launch shape is read from the PROVIDERS row, never branched on the id
+  const KEEPER = 'src/server/browser-keeper.js';
+  const kc = IB.census(REPO, { files: [KEEPER], read: (f) => read(f) + "\n    if (String(p.provider || 'chromium') === 'chromium') x();" });
+  ok((kc.counts.browser[KEEPER] || 0) > ((baseIB.browser || {})[KEEPER] || 0) && IB.judge(baseIB, { ...ib.counts, browser: { ...ib.counts.browser, [KEEPER]: kc.counts.browser[KEEPER] } }).rises.some((r) => r.family === 'browser' && r.file === KEEPER),
+    `§78 NEGATIVE CONTROL (dc-browser-providers): the keeper with one \`=== 'chromium'\` branch restored is a browser rise (${(baseIB.browser || {})[KEEPER] || 0} → ${kc.counts.browser[KEEPER]})`);
+  // NEGATIVE CONTROLS — the id-branch regexes and exclusions
+  const PLANT = {
+    'src/zz-shared.js': ["if (kind === 'slack') x();", "switch (b) { case 'codex': break; }", 'const M = { xpra: 1, vnc: 2 };', 'const R = {', '  cloak: a,', '  chromium: b,', '};', "if ('frp' !== id) y();",
+      'spawn(c, { shell: true });', 'const o = { agents: 0, title: 1 };', "// if (kind === 'lark') z();", "const label = kind === 'gmail' ? 'Gmail' : 'x'; // counted once per family"].join('\n'),
+    'src/channels/zz.js': "if (kind === 'slack') a(); if (backend === 'claude') b();",
+    'src/desktop-apps.js': ['const DISPLAY_BACKENDS = Object.freeze([', "  Object.freeze({ id: 'xpra', ok: s === 'vnc' }),", ']);', "if (stream === 'x11vnc') c();"].join('\n'),
+    'src/codex-message-manager.js': "if (n === 'shell') return 'bash';",
+  };
+  const pc = IB.census(REPO, { files: Object.keys(PLANT), read: (f) => PLANT[f] });
+  const got = Object.fromEntries(Object.keys(IB.FAMILIES).map((f) => [f, pc.counts[f]]));
+  const want = { harness: { 'src/zz-shared.js': 1, 'src/channels/zz.js': 1 }, channel: { 'src/zz-shared.js': 2 }, display: { 'src/zz-shared.js': 1, 'src/desktop-apps.js': 1 }, browser: { 'src/zz-shared.js': 2 }, plugin: { 'src/zz-shared.js': 1 } };
+  ok(JSON.stringify(got) === JSON.stringify(want) && pc.allowed.harness === 1,
+    `§78 NEGATIVE CONTROLS: compare / reversed compare / case / one-line + multi-line dispatch maps counted; a comment, a lone { shell: true } / { agents: 0 } key, the owner folder, the DISPLAY_BACKENDS table and an ALLOW row not (${JSON.stringify(got)}, allowed ${pc.allowed.harness})`);
+  const raised = IB.judge({ harness: { 'a.js': 2 } }, { harness: { 'a.js': 3, 'b.js': 1 } }), low = IB.lowered({ harness: { 'a.js': 2, 'b.js': 4 } }, { harness: { 'a.js': 5, 'b.js': 1 } });
+  ok(raised.rises.length === 2 && raised.falls.length === 0 && JSON.stringify(low) === JSON.stringify({ harness: { 'a.js': 2, 'b.js': 1 } }), `§78 NEGATIVE CONTROL: a rise in a pinned file and a new file are both red; --lower never raises a row (${JSON.stringify(low)})`);
+  // NEGATIVE CONTROLS — the dead-code censuses
+  const EXP = {
+    'src/zz-a.js': 'export function deadOne() {}\nexport function usedElsewhere() {}\nexport const SPARE = 1; f(SPARE);\n',
+    'src/zz-b.js': 'function cjsDead() {}\nfunction cjsUsed() {}\nmodule.exports = { cjsDead, cjsUsed };\n',
+    'scripts/zz-test.mjs': 'usedElsewhere(); cjsUsed();\n',
+  };
+  const pe = DC.exportDead(REPO, { files: Object.keys(EXP), read: (f) => EXP[f] });
+  ok(JSON.stringify(pe.rows) === JSON.stringify(['src/zz-a.js deadOne', 'src/zz-b.js cjsDead']), `§78 NEGATIVE CONTROL: dead ESM + CJS exports caught; one a test names and one its own file uses are not (${JSON.stringify(pe.rows)})`);
+  const corpus = "t('In t()'); const row = { label: 'Used via a row' }; x('It\\'s quoted'); tc('ctx'); 'Both parts' <b>a &amp; b</b>";
+  const verdicts = ['In t()', 'Used via a row', "It's quoted", 'ctx::Both parts', 'a & b', 'Never anywhere', 'ctx::Nowhere'].map((k) => DC.keyUnused(k, new Set(['In t()']), corpus));
+  ok(JSON.stringify(verdicts) === JSON.stringify([false, false, false, false, false, true, true]), `§78 NEGATIVE CONTROL: unused-key judge — an extracted key, a data-row literal, an escaped quote, both tc parts, an HTML-escaped key are used; a key nowhere and a tc key with a missing part are not (${JSON.stringify(verdicts)})`);
+}
+
+// dc-harness-store (2.369.213): the resume hooks are the descriptor's — the
+// generic sweep/fork readers carry no harness id (the lane proof is
+// test-harness-contract `store:`: a derived reader census + a fake harness
+// with a patched-copy control).
+{
+  const rd = (f) => { try { return fs.readFileSync(path.join(ROOT_DIR_DCHS, f), 'utf8'); } catch { return ''; } };
+  ok(!/=== '(claude|codex|opencode)'/.test(rd('src/writer-sweep.js')) && !/=== '(claude|codex|opencode)'/.test(rd('src/resume-store.js')) && /store\.writerSweep|\.writerSweep\b/.test(rd('src/resume-store.js')),
+    'dc-harness-store: writer-sweep.js + resume-store.js read store.writerSweep / forkChain with no harness id branch (proof: test-harness-contract store:)');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

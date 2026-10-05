@@ -12,10 +12,7 @@
  * of these for cloak, its allowlist = the §7.2.1 record's run hosts + the sites
  * this deployment names, and the browser gets `--proxy-server` pointing here
  * with loopback NOT bypassed; the pinned DOWNLOAD runs through another one whose
- * allowlist is the record's download hosts), the cloakserve container
- * (src/browser-profiles.cloakservePlan points HTTPS_PROXY/HTTP_PROXY at it from
- * an INTERNAL docker network — the container has no other route out of the
- * host), and any profile whose `proxy` field names it. Loopback and link-local targets are refused by the
+ * allowlist is the record's download hosts), and any profile whose `proxy` field names it. Loopback and link-local targets are refused by the
  * verdict itself — the proxy is never a way back into the hub's services.
  *
  * Not a general proxy: no auth (loopback only, like the stream port, §6.1),

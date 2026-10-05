@@ -200,7 +200,45 @@ const M = mutantCopies('bprop-switch', REPO);
   const line = m.proposalLines(m.proposalCardBlock({ id: 'bl-0000aaaa', host: 'accounts.google.com', proposal: q })).plan.find((l) => /opens only the sites/.test(l.key));
   ok(!q.alsoSites && /\(only that host\)/.test(line.key), 'CONTROL: a record that does not freeze them leaves the card saying "only that host" for Google — the V1 rows above would be red');
 }
-for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 2 })) ok(c.pass, c.name, c.detail);
+console.log('— lane dc-browser-providers: a FAKE provider (fakebrowser — headless only, no build choice) registered by ONE row line in a copy of PROVIDERS');
+{
+  // the closed world: a copy of browser-profiles.js with ONE added row; copies of browser-switch.js / browser-builds.js whose
+  // `require('./browser-profiles.js')` (and builds' `./browser-switch.js`) reach those copies — nothing else is edited
+  const FAKE = "  fakebrowser: Object.freeze({ ...NO_LAUNCH, launchArgs: Object.freeze(['--headless=new']), seeded: true, launchFlags: true, tier: 2, wired: true, label: 'FakeBrowser (headless only)', keyScope: 'none', canSwitchTo: 'in-place', ownsDir: true, leaseKind: 'tab', remote: null, starts: true, headed: false, binary: 'fakebrowser', cdp: true, allowedDomains: true, pinTab: true, consent: null }),\n";
+  const rd = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
+  const psrc = rd('src/browser-profiles.js'), at = psrc.indexOf("  'local-window': Object.freeze({"), end = psrc.indexOf('\n});\n', at) + 1;
+  ok(at > 0 && end > at, 'the registration point: the last PROVIDERS row, then the table closes');
+  const pPath = M.write('src/browser-profiles.js', psrc.slice(0, end) + FAKE + psrc.slice(end), 'fake', { name: 'profiles-fake' });
+  const PROF = "require('./browser-profiles.js')";
+  const swSrc = rd('src/browser-switch.js');
+  const swPath = M.write('src/browser-switch.js', swSrc.split(PROF).join(`require(${JSON.stringify(pPath)})`), 'fake', { name: 'switch-fake' });
+  const bbPath = M.write('src/browser-builds.js', rd('src/browser-builds.js').split(PROF).join(`require(${JSON.stringify(pPath)})`).split("require('./browser-switch.js')").join(`require(${JSON.stringify(swPath)})`), 'fake', { name: 'builds-fake' });
+  const P = require(pPath), S = require(swPath), BB = require(bbPath);
+  ok(P.providerIds().includes('fakebrowser') && P.providerControl('fakebrowser').ok === true && P.capabilityRefusal('fakebrowser', 'headed').code === 'provider_lacks_capability' && P.capabilityRefusal('fakebrowser', 'start') === null, 'the row is a provider: listed, usable here, refused a window by its own `headed: false` cell');
+  const env = S.launchEnvFor('fakebrowser', { seed: 7, executablePath: '/opt/fake/chrome' });
+  ok(JSON.stringify(env) === JSON.stringify({ AGENT_BROWSER_ARGS: '--headless=new,--fingerprint=7', AGENT_BROWSER_EXECUTABLE_PATH: '/opt/fake/chrome' }) && S.providerNeedsSeed('fakebrowser') && S.integrationIdFor('fakebrowser') === null && S.seedForSwitch({ profile: { provider: 'chromium' }, target: 'fakebrowser', hex: '0000002a' }).minted === true, 'THE LAUNCH ENV from the row: its own arguments + its seed + the executable; a seed minted at the switch; no key row', env);
+  const profile = { id: 'bp-0000fa4e', label: 'fake', provider: 'chromium', dir: '/tmp/x' };
+  const rows = S.switcherRows({ profile, providerIds: P.providerIds(), rowOf: P.providerRow, controlOf: P.providerControl, capabilityRefusalOf: P.capabilityRefusal, now: 1 });
+  const fr = rows.find((r) => r.id === 'fakebrowser');
+  ok(fr && fr.switchKind === 'in-place' && fr.integrationId === null && fr.facts.binary === null && S.switchChoices({ profile, providerIds: P.providerIds(), rowOf: P.providerRow, controlOf: P.providerControl }).includes('fakebrowser'), 'THE SWITCH VERDICT: chromium → fakebrowser is an in-place target and one of the profile\'s choices', fr && { state: fr.state, code: fr.code, reason: fr.reason });
+  const build = { kind: 'build', version: '151.0.7922.34' };
+  ok(BB.browserChoiceVerdict({ choice: build, provider: 'fakebrowser' }).code === 'browser_choice_provider' && BB.browserChoiceVerdict({ choice: build, provider: 'chromium', builds: { ok: true, builds: [] } }).code !== 'browser_choice_provider', 'no build choice: a Chrome build for the fake profile is refused by its `buildChoice` cell (chromium is not)');
+  // the client models, fed the rows the routes carry (GET /api/browser/providers = providerRows; the profile view stamps buildChoice)
+  const NP = await import('../src/lib/browser-new-profile-model.js'), SWM = await import('../src/lib/browser-switcher-model.js'), BM = await import('../src/lib/browser-build-model.js'), PM = await import('../src/lib/browser-panel-model.js');
+  const t = (k, p) => String(k).replace(/\{(\w+)\}/g, (_, n) => (p && p[n] != null ? String(p[n]) : ''));
+  const ch = NP.providerChoices({ providers: P.providerRows(), t }).find((c) => c.id === 'fakebrowser');
+  ok(ch && ch.state === 'ready' && ch.pickable === true, 'New profile…: the fake row is a pickable choice off the /providers rows', ch);
+  const m = SWM.switcherModel({ profile, rows }, { t });
+  ok(m.targets.some((x) => x.id === 'fakebrowser'), 'the switch dialog\'s model draws a card for it', m.targets.map((x) => x.id));
+  const fv = { id: 'bp-0000fa4e', provider: 'fakebrowser', buildChoice: !!P.providerRow('fakebrowser').buildChoice, live: false };
+  ok(BM.cardBuildLine({ buildChoice: fv.buildChoice, choice: build }, t) === null && !PM.rowMenu(fv, { t }).some((x) => x.id === 'build') && PM.rowMenu({ ...fv, provider: 'chromium', buildChoice: true }, { t }).some((x) => x.id === 'build'), 'the panel: no build line, no Change build… for it — the cell says so, not the id');
+  // CONTROL: the id ladder restored in launchEnvFor (`=== 'chromium'` / `!== 'cloak'`) ⇒ the fake launches with NO arguments
+  const head = "  const row = rowOf(provider);\n";
+  ok(swSrc.includes(head), 'the control cuts launchEnvFor where it reads the row');
+  const lad = M.load('src/browser-switch.js', swSrc.split(PROF).join(`require(${JSON.stringify(pPath)})`).replace(head, head + "  if (String(provider == null ? '' : provider) === 'chromium') return executablePath ? { AGENT_BROWSER_EXECUTABLE_PATH: String(executablePath) } : {};\n  if (String(provider == null ? '' : provider) !== 'cloak') return {};\n"), 'id-ladder');
+  ok(JSON.stringify(lad.launchEnvFor('fakebrowser', { seed: 7, executablePath: '/opt/fake/chrome' })) === '{}', 'CONTROL: with the `=== \'chromium\'` ladder restored the fake browser starts with no arguments, no seed, no executable — the launch-env row above would be red');
+}
+for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 6 })) ok(c.pass, c.name, c.detail);
 
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass}${fail ? ` passed, ${fail} failed` : ''})`);
 process.exit(fail ? 1 : 0);

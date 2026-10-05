@@ -59,6 +59,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { sameToken } = require('../pairing-token.js'); // B-8dda: the per-boot header is a secret too
 const { parseOtlpLogs } = require('../otel-truth.js');
+const { spawnOf } = require('../harnesses'); // the spawn.otelExport row: whose accounts OTel can name
 
 const MAX_TRUTH = 60000;      // in-memory rid map cap (~a week of heavy storms)
 const FILE_MAX = 12 * 1024 * 1024; // boot-time trim threshold for the stash
@@ -141,7 +142,8 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
         return { known: true, acct: named ?? null };
       }
       if (email) {
-        const a = (listAccounts?.() || []).find((x) => x.backend !== 'codex' && x.type !== 'pooled'
+        // only a harness whose spawns EXPORT OTel (descriptor spawn.otelExport — claude) has accounts OTel can name
+        const a = (listAccounts?.() || []).find((x) => spawnOf(x.backend || 'claude').otelExport === true && x.type !== 'pooled'
           && String(x.email || '').toLowerCase() === email);
         if (a) return { known: true, acct: a.id };
       }

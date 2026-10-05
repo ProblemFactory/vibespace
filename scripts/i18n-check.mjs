@@ -13,16 +13,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { dictEntries } from './i18n-extract.mjs';
 
 const lib = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src', 'lib');
 const DICTS = ['i18n-zh.js', 'i18n-ja.js'].map((f) => path.join(lib, f));
 
 // Quote-AGNOSTIC (2.227.1, real miss: python-inserted single-quoted entries
 // were invisible to every check — a mixed-quote duplicate of "this machine"
-// shipped without a peep). Keys/values are DECODED before comparison.
-const STR_LIT = `(?:"(?:[^"\\\\]|\\\\.)*"|'(?:[^'\\\\]|\\\\.)*')`;
-const ENTRY_RE = new RegExp(`^  (${STR_LIT}): (${STR_LIT}),?$`);
-const decode = (lit) => { try { return new Function('return ' + lit)(); } catch { return lit; } };
+// shipped without a peep). Keys/values are DECODED before comparison —
+// dictEntries (scripts/i18n-extract.mjs) is the one entry parser.
 let dupFail = 0, warns = 0;
 const keySets = new Map();
 
@@ -30,20 +29,17 @@ for (const file of DICTS) {
   const name = path.basename(file);
   const seen = new Map(); // key -> { line, value }
   const entries = new Map();
-  fs.readFileSync(file, 'utf8').split('\n').forEach((ln, i) => {
-    const m = ln.match(ENTRY_RE);
-    if (!m) return;
-    const k = decode(m[1]), v = decode(m[2]);
+  for (const { key: k, value: v, line } of dictEntries(fs.readFileSync(file, 'utf8'))) {
     if (seen.has(k)) {
       dupFail++;
       const prev = seen.get(k);
       const conflict = prev.value !== v;
-      console.error(`✗ ${name}: duplicate key ${k.slice(0, 60)} @${prev.line} and @${i + 1}${conflict ? ` — CONFLICTING translations (${prev.value.slice(0, 24)}… vs ${v.slice(0, 24)}…); the later silently overrides the earlier EVERYWHERE. Same word, different meaning? use tc(ctx, str)` : ' (identical — delete one)'}`);
+      console.error(`✗ ${name}: duplicate key ${k.slice(0, 60)} @${prev.line} and @${line}${conflict ? ` — CONFLICTING translations (${prev.value.slice(0, 24)}… vs ${v.slice(0, 24)}…); the later silently overrides the earlier EVERYWHERE. Same word, different meaning? use tc(ctx, str)` : ' (identical — delete one)'}`);
     } else {
-      seen.set(k, { line: i + 1, value: v });
+      seen.set(k, { line, value: v });
       entries.set(k, v);
     }
-  });
+  }
   keySets.set(name, entries);
   // param/tag preservation: every {param} and <tag in the key must appear in
   // the translation (a lost param renders the raw placeholder to users)

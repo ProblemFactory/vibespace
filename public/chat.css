@@ -861,6 +861,9 @@
 .chat-send-hint.hidden { display: none; }
 .chat-send-hint-sep { color: var(--border); }
 @media (max-width: 768px) { .chat-send-hint { display: none; } }
+/* inc-muukd9oq-qyc3: an Enter the input-method guard turned into a newline says so here for 2 s (the hint's row) */
+.chat-ime-hint { width: 100%; font-size: 11px; color: var(--text-dim); padding: 3px 2px 0; }
+.chat-ime-hint[hidden] { display: none; }
 .chat-steer-btn {
   display: none; background: none; border: 1px solid var(--border);
   color: var(--text-dim); cursor: pointer; flex-shrink: 0;

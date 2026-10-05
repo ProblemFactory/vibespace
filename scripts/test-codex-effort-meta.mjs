@@ -39,7 +39,7 @@ console.log('— ① the PURE label rules (agent-meta): ultra is a MODE, the lev
 {
   const { effortDisplay, multiAgentReasoningFor, noteModelCatalog, BACKEND_META } = await import(path.join(REPO, 'src/lib/agent-meta.js'));
   ok(effortDisplay('codex', 'ultra') === 'ultra', 'with no catalog loaded, ultra is just "ultra" (never a guessed level)', effortDisplay('codex', 'ultra'));
-  // the REAL shape /api/available-models serves (server.js refreshCodexModels)
+  // the REAL shape /api/available-models serves (the codex descriptor's models(), src/harnesses/codex-models.js)
   noteModelCatalog('codex', [
     { id: 'gpt-6-astra', label: 'GPT-6 Astra (272k)', efforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'], multiAgentEffort: 'xhigh' },
     { id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', efforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'], multiAgentEffort: '' },
@@ -560,7 +560,7 @@ console.log('— ⑦ the WRITER: the wrapper\'s effort reaches session-meta, so 
       JSON.stringify({ o: s2._effortOrigin, changed: JSON.stringify(disk2()) !== before2 }));
     // …and boot-restore really is the reader that makes this matter.
     const bootSrc = fs.readFileSync(path.join(REPO, 'src/server/boot-restore.js'), 'utf8');
-    ok((bootSrc.match(/_effortOrigin: meta\.effortOrigin \|\| null/g) || []).length >= 3,
+    ok(((s, r) => (s.match(new RegExp(r.source, 'g')) || []).length === 1 && r.test((s.match(/\nfunction sessionFromMeta\(meta, transportFacts\) \{[\s\S]*?\n\}\n/) || [''])[0]) && (s.match(/= sessionFromMeta\(meta, \{/g) || []).length === 3)(bootSrc, /_effortOrigin: meta\.effortOrigin \|\| null/),
       'r3 ①: …and boot-restore is what reads that key back (all three restore paths)');
   }
   const ev = require(path.join(REPO, 'src/server/stdout/codex-events.js'));
@@ -587,7 +587,7 @@ console.log('— ⑧ spawn / restore wiring pins (the saved effort must REACH th
   const adapter = fs.readFileSync(path.join(REPO, 'src/adapters/codex.js'), 'utf8');
   ok(/CODEX_WEBUI_EFFORT/.test(adapter), 'the codex adapter is what turns that into the wrapper\'s env');
   const boot = fs.readFileSync(path.join(REPO, 'src/server/boot-restore.js'), 'utf8');
-  ok((boot.match(/_effort: meta\.effort \|\| null/g) || []).length >= 3,
+  ok(((s, r) => (s.match(new RegExp(r.source, 'g')) || []).length === 1 && r.test((s.match(/\nfunction sessionFromMeta\(meta, transportFacts\) \{[\s\S]*?\n\}\n/) || [''])[0]) && (s.match(/= sessionFromMeta\(meta, \{/g) || []).length === 3)(boot, /_effort: meta\.effort \|\| null/),
     'every boot-restore path restores _effort from session-meta (so a server restart does not lose it)');
   const wsh = fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8');
   ok(/chatStatus\.effortNext = session\._effort/.test(wsh), 'the attach payload carries the pending value separately from the running one');
@@ -608,9 +608,9 @@ console.log('— ⑨ client wiring pins');
   ok(/noteModelCatalog\('codex', models\)/.test(sb), 'the effort picker\'s own catalog fetch feeds the model catalog');
   const appjs = fs.readFileSync(path.join(REPO, 'src/lib/app.js'), 'utf8');
   ok(/noteModelCatalog\(be, data\[be\]\)/.test(appjs), 'the boot catalog fetch feeds it too');
-  const srv = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
+  const srv = fs.readFileSync(path.join(REPO, 'src/harnesses/codex-models.js'), 'utf8'); // the codex descriptor's models() (dc-ws-create; was server.js)
   ok(/multiAgentEffort: m\.multi_agent_reasoning_effort \|\| ''/.test(srv),
-    'server.js carries multi_agent_reasoning_effort out of codex\'s own model cache (never a hardcoded level)');
+    'the codex model list (src/harnesses/codex-models.js) carries multi_agent_reasoning_effort out of codex\'s own model cache (never a hardcoded level)');
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -668,7 +668,7 @@ console.log('— ⑩ version markers resolve; this branch squats nothing');
   const SITES = ['CLAUDE.md', 'data/bin/codex-chat-wrapper.js', 'src/codex-message-manager.js',
     'src/codex-session-store.js', 'src/server/stdout/codex-events.js', 'src/lib/agent-meta.js',
     'src/lib/chat-status-bar.js', 'src/lib/chat-view.js', 'src/ws-handler.js', 'src/session-schema.js',
-    'server.js', 'docs/kb-file-structure.md', 'docs/kb-features.md', 'docs/kb-bugfix-invariants.md'];
+    'src/harnesses/codex-models.js', 'docs/kb-file-structure.md', 'docs/kb-features.md', 'docs/kb-bugfix-invariants.md'];
   for (const f of SITES) ok(read(f).includes(PREDECESSOR), `${f} back-references the predecessor ${PREDECESSOR} (all sites name ONE version)`);
   // A leftover mention of 2.369.61 is only allowed where it is ABOUT the
   // renumber (the same line names the predecessor) — anywhere else it is still
@@ -1273,7 +1273,7 @@ console.log('— ⑪c WIRING: every resume/fork/restart entry point, and where t
   ok(/this\._spawnOrigin = \{ \.\.\.\(this\._spawnOrigin \|\| \{\}\), effort: 'chosen' \};/.test(sbar),
     '…on the CLIENT too, next to the optimistic chip value (one pick, one pair of writes)');
   const boot = read('src/server/boot-restore.js');
-  ok((boot.match(/_modelOrigin: meta\.modelOrigin \|\| null/g) || []).length >= 3,
+  ok(((s, r) => (s.match(new RegExp(r.source, 'g')) || []).length === 1 && r.test((s.match(/\nfunction sessionFromMeta\(meta, transportFacts\) \{[\s\S]*?\n\}\n/) || [''])[0]) && (s.match(/= sessionFromMeta\(meta, \{/g) || []).length === 3)(boot, /_modelOrigin: meta\.modelOrigin \|\| null/),
     'every boot-restore path restores it (all three, like _effort)');
   const srv = read('server.js');
   ok(/modelOrigin: s\._modelOrigin \|\| null, effortOrigin: s\._effortOrigin \|\| null,/.test(srv),

@@ -23,7 +23,7 @@ export async function openBuildDialog(app, profileId, { label = '', onDone = nul
   const shell = createModalShell({ id: DIALOG_ID, title: t('Chrome build for {label}', { label: name }), dialogClass: 'bwho-dialog bbuild-dialog', bodyClass: 'bwho-body bbuild-body', escapeToClose: true, onClose: () => { st.closed = true; if (st.picker) st.picker.stop(); } });
   shell.dialog.dataset.profileId = id;
   const body = shell.body;
-  const now = cardBuildLine({ provider: view.provider, choice: view.choice, running: view.running, missing: view.missing, live: view.live }, t);
+  const now = cardBuildLine({ buildChoice: view.buildChoice, choice: view.choice, running: view.running, missing: view.missing, live: view.live }, t);
   if (now) body.appendChild(el('div', 'bbuild-now' + (now.warn ? ' chan-warn' : ''), now.text));
   const rows = buildRows(view.listing, { choice: view.choice, lastChromiumMajor: view.lastChromiumMajor, local, machine: view.host || '', t, download: view.download || null });
   const list = el('div', 'bwho-answers bbuild-rows'); list.setAttribute('role', 'radiogroup'); list.setAttribute('aria-label', t('Chrome build'));

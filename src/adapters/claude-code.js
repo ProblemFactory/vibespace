@@ -13,6 +13,7 @@
  */
 
 const { BackendAdapter } = require('./base');
+const { CHAT_TRANSPORT_ARGS } = require('../harnesses/claude-transport'); // the ONE spelling (chat-wrapper reads it too)
 const { worktreeSpawnArgs } = require('../backend-caps');
 const { claudeAllowRules, claudeAskRulesFor, spawnPermissionMode } = require('../agent-tool-rules.js'); // lane L: VibeSpace's own agent tools never ask per command (publish asks in a mode that asks anyway)
 // PURE (imports nothing): `parseGetUsageResponse` marks whether its own parse
@@ -337,6 +338,10 @@ class ClaudeCodeAdapter extends BackendAdapter {
       ...(notes.length ? { notes } : {}),
     };
   }
+
+  /** The chat transport flags a spawn WITHOUT the local chat-wrapper must
+   *  append itself (ws-create's remote leg) — the harness's one spelling. */
+  chatTransportArgs() { return CHAT_TRANSPORT_ARGS; }
 
   // ── Protocol formatting (called by ws-handler) ──
 

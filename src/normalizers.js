@@ -1,4 +1,5 @@
-const { HARNESSES } = require('./harnesses');
+const harnessReg = require('./harnesses');
+const { HARNESSES } = harnessReg;
 const { MessageManager, PEER_RECORDED } = require('./message-manager');
 const { helperParentOf: helperParentFromTaskRecords } = require('./helper-ask.js'); // PURE (lane S1)
 const { cardBlock: browserCardBlock } = require('./browser-sessions.js'); // PURE (2026-09-27): the browser-session card's block
@@ -22,8 +23,10 @@ const NORMALIZERS = Object.fromEntries(Object.values(HARNESSES).map((h) => [h.id
 // wrapper_meta.threadId re-points that default on a mid-life thread/fork, and
 // fork-ancestry / parent-provenance session_metas never do. Normalizers that
 // have no use for it ignore the extra argument.
+// a register()ed chat harness brings its own Normalizer on the descriptor (lane dc-ws-create)
+const registeredNormalizer = (backend) => (harnessReg.has(backend) ? harnessReg.get(backend).Normalizer : null);
 function createMessageManager(backend, sessionId, opts) {
-  const Ctor = NORMALIZERS[backend || 'claude'];
+  const Ctor = NORMALIZERS[backend || 'claude'] || registeredNormalizer(backend);
   if (!Ctor) throw new Error(`no message normalizer registered for backend "${backend}" — add it to src/normalizers.js NORMALIZERS`);
   return new Ctor(sessionId, opts);
 }

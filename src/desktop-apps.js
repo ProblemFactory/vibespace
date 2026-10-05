@@ -9,7 +9,8 @@
  *     (an `exec` comes from the registry or from the human in the launch
  *     dialog — never from an agent, §5)
  *   • `DISPLAY_BACKENDS` — the picture-backend CAPABILITY TABLE (§3): one row
- *     per rung, each declaring `perWindow`, `adaptive`, `needs` (alternative
+ *     per rung, each declaring its CAPABILITY CELLS (`CAP_KEYS` — every reader
+ *     outside this file asks `capsOf`, never a rung id), `needs` (alternative
  *     binary groups), `recipes` (needs-group `via` → the NAME of its bring-up
  *     recipe in desktop-display.js's `RECIPES` table) and `stream` ('rfb' |
  *     'xpra'). A NEW rung is one row here + one recipe in desktop-display.js
@@ -53,7 +54,8 @@ const DEFAULT_IDLE_TIMEOUT_MIN = 0;
 // "unknown bring-up"). The record stores `via` as a fact beside `backend`.
 const DISPLAY_BACKENDS = Object.freeze([
   Object.freeze({
-    id: 'xpra', label: 'xpra', perWindow: true, adaptive: true, stream: 'xpra',
+    id: 'xpra', label: 'xpra', stream: 'xpra',
+    scales: true, crispText: true, perWindow: true, seamless: true, satellites: true, geometry: true, ownsDisplay: true, hostedClient: true,
     needs: Object.freeze([Object.freeze(['xpra'])]),
     recipes: Object.freeze({ xpra: 'xpra-seamless' }),
     // P8-2 x4: the app window follows the pane from the CLIENT (xpra-client's configure-window) — the keeper's fit never runs here
@@ -66,7 +68,8 @@ const DISPLAY_BACKENDS = Object.freeze([
     wired: true,
   }),
   Object.freeze({
-    id: 'vnc-display', label: 'vnc-display', perWindow: false, adaptive: false, stream: 'rfb',
+    id: 'vnc-display', label: 'vnc-display', stream: 'rfb',
+    scales: false, crispText: false, perWindow: false, seamless: false, satellites: false, geometry: false, ownsDisplay: true, hostedClient: false,
     needs: Object.freeze([Object.freeze(['Xvnc']), Object.freeze(['Xvfb', 'x11vnc'])]),
     // one pid serves both X and RFB / an X server, then a picture server on it
     recipes: Object.freeze({ Xvnc: 'x-serves-rfb', 'Xvfb+x11vnc': 'x-then-server' }),
@@ -79,7 +82,8 @@ const DISPLAY_BACKENDS = Object.freeze([
     wired: true,
   }),
   Object.freeze({
-    id: 'desktop-singleton', label: 'desktop-singleton', perWindow: false, adaptive: false, stream: 'rfb',
+    id: 'desktop-singleton', label: 'desktop-singleton', stream: 'rfb',
+    scales: false, crispText: false, perWindow: false, seamless: false, satellites: false, geometry: false, ownsDisplay: false, hostedClient: false,
     // the existing src/vnc.js stack: an Xvnc-style binary, or a port that
     // already listens (bring-your-own / adopted) — desktop-display reports
     // the latter as the pseudo-binary `desktop-singleton:running`
@@ -92,6 +96,26 @@ const DISPLAY_BACKENDS = Object.freeze([
 ]);
 const BACKEND_IDS = Object.freeze(DISPLAY_BACKENDS.map((b) => b.id));
 const backendById = (id, table = DISPLAY_BACKENDS) => table.find((b) => b.id === id) || null;
+/** THE CAPABILITY CELLS a rung declares — booleans on its row (lane dc-desktop-caps, 2026-10-04). Every reader outside
+ *  this file asks `capsOf(rec)` (the server) or the record's served `caps` (the client) — never a rung id or a stream kind:
+ *    scales       — an app renders at a HiDPI scale: GDK_SCALE knobs at launch, the Scale ▸ chip / menu / relaunch, the launch dialog's default scale
+ *    crispText    — the rung's server writes the display's font dpi from the viewer's screen (the keeper waits for that write before the app starts; the backend chip says text stays crisp)
+ *    perWindow    — each app window is its own picture: the window census drops the server's wrappers, a window is mapped only while a viewer watches (a pixel verb needs it mapped, the ✕ asks the app's window), its title is read from X
+ *    seamless     — the per-app "Show window frame" choice (the app's own header bar the VibeSpace frame folds around)
+ *    satellites   — the app's other top-levels open as VibeSpace windows of their own, bound to the main view
+ *    geometry     — a window's picture is a part of a larger display: a window point is clamped to the display's root size
+ *    ownsDisplay  — the session owns its display (WM, Xauthority, every part torn down); false = a SHARED desktop (only the app is the session's)
+ *    hostedClient — the rung's server ships the HTML5 client the window's view loads (routes/desktop-apps hosts it)
+ *  A record of a rung the table does not know claims nothing — and keeps its display its own (the keeper's pre-table default). */
+const CAP_KEYS = Object.freeze(['scales', 'crispText', 'perWindow', 'seamless', 'satellites', 'geometry', 'ownsDisplay', 'hostedClient']);
+const NO_CAPS = Object.freeze({ ...Object.fromEntries(CAP_KEYS.map((k) => [k, false])), ownsDisplay: true });
+/** A record's capability cells: the ones its VIEW already carries (served once — the client, a paired machine's view),
+ *  else its rung's row in `table`; NO_CAPS for a rung the table does not know. */
+function capsOf(rec, table = DISPLAY_BACKENDS) {
+  if (rec && rec.caps && typeof rec.caps === 'object') return rec.caps;
+  const b = rec && rec.backend ? backendById(rec.backend, table) : null;
+  return b ? Object.freeze(Object.fromEntries(CAP_KEYS.map((k) => [k, b[k] === true]))) : NO_CAPS;
+}
 /** The bring-up recipe name for a (backend, via) pair, or null when the table
  *  names none — the keeper refuses such a pair BY NAME instead of guessing. */
 function recipeFor(backend, via, table = DISPLAY_BACKENDS) {
@@ -569,8 +593,7 @@ function askCloseVerdict(rec, { force = false } = {}) {
 function relaunchVerdict(rec, backends = DISPLAY_BACKENDS) {
   if (!rec) return { code: 'not-found', error: 'no such desktop app' };
   if (rec.state !== 'ready') return { code: 'not-ready', error: `${rec.label || rec.id} is ${rec.state} — only a running app can be relaunched at another scale` };
-  const b = rec.backend ? backendById(rec.backend, backends) : null;
-  if (!b || b.stream !== 'xpra') return { code: 'not-xpra', error: `${rec.label || rec.id} runs on ${rec.backend || 'no'} rung — only an xpra app has a scale (a whole display is drawn at the browser's pixels)` };
+  if (!capsOf(rec, backends).scales) return { code: 'not-xpra', error: `${rec.label || rec.id} runs on ${rec.backend || 'no'} rung — only an xpra app has a scale (a whole display is drawn at the browser's pixels)` };
   // a browser row relaunches too (2.369.176, the owner: "你不让我在这里调我怎么调") — the keeper stops it FIRST and moves its
   // profile onto the successor (a browser locks its profile dir, so the successor cannot start beside it), then starts it
   return null;
@@ -643,10 +666,10 @@ function exitCloseVerdict(rec, { leased = false } = {}) {
  *  active viewer, no main window to ask). 'ask-front' (design 016 S1c) = close-window to the FRONT
  *  window when it is not the main (`frontWid` — WeChat's Moments over its main): that window
  *  closes, the app and the pane stay; the app is asked only when its main is in front. */
-function outerCloseVerdict({ state, stream, seat, connected, mainWid, frontWid = 0, leased = false, askedAt = 0, now = 0, againMs = OUTER_CLOSE_AGAIN_MS } = {}) {
+function outerCloseVerdict({ state, perWindow = false, seat, connected, mainWid, frontWid = 0, leased = false, askedAt = 0, now = 0, againMs = OUTER_CLOSE_AGAIN_MS } = {}) {
   if (state !== 'ready') return { act: 'close', why: 'not-running' };
   if (askedAt > 0 && now >= askedAt && now - askedAt <= againMs) return { act: 'stop', why: 'again' };
-  if (stream !== 'xpra') return { act: 'close', why: 'no-window-protocol' };
+  if (!perWindow) return { act: 'close', why: 'no-window-protocol' };
   if (leased) return { act: 'close', why: 'lease' };
   if (seat !== 'active') return { act: 'close', why: 'not-active' };
   if (!connected || !(mainWid > 0)) return { act: 'close', why: 'no-main-window' };
@@ -1595,7 +1618,7 @@ function tightvncInstallPlan(f) {
 
 module.exports = {
   LIMITS, DESKTOP_SINGLETON_ID, APP_STATES, LIVE_STATES, DEFAULT_IDLE_TIMEOUT_MIN, KEEPER_ENV,
-  DISPLAY_BACKENDS, BACKEND_IDS, backendById, recipeFor, needsVerdict, resolveBackend, fallbackLogLine, parseBackendPrefs, streamKindOf,
+  DISPLAY_BACKENDS, BACKEND_IDS, backendById, CAP_KEYS, capsOf, recipeFor, needsVerdict, resolveBackend, fallbackLogLine, parseBackendPrefs, streamKindOf,
   fitPolicyOf, keeperFits, topLevelWindows, appWindows, appFitPlan, appMainWindow, windowTitleOf, APP_TITLE_MAX,
   validateAppRow, validateLaunchRequest, DEFAULT_REGISTRY, APP_SCALES, normalizeDpr, appScaleFor, scaleKnobs, SCALE_RULES, scaleRuleOf, renderOf, relaunchPaneCss, // lane D (a)
   BROWSER_EXEC_RE, BROWSER_APP_ID_RE, isBrowserName, launchedProgram, browserLaunchVerdict,

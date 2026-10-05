@@ -14,7 +14,7 @@
 // every chat harness's protocol has a registered consumer and that no
 // stdout/stream twin of caps.streamProtocol exists here.
 const { NULL_QUOTA } = require('./null-quota');
-const { AUTO_RESUME_FORMS, NO_AUTO_RESUME, deriveAutoResume } = require('../backend-caps');
+const { AUTO_RESUME_FORMS, NO_AUTO_RESUME, deriveAutoResume, contributeCaps } = require('../backend-caps');
 const { checkTable } = require('../harness-settings'); // PURE: the settings-table validator (design-harness-settings §2/§7)
 
 const QUOTA_PROBE_RUNGS = Object.freeze(['cli-usage', 'rpc-rate-limits', null]);
@@ -72,6 +72,39 @@ function assertSettingsContract(h, { full }) {
   if (errs.length) throw new Error(`harness '${h.id}': settings table invalid — ${errs.join('; ')}`);
 }
 
+/** THE SPAWN CONTRACT (lane dc-ws-create): everything src/ws-create.js
+ *  used to ask as `backend === '<id>'` is a ROW (boolean) or a HOOK (function)
+ *  on the descriptor's optional `spawn` object. An absent key is "no" for every
+ *  harness; an UNKNOWN key throws (a misspelt row must not silently read as
+ *  "no"), and so does a row of the wrong type. */
+const SPAWN_ROWS = Object.freeze({
+  hostHeldLogin: 'boolean',          // a remote spawn on an account only the HOST holds is rescued through evaluateOnHost
+  resumeMayFork: 'boolean',          // a resume may mint a NEW conversation id the stdout parser adopts
+  localPipe: 'boolean',              // agentd.localPipeSessions may route a local CHAT spawn through the device-#0 pipe session
+  otelExport: 'boolean',             // a local spawn exports api_request telemetry to the loopback OTLP receiver (its accounts are the ones OTel names)
+  homeFallback: 'boolean',           // a missing explicit cwd falls back to $HOME instead of refusing
+  loginShell: 'boolean',             // the spawn IS the user's login shell (a device resolves its own $SHELL, argv -l)
+  conversationIdField: 'string',     // the session field carrying this harness's conversation id BESIDE backendSessionId (claude: claudeSessionId)
+  isLocalConversation: 'function',   // (id) → is the transcript on THIS machine? (absent: no remote-cache host inference)
+  authAtSpawn: 'function',           // ({hostId, accounts}) → the global-login guess for a spawn with no account
+  statusline: 'function',            // (args, command) → args carrying the usage statusline (terminal sessions)
+  threadBaseline: 'function',        // ({activeSessions}) → Set of the conversation ids before the spawn; present ⇒ the CLI mints its id AFTER the spawn and the create captures it
+  deviceChatRefusal: 'function',     // (hostName) → the refusal text: CHAT on a paired device is not wired for this harness
+});
+function assertSpawnContract(h) {
+  const sp = h.spawn;
+  if (sp === undefined || sp === null) return;
+  if (typeof sp !== 'object') throw new Error(`harness '${h.id}': spawn must be an object of rows/hooks`);
+  for (const [k, v] of Object.entries(sp)) {
+    if (!(k in SPAWN_ROWS)) throw new Error(`harness '${h.id}': spawn.${k} is not a declared spawn row (${Object.keys(SPAWN_ROWS).join('|')})`);
+    if (typeof v !== SPAWN_ROWS[k]) throw new Error(`harness '${h.id}': spawn.${k} must be a ${SPAWN_ROWS[k]} (got ${typeof v})`);
+  }
+}
+/** The spawn rows of one harness id — {} for an unknown id or a harness that declares none. */
+function spawnOf(id) {
+  try { return get(id).spawn || {}; } catch { return {}; }
+}
+
 /** Built-ins must declare every key (null is a valid declaration for a
  *  terminal-only harness: wrapper/Normalizer/store); chat-capable ones must
  *  fill them. Contributed harnesses (register) need id + quota at minimum —
@@ -89,6 +122,7 @@ function validate(h, { full = true } = {}) {
   assertQuotaContract(h.id, h.quota);
   assertResumeContract(h.id, h.resume);
   assertSettingsContract(h, { full });
+  assertSpawnContract(h);
   // THE AUTO-RESUME CAPS ROW IS DERIVED HERE, from what the descriptor really
   // implements — never hand-set on the caps literal (which carries the honest
   // NO_AUTO_RESUME placeholder so an unregistered id still answers). `h.caps`
@@ -141,10 +175,12 @@ function register(h, { replace = false } = {}) {
   if (BUILTIN.has(h.id)) throw new Error(`harness '${h.id}' is built-in and cannot be replaced`);
   if (REGISTRY.has(h.id) && !replace) throw new Error(`harness '${h.id}' already registered (pass {replace:true} to override)`);
   REGISTRY.set(h.id, h);
+  contributeCaps(h.id, h.caps && typeof h.caps === 'object' ? h.caps : null); // capsOf(id) answers the DECLARED row
   return h;
 }
 function unregister(id) {
   if (BUILTIN.has(id)) throw new Error(`harness '${id}' is built-in and cannot be unregistered`);
+  contributeCaps(id, null);
   return REGISTRY.delete(id);
 }
 
@@ -162,4 +198,4 @@ function resumeVerb(id) {
 }
 
 module.exports = { HARNESSES, harnessOf, harnessIds, chatHarnessIds, REQUIRED_DESCRIPTOR_KEYS: REQUIRED, get, has, isBuiltin, list, ids, register, unregister, assertSettingsContract, assertQuotaContract, QUOTA_PROBE_RUNGS, NULL_QUOTA,
-  hasLimitSignal, assertResumeContract, autoResumeCaps, resumeVerb, AUTO_RESUME_FORMS, NO_AUTO_RESUME };
+  hasLimitSignal, assertResumeContract, autoResumeCaps, resumeVerb, AUTO_RESUME_FORMS, NO_AUTO_RESUME, SPAWN_ROWS, assertSpawnContract, spawnOf };

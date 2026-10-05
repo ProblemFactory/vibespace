@@ -42,7 +42,7 @@ function storeFailureReason(h, st = null) {
 }
 
 function create({ rootDir, CLAUDE_CMD_RAW, CODEX_CMD_RAW, resolveCmd,
-  getOAuthToken, usagePollingEnabled, refreshCodexModels, broadcast = null,
+  getOAuthToken, usagePollingEnabled, refreshHarnessModels, broadcast = null,
   getTelemetry = () => null, getPlugins = () => null, getHeldPtyIds = () => [] }) {
   const USAGE_CACHE_DIR = path.join(rootDir, 'data', 'usage-cache');
 // ── X display detection (Linux clipboard / xclip) ──
@@ -425,7 +425,7 @@ function refreshAvailableModels() {
   } else if (usagePollingEnabled()) {
     getOAuthToken((oauthToken) => { if (oauthToken) fetchModels(oauthToken, true); });
   }
-  refreshCodexModels();
+  refreshHarnessModels();
 }
 
   return { X_ENV, detectXDisplay, refreshXEnv, stabilizeXAuth, adapterRegistry,

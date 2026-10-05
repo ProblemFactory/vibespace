@@ -218,7 +218,7 @@ console.log('— caps row');
   // (the chip would report "default" for a session really running one).
   ok(/outputStyle: session\._outputStyle \|\| null,/.test(read('src/ws-create.js')) && /writeSessionMeta\(session\.sockName, \{ \.\.\.m, outputStyle: session\._outputStyle \}\)/.test(wh),
     'the effective style is written to session meta at spawn AND on every live change');
-  ok((read('src/server/boot-restore.js').match(/_outputStyle: meta\.outputStyle \|\| null,/g) || []).length === 3,
+  ok(((s, r) => (s.match(new RegExp(r.source, 'g')) || []).length === 1 && r.test((s.match(/\nfunction sessionFromMeta\(meta, transportFacts\) \{[\s\S]*?\n\}\n/) || [''])[0]) && (s.match(/= sessionFromMeta\(meta, \{/g) || []).length === 3)(read('src/server/boot-restore.js'), /_outputStyle: meta\.outputStyle \|\| null,/),
     'boot-restore reads it back on ALL THREE session-construction paths (a dead persistence write is worse than none)');
   ok(/_outputStyle:\s+\{ owner: 'ws',\s+persisted: 'session-meta'/.test(read('src/session-schema.js')), 'the session-schema row names its real persistence home');
 }

@@ -61,7 +61,7 @@ for (const id of harnessIds()) {
     ok(fs.existsSync(path.join(REPO, h.wrapper)), `${id}: wrapper file exists (${h.wrapper})`);
     const w = fs.readFileSync(path.join(REPO, h.wrapper), 'utf8');
     ok(/caps\s*[:=]\s*\{/.test(w), `${id}: wrapper adverts a caps object in its sidecar meta`);
-    ok(h.store && typeof h.store.locateTranscript === 'function' && Array.isArray(h.store.transcriptDirs) && typeof h.store.conversationIdField === 'string', `${id}: store declares locateTranscript/transcriptDirs/conversationIdField`);
+    ok(h.store && typeof h.store.locate === 'function', `${id}: store declares locate (where the conversation lives; transcript-service / incident read it)`);
     // SETTINGS TABLE (design-harness-settings §8): the descriptor's `settings` IS
     // the PURE table by identity (like caps), and the two knobs every chat
     // harness needs are ROWS of it — the schema DERIVES its section from this
@@ -775,6 +775,72 @@ console.log('— auto-resume conformance (owner ruling 2026-09-08)');
   }
 }
 
+
+// ── store: EVERY declared store field has a reader; a fake harness drives the
+// resume hooks through the generic code (dc-harness-store, 2.369.213) ──
+// The census is DERIVED from the descriptors (every key any harness's `store`
+// declares) and the code outside src/harnesses (tracked + untracked, comments
+// stripped): a field nobody reads is RED — the S3 fields forkAncestry /
+// conversationIdField / transcriptDirs / locateTranscript / Reader /
+// listThreads were declared with zero production readers for months.
+console.log('\nstore: every declared field is read outside src/harnesses; a fake harness rides the generic resume hooks');
+{
+  const { execFileSync } = require('node:child_process');
+  const files = execFileSync('git', ['ls-files', '-co', '--exclude-standard', '--', 'src', 'server.js', 'data/bin'], { cwd: REPO, encoding: 'utf8' })
+    .split('\n').filter((f) => f && !f.startsWith('src/harnesses/') && /(\.c?js|\.mjs|^server\.js|^data\/bin\/[^.]+)$/.test(f));
+  const code = files.map((f) => { let t = ''; try { t = fs.readFileSync(path.join(REPO, f), 'utf8'); } catch { }
+    return [f, t.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).map((l) => l.replace(/\s\/\/.*$/, '')).join('\n')]; });
+  const fields = new Set(); for (const h of Object.values(HARNESSES)) for (const k of Object.keys(h.store || {})) fields.add(k);
+  ok(fields.size >= 10, `store census covers every declared field (${fields.size})`);
+  for (const k of [...fields].sort()) {
+    const re = new RegExp(`\\.${k}\\b|\\[['"]${k}['"]\\]`);
+    const readers = code.filter(([, t]) => re.test(t)).map(([f]) => f);
+    ok(readers.length > 0, `store.${k}: read outside src/harnesses (${readers.slice(0, 3).join(', ') || 'NONE — wire a consumer or delete the field'})`);
+  }
+  for (const k of ['forkAncestry', 'conversationIdField', 'transcriptDirs', 'locateTranscript', 'Reader', 'listThreads']) ok(!fields.has(k), `store.${k} stays deleted (declared, never read)`);
+
+  // THE FAKE HARNESS: its own store hooks, registered through the one line; the
+  // generic resume code (src/resume-store.js → writer-sweep.js sweepWriters)
+  // reaches them with no id branch anywhere.
+  const harnesses = require(path.join(REPO, 'src/harnesses/index.js'));
+  const { writerSweepOpts, forkChainEnv, hasWriterSweep } = require(path.join(REPO, 'src/resume-store.js'));
+  const { sweepWriters } = require(path.join(REPO, 'src/writer-sweep.js'));
+  const calls = [];
+  const acmeSweep = (rid, shq, o) => { calls.push({ rid, protectSids: o.protectSids }); return `echo SWEPT:4242 # ${shq(rid)}`; };
+  harnesses.register({ id: 'acme-store', label: 'Acme', quota: harnesses.NULL_QUOTA,
+    store: { writerSweep: acmeSweep, forkChain: (id) => (id === 'r2' ? ['r0', 'r1'] : []), forkChainEnv: 'ACME_FORKED_FROM', locate: (id) => `/acme/${id}.log` } }, { replace: true });
+  try {
+    const live = new Map([['s-acme', { backend: 'acme-store', host: null }], ['s-acme-remote', { backend: 'acme-store', host: 'h1' }], ['s-claude', { backend: 'claude', host: null }]]);
+    const so = writerSweepOpts('acme-store', live, null);
+    ok(hasWriterSweep('acme-store') && so.sweep === acmeSweep && JSON.stringify(so.protectSids) === '["s-acme"]',
+      'fake harness: writerSweepOpts hands ITS store.writerSweep + the protect list of ITS live sessions on the TARGET machine', JSON.stringify(so.protectSids));
+    const ran = [];
+    const hosts = { deviceBounded: async () => ({ runCmd: async (cmd, args) => { ran.push(args[1]); return { stdout: 'SWEPT:4242\n' }; } }) };
+    const r = await sweepWriters(hosts, null, 'rid-acme', { shq: (s) => `'${s}'`, ...so });
+    ok(r.swept.join() === '4242' && ran[0] === "echo SWEPT:4242 # 'rid-acme'" && calls[0].rid === 'rid-acme',
+      'fake harness: sweepWriters runs the hook\'s script on the device and parses its SWEPT lines', JSON.stringify(r));
+    ok(JSON.stringify(forkChainEnv('acme-store', 'r2')) === '{"ACME_FORKED_FROM":"r0,r1,r2"}' && JSON.stringify(forkChainEnv('claude', 'r2')) === '{}',
+      'fake harness: forkChainEnv = its chain + the resumed id under ITS declared env name; a harness with no chain gets nothing');
+    ok(harnesses.get('acme-store').store.locate('x') === '/acme/x.log' && !hasWriterSweep('shell'), 'fake harness: locate is its own; a harness with no sweep is not gated in');
+    // PATCHED-COPY CONTROL: the old id branch back in resume-store ⇒ the fake
+    // harness's hook is never reached (this proof measures the generic path).
+    const rsSrc = fs.readFileSync(path.join(REPO, 'src/resume-store.js'), 'utf8');
+    const mut = rsSrc.replace('const sweep = storeOf(backend).writerSweep;', "const sweep = storeOf(backend === 'codex' ? 'codex' : 'claude').writerSweep;");
+    ok(mut !== rsSrc, 'PATCHED-COPY CONTROL: the sweep lookup is one identifiable line');
+    const mutSo = require(MUTH.write('src/resume-store.js', mut, 'idbranch')).writerSweepOpts('acme-store', live, null);
+    ok(mutSo.sweep !== acmeSweep, '…and with the id branch back the fake harness gets claude\'s legs, not its own — RED for the proof above');
+  } finally { harnesses.unregister('acme-store'); }
+  // the claude home-rename hook + chat transport args: harness-owned, read generically
+  const claude = harnessOf('claude');
+  ok(typeof claude.store.homeRename?.staleUsers === 'function' && typeof claude.store.homeRename?.moveUser === 'function' && typeof claude.store.homeRename?.relinkLegacy === 'function',
+    'claude: store.homeRename (staleUsers / moveUser / relinkLegacy) is the ONE ~/.claude/projects re-encoding (server.js + boot-restore call it)');
+  const reg = createAdapterRegistry({ claudeCmd: 'claude', chatWrapper: '/x', ptyWrapper: '/y', codexCmd: 'codex', acpCommands: {} });
+  const ca = reg.get('claude');
+  ok(ca && JSON.stringify(ca.chatTransportArgs()) === JSON.stringify([['--output-format', 'stream-json'], ['--input-format', 'stream-json'], ['--verbose'], ['--permission-prompt-tool', 'stdio']]),
+    'claude adapter: chatTransportArgs() = the ONE stream-json spelling (data/bin/chat-wrapper.js requires the same module)');
+  const wsc = fs.readFileSync(path.join(REPO, 'src/ws-create.js'), 'utf8'), wrap = fs.readFileSync(path.join(REPO, 'data/bin/chat-wrapper.js'), 'utf8');
+  ok(!/'--output-format'/.test(wsc) && !/'--output-format'/.test(wrap) && /claude-transport\.js/.test(wrap), 'the stream-json flags are spelled in neither ws-create nor chat-wrapper');
+}
 
 // ── tree: THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──
 // Measured HERE, while every patched copy this run made still exists (the exit

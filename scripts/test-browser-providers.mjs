@@ -182,15 +182,7 @@ console.log('— ① the provider rows, their refusals, the egress record, the c
   ok(B.forwardedCdpUrl('ws://127.0.0.1:9222/devtools/browser/abc', 5555) === 'ws://127.0.0.1:5555/devtools/browser/abc' && B.forwardedCdpUrl(9222, 5555) === 'http://127.0.0.1:5555' && B.forwardedCdpUrl('', 5555) === 'http://127.0.0.1:5555' && B.forwardedCdpUrl('ftp://x', 5555) === null && B.forwardedCdpUrl('9222', 0) === null, 'forwardedCdpUrl keeps scheme + path and re-points host:port; a bare port becomes an http endpoint');
   ok(B.cdpPortOf('ws://127.0.0.1:19222/devtools/browser/x') === 19222 && B.cdpPortOf('http://localhost:9222') === 9222 && B.cdpPortOf('ws://10.0.0.1:9222/') === null, 'cdpPortOf reads a LOOPBACK url\'s port only');
 
-  // the cloakserve plan + the egress verdicts
-  ok(B.cloakservePlan({}).code === 'cloak_opt_in_off' && B.cloakservePlan({ enabled: true }).code === 'egress_allowlist_empty' && B.cloakservePlan({ enabled: true, proof: REFUSED }).code === 'egress_proof_invalid' && /re-enabled without re-measuring/.test(B.cloakservePlan({ enabled: true, proof: REFUSED }).error), 'the plan refuses: opt-in off; on the SHIPPED record an empty allowlist (the browser itself needs no host); the pre-measurement refusal against the wired table is an invalid record');
-  ok(B.cloakservePlan({ enabled: true, proof: REFUSED, }).code !== 'ok' && B.cloakservePlan({ enabled: true, proof: P, allowlist: 'a.test' }).code === 'egress_proxy_missing', 'then a proxy that is not listening');
-  ok(B.cloakservePlan({ enabled: true, proof: { ...P, runs: [] } }).code === 'egress_proof_invalid', 'a malformed record refuses before anything else is considered');
-  const plan = B.cloakservePlan({ enabled: true, proof: P, allowlist: 'portal.example, .docs.example', proxyPort: 4321 });
-  ok(plan.ok && plan.image === B.CLOAKSERVE_IMAGE && /:\d+\.\d+\.\d+$/.test(plan.image) && plan.egress.hosts.join() === 'portal.example,.docs.example' && plan.egress.proxy === 'http://host.docker.internal:4321', 'a full plan: the image is PINNED to a version, the egress hosts and the proxy named');
-  const run = plan.docker[1];
-  ok(plan.docker[0].join(' ') === 'network create --internal vs-cloak-egress' && run.includes('--internal') === false && run.includes('--network') && run[run.indexOf('--network') + 1] === 'vs-cloak-egress' && run.includes('-p') && run[run.indexOf('-p') + 1] === '127.0.0.1:9222:9222' && run.includes('HTTPS_PROXY=http://host.docker.internal:4321') && run[run.length - 1] === B.CLOAKSERVE_IMAGE, 'docker argv: an INTERNAL network, 9222 published on the hub\'s loopback only, the proxy as the only way out, the pinned image last');
-  ok(!run.some((a) => /0\.0\.0\.0|--network host|--privileged/.test(a)), 'nothing in the argv publishes on all interfaces, joins the host network or is privileged');
+  // the egress verdicts (lane dc-browser-providers: the cloakserve CONTAINER plan they once fed is deleted — its docker argv never ran)
   // (`bad host` would split on the space into two VALID labels — junk has to be junk)
   const L = B.parseEgressAllowlist('Portal.Example, .docs.example https://x.test/path, bad_host!, ,');
   ok(L.join() === 'portal.example,.docs.example,x.test', 'parseEgressAllowlist: lowercased, scheme/path stripped, junk dropped, deduped');
@@ -445,7 +437,7 @@ let srv = null;
   const TOKEN_A = 'vsst_' + 'a'.repeat(24);
   const active = new Map([['sess-1', { agentToken: TOKEN_A, _browserKey: KEY_A }]]);
   const app = express(); app.use(express.json());
-  R.setup({ keeper: kR, activeSessions: active, browserEnv: () => null, cloakPlan: () => B.cloakservePlan({ enabled: false }), forwards: () => access.forwards() });
+  R.setup({ keeper: kR, activeSessions: active, browserEnv: () => null, forwards: () => access.forwards() });
   app.use(R.router);
   srv = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
   servers.add(srv);
@@ -457,7 +449,7 @@ let srv = null;
   };
   const bearer = (t) => ({ Authorization: 'Bearer ' + t });
   let r = await j('GET', '/api/browser/providers');
-  ok(r.status === 200 && r.json.providers.length === B.providerIds().length && r.json.proof.status === 'measured' && r.json.proof.version === '0.5.10' && r.json.cloak.code === 'cloak_opt_in_off' && r.json.host === null && r.json.hostKnown === true && Array.isArray(r.json.forwards), 'GET /api/browser/providers: the rows, the §7.2.1 record (measured), the cloakserve refusal by name, the forwards');
+  ok(r.status === 200 && r.json.providers.length === B.providerIds().length && r.json.proof.status === 'measured' && r.json.proof.version === '0.5.10' && !('cloak' in r.json) && r.json.host === null && r.json.hostKnown === true && Array.isArray(r.json.forwards), 'GET /api/browser/providers: the rows, the §7.2.1 record (measured), no cloakserve plan (deleted: it never ran), the forwards');
   ok(r.json.egress && JSON.stringify(r.json.egress.install) === JSON.stringify(B.cloakInstallAllowlist(B.CLOAK_EGRESS_PROOF)) && r.json.egress.run.length === 0 && Array.isArray(r.json.cloakSites) && r.json.cloakSites.length === 0, '…with the allowlists the record implies (derived, never a second list) and the sites a cloak browser may open here (none named)');
   r = await j('GET', '/api/browser/providers?host=dev-1');
   ok(r.status === 200 && r.json.hostKnown === true && r.json.providers.find((x) => x.id === 'cloak').onHost.code === 'provider_needs_local_key' && r.json.providers.find((x) => x.id === 'chromium').onHost.ok === true, '?host=dev-1: the verdict FOR that machine per row (a host the route answers ABOUT is not refused)');

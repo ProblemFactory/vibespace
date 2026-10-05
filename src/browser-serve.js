@@ -226,7 +226,7 @@ async function runBrowserServeOp(bs, action, params = {}) {
     const choice = BB.normalizeBrowserChoice(p.browser);
     if (p.browser != null && !choice) return { ok: false, code: 'browser_choice_invalid', error: 'the start named a browser build that is not one' };
     if (choice && choice.kind !== 'default') {
-      const bv = BB.browserChoiceVerdict({ choice, provider: 'chromium', by: 'user', builds: choice.kind === 'build' ? BB.listBuilds({ homeDir: bs.homeDir }) : null, pathFact: choice.kind === 'path' ? BB.fileFact(choice.path) : null, machine: os.hostname() });
+      const bv = BB.browserChoiceVerdict({ choice, by: 'user', builds: choice.kind === 'build' ? BB.listBuilds({ homeDir: bs.homeDir }) : null, pathFact: choice.kind === 'path' ? BB.fileFact(choice.path) : null, machine: os.hostname() });
       if (!bv.ok) return { ok: false, code: bv.code === 'browser_build_not_executable' ? 'browser_build_missing' : bv.code, error: bv.error, display: plan.fact };
       buildEnv = { AGENT_BROWSER_EXECUTABLE_PATH: bv.executablePath };
     }

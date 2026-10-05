@@ -254,11 +254,11 @@ console.log('§6 THE PIXEL ROAD — plan, visibility, points (fixtures from the 
   const calc = [{ id: 4194309, title: 'Calculator', cls: 'gnome-calculator', instance: 'gnome-calculator', x: 0, y: 0, w: 720, h: 1232, mapped: false, depth: 2 }];
   const p0 = R.pixelPlan(calc);
   ok(p0.ok && p0.main.id === 4194309 && p0.origin.x === 0 && p0.w === 720 && p0.h === 1232 && p0.visible === false, 'the calculator at scale 2 with NO viewer: one window 720x1232 at 0,0, visible=false (xpra unmapped it)');
-  const v0 = R.visibilityVerdict({ stream: 'xpra', plan: p0 });
+  const v0 = R.visibilityVerdict({ perWindow: true, plan: p0 });
   ok(!v0.ok && v0.code === 'window_not_visible' && /nobody has this window open/.test(v0.why), 'xpra + unmapped ⇒ window_not_visible (a click would be a silent no-op, a grab black)');
-  ok(R.visibilityVerdict({ stream: 'rfb', plan: p0 }).ok && R.visibilityVerdict({ stream: 'xpra', plan: null }).ok, 'a whole-display rung always has pixels; no plan (the keeper cannot say) is not a refusal');
+  ok(R.visibilityVerdict({ perWindow: false, plan: p0 }).ok && R.visibilityVerdict({ perWindow: true, plan: null }).ok, 'a whole-display rung always has pixels; no plan (the keeper cannot say) is not a refusal');
   const p1 = R.pixelPlan([{ ...calc[0], mapped: true }]);
-  ok(R.visibilityVerdict({ stream: 'xpra', plan: p1 }).ok && p1.visible === true, 'with a viewer attached (mapped) it is visible');
+  ok(R.visibilityVerdict({ perWindow: true, plan: p1 }).ok && p1.visible === true, 'with a viewer attached (mapped) it is visible');
   const m7 = R.mapPoint(p1, { x: 86, y: 876 });
   ok(m7.ok && m7.x === 86 && m7.y === 876, 'the "7" key at image px (86,876) maps to display (86,876) — the origin is 0,0 (measured: pressed "7")');
   const chrome = [{ id: 4194308, title: 't', cls: 'Google-chrome', x: 20, y: 20, w: 2018, h: 2264, mapped: true, depth: 2 }, { id: 6291457, cls: 'Google-chrome', x: 20, y: 20, w: 20, h: 20, mapped: false, depth: 1 }, { id: 4194304, cls: null, instance: null, title: null, x: -100, y: -100, w: 10, h: 10, mapped: false, depth: 1 }];
@@ -271,7 +271,7 @@ console.log('§6 THE PIXEL ROAD — plan, visibility, points (fixtures from the 
   ok(R.mapPoint(pc, { x: 5000, y: 1 }).code === 'outside_window' && R.mapPoint(null, { x: 1, y: 1 }).code === 'outside_window', 'a point outside the image (or no plan) ⇒ outside_window');
   const popup = R.pixelPlan([{ ...chrome[0] }, { id: 7, cls: 'Google-chrome', x: 1900, y: 2200, w: 400, h: 300, mapped: true }, { id: 8, cls: 'Google-chrome', x: 0, y: 0, w: 15, h: 15, mapped: true }]);
   ok(popup.origin.x === 20 && popup.w === 2280 && popup.h === 2480 && popup.members.some((m) => m.id === 7), 'a popup below-right extends the image; the ORIGIN stays the main window\'s top-left (a popup never shifts the coordinates)');
-  ok(!R.pixelPlan([]).ok && R.visibilityVerdict({ stream: 'xpra', plan: R.pixelPlan([]) }).code === 'window_not_visible', 'no window yet ⇒ nothing to read or act on in pixels');
+  ok(!R.pixelPlan([]).ok && R.visibilityVerdict({ perWindow: true, plan: R.pixelPlan([]) }).code === 'window_not_visible', 'no window yet ⇒ nothing to read or act on in pixels');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

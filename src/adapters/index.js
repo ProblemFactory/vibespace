@@ -1,7 +1,11 @@
 // Built from the HARNESS REGISTRY (S1, src/harnesses/index.js): one adapter
 // instance per registered harness, configured by the descriptor's own
 // adapterConfig mapping. Adding a backend = adding a descriptor file.
-const { HARNESSES } = require('../harnesses');
+// A harness register()ed AFTER the registry was built (plugin tier-5; the
+// proof suite's fake) gets its adapter on first ask, from its own descriptor —
+// the registration line is the whole wiring (lane dc-ws-create).
+const harnesses = require('../harnesses');
+const { HARNESSES } = harnesses;
 
 function createAdapterRegistry(config = {}) {
   const adapters = new Map();
@@ -9,7 +13,13 @@ function createAdapterRegistry(config = {}) {
 
   return {
     get(name) {
-      return adapters.get(name) || null;
+      if (adapters.has(name)) return adapters.get(name);
+      if (!harnesses.has(name)) return null;
+      const h = harnesses.get(name);
+      if (typeof h.Adapter !== 'function' || typeof h.adapterConfig !== 'function') return null;
+      const a = new h.Adapter(h.adapterConfig(config));
+      adapters.set(name, a);
+      return a;
     },
   };
 }

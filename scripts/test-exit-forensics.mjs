@@ -1183,9 +1183,19 @@ console.log('— §5 wiring: the line, the event and the tomb are built from exi
   ok(!!lineSrc && lineSrc.trim().startsWith('console.log(') && lineSrc.includes('${facts.suffix}`'), 'the "[session] exited" console.log ends with ${facts.suffix}', lineSrc);
   ok(/__vsEvent\?\.\('session-exited', .*\$\{facts\.eventSuffix\}`\)/.test(s), 'the session-exited event carries ${facts.eventSuffix}');
   ok(/wrapperFate: facts\.wrapperFate/.test(s) && /socketFate: facts\.socketFate/.test(s), 'the tomb carries the same facts');
+  // dc-harness-store (2.369.213): chat-wrapper.js reads the claude stream-json flags from ONE PURE module (the remote spawn
+  // reads the same list through the adapter). Admitted only while that module requires NOTHING and the wrapper is not a
+  // remote-shipped tool (it runs on the server box beside src/; HostManager.AGENT_TOOLS is the ship list).
+  const TRANSPORT_REQ = "require(path.join(__dirname, '..', '..', 'src', 'harnesses', 'claude-transport.js'))";
+  const transportPure = (t) => !/\brequire\(|\bimport\b/.test(t.replace(/^\s*\/\/.*$/gm, ''));
+  const shipList = (t) => ((t.match(/static AGENT_TOOLS = \[([^\]]*)\]/) || [])[1] || '');
+  ok(transportPure(read('src/harnesses/claude-transport.js')) && /'vibespace-status'/.test(shipList(read('src/hosts.js'))) && !/wrapper/.test(shipList(read('src/hosts.js'))),
+    'chat-wrapper.js\'s one non-builtin require (src/harnesses/claude-transport.js) is PURE (no require / import) and no wrapper is on the remote ship list (HostManager.AGENT_TOOLS)');
+  ok(!transportPure("'use strict';\nconst x = require('./other.js');\n") && /wrapper/.test(shipList("  static AGENT_TOOLS = ['vibespace-status', 'chat-wrapper.js'];")),
+    'CONTROL: a require in the transport module, or a wrapper on the ship list, is red');
   for (const [f, src] of KINDS.map((k) => [path.basename(REL[k]), SRC[k]])) {
-    ok(!/require\((?!['"](fs|path|os|child_process|crypto)['"])[^)]*\)/.test(src.replace(/require\(path\.join\(__dirname, '\.\.\/\.\.\/node_modules\/node-pty'\)\)/, '')),
-      `${f}: node builtins only (a STATIC file shipped to remote hosts; node-pty is its one pre-existing dependency; crypto since lane codex-0159: the reset-credit consume's idempotencyKey)`);
+    ok(!/require\((?!['"](fs|path|os|child_process|crypto)['"])[^)]*\)/.test(src.replace(/require\(path\.join\(__dirname, '\.\.\/\.\.\/node_modules\/node-pty'\)\)/, '').replace(TRANSPORT_REQ, '')),
+      `${f}: node builtins only (a STATIC file; node-pty is its one pre-existing dependency; crypto since lane codex-0159: the reset-credit consume's idempotencyKey; dc-harness-store 2.369.213: the claude transport flags' PURE module, below)`);
     const body = src.slice(src.indexOf('function onWrapperSignal'), src.indexOf('for (const sig of Object.keys(WRAPPER_SIGNO))'));
     ok(body.length > 0 && !/await|setTimeout|setImmediate|\.write\(|\.end\(|Promise/.test(body.replace(/fs\.writeFileSync|clearTimeout/g, '')),
       `${f}: the signal handler is synchronous (no await/timer/stream write)`);
@@ -1226,7 +1236,7 @@ console.log('— §6c every kill door is declared: an actor marked before the ki
     'src/desktop-serve.js': [3, 'not a conversation: desktop apps'],
     'src/device-mount.js': [4, 'not a conversation: rclone mounts (lane mac-pull-refresh added one — its bounded refresh child; composed at the 2.369.202 integration)'],
     'src/machine-mounts.js': [1, 'not a conversation: mount probes'],
-    'src/mounts.js': [5, 'not a conversation: mounts'],
+    'src/mounts.js': [7, 'not a conversation: mounts (2.369.213: + a hung/over-ceiling starting daemon, + the bounded cache-count child)'],
     'src/jobs.js': [2, 'not a conversation: background jobs'],
     'src/plugins.js': [2, 'not a conversation: plugins'],
     'src/server/plugin-loader.js': [2, 'not a conversation: plugin children'],

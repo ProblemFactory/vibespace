@@ -2,6 +2,19 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.213 — 2026-10-05
+
+### Added
+- A new Chat setting, “Enter sends the message” (on by default): turn it off and Enter adds a line, while Ctrl+Enter (⌘+Enter on a Mac) sends.
+
+### Fixed
+- With a Chinese or Japanese input method, an Enter right after it ends on Shift, Space or Esc adds a line instead of sending a half-written message.
+- A storage connection still rebuilding its cache (minutes for a large OneDrive) now shows Starting and its file count, then mounts, instead of failing.
+- A remote machine's desktop and port forwards no longer sometimes fail to connect; the machine's first reply was being lost.
+
+### Removed
+- The “Allow the CloakBrowser container” switch is gone from Agent browser settings (it never started anything); CloakBrowser settings no longer hide behind it.
+
 ## 2.369.212 — 2026-10-04
 
 ### Added

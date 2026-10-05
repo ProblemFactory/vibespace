@@ -291,7 +291,7 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
    *  unreadable name keeps the last one. Fire-and-forget: a failure is a log line, never a thrown join. */
   function refreshAppTitle(id, why) {
     const rec = recOf(id);
-    if (!rec || rec.state !== 'ready' || M.streamKindOf(rec, backends) !== 'xpra') return null;
+    if (!rec || rec.state !== 'ready' || !M.capsOf(rec, backends).perWindow) return null;
     let tr = titleReads.get(id);
     if (!tr) { tr = { at: 0, inflight: null }; titleReads.set(id, tr); }
     if (tr.inflight) return tr.inflight;
@@ -368,7 +368,7 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
     if (isLocalHost(host)) { const r = await machine.list(); return hasRemote() ? { ...r, apps: listApps() } : r; }
     const r = await acc().call(host, 'list', { settings: settingsForOp() });
     ingestHost(host, r.apps, { www: r.availability && r.availability.xpra ? r.availability.xpra.www || null : null });
-    return { apps: listApps(), registry: r.registry, availability: r.availability, cap: r.cap, idleTimeoutMin: r.idleTimeoutMin, host: { hostId: host, label: labelOf(host) } };
+    return { apps: listApps(), registry: r.registry, availability: r.availability && { ...r.availability, caps: M.capsOf(r.availability, backends) }, cap: r.cap, idleTimeoutMin: r.idleTimeoutMin, host: { hostId: host, label: labelOf(host) } };
   }
 
   // ── the machine's acts (device #0 in-process — zero hops; a paired machine through the desktop-serve op) ──
@@ -558,7 +558,7 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
   function remoteView(hostId, rec) {
     const h = remote.hosts[hostId];
     const hub = (h && h.hub && h.hub[rec.id]) || {};
-    const base = { ...rec, hostId, hostLabel: labelOf(hostId), appTitle: hub.appTitle || rec.appTitle || null };
+    const base = { ...rec, caps: M.capsOf(rec, backends), hostId, hostLabel: labelOf(hostId), appTitle: hub.appTitle || rec.appTitle || null };
     delete base.live; delete base.idle;
     if (hub.lastInputAt && hub.lastInputAt > (Number(rec.lastInputAt) || 0)) base.lastInputAt = hub.lastInputAt;
     const offline = !!(h && h.online === false && M.isLiveState(rec.state));

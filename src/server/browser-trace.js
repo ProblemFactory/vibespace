@@ -920,6 +920,7 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
       // lane profile-lock-roll (L3): the machine its browser last started on, and the takeover of a previous name's lock (a day)
       r.launchHost = keeper && typeof keeper.browserOf === 'function' ? ((keeper.browserOf(r.id) || {}).host || null) : null;
       r.renamedFrom = keeper && typeof keeper.profile === 'function' ? require('../browser-profiles.js').renamedFromFact(keeper.profile(r.id), now()) : null;
+      r.buildChoice = !!(require('../browser-profiles.js').providerRow(r.provider) || {}).buildChoice; // lane dc-browser-providers: the row's cell (Change build…, the build line) — the panel never asks the id
     }
     const eph = { scope: T.EPHEMERAL_SCOPE, trace: { ...T.scopeDigest(loadIndex(T.EPHEMERAL_SCOPE)), ...usageOf(T.EPHEMERAL_SCOPE) } };
     const o = await orphans();

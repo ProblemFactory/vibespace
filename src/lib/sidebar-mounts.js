@@ -336,7 +336,7 @@ export function installSidebarMounts(Sidebar) {
           ibtn(MI.folder, 'Browse in file explorer', () => { this.app.openFileExplorer(m.path); }),
           ibtn(MI.eject, m.type === 'gmail' ? tr('Stop syncing (synced emails stay)') : 'Disconnect', () => api(`/api/mounts/${m.id}/unmount`, { method: 'POST' })),
         );
-      } else if (!isCred) {
+      } else if (!isCred && !m.starting) { // STARTING: no Connect — the row's line says what it waits for
         // Power icon (⏻) in the same icon-button family — the old glyph read
         // as a "download" button and a text chip among icons read worse
         // (user feedback, twice). The ROW itself is also click-to-connect.
@@ -409,7 +409,7 @@ export function installSidebarMounts(Sidebar) {
       // Row body = the primary action users try anyway: a disconnected row
       // CONNECTS on click, a mounted row opens its folder. Buttons/expanders
       // inside keep their own handlers.
-      if (!isCred) {
+      if (!isCred && !m.starting) {
         row.classList.add('mounts-row-clickable');
         row.setAttribute('data-tip', m.mounted ? tr('Open in file explorer') : tr('Click to connect'));
         row.onclick = async (e) => {
@@ -423,6 +423,29 @@ export function installSidebarMounts(Sidebar) {
           } catch (err2) { showToast(err2.message || 'Failed', { type: 'error' }); }
           this._renderMounts();
         };
+      }
+      // STARTING (2.369.213): rclone rebuilds its cache index before it mounts.
+      // Keyed line, its elapsed time patched in place every second.
+      if (m.starting && !m.mounted) {
+        const sl = document.createElement('div');
+        sl.className = 'mounts-syncline mounts-startline';
+        sl.dataset.key = 'mount-start:' + m.id;
+        const st = m.starting;
+        const words = () => {
+          const s = Math.max(0, Math.round((Date.now() - st.since) / 1000));
+          return tr('Starting — rebuilding its cache index ({files} files), {elapsed} so far; it mounts by itself when the scan ends (waits up to {max} min)', {
+            files: st.files == null ? '…' : String(st.files).replace(/\B(?=(\d{3})+(?!\d))/g, ' ') + (st.capped ? '+' : ''),
+            elapsed: s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${String(s % 60).padStart(2, '0')} s`, max: st.maxMin });
+        };
+        sl.textContent = words();
+        const tick = setInterval(() => { if (!sl.isConnected) { clearInterval(tick); return; } sl.textContent = words(); }, 1000);
+        row.appendChild(sl);
+      }
+      if (m.stranded) {
+        const sd = document.createElement('div');
+        sd.className = 'mounts-syncline';
+        sd.textContent = tr('Files written while it was not mounted were moved to {dest} — nothing was deleted', { dest: m.stranded });
+        row.appendChild(sd);
       }
       if (m.error) {
         const err = document.createElement('div');

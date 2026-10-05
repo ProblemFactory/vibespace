@@ -175,6 +175,10 @@ for (const f of ['src', 'public', 'server.js']) { execSync(`rm -rf ${wt}/${f} &&
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
 execSync('npm run build', { cwd: wt, stdio: 'ignore' });
+// dc-ratchet (2.369.213): a CONTROL copy below is a MUTANT tree, not a commit — before its build, its §78 ratchet baselines are
+// re-derived from the copy itself (a lever pulled back can remove or restore a member-id branch or an export; test-architecture
+// is chained in npm run build, and §78 is red on any rise or fall against the committed baseline)
+const rebaseline = (dir) => { for (const c of ['id-branch', 'dead-code']) { fs.rmSync(path.join(dir, 'scripts', 'fixtures', `${c}-baseline.json`), { force: true }); execSync(`node scripts/${c}-census.mjs --write-initial`, { cwd: dir, stdio: 'ignore' }); } };
 
 // §5's agent lease needs a LIVE agent session: a fake claude (prints the init frame, then sleeps) under the real ws create
 const FAKE_BIN = path.join(fakeHome, 'fake-bin');
@@ -1008,13 +1012,13 @@ try {
     fs.mkdirSync(path.join(wtc, 'data'), { recursive: true });
     const patches = [
       ['src/lib/xpra-view.js', "  const screenRatio = () => pixelRatioOf(typeof pixelRatio === 'function' ? pixelRatio() : pixelRatio);", '  const screenRatio = () => 1; // pre-fix CONTROL'], // lane D (a) respelled the lever (the ratio is screen ÷ pictureScale)
-      ['src/desktop-serve.js', "const knobs = backend.stream === 'xpra' ? M.scaleKnobs(pick.scale, { rule: M.scaleRuleOf(row) }) : M.scaleKnobs(1);", 'const knobs = M.scaleKnobs(1); // pre-fix CONTROL'], // round 3 A3 + lane D (a) respelled the lever (the pick is scalePick's, the rule the row's)
+      ['src/desktop-serve.js', "const knobs = rungScales ? M.scaleKnobs(pick.scale, { rule: M.scaleRuleOf(row) }) : M.scaleKnobs(1);", 'const knobs = M.scaleKnobs(1); // pre-fix CONTROL'], // round 3 A3 + lane D (a) respelled the lever (the pick is scalePick's, the rule the row's)
       ['src/lib/xpra-proto.js', "'title', 'size-hints', 'size-constraints', 'class-instance'", "'title', 'size-hints', 'class-instance'"],
     ];
     let allOnce = true;
     for (const [f, from, to] of patches) { const src = fs.readFileSync(path.join(wtc, f), 'utf8'); if (src.split(from).length !== 2) allOnce = false; fs.writeFileSync(path.join(wtc, f), src.replace(from, to)); }
     check('CONTROL: each pre-fix lever is spelled exactly once in the tree (the control patches exactly those)', allOnce);
-    execSync('npm run build', { cwd: wtc, stdio: 'ignore' });
+    rebaseline(wtc); execSync('npm run build', { cwd: wtc, stdio: 'ignore' });
     const [PORTH] = await freePorts(1);
     const homeH = scratchHome('deskxpra-hidpictl-home', fs);
     const sh = spawn(process.execPath, ['server.js'], { cwd: wtc, env: { ...srvEnv, ...VNC_ENV, PORT: String(PORTH), HOME: homeH }, stdio: 'ignore' }); ctlServers.push(sh);
@@ -1162,13 +1166,13 @@ try {
       ['src/lib/xpra-view.js', "      if (mode === 'watch') {\n        for (const w of client.windows.values())", "      if (true) {\n        for (const w of client.windows.values())"],
       ['src/lib/xpra-client.js', '    return { width: Math.max(pane.width, g ? g.x + g.w : 0), height: Math.max(pane.height, g ? g.y + g.h : 0) };', '    return { width: pane.width, height: pane.height };'],
       ['src/lib/window.js', '  _ownMinOf(win) { return minOf(win, this._workspaceBox()); }', '  _ownMinOf(win) { return minOf(win); }'],
-      ['src/desktop-serve.js', "      if (own && M.streamKindOf(rec, backends) === 'xpra') {\n        const xd = await display.waitForXftDpi(", "      if (false) {\n        const xd = await display.waitForXftDpi("],
+      ['src/desktop-serve.js', "      if (own && M.capsOf(rec, backends).crispText) {\n        const xd = await display.waitForXftDpi(", "      if (false) {\n        const xd = await display.waitForXftDpi("],
       ['src/desktop-apps.js', '  if (eff < Math.SQRT2) return eff;', '  return Math.min(2, Math.max(1, Math.round(normalizeDpr(dpr) * 2) / 2)); // r1 CONTROL (round 3 A3 respelled the auto rule: the lever is its first line)'],
     ];
     let once = true;
     for (const [f, from, to] of levers) { const src = fs.readFileSync(path.join(wtr, f), 'utf8'); if (src.split(from).length !== 2) { once = false; console.error(`    lever not spelled once in ${f}: ${from.slice(0, 70)}`); } fs.writeFileSync(path.join(wtr, f), src.replace(from, to)); }
     check('CONTROL (r1): each of the nine r2 levers is spelled exactly once in the tree (the control pulls back exactly those)', once);
-    execSync('npm run build', { cwd: wtr, stdio: 'ignore' });
+    rebaseline(wtr); execSync('npm run build', { cwd: wtr, stdio: 'ignore' });
     const [PORTR] = await freePorts(1);
     const homeR = scratchHome('deskxpra-r2ctl-home', fs);
     const sr = spawn(process.execPath, ['server.js'], { cwd: wtr, env: { ...srvEnv, ...VNC_ENV, PORT: String(PORTR), HOME: homeR }, stdio: 'ignore' }); ctlServers.push(sr);
@@ -1602,7 +1606,7 @@ try {
       const closeLine = '    if (!v.close) return false;';
       check('CONTROL: the window\'s close decision is spelled exactly once (the control pulls exactly it back)', winSrc.split(closeLine).length === 2);
       fs.writeFileSync(path.join(wtc, 'src/lib/desktop-app-window.js'), winSrc.replace(closeLine, '    return false; // pre-A2 CONTROL: the window never closes itself'));
-      execSync('npm run build', { cwd: wtc, stdio: 'ignore' });
+      rebaseline(wtc); execSync('npm run build', { cwd: wtc, stdio: 'ignore' });
       const [PORTA] = await freePorts(1);
       const homeA = scratchHome('deskxpra-a2ctl-home', fs);
       const sa = spawn(process.execPath, ['server.js'], { cwd: wtc, env: { ...srvEnv, ...VNC_ENV, PORT: String(PORTA), HOME: homeA }, stdio: 'ignore' }); ctlServers.push(sa);
@@ -2667,7 +2671,7 @@ try {
     let once = true;
     for (const [f, from, to] of levers) { const src = fs.readFileSync(path.join(wtd, f), 'utf8'); if (src.split(from).length !== 2) { once = false; console.error(`    lever not spelled once in ${f}: ${from.slice(0, 70)}`); } fs.writeFileSync(path.join(wtd, f), src.replace(from, to)); }
     check('§15/§16 CONTROL: each lane-D lever is spelled exactly once (the copy patches exactly those)', once);
-    execSync('npm run build', { cwd: wtd, stdio: 'ignore' });
+    rebaseline(wtd); execSync('npm run build', { cwd: wtd, stdio: 'ignore' });
     const [PORTD] = await freePorts(1);
     const homeD = scratchHome('deskxpra-dctl-home', fs);
     const sd = spawn(process.execPath, ['server.js'], { cwd: wtd, env: { ...srvEnv, PORT: String(PORTD), HOME: homeD }, stdio: 'ignore' }); ctlServers.push(sd);

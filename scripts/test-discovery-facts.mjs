@@ -109,7 +109,7 @@ ok(bundle.includes('pidLooksClaude') || bundle.includes('PID-reuse guard'), 'bui
   console.log('lane peer-card-sender ② a name given to the live session outranks the first message');
   const wc = read('src/ws-create.js'), br = read('src/server/boot-restore.js'), srv = read('server.js'), sb = read('src/lib/sidebar.js'), card = read('src/lib/session-card.js');
   ok(/_nameExplicit: typeof data\.sessionName === 'string' && !!data\.sessionName\.trim\(\),/.test(wc) && /nameExplicit: session\._nameExplicit \|\| undefined, \/\/ lane peer-card-sender/.test(wc), 'ws-create: a name GIVEN at creation is explicit (`sessionName` — the client\'s "Session N" default never travels) and persisted in the meta');
-  ok((br.match(/_nameExplicit: meta\.nameExplicit === true/g) || []).length === 3, 'boot-restore: every restore path (dtach, chat, remote keeper) restores it');
+  ok(((s, r) => (s.match(new RegExp(r.source, 'g')) || []).length === 1 && r.test((s.match(/\nfunction sessionFromMeta\(meta, transportFacts\) \{[\s\S]*?\n\}\n/) || [''])[0]) && (s.match(/= sessionFromMeta\(meta, \{/g) || []).length === 3)(br, /_nameExplicit: meta\.nameExplicit === true/), 'boot-restore: every restore path (dtach, chat, remote keeper) restores it');
   ok(/\n      (?:name: s\.name, )?nameExplicit: !!s\._nameExplicit, /.test(srv) && /nameExplicit: \{ digest: \(v\) => \(v \? '1' : ''\) \},/.test(sb), 'the live payload carries it and LIVE_SESSION_FACTS carries + gates it (a rename re-renders the card)');
   const CHAIN = "const originalName = (s.nameExplicit && s.webuiName) || s.name || s.webuiName || cwdFolder || s.sessionId.substring(0, 12) + '...';";
   ok(card.includes(CHAIN), 'the card: a custom name, else the GIVEN live name, else the first message, else the live default');

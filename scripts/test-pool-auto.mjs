@@ -1936,7 +1936,7 @@ await (async () => {
     ck('r2 resume: …and with the member back the same carrier pins as it always did', got(rp({ accountId: P3, poolPin: { memberId: B, at: 5, poolId: P3 } }), P3, B));
     // control: the accept lines as they were (the claude default for every backend, no pool on the pin)
     const wsrc = fs.readFileSync(path.resolve('src/ws-create.js'), 'utf8');
-    const l1 = "const poolId = data.accountId || (backend === 'codex' ? st.defaultCodexAccountId : st.defaultAccountId) || null;", l2 = "if (typeof p.poolId === 'string' && p.poolId && p.poolId !== poolId) return null;";
+    const l1 = "const poolId = data.accountId || (defaultIdField ? st[defaultIdField] : null) || null;", l2 = "if (typeof p.poolId === 'string' && p.poolId && p.poolId !== poolId) return null;";
     ck('r1 resume control: the patch (the two clauses as they were) hits', wsrc.split(l1).length === 2 && wsrc.split(l2).length === 2);
     const MRP = mutantCopies('poolpin-r1resume', path.resolve('.'));
     const old = MRP.load('src/ws-create.js', wsrc.replace(l1, 'const poolId = data.accountId || st.defaultAccountId || null;').replace(l2, ''), 'claudedefault');
@@ -2171,7 +2171,10 @@ await (async () => {
   // WIRING PINS (code only): restart / resume / fork
   const strip = (f) => fs.readFileSync(path.resolve(f), 'utf8').split('\n').map((l) => l.replace(/(^|\s)\/\/.*$/, '')).join('\n');
   const br = strip('src/server/boot-restore.js');
-  ck('WIRING PIN: all THREE boot-restore sites restore the pin through ONE expression', (br.match(/_poolPin: poolPinFromMeta\(meta\),/g) || []).length === 3);
+  // dc-harness-store (2.369.213): the three restore paths build the session through ONE sessionFromMeta — the pin is spelled
+  // once, inside it, and no path's transport facts (which win the spread) carry a _poolPin of their own
+  const sfm = (br.match(/\nfunction sessionFromMeta\(meta, transportFacts\) \{[\s\S]*?\n\}\n/) || [''])[0];
+  ck('WIRING PIN: all THREE boot-restore sites restore the pin through ONE expression (sessionFromMeta)', (br.match(/_poolPin:/g) || []).length === 1 && /_poolPin: poolPinFromMeta\(meta\),/.test(sfm) && (br.match(/= sessionFromMeta\(meta, \{/g) || []).length === 3, [(br.match(/_poolPin:/g) || []).length, (br.match(/= sessionFromMeta\(meta, \{/g) || []).length]);
   const wc2 = strip('src/ws-create.js');
   ck('WIRING PIN: ws-create persists the pin into the meta and takes a resume\'s pin through ONE judge (resumePoolPin — never on a FORK, never remote)', /poolPin: session\._poolPin \|\| undefined,/.test(wc2) && /const rp = resumePoolPin\(data, accounts, backend\);/.test(wc2) && /if \(!data \|\| data\.fork \|\| data\.hostId \|\| !accounts\) return null;/.test(wc2) && /_poolPin: \(data\._poolPin && spawnAccount && spawnAccount\.id === data\._poolPinPool\) \? data\._poolPin : null,/.test(wc2));
   const sl = strip('src/lib/session-lifecycle.js');

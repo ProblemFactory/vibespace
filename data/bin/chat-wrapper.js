@@ -60,18 +60,11 @@ if (!bufferFile || !cmd) {
   process.exit(1);
 }
 
-// Ensure stream-json flags are in args
-if (!args.includes('--output-format')) {
-  args.push('--output-format', 'stream-json');
-}
-if (!args.includes('--input-format')) {
-  args.push('--input-format', 'stream-json');
-}
-if (!args.includes('--verbose')) {
-  args.push('--verbose');
-}
-if (!args.includes('--permission-prompt-tool')) {
-  args.push('--permission-prompt-tool', 'stdio');
+// Ensure stream-json flags are in args — the claude harness's ONE spelling
+// (src/harnesses/claude-transport.js; the remote spawn reads the same list via
+// the adapter's chatTransportArgs())
+for (const fl of require(path.join(__dirname, '..', '..', 'src', 'harnesses', 'claude-transport.js')).CHAT_TRANSPORT_ARGS) {
+  if (!args.includes(fl[0])) args.push(...fl);
 }
 
 // Write initial metadata

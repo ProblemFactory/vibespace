@@ -276,12 +276,15 @@ export function styleAppliesLive(caps, wrapperLive) {
  *  WHERE the two surfaces appear is CSS's business, not this predicate's: the
  *  hint is the desktop face and the bolt button beside Send is the ≤768px one
  *  (chat.css, same shape as `.chat-attach-btn`). */
-export function composerSendModes(caps) {
+export function composerSendModes(caps, { enterSends = true } = {}) {
   const queue = !!(caps && caps.queue);
   const steer = !!(caps && caps.steer);
   const queueOps = !!(caps && caps.queueOps);
   const queueSegment = queue && queueOps;
-  return { queueSegment, steerSegment: steer, allowSteerChord: steer, showHint: queueSegment || steer };
+  // chat.enterSends off (lane chat-enter-ime): Enter is a newline, so the line must say which key sends — the queue
+  // segment names it where the harness queues, a send segment everywhere else.
+  const sendSegment = enterSends === false && !queueSegment;
+  return { queueSegment, steerSegment: steer, allowSteerChord: steer, sendSegment, enterSends: enterSends !== false, showHint: queueSegment || steer || sendSegment };
 }
 
 /** PURE: WHICH FACT is the response style a panel is showing? `live` = what the

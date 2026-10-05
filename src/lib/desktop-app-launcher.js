@@ -764,7 +764,7 @@ export async function showLaunchDialog(app, opts = {}) {
     else { const shareEl = availFoot.querySelector('.desktop-launch-share-row'); if (availEl.previousElementSibling !== shareEl) shareEl.after(availEl); }
     renderInstall();
     const dead = !!listError || !data?.availability?.backend;
-    const scales = !dead && data?.availability?.stream === 'xpra'; // lane D: only a rung that scales apps offers a default scale
+    const scales = !dead && !!data?.availability?.caps?.scales; // lane D: only a rung that scales apps offers a default scale (the row's cell)
     // ── the catalog: applications, then browsers (B-bfe6) under their own heading ──
     regEl.innerHTML = '';
     browsersEl.innerHTML = '';

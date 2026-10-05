@@ -166,8 +166,14 @@ function assertExecutable(binPath, name) {
   throw namedError('exec-vanished', `${name || path.basename(String(binPath))} is no longer an executable at ${binPath} (it was when probed; uninstalled or replaced since)`);
 }
 
-/** Every binary a backend rung, a light WM or the enumeration may need. */
-const PROBE_BINS = Object.freeze(['xpra', 'Xvnc', 'Xtigervnc', 'Xvfb', 'x11vnc', 'xfwm4', 'openbox', 'xdotool', 'wmctrl', 'xwininfo', 'xdpyinfo', 'xauth', 'xrdb']);
+/** The light WMs, the window enumeration and the X helpers — binaries no rung's `needs` names. */
+const HELPER_BINS = Object.freeze(['xfwm4', 'openbox', 'xdotool', 'wmctrl', 'xwininfo', 'xdpyinfo', 'xauth', 'xrdb']);
+/** Every binary a backend rung, a light WM or the enumeration may need: the rungs' `needs` DERIVED from the table (a
+ *  pseudo-binary like `desktop-singleton:running` is a fact, not a file — rv-desktop F-B5), then the helpers. */
+function probeBinsOf(table = require('./desktop-apps').DISPLAY_BACKENDS) {
+  return Object.freeze([...new Set([...table.flatMap((b) => b.needs.flat()).filter((n) => !n.includes(':')), ...HELPER_BINS])]);
+}
+const PROBE_BINS = probeBinsOf();
 
 /**
  * B-bfe6 — IS THIS BROWSER BINARY A SNAP? (a FACT; the PURE `profileDirVerdict`
@@ -1291,7 +1297,7 @@ function rfbGreeting(buf) {
 }
 
 module.exports = {
-  assertLocal, binOnPath, resetBinMemo, forgetBin, assertExecutable, PROBE_BINS, BROWSER_BINS, browserConfinement, hostFacts, officeFacts, x11Env, NO_WAYLAND_DISPLAY, withoutWayland,
+  assertLocal, binOnPath, resetBinMemo, forgetBin, assertExecutable, PROBE_BINS, probeBinsOf, BROWSER_BINS, browserConfinement, hostFacts, officeFacts, x11Env, NO_WAYLAND_DISPLAY, withoutWayland,
   newCookie, writeXauthority, xauthEntry, freePort, rfbBanner, waitForRfb, httpProbe, waitForHttp, waitForListen, portAnswers, LISTEN_PROBES,
   listenerInode, pidHoldsInode, listenerHeldBy,
   spawnDetached, X_SERVER_ARGS, startXServer, startX11vnc, startWindowManager, startApp, applyXResources, waitForXftDpi, RECIPES,

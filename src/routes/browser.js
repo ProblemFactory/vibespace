@@ -8,7 +8,7 @@
  *   GET    /api/browser/profiles              registry + leases + browsers + cap + floor + providers (P4: the rows)
  *   GET    /api/browser/providers[?host=]     P4 (§7.1): every provider row with its capability cells, the local verdict
  *                                             and the verdict FOR `host` (a disabled control names its reason), the
- *                                             §7.2.1 egress record, the cloakserve plan or its typed refusal, the forwards
+ *                                             §7.2.1 egress record, the forwards
  *   POST   /api/browser/profiles              { label, provider?, proxy?, notes?, record?, host?, cdpPort? }
  *                                             P4: `host` = the PAIRED machine the browser runs on (chromium via the
  *                                             browser-serve op, cdp via tcpForward); `cdpPort` = a cdp profile's port
@@ -438,8 +438,7 @@ router.post('/api/browser/profiles', async (req, res) => {
 });
 /** P4 (§7.1): the provider rows with their capability cells, each with the
  *  local verdict and — with `?host=` — the verdict FOR that machine (a
- *  disabled control names its reason), the §7.2.1 egress record, and the
- *  cloakserve plan or its typed refusal. `host` here names the machine the
+ *  disabled control names its reason), and the §7.2.1 egress record. `host` here names the machine the
  *  answer is ABOUT, not one the route acts on, so it is not refused. */
 router.get('/api/browser/providers', (req, res) => {
   const k = keeperOr503(res); if (!k) return;
@@ -448,10 +447,9 @@ router.get('/api/browser/providers', (req, res) => {
   const h = LOCAL.has(host) ? null : host;
   try {
     const rows = B.providerRows({ host: h, desktopConsent: typeof k.desktopConsent === 'function' ? k.desktopConsent() : undefined });
-    const cloak = typeof ctx.cloakPlan === 'function' ? ctx.cloakPlan() : { ok: false, code: 'cloak_opt_in_off', error: 'CloakBrowser is not wired on this instance' };
     // lane-cloak: `egress` = the allowlists the record IMPLIES (derived — egressHostsOf), `cloakSites` = what a running
     // cloak browser may reach here now (the record's run hosts + the deployment's named sites)
-    res.json({ providers: rows, proof: B.CLOAK_EGRESS_PROOF, egress: B.egressHostsOf(B.CLOAK_EGRESS_PROOF), cloakSites: typeof k.cloakEgress === 'function' ? k.cloakEgress().allowlist : [], host: h, hostKnown: h ? k.hostKnown(h) : true, cloak: cloak.ok ? { ok: true, image: cloak.image, egress: cloak.egress, cdpUrl: cloak.cdpUrl } : cloak, forwards: typeof ctx.forwards === 'function' ? ctx.forwards() : [] });
+    res.json({ providers: rows, proof: B.CLOAK_EGRESS_PROOF, egress: B.egressHostsOf(B.CLOAK_EGRESS_PROOF), cloakSites: typeof k.cloakEgress === 'function' ? k.cloakEgress().allowlist : [], host: h, hostKnown: h ? k.hostKnown(h) : true, forwards: typeof ctx.forwards === 'function' ? ctx.forwards() : [] });
   } catch (e) { fail(res, e); }
 });
 router.get('/api/browser/profiles/:id', (req, res) => {
@@ -669,7 +667,7 @@ function adoptPlanOf(f) {
 function adoptKeepRefusal(body) {
   const b = body || {};
   const asks = [];
-  if (b.provider != null && String(b.provider) !== 'chromium') asks.push('browser');
+  if (b.provider != null && String(b.provider) !== require('../browser-profiles.js').DEFAULT_PROVIDER) asks.push('browser');
   if (b.host != null && !LOCAL.has(String(b.host))) asks.push('machine');
   if (b.cdpPort != null) asks.push('port');
   const c = require('../browser-builds.js').normalizeBrowserChoice(b.browser);
@@ -1922,7 +1920,6 @@ router.get('/api/agent/browser/providers', async (req, res) => {
   const B = require('../browser-profiles.js');
   const host = hostOf(req);
   const h = LOCAL.has(host) ? null : host;
-  const cloak = typeof ctx.cloakPlan === 'function' ? ctx.cloakPlan() : { ok: false, code: 'cloak_opt_in_off', error: 'CloakBrowser is not wired on this instance' };
   // lane browser-admin (chunk 3): the Chrome BUILDS of the machine asked about and the browser CLI version VibeSpace
   // drives — FACTS an agent may read (versions only: never a path, never a way to choose — `--executable-path` stays a
   // refused launch flag, `install` not offered, a build is the user's choice in the Agent browser panel)
@@ -1931,7 +1928,7 @@ router.get('/api/agent/browser/providers', async (req, res) => {
   try { builds = typeof k.buildsFor === 'function' ? B0.buildsView(await k.buildsFor(h)) : null; } catch { builds = null; }
   if (builds && builds.ok) builds = { ok: true, missing: builds.missing, cut: builds.cut, builds: builds.builds }; // no root path for an agent
   try { const c = typeof k.cliFacts === 'function' ? await k.cliFacts() : null; cli = c ? { table: c.table, mode: c.choice.mode, chosen: c.choice.version || null, inUse: c.inUse.version || null, inUsePinned: !!c.inUse.pinned, onPath: c.onPath.version || null, pinnedInstalled: c.pinned ? !!c.pinned.installed : null, drift: c.drift || null } : null; } catch { cli = null; }
-  res.json({ providers: B.providerRows({ host: h, desktopConsent: typeof k.desktopConsent === 'function' ? k.desktopConsent() : undefined }), proof: B.CLOAK_EGRESS_PROOF, egress: B.egressHostsOf(B.CLOAK_EGRESS_PROOF), cloakSites: typeof k.cloakEgress === 'function' ? k.cloakEgress().allowlist : [], host: h, hostKnown: h ? k.hostKnown(h) : true, cloak: cloak.ok ? { ok: true, image: cloak.image, egress: cloak.egress } : cloak, builds, cli });
+  res.json({ providers: B.providerRows({ host: h, desktopConsent: typeof k.desktopConsent === 'function' ? k.desktopConsent() : undefined }), proof: B.CLOAK_EGRESS_PROOF, egress: B.egressHostsOf(B.CLOAK_EGRESS_PROOF), cloakSites: typeof k.cloakEgress === 'function' ? k.cloakEgress().allowlist : [], host: h, hostKnown: h ? k.hostKnown(h) : true, builds, cli });
 });
 router.post('/api/agent/browser/new', (req, res) => {
   const k = keeperOr503(res); if (!k) return;

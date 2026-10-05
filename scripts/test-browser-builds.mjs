@@ -408,7 +408,7 @@ console.log('— ④ the client words (en / zh / ja) + wiring');
   const t = mkT(null);
   ok(W.cardBuildLine({ choice: { kind: 'build', version: '151.0.7922.34' } }, t).text === 'Chrome 151.0.7922.34 (pinned)' && W.cardBuildLine({ choice: null }, t).text === "The browser CLI's default build"
     && W.cardBuildLine({ choice: { kind: 'path', path: '/opt/c/chrome' } }, t).text === 'The chrome at /opt/c/chrome (pinned)' && W.cardBuildLine({ choice: null, live: true, running: '149.0.1.1' }, t).text === "The browser CLI's default build · running Chrome 149.0.1.1"
-    && W.cardBuildLine({ provider: 'cloak' }, t) === null && W.cardBuildLine({ choice: { kind: 'build', version: '151.0.7922.34' }, missing: { what: '151.0.7922.34' } }, t).warn === true,
+    && W.cardBuildLine({ buildChoice: false }, t) === null && W.cardBuildLine({ choice: { kind: 'build', version: '151.0.7922.34' }, missing: { what: '151.0.7922.34' } }, t).warn === true,
   'the profile card: "Chrome 151.0.7922.34 (pinned)" / the CLI\'s default build / a path; the build its browser RUNS while live; a missing one amber; nothing for CloakBrowser');
   const rows = W.buildRows({ ok: true, builds: [{ version: '152.0.1.2', usable: true }, { version: '146.0.7680.153', usable: true }, { version: '139.0.1.1', usable: false, why: 'not-executable' }] }, { choice: { kind: 'build', version: '151.0.7922.34' }, lastChromiumMajor: 151, local: true, t });
   const byKey = Object.fromEntries(rows.map((r) => [r.key, r]));
@@ -436,7 +436,7 @@ console.log('— ④ the client words (en / zh / ja) + wiring');
   const noZh = [...said].filter((k) => !(k in zh)), noJa = [...said].filter((k) => !(k in ja));
   ok(said.size > 25 && !noZh.length && !noJa.length, `every sentence the build model says (${said.size}) has a zh and a ja entry`, { noZh, noJa });
   const tv = read('src/lib/browser-trace-view.js');
-  ok(/cardBuildLine\(\{ provider: r\.provider, choice: r\.browser, running: runningBuildOf\(r\.id\), missing: r\.buildMissing, live: !!r\.live \}, t\)/.test(tv) && /build: \(r\) => openBuildDialog\(app, r\.id,/.test(tv) && /id: 'build', label: t\('Change build…'\)/.test(read('src/lib/browser-panel-model.js')) /* design 015: the ⋯ menu's act */ && /runningBuildOf\(r\.id\)\]\); \};/.test(tv),
+  ok(/cardBuildLine\(\{ buildChoice: r\.buildChoice, choice: r\.browser, running: runningBuildOf\(r\.id\), missing: r\.buildMissing, live: !!r\.live \}, t\)/.test(tv) && /build: \(r\) => openBuildDialog\(app, r\.id,/.test(tv) && /id: 'build', label: t\('Change build…'\)/.test(read('src/lib/browser-panel-model.js')) /* design 015: the ⋯ menu's act */ && /runningBuildOf\(r\.id\)\]\); \};/.test(tv),
     'the Agent browser panel row: the build line (its fact in the row\'s signature) + Change build… opening THE dialog');
   const sw = read('src/lib/browser-switcher.js');
   ok(/st\.view\.build \? cardBuildLine\(/.test(sw) && /a\.kind === 'build'\) \{ close\(\); openBuildDialog\(app, profileId,/.test(sw), 'the switch dialog gains the build row and its ONE act');

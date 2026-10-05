@@ -129,7 +129,8 @@ console.log('§4 the shipped schema');
   const misses = Object.keys(SCHEMA).filter((p) => !real(none, { query: p }).sections.some((s) => s.rows.some((r) => r.path === p)));
   ok(misses.length === 0, `V1: EVERY one of the ${Object.keys(SCHEMA).length} rows is reachable by searching its key with the switch OFF and every fact false (a loop, not a sample)`, misses.slice(0, 5));
   const cloak = real(none, { query: 'cloakbrowser' });
-  ok(cloak.sections.flatMap((s) => s.rows).some((r) => r.path === 'browser.cloak.executablePath' && r.chips.some((c) => c.kind === 'unused')), 'the switch dialog\'s deep link ("CloakBrowser") reaches the hidden-by-relevance CloakBrowser rows, each with its chip');
+  { const cr = cloak.sections.flatMap((s) => s.rows).filter((r) => r.path === 'browser.cloak.executablePath' || r.path === 'browser.cloak.egressAllowlist');
+    ok(cr.length === 2 && cr.every((r) => !r.chips.some((c) => c.kind === 'unused')) && !('browser.cloak.enabled' in SCHEMA), 'the switch dialog\'s deep link ("CloakBrowser") reaches both live CloakBrowser rows with no "not in use here" chip — lane dc-browser-providers deleted the never-run container switch they hid behind', cr.map((r) => r.path)); }
   const adv = Object.entries(SCHEMA).filter(([, r]) => r.tier === 'advanced').map(([k]) => k);
   const whens = Object.entries(SCHEMA).filter(([, r]) => r.when).length;
   console.log(`    tier census: ${adv.length} advanced of ${Object.keys(SCHEMA).length} rows; ${whens} rows carry a \`when\`; default view draws ${real(all).drawn} rows, ${real(all).hiddenAdvanced} advanced folded`);

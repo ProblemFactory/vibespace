@@ -191,7 +191,7 @@ const k = K.create({ dataDir: DATA, homeDir: HOME, env: () => ({ PATH: PATH_ENV,
 const express = require('express');
 function serve(R) {
   const app = express(); app.use(express.json());
-  R.setup({ keeper: k, activeSessions: new Map(), browserEnv: () => null, cloakPlan: () => B.cloakservePlan({ enabled: false }), forwards: () => access.forwards() });
+  R.setup({ keeper: k, activeSessions: new Map(), browserEnv: () => null, forwards: () => access.forwards() });
   app.use(R.router);
   return new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => { servers.add(s); r(`http://127.0.0.1:${s.address().port}`); }); });
 }
@@ -206,7 +206,7 @@ const owner = { owner: { kind: 'instance', id: null } };
   const APIc = await serve(Rc);
   const c0 = await call(APIc, 'POST', `/api/browser/profiles/${p.id}/restart`);
   ok(c0.status === 404 && /no browser record/.test(c0.json && c0.json.error), 'CONTROL (the base\'s stop-first restart): a never-started paired machine\'s profile answers 404 "no browser record"', c0);
-  R.setup({ keeper: k, activeSessions: new Map(), browserEnv: () => null, cloakPlan: () => B.cloakservePlan({ enabled: false }), forwards: () => access.forwards() });
+  R.setup({ keeper: k, activeSessions: new Map(), browserEnv: () => null, forwards: () => access.forwards() });
   const c1 = await call(API, 'POST', `/api/browser/profiles/${p.id}/restart`);
   ok(c1.status === 200 && c1.json.cold === true && c1.json.browser && c1.json.browser.state === 'ready' && mac.st.launches.length === 1 && access.forwards().some((f) => f.hostId === 'dev-mac'), 'the owner STARTS it from cold: 200, started on dev-mac (one launch there), the hub forward up', c1);
   const c2 = await call(API, 'POST', `/api/browser/profiles/${p.id}/restart`);
@@ -241,7 +241,7 @@ const owner = { owner: { kind: 'instance', id: null } };
   fs.mkdirSync(path.join(mac.home, '.agent-browser', 'vs-' + p2.id), { recursive: true });
   const dc = await call(APId, 'DELETE', `/api/browser/profiles/${p2.id}`);
   ok(dc.status === 200 && fs.existsSync(path.join(mac.home, '.agent-browser', 'vs-' + p2.id)) && !dc.json.machine, 'CONTROL (no machine removal): the record goes, its folder on the machine STAYS and nothing says so');
-  R.setup({ keeper: k, activeSessions: new Map(), browserEnv: () => null, cloakPlan: () => B.cloakservePlan({ enabled: false }), forwards: () => access.forwards() });
+  R.setup({ keeper: k, activeSessions: new Map(), browserEnv: () => null, forwards: () => access.forwards() });
   const d1 = await call(API, 'DELETE', `/api/browser/profiles/${p.id}`);
   ok(d1.status === 200 && d1.json.removed === p.id && d1.json.machine && d1.json.machine.removed === true && d1.json.machine.host === 'dev-mac' && !fs.existsSync(path.join(mac.home, '.agent-browser', 'vs-' + p.id)) && fs.existsSync(path.join(mac.home, '.agent-browser', 'vs-' + p2.id)), 'DELETE: the record AND its folder on dev-mac gone (the machine\'s own op); another profile\'s folder there untouched', d1.json);
   const l = k.createProfile({ label: 'Old agent box', host: 'dev-lin' }, owner);
@@ -285,7 +285,7 @@ console.log('— ④ the New profile dialog: a machine with no browser, by name,
 // ═══ ⑤ VERIFY R1: a start racing a delete · this computer's restart unchanged · two lines an inline comment had eaten ═══
 console.log('— ⑤ verify r1');
 {
-  const setupWith = (Rm, extra = {}) => Rm.setup({ keeper: k, activeSessions: new Map(), browserEnv: () => null, cloakPlan: () => B.cloakservePlan({ enabled: false }), forwards: () => access.forwards(), ...extra });
+  const setupWith = (Rm, extra = {}) => Rm.setup({ keeper: k, activeSessions: new Map(), browserEnv: () => null, forwards: () => access.forwards(), ...extra });
   // F4 · a DELETE racing an agent's first command: the record goes FIRST, the machine is asked after — no start lands between
   const raceOnce = async (base) => {
     const pr = k.createProfile({ label: 'Race ' + Math.random().toString(16).slice(2, 6), host: 'dev-mac' }, owner);

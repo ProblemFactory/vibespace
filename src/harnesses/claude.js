@@ -5,7 +5,41 @@ const { BACKEND_CAPS } = require('../backend-caps');
 const { ClaudeCodeAdapter } = require('../adapters/claude-code');
 const { MessageManager } = require('../message-manager');
 const store = require('../session-store');
-const { writerSweepScript } = require('../writer-sweep');
+const { sweepSharedLegs, fdScanShellFns, cliIdentityShellFns } = require('../writer-sweep');
+// WRITER SWEEP holder legs (store.writerSweep; the generic runner is
+// writer-sweep.js sweepWriters): an fd on `<rid>.jsonl` (/proc scan, lsof on
+// macOS/BSD ssh hosts) + the CLI's own ~/.claude/sessions lock files; the
+// protect list is unused — a claude writer of THIS id is never a live peer.
+function claudeWriterSweep(rid, shq) {
+  return `RID=${shq(rid)}
+# writer sweep (VS_WRITER_SWEEP), portable: /proc fd scan on Linux; lsof on
+# macOS/BSD ssh hosts (no /proc there — the old script silently swept NOTHING,
+# audit 2.192.0). Holding the transcript open is the EVIDENCE; vs_is_cli decides
+# whether the holder is the CLI (a writer) or a reader that must survive.
+${fdScanShellFns()}
+${cliIdentityShellFns()}
+vs_claude_kill() {
+  vs_is_cli "$1" claude || return 0
+  kill -TERM "$1" 2>/dev/null && echo "SWEPT:$1"
+}
+if [ -d /proc/1 ] || [ -d /proc/self ]; then
+  for pid in $(vs_fd_pids "/$RID.jsonl"); do vs_claude_kill "$pid"; done
+elif command -v lsof >/dev/null 2>&1; then
+  J=$(find "$HOME/.claude/projects" -maxdepth 2 -name "$RID.jsonl" 2>/dev/null | head -1)
+  if [ -n "$J" ]; then
+    for pid in $(lsof -t -- "$J" 2>/dev/null); do vs_claude_kill "$pid"; done
+  fi
+fi
+# The CLI's own lock file names the pid; the executable test is what keeps a
+# STALE file whose pid has been reused from killing an unrelated process.
+find "$HOME/.claude/sessions" -maxdepth 1 -name '*.json' 2>/dev/null | while read -r f; do
+  pid=$(basename "$f" .json)
+  grep -q "\\"sessionId\\":\\"$RID\\"" "$f" 2>/dev/null || continue
+  kill -0 "$pid" 2>/dev/null || continue
+  vs_claude_kill "$pid"
+done
+${sweepSharedLegs()}`;
+}
 const { loginState } = require('../login-expiry'); // PURE: refreshTokenExpiresAt -> ok/expiring/expired/logged-out/unknown
 const { HARNESS_SETTINGS } = require('../harness-settings'); // PURE: THE declared settings table (design-harness-settings §2)
 const { cliConfigFile } = require('../harness-config');       // SHARED: the descriptor-side file object over the table's `files` entry
@@ -71,6 +105,58 @@ function claudeLoginState(dir, now = Date.now()) {
   return { ...loginState(raw, now), writtenAt };
 }
 
+/** THE GLOBAL-LOGIN GUESS at spawn (moved from ws-create's `_authAtSpawn`):
+ *  a spawn with no account follows the CLI's GLOBAL login — record what that
+ *  was RIGHT NOW so the badge can warn about API billing; the stream's init
+ *  record (apiKeySource) later confirms or overrides it. */
+function claudeAuthAtSpawn({ hostId, accounts }) {
+  if (hostId) return 'remote-global';
+  return accounts?.subscriptionStatus?.().loggedIn ? 'subscription'
+    : (accounts?.cliPrimaryKey?.().present ? 'console' : 'unknown');
+}
+
+/** The usage statusline rides the CLI's `--settings` JSON (merged into one the
+ *  spawn already carries — the existing arg is rewritten IN PLACE, as before). */
+function withStatusline(args, command) {
+  let settingsObj = {};
+  const si = args.indexOf('--settings');
+  if (si >= 0 && args[si + 1]) { try { settingsObj = JSON.parse(args[si + 1]) || {}; } catch {} }
+  settingsObj.statusLine = { type: 'command', command, padding: 0 };
+  const sjson = JSON.stringify(settingsObj);
+  if (si >= 0) { args[si + 1] = sjson; return args; }
+  return [...args, '--settings', sjson];
+}
+
+/** BILLING IDENTITY of a live session (moved from server.js sessionAuth): a
+ *  named account / pool, else the stream's apiKeySource, else the spawn-time
+ *  guess. `withHost` / `poolAuth` are server.js's generic helpers (host-name
+ *  qualification, the ONE pooled shape). */
+function claudeBillingIdentity(s, { accounts, withHost, poolAuth }) {
+  if (s._accountId) {
+    const a = accounts.get(s._accountId);
+    if (a && a.type === 'pooled') return poolAuth(a);
+    // A named SUBSCRIPTION account bills the subscription (not API) — show its
+    // name, no amber key warning.
+    if (a && (a.type || 'api') === 'subscription') return withHost({ source: 'subscription', name: a.name });
+    return withHost({ source: 'api-key', name: a?.name || 'API key', tail: a?.tail || null });
+  }
+  const src = s._apiKeySource;
+  if (src === 'none') return withHost({ source: 'subscription' });
+  if (src === '/login managed key') return withHost({ source: 'api-console' });
+  if (src === 'ANTHROPIC_API_KEY') return withHost({ source: 'api-key', name: 'env key' });
+  if (typeof src === 'string' && src) return withHost({ source: 'api-other', detail: src });
+  const at = s._authAtSpawn;
+  if (at === 'subscription') return withHost({ source: 'subscription', guessed: true });
+  if (at === 'console') return withHost({ source: 'api-console', guessed: true });
+  if (at === 'env-key') return withHost({ source: 'api-key', guessed: true });
+  // remote session with no explicit account: billed by the HOST's own CLI
+  // login — a real subscription-or-key on that machine, never "unknown"
+  // (2.188.0: remote TERMINAL sessions showed "KEY?" forever — apiKeySource
+  // is chat-stream-only and the /proc backfill probes the LOCAL ssh wrapper).
+  if (at === 'remote-global') return withHost({ source: 'subscription', guessed: true });
+  return withHost({ source: 'unknown' });
+}
+
 module.exports = {
   id: 'claude',
   label: 'Claude Code',
@@ -105,16 +191,12 @@ module.exports = {
     // So a claude resume commands neither knob and the CLI's own session
     // record — variant-exact — decides. Adding a hook back here is all it takes
     // if a future CLI records the commanded value.
-    locateTranscript: store.findSessionJsonlPath,   // (sessionId, cwd) → path|null (S1 alias)
     warmTranscript: store.warmSessionJsonlAsync,   // worker-side parse cache
-    Reader: store.SessionMessages,
     createReader: (session, sessionId, opts) => new store.SessionMessages(session, sessionId, opts || {}), // SessionMessages-shaped reader
-    forkChain: () => [],                            // claude forks write a NEW id's JSONL — nothing to merge
-    writerSweep: (rid, shq, opts) => writerSweepScript(rid, shq, { ...(opts || {}), backend: 'claude' }),
+    homeRename: require('./claude-home'),           // ~/.claude/projects re-encoding after a home rename (server.js / boot-restore call it)
+    writerSweep: claudeWriterSweep,                  // (rid, shq) → POSIX sweep script (writer-sweep.js runs it)
     // remote transcript location (hosts.fetchTranscript): where find(1) looks + the cache name
     remoteFind: (id) => ({ root: '"$HOME"/.claude/projects', findExpr: `-maxdepth 2 -name ${JSON.stringify(id + '.jsonl')}`, cacheRel: id + '.jsonl', maxBytes: 64 * 1024 * 1024 }),
-    transcriptDirs: ['~/.claude/projects'],
-    conversationIdField: 'claudeSessionId',
   },
   quota: require('./claude-quota.js'),   // QuotaSignalSource (S4): normalize/signalFromStream/probe/classifyAuthFailure
   // CREDENTIAL mechanics (S2): where a named account lives, which env var
@@ -165,6 +247,23 @@ module.exports = {
     form: 'message',
     deliver: (session, text, deps) => !!deps.sendChatInput(session, text),
   },
+  // SPAWN FACTS (lane dc-ws-create): what src/ws-create.js used to ask as
+  // `backend === 'claude'` — rows/hooks of the spawn contract (./index.js SPAWN_ROWS).
+  spawn: {
+    conversationIdField: 'claudeSessionId', // the resume guard + the session's stamp read it beside backendSessionId
+    // a host-less resume of a conversation NOT here is looked for in the remote caches (2.297.0)
+    isLocalConversation: (id) => {
+      const projectsDir = path.join(os.homedir(), '.claude', 'projects');
+      try { return fs.readdirSync(projectsDir).some((d) => fs.existsSync(path.join(projectsDir, d, id + '.jsonl'))); } catch { return false; }
+    },
+    hostHeldLogin: true,          // a remote sub- account the host alone holds is rescued through evaluateOnHost (B-f531)
+    authAtSpawn: claudeAuthAtSpawn,
+    resumeMayFork: true,          // resuming a locked conversation mints a new id the parser adopts (2.219.0)
+    statusline: withStatusline,   // only the claude CLI understands --settings (a shell/codex spawn exits on it)
+    localPipe: true,              // R6: agentd.localPipeSessions may route a local chat spawn through the device-#0 pipe
+    otelExport: true,             // local spawns export api_request telemetry to the loopback OTLP receiver (B-345b)
+  },
+  billingIdentity: claudeBillingIdentity,
   settingsPrefix: 'claude',
   // THE SETTINGS TABLE (design-harness-settings §2): joined by OBJECT IDENTITY
   // like `caps` above — the schema derives the Claude section from it, the

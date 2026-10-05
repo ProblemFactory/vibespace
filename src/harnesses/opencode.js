@@ -17,13 +17,11 @@
 // /session/:id/message (a live session keeps reading its wrapper journal),
 // forkSession = POST /session/:id/fork (ws-create mints the fork id BEFORE the
 // spawn and resumes it; capsOf('opencode').fork flips only on the OpenAPI
-// evidence), forkChain = [] (OpenCode records no fork parent — a fork is a
+// evidence), no forkChain (OpenCode records no fork parent — a fork is a
 // copied session with "(fork #n)" in its title; parentID means a sub-agent
 // child, not a fork).
 const { acpHarness } = require('./acp');
 const serve = require('../opencode-serve');
-const os = require('os');
-const path = require('path');
 
 const harness = acpHarness({
   id: 'opencode',
@@ -31,7 +29,6 @@ const harness = acpHarness({
   command: 'opencode',
   args: ['acp'],
   store: {
-    transcriptDirs: [path.join(os.homedir(), '.local', 'share', 'opencode')],
     locate: () => null,
   },
   brand: '/brand/opencode.svg',
@@ -47,14 +44,12 @@ Object.assign(harness.store, {
   // async ({activeSessions}) → session entries; [] (silently) until the serve
   // instance is up, when the CLI is missing, or while negative-cached
   discover: ({ activeSessions } = {}) => serve.facts().discover({ activeSessions }),
-  Reader: serve.OpencodeServeSessionMessages,
   // (session, sessionId, {buffersDir, live}) — live sessions read the journal;
   // the synthetic stopped shape loads from the serve on prepare()
   createReader: (session, sessionId, opts) => new serve.OpencodeServeSessionMessages(session, sessionId, { ...(opts || {}), facts: serve.facts() }),
   // (id, {cwd}) → the NEW Session {id, title, directory, …}; throws LOUDLY
   // (not installed / parked / unreachable / no fork endpoint / 404)
   forkSession: (id, opts) => serve.facts().forkSession(id, opts || {}),
-  forkChain: () => [],
   // RESUME CONTINUITY (B-6b6d round 2): OpenCode's OWN session record names the
   // model, so this harness CAN answer "what is this conversation on" and the
   // hook's PRESENCE says so (src/resume-continuity.js — a knob with no source

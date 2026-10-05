@@ -5,6 +5,7 @@ import { t } from './i18n.js';
 import { startPointerDrag } from './drag-feed.js'; // THE feed for every drag door (lane-drag-release verify r2 census)
 import { isNotificationQueueItem } from '../notification-senders.js';
 import { keyboardOwned, keyboardYielded, onKeyboardChange } from './keyboard-owner.js'; // lane J r2: a driven live view owns the keyboard — focus() stands down; lane takeover-keyboard: …unless the user pressed this box (the line above it says so)
+import { EnterGuard, imeOwnsKey, IME_HINT_MS, sendKeyName } from './chat-enter-keys.js'; // lane chat-enter-ime: an Enter meant for the input method never sends
 import { createStashStrip } from './stash-strip.js'; // 2026-09-27: what waits for this agent's next turn + Hand over now
 
 /**
@@ -21,7 +22,7 @@ export class ChatInput {
    * @param {function} opts.getStateSync - returns StateSync instance
    * @param {function} opts.onInterrupt - called when user clicks Stop
    */
-  constructor(ws, sessionId, { onSend, onInterrupt, getCwd, getHost, getUploadDir, isTouch, getTouchEnterSends, onQueueOp, onSteerChord, onSteerSend }) {
+  constructor(ws, sessionId, { onSend, onInterrupt, getCwd, getHost, getUploadDir, isTouch, getTouchEnterSends, getEnterSends, onQueueOp, onSteerChord, onSteerSend }) {
     this._ws = ws;
     this._sessionId = sessionId;
     this._onSend = onSend;
@@ -31,6 +32,8 @@ export class ChatInput {
     this._getUploadDir = getUploadDir || (() => '');
     this._isTouch = isTouch || (() => false);
     this._getTouchEnterSends = getTouchEnterSends || (() => false);
+    this._getEnterSends = getEnterSends || (() => true);   // chat.enterSends (desktop): off ⇒ Cmd/Ctrl+Enter sends
+    this._enterGuard = new EnterGuard();                     // inc-muukd9oq-qyc3: a composition ended by another key arms a short newline window
     this._onQueueOp = onQueueOp || null;   // (op, id, extra) → ws 'queue-op'
     // THE CHORD (2026-09-07 owner ask). `onSteerChord` routes the composer's
     // Alt+Enter through the SAME command the registered keybinding runs
@@ -190,6 +193,7 @@ export class ChatInput {
     // Send: Enter in normal mode, Ctrl+Enter in expanded mode
     // Tab to accept slash autocomplete
     this._textarea.addEventListener('keydown', (e) => {
+      this._enterGuard.keydown(e); // FIRST: which key ended a composition decides whether its end arms the guard
       if (!this._slashDropdown.classList.contains('hidden')) {
         if (e.key === 'Tab' || e.key === 'Enter') {
           const active = this._slashDropdown.querySelector('.active');
@@ -206,7 +210,7 @@ export class ChatInput {
           return;
         }
       }
-      if (e.isComposing || e.keyCode === 229) return; // IME composing
+      if (imeOwnsKey(e)) return; // IME composing
       // Editing a queued message: Esc puts the textarea back the way it was.
       if (e.key === 'Escape' && this._editingQueueId) { e.preventDefault(); this._cancelQueueEdit(); return; }
       // Input history: ArrowUp on empty textarea recalls previous sent message
@@ -250,19 +254,18 @@ export class ChatInput {
         if (this._onSteerChord) this._onSteerChord(); else this.steerNow();
         return;
       }
-      if (this._expanded) {
-        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); this._send(); }
-      } else {
-        if (e.key === 'Enter' && !e.shiftKey) {
-          // Touch soft keyboards have no Shift — their enter key is the only
-          // way to type a newline, so by default it inserts one and sending
-          // is the button (2.234.0, real report "点换行之后就发出了").
-          // chat.touchEnterSends opts back into enter-to-send.
-          if (this._isTouch() && !this._getTouchEnterSends()) return;
-          e.preventDefault(); this._send();
-        }
-      }
+      // Enter: chat-enter-keys.js decides (PURE). Touch soft keyboards have no Shift — their enter key is the only way
+      // to type a newline, so by default it inserts one and sending is the button (2.234.0, real report "点换行之后就发出了";
+      // chat.touchEnterSends opts back in). The expanded composer and chat.enterSends off: Ctrl/Cmd+Enter sends.
+      // 'ime-newline' (inc-muukd9oq-qyc3): the input method JUST ended on another key — the default newline stays and
+      // the line under the box says so; the next Enter sends.
+      const act = this._enterGuard.enter(e, { expanded: this._expanded, touch: this._isTouch(), touchEnterSends: this._getTouchEnterSends(), enterSends: this._getEnterSends() !== false });
+      if (act === 'send') { e.preventDefault(); this._send(); }
+      else if (act === 'ime-newline') this._showImeHint();
     });
+
+    this._textarea.addEventListener('compositionstart', () => this._enterGuard.compositionstart());
+    this._textarea.addEventListener('compositionend', () => this._enterGuard.compositionend());
 
     // Slash command autocomplete on input
     this._textarea.addEventListener('input', () => {
@@ -407,6 +410,12 @@ export class ChatInput {
     // input area's flex-wrap puts it on its own row below the box.
     this._sendHint = document.createElement('div');
     this._sendHint.className = 'chat-send-hint hidden';
+    // THE IME LINE (inc-muukd9oq-qyc3): an Enter the guard turned into a newline says so for IME_HINT_MS, right where
+    // the send-mode hint lives — inline, never a toast.
+    this._imeHint = document.createElement('div');
+    this._imeHint.className = 'chat-ime-hint';
+    this._imeHint.hidden = true;
+    this._imeHint.setAttribute('role', 'status');
 
     // WHERE THE KEYS ARE (lane takeover-keyboard, userW inc-mum339id-1zsb): while this client drives the agent's browser
     // and the user PRESSED this composer, his keys come here, not to the page — one line right above the box says so,
@@ -422,7 +431,7 @@ export class ChatInput {
     this._textarea.addEventListener('focus', renderKbdLine);
     this._textarea.addEventListener('blur', renderKbdLine);
 
-    inputArea.append(this._stashStrip.el, this._queueStrip, this._attachArea, this._todoDisplay, this._streamStatus, this._kbdLine, inputWrap, this._steerBtn, sendCol, this._sendHint);
+    inputArea.append(this._stashStrip.el, this._queueStrip, this._attachArea, this._todoDisplay, this._streamStatus, this._kbdLine, inputWrap, this._steerBtn, sendCol, this._sendHint, this._imeHint);
   }
 
   /** The .chat-input-area wrapper element */
@@ -551,7 +560,16 @@ export class ChatInput {
 
   // ── SEND MODES WHILE A TURN RUNS (the Alt+Enter chord + its hint) ────────
   /** The PURE caps→surfaces answer for this session's live queue caps. */
-  _sendModes() { return composerSendModes(this._queueCaps); }
+  // optional calls: chat-view and the suites ask the REAL prototype DOM-free (Object.create, no constructor)
+  _sendModes() { return composerSendModes(this._queueCaps, { enterSends: !!this._isTouch?.() || this._getEnterSends?.() !== false }); }
+
+  _showImeHint() {
+    if (!this._imeHint) return;
+    this._imeHint.textContent = t('Input method just ended — press Enter again to send');
+    this._imeHint.hidden = false;
+    clearTimeout(this._imeHintTimer);
+    this._imeHintTimer = setTimeout(() => { this._imeHint.hidden = true; }, IME_HINT_MS);
+  }
 
   /** May Alt+Enter (and the ≤768px bolt button) act right now? A CAPABILITY
    *  answer only — deliberately not "is there text": the hint and the `when`
@@ -587,7 +605,7 @@ export class ChatInput {
     const show = live && modes.showHint;
     this._sendHint.classList.toggle('hidden', !show);
     if (!show) { this._sendHint.innerHTML = ''; return; }
-    const html = ChatInput.sendHintHtml(modes);
+    const html = ChatInput.sendHintHtml(modes, sendKeyName(modes.enterSends, /Mac|iPhone|iPad/.test(globalThis.navigator?.platform || '')));
     if (this._sendHintHtml !== html) { this._sendHint.innerHTML = html; this._sendHintHtml = html; }
   }
 
@@ -596,9 +614,11 @@ export class ChatInput {
    *  nothing here. The KEY NAME lives inside the translated phrase (a physical
    *  key is not translated, but "Enter queues" as a sentence is — the owner's
    *  own wording is "Enter 排队 · Alt+Enter 立即注入"). */
-  static sendHintHtml(modes = {}) {
+  static sendHintHtml(modes = {}, key = 'Enter') {
     const parts = [];
-    if (modes.queueSegment) parts.push(`<span class="chat-send-hint-part">${escHtml(t('Enter queues'))}</span>`);
+    // chat.enterSends off: the line names the key that sends (Ctrl/⌘+Enter), on every harness
+    if (modes.sendSegment) parts.push(`<span class="chat-send-hint-part">${escHtml(t('{key} sends', { key }))}</span>`);
+    if (modes.queueSegment) parts.push(`<span class="chat-send-hint-part">${escHtml(modes.enterSends === false ? t('{key} queues', { key }) : t('Enter queues'))}</span>`);
     if (modes.steerSegment) parts.push(`<span class="chat-send-hint-part">${escHtml(t('Alt+Enter injects now'))}</span>`);
     return parts.join('<span class="chat-send-hint-sep">·</span>');
   }

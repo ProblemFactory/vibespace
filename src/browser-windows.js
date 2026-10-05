@@ -49,7 +49,7 @@
 const WINDOWS_PROOF = Object.freeze({
   status: 'measured',
   measured: '2026-10-01',
-  agentBrowser: '0.38.1',
+  agentBrowser: require('./browser-verbs.js').AGENT_BROWSER_CLI.table, // the table's version (one row): a table bump re-measures this proof
   chrome: 'Google Chrome 154.0.8037.57',
   modes: Object.freeze(['headless', 'hidden window (headed on the CLI\'s own Xvfb)']),
   script: 'scripts/measure-browser-windows.mjs',

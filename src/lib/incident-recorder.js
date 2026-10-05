@@ -14,6 +14,7 @@
 import { t } from './i18n.js';
 import { onRendererFreeze } from './telemetry-client.js';
 import { BUILD_VERSION } from './build-version.js';
+import { actionKeyWords, imeMarker } from './chat-enter-keys.js';
 import { showToast, fetchJson, copyText, createModalShell, escHtml, uiScale } from './utils.js';
 
 const CAP = { action: 500, ws: 700, console: 250, op: 300 };
@@ -50,14 +51,21 @@ export function installIncidentRecorder(app) {
   }, { capture: true, passive: true });
   let lastTypeAt = 0;
   document.addEventListener('keydown', (e) => {
-    const special = e.key.length > 1 || e.ctrlKey || e.metaKey || e.altKey;
-    if (special) {
-      push(rings.action, CAP.action, { t: Date.now(), k: 'key', key: (e.ctrlKey ? 'C-' : '') + (e.metaKey ? 'M-' : '') + (e.altKey ? 'A-' : '') + e.key, el: describeEl(e.target) });
+    const w = actionKeyWords(e); // C-/M-/A-/S- + key, c:1 when the input method owned it (chat-enter-keys.js, PURE)
+    if (w) {
+      push(rings.action, CAP.action, { t: Date.now(), k: 'key', ...w, el: describeEl(e.target) });
     } else if (Date.now() - lastTypeAt > 3000) {
       lastTypeAt = Date.now(); // one "typing" marker per burst — never the text
       push(rings.action, CAP.action, { t: Date.now(), k: 'typing', el: describeEl(e.target) });
     }
   }, { capture: true, passive: true });
+  // input-method markers on a textarea (the composer): when a composition starts and ends — never its text
+  for (const type of ['compositionstart', 'compositionend']) {
+    document.addEventListener(type, (e) => {
+      const m = imeMarker(type, e.target);
+      if (m) push(rings.action, CAP.action, { t: Date.now(), ...m, el: describeEl(e.target) });
+    }, { capture: true, passive: true });
+  }
 
   // ── ws ring: message TYPES both directions (no payloads) ──
   try {

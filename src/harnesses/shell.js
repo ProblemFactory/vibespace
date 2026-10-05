@@ -19,6 +19,11 @@ module.exports = {
   // is the honest nothing and every surface — the status-bar toggle, the
   // engine's arm, the module's fire — refuses by that row rather than by an id.
   resume: null,
+  // SPAWN FACTS (lane dc-ws-create): what src/ws-create.js used to ask as `backend === 'shell'`.
+  spawn: {
+    homeFallback: true, // a terminal in $HOME is fine: a missing explicit cwd falls back instead of refusing
+    loginShell: true,   // a paired device runs ITS user's login shell ($SHELL → UserShell → zsh → bash), argv -l
+  },
   settingsPrefix: null,
   settings: null,               // no instance settings (a plain shell has no model, no CLI config)
   configFiles: {},

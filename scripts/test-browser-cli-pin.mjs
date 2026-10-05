@@ -599,5 +599,27 @@ console.log('— ⑥ controls');
   ok(hj.stream && hj.stream.code === 'browser_cli_gone' && hj.streamCalls.length === 0, 'control (j): …the keeper\'s call on a browser whose binary was re-installed (the same version) was refused browser_cli_gone — exactly what the r3 (Y1) leg catches', { stream: hj.stream && hj.stream.code, calls: hj.streamCalls });
 }
 
+console.log('— ⑦ lane dc-browser-providers (rv-browser F8): ONE agent-browser version row — every spelling reads it or is pinned to it');
+{
+  // the two files that cannot import the row: every `agent-browser@x.y.z` / `agent-browser x.y.z` they spell (DERIVED by
+  // regex, never a hand list of lines) must be the row's `table`; package.json's declared floor must be the row's `floor`
+  const spellings = (docker, pkg) => {
+    const out = [];
+    for (const m of docker.matchAll(/agent-browser[@ ](\d+\.\d+\.\d+)/g)) out.push({ where: 'deploy/docker/Dockerfile', want: 'table', v: m[1] });
+    const at = JSON.parse(pkg).agentTools?.['agent-browser'] || {};
+    for (const m of String(at.install || '').matchAll(/agent-browser@(\d+\.\d+\.\d+)/g)) out.push({ where: 'package.json install', want: 'table', v: m[1] });
+    out.push({ where: 'package.json floor', want: 'floor', v: String(at.floor || '') });
+    return out;
+  };
+  const off = (docker, pkg) => spellings(docker, pkg).filter((s) => s.v !== V.AGENT_BROWSER_CLI[s.want]);
+  const dock = read('deploy/docker/Dockerfile'), pkg = read('package.json');
+  const all = spellings(dock, pkg);
+  ok(all.filter((s) => s.where === 'deploy/docker/Dockerfile').length >= 2 && all.some((s) => s.where === 'package.json install'), 'the census finds the image\'s install + its --version check and package.json\'s install hint', JSON.stringify(all));
+  ok(off(dock, pkg).length === 0, `every spelling is the row's: table ${V.AGENT_BROWSER_CLI.table}, floor ${V.AGENT_BROWSER_CLI.floor}`, JSON.stringify(off(dock, pkg)));
+  const B = require('../src/browser-profiles.js'), TR = require('../src/browser-trace.js'), W = require('../src/browser-windows.js');
+  ok(V.TABLE_VERSION === V.AGENT_BROWSER_CLI.table && V.CLI_PIN_RECORD.version === V.AGENT_BROWSER_CLI.table && B.FLOOR_VERSION === V.AGENT_BROWSER_CLI.floor && TR.RECORDING_FLOOR === V.AGENT_BROWSER_CLI.recordingFloor && W.WINDOWS_PROOF.agentBrowser === V.AGENT_BROWSER_CLI.table, 'the code spellings READ the row (table, pin record, floor, recording floor, windows proof)');
+  ok(off(dock.replace(/agent-browser@\d+\.\d+\.\d+/, 'agent-browser@0.38.2'), pkg).length === 1 && off(dock, pkg.replace(/agent-browser@\d+\.\d+\.\d+/, 'agent-browser@0.37.1')).length === 1, 'control: an image pinned to another version, or the old 0.37.1 install hint, is RED by name');
+}
+
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

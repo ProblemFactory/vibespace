@@ -846,7 +846,7 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
     const psw = ps ? stuckWords(ps, t) : null;
     const autoText = autoDialogsOf(r) ? t('Accepts leave-page dialogs by itself (typed input is lost) until its next start') : null;
     // lane browser-admin 2a: WHICH CHROME BUILD — the choice and, while it runs, the build the browser itself reports (the fold)
-    const buildLine = cardBuildLine({ provider: r.provider, choice: r.browser, running: runningBuildOf(r.id), missing: r.buildMissing, live: !!r.live }, t);
+    const buildLine = cardBuildLine({ buildChoice: r.buildChoice, choice: r.browser, running: runningBuildOf(r.id), missing: r.buildMissing, live: !!r.live }, t);
     const x = { w: WORDS, chip: app.browserChipFor ? app.browserChipFor(r.id) : null, mine: app._browserProfiles && app._browserProfiles.machine ? String(app._browserProfiles.machine.host || '') : '', stuck: psw, autoDialogs: !!autoText, autoText, buildLine, limits: v?.limits || null, now: Date.now() };
     const L = rowLine(r, x);
     const isOpen = openFolds.has(r.id);

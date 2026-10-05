@@ -11,7 +11,8 @@ const pty = require('node-pty');
 const { execFileSync, spawn } = require('child_process');
 const { createMessageManager } = require('../normalizers');
 const { pipePtyShim } = require('../pty-duck'); // B-ae4b: the R6 re-open duck holds a listener SET (the liveness stamp + the consumer)
-const { cwdToProjectDir, dedupWebuiSockets } = require('../session-store');
+const { dedupWebuiSockets } = require('../session-store');
+const { list: harnessList } = require('../harnesses');
 const { pickCodexThreadCandidate } = require('../ws-handler');
 const { fdScanShellFns } = require('../writer-sweep.js');
 const { lockCaptureWanted, captureLockId, armLockCapture, adoptCapturedId, restoredForkPending, ownsItsId } = require('../claude-lock-capture'); // the ONE local lock capture (ws-create's create chain + this boot re-arm; the witness is the wrapper's pid)
@@ -75,6 +76,39 @@ function create({ rootDir, PORT, BUFFERS_DIR, META_DIR, SOCKETS_DIR, DTACH_CMD,
     return (fb && typeof fb === 'object' && fb.to)
       ? { from: fb.from || null, to: fb.to, at: Number(fb.at) || 0 } : null;
   };
+// THE meta→session CONVERSATION facts (rv-server M3, dc-harness-store
+// 2.369.213) — ONE spelling for the three restore paths (restoreSessions,
+// restoreAgentdPipeSessions, readoptOrphanKeeperSessions), which used to
+// hand-copy them (35 / 10 / 21 assignments, drifting). `transportFacts` = the
+// transport-only fields (socket / keeper / pipe / port) and the per-path rows
+// a path has never restored (kept per path so behaviour is unchanged); they win.
+function sessionFromMeta(meta, transportFacts) {
+  return {
+    clients: new Map(),
+    cwd: meta.cwd || os.homedir(),
+    _nameExplicit: meta.nameExplicit === true, // lane peer-card-sender: a name given at creation / by a rename
+    createdAt: meta.createdAt || Date.now(),
+    claudeSessionId: meta.claudeSessionId || null,
+    agentToken: meta.agentToken || null, // vibespace-status auth survives restarts
+    _accountId: meta.accountId || null, // billing identity the session was spawned with (badge only — env lives in the surviving process)
+    // Permission mode isn't recoverable from the JSONL (init records are
+    // stdout-only) — restore what the session was launched with
+    _permissionMode: meta.permissionMode || null,
+    _effort: meta.effort || null,
+    _modelOrigin: meta.modelOrigin || null, _effortOrigin: meta.effortOrigin || null, // B-6b6d: the spawn's model/effort ORIGIN survives a restart (else the panel's honest row degrades to a guess)
+    _outputStyle: meta.outputStyle || null, // 2.369.58: the chip must not report "default" for a session really running a style
+    _worktree: !!meta.worktree, _worktreePath: meta.worktreePath || null,
+    _vcs: meta.vcs && typeof meta.vcs === 'object' ? meta.vcs : null, _prLinks: Array.isArray(meta.prLinks) ? meta.prLinks : null, // design-unknown-records: the git chip + PR chips survive a restart
+    // agent-browser P0 (§3.2.1): the CONVERSATION's browser identity and the
+    // user-data-dir rung it spawned on. Restored so a later resume of this
+    // conversation finds its key and the orphan sweep sees this session as
+    // live in memory as well as on disk.
+    _poolPin: poolPinFromMeta(meta), // THE CONVERSATION'S PIN (2026-09-28) survives a restart
+    _browserKey: meta.browserKey || null, _browserVariant: meta.browserVariant || null, _browserProfileId: meta.browserProfileId || null, _browserPinOrigin: meta.browserPinOrigin || null, _browserEnv: Array.isArray(meta.browserEnv) ? meta.browserEnv : null, _browserProfileActive: typeof meta.browserProfileActive === 'string' ? meta.browserProfileActive : null, _browserCap: Number.isInteger(meta.browserCap) ? meta.browserCap : null, _channelTouches: Array.isArray(meta.channelTouches) ? meta.channelTouches : null, _groupCards: Array.isArray(meta.groupCards) ? meta.groupCards : null,
+    ...transportFacts,
+  };
+}
+
 // ── Personalized-username migration self-heal (2.236.1, userW's real
 // incident): the 3.5.0 image renames the container user vibe→<name> and
 // symlinks /home/vibe → /home/<name>, which covers every recorded ABSOLUTE
@@ -91,25 +125,8 @@ function migrateLegacyHomeProjects() {
     if (path.basename(home) === 'vibe') return;
     let st; try { st = fs.lstatSync('/home/vibe'); } catch { return; }
     if (!st.isSymbolicLink()) return;
-    const projectsDir = path.join(home, '.claude', 'projects');
-    const newPrefix = cwdToProjectDir(home); // e.g. -home-userW
-    let names; try { names = fs.readdirSync(projectsDir); } catch { return; }
-    let n = 0;
-    for (const d of names) {
-      if (!d.startsWith('-home-vibe-')) continue;
-      const full = path.join(projectsDir, d);
-      let ds; try { ds = fs.lstatSync(full); } catch { continue; }
-      if (!ds.isDirectory()) continue; // already a symlink from a prior run
-      const target = newPrefix + '-' + d.slice('-home-vibe-'.length);
-      const targetFull = path.join(projectsDir, target);
-      if (fs.existsSync(targetFull)) { console.warn(`[migrate] projects collision, left in place: ${d}`); continue; }
-      try {
-        fs.renameSync(full, targetFull);
-        fs.symlinkSync(target, full);
-        n++;
-      } catch (e) { console.warn(`[migrate] projects rename failed for ${d}: ${e.message}`); }
-    }
-    if (n) console.log(`[migrate] personalized-username: re-encoded ${n} claude project dir(s) -home-vibe-* -> ${newPrefix}-* (old names symlinked)`);
+    // the transcript-dir layout is the harness's (store.homeRename — claude: src/harnesses/claude-home.js)
+    for (const h of harnessList()) { const hr = h.store && h.store.homeRename; if (hr && typeof hr.relinkLegacy === 'function') hr.relinkLegacy(home, 'vibe'); }
   } catch (e) { console.warn('[migrate] legacy home projects check failed:', e.message); }
 }
 
@@ -344,10 +361,9 @@ function restoreSessions() {
     let savedBuffer = '';
     try { savedBuffer = fs.readFileSync(wrapperFiles.buf, 'utf-8'); } catch {}
 
-    const session = {
+    const session = sessionFromMeta(meta, { // transport-only + per-path facts (win over the shared ones)
       mode: sessionMode,
-      pty: null, clients: new Map(),
-      cwd: meta.cwd || os.homedir(),
+      pty: null,
       host: meta.host || null,
       _bareRemote: bareRemote,
       keeperSid: meta.keeperSid || null,
@@ -370,36 +386,17 @@ function restoreSessions() {
       _dialReversePort: meta.dialReversePort || null, // VIBESPACE_API back-tunnel, re-owned at the next dial-in (audit #49)
       hostName: meta.hostName || null,
       name: meta.name || sockFile,
-      _nameExplicit: meta.nameExplicit === true, // lane peer-card-sender: a name given at creation / by a rename
-      createdAt: meta.createdAt || Date.now(),
       backend: meta.backend || 'claude',
       backendSessionId: meta.backendSessionId || meta.claudeSessionId || null,
-      claudeSessionId: meta.claudeSessionId || null,
       sourceKind: meta.sourceKind || null,
       agentKind: meta.agentKind || 'primary',
       agentRole: meta.agentRole || '',
       agentNickname: meta.agentNickname || '',
       parentThreadId: meta.parentThreadId || null,
       forkedFrom: meta.forkedFrom || null,
-      // Permission mode isn't recoverable from the JSONL (init records are
-      // stdout-only) — restore what the session was launched with
-      _permissionMode: meta.permissionMode || null,
-      _effort: meta.effort || null,
-      _modelOrigin: meta.modelOrigin || null, _effortOrigin: meta.effortOrigin || null, // B-6b6d: the spawn's model/effort ORIGIN survives a restart (else the panel's honest row degrades to a guess)
-      _outputStyle: meta.outputStyle || null, // 2.369.58: the chip must not report "default" for a session really running a style
-      _worktree: !!meta.worktree, _worktreePath: meta.worktreePath || null,
-      _vcs: meta.vcs && typeof meta.vcs === 'object' ? meta.vcs : null, _prLinks: Array.isArray(meta.prLinks) ? meta.prLinks : null, // design-unknown-records: the git chip + PR chips survive a restart // owner ruling 9: the badge + the CLI-announced path survive a restart
-      // agent-browser P0 (§3.2.1): the CONVERSATION's browser identity and the
-      // user-data-dir rung it spawned on. Restored so a later resume of this
-      // conversation finds its key and the orphan sweep sees this session as
-      // live in memory as well as on disk.
-      _poolPin: poolPinFromMeta(meta), // THE CONVERSATION'S PIN (2026-09-28) survives a restart
-      _browserKey: meta.browserKey || null, _browserVariant: meta.browserVariant || null, _browserProfileId: meta.browserProfileId || null, _browserPinOrigin: meta.browserPinOrigin || null, _browserEnv: Array.isArray(meta.browserEnv) ? meta.browserEnv : null, _browserProfileActive: typeof meta.browserProfileActive === 'string' ? meta.browserProfileActive : null, _browserCap: Number.isInteger(meta.browserCap) ? meta.browserCap : null, _channelTouches: Array.isArray(meta.channelTouches) ? meta.channelTouches : null, _groupCards: Array.isArray(meta.groupCards) ? meta.groupCards : null, // lane group-report-card: the group messages this conversation was handed (their cards re-placed by the rebuild; their keys keep a re-report from drawing twice) · §26 (B-099e): the channel witness's ring survives the restart (the chat's rows are replayed) + MULTIVIEW D4: the conversation's explicit browser cap // + P2: the ephemeral live view's pairs + the last-used profile (§3.8 ③)
       _modelLocked: !!meta.modelLocked,
       _lockedModel: meta.lockedModel || null,
-      agentToken: meta.agentToken || null, // vibespace-status auth survives restarts
       _initialGroupId: meta.taskId || null, // group spawned into; belonging is live-derived, this only covers the pre-bind window
-      _accountId: meta.accountId || null, // billing identity the session was spawned with (badge only — env lives in the surviving dtach process)
       _heldPoolMember: typeof meta.heldPoolMember === 'string' ? meta.heldPoolMember : null, // the pool member the surviving (non-hot) process holds (design-reset-credits r2)
       _heldPoolOrigin: heldOriginOf(meta), // r4: a ledger-derived stamp stays 'ledger'; a meta that never recorded its start cannot be answered by the ledger
       _authAtSpawn: meta.authAtSpawn || null,
@@ -412,7 +409,7 @@ function restoreSessions() {
       _goalStatus: wrapperGoalStatus,
       _goalElapsed: wrapperGoalElapsed,
       _goalTokensUsed: wrapperGoalTokens,
-    };
+    });
     // Create normalizer for chat sessions (populated on first attach from JSONL + buffer)
     if (sessionMode === 'chat') {
       session._normalizer = createMessageManager(session.backend || 'claude', id);
@@ -566,31 +563,19 @@ function restoreAgentdPipeSessions() {
     const id = 'sess-' + sockFile.replace(/^cw-/, '');
     if (activeSessions.has(id)) continue;
     persistNoStart(sockFile, meta, { readSessionMeta, writeSessionMeta }); // r5
-    const session = {
-      mode: 'chat', backend: meta.backend || 'claude', cwd: meta.cwd || os.homedir(),
-      name: meta.name || 'Session', _nameExplicit: meta.nameExplicit === true, createdAt: meta.createdAt || Date.now(), sockName: sockFile,
-      clients: new Map(), buffer: '', agentToken: meta.agentToken || null, taskId: meta.taskId || null,
-      _accountId: meta.accountId || null, claudeSessionId: meta.claudeSessionId || null,
+    const session = sessionFromMeta(meta, { // transport-only + per-path facts (win over the shared ones)
+      mode: 'chat', backend: meta.backend || 'claude',
+      name: meta.name || 'Session', sockName: sockFile,
+      buffer: '', taskId: meta.taskId || null,
       _heldPoolMember: typeof meta.heldPoolMember === 'string' ? meta.heldPoolMember : null, // design-reset-credits r2: the member the surviving pipe process holds
       _heldPoolOrigin: heldOriginOf(meta), // r4: a ledger-derived stamp stays 'ledger'; a meta that never recorded its start cannot be answered by the ledger
       backendSessionId: meta.claudeSessionId || meta.backendSessionId || null,
       _forkRequested: restoredForkPending(meta), // a pending fork re-opened by the daemon still adopts its own id (parser or lock capture) — round 3
       agentdSession: true, keeperSid: id, agentdPipe: true,
-      _permissionMode: meta.permissionMode || null, _effort: meta.effort || null,
-      _modelOrigin: meta.modelOrigin || null, _effortOrigin: meta.effortOrigin || null, // B-6b6d: the spawn's model/effort ORIGIN survives a restart (else the panel's honest row degrades to a guess)
-      _outputStyle: meta.outputStyle || null,
-      _worktree: !!meta.worktree, _worktreePath: meta.worktreePath || null,
-      _vcs: meta.vcs && typeof meta.vcs === 'object' ? meta.vcs : null, _prLinks: Array.isArray(meta.prLinks) ? meta.prLinks : null, // design-unknown-records: the git chip + PR chips survive a restart // owner ruling 9
-      // agent-browser P0 (§3.2.1): the CONVERSATION's browser identity and the
-      // user-data-dir rung it spawned on. Restored so a later resume of this
-      // conversation finds its key and the orphan sweep sees this session as
-      // live in memory as well as on disk.
-      _poolPin: poolPinFromMeta(meta), // THE CONVERSATION'S PIN (2026-09-28) survives a restart
-      _browserKey: meta.browserKey || null, _browserVariant: meta.browserVariant || null, _browserProfileId: meta.browserProfileId || null, _browserPinOrigin: meta.browserPinOrigin || null, _browserEnv: Array.isArray(meta.browserEnv) ? meta.browserEnv : null, _browserProfileActive: typeof meta.browserProfileActive === 'string' ? meta.browserProfileActive : null, _browserCap: Number.isInteger(meta.browserCap) ? meta.browserCap : null, _channelTouches: Array.isArray(meta.channelTouches) ? meta.channelTouches : null, _groupCards: Array.isArray(meta.groupCards) ? meta.groupCards : null, // lane group-report-card: the group messages this conversation was handed (their cards re-placed by the rebuild; their keys keep a re-report from drawing twice) · §26 (B-099e): the channel witness's ring survives the restart (the chat's rows are replayed) + MULTIVIEW D4: the conversation's explicit browser cap // + P2: the ephemeral live view's pairs + the last-used profile (§3.8 ③)
       _spawnModel: meta.spawnModel || null, _pickedModel: meta.pickedModel || null, _pickedModelAt: meta.pickedModelAt || 0,
       _servedViaFallback: restoredFallback(meta), // the classifier reroute survives a restart (r3 §7)
       _msgReachability: meta.msgReachability || null,
-    };
+    });
     hosts.device(null).then(async (dm) => {
       let offset = 0;
       try { offset = fs.statSync(path.join(BUFFERS_DIR, id + '.buf')).size; } catch { }
@@ -675,38 +660,20 @@ async function readoptOrphanKeeperSessions() {
         env: { ...process.env, TERM: 'xterm-256color', VIBESPACE_REMOTE_SID: id },
       });
     } catch (e) { console.warn(`[readopt] spawn failed for ${meta.keeperSid}: ${e.message}`); continue; }
-    const session = {
-      mode: 'chat', pty: null, clients: new Map(),
-      cwd: meta.cwd || os.homedir(),
+    const session = sessionFromMeta(meta, { // transport-only + per-path facts (win over the shared ones)
+      mode: 'chat', pty: null,
       host: meta.host, hostName: meta.hostName || null,
       keeperSid: meta.keeperSid,
       name: meta.name || 'Session',
-      _nameExplicit: meta.nameExplicit === true,
-      createdAt: meta.createdAt || Date.now(),
       backend: 'claude',
       backendSessionId: meta.claudeSessionId || meta.backendSessionId || null,
-      claudeSessionId: meta.claudeSessionId || null,
-      agentToken: meta.agentToken || null,
-      _accountId: meta.accountId || null,
       _authAtSpawn: meta.authAtSpawn || null,
-      _permissionMode: meta.permissionMode || null,
-      _effort: meta.effort || null,
-      _modelOrigin: meta.modelOrigin || null, _effortOrigin: meta.effortOrigin || null, // B-6b6d: the spawn's model/effort ORIGIN survives a restart (else the panel's honest row degrades to a guess)
-      _outputStyle: meta.outputStyle || null, // 2.369.58: the chip must not report "default" for a session really running a style
-      _worktree: !!meta.worktree, _worktreePath: meta.worktreePath || null,
-      _vcs: meta.vcs && typeof meta.vcs === 'object' ? meta.vcs : null, _prLinks: Array.isArray(meta.prLinks) ? meta.prLinks : null, // design-unknown-records: the git chip + PR chips survive a restart // owner ruling 9: the badge + the CLI-announced path survive a restart
-      // agent-browser P0 (§3.2.1): the CONVERSATION's browser identity and the
-      // user-data-dir rung it spawned on. Restored so a later resume of this
-      // conversation finds its key and the orphan sweep sees this session as
-      // live in memory as well as on disk.
-      _poolPin: poolPinFromMeta(meta), // THE CONVERSATION'S PIN (2026-09-28) survives a restart
-      _browserKey: meta.browserKey || null, _browserVariant: meta.browserVariant || null, _browserProfileId: meta.browserProfileId || null, _browserPinOrigin: meta.browserPinOrigin || null, _browserEnv: Array.isArray(meta.browserEnv) ? meta.browserEnv : null, _browserProfileActive: typeof meta.browserProfileActive === 'string' ? meta.browserProfileActive : null, _browserCap: Number.isInteger(meta.browserCap) ? meta.browserCap : null, _channelTouches: Array.isArray(meta.channelTouches) ? meta.channelTouches : null, _groupCards: Array.isArray(meta.groupCards) ? meta.groupCards : null, // lane group-report-card: the group messages this conversation was handed (their cards re-placed by the rebuild; their keys keep a re-report from drawing twice) · §26 (B-099e): the channel witness's ring survives the restart (the chat's rows are replayed) + MULTIVIEW D4: the conversation's explicit browser cap // + P2: the ephemeral live view's pairs + the last-used profile (§3.8 ③)
       _modelLocked: !!meta.modelLocked,
       _lockedModel: meta.lockedModel || null,
       _initialGroupId: meta.taskId || null,
       _remotePort: rport,
       sockName, socketPath, buffer: '',
-    };
+    });
     session._normalizer = createMessageManager('claude', id);
     session._normEpoch = Date.now();
     session._normalizer.onOp((op) => broadcastToSession(session, id, { type: 'msg', sessionId: id, ...op }));

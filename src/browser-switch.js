@@ -93,12 +93,17 @@ const VENDOR_ENV_NAMES = Object.freeze([...new Set(KEY_IDS.flatMap((id) => Objec
 
 /** Does this key row REFUSE to run without a key? (cloak: no — measured; everything else: yes) */
 function keyRequiredFor(integrationId) { const r = KEY_ROWS[String(integrationId || '')]; return !!r && r.keyRequired !== false; }
-/** The integration-registry row a provider's key lives in; null = needs none. */
-function integrationIdFor(provider) {
+/** lane dc-browser-providers: THE PROVIDERS row of a NAMED provider (src/browser-profiles.js — the launch shape lives
+ *  there, never an id here); null for an absent or unknown one (no launch shape, no key, no seed). */
+function rowOf(provider) {
   const p = String(provider == null ? '' : provider);
-  if (p === 'cloak') return 'cloak';
-  if (/^cloud:[a-z0-9-]+$/.test(p) && KEY_ROWS[p]) return p;
-  return null;
+  return p ? require('./browser-profiles.js').providerRow(p) : null;
+}
+/** The integration-registry row a provider's key lives in (the row's `integrationId`, when that registry row exists);
+ *  null = needs none. */
+function integrationIdFor(provider) {
+  const id = (rowOf(provider) || {}).integrationId;
+  return id && KEY_ROWS[id] ? id : null;
 }
 /** The child's env pairs for a provider, from RESOLVED values — only the
  *  fields that carry a value, under the vendor's own names. `{}` for a
@@ -146,12 +151,13 @@ function launchArgsFor(provider) {
  *  made none). No secret here: the path,
  *  the seed and the proxy's loopback url; the KEY rides `vendorEnvFor`. */
 function launchEnvFor(provider, { seed = null, executablePath = '', proxy = '' } = {}) {
-  // lane browser-admin 2a: a CHROMIUM profile pinned to one Chrome build rides the same env name, alone — the CLI's
-  // own default arguments (no --no-sandbox: a Chrome for Testing build carries its own sandbox helper), the path only
-  if (String(provider == null ? '' : provider) === 'chromium') return executablePath ? { AGENT_BROWSER_EXECUTABLE_PATH: String(executablePath) } : {};
-  if (String(provider == null ? '' : provider) !== 'cloak') return {};
-  const chrome = ['--no-sandbox'];
-  if (Number.isInteger(seed)) chrome.push(`--fingerprint=${seed}`);
+  const row = rowOf(provider);
+  // lane browser-admin 2a: a profile pinned to one Chrome build (a `buildChoice` row) rides the same env name, alone —
+  // the CLI's own default arguments (no --no-sandbox: a Chrome for Testing build carries its own sandbox helper), the path only
+  if (row && !row.launchArgs && row.buildChoice) return executablePath ? { AGENT_BROWSER_EXECUTABLE_PATH: String(executablePath) } : {};
+  if (!row || !row.launchArgs) return {};
+  const chrome = [...row.launchArgs];
+  if (row.seeded && Number.isInteger(seed)) chrome.push(`--fingerprint=${seed}`);
   // Chromium bypasses the proxy for loopback by default; `<-loopback>` removes that implicit rule, so the proxy — which
   // never admits loopback — is also the answer for 127.0.0.1 / localhost (the hub's own services stay out of reach)
   if (proxy) chrome.push(`--proxy-server=${String(proxy)}`, '--proxy-bypass-list=<-loopback>');
@@ -160,7 +166,7 @@ function launchEnvFor(provider, { seed = null, executablePath = '', proxy = '' }
   return e;
 }
 /** Does this provider carry a fingerprint seed at all (§7.4)? */
-function providerNeedsSeed(provider) { return String(provider || '') === 'cloak'; }
+function providerNeedsSeed(provider) { return !!(rowOf(provider) || {}).seeded; }
 /** A seed minted from 8 hex characters (the keeper hands it crypto bytes):
  *  a positive 31-bit integer, the shape `--fingerprint=<seed>` takes. */
 function mintSeed(hex8) {

@@ -286,11 +286,11 @@ function pixelPlan(windows) {
 }
 /**
  * May a PIXEL verb (screenshot / click --at / key / scroll / an injected type) run on this window? Whole-display
- * rungs (vnc-display) always have pixels; on the xpra rung the main window must be MAPPED — with no client attached
+ * rungs (vnc-display) always have pixels; on a PER-WINDOW rung (xpra — the row's `perWindow` cell) the main window must be MAPPED — with no client attached
  * it is not, its grab is black and XTEST input is silently lost. `plan` = pixelPlan's answer or null (unknown ⇒ ok).
  */
-function visibilityVerdict({ stream = null, plan = null } = {}) {
-  if (stream !== 'xpra' || !plan) return { ok: true, code: null, why: null };
+function visibilityVerdict({ perWindow = false, plan = null } = {}) {
+  if (!perWindow || !plan) return { ok: true, code: null, why: null };
   if (!plan.ok) return refuse('window_not_visible', `${plan.why || 'the app has no window'} — nothing to read or act on in pixels yet`);
   if (plan.visible === false) return refuse('window_not_visible', 'nobody has this window open, so it has no pixels (a click or a key would be lost) — ask the user to open it (`vibespace-window watch <handle>` says where), or use the tree');
   return { ok: true, code: null, why: null };

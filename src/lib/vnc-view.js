@@ -53,6 +53,8 @@ export { COUNTER_ZOOM }; // the ONE definition is utils.js (shared with every xt
 
 /** The bounded auto-reconnect ladder + the ws url helper live in the shell; re-exported for the callers that import them here. */
 export { RECONNECT_LADDER, streamUrl };
+/** The stream KIND this view shows (a record's `stream`) — desktop-app-window.js registers the view under it. */
+export const STREAM_KIND = 'rfb';
 
 /**
  * createVncView(host, opts) — mounts the picture view into `host`.

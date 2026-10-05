@@ -81,7 +81,7 @@ export function rowMenu(r, x = {}) {
   if (ours(r)) out.push({ id: 'record', label: t('Record the screen'), check: !!r.record, title: t('Record this profile\'s screen (30 fps WebM, needs agent-browser ≥ {floor}) whenever its browser is live — a video of a logged-in profile is a secret with a storage bill', { floor: String((x.limits && x.limits.recordingFloor) || '0.37.0') }) });
   if (canBrowse(r)) out.push({ id: 'record-mine', label: t('Also record my own actions'), check: r.recordMine !== false, title: t('When you browse this profile yourself, record what you do like an agent\'s actions (before / after frames; typed text is kept as a length only) — off keeps only when you started and stopped') });
   if (r.trace && r.trace.n) out.push({ id: 'replay', label: t('Replay…'), title: t('Every browser session on this profile, action by action') });
-  if (String(r.provider || 'chromium') === 'chromium' && !notOurs(r)) out.push({ id: 'build', label: t('Change build…'), title: t('Choose which installed Chrome build this profile runs') });
+  if (r.buildChoice && !notOurs(r)) out.push({ id: 'build', label: t('Change build…'), title: t('Choose which installed Chrome build this profile runs') });
   out.push({ id: 'rename', label: t('Rename…') });
   if (r.live) out.push({ id: 'stop', label: t('Stop'), title: t('Stop this profile\'s browser now — its logins stay in the profile; the next command starts it again (this also resets a browser that keeps closing)') });
   if (x.stuck && x.stuck.action && r.live && !r.host) out.push({ id: 'restart', label: String(x.stuck.action), title: String(x.stuck.tooltip || '') });

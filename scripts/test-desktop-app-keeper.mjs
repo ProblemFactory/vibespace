@@ -898,16 +898,23 @@ console.log('§8 r2 — the round-1 verifier\'s findings, each reproduced on the
   const src = (fs.readFileSync(path.join(repo, 'src/server/desktop-app-keeper.js'), 'utf8') + '\n' + fs.readFileSync(path.join(repo, 'src/desktop-serve.js'), 'utf8')).replace(/^\s*(\/\/|\*).*$/gm, ''); // lane C1: the keeper = the hub half + the machine half
   ok(!/rec\.via ===|'Xvfb\+x11vnc'|'Xvnc'|unknown bring-up/.test(src), 'the keeper source spells no rung (no `rec.via ===`, no Xvnc / Xvfb+x11vnc literal, no "unknown bring-up")');
   ok(/display\.RECIPES\[/.test(src) && /M\.recipeFor|resolved\.recipe/.test(src), 'it looks the recipe UP by the name the PURE table gives it');
-  const fourth = Object.freeze({ id: 'fake-rung', label: 'fake', perWindow: true, adaptive: false, stream: 'rfb', needs: Object.freeze([Object.freeze(['Xvfb', 'x11vnc'])]), recipes: Object.freeze({ 'Xvfb+x11vnc': 'x-then-server-copy' }), wired: true });
+  // lane dc-desktop-caps: the fourth rung declares its CELLS — an rfb picture that SCALES, one picture for the whole display
+  const fourth = Object.freeze({ id: 'fake-rung', label: 'fake', stream: 'rfb', scales: true, crispText: false, perWindow: false, seamless: false, satellites: false, geometry: false, ownsDisplay: true, hostedClient: false, needs: Object.freeze([Object.freeze(['Xvfb', 'x11vnc'])]), recipes: Object.freeze({ 'Xvfb+x11vnc': 'x-then-server-copy' }), wired: true });
   const display = { ...D, RECIPES: Object.freeze({ ...D.RECIPES, 'x-then-server-copy': D.RECIPES['x-then-server'] }) };
   const k = mk('r2f', { display, backends: [fourth, ...M.DISPLAY_BACKENDS], settings: { 'desktop.backendPrefs': '' } }); await k.adoptAll(); k.start(); // table order: a preference names only rungs it knows, and this one is new
   const l = await k.list();
   ok(l.availability.backend === 'fake-rung' && l.availability.recipe === 'x-then-server-copy' && l.availability.ladder.length === 4, 'the ladder resolves to the fourth rung and names ITS recipe');
-  const rec = await k.launch({ exec: appBin, args: appArgs, label: 'fourth-rung' });
+  const rec = await k.launch({ exec: appBin, args: appArgs, label: 'fourth-rung', dpr: 2 });
   const r = await until(() => { const x = k.get(rec.id); return x.state !== 'launching' ? x : null; });
   ok(r && r.state === 'ready' && r.backend === 'fake-rung' && r.recipe === 'x-then-server-copy' && r.pids.x > 0 && r.pids.server > 0, 'a session comes up through a recipe name the keeper has never heard of — the record says the rung and the recipe', r && { state: r.state, lastError: r.lastError });
   const hs = await rfbHandshake(r.port);
   ok(hs.banner === 'RFB 003.008\n', 'and it streams');
+  // THE CELLS DRIVE IT (no rung id, no stream kind): `scales` ⇒ the launch took the screen's scale and the app runs with its
+  // knobs; `perWindow:false` ⇒ the whole-display window census; the view serves the cells; the bridge's target is the row's kind
+  let envOfApp = '';
+  try { envOfApp = fs.readFileSync(`/proc/${r.pids.app}/environ`, 'utf8'); } catch { /* the app gone: the env check fails below */ }
+  const st = k.streamTarget(rec.id);
+  ok(r.caps && r.caps.scales === true && r.caps.perWindow === false && r.scale === 2 && r.gdkScale === 2 && envOfApp.split('\0').includes('GDK_SCALE=2') && st && st.kind === 'rfb', 'dc-desktop-caps PROOF: the fake rung\'s cells drive the keeper — served on the view, the scale taken (2×, GDK_SCALE=2 in the app), the bridge target its rfb', { caps: r.caps, scale: r.scale, gdk: r.gdkScale, gdkEnv: envOfApp.split('\0').filter((l) => l.startsWith('GDK_')), st });
   await k.stop(rec.id); k.shutdown();
   // a pair the table cannot name is refused BY NAME at launch, nothing spawned
   const broken = Object.freeze({ ...M.backendById('vnc-display'), recipes: Object.freeze({}) });
@@ -1358,7 +1365,7 @@ setInterval(() => {}, 1000);
     try { process.kill(strayB.pid, 'SIGKILL'); } catch {}
     kg3.shutdown();
     // CONTROL: the pre-fix keeper (the marker was the only evidence) leaks the Xvfb on the same crash
-    const { mod: KX } = mutant('xvfb', [["  const needlesOf = (rec) => (rec.backend === 'desktop-singleton' ? [sessionMarker(rec.id)] : [sessionMarker(rec.id), `XAUTHORITY=${path.join(logRoot, rec.id, 'Xauthority')}`]);", "  const needlesOf = (rec) => [sessionMarker(rec.id)]; // pre-fix: the marker was the only evidence"]]);
+    const { mod: KX } = mutant('xvfb', [["  const needlesOf = (rec) => (!M.capsOf(rec, backends).ownsDisplay ? [sessionMarker(rec.id)] : [sessionMarker(rec.id), `XAUTHORITY=${path.join(logRoot, rec.id, 'Xauthority')}`]);", "  const needlesOf = (rec) => [sessionMarker(rec.id)]; // pre-fix: the marker was the only evidence"]]);
     const cdir = path.join(root, 'k12-crash-ctl'); fs.mkdirSync(cdir, { recursive: true });
     const kc = KX.create({ dataDir: cdir, env: baseEnv, broadcast: () => {}, serverSetting: () => '', log: { log() {}, warn() {}, error() {} } }); keepers.push(kc);
     await kc.adoptAll(); kc.start();

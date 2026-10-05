@@ -1197,13 +1197,15 @@ console.log('— wiring + docs pins');
   const cinput2 = read('src/lib/chat-input.js');
   const cv2 = read('src/lib/chat-view.js');
   ok('the chord is checked BEFORE the plain-Enter branch (that branch tests only !shiftKey and would swallow Alt+Enter as an ordinary send — the bug this ordering exists to prevent)',
-    cinput2.indexOf("e.key === 'Enter' && e.altKey") < cinput2.indexOf("if (e.key === 'Enter' && !e.shiftKey)"));
+    // lane chat-enter-ime: the plain-Enter branch is now the PURE enterKeyAction behind this._enterGuard.enter (its
+    // non-Shift Enter is 'send', Alt included — so the ordering still matters)
+    cinput2.indexOf("e.key === 'Enter' && e.altKey") > 0 && cinput2.indexOf("e.key === 'Enter' && e.altKey") < cinput2.indexOf("this._enterGuard.enter(e,"));
   ok('…and it is the ONLY new chord: Tab stays the slash completion, Ctrl/Cmd+Enter stays plain send',
-    /if \(e\.key === 'Tab' \|\| e\.key === 'Enter'\)/.test(cinput2) && /if \(e\.key === 'Enter' && \(e\.ctrlKey \|\| e\.metaKey\)\) \{ e\.preventDefault\(\); this\._send\(\); \}/.test(cinput2)
+    /if \(e\.key === 'Tab' \|\| e\.key === 'Enter'\)/.test(cinput2) && /const mod = !!\(e\.ctrlKey \|\| e\.metaKey\);[\s\S]*?return mod \? 'send' : 'newline';/.test(read('src/lib/chat-enter-keys.js')) && /if \(act === 'send'\) \{ e\.preventDefault\(\); this\._send\(\); \}/.test(cinput2)
     && (cinput2.match(/e\.key === 'Enter' && e\.altKey/g) || []).length === 1);
   ok('the chord condition excludes every other modifier (Alt+Shift/Alt+Ctrl+Enter are not it)', /e\.key === 'Enter' && e\.altKey && !e\.ctrlKey && !e\.metaKey && !e\.shiftKey && this\.steerChordAllowed/.test(cinput2));
   ok('BOTH surfaces gate on the ONE capability answer, never on a backend id', /this\._steerBtn\.classList\.toggle\('hidden', !\(live && modes\.allowSteerChord\)\)/.test(cinput2) && !/=== 'codex'|=== 'claude'|=== 'opencode'/.test(cinput2));
-  ok('…which comes from the PURE composerSendModes over the LIVE queue caps (the same object the strip reads)', /_sendModes\(\) \{ return composerSendModes\(this\._queueCaps\); \}/.test(cinput2) && /_canSteerComposer\(\) \{ return !!this\._chatInput\?\.steerChordAllowed; \}/.test(cv2));
+  ok('…which comes from the PURE composerSendModes over the LIVE queue caps (the same object the strip reads)', /_sendModes\(\) \{ return composerSendModes\(this\._queueCaps[,)]/.test(cinput2) && /_canSteerComposer\(\) \{ return !!this\._chatInput\?\.steerChordAllowed; \}/.test(cv2));
   ok('both faces repaint on BOTH inputs: the streaming flag AND the late-arriving caps (the dead-chip ordering)', /_updateSendModes\(\);\s*\n\s*\}/.test(cinput2) && /this\._renderQueue\(\);[\s\S]{0,400}this\._updateSendModes\(\);/.test(cinput2) && (cinput2.match(/this\._updateSendModes\(\)/g) || []).length >= 4, (cinput2.match(/this\._updateSendModes\(\)/g) || []).length);
   ok('the send→steer conversion reuses the ONE queue-op sender (no second wire shape anywhere)', /this\._sendQueueOp\('steer', it\.id\);/.test(cv2) && (cv2.match(/type: 'queue-op'/g) || []).length === 1);
   ok('the ≤768px button carries an SVG icon and an aria-label, never a glyph (§17)', /this\._steerBtn\.innerHTML = UI_ICONS\.bolt;/.test(cinput2) && /setAttribute\('aria-label'/.test(cinput2));

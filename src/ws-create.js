@@ -11,14 +11,13 @@ const { MessageManager } = require('./message-manager');
 const { capsOf, worktreeRefusal, worktreeSpawnArgs } = require('./backend-caps');
 const { get: harnessOf } = require('./harnesses'); // S9: store-side fork (opencode serve) before the spawn
 const { createMessageManager } = require('./normalizers');
-const { listCodexThreads } = require('./codex-session-store');
-const { findCodexSessionJsonlPath, extractCodexThreadMeta } = require('./adapters/codex'); // the per-turn model/effort readers reach ws-create through the harness descriptor's store hooks (B-6b6d)
 const { cwdToProjectDir, findSessionJsonlPath, warmSessionJsonlAsync } = require('./session-store');
 const crypto = require('crypto');
 const { execFile } = require('child_process');
 const { REMOTE_PRELUDE, buildRemoteExec, nodeFinder, buildRemoteShellPrelude } = require('./remote-shell');
 const { pipePtyShim } = require('./pty-duck'); // B-ae4b: the R6 pipe duck holds a listener SET (the liveness stamp + the consumer)
 const { sweepWriters } = require('./writer-sweep');
+const { hasWriterSweep, writerSweepOpts, forkChainEnv } = require('./resume-store'); // descriptor store hooks (writerSweep / forkChain), no id branch
 const { lockCaptureWanted, captureLockId, armLockCapture, adoptCapturedId } = require('./claude-lock-capture'); // the ONE local lock capture (create + boot re-arm; a terminal fork included; the witness is the wrapper's pid, 2026-09-25)
 const { readPpid } = require('./cli-identity');
 const { resumeSpawnPick, applyOriginHint, continuityLogLine } = require('./resume-continuity');
@@ -82,7 +81,9 @@ function resumePoolPin(data, accounts, backend = 'claude') {
     if (!p || typeof p !== 'object' || typeof p.memberId !== 'string' || !p.memberId) return null;
     if (data.accountId === 'subscription') return null; // the CLI's own login — no pool
     const st = accounts._state || {};
-    const poolId = data.accountId || (backend === 'codex' ? st.defaultCodexAccountId : st.defaultAccountId) || null;
+    // the default THIS backend bills — the descriptor's creds.defaultIdField (codex: defaultCodexAccountId)
+    const defaultIdField = (() => { try { return harnessOf(backend).creds?.defaultIdField || null; } catch { return null; } })();
+    const poolId = data.accountId || (defaultIdField ? st[defaultIdField] : null) || null;
     if (!poolId || accounts.get(poolId)?.type !== 'pooled') return null;
     if (typeof p.poolId === 'string' && p.poolId && p.poolId !== poolId) return null;
     // a pin that NAMES this pool is the owner's choice FOR it: kept while its member is out of the pool — placed
@@ -175,6 +176,12 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
     do {
           const backend = data.backend || 'claude';
           const adapter = adapterRegistry?.get?.(backend) || null;
+          // THE HARNESS'S DECLARED SPAWN ROWS (lane dc-ws-create): every per-harness fact of this
+          // create is a row/hook on the descriptor (src/harnesses/<id>.js `spawn`, checked by
+          // assertSpawnContract) or a caps row — never a literal-id branch here.
+          const harness = (() => { try { return harnessOf(backend); } catch { return null; } })();
+          const SP = (harness && harness.spawn) || {};
+          const convIdField = SP.conversationIdField || null; // claude: the claudeSessionId twin beside backendSessionId
           if (!adapter) {
             ws.send(JSON.stringify({ type: 'error', message: `Unknown backend "${backend}".` }));
             break;
@@ -192,9 +199,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           // session's app-server (the 2.284.4 class). Live sessions are the
           // resume-already-live guard's business; the sweep reaches
           // external/orphaned writers only.
-          const sweepOpts = (hostId) => backend === 'codex'
-            ? { backend, protectSids: [...activeSessions].filter(([, es]) => (es.backend || 'claude') === 'codex' && (es.host || null) === (hostId || null)).map(([eid]) => eid) }
-            : { backend };
+          const sweepOpts = (hostId) => writerSweepOpts(backend, activeSessions, hostId);
           // Resume guard (2.179.0, userW's duplicate-session incident): a
           // plain claude --resume REUSES the conversation id — spawning it
           // while the original session is still LIVE puts TWO claude
@@ -226,7 +231,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             let existing = null;
             for (const [eid, es] of activeSessions) {
               if ((es.backend || 'claude') !== backend) continue;
-              const liveId = backend === 'claude' ? (es.claudeSessionId || es.backendSessionId) : es.backendSessionId;
+              const liveId = (convIdField && es[convIdField]) || es.backendSessionId; // the harness's own conversation-id field (spawn.conversationIdField), else the generic one
               if (liveId !== data.resumeId) continue;
               if ((es.host || null) !== (data.hostId || null)) continue;
               existing = [eid, es]; break;
@@ -282,18 +287,17 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           // host — and when the host still runs a live keeper child for the
           // conversation, ATTACH (keeperSid) instead of spawning a second
           // writer onto the same JSONL.
-          if (data.resume && data.resumeId && !data.hostId && (data.backend || 'claude') === 'claude'
+          if (data.resume && data.resumeId && !data.hostId && typeof SP.isLocalConversation === 'function'
               && hosts && /^[\w-]+$/.test(data.resumeId)) {
             try {
-              const projectsDir = path.join(os.homedir(), '.claude', 'projects');
-              let local = false;
-              try { local = fs.readdirSync(projectsDir).some((d) => fs.existsSync(path.join(projectsDir, d, data.resumeId + '.jsonl'))); } catch { }
+              const local = !!SP.isLocalConversation(data.resumeId); // the descriptor's answer (claude: ~/.claude/projects/*/<id>.jsonl)
               if (!local) {
                 const cacheRoot = path.join(__dirname, '..', 'data', 'remote-jsonl');
+                const cacheRel = harness.store.remoteFind(data.resumeId).cacheRel; // where hosts.fetchTranscript caches this harness's transcript
                 const owners = [];
                 try {
                   for (const hd of fs.readdirSync(cacheRoot)) {
-                    if (hosts.get(hd) && fs.existsSync(path.join(cacheRoot, hd, data.resumeId + '.jsonl'))) owners.push(hd);
+                    if (hosts.get(hd) && fs.existsSync(path.join(cacheRoot, hd, cacheRel))) owners.push(hd);
                   }
                 } catch { }
                 // conversation-location INDEX first (R3 tail, 2.297.0): the
@@ -362,7 +366,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
               try { const hh = hosts.get(data.hostId); cwd = (hh && await hosts.homeDir(hh)) || ''; } catch { }
             }
             if (!cwd) cwd = os.homedir();
-          } else if ((data.backend || 'claude') !== 'shell') {
+          } else if (!SP.homeFallback) { // spawn.homeFallback (shell): a terminal in $HOME is fine
             // Spawn-cwd preflight (2.226.0, user directive "不要静默失败"): an
             // EXPLICIT cwd that doesn't exist used to fall back to $HOME
             // silently — for claude/codex that broke resumes ("No conversation
@@ -718,7 +722,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // only where our peer-messaging can actually deliver.
             acceptPeerMessages: (() => { try { return !data.hostId && serverSetting('agents.jobNotify') !== false; } catch { return !data.hostId; } })(),
           });
-          // For codex resume: inherit forkedFrom chain from old session's JSONL.
+          // Resume: the harness's persisted fork chain (store.forkChain → store.forkChainEnv; codex's forked_from).
           // MODEL CONTINUITY (2.369.32) and EFFORT CONTINUITY (B-21e4 item 4)
           // used to sit HERE, as two `if (!sessionSpec.env.CODEX_WEBUI_*)`
           // post-fills. They now run BEFORE the spawn spec, for every harness,
@@ -726,14 +730,9 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           // only ever fire when the client sent nothing, and the client sent
           // the instance default on every resume (B-6b6d), so the fallback the
           // env test was guarding was unreachable exactly when it was needed.
-          if (backend === 'codex' && data.resumeId && sessionSpec.env) {
-            const oldPath = findCodexSessionJsonlPath(data.resumeId);
-            const oldChain = oldPath ? (extractCodexThreadMeta(oldPath).forkedFrom || []) : [];
-            if (!oldChain.includes(data.resumeId)) oldChain.push(data.resumeId);
-            sessionSpec.env.CODEX_WEBUI_FORKED_FROM = oldChain.join(',');
-          }
-          const codexThreadBaseline = backend === 'codex' && !data.resumeId
-            ? new Set(listCodexThreads({ activeSessions }).map((entry) => entry.backendSessionId || entry.sessionId).filter(Boolean))
+          if (data.resumeId && sessionSpec.env) Object.assign(sessionSpec.env, forkChainEnv(backend, data.resumeId));
+          const codexThreadBaseline = typeof SP.threadBaseline === 'function' && !data.resumeId // spawn.threadBaseline: the id appears after the spawn
+            ? SP.threadBaseline({ activeSessions })
             : null;
 
           ensureDir(SOCKETS_DIR);
@@ -763,7 +762,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             console.log(`[session] explicit account pick ${String(data.accountId).slice(0, 12)} — skipping keeper adopt of ${data.keeperSid} (respawn applies the pick)`);
             delete data.keeperSid; delete data.keeperKind;
           }
-          if ((backend === 'claude' || backend === 'codex') && accounts) {
+          if (capsOf(backend).pool && harness && harness.creds && accounts) { // the DECLARED pool row (caps.pool) on a harness whose credentials VibeSpace manages
             try {
               // Plan C (2.315.0): a LOCAL pooled session gets its own link,
               // chosen by the session's declared model (deps.poolChooser reads
@@ -784,7 +783,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
               data._poolPin = rp ? rp.pin : null;
               data._poolPinPool = rp ? rp.poolId : null;
               spawnAccount = accounts.resolveForSpawn(data.accountId, backend, data.hostId ? {} : {
-                sessionKey: id,
+                ...(capsOf(backend).planC ? { sessionKey: id } : {}), // a per-session pool link only where the harness DECLARES plan C (caps.planC — claude)
                 // the store hands the chooser THE POOL IT RESOLVED for this spawn (per backend: a codex conversation on
                 // the default bills the CODEX default) — the caller never re-derives it (verify r2: a re-derivation here
                 // asked the claude default for a codex resume and nothing noticed)
@@ -813,7 +812,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
                 rescued = { id: null, kind: null, _acctGone: true };
                 data.accountId = null; // the dead id must not hold the keeper-adopt gates closed downstream
               }
-              if (!rescued && data.hostId && hosts && backend === 'claude'
+              if (!rescued && data.hostId && hosts && SP.hostHeldLogin
                   && typeof data.accountId === 'string' && /^sub-[\w-]{1,40}$/.test(data.accountId)
                   && /not logged in/.test(String(e.message))) {
                 try {
@@ -973,13 +972,10 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // CONFIRMS/overrides this guess (chat sessions).
             _authAtSpawn: (spawnAccount?.kind === 'subscription' || spawnAccount?.kind === 'codex-subscription') ? 'subscription-acct'
               : spawnAccount ? 'env-key'
-              : backend !== 'claude' ? null
-              : data.hostId ? 'remote-global'
-              : (accounts?.subscriptionStatus?.().loggedIn ? 'subscription'
-                : (accounts?.cliPrimaryKey?.().present ? 'console' : 'unknown')),
+              : typeof SP.authAtSpawn === 'function' ? SP.authAtSpawn({ hostId: data.hostId, accounts }) : null, // the harness's global-login guess (claude)
             backend,
             backendSessionId: data.resumeId || null,
-            claudeSessionId: backend === 'claude' ? (data.resumeId || null) : null,
+            claudeSessionId: null, // the harness's own conversation-id field is stamped below (spawn.conversationIdField)
             sourceKind: data.sourceKind || null,
             agentKind: data.agentKind || 'primary',
             agentRole: data.agentRole || '',
@@ -1013,9 +1009,10 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             _forkRequested: !!data.fork && !!capsOf(backend).fork, // per-harness (codex thread/fork since 2.369.21)
             // resume spawn marker (2.219.0): lets the parser adopt claude's
             // IMPLICIT fork (locked-conversation resume mints a new id)
-            _resumeSpawn: backend === 'claude' && !!(data.resume && data.resumeId),
+            _resumeSpawn: !!SP.resumeMayFork && !!(data.resume && data.resumeId),
             sockName, socketPath, buffer: '',
           };
+          if (convIdField) session[convIdField] = data.resumeId || null;
           if (codexThreadBaseline) session._codexThreadBaseline = codexThreadBaseline;
           if (sessionMode === 'chat') {
             session._normalizer = createMessageManager(backend, id);
@@ -1048,14 +1045,9 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           // JSON rides the normal rargs quoting (each remote arg is shq'd),
           // which is the whole quoting hazard handled in one place. Local
           // sessions keep their existing injection below, untouched.
-          if (backend === 'claude' && sessionMode === 'terminal' && data.hostId) {
+          if (typeof SP.statusline === 'function' && sessionMode === 'terminal' && data.hostId) {
             try {
-              let settingsObj = {};
-              const si = spawnArgs.indexOf('--settings');
-              if (si >= 0 && spawnArgs[si + 1]) { try { settingsObj = JSON.parse(spawnArgs[si + 1]) || {}; } catch {} }
-              settingsObj.statusLine = { type: 'command', command: '"$HOME"/.vibespace/bin/vibespace-usage', padding: 0 };
-              const sjson = JSON.stringify(settingsObj);
-              if (si >= 0) spawnArgs[si + 1] = sjson; else spawnArgs = [...spawnArgs, '--settings', sjson];
+              spawnArgs = SP.statusline(spawnArgs, '"$HOME"/.vibespace/bin/vibespace-usage'); // the harness's statusline carrier (claude: --settings)
               // Spawn-fixed BY CONSTRUCTION on a remote host (no VIBESPACE_
               // ACCOUNT_LINK twin, unlike the local branch below): a host gets
               // the credentials TARRED to it at spawn and the engine's
@@ -1216,7 +1208,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           // A remote Add-subscription helper terminal needs this one transport
           // utility even when agent-visible Integration is OFF. It handles the
           // host's own Keychain/file login only and exposes nothing to agents.
-          const needsClaudeLoginHelper = backend === 'shell'
+          const needsClaudeLoginHelper = !!SP.loginShell
             && String(data.initialCommand || '').includes('/vibespace-claude-subscription-login.mjs');
           // Remote agent enablement (P3): a remote session can't reach the local
           // API at 127.0.0.1:<PORT>, and the vibespace-status/-task tools don't
@@ -1551,8 +1543,8 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
               // be absent under launchd → fall back to the account's UserShell
               // (macOS dscl) → zsh → bash. S0 is resolved in the shellCmd
               // preamble; rcmd0 just execs it.
-              const rcmd0 = backend === 'shell' ? '"$S0"' : (spawnCmd.includes('/') ? path.basename(spawnCmd) : spawnCmd);
-              const shellResolve = backend === 'shell'
+              const rcmd0 = SP.loginShell ? '"$S0"' : (spawnCmd.includes('/') ? path.basename(spawnCmd) : spawnCmd);
+              const shellResolve = SP.loginShell
                 ? `S0="\${SHELL:-}"; [ -n "$S0" ] || S0="$(dscl . -read ~/ UserShell 2>/dev/null | awk '{print \$2}')"; [ -n "$S0" ] || S0="$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f7)"; [ -x "$S0" ] || S0="$(command -v zsh || command -v bash || echo sh)"; `
                 : '';
               try {
@@ -1571,7 +1563,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
                   pre: buildRemoteShellPrelude({ toolsOnPath: integrationOn, withNodeFinder: integrationOn }),
                   browser: spawnBrowserPre,
                   resolve: shellResolve, tokenAssign: da.tokenAssign, acctEnv: dialAcctAssign,
-                  parts: [...da.envPairs.map(shq), ...spawnEnvPairs.map(shq), rcmd0, ...(backend === 'shell' ? ['-l'] : spawnArgs.map(shq))],
+                  parts: [...da.envPairs.map(shq), ...spawnEnvPairs.map(shq), rcmd0, ...(SP.loginShell ? ['-l'] : spawnArgs.map(shq))],
                 });
                 const cfg = {
                   tcp: { port: bridgePort },
@@ -1646,14 +1638,12 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // no-op on devices without the keeper).
             const rcmd = spawnCmd.includes('/') ? path.basename(spawnCmd) : spawnCmd;
             const rargs = [...spawnArgs];
-            // EXPLICIT backend check (P4 hazard fix): `!== 'codex'` appended
-            // claude stream-json flags to ANY future backend's remote spawn —
-            // the gemini-as-claude fallthrough class.
-            if (backend === 'claude') {
-              for (const fl of [['--output-format', 'stream-json'], ['--input-format', 'stream-json'], ['--verbose'], ['--permission-prompt-tool', 'stdio']]) {
-                if (!rargs.includes(fl[0])) rargs.push(...fl);
-              }
-            }
+            // The harness's chat transport flags (adapter.chatTransportArgs —
+            // claude's stream-json set; the local chat-wrapper appends the same
+            // list): only a harness that DECLARES the hook gets any (the P4
+            // hazard: a blanket append once reached every future backend).
+            const ta = adapter && typeof adapter.chatTransportArgs === 'function' ? adapter.chatTransportArgs() : [];
+            for (const fl of ta) { if (!rargs.includes(fl[0])) rargs.push(...fl); }
             if (h.transport === 'dial') {
               // Graduation B.2/B.3: the session runs as a persistent PIPE
               // SESSION in the DIALED-IN device's daemon; the attach child
@@ -1664,12 +1654,12 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
               // VIBESPACE_API back-tunnel via reverseForward, hook registration
               // via runCmd — so vibespace-status/task/ask work on the device.
               if (!dialBridge || !agentdRemote) { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: 'dial sessions not wired on this server' })); return; }
-              // Codex CHAT over a byte pipe is not wired (B-0588, same as the
+              // A harness may declare CHAT over a byte pipe unwired (codex, B-0588, same as the
               // ssh path): the codex-chat-wrapper speaks JSON-RPC to a local
               // codex app-server, not to the pipe-relayed device one. Fail
               // LOUD rather than blank. Codex TERMINAL on dial works (TUI over
               // the pty path); claude chat works.
-              if (backend === 'codex') { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, sessionId: id, message: `Codex CHAT on a paired device isn't wired yet — use TERMINAL mode for codex on "${h.name}", or codex chat on an ssh host. Claude chat works on devices.` })); return; }
+              if (typeof SP.deviceChatRefusal === 'function') { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, sessionId: id, message: SP.deviceChatRefusal(h.name) })); return; }
               // A selected SUBSCRIPTION account can't be honored on a device
               // (OAuth shipping is off by default — §ban-safety) — fail loudly
               // rather than silently billing the device's own login (the ssh
@@ -1927,7 +1917,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           // 5h/7d rate_limits into data/usage-cache/. This is why VibeSpace
           // makes NO background /api/oauth/usage calls with subscription
           // tokens. Merged into any existing --settings (e.g. ultracode) so
-          // there's ONE flag. The claude gate is load-bearing: only the claude
+          // there's ONE flag. The harness gate (spawn.statusline) is load-bearing: only the claude
           // CLI understands --settings — appending it to `zsh -l` (shell
           // terminals, incl. the Manage-Agents update/login helpers) or codex
           // made them exit instantly ("terminated").
@@ -1937,14 +1927,9 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           // AGENT-VISIBLE integration only (hooks/context/tools); billing env
           // is likewise exempt.
           const usageEnvPairs = [];
-          if (backend === 'claude' && sessionMode === 'terminal' && !data.hostId && USAGE_STATUSLINE_CMD) {
+          if (typeof SP.statusline === 'function' && sessionMode === 'terminal' && !data.hostId && USAGE_STATUSLINE_CMD) {
             try {
-              let settingsObj = {};
-              const si = spawnArgs.indexOf('--settings');
-              if (si >= 0 && spawnArgs[si + 1]) { try { settingsObj = JSON.parse(spawnArgs[si + 1]) || {}; } catch {} }
-              settingsObj.statusLine = { type: 'command', command: USAGE_STATUSLINE_CMD, padding: 0 };
-              const sjson = JSON.stringify(settingsObj);
-              if (si >= 0) spawnArgs[si + 1] = sjson; else spawnArgs = [...spawnArgs, '--settings', sjson];
+              spawnArgs = SP.statusline(spawnArgs, USAGE_STATUSLINE_CMD);
               // A POOLED spawn attributes usage to the real TARGET account, not
               // the pool: the statusline cache + quota popup are per-account.
               // The old comment here claimed "the target is fixed for this
@@ -1987,7 +1972,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           // resume <id>` TUI in an external terminal is exactly the local
           // double-writer the claude leg exists for.
           if (data.resume && data.resumeId && !data.fork && !data.hostId && !data.keeperSid
-              && (backend === 'claude' || backend === 'codex') && /^[\w-]+$/.test(data.resumeId) && hosts) {
+              && hasWriterSweep(backend) && /^[\w-]+$/.test(data.resumeId) && hosts) {
             try {
               // shq is defined in the remote branches' scope, not here — the
               // undefined ref was swallowed by this catch and the local sweep
@@ -2010,7 +1995,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           // on their dtach path forever; only NEW creates route here, and any
           // failure falls through to the dtach spawn below (never worse).
           let r6Handle = null;
-          const r6Wanted = !session.host && sessionMode === 'chat' && backend === 'claude'
+          const r6Wanted = !session.host && sessionMode === 'chat' && !!SP.localPipe
             && serverSetting?.('agentd.localPipeSessions') === true;
           // OPENCODE SERVE TERMINAL (S9 remainder piece (c), B-eac2): a shell
           // the OpenCode SERVE owns, bridged onto the normal ws terminal path.
@@ -2130,7 +2115,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
                 // get env via buildRemoteExec, never r6Env) but gated
                 // explicitly anyway; a user-provided OTEL endpoint in the
                 // session spec wins (we never clobber their telemetry).
-                if (!session.host && backend === 'claude' && typeof otelEnv === 'function'
+                if (!session.host && SP.otelExport && typeof otelEnv === 'function'
                     && !(sessionSpec.env && sessionSpec.env.OTEL_EXPORTER_OTLP_ENDPOINT)) {
                   const oe = otelEnv();
                   if (oe) Object.assign(env, oe);
@@ -2373,7 +2358,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             });
           }
 
-          if (backend === 'codex' && !session.backendSessionId) {
+          if (typeof SP.threadBaseline === 'function' && !session.backendSessionId) {
             const tryCapture = (attempts) => {
               if (attempts <= 0 || !activeSessions.has(id)) return;
 

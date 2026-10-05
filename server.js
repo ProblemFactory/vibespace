@@ -89,54 +89,19 @@ const { X_ENV, detectXDisplay, refreshXEnv, stabilizeXAuth, adapterRegistry,
   rootDir: __dirname, CLAUDE_CMD_RAW, CODEX_CMD_RAW, resolveCmd,
   getOAuthToken: (...a) => getOAuthToken(...a),
   usagePollingEnabled: (...a) => usagePollingEnabled(...a),
-  refreshCodexModels: (...a) => refreshCodexModels(...a), broadcast: (m) => bcastAll(m), getTelemetry: () => { try { return telemetry; } catch { return null; } }, getPlugins: () => { try { return plugins; } catch { return null; } }, // S9: opencode serve caps verdict → 'harness-caps-updated'; runaway telemetry + the 'opencode-serve' PLUGIN is the autostart switch (lazy — both defined below)
+  refreshHarnessModels: (...a) => refreshHarnessModels(...a), broadcast: (m) => bcastAll(m), getTelemetry: () => { try { return telemetry; } catch { return null; } }, getPlugins: () => { try { return plugins; } catch { return null; } }, // S9: opencode serve caps verdict → 'harness-caps-updated'; runaway telemetry + the 'opencode-serve' PLUGIN is the autostart switch (lazy — both defined below)
   getHeldPtyIds: () => { try { return [...activeSessions.values()].map((s) => s?._opencodePtyId).filter(Boolean); } catch { return []; } }, // S9 r4: the ONE reader of session._opencodePtyId — the serve-pty reaper's keep set (lazy like getPlugins: activeSessions is declared below)
 });
-// ── Codex model list (from ~/.codex/models_cache.json) ──
-// That cache is last-writer-wins AND version-gated server-side: a still-running
-// OLD codex CLI re-fetches it and writes it back WITHOUT newer models (observed
-// live TWICE: a 0.142.5 session erased the gpt-5.6 entries minutes after
-// 0.144.0 fetched them — and once it happened right before a server restart,
-// leaving the dropdown stale for the whole hourly re-read cycle). Two guards:
-// (1) union every model ever seen, PERSISTED across restarts;
-// (2) mtime-guarded re-read ON DEMAND from /api/available-models — the model/
-//     effort dropdowns fetch per click, so they're always current, no timers.
-const CODEX_MODELS_SEEN_FILE = path.join(__dirname, 'data', 'codex-models-seen.json');
-const _codexModelsSeen = new Map();
-try { for (const m of JSON.parse(fs.readFileSync(CODEX_MODELS_SEEN_FILE, 'utf-8'))) if (m && m.id) _codexModelsSeen.set(m.id, m); } catch {}
-if (_codexModelsSeen.size) AVAILABLE_MODELS.codex = [{ id: '', label: 'Default' }, ..._codexModelsSeen.values()];
-let _codexCacheMtime = 0;
-function refreshCodexModels() {
-  try {
-    const fp = path.join(os.homedir(), '.codex', 'models_cache.json');
-    const mt = fs.statSync(fp).mtimeMs;
-    if (mt === _codexCacheMtime) return;
-    _codexCacheMtime = mt;
-    const codexCache = JSON.parse(fs.readFileSync(fp, 'utf-8'));
-    if (!codexCache.models?.length) return;
-    const fresh = codexCache.models.map(m => {
-      const ctx = m.context_window ? (m.context_window >= 1000000 ? Math.round(m.context_window / 1000000) + 'M' : Math.round(m.context_window / 1000) + 'k') : '';
-      // Per-model reasoning levels ride along: GPT-5.6 made efforts
-      // model-specific (sol/terra add max+ultra, luna tops out at max) —
-      // clients derive dropdowns from this instead of a stale hardcoded list. Plus multiAgentEffort (2.369.62) = the level a DELEGATING effort really reasons at ('ultra' is a mode, not a level); '' = the catalog names none ⇒ the label stays a bare "ultra", never a hardcoded one (kb agent-meta.js).
-      return { id: m.slug, label: (m.display_name || m.slug) + (ctx ? ` (${ctx})` : ''), efforts: (m.supported_reasoning_levels || []).map(l => l && l.effort).filter(Boolean), multiAgentEffort: m.multi_agent_reasoning_effort || '' };
-    }).filter(m => m.id);
-    let changed = false;
-    for (const m of fresh) {
-      const prev = _codexModelsSeen.get(m.id);
-      if (!prev || JSON.stringify(prev) !== JSON.stringify(m)) { _codexModelsSeen.set(m.id, m); changed = true; }
-    }
-    AVAILABLE_MODELS.codex = [{ id: '', label: 'Default' }, ..._codexModelsSeen.values()];
-    if (changed) {
-      try {
-        const tmp = CODEX_MODELS_SEEN_FILE + '.tmp';
-        fs.writeFileSync(tmp, JSON.stringify([..._codexModelsSeen.values()]));
-        fs.renameSync(tmp, CODEX_MODELS_SEEN_FILE);
-      } catch {}
-    }
-  } catch {}
+// ── Harness model lists: every descriptor's models({dataDir}) — codex: its CLI's
+// own model cache (src/harnesses/codex-models.js); claude's list is cli-env's
+// refreshAvailableModels, ACP agents report theirs (noteHarnessModels).
+function refreshHarnessModels() {
+  for (const h of require('./src/harnesses').list()) {
+    if (typeof h.models !== 'function') continue;
+    try { const list = h.models({ dataDir: path.join(__dirname, 'data') }); if (list) AVAILABLE_MODELS[h.id] = list; } catch { }
+  }
 }
-refreshCodexModels();
+refreshHarnessModels();
 setTimeout(refreshAvailableModels, 3000);
 setInterval(refreshAvailableModels, 3600000); // refresh hourly
 
@@ -258,36 +223,16 @@ function migrateHomeRename() {
   try {
     const home = os.homedir();
     const user = path.basename(home);
-    const projectsDir = path.join(home, '.claude', 'projects');
-    let dirs = [];
-    try { dirs = fs.readdirSync(projectsDir); } catch { return; }
-    // Detect the old username from leftover projdirs: -home-<old>-… where
-    // <old> ≠ current user and /home/<old> no longer exists.
-    const oldUsers = new Set();
-    for (const d of dirs) {
-      const m = /^-home-([a-z][a-z0-9]*)-/.exec(d);
-      if (m && m[1] !== user && !fs.existsSync(`/home/${m[1]}`)) oldUsers.add(m[1]);
-    }
+    // the transcript-dir layout is each harness's (store.homeRename — claude:
+    // src/harnesses/claude-home.js); this core owns the marker + the store rewrite
+    const hooks = require('./src/harnesses').list().map((h) => h.store && h.store.homeRename).filter((hr) => hr && typeof hr.staleUsers === 'function');
+    const oldUsers = new Set(hooks.flatMap((hr) => hr.staleUsers(home, user)));
     for (const old of oldUsers) {
       const marker = path.join(__dirname, 'data', `.home-migrated-${old}-to-${user}`);
       if (fs.existsSync(marker)) continue;
       console.log(`[migrate] home rename detected: /home/${old} → ${home} — migrating projdirs + recorded paths`);
       let moved = 0;
-      for (const d of fs.readdirSync(projectsDir)) {
-        if (!d.startsWith(`-home-${old}-`)) continue;
-        const nd = `-home-${user}-` + d.slice(`-home-${old}-`.length);
-        const src = path.join(projectsDir, d), dst = path.join(projectsDir, nd);
-        try {
-          if (!fs.existsSync(dst)) { fs.renameSync(src, dst); moved++; }
-          else { // merge, never overwrite (both sides may hold transcripts)
-            for (const f of fs.readdirSync(src)) {
-              if (!fs.existsSync(path.join(dst, f))) fs.renameSync(path.join(src, f), path.join(dst, f));
-            }
-            try { fs.rmdirSync(src); } catch { }
-            moved++;
-          }
-        } catch (e) { console.warn(`[migrate] projdir ${d}: ${e.message}`); }
-      }
+      for (const hr of hooks) moved += hr.moveUser(home, old, user) || 0;
       // Prefix-rewrite every recorded string path in the small JSON stores.
       const rewrite = (v) => (typeof v === 'string' && v.includes(`/home/${old}/`))
         ? v.split(`/home/${old}/`).join(`/home/${user}/`)
@@ -1118,7 +1063,8 @@ const usageHistory = new UsageHistory({
     const a = accounts.get(id);
     if (!a) return null;
     const type = a.type || 'api', backend = a.backend || 'claude';
-    return { type: backend === 'codex' ? 'codex-subscription' : type, name: a.name, tail: type === 'pooled' || type === 'subscription' ? undefined : a.tail };
+    let ledgerType = null; try { ledgerType = require('./src/harnesses').get(backend).creds?.ledgerType || null; } catch { } // codex: every account is 'codex-subscription'
+    return { type: ledgerType || type, name: a.name, tail: type === 'pooled' || type === 'subscription' ? undefined : a.tail };
   },
 });
 // OTel receiver (2.361.0, B-345b; DEMOTED TO CORROBORATION 2026-09-07 — the
@@ -1654,7 +1600,7 @@ require('./src/server/auto-cli-loop.js').createAutoCliLoop({ serverSetting, acco
 MessageManager.getSetting = (k) => { try { return serverSetting(k); } catch { return undefined; } };
 const { getOAuthToken, usagePollingEnabled, summarizeCodexRateLimit, summarizeCodexRateLimits } = usage;
 app.locals.harnessAvailability = harnessAvailability; app.get('/api/available-models', (req, res) => { // S8: /api/home reads harnessAvailability (installed ACP harnesses for the picker)
-  refreshCodexModels(); // mtime-guarded local read — stays current despite old-CLI cache rewrites
+  refreshHarnessModels(); // mtime-guarded local reads — stay current despite old-CLI cache rewrites
   res.json(AVAILABLE_MODELS);
 });
 app.get('/api/session-options', (req, res) => {
@@ -1702,39 +1648,10 @@ function sessionAuth(s) {
   // POOLED pseudo-account (B-6217; codex pools 2.368.20): ONE shape for both backends — the pool + the real account it currently
   // bills, so no chip mislabels it (real reports: claude pools rendered as 'API key', codex pools as a plain 'ChatGPT account', no target).
   const poolAuth = (a) => { let cur = null, curId = null; try { curId = accounts.poolMemberOfSession(a.id, s, s._webuiId || null).id || null; cur = curId ? (accounts.get(curId)?.name || null) : null; } catch {} const prio = Array.isArray(a.priority) ? a.priority : []; const rank = curId ? prio.indexOf(curId) : -1; const pinId = s._poolPin && s._poolPin.memberId && s._accountId === a.id ? s._poolPin.memberId : null; return withHost({ source: 'pooled', name: a.name, poolTarget: cur, poolTargetId: curId, placement: pinId ? 'pinned' : prio.length ? 'priority' : 'automatic', priorityRank: rank >= 0 ? rank + 1 : null, pinned: pinId ? (accounts.get(pinId)?.name || pinId) : null, pinnedId: pinId, poolDefault: (() => { try { const d = accounts.poolCurrent(a.id); return d ? (accounts.get(d)?.name || d) : null; } catch { return null; } })() }); }; // 2026-09-28: WHICH rule placed it (the chip's tooltip — "(priority #1)" / "(automatic)") // plan C: THIS session's link target (claude), else the pool default — a non-hot pool process: the member it HOLDS (reset credits r3)
-  if (be === 'codex') {
-    // Codex billing identity: named ChatGPT account (isolated CODEX_HOME), a codex pool, or the machine's own ~/.codex login.
-    if (s._accountId) {
-      const a = accounts.get(s._accountId);
-      if (a && a.type === 'pooled') return poolAuth(a);
-      return withHost({ source: 'codex-subscription', name: a?.name || 'ChatGPT' });
-    }
-    return withHost({ source: 'codex-cli' });
-  }
-  if (be !== 'claude') return null; // shell terminals — nothing billed
-  if (s._accountId) {
-    const a = accounts.get(s._accountId);
-    if (a && a.type === 'pooled') return poolAuth(a);
-    // A named SUBSCRIPTION account bills the subscription (not API) — show its
-    // name, no amber key warning.
-    if (a && (a.type || 'api') === 'subscription') return withHost({ source: 'subscription', name: a.name });
-    return withHost({ source: 'api-key', name: a?.name || 'API key', tail: a?.tail || null });
-  }
-  const src = s._apiKeySource;
-  if (src === 'none') return withHost({ source: 'subscription' });
-  if (src === '/login managed key') return withHost({ source: 'api-console' });
-  if (src === 'ANTHROPIC_API_KEY') return withHost({ source: 'api-key', name: 'env key' });
-  if (typeof src === 'string' && src) return withHost({ source: 'api-other', detail: src });
-  const at = s._authAtSpawn;
-  if (at === 'subscription') return withHost({ source: 'subscription', guessed: true });
-  if (at === 'console') return withHost({ source: 'api-console', guessed: true });
-  if (at === 'env-key') return withHost({ source: 'api-key', guessed: true });
-  // remote session with no explicit account: billed by the HOST's own CLI
-  // login — a real subscription-or-key on that machine, never "unknown"
-  // (2.188.0: remote TERMINAL sessions showed "KEY?" forever — apiKeySource
-  // is chat-stream-only and the /proc backfill probes the LOCAL ssh wrapper).
-  if (at === 'remote-global') return withHost({ source: 'subscription', guessed: true });
-  return withHost({ source: 'unknown' });
+  // THE HARNESS answers (descriptor billingIdentity — claude.js / codex.js own their
+  // rungs); a harness that declares none bills nothing (shell terminals, ACP agents).
+  let h = null; try { h = require('./src/harnesses').get(be); } catch { }
+  return h && typeof h.billingIdentity === 'function' ? h.billingIdentity(s, { accounts, withHost, poolAuth }) : null;
 }
 
 // THE single active-sessions payload builder — used by every broadcast AND the

@@ -627,6 +627,53 @@ console.log('§D014 the whole desktop over a real agent: the probe through its t
   ok(done.ok && done.after && done.after.ok && done.after.auth === 'ard', 'the install exits 0 ⇒ done is judged by the 5900 probe afterwards (through the real agent)', done.after);
   const everything = JSON.stringify(logs);
   ok(!/VALUE_OF_PASSWORD="?[^"' ]/.test(everything) && logs.some((l) => /Windows asks for administrator rights on that machine's screen/.test(l)), 'the hub log names the install and the UAC step — no password anywhere (it is typed on that machine)');
+  // (lane mirror-green-212) A SERVER THAT SPEAKS FIRST over the real agent's tcp-connect, the hub's loop STALLED 150 ms
+  // between the ask and the resume — a loaded runner: the 2.369.212 Actions mirror lost the greeting twice ("silent").
+  // The fake RFB server is ANOTHER process, so it accepts and speaks while this one stalls: the agent's tcp-open and the
+  // greeting reach the hub in ONE read, before tcpForward's caller has set onData. Judged by arrival, not by a clock:
+  // each chunk is stamped as it reaches the handle's session, before or after the probe attached its consumer.
+  {
+    const cp = require('child_process');
+    const marks = path.join(work, 'mg212-greetings'); fs.writeFileSync(marks, '');
+    const kid = cp.spawn(process.execPath, ['-e', `const net = require('net'), fs = require('fs'); const s = net.createServer((c) => { c.on('error', () => { }); c.write('RFB 003.889\\n', () => fs.appendFileSync(${JSON.stringify(marks)}, 'x')); }); s.listen(0, '127.0.0.1', () => console.log(s.address().port));`], { stdio: ['ignore', 'pipe', 'inherit'] });
+    process.on('exit', () => { try { kid.kill('SIGKILL'); } catch { } });
+    const kidPort = await new Promise((r) => kid.stdout.once('data', (d) => r(Number(String(d).trim()))));
+    const spin = (done) => { while (!done()); };
+    async function stalledProbes(dm, n, waitMs) {
+      const early = new Set(), attached = new Set(), sessions = dm._conn.sessions, set0 = sessions.set.bind(sessions);
+      sessions.set = (chan, s) => set0(chan, { ...s, onData: (b) => { if (!attached.has(chan)) early.add(chan); s.onData(b); } });
+      let seen = 0;
+      for (let i = 0; i < n; i++) {
+        const k = fs.statSync(marks).size;
+        const asked = dm.tcpForward(kidPort);
+        // the ask is on the wire (tcpForward writes it in microtasks); stall until the server has spoken, then 150 ms more
+        setImmediate(() => { const t = Date.now() + 3000; spin(() => fs.statSync(marks).size > k || Date.now() > t); const t2 = Date.now() + 150; spin(() => Date.now() > t2); });
+        const h = await asked;
+        if (await new Promise((res) => { const t = setTimeout(() => res(false), waitMs); attached.add(h.chan); h.onData = (d) => { clearTimeout(t); res(String(d).startsWith('RFB 003.889')); }; })) seen++;
+        h.close();
+      }
+      delete sessions.set;
+      return { n, seen, early: early.size };
+    }
+    const fx = await stalledProbes(real, 40, 3000);
+    ok(fx.seen === 40 && fx.early >= 1, `a server that speaks first, the hub stalled 150 ms between the ask and the resume ⇒ the greeting is seen ${fx.seen}/40 (${fx.early} of them reached the handle BEFORE its consumer was attached — kept, then handed over)`, fx);
+    const MT = mutantCopies('dsremote-tcp', REPO);
+    const cText = fs.readFileSync(path.join(REPO, 'src/agentd/client.js'), 'utf8');
+    const FIX_H = 'const handle = { chan, get onData() { return dataFn; }, set onData(f) { dataFn = f; drain(); }, get onClose() { return closeFn; }, set onClose(f) { closeFn = f; drain(); } };';
+    const FIX_S = 'conn.sessions.set(chan, { onData: (b) => { if (dataFn && !early.length) dataFn(b); else early.push(b); }, onClose: () => { closed = true; drain(); } });';
+    ok(cText.split(FIX_H).length === 2 && cText.split(FIX_S).length === 2, 'CONTROL setup: the client spells the early-chunk handle and its session once each');
+    const preC = MT.load('src/agentd/client.js', cText.replace(FIX_H, 'const handle = { chan, onData: null, onClose: null };').replace(FIX_S, 'conn.sessions.set(chan, { onData: (b) => handle.onData?.(b), onClose: () => handle.onClose?.() });'), 'pretcp');
+    const home8 = scratchHome('dsremote-home8', fs, ['.vibespace']);
+    process.on('exit', () => { killDaemon(home8); try { fs.rmSync(home8, { recursive: true, force: true }); } catch { } });
+    process.env.HOME = home8; process.env.VIBESPACE_AGENTD_ROOT = rootOf(home8);
+    const data8 = path.join(home8, 'hub-data'); fs.mkdirSync(data8, { recursive: true }); started.push(home8);
+    const dmPre = new preC.DeviceManager({ dataDir: data8, bundlePath: BUNDLE, version: '0.0.0-t', nodeModules: path.join(REPO, 'node_modules'), log: () => { } });
+    await dmPre.connect();
+    const pre = await stalledProbes(dmPre, 10, 500);
+    ok(pre.early >= 1 && pre.seen === pre.n - pre.early, `CONTROL: the pre-fix handle (onData null until the caller resumes) LOSES every greeting that came before its consumer — ${pre.n - pre.seen} of ${pre.n} lost, ${pre.early} arrived early`, pre);
+    for (const r of copiesCensus(MT.files, MT.dir, REPO, { minCopies: 1 })) ok(r.pass, '§tree (tcp control) ' + r.name + (r.pass ? '' : ' — ' + r.detail));
+    dmPre.stop(); killDaemon(home8); kid.kill('SIGKILL');
+  }
   for (const s of vncConns) s.destroy();
   fakeMac.close(); accR.shutdown(); accDead.shutdown(); accI.shutdown(); accOk.shutdown();
   real.stop(); killDaemon(home7);

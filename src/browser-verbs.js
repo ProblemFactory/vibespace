@@ -136,7 +136,13 @@ const BOOL_FLAGS = new Set(['--allow-file-access', '--annotate', '--auto-connect
  *  and, when it is not this one, judges EVERY flag under both readings
  *  (`classify(…, {drift})`) and says so once — the table stops being trusted
  *  exactly where it was never measured. */
-const TABLE_VERSION = '0.38.1'; // lane H (2026-09-25): re-measured on 0.38.1 — was 0.32.0 (its fixtures stay as the r3 evidence)
+/** lane dc-browser-providers (rv-browser F8): THE agent-browser VERSION ROW — its one spelling. `table` = the version the
+ *  verb + flag tables were measured on: the pinned install (CLI_PIN_RECORD), the windows proof (src/browser-windows.js), and
+ *  the two files that cannot import it — deploy/docker/Dockerfile's `npm install -g agent-browser@…` and package.json's
+ *  agentTools install hint — pinned to it by scripts/test-browser-cli-pin.mjs; `floor` = the oldest CLI VibeSpace runs on
+ *  (src/browser-profiles.js FLOOR_VERSION, package.json's declared floor); `recordingFloor` = `record start`'s (src/browser-trace.js). */
+const AGENT_BROWSER_CLI = Object.freeze({ table: '0.38.1', floor: '0.37.1', recordingFloor: '0.37.0' });
+const TABLE_VERSION = AGENT_BROWSER_CLI.table; // lane H (2026-09-25): re-measured on 0.38.1 — was 0.32.0 (its fixtures stay as the r3 evidence)
 /** → the installed version when it is not the table's (`'unknown'` when the
  *  probe could not read one), else null. */
 function versionDrift(installed) {
@@ -1244,7 +1250,7 @@ module.exports = {
   CONFIG_KEY, PROJECT_CONFIG_KEYS, RAW_CONFIG_KEYS, RAW_ARG_RE, sanitizeArgs, sanctionedConfig,
   KEEPER_MARK, // lane H verify r4: the keeper's launch mark (only the keeper writes it)
   // r4
-  TABLE_VERSION, versionDrift, NAV_VERBS, localSchemeOf, stateFileVerdict, parseBatchStdin,
+  AGENT_BROWSER_CLI, TABLE_VERSION, versionDrift, NAV_VERBS, localSchemeOf, stateFileVerdict, parseBatchStdin,
   CLI_PACKAGE, CLI_PIN_RECORD, CHROME_BUILDS_RECORD, cliChoiceOf, cliInstallDirName, cliNativeName, cliInstallVerdict, cliPinVerdict, // lane browser-admin 2b: the pinned browser CLI
   cliForBrowser, browserCliGoneText, // verify r2 (H1): a running browser keeps the CLI it was launched with
   SWITCH_VERBS, pausedSwitchNote, // verify S2 r3: a paused refusal names a verb that would move the user's view

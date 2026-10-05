@@ -296,11 +296,11 @@ console.log('§5 resolveAccount reads the record, not list()');
   const srv = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
   const m = srv.match(/  resolveAccount: \(id\) => \{\n([\s\S]*?)\n  \},\n\}\);/);
   ok('§5 WIRING: server.js hands UsageHistory a resolveAccount that never calls accounts.list()', !!m && !/accounts\.list\(/.test(m[1]) && /accounts\.get\(id\)/.test(m[1]), m && m[1]);
-  const resolveNew = m && new Function('accounts', `return (id) => {\n${m[1]}\n};`);
+  const resolveNew = m && new Function('accounts', 'require', `return (id) => {\n${m[1]}\n};`); // dc-ws-create: the ledger type is the descriptor's creds.ledgerType (require'd like server.js does)
   const w = mkWorld({ members: 3, pooled: 0 });
   w.am._state.accounts.push({ id: 'acct-k', name: 'key', type: 'api', tail: 'abcd1234', createdAt: 1 }, { id: 'acct-legacy', name: 'legacy', tail: 'zz' }, { id: 'cxs-1', name: 'codex', type: 'subscription', backend: 'codex', createdAt: 1 }, { id: 'oat-1', name: 'oat', type: 'oat', tail: 'q', createdAt: 1 });
   const resolveOld = (id) => { const a = (w.am.list().accounts || []).find((x) => x.id === id); if (!a) return null; return { type: a.backend === 'codex' ? 'codex-subscription' : a.type, name: a.name, tail: a.tail }; };
-  const fn = resolveNew && resolveNew(w.am);
+  const fn = resolveNew && resolveNew(w.am, createRequire(path.join(REPO, 'server.js')));
   const probes = [...w.ids, w.P, 'acct-k', 'acct-legacy', 'cxs-1', 'oat-1', 'nope', null];
   const bad = probes.filter((id) => !isDeepStrictEqual(settle(() => fn(id)), settle(() => resolveOld(id))));
   ok(`§5 the same {type, name, tail} as the list() row for ${probes.length} ids (subscription, pool, API key, legacy, codex, oat, unknown)`, !!fn && !bad.length, bad.map((id) => `${id}: ${JSON.stringify(settle(() => fn(id)))} vs ${JSON.stringify(settle(() => resolveOld(id)))}`).join(' | '));

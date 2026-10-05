@@ -4,8 +4,8 @@
 //   acpHarness({ id, label, command, args, env, store, brand, terminal })
 // The wrapper (data/bin/acp-wrapper.js), adapter (adapters/acp.js) and
 // normalizer (acp-message-manager.js) are SHARED by every ACP harness; the
-// per-agent facts are the executable, its ACP args, optional env, where its
-// transcripts live (for the store contract) and the brand mark. Capabilities
+// per-agent facts are the executable, its ACP args, optional env, its store
+// hooks and the brand mark. Capabilities
 // beyond the static caps row (fork/list/load/image…) are read from the
 // agent's `initialize` reply at spawn time by the wrapper — capability-driven,
 // never hardcoded per agent.
@@ -51,9 +51,6 @@ function acpHarness({ id, label, command, args = ['acp'], env = {}, store = {}, 
     Normalizer: AcpMessageManager,
     store: {
       locate: typeof store.locate === 'function' ? store.locate : () => null,           // S3 name: (id, cwd) → path|null — ACP exposes no transcript read API; the wrapper journal is the history
-      locateTranscript: typeof store.locate === 'function' ? store.locate : () => null, // S1 alias
-      transcriptDirs: Array.isArray(store.transcriptDirs) ? store.transcriptDirs : [],
-      conversationIdField: 'backendSessionId',
       // RESUME CONTINUITY (B-6b6d): deliberately NO `lastTurnModel`/
       // `lastTurnEffort` here. ACP itself exposes no way to ask an agent what a
       // stopped conversation was running, and the hook's PRESENCE is the whole

@@ -379,20 +379,21 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     if (rec.origin === 'desktop' || typeof keeper.windows !== 'function') return null;
     try { const r = await keeper.windows(rec.id); return r && r.ok ? R.pixelPlan(r.windows) : null; } catch { return null; }
   }
-  const streamOf = (rec) => (rec && (rec.stream || M.streamKindOf(rec))) || null;
+  const streamOf = (rec) => (rec && (rec.stream || M.streamKindOf(rec))) || null; // a FACT the reach view reports, never a branch
+  const capsOf = (rec) => M.capsOf(rec); // the rung's capability cells (the view's, else the row's)
   /** The pixel verbs' common door: an injection backend (unless only reading), the plan, the VISIBILITY gate. */
   async function pixelsFor(rec, who, verb, { inject = true } = {}) {
     const { backends, xenv, bins: b } = await backendsFor(rec);
     if (inject && !backends.injection) { audit({ ...who, verb, by: 'inject', ok: false, code: 'no_injection_backend' }); throw namedError('no_injection_backend', `${verb === 'key' ? 'a chord has no road on the accessibility tree and' : 'this is injection and'} no wired injection backend is available on ${rec.display}: ${wt.verbVerdicts({ backends }).probe}`, { backends: backends.rows }); }
     const plan = await planFor(rec);
-    const vis = R.visibilityVerdict({ stream: streamOf(rec), plan });
+    const vis = R.visibilityVerdict({ perWindow: capsOf(rec).perWindow, plan });
     if (!vis.ok) { audit({ ...who, verb, by: 'pixels', ok: false, code: vis.code }); throw namedError(vis.code, vis.why.replace('<handle>', rec.id), { handle: rec.id }); }
     return { backends, xenv, bins: b, plan };
   }
   /** A pixel of the screenshot (window coordinates) → the display point, through the plan (no plan ⇒ the point as given). */
   async function pointOf(rec, px, at, who, verb) {
     if (!px.plan) return { x: at.x, y: at.y, coords: 'display' };
-    const geo = streamOf(rec) === 'xpra' ? await wt.displayGeometry({ bins: px.bins, xenv: px.xenv }) : { ok: false };
+    const geo = capsOf(rec).geometry ? await wt.displayGeometry({ bins: px.bins, xenv: px.xenv }) : { ok: false };
     const m = R.mapPoint(px.plan, at, geo.ok ? { rootW: geo.w, rootH: geo.h } : {});
     if (!m.ok) { audit({ ...who, verb, by: 'point', at, ok: false, code: m.code }); throw namedError(m.code, m.why, { plan: { w: px.plan.w, h: px.plan.h } }); }
     return { x: m.x, y: m.y, coords: 'window' };
@@ -1093,7 +1094,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     // composited offscreen and grabs black), never AT-SPI bounds (logical px on GTK4, DIP on Chrome)
     const plan = await planFor(rec);
     if (plan) {
-      const vis = R.visibilityVerdict({ stream: streamOf(rec), plan });
+      const vis = R.visibilityVerdict({ perWindow: capsOf(rec).perWindow, plan });
       if (!vis.ok) { audit({ ...who, verb: 'screenshot', by: 'pixels', ok: false, code: vis.code }); throw namedError(vis.code, vis.why.replace('<handle>', rec.id), { handle: rec.id }); }
       let r = await wt.windowShot({ xenv, out, plan, ...helperOpts() });
       // a window mapped a moment ago may not have drawn yet (a viewer just attached): one short second look before
@@ -1159,7 +1160,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     const l = leases.get(rec.id);
     const v = leaseView(l);
     return { handle: rec.id, label: rec.label, origin: ORIGIN, form: 'window-live', openSpec: { action: 'openDesktopApp', id: rec.id }, streamPath: `/api/desktop/${rec.id}/stream`, lease: v, mode: modeInfo(rec.id),
-      note: `the user watches ${rec.label} in its Desktop-app window (display ${rec.display}); ${l ? `while you hold it the pane shows "Agent is driving" and their input is not relayed — Take over flips lease.input to 'user' (your verbs are refused window_paused, nothing is injected), Hand back returns it${v && v.input === 'user' ? '; the user is driving it RIGHT NOW' : ''}` : 'nobody holds it, so their input reaches it directly'}${streamOf(rec) === 'xpra' ? '; its pixels exist only while that window is open somewhere (the pixel verbs answer window_not_visible otherwise)' : ''}` };
+      note: `the user watches ${rec.label} in its Desktop-app window (display ${rec.display}); ${l ? `while you hold it the pane shows "Agent is driving" and their input is not relayed — Take over flips lease.input to 'user' (your verbs are refused window_paused, nothing is injected), Hand back returns it${v && v.input === 'user' ? '; the user is driving it RIGHT NOW' : ''}` : 'nobody holds it, so their input reaches it directly'}${capsOf(rec).perWindow ? '; its pixels exist only while that window is open somewhere (the pixel verbs answer window_not_visible otherwise)' : ''}` };
   }
 
   // ── lane E: THE USER'S SIDE — share / revoke / mode / the request's grant (cookie-authed routes, never an agent) ──

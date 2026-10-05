@@ -32,7 +32,13 @@ if (process.env.VS_SWEEP_HOLDER) {
 }
 
 const require = createRequire(import.meta.url);
-const { writerSweepScript, sweepWriters, parseSwept, fdScanShellFns, cliIdentityShellFns } = require('../src/writer-sweep.js');
+const { sweepWriters: sweepWritersRaw, sweepSharedLegs, parseSwept, fdScanShellFns, cliIdentityShellFns } = require('../src/writer-sweep.js');
+const { harnessOf: harnessOfWS } = require('../src/harnesses/index.js');
+// dc-harness-store (2.369.213): the holder legs are each descriptor's
+// store.writerSweep and sweepWriters runs the hook it is handed — the suite
+// keeps its old (rid, shq, {backend}) call shape through these two shims.
+const writerSweepScript = (rid, shq, { backend = 'claude', ...o } = {}) => harnessOfWS(backend).store.writerSweep(rid, shq, o);
+const sweepWriters = (hosts, hostId, rid, { backend = 'claude', ...o } = {}) => sweepWritersRaw(hosts, hostId, rid, { sweep: harnessOfWS(backend).store.writerSweep, ...o });
 // THE identity rule's own home (B-3185 r3): the shell text AND its JS twin. The
 // sweep re-exports the shell half, so importing it from BOTH here is also how
 // the re-export is proven to be the same function object (§12).
@@ -1009,8 +1015,10 @@ if (fs.existsSync('/proc/self')) {
   ok(/if \(capsOf\(backend\)\.streamProtocol && data\.resume && data\.resumeId && !data\.fork\)/.test(src), 'resume-already-live guard is gated on the harness caps row (no backend id list)');
   const sites = src.split('\n').filter((l) => /await sweepWriters\(/.test(l));
   ok(sites.length >= 3 && sites.every((l) => /\.\.\.sweepOpts\(/.test(l)), `every sweep call site passes the backend + protect list via sweepOpts (${sites.length})`);
-  ok(/const sweepOpts = \(hostId\) => backend === 'codex'/.test(src) && /\(es\.backend \|\| 'claude'\) === 'codex' && \(es\.host \|\| null\) === \(hostId \|\| null\)/.test(src), 'protect list = live codex sessions on the TARGET machine');
-  ok(/&& \(backend === 'claude' \|\| backend === 'codex'\) && \/\^\[\\w-\]\+\$\/\.test\(data\.resumeId\) && hosts\)/.test(src), 'the LOCAL sweep gate admits codex');
+  const rstore = fs.readFileSync(new URL('../src/resume-store.js', import.meta.url), 'utf8');
+  ok(/const sweepOpts = \(hostId\) => writerSweepOpts\(backend, activeSessions, hostId\)/.test(src) && /\(es\.backend \|\| 'claude'\) === backend && \(es\.host \|\| null\) === \(hostId \|\| null\)/.test(rstore), 'protect list = live sessions of the SAME harness on the TARGET machine (resume-store.writerSweepOpts)');
+  ok(!/backend === '(claude|codex)'/.test(fs.readFileSync(new URL('../src/writer-sweep.js', import.meta.url), 'utf8')) && !/=== '(claude|codex)'/.test(rstore), 'writer-sweep.js / resume-store.js carry no harness id branch (dc-harness-store)');
+  ok(/&& hasWriterSweep\(backend\) && \/\^\[\\w-\]\+\$\/\.test\(data\.resumeId\) && hosts\)/.test(src), 'the LOCAL sweep gate admits every harness that declares store.writerSweep (codex included)');
   const client = fs.readFileSync(new URL('../src/lib/session-lifecycle.js', import.meta.url), 'utf8');
   ok(/resend: \(backend === 'claude' \|\| backend === 'codex'\) && !!resumeId && !fork/.test(client), 'client re-sends codex resumes on reconnect (safe only because the guard now covers codex)');
 }
@@ -1805,9 +1813,9 @@ if (fs.existsSync('/proc/self')) {
       why: 'ARGV+UID READ (readPsIdentity, the no-/proc rung of the {uid, argv} ladder every signalling caller shares since B-eac2 residual (c) — opencode-serve\'s keeper and the shipped ssh op were its other spellings). It asks for a VALUE: an unanswerable `ps` yields `null`, which the callers read as "no evidence", never as "gone". Existence is `kill -0` (pidAlive / pidAliveShellFn), and classifyRecordedPid turns this null into the verdicts that REFUSE to signal, never into a licence to.' },
     { file: 'data/bin/vibespace-opencode-op', needle: `execImpl('ps', ['-p', String(pid), '-o', 'uid=,args=']`,
       why: 'The SHIPPED PARITY TWIN of the row above — a checkout-less ssh host cannot require src/cli-identity.js, which is the documented exception the usage scanner also lives under. Same ladder, same value-not-existence rule, driven against the local rung by scripts/test-opencode-remote.mjs.' },
-    { file: 'src/writer-sweep.js', needle: `ps -p "$1" -o args= 2>/dev/null | tr ' '`,
+    { file: 'src/harnesses/codex.js', needle: `ps -p "$1" -o args= 2>/dev/null | tr ' '`,
       why: 'ARGV READ (vs_sid_of: the PROTECT session id out of argv). Existence is the caller\'s open-fd evidence, not this line.' },
-    { file: 'src/writer-sweep.js', needle: `ps -p "$1" -E -o command=`,
+    { file: 'src/harnesses/codex.js', needle: `ps -p "$1" -E -o command=`,
       why: 'ENVIRON READ (vs_sid_of\'s BSD rung, same value, same non-decision).' },
     // ── the JS spelling (`execFileSync('ps', ['-p', …])`), invisible to this
     //    sweep until B-eac2 residual (c) taught `namesPsP` about it. Every one

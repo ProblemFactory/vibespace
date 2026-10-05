@@ -135,7 +135,7 @@
  * 200-with-nothing would be a silent failure of a user action.
  */
 const express = require('express');
-const { streamKindOf, scaleChoiceVerdict, INSTALL_WHATS, relaunchLeaseVerdict, TIGHTVNC, machineDesktopId } = require('../desktop-apps');
+const { capsOf, scaleChoiceVerdict, INSTALL_WHATS, relaunchLeaseVerdict, TIGHTVNC, machineDesktopId } = require('../desktop-apps');
 /** design 014 D1: the whole-desktop refusals' statuses (by name, like every code below). */
 const D014_STATUS = Object.freeze({ human_only: 403, no_vnc: 409, not_desktop_machine: 409, not_windows: 409, no_admin: 409, run_failed: 409, empty: 400, too_long: 400, multi_line: 400, hidden_chars: 400 });
 const { openWithVerdict, installSpecFor, FONTS_ID } = require('../office-open'); // §7.9: the ONE open-with verdict
@@ -394,7 +394,7 @@ async function xpraUiGate(req, res) {
   const id = m[1];
   const rec = ctx.keeper.get(id);
   if (!rec) { res.status(404).json({ error: `no desktop app ${id}`, code: 'not-found' }); return null; }
-  if (streamKindOf(rec) !== 'xpra') { fail(res, { code: 'not-xpra', message: `desktop app ${id} runs on ${rec.backend} — the xpra client cannot show it` }); return null; }
+  if (!capsOf(rec).hostedClient) { fail(res, { code: 'not-xpra', message: `desktop app ${id} runs on ${rec.backend} — the xpra client cannot show it` }); return null; }
   let www = null;
   try { www = ctx.keeper.xpraWwwFor ? await ctx.keeper.xpraWwwFor(id) : { hostId: 'local', dir: await ctx.keeper.xpraWww() }; } catch { www = null; }
   if (!www || !www.dir) { fail(res, { code: 'xpra-ui-unavailable', message: 'the installed xpra ships no html5 client (no www/index.html found)' }); return null; }

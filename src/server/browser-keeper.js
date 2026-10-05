@@ -955,8 +955,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
    *  → `{executablePath}` ({} for the default). Throws by name. */
   function launchBuildOf(p) {
     const c = BB.normalizeBrowserChoice(p.browser);
-    if (!c || c.kind === 'default' || String(p.provider || 'chromium') !== 'chromium') { if (p.buildMissing) { delete p.buildMissing; dirty = true; } return {}; }
-    const v = BB.browserChoiceVerdict({ choice: c, provider: 'chromium', by: 'user', builds: c.kind === 'build' ? buildsHere() : null, pathFact: c.kind === 'path' ? BB.fileFact(c.path) : null, label: p.label });
+    if (!c || c.kind === 'default' || !(B.providerRow(p.provider) || {}).buildChoice) { if (p.buildMissing) { delete p.buildMissing; dirty = true; } return {}; }
+    const v = BB.browserChoiceVerdict({ choice: c, provider: p.provider, by: 'user', builds: c.kind === 'build' ? buildsHere() : null, pathFact: c.kind === 'path' ? BB.fileFact(c.path) : null, label: p.label });
     if (v.ok) { if (p.buildMissing) { delete p.buildMissing; dirty = true; log.log?.(`[browser] ${p.id} "${p.label}": its chosen Chrome build is back (${c.kind === 'build' ? c.version : c.path})`); } return { executablePath: v.executablePath }; }
     noteBuildMissing(p, c, v);
     throw namedError(v.code === 'browser_path_missing' || v.code === 'browser_path_not_executable' ? v.code : 'browser_build_missing', v.error, { version: c.kind === 'build' ? c.version : null });
@@ -1886,7 +1886,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       { const c = cliOptOf(rec); if (c && c.gone) { if (setClosed(rec, { code: 'browser_cli_gone', error: closedText(p, c.gone) })) { log.warn?.(`[browser] ${p.id} "${p.label}": its browser closed (daemon ${rec.pid} alive, seen by ${seenBy}) and is NOT started again — ${c.gone}`); commit(); } return null; } }
       // a browser launched with the provider's own flags (cloak's executable + fingerprint) is never relaunched by a bare
       // `get cdp-url` (a launch view without them would relaunch it as plain chromium on that directory): said, not guessed
-      if (rec.launchFlags === true || (rec.launchFlags == null && String(p.provider) === 'cloak')) { // (a record from before r4 carries no flag: its provider says)
+      // (lane dc-browser-providers: the pre-r4 record rung — no flag, the provider said — is gone with the row's `launchFlags`)
+      if (rec.launchFlags === true) {
         if (setClosed(rec, { code: 'browser_closed', error: closedText(p, `a ${p.provider} browser is started again only by a start (its own launch flags)`) })) { log.warn?.(`[browser] ${p.id} "${p.label}": its browser closed (daemon ${rec.pid} alive, seen by ${seenBy}) — ${rec.closed.error}`); commit(); }
         return null;
       }
@@ -3192,14 +3193,16 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // EVERY call of the keeper's session (`rec.launchEnv`) — as argv they rode `open` only, and the keeper's own
     // `get cdp-url` right after it relaunched the browser without them (measured; without --no-sandbox it then died)
     let providerEnv = {};
-    // lane browser-admin 2a: a chromium profile pinned to one Chrome build — judged NOW (a build gone since it was chosen is
-    // refused by name before any record exists); its executable rides the launch view of EVERY call, as cloak's does
+    // lane dc-browser-providers: THE ROW's launch shape (src/browser-profiles.js PROVIDERS) — never the provider's id
+    const prow = B.providerRow(p.provider) || {};
+    // lane browser-admin 2a: a profile pinned to one Chrome build (a `buildChoice` row) — judged NOW (a build gone since it
+    // was chosen is refused by name before any record exists); its executable rides the launch view of EVERY call, as cloak's does
     const buildEnv = !p.host ? launchBuildOf(p) : {};
-    if (!p.host && p.provider === 'chromium' && buildEnv.executablePath) providerEnv = SW.launchEnvFor('chromium', { executablePath: buildEnv.executablePath });
-    if (!p.host && p.provider === 'cloak') {
+    if (!p.host && prow.buildChoice && buildEnv.executablePath) providerEnv = SW.launchEnvFor(p.provider, { executablePath: buildEnv.executablePath });
+    if (!p.host && prow.executable === 'installed') {
       const exe = cloakExecutable();
-      if (!exe.ok) throw namedError('backend_unavailable', exe.error, { provider: 'cloak', missing: 'cloakbrowser' });
-      providerEnv = SW.launchEnvFor('cloak', { seed: p.fingerprintSeed, executablePath: exe.path, proxy: await cloakEgressUrl(p.id) });
+      if (!exe.ok) throw namedError('backend_unavailable', exe.error, { provider: p.provider, missing: prow.binary });
+      providerEnv = SW.launchEnvFor(p.provider, { seed: p.fingerprintSeed, executablePath: exe.path, proxy: prow.egressProxy ? await cloakEgressUrl(p.id) : '' });
     } else if (!p.host) argvPrefix = SW.launchArgsFor(p.provider);
     const p0 = (async () => {
       const ns = nsOf(profileId);
@@ -3211,7 +3214,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         hostId: p.host || null, external: !(B.providerRow(p.provider) || {}).starts, forward: null, remoteCdpUrl: null, dir: null,
         // lane browser-propose (step 1): a chromium launch on THIS machine stops announcing automation (stamped before the
         // display fact reads the base file; a cloak launch carries its own build's patches — never stamped)
-        automationFlag: automationFlagOn() && !p.host && String(p.provider || 'chromium') === 'chromium' };
+        automationFlag: automationFlagOn() && !p.host && !!prow.automationFlag };
       // r5 LOW 3: the LAUNCH-MARK lineage rides every new record (a refused start too) — a profile once launched with the
       // mark never falls back to the pre-mark rule, whatever record comes next (set again at the launch below)
       if (prevRec && prevRec.mark) rec.mark = prevRec.mark;
@@ -3289,7 +3292,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       stampLaunchHost(rec, prevRec, p.dir || null); // lane profile-lock-roll (L1): THIS machine's name on the record — the witness the next pod reads
       rec.mark = p.id; // r4 (MAJOR 2): the launch carries this profile's MARK (machine-<id>.json); every later keeper call keeps that file
       rec.holdDialogs = true; // lane browser-stuck: …and holds page dialogs (noAutoDialog) from this launch on
-      rec.launchFlags = argvPrefix.length > 0 || (Object.keys(providerEnv).length > 0 && String(p.provider) !== 'chromium'); // r4: a provider's own launch flags (cloak: its env pair) — a heal never relaunches it. lane browser-admin 2a: a chromium build pin is NOT one — the heal's `get cdp-url` carries rec.launchEnv (the executable included), so it relaunches the SAME build
+      rec.launchFlags = !!prow.launchFlags && (argvPrefix.length > 0 || Object.keys(providerEnv).length > 0); // r4: a provider's own launch flags (cloak: its env pair; the row's `launchFlags`) — a heal never relaunches it. lane browser-admin 2a: a chromium build pin is NOT one — the heal's `get cdp-url` carries rec.launchEnv (the executable included), so it relaunches the SAME build
       rec.browserChoice = p.browser ? BB.choiceView(p.browser) : { kind: 'default' }; // what this launch was asked to run (the running build is `cdpBrowser`, the browser's own answer)
       const stamp0 = F.dirLaunchStamp(p.dir); // r5 MAJOR 1 (iii): the directory before this launch
       rec.cli = await cliNow(); // verify r2 (H1): the CLI this launch runs — every later call of this browser runs that version
@@ -5611,7 +5614,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     return { profiles, running, defaults, kept };
   }
   // verify r1 (H1): the profiles on the DEFAULT choice here (chromium) — the CLI launches its newest build for them; the newest build
-  const defaultChoosers = () => named().filter((p) => !p.host && String(p.provider || 'chromium') === 'chromium' && (() => { const c = BB.normalizeBrowserChoice(p.browser); return !c || c.kind === 'default'; })());
+  const defaultChoosers = () => named().filter((p) => !p.host && !!(B.providerRow(p.provider) || {}).buildChoice && (() => { const c = BB.normalizeBrowserChoice(p.browser); return !c || c.kind === 'default'; })());
   const newestHere = (l = buildsHere()) => (l && l.ok ? l.builds.find((b) => b.usable) || null : null);
   const sameBuild = (choice, version) => { const c = BB.normalizeBrowserChoice(choice); return !!c && c.kind === 'build' && c.version === String(version); };
   /** The picker's facts (no fetch): this machine's builds with their sizes, which VibeSpace downloaded (Remove), the free space,
@@ -5869,14 +5872,15 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // the rebuilt dialog: the rows carry their STATE — so the gate sees the real leases + who drives (a driven profile
     // is `in-use-by-hand`), the cloak executable re-shaped (null for every row the user installs nothing for) and the install facts
     const binaryOf = (id) => {
-      if (id !== 'cloak' || p.host) return null;
+      const r = B.providerRow(id);
+      if (!r || r.executable !== 'installed' || p.host) return null;
       const exe = cloakExecutable();
-      return { needed: 'cloakbrowser', present: !!exe.ok, configured: String(setting('browser.cloak.executablePath', '') || '').trim() !== '' };
+      return { needed: r.binary, present: !!exe.ok, configured: String(setting(r.exeSetting, '') || '').trim() !== '' };
     };
     // lane-cloak: `sitesOf` = what a cloak browser may open behind the egress proxy (the ready card says when it is none)
-    const rows = SW.switcherRows({ profile: p, providerIds: B.providerIds(), rowOf, controlOf: control, capabilityRefusalOf: B.capabilityRefusal, sources: (id) => keysOf().sourceOf(id), seats: reg.seats, majors: reg.majors, dirMajor, now: now(), runningOf, leases, inputs: inputsView({ withHumans: !forAgent }), binaryOf, install, keyRequiredOf: keyRequired, sitesOf: (id) => (id === 'cloak' && !p.host ? cloakRunList() : null), humans: forAgent ? [] : humanRowsOn(p.id) });
+    const rows = SW.switcherRows({ profile: p, providerIds: B.providerIds(), rowOf, controlOf: control, capabilityRefusalOf: B.capabilityRefusal, sources: (id) => keysOf().sourceOf(id), seats: reg.seats, majors: reg.majors, dirMajor, now: now(), runningOf, leases, inputs: inputsView({ withHumans: !forAgent }), binaryOf, install, keyRequiredOf: keyRequired, sitesOf: (id) => ((B.providerRow(id) || {}).egressProxy && !p.host ? cloakRunList() : null), humans: forAgent ? [] : humanRowsOn(p.id) });
     const rec1 = reg.browsers[p.id] || null; // lane browser-admin 2a: the Chrome build line (chromium only) — the choice + the build its browser reports
-    return { build: String(p.provider || 'chromium') === 'chromium' ? { choice: forAgent ? BB.agentChoiceView(p.browser) : BB.choiceView(p.browser), running: rec1 ? BB.runningBuildOf(rec1.cdpBrowser) : null, missing: p.buildMissing ? (forAgent ? BB.agentMissingView(p.buildMissing) : { ...p.buildMissing }) : null, live: B.isLiveBrowser(rec1) } : null, /* verify r1 (F5): an agent's view names a chrome file by kind only */ profile: B.publicProfileView(p), chip: chipFor(p), rows, seats: seatStates(), siteHints: reg.siteHints.map((h) => ({ ...h })), blocked: blockedFor({ profileId: p.id }), leases: leasesOn(p.id), switching: switching.has(p.id), live: B.isLiveBrowser(reg.browsers[p.id]), versions: { recorded: p.lastChromiumMajor, dir: dirMajor, majors: { ...reg.majors } }, install };
+    return { build: (B.providerRow(p.provider) || {}).buildChoice ? { choice: forAgent ? BB.agentChoiceView(p.browser) : BB.choiceView(p.browser), running: rec1 ? BB.runningBuildOf(rec1.cdpBrowser) : null, missing: p.buildMissing ? (forAgent ? BB.agentMissingView(p.buildMissing) : { ...p.buildMissing }) : null, live: B.isLiveBrowser(rec1) } : null, /* verify r1 (F5): an agent's view names a chrome file by kind only */ profile: B.publicProfileView(p), chip: chipFor(p), rows, seats: seatStates(), siteHints: reg.siteHints.map((h) => ({ ...h })), blocked: blockedFor({ profileId: p.id }), leases: leasesOn(p.id), switching: switching.has(p.id), live: B.isLiveBrowser(reg.browsers[p.id]), versions: { recorded: p.lastChromiumMajor, dir: dirMajor, majors: { ...reg.majors } }, install };
   }
   /**
    * THE SWITCH (§7.4's sequence, the gate first and nothing moving until it
@@ -6001,7 +6005,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const rec = reg.browsers[p.id] || null;
     const listing = await buildsFor(p.host || null);
     return {
-      profileId: p.id, label: p.label, provider: p.provider, host: p.host || null, choice: BB.choiceView(p.browser), missing: p.buildMissing ? { ...p.buildMissing } : null,
+      profileId: p.id, label: p.label, provider: p.provider, buildChoice: !!(B.providerRow(p.provider) || {}).buildChoice, host: p.host || null, choice: BB.choiceView(p.browser), missing: p.buildMissing ? { ...p.buildMissing } : null,
       listing, live: B.isLiveBrowser(rec), running: rec ? BB.runningBuildOf(rec.cdpBrowser) : null, holders: reg.leases.filter((l) => l.profileId === p.id).length,
       browsing: !!humans.get(p.id), switching: switching.has(p.id), lastChromiumMajor: Number.isInteger(p.lastChromiumMajor) ? p.lastChromiumMajor : null,
       driven: (() => { const h = SW.holdOf(reg.leases.filter((l) => l.profileId === p.id), inputsView({ withHumans: false })); return h.hold === 'driven' ? h.driver : null; })(), // verify r1 (F1): who drives it by hand (a takeover) — the dialog says it, the change is refused

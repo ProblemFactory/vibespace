@@ -202,7 +202,7 @@ export function openBrowserSwitcher(app, { profileId, sessionId = null, preselec
       { const dt = displayFactText(displayFactOf(app._browserProfiles, profileId)); if (dt) entries.push({ key: 'display', kind: 'display', text: dt }); } // one sentence (the default create/patch)
       // lane browser-admin 2a: THE CHROME BUILD row — which build this profile runs (and what its browser reports), with its
       // ONE act, Change build… (a chromium profile only; CloakBrowser runs its own measured build)
-      { const b = st.view.build ? cardBuildLine({ provider: 'chromium', ...st.view.build }, t) : null; if (b) entries.push({ key: 'build', kind: 'empty', text: b.text, action: { kind: 'build', label: t('Change build…') } }); }
+      { const b = st.view.build ? cardBuildLine(st.view.build, t) : null; if (b) entries.push({ key: 'build', kind: 'empty', text: b.text, action: { kind: 'build', label: t('Change build…') } }); }
       if (m.notice) entries.push({ kind: 'notice', ...m.notice });
       for (const tg of m.targets) {
         entries.push({ kind: 'target', ...tg });

@@ -2120,7 +2120,7 @@ out({ success: false, error: 'fake: unknown verb ' + process.argv.slice(2).join(
       ok(!cg4.threw && cg4.a2 > cg4.a1 + 0, `⑥ r5 LOW 4 CONTROL: a keeper copy without the gate asks the binary ${cg4.a2 - cg4.a1} more time(s) in three ticks — the gate leg can go red`, cg4);
     } else ok(false, '⑥ r5 LOW 4 CONTROL: the gate anchor was not found in src/server/browser-keeper.js');
     // (13) r5 LOW 4: the cloak branch neutered — a bare re-ask relaunches a provider-flagged browser as plain chromium
-    const CL = "      if (rec.launchFlags === true || (rec.launchFlags == null && String(p.provider) === 'cloak')) {";
+    const CL = '      if (rec.launchFlags === true) {'; // dc-browser-providers (2.369.213): the pre-r4 provider rung is gone with the row's launchFlags
     if (k6src.includes(CL)) {
       const cc5 = await cloakLeg(M6.load('src/server/browser-keeper.js', k6src.replace(CL, '      if (false) {'), 'no-cloak-branch'), 'ctl-cloak');
       ok(!cc5.threw && cc5.cdp >= 1 && cc5.chromes === 1, `⑥ r5 LOW 4 CONTROL: a keeper copy without the cloak branch re-asks the binary (${cc5.cdp}) and relaunches it bare (${cc5.chromes} chrome) — the cloak leg can go red`, cc5);

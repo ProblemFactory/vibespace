@@ -231,7 +231,9 @@ const PAYLOAD = (recs) => ({
 {
   const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf-8');
   const wc = read('src/ws-create.js');
-  ok(/!session\.host && backend === 'claude' && typeof otelEnv === 'function'/.test(wc), 'ws-create: OTEL env injection gated local-claude-only');
+  { const H = require(path.join(REPO, 'src/harnesses'));
+    ok(/!session\.host && SP\.otelExport && typeof otelEnv === 'function'/.test(wc) && H.ids().filter((id) => H.spawnOf(id).otelExport === true).join() === 'claude',
+      'ws-create: OTEL env injection gated local-only on the declared spawn.otelExport row (claude alone declares it)'); }
   ok(read('src/ws-handler.js').includes("'otelEnv',"), 'ws contract carries otelEnv');
   ok(/p\.startsWith\('\/otel\/'\)/.test(read('src/auth.js')), 'auth middleware exempts /otel/ (module gate is the only door)');
   const sv = read('server.js');

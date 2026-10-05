@@ -82,7 +82,7 @@ const BOX_PROBE_TIMEOUT_MS = 1500;
 const PENDING_CAP = 20;
 const FRAME_RING = 8;
 /** §1.3: recording (`record start`, 30 fps via Page.startScreencast) needs ≥ 0.37.0. */
-const RECORDING_FLOOR = '0.37.0';
+const RECORDING_FLOOR = require('./browser-verbs.js').AGENT_BROWSER_CLI.recordingFloor; // the one version row
 const RECORDING_DIR = 'browser-recordings';
 const TRACE_DIR = 'browser-trace';
 const FORGOTTEN_FILE = 'browser-forgotten.json';

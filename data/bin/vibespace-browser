@@ -1057,7 +1057,6 @@ async function runOursPage(cls, { r, head, profileId, wantsJson }) {
       console.log(`  the browser itself reached: ${(r.egress.run || []).length ? r.egress.run.join(', ') : 'nothing beyond loopback'}; its one-time download: ${(r.egress.install || []).join(', ') || 'none'}`);
       console.log(`  a cloak browser may open here: ${(r.cloakSites || []).length ? r.cloakSites.join(', ') : 'no site yet — the user names them (Settings → Agent browser); everything else is refused'}`);
     }
-    if (r.cloak && r.cloak.ok === false) console.log(`cloakserve: ${r.cloak.error}`);
     // lane browser-admin (chunk 3): the Chrome builds there and the browser CLI version in use — FACTS (the user chooses a
     // profile's build in the Agent browser panel; this command never sets one)
     if (r.builds) {

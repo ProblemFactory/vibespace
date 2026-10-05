@@ -357,9 +357,9 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
    *  (the resource report's live row, the idle verdict) over it through `hooks.view`. */
   function machineView(rec) {
     const b = rec.backend ? M.backendById(rec.backend, backends) : null;
-    // `stream` / `wired` / `fitMode` are the rung's TABLE facts laid over the record in the VIEW (the stored record keeps facts only)
+    // `stream` / `wired` / `fitMode` / `caps` (the capability cells — the client reads these, never a rung id) are the rung's TABLE facts laid over the record in the VIEW (the stored record keeps facts only)
     const fp = M.fitPolicyOf(rec, backends);
-    return { ...rec, pids: { ...rec.pids }, starts: { ...rec.starts }, stream: b ? b.stream : null, wired: b ? b.wired !== false : null, fitMode: fp ? fp.mode : null, fitBy: fp ? fp.by : null, fb: rec.fb ? { ...rec.fb } : null, fit: rec.fit ? { ...rec.fit } : null };
+    return { ...rec, pids: { ...rec.pids }, starts: { ...rec.starts }, stream: b ? b.stream : null, wired: b ? b.wired !== false : null, fitMode: fp ? fp.mode : null, fitBy: fp ? fp.by : null, caps: M.capsOf(rec, backends), fb: rec.fb ? { ...rec.fb } : null, fit: rec.fit ? { ...rec.fit } : null };
   }
   const view = (rec) => (typeof H.view === 'function' ? H.view(rec) : machineView(rec));
   function commit() { save(); try { H.onCommit?.(); } catch (e) { log.warn?.(`[desktop] commit hook failed: ${e.message}`); } }
@@ -526,7 +526,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     const f = await facts();
     try { await apps.refreshCatalog(); } catch (e) { log.warn?.(`[apps] the catalog could not be read (${e.message}) — its last rows are served`); }
     const resolved = resolve(f, undefined, serverSetting0);
-    return { apps: listApps(), registry: registry(f), availability: { backend: resolved.backend, via: resolved.via, recipe: resolved.recipe, stream: resolved.stream, fallbackWhy: resolved.fallbackWhy, ladder: resolved.ladder, prefs: instancePrefs(serverSetting0), xpra: f.xpra, bins: f.bins }, cap: { used: liveRecords().length, cap: limits.CONCURRENT_CAP }, idleTimeoutMin: idleTimeoutMin(serverSetting0) };
+    return { apps: listApps(), registry: registry(f), availability: { backend: resolved.backend, via: resolved.via, recipe: resolved.recipe, stream: resolved.stream, caps: M.capsOf({ backend: resolved.backend }, backends), fallbackWhy: resolved.fallbackWhy, ladder: resolved.ladder, prefs: instancePrefs(serverSetting0), xpra: f.xpra, bins: f.bins }, cap: { used: liveRecords().length, cap: limits.CONCURRENT_CAP }, idleTimeoutMin: idleTimeoutMin(serverSetting0) };
   }
 
   function idleTimeoutMin(read = serverSetting) {
@@ -629,7 +629,8 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     const pick = M.scalePick({ choice: opts.scaleChoice, appDefault: v.launch.scaleChoice, setting: serverSetting('desktop.appScale'), dpr: v.launch.dpr, uiScale: v.launch.uiScale });
     // lane D (a): a fraction is a REAL scale (GDK_SCALE at the ceiling, the picture shown at s ÷ it) — a browser row keeps the
     // floor rule (it scales whole from the font dpi, measured); the record stores what it was rendered at (gdkScale, pictureScale)
-    const knobs = backend.stream === 'xpra' ? M.scaleKnobs(pick.scale, { rule: M.scaleRuleOf(row) }) : M.scaleKnobs(1);
+    const rungScales = M.capsOf({ backend: backend.id }, backends).scales; // the row's cell: only a rung that scales takes the knobs
+    const knobs = rungScales ? M.scaleKnobs(pick.scale, { rule: M.scaleRuleOf(row) }) : M.scaleKnobs(1);
     if (office) {
       try { await fs.promises.mkdir(office.profileDir, { recursive: true, mode: 0o700 }); await fs.promises.chmod(office.profileDir, 0o700); }
       catch (e) { throw namedError('profile-dir', `could not create the LibreOffice profile ${office.profileDir}: ${e.message}`); }
@@ -642,7 +643,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
         if (browser.kind === 'firefox') await fs.promises.writeFile(path.join(browser.profileDir, 'user.js'), M.firefoxUserJs(), { mode: 0o600 });
       } catch (e) { throw namedError('profile-dir', `could not create the browser profile ${browser.profileDir}: ${e.message}`); }
     }
-    const rec = M.newRecord({ id, label: doc ? doc.label : row.label, exec: execPath, args: browser ? browser.argv : office ? office.argv : (row.args || []), cwd, env: browser && Object.keys(browser.env).length ? { ...(row.env || {}), ...browser.env } : row.env, source: v.launch.source, backend: resolved.backend, via: resolved.via, fallbackWhy: resolved.fallbackWhy, idleTimeoutMs: idleTimeoutMin(serverSetting) * 60000, now: now(), scale: knobs.scale, dpi: knobs.dpi, gdkScale: backend.stream === 'xpra' ? knobs.gdkScale : null, pictureScale: backend.stream === 'xpra' ? knobs.pictureScale : null, scaleOrigin: backend.stream === 'xpra' ? pick.origin : null, scaleFrom: backend.stream === 'xpra' ? pick.from : null });
+    const rec = M.newRecord({ id, label: doc ? doc.label : row.label, exec: execPath, args: browser ? browser.argv : office ? office.argv : (row.args || []), cwd, env: browser && Object.keys(browser.env).length ? { ...(row.env || {}), ...browser.env } : row.env, source: v.launch.source, backend: resolved.backend, via: resolved.via, fallbackWhy: resolved.fallbackWhy, idleTimeoutMs: idleTimeoutMin(serverSetting) * 60000, now: now(), scale: knobs.scale, dpi: knobs.dpi, gdkScale: rungScales ? knobs.gdkScale : null, pictureScale: rungScales ? knobs.pictureScale : null, scaleOrigin: rungScales ? pick.origin : null, scaleFrom: rungScales ? pick.from : null });
     if (v.launch.source === 'registry') rec.appId = row.id;
     if (browser) { rec.browser = browser.kind; rec.profileDir = browser.profileDir; rec.keepProfile = browser.keepProfile; rec.url = browser.url; rec.confinement = browser.confinement; }
     if (office) { rec.office = office.module; rec.profileDir = office.profileDir; } // §7.9
@@ -756,7 +757,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
    *  every process on that display carries. xpra's own Xvfb gets a sanitised
    *  env WITHOUT the marker but WITH that path (measured on 6.5.3), so a dead
    *  xpra's Xvfb (~100-190 MB) was proven by nothing and leaked for ever. */
-  const needlesOf = (rec) => (rec.backend === 'desktop-singleton' ? [sessionMarker(rec.id)] : [sessionMarker(rec.id), `XAUTHORITY=${path.join(logRoot, rec.id, 'Xauthority')}`]);
+  const needlesOf = (rec) => (!M.capsOf(rec, backends).ownsDisplay ? [sessionMarker(rec.id)] : [sessionMarker(rec.id), `XAUTHORITY=${path.join(logRoot, rec.id, 'Xauthority')}`]);
   const carriesEvidence = (pid, needles) => needles.some((n) => display.environHas(pid, n));
   /** ONE /proc walk over the needles of `recs` → Map<id, pid[]> (never this process). */
   function evidenceCensus(recs) {
@@ -838,12 +839,12 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
       } else commit();
       // the app itself — the sanitised env + the scale's knobs + the row's own (a row may pin GDK_SCALE) + the display
       const knobs = M.scaleKnobs(rec.scale || 1, { rule: M.scaleRuleOf(rec) }); // the same rule the launch recorded (lane D (a))
-      const appEnv = { ...display.x11Env(base, { display: up.display, authFile: sessionAuth || base.XAUTHORITY }), ...(M.streamKindOf(rec, backends) === 'xpra' ? knobs.env : {}), ...(rec.env || {}) };
+      const appEnv = { ...display.x11Env(base, { display: up.display, authFile: sessionAuth || base.XAUTHORITY }), ...(M.capsOf(rec, backends).scales ? knobs.env : {}), ...(rec.env || {}) };
       if (!sessionAuth) delete appEnv.XAUTHORITY;
       // r2 (the verifier's race): xpra REPLACES the display's resource database ~1 s after its display is up — an app
       // started before read no Xft.dpi (Xvfb's 100 dpi: a "1.5×" xterm got a 7×14 cell) and a merge before it was wiped.
       // Wait for xpra's write (bounded; a miss is logged, the app still starts), THEN merge, THEN start the app.
-      if (own && M.streamKindOf(rec, backends) === 'xpra') {
+      if (own && M.capsOf(rec, backends).crispText) {
         const xd = await display.waitForXftDpi({ binPath: f.bins.xrdb, env: appEnv }); // wall clock (an injected test clock never stalls a real display wait)
         if (!xd.ok) log.warn?.(`[desktop] ${id}: ${xd.why} — the app starts without the display's font dpi`);
         if (gone()) return;
@@ -930,7 +931,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
    *  (the keeper's app-window rows through M.windowsLeftCount); null = not counted — a SHARED display (the singleton:
    *  other apps' windows are not this app's), no display, or a census that failed / outlived EXIT_CENSUS_MS. */
   async function windowsLeftAtExit(rec) {
-    if (!rec.display || rec.backend === M.DESKTOP_SINGLETON_ID) return null;
+    if (!rec.display || !M.capsOf(rec, backends).ownsDisplay) return null;
     const xenv = x11EnvFor(rec.id);
     if (!xenv) return null;
     let timer = null;
@@ -943,7 +944,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
       // xpra keeps each managed app window inside a Corral wrapper that is MAPPED only while a client is connected
       // (measured 6.5.3: with no client the forking launcher's surviving xterm read viewable=false) — on that rung the
       // window's existence is the fact, not X's viewability; the other rungs keep X's mapped state
-      const rows = M.streamKindOf(rec, backends) === 'xpra' ? display.seamlessWindows(r.windows).map((w) => ({ ...w, mapped: null })) : M.appWindows(r.windows);
+      const rows = M.capsOf(rec, backends).perWindow ? display.seamlessWindows(r.windows).map((w) => ({ ...w, mapped: null })) : M.appWindows(r.windows);
       return M.windowsLeftCount(rows);
     } catch (e) { log.warn?.(`[desktop] ${rec.id}: the window census at the app's exit threw (${e.message}) — not counted`); return null; }
     finally { clearTimeout(timer); }
@@ -1030,7 +1031,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
    *  boot adoption), so `exited`/`failed` mean "nothing of this session's
    *  runs" on every one of them. Returns true when nothing survived. */
   async function teardown(rec, handles) {
-    const own = rec.backend !== 'desktop-singleton';
+    const own = M.capsOf(rec, backends).ownsDisplay;
     let clean = true;
     display.refreshSessions();
     for (const part of PARTS) {
@@ -1305,7 +1306,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     const rec = store.apps[id];
     if (!rec || !rec.display) return null;
     let authFile = null;
-    if (rec.backend === 'desktop-singleton') { let s = null; try { s = singleton?.(); } catch { s = null; } authFile = (s && s.authFile) || null; }
+    if (!M.capsOf(rec, backends).ownsDisplay) { let s = null; try { s = singleton?.(); } catch { s = null; } authFile = (s && s.authFile) || null; }
     else authFile = path.join(logRoot, id, 'Xauthority');
     const base = env();
     return display.x11Env(base, { display: rec.display, authFile: authFile || base.XAUTHORITY });
@@ -1313,7 +1314,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
   function streamTarget(id) {
     const rec = store.apps[id];
     if (!rec) return null;
-    if (rec.backend === 'desktop-singleton') { let s = null; try { s = singleton?.(); } catch { s = null; } return s && s.running && rec.state === 'ready' ? { kind: 'rfb', port: s.port, backend: rec.backend } : null; }
+    if (!M.capsOf(rec, backends).ownsDisplay) { let s = null; try { s = singleton?.(); } catch { s = null; } return s && s.running && rec.state === 'ready' ? { kind: M.streamKindOf(rec, backends), port: s.port, backend: rec.backend } : null; }
     return M.streamTargetOf(rec);
   }
   /** The APPLICATION's windows on a record's display (P8-2 per-window facts):
@@ -1329,7 +1330,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     const xenv = x11EnvFor(id);
     const r = await display.enumerateWindows({ hostId, display: rec.display, authFile: xenv.XAUTHORITY, env: xenv });
     if (!r.ok) return r;
-    const rows = M.streamKindOf(rec, backends) === 'xpra' ? display.seamlessWindows(r.windows) : r.windows.filter((w) => w.mapped !== false && w.w > 1 && w.h > 1);
+    const rows = M.capsOf(rec, backends).perWindow ? display.seamlessWindows(r.windows) : r.windows.filter((w) => w.mapped !== false && w.w > 1 && w.h > 1);
     return { ok: true, why: null, windows: rows.map((w) => ({ id: w.id, title: w.name, cls: w.cls, instance: w.instance, x: w.x, y: w.y, w: w.w, h: w.h, mapped: w.mapped, depth: w.depth == null ? null : w.depth })) }; // depth 1 = a top-level (P8-2 x4)
   }
   /** Where this machine's xpra ships its html5 client (null = no xpra, or a
@@ -1339,7 +1340,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
    *  plus `extra` (rule 10: the marker-carrying members the sid table lost,
    *  handed in by the tick's ONE census). */
   function sessionPids(rec, extra = []) {
-    const own = rec.backend !== 'desktop-singleton';
+    const own = M.capsOf(rec, backends).ownsDisplay;
     const out = new Set(display.sessionCensus(own ? [rec.pids.app, rec.pids.server, rec.pids.wm, rec.pids.x] : [rec.pids.app]));
     for (const p of extra) if (p !== process.pid) out.add(p);
     return [...out];
@@ -1391,7 +1392,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     const shared = await singletonLive(); // rule 6: asked, not remembered
     for (const rec of Object.values(store.apps)) {
       if (!M.isLiveState(rec.state)) continue;
-      const own = rec.backend !== 'desktop-singleton';
+      const own = M.capsOf(rec, backends).ownsDisplay;
       // rule 8: no child handles exist at boot, so every part is judged by
       // pid AND starttime — a record with none is not proven and is reaped
       // by MARKER only (see partIsOurs / killSessionVerified)
@@ -1442,7 +1443,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
   async function tick() {
     const t = now();
     const recs = liveRecords();
-    const shared = recs.some((r) => r.backend === 'desktop-singleton') ? await singletonLive() : null;
+    const shared = recs.some((r) => !M.capsOf(r, backends).ownsDisplay) ? await singletonLive() : null;
     // rule 10: ONE marker census per tick, and only on a tick where some
     // record is due a resource sample — the sample must see the member that
     // setsid()'d out of every leader's session (measured: a setsid'd `yes`
@@ -1455,7 +1456,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     };
     for (const rec of recs) {
       if (stopping.has(rec.id)) continue;
-      const own = rec.backend !== 'desktop-singleton';
+      const own = M.capsOf(rec, backends).ownsDisplay;
       const handles = children.get(rec.id) || null;
       if (rec.pids.app && !partIsOurs(rec, 'app', handles)) { onPartExit(rec.id, 'app', null, null); continue; }
       if (own && rec.pids.x && !partIsOurs(rec, 'x', handles)) { onPartExit(rec.id, 'x', null, null); continue; }

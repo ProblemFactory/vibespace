@@ -37,17 +37,18 @@ const win = read('src/lib/desktop-app-window.js'), xv = read('src/lib/xpra-view.
 
 console.log('§1 the window bar: status · Stop · ⋯ · Paste');
 {
-  const X = { stream: 'xpra', state: 'ready', backend: 'xpra', scale: 2, scaleOrigin: 'auto', live: { memBytes: 131 * 1048576, memMetric: 'pss', cpuPct: 3 } };
+  const CAPS = (backend) => require('../src/desktop-apps.js').capsOf({ backend }); // the cells a view carries (lane dc-desktop-caps)
+  const X = { stream: 'xpra', caps: CAPS('xpra'), state: 'ready', backend: 'xpra', scale: 2, scaleOrigin: 'auto', live: { memBytes: 131 * 1048576, memMetric: 'pss', cpuPct: 3 } };
   ok(Wm.aboutWindowText(X) === 'About this window: 131 MB memory · shown with xpra', 'the ⋯ line says the memory and how the window reaches you, in words', Wm.aboutWindowText(X));
   ok(Wm.aboutWindowText({ backend: 'vnc-display', fallbackWhy: 'xpra not on PATH' }) === 'About this window: shown with vnc-display — xpra not on PATH' && Wm.aboutWindowText({}) === '' && Wm.aboutWindowText(null) === '', 'a fallback names why; nothing known ⇒ no line');
   ok(Wm.memSize(1.44 * 1024 * 1048576) === '1.4 GB' && Wm.memSize(1) === '1 MB' && Wm.memSize(512 * 1048576) === '512 MB' && !/PSS|RSS|CPU/.test(Wm.aboutWindowText(X)), 'plain units, never the metric\'s name (PSS stays in the tooltip)');
-  ok(Wm.scaleChipText(X) === '' && Wm.scaleChipText({ ...X, scaleOrigin: undefined }) === '' && Wm.scaleChipText({ ...X, scale: 1.5, scaleOrigin: 'chosen' }) === 'Larger 1.5×' && Wm.scaleChipText({ ...X, scale: 1, scaleOrigin: 'app' }) === 'Actual size' && Wm.scaleChipText({ ...X, backend: 'vnc-display', stream: 'rfb', scaleOrigin: 'chosen' }) === '', 'the scale chip only when somebody chose the scale, in words');
+  ok(Wm.scaleChipText(X) === '' && Wm.scaleChipText({ ...X, scaleOrigin: undefined }) === '' && Wm.scaleChipText({ ...X, scale: 1.5, scaleOrigin: 'chosen' }) === 'Larger 1.5×' && Wm.scaleChipText({ ...X, scale: 1, scaleOrigin: 'app' }) === 'Actual size' && Wm.scaleChipText({ ...X, backend: 'vnc-display', stream: 'rfb', caps: CAPS('vnc-display'), scaleOrigin: 'chosen' }) === '', 'the scale chip only when somebody chose the scale, in words');
   ok(!/已选|選択済み/.test(zh['Larger {scale}×'] + zh['Actual size'] + ja['Larger {scale}×'] + ja['Actual size']) && zh['Larger {scale}×'] === '放大 {scale}×', 'zh says 放大 1.5× — never 已选');
   const pinBar = (s) => [
     /backendChip\.className = 'desktop-app-chip desktop-app-chip-backend'; backendChip\.style\.display = 'none';/.test(s) || 'backend chip shown',
     /liveChip\.textContent = liveChipText\(rec\); liveChip\.style\.display = 'none';/.test(s) || 'memory chip shown',
     /const about = aboutWindowText\(rec\);[^\n]*\n\s*if \(about\) items\.push\(\{ label: about,[^\n]*disabled: true \}\);/.test(s) || 'no about line in ⋯',
-    /moreAlways: \(\) => !!rec && \(rec\.stream === 'xpra' \|\| shareable\(\) \|\| !!aboutWindowText\(rec\)\)/.test(s) || '⋯ not always there',
+    /moreAlways: \(\) => !!rec && \(cap\(rec, 'seamless'\) \|\| cap\(rec, 'scales'\) \|\| shareable\(\) \|\| !!aboutWindowText\(rec\)\)/.test(s) || '⋯ not always there',
   ].filter((v) => v !== true);
   ok(same(pinBar(win), []), 'WIRING: both chips stay in the DOM never shown (display none = absent for the fold), the about line opens the ⋯, the ⋯ is there whenever it has a line', pinBar(win));
   const mut = win.replace("liveChip.textContent = liveChipText(rec); liveChip.style.display = 'none';", "const lt = liveChipText(rec); liveChip.textContent = lt; liveChip.style.display = lt ? '' : 'none';");

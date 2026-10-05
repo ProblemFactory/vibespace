@@ -1069,15 +1069,29 @@ const CLOAK_WIRED = CLOAK_EGRESS_PROOF.status === 'measured' && proofVerdict(CLO
 //   consent      P10 (D27 (b)): the SETTING that must read true before the row
 //                may be used on this machine (`provider_needs_consent` otherwise —
 //                a user act with its own confirmation; agents cannot write settings)
+// lane dc-browser-providers — THE LAUNCH SHAPE and the build cells, read by every site that used to ask the id
+// (src/browser-switch.js launchEnvFor / providerNeedsSeed / integrationIdFor, the keeper's launch + heal, the build
+// verdict, the panel / switcher / New profile… models off the /providers rows and the profile view):
+//   buildChoice  a Chrome build is choosable for it (Change build…; the chosen build's executable rides the launch env)
+//   automationFlag  the launch stamps AUTOMATION_FLAG (a build of ours; a vendor build carries its own patches)
+//   launchArgs   the browser's own arguments (agent-browser's AGENT_BROWSER_ARGS); null = the CLI's defaults
+//   seeded       it carries a fingerprint seed (`--fingerprint=<seed>` rides launchArgs; §7.4)
+//   launchFlags  it is started with flags of its own, so a heal's bare `get cdp-url` never relaunches it
+//   executable   'installed' = its own binary (the `exeSetting` setting names one installed some other way); null = none
+//   egressProxy  it reaches the world only through the keeper's allowlisting egress proxy (§7.2.1)
+//   integrationId  the integration-registry row its key lives in (null = needs none; cloud rows: their own id)
+const NO_LAUNCH = Object.freeze({ buildChoice: false, automationFlag: false, launchArgs: null, seeded: false, launchFlags: false, executable: null, exeSetting: null, egressProxy: false, integrationId: null });
+/** The provider an empty / absent `provider` means (a record from before providers, a kept directory adopted as it is). */
+const DEFAULT_PROVIDER = 'chromium';
 const PROVIDERS = Object.freeze({
-  chromium: Object.freeze({ tier: 1, wired: true, label: 'Chromium (a browser VibeSpace starts)', keyScope: 'none', canSwitchTo: 'in-place', ownsDir: true, leaseKind: 'tab', remote: 'browser-serve', starts: true, headed: null, binary: 'agent-browser', cdp: true, allowedDomains: true, pinTab: true, consent: null }),
-  cloak: Object.freeze({ tier: 2, wired: CLOAK_WIRED, label: 'CloakBrowser (the same profile directory opened by the cloakbrowser binary, seeded)', keyScope: 'local-only', canSwitchTo: 'in-place', ownsDir: true, leaseKind: 'tab', remote: null, starts: true, headed: false, binary: 'cloakbrowser', cdp: true, allowedDomains: true, pinTab: true, consent: null }),
-  cdp: Object.freeze({ tier: 1, wired: true, label: 'An existing browser over CDP (yours, or one on a paired machine)', keyScope: 'none', canSwitchTo: 'no', ownsDir: false, leaseKind: 'tab', remote: 'tcp-forward', starts: false, headed: null, binary: null, cdp: true, allowedDomains: true, pinTab: true, consent: null }),
+  chromium: Object.freeze({ ...NO_LAUNCH, buildChoice: true, automationFlag: true, tier: 1, wired: true, label: 'Chromium (a browser VibeSpace starts)', keyScope: 'none', canSwitchTo: 'in-place', ownsDir: true, leaseKind: 'tab', remote: 'browser-serve', starts: true, headed: null, binary: 'agent-browser', cdp: true, allowedDomains: true, pinTab: true, consent: null }),
+  cloak: Object.freeze({ ...NO_LAUNCH, launchArgs: Object.freeze(['--no-sandbox']), seeded: true, launchFlags: true, executable: 'installed', exeSetting: 'browser.cloak.executablePath', egressProxy: true, integrationId: 'cloak', tier: 2, wired: CLOAK_WIRED, label: 'CloakBrowser (the same profile directory opened by the cloakbrowser binary, seeded)', keyScope: 'local-only', canSwitchTo: 'in-place', ownsDir: true, leaseKind: 'tab', remote: null, starts: true, headed: false, binary: 'cloakbrowser', cdp: true, allowedDomains: true, pinTab: true, consent: null }),
+  cdp: Object.freeze({ ...NO_LAUNCH, tier: 1, wired: true, label: 'An existing browser over CDP (yours, or one on a paired machine)', keyScope: 'none', canSwitchTo: 'no', ownsDir: false, leaseKind: 'tab', remote: 'tcp-forward', starts: false, headed: null, binary: null, cdp: true, allowedDomains: true, pinTab: true, consent: null }),
   // P10 (§7.6 tier 3, D27 (b), D31): WIRED — a window already open on the user's
   // own desktop, addressed through vibespace-window (the AT-SPI tree + its own
   // pixmap), NO CDP, NO process of ours, NO directory of ours; usable only while
   // the consent setting reads true (src/window-desktop.js is the model)
-  'local-window': Object.freeze({ tier: 3, wired: true, label: 'A window on your own desktop (tier 3: the accessibility tree + pixels, no CDP)', keyScope: 'none', canSwitchTo: 'no', ownsDir: false, leaseKind: 'window-target', remote: null, starts: false, headed: true, binary: null, cdp: false, allowedDomains: false, pinTab: false, consent: 'window.realDesktopTargets' }),
+  'local-window': Object.freeze({ ...NO_LAUNCH, tier: 3, wired: true, label: 'A window on your own desktop (tier 3: the accessibility tree + pixels, no CDP)', keyScope: 'none', canSwitchTo: 'no', ownsDir: false, leaseKind: 'window-target', remote: null, starts: false, headed: true, binary: null, cdp: false, allowedDomains: false, pinTab: false, consent: 'window.realDesktopTargets' }),
 });
 /** `cloud:<name>` is a FAMILY of rows (§7.1): each vendor's own browser,
  *  reached with a key from the integration store (§7.5). The key half
@@ -1089,14 +1103,14 @@ const PROVIDERS = Object.freeze({
  *  UNVERIFIED against upstream (§7.5's table says so), so its row stays
  *  unwired BY NAME — a refusal, never a spawn that fails at the vendor. */
 const CLOUD_PROVIDERS = Object.freeze(['browserbase', 'browserless', 'kernel', 'browseruse', 'agentcore']);
-const CLOUD_ROW = Object.freeze({ tier: 2, wired: true, keyScope: 'local-only', canSwitchTo: 'export-only', ownsDir: false, leaseKind: 'tab', remote: null, starts: true, headed: false, binary: 'agent-browser', cdp: true, allowedDomains: true, pinTab: true, consent: null });
+const CLOUD_ROW = Object.freeze({ ...NO_LAUNCH, launchFlags: true, tier: 2, wired: true, keyScope: 'local-only', canSwitchTo: 'export-only', ownsDir: false, leaseKind: 'tab', remote: null, starts: true, headed: false, binary: 'agent-browser', cdp: true, allowedDomains: true, pinTab: true, consent: null });
 const CLOUD_UNWIRED = Object.freeze({ agentcore: 'its field set (AWS access key / secret / region) is unverified against upstream\'s provider table (§7.5) — the row stays unwired until it is measured' });
 /** The row for a provider id, `cloud:<name>` included; null when unknown. */
 function providerRow(id) {
-  const s = String(id == null || id === '' ? 'chromium' : id);
+  const s = String(id == null || id === '' ? DEFAULT_PROVIDER : id);
   if (PROVIDERS[s]) return PROVIDERS[s];
   const m = /^cloud:([a-z0-9-]+)$/.exec(s);
-  if (m && CLOUD_PROVIDERS.includes(m[1])) return Object.freeze({ ...CLOUD_ROW, wired: !CLOUD_UNWIRED[m[1]], unwiredWhy: CLOUD_UNWIRED[m[1]] || null, label: `${m[1]} (cloud, key required)`, cloud: m[1] });
+  if (m && CLOUD_PROVIDERS.includes(m[1])) return Object.freeze({ ...CLOUD_ROW, wired: !CLOUD_UNWIRED[m[1]], unwiredWhy: CLOUD_UNWIRED[m[1]] || null, label: `${m[1]} (cloud, key required)`, cloud: m[1], integrationId: s });
   return null;
 }
 function providerIds() { return [...Object.keys(PROVIDERS), ...CLOUD_PROVIDERS.map((n) => 'cloud:' + n)]; }
@@ -1116,7 +1130,7 @@ function providerIds() { return [...Object.keys(PROVIDERS), ...CLOUD_PROVIDERS.m
  * `{ok:true, row}` otherwise.
  */
 function providerControl(provider, { host = null, desktopConsent = undefined } = {}) {
-  const id = provider == null || provider === '' ? 'chromium' : String(provider);
+  const id = provider == null || provider === '' ? DEFAULT_PROVIDER : String(provider);
   const row = providerRow(id);
   if (!row) return { ok: false, code: 'provider_unknown', error: `unknown provider "${id}" — one of ${providerIds().join(', ')}` };
   // The STRUCTURAL refusals first (they never change with a measurement):
@@ -1137,7 +1151,7 @@ function providerControl(provider, { host = null, desktopConsent = undefined } =
  *  `capabilityRefusal('cdp', 'start')` → {code:'provider_lacks_capability',
  *  capability, error}; null when the row has it. */
 function capabilityRefusal(provider, capability) {
-  const id = provider == null || provider === '' ? 'chromium' : String(provider);
+  const id = provider == null || provider === '' ? DEFAULT_PROVIDER : String(provider);
   const row = providerRow(id);
   if (!row) return { code: 'provider_unknown', capability, error: `unknown provider "${id}"` };
   const lacks = (why) => ({ code: 'provider_lacks_capability', capability, error: `provider "${id}" cannot ${capability}: ${why}` });
@@ -1167,10 +1181,10 @@ function providerRows({ host = null, desktopConsent = undefined } = {}) {
   });
 }
 
-// ── §7.2.1 the cloakserve egress ALLOWLIST (opt-in on the free tier) ────
+// ── §7.2.1 the cloak egress ALLOWLIST ────────────────────────────────────
 /** Does the allowlist admit this host? Entries are exact hostnames or
  *  `.suffix` (a leading dot admits every sub-domain — and the bare domain).
- *  Loopback and link-local are NEVER admitted by a rule (the container must
+ *  Loopback and link-local are NEVER admitted by a rule (the browser must
  *  not reach the hub's own services through the proxy); an empty list admits
  *  nothing (deny by default is the whole point of an allowlist). */
 function parseEgressAllowlist(v) {
@@ -1194,40 +1208,6 @@ function egressVerdict(host, allowlist) {
     else if (h === e) return { allow: true, rule: e };
   }
   return { allow: false, why: `${h} is not in the egress allowlist (${list.join(', ')})` };
-}
-/** The pinned cloakserve image: the version the §7.2.1 record describes.
- *  An unpinned `:latest` silently invalidates the measurement. */
-const CLOAKSERVE_IMAGE = 'cloakhq/cloakserve:0.5.10';
-/**
- * THE PLAN for running cloakserve on this machine — PURE: it composes the
- * docker argv and the egress boundary, it runs nothing. Refused (typed) when
- * the opt-in is off, the §7.2.1 measurement is not recorded, or the allowlist
- * is empty; otherwise the container joins an INTERNAL docker network (no
- * route out of the host), publishes 9222 on the hub's loopback only (§6.1),
- * and reaches the world ONLY through the hub's allowlisting CONNECT proxy
- * (src/server/egress-proxy.js) — a deployment property that survives the
- * vendor shipping a new binary, which a measurement alone does not.
- */
-function cloakservePlan({ enabled = false, proof = CLOAK_EGRESS_PROOF, allowlist = '', proxyPort = 0, port = 9222, image = CLOAKSERVE_IMAGE, network = 'vs-cloak-egress', name = 'vs-cloakserve' } = {}) {
-  if (!enabled) return { ok: false, code: 'cloak_opt_in_off', error: 'CloakBrowser is opt-in: turn on browser.cloak.enabled (Settings → Agent browser) first' };
-  const pv = proofVerdict(proof);
-  if (!pv.ok) return { ok: false, code: 'egress_proof_invalid', error: `the §7.2.1 egress record is malformed: ${pv.error}` };
-  if (proof.status !== 'measured') return { ok: false, code: 'egress_not_measured', error: `the §7.2.1 egress precondition is recorded as ${proof.refusal} (${proof.date}) — measure first (scripts/measure-cloak-egress.mjs), then install the pinned package` };
-  // the record's own run hosts (measured: none) + the sites this deployment names — ONE derivation (cloakRunAllowlist)
-  const hosts = cloakRunAllowlist(proof, allowlist);
-  if (!hosts.length) return { ok: false, code: 'egress_allowlist_empty', error: 'the egress allowlist is empty — name the sites this profile is for (browser.cloak.egressAllowlist)' };
-  const pp = Number(proxyPort);
-  if (!Number.isInteger(pp) || pp < 1 || pp > 65535) return { ok: false, code: 'egress_proxy_missing', error: 'the allowlisting egress proxy is not listening' };
-  const proxy = `http://host.docker.internal:${pp}`;
-  return {
-    ok: true, image, network, name, port: Number(port) || 9222, cdpUrl: `http://127.0.0.1:${Number(port) || 9222}`,
-    egress: { mode: 'allowlist', hosts, proxy, enforcedBy: 'internal docker network + the hub\'s allowlisting CONNECT proxy' },
-    docker: [
-      ['network', 'create', '--internal', network],
-      ['run', '-d', '--name', name, '--restart', 'unless-stopped', '--network', network, '--add-host', 'host.docker.internal:host-gateway',
-        '-p', `127.0.0.1:${Number(port) || 9222}:9222`, '-e', `HTTPS_PROXY=${proxy}`, '-e', `HTTP_PROXY=${proxy}`, '-e', 'NO_PROXY=127.0.0.1,localhost', image],
-    ],
-  };
 }
 const LABEL_MAX = 80;
 /** THE ONE label / notes cleaner — and THE BELT (verify r5 F3, lane peer-census). A label an AGENT chose (`vibespace-browser
@@ -3266,7 +3246,7 @@ function adoptDirVerdict({ dir, realDir, homeDir = null, dataDir = null, realHom
  * binary must degrade by capability with one honest notice, never crash and
  * never go quiet.
  */
-const FLOOR_VERSION = '0.37.1';
+const FLOOR_VERSION = VERBS.AGENT_BROWSER_CLI.floor; // the one version row (src/browser-verbs.js)
 
 /** Numeric-segment compare. Returns -1/0/1; an unparseable version is `null`
  *  and a null is NEVER treated as "old enough" by the callers below. */
@@ -3350,11 +3330,11 @@ module.exports = {
   AUTOMATION_FLAG, automationFlagVerdict, withAutomationFlag, // lane browser-propose: the one launch flag that stops Chromium announcing automation
   HEAL_BUDGET, HEAL_WINDOW_MS, HEAL_DAY_BUDGET, HEAL_DAY_MS, HEAL_RETRY_MS, healLedger, healBudgetVerdict, unstableText, unstableNotice, // lane H verify r5: the heal ledger + budget
   HEAL_FAIL_BUDGET, HEAL_FAIL_SPAN_MS, failedAskVerdict, // lane H verify r6: a failed relaunch ask is not a relaunch — its own streak + cap
-  // P4 (§7.1–§7.3): provider rows + capability gating, the §7.2.1 egress record, the cdp env pair, the cloakserve plan
-  CLOUD_PROVIDERS, CLOUD_UNWIRED, providerRow, providerIds, providerControl, capabilityRefusal, providerRows,
+  // P4 (§7.1–§7.3): provider rows + capability gating, the §7.2.1 egress record, the cdp env pair
+  DEFAULT_PROVIDER, CLOUD_PROVIDERS, CLOUD_UNWIRED, providerRow, providerIds, providerControl, capabilityRefusal, providerRows,
   CLOAK_EGRESS_PROOF, CLOAK_EGRESS_RUNS, EGRESS_PHASES, CLOAK_WIRED, proofVerdict, blockedCell, egressHostsOf, cloakInstallAllowlist, cloakRunAllowlist,
   isCdpPair, forwardedCdpUrl, cdpPortOf,
-  parseEgressAllowlist, egressVerdict, CLOAKSERVE_IMAGE, cloakservePlan,
+  parseEgressAllowlist, egressVerdict,
   // P1 second half (§3.7/§3.8): the attachment set, handles, the two refusals, the audit line
   ALIAS_RE, aliasFor, isAlias, childHandleFor, looksLikePath, attachmentsFor, handlesText, resolveHandle,
   profileChangedRefusal, profileChangeNotice, renderProfileChangeNotice, auditVerbOf, auditLine,

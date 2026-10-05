@@ -88,6 +88,8 @@ const RESIZE_DEBOUNCE_MS = 150;
  *  (a)): GTK apps snap to their own size ~650 ms after the map and the belt re-fits them in the SAME task — a backing
  *  shrunk and regrown in between lost the rows past the snapped size, a band of the pane's background until the app
  *  repainted (~110 ms, measured on every GNOME Calculator connect). The element's box still follows at once (it clips). */
+/** The stream KIND this view shows (a record's `stream`) — desktop-app-window.js registers the view under it. */
+export const STREAM_KIND = 'xpra';
 export const BACKING_SHRINK_MS = 1000;
 const Z_BASE = { main: 1000, dialog: 200000, popup: 300000 };
 

@@ -156,8 +156,8 @@ import { t } from './i18n.js';
 import { escHtml, fetchJson, showConfirmDialog, showContextMenu, showToast, uiScale } from './utils.js';
 import { windowMinForPane } from './window-min-size.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
-import { createVncView, streamUrl } from './vnc-view.js';
-import { createXpraView } from './xpra-view.js';
+import { createVncView, streamUrl, STREAM_KIND as RFB_KIND } from './vnc-view.js';
+import { createXpraView, STREAM_KIND as XPRA_KIND } from './xpra-view.js';
 import { windowLiveMode, windowModeBadge, leaseTransition, newViewerId } from './window-live-mode.js';
 import { paneState } from '../desktop-viewers.js';
 import { exitCloseVerdict, outerCloseVerdict, OUTER_CLOSE_AGAIN_MS, scaleKnobs, scaleMenuModel, renderOf, relaunchPaneCss, relaunchVerdict } from '../desktop-apps.js';
@@ -178,6 +178,9 @@ const WATCH_HINT_EVERY_MS = 8000;
 /** The status's minimum on the strip (its ONE flexible item) — public/style.css `.desktop-bar > .desktop-status` min-width says the same (test-live-bar-layout pins the pair). */
 export const DESK_STATUS_MIN_PX = 40;
 
+/** A capability cell of the record's rung, as the server served it (`rec.caps` — src/desktop-apps.js capsOf on the
+ *  view; lane dc-desktop-caps): the window reads these, never a rung id or a stream kind. An absent cell is false. */
+const cap = (rec, k) => !!(rec && rec.caps && rec.caps[k] === true);
 const ICON = svgIcon16('<rect x="1.5" y="2.5" width="13" height="10" rx="1"/><path d="M1.5 5.5h13M4 4h.01M6 4h.01"/>');
 
 /** HiDPI (2.369.158): the scale chip — "2×" / "1.5×" for an xpra record, '' elsewhere (a whole-display rung is CSS px).
@@ -185,7 +188,7 @@ const ICON = svgIcon16('<rect x="1.5" y="2.5" width="13" height="10" rx="1"/><pa
  *  Scale ▸), "2× · Settings" (an explicit desktop.appScale), lane D "1.5× · App default" (the default scale chosen for
  *  this app in the launch dialog); a record from before A3 has no origin: the number alone. */
 export function scaleChipText(rec) {
-  if (!rec || rec.stream !== 'xpra') return '';
+  if (!cap(rec, 'scales')) return '';
   const s = Number(rec.scale);
   if (!(Number.isFinite(s) && s > 0)) return '';
   // design 009 §B2: only a scale somebody CHOSE is on the strip, in words (its origin is the tooltip's); automatic (or a
@@ -211,7 +214,7 @@ export function memSize(bytes) {
  *  what a click does: `why` = the relaunch verdict's CODE when the window cannot change its scale (the chip is plain
  *  text then and the tooltip says why), else the chip is a control ("Click to change the scale"). */
 export function scaleChipTitle(rec, why = null) {
-  if (!rec || rec.stream !== 'xpra') return '';
+  if (!cap(rec, 'scales')) return '';
   const k = scaleKnobs(rec.scale), rd = renderOf(rec);
   // lane D (a): "widgets" = the widgets' TRUE scale (GDK_SCALE × the picture scale — 1.5 for a fractional record drawn at 2×
   // and shown at 75 %; ⌊s⌋ for a record from before lane D, whose fraction reached the text only), the text = widgets × dpi ÷ 96
@@ -435,7 +438,8 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '' } = {}) {
   let view = null;
   let appTitle = '';      // the app window's own title, from the xpra protocol ('' = none yet)
   let front = null;       // design 016 S1c: the FRONT X window when it is NOT the app's main ({wid, title} — WeChat's Moments)
-  const streamKindOf = (r) => (r && r.stream === 'xpra' ? 'xpra' : 'rfb');
+  // the view of a stream KIND, registered by the view module's own STREAM_KIND (an unknown kind takes the RFB view, as before)
+  const streamKindOf = (r) => (r && r.stream === XPRA_KIND ? XPRA_KIND : RFB_KIND);
   const viewOpts = () => ({
     url: () => { viewerId = newViewerId(); winInfo._windowViewerId = viewerId; return streamUrl(`/api/desktop/${encodeURIComponent(id)}/stream`) + `?viewer=${encodeURIComponent(viewerId)}&pane=${encodeURIComponent(paneKey)}` + (prevPane ? `&prev=${encodeURIComponent(prevPane)}` : ''); }, // the ONE bridge path (test-vnc-view's census) + a fresh per-socket viewer id + the stable pane key (x5) + its predecessor (the grace)
     labels: { starting: t('Starting application…'), unavailable: t('Desktop app unavailable') },
@@ -454,12 +458,12 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '' } = {}) {
   };
   const ensureView = (kind) => {
     if (view) return view;
-    view = kind === 'xpra'
+    view = kind === XPRA_KIND
       ? createXpraView(winInfo.content, { ...viewOpts(), workerUrl: `/api/desktop/${encodeURIComponent(id)}/xpra-ui/js/Protocol.js`, onTitle: (text) => { appTitle = String(text || ''); render(); }, onIcon: setAppIcon, onMinSize: applyMinSize, onFixedSize: applyFixedSize, fixedFollows: () => !app.wm._mobileLayout(), onFront: (f) => { front = f && !f.main ? { wid: f.wid, title: String(f.title || '') } : null; render(); }, onSatellite: ({ wid, title }) => { openSatelliteWindow(app, id, wid, { title, beside: winInfo, fresh: true }); }, onMain: onAppMain, onState: onAppState, onMoveResize: onAppMoveResize, dpi: () => (rec && Number.isInteger(rec.dpi) ? rec.dpi : 96), pictureScale: () => renderOf(rec).picture }) // lane D (a): the RECORD says what it was drawn at
       : createVncView(winInfo.content, viewOpts());
     view.mount.classList.add('desktop-app-mount');
     winInfo._desktopAppView = view; // the raw handle the heavy suite reads (never the DOM)
-    if (kind === 'xpra') announceMainView(id, { view, winInfo }); // S2: satellites replayed before this view bind to it now
+    if (cap(rec, 'satellites')) announceMainView(id, { view, winInfo }); // S2: satellites replayed before this view bind to it now
     for (const el of [view.bar, view.pane]) if (el && minRo) minRo.observe(el); // the status strip's height is chrome; the pane shown again re-measures (the RFB view has no pane)
     for (const el of controls) view.addControl(el);
     // lane I: the strip never wraps — every child at its natural width on one line, the status alone flexing; the rest
@@ -468,7 +472,7 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '' } = {}) {
     const bar = view.bar;
     barFold = createBarFold(bar, {
       more: moreBtn,
-      moreAlways: () => !!rec && (rec.stream === 'xpra' || shareable() || !!aboutWindowText(rec)), // xpra's own rows, lane E's share rows (a local app, every rung), or design 009's about line; read in a frame, never during this body
+      moreAlways: () => !!rec && (cap(rec, 'seamless') || cap(rec, 'scales') || shareable() || !!aboutWindowText(rec)), // xpra's own rows, lane E's share rows (a local app, every rung), or design 009's about line; read in a frame, never during this body
       items: () => [...bar.children].filter((el) => el !== moreBtn && !el.classList.contains('bar-ruler-host')).map((el, i) => ({
         key: DESK_BAR_KEY.get(el) || `shell-${i}-${String(el.className || el.tagName).split(/\s+/)[0]}`, el,
         priority: DESK_BAR_PRIORITY.get(el) || 0,
@@ -664,10 +668,10 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '' } = {}) {
     blockedTitle.textContent = label; // x5: the overlay names the app (textContent — the title is peer-controlled)
     backendChip.textContent = backendChipText(rec);
     backendChip.title = rec.fallbackWhy ? t('Backend: {backend} — fell back because {why}', { backend: rec.backend, why: rec.fallbackWhy }) : t('Backend: {backend}', { backend: rec.backend || '' });
-    if (rec.stream === 'xpra') backendChip.title += ' — ' + t('xpra streams each app window as pixels; text stays crisp at your screen’s scale');
+    if (cap(rec, 'crispText')) backendChip.title += ' — ' + t('xpra streams each app window as pixels; text stays crisp at your screen’s scale');
     const sc = scaleChipText(rec); scaleChip.textContent = sc; scaleChip.style.display = sc ? '' : 'none';
     applyScaleChipControl(sc);
-    winInfo._desktopAppStream = rec.stream || null;
+    winInfo._desktopAppCaps = rec.caps || null; // the window-menu rows read the cells (Scale ▸ / Show window frame ▸)
     barFold?.schedule(); // lane I: bar-fold.js decides the ⋯ — shown for xpra (Show window frame ▸ / Scale ▸), for a shareable app on EVERY rung (lane E: Share with agent… / Ask an agent…) and while anything is folded
     const ft = fitChipText(rec); fitChip.textContent = ft; fitChip.style.display = ft ? '' : 'none';
     liveChip.textContent = liveChipText(rec); liveChip.style.display = 'none'; // design 009 §B2: said by the ⋯'s about line
@@ -735,7 +739,7 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '' } = {}) {
   winInfo.onCloseRequest = () => {
     const now = Date.now();
     const v = outerCloseVerdict({
-      state: rec ? rec.state : null, stream: rec ? rec.stream : null, seat: seatState(), leased: !!lease,
+      state: rec ? rec.state : null, perWindow: cap(rec, 'perWindow'), seat: seatState(), leased: !!lease,
       connected: !!view && view.state === 'connected', mainWid: view && view.client ? view.client.mainWid : 0, frontWid: front ? front.wid : 0, askedAt: closeAskedAt, now,
     });
     winInfo._desktopCloseVerdict = v; // the raw handle the heavy suite reads
@@ -773,7 +777,7 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '' } = {}) {
   scaleChip.addEventListener('click', openScaleMenu, { signal: lsig });
   scaleChip.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') { e.preventDefault(); openScaleMenu(e); } }, { signal: lsig });
   function applyScaleChipControl(text) {
-    const why = rec && rec.stream === 'xpra' ? scaleChipWhy(rec) : 'not-xpra'; // design 009 §B2: an automatic scale hides the chip, never its verdict
+    const why = cap(rec, 'scales') ? scaleChipWhy(rec) : 'not-xpra'; // design 009 §B2: an automatic scale hides the chip, never its verdict
     const control = !why;
     scaleChip.classList.toggle('is-control', control);
     if (control) { scaleChip.setAttribute('role', 'button'); scaleChip.tabIndex = 0; scaleChip.setAttribute('aria-haspopup', 'menu'); scaleChip.setAttribute('aria-label', `${text} — ${t('Click to change the scale')}`); }
@@ -791,7 +795,8 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '' } = {}) {
     if (about) items.push({ label: about, title: [backendChip.title, liveChip.title].filter(Boolean).join(' — '), disabled: true });
     for (const [el, key] of DESK_BAR_KEY) if (folded.includes(key) && key !== 'keep' && key !== 'stop' && el.textContent) items.push({ label: el.textContent, title: el.title || '', disabled: true });
     if (items.length) items.push({ separator: true });
-    if (rec && rec.stream === 'xpra') items.push({ label: t('Show window frame'), children: frameItems() }, { label: t('Scale'), children: scaleItems() });
+    if (cap(rec, 'seamless')) items.push({ label: t('Show window frame'), children: frameItems() });
+    if (cap(rec, 'scales')) items.push({ label: t('Scale'), children: scaleItems() });
     items.push(...shareItems()); // lane E: Share with agent… / Ask an agent to take control… (a local app, every rung)
     if (canKeep()) items.push({ label: t('Keep running'), action: () => keepBtn.onclick() });
     if (canStop()) items.push({ label: t('Stop app'), action: () => stopApp() });
@@ -804,7 +809,7 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '' } = {}) {
    *  app's main X window (larger than the pane when its minimum is scaled to fit), the chrome around the pane (the
    *  seamless state it was in) and this screen's ratio. Read BEFORE the relaunch: the view is replaced after it. */
   const relaunchGeometry = () => {
-    if (!view || !view.pane || !rec || rec.stream !== 'xpra') return null;
+    if (!view || !view.pane || !cap(rec, 'scales')) return null;
     const er = winInfo.element.getBoundingClientRect(), pr = view.pane.getBoundingClientRect();
     if (!(pr.width > 0) || !(pr.height > 0) || !(er.width > 0)) return null;
     // the main's own size only when the view SCALES it to fit (its minimum is larger than the pane) — otherwise it is the
@@ -933,7 +938,7 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '' } = {}) {
   function applySeamless() {
     const v = seamlessVerdict({
       // the per-app frame choice is about xpra windows (the only ones with a header bar to drag): a whole-display rung is 'auto' + no CSD
-      csd: isCsd(mainMeta), setting: app.settings.get('desktop.seamless'), userToggle: rec && rec.stream === 'xpra' ? userToggleOfFrame(frameChoice()) : 'auto',
+      csd: isCsd(mainMeta), setting: app.settings.get('desktop.seamless'), userToggle: cap(rec, 'seamless') ? userToggleOfFrame(frameChoice()) : 'auto',
       lease: !!lease, chain: !!winInfo._tabChain, phone: !!phoneMq?.matches, connected: viewConnected,
     });
     const was = seamless.seamless;
@@ -944,7 +949,7 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '' } = {}) {
     if (was && !v.seamless) stepReveal({ type: 'reset' });
     pokeSatellites();
   }
-  winInfo._desktopSeamlessCtx = () => ({ setting: app.settings.get('desktop.seamless'), userToggle: rec && rec.stream === 'xpra' ? userToggleOfFrame(frameChoice()) : 'auto', lease: !!lease, phone: !!phoneMq?.matches, connected: viewConnected });
+  winInfo._desktopSeamlessCtx = () => ({ setting: app.settings.get('desktop.seamless'), userToggle: cap(rec, 'seamless') ? userToggleOfFrame(frameChoice()) : 'auto', lease: !!lease, phone: !!phoneMq?.matches, connected: viewConnected });
   function stepReveal(ev) {
     const r = revealStep(revealState, ev, performance.now());
     revealState = r.state;
@@ -1206,12 +1211,12 @@ registerWindowType({
 // round 3 A3: the same Scale ▸ rows on the title-bar / taskbar / window-list menu of a desktop-app window
 registerMenuItem({
   menu: 'window', group: '1_window', order: 35, id: 'window/desktop-app-scale', kind: 'scale',
-  when: (c) => !!c.win && c.win.type === 'desktop-app' && typeof c.win._desktopAppScaleItems === 'function' && c.win._desktopAppStream === 'xpra',
+  when: (c) => !!c.win && c.win.type === 'desktop-app' && typeof c.win._desktopAppScaleItems === 'function' && cap({ caps: c.win._desktopAppCaps }, 'scales'),
   label: () => t('Scale'), children: (c) => c.win._desktopAppScaleItems(),
 });
 // round 3 lane B (seamless §3.3): with the bars folded the window menu is the way to every control of the window —
 // Show window frame ▸ (per app), Keep running, Stop app — the same rows the ⋯ carries
-const isXpraApp = (c) => !!c.win && c.win.type === 'desktop-app' && c.win._desktopAppStream === 'xpra';
+const isXpraApp = (c) => !!c.win && c.win.type === 'desktop-app' && cap({ caps: c.win._desktopAppCaps }, 'seamless');
 registerMenuItem({
   menu: 'window', group: '1_window', order: 34, id: 'window/desktop-app-frame', kind: 'frame',
   when: (c) => isXpraApp(c) && typeof c.win._desktopAppFrameItems === 'function',

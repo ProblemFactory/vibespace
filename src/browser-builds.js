@@ -119,12 +119,12 @@ function sameChoice(a, b) {
  * read on that machine (null ⇒ not read: a paired machine's path is judged there, at its start); `machine` = its name
  * in sentences. → `{ok:true, choice, executablePath, version, major}` | `{ok:false, code, error, …}`.
  */
-function browserChoiceVerdict({ choice, provider = 'chromium', by = 'user', builds = null, buildsError = null, pathFact = null, machine = 'this computer', label = 'this profile', recordedMajor = null, dirMajor = null, written = false, ladder = false, confirmed = false } = {}) {
+function browserChoiceVerdict({ choice, provider = null, by = 'user', builds = null, buildsError = null, pathFact = null, machine = 'this computer', label = 'this profile', recordedMajor = null, dirMajor = null, written = false, ladder = false, confirmed = false } = {}) {
   const c = normalizeBrowserChoice(choice);
   if (!c) return { ok: false, code: 'browser_choice_invalid', error: 'a browser build is {kind:"default"} | {kind:"build", version:"151.0.7922.34"} | {kind:"path", path:"/absolute/path/to/chrome"}' };
   if (c.kind === 'default') return { ok: true, choice: c, executablePath: null, version: null, major: null };
   if (by !== 'user') return { ok: false, code: 'browser_choice_user_only', error: 'which Chrome build a profile runs is the user\'s choice (Agent browser panel → Change build…) — an agent never sets one; `vibespace-browser providers` lists the builds this machine has' };
-  if (String(provider || 'chromium') !== 'chromium') return { ok: false, code: 'browser_choice_provider', error: `a Chrome build is chosen for a Chromium profile only — "${label}" runs ${provider} (CloakBrowser runs its own measured build; a connected or cloud browser is not started by VibeSpace)` };
+  if (!(require('./browser-profiles.js').providerRow(provider) || {}).buildChoice) return { ok: false, code: 'browser_choice_provider', error: `a Chrome build is chosen for a Chromium profile only — "${label}" runs ${provider} (CloakBrowser runs its own measured build; a connected or cloud browser is not started by VibeSpace)` };
   let executablePath, version = null, major = null;
   if (c.kind === 'build') {
     if (!builds || builds.ok === false) {

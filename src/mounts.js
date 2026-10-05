@@ -626,6 +626,7 @@ class MountManager {
   list() {
     return this._state.mounts.map(m => {
       const conn = this._connOf(m);
+      const st = this._starting?.get(m.id);
       return {
         id: m.id, name: m.name, type: conn.type || 's3', origin: m.origin, mode: m.mode,
         kind: this._kindOf(m), parentId: m.parentId || null,
@@ -652,6 +653,10 @@ class MountManager {
         // a plain grey "Not mounted" dot the whole time, and the initiating
         // client's local row-dimming was wiped by any mounts-updated broadcast.
         connecting: this._connecting?.has(m.id) || false,
+        // STARTING (2.369.213): the daemon lives, its fuse mount does not exist
+        // yet — the row says what it waits for (cached files, elapsed, ceiling)
+        starting: st ? { since: st.since, files: st.files, capped: st.capped, maxMin: Math.round((this._startingT || MountManager.STARTING).ceilingMs / 60e3) } : null,
+        stranded: this._stranded?.get(m.id) || null,
         createdAt: m.createdAt,
       };
     });
@@ -1514,21 +1519,38 @@ class MountManager {
   async mount(id) {
     // One connect in flight per record — the watchdog's auto-reconnect must
     // never race a user-initiated connect (or itself).
+    // A second connect JOINS the one in flight (2.369.213: one daemon per
+    // mountpoint — it used to answer false, which the client called a failure).
     this._connecting = this._connecting || new Set();
-    if (this._connecting.has(id)) return false;
+    this._joins = this._joins || new Map();
+    if (this._connecting.has(id)) return this._joins.get(id) || false;
     this._connecting.add(id);
     this._notify(); // every client shows "Connecting…" for the whole window
-    try { return await this._mountInner(id); }
-    finally { this._connecting.delete(id); this._notify(); }
+    const p = (async () => {
+      try { return await this._mountInner(id); }
+      finally { this._connecting.delete(id); this._joins.delete(id); this._notify(); }
+    })();
+    this._joins.set(id, p);
+    return p;
   }
 
-  async _mountInner(id) {
+  async _mountInner(id, opts = {}) {
     const m = this._get(id);
     if (this.isMounted(m)) { m.desired = 'mounted'; this._save(); this._notify(); return; }
+    // STARTING (2.369.213): a connect while the daemon still rebuilds its
+    // cache index JOINS it — never a second daemon, never a kill.
+    if (this._starting?.has(id)) return 'starting';
     // Gmail = a sync WORKER writing .eml files, not a filesystem.
     if (m.type === 'gmail') return this._mountGmail(id);
     // CephFS = native kernel mount (not rclone) — its own path.
     if (m.type === 'cephfs') return this._mountCephfs(id);
+    // A daemon ALREADY on this mountpoint with no mount yet (a server restart
+    // mid-scan, a Connect after the old 5 s verdict) is ADOPTED and watched
+    // like a fresh spawn: killing it restarted its scan from zero (the
+    // owner's three Connect clicks at 16:52, 2026-10-04).
+    let pid0 = 0;
+    try { pid0 = this._daemonPids(this.pathOf(m))[0] || 0; } catch {}
+    if (pid0) { m.desired = 'mounted'; this._save(); return this._watchStart(m, this.pathOf(m), pid0, opts); }
     // OneDrive backstop: rclone refuses to create the fs without a resolved
     // drive_id/drive_type — resolve via Graph before spawning (an honest
     // error instead of rclone's cryptic "upgrading from older versions" one;
@@ -1569,8 +1591,10 @@ class MountManager {
       if (m.kind === 'credential') { delete m.kind; this._save(); }
     }
     const mp = this.pathOf(m);
-    try { await this._ensureMountpointDir(mp, { quarantine: true }); }
+    let dest = null;
+    try { dest = await this._ensureMountpointDir(mp, { quarantine: true }); }
     catch (e) { this._errors.set(id, String(e.message || e)); this._notify(); throw e; } // mount()'s finally clears _connecting
+    if (dest) this._noteStranded(m, dest);
     fs.mkdirSync(this._logDir, { recursive: true });
     const { env, remote } = this._rcloneFor(m);
     const log = fs.openSync(path.join(this._logDir, `${m.id}.log`), 'w');
@@ -1666,19 +1690,119 @@ class MountManager {
     m.desired = 'mounted';
     this._errors.delete(id);
     this._save();
-    // Circuit-break the path for the whole connect window: nothing may issue
-    // node-fs IO against this root until the health probe has passed.
-    this.blockPath(mp, 30000);
-    // rclone daemonizes the fuse mount asynchronously — poll up to 5s
-    const ok = await this._waitMounted(m, 5000);
-    if (!ok) {
-      let tail = '';
-      try { tail = fs.readFileSync(path.join(this._logDir, `${m.id}.log`), 'utf-8').trim().split('\n').slice(-2).join(' '); } catch {}
-      this._errors.set(id, tail || 'mount did not appear within 5s');
-      this.unblockPath(mp);
-      this._notify();
-      return false;
+    return this._watchStart(m, mp, child.pid, opts);
+  }
+
+  // ── STARTING (2.369.213, the owner's OneDrive, 2026-10-04) ──
+  // rclone --vfs-cache-mode full REBUILDS its cache index (walks every cached
+  // file) BEFORE it mounts: 164 788 files took 4.5 min (24 s CPU at 136 s).
+  // The old fixed 5 s verdict called that "failed", unblocked the bare mount
+  // point (an outside writer dropped .restore into it; rclone then died "not
+  // empty"), and each Connect killed the scan before it. A live daemon with no
+  // mount yet is STARTING: the path stays blocked (and shadowedBy answers the
+  // record) until the fuse mount exists; only a daemon with no CPU progress
+  // for 60 s, or past the ceiling, is killed. Ceiling 15 min ≈ 3× the measured
+  // 164 788-file scan (the scan is ~linear in cached files).
+  static STARTING = Object.freeze({ ceilingMs: 15 * 60e3, hungMs: 60e3, progressTicks: 30, pollMs: 500, quickMs: 5000, countCap: 200000 });
+
+  /** Watch a spawned/adopted daemon until its fuse mount exists. A quick
+   *  mount answers the caller with the real verdict; past quickMs the caller
+   *  gets 'starting' and the watch carries on in the background. */
+  async _watchStart(m, mp, pid, opts = {}) {
+    const T = this._startingT || MountManager.STARTING;
+    const st = { pid, since: Date.now(), files: null, capped: false };
+    (this._starting = this._starting || new Map()).set(m.id, st);
+    this.blockPath(mp, T.ceilingMs + 60e3); // no writer reaches the bare directory before the mount exists
+    this._countCacheFiles(path.join(this._vfsCacheRoot(), m.id), T.countCap)
+      .then((c) => { st.files = c.n; st.capped = c.capped; this._notify(); }, () => {});
+    this._notify();
+    const done = this._waitMounted(m, pid)
+      .then((r) => { if (r !== 'mounted') this._starting.delete(m.id); return this._startSettled(m, mp, r, opts); })
+      .catch((e) => { this._errors.set(m.id, String(e.message || e)); return false; })
+      .finally(() => { if (this._starting.get(m.id) === st) this._starting.delete(m.id); this._notify(); });
+    return Promise.race([done, new Promise((r) => { setTimeout(() => r('starting'), T.quickMs).unref?.(); })]);
+  }
+
+  /** Wait for the fuse mount WHILE ITS DAEMON LIVES (never a fixed 5 s):
+   *  'mounted' | 'died' (pid gone) | 'hung' (no CPU progress for hungMs) |
+   *  'ceiling' — the last two SIGKILL it. Progress = utime+stime. */
+  _waitMounted(m, pid) {
+    const T = this._startingT || MountManager.STARTING;
+    return new Promise((resolve) => {
+      const t0 = Date.now();
+      let mark = this._cpuTicks(pid), markAt = t0;
+      const tick = () => {
+        if (this.isMounted(m)) return resolve('mounted');
+        const cpu = this._cpuTicks(pid);
+        if (cpu == null) return resolve('died');
+        const now = Date.now();
+        if (cpu - mark >= T.progressTicks) { mark = cpu; markAt = now; }
+        const verdict = now - markAt >= T.hungMs ? 'hung' : now - t0 >= T.ceilingMs ? 'ceiling' : null;
+        if (verdict) { try { process.kill(pid, 'SIGKILL'); } catch {} return resolve(verdict); }
+        setTimeout(tick, T.pollMs);
+      };
+      tick();
+    });
+  }
+
+  /** utime+stime (clock ticks) of a live process; null when gone/zombie. */
+  _cpuTicks(pid) {
+    try {
+      const s = fs.readFileSync(`/proc/${pid}/stat`, 'utf-8');
+      const f = s.slice(s.lastIndexOf(')') + 2).split(' ');
+      return (f[0] === 'Z' || f[0] === 'X') ? null : Number(f[11]) + Number(f[12]);
+    } catch {
+      // no /proc (non-Linux): alive = progressing, the ceiling still bounds it
+      try { process.kill(pid, 0); return Math.floor(process.uptime() * 100); } catch { return null; }
     }
+  }
+
+  /** Files in a mount's VFS cache dir, counted by a CHILD `find` (never a
+   *  walk on the event loop), stopped at `cap`. */
+  _countCacheFiles(dir, cap) {
+    return new Promise((resolve) => {
+      let n = 0, done = false;
+      const end = () => { if (!done) { done = true; resolve({ n: Math.min(n, cap), capped: n >= cap }); } };
+      const c = spawn('find', [dir, '-type', 'f', '-printf', '.'], { stdio: ['ignore', 'pipe', 'ignore'] });
+      c.stdout.on('data', (b) => { n += b.length; if (n >= cap) { try { c.kill('SIGKILL'); } catch {} end(); } });
+      c.on('close', end); c.on('error', end);
+    });
+  }
+
+  async _startSettled(m, mp, r, opts = {}) {
+    if (r === 'mounted') return this._afterMounted(m, mp);
+    const id = m.id;
+    let tail = '';
+    try { tail = fs.readFileSync(path.join(this._logDir, `${id}.log`), 'utf-8').trim().split('\n').slice(-2).join(' '); } catch {}
+    // "not empty": something wrote into the bare directory while it started —
+    // isolate the strays (the connect-time stranded move) and retry ONCE
+    if (r === 'died' && /is not empty/i.test(tail) && !opts.retried) {
+      console.warn(`[mounts] rclone refused the non-empty mount point ${mp} — isolating the strays, retrying once`);
+      return this._mountInner(id, { retried: true });
+    }
+    const T = this._startingT || MountManager.STARTING;
+    let msg = tail || 'rclone exited before mounting';
+    if (r !== 'died') {
+      msg = r === 'hung'
+        ? `rclone made no progress for ${Math.round(T.hungMs / 1000)} s and never mounted — stopped it; will retry`
+        : `still not mounted after ${Math.round(T.ceilingMs / 60e3)} min of starting — stopped it; will retry`;
+      console.warn(`[mounts] ${r} daemon on ${mp} (never mounted) — killed`);
+      this._killMountDaemon(mp);
+      this._noteReconnectBackoff(id);
+    }
+    this._errors.set(id, msg);
+    this.unblockPath(mp);
+    this._notify();
+    return false;
+  }
+
+  /** Stray files moved aside at connect: said on the row (the move itself
+   *  broadcasts the level-2 server-notice). */
+  _noteStranded(m, dest) { (this._stranded = this._stranded || new Map()).set(m.id, dest); }
+
+  /** The fuse mount exists: IO health probe, unblock, access check. */
+  async _afterMounted(m, mp) {
+    const id = m.id;
     // Post-mount IO health probe: a fuse mount to an UNREACHABLE backend
     // "succeeds" and then HANGS every IO — node's libuv threadpool fills with
     // stuck fs ops and the whole server stops answering (real incident: an
@@ -1826,14 +1950,19 @@ class MountManager {
    *  is not connected") — isMounted() lies, so recovery must key off the
    *  PROCESS (same exact-argv /proc scan as _killMountDaemon). */
   _daemonAlive(mp) {
-    try {
-      for (const pid of fs.readdirSync('/proc').filter(d => /^\d+$/.test(d))) {
-        let argv;
-        try { argv = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf-8').split('\0'); } catch { continue; }
-        if (argv.includes('mount') && argv.includes(mp) && /rclone/.test(argv[0] || '')) return true;
-      }
-      return false;
-    } catch { return true; } // no /proc (non-Linux) — can't tell, assume alive
+    try { return this._daemonPids(mp).length > 0; }
+    catch { return true; } // no /proc (non-Linux) — can't tell, assume alive
+  }
+
+  /** Pids of the rclone daemons serving a mountpoint (exact argv); throws without /proc. */
+  _daemonPids(mp) {
+    const out = [];
+    for (const pid of fs.readdirSync('/proc').filter(d => /^\d+$/.test(d))) {
+      let argv;
+      try { argv = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf-8').split('\0'); } catch { continue; }
+      if (argv.includes('mount') && argv.includes(mp) && /rclone/.test(argv[0] || '')) out.push(+pid);
+    }
+    return out;
   }
 
   /** Kill the detached rclone daemon serving a mountpoint (a WEDGED daemon
@@ -1941,6 +2070,9 @@ class MountManager {
           continue;
         }
         if (!this.isMounted(m)) {
+          // STARTING is not dead (2.369.213): never remount over / kill a
+          // daemon that is still rebuilding its cache index.
+          if (this._starting?.has(m.id)) continue;
           // Self-heal: desired-but-dead (daemon crashed/OOM-killed, kernel
           // mount evicted, or a prior hang teardown) — auto-remount with
           // backoff. Auth/revoke errors wait for the USER instead of looping.
@@ -1963,7 +2095,21 @@ class MountManager {
         // cephfs (native kernel mount) gets a longer probe window — an MDS
         // session on a cold mount can spike a first `ls` past the fuse budget,
         // and a single blip must not disconnect a trusted deployment mount.
+        let pid = 0;
+        try { pid = m.type === 'cephfs' ? 0 : (this._daemonPids(mp)[0] || 0); } catch {}
+        const cpu0 = pid ? this._cpuTicks(pid) : null;
         const health = await this._probeMountpoint(mp, m.type === 'cephfs' ? 12000 : 6000);
+        // 2026-10-04 15:09:43 / 16:41:43 (this sweep's :43 phase): THIS branch
+        // lazily unmounted the owner's OneDrive while its daemon was busy, then
+        // killed it ("survived lazy unmount"). A daemon making CPU progress is
+        // WORKING, not hung: keep the path blocked (fail fast), re-check next sweep.
+        const T = this._startingT || MountManager.STARTING;
+        if (health === 'hung' && cpu0 != null && (this._cpuTicks(pid) ?? cpu0) - cpu0 >= T.progressTicks) {
+          this.blockPath(mp, 65000);
+          const busy = 'storage busy — its rclone is working and the listing took over 6 s; kept connected, re-checked every minute';
+          if (this._errors.get(m.id) !== busy) { this._errors.set(m.id, busy); this._notify(); }
+          continue;
+        }
         if (health === 'hung') {
           // Blip tolerance: require TWO consecutive hangs before auto-
           // disconnecting a trusted deployment mount (cephfs) — a single slow
@@ -2016,7 +2162,7 @@ class MountManager {
 
   async _maybeAutoRemount(m) {
     const mp = this.pathOf(m);
-    if (this.pathBlocked(mp) || this._connecting?.has(m.id)) return; // connect/teardown in flight
+    if (this.pathBlocked(mp) || this._connecting?.has(m.id) || this._starting?.has(m.id)) return; // connect/start/teardown in flight
     if (m.expiresAt && Date.now() > m.expiresAt) return;             // expired — user must re-import
     const err = this._errors.get(m.id) || '';
     if (/denied|revoked|expired|AccessDenied|SignatureDoesNotMatch|self-mount|bucket-scoped|credential|log ?in|invalid_grant|unauthorized|401|403/i.test(err)) return;
@@ -2034,18 +2180,6 @@ class MountManager {
     }
     const ok = await this.mount(m.id).catch(() => false);
     if (ok) this._reconnects.delete(m.id); // mount() already cleared the error
-  }
-
-  _waitMounted(m, timeoutMs) {
-    return new Promise((resolve) => {
-      const t0 = Date.now();
-      const tick = () => {
-        if (this.isMounted(m)) return resolve(true);
-        if (Date.now() - t0 > timeoutMs) return resolve(false);
-        setTimeout(tick, 250);
-      };
-      tick();
-    });
   }
 
   // ── CephFS (native kernel mount; deployment-provisioned all-flash storage) ──

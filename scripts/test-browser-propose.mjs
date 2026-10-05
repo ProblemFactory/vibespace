@@ -146,7 +146,7 @@ const runner = PR.create({
 N.setProposalCardSource(({ session = null } = {}) => (session && session._browserKey ? runner.cardsFor(session._browserKey) : []));
 const notices = [];
 const app = express(); app.use(express.json());
-RT.setup({ keeper, activeSessions: active, browserEnv: () => null, cloakPlan: () => B.cloakservePlan({ enabled: false }), forwards: () => [], notice: (sid, s, n) => notices.push({ sid, n }), persistPin: () => {}, tasksForSession: () => [],
+RT.setup({ keeper, activeSessions: active, browserEnv: () => null, forwards: () => [], notice: (sid, s, n) => notices.push({ sid, n }), persistPin: () => {}, tasksForSession: () => [],
   proposals: { filed: (r) => runner.filed(r), approve: (id, o) => runner.approve(id, o), reject: (id, o) => runner.reject(id, o), rejectionFor: (q) => runner.rejectionFor(q) } });
 app.use(RT.router);
 const srv = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });

@@ -574,7 +574,7 @@ console.log('— ③b the rebuilt dialog: ROW_STATES / rowState / switchChoices 
   const express = require('express');
   const RT = require('../src/routes/browser.js');
   const app = express(); app.use(express.json());
-  RT.setup({ keeper: kb, activeSessions: new Map([['sess-a', { agentToken: 'vsst_' + 'c'.repeat(24), _browserKey: KEY_A, name: 'A' }]]), browserEnv: () => null, cloakPlan: () => B.cloakservePlan({ enabled: false }), forwards: () => [], propose: () => ({ id: 'ut-3b' }) });
+  RT.setup({ keeper: kb, activeSessions: new Map([['sess-a', { agentToken: 'vsst_' + 'c'.repeat(24), _browserKey: KEY_A, name: 'A' }]]), browserEnv: () => null, forwards: () => [], propose: () => ({ id: 'ut-3b' }) });
   app.use(RT.router);
   const srv3 = await new Promise((r) => { const s2 = app.listen(0, '127.0.0.1', () => r(s2)); });
   servers.add(srv3);
@@ -592,7 +592,7 @@ console.log('— ③b the rebuilt dialog: ROW_STATES / rowState / switchChoices 
   const bl = await fetch(API3 + '/api/agent/browser/blocked', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer vsst_' + 'c'.repeat(24) }, body: JSON.stringify({ url: 'https://portal.example/x', profile: pb.id, tier: 3 }) });
   const blj = await bl.json();
   ok(bl.status === 200 && !blj.proposal && /THEIR act/.test(blj.next) && /Switch to CloakBrowser/.test(blj.next), 'the blocked claim\'s `next` (a claim with no proposal — tier 3): another browser IS available here ⇒ the live view offers the switch (THEIR act)', blj.next);
-  RT.setup({ keeper: kShip, activeSessions: new Map([['sess-a', { agentToken: 'vsst_' + 'c'.repeat(24), _browserKey: KEY_A, name: 'A' }]]), browserEnv: () => null, cloakPlan: () => B.cloakservePlan({ enabled: false }), forwards: () => [], propose: () => ({ id: 'ut-3b' }) });
+  RT.setup({ keeper: kShip, activeSessions: new Map([['sess-a', { agentToken: 'vsst_' + 'c'.repeat(24), _browserKey: KEY_A, name: 'A' }]]), browserEnv: () => null, forwards: () => [], propose: () => ({ id: 'ut-3b' }) });
   const bl2 = await fetch(API3 + '/api/agent/browser/blocked', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer vsst_' + 'c'.repeat(24) }, body: JSON.stringify({ url: 'https://portal.example/x', profile: pShip.id, tier: 3 }) });
   const blj2 = await bl2.json();
   ok(bl2.status === 200 && /THEIR act/.test(blj2.next) && /no other browser is available on this instance/.test(blj2.next), '…under a refused record: the agent is told no other browser is available, so the switch is not offered (still THEIR act to arrange one)', blj2.next);
@@ -614,7 +614,7 @@ console.log('— ④ the routes and the CLI: switcher, switch, backend, blocked,
   const active = new Map([['sess-a', { agentToken: TOKEN_A, _browserKey: KEY_A, name: 'A' }], ['sess-b', { agentToken: TOKEN_B, _browserKey: KEY_B, name: 'B' }]]);
   const proposals = [];
   const app = express(); app.use(express.json());
-  RT.setup({ keeper: kR, activeSessions: active, browserEnv: () => null, cloakPlan: () => B.cloakservePlan({ enabled: false }), forwards: () => [], propose: (sid, s, item) => { proposals.push({ sid, ...item }); return { id: 'ut-1' }; } });
+  RT.setup({ keeper: kR, activeSessions: active, browserEnv: () => null, forwards: () => [], propose: (sid, s, item) => { proposals.push({ sid, ...item }); return { id: 'ut-1' }; } });
   app.use(RT.router);
   const srv = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
   servers.add(srv);
@@ -869,7 +869,7 @@ process.stdout.write('fake npm installed ' + spec + '\\n');
   const express = require('express');
   const RT = require('../src/routes/browser.js');
   const app = express(); app.use(express.json());
-  RT.setup({ keeper: kI, activeSessions: new Map(), browserEnv: () => null, cloakPlan: () => B.cloakservePlan({ enabled: false }), forwards: () => [], propose: () => ({ id: 'ut-x' }) });
+  RT.setup({ keeper: kI, activeSessions: new Map(), browserEnv: () => null, forwards: () => [], propose: () => ({ id: 'ut-x' }) });
   app.use(RT.router);
   const srv = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
   servers.add(srv);

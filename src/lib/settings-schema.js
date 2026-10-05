@@ -414,6 +414,12 @@ const SETTINGS_SCHEMA = {
     when: { setting: 'chat.showHookCards', is: true },
     category: t('Chat'), liveApply: true,
   },
+  'chat.enterSends': {
+    type: 'boolean', default: true,
+    label: t('Enter sends the message'),
+    description: t('On a desktop keyboard Enter sends and Shift+Enter inserts a newline. Turn off to make Enter insert a newline and send with Ctrl+Enter (\u2318+Enter on a Mac) \u2014 while a turn runs, the line under the composer names the send key. Phones and tablets follow \u201cEnter sends on touch devices\u201d.'),
+    category: t('Chat'), liveApply: true,
+  },
   'chat.touchEnterSends': {
     type: 'boolean', default: false,
     label: t('Enter sends on touch devices'),
@@ -588,17 +594,12 @@ const SETTINGS_SCHEMA = {
     category: t('Agent browser'), liveApply: true,
   },
   // ── AGENT BROWSER P4 (design-agent-browser-v2 §7.2 / §7.2.1) ──────────
-  // The CONTAINER form of CloakBrowser (`cloakserve` on this machine's
-  // loopback, free tier) — a plan only (src/browser-profiles.cloakservePlan).
   // lane-cloak (2026-09-28): the §7.2.1 record is a measurement, and cloak as a
-  // PROFILE's browser is opt-in by the user's own acts instead — the install
-  // (Manage agents) and the switch (the profile's browser dialog).
-  'browser.cloak.enabled': {
-    type: 'boolean', default: false,
-    label: t('Allow the CloakBrowser container (cloakserve on loopback, free tier)'),
-    description: t('Only the container form of CloakBrowser (cloakserve in docker). OFF (default): no container is planned. ON: a cloakserve container may be planned on this machine\'s loopback, on an internal docker network whose only way out is the allowlisting proxy below. CloakBrowser as a profile\'s browser does not need this: install it from Manage agents and choose it in the profile\'s browser dialog.'),
-    category: t('Agent browser'), liveApply: true,
-  },
+  // PROFILE's browser is opt-in by the user's own acts — the install
+  // (Manage agents) and the switch (the profile's browser dialog). lane
+  // dc-browser-providers: the CONTAINER form's switch (browser.cloak.enabled,
+  // a docker plan that was never run) is deleted, and the two live cloak rows
+  // below are no longer hidden behind it.
   // P4 second half (§7.4): the in-place switch opens the SAME profile directory
   // with the CloakBrowser Chromium (+ `--fingerprint=<seed>`); this names that
   // program when it was installed some other way. Empty = the one Manage
@@ -619,18 +620,16 @@ const SETTINGS_SCHEMA = {
     type: 'string', default: '',
     label: t('CloakBrowser program file'),
     description: t('The CloakBrowser browser program (its chrome file), for when it was installed some other way. Leave it empty to use the one installed from Manage agents.'),
-    when: { setting: 'browser.cloak.enabled', is: true },
     tier: 'advanced',
     category: t('Agent browser'), liveApply: true,
   },
   // lane-cloak: THE SITES a running cloak browser may reach — the keeper's
   // egress proxy admits exactly the §7.2.1 record's run hosts (measured: none)
-  // + these (src/browser-profiles cloakRunAllowlist); the container plan too
+  // + these (src/browser-profiles cloakRunAllowlist)
   'browser.cloak.egressAllowlist': {
     type: 'string', default: '',
     label: t('Sites CloakBrowser may open (hosts, comma-separated)'),
     description: t('The only sites a CloakBrowser browser may reach, through this instance\'s allowlisting proxy: exact hostnames, or ".example.com" for a domain and every sub-domain. Empty (default): it opens no site at all. Measured: CloakBrowser itself needs no site of its own, so this list is all it can reach — its maker\'s download and update hosts are refused. Loopback and link-local addresses are never admitted.'),
-    when: { setting: 'browser.cloak.enabled', is: true },
     tier: 'advanced',
     category: t('Agent browser'), liveApply: true,
   },

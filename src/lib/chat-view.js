@@ -978,6 +978,8 @@ class ChatView {
       // restores enter-to-send for those who prefer it.
       isTouch: () => !!this.app?.isTouch,
       getTouchEnterSends: () => !!this.app?.settings?.get('chat.touchEnterSends'),
+      // chat.enterSends (desktop, default on): off ⇒ Enter inserts a newline and Ctrl/Cmd+Enter sends
+      getEnterSends: () => this.app?.settings?.get('chat.enterSends') !== false,
       onQueueOp: (op, id, extra) => this._sendQueueOp(op, id, extra),
       // Alt+Enter in the composer runs the SAME contributed command the
       // registered keybinding does (owner: one verb, rebindable by plugins).

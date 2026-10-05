@@ -942,12 +942,17 @@ class DeviceManager {
     return { ndjson: lines.length ? lines.join('\n') + '\n' : '', cursors, cursorFile: cf };
   }
 
-  /** loopback TCP forward on the device: returns {write, close, onData, onClose}. */
+  /** loopback TCP forward on the device: returns {write, close, onData, onClose}. A server that speaks first (an RFB
+   *  greeting, an SSH banner) answers in the same read as the agent's tcp-open — before the caller's `await` resumes
+   *  and sets onData. The handle keeps what arrives before its consumer is attached (bytes, then the close) and hands
+   *  it over, in order, when onData / onClose are set (lane mirror-green-212 — kb-bugfix-invariants). */
   async tcpForward(port, host) {
     const conn = await this.connect();
     const chan = conn.nextChan++;
-    const handle = { chan, onData: null, onClose: null };
-    conn.sessions.set(chan, { onData: (b) => handle.onData?.(b), onClose: () => handle.onClose?.() });
+    const early = []; let dataFn = null, closeFn = null, closed = false;
+    const drain = () => { while (dataFn && early.length) dataFn(early.shift()); if (closed && closeFn && !early.length) { closed = false; closeFn(); } };
+    const handle = { chan, get onData() { return dataFn; }, set onData(f) { dataFn = f; drain(); }, get onClose() { return closeFn; }, set onClose(f) { closeFn = f; drain(); } };
+    conn.sessions.set(chan, { onData: (b) => { if (dataFn && !early.length) dataFn(b); else early.push(b); }, onClose: () => { closed = true; drain(); } });
     // host defaults to loopback on the device; an explicit host reaches the
     // device's LAN (a user-driven forward to another internal machine)
     await this._request({ op: 'tcp-connect', port, chan, ...(host && host !== '127.0.0.1' ? { host } : {}) });

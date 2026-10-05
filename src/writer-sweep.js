@@ -91,26 +91,18 @@ vs_fd_pids() { vs_fd_scan "$1" | cut -f1 | sort -u; }`;
  *  holder is the agent CLI (a writer) or a reader that must be left alone. */
 const { cliIdentityShellFns } = require('./cli-identity');
 
-/** POSIX sweep script. Every kill leg echoes `SWEPT:<pid>` so the caller can
- *  TELL THE USER what was stopped instead of silently killing their terminal
- *  session (the honesty rule — a sweep is destructive by design).
- *
- *  `backend` selects the transcript-holder legs — claude: `<rid>.jsonl` fd/lsof
- *  + the CLI's own ~/.claude/sessions lock files; codex: an open
- *  `rollout-*-<threadId>.jsonl` (or `.jsonl.zst`, codex ≥0.153 may compress)
- *  + a `codex resume <threadId>` / `CODEX_WEBUI_RESUME_ID=<threadId>` argv.
- *  The pipe-session-meta and keeper legs are shared. `protectSids` (codex
- *  only) = webui ids of LIVE VibeSpace codex sessions on this machine: a codex
- *  app-server keeps EVERY rollout of its thread tree open for its whole
- *  lifetime (measured on the dev box: one app-server with the parent + three
- *  sub-agent rollouts still open two days after the sub-agents finished), so a
- *  holder spawned under a live session (CLAUDE_WEBUI_SESSION_ID in its
- *  argv/environ) is never a target — for live sessions the resume-already-live
- *  guard is the only arbiter; the sweep reaches EXTERNAL/orphaned writers. */
-function writerSweepScript(rid, shq, { backend = 'claude', protectSids = [] } = {}) {
-  // Shared legs: daemon pipe-session metas + legacy keeper records reference
-  // the conversation id verbatim whatever the backend.
-  const shared = `for kf in "$HOME"/.vibespace/*/state/sessions/*.json; do
+/** THE writer sweep's harness-neutral pieces. The per-harness HOLDER legs
+ *  (which fds / lock files / argv name a writer of THIS conversation) are the
+ *  descriptor's `store.writerSweep(rid, shq, {protectSids})` — claude and
+ *  codex each compose their script from these pieces in their own file
+ *  (src/harnesses/claude.js, codex.js); this module never branches on a
+ *  harness id. `sweepSharedLegs()` = the daemon pipe-session-meta and keeper
+ *  legs every script ends with (they reference the conversation id verbatim
+ *  whatever the harness). Every kill leg echoes `SWEPT:<pid>` so the caller
+ *  can TELL THE USER what was stopped (the honesty rule — a sweep is
+ *  destructive by design). */
+function sweepSharedLegs() {
+  return `for kf in "$HOME"/.vibespace/*/state/sessions/*.json; do
   [ -e "$kf" ] || continue
   grep -q "$RID" "$kf" 2>/dev/null || continue
   grep -q '"exited"' "$kf" 2>/dev/null && continue
@@ -122,90 +114,16 @@ find "$HOME/.vibespace/run" -maxdepth 1 -name '*.json' 2>/dev/null | while read 
   grep -q '"exited"' "$kf" 2>/dev/null && continue
   node "$HOME/.vibespace/bin/vibespace-remote-keeper" stop "$(basename "$kf" .json)" >/dev/null 2>&1 || true
 done`;
-  if (backend === 'codex') {
-    const protect = protectSids.map((s) => String(s)).filter((s) => /^[\w-]+$/.test(s)).join(' ');
-    return `RID=${shq(rid)}
-PROTECT=${shq(protect)}
-# codex writer sweep (VS_WRITER_SWEEP): the app-server keeps rollout-*-<threadId>.jsonl
-# (codex >=0.153 may write .jsonl.zst) open for its lifetime — and EVERY thread of its
-# tree (sub-agent rollouts included), so a holder spawned under a LIVE VibeSpace codex
-# session (PROTECT) is never a target; only external/orphaned writers are swept.
-vs_sid_of() {
-  { ps -p "$1" -o args= 2>/dev/null | tr ' ' '\\n'
-    tr '\\0' '\\n' 2>/dev/null < "/proc/$1/environ" || ps -p "$1" -E -o command= 2>/dev/null | tr ' ' '\\n'
-  } | sed -n 's/^CLAUDE_WEBUI_SESSION_ID=//p' | head -1
-}
-${fdScanShellFns()}
-${cliIdentityShellFns()}
-# $1=pid. The PROTECT check + the kill; the CALLER supplies the evidence that
-# this pid is a codex writer at all — an open rollout fd (which needs the
-# vs_is_cli executable test, since holding a file open says nothing about who
-# you are) or an argv that NAMES this thread id (self-evidencing, and the shape
-# that matches is a VibeSpace wrapper/dtach master that is not the codex binary).
-vs_codex_kill() {
-  sid=$(vs_sid_of "$1")
-  if [ -n "$sid" ]; then case " $PROTECT " in *" $sid "*) return 0;; esac; fi
-  kill -TERM "$1" 2>/dev/null && echo "SWEPT:$1"
-}
-if [ -d /proc/1 ] || [ -d /proc/self ]; then
-  for pid in $(vs_fd_pids "/rollout-.*-$RID.jsonl"); do
-    vs_is_cli "$pid" codex || continue
-    vs_codex_kill "$pid"
-  done
-elif command -v lsof >/dev/null 2>&1; then
-  find "$HOME/.codex/sessions" -name "rollout-*-$RID.jsonl*" 2>/dev/null | while read -r J; do
-    for pid in $(lsof -t -- "$J" 2>/dev/null); do
-      vs_is_cli "$pid" codex || continue
-      vs_codex_kill "$pid"
-    done
-  done
-fi
-# argv leg: \`codex resume <threadId>\` (a TUI in an external terminal) names the thread
-# on its command line; so does an orphaned VibeSpace wrapper (CODEX_WEBUI_RESUME_ID=).
-# The sweep's own shell carries RID in argv too (sh -c <this script>) — the
-# VS_WRITER_SWEEP sentinel skips it and its subshells.
-ps -eo pid=,args= 2>/dev/null | while read -r pid args; do
-  case "$args" in *VS_WRITER_SWEEP*) continue;; esac
-  case "$args" in *codex*resume*"$RID"*|*"CODEX_WEBUI_RESUME_ID=$RID"*) vs_codex_kill "$pid";; esac
-done
-${shared}`;
-  }
-  return `RID=${shq(rid)}
-# writer sweep (VS_WRITER_SWEEP), portable: /proc fd scan on Linux; lsof on
-# macOS/BSD ssh hosts (no /proc there — the old script silently swept NOTHING,
-# audit 2.192.0). Holding the transcript open is the EVIDENCE; vs_is_cli decides
-# whether the holder is the CLI (a writer) or a reader that must survive.
-${fdScanShellFns()}
-${cliIdentityShellFns()}
-vs_claude_kill() {
-  vs_is_cli "$1" claude || return 0
-  kill -TERM "$1" 2>/dev/null && echo "SWEPT:$1"
-}
-if [ -d /proc/1 ] || [ -d /proc/self ]; then
-  for pid in $(vs_fd_pids "/$RID.jsonl"); do vs_claude_kill "$pid"; done
-elif command -v lsof >/dev/null 2>&1; then
-  J=$(find "$HOME/.claude/projects" -maxdepth 2 -name "$RID.jsonl" 2>/dev/null | head -1)
-  if [ -n "$J" ]; then
-    for pid in $(lsof -t -- "$J" 2>/dev/null); do vs_claude_kill "$pid"; done
-  fi
-fi
-# The CLI's own lock file names the pid; the executable test is what keeps a
-# STALE file whose pid has been reused from killing an unrelated process.
-find "$HOME/.claude/sessions" -maxdepth 1 -name '*.json' 2>/dev/null | while read -r f; do
-  pid=$(basename "$f" .json)
-  grep -q "\\"sessionId\\":\\"$RID\\"" "$f" 2>/dev/null || continue
-  kill -0 "$pid" 2>/dev/null || continue
-  vs_claude_kill "$pid"
-done
-${shared}`;
 }
 
 /** Run the sweep on ANY machine. hostId falsy ⇒ this machine (device #0).
  *  Returns {swept: [pid…], via: 'device'|'ssh'}; throws if it could not run
  *  (the caller must decide: refuse the resume, or warn and continue).
- *  `backend`/`protectSids` select the script legs (see writerSweepScript). */
-async function sweepWriters(hosts, hostId, rid, { shq, timeoutMs = 20000, connectMs = 15000, execFileAsync, backend = 'claude', protectSids = [] } = {}) {
-  const script = writerSweepScript(rid, shq, { backend, protectSids });
+ *  `sweep` = the harness descriptor's `store.writerSweep` (src/resume-store.js
+ *  writerSweepOpts resolves it with the protect list). */
+async function sweepWriters(hosts, hostId, rid, { shq, timeoutMs = 20000, connectMs = 15000, execFileAsync, sweep, protectSids = [] } = {}) {
+  if (typeof sweep !== 'function') throw new Error('sweepWriters: no store.writerSweep hook for this harness');
+  const script = sweep(rid, shq, { protectSids });
   try {
     const dm = await hosts.deviceBounded(hostId, connectMs);
     const r = await dm.runCmd('sh', ['-c', script], { timeoutMs });
@@ -230,4 +148,4 @@ function parseSwept(stdout) {
   return out;
 }
 
-module.exports = { writerSweepScript, sweepWriters, parseSwept, fdScanShellFns, cliIdentityShellFns };
+module.exports = { sweepSharedLegs, sweepWriters, parseSwept, fdScanShellFns, cliIdentityShellFns };

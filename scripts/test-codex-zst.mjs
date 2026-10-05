@@ -272,7 +272,7 @@ console.log('— ⑤ descriptor store contract + wiring pins');
   }
   for (const id of ['claude', 'codex']) {
     const st = HARNESSES[id].store;
-    ok(typeof st.discover === 'function' && typeof st.forkChain === 'function' && typeof st.writerSweep === 'function' && typeof st.remoteFind === 'function' && typeof st.remoteFind('abc').findExpr === 'string' && typeof st.remoteFind('abc').cacheRel === 'string' && typeof st.remoteFind('abc').root === 'string', `${id}: store declares discover/forkChain/writerSweep/remoteFind`);
+    ok(typeof st.discover === 'function' && (id === 'codex') === (typeof st.forkChain === 'function') && typeof st.writerSweep === 'function' && typeof st.remoteFind === 'function' && typeof st.remoteFind('abc').findExpr === 'string' && typeof st.remoteFind('abc').cacheRel === 'string' && typeof st.remoteFind('abc').root === 'string', `${id}: store declares discover/forkChain/writerSweep/remoteFind`);
   }
   ok(/rollout-\*abc\.jsonl\.zst/.test(HARNESSES.codex.store.remoteFind('abc').findExpr) && HARNESSES.codex.store.forkChain(TID2).length === 0, 'codex remoteFind matches .jsonl and .jsonl.zst; forkChain reads the rollout meta');
   const rs = read('src/routes/sessions.js');

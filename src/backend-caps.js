@@ -469,8 +469,23 @@ for (const row of Object.values(BACKEND_CAPS)) row.inputModes = deriveInputModes
 
 const NO_CAPS = Object.freeze({ pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, fork: false, forkAtMessage: false, review: false, renameWriteback: false, streamProtocol: null, worktree: NO_WORKTREE, peerDelivery: 'stash-only', compactEnd: null, inputModes: deriveInputModes({ queue: false, queueVerbs: [] }), turnState: null, inProgressTools: false, permissionRules: Object.freeze({ source: null, session: false, instance: false, liveVerb: false }), responseStyle: Object.freeze({ live: false, closed: true, values: Object.freeze([]) }), autoResume: NO_AUTO_RESUME });
 
+// A CONTRIBUTED harness's row (src/harnesses/index.js register(), lane
+// dc-ws-create): the shipped table above stays the built-in truth; a register()ed
+// descriptor that declares `caps` is answered from here — over NO_CAPS, so a
+// partial row still reads every key — and every capsOf gate (the spawn's pool
+// gate included) sees what that harness DECLARED instead of the all-false row.
+const CONTRIBUTED_CAPS = new Map();
+function contributeCaps(id, row) {
+  if (!row) { CONTRIBUTED_CAPS.delete(id); return null; }
+  const merged = { ...NO_CAPS, ...row };
+  merged.inputModes = deriveInputModes(row.inputModes || NO_CAPS.inputModes);
+  CONTRIBUTED_CAPS.set(id, merged);
+  return merged;
+}
+
 function capsOf(backend) {
-  return BACKEND_CAPS[backend || 'claude'] || NO_CAPS;
+  const id = backend || 'claude';
+  return BACKEND_CAPS[id] || CONTRIBUTED_CAPS.get(id) || NO_CAPS;
 }
 
 // WHICH LANE A **VIBESPACE NOTIFICATION** TAKES WHEN THE RECEIVER IS BUSY
@@ -637,6 +652,6 @@ function worktreeSpawnArgs({ backend, want, resume, fork }) {
   return { args: [wt.flag], pass: true, why: fork ? 'fork' : 'new' };
 }
 
-module.exports = { BACKEND_CAPS, capsOf, setVerifiedCap, QUEUE_VERBS, LEGACY_QUEUE_VERBS, deriveInputModes, notificationDelivery,
+module.exports = { BACKEND_CAPS, capsOf, contributeCaps, setVerifiedCap, QUEUE_VERBS, LEGACY_QUEUE_VERBS, deriveInputModes, notificationDelivery,
   AUTO_RESUME_FORMS, NO_AUTO_RESUME, deriveAutoResume,
   NO_WORKTREE, WORKTREE_REASONS, worktreeCaps, worktreeRefusal, worktreeSpawnArgs, worktreePick, worktreeLatchWrite };

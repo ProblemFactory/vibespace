@@ -27,10 +27,11 @@ export function choiceWords(choice, t) {
  * THE PROFILE CARD'S LINE (the Agent browser panel row, the switch dialog): the choice, "(pinned)" when it is one, and —
  * while the browser runs — the build it REPORTS (the fact, which for the default build is the only way to know which).
  * A chosen build that vanished says so first (the browser does not start until another is picked). null for a profile
- * whose provider runs its own build (CloakBrowser, a connected / cloud browser).
+ * whose provider runs its own build (CloakBrowser, a connected / cloud browser) — its row's `buildChoice` cell is false
+ * (lane dc-browser-providers: the server stamps the cell on the profile view; never the provider's id here).
  */
-export function cardBuildLine({ provider = 'chromium', choice = null, running = null, missing = null, live = false } = {}, t) {
-  if (String(provider || 'chromium') !== 'chromium') return null;
+export function cardBuildLine({ buildChoice = true, choice = null, running = null, missing = null, live = false } = {}, t) {
+  if (!buildChoice) return null;
   const c = normalize(choice);
   if (missing && c.kind !== 'default') return { text: t(i18nKey("{build} is no longer on this computer — it won't start until you choose another build (Change build…)."), { build: choiceWords(c, t) }), warn: true };
   const base = c.kind === 'default' ? choiceWords(c, t) : t(i18nKey('{build} (pinned)'), { build: choiceWords(c, t) });

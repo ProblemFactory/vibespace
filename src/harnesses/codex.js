@@ -8,7 +8,62 @@ const { findCodexSessionJsonlPath, extractCodexThreadMeta, lastCodexTurnModel, l
 const { CodexMessageManager } = require('../codex-message-manager');
 const codexStore = require('../codex-session-store');
 const codexThreadRead = require('../codex-thread-read');
-const { writerSweepScript } = require('../writer-sweep');
+const { sweepSharedLegs, fdScanShellFns, cliIdentityShellFns } = require('../writer-sweep');
+// WRITER SWEEP holder legs (store.writerSweep; the generic runner is
+// writer-sweep.js sweepWriters): an open `rollout-*-<threadId>.jsonl` (or
+// `.jsonl.zst`, codex >=0.153 may compress) + a `codex resume <threadId>` /
+// `CODEX_WEBUI_RESUME_ID=<threadId>` argv. `protectSids` = webui ids of LIVE
+// VibeSpace codex sessions on the target machine (src/resume-store.js): an
+// app-server keeps EVERY rollout of its thread tree open for its lifetime, so
+// a holder spawned under a live session is never a target.
+function codexWriterSweep(rid, shq, { protectSids = [] } = {}) {
+  const protect = protectSids.map((s) => String(s)).filter((s) => /^[\w-]+$/.test(s)).join(' ');
+  return `RID=${shq(rid)}
+PROTECT=${shq(protect)}
+# codex writer sweep (VS_WRITER_SWEEP): the app-server keeps rollout-*-<threadId>.jsonl
+# (codex >=0.153 may write .jsonl.zst) open for its lifetime — and EVERY thread of its
+# tree (sub-agent rollouts included), so a holder spawned under a LIVE VibeSpace codex
+# session (PROTECT) is never a target; only external/orphaned writers are swept.
+vs_sid_of() {
+  { ps -p "$1" -o args= 2>/dev/null | tr ' ' '\\n'
+    tr '\\0' '\\n' 2>/dev/null < "/proc/$1/environ" || ps -p "$1" -E -o command= 2>/dev/null | tr ' ' '\\n'
+  } | sed -n 's/^CLAUDE_WEBUI_SESSION_ID=//p' | head -1
+}
+${fdScanShellFns()}
+${cliIdentityShellFns()}
+# $1=pid. The PROTECT check + the kill; the CALLER supplies the evidence that
+# this pid is a codex writer at all — an open rollout fd (which needs the
+# vs_is_cli executable test, since holding a file open says nothing about who
+# you are) or an argv that NAMES this thread id (self-evidencing, and the shape
+# that matches is a VibeSpace wrapper/dtach master that is not the codex binary).
+vs_codex_kill() {
+  sid=$(vs_sid_of "$1")
+  if [ -n "$sid" ]; then case " $PROTECT " in *" $sid "*) return 0;; esac; fi
+  kill -TERM "$1" 2>/dev/null && echo "SWEPT:$1"
+}
+if [ -d /proc/1 ] || [ -d /proc/self ]; then
+  for pid in $(vs_fd_pids "/rollout-.*-$RID.jsonl"); do
+    vs_is_cli "$pid" codex || continue
+    vs_codex_kill "$pid"
+  done
+elif command -v lsof >/dev/null 2>&1; then
+  find "$HOME/.codex/sessions" -name "rollout-*-$RID.jsonl*" 2>/dev/null | while read -r J; do
+    for pid in $(lsof -t -- "$J" 2>/dev/null); do
+      vs_is_cli "$pid" codex || continue
+      vs_codex_kill "$pid"
+    done
+  done
+fi
+# argv leg: \`codex resume <threadId>\` (a TUI in an external terminal) names the thread
+# on its command line; so does an orphaned VibeSpace wrapper (CODEX_WEBUI_RESUME_ID=).
+# The sweep's own shell carries RID in argv too (sh -c <this script>) — the
+# VS_WRITER_SWEEP sentinel skips it and its subshells.
+ps -eo pid=,args= 2>/dev/null | while read -r pid args; do
+  case "$args" in *VS_WRITER_SWEEP*) continue;; esac
+  case "$args" in *codex*resume*"$RID"*|*"CODEX_WEBUI_RESUME_ID=$RID"*) vs_codex_kill "$pid";; esac
+done
+${sweepSharedLegs()}`;
+}
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -47,6 +102,18 @@ const parseCodexAuth = (dir) => parseCodexAuthFile(path.join(dir, 'auth.json'));
 const HOOKS_FILE = cliConfigFile(HARNESS_SETTINGS.codex.files.hooks, { createIfMissing: 'dir-exists' });
 const CONFIG_TOML = cliConfigFile(HARNESS_SETTINGS.codex.files.config, { createIfMissing: 'dir-exists' });
 
+/** BILLING IDENTITY of a live codex session (moved from server.js sessionAuth):
+ *  a named ChatGPT account (isolated CODEX_HOME), a codex pool, or the
+ *  machine's own ~/.codex login. */
+function codexBillingIdentity(s, { accounts, withHost, poolAuth }) {
+  if (s._accountId) {
+    const a = accounts.get(s._accountId);
+    if (a && a.type === 'pooled') return poolAuth(a);
+    return withHost({ source: 'codex-subscription', name: a?.name || 'ChatGPT' });
+  }
+  return withHost({ source: 'codex-cli' });
+}
+
 module.exports = {
   id: 'codex',
   label: 'Codex',
@@ -63,11 +130,9 @@ module.exports = {
   store: {
     discover: ({ activeSessions } = {}) => codexStore.listCodexThreadsAsync({ activeSessions }),
     locate: (id) => findCodexSessionJsonlPath(id),   // (threadId) → rollout path|null (cwd irrelevant)
-    locateTranscript: findCodexSessionJsonlPath,   // (threadId) → rollout path|null (S1 alias)
-    listThreads: codexStore.listCodexThreads,      // sync twin (user-action consumers)
-    Reader: codexStore.CodexSessionMessages,
     createReader: (session, sessionId, opts) => new codexStore.CodexSessionMessages(session, sessionId, opts || {}),
     forkChain: (id) => { const p = findCodexSessionJsonlPath(id); return p ? (extractCodexThreadMeta(p).forkedFrom || []) : []; },
+    forkChainEnv: 'CODEX_WEBUI_FORKED_FROM',       // where codex-chat-wrapper reads the chain (src/resume-store.js forkChainEnv)
     // RESUME CONTINUITY (B-6b6d): what this CONVERSATION last ran at, for a
     // resume/fork carrying no explicit pick (src/resume-continuity.js states
     // the ladder; the hook's PRESENCE is the declaration that this harness can
@@ -77,10 +142,6 @@ module.exports = {
     // descriptor where the claude twin could join it.
     lastTurnModel: (id) => lastCodexTurnModel(id),
     lastTurnEffort: (id) => lastCodexTurnEffort(id),
-    // (id, wrapperChain) → [{ id, untilOrdinal|null }] oldest→newest: the wrapper
-    // chain ∪ codex's own 0.153 fork parents cut at their boundary ordinal —
-    // what the read-only view prepends (codex-session-store.resolveCodexForkAncestry)
-    forkAncestry: (id, wrapperChain) => codexStore.resolveCodexForkAncestry(id, wrapperChain || []),
     // (id, cwd, {remote}) → Promise<bool>: the pre-read hook consumers await before
     // constructing a reader (claude warms its worker parse cache here). For codex
     // it is the 0.153 `thread/read` FALLBACK: a thread with NO rollout file on this
@@ -88,14 +149,12 @@ module.exports = {
     // parseCodexSessionJsonl from the cache (B-21e4 item 5; local only — the local
     // app-server knows no remote thread; a present rollout is always authoritative).
     warmTranscript: (id, cwd, opts) => codexThreadRead.warmMissingThread(id, { locate: findCodexSessionJsonlPath, remote: !!(opts && opts.remote) }),
-    writerSweep: (rid, shq, opts) => writerSweepScript(rid, shq, { ...(opts || {}), backend: 'codex' }),
+    writerSweep: codexWriterSweep,                 // (rid, shq, {protectSids}) → POSIX sweep script
     remoteFind: (id) => ({
       root: '"$HOME"/.codex/sessions',
       findExpr: `-maxdepth 5 -type f \\( -name ${JSON.stringify('rollout-*' + id + '.jsonl')} -o -name ${JSON.stringify('rollout-*' + id + '.jsonl.zst')} \\)`,
       cacheRel: path.join('codex', id + '.jsonl'), maxBytes: 64 * 1024 * 1024,
     }),
-    transcriptDirs: ['~/.codex/sessions'],
-    conversationIdField: 'backendSessionId',
   },
   quota: require('./codex-quota.js'),    // QuotaSignalSource (S4)
   // CREDENTIAL mechanics (S2): one isolated CODEX_HOME per named account
@@ -127,6 +186,7 @@ module.exports = {
       link('config.toml');
     },
     authFile: 'auth.json',
+    ledgerType: 'codex-subscription',          // the usage ledger's account type for EVERY codex account (server.js resolveAccount)
     spawnEnvVar: 'CODEX_HOME',
     loginLabel: 'ChatGPT',
     defaultIdField: 'defaultCodexAccountId',
@@ -146,6 +206,17 @@ module.exports = {
     form: 'turn-start',
     deliver: (session, text, deps) => !!deps.sendChatInput(session, text),
   },
+  // SPAWN FACTS (lane dc-ws-create): what src/ws-create.js used to ask as
+  // `backend === 'codex'` — rows/hooks of the spawn contract (./index.js SPAWN_ROWS).
+  spawn: {
+    // the thread id appears AFTER the spawn: the create captures it against the threads that existed before
+    threadBaseline: ({ activeSessions }) => new Set(codexStore.listCodexThreads({ activeSessions }).map((entry) => entry.backendSessionId || entry.sessionId).filter(Boolean)),
+    // CHAT over a dial byte pipe is not wired (B-0588): the chat wrapper speaks
+    // JSON-RPC to a LOCAL app-server; TERMINAL on dial works (TUI over the pty)
+    deviceChatRefusal: (hostName) => `Codex CHAT on a paired device isn't wired yet — use TERMINAL mode for codex on "${hostName}", or codex chat on an ssh host. Claude chat works on devices.`,
+  },
+  billingIdentity: codexBillingIdentity,
+  models: require('./codex-models.js').models, // the /api/available-models list (~/.codex/models_cache.json, union-persisted)
   settingsPrefix: 'codex',
   // THE SETTINGS TABLE (design-harness-settings §2) — object identity, like caps.
   settings: HARNESS_SETTINGS.codex,

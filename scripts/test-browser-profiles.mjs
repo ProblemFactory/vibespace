@@ -774,7 +774,7 @@ console.log('\n⑦ wiring (a pure function nobody calls is a feature nobody has)
     'the budgeted tools intro carries ONE line about it — the one tool (takeover C2) — pointing at the manual');
 
   const restore = read('src/server/boot-restore.js');
-  ok((restore.match(/_browserKey: meta\.browserKey/g) || []).length === 3,
+  ok(((s, r) => (s.match(new RegExp(r.source, 'g')) || []).length === 1 && r.test((s.match(/\nfunction sessionFromMeta\(meta, transportFacts\) \{[\s\S]*?\n\}\n/) || [''])[0]) && (s.match(/= sessionFromMeta\(meta, \{/g) || []).length === 3)(restore, /_browserKey: meta\.browserKey/),
     'ALL THREE boot-restore paths carry the key back (a whitelist that covers two of three is this file\'s recurring bug)');
   const schema = read('src/session-schema.js');
   ok(/_browserKey:/.test(schema) && /_browserVariant:/.test(schema), 'both session fields have owner rows');
@@ -1733,7 +1733,7 @@ console.log('\n⑳ r5: the floor notice latches on DELIVERY · the conversation 
   const sites = arSrc.match(/sessionToolsIntro\((?:enabledTools\(\)|toolFlags), \{ browserVariant: s\._browserVariant(?:, browserSet: browserSetFacts\(s\))?(?:, browserDisplay: browserDisplayFacts\(s\))? \}\)/g) || []; // P1b added the set beside the variant, lane browser-recipes the display fact; the pin follows the shipped call shape
   ok(sites.length === 2, `both delivery sites (task-context + prompt-context) hand it \`s._browserVariant\` (${sites.length})`);
   ok(!/sessionToolsIntro\((?:enabledTools\(\)|toolFlags)\)/.test(arSrc), 'and no site calls it without the session\'s facts (the round-4 shape)');
-  ok((read('src/server/boot-restore.js').match(/_browserVariant: meta\.browserVariant/g) || []).length === 3, 'the rung is restored with the session at all three boot-restore sites, so a restored session\'s re-delivered intro is about ITS rung');
+  ok(((s, r) => (s.match(new RegExp(r.source, 'g')) || []).length === 1 && r.test((s.match(/\nfunction sessionFromMeta\(meta, transportFacts\) \{[\s\S]*?\n\}\n/) || [''])[0]) && (s.match(/= sessionFromMeta\(meta, \{/g) || []).length === 3)(read('src/server/boot-restore.js'), /_browserVariant: meta\.browserVariant/), 'the rung is restored with the session at all three boot-restore sites, so a restored session\'s re-delivered intro is about ITS rung');
   ok(!arSrc.includes("L.push(\n    'Browsing: the `agent-browser` CLI works as usual and THIS session already has its own browser"), 'the unconditional round-4 push is gone (the control names the retired bytes)');
 }
 
@@ -1790,6 +1790,17 @@ console.log('\n㉒ lane H: the holder rows (a live managed ephemeral browser is 
 // one counted them as product code; they are written to this process's scratch
 // dir now (scripts/mutant-copy.mjs).
 console.log('\n㉑ the patched copies never touch the tree');
+console.log('— lane dc-browser-providers: every provider row carries THE launch shape; the cloakserve rung is gone');
+{
+  const cells = ['buildChoice', 'automationFlag', 'launchArgs', 'seeded', 'launchFlags', 'executable', 'exeSetting', 'egressProxy', 'integrationId'];
+  const missing = B.providerIds().flatMap((id) => cells.filter((c) => !(c in B.providerRow(id))).map((c) => id + '.' + c));
+  ok(!missing.length, `every row (${B.providerIds().length}, cloud rows included) declares the ${cells.length} launch cells${missing.length ? ' — missing ' + missing.join(', ') : ''}`);
+  const with_ = (c) => B.providerIds().filter((id) => B.providerRow(id)[c]).join();
+  ok(with_('buildChoice') === 'chromium' && with_('automationFlag') === 'chromium' && with_('seeded') === 'cloak' && with_('egressProxy') === 'cloak' && B.providerRow('cloak').executable === 'installed' && B.providerRow('cloud:kernel').integrationId === 'cloud:kernel' && B.DEFAULT_PROVIDER === 'chromium' && B.providerRow('') === B.providerRow(B.DEFAULT_PROVIDER), 'the shipped values: a build choice + the automation flag are chromium\'s, the seed + the installed executable + the egress proxy cloak\'s, a cloud row\'s key row is its own id');
+  const schema = fs.readFileSync(path.join(REPO, 'src/lib/settings-schema.js'), 'utf8');
+  const exeRow = schema.slice(schema.indexOf(`'${B.providerRow('cloak').exeSetting}': {`), schema.indexOf('},', schema.indexOf(`'${B.providerRow('cloak').exeSetting}': {`)));
+  ok(!('cloakservePlan' in B) && !('CLOAKSERVE_IMAGE' in B) && !schema.includes("'browser.cloak.enabled'") && exeRow.length > 0 && !/\bwhen:/.test(exeRow), 'the cloakserve CONTAINER rung is deleted (its plan, image, setting) and the live program-file setting no longer hides behind it');
+}
 for (const r of copiesCensus(MUTB.files, MUTB.dir, REPO, { minCopies: 2 })) ok(r.pass, '㉑ ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 
 console.log(`\n${fail ? fail + ' FAILED (' + pass + ' passed' + (skipped ? ', ' + skipped + ' skipped' : '') + ')' : 'ALL PASS (' + pass + (skipped ? ', ' + skipped + ' skipped' : '') + ')'}`);

@@ -74,13 +74,16 @@ ok(Number.isInteger(L.CONCURRENT_CAP) && L.CONCURRENT_CAP >= 1, `CONCURRENT_CAP 
 console.log('§2 DISPLAY_BACKENDS — the capability table');
 ok(same(M.BACKEND_IDS, ['xpra', 'vnc-display', 'desktop-singleton']), 'three rungs in DA1 order: xpra > vnc-display > desktop-singleton');
 for (const b of M.DISPLAY_BACKENDS) {
-  ok(typeof b.perWindow === 'boolean' && typeof b.adaptive === 'boolean' && Array.isArray(b.needs) && b.needs.every((g) => Array.isArray(g) && g.length) && ['rfb', 'xpra'].includes(b.stream) && typeof b.wired === 'boolean', `row ${b.id} declares perWindow/adaptive/needs/stream/wired`);
+  ok(M.CAP_KEYS.every((k) => typeof b[k] === 'boolean') && !('adaptive' in b) && Array.isArray(b.needs) && b.needs.every((g) => Array.isArray(g) && g.length) && ['rfb', 'xpra'].includes(b.stream) && typeof b.wired === 'boolean', `row ${b.id} declares every capability cell (${M.CAP_KEYS.join('/')}) + needs/stream/wired`);
   ok(Object.isFrozen(b) && Object.isFrozen(b.needs), `row ${b.id} is frozen (a rung is a declaration, not state)`);
 }
-ok(M.backendById('xpra').perWindow && M.backendById('xpra').adaptive && M.backendById('xpra').stream === 'xpra' && M.backendById('xpra').wired === true, 'xpra: per-window, adaptive, xpra stream, WIRED since P8-2 (DA1: installed ⇒ every NEW session takes it)');
+ok(M.CAP_KEYS.every((k) => M.backendById('xpra')[k] === true) && M.backendById('xpra').stream === 'xpra' && M.backendById('xpra').wired === true, 'xpra: every cell (scales, crisp text, per-window, seamless, satellites, geometry, its own display, a hosted client), xpra stream, WIRED since P8-2 (DA1: installed ⇒ every NEW session takes it)');
 ok(M.DISPLAY_BACKENDS.every((b) => b.wired === true), 'every SHIPPED row is wired — an unwired row is a table copy the suites hand in, never a product state');
-ok(!M.backendById('vnc-display').perWindow && !M.backendById('vnc-display').adaptive && M.backendById('vnc-display').stream === 'rfb' && M.backendById('vnc-display').wired === true, 'vnc-display: whole display, not adaptive, rfb, wired');
+ok(M.CAP_KEYS.every((k) => M.backendById('vnc-display')[k] === (k === 'ownsDisplay')) && !M.backendById('desktop-singleton').ownsDisplay && M.backendById('vnc-display').stream === 'rfb' && M.backendById('vnc-display').wired === true, 'vnc-display: a whole display of its own, no other cell, rfb, wired; the singleton owns no display (shared)');
 {
+  // lane dc-desktop-caps (rv-desktop F-B5): PROBE_BINS is DERIVED from the rows — a new rung's binary is probed with no second list
+  const pix = Object.freeze({ id: 'fakepix', label: 'fakepix', stream: 'rfb', needs: Object.freeze([Object.freeze(['Xfakepix'])]), recipes: Object.freeze({ Xfakepix: 'x-then-server' }), wired: true });
+  ok(D.probeBinsOf([pix, ...M.DISPLAY_BACKENDS]).includes('Xfakepix') && !D.PROBE_BINS.includes('Xfakepix') && !D.PROBE_BINS.some((n) => n.includes(':')) && D.PROBE_BINS.includes('xrdb'), 'PROBE_BINS = every rung\'s needs (derived; a pseudo-binary is a fact, not a file) + the helpers — a fake row\'s binary is probed with no edit');
   const probed = new Set([...D.PROBE_BINS, 'desktop-singleton:running']);
   const needed = M.DISPLAY_BACKENDS.flatMap((b) => b.needs.flat());
   ok(needed.every((n) => probed.has(n)), 'every binary a rung needs is one desktop-display PROBES (a rung nobody can probe is prose)', needed.filter((n) => !probed.has(n)));
@@ -785,10 +788,10 @@ console.log('§10 HiDPI (2.369.158, docs/design-desktop-apps.zh.md §7.6): the a
   const recD = M.newRecord({ id: 'da-2', label: 'x', exec: '/usr/bin/xterm', source: 'registry', backend: 'vnc-display', now: 1 });
   ok(rec.scale === 2 && rec.dpi === 96 && recD.scale === 1 && recD.dpi === 96, 'the record carries its scale and its display\'s font dpi (fixed at launch; defaults 1 / 96)');
   const keeper = keeperSrc(), disp = read('src/desktop-display.js');
-  ok(/const knobs = backend\.stream === 'xpra' \? M\.scaleKnobs\(pick\.scale, \{ rule: M\.scaleRuleOf\(row\) \}\) : M\.scaleKnobs\(1\);/.test(keeper), 'WIRING PIN: the keeper decides the scale ONCE at launch — on the xpra STREAM only (a whole-display rung\'s picture is CSS px), by the row\'s rule (lane D (a)); the pick itself is §13\'s pin');
-  ok(/\.\.\.\(M\.streamKindOf\(rec, backends\) === 'xpra' \? knobs\.env : \{\}\), \.\.\.\(rec\.env \|\| \{\}\)/.test(keeper) && /display\.applyXResources\(\{ binPath: f\.bins\.xrdb, env: appEnv, text: knobs\.xresources \}\)/.test(keeper), 'WIRING PIN: the app\'s env gets the knobs (a row\'s own env still wins) and the X resources are merged BEFORE the app starts');
+  ok(/const rungScales = M\.capsOf\(\{ backend: backend\.id \}, backends\)\.scales;[^\n]*\n\s*const knobs = rungScales \? M\.scaleKnobs\(pick\.scale, \{ rule: M\.scaleRuleOf\(row\) \}\) : M\.scaleKnobs\(1\);/.test(keeper), 'WIRING PIN: the keeper decides the scale ONCE at launch — on the xpra STREAM only (a whole-display rung\'s picture is CSS px), by the row\'s rule (lane D (a)); the pick itself is §13\'s pin');
+  ok(/\.\.\.\(M\.capsOf\(rec, backends\)\.scales \? knobs\.env : \{\}\), \.\.\.\(rec\.env \|\| \{\}\)/.test(keeper) && /display\.applyXResources\(\{ binPath: f\.bins\.xrdb, env: appEnv, text: knobs\.xresources \}\)/.test(keeper), 'WIRING PIN: the app\'s env gets the knobs (a row\'s own env still wins) and the X resources are merged BEFORE the app starts');
   { const iWait = keeper.indexOf('display.waitForXftDpi('), iMerge = keeper.indexOf('display.applyXResources('), iApp = keeper.indexOf('display.startApp(');
-    ok(iWait > 0 && iWait < iMerge && iMerge < iApp && /if \(own && M\.streamKindOf\(rec, backends\) === 'xpra'\) \{\n\s*const xd = await display\.waitForXftDpi\(/.test(keeper), 'WIRING PIN (r2, the verifier\'s race): on its own xpra display the keeper WAITS for xpra\'s resource write (Xft.dpi) BEFORE it merges its X resources and BEFORE it starts the app — xpra replaces the database ~1 s after the display is up'); }
+    ok(iWait > 0 && iWait < iMerge && iMerge < iApp && /if \(own && M\.capsOf\(rec, backends\)\.crispText\) \{\n\s*const xd = await display\.waitForXftDpi\(/.test(keeper), 'WIRING PIN (r2, the verifier\'s race): on its own xpra display the keeper WAITS for xpra\'s resource write (Xft.dpi) BEFORE it merges its X resources and BEFORE it starts the app — xpra replaces the database ~1 s after the display is up'); }
   ok(/dpi: rec\.dpi \|\| 96,/.test(keeper) && /startXpra\(\{ binPath: ctx\.bins\.xpra, port, dir: ctx\.dir, env, logFd: ctx\.logFd, dpi: ctx\.dpi \}\)/.test(disp), 'WIRING PIN: the record\'s dpi reaches `xpra start --dpi` through the recipe ctx');
   const schema = read('src/lib/settings-schema.js');
   ok(/'desktop\.appScale': \{\s*type: 'enum', default: 'auto', options: \[\s*\{ value: 'auto'[^\]]*\{ value: '1', [^\]]*\{ value: '1\.5', [^\]]*\{ value: '2', /.test(schema), 'the setting `desktop.appScale` (auto | 1 | 1.5 | 2, default auto) exists in the schema — only for working code');
@@ -912,14 +915,14 @@ console.log('§12 round 3 A2 (docs/design-desktop-apps-seamless §3.2): the app 
   const bad = table.map(([rec, o, close, why]) => ({ rec, o, want: [close, why], got: V(rec, o) })).filter((x) => x.got.close !== x.want[0] || x.got.why !== x.want[1]);
   ok(bad.length === 0, `exitCloseVerdict: ${table.length} rows — failed stays, a lease keeps it, a stop closes, an exit closes unless a window is LEFT on the display`, bad);
   // (c) the outer ✕ — the whole matrix
-  const base = { state: 'ready', stream: 'xpra', seat: 'active', connected: true, mainWid: 7, leased: false, askedAt: 0, now: 100000 };
+  const base = { state: 'ready', perWindow: true, seat: 'active', connected: true, mainWid: 7, leased: false, askedAt: 0, now: 100000 };
   const O = (o) => M.outerCloseVerdict({ ...base, ...o });
   const otable = [
     [{}, 'ask-app', 'close-window'],
     [{ state: 'launching' }, 'close', 'not-running'],
     [{ state: 'exited' }, 'close', 'not-running'],
     [{ state: 'failed' }, 'close', 'not-running'],
-    [{ stream: 'rfb' }, 'close', 'no-window-protocol'],
+    [{ perWindow: false }, 'close', 'no-window-protocol'],
     [{ leased: true }, 'close', 'lease'],
     [{ seat: 'blocked' }, 'close', 'not-active'],
     [{ seat: 'watch' }, 'close', 'not-active'],
@@ -1016,7 +1019,7 @@ console.log('§13 round 3 A3 (docs/design-desktop-apps-seamless §3.4): the scal
   // (i) WIRING PINS — the keeper decides the scale ONCE through scalePick (the launch's dpr + uiScale, or the relaunch's choice);
   // the launcher sends THIS client's UI scale; the window offers the menu and follows a replacement
   const keeper = keeperSrc(), launcher = read('src/lib/desktop-app-launcher.js'), win = read('src/lib/desktop-app-window.js'), routes = read('src/routes/desktop-apps.js');
-  ok(/const pick = M\.scalePick\(\{ choice: opts\.scaleChoice, appDefault: v\.launch\.scaleChoice, setting: serverSetting\('desktop\.appScale'\), dpr: v\.launch\.dpr, uiScale: v\.launch\.uiScale \}\);/.test(keeper) && /const knobs = backend\.stream === 'xpra' \? M\.scaleKnobs\(pick\.scale, \{ rule: M\.scaleRuleOf\(row\) \}\) : M\.scaleKnobs\(1\);/.test(keeper), 'WIRING PIN: the keeper picks the scale once at launch (a relaunch\'s choice, lane D\'s app default, the setting) from the request\'s dpr + uiScale, and spells it by the row\'s rule (lane D (a)), on the xpra STREAM only');
+  ok(/const pick = M\.scalePick\(\{ choice: opts\.scaleChoice, appDefault: v\.launch\.scaleChoice, setting: serverSetting\('desktop\.appScale'\), dpr: v\.launch\.dpr, uiScale: v\.launch\.uiScale \}\);/.test(keeper) && /const rungScales = M\.capsOf\(\{ backend: backend\.id \}, backends\)\.scales;[^\n]*\n\s*const knobs = rungScales \? M\.scaleKnobs\(pick\.scale, \{ rule: M\.scaleRuleOf\(row\) \}\) : M\.scaleKnobs\(1\);/.test(keeper), 'WIRING PIN: the keeper picks the scale once at launch (a relaunch\'s choice, lane D\'s app default, the setting) from the request\'s dpr + uiScale, and spells it by the row\'s rule (lane D (a)), on the xpra STREAM only');
   ok(/const armSeat = typeof onSuccessor === 'function' \? onSuccessor\(next\.id\) : null;\s*rec\.replacedBy = next\.id;\s*commit\(\);\s*let old;\s*try \{ old = await stop\(id, \{ why: 'relaunch' \}\); \} finally \{ if \(typeof armSeat === 'function'\) armSeat\(\); \}/.test(keeper) && /return machine\.relaunch\(id, body, \{ onSuccessor: \(nextId\) => carrySeat\(id, nextId\) \}\);/.test(keeper) && /M\.capVerdict\(liveRecords\(\)\.filter\(\(r\) => r\.id !== opts\.replacing\), limits\)/.test(keeper), 'WIRING PIN: relaunch = the successor launched first (the one it replaces does not count against the cap), the old record names it and is committed BEFORE its stop broadcasts, the seat carried first (A r1)');
   ok(/router\.post\('\/api\/desktop\/apps\/:id\/relaunch'/.test(routes) && /ctx\.keeper\.relaunch\(req\.params\.id, req\.body \|\| \{\}\)/.test(routes), 'WIRING PIN: POST /api/desktop/apps/:id/relaunch → keeper.relaunch');
   ok(/dpr: launchDpr\(\), uiScale: launchUiScale\(\)/.test(launcher), 'WIRING PIN: the launcher sends THIS client\'s dpr AND its UI scale');
@@ -1066,7 +1069,7 @@ console.log('§14 lane D (a) (docs/design-desktop-apps-seamless §3.4, the owner
   ok(cfGot[0].prefs.browser.custom_chrome_frame === true && cfGot[2].prefs.browser.x === 1 && cfGot[2].prefs.browser.custom_chrome_frame === true && cfGot[3].prefs.browser.custom_chrome_frame === false && M.CHROMIUM_FRAME_MARKER === '.vibespace-frame-seeded', 'the pref is set to true only when ABSENT — an existing false (the user turned "Use system title bar and borders" back on inside Chrome) is kept; other keys survive; the marker name');
   // (e) WIRING PINS — the keeper records what it drew, bringUp uses the SAME rule, the chromium profile is seeded before the app
   const keeper = keeperSrc(), win = read('src/lib/desktop-app-window.js');
-  ok(/gdkScale: backend\.stream === 'xpra' \? knobs\.gdkScale : null, pictureScale: backend\.stream === 'xpra' \? knobs\.pictureScale : null,/.test(keeper) && /const knobs = M\.scaleKnobs\(rec\.scale \|\| 1, \{ rule: M\.scaleRuleOf\(rec\) \}\);/.test(keeper), 'WIRING PIN: the launch records gdkScale + pictureScale; the bring-up spells the env by the same rule');
+  ok(/gdkScale: rungScales \? knobs\.gdkScale : null, pictureScale: rungScales \? knobs\.pictureScale : null,/.test(keeper) && /const knobs = M\.scaleKnobs\(rec\.scale \|\| 1, \{ rule: M\.scaleRuleOf\(rec\) \}\);/.test(keeper), 'WIRING PIN: the launch records gdkScale + pictureScale; the bring-up spells the env by the same rule');
   { const iSeed = keeper.indexOf('await seedChromiumFrame(rec.profileDir)'), iApp = keeper.indexOf('display.startApp(');
     ok(iSeed > 0 && iSeed < iApp && /if \(rec\.browser === 'chromium' && rec\.profileDir\) \{/.test(keeper) && /M\.chromiumFramePrefs\(prefs\)/.test(keeper) && /M\.CHROMIUM_FRAME_MARKER/.test(keeper), 'WIRING PIN: a chromium record\'s profile is seeded (once — the marker) BEFORE the browser starts, through the PURE chromiumFramePrefs'); }
   ok(/pictureScale: \(\) => renderOf\(rec\)\.picture/.test(win) && /fitAfterRelaunch\(geo, r\.app\)/.test(win) && win.indexOf('retarget(r.app.id);') < win.indexOf('fitAfterRelaunch(geo, r.app);'), 'WIRING PIN: the view reads the RECORD\'s picture scale; the relaunch resizes the window AFTER retarget (the old app\'s minimum cleared first)');

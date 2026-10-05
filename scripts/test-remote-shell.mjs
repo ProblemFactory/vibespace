@@ -130,9 +130,13 @@ const tailLineHas = (l) => l.includes('VIBESPACE_SESSION_CWD=') && l.indexOf('VI
   // site that assigned a fresh object would silently drop the switch.
   const wcCode = wsCode;
   ok((wcCode.match(/\.buildSessionArgs\(/g) || []).length === 1, 'exactly ONE buildSessionArgs call feeds every spawn path in ws-create/ws-handler (no second spec builder that could miss the switch)');
-  const rewrites = (wcCode.match(/spawnArgs\[si \+ 1\] = sjson/g) || []).length;
-  const merges = (wcCode.match(/settingsObj = JSON\.parse\(spawnArgs\[si \+ 1\]\)/g) || []).length;
-  ok(rewrites >= 2 && rewrites === merges, `every --settings rewrite in ws-create merges the parsed spawn JSON (${rewrites} rewrite(s), ${merges} merge(s))`);
+  // dc-ws-create: the rewrite is the claude descriptor's spawn.statusline hook (ONE body); ws-create's
+  // remote + local statusline sites both call it and rewrite nothing themselves
+  const cl = fs.readFileSync(new URL('../src/harnesses/claude.js', import.meta.url), 'utf8');
+  const rewrites = (cl.match(/args\[si \+ 1\] = sjson/g) || []).length;
+  const merges = (cl.match(/settingsObj = JSON\.parse\(args\[si \+ 1\]\)/g) || []).length;
+  ok(rewrites === 1 && rewrites === merges && (wcCode.match(/SP\.statusline\(spawnArgs, /g) || []).length === 2 && !/spawnArgs\[si \+ 1\] = /.test(wcCode),
+    `every --settings rewrite merges the parsed spawn JSON — ONE hook (claude.js, ${rewrites} rewrite / ${merges} merge), called by both ws-create statusline sites`);
   ok((("spawnArgs[si + 1] = sjson;").match(/spawnArgs\[si \+ 1\] = sjson/g) || []).length === 1 && (("let settingsObj = {};").match(/settingsObj = JSON\.parse\(spawnArgs\[si \+ 1\]\)/g) || []).length === 0, 'NEGATIVE CONTROL: a rewrite with no merge is what the census counts apart');
   // the statusline merge itself, run on the adapter's real args (the remote terminal injection's exact shape)
   { let spawnArgs = [...termSpec.args]; let settingsObj = {}; const si = spawnArgs.indexOf('--settings'); if (si >= 0 && spawnArgs[si + 1]) { try { settingsObj = JSON.parse(spawnArgs[si + 1]) || {}; } catch {} } settingsObj.statusLine = { type: 'command', command: 'x', padding: 0 }; const sjson = JSON.stringify(settingsObj); if (si >= 0) spawnArgs[si + 1] = sjson; else spawnArgs = [...spawnArgs, '--settings', sjson];
