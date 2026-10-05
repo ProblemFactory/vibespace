@@ -2,14 +2,16 @@
 // AN ENTER MEANT FOR THE INPUT METHOD MUST NOT SEND THE MESSAGE (lane chat-enter-ime, inc-muukd9oq-qyc3, 2026-10-05 —
 // the owner, Chrome 152 / macOS / a Chinese IME: "我还没写完消息怎么发出去了？"). PURE: src/lib/chat-enter-keys.js, the
 // very EnterGuard ChatInput holds, driven over keydown/composition sequences with a fake clock in the handler's order.
-//   §1 THE TABLE: the incident (composing Enter ×2, a Shift tap, Enter 383 ms later) ⇒ no send + the hint, and the next
-//      Enter sends · a Space-select then Enter at 700 ms ⇒ send, at 250 ms ⇒ the hint · an Enter that itself ended the
-//      composition (Chrome order, Windows 'Process' key, Safari order) ⇒ the next Enter sends · modifiers are untouched ·
-//      chat.enterSends off (Enter ⇒ newline, Cmd/Ctrl+Enter ⇒ send) · touch keeps chat.touchEnterSends · expanded;
-//   §2 the recorder's key words: S- for Shift, c:1 when the IME owned the key, k:'ime' start/end markers (textarea only);
+//   §1 THE TABLE (r2, the owner's correction: the Enter that COMMITS an English word is what sent): Enter(229) →
+//      compositionend → a plain Enter(13) +1 ms ⇒ 'ime-swallow' (no send, no newline, the hint) · the ring's shape · a
+//      commit then Enter +1/+30 ms ⇒ swallow, +120/+300/+700 ms ⇒ send (Space → Enter never swallowed) · Cmd/Ctrl+Enter sends · Safari order (compositionend
+//      before the 229 Enter) ⇒ no send, one hint · chat.enterSends off · touch keeps chat.touchEnterSends · expanded;
+//   §2 the recorder's key words: S- for Shift, c:1 when the IME owned the key, k:'ime' start/end markers (textarea only),
+//      an end's how: commit | cancel (r2 — the data's length, never its text);
 //   §3 the send-mode hint names the send key when chat.enterSends is off; the schema row, zh/ja words, docs row;
 //   §4 wiring census: ChatInput / the recorder / chat-view use these exports in the handler's order;
-//   §5 patched-copy controls: the guard removed ⇒ the incident sequence SENDS (and each other law has its own mutant).
+//   §5 patched-copy controls: the guard removed, or r1's "an Enter ended it" exemption restored ⇒ the owner's sequence
+//      SENDS (and each other law has its own mutant).
 // The real textarea under CDP Input.imeSetComposition is scripts/test-chat-enter-ime-chrome.mjs (heavy).
 import fs from 'node:fs';
 import os from 'node:os';
@@ -21,7 +23,8 @@ const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
 const read = (p) => fs.readFileSync(path.join(REPO, p), 'utf8');
 const SRC = path.join(REPO, 'src/lib/chat-enter-keys.js');
 
-// A sequence player in ChatInput's keydown order: guard.keydown(e) FIRST · imeOwnsKey ⇒ swallowed · Enter ⇒ guard.enter.
+// A sequence player in ChatInput's keydown order: imeOwnsKey ⇒ the IME's · Enter ⇒ guard.enter. (r2's guard has no
+// keydown; the r1-exemption control restores one, so the player feeds it when present.)
 const C = (key, extra = {}) => ({ kd: { key, isComposing: true, keyCode: 229, ...extra } });   // a key the IME owns
 const K = (key, extra = {}) => ({ kd: { key, keyCode: key === 'Enter' ? 13 : 0, ...extra } });  // a plain key
 const CS = { cs: 1 }, CE = { ce: 1 }, W = (ms) => ({ wait: ms });
@@ -35,7 +38,7 @@ function play(M, seq, ctx = {}) {
     else if (s.ce) g.compositionend();
     else {
       const e = { shiftKey: false, ctrlKey: false, metaKey: false, altKey: false, code: s.kd.key === 'Enter' ? 'Enter' : '', ...s.kd };
-      g.keydown(e);
+      g.keydown?.(e);
       if (M.imeOwnsKey(e)) { if (e.key === 'Enter' || e.code === 'Enter') out.push('ime'); continue; }
       if (e.key === 'Enter') out.push(g.enter(e, { expanded: false, touch: false, touchEnterSends: false, enterSends: true, ...ctx }));
     }
@@ -43,20 +46,24 @@ function play(M, seq, ctx = {}) {
   }
   return out;
 }
-const INCIDENT = [CS, C('n'), C('Enter'), W(1150), C('h'), C('Enter'), W(1057), C('Shift', { shiftKey: true }), CE, W(383), K('Enter')];
+// the ring (2.369.207 recorder: no c:1 / ime markers): a word committed by a composing Enter ×2 (no send), then the
+// next word — a capital letter's Shift at :11.860 inside it — and its committing Enter at :12.243 arriving PLAIN
+const INCIDENT = [CS, C('n'), C('Enter'), CE, W(1150), CS, C('h'), C('Enter'), CE, W(1057), CS, C('Shift', { shiftKey: true }), C('H', { shiftKey: true }), W(383), CE, K('Enter')];
+const OWNER = [CS, C('h'), C('Enter'), CE, W(1), K('Enter')];
 const ROWS = [
-  ['THE INCIDENT: composing Enter ×2, a Shift tap ends the composition, Enter 383 ms later ⇒ no send + the hint', INCIDENT, ['ime', 'ime', 'ime-newline']],
-  ['…and the Enter after the hint SENDS (the hint says "press Enter again"), even inside the window', [...INCIDENT, W(200), K('Enter')], ['ime', 'ime', 'ime-newline', 'send']],
-  ['a Space-select, 700 ms, Enter ⇒ send (outside the 600 ms window)', [CS, C('a'), C(' '), CE, W(700), K('Enter')], ['send']],
-  ['a Space-select, 250 ms, Enter ⇒ the hint (a fast typist: nothing lost, the line says what happened)', [CS, C('a'), C(' '), CE, W(250), K('Enter')], ['ime-newline']],
-  ['an Escape that cancels the composition, Enter 100 ms later ⇒ the hint', [CS, C('a'), C('Escape'), CE, W(100), K('Enter')], ['ime-newline']],
-  ['a click that ends the composition (no key), Enter 100 ms later ⇒ the hint', [CS, C('a'), CE, W(100), K('Enter')], ['ime-newline']],
-  ['the Enter that ITSELF ended the composition (Chrome: keydown isComposing → compositionend), then Enter ⇒ send', [CS, C('a'), C('Enter'), CE, W(120), K('Enter')], ['ime', 'send']],
-  ['…the same on Chrome/Windows, where the IME reports the committing key as "Process" (code Enter)', [CS, C('a'), C('Process', { code: 'Enter' }), CE, W(120), K('Enter')], ['ime', 'send']],
-  ['…the same in Safari order (compositionend BEFORE the committing Enter keydown, keyCode 229)', [CS, C('a', { isComposing: false }), CE, K('Enter', { keyCode: 229 }), W(120), K('Enter')], ['ime', 'send']],
-  ['Shift+Enter inside the window stays a plain newline (no hint)', [CS, C('a'), C('Shift', { shiftKey: true }), CE, W(100), K('Enter', { shiftKey: true })], ['newline']],
-  ['Ctrl+Enter / Cmd+Enter inside the window still send (an explicit chord)', [CS, C('a'), C(' '), CE, W(100), K('Enter', { ctrlKey: true }), CS, C('b'), C(' '), CE, W(100), K('Enter', { metaKey: true })], ['send', 'send']],
-  ['a new composition clears an armed window (compositionstart)', [CS, C('a'), C(' '), CE, W(50), CS, C('Enter'), CE, W(50), K('Enter')], ['ime', 'send']],
+  ['THE OWNER\'S SEQUENCE: Enter(229) → compositionend → a plain Enter(13, isComposing false) +1 ms ⇒ swallowed, no send', OWNER, ['ime', 'ime-swallow']],
+  ['the ring\'s shape: two composing Enters, then a commit whose Enter arrives plain ⇒ swallowed', INCIDENT, ['ime', 'ime', 'ime-swallow']],
+  ['…and the Enter after the hint SENDS (the hint says "press Enter again")', [...INCIDENT, W(1), K('Enter')], ['ime', 'ime', 'ime-swallow', 'send']],
+  ['a commit (compositionend, data "hello"), Enter(13) +1 ms ⇒ swallowed + the hint', [CS, C('o'), CE, W(1), K('Enter')], ['ime-swallow']],
+  ['…Enter +30 ms (still the commit\'s event burst) ⇒ swallowed', [CS, C('o'), CE, W(30), K('Enter')], ['ime-swallow']],
+  ['…Enter +120 / +300 / +700 ms (a human\'s second press) ⇒ send', [CS, C('o'), CE, W(120), K('Enter'), CS, C('p'), CE, W(300), K('Enter'), CS, C('q'), CE, W(700), K('Enter')], ['send', 'send', 'send']],
+  ['the everyday Chinese send: Space commits, Enter 120 / 250 ms later ⇒ send (never swallowed)', [CS, C('a'), C(' '), CE, W(120), K('Enter'), CS, C('b'), C(' '), CE, W(250), K('Enter')], ['send', 'send']],
+  ['compositionend → Cmd+Enter / Ctrl+Enter +1 ms ⇒ send (a deliberate chord)', [CS, C('a'), CE, W(1), K('Enter', { metaKey: true }), CS, C('b'), CE, W(1), K('Enter', { ctrlKey: true })], ['send', 'send']],
+  ['Safari order (compositionend BEFORE the 229 Enter) ⇒ no send; a plain Enter +10 ms ⇒ ONE swallow (one hint), then send', [CS, C('a', { isComposing: false }), CE, K('Enter', { keyCode: 229 }), W(10), K('Enter'), W(10), K('Enter')], ['ime', 'ime-swallow', 'send']],
+  ['Chrome/Windows: the committing key reported as "Process" (code Enter), a plain Enter +10 ms ⇒ swallowed', [CS, C('a'), C('Process', { code: 'Enter' }), CE, W(10), K('Enter')], ['ime', 'ime-swallow']],
+  ['an Escape that cancels, or a click that ends the composition, Enter +10 ms ⇒ swallowed', [CS, C('a'), C('Escape'), CE, W(10), K('Enter'), CS, C('b'), CE, W(10), K('Enter')], ['ime-swallow', 'ime-swallow']],
+  ['Shift+Enter inside the window stays a plain newline (no hint)', [CS, C('a'), CE, W(10), K('Enter', { shiftKey: true })], ['newline']],
+  ['a new composition clears an armed window (compositionstart); its own end re-arms', [CS, C('a'), CE, W(1), CS, W(700), C('Enter'), CE, W(700), K('Enter')], ['ime', 'send']],
   ['an Enter long after any composition ⇒ send (today\'s default)', [K('a'), W(5000), K('Enter')], ['send']],
 ];
 async function table(M, label = '') {
@@ -73,7 +80,7 @@ async function table(M, label = '') {
 const M = await import(pathToFileURL(SRC).href);
 console.log('§1 the table (PURE EnterGuard, fake clock)');
 for (const r of await table(M)) ok(r.n, r.ok, { got: r.got, want: r.want });
-ok('the window is 600 ms and the hint lives 2 s', M.IME_ENTER_WINDOW_MS === 600 && M.IME_HINT_MS === 2000);
+ok('the window is the commit\'s event burst, 50 ms, and the hint lives 2 s', M.IME_COMMIT_BURST_MS === 50 && M.IME_HINT_MS === 2000);
 
 console.log('§2 the recorder\'s key words');
 const kw = (e) => M.actionKeyWords({ shiftKey: false, ctrlKey: false, metaKey: false, altKey: false, ...e });
@@ -82,9 +89,11 @@ ok('a composing Enter ⇒ { key: "Enter", c: 1 }; a plain Enter ⇒ { key: "Ente
 ok('Shift+Enter ⇒ "S-Enter"; Ctrl+Alt+Shift+Enter ⇒ "C-A-S-Enter" (the C-/M-/A- order kept, S- last)', kw({ key: 'Enter', shiftKey: true }).key === 'S-Enter' && kw({ key: 'Enter', ctrlKey: true, altKey: true, shiftKey: true }).key === 'C-A-S-Enter');
 ok('keyCode 229 alone (Safari) also marks c:1', kw({ key: 'Enter', keyCode: 229 }).c === 1);
 ok('a plain character (even shifted) is null — the "typing" marker, never the text', kw({ key: 'a' }) === null && kw({ key: 'A', shiftKey: true }) === null);
-ok('k:"ime" markers on a textarea: start / end, no text field', JSON.stringify(M.imeMarker('compositionstart', { tagName: 'TEXTAREA' })) === '{"k":"ime","ph":"start"}' && JSON.stringify(M.imeMarker('compositionend', { tagName: 'TEXTAREA' })) === '{"k":"ime","ph":"end"}');
+ok('k:"ime" markers on a textarea: start / end (no data ⇒ no how), no text field', JSON.stringify(M.imeMarker('compositionstart', { tagName: 'TEXTAREA' })) === '{"k":"ime","ph":"start"}' && JSON.stringify(M.imeMarker('compositionend', { tagName: 'TEXTAREA' })) === '{"k":"ime","ph":"end"}');
 ok('…and none for an input / another event', M.imeMarker('compositionend', { tagName: 'INPUT' }) === null && M.imeMarker('compositionupdate', { tagName: 'TEXTAREA' }) === null);
 
+const mk = (d) => JSON.stringify(M.imeMarker('compositionend', { tagName: 'TEXTAREA' }, d));
+ok('an end with data "hello" ⇒ how "commit"; with "" ⇒ how "cancel" — and never the text', mk('hello') === '{"k":"ime","ph":"end","how":"commit"}' && mk('') === '{"k":"ime","ph":"end","how":"cancel"}' && !mk('hello').includes('hello'), [mk('hello'), mk('')]);
 console.log('§3 the send-mode hint, the setting');
 const { composerSendModes } = await import(pathToFileURL(path.join(REPO, 'src/lib/agent-meta.js')).href);
 const q = { queue: true, steer: true, queueOps: true };
@@ -104,23 +113,24 @@ ok('docs/settings.md lists chat.enterSends (gen-settings-reference)', read('docs
 
 console.log('§4 wiring census');
 const kdBody = ci.slice(ci.indexOf("this._textarea.addEventListener('keydown', (e) => {"));
-ok('the keydown handler feeds the guard FIRST, before the slash dropdown can return', /^this\._textarea\.addEventListener\('keydown', \(e\) => \{\n\s+this\._enterGuard\.keydown\(e\);/.test(kdBody));
-ok('…then the IME return, then the Enter decision through the guard (send ⇒ preventDefault + _send; ime-newline ⇒ the hint)', kdBody.indexOf('if (imeOwnsKey(e)) return;') > 0 && kdBody.indexOf('if (imeOwnsKey(e)) return;') < kdBody.indexOf('this._enterGuard.enter(e,') && /if \(act === 'send'\) \{ e\.preventDefault\(\); this\._send\(\); \}\n\s+else if \(act === 'ime-newline'\) this\._showImeHint\(\);/.test(kdBody));
+ok('the keydown handler no longer feeds the guard (r2: the key that ended a composition no longer matters)', !ci.includes('_enterGuard.keydown('));
+ok('…the IME return, then the Enter decision through the guard (send ⇒ preventDefault + _send; ime-swallow ⇒ preventDefault + the hint)', kdBody.indexOf('if (imeOwnsKey(e)) return;') > 0 && kdBody.indexOf('if (imeOwnsKey(e)) return;') < kdBody.indexOf('this._enterGuard.enter(e,') && /if \(act === 'send'\) \{ e\.preventDefault\(\); this\._send\(\); \}\n\s+else if \(act === 'ime-swallow'\) \{ e\.preventDefault\(\); this\._showImeHint\(\); \}/.test(kdBody));
 ok('compositionstart / compositionend on the textarea feed the guard', ci.includes("this._textarea.addEventListener('compositionstart', () => this._enterGuard.compositionstart());") && ci.includes("this._textarea.addEventListener('compositionend', () => this._enterGuard.compositionend());"));
 ok('the ime line is a role=status node under the composer, hidden by IME_HINT_MS', /this\._imeHint\.setAttribute\('role', 'status'\)/.test(ci) && /this\._sendHint, this\._imeHint\);/.test(ci) && /setTimeout\(\(\) => \{ this\._imeHint\.hidden = true; \}, IME_HINT_MS\)/.test(ci));
 ok('chat-view hands chat.enterSends to the composer (default on)', read('src/lib/chat-view.js').includes("getEnterSends: () => this.app?.settings?.get('chat.enterSends') !== false,"));
 const rec = read('src/lib/incident-recorder.js');
-ok('the recorder writes actionKeyWords + imeMarker into the action ring', /const w = actionKeyWords\(e\);/.test(rec) && /k: 'key', \.\.\.w, el:/.test(rec) && /const m = imeMarker\(type, e\.target\);/.test(rec) && /'compositionstart', 'compositionend'/.test(rec));
+ok('the recorder writes actionKeyWords + imeMarker into the action ring', /const w = actionKeyWords\(e\);/.test(rec) && /k: 'key', \.\.\.w, el:/.test(rec) && /const m = imeMarker\(type, e\.target, e\.data\);/.test(rec) && /'compositionstart', 'compositionend'/.test(rec));
 
 console.log('§5 patched-copy controls');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-cei-'));
 const src = fs.readFileSync(SRC, 'utf8');
 const MUT = [
-  ['the guard removed (no window) ⇒ the incident sequence SENDS', [/ && \(ctx\.now - ctx\.imeEndedAt\) < windowMs\) return 'ime-newline';/, ' && false) return \'ime-newline\';'], 0],
-  ['an Enter-ended composition arms too ⇒ the commit-then-send row turns into a hint', [/this\._imeEndedAt = this\._lastKeyEnter \? 0 : this\._now\(\);/, 'this._imeEndedAt = this._now();'], 6],
-  ['no Safari disarm ⇒ the Safari-order row turns into a hint', [/if \(this\._lastKeyEnter && imeOwnsKey\(e\)\) this\._imeEndedAt = 0;/, ''], 8],
-  ['the guard not consumed ⇒ the Enter after the hint is swallowed again', [/if \(a === 'ime-newline' \|\| a === 'send'\) this\._imeEndedAt = 0;/, ''], 1],
-  ['modifiers not exempt ⇒ Ctrl+Enter inside the window no longer sends', [/if \(!mod && !e\.altKey && ctx\.imeEndedAt/, 'if (ctx.imeEndedAt'], 10],
+  ['the guard removed (no window) ⇒ the owner\'s sequence SENDS', [/ && \(ctx\.now - ctx\.imeEndedAt\) < windowMs\) return 'ime-swallow';/, ' && false) return \'ime-swallow\';'], 0],
+  ['r1\'s exemption restored (an Enter-ended composition arms nothing) ⇒ the owner\'s sequence SENDS', [/compositionend\(\) \{ this\._imeEndedAt = this\._now\(\); \}/, "keydown(e) { this._lastKeyEnter = e.key === 'Enter' || e.code === 'Enter'; if (this._lastKeyEnter && imeOwnsKey(e)) this._imeEndedAt = 0; }\n  compositionend() { this._imeEndedAt = this._lastKeyEnter ? 0 : this._now(); }"], 0],
+  ['…the same restored exemption ⇒ the ring\'s shape SENDS too', [/compositionend\(\) \{ this\._imeEndedAt = this\._now\(\); \}/, "keydown(e) { this._lastKeyEnter = e.key === 'Enter' || e.code === 'Enter'; if (this._lastKeyEnter && imeOwnsKey(e)) this._imeEndedAt = 0; }\n  compositionend() { this._imeEndedAt = this._lastKeyEnter ? 0 : this._now(); }"], 9],
+  ['the guard not consumed ⇒ the Enter after the hint is swallowed again', [/if \(a === 'ime-swallow' \|\| a === 'send'\) this\._imeEndedAt = 0;/, ''], 2],
+  ['modifiers not exempt ⇒ Cmd+Enter inside the window no longer sends', [/if \(!mod && !e\.altKey && ctx\.imeEndedAt/, 'if (ctx.imeEndedAt'], 7],
+  ['r1\'s 600 ms back ⇒ the everyday Space → Enter send at 120 ms is swallowed', [/export const IME_COMMIT_BURST_MS = 50;/, 'export const IME_COMMIT_BURST_MS = 600;'], 6],
 ];
 for (const [n, [re, to], rowIdx] of MUT) {
   ok(`control: the mutation site exists (${n.split(' ⇒')[0]})`, re.test(src));

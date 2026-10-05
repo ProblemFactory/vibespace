@@ -62,7 +62,7 @@ export function installIncidentRecorder(app) {
   // input-method markers on a textarea (the composer): when a composition starts and ends — never its text
   for (const type of ['compositionstart', 'compositionend']) {
     document.addEventListener(type, (e) => {
-      const m = imeMarker(type, e.target);
+      const m = imeMarker(type, e.target, e.data); // how: commit | cancel — the length only
       if (m) push(rings.action, CAP.action, { t: Date.now(), ...m, el: describeEl(e.target) });
     }, { capture: true, passive: true });
   }

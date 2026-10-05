@@ -64,7 +64,7 @@ import { installBrowserSwitcher } from './browser-switcher.js'; // agent browser
 import { installBrowserTrace } from './browser-trace-view.js'; // agent browser P5 (§4.5/§8 step 3): the profiles panel (the trace surfaces install themselves)
 import { installBrowserReplay } from './browser-replay-window.js'; // 2026-09-27: a browser session's replay (window type browser-replay)
 import { permissionModeOptions } from './permission-mode-labels.js'; // lane L: permission modes in plain words, the raw value as a hint
-import { BACKEND_META, createBackendIconHtml, getSessionKey, pickAgentIdentity, settingsPrefixFor, effortLabel, noteModelCatalog, worktreeCapsFor, backendFeatureCaps, billingRow } from './agent-meta.js';
+import { BACKEND_META, createBackendIconHtml, getSessionKey, pickAgentIdentity, settingsPrefixFor, effortLabel, effortOptions, noteModelCatalog, worktreeCapsFor, backendFeatureCaps, billingRow } from './agent-meta.js';
 
 const BACKEND_SESSION_OPTIONS = {
   claude: {
@@ -77,7 +77,7 @@ const BACKEND_SESSION_OPTIONS = {
       { value: 'high', label: t('High') },
       { value: 'xhigh', label: t('XHigh') },
       { value: 'max', label: t('Max (Opus only)') },
-      { value: 'ultracode', label: t('Ultracode (xhigh + workflows)') },
+      ...effortOptions('claude', [], BACKEND_META.claude.ui.effortExtras), // seed: the declared extras (ultracode) until the server answers
     ],
   },
   codex: {
@@ -135,11 +135,14 @@ fetchJson('/api/available-models').then(data => {
     }
   }
 });
-// Fetch effort levels + permission modes from server (parsed from claude --help)
+// Fetch effort levels + permission modes from server (parsed from claude --help).
+// The pickers are the parsed levels + the declared extras (the server's gated
+// effortExtras; the META seed from an older server) — APPENDED, never replaced:
+// swapping the parsed list in dropped ultracode the moment this landed (lane effort-ultracode).
 fetchJson('/api/session-options').then(data => {
   if (!data) return;
   if (data.effortLevels?.length) {
-    const efforts = [{ value: '', label: t('Auto (model default)') }, ...data.effortLevels.map(e => ({ value: e, label: e.charAt(0).toUpperCase() + e.slice(1) }))];
+    const efforts = effortOptions('claude', data.effortLevels, data.effortExtras ?? BACKEND_META.claude.ui.effortExtras, { head: { value: '', label: t('Auto (model default)') } });
     BACKEND_SESSION_OPTIONS.claude.efforts = efforts;
     SETTINGS_SCHEMA['claude.defaultEffort'].options = efforts.map(e => ({ value: e.value, label: e.label }));
   }

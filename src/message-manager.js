@@ -19,11 +19,10 @@ const { VIBESPACE_NOTICE_HEAD } = require('./notification-senders.js'); // PURE:
 const { offerOf, offerResolution } = require('./reset-credit.js'); // PURE: the reset-credit offer a peer card may carry (design-reset-credits §5) + its resolution (lane reset-path R3)
 const { refOf: channelRefOf } = require('./channel-ref.js'); // PURE (B-c127): a channel notice's conversation — `peerChannel`
 const { groupOf: groupCardOf, readReport, cardOfReport } = require('./group-card.js'); // PURE (lane group-report-card): a group message's card facts — `peerGroup`
-const { sliceTextWindow } = require('./text-window.js'); // PURE: the attach slab counted in text cards (perf lane A)
+const { MessageWindow } = require('./message-window.js'); // the ordered card list + its window arithmetic (dc-twins M10)
 const { staleFromDenyMessage } = require('./browser-stale.js'); // PURE (lane J r2): a deny naming browser_paused = the takeover's stale answer
 const { unknownFields: shapeUnknownFields, carrierOf: shapeCarrierOf, unknownFieldsSample } = require('./record-shape.js'); // §3 schema drift (2026-09-21)
 const { helperAskOf, askRecordOf, askState, pendingAsksOf, asksSignature, askTransition, isWaiting, ASK_INITIAL, ASK_RECORD_EVENTS, RESULT_EVENT_OF, isUnknownOutcome } = require('./helper-ask.js'); // PURE (lane S1): a helper's permission ask — the parent's card, its view, the waiting chip
-const { turnPreviewOf } = require('./assistant-note.js'); // PURE (B-40f8): THE preview of a user turn — the minimap and the outline, every builder
 const { permissionOutcome, outcomeHead } = require('./permission-outcome.js'); // PURE (lane S1 verify r5): the CENSUS of the CLI's own permission-outcome sentences — the ONE reader of a tool_result's word
 const { safetyStopOf } = require('./safety-stop.js'); // PURE (lane classifier-stop-card): the CENSUS of the CLI's own safety-stop sentences — the stop card's one reader
 
@@ -296,18 +295,13 @@ function syntheticUsage(raw) {
 // the source up to the first `])`.
 const TERMINAL_TASK_STATUS = new Set(['completed', 'failed', 'stopped', 'killed']);
 
-class MessageManager {
+class MessageManager extends MessageWindow {
   // Injected by the server once the settings SyncStore exists (the normalizer
   // can't reach server state directly). null in tests → defaults apply.
   static getSetting = null;
 
   constructor(sessionId) {
-    this.sessionId = sessionId;
-    this.seq = 0; // rebuild belt only — ids no longer derive from it (R0, three-tier design)
-    this._rkCounts = new Map(); // record-key → messages minted from it (id suffix discriminator)
-    this._currentRk = null;
-    this.messages = [];
-    this.messageIndex = new Map();      // id → NormalizedMessage
+    super(sessionId);
     this.pendingToolCalls = new Map();   // toolUseId → { msgId, block }
     // Task lifecycle needs its OWN index (2.368.15, owner: "基本每个对话都有
     // 已结束的后台任务显示为正在进行"): pendingToolCalls is the permission/
@@ -318,8 +312,6 @@ class MessageManager {
     // stayed 'running' forever. These maps live for the conversation.
     this.taskMsgByToolUse = new Map();   // toolUseId → msgId (tasks only)
     this.taskMsgByTaskId = new Map();    // task_id  → msgId
-    this.turnIndex = 0;
-    this.listeners = [];
     this._peerMsgIds = new Set(); // cross-session msg_ids already rendered (dedup across the three peer sites)
     // A HELPER's own view (`sub-<tool_use_id>` / `sub-agent-<id>`, lane S1): its
     // asks attach to its own tool cards; the PARENT's normalizer instead hangs a
@@ -451,29 +443,16 @@ class MessageManager {
   // order is the API's content order on BOTH transports, so the suffix is
   // transport-stable. Tool messages don't come through here at all: they key
   // on their globally-unique toolCallId.
-  _nextId() {
-    const rk = this._currentRk || ('s' + this.seq); // s-fallback: creates outside record context
-    this.seq++;
-    const n = this._rkCounts.get(rk) || 0;
-    this._rkCounts.set(rk, n + 1);
-    return `${this.sessionId}:${rk}${n ? '.' + n : ''}`;
-  }
-
   static recordKey(raw) {
     const mid = raw?.message?.id;
     if (mid && mid !== '<synthetic>') return 'm:' + mid;
     const u = raw?.uuid;
     if (u && !/-0{11,}1?$/.test(u)) return 'u:' + u; // stdout placeholder …-000000000001 excluded
-    let h = 0x811c9dc5; // FNV-1a over the record's own serialization —
-    const str = JSON.stringify(raw ?? null); // deterministic for identical bytes (buffer replay)
-    for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = (h * 0x01000193) >>> 0; }
-    return 'h:' + h.toString(36) + ':' + str.length;
+    return MessageWindow.hashKey(JSON.stringify(raw ?? null)); // FNV-1a over the record's own serialization — deterministic for identical bytes (buffer replay)
   }
 
-  onOp(fn) { this.listeners.push(fn); }
-  offOp(fn) { const i = this.listeners.indexOf(fn); if (i >= 0) this.listeners.splice(i, 1); }
   _emit(op) {
-    for (const fn of this.listeners) fn(op);
+    super._emit(op);
     // THE PENDING-ASKS LEVEL (lane S1): an edit that can open or settle an ask
     // (a permission, a helper's ask, the helper's own lifecycle — a stopped
     // helper's ask is no longer waiting) re-derives the list the waiting chip
@@ -667,34 +646,6 @@ class MessageManager {
   }
 
   /**
-   * TIME-SLICED rebuild (2.369.16, userW inc-mtndq0vb): identical result to
-   * convertHistory, but yields to the event loop every ~budgetMs so the
-   * first attach of a multi-MB transcript no longer blocks the server for
-   * seconds (58 sessions × 10-56MB after a restart = a 4-minute stall that
-   * made the heartbeat terminate the client and drop its queued kills).
-   * Callers MUST hold live records back (session._rebuildQueue) while this
-   * runs and replay them after — a live record interleaved mid-rebuild
-   * would land before the rest of the history.
-   */
-  // `beforeRecord` (2026-09-27): the browser-session cards interleave by time (normalizers.convertWithCards)
-  async convertHistoryAsync(claudeMessages, { budgetMs = 25, onSlice, beforeRecord } = {}) {
-    let sliceStart = Date.now(), done = 0;
-    for (const msg of claudeMessages) {
-      if (beforeRecord) { try { beforeRecord(msg); } catch { } }
-      try { this._processMessage(msg, false); }
-      catch (e) { console.error('[normalizer] record skipped during history rebuild:', e.message); }
-      done++;
-      if (Date.now() - sliceStart >= budgetMs) {
-        try { onSlice?.(done); } catch { }
-        await new Promise((r) => setImmediate(r));
-        sliceStart = Date.now();
-      }
-    }
-    this._finalizeStreaming(false);
-    return this.messages;
-  }
-
-  /**
    * Process a single live message. Emits create/edit ops via listeners.
    */
   /** Feed a record WITHOUT emitting ops — the rebuild's tail for the task
@@ -721,60 +672,8 @@ class MessageManager {
    *  old (an idle session's ring is never overwritten). */
   _taskRecordAt(emit) { return this._replayAt != null ? this._replayAt : (emit ? Date.now() : 0); }
 
-  processLive(claudeMsg) {
-    this._processMessage(claudeMsg, true);
-  }
-
-  /** Get current message count */
-  get total() { return this.messages.length; }
-
-  /** Get message by ID */
-  get(id) { return this.messageIndex.get(id); }
-
-  /** Get last N messages */
-  tail(n) { return this.messages.slice(-n); }
-
-  /** THE ATTACH SLAB (perf lane A): the tail counted in TEXT cards, not
-   *  records — src/text-window.js is the one rule, and all three normalizers
-   *  (claude / codex / acp) answer it the same way (twin parity). */
-  tailWindow(opts) { return sliceTextWindow(this.messages, opts); }
-
-  /** Get messages by offset+limit */
-  slice(offset, limit) { return this.messages.slice(offset, offset + limit); }
-
-  /** Get turn boundaries for minimap: [{turnIndex, startIdx, ts, role, preview?, isCompact?}] */
-  turnMap() {
-    const turns = [];
-    let lastTurn = -1;
-    for (let i = 0; i < this.messages.length; i++) {
-      const m = this.messages[i];
-      // A RETRACTED message is not a turn marker: the minimap must never offer
-      // a jump to a turn the harness itself has taken back (§2.10).
-      if (m.rewound) continue;
-      const t = m.turnIndex ?? 0;
-      if (t !== lastTurn) {
-        const entry = { turnIndex: t, startIdx: i, ts: m.ts, role: m.role };
-        if (m.role === 'user') Object.assign(entry, turnPreviewOf(m)); // B-40f8: THE preview rule (a note says its sentence, never "Stop hook feedback: …")
-        turns.push(entry);
-        lastTurn = t;
-      }
-    }
-    return turns;
-  }
-
-  /** Search messages by text query → [{index, id, type, preview}] */
-  search(query) {
-    const q = query.toLowerCase();
-    const matches = [];
-    for (let i = 0; i < this.messages.length; i++) {
-      const m = this.messages[i];
-      const text = this._extractText(m);
-      if (text.toLowerCase().includes(q)) {
-        matches.push({ index: i, id: m.id, type: m.role, preview: text.substring(0, 120) });
-      }
-    }
-    return matches;
-  }
+  /** ONE record into cards (MessageWindow's processLive / convertHistoryAsync). */
+  _feedRecord(claudeMsg, emit) { this._processMessage(claudeMsg, emit); }
 
   _extractText(msg) {
     return msg.content.map(b => {
@@ -785,33 +684,13 @@ class MessageManager {
     }).join(' ');
   }
 
-  _create(fields) {
-    const msg = {
-      id: this._nextId(),
-      role: fields.role,
-      status: fields.status || 'complete',
-      content: fields.content || [],
-      ts: fields.ts || this._currentTs || Date.now(),
-      srcLine: this._currentLine,
-      uuid: this._currentUuid,
-      turnIndex: fields.turnIndex ?? this.turnIndex,
-      toolCallId: fields.toolCallId || null,
-      toolName: fields.toolName || null,
-      toolStatus: fields.toolStatus || null,
-      permission: fields.permission || null,
-      usage: fields.usage || null,
-      taskInfo: fields.taskInfo || null,
-      meta: fields.meta || null, // per-record metadata (model/usage/requestId) for the message-info popup
-      // noticeKind keys the CLIENT's localized renderer branch (model-fallback,
-      // model-refusal-fallback). It was NEVER passed through here (2.227.4):
-      // every notice fell back to its raw English text and the localized
-      // branches were dead code from the day they were written.
-      noticeKind: fields.noticeKind || null,
-    };
-    this.messages.push(msg);
-    this.messageIndex.set(msg.id, msg);
-    return msg;
-  }
+  // Card tail after taskInfo (MessageWindow._create): per-record metadata
+  // (model/usage/requestId) for the message-info popup, then noticeKind = the
+  // CLIENT's localized renderer key (never threaded before 2.227.4: every
+  // notice fell back to its raw English text). CARD_UUID: the JSONL record
+  // uuid rides after srcLine — fork-from-here (--resume-session-at) needs it.
+  static CARD_FIELDS = ['meta', 'noticeKind'];
+  static CARD_UUID = true;
 
   /** Harness tasks (TaskCreate/TaskUpdate) → TodoWrite-shaped todos meta */
   _emitHarnessTodos(emit) {
@@ -1656,22 +1535,10 @@ class MessageManager {
     }
   }
 
-  goalState() { return this._goalState || null; }
-
-  /** The input queue (harness contract). ALWAYS EMPTY for claude: the CLI
-   *  queues stdin messages itself and publishes no queue state — backend-caps
-   *  inputModes {queue:true, queueVerbs:[]} says so, and the client's strip
-   *  renders nothing. Present so every chat normalizer answers the same
-   *  question (test-harness-contract pins it) instead of the caller learning
-   *  which ones have the method. */
-  queueState() { return []; }
-  /** …and the CLI never publishes one, so the client's controls stay off. */
-  queuePublished() { return false; }
-  /** …nor any verbs. `null` = "this wrapper has named no verb list", which is
-   *  a different fact from "it serves none" — the ws gate distinguishes them
-   *  (a pre-verb-table codex wrapper publishes a queue with no list and still
-   *  serves the legacy three). */
-  queueVerbsPublished() { return null; }
+  // goalState / queueState / queuePublished / queueVerbsPublished =
+  // MessageWindow's: claude publishes NO queue (the CLI queues stdin itself;
+  // backend-caps inputModes {queue:true, queueVerbs:[]}), so they answer [] /
+  // false / null — null = "named no verb list", not "serves none".
 
   _processUser(raw, emit) {
     this._finalizeStreaming(emit);

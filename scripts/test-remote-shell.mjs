@@ -11,6 +11,12 @@ const { REMOTE_PRELUDE, nodeFinder, buildRemoteShellPrelude } = require('../src/
 let pass = 0, fail = 0;
 const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
 
+{ // dc-twins M9 drift guard: claude's chat transport flags are spelled ONCE (src/harnesses/claude-transport.js) — the
+  // local chat-wrapper and ws-create's remote leg both read that list (adapter.chatTransportArgs()), never a literal
+  const rd = (f) => fs.readFileSync(new URL('../' + f, import.meta.url), 'utf8');
+  const sites = ['src/ws-create.js', 'data/bin/chat-wrapper.js', 'src/adapters/claude-code.js', 'src/harnesses/claude-transport.js'].filter((f) => /['"]--output-format['"]|['"]--permission-prompt-tool['"]/.test(rd(f)));
+  ok(sites.join() === 'src/harnesses/claude-transport.js' && /chatTransportArgs\(\)/.test(rd('src/ws-create.js')) && /claude-transport\.js'\)\)\.CHAT_TRANSPORT_ARGS/.test(rd('data/bin/chat-wrapper.js')), `M9 drift guard: the stream-json flags have ONE spelling (${sites.join(', ')}); ws-create + chat-wrapper read it`);
+}
 ok(REMOTE_PRELUDE.includes('$HOME/.local/bin'), 'prelude puts ~/.local/bin on PATH (native claude installer target)');
 ok(REMOTE_PRELUDE.includes('nvm.sh'), 'prelude sources nvm (the #1 "node: not found" cause on dev machines)');
 ok(REMOTE_PRELUDE.trimEnd().endsWith(';'), 'prelude is a composable ;-terminated prefix');

@@ -40,9 +40,8 @@
 const { peerOriginOf } = require('./message-manager'); // peerOriginOf = peerDisplayName's name + the PATH (S3 verify F3)
 const fs = require('fs');
 const path = require('path');
-const { sliceTextWindow } = require('./text-window.js'); // PURE: the attach slab (the claude normalizer's twin)
+const { MessageWindow } = require('./message-window.js'); // the ordered card list + its window arithmetic (dc-twins M10)
 const { refOf: channelRefOf } = require('./channel-ref.js'); // PURE (B-c127): a channel notice's conversation — `peerChannel`
-const { turnPreviewOf } = require('./assistant-note.js'); // PURE (B-40f8): THE preview of a user turn
 const { groupOf: groupCardOf } = require('./group-card.js'); // PURE (lane group-report-card): a group message's card facts — `peerGroup`
 
 function asArray(v) { return Array.isArray(v) ? v : []; }
@@ -126,14 +125,9 @@ function flattenSelect(opt) {
   return out;
 }
 
-class AcpMessageManager {
+class AcpMessageManager extends MessageWindow {
   constructor(sessionId) {
-    this.sessionId = sessionId;
-    this.seq = 0;
-    this._rkCounts = new Map();
-    this._currentRk = null;
-    this.messages = [];
-    this.messageIndex = new Map();
+    super(sessionId);
     this.userMessageIds = new Map();      // webui msgId → message id
     this._queue = [];                     // the wrapper's promptQueue, as published
     this._queuedMsgIds = new Set();       // bubbles currently wearing a 'queued' chip
@@ -143,8 +137,6 @@ class AcpMessageManager {
     this.pendingApprovals = new Map();    // requestId → {msgId, permission}
     this.streams = new Map();             // `${kind}:${messageId}` → message id (open agent/thought streams)
     this._userEcho = null;                // {messageId, text, skip, msgId}
-    this.listeners = [];
-    this.turnIndex = 0;
     this._currentTs = Date.now();
     this._currentLine = null;
     this._status = { model: '', permissionMode: '', permissionModes: [], contextWindow: 0, lastUsage: null, total_cost_usd: 0, slashCommands: [], models: [], agentInfo: null };
@@ -156,73 +148,21 @@ class AcpMessageManager {
 
   // Content-derived ids (R0): rebuild reproduces the same ids for the same
   // records — a hash of the record minus its timestamp.
-  _nextId() {
-    const rk = this._currentRk || ('s' + this.seq);
-    this.seq++;
-    const n = this._rkCounts.get(rk) || 0;
-    this._rkCounts.set(rk, n + 1);
-    return `${this.sessionId}:${rk}${n ? '.' + n : ''}`;
-  }
   static recordKey(record) {
     const { ts, ...stable } = record || {};
     let str;
     try { str = JSON.stringify(stable); } catch { str = String(record?.kind || ''); }
-    let h = 0x811c9dc5;
-    for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = (h * 0x01000193) >>> 0; }
-    return 'h:' + h.toString(36) + ':' + str.length;
+    return MessageWindow.hashKey(str);
   }
 
-  onOp(fn) { this.listeners.push(fn); }
-  offOp(fn) { const i = this.listeners.indexOf(fn); if (i >= 0) this.listeners.splice(i, 1); }
-  _emit(op) { for (const fn of this.listeners) fn(op); }
-
-  get total() { return this.messages.length; }
-  get(id) { return this.messageIndex.get(id); }
-  tail(n) { return this.messages.slice(-n); }
-  /** THE ATTACH SLAB — the claude normalizer's twin (src/text-window.js). */
-  tailWindow(opts) { return sliceTextWindow(this.messages, opts); }
-  slice(offset, limit) { return this.messages.slice(offset, offset + limit); }
+  // The window (get / tail / tailWindow / slice / turnMap / search) and the
+  // session-state reads = MessageWindow's. ACP has no goal loop (goalState is
+  // null — the status bar shows nothing); queueState = the wrapper's
+  // promptQueue as published (pairs with sidecar caps.inputQueue), and
+  // queueVerbsPublished null = a pre-verb-table wrapper.
   status() { return { ...this._status }; }
-  goalState() { return this._goalState; }      // ACP has no goal loop (stub — the status bar shows nothing)
-  queueState() { return this._queue || []; }   // the input queue (attach payload)
-  queuePublished() { return !!this._queuePublished; } // the RUNNING wrapper publishes a queue (pairs with sidecar caps.inputQueue)
-  queueVerbsPublished() { return this._queueVerbs || null; } // …and WHICH verbs it named (null = a pre-verb-table wrapper); the only advert a remote session has
   taskState() {
     return { tasks: {}, todos: Array.isArray(this._todos) ? this._todos : [] };
-  }
-
-  turnMap() {
-    const turns = [];
-    let last = -1;
-    for (let i = 0; i < this.messages.length; i++) {
-      const m = this.messages[i];
-      const ti = m.turnIndex ?? 0;
-      if (ti === last) continue;
-      const entry = { turnIndex: ti, startIdx: i, ts: m.ts, role: m.role };
-      if (m.role === 'user') Object.assign(entry, turnPreviewOf(m)); // B-40f8: THE preview rule
-      turns.push(entry);
-      last = ti;
-    }
-    return turns;
-  }
-
-  search(query) {
-    const q = String(query || '').toLowerCase();
-    if (!q) return [];
-    const out = [];
-    for (let i = 0; i < this.messages.length; i++) {
-      const text = this._extractText(this.messages[i]);
-      if (text.toLowerCase().includes(q)) out.push({ index: i, id: this.messages[i].id, type: this.messages[i].role, preview: text.slice(0, 120) });
-    }
-    return out;
-  }
-  _extractText(msg) {
-    return asArray(msg.content).map((b) => {
-      if (b.type === 'text' || b.type === 'thinking' || b.type === 'system_info') return b.text || '';
-      if (b.type === 'tool_call') return `${b.toolName || ''} ${JSON.stringify(b.input || {})}`;
-      if (b.type === 'tool_result') return `${b.toolName || ''} ${b.output || ''}`;
-      return '';
-    }).join(' ');
   }
 
   /** Server-side peer card (same shape as the claude/codex twins). */
@@ -251,49 +191,10 @@ class AcpMessageManager {
     this._finalizeStreaming(false);
     return this.messages;
   }
-  /** Time-sliced twin (same shape as MessageManager.convertHistoryAsync). */
-  // `beforeRecord` (2026-09-27): the browser-session cards interleave by time (normalizers.convertWithCards)
-  async convertHistoryAsync(records, { budgetMs = 25, onSlice, beforeRecord } = {}) {
-    let sliceStart = Date.now(), done = 0;
-    for (const r of records || []) {
-      if (beforeRecord) { try { beforeRecord(r); } catch { } }
-      try { this._processRecord(r, false); }
-      catch (e) { console.error('[acp-normalizer] record skipped during history rebuild:', e.message); }
-      done++;
-      if (Date.now() - sliceStart >= budgetMs) {
-        try { onSlice?.(done); } catch { }
-        await new Promise((res) => setImmediate(res));
-        sliceStart = Date.now();
-      }
-    }
-    this._finalizeStreaming(false);
-    return this.messages;
-  }
-  processLive(record) { this._processRecord(record, true); }
-
-  _create(fields) {
-    const msg = {
-      id: this._nextId(),
-      role: fields.role,
-      status: fields.status || 'complete',
-      content: fields.content || [],
-      ts: fields.ts || this._currentTs || Date.now(),
-      srcLine: this._currentLine,
-      turnIndex: fields.turnIndex ?? this.turnIndex,
-      toolCallId: fields.toolCallId || null,
-      toolName: fields.toolName || null,
-      toolStatus: fields.toolStatus || null,
-      permission: fields.permission || null,
-      usage: fields.usage || null,
-      taskInfo: fields.taskInfo || null,
-      backendMeta: fields.backendMeta || null,
-      collapseKind: fields.collapseKind || null,
-      noticeKind: fields.noticeKind || null,
-    };
-    this.messages.push(msg);
-    this.messageIndex.set(msg.id, msg);
-    return msg;
-  }
+  get _logTag() { return 'acp-normalizer'; }
+  _feedRecord(record, emit) { this._processRecord(record, emit); }
+  // convertHistoryAsync / processLive / _create = MessageWindow's (CARD_FIELDS
+  // = the base tail: backendMeta, collapseKind, noticeKind).
 
   _finalizeStreaming(emit) {
     for (let i = this.messages.length - 1; i >= 0; i--) {

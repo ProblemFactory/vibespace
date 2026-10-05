@@ -195,6 +195,9 @@ module.exports = {
     createReader: (session, sessionId, opts) => new store.SessionMessages(session, sessionId, opts || {}), // SessionMessages-shaped reader
     homeRename: require('./claude-home'),           // ~/.claude/projects re-encoding after a home rename (server.js / boot-restore call it)
     writerSweep: claudeWriterSweep,                  // (rid, shq) → POSIX sweep script (writer-sweep.js runs it)
+    // the incident SCENE (src/incident.js, dc-twins M4 — local and remote read the same row): the process word, the
+    // lock files the CLI deletes on exit, the state dirs worth a listing [label, $HOME-relative dir, max], the CLI
+    scene: { process: 'claude', locks: '.claude/sessions', listings: [['project dirs', '.claude/projects', 30]], version: 'claude' },
     // remote transcript location (hosts.fetchTranscript): where find(1) looks + the cache name
     remoteFind: (id) => ({ root: '"$HOME"/.claude/projects', findExpr: `-maxdepth 2 -name ${JSON.stringify(id + '.jsonl')}`, cacheRel: id + '.jsonl', maxBytes: 64 * 1024 * 1024 }),
   },
@@ -268,8 +271,10 @@ module.exports = {
   billingIdentity: claudeBillingIdentity,
   // THE DECLARED UI ROW (lane dc-client-billing, 2026-10-04): billing words, the accounts-store default field,
   // the usage bucket, effort/lock facts and the legacy id forms — the chrome reads THESE, never an id. The
-  // client META mirrors it key for key (test-harness-contract deep-compares).
-  ui: { billing: { globalLogin: 'Subscription', cliLogin: 'CLI login', pickLogin: 'Subscription (Pro/Max login)', pickLoginHost: '', planSuffix: ' (Pro/Max)', switchLogin: 'Subscription (Pro/Max)', defaultIdField: 'defaultAccountId', apiKeys: true, longLivedToken: true, hostLogin: true, machineUsage: true, usage: 'accounts', globalUsageKey: '__global__', estimates: true }, effortReport: 'commanded', effortLevels: null, modelLock: true, legacyIds: true, resumeResend: true },
+  // client META mirrors it key for key (test-harness-contract deep-compares). effortExtras (lane effort-ultracode): the effort
+  // rows that are NOT --effort values — appended AFTER the CLI's parsed levels, never replaced by them; a row
+  // whose requiresLevel the probe did not parse is absent by name (ultracode spawns as --effort xhigh).
+  ui: { billing: { globalLogin: 'Subscription', cliLogin: 'CLI login', pickLogin: 'Subscription (Pro/Max login)', pickLoginHost: '', planSuffix: ' (Pro/Max)', switchLogin: 'Subscription (Pro/Max)', defaultIdField: 'defaultAccountId', apiKeys: true, longLivedToken: true, hostLogin: true, machineUsage: true, usage: 'accounts', globalUsageKey: '__global__', estimates: true }, effortReport: 'commanded', effortLevels: null, effortExtras: [{ value: 'ultracode', label: 'Ultracode', hint: 'xhigh effort + standing dynamic-workflow orchestration', requiresLevel: 'xhigh' }], modelLock: true, legacyIds: true, resumeResend: true },
   settingsPrefix: 'claude',
   // THE SETTINGS TABLE (design-harness-settings §2): joined by OBJECT IDENTITY
   // like `caps` above — the schema derives the Claude section from it, the

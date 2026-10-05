@@ -3,7 +3,7 @@ import { escHtml, showInputDialog, showConfirmDialog, uiScale, showToast, fetchJ
 import { renderArtifactList } from './artifact-card.js'; // lane artifacts-model: the Artifacts chip's list
 import { UI_ICONS } from './icons.js';
 import { systemSelect } from './design-home.js'; // lane design-systems-home: the design chip's "Design system" select
-import { BACKEND_META, getBackendMeta, backendFeatureCaps, autoResumeCapsFor, effortDisplay, effortLabel, noteModelCatalog, responseStyleLabel, responseStyleCaps, styleAppliesLive, initHealthLabel, uiRow, billingRow } from './agent-meta.js';
+import { BACKEND_META, getBackendMeta, backendFeatureCaps, autoResumeCapsFor, effortDisplay, effortLabel, effortOptions, noteModelCatalog, responseStyleLabel, responseStyleCaps, styleAppliesLive, initHealthLabel, uiRow, billingRow } from './agent-meta.js';
 import { t } from './i18n.js';
 import { shortWorkflowName } from '../workflow-name.js';
 import { waitingChip } from '../helper-ask.js'; // PURE (lane S1): the waiting chip names who waits
@@ -1714,7 +1714,7 @@ export class ChatStatusBar {
         // Async population: show a Loading row immediately (a bare empty box
         // reads as a dead click), and NEVER vanish on fetch failure — the
         // effort enum is stable, so fall back to the hardcoded ladder.
-        const claudeLadder = (levels) => [{ value: '', label: t('Default (reset)') }, ...levels, { value: 'ultracode', label: t('ultracode (xhigh + workflows)') }];
+        const claudeLadder = (levels, extras) => effortOptions(this._backend, levels, extras ?? uiRow(this._backend).effortExtras, { head: { value: '', label: t('Default (reset)') }, capitalize: false });
         const loading = document.createElement('div');
         loading.className = 'chat-status-dropdown-item chat-status-dim';
         loading.textContent = t('Loading…');
@@ -1722,17 +1722,16 @@ export class ChatStatusBar {
         fetch('/api/session-options').then(r => r.json()).then(data => {
           if (!dropdown.isConnected) return;
           loading.remove();
-          const levels = (data?.effortLevels || ['low', 'medium', 'high', 'xhigh', 'max']).map(v => ({ value: v, label: v }));
           // "ultracode" isn't an effortLevel — it's a separate mode (xhigh +
-          // dynamic-workflow orchestration). The CLI's own /effort UI appends it
-          // to the ladder; mirror that. The adapter wires it via the ultracode
-          // settings key, not effortLevel. (Gated CLI-side on an xhigh-capable
-          // model + dynamic workflows — a no-op if unsupported.)
-          addItems(claudeLadder(levels));
+          // dynamic-workflow orchestration) the harness DECLARES (ui.effortExtras);
+          // the server answers it gated on the CLI, appended after the levels
+          // the way the CLI's own /effort UI does. The adapter wires it via the
+          // ultracode settings key, not effortLevel.
+          addItems(claudeLadder(data?.effortLevels || ['low', 'medium', 'high', 'xhigh', 'max'], data?.effortExtras));
         }).catch(() => {
           if (!dropdown.isConnected) return;
           loading.remove();
-          addItems(claudeLadder(['low', 'medium', 'high', 'xhigh', 'max'].map(v => ({ value: v, label: v }))));
+          addItems(claudeLadder(['low', 'medium', 'high', 'xhigh', 'max']));
         });
       }
       return;

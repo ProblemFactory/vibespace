@@ -1511,7 +1511,7 @@ function serveConnection(sock) {
           // per-op capability gating (three-tier design): consumers check the
           // capability, NEVER parse daemonVersion — unknown ops on an old
           // daemon get no reply and hang the request until its timeout
-          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo', 'session-events', 'proc-list', 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'desktop-serve', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream'],
+          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'desktop-serve', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream'],
         }));
         return;
       }
@@ -1938,6 +1938,18 @@ function serveConnection(sock) {
       // lane-pairing ③ (THREE-TOUCH: reply `dial-status-result` by id, the capability in the hello-ack, no watch):
       // the device's own record of every dial outcome (state/dial-status.json — never the token)
       if (msg.op === 'dial-status') { mux.control({ op: 'dial-status-result', id: msg.id, status: readDialStatus() }); return; }
+      if (msg.op === 'design-fs') {
+        // The Design window's folder reads + its user.json write (dc-twins M1) via THE shared module (src/design-fs.js)
+        // — the same code the hub runs for device #0, node fs only (a Windows agent serves it too). The hub's sh script
+        // is the fallback rung for daemon-less ssh hosts only.
+        (async () => {
+          try {
+            const dfs = require('./../design-fs.js');
+            mux.control({ op: 'design-fs-result', id: msg.id, result: dfs.toWire(await dfs.run(msg.action, msg.params || {})) });
+          } catch (e) { mux.control({ op: 'design-fs-result', id: msg.id, error: String(e.message || e) }); }
+        })();
+        return;
+      }
       if (msg.op === 'sysinfo') {
         // Machine snapshot via THE shared implementation (src/sysinfo.js) —
         // the same module the server runs for device #0, executed where the

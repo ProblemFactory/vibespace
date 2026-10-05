@@ -285,7 +285,7 @@ const SHARED = new Set(['src/discovery-facts.js', 'src/sysinfo.js', 'src/machine
   // transitively via the daemon-bundle marker check (round-6 verifier).
   'src/usage-cache-write.js',
   'src/session-store.js', 'src/codex-session-store.js', 'src/normalizers.js', 'src/message-manager.js',
-  'src/codex-message-manager.js', 'src/adapters/base.js', 'src/adapters/claude-code.js', 'src/adapters/codex.js',
+  'src/codex-message-manager.js', 'src/message-window.js', 'src/adapters/base.js', 'src/adapters/claude-code.js', 'src/adapters/codex.js',
   'src/adapters/shell.js', 'src/adapters/index.js', 'src/usage-estimator.js', 'src/usage-anchors.js', 'src/safe-fs.js',
   'src/transcript-worker.js', 'src/ssh-key.js', 'src/migration-runner.js', 'src/peer-messaging.js',
   // rate-limit-capture is fs/path-only by design ("so the device daemon can bundle it") — SHARED, not ORCH
@@ -296,6 +296,9 @@ const SHARED = new Set(['src/discovery-facts.js', 'src/sysinfo.js', 'src/machine
   'src/harnesses/claude-quota.js', 'src/harnesses/codex-quota.js', 'src/harnesses/null-quota.js',
   // ACP v1 harness (S8): generic descriptor factory + first agent, adapter, normalizer (+ store reader)
   'src/harnesses/acp.js', 'src/harnesses/opencode.js', 'src/adapters/acp.js', 'src/acp-message-manager.js',
+  // the Design window's folder reads + its user.json write (dc-twins M1): node fs + the PURE design model / token
+  // check; the daemon bundles it (`design-fs` op) and the hub runs it in-process for device #0
+  'src/design-fs.js',
   // codex 0.153 thread/read fallback (B-21e4 item 5): pure Thread→records mapper + one bounded app-server read; node builtins only
   'src/codex-thread-read.js',
   // OpenCode serve-mode store facts (S9): 127.0.0.1 client + locator/keeper + 'acp-events' synthesis — facts about a machine
@@ -529,10 +532,19 @@ for (const [edge] of EXCEPTIONS) {
   const broken = [];
   for (const f of svFiles) {
     const s9 = read(f);
+    // A class that `extends` a relatively-required base (src/message-window.js,
+    // dc-twins M10) inherits that file's definitions — and nothing else's.
+    const inherited = [];
+    for (const m of s9.matchAll(/class\s+\w+\s+extends\s+(\w+)/g)) {
+      const rq = s9.match(new RegExp(`\\{[^}]*\\b${m[1]}\\b[^}]*\\}\\s*=\\s*require\\(['"](\\.[^'"]+)['"]\\)`));
+      const bp = rq && path.normalize(path.join(path.dirname(f), rq[1])).replace(/\\/g, '/');
+      if (bp && fs.existsSync(path.join(REPO, bp))) inherited.push(read(bp));
+    }
     const called = new Set([...s9.matchAll(/this\.(_[a-zA-Z0-9]+)\(/g)].map((m) => m[1]));
     for (const name of called) {
       const woCalls = s9.replace(new RegExp(`this\\.${name}\\(`, 'g'), '');
-      const defined = new RegExp(`(^|\\s)${name}\\s*\\(`, 'm').test(woCalls) || new RegExp(`this\\.${name}\\s*=`).test(s9) || new RegExp(`${name}\\s*:`).test(s9);
+      const defined = new RegExp(`(^|\\s)${name}\\s*\\(`, 'm').test(woCalls) || new RegExp(`this\\.${name}\\s*=`).test(s9) || new RegExp(`${name}\\s*:`).test(s9)
+        || inherited.some((b) => new RegExp(`(^|\\s)${name}\\s*\\(`, 'm').test(b.replace(new RegExp(`this\\.${name}\\(`, 'g'), '')));
       if (!defined) broken.push(`${f}: this.${name}() called but never defined`);
     }
   }

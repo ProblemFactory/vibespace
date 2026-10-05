@@ -316,6 +316,9 @@ try {
   }
   CLAUDE_SUPPORTS_NAME = /--name\b/.test(help);
 } catch {}
+// The harness's declared effort extras (ultracode), gated on what the probe
+// parsed — appended client-side AFTER the levels, never in their place.
+const EFFORT_EXTRAS = effortExtrasFor(harnessOf('claude')?.ui?.effortExtras, EFFORT_LEVELS);
 // Propagate capability flags to the adapter
 adapterRegistry.get('claude').config.supportsName = CLAUDE_SUPPORTS_NAME;
 // Discover available models per backend (cached, refreshed periodically)
@@ -431,7 +434,15 @@ function refreshAvailableModels() {
   return { X_ENV, detectXDisplay, refreshXEnv, stabilizeXAuth, adapterRegistry,
     CLAUDE_CMD, CODEX_CMD, CODEX_LINUX_SANDBOX_CMD, CODEX_SANDBOX_SUPPORTED,
     CLAUDE_SUBSCRIPTION_LOGIN_HELPER, CLAUDE_SUPPORTS_NAME, PERMISSION_MODES,
-    EFFORT_LEVELS, CLAUDE_MODEL_ALIASES, CLAUDE_KNOWN_MODELS, AVAILABLE_MODELS,
+    EFFORT_LEVELS, EFFORT_EXTRAS, CLAUDE_MODEL_ALIASES, CLAUDE_KNOWN_MODELS, AVAILABLE_MODELS,
     noteModelSeen, refreshAvailableModels, ACP_COMMANDS, harnessAvailability, noteHarnessModels, opencodeServe, cliCmds };
 }
-module.exports = { create, storeFailureReason };
+// A declared extra rides only when the CLI parsed the level it spawns as
+// (ultracode = `--effort xhigh` + the ultracode settings key; the key is in the
+// 2.1.281–2.1.288 binaries, gated CLI-side on an xhigh-capable model) — a CLI
+// without that level ⇒ the row is ABSENT by name, never a no-op pick. Pure.
+function effortExtrasFor(declared, levels) {
+  return (declared || []).filter((x) => !x.requiresLevel || (levels || []).includes(x.requiresLevel))
+    .map(({ value, label, hint }) => ({ value, label, hint }));
+}
+module.exports = { create, storeFailureReason, effortExtrasFor };

@@ -70,7 +70,7 @@ fs.writeFileSync(stubPath, `#!${process.execPath}
 const fs = require('fs');
 const args = process.argv.slice(2);
 if (args.includes('--version')) { console.log('2.1.281 (Claude Code) stub'); process.exit(0); }
-if (args.includes('--help')) { console.log('Usage: claude [options]\\n  --permission-mode <mode>              Permission mode to use for the session\\n                                        (choices: "acceptEdits", "auto",\\n                                        "bypassPermissions", "manual",\\n                                        "dontAsk", "plan")'); process.exit(0); }
+if (args.includes('--help')) { console.log('Usage: claude [options]\\n  --permission-mode <mode>              Permission mode to use for the session\\n                                        (choices: "acceptEdits", "auto",\\n                                        "bypassPermissions", "manual",\\n                                        "dontAsk", "plan")\\n  --effort <level>                      Effort level for the current session\\n                                        (low, medium, high, xhigh, max)'); process.exit(0); }
 fs.writeFileSync(${JSON.stringify(stubDir)} + '/argv-' + process.pid + '.json', JSON.stringify(args));
 const SID = '0e1a0000-0000-4000-8000-' + String(process.pid).padStart(12, '0');
 const STEPS = ${JSON.stringify(STEPS)};
@@ -315,6 +315,27 @@ try {
   check('CONTROL: with claude.allowAgentTools off, a new session\'s CLI gets NO allow rules (only the other defaults)', !!off.argv && !!sOff && typeof sOff === 'object' && !('permissions' in sOff), sOff);
   await fetch(`http://127.0.0.1:${PORT}/api/settings`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ 'claude.allowAgentTools': null }) });
   if (off.sid) liveWs.send(JSON.stringify({ type: 'kill', sessionId: off.sid }));
+
+  // ═══ B2 the effort picker keeps Ultracode (lane effort-ultracode) ═════════════════
+  // /api/session-options used to REPLACE the dialog's effort list with the
+  // CLI's parsed --effort levels, which never carry ultracode (not an
+  // --effort value) — the row vanished the moment the fetch landed.
+  console.log('B2 the dialog\'s effort select after /api/session-options');
+  const sopts = await (await fetch(`http://127.0.0.1:${PORT}/api/session-options`)).json();
+  check('the server answers the CLI\'s parsed levels and the declared extras apart', JSON.stringify(sopts.effortLevels) === JSON.stringify(['low', 'medium', 'high', 'xhigh', 'max']) && (sopts.effortExtras || []).map((x) => x.value).join() === 'ultracode', sopts);
+  await evalJs(`app.showNewSessionDialog(); document.getElementById('input-backend').value = 'claude'; document.getElementById('input-backend').dispatchEvent(new Event('change')); true`);
+  const landed = await waitFor(`[...document.getElementById('input-effort').options].some((o) => o.value === 'xhigh' && o.textContent === 'Xhigh')`); // 'Xhigh' = the fetched list ('XHigh' = the static seed)
+  const effortRows = await evalJs(`JSON.stringify([...document.getElementById('input-effort').options].map((o) => [o.value, o.textContent]))`);
+  check('THE BUG: after the fetch landed the dialog\'s effort select still lists Ultracode — Auto, the parsed levels, then the declared extra', landed && JSON.stringify(JSON.parse(effortRows).map((r) => r[0])) === JSON.stringify(['', 'low', 'medium', 'high', 'xhigh', 'max', 'ultracode']), effortRows);
+  check('…labelled with its hint the way codex\'s ultra is', JSON.parse(effortRows).some((r) => r[0] === 'ultracode' && /^Ultracode — xhigh effort/.test(r[1])), effortRows);
+  const argvBeforeU = argvFiles().length;
+  await evalJs(`document.getElementById('input-cwd').value = ${JSON.stringify(CWD)}; document.getElementById('input-mode').value = 'chat'; document.getElementById('input-effort').value = 'ultracode'; true`);
+  await realClick('#dialog-new-session .btn-create');
+  for (let i = 0; i < 80 && argvFiles().length <= argvBeforeU; i++) await sleep(150);
+  const uFiles = argvFiles();
+  const uArgv = uFiles.length > argvBeforeU ? uFiles[uFiles.length - 1].argv : null;
+  const uSet = uArgv ? settingsOfArgv(uArgv) : null;
+  check('picking Ultracode spawns the CLI with --effort xhigh + the ultracode settings key (never --effort ultracode)', !!uArgv && uArgv[uArgv.indexOf('--effort') + 1] === 'xhigh' && !uArgv.includes('ultracode') && uSet?.ultracode === true, uArgv);
 
   // ═══ C the permission cards ════════════════════════════════════════════
   console.log('C the permission cards (the stub asks like the CLI)');

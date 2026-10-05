@@ -115,6 +115,15 @@ class RemoteFs {
 
   _host(id) { return this.hosts.get(id); }
 
+  /** The machine's daemon when it DECLARES `cap` in its hello (dc-twins M1: the Design window's `design-fs` op) → the
+   *  DeviceManager, else null — null = the caller's own ONE-command sh rung (a daemon-less ssh host, an older daemon). */
+  async deviceWith(id, cap) {
+    const dm = await this._dev(id);
+    if (!dm) return null;
+    const caps = daemonInfoOf(dm).capabilities;
+    return Array.isArray(caps) && caps.includes(cap) ? dm : null;
+  }
+
   /** lane windows-device-fs: → null for every machine that is not a Windows agent (the paths below, unchanged), else
    *  the DeviceManager of a Windows agent that has `fs-portable`. A Windows agent WITHOUT it is refused by name (its
    *  version + the one step); `op` names what cannot be done without a shell on Windows yet (WIN_REFUSED). */

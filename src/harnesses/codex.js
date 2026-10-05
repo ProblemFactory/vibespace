@@ -150,6 +150,7 @@ module.exports = {
     // app-server knows no remote thread; a present rollout is always authoritative).
     warmTranscript: (id, cwd, opts) => codexThreadRead.warmMissingThread(id, { locate: findCodexSessionJsonlPath, remote: !!(opts && opts.remote) }),
     writerSweep: codexWriterSweep,                 // (rid, shq, {protectSids}) → POSIX sweep script
+    scene: { process: 'codex', listings: [['codex sessions', '.codex/sessions', 10]], version: 'codex' },   // the incident scene (src/incident.js)
     remoteFind: (id) => ({
       root: '"$HOME"/.codex/sessions',
       findExpr: `-maxdepth 5 -type f \\( -name ${JSON.stringify('rollout-*' + id + '.jsonl')} -o -name ${JSON.stringify('rollout-*' + id + '.jsonl.zst')} \\)`,

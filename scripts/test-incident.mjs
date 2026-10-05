@@ -169,6 +169,20 @@ const probe = inc.buildRemoteTranscriptProbe([CID, TID]);
 check('remote probe: claude find line = the pre-B-8ebb expression', probe.includes(`find "$HOME"/.claude/projects -maxdepth 2 -name "${CID}.jsonl" 2>/dev/null | head -3); do probe_transcript "$f" "claude"; done`), probe.slice(0, 300));
 check('remote probe: codex rollouts (.jsonl and .jsonl.zst) probed under $HOME/.codex/sessions', probe.includes(`rollout-*${TID}.jsonl.zst`) && probe.includes('"$HOME"/.codex/sessions') && probe.includes('probe_transcript "$f" "codex"'), probe.slice(-400));
 check('REMOTE_SCRIPT defines probe_transcript once and embeds the per-harness lines', (() => { const s = inc.REMOTE_SCRIPT([CID]); return s.includes('probe_transcript() {') && s.includes('probe_transcript "$f" "claude"') && !s.includes('$HOME/.claude/projects -maxdepth 2 -name "$cid.jsonl"'); })());
+// dc-twins M4: a harness is captured by its declared `store.scene` row — a FAKE harness added through ONE registration
+// line shows up in the remote script (process word, locks, listing, --version) and in the local process filter; the
+// script names no harness of its own
+{
+  const reg = (await import('node:module')).createRequire(import.meta.url)(path.join(repo, 'src', 'harnesses', 'index.js'));
+  const base = reg.get('shell');
+  reg.register({ ...base, id: 'acme-cli', store: { scene: { process: 'acme-cli', locks: '.acme/locks', listings: [['acme threads', '.acme/threads', 7]], version: 'acme-cli' } } });
+  try {
+    const s = inc.REMOTE_SCRIPT([CID]);
+    check('scene rows: a fake harness (one register() line) is in the remote scene — ps words, its locks, its listing, its --version', /grep -E "[^"]*\bacme-cli\b/.test(s) && s.includes('echo "== acme-cli locks"\nfor f in $HOME/.acme/locks/*.json') && s.includes('echo "== acme threads"; ls $HOME/.acme/threads 2>/dev/null | head -7') && s.includes('(acme-cli --version 2>/dev/null || echo "acme-cli: not on PATH")'));
+  } finally { reg.unregister('acme-cli'); }
+  const incCode = fs.readFileSync(path.join(repo, 'src', 'incident.js'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');   // code, not its history comments
+  check('scene rows: incident.js spells no harness lock dir, listing or CLI (local and remote read the rows)', !/\.claude\/sessions|\.codex\/sessions|claude --version|codex --version|\|claude\||\|codex\|/.test(incCode) && !/'\.claude', 'sessions'/.test(incCode));
+}
 check('incident.js carries no backend id branch (the registry is the only harness knowledge)', !/['"]codex['"]\s*\?|backend === ['"]codex['"]|=== ['"]claude['"]/.test(fs.readFileSync(path.join(repo, 'src', 'incident.js'), 'utf8')));
 
 // ── 2.239.1: the dialog must actually render its submit button (the boss's

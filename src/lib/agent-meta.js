@@ -60,8 +60,10 @@ export const BACKEND_META = {
     permissionModes: ['default', 'acceptEdits', 'bypassPermissions', 'plan', 'auto'],
     // THE DECLARED UI ROW (lane dc-client-billing, 2026-10-04): billing words, the accounts-store default field,
     // the usage bucket, effort/lock facts and the legacy id forms — the chrome reads THESE, never an id. The
-    // client META mirrors it key for key (test-harness-contract deep-compares).
-    ui: { billing: { globalLogin: 'Subscription', cliLogin: 'CLI login', pickLogin: 'Subscription (Pro/Max login)', pickLoginHost: '', planSuffix: ' (Pro/Max)', switchLogin: 'Subscription (Pro/Max)', defaultIdField: 'defaultAccountId', apiKeys: true, longLivedToken: true, hostLogin: true, machineUsage: true, usage: 'accounts', globalUsageKey: '__global__', estimates: true }, effortReport: 'commanded', effortLevels: null, modelLock: true, legacyIds: true, resumeResend: true },
+    // client META mirrors it key for key (test-harness-contract deep-compares). effortExtras (lane effort-ultracode): the effort
+    // rows that are NOT --effort values — appended AFTER the CLI's parsed levels, never replaced by them; a row
+    // whose requiresLevel the probe did not parse is absent by name (ultracode spawns as --effort xhigh).
+    ui: { billing: { globalLogin: 'Subscription', cliLogin: 'CLI login', pickLogin: 'Subscription (Pro/Max login)', pickLoginHost: '', planSuffix: ' (Pro/Max)', switchLogin: 'Subscription (Pro/Max)', defaultIdField: 'defaultAccountId', apiKeys: true, longLivedToken: true, hostLogin: true, machineUsage: true, usage: 'accounts', globalUsageKey: '__global__', estimates: true }, effortReport: 'commanded', effortLevels: null, effortExtras: [{ value: 'ultracode', label: 'Ultracode', hint: 'xhigh effort + standing dynamic-workflow orchestration', requiresLevel: 'xhigh' }], modelLock: true, legacyIds: true, resumeResend: true },
   },
   shell: {
     id: 'shell',
@@ -173,12 +175,28 @@ export const BACKEND_META = {
 /** Picker label for an effort level: the plain value (capitalized for the
  *  New-Session / settings pickers, lowercase for the status-bar rows) plus the
  *  harness's META `effortHints` one-liner when the level has one (codex
- *  'ultra' → "… — delegates to sub-agents (multi-agent), extra usage"). */
+ *  'ultra' → "… — delegates to sub-agents (multi-agent), extra usage"). A
+ *  declared ui.effortExtras row (claude 'ultracode') carries its own label +
+ *  hint the same way. */
 export function effortLabel(backend, value, { capitalize = false } = {}) {
   const v = String(value || '');
-  const base = capitalize ? v.charAt(0).toUpperCase() + v.slice(1) : v;
-  const hint = BACKEND_META[backend]?.effortHints?.[v];
+  const extra = BACKEND_META[backend]?.ui?.effortExtras?.find((x) => x.value === v);
+  const base = capitalize ? (extra?.label || v.charAt(0).toUpperCase() + v.slice(1)) : v;
+  const hint = BACKEND_META[backend]?.effortHints?.[v] || extra?.hint;
   return hint ? `${base} — ${t(hint)}` : base;
+}
+
+/** THE EFFORT PICKER ROWS (lane effort-ultracode): [head], the CLI's parsed levels, then the
+ *  harness's declared extras — APPENDED, never swapped in for one another (the
+ *  /api/session-options fetch used to REPLACE the list with the parsed levels,
+ *  and ultracode — not an --effort value — vanished from every claude picker).
+ *  `extras` is what the server answered (already gated on the CLI); pass the
+ *  META row only as the seed before/without an answer. Pure. */
+export function effortOptions(backend, levels, extras, { head = null, capitalize = true } = {}) {
+  const lv = (levels || []).map(String).filter(Boolean);
+  const ex = (extras || []).filter((x) => x?.value && !lv.includes(x.value));
+  return [...(head ? [head] : []),
+    ...[...lv, ...ex.map((x) => x.value)].map((value) => ({ value, label: effortLabel(backend, value, { capitalize }) }))];
 }
 
 // ── MODEL CATALOG (2.369.62) ──

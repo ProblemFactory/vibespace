@@ -33,7 +33,7 @@ export class ChatInput {
     this._isTouch = isTouch || (() => false);
     this._getTouchEnterSends = getTouchEnterSends || (() => false);
     this._getEnterSends = getEnterSends || (() => true);   // chat.enterSends (desktop): off ⇒ Cmd/Ctrl+Enter sends
-    this._enterGuard = new EnterGuard();                     // inc-muukd9oq-qyc3: a composition ended by another key arms a short newline window
+    this._enterGuard = new EnterGuard();                     // inc-muukd9oq-qyc3 r2: every compositionend arms a window that swallows the commit's Enter
     this._onQueueOp = onQueueOp || null;   // (op, id, extra) → ws 'queue-op'
     // THE CHORD (2026-09-07 owner ask). `onSteerChord` routes the composer's
     // Alt+Enter through the SAME command the registered keybinding runs
@@ -193,7 +193,6 @@ export class ChatInput {
     // Send: Enter in normal mode, Ctrl+Enter in expanded mode
     // Tab to accept slash autocomplete
     this._textarea.addEventListener('keydown', (e) => {
-      this._enterGuard.keydown(e); // FIRST: which key ended a composition decides whether its end arms the guard
       if (!this._slashDropdown.classList.contains('hidden')) {
         if (e.key === 'Tab' || e.key === 'Enter') {
           const active = this._slashDropdown.querySelector('.active');
@@ -257,11 +256,11 @@ export class ChatInput {
       // Enter: chat-enter-keys.js decides (PURE). Touch soft keyboards have no Shift — their enter key is the only way
       // to type a newline, so by default it inserts one and sending is the button (2.234.0, real report "点换行之后就发出了";
       // chat.touchEnterSends opts back in). The expanded composer and chat.enterSends off: Ctrl/Cmd+Enter sends.
-      // 'ime-newline' (inc-muukd9oq-qyc3): the input method JUST ended on another key — the default newline stays and
-      // the line under the box says so; the next Enter sends.
+      // 'ime-swallow' (inc-muukd9oq-qyc3 r2): the input method JUST ended — this is its committing Enter (the owner's
+      // Chrome/macOS delivers it plain): no newline, no send; the line under the box says so and the next Enter sends.
       const act = this._enterGuard.enter(e, { expanded: this._expanded, touch: this._isTouch(), touchEnterSends: this._getTouchEnterSends(), enterSends: this._getEnterSends() !== false });
       if (act === 'send') { e.preventDefault(); this._send(); }
-      else if (act === 'ime-newline') this._showImeHint();
+      else if (act === 'ime-swallow') { e.preventDefault(); this._showImeHint(); }
     });
 
     this._textarea.addEventListener('compositionstart', () => this._enterGuard.compositionstart());

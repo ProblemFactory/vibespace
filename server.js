@@ -83,7 +83,7 @@ const ENV_CMD = resolveCmd('env');
 const { X_ENV, detectXDisplay, refreshXEnv, stabilizeXAuth, adapterRegistry,
   CLAUDE_CMD, CODEX_CMD, CODEX_LINUX_SANDBOX_CMD, CODEX_SANDBOX_SUPPORTED,
   CLAUDE_SUBSCRIPTION_LOGIN_HELPER, CLAUDE_SUPPORTS_NAME, PERMISSION_MODES,
-  EFFORT_LEVELS, CLAUDE_MODEL_ALIASES, CLAUDE_KNOWN_MODELS, AVAILABLE_MODELS,
+  EFFORT_LEVELS, EFFORT_EXTRAS, CLAUDE_MODEL_ALIASES, CLAUDE_KNOWN_MODELS, AVAILABLE_MODELS,
   noteModelSeen, refreshAvailableModels, harnessAvailability, noteHarnessModels, cliCmds,
 } = require('./src/server/cli-env.js').create({
   rootDir: __dirname, CLAUDE_CMD_RAW, CODEX_CMD_RAW, resolveCmd,
@@ -1604,7 +1604,7 @@ app.locals.harnessAvailability = harnessAvailability; app.get('/api/available-mo
   res.json(AVAILABLE_MODELS);
 });
 app.get('/api/session-options', (req, res) => {
-  res.json({ effortLevels: EFFORT_LEVELS, permissionModes: PERMISSION_MODES });
+  res.json({ effortLevels: EFFORT_LEVELS, effortExtras: EFFORT_EXTRAS, permissionModes: PERMISSION_MODES });
 });
 
 // ── WebSocket Terminal Handler (extracted to src/ws-handler.js) ──

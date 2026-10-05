@@ -29,6 +29,16 @@ const { execFile } = require('child_process');
 // (store.locate / store.remoteFind) — the freeze iterates it instead of
 // knowing any backend (B-8ebb). Lazy: incident.js stays importable alone.
 const listHarnesses = () => require('./harnesses').list();
+/** Every registered harness's declared incident SCENE (`store.scene`, dc-twins M4): `process` (its word in the process
+ *  table), `locks` (the $HOME-relative dir of lock files the CLI deletes on exit), `listings` ([label, dir, max]) and
+ *  `version` (the CLI's name for `--version`). captureLocal and the remote script read the SAME rows — a harness is
+ *  captured by declaring them, never by an edit here. */
+function scenes() {
+  let hs = [];
+  try { hs = listHarnesses(); } catch { hs = []; }
+  return hs.filter((h) => h.store && h.store.scene && typeof h.store.scene === 'object').map((h) => ({ id: h.id, ...h.store.scene }));
+}
+const reWord = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 const MAX_HOSTS = 6;
 const MAX_CIDS = 12;
@@ -166,10 +176,11 @@ async function captureLocal(dir, { dataDir, cids, terminalIds = [] }) {
   fs.mkdirSync(frozen, { recursive: true });
   const out = { at: new Date().toISOString(), host: os.hostname(), uptimeS: Math.round(os.uptime()) };
 
-  // process table: the whole session tree (dtach / wrappers / claude / codex /
-  // node) — a user's kill erases it and it is THE liveness evidence
+  // process table: the whole session tree (dtach / wrappers / every harness's
+  // declared process word / node) — a user's kill erases it and it is THE liveness evidence
+  const procRe = new RegExp(['dtach', 'chat-wrapper', 'pty-wrapper', ...scenes().filter((s) => s.process).map((s) => reWord(s.process)), 'agentd', 'node server\\.js', 'PID'].join('|'));
   out.processes = (await sh('ps', ['-eo', 'pid,ppid,lstart,etime,rss,stat,args'], 10000))
-    .split('\n').filter((l) => /dtach|chat-wrapper|pty-wrapper|claude|codex|agentd|node server\.js|PID/.test(l))
+    .split('\n').filter((l) => procRe.test(l))
     .slice(0, 400).map((l) => l.slice(0, 400));
 
   // dtach sockets (the session anchors) + buffer/meta files
@@ -213,16 +224,20 @@ async function captureLocal(dir, { dataDir, cids, terminalIds = [] }) {
     }
   } catch (e) { out.terminalTails = { error: e.message }; }
 
-  // claude's OWN lock files — deleted the moment a CLI exits, so a user's
-  // kill destroys the proof of what was running
-  const lockDir = path.join(os.homedir(), '.claude', 'sessions');
-  out.claudeLocks = {};
-  try {
-    for (const f of fs.readdirSync(lockDir).slice(0, 120)) {
-      try { out.claudeLocks[f] = JSON.parse(fs.readFileSync(path.join(lockDir, f), 'utf8')); }
-      catch { out.claudeLocks[f] = statOf(path.join(lockDir, f)); }
-    }
-  } catch (e) { out.claudeLocks = { error: e.message }; }
+  // each harness's OWN lock files (`scene.locks`) — deleted the moment a CLI
+  // exits, so a user's kill destroys the proof of what was running. Key
+  // `<id>Locks` (claude's = `claudeLocks`, the bundle's key since 2.239.0).
+  for (const s of scenes()) {
+    if (!s.locks) continue;
+    const key = s.id + 'Locks', lockDir = path.join(os.homedir(), s.locks);
+    out[key] = {};
+    try {
+      for (const f of fs.readdirSync(lockDir).slice(0, 120)) {
+        try { out[key][f] = JSON.parse(fs.readFileSync(path.join(lockDir, f), 'utf8')); }
+        catch { out[key][f] = statOf(path.join(lockDir, f)); }
+      }
+    } catch (e) { out[key] = { error: e.message }; }
+  }
 
   // TRANSCRIPT IDENTITY for every referenced conversation: size+mtime+sha256.
   // A manual `claude --resume` on a live id double-writes or forks — the hash
@@ -315,7 +330,7 @@ function buildRemoteTranscriptProbe(cids) {
 
 /** REMOTE scene per host — one bounded read-only probe over the SAME channel
  *  the roster/status probes use (ssh or dial), so it works for both. */
-const REMOTE_SCRIPT = (cids) => `
+const REMOTE_SCRIPT = (cids, sc = scenes()) => `
 probe_transcript() {
   echo "--- $1 [$2]"
   stat -c 'size=%s mtime=%y' "$1" 2>/dev/null || stat -f 'size=%z mtime=%Sm' "$1" 2>/dev/null
@@ -326,17 +341,16 @@ probe_transcript() {
 echo "== uptime"; uptime 2>/dev/null | head -1
 echo "== whoami"; id -un 2>/dev/null
 echo "== claude/dtach/keeper processes"
-ps -eo pid,ppid,lstart,etime,rss,args 2>/dev/null | grep -E "claude|dtach|vibespace-|codex" | grep -v grep | head -40 | cut -c1-320
-echo "== claude locks"
-for f in $HOME/.claude/sessions/*.json; do [ -f "$f" ] && echo "--- $f" && head -c 400 "$f" && echo; done 2>/dev/null | head -80
+ps -eo pid,ppid,lstart,etime,rss,args 2>/dev/null | grep -E "${['dtach', 'vibespace-', ...sc.filter((s) => s.process).map((s) => reWord(s.process))].join('|')}" | grep -v grep | head -40 | cut -c1-320
+${sc.filter((s) => s.locks).map((s) => `echo "== ${s.id} locks"
+for f in $HOME/${s.locks}/*.json; do [ -f "$f" ] && echo "--- $f" && head -c 400 "$f" && echo; done 2>/dev/null | head -80`).join('\n')}
 echo "== keeper run dir"; ls -la $HOME/.vibespace/run/ 2>/dev/null | head -20
 echo "== agentd"; ls -la $HOME/.vibespace/ 2>/dev/null | head -20
 echo "== transcripts"
 ${buildRemoteTranscriptProbe(cids)}
-echo "== project dirs"; ls $HOME/.claude/projects 2>/dev/null | head -30
-echo "== codex sessions"; ls $HOME/.codex/sessions 2>/dev/null | head -10
+${sc.flatMap((s) => (s.listings || []).map(([label, dir, max]) => `echo "== ${label}"; ls $HOME/${dir} 2>/dev/null | head -${Number(max) || 20}`)).join('\n')}
 echo "== disk"; df -h $HOME 2>/dev/null | tail -2
-echo "== versions"; (claude --version 2>/dev/null || echo "claude: not on PATH"); (codex --version 2>/dev/null || echo "codex: not on PATH"); node --version 2>/dev/null
+echo "== versions"; ${sc.filter((s) => s.version).map((s) => `(${s.version} --version 2>/dev/null || echo "${s.version}: not on PATH"); `).join('')}node --version 2>/dev/null
 `;
 
 async function captureRemote({ hosts, hostIds, cids }) {

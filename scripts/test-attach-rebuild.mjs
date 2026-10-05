@@ -222,7 +222,8 @@ const strip = (msgs) => JSON.stringify(msgs.map((m) => ({ ...m, ts: undefined })
   const schema = fs.readFileSync(path.join(REPO, 'src/session-schema.js'), 'utf8');
   ok(/_rebuildQueue:/.test(schema) && /_rebuildPromise:/.test(schema) && /_rebuildProgress:/.test(schema), 'the three new session fields are registered with an owner');
   const cmm = fs.readFileSync(path.join(REPO, 'src/codex-message-manager.js'), 'utf8');
-  ok(/convertHistoryAsync[\s\S]{0,400}try \{ this\._processRecord\(record, false\); \}/.test(cmm), 'codex convertHistoryAsync isolates per record (one bad rollout record must not reject the rebuild)');
+  const mwin = fs.readFileSync(path.join(REPO, 'src/message-window.js'), 'utf8');   // dc-twins M10: the ONE convertHistoryAsync (every normalizer extends it)
+  ok(/convertHistoryAsync[\s\S]{0,400}try \{ this\._feedRecord\(record, false\); \}/.test(mwin) && /extends MessageWindow/.test(cmm) && !/async convertHistoryAsync/.test(cmm) && /_feedRecord\(record, emit\) \{ this\._processRecord\(record, emit\); \}/.test(cmm), 'codex convertHistoryAsync isolates per record (one bad rollout record must not reject the rebuild)');
 }
 
 // ── ④ attach streaming reconciliation (design-harness-features §2.5) ───────

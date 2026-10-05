@@ -15,8 +15,7 @@ const { unknownFields: shapeUnknownFields, unknownFieldsSample } = require('./re
 const { peerOriginOf } = require('./message-manager'); // peerOriginOf = peerDisplayName's name + the PATH (S3 verify F3)
 // web-search cards: the ONE results renderer + the twin-dedup key (PURE, shared with the client's title chip)
 const { renderSearchOutput, searchActionKey, NO_SEARCH_DETAILS } = require('./search-card');
-const { sliceTextWindow } = require('./text-window.js'); // PURE: the attach slab (the claude normalizer's twin)
-const { turnPreviewOf, COMPACT_PREVIEW } = require('./assistant-note.js'); // PURE (B-40f8): THE preview of a user turn
+const { MessageWindow } = require('./message-window.js'); // the ordered card list + its window arithmetic (dc-twins M10)
 const { agentName, collabSummaryText } = require('./collab-row');
 const { rewoundByTurns, applyRewound, rewoundOp } = require('./rewind-ops.js');
 const { offerOf, offerResolution } = require('./reset-credit.js'); // PURE: the reset-credit offer a peer card may carry (design-reset-credits §5) + its resolution (lane reset-path R3)
@@ -374,7 +373,7 @@ function mergeToolInput(existingInput, extraInput) {
   return extraInput;
 }
 
-class CodexMessageManager {
+class CodexMessageManager extends MessageWindow {
   // opts.threadId = the READER's thread id (the rollout being rendered) — the
   // DEFAULT ledger thread id for records that carry no file provenance (gap
   // slabs, tail-only reads, the live stream/buffer). A record a reader merged
@@ -384,12 +383,7 @@ class CodexMessageManager {
   // not a lock — see _adoptThreadId for the precedence and the two real-data
   // refutations behind it.
   constructor(sessionId, { threadId } = {}) {
-    this.sessionId = sessionId;
-    this.seq = 0; // rebuild belt only (R0 — ids are content-derived)
-    this._rkCounts = new Map();
-    this._currentRk = null;
-    this.messages = [];
-    this.messageIndex = new Map();
+    super(sessionId);
     this.userMessageIds = new Map();
     // THE INPUT QUEUE (session state, never a transcript message): the wrapper
     // publishes the WHOLE queue on every change; `_queuedMsgIds` is the set of
@@ -467,14 +461,6 @@ class CodexMessageManager {
   // exactly the fields whose presence differs between the wrapper buffer copy
   // and the rollout JSONL copy of one item), so a rebuild reproduces the same
   // ids and cross-transport twins collide instead of double-rendering.
-  _nextId() {
-    const rk = this._currentRk || ('s' + this.seq);
-    this.seq++;
-    const n = this._rkCounts.get(rk) || 0;
-    this._rkCounts.set(rk, n + 1);
-    return `${this.sessionId}:${rk}${n ? '.' + n : ''}`;
-  }
-
   static recordKey(record) {
     const payload = record?.payload || record || {};
     // webui_peer = the wrapper's peer marker (buffer copy only) — stripped so
@@ -489,14 +475,9 @@ class CodexMessageManager {
     const { item_id, itemId, id, internal_chat_message_metadata_passthrough, webui_peer, webui_queue_id, webuiQueueId, webui_queue_via, webuiQueueVia, webui_after_commit, webuiAfterCommit, webui_no_commit, webuiNoCommit, thread_id, turn_id, ...stable } = payload;
     let str;
     try { str = (record?.type || '') + ':' + JSON.stringify(stable); } catch { str = String(record?.type || ''); }
-    let h = 0x811c9dc5;
-    for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = (h * 0x01000193) >>> 0; }
-    return 'h:' + h.toString(36) + ':' + str.length;
+    return MessageWindow.hashKey(str);
   }
 
-  onOp(fn) { this.listeners.push(fn); }
-  offOp(fn) { const i = this.listeners.indexOf(fn); if (i >= 0) this.listeners.splice(i, 1); }
-  _emit(op) { for (const fn of this.listeners) fn(op); }
 
   // SERVER-SIDE peer card — the codex twin of MessageManager.injectPeerCard
   // (design-harness-plugins §1 P1: its absence made normalizers.feedPeerCard
@@ -559,125 +540,35 @@ class CodexMessageManager {
     return n;
   }
 
-  get total() { return this.messages.length; }
-  get(id) { return this.messageIndex.get(id); }
-  tail(n) { return this.messages.slice(-n); }
-  /** THE ATTACH SLAB — the claude normalizer's twin (src/text-window.js). */
-  tailWindow(opts) { return sliceTextWindow(this.messages, opts); }
-  slice(offset, limit) { return this.messages.slice(offset, offset + limit); }
-
-  turnMap() {
-    const turns = [];
-    let lastTurn = -1;
-    for (let i = 0; i < this.messages.length; i++) {
-      const m = this.messages[i];
-      // A rolled-back message is not a turn marker (§2.10 / §3.2): after a
-      // `thread_rolled_back` the minimap must stop pointing at ghost turns.
-      if (m.rewound) continue;
-      const turnIndex = m.turnIndex ?? 0;
-      if (turnIndex === lastTurn) continue;
-      const entry = { turnIndex, startIdx: i, ts: m.ts, role: m.role };
-      if (m.isCompact) { entry.isCompact = true; entry.preview = COMPACT_PREVIEW; }
-      if (m.role === 'user') Object.assign(entry, turnPreviewOf(m)); // B-40f8: THE preview rule (the wrapper's <vibespace-reminder> nudge turn is a note)
-      turns.push(entry);
-      lastTurn = turnIndex;
-    }
-    return turns;
-  }
-
-  search(query) {
-    const q = String(query || '').toLowerCase();
-    if (!q) return [];
-    const matches = [];
-    for (let i = 0; i < this.messages.length; i++) {
-      const text = this._extractText(this.messages[i]);
-      if (text.toLowerCase().includes(q)) {
-        matches.push({ index: i, id: this.messages[i].id, type: this.messages[i].role, preview: text.slice(0, 120) });
-      }
-    }
-    return matches;
-  }
-
   status() {
     return { ...this._status };
   }
 
   convertHistory(records) {
     for (const record of records || []) this._processRecord(record, false);
-    this._finalizeStreaming(false, { includeReasoning: true });
-    // Finalize goal state: if auto-continue messages were found, goal is active
-    if (this._goalActive && this._goalCondition) {
-      this._goalState = { condition: this._goalCondition, met: false, sentinel: false };
-    }
+    this._finishHistory();
     return this.messages;
   }
 
-  /** Time-sliced twin of convertHistory (see MessageManager.convertHistoryAsync). */
-  // `beforeRecord` (2026-09-27): the browser-session cards interleave by time (normalizers.convertWithCards)
-  async convertHistoryAsync(records, { budgetMs = 25, onSlice, beforeRecord } = {}) {
-    let sliceStart = Date.now(), done = 0;
-    for (const record of records || []) {
-      if (beforeRecord) { try { beforeRecord(record); } catch { } }
-      // per-record isolation (review-caught: one bad rollout record rejected
-      // the whole rebuild for every attached window)
-      try { this._processRecord(record, false); }
-      catch (e) { console.error('[codex-normalizer] record skipped during history rebuild:', e.message); }
-      done++;
-      if (Date.now() - sliceStart >= budgetMs) {
-        try { onSlice?.(done); } catch { }
-        await new Promise((r) => setImmediate(r));
-        sliceStart = Date.now();
-      }
-    }
+  /** A rebuild closes reasoning streams too, and — if auto-continue
+   *  messages were found — leaves the goal active. */
+  _finishHistory() {
     this._finalizeStreaming(false, { includeReasoning: true });
     if (this._goalActive && this._goalCondition) {
       this._goalState = { condition: this._goalCondition, met: false, sentinel: false };
     }
-    return this.messages;
   }
+  get _logTag() { return 'codex-normalizer'; }
+  _feedRecord(record, emit) { this._processRecord(record, emit); }
 
-  processLive(record) {
-    this._processRecord(record, true);
-  }
+  // convertHistoryAsync / processLive / _extractText = MessageWindow's.
 
-  _extractText(msg) {
-    return asArray(msg.content).map((block) => {
-      if (block.type === 'text' || block.type === 'thinking' || block.type === 'system_info') return block.text || '';
-      if (block.type === 'tool_call') return `${block.toolName || ''} ${JSON.stringify(block.input || {})}`;
-      if (block.type === 'tool_result') return `${block.toolName || ''} ${block.output || ''}`;
-      return '';
-    }).join(' ');
-  }
-
-  _create(fields) {
-    const msg = {
-      id: this._nextId(),
-      role: fields.role,
-      status: fields.status || 'complete',
-      content: fields.content || [],
-      ts: fields.ts || this._currentTs || Date.now(),
-      srcLine: this._currentLine,
-      turnIndex: fields.turnIndex ?? this.turnIndex,
-      toolCallId: fields.toolCallId || null,
-      toolName: fields.toolName || null,
-      toolStatus: fields.toolStatus || null,
-      permission: fields.permission || null,
-      usage: fields.usage || null,
-      taskInfo: fields.taskInfo || null,
-      backendMeta: fields.backendMeta || null,
-      collapseKind: fields.collapseKind || null, // semantic run-fold kind (Track B) — the chat view folds by THIS, never by backend tool names
-      // noticeKind keys the CLIENT's localized renderer branch. It was passed
-      // to _create by the notice sites ('compact'/'notice' since 2.369.20) and
-      // silently DROPPED here — the exact 2.227.4 gap the claude normalizer
-      // documents. Threading it costs nothing (no renderer branch exists for
-      // those two values) and is what makes the 'rewound' notice localizable.
-      noticeKind: fields.noticeKind || null,
-      meta: fields.meta || null, // per-response metadata for the message-info popup — threaded by _threadUsageMeta at token_count (claude parity: MessageManager._create)
-    };
-    this.messages.push(msg);
-    this.messageIndex.set(msg.id, msg);
-    return msg;
-  }
+  // Card tail after taskInfo (MessageWindow._create): collapseKind = the
+  // semantic run-fold kind (Track B — the chat view folds by THIS, never by
+  // backend tool names); noticeKind = the client's localized renderer key
+  // (once silently dropped here, the claude 2.227.4 gap); meta = per-response
+  // metadata for the message-info popup, threaded by _threadUsageMeta.
+  static CARD_FIELDS = ['backendMeta', 'collapseKind', 'noticeKind', 'meta'];
 
   _finalizeStreaming(emit, { includeReasoning = false } = {}) {
     // Backward scan, stop at the previous user message: streaming messages can
@@ -1292,20 +1183,7 @@ class CodexMessageManager {
     }
   }
 
-  goalState() { return this._goalState || null; }
-
-  /** The input queue as last published by the wrapper (attach payload). */
-  queueState() { return this._queue || []; }
-
-  /** Did the RUNNING wrapper publish a queue at all (the in-band capability
-   *  signal that pairs with the sidecar's caps.inputQueue advert)? */
-  queuePublished() { return !!this._queuePublished; }
-
-  /** WHICH verbs the running wrapper named in its last publication, or null if
-   *  it named none (a build older than the verb table). This is the REMOTE
-   *  advert: the orchestrator cannot read a sidecar that lives on another
-   *  machine, so the in-band list is the only one it will ever see. */
-  queueVerbsPublished() { return this._queueVerbs || null; }
+  // goalState / queueState / queuePublished / queueVerbsPublished = MessageWindow's.
 
   /** Stamp the queue chip on the user bubble a queued message belongs to.
    *  Returns false when there is no such bubble (peer messages carry no

@@ -2,6 +2,15 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.216 — 2026-10-05
+
+### Changed
+- Channels: the Lark and Gmail marks are redrawn so they are recognisable at badge size.
+
+### Fixed
+- Pressing Enter to confirm an English word in a Chinese input method no longer sends the message.
+- Ultracode can be chosen again as the effort for a new Claude session and in Settings.
+
 ## 2.369.215 — 2026-10-05
 
 ### Added

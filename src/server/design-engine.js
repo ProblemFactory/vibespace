@@ -8,9 +8,10 @@
  *   REGISTRY   data/designs.json `{designs: [{id, sessionId, conversationId, host, dir, title, createdAt, openedAt}]}`,
  *              one row per (host, dir), written through writeJsonAtomic (async, serialized), a `designs-updated`
  *              broadcast on every write. `host` null = this machine (a PARAMETER, never a branch above the reader).
- *   READ       `read(host, dir)` = ONE operation per machine: this machine = async, bounded fs reads (readdir, then
- *              each file through an O_NOFOLLOW handle — a symlink is never followed out of the folder); an ssh host =
- *              ONE remote command (RemoteFs.runScript) that lists and base64-cats the folder's artboards, manifest and
+ *   READ       `read(host, dir)` = ONE operation per machine through ONE implementation, src/design-fs.js (dc-twins M1):
+ *              async, bounded fs reads (readdir, then each file through an O_NOFOLLOW handle — a symlink is never
+ *              followed out of the folder), in-process for this machine and as the daemon's `design-fs` op elsewhere
+ *              (a Windows agent included); only a daemon-less ssh host gets the fallback rung, ONE remote command (RemoteFs.runScript) that lists and base64-cats the folder's artboards, manifest and
  *              images under the same caps — never 40 ssh round trips. Caps: 40 artboards, 2 MiB a file, 24 MB a read
  *              ⇒ `too_big` by name. The result is the model's: the manifest (or its refusals), every frame laid out
  *              with its verdict, the artboards inlined by THE ONE bundler.
@@ -68,6 +69,7 @@ const path = require('path');
 const crypto = require('crypto');
 const M = require('../design-model.js');
 const UL = require('../design-user-layer.js');   // lane design-tweaks: THE USER'S LAYER (user.json)
+const DFS = require('../design-fs.js'); // dc-twins M1: THE folder reads + the user.json write, run where the folder lives
 const DT = require('../design-tokens.js'); // lane design-systems-home: the design system's token check (PURE)
 const { toAgentText: agentText } = require('../peer-text.js');
 const { addressableId } = require('../claude-lock-capture.js');
@@ -80,7 +82,7 @@ const WATCH_PER_SOCKET = 16;
 const WATCH_TOTAL = 32;
 const REMOTE_TIMEOUT_MS = 30000;
 const REMOTE_MAX_BUFFER = 40 * MiB; // 24 MB of files as base64 + the frame lines
-const ASSETS_PER_READ = 200;
+const ASSETS_PER_READ = DFS.ASSETS_PER_READ;
 const COMMENT_LINE_MAX = 6000;
 const CHANGES_TEXT_MAX = 48000;    // 30 chips × (a quote + a 1000-char comment), with room
 const DESIGN_COMMENT_FROM = 'Design comment';
@@ -271,51 +273,19 @@ function create({
   };
 
   // ── reads ──
-  /** This machine: readdir, then every needed file through an O_NOFOLLOW handle (fstat judged before the read). */
-  async function readLocal(dir) {
-    let ents;
-    try { ents = await fsp.readdir(dir, { withFileTypes: true }); }
-    catch (e) { return e.code === 'ENOENT' ? fail('not_found', 'the folder does not exist') : e.code === 'ENOTDIR' ? fail('not_a_dir', 'that path is a file, not a folder') : fail('read_failed', `the folder could not be read (${e.code || e.message})`); }
-    const names = ents.filter((e) => e.isFile()).map((e) => e.name);   // a symlink entry is not a file here: never followed
-    const userOdd = ents.some((e) => e.name === M.USER_FILE && !e.isFile());   // lane design-tweaks: a linked user.json is said, never read
-    const html = names.filter((n) => /\.html$/i.test(n));
-    if (html.length > M.LIMITS.artboards) return fail('too_big', M.readCapsVerdict({ artboards: html.length }).why);
-    const files = new Map();
-    let total = 0;
-    const take = async (name, cap) => {
-      let fh = null;
-      try {
-        fh = await fsp.open(path.join(dir, name), fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0) | (fs.constants.O_NONBLOCK || 0));   // a FIFO swapped in never parks a pool thread (design-cd-joint r1)
-        const st = await fh.stat();
-        if (!st.isFile()) return null;
-        const rec = { name, size: st.size, mtime: Math.round(st.mtimeMs), bytes: null };
-        if (st.size <= cap && total + st.size <= M.LIMITS.readBytes) { rec.bytes = await fh.readFile(); total += rec.bytes.length; }
-        else if (st.size <= cap) rec.over = true;   // within its own cap, past the read's budget
-        return rec;
-      } catch { return null; } finally { if (fh) await fh.close().catch(() => { }); }
-    };
-    for (const n of [M.MANIFEST_FILE, M.USER_FILE, ...html.sort()]) {
-      if ((n === M.MANIFEST_FILE || n === M.USER_FILE) && !names.includes(n)) continue;
-      const rec = await take(n, M.LIMITS.artboardBytes);
-      if (rec) files.set(n, rec);
-    }
-    if (userOdd) files.set(M.USER_FILE, { name: M.USER_FILE, size: 0, mtime: null, bytes: null, link: true });
-    if (names.includes(DT.TOKENS_FILE)) { const rec = await take(DT.TOKENS_FILE, DT.TOKEN_LIMITS.tokensBytes); if (rec) files.set(DT.TOKENS_FILE, rec); }   // the token check
-    // only the images the artboards use
-    const want = new Set();
-    for (const n of html) { const r = files.get(n); if (r && r.bytes) for (const a of M.assetRefsOf(r.bytes.toString('utf8'))) want.add(a); }
-    const wanted = [...want];
-    for (const a of wanted.slice(0, ASSETS_PER_READ)) {
-      if (!names.includes(a)) continue;
-      const rec = await take(a, M.LIMITS.assetBytes);
-      if (rec) files.set(a, rec);
-    }
-    // past the per-read image cap: the file IS in the folder and is NOT read — its artboard is refused as the cap, by
-    // name, never as "missing" (L4 B③: 300 images read "not in the design folder")
-    for (const a of wanted.slice(ASSETS_PER_READ)) if (names.includes(a)) files.set(a, { name: a, size: 0, mtime: null, bytes: null, capped: true });
-    return { ok: true, files, html: html.length };
+  /** THE FOLDER'S MACHINE (dc-twins M1 — the sysinfo 2.314.0 precedent): ONE implementation, src/design-fs.js. This
+   *  machine (device #0) runs it in-process; a machine whose daemon serves `design-fs` runs the SAME module there in ONE
+   *  op (a Windows `fs-portable` agent included — no shell); null ⇒ a daemon-less ssh host (or an older daemon): the
+   *  caller's ONE-command sh script, the fallback rung. The host is a parameter here, never a branch above. */
+  async function onMachine(h, action, params) {
+    if (!h) return DFS.run(action, params);
+    const rfs = getRemoteFs();
+    const dm = rfs && typeof rfs.deviceWith === 'function' ? await rfs.deviceWith(h, DFS.CAP).catch(() => null) : null;
+    if (!dm) return null;
+    try { return DFS.fromWire(await dm.designFs(action, params)); }
+    catch (e) { return fail('host_unreachable', `the machine did not answer (${String(e && e.message || e).slice(0, 200)})`); }
   }
-  /** An ssh host: ONE command through RemoteFs. */
+  /** The sh rung (a daemon-less ssh host): ONE command through RemoteFs. */
   async function readRemote(host, dir) {
     const rfs = getRemoteFs();
     if (!rfs || typeof rfs.runScript !== 'function') return fail('no_remote', 'reading another machine is not available on this server');
@@ -382,7 +352,7 @@ function create({
     const d = dirOf(dir);
     if (!d) return fail('bad_dir', 'name the design folder by its absolute path');
     const h = hostOf(host);
-    const raw = h ? await readRemote(h, d) : await readLocal(d);
+    const raw = (await onMachine(h, 'read', { dir: d })) || await readRemote(h, d);
     if (!raw.ok) return raw;
     const r = compose(h, d, raw);
     const k = keyOf(h, d);
@@ -444,28 +414,17 @@ function create({
   async function readTokens(host, dir) {
     const missing = () => fail('no_tokens', `the design system at ${dir} has no tokens.css — its agent writes one (custom properties: --accent, --radius, …)`);
     let text;
-    if (host) {
+    const viaFs = await onMachine(host, 'tokens', { dir });
+    if (viaFs) {
+      if (!viaFs.ok) return viaFs;
+      text = viaFs.text;
+    } else {
       const raw = await readRemote(host, dir);
       if (!raw.ok) return raw;
       const f = raw.files.get(DT.TOKENS_FILE);
       if (!f) return missing();
       if (!f.bytes || f.size > DT.TOKEN_LIMITS.tokensBytes) return fail('bad_tokens', `the design system's tokens.css is over ${DT.TOKEN_LIMITS.tokensBytes / 1024} KB`);
       text = f.bytes.toString('utf8');
-    } else {
-      let fh = null;
-      try {
-        // never through a link; O_NONBLOCK: a FIFO named tokens.css opens at once and is refused below — a blocking open would
-        // park a libuv pool thread for good, and N `new --system` calls would freeze every fs call of the hub (design-cd-joint r1)
-        fh = await fsp.open(path.join(dir, DT.TOKENS_FILE), (fs.constants.O_NOFOLLOW || 0) | fs.constants.O_RDONLY | (fs.constants.O_NONBLOCK || 0));
-        const st = await fh.stat();
-        if (!st.isFile()) return fail('no_tokens', 'the design system\'s tokens.css is not a plain file (a FIFO, a device or a folder) — its tokens must be a file of its own folder');
-        if (st.size > DT.TOKEN_LIMITS.tokensBytes) return fail('bad_tokens', `the design system's tokens.css is over ${DT.TOKEN_LIMITS.tokensBytes / 1024} KB`);
-        text = (await fh.readFile()).toString('utf8');
-      } catch (e) {
-        if (e.code === 'ENOENT') return missing();
-        if (e.code === 'ELOOP') return fail('no_tokens', 'the design system\'s tokens.css is a link — its tokens must be a file of its own folder');
-        return fail('read_failed', `the design system's tokens.css could not be read (${e.code || 'error'})`);
-      } finally { if (fh) await fh.close().catch(() => { }); }
     }
     const v = DT.tokensVerdict(text);
     return v.ok ? { ok: true, text: v.text } : fail('bad_tokens', `the design system's tokens.css: ${v.why}`);
@@ -785,7 +744,11 @@ function create({
    *  ssh host: ONE command) → {ok, manifest, refusals, set, values, warnings}. */
   async function readMeta(h, d) {
     let files;
-    if (h) {
+    const viaFs = await onMachine(h, 'meta', { dir: d });
+    if (viaFs) {
+      if (!viaFs.ok) return viaFs;
+      files = viaFs.files;
+    } else {
       const rfs = getRemoteFs();
       if (!rfs || typeof rfs.runScript !== 'function') return fail('no_remote', 'reading another machine is not available on this server');
       let out;
@@ -794,20 +757,6 @@ function create({
       const raw = parseRemoteRead(out);
       if (!raw.ok) return raw;
       files = raw.files;
-    } else {
-      files = new Map();
-      for (const n of [M.MANIFEST_FILE, M.USER_FILE]) {
-        let fh = null;
-        try {
-          fh = await fsp.open(path.join(d, n), (fs.constants.O_NOFOLLOW || 0) | fs.constants.O_RDONLY | (fs.constants.O_NONBLOCK || 0));   // a FIFO opens at once, refused below (design-cd-joint r1)
-          const st = await fh.stat();
-          if (!st.isFile()) { if (n === M.USER_FILE) files.set(n, { name: n, size: 0, mtime: null, bytes: null, link: true }); continue; }
-          files.set(n, { name: n, size: st.size, mtime: Math.round(st.mtimeMs), bytes: st.size <= M.LIMITS.artboardBytes ? await fh.readFile() : null });
-        } catch (e) {
-          if (e.code === 'ELOOP' && n === M.USER_FILE) files.set(n, { name: n, size: 0, mtime: null, bytes: null, link: true });
-          else if (e.code !== 'ENOENT') return fail('read_failed', `${n} could not be read (${e.code || e.message})`);
-        } finally { if (fh) await fh.close().catch(() => { }); }
-      }
     }
     let manifest = M.emptyManifest(), refusals = [];
     const mf = files.get(M.MANIFEST_FILE);
@@ -860,39 +809,17 @@ function create({
     }
     const ordered = {};
     for (const t of decl) if (Object.prototype.hasOwnProperty.call(next, t.id)) ordered[t.id] = next[t.id];
-    const w = h ? await writeUserRemote(h, d, UL.userLayerText(ordered)) : await writeUserLocal(d, UL.userLayerText(ordered));
+    const text = UL.userLayerText(ordered);
+    const w = (await onMachine(h, 'write-user', { dir: d, text })) || await writeUserRemote(h, d, text);
     if (!w.ok) return w;
     const file = path.posix.join(d, M.USER_FILE);
-    let mtime = null;
-    if (!h) { try { mtime = Math.round((await fsp.lstat(file)).mtimeMs); } catch { mtime = null; } }
+    const mtime = Number.isFinite(w.mtime) ? w.mtime : null;   // the machine's own lstat after the rename (the sh rung says none)
     const wt = watches.get(keyOf(h, d));
     if (wt) { wt.names.add(M.USER_FILE); wt.mtimes.set(M.USER_FILE, mtime); }   // the poll has seen it now — no second broadcast
     try { broadcastAll({ type: 'file-changed', host: h, path: file, mtime, by: 'design' }); } catch { }
     return { ok: true, set: ordered, values: UL.userValues(r.manifest, { tweaks: ordered }).values };
   }
-  /** user.json on this machine: a fresh temp file beside it (O_EXCL | O_NOFOLLOW), then a rename — a rename replaces the
-   *  NAME, never a file a link points at. A user.json that is a link or not a plain file is refused by name. */
-  async function writeUserLocal(d, text) {
-    const file = path.join(d, M.USER_FILE);
-    try {
-      const st = await fsp.lstat(file);
-      if (!st.isFile()) return fail('user_not_file', `${file} is ${st.isSymbolicLink() ? 'a link' : 'not a plain file'} — the user's tweak values are written only as a plain file inside the design folder (remove it, then try again)`);
-    } catch (e) { if (e.code !== 'ENOENT') return fail('write_failed', `user.json could not be checked (${e.code || e.message})`); }
-    const tmp = path.join(d, `.user.json.${process.pid}.${crypto.randomBytes(6).toString('hex')}.tmp`);
-    let fh = null;
-    try {
-      fh = await fsp.open(tmp, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW || 0), 0o644);
-      await fh.writeFile(text);
-      await fh.close(); fh = null;
-      await fsp.rename(tmp, file);
-      return { ok: true };
-    } catch (e) {
-      if (fh) await fh.close().catch(() => { });
-      await fsp.unlink(tmp).catch(() => { });
-      return e.code === 'ENOENT' ? fail('not_found', 'the design folder does not exist') : fail('write_failed', `user.json could not be written (${e.code || e.message})`);
-    }
-  }
-  /** user.json on an ssh host: ONE command through RemoteFs (remoteUserWriteScript). */
+  /** user.json on a daemon-less ssh host (the sh rung): ONE command through RemoteFs (remoteUserWriteScript). */
   async function writeUserRemote(h, d, text) {
     const rfs = getRemoteFs();
     if (!rfs || typeof rfs.runScript !== 'function') return fail('no_remote', 'writing on another machine is not available on this server');

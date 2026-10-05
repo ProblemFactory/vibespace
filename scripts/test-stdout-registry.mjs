@@ -1904,8 +1904,8 @@ console.log('— wiring pins');
     ok("codex's thread_rolled_back is OUT of SKIPPED_EVENT_TYPES and routed (it was invisible history)",
       !/'thread_rolled_back'/.test(read('src/codex-message-manager.js').split('SKIPPED_EVENT_TYPES')[1].split('\n]')[0])
       && /if \(type === 'thread_rolled_back'\) return this\._processRolledBack\(event, emit\);/.test(read('src/codex-message-manager.js')));
-    ok('both normalizers drop rewound messages from turnMap (the minimap must not point at ghosts)',
-      /if \(m\.rewound\) continue;/.test(mm) && /if \(m\.rewound\) continue;/.test(read('src/codex-message-manager.js')));
+    ok('both normalizers drop rewound messages from turnMap (the minimap must not point at ghosts) — the ONE turnMap, src/message-window.js (dc-twins M10), which both extend',
+      /if \(m\.rewound\) continue;/.test(read('src/message-window.js')) && ['src/message-manager.js', 'src/codex-message-manager.js'].every((f) => /extends MessageWindow/.test(read(f)) && !/^  turnMap\(\)/m.test(read(f))));
     const css = read('public/chat.css');
     ok('the two retraction kinds have their OWN display rules (no global .hidden in this project)',
       /\.chat-msg-superseded \{ display: none; \}/.test(css) && /\.chat-msg-rewound \{/.test(css) && /\.chat-tool-inflight \.chat-tool-label::after/.test(css));

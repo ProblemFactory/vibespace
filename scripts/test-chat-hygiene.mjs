@@ -649,9 +649,13 @@ const CXreal = require(path.join(REPO, 'src/adapters/codex.js'));
 {
   for (const r of previewTable(builderRows(MMreal, CXreal))) ok(`${r.name}: the nudge turn is a note with no text, a question keeps its words${r.name.includes('claude') ? ', a TYPED quote of the nudge stays the user\'s, a compact summary says so' : ''}`, r.pass, r.got);
   ok('the live append (chat-view) builds its turn with the SAME rule', /const turn = \{ turnIndex: msg\.turnIndex, startIdx: this\._total - 1, ts: msg\.ts, role: 'user', \.\.\.turnPreviewOf\(msg\) \};/.test(read('src/lib/chat-view.js')));
-  const BUILDERS = ['src/message-manager.js', 'src/codex-message-manager.js', 'src/acp-message-manager.js', 'src/adapters/codex.js', 'src/lib/chat-view.js'];
-  const own = BUILDERS.filter((f) => { const s = read(f); return !/turnPreviewOf\(/.test(s) || /This session is being continued from a previous conversation/.test(s) || /preview = 'Context compacted'|preview: 'Context compacted'|\?\? 'Context compacted'/.test(s); });
-  ok(`CENSUS: every turn builder asks turnPreviewOf and none keeps its own cut or compact test (${BUILDERS.length} builders)`, own.length === 0, own);
+  // dc-twins M10: the three chat normalizers build turns in ONE place — src/message-window.js (each extends it, none
+  // keeps a turnMap of its own)
+  const NORMALIZERS = ['src/message-manager.js', 'src/codex-message-manager.js', 'src/acp-message-manager.js'];
+  const BUILDERS = ['src/message-window.js', 'src/adapters/codex.js', 'src/lib/chat-view.js'];
+  const own = BUILDERS.filter((f) => { const s = read(f); return !/turnPreviewOf\(/.test(s) || /This session is being continued from a previous conversation/.test(s) || /preview = 'Context compacted'|preview: 'Context compacted'|\?\? 'Context compacted'/.test(s); })
+    .concat(NORMALIZERS.filter((f) => !/extends MessageWindow/.test(read(f)) || /^  turnMap\(\)/m.test(read(f))));
+  ok(`CENSUS: every turn builder asks turnPreviewOf and none keeps its own cut or compact test (${BUILDERS.length} builders; the ${NORMALIZERS.length} normalizers share the window's)`, own.length === 0, own);
   const mm = read('src/lib/chat-minimap.js');
   ok('the minimap\'s drag label AND the outline row say a note\'s sentence in the device\'s language (turnText → t(noteSentence))', /const turnText = \(turn\) => \(turn\.note \? t\(noteSentence\(turn\.note\)\) : turn\.preview \|\| ''\);/.test(mm) && (mm.match(/const preview = turnText\(turn\);/g) || []).length === 2 && /note: turn\.note, line: turn\.line/.test(mm));
   ok('the note TEXT rule is ONE: chat-run-summary\'s assistantNoteOf reads src/assistant-note.js (no second marker / tag table)', /import \{ NOTE_MARKER, noteKindOfText, userNoteOf \} from '\.\.\/assistant-note\.js';/.test(read('src/lib/chat-run-summary.js')) && !/const NOTE_TAGS|function noteOfText/.test(read('src/lib/chat-run-summary.js')) && RS.NOTE_MARKER === AN.NOTE_MARKER);
@@ -684,10 +688,15 @@ function liveHookCard({ MessageManager }, { output = PROTO7, ok: good = true, at
 console.log('§7 NEGATIVE CONTROLS — the pre-fix builders go red');
 {
   const mmSrc = read('src/message-manager.js');
-  const NEW_TM = "        if (m.role === 'user') Object.assign(entry, turnPreviewOf(m));";
-  const p1 = mmSrc.replace(NEW_TM, "        if (m.role === 'user') { const raw = (m.content || []).map(b => b.text || '').join('').trim(); if (raw) entry.preview = raw.length > 60 ? raw.substring(0, 60) + '…' : raw; }");
-  ok('(the pre-fix claude turnMap patch applied)', p1 !== mmSrc);
-  const c1 = previewTable(builderRows(M.load('src/message-manager.js', p1, 'pre-b40f8-turnmap'), CXreal)).filter((r) => !r.pass).map((r) => r.name);
+  // the turn rule lives in the window base (dc-twins M10): a CLOSED-WORLD pair — the patched base, and the claude
+  // normalizer whose require of it points at that copy
+  const winSrc = read('src/message-window.js');
+  const NEW_TM = "      if (m.role === 'user') Object.assign(entry, turnPreviewOf(m));";
+  const p1 = winSrc.replace(NEW_TM, "      if (m.role === 'user') { const raw = (m.content || []).map(b => b.text || '').join('').trim(); if (raw) entry.preview = raw.length > 60 ? raw.substring(0, 60) + '…' : raw; }");
+  ok('(the pre-fix claude turnMap patch applied)', p1 !== winSrc);
+  const winCopy = M.write('src/message-window.js', p1, 'pre-b40f8-turnmap');
+  const mmOnCopy = mmSrc.replace("require('./message-window.js')", `require(${JSON.stringify(winCopy)})`);
+  const c1 = previewTable(builderRows(M.load('src/message-manager.js', mmOnCopy, 'pre-b40f8-turnmap'), CXreal)).filter((r) => !r.pass).map((r) => r.name);
   ok(`the pre-fix claude turnMap previews the nudge as "Stop hook feedback: …" — exactly its row goes red (${c1.join(', ')})`, c1.length === 1 && c1[0].startsWith('claude turnMap'), c1);
   const cxSrc = read('src/adapters/codex.js');
   const p2 = cxSrc.replace("const p = turnPreviewOf({ role: 'user', content: [{ type: 'text', text }], ...prov });", "const p = text.trim() ? { preview: text.trim().replace(/\\s+/g, ' ').slice(0, 60) } : null;");
