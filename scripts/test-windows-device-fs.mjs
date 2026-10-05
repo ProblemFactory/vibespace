@@ -81,12 +81,12 @@ const TABLE = [
   { file: 'src/server/mounts-plugins-wiring.js', has: "await dm.runCmd('chmod', ['600', root + '/state/dial.json']", verdict: 'n/a', how: 'reached only past the root read above it (refused at the door on Windows)', argv: true },
   { file: 'src/server/sysinfo-wiring.js', has: "out = String((await dm.runCmd('sh', ['-c', script], { timeoutMs: 8000 })).stdout", verdict: 'refused', how: DOOR },
   { file: 'src/writer-sweep.js', has: "const r = await dm.runCmd('sh', ['-c', script], { timeoutMs });", verdict: 'refused', how: DOOR },
-  { file: 'src/ws-create.js', has: "await dm.runCmd('sh', ['-c', 'printf %s \"$HOME\"'], { timeoutMs: 8000 })", verdict: 'refused', how: DOOR },
-  { file: 'src/ws-create.js', has: "await dm.runCmd('sh', ['-c',", exact: true, verdict: 'refused', how: DOOR },
-  { file: 'src/ws-create.js', has: "await dm.runCmd('sh', ['-c', `chmod 600", verdict: 'refused', how: DOOR },
-  { file: 'src/ws-create.js', has: "pty: { cmd: 'sh', args: ['-lc', shellCmd], cwd,", verdict: 'refused', how: 'a session spawn spec ⇒ openSession / openPipeSession ⇒ the door' },
-  { file: 'src/ws-create.js', has: "spawn: { cmd: 'sh', args: ['-lc', shellCmd], cwd } }", verdict: 'refused', how: 'a session spawn spec ⇒ openPipeSession ⇒ the door' },
-  { file: 'src/ws-create.js', has: "spawn: { cmd: 'sh', args: ['-lc', shellCmd], cwd: os.homedir() } }", verdict: 'refused', how: 'a session spawn spec ⇒ openPipeSession ⇒ the door' },
+  { file: 'src/spawn/dial.js', has: "await dm.runCmd('sh', ['-c', 'printf %s \"$HOME\"'], { timeoutMs: 8000 })", verdict: 'refused', how: DOOR },
+  { file: 'src/spawn/dial.js', has: "await dm.runCmd('sh', ['-c',", exact: true, verdict: 'refused', how: DOOR },
+  { file: 'src/spawn/dial.js', has: "await dm.runCmd('sh', ['-c', `chmod 600", verdict: 'refused', how: DOOR },
+  { file: 'src/spawn/dial.js', has: "pty: { cmd: 'sh', args: ['-lc', shellCmd], cwd,", verdict: 'refused', how: 'a session spawn spec ⇒ openSession / openPipeSession ⇒ the door' },
+  { file: 'src/spawn/dial.js', has: "spawn: { cmd: 'sh', args: ['-lc', shellCmd], cwd } }", verdict: 'refused', how: 'a session spawn spec ⇒ openPipeSession ⇒ the door' },
+  { file: 'src/spawn/ssh.js', has: "spawn: { cmd: 'sh', args: ['-lc', shellCmd], cwd: os.homedir() } }", verdict: 'refused', how: 'a session spawn spec ⇒ openPipeSession ⇒ the door' },
   { file: 'src/ws-handler.js', has: "await dm.runCmd('sh', ['-c', `rm -f", verdict: 'refused', how: DOOR },
 ];
 function scanSites(read) {

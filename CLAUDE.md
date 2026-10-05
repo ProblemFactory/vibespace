@@ -830,6 +830,7 @@ stream-json 下 assistant 的 `thinking→text→thinking→tool_use` 三明治�
 
 **Full essays: docs/kb-bugfix-invariants.md (moved verbatim; ancient one-liners in docs/history-archive.md). Each entry is an incident whose FIX carries invariants — search here before re-diagnosing a familiar symptom.** Index:
 
+- THE OUTBOX BUTTON DID NOTHING — ITS WINDOW WAS ON ANOTHER DESKTOP (userW inc-muv3qfo7-96tm): revealWindow focused a hidden window. FIX = reveal switches to the window's desktop first; a census of singleton openers. 不变量 = reveal lifts every hider, the desktop included
 - A SERVER-SPEAKS-FIRST FORWARD DROPPED ITS FIRST BYTES (lane mirror-green-212, 2026-10-05): tcpForward's handle had onData null until the caller resumed, so an RFB greeting / SSH banner read with the tcp-open was lost. 不变量 = a handle buffers until its consumer is attached ⇒ kb-bugfix-invariants.md
 - A DIRECT CHAT WORE THE OWNER'S OWN FACE — 不变量 = a peer is the author that is not the account's identity, and the identity is a resolved fact, never a guess (Av.peerOf/stampSelf, selfIdOf, people.json; kb-bugfix-invariants).
 - A SPLIT ON A HIDDEN DESKTOP WAS LOST AT RELOAD (lane split-restore-hidden, inc-muundq37-cjay): a first visit after a reload replayed the windows, never the chain. 不变量 = a queued chain reconciles when its member appears, never on a timer ⇒ kb-bugfix-invariants.md

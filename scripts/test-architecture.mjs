@@ -39,6 +39,9 @@ const DEAD78 = (() => {
 
 const rel = (p) => path.relative(REPO, p).replace(/\\/g, '/');
 const read = (f) => { try { return fs.readFileSync(path.join(REPO, f), 'utf-8'); } catch { return ''; } };
+// THE CREATE PATH = ws-create + its per-transport spawn ladders (lane dc-seams-server: src/spawn/<transport>.js behind
+// spawnFor) — a census of the create reads both, so a line moving between them keeps its enforcement.
+const readCreatePath = () => [read('src/ws-create.js'), ...fs.readdirSync(path.join(REPO, 'src/spawn')).filter((f) => f.endsWith('.js')).sort().map((f) => read('src/spawn/' + f))].join('\n');
 function requiresOf(f) {
   const s = read(f);
   const out = new Set();
@@ -60,6 +63,9 @@ const PURE = new Set(['src/timed-sync.js' /* design 011 lane 1 (store-timing): t
   // registry + lease model and the keeper's verdicts — imports nothing (P0/P1); and the ONE
   // constants home every process keeper counts and bounds by (src/keeper-limits.js)
   'src/browser-profiles.js', 'src/keeper-limits.js',
+  // lane dc-browser-backends: every browser backend file (and the folder's registration list) is PURE — the folder is
+  // read, so a new backend adds no line here
+  ...fs.readdirSync(path.join(REPO, 'src/browser-backends')).filter((f) => f.endsWith('.js')).map((f) => 'src/browser-backends/' + f),
   'src/browser-job-principal.js', // lane jobs-browser: a Background Work job browses AS its owner conversation (child handle, the owner's admission + pin, route lists, the release rule); imports only browser-profiles
   // BROWSER TAKEOVER (design-browser-takeover §3): the ONE browser CLI's verb table — the router,
   // the child env and (r3) the config rule; imports nothing, shipped beside the CLI to hosts
@@ -432,7 +438,7 @@ ok(!/\/\/ src\/ws-handler\.js|\/\/ src\/ws-create\.js|\/\/ src\/hosts\.js|\/\/ s
 //    commit that explains why.
 {
   const serverLines = read('server.js').split('\n').length;
-  ok(serverLines <= 2100, `server.js stays bootstrap-sized (${serverLines} ≤ 2100 lines — new mechanisms go in src/server/*)`);
+  ok(serverLines <= 1907, `server.js stays bootstrap-sized (${serverLines} ≤ 1907 lines — new mechanisms go in src/server/*; lowered from 2100 by lane dc-seams-server: the editor routes, the usage attribution log and the setup-token sweep moved out; 1905 on its base + the doc-engine and artifact-registry wiring lines of 2.369.215 at int217)`);
   // §48 (2.369.134): CODE APPENDED AFTER A MID-LINE // IS A COMMENT. The mounts-plugins wiring call in server.js
   // carried three chunk notes mid-line; one chunk appended `getTelemetry: …` after them (never wired, the
   // default null hid it) and the r-fix moved `activeSessions,` after them too — every browser route answered
@@ -1718,13 +1724,13 @@ for (const [edge] of EXCEPTIONS) {
   {
     const ID_BRANCH = /[!=]==?\s*'(?:claude|codex|opencode|acp|shell)'|case\s+'(?:claude|codex|opencode|acp|shell)'\s*:/;
     const branchLines = (txt) => txt.split('\n').filter((l) => !/^\s*\/\//.test(l) && ID_BRANCH.test(l));
-    const wc = read('src/ws-create.js'), srv = read('server.js');
+    const wc = readCreatePath(), srv = read('server.js');
     const HANDED = ["const sweepOpts = (hostId) => backend === 'codex'", "(es.backend || 'claude') === 'codex' && (es.host || null) === (hostId || null)",
       "if (backend === 'codex' && data.resumeId && sessionSpec.env) {", "            if (backend === 'claude') {\n              for (const fl of [['--output-format', 'stream-json']",
       "&& (backend === 'claude' || backend === 'codex') && /^[\\w-]+$/.test(data.resumeId) && hosts) {"];
     const handedLines = (txt) => HANDED.filter((h) => txt.includes(h)).map((h) => h.split('\n')[0].trim());
     const wcHits = branchLines(wc).filter((l) => !handedLines(wc).some((h) => l.trim().startsWith(h) || l.includes(h)));
-    ok(wc.length > 50000 && wcHits.length === 0 && branchLines(wc).length <= HANDED.length, `46d src/ws-create.js branches on no harness id outside dc-harness-store's ${handedLines(wc).length} handed sites — every per-harness spawn fact is a descriptor row (was 26)${wcHits.length ? ' — ' + wcHits.slice(0, 3).map((l) => l.trim().slice(0, 90)).join(' ; ') : ''}`);
+    ok(wc.length > 50000 && wcHits.length === 0 && branchLines(wc).length <= HANDED.length, `46d src/ws-create.js + src/spawn/ branch on no harness id outside dc-harness-store's ${handedLines(wc).length} handed sites — every per-harness spawn fact is a descriptor row (was 26)${wcHits.length ? ' — ' + wcHits.slice(0, 3).map((l) => l.trim().slice(0, 90)).join(' ; ') : ''}`);
     const a0 = srv.indexOf('function sessionAuth(s) {'), authBody = a0 >= 0 ? srv.slice(a0, srv.indexOf('\n}\n', a0)) : '';
     ok(authBody.length > 300 && branchLines(authBody).length === 0 && /h\.billingIdentity\(s, \{ accounts, withHost, poolAuth \}\)/.test(authBody),
       '46d server.js sessionAuth asks the harness (descriptor billingIdentity) — no claude/codex rungs inline');
@@ -2675,7 +2681,7 @@ console.log('§60 the browser tool writes in the session\'s frame; no browser da
   const line = RS.buildRemoteExec({ cwd: '/w x', shq, parts: ['a'] });
   ok(exported(line) && exported(RS.buildRemoteExec({ cwd: '/w x', shq, parts: ['K=v'], tail: ' node keeper run sid 0 --' })), '§60a buildRemoteExec (every remote builder) exports the session cwd before the exec — the tail (keeper) form too');
   ok(!exported(line.replace(RS.sessionCwdExport('/w x', shq), '')), '§60a NEGATIVE CONTROL: the pre-r5 remote line (no export) is caught');
-  ok((wc.match(/buildRemoteExec\(\{/g) || []).length === 5 && (wc.match(/VIBESPACE_SESSION_CWD=/g) || []).length === 1, `§60a all five remote builders compose buildRemoteExec and ws-create spells the variable once — the local pair (${(wc.match(/buildRemoteExec\(\{/g) || []).length} builders, ${(wc.match(/VIBESPACE_SESSION_CWD=/g) || []).length} spelling)`);
+  ok((readCreatePath().match(/buildRemoteExec\(\{/g) || []).length === 5 && (readCreatePath().match(/VIBESPACE_SESSION_CWD=/g) || []).length === 1, `§60a all five remote builders compose buildRemoteExec and the create path (ws-create + src/spawn/) spells the variable once — the local pair (${(readCreatePath().match(/buildRemoteExec\(\{/g) || []).length} builders, ${(readCreatePath().match(/VIBESPACE_SESSION_CWD=/g) || []).length} spelling)`);
   const cli = read('data/bin/vibespace-browser');
   const fnBody = (src, name) => { const a = src.indexOf(`function ${name}(`); if (a < 0) return ''; let d = 0; for (let i = src.indexOf('{', a); i >= 0 && i < src.length; i++) { if (src[i] === '{') d++; else if (src[i] === '}' && --d === 0) return src.slice(a, i + 1); } return ''; };
   const judgeCli = (src) => { const sr = fnBody(src, 'sessionRoot'); return sr.includes('process.env.VIBESPACE_SESSION_CWD') && sr.includes('process.env.VIBESPACE_JOB_CWD') && !/process\.cwd\(\)/.test(sr) && /spawn\(bin\.path, argv, \{[^}]*\bcwd: runCwd\.dir/.test(src) && /const argv = closeAllScoped \? framed\.argv\.filter\(\(x\) => x !== '--all'\) : \[\.\.\.framed\.argv\];/.test(src) && /writeRefusal\(framed\.writes\)/.test(src); };
@@ -2767,7 +2773,7 @@ console.log('§62 every path where the user names a window goes through wm.revea
   const DOORS = {
     'src/lib/mobile-nav.js': [2, 'the phone switcher\'s window row + its Minimized row (the incident)'],
     'src/lib/taskbar.js': [3, 'activateWindow (every taskbar button), the grouped chooser\'s row, the window list\'s row'],
-    'src/lib/window.js': [1, 'the overlap switcher\'s row'],
+    'src/lib/window.js': [3, 'the overlap switcher\'s row + the door\'s own second pass after a desktop switch (inc-muv3qfo7-96tm: resolved / refused)'],
     'src/lib/app.js': [5, 'goToWinId (go-to / Switch window / inbox / live view), flashWindow here + on another desktop, moveSessionWindow, _focusOpenInChain'],
     'src/lib/session-lifecycle.js': [2, '_focusExistingSession (sidebar card, palette, For-you / explorer / chat links, resume-already-open) + the tmux view'],
     'src/lib/chat-view.js': [2, 'the two sub-agent viewer dedupes'],
@@ -2819,6 +2825,33 @@ console.log('§62 every path where the user names a window goes through wm.revea
     `§62 NEGATIVE CONTROL: the pre-fix switcher row (${judge(preFix).length} findings), a bare focus planted in an unlisted file (${judge(planted).length}), a singleton door turned back into a raise (${judge(raised).length}) are caught; a commented-out call is not counted (${judge(commented).length})`);
   const fpBad = body(wj.replace('const target = pressTab(ch, paneWin ? paneWin.id : null);', 'const target = pressTab(ch, paneWin ? paneWin.id : null); this.revealWindow(win.id);'), '_focusFromPointer');
   ok(fpBad !== fp && !pointerPin(fpBad), '§62 NEGATIVE CONTROL: the pointer path patched to reveal (a press that would switch tabs) fails the pointer pin');
+}
+
+// §62c EVERY SINGLETON'S RE-OPEN IS THE DOOR, AND THE DOOR GOES TO THE WINDOW'S DESKTOP (userW inc-muv3qfo7-96tm,
+// 2026-10-05: "点击 Outbox 没有任何反应" — the Outbox singleton lived on another desktop; its button revealed it where
+// nobody looked). GREP-DERIVED: every `singleton: true` registerWindowType in src/lib — its file re-opens an existing
+// window through `.revealWindow(` (counted in §62's DOORS) and never a bare raise; revealWindow's body asks PURE
+// revealDesktop and switches through this client's one door (dm.switchTo) before the tab / restore / focus.
+console.log('§62c every singleton re-open is wm.revealWindow, and the door switches to the window\'s desktop first');
+{
+  const strip = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:\\])\/\/[^\n]*/g, '$1');
+  const srcFiles = fs.readdirSync(path.join(REPO, 'src/lib')).filter((n) => n.endsWith('.js')).map((n) => 'src/lib/' + n);
+  const singletonFiles = (srcs) => Object.keys(srcs).filter((f) => /\bsingleton:\s*true\b/.test(strip(srcs[f])) && /registerWindowType\(/.test(srcs[f]));
+  const judgeS = (srcs) => singletonFiles(srcs).filter((f) => !/\.revealWindow\(/.test(strip(srcs[f])) || /\.focusWindow\(/.test(strip(srcs[f])));
+  const srcs = Object.fromEntries(srcFiles.map((f) => [f, read(f)]));
+  const sf = singletonFiles(srcs);
+  ok(sf.length >= 10 && ['src/lib/channel-outbox.js', 'src/lib/inbox-window.js', 'src/lib/channels-panel.js', 'src/lib/settings-ui.js', 'src/lib/usage-window.js'].every((f) => sf.includes(f)),
+    `§62c census scope: ${sf.length} files register a singleton window (Outbox, For you, Channels, Settings, Usage …)`);
+  const bad = judgeS(srcs);
+  ok(bad.length === 0, `§62c every singleton's file re-opens through .revealWindow( and never a bare .focusWindow(${bad.length ? ' — ' + bad.join(', ') : ''}`);
+  const wj = read('src/lib/window.js'); const i = wj.indexOf('\n  revealWindow('), rw = wj.slice(i, wj.indexOf('\n  }\n', i));
+  const doorPin = (b) => /const go = dm \? revealDesktop\(\{ raise,/.test(b) && /if \(go\.act === 'switch'\) \{[^\n]*\n\s*Promise\.resolve\(go\.to === STAGE_ID \? stage\.enter\(\) : dm\.switchTo\(go\.to\)\)/.test(b) && b.indexOf('revealDesktop(') < b.indexOf('const i = revealTab(ch, id);') && /if \(go\.act === 'tell'\) \{[\s\S]*?showToast\(/.test(b);
+  ok(doorPin(rw), '§62c revealWindow asks PURE revealDesktop FIRST and goes through dm.switchTo (the Stage through stage.enter); a reveal that cannot land toasts where the window is');
+  // NEGATIVE CONTROLS (string copies): a singleton re-open turned back into a raise; the door's switch removed
+  const raised = { ...srcs, 'src/lib/channel-outbox.js': srcs['src/lib/channel-outbox.js'].replace("app.wm.revealWindow(id, { replay: !!opts.syncId });", 'app.wm.focusWindow(id);') };
+  const noSwitch = rw.replace(/\n    if \(go\.act === 'switch'\) \{[\s\S]*?\n    \}\n/, '\n');
+  ok(raised['src/lib/channel-outbox.js'] !== srcs['src/lib/channel-outbox.js'] && JSON.stringify(judgeS(raised)) === '["src/lib/channel-outbox.js"]' && noSwitch !== rw && !doorPin(noSwitch),
+    '§62c NEGATIVE CONTROL: the Outbox re-open turned into a bare raise (1 finding) and the door with its desktop switch removed (pin red)');
 }
 
 // §63 THE CHANNEL WITNESS CENSUS (docs/design-communication-panel.zh.md §26, backlog B-099e — the owner: "那就按照这个
@@ -3469,9 +3502,9 @@ console.log('§71 a raw secret is compared only through sameToken');
   ok(files68.length > 300 && found68.length === 0, `§71 no compare of a raw secret outside sameToken in server.js + src (${files68.length} files)${found68.length ? ' — ' + found68.join(' | ') : ''}`);
   const pt = read('src/pairing-token.js');
   ok(/function sameToken\(presented, secret\) \{[^}]*tokenMatches\(presented, tokenHash\(secret\)\)/.test(pt) && /module\.exports = \{[^}]*\bsameToken\b/.test(pt), '§71 sameToken is tokenMatches over the secret\'s digest, exported from the one door');
-  const SITES68 = ['server.js', 'src/agent-routes.js', 'src/server/window-targets-engine.js', 'src/server/mounts-plugins-wiring.js', 'src/server/exit-routes.js', 'src/routes/browser.js', 'src/server/otel-ingest.js'];
+  const SITES68 = ['server.js', 'src/routes/editor.js', 'src/agent-routes.js', 'src/agent-routes/status.js', 'src/server/window-targets-engine.js', 'src/server/mounts-plugins-wiring.js', 'src/server/exit-routes.js', 'src/routes/browser.js', 'src/server/otel-ingest.js'];
   const noDoor = SITES68.filter((f) => !/\bsameToken\(/.test(strip68(read(f))));
-  ok(noDoor.length === 0 && (strip68(read('src/agent-routes.js')).match(/\bsameToken\(/g) || []).length >= 2, `§71 every lookup site compares through sameToken${noDoor.length ? ' — missing: ' + noDoor.join(' ') : ''}`);
+  ok(noDoor.length === 0 && (strip68(read('src/agent-routes.js') + read('src/agent-routes/status.js')).match(/\bsameToken\(/g) || []).length >= 2, `§71 every lookup site compares through sameToken${noDoor.length ? ' — missing: ' + noDoor.join(' ') : ''}`);
   const { sameToken } = (await import('node:module')).createRequire(import.meta.url)(path.join(REPO, 'src/pairing-token.js'));
   ok(sameToken('vsst_ab12', 'vsst_ab12') && !sameToken('vsst_ab13', 'vsst_ab12') && !sameToken('vsst_ab1', 'vsst_ab12') && !sameToken(undefined, 'vsst_ab12') && !sameToken('vsst_ab12', undefined) && !sameToken('', ''),
     '§71 sameToken: equal ⇒ true; one character, a prefix, a missing or an empty side ⇒ false');

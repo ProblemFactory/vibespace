@@ -910,7 +910,7 @@ console.log('— §4 negative controls (patched copies, scripts/mutant-copy.mjs)
 console.log('— §5 wiring');
 {
   const W = read('src/lib/window.js'), D = read('src/lib/desktop-manager.js'), SM = read('src/lib/stage-manager.js'), TG = read('src/lib/tab-group.js');
-  ok(/import \{ HIDE_REASONS, hiddenReasons, windowMarks \} from '\.\/view-visibility\.js';/.test(W), '§5 window.js imports the PURE rule (never re-spelled)');
+  ok(/import \{ HIDE_REASONS, hiddenReasons, windowMarks(?:, revealDesktop)? \} from '\.\/view-visibility\.js';/.test(W), '§5 window.js imports the PURE rule (never re-spelled)');
   ok(/_hideWin\(win\) \{\n\s+this\.app\.wm\.setWindowHidden\(win, \{ desktop: true \}\);\n\s+\}/.test(D) && /_showWin\(win\) \{\n\s+this\.app\.wm\.setWindowHidden\(win, \{ desktop: false \}\);\n\s+\}/.test(D), '§5 the desktop hides / shows through the door and nothing else');
   ok(/_hideStage\(win\) \{\n\s+this\.app\.wm\.setWindowHidden\(win, \{ stage: true \}\);\n\s+\}/.test(SM) && /_showWin\(win\) \{\n\s+this\.app\.wm\.setWindowHidden\(win, \{ stage: false \}\);\n\s+\}/.test(SM), '§5 the Stage parks / un-parks through the door and nothing else');
   ok(/for \(const m of this\._frameOf\(win\)\) this\.app\.wm\.setWindowHidden\(m, \{ desktop: false, stage: false \}\);/.test(SM) && (SM.match(/this\._returnFrame\(hero\);/g) || []).length === 2, '§5 the borrow clears the whole frame; leave and a hero switch return it through _returnFrame (symmetric)');

@@ -856,13 +856,17 @@ if (tracked.length) {
 }
 
 // (c) CONSUMERS: every named consumer exists AND calls resolveIntegration('<id>'[, {credentialKey}])
+const TABLE_CONSUMERS = { 'src/server/browser-backend.js': require(path.join(REPO, 'src/browser-switch.js')).KEY_IDS };
 function consumerCensus(rows, read) {
   const problems = [];
   for (const row of rows) {
     for (const f of row.consumers) {
       let s; try { s = read(f); } catch { problems.push(`${row.id}: consumer ${f} does not exist`); continue; }
       // the call may carry the ACCOUNT's key as a second argument (2026-09-22: `resolveIntegration('<id>', { credentialKey })`) — the census asks for the id literal, not the arity
-      if (!new RegExp(`resolveIntegration\\(['"]${row.id}['"]\\s*[,)]`).test(s)) problems.push(`${row.id}: consumer ${f} never calls resolveIntegration('${row.id}')`);
+      // lane dc-browser-backends (F10): a TABLE consumer resolves each of its DECLARED rows with one generic call — its
+      // ids are DERIVED from those declarations (the browser track's KEY_ROWS), not a literal per id
+      const table = (TABLE_CONSUMERS[f] || []).includes(row.id) && /\.resolveIntegration\(id\)/.test(s);
+      if (!table && !new RegExp(`resolveIntegration\\(['"]${row.id}['"]\\s*[,)]`).test(s)) problems.push(`${row.id}: consumer ${f} never calls resolveIntegration('${row.id}')`);
     }
     if (!row.consumers.length && !row.wiredIn) problems.push(`${row.id}: no consumer and no wiredIn phase`);
   }
@@ -873,6 +877,8 @@ function consumerCensus(rows, read) {
   ok(!p.length, `every consumer file exists and REALLY calls resolveIntegration('<id>') (${p.join('; ') || 'clean'})`);
   const ctl = consumerCensus([{ id: 'fake', consumers: ['src/channels/index.js'], wiredIn: null }], readRepo);
   ok(ctl.length === 1 && /never calls/.test(ctl[0]), 'CONTROL: a consumer that EXISTS but never calls resolveIntegration is RED ("file exists" is the degenerate form of this census)');
+  const tctl = consumerCensus([{ id: 'fake', consumers: ['src/server/browser-backend.js'], wiredIn: null }], readRepo);
+  ok(tctl.length === 1 && /never calls/.test(tctl[0]), 'CONTROL: the table consumer\'s generic call covers only its DECLARED key rows — a row it does not declare (fake) is RED');
 }
 
 // (d) THE CALLBACK URL HAS ONE DEFINITION

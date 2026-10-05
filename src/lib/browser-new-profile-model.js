@@ -10,7 +10,7 @@
 // behind the download confirm), and is chosen once it is done; a machine a provider cannot run on is shown greyed WITH
 // the reason as text (P4's rule — never a tooltip-only "you can't"); "Who can use it" defaults to every conversation
 // (owner ruling A).
-import { backendName, blurbOf } from './browser-switcher-model.js';
+import { backendName, blurbOf, learnBackendRows } from './browser-switcher-model.js';
 
 const i18nKey = (s) => s;
 
@@ -34,6 +34,7 @@ const isCloud = (id) => /^cloud:[a-z0-9-]+$/.test(String(id || ''));
  */
 export function providerChoices({ providers = [], install = null, host = null, t = (s) => s } = {}) {
   const out = [];
+  learnBackendRows(providers);
   for (const r of Array.isArray(providers) ? providers : []) {
     if (!r || !r.id) continue;
     const id = String(r.id);
@@ -42,19 +43,21 @@ export function providerChoices({ providers = [], install = null, host = null, t
     if (r.leaseKind === 'window-target') { state = 'not-a-profile'; note = t(i18nKey('A window on your desktop is shared with an agent from the window itself — it is not a profile.')); }
     else if (v.ok === false && (v.code === 'provider_needs_local_key' || v.code === 'provider_local_only')) { state = 'other-machine'; note = t(i18nKey('Runs only on the computer VibeSpace runs on — pick This computer to use it.')); }
     else if (v.ok === false) { state = 'unavailable'; note = v.code === 'provider_needs_consent' ? t(i18nKey('Off until you allow agents to use windows on your desktop (Settings → Desktop apps).')) : t(i18nKey("Can't be used in this version of VibeSpace.")); }
-    else if (id === 'cloak' && !host && install && install.code !== 'already_installed') {
+    else if (r.install && !host && install && install.code !== 'already_installed') {
       const s = install.state || {};
       if (s.running) { state = 'installing'; note = t(i18nKey('Installing… it can be chosen once it is done.')); }
-      else if (s.failed) { state = 'install-failed'; note = t(i18nKey("The last install of {name} didn't finish."), { name: 'CloakBrowser' }); offer = install.npm === false ? null : 'install-again'; }
+      else if (s.failed) { state = 'install-failed'; note = t(i18nKey("The last install of {name} didn't finish."), { name: backendName(id, t) }); offer = install.npm === false ? null : 'install-again'; }
       else if (install.ok && install.npm !== false) { state = 'needs-install'; note = t(i18nKey('Not installed yet — install it first, then choose it.')); offer = 'install'; }
-      else { state = 'unavailable'; note = t(i18nKey("VibeSpace can't install {name} here by itself. Ask whoever runs VibeSpace, or install it yourself and enter where it is under Settings → Agent browser."), { name: 'CloakBrowser' }); }
+      else { state = 'unavailable'; note = t(i18nKey("VibeSpace can't install {name} here by itself. Ask whoever runs VibeSpace, or install it yourself and enter where it is under Settings → Agent browser."), { name: backendName(id, t) }); }
     } else if (id === 'cdp') { state = 'needs-port'; note = t(i18nKey('Connects to a browser that is already running with a debugging port — enter its port.')); }
     else if (isCloud(id)) { state = 'needs-key'; note = t(i18nKey('Runs at the vendor; it needs your key (⚙ → Integrations) before its first start.')); }
     // the switch dialog's names and blurbs speak of SWITCHING ("…so it can't be switched from here"); a row here names what
     // a new profile would BE — its own head for the two that are not a browser VibeSpace starts, the blurb only where it
     // describes the browser itself (Chromium, CloakBrowser); the note says the rest
-    const name = id === 'cdp' ? t(i18nKey('A browser that is already running')) : id === 'local-window' ? t(i18nKey('A window on your desktop')) : backendName(id, t);
-    const blurb = id === 'chromium' || id === 'cloak' ? blurbOf(id, t) : null;
+    // lane dc-browser-backends (F5): a row's own `newProfileName` (cdp, local-window) else its name; the blurb only for a
+    // browser VibeSpace starts on a directory of its own (`ownsDir` — the others' blurbs speak of switching)
+    const name = r.words && r.words.newProfileName ? t(r.words.newProfileName) : backendName(id, t);
+    const blurb = r.ownsDir ? blurbOf(id, t) : null;
     out.push({ id, name, blurb, state, pickable: PICKABLE.includes(state), note, offer });
   }
   return out;

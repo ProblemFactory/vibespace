@@ -60,11 +60,8 @@
   "src/lib/settings-view.js": 1
  },
  "browser": {
-  "src/browser-profiles.js": 1,
   "src/desktop-serve.js": 1,
   "src/lib/browser-build-model.js": 1,
-  "src/lib/browser-new-profile-model.js": 2,
-  "src/lib/browser-switcher-model.js": 6,
   "src/server/browser-keeper.js": 2
  },
  "plugin": {},

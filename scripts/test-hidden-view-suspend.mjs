@@ -138,7 +138,7 @@ console.log('— wiring pins');
   ok('switchTab re-derives after flipping the guest\'s content', /this\.activeWindowId = chain\.tabs\[index\];\s*\n\s*this\.syncHiddenViews\?\.\(\);/.test(tg));
   ok('every ChatView registration re-derives (a view born hidden starts suspended — the page-load autoFill)', (sl.match(/sessions\.set\(winInfo\.id, (chatView|view)\); (this|app)\.wm\.syncHiddenViews\?\.\(\);/g) || []).length === 4);
   ok('the breakpoint flip re-derives (matchMedia change → syncHiddenViews)', /matchMedia\('\(max-width: 768px\)'\)/.test(wj) && /addEventListener\?\.\('change', \(\) => this\.syncHiddenViews\(\)\)/.test(wj));
-  ok('the rule is imported from the PURE module, not re-spelled', /import \{ HIDE_REASONS, hiddenReasons, windowMarks \} from '\.\/view-visibility\.js'/.test(wj));
+  ok('the rule is imported from the PURE module, not re-spelled', /import \{ HIDE_REASONS, hiddenReasons, windowMarks(?:, revealDesktop)? \} from '\.\/view-visibility\.js'/.test(wj));
   ok('setSuspended is the desktop reason of the same set (the derivation drives every reason through setHidden)', /setSuspended\(on\) \{ this\.setHidden\('desktop', on\); \}/.test(cv) && /_applySuspend\(on\) \{/.test(cv));
   ok('every gate still reads the derived flag (suspended / resume-settle / shortViewNeedsFill / extendTop)', /if \(this\._suspended\) return 'suspended';/.test(cv) && /if \(this\._suspended \|\| this\._disposed\) return; \/\/ hidden window: sh<=ch is an artifact/.test(cv));
   // WHY the sync exists: the three display:none hiders (a CSS refactor that keeps geometry would still need the sync for scrollTop)

@@ -142,8 +142,8 @@ const SITES = [
   { file: 'src/server/harness-config-sync.js', re: /applyConfigPlan\(plan, \{ home \}\)/, what: 'syncCliConfig — the managed keys at boot and on every settings write (onSettingsWrite)' },
   { file: 'src/hosts.js', re: /VIBESPACE_CLI_CONFIG=\$\{this\._cliConfigPlanB64\(\)\} "\$VS_NODE" "\$HOME\/\.vibespace\/bin\/vibespace-hook-register\.mjs" 2>/, what: 'hosts.installAgentTools — the remote register' },
   { file: 'src/hosts.js', re: /vibespace-hook-register\.mjs" --uninstall/, what: 'hosts.uninstallAgentTools — the remote strip' },
-  { file: 'src/ws-create.js', re: /VIBESPACE_CLI_CONFIG=\$\{cliConfigPlanB64\(\)\} "\$VS_NODE" "\$HOME\/\.vibespace\/bin\/vibespace-hook-register\.mjs"/, what: 'the ssh per-spawn prelude' },
-  { file: 'src/ws-create.js', re: /"\$\{bin\}\/vibespace-hook-register\.mjs" 2>\/dev\/null \|\| true/, what: 'the dial device setup (the device-side register)' },
+  { file: 'src/spawn/ssh.js', re: /VIBESPACE_CLI_CONFIG=\$\{cliConfigPlanB64\(\)\} "\$VS_NODE" "\$HOME\/\.vibespace\/bin\/vibespace-hook-register\.mjs"/, what: 'the ssh per-spawn prelude' },
+  { file: 'src/spawn/dial.js', re: /"\$\{bin\}\/vibespace-hook-register\.mjs" 2>\/dev\/null \|\| true/, what: 'the dial device setup (the device-side register)' },
 ];
 function walk(dir) {
   const out = [];

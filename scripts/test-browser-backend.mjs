@@ -291,7 +291,10 @@ const store = IS.create({ dataDir: path.join(ROOT, 'integ'), env: fakeEnv, broad
   const ids = backend.registerTests();
   ok(ids.length === 6 && SW.KEY_IDS.every((id) => store.hasTestRunner(id)), 'all six rows register a runner with the real store (leg v)');
   const src = fs.readFileSync(path.join(REPO, 'src/server/browser-backend.js'), 'utf8');
-  ok(SW.KEY_IDS.every((id) => src.includes(`resolveIntegration('${id}')`)), 'the literal per-row resolveIntegration table is what the shared census reads (one module declares, registers and resolves)');
+  // lane dc-browser-backends (F10): ONE generic resolve over the DECLARED key rows — the shared census derives this file's ids
+  // from those declarations (scripts/test-integration-registry.mjs (c)), so no literal per id is left to keep in step
+  const bb2 = BB.create({ integrations: store, log: { warn() {} } });
+  ok(/\.resolveIntegration\(id\)/.test(src) && !/resolveIntegration\('/.test(src) && SW.KEY_IDS.every((id) => !/is not a key row/.test(String(bb2.keyFor(id).why || ''))) && /is not a key row/.test(bb2.keyFor('lark').why), 'ONE generic resolve over the declared key rows (no literal per id): every declared row resolves through it, an undeclared one (lark) is not a key row');
   ok(!store.hasTestRunner('lark'), 'NEGATIVE CONTROL: a row this track does not consume (lark) has no runner from it');
   // precedence: user > cluster > none, over ONE fixture (leg iii)
   ok(backend.keyFor('cloak').source === 'none' && backend.sourceOf('cloak').source === 'none', 'nothing configured ⇒ source none (both the resolve and the chip)');

@@ -200,17 +200,21 @@ const M = mutantCopies('bprop-switch', REPO);
   const line = m.proposalLines(m.proposalCardBlock({ id: 'bl-0000aaaa', host: 'accounts.google.com', proposal: q })).plan.find((l) => /opens only the sites/.test(l.key));
   ok(!q.alsoSites && /\(only that host\)/.test(line.key), 'CONTROL: a record that does not freeze them leaves the card saying "only that host" for Google — the V1 rows above would be red');
 }
-console.log('— lane dc-browser-providers: a FAKE provider (fakebrowser — headless only, no build choice) registered by ONE row line in a copy of PROVIDERS');
+console.log('— lane dc-browser-providers: a FAKE provider (fakebrowser — headless only, no build choice) — since lane dc-browser-backends its OWN FILE + ONE registration line in a copy of src/browser-backends/index.js');
 {
-  // the closed world: a copy of browser-profiles.js with ONE added row; copies of browser-switch.js / browser-builds.js whose
-  // `require('./browser-profiles.js')` (and builds' `./browser-switch.js`) reach those copies — nothing else is edited
-  const FAKE = "  fakebrowser: Object.freeze({ ...NO_LAUNCH, launchArgs: Object.freeze(['--headless=new']), seeded: true, launchFlags: true, tier: 2, wired: true, label: 'FakeBrowser (headless only)', keyScope: 'none', canSwitchTo: 'in-place', ownsDir: true, leaseKind: 'tab', remote: null, starts: true, headed: false, binary: 'fakebrowser', cdp: true, allowedDomains: true, pinTab: true, consent: null }),\n";
+  // the closed world: the fake backend's own file, a copy of the registration list with ONE added line, copies of
+  // browser-profiles.js / browser-switch.js / browser-builds.js whose requires reach those copies — nothing else is edited
   const rd = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
-  const psrc = rd('src/browser-profiles.js'), at = psrc.indexOf("  'local-window': Object.freeze({"), end = psrc.indexOf('\n});\n', at) + 1;
-  ok(at > 0 && end > at, 'the registration point: the last PROVIDERS row, then the table closes');
-  const pPath = M.write('src/browser-profiles.js', psrc.slice(0, end) + FAKE + psrc.slice(end), 'fake', { name: 'profiles-fake' });
+  const FAKE_FILE = "'use strict';\nconst i18nKey = (s) => s;\nmodule.exports = Object.freeze({\n  id: 'fakebrowser',\n  row: Object.freeze({ launchArgs: Object.freeze(['--headless=new']), seeded: true, launchFlags: true, tier: 2, wired: true, label: 'FakeBrowser (headless only)', keyScope: 'none', canSwitchTo: 'in-place', ownsDir: true, leaseKind: 'tab', remote: null, starts: true, headed: false, binary: 'fakebrowser', cdp: true, allowedDomains: true, pinTab: true, consent: null }),\n  words: Object.freeze({ name: i18nKey('FakeBrowser'), chip: i18nKey('Fake'), blurb: i18nKey('A browser that only exists in this test.') }),\n});\n";
+  const fakePath = M.write('src/browser-backends/cdp.js', FAKE_FILE, 'fake', { name: 'fakebrowser-backend' });
+  const LAST = "  require('./local-window.js'),\n";
+  const isrc = rd('src/browser-backends/index.js'), at = isrc.indexOf(LAST), end = at + LAST.length;
+  ok(at > 0, 'the registration point: the last line of src/browser-backends/index.js, then the list closes');
+  const iPath = M.write('src/browser-backends/index.js', isrc.slice(0, end) + `  require(${JSON.stringify(fakePath)}),\n` + isrc.slice(end), 'fake', { name: 'backends-fake' });
+  const IDX = "require('./browser-backends/index.js')";
+  const pPath = M.write('src/browser-profiles.js', rd('src/browser-profiles.js').split(IDX).join(`require(${JSON.stringify(iPath)})`), 'fake', { name: 'profiles-fake' });
   const PROF = "require('./browser-profiles.js')";
-  const swSrc = rd('src/browser-switch.js');
+  const swSrc = rd('src/browser-switch.js').split(IDX).join(`require(${JSON.stringify(iPath)})`);
   const swPath = M.write('src/browser-switch.js', swSrc.split(PROF).join(`require(${JSON.stringify(pPath)})`), 'fake', { name: 'switch-fake' });
   const bbPath = M.write('src/browser-builds.js', rd('src/browser-builds.js').split(PROF).join(`require(${JSON.stringify(pPath)})`).split("require('./browser-switch.js')").join(`require(${JSON.stringify(swPath)})`), 'fake', { name: 'builds-fake' });
   const P = require(pPath), S = require(swPath), BB = require(bbPath);
@@ -228,6 +232,15 @@ console.log('— lane dc-browser-providers: a FAKE provider (fakebrowser — hea
   const t = (k, p) => String(k).replace(/\{(\w+)\}/g, (_, n) => (p && p[n] != null ? String(p[n]) : ''));
   const ch = NP.providerChoices({ providers: P.providerRows(), t }).find((c) => c.id === 'fakebrowser');
   ok(ch && ch.state === 'ready' && ch.pickable === true, 'New profile…: the fake row is a pickable choice off the /providers rows', ch);
+  // lane dc-browser-backends (F5): its WORDS are its file's — the New profile… row, the switch dialog's name, the pill and
+  // the blurb read them off the rows (no ladder over ids learns its name)
+  ok(ch.name === 'FakeBrowser' && ch.blurb === 'A browser that only exists in this test.' && SWM.backendName('fakebrowser', t) === 'FakeBrowser' && SWM.chipWords({ id: 'fakebrowser' }, t) === 'Fake', 'its words are its own file\'s: New profile… names it, the switch dialog / pill / blurb say it', { ch, chip: SWM.chipWords({ id: 'fakebrowser' }, t) });
+  // CONTROL (F5): the old id ladder restored in backendName ⇒ the fake backend is "an unknown browser" — the words row above would be red
+  const smSrc = rd('src/lib/browser-switcher-model.js'), nameBody = "  return said(wordsOf(id), 'name', t) || t(i18nKey('an unknown browser'));\n";
+  ok(smSrc.includes(nameBody), 'the control cuts backendName where it reads the row');
+  const SWL = await import(M.write('src/lib/browser-switcher-model.js', smSrc.replace(nameBody, "  const s = String(id || '');\n  if (s === 'chromium') return 'Chromium';\n  if (s === 'cloak') return 'CloakBrowser';\n  return t(i18nKey('an unknown browser'));\n"), 'ladder', { esm: true }));
+  SWL.learnBackendRows(P.providerRows());
+  ok(SWL.backendName('fakebrowser', t) === 'an unknown browser' && SWL.backendName('cloak', t) === 'CloakBrowser', 'CONTROL: with the id ladder restored the fake backend has no name ("an unknown browser") — its words row above would be red');
   const m = SWM.switcherModel({ profile, rows }, { t });
   ok(m.targets.some((x) => x.id === 'fakebrowser'), 'the switch dialog\'s model draws a card for it', m.targets.map((x) => x.id));
   const fv = { id: 'bp-0000fa4e', provider: 'fakebrowser', buildChoice: !!P.providerRow('fakebrowser').buildChoice, live: false };

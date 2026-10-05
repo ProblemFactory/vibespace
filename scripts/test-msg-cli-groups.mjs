@@ -630,8 +630,12 @@ console.log('§2 the routes over the REAL engine + store + ladder');
       const a = await askLeg(AR, 'r5-ask');
       ok(a.status === 200 && a.key === 'webui:w-F' && a.repliesTo === 'w-F', `a pending fork's For-you item is keyed under its own placeholder and the owner's reply reaches the FORK (${JSON.stringify(a)})`);
       const AL = "  const key = liveForkPending(s) ? `webui:${id}` : sessionStatusKey(s, id);";
-      ok(arsrc5.split(AL).length === 2, 'the user-todo key line is present once (the control keys by the raw status key)');
-      const ARa = M5.load('src/agent-routes.js', arsrc5.replace(AL, "  const key = sessionStatusKey(s, id);"), 'ask-raw-key');
+      // the user-todo route lives in the status / todos family (src/agent-routes/status.js, lane dc-seams-server): a CLOSED
+      // WORLD — the patched family copy, and an agent-routes copy whose one registration line requires it
+      const sts5 = fs.readFileSync(path.join(REPO, 'src/agent-routes/status.js'), 'utf-8'), REG5 = "require('./agent-routes/status.js')";
+      ok(sts5.split(AL).length === 2 && arsrc5.split(REG5).length === 2, 'the user-todo key line is present once (the control keys by the raw status key)');
+      const stsC = M5.write('src/agent-routes/status.js', sts5.replace(AL, "  const key = sessionStatusKey(s, id);"), 'ask-raw-key-status');
+      const ARa = M5.load('src/agent-routes.js', arsrc5.replace(REG5, `require(${JSON.stringify(stsC)})`), 'ask-raw-key');
       const ac = await askLeg(ARa, 'r5-ask-ctl');
       ok(ac.key === 'claude:' + P && ac.repliesTo === 'w-P', `CONTROL: keyed by the raw status key the item is the PARENT's and the reply is typed into the parent (${JSON.stringify(ac)}) — the leg would go red`);
     }
@@ -774,7 +778,7 @@ console.log('§2c the addressing-read census (r7): every raw "which session carr
     { file: 'src/transcript-service.js', needle: '=== r.sessionId) return s', verdict: 'harmless', why: 'serves the transcript; a pending fork SHARES the parent\'s file until adoption, so either session returns the same bytes (read)' },
     { file: 'src/ws-handler.js', needle: 'data.backendSessionId && (session.backendSessionId', verdict: 'harmless', why: 'rename-session fallback, reached only when the client\'s own webui id is stale (missing from activeSessions); user-explicit, renames a display name, self-heals at adoption' },
     { file: 'src/ws-handler.js', needle: 'data.sessionId = eid; break', verdict: 'harmless', why: 'kill fallback on a stale webui id; user-explicit, no bill/grant/record; a fork/parent id ambiguity here is the same transient class as any two sessions momentarily sharing an id' },
-    { file: 'server.js', needle: '=== sid && s2._accountId === acct', verdict: 'harmless', why: 'recordUsageAttribution — the REAL inference odometer (reading-attribution campaign, slot-transitions/reading-repair), NOT the addressing lane; the pool MEMBER is chosen by poolMemberOfSession keyed on the found session\'s webuiId, and requests share the parent\'s transcript rid pre-adoption' },
+    { file: 'src/server/usage-attribution.js', needle: '=== sid && s2._accountId === acct', verdict: 'harmless', why: 'recordUsageAttribution — the REAL inference odometer (reading-attribution campaign, slot-transitions/reading-repair), NOT the addressing lane; the pool MEMBER is chosen by poolMemberOfSession keyed on the found session\'s webuiId, and requests share the parent\'s transcript rid pre-adoption' },
   ];
   const hits = censusOf(REPO);
   ok(hits.length === 8, `the tree holds exactly the 8 known addressing-idiom sites (found ${hits.length}: ${hits.map((h) => h.file + ':' + h.line).join(', ')})`);

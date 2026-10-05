@@ -65,7 +65,7 @@ ok(!/\bacme\b/i.test(read('src/ws-create.js')) && !/\bacme\b/i.test(read('server
 
 // ── ② a create through the REAL handler, down to the (stub) pty spawn
 const SOCK = scratchDir('hspawn-sock'), BUF = scratchDir('hspawn-buf'), CWD = scratchDir('hspawn-cwd');
-async function drive(mod, data) {
+async function drive(mod, data, extra = {}) {
   const sent = [], spawned = [], resolved = [], active = new Map();
   const accounts = {
     _state: {}, get: () => null, poolMembership: () => [],
@@ -88,6 +88,7 @@ async function drive(mod, data) {
     integrationEnabled: () => false, readSessionMeta: () => null, readLayouts: () => ({}), getSyncStore: () => null,
     pty: { spawn: (cmd, args, opts) => { spawned.push({ cmd, args, env: opts.env }); return { pid: 4242, onData() { }, onExit() { }, write() { }, resize() { }, kill() { } }; } },
     setupSessionPty: (s, id, p) => { s.pty = p; },
+    ...extra,
   }, { get: (t, k) => (k in t ? t[k] : (typeof k === 'string' && /^[a-z]/.test(k) ? noop : undefined)) });
   const handler = mod.createWsCreateHandler({
     ctx, agentEnv: () => ({}), crashLoopRef: { map: new Map() }, noConvoRef: { map: new Map() },
@@ -130,14 +131,80 @@ const CONTROLS = [
     (x) => x.resolved.join() === 'acme'],
   ['statusline', "          if (typeof SP.statusline === 'function' && sessionMode === 'terminal' && !data.hostId && USAGE_STATUSLINE_CMD) {",
     "          if (backend === 'claude' && typeof SP.statusline === 'function' && sessionMode === 'terminal' && !data.hostId && USAGE_STATUSLINE_CMD) {",
-    (x) => !!x.spawned[0] && x.spawned[0].args.includes('--acme-status')],
+    (x) => !!x.spawned[0] && x.spawned[0].args.includes('--acme-status'), 'src/spawn/local.js'],
 ];
-for (const [name, line, old, judge] of CONTROLS) {
-  ok(src.split(line).length === 2, `control ${name}: the gate is one identifiable line in the product source`);
+// A gate that moved into a transport ladder (lane dc-seams-server: the local statusline lives in src/spawn/local.js)
+// is patched in a CLOSED WORLD: the ladder copy, a registry copy requiring it, a ws-create copy requiring that registry.
+const closedWorld = (file, patched, tag) => {
+  const member = M.write(file, patched, tag + '-member');
+  const reg = M.write('src/spawn/index.js', read('src/spawn/index.js').replace(`require('./${path.basename(file, '.js')}')`, `require(${JSON.stringify(member)})`), tag + '-registry');
+  return M.load('src/ws-create.js', src.replace("require('./spawn')", `require(${JSON.stringify(reg)})`), tag);
+};
+for (const [name, line, old, judge, file = 'src/ws-create.js'] of CONTROLS) {
+  const fsrc = read(file);
+  ok(fsrc.split(line).length === 2, `control ${name}: the gate is one identifiable line in the product source (${file})`);
   ok(judge(r), `control ${name}: the shipped gate passes the fake's row`);
-  const mut = M.load('src/ws-create.js', src.replace(line, old), name.replace(/\W+/g, '-'));
+  const mut = file === 'src/ws-create.js' ? M.load(file, src.replace(line, old), name.replace(/\W+/g, '-')) : closedWorld(file, fsrc.replace(line, old), name.replace(/\W+/g, '-'));
   const x = await drive(mut, { backend: 'acme' });
   ok(x.sent.some((m) => m.type === 'created') && !judge(x), `control ${name}: with the id branch restored the fake's declared row is LOST (the leg above can go red)`);
+}
+
+// ── ④ THE SPAWN-LADDER SEAM (lane dc-seams-server, decoupling wave 2b): a machine transport = src/spawn/<id>.js +
+// ONE line in src/spawn/index.js. A FAKE transport `acme-link` added by one line in a scratch copy of the registry
+// gets a remote create through the real ws-create code (the copy differs only in where `./spawn` resolves); the
+// pre-lane dispatch (`h.transport === 'dial' ? dial : ssh`) restored in a copy never reaches it.
+console.log('— ④ the spawn-ladder seam: a fake transport through ONE registration line');
+{
+  const SPW = require(path.join(REPO, 'src/spawn/index.js'));
+  ok(SPW.spawnFor(null).hostless === true && SPW.spawnFor({ name: 'old ssh record' }).hostDefault === true
+    && SPW.spawnFor({ transport: 'no-such-transport' }).hostDefault === true && SPW.spawnFor({ transport: 'dial' }).id === 'dial',
+    'spawnFor: no host ⇒ the hostless member; a record naming no (or an unknown) transport ⇒ the hostDefault member (the old else-branch); a declared one ⇒ itself');
+  const throws = (list) => { try { SPW.check(list); return false; } catch { return true; } };
+  const stub = { terminal() { }, chat() { } };
+  ok(throws([...SPW.TRANSPORTS, { id: 'x2', hostless: true, ...stub }]) && throws([...SPW.TRANSPORTS, { id: 'x3', terminal() { } }])
+    && throws([...SPW.TRANSPORTS, { ...SPW.TRANSPORTS[1] }]) && !throws(SPW.TRANSPORTS),
+    'NEGATIVE CONTROL: the registry refuses a second hostless member, a member without chat(c), a duplicate id');
+  const wsc = read('src/ws-create.js');
+  ok(!/\.transport\s*[!=]==?/.test(wsc) && /spawnFor\(h\)\.terminal\(/.test(wsc) && /spawnFor\(h\)\.chat\(/.test(wsc) && /spawnFor\(null\)\[sessionMode\]\(/.test(wsc),
+    'ws-create names no transport: every ladder is asked through spawnFor (terminal, chat, this machine; the pool facts\' transport = the member id)');
+  globalThis.__acmeLinkCalls = [];
+  const ACME_LINK = `module.exports = {
+  id: 'acme-link',
+  terminal: async (c) => { globalThis.__acmeLinkCalls.push({ mode: 'terminal', host: c.h.id, cwd: c.cwd });
+    c.session.host = c.h.id; c.session.hostName = c.h.name;
+    return { spawnCmd: 'acme-link-cli', spawnArgs: ['--to', c.h.id, ...c.spawnArgs], spawnEnvPairs: [], spawnCwd: c.cwd }; },
+  chat: async (c) => { globalThis.__acmeLinkCalls.push({ mode: 'chat', host: c.h.id }); return null; },
+};
+`;
+  const member = M.write('src/spawn/acme-link.js', ACME_LINK, 'acme-link');
+  const regSrc = read('src/spawn/index.js');
+  const anchor = "  require('./dial'),\n";
+  const regMut = regSrc.replace(anchor, anchor + `  require(${JSON.stringify(member)}),\n`);
+  const added = regMut.split('\n').filter((l) => !regSrc.split('\n').includes(l));
+  ok(regSrc.split(anchor).length === 2 && added.length === 1 && regMut.split('\n').length === regSrc.split('\n').length + 1,
+    'the registration is ONE added line in the registry copy', added);
+  const reg = M.write('src/spawn/index.js', regMut, 'acme-registry');
+  const viaReg = (code) => code.replace("require('./spawn')", `require(${JSON.stringify(reg)})`);
+  const hostsStub = new Proxy({ get: (id) => ({ id, name: 'Acme box', transport: 'acme-link' }) }, { get: (t, k) => (k in t ? t[k] : (typeof k === 'string' ? () => undefined : undefined)) });
+  const mod = M.load('src/ws-create.js', viaReg(src), 'acme-link-create');
+  const x = await drive(mod, { backend: 'acme', hostId: 'host-acme-1' }, { hosts: hostsStub });
+  const sp0 = x.spawned[0];
+  ok(globalThis.__acmeLinkCalls.length === 1 && globalThis.__acmeLinkCalls[0].mode === 'terminal' && globalThis.__acmeLinkCalls[0].host === 'host-acme-1',
+    'a terminal create on an acme-link host runs the acme-link ladder (once, with the host record)', globalThis.__acmeLinkCalls);
+  ok(x.sent.some((m) => m.type === 'created') && !!sp0 && sp0.cmd === '/stub/dtach' && sp0.args.includes('acme-link-cli') && sp0.args.includes('host-acme-1'),
+    'its spawn line is what the SHARED tail spawns (dtach → the wrapper → acme-link-cli --to <host>), and the create answers created', sp0 && sp0.args.slice(-6));
+  ok(x.session && x.session.host === 'host-acme-1', 'the live session is on the acme-link host');
+  const y = await drive(mod, { backend: 'claude', hostId: 'host-acme-1', mode: 'chat' }, { hosts: hostsStub }); // a chat needs a normalizer: the real claude one
+  ok(globalThis.__acmeLinkCalls.length === 2 && globalThis.__acmeLinkCalls[1].mode === 'chat' && y.spawned.length === 0 && !y.session,
+    'a chat create asks the same member\'s chat(c); its "answered the socket" (nothing) ends the create with NO spawn', { calls: globalThis.__acmeLinkCalls.length, spawned: y.spawned.length });
+  globalThis.__acmeLinkCalls = [];
+  const pre = "const sp = await spawnFor(h).terminal(ladderCtx({ h, shq }));";
+  ok(src.split(pre).length === 2, 'control: the terminal dispatch is one identifiable line');
+  const old = viaReg(src).replace(pre, "const sp = await (h.transport === 'dial' ? require('./spawn/dial') : require('./spawn/ssh')).terminal(ladderCtx({ h, shq }));");
+  let z; try { z = await drive(M.load('src/ws-create.js', old, 'acme-link-preseam'), { backend: 'acme', hostId: 'host-acme-1' }, { hosts: hostsStub }); } catch (e) { z = { threw: e.message, spawned: [] }; }
+  ok(globalThis.__acmeLinkCalls.length === 0 && !(z.spawned[0] && z.spawned[0].args.includes('acme-link-cli')),
+    'CONTROL: the pre-lane dispatch restored (dial-or-ssh) never reaches the registered member — the leg above can go red', z.threw || (z.sent || []).map((m) => m.type));
+  delete globalThis.__acmeLinkCalls;
 }
 
 H.unregister('acme'); H.unregister('acme-nopool');

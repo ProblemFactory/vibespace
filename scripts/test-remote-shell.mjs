@@ -32,7 +32,7 @@ ok(buildRemoteShellPrelude({ withNodeFinder: true }).includes('VS_NODE'), 'withN
 // THE DRIFT GUARD: no remote-command file may re-inline the prelude or finder.
 const LIT_PRE = 'export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ]';
 const LIT_NF = 'VS_NODE="$(command -v node';
-for (const f of ['src/hosts.js', 'src/ws-handler.js', 'src/ws-create.js']) {
+for (const f of ['src/hosts.js', 'src/ws-handler.js', 'src/ws-create.js', 'src/spawn/ssh.js', 'src/spawn/dial.js', 'src/spawn/local.js']) {
   const src = fs.readFileSync(new URL('../' + f, import.meta.url), 'utf8');
   ok(!src.includes(LIT_PRE), `${f} has no inlined prelude copy (must import REMOTE_PRELUDE)`);
   ok(!src.includes(LIT_NF), `${f} has no inlined node finder (must import nodeFinder)`);
@@ -81,8 +81,9 @@ const tailLineHas = (l) => l.includes('VIBESPACE_SESSION_CWD=') && l.indexOf('VI
   const tailLine = buildRemoteExec({ cwd: '/w', shq, parts: ['K=v'], tail: ' node keeper run sid 0 --' });
   ok(tailLine.endsWith('exec env K=v node keeper run sid 0 --'), 'tail form (keeper runTail) appends verbatim');
   // drift guard: ws-handler must never hand-assemble a spawn line again
-  const ws = fs.readFileSync(new URL('../src/ws-handler.js', import.meta.url), 'utf-8')
+  let ws = fs.readFileSync(new URL('../src/ws-handler.js', import.meta.url), 'utf-8')
     + fs.readFileSync(new URL('../src/ws-create.js', import.meta.url), 'utf-8');
+  for (const f of ['src/spawn/ssh.js', 'src/spawn/dial.js', 'src/spawn/local.js']) ws += fs.readFileSync(new URL('../' + f, import.meta.url), 'utf-8'); // the transport ladders (lane dc-seams-server)
   const handRolled = (ws.match(/exec env `/g) || []).length + (ws.match(/`exec env/g) || []).length;
   ok(handRolled === 0, `no hand-assembled 'exec env' spawn lines left in ws-handler (found ${handRolled})`);
   ok((ws.match(/buildRemoteExec\(\{/g) || []).length === 5, 'all five builders route through buildRemoteExec');
@@ -159,8 +160,8 @@ const tailLineHas = (l) => l.includes('VIBESPACE_SESSION_CWD=') && l.indexOf('VI
   const { TOOLS_ON_PATH } = require('../src/remote-shell.js');
   const both = buildRemoteShellPrelude({ toolsOnPath: true, withNodeFinder: true });
   ok(both.indexOf(TOOLS_ON_PATH) > both.indexOf('VS_NODE=') && both.indexOf('VS_NODE=') > both.indexOf('nvm.sh'), 'composition order: REMOTE_PRELUDE → node finder → tools (the tools prepend runs LAST, so it is FIRST on PATH)');
-  const wc = fs.readFileSync(new URL('../src/ws-create.js', import.meta.url), 'utf8');
-  ok(!wc.includes('export PATH="$HOME/.vibespace/bin'), 'drift guard: ws-create.js hand-writes NO ~/.vibespace/bin PATH prepend (every builder composes buildRemoteShellPrelude)');
+  const wc = ['src/ws-create.js', 'src/spawn/ssh.js', 'src/spawn/dial.js', 'src/spawn/local.js'].map((f) => fs.readFileSync(new URL('../' + f, import.meta.url), 'utf8')).join('\n');
+  ok(!wc.includes('export PATH="$HOME/.vibespace/bin'), 'drift guard: ws-create.js + src/spawn/ hand-write NO ~/.vibespace/bin PATH prepend (every builder composes buildRemoteShellPrelude)');
   ok((wc.match(/buildRemoteShellPrelude\(\{/g) || []).length === 3, `the three agent-tool builders (ssh setup, dial pty, dial pipe) compose it (${(wc.match(/buildRemoteShellPrelude\(\{/g) || []).length})`);
   const hs = fs.readFileSync(new URL('../src/hosts.js', import.meta.url), 'utf8');
   ok(/AGENT_TOOLS = \[[^\]]*'agent-browser'/.test(hs), 'the shim is an agent tool (it ships where the prelude puts it first)');

@@ -16,7 +16,7 @@
   "src/browser-profiles.js": 1,
   "src/browser-stream.js": 1,
   "src/browser-stuck.js": 2,
-  "src/browser-switch.js": 4,
+  "src/browser-switch.js": 2,
   "src/browser-takeover.js": 1,
   "src/browser-verbs.js": 1,
   "src/browser-windows.js": 1,

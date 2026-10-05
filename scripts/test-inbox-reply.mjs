@@ -361,7 +361,7 @@ console.log('§5 turn facts + wiring');
   ok(/turn: require\('\.\/src\/server\/turn-facts\.js'\)\.turnOf\(s\)/.test(srv) && /turnDigest\(activeSessions\)/.test(srv) && /\}, 1000\)\.unref\(\)/.test(srv), 'the payload carries `turn`, re-broadcast by ONE unref\'d 1 s digest');
   const { SPEND_REASONS } = require(path.join(REPO, 'src/spend-authorizer.js'));
   ok(Array.isArray(SPEND_REASONS) ? !SPEND_REASONS.some((x) => /reply|inbox/.test(String(x))) : !Object.keys(SPEND_REASONS || {}).some((x) => /reply|inbox/.test(x)), 'no spend reason for a reply (a per-occurrence owner action is not an unattended turn)');
-  const ag = read('src/agent-routes.js');
+  const ag = read('src/agent-routes.js') + read('src/agent-routes/status.js'); // + the status / todos family (lane dc-seams-server)
   ok(/options: add\.options == null \? null : add\.options/.test(ag) && ag.includes('[--options "A|B|C"]') && ag.includes('`[For you reply #<id>]`'), 'agent route forwards add.options; the teaching block names --options and the reply shape');
   const cli = read('data/bin/vibespace-ask');
   ok(/opt\('options'\)/.test(cli) && /split\('\|'\)/.test(cli) && /options: ' \+ i\.options\.join/.test(cli) && /cmd === 'show'/.test(cli), "vibespace-ask: --options split on '|', list prints options, a show verb");

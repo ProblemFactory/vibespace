@@ -928,14 +928,14 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
       ok('R15 r4: the engine hears the failure as a failure (journal), keeps the hold and the pool on A', w.eng._resetCreditPending.has(w.A) && w.current() === w.A && l.some((x) => /the post-reset re-read of Cx Alpha failed \(timeout\) — the pool keeps it on the vendor's word/.test(x)), l.join(' | ').slice(0, 300)); }
   }
   // (16) THE PERMANENT LEDGER bills a held process to the member it HOLDS — the
-  //      PRODUCTION recordUsageAttribution text lifted from server.js
+  //      PRODUCTION recordUsageAttribution text lifted from src/server/usage-attribution.js (moved out of server.js, lane dc-seams-server)
   {
-    const srv = read('server.js');
+    const srv = read('src/server/usage-attribution.js');
     const a0 = srv.indexOf('const _lastAttrib = new Map();');
     const endMark = 'usageHistory.recordAttribution({ sid, acct, pool, ts: Date.now() });\n}';
     const b0 = srv.indexOf(endMark, a0);
     const body = a0 > 0 && b0 > a0 ? srv.slice(a0, b0 + endMark.length) : '';
-    ok('R16 the production recordUsageAttribution text was found in server.js', !!body);
+    ok('R16 the production recordUsageAttribution text was found in src/server/usage-attribution.js', !!body);
     const resolver = (txt, w, rows) => new Function('accounts', 'activeSessions', 'usageHistory', txt + '\nreturn recordUsageAttribution;')(w.wam, w.sessions, { recordAttribution: (r) => rows.push(r) });
     const w = world({ mode: 'off', sessions: 2, held: true });
     quietly(() => w.wall(w.ss[1])); // the default moves A→B
@@ -947,7 +947,7 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
     const s3 = w.mk(3); s3._heldPoolMember = w.B;
     rec({ backendSessionId: 'thread-3', accountId: w.P });
     ok('R16 …a conversation spawned after the switch (stamped B) bills B', rows.length === 2 && rows[1].acct === w.B, JSON.stringify(rows));
-    ok('R16 the billing badge reads the same rule (sessionAuth poolAuth → accounts.poolMemberOfSession) and it answers A for the held process', /const poolAuth = \(a\) => \{[^\n]*accounts\.poolMemberOfSession\(a\.id, s, s\._webuiId \|\| null\)\.id/.test(srv) && w.wam.poolMemberOfSession(w.P, w.ss[0]).id === w.A);
+    ok('R16 the billing badge reads the same rule (sessionAuth poolAuth → accounts.poolMemberOfSession) and it answers A for the held process', /const poolAuth = \(a\) => \{[^\n]*accounts\.poolMemberOfSession\(a\.id, s, s\._webuiId \|\| null\)\.id/.test(read('server.js')) && w.wam.poolMemberOfSession(w.P, w.ss[0]).id === w.A);
     const oldTxt = body.replace('acct = (live ? accounts.poolMemberOfSession(acct, live, sessKey).id : accounts.poolCurrentFor(acct, sessKey)) || null;', 'acct = accounts.poolCurrentFor(acct, sessKey) || null;');
     ok('R16 NEGATIVE CONTROL: the patch hit the production text', oldTxt !== body);
     const rowsN = []; resolver(oldTxt, w, rowsN)({ backendSessionId: 'thread-1', accountId: w.P });

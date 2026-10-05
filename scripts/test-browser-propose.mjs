@@ -593,7 +593,7 @@ const swSrc = fs.readFileSync(path.join(REPO, 'src/browser-switch.js'), 'utf8');
   const pSrc = fs.readFileSync(path.join(REPO, 'src/server/browser-propose.js'), 'utf8');
   const cut = "      if (!sessionFor(entry)) return gone('nothing was installed, added or switched');\n";
   ok(pSrc.includes(cut), 'c9: the runner asks for the proposing conversation where the control cuts it');
-  const cut2 = "      if (!sessionFor(entry)) return gone('CloakBrowser is installed, nothing else was added or switched');\n";
+  const cut2 = "      if (!sessionFor(entry)) return gone(`${ANTI.name} is installed, nothing else was added or switched`);\n"; // lane dc-browser-backends (F6): the anti-bot row's name
   const Pm = M.load('src/server/browser-propose.js', pSrc.replace(cut, '').replace(cut2, ''), 'no-preflight');
   const calls9 = [];
   const stubK = { onProposal: () => () => {}, cloakExecutable: () => ({ ok: true }), stepProposal: () => ({ ok: true }), proposalsFor: () => [], switchBackend: async (o) => { calls9.push(o); return { mode: 'switch', reopened: [] }; } };

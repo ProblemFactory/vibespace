@@ -285,7 +285,7 @@ try {
   assert.doesNotMatch(manageAgentsSource, /CLAUDE_SECURESTORAGE_CONFIG_DIR=.*claude (?:auth login|\/login)/);
   assert.match(manageAgentsSource, /loginStatus\.attempt !== loginAttempt/);
   assert.match(manageAgentsSource, /loginStatus\.state === 'success'\) complete\(false\)/);
-  const wsSource = fs.readFileSync(path.join(process.cwd(), 'src/ws-create.js'), 'utf8');
+  const wsSource = ['src/ws-create.js', 'src/spawn/ssh.js', 'src/spawn/dial.js'].map((f) => fs.readFileSync(path.join(process.cwd(), f), 'utf8')).join('\n'); // + the transport ladders (lane dc-seams-server)
   assert.match(wsSource, /needsClaudeLoginHelper && !present\.includes\('vibespace-claude-subscription-login\.mjs'\)/);
   // Adapted from the PR's literal pattern: current master keeps the B-211a
   // nuance (held billing rides dialAcctAssign — _hostSubReady exempts it from

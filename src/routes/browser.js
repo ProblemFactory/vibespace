@@ -2057,19 +2057,21 @@ router.post('/api/agent/browser/pin', (req, res) => {
 });
 /** lane browser-propose step 3: what the agent is told when its claim filed (or found) a PROPOSAL — the ONE next step
  *  (tell the user in one sentence) and what it must not do (work around the refusal). */
+// lane dc-browser-backends (F6): the switch the agent is told about names the ANTI-BOT ROW (src/browser-profiles.js antiBotRow)
+const antiName = () => (require('../browser-profiles.js').antiBotRow() || { name: 'the anti-bot browser' }).name;
 function proposalNext(r) {
   const p = r.proposal || {};
   const id = r.claim && r.claim.id;
-  if (r.rejected) return `the user REJECTED switching your browser to CloakBrowser for ${p.site} — do not work around the refusal (no copied session, no other browser); tell the user which page needs them and carry on with what you can`;
+  if (r.rejected) return `the user REJECTED switching your browser to ${antiName()} for ${p.site} — do not work around the refusal (no copied session, no other browser); tell the user which page needs them and carry on with what you can`;
   if (p.state === 'unavailable') {
     const why = p.plan && p.plan.why === 'remote' ? 'this conversation runs on another machine' : p.plan && p.plan.why === 'other-machine' ? 'your browser runs on a paired machine' : p.plan && p.plan.why === 'already-cloak' ? 'your browser already is CloakBrowser' : p.plan && p.plan.why === 'never-admitted' ? `CloakBrowser never opens ${p.site} — a loopback / link-local address` : p.installWhy === 'provider_unavailable' ? 'CloakBrowser is not available in this version' : `CloakBrowser cannot be installed here (${p.installWhy || 'unavailable'})`;
     return `no switch can be offered on this machine (${why}) — the user sees your claim as a card in the chat; tell them in ONE sentence which page refused you: signing in there is theirs (the live view's Take over). Do not work around it`;
   }
   // verify r1: a REJECT is not pushed — it is said at the agent's next navigation to the host (or its next claim on it)
   if (r.duplicate) return `the same card still waits for the user (proposal ${id}, ${p.state}) — no second card was made. Do not ask again and do not work around the refusal; when they approve you are told (with their next message if your turn has ended); if they reject it, your next navigation to ${p.site} says so`;
-  const what = p.plan && p.plan.kind === 'switch' ? 'switch this browser to CloakBrowser in place' : p.plan && p.plan.kind === 'site' ? `let your CloakBrowser browser open ${p.site}` : 'a new CloakBrowser profile for this conversation';
+  const what = p.plan && p.plan.kind === 'switch' ? `switch this browser to ${antiName()} in place` : p.plan && p.plan.kind === 'site' ? `let your ${antiName()} browser open ${p.site}` : `a new ${antiName()} profile for this conversation`;
   const also = Array.isArray(p.alsoSites) && p.alsoSites.length ? `, with the sites ${p.site}'s sign-in page loads from` : '';
-  return `a card in the user's chat now waits for their Approve (proposal ${id}: ${what}${also}${p.install === 'needed' ? ', installing CloakBrowser first' : ''}). Tell the user in ONE sentence that the card waits for their Approve — then stop: do NOT work around the refusal (no copied session, no other browser, no switch of your own). When they approve, you are told (with their next message if your turn has ended); re-run the sign-in then`;
+  return `a card in the user's chat now waits for their Approve (proposal ${id}: ${what}${also}${p.install === 'needed' ? `, installing ${antiName()} first` : ''}). Tell the user in ONE sentence that the card waits for their Approve — then stop: do NOT work around the refusal (no copied session, no other browser, no switch of your own). When they approve, you are told (with their next message if your turn has ended); re-run the sign-in then`;
 }
 /** P4 (§7.4): the profile an agent's backend verb acts on — a named handle/id, else the set's default / only member; the
  *  ephemeral browser has no registry record, so it is refused with the remedy (a switch is a property of a PROFILE). */
@@ -2130,8 +2132,8 @@ router.post('/api/agent/browser/blocked', (req, res) => {
     let choices = [];
     try { choices = profileId && typeof k.choicesFor === 'function' ? k.choicesFor(profileId) : []; } catch { choices = []; }
     const next = r.proposal ? proposalNext(r)
-      : choices.includes('cloak')
-        ? 'the user sees your claim in the live view with a one-click "Switch to CloakBrowser…" — the switch is THEIR act; `vibespace-browser backend <name>` proposes it yourself'
+      : choices.includes((require('../browser-profiles.js').antiBotRow() || {}).id)
+        ? `the user sees your claim in the live view with a one-click "Switch to ${antiName()}…" — the switch is THEIR act; \`vibespace-browser backend <name>\` proposes it yourself`
         : 'the user sees your claim in the live view; no other browser is available on this instance, so the switch is not offered there — it is THEIR act to arrange one; `vibespace-browser backend` lists the rows';
     const { proposal, ...rest } = r;
     res.json({ ...rest, ...(proposal ? { proposal: { id: r.claim.id, state: proposal.state, install: proposal.install, plan: { kind: proposal.plan.kind, why: proposal.plan.why || null, label: proposal.plan.label || proposal.plan.profileLabel || null }, site: proposal.site } } : {}), remembered, next });

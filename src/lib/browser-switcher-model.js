@@ -16,46 +16,33 @@ export const ROW_STATES = Object.freeze(['current', 'not-a-switch', 'other-machi
 /** The states that never draw a card (the current browser, and every row that is not a switch of THIS profile). */
 export const HIDDEN_STATES = Object.freeze(['current', 'not-a-switch', 'other-machine', 'not-in-this-version']);
 
-const CLOUD_VENDORS = Object.freeze({ browserbase: 'Browserbase', browserless: 'Browserless', kernel: 'Kernel', browseruse: 'Browser Use', agentcore: 'Amazon Bedrock AgentCore' });
-function vendorOf(id) {
-  const m = /^cloud:([a-z0-9-]+)$/.exec(String(id || ''));
-  return m && CLOUD_VENDORS[m[1]] ? CLOUD_VENDORS[m[1]] : null;
+// lane dc-browser-backends (F5): A BACKEND'S WORDS ARE ITS ROW'S — declared in its own file (src/browser-backends/<id>.js;
+// a cloud row's in src/browser-profiles.js, its vendor's name as `{vendor}`) as i18n keys, carried by every row the
+// server sends (the digest's `providers`, the /providers rows, the switch dialog's rows); this model LEARNS them from
+// those rows and words them through t() — one lookup where three if-ladders over the ids stood.
+const ROWS = new Map();
+export function learnBackendRows(rows) {
+  // a provider row says `canSwitchTo`, a switch dialog row the same cell as `switchKind`
+  for (const r of Array.isArray(rows) ? rows : []) if (r && r.id && r.words && typeof r.words === 'object') ROWS.set(String(r.id), { words: r.words, canSwitchTo: r.canSwitchTo || r.switchKind || null });
 }
-const isStructural = (id) => { const s = String(id || ''); return s === 'cdp' || s === 'local-window' || !!vendorOf(s); };
+const wordsOf = (id) => { const r = ROWS.get(String(id || '')); return r ? r.words : null; };
+// `brand: true` = its name and chip are a brand name, said as they are in every language (Chromium, CloakBrowser)
+const said = (w, key, t) => (!w || !w[key] ? null : w.brand && (key === 'name' || key === 'chip') ? String(w[key]) : t(w[key], w.vendor ? { vendor: w.vendor } : undefined));
+// a row that is not switched in place (somebody else's browser, a desktop window, a cloud vendor's) has no switch card
+const isStructural = (id) => { const r = ROWS.get(String(id || '')); return !!r && !!r.canSwitchTo && r.canSwitchTo !== 'in-place'; };
 
 /** The browser's name inside sentences and on the now line. */
 export function backendName(id, t) {
-  const s = String(id || '');
-  if (s === 'chromium') return 'Chromium';
-  if (s === 'cloak') return 'CloakBrowser';
-  if (s === 'cdp') return t(i18nKey('a browser VibeSpace connected to'));
-  if (s === 'local-window') return t(i18nKey('a window on your desktop'));
-  const v = vendorOf(s);
-  if (v) return t(i18nKey('{vendor} (cloud)'), { vendor: v });
-  return t(i18nKey('an unknown browser'));
+  return said(wordsOf(id), 'name', t) || t(i18nKey('an unknown browser'));
 }
 /** The short form for a PILL (the live bar, the picker row, Session Properties, the Actions pane): no major, no plan. */
 export function chipWords(fact, t) {
   if (!fact || typeof fact !== 'object') return null;
-  const s = String(fact.id || '');
-  if (s === 'chromium') return 'Chromium';
-  if (s === 'cloak') return 'CloakBrowser';
-  if (s === 'cdp') return t(i18nKey('connected browser'));
-  if (s === 'local-window') return t(i18nKey('desktop window'));
-  const v = vendorOf(s);
-  if (v) return t(i18nKey('{vendor} (cloud)'), { vendor: v });
-  return t(i18nKey('unknown browser'));
+  return said(wordsOf(fact.id), 'chip', t) || t(i18nKey('unknown browser'));
 }
 /** One line about a browser, under its name; null for an id we do not know. */
 export function blurbOf(id, t) {
-  const s = String(id || '');
-  if (s === 'chromium') return t(i18nKey("VibeSpace's default browser (the open-source version of Chrome)."));
-  if (s === 'cloak') return t(i18nKey('A browser that sites are less likely to block as a bot.'));
-  if (s === 'cdp') return t(i18nKey("VibeSpace didn't start this browser, only connected to it, so it can't be switched from here."));
-  if (s === 'local-window') return t(i18nKey("This is a window on your own desktop, not a browser VibeSpace started, so it can't be switched from here."));
-  const v = vendorOf(s);
-  if (v) return t(i18nKey("Its saved logins live with {vendor}, so it can't be switched to another browser."), { vendor: v });
-  return null;
+  return said(wordsOf(id), 'blurb', t);
 }
 /** The agent's claim: WHO said it (your agent), the site, its own words quoted as data; the evidence behind a fold. */
 export function claimWords(claim, t) {
@@ -170,6 +157,7 @@ export function stateWords(state, facts, ctx, t) {
 /** The now line: whose browser it is (or the switch in flight), and its one-line description. */
 export function nowWords(view, { t, pending = null } = {}) {
   const v = view || {};
+  learnBackendRows(v.rows);
   const cur = String((v.profile && v.profile.provider) || 'chromium');
   if (v.switching || (pending && pending.state === 'switching')) {
     const name = backendName(pending && pending.to ? pending.to : cur, t);
@@ -180,6 +168,7 @@ export function nowWords(view, { t, pending = null } = {}) {
 /** Why there is no card — ONE sentence by the fact; null when a card exists or the now blurb already says why. */
 export function emptyWords(view, model, t) {
   const v = view || {};
+  learnBackendRows(v.rows);
   const m = model || {};
   if (Array.isArray(m.targets) && m.targets.length) return null;
   const cur = String((v.profile && v.profile.provider) || 'chromium');
@@ -204,6 +193,7 @@ export function noticeWords(state, facts, name, label, t) {
  */
 export function switcherModel(view, { t, preselect = null, pending = null, sessionOf = () => null, hostNameOf = (id) => id, credentialWhy = null } = {}) {
   const v = view || {};
+  learnBackendRows(v.rows);
   const p = v.profile || {};
   const label = String(p.label || p.id || '');
   const hostName = p.host ? String((typeof hostNameOf === 'function' && hostNameOf(p.host)) || p.host) : null;

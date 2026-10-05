@@ -31,6 +31,8 @@
  * views told in one line (`browser-site-reset`), the agent told for free — and nothing else.
  */
 const SW = require('../browser-switch.js');
+// lane dc-browser-backends (F6): the proposal's target is the ANTI-BOT ROW (antiBot: true, tier 2, local), named by its words
+const ANTI = require('../browser-profiles.js').antiBotRow() || { id: null, name: 'the anti-bot browser' };
 
 function create({ keeper, feedCard = null, userTodos = null, sessionKeyFor = null, activeSessions = null,
   patchSettings = null, serverSetting = () => undefined, tell = null, pinConversation = null, broadcast = null,
@@ -139,7 +141,7 @@ function create({ keeper, feedCard = null, userTodos = null, sessionKeyFor = nul
       if (!inst.exeOk()) {
         // verify r1 V2: a card that said CloakBrowser IS installed carried no download line — its Approve never fetches the
         // 217 MB (it went away after the card was drawn: refused by name, the one way back named)
-        if (p.install !== 'needed') return fail('CloakBrowser is not installed any more, and this card did not include its download — nothing was downloaded. Install it from Manage agents (CloakBrowser), then press Approve again', 'install_gone');
+        if (p.install !== 'needed') return fail(`${ANTI.name} is not installed any more, and this card did not include its download — nothing was downloaded. Install it from Manage agents (${ANTI.name}), then press Approve again`, 'install_gone');
         progress('install');
         const pr0 = inst.progress() || {};
         if (!pr0.running) {
@@ -166,9 +168,9 @@ function create({ keeper, feedCard = null, userTodos = null, sessionKeyFor = nul
         }
         const end = inst.progress() || {};
         if (end.failed) return fail(end.error || 'the install failed', 'install_failed');
-        if (!inst.exeOk()) return fail('the install finished but CloakBrowser does not answer', 'install_failed');
+        if (!inst.exeOk()) return fail(`the install finished but ${ANTI.name} does not answer`, 'install_failed');
       }
-      if (!sessionFor(entry)) return gone('CloakBrowser is installed, nothing else was added or switched');
+      if (!sessionFor(entry)) return gone(`${ANTI.name} is installed, nothing else was added or switched`);
       // (b) THE SITE — only the claim's host (+ the frozen sites its sign-in page loads from), added to the list CloakBrowser may open
       progress('site');
       const aw = SW.allowlistWith(setting('browser.cloak.egressAllowlist', ''), [p.site, ...(Array.isArray(p.alsoSites) ? p.alsoSites : [])]);
@@ -182,7 +184,7 @@ function create({ keeper, feedCard = null, userTodos = null, sessionKeyFor = nul
         const st1 = staleOthers(); if (st1) return st1;
         progress('switch');
         let r;
-        try { r = await keeper.switchBackend({ profileId: p.plan.profileId, target: 'cloak', by: { kind: 'user' }, browserKey: entry.browserKey, sessionId: entry.sessionId, confirmDowngrade: !!p.plan.confirm }); }
+        try { r = await keeper.switchBackend({ profileId: p.plan.profileId, target: ANTI.id, by: { kind: 'user' }, browserKey: entry.browserKey, sessionId: entry.sessionId, confirmDowngrade: !!p.plan.confirm }); }
         catch (e) { return fail(e && e.message ? e.message : String(e), (e && e.code) || 'switch_failed'); }
         if (!r || r.mode !== 'switch') return fail(r && r.reason ? r.reason : 'the switch did not run', 'switch_refused');
         outcome = { code: 'switched', label: p.plan.profileLabel || null, profileId: p.plan.profileId, newProfile: false, reopened: (r.reopened || []).filter((x) => x && x.ok).length, siteAdded: aw.added };
@@ -191,13 +193,13 @@ function create({ keeper, feedCard = null, userTodos = null, sessionKeyFor = nul
         const sess = sessionFor(entry);
         if (!sess) return fail('the conversation is not running any more — nothing was created', 'session-gone');
         let prof;
-        try { prof = keeper.createProfile({ label: p.plan.label, provider: 'cloak' }, { owner: { kind: 'instance', id: null }, createdBy: entry.browserKey || null }); }
+        try { prof = keeper.createProfile({ label: p.plan.label, provider: ANTI.id }, { owner: { kind: 'instance', id: null }, createdBy: entry.browserKey || null }); }
         catch (e) { return fail(e && e.message ? e.message : String(e), (e && e.code) || 'profile_failed'); }
         try { if (typeof pinConversation === 'function') await pinConversation({ sessionId: sess.id, session: sess.s, browserKey: entry.browserKey, profileId: prof.id }); }
         catch (e) { return fail(`the new profile "${prof.label}" was made but this conversation could not be pointed at it: ${e && e.message}`, (e && e.code) || 'pin_failed'); }
         progress('open');
         try { await keeper.attach({ profileId: prof.id, browserKey: entry.browserKey, sessionId: sess.id, by: 'user' }); }
-        catch (e) { return fail(`CloakBrowser did not start for "${prof.label}": ${e && e.message}`, (e && e.code) || 'launch_failed'); }
+        catch (e) { return fail(`${ANTI.name} did not start for "${prof.label}": ${e && e.message}`, (e && e.code) || 'launch_failed'); }
         progress('reopen');
         const o = await keeper.openInLease({ profileId: prof.id, browserKey: entry.browserKey, url: p.url });
         outcome = { code: 'new-profile', label: prof.label, profileId: prof.id, newProfile: true, reopened: o.ok ? 1 : 0, siteAdded: aw.added, ...(o.ok ? {} : { reopenError: o.error }) };

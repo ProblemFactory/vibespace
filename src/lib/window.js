@@ -1,4 +1,4 @@
-import { attachPopoverClose, escHtml, uiScale } from './utils.js';
+import { attachPopoverClose, escHtml, showToast, uiScale } from './utils.js';
 import { dragEndVerdict } from './drag-end.js';
 import { captureOn, setDragShield, attachDragFeed } from './drag-feed.js'; // ONE feed for every drag door (verify r1)
 import { minOf, clampToMin, raiseToMin, keepInside, zoneBox, wholePx, rescaleBox } from './window-min-size.js';
@@ -8,10 +8,10 @@ import { showWindowContextMenu } from './taskbar.js';
 import { installTabGroupMixin } from './tab-group.js';
 import { windowTypeIcon } from './window-types.js';
 import { createAgentKindIcon, createBackendIcon, createModeBackendIcon, getAgentKindMeta } from './agent-meta.js';
-import { HIDE_REASONS, hiddenReasons, windowMarks } from './view-visibility.js';
+import { HIDE_REASONS, hiddenReasons, windowMarks, revealDesktop } from './view-visibility.js';
 import { placementNote, billingAuthKey } from './pool-priority-model.js'; // 2026-09-28: which rule placed a pooled conversation, in words (PURE); 2026-09-30 THE ONE billing re-render key
 import { chipMode, chipWords, titleMinText, CHIP_MODES } from './title-chips.js'; // THE TITLE WINS (lane G): the billing chip's form per title bar / tab
-import { stageRefusalWords } from './stage-rules.js'; // inc-muly2izg-cks3: the Stage's move refusal in words (PURE)
+import { stageRefusalWords, stageWindowKind } from './stage-rules.js'; // inc-muly2izg-cks3: the Stage's move refusal in words (PURE)
 import { STAGE_ID } from './stage-manager.js';
 import { displayedPanes, revealTab, pressTab } from './chain-layout.js'; // agent browser P7 (§4.6): a split's displayed panes on a narrow layout // PURE: which hiders hold a window's content off-screen (inc-mu6bfv1t-4drq)
 
@@ -1368,14 +1368,29 @@ class WindowManager {
    *  tab click, and never drags a partner pane on the phone), a minimized group is restored, the
    *  frame is raised. NOT for a press on the frame (`_focusFromPointer` keeps the tab on show) and
    *  NOT for a machine path: `replay` (a layout replay / remote apply — the record's `active`
-   *  decides) only raises, as before. The desktop switch stays with the caller (goToWinId; a
-   *  'focus' card click never switched desktops); `raise: false` = choose its tab only (a window
-   *  found on ANOTHER desktop: its group shows it when the user goes there). The census in
-   *  test-architecture §62 holds every user-named call site to this door. */
-  revealWindow(id, { replay = false, raise = true } = {}) {
+   *  decides) only raises, as before. THE DESKTOP IS A HIDER TOO (userW inc-muv3qfo7-96tm: the Outbox
+   *  button "did nothing" — its window was on another desktop): a frame on another desktop is gone to
+   *  FIRST through this client's one switch door (dm.switchTo — the previews', Ctrl+\'s and the phone's
+   *  desktop tabs' path; the active desktop is per client, nothing broadcast), the Stage asked through
+   *  PURE revealDesktop; a reveal that cannot land says where the window is. `raise: false` = choose its
+   *  tab only (Locate — a window found on ANOTHER desktop: its group shows it when the user goes there,
+   *  the user is never moved). The census in test-architecture §62 holds every user-named call site
+   *  (and every singleton's re-open, §62c) to this door. */
+  revealWindow(id, { replay = false, raise = true, _switched = false } = {}) {
     const win = this.windows.get(id); if (!win) return false;
     if (replay) { this.focusWindow(id); return true; }
     const ch = win._tabChain;
+    const frame = (ch && this.windows.get(ch.tabs[0])) || win, dm = this._app?.desktopManager, stage = this._app?.stage;
+    const go = dm ? revealDesktop({ raise, desktopId: frame._desktopId || null, activeId: dm.activeDesktopId, stageId: STAGE_ID, stageActive: !!stage?.isActive, stageEnabled: !!stage?.enabled,
+      stageKind: stageWindowKind({ type: frame.type, isPlaceholder: !!frame._isStagePlaceholder, onStage: !!frame._onStage, desktopId: frame._desktopId }, STAGE_ID), intercept: !!stage?.shouldIntercept?.(win), switched: _switched }) : { act: 'none' };
+    if (go.act === 'switch') {
+      Promise.resolve(go.to === STAGE_ID ? stage.enter() : dm.switchTo(go.to)).then(() => this.revealWindow(id, { raise, _switched: true }), () => this.revealWindow(id, { raise, _switched: true }));
+      return true;
+    }
+    if (go.act === 'tell') {
+      const desk = frame._desktopId === STAGE_ID ? t('Stage') : (dm.desktops || []).find((d) => d.id === frame._desktopId)?.name || frame._desktopId;
+      showToast(t('“{window}” is on “{desktop}”', { window: win.title || win.type, desktop: desk }), { type: 'info', duration: 5000 });
+    }
     const i = revealTab(ch, id);
     if (!raise) {
       // choose its tab only (Locate of a window on ANOTHER desktop): the ACTIVE window stays what it was — switchTab

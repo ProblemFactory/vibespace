@@ -14,7 +14,7 @@
  * (src/browser-switch.js `vendorEnvFor`) — never a file, never argv, never a
  * log line, never `agentEnv`.
  *
- *   keyFor(id)     → resolveIntegration('<id>') — the literal per-row table
+ *   keyFor(id)     → resolveIntegration(id) — ONE generic resolve over the declared key rows
  *                    below IS the census's evidence; `{source, values, …}`
  *   sourceOf(id)   → the MASKED view's `{source, clusterKey, clusterLabel,
  *                    why}` for the switcher's SOURCE chip — never a value
@@ -37,18 +37,12 @@
  */
 const SW = require('../browser-switch.js');
 
-/** THE LITERAL TABLE — one `resolveIntegration('<id>')` per row, so the
- *  shared layer's consumer census (scripts/test-integration-registry.mjs (c))
- *  finds a real call site for every id this file claims to consume. */
-const RESOLVE = Object.freeze({
-  cloak: (st) => st.resolveIntegration('cloak'),
-  'cloud:browserbase': (st) => st.resolveIntegration('cloud:browserbase'),
-  'cloud:browserless': (st) => st.resolveIntegration('cloud:browserless'),
-  'cloud:kernel': (st) => st.resolveIntegration('cloud:kernel'),
-  'cloud:browseruse': (st) => st.resolveIntegration('cloud:browseruse'),
-  'cloud:agentcore': (st) => st.resolveIntegration('cloud:agentcore'),
-});
 const KEY_IDS = SW.KEY_IDS;
+/** lane dc-browser-backends (F10): ONE generic resolve over the DECLARED key rows (src/browser-switch.js KEY_ROWS — a
+ *  backend's `keyRow` in its own file, the cloud vendors' rows there); the shared layer's consumer census
+ *  (scripts/test-integration-registry.mjs (c)) derives this file's ids from those declarations, never a literal per id. */
+const RESOLVE = (id) => (KEY_IDS.includes(id) ? (st) => st.resolveIntegration(id) : null);
+
 
 function create({ integrations = null, fetchImpl = null, now = Date.now, log = console } = {}) {
   const store = () => { try { return (typeof integrations === 'function' ? integrations() : integrations) || null; } catch { return null; } };
@@ -60,7 +54,7 @@ function create({ integrations = null, fetchImpl = null, now = Date.now, log = c
    *  when the store is absent, the row unknown or nothing configured. */
   function keyFor(integrationId) {
     const id = String(integrationId || '');
-    const fn = RESOLVE[id];
+    const fn = RESOLVE(id);
     if (!fn) return { integrationId: id, source: 'none', values: {}, clusterKey: null, clusterLabel: null, fromEnv: false, missing: [], why: `${id} is not a key row of this track` };
     const st = store();
     if (!st) return { integrationId: id, source: 'none', values: {}, clusterKey: null, clusterLabel: null, fromEnv: false, missing: [], why: 'the integration store is not available on this instance' };
@@ -73,7 +67,7 @@ function create({ integrations = null, fetchImpl = null, now = Date.now, log = c
   function sourceOf(integrationId) {
     const id = String(integrationId || '');
     const st = store();
-    if (!st || !RESOLVE[id]) return { integrationId: id, source: 'none', clusterKey: null, clusterLabel: null, why: st ? `${id} is not a key row` : 'the integration store is not available on this instance', testedAt: null, lastOk: null };
+    if (!st || !RESOLVE(id)) return { integrationId: id, source: 'none', clusterKey: null, clusterLabel: null, why: st ? `${id} is not a key row` : 'the integration store is not available on this instance', testedAt: null, lastOk: null };
     let v;
     try { v = st.publicView(id); } catch (e) { return { integrationId: id, source: 'none', clusterKey: null, clusterLabel: null, why: String(e && e.message), testedAt: null, lastOk: null }; }
     return { integrationId: id, source: v.source, clusterKey: v.clusterKey || null, clusterLabel: v.clusterLabel || null, why: v.why || null, whyCode: v.whyCode || null, whyParams: v.whyParams || null, testedAt: v.testedAt || null, lastOk: v.lastOk == null ? null : v.lastOk, missing: v.missing || [] }; // whyCode/whyParams: the same fact as STRUCTURE — the switch dialog words it with the device's t() (credentialWhyText)

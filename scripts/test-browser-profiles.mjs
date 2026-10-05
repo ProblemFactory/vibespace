@@ -79,6 +79,8 @@ const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail
 const skip = (n) => { skipped++; console.log('  ⊘ SKIP ' + n); };
 const REPO = new URL('..', import.meta.url).pathname;
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
+// the create path = ws-create + its transport ladders (lane dc-seams-server: src/spawn/), ws-create first
+const readCreate = () => ['src/ws-create.js', 'src/spawn/local.js', 'src/spawn/ssh.js', 'src/spawn/dial.js'].map(read).join('\n');
 
 const ROOT = scratch('browser-profiles');
 fs.rmSync(ROOT, { recursive: true, force: true });
@@ -728,7 +730,7 @@ console.log('\n⑫ the version probe strips an ambient AGENT_BROWSER_* (r2)');
 // ═══ ⑦ WIRING PINS — the composition really reaches both transports ═══════
 console.log('\n⑦ wiring (a pure function nobody calls is a feature nobody has)');
 {
-  const src = read('src/ws-create.js');
+  const src = readCreate();
   ok(/\.envFor\(\{\s*\n?\s*browserKey/.test(src), 'ws-create calls the resolver');
   // LAZY BY CONSTRUCTION: registering the ws handler must cost nothing. An
   // EAGER construction here took the whole release gate down with a TypeError,
@@ -992,7 +994,7 @@ console.log('\n⑬ the project-level agent-browser.json is layered the way the C
       'takeover r3 PRE-FIX CONTROL: the v2-r3 layering (patched copy) carries the project\'s raw debugging port, user agent and executable into the generated config — the legs above can go red', JSON.stringify(pc));
   }
   // wiring: ws-create hands the resolver the session's cwd
-  const src = read('src/ws-create.js');
+  const src = readCreate();
   ok(/remote: !!data\.hostId, cwd,/.test(src), 'ws-create passes the session\'s `cwd` to envFor (the file is read from the directory the CLI would read it from)');
   // the two documents that told the agent and the user the opposite
   ok(/agent-browser\.json/.test(read('docs/agent/browser-manual.md')) && /agent-browser\.json/.test(read('docs/kb-features.md')),
@@ -1172,7 +1174,7 @@ console.log('\n⑭ the remote rung: a shell fragment the host runs (r3)');
     'the fragment lands after the cd (so ./agent-browser.json is the session dir) and after the prelude, before exec env');
   ok(buildRemoteExec({ cwd: '/w', shq, parts: ['x'] }) === "cd '/w' 2>/dev/null; " + sessionCwdExport('/w', shq) + AMBIENT_OAT_UNSET + 'exec env x',
     'an empty `browser` changes nothing (every non-browser caller is byte-identical to round 2\'s composition + lane L r5\'s session-cwd export)');
-  const ws = read('src/ws-create.js');
+  const ws = readCreate();
   const sites = (ws.match(/buildRemoteExec\(\{/g) || []).length;
   const wired = (ws.match(/browser: spawnBrowserPre/g) || []).length;
   ok(sites === 5 && wired === sites, `ALL ${sites} buildRemoteExec sites pass \`browser: spawnBrowserPre\` (${wired}) — a site that forgets is a remote transport with the round-2 collision`);
@@ -1218,7 +1220,7 @@ console.log('\n⑯ modes: the generated config is 0600 in a 0700 directory (r3)'
   fs.writeFileSync(retired, '{}');
   ok(mode(retired) === (0o666 & ~um), `PRE-FIX CONTROL: round 2's bare writeFileSync gives 0666 & ~umask = ${(0o666 & ~um).toString(8)} here (umask ${um.toString(8)})`);
   ok(BE.FILE_MODE === 0o600 && BE.DIR_MODE === 0o700, 'the modes are named constants the ORCH exports');
-  const wsrc = read('src/ws-create.js');
+  const wsrc = readCreate();
   ok((wsrc.match(/\{ mode: 0o600 \}/g) || []).length >= 3, 'and match the mode the token-bearing files beside it in ws-create already use');
 }
 
@@ -1519,7 +1521,7 @@ console.log('\n⑳ r5: the floor notice latches on DELIVERY · the conversation 
   const fnStart = srvSrc.indexOf('function serverNotice(');
   const fn = srvSrc.slice(fnStart, srvSrc.indexOf('\n}\n', fnStart));
   ok(/return delivered;/.test(fn) && /_sentNotices\.get\(key\)/.test(fn), 'server.js `serverNotice` RETURNS the delivery count (and, once burned, the count it reached)');
-  const wc = read('src/ws-create.js');
+  const wc = readCreate();
   ok(/const onClientConnected = \(\) => \{ try \{ browserEnvOf\(\)\?\.checkFloor\(\)/.test(wc) && /\}, \{ onClientConnected \}\);/.test(wc), 'ws-create exposes `onClientConnected` on the handler, and it asks checkFloor()');
   ok(/checkFloor\(\{ reprobe: true \}\)[^\n]*6 \* 3600e3/.test(wc), 'and re-probes on the 6 h cadence the other health probes use');
   const wh = read('src/ws-handler.js');
@@ -1682,7 +1684,7 @@ console.log('\n⑳ r5: the floor notice latches on DELIVERY · the conversation 
   // WIRING: the record says which conversation it was forked from, at the ONE
   // origin write, and every other producer spreads the previous record so the
   // statement survives to the adoption write that finally binds the fork.
-  const wc = read('src/ws-create.js');
+  const wc = readCreate();
   ok(/forkSourceId: \(data\.fork && \(data\.forkedFromId \|\| data\.resumeId\)\) \? String\(data\.forkedFromId \|\| data\.resumeId\) : undefined,/.test(wc), 'ws-create\'s first meta write states forkSourceId = the id the fork was asked to resume (forkedFromId when the store minted the fork before the spawn, else resumeId), only under data.fork');
   // A census reads CODE: whole-line comments are blanked first (the origin
   // write's own comments spell parentheses and semicolons), and each site is

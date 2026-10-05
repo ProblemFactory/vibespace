@@ -876,96 +876,19 @@ function isProfileId(v) { return PROFILE_ID_RE.test(String(v || '')); }
 /** The user-data-dir NAME for a minted profile: `~/.agent-browser/vs-bp-<id>`.
  *  Adopted directories keep their own path; the LABEL never reaches a path. */
 function profileDirName(id) { return 'vs-' + String(id); }
-/**
- * §7.2.1 — THE EGRESS PRECONDITION, AS A RECORDED RESULT. Modelled on
- * src/local-oracles.js: a record carries `tool`, `date`, `version` and
- * per-run INET connect counts, or it is not a record. CloakBrowser is a
- * network tool by definition, so it can never be an ORACLE — this record
- * contributes the proof's SHAPE, not a zero-network verdict; it lives beside
- * the provider row so the UI can show what was measured and when.
- *
- * MEASURED 2026-09-28 (lane-cloak, the owner's 「下载吧」): npm `cloakbrowser`
- * 0.5.10 into a scratch prefix, its Chromium 146.0.7680.177.5 for linux-x64
- * downloaded ONCE into a VibeSpace-owned cache (never ~/.cloakbrowser), every
- * run under `env -i HOME=<empty dir>` + strace, launched the way the product
- * launches it (agent-browser 0.38.1, the binary + arguments in agent-browser's
- * own env names). What it says, in words:
- *   · the download reaches cloakbrowser.dev, which serves the archive through
- *     GitHub's release storage (github.com + release-assets.githubusercontent.com);
- *     the wrapper checks an Ed25519 signature over SHA256SUMS against a key
- *     pinned in its own code, locally, then the archive's SHA-256;
- *   · the BROWSER never connected anywhere but the loopback CDP port
- *     agent-browser drives it through — not at its first start, not from
- *     cache, not with a key in its environment, not idle for 10 minutes;
- *   · the free tier needs NO key and NO sign-in (the "gated by login" of the
- *     design's §7.2 is the vendor's upsell for its newer build, see `freeTier`).
- * Every target is named (a DNS answer in the trace names each address; a
- * loopback / resolver address is named by what it is) and tagged with the
- * PHASE it belongs to — `egressHostsOf` derives the two allowlists from those
- * tags, so the proxy admits exactly what the record implies and nothing is
- * written twice. `CLOAK_WIRED` (the row's `wired` cell) is DERIVED from this
- * record: a row cannot be re-enabled without a record the discipline accepts.
- *
- * Re-measure with scripts/measure-cloak-egress.mjs (its header lists what the
- * real package taught it); the version it names is the version the counts
- * describe, and the install pins exactly that version AND that Chromium.
- */
-const CLOAK_EGRESS_RUNS = Object.freeze(['first launch (download expected)', 'second launch from cache', 'launch with a license key present', '10-minute idle browser']);
+// ── §7.2.1 the egress records — lane dc-browser-backends (F4): a backend's measured record lives in ITS file
+// (src/browser-backends/<id>.js `egressProof`, moved there verbatim); this module keeps the DISCIPLINE over any record
+// (egressHostsOf / proofVerdict / blockedCell) and the old names for the readers that ask it.
+const { BROWSER_BACKENDS } = require('./browser-backends/index.js');
+const PROOFS = Object.freeze(BROWSER_BACKENDS.map((b) => b.egressProof).filter(Boolean));
+const PROOFED = BROWSER_BACKENDS.find((b) => b.egressProof) || {};
+const CLOAK_EGRESS_RUNS = PROOFED.egressRuns || Object.freeze([]);
 /** The PHASES a target may belong to: `npm` = the package manager fetching the
  *  wrapper (the registry, not the vendor — named, not proxied); `download` =
  *  the wrapper fetching the pinned Chromium (THE install allowlist); `launch` =
  *  anything a running browser (or its driver) reached (THE run allowlist). */
 const EGRESS_PHASES = Object.freeze(['npm', 'download', 'launch']);
-const tgt = (host, addr, port, by, n, phase) => Object.freeze({ host, addr, port, by, n, phase });
-const LOOPBACK_CDP = (port) => tgt('loopback', '127.0.0.1', port, 'browser driver', 1, 'launch'); // the driver → the browser's own CDP port
-const CLOAK_EGRESS_PROOF = Object.freeze({
-  provider: 'cloak',
-  tool: 'strace -f -qq -e trace=%network,execve,clone,clone3,fork,vfork -s 1024 -xx',
-  date: '2026-09-28',
-  version: '0.5.10',
-  package: 'cloakbrowser@0.5.10',
-  chromium: '146.0.7680.177.5',
-  platform: 'linux-x64',
-  status: 'measured',
-  measuredWith: 'scripts/measure-cloak-egress.mjs',
-  launchedVia: 'the browser driver VibeSpace runs (0.38.1), its executable path set to <chrome> and its browser arguments to --no-sandbox,--fingerprint=<seed>, both in its environment',
-  pins: Object.freeze({ CLOAKBROWSER_VERSION: '146.0.7680.177.5', CLOAKBROWSER_AUTO_UPDATE: 'false' }),
-  download: Object.freeze({
-    url: 'https://cloakbrowser.dev/chromium-v146.0.7680.177.5/cloakbrowser-linux-x64.tar.gz',
-    bytes: 216890134,
-    sha256: '4a12bcde95fa1bb1beef2b41ab5e5c27c36be78e3be3d0dac8c64d705216670e',
-    signature: 'Ed25519 over SHA256SUMS, checked locally against the one key pinned in the wrapper (dist/config.js BINARY_SIGNING_PUBKEYS); the manifest must name the pinned version; then the archive\'s SHA-256',
-  }),
-  binary: Object.freeze({ path: 'chromium-146.0.7680.177.5/chrome', sha256: '715722e8605ae3ce81523c1218aba1ec89425786ab33ceaf99f8a6cb5e70e6e8', dirBytes: 729336146, lastVersion: '146.0.7680.177' }),
-  // measured with the same strace method BEFORE the four runs: the package manager, and the vendor's own offline probe
-  install: Object.freeze([
-    Object.freeze({ what: 'npm install --prefix <scratch> --no-save cloakbrowser@0.5.10 (the wrapper + its one dependency, tar)', inetConnects: 57, addrProbes: 48, targets: Object.freeze([tgt('dns resolver', '127.0.0.53', 53, 'npm', 2, 'npm'), tgt('registry.npmjs.org', '104.16.4.34', 443, 'npm', 7, 'npm')]) }),
-    Object.freeze({ what: 'cloakbrowser info --quick --json (the vendor\'s network-free mode — the pin and the path are read from it)', inetConnects: 0, addrProbes: 0, targets: Object.freeze([]) }),
-  ]),
-  runs: Object.freeze([
-    Object.freeze({
-      what: CLOAK_EGRESS_RUNS[0], inetConnects: 21, addrProbes: 12, browserStarts: 10,
-      targets: Object.freeze([tgt('dns resolver', '127.0.0.53', 53, 'wrapper', 4, 'download'), tgt('cloakbrowser.dev', '172.67.208.193', 443, 'wrapper', 2, 'download'), tgt('github.com', '140.82.116.3', 443, 'wrapper', 1, 'download'), tgt('release-assets.githubusercontent.com', '185.199.110.133', 443, 'wrapper', 1, 'download'), LOOPBACK_CDP(33851)]),
-      note: 'the download: `cloakbrowser install` (pinned, auto-update off) fetched 216 890 134 bytes and printed "SHA256SUMS signature verified: Ed25519 OK" + "Checksum verified: SHA-256 OK". The binary\'s first start then came up (zygote + network service, one loopback CDP connect) and about a second later was replaced by a relaunch that the measurement\'s own flag-less `get cdp-url` caused (the 0.38.1 driver relaunches the browser when a call\'s launch view differs — the product carries the flags in the env of every call since); the relaunches, without --no-sandbox, died on the sandbox. The first-start trace spans about 60 s. No DNS query and no non-loopback connect from any browser process.',
-    }),
-    Object.freeze({ what: CLOAK_EGRESS_RUNS[1], inetConnects: 1, addrProbes: 0, browserStarts: 1, heldMs: 30000, targets: Object.freeze([LOOPBACK_CDP(33149)]), note: 'a second `cloakbrowser install` found the pinned build in the cache and made 0 connects; the browser then ran 30 s on about:blank' }),
-    Object.freeze({ what: CLOAK_EGRESS_RUNS[2], inetConnects: 1, addrProbes: 0, browserStarts: 1, heldMs: 30000, targets: Object.freeze([LOOPBACK_CDP(42783)]), key: 'a dummy value in CLOAKBROWSER_LICENSE_KEY — not a license (no CloakBrowser account exists); the browser driver hands its environment to the browser it starts (checked with a stub browser that wrote its env)', note: 'the build received a key and sent it nowhere — it neither checks nor uses one' }),
-    Object.freeze({ what: CLOAK_EGRESS_RUNS[3], inetConnects: 1, addrProbes: 0, browserStarts: 1, heldMs: 600000, targets: Object.freeze([LOOPBACK_CDP(33589)]), note: '10 minutes idle on about:blank: nothing but the loopback CDP connect it was opened with' }),
-  ]),
-  // what the free tier needs — measured where it could be, read in the vendor's own code (dist/*.js) where it could not
-  freeTier: Object.freeze({
-    key: 'none', login: 'none', chromiumMajor: 146,
-    measured: 'the keyless build (Chromium 146) installed, started and ran with no key and no sign-in; its only output about keys is the wrapper\'s banner "Running the free binary (v146). The latest binary (v151) is free too, with 1 concurrent session. Get your key: run cloakbrowser login or visit https://cloakbrowser.dev/free"',
-    withAKey: 'NOT measured (no key is authorized): with a key the wrapper validates it at cloakbrowser.dev/api/license/validate (a 24 h local cache) and downloads a DIFFERENT build (Chromium 151, cloakbrowser.dev/api/download/<v> with the key as a Bearer token), which checks the key with cloakbrowser.dev when it starts (exit 76 seat limit / 77 invalid key / 78 server unreachable). VibeSpace installs only the measured keyless build.',
-  }),
-  // the vendor's code names these; the pinned install never reached them, and the proxy refuses them (not in either allowlist)
-  notReached: Object.freeze([
-    Object.freeze({ host: 'api.github.com', why: 'the wrapper\'s hourly update check (then a silent download of a newer build) — off: CLOAKBROWSER_AUTO_UPDATE=false and a pinned CLOAKBROWSER_VERSION' }),
-    Object.freeze({ host: 'registry.npmjs.org', why: 'the wrapper\'s own "update available" check — off with the same switch (npm reaching it to install the wrapper is the `npm` phase)' }),
-    Object.freeze({ host: 'cloakbrowser.dev/api/license/*, /api/download/*', why: 'only with a key (see freeTier.withAKey)' }),
-  ]),
-  expectedRuns: CLOAK_EGRESS_RUNS,
-});
+const CLOAK_EGRESS_PROOF = PROOFED.egressProof || null;
 /** A loopback / resolver address is never an egress host (it is named by what it is). */
 function isLocalAddr(a) { const s = String(a || '').toLowerCase(); return /^127\./.test(s) || s === '::1' || s === 'localhost'; }
 /** THE ALLOWLISTS A RECORD IMPLIES, derived from its phase-tagged targets (the
@@ -1010,7 +933,8 @@ function proofVerdict(proof, rows = PROVIDERS) {
   if (proof.status === 'measured') {
     if (proof.blocks) return { ok: false, error: 'a measured record may not carry a blocks claim (the cell it would explain is not explained by a measurement that succeeded)' };
     if (!proof.version) return { ok: false, error: 'a measured record names the version it describes' };
-    if (proof.provider === 'cloak' && (!proof.chromium || !proof.platform)) return { ok: false, error: 'a measured cloak record names the Chromium build and the platform it describes (the install pins both)' };
+    // a record that measured a DOWNLOAD names the build it fetched (lane dc-browser-backends: the record's own shape, not its id)
+    if (proof.download && (!proof.chromium || !proof.platform)) return { ok: false, error: `a measured ${proof.provider} record names the Chromium build and the platform it describes (the install pins both)` };
     const want = proof.expectedRuns || CLOAK_EGRESS_RUNS;
     for (const w of want) {
       const r = proof.runs.find((x) => x && x.what === w);
@@ -1034,12 +958,13 @@ function proofVerdict(proof, rows = PROVIDERS) {
 }
 /** The proof record that explains a false cell, or null (`blockedCell('cloak','wired')`). */
 function blockedCell(provider, cell) {
-  return CLOAK_EGRESS_PROOF.blocks === `${provider}.${cell}` ? CLOAK_EGRESS_PROOF : null;
+  return PROOFS.find((p) => p.blocks === `${provider}.${cell}`) || null;
 }
-/** The cloak row's `wired` cell, DERIVED: a measured record the discipline
+/** A proofed row's `wired` cell, DERIVED: a measured record the discipline
  *  accepts (asked with no rows — a measured record's verdict never reads
  *  them). A refused record ⇒ false, and its `blocks` claim names this cell. */
-const CLOAK_WIRED = CLOAK_EGRESS_PROOF.status === 'measured' && proofVerdict(CLOAK_EGRESS_PROOF, {}).ok;
+const proofWires = (proof) => !!proof && proof.status === 'measured' && proofVerdict(proof, {}).ok;
+const CLOAK_WIRED = proofWires(CLOAK_EGRESS_PROOF);
 
 // ═══ P4 — PROVIDERS ARE ROWS, NOT AN `if` CHAIN (§7.1's two tables, §7.2.1,
 // §7.3, §7.6). `provider` IS the backend and the TIER is derived from it
@@ -1048,7 +973,7 @@ const CLOAK_WIRED = CLOAK_EGRESS_PROOF.status === 'measured' && proofVerdict(CLO
 // failing at use time (the backend-caps discipline). Cells:
 //   tier         1 CDP undisguised · 2 fingerprint (still CDP) · 3 no CDP at all
 //   wired        this build can START/REACH one — false ⇒ `provider_unavailable`
-//                naming why (for `cloak` it is DERIVED from the §7.2.1 record above)
+//                naming why (a row that carries a §7.2.1 record: DERIVED from it — its backend file)
 //   keyScope     'none' | 'local-only' (D34: a key-bearing provider is REFUSED
 //                on `host != null` — `provider_needs_local_key`)
 //   canSwitchTo  §7.4: 'in-place' | 'export-only' | 'no'
@@ -1081,18 +1006,13 @@ const CLOAK_WIRED = CLOAK_EGRESS_PROOF.status === 'measured' && proofVerdict(CLO
 //   egressProxy  it reaches the world only through the keeper's allowlisting egress proxy (§7.2.1)
 //   integrationId  the integration-registry row its key lives in (null = needs none; cloud rows: their own id)
 const NO_LAUNCH = Object.freeze({ buildChoice: false, automationFlag: false, launchArgs: null, seeded: false, launchFlags: false, executable: null, exeSetting: null, egressProxy: false, integrationId: null });
-/** The provider an empty / absent `provider` means (a record from before providers, a kept directory adopted as it is). */
-const DEFAULT_PROVIDER = 'chromium';
-const PROVIDERS = Object.freeze({
-  chromium: Object.freeze({ ...NO_LAUNCH, buildChoice: true, automationFlag: true, tier: 1, wired: true, label: 'Chromium (a browser VibeSpace starts)', keyScope: 'none', canSwitchTo: 'in-place', ownsDir: true, leaseKind: 'tab', remote: 'browser-serve', starts: true, headed: null, binary: 'agent-browser', cdp: true, allowedDomains: true, pinTab: true, consent: null }),
-  cloak: Object.freeze({ ...NO_LAUNCH, launchArgs: Object.freeze(['--no-sandbox']), seeded: true, launchFlags: true, executable: 'installed', exeSetting: 'browser.cloak.executablePath', egressProxy: true, integrationId: 'cloak', tier: 2, wired: CLOAK_WIRED, label: 'CloakBrowser (the same profile directory opened by the cloakbrowser binary, seeded)', keyScope: 'local-only', canSwitchTo: 'in-place', ownsDir: true, leaseKind: 'tab', remote: null, starts: true, headed: false, binary: 'cloakbrowser', cdp: true, allowedDomains: true, pinTab: true, consent: null }),
-  cdp: Object.freeze({ ...NO_LAUNCH, tier: 1, wired: true, label: 'An existing browser over CDP (yours, or one on a paired machine)', keyScope: 'none', canSwitchTo: 'no', ownsDir: false, leaseKind: 'tab', remote: 'tcp-forward', starts: false, headed: null, binary: null, cdp: true, allowedDomains: true, pinTab: true, consent: null }),
-  // P10 (§7.6 tier 3, D27 (b), D31): WIRED — a window already open on the user's
-  // own desktop, addressed through vibespace-window (the AT-SPI tree + its own
-  // pixmap), NO CDP, NO process of ours, NO directory of ours; usable only while
-  // the consent setting reads true (src/window-desktop.js is the model)
-  'local-window': Object.freeze({ ...NO_LAUNCH, tier: 3, wired: true, label: 'A window on your own desktop (tier 3: the accessibility tree + pixels, no CDP)', keyScope: 'none', canSwitchTo: 'no', ownsDir: false, leaseKind: 'window-target', remote: null, starts: false, headed: true, binary: null, cdp: false, allowedDomains: false, pinTab: false, consent: 'window.realDesktopTargets' }),
-});
+/** The provider an empty / absent `provider` means (a record from before providers, a kept directory adopted as it is) —
+ *  the FIRST registered backend. */
+const DEFAULT_PROVIDER = BROWSER_BACKENDS[0].id;
+// lane dc-browser-backends (F4): THE ROWS ARE DECLARED BY THEIR BACKENDS (src/browser-backends/<id>.js, one line each in
+// its index.js) — this table is DERIVED: the launch defaults, the backend's cells, its `wired` read against its own §7.2.1
+// record when it carries one (no record the discipline accepts ⇒ not wired), its words (i18n keys the client t()s).
+const PROVIDERS = Object.freeze(Object.fromEntries(BROWSER_BACKENDS.map((b) => [b.id, Object.freeze({ ...NO_LAUNCH, ...b.row, wired: !!b.row.wired && (!b.egressProof || proofWires(b.egressProof)), words: b.words })])));
 /** `cloud:<name>` is a FAMILY of rows (§7.1): each vendor's own browser,
  *  reached with a key from the integration store (§7.5). The key half
  *  LANDED (P4 second half): the local `agent-browser` daemon is started with
@@ -1104,14 +1024,26 @@ const PROVIDERS = Object.freeze({
  *  unwired BY NAME — a refusal, never a spawn that fails at the vendor. */
 const CLOUD_PROVIDERS = Object.freeze(['browserbase', 'browserless', 'kernel', 'browseruse', 'agentcore']);
 const CLOUD_ROW = Object.freeze({ ...NO_LAUNCH, launchFlags: true, tier: 2, wired: true, keyScope: 'local-only', canSwitchTo: 'export-only', ownsDir: false, leaseKind: 'tab', remote: null, starts: true, headed: false, binary: 'agent-browser', cdp: true, allowedDomains: true, pinTab: true, consent: null });
+// lane dc-browser-backends (F5): a cloud row's words — the vendor's display name rides as `{vendor}` (the client's
+// CLOUD_VENDORS map moved here, beside the family it names)
+const CLOUD_VENDOR_NAMES = Object.freeze({ browserbase: 'Browserbase', browserless: 'Browserless', kernel: 'Kernel', browseruse: 'Browser Use', agentcore: 'Amazon Bedrock AgentCore' });
+const i18nKey = (s) => s; // extraction marker (scripts/i18n-extract.mjs) — the client words it through t()
+const cloudWords = (name) => Object.freeze({ name: i18nKey('{vendor} (cloud)'), chip: i18nKey('{vendor} (cloud)'), blurb: i18nKey("Its saved logins live with {vendor}, so it can't be switched to another browser."), vendor: CLOUD_VENDOR_NAMES[name] || name });
 const CLOUD_UNWIRED = Object.freeze({ agentcore: 'its field set (AWS access key / secret / region) is unverified against upstream\'s provider table (§7.5) — the row stays unwired until it is measured' });
 /** The row for a provider id, `cloud:<name>` included; null when unknown. */
 function providerRow(id) {
   const s = String(id == null || id === '' ? DEFAULT_PROVIDER : id);
   if (PROVIDERS[s]) return PROVIDERS[s];
   const m = /^cloud:([a-z0-9-]+)$/.exec(s);
-  if (m && CLOUD_PROVIDERS.includes(m[1])) return Object.freeze({ ...CLOUD_ROW, wired: !CLOUD_UNWIRED[m[1]], unwiredWhy: CLOUD_UNWIRED[m[1]] || null, label: `${m[1]} (cloud, key required)`, cloud: m[1], integrationId: s });
+  if (m && CLOUD_PROVIDERS.includes(m[1])) return Object.freeze({ ...CLOUD_ROW, wired: !CLOUD_UNWIRED[m[1]], unwiredWhy: CLOUD_UNWIRED[m[1]] || null, label: `${m[1]} (cloud, key required)`, cloud: m[1], integrationId: s, words: cloudWords(m[1]) });
   return null;
+}
+/** lane dc-browser-backends (F6): THE ANTI-BOT ROW — the backend a site's bot check is answered with (the propose
+ *  runner's switch / new-profile target, the route's one-click words): the row declaring `antiBot: true`, tier 2, with
+ *  no remote transport (it runs on this machine). `{id, name}` (name = its words' name), or null when none is declared. */
+function antiBotRow() {
+  const id = Object.keys(PROVIDERS).find((k) => PROVIDERS[k].antiBot && PROVIDERS[k].tier === 2 && !PROVIDERS[k].remote);
+  return id ? { id, name: String((PROVIDERS[id].words || {}).name || id) } : null;
 }
 function providerIds() { return [...Object.keys(PROVIDERS), ...CLOUD_PROVIDERS.map((n) => 'cloud:' + n)]; }
 
@@ -3331,7 +3263,7 @@ module.exports = {
   HEAL_BUDGET, HEAL_WINDOW_MS, HEAL_DAY_BUDGET, HEAL_DAY_MS, HEAL_RETRY_MS, healLedger, healBudgetVerdict, unstableText, unstableNotice, // lane H verify r5: the heal ledger + budget
   HEAL_FAIL_BUDGET, HEAL_FAIL_SPAN_MS, failedAskVerdict, // lane H verify r6: a failed relaunch ask is not a relaunch — its own streak + cap
   // P4 (§7.1–§7.3): provider rows + capability gating, the §7.2.1 egress record, the cdp env pair
-  DEFAULT_PROVIDER, CLOUD_PROVIDERS, CLOUD_UNWIRED, providerRow, providerIds, providerControl, capabilityRefusal, providerRows,
+  DEFAULT_PROVIDER, CLOUD_PROVIDERS, CLOUD_UNWIRED, providerRow, antiBotRow, providerIds, providerControl, capabilityRefusal, providerRows,
   CLOAK_EGRESS_PROOF, CLOAK_EGRESS_RUNS, EGRESS_PHASES, CLOAK_WIRED, proofVerdict, blockedCell, egressHostsOf, cloakInstallAllowlist, cloakRunAllowlist,
   isCdpPair, forwardedCdpUrl, cdpPortOf,
   parseEgressAllowlist, egressVerdict,

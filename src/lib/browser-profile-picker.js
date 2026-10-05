@@ -10,6 +10,7 @@
 // lists what the server's digest says and asks the server to decide.
 import { escHtml, fetchJson, showContextMenu, showToast } from './utils.js';
 import { t } from './i18n.js';
+import { learnBackendRows } from './browser-switcher-model.js';
 import { browserFactWords } from '../browser-fact.js'; // lane S2: THE browser fact — the pin, the browser in use, why they differ
 import { openNewProfileDialog } from './browser-new-profile.js'; // lane browser-admin: the picker's adopt rows open THE New profile… dialog
 
@@ -71,6 +72,7 @@ export function installBrowserProfilePicker(App) {
   App.prototype.refreshBrowserProfiles = function () {
     return fetchJson('/api/browser/profiles').then((d) => {
       this._browserProfiles = d && !d.error && Array.isArray(d.profiles) ? d : null;
+      learnBackendRows(this._browserProfiles && this._browserProfiles.providers); // lane dc-browser-backends (F5): the rows' words
       try { this._browserProfilesHook?.(); } catch { }
       return this._browserProfiles;
     }).catch(() => this._browserProfiles);
@@ -80,6 +82,7 @@ export function installBrowserProfilePicker(App) {
     const { type, ...digest } = msg;
     const prev = this._browserProfiles;
     this._browserProfiles = digest;
+    learnBackendRows(digest && digest.providers); // lane dc-browser-backends (F5): the rows' words
     try { this._browserProfilesHook?.(); } catch { }
     try { this.onBrowserDigestChanged?.(prev, digest); } catch (e) { console.warn('[browser] digest hook failed', e); } // P7 (§4.6): auto-bind on a NEW lease
     try { this._refillBrowserProfileRow?.(); } catch (e) { console.warn('[browser] new-session profile row not re-filled', e); } // lane S2: an open New Session dialog follows the registry

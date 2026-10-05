@@ -539,23 +539,16 @@ function checkAgentHookHealth() {
   } catch (e) { console.warn('[hook-health] probe failed:', e.message); }
 }
 
-// Long-lived-token expiry sweep (B-211a): setup-token tokens live exactly 1
-// year and a 401 has NO self-heal — warn while there's still time to re-mint.
-// Once per boot, notice-deduped per account.
-function checkOatExpiry() {
-  try {
-    for (const a of accounts.list().accounts) {
-      if (!a.oat || typeof a.oatDaysLeft !== 'number') continue;
-      if (a.oatDaysLeft <= 0) {
-        serverNotice(`oat-expired-${a.id}`, `The long-lived token for "${a.name}" has EXPIRED — sessions using it will fail until you re-mint one (Manage agents → the account's ⋯ menu → Long-lived token).`, { level: 2 });
-      } else if (a.oatDaysLeft <= 21) {
-        serverNotice(`oat-expiring-${a.id}`, `The long-lived token for "${a.name}" expires in ${a.oatDaysLeft} days — re-mint it soon (Manage agents → ⋯ → Long-lived token).`, { level: 2 });
-      }
-    }
-  } catch { }
+// Credential expiry sweeps (B-211a): every descriptor's expirySweep({accounts, serverNotice}) — claude: the
+// long-lived setup-token warning (src/harnesses/claude-oat-expiry.js). Notice-deduped per account.
+function checkCredentialExpiry() {
+  for (const h of require('./src/harnesses').list()) {
+    if (typeof h.expirySweep !== 'function') continue;
+    try { h.expirySweep({ accounts, serverNotice }); } catch { }
+  }
 }
-setTimeout(checkOatExpiry, 20000);
-setInterval(checkOatExpiry, 6 * 3600e3); // stable instances stay up for weeks — a one-shot sweep would sail past the threshold (serverNotice keys dedupe per boot, so re-fires are cheap)
+setTimeout(checkCredentialExpiry, 20000);
+setInterval(checkCredentialExpiry, 6 * 3600e3); // stable instances stay up for weeks — a one-shot sweep would sail past the threshold (serverNotice keys dedupe per boot, so re-fires are cheap)
 // Boot-time hook registration is DEFERRED until settings are readable (after
 // setupPersistence below) — the Integration master switch decides whether we
 // register or actively strip. See "Agent-hook boot registration".
@@ -597,76 +590,8 @@ const unblocker = new Unblocker({
 });
 app.use(unblocker);
 
-// Editor: open request from the `code` helper script (via HTTP, not terminal
-// output). The caller lives INSIDE the session shell — no cookie exists there,
-// so auth.middleware exempts this path and WE validate the per-session vsst_
-// token instead (same trust model as /api/agent/*). Without this, enabling
-// password auth silently broke Ctrl+G: the script's POST got 401 and claude
-// sat on "Save and close editor to continue…" forever.
-app.post('/api/editor/open', (req, res) => {
-  if (app.locals.authEnabled) {
-    const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
-    let ok = false;
-    if (token && token.startsWith('vsst_')) {
-      for (const [, s] of activeSessions) { if (sameToken(token, s.agentToken)) { ok = true; break; } }
-    }
-    if (!ok) return res.status(401).json({ error: 'unauthorized (session token required)' });
-  }
-  const { file, signal, sessionId } = req.body;
-  // Remote Ctrl+G (B-2de8): the POST came from the fake `code` helper running
-  // ON THE HOST (over the reverse tunnel) — the tmpfile + signal file live
-  // there. Resolve the session's host server-side and ship it in the
-  // broadcast so the client editor reads/writes/signals the right machine.
-  const editorHost = (sessionId && activeSessions.get(sessionId)?.host) || null;
-  // Persist the pending edit on the session + its meta: the helper script
-  // waits FOREVER on the signal file while claude shows "Save and close
-  // editor to continue…" — a server restart + page reload (or pod recreation
-  // for remote sessions, whose helper+claude survive on the host) otherwise
-  // loses the only record of it and the session silently hangs mid-turn.
-  // Cleared by /api/editor/signal; re-broadcast on terminal attach.
-  if (sessionId && activeSessions.has(sessionId)) {
-    const s = activeSessions.get(sessionId);
-    s._pendingEditor = { filePath: file, signalPath: signal, host: editorHost, at: Date.now() };
-    try { if (s.sockName) writeSessionMeta(s.sockName, { ...(readSessionMeta(s.sockName) || {}), pendingEditor: s._pendingEditor }); } catch {}
-  }
-  // Broadcast to all WebSocket clients — include sessionId so each client opens editor on the right window
-  const msg = JSON.stringify({ type: 'editor-open', filePath: file, signalPath: signal, sessionId: sessionId || null, host: editorHost });
-  wss.clients.forEach(client => {
-    if (client.readyState === WS_OPEN) {
-      try { client.send(msg); } catch {}
-    }
-  });
-  res.json({ success: true });
-});
-
-// Editor: signal completion (called by client when user saves/closes editor)
-app.post('/api/editor/signal', async (req, res) => {
-  const { signalPath, filePath, content, host } = req.body;
-  try {
-    if (host && remoteFs) {
-      // remote Ctrl+G: the CLI polls the signal file ON ITS machine
-      if (content !== undefined) await remoteFs.write(String(host), filePath, Buffer.from(content));
-      await remoteFs.write(String(host), signalPath, Buffer.from('done'));
-    } else {
-      if (content !== undefined) fs.writeFileSync(filePath, content);
-      fs.writeFileSync(signalPath, 'done');
-    }
-    // The edit is settled — drop the persisted pending-editor record so a
-    // later restart/attach doesn't re-open a dead pane
-    for (const [, s] of activeSessions) {
-      if (s._pendingEditor?.signalPath === signalPath) {
-        s._pendingEditor = null;
-        try { if (s.sockName) writeSessionMeta(s.sockName, { ...(readSessionMeta(s.sockName) || {}), pendingEditor: null }); } catch {}
-      }
-    }
-    // Broadcast editor-close to all clients so they remove the split pane
-    const msg = JSON.stringify({ type: 'editor-close', filePath, signalPath });
-    wss.clients.forEach(client => {
-      if (client.readyState === WS_OPEN) { try { client.send(msg); } catch {} }
-    });
-    res.json({ success: true });
-  } catch (err) { res.status(400).json({ error: err.message }); }
-});
+// Ctrl+G editor: POST /api/editor/open (the `code` helper, vsst_ auth) + /api/editor/signal — src/routes/editor.js
+require('./src/routes/editor.js').registerEditorRoutes(app, { activeSessions, wss, WS_OPEN, readSessionMeta, writeSessionMeta, getRemoteFs: () => remoteFs });
 
 // ── Persistence API (extracted to src/routes/persistence.js) ──
 const syncStores = {};
@@ -1080,44 +1005,7 @@ otelIngest.registerRoutes(app);
 const bridgeWatch = require('./src/server/bridge-watch.js').create({ activeSessions, BUFFERS_DIR, SOCKETS_DIR, reattachLocalPty, serverSetting, getOtelIngest: () => otelIngest, feedPeerCard, log: console }); // THE DEAD-BRIDGE WATCH (lane-dead-bridge): the attach-pty teardown shared by shutdown + crash, the orphan sweep, silence judged against the CLI's own witnesses (buffer file / OTel), the catch-up card
 // `usageHistory.setTruthLookup(otelIngest.…)` is DELIBERATELY UNWIRED since
 // 2026-09-07 — reasoning at the seam (usage-history.js) + otel-ingest's header.
-// Attribution log: dedup'd per (sid,acct) so a resume under a DIFFERENT account
-// is captured with its timestamp (per-request-by-time attribution). Called from
-// writeSessionMeta whenever a session has both a claudeSessionId and account.
-const _lastAttrib = new Map();
-function recordUsageAttribution(meta) {
-  const sid = meta && (meta.claudeSessionId || meta.backendSessionId);
-  if (!sid) return;
-  let acct = meta.accountId || null;
-  let pool = null;
-  // A POOLED session bills whatever the pool currently points at — attribute
-  // the ledger to the REAL target at record time (attribution is by-time, so
-  // a later re-point + re-record moves subsequent requests to the new target).
-  // Keep the pool id as a SEPARATE tag (#4): acct stays the real target so
-  // per-account and the global sum are correct with NO double-count, while pool
-  // lets the Usage window show the total that flowed through each pool.
-  // An unresolvable pool target (broken symlink / logged-out member) falls to
-  // GLOBAL, never to the pool id itself — else a `type:'pooled'` pseudo-account
-  // would surface as a spender in the account dimension (review low-confidence
-  // finding). The pool tag is still recorded (pool captured above).
-  try {
-    if (acct && accounts.get(acct)?.type === 'pooled') {
-      pool = acct;
-      // Plan C: a session with its OWN link bills that link's target — the
-      // live session is looked up by conversation id (the attribution key we
-      // were handed) so the per-session choice lands in the ledger; a non-hot pool process (codex) bills the member it HOLDS (reset credits r3 — accounts.poolMemberOfSession).
-      let sessKey = null, live = null;
-      try { for (const [wid, s2] of activeSessions) if ((s2.claudeSessionId || s2.backendSessionId) === sid && s2._accountId === acct) { sessKey = wid; live = s2; break; } } catch { }
-      acct = (live ? accounts.poolMemberOfSession(acct, live, sessKey).id : accounts.poolCurrentFor(acct, sessKey)) || null;
-    }
-  } catch {}
-  const attribKey = (acct || '') + '|' + (pool || '');
-  if (_lastAttrib.get(sid) === attribKey) return;
-  _lastAttrib.set(sid, attribKey);
-  // Cap only — never delete-on-kill: kill→resume of the same sid (terminate/
-  // resume, billing switch) would re-append a duplicate attribution line.
-  if (_lastAttrib.size > 4096) _lastAttrib.delete(_lastAttrib.keys().next().value);
-  usageHistory.recordAttribution({ sid, acct, pool, ts: Date.now() });
-}
+const { recordUsageAttribution } = require('./src/server/usage-attribution.js').create({ activeSessions, accounts, usageHistory }); // the by-time billing attribution log (moved, lane dc-seams-server)
 // Rescan the ledger periodically (incremental — only new JSONL bytes). Also
 // rescanned on demand when the Usage window opens.
 // The walk YIELDS every MiB (perf ⑥): warm() reads the ledger only once the

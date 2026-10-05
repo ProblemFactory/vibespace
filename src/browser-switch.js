@@ -48,13 +48,12 @@
 /** A claim that REFUSES something must carry a date: the shape this repo
  *  already runs for overage (`OVERAGE_STALE_MS`, src/spend-authorizer.js). */
 const SEAT_TIER_STALE_MS = 7 * 24 * 3600 * 1000;
-/** Repository docs, verbatim in the design (§7.2/§7.4): the free tier ships
- *  Chromium 146 with ONE concurrent session; Pro ships 151 with 5/20/200/2000. */
-const CLOAK_TIERS = Object.freeze({
-  free: Object.freeze({ total: 1, chromiumMajor: 146 }),
-  pro: Object.freeze({ total: null, chromiumMajor: 151 }),
-});
-const CLOAK_PRO_TOTALS = Object.freeze([5, 20, 200, 2000]);
+// lane dc-browser-backends (F4): the backends are rows declared in their own files (src/browser-backends/<id>.js, one
+// line each in its index.js) — a backend's tiers, key row and install spec live there; the old names stay for readers
+const { BROWSER_BACKENDS } = require('./browser-backends/index.js');
+const TIERED = BROWSER_BACKENDS.find((b) => b.tiers) || {};
+const CLOAK_TIERS = TIERED.tiers || Object.freeze({});
+const CLOAK_PRO_TOTALS = TIERED.proTotals || Object.freeze([]);
 
 // ── §7.5 the six rows this track consumes: the vendor's own env names ────
 /**
@@ -74,11 +73,8 @@ const CLOAK_PRO_TOTALS = Object.freeze([5, 20, 200, 2000]);
  * refusal, never "let us try the default".
  */
 const KEY_ROWS = Object.freeze({
-  // lane-cloak (MEASURED 2026-09-28): `keyRequired: false` — the free CloakBrowser build runs with no key and no sign-in,
-  // and a key in its environment was sent nowhere (the §7.2.1 record's run 3). A key only matters for the vendor's
-  // NEWER build, which the wrapper downloads with the key (unmeasured — VibeSpace installs only the measured one).
-  // Every other key row needs its key (the vendor's API refuses without one).
-  cloak: Object.freeze({ env: Object.freeze({ licenseKey: 'CLOAKBROWSER_LICENSE_KEY' }), host: null, provider: 'cloak', keyRequired: false }),
+  // lane dc-browser-backends (F4): a backend's key row is DECLARED in its file (`keyRow`) — derived here, in list order
+  ...Object.fromEntries(BROWSER_BACKENDS.filter((b) => b.keyRow).map((b) => [b.id, Object.freeze({ env: b.keyRow.env, host: b.keyRow.host, provider: b.id, ...(b.keyRow.keyRequired === false ? { keyRequired: false } : {}) })])),
   'cloud:browserbase': Object.freeze({ env: Object.freeze({ apiKey: 'BROWSERBASE_API_KEY' }), host: Object.freeze({ constant: 'api.browserbase.com' }), provider: 'cloud:browserbase' }),
   'cloud:browserless': Object.freeze({ env: Object.freeze({ apiKey: 'BROWSERLESS_API_KEY', apiUrl: 'BROWSERLESS_API_URL', stealth: 'BROWSERLESS_STEALTH' }), host: Object.freeze({ field: 'apiUrl' }), provider: 'cloud:browserless' }),
   'cloud:kernel': Object.freeze({ env: Object.freeze({ apiKey: 'KERNEL_API_KEY', endpoint: 'KERNEL_ENDPOINT', stealth: 'KERNEL_STEALTH' }), host: Object.freeze({ field: 'endpoint' }), provider: 'cloud:kernel' }),
@@ -91,7 +87,7 @@ const KEY_IDS = Object.freeze(Object.keys(KEY_ROWS));
  *  is exactly why the cluster may inject ONLY under the integration store's own prefixed names. */
 const VENDOR_ENV_NAMES = Object.freeze([...new Set(KEY_IDS.flatMap((id) => Object.values(KEY_ROWS[id].env)))]);
 
-/** Does this key row REFUSE to run without a key? (cloak: no — measured; everything else: yes) */
+/** Does this key row REFUSE to run without a key? (a row declaring `keyRequired: false` — measured: no; everything else: yes) */
 function keyRequiredFor(integrationId) { const r = KEY_ROWS[String(integrationId || '')]; return !!r && r.keyRequired !== false; }
 /** lane dc-browser-providers: THE PROVIDERS row of a NAMED provider (src/browser-profiles.js — the launch shape lives
  *  there, never an id here); null for an absent or unknown one (no launch shape, no key, no seed). */
@@ -1203,7 +1199,7 @@ function switcherRows({ profile, providerIds, rowOf, controlOf, capabilityRefusa
       hold: held.hold, driver: held.driver,
     };
     return {
-      id, label: row.label || id, tier: row.tier || null, current,
+      id, label: row.label || id, words: row.words || null, tier: row.tier || null, current,
       enabled: v.ok, code: v.ok ? null : v.code, reason: v.ok ? null : v.error, needsConfirm: !!v.needsConfirm,
       integrationId, source: src ? src.source : null, sourceLabel, action: v.ok ? null : (v.action || (integrationId && needsKey && src && src.source === 'none' ? { openIntegration: integrationId, label: 'open Integrations' } : null)),
       seats: integrationId ? seatState({ tier: seatRec ? seatRec.tier : null, total: seatRec ? seatRec.total : null, at: seatRec ? seatRec.at : 0, now }) : null,
@@ -1256,10 +1252,11 @@ function installFacts({ verdict = {}, npm = false, state = {} } = {}) {
 }
 
 // ─── §7.4 failure form (1): INSTALLING cloakbrowser is a USER act that comes AFTER the measurement ───
-/** The npm package the §7.2.1 proof record describes. The install PINS the
- *  version that record names ("version pinning is part of this control": an
- *  unpinned download silently invalidates the measurement). */
-const CLOAK_PACKAGE = 'cloakbrowser';
+/** lane dc-browser-backends (F4): the backend that is installed by the user's act declares its install spec in its own
+ *  file (`install`: the npm package its §7.2.1 record describes — the install PINS that record's version, "version
+ *  pinning is part of this control" — where its build unpacks, the install env); the old names stay for readers. */
+const INSTALLED = BROWSER_BACKENDS.find((b) => b.install) || { install: {} };
+const CLOAK_PACKAGE = INSTALLED.install.package || null;
 /**
  * THE INSTALL VERDICT — "measure first, then install", as a decision:
  *   · `install_local_only`          a paired machine's provider binary is its own to install (the key rule's twin, D34);
@@ -1273,10 +1270,10 @@ const CLOAK_PACKAGE = 'cloakbrowser';
  * answer. The CONTROL the design names — an install that skips the measurement — is a verdict answering ok for a
  * refused record; test-browser-backend drives that shape and it must be red.
  */
-function installVerdict({ proof = null, proofOk = null, exe = null, host = null, running = false, platform = null } = {}) {
-  if (host) return { ok: false, code: 'install_local_only', error: `cloakbrowser is installed on this machine only — host ${JSON.stringify(String(host))} refused (a paired machine's provider binary is its own to install)` };
-  if (exe && exe.ok) return { ok: false, code: 'already_installed', error: `cloakbrowser is already installed at ${exe.path}`, path: exe.path };
-  if (running) return { ok: false, code: 'install_running', error: 'a cloakbrowser install is already running — wait for it to finish' };
+function installVerdict({ proof = null, proofOk = null, exe = null, host = null, running = false, platform = null, pkg = CLOAK_PACKAGE } = {}) {
+  if (host) return { ok: false, code: 'install_local_only', error: `${pkg} is installed on this machine only — host ${JSON.stringify(String(host))} refused (a paired machine's provider binary is its own to install)` };
+  if (exe && exe.ok) return { ok: false, code: 'already_installed', error: `${pkg} is already installed at ${exe.path}`, path: exe.path };
+  if (running) return { ok: false, code: 'install_running', error: `a ${pkg} install is already running — wait for it to finish` };
   // the facts the download confirm says in plain words (sizes, where from) ride with the record — never a hard-coded number
   const rec = proof && typeof proof === 'object' ? {
     status: proof.status || null, refusal: proof.refusal || null, date: proof.date || null, version: proof.version || null, chromium: proof.chromium || null, platform: proof.platform || null,
@@ -1291,40 +1288,16 @@ function installVerdict({ proof = null, proofOk = null, exe = null, host = null,
   // lane-cloak: the measurement describes ONE build for ONE platform — a machine of another kind would download another
   // (unmeasured) build, so it is refused by name before anything is fetched
   if (rec.platform && platform && String(platform) !== String(rec.platform)) return { ok: false, code: 'install_unmeasured_platform', error: `the §7.2.1 measurement describes the ${rec.platform} build (Chromium ${rec.chromium || '?'}); this machine is ${platform}, whose build was never measured — nothing is downloaded`, proof: rec, platform: String(platform) };
-  return { ok: true, spec: `${CLOAK_PACKAGE}@${String(rec.version)}`, version: String(rec.version), package: CLOAK_PACKAGE, chromium: rec.chromium || null, proof: rec };
+  return { ok: true, spec: `${pkg}@${String(rec.version)}`, version: String(rec.version), package: pkg, chromium: rec.chromium || null, proof: rec };
 }
 /** The vendor's own platform tag for this machine (the wrapper's getPlatformTag, mirrored — the record names one). */
 function platformTag(platform, arch) {
   const k = `${platform}-${arch}`;
   return { 'linux-x64': 'linux-x64', 'linux-arm64': 'linux-arm64', 'darwin-arm64': 'darwin-arm64', 'darwin-x64': 'darwin-x64', 'win32-x64': 'windows-x64' }[k] || k;
 }
-/** WHERE the wrapper unpacks the pinned Chromium (its getBinaryPath, mirrored): `<cache>/chromium-<v>/chrome` on Linux. */
-function cloakBinaryPath({ cacheDir, chromium, platform = 'linux-x64' } = {}) {
-  if (!cacheDir || !chromium) return null;
-  const dir = `${String(cacheDir).replace(/\/+$/, '')}/chromium-${String(chromium)}`;
-  if (/^darwin/.test(String(platform))) return `${dir}/Chromium.app/Contents/MacOS/Chromium`;
-  if (/^windows/.test(String(platform))) return `${dir}/chrome.exe`;
-  return `${dir}/chrome`;
-}
-/** Every CLOAKBROWSER_* name the wrapper reads (dist/config.js + license.js + download.js, 0.5.10) — the install env
- *  sets the three it needs and DROPS the rest: a key there would route the wrapper to the vendor's other, unmeasured
- *  build; a download URL / binary path / skip-checksum would bypass the pinned, signature-checked download. */
-const CLOAK_ENV_NAMES = Object.freeze(['CLOAKBROWSER_CACHE_DIR', 'CLOAKBROWSER_VERSION', 'CLOAKBROWSER_AUTO_UPDATE', 'CLOAKBROWSER_LICENSE_KEY', 'CLOAKBROWSER_DOWNLOAD_URL', 'CLOAKBROWSER_BINARY_PATH', 'CLOAKBROWSER_SKIP_CHECKSUM', 'CLOAKBROWSER_RELEASE_CHANNEL', 'CLOAKBROWSER_LICENSE_STATUS_FILE']);
-/** THE ENVIRONMENT of the binary step (`cloakbrowser install`): the caller's env minus every CLOAKBROWSER_* and proxy
- *  name, plus the cache dir, the PINNED Chromium, auto-update off and — when given — the install egress proxy (Node's
- *  fetch honours it under NODE_USE_ENV_PROXY=1, measured on Node 24). */
-function cloakInstallEnv(base = {}, { cacheDir, chromium, proxyUrl = null } = {}) {
-  const out = {};
-  for (const [k, v] of Object.entries(base || {})) {
-    if (v == null || /^CLOAKBROWSER_/.test(k) || /^(https?|no|all)_proxy$/i.test(k) || k === 'NODE_USE_ENV_PROXY') continue;
-    out[k] = String(v);
-  }
-  out.CLOAKBROWSER_CACHE_DIR = String(cacheDir);
-  out.CLOAKBROWSER_VERSION = String(chromium);
-  out.CLOAKBROWSER_AUTO_UPDATE = 'false';
-  if (proxyUrl) { out.HTTPS_PROXY = String(proxyUrl); out.HTTP_PROXY = String(proxyUrl); out.NODE_USE_ENV_PROXY = '1'; }
-  return out;
-}
+const cloakBinaryPath = INSTALLED.install.binaryPath || (() => null);
+const CLOAK_ENV_NAMES = INSTALLED.install.envNames || Object.freeze([]);
+const cloakInstallEnv = INSTALLED.install.env || ((base) => ({ ...base }));
 /** The binary step's argv (run with node): the package's OWN CLI + `install` (it downloads, checks the Ed25519-signed
  *  SHA256SUMS, unpacks, and prints the executable's path as its last line). */
 function binaryInstallArgv({ cli }) {

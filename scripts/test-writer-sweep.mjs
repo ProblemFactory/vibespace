@@ -739,7 +739,8 @@ if (fs.existsSync('/proc/self')) {
 // `!data.fork` gate. This guard fails anyone adding a new site without it.
 {
   const src = fs.readFileSync(new URL('../src/ws-handler.js', import.meta.url), 'utf8')
-    + fs.readFileSync(new URL('../src/ws-create.js', import.meta.url), 'utf8');
+    + fs.readFileSync(new URL('../src/ws-create.js', import.meta.url), 'utf8')
+    + ['src/spawn/local.js', 'src/spawn/ssh.js', 'src/spawn/dial.js'].map((f) => fs.readFileSync(new URL('../' + f, import.meta.url), 'utf8')).join('\n'); // + the transport ladders (lane dc-seams-server)
   const lines = src.split('\n');
   let sites = 0, gated = 0;
   lines.forEach((l, i) => {
@@ -1010,7 +1011,7 @@ if (fs.existsSync('/proc/self')) {
   ok((await drive(live, { backend: 'claude', resume: true, resumeId: 'cid-live' }))?.existingId === 'sess-2', 'claude guard unchanged');
   ok(!(await drive(live, { backend: 'claude', resume: true, resumeId: 'tid-live' })), 'backends never cross-match (a claude resume of a codex thread id is not refused)');
 
-  const src = fs.readFileSync(new URL('../src/ws-create.js', import.meta.url), 'utf8');
+  const src = ['src/ws-create.js', 'src/spawn/local.js', 'src/spawn/ssh.js', 'src/spawn/dial.js'].map((f) => fs.readFileSync(new URL('../' + f, import.meta.url), 'utf8')).join('\n'); // the create path (lane dc-seams-server)
   ok(!/codex resume forks a new thread id by design \(not affected\)/.test(src), 'the FALSE "codex resume forks a new thread id" exemption is gone');
   ok(/if \(capsOf\(backend\)\.streamProtocol && data\.resume && data\.resumeId && !data\.fork\)/.test(src), 'resume-already-live guard is gated on the harness caps row (no backend id list)');
   const sites = src.split('\n').filter((l) => /await sweepWriters\(/.test(l));

@@ -421,6 +421,7 @@ const BIN = path.join(ROOT, 'bin');
 const PROJ = path.join(ROOT, 'proj');
 fs.mkdirSync(BIN, { recursive: true }); fs.mkdirSync(PROJ, { recursive: true });
 const STUB_PROG = path.join(ROOT, 'stub.prog');
+const STUB_EXIT = path.join(ROOT, 'stub.exit');
 const STUB_SID = crypto.randomUUID();   // a random conversation id — no transcript is ever written under it
 // THE STUB CLI: stamps every assistant record at EMISSION (as claude 2.1.281 does), a rate_limit_event every 50, an
 // OTel api_request a second (the witness), and — once — asks the server to start a long-lived Background Work job,
@@ -440,8 +441,10 @@ setInterval(() => {
   n++;
   out({ type: 'assistant', timestamp: new Date().toISOString(), session_id: sid, uuid: require('crypto').randomUUID(), message: { id: 'msg_vsrec_' + n, type: 'message', role: 'assistant', model: 'claude-fable-5', content: [{ type: 'text', text: 'VSREC ' + n + ' ' + pad }], stop_reason: null, usage: { input_tokens: 1, output_tokens: 1 } } });
   if (n % 50 === 0) out({ type: 'rate_limit_event', session_id: sid, uuid: require('crypto').randomUUID(), rate_limit_info: { status: 'allowed_warning', rateLimitType: 'five_hour', resetsAt: Math.floor(Date.now() / 1000) + 3600, utilization: 0.5 } });
-  fs.writeFileSync(${JSON.stringify(STUB_PROG)}, n + ' ' + Date.now());
+  // the counter is RENAMED into place: a rewrite in place (O_TRUNC, then the write) left a reader an empty file — mirror-216 read it as 0
+  fs.writeFileSync(${JSON.stringify(STUB_PROG + '.tmp')}, n + ' ' + Date.now() + ' ' + process.pid); fs.renameSync(${JSON.stringify(STUB_PROG + '.tmp')}, ${JSON.stringify(STUB_PROG)});
 }, 20);
+process.on('exit', (code) => { try { fs.writeFileSync(${JSON.stringify(STUB_EXIT)}, String(code)); } catch {} });
 const EP = process.env.OTEL_EXPORTER_OTLP_ENDPOINT, HDR = process.env.OTEL_EXPORTER_OTLP_HEADERS || '';
 fs.writeFileSync(${JSON.stringify(path.join(ROOT, 'stub.env'))}, JSON.stringify({ otel: !!EP, api: process.env.VIBESPACE_API || null, token: !!process.env.VIBESPACE_SESSION_TOKEN }));
 let req = 0;
@@ -493,7 +496,27 @@ async function connect() {
   await new Promise((res, rej) => { ws.on('open', res); ws.on('error', rej); });
   return st;
 }
-const stubN = () => progressOf(STUB_PROG).n;
+// the stub's counter as EVIDENCE: "ok" with its record, or WHY there is none — a missing or unreadable counter is not "0 records"
+// (mirror-216: one read caught the stub's in-place rewrite empty, Number('') = 0, and §3's control printed "the CLI wrote 1648 → 0")
+let stubLast = null;
+const stubRead = () => {
+  let txt;
+  try { txt = fs.readFileSync(STUB_PROG, 'utf8'); } catch (e) { return { state: e.code === 'ENOENT' ? 'missing' : e.code || String(e) }; }
+  const m = /^(\d+) (\d+) (\d+)$/.exec(txt);
+  if (!m) return { state: txt ? `unparsable (${JSON.stringify(txt.slice(0, 40))})` : 'empty' };
+  return (stubLast = { state: 'ok', n: Number(m[1]), t: Number(m[2]), pid: Number(m[3]) });
+};
+const stubN = () => { const r = stubRead(); return r.state === 'ok' ? r.n : NaN; };
+// the sentence a stopped stub fails with: its counter, its pid, its exit
+const stubState = () => {
+  const r = stubRead(), pid = stubLast && stubLast.pid;
+  const exit = fs.existsSync(STUB_EXIT) ? fs.readFileSync(STUB_EXIT, 'utf8') : null;
+  // kill(pid, 0) answers for a zombie too (mirror-216's kill-the-stub control: the wrapper, blocked on the stalled master, never reaps it)
+  const st = (() => { try { const t = fs.readFileSync(`/proc/${pid}/stat`, 'utf8'); return t[t.lastIndexOf(')') + 2]; } catch { return null; } })();
+  return `its counter ${r.state === 'ok' ? `sits at ${r.n}, written ${((Date.now() - r.t) / 1000).toFixed(1)} s ago` : `file is ${r.state}`}; `
+    + (pid ? `its pid ${pid} is ${st === null ? 'GONE' : st === 'Z' ? 'a ZOMBIE (dead, unreaped — the wrapper above it is stuck on the master)' : `ALIVE (state ${st})`}` : 'its pid was never read')
+    + (exit !== null ? `; it exited with code ${exit}` : pid && (st === null || st === 'Z') ? '; no exit record (ended by a signal)' : '');
+};
 const sockDir = path.join(wt, 'data', 'sockets');
 
 // ═══ §2 SIGKILL mid-stream → the boot sweep ═══════════════════════════════════
@@ -569,11 +592,14 @@ e2e: {
   const c3 = await connect();
   c3.ws.send(JSON.stringify({ type: 'attach', sessionId: SID, cols: 120, rows: 30 }));
   await sleep(4000);                               // the attach slab (history from the wrapper's buffer file) lands first
-  const n0 = stubN(), live0 = c3.maxRec;
-  await sleep(25000);
-  const n1 = stubN();
-  ok(n1 > n0 + 500 && c3.maxRec <= live0 && attachClientsOf(SOCK).includes(clientB),
-    `THE CONTROL: for 25 s the pre-fix restore delivers NO new record (${c3.maxRec} seen, the CLI wrote ${n0} → ${n1}) — the orphan ${clientB} still holds the master`);
+  // the precondition is EVIDENCE, not a sleep: the stub writes 500 more records (≤ 25 s), and the silence is judged over that span
+  const n0 = stubN(), live0 = c3.maxRec, t0 = Date.now();
+  const wrote = await until(() => stubN() > n0 + 500, 25000, 250);
+  const n1 = stubN(), span = ((Date.now() - t0) / 1000).toFixed(1), dark = c3.maxRec;
+  ok(wrote, wrote ? `control precondition: the stub CLI keeps writing while the bridge is dark (record ${n0} → ${n1} in ${span} s)`
+    : `control precondition: the stub CLI STOPPED writing while the bridge is dark (record ${n0} → ${n1} in ${span} s) — ${stubState()}`);
+  ok(dark <= live0, `THE CONTROL: over those ${span} s the pre-fix restore delivers NO new record (${dark} seen, ${live0} before)`);
+  ok(attachClientsOf(SOCK).includes(clientB), `THE CONTROL: the orphan ${clientB} still holds the master`);
   c3.ws.close();
   await stop(C, 'SIGTERM');   // the clean shutdown ends C's own attach pty (no new orphan); B's orphan stays for §4's sweep
   ok(!/\[bridge\]/.test(C.jr), 'control: the pre-fix copy never swept or healed anything');
@@ -596,7 +622,7 @@ watch: {
   await sleep(1500);
   await stop(D, 'SIGTERM');   // the clean shutdown ends D's attach: the paused client is the only one left, and it fills
   await sleep(12000);
-  const w1 = progressOf(STUB_PROG).n;
+  const w1 = stubN();
   ok(alive(paused.pid) && w1 > 0, `setup: the paused client ${paused.pid} is attached and full; the CLI keeps writing (record ${w1})`);
   const E = boot();
   if (!ok(await ready(E), 'boot E (post-fix, session.deadBridgeMinutes = 2.1) is Ready')) break watch;

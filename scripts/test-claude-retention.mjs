@@ -130,7 +130,8 @@ console.log('§4 the helper embeds the SHARED applier from the module file text 
 
 console.log('§5 wiring pins (the 2.355.0 lesson: a pure fix without its call site is dead)');
 {
-  const srv = read('server.js'), hosts = read('src/hosts.js'), wsc = read('src/ws-create.js'), sync = read('src/server/harness-config-sync.js');
+  const srv = read('server.js'), hosts = read('src/hosts.js'), wsc = read('src/ws-create.js') + read('src/spawn/ssh.js') + read('src/spawn/dial.js'), // + the transport ladders (lane dc-seams-server)
+    sync = read('src/server/harness-config-sync.js');
   ok('the claude table declares transcriptRetentionDays as a cli-config row (number, default 36500 → cleanupPeriodDays, off 0)', (() => { const r = HARNESS_SETTINGS.claude.rows.find((x) => x.key === 'transcriptRetentionDays'); return r && r.type === 'number' && r.default === 36500 && r.apply.kind === 'cli-config' && r.apply.path.join('.') === 'cleanupPeriodDays' && r.apply.off === 0 && r.apply.onUninstall === 'keep'; })());
   ok('server.js syncs the plan at boot (skipped under VIBESPACE_SKIP_AGENT_HOOKS, the worktree-smoke guard)', /if \(!process\.env\.VIBESPACE_SKIP_AGENT_HOOKS\) harnessConfig\.syncCliConfig\(\{ reason: 'boot' \}\);/.test(srv));
   ok('…and the sync itself asks THE ROOT VERDICT first (src/server-root.js — a worktree / temp server never writes the real HOME; lane hook-root-guard)', /const refused = refusalNow\(\);\n\s*if \(refused\) \{ if \(typeof refuseOwnerWrite === 'function'\) refuseOwnerWrite\(\); else log\(`\[cli-config\] skipped/.test(sync) && /hookRegistrationSafe\(\) \? null :/.test(sync));

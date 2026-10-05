@@ -275,6 +275,7 @@ module.exports = {
   // rows that are NOT --effort values — appended AFTER the CLI's parsed levels, never replaced by them; a row
   // whose requiresLevel the probe did not parse is absent by name (ultracode spawns as --effort xhigh).
   ui: { billing: { globalLogin: 'Subscription', cliLogin: 'CLI login', pickLogin: 'Subscription (Pro/Max login)', pickLoginHost: '', planSuffix: ' (Pro/Max)', switchLogin: 'Subscription (Pro/Max)', defaultIdField: 'defaultAccountId', apiKeys: true, longLivedToken: true, hostLogin: true, machineUsage: true, usage: 'accounts', globalUsageKey: '__global__', estimates: true }, effortReport: 'commanded', effortLevels: null, effortExtras: [{ value: 'ultracode', label: 'Ultracode', hint: 'xhigh effort + standing dynamic-workflow orchestration', requiresLevel: 'xhigh' }], modelLock: true, legacyIds: true, resumeResend: true },
+  expirySweep: require('./claude-oat-expiry.js').checkOatExpiry, // the long-lived setup-token expiry notices (B-211a; server.js's sweep timer asks every descriptor)
   settingsPrefix: 'claude',
   // THE SETTINGS TABLE (design-harness-settings §2): joined by OBJECT IDENTITY
   // like `caps` above — the schema derives the Claude section from it, the

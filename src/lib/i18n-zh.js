@@ -6546,6 +6546,7 @@ export default {
   "When this machine has no desktop session": "这台机器没有桌面会话时",
   "What an agent's browser does when it asks for a window but nobody is logged in to this machine's desktop. A hidden window (default, when Xvfb is installed) is a normal browser on an invisible screen — sign-in pages see an ordinary browser; headless has no screen at all and some sign-in pages refuse it. Either way the pages work and you can watch and take over in the live view. Applies to the next browser that starts.": "agent 的浏览器要求显示窗口、但没有人登录这台机器的桌面时怎么办。隐藏窗口（默认，装了 Xvfb 时）是在一块看不见的屏幕上运行的普通浏览器——登录页面看到的是一个普通浏览器；headless 完全没有屏幕，有些登录页面会拒绝它。两种方式页面都能正常工作，你都可以在实时视图里查看和接管。对下一个启动的浏览器生效。",
   "{n} windows on “{desktop}” were kept — this page had not opened them yet": "“{desktop}”上的 {n} 个窗口已保留——本页面还没有打开过它们",
+  "“{window}” is on “{desktop}”": "“{window}”在“{desktop}”上",
   "Then: {changes}": "之后的改动：{changes}",
   "The layout could not be re-read after reconnecting — window changes on this page are held until it can be": "重新连接后无法重新读取布局——本页面的窗口改动将暂存，直到能读取为止",
   "The layout was re-read — window changes made on this page more than a minute ago were not kept ({n})": "布局已重新读取——本页面一分钟多以前做的窗口改动未能保留（{n} 项）",

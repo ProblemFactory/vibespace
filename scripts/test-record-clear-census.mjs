@@ -251,10 +251,13 @@ function routeCensus(src) {
     const fns = fileFunctions(lines);
     const regs = [];
     lines.forEach((l, i) => { const m = ROUTE_RE.exec(l); if (m) regs.push({ i, method: m[1].toUpperCase(), path: m[3] }); });
+    // a routes MODULE's registration call (`….registerEditorRoutes(app, …)`, lane dc-seams-server) ends the handler above it too
+    const bounds = lines.map((l, i) => (ROUTE_RE.test(l) || /\.register\w*\(app\b/.test(l) ? i : -1)).filter((i) => i >= 0);
+    const nextBound = (i) => { const b = bounds.find((x) => x > i); return b === undefined ? lines.length : b; };
     for (let k = 0; k < regs.length; k++) {
       // the handler = the text up to the next registration, PLUS every same-file function it calls (a bare `name(` —
       // never a method `x.name(`), to CALL_DEPTH: a store token anywhere in that makes the route a candidate
-      const body0 = lines.slice(regs[k].i, regs[k + 1] ? regs[k + 1].i : lines.length).join('\n');
+      const body0 = lines.slice(regs[k].i, nextBound(regs[k].i)).join('\n');
       let body = body0; const seen = new Set(); let frontier = [body0];
       for (let d = 0; d < CALL_DEPTH && frontier.length; d++) {
         const next = [];
@@ -268,7 +271,6 @@ function routeCensus(src) {
 }
 // THE TABLE: every store-touching route, by class. `reads` / `folded` rows are probed by the walk.
 const ROUTES = {
-  'POST /api/editor/signal': 'meta',                    // Ctrl+G editor bridge: touches tasks for the ctx dir only
   'GET /api/tasks': 'reads',
   'POST /api/tasks': 'echo',
   'PATCH /api/tasks/:id': 'echo',
@@ -281,10 +283,8 @@ const ROUTES = {
   'POST /api/tasks/import': 'writes',                   // declared: a file the user holds re-seeds an EMPTY group's log; an older file restores its own notes (a restore, not a leak)
   'GET /api/user-todos': 'reads',
   'POST /api/user-todos/:id': 'echo',
-  'POST /api/sessions/:id/msg-reachability': 'meta',
   'POST /api/machine-mounts/:id/remount': 'meta',
   'POST /api/hosts/:id/allow-exit': 'meta',
-  'GET /api/session-options': 'meta',                   // group ids + titles for the New Session dialog
   'POST /api/agent/user-todo': 'reads',                 // list / show (+ add / resolve / clear = writes)
   'GET /api/session-status': 'reads',
   'POST /api/session-status': 'echo',
@@ -1697,8 +1697,8 @@ const I_RECORD_KINDS = new Set([...RC.RECORD_KINDS, 'carrier']);
 const I_RECV = {
   // ── the five kinds and their carriers ──
   'src/agent-routes.js|e': ['carrier', 'a stash entry drained into the agent\'s next turn (the ladder\'s and the jobs engine\'s) — drawn as the chat card of what the agent received'],
-  'src/agent-routes.js|add': ['todo', 'the agent\'s OWN For-you item (vibespace-ask) — the record itself'],
-  'src/agent-routes.js|s': ['session', 'the filing session\'s own name (a For-you item\'s label)'],
+  'src/agent-routes/status.js|add': ['todo', 'the agent\'s OWN For-you item (vibespace-ask) — the record itself'],
+  'src/agent-routes/status.js|s': ['session', 'the filing session\'s own name (a For-you item\'s label)'],
   'src/agent-routes.js|req.body': ['activity', 'the agent\'s OWN Activity note (vibespace-task progress) — the record itself'],
   'src/agentd/agentd.js|msg': ['carrier', 'the delivered text of the device\'s peer-post op (the ladder\'s rung ③)'],
   'src/jobs.js|job': ['job', 'the Background Work record'],
@@ -1717,7 +1717,7 @@ const I_RECV = {
   'data/bin/codex-chat-wrapper.js|data': ['carrier', 'the task context the codex wrapper injects (Activity notes, a status) — its log prints the LENGTH'],
   'src/server/stdout/claude-stream-json.js|po': ['carrier', 'the sender name of a message the CLI received (a job\'s `Background Work · <name>`) — the live chat card'],
   // ── not a record: what each is ──
-  'server.js|a': ['account', 'an account / pool name'], 'server.js|h': ['host', 'a machine name'],
+  'src/harnesses/claude-oat-expiry.js|a': ['account', 'an account / pool name'], 'server.js|h': ['host', 'a machine name'],
   'src/accounts.js|a': ['account', 'an account'], 'src/accounts.js|target': ['account', 'an account'],
   'src/browser-profiles.js|existing': ['browser profile', 'a profile label'], 'src/browser-profiles.js|profile': ['browser profile', 'a profile label'], 'src/browser-profiles.js|row': ['browser profile', 'a profile label'],
   'src/browser-switch.js|profile': ['browser profile', 'a profile label'], 'src/browser-trace.js|profile': ['browser profile', 'a profile label'],
@@ -1787,7 +1787,7 @@ const I_RECV = {
   'src/server/window-targets-engine.js|bRow': ['desktop app', 'an app label'], 'src/server/window-targets-engine.js|drec': ['desktop app', 'an app label'], 'src/server/window-targets-engine.js|e': ['window', 'a window\'s name'],
   'src/server/window-targets-engine.js|holder': ['session', 'a lease holder\'s name'], 'src/server/window-targets-engine.js|l': ['session', 'a lease\'s session name'], 'src/server/window-targets-engine.js|rec': ['desktop app', 'an app label'],
   'src/usage-routes.js|hMeta2': ['host', 'a machine name'], 'src/usage-routes.js|hMeta': ['host', 'a machine name'], 'src/weekly-lanes-unfold.js|lane': ['quota', 'a lane\'s name'],
-  'src/ws-create.js|h': ['host', 'a machine name'], 'src/ws-handler.js|data': ['caller', 'the owner\'s own queued text (a refusal echoes its LENGTH to the owner who typed it)'],
+  'src/spawn/ssh.js|h': ['host', 'a machine name'], 'src/spawn/dial.js|h': ['host', 'a machine name'], 'src/ws-handler.js|data': ['caller', 'the owner\'s own queued text (a refusal echoes its LENGTH to the owner who typed it)'],
   'src/ws-handler.js|h': ['host', 'a machine name'], 'src/ws-handler.js|wcaps': ['harness', 'a wrapper capability\'s reason'],
   // ── verify r8 ③: the journal's receivers (every server console / log line rides the incident ring) ──
   'data/bin/codex-chat-wrapper.js|r': ['harness', 'an app-server answer\'s reason / detail (an RPC refusal)'], 'data/bin/codex-chat-wrapper.js|st': ['harness', 'a steer answer\'s reason / detail (an RPC refusal)'],
@@ -1856,7 +1856,7 @@ const I_RECV = {
   // ── lane device-upgrade-stuck ──
   'src/server/device-upgrade-watch.js|w': ['host', 'the stuck-upgrade item\'s words — a machine name and two agent versions (itemOf), the machine\'s own record'],
   // ── verify r9: the receivers of the one-level alias pass (a field copied into a local, then handed to a sink) ──
-  'src/agent-routes.js|req.body||{}': ['status', 'the caller\'s OWN status write (the owner\'s route / the agent\'s vibespace-status), destructured — the record itself'],
+  'src/agent-routes/status.js|req.body||{}': ['status', 'the caller\'s OWN status write (the owner\'s route / the agent\'s vibespace-status), destructured — the record itself'],
   'src/install-slot.js|s': ['desktop app', 'an install spec\'s label (packageInstallPlan, moved from desktop-apps.js — lane dc-apps-rows)'], 'src/lib/browser-switcher.js|st.view?.profile': ['browser profile', 'a profile label'],
   'src/lib/sidebar-mounts.js|cfg': ['mount', 'a storage mount\'s name'], 'src/lib/telemetry-client.js|e': ['error', 'an unhandled rejection\'s reason'],
   'src/lib/workflow-detail.js|opts': ['workflow', 'a workflow run\'s name'], 'src/routes/desktop-apps.js|req.query': ['caller', 'the install the caller asked for (a closed set, echoed clipped)'],
@@ -1871,9 +1871,9 @@ const I_SITES = {
   'src/agent-routes.js|peer|e.fromName': ['transcript', 'the drained stash entry\'s sender label on the card drawn for what the agent\'s turn received'],
   'src/agent-routes.js|peer|e.text': ['transcript', 'the drained entries — injected into the agent\'s context; the card shows what it received'],
   'src/agent-routes.js|peer|e.jobName': ['transcript', 'the drained job notification\'s name on the card of what the agent received'],
-  'src/agent-routes.js|todo|add.text': ['own', 'the agent files its own item — the record the clear reaches'],
-  'src/agent-routes.js|todo|add.detail': ['own', 'the agent files its own item'],
-  'src/agent-routes.js|todo|add.options': ['own', 'the agent files its own item'],
+  'src/agent-routes/status.js|todo|add.text': ['own', 'the agent files its own item — the record the clear reaches'],
+  'src/agent-routes/status.js|todo|add.detail': ['own', 'the agent files its own item'],
+  'src/agent-routes/status.js|todo|add.options': ['own', 'the agent files its own item'],
   'src/agent-routes.js|activity|req.body.note': ['own', 'the agent\'s own Activity entry'],
   'src/agent-routes.js|activity|req.body.detail': ['own', 'the agent\'s own Activity entry'],
   'src/agentd/agentd.js|peer|msg.text': ['transcript', 'the device posts the delivered text into the CLI\'s inbox'],
@@ -1905,8 +1905,8 @@ const I_SITES = {
   'src/server/groups-engine.js|peer|c.text': ['transcript', 'a group message a member\'s report carried (the agent received it; the card\'s ring copy re-words at the clear)'],
   // verify r9 — the alias pass's record reads
   'src/agent-routes.js|peer|req.body.text': ['transcript', 'the agent\'s own vibespace-msg text (copied into a local first) delivered into the target conversation, and its card'],
-  'src/agent-routes.js|status|req.body||{}.reason': ['own', 'the caller\'s own status write — the record the clear reaches'],
-  'src/agent-routes.js|status|req.body||{}.detail': ['own', 'the agent\'s own status write — the record the clear reaches'],
+  'src/agent-routes/status.js|status|req.body||{}.reason': ['own', 'the caller\'s own status write — the record the clear reaches'],
+  'src/agent-routes/status.js|status|req.body||{}.detail': ['own', 'the agent\'s own status write — the record the clear reaches'],
 };
 const iJudge = (rows) => {
   const unknownRecv = new Set(), bad = [], used = new Set(), usedSites = new Set(), bySink = {}, recordSites = [];

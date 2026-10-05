@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.217 — 2026-10-05
+
+### Fixed
+- Opening a window that is already open on another desktop, like the Outbox, now takes you to that desktop.
+
 ## 2.369.216 — 2026-10-05
 
 ### Changed

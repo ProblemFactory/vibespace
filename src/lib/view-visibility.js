@@ -138,4 +138,25 @@ function attachSlab({ suspended = false, inFlight = 0, burst = ATTACH_TEXT_BURST
   return k >= b ? 'floor' : 'text';
 }
 
-module.exports = { HIDE_REASONS, BOX_HIDERS, hiddenReasons, isDisplayed, windowMarks, reconnectSlot, RECONNECT_BASE_MS, RECONNECT_STEP_MS, RECONNECT_CAP_MS, attachSlab, ATTACH_TEXT_BURST };
+/** WHERE A REVEAL MUST GO FIRST — the DESKTOP is one more hider a reveal lifts (userW inc-muv3qfo7-96tm, 2026-10-05:
+ *  "点击 Outbox 没有任何反应" — the Outbox lived on desktop 1 while he looked at desktop 2; the button found the
+ *  singleton and revealed it where nobody looked, 12 presses in a minute). The window manager reads the facts off
+ *  the FRAME (a group's host carries the desktop) and this client's DesktopManager / Stage; this names the rule.
+ *    raise      — false = Locate (choose its tab only, never move the user)
+ *    desktopId  — the frame's desktop (the Stage's id when it lives on the Stage); activeId — this client's desktop
+ *    stageActive / stageEnabled / stageKind (stage-rules stageWindowKind) / intercept (the Stage materializes it)
+ *    switched   — the switch already ran (the second pass): still elsewhere ⇒ say where, never a silent no-op
+ *  → {act:'none'} | {act:'switch', to} | {act:'tell'} */
+function revealDesktop({ raise = true, desktopId = null, activeId = null, stageId = '__stage__', stageActive = false, stageEnabled = false, stageKind = null, intercept = false, switched = false } = {}) {
+  if (!raise || !desktopId) return { act: 'none' };
+  if (stageActive) {
+    // the Stage on screen: its own reveal (materialize) or a window already on it; a desktop window = leave to its desktop
+    if (intercept || stageKind || desktopId === stageId) return { act: 'none' };
+    return switched ? { act: 'tell' } : { act: 'switch', to: desktopId };
+  }
+  if (desktopId === activeId) return { act: 'none' };
+  if (desktopId === stageId && !stageEnabled) return { act: 'tell' }; // the Stage is off: nothing to go to
+  return switched ? { act: 'tell' } : { act: 'switch', to: desktopId };
+}
+
+module.exports = { HIDE_REASONS, BOX_HIDERS, hiddenReasons, revealDesktop, isDisplayed, windowMarks, reconnectSlot, RECONNECT_BASE_MS, RECONNECT_STEP_MS, RECONNECT_CAP_MS, attachSlab, ATTACH_TEXT_BURST };

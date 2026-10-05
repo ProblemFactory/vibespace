@@ -82,7 +82,7 @@ console.log('⑤ NOTICES (2.369.118, owner: spend notices are DISTRACTING beside
   const guard = fs.readFileSync(path.join(ROOT, 'src/server/spend-guard.js'), 'utf8');
   ok(/sessionName: 'Spending', kind: 'notice'/.test(guard), "spend-guard's inbox item is declared a notice at the producer");
   const ask = fs.readFileSync(path.join(ROOT, 'data/bin/vibespace-ask'), 'utf8');
-  const routes = fs.readFileSync(path.join(ROOT, 'src/agent-routes.js'), 'utf8');
+  const routes = fs.readFileSync(path.join(ROOT, 'src/agent-routes.js'), 'utf8') + fs.readFileSync(path.join(ROOT, 'src/agent-routes/status.js'), 'utf8'); // + the status / todos family (lane dc-seams-server)
   ok(/--notice/.test(ask) && /add: \{ text, detail, urgency, kind(?:, options)? \}/.test(ask) && /kind: add\.kind \|\| null/.test(routes), 'vibespace-ask --notice reaches the store through the agent route');
   const css = fs.readFileSync(path.join(ROOT, 'public/style.css'), 'utf8');
   ok(/\.ut-count\.ut-seg-notice \{[^}]*var\(--text-dim\)/.test(css) && !/\.ut-count\.ut-seg-notice \{[^}]*#[0-9a-f]{3}/i.test(css), 'the grey segment uses theme vars, no literal colour');
@@ -432,7 +432,7 @@ console.log('⑪ NOTICES BY ORIGIN (B-328d) — the closed producer set, the leg
     'src/server/browser-keeper.js': 'browser', // lane H verify r5: the ONE notice when a profile's browser keeps closing (the heal budget)
     'src/server/mounts-plugins-wiring.js': 'browser', // the browser routes' switch PROPOSAL (this file only wires them)
     'src/server/browser-propose.js': 'browser', // lane browser-propose: the agent's proposal (Approve / Reject), one item per proposal
-    'src/agent-routes.js': 'agent',
+    'src/agent-routes/status.js': 'agent',
     'src/server/helper-asks.js': 'agent', // lane S1: a helper's permission ask left unanswered for 60 s
     'src/server/unexpected-exit.js': 'agent', // B-f698: a conversation that exited unexpectedly while working — restarted once, or why not
     'src/exit-proxy.js': 'machines', // lane-pairing ⑥: "Allow <conversation> to run a command on <machine>?" (Allow / Deny, 60 s)

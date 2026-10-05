@@ -6545,6 +6545,7 @@ export default {
   "When this machine has no desktop session": "このマシンにデスクトップセッションがないとき",
   "What an agent's browser does when it asks for a window but nobody is logged in to this machine's desktop. A hidden window (default, when Xvfb is installed) is a normal browser on an invisible screen — sign-in pages see an ordinary browser; headless has no screen at all and some sign-in pages refuse it. Either way the pages work and you can watch and take over in the live view. Applies to the next browser that starts.": "agent のブラウザがウィンドウを求めたのに、このマシンのデスクトップに誰もログインしていないときの動作です。非表示のウィンドウ（既定、Xvfb がある場合）は見えない画面上で動く通常のブラウザで、ログインページには普通のブラウザとして見えます。ヘッドレスには画面がまったくなく、一部のログインページは受け付けません。どちらでもページは動作し、ライブビューで確認・引き継ぎができます。次に起動するブラウザから適用されます。",
   "{n} windows on “{desktop}” were kept — this page had not opened them yet": "「{desktop}」の {n} 個のウィンドウは保持されました — このページではまだ開いていませんでした",
+  "“{window}” is on “{desktop}”": "「{window}」は「{desktop}」にあります",
   "Then: {changes}": "その後の変更: {changes}",
   "The layout could not be re-read after reconnecting — window changes on this page are held until it can be": "再接続後にレイアウトを再読み込みできませんでした — このページのウィンドウ変更は、読み込めるまで保留されます",
   "The layout was re-read — window changes made on this page more than a minute ago were not kept ({n})": "レイアウトを再読み込みしました — このページで1分以上前に行ったウィンドウ変更は保持されませんでした（{n} 件）",
