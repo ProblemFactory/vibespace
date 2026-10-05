@@ -1,0 +1,42 @@
+{
+ "_source": "lane channel-send-files (2026-10-04): Slack's documented upload since files.upload's retirement — files.getUploadURLExternal (filename, length) → POST the bytes to upload_url → files.completeUploadExternal (files=[{id,title}], channel_id, thread_ts, initial_comment). NOT a recorded live answer.",
+ "getUploadURLExternal": {
+  "params": [
+   "filename",
+   "length"
+  ],
+  "answer": {
+   "ok": true,
+   "upload_url": "https://files.slack.com/upload/v1/CwABAAAAXAoAAZnBg",
+   "file_id": "F07FIXTURE01"
+  }
+ },
+ "upload": {
+  "method": "POST",
+  "origin": "https://files.slack.com/",
+  "answer": "OK - 5"
+ },
+ "completeUploadExternal": {
+  "params": [
+   "files",
+   "channel_id",
+   "thread_ts",
+   "initial_comment"
+  ],
+  "answer": {
+   "ok": true,
+   "files": [
+    {
+     "id": "F07FIXTURE01",
+     "title": "a.png"
+    }
+   ]
+  }
+ },
+ "scopeRefusal": {
+  "ok": false,
+  "error": "missing_scope",
+  "needed": "files:write",
+  "provided": "chat:write,channels:history"
+ }
+}

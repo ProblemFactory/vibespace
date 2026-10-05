@@ -44,7 +44,7 @@ import { openTaskLog as openTaskLogFn } from './task-log.js';
 import { openUsageWindow } from './usage-window.js';
 import { openJobsWindow, openInteractWindow } from './jobs-panel.js';
 import { openChannelWindow } from './channel-window.js';
-import { focusChannelsPanel } from './channels-panel.js';
+import { focusChannelsPanel, openSearchResults } from './channels-panel.js';
 import { openChannelOutbox as openChannelOutboxFn } from './channel-outbox.js';
 import { openIntegrationsWindow } from './integrations-window.js';
 import { openSessionProps as openSessionPropsFn } from './session-props.js';
@@ -2138,6 +2138,8 @@ class App {
   openJobs(opts) { return openJobsWindow(this, opts || {}); }
   openJobInteract(jobId, opts) { return openInteractWindow(this, jobId, opts || {}); }
   openChannel(adapterId, convId, opts) { return openChannelWindow(this, adapterId, convId, opts || {}); }
+  /** .212: an agent's channel search AS RESULTS — the search dialog pre-filled, scoped to one conversation or grouped. */
+  openChannelSearch(opts) { return openSearchResults(this, opts || {}); }
   /** THE For-you window (design-user-inbox-reply §9) — a singleton kind; `{itemId, sessionKey, syncId}`:
    *  select that item / scope to that session; an open window is revealed and re-pointed (a replay never re-points). */
   openInbox(opts) { return openInboxWindow(this, opts || {}); }

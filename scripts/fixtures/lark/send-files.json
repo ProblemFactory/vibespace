@@ -1,0 +1,97 @@
+{
+ "_source": "lane channel-send-files (2026-10-04): the request shapes as Lark's open-platform pages document them — im/v1/images (Upload image), im/v1/files (Upload file), im/v1/messages (Send message, msg_type image|file). NOT a recorded live answer: the first real upload is made under the owner's Approve.",
+ "image": {
+  "method": "POST",
+  "path": "/open-apis/im/v1/images",
+  "contentType": "multipart/form-data",
+  "fields": {
+   "image_type": "message"
+  },
+  "fileField": "image",
+  "maxBytes": 10485760,
+  "types": [
+   "JPEG",
+   "PNG",
+   "WEBP",
+   "GIF",
+   "TIFF",
+   "BMP",
+   "ICO"
+  ]
+ },
+ "file": {
+  "method": "POST",
+  "path": "/open-apis/im/v1/files",
+  "contentType": "multipart/form-data",
+  "fields": [
+   "file_type",
+   "file_name"
+  ],
+  "fileTypes": [
+   "opus",
+   "mp4",
+   "pdf",
+   "doc",
+   "xls",
+   "ppt",
+   "stream"
+  ],
+  "fileField": "file",
+  "maxBytes": 31457280
+ },
+ "message": {
+  "method": "POST",
+  "path": "/open-apis/im/v1/messages?receive_id_type=chat_id",
+  "image": {
+   "msg_type": "image",
+   "content": {
+    "image_key": "<key>"
+   }
+  },
+  "file": {
+   "msg_type": "file",
+   "content": {
+    "file_key": "<key>"
+   }
+  }
+ },
+ "answers": {
+  "image": {
+   "code": 0,
+   "msg": "success",
+   "data": {
+    "image_key": "img_v2_041b28e3-5680-48c2-9af2-497ace79333g"
+   }
+  },
+  "file": {
+   "code": 0,
+   "msg": "success",
+   "data": {
+    "file_key": "file_v2_6c1b2a43-0f0e-4f4a-9b2a-2d1e5d9b1c0g"
+   }
+  },
+  "message": {
+   "code": 0,
+   "msg": "success",
+   "data": {
+    "message_id": "om_dc13264520392913993dd051dba21dcf",
+    "create_time": "1727999999000",
+    "chat_id": "oc_fixture",
+    "msg_type": "image",
+    "sender": {
+     "id": "ou_me",
+     "id_type": "open_id",
+     "sender_type": "user"
+    }
+   }
+  },
+  "scopeRefusal": {
+   "code": 99991679,
+   "msg": "Unauthorized. You do not have permission to perform the requested operation on the resource. Please request user re-authorization and try again. required one of these privileges under the user identity: [im:resource]"
+  },
+  "sizeRefusal": {
+   "code": 234006,
+   "msg": "The file size exceeds the limit."
+  }
+ }
+}

@@ -484,8 +484,8 @@ function gateCensus(src, { gateRe, ungatedIds }) {
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i], c = code(l);
     if (/^\s*(\*|\/\/|\/\*)/.test(l)) continue;
-    if (!/\b(callJson|fetchFn)\s*\(|\bawait f\(/.test(c)) continue;
-    if (/^\s*async function callJson\(/.test(l) || /\bfetchFn\(url\b/.test(c)) continue;
+    if (!/\b(callJson|callForm|fetchFn)\s*\(|\bawait f\(/.test(c)) continue;   // verify r1 (channel-send-files): the multipart upload is a call too
+    if (/^\s*async function call(?:Json|Form)\(/.test(l) || /\bfetchFn\(url\b/.test(c)) continue;
     const m = /\/\/\s*(ungated|gated-inline):\s*([\w-]+)/.exec(l);
     if (gateRe.test(c)) { if (gate >= 0) problems.push(`two gate lines: ${gate + 1} and ${i + 1}`); gate = i; sites.push({ line: i + 1, cls: 'gate' }); continue; }
     if (!m) { problems.push(`line ${i + 1}: an outbound call outside the gate with no marker: ${c.trim().slice(0, 100)}`); sites.push({ line: i + 1, cls: 'unmarked' }); continue; }
@@ -507,7 +507,7 @@ function gateCensus(src, { gateRe, ungatedIds }) {
   const c1 = gateCensus(src, { gateRe: GATE, ungatedIds: ids });
   console.log('    gate census (lark.js): ' + c1.sites.map((x) => `${x.cls}${x.id ? ':' + x.id : ''}@${x.line}`).join(' '));
   ok(c1.problems.length === 0 && c1.sites.filter((x) => x.cls === 'gate').length === 1, `every outbound call is the ONE gate, a gated-inline site with its own pace + meter, or a listed ungated site (${c1.sites.length} sites)`, c1.problems.join(' ; '));
-  ok(c1.sites.filter((x) => x.cls === 'gated-inline').map((x) => x.id).sort().join() === 'app-name,resource,send,send-reply,tenant-token,token-refresh' && c1.sites.filter((x) => x.cls === 'ungated').map((x) => x.id).sort().join() === 'consent-exchange,consent-user-info,integration-test', 'gated-inline = {token-refresh, send, send-reply, resource, tenant-token, app-name (D3: a bot\'s name is a paced + metered request)}; ungated = {consent-exchange, consent-user-info, integration-test} — the send, unpaced and unmetered since P4, is now inside');
+  ok(c1.sites.filter((x) => x.cls === 'gated-inline').map((x) => x.id).sort().join() === 'app-name,resource,send,send-reply,tenant-token,token-refresh,upload' && c1.sites.filter((x) => x.cls === 'ungated').map((x) => x.id).sort().join() === 'consent-exchange,consent-user-info,integration-test', 'gated-inline = {token-refresh, send, send-reply, resource, tenant-token, app-name (D3: a bot\'s name is a paced + metered request)}; ungated = {consent-exchange, consent-user-info, integration-test} — the send, unpaced and unmetered since P4, is now inside');
   const L = src.split('\n'); const a0 = L.findIndex((l) => /^  const api = async \(pathq, opts = \{\}\) => \{/.test(l)); const g0 = L.findIndex((l) => GATE.test(l));
   const idx = (re) => L.findIndex((l, i) => i > a0 && i < g0 && re.test(l));
   ok(a0 >= 0 && g0 > a0 && idx(/await accessToken\(\)/) < idx(/await pace\(1\)/) && idx(/await pace\(1\)/) < idx(/^\s*meter\(1\)/) && /bearerNow\(at\)/.test(L[g0]), 'the gate reads token → pace → meter → bearerNow(at) → send');
@@ -2069,9 +2069,9 @@ console.log('\n⑰ verify r3: one response judge, the catch census, the push pat
   console.log('    response census (lark.js): ' + censusLine(c));
   const cls = (cc, k) => cc.sites.filter((s) => `${s.kind}:${s.cls}` === k).length;
   ok(c.problems.length === 0 && cls(c, 'catch:RED') === 0, `every raw send is judged and every catch over a vendor call re-throws a RATE refusal, ends by re-throwing, or is a RATE_OK row (${c.sites.length} sites)`, c.problems.join(' ; '));
-  ok(cls(c, 'raw:judge') === 1 && cls(c, 'raw:judged-inline') === 1 && cls(c, 'raw:unjudged') === 0, 'raw sends: exactly the judge\'s own (callJson) and the resource bytes (typedFailure right after) — nothing else touches fetch');
-  ok(c.sites.filter((s) => s.cls === 'rate-ok').map((s) => s.id).sort().join() === 'consent-user-info,integration-test,push-names' && Object.isFrozen(lark.RATE_OK) && lark.RATE_OK.every((r) => typeof r.why === 'string' && r.why.length > 40), 'the deliberate swallows are exactly {push-names, consent-user-info, integration-test}, each a frozen row with its reason');
-  ok(cls(c, 'catch:rethrows-rate') >= 7 && cls(c, 'catch:ends-throw') >= 5 && cls(c, 'catch:raw-fetch') === 2, `the rate re-throws (${cls(c, 'catch:rethrows-rate')}: the members page, a profile, a department, the app name, the chat lookup, the reconcile's scan and re-issue), the end-throws (${cls(c, 'catch:ends-throw')}), the two raw-fetch catches`);
+  ok(cls(c, 'raw:judge') === 1 && cls(c, 'raw:judged-inline') === 3 && cls(c, 'raw:unjudged') === 0, 'raw sends: exactly the judge\'s own (callJson), the resource bytes, the avatar bytes (lane channel-avatars) and the upload\'s multipart (lane channel-send-files: callForm) — each typedFailure right after — nothing else touches fetch');
+  ok(c.sites.filter((s) => s.cls === 'rate-ok').map((s) => s.id).sort().join() === 'consent-user-info,integration-test,push-names,send-parts' && Object.isFrozen(lark.RATE_OK) && lark.RATE_OK.every((r) => typeof r.why === 'string' && r.why.length > 40), 'the deliberate swallows are exactly {push-names, consent-user-info, integration-test, send-parts (lane channel-send-files: a send in parts stops at its first refusal)}, each a frozen row with its reason');
+  ok(cls(c, 'catch:rethrows-rate') >= 7 && cls(c, 'catch:ends-throw') >= 5 && cls(c, 'catch:raw-fetch') === 4, `the rate re-throws (${cls(c, 'catch:rethrows-rate')}: the members page, a profile, a department, the app name, the chat lookup, the reconcile's scan and re-issue), the end-throws (${cls(c, 'catch:ends-throw')}), the four raw-fetch catches (the judge, the resource, the avatar, callForm)`);
   const cl = responseCensus(liveSrc, { direct: /\b(?:api|callJson|fetchFn|f)\s*\(/, raw: /\b(?:fetchFn|f)\s*\(/g, rateOkIds: new Set() });
   ok(cl.problems.length === 0 && cl.sites.length >= 3 && cl.sites.every((s) => s.cls === 'no-vendor') && Array.isArray(LL.EGRESS) && LL.EGRESS.length === 0, `live/lark.js constructs no request (EGRESS empty) and none of its ${cl.sites.length} catches sits over a vendor call — the push path's only vendor touch is the adapter's names, judged there`);
   // THE JUDGE TABLE: every refusal shape the class names → the typed error the pass's ladder reads

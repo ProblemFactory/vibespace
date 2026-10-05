@@ -293,13 +293,17 @@ ok((await gate({ ...UNIT, VIBESPACE_APP_SYSTEM: '1' }, mUnit)).ran > 0, 'CONTROL
   const { agentEnv } = require('../src/agent-env.js');
   const prev = process.env.VIBESPACE_APP_SYSTEM;
   process.env.VIBESPACE_APP_SYSTEM = '1';
-  const wired = async (mod = SS) => { const lines = [], n0 = calls.length; const g = mod.create({ home, env: () => agentEnv(process.env), runner: stub({ 'vs-sys-install': { code: 0, stdout: '= ok\n', stderr: '' } }), platform: 'linux', log: { log: (m) => lines.push(m), warn: (m) => lines.push(m) } }); await g.boot(); return { on: g.enabled(), ran: calls.length - n0, line: lines.find((m) => /^\[apps\] app system: helper \+ sudoers installed in \d+ ms$/.test(m)) || null }; };
+  // mirror-green-211: the pod's env has no INVOCATION_ID; an Actions runner (a systemd service) hands its children one — strip it (the pod)
+  const pod = () => { const { INVOCATION_ID, ...e } = agentEnv(process.env); return e; };
+  const wired = async (mod = SS, env = pod) => { const lines = [], n0 = calls.length; const g = mod.create({ home, env, runner: stub({ 'vs-sys-install': { code: 0, stdout: '= ok\n', stderr: '' } }), platform: 'linux', log: { log: (m) => lines.push(m), warn: (m) => lines.push(m) } }); await g.boot(); return { on: g.enabled(), ran: calls.length - n0, line: lines.find((m) => /^\[apps\] app system: helper \+ sudoers installed in \d+ ms$/.test(m)) || null }; };
   const w = await wired();
   const mSan = spatch(' || process.env.VIBESPACE_APP_SYSTEM', '', 'sanitized-env-only');
   const wm = await wired(mSan);
+  const wu = await wired(SS, () => agentEnv({ ...process.env, INVOCATION_ID: UNIT.INVOCATION_ID }));
   if (prev === undefined) delete process.env.VIBESPACE_APP_SYSTEM; else process.env.VIBESPACE_APP_SYSTEM = prev;
   ok(!('VIBESPACE_APP_SYSTEM' in agentEnv({ VIBESPACE_APP_SYSTEM: '1' })) && w.on && w.ran > 0 && w.line, 'app-system-env: the serve built as server.js builds it (env: () => agentEnv(), the flag in the process env only) is ENABLED and its boot step logs "[apps] app system: helper + sudoers installed in N ms"', w);
   ok(!wm.on && wm.ran === 0 && !wm.line, 'CONTROL (sanitized-env-only): an enabled() that reads the sanitized env alone never turns on in a pod (the 2.369.210 fleet bug)', wm);
+  ok(!wu.on && wu.ran === 0 && !wu.line, 'the INVOCATION_ID rule on the same wiring: the flag in the process env but INVOCATION_ID too (a systemd unit — this host, an Actions runner) ⇒ OFF, nothing installed', wu);
 }
 }
 for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 6 })) ok(r.pass, '§tree ' + r.name + (r.pass ? '' : ' — ' + r.detail));

@@ -1,3 +1,4 @@
+import { wireFileDownload } from './file-download.js';
 import { formatSize, escHtml } from './utils.js';
 import { t } from './i18n.js';
 
@@ -28,7 +29,7 @@ class HexViewer {
     const loadMoreBtn = document.createElement('button'); loadMoreBtn.className = 'file-tool-btn media-btn';
     loadMoreBtn.textContent = t('Load more');
     loadMoreBtn.onclick = () => this._loadChunk();
-    toolbar.append(jumpInput, loadMoreBtn);
+    toolbar.append(jumpInput, loadMoreBtn, wireFileDownload(winInfo, { path: filePath, host: this._host })); // lane viewer-download
 
     // Content
     this.contentEl = document.createElement('div'); this.contentEl.className = 'hex-content';

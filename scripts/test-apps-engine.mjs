@@ -791,21 +791,31 @@ console.log('§13 design 019 — MOVE the host apps into the app system: the REA
 console.log('§14 lane app-system-env — THE REAL WIRING after listen: the machine half built as server.js builds it (env: () => agentEnv(), the pod\'s flag in the PROCESS env only), the replay\'s status read boots the app system');
 {
   const AS = require('../src/app-serve.js'), { agentEnv } = require('../src/agent-env.js');
-  const base = path.join(dir, 'wired'), home = path.join(base, 'home'), stateDir = path.join(base, 'state');
-  for (const d of [path.join(home, '.vibespace'), stateDir, path.join(base, 'eng')]) fs.mkdirSync(d, { recursive: true });
-  const osr = path.join(base, 'os-release'); fs.writeFileSync(osr, 'ID=debian\nVERSION_CODENAME=bookworm\n');
-  const lines = [], seen = { log: (m) => lines.push(String(m)), warn: (m) => lines.push(String(m)), error: () => { } };
-  const runner = async (cmd, args) => ([cmd, ...args].join(' ').includes('vs-sys-install') ? { code: 0, stdout: '= helper installed\n= sudoers installed\n= ok\n', stderr: '' } : { code: 0, stdout: '', stderr: '' });
+  // mirror-green-211: the pod's process env carries no INVOCATION_ID, but a GitHub Actions runner is a systemd service and its
+  // children inherit the unit's INVOCATION_ID (the serve then rightly stays off) — the fixture is the pod: the env minus that name
+  const pod = () => { const { INVOCATION_ID, ...e } = agentEnv(process.env); return e; };
+  const wire = async (name, env) => {
+    const base = path.join(dir, name), home = path.join(base, 'home'), stateDir = path.join(base, 'state');
+    for (const d of [path.join(home, '.vibespace'), stateDir, path.join(base, 'eng')]) fs.mkdirSync(d, { recursive: true });
+    const osr = path.join(base, 'os-release'); fs.writeFileSync(osr, 'ID=debian\nVERSION_CODENAME=bookworm\n');
+    const lines = [], seen = { log: (m) => lines.push(String(m)), warn: (m) => lines.push(String(m)), error: () => { } };
+    let sysRuns = 0;
+    const runner = async (cmd, args) => ([cmd, ...args].join(' ').includes('vs-sys-install') ? (sysRuns++, { code: 0, stdout: '= helper installed\n= sudoers installed\n= ok\n', stderr: '' }) : { code: 0, stdout: '', stderr: '' });
+    const apps = AS.create({ home, stateDir, env, osRelease: osr, binOnPath: () => null, runner, dpkgStatus: path.join(base, 'no-status'), markerDir: path.join(base, 'markers'), log: seen });
+    const call = async (h, op, params) => { const r = await AS.runAppOp(apps, op, params); if (!r.ok) throw Object.assign(new Error(r.error), { code: r.code }); return r; };
+    const eng = E.create({ access: { call }, dataDir: path.join(base, 'eng'), log: seen });
+    const r = await eng.afterListen();
+    const bootAt = lines.findIndex((m) => /^\[apps\] app system: helper \+ sudoers installed in \d+ ms$/.test(m)), replayAt = lines.findIndex((m) => m.startsWith('[apps] boot: '));
+    const st = await eng.status('local');
+    return { r, lines, bootAt, replayAt, sysRuns, appSystem: st.appSystem };
+  };
   const prev = process.env.VIBESPACE_APP_SYSTEM;
   process.env.VIBESPACE_APP_SYSTEM = '1';
-  const apps = AS.create({ home, stateDir, env: () => agentEnv(process.env), osRelease: osr, binOnPath: () => null, runner, dpkgStatus: path.join(base, 'no-status'), markerDir: path.join(base, 'markers'), log: seen });
-  const call = async (h, op, params) => { const r = await AS.runAppOp(apps, op, params); if (!r.ok) throw Object.assign(new Error(r.error), { code: r.code }); return r; };
-  const eng = E.create({ access: { call }, dataDir: path.join(base, 'eng'), log: seen });
-  const r = await eng.afterListen();
-  const bootAt = lines.findIndex((m) => /^\[apps\] app system: helper \+ sudoers installed in \d+ ms$/.test(m)), replayAt = lines.findIndex((m) => m.startsWith('[apps] boot: '));
-  const st = await eng.status('local');
+  const w = await wire('wired', pod);
+  const u = await wire('wired-unit', () => agentEnv({ ...process.env, INVOCATION_ID: '5b1f0c2a9e6d4c3b8a7f6e5d4c3b2a19' }));
   if (prev === undefined) delete process.env.VIBESPACE_APP_SYSTEM; else process.env.VIBESPACE_APP_SYSTEM = prev;
-  ok(!r.error && bootAt >= 0 && replayAt > bootAt && st.appSystem && st.appSystem.enabled === true && st.appSystem.helper.installed === true, 'after listen (no dialog opened): the replay\'s status read runs the boot step — "[apps] app system: helper + sudoers installed in N ms" before the "[apps] boot:" line; GET /api/apps reads appSystem.enabled', { r, lines, appSystem: st.appSystem });
+  ok(!w.r.error && w.bootAt >= 0 && w.replayAt > w.bootAt && w.appSystem && w.appSystem.enabled === true && w.appSystem.helper.installed === true, 'after listen (no dialog opened): the replay\'s status read runs the boot step — "[apps] app system: helper + sudoers installed in N ms" before the "[apps] boot:" line; GET /api/apps reads appSystem.enabled', { r: w.r, lines: w.lines, appSystem: w.appSystem });
+  ok(!u.r.error && u.appSystem && u.appSystem.enabled === false && u.appSystem.blocked === 'not-enabled' && u.sysRuns === 0 && u.bootAt < 0, 'the INVOCATION_ID rule on the same wiring: a process whose env names a systemd unit (INVOCATION_ID — a bare-metal host, an Actions runner) keeps the app system OFF with the flag set (blocked: not-enabled), no helper install ran', { r: u.r, lines: u.lines, sysRuns: u.sysRuns, appSystem: u.appSystem });
 }
 
 console.log(`\n${fail ? `${fail} FAILED` : 'ALL PASS'} (${pass}) in ${Date.now() - T0} ms`);

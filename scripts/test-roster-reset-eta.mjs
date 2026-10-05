@@ -101,6 +101,12 @@ const AD = await post('/api/accounts/subscription', { name: 'Member D' });
 const AE = await post('/api/accounts/subscription', { name: 'Member E' });
 const AF = await post('/api/accounts/subscription', { name: 'Member F' });
 check('six subscriptions minted', !!(A?.id && B?.id && C?.id && AD?.id && AE?.id && AF?.id), { A, B, C, AD, AE, AF });
+// G (§5, 2.369.212 — owner: "这个登陆过期提示会被备注抢占位置导致看不到"): a 24-character NOTE + a
+// login session ending in 13 h. Access token only (no refresh token): nothing can try to refresh it.
+const NOTE_G = 'Team seat 0248 08 desk B';
+const AG = await post('/api/accounts/subscription', { name: 'Note Max' });
+check('the note row is minted with its 24-character note', !!AG?.id && NOTE_G.length === 24 && (await api('/api/accounts/' + AG.id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ note: NOTE_G }) }))?.account?.note === NOTE_G);
+fs.writeFileSync(path.join(wt, 'data', 'subs', AG.id, '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'expired-test-token', expiresAt: Date.now() - 1000, refreshTokenExpiresAt: Date.now() + 13 * 3600e3 } }));
 for (const s of [A, B, C, AD, AE, AF]) fs.writeFileSync(path.join(wt, 'data', 'subs', s.id, '.credentials.json'), expiredCreds);
 const cacheDir = path.join(wt, 'data', 'usage-cache');
 fs.mkdirSync(cacheDir, { recursive: true });
@@ -441,6 +447,76 @@ try {
   if (SHOTS && ze) { const r = await cdp('Page.captureScreenshot', { format: 'png', clip: { x: Math.max(0, ze.credits.rowL - 4), y: Math.max(0, ze.credits.rowT - 60), width: Math.min(560, ze.credits.rowR - ze.credits.rowL + 8), height: 150, scale: 1 } }); fs.writeFileSync(path.join(SHOTS, 'roster-zh-credits-rows.png'), Buffer.from(r.data, 'base64')); }
   await shot('roster-1200x800-zh.png');
   await evalJs(`(() => { localStorage.removeItem('vibespace.lang'); return 1; })()`);
+
+  // §5 THE LOGIN CHIP IS NEVER CROWDED OUT (2.369.212, owner: "这个登陆过期提示会被备注抢占位置导致
+  // 看不到" — the extras line was one nowrap ellipsis line, note first, chip LAST). Under the
+  // runner's DejaVu Sans, zh / ja / en × the three rail widths + the Manage agents modal + 390 px:
+  // the chip's right edge stays inside its row's content box, its text is not truncated, its
+  // middle AND its end are hit-testable (an ancestor's clip would hide them), it re-logs THIS
+  // account; when the line is short, the NOTE is what truncates. CONTROL: the old order + CSS.
+  console.log('§5 a 24-character note + a login ending in 13 h: the chip stays whole, the note truncates (zh/ja/en × 504/384/304 + modal + 390 px, DejaVu Sans)');
+  if (!hasDejaVu) console.log('  SKIP: §5 measures under the runner\'s DejaVu Sans, absent here (fc-list)');
+  else {
+    const dv = await cdp('Page.addScriptToEvaluateOnNewDocument', { source: `document.addEventListener('DOMContentLoaded', () => { const st = document.createElement('style'); st.textContent = "*, html, body, .dialog, button, select, input { font-family: 'DejaVu Sans', sans-serif !important; }"; document.head.appendChild(st); });` });
+    const LC = (root) => `(() => {
+      const root = ${root}; const row = root && root.querySelector('.acct-key-row[data-id="${AG.id}"]'); if (!row) return null;
+      row.scrollIntoView({ block: 'center' });
+      const R = (el) => el.getBoundingClientRect(), cs = getComputedStyle(row), rr = R(row);
+      const chip = row.querySelector('.acct-login-chip'); if (!chip) return { err: 'no chip' };
+      const cr = R(chip), note = [...row.querySelectorAll('.acct-blocked-hint')].find((n) => n.getAttribute('title') === ${JSON.stringify(NOTE_G)});
+      const box = note && (note.closest('.acct-extra-soft') || note.parentElement);
+      const hit = (x) => { const e = document.elementFromPoint(x, cr.top + cr.height / 2); return !!(e && e.closest('.acct-login-chip') === chip); };
+      return { contentR: rr.right - parseFloat(cs.paddingRight) - parseFloat(cs.borderRightWidth), chipR: cr.right, sw: chip.scrollWidth, cw: chip.clientWidth, text: chip.textContent,
+        hitMid: hit(cr.left + cr.width / 2), hitEnd: hit(cr.right - 2), font: getComputedStyle(chip).fontFamily, chipOutside: !chip.closest('.acct-extra-soft'),
+        chipFirst: !!note && !!(chip.compareDocumentPosition(note) & Node.DOCUMENT_POSITION_FOLLOWING),
+        clips: !!box && box.scrollWidth > box.clientWidth + 0.5, noteR: note ? R(note).right : null, boxR: box ? R(box).right : null, rowTop: rr.top };
+    })()`;
+    const whole = (m) => !!m && !m.err && m.chipR <= m.contentR + 0.5 && m.sw <= m.cw + 0.5 && m.hitMid && m.hitEnd && /13/.test(m.text) && m.chipOutside && m.chipFirst && /^"?DejaVu Sans/.test(m.font);
+    const judge = (lang, where, m) => {
+      check(`${lang} ${where}: the chip is whole inside its row (right ${m && m.chipR != null ? m.chipR.toFixed(1) : '?'} ≤ content ${m && m.contentR != null ? m.contentR.toFixed(1) : '?'}, scroll ${m && m.sw}/${m && m.cw}, mid+end hit-testable, before the note, DejaVu)`, whole(m), m);
+      check(`${lang} ${where}: if the line is short, the NOTE is what truncates (${m && m.clips ? 'clipped: note right ' + m.noteR.toFixed(1) + ' > box ' + m.boxR.toFixed(1) : 'nothing clipped'})`, !!m && (!m.clips || m.noteR > m.boxR - 0.5), m);
+      return !!(m && m.clips);
+    };
+    for (const lang of ['zh', 'ja', 'en']) {
+      let clipped = 0;
+      await cdp('Emulation.setDeviceMetricsOverride', { width: 1200, height: 800, deviceScaleFactor: 2, mobile: false });
+      await openPage();
+      await evalJs(`(() => { localStorage.setItem('vibespace.lang', '${lang}'); return 1; })()`);
+      await openPage();
+      await evalJs(`(() => { app.sidebar.toggle(true); return 1; })()`);
+      for (let i = 0; i < 4; i++) { const w = await evalJs(`(() => { const sec = ${LOCAL}; return sec ? sec.clientWidth : 0; })()`); if (w > 0) break; await evalJs(`(() => { const it = document.querySelector('.rail-item[data-rail="agents"]'); if (!it) throw new Error('no agents rail item'); it.click(); return 1; })()`); await sleep(400); }
+      for (const sbw of [504, 384, 304]) {
+        await evalJs(`(() => { app.sidebar.el.style.width = '${sbw}px'; app.sidebar._applySidebarLayoutWidth?.(); return 1; })()`);
+        await sleep(300);
+        const m = await until(async () => evalJs(LC(LOCAL)), 20000, 300);
+        if (judge(lang, `rail ${sbw}px`, m)) clipped++;
+        if (SHOTS && lang === 'zh' && sbw === 384 && m) { const r = await cdp('Page.captureScreenshot', { format: 'png', clip: { x: 0, y: Math.max(0, m.rowTop - 140), width: sbw, height: 300, scale: 2 } }); fs.writeFileSync(path.join(SHOTS, 'login-chip-zh.png'), Buffer.from(r.data, 'base64')); }
+      }
+      const relog = await evalJs(`(() => { const chip = ${LOCAL}.querySelector('.acct-key-row[data-id="${AG.id}"] .acct-login-chip'); if (!chip) return null;
+        const own = Object.getOwnPropertyDescriptor(app, '_reloginSubscription'); let got = null; app._reloginSubscription = (id) => { got = id; };
+        try { chip.click(); } finally { if (own) Object.defineProperty(app, '_reloginSubscription', own); else delete app._reloginSubscription; }
+        return got; })()`);
+      check(`${lang}: a click on the chip opens the re-login path for THIS account (${relog})`, relog === AG.id);
+      if (lang === 'en') {
+        // CONTROL: the shipped-before layout — note first, chip last, one nowrap ellipsis line.
+        const ctl = await evalJs(`(() => { const row = ${LOCAL}.querySelector('.acct-key-row[data-id="${AG.id}"]'); const ex = row.querySelector('.acct-key-extra'), soft = ex.querySelector('.acct-extra-soft'), chip = ex.querySelector('.acct-login-chip');
+          ex.innerHTML = soft.innerHTML + ' ' + chip.outerHTML; ex.style.cssText = 'display:block;flex-basis:100%;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+          for (const el of ex.children) el.style.cssText += ';max-width:none;white-space:nowrap'; return 1; })()`);
+        const m = await evalJs(LC(LOCAL));
+        check('CONTROL: under the OLD order + CSS the same row at 304px fails the census (the note eats the chip)', ctl === 1 && !whole(m), m);
+      }
+      await evalJs(`(() => { app.sidebar.el.style.width = ''; app.sidebar._applySidebarLayoutWidth?.(); app._showAgentsDialog({ forceModal: true }); return 1; })()`); // desktop: without forceModal it routes to the rail panel
+      const MODAL5 = `document.querySelector('#agents-dialog-overlay .agents-dialog-body .agents-machine-sec[data-host=""]')`;
+      if (judge(lang, 'Manage agents modal', await until(async () => evalJs(LC(MODAL5)), 20000, 300))) clipped++;
+      await cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+      await openPage();
+      await evalJs(`(() => { app._showAgentsDialog(); return 1; })()`);
+      if (judge(lang, '390 px (phone modal)', await until(async () => evalJs(LC(MODAL5)), 20000, 300))) clipped++;
+      check(`${lang}: the fixture is under real pressure — the note truncates on at least one surface (${clipped})`, clipped > 0);
+    }
+    await cdp('Page.removeScriptToEvaluateOnNewDocument', { identifier: dv.identifier });
+    await evalJs(`(() => { localStorage.removeItem('vibespace.lang'); return 1; })()`);
+  }
   const realErrors = jsErrors.filter((e) => !/favicon|net::|Failed to load resource/.test(e));
   check('no JS errors', realErrors.length === 0, realErrors.slice(0, 5));
 } catch (e) {

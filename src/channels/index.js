@@ -281,6 +281,8 @@ const METHOD_GATES = Object.freeze({
   live: (c) => c.receive === 'push',
   scanHost: (c) => c.receive === 'scan',
   fetchAttachment: (c) => c.attachments === 'fetch',
+  // lane channel-avatars (B-5fe1): a PERSON's picture — declared by `caps.avatars: 'fetch'` (null + `avatarsWhy` = none)
+  avatarImage: (c) => c.avatars === 'fetch',
   // 2026-09-26: history ON DEMAND past the local log's start (the window's
   // scroll-up) — declared by `caps.olderHistory: 'page'`
   older: (c) => c.olderHistory === 'page',
@@ -348,6 +350,8 @@ function validateCaps(kind, caps, { channelSettings } = {}) {
   if (!IDENTITY_MARKING.includes(c.identityMarking)) bad(`caps.identityMarking must be one of ${IDENTITY_MARKING.join('|')}`);
   if (!TOS_RISK.includes(c.tosRisk || 'none')) bad(`caps.tosRisk must be one of ${TOS_RISK.join('|')}`);
 
+  if (c.avatars !== undefined && c.avatars !== null && c.avatars !== 'fetch') bad(`caps.avatars must be 'fetch' or null (got ${JSON.stringify(c.avatars)})`);
+  if (c.avatars === null && !(typeof c.avatarsWhy === 'string' && c.avatarsWhy.trim())) bad('caps.avatars is null without caps.avatarsWhy (the reason a person shows initials is said, never a silent blank)');
   if (c.olderHistory !== undefined && !OLDER_HISTORY.includes(c.olderHistory)) bad(`caps.olderHistory must be one of ${OLDER_HISTORY.join('|')}`);
   if (c.compose !== undefined && typeof c.compose !== 'boolean') bad('caps.compose must be a boolean (true = the adapter can start a NEW conversation)');
   if (c.replyEnvelope !== undefined && typeof c.replyEnvelope !== 'boolean') bad('caps.replyEnvelope must be a boolean (true = a reply\'s recipients follow from the message it answers, resolved when it is proposed)');
@@ -518,12 +522,40 @@ function validateCaps(kind, caps, { channelSettings } = {}) {
   return true;
 }
 
+/** THE RAW-API ROW (B-2198, docs/design-channel-raw-api.md "The api row") — the ONE schema an integration declares its raw
+ *  API in, next to its `apiBearer`: the vendor facts live in the vendor's own file, the fence (src/channel-api.js) and the
+ *  orchestrator (src/server/channel-api.js) read the declared row and name no vendor. A storage mount's lent credential
+ *  (src/mounts.js `OAUTH_API`) is the same row plus `refresh`, its token endpoint.
+ *   · label       — the vendor's name as `api docs` and the API access dialog say it
+ *   · hosts       — bare lowercase hostnames; `hosts[0]` is the default, a call may name another (`--host`), never one outside
+ *   · docs        — the vendor's own API reference, https URLs (VibeSpace keeps no API map of its own)
+ *   · readByPost  — the vendor's read-by-POST paths (a POST that reads): RegExp, or a string anchored with `^`
+ *   · sensitive   — the paths that ALWAYS ask (never auto, never "always allow"): RegExp, or a string anchored with `^`
+ *   · refresh     — (optional) the https token endpoint VibeSpace refreshes the credential at itself */
+const API_ROW_KEYS = Object.freeze(['label', 'hosts', 'docs', 'readByPost', 'sensitive', 'refresh']);
+const API_HOST = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/;
+const httpsUrl = (u) => { try { const x = new URL(String(u)); return typeof u === 'string' && x.protocol === 'https:' && API_HOST.test(x.hostname); } catch { return false; } };
+const apiPattern = (p) => p instanceof RegExp || (typeof p === 'string' && p.length > 1 && p.startsWith('^'));
+function validateApi(kind, api) {
+  const bad = (msg) => { throw new Error(`channel adapter '${kind}': api.${msg}`); };
+  if (!api || typeof api !== 'object' || Array.isArray(api)) throw new Error(`channel adapter '${kind}': api must be the raw-API row {${API_ROW_KEYS.join(', ')}}`);
+  for (const k of Object.keys(api)) if (!API_ROW_KEYS.includes(k)) bad(`${k} is not a key of the raw-API row (${API_ROW_KEYS.join(', ')})`);
+  if (typeof api.label !== 'string' || !api.label.trim() || api.label.length > 60) bad('label must be the vendor\'s name (1-60 characters)');
+  if (!Array.isArray(api.hosts) || !api.hosts.length || !api.hosts.every((h) => typeof h === 'string' && API_HOST.test(h))) bad('hosts must be bare lowercase hostnames (at least one; no scheme, port or path)');
+  if (new Set(api.hosts).size !== api.hosts.length) bad('hosts holds a duplicate');
+  if (!Array.isArray(api.docs) || !api.docs.length || !api.docs.every(httpsUrl)) bad('docs must be the vendor\'s own API reference as https URLs (at least one)');
+  for (const k of ['readByPost', 'sensitive']) if (!Array.isArray(api[k]) || !api[k].every(apiPattern)) bad(`${k} must be a list of RegExp or strings anchored with "^"`);
+  if (api.refresh !== undefined && !httpsUrl(api.refresh)) bad('refresh must be an https URL (the token endpoint)');
+  return true;
+}
+
 /** Which optional methods a module must and must not implement. */
 function validateMethods(kind, caps, mod) {
   for (const [name, declared] of Object.entries(METHOD_GATES)) {
     const has = typeof mod[name] === 'function' || (name === 'live' && mod.live && typeof mod.live.start === 'function');
     if (declared(caps) && !has) throw new Error(`channel adapter '${kind}': caps declare ${name} but the module does not implement it`);
     // lane channel-threads: a thread / reaction method present that its row does not declare is refused too
+    if (name === 'avatarImage' && !declared(caps) && has) throw new Error(`channel adapter '${kind}': avatarImage is implemented but caps.avatars does not declare 'fetch'`);
     if (THREAD_REACTION_METHODS.includes(name) && !declared(caps) && has) throw new Error(`channel adapter '${kind}': ${name} is implemented but its capability row does not declare it`);
     // lane lark-search-poll: a feed method present that `caps.changeFeed` does not declare is refused too
     if (FEED_METHODS.includes(name) && !declared(caps) && has) throw new Error(`channel adapter '${kind}': ${name} is implemented but caps.changeFeed does not declare it`);
@@ -559,6 +591,8 @@ function createChannelRegistry({ channelSettings } = {}) {
     if (typeof kind !== 'string' || !kind) throw new Error('registerChannelAdapter: `kind` (non-empty string) is required');
     if (mods.has(kind)) throw new Error(`registerChannelAdapter: duplicate kind '${kind}'`);
     validateCaps(kind, mod.caps, { channelSettings });
+    // B-2198: the raw-API row, DECLARED by the adapter (its `apiBearer` pairs with it at create — the bearer lives per record)
+    if (mod.api !== undefined) validateApi(kind, mod.api);
     if (typeof mod.create !== 'function') throw new Error(`channel adapter '${kind}': create(record, deps) is required`);
     // §25: `render: 'blocks'` is DECLARED ⇒ the stored-record rung must exist;
     // a rung nobody declared is refused (it would half-work on read only)
@@ -621,6 +655,10 @@ function createChannelRegistry({ channelSettings } = {}) {
     const mod = get(kind);
     const caps = mod.caps;
     const impl = mod.create(record, deps) || {};
+    // B-2198: `apiBearer` ⇔ the declared `api` row — a bearer with no row (or a row with no bearer) is LOUD, like an
+    // undeclared capability: the raw API's fence knows a vendor ONLY by the row its adapter declares
+    if (typeof impl.apiBearer === 'function' && !mod.api) throw new Error(`channel adapter '${kind}': apiBearer without an api row — declare the raw-API row (label, hosts, docs, readByPost, sensitive) on the module`);
+    if (mod.api && typeof impl.apiBearer !== 'function') throw new Error(`channel adapter '${kind}': an api row without apiBearer — the instance hands the raw API its bearer`);
     // lane channel-threads (spec §2.1): the six thread / reaction methods live on the INSTANCE (created per
     // record), so "declared ⇒ implemented" is judged there: `validateMethods(kind, caps, instance)` — the contract
     // suite runs it over every registered adapter (a declared row without its method is red), and a declared
@@ -661,6 +699,9 @@ function createChannelRegistry({ channelSettings } = {}) {
     return {
       kind, caps, record,
       auth,
+      // B-2198 (lane channel-api-chrome — the raw API never reached a REAL adapter: this object dropped it): the account's
+      // bearer for the raw API's ONE fetch site (src/server/channel-api.js via the engine's apiCredential), never a route
+      ...(mod.api ? { api: mod.api, apiBearer: wrap('apiBearer', impl.apiBearer.bind(impl)) } : {}),
       listConversations: gated('listConversations', impl.listConversations && impl.listConversations.bind(impl)),
       /** NARROWED to `caps` — the resolution may only shrink the declaration. */
       async convCaps(convId) {
@@ -843,6 +884,7 @@ function createChannelRegistry({ channelSettings } = {}) {
       react: gated('react', impl.react && impl.react.bind(impl)),
       unreact: gated('unreact', impl.unreact && impl.unreact.bind(impl)),
       emojiImage: gated('emojiImage', impl.emojiImage && impl.emojiImage.bind(impl)),
+      avatarImage: gated('avatarImage', impl.avatarImage && impl.avatarImage.bind(impl)),
       reactionSet: gated('reactionSet', impl.reactionSet && impl.reactionSet.bind(impl)),
       /**
        * THE CHANGE FEED'S PAGE (lane lark-search-poll): ONE vendor page of `{from, to, pageToken, chatType, pageSize}`.
@@ -925,11 +967,11 @@ function createChannelRegistry({ channelSettings } = {}) {
     };
   }
 
-  return { register, get, has, list, capsOf, create, validateCaps, validateMethods };
+  return { register, get, has, list, capsOf, create, validateCaps, validateMethods, validateApi };
 }
 
 module.exports = {
-  createChannelRegistry, ChannelError, validateCaps, validateMethods,
+  createChannelRegistry, ChannelError, validateCaps, validateMethods, validateApi, API_ROW_KEYS,
   CHANNEL_ERROR_CODES, RETENTION_MODES, AUDIENCE_KINDS, RECEIVE_MODES, SCAN_SOURCES, HISTORY_MODES, SEND_IDENTITIES, IDENTITY_MARKING, TOS_RISK, METHOD_GATES, OLDER_HISTORY, BUDGET_UNITS, PACE_COSTS, RENDER_MODES, TITLE_FORMS, FEED_METHODS, BY_ID_KINDS,
   SEARCH_METHODS, SEARCH_HIT_FIELDS, searchRowOf,
   peerName,

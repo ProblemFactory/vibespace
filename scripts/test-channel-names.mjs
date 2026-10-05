@@ -64,6 +64,7 @@ const JUDGED = [
   ['src/lib/channel-rows.js', 'textMatches([r.title || r.id, r.adapterLabel, r.lastText]', '③ — the store matches a held row the way the server\'s `q` does (the ladder name, else the id); r.title is the ladder name (rowView humanNameOf)'],
   ['src/channel-touch.js', 'const title = (row && (row.title || row.convId))', '③ — the touch title is the ladder name, set at record time (src/server/channel-touches.js nameOf)'],
   ['src/channel-touch.js', 'return `${t(\'Channels\')} ·', '③ — the touch title is the ladder name, set at record time'],
+  ['src/channel-touch.js', "open: 'search', adapterId: row.adapterId, convId: row.convId, title: row.title || row.convId", '③ — the touch title is the ladder name, set at record time; the search verdict hands it to the scoped search dialog\'s title (lane channel-search-view)'],
   ['src/lib/channel-account-dialogs.js', 'access: {conv} → {who}', '③ — the engine names the ref by the ladder (referencesOf → conversationName)'],
   ['src/lib/channel-filter-editor.js', 'name: conv.title || conv.id', '③ — conv.title is the digest row\'s ladder name (rowView → humanNameOf)'],
   ['src/lib/channel-reach-editor.js', 'Reach & policy — {title}', '③ — conv.title is the ladder name (rowView)'],
@@ -353,7 +354,7 @@ async function verifyRun(EM, UT, tag) {
   s = swap(s, "    return said(titleOf(registry.capsOf(rec.kind), en.title)) || said(dmTitleOf(rec, en)) || CR.describeOf(en, { selfId: self }) || null;", "    return titleOf(registry.capsOf(rec.kind), en.title) || dmTitleOf(rec, en) || CR.describeOf(en, { selfId: self }) || null;");
   s = swap(s, "    const en = store.index.live()[`${adapterId}/${convId}`];", "    const en = store.index.snapshot().conversations[`${adapterId}/${convId}`];");
   s = swap(s, "    const cardText = `${CR.nameOf([title], convId)}: ${n} message", "    const cardText = `${title}: ${n} message");
-  const todoPre = swap(read('src/user-todos.js'), ", 'open-channel': 'key' });", ' });');
+  const todoPre = swap(read('src/user-todos.js'), ", 'open-channel': 'key', 'channel-api-proposal': 'id' });", ", 'channel-api-proposal': 'id' });");   // int212: B-2198's row after it
   const p = await verifyRun(MUT.load('src/server/channels-engine.js', s, 'vr1-pre'), MUT.load('src/user-todos.js', todoPre, 'vr1-todos-pre').UserTodoManager, 'vr1pre');
   ok(p.names.oc_byid === 'oc_byid' && p.wakes.oc_byid && p.wakes.oc_byid.cardText.startsWith('oc_byid: 1 message'), 'CONTROL F1: the lane head\'s ladder took the id-as-title for a name — "oc_byid: 1 message" with Bob known', JSON.stringify(p.wakes.oc_byid));
   ok(JSON.stringify(p.ptrsBoth) === JSON.stringify(['oc_teamB']) && JSON.stringify(p.ptrsAfter) === '[]', 'CONTROL F2: ONE merged item (it opened oc_teamB for both); rejecting oc_teamA\'s proposal retracted it — oc_teamB still awaiting, no pointer', JSON.stringify({ both: p.ptrsBoth, after: p.ptrsAfter }));

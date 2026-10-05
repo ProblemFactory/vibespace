@@ -84,6 +84,7 @@ import * as chanCaps from '../channel-caps.js';
 import * as P from '../channel-policy.js';
 // a3 i18n: a route failure is worded by its CODE, never by the engine's sentence.
 import { routeErrorText } from './channel-words.js';
+import { apiOutboxSection } from './channel-api-card-view.js';   // B-2198 part 2: one row per raw-API proposal, its card under it
 
 const ICON = svgIcon16('<path d="M2.5 4.5h11v8h-11z"/><path d="M2.5 4.5l5.5 4 5.5-4"/><path d="M8 2v3"/>');
 const JSON_HDR = { 'Content-Type': 'application/json' };
@@ -962,7 +963,8 @@ export function openChannelOutbox(app, opts = {}) {
   seg.append(segAwait, segAll);
   bar.appendChild(seg);
   const list = el('div', 'chanwin-list chan-outbox-list');
-  root.append(bar, list);
+  const apiSec = apiOutboxSection(app);
+  root.append(bar, apiSec.el, list);
   /** `null` until the user picks — the store decides the first view. */
   let view = null;
   let last = null;
@@ -1000,7 +1002,7 @@ export function openChannelOutbox(app, opts = {}) {
   }
   const onBroadcast = (msg) => { if (msg.type === 'channel-outbox-updated' && msg.outbox) draw(msg.outbox); };
   app.ws.onGlobal(onBroadcast);
-  winInfo._listenerCtl?.signal.addEventListener('abort', () => { try { app.ws.offGlobal(onBroadcast); } catch {} });
+  winInfo._listenerCtl?.signal.addEventListener('abort', () => { try { app.ws.offGlobal(onBroadcast); } catch {} apiSec.stop(); });
   refresh().catch(() => {});
   return winInfo;
 }

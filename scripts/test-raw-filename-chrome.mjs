@@ -215,7 +215,11 @@ try {
   // ⑤ the code editor's ⇩ Download carries the file's machine
   console.log("— ⑤ the code editor's ⇩ Download");
   const ed = await evalJs(`(async () => {
-    const opened = []; const orig = window.open; window.open = (u) => { opened.push(String(u)); return null; };
+    // lane viewer-download: the button starts an <a download> after a stat of the file on its machine — record the
+    // anchor's href instead of downloading, and answer the stat for the made-up host "box"
+    const opened = []; const origClick = HTMLAnchorElement.prototype.click, origFetch = window.fetch;
+    HTMLAnchorElement.prototype.click = function () { if (this.hasAttribute('download')) opened.push(this.getAttribute('href')); else origClick.call(this); };
+    window.fetch = (u, o) => (String(u).startsWith('/api/file/info') ? Promise.resolve(new Response('{"size":1}', { headers: { 'Content-Type': 'application/json' } })) : origFetch(u, o));
     const out = {};
     try {
       for (const host of ['', 'box']) {
@@ -224,10 +228,11 @@ try {
         let btn = null; const t0 = Date.now();
         while (Date.now() - t0 < 5000 && !(btn = [...(__rn.win()?.element?.querySelectorAll('.editor-toolbar button') || [])].find((b) => b.title === 'Download'))) await new Promise((r) => setTimeout(r, 50));
         if (!btn) { out[host || 'local'] = 'no Download button'; continue; }
-        btn.click();
+        const n0 = opened.length; btn.click();
+        for (let i = 0; i < 60 && opened.length === n0; i++) await new Promise((r) => setTimeout(r, 50));
         out[host || 'local'] = opened[opened.length - 1] || null;
       }
-    } finally { window.open = orig; __rn.closeAll(); }
+    } finally { HTMLAnchorElement.prototype.click = origClick; window.fetch = origFetch; __rn.closeAll(); }
     return out;
   })()`);
   const want = `/api/download?path=${encodeURIComponent(NOTES)}`;

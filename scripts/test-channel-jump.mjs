@@ -26,6 +26,12 @@
 //      prompt-context injection takes it ⇒ the strip and the hint disappear with no button
 //   ⑧ SIGKILL + restart the server, reload the page (a fresh client): the rows come back on both cards, from the
 //      session meta the witness persisted (the ring is the server's)
+//   ⑩ (lane channel-search-view, .212 — the owner 2026-10-04: "目前点开似乎是第一条匹配结果的对话框而不是搜索结果展示") a
+//      third turn SEARCHES ("the" — four conversations): three rows + the tail; a REAL click on a row opens the search
+//      dialog pre-filled with the agent's query, scoped to that conversation (title + "Search all conversations"),
+//      its hits listed with the match marked; a hit click opens the window AT that message (the jump's flash); the
+//      tail opens the same search unscoped, grouped by conversation; CONTROL: the old click (app.openChannel) opens
+//      no results; the dialog at 390 px (nothing off-screen, no sideways scroll); zh + ja (reloads)
 // VS_SHOT_DIR=<dir> saves the screenshots (the card rows, the chip + menu, the window header link).
 // Requires google-chrome + dtach (SKIP without). ~60 s. Run: node scripts/test-channel-jump.mjs
 import { execSync, spawn } from 'node:child_process';
@@ -68,6 +74,7 @@ const CLI = path.join(wt, 'data', 'bin', 'vibespace-channels');
 
 // ── the stub CLI ──
 const CMD1 = 'for c in fake-poll/fake-poll-ops fake-poll/fake-poll-announce fake-scan/fake-scan-ops; do vibespace-channels read "$c"; done; vibespace-channels reply fake-poll/fake-poll-ops "On it — drafted"';
+const CMD3 = 'vibespace-channels search "the"';
 const CMD2 = `vibespace-channels compose fake-poll --to ada@example.com --subject '${HOSTILE}' "Hello Ada"`;
 const stubPath = path.join(stubDir, 'claude');
 const TRANSCRIPT = path.join(fakeHome, '.claude', 'projects', CWD.replace(/[/._]/g, '-'), SID + '.jsonl');
@@ -116,6 +123,7 @@ process.stdin.on('data', (d) => {
       [['read', 'fake-poll/fake-poll-ops'], ['read', 'fake-poll/fake-poll-announce'], ['read', 'fake-scan/fake-scan-ops'], ['reply', 'fake-poll/fake-poll-ops', 'On it — drafted']], 'Read three conversations and drafted a reply.'));
     else if (/write the mail/.test(s)) chain = chain.then(() => toolTurn(2, 'write the mail', ${JSON.stringify(CMD2)},
       [['compose', 'fake-poll', '--to', 'ada@example.com', '--subject', ${JSON.stringify(HOSTILE)}, 'Hello Ada']], 'Drafted the mail.'));
+    else if (/search the channels/.test(s)) chain = chain.then(() => toolTurn(3, 'search the channels', ${JSON.stringify(CMD3)}, [['search', 'the']], 'Searched.'));
   }
 });
 process.stdin.on('end', () => process.exit(0));
@@ -358,6 +366,83 @@ try {
   check('both cards carry their rows again — the ring replayed from the persisted session meta (a fresh client)', back1 && rr[0]?.key === 'fake-poll/fake-poll-ops' && rr[0].drafted, { rr, r2: await rowsOf(2) });
   const chip3 = await evalJs(`(() => { const v = ${VIEW(sid)}; const c = v && v._statusBar.element.querySelector('.chat-status-channels'); return c ? c.textContent.trim() : null; })()`);
   check('the chip after the restart names the last turn\'s conversation (the turn start re-derived from the transcript)', chip3 === 'Channels · ' + HOSTILE_SHOWN, chip3);
+
+  // ── ⑩ an agent's SEARCH opens as search RESULTS (lane channel-search-view, .212) ──
+  console.log('⑩ a search row opens the search results; a hit the window AT that message; the tail the whole search');
+  await evalJs(`app.ws.send({ type: 'chat-input', sessionId: ${JSON.stringify(sid)}, text: 'search the channels' }); true`);
+  const MORE3 = `${CARD(3)} .chat-channel-touches-more`;
+  const got10 = await waitFor(`${ROWS(3)}.length === 3 && !!document.querySelector('${MORE3}')`, 30000);
+  const r10 = await rowsOf(3);
+  check('the search card: three rows "N search hits" + the tail (four conversations hold "the")', got10 && r10.length === 3 && r10.every((r) => /search hit/.test(r.words)), { r10, more: await evalJs(`document.querySelector('${MORE3}')?.textContent || null`) });
+  const k0 = (r10[0] && r10[0].key) || '/';
+  const [A0, C0] = k0.split('/');
+  const want = await api('GET', `/api/channels/search?adapter=${encodeURIComponent(A0)}&q=the&conv=${encodeURIComponent(C0)}`);
+  const nWant = (want.body?.results || []).length;
+  check('setup: the owner\'s search scoped to that conversation (`conv`) answers its hits, only its own', nWant > 0 && want.body.results.every((x) => x.convId === C0), { status: want.status, n: nWant });
+  const DLG = `document.getElementById('chan-search-dialog')`;
+  const dlgState = `(() => { const d = ${DLG}; if (!d) return null; const a = d.querySelector('.chan-search-all'); return { title: d.querySelector('h3')?.textContent || '', q: d.querySelector('input[type=search]')?.value, hits: d.querySelectorAll('.chan-search-saved .chan-search-hit').length, marks: d.querySelectorAll('.chan-search-saved .chan-search-mark').length, all: a ? a.textContent : null, groups: d.querySelectorAll('.chan-search-group').length, titled: d.querySelectorAll('.chan-search-saved .chan-search-head b').length }; })()`;
+  const drop = () => evalJs(`${DLG}?.remove(); true`);
+  const convTitle = (r10[0]?.name || '').split(' › ').pop();
+  await realClick(`${CARD(3)} .chat-channel-touch[data-key="${k0}"]`);
+  const ok10 = await waitFor(`(${dlgState})?.hits === ${nWant}`, 15000);
+  const s10 = await evalJs(dlgState);
+  check('a REAL click on the row opens THE SEARCH RESULTS: the agent\'s query filled in, "Search: the — <conversation>", its N hits (author · time · words, the match marked), "Search all conversations"',
+    ok10 && s10.q === 'the' && s10.title === `Search: the — ${convTitle}` && s10.marks >= nWant && s10.titled === 0 && s10.all === 'Search all conversations', { s10, nWant, convTitle });
+  await shot('search-results-scoped', '#chan-search-dialog');
+  const vid = await evalJs(`(() => { const h = [...${DLG}.querySelectorAll('.chan-search-saved .chan-search-hit')]; return h.length ? h[h.length - 1].dataset.vid : null; })()`);
+  const lastHit = `#chan-search-dialog .chan-search-saved .chan-search-hit[data-vid="${String(vid).replace(/"/g, '\\"')}"]`;
+  await realClick(lastHit);
+  const flashed = await waitFor(`(() => { const w = ${channelWin(C0)}; const r = w && w.content.querySelector('.chanmsg[data-vid="' + CSS.escape(${JSON.stringify(vid)}) + '"]'); return !!r && r.classList.contains('chanmsg-flash'); })()`, 15000);
+  check('a hit click closes the dialog and opens the conversation AT that message (the window\'s jump flashes its row)', flashed && !(await evalJs(`!!${DLG}`)), { vid });
+  // CONTROL: the old click — the conversation window, no results (the results check above can go red)
+  await drop();
+  await evalJs(`app.openChannel(${JSON.stringify(A0)}, ${JSON.stringify(C0)}); true`);
+  await sleep(900);
+  const c10 = await evalJs(dlgState);
+  check('CONTROL the old click (app.openChannel) shows no search results — the row check can go red', !c10 || c10.hits !== nWant || c10.q !== 'the', c10);
+  // the conversation windows the hit and the control opened sit over the card — closed, so the next REAL clicks reach it
+  await evalJs(`(() => { for (const [id, w] of [...app.wm.windows]) if (w && w._openSpec && w._openSpec.action === 'openChannel') app.wm.closeWindow(id); return true; })()`);
+  await sleep(400);
+  // the scope's ONE control
+  await realClick(`${CARD(3)} .chat-channel-touch[data-key="${k0}"]`);
+  await waitFor(`(${dlgState})?.hits === ${nWant}`, 15000);
+  await realClick('#chan-search-dialog .chan-search-all');
+  const okAll = await waitFor(`(() => { const s = ${dlgState}; return s && s.title === 'Search: the' && s.hits > ${nWant} && s.all === null; })()`, 15000);
+  check('"Search all conversations" drops the scope: the title says the query alone, more hits, the control gone', okAll, await evalJs(dlgState));
+  await drop();
+  // the tail: the whole search, every conversation, grouped
+  await realClick(MORE3);
+  const okT = await waitFor(`(${dlgState})?.groups >= 4`, 15000);
+  const sT = await evalJs(dlgState);
+  check('the tail row opens the SAME search unscoped: every conversation grouped under its name, no scope control', okT && sT.title === 'Search: the' && sT.all === null && sT.hits > nWant && sT.titled === 0, sT);
+  check('the card did not expand (the tail is the search, not more rows)', (await rowsOf(3)).length === 3);
+  await shot('search-results-grouped', '#chan-search-dialog');
+  await drop();
+  // the phone: 390 px
+  await cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+  await sleep(500);
+  await evalJs(`app.openChannelSearch({ adapterIds: [${JSON.stringify(A0)}], q: 'the', convId: ${JSON.stringify(C0)}, convTitle: ${JSON.stringify(convTitle + ' — a long conversation name that has to wrap on a phone')} }); true`);
+  await waitFor(`(${dlgState})?.hits === ${nWant}`, 15000);
+  const fit = await evalJs(`(() => { const d = ${DLG}; const off = [...d.querySelectorAll('*')].filter((e) => e.getClientRects().length).filter((e) => { const r = e.getBoundingClientRect(); return r.right > innerWidth + 0.5 || r.left < -0.5; }).map((e) => e.className || e.tagName).slice(0, 6); const box = d.querySelector('.chan-search-results'); return { off, sideways: box.scrollWidth > box.clientWidth + 1, all: !!d.querySelector('.chan-search-all') }; })()`);
+  check('390 px: the scoped dialog fits — nothing off-screen, no sideways scroll, the scope control on screen', fit && fit.off.length === 0 && !fit.sideways && fit.all, fit);
+  await shot('search-results-390', '#chan-search-dialog');
+  await drop();
+  await cdp('Emulation.setDeviceMetricsOverride', { width: 1400, height: 900, deviceScaleFactor: 1, mobile: false });
+  // zh + ja (a per-device choice: a reload)
+  for (const [lang, head, all] of [['zh', '搜索：the — ', '搜索全部对话'], ['ja', '検索：the — ', 'すべての会話を検索']]) {
+    await evalJs(`localStorage.setItem('vibespace.lang', '${lang}'); true`);
+    await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
+    await waitApp(); await sleep(800);
+    await waitFor(`(app.sidebar._webuiSessions || []).some((s) => s.id === ${JSON.stringify(sid)})`, 20000);
+    await evalJs(`app.attachSession(${JSON.stringify(sid)}, 'jump stub', ${JSON.stringify(CWD)}, { mode: 'chat', backend: 'claude' }); true`);
+    await waitFor(`${ROWS(3)}.length === 3`, 30000);
+    await realClick(`${CARD(3)} .chat-channel-touch[data-key="${k0}"]`);
+    const okL = await waitFor(`(${dlgState})?.hits === ${nWant}`, 15000);
+    const sL = await evalJs(dlgState);
+    check(`${lang}: the row opens the results; the title and the scope control speak ${lang}`, okL && sL.title.startsWith(head) && sL.all === all, sL);
+    await drop();
+  }
+  await evalJs(`localStorage.removeItem('vibespace.lang'); true`);
   check('no page exception anywhere', pageErrors.length === 0, pageErrors.slice(0, 3));
 } catch (e) {
   failed++;

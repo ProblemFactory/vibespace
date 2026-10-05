@@ -599,6 +599,29 @@ function attachVerdict(row, list, { hasText = true, channel = 'this channel', wh
   if (hasText && r.withText === false) return no('attachment-shape', `on ${ch} attachments go without text — send the text as another reply`);
   return { ok: true };
 }
+/** lane channel-send-files: a send's PARTS as the adapter answered them (Lark: the text + one message per file; Slack:
+ *  one chain per file) — bounded, the fields the receipt reads; null when the send was one message. PURE. */
+function sendParts(v) {
+  if (!Array.isArray(v) || !v.length) return null;
+  return v.slice(0, 12).filter((x) => x && typeof x === 'object').map((x) => ({ part: x.part === 'text' ? 'text' : 'attachment', ...(x.name ? { name: String(x.name).slice(0, 200) } : {}), ok: x.ok === true, ...(x.vendorMessageId ? { vendorMessageId: String(x.vendorMessageId).slice(0, 200) } : {}), ...(x.ok === true ? {} : { code: String(x.code || 'vendor-error').slice(0, 40), ...(x.why ? { why: String(x.why).slice(0, 300) } : {}), ...(x.lost ? { lost: true } : {}), ...(Array.isArray(x.requiredScopes) && x.requiredScopes.length ? { requiredScopes: x.requiredScopes.slice(0, 8).map(String) } : {}) }) }));
+}
+/** verify r1 (F1): a send in parts whose answer was LOST before anything landed, settled `sent` by a reconcile — the lost
+ *  part is what the reconcile found (it landed); every part after it was never sent (the chain stopped at the lost answer).
+ *  Without this the receipt said SENT "with 2 attachments" while no file had left. PURE. */
+function reconciledParts(v, vendorMessageId = null) {
+  const ps = sendParts(v);
+  if (!ps) return null;
+  const at = ps.findIndex((x) => !x.ok && x.code !== 'not-sent');
+  return ps.map((x, i) => (i === at ? { part: x.part, ...(x.name ? { name: x.name } : {}), ok: true, ...(vendorMessageId ? { vendorMessageId: String(vendorMessageId).slice(0, 200) } : {}) } : x));
+}
+/** The parts in the receipt's words: "landed: the text, a.png · NOT landed: b.pdf (forbidden: … needs files:write)". */
+function partsWords(parts) {
+  const ps = sendParts(parts) || [];
+  const nm = (x) => (x.part === 'text' ? 'the text' : JSON.stringify(String(x.name || 'a file').slice(0, 80)));
+  const ok = ps.filter((x) => x.ok), no = ps.filter((x) => !x.ok);
+  const said = (x) => `${nm(x)} (${x.code === 'not-sent' ? 'not sent after the refusal before it' : `${x.code}${x.lost ? ', the answer was lost — check the platform' : ''}${x.why ? `: ${x.why}` : ''}${x.requiredScopes ? ` — needs ${x.requiredScopes.join(', ')}` : ''}`})`;
+  return [ok.length ? `landed: ${ok.map(nm).join(', ')}` : null, no.length ? `NOT landed: ${no.map(said).join('; ')}` : null].filter(Boolean).join(' · ');
+}
 /** The attachments a proposal STORED (each with its sha256) — a record from before the bytes (names only) has none. */
 function storedAttachments(p) {
   return (p && Array.isArray(p.attachments) ? p.attachments : []).filter((a) => a && typeof a === 'object' && typeof a.sha256 === 'string' && a.sha256);
@@ -1242,6 +1265,8 @@ function receiptFor(p) {
     ...replyPlaceOf(p),
     // design 005 §2.B: the files it carried — name, size, sha256 (what the person approved)
     ...(storedAttachments(p).length ? { attachments: storedAttachments(p).map((a) => ({ name: a.name, bytes: Number(a.bytes) || 0, sha256: a.sha256 })) } : {}),
+    // lane channel-send-files: per part, what landed and what did not (a send in parts; a refusal's parts too)
+    ...(sendParts((p.result && p.result.parts) || (p.failure && p.failure.detail && p.failure.detail.parts)) ? { parts: sendParts((p.result && p.result.parts) || p.failure.detail.parts) } : {}),
   };
 }
 
@@ -1297,6 +1322,7 @@ function renderReceiptBlock(receipt, { adapterLabel = null, title = null, text =
   const what = r.status === 'edited' ? 'SENT after the user edited it' : r.status === 'sent' ? 'SENT' : r.status === 'rejected' ? 'REJECTED by the user' : r.status === 'expired' ? 'EXPIRED unapproved (24 h)' : r.status === 'failed' ? 'FAILED' : r.status === 'withdrawn' ? `WITHDRAWN by you (the drafting agent)${r.replacedBy ? ` — replaced by proposal ${safeInline(r.replacedBy, 80)}` : ''}` : String(r.status || '').toUpperCase();
   lines.push(`proposal ${safeInline(r.proposalId, 80)}: ${what}${r.vendorMessageId ? ` (vendor id ${safeInline(r.vendorMessageId, 200)})` : ''}`);
   if (Array.isArray(r.attachments) && r.attachments.length) lines.push(`with ${r.attachments.length} attachment${r.attachments.length === 1 ? '' : 's'}: ${r.attachments.map((a) => `${safeInline(a.name, 120)} ${attachmentSize(a.bytes)} sha256 ${safeInline(String(a.sha256 || '').slice(0, 12), 12)}`).join(', ')}`);
+  if (Array.isArray(r.parts) && r.parts.length) lines.push(`parts: ${inertFrames(partsWords(r.parts)).slice(0, 600)}`);
   // the PLACEMENT (a receipt from before the enum carries `inThread` only — read as `thread`)
   const pl = PLACEMENTS.includes(r.placement) ? r.placement : r.inThread ? 'thread' : null;
   if (pl && pl !== 'chat') lines.push(`placed ${placementWords(pl)}${isThreadPlacement(pl) && r.threadKey ? ` (thread ${safeInline(r.threadKey, 200)})` : ''}`);
@@ -1347,5 +1373,5 @@ module.exports = {
   replyAnchorVerdict, anchorView, envelopeVerdict, ENVELOPE_HEADER_MAX, envelopeAddresses, withAddedCc, addressesOf, shownFields, shownDigest, ARM_MS, armVerdict, rearmVerdict,
   hiddenCharsOf, revealSegments,
   // design 005 §2.B (B-fd1f): an agent's attachments — bounds, the name rule, the sniffed type, the adapter's row
-  ATTACH_MAX_COUNT, ATTACH_MAX_TOTAL, ATTACH_NAME_MAX, ATTACH_CODES, INLINE_RASTER, base64Bytes, safeAttachmentName, attachmentsOf, sniffType, nameTypeMismatch, attachVerdict, storedAttachments, attachmentSize, ATTACH_HELD_MAX, attachHeldVerdict,
+  ATTACH_MAX_COUNT, ATTACH_MAX_TOTAL, ATTACH_NAME_MAX, ATTACH_CODES, INLINE_RASTER, base64Bytes, safeAttachmentName, attachmentsOf, sniffType, nameTypeMismatch, sendParts, reconciledParts, partsWords, attachVerdict, storedAttachments, attachmentSize, ATTACH_HELD_MAX, attachHeldVerdict,
 };

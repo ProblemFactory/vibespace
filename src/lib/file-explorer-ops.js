@@ -1,5 +1,6 @@
 import { showToast, showInputDialog, showConfirmDialog, copyText, formatSize, createModalShell, attachPopoverClose, absUrl as absUrlShared } from './utils.js';
 import { t } from './i18n.js';
+import { startFileDownload } from './file-download.js';
 import { isOfficeFile } from '../office-open.js'; // §7.9: which files offer "Open with LibreOffice" (the PURE table)
 
 /**
@@ -117,7 +118,7 @@ export function installExplorerOps(FileExplorer) {
     items.push({ label: t('Duplicate'), action: () => this._duplicate(dataset.name) });
     items.push({ label: t('Compress to Archive\u2026'), action: () => this._compressSelection([dataset.name]) });
     if (isDir) items.push({ label: t('Download as Zip'), action: () => { window.open(`/api/download-zip?path=${encodeURIComponent(fullPath)}${this._hp()}`); } });
-    else items.push({ label: t('Download'), action: () => { window.open(`/api/download?path=${encodeURIComponent(fullPath)}${this._hp()}`); } });
+    else items.push({ label: t('Download'), action: () => startFileDownload({ path: fullPath, host: this._host || '' }) }); // the ONE file download (file-download.js): an <a download>, a refusal toasts
     items.push({ label: t('Copy Path'), action: () => copyText(fullPath) });
 
     if (isDir) {

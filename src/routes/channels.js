@@ -148,6 +148,29 @@ function choiceOf(b) {
  *  Connect submits — never a credential); CALLBACK `{url, flowId?}` = the
  *  paste-back. The record is created only by `connect {flowId}`. Declared
  *  BEFORE `GET /api/channels/:adapterId/:convId`, which would match. */
+// B-2198 THE RAW API — the OWNER's side (the API access dialog, the proposal cards, the API log). An agent bearer is
+// refused first: the tier is the user's to grant, a proposal the user's to decide (the agent surface is
+// /api/agent/channels/api*).
+const API_IS_OWNERS = 'API access and its proposals are the owner\'s — an agent token may not grant, approve or read them here';
+const rawApi = () => { const e = engine(); if (!e || !e.rawApi) { const err = new Error('Channels are not available'); err.status = 503; throw err; } return e.rawApi; };
+router.get('/api/channels/api', (req, res) => {
+  try { if (refuseAgentBearer(req, res, API_IS_OWNERS)) return; const e = engine(); res.json({ ...rawApi().ownerView(), cards: e && e.apiCards ? e.apiCards.records() : [] }); } catch (e) { fail(res, e); }
+});
+router.put('/api/channels/api/:cred/grants', async (req, res) => {
+  try { if (refuseAgentBearer(req, res, API_IS_OWNERS)) return; const r = await rawApi().setTiers(String(req.params.cred), (req.body || {}).grants, { by: 'user' }); res.status(r.ok ? 200 : r.code === 'not-found' ? 404 : 400).json(r); } catch (e) { fail(res, e); }
+});
+router.get('/api/channels/api/:cred/log', (req, res) => {
+  try { if (refuseAgentBearer(req, res, API_IS_OWNERS)) return; res.json({ ok: true, lines: rawApi().auditTail(String(req.params.cred), { n: Number(req.query.n) || 100 }) }); } catch (e) { fail(res, e); }
+});
+router.post('/api/channels/api/proposals/:id/approve', async (req, res) => {
+  try { if (refuseAgentBearer(req, res, API_IS_OWNERS)) return; const shown = (req.body || {}).shown; const cur = shown ? (rawApi().ownerView().proposals || []).find((p) => p.id === String(req.params.id)) : null; if (shown && cur && cur.digest !== shown) return res.status(409).json({ ok: false, code: 'proposal_changed', error: 'that card is not this proposal any more — nothing ran' }); const r = await rawApi().approve(String(req.params.id), { always: !!(req.body || {}).always, by: 'user', digest: String(shown || (req.body || {}).digest || '') }); res.status(r.ok ? 200 : r.code === 'not-found' ? 404 : 409).json(r); } catch (e) { fail(res, e); }
+});
+router.post('/api/channels/api/proposals/:id/reject', (req, res) => {
+  try { if (refuseAgentBearer(req, res, API_IS_OWNERS)) return; const r = rawApi().reject(String(req.params.id), { reason: (req.body || {}).reason || null, by: 'user' }); res.status(r.ok ? 200 : r.code === 'not-found' ? 404 : 409).json(r); } catch (e) { fail(res, e); }
+});
+router.delete('/api/channels/api/shapes/:id', (req, res) => {
+  try { if (refuseAgentBearer(req, res, API_IS_OWNERS)) return; const r = rawApi().revokeShape(String(req.params.id)); res.status(r.ok ? 200 : 404).json(r); } catch (e) { fail(res, e); }
+});
 router.post('/api/channels/oauth/start', async (req, res) => {
   try {
     forHost(req);
@@ -508,7 +531,7 @@ router.get('/api/channels/adapters', (req, res) => {
 router.get('/api/channels/search', async (req, res) => {
   try {
     forHost(req);
-    const r = await engine().search(String(req.query.adapter || ''), String(req.query.q || ''), { limit: Number(req.query.limit) || 100 });
+    const r = await engine().search(String(req.query.adapter || ''), String(req.query.q || ''), { limit: Number(req.query.limit) || 100, convId: req.query.conv ? String(req.query.conv) : null });   // .212: `conv` = one conversation (an agent's search row)
     if (!r.ok) return res.status(r.code === 'not-found' ? 404 : 400).json({ error: r.error, code: r.code });
     res.json(r);
   } catch (e) { fail(res, e); }
@@ -557,7 +580,7 @@ router.get('/api/channels/:adapterId/:convId/touches', (req, res) => {
 // ── lane channel-threads (2026-09-28, spec §9): THREADS + REACTIONS ────────
 /** A thread / reaction verb's typed answer → status BY CODE (every refusal named; the window words the code). */
 const RX_STATUS = Object.freeze({
-  'not-found': 404, 'thread-not-loaded': 404, 'bad-request': 400, 'bad-emoji': 400, 'bad-proposal': 400,
+  'not-found': 404, 'no-picture': 404, 'thread-not-loaded': 404, 'bad-request': 400, 'bad-emoji': 400, 'bad-proposal': 400,
   'react-not-available': 409, 'already-reacted': 409, 'reaction-cap': 409, 'not-reactable': 409, 'reaction-not-mine': 409,
   'reactions-scope-not-granted': 409, 'topic-forbidden': 409, 'account-changed': 409, disabled: 409, 'not-a-thread': 409,
   'thread-floor': 429, 'reactions-floor': 429, 'older-floor': 429, 'vendor-budget': 429, backoff: 429, 'rate-limited': 429,
@@ -569,6 +592,31 @@ function answerRx(res, r) {
   if (r && r.retryAfterSec) res.setHeader('Retry-After', String(r.retryAfterSec));
   return res.status(RX_STATUS[code] || 502).json({ ...(r && typeof r === 'object' ? r : {}), error: (r && r.error) || 'refused', code });
 }
+/** lane channel-avatars (B-5fe1): A PERSON'S PICTURE through OUR route only — the cached bytes (≤ 256 KiB, the type
+ *  SNIFFED from the bytes when it was stored, never the vendor's header), `private, max-age=86400`; the vendor's
+ *  address (it may carry a token) never reaches a page. A refusal is the engine's code, typed (a person with no
+ *  picture is 404 `no-picture`: the surface keeps the initials). */
+router.get('/api/channels/avatar', async (req, res) => {
+  try {
+    forHost(req);
+    const account = String(req.query.account || ''), author = String(req.query.author || '');
+    const r = await engine().avatarImage(account, author, { convId: req.query.conv ? String(req.query.conv) : null });
+    if (!r || !r.ok) { res.setHeader('Cache-Control', 'no-store'); return answerRx(res, r); }
+    const mime = String((r.meta && r.meta.mime) || '');
+    let st;
+    try { st = fs.statSync(r.file); } catch { st = null; }
+    if (!INLINE_IMAGE_RX.has(mime) || !st || st.size > AVATAR_MAX_BYTES) { res.setHeader('Cache-Control', 'no-store'); return answerRx(res, { ok: false, code: 'not-found', error: 'no picture' }); }
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
+    res.setHeader('Cache-Control', 'private, max-age=86400');
+    res.setHeader('Content-Type', mime);
+    res.setHeader('Content-Length', String(st.size));
+    const rs = fs.createReadStream(r.file);
+    rs.on('error', (e) => { if (!res.headersSent) bad(res, 500, String((e && e.message) || e)); else res.destroy(); });
+    rs.pipe(res);
+  } catch (e) { fail(res, e); }
+});
+const AVATAR_MAX_BYTES = 256 * 1024;
 /** The picker's vocabulary (cached 6 h): `{keys:[{key, glyph, label, custom}], quick, custom, at}`. */
 router.get('/api/channels/:adapterId/emoji-set', async (req, res) => {
   try { forHost(req); answerRx(res, await engine().emojiSet(req.params.adapterId)); } catch (e) { fail(res, e); }

@@ -179,7 +179,30 @@ function sectionHead(adds, { t = defaultT, vendor = '' } = {}) {
   return (Array.isArray(adds) ? adds : [adds]).some((a) => a === 'unsaved') ? t("Not saved here — from {vendor}'s search", { vendor: V }) : t("Older messages — from {vendor}'s search", { vendor: V });
 }
 
+/** A hit's words with the MATCH marked (lane channel-search-view, .212): [{text, hit}] in order — every case-insensitive
+ *  occurrence of each searched word (≥ 2 characters; the longer word wins a tie). The caller draws every piece through
+ *  textContent (vendor text). A text whose lower case changes its length is returned whole, unmarked. */
+function matchParts(text, q) {
+  const s = String(text || '');
+  const words = [...new Set(String(q || '').toLowerCase().split(/\s+/).filter((w) => w.length >= 2))];
+  const low = s.toLowerCase();
+  if (!s || !words.length || low.length !== s.length) return s ? [{ text: s, hit: false }] : [];
+  const out = [];
+  let i = 0;
+  while (i < s.length) {
+    let at = -1, len = 0;
+    for (const w of words) { const k = low.indexOf(w, i); if (k >= 0 && (at < 0 || k < at || (k === at && w.length > len))) { at = k; len = w.length; } }
+    if (at < 0) break;
+    if (at > i) out.push({ text: s.slice(i, at), hit: false });
+    out.push({ text: s.slice(at, at + len), hit: true });
+    i = at + len;
+  }
+  if (i < s.length) out.push({ text: s.slice(i), hit: false });
+  return out;
+}
+
 module.exports = {
+  matchParts,
   SNIPPET_MAX, SNIPPET_READ_MAX, SNIPPET_KEYS, SEARCH_VIA, SEARCH_CONTEXT, SEARCH_MATCH, SEARCH_ADDS, OWNER_FLOOR_MS, AGENT_FLOOR_MS, AROUND_MAX, QUERY_MAX,
   snippetOf, snippetShape, holdsQuery, isCjk, mergeVendorHits, coverageOf, fullSearchVerdict, coverageText, statusText, sectionHead,
 };

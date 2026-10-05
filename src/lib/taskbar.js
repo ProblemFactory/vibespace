@@ -1,3 +1,4 @@
+import { startFileDownload } from './file-download.js';
 import { createPopover, showContextMenu, uiScale } from './utils.js';
 import { groupClickVerdict, hoverVerdict, hoverStep, groupKeyVerdict, inFrontOf, GROUP_HOVER_INTENT_MS, GROUP_HOVER_LEAVE_MS } from './taskbar-group.js';
 import { t } from './i18n.js';
@@ -242,6 +243,9 @@ export function registerWindowMenu() {
   });
   registerMenuItem({ menu: M, group: '1_window', order: 50, command: 'window.unsplit', kind: 'split', when: inSplit });
   registerMenuItem({ menu: M, group: '1_window', order: 55, command: 'window.swapSides', kind: 'split', when: (c) => inSplit(c) && !c.app.isMobile });
+  // a window that shows ONE file (every viewer kind, the hex viewer, the code editor) downloads it — the same helper as its button (lane viewer-download)
+  registerCommand({ id: 'window.download', title: () => t('Download'), run: (c) => startFileDownload(c.win._fileDownload) });
+  registerMenuItem({ menu: M, group: '1_window', order: 60, command: 'window.download', kind: 'download', when: (c) => !!(c.win && c.win._fileDownload) });
   // Common SESSION ops on the window chrome (owner UX 2.369.8: restart after a
   // style pick meant a sidebar hunt; the title menu is right here)
   registerMenuItem({ menu: M, group: '2_session', order: 0, when: hasSess, separator: true });

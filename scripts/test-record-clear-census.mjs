@@ -167,6 +167,9 @@ const CHANNELS_GATES = {
   msgHeld: { callers: ['fetchMissing', 'recheckOne'] },
   fetchMissing: 'store.index.peek(',
   recheckOne: 'store.index.peek(',
+  // lane channel-avatars (int212): "is this person in OUR stored conversations" — a boolean, never a served record; the
+  // tail is read only for a conversation with an index row (store.index.live() first)
+  authorIsOurs: 'store.index',
 };
 function groupLogCensus(src) {
   const out = { outside: [], groupsRaw: [], channelsUngated: [], channelsUnknown: [], groupsNamed: false, sites: 0 };
@@ -350,6 +353,10 @@ const ROUTES = {
   'DELETE /api/mounts/:id': 'meta',                    // mounts-plugins-wiring: the browser keeper's deps (getTasks → group ids / browserProfileId) sit lexically after this registration
   // ── the .197 integration: the other lanes' routes the derived census now sees ──
   'POST /api/ports/kill-orphan': 'meta',               // server.js: ends a port's orphan pid; the store tokens are lane-pairing's ExitProxyManager construction (userTodos / tasks.groupsForSession) that sits lexically after this registration
+  // B-2198 the raw API pass-through: the vendor's answer (never a store's text; belted at its door), the caller's own
+  // credentials / docs / proposal / audit lines — no conversation store is read
+  'POST /api/agent/channels/api': 'meta', 'GET /api/agent/channels/api/creds': 'meta', 'GET /api/agent/channels/api/docs': 'meta',
+  'GET /api/agent/channels/api/proposals/:id': 'meta', 'GET /api/agent/channels/api/log': 'meta',
   'POST /api/agent/channels/react': 'meta',            // lane channel-threads: msgCaller (the caller's identity + group ids) → a reaction PROPOSAL; no store's text
   'POST /api/agent/channels/:adapterId/:convId/thread/:msg/refresh': 'meta',   // lane channel-threads: msgCaller → the thread walk; no store's text
   'GET /api/hosts/:id/exit-access': 'meta',            // lane-pairing: the exit lists + the roster (session names, Task Group ids + titles) — no record of the five kinds
@@ -1754,6 +1761,7 @@ const I_RECV = {
   'src/routes/desktop-apps.js|rec': ['desktop app', 'an app label'], 'src/routes/desktop-apps.js|row': ['desktop app', 'a machine\'s reason'], 'src/routes/desktop-apps.js|spec': ['desktop app', 'an app label'],
   'src/routes/files.js|shadow': ['mount', 'a storage name'],
   'src/server/browser-handback.js|sess.s': ['session', 'a session\'s name'], 'src/server/browser-propose.js|sess.s': ['session', 'a session\'s name'], 'src/server/browser-keeper.js|n': ['browser notice', 'the keeper\'s own notice (resources, a heal)'], 'src/server/browser-keeper.js|p': ['browser profile', 'a profile label'],
+  'src/server/channel-api.js|e': ['channel', 'a vendor fetch error\'s name'], 'src/server/channel-api.js|p': ['outbox proposal', 'an API proposal\'s reject / failure reason'], 'src/mounts.js|c': ['mount', 'a storage mount\'s name'],
   'src/server/channels-engine.js|ctx': ['session', 'an agent session\'s name'], 'src/server/channels-engine.js|err': ['channel', 'a vendor error\'s detail'], 'src/server/channels-engine.js|fresh': ['outbox proposal', 'a decision reason'],
   'src/server/channels-engine.js|head': ['channel', 'a failing adapter\'s head sentence'], 'src/server/channels-engine.js|h': ['host', 'a machine name'], 'src/server/channels-engine.js|mod': ['channel', 'an adapter label'],
   'src/server/channels-engine.js|p.choice.fromMount': ['mount', 'a storage mount\'s name'], 'src/server/channels-engine.js|p': ['outbox proposal', 'a proposal\'s reason'], 'src/server/channels-engine.js|rec': ['channel', 'an account / adapter label'],

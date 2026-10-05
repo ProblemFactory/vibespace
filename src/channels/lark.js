@@ -80,7 +80,16 @@ const HOSTS = Object.freeze({
 });
 const BRANDS = Object.freeze(Object.keys(HOSTS));
 /** THE DECLARED EGRESS (§3.1): every host this file may construct a request to. */
-const EGRESS = Object.freeze(['open.feishu.cn', 'accounts.feishu.cn', 'open.larksuite.com', 'accounts.larksuite.com']);
+const EGRESS = Object.freeze(['open.feishu.cn', 'accounts.feishu.cn', 'open.larksuite.com', 'accounts.larksuite.com', 'feishucdn.com', 'larksuitecdn.com']);   // + lane channel-avatars: the people's picture hosts
+/** B-2198: THE RAW-API ROW (the one schema: src/channels/index.js validateApi) — Lark's facts for the raw API's fence,
+ *  declared HERE beside `apiBearer`; the fence and the orchestrator read this row and name no vendor. */
+const API_ROW = Object.freeze({
+  label: 'Lark / Feishu',
+  hosts: Object.freeze(['open.feishu.cn', 'open.larksuite.com']),
+  docs: Object.freeze(['https://open.feishu.cn/document/server-docs/api-call-guide/calling-process/overview', 'https://open.larksuite.com/document/server-docs/api-call-guide/calling-process/overview']),
+  readByPost: Object.freeze([/\/search(\/|$)/, /\/batch_get(\/|$)/, /\/query(\/|$)/, /\/list(\/|$)/]),
+  sensitive: Object.freeze([/\/permission/, /\/member/, /\/transfer/, /delete/i, /remove/i, /\/admin/, /\/approval/, /\/pay/]),   // `batch_delete` too
+});
 
 /** Per-record OPTIONS the engine stores and the panel edits: which console
  *  the app was created in decides every host this adapter talks to, so a
@@ -251,7 +260,7 @@ const UNGATED = Object.freeze([
 const RATE_OK = Object.freeze([
   { id: 'push-names', why: 'the push path must persist the record inside the vendor\'s 3 s ack budget, so a names refusal never fails a message; a RATE refusal pauses the push path\'s lookups for the vendor\'s hint (at most 5 min) instead of one members read per pushed message into the stop' },
   { id: 'consent-user-info', why: 'ONE user_info read inside a human consent: a refusal of any kind ends that consent as nameless, by name; no pass, nothing retried' },
-  { id: 'integration-test', why: 'the integrations panel\'s Test button (a human POST): the refusal\'s words ARE the answer; no pass, nothing retried' },
+  { id: 'integration-test', why: 'the integrations panel\'s Test button (a human POST): the refusal\'s words ARE the answer; no pass, nothing retried' },  { id: 'send-parts', why: 'lane channel-send-files: a message sent in PARTS (the text, then one message per file) whose LATER part is refused — a rate refusal included — STOPS the chain: no further request, nothing retried, the receipt names the refusal; a refusal before anything landed is re-thrown to the ladder' },
 ]);
 
 const caps = Object.freeze({
@@ -265,11 +274,13 @@ const caps = Object.freeze({
   historyBySource: null,
   listConversations: true,
   sendAs: ['user'],                // P4: as the USER (decision 2); convCaps narrows until the send scopes are held
-  // design 005 §2.B (B-fd1f): an agent's attachments are NOT offered here yet — Lark documents its picture and file
-  // uploads (im/v1/images, im/v1/files) for the app's tenant token only (LA1), and whether a message sent AS THE USER may
-  // carry a key the app uploaded (LA3) cannot be proven without a live call; the reason rides every refusal
-  sendAttachments: null,
-  sendAttachmentsWhy: "Lark documents its picture and file uploads for the app's own token only, and a message sent as you carrying them is not yet measured",
+  // lane channel-send-files (.212): an agent's pictures and files — uploaded with the ACCOUNT's user token (im/v1/images
+  // `image_type=message` ≤ 10 MB, else im/v1/files ≤ 30 MB — the docs list user_access_token for both), then ONE message
+  // per attachment as the user (`msg_type: image|file` + the key). Lark has NO mixed message as a user: the text goes
+  // FIRST as its own message, the files follow under the same proposal; the receipt names each part that landed or not.
+  // Gmail's bounds (Lark's own per-file ceilings are higher; a picture over 10 MB goes as a file)
+  sendAttachments: Object.freeze({ maxCount: 10, maxTotalBytes: 25e6, withText: true }),
+  sendAttachmentsWhy: null,
   identityMarking: 'unknown',      // UNVERIFIED until one real send's `sender.sender_type` is read (§21 item 3) — treated as `marked`
   identityMarkingWhere: null,
   identityMarkingText: null,
@@ -288,6 +299,8 @@ const caps = Object.freeze({
   // shares it), so the default is 60 (6 %) — the default and the setting come
   // from the lark table of src/channel-settings.js BY IDENTITY (B-df40 part 3)
   attachments: 'fetch',
+  // lane channel-avatars (B-5fe1): a person's picture from the contact profile (`avatarImage`, PEOPLE_SCOPE)
+  avatars: 'fetch',
   olderHistory: 'page',
   budget: { unit: 'request', metered: true, ...budgetOf(CHANNEL_SETTINGS.lark) },
   // lane R5 (2026-09-26): PACED PER SECOND as well (drain rule 18). The
@@ -603,6 +616,36 @@ const PEOPLE_LOOKUPS_PER_CALL = 3;
 const PEOPLE_PER_MIN = 20;
 const pName = (v) => (typeof v === 'string' ? (peerName(Blocks.markupPlainLine(v), 200) || '') : '');
 /** THE PROFILE ANSWER'S READER (PURE, bounded): `data.user` → {name, enName, nickname, jobTitle, deptIds ≤ 5}. */
+/** lane channel-avatars (B-5fe1): the picture address a `contact/v3/users/:id` answer names — `avatar.avatar_72` (else
+ *  `avatar_240`), https on Lark's own picture hosts only, ≤ 2048 chars; '' = the person has no picture. Peer bytes:
+ *  read through this ONE bounded reader, never handed to a client (the address may carry a token). */
+const AVATAR_ORIGINS = Object.freeze(['https://feishucdn.com', 'https://larksuitecdn.com']);   // Lark's picture hosts and their subdomains (s1-imfile.feishucdn.com …)
+const avatarHostOk = (h) => AVATAR_ORIGINS.some((o) => { const d = o.slice('https://'.length); return h === d || h.endsWith('.' + d); });
+function avatarUrlOf(data) {
+  const u = data && typeof data === 'object' && data.user && typeof data.user === 'object' ? data.user : null;
+  const av = u && u.avatar && typeof u.avatar === 'object' ? u.avatar : null;
+  const raw = av ? [av.avatar_72, av.avatar_240].find((x) => typeof x === 'string' && x.length > 0 && x.length <= 2048) : null;
+  if (!raw) return '';
+  let url;
+  try { url = new URL(raw); } catch { return ''; }
+  return url.protocol === 'https:' && !url.username && !url.password && avatarHostOk(url.hostname) ? url.href : '';
+}
+/** The picture's bytes, bounded at 256 KiB WHILE reading (a chunked answer says no length; a wrong one says less). */
+async function readAvatarBytes(r, what) {
+  const MAX = 256 * 1024;
+  if (Number((r.headers && r.headers.get && r.headers.get('content-length')) || 0) > MAX) throw new ChannelError('too-large', `${what}: over the 256 KiB bound`, { retryable: false });
+  if (!(r.body && typeof r.body.getReader === 'function')) { const b = Buffer.from(await r.arrayBuffer()); if (b.length > MAX) throw new ChannelError('too-large', `${what}: over the 256 KiB bound`, { retryable: false }); return b; }
+  const rd = r.body.getReader(), parts = [];
+  let n = 0;
+  for (;;) {
+    const { done, value } = await rd.read();
+    if (done) break;
+    n += value.length;
+    if (n > MAX) { try { await rd.cancel(); } catch { } throw new ChannelError('too-large', `${what}: the answer ran past the 256 KiB bound — cancelled, nothing kept`, { retryable: false }); }
+    parts.push(Buffer.from(value));
+  }
+  return Buffer.concat(parts);
+}
 function readPersonAnswer(data) {
   const u = data && typeof data === 'object' && data.user && typeof data.user === 'object' ? data.user : null;
   if (!u) return null;
@@ -815,6 +858,36 @@ async function callJson(fetchFn, url, { method = 'GET', headers = {}, body = nul
   try { parsed = await r.json(); } catch { parsed = null; }
   if (!r.ok || !parsed || (parsed.code !== undefined && Number(parsed.code) !== 0)) throw typedFailure(r.status, withoutSent(parsed, sent), what, retryAfterSeconds(r.headers));
   return parsed;
+}
+
+/** lane channel-send-files: ONE multipart upload (im/v1/images · im/v1/files) — the same judge as `callJson`. */
+async function callForm(fetchFn, url, { headers = {}, fields = {}, file = null, what = 'lark upload', signal = null } = {}) {
+  const sent = sentSecrets({ headers });
+  const form = new FormData();
+  for (const [k, v] of Object.entries(fields)) form.append(k, String(v));
+  if (file) form.append(file.field, new Blob([file.data], { type: file.mime || 'application/octet-stream' }), file.name);
+  let r;
+  try { r = await fetchFn(url, { method: 'POST', headers: { Accept: 'application/json', ...headers }, body: form, signal: signal || AbortSignal.timeout(60000) }); }
+  catch (e) { throw new ChannelError('transport', withoutSent(`${what}: ${(e && e.message) || e}`, sent), { retryable: true }); }
+  let parsed = null;
+  try { parsed = await r.json(); } catch { parsed = null; }
+  const refused = !r.ok || !parsed || (parsed.code !== undefined && Number(parsed.code) !== 0);
+  if (refused) throw typedFailure(r.status, withoutSent(parsed, sent), what, retryAfterSeconds(r.headers));
+  return parsed;
+}
+/** The documented picture types of im/v1/images and its 10 MB ceiling; im/v1/files' `file_type` by the sniffed type. */
+const LARK_IMAGE_TYPES = Object.freeze(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/bmp', 'image/tiff']);
+const LARK_IMAGE_MAX = 10 * 1024 * 1024;
+const LARK_FILE_MAX = 30 * 1024 * 1024;
+/** PURE: how ONE stored attachment goes to Lark — `{route, msgType, fields, field, keyName}`. */
+function attachmentPlan(f) {
+  const mime = String((f && f.mime) || '');
+  const bytes = Number(f && (f.bytes || (f.data && f.data.length))) || 0;
+  if (LARK_IMAGE_TYPES.includes(mime) && bytes <= LARK_IMAGE_MAX) return { route: '/im/v1/images', msgType: 'image', fields: { image_type: 'message' }, field: 'image', keyName: 'image_key' };
+  const ext = (String((f && f.name) || '').match(/\.([A-Za-z0-9]{1,5})$/) || [])[1];
+  const e = ext ? ext.toLowerCase() : '';
+  const type = mime === 'application/pdf' || e === 'pdf' ? 'pdf' : mime === 'video/mp4' || e === 'mp4' ? 'mp4' : e === 'opus' ? 'opus' : /^docx?$/.test(e) ? 'doc' : /^xlsx?$/.test(e) ? 'xls' : /^pptx?$/.test(e) ? 'ppt' : 'stream';
+  return { route: '/im/v1/files', msgType: 'file', fields: { file_type: type, file_name: String((f && f.name) || 'file') }, field: 'file', keyName: 'file_key' };
 }
 
 // ── the adapter ───────────────────────────────────────────────────────
@@ -1279,7 +1352,57 @@ function create(record = {}, deps = {}) {
    * request left is `detail.lost` — the outcome is unknown, not refused.
    * The vendor's own `sender.sender_type` rides back as `observed`.
    */
-  async function sendImpl(convId, { text, replyTo = null, idemKey, as = 'user', replyAnchor = null, inThread = false, placement = null } = {}) {
+  /**
+   * lane channel-send-files (.212): A MESSAGE WITH FILES, as the user — the text first (its own message, the proposal's
+   * uuid), then per file: ONE upload with the account's token (`attachmentPlan`) and ONE message carrying its key
+   * (`uuid` = the proposal's + `:a<i>`). The first refusal STOPS the chain (no retry, no storm: a rate refusal is the
+   * ladder's when nothing landed); the answer's `parts` say, per piece, what landed and what did not (the receipt's words).
+   */
+  async function sendWithFiles(convId, { text, replyTo, replyAnchor, idemKey, inThread, placement, files }) {
+    const parts = [];
+    const one = async (what, body, i) => {
+      return sendImpl(convId, { text: '', replyTo, idemKey: i == null ? idemKey : `${idemKey}:a${i}`, replyAnchor, inThread, placement, _body: body });
+    };
+    let first = null;
+    const hasText = !!String(text == null ? '' : text).trim();
+    const fail = (e, part) => ({ ...part, ok: false, code: (e && e.code) || 'vendor-error', why: String((e && e.message) || e).slice(0, 300), ...(e && e.detail && e.detail.lost ? { lost: true } : {}), ...(e && e.detail && e.detail.requiredScopes ? { requiredScopes: e.detail.requiredScopes } : {}) });
+    const pieces = [...(hasText ? [{ part: 'text' }] : []), ...files.map((f, i) => ({ part: 'attachment', name: f.name, i, f }))];
+    for (let k = 0; k < pieces.length; k++) {
+      const p = pieces[k];
+      const label = p.part === 'text' ? { part: 'text' } : { part: 'attachment', name: p.name };
+      try {
+        let r;
+        if (p.part === 'text') r = await one('lark send', { msg_type: 'text', content: JSON.stringify({ text: String(text) }) }, null);
+        else {
+          const plan = attachmentPlan(p.f);
+          if (plan.msgType === 'file' && Number(p.f.data.length) > LARK_FILE_MAX) throw new ChannelError('too-large', `lark: ${JSON.stringify(String(p.name).slice(0, 80))} is over Lark's 30 MB file ceiling`, { retryable: false, detail: { why: 'attachment-too-large' } });
+          const up = await upload(plan, p.f);
+          r = await one(`lark send ${plan.msgType}`, { msg_type: plan.msgType, content: JSON.stringify({ [plan.keyName]: up }) }, p.i);
+        }
+        parts.push({ ...label, ok: true, vendorMessageId: r.vendorMessageId });
+        if (!first) first = r;
+      } catch (e) {   // rate-ok: send-parts
+        // nothing landed yet: the plain refusal (the ladder reads a rate / lost answer as for any send)
+        if (!first) { if (e instanceof ChannelError) { e.detail = { ...(e.detail || {}), parts: [fail(e, label), ...pieces.slice(k + 1).map((q) => ({ part: q.part, ...(q.name ? { name: q.name } : {}), ok: false, code: 'not-sent' }))] }; } throw e; }
+        parts.push(fail(e, label));
+        for (const q of pieces.slice(k + 1)) parts.push({ part: q.part, ...(q.name ? { name: q.name } : {}), ok: false, code: 'not-sent' });
+        break;
+      }
+    }
+    return { ...first, parts };
+  }
+  /** ONE upload with the account's user token, through the gate's pace + meter — the vendor's key, or its refusal. */
+  async function upload(plan, f) {
+    let at0 = await accessToken();
+    await pace(1);
+    meter(1);
+    if (bearerExpired()) at0 = await accessToken();
+    const d = await callForm(fetchFn, `${H.open}/open-apis${plan.route}`, { what: `lark upload ${plan.msgType}`, headers: { Authorization: `Bearer ${bearerNow(at0)}` }, fields: plan.fields, file: { field: plan.field, data: f.data, mime: f.mime, name: f.name } });   // gated-inline: upload
+    const key = d && d.data && d.data[plan.keyName];
+    if (typeof key !== 'string' || !key || key.length > 200) throw new ChannelError('vendor-error', `lark upload ${plan.msgType}: the answer carries no ${plan.keyName}`, { retryable: false, detail: { why: 'no-key' } });
+    return key;
+  }
+  async function sendImpl(convId, { text, replyTo = null, idemKey, as = 'user', replyAnchor = null, inThread = false, placement = null, attachments = null, _body = null } = {}) {
     if (as !== 'user') throw new ChannelError('send-not-available', `lark: sending as '${as}' is not declared (caps.sendAs: user)`, { retryable: false, detail: { sendAs: caps.sendAs } });
     // r6 verify F1 (the belt under the engine's gate): the reply endpoint names only the MESSAGE, never the chat —
     // a message id of chat B posted into B whatever `convId` said. So a reply is sent only with the anchor's STORED
@@ -1294,8 +1417,10 @@ function create(record = {}, deps = {}) {
       }
     }
     if (!hasSendScopes(readToken().token)) throw new ChannelError('forbidden', 'lark: the held token has no send scopes (im:message + im:message.send_as_user) — reconnect to request them', { retryable: false, detail: { why: 'send-scope-not-granted' } });
+    const files = Array.isArray(attachments) ? attachments.filter((a) => a && Buffer.isBuffer(a.data)) : [];
+    if (files.length) return sendWithFiles(convId, { text, replyTo, replyAnchor, idemKey, inThread, placement, files });
     const uuid = uuidFor(idemKey);
-    const body = { msg_type: 'text', content: JSON.stringify({ text: String(text == null ? '' : text) }), uuid };
+    const body = { ...(_body || { msg_type: 'text', content: JSON.stringify({ text: String(text == null ? '' : text) }) }), uuid };
     // lane channel-threads (L6): a reply INTO a thread says so — `reply_in_thread` is a PROMISE the composer made
     // (a reply to a message already in a thread lands there anyway; one to a plain message mints the thread)
     // (2026-09-28: the registry hands a declared PLACEMENT — `thread` sets the flag, `quote` is the plain reply endpoint)
@@ -1465,6 +1590,9 @@ function create(record = {}, deps = {}) {
 
   return {
     live,
+    // B-2198: the raw API's bearer — handed to src/server/channel-api.js's ONE fetch site only, never to a route; its
+    // vendor facts are the module's declared `API_ROW` (the registry refuses a bearer without one)
+    apiBearer: () => accessToken(),
     auth: {
       /** Four-valued and honest (§13): the credential question FIRST. */
       async state() {
@@ -1913,6 +2041,33 @@ function create(record = {}, deps = {}) {
      * / video `type=file`. A JSON answer is the vendor's refusal, typed.
      * Bounded at 100 MB (the vendor's own no-Range ceiling).
      */
+    /**
+     * lane channel-avatars (B-5fe1): ONE person's picture — the contact profile (`contact/v3/users/:id`, through the
+     * gate, under PEOPLE_READ_SCOPES: a token without one is refused BY NAME, never a silent blank), then the picture's
+     * bytes from Lark's picture host (paced, metered, NO bearer — the address carries what it needs), ≤ 256 KiB.
+     * "No picture" is `not-found` + `why: 'no-picture'` (the engine remembers it).
+     */
+    async avatarImage(author) {
+      const key = String(author || '');
+      if (!Feed.idOf(key)) throw new ChannelError('not-found', 'lark: a person is named by an open_id', { retryable: false, detail: { why: 'no-picture' } });
+      if (!canReadPeople()) throw new ChannelError('forbidden', `lark: people's profiles cannot be read — re-authorize to grant ${PEOPLE_SCOPE}`, { retryable: false, detail: { why: 'scope', scope: PEOPLE_SCOPE } });
+      let d;
+      try { d = await api(`/contact/v3/users/${encodeURIComponent(key)}?user_id_type=open_id`, { what: 'lark user avatar' }); }
+      catch (e) {
+        const vc = e && e.detail ? Number(e.detail.code) : null;
+        if (vc === 99991679) throw new ChannelError('forbidden', `lark: people's profiles cannot be read — re-authorize to grant ${PEOPLE_SCOPE}`, { retryable: false, detail: { why: 'scope', scope: PEOPLE_SCOPE } });
+        throw e;
+      }
+      const url = avatarUrlOf(d && d.data);
+      if (!url) throw new ChannelError('not-found', 'lark: this person has no profile picture', { retryable: false, detail: { why: 'no-picture' } });
+      await pace(1);
+      meter(1);
+      let r;
+      try { r = await fetchFn(url, { redirect: 'error', signal: AbortSignal.timeout(30000) }); }   // gated-inline: avatar-bytes
+      catch (e) { throw new ChannelError('transport', `lark avatar: ${(e && e.message) || e}`, { retryable: true }); }
+      if (!r.ok) throw typedFailure(r.status || 500, null, 'lark avatar', retryAfterSeconds(r.headers));
+      return { data: await readAvatarBytes(r, 'lark avatar'), mime: null };
+    },
     async fetchAttachment(convId, { messageId, attachmentId, mime = null } = {}) {
       if (!messageId || !attachmentId) throw new ChannelError('not-found', 'lark: an attachment needs its message id and key', { retryable: false });
       let at = await accessToken();
@@ -1993,11 +2148,12 @@ const FEED_GRANT = Object.freeze({ scopes: Object.freeze([SEARCH_SCOPE, P2P_READ
 /** lane lark-threads (B1/B5): WHAT UNLOCKS READING PEOPLE'S PROFILES — the measured scope (a person who left a chat, an
  *  external contact, the organization's nickname, the department) — the card's ONE Re-authorize line names it. */
 const PEOPLE_GRANT = Object.freeze({ scopes: Object.freeze([PEOPLE_SCOPE]), console: true });
-const adapter = { kind: KIND, caps, create, vendorNameOf, blocksOf: Blocks.larkStoredBlocks, recordView, sendGrant: SEND_GRANT, sendCapsOf, capsOfScopes, reactionsGrant: REACTIONS_GRANT, feedGrant: FEED_GRANT, peopleGrant: PEOPLE_GRANT };
+const adapter = { kind: KIND, caps, create, api: API_ROW, vendorNameOf, blocksOf: Blocks.larkStoredBlocks, recordView, sendGrant: SEND_GRANT, sendCapsOf, capsOfScopes, reactionsGrant: REACTIONS_GRANT, feedGrant: FEED_GRANT, peopleGrant: PEOPLE_GRANT };
 module.exports = {
-  kind: KIND, caps, create, adapter, label: LABEL, integration: INTEGRATION, integrationTest, OPTIONS, UNGATED, RATE_OK,
+  attachmentPlan, LARK_IMAGE_MAX, LARK_FILE_MAX,
+  kind: KIND, caps, create, adapter, API_ROW, label: LABEL, integration: INTEGRATION, integrationTest, OPTIONS, UNGATED, RATE_OK,
   EGRESS, HOSTS, BRANDS, SCOPES, SEND_SCOPES, FIRST_INGEST_MAX, WALK_TTL_MS, UUID_WINDOW_MS, UUID_MAX, RECONCILE_SLACK_MS, RECONCILE_SCAN_MAX, RENEW_WINDOW_MS,
-  toRecord, textOf, mentionsOf, attachmentsOf, typedFailure, nextToken, uuidFor, hasSendScopes, vendorNameOf,
+  toRecord, textOf, mentionsOf, attachmentsOf, typedFailure, avatarUrlOf, AVATAR_ORIGINS, nextToken, uuidFor, hasSendScopes, vendorNameOf,
   SEND_GRANT, blocksOf: Blocks.larkStoredBlocks, sendCapsOf,
   // D3 (lane channel-rich): the ONE bot-name resolver's module half + the read-time view
   recordView, botFallbackName, appNameOf, knownAppName, rememberAppName, APP_NAMES,

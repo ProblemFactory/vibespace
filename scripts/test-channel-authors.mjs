@@ -53,7 +53,7 @@ const quiet = (fn) => { const P = pass, F = fail; const saved = console.log, sav
 console.log('③ verify r3 (T2 ④): a vendor id is never a name — the avatar of an id-only author');
 {
   const win = fs.readFileSync(path.join(REPO, 'src/lib/channel-window.js'), 'utf8');
-  ok(/avatar\(\{ name: a\.display \|\| a\.name \|\| '', key: authorKey\(rec\), self: !!a\.isSelf \}, null, 'chanmsg-av'\)/.test(win) && !/avatar\(\{ name: [^}]*\|\| a\.id\b/.test(win), 'WIRING: the window\'s avatar is drawn from the display / vendor name only — never from `a.id` (an `ou_…` id drew the initial "O", a `cli_…` id "C", as if they were names; the id stays the head\'s text)');
+  ok(/avatar\(\{ name: a\.display \|\| a\.name \|\| '', key: authorKey\(rec\), self: !!a\.isSelf(?:, pic)? \}, null, 'chanmsg-av'\)/.test(win) && !/avatar\(\{ name: [^}]*\|\| a\.id\b/.test(win), 'WIRING: the window\'s avatar is drawn from the display / vendor name only — never from `a.id` (an `ou_…` id drew the initial "O", a `cli_…` id "C", as if they were names; the id stays the head\'s text)');
   const AV = await import(path.join(REPO, 'src/lib/channel-avatar.js'));
   ok(AV.initialsOf('ou_ff8c53730c347e160493771728962528') === 'O' && AV.initialsOf('cli_a5ed0d009') === 'C' && AV.initialsOf('') === '?' && AV.avatarOf({ name: '', key: 'ou_ff8c' }).text === '?' && AV.avatarOf({ name: '', key: 'ou_ff8c' }).hue === AV.avatarOf({ name: 'Zin', key: 'ou_ff8c' }).hue, 'the PURE fact that makes the wiring matter: initialsOf takes the first letter of ANY string (an id included), so the name must be empty for the "?" — the hue stays the author key\'s (stable across a later naming)');
 }

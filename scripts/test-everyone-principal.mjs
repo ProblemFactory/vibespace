@@ -78,6 +78,7 @@ const SURFACES = [
   { file: 'src/lib/window-share.js', match: /label: t\('Share with agents'\)/, surface: 'Desktop app · Share with agents (launcher row + window dialog)', model: 'window-reach', before: 'no', spelled: "{kind:'everyone', id:'*'} reach row" },
   { file: 'src/lib/exit-access-dialog.js', match: /label: grant === 'use'/, surface: 'Machine · Who can use <machine>? (network + commands)', model: 'exit-reach', before: 'yes — the "All my conversations" radio', spelled: "mode 'everyone' (the radio is gone; the picker's All row IS the mode, rows kept beside it)" },
   { file: 'src/lib/browser-who-dialog.js', match: /label: t\('Who can use it'\)/, surface: 'Agent browser · Who can use <profile>?', model: 'browser-profiles who-list', before: 'yes — the "All my conversations" radio (the default)', spelled: "use.mode 'all' = owner {kind:'instance'} (rows kept as owner.who)" },
+  { file: 'src/lib/channel-api-dialog.js', match: /label: t\('Add an agent or group'\)/, surface: 'Channels · API access… (who may call the raw API, at which tier; B-2198)', model: 'channel-acl api tier rows (src/channel-api.js apiGrant)', before: 'yes — the dialog offered All from its first lane (channel-api-core)', spelled: "{kind:'everyone', id:'*'} tier row — Read at most by default; a write tier needs its own tick (allWrite)" },
   { file: 'src/lib/browser-new-profile.js', match: /label: t\('Who can use it'\)/, surface: 'Agent browser · New profile… → Who can use it (the .200 dialog, folded onto the one control at the 2.369.202 integration)', model: 'browser-profiles who-list', before: 'yes — the "All my conversations" radio (the default)', spelled: "use.mode 'all' (the create body sends no list)" },
 ];
 const EXEMPT = [
@@ -131,9 +132,21 @@ for (const m of MODELS) {
 }
 // the raw-API lane INHERITS the row (its tier lives on the access row — design: "TIER per (credential, principal) on
 // the EXISTING access row"): when its module lands it must spell `everyone` (the default tier under All = read)
-const rawApi = tracked.filter((f) => /^src\/(lib\/)?channel-api[\w-]*\.js$/.test(f));
-if (rawApi.length) for (const f of rawApi) ok(/\beveryone\b/.test(read(f)), `${f} (the raw-API tiers) spells ALL AGENTS — the tier under All is read at most by default`);
-else ok(true, 'the raw-API tier module has not landed (src/channel-api*.js) — when it does, this census requires it to spell `everyone` (its tier rides the access row this lane extended)');
+// — the TIER modules (a raw-API file that spells the tier ladder; the card modules draw one conversation's proposal, no tier picker)
+const TIER_RE = /\b(API_TIERS|TIERS)\b|'write-ask'/;
+const rawApi = tracked.filter((f) => /^src\/(lib\/)?channel-api[\w-]*\.js$/.test(f) && TIER_RE.test(read(f)));
+ok(rawApi.includes('src/channel-api.js') && rawApi.includes('src/lib/channel-api-dialog.js'), `the raw-API tier modules are found by their tier ladder (${rawApi.join(', ')})`, rawApi);
+for (const f of rawApi) ok(/\beveryone\b/.test(read(f)), `${f} (the raw-API tiers) spells ALL AGENTS — the tier under All is read at most by default`);
+/** the RULE, by behaviour: All agents ⇒ Read at most by default; a write tier for everyone only with its own tick. */
+const everyoneRule = (FA) => {
+  const g = (tier, allWrite) => { try { return !!FA.apiGrant({ principal: { kind: 'everyone', id: '*' }, cred: 'acct-1', tier, by: 'user', allWrite }); } catch { return false; } };
+  return FA.EVERYONE_TIER === 'read' && g('read') && !g('write-ask') && !g('write-auto') && g('write-ask', true) && g('write-auto', true)
+    && !!FA.apiGrant({ principal: { kind: 'agent', id: 'cid-1' }, cred: 'acct-1', tier: 'write-ask', by: 'user' });
+};
+const FAPI = require(path.join(REPO, 'src/channel-api.js'));
+ok(everyoneRule(FAPI), 'src/channel-api.js spells the `everyone` rule: All agents ⇒ Read at most by default; write-ask / write-auto for everyone only with its own tick (allWrite) — an agent row is unchanged');
+const DLG = read('src/lib/channel-api-dialog.js');
+ok(/r\.key === 'everyone:\*' && r\.tier !== 'read'/.test(DLG) && /t\('Let every agent write through this account/.test(DLG) && /allWrite: !!r\.allWrite/.test(DLG), 'the dialog SAYS it: the All row at a write tier shows its own tick, and Save sends it (allWrite)');
 // THE PRINTED TABLE (the report's)
 console.log('\n  surface · model · had "everyone" before this lane · how it is spelled now');
 for (const r of SURFACES) console.log(`  · ${r.surface} · ${r.model} · ${r.before} · ${r.spelled}`);
@@ -159,6 +172,11 @@ console.log('  · [inherits] the raw-API tier rows (SharedContext/vibespace-chan
   const noAll = aclSrc.includes(LINE) ? M.load('src/channel-acl.js', aclSrc.replace(LINE, "const PRINCIPAL_KINDS = Object.freeze(['agent', 'group']);"), 'no-everyone') : null;
   let spelled = true; try { spelled = !!MODELS.find((m) => m.file === 'src/channel-acl.js').check(noAll); } catch { spelled = false; }
   ok(!!noAll && !spelled, 'CONTROL (2b): channel-acl with `everyone` dropped from its kinds fails its census spelling check — RED');
+  const apiSrc = read('src/channel-api.js');
+  const RULE = " && TIERS.indexOf(tier) > TIERS.indexOf(EVERYONE_TIER) && allWrite !== true) throw";
+  const noRule = apiSrc.includes(RULE) ? M.load('src/channel-api.js', apiSrc.replace(RULE, ' && false) throw'), 'no-everyone-rule') : null;
+  let ruled = true; try { ruled = everyoneRule(noRule); } catch { ruled = false; }
+  ok(!!noRule && !ruled, 'CONTROL (2c): src/channel-api.js without the `everyone` rule (All agents at write with no tick) fails the rule — RED');
 }
 
 // ═══ ② THE PURE TABLES ══════════════════════════════════════════════════════

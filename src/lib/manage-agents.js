@@ -114,6 +114,21 @@ export function loginExpiryChipHtml(a, { local = true } = {}) {
     + `${dead ? ' style="color:var(--red,#e55)"' : ''} title="${title}">${ROSTER_ICONS.CLOCK}${who}${label}</span>`;
 }
 
+/** The row's extras line (2.369.212, owner: "这个登陆过期提示会被备注抢占位置导致看不到"):
+ *  ordered by what can stop a session. The login chip, then a long-lived-token
+ *  WARNING (expired / ≤ 30 d) come first and stay WHOLE (a warning with a button
+ *  is whole or it is not there; .acct-key-extra > .acct-blocked-hint never
+ *  shrinks and wraps inside itself only when the row is narrower than it). The
+ *  rest — provenance, a healthy token, the note LAST — shares ONE ellipsis box
+ *  (.acct-extra-soft), so the clip always eats the note first, then provenance;
+ *  the note's whole text stays in its title and ⋯ → Account note. */
+export function acctExtrasHtml({ login = '', oat = '', oatWarn = false, prov = '', note = '' } = {}) {
+  const hard = login + (oatWarn ? oat : '');
+  const soft = prov + (oatWarn ? '' : oat) + note;
+  if (!hard && !soft) return '';
+  return `<span class="acct-key-extra">${hard}${soft ? `<span class="acct-extra-soft">${soft}</span>` : ''}</span>`;
+}
+
 function remoteClaudeSubscriptionLoginCommand(id) {
   if (!/^sub-[a-f0-9]+$/.test(id)) throw new Error('invalid subscription id');
   const dir = `$HOME/.vibespace/subs/${id}`;
@@ -2423,6 +2438,7 @@ export function installManageAgents(App, ctx = {}) {
       // LOGIN-SESSION expiry (2026-09-07): the chip that makes a dying login
       // visible BEFORE a turn dies on it. Pools show their members' worst.
       const loginTag = (isSub || a.pooled) ? loginExpiryChipHtml(a, { local: !selectedHost }) : '';
+      const extrasTag = acctExtrasHtml({ login: loginTag, oat: oatTag, oatWarn: !!oatTag && a.oatDaysLeft <= 30, prov: provTag, note: noteTag });
       const isPool = !!a.pooled;
       // ONE usage snapshot per row (the cell below and the credits tag read the
       // same one). Usage source follows the VERDICT's how (2.245.0): a linked
@@ -2469,7 +2485,7 @@ export function installManageAgents(App, ctx = {}) {
       // modal AND panel; real screenshot report). Star stays direct: most-used.
       return `<div class="acct-key-row${isDef ? ' is-default' : ''}${blocked ? ' acct-row-blocked' : ''}" data-id="${escHtml(a.id)}" data-sub="${isSub ? '1' : ''}"${blocked ? ' data-blocked="1"' : ''}${hostSub ? ' data-hostsub="1"' : ''}${linked ? ' data-linked="1"' : ''}${isPool ? ' data-pooled="1"' : ''}>
         <span class="acct-type-icon" title="${iconTitle}">${isPool ? POOL : isSub ? CROWN : KEY}</span>
-        <span class="acct-key-main"><span class="acct-key-line"><span class="acct-key-name">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}${hint}</span>${creditsTag}${resetTag ? `<span class="acct-reset-slot">${resetTag}</span>` : ''}</span>${(provTag || noteTag || oatTag || loginTag) ? `<span class="acct-key-extra">${provTag}${noteTag}${oatTag}${loginTag}</span>` : ''}</span>
+        <span class="acct-key-main"><span class="acct-key-line"><span class="acct-key-name">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}${hint}</span>${creditsTag}${resetTag ? `<span class="acct-reset-slot">${resetTag}</span>` : ''}</span>${extrasTag}</span>
         <span class="acct-usage-cell"${usageStampAttrs}>${rowSnap ? usageHtml(rowSnap.u, rowSnap.est) : ''}</span>
         <span class="acct-key-actions">
           <button class="acct-icon acct-def ${isDef ? 'on' : ''}" title="${isDef ? t('Default for new sessions — click to clear') : t('Set as default for new sessions')}">${isDef ? STAR_F : STAR_O}</button>

@@ -39,15 +39,24 @@ import { t } from './i18n.js';
 import { icon, el } from './channel-chrome.js';
 import { toolCommandText } from '../browser-trace.js';
 import * as T from '../channel-touch.js';
+import { showApiAccessDialog } from './channel-api-dialog.js';   // B-2198
+import { chatApiCards } from './channel-api-card-view.js';   // B-2198 part 2: the proposal's card at its call row
+
 
 const REBIND_MS = 80;
 const REFETCH_MS = 250;
 const clock = (at) => { const d = new Date(Number(at) || 0); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
 
-/** The ONE way a touched conversation is opened (the card row, the chip's menu). */
+/** The ONE way a touched conversation is opened (the card row, the chip's menu). The verdict is PURE
+ *  (T.openVerdict): an agent's SEARCH row opens the search results scoped to that conversation — the agent's query,
+ *  its hits (lane channel-search-view, .212; the owner 2026-10-04: a click opened the first hit's conversation, the
+ *  hits were nowhere to be seen); a read / a reply opens the conversation; a composed message not yet sent the Outbox. */
 export function openTouchRow(app, row) {
   if (!app || !row) return;
-  if (row.convId) app.openChannel(row.adapterId, row.convId);
+  if (row.ops && row.ops.api) { showApiAccessDialog(app, row.adapterId); return; }   // B-2198: a raw API call row opens its credential's API access (the waiting card, the log)
+  const v = T.openVerdict(row);
+  if (v.open === 'search' && typeof app.openChannelSearch === 'function') app.openChannelSearch({ adapterIds: [v.adapterId], q: v.query, convId: v.convId, convTitle: v.title, hits: v.hits });
+  else if (v.open !== 'outbox') app.openChannel(v.adapterId, v.convId);
   else if (typeof app.openChannelOutbox === 'function') app.openChannelOutbox();   // a composed message has no conversation until it is sent
 }
 
@@ -135,6 +144,7 @@ export function createChannelTouchView(view) {
     cardEl.classList.remove('chat-channel-touched');
     const box = boxOf(cardEl, false);
     if (box && !box.hidden) { box.hidden = true; box.replaceChildren(); }
+    chatApiCards(null, cardEl, []);
   }
   /** ONE box per card, rows KEYED by conversation and patched in place. */
   function renderBox(cardEl, touches) {
@@ -154,12 +164,14 @@ export function createChannelTouchView(view) {
         rowEl.type = 'button';
         rowEl.className = 'chat-channel-touch';
         rowEl.dataset.key = r.key;
-        rowEl.title = r.convId ? t('Open this conversation') : t('Not sent yet — open the Outbox');
         const g = el('span', 'cct-glyph'); g.dataset.glyph = '';
         rowEl.append(g, el('span', 'cct-name', ''), el('span', 'cct-words chat-status-dim', ''), el('span', 'cct-time chat-status-dim', ''));
         rowEl.addEventListener('click', (ev) => { ev.stopPropagation(); openTouchRow(view.app, rowEl._row); });
       }
       rowEl._row = r;
+      const verdict = T.openVerdict(r).open;
+      const tip = r.ops && r.ops.api ? t('Open API access and its log') : verdict === 'search' ? t('Show the search results') : verdict === 'outbox' ? t('Not sent yet — open the Outbox') : t('Open this conversation');   // B-2198: a raw API call row opens its credential's API access
+      if (rowEl.title !== tip) rowEl.title = tip;
       const glyph = T.glyphFor(r.kind || r.adapterId);
       const g = rowEl.querySelector('.cct-glyph');
       if (g.dataset.glyph !== glyph) { g.replaceChildren(icon(glyph, 12)); g.dataset.glyph = glyph; }
@@ -180,12 +192,22 @@ export function createChannelTouchView(view) {
         more = document.createElement('button');
         more.type = 'button';
         more.className = 'chat-channel-touches-more chat-status-dim';
-        more.addEventListener('click', (ev) => { ev.stopPropagation(); box.dataset.expanded = box.dataset.expanded === '1' ? '0' : '1'; rebind(); });
+        more.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          // .212: the tail of ONE search's rows is that search, unscoped (every conversation, grouped) — not more rows
+          const tv = box.dataset.expanded === '1' ? { open: 'expand' } : T.tailVerdict(more._rows || []);
+          if (tv.open === 'search-all' && typeof view.app?.openChannelSearch === 'function') { view.app.openChannelSearch({ adapterIds: tv.adapterIds, q: tv.query, group: true }); return; }
+          box.dataset.expanded = box.dataset.expanded === '1' ? '0' : '1'; rebind();
+        });
       }
+      more._rows = rows;
       const text = expanded ? t('Show less') : t('+{n} more', { n: hidden });
       if (more.textContent !== text) more.textContent = text;
+      const moreTip = !expanded && T.tailVerdict(rows).open === 'search-all' ? t('Show every conversation this search found') : '';
+      if (more.title !== moreTip) more.title = moreTip;
       if (box.lastElementChild !== more) box.appendChild(more);
     } else if (more) more.remove();
+    chatApiCards(view.app, cardEl, rows.filter((r) => r.ops && r.ops.api && r.proposalId).map((r) => r.proposalId));
   }
   function turnAt() { return Math.max(st.turnAtServer, st.turnAtLocal); }
   function updateChip() {

@@ -1,3 +1,4 @@
+import { wireFileDownload } from './file-download.js';
 import { EditorView, basicSetup } from 'codemirror';
 import { javascript } from '@codemirror/lang-javascript';
 import { python } from '@codemirror/lang-python';
@@ -233,10 +234,11 @@ class CodeEditor {
     const btnSave = this._btn(''); btnSave.innerHTML = '<svg style="width:12px;height:12px;vertical-align:-1px" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 1h8l3 3v9a2 2 0 01-2 2H3a2 2 0 01-2-2V3a2 2 0 012-2z"/><path d="M5 1v4h5V1M4 9h8"/></svg>'; btnSave.title = 'Save (Ctrl+S)';
     btnSave.onclick = () => this.save();
     if (this._isReadOnly) btnSave.style.display = 'none';
-    const btnDownload = this._btn('\u21E9'); btnDownload.title = 'Download';
-    // the file's machine rides along (lane raw-filename r2): without `&host=` a REMOTE file's ⇩ asked
-    // THIS machine for a path of the same name (test-raw-filename ⑧, the client host census)
-    btnDownload.onclick = () => window.open(`/api/download?path=${encodeURIComponent(filePath)}${this._host ? '&host=' + encodeURIComponent(this._host) : ''}`);
+    // the file's machine rides along (lane raw-filename r2: without `&host=` a REMOTE file's Download asked THIS
+    // machine for a path of the same name) — through the ONE file-window download (file-download.js, lane
+    // viewer-download): the SAVED copy on disk; with unsaved edits it says so once
+    const self = this;
+    const btnDownload = wireFileDownload(winInfo, { get path() { return self.filePath; }, host: this._host, dirty: () => !!this.modified });
 
     // Reload from disk (2.341.0): the editor loaded once and never looked back
     // \u2014 files rewritten by agents/other windows were unreachable without

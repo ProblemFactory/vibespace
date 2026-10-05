@@ -50,6 +50,8 @@ const caps = {
   threading: 'none',
   editSent: false, readReceipts: false,
   attachments: 'none',
+  // lane channel-avatars: VibeSpace's own talk draws initials (an agent has no picture to fetch)
+  avatars: null, avatarsWhy: 'VibeSpace agents have no profile pictures',
   // lane channel-threads: an agent conversation is flat and carries no reactions — declared, so no control appears
   // 2026-09-28 (reply PLACEMENTS): the ladder delivers a message; it cannot answer a specific one — `chat` only
   threads: Object.freeze({ read: 'none', replyInto: false, listing: 'none', placements: Object.freeze(['chat']) }),

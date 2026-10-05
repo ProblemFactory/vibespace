@@ -436,6 +436,8 @@
   display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1; overflow: hidden;
 }
 .editor-toolbar-right { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+/* lane viewer-download: on a phone the right group no longer runs off the screen — Download leads it, the rest scrolls */
+@media (max-width: 768px) { .editor-toolbar-right { flex-shrink: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; } .editor-toolbar-right .file-download-btn { order: -1; flex: none; } }
 .editor-toolbar-sep {
   width: 1px; height: 16px; background: var(--border); margin: 0 2px; flex-shrink: 0;
 }
@@ -638,3 +640,7 @@
    way of per-type toolbars; .window-content is position:relative */
 .viewer-reload-btn { position: absolute; top: 8px; right: 12px; z-index: 30; opacity: 0.55; }
 .viewer-reload-btn:hover { opacity: 1; }
+/* lane viewer-download: a viewer without a toolbar (PDF, video, audio…) floats its Download beside the ⟳ */
+.viewer-download-float { position: absolute; top: 8px; right: 44px; z-index: 30; opacity: 0.55; }
+.viewer-download-float:hover { opacity: 1; }
+.file-download-btn svg { width: 14px; height: 14px; }

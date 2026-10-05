@@ -347,6 +347,8 @@ function seedReactions(kind, convId, records) {
   return state;
 }
 /** A 1×1 PNG — what a CUSTOM fake emoji's picture fetches (through OUR route). */
+/** lane channel-avatars: the fake people with a profile picture (Cass has none). */
+const FAKE_FACES = new Set(['u-ada', 'u-brook']);
 const ONE_PX_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
 
 /** `'ui'` has no stable id, so it DECLARES one derived from the content. */
@@ -439,6 +441,9 @@ function makeFakeAdapter({ kind, receive, sendAs = ['user'], now = () => Date.no
     // call is metered one request against a generous fixture budget
     attachments: receive === 'scan' ? 'metadata' : 'fetch',
     olderHistory: receive === 'scan' ? 'none' : 'page',
+    // lane channel-avatars: a fake person's picture (Ada, Brook — Cass has none: her initials stay)
+    avatars: receive === 'scan' ? null : 'fetch',
+    ...(receive === 'scan' ? { avatarsWhy: 'a scanned host has no profile pictures' } : {}),
     budget: { unit: 'request', default: 600, settingKey: null, metered: true },
     // R4 (B-6acc): the poll fake can start a NEW conversation (`compose`) —
     // the suites drive the compose verb through it; the push fake is read-only
@@ -664,6 +669,14 @@ function makeFakeAdapter({ kind, receive, sendAs = ['user'], now = () => Date.no
       },
       /** ONE attachment's bytes: a fixture PNG for an image, a text body
        *  otherwise — only for an id a record of this conversation names. */
+      /** lane channel-avatars: ONE person's picture — paced, then metered (the vendor-request rule); Cass has none. */
+      avatarImage: receive === 'scan' ? undefined : async (author) => {
+        if (typeof deps.pace === 'function') await deps.pace(1);
+        meter(1);
+        const { ChannelError } = require('./index.js');
+        if (!FAKE_FACES.has(String(author))) throw new ChannelError('not-found', 'fake: this person has no profile picture', { retryable: false, detail: { why: 'no-picture' } });
+        return { data: ONE_PX_PNG, mime: 'image/png' };
+      },
       fetchAttachment: receive === 'scan' ? undefined : async (convId, { messageId, attachmentId } = {}) => {
         meter(1);
         const c = getWorld().get(convId);

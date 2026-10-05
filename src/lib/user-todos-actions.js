@@ -172,6 +172,16 @@ export function inboxModel(app) {
       showToast((r && r.code === 'bad-state') ? t('That request was already decided') : (r && r.error) || t('server unreachable'), { type: 'error' });
       return false;
     }
+    if (rec && rec.action && rec.action.type === 'channel-api-proposal') {
+      // B-2198 part 2: the raw-API proposal's Approve / Reject where it appears — the card's own route, naming the digest this item showed
+      const id = encodeURIComponent(rec.action.id);
+      const r = answer === 'reject'
+        ? await fetchJson(`/api/channels/api/proposals/${id}/reject`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+        : await fetchJson(`/api/channels/api/proposals/${id}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ shown: rec.action.shown }) });
+      if (r && r.ok) { showToast(answer === 'reject' ? t('Rejected — the agent is told on its next turn') : t('Approved — the card in the conversation shows how it went')); return true; }
+      showToast(r && r.code === 'not-pending' ? t('That request was already decided') : r && r.code === 'proposal_changed' ? t('That card changed after it was shown — nothing ran; read it again') : (r && r.error) || t('server unreachable'), { type: 'error' });
+      return false;
+    }
     if (rec && rec.action && rec.action.type === 'browser-proposal') {
       // lane browser-propose: THE person's answer to an agent's proposal, where it appears — the same route the chat card
       // presses, with the digest of what this row showed (`shown`); the proposal's card patches itself, the runner answers

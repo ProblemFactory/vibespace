@@ -150,7 +150,19 @@ function rawRequest(pathq, raw, { draft = false, threadId = null } = {}) {
  *  are SCOPE identifiers, not request targets — declared because they are
  *  host literals in a file that constructs requests, and the census reads
  *  code, not intent. */
-const EGRESS = Object.freeze(['oauth2.googleapis.com', 'accounts.google.com', 'gmail.googleapis.com', 'www.googleapis.com', 'mail.google.com']);
+const EGRESS = Object.freeze(['oauth2.googleapis.com', 'accounts.google.com', 'gmail.googleapis.com', 'www.googleapis.com', 'mail.google.com',
+  // B-2198: the raw API's other Google hosts (API below) — the ORCH's ONE fetch site reaches them with this account's token
+  'docs.googleapis.com', 'sheets.googleapis.com', 'slides.googleapis.com', 'drive.googleapis.com', 'people.googleapis.com', 'tasks.googleapis.com']);
+/** B-2198: THE RAW-API ROW (the one schema: src/channels/index.js validateApi) — the Google APIs a Gmail account's token
+ *  reaches through the raw API's fence, declared HERE beside `apiBearer`; the fence and the orchestrator name no vendor.
+ *  Every host is in EGRESS above (test-channels-egress derives the census from this row). */
+const API_ROW = Object.freeze({
+  label: 'Google APIs',
+  hosts: Object.freeze(['www.googleapis.com', 'gmail.googleapis.com', 'docs.googleapis.com', 'sheets.googleapis.com', 'slides.googleapis.com', 'drive.googleapis.com', 'people.googleapis.com', 'tasks.googleapis.com']),
+  docs: Object.freeze(['https://developers.google.com/workspace/explore', 'https://developers.google.com/gmail/api/reference/rest']),
+  readByPost: Object.freeze([/:batchGet$/]),
+  sensitive: Object.freeze([/\/permissions/, /trash/i, /delete/i, /\/acl/]),   // `batchDelete` too
+});
 
 /** Per-record OPTIONS the engine stores and the panel edits (§6.3). */
 /** A declared `label` / `help` is a KEY the client renders with `t()` (a3
@@ -258,6 +270,8 @@ const caps = Object.freeze({
   // user is the vendor's cap; the default 3000 leaves the other half — the
   // default and the setting come from the gmail table of src/channel-settings.js)
   attachments: 'fetch',
+  // lane channel-avatars (B-5fe1): a mail sender has no picture any Gmail API answers — the initials stay
+  avatars: null, avatarsWhy: 'Gmail has no profile pictures for mail senders',
   // lane message-facts (B-f066, design 007): the per-message FACTS every record carries from its headers (the closed
   // kinds of src/channel-facts.js — the contract suite holds every emit to this list), and `factsOf(convId)` — ONE
   // metadata read of a thread stored before them, asked only by a person's Details click (the engine's `messageFacts`)
@@ -1126,6 +1140,9 @@ function create(record = {}, deps = {}) {
 
   return {
     live,
+    // B-2198: the raw API's bearer — handed to src/server/channel-api.js's ONE fetch site only, never to a route; its
+    // vendor facts are the module's declared `API_ROW` (the registry refuses a bearer without one)
+    apiBearer: () => accessToken(),
     auth: {
       async state() {
         const cred = credential();
@@ -1621,9 +1638,9 @@ async function integrationTest({ resolved } = {}) {
   return { ok: true, detail: { source: r.source, clusterKey: r.clusterKey || null, clientId: id, authHost: new URL(url).host, scope: SCOPE } };
 }
 
-const adapter = { kind: KIND, caps, create, blocksOf, sendCapsOf };
+const adapter = { kind: KIND, caps, create, api: API_ROW, blocksOf, sendCapsOf };
 module.exports = {
-  kind: KIND, caps, create, adapter, label: LABEL, integration: INTEGRATION, integrationTest, OPTIONS, UNGATED, RATE_OK,
+  kind: KIND, caps, create, adapter, API_ROW, label: LABEL, integration: INTEGRATION, integrationTest, OPTIONS, UNGATED, RATE_OK,
   EGRESS, SCOPE, SCOPE_SEND, SCOPE_COMPOSE, SCOPE_MODIFY, SCOPE_MAIL, sendVerbsOf, PROPOSAL_HEADER, PUBSUB_SCOPE, TOKEN_URL, AUTH_URL, API, MAILBOX_MEMO_MS, THREAD_MEMO_MS, META_PER_LIST, unitsFor, queryOf, scopeOf, effectiveOptions,
   toRecord, walkParts, parseAddress, addressList, stripHtml, typedFailure, buildMime, replyHeaders, encodeHeader, encodeAddressHeader,
   rawRequest, JSON_RAW_MAX, UPLOAD_API,   // design 005 §2.B: the upload form past the JSON body's cap

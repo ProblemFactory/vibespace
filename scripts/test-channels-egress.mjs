@@ -59,9 +59,14 @@ const blankComments = (text) => text.split('\n').map((l) => (/^\s*(\/\/|\*|\/\*)
 const hostsOf = (text) => { const out = new Set(); let m; HOST.lastIndex = 0; while ((m = HOST.exec(text))) { const h = m[1].toLowerCase(); if (!EXEMPT(h)) out.add(h); } return out; };
 
 /**
- * @param files  [{rel, text, egress?: string[]|null}] — `egress` is the
+ * @param files  [{rel, text, egress?: string[]|null, api?: row[]}] — `egress` is the
  *               adapter's own declaration for src/channels/<kind>.js, null
- *               for every other file
+ *               for every other file; `api` = the RAW-API rows the file
+ *               DECLARES (B-2198, lane channel-api-declared): each row's hosts
+ *               (+ its `refresh` endpoint) are hosts the file NAMES — the
+ *               orchestrator's ONE fetch site reaches them with this file's
+ *               credential — and its `docs` URLs are documentation the agent
+ *               reads, never a request (those exact literals are blanked)
  * @param allow  { 'rel|host': reason }
  * @returns { rows, offenders, deadAllow, undeclared, deadDeclared }
  */
@@ -72,9 +77,11 @@ function census(files, allow) {
   const deadDeclared = [];   // an EGRESS entry no literal in the file matches
   const used = new Set();
   for (const f of files) {
-    const code = blankComments(f.text);
+    let code = blankComments(f.text);
+    for (const row of f.api || []) for (const u of row.docs || []) code = code.split(u).join('');
     const primitive = PRIMITIVE.test(code);
     const hosts = hostsOf(code);
+    for (const row of f.api || []) for (const h of [...(row.hosts || []), ...(row.refresh ? [new URL(row.refresh).host] : [])]) hosts.add(String(h).toLowerCase());
     const isAdapter = Array.isArray(f.egress);
     rows.push({ rel: f.rel, primitive, hosts: [...hosts].sort(), adapter: isAdapter });
     if (isAdapter) {
@@ -97,6 +104,7 @@ function census(files, allow) {
 // Seeded at birth with the two files §3.1 names (gmail-sync, mounts) and with
 // every other construction the tree held when the census was born, each with
 // its reason. A NEW pair fails the suite until it is added HERE with one.
+const RAW_API_MOUNT = 'B-2198 (D3): a host of the storage mounts\' DECLARED raw-API row (MountManager.OAUTH_API) — the raw API\'s orchestrator (src/server/channel-api.js, ONE fetch site, behind the grant) reaches it with a mount\'s lent token';
 const ALLOW = {
   'src/server/channels-engine.js|problemfactory.github.io': 'design 018: the DEFAULT of the `channels.slackRelayUrl` setting — the static relay page Slack sends a member\'s BROWSER back through (a redirect_uri); this server never requests it',
   // ── the two seeds §3.1 names ──
@@ -108,6 +116,9 @@ const ALLOW = {
   'src/mounts.js|graph.microsoft.com': 'the native OneDrive mount\'s Microsoft Graph base (global cloud), under the user\'s consent',
   'src/mounts.js|graph.microsoft.us': 'the native OneDrive mount\'s Microsoft Graph base (US Government cloud)',
   'src/mounts.js|graph.microsoft.de': 'the native OneDrive mount\'s Microsoft Graph base (Germany cloud)',
+  'src/mounts.js|oauth2.googleapis.com': 'B-2198 (D3): the token endpoint (`refresh`) of the mounts\' declared raw-API row — the raw API\'s orchestrator refreshes a lent mount token there, in memory, single-flight',
+  'src/mounts.js|www.googleapis.com': RAW_API_MOUNT, 'src/mounts.js|gmail.googleapis.com': RAW_API_MOUNT, 'src/mounts.js|docs.googleapis.com': RAW_API_MOUNT, 'src/mounts.js|sheets.googleapis.com': RAW_API_MOUNT,
+  'src/mounts.js|slides.googleapis.com': RAW_API_MOUNT, 'src/mounts.js|drive.googleapis.com': RAW_API_MOUNT, 'src/mounts.js|people.googleapis.com': RAW_API_MOUNT, 'src/mounts.js|tasks.googleapis.com': RAW_API_MOUNT,
   'src/mounts.js|microsoftgraph.chinacloudapi.cn': 'the native OneDrive mount\'s Microsoft Graph base (China cloud)',
   // ── every other construction the tree held when the census was born ──
   'src/server/cli-env.js|api.anthropic.com': '§ban-safety: the guarded models fetch — its GATES are pinned by scripts/test-vendor-whitelist.mjs; this row only records that the host is a known decision',
@@ -139,20 +150,22 @@ if (!files) {
   const input = [];
   for (const rel of wanted) {
     let text; try { text = fs.readFileSync(path.join(REPO, rel), 'utf-8'); } catch { continue; }   // tracked but deleted
-    let egress = null;
+    let egress = null, api = null;
+    if (rel === 'src/mounts.js') api = Object.values(require(path.join(REPO, rel)).MountManager.OAUTH_API);   // the storage mounts' declared rows
     // An adapter's LIVE lane (src/channels/live/<kind>.js, P1b) constructs its own
     // requests (the Gmail Pub/Sub pull) and declares its own EGRESS the same way;
     // the lane CORE (lane.js) constructs none and declares none.
     if (/^src\/channels\/(live\/)?[^/]+\.js$/.test(rel) && !/\/(index|fake|lane)\.js$/.test(rel)) {
       const mod = require(path.join(REPO, rel));
       egress = Array.isArray(mod.EGRESS) ? mod.EGRESS : [];
+      api = mod.adapter && mod.adapter.api ? [mod.adapter.api] : null;   // the raw-API row it declares (derived, never a hand list)
       // A lane whose transport is a vendor SDK (live/lark.js) constructs no
       // request itself: an EMPTY declaration is honest there, and the census
       // still holds it to it (a literal that appears later is undeclared).
       const constructs = PRIMITIVE.test(blankComments(text));
       ok(Array.isArray(mod.EGRESS) && (mod.EGRESS.length > 0 || !constructs), `${rel} declares ${constructs ? 'a non-empty' : 'its'} EGRESS (${constructs ? 'an adapter that constructs requests names its hosts' : 'it constructs no request of its own, so an empty declaration is the truth'})`);
     }
-    input.push({ rel, text, egress });
+    input.push({ rel, text, egress, api });
   }
   const r = census(input, ALLOW);
   const egressFiles = r.rows.filter((x) => x.primitive || x.adapter);
@@ -178,6 +191,16 @@ if (!files) {
 console.log('§2 controls: the rule over synthetic files');
 {
   const mk = (rel, text, egress = null) => ({ rel, text, egress });
+  // B-2198 (lane channel-api-declared): a declared raw-API row's hosts are NAMED hosts (EGRESS / ALLOW), its docs are not
+  const ROW = { hosts: ['api.vendor.test'], docs: ['https://docs.vendor.test/ref'] };
+  const ra = census([{ ...mk('src/channels/acme.js', "const doc = 'https://docs.vendor.test/ref';\nawait fetch(x);\n", []), api: [ROW] }], {});
+  ok(ra.undeclared.length === 1 && ra.undeclared[0].host === 'api.vendor.test', 'POSITIVE: a host of the adapter\'s declared raw-API row missing from its EGRESS is undeclared (the row is egress)', ra.undeclared);
+  const rb = census([{ ...mk('src/channels/acme.js', "const doc = 'https://docs.vendor.test/ref';\nawait fetch(x);\n", ['api.vendor.test']), api: [ROW] }], {});
+  ok(rb.undeclared.length === 0 && rb.deadDeclared.length === 0, 'NEGATIVE: the row\'s hosts in EGRESS + its docs URL (documentation the agent reads) is clean');
+  const rc = census([{ ...mk('src/channels/acme.js', "const doc = 'https://docs.vendor.test/ref';\nawait fetch('https://docs.vendor.test/other');\n", ['api.vendor.test']), api: [ROW] }], {});
+  ok(rc.undeclared.length === 1 && rc.undeclared[0].host === 'docs.vendor.test', 'POSITIVE: only the EXACT declared docs literal is documentation — another literal of that host is still egress', rc.undeclared);
+  const rd = census([{ ...mk('src/x.js', 'await fetch(u);\n'), api: [{ ...ROW, refresh: 'https://token.vendor.test/t' }] }], {});
+  ok(rd.offenders.map((o) => o.host).sort().join(',') === 'api.vendor.test,token.vendor.test', 'POSITIVE: a non-adapter file\'s declared row (hosts + refresh) needs an allowlisted decision per host', rd.offenders);
   const r1 = census([mk('src/x.js', "const u = 'https://vendor.test/api';\nawait fetch(u);\n")], {});
   ok(r1.offenders.length === 1 && r1.offenders[0].host === 'vendor.test', 'POSITIVE: a host literal in a file with a request primitive is an undecided egress');
   const r2 = census([mk('src/x.js', "const u = 'https://vendor.test/api';\nawait fetch(u);\n")], { 'src/x.js|vendor.test': 'reason' });

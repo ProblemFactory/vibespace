@@ -100,7 +100,7 @@ const DISABLED_KEY = 'This account is disabled — enable it in the account’s 
     st.close && st.close();
   }
   const registry = CH.createChannelRegistry();
-  registry.register(lark);
+  registry.register(lark.adapter);   // int212: the adapter object (as the engine registers it) — B-2198's registry refuses a bearer without the `api` row it carries
   const eng = ENG.create({ dataDir: dir, env: {}, registry, broadcast: () => { }, log: quiet, serverSetting: () => undefined, liveSessions: () => [], now: () => Date.now() });
   engines.push(eng);
   const th = await eng.threadRefresh('lark', 'oc_thr', 'om_t0');

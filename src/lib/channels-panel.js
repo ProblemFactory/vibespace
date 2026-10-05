@@ -48,7 +48,7 @@ import { registerMenuItem, menuItems } from './contributions.js';
 import { registerWindowType } from './window-types.js';
 import { UI_ICONS } from './icons.js';
 // the shared chrome primitives (one SVG helper, one textContent element, one house button)
-import { icon, btn, noteLine, el as chanEl, convAvatar, accountBadge } from './channel-chrome.js';
+import { icon, btn, noteLine, el as chanEl, convAvatar, accountBadge, warmAvatars } from './channel-chrome.js';
 // lane channels-badges: ONE badge per account — the rows' corner and the account card's icon read the same record
 import { accountBadges, INTERNAL_BADGE } from './channel-avatar.js';
 // PURE, bundled directly (the task-color-seq / quota-model pattern). THE
@@ -78,6 +78,7 @@ import { showGrantAccessDialog, showNotifyDialog, showGrainMenu, assignmentSumma
 import { grainSummaryText } from './channel-words.js';
 // P3: the reach/policy dialog (row menu) and the Outbox window (header button).
 import { showReachDialog } from './channel-reach-editor.js';
+import { showApiAccessDialog } from './channel-api-dialog.js';   // B-2198
 import './channel-outbox.js';
 // r4 (design-integrations-per-account, chunk 3): the account dialogs — every
 // one the storage dialog component (src/lib/mounts-dialog.js, D1)
@@ -348,11 +349,15 @@ function openConversationOf(app, convs) {
 /** SEARCH ONE ACCOUNT's messages (2026-09-26, design §6.5): the server reads
  *  the local logs asynchronously with a byte cap; a result opens its
  *  conversation. Every string is vendor text ⇒ textContent only. */
-function showSearchDialog(app, a, { q: initial = '' } = {}) {
+function showSearchDialog(app, a, { q: initial = '', convId = null, convTitle = '', group = false, hits: agentHits = null } = {}) {
   // R3 (§23): the first screen's filter hands its words to EVERY connected account's search (`a` = a list)
   const accounts = Array.isArray(a) ? a.filter(Boolean) : [a];
-  const title = accounts.length === 1 ? t('Search messages — {label}', { label: accounts[0].label || accounts[0].id }) : t('Search messages…');
-  const { body, close } = createModalShell({ id: 'chan-search-dialog', title, dialogClass: 'chan-dialog chan-search', escapeToClose: true });
+  // lane channel-search-view (.212): an AGENT'S search row opens here — pre-filled and run, scoped to its conversation
+  // (`convId`; "Search all conversations" drops the scope), or unscoped and grouped by conversation (the card's tail)
+  let scope = convId ? { convId: String(convId), title: String(convTitle || convId) } : null;
+  const titleText = () => (scope ? t('Search: {q} — {conversation}', { q: initial, conversation: scope.title }) : scope === null && (convId || group) ? t('Search: {q}', { q: initial })
+    : accounts.length === 1 ? t('Search messages — {label}', { label: accounts[0].label || accounts[0].id }) : t('Search messages…'));
+  const { dialog, body, close } = createModalShell({ id: 'chan-search-dialog', title: titleText(), dialogClass: 'chan-dialog chan-search', escapeToClose: true });
   const row = document.createElement('div');
   row.className = 'chan-search-row';
   const input = document.createElement('input');
@@ -360,6 +365,11 @@ function showSearchDialog(app, a, { q: initial = '' } = {}) {
   input.spellcheck = false;
   const go = btn(t('Search'), null, 'mounts-btn-primary');
   row.append(input, go);
+  if (scope) {
+    const all = btn(t('Search all conversations'), () => { scope = null; all.remove(); const h = dialog.querySelector('h3'); if (h) h.textContent = titleText(); run(); });
+    all.classList.add('chan-search-all');
+    row.appendChild(all);
+  }
   const status = chanLine('chan-flow-status', '');
   const list = document.createElement('div');
   list.className = 'chan-search-results';
@@ -372,6 +382,9 @@ function showSearchDialog(app, a, { q: initial = '' } = {}) {
   let gen = 0, observer = null;
   const aroundCache = new Map();   // the sheet's records, for the dialog's life (never stored)
   const vendorOf = (acc) => (acc.vendor ? t(acc.vendor) : (acc.label || acc.kind || acc.id));
+  let curQ = '';
+  // .212: the words a hit matched, MARKED — pieces by textContent, the mark a library element (PURE SR.matchParts)
+  const markInto = (node, text) => { for (const p of SR.matchParts(text, curQ)) { if (!p.hit) { node.appendChild(document.createTextNode(p.text)); continue; } const m = document.createElement('mark'); m.className = 'chan-search-mark'; m.textContent = p.text; node.appendChild(m); } };
   const hitRow = (acc, head0, who0, text0, extra) => {
     const it = document.createElement('div');
     it.className = 'chan-search-hit';
@@ -379,9 +392,10 @@ function showSearchDialog(app, a, { q: initial = '' } = {}) {
     head.className = 'chan-search-head';
     const ti = document.createElement('b'); ti.textContent = head0;
     const who = document.createElement('span'); who.className = 'chan-search-who'; who.textContent = who0;
-    head.append(ti, who);
+    if (head0) head.appendChild(ti);   // .212: scoped / grouped — the conversation is said once, a hit is author · time · words
+    head.appendChild(who);
     if (extra) head.appendChild(extra);
-    const tx = document.createElement('div'); tx.className = 'chan-search-text'; tx.textContent = text0;
+    const tx = document.createElement('div'); tx.className = 'chan-search-text'; markInto(tx, text0);
     it.append(head, tx);
     return it;
   };
@@ -422,11 +436,13 @@ function showSearchDialog(app, a, { q: initial = '' } = {}) {
     if (q.length < 2) { status.textContent = t('Type at least 2 characters.'); return; }
     if (go.disabled) return;   // a held Enter key: one press at a time (the server's 2 s floor is the belt)
     const my = ++gen;
+    const sc = scope;
+    curQ = q;
     if (observer) { observer.disconnect(); observer = null; }
     go.disabled = true; status.textContent = t('Searching…');
     list.textContent = '';
     const s1 = section('chan-search-saved', t('Saved messages'));
-    const answers = await Promise.all(accounts.map((acc) => fetchJson(`/api/channels/search?adapter=${encodeURIComponent(acc.id)}&q=${encodeURIComponent(q)}`).then((x) => ({ acc, x }))));
+    const answers = await Promise.all(accounts.map((acc) => fetchJson(`/api/channels/search?adapter=${encodeURIComponent(acc.id)}&q=${encodeURIComponent(q)}${sc ? `&conv=${encodeURIComponent(sc.convId)}` : ''}`).then((x) => ({ acc, x }))));
     if (my !== gen) return;
     go.disabled = false;
     const bad = answers.find(({ x }) => !x || x.error);
@@ -440,10 +456,26 @@ function showSearchDialog(app, a, { q: initial = '' } = {}) {
     }
     r.results.sort((m, n) => (Number(n.record && n.record.at) || 0) - (Number(m.record && m.record.at) || 0));
     status.textContent = r.results.length ? (r.truncated ? t('{n} results — more exist; narrow the words', { n: r.results.length }) : t('{n} results', { n: r.results.length })) : t('No message matches.');
+    // .212: the agent's hits the saved copy no longer holds (a search older than its window) are SAID, never invented
+    if (sc && q === initial && Array.isArray(agentHits) && agentHits.length) {
+      const have = new Set(r.results.map((h) => String((h.record && h.record.vendorId) || '')));
+      const gone = agentHits.filter((h) => h && !have.has(String(h.msgId))).length;
+      if (gone) status.textContent += ` — ${t('{n} of the agent’s hits are not in the saved copy', { n: gone })}`;
+    }
     s1.note.textContent = SR.coverageText(cov, { t });
-    for (const hit of r.results) {
-      const it = hitRow(null, hit.title || chanCaps.untitledText(null, { t }), `${(hit.record.author && (hit.record.author.name || hit.record.author.id)) || ''} · ${rowTime(hit.record.at)}`, String(hit.record.text || '').slice(0, 300));
-      it.onclick = () => { close(); app.openChannel(hit.adapterId, hit.convId); };
+    const grouped = group && !sc;
+    const ck = (h) => `${h.adapterId}\u0000${h.convId}`;
+    let ordered = r.results;
+    if (grouped) { const first = new Map(); r.results.forEach((h, i) => { if (!first.has(ck(h))) first.set(ck(h), i); }); ordered = r.results.map((h, i) => [first.get(ck(h)), i, h]).sort((x, y) => x[0] - y[0] || x[1] - y[1]).map((x) => x[2]); }
+    let lastKey = null;
+    for (const hit of ordered) {
+      const name = hit.title || chanCaps.untitledText(null, { t });
+      if (grouped && ck(hit) !== lastKey) { const gh = document.createElement('div'); gh.className = 'chan-search-group'; gh.textContent = name; s1.rows.appendChild(gh); }
+      lastKey = ck(hit);
+      const it = hitRow(null, sc || grouped ? '' : name, `${(hit.record.author && (hit.record.author.name || hit.record.author.id)) || ''} · ${rowTime(hit.record.at)}`, String(hit.record.text || '').slice(0, 300));
+      it.dataset.vid = String(hit.record.vendorId || '');
+      // .212: a hit opens its conversation AT that message (the window's own jump)
+      it.onclick = () => { close(); app.openChannel(hit.adapterId, hit.convId, { jump: { vid: hit.record.vendorId, at: hit.record.at } }); };
       s1.rows.appendChild(it);
     }
     // SECTION TWO — every searched account's own search, on this press
@@ -482,6 +514,7 @@ function showSearchDialog(app, a, { q: initial = '' } = {}) {
       }
       st.match = x.match || st.match; st.adds = x.adds || st.adds;
       for (const h of x.hits || []) {
+        if (sc && String(h.convId) !== sc.convId) continue;   // .212: scoped to one conversation
         const key = `${st.acc.id}\u0000${h.convId}\u0000${h.vendorId}`;
         if (shown.has(key)) continue;   // a hit section one already holds appears once (V6)
         shown.add(key);
@@ -521,6 +554,17 @@ function showSearchDialog(app, a, { q: initial = '' } = {}) {
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); if (!e.repeat) run(); } });
   if (initial) { input.value = initial; run(); }   // the panel's "Search messages for …" — the owner's press on it
   setTimeout(() => input.focus(), 30);
+}
+
+/** .212 THE AGENT'S SEARCH, AS RESULTS (`app.openChannelSearch` — the card's search row and its tail; lane
+ *  channel-search-view): the accounts the touches name, the search dialog pre-filled and run — scoped to one
+ *  conversation, or unscoped and grouped by conversation. */
+export async function openSearchResults(app, { adapterIds = [], q = '', convId = null, convTitle = '', group = false, hits = null } = {}) {
+  const want = new Set((adapterIds || []).map(String));
+  const d = await fetchJson('/api/channels');
+  const accounts = (d && Array.isArray(d.adapters) ? d.adapters : []).filter((x) => x && want.has(String(x.id)));
+  if (!accounts.length) { showToast(t('That account is no longer connected'), { type: 'warn' }); return; }
+  showSearchDialog(app, accounts, { q, convId, convTitle, group, hits });
 }
 
 /** THE OPTIONS EDITOR: the adapter's DECLARED options only (a select for a
@@ -748,6 +792,8 @@ export function registerChannelAdapterMenu() {
   // are a grain of their own (a new rule starts with its access)
   registerMenuItem({ menu: M, group: '1_rows', order: 10, when: (c) => !A(c).builtin, label: () => t('Grant access…'), run: (c) => showGrantAccessDialog(c.app, { kind: 'account', adapter: A(c) }) });
   registerMenuItem({ menu: M, group: '1_rows', order: 11, when: (c) => !A(c).builtin, label: () => t('Notify…'), run: (c) => showNotifyDialog(c.app, { kind: 'account', adapter: A(c) }) });
+  // B-2198: the RAW API pass-through — who may call this account's vendor API, at which tier (off until granted)
+  registerMenuItem({ menu: M, group: '1_rows', order: 11.5, when: (c) => !A(c).builtin && ['lark', 'slack', 'gmail'].includes(A(c).kind), label: () => t('API access…'), run: (c) => showApiAccessDialog(c.app, A(c).id) });
   registerMenuItem({ menu: M, group: '1_rows', order: 12, when: (c) => !A(c).builtin, label: () => t('Conversations matching a rule…'), run: (c) => showGrantAccessDialog(c.app, { kind: 'pattern', adapter: A(c), id: null }) });
   registerMenuItem({ menu: M, group: '1_rows', order: 20, when: (c) => (A(c).optionsSchema || []).length > 0, label: () => t('Options'), run: (c) => showOptionsDialog(c.app, A(c)) });
   registerMenuItem({ menu: M, group: '1_rows', order: 30, when: (c) => !!A(c).push, label: () => t('Push…'), tooltip: () => pushWhat(), run: (c) => showPushDialog(c.app, A(c)) });
@@ -1319,6 +1365,8 @@ export function renderChannelsPanel(app, c) {
     //  under it. lane channels-fold: FOLDED BY DEFAULT (foldsFrom) — the user's unfold is user state, synced
     const ib = internalBlock(fs.shown, { folded: (FOLDS || foldsFrom(null)).internal && !q.trim(), now });
     for (const r of ib.rows) list.appendChild(r.kind === 'internal-head' ? internalHead(r.block) : groupRow(r, now));
+    // lane channel-avatars: the attention list warms its VISIBLE direct chats' pictures (≤ Av.WARM_MAX — never an account sweep)
+    warmAvatars(ib.rows.filter((r) => r && r.conv && r.conv.peer).slice(0, 40).map((r) => ({ account: r.conv.adapterId, author: r.conv.peer, conv: r.conv.id })));
     const allEnd = fs.view === 'all' ? endOfList(allName) : null;
     if (allEnd) list.appendChild(allEnd);
     if (fs.moreInAll > 0) {
@@ -1462,7 +1510,7 @@ export function renderChannelsPanel(app, c) {
     // THE LOOK (channel-polish): the conversation's avatar — the SAME circle its window's bar wears
     // (an agent group the people glyph, a mail thread the mail glyph, a chat the title's initials)
     // B-5fe1: …wearing its ACCOUNT's badge (the vendor glyph on the account's own hue — two Lark accounts differ)
-    el.appendChild(convAvatar({ key: r.key, title: r.title, kind: r.conv ? r.conv.kind : '', group: r.kind === 'group', badge: r.account }, null, 'chan-grow-av'));
+    el.appendChild(convAvatar({ key: r.key, title: r.title, kind: r.conv ? r.conv.kind : '', group: r.kind === 'group', badge: r.account, pic: r.conv && r.conv.peer ? { account: r.conv.adapterId, author: r.conv.peer } : null }, null, 'chan-grow-av'));
     const line = document.createElement('div');
     line.className = 'chan-grow-line';
     const title = document.createElement('span');

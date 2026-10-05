@@ -190,6 +190,8 @@ const TABLE = {
   'src/server/channels-engine.js :: searchFor(': { rules: BELT, pin: /text: agentText\(ax\.text, \{ kind: 'block', max: 400 \}\)/, why: 'each search hit\'s 400-character cut, judged after the cut' },
   'src/server/channels-engine.js :: readThreadFor(': { rules: ['declared:answers through withView(agent:true) → agentCopy — its row above'], pin: /threadRead\(adapterId, convId, msg, \{ limit, agent: true \}\)/, why: 'the thread read is the same agent copy' },
   'src/server/channels-engine.js :: stashFor(': { rules: ['frame-inert', 'bounded', 'declared:the reaction digest line is src/channel-reactions.js reactionDigestLine (inertFrameLine); a wake / receipt stash carries channel-filter\'s block or channel-policy\'s receipt (their pieces inertFrames + inertFrameLine)'], pin: /const title = agentText\(en\.title \|\| convId, \{ kind: 'line', max: 120 \}\)/, why: 'a vendor title as one piece through the belt; the rest composed by judged producers' },
+  'src/server/channel-api-cards.js :: deliverToConversation(': { rules: ['declared:the raw-API receipt is PURE src/channel-api-card.js receiptText — the agent\'s OWN frozen request (fenced by src/channel-api.js), the status + byte count, the user\'s reject reason; no vendor text rides it (the answer stays behind `api wait`, belted there)'], pin: null, why: 'B-2198 part 2: the proposal\'s next-turn receipt' },
+  'src/server/channel-api-cards.js :: stashFor(': { rules: ['declared:the same receiptText as its deliverToConversation row (the ladder refused: stashed)'], pin: null, why: 'B-2198 part 2: the receipt stashed for the next turn' },
   'src/server/channels-engine.js :: deliverToConversation(': { rules: ['declared:the wake block (src/channel-filter.js rows) and the receipt (src/channel-policy.js: inertFrames + inertFrameLine at every piece) are composed by their producers'], pin: null, why: 'the engine hands a judged block to the ladder' },
   'src/server/channels-engine.js :: renderWakeBlock(': { rules: ['declared:src/channel-filter.js renders (its row)'], pin: null, why: 'call site' },
   'src/server/channels-engine.js :: renderDigestBlock(': { rules: ['declared:src/channel-filter.js renders (its row)'], pin: null, why: 'call site' },
@@ -667,6 +669,8 @@ function printPieces(src) {
 // id / a conversation key ending in an opener was live before the next line's `>` — an id is a line piece through `agentId`.
 const JUDGES = ['judged', 'own', 'vibespace', 'user', 'lineage', 'log'];
 const JUDGED_DOORS = {   // door → [file, a pin on its belt call]
+  // B-2198 the raw API: every string of a vendor's answer (body, header values, a proposal's result) through redaction + the belt
+  apiAnswer: ['src/server/channel-api.js', /if \(typeof v === 'string'\) return toAgentText\(redactSecrets\(v\)\.text, \{ max: Math\.max\(1, v\.length\) \}\);/],
   agentId: ['src/server/channels-engine.js', /const agentId = \(v, max = 512\) => \(v == null \? v : agentText\(v, \{ kind: 'line', max \}\)\)/],
   // verify r4 F1: the task answers' doors (src/agent-routes.js) and the nudge's two cuts (src/backlog-select.js — a cut, then the rule)
   taskShowAnswer: ['src/agent-routes.js', /const taskShowAnswer = \(t, openSorted\) => \(\{ id: t\.id, title: taskLine\(t\.title\), archived: !!t\.archived, objective: t\.objective == null \? t\.objective : taskBlock\(t\.objective\), backlog: \(openSorted \|\| \[\]\)\.map\(taskItemAnswer\), progress: \(t\.progress \|\| \[\]\)\.slice\(-10\)\.map\(taskEntryAnswer\)/],
@@ -748,6 +752,15 @@ const PRINTS = {
     'r.attempt': `${V}:the dispatch attempt nonce (hub-minted hex, or the caller's own --again value sanitized at the route)`,
   }),
   ...rows('data/bin/vibespace-channels', {
+    // B-2198 the raw API verb (`api …`): the vendor's answer is belted at the door (apiAnswer); ids, codes, counts are ours
+    'r.proposal.id': `${V}:an API proposal id`, 'r.proposal.status': `${V}:the API proposal status enum`, 'r.proposal.reason': 'user:the user\'s own reject reason',
+    'r.proposal.result': 'judged:apiAnswer — the approved call\'s answer (status, headers, body), belted', 'r.creds': 'user:the credentials the user granted (account labels + ids + tiers)',
+    'JSON.stringify(r.creds, null, 2)': 'user:the credentials the user granted (account labels + ids + tiers)', 'sub': `${O}:the api sub-verb the caller named`,
+    'JSON.stringify(r.lines, null, 2)': `${O}:the caller's own audit lines (its method, path, query keys, status)`, 'r.lines': `${O}:the caller's own audit lines`,
+    'JSON.stringify(r, null, 2)': `${V}:the docs answer (the vendor table: reference URLs, hosts, the fence)`, 'r': `${V}:the docs answer`,
+    'r.code': `${V}:the refusal code`, 'r.bytes': `${V}:a byte count`, 'r.status': `${V}:the vendor's HTTP status`, 'r.truncated': `${V}:a flag`,
+    'r.headers': 'judged:apiAnswer — the allow-listed response headers, belted', 'r.json': 'judged:apiAnswer — the vendor\'s JSON answer, belted',
+    'shown': 'judged:apiAnswer — the vendor answer (status, headers, body), belted', 'JSON.stringify(shown, null, 2)': 'judged:apiAnswer — the vendor answer, belted',
     // verify r4 F4: the REACH of a chain's root and of the chain-printing helpers printProposal(p) / printReplaced(r) — the records behind the printed fields (each field its own row)
     'JSON.stringify(body)': `${O}:the caller's own request body — reached through call()'s fetch (sent, never printed)`, 'e.message': `${V}:node's own error text (fetch / JSON)`,
     'r.proposal': `${V}:the proposal record printProposal prints (its fields p.* — each its own row)`, 'j.proposal': `${V}:the same, on a refusal's answer`, 'r.proposals': `${V}:the proposal records (status; p.*)`, 'p': `${V}:the proposal record handed to printProposal (its fields p.* — rows)`, 'p.receipt': `${V}:the receipt record (its fields rc.* — rows)`,
@@ -2063,7 +2076,7 @@ console.log('§6 the shared-store census (words another principal wrote into a s
     'FROM_NAME': 'a constant of ours (window-request / browser-handback / stash-handover / the retry park\'s batch card in conversation-deliver — the hand-over\'s own sender)',
     'DESIGN_COMMENT_FROM': 'a constant of ours (src/server/design-engine.js — the user\'s design comment waiting in the stash)',
     'RX_DIGEST_FROM': 'a constant of ours (channels)',
-    "'VibeSpace'": 'ours (auto-resume / the pool engine)', "'You · via Channels'": 'ours', "'Channels · Outbox'": 'ours',
+    "'VibeSpace'": 'ours (auto-resume / the pool engine)', "'You · via Channels'": 'ours', "'Channels · Outbox'": 'ours', "'Channels · API'": 'ours (B-2198 part 2: the raw-API receipt)',
     "'Background Work · ' + (job.name || job.id)": 'a job name is a slug (resolveName)',
     "'Background Work · ' + (e.jobName || e.jobId)": 'a client card of a slug',
     "'Background Work · ' + CLEARED_TEXT": 'ours (a cleared job)',

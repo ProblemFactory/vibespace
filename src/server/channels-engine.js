@@ -125,6 +125,7 @@ const ChannelSettings = require('../channel-settings.js');   // B-df40 part 3: t
 // joined, the back-off, the budget, then the fetch (PURE; the vendor-whitelist
 // census §7 pins that `fetchAttachment` is reached only through its `fetch`).
 const Att = require('../channel-attachments.js');
+const Av = require('../channel-avatars.js');   // lane channel-avatars (B-5fe1): a person's picture — memo facts, sniff, bounds
 const OF = require('../channel-outbox-files.js');   // design 005 §2.B (B-fd1f): an agent's attachments on disk
 // design 008 (B-3cf8, userW's first Channels open: 77.5 MB, 1.49 s): THE FIRST SCREEN'S PREDICATE + the page rules,
 // shared with the panel (PURE) — the first read views only the rows `candidateOf` names and `statusTag` decides.
@@ -2959,7 +2960,7 @@ function create(deps = {}) {
     const ob = ctx.outbox.get(en.key) || { awaiting: 0, unknown: 0 };
     const lw = en.stats && Array.isArray(en.stats.wakes) && en.stats.wakes.length ? en.stats.wakes[en.stats.wakes.length - 1] : null;
     return {
-      key: en.key, id: en.id, adapterId: en.adapterId, adapterLabel: rec.label || rec.id, title: humanNameOf(rec, en), kind: en.kind, ...(en.app ? { app: true } : {}),   // B-c127: THE NAME LADDER (null = nothing known; the client's ③)
+      key: en.key, id: en.id, adapterId: en.adapterId, adapterLabel: rec.label || rec.id, title: humanNameOf(rec, en), kind: en.kind, ...(en.app ? { app: true } : {}), ...(en.kind === 'dm' && Av.avatarRow(c).fetch ? peerOf(en) : {}),   // B-c127: THE NAME LADDER (null = nothing known; the client's ③)
       participants: en.participants, lastAt: en.lastAt, lastText: en.lastText || '', unread: en.unread || 0,
       unlisted: !!en.unlistedAt,
       refresh: en.refresh && typeof en.refresh === 'object' ? { every: en.refresh.every, by: en.refresh.by || null } : null,
@@ -5174,6 +5175,80 @@ function create(deps = {}) {
     emojiFlights.set(fk, run);
     try { return await run; } finally { emojiFlights.delete(fk); }
   }
+  /** lane channel-avatars (B-5fe1): `GET /api/channels/avatar?account=&author=` — A PERSON'S PICTURE through OUR
+   *  route, in THE ONE PICTURE ORDER an attachment follows (PURE `Att.fetchVerdict`, fed by PURE `Av.memoFacts`): the
+   *  account's on-disk memo first (a picture < 30 days old is served whatever the budget says) · a REMEMBERED refusal
+   *  ("no picture", a refused scope — no vendor call inside its TTL) · OURS ONLY (an author a record of this account
+   *  names — the route is not a directory lookup) · the row says `fetch` · an enabled account · one flight per person ·
+   *  the back-off · the budget · then ONE paced + metered `avatarImage` (two vendor requests: the profile, the bytes).
+   *  The bytes are bounded (≤ 256 KiB) and their type is SNIFFED; a stale picture is served when the refresh is refused. */
+  const avatarFlights = new Map();
+  /** A direct chat's other person (the panel row's picture): `{peer: id}` or nothing. */
+  const peerOf = (en) => { const p = (Array.isArray(en.authors) ? en.authors : []).find((a) => a && a.id && !a.isSelf); return p && Av.authorOk(String(p.id)) ? { peer: String(p.id) } : {}; };
+  function authorIsOurs(adapterId, author, convId) {
+    const all = store.index.live();
+    const named = (en) => !!en && Array.isArray(en.authors) && en.authors.some((a) => a && String(a.id || '') === author);
+    if (convId && named(all[`${adapterId}/${convId}`])) return true;
+    for (const [k, en] of Object.entries(all)) if (k.startsWith(adapterId + '/') && named(en)) return true;
+    if (!convId || !all[`${adapterId}/${convId}`]) return false;
+    return store.readTail(adapterId, convId, { limit: 500 }).some((r) => r && r.author && String(r.author.id || '') === author);
+  }
+  async function avatarImage(adapterId, author, { convId = null } = {}) {
+    const rec = adapterRecords().adapters.find((r) => r.id === adapterId);
+    if (!rec) return { ok: false, code: 'not-found', error: 'no such account' };
+    const a = String(author || '');
+    if (!Av.authorOk(a)) return { ok: false, code: 'not-found', error: 'no such person' };
+    const row = Av.avatarRow(registry.capsOf(rec.kind));
+    if (!row.fetch) return { ok: false, code: 'not-supported', error: row.why };
+    const fk = `${adapterId}/${a}`;
+    const t = now();
+    const memo = store.avatarGet(adapterId, a);
+    const f = Av.memoFacts(memo, t);
+    let v = Att.fetchVerdict({ cached: f.cached, remembered: f.remembered });
+    if (v.act === 'serve') return { ok: true, file: memo.file, meta: memo.meta, cached: true };
+    if (v.act === 'refuse') return { ok: false, code: v.code, error: f.remembered.error, remembered: true };
+    const stale = f.stale ? { ok: true, file: memo.file, meta: memo.meta, cached: true, stale: true } : null;
+    const e = adapterFor(rec);
+    v = Att.fetchVerdict({ cached: false, remembered: null, owner: authorIsOurs(adapterId, a, convId ? String(convId) : null), fetchable: true, enabled: rec.enabled !== false, inflight: avatarFlights.has(fk), backoff: inBackoff(e) || (Number(e.attBackoffUntil) || 0) > t, affordable: affordable(rec, e) });
+    switch (v.act) {
+      case 'join': return avatarFlights.get(fk);
+      case 'fetch': break;
+      default:
+        if (stale) return stale;
+        if (v.code === 'not-found') return { ok: false, code: 'not-found', error: 'no message of this account names this person' };
+        if (v.code === 'disabled') return { ok: false, code: 'disabled', error: `${rec.label || rec.id} is disabled` };
+        if (v.code === 'backoff') return inBackoff(e) ? backoffRefusal(rec, e) : { ok: false, code: 'backoff', error: 'the vendor rate-limited this account\'s last picture fetch', retryAfterSec: Math.max(1, Math.ceil(((Number(e.attBackoffUntil) || 0) - t) / 1000)) };
+        return budgetRefusal(rec, e);
+    }
+    const run = (async () => {
+      let r;
+      try { r = await vendor(rec, e, () => e.adapter.avatarImage(a)); }
+      catch (err) {
+        const code = err instanceof ChannelError ? err.code : 'vendor-error';
+        const why = err && err.detail ? err.detail.why : null;
+        const retryAfterSec = Number(err && err.detail && err.detail.retryAfterSec) || null;
+        const ttl = Av.refusalTtlMs(code, why, Att.negativeTtlMs, { retryAfterSec });
+        const error = String((err && err.message) || err);
+        const ended = outlived(rec, e);
+        if (ttl && !ended) store.avatarRefuse(adapterId, a, { code: why === 'no-picture' ? 'no-picture' : code, error, until: now() + ttl });
+        if (code === 'rate-limited' && !ended) e.attBackoffUntil = now() + (ttl || Att.NEGATIVE_TTL.transient);
+        if (stale) return stale;
+        return { ok: false, code: why === 'no-picture' ? 'no-picture' : code, error, ...(why === 'scope' && err.detail.scope ? { scope: String(err.detail.scope) } : {}) };
+      }
+      if (outlived(rec, e)) return { ok: false, code: 'account-changed', error: 'the account changed while the picture was fetched — nothing was kept' };
+      const data = r && Buffer.isBuffer(r.data) ? r.data : Buffer.from((r && r.data) || '');
+      const mime = Av.sniffImage(data);
+      if (data.length > Av.AVATAR_MAX_BYTES || !mime) {
+        const code = mime ? 'too-large' : 'not-supported';
+        store.avatarRefuse(adapterId, a, { code, error: mime ? 'a profile picture is larger than 256 KiB' : 'the profile picture is not a png / jpeg / gif / webp', until: now() + Att.negativeTtlMs(code) });
+        return { ok: false, code, error: mime ? 'a profile picture is larger than 256 KiB' : 'the profile picture is not a raster image' };
+      }
+      const put = await store.avatarPut(adapterId, a, { data, mime });
+      return { ok: true, file: put.file, meta: put.meta, cached: false };
+    })();
+    avatarFlights.set(fk, run);
+    try { return await run; } finally { avatarFlights.delete(fk); }
+  }
   /** What unlocks READING reactions on this account (the window's line): the module's `reactionsGrant` against
    *  the scopes it HOLDS — like `sendGrantView`. */
   function reactionsGrantView(rec) {
@@ -5248,12 +5323,12 @@ function create(deps = {}) {
   }
 
   /** SEARCH one account's local logs (design §6.5) — async, byte-capped. */
-  async function search(adapterId, q, { limit = 100 } = {}) {
+  async function search(adapterId, q, { limit = 100, convId = null } = {}) {
     const rec = adapterRecords().adapters.find((r) => r.id === adapterId);
     if (!rec) return { ok: false, code: 'not-found', error: `no such account '${adapterId}'` };
     const query = String(q || '').trim();
     if (query.length < 2) return { ok: false, code: 'bad-request', error: 'a search needs at least 2 characters' };
-    const r = await store.search(adapterId, query, { limit: Math.min(200, Math.max(1, Number(limit) || 100)) });
+    const r = await store.search(adapterId, query, { limit: Math.min(200, Math.max(1, Number(limit) || 100)), ...(convId ? { convIds: [convId] } : {}) });   // .212: scoped to ONE conversation (the agent's search row)
     const liveIx = store.index.live();
     const sc = registry.capsOf(rec.kind);
     const results = r.results.map((x) => ({ key: `${adapterId}/${x.convId}`, convId: x.convId, title: titleOf(sc, (liveIx[`${adapterId}/${x.convId}`] || {}).title) || null, record: withoutBody(viewOf(rec, x)) }));   // lane lark-search-poll: an untitled row is worded by the client, never its raw id
@@ -9024,10 +9099,14 @@ function create(deps = {}) {
     if (r && r.ok) {
       to = 'sent';
       patch = (q) => {
-        q.result = { vendorMessageId: r.vendorMessageId || null, at: r.at || t, sentAs: r.sentAs || q.sendAs, lane: r.lane || null, honestyLine: !!line, observed: r.observed || null, handle: r.handle || q.sendHandle || null, ...(q.compose ? { threadId: r.threadId || null } : {}) };
+        q.result = { vendorMessageId: r.vendorMessageId || null, at: r.at || t, sentAs: r.sentAs || q.sendAs, lane: r.lane || null, honestyLine: !!line, observed: r.observed || null, handle: r.handle || q.sendHandle || null, ...(q.compose ? { threadId: r.threadId || null } : {}), ...(P.sendParts(r.parts) ? { parts: P.sendParts(r.parts) } : {}) };
         // lane channel-threads: the thread the reply LANDED in (the vendor's word, e.g. Lark's `thread_id`) — the receipt names it
         if (q.inThread && r.observed && r.observed.threadKey) q.threadKey = String(r.observed.threadKey);
         q.reason = null;
+        // lane channel-send-files: a message sent in PARTS (Lark's text + one message per file, Slack's chain per file)
+        // whose later part was refused is SENT — and its reason says, by name, what did not land
+        const miss = (q.result.parts || []).filter((x) => !x.ok);
+        if (miss.length) q.reason = `partly sent — ${P.partsWords(q.result.parts)}`;
         // the NEW conversation's id (the thread the vendor answered with) —
         // the card's link, the receipt; the index row arrives with the next pass
         if (q.compose && r.threadId && !q.convId) q.convId = String(r.threadId);
@@ -9212,9 +9291,12 @@ function create(deps = {}) {
       log.log(`[channels] outbox ${id}: reconcile #${n} — still unknown${v.reason ? ` (${v.reason})` : ''}`);
       return { ok: true, resolved: false, state: 'unknown', answer: 'unknown', reason: v.reason || null, proposal: proposalView(p1) };
     }
+    // verify r1 (F1): a send in PARTS lost before anything landed (Lark's text first) — the reconcile settles the lost part
+    // only; the files after it never left, and the receipt says so by name (never "SENT with 2 attachments")
+    const rp = v.to === 'sent' ? P.reconciledParts(p.failure && p.failure.detail && p.failure.detail.parts, v.vendorMessageId) : null;
     const tr = await transition(id, v.to, 'reconcile', (q) => {
       stamp(q);
-      if (v.to === 'sent') { q.result = { vendorMessageId: v.vendorMessageId, at: v.at || t, sentAs: q.sendAs, lane: null, honestyLine: !!(q.wire && q.wire.honestyLine), observed: (v.detail && v.detail.observed) || null, handle: q.sendHandle || null, reconciled: true }; q.reason = null; q.failure = null; }
+      if (v.to === 'sent') { q.result = { vendorMessageId: v.vendorMessageId, at: v.at || t, sentAs: q.sendAs, lane: null, honestyLine: !!(q.wire && q.wire.honestyLine), observed: (v.detail && v.detail.observed) || null, handle: q.sendHandle || null, reconciled: true, ...(rp ? { parts: rp } : {}) }; q.reason = rp && rp.some((x) => !x.ok) ? `partly sent — ${P.partsWords(rp)}` : null; q.failure = null; }
       else { q.reason = v.reason; q.failure = { code: 'not-landed', detail: v.detail || null, at: t }; }
     });
     if (!tr.ok) return { ok: false, code: 'bad-state', error: tr.why };
@@ -10704,6 +10786,41 @@ function create(deps = {}) {
   }
 
   try { stampIdentities(); } catch (err) { log.warn(`[channels] identity stamp failed: ${(err && err.message) || err}`); }   // verify r6: legacy records bound to their holder at boot
+  // ── THE RAW API'S ENGINE SIDE (B-2198, docs/design-channel-raw-api.md; the orchestrator is src/server/channel-api.js) ──
+  // The tier rows live in their OWN index table (`apiGrants` — channel-acl's row shape, origin `api`, level `hidden`), so
+  // an API grant never widens reach and never shows as an access row; the credential's token stays inside the adapter
+  // (`apiBearer`) and is handed to the orchestrator's ONE fetch site only; the account's minute meters every call.
+  function apiGrants() { return (store.index.table('apiGrants') || []).filter(Boolean); }
+  /** The tier rows of ONE credential, replaced whole — the owner's (an agent's `by` is refused before anything is written). */
+  async function setApiGrants(cred, rows, { by = 'user' } = {}) {
+    if (/^agent:/.test(String(by))) return { ok: false, code: 'not-yours', error: 'API access is the user\'s to grant' };
+    const id = String(cred || '');
+    if (!id) return { ok: false, code: 'bad-request', error: 'cred is required' };
+    await store.index.update((ix) => { ix.apiGrants = [...(Array.isArray(ix.apiGrants) ? ix.apiGrants : []).filter((g) => !(g && g.scope && g.scope.id === id)), ...rows]; });
+    try { store.audit({ kind: 'api-acl', cred: id, rows: rows.map((g) => ({ principal: g.principal, api: g.api })), at: now(), by }); } catch {}
+    return { ok: true, rows: apiGrants().filter((g) => g.scope && g.scope.id === id) };
+  }
+  /** The tier of a principal on a credential — asked BEFORE and AGAIN after every await of a call (a revoke lands at once). */
+  function apiTierFor(ctx, cred) { return ACL.effectiveApi(ctx, String(cred || ''), apiGrants()); }
+  /** A Channels account as a raw-API credential: its kind, its adapter's DECLARED raw-API row (`api`), its label, its
+   *  bearer, the account's meter. `null` = no such account. */
+  function apiCredential(adapterId) {
+    const rec = adapterRecords().adapters.find((r) => r.id === adapterId) || null;
+    if (!rec || rec.enabled === false) return null;
+    const e = adapterFor(rec);
+    const bearer = e && e.adapter && typeof e.adapter.apiBearer === 'function' ? () => e.adapter.apiBearer() : null;
+    return {
+      id: rec.id, kind: rec.kind, api: (e && e.adapter && e.adapter.api) || null, label: rec.label || rec.id, source: 'channels', bearer,
+      // the account's vendor meter, shared with the channel's own reads: back-off, the minute's budget, the agents' share
+      gate: () => (inBackoff(e) ? backoffRefusal(rec, e) : !affordable(rec, e) ? budgetRefusal(rec, e) : agentShareRefusal(rec, e)),
+      charge: () => spendAs('agent', () => charge(e, budgetDecl(rec).unit === 'quota-unit' ? 5 : 1)),
+      // a vendor 429 enters the account's rate ladder (its back-off), never a retry loop
+      rateLimited: (sec) => { e.nextAt = Math.max(e.nextAt || 0, now() + Math.min(600, Math.max(1, Number(sec) || 30)) * 1000); },
+    };
+  }
+  // the accounts whose adapter DECLARES a raw-API row (src/channels/index.js validateApi) — never a list of kinds
+  const declaresApi = (kind) => { try { return registry.has(kind) && !!registry.get(kind).api; } catch { return false; } };
+  function apiAccounts() { return adapterRecords().adapters.filter((r) => r && r.enabled !== false && declaresApi(r.kind)).map((r) => ({ id: r.id, kind: r.kind, label: r.label || r.id })); }
   return {
     store, registry, digest, notify, pass, refreshConvCaps, markRead, messages,
     // 2026-09-26: the aggregated IM — the reader surface, the scheduler's
@@ -10760,6 +10877,8 @@ function create(deps = {}) {
     oauth: flows,
     // P2: assign / filter / wake
     setAssignment, setFilter, estimateFilter, settleWakes, coalesceSeconds,
+    // B-2198: the raw API's engine side (src/server/channel-api.js is its orchestrator)
+    apiGrants, setApiGrants, apiTierFor, apiCredential, apiAccounts,
     // P3: outbox / policy / reach + the agent-facing reads (§9, §8, §11)
     propose, approve: (id, o) => onProposal(id, () => approve(id, o)), reject: (id, o) => onProposal(id, () => reject(id, o)), outboxView, expireSweep, pointerSync, receipt,
     filesSweep, outboxAttachment,   // design 005 §2.B (B-fd1f): attachments retention + the owner's file
@@ -10784,7 +10903,7 @@ function create(deps = {}) {
     refreshQueueOf, idle, tick,
     // lane channel-threads (2026-09-28): threads + reactions — the owner's routes, the read shape, the side log
     messageFacts,   // lane message-facts (B-f066): the owner's Details on a message stored before its facts
-    threadRead, threadRefresh, threadOlder, reactionsRead, reactionsRefresh, react, unreact, emojiSet, emojiImage, migrateThreads, setReactionPolicy, proposeReaction, readThreadFor, agentThreadRefresh,
+    threadRead, threadRefresh, threadOlder, reactionsRead, reactionsRefresh, react, unreact, emojiSet, emojiImage, avatarImage, migrateThreads, setReactionPolicy, proposeReaction, readThreadFor, agentThreadRefresh,
     withView: (adapterId, convId, records, o = {}) => withView(adapterRecords().adapters.find((r) => r.id === adapterId) || null, records, { ...o, convId }),
     reactionsFor: (adapterId, convId, ids) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId); return rec ? reactionsFor(rec, convId, ids) : new Map(); },
     rxStateOf: (adapterId) => { const e = live.get(adapterId); return e ? { reserved: Drain.rxMinuteAt(e.rxMinute, now()).n, calls: (e.rxCalls || []).filter((x) => now() - x < 60e3).length } : null; },

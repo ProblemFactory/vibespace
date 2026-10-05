@@ -295,7 +295,7 @@ for (const [n, p, d] of registryLegs(CH)) ok(p, n, d);
   try { await ad.send('c', { text: 'x', attachments: [{ name: 'a', data: PNG }] }); } catch (e) { e1 = e; }
   try { await ad.compose({ to: ['a@x.com'], text: 'x', attachments: [{ name: 'a', data: PNG }] }); } catch (e) { e2 = e; }
   ok(e1 && e1.code === 'not-supported' && e2 && e2.code === 'not-supported', 'an adapter without the row handed attachments: send and compose throw not-supported (the module never runs)', JSON.stringify([e1 && e1.message, e2 && e2.message]));
-  ok(GM.caps.sendAttachments && GM.caps.sendAttachments.maxCount === 10 && require(path.join(REPO, 'src/channels/lark.js')).caps.sendAttachments === null && /not yet measured/.test(require(path.join(REPO, 'src/channels/lark.js')).caps.sendAttachmentsWhy) && !require(path.join(REPO, 'src/channels/agents.js')).caps.sendAttachments, 'the rows: Gmail 10 files / 25 MB with text; Lark null WITH its reason (LA1–LA4 unmeasured); the Agents adapter none');
+  ok(GM.caps.sendAttachments && GM.caps.sendAttachments.maxCount === 10 && ['lark.js', 'slack.js'].every((f) => { const r = require(path.join(REPO, 'src/channels', f)).caps; return r.sendAttachments && r.sendAttachments.maxCount === 10 && r.sendAttachments.maxTotalBytes === 25e6 && r.sendAttachments.withText === true && r.sendAttachmentsWhy === null; }) && !require(path.join(REPO, 'src/channels/agents.js')).caps.sendAttachments, 'the rows: Gmail 10 files / 25 MB with text; Lark and Slack the same bounds (lane channel-send-files: sent in parts — test-channel-send-files); the Agents adapter none');
 }
 
 // ═══ ⑥ Gmail ═══════════════════════════════════════════════════════════════

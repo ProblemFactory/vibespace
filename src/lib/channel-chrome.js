@@ -14,6 +14,7 @@
 import { UI_ICONS } from './icons.js';
 import { getFileIcon } from './file-types.js';
 import { avatarOf } from './channel-avatar.js';
+import * as Av from '../channel-avatars.js';   // lane channel-avatars: the warm-up bound (PURE)
 import { t } from './i18n.js';
 
 /** An icon from the library, sized in px (the SVG is 1em). */
@@ -40,7 +41,29 @@ export function fileIcon(fileName, px = 16, cls = '') {
  *  `self`), or a library `glyph` on that hue (a mail thread, an agent group,
  *  an account's kind). `px` = the diameter. `badge` (B-5fe1, channel-avatar.js
  *  accountBadges) = the ACCOUNT's vendor glyph on the account's hue at the corner. */
-export function avatar({ name = '', key = '', self = false, glyph = null, badge = null } = {}, px = null, cls = '') {
+// lane channel-avatars (B-5fe1): A PERSON'S PICTURE over the initials — asked through OUR route only, at most
+// Av.WARM_MAX per surface open (deduped, the answered ones skipped); every avatar of that person swaps IN PLACE (keyed
+// `data-av`) once the picture loaded — the same box, the initials stay beneath for a person with no picture.
+const avState = new Map();   // `${account}\n${author}` → 'pending' | {url} | 'none'
+const avUrl = (w) => `/api/channels/avatar?account=${encodeURIComponent(w.account)}&author=${encodeURIComponent(w.author)}${w.conv ? `&conv=${encodeURIComponent(w.conv)}` : ''}`;
+function putPicture(s, url) {
+  if (s.querySelector('img.chan-av-img')) return;
+  const img = document.createElement('img');
+  img.className = 'chan-av-img'; img.alt = ''; img.decoding = 'async'; img.draggable = false; img.src = url;
+  s.classList.add('chan-av-pic');
+  s.appendChild(img);
+}
+/** Ask the pictures of `list` ([{account, author, conv?}] in draw order) — the surface's warm-up. */
+export function warmAvatars(list) {
+  for (const w of Av.warmList(list, (k) => avState.has(k))) {
+    const k = `${w.account}\n${w.author}`, url = avUrl(w), probe = new Image();
+    avState.set(k, 'pending');
+    probe.onload = () => { avState.set(k, { url }); for (const s of document.querySelectorAll('.chan-av[data-av]')) if (s.dataset.av === k) putPicture(s, url); };
+    probe.onerror = () => { avState.set(k, 'none'); setTimeout(() => { if (avState.get(k) === 'none') avState.delete(k); }, 5 * 60e3); };
+    probe.src = url;
+  }
+}
+export function avatar({ name = '', key = '', self = false, glyph = null, badge = null, pic = null } = {}, px = null, cls = '') {
   const a = avatarOf({ name, key, self });
   const s = document.createElement('span');
   s.className = 'chan-av' + (a.self ? ' chan-av-self' : '') + (glyph ? ' chan-av-glyph' : '') + (cls ? ' ' + cls : '');
@@ -50,6 +73,12 @@ export function avatar({ name = '', key = '', self = false, glyph = null, badge 
   if (px) s.style.setProperty('--av-size', px + 'px');
   if (glyph) { const g = icon(glyph, 13); g.style.fontSize = ''; s.appendChild(g); }
   else s.textContent = a.text;
+  if (pic && pic.account && Av.authorOk(pic.author) && !glyph) {
+    const k = `${pic.account}\n${pic.author}`;
+    s.dataset.av = k;
+    const st = avState.get(k);
+    if (st && st.url) putPicture(s, st.url);
+  }
   if (badge && (Number.isInteger(badge.hue) || badge.internal)) {
     s.classList.add('chan-av-badged');
     s.appendChild(accountBadge(badge));
@@ -79,9 +108,9 @@ export function accountBadge(badge, cls = '', title = '') {
 /** A CONVERSATION's avatar (the window's bar, the panel's first-screen row):
  *  an agent group wears the people glyph, a mail thread / mailbox the mail
  *  glyph, anything else the title's initials — on the hue of the key. */
-export function convAvatar({ key = '', title = '', kind = '', group = false, badge = null } = {}, px = null, cls = '') {
+export function convAvatar({ key = '', title = '', kind = '', group = false, badge = null, pic = null } = {}, px = null, cls = '') {
   const glyph = group ? 'users' : (kind === 'thread' || kind === 'mailbox') ? 'mail' : null;
-  return avatar({ name: title, key, glyph, badge }, px, cls);
+  return avatar({ name: title, key, glyph, badge, pic }, px, cls);
 }
 
 /** A textContent element (XSS law: every string on these surfaces is vendor-

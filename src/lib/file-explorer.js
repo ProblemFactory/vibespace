@@ -1,3 +1,4 @@
+import { hostParam } from './file-download.js';
 import { formatSize, attachPopoverClose, createPopover, createModalShell, showContextMenu, getStateSync, copyText, escHtml, frontTruncate, uploadFilesBatched, showInputDialog, showConfirmDialog, showToast, collectDroppedFiles, uiScale } from './utils.js';
 import { installExplorerUploads } from './file-explorer-uploads.js';
 import { installExplorerOps, fsErrorText } from './file-explorer-ops.js';
@@ -570,7 +571,7 @@ class FileExplorer {
 
   // Host query-param suffix for GET URLs / body field for POSTs (Files
   // cross-host). Empty string / no field when browsing the local machine.
-  _hp() { return this._host ? `&host=${encodeURIComponent(this._host)}` : ''; }
+  _hp() { return hostParam(this._host); } // THE host spelling (file-download.js) — the viewers' Download shares it
   _hb(obj = {}) { return this._host ? { ...obj, host: this._host } : obj; }
   // verify-r6 E1: WHERE an operation acts, frozen when the user starts it — the folder and the machine this explorer
   // shows NOW. Every op that awaits a dialog (a confirm, a name) builds its paths and its host from this snapshot, never

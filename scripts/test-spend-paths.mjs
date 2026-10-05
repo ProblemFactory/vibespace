@@ -425,6 +425,8 @@ const ALLOW = [
   // the ladder's own authorizer and reports its refusal as a typed failure.
   { file: 'src/channels/agents.js', prim: 'deliver-ladder', why: "the built-in Agents adapter sends through the gated ladder (spendReason 'peer-message' — an approved outbox message is the user's own); a refusal is a typed transport failure the outbox records, never a second attempt" },
   { file: 'src/server/channels-engine.js', prim: 'deliver-ladder', why: "the channels engine calls the gated ladder with spendReason 'channel-message' and stashes what it refuses (its per-assignment daily wake cap and the push coalescing window are pacing, not money)" },
+  // B-2198 (int212): the raw-API receipt — the agent's NEXT turn, never a wake (noWake), forwarded to the gated ladder
+  { file: 'src/server/channel-api-cards.js', prim: 'deliver-ladder', why: "the raw-API receipt FORWARDS to the gated ladder with noWake (spendReason 'channel-receipt' — it rides the agent's next turn, never opens one); a refusal is stashed, nothing beside the ladder" },
   // agent browser P3 (design-agent-browser-v2 §4.3.1): the handback announcer
   // FORWARDS to the gated ladder under its own declared reason
   // (spendReason 'browser-handback'); the ladder authorizes every call.

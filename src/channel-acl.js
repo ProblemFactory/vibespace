@@ -42,7 +42,12 @@ const msgAcl = require('./msg-acl.js');
 
 const LEVELS = Object.freeze(['hidden', 'requestable', 'visible']);
 const RANK = Object.freeze({ hidden: 0, requestable: 1, visible: 2 });
-const GRANT_ORIGINS = Object.freeze(['user', 'access', 'request', 'assignment']);
+const GRANT_ORIGINS = Object.freeze(['user', 'access', 'request', 'assignment', 'api']);
+/** THE RAW API TIER (B-2198, docs/design-channel-raw-api.md): a SEPARATE axis on the same row shape — `api` on a row
+ *  of origin `api` (level `hidden`: it widens no reach), scope = the credential (an account id, or `mount:<id>`).
+ *  Widen-only like the levels: the effective tier is the MAX over every applicable row. Default `none`. */
+const API_TIERS = Object.freeze(['none', 'read', 'write-ask', 'write-auto']);
+const API_RANK = Object.freeze({ none: 0, read: 1, 'write-ask': 2, 'write-auto': 3 });
 const PRINCIPAL_KINDS = Object.freeze(['agent', 'group', 'everyone']);
 /** THE everyone principal's ONE id (the picker's `EVERYONE_ID`; every list model spells it so). */
 const EVERYONE_ID = '*';
@@ -93,7 +98,10 @@ function validateGrant(input = {}) {
     level: g.level, origin: g.origin,
     at: Number.isFinite(Number(g.at)) ? Number(g.at) : null,
     by: g.by ? String(g.by).slice(0, 64) : null,
+    ...(g.api !== undefined && API_TIERS.includes(g.api) ? { api: g.api } : {}),
+    ...(g.api !== undefined && API_TIERS.includes(g.api) && Number(g.perDay) > 0 ? { perDay: Math.min(100000, Math.floor(Number(g.perDay))) } : {}),
   };
+  if (g.api !== undefined && !API_TIERS.includes(g.api)) return { ok: false, error: `api must be ${API_TIERS.join('|')}` };
   return { ok: true, grant, id: grantId(grant) };
 }
 
@@ -129,6 +137,16 @@ function effective(ctx, target, grants) {
     if (winner === null || RANK[lv] > RANK[level]) { level = widen(level, lv); via = g.principal.kind === 'agent' ? 'agent' : g.principal.kind === 'everyone' ? 'everyone' : 'group'; winner = g; }
   }
   return { level, via, grantId: winner ? grantId(winner) : null };
+}
+
+/** THE API TIER of a principal on ONE credential: MAX over the rows naming it (itself, its groups, everyone). */
+function effectiveApi(ctx, cred, grants) {
+  let tier = 'none', winner = null;
+  for (const g of Array.isArray(grants) ? grants : []) {
+    if (!g || !API_TIERS.includes(g.api) || !principalApplies(ctx, g) || !g.scope || g.scope.kind !== 'adapter' || g.scope.id !== cred) continue;
+    if (API_RANK[g.api] > API_RANK[tier]) { tier = g.api; winner = g; }   // widen only
+  }
+  return { tier, grantId: winner ? grantId(winner) : null, perDay: winner && Number(winner.perDay) > 0 ? Number(winner.perDay) : null };
 }
 
 /** Add or replace the ONE row for (principal, scope, origin); other origins untouched. */
@@ -208,5 +226,6 @@ module.exports = {
   LEVELS, RANK, GRANT_ORIGINS, PRINCIPAL_KINDS, EVERYONE_ID, SCOPE_KINDS, NOT_FOUND_TEXT,
   notFound, canSee, canRequest, widen, fromMsgLevel, grantId, validateGrant, principalApplies, scopeApplies,
   effective, applyGrant, removeGrant, approveRequest, grantsFor,
+  API_TIERS, API_RANK, effectiveApi,
   accountGrant, patternGrant, grantsForConversation,
 };

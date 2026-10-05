@@ -2740,6 +2740,11 @@ console.log('§63 every agent channel route that touches a conversation records 
     // id — it reads no conversation and drafts nothing; the draft's card says it was withdrawn and by whom, and the draft
     // itself was recorded as a `reply` / `compose` touch when it was made
     'POST /api/agent/channels/proposals/:id/withdraw': 'takes back the caller\'s own undecided draft by id — no conversation is read or drafted (the draft was recorded when it was made)',
+    // B-2198 the raw API: the call itself (POST /api/agent/channels/api) records its row; these read no conversation
+    'GET /api/agent/channels/api/creds': 'lists the credentials the user granted this conversation — no conversation is read',
+    'GET /api/agent/channels/api/docs': 'prints the vendor\'s own reference URLs and the fence summary — no conversation is read, no vendor call',
+    'GET /api/agent/channels/api/proposals/:id': 'the caller\'s own API proposal\'s outcome — its call row was recorded when the call was made',
+    'GET /api/agent/channels/api/log': 'the caller\'s own audit lines — no conversation is read, no vendor call',
   };
   const handlers = (src) => [...src.matchAll(/^app\.(get|post|put|patch|delete)\('(\/api\/agent\/channels\/[^']*)'/gm)].map((m) => {
     const end = src.indexOf('\n});', m.index);
@@ -3045,6 +3050,55 @@ console.log('§65 every producer that can carry a conversation\'s facts to an ag
     `§65 NEGATIVE CONTROLS: ${results.map((r) => `${r.name} (${r.ok ? 'RED' : 'missed'})`).join(', ')}, a planted agent route over an ungated read (RED), the CLI pointed at an owner route (RED)`, JSON.stringify(results.filter((r) => !r.ok)));
 }
 
+// §65c B-2198 THE RAW API ORCHESTRATOR'S ACCESS GATE (docs/design-channel-raw-api.md): every agent answer of
+// src/server/channel-api.js (the verbs the /api/agent/channels/api* handlers call) asks the TIER first (`tierNow(ctx`)
+// and again after its last await (a revoke lands mid-call: the answer is withheld); `run` (both the agent's call and the
+// owner's Approve) re-asks after each of its awaits; the module has ONE vendor fetch site (`vendorFetch`, the host
+// table's gate + `redirect: 'manual'`). Controls: the re-ask cut, a second fetch site planted, the host gate cut, a
+// planted agent verb with no tier.
+console.log('§65c the raw API orchestrator asks the tier first and after every await; ONE vendor fetch site');
+{
+  const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' ')).replace(/(^|[^:\\'"`])\/\/.*$/gm, '$1');
+  const judge65c = (osrc, asrc) => {
+    const code = strip(osrc);
+    const decls = [...code.matchAll(/\n  (?:async\s+)?function\s+(\w+)\s*\(/g)].map((m) => ({ name: m[1], at: m.index }));
+    const bodies = new Map();
+    decls.forEach((d, i) => bodies.set(d.name, code.slice(d.at, i + 1 < decls.length ? decls[i + 1].at : code.length)));
+    const ar = strip(asrc);
+    const verbs = new Set();
+    for (const m of ar.matchAll(/^app\.(get|post|put|patch|delete)\('(\/api\/agent\/channels\/api[^']*)'/gm)) { const end = ar.indexOf('\n});', m.index); for (const c of ar.slice(m.index, end).matchAll(/\bapi\.(\w+)\(/g)) verbs.add(c[1]); }
+    verbs.add('run');
+    const bad = [];
+    for (const n of verbs) {
+      const b = bodies.get(n);
+      if (!b) { bad.push(`${n}: an agent route calls it but the orchestrator declares no such function`); continue; }
+      const gates = [...b.matchAll(/\btierNow\(ctx\b/g)].map((m) => m.index);
+      const awaits = [...b.matchAll(/\bawait\b/g)].map((m) => m.index);
+      if (!gates.length) bad.push(`${n} never asks the tier`);
+      else if (awaits.length && gates[0] > awaits[0] && n !== 'run') bad.push(`${n} awaits before it asks the tier`);
+      if (awaits.length && !(gates.length && gates[gates.length - 1] > awaits[awaits.length - 1])) bad.push(`${n} answers after an await without asking the tier again`);
+    }
+    const sites = [...code.matchAll(/\bfetchFn\(/g)].length;
+    if (sites !== 1) bad.push(`${sites} vendor fetch sites (fetchFn() calls) — exactly ONE (vendorFetch)`);
+    const vf = bodies.get('vendorFetch') || '';
+    if (!/hosts\.has\(u\.host\)/.test(vf) || !/redirect: 'manual'/.test(vf) || !/\bfetchFn\(/.test(vf)) bad.push('vendorFetch lost its host table gate, its manual redirect or the fetch itself');
+    return { verbs: [...verbs], bad };
+  };
+  const osrc = read('src/server/channel-api.js'), asrc = read('src/agent-routes.js');
+  const j = judge65c(osrc, asrc);
+  ok(j.verbs.length >= 6 && j.bad.length === 0, `§65c every raw-API agent answer asks the tier first and after every await; ONE vendor fetch site (${j.verbs.join(', ')})${j.bad.length ? ' — ' + j.bad.join('; ') : ''}`);
+  const cut = (src, a, b) => (src.split(a).length === 2 ? src.replace(a, b) : null);
+  const ctl = [
+    ['the call without its re-ask after the run', cut(osrc, "    if (tierNow(ctx, cred).tier === 'none') return NOT_GRANTED();\n    return { ...r, touch:", '    return { ...r, touch:'), /call answers after an await/],
+    ['a second fetch site', cut(osrc, '  async function readBounded(res) {', '  async function peek(u) { return fetchFn(u); }\n  async function readBounded(res) {'), /2 vendor fetch sites/],
+    ['vendorFetch without its host gate', cut(osrc, ' || !hosts.has(u.host)) throw', ') throw'), /vendorFetch lost/],
+  ];
+  const res = ctl.map(([name, src, re]) => ({ name, red: !!src && judge65c(src, asrc).bad.some((x) => re.test(x)) }));
+  const planted = asrc.replace("app.get('/api/agent/channels/api/creds',", "app.get('/api/agent/channels/api/peek', (req, res) => { res.json(api.peekAll()); });\napp.get('/api/agent/channels/api/creds',");
+  const plantedO = osrc.replace('  function creds(ctx) {', '  function peekAll() { return { ok: true, all: allCreds() }; }\n  function creds(ctx) {');
+  const pr = judge65c(plantedO, planted).bad.some((x) => /peekAll never asks the tier/.test(x));
+  ok(res.every((r) => r.red) && pr, `§65c NEGATIVE CONTROLS: ${res.map((r) => `${r.name} (${r.red ? 'RED' : 'missed'})`).join(', ')}, a planted agent verb with no tier (${pr ? 'RED' : 'missed'})`);
+}
 // §65b lane lark-threads (B3): THE OWNER'S NAME FOR AN AUTHOR is an OWNER surface — its one route (PATCH
 // /api/channels/:adapterId/authors/:id) refuses an agent bearer BY NAME before it reaches the engine, no agent route
 // (src/agent-routes.js) and no CLI path (data/bin/vibespace-channels) names `setAlias` / `/authors/`, and the engine's
@@ -3695,6 +3749,41 @@ console.log('§76 every private-bus / GTK-fixture script gives its children a pr
   const strip = (t) => t.replace(/XDG_RUNTIME_DIR\s*:\s*(?!process\.env)[^,}]+,?/g, '');
   const ctl = [['test-desktop-app-snap.mjs', 'private bus'], ['test-desktop-xpra-window.mjs', 'GTK fixture']].map(([f, k]) => { const t = read('scripts/' + f); return { f, k, asWritten: unsafe(t), patched: unsafe(strip(t)) }; });
   ok(ctl.every((c) => !c.asWritten && c.patched), `§76 NEGATIVE CONTROLS: ${ctl.map((c) => `${c.f} (${c.k}) passes as written and is caught with its XDG_RUNTIME_DIR entries stripped`).join('; ')}${ctl.some((c) => c.asWritten || !c.patched) ? ' — ' + JSON.stringify(ctl) : ''}`);
+}
+
+// §77 THE RAW API'S CORE NAMES NO VENDOR (B-2198, lane channel-api-declared; the owner 2026-10-04 "我需要当前系统低耦合"):
+// the vendor facts live in the file that owns them — an adapter's `api` row beside its `apiBearer` (the ONE schema:
+// src/channels/index.js validateApi), the storage mounts' row in src/mounts.js — and the fence (src/channel-api.js) +
+// the orchestrator (src/server/channel-api.js) read the DECLARED row. The deleted central tables (`VENDORS`,
+// `KIND_VENDOR`) stay deleted anywhere in src/, and the two core files name no vendor at all. readdir, not ls-files: a
+// new untracked file is judged too. Controls: each planted shape is red.
+console.log('§77 the raw API core names no vendor: no VENDORS / KIND_VENDOR table, no vendor name in the fence or the orchestrator');
+{
+  const CORE = ['src/channel-api.js', 'src/server/channel-api.js'];
+  const VENDOR_NAME = /lark|feishu|slack|google|gmail/i;
+  const census77 = (files) => {
+    const bad = [];
+    for (const [rel, text] of files) {
+      if (/\bKIND_VENDOR\b/.test(text)) bad.push(`${rel}: KIND_VENDOR`);
+      if (/\bF\.VENDORS\b|require\([^)]*channel-api\.js['"]\)\.VENDORS/.test(text)) bad.push(`${rel}: reads the raw API's VENDORS table`);
+      if (CORE.includes(rel) && /\bVENDORS\b/.test(text)) bad.push(`${rel}: a VENDORS table in the core`);
+      if (CORE.includes(rel) && VENDOR_NAME.test(text)) bad.push(`${rel}: names a vendor (${(text.match(VENDOR_NAME) || [''])[0]})`);
+    }
+    return bad;
+  };
+  const srcFiles = fs.readdirSync(path.join(REPO, 'src'), { recursive: true }).map((f) => `src/${f}`).filter((f) => /\.(c|m)?js$/.test(f));
+  const tree = srcFiles.map((rel) => [rel, fs.readFileSync(path.join(REPO, rel), 'utf8')]);
+  const bad = census77(tree);
+  ok(bad.length === 0 && CORE.every((c) => tree.some(([r]) => r === c)), `§77 ${tree.length} src files: no VENDORS / KIND_VENDOR table, the fence and the orchestrator name no vendor`, bad.join('; '));
+  const core = new Map(tree.filter(([r]) => CORE.includes(r)));
+  const ctl = [
+    ['a VENDORS table back in the fence', [['src/channel-api.js', core.get('src/channel-api.js') + "\nconst VENDORS = Object.freeze({});\n"]]],
+    ['a hard-coded token host in the orchestrator', [['src/server/channel-api.js', core.get('src/server/channel-api.js') + "\nconst T = 'https://oauth2.googleapis.com/token';\n"]]],
+    ['a KIND_VENDOR map anywhere in src/', [['src/server/channels-engine.js', "const KIND_VENDOR = { lark: 'lark' };"]]],
+    ['a reader of F.VENDORS', [['src/routes/channels.js', 'const hosts = Object.values(F.VENDORS);']]],
+  ];
+  const r = ctl.map(([n, files]) => ({ n, red: census77(files).length > 0 }));
+  ok(r.every((x) => x.red), `§77 CONTROLS: ${r.map((x) => `${x.n} (${x.red ? 'RED' : 'missed'})`).join(', ')}`);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

@@ -1709,7 +1709,9 @@ conversation — a delivery now would open a billed turn"), 没有一份唤醒; 
 - **审批规则 (主人 Q2 = 否, 2026-10-02)**: 不加「永远审批」的覆盖; 沿用现有开关 `channels.guardAttachmentsReview` (默认开 ⇒ 原因 `attachments`) 与渠道策略: 开关关闭 + 直发策略 + send 权限 ⇒ 直接发出 (字节同样校验)。
 - **卡片**: 每个附件一行 — 服务端嗅探为四种栅格图时显示缩略图 (仅经主人路由 `GET /api/channels/outbox/:id/attachment/:n`: nosniff、sandbox CSP、no-store、只有这四种可内联), 名称、大小、嗅探类型 (扩展名不符时显示提示)、sha256 前缀, 以及「发送的正是这些字节」。agent 路由不提供任何发件箱文件。
 - **Gmail**: `buildMime` 生成 multipart/mixed (正文 + 每个文件一部分: 嗅探类型、`attachment` 处置、ASCII 回退名 + RFC 2231 `filename*` 分段续写、76 列 base64、头部值去除控制字符); `raw` 超过 4 MB 时改走上传形式 (`/upload/…?uploadType=multipart`, Google 文档所述 JSON 请求体上限 5 MB — 未在主人账号上实测)。行: `{maxCount: 10, maxTotalBytes: 25e6, withText: true}`。
-- **Lark**: 行为空, 原因写明 — 文档显示 `im/v1/images` / `im/v1/files` 只接受应用的 tenant token (LA1), 以用户身份发送的消息能否携带应用上传的 key (LA3) 无法不经真实调用证明; LA2 (权限 `im:resource` 或 `im:resource:upload`) 与 LA4 (图片 ≤ 10 MB, 文件 ≤ 30 MB) 取自文档。Agents 渠道无行。
+- **Lark (as built 2.369.212, lane channel-send-files)**: 行 `{maxCount: 10, maxTotalBytes: 25e6, withText: true}` (Gmail 的数; Lark 自身上限更高: 图片 ≤ 10 MB、文件 ≤ 30 MB, 超 10 MB 的图片改按文件发)。上传用**账号自己的 user token** (`im/v1/images` `image_type=message` / `im/v1/files` `file_type`+`file_name`, multipart; 文档列出 user_access_token), 然后以用户身份每个附件发一条 `msg_type: image|file` 消息携带 key。Lark 没有以用户身份的图文混排消息: 有文字时文字先发一条 (提案的 uuid), 文件随后 (uuid + `:a<i>`), 同一提案下。第一个拒绝即停 (不重试; 什么都没落地时抛给 ladder, 落地后为 `RATE_OK` 行 `send-parts`), 回执的 `parts:` 行逐条写明落地与未落地 (厂商码、`requiredScopes`)。请求形状记录在 `scripts/fixtures/lark/send-files.json` (取自文档, 非实测)。
+- **Slack (as built 2.369.212)**: 同一行; 每个文件一条链 `files.getUploadURLExternal` (filename, length) → 字节 POST 到 `upload_url` (只认 files.slack.com, 不带 token) → `files.completeUploadExternal` (channel_id、thread_ts、第一个文件带 `initial_comment` = 正文); 三个方法各有 slack-limits 行 (Tier 4)。user token 无 `files:write` ⇒ 发送前按名拒绝。形状: `scripts/fixtures/slack/send-files.json`。
+- **未实测 (等主人第一次 Approve)**: 以用户 token 上传是否被 Lark 接受、所需 scope 的确切名字、发出的消息是否带应用标记; Slack 分享后的消息 ts (回执以文件 id 为 vendor id)。Agents 渠道无行。
 - **保留**: 拒绝 / 撤回 / 过期时立即删除; 已发送 / 失败的 7 天后由每分钟的清扫删除 (记录仍留名称、大小、sha256, 卡片注明文件不再保留); 被修剪的记录连同文件夹一起删除; 孤儿文件夹与崩溃留下的暂存夹也会被清理。
 
 ## 10. 面板
@@ -3517,6 +3519,12 @@ owner 看 2.369.185 (聚合 IM) 时的两句话, 原文:
 门: test-channels-images (fast) · test-channels-focus (fast) · test-channels-lark-shape ⑨ · test-vendor-whitelist §7 · test-channels-groups-ui · heavy: test-channels-aggregate-ui ②b · test-channels-groups-e2e ⑨ · test-channels-e2e ⑰ · test-channels-i18n。
 
 **要 owner 拍板的 (默认已按下面实现, 一个设置都没加)**: D1 @你 的消息算不算"要紧" (今天没算; 飞书里 18 个会话 @ 过你); D2 排序保持活动顺序, 还是需要你的排前面; D3 给窗口里的图片在 vendor 预算里留一块 owner 保留额 (今天图片与定时遍历共用每分钟预算; 被拒时图会自己等一分钟再试, 不再沉默)。
+
+### 23.R3b 建成 (lane channel-avatars, B-5fe1, 2026-10-04): 人的真实头像
+
+- 能力行 `avatars: 'fetch' | null` + `avatarsWhy`: Lark (contact/v3/users → `avatar.avatar_72`, 需 PEOPLE_SCOPE, 缺则按名拒绝), Slack (users.info → 上传的 `profile.image_72`), Gmail 与内置 Agents 为 null (保留缩写)。下游只读能力行, 从不读适配器 id。
+- 顺序 = 附件的同一个 `fetchVerdict`: 盘上备忘 (data/channels/<account>/avatars/, 30 天刷新; 无头像记 7 天, 权限被拒记 6 小时) · 记住的拒绝 · 只限本账号记录点名的作者 · 启用 · 单飞 · 退避 · 预算 · 一次 `vendor()` (两次请求, 各自限速+计量; 图片主机不带令牌)。字节 ≤ 256 KiB, 类型从字节嗅探。
+- 只由我们的路由供图 (`GET /api/channels/avatar`, `private, max-age=86400`); 厂商 URL 不进 DOM。客户端在同一个圆里就地覆盖缩写 (按 `data-av` 键), aria-hidden; 预热每次打开 ≤ 40。
 
 ## 24. R4 (2026-09-26 / 27): 访问与通知 —— 两种操作, 先访问
 

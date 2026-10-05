@@ -92,6 +92,7 @@ function create({ sessions = () => null, broadcast = () => {}, metaStore = () =>
         account: inert(x.account || (acc && acc.label) || '', T.LABEL_MAX),
         kind: x.kind || (acc && acc.kind) || null,
         ...(x.glyph ? { glyph: inert(x.glyph, 70) } : {}),
+        ...(x.query ? { query: inert(x.query, T.QUERY_MAX) } : {}),   // .212: the agent's search words — its own text, made inert
       });
       if (!t) continue;
       const { touch, merged: m } = T.appendTouch(ring, t);

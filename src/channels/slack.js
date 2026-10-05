@@ -68,7 +68,16 @@ const LABEL = 'Slack';
 const INTEGRATION = 'slack';
 const API = 'https://slack.com/api/';
 const FILES_ORIGIN = 'https://files.slack.com/';
-const EGRESS = Object.freeze(['slack.com', 'files.slack.com']);
+const EGRESS = Object.freeze(['slack.com', 'files.slack.com', 'avatars.slack-edge.com']);   // + lane channel-avatars: uploaded profile pictures
+/** B-2198: THE RAW-API ROW (the one schema: src/channels/index.js validateApi) — Slack's facts for the raw API's fence,
+ *  declared HERE beside `apiBearer`; the fence and the orchestrator read this row and name no vendor. */
+const API_ROW = Object.freeze({
+  label: 'Slack',
+  hosts: Object.freeze(['slack.com']),
+  docs: Object.freeze(['https://api.slack.com/methods']),
+  readByPost: Object.freeze([/^\/api\/[a-z.]+\.(list|info|history|replies)$/, /^\/api\/search\./]),
+  sensitive: Object.freeze([/^\/api\/admin\./, /\.(delete|remove|kick|invite|archive)$/, /^\/api\/files\.upload/, /^\/api\/users\.admin/]),
+});
 const i18nKey = (s) => s;
 /** Per-record OPTIONS: archived channels are skipped by default (`exclude_archived`); the owner may list them. */
 const OPTIONS = Object.freeze([
@@ -96,6 +105,17 @@ const TEAMS_MAX = 50;
 const RX_CACHE_TTL_MS = 60 * 1000;
 const RX_CACHE_MAX = 2000;
 const ATTACH_MAX_BYTES = 100 * 1024 * 1024;
+/** lane channel-avatars (B-5fe1): a person's UPLOADED picture lives here (Slack's default face is a gravatar — no
+ *  picture: the initials stay); fetched with NO token, ≤ 256 KiB. */
+const AVATAR_ORIGIN = 'https://avatars.slack-edge.com/';
+const AVATAR_MAX_BYTES = 256 * 1024;
+/** The picture address a `users.info` answer names (`profile.image_72`), '' = no uploaded picture. Peer bytes. */
+function avatarUrlOf(u) {
+  const p = u && typeof u === 'object' && u.profile && typeof u.profile === 'object' ? u.profile : null;
+  if (!p || p.is_custom_image === false) return '';
+  const raw = typeof p.image_72 === 'string' && p.image_72.length <= 2048 ? p.image_72 : '';
+  return raw.startsWith(AVATAR_ORIGIN) && !/[\s\\]/.test(raw) ? raw : '';
+}
 const SEND_GAP_WAIT_MS = 1100;   // one wait for Slack's per-conversation second, then the bucket decides
 const TS_RE = /^\d{9,11}\.\d{1,6}$/;
 const ID_RE = /^[A-Z0-9][A-Z0-9_]{1,40}$/;
@@ -112,8 +132,12 @@ const caps = Object.freeze({
   historyBySource: null,
   listConversations: true,
   sendAs: ['user'],                 // AS THE PERSON (the user token) — convCaps narrows per conversation
-  sendAttachments: null,
-  sendAttachmentsWhy: 'Sending files to Slack comes in a later step (Slack takes a file in three requests); for now an agent sends text',
+  // lane channel-send-files (.212): an agent's files — per file `files.getUploadURLExternal` → the bytes to Slack's upload
+  // URL (files.slack.com) → `files.completeUploadExternal` into the conversation; the text rides as the FIRST file's
+  // `initial_comment`. Needs `files:write` on the user token (refused by name when not held). Gmail's bounds (Slack's own
+  // per-file ceiling is 1 GB)
+  sendAttachments: Object.freeze({ maxCount: 10, maxTotalBytes: 25e6, withText: true }),
+  sendAttachmentsWhy: null,
   identityMarking: 'unknown',       // the probe `sendMarker`: whether a message sent with the person's token carries an app marker
   identityMarkingWhere: null,
   identityMarkingText: null,
@@ -124,6 +148,8 @@ const caps = Object.freeze({
   readReceipts: false,
   render: 'blocks',
   attachments: 'fetch',
+  // lane channel-avatars (B-5fe1): a person's picture from `users.info` (`avatarImage`)
+  avatars: 'fetch',
   olderHistory: 'page',
   budget: { unit: 'request', metered: true, ...budgetOf(CHANNEL_SETTINGS.slack) },
   pace: { ...paceOf(CHANNEL_SETTINGS.slack), cost: { fetch: 1, discover: 1 } },
@@ -143,6 +169,7 @@ const caps = Object.freeze({
 const READ_SCOPES = Manifest.READ_SCOPES;
 const SEND_SCOPES = Manifest.SEND_SCOPES;
 const has = (scopes, s) => Array.isArray(scopes) && scopes.includes(s);
+const FILES_SCOPE = 'files:write';
 /** The send verdict from the HELD scopes alone (PURE — the engine re-judges every conversation on a credential change). */
 function sendCapsOf(scopes) {
   const send = SEND_SCOPES.every((s) => has(scopes, s));
@@ -578,7 +605,52 @@ function create(record = {}, deps = {}) {
   }
 
   // ── send (as the person) ──
-  async function sendImpl(convId, { text, replyTo = null, as = 'user', placement = null, prepared = null, replyAnchor = null } = {}) {
+  /**
+   * lane channel-send-files (.212): FILES into a conversation, ONE chain per file — `files.getUploadURLExternal`
+   * (name + length) → the bytes to its `upload_url` (files.slack.com only; no token rides) → `files.completeUploadExternal`
+   * (the channel, the thread, and on the first file the text as `initial_comment`). The first refusal STOPS the chain
+   * (never retried); `parts` say per file what landed. A token without `files:write` is refused by name before any request.
+   */
+  async function sendFiles(convId, params, files) {
+    if (!has(scopesHeld(), FILES_SCOPE)) throw new ChannelError('forbidden', `slack: the pasted token has no ${FILES_SCOPE} scope — nothing was sent (add ${FILES_SCOPE} to the app's user scopes and paste the new token)`, { retryable: false, detail: { why: 'files-scope-not-granted', requiredScopes: [FILES_SCOPE] } });
+    const parts = [];
+    let first = null;
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      const label = { part: 'attachment', name: f.name, ...(i === 0 && params.text ? { withText: true } : {}) };
+      try {
+        const u = await api('files.getUploadURLExternal', { filename: f.name, length: f.data.length }, { convId });
+        const url = String((u && u.upload_url) || ''), fid = String((u && u.file_id) || '');
+        if (!url.startsWith(FILES_ORIGIN) || !ID_RE.test(fid)) throw new ChannelError('vendor-error', 'slack files.getUploadURLExternal: the answer names no files.slack.com upload URL — nothing was uploaded', { retryable: false, detail: { why: 'upload-url' } });
+        await uploadBytes(url, f.data, convId);
+        const c = { files: JSON.stringify([{ id: fid, title: f.name }]), channel_id: convId, ...(params.thread_ts ? { thread_ts: params.thread_ts } : {}), ...(i === 0 && params.text ? { initial_comment: params.text } : {}) };
+        try { await api('files.completeUploadExternal', c, { convId }); }
+        catch (e) { if (e instanceof ChannelError && e.code === 'transport') throw new ChannelError('transport', `${e.message} — the request left and Slack's answer was lost; check Slack before sending again`, { retryable: false, detail: { ...(e.detail || {}), lost: true } }); throw e; }
+        parts.push({ ...label, ok: true, vendorMessageId: fid });
+        if (!first) first = { ok: true, vendorMessageId: fid, at: now(), sentAs: 'user', observed: { senderType: 'user', senderId: null, ...(params.thread_ts ? { threadKey: params.thread_ts } : {}) } };
+      } catch (e) {
+        const no = { ...label, ok: false, code: (e && e.code) || 'vendor-error', why: String((e && e.message) || e).slice(0, 300), ...(e && e.detail && e.detail.lost ? { lost: true } : {}), ...(e && e.detail && e.detail.requiredScopes ? { requiredScopes: e.detail.requiredScopes } : {}) };
+        const rest = files.slice(i + 1).map((g) => ({ part: 'attachment', name: g.name, ok: false, code: 'not-sent' }));
+        if (!first) { if (e instanceof ChannelError) e.detail = { ...(e.detail || {}), parts: [no, ...rest] }; throw e; }
+        parts.push(no, ...rest);
+        break;
+      }
+    }
+    return { ...first, parts };
+  }
+  /** The bytes to Slack's upload URL — metered as its own method; the answer judged here (a 429 is the ladder's). */
+  async function uploadBytes(url, data, convId) {
+    const v = buckets.take('files.upload', now(), { convId });
+    if (!v.go) throw new ChannelError('rate-limited', `slack files.upload: again in ${v.retryAfterSec || 60} s`, { retryable: true, detail: { method: 'files.upload', retryAfterSec: v.retryAfterSec || 60, bucket: true } });
+    await pace(1);
+    meter(1);
+    let r;
+    try { r = await fetchFn(url, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: data, redirect: 'error', signal: AbortSignal.timeout(60000) }); }
+    catch (e) { throw new ChannelError('transport', `slack files.upload: ${(e && e.message) || e}`, { retryable: true, detail: { method: 'files.upload' } }); }
+    if (r.status === 429) { const ra = retryAfterSeconds(r.headers); if (Number(ra) > 0) buckets.hold('files.upload', ra, now()); throw new ChannelError('rate-limited', `slack files.upload: Slack answered 429 (rate limited)`, { retryable: true, detail: { method: 'files.upload', status: 429, ...(Number(ra) > 0 ? { retryAfterSec: ra } : {}) } }); }
+    if (!r.ok) throw new ChannelError(r.status === 413 ? 'too-large' : r.status === 403 ? 'forbidden' : r.status >= 500 ? 'transport' : 'vendor-error', `slack files.upload: HTTP ${r.status}`, { retryable: r.status >= 500, detail: { method: 'files.upload', status: r.status } });
+  }
+  async function sendImpl(convId, { text, replyTo = null, as = 'user', placement = null, prepared = null, replyAnchor = null, attachments = null } = {}) {
     if (as !== 'user') throw new ChannelError('send-not-available', `slack: sending as '${as}' is not declared (caps.sendAs: user)`, { retryable: false, detail: { sendAs: caps.sendAs } });
     if (!SEND_SCOPES.every((s) => has(scopesHeld(), s))) throw new ChannelError('forbidden', 'slack: the pasted token has no chat:write scope — add it to the app and paste the new token (Re-authorize)', { retryable: false, detail: { why: 'send-scope-not-granted' } });
     const body = String(text == null ? '' : text);
@@ -595,6 +667,11 @@ function create(record = {}, deps = {}) {
       params.thread_ts = root;
       if (placement === 'thread+chat') params.reply_broadcast = 'true';
     }
+    const files = Array.isArray(attachments) ? attachments.filter((a) => a && Buffer.isBuffer(a.data)) : [];
+    // verify r1 (F4): Slack's files.completeUploadExternal has no `reply_broadcast` — a file into a thread AND the channel
+    // would land in the thread only while the receipt said both; refused by name before any request
+    if (files.length && params.reply_broadcast) throw new ChannelError('send-not-available', 'slack: a file shared into a thread cannot also go to the channel (Slack\'s file sharing has no "also send to the channel") — nothing was sent; send it into the thread only', { retryable: false, detail: { why: 'attachment-placement' } });
+    if (files.length) return sendFiles(convId, params, files);
     let d;
     try { d = await api('chat.postMessage', params, { convId }); }
     catch (e) {
@@ -608,6 +685,9 @@ function create(record = {}, deps = {}) {
   }
 
   return {
+    // B-2198: the raw API's bearer — handed to src/server/channel-api.js's ONE fetch site only, never to a route; its
+    // vendor facts are the module's declared `API_ROW` (the registry refuses a bearer without one)
+    apiBearer: async () => bearer(),
     auth: {
       async state() {
         const { token, why } = readToken();
@@ -810,6 +890,40 @@ function create(record = {}, deps = {}) {
 
     /** A file's bytes: `files.info` first (a Slack Connect file says `check_file_info`), then the private download URL —
      *  ONLY on files.slack.com (the token never goes anywhere else), bounded at 100 MB while it reads. */
+    /** lane channel-avatars (B-5fe1): ONE person's picture — `users.info` through the gate (users:read; a refused
+     *  scope said BY NAME), then the uploaded picture's bytes (paced, metered, NO token), ≤ 256 KiB. */
+    async avatarImage(author) {
+      const id = String(author || '');
+      if (!ID_RE.test(id)) throw new ChannelError('not-found', 'slack: a person is named by a user id', { retryable: false, detail: { why: 'no-picture' } });
+      let d;
+      try { d = await api('users.info', { user: id }); }
+      catch (e) {
+        if (e && e.detail && e.detail.error === 'missing_scope') throw new ChannelError('forbidden', 'slack: people\'s profiles cannot be read — re-authorize to grant users:read', { retryable: false, detail: { why: 'scope', scope: 'users:read' } });
+        throw e;
+      }
+      const url = avatarUrlOf(d && d.user);
+      if (!url) throw new ChannelError('not-found', 'slack: this person has no uploaded profile picture', { retryable: false, detail: { why: 'no-picture' } });
+      await pace(1);
+      meter(1);
+      let r;
+      try { r = await fetchFn(url, { redirect: 'error', signal: AbortSignal.timeout(30000) }); }
+      catch (e) { throw new ChannelError('transport', `slack avatar: ${(e && e.message) || e}`, { retryable: true }); }
+      if (!r.ok) throw new ChannelError(r.status === 404 ? 'not-found' : r.status === 429 ? 'rate-limited' : r.status === 403 ? 'forbidden' : 'transport', `slack avatar: HTTP ${r.status}`, { retryable: r.status === 429 || r.status >= 500, detail: { retryAfterSec: retryAfterSeconds(r.headers) } });
+      if (Number((r.headers && r.headers.get && r.headers.get('content-length')) || 0) > AVATAR_MAX_BYTES) throw new ChannelError('too-large', 'slack avatar: over the 256 KiB bound', { retryable: false });
+      const parts = [];
+      let n = 0;
+      if (r.body && typeof r.body.getReader === 'function') {
+        const rd = r.body.getReader();
+        for (;;) {
+          const { done, value } = await rd.read();
+          if (done) break;
+          n += value.length;
+          if (n > AVATAR_MAX_BYTES) { try { await rd.cancel(); } catch { } throw new ChannelError('too-large', 'slack avatar: the answer ran past the 256 KiB bound — cancelled, nothing kept', { retryable: false }); }
+          parts.push(Buffer.from(value));
+        }
+      } else { const b = Buffer.from(await r.arrayBuffer()); if (b.length > AVATAR_MAX_BYTES) throw new ChannelError('too-large', 'slack avatar: over the 256 KiB bound', { retryable: false }); parts.push(b); }
+      return { data: Buffer.concat(parts), mime: null };
+    },
     async fetchAttachment(convId, { attachmentId } = {}) {
       const id = String(attachmentId || '');
       if (!ID_RE.test(id)) throw new ChannelError('not-found', 'slack: a file is named by its id', { retryable: false });
@@ -855,10 +969,10 @@ function create(record = {}, deps = {}) {
 
 const SEND_GRANT = Object.freeze({ scopes: SEND_SCOPES, console: true });
 const REACTIONS_GRANT = Object.freeze({ scopes: Object.freeze(['reactions:read']), console: true });
-const adapter = { kind: KIND, caps, create, vendorNameOf, blocksOf: Text.slackStoredBlocks, recordView, sendGrant: SEND_GRANT, sendCapsOf, capsOfScopes, reactionsGrant: REACTIONS_GRANT };
+const adapter = { kind: KIND, caps, create, api: API_ROW, vendorNameOf, blocksOf: Text.slackStoredBlocks, recordView, sendGrant: SEND_GRANT, sendCapsOf, capsOfScopes, reactionsGrant: REACTIONS_GRANT };
 module.exports = {
-  kind: KIND, caps, create, adapter, label: LABEL, integration: INTEGRATION, OPTIONS, optionOf,
+  kind: KIND, caps, create, adapter, API_ROW, label: LABEL, integration: INTEGRATION, OPTIONS, optionOf,
   EGRESS, API, FILES_ORIGIN, FIRST_INGEST_MAX, WALK_TTL_MS, PAGE_MAX, PEOPLE_TTL_MS, PEOPLE_LOOKUPS_PER_CALL, RX_CACHE_TTL_MS, ATTACH_MAX_BYTES,
-  toRecord, recordView, factsOfMessage, personOf, callSlack, sendCapsOf, capsOfScopes, vendorNameOf, tsMs, msTs,
+  toRecord, recordView, factsOfMessage, personOf, avatarUrlOf, AVATAR_ORIGIN, callSlack, sendCapsOf, capsOfScopes, vendorNameOf, tsMs, msTs,
   SEND_GRANT, REACTIONS_GRANT, READ_SCOPES, SEND_SCOPES, blocksOf: Text.slackStoredBlocks,
 };

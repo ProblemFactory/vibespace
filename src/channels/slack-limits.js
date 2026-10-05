@@ -37,6 +37,10 @@ const METHOD_TIERS = Object.freeze({
   'emoji.list': 2,
   'files.info': 4,
   'files.download': 4,
+  // lane channel-send-files: an agent's file = these three, in order (Slack's documented upload since files.upload's retirement)
+  'files.getUploadURLExternal': 4,
+  'files.upload': 4,
+  'files.completeUploadExternal': 4,
 });
 const METHODS = Object.freeze(Object.keys(METHOD_TIERS));
 const WINDOW_MS = 60 * 1000;

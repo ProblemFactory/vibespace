@@ -114,7 +114,7 @@ function normalizeCard(x) {
   return out;
 }
 
-const ACTION_IDENTITY = Object.freeze({ 'exit-run-ask': 'askId', 'browser-proposal': 'id', 'app-install': 'id', 'open-channel': 'key' }); // lane browser-propose: one item per proposal (each is a different switch); Layer 0 apps (verify-r1 F2): one item per app proposal — another proposal of the same words never re-points this one's Install; channel-names verify r1 F2: one item per CONVERSATION (two rooms of one name merged — the click opened the last filer's, deciding one retracted both)
+const ACTION_IDENTITY = Object.freeze({ 'exit-run-ask': 'askId', 'browser-proposal': 'id', 'app-install': 'id', 'open-channel': 'key', 'channel-api-proposal': 'id' }); // lane browser-propose: one item per proposal (each is a different switch); Layer 0 apps (verify-r1 F2): one item per app proposal — another proposal of the same words never re-points this one's Install; channel-names verify r1 F2: one item per CONVERSATION (two rooms of one name merged — the click opened the last filer's, deciding one retracted both)
 const URGENCIES = ['low', 'normal', 'high', 'urgent'];
 const KINDS = ['action', 'notice']; // 2.369.118: action = needs the user (default); notice = for their information (own section, grey count)
 const STATUSES = ['open', 'done', 'dismissed'];

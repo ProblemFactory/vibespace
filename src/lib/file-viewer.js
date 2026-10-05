@@ -12,6 +12,7 @@ import { init as initPptx } from 'pptx-preview';
 import { t } from './i18n.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { fsErrorText } from './file-explorer-ops.js'; // verify-r2: a Files refusal in the reader's language
+import { wireFileDownload } from './file-download.js'; // lane viewer-download: every file window's Download
 
 /** The viewer types renderInto draws itself (its if-chain, one entry each —
  *  scripts/test-window-binding-model.mjs pins the two lists equal); any other
@@ -91,18 +92,33 @@ class FileViewer {
     const btnReload = document.createElement('button');
     btnReload.className = 'file-tool-btn media-btn viewer-reload-btn';
     btnReload.textContent = '⟳'; btnReload.title = t('Reload from disk');
+    // Download (lane viewer-download): the file on its machine's disk — seated in the viewer's own toolbar after
+    // every render (Word: beside "Open in LibreOffice"), else floating beside the ⟳
+    const btnDownload = wireFileDownload(winInfo, { path: filePath, host });
     btnReload.onclick = async () => {
       container._bustTs = Date.now();
       container.innerHTML = '';
       await FileViewer.renderInto(container, filePath, fileName, app, host);
+      FileViewer._seatDownload(container, btnDownload, winInfo.content);
     };
     winInfo.content.appendChild(btnReload);
     const rendered = await FileViewer.renderInto(container, filePath, fileName, app, host);
+    FileViewer._seatDownload(container, btnDownload, winInfo.content);
     if (!rendered) {
       // No dedicated viewer — open in code editor
       app.openEditor(filePath, fileName, opts);
       app.wm.closeWindow(winInfo.id);
     }
+  }
+
+  /** The window's Download into the toolbar its viewer drew (Word: right after "Open in LibreOffice", else before
+   *  the page count), or floating beside the ⟳ when the viewer has no toolbar (PDF, video, an error pane). */
+  static _seatDownload(container, btn, floatHost) {
+    const bar = container.querySelector('.docx-toolbar, .media-toolbar, .archive-toolbar');
+    btn.classList.toggle('viewer-download-float', !bar);
+    if (!bar) { floatHost.appendChild(btn); return; }
+    const office = bar.querySelector('.docx-tool-office'), pages = bar.querySelector('.docx-pages');
+    if (office) office.after(btn); else if (pages) bar.insertBefore(btn, pages); else bar.appendChild(btn);
   }
 
   /**

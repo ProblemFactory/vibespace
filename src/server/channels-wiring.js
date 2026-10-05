@@ -13,6 +13,8 @@ const { create: createEngine } = require('./channels-engine.js');
 const { create: createGroups } = require('./groups-engine.js');
 const channelsRoutes = require('../routes/channels.js');
 const { create: createTouches } = require('./channel-touches.js');
+const { create: createChannelApi } = require('./channel-api.js');
+const { create: createApiCards } = require('./channel-api-cards.js');
 const N = require('../normalizers.js');
 
 function create({ app, dataDir, bcastAll = () => {}, now = () => Date.now(), env = process.env, integrations = null, userTodos = null, deliver = null, serverSetting = () => undefined, liveSessions = () => [], groupSetting = () => 'none', authEnabled = () => false, getMounts = () => null, sessions = () => null, sessionMeta = () => null, onGroupsPending = () => {} } = {}) {
@@ -39,6 +41,10 @@ function create({ app, dataDir, bcastAll = () => {}, now = () => Date.now(), env
     of: (mountId, opts = {}) => { const m = getMounts(); if (!m || typeof m.oauthClientOf !== 'function') noMounts(); return m.oauthClientOf(mountId, opts); },
   };
   const channels = createEngine({ dataDir, broadcast: (msg) => bcastAll(msg), now, env, integrations, userTodos, deliver, serverSetting, liveSessions, mountClients });
+  // B-2198: the raw API pass-through's orchestrator (src/server/channel-api.js) — reached by the agent and owner routes as `channels.rawApi`
+  channels.rawApi = createChannelApi({ dataDir, engine: channels, getMounts, now, broadcast: (msg) => { bcastAll(msg); if (channels.apiCards) channels.apiCards.onUpdate(msg); } });
+  // B-2198 part 2: ONE card per proposal in the chat, the Outbox and For you; the next-turn receipt; the 24 h expiry + withdrawal
+  channels.apiCards = createApiCards({ dataDir, api: () => channels.rawApi, userTodos, deliver, now });
   // AGENT GROUPS (design §22): the SAME store (groups.json + the group logs
   // behind its serialized doors), the SAME ladder (a wake is a billed turn —
   // spendReason peer-message, the authorizer inside it), reach = msg-acl over
@@ -82,7 +88,7 @@ function create({ app, dataDir, bcastAll = () => {}, now = () => Date.now(), env
   channelsRoutes.setup({ getEngine: () => channels, getGroups: () => groups, authEnabled, getTouches: () => touches });
   app.use(channelsRoutes.router);
   channels.start();
-  return { channels, groups, touches, flushGroupCards, shutdown: () => { try { touches.flush(); } catch (e) { console.warn('[channel-touches] flush:', e && e.message); } try { flushGroupCards(); } catch (e) { console.warn('[groups] card flush:', e && e.message); } try { channels.stop(); } catch (e) { console.warn('[channels] shutdown:', e && e.message); } } };
+  return { channels, groups, touches, flushGroupCards, shutdown: () => { try { channels.apiCards.stop(); } catch {} try { touches.flush(); } catch (e) { console.warn('[channel-touches] flush:', e && e.message); } try { flushGroupCards(); } catch (e) { console.warn('[groups] card flush:', e && e.message); } try { channels.stop(); } catch (e) { console.warn('[channels] shutdown:', e && e.message); } } };
 }
 
 module.exports = { create };

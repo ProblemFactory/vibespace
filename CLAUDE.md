@@ -828,6 +828,7 @@ stream-json 下 assistant 的 `thinking→text→thinking→tool_use` 三明治�
 
 **Full essays: docs/kb-bugfix-invariants.md (moved verbatim; ancient one-liners in docs/history-archive.md). Each entry is an incident whose FIX carries invariants — search here before re-diagnosing a familiar symptom.** Index:
 
+- A NOTE CROWDED OUT THE LOGIN-EXPIRY CHIP (lane roster-login-chip, 2026-10-04): the roster's extras line put the chip + re-login button LAST on one ellipsis line. FIX = acctExtrasHtml: warnings first and whole, provenance + note in one ellipsis box, note last ⇒ kb-bugfix-invariants.md
 - THE HUB ASSUMED `sh` FOR FILES TOO (lane windows-device-fs, WIN-DESK1): /api/files on Windows = "command failed (127)". FIX = the agent's own fs ops (`fs-portable`), shell-only ops refused by name, a door refusing `sh` where the hello says none, a 36-site census ⇒ kb-bugfix-invariants.md
 - EVERY WORKER IN THE SIDEBAR WAS CALLED "Another Claude session sent a message:" (peer-card-sender): its first user record, a wake, named it. FIX = the CLI's stamps (origin / isMeta) never name; a given live name outranks; ws rename → customNames. 不变量=a name is typed words ⇒ kb-bugfix-invariants.md
 - A SERVER-POSTED GROUP WAKE WAS "Message from another session" (B-9fd6): a wake older than the ring rebuilt name-less; a 3-message wake named 1. FIX = group-card readReport fallback (matched by the recorded words) + wake authors ≤ 3. 不变量=name from the delivery's facts ⇒ kb-bugfix-invariants.md

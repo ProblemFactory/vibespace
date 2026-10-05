@@ -1572,6 +1572,11 @@ const CENSUS = [
   ['browser-replay-window.js', 'combobox', 'widget', 'the sessions / actions lists (role=listbox: ← → Home End Space)'],
   ['channel-filter-editor.js', 'select', 'choice', 'the filter\'s pickers (selectBox — el(\'select\') from channel-chrome.js)'],
   ['channel-outbox.js', 'details', 'control', 'the proposal\'s "Original text" fold'],
+  // B-2198 (the raw API, joined at the 2.369.212 integration): the proposal card and the API access dialog
+  ['channel-api-card-view.js', 'details', 'control', 'the card\'s frozen-request fold (method, host, path, headers, the body\'s first 400 chars)'],
+  ['channel-api-card-view.js', 'input', 'text', 'the Reject\'s "Why (the agent reads it)" box'],
+  ['channel-api-dialog.js', 'input', 'text+control', 'API access: a credential\'s per-day cap (number); the All agents write tick (checkbox)'],
+  ['channel-api-dialog.js', 'select', 'choice', 'API access: the credential picker, a principal\'s tier'],
   ['exit-runs-dialog.js', 'details', 'control', 'a command\'s row in the machine\'s Commands… list (lane exit-run-output; joined at the 2.369.200 integration)'],
   ['channel-outbox.js', 'tabindex', 'control', 'the Outbox ROW (0, role=button — B-f467: Enter opens its full card)'],
   ['channel-outbox.js', 'input', 'text', 'the reject reason'],

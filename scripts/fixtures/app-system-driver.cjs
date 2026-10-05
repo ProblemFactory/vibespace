@@ -48,6 +48,8 @@ const setId = (patch) => { const j = JSON.parse(su('cat', `${R}/etc/vibespace-sy
 const resetId = () => su('install', '-m', '0644', '-o', 'root', '-g', 'root', '/tmp/id.orig', `${R}/etc/vibespace-sysroot.json`);
 
 (async () => {
+  // (mirror-green-211: this process env is the container's — docker run is given no -e, so it is the image env and no
+  // INVOCATION_ID of the host's systemd unit or an Actions runner ever reaches it; the {...process.env} bases below are safe)
   // ── lane app-system-env: THE REAL WIRING, FIRST (nothing installed yet) — a child whose OWN env carries the flag, the
   // machine half built over agentEnv() as server.js builds it; its after-listen replay installs the helper; the status read ──
   {

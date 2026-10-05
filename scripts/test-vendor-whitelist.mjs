@@ -422,6 +422,38 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
     const r = emojiCensus(mut, routesSrc, { ...serverTexts, [engineRel]: mut }).filter(([, p]) => !p).map(([n]) => n);
     ok(r.some((n) => /EMOJI CACHE-FIRST \+ BUDGET-CHARGED/.test(n)), `§7 CONTROL: an emojiImage() that skips the budget is RED (${r.join(' | ')})`);
   }
+  // §7b lane channel-avatars (B-5fe1, 2026-10-04): A PERSON'S PICTURE — allowlisted HERE deliberately: Lark
+  // `contact/v3/users/:id` + the picture host's bytes, Slack `users.info` + avatars.slack-edge.com. ON-DEMAND (the
+  // adapters' `avatarImage` called once by the engine, the engine's once by the GET avatar route), MEMO-FIRST (the
+  // account's on-disk memo + its remembered refusal before anything), OURS ONLY + BUDGET-CHARGED (the author named by a
+  // record of the account, the back-off and the budget, then ONE call through vendor(rec, e, …) — paced inside the adapter).
+  const avatarCensus = (engineSrc3, routesSrc3, texts) => {
+    const E = strip(engineSrc3);
+    const at = E.indexOf('async function avatarImage(');
+    const body = at < 0 ? '' : E.slice(at, E.indexOf('\n  }\n', at));
+    const p = (x) => body.indexOf(x);
+    const callers = [];
+    for (const [rel, text] of Object.entries(texts)) { const n = (strip(text).match(/\.avatarImage\(/g) || []).length; if (n) callers.push(`${rel}:${n}`); }
+    const R = strip(routesSrc3);
+    const rAt = R.indexOf("router.get('/api/channels/avatar'");
+    const rBody = rAt < 0 ? '' : R.slice(rAt, R.indexOf('\n});', rAt));
+    return [
+      ['AVATAR MEMO-FIRST + OURS ONLY + BUDGET-CHARGED: avatarImage() asks the memo and its refusal, then ONE verdict with the owner, the back-off and the budget, then ONE metered call on its `fetch`', !!body && p('store.avatarGet(') > 0 && p('Att.fetchVerdict({ cached: f.cached') > p('store.avatarGet(') && p('owner: authorIsOurs(') > p('Att.fetchVerdict({ cached: f.cached') && p('affordable: affordable(rec, e)') > p('owner: authorIsOurs(') && p("case 'fetch': break;") > p('affordable: affordable(rec, e)') && p('vendor(rec, e, () => e.adapter.avatarImage(') > p("case 'fetch': break;")],
+      ['AVATAR ON-DEMAND: `.avatarImage(` is called by the engine once (its vendor call) and by the GET avatar route once — nowhere else in the server tree', callers.sort().join() === 'src/routes/channels.js:1,src/server/channels-engine.js:1' && /engine\(\)\.avatarImage\(/.test(rBody), callers.join(', ')],
+    ];
+  };
+  for (const [name, pass, detail] of avatarCensus(engineSrc, routesSrc, serverTexts)) ok(pass, `§7b ${name}`, detail);
+  {
+    const from = 'backoff: inBackoff(e) || (Number(e.attBackoffUntil) || 0) > t, affordable: affordable(rec, e) });\n    switch (v.act) {\n      case \'join\': return avatarFlights';
+    ok(engineSrc.split(from).length === 2, '§7b CONTROL avatar: the budget fact of avatarImage()\'s verdict is spelled once');
+    const mut = engineSrc.replace(from, from.replace(', affordable: affordable(rec, e)', ''));
+    const r = avatarCensus(mut, routesSrc, { ...serverTexts, [engineRel]: mut }).filter(([, q]) => !q).map(([n]) => n);
+    ok(r.some((n) => /AVATAR MEMO-FIRST/.test(n)), `§7b CONTROL: an avatarImage() that skips the budget is RED (${r.join(' | ')})`);
+    const wf2 = 'src/server/channels-wiring.js';
+    const sweep = serverTexts[wf2] + '\nfunction sweepFaces(engine, rows) { for (const r of rows) engine.avatarImage(r.adapterId, r.author).catch(() => {}); }\n';
+    const r2 = avatarCensus(engineSrc, routesSrc, { ...serverTexts, [wf2]: sweep }).filter(([, q]) => !q).map(([n]) => n);
+    ok(r2.some((n) => /AVATAR ON-DEMAND/.test(n)), `§7b CONTROL: a wiring-file copy that sweeps every author's picture is RED (${r2.join(' | ')})`);
+  }
   // THE CONTROLS: ungated copies, written by scripts/mutant-copy.mjs into this run's scratch dir
   const MUT = mutantCopies('vendor-whitelist-att', REPO);
   const reds = (rows) => rows.filter(([, p]) => !p).map(([n]) => n);
@@ -977,6 +1009,57 @@ console.log('§FS-G design 010 S6: Gmail\'s search requests live in its search /
   const keeps13 = mut('keeps-secret', '    const c = workspaceClient();\n    let r;\n    try { r = await callSlack(fetchFn, Manifest.EXCHANGE_METHOD', '    const c = workspaceClient();\n    const kept = c.secret(); void kept;\n    let r;\n    try { r = await callSlack(fetchFn, Manifest.EXCHANGE_METHOD');
   ok(keeps13 && reds(census13(keeps13, { ...serverTexts, [slackRel]: keeps13 })).some((n) => /THE SECRET/.test(n)), '§13 CONTROL: a copy that keeps the secret in a variable is RED');
   for (const x of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 3, label: '§12 ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
+}
+
+// §14 B-2198 THE CHANNELS RAW API (docs/design-channel-raw-api.md) — the ONE allow-listed pass-through vendor surface:
+// src/server/channel-api.js constructs vendor requests at ONE site (`vendorFetch`), only to the hosts the credential's
+// DECLARED row names (an adapter's `api` row beside its `apiBearer`; the storage mounts' row + its `refresh` token
+// endpoint — lane channel-api-declared: the core names no vendor), never following a redirect, and only behind
+// the grant (`tierNow(ctx`) and the account's meter (`c.gate()` / `c.charge()`); no other file reaches `rawApi`'s fetch.
+// Controls: the host gate cut, the meter cut, the grant cut — each RED.
+console.log('§14 the Channels raw API: ONE fetch site, the host table, the grant, the account meter');
+{
+  const rel = 'src/server/channel-api.js';
+  const src0 = fs.readFileSync(path.join(REPO, rel), 'utf8');
+  const fence = fs.readFileSync(path.join(REPO, 'src/channel-api.js'), 'utf8');
+  const census14 = (src) => {
+    const bad = [];
+    const sites = (src.match(/\bfetchFn\(/g) || []).length;
+    if (sites !== 1) bad.push(`${sites} fetch sites — exactly ONE (vendorFetch)`);
+    // a raw global fetch( beside fetchFn (redirects followed, no host table) is a second site too (verify r1)
+    const raw = (src.match(/(?<![\w.])fetch\(/g) || []).length;
+    if (raw) bad.push(`${raw} raw fetch( call(s) — every vendor request goes through vendorFetch`);
+    const vf = (src.match(/\n  function vendorFetch\([\s\S]*?\n  \}/) || [''])[0];
+    if (!/if \(u\.protocol !== 'https:' \|\| !hosts\.has\(u\.host\)\) throw/.test(vf)) bad.push('THE HOST TABLE gate is gone from vendorFetch');
+    if (!/redirect: 'manual'/.test(vf)) bad.push('vendorFetch follows redirects (THE REDIRECT RULE)');
+    const call = (src.match(/\n  async function call\([\s\S]*?\n  \}\n/) || [''])[0];
+    const iGate = call.indexOf('const g = c.gate();'), iRun = call.indexOf('await run(');
+    if (iGate < 0 || iRun < 0 || iGate > iRun || !/if \(g\) \{/.test(call)) bad.push('THE ACCOUNT METER (c.gate) is not asked before the run');
+    if (!/const tr = tierNow\(ctx, cred\);\n    const c = tr\.tier !== 'none' \? credentialOf\(cred\) : null;\n    if \(!c\) return NOT_GRANTED\(\);/.test(call)) bad.push('THE GRANT (tierNow) is not asked before the credential is resolved');
+    const runB = (src.match(/\n  async function run\([\s\S]*?\n  \}\n/) || [''])[0];
+    if (!/c\.charge\(\);\n\s+res = await vendorFetch\(/.test(runB)) bad.push('a vendor request is not charged to the account meter');
+    return bad;
+  };
+  ok(census14(src0).length === 0, '§14 the raw API: ONE fetch site behind the host table, no redirect, the grant, the account meter', census14(src0).join('; '));
+  ok(src0.includes('await vendorFetch(row.refresh,') && census14(src0.replace('await vendorFetch(row.refresh,', 'await fetch(row.refresh,')).length > 0, 'CONTROL: §14 a raw fetch( planted beside vendorFetch (the mount refresh) is red (verify r1)');
+  // THE HOSTS ARE DERIVED FROM THE DECLARATIONS (never a second hand list): every adapter module's `api` row + the mounts'
+  const chDir = path.join(REPO, 'src/channels');
+  const declared = [...fs.readdirSync(chDir).filter((f) => /\.js$/.test(f)).map((f) => require(path.join(chDir, f))).filter((m) => m && m.adapter && m.adapter.api).map((m) => ({ who: m.adapter.kind, row: m.adapter.api })),
+    ...Object.entries(require(path.join(REPO, 'src/mounts.js')).MountManager.OAUTH_API).map(([v, row]) => ({ who: `mount-${v}`, row }))];
+  const reach = declared.flatMap(({ who, row }) => [...row.hosts, ...(row.refresh ? [new URL(row.refresh).host] : [])].map((h) => `${who}:${h}`));
+  const hostLit = /['"`](https?:\/\/)?[a-z0-9-]+(\.[a-z0-9-]+)*\.(com|cn|net|org|io|ai|dev|app)\b/i;
+  ok(declared.length >= 4 && !reach.some((x) => /anthropic|claude\.ai/i.test(x)) && !/anthropic|claude\.ai/i.test(fence + src0) && !hostLit.test(fence) && !hostLit.test(src0), `§14 the hosts are the DECLARED rows' (${declared.map((d) => d.who).join(', ')}) — no Anthropic endpoint among them, and the fence + orchestrator hold no host literal`, reach.join(' '));
+  const others = fs.readdirSync(path.join(REPO, 'src'), { recursive: true }).map((f) => `src/${f}`).filter((f) => /\.js$/.test(f) && f !== rel && /\brawApi\b/.test(fs.readFileSync(path.join(REPO, f), 'utf8')) && /\bvendorFetch\(/.test(fs.readFileSync(path.join(REPO, f), 'utf8')));
+  ok(others.length === 0, '§14 no other file calls the raw API\'s vendorFetch', others.join(', '));
+  const cut = (a, b) => (src0.split(a).length === 2 ? src0.replace(a, b) : null);
+  const ctl = [
+    ['the host gate cut', cut(" || !hosts.has(u.host)) throw", ") throw"), /HOST TABLE/],
+    ['the meter cut', cut("    const g = c.gate();\n    if (g) {", "    const g = null;\n    if (g) {"), /ACCOUNT METER/],
+    ['the grant cut', cut("    const c = tr.tier !== 'none' ? credentialOf(cred) : null;", "    const c = credentialOf(cred);"), /THE GRANT/],
+    ['the charge cut', cut("        c.charge();\n", ""), /charged/],
+  ];
+  const r = ctl.map(([n, s, re]) => ({ n, red: !!s && census14(s).some((x) => re.test(x)) }));
+  ok(r.every((x) => x.red), `§14 CONTROLS: ${r.map((x) => `${x.n} (${x.red ? 'RED' : 'missed'})`).join(', ')}`);
 }
 
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);

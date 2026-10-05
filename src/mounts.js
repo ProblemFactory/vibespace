@@ -684,6 +684,22 @@ class MountManager {
   // at use time), so only top-level records are listed; a preset-backed
   // record holds no client to lend.
   static OAUTH_CLIENT_VENDOR = Object.freeze({ drive: 'google', gmail: 'google', onedrive: 'microsoft' });
+  /** B-2198 (D3): a lent client's RAW-API ROW per vendor — the channel registry's one raw-API schema (`validateApi`), plus
+   *  `refresh` (the token endpoint the raw API's orchestrator refreshes a mount's token at, in memory). Declared HERE, by
+   *  the owner of the storage OAuth clients (the vendor map above, `oauthClientOf` / `oauthTokenOf`): the orchestrator
+   *  lists a vendor's mounts as credentials only when its row is declared, and names no vendor itself. */
+  static OAUTH_API = Object.freeze({
+    google: Object.freeze({
+      label: 'Google APIs',
+      hosts: Object.freeze(['www.googleapis.com', 'gmail.googleapis.com', 'docs.googleapis.com', 'sheets.googleapis.com', 'slides.googleapis.com', 'drive.googleapis.com', 'people.googleapis.com', 'tasks.googleapis.com']),
+      docs: Object.freeze(['https://developers.google.com/workspace/explore', 'https://developers.google.com/gmail/api/reference/rest']),
+      readByPost: Object.freeze([/:batchGet$/]),
+      sensitive: Object.freeze([/\/permissions/, /trash/i, /delete/i, /\/acl/]),   // `batchDelete` too
+      refresh: 'https://oauth2.googleapis.com/token',
+    }),
+  });
+  /** The raw-API rows of the vendors whose lent clients are credentials (`{vendor: row}`) — read by the orchestrator. */
+  oauthApiRows() { return MountManager.OAUTH_API; }
   _lendsOAuthClient(m) {
     return !!(m && !m.parentId && m.origin !== 'my-storage' && MountManager.OAUTH_CLIENT_VENDOR[m.type || 's3'] && m.clientId && m.clientSecretEnc);
   }
@@ -722,6 +738,16 @@ class MountManager {
     try { clientSecret = this._dec(m.clientSecretEnc); }
     catch (e) { throw refuse('mount-secret-undecryptable', `the storage mount "${head.name}"'s client secret cannot be decrypted with .mounts-key (${(e && e.code) || 'decrypt-failed'})`); }
     return { ...head, clientSecret };
+  }
+  /** B-2198 (D3): a Google mount as a raw-API credential — SERVER-ONLY, for src/server/channel-api.js's ONE fetch site:
+   *  the lent client plus the mount's OAuth token (rclone's JSON), decrypted here and never answered on a route. */
+  oauthTokenOf(mountId, { vendor = 'google' } = {}) {
+    const c = this.oauthClientOf(mountId, { vendor });
+    const m = this._state.mounts.find((x) => x.id === c.mountId);
+    let token = null;
+    try { token = m && m.tokenEnc ? JSON.parse(this._dec(m.tokenEnc)) : null; } catch { token = null; }
+    if (!token || typeof token !== 'object') { const e = new Error(`the storage mount "${c.name}" holds no readable OAuth token — sign it in again`); e.code = 'mount-no-token'; throw e; }
+    return { ...c, token };
   }
 
   /**

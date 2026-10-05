@@ -88,3 +88,5 @@ cb_env_license_Z{16}
 \(SYSTEM \+ Admin[i]strators
 # design 018 test legs hand the fake Slack's workspace-app secret CONSTANT (scripts/fixtures/slack-vendor.cjs) by name:
 clientSecret: WS_CLIENT_SECRET
+# lane channel-send-files (2.369.212): the Lark fixture user token in scripts/test-channel-send-files.mjs, not real
+u-fixture-user-token

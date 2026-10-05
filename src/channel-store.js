@@ -1517,6 +1517,39 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     if (closed) { lruFlush(); return; }
     if (!lruTimer) { lruTimer = setTimeout(lruFlush, LRU_TOUCH_MS); if (lruTimer.unref) lruTimer.unref(); }
   }
+  // lane channel-avatars (B-5fe1): A PERSON'S PICTURE, memoised beside the account — data/channels/<account>/avatars/
+  // <sha1(author)> (the bytes, 0600) + .json (`{at, mime, bytes}` for a picture, `{code, error, until}` for a refusal
+  // the vendor answered: "no picture", a refused scope). ONE fetch per author per account per channel-avatars REFRESH_MS;
+  // bounded by its route (≤ 256 KiB each) — no LRU: one small file per person the account's messages name.
+  const avDir = (adapterId) => path.join(dir, safeSeg(adapterId), 'avatars');
+  function avatarGet(adapterId, author) {
+    const file = path.join(avDir(adapterId), attHash(author));
+    let meta;
+    try { meta = JSON.parse(fs.readFileSync(file + '.json', 'utf-8')); } catch { return null; }
+    if (!meta || typeof meta !== 'object') return null;
+    if (meta.code) return { file: null, meta };
+    try { fs.statSync(file); } catch { return null; }
+    return { file, meta };
+  }
+  async function avatarPut(adapterId, author, { data, mime }) {
+    const buf = Buffer.isBuffer(data) ? data : Buffer.from(data || '');
+    const d = avDir(adapterId);
+    await fs.promises.mkdir(d, { recursive: true, mode: 0o700 });
+    const file = path.join(d, attHash(author));
+    const tmp = `${file}.tmp-${process.pid}-${++attSeq}`;
+    await fs.promises.writeFile(tmp, buf, { mode: 0o600 });
+    await fs.promises.rename(tmp, file);
+    const meta = { at: now(), mime: String(mime || '').slice(0, 64), bytes: buf.length };
+    writeJsonAtomic(file + '.json', meta, { mode: 0o600 });
+    return { file, meta };
+  }
+  function avatarRefuse(adapterId, author, { code, error = '', until }) {
+    const d = avDir(adapterId);
+    fs.mkdirSync(d, { recursive: true, mode: 0o700 });
+    const meta = { code: String(code).slice(0, 64), error: String(error || '').slice(0, 300), until: Number(until) || 0, at: now() };
+    writeJsonAtomic(path.join(d, attHash(author)) + '.json', meta, { mode: 0o600 });
+    return { file: null, meta };
+  }
   /** A cached attachment: `{file, meta}` or null. A hit refreshes its LRU stamp. */
   // verify r1 (lane channel-attach-read): `msg` names the message whose part it is (a Gmail `part:N` repeats per mail)
   const attSlot = (attId, msg) => attHash(msg ? `${msg}\n${attId}` : attId);
@@ -1885,7 +1918,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     quarantined,
     appendRecords, readTail, countSince, trim, audit, auditTail, close,
     // 2026-09-26 (the aggregated IM): backfill, search, attachments
-    prependRecords, oldestRecord, search, attachmentGet, attachmentPut, attachmentUsage,
+    prependRecords, oldestRecord, search, attachmentGet, attachmentPut, attachmentUsage, avatarGet, avatarPut, avatarRefuse,
     // R3 (§23): one record by its vendorId (the attachment's owner), the LRU ledger's coalesced flush
     findRecord, lruFlush,
     // lane channel-threads: the side log (invariant 8) + which conversation holds a message

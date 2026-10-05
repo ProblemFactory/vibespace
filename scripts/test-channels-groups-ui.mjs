@@ -125,7 +125,7 @@ console.log('§1 channel-groups-view (PURE)');
     for (const c of copiesCensus(MC.files, MC.dir, REPO, { minCopies: 2, label: 'chan-b5fe1: ' })) ok(c.pass, c.name, c.pass ? undefined : c.detail);
     // the wiring: the panel row and the window bar pass the badge; line 1 says the account at ≥ 2; the route names the accounts
     const PS = read('src/lib/channels-panel.js'), WS = read('src/lib/channel-window.js'), RS = read('src/routes/channels.js'), CS = read('src/lib/channel-chrome.js');
-    ok(/convAvatar\(\{ key: r\.key, [^\n]*badge: r\.account \}/.test(PS) && /const acct = r\.account && r\.account\.multi \? r\.account\.label : '';/.test(PS) && /chanEl\('span', 'chan-grow-acct', acct\)/.test(PS) && /\} else if \(!acct\) \{/.test(PS),
+    ok(/convAvatar\(\{ key: r\.key, [^\n]*badge: r\.account(?: \}|, pic: )/.test(PS) && /const acct = r\.account && r\.account\.multi \? r\.account\.label : '';/.test(PS) && /chanEl\('span', 'chan-grow-acct', acct\)/.test(PS) && /\} else if \(!acct\) \{/.test(PS),
       'B-5fe1 PIN: the first-screen row draws its account badge, says the account in small text at ≥ 2 accounts of a kind (one account name per row: the source chip stays away)');
     ok(/const badge = accountBadges\(r\.accounts \|\| /.test(WS) && /convAvatar\(\{ key: `\$\{adapterId\}\/\$\{convId\}`, title: shownTitle, kind: c\.kind, badge \}/.test(WS) && /accounts: eng\.accountsBrief\(\)/.test(RS) && /b\.className = 'chan-av-badge';/.test(CS) && /UI_ICONS\[badge\.glyph\] \? badge\.glyph : 'chat'/.test(CS),
       'B-5fe1 PIN: the window bar wears the same badge (its hue from the WHOLE account list the conversation route names); the badge is a library glyph inside the avatar (paint)');
@@ -451,7 +451,13 @@ const CLIENT = ['src/lib/channels-panel.js', 'src/lib/channel-window.js', 'src/l
   // the panel's draw region wires must be one of those properties, never addEventListener (a kept node would keep a
   // stale closure)
   const drawRegion = P.slice(P.indexOf('  function draw() {'), P.indexOf('  async function refresh() {'));
-  const propsUsed = [...new Set([...(drawRegion + read('src/lib/channel-chrome.js')).matchAll(/\.(on[a-z]+) = /g)].map((m) => m[1]))];
+  // lane channel-avatars (int212): a handler on a DETACHED probe (`const probe = new Image()` — the picture warm-up) is never on a
+  // drawn node, so reconcile never adopts it; every other receiver counts
+  const handlerProps = (src) => { const probes = new Set([...src.matchAll(/\b(\w+) = new Image\(\)/g)].map((m) => m[1])); return [...new Set([...src.matchAll(/\b(\w+)\.(on[a-z]+) = /g)].filter((m) => !probes.has(m[1])).map((m) => m[2]))]; };
+  const CH = read('src/lib/channel-chrome.js');
+  const propsUsed = handlerProps(drawRegion + CH);
+  const plantedOn = CH.replace("img.className = 'chan-av-img';", "img.onerror = () => img.remove(); img.className = 'chan-av-img';");
+  ok(plantedOn !== CH && handlerProps(drawRegion + plantedOn).includes('onerror'), 'CONTROL (int212): an `onerror` on the DRAWN avatar\'s picture (not the detached probe) is counted by the handler census');
   const hp = /const HANDLER_PROPS = Object\.freeze\(\[([^\]]*)\]\);/.exec(P);
   const declared = hp ? [...hp[1].matchAll(/'(\w+)'/g)].map((m) => m[1]) : [];
   ok(drawRegion.length > 5000 && !/addEventListener\(/.test(strip(drawRegion)) && propsUsed.length >= 2 && propsUsed.every((k) => declared.includes(k)), `HANDLER CENSUS: the draw region wires handlers only as properties (${propsUsed.join(', ')}) and every one is in reconcile's HANDLER_PROPS (${declared.join(', ')}) — never addEventListener`, J({ propsUsed, declared }));

@@ -984,7 +984,30 @@ console.log('— §5 wiring');
   })());
 
   const ma = fs.readFileSync(path.join(REPO, 'src/lib/manage-agents.js'), 'utf8');
-  ck('the roster row renders the chip', /loginExpiryChipHtml\(a, \{ local: !selectedHost \}\)/.test(ma) && /\$\{oatTag\}\$\{loginTag\}/.test(ma));
+  ck('the roster row renders the chip', /loginExpiryChipHtml\(a, \{ local: !selectedHost \}\)/.test(ma) && /<span class="acct-key-main">[^\n]*\$\{extrasTag\}<\/span>/.test(ma));
+  // §5x THE EXTRAS ORDER (2.369.212, owner: "这个登陆过期提示会被备注抢占位置导致看不到" — the
+  // extras line was ONE nowrap ellipsis line with the note first and the chip LAST,
+  // so a note ate the warning and its re-login button). DOM-free: the REAL helper
+  // (sliced out of the source and run) on a row with provenance + a note + an
+  // expiring login, through the REAL call site's argument mapping.
+  const extrasOrder = (src) => {
+    const i = src.indexOf('export function acctExtrasHtml('); if (i < 0) return { ok: false, why: 'no acctExtrasHtml' };
+    const body = src.slice(i, src.indexOf('\n}\n', i) + 2).replace(/^export /, '');
+    const call = /const extrasTag = acctExtrasHtml\(\{ login: loginTag, oat: oatTag, oatWarn: [^}]*prov: provTag, note: noteTag \}\);/.test(src);
+    const fn = new Function(body + '\nreturn acctExtrasHtml;')();
+    const chip = ' <span class="acct-blocked-hint acct-login-chip" role="button" data-relogin="s1">login expires in 13 h</span>';
+    const note = ' <span class="acct-blocked-hint" title="0248 08">· 0248 08</span>', prov = ' <span class="acct-linked-hint">· from box</span>';
+    const warn = ' <span class="acct-blocked-hint" style="color:var(--red,#e55)">· long-lived token expired</span>';
+    const h = fn({ login: chip, oat: '', prov, note }), w = fn({ login: chip, oat: warn, oatWarn: true, prov, note });
+    const soft = (x) => (x.match(/<span class="acct-extra-soft">([\s\S]*)<\/span><\/span>$/) || [])[1] || '';
+    return { ok: call && h.indexOf('acct-login-chip') >= 0 && h.indexOf('acct-login-chip') < h.indexOf('0248 08')
+      && !soft(h).includes('acct-login-chip') && soft(h).endsWith(note) && soft(h).indexOf('from box') < soft(h).indexOf('0248 08')
+      && w.indexOf('long-lived token expired') < w.indexOf('from box') && !soft(w).includes('long-lived token expired'), call, h };
+  };
+  const eo = extrasOrder(ma);
+  ck('§5x the login chip PRECEDES the note, outside the ellipsis box; provenance then the note LAST inside it; an expiring token warning sits whole beside the chip', eo.ok);
+  const oldOrder = ma.replace(/(export function acctExtrasHtml\([^)]*\) \{)[\s\S]*?\n\}\n/, '$1\n  if (!(login || oat || prov || note)) return \'\';\n  return `<span class="acct-key-extra">${prov}${note}${oat}${login}</span>`;\n}\n');
+  ck('§5x CONTROL: a patched copy with the OLD order (prov, note, oat, chip on one ellipsis line) goes red', oldOrder !== ma && extrasOrder(oldOrder).ok === false);
   ck('the chip ACTION is the existing re-login flow (no second login path)', /acct-login-chip'\)/.test(ma) && /this\._reloginSubscription\(target, targetAcct, refresh\)/.test(ma));
   ck('the chip is an SVG icon, never emoji, and never a literal colour', /ROSTER_ICONS\.CLOCK/.test(ma) && /var\(--red/.test(ma) && !/[\u{1F300}-\u{1FAFF}]/u.test(ma.slice(ma.indexOf('loginExpiryChipHtml'), ma.indexOf('loginExpiryChipHtml') + 3000)));
   const css = fs.readFileSync(path.join(REPO, 'public/style.css'), 'utf8');

@@ -413,6 +413,7 @@ const CENSUS = [
   { file: 'src/remote-fs.js', has: 'child.stdout.pipe(res, { end: false });', route: 'RemoteFs._streamChild (the ssh downloads)', verdict: 'named', how: 'the caller\'s name: attachment set by downloadTo / downloadZipTo, inline through beforeBody; withdrawn on a 404 / 502' },
   { file: 'src/agent-routes.js', has: 'st.pipe(res);', route: 'GET /api/agent/channels/attachment', verdict: 'declared', why: 'an AGENT bearer only, never a browser: the CLI writes the bytes to the path it chose (`vibespace-channels attachment … --out`), so no save is named by a header — the bare `attachment` keeps a stray page from rendering it (lane channel-attach-read, classified at the 2.369.203 integration)' },
   { file: 'src/routes/channels.js', has: 'st.pipe(res);', route: 'GET /api/channels/…/attachment/:id', verdict: 'named', how: 'inline (raster) / attachment, both forms' },
+  { file: 'src/routes/channels.js', has: 'rs.pipe(res);', route: 'GET /api/channels/avatar', verdict: 'declared', why: 'a person\'s profile picture an <img> draws in the Channels surfaces (lane channel-avatars: sandbox CSP, nosniff, ≤ 256 KiB) — never offered to the user as a file to save' },
   { file: 'src/server/published-pages.js', has: 'fs.createReadStream(fp).pipe(res);', route: 'GET /p/:id (a non-HTML snapshot)', verdict: 'named', how: 'inline / attachment; filename="…" ASCII only — a CJK name becomes underscores (finding, not changed here)' },
   { file: 'src/server/published-pages.js', has: 'return res.sendFile(fp);', route: 'GET /p/:id (the HTML page, shim failed)', verdict: 'declared', why: 'an HTML page — a browser saves a page by its title' },
   { file: 'src/routes/browser-trace.js', has: "it is still a secret (§6.4)\n  res.sendFile(path.resolve(fp));", route: 'GET /api/browser/actions/:id/frame/:which', verdict: 'declared', why: 'a trace frame is not a user file: the URL names it `before` / `after` (Chrome saves before.jpg) — naming frames per action is a follow-up' },
@@ -560,11 +561,14 @@ function hostCensus(sources, decl = LOCAL_ONLY) {
   ok(hc.seen >= 10, `the grep found the client URL sites (${hc.seen})`);
   ok(!hc.missing.length, 'every client URL to /api/file/raw, /api/download, /api/download-zip carries the file\'s machine (hq / _hp() / host) or is declared local-only', hc.missing);
   ok(!hc.dead.length, 'no dead local-only row', hc.dead);
-  const ED = C['src/lib/code-editor.js'];
-  const ED_FIX = "btnDownload.onclick = () => window.open(`/api/download?path=${encodeURIComponent(filePath)}${this._host ? '&host=' + encodeURIComponent(this._host) : ''}`);";
-  ok(ED.includes(ED_FIX), 'the code editor\'s ⇩ Download carries this._host (the r2 line, verbatim)');
-  const pre = hostCensus({ ...C, 'src/lib/code-editor.js': ED.replace(ED_FIX, 'btnDownload.onclick = () => window.open(`/api/download?path=${encodeURIComponent(filePath)}`);') });
-  ok(pre.missing.some((m) => m.startsWith('src/lib/code-editor.js')), 'control: the pre-r2 code-editor line (no &host=) ⇒ RED', pre.missing);
+  // lane viewer-download: the editor's Download goes through THE file-window helper (file-download.js) — its
+  // target names the editor's machine, and the helper's URL is the census row that must carry it
+  const ED = C['src/lib/code-editor.js'], DL = C['src/lib/file-download.js'];
+  ok(/wireFileDownload\(winInfo, \{[^}]*\}, host: this\._host\b/.test(ED), 'the code editor\'s Download target carries this._host (the r2 rule, through the shared helper)');
+  const DL_FIX = 'return `/api/download?path=${encodeURIComponent(path)}${hostParam(host)}`;';
+  ok(DL.includes(DL_FIX), 'the shared helper\'s download URL carries the file\'s machine');
+  const pre = hostCensus({ ...C, 'src/lib/file-download.js': DL.replace(DL_FIX, 'return `/api/download?path=${encodeURIComponent(path)}`;') });
+  ok(pre.missing.some((m) => m.startsWith('src/lib/file-download.js')), 'control: the helper\'s URL without &host= ⇒ RED', pre.missing);
 }
 
 if (process.env.RAWNAME_PRINT_CENSUS) {

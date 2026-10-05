@@ -2126,7 +2126,7 @@ app.get('/api/agent/channels/search', async (req, res) => {
   try {
     // design 010: `full=1` = ONE page of the account's OWN search (the agents' share, a 20 s floor, reach after the answer)
     const r = await eng.searchFor(channelPrincipal(s, id), String(req.query.q || ''), { adapterId: req.query.account ? String(req.query.account) : null, limit: Number(req.query.limit) || 50, full: req.query.full === '1' || req.query.full === 'true' });
-    if (r && r.ok) touchChannel(id, searchTouches(r.results));   // one touch per conversation hit (the most hits first, bounded)
+    if (r && r.ok) touchChannel(id, searchTouches(r.results, { query: String(req.query.q || '') }));   // one touch per conversation hit (the most hits first, bounded) — .212: + what was searched and ≤ 50 hit refs each
     chanAnswer(res, r);
   }
   catch (e) { res.status(500).json({ error: e.message }); }
@@ -2199,6 +2199,63 @@ const watchVerb = async (verb, req, res) => {
 };
 app.post('/api/agent/channels/watch', async (req, res) => { const t = await watchVerb('watch', req, res); if (t) touchChannel(t.id, t.touches); });   // §26 (B-099e): a conversation watched is a conversation touched
 app.post('/api/agent/channels/unwatch', async (req, res) => { const t = await watchVerb('unwatch', req, res); if (t) touchChannel(t.id, t.touches); });
+// B-2198 THE RAW API PASS-THROUGH (docs/design-channel-raw-api.md): the agent sends a raw vendor call — method + PATH —
+// and VibeSpace adds the credential's token server-side; src/server/channel-api.js holds the tier (asked again after
+// every await), the fence, the budget, the ONE fetch, the belt and the audit ring. A write under "ask each" and every
+// sensitive call is a proposal the user approves (the frozen bytes run). The call row rides the §26 witness.
+const rawApi = () => { const c = channelsEngine(); return c && c.rawApi ? c.rawApi : null; };
+const API_STATUS = Object.freeze({ api_not_granted: 403, api_tier_read: 403, api_pending: 202, api_host_refused: 400, api_header_refused: 400, api_bad_request: 400, api_body_too_large: 413, api_budget: 429, api_redirect_refused: 502, api_cred_expired: 409, api_cred_unsupported: 409, api_vendor_unreachable: 502, 'not-found': 404 });
+const apiAnswer = (res, r) => {
+  const { touch, ...out } = r || {};
+  if (out.ok) return res.json(out);
+  if (out.retryAfterSec) res.setHeader('Retry-After', String(out.retryAfterSec));
+  return res.status(API_STATUS[out.code] || 500).json({ ...out, error: out.error || 'refused', code: out.code || 'error' });
+};
+app.post('/api/agent/channels/api', async (req, res) => {
+  const hit = agentSession(req, res);
+  if (!hit) return;
+  if (!integrationOnMaster()) return res.status(403).json({ error: 'VibeSpace integration is off' });
+  const api = rawApi();
+  if (!api) return res.status(503).json({ error: 'Channels are not available on this instance', code: 'unavailable' });
+  const [s, id] = hit;
+  const b = req.body || {};
+  let body = null;
+  if (typeof b.bodyBase64 === 'string') body = Buffer.from(b.bodyBase64, 'base64');
+  else if (typeof b.body === 'string') body = b.body;
+  let r;
+  try { r = await api.call(channelPrincipal(s, id), { cred: b.cred, method: b.method, host: b.host, path: b.path, query: b.query, headers: b.headers, body }); }
+  catch (e) { return res.status(500).json({ error: e.message }); }
+  if (r && r.touch) touchChannel(id, [r.touch]);
+  apiAnswer(res, r);
+});
+app.get('/api/agent/channels/api/creds', (req, res) => {
+  const hit = agentSession(req, res);
+  if (!hit) return;
+  const api = rawApi();
+  if (!api) return res.status(503).json({ error: 'Channels are not available on this instance', code: 'unavailable' });
+  apiAnswer(res, api.creds(channelPrincipal(hit[0], hit[1])));
+});
+app.get('/api/agent/channels/api/docs', (req, res) => {
+  const hit = agentSession(req, res);
+  if (!hit) return;
+  const api = rawApi();
+  if (!api) return res.status(503).json({ error: 'Channels are not available on this instance', code: 'unavailable' });
+  apiAnswer(res, api.docs(channelPrincipal(hit[0], hit[1]), String(req.query.cred || '')));
+});
+app.get('/api/agent/channels/api/proposals/:id', (req, res) => {
+  const hit = agentSession(req, res);
+  if (!hit) return;
+  const api = rawApi();
+  if (!api) return res.status(503).json({ error: 'Channels are not available on this instance', code: 'unavailable' });
+  apiAnswer(res, api.proposalFor(channelPrincipal(hit[0], hit[1]), String(req.params.id)));
+});
+app.get('/api/agent/channels/api/log', (req, res) => {
+  const hit = agentSession(req, res);
+  if (!hit) return;
+  const api = rawApi();
+  if (!api) return res.status(503).json({ error: 'Channels are not available on this instance', code: 'unavailable' });
+  apiAnswer(res, api.logFor(channelPrincipal(hit[0], hit[1]), String(req.query.cred || '')));
+});
 
 const AGENT_DOC_TOPICS = { index: 'index-manual.md', jobs: 'background-work-manual.md', task: 'task-manual.md', status: 'status-manual.md', ask: 'ask-manual.md', msg: 'msg-manual.md', pages: 'pages-manual.md', design: ['design-manual.md', 'design-skill.md'], channels: 'channels-manual.md', browser: 'browser-manual.md', window: 'window-manual.md', exit: 'exit-manual.md', apps: 'apps-manual.md', app: 'apps-manual.md' };
 const serveAgentDoc = (req, res, topic) => {

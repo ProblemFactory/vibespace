@@ -34,6 +34,10 @@
  *    (read = messages read, search = hits, reply / compose / refresh /
  *    request / status = calls), replied or composed first, then by the last
  *    touch; FOLD_SHOWN rows shown, the rest behind "+N more".
+ *  - `openVerdict` / `tailVerdict` (lane channel-search-view, .212 — the owner 2026-10-04: "目前点开似乎是第一条匹配结果
+ *    的对话框而不是搜索结果展示"): WHAT A CLICK OPENS — a row whose newest op is a search that carries its query ⇒
+ *    the search RESULTS scoped to that conversation; the fold's tail over rows of one search ⇒ that search unscoped;
+ *    a search touch carries its `query` + bounded hit refs ({msgId, at} — never the words: the dialog re-reads them).
  *  - `rowWords`, `chipView` / `chipText`, `touchedBy` / `touchedByWords`,
  *    `agoText`, `glyphFor`: the words, through an INJECTED translator (the
  *    server sends structure; the device's language speaks it).
@@ -43,7 +47,7 @@
  */
 
 /** The closed op set, in the order a row SAYS them (a draft outranks a read). */
-const OPS = Object.freeze(['reply', 'compose', 'react', 'read', 'search', 'refresh', 'request', 'status']);
+const OPS = Object.freeze(['reply', 'compose', 'react', 'read', 'search', 'refresh', 'request', 'status', 'api']);
 /** The ops that make a row a DRAFT row (sorted first; the reverse link says "Drafted by"). */
 const DRAFT_OPS = Object.freeze(['reply', 'compose']);
 /** The per-session ring (the witness keeps the newest). */
@@ -58,6 +62,10 @@ const BATCH_MS = 1500;
 const FOLD_SHOWN = 3;
 /** One search records at most this many conversations (by hits) — a search is one card, not a ring flush. */
 const SEARCH_MAX_CONVS = 20;
+/** A search touch keeps at most this many hit refs per conversation ({msgId, at} — never the words), the newest. */
+const SEARCH_HITS_MAX = 50;
+/** What was searched, at most this long (the agent's query — the dialog opens pre-filled with it). */
+const QUERY_MAX = 200;
 const TITLE_MAX = 200;
 const LABEL_MAX = 120;
 const ID_MAX = 300;
@@ -76,9 +84,20 @@ const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 function touchKey(t) {
   if (!t) return '';
   if (t.convId) return `${t.adapterId}/${t.convId}`;
+  if (t.op === 'api') return `${t.adapterId}/~api/${t.id || t.at || ''}`;   // B-2198: one row per raw API call
   return `${t.adapterId}/~compose/${t.proposalId || t.id || ''}`;
 }
 
+/** A search's hit refs, bounded: {msgId, at} only (the row re-reads the words at open), one per message, the newest
+ *  SEARCH_HITS_MAX. */
+function hitRefs(list) {
+  const by = new Map();
+  for (const h of Array.isArray(list) ? list : []) {
+    const msgId = h && h.msgId ? str(h.msgId, ID_MAX) : '';
+    if (msgId && !by.has(msgId)) by.set(msgId, { msgId, at: num(h.at) });
+  }
+  return [...by.values()].sort((a, b) => b.at - a.at).slice(0, SEARCH_HITS_MAX);
+}
 /** The ONE touch record (bounded strings; null when it names no op or no account). The witness makes the
  *  strings frame-inert BEFORE it calls this (src/channel-record.js inertFrames — this module imports nothing). */
 function normalizeTouch(x) {
@@ -89,7 +108,7 @@ function normalizeTouch(x) {
   if (!adapterId) return null;
   const convId = x.convId ? str(x.convId, ID_MAX) : null;
   const proposalId = x.proposalId ? str(x.proposalId, ID_MAX) : null;
-  if (!convId && op !== 'compose') return null;   // only a message not yet sent has no conversation
+  if (!convId && op !== 'compose' && op !== 'api') return null;   // only a message not yet sent (or a raw API call — B-2198) has no conversation
   const at = num(x.at);
   if (!(at > 0)) return null;
   return {
@@ -103,6 +122,8 @@ function normalizeTouch(x) {
     ...(op === 'react' && x.glyph ? { glyph: str(x.glyph, 70) } : {}),
     // 2026-09-28: where a drafted reply lands (a value outside the closed set is dropped, never printed)
     ...(op === 'reply' && TOUCH_PLACEMENTS.includes(x.placement) ? { placement: x.placement } : {}),
+    // lane channel-search-view (.212): a search remembers WHAT was searched — the query + bounded hit refs
+    ...(op === 'search' && x.query ? { query: str(x.query, QUERY_MAX), hits: hitRefs(x.hits) } : {}),
     at,
   };
 }
@@ -118,6 +139,7 @@ function appendTouch(ring, t, { mergeMs = MERGE_MS, max = RING_MAX } = {}) {
     if (t.title) last.title = t.title;
     if (t.account) last.account = t.account;
     if (t.placement) last.placement = t.placement;
+    if (t.query) { last.hits = hitRefs([...(t.hits || []), ...(last.query === t.query ? last.hits || [] : [])]); last.query = t.query; }   // the same search again: refs united; another: the newest
     return { touch: last, merged: true };
   }
   ring.push(t);
@@ -221,6 +243,7 @@ function foldTouches(touches) {
       if (!r.title && t.title) r.title = t.title;
       if (!r.account && t.account) r.account = t.account;
     }
+    if (t.op === 'search' && t.query && at >= num(r.lastAt.search)) { r.query = t.query; r.hits = Array.isArray(t.hits) ? t.hits : []; }
     if (at < r.first) r.first = at;
     r.lastAt[t.op] = Math.max(num(r.lastAt[t.op]), at);
   }
@@ -235,6 +258,27 @@ function foldView(rows, { max = FOLD_SHOWN, expanded = false } = {}) {
   return { shown: list.slice(0, max), hidden: list.length - max };
 }
 
+/** WHAT A ROW'S CLICK OPENS: a composed message not yet sent ⇒ the Outbox; a row whose NEWEST op is a search that
+ *  carries its query ⇒ the search results scoped to that conversation (the agent's query, its hit refs); anything
+ *  else (a read, a reply, a search recorded before the query was kept) ⇒ the conversation, as before. */
+function openVerdict(row) {
+  if (!row) return null;
+  if (!row.convId) return { open: 'outbox' };
+  const la = row.lastAt || {};
+  const newest = Math.max(0, ...Object.values(la).map(num));
+  if (row.query && num(la.search) >= newest) return { open: 'search', adapterId: row.adapterId, convId: row.convId, title: row.title || row.convId, query: row.query, hits: Array.isArray(row.hits) ? row.hits : [] };
+  return { open: 'conversation', adapterId: row.adapterId, convId: row.convId };
+}
+/** WHAT THE FOLD'S TAIL ("+N more") OPENS: every hidden row a search of ONE query ⇒ that search UNSCOPED (every
+ *  conversation, grouped by conversation) over the accounts its rows name; anything else ⇒ the fold expands. */
+function tailVerdict(rows, { max = FOLD_SHOWN } = {}) {
+  const list = Array.isArray(rows) ? rows : [];
+  const hidden = list.slice(max).map(openVerdict);
+  if (!hidden.length || hidden.some((v) => !v || v.open !== 'search' || v.query !== hidden[0].query)) return { open: 'expand' };
+  const q = hidden[0].query;
+  const adapterIds = [...new Set(list.map(openVerdict).filter((v) => v && v.open === 'search' && v.query === q).map((v) => v.adapterId))];
+  return { open: 'search-all', query: q, adapterIds };
+}
 /** A row's words ("drafted a reply · read 12 messages"), in OPS order, through the injected `t`. */
 function rowWords(row, t) {
   const o = (row && row.ops) || {};
@@ -247,6 +291,7 @@ function rowWords(row, t) {
   if (o.refresh) out.push(t('refreshed'));
   if (o.request) out.push(t('asked for access'));
   if (o.status) out.push(t('checked its draft'));
+  if (o.api) out.push(row.proposalId ? t('API call {call} · awaiting you', { call: row.title }) : t('API call {call}', { call: row.title }));
   return out.join(' · ');
 }
 
@@ -324,21 +369,24 @@ function agoText(ms, t) {
 }
 
 /** A search's answer → the touches it records: one per conversation (hits counted), the SEARCH_MAX_CONVS with the
- *  most hits. `results` = the engine's `searchFor` rows ({adapterId, adapter, convId, title}). */
-function searchTouches(results, { max = SEARCH_MAX_CONVS } = {}) {
+ *  most hits. `results` = the engine's `searchFor` rows ({adapterId, adapter, convId, title, vendorId, at}); `query` =
+ *  what was searched (kept on each touch with ≤ SEARCH_HITS_MAX hit refs — the row opens the search results). */
+function searchTouches(results, { max = SEARCH_MAX_CONVS, query = '' } = {}) {
+  const q = String(query || '').trim();
   const by = new Map();
   for (const r of Array.isArray(results) ? results : []) {
     if (!r || !r.adapterId || !r.convId) continue;
     const k = `${r.adapterId}/${r.convId}`;
-    const x = by.get(k) || { op: 'search', adapterId: r.adapterId, convId: r.convId, title: r.title || '', account: r.adapter || '', count: 0 };
+    const x = by.get(k) || { op: 'search', adapterId: r.adapterId, convId: r.convId, title: r.title || '', account: r.adapter || '', count: 0, ...(q ? { query: q, hits: [] } : {}) };
     x.count += 1;
+    if (x.hits && r.vendorId && x.hits.length < SEARCH_HITS_MAX) x.hits.push({ msgId: r.vendorId, at: num(r.at) });   // the rows come newest first
     by.set(k, x);
   }
   return [...by.values()].sort((a, b) => b.count - a.count).slice(0, max);
 }
 
 module.exports = {
-  OPS, DRAFT_OPS, RING_MAX, MERGE_MS, SKEW_MS, BATCH_MS, FOLD_SHOWN, SEARCH_MAX_CONVS, TITLE_MAX, LABEL_MAX, TOUCH_PLACEMENTS,
+  OPS, DRAFT_OPS, RING_MAX, MERGE_MS, SKEW_MS, BATCH_MS, FOLD_SHOWN, SEARCH_MAX_CONVS, SEARCH_HITS_MAX, QUERY_MAX, TITLE_MAX, LABEL_MAX, TOUCH_PLACEMENTS,
   touchKey, normalizeTouch, appendTouch, upsertTouch, commandTouchesChannels, namesTouch, bindToCall, foldTouches, foldView, rowWords, replyWords, rowName,
-  glyphFor, chipView, chipText, sessionSummary, touchedByWords, agoText, searchTouches,
+  glyphFor, chipView, chipText, sessionSummary, touchedByWords, agoText, searchTouches, hitRefs, openVerdict, tailVerdict,
 };

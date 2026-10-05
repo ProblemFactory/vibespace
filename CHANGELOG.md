@@ -2,6 +2,18 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.212 — 2026-10-04
+
+### Added
+- Every window that shows a file — Word, PDF, pictures, video, the code editor and the rest — has a Download button, and its title-bar menu has Download too.
+- Channels shows Lark and Slack people's real profile pictures (panel, conversation window, threads); people without one keep their initials.
+- An agent can now send pictures and files on Lark and Slack too, after you approve them.
+- Agents can call a connected account's own API (Lark, Slack, Google) once you allow it under API access…; every call is logged and changes ask you first.
+
+### Fixed
+- An account’s note no longer hides its login-expiry warning and re-login button: the warning comes first, whole, and the note is shortened instead.
+- Clicking an agent's channel search on its card now shows the search results, matches marked; a result opens the conversation at that message.
+
 ## 2.369.211 — 2026-10-04
 
 ### Added

@@ -63,6 +63,8 @@ export function resolvedByText(by, t, item = null) {
   if (by === 'ask-changed') return t('not run — it changed after it was shown'); // verify-r6 W1
   if (by === 'ask-over') return t('this request is over — the agent can ask again'); // verify-r6 W2: a reopened ask that is over
   if (by === 'conversation-gone') return t('the conversation ended before you answered');
+  // B-2198 part 2: a raw-API proposal's item is answered BY its outcome (the card's words: Ran · 200 · 1.2 KB / Rejected by you)
+  if (by === 'channel-api' && item && item.resolvedFact && item.resolvedFact.apiOutcome) return t(item.resolvedFact.apiOutcome.key, item.resolvedFact.apiOutcome.params || {});
   // lane exit-item-heal: an unexpected-exit item answered by the conversation running again (its new session's start, this device's clock)
   if (by === 'resumed') {
     const at = item && item.resolvedFact && Number(item.resolvedFact.resumedAt);
@@ -99,7 +101,7 @@ const exitAskHtml = (i, t) => (i && i.action && i.action.type === 'exit-run-ask'
 /** lane browser-propose (2026-09-30): the agent's PROPOSAL, answered where it appears — its words (the card's, line for
  *  line: what Approve runs) ABOVE Approve / Reject, never folded (the exit-ask lesson: a folded detail below the button
  *  read as the whole story). ONE primary (Approve), a quiet Reject; open items only. */
-const PROPOSAL_ACTIONS = ['browser-proposal', 'channel-watch-request'];   // lane channel-agent-watch: an agent's wake request is answered the same way
+const PROPOSAL_ACTIONS = ['browser-proposal', 'channel-watch-request', 'channel-api-proposal'];   // B-2198 part 2: a raw-API proposal too   // lane channel-agent-watch: an agent's wake request is answered the same way
 const proposalAskHtml = (i, t, detail) => (i && i.action && PROPOSAL_ACTIONS.includes(i.action.type)
   ? `<div class="ut-proposal-plan">${escHtml(detail || '')}</div>`
     + (i.action.id ? `<div class="ut-exit-answer ut-proposal-answer"><button type="button" class="ut-act ut-action-proposal ut-proposal-approve" data-answer="approve" title="${escHtml(t('Runs exactly what this card says'))}">${escHtml(t('Approve'))}</button><button type="button" class="ut-act ut-action-proposal ut-proposal-reject" data-answer="reject">${escHtml(t('Reject'))}</button></div>` : '') : '');
@@ -159,7 +161,7 @@ function partsOf(entry, ctx) {
   // (an exit ask's detail IS its command — shown whole above its Allow / Deny, never again folded below them)
   const detailHtml = detail && !(i.action && i.action.type === 'exit-run-ask') ? `<details class="ut-detail-exp"><summary>${escHtml(t('detail'))}</summary><div class="ut-detail">${escHtml(detail)}</div></details>` : '';
   // lane browser-propose: an open proposal's words are shown whole ABOVE its Approve (proposalAskHtml) — never folded again below
-  const detailFold = i && i.action && i.action.type === 'browser-proposal' && !resolved ? '' : detailHtml;
+  const detailFold = i && i.action && (i.action.type === 'browser-proposal' || i.action.type === 'channel-api-proposal') && !resolved ? '' : detailHtml;
   // OPTION CHIPS (design-user-inbox-reply D3a): one click = a reply whose text
   // IS the label. Addressed by INDEX — the label never rides an attribute.
   const opts = !resolved && rs.show && Array.isArray(i.options) && i.options.length

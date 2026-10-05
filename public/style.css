@@ -538,8 +538,17 @@ html, body {
 .credits-chip svg { width: 10px; height: 10px; flex: none; }
 .credits-chip[data-credits="allowed"] { color: var(--text-secondary); background: color-mix(in srgb, var(--text-secondary) 12%, transparent); }
 /* provenance/note line under the account identity (2.202.0 — inline tags
-   squeezed the tail into an ellipsis mush; flex-basis:100% wraps the flex row) */
-.acct-key-extra { flex-basis: 100%; font-size: 10px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+   squeezed the tail into an ellipsis mush; flex-basis:100% wraps the flex row).
+   WARNINGS FIRST AND WHOLE (2.369.212, owner: "这个登陆过期提示会被备注抢占位置导致看不到"
+   — one nowrap ellipsis line with the login chip LAST let a note eat the chip and
+   its re-login button): the login chip / an expiring long-lived token are direct
+   children that never shrink or clip (max-width 100% + wrap inside themselves only
+   when the row is narrower than they are); provenance + the note share ONE ellipsis
+   box (src/lib/manage-agents.js acctExtrasHtml), note last, so the note is what
+   truncates; under 6em left it takes the next line instead of a bare "…". */
+.acct-key-extra { flex-basis: 100%; font-size: 10px; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; column-gap: 4px; white-space: nowrap; }
+.acct-key-extra > .acct-blocked-hint { flex: none; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.acct-extra-soft { flex: 1 1 0; min-width: min(6em, 100%); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Login-session expiry chip (2026-09-07). It IS the re-login button, so it
    reads as clickable. The SVG carries an EXPLICIT size: an unsized inline SVG
    in a flex row scales to its viewBox and swallows the line (the 2.369.13
@@ -4662,6 +4671,9 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
   white-space: nowrap; overflow: hidden; user-select: none; font-variant-numeric: normal;
 }
 .chan-av .chan-ic { font-size: calc(var(--av-size) * 0.5); }
+/* lane channel-avatars: a person's picture covers the initials IN THE SAME BOX (no layout shift); paint, aria-hidden */
+.chan-av.chan-av-pic { position: relative; }
+.chan-av-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: inherit; pointer-events: none; }
 .chan-av[data-hue="1"] { --av: var(--green, #22c55e); }
 .chan-av[data-hue="2"] { --av: var(--yellow, #f59e0b); }
 .chan-av[data-hue="3"] { --av: var(--red, #ef4444); }
@@ -4806,6 +4818,10 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .chan-search-head b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chan-search-who { color: var(--text-dim); font-size: 10px; white-space: nowrap; }
 .chan-search-text { font-size: 11px; color: var(--text-secondary); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 4.4em; overflow: hidden; }
+/* lane channel-search-view (.212): an agent's search as results — the match marked, the scope's one control (the row wraps on a phone), a conversation's head when grouped */
+.chan-search-row { flex-wrap: wrap; }
+.chan-search-mark { background: color-mix(in srgb, var(--accent) 28%, transparent); color: inherit; border-radius: 2px; padding: 0 1px; }
+.chan-search-group { font-size: 11px; font-weight: 600; color: var(--text-secondary); margin: 6px 7px 0; overflow-wrap: anywhere; }
 /* design 010 (B-c9be): the saved copy, then the vendor's own search — two sections, a chip, a skeleton, the scroll sentinel */
 .chan-search-sec + .chan-search-sec { margin-top: 6px; border-top: 1px solid var(--border); padding-top: 4px; }
 .chan-search-sec-head { font-size: 11px; font-weight: 600; color: var(--text-secondary); margin: 4px 7px 1px; }
@@ -5859,6 +5875,30 @@ label.chan-cap-row { cursor: default; }
 /* §26 (B-099e): the channel witness's rows on a tool card — one per conversation the call read or drafted */
 .chat-channel-touches { margin: 4px 0 2px; display: flex; flex-direction: column; gap: 2px; }
 .chat-channel-touches[hidden] { display: none; }
+/* B-2198 THE RAW-API CARD (chat · Outbox · For you · API access…) + the API access dialog — lane channel-api-chrome: drawn
+   for the first time in a browser; every request string wraps (a long path / body never runs off a 390 px screen) */
+.chat-api-cards { display: flex; flex-direction: column; gap: 6px; margin: 4px 0; min-width: 0; }
+.chan-api-card { min-width: 0; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--text) 3%, transparent); font-size: 12px; display: flex; flex-direction: column; gap: 4px; overflow-wrap: anywhere; }
+.chan-api-card.chan-api-fate-pending { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
+.chan-api-card .chan-api-head { font-weight: 600; color: var(--text); }
+.chan-api-card .chan-api-outcome { color: var(--text-secondary); }
+.chan-api-card .chan-api-req code { word-break: break-all; }
+.chan-api-card .chan-api-hdr { font-size: 11px; }
+.chan-api-card .chan-api-body pre { margin: 4px 0 0; max-height: 14em; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; }
+.chan-api-card .chan-api-body summary { cursor: pointer; color: var(--text-secondary); }
+.chan-api-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 2px; }
+.chan-api-actions .mounts-btn { white-space: normal; text-align: left; max-width: 100%; }
+.chan-api-actions .chan-api-why { flex: 1 1 10em; min-width: 0; box-sizing: border-box; }
+.chan-api-outbox-list { display: flex; flex-direction: column; gap: 4px; }
+.chan-api-orow { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; min-width: 0; text-align: left; overflow-wrap: anywhere; }
+.chan-api-dialog .chan-api-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0; }
+.chan-api-dialog .chan-api-row .chan-api-who { flex: 1 1 8em; min-width: 0; overflow-wrap: anywhere; }
+.chan-api-dialog .chan-api-row .chan-api-tier { flex: 1 1 12em; min-width: 0; }
+.chan-api-dialog .chan-api-row .chan-api-cap { width: 7em; }
+.chan-api-dialog .chan-api-allwrite { display: flex; gap: 6px; align-items: baseline; margin: 0 0 6px; font-size: 12px; color: var(--warning, var(--accent)); }
+.chan-api-dialog .chan-api-sensitive, .chan-api-dialog .chan-api-shape, .chan-api-dialog .chan-api-logrow { overflow-wrap: anywhere; }
+.chan-api-dialog .chan-api-shape { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; margin: 2px 0; }
+.chan-api-dialog .chan-api-log { max-height: 16em; overflow: auto; font-size: 11px; color: var(--text-secondary); }
 .chat-channel-touch { display: flex; align-items: baseline; gap: 6px; width: 100%; min-width: 0; box-sizing: border-box; padding: 2px 8px; font: inherit; font-size: 11px; text-align: left; color: var(--text-secondary); background: transparent; border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; }
 .chat-channel-touch:hover, .chat-channel-touch:focus-visible { color: var(--accent); border-color: var(--accent); }
 .chat-channel-touch.drafted { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }

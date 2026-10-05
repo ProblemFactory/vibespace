@@ -60,7 +60,7 @@ import { fetchJson, showToast, showContextMenu, showImageOverlay, showInputDialo
 import { t, deviceLocale } from './i18n.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { menuItems } from './contributions.js';
-import { icon, el, btn, avatar, convAvatar, fileIcon } from './channel-chrome.js';
+import { icon, el, btn, avatar, convAvatar, fileIcon, warmAvatars } from './channel-chrome.js';
 import { accountBadges } from './channel-avatar.js';   // B-5fe1: the bar's account badge
 // P2: the Assign & filter editor and the one-line summary the bar draws.
 import { showAssignFilterDialog, assignmentSummary } from './channel-filter-editor.js';
@@ -300,7 +300,9 @@ function authorAvatar(rec) {
   const a = rec.author || {};
   // verify r3 (T2 ④): an author known only by a vendor id (`ou_…`, `cli_…`) has NO initials — the avatar shows '?' on the
   // author's stable hue; the id itself is still the head's text (a name the vendor never gave is shown as the id, not hidden)
-  return avatar({ name: a.display || a.name || '', key: authorKey(rec), self: !!a.isSelf }, null, 'chanmsg-av');
+  // lane channel-avatars: the person's picture over the initials (asked by the window's warm-up, swapped in place)
+  const pic = a.id && rec.adapterId ? { account: String(rec.adapterId), author: String(a.id) } : null;
+  return avatar({ name: a.display || a.name || '', key: authorKey(rec), self: !!a.isSelf, pic }, null, 'chanmsg-av');
 }
 /** lane lark-threads (B3–B5): the author head's TITLE — the vendor name when the head shows another (the owner's name /
  *  the organization's nickname), the profile's alternatives, "external to your organization", "your name for them". */
@@ -486,6 +488,7 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
     const spec = w && w._openSpec;
     if (spec && spec.action === 'openChannel' && `${spec.adapterId}/${spec.convId}` === key) {
       app.wm.revealWindow(id, { replay: !!opts.syncId });
+      if (opts.jump && typeof w._chanJump === 'function') w._chanJump(opts.jump);   // .212: a search hit — the open window jumps to it
       return w;
     }
   }
@@ -1145,6 +1148,8 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
       frag.appendChild(renderRecord(rec, { cont, base, folds, mail, ctx: rowCtx }));
       prev = rec;
     }
+    // lane channel-avatars: THE WARM-UP — the drawn authors' pictures, newest first, ≤ Av.WARM_MAX, deduped, the answered skipped
+    warmAvatars(recs.slice().reverse().filter((r) => r && r.author && r.author.id && !r.author.isSelf && r.adapterId).map((r) => ({ account: String(r.adapterId), author: String(r.author.id), conv: r.convId ? String(r.convId) : null })));
     return frag;
   }
   /** The newest drawn row as a record-shaped seam for the next append. */
@@ -1430,6 +1435,10 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
   winInfo._listenerCtl?.signal.addEventListener('abort', () => clearInterval(beatTimer));
 
   render({ read: true }).catch((e) => showToast(String(e && e.message ? e.message : e), { type: 'error' }));
+  // .212 (lane channel-search-view): a search hit opens the conversation AT that message — the window's own jump (W1),
+  // after whatever render is queued
+  winInfo._chanJump = (j) => queue.then(() => (j && j.vid ? jumpTo(j.vid, null) : null)).catch(() => {});
+  if (opts.jump) winInfo._chanJump(opts.jump);
   return winInfo;
 }
 
