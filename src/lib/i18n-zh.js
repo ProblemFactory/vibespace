@@ -6480,6 +6480,16 @@ export default {
   "Open it again on the desktop where you want it.": "请在想用它的桌面上重新打开它。",
   "The page shows a message": "网页弹出了一条消息",
   "The page asks you to confirm": "网页请你确认",
+  "This page is waiting for a passkey ({rp})": "此网页正在等待通行密钥（{rp}）", // lane browser-passkey
+  "The agent's browser holds no passkey of yours — cancel the request, then use the page's other way in (a recovery code, a password), or sign in on your own device.": "代理的浏览器里没有你的通行密钥——请取消这个请求，再用网页的其他登录方式（恢复码、密码），或在你自己的设备上登录。", // lane browser-passkey
+  "Chrome's own passkey window is open on this computer's desktop — it does not show in this view.": "Chrome 自己的通行密钥窗口开在这台电脑的桌面上——这个视图里看不到它。", // lane browser-passkey
+  "Cancel passkey request": "取消通行密钥请求", // lane browser-passkey
+  "page waits for a passkey": "网页在等通行密钥", // lane browser-passkey
+  "this site": "此网站", // lane browser-passkey
+  "The page is waiting for a passkey — cancel it in the live view": "网页在等待通行密钥——请在实时视图中取消", // lane browser-passkey
+  "A page in the agent's browser is waiting for a passkey ({rp})": "代理浏览器中的一个网页正在等待通行密钥（{rp}）", // lane browser-passkey
+  "The agent's browser holds no passkey of yours. Cancel the request in the live view (or the agent runs `vibespace-browser passkey cancel`), then use the page's other way in, or sign in on your own device.": "代理的浏览器里没有你的通行密钥。请在实时视图中取消这个请求（或由代理运行 `vibespace-browser passkey cancel`），再用网页的其他登录方式，或在你自己的设备上登录。", // lane browser-passkey
+  "The passkey request could not be cancelled: {why}": "无法取消通行密钥请求：{why}", // lane browser-passkey
   "The page asks for text": "网页请你输入文字",
   "Leave this page?": "要离开这个页面吗？",
   "The page opened a dialog": "网页打开了一个对话框",
@@ -7872,4 +7882,50 @@ export default {
   "✓ Connected as {user} — finish with the “Connect” button below.": "✓ 已以 {user} 连接——点下方“连接”按钮完成。",
   "✓ Connected as {user} — finish with the “Create & connect” button below.": "✓ 已以 {user} 连接 —— 点下面的「创建并连接」完成。",
   "Slack’s last page says “Done here” and this dialog finishes by itself — even when you approved in another browser. If that page shows a code instead, or does not load, paste the code or its address here:": "Slack 最后一页会显示“这里已完成”，这个对话框随后自己完成——即使你是在另一个浏览器里同意的。如果那一页显示的是一串码，或者打不开，把码或它的地址粘到这里：",
+  "Open new documents beside the chat": "在聊天旁打开新文档",
+  "When the agent writes a NEW document (.md, .txt, .docx, .pdf…) while the chat is on screen, it opens beside the chat. Off = its card in the chat only. An edit never opens it again.": "智能体写出一份新文档（.md、.txt、.docx、.pdf…）且聊天在屏幕上时，它会在聊天旁打开。关闭 = 只在聊天里显示它的卡片。修改不会再次打开。",
+  "Changed {n} times": "已改 {n} 次",
+  "Written by the agent": "智能体写的",
+  "last by you": "最后由你修改",
+  "Open {name} beside the chat": "在聊天旁打开 {name}",
+  "No documents yet — only code.": "还没有文档 — 只有代码。",
+  "Code ({n})": "代码（{n}）",
+  "The list keeps the newest {n} files.": "列表只保留最新的 {n} 个文件。",
+  "Files the agent made in this conversation — click for the list": "智能体在这个对话里做出的文件 — 点击查看列表",
+  "Artifacts · {n}": "产出 · {n}",
+  // lane doc-window: the Doc window (a markdown file read, edited and commented in one rendered view)
+  "Could not load the document editor — reload the page": "文档编辑器没能加载 — 请刷新页面",
+  "Raw": "源码",
+  "Edit the markdown source": "编辑 Markdown 源码",
+  "The agent changed this file while you were editing.": "你编辑期间，智能体改了这个文件。",
+  "Reload (your edits go)": "重新载入（你的修改会丢弃）",
+  "Keep editing": "继续编辑",
+  "Comments": "批注",
+  "This file uses formatting the rich editor would change — editing raw": "这个文件用了富文本编辑器会改动的格式 — 以源码方式编辑",
+  "a table": "表格",
+  "HTML": "HTML",
+  "a footnote": "脚注",
+  "front matter": "文首元数据",
+  "an underlined heading": "下划线式标题",
+  "line {n}": "第 {n} 行",
+  "Could not read this document: {why}": "读不了这个文档：{why}",
+  "Save first — the raw editor opens the file as it is on disk": "请先保存 — 源码编辑器打开的是磁盘上的文件",
+  "Save first — the raw editor has unsaved edits": "请先保存 — 源码编辑器里还有未保存的修改",
+  "Overwrite the agent's newer version?": "覆盖智能体更新的版本？",
+  "The agent changed this file after you opened it. Saving replaces its version with yours.": "你打开之后智能体改过这个文件。保存会用你的版本替换它的版本。",
+  "Saved {time}": "已保存 {time}",
+  "Save failed: {why}": "保存失败：{why}",
+  "Saved — the chat sees your edit on its next turn": "已保存 — 对话下一轮会看到你的修改",
+  "At most {n} comments — send these first": "最多 {n} 条批注 — 请先发送这些",
+  "Comments ({n})": "批注（{n}）",
+  "Add comment": "批注",
+  "Select text in the document, then press Add comment.": "在文档里选中文字，再点「批注」。",
+  "Open this document from a chat to send comments to it": "请从对话里打开这个文档，才能把批注发给它",
+  "Comments wait for the chat's next turn": "批注会在对话下一轮送达",
+  "Comments sent to the chat": "批注已发给对话",
+  "Could not send the comments: {why}": "批注没能发送：{why}",
+  "a document comment": "一条文档批注",
+  "{n} document comments": "{n} 条文档批注",
+  "a document edit": "一次文档修改",
+  "{n} document edits": "{n} 次文档修改",
 };

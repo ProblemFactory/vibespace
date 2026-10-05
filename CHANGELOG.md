@@ -2,6 +2,15 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.215 — 2026-10-05
+
+### Added
+- Files the agent writes for you show as a card in the chat and in an Artifacts list; new documents open beside the chat (you can turn that off in Chat settings).
+- A markdown document opens as a page you can edit and comment on directly; the chat that wrote it learns about your edits and comments by itself.
+
+### Fixed
+- When a site asks the agent's browser for a passkey, VibeSpace says so and you can cancel it; the agent is told to sign in another way or to ask you.
+
 ## 2.369.214 — 2026-10-05
 
 ### Changed

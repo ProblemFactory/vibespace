@@ -27,5 +27,6 @@ module.exports = {
   settingsPrefix: null,
   settings: null,               // no instance settings (a plain shell has no model, no CLI config)
   configFiles: {},
+  artifactsOf: null, // lane artifacts-model: a plain shell never produces a deliverable row (no write record to witness)
   inject: null,
 };

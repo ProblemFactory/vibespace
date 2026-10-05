@@ -33,6 +33,8 @@ const crypto = require('crypto');
 const A = require('../app-manifest.js');
 const R = require('../app-recipes.js');
 const { toAgentText } = require('../peer-text.js');
+const K = require('../app-kinds.js'); // PURE — an app kind is one row (lane dc-apps-rows, F-A1)
+const SYS = require('../app-system.js'); // PURE — the app system's own request rows (SYS_KINDS)
 const AC = require('../app-card.js'); // PURE: THE one card of an install (design 009 §4) — its view and the digest of what it showed
 const HC = require('../hidden-chars.js'); // THE one set: an agent's why on the approval card carries no hidden / reordering character (verify-r1 F8) // THE belt on text toward an agent: a package's .desktop Name / the machine's error words ride the outcome
 /** a piece of an outcome sentence that a PACKAGE (its .desktop Name) or the MACHINE (an error line) wrote — the belt (line) */
@@ -51,16 +53,14 @@ const REPLAY_BUSY_WAIT_MS = 10 * 60 * 1000;
 const REPLAY_BUSY_POLL_MS = 15 * 1000;
 // Layer 1 (design §3.2): the app system's own requests — Set up · Repair · Migrate (rebase) · Roll back · Delete the old one —
 // the USER's clicks only (never in AGENT_KINDS: an agent still only proposes an install)
-const SYS_REQUEST_KINDS = Object.freeze(['sys-create', 'repair', 'rebase', 'rollback', 'sys-drop-prev']);
-const REQUEST_KINDS = Object.freeze(['apt', 'deb', 'appimage', 'installer', 'source', 'source-remove', 'remove', 'refresh', 'adopt', 'replay', 'move', ...SYS_REQUEST_KINDS]); // design 019 M2: `move` (the host apps INTO the app system) is the USER's click
+const SYS_REQUEST_KINDS = SYS.SYS_KINDS; // F-A3: src/app-system.js's own rows — no copy
+const REQUEST_KINDS = Object.freeze([...K.REQUEST_KINDS, ...SYS_REQUEST_KINDS]); // design 019 M2: `move` (the host apps INTO the app system) is the USER's click
 // what an agent may PROPOSE — design 009 (owner 2026-10-02 22:22 PDT) overturns D4's "a .deb is the user's door only": a
 // vendor's .deb / AppImage by its ADDRESS or a FILE on that machine (`installer`; a `deb` / `appimage` the agent names
 // is the same ask) — never a file VibeSpace staged (that is the machine's own word, after its fetch)
-const AGENT_KINDS = Object.freeze(['apt', 'remove', 'source', 'deb', 'appimage', 'installer']);
+const AGENT_KINDS = K.AGENT_KINDS; // the rows declaring `agent` (src/app-kinds.js)
 /** How long an unanswered proposal of a downloaded installer keeps its file (then: withdrawn, `expired`, the file gone). */
 const EXPIRE_MS = 24 * 3600 * 1000;
-/** The card's kind word per request kind (design 009 §4 — the proposal view both install lanes share). */
-const KIND_VIEW = Object.freeze({ apt: 'package', deb: 'deb', appimage: 'appimage', remove: 'remove', source: 'source' });
 const i18nKey = (s) => s; // extraction marker (scripts/i18n-extract.mjs) — the client words these with t()
 const WORDS = Object.freeze({
   wants: i18nKey('{name} wants to install {app} ({n} packages, {size} to download)'),
@@ -89,16 +89,17 @@ function normRequest(r, { agent = false } = {}) {
     if (bad !== undefined) return { ok: false, code: 'bad_name', error: `${JSON.stringify(bad.slice(0, 64))} is not a Debian package name` };
     return { ok: true, request: { kind, packages } };
   }
-  if (kind === 'installer' || ((kind === 'deb' || kind === 'appimage') && (x.url != null || x.file != null || (agent && x.debPath != null)))) {
+  const kr = K.kindRow(kind) || {};
+  if (kr.fetches || (kr.staged && (x.url != null || x.file != null || (agent && x.debPath != null)))) {
     const url = x.url != null ? String(x.url) : null, file = x.file != null ? String(x.file) : x.debPath != null ? String(x.debPath) : null;
     if (url != null) return /^https:\/\/\S{3,2040}$/.test(url) ? { ok: true, request: { kind: 'installer', url } } : { ok: false, code: 'bad_address', error: 'name the vendor\'s download address (https://…)' };
     if (file != null) return file.startsWith('/') && file.length <= 4096 && !/[\0\n]/.test(file) ? { ok: true, request: { kind: 'installer', file } } : { ok: false, code: 'bad_name', error: 'name the installer by its absolute path on that machine' };
     return { ok: false, code: 'bad-request', error: 'name the installer: an address (url) or a file' };
   }
-  if ((kind === 'deb' || kind === 'appimage') && x.staged != null) { // the machine's own word after app-fetch — never an agent's
+  if (kr.staged && x.staged != null) { // the machine's own word after app-fetch — never an agent's
     if (agent) return { ok: false, code: 'agent_forbidden', error: 'name the installer by its address or file — VibeSpace stages it itself' };
     const staged = String(x.staged), sha256 = String(x.sha256 || '');
-    if (!new RegExp(`^[0-9a-f]{16}\\.${kind === 'deb' ? 'deb' : 'AppImage'}$`).test(staged) || !A.SHA256_RE.test(sha256)) return { ok: false, code: 'bad-request', error: 'a staged installer is named by its file and its sha256' };
+    if (!new RegExp(`^[0-9a-f]{16}\\.${kr.staged}$`).test(staged) || !A.SHA256_RE.test(sha256)) return { ok: false, code: 'bad-request', error: 'a staged installer is named by its file and its sha256' };
     const from = x.from && typeof x.from === 'object' ? { ...(typeof x.from.url === 'string' ? { url: x.from.url.slice(0, 2048) } : {}), ...(Array.isArray(x.from.hosts) ? { hosts: x.from.hosts.map(String).slice(0, 8) } : {}), ...(typeof x.from.file === 'string' ? { file: x.from.file.slice(0, 4096) } : {}), ...(typeof x.from.recipe === 'string' ? { recipe: x.from.recipe.slice(0, 40) } : {}) } : null;
     return { ok: true, request: { kind, staged, sha256, size: Number(x.size) || null, name: String(x.name || '').replace(/[^A-Za-z0-9@._+-]+/g, '-').slice(0, 120) || null, from } };
   }
@@ -117,7 +118,7 @@ const whatOf = (rq, plan) => `app:${rq.kind}:${String(labelOf(rq, plan)).toLower
 /** The record op and its params for a run of request kind `k` after the slot ran plan `pl`. */
 function recordOf(rq, pl, { by, why = null } = {}) {
   const k = rq.kind;
-  if (k === 'apt' || k === 'deb') return ['app-install', { entryId: pl.entryId, nonce: pl.nonce, kind: k === 'deb' ? 'deb' : 'apt', by, why, label: pl.label || null, deb: pl.deb || null, source: pl.source && pl.source.startsWith('source:') ? pl.source.slice(7) : null, ...(rq.staged ? { staged: rq.staged, icon: (pl.app && pl.app.icon) || null } : {}) }];
+  if ((K.kindRow(k) || {}).entry === 'root') return ['app-install', { entryId: pl.entryId, nonce: pl.nonce, kind: k, by, why, label: pl.label || null, deb: pl.deb || null, source: pl.source && pl.source.startsWith('source:') ? pl.source.slice(7) : null, ...(rq.staged ? { staged: rq.staged, icon: (pl.app && pl.app.icon) || null } : {}) }];
   if (k === 'adopt') return ['app-adopt-drift', { entryId: pl.entryId, nonce: pl.nonce, by, why, label: pl.label || null }];
   if (k === 'source') return ['app-install', { kind: 'source', sourceId: pl.entryId, nonce: pl.nonce, source: pl.sourceSpec, by }];
   if (k === 'source-remove') return ['app-remove', { kind: 'source', sourceId: pl.entryId, nonce: pl.nonce }];
@@ -234,7 +235,7 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
   /** design 009 §4 — THE PROPOSAL VIEW both install lanes share (additive): the card's structure; the client words it. */
   const view = (p) => {
     const c = p.card || cardOf(p.request, { label: p.label, closure: [], packages: (p.summary && p.summary.packages) || [], origins: (p.summary && p.summary.origins) || [], downloadBytes: p.summary && p.summary.downloadBytes, installedBytes: p.summary && p.summary.installedBytes, commands: [] }, null);
-    return { id: p.id, host: p.host, kind: KIND_VIEW[p.request.kind] || p.request.kind, request: p.request, label: p.label, by: p.by, why: p.why || null, state: p.state, summary: p.summary || null, createdAt: p.createdAt, decidedAt: p.decidedAt || null, finishedAt: p.finishedAt || null, result: p.result || null, todoId: p.todoId || null,
+    return { id: p.id, host: p.host, kind: (K.kindRow(p.request.kind) || {}).card || p.request.kind, request: p.request, label: p.label, by: p.by, why: p.why || null, state: p.state, summary: p.summary || null, createdAt: p.createdAt, decidedAt: p.decidedAt || null, finishedAt: p.finishedAt || null, result: p.result || null, todoId: p.todoId || null,
       app: { ...c.app, ...(c.app.icon ? { icon: `/api/apps/proposals/${encodeURIComponent(p.id)}/icon` } : {}) }, from: c.from, bytes: c.bytes, keeps: c.keeps, details: c.details, digest: p.digest || null };
   };
   /** The card's structure from a plan (stored on the proposal at propose time — the card shows what was planned). */
@@ -242,9 +243,9 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
     const k = rq.kind;
     const recipe = rq.from && rq.from.recipe ? R.byId(rq.from.recipe) : null;
     const hosts = (rq.from && rq.from.hosts) || [];
-    const from = k === 'deb' || k === 'appimage'
+    const from = K.fromOf(k) === 'download'
       ? { kind: 'download', ...(hosts.length ? { host: hosts[0], ...(hosts.length > 1 ? { via: hosts.slice(1) } : {}) } : {}), ...(rq.from && rq.from.file ? { file: path.basename(rq.from.file) } : {}), ...(recipe ? { recipe: recipe.publisher } : {}) }
-      : k === 'source' ? { kind: 'download', host: (A.pinHost((rq.source && rq.source.uris || [])[0]) || null) } : { kind: 'sources', origin: [facts && facts.prettyName, ...(pl.origins || [])].filter(Boolean).join(' · ') || null };
+      : K.fromOf(k) === 'source' ? { kind: 'download', host: (A.pinHost((rq.source && rq.source.uris || [])[0]) || null) } : { kind: 'sources', origin: [facts && facts.prettyName, ...(pl.origins || [])].filter(Boolean).join(' · ') || null };
     const app = pl.app || {};
     // apps-joint r1 (F4, V3): a vendor's .desktop names are third-party words — no hidden / reordering / control character on
     // the card's face (HC's ONE set; the agent's side is belted at its route)
@@ -253,7 +254,7 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
     return {
       app: { name: (appName(app.name) || appName((recipe && recipe.names[0]) || pl.label || labelOf(rq, pl))).slice(0, 120), labels: labels && Object.keys(labels).length ? labels : null, icon: app.icon || null },
       from, bytes: { download: Math.max(0, pl.downloadBytes || 0), installed: Math.max(0, pl.installedBytes || 0) },
-      keeps: k === 'appimage' || pl.mode === 'home-remove' ? 'home' : k === 'source' ? 'system' : 'replay',
+      keeps: pl.mode === 'home-remove' ? 'home' : K.keepsOf(k),
       details: { packages: (pl.closure && pl.closure.length ? pl.closure.map((c) => c.package) : pl.packages || []).slice(0, 400), commands: (pl.commands || []).slice(0, 40), ...(rq.sha256 ? { sha256: rq.sha256 } : {}), ...(pl.deb && pl.deb.scripts ? { scripts: pl.deb.scripts } : {}), ...(pl.sourceSpec && pl.sourceSpec.fingerprints ? { fingerprints: pl.sourceSpec.fingerprints } : {}), ...(rq.from && rq.from.url ? { url: rq.from.url } : {}) },
     };
   }
@@ -263,7 +264,7 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
   const cardInput = (p) => {
     const c = p.card;
     if (!c) return p;
-    const f = c.from && c.from.kind === 'download' && (p.request.kind === 'deb' || p.request.kind === 'appimage') ? (c.from.host ? { host: c.from.host, ...(c.from.recipe ? { recipe: c.from.recipe } : {}) } : c.from.file ? { file: c.from.file } : null) : null;
+    const f = c.from && c.from.kind === 'download' && K.fromOf(p.request.kind) === 'download' ? (c.from.host ? { host: c.from.host, ...(c.from.recipe ? { recipe: c.from.recipe } : {}) } : c.from.file ? { file: c.from.file } : null) : null;
     return { ...p, app: { name: c.app.name, labels: c.app.labels, ...(c.app.icon ? { icon: `/api/apps/proposals/${encodeURIComponent(p.id)}/icon` } : {}) }, ...(f ? { fetch: f } : {}), keeps: c.keeps };
   };
   const cardViewOf = (p) => AC.cardView(cardInput(p));
@@ -282,7 +283,7 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
     if (openOne()) return again(openOne());
     // design 009: an installer by address / file is FETCHED (as the user, judged, sniffed, hashed) before anything is planned
     let fetched = null, request1 = request;
-    if (v0.ok && v0.request.kind === 'installer') {
+    if (v0.ok && (K.kindRow(v0.request.kind) || {}).fetches) {
       fetched = await access.call(host, 'app-fetch', v0.request.url ? { url: v0.request.url } : { file: v0.request.file });
       const recipe = R.recipeFor(fetched.hosts);
       const name = v0.request.url ? decodeURIComponent(String(v0.request.url).split(/[?#]/)[0].split('/').pop() || '').slice(0, 120) : path.basename(v0.request.file);
@@ -310,7 +311,7 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
       const lines = [];
       if (p.why) lines.push(`Why: ${p.why}`);
       if (fetched) lines.push(`From: ${card.from.host ? `${card.from.host}${card.from.recipe ? ` (${card.from.recipe}'s official download address)` : ' (VibeSpace cannot confirm who published it)'}` : `the file ${shown.request.from && shown.request.from.file}`}`, `sha256 ${shown.request.sha256}`, ...(k === 'deb' && pl.deb && pl.deb.scripts && pl.deb.scripts.length ? [`Runs its own install scripts as administrator: ${pl.deb.scripts.join(' ')}`] : []));
-      if (k === 'appimage') lines.push(`Download ${size}, ${sizeWords(pl.installedBytes)} on disk — unpacked in your home, nothing runs as administrator`);
+      if ((K.kindRow(k) || {}).entry === 'home') lines.push(`Download ${size}, ${sizeWords(pl.installedBytes)} on disk — unpacked in your home, nothing runs as administrator`);
       else if (k === 'source') lines.push(`Address: ${shown.request.source.uris.join(' ')}`, `Key fingerprint: ${(pl.sourceSpec && pl.sourceSpec.fingerprints || []).join(' ')}`);
       else if (k !== 'remove') lines.push(`Packages: ${(pl.closure || []).map((c) => c.package).slice(0, 60).join(' ')}${n > 60 ? ` … (+${n - 60})` : ''}`, `From: ${(pl.origins || []).join(', ')}`, `Download ${size}, ${sizeWords(pl.installedBytes)} on disk`);
       else lines.push(`Removes: ${(pl.removes || []).join(' ') || '(nothing else)'}`);
@@ -346,9 +347,9 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
     // design 009: an AppImage and the removal of a home-level app (AppImage / uv / npm) need no root — planned fresh here,
     // the shown digest checked, then ONE app op on the machine as the user (no package slot)
     let home = null;
-    if (rq.kind === 'appimage' || rq.kind === 'remove') {
+    if ((K.kindRow(rq.kind) || {}).entry === 'home' || rq.kind === 'remove') {
       const fresh = await plan(host, rq);
-      if (rq.kind === 'appimage' || (fresh.plan && fresh.plan.mode === 'home-remove')) home = fresh;
+      if ((K.kindRow(rq.kind) || {}).entry === 'home' || (fresh.plan && fresh.plan.mode === 'home-remove')) home = fresh;
     }
     if (rq.kind === 'replay') replaying.set(host || 'local', { since: now(), rung: rq.rung || null });
     if (p) setState(p, 'installing', { decidedAt: now() });
@@ -359,9 +360,9 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
         const hp = home.plan;
         if (!hp.ok) throw named(hp.code || 'refused', hp.error || 'the machine refused the plan', { plan: hp });
         if (expectDigest != null && home.digest !== String(expectDigest)) throw named('plan_changed', 'what would run changed after it was shown — nothing ran', { plan: hp, digest: home.digest });
-        onData(Buffer.from(`${rq.kind === 'appimage' ? 'unpacking' : 'removing'} ${hp.label || hp.entryId} …\n`));
+        onData(Buffer.from(`${(K.kindRow(rq.kind) || {}).entry === 'home' ? 'unpacking' : 'removing'} ${hp.label || hp.entryId} …\n`));
         const who = p ? { kind: 'agent', conversation: p.by.conversation, name: p.by.name } : by;
-        homeRec = rq.kind === 'appimage'
+        homeRec = (K.kindRow(rq.kind) || {}).entry === 'home'
           ? await access.call(host, 'app-install', { kind: 'appimage', staged: rq.staged, sha256: rq.sha256, entryId: hp.entryId, by: who, why: p ? p.why : null, label: p ? p.label : hp.label, from: (rq.from && (rq.from.url || rq.from.file)) || null, icon: (hp.app && hp.app.icon) || null })
           : await access.call(host, 'app-remove', { entryId: hp.entryId, home: true });
         onData(Buffer.from('done\n'));
@@ -385,7 +386,7 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
     }
     // design 019 M3: an install INTO the app system of exactly a host entry's packages IS its move — the host record goes now
     let moved = null;
-    if (pl.forgets && (rq.kind === 'apt' || rq.kind === 'deb')) moved = [await moveTail(host, { id: pl.forgets, label: labelOf(rq, pl) }, onData)];
+    if (pl.forgets && (K.kindRow(rq.kind) || {}).entry === 'root') moved = [await moveTail(host, { id: pl.forgets, label: labelOf(rq, pl) }, onData)];
     const out = { done: true, host: host || 'local', kind: rq.kind, entryId: pl.entryId || null, label: labelOf(rq, pl), rows: (rec.rows || []).map((x) => ({ id: x.id, label: x.label })), reattached: !!r.reattached, run: rec.run || null, state: rec.state || null, ...(moved ? { moved } : {}) };
     if (p) {
       if (userTodos && p.todoId) { try { userTodos.setStatus(p.todoId, 'done', 'apps'); } catch { /* resolved already */ } }
@@ -611,4 +612,4 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
   return { plan, planProposal, search, status, propose, recordUserKind, run, approve, card: (id) => { const p = get(id); return p ? cardViewOf(p) : null; }, reject, withdraw, sweep, proposalIcon, wait, proposalsOf, get: (id) => { const p = get(id); return p ? view(p) : null; }, outcomeText: (id) => { const p = get(id); return p ? outcomeText(p) : null; }, afterListen, decorate, isReplaying, addHelper, dropHelper, helperIds, helpers: () => store.helpers.slice(), planner, storeFile: file };
 }
 
-module.exports = { create, normRequest, recordOf, whatOf, SYS_REQUEST_KINDS, STORE_FILE, FROM_NAME, INBOX_KEY, WAIT_MAX_MS, PROPOSAL_STATES, REQUEST_KINDS, AGENT_KINDS, KIND_VIEW, EXPIRE_MS, WORDS };
+module.exports = { create, normRequest, recordOf, whatOf, SYS_REQUEST_KINDS, STORE_FILE, FROM_NAME, INBOX_KEY, WAIT_MAX_MS, PROPOSAL_STATES, REQUEST_KINDS, AGENT_KINDS, EXPIRE_MS, WORDS };

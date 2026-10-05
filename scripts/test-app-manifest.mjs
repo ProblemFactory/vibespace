@@ -34,6 +34,7 @@ const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const FX = path.join(repo, 'scripts/fixtures/apt');
 const fx = (f) => fs.readFileSync(path.join(FX, f), 'utf8');
 const A = require('../src/app-manifest.js');
+const E = require('../src/server/apps-engine.js'); // lane dc-apps-rows §kinds: the engine's kind lists derive from the table
 const M = require('../src/desktop-apps.js');
 const MUT = mutantCopies('app-manifest', repo);
 const MANIFEST_SRC = fs.readFileSync(path.join(repo, 'src/app-manifest.js'), 'utf8');
@@ -74,6 +75,13 @@ console.log('§1 the index\'s schema');
   const srcBad = [[{ ...src, uris: ['http://packages.example.com/x'] }, /not https/], [{ ...src, key: '' }, /Signed-By/], [{ ...src, key: 'http://x/k.asc' }, /https/], [{ ...src, uris: ['https://x/a b'] }, /plain https/], [{ ...src, suites: ['stable; rm'] }, /suites/], [{ ...src, id: 'Bad Id' }, /name/], [{ ...src, fingerprints: ['xyz'] }, /fingerprint/]];
   for (const [b, re] of srcBad) { const v = A.validateSourceSpec(b); ok(!v.ok && v.code === 'bad_source' && re.test(v.error), `a source is refused bad_source: ${v.error}`); }
   ok(A.sourceDeb822(A.validateSourceSpec(src).source, '/etc/apt/keyrings/vibespace-vscode.asc') === 'Types: deb\nURIs: https://packages.example.com/repos/code\nSuites: stable\nComponents: main\nSigned-By: /etc/apt/keyrings/vibespace-vscode.asc\n', 'the deb822 of an approved source names its key under /etc/apt/keyrings (root-only — never a path under the user\'s home)');
+  { // lane dc-apps-rows (F-I2): sourceDeb822 is THE deb822 of an approved source — the shipped root script's writer (APP_SCRIPT,
+    // shell printf over $U $SU $CO $ID $x) must write the very same bytes; run it in sh beside the PURE text
+    const g = /\{ printf 'Types: deb[^\n]*?\} > "\$T\/src"/.exec(A.APP_SCRIPT);
+    const s1 = A.validateSourceSpec(src).source;
+    const runW = (co) => spawnSync('sh', ['-c', `${g[0].replace(/ > "\$T\/src"$/, '')}`], { encoding: 'utf8', env: { PATH: '/usr/bin:/bin', U: s1.uris.join(' '), SU: s1.suites.join(' '), CO: co, ID: 'vscode', x: 'asc' } }).stdout;
+    ok(g && runW(s1.components.join(' ')) === A.sourceDeb822(s1, '/etc/apt/keyrings/vibespace-vscode.asc') && runW('') === A.sourceDeb822({ ...s1, components: [] }, '/etc/apt/keyrings/vibespace-vscode.asc'), 'the root script\'s deb822 writer writes exactly sourceDeb822\'s bytes (with and without Components)');
+  }
   const m3 = A.withSource(m0, { ...src, keySha256: 'a'.repeat(64), fingerprints: ['B'.repeat(40)] });
   ok(m3.sources.length === 1 && m3.sources[0].fingerprints[0] === 'B'.repeat(40) && A.withoutSource(m3, 'vscode').sources.length === 0, 'withSource / withoutSource');
   ok(A.entryIdFor('gimp') === 'gimp' && A.entryIdFor('gimp', ['gimp']) === 'gimp-2' && A.entryIdFor('libreoffice-calc') === 'libreoffice-calc' && A.entryIdFor('g++') === 'g' && A.entryIdFor('python3.12-venv') === 'python3-12-venv', 'entryIdFor: the package name, dots/pluses as dashes, a taken id numbered');
@@ -609,6 +617,42 @@ console.log('§D019 design 019 — reconcileIndex (the index follows root), dedu
   const appsF = path.join(dirF, 'home/.vibespace/apps'); fs.mkdirSync(appsF, { recursive: true });
   const runF = (...a) => { const r = spawnSync('sh', [shF, ...a], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: path.join(dirF, 'home') } }); return (r.stdout || '') + (r.stderr || ''); };
   ok(/= refused bad-id/.test(runF(appsF, 'forget', '-x', 'abcdefgh1', '--')) && /= refused bad-args/.test(runF(appsF, 'forget', 'hello', 'abcdefgh1', '--', 'other')) && /= run hello abcdefgh1 forget\n= refused not-root/.test(runF(appsF, 'forget', 'hello', 'abcdefgh1', '--')), 'the script: forget with a bad id / an extra argument is refused before root; valid arguments reach the root check (nothing touched here)');
+}
+console.log('§kinds a NEW app kind is ONE row of src/app-kinds.js (lane dc-apps-rows, F-A1/F-A2/F-A3): a fake member drives the real consumers');
+{
+  // the fake members: ONE registration line each in a copy of src/app-kinds.js; the REAL consumers are loaded fresh over it
+  // (the copy seeded as src/app-kinds.js in the require cache) — nothing else is edited
+  const KSRC = fs.readFileSync(path.join(repo, 'src/app-kinds.js'), 'utf8');
+  const ANCHOR = "  row({ id: 'forget', plan: true }),\n";
+  const LINE = "  row({ id: 'acme-root', entry: 'root', plan: true, request: true, agent: true, sysView: true }), row({ id: 'acme', entry: 'home', cliWord: 'acme', addArgv: ['acme', 'get'], removeArgv: ['acme', 'drop'] }),\n";
+  ok(KSRC.includes(ANCHOR), '§kinds the registration anchor is the table itself');
+  const K2 = MUT.load('src/app-kinds.js', KSRC.replace(ANCHOR, ANCHOR + LINE), 'fake-kind');
+  const realK = require.resolve('../src/app-kinds.js');
+  const over = (kx, rels, srcOf = {}) => { // load `rels` fresh with `kx` standing in for src/app-kinds.js (patched copies by `srcOf`)
+    const keys = [realK, ...rels.map((r) => require.resolve(`../${r}`))];
+    const saved = keys.map((k) => require.cache[k]);
+    for (const k of keys) delete require.cache[k];
+    require.cache[realK] = { id: realK, filename: realK, loaded: true, exports: kx, children: [], paths: [] };
+    try { return rels.map((r) => (srcOf[r] ? MUT.load(r, srcOf[r], `over-${path.basename(r, '.js')}`) : require(`../${r}`))); } finally { keys.forEach((k, i) => { if (saved[i]) require.cache[k] = saved[i]; else delete require.cache[k]; }); }
+  };
+  const [A2, AC2, E2] = over(K2, ['src/app-manifest.js', 'src/app-card.js', 'src/server/apps-engine.js']);
+  const m0 = A2.emptyManifest();
+  const ent = (kind, extra = {}) => A2.validateManifest({ ...m0, entries: [{ id: `x-${kind}`, kind, packages: [], by: { kind: 'agent' }, addedAt: 1, label: 'tool', ...extra }] });
+  ok(A2.ENTRY_KINDS.includes('acme') && A2.HOME_KINDS.includes('acme') && !A2.HOME_KINDS.includes('acme-root') && ent('acme').ok && !ent('acme-root').ok && ent('acme-root', { packages: ['acme-pkg'] }).ok, '§kinds a fake home kind is an entry (its packages free); a fake ROOT kind must carry Debian packages — the manifest asked the row');
+  const rp = A2.removePlanFor({ id: 'x-acme', kind: 'acme', label: 'tool' });
+  ok(rp.ok && JSON.stringify(rp.homeArgv) === '["acme","drop","tool"]', '§kinds the fake home kind is removed by its row\'s argv (removePlanFor)', rp);
+  ok(E2.AGENT_KINDS.includes('acme-root') && E2.normRequest({ kind: 'acme-root' }, { agent: true }).ok && E2.recordOf({ kind: 'acme-root' }, { entryId: 'e1', nonce: 'n1' }, { by: { kind: 'user' } })[1].kind === 'acme-root', '§kinds the engine takes the fake root kind as a request an agent may propose, recorded as an app install of its own kind');
+  ok(AC2.cardView({ request: { kind: 'acme-root' } }).kind === 'package' && AC2.cardView({ request: { kind: 'acme-root' } }).keeps === 'replay', '§kinds THE card draws an undeclared card kind as the machine\'s packages (the default card row)');
+  // the control: the manifest with the OLD id branch restored — the fake root kind's empty package list slips through (red)
+  const MSRC = fs.readFileSync(path.join(repo, 'src/app-manifest.js'), 'utf8');
+  const NEW = "if (K.kindRow(e.kind).entry === 'root' && (!packages.length";
+  ok(MSRC.includes(NEW), '§kinds control anchor: the manifest asks the row');
+  const [Aold] = over(K2, ['src/app-manifest.js'], { 'src/app-manifest.js': MSRC.replace(NEW, "if ((e.kind === 'apt' || e.kind === 'deb') && (!packages.length") });
+  const entOld = Aold.validateManifest({ ...m0, entries: [{ id: 'x-acme-root', kind: 'acme-root', packages: [], by: { kind: 'agent' }, addedAt: 1 }] });
+  ok(entOld.ok, '§kinds CONTROL: with the old `apt || deb` branch the fake root kind passes with no packages (the row is what refuses it)');
+  // files a NEW kind touches: the table only (its planner aside — src/app-serve.js plans it)
+  const real = require('../src/app-kinds.js');
+  ok(['ENTRY_KINDS', 'HOME_KINDS'].every((n) => A[n] === real[n]) && E.REQUEST_KINDS.slice(0, real.REQUEST_KINDS.length).join() === real.REQUEST_KINDS.join() && E.AGENT_KINDS === real.AGENT_KINDS, '§kinds every kind list derives from the ONE table (manifest, engine)');
 }
 for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 8 })) ok(r.pass, '§tree ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 console.log(`\n${fail ? `${fail} FAILED` : 'ALL PASS'} (${pass}) in ${Date.now() - T0} ms`);

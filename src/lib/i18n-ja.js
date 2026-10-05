@@ -6479,6 +6479,16 @@ export default {
   "Open it again on the desktop where you want it.": "使いたいデスクトップで開き直してください。",
   "The page shows a message": "ページがメッセージを表示しています",
   "The page asks you to confirm": "ページが確認を求めています",
+  "This page is waiting for a passkey ({rp})": "このページはパスキーを待っています（{rp}）", // lane browser-passkey
+  "The agent's browser holds no passkey of yours — cancel the request, then use the page's other way in (a recovery code, a password), or sign in on your own device.": "エージェントのブラウザにはあなたのパスキーはありません。リクエストをキャンセルして、ページの別のサインイン方法（リカバリーコード、パスワード）を使うか、ご自身のデバイスでサインインしてください。", // lane browser-passkey
+  "Chrome's own passkey window is open on this computer's desktop — it does not show in this view.": "Chrome 自身のパスキーウィンドウがこのコンピューターのデスクトップに開いています。このビューには表示されません。", // lane browser-passkey
+  "Cancel passkey request": "パスキーのリクエストをキャンセル", // lane browser-passkey
+  "page waits for a passkey": "ページがパスキー待ち", // lane browser-passkey
+  "this site": "このサイト", // lane browser-passkey
+  "The page is waiting for a passkey — cancel it in the live view": "ページがパスキーを待っています。ライブビューでキャンセルしてください", // lane browser-passkey
+  "A page in the agent's browser is waiting for a passkey ({rp})": "エージェントのブラウザのページがパスキーを待っています（{rp}）", // lane browser-passkey
+  "The agent's browser holds no passkey of yours. Cancel the request in the live view (or the agent runs `vibespace-browser passkey cancel`), then use the page's other way in, or sign in on your own device.": "エージェントのブラウザにはあなたのパスキーはありません。ライブビューでリクエストをキャンセルし（またはエージェントが `vibespace-browser passkey cancel` を実行）、ページの別のサインイン方法を使うか、ご自身のデバイスでサインインしてください。", // lane browser-passkey
+  "The passkey request could not be cancelled: {why}": "パスキーのリクエストをキャンセルできませんでした: {why}", // lane browser-passkey
   "The page asks for text": "ページが文字の入力を求めています",
   "Leave this page?": "このページから移動しますか？",
   "The page opened a dialog": "ページがダイアログを開きました",
@@ -7871,4 +7881,50 @@ export default {
   "✓ Connected as {user} — finish with the “Connect” button below.": "✓ {user} として接続済み——下の「接続」ボタンで完了。",
   "✓ Connected as {user} — finish with the “Create & connect” button below.": "✓ {user} として接続しました — 下の「作成して接続」で完了します。",
   "Slack’s last page says “Done here” and this dialog finishes by itself — even when you approved in another browser. If that page shows a code instead, or does not load, paste the code or its address here:": "Slack の最後のページに「ここでの操作は完了です」と表示され、このダイアログは自動的に完了します（別のブラウザで許可した場合も）。代わりにコードが表示された場合や、ページが開かない場合は、そのコードかアドレスをここに貼り付けてください：",
+  "Open new documents beside the chat": "新しいドキュメントをチャットの横に開く",
+  "When the agent writes a NEW document (.md, .txt, .docx, .pdf…) while the chat is on screen, it opens beside the chat. Off = its card in the chat only. An edit never opens it again.": "エージェントが新しいドキュメント（.md、.txt、.docx、.pdf…）を書き、チャットが画面に出ているとき、チャットの横に開きます。オフ = チャット内のカードだけ。編集で再び開くことはありません。",
+  "Changed {n} times": "{n} 回変更",
+  "Written by the agent": "エージェントが作成",
+  "last by you": "最後の変更はあなた",
+  "Open {name} beside the chat": "{name} をチャットの横に開く",
+  "No documents yet — only code.": "まだドキュメントはありません — コードだけです。",
+  "Code ({n})": "コード（{n}）",
+  "The list keeps the newest {n} files.": "一覧には最新の {n} ファイルだけが残ります。",
+  "Files the agent made in this conversation — click for the list": "この会話でエージェントが作ったファイル — クリックで一覧",
+  "Artifacts · {n}": "成果物 · {n}",
+  // lane doc-window: the Doc window (a markdown file read, edited and commented in one rendered view)
+  "Could not load the document editor — reload the page": "ドキュメントエディタを読み込めませんでした — ページを再読み込みしてください",
+  "Raw": "ソース",
+  "Edit the markdown source": "Markdown のソースを編集",
+  "The agent changed this file while you were editing.": "編集中にエージェントがこのファイルを変更しました。",
+  "Reload (your edits go)": "再読み込み（あなたの編集は破棄）",
+  "Keep editing": "編集を続ける",
+  "Comments": "コメント",
+  "This file uses formatting the rich editor would change — editing raw": "このファイルにはリッチエディタが変えてしまう書式があります — ソースで編集します",
+  "a table": "表",
+  "HTML": "HTML",
+  "a footnote": "脚注",
+  "front matter": "フロントマター",
+  "an underlined heading": "下線式の見出し",
+  "line {n}": "{n} 行目",
+  "Could not read this document: {why}": "このドキュメントを読めません: {why}",
+  "Save first — the raw editor opens the file as it is on disk": "先に保存してください — ソースエディタはディスク上のファイルを開きます",
+  "Save first — the raw editor has unsaved edits": "先に保存してください — ソースエディタに未保存の編集があります",
+  "Overwrite the agent's newer version?": "エージェントの新しい版を上書きしますか？",
+  "The agent changed this file after you opened it. Saving replaces its version with yours.": "開いた後にエージェントがこのファイルを変更しました。保存するとその版があなたの版に置き換わります。",
+  "Saved {time}": "保存しました {time}",
+  "Save failed: {why}": "保存に失敗しました: {why}",
+  "Saved — the chat sees your edit on its next turn": "保存しました — 会話は次のターンであなたの編集を知ります",
+  "At most {n} comments — send these first": "コメントは最大 {n} 件です — 先に送信してください",
+  "Comments ({n})": "コメント（{n}）",
+  "Add comment": "コメント",
+  "Select text in the document, then press Add comment.": "ドキュメントで文字を選んでから「コメント」を押してください。",
+  "Open this document from a chat to send comments to it": "コメントを送るには、会話からこのドキュメントを開いてください",
+  "Comments wait for the chat's next turn": "コメントは会話の次のターンで届きます",
+  "Comments sent to the chat": "コメントを会話に送りました",
+  "Could not send the comments: {why}": "コメントを送信できませんでした: {why}",
+  "a document comment": "ドキュメントへのコメント 1 件",
+  "{n} document comments": "ドキュメントへのコメント {n} 件",
+  "a document edit": "ドキュメントの編集 1 件",
+  "{n} document edits": "ドキュメントの編集 {n} 件",
 };

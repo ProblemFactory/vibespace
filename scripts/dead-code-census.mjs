@@ -14,7 +14,7 @@
 //                at the export (ESM `export function x` = 1; CJS `function x` + `module.exports = { x }` = 2).
 //                rv-server-core's deadscan.js implementation (one of the two review scripts; the other was ESM-only).
 //   lib-unreached a src/lib file no esbuild metafile input of the two browser bundles (src/client.js,
-//                src/design-viewer-entry.js) names.
+//                src/design-viewer-entry.js, src/doc-editor-entry.js — the Doc window's lazy editor) names.
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -83,7 +83,7 @@ export function exportDead(repo, { read = (f) => rd(repo, f), files } = {}) {
 }
 
 // ── lib-unreached ──
-export const BUNDLE_ENTRIES = ['src/client.js', 'src/design-viewer-entry.js'];
+export const BUNDLE_ENTRIES = ['src/client.js', 'src/design-viewer-entry.js', 'src/doc-editor-entry.js'];
 export async function libUnreached(repo) {
   const esbuild = createRequire(path.join(repo, 'package.json'))('esbuild');
   const stub = { name: 'build-version-stub', setup(b) { b.onResolve({ filter: /build-version\.js$/ }, () => ({ path: 'bv', namespace: 'stub' })); b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({ contents: 'export const BUILD_VERSION="0"', loader: 'js' })); } };

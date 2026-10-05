@@ -277,6 +277,7 @@ module.exports = {
   // names one of `configFiles` below.
   settings: HARNESS_SETTINGS.claude,
   configFiles: { settings: SETTINGS_FILE },
+  artifactsOf: require('./artifacts-of.js').claude, // lane artifacts-model: Write / Edit / MultiEdit / NotebookEdit → the deliverable rows (src/artifacts.js)
   // CONTEXT INJECTION strategy (S6): the CLI's own hooks carry task context
   // (SessionStart), per-prompt notices (UserPromptSubmit) and the stop-time
   // bookkeeping nudge (Stop); SessionStart output is honoured, so the

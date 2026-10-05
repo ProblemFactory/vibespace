@@ -18,7 +18,7 @@ import { t } from './i18n.js';
 import { createModalShell, fetchJson, showToast } from './utils.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { createVncView, streamUrl } from './vnc-view.js';
-import { desktopRunPlan, desktopRunPresets, rememberRun, machineDesktopId } from '../desktop-apps.js';
+import { desktopRunPlan, desktopRunPresets, rememberRun, machineDesktopId } from '../machine-desktop-model.js';
 
 const RUNS_KEY = 'vibespace.machineDesktopRuns'; // { [hostId]: [line…] } — the owner's latest lines per machine (≤ 3)
 function readRuns() { try { const o = JSON.parse(localStorage.getItem(RUNS_KEY) || '{}'); return o && typeof o === 'object' && !Array.isArray(o) ? o : {}; } catch { return {}; } }

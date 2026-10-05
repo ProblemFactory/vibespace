@@ -1,5 +1,6 @@
 import { pillMode, billingPillForms, billingPillHtml } from './title-chips.js'; // lane phone-chip: the billing pill folds, never cuts
 import { escHtml, showInputDialog, showConfirmDialog, uiScale, showToast, fetchJson, copyText, absUrl, onOutsidePress } from './utils.js';
+import { renderArtifactList } from './artifact-card.js'; // lane artifacts-model: the Artifacts chip's list
 import { UI_ICONS } from './icons.js';
 import { systemSelect } from './design-home.js'; // lane design-systems-home: the design chip's "Design system" select
 import { BACKEND_META, getBackendMeta, backendFeatureCaps, autoResumeCapsFor, effortDisplay, effortLabel, noteModelCatalog, responseStyleLabel, responseStyleCaps, styleAppliesLive, initHealthLabel, uiRow, billingRow } from './agent-meta.js';
@@ -49,11 +50,13 @@ export class ChatStatusBar {
    * @param {function} opts.openInTempEditor - (text) => void
    * @param {function} [opts.startReview] - ({ target, delivery }) => void
    */
-  constructor(ws, sessionId, { backend = 'claude', allowReview = false, getToolMsg, openSubagentViewer, openInTempEditor, startReview, onConfigChange, onOpenWorkflow, getWorkflowIds, onWorkflowVerdict = null, onDesignRequest = null, onOpenDesign = null, onPublishDesign = null, onRestartSession = null, onSearch = null, onBrowserAction = null, onJumpToAsk = null, onChannelOpen = null }) {
+  constructor(ws, sessionId, { backend = 'claude', allowReview = false, getToolMsg, openSubagentViewer, openInTempEditor, startReview, onConfigChange, onOpenWorkflow, getWorkflowIds, onWorkflowVerdict = null, onDesignRequest = null, onOpenDesign = null, onPublishDesign = null, onRestartSession = null, onSearch = null, onBrowserAction = null, onJumpToAsk = null, onChannelOpen = null, onOpenArtifact = null }) {
     this._ws = ws;
     // §26 (B-099e): the conversations THIS TURN read or drafted (PURE chipView over the witness's ring — the
     // view hands it over) and the one door that opens one; null = the turn touched nothing (no chip)
     this._channelTouch = null;
+    this._artifacts = null; // lane artifacts-model: the conversation's deliverables (GET /api/artifacts — view(rows)); null = none yet
+    this._onOpenArtifact = onOpenArtifact;
     this._onChannelOpen = onChannelOpen;
     // lane S1: the waiting chip names WHO waits (the server's pending asks, oldest
     // first) and its click goes there — null = the view cannot jump (no chip click)
@@ -177,6 +180,7 @@ export class ChatStatusBar {
    *  something to say (a pin, or a use); amber when the two halves differ. */
   setBrowserProfile(v) { this._browserProfile = v && v.key && v.fact && v.words ? v : null; this.render(); } // lane S2: {key, fact, words} — THE browser fact and its words
   /** §26 (B-099e): the turn's touched conversations `{rows, latest}` (PURE chipView) or null. */
+  setArtifacts(v) { this._artifacts = v && v.ok && ((v.count || 0) + (v.codeCount || 0)) > 0 ? v : null; this.render(); }
   setChannelTouches(v) { this._channelTouch = v && v.latest && Array.isArray(v.rows) && v.rows.length ? v : null; this.render(); }
   /** Billing identity chip (mobile — windows have no title bar there, so the
       title-bar badge's click-to-switch has no home; this is its stand-in). */
@@ -813,6 +817,12 @@ export class ChatStatusBar {
       chip('channels', 'chat-status-channels chat-status-clickable', tip, `${glyph} <span class="chat-status-channels-text">${escHtml(channelChipText(v, t))}</span>`);
     }
 
+    // lane artifacts-model: the Artifacts chip (keyed) — the files the agent made here, documents first, code folded
+    if (this._artifacts) {
+      const v = this._artifacts;
+      chip('artifacts', 'chat-status-artifacts chat-status-clickable', t('Files the agent made in this conversation — click for the list'), `${UI_ICONS.memo || ''} <span class="chat-status-artifacts-text">${escHtml(t('Artifacts · {n}', { n: v.count || 0 }))}</span>`);
+    }
+
     // Remote reconnect chip — amber, only while the ssh pipe is down
     if (this._remoteState && this._remoteState.state === 'unprotected') {
       // B-0845: session predates the keeper (2.124.0) — claude hangs bare off
@@ -1292,6 +1302,15 @@ export class ChatStatusBar {
       if (f.pinned && (f.differs === 'agent_elsewhere' || f.differs === 'other_attached' || f.differs === 'pin_pending') && f.lastUsed) row('chat-status-browser-nudge', t('Remind on next message'), t('The reminder rides your next message — no billed turn'), (ev) => this._onBrowserAction?.('nudge', ev));
       row('chat-status-browser-live', t('Open live view'), '', (ev) => this._onBrowserAction?.('live', ev));
       row('chat-status-browser-pin', t('Change pin…'), '', (ev) => this._onBrowserAction?.('pin', ev));
+      return;
+    }
+    // lane artifacts-model: Artifacts chip -> the deliverables (documents first, "Code (n)" folded); a row opens beside the chat
+    const afEl = e.target.closest('.chat-status-artifacts');
+    if (afEl && this._artifacts) {
+      e.stopPropagation();
+      const dropdown = showDropdown(afEl, { minWidth: 260, maxWidth: 440 });
+      if (!dropdown) return;
+      renderArtifactList(dropdown, this._artifacts, { onOpen: (b) => this._onOpenArtifact?.(b), close: () => dropdown.remove() });
       return;
     }
     // Channels chip (§26) -> the turn's conversations, drafted first; ONE conversation opens at once

@@ -25,7 +25,7 @@ const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const MUTK = mutantCopies('dka', repo);
 
 const WebSocket = require(path.join(repo, 'node_modules/ws'));
-const DS = require(path.join(repo, 'src/server/desktop-stream.js'));
+const DS = { ...require(path.join(repo, 'src/server/desktop-stream.js')), ...require(path.join(repo, 'src/server/stream-relay-rfb.js')), ...require(path.join(repo, 'src/server/stream-relay-xpra.js')) } /* F-B4: the relays' classifiers live in their own modules */;
 let pass = 0, fail = 0;
 const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + JSON.stringify(e) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -257,9 +257,13 @@ console.log('§5 the HELD-BYTES CAP (2026-09-22, hole A of the r6 verify): a vie
 
   // CONTROL: the same bridge WITHOUT the cap (the two constants patched to Infinity — the r6 sieve held every byte)
   const src = fs.readFileSync(path.join(repo, 'src/server/desktop-stream.js'), 'utf8');
-  const from1 = 'const XPRA_MAX_PACKET_BYTES = 16 * 1024 * 1024;', from2 = 'const RFB_MAX_MESSAGE_BYTES = 16 * 1024 * 1024;';
-  ok('each cap is spelled once (the control patches exactly them)', src.split(from1).length === 2 && src.split(from2).length === 2);
-  const mfile = MUTK.write('src/server/desktop-stream.js', src.replace(from1, 'const XPRA_MAX_PACKET_BYTES = Infinity; // pre-fix').replace(from2, 'const RFB_MAX_MESSAGE_BYTES = Infinity; // pre-fix'), 'kacap');
+  // rv-desktop-apps F-B4: each relay declares its protocol's cap — the control patches both relays and loads a bridge copy over them
+  const srcX = fs.readFileSync(path.join(repo, 'src/server/stream-relay-xpra.js'), 'utf8'), srcR = fs.readFileSync(path.join(repo, 'src/server/stream-relay-rfb.js'), 'utf8');
+  const from1 = 'const XPRA_MAX_PACKET_BYTES = 16 * 1024 * 1024;', from2 = 'const RFB_MAX_MESSAGE_BYTES = 16 * 1024 * 1024;', reg = "require('./stream-relays.js')";
+  ok('each cap is spelled once (the control patches exactly them)', srcX.split(from1).length === 2 && srcR.split(from2).length === 2 && src.split(reg).length === 2);
+  const xfile = MUTK.write('src/server/stream-relay-xpra.js', srcX.replace(from1, 'const XPRA_MAX_PACKET_BYTES = Infinity; // pre-fix'), 'kacap-x');
+  const rfile = MUTK.write('src/server/stream-relay-rfb.js', srcR.replace(from2, 'const RFB_MAX_MESSAGE_BYTES = Infinity; // pre-fix'), 'kacap-r');
+  const mfile = MUTK.write('src/server/desktop-stream.js', src.replace(reg, `{ rfb: require(${JSON.stringify(rfile)}), xpra: require(${JSON.stringify(xfile)}) }`), 'kacap');
   try {
     const Rc = await rig(require(mfile));
     const Ac = await viewer(Rc.port, '/api/desktop/xp/stream', 'v-a');

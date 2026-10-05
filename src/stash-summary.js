@@ -29,7 +29,7 @@ const { CLEARED_TEXT } = require('./record-clear.js');   // PURE: the stored sen
 // not accept it at once (a transient miss on a live pid); it is posted again at the conversation's turn end and on a
 // bounded backoff (src/server/conversation-deliver.js, the retry park). It is listed first: it is on its way, not
 // waiting for a prompt. The fact carries `retrying: {n, nextAt}` beside the items.
-const KIND_ORDER = Object.freeze(['retrying', 'channel-receipt', 'channel', 'channel-reaction', 'job', 'handback', 'window-request', 'design-comment', 'notice', 'group', 'peer']);
+const KIND_ORDER = Object.freeze(['retrying', 'channel-receipt', 'channel', 'channel-reaction', 'job', 'handback', 'window-request', 'design-comment', 'doc-comment', 'doc-edit', 'notice', 'group', 'peer']);
 /** THE sender name of the reaction digest (lane channel-threads, spec §5.4 — `👍 ×3 on your reply in <conversation>`), spelled
  *  ONCE: the channels engine files under it, this module and the agent's injection read it. The naive-user pass
  *  (2026-09-28): a digest was a "channel message" in the strip — the owner could not tell a reaction from a message —
@@ -48,6 +48,7 @@ function kindOf(e, { job = false } = {}) {
   if (src === 'channel-receipt') return 'channel-receipt';
   if (src === 'channel') return from === REACTION_DIGEST_FROM ? 'channel-reaction' : 'channel';
   if (src === 'window-request') return 'window-request';
+  if (src === 'doc-comment' || src === 'doc-edit') return src;   // lane doc-window: the USER's comments on a markdown file / the note that they saved it — the next turn reads them
   if (src === 'design-comment') return 'design-comment';   // lane design-core: the USER's own comment on an artboard, waiting because no live chat process could take it
   if (e.kind === 'notification') {
     if (from === 'VibeSpace browser') return 'handback';
@@ -144,6 +145,8 @@ function partWords(item, t) {
     case 'handback': return one ? t('a browser handback') : t('{n} browser handbacks', { n });
     case 'window-request': return one ? t('a window request') : t('{n} window requests', { n });
     case 'design-comment': return one ? t('a design comment') : t('{n} design comments', { n });
+    case 'doc-comment': return one ? t('a document comment') : t('{n} document comments', { n });
+    case 'doc-edit': return one ? t('a document edit') : t('{n} document edits', { n });
     case 'notice': return one ? t('a VibeSpace notice') : t('{n} VibeSpace notices', { n });
     case 'group': {   // lane group-report-card: a group message waiting for the next turn, by its sender
       const name = item.label;

@@ -46,6 +46,14 @@ for (const id of harnessIds()) {
   console.log(`— ${id}`);
   ok(REQUIRED_DESCRIPTOR_KEYS.every((k) => k in h), `${id}: descriptor declares ${REQUIRED_DESCRIPTOR_KEYS.join('/')}`);
   ok(h.caps === capsOf(id) && h.caps === BACKEND_CAPS[id], `${id}: caps ARE the backend-caps row (one source)`);
+  // lane artifacts-model: THE DELIVERABLE HOOK — a reader (record → [{path, op, bytes, id}]) or null (= never produces);
+  // a reader answers every record shape with an array (a foreign / empty record → []), never a throw
+  {
+    const of = h.artifactsOf;
+    const FOREIGN = [null, {}, { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Write', input: {} }] } }, { type: 'response_item', payload: { name: 'apply_patch', type: 'function_call', arguments: '{' } }, { kind: 'update', update: { sessionUpdate: 'tool_call', content: [{ type: 'diff' }] } }];
+    ok('artifactsOf' in h && (of === null || (typeof of === 'function' && FOREIGN.every((r) => { try { const o = of(r); return Array.isArray(o) && o.length === 0; } catch { return false; } }))), `${id}: declares artifactsOf (${of === null ? 'null — never produces' : 'a reader: [] on a foreign record, never a throw'})`);
+    if (of === null) { const reg = require(path.join(REPO, "src/server/artifact-registry.js")); const N2 = require(path.join(REPO, "src/normalizers.js")); const s = { backend: id, _historyLoaded: true }; ok(reg.observe(s, { type: 'assistant', message: { content: [{ type: 'tool_use', id: 't', name: 'Write', input: { file_path: '/x.md' } }] } }) === 0 && !s._artifacts && N2.artifactDeriveOpts({ backend: id }) === null, `${id}: a null hook is PROVEN never to produce (the live consumer and the rebuild both skip it)`); }
+  }
   const ad = registry.get(id);
   ok(ad instanceof BackendAdapter && ad instanceof h.Adapter, `${id}: adapter registry instantiates the descriptor's Adapter`);
   if (h.kind === 'chat') {

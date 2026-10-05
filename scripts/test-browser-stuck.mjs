@@ -1208,8 +1208,11 @@ async function noticeCase(scenario, { Dmod = D, SSmod = null } = {}) {
   const rsrc = fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8');
   ok(!/driveVerdictFor/.test(rsrc), 'lane browser-windows: the route carries no drive belt any more (the claim is deleted)');
   const needle = "if (st && st.input === 'user') return res.status(409)";
-  ok(rsrc.includes(needle), 'control setup: the input check is found in the dialog route');
-  const b2 = await busyRoute(MUT.load('src/routes/browser.js', rsrc.replace(needle, "if (false) return res.status(409)"), 'busy-none'));
+  // int215: the needle is read INSIDE the dialog route — lane browser-passkey's route (registered before it) carries the
+  // same input check, and a bare replace() took that one
+  const dlgAt = rsrc.indexOf("router.post('/api/agent/browser/dialog'"); const cut = dlgAt < 0 ? -1 : rsrc.indexOf(needle, dlgAt);
+  ok(cut > dlgAt && dlgAt >= 0, 'control setup: the input check is found in the dialog route');
+  const b2 = await busyRoute(MUT.load('src/routes/browser.js', rsrc.slice(0, cut) + "if (false) return res.status(409)" + rsrc.slice(cut + needle.length), 'busy-none'));
   ok(b2.r.status === 200 && b2.answered === 1, 'CONTROL: without it the direct call answers the dialog under the user\'s hands — the leg reddens on it', b2);
 }
 // VERIFY r1 A6 (LOW): the Agent browser panel's row SAYS a browser launched before the lane still accepts leave-page

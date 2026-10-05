@@ -75,6 +75,8 @@ function create({ engine, noteHarnessModels, deliverRef, permissionRulesRef }) {
             try { noteTurnEnd?.(session); } catch {}
           } else if (msg.kind === 'update') {
             const u = msg.update || {};
+            // lane artifacts-model: a tool call's diff → the conversation's deliverable rows + their cards (the descriptor's hook reads it)
+            if (u.sessionUpdate === 'tool_call' || u.sessionUpdate === 'tool_call_update') { try { require('../artifact-registry.js').observe(session, msg); } catch (e) { console.warn('[acp] artifacts consumer failed:', e.message); } }
             if (u.sessionUpdate === 'agent_message_chunk') newLabel = 'responding';
             else if (u.sessionUpdate === 'agent_thought_chunk') newLabel = 'thinking...';
             else if (u.sessionUpdate === 'tool_call') newLabel = `running ${String(u.title || u.kind || 'tool').slice(0, 60)}`;

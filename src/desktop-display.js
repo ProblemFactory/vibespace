@@ -118,7 +118,7 @@ const crypto = require('crypto');
 const { spawn, execFile } = require('child_process');
 const cliIdentity = require('./cli-identity');
 const { BROWSER_BINS } = require('./desktop-apps'); // B-bfe6: the browser families' binary names — ONE list, the PURE model's
-const { INSTALL_FILES } = require('./desktop-apps'); // lane C verify r2 (F3/F4): the detached install's log / pidfile / exit file names — ONE spelling, the launcher's
+const { INSTALL_FILES } = require('./install-slot'); // lane C verify r2 (F3/F4): the detached install's log / pidfile / exit file names — ONE spelling, the launcher's
 const OFFICE = require('./office-open'); // §7.9: the LibreOffice binaries + each module's library name — ONE table, the PURE model's
 
 const LOCAL_HOST_IDS = new Set([null, undefined, '', 'local']);

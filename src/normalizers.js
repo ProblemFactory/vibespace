@@ -3,6 +3,7 @@ const { HARNESSES } = harnessReg;
 const { MessageManager, PEER_RECORDED } = require('./message-manager');
 const { helperParentOf: helperParentFromTaskRecords } = require('./helper-ask.js'); // PURE (lane S1)
 const { cardBlock: browserCardBlock } = require('./browser-sessions.js'); // PURE (2026-09-27): the browser-session card's block
+const AF = require('./artifacts.js'); // PURE (lane artifacts-model): the deliverable rows — the card's block, the reducer the rebuild re-derives with
 const GC = require('./group-card.js'); // PURE (lane group-report-card): a group message's card — its key, its ring, its place in a rebuild
 
 // REGISTRY, not a ternary (P4, design-backend-parity.md §4): the old
@@ -304,6 +305,71 @@ function feedProposalCard(session, block) {
   if (!session._historyLoaded) return false;
   return patchProposalCard(mm, block) || !!placeProposalCard(mm, block, { emit: true });
 }
+// ── DELIVERABLE CARDS (lane artifacts-model) — ONE card per deliverable row (src/artifacts.js cardBlock), born at the
+// first write's position, keyed by the row key (`{view id}:af:{hash of the key}`: the live op and every rebuild name the
+// SAME card), PATCHED IN PLACE on every later write / edit (an `edit` op with `content` only — the live-card rule).
+const isArtifactBlock = (c) => !!(c && c.type === 'artifact' && typeof c.key === 'string' && c.key);
+function artifactKeyHash(s) { let h = 5381; for (const ch of String(s)) h = (Math.imul(h, 33) ^ ch.codePointAt(0)) >>> 0; return h.toString(36) + '-' + String(s).length.toString(36); }
+const artifactCardId = (mm, key) => `${mm.sessionId || 'view'}:af:${artifactKeyHash(key)}`;
+function placeArtifactCard(mm, block, { emit = false } = {}) {
+  if (!mm || !Array.isArray(mm.messages) || !mm.messageIndex || !isArtifactBlock(block)) return null;
+  const id = artifactCardId(mm, block.key);
+  if (mm.messageIndex.has(id)) return null;
+  const msg = { id, role: 'system', status: 'complete', content: [{ ...block }], ts: Number(block.firstAt) || Date.now(), srcLine: null, uuid: null, turnIndex: mm.turnIndex || 0,
+    toolCallId: null, toolName: null, toolStatus: null, permission: null, usage: null, taskInfo: null, meta: null, noticeKind: 'artifact' };
+  mm.messages.push(msg);
+  mm.messageIndex.set(id, msg);
+  if (emit && typeof mm._emit === 'function') mm._emit({ op: 'create', message: msg });
+  return msg;
+}
+/** The card already drawn gets the row's new block IN PLACE; false = not drawn (or unchanged). `emit` false = a history pass. */
+function patchArtifactCard(mm, block, { emit = true } = {}) {
+  if (!mm || !mm.messageIndex || !isArtifactBlock(block)) return false;
+  const msg = mm.messageIndex.get(artifactCardId(mm, block.key));
+  if (!msg) return false;
+  const { autoOpen, ...next } = block; // the open is a birth's — a patch never re-opens
+  if (JSON.stringify(msg.content && msg.content[0]) === JSON.stringify(next)) return false;
+  msg.content = [next];
+  if (emit && typeof mm._emit === 'function') mm._emit({ op: 'edit', id: msg.id, fields: { content: msg.content } });
+  return true;
+}
+/** The live card (src/server/artifact-registry.js): held in the rebuild's queue while one runs, else placed / patched
+ *  in the live normalizer like every live record (feedLive has no history gate). NO `_historyLoaded` gate (lane
+ *  artifacts-e2e): a chat created in the UI is never attached by its creator (2.368.4), so the flag stays false until
+ *  another attach — the real-Opus e2e lost the first deliverable's card, the chip and the auto-open on exactly that
+ *  path; a later first attach rebuilds and derives the same card id from the transcript. */
+function feedArtifactCard(session, block) {
+  const mm = session && session._normalizer;
+  if (!mm || !isArtifactBlock(block)) return false;
+  if (session._rebuildQueue) { session._rebuildQueue.push({ kind: 'acard', card: block }); return true; }
+  return patchArtifactCard(mm, block) || !!placeArtifactCard(mm, block, { emit: true });
+}
+/** The rebuild's / history read's derivation: the harness hook over every record, folded AFTER the record (the hook
+ *  has no afterRecord — the PREVIOUS record folds before the next one), its cards placed/patched silently. */
+function artifactDeriver(mm, { artifactsOf, cwd = '', host = '' }) {
+  let rows = {};
+  let prev = null;
+  const fold = (raw) => {
+    let ops = [];
+    try { ops = artifactsOf(raw) || []; } catch { ops = []; }
+    for (const o of ops) {
+      const r = AF.apply(rows, { ...o, host, cwd, at: recordAt(raw), by: 'agent' });
+      if (r.skipped || !r.row) continue;
+      rows = r.rows;
+      if (AF.cardWorthy(r.row)) { const b = AF.cardBlock(r.row); if (!patchArtifactCard(mm, b, { emit: false })) placeArtifactCard(mm, b); }
+    }
+  };
+  return { before: (raw) => { if (prev) fold(prev); prev = raw; }, end: () => { if (prev) fold(prev); prev = null; return rows; } };
+}
+/** After the derivation merged with the persisted rows: every deliverable's card says the merged counts (a user's save
+ *  lives only in the persisted rows) — patched, or placed at the end when the transcript no longer holds its write. */
+function settleArtifactCards(mm, rows) {
+  for (const row of Object.values(rows || {})) {
+    if (!AF.cardWorthy(row)) continue;
+    const b = AF.cardBlock(row);
+    if (!patchArtifactCard(mm, b, { emit: false })) placeArtifactCard(mm, b);
+  }
+}
 /** THE ONE writer of a browser-session card into a normalizer (any harness: every normalizer keeps `messages`,
  *  `messageIndex`, `turnIndex`, `_emit`). Idempotent by id. `emit` = a live op; a history conversion emits nothing. */
 function placeBrowserCard(mm, card, { emit = false } = {}) {
@@ -327,12 +393,17 @@ function recordAt(raw) { const t = raw && typeof raw.timestamp === 'string' ? Da
 // instant (`GC.placeAt`: the injection + the slack, so the turn's user record comes first) through its own writer.
 const cardPlaceAt = (c) => (GC.isGroupCard(c) ? GC.placeAt(c) : (Number(c && c.at) || 0));
 const placeAnyCard = (mm, c) => (GC.isGroupCard(c) ? placeGroupCard(mm, c) : isProposalBlock(c) ? placeProposalCard(mm, c) : placeBrowserCard(mm, c));
+// lane artifacts-model: `opts.artifacts` = {artifactsOf, cwd, host} (src/server/artifact-registry.js deriveOpts) derives
+// the conversation's deliverable rows from the SAME records and places their cards; the rows land on `mm.derivedArtifacts`.
 async function convertWithCards(mm, records, cards, opts = {}) {
+  const { artifacts = null, ...rest } = opts || {};
+  const derive = artifacts && typeof artifacts.artifactsOf === 'function' ? artifactDeriver(mm, artifacts) : null;
   const due = (cards || []).filter((c) => GC.isGroupCard(c) || isProposalBlock(c) || browserCardBlock(c)).slice().sort((a, b) => cardPlaceAt(a) - cardPlaceAt(b));
-  if (!due.length) return mm.convertHistoryAsync(records, opts);
+  if (!due.length && !derive) return mm.convertHistoryAsync(records, rest);
   let i = 0;
-  const beforeRecord = (raw) => { const at = recordAt(raw); if (!at) return; while (i < due.length && cardPlaceAt(due[i]) <= at) placeAnyCard(mm, due[i++]); };
-  await mm.convertHistoryAsync(records, { ...opts, beforeRecord });
+  const beforeRecord = (raw) => { if (derive) derive.before(raw); const at = recordAt(raw); if (!at) return; while (i < due.length && cardPlaceAt(due[i]) <= at) placeAnyCard(mm, due[i++]); };
+  await mm.convertHistoryAsync(records, { ...rest, beforeRecord });
+  if (derive) mm.derivedArtifacts = derive.end();
   while (i < due.length) placeAnyCard(mm, due[i++]);
   return mm.messages;
 }
@@ -455,6 +526,7 @@ function drainQueue(session, mm, ctx = null) {
       if (e.kind === 'peer') { if (mm.injectPeerCard) replayCard(mm, e.card, ctx); }
       else if (e.kind === 'bcard') placeBrowserCard(mm, e.card, { emit: true }); // a card the rebuild's markers already held is the same id — never twice
       else if (e.kind === 'gcard') placeGroupCard(mm, e.card, { emit: true }); // lane group-report-card: the ring's card is the same id — never twice
+      else if (e.kind === 'acard') { if (!patchArtifactCard(mm, e.card)) placeArtifactCard(mm, e.card, { emit: true }); } // lane artifacts-model: the rebuild's card is the same id — patched, never twice
       else if (e.kind === 'pcard') { if (!patchProposalCard(mm, e.card)) placeProposalCard(mm, e.card, { emit: true }); } // lane browser-propose: the rebuild's card is the same id — patched, never twice
       else if (e.kind === 'perm-stale') applyPermissionStale(mm, e.requestId, e.staleBy);
       else if (e.kind === 'helper-result') applyHelperResults(session, mm, e.msg);
@@ -492,6 +564,13 @@ function taskReplayRecords(taskRecords) {
   }
   return out;
 }
+/** A conversation's derivation options: its DESCRIPTOR's hook (lane artifacts-model; null = the harness never produces). */
+function artifactDeriveOpts({ backend, cwd, host } = {}) {
+  let of = null;
+  try { of = harnessReg.harnessOf(backend || 'claude').artifactsOf; } catch { of = null; }
+  return typeof of === 'function' ? { artifactsOf: of, cwd: cwd || '', host: host || '' } : null;
+}
+const artifactsOptsOf = (session) => artifactDeriveOpts({ backend: session.backend, cwd: session.cwd, host: session.host });
 function rebuildHistory(session, sessionId, records, { budgetMs, onProgress, replay = null, helperResults = null } = {}) {
   if (session._rebuildPromise) return session._rebuildPromise;
   const opHandlers = [...(session._normalizer?.listeners || [])];
@@ -510,7 +589,9 @@ function rebuildHistory(session, sessionId, records, { budgetMs, onProgress, rep
     try {
       // 2026-09-27: the browser-session cards, read from the trace markers NOW and placed by time between the records
       // lane group-report-card: + the group messages this conversation was handed with a turn (the ring's report cards)
-      await convertWithCards(mm, records, [...browserCardsFor({ session }), ...GC.ringCards(session._groupCards)], { ...(budgetMs ? { budgetMs } : {}), onSlice: (done) => { session._rebuildProgress = { done, total: records?.length || 0 }; try { onProgress?.(session._rebuildProgress); } catch { } } });
+      await convertWithCards(mm, records, [...browserCardsFor({ session }), ...GC.ringCards(session._groupCards)], { artifacts: artifactsOptsOf(session), ...(budgetMs ? { budgetMs } : {}), onSlice: (done) => { session._rebuildProgress = { done, total: records?.length || 0 }; try { onProgress?.(session._rebuildProgress); } catch { } } });
+      // lane artifacts-model: the re-derived deliverable rows ∪ the persisted ones (the user's saves) — every card says the merge
+      try { session._artifacts = AF.merge(mm.derivedArtifacts || {}, session._artifacts || {}); settleArtifactCards(mm, session._artifacts); } catch (err) { console.error('[normalizer] deliverable rows not merged:', err.message); }
       // the persisted task records (2.369.140) — silent, after the history, before the live queue
       for (const { record, at } of taskReplayRecords(replay || session._taskRecords)) { try { mm.replay(record, { at }); } catch (err) { console.error('[normalizer] task record replay skipped:', err.message); } }
       // verify r3: the helpers' tool_results (session-store helperResults — the record list skips every sidechain
@@ -550,5 +631,6 @@ function rebuildHistory(session, sessionId, records, { budgetMs, onProgress, rep
 
 module.exports = { createMessageManager, NORMALIZERS, feedLive, feedPeerCard, rebuildHistory, taskReplayRecords, pendingPermissions, pendingHelperApprovals, notePermissionStale, routeToHelperView, seedHelperView, setAsksObserver, noteHelperResults, HELD_PEER_CARDS_CAP,
   setBrowserCardSource, browserCardsFor, placeBrowserCard, convertWithCards, feedBrowserCard,
-  setProposalCardSource, placeProposalCard, patchProposalCard, feedProposalCard, // lane browser-propose: the proposal card
+  setProposalCardSource, placeProposalCard, patchProposalCard, feedProposalCard,
+  placeArtifactCard, patchArtifactCard, feedArtifactCard, artifactCardId, artifactDeriveOpts, // lane artifacts-model: the deliverable card // lane browser-propose: the proposal card
   setGroupCardPersist, feedGroupCard, placeGroupCard, upgradeWakeCards, redactGroupCards };

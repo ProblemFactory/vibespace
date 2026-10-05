@@ -331,6 +331,17 @@ function createBrowserStuckCopy() {
   } catch (e) { console.warn('[tools] browser dialog words not copied beside vibespace-browser: ' + e.message); }
 }
 createBrowserStuckCopy();
+// lane browser-passkey (2026-10-05): the passkey words + loop verdict (PURE src/browser-passkey.js) ride beside it the same
+// way — `vibespace-browser-passkey.js`, copied at every boot, gitignored, in AGENT_TOOLS; loaded OPTIONALLY by the CLI
+function createBrowserPasskeyCopy() {
+  try {
+    const src = fs.readFileSync(path.join(rootDir, 'src', 'browser-passkey.js'));
+    const dst = path.join(AGENT_BIN_DIR, 'vibespace-browser-passkey.js');
+    let cur = null; try { cur = fs.readFileSync(dst); } catch { cur = null; }
+    if (!cur || !cur.equals(src)) { ensureDir(AGENT_BIN_DIR); fs.writeFileSync(dst + '.tmp', src, { mode: 0o644 }); fs.renameSync(dst + '.tmp', dst); }
+  } catch (e) { console.warn('[tools] browser passkey words not copied beside vibespace-browser: ' + e.message); }
+}
+createBrowserPasskeyCopy();
 
 // Idempotent, NON-DESTRUCTIVE hook registration for both harnesses: only our
 // own entry (matched by 'vibespace-hook.mjs') is ever added or updated; every

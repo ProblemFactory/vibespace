@@ -285,6 +285,8 @@ function create({ engine, deliverRef, permissionRulesRef }) {
           if (msg.type === 'event_msg' && msg.payload?.type === 'permission_rules') {
             try { permissionRulesRef?.onWrapperRecord?.(id, msg.payload); } catch (e) { console.warn(`[permission-rules] ${id}: answer handling failed: ${e.message}`); }
           }
+          // lane artifacts-model: apply_patch → the conversation's deliverable rows + their cards (the descriptor's hook reads it)
+          if (msg.type === 'response_item' && msg.payload?.name === 'apply_patch') { try { require('../artifact-registry.js').observe(session, msg); } catch (e) { console.warn('[codex] artifacts consumer failed:', e.message); } }
           // Codex plan tool → the session's live TODO summary (board pill)
           if (msg.type === 'event_msg' && msg.payload?.type === 'plan_updated' && Array.isArray(msg.payload.plan)) {
             updateSessionTodos(session, msg.payload.plan.map((p) => ({

@@ -45,7 +45,13 @@ ok(Number.isInteger(L.CONCURRENT_CAP) && L.CONCURRENT_CAP >= 1, `CONCURRENT_CAP 
   const da = read('src/desktop-apps.js');
   const reqs = [...da.matchAll(/require\('([^']+)'\)/g)].map((m) => m[1]);
   // design 014 D1 verify r1: + src/hidden-chars.js, THE hidden-character set "Run on its desktop…" asks (PURE, imports nothing)
-  ok(same(reqs, ['./keeper-limits', './hidden-chars.js', './office-open']) && !/require\(/.test(read('src/hidden-chars.js')), 'desktop-apps.js imports nothing but the constants home, the PURE hidden-character set and the PURE office table (§7.9 — each imports nothing)', reqs);
+  // lane dc-apps-rows (F-I1): + src/install-slot.js, the machine's ONE package slot (PURE, imports nothing)
+  // rv-desktop-apps F-S1 (lane dc-seams-desktop): the families are their own PURE files — each imports only its siblings / hidden-chars
+  const FAMS = { 'src/desktop-backends.js': [], 'src/desktop-browser-app.js': [], 'src/desktop-fit.js': ['./desktop-backends.js', './desktop-browser-app.js'], 'src/machine-desktop-model.js': ['./hidden-chars.js'] };
+  const libWhole = fs.readdirSync(path.join(repo, 'src/lib')).filter((f) => /\.js$/.test(f) && /from '\.\.\/desktop-apps\.js'/.test(read('src/lib/' + f)));
+  ok(libWhole.length === 0, `no client module imports the whole model — each imports its family (F-S1: the bundle carries no install plan for a scale chip)${libWhole.length ? ': ' + libWhole.join(', ') : ''}`);
+  const famOk = Object.entries(FAMS).every(([f, want]) => same([...read(f).matchAll(/require\('([^']+)'\)/g)].map((m) => m[1]), want));
+  ok(same(reqs, ['./keeper-limits', './office-open', './install-slot', ...Object.keys(FAMS).map((f) => './' + path.basename(f))]) && famOk && !/require\(/.test(read('src/hidden-chars.js')) && !/require\(/.test(read('src/install-slot.js')), 'desktop-apps.js imports nothing but the constants home, the PURE office table, the PURE package slot and its own PURE families (ladder / window / browser / machine desktop — the last asks the PURE hidden-character set; §7.9 — each imports nothing else)', reqs);
   // P8-2 x3 (2026-09-22): the guard numbers are IMPORTED, never copied — every consumer of the keeper's
   // ceiling names a guard number ONLY through the home (`limits.X` / `LIMITS.X`) and none re-spells a
   // guard literal. A grep census over the code with comments stripped (a comment may quote "150 %").
@@ -283,7 +289,7 @@ console.log('§7 the bridge\'s RFB input sieve — its message table DERIVED fro
   // core/rfb.js is parsed for its pushes, each fixed-shape one is built at
   // the derived length and driven through the sieve followed by a KeyEvent,
   // which MUST count. A variable-shape encoder is driven at a real shape.
-  const S = require('../src/server/desktop-stream.js');
+  const S = { ...require('../src/server/desktop-stream.js'), ...require('../src/server/stream-relay-rfb.js'), ...require('../src/server/stream-relay-xpra.js') } /* F-B4: the relays' classifiers live in their own modules */;
   const src = read('node_modules/@novnc/novnc/core/rfb.js');
   const start = src.indexOf('\nRFB.messages = {');
   const end = src.indexOf('\n};', start);
@@ -367,10 +373,10 @@ console.log('§7 the bridge\'s RFB input sieve — its message table DERIVED fro
     const r4 = sr.strip(sd, true);
     ok(r4.relay && r4.relay.equals(sd) && same(got[2], ['refused', 900, 600]), 'the same viewer ALLOWED (a takeover) ⇒ its next SetDesktopSize passes and is reported (the sieve\'s refusal is per message, never sticky)');
     // CONTROL: the x4 strip (a SetDesktopSize relayed whatever the policy) — the reproduced class
-    const srcS = read('src/server/desktop-stream.js');
+    const srcS = read('src/server/stream-relay-rfb.js'); // F-B4: the rfb relay's own file
     const from = "if ((input || type === 251) && !allowInput) dropped++;";
     ok(srcS.split(from).length === 2, 'the rfb strip decision is spelled once (the control patches exactly it)');
-    const file = MUTD.write('src/server/desktop-stream.js', srcS.replace(from, "if (input && !allowInput) /* pre-fix (x4) */ dropped++;"), 'rfbsize');
+    const file = MUTD.write('src/server/stream-relay-rfb.js', srcS.replace(from, "if (input && !allowInput) /* pre-fix (x4) */ dropped++;"), 'rfbsize');
     try {
       const rc = require(file).rfbInputSieve().strip(Buffer.concat([...hs, sd, key]), false);
       ok(rc.relay && rc.relay.equals(Buffer.concat([...hs, sd])) && rc.dropped === 1, 'CONTROL: the x4 strip relays a refused viewer\'s SetDesktopSize (Xvnc would resize the holder\'s display)');
@@ -378,10 +384,10 @@ console.log('§7 the bridge\'s RFB input sieve — its message table DERIVED fro
   }
   // NEGATIVE CONTROL: a patched copy of the real bridge with the round-2 table — same sequence, KeyEvents lost, sieve still 'followable'
   {
-    const srcS = read('src/server/desktop-stream.js');
+    const srcS = read('src/server/stream-relay-rfb.js'); // F-B4: the rfb relay's own file
     const from = 'const RFB_FIXED_LEN = Object.freeze({ 0: 20, 3: 10, 4: 8, 150: 10, 250: 4 });';
     ok(srcS.split(from).length === 2, 'the fixed table is spelled once in the bridge (the control patches exactly it)');
-    const file = MUTD.write('src/server/desktop-stream.js', srcS.replace(from, 'const RFB_FIXED_LEN = Object.freeze({ 0: 20, 3: 10, 4: 8, 5: 6, 150: 4 }); // pre-fix'), 'stream');
+    const file = MUTD.write('src/server/stream-relay-rfb.js', srcS.replace(from, 'const RFB_FIXED_LEN = Object.freeze({ 0: 20, 3: 10, 4: 8, 5: 6, 150: 4 }); // pre-fix'), 'stream');
     try {
       const P = require(file);
       const spf = Buffer.alloc(20); const se = Buffer.from([2, 0, 0, 1, 0, 0, 0, 0]);
@@ -394,7 +400,7 @@ console.log('§7 the bridge\'s RFB input sieve — its message table DERIVED fro
 
 console.log('§8 the xpra client stream, classified (P8-2) — the sieve, the netem knob, the client\'s own vocabulary');
 {
-  const S = require('../src/server/desktop-stream.js');
+  const S = { ...require('../src/server/desktop-stream.js'), ...require('../src/server/stream-relay-rfb.js'), ...require('../src/server/stream-relay-xpra.js') } /* F-B4: the relays' classifiers live in their own modules */;
   // a rencodeplus packet: header P, flags 0x10 (rencodeplus), level 0, index 0, size; payload = list [type, 0]
   const rpkt = (type, { flags = 0x10, level = 0, index = 0, tail = Buffer.from([0]) } = {}) => { const t = Buffer.from(type); const payload = Buffer.concat([Buffer.from([192 + 2, 128 + t.length]), t, tail]); const h = Buffer.alloc(8); h[0] = 0x50; h[1] = flags; h[2] = level; h[3] = index; h.writeUInt32BE(payload.length, 4); return Buffer.concat([h, payload]); };
   const bpkt = (type) => { const b = Buffer.from(`l${type.length}:${type}i0ee`); const h = Buffer.alloc(8); h[0] = 0x50; h.writeUInt32BE(b.length, 4); return Buffer.concat([h, b]); };
@@ -479,10 +485,10 @@ console.log('§8 the xpra client stream, classified (P8-2) — the sieve, the ne
   }
   // NEGATIVE CONTROL: the r5 strip (a denylist of input — every non-input packet relayed) on the same bytes relays the lifecycle packets
   {
-    const srcS = read('src/server/desktop-stream.js');
+    const srcS = read('src/server/stream-relay-xpra.js'); // F-B4: the xpra relay's own file
     const from = "      if (life || (!allowInput && !(type !== null && XPRA_WATCH_TYPES.has(type)))) dropped++; else keep.push(u);";
     ok(srcS.split(from).length === 2, 'the allowlist decision is spelled once in the bridge (the control patches exactly it)');
-    const file = MUTD.write('src/server/desktop-stream.js', srcS.replace(from, '      if (input && !allowInput) dropped++; else keep.push(u); // pre-fix (r5): a denylist of input'), 'xstream');
+    const file = MUTD.write('src/server/stream-relay-xpra.js', srcS.replace(from, '      if (input && !allowInput) dropped++; else keep.push(u); // pre-fix (r5): a denylist of input'), 'xstream');
     try {
       const Pm = require(file);
       const r = Pm.xpraInputSieve().strip(refusedBytes, false);
@@ -520,10 +526,10 @@ console.log('§8 the xpra client stream, classified (P8-2) — the sieve, the ne
   }
   // CONTROL: the r6 allowlist (keyboard-config / keymap-changed listed as watch types) relays a refused viewer's keymap
   {
-    const srcS = read('src/server/desktop-stream.js');
+    const srcS = read('src/server/stream-relay-xpra.js'); // F-B4: the xpra relay's own file
     const from = "const XPRA_WATCH_TYPES = Object.freeze(new Set(['hello', 'ping', 'ping_echo', 'damage-sequence', 'map-window', 'buffer-refresh', ";
     ok(srcS.split(from).length === 2, 'the watch allowlist is spelled once in the bridge (the control patches exactly it)');
-    const file = MUTD.write('src/server/desktop-stream.js', srcS.replace(from, "const XPRA_WATCH_TYPES = Object.freeze(new Set(['hello', 'ping', 'ping_echo', 'damage-sequence', 'map-window', 'buffer-refresh', 'keyboard-config', 'keymap-changed', "), 'xkeymap');
+    const file = MUTD.write('src/server/stream-relay-xpra.js', srcS.replace(from, "const XPRA_WATCH_TYPES = Object.freeze(new Set(['hello', 'ping', 'ping_echo', 'damage-sequence', 'map-window', 'buffer-refresh', 'keyboard-config', 'keymap-changed', "), 'xkeymap');
     try {
       const Pm = require(file);
       const r = Pm.xpraInputSieve().strip(Buffer.concat([rpkt('keyboard-config'), rpkt('keymap-changed')]), false);
@@ -550,15 +556,15 @@ console.log('§8 the xpra client stream, classified (P8-2) — the sieve, the ne
     const s2 = S.xpraInputSieve();
     const f1 = s2.strip(rpkt('display-configure', { tail: Buffer.alloc(S.XPRA_DISPLAY_HOLD_BYTES) }), false), f2 = s2.strip(pe, true);
     ok(f1.relay === null && f1.dropped === 1 && s2.state().heldDisplay === 0 && f2.replayed === 0 && f2.relay.equals(pe), `a refused display packet over XPRA_DISPLAY_HOLD_BYTES (${S.XPRA_DISPLAY_HOLD_BYTES} B) is cut and NOT held — nothing to replay`);
-    const src = read('src/server/desktop-stream.js');
+    const src = read('src/server/stream-relay-xpra.js'); // F-B4: the xpra relay's own file
     ok(!/XPRA_WATCH_TYPES = [^\n]*'(display-configure|configure-display|desktop_size)'/.test(src), 'the bridge spells no display-size packet in its watch allowlist');
   }
   // CONTROL: the r7 allowlist (the display-size packets listed as watch types) relays a refused viewer's display size
   {
-    const srcS = read('src/server/desktop-stream.js');
+    const srcS = read('src/server/stream-relay-xpra.js'); // F-B4: the xpra relay's own file
     const from = "const XPRA_WATCH_TYPES = Object.freeze(new Set(['hello', 'ping', 'ping_echo', 'damage-sequence', 'map-window', 'buffer-refresh', ";
     ok(srcS.split(from).length === 2, 'the watch allowlist is spelled once in the bridge (the display control patches exactly it)');
-    const file = MUTD.write('src/server/desktop-stream.js', srcS.replace(from, from + "'display-configure', 'configure-display', 'desktop_size', "), 'xdisplay');
+    const file = MUTD.write('src/server/stream-relay-xpra.js', srcS.replace(from, from + "'display-configure', 'configure-display', 'desktop_size', "), 'xdisplay');
     try {
       const Pm = require(file);
       const bytes = Buffer.concat([rpkt('display-configure'), rpkt('configure-display'), rpkt('desktop_size')]);
@@ -568,7 +574,7 @@ console.log('§8 the xpra client stream, classified (P8-2) — the sieve, the ne
     // CONTROL: the fence without the replay — a takeover carries nothing it held
     const fromN = '    if (allowInput && !st.oversize) {';
     ok(srcS.split(fromN).length === 2, 'the replay is spelled once in the bridge (the no-replay control patches exactly it)');
-    const nfile = MUTD.write('src/server/desktop-stream.js', srcS.replace(fromN, '    if (false && allowInput) { /* pre-fix: fenced and never replayed */'), 'xnoreplay');
+    const nfile = MUTD.write('src/server/stream-relay-xpra.js', srcS.replace(fromN, '    if (false && allowInput) { /* pre-fix: fenced and never replayed */'), 'xnoreplay');
     try {
       const sn = require(nfile).xpraInputSieve();
       sn.strip(rpkt('display-configure'), false);
@@ -626,12 +632,13 @@ console.log('§8 the xpra client stream, classified (P8-2) — the sieve, the ne
   // CONTROL: the bridge WITHOUT the cap (the constants patched to Infinity — the r6 sieve held every byte of an
   // incomplete packet) keeps holding a 2 GiB-declared packet's bytes as they stream
   {
-    const srcS = read('src/server/desktop-stream.js');
+    const srcS = read('src/server/stream-relay-xpra.js'), srcR = read('src/server/stream-relay-rfb.js'); // F-B4: each relay declares its protocol's cap
     const from1 = 'const XPRA_MAX_PACKET_BYTES = 16 * 1024 * 1024;', from2 = 'const RFB_MAX_MESSAGE_BYTES = 16 * 1024 * 1024;';
-    ok(srcS.split(from1).length === 2 && srcS.split(from2).length === 2, 'each cap is spelled once in the bridge (the control patches exactly them)');
-    const file = MUTD.write('src/server/desktop-stream.js', srcS.replace(from1, 'const XPRA_MAX_PACKET_BYTES = Infinity; // pre-fix').replace(from2, 'const RFB_MAX_MESSAGE_BYTES = Infinity; // pre-fix'), 'xcap');
+    ok(srcS.split(from1).length === 2 && srcR.split(from2).length === 2, 'each cap is spelled once, in its relay (the control patches exactly them)');
+    const file = MUTD.write('src/server/stream-relay-xpra.js', srcS.replace(from1, 'const XPRA_MAX_PACKET_BYTES = Infinity; // pre-fix'), 'xcap');
+    const rfile = MUTD.write('src/server/stream-relay-rfb.js', srcR.replace(from2, 'const RFB_MAX_MESSAGE_BYTES = Infinity; // pre-fix'), 'rcap');
     try {
-      const Pm = require(file);
+      const Pm = { ...require(file), ...require(rfile) };
       const h = Buffer.alloc(8); h[0] = 0x50; h[1] = 0x10; h.writeUInt32BE(2 ** 31, 4);
       const xs = Pm.xpraInputSieve(); let ov = null; xs.strip(h, true);
       for (let i = 0; i < 8; i++) { const x = xs.strip(Buffer.alloc(1024 * 1024), true); ov = ov || x.oversize; }
@@ -674,7 +681,7 @@ console.log('§8 the xpra client stream, classified (P8-2) — the sieve, the ne
   });
   // the bridge refuses NOTHING by rung any more: an xpra target is relayed (the keeper suite drives it against a fake upstream + the real xpra)
   const src = read('src/server/desktop-stream.js');
-  ok(!/501, 'xpra stream not wired/.test(src) && /bridgeXpra\(ws, id, port, viewerId, netem, req\)/.test(src) && /const ep = streamEndpointFor\(target\)/.test(src), 'the 501-by-name refusal for xpra is gone; handleUpgrade hands an xpra target to bridgeXpra (lane C2: at the port streamEndpointFor answered — this machine\'s own, or the hub forward of a paired one)');
+  ok(!/501, 'xpra stream not wired/.test(src) && /bridgeXpra\(a\.ws, a\.id, a\.port, a\.viewerId, a\.netem, a\.req\)/.test(read('src/server/stream-relay-xpra.js')) && /bridges\[target\.kind\]\(\{ ws, id, port, viewerId, netem, req \}\)/.test(src) && /const ep = streamEndpointFor\(target\)/.test(src), 'the 501-by-name refusal for xpra is gone; handleUpgrade hands an xpra target to bridgeXpra (lane C2: at the port streamEndpointFor answered — this machine\'s own, or the hub forward of a paired one)');
   ok(/netemEnabled \? /.test(src) && !/parseNetem\(q\)/.test(src.replace(/netemEnabled\) \{ const q = netemOfUrl[^\n]*/, '')), 'netem is read ONLY behind the netemEnabled gate (never on by default)');
   ok(/VIBESPACE_DESKTOP_NETEM === '1'/.test(read('server.js')), 'server.js flips the gate from VIBESPACE_DESKTOP_NETEM=1 and nothing else');
 }
@@ -877,7 +884,7 @@ console.log('§11 B-bfe6 — a BROWSER as a desktop app: the rows, the binary pi
   ok(/const av = M\.browserArgv\(row, \{ profileDir: pv\.dir, url: v\.launch\.url \}\);/.test(keeper) && /args: browser \? browser\.argv : office \? office\.argv : \(row\.args \|\| \[\]\)/.test(keeper), 'WIRING PIN: the keeper launches a browser row with browserArgv\'s argv (the profile flags, then the URL)');
   ok(/const pv = M\.profileDirVerdict\(profileDirOf\(id\), \{ home: homeOf\(\), ownedRoot: logRoot, confinement, exec: row\.exec \}\);/.test(keeper) && /const profileDirOf = \(id\) => path\.join\(logRoot, id, 'profile'\);/.test(keeper), 'WIRING PIN: the profile dir is the session\'s own (data/desktop-apps/<id>/profile), judged by profileDirVerdict before anything starts');
   ok(/mkdir\(browser\.profileDir, \{ recursive: true, mode: 0o700 \}\)/.test(keeper) && /fs\.promises\.rm\(pv\.dir, \{ recursive: true, force: true \}\)/.test(keeper) && !/rmSync\(/.test(keeper), 'WIRING PIN: created 0700, removed ASYNC (never a sync walk on the event loop — a Chrome profile is thousands of files, data/ may be NFS)');
-  ok(/import \{ validateBrowserUrl \} from '\.\.\/desktop-apps\.js';/.test(launcher) && /browserLaunchBody\(row, \{ url: urlIn\.value, keepProfile: keepIn\.checked \}\)/.test(launcher), 'WIRING PIN: the launcher checks the typed URL with the SAME pure function the server runs');
+  ok(/import \{ validateBrowserUrl \} from '\.\.\/desktop-browser-app\.js';/.test(launcher) && /browserLaunchBody\(row, \{ url: urlIn\.value, keepProfile: keepIn\.checked \}\)/.test(launcher), 'WIRING PIN: the launcher checks the typed URL with the SAME pure function the server runs');
   ok(/const \{ BROWSER_BINS \} = require\('\.\/desktop-apps'\);/.test(disp) && /for \(const b of \[\.\.\.bins, \.\.\.BROWSER_BINS, \.\.\.OFFICE\.OFFICE_EXECS\]\)/.test(disp), 'WIRING PIN: hostFacts probes the families\' binaries from the PURE list');
 }
 
@@ -944,17 +951,17 @@ console.log('§12 round 3 A2 (docs/design-desktop-apps-seamless §3.2): the app 
   const obad = otable.map(([o, act, why]) => ({ o, want: [act, why], got: O(o) })).filter((x) => x.got.act !== x.want[0] || x.got.why !== x.want[1]);
   ok(M.OUTER_CLOSE_AGAIN_MS === 5000 && obad.length === 0, `outerCloseVerdict: ${otable.length} rows — ask the app first, a second ✕ within ${M.OUTER_CLOSE_AGAIN_MS} ms stops it, today's pane-only close everywhere the app cannot be asked`, obad);
   { // design 016 S1c CONTROL: the pre-lane verdict asks the WHOLE app to close while its second window (Moments) is in front
-    const srcV = read('src/desktop-apps.js');
+    const srcV = read('src/desktop-fit.js');
     const FR = "  if (frontWid > 0 && frontWid !== mainWid) return { act: 'ask-front', why: 'front-window' };\n";
-    ok(srcV.split(FR).length === 2, 'CONTROL: the front-window rule is spelled once in desktop-apps.js');
-    const Mc = require(MUTD.write('src/desktop-apps.js', srcV.replace(FR, ''), 'front'));
+    ok(srcV.split(FR).length === 2, 'CONTROL: the front-window rule is spelled once in desktop-fit.js');
+    const Mc = require(MUTD.write('src/desktop-fit.js', srcV.replace(FR, ''), 'front'));
     ok(Mc.outerCloseVerdict({ ...base, frontWid: 9 }).act === 'ask-app', 'CONTROL: pre-fix the ✕ with Moments in front asks WeChat ITSELF to close (close-window to its main) — the whole app, not the window in front');
   }
   // (d) WIRING PINS — the keeper stamps the census BEFORE the teardown; the window decides with the PURE verdicts; every
   // user close of a window goes through the ONE veto point (programmatic closes — layout sync, the auto-close — do not)
   const keeper = keeperSrc(), win = read('src/lib/desktop-app-window.js'), wm = read('src/lib/window.js');
   ok(/rec\.windowsAtExit = await windowsLeftAtExit\(rec\);/.test(keeper) && /return M\.windowsLeftCount\(rows\);/.test(keeper) && /rec\.windowsAtExit = await windowsLeftAtExit\(rec\);\s*await teardown\(rec, handles\);\s*commit\(\);/.test(keeper), 'WIRING PIN: the keeper counts the windows left at an app exit through M.windowsLeftCount, BEFORE the teardown (X is still up) and before the commit that broadcasts it');
-  ok(/import \{ exitCloseVerdict, outerCloseVerdict, OUTER_CLOSE_AGAIN_MS[, \w]*\} from '\.\.\/desktop-apps\.js';/.test(win) && /exitCloseVerdict\(r, \{ leased: !!lease \}\)/.test(win) && /outerCloseVerdict\(\{/.test(win) && /winInfo\.onCloseRequest = /.test(win) && /frontWid: front \? front\.wid : 0/.test(win) && /if \(v\.act === 'ask-front'\) return !view\.closeFront\(\);/.test(win), 'WIRING PIN: the window decides its close with the PURE verdicts and answers the WM\'s close request');
+  ok(/import \{ exitCloseVerdict, outerCloseVerdict, OUTER_CLOSE_AGAIN_MS[, \w]*\} from '\.\.\/desktop-fit\.js';/.test(win) && /exitCloseVerdict\(r, \{ leased: !!lease \}\)/.test(win) && /outerCloseVerdict\(\{/.test(win) && /winInfo\.onCloseRequest = /.test(win) && /frontWid: front \? front\.wid : 0/.test(win) && /if \(v\.act === 'ask-front'\) return !view\.closeFront\(\);/.test(win), 'WIRING PIN: the window decides its close with the PURE verdicts and answers the WM\'s close request');
   ok(/requestClose\(id\) \{/.test(wm) && /\.win-close'\)\.onclick = \(e\) => \{ e\.stopPropagation\(\); this\.requestCloseGroup\(winInfo\.id\); \}/.test(wm) && /return Promise\.resolve\(this\.requestClose\(id\)\);/.test(read('src/lib/tab-group.js')) && /for \(const tid of doomed\) if \(this\.windows\.has\(tid\)\) this\.requestClose\(tid\);/.test(read('src/lib/tab-group.js')), 'WIRING PIN: the title bar ✕ asks requestCloseGroup (B-a67c: a group is asked first), whose every close — a lone window, each member of a confirmed group — is WindowManager.requestClose (the veto point), never closeWindow directly');
   const userCloses = { 'src/lib/taskbar.js': /run: \(c\) => \(c\.group \? c\.app\.wm\.requestCloseGroup\(c\.id\) : c\.app\.wm\.requestClose\(c\.id\)\)/, 'src/lib/command-mode.js': /wm\.requestClose\(wm\.activeWindowId\)/, 'src/lib/mobile-nav.js': /app\.wm\.requestClose\(activeId\)/, 'src/lib/tab-group.js': /closeBtn\.addEventListener\('click', \(e\) => \{ e\.stopPropagation\(\); this\.requestClose\(tabWinId\); \}\)/ };
   const missing = Object.entries(userCloses).filter(([f, re]) => !re.test(read(f))).map(([f]) => f);
@@ -1074,13 +1081,13 @@ console.log('§14 lane D (a) (docs/design-desktop-apps-seamless §3.4, the owner
     ok(iSeed > 0 && iSeed < iApp && /if \(rec\.browser === 'chromium' && rec\.profileDir\) \{/.test(keeper) && /M\.chromiumFramePrefs\(prefs\)/.test(keeper) && /M\.CHROMIUM_FRAME_MARKER/.test(keeper), 'WIRING PIN: a chromium record\'s profile is seeded (once — the marker) BEFORE the browser starts, through the PURE chromiumFramePrefs'); }
   ok(/pictureScale: \(\) => renderOf\(rec\)\.picture/.test(win) && /fitAfterRelaunch\(geo, r\.app\)/.test(win) && win.indexOf('retarget(r.app.id);') < win.indexOf('fitAfterRelaunch(geo, r.app);'), 'WIRING PIN: the view reads the RECORD\'s picture scale; the relaunch resizes the window AFTER retarget (the old app\'s minimum cleared first)');
   // (f) NEGATIVE CONTROL — a patched copy with the floor rule (the pre-lane-D knobs): the 1.5 record's widgets are 1× (the white edges)
-  const srcA = read('src/desktop-apps.js');
+  const srcA = read('src/desktop-fit.js');
   const fromA = "  const gdkScale = r === 'dpi' ? Math.max(1, Math.min(SCALE_MAX, Math.floor(s))) : Math.max(1, Math.min(SCALE_MAX, Math.ceil(s - 1e-9)));";
   ok(srcA.split(fromA).length === 2, 'the GDK_SCALE rule is spelled once (the control patches exactly it)');
-  const fileA = MUTD.write('src/desktop-apps.js', srcA.replace(fromA, '  const gdkScale = Math.max(1, Math.min(SCALE_MAX, Math.floor(s))); // pre-lane-D CONTROL').replace("  const dpi = r === 'dpi' ? Math.round(96 * s / gdkScale) : 96;", '  const dpi = Math.round(96 * s / gdkScale);').replace("  const pictureScale = r === 'dpi' ? 1 : round4(s / gdkScale);", '  const pictureScale = 1;'), 'floorknobs');
+  const fileA = MUTD.write('src/desktop-fit.js', srcA.replace(fromA, '  const gdkScale = Math.max(1, Math.min(SCALE_MAX, Math.floor(s))); // pre-lane-D CONTROL').replace("  const dpi = r === 'dpi' ? Math.round(96 * s / gdkScale) : 96;", '  const dpi = Math.round(96 * s / gdkScale);').replace("  const pictureScale = r === 'dpi' ? 1 : round4(s / gdkScale);", '  const pictureScale = 1;'), 'floorknobs');
   try {
-    const MC = require(fileA);
-    const kc = MC.scaleKnobs(1.5), rc = MC.newRecord({ id: 'x', label: 'x', exec: '/x', source: 'registry', backend: 'xpra', now: 1, scale: kc.scale, dpi: kc.dpi, gdkScale: kc.gdkScale, pictureScale: kc.pictureScale });
+    const MC = require(fileA); // F-S1: the scale family's copy; the record is the model's (newRecord carries the knobs it is handed)
+    const kc = MC.scaleKnobs(1.5), rc = M.newRecord({ id: 'x', label: 'x', exec: '/x', source: 'registry', backend: 'xpra', now: 1, scale: kc.scale, dpi: kc.dpi, gdkScale: kc.gdkScale, pictureScale: kc.pictureScale });
     ok(MC.renderOf(rc).widget === 1 && kc.dpi === 144 && M.renderOf(r15).widget === 1.5, `CONTROL: under the floor rule a 1.5× record draws its widgets at ${MC.renderOf(rc).widget}× (text at ${kc.dpi} dpi) — ours at ${M.renderOf(r15).widget}×`);
   } finally { /* MUTD's scratch dir is removed at exit */ }
 }
@@ -1147,6 +1154,16 @@ console.log('§D014 the machine picker: linux / darwin / win32 × online / offli
 }
 
 for (const r of copiesCensus(MUTD.files, MUTD.dir, repo, { minCopies: 8 })) ok(r.pass, '§tree ' + r.name + (r.pass ? '' : ' — ' + r.detail));
+
+console.log('§xpra-repo the image and the machine plan read ONE xpra.org row (lane dc-apps-rows, F-I2)');
+{
+  const df = read('deploy/docker/Dockerfile');
+  const [, keyLine, srcLine, pinLine] = M.xpraRepoSteps('bookworm');
+  ok(df.includes(`curl -fsSL ${M.XPRA_KEY_URL} -o /usr/share/keyrings/xpra.asc`) && keyLine.includes(`curl -fsSL ${M.XPRA_KEY_URL} -o /usr/share/keyrings/xpra.asc`), 'the image fetches the key the plan fetches (XPRA_KEY_URL)');
+  ok(df.includes(`&& ${srcLine} \\\n`) && df.includes(`&& ${pinLine}\n`), 'the image writes the plan\'s deb822 source + pin lines verbatim (xpraRepoSteps(bookworm): XPRA_REPO_URL, XPRA_PIN_MAJOR)');
+  const pl = M.xpraInstallPlan({ platform: 'linux', apt: true, distro: 'debian', codename: 'bookworm', aptXpra: '3.1', sudo: true });
+  ok(pl.ok && M.xpraRepoSteps('bookworm').every((l) => pl.script.includes(l)), 'the machine plan runs exactly xpraRepoSteps');
+}
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

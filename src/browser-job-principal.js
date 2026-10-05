@@ -27,8 +27,8 @@
 const B = require('./browser-profiles.js');
 
 const RUNNING_STATES = Object.freeze(['starting', 'up']);
-/** The /api/agent/browser/<route> verbs a job may call: read, act, answer a dialog. */
-const JOB_ROUTES_ALLOWED = Object.freeze(['profiles', 'status', 'providers', 'resolve', 'audit', 'tab', 'dialog', 'direct']);
+/** The /api/agent/browser/<route> verbs a job may call: read, act, answer a dialog or a page's passkey wait. */
+const JOB_ROUTES_ALLOWED = Object.freeze(['profiles', 'status', 'providers', 'resolve', 'audit', 'tab', 'dialog', 'direct', 'passkey']);
 /** …and the ones that would change the conversation's browsers — refused by name. Any route in neither list is refused too. */
 const JOB_ROUTES_REFUSED = Object.freeze(['use', 'pin', 'new', 'new-child', 'detach', 'backend', 'blocked', 'site-hint', 'site-reset', 'resume']);
 

@@ -56,7 +56,7 @@ const until = async (fn, ms = 15000, step = 100) => { const t = Date.now() + ms;
 
 const D = require('../src/desktop-display.js');
 const K = require('../src/server/desktop-app-keeper.js');
-const S = require('../src/server/desktop-stream.js');
+const S = { ...require('../src/server/desktop-stream.js'), ...require('../src/server/stream-relay-rfb.js'), ...require('../src/server/stream-relay-xpra.js') } /* F-B4: the relays' classifiers live in their own modules */;
 const M = require('../src/desktop-apps.js');
 const ident = require('../src/cli-identity.js');
 const alive = (p) => D.pidAlive(p);
@@ -118,6 +118,15 @@ function xvfbOrphans() {
   return out;
 }
 const MUTK = mutantCopies('dak', repo);
+// rv-desktop-apps F-B4 (lane dc-seams-desktop): each stream kind's relay is its own module — a control patches ONE relay
+// and loads a bridge copy whose registry carries that patched relay (closed world; the copy's other requires stay real)
+function relayMutant(kind, relaySrc, tag) {
+  const rfile = MUTK.write(`src/server/stream-relay-${kind}.js`, relaySrc, `${tag}-relay`);
+  const ds = fs.readFileSync(path.join(repo, 'src/server/desktop-stream.js'), 'utf8');
+  const reg = "require('./stream-relays.js')";
+  if (ds.split(reg).length !== 2) throw new Error('relayMutant: the bridge requires its relay registry exactly once');
+  return MUTK.write('src/server/desktop-stream.js', ds.replace(reg, `{ ...${reg}, ${kind}: require(${JSON.stringify(rfile)}) }`), tag);
+}
 
 const cleanup = () => {
   for (const k of keepers) { try { k.shutdown(); } catch {} }
@@ -1456,10 +1465,10 @@ console.log('§13 P8-2 x4 — THE PICTURE IS THE APP on the vnc-display rung: fi
       await sleep(1500);
       ok(!!wb.cl && sizeX() === before && wb.rep.length === 0 && wb.st.stats().dropped >= 1, `a Watch viewer's SetDesktopSize 640x480 never reaches Xvnc: the display stays ${sizeX()} (was ${before}), nothing reported to the keeper, counted refused (${wb.st.stats().dropped})`);
       await wb.close();
-      const srcR = fs.readFileSync(path.join(repo, 'src/server/desktop-stream.js'), 'utf8');
+      const srcR = fs.readFileSync(path.join(repo, 'src/server/stream-relay-rfb.js'), 'utf8');
       const fromR = 'if ((input || type === 251) && !allowInput) dropped++;';
       ok(srcR.split(fromR).length === 2, 'the rfb strip decision is spelled once (the control patches exactly it)');
-      const rfile = MUTK.write('src/server/desktop-stream.js', srcR.replace(fromR, 'if (input && !allowInput) /* pre-fix (x4) */ dropped++;'), 'rfbsize13');
+      const rfile = relayMutant('rfb', srcR.replace(fromR, 'if (input && !allowInput) /* pre-fix (x4) */ dropped++;'), 'rfbsize13');
       const wc = await watchBridge(require(rfile));
       wc.cl && wc.cl.setSize(640, 480);
       const moved = await until(() => (sizeX() === '640x480' ? '640x480' : null), 5000, 100);
@@ -1650,10 +1659,10 @@ console.log('§14 r6 — a REFUSED viewer never ends the session (round 2 of the
     // CONTROL: the r5 bridge (a denylist of input — every non-input packet relayed) on the same Watch viewer. exit-server is the
     // spelling xpra 6.5.3 has no server-side switch for (the recipe's XPRA_CLIENT_CAN_SHUTDOWN=0 covers shutdown-server alone —
     // test-desktop-display §5 (f)), so the bridge is its only gate and the control ends the session.
-    const srcS = fs.readFileSync(path.join(repo, 'src/server/desktop-stream.js'), 'utf8');
+    const srcS = fs.readFileSync(path.join(repo, 'src/server/stream-relay-xpra.js'), 'utf8');
     const from = '      if (life || (!allowInput && !(type !== null && XPRA_WATCH_TYPES.has(type)))) dropped++; else keep.push(u);';
     ok(srcS.split(from).length === 2, 'the bridge\'s allowlist decision is spelled once (the control patches exactly it)');
-    const mfile = MUTK.write('src/server/desktop-stream.js', srcS.replace(from, '      if (input && !allowInput) dropped++; else keep.push(u); // pre-fix (r5)'), 'xstream14');
+    const mfile = relayMutant('xpra', srcS.replace(from, '      if (input && !allowInput) dropped++; else keep.push(u); // pre-fix (r5)'), 'xstream14');
     const bc = await bridgeOn(require(mfile));
     const r2 = await launch('k14-ctl');
     const w2 = await viewer(bc, r2.id, 'v-watch');
@@ -1723,7 +1732,7 @@ console.log('§14 r6 — a REFUSED viewer never ends the session (round 2 of the
         // CONTROL: the fence WITHOUT the replay — the same pane types garbage (xpra reads its JS keycodes as X keycodes)
         const fromR = '    if (allowInput && !st.oversize) {';
         ok(srcS.split(fromR).length === 2, 'the replay is spelled once (the control patches exactly it)');
-        const rfile = MUTK.write('src/server/desktop-stream.js', srcS.replace(fromR, '    if (false && allowInput) { /* pre-fix: fenced and never replayed */'), 'xreplay15');
+        const rfile = relayMutant('xpra', srcS.replace(fromR, '    if (false && allowInput) { /* pre-fix: fenced and never replayed */'), 'xreplay15');
         const typedC = await typeAfterTakeover(require(rfile), 'noreplay');
         // the .197 integration: WHAT A KEYMAP-LESS PANE TYPES IS A FACT OF THE xpra VERSION — a MEASURED census, never a
         // guess. 6.5.3 read the pane's JS keycodes as X keycodes (garbage — the lane's measurement); 6.5.4 (the runner box
@@ -1741,7 +1750,7 @@ console.log('§14 r6 — a REFUSED viewer never ends the session (round 2 of the
       // CONTROL: the r6 allowlist (keyboard-config / keymap-changed as watch types) — the same Watch viewer reprograms X
       const fromW = "const XPRA_WATCH_TYPES = Object.freeze(new Set(['hello', 'ping', 'ping_echo', 'damage-sequence', 'map-window', 'buffer-refresh', ";
       ok(srcS.split(fromW).length === 2, 'the watch allowlist is spelled once (the control patches exactly it)');
-      const wfile = MUTK.write('src/server/desktop-stream.js', srcS.replace(fromW, "const XPRA_WATCH_TYPES = Object.freeze(new Set(['hello', 'ping', 'ping_echo', 'damage-sequence', 'map-window', 'buffer-refresh', 'keyboard-config', 'keymap-changed', "), 'xwatch15');
+      const wfile = relayMutant('xpra', srcS.replace(fromW, "const XPRA_WATCH_TYPES = Object.freeze(new Set(['hello', 'ping', 'ping_echo', 'damage-sequence', 'map-window', 'buffer-refresh', 'keyboard-config', 'keymap-changed', "), 'xwatch15');
       const bw = await bridgeOn(require(wfile));
       const r4 = await launch('k15-ctl');
       const w4 = await viewer(bw, r4.id, 'v-watch');
@@ -1791,7 +1800,7 @@ console.log('§14 r6 — a REFUSED viewer never ends the session (round 2 of the
       // CONTROL: the fence WITHOUT the replay — the pane that watched and took over never gets its own size
       const fromN = '    if (allowInput && !st.oversize) {';
       ok(srcS.split(fromN).length === 2, 'the replay is spelled once (the no-replay control patches exactly it)');
-      const nfile = MUTK.write('src/server/desktop-stream.js', srcS.replace(fromN, '    if (false && allowInput) { /* pre-fix: fenced and never replayed */'), 'xnoreplay16');
+      const nfile = relayMutant('xpra', srcS.replace(fromN, '    if (false && allowInput) { /* pre-fix: fenced and never replayed */'), 'xnoreplay16');
       let ownN = false;
       const bn = await bridgeOn(require(nfile), (id, v) => (v === 'v-own' || (ownN && v === 'v-watch') ? { relay: true } : { relay: false, code: 'watch-mode' }));
       const r9 = await launch('k16-noreplay');
@@ -1808,7 +1817,7 @@ console.log('§14 r6 — a REFUSED viewer never ends the session (round 2 of the
       // CONTROL: the r7 allowlist (the display-size packets as watch types) — the same Watch viewer resizes the holder's display
       const fromD = "const XPRA_WATCH_TYPES = Object.freeze(new Set(['hello', 'ping', 'ping_echo', 'damage-sequence', 'map-window', 'buffer-refresh', ";
       ok(srcS.split(fromD).length === 2, 'the watch allowlist is spelled once (the control patches exactly it)');
-      const dfile = MUTK.write('src/server/desktop-stream.js', srcS.replace(fromD, fromD + "'display-configure', 'configure-display', 'desktop_size', "), 'xdisplay16');
+      const dfile = relayMutant('xpra', srcS.replace(fromD, fromD + "'display-configure', 'configure-display', 'desktop_size', "), 'xdisplay16');
       const bd = await bridgeOn(require(dfile));
       const r8 = await launch('k16-ctl');
       const o8 = await viewer(bd, r8.id, 'v-own');

@@ -253,9 +253,9 @@ console.log('§3 the daemon wiring (three-touch rule) and the SHARED tier');
   const reqs = [...serveSrc.matchAll(/require\('([^']+)'\)/g)].map((m) => m[1]);
   ok(reqs.every((r) => ['fs', 'os', 'path', './desktop-apps', './office-open' /* §7.9: PURE — the LibreOffice rows + the open-with verdict */, './keeper-limits', './desktop-display', './app-serve' /* Layer 0 apps: SHARED (builtins + the PURE app-manifest + desktop-apps) */].includes(r)), `the SHARED module requires only builtins + the PURE models + the machine facts (${reqs.join(' ')}) — never src/server`);
   const asReqs = [...read('src/app-serve.js').matchAll(/require\('([^']+)'\)/g)].map((m) => m[1]);
-  ok(asReqs.every((r) => ['fs', 'path', 'os', 'crypto', 'child_process', 'https', 'dns', './app-manifest.js', './desktop-apps.js', './app-squashfs.js', './app-system-serve.js' /* Layer 1: the app system's machine half (SHARED, pinned below) */, './app-system.js' /* Layer 1: PURE */].includes(r)) && read('src/app-manifest.js').match(/require\(/g) === null, `…and src/app-serve.js requires only builtins + the two PURE models + the Layer 1 pair (${asReqs.join(' ')}); src/app-manifest.js requires NOTHING`);
+  ok(asReqs.every((r) => ['fs', 'path', 'os', 'crypto', 'child_process', 'https', 'dns', './app-manifest.js', './desktop-apps.js', './install-slot.js', './app-kinds.js' /* lane dc-apps-rows: PURE, import nothing */, './app-squashfs.js', './app-system-serve.js' /* Layer 1: the app system's machine half (SHARED, pinned below) */, './app-system.js' /* Layer 1: PURE */].includes(r)) && [...read('src/app-manifest.js').matchAll(/require\('([^']+)'\)/g)].map((m) => m[1]).join() === './install-slot,./app-kinds' && [read('src/install-slot.js'), read('src/app-kinds.js')].every((t) => t.match(/require\(/g) === null), `…and src/app-serve.js requires only builtins + the two PURE models + the Layer 1 pair (${asReqs.join(' ')}); src/app-manifest.js requires only the PURE package slot + kind table (each requires NOTHING) — was: requires NOTHING`);
   const ssReqs = [...read('src/app-system-serve.js').matchAll(/require\('([^']+)'\)/g)].map((m) => m[1]);
-  ok(ssReqs.length > 0 && ssReqs.every((r) => ['fs', 'path', './app-system.js', './app-manifest.js'].includes(r)) && read('src/app-system.js').match(/require\(/g) === null, `…and Layer 1's src/app-system-serve.js requires only fs + path + the PURE pair (${ssReqs.join(' ')}); src/app-system.js requires NOTHING`);
+  ok(ssReqs.length > 0 && ssReqs.every((r) => ['fs', 'path', './app-system.js', './app-manifest.js'].includes(r)) && [...read('src/app-system.js').matchAll(/require\('([^']+)'\)/g)].map((m) => m[1]).join() === './install-slot', `…and Layer 1's src/app-system-serve.js requires only fs + path + the PURE pair (${ssReqs.join(' ')}); src/app-system.js requires only the PURE package slot (PKG_RE + apt's lock wait — lane dc-apps-rows)`);
   ok(caps && /'app-install'/.test(caps[1]) && /if \(\/\^app-\/\.test\(String\(action\)\) && !conn\.info\?\.capabilities\?\.includes\?\.\('app-install'\)\) \{[^\n]*e\.code = 'host_needs_daemon'; throw e; \}/.test(meth) && meth.indexOf("includes?.('app-install')") < meth.indexOf('_request('), 'Layer 0: the hello-ack names `app-install` and the client asks the app-* actions ONLY of a daemon that names it — before any request (an older daemon is never asked)');
   const bundle = path.join(REPO, 'data/bin/vibespace-agentd.js');
   if (fs.existsSync(bundle)) { const b = read('data/bin/vibespace-agentd.js'); ok(/capabilities: \[[^\]]*["']desktop-serve["'][^\]]*\]/.test(b) && /function runDesktopServeOp/.test(b), 'the BUILT daemon bundle carries the capability and the runner (npm run build:agentd)'); }
@@ -580,7 +580,7 @@ console.log('§8 lane C2 — the bridge\'s ONE change: streamEndpointFor');
   const Srst = MUT.load('src/server/desktop-stream.js', sSrc.replace(fixP, '\n').replace(fixQ, '\n'), 'parkedrst');
   const mRst = await racing(Srst, 'rst');
   ok(mRst.uncaught.some((x) => /ECONNRESET/.test(x)), `CONTROL: the pre-fix bridge (no listener while parked) lets the reset escape as an uncaught ${JSON.stringify(mRst.uncaught)} — the hub's exit`, mRst);
-  const src = read('src/server/desktop-stream.js');
+  const src = read('src/server/stream-relay-rfb.js') + read('src/server/stream-relay-xpra.js'); // F-B4: the upstream connects live in the relays
   ok((src.match(/net\.connect\(port, '127\.0\.0\.1'\)/g) || []).length === 1 && (src.match(/new WebSocketClient\(`ws:\/\/127\.0\.0\.1:\$\{port\}\/`/g) || []).length === 1, 'the two upstream connects are unchanged — they take the endpoint\'s port (the protocol is end to end: seats, backpressure, pings, closes untouched)');
 }
 
@@ -741,7 +741,7 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
   const f4a = await f4(accPath, 'fix');
   ok(f4a.sawStep1 && f4a.landed && /step1\nstep2\n/.test(f4a.log || ''), 'the process that started the install is SIGKILLed mid-run ⇒ the install runs to its end (its marker lands, its log whole) — it never lived on that process\'s pipe', f4a);
   const accSrc = read('src/server/desktop-access.js');
-  const launchLine = '    const launch = M.installLauncherArgv(argv, { stateDir, mode });\n';
+  const launchLine = '    const launch = SLOT.installLauncherArgv(argv, { stateDir, mode });\n';
   ok(accSrc.split(launchLine).length === 2, 'CONTROL setup: the launcher wrap is spelled once');
   const accPre = MUT.write('src/server/desktop-access.js', accSrc.replace(launchLine, '    const launch = argv;\n'), 'nolauncher');
   const f4b = await f4(accPre, 'pre');
@@ -783,7 +783,7 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
   // ── verify r3 + r4: THE SLOT IS A LOCK THE RUNNING INSTALL HOLDS (flock, on local storage), NEVER FOLLOWED ON AN
   //    UNVERIFIED PID, AND EVERY REFUSAL NAMES ITS CAUSE ──
   const { spawn: spawnR3, execFileSync: execR4 } = require('child_process');
-  const appsSrc = read('src/desktop-apps.js');
+  const appsSrc = read('src/install-slot.js'); // lane dc-apps-rows: the launcher + runner live in the package slot's own module
   const lineOf = (needle) => { const l = appsSrc.split('\n').find((x) => x.includes(needle)); return l === undefined ? null : l + '\n'; };
   /** A launcher run directly (the local rung's argv); `killAfter` bounds a CONTROL that would hang (our own launcher —
    *  never an install: the control's install is `echo`). → {code, out, ms, killed}; the promise carries `.child`. */
@@ -903,17 +903,17 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
   // the controls' patched copies (scripts/mutant-copy.mjs), each edit spelled once
   const m1Reset = lineOf("'  pid=; s=', // M1"), m1Verify = lineOf('! gone "$pid" "$s" || pid=');
   ok(m1Reset && m1Verify && appsSrc.split(m1Reset).length === 2 && appsSrc.split(m1Verify).length === 2, 'CONTROL setup: the winner\'s pid reset and the pre-tail verification are spelled once each');
-  const appsPreM1 = MUT.write('src/desktop-apps.js', appsSrc.replace(m1Reset, '\n').replace(m1Verify, "  '  r=$pid;',\n"), 'm1pre');
-  ok(accSrc.split("const M = require('../desktop-apps.js');").length === 2, 'CONTROL setup: the access layer requires the model once (the closed world re-binds it)');
-  const AccPreM1 = MUT.load('src/server/desktop-access.js', accSrc.replace("const M = require('../desktop-apps.js');", `const M = require(${JSON.stringify(appsPreM1)});`), 'accm1pre');
+  const appsPreM1 = MUT.write('src/install-slot.js', appsSrc.replace(m1Reset, '\n').replace(m1Verify, "  '  r=$pid;',\n"), 'm1pre');
+  ok(accSrc.split("const SLOT = require('../install-slot.js');").length === 2, 'CONTROL setup: the access layer requires the package slot once (the closed world re-binds it)');
+  const AccPreM1 = MUT.load('src/server/desktop-access.js', accSrc.replace("const SLOT = require('../install-slot.js');", `const SLOT = require(${JSON.stringify(appsPreM1)});`), 'accm1pre');
   const flockTake = lineOf("'    if flock -n 9; then'"), flockGuard = lineOf("'flock -n 9 2>/dev/null ||");
   ok(flockTake && flockGuard && appsSrc.split(flockTake).length === 2 && appsSrc.split(flockGuard).length === 2, 'CONTROL setup: the launcher\'s lock and the runner\'s re-assertion are spelled once each');
-  const AppsNoFlock = MUT.load('src/desktop-apps.js', appsSrc.replace(flockTake, flockTake.replace('if flock -n 9; then', 'if true; then')).replace(flockGuard, flockGuard.replace('flock -n 9 2>/dev/null ||', 'true ||')), 'noflock');
-  const AppsNoGuard = MUT.load('src/desktop-apps.js', appsSrc.replace(flockGuard, flockGuard.replace('flock -n 9 2>/dev/null ||', 'true ||')), 'noguard');
+  const AppsNoFlock = MUT.load('src/install-slot.js', appsSrc.replace(flockTake, flockTake.replace('if flock -n 9; then', 'if true; then')).replace(flockGuard, flockGuard.replace('flock -n 9 2>/dev/null ||', 'true ||')), 'noflock');
+  const AppsNoGuard = MUT.load('src/install-slot.js', appsSrc.replace(flockGuard, flockGuard.replace('flock -n 9 2>/dev/null ||', 'true ||')), 'noguard');
   const setsidLine = lineOf('command -v setsid'), flockCheck = lineOf('command -v flock');
   ok(setsidLine && flockCheck && appsSrc.split(setsidLine).length === 2 && appsSrc.split(flockCheck).length === 2, 'CONTROL setup: the setsid and flock checks are spelled once each');
-  const AppsNoSetsidCheck = MUT.load('src/desktop-apps.js', appsSrc.replace(setsidLine, '\n'), 'nosetsidcheck');
-  const AppsNoFlockCheck = MUT.load('src/desktop-apps.js', appsSrc.replace(flockCheck, '\n'), 'noflockcheck');
+  const AppsNoSetsidCheck = MUT.load('src/install-slot.js', appsSrc.replace(setsidLine, '\n'), 'nosetsidcheck');
+  const AppsNoFlockCheck = MUT.load('src/install-slot.js', appsSrc.replace(flockCheck, '\n'), 'noflockcheck');
   // a state dir that exists but cannot be written: refused by name at once
   const stRo = path.join(root, 'st-ro'); fs.mkdirSync(stRo, { recursive: true }); fs.chmodSync(stRo, 0o555);
   const asRoot = typeof process.getuid === 'function' && process.getuid() === 0;
@@ -923,10 +923,10 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
   } else console.log('  - SKIP the read-only state dir row: running as root (a mode bit does not stop root)');
   const roLine = lineOf('[ -w "$D" ] ||');
   ok(roLine && appsSrc.split(roLine).length === 2, 'CONTROL setup: the writable check is spelled once');
-  const AppsNoRoCheck = MUT.load('src/desktop-apps.js', appsSrc.replace(roLine, '\n'), 'norocheck');
+  const AppsNoRoCheck = MUT.load('src/install-slot.js', appsSrc.replace(roLine, '\n'), 'norocheck');
   const refuseLine = lineOf('[ -n "$s" ] || { echo "+ [vibespace] cannot read /proc/$$/stat');
   ok(refuseLine && appsSrc.split(refuseLine).length === 2, 'CONTROL setup: the runner\'s refusal is spelled once');
-  const AppsNoRefuse = MUT.load('src/desktop-apps.js', appsSrc.replace(refuseLine, '\n'), 'norefuse');
+  const AppsNoRefuse = MUT.load('src/install-slot.js', appsSrc.replace(refuseLine, '\n'), 'norefuse');
   // (M4) FIVE hubs START at the same moment on one machine: exactly ONE runner; the other four follow it and answer ITS
   // code. A ~2 % race is never gated by one trial: 40 trials at their natural speed (batches of 8 at once), then 20 with
   // the windows WIDENED — `setsid` waits 0.3 s before exec'ing the real one (the lock → pidfile window) and `flock` a
@@ -1022,8 +1022,8 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
   };
   const t3Line = lineOf("'  T=/run/user/$u;"), t3Check = lineOf('is not a directory this user owns');
   ok(t3Line && t3Check && appsSrc.split(t3Line).length === 2 && appsSrc.split(t3Check).length === 2, 'CONTROL setup: the uid-named directory and its ownership check are spelled once each');
-  const AppsEnvRoot = MUT.load('src/desktop-apps.js', appsSrc.replace(t3Line, "  '  T=${XDG_RUNTIME_DIR:-/tmp}; [ -d \"$T\" ] && [ -w \"$T\" ] || T=/tmp',\n").replace(t3Check, '\n'), 'envroot');
-  const AppsNoOwnCheck = MUT.load('src/desktop-apps.js', appsSrc.replace(t3Check, '\n'), 'noowncheck');
+  const AppsEnvRoot = MUT.load('src/install-slot.js', appsSrc.replace(t3Line, "  '  T=${XDG_RUNTIME_DIR:-/tmp}; [ -d \"$T\" ] && [ -w \"$T\" ] || T=/tmp',\n").replace(t3Check, '\n'), 'envroot');
+  const AppsNoOwnCheck = MUT.load('src/install-slot.js', appsSrc.replace(t3Check, '\n'), 'noowncheck');
   // a fake uid (an `id` that answers -u with it): /run/user/<n> does not exist ⇒ the per-uid /tmp dir, created 0700
   const fakeUid = 4000000000 + (process.pid % 1000000) * 4;
   const idShim = (n, answer) => { const d = path.join(root, `bin-id-${n}`); fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, 'id'), `#!/bin/sh\ncase "$1" in -u) echo '${answer}' ;; *) exec ${realBin('id')} "$@" ;; esac\n`, { mode: 0o755 }); return { ...process.env, PATH: `${d}:${process.env.PATH}` }; };
@@ -1065,7 +1065,7 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
   // keep it there — the alignment is evidence in the result either way.
   const exitLine1 = lineOf('fin() { echo "$1 $(date +%s%N) $K"'), t0Line1 = lineOf("'  t0=$(date +%s%N);"), cmpLine1 = lineOf('-gt "$t0" ]');
   ok(exitLine1 && t0Line1 && cmpLine1 && [exitLine1, t0Line1, cmpLine1].every((l) => appsSrc.split(l).length === 2), 'CONTROL setup: the exit instant, the start instant and their comparison are spelled once each');
-  const AppsWholeSec = MUT.load('src/desktop-apps.js', appsSrc.replace(exitLine1, exitLine1.replace('$(date +%s%N)', '$(date +%s)')).replace(t0Line1, t0Line1.replace('$(date +%s%N)', '$(date +%s)')).replace(cmpLine1, cmpLine1.replace('-gt "$t0" ]', '-ge "$t0" ]')), 'wholesec');
+  const AppsWholeSec = MUT.load('src/install-slot.js', appsSrc.replace(exitLine1, exitLine1.replace('$(date +%s%N)', '$(date +%s)')).replace(t0Line1, t0Line1.replace('$(date +%s%N)', '$(date +%s)')).replace(cmpLine1, cmpLine1.replace('-gt "$t0" ]', '-ge "$t0" ]')), 'wholesec');
   const sameSecond = async (Mod, tag, unit) => {
     let last = null;
     for (let attempt = 1; attempt <= 3; attempt++) {
@@ -1101,7 +1101,7 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
   const envNoFd9 = { ...process.env, PATH: `${noFd9}:${process.env.PATH}` };
   const waitLine4 = lineOf('[ -e "/proc/$b" ]; do sleep 0.05');
   ok(waitLine4 && appsSrc.split(waitLine4).length === 2, 'CONTROL setup: the pidfile wait bounded by the runner\'s life is spelled once');
-  const AppsUnbounded = MUT.load('src/desktop-apps.js', appsSrc.replace(waitLine4, waitLine4.replace(' && [ -e "/proc/$b" ]', '')), 'unbounded');
+  const AppsUnbounded = MUT.load('src/install-slot.js', appsSrc.replace(waitLine4, waitLine4.replace(' && [ -e "/proc/$b" ]', '')), 'unbounded');
   const l4Leg = (async () => {
     const stF = path.join(root, 'st-l4'), stC = path.join(root, 'st-l4-pre'); fs.mkdirSync(stF, { recursive: true }); fs.mkdirSync(stC, { recursive: true });
     // the fix's killAfter is PATIENCE, never a bound (our own launcher — the install is `echo`); the control is killed AT

@@ -56,7 +56,7 @@ const until = async (fn, ms = 15000, step = 100) => { const t0 = Date.now(); whi
 const run = (bin, args, env = process.env, timeout = 8000) => new Promise((res) => execFile(bin, args, { env, timeout, encoding: 'utf8' }, (err, stdout, stderr) => res({ err, stdout: String(stdout || ''), stderr: String(stderr || '') })));
 
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
-const S = require('../src/server/desktop-stream.js');
+const S = { ...require('../src/server/desktop-stream.js'), ...require('../src/server/stream-relay-rfb.js'), ...require('../src/server/stream-relay-xpra.js') } /* F-B4: the relays' classifiers live in their own modules */;
 const T = require('../src/browser-takeover.js');
 const WT = require('../src/window-targets.js');
 const D = require('../src/desktop-display.js');

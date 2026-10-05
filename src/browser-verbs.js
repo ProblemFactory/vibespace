@@ -49,7 +49,9 @@ const OURS = Object.freeze(['profiles', 'new', 'providers', 'use', 'detach', 'st
  *  road (the one /resolve: which browser, the lease, the refusals, the audit) but never reach the binary as a verb: `stop`
  *  (Page.stopLoading through the watch — a looping tab never disables the browser) and `site-reset <host>` (one site's
  *  stored login cleared in the conversation's own browser; a proposal on a shared profile). Ours always wins. */
-const OURS_PAGE = Object.freeze(['stop', 'site-reset']);
+// lane browser-passkey (2026-10-05): + `passkey status | cancel` (a page of the conversation's waiting for a passkey — the watch's
+// hook aborts the page's own request; 0.38.1 has no `passkey` verb)
+const OURS_PAGE = Object.freeze(['stop', 'site-reset', 'passkey']);
 
 /** Page verbs (the browser CLI 0.32.0's `--help` + `skills get core --full`
  *  census, design §3.2 rows 1–2 + `close` + D4/D5's pass-throughs). `profiles`

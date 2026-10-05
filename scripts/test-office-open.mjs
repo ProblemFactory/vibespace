@@ -26,6 +26,7 @@ const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (f) => fs.readFileSync(path.join(repo, f), 'utf8');
 const O = require('../src/office-open.js');
 const M = require('../src/desktop-apps.js');
+const I = require('../src/installs.js'); // lane dc-apps-rows (F-I1): THE INSTALLABLES — the plan lookup + the closed set live there
 const FC = await import(pathToFileURL(path.join(repo, 'src/lib/file-changed.js')).href);
 const MUT = mutantCopies('office-open', repo);
 const T0 = Date.now();
@@ -160,20 +161,20 @@ console.log('§5 officeRowFor — the facts matrix');
 
 console.log('§6 the closed install set + packageInstallPlan');
 {
-  ok(same(O.INSTALL_WHATS, [...O.OFFICE_ROW_IDS, O.FONTS_ID]) && same(M.INSTALL_WHATS, ['xpra', ...O.OFFICE_ROW_IDS, O.FONTS_ID]), 'the install set: xpra + one per LibreOffice row + the faces alone (B-04da ②)');
+  ok(same(O.INSTALL_WHATS, [...O.OFFICE_ROW_IDS, O.FONTS_ID]) && same(I.INSTALL_WHATS, ['xpra', ...O.OFFICE_ROW_IDS, O.FONTS_ID]), 'the install set: xpra + one per LibreOffice row + the faces alone (B-04da ②)');
   ok(O.installSpecFor('rm -rf /') === null && O.installSpecFor('libreoffice-writer; reboot') === null && O.installSpecFor('xpra') === null, 'anything outside the closed set ⇒ no spec (a request never names a package)');
   const f = { platform: 'linux', apt: '/usr/bin/apt-get', sudo: true, distro: 'ubuntu', codename: 'resolute', prettyName: 'Ubuntu 26.04' };
-  const p = M.installPlanFor('libreoffice-writer', f);
+  const p = I.installPlanFor('libreoffice-writer', f);
   ok(p.ok && p.source === 'apt' && p.canRun && p.what === 'libreoffice-writer' && same(p.packages, ['libreoffice-writer', 'fonts-crosextra-carlito', 'fonts-crosextra-caladea']), 'the Writer plan: the machine\'s own apt, the package + the two faces', p);
   ok(/^set -e\n/.test(p.script) && p.script.includes(`apt-get -o DPkg::Lock::Timeout=${M.APT_LOCK_WAIT_S} update`) && p.script.includes('DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 install -y libreoffice-writer fonts-crosextra-carlito fonts-crosextra-caladea') && p.script.endsWith('command -v soffice'), 'the root script: set -e, apt waits for another apt\'s lock, one install line, the check last', p.script);
   ok(same(p.commands, ['sudo apt-get -o DPkg::Lock::Timeout=300 update', 'sudo DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 install -y libreoffice-writer fonts-crosextra-carlito fonts-crosextra-caladea', 'command -v soffice']) && same(M.installArgv(p), ['sudo', '-n', 'sh', '-c', p.script]), 'the commands a person copies (the check without sudo); the argv that runs it is sudo -n (never a password prompt)', p.commands);
-  ok(M.installPlanFor('libreoffice-writer', undefined).code === 'no_facts' && M.installPlanFor('libreoffice-writer', { platform: 'darwin' }).code === 'no_x11' && M.installPlanFor('libreoffice-writer', { platform: 'linux', apt: null, prettyName: 'Arch Linux' }).code === 'no_apt' && /Arch Linux has no apt-get — install LibreOffice Writer/.test(M.installPlanFor('libreoffice-writer', { platform: 'linux', apt: null, prettyName: 'Arch Linux' }).error), 'refused by name before anything runs: no facts, macOS, a Linux without apt');
-  const ns = M.installPlanFor('libreoffice-calc', { platform: 'linux', apt: '/x' });
+  ok(I.installPlanFor('libreoffice-writer', undefined).code === 'no_facts' && I.installPlanFor('libreoffice-writer', { platform: 'darwin' }).code === 'no_x11' && I.installPlanFor('libreoffice-writer', { platform: 'linux', apt: null, prettyName: 'Arch Linux' }).code === 'no_apt' && /Arch Linux has no apt-get — install LibreOffice Writer/.test(I.installPlanFor('libreoffice-writer', { platform: 'linux', apt: null, prettyName: 'Arch Linux' }).error), 'refused by name before anything runs: no facts, macOS, a Linux without apt');
+  const ns = I.installPlanFor('libreoffice-calc', { platform: 'linux', apt: '/x' });
   ok(ns.ok && !ns.canRun && ns.code === 'no_sudo' && ns.commands.length === 3, 'no passwordless sudo ⇒ the plan still returned, canRun false, no_sudo (the commands to copy)');
   ok(M.packageInstallPlan(f, { what: 'x', packages: ['ok', 'bad;name'], verify: 'command -v soffice' }).code === 'bad-request' && M.packageInstallPlan(f, { what: 'x', packages: ['ok'], verify: 'soffice; rm -rf /' }).code === 'bad-request' && M.packageInstallPlan(f, null).code === 'bad-request', 'a spec whose package or check is not the fixed shape never reaches a root line (bad-request)');
-  ok(M.installPlanFor('nope', f).code === 'bad-request' && /one of xpra, libreoffice-writer/.test(M.installPlanFor('nope', f).error), 'an unknown install ⇒ bad-request naming the set');
+  ok(I.installPlanFor('nope', f).code === 'bad-request' && /one of xpra, libreoffice-writer/.test(I.installPlanFor('nope', f).error), 'an unknown install ⇒ bad-request naming the set');
   const xf = [undefined, { platform: 'linux', apt: '/x', aptXpra: '3.1', distro: 'ubuntu', codename: 'noble', root: true }, { platform: 'linux', apt: '/x', aptXpra: '6.5.3', sudo: true }];
-  ok(xf.every((x) => same(M.installPlanFor('xpra', x), M.xpraInstallPlan(x)) && same(M.installPlanFor(undefined, x), M.xpraInstallPlan(x))), 'installPlanFor(xpra | absent) IS xpraInstallPlan (the xpra rung unchanged)');
+  ok(xf.every((x) => same(I.installPlanFor('xpra', x), M.xpraInstallPlan(x)) && same(I.installPlanFor(undefined, x), M.xpraInstallPlan(x))), 'installPlanFor(xpra | absent) IS xpraInstallPlan (the xpra rung unchanged)');
 }
 
 console.log('§7 the launch request\'s `file` + relaunchBodyOf');
@@ -213,7 +214,7 @@ console.log('§9 WIRING PINS');
   ok(serve.includes('if (rec.browser || rec.office) {'), 'a LibreOffice relaunch stops FIRST (the document is locked by the running instance), its profile carried');
   ok(/for \(const b of \[\.\.\.bins, \.\.\.BROWSER_BINS, \.\.\.OFFICE\.OFFICE_EXECS\]\)/.test(disp) && disp.includes('const office = await officeFacts({ bins: out, now });'), 'hostFacts probes LibreOffice\'s binaries from the PURE list and reads its modules (officeFacts)');
   ok(routes.includes("const v = openWithVerdict({ row: asked, file: req.body.file, machine: { hostId: host, fileHost: LOCAL.has(fh) ? 'local' : fh, registry: null } });") && routes.includes("router.get('/api/desktop/open-with'"), 'the ROUTE runs the machine rule before any machine is asked; the verdict route answers the explorer\'s menu');
-  ok(routes.includes("return streamInstall(req, res, host, (o) => ctx.access.installXpra(host, { ...o, expectDigest: shownDigest(req) }), xpraDone);") && routes.includes("(o) => ctx.access.installPackage(host, { ...o, what, expectDigest: shownDigest(req) })") && access.includes("async function installXpra(hostId, opts = {}) { return installPackage(hostId, { ...opts, what: 'xpra' }); }"), 'ONE install machinery: install-xpra and the generic install stream through streamInstall; installXpra IS installPackage(xpra); both name the plan the dialog SHOWED (verify-r6 I1: planDigest)');
+  ok(routes.includes("return streamInstall(req, res, host, (o) => ctx.access.installXpra(host, { ...o, expectDigest: shownDigest(req) }), xpraDone);") && routes.includes("(o) => ctx.access.installPackage(host, { ...o, what, expectDigest: shownDigest(req) })") && access.includes("async function installXpra(hostId, opts = {}) { return installPackage(hostId, { ...opts, what: I.DEFAULT_INSTALL }); }") && I.DEFAULT_INSTALL === 'xpra' && I.installRow(null) === M.XPRA_INSTALL, 'ONE install machinery: install-xpra and the generic install stream through streamInstall; installXpra IS installPackage(the default row = xpra — lane dc-apps-rows); both name the plan the dialog SHOWED (verify-r6 I1: planDigest)');
   ok(/planDigest: shownDigest \} : \{ host: m\.hostId, what, planDigest: shownDigest \}/.test(launcher) && /let shownDigest = r\.digest \|\| null;/.test(launcher) && /end\.code === 'plan_changed' && end\.plan && Array\.isArray\(end\.plan\.commands\)/.test(launcher), 'I1 WIRING: the install dialog sends the digest of the plan it shows, and a plan_changed answer replaces the commands above the button (nothing ran; the next press names the new plan)');
   ok(keeper.includes("broadcast?.({ type: 'file-changed', host, path: rec.file,") && /function notify\(\) \{\n[^\n]*desktop-apps-updated[^\n]*\n\s*signalFileChanges\(\);/.test(keeper), 'the hub broadcasts ONE file-changed per changed record, from every commit (notify)');
   ok(ops.includes("import { isOfficeFile } from '../office-open.js';") && ops.includes("const fullPath = this.currentPath + '/' + dataset.name;") && ops.includes('const q = this.app.officeVerdictFor(host, fullPath);') && ops.includes('items.push(...this.app.officeMenuItems(q.cached, { host, file: fullPath }));'), 'the EXPLORER row: the PURE isOfficeFile, the REAL path (currentPath + name — never the window\'s host-labelled title) and its host through the app mediator');
@@ -410,8 +411,8 @@ console.log('B-04da');
   const r2 = O.officeRowFor(row, facts({ Carlito: true, Caladea: true })), r3 = O.officeRowFor(row, facts(null)), r4 = O.officeRowFor(row, facts({ Carlito: true, Caladea: false }));
   ok(same(r2.fontsMissing, []) && r2.fontRemedy === null && same(r3.fontsMissing, []) && same(r4.fontsMissing, ['Caladea']), '② CONTROLS: both faces ⇒ nothing said; not knowable (a snap, an old agent) ⇒ nothing said; one missing ⇒ that one', [r2.fontsMissing, r3.fontsMissing, r4.fontsMissing]);
   const spec = O.installSpecFor(O.FONTS_ID);
-  ok(spec && same(spec.packages, ['fonts-crosextra-carlito', 'fonts-crosextra-caladea']) && O.INSTALL_WHATS.includes(O.FONTS_ID) && M.INSTALL_WHATS.includes(O.FONTS_ID), '② the faces alone are ONE closed install (installSpecFor, INSTALL_WHATS)', spec);
-  const plan = M.installPlanFor(O.FONTS_ID, { platform: 'linux', apt: true, sudo: true });
+  ok(spec && same(spec.packages, ['fonts-crosextra-carlito', 'fonts-crosextra-caladea']) && O.INSTALL_WHATS.includes(O.FONTS_ID) && I.INSTALL_WHATS.includes(O.FONTS_ID), '② the faces alone are ONE closed install (installSpecFor, INSTALL_WHATS)', spec);
+  const plan = I.installPlanFor(O.FONTS_ID, { platform: 'linux', apt: true, sudo: true });
   ok(plan.ok && /apt-get .*install -y fonts-crosextra-carlito fonts-crosextra-caladea/.test(plan.script), '② …its plan is apt over exactly those two packages', plan.script);
   const reg = [{ id: 'xterm', available: true }, ...O.OFFICE_ROWS.map((r) => O.officeRowFor(r, facts({ Carlito: false, Caladea: true })))];
   const v = O.openWithVerdict({ file: '/home/u/a.docx', machine: { hostId: 'local', registry: reg } });
@@ -419,6 +420,23 @@ console.log('B-04da');
   ok(v.ok && same(v.fontsMissing, ['Carlito']) && v.fontRemedy && v.fontRemedy.what === O.FONTS_ID && v2.ok && v2.fontsMissing === undefined, '② the open-with verdict opens AND names the missing face (the menu offers it); with both faces it says nothing', [v, v2]);
 }
 
+console.log('§installs a NEW installable is ONE registration line of src/installs.js (lane dc-apps-rows, F-I1): a fake member through the real slot plan');
+{
+  const ISRC = fs.readFileSync(path.join(repo, 'src/installs.js'), 'utf8');
+  const ANCHOR = '  ...O.INSTALL_ROWS, // §7.9 the LibreOffice set (src/office-open.js)\n';
+  const LINE = "  Object.freeze({ id: 'acme', from: 'facts', spec: Object.freeze({ what: 'acme', label: 'Acme', packages: ['acme-tool'], verify: 'command -v acme' }), done: 'catalog' }),\n";
+  ok(ISRC.includes(ANCHOR), '§installs the registration anchor is the INSTALLS list');
+  const I2 = MUT.load('src/installs.js', ISRC.replace(ANCHOR, ANCHOR + LINE), 'fake-install');
+  const fx = { platform: 'linux', apt: true, sudo: true };
+  const p2 = I2.installPlanFor('acme', fx);
+  ok(I2.INSTALL_WHATS.includes('acme') && I2.installRow('acme').done === 'catalog' && p2.ok && JSON.stringify(p2.packages) === '["acme-tool"]' && p2.script.includes('apt-get -o DPkg::Lock::Timeout=300 install -y acme-tool') && p2.canRun, '§installs the fake installable is planned by the ONE slot (packageInstallPlan over its spec, apt\'s lock wait) and listed — nothing else edited', p2);
+  ok(I2.installRow(null).id === 'xpra' && JSON.stringify(I2.installPlanFor(undefined, fx)) === JSON.stringify(M.xpraInstallPlan(fx)) && I2.installRow('tightvnc').from === 'hello' && !I2.INSTALL_WHATS.includes('tightvnc'), '§installs the default row and the hello row are unchanged beside it');
+  // the control: the OLD lookup (absent/xpra ⇒ the xpra plan, else the office spec table) restored — the fake member is refused (red)
+  const NEW = "  return typeof row.plan === 'function' ? row.plan(f) : S.packageInstallPlan(f, row.spec);";
+  ok(ISRC.includes(NEW), '§installs control anchor: the lookup asks the row');
+  const Iold = MUT.load('src/installs.js', ISRC.replace(ANCHOR, ANCHOR + LINE).replace(NEW, "  if (w === 'xpra') return M.xpraInstallPlan(f);\n  const spec = O.installSpecFor(w);\n  if (!spec) return { ok: false, code: 'bad-request', error: 'unknown install' };\n  return S.packageInstallPlan(f, spec);"), 'old-lookup');
+  ok(Iold.installPlanFor('acme', fx).code === 'bad-request', '§installs CONTROL: with the old id lookup the fake installable is refused bad-request (the row is what plans it)');
+}
 for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 11 })) ok(r.pass, '§tree ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 console.log(`\n${fail ? `${fail} FAILED` : 'ALL PASS'} (${pass}) in ${Date.now() - T0} ms`);
 process.exit(fail ? 1 : 0);

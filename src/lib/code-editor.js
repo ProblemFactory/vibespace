@@ -13,6 +13,7 @@ let _mermaid = null; // lazy-loaded from CDN
 import { indentWithTab } from '@codemirror/commands';
 import { marked } from 'marked';
 import { escHtml, showConfirmDialog } from './utils.js';
+import { lineDelta } from '../artifacts.js'; // lane artifacts-model: the save's "+a −b lines"
 import { t } from './i18n.js';
 import { sanitizeHtml } from './safe-html.js';
 import * as prettier from 'prettier/standalone';
@@ -146,6 +147,7 @@ class CodeEditor {
   constructor(winInfo, filePath, fileName, app, opts = {}) {
     this.winInfo = winInfo; this.filePath = filePath; this.app = app;
     this._host = opts.host || ''; // '' = local; else host id (Files cross-host)
+    this._fromWin = opts.fromWin || null; // lane artifacts-model: the chat window this file was opened from (its save → artifact-touch)
     // Stage/layout machinery reads dirty state through the window record —
     // an editor with unsaved changes must never be auto-closed (LRU eviction).
     winInfo._editorDirty = () => !!this.modified;
@@ -338,6 +340,7 @@ class CodeEditor {
     this.langSelect.value = detectedLang === 'plain' ? 'auto' : detectedLang;
 
     const self = this;
+    this._savedText = content; // lane artifacts-model: the save's "+a −b lines" is counted against this
     this.editorView = new EditorView({
       state: EditorState.create({
         doc: content,
@@ -562,11 +565,22 @@ class CodeEditor {
       if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
       this.modified = false; this.saveIndicator.textContent = '✓ Saved'; this.saveIndicator.style.color = 'var(--green)';
       this._diskChip.style.display = 'none';
+      this._noteArtifactSave(content);
       this._baselineMtime(); // our own write moved the disk mtime — re-baseline so the freshness watch doesn't see it as a foreign change
       setTimeout(() => { if (!this.modified) this.saveIndicator.textContent = ''; }, 2000);
     } catch (err) {
       this.saveIndicator.textContent = `✕ ${err.message || 'Error'}`; this.saveIndicator.style.color = 'var(--red)';
     }
+  }
+
+  // lane artifacts-model: a save in an editor opened FROM a chat counts on that conversation's deliverable row (by: user)
+  // and the agent hears ONE next-turn note ("[Doc edit] <path>: +a −b lines") — the ws `artifact-touch`, free (the stash)
+  _noteArtifactSave(content) {
+    const before = this._savedText;
+    this._savedText = content;
+    const cv = this._fromWin ? this.app.sessions?.get?.(this._fromWin) : null;
+    if (!cv || !cv.sessionId || before === content) return;
+    try { this.app.ws?.send({ type: 'artifact-touch', sessionId: cv.sessionId, host: this._host || '', path: this.filePath, summary: lineDelta(before ?? '', content).text }); } catch { }
   }
 
   async format() {

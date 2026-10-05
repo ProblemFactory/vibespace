@@ -1768,7 +1768,7 @@ async function dialogAnswerFor(k, f, profileId, { arm = true, outcome = null, en
     const fresh = outcome ? D.factFor({ ...t, consume: false }) : fct;
     const loop = fresh.loop;
     // verify r1: `loopShared` — some tab of a shared browser loops and this conversation's cannot be told apart (a kind only)
-    return { dialog: { watched: fct.watched, profileId: t.profileId, open: fct.open, text: fct.text || '', notes: fct.notes, stuck: stuck ? stuck.text : null, blind: !!fct.blind, unattributed: !!fct.unattributed, loading: loading ? require('../browser-stuck.js').loadingText(loading, { now: loading.at }) : null, loop: loop || null, loopShared: !!fresh.loopShared, ...(bound ? { tabBound: { ok: !!bound.ok, code: bound.code || null } } : {}) } };
+    return { dialog: { watched: fct.watched, profileId: t.profileId, passkey: fct.passkey || null /* lane browser-passkey */, open: fct.open, text: fct.text || '', notes: fct.notes, stuck: stuck ? stuck.text : null, blind: !!fct.blind, unattributed: !!fct.unattributed, loading: loading ? require('../browser-stuck.js').loadingText(loading, { now: loading.at }) : null, loop: loop || null, loopShared: !!fresh.loopShared, ...(bound ? { tabBound: { ok: !!bound.ok, code: bound.code || null } } : {}) } };
   } catch (e) { console.warn(`[browser-dialog] ${f.browserKey}: the dialog fact was not read — ${e && e.message}`); return {}; }
 }
 /** The CLI's long-poll while its verb runs: answers at the first HELD dialog in this conversation's scope (the event),
@@ -1787,11 +1787,41 @@ router.get('/api/agent/browser/dialog', async (req, res) => {
   const ac = new AbortController();
   res.on('close', () => ac.abort());
   try {
-    const hit = wait ? await D.waitForOpen(t, wait, { signal: ac.signal, loop: loopWanted }) : null;
+    const hit = wait ? await D.waitForOpen(t, wait, { signal: ac.signal, loop: loopWanted, passkey: String(req.query.passkey || '') === '1' }) : null; // lane browser-passkey: `passkey=1` — an ACTING verb also ends at `passkey_open`
     if (ac.signal.aborted && !res.writable) return;
     const fct = D.factFor({ ...t, consume: false });
     const loop = hit && hit.loop ? { ...require('../browser-stuck.js').loopBlock(hit.loop), runStart: hit.loop.runStart, text: require('../browser-stuck.js').loopText(hit.loop) } : null;
-    res.json({ watched: fct.watched, open: fct.open, text: fct.text || '', via: hit ? hit.via : null, eventAt: hit ? hit.at : null, answeredAt: Date.now(), ...(loop && !fct.open ? { loop } : {}) });
+    res.json({ watched: fct.watched, open: fct.open, text: fct.text || '', via: hit ? hit.via : null, eventAt: hit ? hit.at : null, answeredAt: Date.now(), ...(loop && !fct.open ? { loop } : {}), ...(hit && hit.passkey && !fct.open ? { passkey: hit.passkey } : {}) });
+  } catch (e) { fail(res, e); }
+});
+/** lane browser-passkey (owner inc-muuvthv9-g69w): the agent's `passkey status | cancel` — a page waiting for a passkey on
+ *  THIS conversation's own browser (its lease / its ephemeral record only; the reach is asked again after every await — a
+ *  lease that went while the watch armed acts on nothing). `cancel` aborts the page's request through the hook (the page's
+ *  promise rejects AbortError, Chrome's own window closes). While the user drives it is the user's page: refused. */
+router.post('/api/agent/browser/passkey', async (req, res) => {
+  const k = keeperOr503(res); if (!k) return;
+  const f = agentFacts(req, res); if (!f) return;
+  const D = ctx.dialogs;
+  const PK = require('../browser-passkey.js');
+  if (!D || typeof D.cancelPasskey !== 'function') return res.status(409).json({ error: 'VibeSpace does not watch passkey requests on this server', code: 'not_watched' });
+  const action = String(req.body?.action || 'status');
+  if (!['status', 'cancel'].includes(action)) return res.status(400).json({ error: 'passkey takes status | cancel', code: 'bad-request' });
+  const t0 = dialogTargetFor(k, f, req.body?.profile);
+  if (!t0.ok) return failVerdict(res, t0);
+  try {
+    const armed = await D.arm(t0.profileId);
+    if (!armed.ok) return res.status(409).json({ error: armed.error || 'VibeSpace is not watching this browser', code: 'not_watched' });
+    const t = dialogTargetFor(k, f, req.body?.profile); // the reach, asked again after the await
+    if (!t.ok) return failVerdict(res, t);
+    const v = D.passkeyIn(t.profileId, D.scopeFor(t));
+    if (action === 'status') return res.json({ ok: true, passkey: PK.passkeyBlock(v), text: v.state === PK.PASSKEY_OPEN_CODE ? v.text : v.state === 'unknown' ? PK.UNKNOWN_TEXT : v.state === 'pending' ? `A passkey request (${PK.rpWord(v.record.rpId) || 'this site'}) started under ${Math.ceil(PK.PENDING_SAID_MS / 1000)} s ago — a present authenticator may still answer it.` : PK.NONE_TEXT });
+    let st = null; try { st = k.inputStateFor(t.ephemeral ? t.browserKey : f.browserKey, t.ephemeral ? null : t.profileId); } catch { st = null; }
+    if (st && st.input === 'user') return res.status(409).json({ error: require('../browser-interrupt.js').interruptedText('passkey cancel'), code: 'browser_interrupted', takenAt: st.takenAt || 0 });
+    const r = await D.cancelPasskey(t, { by: 'agent' });
+    const again = dialogTargetFor(k, f, req.body?.profile);
+    if (!again.ok) return failVerdict(res, again);
+    if (!r.ok) return res.status(409).json({ error: r.error, code: r.code });
+    res.json({ ok: true, cancelled: r.n, text: r.text });
   } catch (e) { fail(res, e); }
 });
 /** The agent's `dialog status | accept [text] | dismiss` — answered through the watch (the one client that saw the

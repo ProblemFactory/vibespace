@@ -155,17 +155,17 @@ console.log('§5 presets, remembered lines, psEncoded');
 
 console.log('§6 CONTROLS — each rule removed from a patched copy ⇒ its leg red');
 {
-  const appsSrc = fs.readFileSync(path.join(repo, 'src/desktop-apps.js'), 'utf8');
+  const appsSrc = fs.readFileSync(path.join(repo, 'src/machine-desktop-model.js'), 'utf8'); // rv-desktop-apps F-S1: the machine-desktop family's own file
   const dispSrc = fs.readFileSync(path.join(repo, 'src/desktop-display.js'), 'utf8');
   const cut = (src, from, to) => { if (!src.includes(from)) throw new Error('anchor moved: ' + from); return src.replace(from, to); };
-  const noHidden = MUT.load('src/desktop-apps.js', cut(appsSrc, 'const hid = HC.hiddenCharsOf(line, { max: 1 });', 'const hid = [];'), 'nohid');
+  const noHidden = MUT.load('src/machine-desktop-model.js', cut(appsSrc, 'const hid = HC.hiddenCharsOf(line, { max: 1 });', 'const hid = [];'), 'nohid');
   ok(noHidden.desktopRunPlan('darwin', `a${ch(0x202e)}b`).ok === true, 'CONTROL: without the hidden-character rule an RLO line would run (§3\'s leg catches it)');
-  const noMulti = MUT.load('src/desktop-apps.js', cut(appsSrc, "if (/[\\r\\n]/.test(line)) return { ok: false, code: 'multi_line'", "if (false) return { ok: false, code: 'multi_line'"), 'nomulti');
+  const noMulti = MUT.load('src/machine-desktop-model.js', cut(appsSrc, "if (/[\\r\\n]/.test(line)) return { ok: false, code: 'multi_line'", "if (false) return { ok: false, code: 'multi_line'"), 'nomulti');
   ok(noMulti.desktopRunPlan('darwin', 'a\nb').code !== 'multi_line', 'CONTROL: without the one-line rule a line break is not named multi_line');
-  const pasted = MUT.load('src/desktop-apps.js', cut(appsSrc, "argv: ['/bin/sh', '-c', 'nohup /bin/sh -lc \"$1\" </dev/null >/dev/null 2>&1 &', 'vibespace-run', line]", "argv: ['/bin/sh', '-c', `nohup /bin/sh -lc '${line}' </dev/null >/dev/null 2>&1 &`]"), 'pasted');
+  const pasted = MUT.load('src/machine-desktop-model.js', cut(appsSrc, "argv: ['/bin/sh', '-c', 'nohup /bin/sh -lc \"$1\" </dev/null >/dev/null 2>&1 &', 'vibespace-run', line]", "argv: ['/bin/sh', '-c', `nohup /bin/sh -lc '${line}' </dev/null >/dev/null 2>&1 &`]"), 'pasted');
   const pm = pasted.desktopRunPlan('darwin', 'echo a');
   ok(!(pm.argv[4] === 'echo a' && !pm.argv[2].includes('echo')), 'CONTROL: a copy that pastes the line into the script fails §3\'s positional check');
-  const lanOpen = MUT.load('src/desktop-apps.js', cut(appsSrc, "'SET_LOOPBACKONLY=1', 'VALUE_OF_LOOPBACKONLY=1', ", ''), 'lan');
+  const lanOpen = MUT.load('src/machine-desktop-model.js', cut(appsSrc, "'SET_LOOPBACKONLY=1', 'VALUE_OF_LOOPBACKONLY=1', ", ''), 'lan');
   ok(lanOpen.tightvncInstallPlan({ platform: 'win32' }).flags.join(' ') !== A.tightvncInstallPlan({ platform: 'win32' }).flags.join(' ') && !lanOpen.TIGHTVNC.flags.includes('VALUE_OF_LOOPBACKONLY=1'), 'CONTROL: a table without LOOPBACKONLY (a LAN port) differs from the frozen one');
   const noTrunc = MUT.load('src/desktop-display.js', cut(dispSrc, '    if (rest.length < 1 + n) return truncated;\n', ''), 'notrunc');
   const short = noTrunc.rfbGreeting(B('RFB 003.889\n', [3, 33]));

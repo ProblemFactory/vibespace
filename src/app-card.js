@@ -15,7 +15,7 @@
  *
  * The face of a card never carries a package-system word; Details may (scripts/test-app-card.mjs is the census).
  */
-const KIND_OF = Object.freeze({ apt: 'package', deb: 'deb', appimage: 'appimage', remove: 'remove', source: 'source' });
+const K = require('./app-kinds'); // PURE — an app kind is one row: its card word, its keeps, its from (lane dc-apps-rows, F-A2)
 const CARD_KINDS = Object.freeze(['package', 'deb', 'appimage', 'remove', 'source']);
 const KEEPS = Object.freeze(['replay', 'home', 'system']);
 /** where a run stopped, by its code: before the package slot ran anything, inside it, or at the record after it */
@@ -47,18 +47,19 @@ function cardView(p) {
   const x = p || {};
   const rq = x.request || {};
   const sm = x.summary || {};
-  const kind = KIND_OF[rq.kind] || 'package';
+  const kind = K.cardRow(rq.kind).card;
+  const fromK = K.fromOf(rq.kind);
   const app = x.app && typeof x.app === 'object' ? x.app : {};
   const labels = {};
   for (const l of ['zh', 'ja']) if (app.labels && app.labels[l]) labels[l] = str(app.labels[l], 120);
   // a download's own facts (lane apps-install-core: `fetch = {host, recipe?}` on the proposal) — else the machine's sources
   // (apps-joint) `fetch = {file}`: an installer that was a FILE on that machine — the face says so, its name is Details'
   const fetched = x.fetch && typeof x.fetch === 'object' && (x.fetch.host || x.fetch.file) ? x.fetch : null;
-  const from = kind === 'remove' ? null
-    : kind === 'source' ? { kind: 'download', host: hostOf(((sm.address && sm.address.length ? sm.address : (rq.source && rq.source.uris)) || [])[0]) }
+  const from = fromK === 'none' ? null
+    : fromK === 'source' ? { kind: 'download', host: hostOf(((sm.address && sm.address.length ? sm.address : (rq.source && rq.source.uris)) || [])[0]) }
       : fetched ? (fetched.host ? { kind: 'download', host: str(fetched.host, 120), ...(fetched.recipe ? { recipe: str(fetched.recipe, 80) } : {}) } : { kind: 'file' })
         : { kind: 'sources', origin: str((sm.origins || [])[0], 120) };
-  const keeps = KEEPS.includes(x.keeps) ? x.keeps : kind === 'appimage' ? 'home' : kind === 'source' ? 'system' : 'replay';
+  const keeps = KEEPS.includes(x.keeps) ? x.keeps : K.keepsOf(rq.kind);
   const deb = sm.deb || null;
   const details = {
     packages: sm.closure && sm.closure.length ? sm.closure.slice(0, 64) : strs(sm.packages, 32, 80), count: num(sm.count),
@@ -101,4 +102,4 @@ function shownDigest(v) {
   return `a1:${fnv32(canon, 0x811c9dc5)}${fnv32(canon.split('').reverse().join(''), 0x9747b28c)}:${canon.length}`;
 }
 
-module.exports = { KIND_OF, CARD_KINDS, KEEPS, RUN_STEP_CODES, stepOf, planSummary, cardView, shownFields, shownDigest };
+module.exports = { CARD_KINDS, KEEPS, RUN_STEP_CODES, stepOf, planSummary, cardView, shownFields, shownDigest };

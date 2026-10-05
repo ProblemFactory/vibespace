@@ -44,7 +44,7 @@ const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const { WebSocketServer, WebSocket } = require(path.join(repo, 'node_modules/ws'));
 const DV = require(path.join(repo, 'src/desktop-viewers.js'));
-const DS = require(path.join(repo, 'src/server/desktop-stream.js'));
+const DS = { ...require(path.join(repo, 'src/server/desktop-stream.js')), ...require(path.join(repo, 'src/server/stream-relay-rfb.js')), ...require(path.join(repo, 'src/server/stream-relay-xpra.js')) } /* F-B4: the relays' classifiers live in their own modules */;
 const K = require(path.join(repo, 'src/server/desktop-app-keeper.js'));
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + JSON.stringify(e) : '')); } };

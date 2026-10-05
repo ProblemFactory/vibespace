@@ -144,6 +144,7 @@ const HELD_TOOLS = Object.freeze({
   'vibespace-hook-register.mjs': 'the register helper VibeSpace runs over ssh',
   'vibespace-browser-verbs.js': 'a module the browser CLI requires, not a command',
   'vibespace-browser-stuck.js': 'a module the browser CLI requires (its page-dialog words), not a command',
+  'vibespace-browser-passkey.js': 'a module the browser CLI requires (its passkey words), not a command',
 });
 
 const CODEX_NOTE = 'codex: no per-spawn allow list — its only per-command allow is an execpolicy .rules file under CODEX_HOME (a write into the user\'s own config), and the default workspace-write sandbox with network on already runs these tools without an approval';

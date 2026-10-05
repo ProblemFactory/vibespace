@@ -296,6 +296,9 @@ function installSpecFor(what) {
   return { what, label: OFFICE_MODULES[k].label, packages: [OFFICE_MODULES[k].package, ...OFFICE_FONT_PACKAGES], verify: 'command -v soffice' };
 }
 const INSTALL_WHATS = Object.freeze([...OFFICE_ROW_IDS, FONTS_ID]);
+/** The LibreOffice installables (src/installs.js registers them — lane dc-apps-rows): planned from the machine's facts op
+ *  over the closed spec (the package slot's packageInstallPlan), done once the machine's catalog serves the row. */
+const INSTALL_ROWS = Object.freeze(INSTALL_WHATS.map((id) => Object.freeze({ id, from: 'facts', spec: installSpecFor(id), done: 'catalog' })));
 
 // ── ending a session without losing an edit (B-04da) ──
 /**
@@ -333,7 +336,7 @@ function startCenterVerdict({ office = null, file = null, classInstance = null }
 }
 
 module.exports = {
-  OFFICE_EXECS, OFFICE_FONT_PACKAGES, OFFICE_MODULES, MODULE_KEYS, OFFICE_ANY, GENERIC_ID, EXT_MODULE, OFFICE_EXTS, OFFICE_ROWS, OFFICE_ROW_IDS, INSTALL_WHATS,
+  OFFICE_EXECS, OFFICE_FONT_PACKAGES, OFFICE_MODULES, MODULE_KEYS, OFFICE_ANY, GENERIC_ID, EXT_MODULE, OFFICE_EXTS, OFFICE_ROWS, OFFICE_ROW_IDS, INSTALL_WHATS, INSTALL_ROWS,
   PATH_MAX, LABEL_MAX, baseName, extOf, moduleForFile, isOfficeFile, foldAbs, fileLabel, isOfficeModule,
   fileVerdict, hostKey, openWithVerdict, userInstallationArg, officeArgv, officeRowFor, installSpecFor, remedyFor,
   lockFileOf, staleLockVerdict,

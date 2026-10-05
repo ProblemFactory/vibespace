@@ -309,11 +309,11 @@ console.log('§6 lane D (a) item C — CHROME draws its own frame (MEASURED 2026
   const applyBody = daw.slice(daw.indexOf('function applySeamless()'), daw.indexOf('function stepReveal('));
   ok(applyBody.length > 100 && !/browser/.test(applyBody) && !/browser/.test(seam.slice(seam.indexOf('export function seamlessVerdict'), seam.indexOf('export const isPaused'))), 'no browser-row exclusion anywhere in the verdict path (applySeamless + seamlessVerdict never read `browser`)');
   // NEGATIVE CONTROL — a copy of desktop-apps.js whose seeding never sets the pref: the same pipeline keeps Chrome SSD
-  const srcA = read('src/desktop-apps.js');
+  const srcA = read('src/desktop-browser-app.js'); // rv-desktop-apps F-S1: the browser family's own file
   const from = "  return { ok: true, changed: true, prefs: { ...prefs, browser: { ...(b || {}), custom_chrome_frame: true } }, why: 'absent' };";
   const from0 = "  if (prefs === null || prefs === undefined) return { ok: true, changed: true, prefs: { browser: { custom_chrome_frame: true } }, why: 'new' };";
   ok(srcA.split(from).length === 2 && srcA.split(from0).length === 2, 'the seeding is spelled once per branch (the control patches exactly them)');
-  const mf = MUT.write('src/desktop-apps.js', srcA.replace(from, "  return { ok: true, changed: false, prefs, why: 'absent' }; // CONTROL: never seeded").replace(from0, "  if (prefs === null || prefs === undefined) return { ok: true, changed: false, prefs: null, why: 'new' }; // CONTROL"), 'noseed');
+  const mf = MUT.write('src/desktop-browser-app.js', srcA.replace(from, "  return { ok: true, changed: false, prefs, why: 'absent' }; // CONTROL: never seeded").replace(from0, "  if (prefs === null || prefs === undefined) return { ok: true, changed: false, prefs: null, why: 'new' }; // CONTROL"), 'noseed');
   const MC = require(mf);
   ok(same(pipeline(MC, null), { seamless: false, why: 'ssd' }) && same(pipeline(MC, {}), { seamless: false, why: 'ssd' }), `CONTROL: without the seeding a fresh profile stays SSD (${JSON.stringify(pipeline(MC, null))}) — both bars stacked, as in the owner's screenshot`);
   // WIRING: the keeper seeds before the browser starts (a fresh scaffold, a kept profile, one carried to a relaunch)

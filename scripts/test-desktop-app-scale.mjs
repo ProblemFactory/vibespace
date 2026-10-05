@@ -114,10 +114,10 @@ const precedenceTable = (mod) => {
   const junk = M.newRecord({ id: 'da-2', label: 'x', exec: '/x', source: 'adhoc', backend: 'xpra', now: 1, scaleOrigin: 'mine' });
   ok(rec.scaleOrigin === 'app' && rec.scale === 1.5 && junk.scaleOrigin === null && same(M.SCALE_ORIGINS, ['auto', 'setting', 'chosen', 'app']), 'the record keeps origin "app"; an origin outside the closed set is dropped');
   // CONTROL — a scalePick that never reads the app default (the pre-lane-D pick): the table is a judge, not an echo
-  const src = read('src/desktop-apps.js');
+  const src = read('src/desktop-fit.js'); // rv-desktop-apps F-S1: the scale family's own file
   const line = "  if (typeof app === 'number') return { scale: app, origin: 'app', from: null };\n";
   ok(src.split(line).length === 2, 'CONTROL: the app-default line is spelled exactly once (the copy removes exactly it)');
-  const Mc = MUT.load('src/desktop-apps.js', src.replace(line, ''), 'no-app-default');
+  const Mc = MUT.load('src/desktop-fit.js', src.replace(line, ''), 'no-app-default');
   const bad = precedenceTable(Mc).filter((r) => !same(r.got, r.want));
   ok(bad.length === 3 && bad.every((r) => r.want[1] === 'app'), `CONTROL: without it the table fails on exactly the ${bad.length} app-default rows (they fall to Settings / auto)`, bad.map((r) => [r.appDefault, r.got]));
   // the window's Scale ▸ model: 2.5× and 3× rows, the app default marked (never current by itself)

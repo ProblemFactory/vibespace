@@ -383,6 +383,7 @@ const ROUTES = {
   'GET /api/agent/browser/dialog': 'meta',
   'POST /api/agent/browser/dialog': 'meta',
   'POST /api/agent/browser/direct': 'meta',
+  'POST /api/agent/browser/passkey': 'meta', // lane browser-passkey: the page's passkey wait — status / cancel through the watch
   'POST /api/agent/browser/site-reset': 'meta',
   'GET /api/agent/browser/providers': 'meta',
   'POST /api/agent/browser/new': 'meta',
@@ -707,6 +708,7 @@ const STORAGE = {
   'src/lib/sidebar-state.js|localStorage|\'archivedSessions\'': ['ids', 'archived session ids'],
   'src/lib/sidebar-state.js|localStorage|\'archivedFolders\'': ['ids', 'archived folder keys'],
   'src/lib/design-changes.js|localStorage|storeKey': ['owner', 'lane design-changes: the Design window\'s pending changes per design on this device — the owner\'s own comments and the before / after of the texts they edited and the nudges they made (previews not yet sent), each with the quote of the artboard element it is about; never a store record of the five kinds'],
+  'src/lib/doc-window-ui.js|localStorage|storeKey': ['owner', 'lane doc-window: the Doc window\'s comments strip per (host, path) on this device — the owner\'s own notes on a markdown file, each with the quote of the text it is about, until Send all; never a store record of the five kinds'],
   'src/lib/sidebar-state.js|localStorage|\'sessionCustomNames\'': ['owner', 'the names the owner typed for sessions (never a store record)'],
   'src/lib/machine-desktop.js|localStorage|RUNS_KEY': ['owner', 'design 014 D1: the owner\'s own last 3 "Run on its desktop…" lines per machine (typed by the owner, re-judged by desktopRunPlan before they are offered; never an agent\'s, never a record)'],
   'src/lib/sidebar-state.js|localStorage|\'sessionModes\'': ['ids', 'terminal | chat per session id'],
@@ -1722,7 +1724,7 @@ const I_RECV = {
   'src/channel-groups.js|c': ['member', 'B-ff04: a candidate MEMBER\'s name in the @ refusal (unknown / ambiguous-mention) — a session name, not a message'],
   'src/channel-groups.js|group': ['agent group', 'a group\'s NAME — the group, not a message (a rename\'s previous name, raw.from, is the cleared field)'],
   'src/channel-record.js|b': ['channel block', 'a render block\'s own kind word'], 'src/channel-record.js|BLOCK_LIMITS': ['constant', 'a length limit'],
-  'src/desktop-apps.js|rec': ['desktop app', 'an app label'], 'src/desktop-apps.js|row': ['desktop app', 'an app label'],
+  'src/desktop-fit.js|rec': ['desktop app', 'an app label'], 'src/desktop-apps.js|row': ['desktop app', 'an app label'], 'src/desktop-browser-app.js|row': ['desktop app', 'an app label'], // rv-desktop-apps F-S1: the window / browser families' own files
   'src/desktop-serve.js|rec': ['desktop app', 'an app label'], 'src/desktop-serve.js|row': ['desktop app', 'an app label / refusal reason'],
   'src/exit-proxy.js|session': ['session', 'the conversation the network / a command is lent to — its own name (lane-pairing exit access)'], 'src/exit-proxy.js|h': ['host', 'a machine name'], 'src/hosts.js|h': ['host', 'a machine name'],
   'src/lib/app.js|BACKEND_META[h.id]': ['harness', 'a harness label'], 'src/lib/app.js|BACKEND_META[msg.backend]': ['harness', 'a harness label'],
@@ -1841,7 +1843,7 @@ const I_RECV = {
   'src/server/usage-pool-engine.js|n': ['quota', 'the helper path\'s reset-credit skip notice (resetCreditSkipNotice, the same words) — lane reset-path'],
   'src/server/unexpected-exit.js|entry': ['session', 'the restarted conversation\'s own name on its For-you item (lane unexpected-exit — composed at the 2.369.202 integration)'],
   // lane desktop-apps-safety (composed at the 2.369.202 integration): the relaunch refusal names the driving conversation; the stop / close toasts name the app
-  'src/desktop-apps.js|lease': ['session', 'the conversation driving the window, by its session name, in the relaunch refusal'],
+  'src/desktop-fit.js|lease': ['session', 'the conversation driving the window, by its session name, in the relaunch refusal'],
   'src/lib/desktop-app-launcher.js|a': ['desktop app', 'an app label (the stop that asks LibreOffice first)'],
   'src/lib/desktop-app-window.js|rec': ['desktop app', 'the closed file\'s app label in the window\'s toast'],
   'src/server/groups-engine.js|c': ['group-message', 'a group REPORT card (lane group-report-card): each message a member\'s report carried, drawn at the injection — the ring copy is re-worded by the groups door\'s onCleared'],
@@ -1855,7 +1857,7 @@ const I_RECV = {
   'src/server/device-upgrade-watch.js|w': ['host', 'the stuck-upgrade item\'s words — a machine name and two agent versions (itemOf), the machine\'s own record'],
   // ── verify r9: the receivers of the one-level alias pass (a field copied into a local, then handed to a sink) ──
   'src/agent-routes.js|req.body||{}': ['status', 'the caller\'s OWN status write (the owner\'s route / the agent\'s vibespace-status), destructured — the record itself'],
-  'src/desktop-apps.js|s': ['desktop app', 'an install spec\'s label'], 'src/lib/browser-switcher.js|st.view?.profile': ['browser profile', 'a profile label'],
+  'src/install-slot.js|s': ['desktop app', 'an install spec\'s label (packageInstallPlan, moved from desktop-apps.js — lane dc-apps-rows)'], 'src/lib/browser-switcher.js|st.view?.profile': ['browser profile', 'a profile label'],
   'src/lib/sidebar-mounts.js|cfg': ['mount', 'a storage mount\'s name'], 'src/lib/telemetry-client.js|e': ['error', 'an unhandled rejection\'s reason'],
   'src/lib/workflow-detail.js|opts': ['workflow', 'a workflow run\'s name'], 'src/routes/desktop-apps.js|req.query': ['caller', 'the install the caller asked for (a closed set, echoed clipped)'],
   'src/server/groups-engine.js|r': ['session', 'a resolved member\'s name'], 'src/window-reach.js|probe': ['window', 'an accessibility probe\'s reason'],

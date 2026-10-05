@@ -71,6 +71,10 @@ async function call(method, p, body) {
 const hostQ = () => { const h = flag('--host'); return h ? `host=${encodeURIComponent(h)}` : ''; };
 const hostB = () => { const h = flag('--host'); return h ? { host: h } : {}; };
 const size = (n) => (n == null ? '?' : n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : n >= 1e6 ? `${Math.round(n / 1e6)} MB` : n >= 1e3 ? `${Math.round(n / 1e3)} kB` : `${n} B`);
+// THE KIND ROWS this CLI reads — the API's declared rows (src/app-kinds.js via GET /api/agent/apps/kinds), never a copy
+let kindRows = null;
+const kinds = async () => kindRows || (kindRows = (await call('GET', '/api/agent/apps/kinds')).kinds || []);
+const cardRow = (rows, card) => rows.find((r) => r.card === card) || {};
 const out = (j, text) => { if (json) console.log(JSON.stringify(j, null, 2)); else console.log(text); };
 function planLine(p) {
   if (!p) return '(no plan)';
@@ -93,10 +97,11 @@ function planLine(p) {
   }
   if (verb === 'list') {
     const j = await call('GET', `/api/agent/apps${hostQ() ? '?' + hostQ() : ''}`);
+    const rows = (j.entries || []).some((e) => !e.packages.length) ? await kinds() : []; // a home kind's word — asked only when one is listed
     const lines = [];
     lines.push(`Apps installed through VibeSpace on ${j.host}:`);
     if (!(j.entries || []).length) lines.push('  (none)');
-    for (const e of j.entries || []) lines.push(`  ${e.id}  ${e.packages.join(' ') || `${e.label || e.id} (${e.kind === 'appimage' ? 'AppImage' : e.kind}, in your home)`}${e.rows.length ? `  → ${e.rows.map((r) => `${r.id} (${r.label})`).join(', ')}` : '  (no desktop app — on PATH)'}${e.by === 'agent' ? '  [proposed by an agent]' : ''}`);
+    for (const e of j.entries || []) lines.push(`  ${e.id}  ${e.packages.join(' ') || `${e.label || e.id} (${(rows.find((r) => r.id === e.kind) || {}).word || e.kind}, in your home)`}${e.rows.length ? `  → ${e.rows.map((r) => `${r.id} (${r.label})`).join(', ')}` : '  (no desktop app — on PATH)'}${e.by === 'agent' ? '  [proposed by an agent]' : ''}`);
     if ((j.proposals || []).length) { lines.push('Your proposals:'); for (const p of j.proposals) lines.push(`  ${p.id}  ${p.state}  ${p.kind} ${p.label}`); }
     if (j.drift && j.drift.added.length) lines.push(`Installed OUTSIDE VibeSpace (lost at the next rebuild unless the user adopts them): ${j.drift.added.join(' ')}`);
     if (j.updates) lines.push(`${j.updates} update(s) available — the user's Refresh in Desktop apps`);
@@ -129,7 +134,7 @@ function planLine(p) {
     const j = await call('POST', '/api/agent/apps/proposals', { ...hostB(), request, why });
     const p = j.proposal;
     const s = p.summary || {};
-    const fetched = p.kind === 'deb' || p.kind === 'appimage';
+    const fetched = cardRow(await kinds(), p.kind).from === 'download';
     const names = fetched && p.app ? [...new Set([p.app.labels && p.app.labels.zh, p.app.name, p.app.labels && p.app.labels.ja].filter(Boolean))] : [];
     const what = fetched ? `${names.join(' / ') || p.label} (${p.from && p.from.host ? p.from.host : 'your file'}, ${size(p.bytes && p.bytes.download)})` : p.kind === 'remove' ? `remove ${p.label}` : p.kind === 'source' ? `the package source ${p.label} (key ${(s.fingerprints || []).join(' ')})` : `${p.label} + ${Math.max(0, (s.newCount || 0) + (s.upgradeCount || 0) - 1)} packages, ${size(s.downloadBytes)} download, ${size(Math.max(0, s.installedBytes || 0))} on disk`;
     const yours = request.file ? `\nThe file you had (${request.file}) is no longer needed — VibeSpace keeps its own copy.` : '';
@@ -166,8 +171,9 @@ function planLine(p) {
     const kind = flag('--kind');
     const target = words()[0];
     const why = flag('--why') || '';
-    if (!['uv', 'npm', 'appimage'].includes(kind) || !target) { console.error('vibespace-app add --kind uv|npm <name> --why "…"  (an AppImage: vibespace-app install --file <file> --why "…")'); process.exit(2); }
-    if (kind === 'appimage') { // design 009: an AppImage is PROPOSED like any installer — VibeSpace unpacks it in its own directory at the user's click
+    const kr = (await kinds()).find((r) => r.cliWord && r.cliWord === kind);
+    if (!kr || !target) { console.error('vibespace-app add --kind uv|npm <name> --why "…"  (an AppImage: vibespace-app install --file <file> --why "…")'); process.exit(2); }
+    if (!kr.addArgv) { // design 009: an AppImage is PROPOSED like any installer (its row installs nothing as the user) — VibeSpace unpacks it in its own directory at the user's click
       if (!why.trim()) { console.error('vibespace-app add --kind appimage: say why (--why "…") — the user reads it before deciding'); process.exit(2); }
       const file = path.resolve(target);
       const j = await call('POST', '/api/agent/apps/proposals', { ...hostB(), request: { kind: 'installer', file }, why });
@@ -175,12 +181,11 @@ function planLine(p) {
       out(j, `Proposed ${p.id}: ${(p.app && p.app.name) || p.label} (your file, ${size(p.bytes && p.bytes.download)}). The user sees one card; nothing is installed until they press Install.\nThe file you had (${file}) is no longer needed — VibeSpace keeps its own copy.`);
       return;
     }
-    if (kind !== 'appimage' && !/^[@a-z0-9][a-z0-9@/._+-]{0,120}$/i.test(target)) { console.error('vibespace-app add: not a package name'); process.exit(2); }
+    if (!/^[@a-z0-9][a-z0-9@/._+-]{0,120}$/i.test(target)) { console.error('vibespace-app add: not a package name'); process.exit(2); }
     const run = (cmd, a) => { const r = spawnSync(cmd, a, { stdio: 'inherit' }); if (r.error) { console.error(`vibespace-app add: ${cmd} could not run (${r.error.message})`); process.exit(5); } if (r.status !== 0) { console.error(`vibespace-app add: ${cmd} exited ${r.status}`); process.exit(r.status || 1); } };
     const name = target;
-    if (kind === 'uv') run('uv', ['tool', 'install', target]);
-    else run('npm', ['install', '-g', '--prefix', path.join(os.homedir(), '.local'), target]);
-    const j = await call('POST', '/api/agent/apps/user-kind', { ...hostB(), kind: kind === 'uv' ? 'uv-tool' : kind, name, why });
+    run(kr.addArgv[0], [...kr.addArgv.slice(1).map((a) => (a === '~/.local' ? path.join(os.homedir(), '.local') : a)), target]); // the row's argv, as the user
+    const j = await call('POST', '/api/agent/apps/user-kind', { ...hostB(), kind: kr.id, name, why });
     out(j, `Installed ${name} (${kind}) in your home and recorded it (${j.entry ? j.entry.id : 'recorded'}) — it needs no replay after a rebuild.`);
     return;
   }

@@ -52,11 +52,12 @@ if (!fs.existsSync(path.join(repo, 'src/lib/build-version.js'))) {
 //   inbox — THE For-you window, a singleton (docs/design-user-inbox-reply.md §9, 2026-09-27): the inbox as a mail client
 //   browser-replay — a conversation's (or a profile's) browser SESSIONS and their replay, one window per target (2026-09-27)
 //   design — the Design window: a conversation's designs/<slug>/ artboards live on a canvas, one window per (host, dir) (lane design-window, 2026-10-02)
-const CORE_TYPES = ['browser', 'browser-live', 'browser-profiles', 'browser-replay', 'channel', 'channel-outbox', 'channels', 'chat', 'design', 'desktop', 'desktop-app', 'editor', 'files', 'hex-viewer', 'inbox', 'integrations', 'job-interact', 'jobs',
+//   doc — the Doc window: a markdown file read, edited and commented in one rendered view, one window per (host, path) (lane doc-window, 2026-10-05)
+const CORE_TYPES = ['browser', 'browser-live', 'browser-profiles', 'browser-replay', 'channel', 'channel-outbox', 'channels', 'chat', 'design', 'desktop', 'doc', 'desktop-app', 'editor', 'files', 'hex-viewer', 'inbox', 'integrations', 'job-interact', 'jobs',
   'machine-desktop', 'ports', 'settings', 'stage-placeholder', 'system', 'task', 'terminal', 'usage', 'viewer', 'workflow'];
 const CORE_ACTIONS = ['attachSession', 'openFileExplorer', 'openFile', 'openEditor', 'openBrowser', 'openBrowserLive', 'openBrowserProfiles', 'openDesktop', 'openDesktopApp',
   'openTaskDetail', 'openTaskLog', 'openJobs', 'openJobInteract', 'openUsage', 'openSettings', 'openSessionProps',
-  'openWorkflowDetail', 'attachTmuxSession', 'viewSession', 'viewSubagent', 'openChannel', 'openChannelOutbox', 'openIntegrations', 'openChannels', 'openSystem', 'openPorts', 'openInbox', 'openBrowserReplay', 'openDesign'];
+  'openWorkflowDetail', 'attachTmuxSession', 'viewSession', 'viewSubagent', 'openChannel', 'openChannelOutbox', 'openIntegrations', 'openChannels', 'openSystem', 'openPorts', 'openInbox', 'openBrowserReplay', 'openDesign', 'openDoc'];
 // layout.js's former `TRANSIENT_WINDOW_TYPES = new Set(['chat', 'terminal', 'stage-placeholder'])`
 const CORE_TRANSIENT = ['chat', 'terminal', 'stage-placeholder', 'machine-desktop']; // + design 014 D1: a machine's whole desktop is never re-opened by a reload (it asks the sign-in)
 // kinds whose opener focuses an existing window of the kind instead of opening a second
@@ -246,7 +247,7 @@ const EXPECTED_OWNER = { chat: 'session-lifecycle.js', terminal: 'session-lifecy
   'machine-desktop': 'machine-desktop.js', // design 014 D1
   task: 'task-detail.js', jobs: 'jobs-panel.js', 'job-interact': 'jobs-panel.js', usage: 'usage-window.js',
   settings: 'settings-ui.js', workflow: 'workflow-detail.js', 'stage-placeholder': 'stage-manager.js', integrations: 'integrations-window.js',
-  channels: 'channels-panel.js', system: 'sidebar-rail.js', ports: 'sidebar-rail.js', inbox: 'inbox-window.js', 'browser-replay': 'browser-replay-window.js', design: 'design-window.js' };
+  channels: 'channels-panel.js', system: 'sidebar-rail.js', ports: 'sidebar-rail.js', inbox: 'inbox-window.js', 'browser-replay': 'browser-replay-window.js', design: 'design-window.js', doc: 'doc-window.js' };
 ok(Object.entries(EXPECTED_OWNER).every(([t, f]) => owner[t] === f), 'each kind registers in its owning module',
   Object.entries(EXPECTED_OWNER).filter(([t, f]) => owner[t] !== f).map(([t, f]) => `${t}: ${owner[t]} (expected ${f})`).join('; '));
 ok(regs.some((r) => r.file === 'task-log.js' && r.fn === 'registerOpenAction' && r.actions.includes('openTaskLog') && r.type === 'task')
@@ -267,6 +268,19 @@ ok([...new Set(regs.map((r) => r.file))].every((f) => /from '\.\/window-types\.j
   ok(/createWindow\(\{[^}]*type: 'design'[^}]*openSpec[^}]*\}\)/.test(dh) && /const openSpec = \{ action: 'openDesign', host: '', dir: '', sessionId: '' \};/.test(dh), "the home is a 'design' window whose openSpec is openDesign with dir '' (no new kind, no new action)");
   ok(/w\._designHome\)/.test(dh) && /revealWindow\(existing\.id, \{ replay: !!syncId \}\)/.test(dh), 'one home per client: an open one is revealed (a replay only raises)');
   ok(!HOME_PIN.test("  if (!d) { showToast(t('No design folder was named'), { type: 'error' }); return null; }"), 'negative control: the pre-lane no-folder line fails the home pin');
+}
+
+// THE DOC WINDOW (lane doc-window): app.openFile routes a markdown file to it (a `:line` link, hex and a derived temp file
+// keep the editor's door); the replay carries host + path + from; one window per (host, path) — an open one is revealed.
+{
+  const dd = src['doc-window.js'] || '', ap = src['app.js'] || '';
+  const ROUTE = /if \(\/\\\.\(md\|markdown\)\$\/i\.test\(fileName \|\| filePath\) && !opts\.line && !opts\.hex && !opts\._tempFile && !opts\.via\) \{/;
+  ok(ROUTE.test(ap) && /return this\.openDoc\(\{ host: opts\.host \|\| '', path: filePath, from:/.test(ap), 'openFile routes .md / .markdown to the Doc window (a :line link / hex / a temp file keep the editor)');
+  const reg = typeRegs.find((r) => r.type === 'doc');
+  ok(!!reg && /path: spec\.path\b/.test(reg.replay) && /from: spec\.from/.test(reg.replay) && /host: spec\.host/.test(reg.replay), `the doc replay carries host, path and from: ${reg && reg.replay}`);
+  ok(/const openSpec = \{ action: 'openDoc', host: h, path: p, from: from \|\| '' \};/.test(dd) && /w\._filePath !== p \|\| \(w\._docHost \|\| ''\) !== h/.test(dd) && /app\.wm\.revealWindow\(w\.id, \{ replay: !!syncId \}\)/.test(dd), 'one Doc window per (host, path): an open one is revealed (a replay only raises)');
+  ok(/import\(new URL\('\/doc-editor\.js', location\.origin\)\.href\)/.test(dd) && !/from 'prosemirror/.test(dd), 'the editor is the LAZY public/doc-editor.js — the door imports no prosemirror module');
+  ok(!ROUTE.test("    if (/\\.(md|markdown)$/i.test(fileName || filePath)) {"), 'negative control: a route without the :line / hex / temp-file exits fails the pin');
 }
 
 // census: every `createWindow({ ... type: '<lit>' })` literal in src/lib is a registered kind

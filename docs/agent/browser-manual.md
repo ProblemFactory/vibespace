@@ -32,6 +32,11 @@ takes over in the live view. Never launch chromium / google-chrome / playwright 
 next step — follow it. `vibespace-browser status` says when this machine has no display.
 Say: "I am using the Agent browser — open the Agent browser window to watch it or take over."
 
+**(e) "A site asks for a passkey"** (a "Use your passkey" page; a command ending `[passkey_open]`): your
+browser holds no passkey of the user's — you cannot provide one. `vibespace-browser passkey cancel`, then take
+the page's other way in (a recovery code, a password), or ask the user. Never press Escape or click again and
+again — the page takes no input while it waits. Say: "<site> asks for a passkey my browser does not have — I cancelled it; please sign in on your own device, or tell me another way in."
+
 ---
 
 You have **one** browser tool: `vibespace-browser`. Every page verb is one of
@@ -314,6 +319,31 @@ guess from a timeout:
   user which page it is — the Restart is theirs (the live view's banner / the
   Agent browser panel; it loses what was typed on the page); never retry in a
   loop.
+
+### A page waiting for a passkey — `[passkey_open]`
+
+A sign-in page may call the browser's passkey API (WebAuthn: "Use your passkey", "Continue with Passkey").
+Chrome then shows ITS OWN window — not page pixels: the live view and your screenshots never show it — and
+the page takes no input until it ends. **Your browser holds no passkey of the user's**, so it never ends by
+itself. VibeSpace watches every tab of your browser for these requests:
+
+* **A request pending 3 s is a named fact.** A command that would act on the page (`click`, `press`,
+  `type`, `fill`, …) does NOT act: it returns `[passkey_open]`, exit 1, and its result STARTS with the sentence
+  `This page is waiting for a passkey (<site>). The agent's browser holds no passkey of yours — cancel it
+  (\`vibespace-browser passkey cancel\`) and use the page's other way in (a recovery code, a password), or ask
+  the user to sign in on their own device.` (`--json`: `{"success":false,"code":"passkey_open","passkey":
+  {state,id,kind,rpId,tab,startedAt,text},"error":"<the sentence>"}`). A command already running when the
+  request turns 3 s old returns the same at once; a read (`snapshot`, `screenshot`, `get …`) runs with the
+  sentence as its first note. Pressing Escape again and again changes nothing — that is the incident this
+  answers.
+* **`vibespace-browser passkey status`** — what is pending (or "No passkey request is waiting on your
+  browser."). **`vibespace-browser passkey cancel`** — aborts the page's request: the page is told it was
+  aborted (its own error path runs, its spinner stops), Chrome's window closes, and the page's other ways in
+  ("Use a recovery code", "Sign in with password") take clicks again. Then choose one — or ask the user.
+* A browser VibeSpace began watching after a page already asked (rare: a restart) cannot be seen into —
+  `passkey status` says so; navigate elsewhere or close the tab.
+* The user sees the same in the live view (a banner with ONE button, Cancel — and, for a browser with a
+  window, that Chrome's own passkey window is on this computer's desktop), and, after 20 s, one "For you" item.
 
 ### A page that keeps reloading — a navigation loop
 
@@ -715,6 +745,8 @@ default with `*`.
 * **Never echo a cookie, a token or an `Authorization` header** into your reply
   or into a file. The OUTPUT of `cookies get`, `state save` and `storage` is a
   secret; so are screenshots of logged-in pages and HAR captures.
+* **`passkey_open` is cancelled, never waited out or pressed at.** `vibespace-browser passkey cancel`, then the
+  page's other way in, or ask the user — you never have the user's passkey.
 * **`dialog_open` is answered, never waited out.** Read what the page asks,
   decide from the task, `vibespace-browser dialog accept [text]` or `dismiss`,
   then continue — never retry the command that ran into it.

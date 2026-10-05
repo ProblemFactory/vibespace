@@ -50,6 +50,7 @@ import { openIntegrationsWindow } from './integrations-window.js';
 import { openSessionProps as openSessionPropsFn } from './session-props.js';
 import { openWorkflowDetail as openWorkflowDetailFn } from './workflow-detail.js';
 import { openDesign as openDesignFn, openDesignPublishDialog, installDesignWindow } from './design-window.js'; // lane design-window: the Design window (window type `design`) + its publish dialog + the hub's open push
+import { openDoc as openDocFn } from './doc-window.js'; // lane doc-window: the Doc window (window type `doc`) — a markdown file read, edited and annotated in one rendered view; the editor itself is the lazy public/doc-editor.js
 import { DesktopManager } from './desktop-manager.js';
 import { StageManager, STAGE_ID } from './stage-manager.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
@@ -2046,7 +2047,7 @@ class App {
       if (!w || id === fromId) continue;
       const wHost = (w._openSpec && w._openSpec.host) || w._explorerHost || '';
       if ((wHost || '') !== (host || '')) continue;
-      const same = dir ? (w.type === 'files' && w._explorerPath === p) : ((w.type === 'viewer' || w.type === 'editor' || w.type === 'hex-viewer') && w._filePath === p);
+      const same = dir ? (w.type === 'files' && w._explorerPath === p) : ((w.type === 'viewer' || w.type === 'editor' || w.type === 'hex-viewer' || (w.type === 'doc' && !line)) && w._filePath === p);
       if (!same) continue;
       this.wm.revealWindow(id); // its own tab (the host's too — inc-muiq348r-jwb5's one door), raised
       if (line && typeof w._gotoLine === 'function') { try { w._gotoLine(line); } catch { } }
@@ -2177,6 +2178,8 @@ class App {
   openDesign(opts) { return openDesignFn(this, opts || {}); }
   /** The design publish dialog (the window's Publish… and the chip's). */
   publishDesign(opts) { return openDesignPublishDialog(this, opts || {}); }
+  /** The Doc window for one markdown file ({host, path, from}) — openFile's `.md` route, layout replay. */
+  openDoc(opts) { return openDocFn(this, opts || {}); }
 
   // Session state keys (backend:backendSessionId) of every window currently
   // blinking "waiting for input" — the idle-detection signal the task board
@@ -2214,10 +2217,16 @@ class App {
    *  its chain is shown instead; otherwise the placement is resolved NOW (the
    *  act) and rides `opts.intoChain` through FileViewer.open's async checks. */
   openFile(filePath, fileName, opts = {}) {
+    // lane doc-window: a markdown file opens as the Doc window (rendered, editable, commentable); a `:line` link, the hex
+    // view and a derived temp file keep the editor's door. `from` (a window id) → the chat session it shows = the owner witness
+    if (/\.(md|markdown)$/i.test(fileName || filePath) && !opts.line && !opts.hex && !opts._tempFile && !opts.via) {
+      if (opts.from && this._focusOpenInChain(opts.from, { path: filePath, host: opts.host })) return;
+      return this.openDoc({ host: opts.host || '', path: filePath, from: (opts.from && this.sessions.get(opts.from)?.sessionId) || '', intoChain: opts.from ? this.linkPlacement(opts.from) : opts.intoChain, syncId: opts.syncId });
+    }
     if (opts.from) {
       if (this._focusOpenInChain(opts.from, { path: filePath, host: opts.host, line: opts.line })) return;
       const { from, ...rest } = opts;
-      opts = { ...rest, intoChain: this.linkPlacement(from) };
+      opts = { ...rest, intoChain: this.linkPlacement(from), fromWin: from }; // lane artifacts-model: the editor's save counts on the source chat's deliverable row
     }
     FileViewer.open(this, filePath, fileName, opts);
   }

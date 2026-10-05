@@ -156,11 +156,11 @@ import { t } from './i18n.js';
 import { escHtml, fetchJson, showConfirmDialog, showContextMenu, showToast, uiScale } from './utils.js';
 import { windowMinForPane } from './window-min-size.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
-import { createVncView, streamUrl, STREAM_KIND as RFB_KIND } from './vnc-view.js';
-import { createXpraView, STREAM_KIND as XPRA_KIND } from './xpra-view.js';
+import { streamUrl } from './vnc-view.js';
+import { viewOf, STATUS_KIND } from './stream-views.js'; // rv-desktop-apps F-B4: the view of each stream kind — one line per kind there
 import { windowLiveMode, windowModeBadge, leaseTransition, newViewerId } from './window-live-mode.js';
 import { paneState } from '../desktop-viewers.js';
-import { exitCloseVerdict, outerCloseVerdict, OUTER_CLOSE_AGAIN_MS, scaleKnobs, scaleMenuModel, renderOf, relaunchPaneCss, relaunchVerdict } from '../desktop-apps.js';
+import { exitCloseVerdict, outerCloseVerdict, OUTER_CLOSE_AGAIN_MS, scaleKnobs, scaleMenuModel, renderOf, relaunchPaneCss, relaunchVerdict } from '../desktop-fit.js';
 import { memoryText } from '../runaway-guard.js';
 import { launchDpr, launchUiScale, explicitScaleLabel, stopDesktopApp, confirmDiscard } from './desktop-app-launcher.js';
 import { startCenterVerdict } from '../office-open.js'; // B-04da ⑤ (PURE)
@@ -438,8 +438,8 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '' } = {}) {
   let view = null;
   let appTitle = '';      // the app window's own title, from the xpra protocol ('' = none yet)
   let front = null;       // design 016 S1c: the FRONT X window when it is NOT the app's main ({wid, title} — WeChat's Moments)
-  // the view of a stream KIND, registered by the view module's own STREAM_KIND (an unknown kind takes the RFB view, as before)
-  const streamKindOf = (r) => (r && r.stream === XPRA_KIND ? XPRA_KIND : RFB_KIND);
+  // the stream KIND the record declares; src/lib/stream-views.js answers with its view (keyed by the view module's own STREAM_KIND)
+  const streamKindOf = (r) => (r && r.stream) || STATUS_KIND;
   const viewOpts = () => ({
     url: () => { viewerId = newViewerId(); winInfo._windowViewerId = viewerId; return streamUrl(`/api/desktop/${encodeURIComponent(id)}/stream`) + `?viewer=${encodeURIComponent(viewerId)}&pane=${encodeURIComponent(paneKey)}` + (prevPane ? `&prev=${encodeURIComponent(prevPane)}` : ''); }, // the ONE bridge path (test-vnc-view's census) + a fresh per-socket viewer id + the stable pane key (x5) + its predecessor (the grace)
     labels: { starting: t('Starting application…'), unavailable: t('Desktop app unavailable') },
@@ -458,9 +458,8 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '' } = {}) {
   };
   const ensureView = (kind) => {
     if (view) return view;
-    view = kind === XPRA_KIND
-      ? createXpraView(winInfo.content, { ...viewOpts(), workerUrl: `/api/desktop/${encodeURIComponent(id)}/xpra-ui/js/Protocol.js`, onTitle: (text) => { appTitle = String(text || ''); render(); }, onIcon: setAppIcon, onMinSize: applyMinSize, onFixedSize: applyFixedSize, fixedFollows: () => !app.wm._mobileLayout(), onFront: (f) => { front = f && !f.main ? { wid: f.wid, title: String(f.title || '') } : null; render(); }, onSatellite: ({ wid, title }) => { openSatelliteWindow(app, id, wid, { title, beside: winInfo, fresh: true }); }, onMain: onAppMain, onState: onAppState, onMoveResize: onAppMoveResize, dpi: () => (rec && Number.isInteger(rec.dpi) ? rec.dpi : 96), pictureScale: () => renderOf(rec).picture }) // lane D (a): the RECORD says what it was drawn at
-      : createVncView(winInfo.content, viewOpts());
+    // ONE call for every kind: each view reads the options it knows (the RFB view none of the protocol window's callbacks)
+    view = viewOf(kind)(winInfo.content, { ...viewOpts(), workerUrl: `/api/desktop/${encodeURIComponent(id)}/xpra-ui/js/Protocol.js`, onTitle: (text) => { appTitle = String(text || ''); render(); }, onIcon: setAppIcon, onMinSize: applyMinSize, onFixedSize: applyFixedSize, fixedFollows: () => !app.wm._mobileLayout(), onFront: (f) => { front = f && !f.main ? { wid: f.wid, title: String(f.title || '') } : null; render(); }, onSatellite: ({ wid, title }) => { openSatelliteWindow(app, id, wid, { title, beside: winInfo, fresh: true }); }, onMain: onAppMain, onState: onAppState, onMoveResize: onAppMoveResize, dpi: () => (rec && Number.isInteger(rec.dpi) ? rec.dpi : 96), pictureScale: () => renderOf(rec).picture }) // lane D (a): the RECORD says what it was drawn at;
     view.mount.classList.add('desktop-app-mount');
     winInfo._desktopAppView = view; // the raw handle the heavy suite reads (never the DOM)
     if (cap(rec, 'satellites')) announceMainView(id, { view, winInfo }); // S2: satellites replayed before this view bind to it now
@@ -877,7 +876,7 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '' } = {}) {
     fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}`).then((r) => {
       if (closed || winInfo._desktopAppId !== nextId) return;
       if (r && r.code === 'not-found') { forgotten(); return; }
-      if (!r || r.error) { ensureView('rfb').setStatus(r?.error ? `${t('Desktop app unavailable')}: ${r.error}` : t('Desktop app unavailable'), { error: true, reconnect: false }); return; }
+      if (!r || r.error) { ensureView(STATUS_KIND).setStatus(r?.error ? `${t('Desktop app unavailable')}: ${r.error}` : t('Desktop app unavailable'), { error: true, reconnect: false }); return; }
       applyRecord(r); refetchReach();
       if (rec && rec.state === 'launching') { if (view.starting) view.starting(); else view.setStatus(t('Starting application…')); } // design 009 §B8: an xpra pane counts the seconds
     });
@@ -1051,7 +1050,7 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '' } = {}) {
     if (closed) return;
     if (r && r.code === 'not-found') { forgotten(); return; } // a replay of a record the keeper forgot: no window
     if (r && !r.error) { if (followReplacement(r) || decideExit(r)) return; reveal(); rec = r; ensureView(streamKindOf(r)); render(); refetchReach(); } // a dead record replayed: closed before it ever painted; a replaced one follows its successor
-    else { reveal(); ensureView('rfb').setStatus(r?.error ? `${t('Desktop app unavailable')}: ${r.error}` : t('Desktop app unavailable'), { error: true, reconnect: false }); return; }
+    else { reveal(); ensureView(STATUS_KIND).setStatus(r?.error ? `${t('Desktop app unavailable')}: ${r.error}` : t('Desktop app unavailable'), { error: true, reconnect: false }); return; }
     if (rec.state === 'launching') {
       if (view.starting) view.starting(); else view.setStatus(t('Starting application…')); // design 009 §B8: an xpra pane counts the seconds
       // the broadcast flips it to ready; connect then (applyRecord)

@@ -27,9 +27,12 @@ import { execFileSync } from 'node:child_process';
 export const FAMILIES = {
   harness: { ids: ['claude', 'codex', 'opencode', 'acp', 'shell'], owners: [{ dir: 'src/harnesses/' }, { dir: 'src/adapters/' }] },
   channel: { ids: ['lark', 'slack', 'gmail', 'fake', 'agents'], owners: [{ dir: 'src/channels/' }] },
-  display: { ids: ['xpra', 'vnc', 'desktop-singleton', 'x11vnc'], owners: [{ file: 'src/desktop-apps.js', table: /^const DISPLAY_BACKENDS\s*=/m }] },
+  display: { ids: ['xpra', 'vnc', 'desktop-singleton', 'x11vnc'], owners: [{ file: 'src/desktop-backends.js', table: /^const DISPLAY_BACKENDS\s*=/m }] },
   browser: { ids: ['cloak', 'chromium', 'agent-browser'], owners: [{ file: 'src/browser-switch.js' }, { file: 'src/browser-profiles.js', table: /^const PROVIDERS\s*=/m }] },
   plugin: { ids: ['tailscale', 'frp'], owners: [{ dir: 'src/plugins/' }] },   // lane dc-plugins: a member = src/plugins/<id>.js + one index line
+  // lane dc-apps-rows (2026-10-04, rv-desktop-apps F-A1): an app KIND is one row of src/app-kinds.js (the generic words
+  // source / remove / search / move are kinds too, but every other family's code says them — only the kind-only ids count)
+  appkind: { ids: ['apt', 'deb', 'appimage', 'uv-tool', 'npm', 'installer'], owners: [{ file: 'src/app-kinds.js' }] },
 };
 
 // FALSE POSITIVES — a line the regexes match that is not a branch on a family member. Each row: the family, the
@@ -37,6 +40,7 @@ export const FAMILIES = {
 // the ratchet no longer sees.
 export const ALLOW = [
   { family: 'harness', file: /^src\/codex-message-manager\.js$/, line: /\bn === 'shell'/, reason: 'Codex\'s own tool name (exec / shell / local_shell → bash), not the shell harness' },
+  { family: 'appkind', file: /^src\/browser-profiles\.js$/, line: /t\.phase === 'npm'/, reason: 'the browser install\'s npm STEP (its progress phase), not the npm app kind' },
   { family: 'channel', file: /^src\/lib\/(?:manage-agents|sidebar-rail)\.js$/, line: /_activeTab\s*[!=]==?\s*'agents'/, reason: 'the sidebar rail\'s Agents tab, not the agents channel vendor' },
 ];
 

@@ -9,7 +9,7 @@
 // This file DECIDES (structure only, no words, no DOM); desktop-app-launcher.js / desktop-app-window.js say it.
 // Gate: scripts/test-desktop-app-scale.mjs (fast).
 import { frameKeyOf } from './desktop-seamless.js';
-import { SCALE_CHOICES, parseScaleChoice, normalizeScale } from '../desktop-apps.js';
+import { SCALE_CHOICES, parseScaleChoice, normalizeScale } from '../desktop-fit.js';
 
 /** The user-state key the per-app default scales live under. */
 export const SCALE_PREF_KEY = 'desktopAppScale';

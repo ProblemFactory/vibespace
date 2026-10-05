@@ -368,6 +368,8 @@ function stuckWords(f, tIn) {
   const t = typeof tIn === 'function' ? (s, p) => tIn(s, p) : fill;
   if (f.state === 'dialog') return { chip: t('page dialog open'), line: t('The page is waiting on a dialog — answer it in the live view'), action: null };
   if (f.state === 'unresponsive') return { chip: t('page not responding'), line: t('The page is not responding — Restart'), action: t('Restart'), tooltip: t('Restart stops this browser and starts it again; open tabs close, logins in a saved profile stay') };
+  // lane browser-passkey: a page waiting for a passkey (the banner's words are browser-passkey's passkeyWords)
+  if (f.state === 'passkey') return { chip: t('page waits for a passkey'), line: t('The page is waiting for a passkey — cancel it in the live view'), action: null };
   // lane site-reset: the loop (with its cycle where the fact carries it; the panel row's digest carries kinds only)
   if (f.state === 'loop') { const w = f.loop ? loopWords(f.loop, tIn) : null; return { chip: w ? w.chip : t('page keeps reloading'), line: w ? w.line : t('The page keeps reloading by itself (a navigation loop) — its stored login may be stale'), action: null, loop: w }; } // verify r4 #4: the chip follows the shape (a self-refreshing page says its period)
   return null;

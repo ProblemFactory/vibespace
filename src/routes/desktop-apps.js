@@ -135,7 +135,8 @@
  * 200-with-nothing would be a silent failure of a user action.
  */
 const express = require('express');
-const { capsOf, scaleChoiceVerdict, INSTALL_WHATS, relaunchLeaseVerdict, TIGHTVNC, machineDesktopId } = require('../desktop-apps');
+const { capsOf, scaleChoiceVerdict, relaunchLeaseVerdict, TIGHTVNC, machineDesktopId } = require('../desktop-apps');
+const { INSTALL_WHATS, DEFAULT_INSTALL, installRow } = require('../installs'); // THE INSTALLABLES — the routes ask the row (lane dc-apps-rows)
 /** design 014 D1: the whole-desktop refusals' statuses (by name, like every code below). */
 const D014_STATUS = Object.freeze({ human_only: 403, no_vnc: 409, not_desktop_machine: 409, not_windows: 409, no_admin: 409, run_failed: 409, empty: 400, too_long: 400, multi_line: 400, hidden_chars: 400 });
 const { openWithVerdict, installSpecFor, FONTS_ID } = require('../office-open'); // §7.9: the ONE open-with verdict
@@ -227,8 +228,9 @@ router.get('/api/desktop/install-plan', async (req, res) => {
   if (!ctx.access) return fail(res, { code: 'host_unavailable', message: 'the desktop access layer is not wired on this instance' });
   // §7.9: `what` = which install (absent = xpra, the call exactly as before); a closed set — anything else 400 by name
   const what = req.query.what == null || req.query.what === '' ? null : String(req.query.what);
-  if (what === TIGHTVNC.id && humanOnly(req, res)) return; // design 014 D1: the Windows one-time setup
-  if (what !== null && what !== TIGHTVNC.id && !INSTALL_WHATS.includes(what)) return fail(res, { code: 'bad-request', message: `unknown install ${JSON.stringify(what.slice(0, 40))} — one of ${INSTALL_WHATS.join(', ')}` });
+  const row = what === null ? null : installRow(what);
+  if (row && row.humanOnly && humanOnly(req, res)) return; // design 014 D1: the Windows one-time setup is people's
+  if (what !== null && !row) return fail(res, { code: 'bad-request', message: `unknown install ${JSON.stringify(what.slice(0, 40))} — one of ${INSTALL_WHATS.join(', ')}` });
   try { res.json(what === null ? await ctx.access.installPlan(host) : await ctx.access.installPlan(host, what)); } catch (e) { fail(res, e); }
 });
 /** THE STREAMED INSTALL (lane C2; §7.9 shares it for every `what`): the machine's slot asked BEFORE the stream starts
@@ -262,6 +264,8 @@ const xpraDone = (r) => {
   try { ctx.keeper.facts?.({ fresh: true })?.catch?.(() => { }); } catch { /* the local ladder is re-read on the next list */ }
   return out;
 };
+/** What the route re-checks after an install, by the row's declared `done` (src/installs.js) — never by its name. */
+const DONE = { display: () => xpraDone, catalog: (host, what) => officeDone(host, what), vnc: () => tightvncDone };
 // verify-r6 I1: the press names the plan it was SHOWN (`planDigest` from GET install-plan) — a plan that changed since
 // is refused plan_changed with the new one, nothing run
 const shownDigest = (req) => (req.body && typeof req.body.planDigest === 'string' && req.body.planDigest ? req.body.planDigest.slice(0, 64) : null);
@@ -283,11 +287,11 @@ const officeDone = (host, what) => async (r) => {
 };
 router.post('/api/desktop/install', async (req, res) => {
   const host = hostParam(req, res); if (!host) return;
-  const what = req.body && req.body.what != null && req.body.what !== '' ? String(req.body.what) : 'xpra';
-  if (what === TIGHTVNC.id) { if (humanOnly(req, res)) return; return streamInstall(req, res, host, (o) => ctx.access.installPackage(host, { ...o, what, expectDigest: shownDigest(req) }), tightvncDone); } // design 014 D1
-  if (!INSTALL_WHATS.includes(what)) return fail(res, { code: 'bad-request', message: `unknown install ${JSON.stringify(what.slice(0, 40))} — one of ${INSTALL_WHATS.join(', ')}` });
-  if (what === 'xpra') return streamInstall(req, res, host, (o) => ctx.access.installXpra(host, { ...o, expectDigest: shownDigest(req) }), xpraDone);
-  return streamInstall(req, res, host, (o) => ctx.access.installPackage(host, { ...o, what, expectDigest: shownDigest(req) }), officeDone(host, what));
+  const what = req.body && req.body.what != null && req.body.what !== '' ? String(req.body.what) : DEFAULT_INSTALL;
+  const row = installRow(what);
+  if (row && row.humanOnly && humanOnly(req, res)) return; // design 014 D1: the Windows one-time setup is people's
+  if (!row) return fail(res, { code: 'bad-request', message: `unknown install ${JSON.stringify(what.slice(0, 40))} — one of ${INSTALL_WHATS.join(', ')}` });
+  return streamInstall(req, res, host, (o) => ctx.access.installPackage(host, { ...o, what, expectDigest: shownDigest(req) }), DONE[row.done](host, what));
 });
 // ── design 014 D1 (lane desktop-vnc-native): a Windows / macOS machine's WHOLE DESKTOP — people only ──
 /** An agent's token (a Bearer header, a token in the body or the url) is refused by name on every whole-desktop door:

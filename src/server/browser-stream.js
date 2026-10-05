@@ -246,6 +246,15 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
       .then((r) => ack(r.ok ? { ok: true } : { ok: false, code: r.code || 'refused', error: r.error || 'refused' }))
       .catch((e) => ack({ ok: false, code: 'internal', error: String(e && e.message) }));
   }
+  /** lane browser-passkey: the live view's Cancel — every pending passkey request of this view's conversation, as the USER. */
+  function cancelPasskeyFor(relay, viewer) {
+    const pid = relayProfileId(relay);
+    const ack = (o) => send(viewer.ws, { type: 'passkey-ack', ...o });
+    if (!dialogs || !pid || typeof dialogs.cancelPasskey !== 'function') return ack({ ok: false, code: 'not_watched', error: 'VibeSpace is not watching this browser' });
+    dialogs.cancelPasskey({ profileId: pid, browserKey: relay.browserKey, sessionId: relay.sessionId, ephemeral: relay.target.kind !== 'attachment' }, { by: 'user' })
+      .then((r) => ack(r.ok ? { ok: true, n: r.n } : { ok: false, code: r.code || 'refused', error: r.error || 'refused' }))
+      .catch((e) => ack({ ok: false, code: 'internal', error: String(e && e.message) }));
+  }
   /** The tab each of a conversation's relays shows (the watch's scope for a dialog — whose tab it is). */
   function activeTargetsFor({ sessionId = null, browserKey = null, profileId = null } = {}) {
     // verify r2 #3: ONE conversation's relays — by its browser key (a helper's view is keyed on its own), else its session;
@@ -1174,6 +1183,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
   }
   function onViewerMessage(relay, viewer, d) {
     let msg = null; try { msg = JSON.parse(typeof d === 'string' ? d : d.toString()); } catch { send(viewer.ws, { type: 'refused', code: 'bad-message', error: 'not JSON' }); return; }
+    if (msg && msg.type === 'passkey-cancel') { cancelPasskeyFor(relay, viewer); return; } // lane browser-passkey: the banner's ONE button
     if (msg && msg.type === 'dialog-answer') { answerDialog(relay, viewer, msg); return; } // lane browser-stuck: the user's Accept / Dismiss on a page dialog (any viewer — the user's own chrome, not a forwarded page input)
     const v = S.viewerMessageVerdict(msg, { holder: relay.holder, viewerId: viewer.id, mode: relay.mode });
     if (v.kind === 'config') { if (v.maxFps !== undefined) { viewer.maxFps = v.maxFps; pushMaxFps(relay); armTrail(relay, viewer); } send(viewer.ws, { type: 'config-ack', maxFps: viewer.maxFps, upstreamMaxFps: relay.upstreamMaxFps }); return; } // lane S4: a viewer back from 2 fps (a hidden tab) catches up on the latest frame

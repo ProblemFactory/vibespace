@@ -216,7 +216,9 @@ const PURE = new Set(['src/timed-sync.js' /* design 011 lane 1 (store-timing): t
   // DESKTOP APPS (docs/design-desktop-apps §2, 2026-09-13): the ONE constants home every
   // process keeper bounds by (opencode-serve reads it too) + the registry/ladder/state-machine
   // model — decisions only, the machine facts are src/desktop-display.js (SHARED)
-  'src/keeper-limits.js', 'src/desktop-apps.js',
+  'src/keeper-limits.js', 'src/desktop-apps.js', 'src/install-slot.js' /* lane dc-apps-rows: the machine's ONE package slot — imports nothing */, 'src/installs.js' /* lane dc-apps-rows: THE INSTALLABLES — one row each, imports only PURE owners */, 'src/app-kinds.js' /* lane dc-apps-rows: an app KIND is one row — imports nothing */,
+  // rv-desktop-apps F-S1 (lane dc-seams-desktop): its families, each its own PURE file
+  'src/desktop-backends.js', 'src/desktop-fit.js', 'src/desktop-browser-app.js', 'src/machine-desktop-model.js',
   // OPEN WITH LIBREOFFICE (docs/design-desktop-apps §7.9, the owner's ruling 2026-09-27 ②): the office table, the
   // open-with verdict (the file rule, THE MACHINE RULE, the app), the argv and the closed install set — imports
   // nothing; the machine keeper, the routes, the machine facts, the daemon bundle and the browser bundle share it
@@ -2759,6 +2761,7 @@ console.log('§62 every path where the user names a window goes through wm.revea
     'src/lib/chat-view.js': [2, 'the two sub-agent viewer dedupes'],
     'src/lib/workflow-detail.js': [2, 'the workflow window + its agent-log dedupe'],
     'src/lib/design-window.js': [1, 'the Design window\'s one-per-(host, dir) re-open (a replay passes { replay })'],
+    'src/lib/doc-window.js': [1, 'the Doc window\'s one-per-(host, path) re-open (a replay passes { replay })'],
     'src/lib/design-home.js': [1, 'the Design window home\'s one-per-client re-open (a replay passes { replay }) — lane design-systems-home'],
     'src/lib/machine-desktop.js': [1, 'a machine\'s whole-desktop window: one per machine per page, a second open reveals it — design 014 D1'],
     'src/lib/desktop-app-window.js': [2, 'the singleton re-open (a replay passes { replay }) + a satellite the app just opened, in front — design 016 S2'],
@@ -3348,7 +3351,7 @@ console.log('§69 every root package run goes through the machine\'s ONE package
       t.split('\n').forEach((l, i) => {
         if (/sudo -n /.test(l) && PKG.test(l.slice(l.indexOf('sudo -n')))) out.pkgLines.push(`${f}:${i + 1}`);
         if (/\[\s*'sudo'\s*,\s*'-n'/.test(l)) out.argvBuilders.push(f);
-        if (/(?:^|[^\w.])installArgv\(|\bM\.installArgv\(/.test(l) && !/function installArgv\(/.test(l)) out.consumers.installArgv.push(f); // desktop-apps' — never browser-switch's own npm argv (SW.installArgv)
+        if (/(?:^|[^\w.])installArgv\(|\b(?:M|SLOT)\.installArgv\(/.test(l) && !/function installArgv\(/.test(l)) out.consumers.installArgv.push(f); // desktop-apps' — never browser-switch's own npm argv (SW.installArgv)
         if (/\bplan\.argv\b/.test(l)) out.consumers.planArgv.push(f);
         if (/\binstallLauncherArgv\(/.test(l) && !/function installLauncherArgv\(/.test(l)) out.consumers.launcher.push(f);
         if (/\bappArgv\(/.test(l) && !/function appArgv\(/.test(l)) out.consumers.appArgv.push(f);
@@ -3368,7 +3371,7 @@ console.log('§69 every root package run goes through the machine\'s ONE package
   ok(undeclared.length === 0 && c.pkgLines.some((x) => x.startsWith('src/hosts.js:')), `§69a a package manager under \`sudo -n\` only in a declared row (${c.pkgLines.join(' ')})${undeclared.length ? ' — UNDECLARED: ' + undeclared.join(' ') : ''}`);
   // app-system-l1 (2.369.210): src/app-system.js is the THIRD plan builder — the app system's SYS_SCRIPT / INSTALL_SCRIPT
   // (design §3.2), run through the same package slot (sysArgv) and the boot install (installArgv, app-system-serve.js)
-  ok(JSON.stringify(c.argvBuilders) === JSON.stringify(['src/app-manifest.js', 'src/app-system.js', 'src/desktop-apps.js']), `§69b the root-script argv ['sudo', '-n', …] is built only by the three plan builders (${c.argvBuilders.join(' ')})`);
+  ok(JSON.stringify(c.argvBuilders) === JSON.stringify(['src/app-manifest.js', 'src/app-system.js', 'src/install-slot.js']), `§69b the root-script argv ['sudo', '-n', …] is built only by the three plan builders (${c.argvBuilders.join(' ')})`);
   ok(JSON.stringify(c.consumers.installArgv) === JSON.stringify(['src/server/desktop-access.js']) && JSON.stringify(c.consumers.planArgv) === JSON.stringify(['src/server/desktop-access.js']) && JSON.stringify(c.consumers.launcher) === JSON.stringify(['src/server/desktop-access.js']) && JSON.stringify(c.consumers.appArgv) === JSON.stringify(['src/app-serve.js']),
     `§69c their argv reaches a machine only through the slot (installArgv / plan.argv / installLauncherArgv in desktop-access.js; appArgv in the machine half): ${JSON.stringify(c.consumers)}`);
   ok(c.directSudo.length === 0, `§69d no direct sudo exec of a package manager or a shell${c.directSudo.length ? ' — ' + c.directSudo.join(' ') : ''}`);
@@ -3395,7 +3398,10 @@ console.log('§69 every root package run goes through the machine\'s ONE package
     ...(/\bKA\.armKeepalive\(/.test(src) ? [] : [`${name}: never arms the keepalive`]),
     ...(/\.ping\(\)/.test(src.replace(/\/\/[^\n]*/g, '')) ? [`${name}: pings by hand`] : []),
   ];
-  const bad = bridges.flatMap((f) => kaBad(f, read('src/server/' + f)));
+  // rv-desktop-apps F-B4 (lane dc-seams-desktop): a bridge that hands its byte pumps to per-kind relays (src/server/stream-relays.js)
+  // arms the keepalive THROUGH them — the relays' text is that bridge's text
+  const relaysOf = (src) => (/require\('\.\/stream-relays\.js'\)/.test(src) ? fs.readdirSync(path.join(REPO, 'src/server')).filter((f) => /^stream-relay-[a-z0-9-]+\.js$/.test(f)).map((f) => '\n' + read('src/server/' + f)).join('') : '');
+  const bad = bridges.flatMap((f) => { const s = read('src/server/' + f); return kaBad(f, s + relaysOf(s)); });
   ok(bridges.length >= 2 && bridges.includes('browser-stream.js') && bridges.includes('desktop-stream.js') && !bad.length, `§70 every src/server/*-stream.js arms the ONE ws keepalive (${bridges.join(', ')})${bad.length ? ' — ' + bad.join('; ') : ''}`);
   ok(kaBad('planted-stream.js', 'const t = setInterval(() => ws.ping(), 20000);').length === 3, '§70 NEGATIVE CONTROL: a planted bridge with its own pinger is red three ways');
   // verify r1 T1⑤ — THE SCOPE, stated and enforced: every ws server in server.js + src/** is a *-stream.js bridge (above)
@@ -3993,7 +3999,7 @@ console.log('§78 literal-id branches per family + unused i18n keys + unreferenc
     : r.family === 'export-dead' ? dc.exportRows.filter((x) => x.startsWith(r.file + ' ')).map((x) => '      ' + x).join('\n') : '      ' + r.file;
   ok(jDC.rises.length === 0, `§78 no new dead text: unused i18n keys, unreferenced exports and unreached src/lib files stay at or under baseline${jDC.rises.length ? ' — RISES (use it or delete it):\n' + jDC.rises.map((r) => `    ${r.family} ${r.file}: ${r.base} → ${r.now}\n${dcDetail(r)}`).join('\n') : ''}`);
   ok(jDC.falls.length === 0, `§78 the dead-code baseline is current${jDC.falls.length ? ' — FALLS (good): lower the baseline in this commit with `node scripts/dead-code-census.mjs --lower`: ' + jDC.falls.map((r) => `${r.family} ${r.file} ${r.base} → ${r.now}`).join(' | ') : ''}`);
-  ok(Object.values(ib.owners).flat().every((o) => !/NOT FOUND/.test(o)) && ib.owners.display.some((o) => /^src\/desktop-apps\.js:\d+-\d+$/.test(o)) && ib.owners.browser.some((o) => /^src\/browser-profiles\.js:\d+-\d+$/.test(o)) && ib.owners.plugin.some((o) => o === 'src/plugins/'),
+  ok(Object.values(ib.owners).flat().every((o) => !/NOT FOUND/.test(o)) && ib.owners.display.some((o) => /^src\/desktop-backends\.js:\d+-\d+$/.test(o)) && ib.owners.browser.some((o) => /^src\/browser-profiles\.js:\d+-\d+$/.test(o)) && ib.owners.plugin.some((o) => o === 'src/plugins/'),
     `§78 every owner table is found (a renamed table would silently count its own rows): ${['display', 'browser', 'plugin'].map((f) => ib.owners[f].join(' ')).join(' · ')}`);
   ok((dc.libFiles || []).includes('src/lib/usage-pace.js') && IB.total(dc.counts['i18n-unused']) >= 400, `§78 POSITIVE CONTROL: the census re-derives the review's findings (usage-pace.js unreached — rv-client F10; ${IB.total(dc.counts['i18n-unused'])} unused dictionary entries — F3's 243 × 2 + the test-only ones)`);
   // dc-browser-providers' CONTROL (its §79, folded into this family at int213): the keeper with ONE `=== 'chromium'` ladder
@@ -4007,13 +4013,17 @@ console.log('§78 literal-id branches per family + unused i18n keys + unreferenc
     'src/zz-shared.js': ["if (kind === 'slack') x();", "switch (b) { case 'codex': break; }", 'const M = { xpra: 1, vnc: 2 };', 'const R = {', '  cloak: a,', '  chromium: b,', '};', "if ('frp' !== id) y();",
       'spawn(c, { shell: true });', 'const o = { agents: 0, title: 1 };', "// if (kind === 'lark') z();", "const label = kind === 'gmail' ? 'Gmail' : 'x'; // counted once per family"].join('\n'),
     'src/channels/zz.js': "if (kind === 'slack') a(); if (backend === 'claude') b();",
-    'src/desktop-apps.js': ['const DISPLAY_BACKENDS = Object.freeze([', "  Object.freeze({ id: 'xpra', ok: s === 'vnc' }),", ']);', "if (stream === 'x11vnc') c();"].join('\n'),
+    'src/desktop-backends.js': ['const DISPLAY_BACKENDS = Object.freeze([', "  Object.freeze({ id: 'xpra', ok: s === 'vnc' }),", ']);', "if (stream === 'x11vnc') c();"].join('\n'),
     'src/codex-message-manager.js': "if (n === 'shell') return 'bash';",
+    // lane dc-apps-rows: the appkind family — a shared file's kind branch counts once, the table file and the browser install's npm step never
+    'src/zz-kinds.js': "if (k === 'deb' || k === 'appimage') d();",
+    'src/app-kinds.js': "if (k === 'apt') owner();",
+    'src/browser-profiles.js': "const b = t.phase === 'npm' ? 1 : 0;",
   };
   const pc = IB.census(REPO, { files: Object.keys(PLANT), read: (f) => PLANT[f] });
   const got = Object.fromEntries(Object.keys(IB.FAMILIES).map((f) => [f, pc.counts[f]]));
-  const want = { harness: { 'src/zz-shared.js': 1, 'src/channels/zz.js': 1 }, channel: { 'src/zz-shared.js': 2 }, display: { 'src/zz-shared.js': 1, 'src/desktop-apps.js': 1 }, browser: { 'src/zz-shared.js': 2 }, plugin: { 'src/zz-shared.js': 1 } };
-  ok(JSON.stringify(got) === JSON.stringify(want) && pc.allowed.harness === 1,
+  const want = { harness: { 'src/zz-shared.js': 1, 'src/channels/zz.js': 1 }, channel: { 'src/zz-shared.js': 2 }, display: { 'src/zz-shared.js': 1, 'src/desktop-backends.js': 1 }, browser: { 'src/zz-shared.js': 2 }, plugin: { 'src/zz-shared.js': 1 }, appkind: { 'src/zz-kinds.js': 1 } };
+  ok(JSON.stringify(got) === JSON.stringify(want) && pc.allowed.harness === 1 && pc.allowed.appkind === 1,
     `§78 NEGATIVE CONTROLS: compare / reversed compare / case / one-line + multi-line dispatch maps counted; a comment, a lone { shell: true } / { agents: 0 } key, the owner folder, the DISPLAY_BACKENDS table and an ALLOW row not (${JSON.stringify(got)}, allowed ${pc.allowed.harness})`);
   const raised = IB.judge({ harness: { 'a.js': 2 } }, { harness: { 'a.js': 3, 'b.js': 1 } }), low = IB.lowered({ harness: { 'a.js': 2, 'b.js': 4 } }, { harness: { 'a.js': 5, 'b.js': 1 } });
   ok(raised.rises.length === 2 && raised.falls.length === 0 && JSON.stringify(low) === JSON.stringify({ harness: { 'a.js': 2, 'b.js': 1 } }), `§78 NEGATIVE CONTROL: a rise in a pinned file and a new file are both red; --lower never raises a row (${JSON.stringify(low)})`);

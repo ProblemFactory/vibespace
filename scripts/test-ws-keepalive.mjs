@@ -69,12 +69,20 @@ function armedLeg(K) {
 }
 
 console.log('③ the census: every long-lived ws bridge arms the ONE rule');
-function census(files) {
+// rv-desktop-apps F-B4 (lane dc-seams-desktop, the 2.369.215 integration): the desktop bridge hands its KA to one relay per
+// stream kind (src/server/stream-relays.js); each relay arms it on its own socket — a bridge that registers relays is armed
+// when EVERY relay it registers arms it, and no relay pings by hand
+const relaysOf = (src, read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8')) => (/require\(['"]\.\/stream-relays\.js['"]\)/.test(src)
+  ? [...read('src/server/stream-relays.js').matchAll(/require\(['"]\.\/(stream-relay-[\w-]+\.js)['"]\)/g)].map((m) => [`src/server/${m[1]}`, read(`src/server/${m[1]}`)]) : []);
+function census(files, relays = (src) => relaysOf(src)) {
   const bad = [];
+  const handPing = (src) => /\.ping\(\)/.test(src.replace(/\/\/[^\n]*/g, ''));
   for (const [f, src] of files) {
     if (!/require\(['"]\.\.\/ws-keepalive\.js['"]\)/.test(src)) bad.push(`${f}: does not require ../ws-keepalive.js`);
-    if (!/\bKA\.armKeepalive\(/.test(src)) bad.push(`${f}: never arms the keepalive`);
-    if (/\.ping\(\)/.test(src.replace(/\/\/[^\n]*/g, ''))) bad.push(`${f}: pings by hand (the rule lives in src/ws-keepalive.js)`);
+    const rs = relays(src);
+    if (!/\bKA\.armKeepalive\(/.test(src) && !(rs.length && rs.every(([, r]) => /\bKA\.armKeepalive\(/.test(r)))) bad.push(`${f}: never arms the keepalive${rs.length ? ` (relays that do not: ${rs.filter(([, r]) => !/\bKA\.armKeepalive\(/.test(r)).map(([rf]) => rf).join(', ')})` : ''}`);
+    if (handPing(src)) bad.push(`${f}: pings by hand (the rule lives in src/ws-keepalive.js)`);
+    for (const [rf, r] of rs) if (handPing(r)) bad.push(`${rf}: pings by hand (the rule lives in src/ws-keepalive.js)`);
   }
   return bad;
 }
@@ -85,6 +93,10 @@ function census(files) {
   ok(bridges.length >= 2 && !bad.length, `every src/server/*-stream.js (${bridges.map((b) => b[0]).join(', ')}) arms the keepalive and pings nowhere else`, bad.join('; '));
   const planted = census([...bridges, ['src/server/planted-stream.js', "const pinger = setInterval(() => ws.ping(), 20000);"]]);
   ok(planted.some((b) => b.startsWith('src/server/planted-stream.js: does not require')) && planted.some((b) => /planted-stream\.js: pings by hand/.test(b)), 'CONTROL: a planted bridge with its own pinger is red by name', planted.join('; '));
+  // the 2.369.215 integration: the desktop bridge is credited through its relays — one relay that stops arming reddens it by name
+  const relaysCut = (src) => relaysOf(src).map(([rf, r]) => [rf, rf.endsWith('stream-relay-rfb.js') ? r.split('KA.armKeepalive(').join('KA.armKeepAlive(') : r]);
+  const unarmed = census(bridges, relaysCut);
+  ok(relaysOf(fs.readFileSync(path.join(dir, 'desktop-stream.js'), 'utf8')).length >= 2 && unarmed.some((b) => /desktop-stream\.js: never arms the keepalive \(relays that do not: src\/server\/stream-relay-rfb\.js\)/.test(b)), 'CONTROL: a relay of the desktop bridge that never arms the keepalive is red by name (the bridge is credited through its relays only)', unarmed.join('; '));
 }
 
 console.log('④ the real browser bridge: a half-open viewer is dropped, the other keeps its picture');

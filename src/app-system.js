@@ -61,7 +61,7 @@ const SYS_RUN_ID = 'sysroot';
 const SAFE_PATH_RE = /^\/[A-Za-z0-9._+\/-]{1,255}$/;
 const NONCE_RE = /^[a-z0-9]{8,32}$/;
 const ENTRY_ID_RE = /^[a-z0-9][a-z0-9-]{0,39}$/;
-const PKG_RE = /^[a-z0-9][a-z0-9+.-]{1,63}$/;
+const { PKG_RE, APT_LOCK_WAIT_S } = require('./install-slot'); // PURE — Debian's name rule + apt's lock wait: ONE home (lane dc-apps-rows, F-I3)
 
 const SUDOERS_TEXT = '# VibeSpace app system (docs/design-app-persistence.zh.md §3.2) — installed by the server after listen.\n'
   + '# Grants nothing new (the user is already NOPASSWD: ALL): sudo EXECs the helper on the caller\'s pid and keeps the X environment.\n'
@@ -276,7 +276,7 @@ const SYS_SCRIPT = [
   "[ -f \"$HP\" ] && [ ! -L \"$HP\" ] && [ \"$(stat -c %u \"$HP\")\" = 0 ] || refuse no-helper \"$HP\"",
   "case $MODE in deb) case $1 in \"$A\"/staging/*) ;; *) refuse bad-deb-path ;; esac ;; esac",
   "T=$(mktemp -d); trap 'rm -rf \"$T\"' EXIT",
-  "LOCK=\"-o DPkg::Lock::Timeout=300\"",
+  `LOCK="-o DPkg::Lock::Timeout=${APT_LOCK_WAIT_S}"`,
   "X() { \"$HP\" --root -- \"$@\"; }",
   "XN() { \"$HP\" --root --next -- \"$@\"; }",
   "q() { dpkg-query --admindir=\"$1/var/lib/dpkg\" -W -f='${db:Status-Abbrev} ${Package}:${Architecture} ${Version}\\n' 2>/dev/null | awk 'substr($1, 2, 1) == \"i\" { print $2 \" \" $3 }' | sort -u; }",
@@ -473,7 +473,7 @@ function sysDigestPart({ layer = null, argv = null } = {}) {
 function sysCommands({ mode, packages = [], deb = null, rung = null, codename = null } = {}) {
   const sys = '~/.vibespace/sysroot/rootfs';
   const inside = `sudo ${HELPER_PATH} --root --`;
-  const lock = '-o DPkg::Lock::Timeout=300';
+  const lock = `-o DPkg::Lock::Timeout=${APT_LOCK_WAIT_S}`;
   const mkLine = (dir) => (rung === 'a' ? `sudo tar -xpzf ${MINBASE_TARBALL} -C ${dir}  # the image's own minbase, offline` : `sudo debootstrap --variant=minbase ${codename || '<codename>'} ${dir}`);
   if (mode === 'create') return [`# VibeSpace creates your app system: a ${codename || ''} userland on your disk that keeps the apps you install (root:root 0755, never group-inherited)`, mkLine(sys), `# + ${sys}/etc/vibespace-sysroot.json (its identity)`, `${inside} apt-get ${lock} update`];
   if (mode === 'install') return ['# into your app system — it survives a rebuilt machine with nothing to reinstall', `${inside} apt-get ${lock} update`, `${inside} apt-get ${lock} install -y ${packages.join(' ')}`];

@@ -563,7 +563,7 @@ else await (async () => {
   {
     await P1.send('Page.bringToFront');
     await clearToasts();
-    fs.writeFileSync(path.join(ROOT, 'notes.md'), '# notes\n\none\ntwo\nthree\n');
+    fs.writeFileSync(path.join(ROOT, 'notes.txt'), '# notes\n\none\ntwo\nthree\n');
     fs.writeFileSync(path.join(ROOT, 'data.csv'), 'a,b\n1,2\n');
     fs.mkdirSync(path.join(ROOT, 'sub'), { recursive: true }); fs.writeFileSync(path.join(ROOT, 'sub', 'x.txt'), 'x\n');
     const tagFn = `const tag = (id) => { const w = wm.windows.get(id); return sidOf(id) || (w ? w.type + ':' + String(w._filePath || w._explorerPath || '').split('/').pop() : id); };`;
@@ -835,19 +835,19 @@ else await (async () => {
     await sleep(300);
     const openFrom = (X, sid, p) => X.ev(`const w = bySid(${S(sid)}); const cv = app.sessions.get(w.id); cv._renderers._openLinkTarget(document.createElement('span'), null, ${S(p)}); return true;`);
     ok((await ev('return app.settings.get("window.openLinkPlacement");')) === 'split' && (await ev(`return wm.activeWindowId === bySid(${S(sidB)}).id;`)), 'L6 the default placement is split, and ANOTHER window (B) is the active one — the source must be the chat the link is in');
-    await openFrom(P1, sidA, path.join(ROOT, 'notes.md'));
+    await openFrom(P1, sidA, path.join(ROOT, 'notes.txt'));
     await until(() => ev(`return [...wm.windows.values()].some((w) => w.type === 'editor');`), 8000);
     await sleep(300);
     let s6 = await v2(P1);
-    ok(s6.chain && s6.layout === 'split' && S(s6.pair) === S([sidA, 'editor:notes.md']) && S(s6.right) === S(['editor:notes.md']), 'L6 a path opened from chat A is BORN side by side in A\'s chain: [A | notes.md]', S(s6));
+    ok(s6.chain && s6.layout === 'split' && S(s6.pair) === S([sidA, 'editor:notes.txt']) && S(s6.right) === S(['editor:notes.txt']), 'L6 a path opened from chat A is BORN side by side in A\'s chain: [A | notes.txt]', S(s6));
     ok(await ev(`return !bySid(${S(sidB)})._tabChain;`), 'L6 …never beside the ACTIVE window B (it stays alone)');
-    await openFrom(P1, sidA, path.join(ROOT, 'notes.md') + ':3');
+    await openFrom(P1, sidA, path.join(ROOT, 'notes.txt') + ':3');
     await sleep(800);
     ok((await ev(`return [...wm.windows.values()].filter((w) => w.type === 'editor').length;`)) === 1 && (await ev(`return wm.windows.get(wm.activeWindowId)?.type;`)) === 'editor', 'L6 the SAME path opened again from A shows its tab (one editor, focused) — never a second window');
     await openFrom(P1, sidA, path.join(ROOT, 'data.csv'));
     await until(() => ev(`return [...wm.windows.values()].some((w) => w.type === 'viewer');`), 8000); await sleep(300);
     s6 = await v2(P1);
-    ok(s6.layout === 'split' && s6.left[0] === sidA && S(s6.right) === S(['editor:notes.md', 'viewer:data.csv']) && s6.pair[1] === 'viewer:data.csv' && s6.pair[0] === sidA, 'L6 on a chain already split the next open joins the side the source is NOT on and is shown there (A stays shown)', S(s6));
+    ok(s6.layout === 'split' && s6.left[0] === sidA && S(s6.right) === S(['editor:notes.txt', 'viewer:data.csv']) && s6.pair[1] === 'viewer:data.csv' && s6.pair[0] === sidA, 'L6 on a chain already split the next open joins the side the source is NOT on and is shown there (A stays shown)', S(s6));
     await ev(`app.settings.set('window.openLinkPlacement', 'tab'); return true;`);
     await openFrom(P1, sidA, path.join(ROOT, 'sub'));
     await until(() => ev(`return [...wm.windows.values()].some((w) => w.type === 'files');`), 8000); await sleep(300);
@@ -984,7 +984,7 @@ else await (async () => {
     const l7d = async (neuter) => {
       await ev(`app.settings.set('window.mergeDropLayout', 'tabs'); app.settings.set('window.openLinkPlacement', 'window'); return true;`);
       await triScene(true);
-      await openFrom(P1, sidA, path.join(ROOT, 'notes.md'));
+      await openFrom(P1, sidA, path.join(ROOT, 'notes.txt'));
       await until(() => ev(`return [...wm.windows.values()].some((w) => w.type === 'editor');`), 8000); await sleep(300);
       const g = await ev(`const A = bySid(${S(sidA)}), Cw = bySid(${S(sidC)}); const D = [...wm.windows.values()].find((w) => w.type === 'editor'); const ch = A._tabChain; wm.addToTabChain(ch, D, { side: 'left', index: 1 }); wm.switchTab(ch, ch.tabs.indexOf(A.id)); wm.focusWindow(Cw.id); document.getElementById('global-toasts')?.remove(); return new Promise((res) => setTimeout(() => { const t = (id) => rect([...A.titleBar.querySelectorAll('.tab-item')].find((x) => x.dataset.winId === id)); res({ tA: t(A.id), tD: t(D.id), c: rect(Cw.element), cTitle: rect(Cw.titleSpan) }); }, 350));`);
       const b = await v2(P1);
@@ -999,10 +999,10 @@ else await (async () => {
       return { b, d, u, c: g.c, cAfter: await ev(`const Cw = bySid(${S(sidC)}); return { chain: !!Cw._tabChain, r: rect(Cw.element) };`) };
     };
     const r7d = await l7d(false);
-    ok(S(r7d.b.left) === S([sidA, 'editor:notes.md']) && S(r7d.b.pair) === S([sidA, sidB]) && S(r7d.d.left) === S([sidA, sidC, 'editor:notes.md']) && S(r7d.d.pair) === S([sidC, sidB]), 'L7d the scene: [A, D | B] with D hidden; C dropped between A and D ⇒ left [A, C, D], pair [C, B]', S({ b: r7d.b.left, d: r7d.d }));
-    ok(!r7d.cAfter.chain && sameRect(r7d.cAfter.r, r7d.c, 2) && S(r7d.u.left) === S([sidA, 'editor:notes.md']) && S(r7d.u.right) === S([sidB]) && S(r7d.u.pair) === S([sidA, sidB]), 'L7d Undo ⇒ C back at its rect, and the split exactly as before the drop: [A, D | B], pair [A, B] (D hidden again)', S({ u: r7d.u, cAfter: r7d.cAfter }));
+    ok(S(r7d.b.left) === S([sidA, 'editor:notes.txt']) && S(r7d.b.pair) === S([sidA, sidB]) && S(r7d.d.left) === S([sidA, sidC, 'editor:notes.txt']) && S(r7d.d.pair) === S([sidC, sidB]), 'L7d the scene: [A, D | B] with D hidden; C dropped between A and D ⇒ left [A, C, D], pair [C, B]', S({ b: r7d.b.left, d: r7d.d }));
+    ok(!r7d.cAfter.chain && sameRect(r7d.cAfter.r, r7d.c, 2) && S(r7d.u.left) === S([sidA, 'editor:notes.txt']) && S(r7d.u.right) === S([sidB]) && S(r7d.u.pair) === S([sidA, sidB]), 'L7d Undo ⇒ C back at its rect, and the split exactly as before the drop: [A, D | B], pair [A, B] (D hidden again)', S({ u: r7d.u, cAfter: r7d.cAfter }));
     const c7d2 = await l7d(true);
-    ok(S(c7d2.u.pair) === S(['editor:notes.md', sidB]), 'L7d CONTROL: with the restore of the before-layout neutered the same Undo leaves D shown (pair [D, B]) — the detach alone does not undo the drop', S(c7d2.u));
+    ok(S(c7d2.u.pair) === S(['editor:notes.txt', sidB]), 'L7d CONTROL: with the restore of the before-layout neutered the same Undo leaves D shown (pair [D, B]) — the detach alone does not undo the drop', S(c7d2.u));
     await ev(`for (const w of [...wm.windows.values()]) if (w.type === 'editor') wm.closeWindow(w.id); app.settings.set('window.mergeDropLayout', 'tabs'); return true;`);
     // ── 13 · inc-muiq348r-jwb5 (2026-09-26, the owner on an Android phone: "我在手机上怎么切换不到 vibespace 大开发
     //    这个 session？"): a window the user NAMES is revealed AS ITSELF — a tab group's HOST is switched to (its row in

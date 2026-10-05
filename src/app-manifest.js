@@ -43,7 +43,7 @@
  *     the user pressed Refresh
  *   · driftVerdict — "installed outside VibeSpace" (the tripwire touched after VibeSpace's last run)
  *   · APP_SCRIPT + appArgv + appCommands — the ONE root script (packages are argv POSITIONS, never interpolated), the
- *     argv the machine's ONE package slot runs (src/desktop-apps.js installLauncherArgv), the commands a person reads
+ *     argv the machine's ONE package slot runs (src/install-slot.js installLauncherArgv), the commands a person reads
  *   · parseRunLog — the script's `= …` lines (delta / desktop / service / deb / entry / base / pin / refused / ok)
  *   · fetchVerdict / addressVerdict / sniffInstaller / appImageOffset / debMembers / debIconOf / appImageRow / removePlanFor
  *     — an installer the agent names by ADDRESS or FILE (design 009 §2 A): the address judged before any byte moves (https,
@@ -57,25 +57,24 @@
 const MANIFEST_V = 1;
 /** Where a machine keeps its apps, relative to the user's home. */
 const APPS_REL = '.vibespace/apps';
-/** Debian's package-name rule (the same as src/desktop-apps.js PKG_RE — the suite pins the two equal). */
-const PKG_RE = /^[a-z0-9][a-z0-9+.-]{1,63}$/;
+/** Debian's package-name rule + how long apt waits for another apt's lock: ONE home, the machine's package slot. */
+const { PKG_RE, APT_LOCK_WAIT_S } = require('./install-slot'); // PURE (lane dc-apps-rows, F-I3)
 const ENTRY_ID_RE = /^[a-z0-9][a-z0-9-]{0,39}$/;
 const NONCE_RE = /^[a-z0-9]{8,32}$/;
 const SHA256_RE = /^[0-9a-f]{64}$/;
 const FPR_RE = /^[0-9A-F]{40}(?:[0-9A-F]{24})?$/;
-/** Kinds of entry. `apt` = packages from the machine's sources (or an approved third-party one), `deb` = a .deb file
- *  the user had (its bytes copied into the repo, sha256 kept). The user-level kinds (§3.4) live in HOME and need no
- *  replay; their CLI verb is HELD (the CLI's own permission card) and Layer 0 records nothing for them yet. */
-const ENTRY_KINDS = Object.freeze(['apt', 'deb', 'uv-tool', 'npm', 'appimage']);
-/** The kinds that live in the user's home (no root, nothing to replay — the home volume keeps them). */
-const HOME_KINDS = Object.freeze(['uv-tool', 'npm', 'appimage']);
+/** Kinds of entry — ONE row each in src/app-kinds.js (lane dc-apps-rows, F-A1). `apt` = packages from the machine's
+ *  sources (or an approved third-party one), `deb` = a .deb file the user had (its bytes copied into the repo, sha256
+ *  kept) — the rows declaring `entry: 'root'`. The user-level kinds (§3.4, `entry: 'home'`) live in HOME and need no
+ *  replay (the home volume keeps them); uv-tool / npm are recorded (POST /api/agent/apps/user-kind), an AppImage is
+ *  proposed. */
+const K = require('./app-kinds'); // PURE — an app kind is one row
+const { ENTRY_KINDS, HOME_KINDS } = K;
 const BY_KINDS = Object.freeze(['user', 'agent']);
 /** Every refusal a plan may carry, by name (the dialog and the CLI word them). */
 const PLAN_CODES = Object.freeze(['no_facts', 'no_apt', 'bad_name', 'not_found', 'conflict', 'removes', 'needs_snap', 'bad_source', 'disk', 'no_sudo', 'shared', 'nothing']);
 /** Free space kept on a file system after an install (design §3.1 "磁盘底线"). */
 const DISK_FLOOR_BYTES = 2 * 1024 * 1024 * 1024;
-/** How long apt waits for another apt's lock before it gives up by name (the xpra plan's figure). */
-const APT_LOCK_WAIT_S = 300;
 const MARKER_DIR = '/var/lib/vibespace';
 const REPLAY_MARKER = `${MARKER_DIR}/apps-replayed`;
 const DRIFT_MARKER = `${MARKER_DIR}/dpkg-touched`;
@@ -186,14 +185,14 @@ function normEntry(e) {
   if (!ENTRY_ID_RE.test(String(e.id || ''))) return { ok: false, error: `entry id must match ${ENTRY_ID_RE}` };
   if (!ENTRY_KINDS.includes(e.kind)) return { ok: false, error: `entry ${e.id}: kind must be one of ${ENTRY_KINDS.join('/')}` };
   const packages = Array.isArray(e.packages) ? e.packages.map(String) : [];
-  if ((e.kind === 'apt' || e.kind === 'deb') && (!packages.length || packages.length > 64 || !packages.every((p) => PKG_RE.test(p)))) return { ok: false, error: `entry ${e.id}: packages must be 1–64 Debian package names` };
+  if (K.kindRow(e.kind).entry === 'root' && (!packages.length || packages.length > 64 || !packages.every((p) => PKG_RE.test(p)))) return { ok: false, error: `entry ${e.id}: packages must be 1–64 Debian package names` };
   const by = normBy(e.by);
   if (!by) return { ok: false, error: `entry ${e.id}: by must be {kind: user|agent}` };
   const out = { id: e.id, kind: e.kind, packages, source: typeof e.source === 'string' && e.source ? e.source.slice(0, 40) : null, addedAt: num(e.addedAt), by, approvedAt: num(e.approvedAt),
     rows: (Array.isArray(e.rows) ? e.rows : []).map(normRow).filter(Boolean).slice(0, 16), services: (Array.isArray(e.services) ? e.services : []).filter((u) => typeof u === 'string' && /^[A-Za-z0-9@._-]{1,120}\.service$/.test(u)).slice(0, 16) };
   if (typeof e.why === 'string' && e.why) out.why = e.why.slice(0, 500);
   if (typeof e.label === 'string' && e.label) out.label = e.label.slice(0, 80);
-  if (e.layer === 'sys' && (e.kind === 'apt' || e.kind === 'deb')) out.layer = 'sys'; // installed INTO the app system (Layer 1) — nothing to replay
+  if (e.layer === 'sys' && K.kindRow(e.kind).entry === 'root') out.layer = 'sys'; // installed INTO the app system (Layer 1) — nothing to replay
   if (e.kind === 'deb') {
     const d = e.deb;
     if (!isObj(d) || !SHA256_RE.test(String(d.sha256 || '')) || !PKG_RE.test(String(d.package || ''))) return { ok: false, error: `entry ${e.id}: a deb entry carries {package, sha256, name}` };
@@ -252,7 +251,7 @@ function reconcileIndex(m, { host = null, sys = null } = {}) {
   const H = host ? by(host) : null, S = sys ? by(sys) : null;
   const entries = [];
   for (const e of m.entries) {
-    if (e.kind !== 'apt' && e.kind !== 'deb') { entries.push(e); continue; }
+    if ((K.kindRow(e.kind) || {}).entry !== 'root') { entries.push(e); continue; }
     const h = H && H.get(e.id), s = S && S.get(e.id);
     let layer;
     if (h && s) { if (pkgSet(h.packages) !== pkgSet(s.packages)) { out.collisions.push(e.id); entries.push(e); continue; } layer = 'sys'; }
@@ -664,7 +663,7 @@ function driftVerdict({ touchedAt = null, slotEndedAt = null, last = null, now =
 
 // ── the root script ─────────────────────────────────────────────────────────────────────────────────────────────
 /**
- * THE ONE ROOT SCRIPT. Run by the machine's ONE package slot (src/desktop-apps.js installLauncherArgv — detached,
+ * THE ONE ROOT SCRIPT. Run by the machine's ONE package slot (src/install-slot.js installLauncherArgv — detached,
  * flock-held, re-attached never twice) as `sudo -n sh -c APP_SCRIPT vs-app <appsDir> <mode> <id> <nonce> -- <args…>`.
  * Every name it touches arrives as a positional parameter and is re-checked here (a package name by Debian's rule, the
  * apps dir as the invoking user's own, an id, a nonce); nothing is interpolated into the text. It prints its facts as
@@ -1118,9 +1117,10 @@ function removePlanFor(entry, { appsDir = '~/.vibespace/apps' } = {}) {
   if (!isObj(entry) || !HOME_KINDS.includes(entry.kind) || !ENTRY_ID_RE.test(String(entry.id || ''))) return { ok: false, code: 'not_found', error: 'not an app in your home' };
   const name = String(entry.label || '');
   const common = { ok: true, code: null, canRun: true, kind: 'remove', mode: 'home-remove', entryKind: entry.kind, entryId: entry.id, packages: [], closure: [], removes: [], downloadBytes: 0, installedBytes: 0, label: name || entry.id };
-  if (entry.kind === 'appimage') return { ...common, dir: `${appsDir}/appimage/${entry.id}`, closureKey: `home-remove appimage ${entry.id}`, commands: [`rm -r ~/.vibespace/apps/appimage/${entry.id}`, '# VibeSpace drops its row from Apps'] };
+  const kr = K.kindRow(entry.kind);
+  if (!kr.removeArgv) return { ...common, dir: `${appsDir}/appimage/${entry.id}`, closureKey: `home-remove appimage ${entry.id}`, commands: [`rm -r ~/.vibespace/apps/appimage/${entry.id}`, '# VibeSpace drops its row from Apps'] };
   if (!/^[@a-z0-9][a-z0-9@/._+-]{0,120}$/i.test(name)) return { ok: false, code: 'bad_name', error: `${entry.id} names no tool` };
-  const argv = entry.kind === 'uv-tool' ? ['uv', 'tool', 'uninstall', name] : ['npm', 'uninstall', '-g', '--prefix', '~/.local', name];
+  const argv = [...kr.removeArgv, name];
   return { ...common, homeArgv: argv, closureKey: `home-remove ${entry.kind} ${name}`, commands: [argv.join(' ')] }; // `homeArgv`, never `argv`: the root slot finds nothing to run in it
 }
 

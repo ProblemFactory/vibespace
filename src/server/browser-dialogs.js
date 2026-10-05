@@ -45,8 +45,20 @@
  * socket clears one site's stored login (`clearSite` — lane site-reset step 2): the cookies that reach the host
  * (`Storage.getCookies` + `Network.deleteCookies` per cookie, never `clearBrowserCookies`), `Storage.clearDataForOrigin`
  * for its origins, and session storage in the tabs at those origins.
+ *
+ * THE PASSKEY CEREMONY (lane browser-passkey, 2026-10-05 — owner inc-muuvthv9-g69w: Chrome's own WebAuthn window sat on the
+ * box's desktop, invisible in the live view, and the page took no input): on every tab this socket enables, ONE
+ * `Runtime.addBinding` (a random name per watch) + PURE PK.installHook injected in the MAIN world
+ * (`Page.addScriptToEvaluateOnNewDocument {runImmediately}`) — the page's own `navigator.credentials.get / .create` report
+ * `start` / `end` here; PK.passkeyVerdict names a ceremony pending PK.PENDING_SAID_MS `passkey_open` (the routes' fact, the
+ * verb in flight woken like a dialog, the chip / live-view banner, ONE For-you item per (profile, rpId) after
+ * PK.FOR_YOU_AFTER_MS, resolved when it ends). `cancelPasskey` = `Runtime.evaluate` of PK.cancelExpression in the
+ * ceremony's own execution context: the hooked closure aborts its AbortControllers — the page's promise rejects AbortError.
+ * A tab whose hook never armed is `unknown`, never `passkey_open`.
  */
 const ST = require('../browser-stuck.js');
+const PK = require('../browser-passkey.js');
+const crypto = require('crypto');
 let WS = null; try { WS = require('ws').WebSocket; } catch { WS = null; }
 
 const ANSWERED_KEEP = 32;
@@ -57,7 +69,7 @@ const STOP_RETRIES = 4, STOP_RETRY_MS = 120; // verify r4 #5: Page.stopLoading u
 
 function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.now,
   enableTimeoutMs = ST.ENABLE_TIMEOUT_MS, connectTimeoutMs = 3000, callTimeoutMs = 5000, captureTimeoutMs = ST.LOOP_SCREENSHOT_MS, quietMs = ST.LOOP_QUIET_MS, // verify r1: the quiet rule is a clock a fast gate shortens
-  tabsOf = null, holdersOf = null, leaseCountOf = null, labelOf = null, notice = null, withdraw = null } = {}) {
+  tabsOf = null, holdersOf = null, leaseCountOf = null, labelOf = null, notice = null, withdraw = null, forYou = null } = {}) {
   const watches = new Map();       // profileId → watch
   const listeners = new Set();
   const waiters = new Set();       // long-polls: {profileId, scope(), resolve}
@@ -92,7 +104,8 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
 
   // ── the socket ──
   function newWatch(profileId, url) {
-    const w = { profileId, url, holds: true, ws: null, state: 'connecting', id: 0, waiting: new Map(), sessions: new Map(), targets: new Map(), open: new Map(), pendingBy: new Map(), answered: [], seq: 0, readyP: null, commands: [] };
+    const w = { profileId, url, holds: true, ws: null, state: 'connecting', id: 0, waiting: new Map(), sessions: new Map(), targets: new Map(), open: new Map(), pendingBy: new Map(), answered: [], seq: 0, readyP: null, commands: [],
+      pkBinding: 'vs' + crypto.randomBytes(12).toString('hex'), pkKey: crypto.randomBytes(16).toString('hex'), pkForYou: new Map(), headed: null }; // lane browser-passkey
     let readyResolve;
     w.readyP = new Promise((r) => { readyResolve = r; });
     w.ready = () => readyResolve();
@@ -115,6 +128,8 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     w.ws = ws;
     ws.on('open', async () => {
       w.state = 'open';
+      // lane browser-passkey: a HEADED browser's passkey window is on this computer's desktop (the banner says so) — the browser's own word
+      call(w, 'Browser.getVersion').then((v) => { const ua = v && v.result ? String(v.result.userAgent || '') : ''; w.headed = ua ? !/HeadlessChrome/.test(ua) : null; }).catch(() => { /* unknown */ });
       await call(w, 'Target.setDiscoverTargets', { discover: true });
       const r = await call(w, 'Target.getTargets');
       const infos = (r && r.result && Array.isArray(r.result.targetInfos)) ? r.result.targetInfos : [];
@@ -132,6 +147,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   function down(w, why, { keepNotices = false } = {}) {
     if (w.state === 'down') return;
     w.state = 'down';
+    for (const id of w.pkForYou.values()) { try { forYou?.resolve?.(id); } catch { /* the tray's own failure */ } } w.pkForYou.clear(); // lane browser-passkey
     w.ready();
     for (const fn of w.waiting.values()) { try { fn({ error: { message: why } }); } catch { /* */ } }
     w.waiting.clear();
@@ -149,7 +165,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     const known = w.targets.get(tid);
     if (known) { known.url = String(info.url || known.url || ''); known.title = String(info.title || known.title || ''); return known.enabling || Promise.resolve(); }
     const e = { targetId: tid, url: String(info.url || ''), title: String(info.title || ''), sid: null, enabled: false, heldAt: 0, enabling: null, reEnable: null, hops: [], loop: null, req: null, hopStart: null, quiet: null,
-      seenAt: w.state === 'open' && w.readySeen ? now() : 0, agentHopAt: 0, owner: null, opener: info.openerId ? String(info.openerId) : null }; // lane site-reset: a tab that appeared while watched (the agent's `tab new`), the last browser-initiated hop on it
+      seenAt: w.state === 'open' && w.readySeen ? now() : 0, agentHopAt: 0, owner: null, opener: info.openerId ? String(info.openerId) : null, pk: { armed: false, records: [] } }; // lane site-reset: a tab that appeared while watched (the agent's `tab new`), the last browser-initiated hop on it
     // verify r2: the ONE conversation whose verb was in flight when it appeared (null = nobody / unclear) — verify r3 #1: only for
     // a tab born of NO page (the CLI's `tab new`, the page it gets on attach: measured, no `openerId`); a tab a PAGE opened
     // (`window.open`, a `target=_blank` link — `openerId` set even under `noopener`, measured) is its OPENER's, whoever's verb
@@ -174,6 +190,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (en && !en.timeout && !en.error) {
       const was = e.heldAt;
       e.enabled = true; e.heldAt = 0;
+      armPasskey(w, e);
       if (was) emit({ kind: 'held-cleared', profileId: w.profileId, targetId: e.targetId });
       return;
     }
@@ -197,6 +214,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
         if (!e) return;
         w.targets.delete(tid); if (e.sid) w.sessions.delete(e.sid); if (e.reEnable) clearTimeout(e.reEnable);
         if (e.quiet) clearTimeout(e.quiet);
+        if (PK.endPending(e.pk.records, { now: now() }).length) passkeyChanged(w, e); // lane browser-passkey: a closed tab waits for nothing
         if (e.owner && keeper && typeof keeper.forgetOwnTab === 'function') { try { keeper.forgetOwnTab(w.profileId, e.owner, tid); } catch { /* the keeper's own failure */ } } // verify r3 #2: the persisted witness goes with the tab
         if (e.loop) { e.loop = null; emit({ kind: 'loop-cleared', profileId: w.profileId, targetId: tid, why: 'tab-closed' }); } // lane site-reset: a closed tab's loop is over
         const dlg = w.open.get(tid);
@@ -224,6 +242,10 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       }
       case 'Page.javascriptDialogOpening': return onOpen(w, w.sessions.get(String(m.sessionId || '')) || null, p);
       case 'Page.javascriptDialogClosed': return onClosed(w, w.sessions.get(String(m.sessionId || '')) || null, p);
+      // lane browser-passkey: the hook's report; a document that went ends its pending ceremonies (the page no longer waits)
+      case 'Runtime.bindingCalled': { if (p.name !== w.pkBinding) return; const e = tabOf(w, m); const ev = e && PK.parseEvent(p.payload); if (ev && PK.applyEvent(e.pk.records, ev, { tab: e.targetId, ctx: p.executionContextId, now: now() })) passkeyChanged(w, e, ev.ev === 'start'); return; }
+      case 'Runtime.executionContextDestroyed': { const e = tabOf(w, m); if (e && PK.endPending(e.pk.records, { now: now(), ctx: Number(p.executionContextId) }).length) passkeyChanged(w, e); return; }
+      case 'Runtime.executionContextsCleared': { const e = tabOf(w, m); if (e && PK.endPending(e.pk.records, { now: now() }).length) passkeyChanged(w, e); return; }
       default: return;
     }
   }
@@ -625,6 +647,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       loop: loop ? { ...ST.loopBlock(loop), runStart: loop.runStart, text: ST.loopText(loop) } : null,
       loopAny: loopAny ? { ...ST.loopBlock(loopAny), runStart: loopAny.runStart } : null,
       loopShared, // verify r1: kinds only
+      passkey: watched ? PK.passkeyBlock(passkeyIn(pid, scope)) : null, // lane browser-passkey: `passkey_open` with THE SENTENCE, `unknown` where no hook armed
     };
   }
   /** The conversation-level stuck fact (the keeper's `factFor` → the chip / the row): across its browsers. */
@@ -638,6 +661,8 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (e && e.profileId) cands.push({ profileId: e.profileId, ephemeral: true, sessionId: e.sessionId || null });
     for (const c of cands) {
       const f = factFor({ ...c, browserKey: bk, consume: false });
+      // lane browser-passkey: a page waiting for a passkey (after a held dialog — that is answered first)
+      if (!f.open && f.passkey && f.passkey.state === PK.PASSKEY_OPEN_CODE) return { state: 'passkey', passkey: f.passkey, headed: onDesktop(c.profileId), since: f.passkey.startedAt, profileId: c.profileId };
       const fact = ST.stuckFact({ dialog: f.open ? { ...f.open, id: f.open.id } : null, verdict: f.stuck, loop: f.loopAny, now: now() });
       if (fact) return { ...fact, profileId: c.profileId };
     }
@@ -649,15 +674,16 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
    *  CLI keeps while its verb runs; null at `ms`. The bound is the event, never a clock. */
   // lane site-reset: `loop: {after}` — the verb also ends at a navigation loop judged in its scope whose run began at or
   // after `after` (a navigation verb passes its own start: the old page's loop is not its; the new page's is)
-  function waitForOpen({ profileId, browserKey = '', sessionId = null, ephemeral = false } = {}, ms = 20000, { signal = null, loop = null } = {}) {
+  function waitForOpen({ profileId, browserKey = '', sessionId = null, ephemeral = false } = {}, ms = 20000, { signal = null, loop = null, passkey = false } = {}) {
     const pid = String(profileId || '');
     const scope = () => scopeFor({ profileId: pid, browserKey, sessionId, ephemeral });
     const d = openIn(pid, scope());
     if (d) return Promise.resolve({ dialog: d, via: 'already-open', at: now() });
     if (loop) { const l = loopIn(pid, scope(), { after: Number(loop.after) || 0, current: true }); if (l) return Promise.resolve({ loop: l, via: 'already-looping', at: now() }); }
+    if (passkey) { const v = passkeyIn(pid, scope()); if (v.state === PK.PASSKEY_OPEN_CODE) return Promise.resolve({ passkey: PK.passkeyBlock(v), via: 'already-waiting', at: now() }); } // lane browser-passkey
     return new Promise((resolve) => {
       let t = null;
-      const x = { profileId: pid, scope, loop: loop ? { after: Number(loop.after) || 0 } : null, resolve: (v) => { if (t) clearTimeout(t); resolve(v); } };
+      const x = { profileId: pid, scope, loop: loop ? { after: Number(loop.after) || 0 } : null, passkey: !!passkey, resolve: (v) => { if (t) clearTimeout(t); resolve(v); } };
       waiters.add(x);
       t = setTimeout(() => { if (waiters.delete(x)) resolve(null); }, Math.max(0, Math.min(Number(ms) || 0, 60000)));
       if (t.unref) t.unref();
@@ -905,6 +931,73 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     }
     return out;
   }
+  // ── lane browser-passkey: the ceremony hook ──
+  async function armPasskey(w, e) {
+    if (e.pk.armed || e.pk.arming || !e.sid) return;
+    e.pk.arming = true;
+    const sid = e.sid;
+    const r1 = await call(w, 'Runtime.addBinding', { name: w.pkBinding }, sid);
+    const r2 = r1 && r1.result ? await call(w, 'Page.addScriptToEvaluateOnNewDocument', { source: PK.hookSource({ binding: w.pkBinding, key: w.pkKey }), runImmediately: true }, sid) : null;
+    const r3 = r2 && r2.result ? await call(w, 'Runtime.enable', {}, sid) : null; // the documents that go (a navigation ends its ceremonies)
+    e.pk.arming = false;
+    e.pk.armed = !!(r3 && r3.result) && e.sid === sid;
+    if (!e.pk.armed) say('pk-arm:' + w.profileId, `${w.profileId}: the passkey hook did not arm on a tab — its passkey requests read as unknown (${(r1 && r1.error && r1.error.message) || (r2 && r2.error && r2.error.message) || (r3 && r3.error && r3.error.message) || 'no answer'})`);
+  }
+  /** lane browser-passkey-chrome (MEASURED on 0.38.1): Chrome draws its passkey dialog TAB-MODAL in the browser's own window —
+   *  on this computer's desktop only when that window is. The hidden-window rung's window is on the CLI's own Xvfb, which
+   *  nobody sees: the banner's desktop note there sent the user looking for a window that is not on any screen. */
+  function onDesktop(profileId) {
+    if ((watches.get(String(profileId)) || {}).headed !== true) return false;
+    let rec = null; try { rec = keeper && typeof keeper.browserOf === 'function' ? keeper.browserOf(String(profileId)) : null; } catch { rec = null; }
+    const fb = rec && rec.display && rec.display.fallback;
+    return !(fb && fb.rung === 'hidden-window');
+  }
+  function passkeyTabs(w, scope) { return w ? [...w.targets.values()].filter((e) => inScope(scope, e.targetId)) : []; }
+  /** The verdict over a conversation's tabs (`unknown` when none of them carries the hook). */
+  function passkeyIn(profileId, scope) {
+    const w = watches.get(String(profileId || ''));
+    if (!w || w.state !== 'open') return { state: 'unknown' };
+    const tabs = passkeyTabs(w, scope);
+    const armed = tabs.filter((e) => e.pk.armed);
+    if (!armed.length) return { state: tabs.length ? 'unknown' : 'none' };
+    return PK.passkeyVerdict(armed.flatMap((e) => e.pk.records), now());
+  }
+  /** A ceremony started / ended on tab `e`: the chip + live view re-read, the verb in flight woken at `passkey_open`, the
+   *  For-you items filed / resolved; a start re-asks itself when it is due to be said and when the For-you item is. */
+  function passkeyChanged(w, e, started = false) {
+    if (started) for (const ms of [PK.PENDING_SAID_MS, PK.FOR_YOU_AFTER_MS]) { const t = setTimeout(() => { if (w.state === 'open') passkeyChanged(w, e); }, ms + 20); if (t.unref) t.unref(); }
+    const v = PK.passkeyVerdict(e.pk.records, now());
+    emit({ kind: 'passkey', profileId: w.profileId, targetId: e.targetId, state: v.state });
+    if (v.state === PK.PASSKEY_OPEN_CODE) for (const x of [...waiters]) if (x.profileId === w.profileId && x.passkey && inScope(x.scope(), e.targetId)) { waiters.delete(x); x.resolve({ passkey: PK.passkeyBlock(v), via: 'event', at: now() }); }
+    if (!forYou) return;
+    const open = new Map(); // rpId → the oldest pending record on this browser past the For-you bound
+    for (const t of w.targets.values()) for (const r of t.pk.records) if (r.outcome === 'pending' && now() - r.startedAt >= PK.FOR_YOU_AFTER_MS && !open.has(r.rpId)) open.set(r.rpId, r);
+    for (const [rp, id] of [...w.pkForYou]) if (!open.has(rp)) { w.pkForYou.delete(rp); try { forYou.resolve?.(id); } catch (err) { say('pk-fy:' + (err && err.message), `the passkey For-you item was not resolved — ${err && err.message}`); } }
+    for (const [rp, r] of open) if (!w.pkForYou.has(rp)) {
+      let label = null; try { label = labelOf ? labelOf(w.profileId) : null; } catch { label = null; }
+      let id = null; try { id = forYou.add?.(w.profileId, PK.forYouItem(r, { label: label || '' })); } catch (err) { say('pk-fy:' + (err && err.message), `the passkey For-you item was not filed — ${err && err.message}`); }
+      if (id) w.pkForYou.set(rp, id);
+    }
+  }
+  /** Cancel every pending ceremony of the conversation's tabs (the agent's `passkey cancel`, the live view's Cancel). */
+  async function cancelPasskey(t, { by = 'agent' } = {}) {
+    const pid = String(t && t.profileId || '');
+    const w = watches.get(pid);
+    if (!w || w.state !== 'open') return { ok: false, code: 'not_watched', error: 'VibeSpace is not watching this browser' };
+    const v = passkeyIn(pid, scopeFor(t));
+    if (v.state === 'unknown') return { ok: true, n: 0, state: 'unknown', text: PK.UNKNOWN_TEXT };
+    let n = 0, rpId = '';
+    for (const e of passkeyTabs(w, scopeFor(t))) {
+      const ctxs = [...new Set(e.pk.records.filter((r) => r.outcome === 'pending').map((r) => r.ctx))];
+      for (const ctx of ctxs) {
+        const r = await call(w, 'Runtime.evaluate', { expression: PK.cancelExpression(w.pkKey), contextId: ctx, returnByValue: true }, e.sid);
+        const k = r && r.result && r.result.result ? Number(r.result.result.value) || 0 : 0;
+        if (k > 0) { n += k; for (const rec of e.pk.records) if (rec.outcome === 'pending' && rec.ctx === ctx) { rec.outcome = 'cancelled'; rec.endedAt = now(); rec.by = by; rpId = rpId || rec.rpId; } }
+      }
+      if (n) passkeyChanged(w, e);
+    }
+    return { ok: true, n, rpId, text: PK.cancelText({ n, rpId }) };
+  }
   function setTabsOf(fn) { tabsFn = typeof fn === 'function' ? fn : null; }
   /** r4 #2: the orphan tabs of a browser and what they hold (a diagnostic read — the suites, `stats`). */
   function orphansOf(profileId, scope = new Set(['-'])) { const w = watches.get(String(profileId || '')); const ob = orphanBusy(w, scope); return { orphans: ob.orphans ? [...ob.orphans] : [], loop: ob.loop ? ob.loop.targetId : null, busy: ob.busy, loading: w && ob.orphans ? (loadingIn(w.profileId, ob.orphans) || null) : null, open: w && ob.orphans ? !!openIn(w.profileId, ob.orphans) : false }; }
@@ -925,6 +1018,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   return { arm, disarm, factFor, openOn, stuckForKey, pageStuckMap, waitForOpen, answer, noteOutcome, resetOutcomes, verbStarted, verbEnded, verbRunning, scopeFor, onChange, setTabsOf, stats, bindTab, orphansOf, // verify r4 #1: the `tab new` ack binds
     ownsTab, pickTab, stopTab, closeTab, captureTab, noteCut, busyFor, // lane site-reset: a looping tab never disables the browser
     ownTabs, clearSite, // lane site-reset step 2: one site's stored login, cleared
+    passkeyIn, cancelPasskey, // lane browser-passkey: a page waiting for a passkey, named and cancellable
     shutdown: () => { shutdown(); try { unsubLease?.(); } catch { /* */ } }, _watches: watches };
 }
 

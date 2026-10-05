@@ -385,7 +385,9 @@ class ChatView {
       onBrowserAction: (what, ev) => this._onBrowserAction(what, ev),
       // §26 (B-099e): the channels chip opens a touched conversation through the ONE door
       onChannelOpen: (row) => openTouchRow(this.app, row),
+      onOpenArtifact: (b) => this._openArtifact(b), // lane artifacts-model: the Artifacts chip's row → the file beside the chat
     });
+    this._refreshArtifacts(); // lane artifacts-e2e: the chip reads the registry when the view is BUILT (a reload / a re-opened chat) — the attach reply never reached it on that path
     // The chip's facts ride the `active-sessions` payload; a window opened
     // between two broadcasts reads the sidebar's last copy at once.
     this._browserFacts = null;
@@ -1247,6 +1249,7 @@ class ChatView {
         // server restart (ID-space reset).
         this._lastAttachedAt = Date.now(); // clears the _reattach no-reply fallback
         this._channelTouches?.onAttached(); // §26: the witness's ring is the server's (it survived a restart) — read it again
+        this._refreshArtifacts(); // lane artifacts-model: the Artifacts chip reads the server's registry (the whole conversation, not the loaded slab)
         if (msg.normEpoch) this._normEpoch = msg.normEpoch;
         if (msg.remoteState) this._statusBar?.setRemoteState(msg.remoteState);
       } else if (msg.type === 'error' && msg.sessionId === sessionId) {
@@ -3784,6 +3787,7 @@ class ChatView {
       if (op.op === 'create') {
         this._onCreateMessage(op.message);
         this._noteRecordKind(op.message);
+        if (op.message?.noticeKind === 'artifact') this._onArtifactCard(op.message, true); // lane artifacts-model: the LIVE birth (auto-open + the chip)
       } else if (op.op === 'edit') {
         this._onEditMessage(op.id, op.fields);
         // AFTER the assign: a coalescing collab edit carries the grown rows
@@ -3952,6 +3956,31 @@ class ChatView {
   }
 
   // Edit an existing message → re-render in place
+  // ── LANE ARTIFACTS-MODEL: the deliverables (src/artifacts.js rows; the server's registry) ──
+  /** Open a deliverable in its kind's viewer BESIDE this chat (`from` — the Cmd+click door). */
+  _openArtifact(b) {
+    if (!b || !b.path) return;
+    this.app.openFile(b.path, b.name || b.path.split('/').pop(), { host: b.host || undefined, from: this.winInfo?.id || null });
+  }
+  /** The Artifacts chip: the server's list for the WHOLE conversation (debounced; a burst of edits = one read). */
+  _refreshArtifacts() {
+    if (this._readOnly || !this.sessionId) return;
+    clearTimeout(this._artifactsTimer);
+    this._artifactsTimer = setTimeout(() => {
+      fetch(`/api/artifacts?sessionId=${encodeURIComponent(this.sessionId)}`).then((r) => r.json()).then((v) => this._statusBar?.setArtifacts(v)).catch(() => { });
+    }, 250);
+  }
+  /** A card's LIVE birth: the chip re-reads; a doc the agent just WROTE opens beside the chat when the setting is on
+   *  and this chat is on screen (artifacts.autoOpenDocs; the server marks only a doc's write-birth — an edit never re-opens). */
+  _onArtifactCard(msg, live) {
+    this._refreshArtifacts();
+    const b = msg?.content?.[0];
+    if (!live || !b || !b.autoOpen || this._loadingHistory || this._suspended) return;
+    if (!(this.app.settings?.get('artifacts.autoOpenDocs') ?? true)) return;
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+    this._openArtifact(b);
+  }
+
   _onEditMessage(id, fields) {
     // Update stored message
     const msgIdx = this._messages.findIndex(m => m.id === id);
@@ -3971,6 +4000,14 @@ class ChatView {
     if (msg.noticeKind === 'browser-proposal' && fields.content && !fields.status) {
       const el = this._elements.get(id);
       if (el) this._renderers.patchProposal(el, msg);
+      return;
+    }
+
+    // LANE ARTIFACTS-MODEL: a deliverable's card is PATCHED IN PLACE on every later write / edit (never re-created)
+    if (msg.noticeKind === 'artifact' && fields.content && !fields.status) {
+      const el = this._elements.get(id);
+      if (el) this._renderers.patchArtifact(el, msg);
+      this._refreshArtifacts();
       return;
     }
 

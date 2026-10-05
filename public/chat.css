@@ -1655,3 +1655,16 @@ body.hide-empty-thinking .chat-compact .chat-msg.chat-empty-thinking { display: 
 .chat-inbox-quote { margin: 0 0 6px; border-left: 2px solid var(--border); padding-left: 8px; }
 .chat-inbox-quote > summary { font-size: 11px; color: var(--text-secondary); cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-inbox-quote-body { font-size: 11px; color: var(--text-secondary); white-space: pre-wrap; margin-top: 4px; max-height: 240px; overflow-y: auto; }
+
+/* lane artifacts-model: a deliverable's ONE card (src/lib/artifact-card.js) — a quiet clickable notice; the chip's list rows */
+.chat-artifact-card { cursor: pointer; }
+.chat-artifact-card:hover, .chat-artifact-card:focus-visible { border-color: var(--accent, #6aa0ff); }
+.chat-artifact-card .chat-vs-notice-head { display: flex; align-items: center; gap: 6px; }
+.chat-artifact-ic { display: inline-flex; width: 16px; height: 16px; flex: none; }
+.chat-artifact-ic svg { width: 16px; height: 16px; }
+.chat-artifact-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-artifact-kind { margin-left: auto; font-size: 0.85em; }
+.chat-artifact-path { font-size: 0.85em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+.chat-artifact-meta { font-size: 0.85em; }
+.chat-artifact-row-top { display: flex; align-items: center; gap: 6px; }
+.chat-artifact-code > summary { cursor: pointer; padding: 4px 8px; }

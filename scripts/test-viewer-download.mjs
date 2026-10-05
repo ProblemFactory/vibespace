@@ -21,8 +21,8 @@ const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else
 
 // ── ① census ──
 const FT = await import(path.join(repo, 'src/lib/file-types.js'));
-const ftSrc = read('src/lib/file-types.js');
-const exts = [...ftSrc.slice(ftSrc.indexOf('const REGISTRY = {'), ftSrc.indexOf('const DEFAULT_ENTRY')).matchAll(/^\s+'?([\w-]+)'?:\s*\{/gm)].map((m) => m[1]);
+const ftSrc = read('src/file-type-table.js'); // the ONE extension table (file-types.js imports it)
+const exts = [...ftSrc.slice(ftSrc.indexOf('const FILE_TYPES = Object.freeze({'), ftSrc.indexOf('});')).matchAll(/^\s+'?([\w-]+)'?:\s*\{/gm)].map((m) => m[1]);
 const kinds = new Set(exts.map((e) => FT.getViewerType(e)).filter(Boolean));
 // the window each kind opens in (file-viewer.js FileViewer.open): RENDERED_VIEWERS → the 'viewer' window; html → the editor
 const WINDOW_OF = { archive: 'viewer', image: 'viewer', video: 'viewer', audio: 'viewer', pdf: 'viewer', eml: 'viewer', csv: 'viewer', xlsx: 'viewer', docx: 'viewer', pptx: 'viewer', 'html-editor': 'editor', '(text)': 'editor', '(binary)': 'hex' };

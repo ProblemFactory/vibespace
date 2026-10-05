@@ -862,6 +862,11 @@ function createSessionMessages(session, sessionId) {
       const holdersOf = (profileId) => { try { const out = (browserKeeper.list().leases || []).filter((l) => l && l.profileId === profileId && l.browserKey).map((l) => ({ browserKey: l.browserKey, sessionId: l.sessionId || null, ephemeral: !!l.ephemeral })); const h = typeof browserKeeper.humanOf === 'function' ? browserKeeper.humanOf(profileId) : null; if (h && h.browserKey) out.push({ browserKey: h.browserKey, sessionId: null, ephemeral: false, human: true, input: h.input === 'user' ? 'user' : 'agent' }); return out; } catch { return []; } };
       browserDialogs = require('./browser-dialogs').create({
         keeper: browserKeeper, holdersOf,
+        // lane browser-passkey: ONE For-you item per (profile, rpId) while a page waits for a passkey > 20 s — resolved when it ends
+        forYou: {
+          add: (profileId, item) => { if (!userTodos) return null; const r = userTodos.add('browser', { origin: 'browser', kind: 'notice', urgency: 'normal', by: 'agent', sessionName: 'Agent browser', ...item }); return r && (r.id || (typeof r === 'string' ? r : null)); },
+          resolve: (id) => { if (userTodos && userTodos.get(id)?.status === 'open') userTodos.setStatus(id, 'done', 'browser'); },
+        },
         leaseCountOf: (profileId) => new Set(holdersOf(profileId).map((h) => h.browserKey)).size,
         labelOf: (profileId) => { try { const p = browserKeeper.profile(profileId); return p ? p.label : null; } catch { return null; } },
         // rule 6: a dialog that opened while the conversation ran no browser verb ⇒ ONE free next-turn line (never a wake)
@@ -881,7 +886,7 @@ function createSessionMessages(session, sessionId) {
       browserKeeper.addDigest(() => ({ pageStuck: Object.fromEntries(Object.entries(browserDialogs.pageStuckMap()).filter(([pid]) => { try { return !browserKeeper.isEphemeral(pid); } catch { return false; } })) }));
       let digestTimer = null;
       browserDialogs.onChange((ev) => {
-        if (!ev || !['open', 'closed', 'stuck', 'held', 'held-cleared', 'down', 'loop', 'loop-cleared'].includes(ev.kind) || digestTimer) return; // lane site-reset: + a navigation loop begun / ended
+        if (!ev || !['open', 'closed', 'stuck', 'held', 'held-cleared', 'down', 'loop', 'loop-cleared', 'passkey'].includes(ev.kind) || digestTimer) return; // lane site-reset: + a navigation loop begun / ended
         digestTimer = setTimeout(() => { digestTimer = null; try { bcastAll({ type: 'browser-profiles-updated', ...browserKeeper.list() }); } catch (e) { console.warn('[browser-dialog] the digest was not re-published — ' + (e && e.message)); } }, 300);
         if (digestTimer.unref) digestTimer.unref();
       });

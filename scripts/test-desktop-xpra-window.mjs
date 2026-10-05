@@ -1167,7 +1167,7 @@ try {
       ['src/lib/xpra-client.js', '    return { width: Math.max(pane.width, g ? g.x + g.w : 0), height: Math.max(pane.height, g ? g.y + g.h : 0) };', '    return { width: pane.width, height: pane.height };'],
       ['src/lib/window.js', '  _ownMinOf(win) { return minOf(win, this._workspaceBox()); }', '  _ownMinOf(win) { return minOf(win); }'],
       ['src/desktop-serve.js', "      if (own && M.capsOf(rec, backends).crispText) {\n        const xd = await display.waitForXftDpi(", "      if (false) {\n        const xd = await display.waitForXftDpi("],
-      ['src/desktop-apps.js', '  if (eff < Math.SQRT2) return eff;', '  return Math.min(2, Math.max(1, Math.round(normalizeDpr(dpr) * 2) / 2)); // r1 CONTROL (round 3 A3 respelled the auto rule: the lever is its first line)'],
+      ['src/desktop-fit.js', '  if (eff < Math.SQRT2) return eff;', '  return Math.min(2, Math.max(1, Math.round(normalizeDpr(dpr) * 2) / 2)); // r1 CONTROL (round 3 A3 respelled the auto rule: the lever is its first line)'],
     ];
     let once = true;
     for (const [f, from, to] of levers) { const src = fs.readFileSync(path.join(wtr, f), 'utf8'); if (src.split(from).length !== 2) { once = false; console.error(`    lever not spelled once in ${f}: ${from.slice(0, 70)}`); } fs.writeFileSync(path.join(wtr, f), src.replace(from, to)); }
@@ -2662,9 +2662,9 @@ try {
     fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wtd, 'node_modules'));
     fs.mkdirSync(path.join(wtd, 'data'), { recursive: true });
     const levers = [
-      ['src/desktop-apps.js', "  const gdkScale = r === 'dpi' ? Math.max(1, Math.min(SCALE_MAX, Math.floor(s))) : Math.max(1, Math.min(SCALE_MAX, Math.ceil(s - 1e-9)));", '  const gdkScale = Math.max(1, Math.min(SCALE_MAX, Math.floor(s))); // lane D CONTROL: the floor rule'],
-      ['src/desktop-apps.js', "  const dpi = r === 'dpi' ? Math.round(96 * s / gdkScale) : 96;", '  const dpi = Math.round(96 * s / gdkScale);'],
-      ['src/desktop-apps.js', "  const pictureScale = r === 'dpi' ? 1 : round4(s / gdkScale);", '  const pictureScale = 1;'],
+      ['src/desktop-fit.js', "  const gdkScale = r === 'dpi' ? Math.max(1, Math.min(SCALE_MAX, Math.floor(s))) : Math.max(1, Math.min(SCALE_MAX, Math.ceil(s - 1e-9)));", '  const gdkScale = Math.max(1, Math.min(SCALE_MAX, Math.floor(s))); // lane D CONTROL: the floor rule'],
+      ['src/desktop-fit.js', "  const dpi = r === 'dpi' ? Math.round(96 * s / gdkScale) : 96;", '  const dpi = Math.round(96 * s / gdkScale);'],
+      ['src/desktop-fit.js', "  const pictureScale = r === 'dpi' ? 1 : round4(s / gdkScale);", '  const pictureScale = 1;'],
       ['src/lib/desktop-app-window.js', '    fitAfterRelaunch(geo, r.app); // lane D (a) F2: the window keeps the app\'s size at the new scale', '    void geo; // lane D CONTROL: the window keeps its size'],
       ['src/desktop-serve.js', "      if (rec.browser === 'chromium' && rec.profileDir) {", "      if (false) { // lane D CONTROL: Chrome not seeded"],
     ];

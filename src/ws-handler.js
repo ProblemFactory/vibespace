@@ -4,7 +4,7 @@
  */
 
 const { MessageManager } = require('./message-manager');
-const { createMessageManager, feedLive, feedPeerCard, rebuildHistory, seedHelperView, convertWithCards, browserCardsFor } = require('./normalizers');
+const { createMessageManager, feedLive, feedPeerCard, rebuildHistory, seedHelperView, convertWithCards, browserCardsFor, artifactDeriveOpts } = require('./normalizers');
 const { pendingAsksOf } = require('./helper-ask.js'); // PURE (lane S1): the pending asks of a normalizer that keeps no index (codex / ACP)
 const { createWsHeartbeat } = require('./server/ws-heartbeat');
 const { listCodexThreads } = require('./codex-session-store');
@@ -369,6 +369,12 @@ function registerWsHandler(wss, ctx) {
           break;
         }
 
+        // lane artifacts-model: the user's own save in an editor window linked to this chat (`from`) — the owning
+        // conversation's deliverable row gets by:user edits+1 (its card patched) and ONE next-turn note (the stash, free)
+        case 'artifact-touch': {
+          try { require('./server/artifact-registry.js').touch({ sessionId: data.sessionId, host: data.host || '', path: data.path, summary: String(data.summary || '').slice(0, 300) }); } catch (e) { console.warn('[artifacts] touch failed:', e.message); }
+          break;
+        }
         case 'set-model': {
           { const s2 = activeSessions.get(data.sessionId); if (s2) { s2._pickedModel = data.model || null; s2._pickedModelAt = Date.now(); if (data.model) s2._modelOrigin = 'chosen'; try { writeSessionMeta(s2.sockName, { ...readSessionMeta(s2.sockName), pickedModel: s2._pickedModel, pickedModelAt: s2._pickedModelAt, modelOrigin: s2._modelOrigin || null }); } catch { } } }
           const session = activeSessions.get(data.sessionId);
@@ -1296,7 +1302,7 @@ function registerWsHandler(wss, ctx) {
             // EMPTY, never wrong, which is exactly why it was silent.
             if (typeof sm.prepare === 'function') { try { await sm.prepare(); } catch (e) { console.warn(`[view] ${data.backend || 'claude'} reader prepare failed for ${backendSessionId}: ${e.message}`); } }
             const mm = createMessageManager(data.backend || 'claude', data.sessionId || 'view', { threadId: backendSessionId }); // the rendered conversation's id (codex ledger key)
-            await convertWithCards(mm, sm.raw(), browserCardsFor({ conversationId: backendSessionId })); // view-only replay of a dead session — same loop-friendly slicing (boot replay opens N of these at once); its browser-session cards by time (2026-09-27)
+            await convertWithCards(mm, sm.raw(), browserCardsFor({ conversationId: backendSessionId }), { artifacts: artifactDeriveOpts({ backend: data.backend || 'claude', cwd: data.cwd || '' }) }); // lane artifacts-model: its deliverable cards, derived at the read // view-only replay of a dead session — same loop-friendly slicing (boot replay opens N of these at once); its browser-session cards by time (2026-09-27)
             ws.send(JSON.stringify({ type: 'attached', sessionId: data.sessionId, name: data.name || '', cwd: data.cwd || '', mode: 'chat',
               messages: mm.tailWindow(attachWindowOpts(data.slab)), totalCount: mm.total, chatStatus: sm.chatStatus(), isStreaming: false, viewOnly: true })); // the slab asked for, as the live attach (perf r1)
           } else {

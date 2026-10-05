@@ -84,6 +84,7 @@ function acpHarness({ ui, id, label, command, args = ['acp'], env = {}, store = 
     // through register() (validated there), and one without settings is null.
     settings: HARNESS_SETTINGS[id] || null,
     configFiles: {},              // no CLI config file VibeSpace writes for an ACP agent (v1)
+    artifactsOf: require('./artifacts-of.js').acp, // lane artifacts-model: a tool call's diff / fs write_text_file → the deliverable rows
     // CONTEXT INJECTION (S6 kind 'acp'): the wrapper prefixes each prompt with
     // the /api/agent/prompt-context text (no hooks exist in a generic agent;
     // SessionStart is never honoured because it is never run).

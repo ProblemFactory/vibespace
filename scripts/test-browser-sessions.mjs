@@ -359,7 +359,7 @@ console.log('— ④ the chat cards in the normalizers: by time on a rebuild, ga
   live._normalizer.onOp((o) => ops2.push(o));
   ok(N.feedBrowserCard(live, cards[1]) === false && N.feedBrowserCard(live, cards[0]) === true && ops2.length === 1 && ops2[0].op === 'create' && ops2[0].message.content[0].phase === 'end', 'once loaded: the end card is a live `create` op; the start card the rebuild already placed is not drawn twice');
   const src = fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8');
-  ok(/await convertWithCards\(mm, sm\.raw\(\), browserCardsFor\(\{ conversationId: backendSessionId \}\)\)/.test(src), 'a view-only history (a stopped conversation) places its cards the same way — wiring pin in ws-handler');
+  ok(/await convertWithCards\(mm, sm\.raw\(\), browserCardsFor\(\{ conversationId: backendSessionId \}\)(?:, \{ artifacts: artifactDeriveOpts\(\{[^}]*\}\) \})?\)/.test(src), 'a view-only history (a stopped conversation) places its cards the same way — wiring pin in ws-handler');
   // the tool card's window ends at the NEXT MESSAGE — a session card lands inside the call that started the browser, so
   // ending there cut off the call's own actions (test-browser-live's lane H leg went red on it: the navigation 3 s after)
   const tv = fs.readFileSync(path.join(REPO, 'src/lib/browser-trace-view.js'), 'utf8');

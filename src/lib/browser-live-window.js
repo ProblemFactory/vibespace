@@ -159,7 +159,8 @@ import { ownResumable, keptLineWords } from '../browser-fact.js'; // lane browse
 import { receiptBook, noteInputSent, noteInputReceipt, sweepInputReceipts } from '../browser-stream.js'; // lane S2: every input has a receipt
 import { humanEndChoices, humanRefusalText, humanSyncId, addressVerdict, humanShareLine, LAUNCH_CODES } from '../browser-human.js'; // BROWSE YOURSELF (B-6ae8): the user's own browsing — its end buttons, its refusals, the address row (PURE)
 import { dialogWords, answeredWords, stuckWords } from '../browser-stuck.js'; // lane browser-stuck: a page dialog / an unresponsive page in words (PURE)
-import { createLoopBanner } from './browser-loop-banner.js'; // lane site-reset: the navigation loop, keyed + patched in place
+import { createLoopBanner } from './browser-loop-banner.js';
+import { passkeyWords } from '../browser-passkey.js'; // lane browser-passkey: a page waiting for a passkey — ONE button, Cancel (PURE words) // lane site-reset: the navigation loop, keyed + patched in place
 import { displayFactOf, displayFactText } from './browser-display-words.js'; // lane headless-fallback: a headless browser (no desktop session) says so under the bar
 
 const CONSOLE_CAP = 200;
@@ -946,6 +947,27 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
     const d = st.dialog;
     renderLoop(!d && st.fact && st.fact.stuck && st.fact.stuck.state === 'loop' ? st.fact.stuck.loop : null);
     const stuck = !d && st.fact && st.fact.stuck && st.fact.stuck.state === 'unresponsive' ? st.fact.stuck : null;
+    // lane browser-passkey (owner inc-muuvthv9-g69w): Chrome's own passkey window is not page pixels — this banner says the
+    // page waits for one, names the desktop it is on when the browser is headed, and its ONE button cancels the request
+    const pk = !d && st.fact && st.fact.stuck && st.fact.stuck.state === 'passkey' ? st.fact.stuck : null;
+    const pkw = pk ? passkeyWords(pk.passkey, t, { headed: pk.headed === true }) : null;
+    if (pkw) {
+      const key = String(pk.passkey.id || '');
+      if (dialogBar.dataset.passkey !== key || dialogBar.dataset.pkBusy !== String(!!st.passkeyCancelling)) {
+        dialogBar.textContent = ''; dialogBar.dataset.passkey = key; dialogBar.dataset.pkBusy = String(!!st.passkeyCancelling);
+        const title = document.createElement('div'); title.className = 'browser-live-dialog-title'; title.textContent = pkw.title;
+        const line = document.createElement('div'); line.className = 'browser-live-dialog-body'; line.textContent = pkw.line;
+        dialogBar.append(title, line);
+        if (pkw.desktop) { const n = document.createElement('div'); n.className = 'browser-live-dialog-note'; n.textContent = pkw.desktop; dialogBar.append(n); }
+        const acts = document.createElement('div'); acts.className = 'browser-live-dialog-actions';
+        const b = textBtn(pkw.cancel, () => { if (st.passkeyCancelling) return; st.passkeyCancelling = true; renderDialog(); send({ type: 'passkey-cancel' }); }, 'browser-live-dialog-dismiss browser-live-passkey-cancel');
+        b.disabled = !!st.passkeyCancelling;
+        acts.append(b); dialogBar.append(acts);
+      }
+      dialogBar.style.display = ''; dialogBar.classList.toggle('stuck', true);
+      return;
+    }
+    if (dialogBar.dataset.passkey) { delete dialogBar.dataset.passkey; st.passkeyCancelling = false; }
     dialogBar.textContent = '';
     dialogBar.style.display = d || stuck ? '' : 'none';
     dialogBar.classList.toggle('stuck', !!stuck);
@@ -1777,6 +1799,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
       case 'confirmation-conflict': { const c = m.id && st.confirmations.get(m.id); if (c) { c.conflict = { action: (m.attempted && m.attempted.action) || '?', target: (m.attempted && m.attempted.target) || null }; renderConfirms(); } break; }
       case 'confirmation-resolved': if (m.id && st.confirmations.delete(m.id)) renderConfirms(); break;
       case 'dialog': onDialogRecord(m); break; // lane browser-stuck: a page dialog opened / closed on the tab this view shows
+      case 'passkey-ack': if (!m.ok) { st.passkeyCancelling = false; renderDialog(); showToast(t('The passkey request could not be cancelled: {why}', { why: String(m.error || m.code || '') }), { type: 'error' }); } break; // lane browser-passkey
       case 'dialog-ack': if (!m.ok) { st.dialogAnswering = false; renderDialog(); showToast(t('The dialog could not be answered: {why}', { why: String(m.error || m.code || '') }), { type: 'error' }); } break;
       case 'confirmation-ack': if (!m.ok) showToast(t('Could not answer the confirmation: {why}', { why: String(m.error || m.code || '') }), { type: 'error' }); else st.confirmations.delete(m.id), renderConfirms(); break;
       case 'viewers': st.viewers = Number(m.n) || 1; renderViewers(); break;

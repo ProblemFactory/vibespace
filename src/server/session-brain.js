@@ -217,6 +217,8 @@ function claudeSideEffects(session, sid, msg) {
     if (msg.type === 'system' && msg.subtype === 'api_error') noteApiErrorAuth(session, sid, msg);
     if (msg.type === 'system' && msg.subtype === 'vcs_state_changed') noteVcsState(session, sid, msg);
     if (msg.type === 'system' && msg.subtype === 'code_change_published') notePublishedChange(session, sid, msg);
+    // lane artifacts-model: the deliverable rows — the parse makes the SAME call (the row moves once per call id)
+    if (msg.type === 'assistant') { try { require('./artifact-registry.js').observe(session, msg); } catch { } }
     // todo/task families mirror the parse's exact consumption (lines above):
     // TodoWrite carries the whole list; TaskUpdate patches by id; TaskCreate's
     // id only exists in the tool RESULT, which the parse stashes — the device

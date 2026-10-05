@@ -39,12 +39,14 @@ const crypto = require('crypto');
 const { execFile } = require('child_process');
 const A = require('./app-manifest.js');
 const M = require('./desktop-apps.js');
+const SLOT = require('./install-slot.js'); // the machine's ONE package slot — its log is this machine's install log
 const SQ = require('./app-squashfs.js');
 const SS = require('./app-system-serve.js'); // Layer 1 (design §3.2): the app system's machine half — its rows, plans, boot step
 const SYS = require('./app-system.js');
 
 const APP_OPS = Object.freeze(['app-status', 'app-plan', 'app-install', 'app-remove', 'app-refresh', 'app-adopt-drift', 'app-fetch', 'app-unstage', 'app-forget']);
-const PLAN_KINDS = Object.freeze(['search', 'apt', 'deb', 'appimage', 'source', 'source-remove', 'remove', 'refresh', 'adopt', 'replay', 'move', 'forget', ...SYS.SYS_KINDS]); // design 019: `move` = the user's click (the host apps INTO the app system), `forget` = its second step
+const K = require('./app-kinds.js'); // PURE — an app kind is one row (lane dc-apps-rows, F-A1)
+const PLAN_KINDS = Object.freeze([...K.PLAN_KINDS, ...SYS.SYS_KINDS]); // design 019: `move` = the user's click (the host apps INTO the app system), `forget` = its second step
 /** A file VibeSpace staged for a proposal: `<16 hex>.deb` / `.AppImage` / `.icon.png|svg` (a download in flight: `.part`). */
 const STAGED_RE = /^[0-9a-f]{16}\.(?:deb|AppImage|icon\.(?:png|svg))$/;
 const STAGED_ANY_RE = /^[0-9a-f]{16}\.(?:deb|AppImage|part|key|icon\.(?:png|svg))$/;
@@ -544,8 +546,8 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
     const nonce = nonceOf();
     const canRun = !!(f.root || f.sudo);
     // Layer 1: where the app system is usable, an apt / .deb install goes INTO it (simulated against its own apt state)
-    const sysV = ['apt', 'deb', 'remove', 'refresh', 'move', ...SYS.SYS_KINDS].includes(kind) ? await sys.view({ facts: f, slot }) : null;
-    const intoSys = !!(sysV && sysV.usable) && (kind === 'apt' || kind === 'deb');
+    const sysV = [...K.SYS_VIEW_KINDS, ...SYS.SYS_KINDS].includes(kind) ? await sys.view({ facts: f, slot }) : null;
+    const intoSys = !!(sysV && sysV.usable) && (K.kindRow(kind) || {}).entry === 'root';
     const simOpts = async () => (intoSys ? SYS.simOpts(sys.rootfs) : aptOpts());
     const ret = (pl) => ({ plan: { ...(intoSys ? sys.retarget(pl, nonce) : pl), nonce }, facts: f, install });
     if (SYS.SYS_KINDS.includes(kind)) return ret(await sys.sysPlan(kind, { facts: f, nonce, canRun, view: sysV }));
@@ -787,7 +789,7 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
       const fh = await fsp.open(part, 'r'); try { await fh.read(head, 0, 64, 0); } finally { await fh.close(); }
       const s = A.sniffInstaller(head);
       if (!s.kind) throw named('not_an_installer', `${p.url != null ? `what ${got.hosts[got.hosts.length - 1]} sent` : path.basename(String(p.file))} is ${s.why}`);
-      const name = `${path.basename(part, '.part')}.${s.kind === 'deb' ? 'deb' : 'AppImage'}`;
+      const name = `${path.basename(part, '.part')}.${(K.kindRow(s.kind) || {}).staged || 'AppImage'}`;
       await fsp.rename(part, path.join(stagingDir, name));
       return { staged: name, sha256: got.sha256, size: got.size, kind: s.kind, hosts: got.hosts, url: p.url != null ? String(p.url) : null, file: got.file || null };
     } catch (e) { await fsp.rm(part, { force: true }); throw e; }
@@ -930,7 +932,7 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
   async function runOf(id, nonce) {
     let text = '';
     try {
-      const file = path.join(stateDir, M.INSTALL_FILES.log);
+      const file = path.join(stateDir, SLOT.INSTALL_FILES.log);
       const st = await fsp.stat(file);
       const fh = await fsp.open(file, 'r');
       try { const n = Math.min(st.size, LOG_MAX); const b = Buffer.alloc(n); await fh.read(b, 0, n, st.size - n); text = b.toString('utf8'); } finally { await fh.close(); }

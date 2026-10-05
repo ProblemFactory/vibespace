@@ -81,7 +81,7 @@ import { copyText, createModalShell, escHtml, fetchJson, showConfirmDialog, show
 import { registerCommand, registerMenuItem, runCommand } from './contributions.js';
 import { setupDirAutocomplete } from './autocomplete.js';
 import { FILE_ICONS, UI_ICONS } from './icons.js';
-import { validateBrowserUrl } from '../desktop-apps.js';
+import { validateBrowserUrl } from '../desktop-browser-app.js';
 import { SCALE_PREF_KEY, scaleKeyOf, scaleChoiceOf, setScaleChoice, launchScaleChoice, scaleDefaultMenuModel } from './desktop-app-scale.js';
 import { wireAppPrefs, appPrefs, appPrefsReady, onAppPrefs, saveAppPrefs } from './desktop-app-prefs.js';
 import { mountLaunchShareRow, launchKeyOf } from './window-share.js';

@@ -55,11 +55,9 @@
   "src/preset-layers.js": 1
  },
  "display": {
-  "src/desktop-apps.js": 2,
+  "src/desktop-apps.js": 1,
   "src/lib/desktop-app-launcher.js": 2,
-  "src/lib/settings-view.js": 1,
-  "src/routes/desktop-apps.js": 1,
-  "src/server/desktop-stream.js": 3
+  "src/lib/settings-view.js": 1
  },
  "browser": {
   "src/browser-profiles.js": 1,
@@ -69,5 +67,13 @@
   "src/lib/browser-switcher-model.js": 6,
   "src/server/browser-keeper.js": 2
  },
- "plugin": {}
+ "plugin": {},
+ "appkind": {
+  "src/app-manifest.js": 4,
+  "src/app-serve.js": 11,
+  "src/app-system-serve.js": 1,
+  "src/app-system.js": 1,
+  "src/lib/app-install-dialog.js": 4,
+  "src/server/apps-engine.js": 6
+ }
 }

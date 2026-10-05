@@ -178,7 +178,7 @@ console.log('§1c A PRESS COUNTS ONLY ON WHAT SAT STILL WHERE IT WAS READ (verif
 // src/hidden-chars.js; every approval surface asks it and spells none of its own; no tracked product file carries such
 // a character raw (the test suites' fixtures deliberately do — scripts/ is not product code).
 const HC = createRequire(import.meta.url)(path.join(REPO, 'src/hidden-chars.js'));
-const HIDDEN_SURFACES = ['src/exit-reach.js', 'src/channel-policy.js', 'src/helper-ask.js', 'src/browser-takeover.js', 'src/desktop-apps.js']; // + design 014 D1 verify r1: "Run on its desktop…"
+const HIDDEN_SURFACES = ['src/exit-reach.js', 'src/channel-policy.js', 'src/helper-ask.js', 'src/browser-takeover.js', 'src/machine-desktop-model.js']; // + design 014 D1 verify r1: "Run on its desktop…"
 const OWN_SET = /\\u(20[0-6][0-9a-f]|061c|feff|00ad)|\\p\{Cf\}/i; // an escape of a hidden code point, spelled in the SOURCE
 function hiddenDoorCensus(read) {
   const raw = [], own = [], unwired = [];

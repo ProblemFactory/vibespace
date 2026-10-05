@@ -39,6 +39,7 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const A = require('../app-manifest.js');
+const K = require('../app-kinds.js'); // PURE — an app kind is one row (lane dc-apps-rows, F-A1)
 const { liveForkPending, addressableId } = require('../claude-lock-capture.js');
 const { toAgentText } = require('../peer-text.js');
 const { sameToken } = require('../pairing-token.js'); // B-8dda (lane agent-cli-fixes): a raw secret is compared in constant time
@@ -249,7 +250,8 @@ router.post('/api/agent/apps/proposals', async (req, res) => {
   // design 009: an installer by address / file is DOWNLOADED first (minutes for a big one) — the answer starts at once and
   // carries a keep-alive space every 10 s (JSON ignores leading whitespace), then the JSON; a refusal is `{error, code}`
   const rk = b.request && typeof b.request === 'object' ? String(b.request.kind || '') : '';
-  const slow = rk === 'installer' || ((rk === 'deb' || rk === 'appimage') && (b.request.url != null || b.request.file != null));
+  const kr = K.kindRow(rk) || {};
+  const slow = !!kr.fetches || (!!kr.staged && (b.request.url != null || b.request.file != null));
   let tick = null;
   if (slow) { res.status(200).set({ 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.write(' '); tick = setInterval(() => { try { res.write(' '); } catch { /* gone */ } }, 10000); }
   const send = (status, obj) => { if (tick) { clearInterval(tick); res.end(JSON.stringify(obj)); } else res.status(status).json(obj); };
@@ -276,9 +278,16 @@ router.post('/api/agent/apps/user-kind', async (req, res) => {
   const g = agentGate(req, res); if (!g) return;
   const b = req.body || {};
   const kind = String(b.kind || '');
-  if (kind === 'appimage') return fail(res, { code: 'bad-request', message: 'an AppImage is proposed, not recorded: vibespace-app install --file <the .AppImage> --why "…"' });
-  if (!['uv-tool', 'npm'].includes(kind)) return fail(res, { code: 'bad-request', message: 'kind must be uv-tool / npm' });
+  const kr = K.kindRow(kind);
+  if (kr && kr.entry === 'home' && !kr.addArgv) return fail(res, { code: 'bad-request', message: `an ${kr.word} is proposed, not recorded: vibespace-app install --file <the .${kr.staged}> --why "…"` });
+  if (!kr || !kr.addArgv) return fail(res, { code: 'bad-request', message: `kind must be ${K.ROWS.filter((r) => r.addArgv).map((r) => r.id).join(' / ')}` });
   try { res.json({ ok: true, ...(await g.engine.recordUserKind(agentHost(req, g.who), { kind, name: String(b.name || ''), why: String(b.why || '').slice(0, 500), by: { kind: 'agent', conversation: g.who.conversation, name: g.who.name } })) }); } catch (e) { fail(res, e); }
+});
+/** THE DECLARED KIND ROWS (src/app-kinds.js) — the CLI's copy reads them (vibespace-app add: its --kind words, the argv
+ *  that installs a home tool; the proposal view's card words). Data only. */
+router.get('/api/agent/apps/kinds', (req, res) => {
+  const g = agentGate(req, res); if (!g) return;
+  res.json({ kinds: K.kindsView() });
 });
 router.get('/api/agent/apps/status', async (req, res) => {
   const g = agentGate(req, res); if (!g) return;

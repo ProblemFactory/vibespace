@@ -100,7 +100,7 @@ console.log('§1 the ONE surface (grep census over src/lib)');
   ok(V.COUNTER_ZOOM === 'calc(1 / var(--ui-scale, 1))', "COUNTER_ZOOM is inc-mtdrm922's rule verbatim: 'calc(1 / var(--ui-scale, 1))' (var-reactive, NET zoom 1)");
   const dw = read('src/lib/desktop-window.js'), daw = read('src/lib/desktop-app-window.js');
   ok(/import \{ createVncView, streamUrl \} from '\.\/vnc-view\.js'/.test(dw) && /createVncView\(winInfo\.content/.test(dw), 'desktop-window.js mounts through createVncView (no inline noVNC)');
-  ok(/import \{ createVncView, streamUrl, STREAM_KIND as RFB_KIND \} from '\.\/vnc-view\.js'/.test(daw) && /createVncView\(winInfo\.content/.test(daw), 'desktop-app-window.js mounts through createVncView too (its RFB records) — one component, two window types; its xpra records go through xpra-view.js on the same shell (P8-2 x2)');
+  ok(/import \{ viewOf, STATUS_KIND \} from '\.\/stream-views\.js'/.test(daw) && /view = viewOf\(kind\)\(winInfo\.content/.test(daw) && /\{ kind: rfb\.STREAM_KIND, create: rfb\.createVncView \}/.test(read('src/lib/stream-views.js')), /* F-B4: through the views registry */ 'desktop-app-window.js mounts through createVncView too (its RFB records) — one component, two window types; its xpra records go through xpra-view.js on the same shell (P8-2 x2)');
   ok(/autoReconnect: true/.test(dw) && /autoReconnect: true/.test(daw), 'BOTH windows walk the bounded reconnect ladder (2.369.118: the singleton too — userW\'s Desktop sat on "Disconnected" until a click; the Reconnect button stays for the ladder\'s end)');
   ok(/streamUrl\('\/api\/vnc'\)/.test(dw) && /streamUrl\(`\/api\/desktop\/\$\{encodeURIComponent\(id\)\}\/stream`\)/.test(daw), 'both windows speak to the ONE bridge (/api/vnc and /api/desktop/<id>/stream)');
 }

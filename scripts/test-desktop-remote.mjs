@@ -462,7 +462,7 @@ console.log('§8 the link dies MID-OP, and a long run past its deadline (C2 veri
   const fd = (await acc5.call('dev-m', 'facts', { install: true })).install; // the reconnect spawned a new daemon
   ok(fd && fd.installing === null && fd.lastInstall && fd.lastInstall.code === 0, 'the NEW daemon\'s facts report the install gone with its exit recorded (0) — what a held slot waits for', fd && { installing: fd.installing, lastInstall: fd.lastInstall });
   const accSrc5 = fs.readFileSync(path.join(REPO, 'src/server/desktop-access.js'), 'utf8');
-  const launchLine5 = '    const launch = M.installLauncherArgv(argv, { stateDir, mode });\n';
+  const launchLine5 = '    const launch = SLOT.installLauncherArgv(argv, { stateDir, mode });\n'; // lane dc-apps-rows: the slot's own module
   ok(accSrc5.split(launchLine5).length === 2, 'CONTROL setup: the launcher wrap is spelled once');
   const AccPre5 = MUT.load('src/server/desktop-access.js', accSrc5.replace(launchLine5, '    const launch = argv;\n'), 'nolauncher5');
   const accPre5 = AccPre5.create({ hosts: hostsFor({ 'dev-m': dm5 }), install: false, log: { log() { }, warn() { } }, installMs: 10000, holdMs: 15000 });

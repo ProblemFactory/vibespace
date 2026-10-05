@@ -42,7 +42,7 @@ const { hooksLateStale } = require('./hooks-late.js'); // lane hooks-create: a l
 const MSG_STASH_LINE_MAX = 400;
 const MSG_STASH_MAX_ENTRIES = 6;
 const MSG_STASH_MAX_BYTES = 6144;
-const MSG_STASH_BLOCK_SOURCES = new Set(['channel', 'channel-receipt', 'window-request', 'design-comment']); // lane E: the user's window request is one block (handle + mode + their line), never clipped to 400; lane design-core: the user's design comment likewise (its quote + their words, belted at the hub's door)
+const MSG_STASH_BLOCK_SOURCES = new Set(['channel', 'channel-receipt', 'window-request', 'design-comment', 'doc-comment', 'doc-edit']); // lane E: the user's window request is one block (handle + mode + their line), never clipped to 400; lane design-core: the user's design comment likewise (its quote + their words, belted at the hub's door)
 const clipBytes = (text, max) => { const b = Buffer.from(String(text), 'utf-8'); if (b.length <= max) return String(text); let cut = b.subarray(0, max).toString('utf-8'); const nl = cut.lastIndexOf('\n'); if (nl > max * 0.5) cut = cut.slice(0, nl); return cut + '\n(… clipped)'; };
 // lane peer-census verify r1 (F1): THE THREE AGENT-FACING GROUP ANSWERS — `GET /api/agent/msg/peers` (a peer agent's
 // own name and its self-set status reason), `GET /api/agent/msg/groups` (a group's name, every member's name) and
@@ -165,7 +165,7 @@ function renderMsgStash(entries, { maxEntries = MSG_STASH_MAX_ENTRIES, maxBytes 
     // head is said ONCE (S3 verify F2): an entry whose text already opens with
     // it (a re-stashed delivered frame) is not headed twice.
     const notice = stashKindOf(e) === 'notification';
-    const said = notice ? `${VIBESPACE_NOTICE_HEAD} [${agentText(who, { kind: 'line', max: 200 })}]` : e.source === 'design-comment' ? 'the user left a design comment:' : `from "${agentText(who, { kind: 'line', max: 200 })}":`;
+    const said = notice ? `${VIBESPACE_NOTICE_HEAD} [${agentText(who, { kind: 'line', max: 200 })}]` : e.source === 'design-comment' ? 'the user left a design comment:' : e.source === 'doc-comment' ? 'the user left comments on a document:' : e.source === 'doc-edit' ? 'the user edited a document:' : `from "${agentText(who, { kind: 'line', max: 200 })}":`;
     // a PEER entry's text is judged on its way out (re-judged-at-read: the belt AFTER every cut — a byte cut can
     // leave an opener dangling); a notification's is VibeSpace's own frame (see the require above)
     const text = notice ? withoutNoticeHead(e.text || '') : String(e.text || '');
@@ -202,6 +202,7 @@ function renderMsgStash(entries, { maxEntries = MSG_STASH_MAX_ENTRIES, maxBytes 
   // the naive-user pass (2026-09-28): a reaction digest is not a message — the reply hint only where a channel MESSAGE rides
   if (shown.some((e) => e.source === 'channel' && stashSummary.kindOf(e) !== 'channel-reaction')) hints.push('a channel message is answered with vibespace-channels reply <conversation> "..." (this PROPOSES; the user approves)');
   if (shown.some((e) => e.source === 'window-request')) hints.push('a window request is answered by acting on the window it names — vibespace-window attach <handle> (vibespace-docs window)');
+  if (shown.some((e) => e.source === 'doc-comment' || e.source === 'doc-edit')) hints.push('a document comment or edit is the user\'s own act on a markdown file — re-read the file before you change it');
   if (shown.some((e) => e.source === 'design-comment')) hints.push('a design comment is the user\'s own words about an artboard — re-read the file, change it, then vibespace-design sync (vibespace-docs design)');
   return { text: `${heading || '### Messages that arrived while this conversation was unreachable'}\n${rows.join('\n')}${held}${hints.length ? `\n(${hints.join('; ')})` : ''}`, shown, rest };
 }
