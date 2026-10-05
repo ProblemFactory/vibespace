@@ -48,7 +48,7 @@ import { cardBuildLine } from './browser-build-model.js'; // lane browser-admin 
 import { cliRowWords, cliOfferLabel, cliConfirmWords, cliOutcomeWords } from './browser-cli-model.js'; // lane browser-admin 2b: the Browser CLI row
 import { UI_ICONS } from './icons.js';
 import { memoryText } from '../runaway-guard.js';
-import { stuckWords } from '../browser-stuck.js'; // lane browser-stuck: a profile row whose page waits on a dialog / does not respond
+import { stuckWords, unresponsiveWords } from '../browser-stuck.js'; // lane browser-stuck: a profile row whose page waits on a dialog / does not respond
 import { frameUrl, bytesText, traceSummary, timelineLabel, positionText, overlayGeometry, traceWindowFor, unionWindow, assignEntriesToWindows, armGapFor, EPHEMERAL_SCOPE, TRACE_BYTES_PER_PROFILE, foldFits, visibleEntries, isFitEntry, fitCount } from '../browser-trace.js'; // lane trace-fits: the page-size fold
 import { sessionOfEntry, sessionOrdinals } from '../browser-sessions.js'; // 2026-09-27: the live view's session dividers + Sessions list (PURE)
 import { humanStateLine, humanRefusalText } from '../browser-human.js'; // BROWSE YOURSELF (B-6ae8): the row's "You are browsing it" line (PURE)
@@ -847,7 +847,9 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
     const autoText = autoDialogsOf(r) ? t('Accepts leave-page dialogs by itself (typed input is lost) until its next start') : null;
     // lane browser-admin 2a: WHICH CHROME BUILD — the choice and, while it runs, the build the browser itself reports (the fold)
     const buildLine = cardBuildLine({ buildChoice: r.buildChoice, choice: r.browser, running: runningBuildOf(r.id), missing: r.buildMissing, live: !!r.live }, t);
-    const x = { w: WORDS, chip: app.browserChipFor ? app.browserChipFor(r.id) : null, mine: app._browserProfiles && app._browserProfiles.machine ? String(app._browserProfiles.machine.host || '') : '', stuck: psw, autoDialogs: !!autoText, autoText, buildLine, limits: v?.limits || null, now: Date.now() };
+    // lane browser-unresponsive: the keeper's verdict, in the viewer's clock ("Not answering since 16:34")
+    const uw = r.unresponsive && Number.isFinite(r.unresponsive.since) ? unresponsiveWords({ since: r.unresponsive.since, label: String(r.label || r.id), clock: new Date(r.unresponsive.since).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }, t) : null;
+    const x = { unresponsive: uw, w: WORDS, chip: app.browserChipFor ? app.browserChipFor(r.id) : null, mine: app._browserProfiles && app._browserProfiles.machine ? String(app._browserProfiles.machine.host || '') : '', stuck: psw, autoDialogs: !!autoText, autoText, buildLine, limits: v?.limits || null, now: Date.now() };
     const L = rowLine(r, x);
     const isOpen = openFolds.has(r.id);
     // ① the profile: the chevron + the name (cut, never wrapped — whole in its title and the fold), then its chips
@@ -881,6 +883,7 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
       const bb = el('button', 'file-tool-btn bprof-btn bprof-browse' + (L.primary.open ? ' open' : ''), L.primary.label);
       bb.title = L.primary.title;
       bb.onclick = () => { if (app.browseYourself) app.browseYourself(r.id, { label: String(r.label || r.id) }); };
+      if (L.primary.id === 'restart') { bb.className = 'file-tool-btn bprof-btn bprof-restart bprof-restart-primary'; bb.onclick = () => RUN.restart(r); } // lane browser-unresponsive: the hung browser's ONE way out
       acts.appendChild(bb);
     }
     const menuBtn = el('button', 'file-tool-btn bprof-more'); menuBtn.type = 'button';

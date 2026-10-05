@@ -745,8 +745,35 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
           ro.appendChild(step);
         }
       } else {
-        // P4: the reason in words, never a bare code
-        ro.appendChild(el('span', '', t('Read-only here ({why})', { why: chanCaps.sendWhyText(why, { t }) })));
+        // lane gmail-reply-known: a row being resolved reads "Checking…"; a REFUSED lookup names why, when it is
+        // asked again, and offers Retry (+ Re-authorize where the sign-in is the fix) — never "not known yet" for ever
+        const fm = chanCaps.sendFoot(c.convCaps, why, { t, vendor: a && a.vendor ? t(a.vendor) : ((a && (a.label || a.kind)) || ''), checking: c.convCapsChecking === true });
+        if (fm) {
+          ro.dataset.channelReadonly = fm.state;
+          ro.appendChild(el('span', '', fm.text));
+          if (fm.retry) {
+            const again = btn(t('Retry'), async () => {
+              again.disabled = true;
+              const d = await fetchJson(`/api/channels/${encodeURIComponent(adapterId)}/${encodeURIComponent(convId)}/caps`, { method: 'POST' });
+              again.disabled = false;
+              if (!d || d.error) showToast(routeErrorText(d), { type: 'error' });
+            });
+            again.dataset.channelCapsRetry = '1';
+            ro.appendChild(again);
+          }
+          if (fm.reauth && a && a.connectable) {
+            const fix = btn(t('Re-authorize'), async () => {
+              const d = await fetchJson('/api/channels?scope=accounts');
+              if (!d || d.error) { showToast(routeErrorText(d), { type: 'error' }); return; }
+              showReauthAccountDialog(app, (d.adapters || []).find((x) => x.id === a.id) || a, { kinds: d.kinds || [] });
+            }, 'mounts-btn-primary');
+            fix.dataset.channelReauth = a.id;
+            ro.appendChild(fix);
+          }
+        } else {
+          // P4: the reason in words, never a bare code
+          ro.appendChild(el('span', '', t('Read-only here ({why})', { why: chanCaps.sendWhyText(why, { t }) })));
+        }
       }
       foot.appendChild(ro);
     }

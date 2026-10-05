@@ -390,6 +390,7 @@ const ROUTES = {
   'POST /api/agent/browser/dialog': 'meta',
   'POST /api/agent/browser/direct': 'meta',
   'POST /api/agent/browser/passkey': 'meta', // lane browser-passkey: the page's passkey wait — status / cancel through the watch
+  'POST /api/agent/browser/restart': 'meta', // int220 (lane browser-unresponsive): the keeper's restartProfile on a browser the caller holds — no record of the five kinds
   'POST /api/agent/browser/site-reset': 'meta',
   'GET /api/agent/browser/providers': 'meta',
   'POST /api/agent/browser/new': 'meta',
@@ -1743,6 +1744,7 @@ const I_RECV = {
   'src/lib/browser-trace-view.js|res.profile': ['browser profile', 'a profile label'], 'src/lib/browser-trace-view.js|res': ['browser profile', 'the profile adopted from'], 'src/lib/browser-trace-view.js|r': ['browser profile', 'a profile label'],
   'src/lib/browser-trace-view.js|k': ['browser profile', 'a kept conversation browser\'s label (the session name it was kept for — lane browser-resume §3.9)'], 'src/server/browser-kept.js|e': ['browser profile', 'a kept conversation browser\'s label (the session name it was kept for — lane browser-resume §3.9)'],
   'src/lib/browser-who-dialog.js|r.profile': ['browser profile', 'a profile label'],
+  'src/lib/user-todos-actions.js|r.browser': ['browser profile', 'a profile label (the For-you Restart of a browser that stopped answering — int220, lane browser-unresponsive)'],
   'src/lib/channel-account-dialogs.js|k': ['channel account', 'an integration key label'], 'src/lib/channel-account-dialogs.js|v': ['channel account', 'an account name'],
   'src/lib/channel-group-dialogs.js|group': ['agent group', 'a group\'s name'], 'src/lib/channel-outbox.js|r': ['outbox proposal', 'a send\'s refusal reason'],
   'src/lib/channels-panel.js|r': ['count', 'a refresh answer\'s pending flag'], 'src/lib/channel-window.js|group': ['agent group', 'a group\'s name'], 'src/lib/channel-window.js|a': ['channel author', 'lane lark-threads: an author\'s vendor name / id in the "Set a name…" dialog\'s title (the vendor\'s, never a record\'s words)'], 'src/lib/channel-window.js|r2.proposal': ['outbox proposal', 'the channel\'s refusal of a send'],

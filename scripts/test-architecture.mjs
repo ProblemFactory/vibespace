@@ -3109,6 +3109,7 @@ console.log('§65 every producer that can carry a conversation\'s facts to an ag
     composePointerSync: 'the owner\'s For-you pointer to composed messages awaiting approval',
     speakUnknown: 'the owner\'s For-you item for a lost outcome',
     speakFailure: 'the owner\'s For-you item for a failing account',
+    speakSlowed: 'the owner\'s For-you item when the vendor refused an account\'s quota twice in a day (lane gmail-quota-share)',
     speakUnsaved: 'the owner\'s For-you item for an unsaved token',
     request: 'files the OWNER\'s For-you item for an agent\'s access request (the owner decides it)',
     fileWatchRequest: 'files the OWNER\'s For-you item for an agent\'s WAKE watch request (lane channel-agent-watch: the owner approves the billed notification)',
@@ -4225,5 +4226,47 @@ console.log('§80 built-in plugins: one list, one file each, no id branch in the
 { const lib = fs.readdirSync(path.join(REPO, 'src/lib')).filter((f) => f.endsWith('.js') && !/^i18n-/.test(f)).map((f) => [f, fs.readFileSync(path.join(REPO, 'src/lib', f), 'utf8')]);
   const bad = lib.filter(([, t]) => /[!=]==?\s*'(?:claude|codex)'\s*\?\s*(?:t|tr)\(\s*'(?:ChatGPT login|CLI login|Subscription)|[!=]==?\s*'(?:claude|codex)'\s*\?\s*'(?:Claude|Codex)'/.test(t)).map(([f]) => f);
   ok(bad.length === 0, `client billing words / backend labels come from the declared ui row (no id ternary; offenders: ${bad.join(', ') || 'none'})`); }
+
+// lane names-scrub (B-2dcc, 2026-10-05; CLAUDE.md "Public repo hygiene": ZERO personal identifiers): a colleague's real
+// names never return to the tracked tree. The list holds the sha256 of each forbidden word (lower-cased), NEVER the word,
+// so the guard itself publishes nothing; every tracked or untracked-unignored text file is split into ASCII-letter runs
+// (so `ou_<name>`, `<name>8`, `<name>的` all count) and each run's digest is looked up. Docs and fixtures use userN for a
+// person and `Ada (Marketing)` for a nickname. NAME_EXEMPT: a same-letters word that is NOT a name, pinned by its exact
+// count so a real name added to that file still goes red. The push-time guard is the private repo-guard denylist
+// (REPO_GUARD_COMPANY, outside this repo); this is the CI one. To add a name: printf <name> | tr A-Z a-z | sha256sum.
+{ const NAME_DIGESTS = new Set([
+    '43f52410ceeba65a8e92d84b6d29f6a82aa3b46959bdd3b056f4c616734e8299',
+    'b78469618fb15871b9508defd1ff70014747c1f918e4185425c5f2bbea2a4e5d',
+  ]);
+  const NAME_EXEMPT = { 'src/design-viewer-entry.js': 3 };   // the zoom-in button's variable
+  const nameCensus = (tree, digests, exempt) => {
+    const memo = new Map(), bad = [];
+    const hit = (w) => { const k = w.toLowerCase(); if (!memo.has(k)) memo.set(k, digests.has(crypto.createHash('sha256').update(k).digest('hex'))); return memo.get(k); };
+    for (const [rel, t] of tree) { let n = 0; for (const w of t.match(/[A-Za-z]+/g) || []) if (hit(w)) n++; if (n !== (exempt[rel] || 0)) bad.push(`${rel} (${n})`); }
+    return bad;
+  };
+  const ls = spawnSync('git', ['-C', REPO, 'ls-files', '-z', '-co', '--exclude-standard'], { encoding: 'utf-8', env: gitEnvFrom(process.env), maxBuffer: 64 * 1024 * 1024 });
+  const tree = [];
+  for (const rel of String(ls.stdout || '').split('\0').filter(Boolean)) {
+    let b; try { b = fs.readFileSync(path.join(REPO, rel)); } catch { continue; }
+    if (!b.subarray(0, 8192).includes(0)) tree.push([rel, b.toString('utf8')]);
+  }
+  const bad = nameCensus(tree, NAME_DIGESTS, NAME_EXEMPT);
+  ok(ls.status === 0 && tree.length > 1000 && bad.length === 0, `public repo hygiene: ${tree.length} text files carry none of the ${NAME_DIGESTS.size} listed real names (offenders: ${bad.join(', ') || 'none'}${ls.status === 0 ? '' : `; git ls-files exit ${ls.status}`})`);
+  // CONTROLS — an invented word stands in for a listed name (the list cannot be planted without writing the name):
+  // planted in a scratch copy of one doc as a word, inside an id, before CJK and in capitals ⇒ red; one extra
+  // same-letters word in an exempt file ⇒ red; the unplanted copy ⇒ green.
+  const PLANT = 'quillonve', D = new Set([crypto.createHash('sha256').update(PLANT).digest('hex')]);
+  const doc = tree.find(([rel]) => rel === 'docs/kb-file-structure.md')?.[1] || '';
+  const ctl = [
+    ['the clean copy', [['docs/kb-file-structure.md', doc]], {}, false],
+    ['a planted word', [['docs/kb-file-structure.md', `${doc}\nThe owner saw Quillonve here.\n`]], {}, true],
+    ['inside an id', [['docs/kb-file-structure.md', `${doc}\nauthor: ou_quillonve\n`]], {}, true],
+    ['before CJK', [['docs/kb-file-structure.md', `${doc}\n我在lark里看到的QUILLONVE的名字\n`]], {}, true],
+    ['one more in an exempt file', [['docs/kb-file-structure.md', `${doc}\nquillonve x quillonve\n`]], { 'docs/kb-file-structure.md': 1 }, true],
+  ];
+  const r = ctl.map(([n, files, ex, wantRed]) => ({ n, ok: doc.length > 0 && (nameCensus(files, D, ex).length > 0) === wantRed, wantRed }));
+  ok(r.every((x) => x.ok), `public repo hygiene CONTROLS: ${r.map((x) => `${x.n} (${x.ok ? (x.wantRed ? 'RED' : 'green') : 'WRONG'})`).join(', ')}`);
+}
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

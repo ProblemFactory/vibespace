@@ -329,7 +329,8 @@ console.log('— ⑤ verify r1');
   const n0 = hubCli().length;
   const h1 = await call(API, 'POST', `/api/browser/profiles/${here.id}/restart`);
   ok(h1.status === 404 && /no browser record/.test(h1.json.error) && Object.keys(h1.json).join() === 'error,code' && hubCli().length === n0, 'this computer\'s never-started profile: restart answers 404 "no browser record" byte-for-byte as before — nothing launched', h1);
-  const Rh = mutant('src/routes/browser.js', "if (!(remote && e && e.code === 'not-found')) throw e;", "if (!(e && e.code === 'not-found')) throw e;");
+  // int220: this computer's restart goes through the keeper's restartProfile first (lane browser-unresponsive) — the cold-start mutant drops that door too
+  const Rh = mutant('src/routes/browser.js', "    if (!remote && typeof k.restartProfile === 'function') return res.json({ browser: await k.restartProfile(req.params.id, { by: 'user' }) });\n    try { await k.stop(req.params.id, { why: 'user' }); } catch (e) { if (!(remote && e && e.code === 'not-found')) throw e; cold = true; }", "    try { await k.stop(req.params.id, { why: 'user' }); } catch (e) { if (!(e && e.code === 'not-found')) throw e; cold = true; }");
   const APIh = await serve(Rh);
   const h2 = await call(APIh, 'POST', `/api/browser/profiles/${here.id}/restart`);
   ok(h2.status !== 404 && hubCli().length > n0, 'CONTROL (any profile cold-starts): this computer\'s profile is launched by a restart', h2);

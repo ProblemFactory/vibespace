@@ -501,15 +501,16 @@ function create(engineCtx) {
     // refresh, so the first direct send on a never-resolved conversation was
     // downgraded to review with reason `authority`, the second went direct)
     let enNow = en;
-    if (!who.as && (who.why === 'unknown' || who.why === 'stale')) {
+    if (!who.as && (who.why === 'unknown' || who.why === 'stale' || caps.CONV_CAPS_FAIL_WHYS.includes(who.why))) {
       // A proposal is a better refresh trigger than a render (§4's second
       // trigger, applied where the answer decides a real message): resolve
       // ONCE, then re-ask. A conversation whose caps were never resolved has none cached.
       let fresh = null;
-      try { fresh = await refreshConvCaps(adapterId, convId); } catch (err) { log.warn(`[channels] convCaps refresh at propose failed: ${(err && err.message) || err}`); }
+      try { fresh = await refreshConvCaps(adapterId, convId, { polite: true }); } catch (err) { log.warn(`[channels] convCaps refresh at propose failed: ${(err && err.message) || err}`); }
       if (fresh) { enNow = { ...en, convCaps: fresh }; who = sendIdentityFor(rec, enNow, now()); }
     }
-    if (!who.as) return { ok: false, code: 'send-not-available', error: `sending is not available on this conversation (${who.why})`, why: who.why };
+    const askAt = caps.CONV_CAPS_FAIL_WHYS.includes(who.why) ? Number(((enNow && enNow.convCaps) || {}).retryAt) || null : null;   // lane gmail-reply-known
+    if (!who.as) return { ok: false, code: 'send-not-available', error: `sending is not available on this conversation (${who.why}${askAt ? `; asked again at ${new Date(askAt).toISOString()}` : ''})`, why: who.why, ...(askAt ? { retryAt: askAt } : {}) };
     const own = !!(input && input.direct === true) && (!ctx || ctx.kind === 'user');
     if (own && who.as !== 'user') return { ok: false, code: 'send-not-available', error: `sending as you is not available on this conversation (${who.userWhy || 'unknown'})`, why: who.userWhy || 'unknown' };
     const v = P.validateProposal(input);

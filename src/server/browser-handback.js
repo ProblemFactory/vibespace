@@ -265,7 +265,9 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
     const sess = sessionFor(ev.sessionId, ev.browserKey);
     if (!sess) { out.why = 'no live session carries this browser key'; return out; }
     out.sessionId = sess.id;
-    const text = INT.relaunchText({ label: ev.label || labelOf(ev.profileId), from: ev.from, to: ev.to, n: ev.n || 0, verbs: ev.verbs || [], outcome: ev.outcome || 'changed' }); // verify r1 (F9): what happened
+    // lane browser-unresponsive: a RESTART of a hung shared browser — the keeper's words (who, since when), a card only
+    const restarted = ev.outcome === 'restarted' && typeof ev.text === 'string' && ev.text;
+    const text = restarted ? ev.text : INT.relaunchText({ label: ev.label || labelOf(ev.profileId), from: ev.from, to: ev.to, n: ev.n || 0, verbs: ev.verbs || [], outcome: ev.outcome || 'changed' }); // verify r1 (F9): what happened
     out.text = text;
     const card = { fromName: FROM_NAME, text, kind: 'notification' };
     const cid = conversationIdOf(sess.s);
@@ -273,6 +275,7 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
       if (typeof emitCard === 'function') out.carded = emitCard(sess.s, card) !== false;
       else if (cid && deliver && typeof deliver.emitPeerCard === 'function') { deliver.emitPeerCard(cid, card); out.carded = true; }
     } catch (e) { log.warn?.(`[browser] relaunch card not shown — ${e && e.message}`); }
+    if (restarted) { log.log?.(`[browser] restart of ${ev.profileId} told to ${sess.id}${out.carded ? ': card shown' : ': NO card (no live chat)'}`); return out; }
     out.noticed = queueNotice(sess, { kind: 'browser-relaunch', label: ev.label || null, from: ev.from || '', to: ev.to || '', outcome: ev.outcome || 'changed', n: Math.max(0, Number(ev.n) || 0), verbs: (Array.isArray(ev.verbs) ? ev.verbs : []).map(String).slice(0, 20), at: Date.now() });
     log.log?.(`[browser] build change on ${ev.profileId} told to ${sess.id}: ${ev.n ? `${ev.n} operation(s) interrupted (${(ev.verbs || []).join(', ')})` : 'nothing in flight'}${out.carded ? '; card shown' : ''}${out.noticed ? '; the notice rides the next turn' : ''} (free — nothing delivered)`);
     return out;

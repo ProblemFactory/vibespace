@@ -108,18 +108,21 @@ function resourceVerdict(sample, prev, hotSince, now, { clkTck = 100, limits = L
   if (prev && now > prev.at) cpuPct = (sample.cpuTicks - prev.cpuTicks) * 100000 / clkTck / (now - prev.at);
   const metric = sample.memMetric;
   const memGuard = JUDGED_METRICS.includes(metric) && Number.isFinite(sample.memBytes) ? metric : 'unavailable';
-  let over = null, overKind = null, hotMin = null;
+  let over = null, overKind = null, hotMin = null, cpuOver = null;
   let hot = hotSince || 0;
+  // lane browser-unresponsive (the measured inc: PSS 3.0 GB over the limit AND a GPU process at 350 % — the memory branch
+  // hid the CPU one, so the CPU crossing was never judged): each cause is judged on its own; `over` keeps memory first
+  if (cpuPct !== null && cpuPct > L.GUARD_CPU_PCT) {
+    if (!hot) hot = now;
+    if (now - hot >= L.GUARD_CPU_SUSTAIN_MS) { cpuOver = `${cpuPct.toFixed(0)}% CPU sustained for ${Math.round((now - hot) / 60000)} min (limit ${L.GUARD_CPU_PCT}%)`; hotMin = Math.round((now - hot) / 60000); }
+  } else hot = 0;
   if (memGuard !== 'unavailable' && sample.memBytes > L.GUARD_MEM_BYTES) {
     over = `memory (${MEM_METRIC_LABELS[metric]}) ${gb(sample.memBytes)} GB (limit ${gb(L.GUARD_MEM_BYTES)} GB)`; overKind = 'memory';
-  } else if (cpuPct !== null && cpuPct > L.GUARD_CPU_PCT) {
-    if (!hot) hot = now;
-    if (now - hot >= L.GUARD_CPU_SUSTAIN_MS) { over = `${cpuPct.toFixed(0)}% CPU sustained for ${Math.round((now - hot) / 60000)} min (limit ${L.GUARD_CPU_PCT}%)`; overKind = 'cpu'; hotMin = Math.round((now - hot) / 60000); }
-  } else hot = 0;
+  } else if (cpuOver) { over = cpuOver; overKind = 'cpu'; }
   const rearm = Number.isFinite(L.REPORT_REARM_FRACTION) ? L.REPORT_REARM_FRACTION : LIMITS.REPORT_REARM_FRACTION;
   const memClear = memGuard === 'unavailable' || sample.memBytes < rearm * L.GUARD_MEM_BYTES;
   const clear = !over && memClear && !hot;
-  return { cpuPct, hotSince: hot, over, overKind, hotMin, memGuard, clear };
+  return { cpuPct, hotSince: hot, over, overKind, hotMin, memGuard, clear, cpuOver };
 }
 
 /**
@@ -176,10 +179,12 @@ function reportDelivery(state, delivered) {
  *  the Desktop panel if that is not what you expect" / "… has been using 280%
  *  CPU for 5 min — …". `who` = the session's name, `where` = the panel that
  *  holds its Stop. */
-function resourceNoticeText({ who, where, verdict, sample }) {
+function resourceNoticeText({ who, where, verdict, sample, gpuPct = null }) {
   const tail = ` — Stop it from the ${where} if that is not what you expect`;
   if (verdict && verdict.overKind === 'cpu') {
     const pct = Number.isFinite(verdict.cpuPct) ? Math.round(verdict.cpuPct) : '?';
+    // lane browser-unresponsive: the GPU process is the one over — said as what it is (software rendering), REPORT only
+    if (Number.isFinite(gpuPct) && Number.isFinite(verdict.cpuPct) && gpuPct >= verdict.cpuPct / 2) return `${who}: its GPU process is rendering in software at ${Math.round(gpuPct)}% CPU (${pct}% for the whole browser, ${Math.max(1, Number(verdict.hotMin) || 1)} min) — a page with continuous animation/WebGL on a machine without a GPU; Restart ends it, closing that page keeps it from coming back`;
     return `${who} has been using ${pct}% CPU for ${Math.max(1, Number(verdict.hotMin) || 1)} min${tail}`;
   }
   return `${who} is using ${memoryText(sample && sample.memBytes, sample && sample.memMetric) || 'a lot of memory'}${tail}`;

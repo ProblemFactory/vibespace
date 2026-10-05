@@ -154,6 +154,9 @@ YOURS:
                                                   tab); --sharing instance = each conversation sees only its own tabs
   vibespace-browser use <label|id> [--alias <h>]  attach to it; your page verbs then run there, in a window of your
                                                   own (other conversations work in theirs at the same time)
+  vibespace-browser restart [<profile>]           relaunch a browser that has STOPPED ANSWERING (refused browser_unresponsive):
+                                                  logins kept, every other conversation on it told — only while it is
+                                                  judged hung and the user is not driving it (a working one: browser_answering)
   vibespace-browser resume                        start THIS conversation's own browser again with its kept tabs (same
                                                   order, the same tab on show) — or, while it runs, reopen the tabs a
                                                   close kept (its logins stay either way; a command's note names them)
@@ -1241,6 +1244,13 @@ async function runOursPage(cls, { r, head, profileId, wantsJson }) {
 
   // lane browser-resume B (§3.9): THIS conversation's own browser, started again with its kept tabs (same order, the same tab
   // on show) — or, when it runs, the tabs still waiting from a deliberate stop reopened as new tabs
+  // lane browser-unresponsive: a HUNG browser's way out — the server admits it only while the keeper judges it hung
+  if (verb === 'restart') {
+    const ref = (args[1] && !args[1].startsWith('-') ? args[1] : '') || handle || '';
+    const r = await call('POST', '/api/agent/browser/restart', ref ? { profile: ref } : {});
+    console.log(r.note || 'restarted');
+    return;
+  }
   if (verb === 'resume') {
     const r = await call('POST', '/api/agent/browser/resume', handle ? { handle } : {});
     printKept(r);

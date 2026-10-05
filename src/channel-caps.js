@@ -375,6 +375,13 @@ function authState(adapterRecord, now, { lastPass = undefined, adapterState = nu
   return { state: 'connected', why: null, expiresAt };
 }
 
+/** WHY A SEND ROW COULD NOT BE RESOLVED — a closed set (lane gmail-reply-known, 2026-10-05: an old listed Gmail
+ *  thread had no reply box because ONE metadata read was rate-limited, and the open's re-ask swallowed the refusal,
+ *  so the foot said "not known yet" for ever). The engine writes `{read:'unknown', sendAs:[], why, at, retryAt}`
+ *  with one of these when the conversation's lookup was refused: the ChannelError codes the adapters throw, plus
+ *  the engine's own `backoff` (the account's vendor back-off; the owner's Retry is exempt) and `not-connected`. */
+const CONV_CAPS_FAIL_WHYS = Object.freeze(['rate-limited', 'backoff', 'not-connected', 'vendor-error', 'auth-expired']);
+
 /**
  * THE per-conversation capability cache, resolved against its own age
  * (design §4, r4). Past the TTL it degrades to `unknown` — which `offers()`
@@ -392,7 +399,8 @@ function convCapsState(cached, now, ttlMs = CONV_CAPS_TTL_MS) {
   // `null` when the cache predates them (a control whose row is unknown is not offered, the r4 rule)
   const threads = e.threads && typeof e.threads === 'object' ? { replyInto: e.threads.replyInto === true, mode: e.threads.mode || null, why: e.threads.why || null } : null;
   const reactions = e.reactions && typeof e.reactions === 'object' ? { read: e.reactions.read === true, add: e.reactions.add === true, why: e.reactions.why || null } : null;
-  return { read, sendAs: Array.isArray(e.sendAs) ? e.sendAs.slice() : [], why: e.why || null, at, ageSeconds: ageS(at, now), threads, reactions };
+  const failed = read === 'unknown' && CONV_CAPS_FAIL_WHYS.includes(e.why) ? { retryAt: num(e.retryAt) } : {};   // when the engine asks again by itself (null: an owner step is needed)
+  return { read, sendAs: Array.isArray(e.sendAs) ? e.sendAs.slice() : [], why: e.why || null, at, ageSeconds: ageS(at, now), threads, reactions, ...failed };
 }
 
 /** The reasons a control is not offered, in the order they are checked.
@@ -506,6 +514,13 @@ function sendWhyText(why, { t = defaultT } = {}) {
     case 'left-group': return t('you left this conversation');
     case 'bot-not-in-chat': return t('the bot is not in this chat');
     case 'not-declared-for-this-identity': return t('this identity cannot send on this channel');
+    // lane gmail-reply-known: a lookup that was REFUSED names why (CONV_CAPS_FAIL_WHYS) — the engine asks again by itself
+    case 'rate-limited': return t('the vendor is rate-limiting this account — it is asked again by itself');
+    case 'backoff': return t('this account is paused after repeated vendor errors — it is asked again by itself');
+    case 'vendor-error': return t('the vendor did not answer whether you can reply — it is asked again by itself');
+    case 'auth-expired': return t('this account\'s sign-in expired — Re-authorize');
+    case 'not-connected': return t('this account is not connected — Re-authorize');
+    case 'checking': return t('checking whether you can reply…');
     case 'stale': return t('the send capability has not been re-checked recently');
     case 'unknown': return t('the send capability is not known yet');
     // r6 verify F1 / F3 (2026-09-28): a reply's target, re-judged at approval
@@ -514,6 +529,25 @@ function sendWhyText(why, { t = defaultT } = {}) {
     case 'reply-envelope': return t('who this reply goes to could not be resolved');
     default: return String(why);
   }
+}
+
+/** THE WINDOW'S FOOT WHILE THE SEND ROW IS NOT RESOLVED (lane gmail-reply-known). A lookup in flight — or about to be:
+ *  the window's open re-asks an unknown / stale row — reads "Checking…" (never the raw word); a REFUSED lookup names
+ *  why, when it is asked again (`retryAt`, the engine's own timer) and offers Retry (+ Re-authorize where the sign-in
+ *  is the fix). `null` = a RESOLVED refusal — the caller's "Read-only here ({why})". */
+function sendFoot(cc, why, { t = defaultT, vendor = '', checking = false } = {}) {
+  const w = String(why || 'unknown');
+  if (checking || w === 'unknown' || w === 'stale') return { state: 'checking', why: w, text: t('Checking whether you can reply…'), retry: false, reauth: false };
+  if (!CONV_CAPS_FAIL_WHYS.includes(w)) return null;
+  const v = vendor || t('The vendor');
+  const said = w === 'rate-limited' ? t('{vendor} is rate-limiting this account — the reply box returns when it answers', { vendor: v })
+    : w === 'backoff' ? t('This account is paused after repeated vendor errors — the reply box returns when it answers')
+      : w === 'auth-expired' ? t('This account\'s sign-in expired — Re-authorize to reply')
+        : w === 'not-connected' ? t('This account is not connected — Re-authorize to reply')
+          : t('{vendor} did not answer whether you can reply here', { vendor: v });
+  const at = cc ? num(cc.retryAt) : null;
+  const text = at ? t('{sentence} (retrying at {time})', { sentence: said, time: hhmm(at) }) : said;
+  return { state: 'failed', why: w, text, retryAt: at, retry: true, reauth: w === 'auth-expired' || w === 'not-connected' };
 }
 
 /** WHY REPLYING INTO A THREAD IS NOT OFFERED, in words (lane channel-threads,
@@ -693,6 +727,20 @@ function cadenceFor(caps, laneOrScan, entry, now, { tiers = null, watched = fals
     return { seconds: clamp(Math.max(Number(secs), Number(T.relaxedSec) || TIER_DEFAULTS.relaxedSec)), tier, source: 'feed-safety', paused: false };
   }
   return { seconds: clamp(secs), tier, source: 'tier', paused: false };
+}
+
+/** THE LEARNED BUDGET SENTENCE (lane gmail-quota-share): the vendor refused this account's quota, so its polling
+ *  slowed itself (src/channel-budget.js) — the ceiling of the setting, WHEN the vendor refused (the shared bucket
+ *  named as a POSSIBILITY: another instance cannot be seen from here) and when it is back at the setting.
+ *  `budget.learned` = {ceiling, setting, refusedAt, fullAt} from the account row; '' at the setting. */
+function learnedBudgetText(budget, { t = defaultT, vendor = '' } = {}) {
+  const l = budget && budget.learned;
+  if (!l || !(Number(l.ceiling) < Number(l.setting))) return '';
+  const hm = (ms) => { const d = new Date(Number(ms)); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+  const unit = budget.unit === 'quota-unit' ? t('quota units') : t('requests');
+  const args = { n: Math.round(Number(l.ceiling)), m: Math.round(Number(l.setting)), unit, back: Number(l.fullAt) > 0 ? hm(l.fullAt) : '—' };
+  if (Number(l.refusedAt) > 0) return t("Polling at {n} of {m} {unit}/min — {vendor} refused this account's quota at {time}; another instance may be polling the same account · back to {m} by {back}", { ...args, vendor: vendor || t('The vendor'), time: hm(l.refusedAt) });
+  return t('Polling at {n} of {m} {unit}/min · back to {m} by {back}', args);
 }
 
 /** THE VENDOR BUDGET SENTENCE (§6.2) — `{unit, limit, exhausted, waiting,
@@ -1145,7 +1193,7 @@ module.exports = {
   laneState, scanState, convCapsState, offers, authState,
   identityWarning, identityWarningText, freshnessClaim, freshnessText, humanAge,
   // 2026-09-26: the per-conversation cadence, the override choices, the vendor budget + push remedies
-  TIER_DEFAULTS, COLD_MAX_SEC, REFRESH_CHOICES, validRefresh, pollTier, cadenceFor, budgetText, passStateText, firstReadText, pushUnavailableText,
+  TIER_DEFAULTS, COLD_MAX_SEC, REFRESH_CHOICES, validRefresh, pollTier, cadenceFor, budgetText, learnedBudgetText, passStateText, firstReadText, pushUnavailableText,
   authWhyText, laneWhyText, errorCodeText, deliveryLaneText, scanSourceText, wakeRefusalText,
   pushWindow, pushSamplesAdd, pushMissRate, pushDemotionVerdict, pushLaneText,
   // lane lark-search-poll: the change feed's one lane answer + its words
@@ -1154,4 +1202,6 @@ module.exports = {
   shapeFields, feedUnreadableText, FEED_LOUD_STRIKES,
   // lane lark-threads (A5): the thread measurement's one sentence
   feedThreadsText,
+  // lane gmail-reply-known: why a send row was not resolved (closed) + the window's foot while it is not
+  CONV_CAPS_FAIL_WHYS, sendFoot,
 };

@@ -357,6 +357,8 @@ function create(ctx, slot) {
    *  restart's outcome is known (verify r1 F9: `changed` | `restored` | `down`). Never the input
    *  seam: a restart is not a takeover (the live view's relay must not read it as one). */
   function onRelaunch(fn) { relaunchListeners.add(fn); return () => relaunchListeners.delete(fn); }
+  /** int220 (lane browser-unresponsive): the keeper's Restart tells each OTHER holder through the same seam (outcome `restarted`). */
+  function announceRelaunch(ev) { for (const fn of relaunchListeners) { try { fn(ev); } catch (e) { log.warn?.(`[browser] a relaunch listener threw — ${e && e.message}`); } } }
   /** INTERRUPT ONE HOLDER, before its browser stops (the takeover's rule — never a silent restart under a holder): what it
    *  has in flight is interrupted NOW (a mediated lease's calls cut by the proxy — `M.interruptPlan` — a running script
    *  asked to stop) and what was in flight is read off the trace at the instant; the announcer's ONE card + ONE zero-spend
@@ -532,7 +534,7 @@ function create(ctx, slot) {
     beforeReattach: (m) => Object.assign(cbState, { version: String(m.version || ''), url: m.url || null, bytes: 0, total: m.bytes || null, etag: m.etag || null, code: null, abort: null }),
     afterRestart: finishChromeBuildAfterRestart,
     shutdown: () => { if (cbState.abort) { cbState.run++; try { cbState.abort.abort(); } catch { /* none */ } } } };
-  return { row: ROW, api: { buildsView, machineBuilds, setBrowserChoice, onRelaunch, chromeBuildFacts, chromeBuildsAvailable, installChromeBuild, removeChromeBuild, fallBackFromChange, downloadOffer, installCommandFor } };
+  return { row: ROW, api: { buildsView, machineBuilds, setBrowserChoice, onRelaunch, announceRelaunch, chromeBuildFacts, chromeBuildsAvailable, installChromeBuild, removeChromeBuild, fallBackFromChange, downloadOffer, installCommandFor } };
 }
 
 module.exports = { create };

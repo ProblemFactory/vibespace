@@ -1428,6 +1428,7 @@ console.log('— ③ censuses: no card for him (+ control), the holder readers, 
     // — his own browsing is refused by name a line earlier): a conversation driving it by hand ⇒ `browser_driven`, never a
     // restart under the user's hands
     buildsView: 2, setBrowserChoice: 2,
+    restartProfile: 1, // int220 (lane browser-unresponsive): a hung browser's Restart tells every OTHER CONVERSATION leased on it (his own row holds no lease)
     // verify r2 (B5): the fall-back from a build that closed within seconds tells every CONVERSATION it told "changed" (his own
     // browsing was refused before the change; a takeover meanwhile is refused browser_restarting by the H2 rule)
     fallBackFromChange: 1,

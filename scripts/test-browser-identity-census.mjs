@@ -230,6 +230,7 @@ const AGENT_ROUTES = {
   // lane browser-resume B (§3.9): `vibespace-browser resume` — THIS conversation's own browser only (its key from the
   // token; a helper's handle / a named profile refused by name), its own kept tabs' urls + titles; no record in the answer
   'POST /api/agent/browser/resume': null,
+  'POST /api/agent/browser/restart': null, // lane browser-unresponsive: the hung browser's restart answers {state, label} — never a record
   // lane browser-resume C (§3.9, ruling 3): the agent's own `tab` verbs on a shared profile — judged from the TOKEN's key
   // (never a key the body names); the answer = PURE agentTabView (its own tabs + a count — test-browser-tabs ② walks a
   // browser holding another conversation's tab and the user's own tab)
@@ -458,6 +459,7 @@ const WALK = (eph, helper) => [
   ['POST', '/api/agent/browser/site-reset', { profile: 'p-secret', host: 'x' }], ['POST', '/api/agent/browser/site-reset', { profile: 'p-all', host: 'x', explicit: true }], ['POST', '/api/agent/browser/site-reset', { profile: eph, host: 'x', explicit: true }],
   ['GET', '/api/agent/browser/status'], ['GET', '/api/agent/browser/profiles'],
   // lane browser-resume B: the agent's own resume (its own browser; a helper's handle and a named profile refused by name)
+  ['POST', '/api/agent/browser/restart', {}], ['POST', '/api/agent/browser/restart', { profile: 'p-secret' }],
   ['POST', '/api/agent/browser/resume', {}], ['POST', '/api/agent/browser/resume', { handle: helper }], ['POST', '/api/agent/browser/resume', { handle: 'p-secret' }],
   // lane browser-resume C: the agent's own tab verbs (a shared profile, a helper's handle, its own browser, A's key named in the body)
   ['POST', '/api/agent/browser/tab', { handle: 'p-all', argv: ['tab', 'list', '--json'] }], ['POST', '/api/agent/browser/tab', { handle: 'p-all', argv: ['tab', 'close', 't1'] }],

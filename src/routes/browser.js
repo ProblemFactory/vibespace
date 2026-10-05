@@ -16,6 +16,7 @@
  *   DELETE /api/browser/profiles/:id[?unpin=1] refused while leased or running; the dir is kept; lane S2: a PINNED profile is
  *                                             refused `pinned` {count, names} unless `unpin` — then every pin is cleared first
  *   POST   /api/browser/profiles/:id/stop     stop its browser (leases stay; it restarts on the next attach)
+ *   POST   /api/agent/browser/restart         an agent's restart of ITS profile's browser — only while judged hung (browser_unresponsive)
  *   POST   /api/browser/profiles/:id/browse   BROWSE YOURSELF (B-6ae8): the USER as one more holder — the browser started /
  *                                             joined through the same start() an agent's command runs, HIS OWN pinned tab
  *                                             opened; nothing of any agent is paused → {how, key, syncId, fresh}; the refusals
@@ -166,6 +167,9 @@ const STATUS = { 'not-found': 404, no_lease: 404, 'bad-request': 400, label_requ
   // lane H verify r2 M1: a profile directory another browser holds (a lock the keeper cannot prove its own orphan's)
   // r4/r5: a profile's browser closed and not started again (a failed / unidentified relaunch), or its heal budget spent
   profile_locked: 409, browser_closed: 409, browser_unstable: 409,
+  // lane browser-unresponsive: a browser judged hung (its DevTools endpoint did not answer for a minute while it lives), and an
+  // agent's restart of a browser that is answering (only a hung one is the agent's to restart)
+  browser_unresponsive: 503, browser_answering: 409,
   // lane remote-profile-start: a paired machine with no browser to run (no agent-browser / no Chrome — `step` names the one
   // command), an agent too old to remove a profile's folder
   browser_cli_missing: 409, browser_missing: 409, remove_unsupported: 409,
@@ -555,6 +559,8 @@ router.post('/api/browser/profiles/:id/restart', async (req, res) => {
     const p0 = typeof k.profile === 'function' ? k.profile(req.params.id) : null;
     const remote = !!(p0 && p0.host);
     let cold = false;
+    // lane browser-unresponsive: this computer's browser restarts through THE recovery (holders told, the For-you item resolved)
+    if (!remote && typeof k.restartProfile === 'function') return res.json({ browser: await k.restartProfile(req.params.id, { by: 'user' }) });
     try { await k.stop(req.params.id, { why: 'user' }); } catch (e) { if (!(remote && e && e.code === 'not-found')) throw e; cold = true; }
     const browser = await k.start(req.params.id, { why: cold ? 'started by the user' : 'restarted by the user (the page was not responding)' });
     res.json(remote ? { browser, cold } : { browser });
@@ -920,6 +926,9 @@ router.post('/api/browser/session/:sessionId/restart', async (req, res) => {
     const row = rows.find((r) => r.ref === ref);
     if (!row) return res.status(404).json({ error: 'that browser is not one of this session\'s', code: 'not-found' });
     if (!row.profileId) return res.status(409).json({ error: 'that browser has not started', code: 'browser_released' });
+    // lane browser-unresponsive: a browser judged HUNG is restarted even when shared — its other conversations are refused
+    // anyway, and THE recovery tells each of them by a card (the user's act; the browsing-yourself rule first)
+    { const hb = typeof k.browserOf === 'function' ? k.browserOf(row.profileId) : null; if (hb && hb.unresponsive && typeof k.restartProfile === 'function' && !(typeof k.humanOf === 'function' && k.humanOf(row.profileId))) { const browser = await k.restartProfile(row.profileId, { by: 'user' }); return res.json({ ref, restarted: true, browser, note: 'started again — logins in the profile stay; every conversation on it was told' }); } }
     if (row.kind === 'attachment' && row.owners > 0) return res.status(409).json({ error: `this profile's browser is shared with ${row.owners} other conversation${row.owners === 1 ? '' : 's'} — restarting it would close their tabs too; stop it from the Agent browser panel if that is what you want`, code: 'shared' });
     // the .197 integration (browse-yourself × browser-stuck): never a stop under HIS page (the Stop route's own rule)
     if (typeof k.humanOf === 'function' && k.humanOf(row.profileId)) return res.status(409).json({ error: require('../browser-human.js').humanRefusalText('browsing_yourself', { label: row.label, act: 'restart' }), code: 'browsing_yourself' });
@@ -1905,6 +1914,23 @@ router.post('/api/agent/browser/direct', async (req, res) => {
  *  socket, never `clearBrowserCookies`. PURE ST.siteResetVerdict orders the refusals (remote, not watched, a bad host, not
  *  the site of one of its own tabs without `--host`); a SHARED profile is never cleared here (`shared_profile` → step 3's
  *  proposal). The CLI writes the audit line like every verb's. */
+/** lane browser-unresponsive: `vibespace-browser restart [profile]` — an agent restarts a browser it holds ONLY while the
+ *  keeper judges it hung (browser_unresponsive) and no human drives it (take_over_first); a working browser is refused
+ *  `browser_answering` by name. No profile named ⇒ the one hung browser among its leases. */
+router.post('/api/agent/browser/restart', async (req, res) => {
+  const k = keeperOr503(res); if (!k) return;
+  const f = agentFacts(req, res); if (!f) return;
+  if (typeof k.restartProfile !== 'function') return res.status(503).json({ error: 'this server cannot restart a browser', code: 'unavailable' });
+  try {
+    const ref = String(req.body?.profile || '').trim().slice(0, 200);
+    const held = (k.leasesFor(f.browserKey) || []).map((l) => l.profileId).filter(Boolean);
+    let id = null;
+    if (ref) { const p = k.profileByRef(ref); id = p && !p.ambiguous && p.id ? p.id : null; if (!id || !held.includes(id)) return res.status(404).json({ error: `"${ref}" is not a browser profile this conversation uses — \`vibespace-browser list\``, code: 'not-found' }); }
+    else { const hung = held.filter((pid) => { const b = k.browserOf(pid); return !!(b && b.unresponsive); }); id = hung.length === 1 ? hung[0] : held.length === 1 ? held[0] : null; if (!id) return res.status(400).json({ error: held.length ? 'name the profile to restart: `vibespace-browser restart <profile>`' : 'this conversation uses no browser profile', code: 'bad-request' }); }
+    const browser = await k.restartProfile(id, { by: 'agent', browserKey: f.browserKey, sessionName: f.sessionName || null });
+    res.json({ ok: true, profileId: id, browser: browser ? { state: browser.state, label: browser.label || null } : null, note: 'restarted — logins kept; your next command opens your tab again; every other conversation on it was told' });
+  } catch (e) { fail(res, e); }
+});
 router.post('/api/agent/browser/site-reset', async (req, res) => {
   const k = keeperOr503(res); if (!k) return;
   const f = agentFacts(req, res); if (!f) return;

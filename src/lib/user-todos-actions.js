@@ -153,6 +153,14 @@ export function inboxModel(app) {
   /** A PRODUCER'S ACTION (design-reset-credits p2): the client maps the item's
    *  `action.type` to a verb it owns. Today: the reset-credit confirm dialog. */
   const runAction = async (rec, answer = null) => {
+    if (rec && rec.action && rec.action.type === 'browser-restart') {
+      // lane browser-unresponsive: a HUNG browser's ONE way out — THE user's Restart (cookie route; the keeper's recovery
+      // tells every conversation on it and resolves this item)
+      const r = await fetchJson(`/api/browser/profiles/${encodeURIComponent(rec.action.profileId)}/restart`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      if (r && r.browser) { showToast(t('Restarted {label}', { label: String(r.browser.label || rec.action.profileId) })); return true; }
+      showToast((r && r.error) || t('Could not restart the browser'), { type: 'error' });
+      return false;
+    }
     if (rec && rec.action && rec.action.type === 'exit-run-ask') {
       // lane-pairing ⑥: THE person's answer to an agent's command on a machine (cookie route; an agent's bearer is
       // refused human_only). The server resolves the item; a failure is said, never swallowed.

@@ -242,7 +242,11 @@ async function treeUsage(pid, { depth = 3, readChildren = cliIdentity.readChildP
   const samples = [];
   for (const p of seen) samples.push(await cliIdentity.procSampleAsync(p, procRoot ? { procRoot } : {}));
   const s = cliIdentity.setSample(samples, { reaped: false });
-  return s ? { ...s, pids: [...seen] } : null;
+  // lane browser-unresponsive: the Chromium GPU process of the tree (`--type=gpu-process`) — its own CPU ticks, so a notice
+  // names the process kind that is over (a page rendering continuously in software)
+  let gpu = null;
+  for (const smp of samples) { const gp = smp && Number.isInteger(smp.pid) ? smp.pid : null; if (!gp) continue; let cl = ''; try { cl = require('fs').readFileSync(`${procRoot || '/proc'}/${gp}/cmdline`, 'latin1'); } catch { cl = ''; } if (cl.includes('--type=gpu-process') && Number.isFinite(smp.cpuTicks)) { gpu = { pid: gp, cpuTicks: smp.cpuTicks }; break; } }
+  return s ? { ...s, pids: [...seen], gpu } : null;
 }
 
 // ═══ LANE H VERIFY r2 (M1): THE BROWSER A DAEMON LAUNCHED, AND WHO HOLDS A PROFILE'S LOCK ═══

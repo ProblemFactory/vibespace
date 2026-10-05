@@ -416,8 +416,8 @@ console.log('\n⑫ lane lark-threads: the place patch (widen-only) — a patched
   // vendor lists the same message WITH `thread_id` (its topic was born); the thread walk answers its replies (`root_id` +
   // `thread_id`). Before the patch the root is plain and its replies form a topic whose root shows nothing; after it the
   // root IS the topic's root (a chip), the replies sit under it.
-  const stored = lark.toRecord('lark', 'oc_grp', lk('om_post', T0 + 1000, { text: 'the post', sender: 'ou_zin' }));
-  const later = lark.toRecord('lark', 'oc_grp', lk('om_post', T0 + 1000, { thread: 'omt_new', text: 'the post', sender: 'ou_zin' }));
+  const stored = lark.toRecord('lark', 'oc_grp', lk('om_post', T0 + 1000, { text: 'the post', sender: 'ou_usern' }));
+  const later = lark.toRecord('lark', 'oc_grp', lk('om_post', T0 + 1000, { thread: 'omt_new', text: 'the post', sender: 'ou_usern' }));
   const r1 = lark.toRecord('lark', 'oc_grp', lk('om_r1', T0 + 5000, { parent: 'om_post', root: 'om_post', thread: 'omt_new', text: 'reply 1' }));
   const plain = lark.toRecord('lark', 'oc_grp', lk('om_next', T0 + 6000, { text: 'next chat message' }));
   ok(stored.threadKey === null && later.threadKey === 'omt_new' && !later.root, 'the fixture: the stored copy carries no thread (listed before its topic existed); the later copy names it (and no root — it IS the root)', [stored.threadKey, later.threadKey]);

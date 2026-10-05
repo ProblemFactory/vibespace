@@ -224,6 +224,10 @@ const THREAD_MEMO_MS = 60 * 1000;
 /** Thread titles (Subject/From) are looked up at most this many per
  *  listConversations call — a discovery pass costs ≤ 1 + this requests. */
 const META_PER_LIST = 10;
+/** lane gmail-quota-share: THE NAMING READ's price — ONE `messages.get?format=metadata` (20 units) of the thread's
+ *  first message, whose id IS the thread's id in Gmail; `threads.list` answers only {id, snippet, historyId}
+ *  (the recorded fixture), and a `threads.get` costs 40 whatever its `fields`. A 404 there falls back to the thread. */
+const NAME_READ_UNITS = 20;
 const META_TTL_MS = 6 * 60 * 60 * 1000;
 /** Past this many changed threads the memory says "everything changed". */
 const CHANGED_CAP = 5000;
@@ -297,7 +301,8 @@ const caps = Object.freeze({
   // request awaited on the account's bucket before it is sent. `cost` = what
   // the drain expects one action to charge: a thread read (threads.get 40), a
   // discovery page (threads.list 10 + up to META_PER_LIST metadata reads).
-  pace: { ...paceOf(MANIFEST.settings), cost: { fetch: 40, discover: 10 + 40 * 10, scanHost: 1 } },
+  // lane gmail-quota-share: a discovery page = threads.list + up to META_PER_LIST naming reads at 20 (messages.get), was 40 each
+  pace: { ...paceOf(MANIFEST.settings), cost: { fetch: 40, discover: 10 + NAME_READ_UNITS * META_PER_LIST, scanHost: 1 } },
   vendorName: i18nKey('Google'),
   // lane channel-threads (2026-09-28): the mail THREAD is the conversation (threadKey === convId — kind
   // `conversation`, the window draws nothing new) and mail has no reactions — declared, so no control appears
@@ -1140,6 +1145,20 @@ function create(record = {}, deps = {}) {
     meta.set(convId, out);
     return out;
   }
+  /** lane gmail-quota-share: DISCOVERY's naming read — the thread's FIRST message (its id is the thread's) as metadata:
+   *  20 units where the thread read is 40. Subject = the thread's, From = who started it, the instant a lower bound the
+   *  engine only ever raises; a first message that is gone (404) falls back to the thread read. */
+  async function nameFor(convId) {
+    let m;
+    try { m = await api(`/messages/${encodeURIComponent(convId)}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=Date`, { what: 'gmail thread name' }); }
+    catch (e) { if (e instanceof ChannelError && e.code === 'not-found') return metaFor(convId); throw e; }
+    const hs = m && m.payload && m.payload.headers;
+    const from = parseAddress(header(hs, 'From')).name;
+    const out = { title: header(hs, 'Subject') || '(no subject)', participants: from || '', lastAt: Number(m && m.internalDate) || null, at: now() };
+    meta.set(convId, out);
+    return out;
+  }
+  const named = typeof deps.named === 'function' ? deps.named : () => false;   // the engine's index: the row already carries a read name
 
   // THE PUSH LANE (decision 20, default off): the watch + pull loop over this
   // adapter's own authorized call, token and LIVE options.
@@ -1226,12 +1245,16 @@ function create(record = {}, deps = {}) {
       for (const t of items) {
         const id = String(t.id);
         let m = meta.get(id);
-        if ((!m || now() - m.at >= META_TTL_MS) && budget > 0) {
+        if (m && now() - m.at >= META_TTL_MS) m = null;
+        // lane gmail-quota-share: a thread the engine already NAMED is never re-read by discovery (the restart / the 6 h
+        // memo re-read ten titles a page, 400 units, at every listing) — its stand-in keeps the stored name
+        const keep = !m && named(id);
+        if (!m && !keep && budget > 0) {
           budget--;
           // verify r3 (the vendor-budget class, the Gmail twin of r2 F1): a RATE refusal on a title read used to be swallowed —
           // the listing went on reading the next titles into the vendor's stop (ten of ten refused) and the pass resolved ok,
           // so the account's rate ladder never saw it; now the READ's 429 is the pass's (the discovery cursor is kept)
-          try { m = await metaFor(id); } catch (e) {
+          try { m = await nameFor(id); } catch (e) {
             if (e instanceof ChannelError && (e.code === 'auth-expired' || e.code === 'rate-limited')) throw e;
             // verify r4 F2: a vendor 5xx on a title read is the vendor's STOP too (its Retry-After rides the failure ladder) — thrown; a network
             // blip is not a stop, but the rest of this listing's titles wait for the next pass (it used to send nine more reads into a
@@ -1246,6 +1269,7 @@ function create(record = {}, deps = {}) {
           kind: 'thread',
           participants: (m && m.participants) || '',
           lastAt: (m && m.lastAt) || null,
+          standIn: !m,
         }));
       }
       const next = d.nextPageToken ? String(d.nextPageToken) : null;
@@ -1258,7 +1282,12 @@ function create(record = {}, deps = {}) {
      *  covers drafts + sending (`gmail.compose`; P4 / R4 verify), else `[]`
      *  with `send-scope-not-granted` — a `gmail.send`-only token cannot
      *  create the draft a reply rides. */
-    async convCaps(convId) {
+    /*  lane gmail-reply-known (2026-10-05): a thread THIS account's own listing returned (`listed`, the engine's
+     *  index row under this account) needs no vendor call — the listing is the membership evidence, the send row is
+     *  the held token's scopes, and the thread's existence is proven at PROPOSE anyway (replyEnvelope → a 404 ⇒
+     *  `reply-anchor-elsewhere`). The metadata read stays for an id the account never listed (`not-a-member`). */
+    async convCaps(convId, { listed = false } = {}) {
+      if (listed === true) return { read: 'yes', ...sendCapsOf(((readToken().token || {}).scopes) || []), at: now(), source: 'listing' };
       try {
         await metaFor(convId);
         return { read: 'yes', ...sendCapsOf(((readToken().token || {}).scopes) || []), at: now() };
@@ -1653,12 +1682,13 @@ async function integrationTest({ resolved } = {}) {
 
 module.exports = {
   kind: KIND, caps, create, manifest: MANIFEST, api: API_ROW, API_ROW, consent: CONSENT, label: LABEL, integration: INTEGRATION, integrationTest, OPTIONS, UNGATED, RATE_OK,
-  EGRESS, SCOPE, SCOPE_SEND, SCOPE_COMPOSE, SCOPE_MODIFY, SCOPE_MAIL, sendVerbsOf, PROPOSAL_HEADER, PUBSUB_SCOPE, TOKEN_URL, AUTH_URL, API, MAILBOX_MEMO_MS, THREAD_MEMO_MS, META_PER_LIST, unitsFor, queryOf, scopeOf, effectiveOptions,
+  EGRESS, SCOPE, SCOPE_SEND, SCOPE_COMPOSE, SCOPE_MODIFY, SCOPE_MAIL, sendVerbsOf, PROPOSAL_HEADER, PUBSUB_SCOPE, TOKEN_URL, AUTH_URL, API, MAILBOX_MEMO_MS, THREAD_MEMO_MS, META_PER_LIST, NAME_READ_UNITS, unitsFor, queryOf, scopeOf, effectiveOptions,
   toRecord, walkParts, parseAddress, addressList, stripHtml, typedFailure, buildMime, replyHeaders, encodeHeader, encodeAddressHeader,
   rawRequest, JSON_RAW_MAX, UPLOAD_API,   // design 005 §2.B: the upload form past the JSON body's cap
   blocksOf, sendCapsOf,
   rawFacts, unavailableWords: UNAVAILABLE_WORDS,   // lane dc-channels-blocks
   factsFromHeaders, decodeWords, FACT_HEADERS,   // lane message-facts (B-f066)
+  convCapsFromListing: true,   // lane gmail-reply-known: a listed thread's send row is answered from held facts (no vendor call)
 };
 // lane dc-channels-manifest (rv F2): the module IS the registered thing — register() validates every field the engine
 // reads off it; `adapter` stays the module itself for the suites that register it by that name

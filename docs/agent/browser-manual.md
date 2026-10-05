@@ -51,6 +51,8 @@ are refused by name (below) — the refusal tells you what to do instead.
 
 ---
 
+**The browser stopped answering** (refused `browser_unresponsive`: "has not answered since 16:34 … hung, not busy") → it is hung, not busy — do not retry. Run `vibespace-browser restart` (logins kept; every other conversation on it is told; refused `take_over_first` while the user drives it, `browser_answering` when it works), or ask the user to press Restart in the Browser panel. Then re-open your page.
+
 ## 1. The one tool
 
 ```

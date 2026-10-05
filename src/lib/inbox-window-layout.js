@@ -199,9 +199,11 @@ export function itemView(item, ctx = {}) {
   const proposal = !resolved && i.action && (i.action.type === 'browser-proposal' || i.action.type === 'channel-watch-request') && i.action.id ? { id: i.action.id, shown: String(i.action.shown || '') } : null;   // lane channel-agent-watch: an agent's wake request too
   // Layer 0 apps: an agent's install proposal — Install… (THE install dialog, the plan first) / Not now, answered here too
   const appAsk = !resolved && i.action && i.action.type === 'app-install' && i.action.id ? { id: i.action.id, host: i.action.host || 'local' } : null;
+  // lane browser-unresponsive: a hung browser's ONE item carries its way out — Restart, first (the profile's id only)
+  const restartAsk = !resolved && i.action && i.action.type === 'browser-restart' && i.action.profileId ? { profileId: String(i.action.profileId) } : null;
   const cardActs = !card ? null : resolved ? [...(cardOpen ? ['app-open'] : []), 'reopen', 'copy']
     : card.state === 'installing' ? ['more'] : card.state === 'failed' ? ['app-retry', 'more'] : card.state === 'done' ? [...(cardOpen ? ['app-open'] : []), 'more'] : ['app-install', 'app-reject', 'more'];
-  const actions = resolved ? ['reopen', 'copy'] : [...(exitAsk ? ['exit-allow', 'exit-deny'] : []), ...(proposal ? ['proposal-approve', 'proposal-reject'] : []), ...(appAsk ? ['app-install', 'app-reject'] : []), ...(reply.show ? ['reply'] : []), 'done', 'dismiss', 'copy', ...(producer ? ['producer'] : [])];
+  const actions = resolved ? ['reopen', 'copy'] : [...(restartAsk ? ['browser-restart'] : []), ...(exitAsk ? ['exit-allow', 'exit-deny'] : []), ...(proposal ? ['proposal-approve', 'proposal-reject'] : []), ...(appAsk ? ['app-install', 'app-reject'] : []), ...(reply.show ? ['reply'] : []), 'done', 'dismiss', 'copy', ...(producer ? ['producer'] : [])];
   const title = String(ctx.words != null ? ctx.words : (i.text || ''));
   const detail = String(ctx.detail != null ? ctx.detail : (i.detail || ''));
   const replied = i.reply && typeof i.reply.text === 'string' && i.reply.text ? i.reply.text : null;
@@ -215,6 +217,6 @@ export function itemView(item, ctx = {}) {
   return {
     id: i.id || null, sessionKey: i.sessionKey || null, title, detail, name: String(ctx.name || ''),
     urgency: resolved || notice ? '' : urgency, notice, resolved, status: resolved ? (i.status === 'dismissed' ? 'dismissed' : 'done') : 'open',
-    meta, replied, options, reply, actions: cardActs || actions, producer, exitAsk, proposal, appAsk, copy, cut,
+    meta, replied, options, reply, actions: cardActs || actions, producer, exitAsk, proposal, appAsk, restartAsk, copy, cut,
   };
 }

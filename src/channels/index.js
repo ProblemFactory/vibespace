@@ -640,6 +640,8 @@ function createChannelRegistry({ channelSettings } = {}) {
     if (!blocksDeclared && mod.blocksOf !== undefined) throw new Error(`channel adapter '${kind}': blocksOf is exported but caps.render is not 'blocks'`);
     // inc-muk9jj0j-rel3: the PURE send verdict from held scopes (the engine re-judges every conversation on a credential change)
     if (mod.sendCapsOf !== undefined && (typeof mod.sendCapsOf !== 'function' || !(mod.caps.sendAs || []).length)) throw new Error(`channel adapter '${kind}': sendCapsOf must be a function of the held scopes, on a sendable adapter`);
+    // lane gmail-reply-known: a listed conversation's send row answered from held facts — a boolean or absent
+    if (mod.convCapsFromListing !== undefined && typeof mod.convCapsFromListing !== 'boolean') throw new Error(`channel adapter '${kind}': convCapsFromListing must be a boolean`);
     // lane channel-rich: the READ-TIME VIEW of a stored record (a bot's name, markup read) — a function or absent
     if (mod.recordView !== undefined && typeof mod.recordView !== 'function') throw new Error(`channel adapter '${kind}': recordView must be a function(record) → record`);
     // lane dc-channels-blocks (C5/C6): a stored record's VENDOR FACTS by name — `rawFacts(record)` → {tenant?, type?,
@@ -757,8 +759,10 @@ function createChannelRegistry({ channelSettings } = {}) {
       ...(mod.api ? { api: mod.api, apiBearer: wrap('apiBearer', impl.apiBearer.bind(impl)) } : {}),
       listConversations: gated('listConversations', impl.listConversations && impl.listConversations.bind(impl)),
       /** NARROWED to `caps` — the resolution may only shrink the declaration. */
-      async convCaps(convId) {
-        const r = (await rawConvCaps(convId)) || {};
+      async convCaps(convId, opts = {}) {
+        // lane gmail-reply-known: `listed` = the account's own listing returned this conversation (an adapter that
+        // declares `convCapsFromListing` answers it from held facts; the others ignore it)
+        const r = (await rawConvCaps(convId, { listed: !!(opts && opts.listed === true) })) || {};
         const declared = Array.isArray(caps.sendAs) ? caps.sendAs : [];
         const asked = Array.isArray(r.sendAs) ? r.sendAs : [];
         const wider = asked.filter((s) => !declared.includes(s));
@@ -766,6 +770,7 @@ function createChannelRegistry({ channelSettings } = {}) {
           throw new ChannelError('vendor-error', `${kind}.convCaps returned sendAs wider than caps.sendAs (${wider.join(',')}) — a per-conversation resolution may only NARROW`, { retryable: false, detail: { declared, asked } });
         }
         const out = { read: r.read || 'unknown', sendAs: asked, why: r.why || null, at: Number.isFinite(r.at) ? r.at : Date.now() };
+        if (r.source === 'listing') out.source = 'listing';   // lane gmail-reply-known: answered from the listing, not asked
         // lane channel-threads (spec §2.5): the two narrowing rows, clamped like `sendAs` — a `true` the static
         // declaration does not allow is the same contract violation ("wider than caps"), never a widened control
         const ct = threadsOf(caps), cr = reactionsOf(caps);

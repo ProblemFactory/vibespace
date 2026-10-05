@@ -763,6 +763,11 @@ router.post('/api/channels/:adapterId/:convId/refresh', async (req, res) => {
 router.post('/api/channels/:adapterId/:convId/watch', async (req, res) => {
   try { forHost(req); readerAnswer(res, await engine().watch(req.params.adapterId, req.params.convId)); } catch (e) { fail(res, e); }
 });
+/** THE OWNER'S Retry on a send row the vendor refused to resolve (lane gmail-reply-known): asked now, exempt from
+ *  the account's back-off, one flight per conversation. */
+router.post('/api/channels/:adapterId/:convId/caps', async (req, res) => {
+  try { forHost(req); readerAnswer(res, await engine().retryConvCaps(req.params.adapterId, req.params.convId)); } catch (e) { fail(res, e); }
+});
 /** HISTORY ON DEMAND: `{before, beforeId, limit}` — the local page, topped
  *  up from the vendor past the log's start (`exhausted` / `vendorHasNoOlder`
  *  said honestly). */

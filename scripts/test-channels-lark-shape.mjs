@@ -1773,7 +1773,7 @@ console.log('\n⑮ lane lark-threads: the recent-roots page and the by-id read (
   const OTHER = 'oc_other_chat_9999';
   const item = (id, off, { thread = null, root = null, parent = null, chat = C, deleted = false, type = 'text', text = 'x', upper = null } = {}) => ({
     message_id: id, create_time: String(T0 + off), update_time: String(T0 + off), msg_type: type, chat_id: chat, deleted, updated: false,
-    body: { content: JSON.stringify({ text }) }, sender: { id: 'ou_zin', id_type: 'open_id', sender_type: 'user', tenant_key: '1433ddec23579750' }, mentions: [],
+    body: { content: JSON.stringify({ text }) }, sender: { id: 'ou_usern', id_type: 'open_id', sender_type: 'user', tenant_key: 'tn_other_0002' }, mentions: [],
     ...(thread ? { thread_id: thread } : {}), ...(root ? { root_id: root } : {}), ...(parent ? { parent_id: parent } : {}), ...(upper ? { upper_message_id: upper } : {}),
   });
   const BEFORE = [item('om_c', 3000), item('om_post', 2000, { text: 'the post' }), item('om_a', 1000)];   // newest first (ByCreateTimeDesc)
@@ -1783,7 +1783,7 @@ console.log('\n⑮ lane lark-threads: the recent-roots page and the by-id read (
   const fetchFn = async (url, init = {}) => {
     const u = new URL(String(url));
     calls.push({ method: init.method || 'GET', path: u.pathname, q: Object.fromEntries(u.searchParams) });
-    if (u.pathname === `/open-apis/im/v1/chats/${C}/members`) return jsonRes({ code: 0, data: { items: [{ member_id_type: 'open_id', member_id: 'ou_zin', name: 'Zin', tenant_key: '1433ddec23579750' }], has_more: false } });
+    if (u.pathname === `/open-apis/im/v1/chats/${C}/members`) return jsonRes({ code: 0, data: { items: [{ member_id_type: 'open_id', member_id: 'ou_usern', name: 'userN', tenant_key: 'tn_other_0002' }], has_more: false } });
     if (u.pathname === '/open-apis/im/v1/messages') return jsonRes({ code: 0, data: { items: V.page, has_more: true, page_token: 'pt-more' } });
     const byId = /^\/open-apis\/im\/v1\/messages\/([^/]+)$/.exec(u.pathname);
     if (byId) {
@@ -1854,7 +1854,7 @@ console.log('\n⑮ lane lark-threads: the recent-roots page and the by-id read (
   st.close(); st2.close(); st3.close();
 }
 
-// ⑯ lane lark-threads PART B (2026-10-01 — "我在lark里看到的Zin的名字是Susan (Marketing)，你看看哪个接口返回这个了"):
+// ⑯ lane lark-threads PART B (2026-10-01 — "我在lark里看到的userN的名字是Ada (Marketing)，你看看哪个接口返回这个了"):
 // WHO IS THIS, over doc-shaped answers. MEASURED (an owner-approved one-off probe): `contact/v3/users/:id` of another
 // person under `contact:user.base:readonly` alone answers 99991679 naming contact:contact.base:readonly — so a sign-in
 // without it sends NO lookup (and the card says so); with it, a person who left the chat (the member list cannot name
@@ -1865,10 +1865,10 @@ console.log('\n⑯ lane lark-threads PART B: people named as Lark shows them (do
 {
   const Authors = require(path.join(REPO, 'src/channel-authors.js'));
   const C = 'oc_gtm_eng_0001';
-  const MY_TENANT = 'tn_own_0001', OTHER_TENANT = '1433ddec23579750';
+  const MY_TENANT = 'tn_own_0001', OTHER_TENANT = 'tn_other_0002';
   const item = (id, off, sender, tenant = MY_TENANT) => ({ message_id: id, create_time: String(T0 + off), msg_type: 'text', chat_id: C, body: { content: JSON.stringify({ text: id }) }, sender: { id: sender, id_type: 'open_id', sender_type: 'user', tenant_key: tenant }, mentions: [] });
-  const PAGE = [item('om_5', 5000, 'ou_zin', OTHER_TENANT), item('om_4', 4000, 'ou_left1'), item('om_3', 3000, 'ou_left2'), item('om_2', 2000, 'ou_left3'), item('om_1', 1000, 'ou_left4'), item('om_0', 500, 'ou_me')];
-  const USERS = { ou_zin: { name: 'Zin', en_name: 'Zin', nickname: 'Susan', job_title: 'GTM lead', department_ids: ['od-mkt'] }, ou_left1: { name: 'Lefty One' }, ou_left2: { name: 'Lefty Two' }, ou_left3: { name: 'Lefty Three' }, ou_left4: { name: 'Lefty Four' } };
+  const PAGE = [item('om_5', 5000, 'ou_usern', OTHER_TENANT), item('om_4', 4000, 'ou_left1'), item('om_3', 3000, 'ou_left2'), item('om_2', 2000, 'ou_left3'), item('om_1', 1000, 'ou_left4'), item('om_0', 500, 'ou_me')];
+  const USERS = { ou_usern: { name: 'userN', en_name: 'userN', nickname: 'Ada', job_title: 'GTM lead', department_ids: ['od-mkt'] }, ou_left1: { name: 'Lefty One' }, ou_left2: { name: 'Lefty Two' }, ou_left3: { name: 'Lefty Three' }, ou_left4: { name: 'Lefty Four' } };
   const V = { refuse: false, dissolved: false };
   const calls = [];
   const fetchB = async (url) => {
@@ -1876,8 +1876,8 @@ console.log('\n⑯ lane lark-threads PART B: people named as Lark shows them (do
     calls.push(u.pathname);
     if (u.pathname === `/open-apis/im/v1/chats/${C}/members`) {
       if (V.dissolved) return jsonRes({ code: 232009, msg: 'Your request specifies a chat which has already been dissolved.' }, 400);
-      // the member list: the owner (his tenant) and Zin (another organization) — the four who LEFT are not in it
-      return jsonRes({ code: 0, data: { items: [{ member_id_type: 'open_id', member_id: 'ou_me', name: 'Me', tenant_key: MY_TENANT }, { member_id_type: 'open_id', member_id: 'ou_zin', name: 'Zin', tenant_key: OTHER_TENANT }], has_more: false } });
+      // the member list: the owner (his tenant) and userN (another organization) — the four who LEFT are not in it
+      return jsonRes({ code: 0, data: { items: [{ member_id_type: 'open_id', member_id: 'ou_me', name: 'Me', tenant_key: MY_TENANT }, { member_id_type: 'open_id', member_id: 'ou_usern', name: 'userN', tenant_key: OTHER_TENANT }], has_more: false } });
     }
     if (u.pathname === '/open-apis/im/v1/messages') return jsonRes({ code: 0, data: { items: PAGE, has_more: false } });
     const us = /^\/open-apis\/contact\/v3\/users\/([^/]+)$/.exec(u.pathname);
@@ -1899,24 +1899,24 @@ console.log('\n⑯ lane lark-threads PART B: people named as Lark shows them (do
   const h0 = await a0.history(C, { limit: 50 });
   ok(!calls.some((x) => x.startsWith('/open-apis/contact/')) && h0.records.find((r) => r.vendorId === 'om_4').author.name === '', 'B1 (MEASURED): a sign-in without contact:contact.base:readonly sends NO profile lookup (it would be refused 99991679 for everyone) — the authors who left stay unnamed until the account is re-authorized', JSON.stringify(calls));
   ok(lark.PEOPLE_GRANT.scopes[0] === 'contact:contact.base:readonly' && lark.adapter.peopleGrant === lark.PEOPLE_GRANT, 'the grant names the measured scope (the card\'s "One Re-authorize adds: reading people\'s profiles")');
-  // (2) WITH it: the unnamed first, ≤ 3 per page; Zin's profile carries the nickname + the department (24 h cached)
+  // (2) WITH it: the unnamed first, ≤ 3 per page; userN's profile carries the nickname + the department (24 h cached)
   calls.length = 0;
   const a1 = mk([...lark.SCOPES, lark.PEOPLE_SCOPE, lark.JOB_SCOPE, lark.DEPT_SCOPE], 'lark-b1');
   const h1 = await a1.history(C, { limit: 50 });
   const looked = calls.filter((x) => x.startsWith('/open-apis/contact/v3/users/')).map((x) => x.split('/').pop());
-  ok(looked.length === 3 && looked.every((x) => /^ou_left/.test(x)), 'B1: ONE page asks at most 3 profiles, the UNNAMED first (the four who left before Zin, whom the member list names)', JSON.stringify(looked));
+  ok(looked.length === 3 && looked.every((x) => /^ou_left/.test(x)), 'B1: ONE page asks at most 3 profiles, the UNNAMED first (the four who left before userN, whom the member list names)', JSON.stringify(looked));
   ok(h1.records.find((r) => r.vendorId === 'om_4').author.name === 'Lefty One' && h1.records.find((r) => r.vendorId === 'om_1').author.name === '', 'B1: a person who LEFT the chat is named by their profile; the fourth waits for the next page (bounded)');
   calls.length = 0;
   const h2 = await a1.history(C, { limit: 50 });
   const looked2 = calls.filter((x) => x.startsWith('/open-apis/contact/')).map((x) => x.split('/').slice(-2).join('/'));
-  const zin = h2.records.find((r) => r.vendorId === 'om_5').author;
-  ok(looked2.includes('users/ou_left4') && looked2.includes('users/ou_zin') && looked2.includes('departments/od-mkt') && !looked2.includes('users/ou_left1'), 'B5: the next page asks the rest (the last unnamed, then the named for their profile — and Zin\'s department once); the ones asked are cached 6 h', JSON.stringify(looked2));
-  ok(zin.name === 'Zin' && zin.alt && zin.alt.nickname === 'Susan' && zin.alt.department === 'Marketing' && zin.alt.jobTitle === 'GTM lead', 'B5: Zin keeps the vendor NAME (the title, the search key); her profile\'s nickname ("Susan"), department ("Marketing", the brand\'s language) and job title ride as `alt`', JSON.stringify(zin));
-  const v = Authors.authorView(zin, { field: 'department' });
-  const vj = Authors.authorView(zin, { field: 'jobTitle' }), vn = Authors.authorView(zin, { field: 'none' }), va = Authors.authorView(zin, { field: 'department', alias: 'Susan from GTM' });
-  ok(v.display === 'Susan (Marketing)' && vj.display === 'Susan (GTM lead)' && vn.display === 'Susan' && va.display === 'Susan from GTM' && v.name === 'Zin', 'B5 THE RENDER (Lark\'s rule): the nickname, then the chosen field in parentheses — "Susan (Marketing)"; job title / none per channels.larkNameField; the owner\'s own name wins over all; the vendor name kept', JSON.stringify([v.display, vj.display, vn.display, va.display]));
-  // (3) B4: Zin's tenant is not the account's (learned from the member list: no call) — EXTERNAL; the owner's colleagues are not
-  ok(zin.external === true && !h2.records.find((r) => r.vendorId === 'om_4').author.external && h2.records.find((r) => r.vendorId === 'om_5').raw.tenant_key === OTHER_TENANT, 'B4: a sender of ANOTHER organization (tenant_key ≠ the account\'s own, learned from the member list — never a new call) is external; the raw keeps the tenant', JSON.stringify(zin));
+  const usern = h2.records.find((r) => r.vendorId === 'om_5').author;
+  ok(looked2.includes('users/ou_left4') && looked2.includes('users/ou_usern') && looked2.includes('departments/od-mkt') && !looked2.includes('users/ou_left1'), 'B5: the next page asks the rest (the last unnamed, then the named for their profile — and userN\'s department once); the ones asked are cached 6 h', JSON.stringify(looked2));
+  ok(usern.name === 'userN' && usern.alt && usern.alt.nickname === 'Ada' && usern.alt.department === 'Marketing' && usern.alt.jobTitle === 'GTM lead', 'B5: userN keeps the vendor NAME (the title, the search key); her profile\'s nickname ("Ada"), department ("Marketing", the brand\'s language) and job title ride as `alt`', JSON.stringify(usern));
+  const v = Authors.authorView(usern, { field: 'department' });
+  const vj = Authors.authorView(usern, { field: 'jobTitle' }), vn = Authors.authorView(usern, { field: 'none' }), va = Authors.authorView(usern, { field: 'department', alias: 'Ada from GTM' });
+  ok(v.display === 'Ada (Marketing)' && vj.display === 'Ada (GTM lead)' && vn.display === 'Ada' && va.display === 'Ada from GTM' && v.name === 'userN', 'B5 THE RENDER (Lark\'s rule): the nickname, then the chosen field in parentheses — "Ada (Marketing)"; job title / none per channels.larkNameField; the owner\'s own name wins over all; the vendor name kept', JSON.stringify([v.display, vj.display, vn.display, va.display]));
+  // (3) B4: userN's tenant is not the account's (learned from the member list: no call) — EXTERNAL; the owner's colleagues are not
+  ok(usern.external === true && !h2.records.find((r) => r.vendorId === 'om_4').author.external && h2.records.find((r) => r.vendorId === 'om_5').raw.tenant_key === OTHER_TENANT, 'B4: a sender of ANOTHER organization (tenant_key ≠ the account\'s own, learned from the member list — never a new call) is external; the raw keeps the tenant', JSON.stringify(usern));
   // (4) A REFUSED PRIVILEGE (99991679): the lookups stop and it is said ONCE
   for (const k of Object.keys(USERS)) lark.PEOPLE.delete(k);
   V.refuse = true; calls.length = 0; warns.length = 0;
@@ -1975,13 +1975,13 @@ console.log('\n⑯ lane lark-threads PART B: people named as Lark shows them (do
     const a8 = reg.create('lark', { id: 'lark-b8', brand: 'lark', options: { brand: 'lark' } }, { now: () => clk7, fetch: fetch8, tokens: tk8, resolveIntegration: () => CRED, log: { warn() {}, log() {} }, pace: async () => {}, meter: () => {} });
     clk7 += 7 * 3600e3; calls.length = 0;
     await a8.history(C, { limit: 50 });
-    const e8 = await threw(() => a8.history(C, { limit: 50 }));   // the second page reaches Zin (her profile names od-mkt): the department's 429 is thrown (r2 F1)
+    const e8 = await threw(() => a8.history(C, { limit: 50 }));   // the second page reaches userN (her profile names od-mkt): the department's 429 is thrown (r2 F1)
     const d1 = calls.filter((x) => x.endsWith('/departments/od-mkt')).length;
     const notRemembered = !lark.DEPTS.has('od-mkt');
     V8.dept = 'ok'; calls.length = 0; clk7 += 61e3;
     await a8.history(C, { limit: 50 });
-    const zin8 = (await a8.history(C, { limit: 50 })).records.find((r) => r.vendorId === 'om_5').author;
-    ok(e8 && e8.code === 'rate-limited' && d1 === 1 && notRemembered && zin8.alt && zin8.alt.department === 'Marketing', `F3 (+ r2 F1): a 429 on the department read throws rate-limited and is not remembered for a day — Zin's department is named after the pause`, JSON.stringify({ code: e8 && e8.code, d1, notRemembered, alt: zin8.alt }));
+    const usern8 = (await a8.history(C, { limit: 50 })).records.find((r) => r.vendorId === 'om_5').author;
+    ok(e8 && e8.code === 'rate-limited' && d1 === 1 && notRemembered && usern8.alt && usern8.alt.department === 'Marketing', `F3 (+ r2 F1): a 429 on the department read throws rate-limited and is not remembered for a day — userN's department is named after the pause`, JSON.stringify({ code: e8 && e8.code, d1, notRemembered, alt: usern8.alt }));
   }
   // (8) verify r2 F1 (the vendor-budget class): a 429 INSIDE a page read — on the members page, a profile or a department
   //     read — is the READ's 429: history() throws rate-limited carrying the vendor's hint (the pass's ladder honours it, up to
@@ -2017,17 +2017,17 @@ console.log('\n⑯ lane lark-threads PART B: people named as Lark shows them (do
     await a9.history(C, { limit: 50 });
     const againU = calls.filter((x) => x.startsWith('/open-apis/contact/v3/users/')).map((x) => x.split('/').pop());
     ok(eU && eU.code === 'rate-limited' && eU.detail.retryAfterSec === 120 && sentU.length === 1 && remU.length === 0 && hIn.records.length === 6 && insideU === 0 && againU.includes(sentU[0]), `F1 r2: a 429 on a PROFILE read throws rate-limited (hint 120 s): ONE read sent, the person not remembered, the page inside the pause lands with 0 profile reads, the same id asked again past it`, JSON.stringify({ code: eU && eU.code, sentU, remU, insideU, againU }));
-    // (c) the DEPARTMENT read 429s (Zin's profile answered, her department refused)
+    // (c) the DEPARTMENT read 429s (userN's profile answered, her department refused)
     for (const k of Object.keys(USERS)) lark.PEOPLE.delete(k); lark.DEPTS.delete('od-mkt');
     clk9 += 7 * 3600e3;
     await a9.history(C, { limit: 50 });   // the unnamed four first (3 per page)
     V9.dept = true; calls.length = 0;
-    const eD = await threw(() => a9.history(C, { limit: 50 }));   // the second page reaches Zin: her profile, then od-mkt ⇒ 429
+    const eD = await threw(() => a9.history(C, { limit: 50 }));   // the second page reaches userN: her profile, then od-mkt ⇒ 429
     const deptSent = calls.filter((x) => x.endsWith('/departments/od-mkt')).length;
     V9.dept = false; clk9 += 121e3; calls.length = 0;
     await a9.history(C, { limit: 50 });
-    const zin9 = (await a9.history(C, { limit: 50 })).records.find((r) => r.vendorId === 'om_5').author;
-    ok(eD && eD.code === 'rate-limited' && deptSent === 1 && !lark.DEPTS.has('od-mkt') === false && zin9.alt && zin9.alt.department === 'Marketing', `F1 r2: a 429 on the DEPARTMENT read throws rate-limited; the department is not remembered for a day — named after the hint`, JSON.stringify({ code: eD && eD.code, deptSent, dept: lark.DEPTS.get('od-mkt') && lark.DEPTS.get('od-mkt').name }));
+    const usern9 = (await a9.history(C, { limit: 50 })).records.find((r) => r.vendorId === 'om_5').author;
+    ok(eD && eD.code === 'rate-limited' && deptSent === 1 && !lark.DEPTS.has('od-mkt') === false && usern9.alt && usern9.alt.department === 'Marketing', `F1 r2: a 429 on the DEPARTMENT read throws rate-limited; the department is not remembered for a day — named after the hint`, JSON.stringify({ code: eD && eD.code, deptSent, dept: lark.DEPTS.get('od-mkt') && lark.DEPTS.get('od-mkt').name }));
     // CONTROL: a patched copy with the three rethrows removed (the r1 shape) resolves ok under a members 429 and sends the
     // page's profile reads into the vendor's stop — every assertion above would be red on it
     const M9b = mutantCopies('chan-lark-r2-rate', REPO);

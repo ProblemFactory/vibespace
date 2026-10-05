@@ -367,6 +367,8 @@ function stuckWords(f, tIn) {
   if (!f) return null;
   const t = typeof tIn === 'function' ? (s, p) => tIn(s, p) : fill;
   if (f.state === 'dialog') return { chip: t('page dialog open'), line: t('The page is waiting on a dialog — answer it in the live view'), action: null };
+  // lane browser-unresponsive: the WHOLE browser does not answer (the keeper's verdict) — its own words, the same Restart
+  if (f.state === 'unresponsive' && f.why === 'browser') { const u = unresponsiveWords({ since: f.since, label: f.label, clock: f.clock }, tIn); return { chip: u.chip, line: u.banner, action: u.action, tooltip: u.tooltip }; }
   if (f.state === 'unresponsive') return { chip: t('page not responding'), line: t('The page is not responding — Restart'), action: t('Restart'), tooltip: t('Restart stops this browser and starts it again; open tabs close, logins in a saved profile stay') };
   // lane browser-passkey: a page waiting for a passkey (the banner's words are browser-passkey's passkeyWords)
   if (f.state === 'passkey') return { chip: t('page waits for a passkey'), line: t('The page is waiting for a passkey — cancel it in the live view'), action: null };
@@ -663,6 +665,81 @@ function loopWords(l, tIn) {
   };
 }
 
+// ── lane browser-unresponsive (2026-10-05, a fleet user's inc: "全员共用的登录浏览器 jarvis-work 卡死了"): A BROWSER THAT DOES
+// NOT ANSWER IS A NAMED STATE WITH ONE WAY OUT, NEVER A RETRY. MEASURED on the user's pod (read-only): the shared profile
+// browser (Chromium, hidden-window rung, SwiftShader) had run 10 h; from 16:34Z its DevTools port ACCEPTED the connection
+// and answered 0 bytes in 3 s (`/json/version` too), the browser main process slept at 0 % CPU while its GPU process spun
+// at 350 % — and every verb of three conversations said "run the command again" for 80 min. The page verdict above
+// (`stuckVerdict`) is ONE TAB's; this one is the WHOLE BROWSER's: its cheapest ask (`GET /json/version`, ≤ ANSWER_ASK_MS)
+// unanswered for ≥ UNRESPONSIVE_AFTER_MS across ≥ UNRESPONSIVE_MIN_ASKS asks while its pid lives ⇒ `browser_unresponsive`.
+// The keeper's tick asks, every refused tab read / window open counts as an ask that did not answer, an answer clears it.
+const UNRESPONSIVE_AFTER_MS = 60 * 1000;
+const UNRESPONSIVE_MIN_ASKS = 2;
+const ANSWER_ASK_MS = 3000;
+/**
+ * THE verdict (PURE): `prev` = the asks so far `{lastAnswerAt, since, asks}` (null at first), one more ask's outcome →
+ * `{state, next}` — state 'answering' (next.since null), 'missing' (unanswered, not yet hung: busy ≠ hung), 'unresponsive'
+ * (the verdict), 'closed' (its pid is gone: the closed path says it, never "unresponsive"; next null). `cleared` = an
+ * answer after misses.
+ */
+function browserAnswerVerdict(prev, { answered = false, at = 0, pidAlive = true } = {}) {
+  const last = prev && Number.isFinite(prev.lastAnswerAt) ? prev.lastAnswerAt : null;
+  const missing = !!(prev && Number.isFinite(prev.since));
+  if (!pidAlive) return { state: 'closed', next: null, cleared: missing };
+  if (answered) return { state: 'answering', next: { lastAnswerAt: at, since: null, asks: 0 }, cleared: missing };
+  const since = missing ? prev.since : at;
+  const asks = (missing ? Number(prev.asks) || 0 : 0) + 1;
+  const hung = asks >= UNRESPONSIVE_MIN_ASKS && at - since >= UNRESPONSIVE_AFTER_MS;
+  return { state: hung ? 'unresponsive' : 'missing', next: { lastAnswerAt: last, since, asks }, cleared: false };
+}
+/** The record's fact (`rec.unresponsive`) from a verdict's `next` — `{since, lastAnswerAt, asks}`. */
+function unresponsiveFact(next) { return next && Number.isFinite(next.since) ? { since: next.since, lastAnswerAt: Number.isFinite(next.lastAnswerAt) ? next.lastAnswerAt : null, asks: Number(next.asks) || 0 } : null; }
+/** "16:34" (UTC — the journal's and the agent's clock; the UI formats `since` in the viewer's own zone). */
+function utcClock(ms) { const d = new Date(Number(ms) || 0); return String(d.getUTCHours()).padStart(2, '0') + ':' + String(d.getUTCMinutes()).padStart(2, '0'); }
+function minutesSince(since, now) { return Math.max(1, Math.round(((Number(now) || 0) - (Number(since) || 0)) / 60000)); }
+/**
+ * WHO MAY RESTART (PURE): the user always; an agent ONLY while the verdict stands and no human drives it. → {ok} or
+ * {ok:false, code, error}.
+ */
+function restartAdmission({ by = 'agent', unresponsive = null, humanDriving = false, label = '' } = {}) {
+  if (by === 'user') return { ok: true };
+  if (humanDriving) return { ok: false, code: 'take_over_first', error: `the user is driving "${label}" right now — it is not restarted under their hands; ask them in your reply` };
+  if (!unresponsive) return { ok: false, code: 'browser_answering', error: `the browser of profile "${label}" is answering — an agent restarts only a browser that has stopped answering (browser_unresponsive); a slow page is \`vibespace-browser tab close\` or the user's Restart in the Browser panel` };
+  return { ok: true };
+}
+/** The card each OTHER holder reads after a restart (one per lease, never a billed turn). */
+function restartedCardText({ label = '', by = 'the user', since = 0, now = 0 } = {}) {
+  const why = Number.isFinite(since) && since > 0 ? ` because it had not answered since ${utcClock(since)} UTC (${minutesSince(since, now)} min)` : '';
+  return `the shared browser "${label}" was restarted by ${by}${why} — re-open the pages you were on (\`vibespace-browser tab list\` shows what came back)`;
+}
+/** The journal line at the verdict and at the clear. */
+function unresponsiveLine({ id = '', label = '', since = 0, asks = 0, pid = null, gpu = null } = {}) {
+  return `${id} "${label}": not answering since ${utcClock(since)} (asks ${asks}${Number.isInteger(pid) ? `, pid ${pid} alive` : ''}${gpu ? `, GPU process ${gpu} %` : ''}) — browser_unresponsive; Restart offered`;
+}
+function answeredAgainLine({ id = '', label = '', since = 0, at = 0, by = 'an ask' } = {}) {
+  return `${id} "${label}": answering again (${by}) after ${minutesSince(since, at)} min — browser_unresponsive cleared`;
+}
+/** The For-you item (ONE per profile and `since`; origin browser; its Restart act). */
+function unresponsiveNotice({ label = '', since = 0, now = 0 } = {}) {
+  return {
+    text: `Agent browser "${label}" has not answered since ${utcClock(since)} UTC — Restart it`,
+    detail: `Its DevTools endpoint has not answered for ${minutesSince(since, now)} min while its process is alive: it is hung, not busy, and every conversation using it is refused. Restart (here, or on its row in the Browser panel) stops it and starts it again — logins stay in the profile, its tabs are re-opened, every conversation on it is told. This item resolves itself when it answers again or is restarted.`,
+  };
+}
+/** The UI's words (t = the client's i18n; every key a literal t('…')). `f` = {since, clock} — `clock` the viewer's "16:34". */
+function unresponsiveWords(f, tIn) {
+  if (!f) return null;
+  const t = typeof tIn === 'function' ? (s, p) => tIn(s, p) : fill;
+  const clock = String(f.clock || utcClock(f.since));
+  return {
+    state: t('Not answering since {clock}', { clock }),
+    chip: t('browser not answering'),
+    banner: t('{label} has not answered since {clock}', { label: String(f.label || ''), clock }),
+    action: t('Restart'),
+    tooltip: t('The browser stopped answering (it is hung, not busy) — Restart stops it and starts it again; logins stay in the profile, its tabs are re-opened and every conversation using it is told'),
+  };
+}
+
 module.exports = {
   DIALOG_OPEN_CODE, DIALOG_TYPES, MESSAGE_MAX, BEFOREUNLOAD_TEXT, STUCK_AFTER, COMMAND_TIMEOUT_MS, ENABLE_TIMEOUT_MS, NO_DIALOG_TEXT,
   FRAME_TAGS, FRAME_TAG_RE, FRAME_OPEN_RE, inertOpeners, pageText, quoted, // verify r1 A2: page text is frame-inert, delimited, bounded
@@ -675,4 +752,7 @@ module.exports = {
   LOOP_WINDOW_MS, LOOP_MIN_HOPS, LOOP_MAX_URLS, LOOP_CHAIN_HOPS, LOOP_LONG_WINDOW_MS, LOOP_LONG_CHAIN_HOPS, LOOP_QUIET_MS, LOOP_ATTRIB_MS, LOOP_KEEP, LOOP_PASS_VERBS, LOOP_ACTING_VERBS, LOOP_READ_VERBS, LOOP_PERIOD_MIN_MS, LOOP_SCREENSHOT_MS, CLI_ACTION_TIMEOUT_MS, busyText,
   loopUrlKey, hostOf, hostWord, navigationLoopVerdict, loopText, loopBlock, loopPasses, loopActing, loopReads, stopText, closeText, noPictureText, loopSharedText, loopWords,
   cookieReaches, originsOf, siteOfHost, siteResetVerdict, siteResetOwn, siteResetText,
+  // lane browser-unresponsive: the WHOLE browser that does not answer (one verdict, every surface reads it)
+  UNRESPONSIVE_AFTER_MS, UNRESPONSIVE_MIN_ASKS, ANSWER_ASK_MS, browserAnswerVerdict, unresponsiveFact, utcClock, minutesSince, restartAdmission,
+  restartedCardText, unresponsiveLine, answeredAgainLine, unresponsiveNotice, unresponsiveWords,
 };

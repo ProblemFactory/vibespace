@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // WHO IS THIS — src/channel-authors.js (fast, PURE; lane lark-threads PART B, 2026-10-01). The rules N1–N5 as tables:
 // the owner's own name wins (N1), else the vendor's way — the organization's nickname else the name, then the chosen
-// profile field in parentheses (N2: "Susan (Marketing)"), the vendor name never rewritten (N3), an external author says so
+// profile field in parentheses (N2: "Ada (Marketing)"), the vendor name never rewritten (N3), an external author says so
 // (N4), every string bounded through the name door (N5); controls (scripts/mutant-copy.mjs): a view that REWRITES the
 // vendor name (N3 red), one where the vendor's way beats the owner's name (N1 red), one that trusts an unbounded alias (N5 red).
 import fs from 'node:fs';
@@ -15,15 +15,15 @@ const SRC = fs.readFileSync(path.join(REPO, MODEL), 'utf8');
 const A = require(path.join(REPO, MODEL));
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } return !!c; };
-const zin = { id: 'ou_zin', name: 'Zin', alt: { nickname: 'Susan', department: 'Marketing', jobTitle: 'GTM lead', enName: 'Zin' } };
+const usern = { id: 'ou_usern', name: 'userN', alt: { nickname: 'Ada', department: 'Marketing', jobTitle: 'GTM lead', enName: 'userN' } };
 
 function legRules(M, tag = '') {
   const r = {};
-  const v = M.authorView(zin, { field: 'department' });
-  r.n2 = ok(v.display === 'Susan (Marketing)' && M.authorView(zin, { field: 'jobTitle' }).display === 'Susan (GTM lead)' && M.authorView(zin, { field: 'none' }).display === 'Susan' && M.authorView({ id: 'ou_x', name: 'Xia' }, { field: 'department' }).display === 'Xia' && M.authorView({ id: 'ou_y', name: 'Yan', alt: { department: 'Ops' } }, {}).display === 'Yan (Ops)', `${tag}N2 the vendor's way: the nickname else the name, then (department) / (job title) per the setting; nothing to add ⇒ the name alone`, v);
-  const al = M.authorView(zin, { field: 'department', alias: 'Susan from GTM' });
-  r.n1 = ok(al.display === 'Susan from GTM' && al.alias === 'Susan from GTM' && al.vendorDisplay === 'Susan (Marketing)', `${tag}N1 the owner's own name wins over everything; the vendor's way kept beside it (a cleared name restores it)`, al);
-  r.n3 = ok(v.name === 'Zin' && al.name === 'Zin' && M.titleFacts(al).name === 'Zin' && M.titleFacts({ name: 'Zin', display: 'Zin' }).name === '', `${tag}N3 the vendor name is never rewritten — it is the title whenever the head shows another`, M.titleFacts(al));
+  const v = M.authorView(usern, { field: 'department' });
+  r.n2 = ok(v.display === 'Ada (Marketing)' && M.authorView(usern, { field: 'jobTitle' }).display === 'Ada (GTM lead)' && M.authorView(usern, { field: 'none' }).display === 'Ada' && M.authorView({ id: 'ou_x', name: 'Xia' }, { field: 'department' }).display === 'Xia' && M.authorView({ id: 'ou_y', name: 'Yan', alt: { department: 'Ops' } }, {}).display === 'Yan (Ops)', `${tag}N2 the vendor's way: the nickname else the name, then (department) / (job title) per the setting; nothing to add ⇒ the name alone`, v);
+  const al = M.authorView(usern, { field: 'department', alias: 'Ada from GTM' });
+  r.n1 = ok(al.display === 'Ada from GTM' && al.alias === 'Ada from GTM' && al.vendorDisplay === 'Ada (Marketing)', `${tag}N1 the owner's own name wins over everything; the vendor's way kept beside it (a cleared name restores it)`, al);
+  r.n3 = ok(v.name === 'userN' && al.name === 'userN' && M.titleFacts(al).name === 'userN' && M.titleFacts({ name: 'userN', display: 'userN' }).name === '', `${tag}N3 the vendor name is never rewritten — it is the title whenever the head shows another`, M.titleFacts(al));
   const ex = M.authorView({ id: 'ou_e', name: 'E' }, { selfTenant: 'tn_own', tenant: 'tn_other' });
   const same = M.authorView({ id: 'ou_s', name: 'S' }, { selfTenant: 'tn_own', tenant: 'tn_own' });
   const unk = M.authorView({ id: 'ou_u', name: 'U' }, { selfTenant: null, tenant: 'tn_other' });
@@ -55,7 +55,7 @@ console.log('③ verify r3 (T2 ④): a vendor id is never a name — the avatar 
   const win = fs.readFileSync(path.join(REPO, 'src/lib/channel-window.js'), 'utf8');
   ok(/avatar\(\{ name: a\.display \|\| a\.name \|\| '', key: authorKey\(rec\), self: !!a\.isSelf(?:, pic)? \}, null, 'chanmsg-av'\)/.test(win) && !/avatar\(\{ name: [^}]*\|\| a\.id\b/.test(win), 'WIRING: the window\'s avatar is drawn from the display / vendor name only — never from `a.id` (an `ou_…` id drew the initial "O", a `cli_…` id "C", as if they were names; the id stays the head\'s text)');
   const AV = await import(path.join(REPO, 'src/lib/channel-avatar.js'));
-  ok(AV.initialsOf('ou_ff8c53730c347e160493771728962528') === 'O' && AV.initialsOf('cli_a5ed0d009') === 'C' && AV.initialsOf('') === '?' && AV.avatarOf({ name: '', key: 'ou_ff8c' }).text === '?' && AV.avatarOf({ name: '', key: 'ou_ff8c' }).hue === AV.avatarOf({ name: 'Zin', key: 'ou_ff8c' }).hue, 'the PURE fact that makes the wiring matter: initialsOf takes the first letter of ANY string (an id included), so the name must be empty for the "?" — the hue stays the author key\'s (stable across a later naming)');
+  ok(AV.initialsOf('ou_ff8c53730c347e160493771728962528') === 'O' && AV.initialsOf('cli_a5ed0d009') === 'C' && AV.initialsOf('') === '?' && AV.avatarOf({ name: '', key: 'ou_ff8c' }).text === '?' && AV.avatarOf({ name: '', key: 'ou_ff8c' }).hue === AV.avatarOf({ name: 'userN', key: 'ou_ff8c' }).hue, 'the PURE fact that makes the wiring matter: initialsOf takes the first letter of ANY string (an id included), so the name must be empty for the "?" — the hue stays the author key\'s (stable across a later naming)');
 }
 for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 3, label: 'chan-authors: ' })) ok(c.pass, c.name, c.pass ? undefined : c.detail);
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

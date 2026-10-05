@@ -339,6 +339,9 @@ function accountLines(app, a, kinds) {
     // the VENDOR BUDGET, said with its numbers while it is spent (§6.2)
     const bt = a.budget ? chanCaps.budgetText(a.budget, { t }) : '';
     if (bt) out.push(noteLine('chan-sec-note', bt, { warn: true }));
+    // lane gmail-quota-share: the vendor refused, so polling slowed itself — the ceiling, when, the shared-bucket possibility, back by
+    const lb = a.budget ? chanCaps.learnedBudgetText(a.budget, { t, vendor: a.vendor ? t(a.vendor) : '' }) : '';
+    if (lb) out.push(noteLine('chan-sec-note', lb, { warn: true }));
     // a failing pass BEFORE the third failure (the "For you" line below takes over from there)
     if (ps.note && !(a.consecutiveFailures >= 3)) out.push(noteLine('chan-sec-note', ps.note, { warn: true }));
   } else if (auth.state === 'expired') {
@@ -768,6 +771,8 @@ function adapterNotes(app, a) {
   if (!a.builtin && a.enabled !== false) {
     const ps = chanCaps.passStateText(a, { t, now: Date.now() });
     if (ps.note && !(a.consecutiveFailures >= 3)) line(ps.note, { warn: true });
+    const lb = a.budget ? chanCaps.learnedBudgetText(a.budget, { t, vendor: a.vendor ? t(a.vendor) : '' }) : '';   // lane gmail-quota-share
+    if (lb) line(lb, { warn: true });
     const fr = a.scheduler ? chanCaps.firstReadText(a.scheduler, { t }) : '';
     if (fr) line(fr);
   }

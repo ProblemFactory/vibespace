@@ -3963,3 +3963,14 @@ Owner 的规则: "拓展 vendor 只需要定义 vendor-specific 的文件 + 一�
 
 每个账号下的会话行与上面「需关注」行同形：头像（右下角账号角标，画在头像之上，角标里是各厂商自己的单色标志 public/brand/<vendor>.svg）· 名字 · 新鲜度小标 · 时间；第二行是最近一条消息的第一行「作者: 正文」（textContent，≤ 160 字，作者用组织昵称，自己写的读「你」）+ 未读数。「访问/通知」那行只在该会话自己的设置与账号不同时出现，措辞为「与账号不同：…」；继承账号设置的行不显示。（as-built lane brand-marks：单色标志按颜色分析重绘——原标志里对比强的颜色交界在单色里留成负间隙：Lark = 翅/头/身三块两道缝，Gmail = 等粗圆头的 M、只在翻盖压右腿处留缝；scripts/measure-brand-marks.mjs 量化验证。）私聊头像 = 不是本账号身份的那个作者（身份是已解析的事实；未知 ⇒ 首字母，绝不显示本人）；群聊头像 = 群自己的头像（chat~<id>）；Lark 机器人没有用户令牌可读的头像，保留机器人字形。
 > **设计 018 落地记录 (2.369.214, lane slack-landing-nologin, userW):** 018 原以为 Slack 授权落地页 `GET /api/channels/oauth/cb/:kind` 会带着实例自己的 cookie 回来 (SameSite=Lax 跟着重定向)。实际上按 Allow 的常常是**另一个浏览器 profile** (用户的 Slack 身份和其 VibeSpace SSO 登录分开放), 认证中间件把它 302 到 /login, code 丢了。现在: src/auth.js 只豁免这一条 GET (别的 oauth 路由仍要 cookie); **签名的 state 才是凭证** (本次启动的 HMAC + 时效, 按整个 state 找到运行中的 public 流程, code 只换一次), 每个地址每分钟 ≤ 30 次 (第 31 次 429, 用落地页自己的拒绝措辞); 落地页说「这里已完成, 回到你按下"连接"的 VibeSpace 窗口」。落地只把待定流程推进到完成, **账号记录仍由 owner 已登录的标签页创建** (Connect {flowId}), 且对话框的完成行写明「✓ 已以 {user} 连接」, 陌生身份在记录生成前就看得见。
+
+### 落地记录：发送行不靠一次 vendor 调用（lane gmail-reply-known，2026-10-05）
+
+- Gmail：本账号自己的 threads.list 列出的线程，发送行由已持有的事实得出（成员 = 列表证据；身份 = token scopes；线程是否还在由 propose 时的 replyEnvelope 证明），零 vendor 调用，`source:'listing'`。从未列出的 id 仍做一次 metadata 读取（404 ⇒ not-a-member）。Slack / Lark 的成员关系可以不经列表改变（被移出），保留 vendor 查询。
+- 任何适配器：查询被拒（rate-limited / backoff / not-connected / vendor-error / auth-expired）写进该行并说明原因与 retryAt；日志每会话每原因 5 分钟一行；打开的窗口在 retryAt 由引擎自动重问，账号恢复时也重问；页脚显示原因、"（HH:MM 重试）"和"重试"按钮（主人按下不受 back-off 限制，同一会话只一次查询）；查询进行中显示"正在确认能否回复…"，不再出现"发送能力尚不清楚"。
+
+## 学习型厂商预算 · 发现页的命名读取（as-built，2026-10-05，lane gmail-quota-share）
+
+同一个 Google 邮箱接在两个实例上（同一个集群 OAuth client = 同一个厂商桶，每分钟 6 000 单位），两边各自默认 3 000/分钟，正好占满整个桶：两边的拉取一重叠，Google 就拒绝。实例之间互相看不见，厂商的拒绝是唯一的共享信号，所以预算从拒绝里**学**出来（每账号 AIMD，纯函数 src/channel-budget.js）：一次拒绝（限速阶梯的第一击）把该账号的每分钟上限减半（下限 = 设置的 10%，且不少于一次读取），每个没有拒绝的整分钟回升设置的 10%；被拒绝时的上限作为「墙」记住一小时，这一小时内只回升到墙下一步。设置仍是上限的封顶；学到的上限存在账号记录旁边（adapters.json，不进索引），重启后仍在；每秒节奏按同一比例缩放。Lark / Slack 走同一扇门。
+账号卡片和频道面板的账号行写明：「轮询速度 1500/3000 配额单位/分钟 — Google 在 16:02 拒绝了这个账号的配额；可能有另一个实例在轮询同一个账号 · 17:03 前恢复到 3000」（另一实例只说「可能」，因为看不见）。同一天被减半两次时，「需关注」里出一条（每账号每天一条），恢复到设置时自动撤回。
+发现页命名一个线程改用 `messages.get?format=metadata`（线程 id 即其第一封邮件的 id，20 单位；404 时退回 `threads.get` 40 单位）；索引里已命名的行（`named`）发现时不再重读，适配器返回 `standIn: true` 时引擎保留已存的名字。夹具上计量：首次列出一页 410 → 210 单位，重启后再列同一页 410 → 10。

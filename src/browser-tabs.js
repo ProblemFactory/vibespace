@@ -49,7 +49,7 @@ const USER_TAB_ACTS = Object.freeze(['switch', 'close']);
  *  conversation's (`other`), nobody's (`orphan`). */
 const OWNER_WORDS = Object.freeze(['agent', 'you', 'other', 'orphan']);
 /** Every refusal a tab act can answer (the routes' STATUS rows and the census read this). */
-const TAB_REFUSALS = Object.freeze(['not_your_tab', 'tabs_unreadable', 'no_such_tab', 'take_over_first', 'last_tab', 'mediated_tabs', 'not_web', 'bad-request']);
+const TAB_REFUSALS = Object.freeze(['not_your_tab', 'tabs_unreadable', 'no_such_tab', 'take_over_first', 'last_tab', 'mediated_tabs', 'not_web', 'bad-request', 'browser_unresponsive']); // lane browser-unresponsive: + the hung browser (after the verdict)
 /** A holder's roots are bounded (the lease's registry row, persisted). */
 const MAX_ROOTS = 32;
 /** The takeover cycle keeps this many of the user's tab acts. */
@@ -335,6 +335,14 @@ function ownerTipText(owner, { human = false, name = '' } = {}, tIn) {
   if (owner === 'other') return name ? t('{name}’s tab — watch it here (view only); open its own live view to drive it', { name }) : t('Another conversation’s — open its live view to use it');
   return human ? t('Nobody’s tab') : t('Nobody’s tab — open Browse yourself on this profile to take it');
 }
+/** lane browser-unresponsive: a HUNG browser's refusal to the agent (English, never t()) — the FACT (since when, how long)
+ *  and the recipe, never "run the command again" (the measured inc: the agent retried 4× in 7 min, for 80 min). */
+function unresponsiveAgentText({ label = '', since = 0, now = 0, tabs = null } = {}) {
+  const d = new Date(Number(since) || 0), clock = String(d.getUTCHours()).padStart(2, '0') + ':' + String(d.getUTCMinutes()).padStart(2, '0');
+  const min = Math.max(1, Math.round(((Number(now) || 0) - (Number(since) || 0)) / 60000));
+  const n = Number.isInteger(tabs) && tabs > 0 ? `, ${tabs} tab(s) re-opened` : '';
+  return `the browser of profile "${label}" has not answered since ${clock} UTC (${min} min) — it is hung, not busy; nothing ran. \`vibespace-browser restart\` relaunches it (logins kept${n}; every other conversation on it is told) — or ask the user to press Restart in the Browser panel`;
+}
 /** Every refusal's words. `f.agent` = the agent-facing sentence (never t()-wrapped by the server). */
 function tabRefusalText(code, f = {}, tIn) {
   const t = f && f.agent ? fill : tOf(tIn);
@@ -344,7 +352,11 @@ function tabRefusalText(code, f = {}, tIn) {
       if (f && f.yours) return t('Switch to your own tab from your browsing window');
       if (f && f.orphan) return t('Nobody’s tab — open Browse yourself on this profile to take it');
       return t('Another conversation’s — open its live view to use it');
-    case 'tabs_unreadable': return f && f.agent ? 'the browser\'s tabs could not be read just now — nothing ran; run the command again' : t('The tabs could not be read just now — try again');
+    // lane browser-unresponsive: the first minute is `tabs_unreadable` (busy ≠ hung); once the browser is JUDGED hung
+    // (`f.unresponsive` = {label, since, now, tabs}, browser-stuck's verdict) the words carry the fact and the one way out
+    case 'tabs_unreadable': if (f && f.unresponsive) return f.agent ? unresponsiveAgentText(f.unresponsive) : t('The browser is not answering — Restart it from the Browser panel');
+      return f && f.agent ? 'the browser\'s tabs could not be read just now — nothing ran; run the command again' : t('The tabs could not be read just now — try again');
+    case 'browser_unresponsive': return f && f.agent ? unresponsiveAgentText((f && f.unresponsive) || {}) : t('The browser is not answering — Restart it from the Browser panel');
     case 'no_such_tab': return t('That tab is gone');
     case 'take_over_first': return t('Take over to switch or close the agent’s tabs');
     case 'last_tab': return f && f.yours ? t('This is your only tab — press Close to end your browsing') : t('This is the agent’s only tab — Close all tabs (quit this browser) ends it');
@@ -424,6 +436,7 @@ function reboundNoteText({ how = 'new', url = '', why = 'life' } = {}) {
 }
 
 module.exports = {
+  unresponsiveAgentText, // lane browser-unresponsive
   TARGET_ID_RE, TAB_ID_RE, AGENT_TAB_ACTS, USER_TAB_ACTS, OWNER_WORDS, TAB_REFUSALS, MAX_ROOTS, MAX_USER_ACTS,
   pageTargets, cleanRoots, addRoot, tabOwners, ownSetOf, ownerWord,
   rebindPick, reboundNoteText, // lane profile-lock-roll L2: the rebind after a replaced browser

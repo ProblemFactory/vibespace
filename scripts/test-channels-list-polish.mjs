@@ -44,8 +44,8 @@ ok(F.listRowModel({ lastText: 'x', assignment: { source: 'conversation' } }).gra
 ok(F.listRowModel({ lastText: 'y'.repeat(999) }).last.length === F.LIST_LAST_MAX, '③ the last line is bounded');
 ok(F.listRowModel({ lastText: 'hi', lastWho: { self: true } }).who.self === true && F.listRowModel({ lastText: '', lastWho: { name: 'A' } }).who === null, '③ the owner reads "You"; no text ⇒ no author');
 // ④ the ladder + Mia's fixture: an external-tenant member whose contact lookup is refused, the member list names her
-const SUSAN = { name: '', member: 'Mia (Marketing)', sender: '', profile: '', id: 'ou_d16d' };
-ok(Av.nameLadder(SUSAN).name === 'Mia (Marketing)' && Av.nameLadder(SUSAN).from === 'member', '④ Mia: the empty name ⇒ the member list');
+const MIA = { name: '', member: 'Mia (Marketing)', sender: '', profile: '', id: 'ou_d16d' };
+ok(Av.nameLadder(MIA).name === 'Mia (Marketing)' && Av.nameLadder(MIA).from === 'member', '④ Mia: the empty name ⇒ the member list');
 ok(Av.nameLadder({ sender: 'Rae', profile: 'R', id: 'ou_x' }).from === 'sender' && Av.nameLadder({ profile: 'Kit', id: 'ou_x' }).from === 'profile', '④ then the sender name, then the profile');
 ok(Av.nameLadder({ name: ' ', id: 'ou_8057' }).name === 'ou_8057' && Av.nameLadder({ id: 'ou_8057' }).from === 'id', '④ the id only when nothing is known');
 ok(Av.reaskDue(null, 0) && !Av.reaskDue({ at: 1000 }, 2000) && Av.reaskDue({ at: 0 }, Av.REASK_MS) && !Av.reaskDue({ at: 0, until: 9e9, why: 'forbidden' }, Av.REASK_MS * 2), '④ re-asked on a schedule; a refusal kept with its reason until its time');

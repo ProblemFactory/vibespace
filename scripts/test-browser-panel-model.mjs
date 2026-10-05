@@ -123,6 +123,8 @@ const census = (Mod) => {
   const runIds = [...runBlk.matchAll(/^    '?([a-z-]+)'?: (?:async )?\(r\) =>/gm)].map((m) => m[1]);
   ok(M.ROW_ACTS.filter((id) => id !== 'browse' && id !== 'who').every((id) => runIds.includes(id)) && runIds.length === 9, 'the view runs each of the nine menu acts by its id (RUN)', runIds);
   ok(/if \(L\.primary\) \{[\s\S]{0,400}app\.browseYourself\(r\.id/.test(tv) && /btn\(t\('Change…'\), \(\) => \{ if \(rowNow\) openWhoDialog\(app, rowNow\.id/.test(tv), 'the primary opens Browse yourself; the who cell\'s Change… opens the who dialog');
+  // lane browser-unresponsive: a hung row's primary is Restart — the view runs RUN.restart (THE user's restart route)
+  ok(/if \(L\.primary\.id === 'restart'\) \{[^\n]*bb\.onclick = \(\) => RUN\.restart\(r\);/.test(tv), 'a hung row\'s primary (Restart) runs RUN.restart');
   const menuFn = tv.slice(tv.indexOf('  function openRowMenu('), tv.indexOf('  const patchSwitch'));
   ok(menuFn.length > 100 && !/disabled/.test(menuFn) && /showContextMenu\(/.test(menuFn) && /rowMenu\(r, x\)/.test(menuFn), 'the ⋯ menu is showContextMenu over rowMenu — the view never passes `disabled`');
   // CONTROL: a patched copy that drops Replay… from the menu

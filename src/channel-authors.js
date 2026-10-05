@@ -1,7 +1,7 @@
 'use strict';
 /**
  * WHO IS THIS — an author as the owner reads it (lane lark-threads, PART B, 2026-10-01; the owner: "你有可能读取我在
- * lark里看到的人的名字（备注，机器人名字）吗？我发现有时候看不懂这里面都是谁" and "我在lark里看到的Zin的名字是Susan
+ * lark里看到的人的名字（备注，机器人名字）吗？我发现有时候看不懂这里面都是谁" and "我在lark里看到的userN的名字是Ada
  * (Marketing)，你看看哪个接口返回这个了"). PURE (imports only channel-record's name door; CJS: the engine, the
  * client bundle and the suites share it).
  *
@@ -11,7 +11,7 @@
  *     department_ids and NO remark) is the head, everywhere.
  *  N2 ELSE THE VENDOR'S WAY (Lark's own rendering): the nickname the organization gives the person (`alt.nickname`,
  *     the admin's alias — "展示在会话窗口、名片页、通讯录和搜索页面"), else the vendor `name`; then, when the setting
- *     `channels.larkNameField` names one, that profile field in parentheses (`Susan (Marketing)`).
+ *     `channels.larkNameField` names one, that profile field in parentheses (`Ada (Marketing)`).
  *  N3 THE VENDOR NAME STAYS: `author.name` is never rewritten — it is the title on every surface, the search key and
  *     what a filter's participant rule matches; the head is `author.display`.
  *  N4 AN EXTERNAL AUTHOR SAYS SO: `external: true` when the sender's tenant differs from the account's own (known

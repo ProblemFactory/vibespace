@@ -9,7 +9,8 @@
 //
 // x = { w: { t, state, why, ago, bytes, size, memory, display, human } — the view's word functions;
 //       chip (the browser chip's words), mine (this machine's name), stuck (stuckWords(…) or null), autoDialogs (bool),
-//       autoText (its sentence), buildLine (cardBuildLine's {text, warn} or null), limits (the housekeeping view's), now }
+//       autoText (its sentence), buildLine (cardBuildLine's {text, warn} or null), limits (the housekeeping view's), now,
+//       unresponsive (browser-stuck's unresponsiveWords(…) for a row whose `r.unresponsive` stands, or null) }
 
 /** The grid's four sized tracks (px minimums: profile, state, who, size) + the column gap; the fifth track (the acts)
  *  is `max-content` — the widest row's buttons, shared by every row. public/style.css's `.bprof-table` template says
@@ -26,6 +27,8 @@ const notOurs = (r) => r.state === 'not-ours';
 const ours = (r) => !notOurs(r) && !r.host;
 const canBrowse = (r) => !!r.canBrowse && !notOurs(r);
 const label = (r) => String(r.label || r.id || '');
+/** lane browser-unresponsive: a live browser of THIS computer judged hung — its state word and its ONE primary (Restart). */
+const hung = (r, x) => !!(r && r.unresponsive && r.live && !r.host && x && x.unresponsive);
 
 /** The name cell's l2 chips, in order: the browser (whole, never folds), then the machine · legacy · separate tabs ·
  *  renamed-from — those fold from the end into "+n" when the column is narrow (the view measures). */
@@ -47,6 +50,7 @@ export function nameChips(r, x = {}) {
 export function stateLines(r, x = {}) {
   const why = String(W(x, 'why', () => '')(r) || '');
   const out = [];
+  if (hung(r, x)) out.push({ key: 'unresponsive', text: String(x.unresponsive.tooltip || x.unresponsive.state), tone: 'warn' });
   if (x.stuck && x.stuck.line) out.push({ key: 'stuck', text: String(x.stuck.line), tone: 'warn' });
   if (r.browserClosed && why) out.push({ key: 'closed', text: why, tone: 'warn' });
   if (x.autoDialogs && x.autoText) out.push({ key: 'auto-dialogs', text: String(x.autoText), tone: 'warn' });
@@ -69,6 +73,8 @@ export function usageLine(r, x = {}) {
 /** The ONE visible act: Browse yourself / Open your browsing window — ABSENT (never greyed) for a paired machine's
  *  profile, a browser VibeSpace only connects to, or a folder it does not keep. */
 export function rowPrimary(r, x = {}) {
+  // lane browser-unresponsive: a browser that stopped answering has ONE way out — Restart is the primary, Browse is not offered
+  if (hung(r, x)) return { id: 'restart', open: false, warn: true, label: String(x.unresponsive.action), title: String(x.unresponsive.tooltip || '') };
   if (!canBrowse(r)) return null;
   const t = T(x), open = !!r.human;
   return { id: 'browse', open, label: open ? t('Open your browsing window') : t('Browse yourself'), title: open ? t('Your own tab in this browser — its window') : t('Open this profile\'s browser and browse it yourself — its logins are there; conversations using it keep working in their own tabs') };
@@ -84,7 +90,7 @@ export function rowMenu(r, x = {}) {
   if (r.buildChoice && !notOurs(r)) out.push({ id: 'build', label: t('Change build…'), title: t('Choose which installed Chrome build this profile runs') });
   out.push({ id: 'rename', label: t('Rename…') });
   if (r.live) out.push({ id: 'stop', label: t('Stop'), title: t('Stop this profile\'s browser now — its logins stay in the profile; the next command starts it again (this also resets a browser that keeps closing)') });
-  if (x.stuck && x.stuck.action && r.live && !r.host) out.push({ id: 'restart', label: String(x.stuck.action), title: String(x.stuck.tooltip || '') });
+  if (hung(r, x)) { /* Restart is the row's primary (never twice) */ } else if (x.stuck && x.stuck.action && r.live && !r.host) out.push({ id: 'restart', label: String(x.stuck.action), title: String(x.stuck.tooltip || '') });
   else if (x.autoDialogs) out.push({ id: 'restart-hold', label: t('Restart to hold dialogs'), title: t('Restart this browser so VibeSpace holds leave-page dialogs for a decision instead of the browser accepting them — its tabs close, logins stay') });
   if (!notOurs(r)) { out.push({ sep: true }); out.push({ id: 'delete', label: t('Delete…'), warn: true, title: t('Stop it, take it away from every conversation that uses it, and move its directory beside itself — nothing is deleted for good until you click Delete permanently below') }); }
   return out;
@@ -101,7 +107,7 @@ export function rowLine(r, x = {}) {
   const t = T(x), st = stateLines(r, x);
   return {
     name: { l1: label(r), title: label(r), chips: nameChips(r, x) },
-    state: { l1: String(W(x, 'state', (s) => String(s || ''))(r.state) || ''), tone: String(r.state || '').replace(/[^a-z-]/g, ''), l2: st[0] || null, title: st.map((s) => s.text).join(' · ') },
+    state: { l1: hung(r, x) ? String(x.unresponsive.state) : String(W(x, 'state', (s) => String(s || ''))(r.state) || ''), tone: hung(r, x) ? 'unresponsive' : String(r.state || '').replace(/[^a-z-]/g, ''), l2: st[0] || null, title: st.map((s) => s.text).join(' · ') },
     who: r.legacy ? { kind: 'legacy', l1: t('Legacy profile — it keeps no list') } : { kind: 'list' },
     usage: usageLine(r, x),
     primary: rowPrimary(r, x),

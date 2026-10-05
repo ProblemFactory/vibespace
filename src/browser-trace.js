@@ -579,7 +579,9 @@ function housekeepingVerdict({ profiles = [], leases = [], browsers = {}, dirFac
     // opt-out, absent = on) — structure for the row's button and checkbox
     const row = rowOf(p.provider) || {};
     const canBrowse = row.starts !== false && row.leaseKind !== 'window-target'; // lane remote-profile-start: a paired machine's profile too (started there, seen here)
-    const base = { id: p.id, label: p.label, dir: p.dir || null, provider: p.provider, host: p.host || null, legacy: !!p.legacy, record: !!p.record, recordMine: p.recordMine !== false, canBrowse, sharing: p.sharing === 'instance' ? 'instance' : 'owner', mediated: B.isMediatedProfile(p), bytes: Number.isFinite(facts.bytes) ? facts.bytes : null, lastUsedAt: Number(p.lastUsedAt) || 0, ageMs, held, live, browserClosed, closedHow };
+    // lane browser-unresponsive: the keeper's verdict on a live browser that stopped answering (the row's state word + Restart)
+    const unresponsive = live && br && br.unresponsive && Number.isFinite(br.unresponsive.since) ? { since: br.unresponsive.since, asks: Number(br.unresponsive.asks) || 0 } : null;
+    const base = { id: p.id, label: p.label, dir: p.dir || null, provider: p.provider, host: p.host || null, legacy: !!p.legacy, record: !!p.record, recordMine: p.recordMine !== false, canBrowse, sharing: p.sharing === 'instance' ? 'instance' : 'owner', mediated: B.isMediatedProfile(p), bytes: Number.isFinite(facts.bytes) ? facts.bytes : null, lastUsedAt: Number(p.lastUsedAt) || 0, ageMs, held, live, browserClosed, closedHow, unresponsive };
     if (!q.ok && !remoteOwned(p, rowOf)) return { ...base, state: 'not-ours', why: q.error, canForget: false }; // lane remote-profile-start: a paired machine's profile is the user's to browse / delete (through its machine)
     if (held) return { ...base, state: 'in-use', why: `attached by ${held} session(s)${closedWhy}`, canForget: false };
     if (live) return { ...base, state: 'live', why: browserClosed ? `its daemon is running${closedWhy}` : 'its browser is running', canForget: false };

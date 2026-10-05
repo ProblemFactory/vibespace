@@ -44,7 +44,7 @@ const SHIM_MARKER = 'VIBESPACE-AGENT-BROWSER-SHIM';
 /** VibeSpace's own verbs — they always win. */
 // lane browser-resume B (§3.9): + `resume` (its conversation's own browser, started again with its kept tabs — the collision
 // census reads the binary's own words: `resume` is none of 0.38.1's)
-const OURS = Object.freeze(['profiles', 'new', 'providers', 'use', 'detach', 'status', 'pin', 'watch', 'backend', 'blocked', 'new-child', 'help', 'resume']);
+const OURS = Object.freeze(['profiles', 'new', 'providers', 'use', 'detach', 'status', 'pin', 'watch', 'backend', 'blocked', 'new-child', 'help', 'resume', 'restart']); // lane browser-unresponsive: + restart (a hung browser's way out)
 /** lane site-reset (2026-09-30): VibeSpace's own verbs that act on the conversation's CURRENT PAGE — they take the page verbs'
  *  road (the one /resolve: which browser, the lease, the refusals, the audit) but never reach the binary as a verb: `stop`
  *  (Page.stopLoading through the watch — a looping tab never disables the browser) and `site-reset <host>` (one site's

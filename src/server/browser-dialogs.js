@@ -660,6 +660,9 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     let e = null; try { e = keeper.ephemeralFor ? keeper.ephemeralFor(bk) : null; } catch { e = null; }
     if (e && e.profileId) cands.push({ profileId: e.profileId, ephemeral: true, sessionId: e.sessionId || null });
     for (const c of cands) {
+      // lane browser-unresponsive: the WHOLE browser judged hung (the keeper's fact) is said before any page's state
+      let br = null; try { br = typeof keeper.browserOf === 'function' ? keeper.browserOf(c.profileId) : null; } catch { br = null; }
+      if (br && br.unresponsive && Number.isFinite(br.unresponsive.since)) { let p = null; try { p = keeper.profile(c.profileId); } catch { p = null; } return { state: 'unresponsive', why: 'browser', count: Number(br.unresponsive.asks) || 0, since: br.unresponsive.since, label: (p && p.label) || c.profileId, profileId: c.profileId }; }
       const f = factFor({ ...c, browserKey: bk, consume: false });
       // lane browser-passkey: a page waiting for a passkey (after a held dialog — that is answered first)
       if (!f.open && f.passkey && f.passkey.state === PK.PASSKEY_OPEN_CODE) return { state: 'passkey', passkey: f.passkey, headed: onDesktop(c.profileId), since: f.passkey.startedAt, profileId: c.profileId };

@@ -69,6 +69,7 @@ const BF = require('../browser-fact.js'); // lane S2: THE browser fact (one answ
 const M = require('../browser-mediation.js'); // P6: the per-session url + env of a MEDIATED lease
 const INT = require('../browser-interrupt.js'); // the owner's ruling (2026-09-27): a takeover interrupts, tells, and the handback reminds
 const VERBS = require('../browser-verbs.js'); // takeover r3: the ONE config rule (sanctionedConfig)
+const BS = require('../browser-stuck.js'); // lane browser-unresponsive: THE hung-browser verdict (PURE) + its words
 const LIMITS = require('../keeper-limits.js');
 const RG = require('../runaway-guard.js'); // the ONE resource verdict + per-provider numbers + report level (2026-09-25: report only)
 const HM = require('../browser-human.js'); // BROWSE YOURSELF (B-6ae8): the user as one more holder on his own tab
@@ -133,7 +134,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   // browser handle (src/browser-job-principal.js), so its lease outlives its owner conversation until the job ends
   jobRunning = () => false,
   jobName = () => null, // accept-fixes-strip F8: a Background Work job's name (the live view names a job's tab by it)
-  facts = null, runtime = null, limits = LIMITS, log = console, now = Date.now, tickMs = TICK_MS, guardSampleMs = null, install = true,
+  facts = null, runtime = null, limits = LIMITS, log = console, now = Date.now, tickMs = TICK_MS, guardSampleMs = null, install = true, answerAskMs = null, /* lane browser-unresponsive: the gate's bound of one ask */
   // lane H: how long a verb waits for the lease seam's listeners (the recorder ARMING its tap) before it runs
   armWaitMs = ARM_WAIT_MS,
   taskGroupDefault = null, access = null, hostKnown = null,
@@ -1870,6 +1871,90 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     noteHeal(rec, { noticedAt: now() });
     return true;
   }
+  // ── lane browser-unresponsive (a fleet user's inc 2026-10-05: the shared "jarvis-work" answered 0 bytes for 80 min while
+  // every verb said "run the command again"): A BROWSER THAT DOES NOT ANSWER IS A NAMED STATE WITH ONE WAY OUT. The tick
+  // asks `/json/version` (≤ BS.ANSWER_ASK_MS), every refused tab read / window open counts as an ask that did not answer;
+  // browser-stuck's PURE verdict decides; `rec.unresponsive` {since, lastAnswerAt, asks} is THE fact every surface reads
+  // (the row, the live banner, the chip, the agent's refusal), cleared the moment an ask answers. Keepers REPORT — a hung
+  // browser is in use by nobody (no verb runs, no picture moves), and Restart stays a human's act or a gated agent's.
+  const answers = new Map(); // profileId → the asks so far {lastAnswerAt, since, asks} (memory: a boot re-judges within a minute)
+  const asking = new Set();
+  const browserPidOf = (rec) => (rec && rec.browser && Number.isInteger(rec.browser.pid) ? rec.browser.pid : (rec ? rec.pid : null));
+  const gpuPctOf = (profileId) => { const l = live.get(profileId); return l && l.gpu && Number.isFinite(l.gpu.cpuPct) ? Math.round(l.gpu.cpuPct) : null; };
+  function noteAnswer(rec, p, answered, by) {
+    if (!rec || !p || !isLocalRec(rec)) return null;
+    const at = now(), pid = browserPidOf(rec);
+    const v = BS.browserAnswerVerdict(answers.get(p.id) || null, { answered, at, pidAlive: Number.isInteger(pid) && F.pidAlive(pid) });
+    if (v.next) answers.set(p.id, v.next); else answers.delete(p.id);
+    const was = rec.unresponsive || null;
+    if (v.state === 'unresponsive') {
+      const fact = BS.unresponsiveFact(v.next);
+      rec.unresponsive = fact; dirty = true;
+      if (!was || was.since !== fact.since) { log.warn?.(`[browser] ${BS.unresponsiveLine({ id: p.id, label: p.label, since: fact.since, asks: fact.asks, pid, gpu: gpuPctOf(p.id) })}`); noticeUnresponsive(rec, p); commit(); }
+    } else if (was) {
+      rec.unresponsive = null; dirty = true;
+      log.log?.(`[browser] ${BS.answeredAgainLine({ id: p.id, label: p.label, since: was.since, at, by: v.state === 'closed' ? 'its process ended' : by })}`);
+      resolveUnresponsive(rec, 'browser-answered'); commit();
+    }
+    return rec.unresponsive || null;
+  }
+  /** One `/json/version` ask of a live local browser (never two at once per profile). */
+  async function askAnswer(rec, p, by = 'the tick') {
+    if (!rec || !p || !rec.cdpUrl || asking.has(p.id)) return null;
+    asking.add(p.id);
+    try {
+      const r = await probeCdp(rec.cdpUrl, { timeoutMs: answerAskMs || BS.ANSWER_ASK_MS });
+      if (reg.browsers[p.id] !== rec || !B.isLiveBrowser(rec) || stopping.has(p.id) || starting.has(p.id)) return null;
+      return noteAnswer(rec, p, !!(r.ok || /^HTTP \d+/.test(String(r.error || ''))), by); // any HTTP answer is an answer
+    } finally { asking.delete(p.id); }
+  }
+  /** The agent refusal's fact (browser-tabs' words), or null while the browser is not judged hung. */
+  const unresponsiveOf = (rec, p) => (rec && rec.unresponsive && p ? { label: p.label, since: rec.unresponsive.since, now: now(), tabs: null } : null);
+  /** ONE For-you item per (profile, since) — origin browser, its Restart act; self-resolving on an answer or a restart. */
+  function noticeUnresponsive(rec, p) {
+    const u = rec.unresponsive;
+    if (!u || (rec.unresponsiveNotice && rec.unresponsiveNotice.since === u.since)) return false;
+    rec.unresponsiveNotice = { since: u.since, id: null }; dirty = true; // claimed first: a refusal never files twice
+    if (!userTodos || typeof userTodos.add !== 'function') { log.warn?.(`[browser] ${p.id} "${p.label}": not answering — no For-you store is wired, so only this journal says so`); return false; }
+    const n = BS.unresponsiveNotice({ label: p.label, since: u.since, now: now() });
+    try { const it = userTodos.add('browser', { origin: 'browser', kind: 'action', urgency: 'high', by: 'agent', text: n.text, detail: n.detail, sessionName: 'Agent browser', action: { type: 'browser-restart', profileId: p.id, since: u.since } }); rec.unresponsiveNotice.id = (it && it.id) || null; }
+    catch (e) { log.warn?.(`[browser] ${p.id} "${p.label}": the not-answering For-you item was not filed (${e && e.message})`); return false; }
+    return true;
+  }
+  function resolveUnresponsive(rec, by) {
+    const n = rec && rec.unresponsiveNotice;
+    if (!n) return;
+    if (n.id && userTodos && typeof userTodos.setStatus === 'function') { try { const it = typeof userTodos.get === 'function' ? userTodos.get(n.id) : null; if (!it || it.status === 'open') userTodos.setStatus(n.id, 'done', by); } catch { /* gone already */ } }
+    rec.unresponsiveNotice = null; dirty = true;
+  }
+  /**
+   * RESTART = THE ONE RECOVERY of a hung browser: the stop (SIGTERM→SIGKILL by pid+starttime) + the relaunch made
+   * explicit + every OTHER conversation holding a lease told by a card (one per lease, never a billed turn) + the audit
+   * line. The user always (the cookie route); an agent ONLY while the verdict stands and no human drives it.
+   */
+  async function restartProfile(profileId, { by = 'user', browserKey = null, sessionName = null } = {}) {
+    ensureLoaded();
+    const rec = reg.browsers[profileId], p = profile(profileId);
+    if (!rec || !p) throw namedError('not-found', `no browser record for ${profileId}`);
+    if (by !== 'user') {
+      const a = BS.restartAdmission({ by: 'agent', unresponsive: rec.unresponsive || null, humanDriving: userDrivesAnyWindowOf(profileId), label: p.label });
+      if (!a.ok) { log.log?.(`[browser] ${browserKey || 'an agent'} on ${profileId}: restart refused ${a.code}`); throw namedError(a.code, a.error); }
+    }
+    const u = rec.unresponsive || null;
+    const who = by === 'user' ? 'the user' : `the conversation ${sessionName ? '"' + sessionName + '"' : browserKey || 'an agent'}`;
+    const others = reg.leases.filter((l) => l.profileId === profileId && l.browserKey !== browserKey).map((l) => ({ browserKey: l.browserKey, sessionId: l.sessionId || null }));
+    await stop(profileId, { why: 'user' });
+    answers.delete(profileId);
+    if (rec.unresponsive) rec.unresponsive = null;
+    resolveUnresponsive(rec, 'browser-restarted');
+    let browser = null;
+    if (!isEph(p)) browser = await start(profileId, { why: `restarted by ${who}${u ? ` (not answering since ${BS.utcClock(u.since)})` : ''}` });
+    const text = BS.restartedCardText({ label: p.label, by: who, since: u ? u.since : null, now: now() });
+    for (const o of others) announceRelaunch({ kind: 'relaunch', outcome: 'restarted', profileId, label: p.label, browserKey: o.browserKey, sessionId: o.sessionId, text, n: 0, verbs: [] }); // int220: the builds row's seam (.219 moved the listeners there)
+    log.log?.(`[browser] ${profileId} "${p.label}": restarted by ${who}${u ? ` — it had not answered since ${BS.utcClock(u.since)} (asks ${u.asks})` : ''}; ${others.length} other conversation(s) told`);
+    commit();
+    return browser || browserView(reg.browsers[profileId]);
+  }
   function healBrowser(rec, p, seenBy, { force = false } = {}) {
     if (!rec || !p || rec.state !== 'ready' || !isLocalRec(rec) || starting.has(p.id) || stopping.has(p.id) || switching.has(p.id)) return Promise.resolve(null);
     if (livenessOf(rec) !== 'ours') return Promise.resolve(null); // never under a daemon we cannot prove ours (the tick marks it gone)
@@ -2808,6 +2893,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       else made = { ok: false, error: `its new window could not be bound to its session (${execWhy(b)})` };
     }
     if (made && made.code === 'window_busy') return { ok: false, code: 'window_busy', why: made.why || 'ladder', targetId: null, window: 'own', error: made.error }; // verify r2 T1: a living window is never traded for the browser's last window (another holder's)
+    if (made && /timed out/i.test(String(made.error || '')) && p) noteAnswer(reg.browsers[p.id], p, false, 'a window open'); // lane browser-unresponsive: an ask that did not answer
     if (!fallback) { log.log?.(`[browser] ${holderKey} on ${p ? p.id : '?'}: no window of its own was opened — ${made && made.error ? made.error : 'no window'}; its first command opens its tab`); return { ok: false, targetId: null, window: null, why: made && made.error }; }
     log.log?.(`[browser] ${holderKey} on ${p ? p.id : '?'}: its tab opens in the browser's last window, not a window of its own — ${made && made.error ? made.error : 'no window'}`);
     let r = null;
@@ -2858,7 +2944,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       return { rows, owners, own, active: active ? String(active).toUpperCase() : null };
     };
     const s0 = await read();
-    if (!s0.rows || !s0.owners) { log.log?.(`[browser] ${bk} on ${p.id}: its \`tab ${w.act}\` refused tabs_unreadable (${s0.rows ? 'the CDP read' : 'its tab list'} did not answer) — nothing ran`); throw namedError('tabs_unreadable', TBS.tabRefusalText('tabs_unreadable', { agent: true })); }
+    if (!s0.rows || !s0.owners) { const hung = noteAnswer(rec, p, false, 'a refused tab read') ? unresponsiveOf(rec, p) : null; const code = hung ? 'browser_unresponsive' : 'tabs_unreadable'; log.log?.(`[browser] ${bk} on ${p.id}: its \`tab ${w.act}\` refused ${code} (${s0.rows ? 'the CDP read' : 'its tab list'} did not answer) — nothing ran`); throw namedError(code, TBS.tabRefusalText('tabs_unreadable', { agent: true, ...(hung ? { unresponsive: hung } : {}) })); } // lane browser-unresponsive: a refusal is an ask that did not answer
     const targetId = w.ref ? TBS.resolveTabRef(w.ref, s0.rows) : null;
     const av = TBS.agentTabVerdict({ act: w.act, ref: w.ref, targetId, own: s0.own, current: s0.active });
     if (!av.ok) { log.log?.(`[browser] ${bk} on ${p.id}: its \`tab ${w.act}${w.ref ? ' ' + String(w.ref).slice(0, 40) : ''}\` refused ${av.code} — nothing ran`); throw namedError(av.code, av.error); }
@@ -5017,7 +5103,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     get cliPrefix() { return cliPrefix; }, get cliWitnessOf() { return cliWitnessOf; }, get isMusl() { return isMusl; }, get inputsView() { return inputsView; },
     get reg() { return reg; }, get dirty() { return dirty; }, set dirty(v) { dirty = v; }, get inFlightReader() { return inFlightReader; },
     get cliGen() { return cliGen; }, set cliGen(v) { cliGen = v; }, get cliMemo() { return cliMemo; }, set cliMemo(v) { cliMemo = v; } });
-  const { installVerdict, installedCloakBin, installedStamp, fallBackFromChange } = installs.api; // what this keeper still asks (the switch, rung 3, the heal)
+  const { installVerdict, installedCloakBin, installedStamp, fallBackFromChange, announceRelaunch } = installs.api; // what this keeper still asks (the switch, rung 3, the heal)
   // ── lane browser-admin 2b: THE BROWSER CLI VERSION VIBESPACE DRIVES (`browser.cli`: path | pinned | x.y.z) ──
   // Installed with THE install slot above (one install at a time, cloak's or this one): `npm install --prefix
   // <data>/browser-tools/agent-browser-<v> --no-save --ignore-scripts agent-browser@<v>` — the registry only (the package's
@@ -5721,6 +5807,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const r = reconcile({ graceMs: B.LEASE_DROP_GRACE_MS });
     if (r.dropped.length || r.stamped.length) dirty = true;
     await r.retired;
+    const asks = []; // lane browser-unresponsive: each live local browser's `/json/version` ask (parallel, awaited below)
     for (const rec of Object.values(reg.browsers)) {
       if (!B.isLiveBrowser(rec) || stopping.has(rec.profileId) || starting.has(rec.profileId)) continue;
       const p = profile(rec.profileId);
@@ -5735,6 +5822,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       // r4 MAJOR 1: a daemon with no browser is healed by the tick while a lease holds it (a conversation is using it); an
       // unleased one waits for its next start / view (or its idle clock) — nobody is asking for a window to reappear
       if (isLocalRec(rec) && rec.state === 'ready') { await followRelaunch(rec, 'the tick', { heal: leasedNow(rec.profileId) }); if (stopping.has(rec.profileId) || reg.browsers[rec.profileId] !== rec) continue; }
+      if (p && isLocalRec(rec) && rec.state === 'ready' && rec.cdpUrl) asks.push(askAnswer(rec, p, 'the tick'));
       // BROWSE YOURSELF (B-6ae8): the user's own holder row counts — a browser he browses (or keeps while away) is USED
       const idle = B.browserIdle(rec, holdersOn(rec.profileId), t, idleMs());
       if (idle.expired) { stop(rec.profileId, { why: 'idle' }).catch(() => { }); continue; }
@@ -5749,10 +5837,15 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         // REPORT ONLY (the owner's 2026-09-25 ruling): the browser keeps running whatever the sample says.
         const lim = RG.providerGuard(p ? p.provider : 'chromium', limits);
         const v = RG.resourceVerdict(s, g.prev, g.hotSince, t, { limits: lim });
-        g.prev = s ? { at: t, cpuTicks: s.cpuTicks } : null; g.hotSince = v.hotSince;
+        // lane browser-unresponsive: the GPU process's own share (a notice names it when it is the one over)
+        const gpuPct = s && s.gpu && g.prev && g.prev.gpu && g.prev.gpu.pid === s.gpu.pid && t > g.prev.at ? (s.gpu.cpuTicks - g.prev.gpu.cpuTicks) * 1000 / (t - g.prev.at) : null;
+        g.prev = s ? { at: t, cpuTicks: s.cpuTicks, gpu: s.gpu || null } : null; g.hotSince = v.hotSince;
         const lvl = RG.reportTransition(g.report, v, { now: t, limits: lim }); g.report = lvl.state;
+        // ONE notice per CAUSE (never one per profile): a CPU crossing while memory is already reported is its own report
+        const vc = v.overKind === 'memory' && v.cpuOver ? { ...v, over: v.cpuOver, overKind: 'cpu' } : v.overKind === 'cpu' ? null : { ...v, over: null, overKind: null, clear: !v.hotSince };
+        const lvc = vc ? RG.reportTransition(g.cpuReport, vc, { now: t, limits: lim }) : null; if (lvc) g.cpuReport = lvc.state;
         guard.set(rec.profileId, g);
-        if (s) { const was = live.get(rec.profileId); live.set(rec.profileId, { cpuPct: v.cpuPct, memBytes: s.memBytes, memMetric: s.memMetric, rssBytes: s.rssBytes /* deprecated: ΣVmRSS, never judged — one release */, pids: s.pids.length, over: v.over, since: v.over ? ((was && was.over && was.since) || t) : null, sampledAt: t }); dirty = true; }
+        if (s) { const was = live.get(rec.profileId); live.set(rec.profileId, { gpu: s.gpu && Number.isFinite(gpuPct) ? { pid: s.gpu.pid, cpuPct: gpuPct } : null, cpuPct: v.cpuPct, memBytes: s.memBytes, memMetric: s.memMetric, rssBytes: s.rssBytes /* deprecated: ΣVmRSS, never judged — one release */, pids: s.pids.length, over: v.over, since: v.over ? ((was && was.over && was.since) || t) : null, sampledAt: t }); dirty = true; }
         if (v.memGuard === 'unavailable' && !g.memOffSaid) { g.memOffSaid = true; log.warn?.(`[browser] ${RG.memGuardOffLine(rec.profileId, s)}`); }
         const label = p ? p.label : rec.profileId;
         if (lvl.fire) {
@@ -5762,11 +5855,19 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         if (lvl.notify) {
           const who = isEph(p) ? `The agent browser of "${label}"` : `The agent browser of profile "${label}"`;
           let delivered;
-          try { delivered = serverNotice?.(`browser-resource:${rec.profileId}:${lvl.state.crossings}`, RG.resourceNoticeText({ who, where: 'Browser panel', verdict: v, sample: s }), { level: 'warn' }); } catch (e) { log.warn?.(`[browser] ${rec.profileId}: the resource notice failed: ${e && e.message}`); }
+          try { delivered = serverNotice?.(`browser-resource:${rec.profileId}:${lvl.state.crossings}`, RG.resourceNoticeText({ who, where: 'Browser panel', verdict: v, sample: s, gpuPct }), { level: 'warn' }); } catch (e) { log.warn?.(`[browser] ${rec.profileId}: the resource notice failed: ${e && e.message}`); }
           g.report = RG.reportDelivery(g.report, delivered);
+        }
+        if (lvc && lvc.fire) log.warn?.(`[browser] ${rec.profileId} "${label}" is over the reporting threshold: ${vc.over}${Number.isFinite(gpuPct) ? ` (GPU process ${Math.round(gpuPct)} %)` : ''} — reported, left running`);
+        if (lvc && lvc.notify) {
+          const who = isEph(p) ? `The agent browser of "${label}"` : `The agent browser of profile "${label}"`;
+          let delivered;
+          try { delivered = serverNotice?.(`browser-resource:${rec.profileId}:cpu:${lvc.state.crossings}`, RG.resourceNoticeText({ who, where: 'Browser panel', verdict: vc, sample: s, gpuPct }), { level: 'warn' }); } catch (e) { log.warn?.(`[browser] ${rec.profileId}: the CPU notice failed: ${e && e.message}`); }
+          g.cpuReport = RG.reportDelivery(g.cpuReport, delivered);
         }
       }
     }
+    await Promise.allSettled(asks); // lane browser-unresponsive: bounded by BS.ANSWER_ASK_MS
     await Promise.allSettled([...reaping.values()]); // r2 M1: every orphan this tick found is ended before it returns
     if (dirty) commit();
     // P3 (§4.3): a takeover somebody walked away from hands back by itself, a
@@ -6116,6 +6217,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   const api = {
     list, profile, profileByRef, browserOf, leasesFor, leasesOn, createProfile, adoptDirectory, removeProfile,
     buildsFor, // lane browser-admin 2a: Change build… (buildsView, machineBuilds, setBrowserChoice, onRelaunch: the builds row, in ...installs.api)
+    restartProfile, askAnswer: (id, by) => { ensureLoaded(); const rec = reg.browsers[id]; return askAnswer(rec, profile(id), by); }, // lane browser-unresponsive: THE recovery + one ask (the gate's seam)
     cliPin, cliFactReady, _reattached: () => reattached, // cliFacts + installCli: the CLI row, in ...installs.api
     ...installs.api, // rv-browser F7 (lane dc-browser-installs): every install row's own routes (lane chrome-builds-download (design 004): Download another build…) // lane browser-admin 2b: the browser CLI VibeSpace drives (verify r3: cliFactReady = the doors' fact, the candidates asked first)
     machineDisplay, machineDisplayCached, noDisplayMode, headedSetting, // lane headless-fallback (+ H5: the stored window preference, for Settings' fact line): this machine's display now (a fresh probe — Settings' read-only line) + the no-display setting

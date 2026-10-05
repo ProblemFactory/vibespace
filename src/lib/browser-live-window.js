@@ -994,7 +994,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
       acts.append(hint);
       dialogBar.append(acts);
     } else if (stuck) {
-      const w = stuckWords(stuck, t);
+      const w = stuckWords(stuck.why === 'browser' && Number.isFinite(stuck.since) ? { ...stuck, clock: new Date(stuck.since).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) } : stuck, t); // lane browser-unresponsive: the viewer's clock
       const line = document.createElement('span'); line.className = 'browser-live-dialog-body'; line.textContent = w.line;
       const re = textBtn(w.action, () => restartBrowser(), 'browser-live-dialog-restart'); re.title = w.tooltip || '';
       re.disabled = !!st.restarting;

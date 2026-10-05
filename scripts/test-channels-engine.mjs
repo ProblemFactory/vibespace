@@ -5815,7 +5815,7 @@ console.log('\n㉓ lane lark-threads: a thread born after its root was stored');
   let clock = Date.UTC(2026, 9, 1, 18, 0, 0);
   const clockFn = () => clock;
   const mk = () => ({ chat: new Map(), threads: new Map(), topicOf: new Map(), hitThreadIds: true, hidden: new Set(), noReplyHits: false, recentThrow: null, byIdThrow: null, historyThrow: null, forbidden: new Set(), calls: { history: 0, recent: [], thread: [], byId: [], changes: 0 } });
-  const say = (W, conv, id, at, o = {}) => { if (!W.chat.has(conv)) W.chat.set(conv, []); W.chat.get(conv).push({ vendorId: id, at, author: o.author || { id: 'ou_zin', name: 'Zin' }, text: o.text || id }); };
+  const say = (W, conv, id, at, o = {}) => { if (!W.chat.has(conv)) W.chat.set(conv, []); W.chat.get(conv).push({ vendorId: id, at, author: o.author || { id: 'ou_usern', name: 'userN' }, text: o.text || id }); };
   const reply = (W, conv, root, id, at) => { const tk = W.topicOf.get(root); const k = `${conv}#${tk}`; if (!W.threads.has(k)) W.threads.set(k, []); W.threads.get(k).push({ vendorId: id, at, root, author: { id: 'ou_ann', name: 'Ann' }, text: id }); };
   const sorted = (l) => l.slice().sort((a, b) => a.at - b.at || (a.vendorId < b.vendorId ? -1 : 1));
   function laneMod(kind, W) {
@@ -6236,10 +6236,10 @@ console.log('\n㉔ lane lark-threads PART B: the owner\'s names for authors, at 
     },
   };
   B.recs = [
-    { vendorId: 'om_1', at: Date.UTC(2026, 9, 1, 10), author: { id: 'ou_zin', name: 'Zin', alt: { nickname: 'Susan', department: 'Marketing' } }, text: 'hello', raw: { msg_type: 'text', tenant_key: '1433ddec23579750' } },
+    { vendorId: 'om_1', at: Date.UTC(2026, 9, 1, 10), author: { id: 'ou_usern', name: 'userN', alt: { nickname: 'Ada', department: 'Marketing' } }, text: 'hello', raw: { msg_type: 'text', tenant_key: 'tn_other_0002' } },
     { vendorId: 'om_2', at: Date.UTC(2026, 9, 1, 11), author: { id: 'ou_col', name: 'Colleague' }, text: 'hi', raw: { msg_type: 'text', tenant_key: 'tn_own' } },
     { vendorId: 'om_3', at: Date.UTC(2026, 9, 1, 12), author: { id: 'cli_a5ed0d00a', name: 'app', isBot: true }, text: 'bot', replyTo: 'om_1', threadKey: 'om_1', raw: { msg_type: 'text' } },
-    { vendorId: 'om_z', at: Date.UTC(2026, 9, 1, 13), author: { id: 'ou_zin', name: 'Zin', alt: { nickname: 'Susan', department: 'Marketing' } }, text: 'bye', raw: { msg_type: 'text', tenant_key: '1433ddec23579750' } },
+    { vendorId: 'om_z', at: Date.UTC(2026, 9, 1, 13), author: { id: 'ou_usern', name: 'userN', alt: { nickname: 'Ada', department: 'Marketing' } }, text: 'bye', raw: { msg_type: 'text', tenant_key: 'tn_other_0002' } },
   ];
   const dB = path.join(ROOT, 'lkt-b');
   fs.mkdirSync(path.join(dB, 'channels'), { recursive: true });
@@ -6253,9 +6253,9 @@ console.log('\n㉔ lane lark-threads PART B: the owner\'s names for authors, at 
   const page = () => eng.messages('peoply', 'oc_b', { limit: 50 });
   const p0 = page();
   const z = p0.find((r) => r.vendorId === 'om_1').author, col = p0.find((r) => r.vendorId === 'om_2').author, bot = p0.find((r) => r.vendorId === 'om_3').author;
-  ok(z.display === 'Susan (Marketing)' && z.name === 'Zin' && z.external === true && col.display === 'Colleague' && !col.external && bot.name !== 'app' && /^Bot /.test(bot.display), 'the window\'s page: the vendor\'s way ("Susan (Marketing)"), the vendor name kept as the name; Zin EXTERNAL (her tenant ≠ the account\'s — no call), the colleague not; a nameless bot is never "app" even on an adapter with no read view of its own', JSON.stringify({ z, col, bot }));
+  ok(z.display === 'Ada (Marketing)' && z.name === 'userN' && z.external === true && col.display === 'Colleague' && !col.external && bot.name !== 'app' && /^Bot /.test(bot.display), 'the window\'s page: the vendor\'s way ("Ada (Marketing)"), the vendor name kept as the name; userN EXTERNAL (her tenant ≠ the account\'s — no call), the colleague not; a nameless bot is never "app" even on an adapter with no read view of its own', JSON.stringify({ z, col, bot }));
   settings['channels.larkNameField'] = 'none';
-  ok(page().find((r) => r.vendorId === 'om_1').author.display === 'Susan', 'channels.larkNameField none: the nickname alone (read live — no re-ingest)');
+  ok(page().find((r) => r.vendorId === 'om_1').author.display === 'Ada', 'channels.larkNameField none: the nickname alone (read live — no re-ingest)');
   settings['channels.larkNameField'] = 'department';
   // THE OWNER'S NAME (the route): an agent bearer refused by name; the owner's PATCH stored, broadcast, applied everywhere
   routes.setup({ getEngine: () => eng });
@@ -6267,29 +6267,29 @@ console.log('\n㉔ lane lark-threads PART B: the owner\'s names for authors, at 
     Promise.resolve(layer.route.stack[0].handle(req, res, () => {})).catch((e) => resolve({ status: 500, body: { error: String(e && e.message) } }));
   });
   const R = '/api/channels/:adapterId/authors/:id';
-  const ag = await call('PATCH', R, { adapterId: 'peoply', id: 'ou_zin' }, { alias: 'Hacked' }, { authorization: 'Bearer vsst_agent-token' });
+  const ag = await call('PATCH', R, { adapterId: 'peoply', id: 'ou_usern' }, { alias: 'Hacked' }, { authorization: 'Bearer vsst_agent-token' });
   ok(ag.status === 403 && ag.body.code === 'agent-forbidden' && !page().find((r) => r.vendorId === 'om_1').author.alias, 'an AGENT bearer is refused by name (403 agent-forbidden) — a name for an author is the owner\'s', JSON.stringify(ag));
   const ev0 = events.length;
-  const set = await call('PATCH', R, { adapterId: 'peoply', id: 'ou_zin' }, { alias: '  Susan from GTM‮  ' });
+  const set = await call('PATCH', R, { adapterId: 'peoply', id: 'ou_usern' }, { alias: '  Ada from GTM‮  ' });
   const ev = events.slice(ev0).find((m) => m.authors && m.authors.peoply);
   const p1 = page();
-  ok(set.status === 200 && set.body.alias === 'Susan from GTM' && ev && ev.authors.peoply.ou_zin.alias === 'Susan from GTM' && p1.filter((r) => r.author.id === 'ou_zin').every((r) => r.author.display === 'Susan from GTM' && r.author.alias === 'Susan from GTM' && r.author.name === 'Zin' && r.author.vendorDisplay === 'Susan (Marketing)'), 'the OWNER\'s name: through the name door (trimmed, a bidi control dropped), ONE channels-updated with the result, every record of that author reads it (the vendor name and the vendor\'s way kept beside it)', JSON.stringify({ set: set.body, ev: ev && ev.authors }));
+  ok(set.status === 200 && set.body.alias === 'Ada from GTM' && ev && ev.authors.peoply.ou_usern.alias === 'Ada from GTM' && p1.filter((r) => r.author.id === 'ou_usern').every((r) => r.author.display === 'Ada from GTM' && r.author.alias === 'Ada from GTM' && r.author.name === 'userN' && r.author.vendorDisplay === 'Ada (Marketing)'), 'the OWNER\'s name: through the name door (trimmed, a bidi control dropped), ONE channels-updated with the result, every record of that author reads it (the vendor name and the vendor\'s way kept beside it)', JSON.stringify({ set: set.body, ev: ev && ev.authors }));
   const tr = eng.threadRead('peoply', 'oc_b', 'om_3');
   const q = tr.records && tr.records[0] && tr.records[0].place && tr.records[0].place.quote;
-  ok(!q || q.author === 'Susan from GTM' || tr.code === 'not-a-thread', 'the quote line names the quoted author by the owner\'s name too (the thread index reads viewed records)', JSON.stringify(tr).slice(0, 300));
+  ok(!q || q.author === 'Ada from GTM' || tr.code === 'not-a-thread', 'the quote line names the quoted author by the owner\'s name too (the thread index reads viewed records)', JSON.stringify(tr).slice(0, 300));
   const AGB = { kind: 'agent', id: 'agent-b', name: 'B', groups: [], msgLevelFor: () => 'none' };
   await eng.setScopeAssignment('peoply', { kind: 'account' }, { principal: { kind: 'agent', id: 'agent-b', name: 'B' }, mode: 'all', notify: 'wake', dailyWakeCap: 10 });
   const rd = eng.readFor(AGB, 'peoply', 'oc_b', { limit: 10 });
   const rz = rd && rd.records ? rd.records.find((r) => r.vendorId === 'om_1') : null;
-  ok(rz && rz.author.name === 'Susan from GTM' && rz.author.vendorName === 'Zin' && rz.author.display === 'Susan from GTM', 'the AGENT\'s read names the author by the owner\'s name (it is the owner\'s word; the CLI prints `name`, unchanged) with the vendor name kept as vendorName', JSON.stringify(rz && rz.author));
-  const clr = await call('PATCH', R, { adapterId: 'peoply', id: 'ou_zin' }, { alias: '' });
-  ok(clr.status === 200 && clr.body.alias === null && page().find((r) => r.vendorId === 'om_1').author.display === 'Susan (Marketing)' && !page().find((r) => r.vendorId === 'om_1').author.alias, 'an EMPTY name clears it — the vendor\'s way restores', JSON.stringify(clr.body));
+  ok(rz && rz.author.name === 'Ada from GTM' && rz.author.vendorName === 'userN' && rz.author.display === 'Ada from GTM', 'the AGENT\'s read names the author by the owner\'s name (it is the owner\'s word; the CLI prints `name`, unchanged) with the vendor name kept as vendorName', JSON.stringify(rz && rz.author));
+  const clr = await call('PATCH', R, { adapterId: 'peoply', id: 'ou_usern' }, { alias: '' });
+  ok(clr.status === 200 && clr.body.alias === null && page().find((r) => r.vendorId === 'om_1').author.display === 'Ada (Marketing)' && !page().find((r) => r.vendorId === 'om_1').author.alias, 'an EMPTY name clears it — the vendor\'s way restores', JSON.stringify(clr.body));
   const badId = await call('PATCH', R, { adapterId: 'peoply', id: 'x'.repeat(300) }, { alias: 'a' });
-  const noAcc = await call('PATCH', R, { adapterId: 'nope', id: 'ou_zin' }, { alias: 'a' });
-  const noBody = await call('PATCH', R, { adapterId: 'peoply', id: 'ou_zin' }, {});
+  const noAcc = await call('PATCH', R, { adapterId: 'nope', id: 'ou_usern' }, { alias: 'a' });
+  const noBody = await call('PATCH', R, { adapterId: 'peoply', id: 'ou_usern' }, {});
   ok(badId.status === 400 && noAcc.status === 404 && noBody.status === 400, 'refusals by name: an over-long author id (400), an unknown account (404), no `alias` (400)', JSON.stringify([badId.body, noAcc.body, noBody.body]));
   const onDisk = JSON.parse(fs.readFileSync(path.join(dB, 'channels', 'aliases.json'), 'utf-8'));
-  ok(onDisk && onDisk.aliases && onDisk.aliases.peoply && !onDisk.aliases.peoply.ou_zin, 'data/channels/aliases.json is the store (written atomically; a cleared name leaves it)', JSON.stringify(onDisk));
+  ok(onDisk && onDisk.aliases && onDisk.aliases.peoply && !onDisk.aliases.peoply.ou_usern, 'data/channels/aliases.json is the store (written atomically; a cleared name leaves it)', JSON.stringify(onDisk));
   // THE CARD: the people grant the sign-in lacks — "One Re-authorize adds: reading people's profiles"
   const view = eng.adapterView(eng.adapterRecords().adapters[0]);
   const g = (view.grants || []).find((x) => x.what === 'people');

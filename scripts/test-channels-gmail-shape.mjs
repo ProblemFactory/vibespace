@@ -89,6 +89,11 @@ function mkVendor() {
       return state.search.rate === id ? jsonRes(FX.errors.rateLimited.body, FX.errors.rateLimited.status) : jsonRes(state.search.meta[id]);
     }
     if (state.search && /^\/threads\/[^/]+$/.test(p) && state.search.threads[decodeURIComponent(p.slice(9))]) return jsonRes(state.search.threads[decodeURIComponent(p.slice(9))]);
+    // lane gmail-quota-share: Gmail's identity rule — a thread's id IS its first message's id, so `messages.get` of a thread id
+    // answers that first message (discovery's 20-unit naming read)
+    const firstOf = { thr_ops_0001: FX.threadOpsMeta, thr_invoice_0002: FX.threadInvoiceMeta, thr_newsletter_0003: FX.threadNewsletterMeta };
+    const fm = /^\/messages\/([^/]+)$/.exec(p);
+    if (fm && u.searchParams.get('format') === 'metadata' && firstOf[decodeURIComponent(fm[1])]) return jsonRes(withDates(firstOf[decodeURIComponent(fm[1])]).messages[0]);
     const mm = /^\/messages\/([^/]+)$/.exec(p);
     if (mm && u.searchParams.get('format') === 'metadata') { const id = decodeURIComponent(mm[1]); const ph = (state.proposalHeaders || {})[id]; return jsonRes({ id, threadId: `thr-of-${id}`, internalDate: '1790000000000', payload: { headers: ph ? [{ name: 'X-VibeSpace-Proposal', value: ph }] : [] } }); }
     const dm = /^\/drafts\/([^/]+)$/.exec(p);
@@ -220,7 +225,8 @@ let flowState = null;
   const tl = v.calls.filter((c) => c.path.endsWith('/threads'));
   ok(tl.length === 2 && tl.every((c) => c.q.q === 'label:INBOX') && tl[1].q.pageToken === 'pt-threads-2', 'threads.list carried the DEFAULT include query and discovery PAGED through the cursor (page 2 landed)');
   const ops = convs.find((c) => c.id === 'thr_ops_0001');
-  ok(ops && ops.title === 'Nightly job slow again' && ops.participants === 'Ada, Member A' && ops.kind === 'thread', 'a thread is titled by its Subject and lists its authors (one metadata read)');
+  ok(ops && ops.title === 'Nightly job slow again' && ops.participants === 'Ada' && ops.kind === 'thread', 'a thread is titled by its Subject and names who started it (ONE 20-unit naming read of its first message — lane gmail-quota-share; the walk names every author)', JSON.stringify(ops));
+  ok((eng.store.index.entry('gmail', 'thr_ops_0001', { create: false }) || {}).named === true, 'the engine marked the read-named row NAMED (discovery never re-reads it: lane gmail-quota-share)');
 }
 
 // ── ③ ingest-all + PAGING + history.list incremental ──
@@ -652,7 +658,7 @@ let flowState = null;
   const TABLE = [['/profile', 'GET', 1], ['/history?startHistoryId=1', 'GET', 2], ['/threads?q=x', 'GET', 10], ['/threads/t1?format=full', 'GET', 40], ['/threads/t1?format=metadata', 'GET', 40], ['/messages/m1', 'GET', 20], ['/messages/m1/attachments/a1', 'GET', 20], ['/messages?q=x', 'GET', 5], ['/drafts', 'POST', 10], ['/drafts', 'GET', 5], ['/drafts/d1', 'GET', 20], ['/drafts/d1', 'DELETE', 10], ['/drafts/send', 'POST', 100], ['/watch', 'POST', 100], ['/stop', 'POST', 50], ['/labels', 'GET', 1], ['/somethingNew', 'GET', 10]];
   const off = TABLE.filter(([p, m, u]) => gmail.unitsFor(p, m) !== u).map(([p, m, u]) => `${m} ${p}: ${gmail.unitsFor(p, m)} ≠ ${u}`);
   ok(off.length === 0, `unitsFor matches the vendor's published table on every row (${TABLE.length} rows; an unknown path is priced 10)`, off.join('; '));
-  ok(gmail.caps.pace && gmail.caps.pace.unitsPerSec === 40 && gmail.caps.pace.settingKey === 'channels.gmailUnitsPerSec' && gmail.caps.pace.cost.fetch === gmail.unitsFor('/threads/x') && gmail.caps.pace.cost.discover === gmail.unitsFor('/threads') + gmail.META_PER_LIST * gmail.unitsFor('/threads/x') && gmail.caps.vendorName === 'Google' && CH.validateCaps('gmail', gmail.caps) === true,
+  ok(gmail.caps.pace && gmail.caps.pace.unitsPerSec === 40 && gmail.caps.pace.settingKey === 'channels.gmailUnitsPerSec' && gmail.caps.pace.cost.fetch === gmail.unitsFor('/threads/x') && gmail.caps.pace.cost.discover === gmail.unitsFor('/threads') + gmail.META_PER_LIST * gmail.unitsFor('/messages/x') && gmail.NAME_READ_UNITS === gmail.unitsFor('/messages/x') && gmail.caps.vendorName === 'Google' && CH.validateCaps('gmail', gmail.caps) === true,
     'caps.pace: 40 quota units a second (one thread read), a fetch priced as a threads.get and a discovery page as threads.list + its metadata reads, the vendor named Google — and it validates');
   // the PRODUCTION refusal (2026-09-26 journal, verbatim shape): a 403 in the usageLimits domain naming the per-minute metric
   const prod = { error: { code: 403, message: "Quota exceeded for quota metric 'Total Query Cost' and limit 'Units per minute per user' of service 'gmail.googleapis.com' for consumer 'project_number:0'.", errors: [{ message: "Quota exceeded for quota metric 'Total Query Cost' and limit 'Units per minute per user'", domain: 'usageLimits', reason: 'rateLimitExceeded' }], status: 'PERMISSION_DENIED' } };
@@ -1086,7 +1092,7 @@ console.log('\n⑲ verify r3: one response judge, the catch census (gmail.js + l
   const eNet = await threw(() => mkG(async () => { throw new Error('ECONNRESET'); }).listConversations({ limit: 10 }));
   ok(eNet && eNet.code === 'transport' && eNet.retryable === true, 'FROM THE WIRE: a fetch that throws ⇒ transport (retryable) through the listing');
   // THE LISTING (r3 G1): twelve threads, every title read refused 429 — one read, then the pass's failure (the cursor kept)
-  const listRun = async (mod) => { const calls = []; const a = mkG(async (url) => { const u = new URL(String(url)); const p = u.pathname.replace('/gmail/v1/users/me', ''); calls.push(p); if (p === '/threads') return { ok: true, status: 200, headers: hdr({}), json: async () => ({ threads: Array.from({ length: 12 }, (_, i) => ({ id: `t${i + 1}`, snippet: `s${i + 1}` })) }) }; return res429(); }, mod); let out = null; const e = await threw(async () => { out = await a.listConversations({ limit: 100 }); }); return { code: e && e.code, hint: e && e.detail && e.detail.retryAfterSec, listed: out ? out.conversations.length : null, meta: calls.filter((p) => /^\/threads\/t\d+$/.test(p)).length }; };
+  const listRun = async (mod) => { const calls = []; const a = mkG(async (url) => { const u = new URL(String(url)); const p = u.pathname.replace('/gmail/v1/users/me', ''); calls.push(p); if (p === '/threads') return { ok: true, status: 200, headers: hdr({}), json: async () => ({ threads: Array.from({ length: 12 }, (_, i) => ({ id: `t${i + 1}`, snippet: `s${i + 1}` })) }) }; return res429(); }, mod); let out = null; const e = await threw(async () => { out = await a.listConversations({ limit: 100 }); }); return { code: e && e.code, hint: e && e.detail && e.detail.retryAfterSec, listed: out ? out.conversations.length : null, meta: calls.filter((p) => /^\/(?:threads|messages)\/t\d+$/.test(p)).length }; };
   const lr = await listRun(gmail);
   ok(lr.code === 'rate-limited' && lr.hint === 30 && lr.listed === null && lr.meta === 1, `LISTING under a title-read 429: thrown as rate-limited with the vendor's hint after ONE read (${JSON.stringify(lr)})`);
   // THE RECONCILE (r3 L2, Gmail): a 429 on the draft read is thrown, never an \`unknown\`
@@ -1098,7 +1104,7 @@ console.log('\n⑲ verify r3: one response judge, the catch census (gmail.js + l
   const anchorHist = "const h = await api(`/history?${q}`, { what: 'gmail history' });";
   const anchorJudge = 'if (!r.ok) throw typedFailure(r.status, withoutSent(parsed, sent), what, retryAfterSeconds(r.headers));';
   // verify r4 F2 rewrote the catch (a 5xx thrown, a blip stops the title reads): the r3 anchor is the WHOLE block now, read off the file
-  const aListStart = src.indexOf('try { m = await metaFor(id); } catch (e) {'); const aListEnd = src.indexOf('\n          }', aListStart) + '\n          }'.length;
+  const aListStart = src.indexOf('try { m = await nameFor(id); } catch (e) {'); const aListEnd = src.indexOf('\n          }', aListStart) + '\n          }'.length;
   const anchorList = aListStart >= 0 ? src.slice(aListStart, aListEnd) : '<no listing catch>';
   ok(src.includes(anchorApi) && src.includes(anchorHist) && src.includes(anchorJudge) && src.includes(anchorList), 'CONTROL anchors: the gate, the history read, the judge line, the listing\'s re-throw are in the file');
   const bare = src.replace(anchorApi, anchorApi + "\n    if (opts.probe) { const z = await fetchFn('https://example.invalid/probe', {}); if (!z.ok) return null; }");
@@ -1112,7 +1118,7 @@ console.log('\n⑲ verify r3: one response judge, the catch census (gmail.js + l
   const modOk = Mg.load('src/channels/gmail.js', src.replace(anchorJudge, 'if (r.status !== 429 && !r.ok) throw typedFailure(r.status, withoutSent(parsed, sent), what, retryAfterSeconds(r.headers));'), 'judge-maps-429-ok');
   const eOk = await threw(() => mkG(async () => res429(), modOk).listConversations({ limit: 10 }));
   ok(eOk === null, 'CONTROL ③: a judge that maps a 429 to ok (the listing resolves on a refused page) is RED by behaviour');
-  const modPre = Mg.load('src/channels/gmail.js', src.replace(anchorList, "try { m = await metaFor(id); } catch (e) { if (e instanceof ChannelError && e.code === 'auth-expired') throw e; m = null; }"), 'listing-swallow');
+  const modPre = Mg.load('src/channels/gmail.js', src.replace(anchorList, "try { m = await nameFor(id); } catch (e) { if (e instanceof ChannelError && e.code === 'auth-expired') throw e; m = null; }"), 'listing-swallow');
   const lp = await listRun(modPre);
   ok(lp.code === null && lp.listed === 12 && lp.meta === 10, `CONTROL: the pre-r3 listing swallows the title read's 429 and sends ${lp.meta} title reads into the stop while resolving ok — RED`);
   // ── verify r4 — THE INJECTION TABLE'S FINDS (2026-10-01), the Gmail half ──
@@ -1140,7 +1146,7 @@ console.log('\n⑲ verify r3: one response judge, the catch census (gmail.js + l
   // resolving ok (the 5xx half of r3 F1 — the hint never reached the ladder); a network blip did the same into a dead connection.
   // Now: a vendor 5xx is thrown (the failure ladder waits its hint); a blip stops this listing's title reads (the rest wait for the next pass)
   {
-    const listRun2 = async (mod, answer) => { const calls = []; const a = mkG(async (url) => { const u = new URL(String(url)); const p = u.pathname.replace('/gmail/v1/users/me', ''); calls.push(p); if (p === '/threads') return { ok: true, status: 200, headers: hdr({}), json: async () => ({ threads: Array.from({ length: 12 }, (_, i) => ({ id: `t${i + 1}`, snippet: `s${i + 1}` })) }) }; return answer(); }, mod); let out = null; const e = await threw(async () => { out = await a.listConversations({ limit: 100 }); }); return { code: e && e.code, hint: e && e.detail && e.detail.retryAfterSec, listed: out ? out.conversations.length : null, meta: calls.filter((p) => /^\/threads\/t\d+$/.test(p)).length }; };
+    const listRun2 = async (mod, answer) => { const calls = []; const a = mkG(async (url) => { const u = new URL(String(url)); const p = u.pathname.replace('/gmail/v1/users/me', ''); calls.push(p); if (p === '/threads') return { ok: true, status: 200, headers: hdr({}), json: async () => ({ threads: Array.from({ length: 12 }, (_, i) => ({ id: `t${i + 1}`, snippet: `s${i + 1}` })) }) }; return answer(); }, mod); let out = null; const e = await threw(async () => { out = await a.listConversations({ limit: 100 }); }); return { code: e && e.code, hint: e && e.detail && e.detail.retryAfterSec, listed: out ? out.conversations.length : null, meta: calls.filter((p) => /^\/(?:threads|messages)\/t\d+$/.test(p)).length }; };
     const res503 = () => ({ ok: false, status: 503, headers: hdr({ 'retry-after': '600' }), json: async () => ({ error: { code: 503, message: 'Backend Error' } }) });
     const r503 = await listRun2(gmail, res503);
     ok(r503.code === 'transport' && r503.hint === 600 && r503.meta === 1 && r503.listed === null, `r4 F2: a 503 + Retry-After 600 on a title read is thrown after ONE read with the hint (the failure ladder waits it) (${JSON.stringify(r503)})`);
@@ -1344,6 +1350,82 @@ console.log('\n⑳ design 010 S6: Gmail\'s full search — messages.list?q=, a m
   e2.stop();
   ok(e2.messages('gmail', 'thr_ops_0001', { limit: 50 }).some((m) => m.vendorId === 'msg_ops_b') && dc.ownReads === 'msg_arch_55,msg_arch_56,msg_gone,msg_ops_b,msg_ops_d' && dc.agReads.split(',').length === 4, 'CONTROL: the engine copy without the hints reads the held hit on the owner\'s press and the hidden thread\'s hits on the agent\'s --full — the legs above would be RED', JSON.stringify({ own: dc.ownReads, ag: dc.agReads }));
   for (const x of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 3, label: '⑳ ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
+}
+
+// ㉑ lane gmail-reply-known (2026-10-05, a fleet user: an OLD listed thread had no reply box — the account's every
+// `threads.get?format=metadata` was 429 'Units per minute per user', and the send row's ONE membership read was it):
+// a thread THIS account listed resolves its send row from held facts — ZERO vendor calls, `source:'listing'`; an id
+// the account never listed still costs ONE read (a 404 ⇒ not-a-member; the 429 ⇒ a NAMED refusal); a scope-less
+// token answers send-scope-not-granted on the listed path too. CONTROL: the engine copy that drops the listing hint
+// asks the vendor again, and the 429 blocks the box.
+console.log('\n㉑ lane gmail-reply-known: a listed thread\'s send row needs no vendor call');
+{
+  const vq = mkVendor();
+  let quota = false;
+  const fq = async (url, init = {}) => {
+    const u = new URL(String(url));
+    if (quota && /^\/gmail\/v1\/users\/me\/threads\/[^/]+$/.test(u.pathname)) {
+      vq.calls.push({ method: init.method || 'GET', host: u.hostname, path: u.pathname, q: Object.fromEntries(u.searchParams), quota: true });
+      return jsonRes({ error: { code: 429, message: "Quota exceeded for quota metric 'Queries' and limit 'Queries per minute per user' of service 'gmail.googleapis.com'", status: 'RESOURCE_EXHAUSTED' } }, 429);
+    }
+    const res = await vq.fetchFn(url, init);
+    // the account granted drafts + sending (gmail.compose) — the measured 29 resolved rows were all sendAs ['user']
+    if (u.hostname === 'oauth2.googleapis.com' && u.pathname === '/token' && res.ok) { const b = await res.json(); return jsonRes({ ...b, scope: `${b.scope || ''} ${gmail.SCOPE_COMPOSE}`.trim() }); }
+    return res;
+  };
+  const fresh = async (M, tag) => {
+    const dir = path.join(ROOT, tag); fs.mkdirSync(dir, { recursive: true });
+    const E = M.create({ dataDir: dir, env: {}, now, broadcast: () => {}, integrations, fetch: fq, log: quiet, ...FAST_PACE });
+    const cf = await E.connect('gmail');
+    await get(`${cf.flow.redirectUri}/?state=${new URL(cf.flow.consentUrl).searchParams.get('state')}&code=auth-code-0001`);
+    await sleep(60);
+    await E.pass('gmail', { force: true });
+    return E;
+  };
+  const threadReads = (from) => vq.calls.slice(from).filter((c) => /\/threads\/[^/]+$/.test(c.path)).length;
+  const oldThread = async (E) => {
+    // the OLD listed thread: listed by the account's own threads.list, never resolved since (the measured 88 915 − 29)
+    await E.store.index.update(() => { const en = E.store.index.entry('gmail', 'thr_ops_0001', { create: false }); if (en) en.convCaps = null; });
+    quota = true;
+    clock += 6 * 3600e3 + 1000;   // OLD: past the adapter's 6 h metadata memo (never read since a restart)
+    const n0 = vq.calls.length;
+    const cc = await E.refreshConvCaps('gmail', 'thr_ops_0001', { polite: true });
+    const v = E.conversationView('gmail', 'thr_ops_0001');
+    return { reads: threadReads(n0), read: cc && cc.read, why: cc && cc.why, source: cc && cc.source, offered: v.offers.sendAsUser.offered, viewWhy: v.offers.sendAsUser.why };
+  };
+  const E1 = await fresh(ENG, 'eng-s21');
+  const en1 = E1.store.index.peek('gmail/thr_ops_0001');
+  ok(!!(en1 && en1.listedAt), 'setup: thr_ops_0001 is a row the account\'s own listing returned (listedAt)');
+  const r = await oldThread(E1);
+  ok(r.reads === 0 && r.read === 'yes' && r.source === 'listing' && r.offered === true, 'an OLD listed thread on an account whose every metadata read is 429: the reply box, with ZERO vendor calls (source listing)', JSON.stringify(r));
+  const n1 = vq.calls.length;
+  const un = await E1.refreshConvCaps('gmail', 'thr_never_listed_77', { polite: true });
+  ok(threadReads(n1) === 1 && un && un.read === 'unknown' && un.why === 'rate-limited' && un.retryAt > 0, 'an id the account never listed still costs ONE read — the 429 answers a NAMED refusal (rate-limited, retryAt), never a swallowed one', JSON.stringify(un));
+  quota = false;
+  const n2 = vq.calls.length;
+  const nm = await E1.refreshConvCaps('gmail', 'thr_never_listed_77');
+  ok(threadReads(n2) === 1 && nm && nm.read === 'no' && nm.why === 'not-a-member', 'unlisted + the vendor\'s 404: ONE read, not-a-member (unchanged)', JSON.stringify(nm));
+  E1.stop();
+  // the listed path on a scope-less (read-only) token: the send row says what unlocks it, still no request
+  {
+    const reg = CH.createChannelRegistry(); reg.register(gmail.adapter);
+    const calls = [];
+    const tok = { read: () => ({ token: { accessToken: 'at', refreshToken: 'rt', expiresAt: clock + 3600e3, scopes: [gmail.SCOPE] }, why: null }), write: async () => {}, clear: async () => {} };
+    const a = reg.create('gmail', { id: 'gmail', options: {} }, { now, fetch: async (u) => { calls.push(String(u)); return jsonRes({}, 500); }, tokens: tok, resolveIntegration: (id) => integrations.resolveIntegration(id), log: quiet });
+    const cc = await a.convCaps('thr_x', { listed: true });
+    ok(calls.length === 0 && cc.read === 'yes' && cc.sendAs.length === 0 && cc.why === 'send-scope-not-granted' && cc.source === 'listing', 'a read-only token on the listed path: send-scope-not-granted (Re-authorize), zero requests', JSON.stringify({ calls: calls.length, cc }));
+  }
+  // CONTROL: the engine copy that drops the listing hint asks the vendor again — and the 429 blocks the box
+  const ESRC = engineSource(REPO);
+  const HINT = '      try { cc = await e.adapter.convCaps(convId, { listed }); } catch (err) { return convCapsFailed(rec, e, adapterId, convId, err); }';
+  ok(ESRC.split(HINT).length === 2, 'CONTROL anchor: the listing hint is passed in one place');
+  const M21 = mutantCopies('chan-gmail-s21', REPO);
+  quota = false;
+  const E2 = await fresh(M21.load('src/server/channels-engine.js', ESRC.replace(HINT, HINT.replace('{ listed }', '{}')), 'no-listing-hint'), 'eng-s21-ctl');
+  const rc = await oldThread(E2);
+  E2.stop();
+  quota = false;
+  ok(rc.reads === 1 && rc.offered === false && rc.viewWhy === 'rate-limited', 'CONTROL: the vendor call restored ⇒ the 429 blocks the reply box (said by name) — the leg above would be red', JSON.stringify(rc));
 }
 
 eng.stop();

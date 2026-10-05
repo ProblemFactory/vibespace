@@ -872,6 +872,9 @@ function makeConversation(input) {
     // design 012 (Slack S1): THE OTHER SIDE IS AN APP (a DM with a bot / an integration) — present only when true, so
     // every other adapter's conversation keeps its shape; an app's DM is never a "Direct" tag (src/channel-focus.js)
     ...(c.app === true ? { app: true } : {}),
+    // lane gmail-quota-share: WHERE THE TITLE CAME FROM — `false` = a naming read (the row is NAMED from now on), `true` = a
+    // stand-in (a snippet) the engine never writes over a stored name; absent = the adapter always names its rows
+    ...(typeof c.standIn === 'boolean' ? { standIn: c.standIn } : {}),
   };
 }
 

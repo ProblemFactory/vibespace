@@ -115,6 +115,7 @@ const ACL = require('../channel-acl.js');
 const agents = require('../channels/agents.js');
 // lane R2 verify r9: THE DRAIN'S SCHEDULING DECISION is PURE — every "what next, who is answered, when does the pass end" (src/channel-drain.js); this engine only drives it
 const Drain = require('../channel-drain.js');
+const Budget = require('../channel-budget.js');   // lane gmail-quota-share: the per-account vendor budget is LEARNED from the vendor's refusals (AIMD, PURE)
 const ChannelSettings = require('../channel-settings.js');   // B-df40 part 3: the vendor budget / pace rows SETTING_BOUNDS derives
 // R3 (2026-09-26, "lark图像不能预览吗？"): THE ONE ORDER an attachment request is
 // judged in — cache first, a remembered refusal, ours only, fetchable, enabled,
@@ -702,7 +703,7 @@ function create(deps = {}) {
       // `pace` (lane R5): the adapter AWAITS it before every request it sends
       // (drain rule 18's bucket, the SAME one the pass's `wait` reads) and
       // then meters it — the per-second shape is enforced call by call.
-      const adapterDeps = { fetch: fetchFn, log, tokens: tokensFor(rec), state: stateFor(rec), people: { read: () => store.peopleRead(rec.id), write: (m) => store.peopleWrite(rec.id, m) }, oauth: flows, consent: consentDepsOf(rec.kind), onAuthDone: (adapterId, r) => onAuthDone(adapterId, r), deliver, liveSessions, credentialKey: rec.credentialKey || null, meter: (units) => { const x = live.get(rec.id) || paceCarry.get(rec.id); if (x) charge(x, units); }, pace: (units) => paceWait(rec.id, units, rec) };
+      const adapterDeps = { fetch: fetchFn, log, tokens: tokensFor(rec), state: stateFor(rec), people: { read: () => store.peopleRead(rec.id), write: (m) => store.peopleWrite(rec.id, m) }, oauth: flows, consent: consentDepsOf(rec.kind), onAuthDone: (adapterId, r) => onAuthDone(adapterId, r), deliver, liveSessions, credentialKey: rec.credentialKey || null, meter: (units) => { const x = live.get(rec.id) || paceCarry.get(rec.id); if (x) charge(x, units); }, pace: (units) => paceWait(rec.id, units, rec), named: (convId) => { const en = store.index.entry(rec.id, String(convId), { create: false }); return !!(en && en.named === true); } };
       // r4: the resolver is PER RECORD (`resolverFor`) — an account's own
       // (`custom`) client lives on its record, a preset in the store.
       const adapter = registry.create(rec.kind, rec, { now, resolveIntegration: resolverFor(rec), ...adapterDeps });
@@ -811,8 +812,25 @@ function create(deps = {}) {
   function budgetDecl(rec) {
     const b = (registry.capsOf(rec.kind).budget) || {};
     const dflt = Number(b.default) > 0 ? Number(b.default) : DEFAULT_BUDGET_PER_MIN;
-    const limit = b.settingKey ? setting(b.settingKey, dflt) : dflt;
-    return { unit: b.unit === 'quota-unit' ? 'quota-unit' : 'request', limit, metered: b.metered === true, settingKey: b.settingKey || null };
+    const cap = b.settingKey ? setting(b.settingKey, dflt) : dflt;
+    // lane gmail-quota-share: the minute's limit is the LEARNED ceiling (src/channel-budget.js), the setting its CAP
+    const learned = learnedOf(rec, cap);
+    return { unit: b.unit === 'quota-unit' ? 'quota-unit' : 'request', limit: learned.ceiling, setting: cap, learned, metered: b.metered === true, settingKey: b.settingKey || null };
+  }
+  /** The facts the learned budget is stepped over: the live setting, one read's price, the clock. */
+  function budgetFacts(rec, cap) {
+    const p = registry.capsOf(rec.kind).pace;
+    const fetchCost = p && p.cost && Number(p.cost.fetch) > 0 ? Number(p.cost.fetch) : 1;
+    return { setting: cap, minUnit: fetchCost, now: now() };
+  }
+  /** The account's learned budget as of now (the persisted state on the record, restored by the 'boot' row). */
+  function learnedOf(rec, cap) { return Budget.budgetStep(rec.budgetLearned || null, 'boot', budgetFacts(rec, cap)).state; }
+  /** ONE STEP of the learned budget (the engine only drives the table): persisted beside the account when it moved. */
+  function stepBudget(rec, event, extra = {}) {
+    const b = registry.capsOf(rec.kind).budget || {};
+    const dflt = Number(b.default) > 0 ? Number(b.default) : DEFAULT_BUDGET_PER_MIN;
+    const cap = b.settingKey ? setting(b.settingKey, dflt) : dflt;
+    return Budget.budgetStep(rec.budgetLearned || null, event, { ...budgetFacts(rec, cap), ...extra });
   }
   /** THE PER-SECOND PACE (lane R5, drain rule 18): the adapter DECLARES it in
    *  `caps.pace` = `{unitsPerSec, settingKey, cost: {fetch, discover,
@@ -827,8 +845,9 @@ function create(deps = {}) {
     const p = registry.capsOf(rec.kind).pace;
     if (!p || typeof p !== 'object') return null;
     const dflt = Number(p.unitsPerSec) > 0 ? Number(p.unitsPerSec) : 1;
-    const perSec = p.settingKey ? setting(p.settingKey, dflt) : dflt;
-    const limit = budgetDecl(rec).limit;
+    const bd = budgetDecl(rec);
+    const perSec = (p.settingKey ? setting(p.settingKey, dflt) : dflt) * Budget.ratioOf(bd.learned);   // lane gmail-quota-share: in proportion to the learned ceiling
+    const limit = bd.limit;
     const cost = p.cost && typeof p.cost === 'object' ? p.cost : {};
     const c = (k) => (Number(cost[k]) >= 0 ? Number(cost[k]) : 1);
     return { perSec, unitsPerSec: Math.min(perSec, limit / 60), burst: Math.min(perSec, limit / 2), settingKey: p.settingKey || null, cost: { fetch: c('fetch'), discover: c('discover'), scanHost: c('scanHost'), feed: c('feed') } };
@@ -1013,7 +1032,13 @@ function create(deps = {}) {
     const pd = paceDecl(rec);   // lane R5: the per-second figure the budget sentence names beside the minute's
     // verify r3 (T2 ②): the minute's meter is a FIXED window; the per-second bucket (`burst` at once, then `perSec`) is what
     // bounds a SLIDING minute — at most limit + burst (the day walk measured 64 under 60 + 5): the card names the burst
-    return { unit: b.unit, limit: b.limit, spent: Math.round(w.spent), spentBy: { timer: Math.round(by.timer || 0), agent: Math.round(by.agent || 0), owner: Math.round(by.owner || 0) }, exhausted, waiting: exhausted ? (e.waiting || 0) : 0, resetInSeconds: exhausted ? Math.max(0, Math.ceil((w.at + 60e3 - t) / 1000)) : 0, settingKey: b.settingKey, perSec: pd ? Math.round(pd.unitsPerSec * 100) / 100 : null, burst: pd ? Math.round(pd.burst * 100) / 100 : null };
+    return { unit: b.unit, limit: b.limit, spent: Math.round(w.spent), spentBy: { timer: Math.round(by.timer || 0), agent: Math.round(by.agent || 0), owner: Math.round(by.owner || 0) }, exhausted, waiting: exhausted ? (e.waiting || 0) : 0, resetInSeconds: exhausted ? Math.max(0, Math.ceil((w.at + 60e3 - t) / 1000)) : 0, setting: b.setting, learned: learnedView(rec, b, t), settingKey: b.settingKey, perSec: pd ? Math.round(pd.unitsPerSec * 100) / 100 : null, burst: pd ? Math.round(pd.burst * 100) / 100 : null };
+  }
+  /** lane gmail-quota-share: the learned ceiling as the card words it (null = polling at the setting). */
+  function learnedView(rec, b, t = now()) {
+    const l = b.learned;
+    if (!l || !(l.ceiling < b.setting)) return null;
+    return { ceiling: l.ceiling, setting: b.setting, refusedAt: l.refusedAt || null, fullAt: Budget.fullAtOf(l, { ...budgetFacts(rec, b.setting), now: t }), halvesToday: l.halvesToday || 0 };
   }
 
   // ── WHICH CONVERSATIONS ARE OPEN IN A WINDOW RIGHT NOW (hot, §6.2) ───────
@@ -1104,8 +1129,12 @@ function create(deps = {}) {
         for (const c of page.conversations || []) {
           const isNew = !store.index.has(`${rec.id}/${c.id}`);   // B-f32b: a lookup — `ix.conversations` here made every page's index write a whole one
           const en = store.index.entry(rec.id, c.id);
-          en.vendorId = c.vendorId; en.title = c.title; en.kind = c.kind;
-          en.participants = c.participants;
+          en.vendorId = c.vendorId; en.kind = c.kind;
+          // lane gmail-quota-share: a STAND-IN title (the adapter skipped the naming read: the row is named) keeps the stored name
+          const keepName = c.standIn === true && en.named === true;
+          if (!keepName) en.title = c.title;
+          if (!keepName) en.participants = c.participants;
+          if (c.standIn === false) en.named = true;
           if (c.app === true) en.app = true; else if (en.app) delete en.app;   // design 012: the other side is an app
           if (c.lastAt && (!en.lastAt || c.lastAt > en.lastAt)) en.lastAt = c.lastAt;
           if (isNew) en.readAt = Number(rec.linkedAt) || listedAt;
@@ -1924,7 +1953,12 @@ function create(deps = {}) {
         // the press consumed — the owner's door climbs the ladder at most one
         // step per window, the timer's own retries climb the rest (r5 ruling)
         if (!wasInBackoff) e.backoffEpoch++;
-        await store.adapters.update(() => { rec.lastPass = { at: now(), ok: false, code, error: String((err && err.message) || err).slice(0, 400) }; rec.consecutiveFailures = e.failures; });
+        // lane gmail-quota-share: THE BUDGET LEARNS FROM THE REFUSAL — a burst's first strike halves the account's ceiling
+        // (the pace follows), the later strikes only restart its quiet clock; persisted in the record's own write
+        const learnt = rate ? stepBudget(rec, 'refused', { burstStart: e.rateStrikes === 1 }) : null;
+        await store.adapters.update(() => { rec.lastPass = { at: now(), ok: false, code, error: String((err && err.message) || err).slice(0, 400) }; rec.consecutiveFailures = e.failures; if (learnt && learnt.changed) rec.budgetLearned = learnt.state; });
+        if (learnt && learnt.halved) log.warn(`[channels] ${rec.id}: the vendor refused the rate — polling slowed to ${learnt.state.ceiling} of ${learnt.state.setting} a minute`);
+        if (learnt && learnt.loud) await speakSlowed(rec, learnt.state);
         // A failing loop MUST reach the user (fence 8): the adapter row goes
         // amber, the log says it, and a "For you" item is FILED naming the
         // adapter and the vendor's own words — by the producer that will
@@ -2063,9 +2097,12 @@ function create(deps = {}) {
         e.failures = 0;
         e.nextAt = 0;
         e.rateStrikes = 0; e.backoffKind = null; e.retryAfterSec = null;
-        await store.adapters.update(() => { rec.lastPass = { at: now(), ok: true, code: null }; rec.lastOkAt = rec.lastPass.at; rec.consecutiveFailures = 0; });
+        const quiet = rec.budgetLearned ? stepBudget(rec, 'quiet-minute') : null;   // lane gmail-quota-share: the creep back to the setting
+        await store.adapters.update(() => { rec.lastPass = { at: now(), ok: true, code: null }; rec.lastOkAt = rec.lastPass.at; rec.consecutiveFailures = 0; if (quiet && quiet.changed) rec.budgetLearned = quiet.state; });
+        if (quiet && quiet.full) await retractSlowed(rec);
         await retractFailure(rec);
         retractUnsaved(rec);   // verify r6: that write landed the whole file — the sign-in is on disk
+        retryHotConvCaps(rec);   // lane gmail-reply-known: an open window's refused send row asks again now
         notify(changed.filter((k) => !early.has(k)), { full: false });
         return { ok: true, changed, results };
       } catch (err) {
@@ -2982,6 +3019,7 @@ function create(deps = {}) {
       ...row,
       // inc-muk9jj0j-rel3: STALE-ON-READ — a verdict older than the account's credential is re-judged on the way out
       convCaps: caps.convCapsState(effectiveConvCaps(rec, en), t),
+      convCapsChecking: convCapsFlights.has(`${adapterId}/${convId}`),   // lane gmail-reply-known: the foot says "Checking…"
       offers: {
         read: caps.offers(c, effectiveConvCaps(rec, en), 'read', t),
         sendAsUser: caps.offers(c, effectiveConvCaps(rec, en), 'send-as-user', t),
@@ -3843,7 +3881,8 @@ function create(deps = {}) {
     }
     if (!was) {
       const cc = caps.convCapsState(effectiveConvCaps(rec, en), t);
-      if (rec.enabled !== false && (cc.why === 'stale' || cc.why === 'unknown' || cc.read === 'unknown')) refreshConvCaps(adapterId, convId).then(() => notify([key])).catch(() => {});
+      const waits = cc.retryAt && cc.retryAt > t;   // lane gmail-reply-known: a refused row is asked again by its own timer
+      if (rec.enabled !== false && !waits && (cc.why === 'stale' || cc.why === 'unknown' || cc.read === 'unknown')) refreshConvCaps(adapterId, convId, { polite: true }).then(() => notify([key]), (err) => log.warn(`[channels] ${key}: send row lookup on open failed: ${(err && err.message) || err}`));
       notify([key]);   // the chip says hot now
     }
     return { ok: true, hotUntil: t + WATCH_TTL_MS, fetched };
@@ -5502,7 +5541,7 @@ function create(deps = {}) {
    *  A caller now JOINS the lookup in flight for that conversation. `join:false` (approve's unconditional re-resolution:
    *  a proposal is decided on an answer asked AFTER the decision) starts its own — which the next callers join. */
   const convCapsFlights = new Map();   // `${adapterId}/${convId}` → the lookup in flight
-  function refreshConvCaps(adapterId, convId, { join = true } = {}) {
+  function refreshConvCaps(adapterId, convId, { join = true, owner = false, polite = false } = {}) {
     const k = `${adapterId}/${convId}`;
     const f = join ? convCapsFlights.get(k) : null;
     if (f) return f;
@@ -5510,17 +5549,93 @@ function create(deps = {}) {
       const rec = adapterRecords().adapters.find((r) => r.id === adapterId);
       if (!rec) return null;
       const e = adapterFor(rec);
-      const cc = await e.adapter.convCaps(convId);
+      // lane gmail-reply-known: the account's OWN listing returned this row ⇒ `listed` (an adapter declaring
+      // `convCapsFromListing` answers from held facts, no vendor call — so no back-off applies to it); a POLITE
+      // caller's lookup (the window's open, the engine's own re-ask, an agent's propose) inside the account's vendor
+      // back-off is refused by name, the OWNER's Retry exempt (as their refresh press is); the reaction / thread
+      // offers keep their own back-off refusals; a refused lookup is WRITTEN into the row (named, retried) — never swallowed
+      const en0 = store.index.peek(k);
+      const listed = !!(en0 && en0.adapterId === adapterId && en0.listedAt && !en0.unlistedAt);
+      if (polite && !owner && inBackoff(e) && !(listed && heldByListing(rec))) return convCapsFailed(rec, e, adapterId, convId, null, 'backoff');
+      let cc;
+      try { cc = await e.adapter.convCaps(convId, { listed }); } catch (err) { return convCapsFailed(rec, e, adapterId, convId, err); }
       // `create:false`: a conversation the vendor no longer lists may have been
       // removed from the index between the ask and the answer, and a cache entry
       // is not a reason to resurrect the row it describes.
       await store.index.update(() => { const en = store.index.entry(adapterId, convId, { create: false }); if (en) en.convCaps = cc; });
+      clearConvCapsRetry(k);
       return cc;
     })();
     convCapsFlights.set(k, run);
     const done = () => { if (convCapsFlights.get(k) === run) convCapsFlights.delete(k); };
     run.then(done, done);
     return run;
+  }
+
+  /** A REFUSED SEND-ROW LOOKUP IS SAID AND RETRIED (lane gmail-reply-known, 2026-10-05 — a fleet user's old listed Gmail
+   *  thread had no reply box: the lookup's 429 was swallowed and the foot kept "not known yet" for ever). The row
+   *  gets `{read:'unknown', sendAs:[], why, detail, at, retryAt}` (why ∈ caps.CONV_CAPS_FAIL_WHYS) unless it holds a
+   *  fresh RESOLVED verdict (a refusal at approve never erases a working reply box); the journal says it once per
+   *  (conversation, why) per 5 min; at `retryAt` the engine asks again BY ITSELF — for an OPEN window only (the
+   *  heartbeat's hot set, never a sweep over the index). Returns the failed row, so every caller reads a named why. */
+  const convCapsRetry = new Map();   // key → the hot window's own re-ask timer (never the drain's)
+  const convCapsSaid = new Map();    // `${key} ${why}` → when the journal last said it
+  const CONV_CAPS_SAY_MS = 5 * 60e3;
+  function heldByListing(rec) { try { return registry.get(rec.kind).convCapsFromListing === true; } catch { return false; } }
+  function clearConvCapsRetry(k) { const tm = convCapsRetry.get(k); if (tm) { clearTimeout(tm); convCapsRetry.delete(k); } }
+  async function convCapsFailed(rec, e, adapterId, convId, err, whyIn = null) {
+    const k = `${adapterId}/${convId}`;
+    const t = now();
+    const code = whyIn || (err instanceof ChannelError ? err.code : 'vendor-error');
+    const hint = err && err.detail ? Number(err.detail.retryAfterSec) : NaN;
+    const hintMs = Number.isFinite(hint) && hint > 0 ? Math.min(RATE_RETRY_AFTER_MAX_MS, Math.max(1e3, Math.ceil(hint * 1000))) : 0;
+    const why = code === 'backoff' ? 'backoff' : code === 'rate-limited' ? 'rate-limited'
+      : code === 'auth-expired' ? (caps.authState(rec, t).state === 'unknown' ? 'not-connected' : 'auth-expired') : 'vendor-error';
+    const retryAt = why === 'backoff' ? e.nextAt
+      : why === 'rate-limited' ? t + (hintMs || (inBackoff(e) ? e.nextAt - t : RATE_BACKOFF_MS[RATE_BACKOFF_MS.length - 1] / 2))
+        : why === 'vendor-error' ? t + (hintMs || 60e3) : null;   // a sign-in needs the owner — no timer
+    const row = { read: 'unknown', sendAs: [], why, detail: code, at: t, retryAt };
+    await store.index.update(() => {
+      const en = store.index.entry(adapterId, convId, { create: false });
+      if (en && caps.convCapsState(effectiveConvCaps(rec, en), t).read === 'unknown') en.convCaps = row;
+    });
+    const sk = `${k} ${why}`;
+    if (t - (convCapsSaid.get(sk) || 0) >= CONV_CAPS_SAY_MS) {
+      convCapsSaid.set(sk, t);
+      if (convCapsSaid.size > 500) convCapsSaid.delete(convCapsSaid.keys().next().value);
+      log.warn(`[channels] ${k}: send row not resolved (${why}${retryAt ? `, retry ${new Date(retryAt).toISOString().slice(11, 16)}Z` : ''})`);
+    }
+    clearConvCapsRetry(k);
+    if (retryAt && !stopped) {
+      const tm = setTimeout(() => {
+        convCapsRetry.delete(k);
+        if (stopped || !isWatched(k)) return;   // the window closed: its next open asks
+        refreshConvCaps(adapterId, convId, { polite: true }).then(() => notify([k]), (er) => log.warn(`[channels] ${k}: send row re-ask failed: ${(er && er.message) || er}`));
+      }, Math.max(250, retryAt - t));
+      if (tm.unref) tm.unref();
+      convCapsRetry.set(k, tm);
+    }
+    return row;
+  }
+  /** THE OWNER'S Retry on the foot: exempt from the account's back-off (as their refresh press is), one flight per
+   *  conversation (joins one in flight). */
+  async function retryConvCaps(adapterId, convId) {
+    const rec = adapterRecords().adapters.find((r) => r.id === adapterId);
+    if (!rec || !known(adapterId, convId)) return { ok: false, code: 'not-found', error: 'No such conversation' };
+    const k = `${adapterId}/${convId}`;
+    if (rec.enabled !== false) await refreshConvCaps(adapterId, convId, { owner: true, polite: true });
+    notify([k]);
+    return { ok: true, convCaps: caps.convCapsState(effectiveConvCaps(rec, store.index.peek(k)), now()) };
+  }
+  /** The account answered again (a pass went through): the OPEN windows whose send row was refused ask again now. */
+  function retryHotConvCaps(rec) {
+    const t = now();
+    for (const [k, exp] of watching) {
+      if (exp <= t || !k.startsWith(`${rec.id}/`)) continue;
+      const cc = (store.index.peek(k) || {}).convCaps;
+      if (!cc || cc.read !== 'unknown' || !caps.CONV_CAPS_FAIL_WHYS.includes(cc.why)) continue;
+      refreshConvCaps(rec.id, k.slice(rec.id.length + 1), { polite: true }).then(() => notify([k]), (er) => log.warn(`[channels] ${k}: send row re-ask failed: ${(er && er.message) || er}`));
+    }
   }
 
   /**
@@ -5664,6 +5779,37 @@ function create(deps = {}) {
       });
       if (item && item.id) await store.adapters.update(() => { rec.failureItem = { id: item.id, text, code, at: now() }; });
     } catch (e) { log.warn(`[channels] ${rec.id}: could not file the failure in the inbox: ${(e && e.message) || e}`); }
+  }
+  /** lane gmail-quota-share: the vendor refused this account's quota TWICE today, so its polling slowed itself
+   *  (src/channel-budget.js) — ONE "For you" item per (account, day), retracted when the ceiling is back at the setting. */
+  async function speakSlowed(rec, st) {
+    if (!userTodos || typeof userTodos.add !== 'function') return;
+    if (rec.budgetItem && rec.budgetItem.day === st.day) return;
+    if (rec.budgetItem) await retractSlowed(rec, 'superseded');
+    const vendor = String((registry.capsOf(rec.kind) || {}).vendorName || 'the vendor');
+    const label = rec.label || rec.id;
+    const text = `Channel ${label}: ${vendor} refused its quota twice today — polling slowed to ${st.ceiling} of ${st.setting} a minute`;
+    try {
+      const item = userTodos.add(INBOX_KEY, {
+        origin: 'channels',
+        text,
+        detail: `Adapter: ${label} (${rec.kind})\nPolling now spends at most ${st.ceiling} of the ${st.setting} a minute its setting allows; every minute without a refusal raises it by a tenth of the setting.\n\nThe vendor meters this account's quota across EVERY app that polls it: if this account is also connected on another VibeSpace instance (or another app reads it), the two share one quota. Disconnecting it there, or lowering its budget setting on one of them, keeps both under the limit.\n\nThis item is retracted automatically by the channels engine when polling is back at the setting.`,
+        urgency: 'normal',
+        by: 'agent', sessionName: 'Channels',
+        i18n: { text: { key: i18nKey('Channel {label}: {vendor} refused its quota twice today — polling slowed to {n} of {m} a minute'), params: { label, vendor, n: st.ceiling, m: st.setting } }, source: INBOX_SOURCE },
+      });
+      if (item && item.id) await store.adapters.update(() => { rec.budgetItem = { id: item.id, text, day: st.day, at: now() }; });
+    } catch (e) { log.warn(`[channels] ${rec.id}: could not file the slowed-polling item: ${(e && e.message) || e}`); }
+  }
+  async function retractSlowed(rec, why = 'back at the setting') {
+    if (!rec.budgetItem) return;
+    const bi = rec.budgetItem;
+    await store.adapters.update(() => { rec.budgetItem = null; });
+    if (!userTodos || typeof userTodos.get !== 'function') return;
+    try {
+      const it = userTodos.get(bi.id);
+      if (it && it.status === 'open' && it.sessionKey === INBOX_KEY && it.text === bi.text) { userTodos.setStatus(bi.id, 'done', RESOLVED_BY); log.log(`[channels] ${rec.id}: ${why} — retracted the slowed-polling item`); }
+    } catch (e) { log.warn(`[channels] ${rec.id}: could not retract the slowed-polling item: ${(e && e.message) || e}`); }
   }
   /** The retraction: ONLY the item this engine filed (same id, same text),
    *  only while it is still open — the user's own resolution stands. */
@@ -6616,6 +6762,7 @@ function create(deps = {}) {
   }
   function stop() {
     stopped = true;
+    for (const k of [...convCapsRetry.keys()]) clearConvCapsRetry(k);   // lane gmail-reply-known
     for (const c of censusTimed.values()) if (c.timer) { try { c.timer.cancel(); } catch { } c.timer = null; }   // B-f32b r2
     if (offIntegrations) { try { offIntegrations(); } catch {} offIntegrations = null; }
     if (offStash) { try { offStash(); } catch {} offStash = null; }   // 2026-09-27: the receipt-fate listener
@@ -6672,6 +6819,7 @@ function create(deps = {}) {
   function apiAccounts() { return adapterRecords().adapters.filter((r) => r && r.enabled !== false && declaresApi(r.kind)).map((r) => ({ id: r.id, kind: r.kind, label: r.label || r.id })); }
   return {
     store, registry, digest, notify, pass, refreshConvCaps, markRead, messages,
+    retryConvCaps,   // lane gmail-reply-known: the owner's Retry on a refused send row
     // 2026-09-26: the aggregated IM — the reader surface, the scheduler's
     // override, the agent refresh, the three assignment grains, the migration
     conversationView, setRefresh, refresh, agentRefresh, watch, loadOlder, attachment, search,

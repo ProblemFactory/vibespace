@@ -2,6 +2,15 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.220 — 2026-10-05
+
+### Changed
+- Gmail polling now slows down after Google refuses and speeds back up, so a mailbox connected on two instances no longer trips the limit and reads less.
+
+### Fixed
+- A shared Agent browser that stops answering is shown as “Not answering since …”, the agent is told what to do, and Restart is one click.
+- An older Gmail thread can be replied to even while Gmail is rate-limiting the account; when a reply can't be offered, the window says why and retries.
+
 ## 2.369.219 — 2026-10-05
 
 ### Changed
