@@ -845,7 +845,7 @@ console.log('\n§3b an oat-only subscription serves turns, so the ceiling must n
       broadcastToSession() { }, serverNotice() { }, serverSetting: () => undefined,
       getAccounts: () => am, getHosts: () => null, getUsageHistory: () => null,
       recordUsageAttribution() { }, adapterRegistry: { get() { return null; } },
-      getAutoResume: () => null, getOtelIngest: () => ({ observedOrgFor: () => null }), getQuotaProbe: () => null,
+      getAutoResume: () => null, getQuotaProbe: () => null,
       getUserTodos: () => null,
     });
     ok('§3b the SLOT reader still calls it unusable — deliberately, and that is its correct answer about a slot',
@@ -986,7 +986,7 @@ function mkWorld({ settings = {}, send = null, resumeVerb = null, arModule = arM
     wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { }, serverNotice: (k, t) => { notices.push(t); noticeKeys.push(k); },
     serverSetting: (k) => settings[k], getAccounts: () => am, getHosts: () => null, getUsageHistory: () => null,
     recordUsageAttribution() { }, adapterRegistry: { get() { return null; } },
-    getAutoResume: () => ar, getOtelIngest: () => ({ observedOrgFor: () => null }), getQuotaProbe: () => null,
+    getAutoResume: () => ar, getQuotaProbe: () => null,
     getUserTodos: () => ({ add: (key, item) => { inbox.push({ key, ...item }); return { id: 'ut' }; } }),
   });
   // `send` stands in the delivery channel's ANSWER (§4b: a failed send is one

@@ -15,10 +15,10 @@
  *               `server.address()`, redirect_uri `http://127.0.0.1:<port>`.
  *               Google accepts any loopback port (RFC 8252 §7.3); this is
  *               exactly what src/gmail-sync.js does today.
- *   fixed     — the port AND the whole URL literal come from the `lark`
- *               row's `setup.callbackUrl` (src/integration-registry.js, the
- *               ONE definition site; the registry suite asserts the literal
- *               does not appear in THIS file). Lark redirects only to a URL
+ *   fixed     — the port AND the whole URL come from the CALLER's consent
+ *               row (`registeredCallbackUrl` = its adapter's `consent.
+ *               callbackUrl`; Lark's is its registry row's `setup.callbackUrl`,
+ *               src/integration-registry.js — this file names no vendor). Lark redirects only to a URL
  *               registered ahead of time, byte for byte.
  *
  * A FIXED PORT IS A MACHINE-GLOBAL NAME. This box runs a production service
@@ -95,7 +95,6 @@
  */
 const http = require('http');
 const crypto = require('crypto');
-const { LARK_CALLBACK_URL } = require('./integration-registry.js');
 
 /** gmail-sync's own budget for a consent flow, carried over. */
 const FLOW_TIMEOUT_MS = 10 * 60 * 1000;
@@ -153,9 +152,11 @@ function stepFactsOf(facts) {
   return out;
 }
 
-/** The fixed mode's target, parsed ONCE from the registry's literal. */
+/** The fixed mode's target, parsed ONCE from the caller's registered callback (lane dc-channels-consent: its adapter's
+ *  consent row `callbackUrl` — this machine holds no vendor's default). */
 function fixedTarget(callbackUrl) {
-  const u = new URL(String(callbackUrl || LARK_CALLBACK_URL));
+  if (!callbackUrl) throw new Error('oauth-loopback: a fixed flow names its registered callback URL (its adapter\'s consent row) — there is no default');
+  const u = new URL(String(callbackUrl));
   if (u.hostname !== '127.0.0.1' || u.protocol !== 'http:') throw new Error(`oauth-loopback: a fixed callback must be an http://127.0.0.1 loopback URL (got ${u.origin})`);
   const port = Number(u.port);
   if (!(port > 0 && port <= 65535)) throw new Error(`oauth-loopback: the fixed callback URL names no port (${String(callbackUrl)})`);
@@ -168,13 +169,13 @@ class OAuthFlowError extends Error {
 
 /**
  * `fixedCallbackUrl` is the ONE place a deployment (or a suite, with a free
- * port) may substitute the registered fixed callback; it defaults to the
- * registry's literal and an adapter never names one — `begin({callbackUrl})`
- * still wins when given.
+ * port) may substitute the registered fixed callback; the caller's row names
+ * its own (`begin({registeredCallbackUrl})`, beaten by this override) and
+ * `begin({callbackUrl})` still wins when given.
  */
 function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallbackUrl = null } = {}) {
   const flows = new Map();   // flowId -> st
-  const byId = new Map();    // caller's own id ('lark'/'gmail'/…) -> flowId of the ONE running flow
+  const byId = new Map();    // caller's own id (its adapter id) -> flowId of the ONE running flow
 
   const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -281,7 +282,8 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
    * Begin ONE consent flow.
    *   id              the caller's own name for the flow ('lark', 'gmail'); one running flow per id
    *   mode            'ephemeral' | 'fixed'
-   *   callbackUrl     fixed mode only; defaults to the registry's Lark literal
+   *   callbackUrl     fixed mode only; beats the machine's `fixedCallbackUrl` and the row's
+   *   registeredCallbackUrl  fixed mode only: the caller's consent row callback (no default — none ⇒ refused)
    *   buildConsentUrl ({redirectUri, state}) => the vendor consent URL
    *   exchange        async ({code, redirectUri, state, flowId, cancelled}) => the token record (opaque here);
    *                   RESOLVING MEANS THE CONSENT LANDED (verify r8: the report is ok:true and this machine cannot
@@ -296,7 +298,7 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
    *                   beside ok:true = a cancel that arrived AFTER the exchange resolved (carried for a consumer
    *                   whose durable write is still ahead; the record's own door reads ok as landed)
    */
-  async function begin({ id, mode, callbackUrl = null, buildConsentUrl, exchange, successText = 'VibeSpace: connected — you can close this tab.', timeoutMs = FLOW_TIMEOUT_MS, onDone = null, label = null, optionalScopes = [], redirectUri = null, stateFor = null } = {}) {
+  async function begin({ id, mode, callbackUrl = null, registeredCallbackUrl = null, buildConsentUrl, exchange, successText = 'VibeSpace: connected — you can close this tab.', timeoutMs = FLOW_TIMEOUT_MS, onDone = null, label = null, optionalScopes = [], redirectUri = null, stateFor = null } = {}) {
     if (!id || typeof id !== 'string') throw new OAuthFlowError('bad-request', 'oauth-loopback: `id` is required');
     if (!MODES.includes(mode)) throw new OAuthFlowError('bad-request', `oauth-loopback: mode must be one of ${MODES.join('|')} (got ${JSON.stringify(mode)})`);
     if (typeof buildConsentUrl !== 'function' || typeof exchange !== 'function') throw new OAuthFlowError('bad-request', 'oauth-loopback: buildConsentUrl and exchange are required');
@@ -368,7 +370,7 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
         throw new OAuthFlowError('listen-failed', `could not bind an ephemeral loopback port: ${(e && e.code) || (e && e.message) || e}`);
       }
     } else {
-      const target = fixedTarget(callbackUrl || fixedCallbackUrl || null);
+      const target = fixedTarget(callbackUrl || fixedCallbackUrl || registeredCallbackUrl || null);
       st.port = target.port; st.pathname = target.pathname;
       st.redirectUri = target.url;          // registered byte for byte — the same whether or not we hold the port
       try {

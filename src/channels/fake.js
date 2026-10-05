@@ -922,6 +922,9 @@ const fakeScan = makeFakeAdapter({ kind: 'fake-scan', receive: 'scan', sendAs: [
  * so a failed Test has a leg on a card that ships in P0, with the vendor's
  * words (here: ours) reaching the card escaped.
  */
+/** lane dc-channels-consent: the integration row the fakes' Test card runs on — declared like a real module's, so the
+ *  engine's ONE runner loop registers it (src/server/channels-engine.js). */
+const INTEGRATION = 'fake';
 async function integrationTest({ resolved } = {}) {
   const r = resolved || {};
   if (r.source === 'none') return { ok: false, error: `no key resolved: ${r.why || 'nothing configured'}` };
@@ -931,4 +934,4 @@ async function integrationTest({ resolved } = {}) {
   return { ok: true, detail: { source: r.source, region: (r.values && r.values.region) || null } };
 }
 
-module.exports = { fakeArchive, FAKE_SEARCH, makeFakeAdapter, fakePoll, fakePush, fakeScan, worldFor, syntheticKey, toRecord, integrationTest, fixturePng, fixtureMailHtml, FAKE_KINDS: ['fake-poll', 'fake-push', 'fake-scan'], FAKE_EMOJI, FAKE_SELF, seedThreads, seedReactions, FAKE_FEED, FAKE_DMS };
+module.exports = { fakeArchive, FAKE_SEARCH, makeFakeAdapter, fakePoll, fakePush, fakeScan, worldFor, syntheticKey, toRecord, integration: INTEGRATION, integrationTest, fixturePng, fixtureMailHtml, FAKE_KINDS: ['fake-poll', 'fake-push', 'fake-scan'], FAKE_EMOJI, FAKE_SELF, seedThreads, seedReactions, FAKE_FEED, FAKE_DMS };

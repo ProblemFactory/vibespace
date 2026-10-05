@@ -387,14 +387,14 @@ const { makeFakeAdapter } = require(${JSON.stringify(path.join(REPO, 'src/channe
 const base = makeFakeAdapter({ kind: 'acme', receive: 'poll', sendAs: [] });
 const API = Object.freeze({ label: 'Acme', hosts: ['api.acme.test', 'eu.acme.test'], docs: ['https://docs.acme.test/api'], readByPost: ['^/v1/search$'], sensitive: [/\\/admin\\//] });
 const adapter = { ...base, api: API, create: (rec, deps) => ({ ...base.create(rec, deps), apiBearer: async () => 'acme-TOKEN-SECRET' }) };
-module.exports = { kind: 'acme', label: 'Acme', adapter, API };
+module.exports = { ...adapter, consent: Object.freeze({ mode: 'ephemeral', landing: null }), label: 'Acme', API };   // lane dc-channels-manifest: the module IS the registered thing; every REAL_ADAPTERS entry declares its consent row (red since dc-channels-consent)   // lane dc-channels-manifest: the module IS the registered thing
 `);
-  const LINE = 'const REAL_ADAPTERS = Object.freeze([lark, gmail, slack]);';
-  const ESRC2 = mutate(ESRC, LINE, `const REAL_ADAPTERS = Object.freeze([lark, gmail, slack, require(${JSON.stringify(acmeFile)})]);`);
+  const LINE = 'const REAL_ADAPTERS = Object.freeze(VendorList.MANIFESTS.map(adapterOf));';
+  const ESRC2 = mutate(ESRC, LINE, `const REAL_ADAPTERS = Object.freeze([...VendorList.MANIFESTS.map(adapterOf), require(${JSON.stringify(acmeFile)})]);`);
   const ENG = MUT.load('src/server/channels-engine.js', ESRC2, 'acme');
   const before = ESRC.split('\n'), after = ESRC2.split('\n');
   const diff = after.length === before.length ? after.filter((l, i) => l !== before[i]) : ['(line count changed)'];
-  ok(diff.length === 1 && diff[0].startsWith('const REAL_ADAPTERS = Object.freeze([lark, gmail, slack, require('), 'the engine copy differs from src/ by the ONE registration line (REAL_ADAPTERS) and nothing else', diff.map((l) => l.slice(0, 120)));
+  ok(diff.length === 1 && diff[0].startsWith('const REAL_ADAPTERS = Object.freeze([...VendorList.MANIFESTS.map(adapterOf), require('), 'the engine copy differs from src/ by the ONE registration line (REAL_ADAPTERS) and nothing else', diff.map((l) => l.slice(0, 120)));
   const dataDir = fs.mkdtempSync(path.join(tmpRoot, 'acme-'));
   const engA = ENG.create({ dataDir, log: quiet, fetch: async () => { throw new Error('no network'); } });
   await engA.store.adapters.update((a) => { a.adapters.push({ id: 'acme-1', kind: 'acme', label: 'Acme (test)', enabled: true, options: {} }); });

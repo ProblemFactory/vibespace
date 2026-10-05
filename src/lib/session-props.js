@@ -2,7 +2,7 @@ import { UI_ICONS } from './icons.js';
 import { escHtml, copyText, showConfirmDialog, stripCwdHostLabel, taskGroupColor, fetchJson, showToast, showContextMenu } from './utils.js';
 import { clearRecords, isCleared, clearedText } from './record-clear-ui.js'; // "Clear content…" (2026-09-28): a status entry's menu + the cleared sentence
 import { SESSION_STATE_META, SESSION_URGENCY_META } from './sidebar-tasks.js';
-import { getBackendMeta, getAgentKindMeta, getAgentRoleLabel, responseStyleCaps, responseStyleOrigin, spawnValueOrigin, effortDisplay, composerSendModes, notificationDeliveryFor, worktreeCapsFor, worktreePick, permissionRulesCaps } from './agent-meta.js';
+import { getBackendMeta, getAgentKindMeta, getAgentRoleLabel, responseStyleCaps, responseStyleOrigin, spawnValueOrigin, effortDisplay, composerSendModes, notificationDeliveryFor, worktreeCapsFor, worktreePick, permissionRulesCaps, billingRow } from './agent-meta.js';
 import { loadInto, renderInto } from './permission-rules-view.js';
 import { t, deviceLocale } from './i18n.js';
 import { placementNote } from './pool-priority-model.js'; // 2026-09-28 (PURE)
@@ -283,7 +283,8 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
     const savedCfg = sidebar.getSessionConfig?.(s) || {};
     const sbe = s.backend || 'claude';
     const accts = (app._accounts?.accounts || []).filter(x => (x.backend || 'claude') === sbe);
-    const globalLabel = sbe === 'codex' ? t('ChatGPT login') : t('Subscription');
+    const bill = billingRow(sbe); // the declared billing row (words, host-login semantics, api keys)
+    const globalLabel = t(bill.globalLogin);
     // Remote session: subscription accounts can't spawn there (dial: never;
     // ssh: only with the ship opt-in) — offering them was fail-late (2.188.0)
     const rHost = s.host || null;
@@ -310,13 +311,13 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
       ? String(app._hostOwnUsage?.[rHost]?.orgEmail || app._hostOwnEmailKnown?.[rHost] || '').trim().toLowerCase()
       : '';
     const acctEmailOf = (x) => String(x.email || (String(x.name || '').includes('@') ? x.name : '')).trim().toLowerCase();
-    const hostLinked = (x) => { const v = vOf(x); if (v) return v.usable && v.how === 'host-login'; return sbe !== 'codex' && !!hostOwnEmail && acctEmailOf(x) === hostOwnEmail; };
-    const hostSubHeld = (x) => { const v = vOf(x); if (v) return v.usable && v.how === 'host-held'; return sbe !== 'codex' && (app._hostSubsKnown?.[rHost] || []).includes(x.id); };
+    const hostLinked = (x) => { const v = vOf(x); if (v) return v.usable && v.how === 'host-login'; return bill.hostLogin && !!hostOwnEmail && acctEmailOf(x) === hostOwnEmail; };
+    const hostSubHeld = (x) => { const v = vOf(x); if (v) return v.usable && v.how === 'host-held'; return bill.hostLogin && (app._hostSubsKnown?.[rHost] || []).includes(x.id); };
     const subBlocked = (x) => {
       const v = vOf(x);
       if (v) return !v.usable; // verdict is authoritative — the same call the spawn makes
       return (x.oat && !(x.oatDaysLeft <= 0)) ? false : (rHost
-        && (sbe === 'codex' || x.type === 'subscription')
+        && (!bill.apiKeys || x.type === 'subscription')
         && !hostLinked(x)
         && !hostSubHeld(x)
         && (rTransport === 'dial' || !shipSubs || x.localOnly));

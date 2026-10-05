@@ -3948,3 +3948,17 @@ owner 2026-10-02: 「gmail thread 展示的时候缺乏细节（原邮件收件�
 - **Lark (lane message-facts-lark, B-f066 第二部分)**: 表里多四行, 全是标签 (chip, 不进摘要也不进详情 —— 聊天消息只有标签时放在时间旁边): `via` (party: `sender_type: app` 的应用 id + 头部同一个名字; 应用名后来才解析到时, `recordView` 读时连同头部一起改名, 经记录的校验器) · `forwarded-from` (party: `merge_forward`; 列表接口从不给原发送人, 所以是**无名 party** `v: {}` —— schema 行声明 `nameless: true` 才允许, 标签只说「已转发」, agent 行只打键名) · `edited` (time: `updated: true` 时取 `update_time`; 读不出时刻就不发 —— 时间从不编造; 标签的 tooltip 用设备语言写出时刻) · `recalled` (flag: `deleted: true`, 即撤回)。`caps.facts` 声明这四种; 没有 `factsOf` (之前存的 Lark 消息不回填)。存入之后才发生的编辑 / 撤回: `fx` 的路径已在 (读时折叠, 后者胜, 撤回不会撤销), "发现"它的读者不在这条车道。契约「发出 ⊆ 声明」= scripts/test-channel-facts.mjs §10 对每一条录制的 Lark 消息跑真实 `toRecord` (加一个多发未声明 kind 的副本 = 红); 名字之门 = 一个跳过 peerName 的副本把原始应用名存进来 = 红。
 - **agent**: `agentCopy` / `withView` 经新的皮带门 `agentFacts` (名字 peerName, 地址和行走皮带的 line 规则; count 只给数字), CLI 在消息下打一行 `to: … · cc: … · reply-to: … · list: … · importance: …` (`agentFactLines`, 整行再过 line 规则)。wake 块不变。
 
+## 31. 新增一个频道厂商: 一个文件夹 + 一行注册 (2026-10-05, lane dc-channels-manifest)
+
+Owner 的规则: "拓展 vendor 只需要定义 vendor-specific 的文件 + 一行注册"。清单 (Adding a vendor):
+
+1. **文件夹** `src/channels/<vendor>/`: `manifest.js` (PURE, 可打包: `kind`、`adapter` (适配器模块的仓库路径)、`settings` = 预算 / 节奏行 + `options` 选项行 (如人名显示方式 `nameField`、中转页 `relayUrl`)、`integrationRow({ V, okV, bad })` = 凭据行 + 它自己的校验器)、适配器模块 (导出 `manifest`、`label`、`integration`、`consent`、`api`、`caps` (含 `glyph`)、`blocksOf` …, 模块本身就是注册对象, `register()` 逐项校验)、`blocks.js` (消息形状读取器)。
+2. **一行注册**: `src/channels/registry-list.js` 的 `MANIFESTS` 里加 `require('./<vendor>/manifest.js'),`。
+3. 唯一的例外: 产品里每个字符串都有的 zh / ja 词典条目。
+
+不需要改 src/channel-settings.js、src/integration-registry.js、src/lib/settings-schema.js、引擎或任何词表 —— 它们从清单派生 (test-architecture §76c 守住这三个文件不出现厂商 id)。证明: scripts/test-channel-manifest.mjs 用假厂商 scripts/fixtures/channels/acme/ 在清单副本里加一行即接入 (设置行、凭据行、注册、consent、raw-API 栅栏、blocks、glyph)。
+
+## 每账号会话列表 · 聊天式的行（as-built，2026-10-04，lane channels-list-polish）
+
+每个账号下的会话行与上面「需关注」行同形：头像（右下角账号角标，画在头像之上，角标里是各厂商自己的单色标志 public/brand/<vendor>.svg）· 名字 · 新鲜度小标 · 时间；第二行是最近一条消息的第一行「作者: 正文」（textContent，≤ 160 字，作者用组织昵称，自己写的读「你」）+ 未读数。「访问/通知」那行只在该会话自己的设置与账号不同时出现，措辞为「与账号不同：…」；继承账号设置的行不显示。私聊头像 = 不是本账号身份的那个作者（身份是已解析的事实；未知 ⇒ 首字母，绝不显示本人）；群聊头像 = 群自己的头像（chat~<id>）；Lark 机器人没有用户令牌可读的头像，保留机器人字形。
+> **设计 018 落地记录 (2.369.214, lane slack-landing-nologin, userW):** 018 原以为 Slack 授权落地页 `GET /api/channels/oauth/cb/:kind` 会带着实例自己的 cookie 回来 (SameSite=Lax 跟着重定向)。实际上按 Allow 的常常是**另一个浏览器 profile** (用户的 Slack 身份和其 VibeSpace SSO 登录分开放), 认证中间件把它 302 到 /login, code 丢了。现在: src/auth.js 只豁免这一条 GET (别的 oauth 路由仍要 cookie); **签名的 state 才是凭证** (本次启动的 HMAC + 时效, 按整个 state 找到运行中的 public 流程, code 只换一次), 每个地址每分钟 ≤ 30 次 (第 31 次 429, 用落地页自己的拒绝措辞); 落地页说「这里已完成, 回到你按下"连接"的 VibeSpace 窗口」。落地只把待定流程推进到完成, **账号记录仍由 owner 已登录的标签页创建** (Connect {flowId}), 且对话框的完成行写明「✓ 已以 {user} 连接」, 陌生身份在记录生成前就看得见。

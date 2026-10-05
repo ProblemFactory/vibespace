@@ -205,11 +205,8 @@ console.log('§1 channel-groups-view (PURE)');
     const AV = await import(path.join(REPO, 'src/lib/channel-avatar.js'));
     const IC = await import(path.join(REPO, 'src/lib/icons.js'));
     const ES = read('src/server/channels-engine.js');
-    const arr = ES.match(/^const REAL_ADAPTERS = Object\.freeze\(\[([^\]]*)\]\);$/m);
-    const kinds = (arr ? arr[1].split(',').map((s) => s.trim()).filter(Boolean) : []).map((id) => {
-      const r = ES.match(new RegExp(`^const ${id} = require\\('\\.\\./channels/([a-z0-9-]+)\\.js'\\);`, 'm'));
-      return r ? require(path.join(REPO, 'src/channels', `${r[1]}.js`)).kind : null;
-    });
+    const kinds = require(path.join(REPO, 'src/channels/registry-list.js')).MANIFESTS.map((m) => m.kind);   // lane dc-channels-manifest: REAL_ADAPTERS derives from the vendor list (ES kept for the census below)
+    void ES;
     const missing = (lib) => kinds.filter((k) => { const g = AV.accountBadges([{ id: k, kind: k, label: k }]).get(k).glyph; return !(typeof lib[g] === 'string' && /^<svg /.test(lib[g])); });
     ok(kinds.length >= 3 && kinds.every((k) => typeof k === 'string' && k) && kinds.includes('slack') && missing(IC.UI_ICONS).length === 0,
       `channels-fold GLYPH CENSUS: every connectable kind (${kinds.join(', ')}) wears its OWN vendor glyph — none falls back to the chat glyph`, JSON.stringify({ kinds, missing: missing(IC.UI_ICONS) }));

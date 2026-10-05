@@ -17,6 +17,16 @@
  *                          anything else (svg is script) is no picture.
  *   warmList(authors, known)   the authors a surface asks for when it opens: deduped, the ones already known
  *                          dropped, at most WARM_MAX — never a whole-account sweep.
+ *   memoKey(kind, id) / keyOf(key)   lane channels-list-polish: ONE picture is (account, kind, id) — `person` keeps its
+ *                          bare id (the memo on disk since lane channel-avatars), a group chat is `chat~<id>`, a bot
+ *                          `bot~<id>`; the route's `author` IS this key.
+ *   selfOf / stampSelf / peerOf   lane channels-list-polish (the owner, 2026-10-04: "这个是我的头像，却展示在 Bob 私聊里"):
+ *                          a direct chat's PEER is the author that is not the account's identity, and the identity is a
+ *                          RESOLVED fact (the adapter's own id, or an author a record marked `isSelf`) — never a guess:
+ *                          unknown ⇒ no peer (initials), never the owner's face.
+ *   nameLadder(facts) / reaskDue(memo, now)   an author with an EMPTY name is named by the chat's member list, then the
+ *                          name a message carries for the sender, then the contact profile — the id only when all three
+ *                          said nothing; a nameless one is asked again on a schedule (a refusal kept with its reason).
  * The picture is served by OUR route only (`GET /api/channels/avatar?account=&author=`, ≤ AVATAR_MAX_BYTES); a vendor
  * URL (it may carry a token) never reaches the DOM. An avatar is paint: the initials stay for an author with no picture.
  */
@@ -26,6 +36,8 @@ const NONE_TTL_MS = 7 * 24 * 3600e3;
 const SCOPE_TTL_MS = 6 * 3600e3;
 const WARM_MAX = 40;
 const AUTHOR_MAX = 128;
+const AVATAR_KINDS = Object.freeze(['person', 'chat', 'bot']);
+const REASK_MS = 6 * 3600e3;
 
 /** An author key the route accepts: 1…AUTHOR_MAX printable characters, no path segment. */
 function authorOk(id) {
@@ -80,10 +92,67 @@ function warmList(authors, known = () => false) {
   return out;
 }
 
-/** The capability row as a surface reads it: `{fetch, why}` (`why` = the adapter's `avatarsWhy` when it is null). */
+/** The capability row as a surface reads it: `{fetch, why, kinds, kindsWhy}` (`why` = the adapter's `avatarsWhy` when it
+ *  is null; `kinds` = which pictures it fetches — `caps.avatarKinds`, a person's only when unsaid; `kindsWhy` = the
+ *  adapter's sentence for the kinds it cannot fetch, e.g. a bot's picture no user sign-in reads). */
 function avatarRow(caps) {
   const c = caps || {};
-  return c.avatars === 'fetch' ? { fetch: true, why: null } : { fetch: false, why: String(c.avatarsWhy || 'no-avatars') };
+  if (c.avatars !== 'fetch') return { fetch: false, why: String(c.avatarsWhy || 'no-avatars'), kinds: [], kindsWhy: null };
+  const kinds = Array.isArray(c.avatarKinds) ? AVATAR_KINDS.filter((k) => c.avatarKinds.includes(k)) : ['person'];
+  return { fetch: true, why: null, kinds, kindsWhy: typeof c.avatarKindsWhy === 'string' && c.avatarKindsWhy ? c.avatarKindsWhy : null };
 }
 
-module.exports = { AVATAR_MAX_BYTES, REFRESH_MS, NONE_TTL_MS, SCOPE_TTL_MS, WARM_MAX, AUTHOR_MAX, authorOk, memoFacts, refusalTtlMs, sniffImage, warmList, avatarRow };
+/** The memo / flight / route key of ONE picture (account-scoped by the caller). */
+function memoKey(kind, id) {
+  const k = AVATAR_KINDS.includes(kind) ? kind : 'person';
+  return k === 'person' ? String(id || '') : `${k}~${String(id || '')}`;
+}
+/** The (kind, id) a route key names; a person's key is its bare id. */
+function keyOf(key) {
+  const s = String(key || '');
+  const m = /^(chat|bot)~(.+)$/.exec(s);
+  return m ? { kind: m[1], id: m[2] } : { kind: 'person', id: s };
+}
+
+/** THE ACCOUNT'S OWN ID as a resolved fact: `self` (the adapter's), else an author a record marked `isSelf`; else null. */
+function selfOf(authors, self = null) {
+  if (typeof self === 'string' && self) return self;
+  const a = (Array.isArray(authors) ? authors : []).find((x) => x && x.isSelf && x.id);
+  return a ? String(a.id) : null;
+}
+/** Every author of the account's own id wears `isSelf` — at index time AND at read time (an old index heals unrebuilt).
+ *  The same array when nothing changed. */
+function stampSelf(authors, self) {
+  const list = Array.isArray(authors) ? authors : [];
+  if (typeof self !== 'string' || !self) return list;
+  let changed = false;
+  const out = list.map((a) => { if (a && String(a.id || '') === self && !a.isSelf) { changed = true; return { ...a, isSelf: true }; } return a; });
+  return changed ? out : list;
+}
+/** A DIRECT CHAT'S OTHER PERSON: the first author that is not the account's identity; null when the identity is not
+ *  known (no picture — initials — never the owner's own face). */
+function peerOf(authors, self = null) {
+  const me = selfOf(authors, self);
+  if (!me) return null;
+  const p = (Array.isArray(authors) ? authors : []).find((a) => a && a.id && !a.isSelf && String(a.id) !== me);
+  return p && authorOk(String(p.id)) ? String(p.id) : null;
+}
+
+/** THE NAME RE-ASK LADDER: `{name, member, sender, profile, id}` → `{name, from}` — the record's own name, the chat's
+ *  member list, the sender name a message carries, the contact profile, and the id only when nothing else is known. */
+function nameLadder(f = {}) {
+  for (const from of ['name', 'member', 'sender', 'profile']) {
+    const v = typeof f[from] === 'string' ? f[from].replace(/[\u0000-\u001f\u007f]/g, '').trim() : '';
+    if (v) return { name: v.slice(0, 200), from };
+  }
+  return { name: String(f.id || '').slice(0, AUTHOR_MAX), from: 'id' };
+}
+/** Is a NAMELESS author asked again now? `memo` = `{at}` (asked, nothing named) or `{at, until, why}` (a refusal kept
+ *  with its reason) or null (never asked) — on a schedule, never on every draw. */
+function reaskDue(memo, now) {
+  if (!memo || typeof memo !== 'object') return true;
+  if (Number(memo.until) > 0) return now >= Number(memo.until);
+  return now - (Number(memo.at) || 0) >= REASK_MS;
+}
+
+module.exports = { AVATAR_MAX_BYTES, REFRESH_MS, NONE_TTL_MS, SCOPE_TTL_MS, WARM_MAX, AUTHOR_MAX, AVATAR_KINDS, REASK_MS, authorOk, memoFacts, refusalTtlMs, sniffImage, warmList, avatarRow, memoKey, keyOf, selfOf, stampSelf, peerOf, nameLadder, reaskDue };

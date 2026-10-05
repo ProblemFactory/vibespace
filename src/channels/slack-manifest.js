@@ -46,7 +46,7 @@
  * characters, the whole name ≤ 35 (Slack's limit for an app name); JSON + URL encoding escape the rest. The link
  * stays under LINK_MAX bytes whatever the name (a verifier control).
  */
-const EGRESS = Object.freeze(['api.slack.com', 'slack.com']);   // design 018: slack.com = the consent page the member's browser opens (authorizeUrl)
+const EGRESS = Object.freeze(['api.slack.com', 'slack.com', 'problemfactory.github.io']);   // design 018: slack.com = the consent page the member's browser opens (authorizeUrl); problemfactory.github.io = the default relay page it is sent back through (RELAY_DEFAULT)
 const CREATE_URL = 'https://api.slack.com/apps?new_app=1&manifest_json=';
 /** design 017: the page that holds "Generate Token" (step 1) and each app's install page (step 2) — the person's
  *  BROWSER opens both; the one request this server makes with the setup token goes to the Web API (slack.js). */
@@ -199,6 +199,9 @@ function stateVerdict(s, { sign, flowId = null, now = Date.now(), ttlMs = 30 * 6
   if (!(now - p.issuedAt <= ttlMs) || p.issuedAt - now > 60 * 1000) return { ok: false, why: 'expired', parts: null };
   return { ok: true, why: null, parts: p };
 }
+/** The custom rung's relay page when its setting (Settings → Channels → Slack relay page) is unset — the schema's default,
+ *  the same address: the project's own static page (docs/slack-relay/), a page the member's BROWSER is sent through. */
+const RELAY_DEFAULT = 'https://problemfactory.github.io/vibespace/slack/';
 /** THE RELAY RULE: a private-network instance (loopback, 10/8, 172.16/12, 192.168/16, fc00::/7, ::1, localhost,
  *  *.local / *.lan / *.home) or an https host under an `allow` suffix (a fleet's own domain, label-bounded) is sent
  *  back to; anything else gets the code shown — the relay is never an open redirector to the internet. */
@@ -234,4 +237,4 @@ function scopesOfHeader(h) {
 }
 
 module.exports = { EGRESS, CREATE_URL, CONFIG_PAGE, INSTALL_BASE, CREATE_METHOD, APP_ID_RE, BOXES, USER_SCOPES, READ_SCOPES, SEND_SCOPES, APP_NAME_MAX, OWNER_NAME_MAX, LINK_MAX, manifestFor, createLink, appNameFor, tokenShapeOf, createRequest, installLink, pasteAction, scopesOfHeader,
-  AUTHORIZE_URL, EXCHANGE_METHOD, CALLBACK_PATH, STATE_MAX, STATE_REFUSALS, PRIVATE_SUFFIXES, originOf, authorizeUrl, redirectFor, stateOf, stateParts, stateVerdict, relayTargetVerdict };
+  AUTHORIZE_URL, EXCHANGE_METHOD, CALLBACK_PATH, STATE_MAX, STATE_REFUSALS, PRIVATE_SUFFIXES, RELAY_DEFAULT, originOf, authorizeUrl, redirectFor, stateOf, stateParts, stateVerdict, relayTargetVerdict };

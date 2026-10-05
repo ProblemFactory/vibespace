@@ -7868,4 +7868,8 @@ export default {
   "API call {call} · awaiting you": "API 调用 {call} · 等你批准",
   "Starting — rebuilding its cache index ({files} files), {elapsed} so far; it mounts by itself when the scan ends (waits up to {max} min)": "启动中 — 正在重建缓存索引（{files} 个文件），已用 {elapsed}；扫描结束后自动挂载（最多等 {max} 分钟）",
   "Files written while it was not mounted were moved to {dest} — nothing was deleted": "未挂载期间写入的文件已移到 {dest} — 没有删除任何东西",
+  "Unlike the account: {grant}": "与账号不同：{grant}",
+  "✓ Connected as {user} — finish with the “Connect” button below.": "✓ 已以 {user} 连接——点下方“连接”按钮完成。",
+  "✓ Connected as {user} — finish with the “Create & connect” button below.": "✓ 已以 {user} 连接 —— 点下面的「创建并连接」完成。",
+  "Slack’s last page says “Done here” and this dialog finishes by itself — even when you approved in another browser. If that page shows a code instead, or does not load, paste the code or its address here:": "Slack 最后一页会显示“这里已完成”，这个对话框随后自己完成——即使你是在另一个浏览器里同意的。如果那一页显示的是一串码，或者打不开，把码或它的地址粘到这里：",
 };

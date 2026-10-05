@@ -198,7 +198,7 @@ function mkWorld({ engineModule = engMod } = {}) {
     getHosts: () => ({ device: async () => ({ poolOrders: async () => { }, ackPoolOrdersLog() { } }) }),
     getUsageHistory: () => ({ _cost: () => 0, ingestRemoteEvents() { } }),
     recordUsageAttribution() { }, adapterRegistry: { get: () => ClaudeCodeAdapter },
-    getAutoResume: () => autoResume, getOtelIngest: () => ({ observedOrgFor: () => null }), getQuotaProbe: () => null,
+    getAutoResume: () => autoResume, getQuotaProbe: () => null,
   });
   const mkSession = (sid, member, fields = {}) => {
     const s = {

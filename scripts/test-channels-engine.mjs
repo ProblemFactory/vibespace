@@ -2603,10 +2603,10 @@ process.exit(0);
     // CONTROL 1 (adapter-held): a gmail copy that keeps every client it resolved, loaded by an engine copy
     const srcG16 = fs.readFileSync(path.join(REPO, 'src/channels/gmail.js'), 'utf-8');
     const RES = "    return { values: r.values, why: null, missing: [], source: r.source, clusterLabel: r.clusterLabel || null, clusterKey: r.clusterKey || null, credentialKey };";
-    ok(srcG16.split(RES).length === 2 && esrc.split("const gmail = require('../channels/gmail.js');").length === 2, 'CONTROL setup (16): the resolver\'s return and the engine\'s gmail require are present once');
+    ok(srcG16.split(RES).length === 2 && esrc.split('const REAL_ADAPTERS = Object.freeze(VendorList.MANIFESTS.map(adapterOf));').length === 2, 'CONTROL setup (16): the resolver\'s return and the engine\'s gmail require are present once');
     const gKeep = MUTE.write('src/channels/gmail.js', srcG16.replace(RES, "    HELD16.push(r.values); return { values: r.values, why: null, missing: [], source: r.source, clusterLabel: r.clusterLabel || null, clusterKey: r.clusterKey || null, credentialKey };").replace("'use strict';", "'use strict'; const HELD16 = [];"), 'keeps-client', { esm: false });
     const p16a = patchPath('src/server', 'channels-engine');
-    writeCopy(p16a, esrc.replace("const gmail = require('../channels/gmail.js');", `const gmail = require(${JSON.stringify(gKeep)});`));
+    writeCopy(p16a, esrc.replace('const REAL_ADAPTERS = Object.freeze(VendorList.MANIFESTS.map(adapterOf));', `const REAL_ADAPTERS = Object.freeze(VendorList.MANIFESTS.map((m) => (m.kind === 'gmail' ? require(${JSON.stringify(gKeep)}) : adapterOf(m))));`));
     const c1h = runStages(p16a, 'ctl1', ['refreshed', 'removed']);
     ok(c1h.refreshed.secret >= 1 && c1h.removed.secret >= 1, `CONTROL 1 (16): an adapter that keeps the client it resolved holds the secret after a refresh (${c1h.refreshed.secret}) and after the account is removed (${c1h.removed.secret}) — the check above would be red`);
     // CONTROL 2 (engine-held): an engine copy that memoizes the decrypted client per record
@@ -6222,6 +6222,7 @@ console.log('\n㉔ lane lark-threads PART B: the owner\'s names for authors, at 
     kind: 'peoply',
     caps: { receive: 'poll', pollInterval: { hot: 30, cold: 300, floor: 10 }, history: 'page', listConversations: true, sendAs: [], identityMarking: 'none', budget: { unit: 'request', default: 600, settingKey: null, metered: true } },
     peopleGrant: { scopes: ['contact:contact.base:readonly'], console: true },
+    rawFacts: (r) => ({ tenant: r.raw && r.raw.tenant_key }),   // lane dc-channels-blocks: the sender's tenant is the ADAPTER's declared fact
     create(record) {
       const A = record.id;
       return {
@@ -6429,6 +6430,122 @@ console.log('\n§ design 011 lane 2: the poll stamps — a restart keeps every d
     ok(b1.spent > b0.spent && b1.spent <= b1.limit && s1.due < s0.due, `design 011 lane 2: …and the re-poll is spent through the vendor's budget (${b1.spent - b0.spent} of the minute's ${b1.limit}), ${s0.due} → ${s1.due} due (a large one's pace: test-channel-drain ②c)`, JSON.stringify({ b0: b0.spent, b1: b1.spent, limit: b1.limit, s0: s0.due, s1: s1.due }));
     e.stop();
   }
+}
+
+// lane dc-channels-consent: A NEW CONSENT VENDOR IS ITS ADAPTER MODULE ALONE. A fake module declaring consent
+// {mode:'public', landing} — its OWN state shape, signed by the engine's generic per-boot key, and its own page — joins
+// through REAL_ADAPTERS (the one list line: the copy's ONLY edit) and completes a consent round trip over the REAL landing
+// route: Connect → the vendor's (stub) Allow → GET /api/channels/oauth/cb/<kind> → the exchange → connected. CONTROLS:
+// the same copy with the pre-lane Slack judge restored in oauthLanding, and a route copy with Slack's page restored ⇒ red.
+console.log('\nconsent: a vendor declares its consent row; the engine + route name none (lane dc-channels-consent)');
+{
+  const httpC = require('node:http');
+  const expressC = require(path.join(REPO, 'node_modules/express'));
+  const STOREC = require(path.join(REPO, 'src/server/integration-store.js'));
+  const CK = 'fake-consent';
+  const escC = (x) => String(x).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+  const baseC = fake.makeFakeAdapter({ kind: CK, receive: 'poll' });
+  const exchanged = [];
+  const FC = {
+    kind: CK, label: 'Fake consent', integration: 'fake', caps: baseC.caps,
+    consent: {
+      mode: 'public',
+      landing: {
+        // NOT Slack's `v1.<facts>.<hmac>`: `fc1.<flowId>.<issuedAt>~<hmac>`
+        stateVerdict(s, { sign, now: at, ttlMs }) {
+          const m = /^(fc1\.([a-f0-9]{8,64})\.(\d{1,15}))~([A-Za-z0-9_-]{20,})$/.exec(typeof s === 'string' ? s : '');
+          if (!m) return { ok: false, why: 'bad-shape', parts: null };
+          if (sign(m[1]) !== m[4]) return { ok: false, why: 'bad-hmac', parts: null };
+          if (!(at - Number(m[3]) <= ttlMs)) return { ok: false, why: 'expired', parts: null };
+          return { ok: true, why: null, parts: { flowId: m[2] } };
+        },
+        landingHtml: (r) => `<!doctype html><p data-fc="${r.ok ? 'ok' : escC(r.why)}">${r.ok ? `fake-consent connected (${escC(r.user || '')})` : 'fake-consent refused'}</p>`,
+      },
+    },
+    adapter: {
+      kind: CK, caps: baseC.caps,
+      create(rec, deps) {
+        const a = baseC.create(rec, deps);
+        return { ...a, auth: { ...a.auth, begin: async ({ origin = null } = {}) => deps.oauth.begin({
+          id: rec.id, mode: 'public', label: 'Fake consent', timeoutMs: 60e3, redirectUri: `${origin}/api/channels/oauth/cb/${CK}`,
+          stateFor: ({ flowId, issuedAt }) => { const clear = `fc1.${flowId}.${issuedAt}`; return `${clear}~${deps.consent.sign(clear)}`; },
+          buildConsentUrl: ({ redirectUri, state }) => 'https://consent.fake.test/allow?' + new URLSearchParams({ redirect_uri: redirectUri, state }),
+          exchange: async ({ code, cancelled = null }) => {
+            exchanged.push(code);
+            if (code !== 'fc-code') throw new Error('the stub vendor refused the code');
+            await deps.tokens.write({ accessToken: 'fc-token', userId: 'u-ada', name: 'Ada' }, { expiresAt: null, scopes: ['fake'], user: 'Ada', consent: { cancelled } });
+            return { user: 'Ada' };
+          },
+          onDone: deps.onAuthDone ? (r) => deps.onAuthDone(rec.id, r) : null,
+        }) } };
+      },
+    },
+  };
+  globalThis.__VS_CONSENT_FAKE = FC.adapter ? { ...FC.adapter, ...FC } : FC;   // lane dc-channels-manifest: the module IS the registered thing
+  const engSrcC = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const routeSrcC = fs.readFileSync(path.join(REPO, 'src/routes/channels.js'), 'utf-8');
+  const LIST = 'const REAL_ADAPTERS = Object.freeze(VendorList.MANIFESTS.map(adapterOf));';
+  const JUDGE = 'const v = row.landing.stateVerdict(state, {';
+  const PAGE = '.send(page(r));';
+  ok(engSrcC.split(LIST).length === 2 && engSrcC.split(JUDGE).length === 2 && routeSrcC.split(PAGE).length === 2, 'consent: the patch sites exist once each (the list line, the engine\'s row judge, the route\'s row page)');
+  const code = (s) => s.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+  const quoted = (s) => (code(s).match(/['"`](lark|slack|gmail|fake)['"`]/g) || []).length;
+  ok(quoted(engSrcC) === 0 && quoted(routeSrcC) === 0 && quoted(fs.readFileSync(path.join(REPO, 'src/oauth-loopback.js'), 'utf-8')) === 0
+    && !/SlackManifest|SlackWords|slackConsent|slackRelayUrl|LARK_CALLBACK_URL/.test(engSrcC + routeSrcC), 'consent: the engine, the channels routes and oauth-loopback quote no vendor id and name no vendor\'s consent module');
+  const withFake = engSrcC.replace(LIST, 'const REAL_ADAPTERS = Object.freeze([...VendorList.MANIFESTS.map(adapterOf), globalThis.__VS_CONSENT_FAKE]);');
+  const roundTrip = async (tag, engText, routeText) => {
+    const ENGC = MUTE.load('src/server/channels-engine.js', engText, `consent-${tag}`);
+    const RTC = MUTE.load('src/routes/channels.js', routeText, `consent-route-${tag}`);
+    const dir = path.join(ROOT, `consent-${tag}`);
+    fs.mkdirSync(dir, { recursive: true });
+    const quietC = { log() {}, warn() {}, error() {} };
+    const integrations = STOREC.create({ dataDir: path.join(dir, 'store'), env: { VIBESPACE_INTEGRATIONS: JSON.stringify([{ id: 'fake', key: 'k1', label: 'K1', values: { apiKey: 'fake_consent_key_0001' } }]) }, now: () => Date.now(), broadcast: () => {}, drivePresets: () => [], log: quietC });
+    const e = ENGC.create({ dataDir: path.join(dir, 'eng'), env: {}, broadcast: () => {}, integrations, log: quietC });
+    RTC.setup({ getEngine: () => e });
+    const app = expressC(); app.use(expressC.json()); app.use(RTC.router);
+    const srv = httpC.createServer(app);
+    await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    const origin = `http://127.0.0.1:${srv.address().port}`;
+    const get = (u) => new Promise((resolve) => {
+      const rq = httpC.request(new URL(u, origin), { method: 'GET' }, (res) => { let b = ''; res.on('data', (d) => { b += d; }); res.on('end', () => resolve({ status: res.statusCode, type: String(res.headers['content-type'] || ''), body: b })); });
+      rq.on('error', (er) => resolve({ status: 0, type: '', body: String(er.message) }));
+      rq.end();
+    });
+    let out = { start: null, land: null, status: null, err: null };
+    try {
+      const st = await e.startOAuth({ kind: CK, origin, clientPreset: 'k1' });
+      const allow = new URL(st.url || st.flow.consentUrl);
+      const back = new URL(allow.searchParams.get('redirect_uri'));
+      back.searchParams.set('code', 'fc-code'); back.searchParams.set('state', allow.searchParams.get('state'));
+      out.start = { st, back: back.toString(), state: allow.searchParams.get('state') };
+      out.land = await get(back.pathname + back.search);
+      for (let i = 0; i < 50 && !(e.oauthStatus(st.flowId) || {}).done; i++) await sleep(20);
+      out.status = e.oauthStatus(st.flowId);
+      out.none = await get('/api/channels/oauth/cb/lark?code=x&state=y');
+      out.unknown = await get('/api/channels/oauth/cb/nonesuch?code=x&state=y');
+    } catch (er) { out.err = (er && er.stack) || String(er); }
+    try { await e.stop(); } catch {}
+    srv.close();
+    return out;
+  };
+  const real = await roundTrip('real', withFake, routeSrcC);
+  const r0 = real.start ? real.start.state : '';
+  ok(!real.err && /^fc1\.[a-f0-9]{8,64}\.\d+~/.test(r0) && real.start.back.startsWith(`http://127.0.0.1:`) && new URL(real.start.back).pathname === `/api/channels/oauth/cb/${CK}`,
+    `consent: Connect on the fake vendor signs ITS state shape with the engine's generic key and sends the browser to its landing (${real.err || r0.slice(0, 24)}…)`, real.err);
+  ok(real.land && real.land.status === 200 && /text\/html/.test(real.land.type) && /data-fc="ok"/.test(real.land.body) && /\(Ada\)/.test(real.land.body) && exchanged.join() === 'fc-code',
+    'consent: the REAL route answers the fake vendor\'s OWN page — connected, the code exchanged once', JSON.stringify(real.land).slice(0, 300));
+  ok(real.status && real.status.done === true && real.status.ok === true, 'consent: the pending flow ends connected (oauthStatus)', JSON.stringify(real.status).slice(0, 300));
+  ok(real.none && real.none.status === 404 && /no-landing/.test(real.none.body) && real.unknown && real.unknown.status === 404 && /no-landing/.test(real.unknown.body),
+    'consent: a kind whose row declares no landing (Lark) and an unknown kind are 404 by name (`no-landing`), never another vendor\'s page', `${real.none && real.none.status} ${real.unknown && real.unknown.status}`);
+  exchanged.length = 0;
+  const judged = await roundTrip('slack-judge', withFake.replace(JUDGE, "const v = require('../channels/slack-manifest.js').stateVerdict(state, {"), routeSrcC);
+  ok(!judged.err && judged.land && judged.land.status === 400 && /data-fc="bad-shape"/.test(judged.land.body) && exchanged.length === 0 && !(judged.status && judged.status.ok),
+    'consent CONTROL: the same copy with the pre-lane Slack judge restored in oauthLanding refuses the fake vendor\'s state (bad-shape) — nothing exchanged', JSON.stringify(judged.land || judged.err).slice(0, 300));
+  exchanged.length = 0;
+  const paged = await roundTrip('slack-page', withFake, routeSrcC.replace(PAGE, ".send(require('../channels/slack-words.js').landingHtml(r));"));
+  ok(!paged.err && paged.land && paged.land.status === 200 && !/data-fc=/.test(paged.land.body) && /Slack/.test(paged.land.body),
+    'consent CONTROL: a route copy with Slack\'s landing page restored shows the fake vendor\'s member SLACK\'s words (the row\'s page is what the green leg read)', JSON.stringify(paged.land || paged.err).slice(0, 200));
+  delete globalThis.__VS_CONSENT_FAKE;
 }
 
 console.log('\ntree: the patched copies never touch the tree');

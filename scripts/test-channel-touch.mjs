@@ -109,7 +109,9 @@ console.log('① PURE src/channel-touch.js');
     && T.rowWords({ ops: { reply: 2, compose: 1, refresh: 1, request: 1, status: 1 } }, tEn) === 'drafted 2 replies · wrote a new message · refreshed · asked for access · checked its draft',
     'rowWords: the drafts first, every op in its own words', rows.map((r) => T.rowWords(r, tEn)));
   ok(T.rowName({ account: 'Work', title: 'Alpha', convId: 'a' }) === 'Work › Alpha' && T.rowName({ title: '', convId: 'a' }) === 'a', 'rowName: account › title (the id when there is no title)');
-  ok(T.glyphFor('gmail') === 'mail' && T.glyphFor('gmail:1a2b3c4d') === 'mail' && T.glyphFor('lark') === 'chat' && T.glyphFor('agents') === 'robot' && T.glyphFor('') === 'chat', 'glyphFor: a mailbox for Gmail (any of its accounts), an agent for the Agents adapter, a chat otherwise');
+  ok(T.glyphFor('mail') === 'mail' && T.glyphFor('robot') === 'robot' && T.glyphFor('chat') === 'chat' && T.glyphFor('gmail') === 'chat' && T.glyphFor('agents') === 'chat' && T.glyphFor('') === 'chat' && T.glyphFor(undefined) === 'chat', 'glyphFor: the row\'s DECLARED glyph (its adapter\'s caps.glyph — lane dc-channels-blocks), a chat otherwise — never a vendor id');
+  const nt = (icon) => T.normalizeTouch({ op: 'read', adapterId: 'x-1', convId: 'c', at: 5, icon });
+  ok(nt('mail').icon === 'mail' && nt('robot').icon === 'robot' && !('icon' in nt('envelope')) && !('icon' in nt(undefined)), 'a touch keeps a DECLARED glyph (chat | mail | robot) and drops anything else');
   // THE CHIP
   const cv = T.chipView(tt, 3200);
   ok(cv && cv.rows.map((r) => r.convId).join() === 'a,b,d' && cv.latest.convId === 'b' && T.chipText(cv, tEn) === 'Channels · Beta 2', 'chipView: only THIS turn\'s touches (at or after its start), the newest touch\'s conversation named', cv && cv.rows.map((r) => r.convId));

@@ -125,7 +125,7 @@ const L = require(path.join(REPO, 'src/server/usage-probe-log.js'));
     wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { }, serverNotice() { },
     serverSetting() { return undefined; }, getAccounts() { return accounts; }, getHosts() { return null; },
     getUsageHistory() { return null; }, recordUsageAttribution() { }, adapterRegistry: { get() { return null; } },
-    getAutoResume: () => null, getOtelIngest: () => null, getQuotaProbe: () => null,
+    getAutoResume: () => null, getQuotaProbe: () => null,
   });
   const nowSec = Math.floor(Date.now() / 1000);
   const payload = { rate_limits: { five_hour: { utilization: 0.31, resets_at: nowSec + 3600 }, seven_day: { utilization: 0.52, resets_at: nowSec + 3 * 86400 } } };

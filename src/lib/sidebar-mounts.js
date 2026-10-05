@@ -3,6 +3,7 @@
 // mount list with live status, share-a-folder minting, import-a-link.
 import { createModalShell, showToast, showConfirmDialog, showContextMenu, copyText, escHtml, hostStateChip, getInstanceUrl } from './utils.js';
 import { protoChip } from './sidebar-rail.js'; // http/https/tcp chip (override menu = this._portProtoMenu, same prototype)
+import { pluginProvides } from './plugins-ui.js'; // the ONE relay probe (declared capability)
 import { t as tr, deviceLocale } from './i18n.js'; // sidebar cluster convention: local `t` is pervasively a task var (verify-r5 A1: + the device's locale for a time)
 import { api, oauthLinkRow, mountsDialog, wireOAuthConnect, reauthDialog } from './mounts-dialog.js'; // D1: the ONE dialog component (storage + channel accounts)
 import { classifyPrivateKey } from '../ssh-key-format.js'; // shared with the server (CJS pulled into the bundle, like task-color-seq.js)
@@ -1012,9 +1013,8 @@ export function installSidebarMounts(Sidebar) {
       // it directly), so "Open" routes through the embedded browser's proxy
       // (node-unblocker on the server → the server's loopback → the tunnel).
       const openForward = (url) => { if (url) { this.app.openBrowser?.(url, { proxy: true }); close(); } };
-      // is the frp relay (public URLs) available on this instance?
-      let frpOk = false;
-      try { frpOk = ((await api('/api/plugins')).plugins || []).some((p) => p.id === 'frp' && p.configured); } catch {}
+      // is a relay (public URLs) available on this instance? — the declared capability, never a plugin id
+      const frpOk = await pluginProvides('relay');
       const render = async () => {
         // live refresh hook: the machine-ports-new broadcast re-renders an
         // OPEN dialog for this machine; self-clears once the dialog is gone

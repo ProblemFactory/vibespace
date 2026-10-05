@@ -25,7 +25,7 @@ import { SETTINGS_SCHEMA } from './settings-schema.js';
 import { agoText, api, copyText, createModalShell, escHtml, estDisplayPair, fetchJson, showConfirmDialog, showContextMenu, showInputDialog, showToast } from './utils.js';
 import { track } from './telemetry-client.js';
 import { openPermissionRulesDialog, runLocalOracle } from './permission-rules-view.js';
-import { permissionRulesCaps, resetCreditCapable } from './agent-meta.js';
+import { permissionRulesCaps, resetCreditCapable, billingRow, getBackendMeta } from './agent-meta.js';
 import { rosterResetOffer } from '../reset-credit.js'; // PURE (design-reset-credits p2): what a row says about stored reset credits
 import { openResetCreditDialog } from './reset-credit-dialog.js'; // THE one confirm dialog (three entry points: this roster, the chat wall card, the For-you item)
 // The oracle registry + its measured PROOFS and the measured-and-REJECTED
@@ -1119,7 +1119,7 @@ export function installManageAgents(App, ctx = {}) {
       const targets = []; // rows addressed by (section data-host, row data-id)
       const accts = this._accounts?.accounts || [];
       const gl = this._usageGlobal || this._usageGlobalIdent || {};
-      const claudeSubs = accts.filter(a => (a.backend || 'claude') !== 'codex' && a.type === 'subscription');
+      const claudeSubs = accts.filter(a => billingRow(a.backend).usage === 'accounts' && a.type === 'subscription');
       // Local CLI login (unless it IS a named account — that account's own
       // refresh covers the shared quota via the server-side merge).
       if ((gl.loggedIn || gl.email) && !gl.accountId) targets.push({ host: '', id: '__global__', body: { account: '__global__' } });
@@ -1522,7 +1522,7 @@ export function installManageAgents(App, ctx = {}) {
           if (stale() || !body.isConnected) return;
           const warn = document.createElement('div');
           warn.className = 'ob-backend';
-          warn.innerHTML = `<div class="usage-warn">${escHtml(t('The {backend} accounts list failed to render — {reason}', { backend: which === 'claude' ? 'Claude' : 'Codex', reason: String(err?.message || err) }))}</div>`;
+          warn.innerHTML = `<div class="usage-warn">${escHtml(t('The {backend} accounts list failed to render — {reason}', { backend: getBackendMeta(which).label, reason: String(err?.message || err) }))}</div>`;
           body.appendChild(warn);
         }
       };
@@ -1818,8 +1818,8 @@ export function installManageAgents(App, ctx = {}) {
           else if (presentN < names.length || outdatedN) toolsHtml = `<span class="ob-warn">${t('tools: {n}/{total} present, {stale} outdated', { n: presentN, total: names.length, stale: outdatedN })}</span>`;
           else toolsHtml = `<span class="ob-ok">✓ ${t('{n} tools current', { n: presentN })}</span>`;
           const hookHtml = ['claude', 'codex'].map((k) => rs.hooks?.[k]
-            ? `<span class="ob-ok">✓ ${k === 'claude' ? 'Claude' : 'Codex'} ${t('hook')}</span>`
-            : `<span class="ob-warn">${k === 'claude' ? 'Claude' : 'Codex'} ${t('hook')}: ${t('not registered')}</span>`).join(' &nbsp; ');
+            ? `<span class="ob-ok">✓ ${escHtml(getBackendMeta(k).label)} ${t('hook')}</span>`
+            : `<span class="ob-warn">${escHtml(getBackendMeta(k).label)} ${t('hook')}: ${t('not registered')}</span>`).join(' &nbsp; ');
           const extras = [];
           if (!rs.node) extras.push(`<span class="ob-bad">${t('node missing on the host — agent tools cannot run')}</span>`);
           if (rs.keeperSessions) extras.push(`<span>${t('{n} keeper session file(s)', { n: rs.keeperSessions })}</span>`);

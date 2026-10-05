@@ -29,7 +29,7 @@ export const FAMILIES = {
   channel: { ids: ['lark', 'slack', 'gmail', 'fake', 'agents'], owners: [{ dir: 'src/channels/' }] },
   display: { ids: ['xpra', 'vnc', 'desktop-singleton', 'x11vnc'], owners: [{ file: 'src/desktop-apps.js', table: /^const DISPLAY_BACKENDS\s*=/m }] },
   browser: { ids: ['cloak', 'chromium', 'agent-browser'], owners: [{ file: 'src/browser-switch.js' }, { file: 'src/browser-profiles.js', table: /^const PROVIDERS\s*=/m }] },
-  plugin: { ids: ['tailscale', 'frp'], owners: [{ file: 'src/plugins.js', table: /^ {2}defs\(\)\s*\{/m }] },
+  plugin: { ids: ['tailscale', 'frp'], owners: [{ dir: 'src/plugins/' }] },   // lane dc-plugins: a member = src/plugins/<id>.js + one index line
 };
 
 // FALSE POSITIVES — a line the regexes match that is not a branch on a family member. Each row: the family, the

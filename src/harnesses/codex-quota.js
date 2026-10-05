@@ -408,8 +408,39 @@ function limitSetFromSnapshot(snap, { identity = null, source = null } = {}) {
   return quotaModel.makeLimitSet({ identity, fetchedAt: at, source: src, limits, extra: Object.keys(extra).length ? extra : null });
 }
 
+// THE LIVE READ (rung 'rpc-rate-limits' — moved out of the pool engine, rv-harnesses H2, lane dc-pool-quota):
+// account/rateLimits/read on a LIVE local codex chat session's own app-server, through the wrapper verb
+// codex-read-limits. The reply lands as rate_limits_updated; the engine writes the cache FIRST, then hands the
+// outcome to settleLive, so a verdict taken next already sees it. The engine reaches both through the
+// descriptor for ANY harness that declares them and never names one. §ban-safety unchanged: the official
+// client does the fetch.
+function readLive(session, timeoutMs, { fresh = false } = {}) {
+  return new Promise((resolve) => {
+    const waiters = (session._codexLimitsWaiters = session._codexLimitsWaiters || []);
+    const entry = {};
+    const drop = () => { const i = waiters.indexOf(entry); if (i >= 0) waiters.splice(i, 1); };
+    entry.timer = setTimeout(() => { drop(); resolve({ ok: false, reason: `no rate_limits_updated within ${timeoutMs}ms` }); }, timeoutMs);
+    if (entry.timer.unref) entry.timer.unref();
+    entry.resolve = (r) => { clearTimeout(entry.timer); drop(); resolve(r); };
+    waiters.push(entry);
+    // SINGLE-FLIGHT per session (verify r1, reproduced: two presses in flight wrote two verbs = two vendor reads):
+    // a read already waiting on this session answers every waiter — the verb goes out once per round trip.
+    // `fresh` = a deliberate RE-ASK after silence (the reset hold's 30 s retry): the earlier push may be lost, so
+    // the verb goes out again and the older waiters ride its answer
+    if (waiters.length > 1 && !fresh) return;
+    try { session.pty.write(JSON.stringify({ type: 'codex-read-limits' }) + '\n'); }
+    catch (e) { entry.resolve({ ok: false, reason: 'stdin write failed: ' + e.message }); }
+  });
+}
+function settleLive(session, result) {
+  const waiters = session._codexLimitsWaiters;
+  if (!waiters || !waiters.length) return;
+  for (const w of waiters.splice(0)) { try { w.resolve(result); } catch { } }
+}
+
 module.exports = {
   normalize: normalizeCodexRateLimit,
+  readLive, settleLive, // the live read the engine calls for any harness that declares it (above)
   signalFromStream,
   probe: capsOf('codex').quotaProbe, // 'rpc-rate-limits': account/rateLimits/read on a LIVE app-server
   classifyAuthFailure,

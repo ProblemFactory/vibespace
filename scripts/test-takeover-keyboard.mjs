@@ -1450,6 +1450,7 @@ const CENSUS = [
   ['channel-window.js', 'tabindex', 'widget+control', 'the message list (-1, PageUp / Home); an info chip (0)'],
   ['channels-panel.js', 'input', 'text+control', 'search, account fields; the enabled checkbox'],
   ['channels-panel.js', 'select', 'choice', 'account fields'],
+  ['channels-panel.js', 'canvas', 'none', 'int214: the freshness pill fit\'s text measure (fitRowPills — never in the document)'],
   ['channels-panel.js', 'tabindex', 'control', 'a paged list\'s END (0): focus there reads the next page (design 008 + owner 2026-10-03, seamless lists) — no keys of its own'],
   ['chat-input.js', 'input', 'control', 'the attach / file / folder pickers (type=file)'],
   ['chat-input.js', 'textarea', 'text', 'THE CHAT COMPOSER'],

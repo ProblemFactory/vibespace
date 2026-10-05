@@ -24,7 +24,6 @@
   "src/channel-filter.js": 1,
   "src/channel-policy.js": 1,
   "src/channel-record.js": 1,
-  "src/channels/slack-manifest.js": 1,
   "src/channels/slack-words.js": 2,
   "src/design-tokens.js": 1,
   "src/desktop-display.js": 1,

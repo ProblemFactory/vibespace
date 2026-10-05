@@ -86,7 +86,7 @@ function mkWorld({ members = 13, pooled = 25, hot = true, explicit = true, engin
     wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { }, serverNotice: (k, t) => notices.push(t),
     serverSetting: () => undefined, getAccounts: () => am, getHosts: () => null, getUsageHistory: () => null,
     recordUsageAttribution() { }, adapterRegistry: { get() { return null; } },
-    getAutoResume: () => null, getOtelIngest: () => ({ observedOrgFor: () => null }), getQuotaProbe: () => null,
+    getAutoResume: () => null, getQuotaProbe: () => null,
   });
   // a burn on every member, so a member with live conversations HAS a crossing to project (the answer compared below)
   eng.usageEstimator.burnFor = (id) => { const i = ids.indexOf(id); return i < 0 ? {} : { fiveHour: 0.0015 * (1 + (i % 4)), sevenDay: 0.0002 }; };
@@ -177,7 +177,7 @@ const engineAnswers = (w, eng, viaIndex, now) => {
 };
 for (const hot of [true, false]) {
   const w = mkWorld({ hot });
-  const pre = PRE_ENGINE.create({ ...{}, app: { get() { }, post() { }, put() { }, delete() { }, use() { }, locals: {} }, rootDir: w.root, USAGE_CACHE_DIR: w.cacheDir, activeSessions: w.sessions, wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { }, serverNotice() { }, serverSetting: () => undefined, getAccounts: () => w.am, getHosts: () => null, getUsageHistory: () => null, recordUsageAttribution() { }, adapterRegistry: { get() { return null; } }, getAutoResume: () => null, getOtelIngest: () => ({ observedOrgFor: () => null }), getQuotaProbe: () => null });
+  const pre = PRE_ENGINE.create({ ...{}, app: { get() { }, post() { }, put() { }, delete() { }, use() { }, locals: {} }, rootDir: w.root, USAGE_CACHE_DIR: w.cacheDir, activeSessions: w.sessions, wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { }, serverNotice() { }, serverSetting: () => undefined, getAccounts: () => w.am, getHosts: () => null, getUsageHistory: () => null, recordUsageAttribution() { }, adapterRegistry: { get() { return null; } }, getAutoResume: () => null, getQuotaProbe: () => null });
   pre.usageEstimator.burnFor = w.eng.usageEstimator.burnFor;
   let rounds = 0, bad = [], projected = 0;
   for (const [st, apply] of Object.entries(STATES)) {
@@ -232,7 +232,7 @@ async function runTick(w, eng, loopMod, { midTick = null } = {}) {
 {
   for (const [label, mid] of [['no change', null], ['a member signs out after the 5th account', (w) => STATES['wiped (no accessToken)'](w, w.ids[7])], ['a login turns unreadable after the 5th account', (w) => STATES['unreadable (garbage JSON)'](w, w.ids[0])], ['a member signs back in after the 5th account', (w) => restore(w, w.ids[4])]]) {
     const w = mkWorld({ hot: true });
-    const pre = PRE_ENGINE.create({ app: { get() { }, post() { }, put() { }, delete() { }, use() { }, locals: {} }, rootDir: w.root, USAGE_CACHE_DIR: w.cacheDir, activeSessions: w.sessions, wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { }, serverNotice() { }, serverSetting: () => undefined, getAccounts: () => w.am, getHosts: () => null, getUsageHistory: () => null, recordUsageAttribution() { }, adapterRegistry: { get() { return null; } }, getAutoResume: () => null, getOtelIngest: () => ({ observedOrgFor: () => null }), getQuotaProbe: () => null });
+    const pre = PRE_ENGINE.create({ app: { get() { }, post() { }, put() { }, delete() { }, use() { }, locals: {} }, rootDir: w.root, USAGE_CACHE_DIR: w.cacheDir, activeSessions: w.sessions, wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { }, serverNotice() { }, serverSetting: () => undefined, getAccounts: () => w.am, getHosts: () => null, getUsageHistory: () => null, recordUsageAttribution() { }, adapterRegistry: { get() { return null; } }, getAutoResume: () => null, getQuotaProbe: () => null });
     pre.usageEstimator.burnFor = w.eng.usageEstimator.burnFor;
     if (/signs back in/.test(label)) STATES['wiped (no accessToken)'](w, w.ids[4]);
     const snap = () => Object.fromEntries(w.ids.map((id) => [id, fs.existsSync(w.credsOf(id)) && fs.statSync(w.credsOf(id)).isFile() ? fs.readFileSync(w.credsOf(id), 'utf8') : null]));

@@ -7867,4 +7867,8 @@ export default {
   "API call {call} · awaiting you": "API 呼び出し {call} · 承認待ち",
   "Starting — rebuilding its cache index ({files} files), {elapsed} so far; it mounts by itself when the scan ends (waits up to {max} min)": "起動中 — キャッシュ索引を再構築しています（{files} ファイル）、経過 {elapsed}。スキャンが終わると自動でマウントされます（最大 {max} 分待ちます）",
   "Files written while it was not mounted were moved to {dest} — nothing was deleted": "マウントされていない間に書き込まれたファイルは {dest} に移しました — 何も削除していません",
+  "Unlike the account: {grant}": "アカウントと異なる：{grant}",
+  "✓ Connected as {user} — finish with the “Connect” button below.": "✓ {user} として接続済み——下の「接続」ボタンで完了。",
+  "✓ Connected as {user} — finish with the “Create & connect” button below.": "✓ {user} として接続しました — 下の「作成して接続」で完了します。",
+  "Slack’s last page says “Done here” and this dialog finishes by itself — even when you approved in another browser. If that page shows a code instead, or does not load, paste the code or its address here:": "Slack の最後のページに「ここでの操作は完了です」と表示され、このダイアログは自動的に完了します（別のブラウザで許可した場合も）。代わりにコードが表示された場合や、ページが開かない場合は、そのコードかアドレスをここに貼り付けてください：",
 };

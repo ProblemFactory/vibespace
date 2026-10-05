@@ -478,6 +478,17 @@ function withoutMembers(rec, ids) {
   return c.tabs.length >= 2 ? c : null;
 }
 
+/** THE QUEUED CHAIN'S VERDICT (lane split-restore-hidden, userW inc-muundq37-cjay): a chain record waiting for its
+ *  members is rebuilt WHOLE — its split and ratio exactly as recorded — the moment its last member exists (`has(id)`);
+ *  until then it waits, however late the member comes (a hidden desktop's first visit, an async opener). Only a member
+ *  the RECORD dropped (`gone`: a window the page could not build) shrinks it — the rest rebuilt without it (removeTab
+ *  decides what a split that lost its pair becomes), or nothing left to group. Never degraded because a member was late. */
+function restoreVerdict(rec, has, gone = []) {
+  const c = gone && gone.length ? withoutMembers(rec, gone) : rec;
+  if (!c || !Array.isArray(c.tabs) || c.tabs.length < 2) return { act: 'drop' };
+  return c.tabs.every((id) => has(id)) ? { act: 'restore', chain: c } : { act: 'wait', chain: c };
+}
+
 /** "Swap left and right": the SIDE LISTS change places with the pair (the
  *  sync key carries the cut and the pair order — the other clients rebuild). */
 function swapSides(chain) {
@@ -712,6 +723,7 @@ module.exports = {
   clampRatio, splitValid, normalizeChain, cloneChain, chainSyncKey, ratioDiffers, displayedPanes, splitAnchor, pairFor, splitColumns, paneMinPx, visualTabOrder, sidesOf, sideOf, swappedPair, splitPartner,
   showTab, enterSplit, insertTab, moveTab, removeTab, swapSides,
   withoutMembers, // inc-mukeyzpt-lpou: a record read without the windows this client closed
+  restoreVerdict, // inc-muundq37-cjay: a queued chain waits for its LAST member, then is rebuilt whole
   // MULTIVIEW (design-browser-multiview §3 (b) / D3 / D5): the partner rule, the follow verdict, the new live view's place, the fold-back
   PANE_KINDS, partnerFor, isPartnered, followFor, livePlacement, foldBackTarget,
   // inc-muiq348r-jwb5: a NAMED window shows its own tab (the host included); a PRESS keeps the tab on show

@@ -24,6 +24,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -307,14 +308,14 @@ const accounts = {
 };
 const engMod = require(path.join(REPO, 'src/server/usage-pool-engine.js'));
 const app = { get() { }, post() { }, put() { }, delete() { }, use() { }, locals: {} };
-const eng = engMod.create({
+const engOpts = {
   app, rootDir: dir, USAGE_CACHE_DIR: cacheDir, activeSessions: sessions,
   wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { }, serverNotice() { },
   serverSetting() { return undefined; }, getAccounts() { return accounts; }, getHosts() { return null; },
   getUsageHistory() { return null; }, recordUsageAttribution() { }, adapterRegistry: { get() { return null; } },
-  getAutoResume: () => null, getOtelIngest: () => null,
-  getQuotaProbe: () => (key) => { cliSpy.push(key); return true; }, // the cli-usage rung's refresher (server.js: usage.refreshViaCliPanel)
-});
+  getAutoResume: () => null,   getQuotaProbe: () => (key) => { cliSpy.push(key); return true; }, // the cli-usage rung's refresher (server.js: usage.refreshViaCliPanel)
+};
+const eng = engMod.create(engOpts);
 ok('engine exports the dispatcher + the registry lookups (functional seam, never a source grep)', ['probeQuotaForKey', 'quotaSourceFor', 'quotaBackendFor'].every((k) => typeof eng[k] === 'function'));
 ok('quotaSourceFor: claude/codex/shell resolve; falsy = legacy claude record; unknown = NULL source (loud, once)', eng.quotaSourceFor('codex').probe === 'rpc-rate-limits' && eng.quotaSourceFor(undefined).probe === 'cli-usage' && eng.quotaSourceFor('shell').probe === null && eng.quotaSourceFor('gemini') === harnesses.NULL_QUOTA);
 ok('quotaBackendFor: named account → its backend (legacy = claude); __global_codex__ → codex; identity-less key → the asking session; else claude',
@@ -392,7 +393,7 @@ const cxSess = mkCodex('w-cx', 'cxs-1', (m, s) => {
   ok('WIRING: scheduleWallProbe and beforeAutoResumeFire both call probeQuotaForKey(target, { session })', (eng.match(/probeQuotaForKey\(target, \{ session \}\)/g) || []).length === 2);
   ok('WIRING: getQuotaProbe is consumed ONLY inside the dispatcher\'s cli-usage rung', (eng.match(/getQuotaProbe\?\.\(\)/g) || []).length === 1 && /if \(rung === 'cli-usage'\) \{\s*\n\s*const probe = getQuotaProbe\?\.\(\);/.test(eng));
   ok('WIRING: recordRateLimitEvent classifies through the session harness (no direct parseRateLimitEvent in the engine)', /quotaSourceFor\(session\.backend\)\.signalFromStream\(msg\)/.test(eng) && !/parseRateLimitEvent\(/.test(eng));
-  ok('WIRING: recordCodexQuotaSignal consumes the harness signal (snapshot / tripped / resetsAtSec), NAMES the reading channel at the write (2026-09-07 r3: writeSnap takes `source` as a parameter — the task_failed branch is a refusal, not this push) and settles probe waiters AFTER the cache write', /const snap0 = sig\?\.snapshot \|\| null;[\s\S]{0,200}const w = writeSnap\(snap0, 'codex-rate-limits'\);\s*\n[\s\S]{0,2000}settleCodexLimitsWaiters\(session, w && w\.key \?/.test(eng) && /const tripped = sig\.tripped;/.test(eng) && /const resets = sig\.resetsAtSec;/.test(eng) && !/require\('\.\.\/usage-routes\.js'\)/.test(eng));
+  ok('WIRING: recordCodexQuotaSignal consumes the harness signal (snapshot / tripped / resetsAtSec), NAMES the reading channel at the write (2026-09-07 r3: writeSnap takes `source` as a parameter — the task_failed branch is a refusal, not this push) and settles probe waiters AFTER the cache write', /const snap0 = sig\?\.snapshot \|\| null;[\s\S]{0,200}const w = writeSnap\(snap0, 'codex-rate-limits'\);\s*\n[\s\S]{0,2000}settleLive\(session, w && w\.key \?/.test(eng) && /const tripped = sig\.tripped;/.test(eng) && /const resets = sig\.resetsAtSec;/.test(eng) && !/require\('\.\.\/usage-routes\.js'\)/.test(eng));
   ok('WIRING: notePoolAuthFailure asks the session harness for the auth verdict', /quotaSourceFor\(session\.backend\)\.classifyAuthFailure\(info\)/.test(eng));
   ok('WIRING: the wall-machine pins test-auto-resume relies on are intact (verify probe, ladder, veto)', /_wallVerifyAt\.set\(scope, Date\.now\(\)\);\s*\n\s*scheduleWallProbe\(session, scope, model, 0\)/.test(eng) && /async function beforeAutoResumeFire/.test(eng) && /WALL_PROBE_BACKOFF = \[0, 1800000, 3600000, 7200000\]/.test(eng));
   ok('server.js still hands the cli-usage refresher to the engine (usage.refreshViaCliPanel — the ONE `claude -p /usage` spawn site)', /getQuotaProbe: \(\) => \{ try \{ return usage\.refreshViaCliPanel; \}/.test(read('server.js')));
@@ -405,6 +406,56 @@ const cxSess = mkCodex('w-cx', 'cxs-1', (m, s) => {
   const ss = read('src/server/stdout/claude-stream-json.js') + '\n' + read('src/server/stdout/codex-events.js'); // S5: per-protocol consumer modules
   ok('the stdout consumers still feed both engine entry points (claude rate_limit_event / codex quota events) — S5 moved the parse behind the registry, S4 owns the signals', /recordRateLimitEvent\(session, msg\)/.test(ss) && /recordCodexQuotaSignal\?\.\(session, msg\.payload(?:, msg)?\)/.test(ss));
   ok('the codex wrapper still serves the verb the rpc rung writes (codex-read-limits → account/rateLimits/read → rate_limits_updated)', /msg\.type === 'codex-read-limits'/.test(read('data/bin/codex-chat-wrapper.js')) && /account\/rateLimits\/read/.test(read('data/bin/codex-chat-wrapper.js')));
+}
+
+// ── 9. A DESCRIPTOR-ONLY harness is served (lane dc-pool-quota, rv-harnesses H2/H3) ──
+// A fake harness declaring quota.readLive/settleLive + a creds row (spawnForm 'isolated-home') is probed by the pool
+// engine and spawned by accounts.js with ZERO engine/accounts edits; a patched copy with ONE codex branch restored
+// (the pre-lane shape) refuses it — the control that proves the legs judge the dispatch, not the fixture.
+{
+  const { BACKEND_CAPS } = require(path.join(REPO, 'src/backend-caps.js'));
+  const { NULL_QUOTA } = require(path.join(REPO, 'src/harnesses/null-quota.js'));
+  const { AccountManager } = require(path.join(REPO, 'src/accounts.js'));
+  const M = mutantCopies('quota-src', REPO);
+  BACKEND_CAPS.fakeq = { ...BACKEND_CAPS.codex };
+  const reads = [];
+  harnesses.register({
+    id: 'fakeq', label: 'FakeQ', kind: 'chat', caps: BACKEND_CAPS.fakeq,
+    quota: { ...NULL_QUOTA, probe: 'rpc-rate-limits',
+      readLive(s, ms, opts) { reads.push([s._webuiId, ms, !!(opts && opts.fresh)]); return Promise.resolve({ ok: true, key: s._accountId }); },
+      settleLive() { } },
+    creds: { ...harnesses.get('codex').creds, subsDirName: 'fakeq-subs', spawnEnvVar: 'FAKEQ_HOME', defaultIdField: 'defaultFakeqAccountId', loginLabel: 'FakeQ', parseAuth: () => ({ loggedIn: true, email: 'fq@example.test' }) },
+  });
+  ROSTER['fq-1'] = { id: 'fq-1', name: 'FQ one', type: 'subscription', backend: 'fakeq' };
+  sessions.set('w-fq', { backend: 'fakeq', mode: 'chat', host: null, _webuiId: 'w-fq', _accountId: 'fq-1', pty: { write() { } } });
+  const r = await eng.probeQuotaForKey('fq-1');
+  ok('§9 a descriptor-only harness: the engine probes it through ITS quota.readLive (no engine edit)', r.ok === true && r.backend === 'fakeq' && r.rung === 'rpc-rate-limits' && reads.length === 1 && reads[0][0] === 'w-fq', { r, reads });
+  ok('§9 …its machine login has its OWN usage key (never claude\'s __global__); __global__ stays claude\'s',
+    eng.quotaBackendFor('__global_fakeq__') === 'fakeq' && eng.quotaBackendFor('__global__') === 'claude' && eng.quotaBackendFor('__global_codex__') === 'codex');
+  const engSrc = read('src/server/usage-pool-engine.js');
+  const needle = '  if (liveReadSource(backend)) {';
+  ok('§9 control anchor: the live-read dispatch is spelled exactly once', engSrc.split(needle).length === 2);
+  const engP = M.load('src/server/usage-pool-engine.js', engSrc.replace(needle, "  if (backend === 'codex') {"), 'codex-branch').create(engOpts);
+  const rp = await engP.probeQuotaForKey('fq-1');
+  ok('§9 CONTROL: one codex branch restored in a patched engine ⇒ the fake harness is refused', rp.ok === false && reads.length === 1, rp);
+  const adir = path.join(dir, 'acct-fq');
+  fs.mkdirSync(adir, { recursive: true });
+  const fqRec = { id: 'fq-1', name: 'FQ one', type: 'subscription', backend: 'fakeq' };
+  const am = new AccountManager({ dataDir: adir, platform: 'linux' });
+  am._state.accounts.push({ ...fqRec });
+  let sp = null, e1 = null; try { sp = am.resolveForSpawn('fq-1', 'fakeq'); } catch (e) { e1 = e.message; }
+  ok('§9 accounts.js spawns it from its creds row (spawnEnvVar = its own dir; no accounts edit)', !!sp && sp.localEnv && sp.localEnv.FAKEQ_HOME === path.join(adir, 'fakeq-subs', 'fq-1') && sp.kind === 'fakeq-subscription', sp || e1);
+  let e2 = null; try { am.resolveForSpawn('fq-1', 'claude'); } catch (e) { e2 = e.message; }
+  ok('§9 …and the securestorage form still refuses its record', /not a Claude account/.test(String(e2)), e2);
+  const accSrc = read('src/accounts.js');
+  const an = "    if (this._credsOf(backend)?.spawnForm === 'isolated-home') return";
+  ok('§9 control anchor: the spawn-form dispatch is spelled exactly once', accSrc.split(an).length === 2);
+  const am2 = new (M.load('src/accounts.js', accSrc.replace(an, "    if (backend === 'codex') return"), 'codex-branch').AccountManager)({ dataDir: adir, platform: 'linux' });
+  am2._state.accounts.push({ ...fqRec });
+  let e3 = null; try { am2.resolveForSpawn('fq-1', 'fakeq'); } catch (e) { e3 = e.message; }
+  ok('§9 CONTROL: one codex branch restored in a patched accounts.js ⇒ the fake creds row is not served', /not a Claude account/.test(String(e3)), e3);
+  sessions.delete('w-fq'); delete ROSTER['fq-1'];
+  harnesses.unregister('fakeq'); delete BACKEND_CAPS.fakeq;
 }
 
 // ── 8. §ban-safety: the vendor whitelist stays green ──

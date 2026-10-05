@@ -12,6 +12,15 @@ import { t } from './i18n.js';
 // that never ends).
 const SERVICE_START_WAIT_MS = 25000;
 
+/** A built-in plugin row (GET /api/plugins) declares what it provides — 'relay' / 'tunnel' / 'serve' (its
+ *  src/plugins/<id>.js `provides`). Every client gate reads that declaration, never a plugin id. */
+const provides = (p, cap) => Array.isArray(p?.provides) && p.provides.includes(cap);
+/** Is a CONFIGURED plugin providing `cap` on this instance (e.g. 'relay' = public URLs)? The ONE probe the
+ *  ports surfaces ask (rv-client F9: it was spelled twice, by id). An unreachable server answers false. */
+export async function pluginProvides(cap) {
+  return (((await fetchJson('/api/plugins')) || {}).plugins || []).some((p) => provides(p, cap) && p.configured);
+}
+
 export function installPluginsUI(App) {
   Object.assign(App.prototype, {
   async openPluginsDialog({ container } = {}) {
@@ -42,34 +51,36 @@ export function installPluginsUI(App) {
         const card = document.createElement('div');
         card.className = 'plugin-card';
         const running = !!p.running;
-        const isFrp = p.id === 'frp';
-        const isOc = p.id === 'opencode-serve';
-        const stateTxt = isOc
+        // the card's sections follow the plugin's DECLARED capability (src/plugins/<id>.js `provides`), never its id
+        const isRelay = provides(p, 'relay');
+        const isServe = provides(p, 'serve');
+        const isTunnel = provides(p, 'tunnel');
+        const stateTxt = isServe
           ? (!p.installed ? t('the opencode CLI is not installed')
             : p.parkedKind === 'runaway' ? t('stopped as a runaway')
               : p.parkedKind === 'blocked' ? t('blocked by a serve we could not identify')
                 : p.parked ? t('parked after repeated crashes')
                 : running ? t('running on 127.0.0.1:{port}', { port: p.port || '?' })
                   : p.starting ? t('starting…') : t('turned off'))
-          : isFrp
+          : isRelay
             ? (p.configured === false ? t('relay not configured on this instance')
               : running ? t('connected') : p.installed ? t('stopped') : t('not installed'))
             : p.mode === 'system' ? t('managed by the system (outside VibeSpace)')
               : running ? (p.backendState === 'Running' ? t('connected') : (p.backendState || t('starting…')))
                 : p.installed ? t('stopped') : t('not installed');
-        const dot = `<span class="plugin-dot ${isOc ? (running ? 'ok' : p.parked ? 'err' : p.starting ? 'warn' : '')
-          : isFrp ? (running ? 'ok' : '')
+        const dot = `<span class="plugin-dot ${isServe ? (running ? 'ok' : p.parked ? 'err' : p.starting ? 'warn' : '')
+          : isRelay ? (running ? 'ok' : '')
             : (running && p.backendState === 'Running' ? 'ok' : running ? 'warn' : '')}"></span>`;
         let detail = '';
-        if (isOc) {
+        if (isServe) {
           if (p.envForced === true) detail += `<div class="plugin-detail plugin-cfg-hint">${escHtml(t('Forced ON by the environment (VIBESPACE_OPENCODE_SERVE=1) — the switch below is ignored on this instance.'))}</div>`;
           if (p.envForced === false) detail += `<div class="plugin-detail plugin-cfg-warn">${escHtml(t('Forced OFF by the environment (VIBESPACE_OPENCODE_SERVE=0) — the switch below is ignored on this instance.'))}</div>`;
           if (!p.installed) detail += `<div class="plugin-detail plugin-cfg-warn">${escHtml(t('The `opencode` CLI was not found on PATH. Install OpenCode (https://opencode.ai) — VibeSpace runs YOUR copy, it never downloads one.'))}</div>`;
           if (running) detail += `<div class="plugin-detail">${escHtml(t('opencode {version} · pid {pid} · {source}', { version: p.version || '?', pid: p.pid || '?', source: p.source === 'reused' ? t('adopted an already-running serve') : t('started by VibeSpace') }))}${p.rssMb ? ' · ' + escHtml(t('{mb} MB', { mb: p.rssMb })) : ''}${p.cpuPct != null ? ' · ' + escHtml(t('{pct}% CPU', { pct: p.cpuPct })) : ''}</div>`;
           if (!running && p.reason) detail += `<div class="plugin-detail plugin-cfg-warn">${escHtml(p.reason)}</div>`;
         }
-        if (isFrp && p.configured) detail += `<div class="plugin-detail">${escHtml(t('Relay'))}: <code>${escHtml(p.server || '')}</code> · ${escHtml(t('publishes forwarded ports to {host}', { host: p.publicHost }))}</div>`;
-        if (isFrp && p.configured === false) {
+        if (isRelay && p.configured) detail += `<div class="plugin-detail">${escHtml(t('Relay'))}: <code>${escHtml(p.server || '')}</code> · ${escHtml(t('publishes forwarded ports to {host}', { host: p.publicHost }))}</div>`;
+        if (isRelay && p.configured === false) {
           // Name the MISSING field (2.227.10) — "not configured" alone sent a
           // user in circles while only the token was blank.
           const miss = (p.missing || []).map((k) => ({ serverAddr: t('relay address'), token: t('relay token') }[k] || k));
@@ -117,7 +128,7 @@ export function installPluginsUI(App) {
         // frp: no login/mode/flags. The relay config fields (below) always
         // show so the user can enter/override the relay; install/start appear
         // only once a relay is configured (env default or user-entered).
-        if (isOc) {
+        if (isServe) {
           // The OpenCode service has nothing to install (it runs the user's own
           // CLI) and nothing to configure — Start / Stop and one deliberate
           // on-switch. The env override, when set, WINS: say so and disable the
@@ -140,7 +151,7 @@ export function installPluginsUI(App) {
           lbl.append(cb, document.createTextNode(' ' + t('Run this service whenever VibeSpace runs')));
           actions.appendChild(lbl);
         } else if (p.mode !== 'system') {
-          if (isFrp && !p.configured) {
+          if (isRelay && !p.configured) {
             // no relay yet — show only the config fields (added after actions)
           } else if (!p.installed) {
             btn(t('Install'), 'mounts-btn-primary', async () => {
@@ -151,7 +162,7 @@ export function installPluginsUI(App) {
           } else if (!running) {
             btn(t('Start'), 'mounts-btn-primary', () => api('start'));
           } else {
-            if (!isFrp && p.backendState !== 'Running') {
+            if (isTunnel && p.backendState !== 'Running') {
               const loginBtn = btn(t('Log in…'), 'mounts-btn-primary', async () => {
                 const res = await api('login');
                 if (res.done) { showToast(t('Already connected')); render(); return; }
@@ -174,7 +185,7 @@ export function installPluginsUI(App) {
               // dialog (showConfirmDialog destructures its first argument), and OK stopped frp / Tailscale unsaid
               const ok = await showConfirmDialog({
                 title: t('Stop {name}?', { name: p.label }),
-                message: isFrp
+                message: isRelay
                   ? t('Public URLs from this instance will stop working until you start it again.')
                   : t('Tailnet connections from this instance will drop. The login persists — starting again reconnects without re-auth.'),
                 confirmText: t('Stop'),
@@ -197,7 +208,7 @@ export function installPluginsUI(App) {
 
           // ── frp relay config (editable — the cluster injects defaults, the
           //    user can override any of it) ──
-          if (isFrp) {
+          if (isRelay) {
             const cfg = p.config || {};
             const row = (label, key, val, ph, isPw) => {
               const r = document.createElement('div'); r.className = 'plugin-cfg-row';
@@ -227,7 +238,7 @@ export function installPluginsUI(App) {
           }
 
           // ── Networking mode + extra flags (advanced config) — tailscale only ──
-          if (!isFrp && p.installed) {
+          if (isTunnel && p.installed) {
             const modes = [
               ['auto', t('Auto')],
               ['kernel', t('Kernel (full tunnel)')],

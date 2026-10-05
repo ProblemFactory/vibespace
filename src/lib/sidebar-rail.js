@@ -12,6 +12,7 @@ import { badgeCounts, badgeText, heldText } from './jobs-layout.js';
 import { renderChannelsPanel } from './channels-panel.js';
 import { copyText, escHtml, showToast, fetchJson, showContextMenu, showConfirmDialog, showInputDialog, absUrl } from './utils.js';
 import { registerMenuItem } from './contributions.js';
+import { pluginProvides } from './plugins-ui.js';
 import { registerWindowType } from './window-types.js';
 import { track } from './telemetry-client.js';
 import { CLEARED_TEXT } from '../record-clear.js'; // PURE: a cleared service's label / scan tag holds the stored key — worded here
@@ -898,8 +899,7 @@ export function installSidebarRail(Sidebar) {
       let hosts = [];
       try { hosts = ((await api('/api/hosts')) || {}).hosts || []; } catch { }
       // publish needs the frp relay — without it the button must SAY so, not no-op
-      let frpOk = false;
-      try { frpOk = (((await api('/api/plugins')) || {}).plugins || []).some((p) => p.id === 'frp' && p.configured); } catch { }
+      const frpOk = await pluginProvides('relay'); // the declared capability, never a plugin id
       const FRP_MSG = tr('Public URLs need the frp relay — not configured on this instance');
       const machines = [{ id: '__local__', name: tr('This machine'), online: true }, ...hosts.map((h) => ({ id: h.id, name: h.name || h.id, online: h.transport === 'dial' ? !!h.online : true }))];
       const nameOf = (hid) => (machines.find((m) => m.id === hid) || {}).name || hid;

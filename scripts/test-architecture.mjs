@@ -180,12 +180,20 @@ const PURE = new Set(['src/timed-sync.js' /* design 011 lane 1 (store-timing): t
   //     step function is pinned by a seeded invariant walk (test-channel-drain).
   'src/channel-drain.js',
   //   channel-blocks — THE RENDER LAYER'S RUNGS (design §25, 2026-09-27): raw →
-  //     the typed block tree (the generic rung, the mail rung, the Lark rung,
-  //     the stored-record rung, cleanSubject, the preview). The adapters run it
+  //     the typed block tree (the generic rung, the mail rung, cleanSubject,
+  //     the preview, THE KIT a vendor's rungs build on). The adapters run it
   //     at ingest, the engine at read time for a stored record, the browser
   //     bundle for the fallback — one definition. Imports only channel-record
   //     (PURE → PURE), where the block SCHEMA lives beside the record.
   'src/channel-blocks.js',
+  //   channels/lark/blocks — LARK'S RUNGS (lane dc-channels-blocks, 2026-10-05: a
+  //     vendor's message-shape reader lives with the vendor, the Slack precedent):
+  //     post / card / system line / THE MARKUP READER / the stored-record rung.
+  //     Imports only channel-blocks + channel-record (PURE → PURE). THE PROOF
+  //     (test-channel-blocks ⑲): a vendor nobody shipped renders through the
+  //     real engine with a blocks module of its own + declared hooks (blocksOf,
+  //     rawFacts, caps.glyph) and no shared module names it.
+  'src/channels/lark/blocks.js',
   //   channel-thread + channel-reactions (lane channel-threads, 2026-09-28): a message's PLACE (what it answers,
   //     which thread, the thread's root, counts, the pane mode, the agent's words) and a message's REACTIONS
   //     (the fold of the side log, the vocabulary rule, the words — never a reactor's name to an agent). Both
@@ -228,6 +236,10 @@ const PURE = new Set(['src/timed-sync.js' /* design 011 lane 1 (store-timing): t
   // harness precedent for channel adapters; imports nothing, bundled (settings-schema derives the "Per vendor" rows),
   // required by the adapters (caps spread budgetOf / paceOf), the registry (undeclared keys refused) and the engine
   'src/channel-settings.js',
+  'src/channels/slack-manifest.js',
+  // THE CHANNEL VENDOR LIST + each vendor's MANIFEST (lane dc-channels-manifest): bundled — channel-settings,
+  // integration-registry and settings-schema derive every vendor's rows from them; the engine derives REAL_ADAPTERS
+  'src/channels/registry-list.js', 'src/channels/lark/manifest.js', 'src/channels/gmail/manifest.js', 'src/channels/slack/manifest.js',
   // THE node-pty DUCK's listener SET (B-ae4b): daemonPtyShim, the R6 pipe duck and the OpenCode
   // serve terminal share it so setupSessionPty's liveness stamp is never replaced by the consumer
   'src/pty-duck.js',
@@ -1444,7 +1456,7 @@ for (const [edge] of EXCEPTIONS) {
     { file: 'src/discovery-facts.js', needle: "spawnSync('lsof', ['-Fpn', '+D', root]", why: 'NO-/proc FALLBACK ONLY (macOS/BSD codex liveness), ONE per scan of the whole sessions tree.' },
     { file: 'src/agentd/agentd.js', needle: "spawnSync('ps', ['-p', String(pid), '-o', 'lstart=']", why: 'NO-/proc FALLBACK ONLY (pidStartTime) — /proc/<pid>/stat field 22 is the rung above it. Asked when a pipe session is adopted, not per poll.' },
     { file: 'src/agentd/agentd.js', needle: "execFileSync('ps', ['-p', String(pid), '-o', 'command=']", why: 'NO-/proc FALLBACK ONLY (acquireSingleton), and ONCE per daemon start — /proc/<pid>/cmdline is the rung above it.' },
-    { file: 'src/plugins.js', needle: "execFileSync('pgrep', ['-x', 'tailscaled']", why: 'ONE per tailscale status read (a plugin card), never per session; the loop under it reads /proc cmdlines, not more spawns.' },
+    { file: 'src/plugins/tailscale.js', needle: "execFileSync('pgrep', ['-x', 'tailscaled']", why: 'ONE per tailscale status read (a plugin card), never per session; the loop under it reads /proc cmdlines, not more spawns.' },
     { file: 'src/server/boot-restore.js', needle: "execFileSync('fuser', [path.join(SOCKETS_DIR, sockFile)]", why: 'BOOT ONLY (restoreSessions, once per surviving socket, before this server serves anybody) — "is this dtach socket still owned" has no /proc rung that does not re-implement fuser. Out of scope on purpose: the incident is create/kill/poll, and a boot pays this once.' },
     { file: 'src/server/boot-restore.js', needle: "execFileSync('fuser', [socketPath]", why: 'BOOT ONLY (same sweep, the per-socket branch).' },
     { file: 'src/server/boot-restore.js', needle: "execFileSync('pgrep', ['-f', socketPath], { encoding: 'utf-8', timeout: 2000 });", why: 'BOOT ONLY — the second rung of the same liveness question when `fuser` is absent.' },
@@ -1640,6 +1652,28 @@ for (const [edge] of EXCEPTIONS) {
     'NEGATIVE CONTROL: the old key-literal shape AND the argument-literal shape are both offenders (this census can go red)');
   ok([...`serverSetting(GENERIC_LEGACY_KEYS.autoResumeOnLimit)`.matchAll(KEY_LITERAL)].length === 0 && /GENERIC_LEGACY_KEYS\.autoResumeOnLimit/.test(read('src/server/auto-resume.js')),
     'the generic auto-resume default is read by NAME (GENERIC_LEGACY_KEYS), which the census does not count');
+  // 46e. THE POOL / QUOTA / CREDS CENSUS (lane dc-pool-quota, rv-harnesses H2 / H3 / M11). The pool engine
+  //      reaches a harness's live quota read through its QuotaSignalSource (quota.readLive / settleLive — codex:
+  //      src/harnesses/codex-quota.js) and its gates through caps / creds rows; accounts.js picks a spawn form
+  //      from creds.spawnForm. The engine spelled 12 harness-id branches; accounts.js's spawn / pool-platform /
+  //      oat / record-import rows 7, and the pool-create route coerced any backend but codex into a claude pool.
+  //      ZERO in the engine now, none of the moved accounts rows is back (matched verbatim), with a planted
+  //      offender. The live proof — a register()ed fake harness probed and spawned with zero engine / accounts
+  //      edits, plus patched copies with one codex branch restored (red) — is scripts/test-quota-source.mjs §9.
+  {
+    const ID_BRANCH = /[!=]==?\s*'(?:claude|codex|opencode|acp|shell)'|case\s+'(?:claude|codex|opencode|acp|shell)'\s*:/;
+    const branchLines = (txt) => txt.split('\n').filter((l) => !/^\s*(\/\/|\*)/.test(l) && ID_BRANCH.test(l));
+    const eng = read('src/server/usage-pool-engine.js'), acc = read('src/accounts.js'), aur = read('src/server/account-usage-routes.js');
+    const GONE = ["if (backend === 'codex') return this._resolveCodexSpawn(", "if (be === 'claude' && !this.poolSupported())", "supported: backend === 'codex' || this.poolSupported()",
+      "if (this._acctBackend(a) !== 'claude') throw new Error('not a Claude account: '", "if (this._acctBackend(a) !== 'codex') throw new Error('not a Codex account: '",
+      "if (this._acctBackend(a) !== 'claude' || this._acctType(a) !== 'subscription') throw new Error('long-lived", "if (be !== 'claude') a.backend = be;"];
+    const engHits = branchLines(eng);
+    ok(eng.length > 200000 && engHits.length === 0, `46e src/server/usage-pool-engine.js branches on no harness id (was 12) — the live read is quota.readLive, the gates are caps / creds rows${engHits.length ? ' — ' + engHits.slice(0, 3).join(' ; ') : ''}`);
+    ok(GONE.every((g) => !acc.includes(g)) && !/req\.body\?\.backend === 'codex'/.test(aur),
+      '46e accounts.js dispatches spawn form / pool platform / oat / record import on the creds row; the pool-create route takes any poolable registered harness (never coerced to claude)');
+    ok(branchLines("  if (rung === 'x' && s.backend === 'codex') {").length === 1 && branchLines('  if (liveReadSource(backend)) {').length === 0,
+      '46e NEGATIVE CONTROL: a planted id branch is an offender, the descriptor dispatch is not');
+  }
   // 46b. A CATEGORY LITERAL THE CATEGORY LIST CANNOT MATCH (the 2.369.120 side
   //      finding): `category: 'Integration'` beside `t('Integration')` in the
   //      list renders into a bucket nobody lists under zh/ja — §44 runs in node
@@ -3834,6 +3868,51 @@ console.log('§76 every private-bus / GTK-fixture script gives its children a pr
   ok(ctl.every((c) => !c.asWritten && c.patched), `§76 NEGATIVE CONTROLS: ${ctl.map((c) => `${c.f} (${c.k}) passes as written and is caught with its XDG_RUNTIME_DIR entries stripped`).join('; ')}${ctl.some((c) => c.asWritten || !c.patched) ? ' — ' + JSON.stringify(ctl) : ''}`);
 }
 
+// §76b THE CONSENT MACHINE NAMES NO VENDOR (lane dc-channels-consent; the 2026-10-04 decoupling plan rows rv-channels-core
+// C1 / C8 / C10, rv-channel-adapters F1 / F3): a vendor's consent — the landing's state shape and page, the relay setting,
+// the fixed loopback callback, the paste dialog's steps / words / app page / app-id shape — is DECLARED by its adapter's
+// `consent` row (src/channels/index.js validateConsent) and its registry row's `paste` block. The engine keeps ONE consent
+// machine (the per-boot signer, the landing dispatch on `:kind`'s row), the route answers the row's page (no row ⇒ 404
+// `no-landing`), oauth-loopback holds no vendor default, the account dialog is the renderer. The live proof — a fake
+// vendor joining through REAL_ADAPTERS alone and completing a round trip over the real route, with the pre-lane judge /
+// page restored as red controls — is scripts/test-channels-engine.mjs ("consent:"). Controls here: each pre-lane line is red.
+console.log('§76b the consent machine names no vendor: the engine, the channels routes, oauth-loopback, the account dialog');
+{
+  const QUOTED_ID = /['"`](?:lark|slack|gmail|fake)['"`]/;
+  const CONSENT_NAMES = /\b(?:SlackManifest|SlackWords|slackConsent|slackRelayUrl|SLACK_RELAY_DEFAULT|LARK_CALLBACK_URL)\b/;
+  const PASTE_FACTS = /xox[pe]|api\.slack\.com|\/\^A\[A-Z0-9\]/;
+  const census76b = (files) => {
+    const bad = [];
+    for (const [rel, text] of files) {
+      for (const l of text.split('\n')) {
+        if (/^\s*(?:\/\/|\*|\/\*)/.test(l)) continue;
+        if (QUOTED_ID.test(l) || CONSENT_NAMES.test(l) || PASTE_FACTS.test(l)) bad.push(`${rel}: ${l.trim().slice(0, 80)}`);
+      }
+    }
+    return bad;
+  };
+  const FILES = ['src/server/channels-engine.js', 'src/routes/channels.js', 'src/oauth-loopback.js', 'src/lib/channel-account-dialogs.js'];
+  const bad = census76b(FILES.map((f) => [f, read(f)]));
+  ok(FILES.every((f) => read(f).length > 5000) && bad.length === 0, `§76b the consent machine and the account dialog name no vendor — no quoted id, no vendor consent module, no paste fact (${bad.slice(0, 3).join(' | ') || 'clean'})`);
+  const eng = read('src/server/channels-engine.js'), route = read('src/routes/channels.js'), dlg = read('src/lib/channel-account-dialogs.js');
+  ok(/for \(const m of REAL_ADAPTERS\) validateConsent\(m\.kind, m\.consent\);/.test(eng) && /const v = row\.landing\.stateVerdict\(state, \{ sign: signState,/.test(eng)
+    && /page = engine\(\)\.consentLandingOf\(kind\)|engine\(\)\.consentLandingOf\(kind\)/.test(route) && /\.send\(page\(r\)\);/.test(route) && /for \(const m of \[fake, \.\.\.REAL_ADAPTERS\]\) if \(m\.integration/.test(eng)
+    && /row\.signin === 'paste' && row\.paste/.test(dlg),
+    '§76b every row is read where it is declared: the engine validates each REAL_ADAPTERS consent row at load and judges a landing by ITS row, the route sends the row\'s page, the fakes\' runner rides the one integration loop, the dialog draws the registry row\'s `paste`');
+  const ctl = [
+    ['engine judge', [['src/server/channels-engine.js', '    const v = SlackManifest.stateVerdict(state, { sign: signState, now: now(), ttlMs: PENDING_FLOW_TTL_MS });']]],
+    ['route page', [['src/routes/channels.js', '    .send(SlackWords.landingHtml(r));']]],
+    ['every adapter\'s deps', [['src/server/channels-engine.js', '      const adapterDeps = { fetch: fetchFn, log, tokens: tokensFor(rec), state: stateFor(rec), oauth: flows, slackConsent };']]],
+    ['fake runner', [['src/server/channels-engine.js', "    reg('fake', fake.integrationTest);"]]],
+    ['loopback default', [['src/oauth-loopback.js', '  const u = new URL(String(callbackUrl || LARK_CALLBACK_URL));']]],
+    ['dialog app page', [['src/lib/channel-account-dialogs.js', "const PASTE_APP_PAGE = 'https://api.slack.com/apps';"]]],
+    ['dialog id shape', [['src/lib/channel-account-dialogs.js', "    return x && typeof x.appId === 'string' && /^A[A-Z0-9]{8,}$/.test(x.appId);"]]],
+    ['dialog token words', [['src/lib/channel-account-dialogs.js', "    tr('3. Copy the User OAuth Token (it starts xoxp-) from “OAuth & Permissions” and paste it in the box below.'),"]]],
+  ];
+  const r = ctl.map(([n, files]) => ({ n, red: census76b(files).length > 0 }));
+  ok(r.every((x) => x.red), `§76b CONTROLS: ${r.map((x) => `${x.n} (${x.red ? 'RED' : 'missed'})`).join(', ')}`);
+}
+
 // §77 THE RAW API'S CORE NAMES NO VENDOR (B-2198, lane channel-api-declared; the owner 2026-10-04 "我需要当前系统低耦合"):
 // the vendor facts live in the file that owns them — an adapter's `api` row beside its `apiBearer` (the ONE schema:
 // src/channels/index.js validateApi), the storage mounts' row in src/mounts.js — and the fence (src/channel-api.js) +
@@ -3914,7 +3993,7 @@ console.log('§78 literal-id branches per family + unused i18n keys + unreferenc
     : r.family === 'export-dead' ? dc.exportRows.filter((x) => x.startsWith(r.file + ' ')).map((x) => '      ' + x).join('\n') : '      ' + r.file;
   ok(jDC.rises.length === 0, `§78 no new dead text: unused i18n keys, unreferenced exports and unreached src/lib files stay at or under baseline${jDC.rises.length ? ' — RISES (use it or delete it):\n' + jDC.rises.map((r) => `    ${r.family} ${r.file}: ${r.base} → ${r.now}\n${dcDetail(r)}`).join('\n') : ''}`);
   ok(jDC.falls.length === 0, `§78 the dead-code baseline is current${jDC.falls.length ? ' — FALLS (good): lower the baseline in this commit with `node scripts/dead-code-census.mjs --lower`: ' + jDC.falls.map((r) => `${r.family} ${r.file} ${r.base} → ${r.now}`).join(' | ') : ''}`);
-  ok(Object.values(ib.owners).flat().every((o) => !/NOT FOUND/.test(o)) && ib.owners.display.some((o) => /^src\/desktop-apps\.js:\d+-\d+$/.test(o)) && ib.owners.browser.some((o) => /^src\/browser-profiles\.js:\d+-\d+$/.test(o)) && ib.owners.plugin.some((o) => /^src\/plugins\.js:\d+-\d+$/.test(o)),
+  ok(Object.values(ib.owners).flat().every((o) => !/NOT FOUND/.test(o)) && ib.owners.display.some((o) => /^src\/desktop-apps\.js:\d+-\d+$/.test(o)) && ib.owners.browser.some((o) => /^src\/browser-profiles\.js:\d+-\d+$/.test(o)) && ib.owners.plugin.some((o) => o === 'src/plugins/'),
     `§78 every owner table is found (a renamed table would silently count its own rows): ${['display', 'browser', 'plugin'].map((f) => ib.owners[f].join(' ')).join(' · ')}`);
   ok((dc.libFiles || []).includes('src/lib/usage-pace.js') && IB.total(dc.counts['i18n-unused']) >= 400, `§78 POSITIVE CONTROL: the census re-derives the review's findings (usage-pace.js unreached — rv-client F10; ${IB.total(dc.counts['i18n-unused'])} unused dictionary entries — F3's 243 × 2 + the test-only ones)`);
   // dc-browser-providers' CONTROL (its §79, folded into this family at int213): the keeper with ONE `=== 'chromium'` ladder
@@ -3961,5 +4040,79 @@ console.log('§78 literal-id branches per family + unused i18n keys + unreferenc
     'dc-harness-store: writer-sweep.js + resume-store.js read store.writerSweep / forkChain with no harness id branch (proof: test-harness-contract store:)');
 }
 
+// §76c A CHANNEL VENDOR = ITS FOLDER + ONE LIST LINE (lane dc-channels-manifest; rv-channels-core C3/C4, rv-channel-adapters
+// F2/F8/F10): src/channel-settings.js, src/integration-registry.js and src/lib/settings-schema.js only DERIVE the vendors'
+// rows from src/channels/registry-list.js — none of them names a vendor (a quoted kind, a vendor's `channels.<kind>…` key,
+// a `V.<vendor>…` validator, a vendor's callback constant). The list line is the one place a vendor's name is written
+// outside its folder (allowlisted: it IS the registration). CONTROLS: a vendor row left in any of the three is RED.
+console.log('§76c a channel vendor is its folder + one list line: the three derived files name no vendor');
+{
+  const KINDS = (await import('node:module')).createRequire(import.meta.url)(path.join(REPO, 'src/channels/registry-list.js')).MANIFESTS.map((m) => m.kind);
+  const alt = KINDS.join('|');
+  const RULES = [new RegExp(`['"\`](${alt})['"\`]`), new RegExp(`['"\`]channels\\.(${alt})[A-Z]`), new RegExp(`\\bV\\.(${alt}|google)[A-Z]`), /\b[A-Z]+_CALLBACK_URL\b/];
+  const code = (t) => t.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+  const census76c = (files) => files.filter(([f, t]) => RULES.some((re) => re.test(code(t)))).map(([f]) => f);
+  const THREE = ['src/channel-settings.js', 'src/integration-registry.js', 'src/lib/settings-schema.js'];
+  const now = THREE.map((f) => [f, read(f)]);
+  const listSrc = read('src/channels/registry-list.js');
+  ok(KINDS.length >= 3 && census76c(now).length === 0 && KINDS.every((k) => listSrc.includes(`require('./${k}/manifest.js'),`)), `§76c the three derived files name no vendor (${census76c(now).join(', ') || 'clean'}); the list names each of ${KINDS.join(', ')} once`);
+  const ctl = [
+    ['a vendor table back in channel-settings.js', 'src/channel-settings.js', "\nconst T = { lark: { vendor: 'lark', rows: [] } };\n"],
+    ['a vendor row back in integration-registry.js', 'src/integration-registry.js', "\nconst ROW = { id: 'slack', label: 'Slack' };\n"],
+    ['a vendor validator back in integration-registry.js', 'src/integration-registry.js', "\nconst ok2 = V.larkAppId('cli_x');\n"],
+    ['a hand row back in settings-schema.js', 'src/lib/settings-schema.js', "\nconst H = { 'channels.larkNameField': { type: 'enum' } };\n"],
+  ];
+  const r = ctl.map(([n, f, add]) => ({ n, red: census76c([[f, read(f) + add]]).length > 0 }));
+  ok(r.every((x) => x.red), `§76c CONTROLS: ${r.map((x) => `${x.n} (${x.red ? 'RED' : 'missed'})`).join(', ')}`);
+}
+
+// §80 ONE BUILT-IN PLUGIN REGISTRY, NO ID DISPATCH (lane dc-plugins, 2026-10-04 — rv-server H3 + rv-client F9). A
+// built-in plugin is ONE file src/plugins/<id>.js declaring { id, label, description, provides, create(h) } + ONE line
+// in src/plugins/index.js; src/plugins.js (the generic lifecycle) and the client never branch on a member's id — they
+// read the DECLARED capability (the client through pluginProvides(cap), the ONE /api/plugins probe of the ports
+// surfaces). The member ids are DERIVED from the list, never hand-listed. The runtime proof (a fake plugin registered
+// through the one list drives every verb with zero plugins.js edits) is scripts/test-builtin-plugins.mjs.
+console.log('§80 built-in plugins: one list, one file each, no id branch in the core or the client');
+{
+  const rd = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
+  const listSrc = rd('src/plugins/index.js');
+  const memberFiles = [...listSrc.matchAll(/require\('\.\/([\w-]+\.js)'\)/g)].map((m) => `src/plugins/${m[1]}`);
+  const ids = memberFiles.map((f) => (rd(f).match(/^ {2}id: '([a-z][a-z0-9-]*)',$/m) || [])[1]).filter(Boolean);
+  const idAlt = ids.map((i) => i.replace(/-/g, '\\-')).join('|');
+  const CLIENT = ['src/lib/plugins-ui.js', 'src/lib/sidebar-rail.js', 'src/lib/sidebar-mounts.js'];
+  const code = (text) => text.split('\n').map((l) => l.replace(/\s\/\/.*$/, '')).filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l));
+  const census79 = (files) => {
+    const bad = [];
+    const quotedId = new RegExp(`['"\`](?:${idAlt})['"\`]`);
+    const idCompare = new RegExp(`\\.id\\s*[!=]==?\\s*['"\`](?:${idAlt})['"\`]`);
+    for (const [rel, text] of files) {
+      if (rel === 'src/plugins.js') code(text).forEach((l) => { if (quotedId.test(l)) bad.push(`src/plugins.js names a member: ${l.trim().slice(0, 90)}`); });
+      if (CLIENT.includes(rel)) code(text).forEach((l) => { if (idCompare.test(l)) bad.push(`${rel} branches on a plugin id: ${l.trim().slice(0, 90)}`); });
+      if (rel === 'src/lib/sidebar-rail.js' || rel === 'src/lib/sidebar-mounts.js') {
+        if (/['"`]\/api\/plugins['"`]/.test(text)) bad.push(`${rel} reads /api/plugins itself (ask pluginProvides)`);
+        if (!/await pluginProvides\('relay'\)/.test(text)) bad.push(`${rel} lost its pluginProvides('relay') probe`);
+      }
+      if (memberFiles.includes(rel) && !/^ {2}provides: \[/m.test(text)) bad.push(`${rel} declares no provides`);
+    }
+    return bad;
+  };
+  const tree = [...new Set(['src/plugins.js', ...CLIENT, ...memberFiles])].map((rel) => [rel, rd(rel)]);
+  const bad = census79(tree);
+  ok(ids.length === memberFiles.length && ids.length >= 3 && bad.length === 0, `§80 ${ids.length} built-in plugins (${ids.join(', ')}) from the one list: src/plugins.js names none, the client branches on none, the ports surfaces ask pluginProvides`, bad.join('; '));
+  const get = (rel) => tree.find(([r]) => r === rel)[1];
+  const ctl = [
+    ['an id branch back in src/plugins.js', [['src/plugins.js', get('src/plugins.js').replace('  start(id) {', `  start(id) {\n    if (id === '${ids[1]}') return this._verb(id, 'start')();`)]]],
+    ['the card keyed by an id', [['src/lib/plugins-ui.js', get('src/lib/plugins-ui.js').replace("const isRelay = provides(p, 'relay');", `const isRelay = p.id === '${ids[1]}';`)]]],
+    ['the pre-fix rail probe', [['src/lib/sidebar-rail.js', get('src/lib/sidebar-rail.js').replace("const frpOk = await pluginProvides('relay');", `let frpOk = false; try { frpOk = (((await api('/api/plugins')) || {}).plugins || []).some((p) => p.id === '${ids[1]}' && p.configured); } catch { }`)]]],
+    ['a member without provides', [[memberFiles[0], get(memberFiles[0]).replace(/^ {2}provides: \[[^\]]*\],\n/m, '')]]],
+  ];
+  const r = ctl.map(([n, files]) => ({ n, applied: files.every(([rel, t]) => t !== get(rel)), red: census79(files).length > 0 }));
+  ok(r.every((x) => x.applied && x.red), `§80 CONTROLS: ${r.map((x) => `${x.n} (${x.applied ? (x.red ? 'RED' : 'missed') : 'patch did not apply'})`).join(', ')}`);
+}
+
+// lane dc-client-billing (2026-10-04): the client billing surfaces read the declared ui row — no billing-word / backend-label ternary on a harness id left in src/lib (test-billing-row carries the fake-harness proof)
+{ const lib = fs.readdirSync(path.join(REPO, 'src/lib')).filter((f) => f.endsWith('.js') && !/^i18n-/.test(f)).map((f) => [f, fs.readFileSync(path.join(REPO, 'src/lib', f), 'utf8')]);
+  const bad = lib.filter(([, t]) => /[!=]==?\s*'(?:claude|codex)'\s*\?\s*(?:t|tr)\(\s*'(?:ChatGPT login|CLI login|Subscription)|[!=]==?\s*'(?:claude|codex)'\s*\?\s*'(?:Claude|Codex)'/.test(t)).map(([f]) => f);
+  ok(bad.length === 0, `client billing words / backend labels come from the declared ui row (no id ternary; offenders: ${bad.join(', ') || 'none'})`); }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

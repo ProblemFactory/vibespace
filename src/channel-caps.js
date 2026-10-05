@@ -152,7 +152,7 @@ function pushLaneText(push, lane, { t = defaultT, now = null, coldSeconds = COLD
     // THE REMEDY BY CODE (2026-09-26): the lane's own `why` is an English
     // sentence for the log; the card says what to DO in the device's words.
     // A code this table does not know falls back to the lane's words.
-    const text = pushUnavailableText(p.lastStateCode, { t });
+    const text = pushUnavailableText(p.lastStateCode, { t, words: p.unavailableWords });
     return text || t('push unavailable: {why}', { why: p.lastStateWhy || t('unknown') });
   }
   if (!p.state) return t('push not started');
@@ -167,21 +167,14 @@ function pushLaneText(push, lane, { t = defaultT, now = null, coldSeconds = COLD
   return t('push {state} — polling at the fast cadence', { state: p.state });
 }
 
-/** A push lane parked `unavailable`, in words, BY ITS CODE (the lanes'
- *  permanent codes: src/channels/live/lark.js + live/gmail.js). */
-function pushUnavailableText(code, { t = defaultT } = {}) {
-  switch (String(code || '')) {
-    case 'sdk-not-installed': return t('Real-time push is off: the official Lark SDK is not installed on this instance — run `npm install @larksuiteoapi/node-sdk` in the VibeSpace folder and restart; enable the event subscription (long-connection mode), grant `im:message.group_msg` and add the bot to the chats you want pushed. Until then messages are polled (every 30 s – 15 min).');
-    case 'needs-credentials': return t('Real-time push is off: this account has no usable app credential — fix the client in Edit. Until then messages are polled.');
-    case 'push-not-configured': return t('Push is on but not configured: set the Pub/Sub topic and subscription options in Edit, then re-authorize. Until then messages are polled.');
-    case 'push-misconfigured': return t('Push is misconfigured: the Pub/Sub topic or subscription option is not a valid resource name — fix it in Edit. Until then messages are polled.');
-    case 'scope-missing': return t('Push needs the Pub/Sub permission: re-authorize this account (the consent now asks for it). Until then messages are polled.');
-    case 'watch-refused': return t('Gmail refused the push watch: grant gmail-api-push@system.gserviceaccount.com the Publisher role on the topic. Until then messages are polled.');
-    case 'pubsub-forbidden': return t('The Pub/Sub subscription refused this account: grant it the Subscriber role on the subscription. Until then messages are polled.');
-    case 'subscription-not-found': return t('The Pub/Sub subscription does not exist: create it (a pull subscription of the topic) or fix the option in Edit. Until then messages are polled.');
-    case 'watch-renew-failed': return t('The push watch could not be renewed three times — push stopped; re-save the Push settings to retry. Until then messages are polled.');
-    default: return '';
-  }
+/** A push lane parked `unavailable`, in words, BY ITS CODE — the words are the
+ *  LANE'S OWN DECLARATION (lane dc-channels-blocks: each live lane declares
+ *  `UNAVAILABLE_WORDS` {code → i18n key} beside the codes it parks with, its
+ *  adapter module exports them as `unavailableWords`, the account view carries
+ *  them while the lane is unavailable). '' for a code nobody declared. */
+function pushUnavailableText(code, { t = defaultT, words = null } = {}) {
+  const k = words && typeof words === 'object' && Object.prototype.hasOwnProperty.call(words, String(code || '')) ? words[String(code || '')] : null;
+  return typeof k === 'string' && k ? t(k) : '';
 }
 
 /** A number, or `null` for ANYTHING that is not one. `Number(null)` is 0 and

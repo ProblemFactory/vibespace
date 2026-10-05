@@ -75,13 +75,6 @@ const TEST_BUTTON_LABEL = Object.freeze({
   'reachability': 'Test reachability',
 });
 
-/** THE ONE DEFINITION of Lark's registered redirect URL (decision 4, owner
- *  2026-09-13): a VibeSpace-owned FIXED loopback, never a per-instance public
- *  address — every user's instance URL differs, so the callback can only land
- *  on the machine the user's browser is on and be pasted back (decision 21).
- *  The port is chosen HERE, once. src/oauth-loopback.js imports this. */
-const LARK_CALLBACK_URL = 'http://127.0.0.1:17865/lark/cb';
-
 /** Masking: secrets never leave the store in the clear. The last 4 characters
  *  ride along ONLY when the value is long enough that they are not most of it. */
 const MASK = '••••';
@@ -92,26 +85,13 @@ function maskValue(v) {
   return s.length >= MASK_TAIL_MIN ? MASK + s.slice(-4) : MASK;
 }
 
+const VendorList = require('./channels/registry-list.js');   // lane dc-channels-manifest: the channel vendors' rows (PURE manifests)
 const okV = Object.freeze({ ok: true });
 const bad = (why) => ({ ok: false, why });
 const V = {
   nonEmpty: (v) => (String(v).length ? okV : bad('must not be empty')),
   noSpaces: (v) => (/\s/.test(String(v)) ? bad('must not contain whitespace') : okV),
   minLen: (n) => (v) => (String(v).length >= n ? okV : bad(`at least ${n} characters`)),
-  larkAppId: (v) => {
-    const s = String(v);
-    if (!s) return bad('must not be empty');
-    if (/\s/.test(s)) return bad('must not contain whitespace');
-    if (!/^cli_[A-Za-z0-9]+$/.test(s)) return bad('a Lark App ID starts with cli_ (Developer Console → Credentials & Basic Info)');
-    return okV;
-  },
-  googleClientId: (v) => {
-    const s = String(v);
-    if (!s) return bad('must not be empty');
-    if (/\s/.test(s)) return bad('must not contain whitespace');
-    if (!/\.apps\.googleusercontent\.com$/.test(s)) return bad('a Google OAuth client id ends with .apps.googleusercontent.com');
-    return okV;
-  },
   cloakLicense: (v) => {
     const s = String(v);
     if (!s) return okV;                       // empty is a valid FIELD (nothing saved) — it resolves to no key, never to a free tier
@@ -129,23 +109,6 @@ const V = {
     return okV;
   },
   /** design 018: a Slack app's Client ID (Basic Information → App Credentials) is `<digits>.<digits>`. */
-  slackClientId: (v) => {
-    const s = String(v);
-    if (!s) return bad('must not be empty');
-    if (/\s/.test(s)) return bad('must not contain whitespace');
-    if (!/^\d{3,20}\.\d{3,20}$/.test(s)) return bad('a Slack Client ID is two runs of digits joined by a dot (Basic Information → App Credentials)');
-    return okV;
-  },
-  /** design 018: an https page address, or empty (empty = no relay: the member pastes the code back). */
-  httpsUrlOrEmpty: (v) => {
-    const s = String(v);
-    if (!s) return okV;
-    if (/\s/.test(s)) return bad('must not contain whitespace');
-    if (!/^https:\/\/[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*(:\d{1,5})?(\/[^?#]*)?$/i.test(s) || s.length > 300) return bad('must be an https URL (Slack redirects only to https)');
-    return okV;
-  },
-  /** design 018: a Slack workspace's subdomain (`acme` of acme.slack.com), or empty. */
-  slackTeamDomain: (v) => (/^([a-z0-9][a-z0-9-]{0,61})?$/i.test(String(v)) ? okV : bad('the workspace\'s subdomain, e.g. acme for acme.slack.com')),
   /** `true` / `false` — each vendor's own stealth switch is a VALUE, not a capability promise (§7.5). */
   boolWord: (v) => (/^(true|false|1|0)$/i.test(String(v)) ? okV : bad('true or false')),
   awsRegion: (v) => (/^[a-z]{2}-[a-z]+-\d$/.test(String(v)) ? okV : bad('an AWS region id such as us-east-1')),
@@ -207,111 +170,11 @@ const ROWS = Object.freeze([
     docs: 'docs/design-communication-panel.zh.md',
   },
 
-  // ── LARK / 飞书 (design §14.2 row 1; consumer lands in P1) ──────────────
-  {
-    id: 'lark',
-    label: 'Lark / 飞书',
-    fields: [
-      { key: 'appId', label: i18nKey('App ID'), secret: false, required: true, placeholder: 'cli_…',
-        help: i18nKey('Developer Console → Credentials & Basic Info.'), validate: V.larkAppId },
-      { key: 'appSecret', label: i18nKey('App Secret'), secret: true, required: true,
-        help: i18nKey('Same page. It is only ever written here, never read back.'), validate: V.minLen(8) },
-    ],
-    clusterEnv: { json: 'VIBESPACE_INTEGRATIONS', prefix: 'VIBESPACE_INTEGRATION_LARK_' },
-    setup: {
-      callbackUrl: LARK_CALLBACK_URL,
-      callbackNote: i18nKey('Developer Console → Security Settings → Redirect URLs. It must match byte for byte.'),
-      prerequisites: [
-        i18nKey('The redirect URL above is registered in that list'),
-        i18nKey('The scopes im:message and im:message.send_as_user are granted'),
-        i18nKey('The app has a PUBLISHED version'),
-      ],
-    },
-    test: {
-      kind: 'credential-exchange',
-      describe: i18nKey('Exchanges this app id / secret pair for a tenant token once. Reads no conversation, sends no message.'),
-      caveat: i18nKey('This only proves the app id / secret pair is right. The consent page also needs the three items above — missing any of them fails on the consent page, not on this call.'),
-    },
-    consumers: ['src/channels/lark.js'],
-    usedBy: i18nKey('Used by the Lark / 飞书 channel'),
-    bindsPerAccount: true,
-    clientHint: i18nKey('The tenant app this account signs in through. A token is bound to the app it was issued under — switching the app means signing in again.'),
-    docs: 'https://open.feishu.cn/document/',
-  },
-
-  // ── GMAIL — a DELEGATING row (decision 5, owner 2026-09-13) ─────────────
-  // It REUSES the existing VibeSpace Google OAuth client preset mechanism
-  // (`VIBESPACE_GDRIVE_CLIENTS`, read by MountManager.drivePresets()) and has
-  // NO env of its own. Resolution order (§14.2): the user's SAVED choice >
-  // `prefer` > the only preset. There is no fourth rung — `_driveClient()`'s
-  // `'default'` fallback answers null on a two-preset list and is exactly the
-  // shape this row refuses to inherit.
-  {
-    id: 'gmail',
-    label: 'Gmail',
-    fields: [
-      { key: 'clientId', label: i18nKey('OAuth client ID'), secret: false, required: true, placeholder: '…apps.googleusercontent.com',
-        help: i18nKey('Only when using your own client.'), validate: V.googleClientId },
-      { key: 'clientSecret', label: i18nKey('OAuth client secret'), secret: true, required: true,
-        help: i18nKey('Only when using your own client.'), validate: V.minLen(8) },
-    ],
-    delegate: { to: 'drive-presets', prefer: 'channels', multi: true },
-    setup: null,
-    test: {
-      kind: 'shape-only',
-      describe: i18nKey('Checks the client id / secret shape and builds the authorization URL. A Google OAuth client cannot be exchanged for anything on its own (no client-credentials grant), so the real verdict is the OAuth round trip.'),
-      caveat: i18nKey('Shape only. Whether the consent succeeds, and how long the refresh token lives, depends on the client\'s verification status.'),
-    },
-    consumers: ['src/channels/gmail.js'],
-    usedBy: i18nKey('Used by the Gmail channel'),
-    bindsPerAccount: true,
-    signinName: 'Google',
-    clientHint: i18nKey('The Google OAuth client this account signs in through. A refresh token is bound to the client it was issued under — switching the client means signing in again.'),
-    docs: 'docs/design-communication-panel.zh.md',
-  },
-
-  // ── SLACK — ONE APP PER WORKSPACE + the PASTE rung (design 012 lane S1; design 017; design 018) ──
-  // THREE RUNGS, the Lark stored / custom shape plus Slack's own: (1) a CLUSTER PRESET ("stored": the company's
-  // workspace app — client id, secret, the relay page on the fleet's admin host, the workspace's subdomain; the
-  // members press Allow); (2) a CUSTOM client ("custom": the id / secret of the person's own workspace app, typed in the
-  // account dialog; its relay page is the `channels.slackRelayUrl` setting); (3) no client (`signin: 'paste'`): each
-  // person's own app made with a one-time setup token, and the pasted User OAuth Token — the engine answers every
-  // credential question of a key-less account as ready (`source: 'paste'`). Slack redirects only to https: the
-  // redirect is the relay page, or the instance's own https origin + /api/channels/oauth/cb/slack (slack-manifest.js
-  // `redirectFor`) — never a literal here.
-  {
-    id: 'slack',
-    label: 'Slack',
-    fields: [
-      { key: 'clientId', label: i18nKey('Client ID'), secret: false, required: true, placeholder: '1234567890.1234567890',
-        help: i18nKey('The workspace app’s Basic Information page → App Credentials.'), validate: V.slackClientId },
-      { key: 'clientSecret', label: i18nKey('Client Secret'), secret: true, required: true,
-        help: i18nKey('Same page. It is only ever written here, never read back.'), validate: V.minLen(8) },
-      { key: 'relayUrl', label: i18nKey('Relay page'), secret: false, required: false, placeholder: 'https://…',
-        help: i18nKey('The https page Slack sends members back to; it returns them to their own VibeSpace. Empty = this instance’s own https address, else the code is pasted back.'), validate: V.httpsUrlOrEmpty },
-      { key: 'teamDomain', label: i18nKey('Workspace'), secret: false, required: false, placeholder: 'acme',
-        help: i18nKey('The workspace’s subdomain (acme for acme.slack.com) — the name the connect card shows.'), validate: V.slackTeamDomain },
-    ],
-    signin: 'paste',
-    clusterEnv: { json: 'VIBESPACE_INTEGRATIONS', prefix: 'VIBESPACE_INTEGRATION_SLACK_' },
-    setup: {
-      callbackNote: i18nKey('Slack → your app → OAuth & Permissions → Redirect URLs: add the relay page (or this instance’s https address + /api/channels/oauth/cb/slack). It must match exactly or be a sub-path.'),
-      prerequisites: [
-        i18nKey('The relay page (or this instance’s https callback) is registered under Redirect URLs'),
-        i18nKey('The app asks for the user scopes VibeSpace lists (node scripts/slack-manifest.mjs prints the whole manifest)'),
-      ],
-    },
-    test: {
-      kind: 'shape-only',
-      describe: i18nKey('Checks the client id / secret shape (Slack has no exchange that proves a secret alone) and, for the paste rung, each pasted value by its shape first: a one-time setup token (xoxe.) makes your own app with one apps.manifest.create request and is not kept; the user token (xoxp-) costs one request that asks Slack who it belongs to.'),
-      caveat: i18nKey('Shape only. Whether the consent succeeds depends on the redirect URL and scopes registered on the app; whether the token reads every conversation depends on the scopes it was installed with — the account card lists them.'),
-    },
-    consumers: ['src/channels/slack.js'],
-    usedBy: i18nKey('Used by the Slack channel'),
-    bindsPerAccount: true,
-    clientHint: i18nKey('A workspace app lets every member just press Allow; without one, make your own Slack app with a one-time setup token.'),
-    docs: 'docs/agent/channels-manual.md',
-  },
+  // ── THE CHANNEL VENDORS' ROWS (lane dc-channels-manifest, rv-channel-adapters F10) ──
+  // Each channel vendor's MANIFEST (src/channels/<vendor>/manifest.js, PURE) declares its row and its own
+  // validators; the vendor list (src/channels/registry-list.js) hands them here in its order — this file names
+  // no vendor. A new vendor's row is its manifest's `integrationRow`, never an edit here.
+  ...VendorList.integrationRows({ V, okV, bad }),
 
   // ── THE AGENT-BROWSER TRACK'S SIX KEY ROWS (docs/design-agent-browser-v2.md §7.5, P4 second half) ──
   // One module declares them, registers their six Test runners and resolves
@@ -618,6 +481,15 @@ function checkRow(row) {
   const paste = row.signin === 'paste';
   const pasteOnly = paste && !(row.fields || []).length;
   if (paste && (row.bindsPerAccount !== true || row.delegate || (pasteOnly && (row.clusterEnv || row.setup)) || (!pasteOnly && !row.clusterEnv))) errs.push('a signin:\'paste\' row is a bindsPerAccount row with no delegate; with no fields it has no clusterEnv / setup (nothing to configure: the person pastes a token), with a workspace client it declares its clusterEnv');
+  // lane dc-channels-consent (F3): a paste row DECLARES its steps' words and facts — the account dialog only renders them
+  if (paste) {
+    const P = row.paste || {}, str = (x) => typeof x === 'string' && !!x.trim();
+    let shapeOk = false;
+    try { shapeOk = str(P.appIdShape) && !!new RegExp(P.appIdShape); } catch { shapeOk = false; }
+    const words = (o) => !!o && typeof o === 'object' && Object.values(o).every(str);
+    if (!/^https:\/\/[a-z0-9.-]+\//.test(String(P.appPage || '')) || !shapeOk || !str(P.fieldLabel) || !Array.isArray(P.steps) || !P.steps.length || !P.steps.every(str)
+      || !words(P.notes) || !P.box || !str(P.box.placeholder) || !str(P.box.hint) || !words(P.words) || !words(P.whys) || !words(P.whysWithCode)) errs.push('a signin:\'paste\' row declares `paste` {appPage, appIdShape, fieldLabel, steps[], notes, box, words, whys, whysWithCode} (the account dialog names no vendor)');
+  } else if (row.paste !== undefined) errs.push('paste belongs to a signin:\'paste\' row only');
   if (row.bindsPerAccount === true) {
     if (typeof row.clientHint !== 'string' || !row.clientHint.trim()) errs.push('a bindsPerAccount row declares its clientHint (the one hint line under the account dialog\'s OAuth client field)');
     if (!pasteOnly && (row.fields || []).filter((f) => f.secret).length !== 1) errs.push('a bindsPerAccount row declares exactly ONE secret field: the custom client\'s secret');
@@ -640,7 +512,7 @@ function checkRow(row) {
 }
 
 module.exports = {
-  ROWS, TEST_KINDS, SIGNIN_KINDS, TEST_BUTTON_LABEL, LARK_CALLBACK_URL, MASK, MASK_TAIL_MIN,
+  ROWS, TEST_KINDS, SIGNIN_KINDS, TEST_BUTTON_LABEL, MASK, MASK_TAIL_MIN,
   rowById, rowIds, maskValue, validateValues, missingFields, resolvePrecedence, pickPreset,
   fieldDecls, checkRow, TRIM_NOTE, credentialWhyText, clientFieldsOf, bindsPerAccount, oauthClientVendorOf,
 };

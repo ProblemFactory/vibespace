@@ -130,7 +130,7 @@ console.log('\n§3 the route over the real engine');
       serverSetting: (k) => settings[k], getAccounts: () => wam, getHosts: () => null, getUsageHistory: () => null,
       recordUsageAttribution() { }, adapterRegistry: { get() { return null; } },
       getAutoResume: () => ({ armIfEnabled: (sid, s2, until, why) => arms.push({ sid, until, why }), noteRecovered() { }, noteFireOutcome() { }, noteNoPoolTarget() { }, statusFor: () => null, enabledFor: () => false, fireNow() { } }),
-      getOtelIngest: () => ({ observedOrgFor: () => null }), getQuotaProbe: () => null,
+      getQuotaProbe: () => null,
       getUserTodos: () => todos || ({ add: () => ({ id: 'ut-1' }) }),
       ...(ackMs ? { resetCreditAckMs: ackMs } : {}),
       ...(helper ? { resetCreditHelper: helper } : {}),
@@ -565,13 +565,19 @@ console.log('\n§3 the route over the real engine');
       w2p.s1.stubLimits = () => ({ type: 'rate_limits_updated', onDemand: true, rateLimits: { primary: { used_percent: 3, window_minutes: 10080, resets_at: w2p.nowS + 6 * 86400 }, secondary: null } });
       const [x1, x2] = await Promise.all([w2p.quietly(() => w2p.eng.refreshCodexForPerson({ key: w2p.A })), w2p.quietly(() => w2p.eng.refreshCodexForPerson({ key: w2p.A }))]);
       ok('R4 single-flight: two presses in flight ⇒ ONE codex-read-limits on the session, both answered with the reading', x1.ok === true && x2.ok === true && w2p.wrote.filter((x) => /"codex-read-limits"/.test(x)).length === 1, JSON.stringify([x1.ok, x2.ok, w2p.wrote.filter((x) => /"codex-read-limits"/.test(x)).length]));
-      const esrcS = read('src/server/usage-pool-engine.js');
+      // the single-flight guard lives in the HARNESS's live read now (codex-quota.js readLive, lane dc-pool-quota):
+      // the control swaps a guard-less copy's readLive onto the codex source for the two presses, then restores it
+      const csrcS = read('src/harnesses/codex-quota.js');
       const fromS = '    if (waiters.length > 1 && !fresh) return;\n';
-      ok('R4 single-flight CONTROL: the patch hits the product source', esrcS.includes(fromS));
-      const twoReads = require(MUTRC.write('src/server/usage-pool-engine.js', esrcS.replace(fromS, ''), 'tworeads'));
-      const w2q = world({ credits: null, engine: twoReads });
+      ok('R4 single-flight CONTROL: the patch hits the product source', csrcS.includes(fromS));
+      const twoReads = require(MUTRC.write('src/harnesses/codex-quota.js', csrcS.replace(fromS, ''), 'tworeads'));
+      const cxQ = require(path.join(REPO, 'src/harnesses/codex-quota.js'));
+      const keepRL = cxQ.readLive;
+      const w2q = world({ credits: null });
       w2q.s1.stubLimits = () => ({ type: 'rate_limits_updated', onDemand: true, rateLimits: { primary: { used_percent: 3, window_minutes: 10080, resets_at: w2q.nowS + 6 * 86400 }, secondary: null } });
-      await Promise.all([w2q.quietly(() => w2q.eng.refreshCodexForPerson({ key: w2q.A })), w2q.quietly(() => w2q.eng.refreshCodexForPerson({ key: w2q.A }))]);
+      cxQ.readLive = twoReads.readLive;
+      try { await Promise.all([w2q.quietly(() => w2q.eng.refreshCodexForPerson({ key: w2q.A })), w2q.quietly(() => w2q.eng.refreshCodexForPerson({ key: w2q.A }))]); }
+      finally { cxQ.readLive = keepRL; }
       ok('R4 single-flight CONTROL: without the guard the two presses write TWO verbs — the row above sees the rule', w2q.wrote.filter((x) => /"codex-read-limits"/.test(x)).length === 2);
       // a deliberate RE-ASK after silence (the reset hold's 30 s retry) still goes out while an older read waits
       const w2r = world({ credits: null });
@@ -1265,7 +1271,7 @@ console.log('\n§3 the route over the real engine');
       const patched = require(f);
       const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-rcui-ctl-')); roots.push(root);
       const sessions = new Map();
-      const eng2 = patched.create({ app: { get() { }, post() { }, put() { }, delete() { }, use() { }, locals: {} }, rootDir: root, USAGE_CACHE_DIR: path.join(root, 'uc'), activeSessions: sessions, wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { }, serverNotice() { }, serverSetting: (k) => ({ 'spend.unattendedPerIdentityHour': 0 })[k], getAccounts: () => new AccountManager({ dataDir: path.join(root, 'data') }), getHosts: () => null, getUsageHistory: () => null, recordUsageAttribution() { }, adapterRegistry: { get() { return null; } }, getAutoResume: () => null, getOtelIngest: () => ({ observedOrgFor: () => null }), getQuotaProbe: () => null, getUserTodos: () => null });
+      const eng2 = patched.create({ app: { get() { }, post() { }, put() { }, delete() { }, use() { }, locals: {} }, rootDir: root, USAGE_CACHE_DIR: path.join(root, 'uc'), activeSessions: sessions, wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { }, serverNotice() { }, serverSetting: (k) => ({ 'spend.unattendedPerIdentityHour': 0 })[k], getAccounts: () => new AccountManager({ dataDir: path.join(root, 'data') }), getHosts: () => null, getUsageHistory: () => null, recordUsageAttribution() { }, adapterRegistry: { get() { return null; } }, getAutoResume: () => null, getQuotaProbe: () => null, getUserTodos: () => null });
       const wrote = [];
       const s = { backend: 'codex', mode: 'chat', host: null, _webuiId: 'cx9', _accountId: null, pty: { write: (x) => wrote.push(x) } };
       sessions.set('cx9', s);
@@ -1582,7 +1588,7 @@ console.log('\n§4e the revived press — two pushes, a SENT press revived, the 
   for (const r of roots) fs.rmSync(r, { recursive: true, force: true });
   const eng = read('src/server/usage-pool-engine.js');
   ok('ONE writer: the auto rung and the manual use both call writeResetCredit with the CREDIT\'S identity (the verb is spelled once in the engine; verify r8 T0: only the manual use asks for the read first)', /const wr = writeResetCredit\(session, \{ resetsAtSec: R, lane, origin: 'auto', now, key \}\);/.test(eng) && /const wr = writeResetCredit\(session, \{ resetsAtSec: p\.resetsAtSec \|\| 0, lane: null, origin: 'user', now, key: p\.key, readFirst: !afterRead \}\);/.test(eng) && (eng.match(/type: 'codex-reset-credit', idempotencyKey: idemKey, \.\.\.\(rf \? \{ readFirst: true \} : \{\}\) \}\)/g) || []).length === 1 && (eng.match(/type: 'codex-reset-credit'[,'\s]/g) || []).length === 1);
-  ok('the carrier is picked by CAPABILITY (capsOf(s.backend).resetCredit), never a backend id', /capsOf\(s\.backend\)\.resetCredit === true && ids\.has\(codexQuotaKeyFor\(s\)\)/.test(eng) && !/function resetCreditCarriers[\s\S]{0,400}backend === 'codex'/.test(eng));
+  ok('the carrier is picked by CAPABILITY (capsOf(s.backend).resetCredit), never a backend id', /capsOf\(s\.backend\)\.resetCredit === true && ids\.has\(liveQuotaKeyFor\(s\)\)/.test(eng) && !/function resetCreditCarriers[\s\S]{0,400}backend === 'codex'/.test(eng));
   ok('the route is wired where the accounts routes live, and server.js hands the engine both functions', /require\('\.\.\/routes\/reset-credit\.js'\)\.registerResetCreditRoutes\(app, \{ engine \}\);/.test(read('src/server/account-usage-routes.js')) && /engine: \{ clearSealedOrders, resetCreditPreview, consumeResetCreditFor(, claimColdRestarts)?(, \w+)* \}/.test(read('server.js')));
 }
 

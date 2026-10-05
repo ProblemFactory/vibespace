@@ -228,6 +228,8 @@ module.exports = {
     spawnEnvVar: 'CLAUDE_SECURESTORAGE_CONFIG_DIR',
     loginLabel: 'Claude',
     defaultIdField: 'defaultAccountId',
+    spawnForm: 'securestorage',                // accounts.resolveForSpawn: subscription (pool link / oat) or API key; spawnEnvVar relocates the secret store
+    legacyGlobalKey: '__global__',             // the pre-registry harness: its machine login's usage key; its records may omit `backend`
     keychainSensitive: true,                   // darwin keychain service name hashes the env string ⇒ pools need Linux
     parseAuth: parseClaudeAuth,
   },
@@ -264,6 +266,10 @@ module.exports = {
     otelExport: true,             // local spawns export api_request telemetry to the loopback OTLP receiver (B-345b)
   },
   billingIdentity: claudeBillingIdentity,
+  // THE DECLARED UI ROW (lane dc-client-billing, 2026-10-04): billing words, the accounts-store default field,
+  // the usage bucket, effort/lock facts and the legacy id forms — the chrome reads THESE, never an id. The
+  // client META mirrors it key for key (test-harness-contract deep-compares).
+  ui: { billing: { globalLogin: 'Subscription', cliLogin: 'CLI login', pickLogin: 'Subscription (Pro/Max login)', pickLoginHost: '', planSuffix: ' (Pro/Max)', switchLogin: 'Subscription (Pro/Max)', defaultIdField: 'defaultAccountId', apiKeys: true, longLivedToken: true, hostLogin: true, machineUsage: true, usage: 'accounts', globalUsageKey: '__global__', estimates: true }, effortReport: 'commanded', effortLevels: null, modelLock: true, legacyIds: true, resumeResend: true },
   settingsPrefix: 'claude',
   // THE SETTINGS TABLE (design-harness-settings §2): joined by OBJECT IDENTITY
   // like `caps` above — the schema derives the Claude section from it, the

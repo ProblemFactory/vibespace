@@ -63,7 +63,7 @@ import { installBrowserSwitcher } from './browser-switcher.js'; // agent browser
 import { installBrowserTrace } from './browser-trace-view.js'; // agent browser P5 (§4.5/§8 step 3): the profiles panel (the trace surfaces install themselves)
 import { installBrowserReplay } from './browser-replay-window.js'; // 2026-09-27: a browser session's replay (window type browser-replay)
 import { permissionModeOptions } from './permission-mode-labels.js'; // lane L: permission modes in plain words, the raw value as a hint
-import { BACKEND_META, createBackendIconHtml, getSessionKey, pickAgentIdentity, settingsPrefixFor, effortLabel, noteModelCatalog, worktreeCapsFor } from './agent-meta.js';
+import { BACKEND_META, createBackendIconHtml, getSessionKey, pickAgentIdentity, settingsPrefixFor, effortLabel, noteModelCatalog, worktreeCapsFor, backendFeatureCaps, billingRow } from './agent-meta.js';
 
 const BACKEND_SESSION_OPTIONS = {
   claude: {
@@ -1811,20 +1811,20 @@ class App {
           - ((b.pooled || b.type === 'pooled') ? 0 : b.type === 'subscription' ? 1 : 2))
           || String(a.name || '').localeCompare(String(b.name || '')));
       const onHost = !!document.getElementById('input-host')?.value;
-      const show = (be === 'claude' || be === 'codex') && list.length > 0;
+      const show = backendFeatureCaps(be).accounts && list.length > 0;
       acctRow.style.display = show ? '' : 'none';
       if (!show) { acctSel.value = ''; return; }
-      const defId = be === 'codex' ? this._accounts?.defaultCodexAccountId : this._accounts?.defaultAccountId;
-      const globalLabel = be === 'codex' ? t('ChatGPT login') : t('Subscription');
+      const bill = billingRow(be); // the declared billing row: words + fields, never an id
+      const defId = this._accounts?.[bill.defaultIdField];
+      const globalLabel = t(bill.globalLogin);
       const defName = defId ? (list.find(a => a.id === defId)?.name || t('API key')) : globalLabel;
       const prev = acctSel.value;
       acctSel.innerHTML = '';
       const hostId = document.getElementById('input-host')?.value || '';
       const hostRec = hostId ? (this._nsHosts || this.sidebar?._hostsData?.hosts || []).find(h => h.id === hostId) : null;
       const hostName = hostRec?.name || hostId;
-      const cliLoginLabel = be === 'codex'
-        ? (onHost ? t('ChatGPT login (on the host)') : t('ChatGPT login'))
-        : (onHost ? t('CLI login') + ' @ ' + hostName + ' (Pro/Max)' : t('Subscription (Pro/Max login)'));
+      const cliLoginLabel = !onHost ? t(bill.pickLogin)
+        : bill.pickLoginHost ? t(bill.pickLoginHost) : t(bill.cliLogin) + ' @ ' + hostName + bill.planSuffix;
       const opts = [
         ['', t('Default ({name})', { name: defName })],
         ['subscription', cliLoginLabel], // the CLI's global login (on the host for remote sessions)
@@ -1837,7 +1837,7 @@ class App {
       // shipping needs the opt-in toggle (ban risk, default OFF; never dial).
       // API keys always ship. Local: needs a local login.
       const allowSubRemote = !!this.settings?.get?.('accounts.shipSubscriptionToRemote');
-      const hostOwnEmail = onHost && be !== 'codex'
+      const hostOwnEmail = onHost && bill.hostLogin
         ? String(this._hostOwnUsage?.[hostId]?.orgEmail || this._hostUsage?.[hostId]?.orgEmail || '').trim().toLowerCase() : '';
       const emailOf = (a) => String(this._accountUsage?.[a.id]?.orgEmail || a.email || (String(a.name || '').includes('@') ? a.name : '')).trim().toLowerCase();
       const hostHeld = (a) => !!a.hostLogins?.[hostId] || (this._hostSubsKnown?.[hostId] || []).includes(a.id);
@@ -1869,11 +1869,11 @@ class App {
           continue;
         }
         if (a.type === 'subscription') {
-          if (be === 'codex' || !onHost) {
+          if (!bill.hostLogin || !onHost) {
             if (a.loggedIn && (!onHost || allowSubRemote)) opts.push([a.id, t('{name} (subscription)', { name: a.name })]);
             // Long-lived token (B-211a): usable locally via the env token even
             // with no local login (expired = disabled with the reason)
-            else if (be !== 'codex' && a.oat) opts.push(a.oatDaysLeft <= 0
+            else if (bill.longLivedToken && a.oat) opts.push(a.oatDaysLeft <= 0
               ? [a.id, a.name + ' — ' + t('long-lived token expired'), true]
               : [a.id, a.name + ' ' + t('· long-lived token')]);
             continue;

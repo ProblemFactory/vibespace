@@ -189,8 +189,7 @@ function mkWorld({ auto = true, hot = true, host = null, withFireNow = true, new
     wss: { clients: new Set([{ readyState: 1, send: (p2) => wsSent.push(p2) }]) }, WS_OPEN: 1, broadcastToSession() { }, serverNotice: (k, t) => notices.push(t),
     serverSetting: () => undefined, getAccounts: () => am, getHosts: () => null, getUsageHistory: () => null,
     recordUsageAttribution() { }, adapterRegistry: { get() { return null; } },
-    getAutoResume: () => arSeenByEngine, getOtelIngest: () => ({ observedOrgFor: () => null }),
-    getQuotaProbe: () => async (key) => {
+    getAutoResume: () => arSeenByEngine,     getQuotaProbe: () => async (key) => {
       probes.push(key);
       if (!probeAnswer) return false;
       writeCache(key, probeAnswer(key));
@@ -1059,8 +1058,7 @@ console.log('\n§8 half ② fires only the conversations nothing could move (r2)
         serverNotice() { }, serverSetting: () => undefined,
         getAccounts: () => am, getHosts: () => null, getUsageHistory: () => null,
         recordUsageAttribution() { }, adapterRegistry: { get() { return null; } },
-        getAutoResume: () => ar, getOtelIngest: () => ({ observedOrgFor: () => null }),
-        getQuotaProbe: () => async () => false,   // the CLAUDE rung; never routed to for a codex identity
+        getAutoResume: () => ar,         getQuotaProbe: () => async () => false,   // the CLAUDE rung; never routed to for a codex identity
       });
       const s = { backend: 'codex', mode: 'chat', _webuiId: 'sess-9-1788764799999', claudeSessionId: 'cid-9', backendSessionId: 'cid-9', _accountId: P, _autoResume: true, name: 'sess-9' };
       s.pty = { write(line) { if (/codex-read-limits/.test(String(line))) setImmediate(() => { try { eng.recordCodexQuotaSignal(s, { type: 'rate_limits_updated', error: 'no app-server in this harness' }); } catch { } }); } };
@@ -1216,7 +1214,7 @@ console.log('\n§7 no new vendor surface');
   ok('the login half reads through the EXISTING caps-routed dispatcher and constructs nothing itself',
     /probeQuotaForKey\(memberId\)/.test(wake) && !/https|request\(|fetch\(/.test(wake));
   ok('…and the dispatcher is the one that routes claude → the cli panel and codex → its app-server twin (no claude spawn for a codex identity)',
-    /rung === 'cli-usage'/.test(engSrc) && /rung === 'rpc-rate-limits'/.test(engSrc));
+    /rung === 'cli-usage'/.test(engSrc) && /if \(liveReadSource\(backend\)\) \{/.test(engSrc));
   const w = mkWorld();
   // a codex member has no cli-usage rung: the edge must not spawn a claude panel
   let CX = null;

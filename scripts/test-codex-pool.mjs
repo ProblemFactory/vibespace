@@ -128,7 +128,7 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
   const w = read('data/bin/codex-chat-wrapper.js');
   ok('the wrapper RELAYS rateLimits to stdout (sidecar was display-only)', /emitTaskEvent\('rate_limits_updated', \{ rateLimits: params\.rateLimits \}\)/.test(w));
   ok('…and forwards the typed codex_error_info on task_failed (it was dropped)', /codexErrorInfo: params\?\.codexErrorInfo \?\? params\?\.codex_error_info/.test(w));
-  ok('the pool-create route accepts backend codex', /backend: req\.body\?\.backend === 'codex' \? 'codex' : 'claude'/.test(read('src/server/account-usage-routes.js')));
+  ok('the pool-create route accepts backend codex — any REGISTERED harness whose caps row pools (lane dc-pool-quota: never coerced into a claude pool)', /const b = req\.body\?\.backend \|\| 'claude';\s*\n\s*if \(!require\('\.\.\/harnesses'\)\.has\(b\) \|\| !require\('\.\.\/backend-caps\.js'\)\.capsOf\(b\)\.pool\) return res\.status\(400\)[^\n]*\n[^\n]*createPool\(\{ name: req\.body\?\.name, members: req\.body\?\.members, backend: b \}\)/.test(read('src/server/account-usage-routes.js')) && require(path.join(REPO, 'src/backend-caps.js')).capsOf('codex').pool === true);
 }
 
 // ── list() pool shape for EVERY backend + ONE shared pool UI (2.369.18, P1) ──
@@ -190,7 +190,7 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
   const sv = read('server.js');
   ok('server.js sessionAuth: a codex pool reports source pooled + poolTarget (the status-bar chip / title badge / session props render it as a pool)', count(read('src/harnesses/claude.js') + read('src/harnesses/codex.js'), /if \(a && a\.type === 'pooled'\) return poolAuth\(a\);/g) === 2 && /const poolAuth = \(a\) =>/.test(sv) && /h\.billingIdentity\(s, \{ accounts, withHost, poolAuth \}\)/.test(sv));
   ok('chat-status-bar + window.js consume source pooled with the pool glyph + target (unchanged consumers)', /isPooled \? '⣿ ' \+ \(a\.name \|\| t\('Pool'\)\) \+ \(a\.poolTarget/.test(read('src/lib/chat-status-bar.js')) && /const isPooled = auth\.source === 'pooled';/.test(read('src/lib/window.js')));
-  ok('usage-meter: codex account chips exclude pools (a pool is not a quota holder — same rule as claudeSubs)', /a\.backend === 'codex' && a\.type === 'subscription'\)/.test(read('src/lib/usage-meter.js')));
+  ok('usage-meter: codex account chips exclude pools (a pool is not a quota holder — same rule as claudeSubs)', /billingRow\(a\.backend\)\.usage === 'codexAccounts' && a\.type === 'subscription'\)/.test(read('src/lib/usage-meter.js')));
   ok('session-card ⚙ account list: a pool row names its target (was "— API …undefined")', /\(a\.pooled \|\| a\.type === 'pooled'\) \? a\.name \+ \(a\.currentName \? ` → \$\{a\.currentName\}` : ' · ' \+ tr\('pool'\)\)/.test(read('src/lib/session-card.js')));
   ok('session-props billing row: pooled / codex-subscription / codex-cli are labeled, never "Unknown"', /a\.source === 'pooled' \? t\('Pooled account — \{name\}'/.test(read('src/lib/session-props.js')) && /a\.source === 'codex-subscription' \? t\('ChatGPT account — \{name\}'/.test(read('src/lib/session-props.js')) && /a\.source === 'codex-cli' \? t\('ChatGPT login \(the machine’s own\)'\)/.test(read('src/lib/session-props.js')));
   // i18n: every new human-visible string has zh + ja entries
@@ -260,7 +260,7 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
       serverSetting: (k) => settings[k], getAccounts: () => wam, getHosts: () => null, getUsageHistory: () => null,
       recordUsageAttribution: (m) => attrib.push(m), adapterRegistry: { get() { return null; } },
       getAutoResume: () => (realAr ? arRef : stubAr),
-      getOtelIngest: () => ({ observedOrgFor: () => null }), getQuotaProbe: () => null,
+      getQuotaProbe: () => null,
       getUserTodos: () => todos, getSessionMetaStore: () => metaStore,
     };
     const eng = engineModule.create(deps);

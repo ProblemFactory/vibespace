@@ -1550,6 +1550,26 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     writeJsonAtomic(path.join(d, attHash(author)) + '.json', meta, { mode: 0o600 });
     return { file: null, meta };
   }
+  /** lane channels-list-polish: THE ACCOUNT'S PEOPLE MEMO (`<account>/people.json`, beside `avatars/`) — who the account
+   *  IS (`self`, a resolved id) and what each author was named by (`people[id]` = {name, member, sender, alt, at, until,
+   *  why}) — so a restart does not forget them. Written whole by the adapter (bounded there), read through a cache. */
+  const peopleCache = new Map();
+  function peopleRead(adapterId) {
+    if (peopleCache.has(adapterId)) return peopleCache.get(adapterId);
+    let v = null;
+    try { v = JSON.parse(fs.readFileSync(path.join(dir, safeSeg(adapterId), 'people.json'), 'utf-8')); } catch { v = null; }
+    const out = v && typeof v === 'object' ? { self: typeof v.self === 'string' && v.self.length <= 128 ? v.self : null, people: v.people && typeof v.people === 'object' ? v.people : {} } : { self: null, people: {} };
+    peopleCache.set(adapterId, out);
+    return out;
+  }
+  function peopleWrite(adapterId, memo) {
+    const d = path.join(dir, safeSeg(adapterId));
+    fs.mkdirSync(d, { recursive: true, mode: 0o700 });
+    const out = { self: memo && typeof memo.self === 'string' ? memo.self : null, people: memo && memo.people && typeof memo.people === 'object' ? memo.people : {} };
+    writeJsonAtomic(path.join(d, 'people.json'), out, { mode: 0o600 });
+    peopleCache.set(adapterId, out);
+    return out;
+  }
   /** A cached attachment: `{file, meta}` or null. A hit refreshes its LRU stamp. */
   // verify r1 (lane channel-attach-read): `msg` names the message whose part it is (a Gmail `part:N` repeats per mail)
   const attSlot = (attId, msg) => attHash(msg ? `${msg}\n${attId}` : attId);
@@ -1918,7 +1938,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     quarantined,
     appendRecords, readTail, countSince, trim, audit, auditTail, close,
     // 2026-09-26 (the aggregated IM): backfill, search, attachments
-    prependRecords, oldestRecord, search, attachmentGet, attachmentPut, attachmentUsage, avatarGet, avatarPut, avatarRefuse,
+    prependRecords, oldestRecord, search, attachmentGet, attachmentPut, attachmentUsage, avatarGet, avatarPut, avatarRefuse, peopleRead, peopleWrite,
     // R3 (§23): one record by its vendorId (the attachment's owner), the LRU ledger's coalesced flush
     findRecord, lruFlush,
     // lane channel-threads: the side log (invariant 8) + which conversation holds a message

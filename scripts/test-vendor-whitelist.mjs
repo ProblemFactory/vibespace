@@ -34,6 +34,10 @@ let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 
 const VENDOR = /api\.anthropic\.com|platform\.claude\.com|console\.anthropic\.com|claude\.ai\/|anthropic-beta/;
+// The CONSTRUCTION census also counts OpenAI hosts (dc-pool-quota verify r1): the codex live quota read moved into
+// src/harnesses/codex-quota.js and rides the official client's app-server — a raw fetch to ChatGPT/OpenAI beside it
+// was invisible here. Only the census widens: whole-file VENDOR reads (permission-rules' comments name chatgpt.com) keep theirs
+const CONSTRUCT_HOSTS = new RegExp(VENDOR.source + '|chatgpt\\.com|openai\\.com');
 const REQUESTY = /https?\.request\s*\(|\bfetch\s*\(|axios|got\s*\(/;
 
 // ── collect every server-side JS file (the browser bundle never holds tokens) ──
@@ -65,7 +69,7 @@ for (const f of files) {
   if (rel.startsWith('data/bin/vibespace-agentd')) continue; // asserted separately below
   const lines = text.split('\n');
   for (let i = 0; i < lines.length; i++) {
-    if (!VENDOR.test(lines[i])) continue;
+    if (!CONSTRUCT_HOSTS.test(lines[i])) continue;
     const lo = Math.max(0, i - 4), hi = Math.min(lines.length, i + 5);
     const ctx = lines.slice(lo, hi).join('\n');
     if (REQUESTY.test(ctx)) constructions[rel] = (constructions[rel] || 0) + 1;
@@ -85,6 +89,14 @@ for (const [rel, n] of Object.entries(constructions)) {
   const a = ALLOW[rel];
   ok(!!a, `vendor request construction only in allowlisted files (found in ${rel}${a ? '' : ' — NOT ALLOWLISTED'})`);
   if (a) ok(n <= a.max, `${rel}: construction count ${n} ≤ ${a.max} (a NEW vendor call site must be allowlisted here with its gates)`);
+}
+// CONTROL: a raw vendor fetch planted beside the codex live read (quota.readLive) is a construction in a file outside
+// the rows — the census counts it, so the allowlist check above would go red
+{
+  const constructionsIn = (text) => { const L = text.split('\n'); let n = 0; for (let i = 0; i < L.length; i++) if (CONSTRUCT_HOSTS.test(L[i]) && REQUESTY.test(L.slice(Math.max(0, i - 4), i + 5).join('\n'))) n++; return n; };
+  const cq = fs.readFileSync(path.join(REPO, 'src/harnesses/codex-quota.js'), 'utf-8');
+  const planted = cq.replace('function settleLive(', "async function peekUsage() { return fetch('https://chatgpt.com/backend-api/wham/usage'); }\nfunction settleLive(");
+  ok(!ALLOW['src/harnesses/codex-quota.js'] && constructionsIn(cq) === 0 && planted !== cq && constructionsIn(planted) === 1, 'CONTROL: a raw ChatGPT fetch planted beside the codex live read is a construction outside the allowlist (RED)', String(constructionsIn(planted)));
 }
 for (const [rel, a] of Object.entries(ALLOW)) {
   ok(constructions[rel] > 0, `${rel} still holds its allowlisted vendor call (moved/renamed ⇒ update the allowlist)`);

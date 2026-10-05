@@ -1112,29 +1112,9 @@ const SETTINGS_SCHEMA = {
     tier: 'advanced',
     category: t('Channels'), liveApply: true,
   },
-  // lane lark-threads (B5): how a Lark person's name is SHOWN — the nickname the organization gives them, else their
-  // name, then (optionally) one of their profile fields in parentheses, the way Lark shows it; the vendor name stays the title
-  'channels.larkNameField': {
-    type: 'enum', default: 'department', options: [
-      { value: 'none', label: t('Name only') },
-      { value: 'department', label: t('Name (department)') },
-      { value: 'jobTitle', label: t('Name (job title)') },
-    ], label: t('Lark: how people are named'),
-    description: t('A person is shown by the nickname your organization gives them, else their name, followed by their department or job title in parentheses when you choose one — the way Lark shows it. Reading profiles needs the sign-in to allow it (the account card says when it does not). A name you set yourself on an author always wins.'),
-    when: { channel: 'lark' },
-    category: t('Channels'), liveApply: true,
-  },
-  // design 018: the relay page a workspace Slack app typed into THIS instance sends members back through (a company
-  // preset names its own relayUrl). The default is the project's own static page; empty = this instance's own https
-  // address, else the member pastes the code the app's page shows. Read by the hub (serverSetting).
-  'channels.slackRelayUrl': {
-    type: 'string', default: 'https://problemfactory.github.io/vibespace/slack/',
-    label: t('Slack: relay page'),
-    description: t('The https page Slack sends a member back to after they press Allow, for a workspace app whose Client ID and Secret were typed here (a company preset names its own). The page only returns the browser to a VibeSpace on a private network; anywhere else it shows the code to paste back. Register the same address under the app’s Redirect URLs. Empty = this instance’s own https address, else the code is pasted back.'),
-    when: { channel: 'slack' },
-    tier: 'advanced',
-    category: t('Channels'), liveApply: true,
-  },
+  // lane dc-channels-manifest (rv C4 / F8): each vendor's OPTION rows (how a person is named, the relay page …) are
+  // declared in its manifest's settings table (`options`) and derived here, in place — this file names no vendor
+  ...channelOptionRows(),
   // lane lark-search-poll (B-5aab, design §8 + owner decision 4): THE CHANGE FEED — one account-wide search per tick
   // names every conversation with a new message (Lark: groups, single chats, thread replies)
   'channels.feedEverySec': {
@@ -1492,6 +1472,20 @@ function deriveChannelTable(tbl) {
   return paths;
 }
 for (const tbl of Object.values(CHANNEL_SETTINGS)) deriveChannelTable(tbl);
+/** lane dc-channels-manifest (rv C4 / F8): every vendor's OPTION rows (`options` of its table — a person's name form,
+ *  a relay page …), as the schema rows they were written as by hand: the declared view fields, `when: { channel }`,
+ *  under `channels.<key>`. Spread in place inside SETTINGS_SCHEMA (the Settings window keeps their order). */
+function channelOptionRows() {
+  const out = {};
+  for (const tbl of Object.values(CHANNEL_SETTINGS)) for (const r of tbl.options || []) {
+    out[channelSettingPath(r.key)] = {
+      type: r.type, default: r.default, ...(r.options ? { options: r.options.map((o) => ({ value: o.value, label: t(o.label) })) } : {}),
+      label: t(r.label), description: t(r.description), when: { channel: tbl.vendor }, ...(r.tier ? { tier: r.tier } : {}),
+      category: t('Channels'), liveApply: true,
+    };
+  }
+  return out;
+}
 /** The settings paths a vendor's table derived (`['channels.budgetLarkPerMin', 'channels.larkRequestsPerSec']`). */
 export function channelSettingPaths(vendor) { return [...(CHANNEL_SETTING_OWNERS.get(vendor)?.paths || [])]; }
 /** A channel vendor's name in the user's language ('Lark', 'Gmail'); a vendor without a table reads its slug capitalised. */

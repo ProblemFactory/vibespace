@@ -51,7 +51,7 @@ function create({ dataDir, plugins, port, serverSetting, authEnabled = () => tru
   const save = () => { try { writeJsonAtomic(file, state); } catch (e) { log('[instance-url] persist failed: ' + e.message); } };
   const settingUrl = () => { try { return String(serverSetting('agentd.publicUrl') || '').trim() || null; } catch { return null; } };
   const envUrl = () => String(process.env.VIBESPACE_PUBLIC_URL || '').trim() || null;
-  const frp = () => { try { return plugins ? plugins.status('frp') : null; } catch { return null; } };
+  const frp = () => { try { return plugins ? plugins.status(plugins.providerId?.('relay')) : null; } catch { return null; } }; // the plugin that DECLARES 'relay'
 
   /** The effective address + WHERE it came from. An `auto` publish is visible
    *  but never outranks the configured setting (see the header). */

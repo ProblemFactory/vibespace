@@ -351,7 +351,11 @@ function limitSetFromEvent(ev, { identity = null, source = 'rate-limit-event', n
   return quotaModel.makeLimitSet({ identity, fetchedAt: at, source, limits });
 }
 
-module.exports = { projectReset, WEEK_SEC,
+// rate_limit_event rawTypes that name the WEEKLY window without its lane (seven_day vs seven_day_opus/sonnet):
+// the pool engine defers such a rejection until the lane is known (laneIsProvisional) — moved here from the
+// engine (rv-harnesses H2), so the engine asks the session's source instead of naming the harness.
+const UNSCOPED_WEEKLY_TYPES = new Set(['seven_day', 'weekly']);
+module.exports = { projectReset, WEEK_SEC, unscopedWeeklyTypes: UNSCOPED_WEEKLY_TYPES,
   normalize,
   signalFromStream,
   probe: capsOf('claude').quotaProbe, // 'cli-usage': the `claude -p /usage` auto-cli rung (usage-routes refreshViaCliPanel)

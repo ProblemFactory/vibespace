@@ -233,13 +233,15 @@ function closeDb() {
 // (the local disk is 91 % full on the dev box); the server is unaffected. For
 // want of ROOM the files go too (verify r1: a build stopped by a full disk left
 // 146 MB of a disabled index on it) — they are only an index, the room is the
-// server's, and the next start rebuilds.
+// server's, and the next start rebuilds. The state is posted LAST: "off" is a
+// fact about the disk, so the files are gone before the owner can say so
+// (mirror-green-213: posted first, a loaded runner read usage.db + -wal after it).
 function failed(e) {
   const code = codeOf(e);
   disabled = true;
-  state('disabled', { reason: code === 'SQLITE_BUSY' || code === 'SQLITE_LOCKED' ? 'locked-by-another-server' : 'write-failed', code, detail: String((e && e.message) || e).slice(0, 200) });
   if (db) { try { db.close(); } catch { } db = null; }
   if (code === 'SQLITE_FULL' || code === 'ENOSPC' || code === 'EDQUOT') removeDbFiles();
+  state('disabled', { reason: code === 'SQLITE_BUSY' || code === 'SQLITE_LOCKED' ? 'locked-by-another-server' : 'write-failed', code, detail: String((e && e.message) || e).slice(0, 200) });
 }
 
 if (!disabled) {

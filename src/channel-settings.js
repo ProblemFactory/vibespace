@@ -26,80 +26,32 @@
 // register its table over the wire like a contributed harness — not built
 // (design S6: no plugin adapter exists).
 //
-// `t` below is only the EXTRACTION MARKER (English-string-as-key): the client
-// re-wraps every label / description / vendor name with the real t() when it
-// derives the schema rows, so the same key hits the same zh/ja entry.
-const t = (s) => s;
+// lane dc-channels-manifest: the tables are DECLARED in each vendor's manifest
+// (src/channels/<vendor>/manifest.js) and only derived here; a table may also
+// carry `options` — OPTION rows (OPTION_ROLES: a person's name form, a relay
+// page) the schema derives in place and the adapter / engine read by role.
+const VendorList = require('./channels/registry-list.js');   // lane dc-channels-manifest: PURE — the vendors' manifests
 
 const PREFIX = 'channels';
 const ROLES = Object.freeze(['budget', 'pace']);
 const ROW_TYPES = Object.freeze(['number']);
+const OPTION_ROLES = Object.freeze(['nameField', 'relayUrl']);   // lane dc-channels-manifest (rv C4 / F8): the option rows' closed roles
+const OPTION_TYPES = Object.freeze(['enum', 'string']);
 const KEY_RE = /^[A-Za-z0-9]+$/;            // the registry's `channels.<key>` shape, minus the prefix
 const VENDOR_RE = /^[a-z][a-z0-9-]*$/;      // a `when: { channel }` slug (test-architecture 44e)
 
 const deepFreeze = (o) => { for (const v of Object.values(o)) if (v && typeof v === 'object') deepFreeze(v); return Object.freeze(o); };
 
-const CHANNEL_SETTINGS = deepFreeze({
-  // Lark's frequency tiers are per API, per app, per TENANT ("1000/min, 50/s" for the chat / message / member /
-  // resource reads) and a cluster app shares that pool with every instance and user: 60 a minute (6 %), 5 a second
-  lark: {
-    vendor: 'lark', vendorName: t('Lark'),
-    rows: [
-      {
-        key: 'budgetLarkPerMin', role: 'budget', type: 'number', default: 60, min: 5, max: 1000, step: 5,
-        label: t('Lark: requests per minute per account'),
-        description: t('Lark allows 1000 requests a minute per API for the whole app across every instance and user that shares it. When an account reaches this budget its refreshes wait for the next minute, and the account card says so.'),
-      },
-      {
-        key: 'larkRequestsPerSec', role: 'pace', type: 'number', default: 5, min: 1, max: 50, step: 1,
-        label: t('Lark: requests per second per account'),
-        description: t('Requests are spread evenly: at most this many a second, and never faster than the per-minute budget above allows. Lark allows 50 a second per API for the whole app across every instance and user that shares it.'),
-      },
-    ],
-  },
-  // Gmail meters in quota units, 6000 a minute per user (a thread read 40, a change check 2), and refuses bursts well
-  // inside that (lane R5): half the minute (3000), 40 units a second = one thread read a second
-  gmail: {
-    vendor: 'gmail', vendorName: t('Gmail'),
-    rows: [
-      {
-        key: 'budgetGmailPerMin', role: 'budget', type: 'number', default: 3000, min: 100, max: 6000, step: 100,
-        label: t('Gmail: quota units per minute per account'),
-        description: t('Gmail allows 6000 quota units a minute per user (a thread read costs 40, a change check 2). When an account reaches this budget its refreshes wait for the next minute, and the account card says so.'),
-      },
-      {
-        key: 'gmailUnitsPerSec', role: 'pace', type: 'number', default: 40, min: 5, max: 100, step: 5,
-        label: t('Gmail: quota units per second per account'),
-        description: t('Reads are spread evenly: at most this many quota units a second (a thread read costs 40, so 40 = one thread a second), and never faster than the per-minute budget above allows. Google refuses bursts well inside its 6000-a-minute cap; when it does, the account waits a few seconds and the card says so.'),
-      },
-    ],
-  },
-  // Slack (design 012, lane S1): each person's OWN internal app — Slack meters every method on its own (history 50 a
-  // minute, reactions.remove 20, users.info 100 — the adapter's per-method buckets, src/channels/slack-limits.js); this
-  // is the account's whole minute across them: 40 (a fifth of the four busiest methods' floors), 2 a second
-  slack: {
-    vendor: 'slack', vendorName: t('Slack'),
-    rows: [
-      {
-        key: 'budgetSlackPerMin', role: 'budget', type: 'number', default: 40, min: 5, max: 300, step: 5,
-        label: t('Slack: requests per minute per account'),
-        description: t('Slack limits every method on its own (reading a conversation\'s history: 50 a minute for your own app). This is the account\'s whole minute across all of them; when an account reaches it, its refreshes wait for the next minute and the account card says so.'),
-      },
-      {
-        key: 'slackRequestsPerSec', role: 'pace', type: 'number', default: 2, min: 1, max: 20, step: 1,
-        label: t('Slack: requests per second per account'),
-        description: t('Requests are spread evenly: at most this many a second, and never faster than the per-minute budget above allows.'),
-      },
-    ],
-  },
-});
+// lane dc-channels-manifest: DERIVED — each vendor's table is its manifest's `settings`
+// (src/channels/<vendor>/manifest.js), in the vendor list's order (src/channels/registry-list.js).
+const CHANNEL_SETTINGS = deepFreeze(VendorList.settingsTables());
 
 /** The persisted settings path of a row — TODAY's spelling (`channels.budgetLarkPerMin`). */
 function settingPath(key) { return `${PREFIX}.${key}`; }
 /** The row of `table` whose role is `role`, or null. */
 function rowOfRole(table, role) {
   if (!table || !Array.isArray(table.rows)) return null;
-  return table.rows.find((r) => r && r.role === role) || null;
+  return table.rows.find((r) => r && r.role === role) || (table.options || []).find((r) => r && r.role === role) || null;
 }
 function roleRow(table, role) {
   const r = rowOfRole(table, role);
@@ -156,6 +108,24 @@ function checkChannelTable(table) {
     if (r.step !== undefined && !(isNum(r.step) && r.step > 0)) errs.push(`${at}: step must be a positive number`);
     for (const f of ['label', 'description']) if (typeof r[f] !== 'string' || !r[f].trim()) errs.push(`${at}: ${f} must be a non-empty string`);
   });
+  if (table.options !== undefined) {
+    if (!Array.isArray(table.options)) errs.push('options must be an array');
+    else table.options.forEach((r, i) => {
+      const at = `options[${i}]${r && r.key ? ` (${r.key})` : ''}`;
+      if (!isPlainObject(r)) { errs.push(`${at} must be an object`); return; }
+      if (typeof r.key !== 'string' || !KEY_RE.test(r.key)) errs.push(`${at}: key must match ${KEY_RE} (the registry's channels.* shape)`);
+      else if (keys.has(r.key)) errs.push(`${at}: duplicate key`);
+      else keys.add(r.key);
+      if (!OPTION_ROLES.includes(r.role)) errs.push(`${at}: role must be one of ${OPTION_ROLES.join('|')} (got ${JSON.stringify(r.role)})`);
+      else if (roles.has(r.role)) errs.push(`${at}: a second ${r.role} row (one per role)`);
+      else roles.add(r.role);
+      if (!OPTION_TYPES.includes(r.type)) errs.push(`${at}: type must be ${OPTION_TYPES.join('|')}`);
+      else if (r.type === 'enum' && !(Array.isArray(r.options) && r.options.length && r.options.every((o) => isPlainObject(o) && typeof o.value === 'string' && typeof o.label === 'string' && o.label.trim()) && r.options.some((o) => o.value === r.default))) errs.push(`${at}: an enum row needs options [{value, label}] holding its default`);
+      else if (r.type === 'string' && typeof r.default !== 'string') errs.push(`${at}: a string row needs a string default`);
+      if (r.tier !== undefined && r.tier !== 'advanced') errs.push(`${at}: tier is 'advanced' or absent`);
+      for (const f of ['label', 'description']) if (typeof r[f] !== 'string' || !r[f].trim()) errs.push(`${at}: ${f} must be a non-empty string`);
+    });
+  }
   return errs;
 }
 /** Every table checked, plus what only the set can tell: the entry name IS its vendor, keys unique across vendors. */
@@ -165,7 +135,7 @@ function checkChannelTables(tables) {
   for (const [name, tbl] of Object.entries(tables || {})) {
     for (const e of checkChannelTable(tbl)) errs.push(`${name}: ${e}`);
     if (isPlainObject(tbl) && tbl.vendor !== name) errs.push(`${name}: vendor ${JSON.stringify(tbl.vendor)} is not its entry name`);
-    for (const r of (isPlainObject(tbl) && Array.isArray(tbl.rows) ? tbl.rows : [])) {
+    for (const r of (isPlainObject(tbl) && Array.isArray(tbl.rows) ? [...tbl.rows, ...(Array.isArray(tbl.options) ? tbl.options : [])] : [])) {
       if (!r || typeof r.key !== 'string') continue;
       if (seen.has(r.key) && seen.get(r.key) !== name) errs.push(`${name}: key ${r.key} is also ${seen.get(r.key)}'s`);
       seen.set(r.key, name);
@@ -175,6 +145,6 @@ function checkChannelTables(tables) {
 }
 
 module.exports = {
-  CHANNEL_SETTINGS, PREFIX, ROLES, ROW_TYPES, KEY_RE, VENDOR_RE,
+  CHANNEL_SETTINGS, PREFIX, ROLES, ROW_TYPES, OPTION_ROLES, OPTION_TYPES, KEY_RE, VENDOR_RE,
   settingPath, rowOfRole, budgetOf, paceOf, boundsOf, declaredKey, checkChannelTable, checkChannelTables,
 };

@@ -51,7 +51,9 @@ function putPicture(s, url) {
   const img = document.createElement('img');
   img.className = 'chan-av-img'; img.alt = ''; img.decoding = 'async'; img.draggable = false; img.src = url;
   s.classList.add('chan-av-pic');
-  s.appendChild(img);
+  // lane channels-list-polish (the owner: "角标也被头像盖住了"): the picture goes UNDER the account badge — before it in
+  // the box (and the badge's z-index says the same), never appended over it
+  s.insertBefore(img, s.querySelector('.chan-av-badge'));
 }
 /** Ask the pictures of `list` ([{account, author, conv?}] in draw order) — the surface's warm-up. */
 export function warmAvatars(list) {
@@ -97,9 +99,21 @@ export function accountBadge(badge, cls = '', title = '') {
   if (cls) b.classList.add(cls);
   if (badge.internal) b.dataset.vs = '1';
   else if (Number.isInteger(badge.hue)) b.dataset.hue = String(badge.hue);
-  const g = icon(UI_ICONS[badge.glyph] ? badge.glyph : 'chat', 8);
-  g.style.fontSize = '';
-  b.appendChild(g);
+  // lane channels-list-polish (the owner: "你这 lark 图标哪来的"): a vendor's OWN mark — public/brand/<vendor>.svg, a
+  // monochrome silhouette drawn from the official shape — painted in the badge's ink through a CSS mask (the account's
+  // hue stays the badge's fill); any other glyph is the library's
+  const mark = typeof badge.glyph === 'string' && /^vendor-[a-z]+$/.test(badge.glyph) && UI_ICONS[badge.glyph] ? badge.glyph.slice(7) : '';
+  if (mark) {
+    const g = document.createElement('span');
+    g.className = 'chan-av-mark';
+    g.dataset.mark = mark;
+    g.style.setProperty('--mark', `url(/brand/${mark}.svg)`);
+    b.appendChild(g);
+  } else {
+    const g = icon(UI_ICONS[badge.glyph] ? badge.glyph : 'chat', 8);
+    g.style.fontSize = '';
+    b.appendChild(g);
+  }
   const tip = title || (badge.internal ? t('VibeSpace internal') : badge.title) || '';
   if (tip) b.title = tip;
   return b;

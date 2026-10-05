@@ -69,7 +69,8 @@ import { routeErrorText, groupErrorText, statusTagParts, viewSwitchText } from '
 import { groupListRows, foldsFrom, GROUP_ADAPTER_ID, firstScreen, statusTag, filterRows, internalBlock } from './channel-groups-view.js';
 // design 008 (B-3cf8): the rows this panel HOLDS — the first read + every page read, keyed (PURE)
 import { createRowStore, applyFirst, applyPage, applyBroadcast, listRows, focusRowsOf, ensureList, pageQueryOf, accountList } from './channel-rows.js';
-import { afterCursor, PAGE_MAX } from '../channel-focus.js';
+import { afterCursor, PAGE_MAX, listRowModel } from '../channel-focus.js';
+import { chipMode, titleMinText } from './title-chips.js'; // int214: a row's freshness pill folds (lane G), never cuts
 import { clearedText } from './record-clear-ui.js'; // "Clear content…" (2026-09-28): a group row's cleared last line
 import { showGroupMembersDialog, showGroupDetail, renameGroup, archiveGroup } from './channel-group-dialogs.js';
 // R4: access and notification — two operations (Grant access… / Notify…),
@@ -93,7 +94,10 @@ function chip(freshness) {
   const el = document.createElement('span');
   const f = freshness || {};
   el.className = 'chan-chip' + (f.kind === 'live' ? ' chan-chip-live' : (f.state === 'off' || f.state === 'never') ? ' chan-chip-off' : '');
-  el.textContent = chanCaps.freshnessText(f, { t, short: true }) || t('unknown');
+  // int214 (lane G's rule on a row): the pill's two forms — its words, or its glyph alone when the row cannot hold the
+  // words beside a readable last message (fitRowPills); the sentence always rides the tooltip
+  el.appendChild(icon('circle', 8, 'chan-chip-ic'));
+  el.appendChild(chanEl('span', 'chan-chip-tx', chanCaps.freshnessText(f, { t, short: true }) || t('unknown')));
   el.title = `${chanCaps.freshnessText(f, { t }) || t('unknown')} — ${t('How fresh this row is — the lane actually carrying it, not the one the adapter declares.')}`;
   return el;
 }
@@ -107,6 +111,29 @@ function laneNote(lane) {
   if (lane.via === 'scan') return lane.source ? `${t('scan')} · ${chanCaps.scanSourceText(lane.source, { t })}` : `${t('scan')} · ${chanCaps.laneWhyText(lane.why || 'no-source', { t })}`;
   if (lane.via === 'push') return t('push');
   return t('poll');
+}
+
+/** int214 (the coordinator's call B, lane G's chipMode): a chat row's freshness pill is WHOLE or it FOLDS to its glyph —
+ *  the words while the last message beside them keeps TITLE_MIN_CHARS readable, else the glyph; never an ellipsis.
+ *  One read pass (every width), then one write pass (the modes), so a fit never forces a layout per row. */
+let pillCanvas = null;
+function fitRowPills(scope) {
+  const rows = scope ? scope.querySelectorAll('.chan-row-chat') : [];
+  const plan = [];
+  let font = null;
+  for (const r of rows) {
+    const who = r.querySelector(':scope > .chan-row-sub > .chan-row-who'), c = r.querySelector(':scope > .chan-row-sub > .chan-chip');
+    if (!who || !c) continue;
+    const cw = c.getBoundingClientRect().width;
+    if (!cw) continue;   // hidden (the ≤160 px panel hides the pill) or not laid out
+    if (c.dataset.mode !== 'icon') c._fullPx = cw;
+    if (!Number.isFinite(c._fullPx)) continue;
+    if (!font) { font = getComputedStyle(who).font; pillCanvas = pillCanvas || document.createElement('canvas'); }
+    const g = pillCanvas.getContext('2d'); g.font = font;
+    const text = who.textContent || '';
+    plan.push([c, chipMode({ availablePx: who.getBoundingClientRect().width + cw, titlePx: who.scrollWidth, titleMinPx: g.measureText(titleMinText(text)).width, chipFullPx: c._fullPx, chipCompactPx: c._fullPx }) === 'icon' ? 'icon' : 'full']);
+  }
+  for (const [c, mode] of plan) if (c.dataset.mode !== mode) c.dataset.mode = mode;
 }
 
 async function api(pathname, init) {
@@ -1258,6 +1285,7 @@ export function renderChannelsPanel(app, c) {
     pruneMemo();
     reconcile(root, top);
     if (scroller && scroller.scrollTop !== keepTop) scroller.scrollTop = keepTop;
+    raf(() => { if (root.isConnected) fitRowPills(root); });   // int214: the pills' forms for the room the rows have now
   }
 
   /** A SECONDARY section (Accounts / Message watcher): a fold head + a body;
@@ -1295,6 +1323,7 @@ export function renderChannelsPanel(app, c) {
     const into = { appendChild: (x) => { top.push(x); return x; } };
     const adapters = (d && d.adapters) || [];
     const badges = accountBadges(adapters);   // lane channels-badges: this build's ONE map — the rows and the cards read it
+    curBadges = badges;   // lane channels-list-polish: the per-account rows wear their account's badge too
     // design 008: the ATTENTION rows the store holds — the server's list (verify r1: a held row's stale tag never draws
     //  it here); All and each account draw their own lists below
     const convs = focusRowsOf(store, Date.now());
@@ -1788,20 +1817,28 @@ export function renderChannelsPanel(app, c) {
     return secEl;
   }
 
+  let curBadges = new Map();
   function row(conv, { child = false } = {}) {
     // THE SIGNATURE NAMES EVERY FACT THE ROW PRINTS (verify round 5, 2026-09-27): line 3 is assignmentSummary(conv)
     //  = the WHOLE `access` and `watchers` lists, while round 4 signed only `assignment` (the FIRST watcher / access
     //  row) — a second principal granted access, or the second watcher's cadence, never reached the row until an
     //  unrelated field moved (reproduced: "Access: Alpha" after "Access: [Alpha, Beta]" was saved). The fast census
     //  (test-channels-groups-ui §3) reads every `conv.<field>` the builder and its helpers touch against this list.
-    const sig = JSON.stringify(['r', child, conv.adapterId, conv.id, conv.title, conv.kind, conv.unread, conv.freshness, conv.participants, conv.outbox && conv.outbox.awaiting, conv.assignment, conv.access, conv.watchers, conv.held]);
+    const sig = JSON.stringify(['r', child, conv.adapterId, conv.id, conv.title, conv.kind, conv.unread, conv.freshness, conv.participants, conv.outbox && conv.outbox.awaiting, conv.peer, conv.lastAt, conv.lastText, conv.lastWho, rowTime(conv.lastAt), curBadges.get(conv.adapterId) || null, conv.assignment, conv.access, conv.watchers, conv.held]);
     return memoRow(`${child ? 'c' : 'r'}:${conv.adapterId}/${conv.id}`, sig, conv, (cur) => rowBuild(conv, child, cur));
   }
   function rowBuild(conv, child, cur) {
+    // lane channels-list-polish (the owner: "整体做的更接近一个聊天工具的列表"): THE ATTENTION ROW'S SHAPE — the avatar
+    // (its account's badge on top), the name + the time, the LAST MESSAGE's first line ("who: text", textContent) + the
+    // freshness pill + the counts (int214, the coordinator's call B); the access/notify line ONLY when this
+    // conversation's own grain differs from the account's
+    const m = listRowModel(conv);
     const el = document.createElement('div');
-    el.className = 'chan-row session-item-card' + (child ? ' chan-row-child' : '') + (conv.unread ? ' chan-row-unread' : '');
+    el.className = 'chan-row chan-row-chat session-item-card' + (child ? ' chan-row-child' : '') + (conv.unread ? ' chan-row-unread' : '');
     el.dataset.conv = `${conv.adapterId}/${conv.id}`;
-    // line 1: the title + ONE freshness pill (the honesty contract)
+    el.appendChild(convAvatar({ key: `${conv.adapterId}/${conv.id}`, title: conv.title || '', kind: conv.kind || '', badge: curBadges.get(conv.adapterId) || null, pic: conv.peer ? { account: conv.adapterId, author: conv.peer } : null }, null, 'chan-row-av'));
+    if (conv.peer) warmAvatars([{ account: conv.adapterId, author: conv.peer, conv: conv.id }]);   // deduped, the answered skipped
+    // line 1: the title + the time (int214, the coordinator's call B: the freshness pill is on line 2)
     const line = document.createElement('div');
     line.className = 'chan-row-line';
     const title = document.createElement('span');
@@ -1811,19 +1848,19 @@ export function renderChannelsPanel(app, c) {
     // carries the freshness sentence, which the ≤180px container hides as a pill
     const fresh = chanCaps.freshnessText(conv.freshness || {}, { t }) || t('unknown');
     title.title = `${conv.title || conv.id} — ${fresh}`;
-    // an account's conversation is its CHILD row: the storage child-row arrow
-    if (child) { const ar = document.createElement('span'); ar.className = 'mounts-child-arrow'; ar.textContent = '↳'; line.appendChild(ar); }
     line.appendChild(title);
-    // the ONE freshness pill — every row is fetched (2026-09-26), so every row has its claim
-    line.appendChild(chip(conv.freshness));
+    if (m.at) { const at = chanEl('span', 'chan-row-at', rowTime(m.at)); at.title = new Date(m.at).toLocaleString(deviceLocale()); line.appendChild(at); }
     el.appendChild(line);
-    // line 2: participants + the needs-you badges (right)
+    // line 2: the last message ("who: text") + the ONE freshness pill (the honesty contract — every row is fetched,
+    // 2026-09-26, so every row has its claim; whole or folded to its glyph, never cut) + the needs-you badges (right)
     const sub = document.createElement('div');
     sub.className = 'chan-row-sub';
     const who = document.createElement('span');
-    who.className = 'chan-row-who';
-    who.textContent = conv.participants || '';
+    who.className = 'chan-row-who chan-row-last';
+    if (m.who) who.appendChild(chanEl('span', 'chan-row-lastwho', (m.who.self ? t('You') : m.who.name) + ': '));
+    who.appendChild(document.createTextNode(m.last || conv.participants || ''));
     sub.appendChild(who);
+    sub.appendChild(chip(conv.freshness));
     const awaiting = conv.outbox && conv.outbox.awaiting ? Number(conv.outbox.awaiting) : 0;
     const unread = conv.unread ? Number(conv.unread) : 0;
     // P3: proposals awaiting approval on this row — the badge the pointer
@@ -1854,18 +1891,16 @@ export function renderChannelsPanel(app, c) {
       sub.appendChild(needs);
     }
     el.appendChild(sub);
-    // line 3 (P2): the assignment IN EFFECT (§7.3: its own, or inherited from
-    // the account / a rule — dim, labelled), authority clamped; a held/stashed
-    // last wake says so in amber.
-    if (conv.assignment) {
+    // line 3 (P2 → lane channels-list-polish): the assignment ONLY where it DIFFERS from the account's (the conversation's
+    // own grain), worded as that difference; a held/stashed last wake says so in amber on any row
+    const held = !!conv.held;
+    if (conv.assignment && (m.grainLine || held)) {
       const asg = document.createElement('div');
-      const held = !!conv.held;
-      const inherited = conv.assignment.source && conv.assignment.source !== 'conversation';
-      asg.className = 'chan-row-assign' + (held ? ' chan-warn' : '') + (inherited ? ' chan-row-inherited' : '');
+      asg.className = 'chan-row-assign' + (held ? ' chan-warn' : '');
       asg.dataset.grain = conv.assignment.source || 'conversation';
       asg.appendChild(icon('filter', 10));   // the glyph is an SVG (§17) — the sentence used to start with a '→'
       const asgText = document.createElement('span');
-      asgText.textContent = assignmentSummary(conv) + (held ? ' · ' + t('last wake held') : '');
+      asgText.textContent = (m.grainLine ? t('Unlike the account: {grant}', { grant: assignmentSummary(conv) }) : '') + (held ? (m.grainLine ? ' · ' : '') + t('last wake held') : '');
       asg.appendChild(asgText);
       asg.title = held ? t('Last wake was held or stashed — open the conversation\'s Assign & filter for the reason') : assignmentSummary(conv);
       el.appendChild(asg);

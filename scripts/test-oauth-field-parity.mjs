@@ -117,7 +117,7 @@ export const SHARED = [
   { spelling: 'mounts-btn mounts-btn-primary mounts-reauth-btn', mounts: true, channels: true },
   { spelling: 'mounts-typetag', mounts: true, channels: true },
   { spelling: 'mounts-icon-btn', mounts: true, channels: true },
-  { spelling: 'mounts-child-arrow', mounts: true, channels: true },
+  { spelling: 'mounts-child-arrow', mounts: true },   // lane channels-list-polish (2.369.214, the owner's item 6): a conversation row is a chat row now — no ↳
   // drawn BY THE MODULE for both sides — the channel side carries them by importing it (§6), never by writing them
   { spelling: "'mounts-field-hint'", module: true, mounts: true, channels: 'module' },
   { spelling: "'mounts-drive-connect'", module: true, mounts: true, channels: 'module' },

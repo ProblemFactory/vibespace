@@ -6,12 +6,12 @@ import { t } from './i18n.js';
 import { renderDashboard, PRESETS, destroyCharts, panelPivots, ORIGIN_COLS, ORIGIN_ORDER, ORIGIN_META } from './usage-dashboard.js';
 import { showContextMenu } from './utils.js';
 import { escHtml, fetchJson, showToast, copyText } from './utils.js';
-import { createBackendIconHtml } from './agent-meta.js';
+import { createBackendIconHtml, getBackendMeta } from './agent-meta.js';
 import { registerWindowType } from './window-types.js';
 
 // Small vendor logo — accounts and models from BOTH CLIs mix in one dashboard,
 // so every such row/chip carries the backend brand to keep them apart.
-const beIc = (be) => be ? createBackendIconHtml(be, { className: 'usage-be-ic', title: be === 'codex' ? 'Codex' : 'Claude' }) : '';
+const beIc = (be) => be ? createBackendIconHtml(be, { className: 'usage-be-ic', title: getBackendMeta(be).label }) : '';
 const bucketBe = (r) => r.key === '__global__' ? 'claude'
   : r.key === '__global_codex__' ? 'codex'
   : (r.be || (r.type === 'codex-subscription' ? 'codex' : 'claude'));

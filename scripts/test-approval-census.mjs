@@ -523,7 +523,7 @@ console.log('controls (patched copies)');
   // CONTROL (d1): the pre-fix plugins-ui Stop confirm — two positional strings
   {
     const prel = 'src/lib/plugins-ui.js', psrc = readRepo(prel);
-    const pmut = psrc.replace(/const ok = await showConfirmDialog\(\{\n\s*title: t\('Stop \{name\}\?', \{ name: p\.label \}\),\n\s*message: isFrp/, "const ok = await showConfirmDialog(t('Stop {name}?', { name: p.label }), isFrp");
+    const pmut = psrc.replace(/const ok = await showConfirmDialog\(\{\n\s*title: t\('Stop \{name\}\?', \{ name: p\.label \}\),\n\s*message: isRelay/, "const ok = await showConfirmDialog(t('Stop {name}?', { name: p.label }), isRelay");
     ok(pmut !== psrc, 'CONTROL (d1): the patch applies');
     const pcopy = M.write(prel, pmut, 'd1');
     const c1 = confirmShapeCensus((f) => (f === prel ? fs.readFileSync(pcopy, 'utf8') : readRepo(f)), LIB);

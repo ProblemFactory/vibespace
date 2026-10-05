@@ -368,7 +368,7 @@ const project = (items, parentKind) => items.map((i) => (i.separator ? { sep: 1 
 
 // B1. session-card menu
 {
-  const backendFeatureCaps = (b) => ({ fork: b !== 'shell' });
+  const backendFeatureCaps = (b) => ({ fork: b !== 'shell', accounts: b === 'claude' || b === 'codex' }); // accounts = the real META caps.accounts rows (switchBilling gates on it)
   const copyCalls = [];
   new Function('registerCommand', 'registerMenuItem', 'tr', 'backendFeatureCaps', 'copyText', 'showConfirmDialog', extract('src/lib/session-card.js', 'registerSessionCardMenu'))(
     registerCommand, registerMenuItem, id, backendFeatureCaps, (t) => copyCalls.push(t), async () => false);

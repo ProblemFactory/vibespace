@@ -117,6 +117,7 @@ function normalizeTouch(x) {
     title: str(x.title, TITLE_MAX),
     account: str(x.account, LABEL_MAX),
     kind: str(x.kind, 40) || null,
+    ...(GLYPHS.includes(x.icon) ? { icon: x.icon } : {}),
     count: Math.max(0, Math.floor(num(x.count))),
     // lane channel-threads: the emoji a `react` touch proposed (a glyph ≤ 16 units, or `:key:`) — the row says it
     ...(op === 'react' && x.glyph ? { glyph: str(x.glyph, 70) } : {}),
@@ -224,7 +225,7 @@ function foldTouches(touches) {
     const key = touchKey(t);
     let r = rows.get(key);
     if (!r) {
-      r = { key, adapterId: t.adapterId, convId: t.convId || null, proposalId: t.proposalId || null, title: '', account: '', kind: t.kind || null, ops: Object.fromEntries(OPS.map((o) => [o, 0])), readCalls: 0, calls: 0, first: num(t.at), last: 0, lastAt: {} };
+      r = { key, adapterId: t.adapterId, convId: t.convId || null, proposalId: t.proposalId || null, title: '', account: '', kind: t.kind || null, icon: t.icon || null, ops: Object.fromEntries(OPS.map((o) => [o, 0])), readCalls: 0, calls: 0, first: num(t.at), last: 0, lastAt: {} };
       rows.set(key, r);
     }
     const at = num(t.at);
@@ -313,12 +314,12 @@ function rowName(row) {
   return row && row.account ? `${row.account} › ${title}` : title;
 }
 
-/** Which library glyph a row wears (a mailbox or a chat; an agent for the built-in Agents adapter). */
-function glyphFor(kindOrAdapterId) {
-  const k = String(kindOrAdapterId || '').split(':')[0];
-  if (k === 'gmail') return 'mail';
-  if (k === 'agents') return 'robot';
-  return 'chat';
+/** The library glyphs a row may wear — the adapter's DECLARED `caps.glyph` (lane dc-channels-blocks, C7). */
+const GLYPHS = Object.freeze(['chat', 'mail', 'robot']);
+/** Which library glyph a row wears: the row's `icon` (its adapter's declared caps.glyph, stamped by the witness);
+ *  `chat` for anything else. */
+function glyphFor(icon) {
+  return GLYPHS.includes(icon) ? icon : 'chat';
 }
 
 /** THE CHIP: the touches of the CURRENT turn (at or after `turnAt`), folded; `latest` = the row of the newest
@@ -388,5 +389,5 @@ function searchTouches(results, { max = SEARCH_MAX_CONVS, query = '' } = {}) {
 module.exports = {
   OPS, DRAFT_OPS, RING_MAX, MERGE_MS, SKEW_MS, BATCH_MS, FOLD_SHOWN, SEARCH_MAX_CONVS, SEARCH_HITS_MAX, QUERY_MAX, TITLE_MAX, LABEL_MAX, TOUCH_PLACEMENTS,
   touchKey, normalizeTouch, appendTouch, upsertTouch, commandTouchesChannels, namesTouch, bindToCall, foldTouches, foldView, rowWords, replyWords, rowName,
-  glyphFor, chipView, chipText, sessionSummary, touchedByWords, agoText, searchTouches, hitRefs, openVerdict, tailVerdict,
+  GLYPHS, glyphFor, chipView, chipText, sessionSummary, touchedByWords, agoText, searchTouches, hitRefs, openVerdict, tailVerdict,
 };

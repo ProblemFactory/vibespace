@@ -84,11 +84,11 @@ const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
 {
   const fs2 = require('node:fs');
   const sl = fs2.readFileSync(REPO + '/src/lib/session-lifecycle.js', 'utf8');
-  ok("billing switcher's global row is backend-aware (ChatGPT login for codex)", /isCodex \? t\('ChatGPT login'\) : t\('CLI login'\)/.test(sl));
+  ok("billing switcher's global row is backend-aware (ChatGPT login for codex)", /const globalLoginName = t\(bill\.cliLogin\)/.test(sl) && /cliLogin: 'ChatGPT login'/.test(fs2.readFileSync(REPO + '/src/lib/agent-meta.js', 'utf8')));
   // 2.369.21: the codex row shows the CODEX quota (__global_codex__), never the claude machine quota
-  ok('…and the CLAUDE machine quota chips never dress the codex row (it shows the codex quota instead)', /isCodex \? \(rHostId \? '' : usageHint\(this\._codexAccountUsage\?\.__global_codex__, this\._usageEstimates\?\.__global_codex__\)\) : usageHint\(rHostId \? this\._hostOwnUsage/.test(sl));
+  ok('…and the CLAUDE machine quota chips never dress the codex row (it shows the codex quota instead)', /!bill\.machineUsage \? \(rHostId \? '' : usageHint\(accountUsageStore\(this, backend\)\?\.\[bill\.globalUsageKey\], this\._usageEstimates\?\.\[bill\.globalUsageKey\]\)\) : usageHint\(rHostId \? this\._hostOwnUsage/.test(sl) && /globalUsageKey: '__global_codex__'/.test(fs2.readFileSync(REPO + '/src/lib/agent-meta.js', 'utf8')));
   const sb = fs2.readFileSync(REPO + '/src/lib/chat-status-bar.js', 'utf8');
-  ok('status-bar billing chip is backend-aware too', /this\._backend === 'codex' \? t\('ChatGPT login'\) : t\('CLI login'\)/.test(sb));
+  ok('status-bar billing chip is backend-aware too', /const glogin = t\(billingRow\(this\._backend\)\.cliLogin\)/.test(sb));
 }
 
 // ── Track B: semantic collapse kinds (owner: codex的exec卡片/agent wait/send
@@ -263,7 +263,7 @@ const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
   const cv = fs.readFileSync(REPO + '/src/lib/chat-view.js', 'utf8');
   ok('popup labels the ledger key honestly + shows the response id, reasoning tokens, effort, codex cache write', /requestIdKind === 'ledger' \? t\('Ledger request key'\) : t\('Request ID'\)/.test(cv) && /msgIdKind === 'response' \? t\('Response ID'\) : t\('Message ID'\)/.test(cv) && /t\('Reasoning tokens'\)/.test(cv) && /if \(meta\.effort\) add\(t\('Effort'\)/.test(cv) && /\|\| \(u\.cache_write_input_tokens \|\| 0\)/.test(cv));
   ok("popup's session-level fallback reads the REAL auth shape (source: codex-subscription / codex-cli / pooled / subscription / api-*)", /a\.source === 'codex-subscription'/.test(cv) && /a\.source === 'codex-cli'/.test(cv) && /a\.source === 'pooled'/.test(cv) && !/a\.accountName \|\| \(a\.kind ===/.test(cv));
-  ok('global-bucket billing row names the ChatGPT login for codex events (route returns be)', /r\.be === 'codex' \? t\('ChatGPT login'\) : t\('CLI login'\)/.test(cv) && /be: ev\.be \|\| 'claude', model: ev\.model \|\| null, effort: ev\.effort \|\| null/.test(fs.readFileSync(REPO + '/src/server/account-usage-routes.js', 'utf8')));
+  ok('global-bucket billing row names the ChatGPT login for codex events (route returns be)', /t\(billingRow\(r\.be\)\.cliLogin\)/.test(cv) && /be: ev\.be \|\| 'claude', model: ev\.model \|\| null, effort: ev\.effort \|\| null/.test(fs.readFileSync(REPO + '/src/server/account-usage-routes.js', 'utf8')));
   for (const dict of ['i18n-zh.js', 'i18n-ja.js']) {
     const d = fs.readFileSync(REPO + '/src/lib/' + dict, 'utf8');
     ok(`${dict} carries the new popup keys`, ['"Reasoning tokens"', '"Ledger request key"', '"Response ID"'].every((k) => d.includes(k)));

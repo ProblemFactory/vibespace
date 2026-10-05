@@ -895,8 +895,9 @@ and restored at boot.
 - design 018 (one Slack app per workspace): `POST …/oauth/start` and `…/reauthorize` read the browser's `Origin` (else
   Host) into the Slack state; `clientPreset: 'paste'` names the per-person rung (a Slack account with no client key);
   `clientPreset: '<preset>'` / `'custom'` + `clientId`/`clientSecret` start Slack's consent (`flow.mode: 'public'`,
-  `url` = slack.com/oauth/v2/authorize). `GET /api/channels/oauth/cb/:kind?code&state[&error]` = the landing (behind the
-  instance cookie; the state is the flow's credential): an html page in en/zh/ja — 200 connected / declined, 400 refused
+  `url` = slack.com/oauth/v2/authorize). `GET /api/channels/oauth/cb/:kind?code&state[&error]` = the landing (NO cookie —
+  2.369.214: src/auth.js exempts exactly this GET, another browser profile is the normal case; the signed state is the
+  credential; ≤ 30 landings / address / minute, then 429 html): an html page in en/zh/ja — 200 connected / declined, 400 refused
   (`bad-shape`, `bad-hmac`, `wrong-flow`, `expired`, `used`, `failed`); never echoes the code or the state. The POST
   callback of a `public` flow takes the landed address, its query, or the bare code a relay page showed (a foreign
   state = 400 `state-mismatch`). A preset without `relayUrl` on an http origin = refused `no-https`.

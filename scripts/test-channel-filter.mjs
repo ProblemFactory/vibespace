@@ -72,7 +72,10 @@ console.log('② every rule kind, hit and miss');
   ok(one({ kind: 'mention', value: 'ada' }, rec(1, { text: 'hey @Ada look' })), 'mention: an @name resolved into the text counts');
   ok(one({ kind: 'sender-in-group', members: ['u-ada'] }, rec(1)) && one({ kind: 'sender-in-group', members: ['ada'] }, rec(1)) && !one({ kind: 'sender-in-group', members: ['brook'] }, rec(1)), 'sender-in-group: author id or name');
   ok(one({ kind: 'from-address', value: 'ada' }, rec(1)) && one({ kind: 'from-address', value: 'ada@example.com' }, rec(1, { author: { id: 'ada@example.com', name: 'Ada' } })) && !one({ kind: 'from-address', value: 'brook' }, rec(1)), 'from-address: substring of author id or name');
-  ok(one({ kind: 'subject', value: 'invoice' }, rec(1, { raw: { subject: 'Re: Invoice 42' } })) && !one({ kind: 'subject', value: 'invoice' }, rec(1)), 'subject: reads raw.subject (a Gmail thread), never the text');
+  // lane dc-channels-blocks (C5): the subject is the ADAPTER's fact — the engine hands `ctx.subjectOf` (its declared rawFacts)
+  const subj = (rule, r) => F.matchRecord({ match: 'any', rules: [F.validateRule(rule).rule] }, r, { subjectOf: (x) => x.raw && x.raw.subject }).hit;
+  ok(subj({ kind: 'subject', value: 'invoice' }, rec(1, { raw: { subject: 'Re: Invoice 42' } })) && !subj({ kind: 'subject', value: 'invoice' }, rec(1)) && !subj({ kind: 'subject', value: 'invoice' }, rec(1, { text: 'invoice' })), 'subject: the adapter\'s declared subject (a Gmail thread), never the text');
+  ok(!one({ kind: 'subject', value: 'invoice' }, rec(1, { raw: { subject: 'Re: Invoice 42' } })), 'subject: the matcher never reads a vendor raw field itself (no subjectOf, no subject)');
   ok(one({ kind: 'has-attachment' }, rec(1, { attachments: [{ id: 'f1', name: 'a.pdf', bytes: 10, mime: 'application/pdf' }] })) && !one({ kind: 'has-attachment' }, rec(1)), 'has-attachment');
   const day0 = Math.floor(NOW / D) * D;
   const at10 = rec(1, { at: day0 + 10 * H + 30 * 60e3 }), at22 = rec(2, { at: day0 + 22 * H });

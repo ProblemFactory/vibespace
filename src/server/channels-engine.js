@@ -100,14 +100,10 @@ const { createChannelRegistry, ChannelError } = require('../channels/index.js');
 const { identityOf, identityMismatch, heldIdentity, mismatchSentence, namelessSentence, cancelledSentence } = require('../channel-identity.js');   // verify r5: whose account a consent may land on; r6: the held identity read off the token it holds, a nameless consent; r7: a cancelled consent
 const caps = require('../channel-caps.js');
 const fake = require('../channels/fake.js');
-const lark = require('../channels/lark.js');
-const gmail = require('../channels/gmail.js');
-const slack = require('../channels/slack.js');   // design 012 (B-ff09): the fourth adapter — a pasted user token, poll only
 const { secretBox } = require('../secret-box.js');
 const { OWN_KEY, CLUSTER_PREFIX } = require('./integration-store.js');   // the two credential-key forms, spelled ONCE (the store's)
 const R = require('../integration-registry.js');   // PURE: the rows' `bindsPerAccount` + `clientFieldsOf` (the custom client's two fields)
 const { createOAuthLoopback, OPTIONAL_SCOPES_MAX } = require('../oauth-loopback.js');
-const SlackManifest = require('../channels/slack-manifest.js');   // PURE (design 018): the workspace app's state + relay rule
 // P2: the PURE filter / assignment / renderer (design §7). Everything after
 // `store.append` is PURE except the two ORCH calls at the end of `wake()`.
 const F = require('../channel-filter.js');
@@ -178,9 +174,21 @@ const Feed = require('../channel-feed.js');
  *  options (`OPTIONS`) and its label — the engine reads THOSE, never the
  *  kind: the contract suite's census forbids a branch on an adapter id
  *  anywhere outside src/channels/. A kind with no module here (the fakes) is
- *  seeded by the dev seam and never CONNECTED. */
-const REAL_ADAPTERS = Object.freeze([lark, gmail, slack]);
-const realByKind = new Map(REAL_ADAPTERS.map((m) => [m.kind, m]));
+ *  seeded by the dev seam and never CONNECTED.
+ *  lane dc-channels-manifest: DERIVED from THE vendor list (src/channels/registry-list.js, PURE — one line per vendor,
+ *  the same list the browser's settings / registry rows derive from): each manifest names its adapter module by repo
+ *  path. The module IS the registered thing (register() validates every field read here — F2); `registry.vendor(kind)`
+ *  answers where a by-kind map used to. */
+const VendorList = require('../channels/registry-list.js');
+const VENDOR_ROOT = path.join(path.dirname(require.resolve('../channels/registry-list.js')), '..', '..');   // the manifests' `adapter` paths are repo-relative
+const adapterOf = (m) => require(path.join(VENDOR_ROOT, m.adapter));
+const REAL_ADAPTERS = Object.freeze(VendorList.MANIFESTS.map(adapterOf));
+// the name-form setting a kind with no `nameField` row of its own reads (the first vendor that declares one)
+const NAME_FIELD_KEY = Object.keys(ChannelSettings.CHANNEL_SETTINGS).map((k) => ChannelSettings.declaredKey(k, 'nameField')).find(Boolean) || null;
+// lane dc-channels-consent: every adapter DECLARES how its consent comes back (`consent` row, src/channels/index.js
+// validateConsent) — a bad row refuses to load here, by name, never at the first sign-in
+const { validateConsent } = require('../channels/index.js');
+for (const m of REAL_ADAPTERS) validateConsent(m.kind, m.consent);
 /** The at-rest key for the adapters' OWN tokens (design §13: a second store
  *  from the integrations layer's — a user's consent, not an admin's
  *  credential — with its own key file). */
@@ -478,22 +486,27 @@ function create(deps = {}) {
   }
   const box = secretBox(path.join(dataDir, KEY_FILE));
   const flows = oauth || createOAuthLoopback({ now, log });
-  // design 018: THE WORKSPACE APP'S CONSENT FACTS — a per-boot HMAC key signs each Slack consent's state (a restart
-  // ends every flow anyway), the custom rung's relay page is a setting (the schema's default beside it here)
+  // design 018 → lane dc-channels-consent: THE ONE CONSENT MACHINE — a per-boot HMAC key signs each redirect consent's
+  // state (a restart ends every flow anyway). The state's SHAPE, the landing page and the relay setting are the
+  // adapter's declared `consent` row; this machine only signs, reads the row's setting and dispatches on the row.
   const consentKey = crypto.randomBytes(32);
   const signState = (clear) => crypto.createHmac('sha256', consentKey).update(String(clear)).digest('base64url');
-  const SLACK_RELAY_DEFAULT = 'https://problemfactory.github.io/vibespace/slack/';
-  function slackRelayUrl() {
+  const consentRowOf = (kind) => { const m = registry.vendor(kind); return (m && m.consent) || null; };
+  function relayUrlOf(row) {
+    const s = row && row.relayUrlSetting;
+    if (!s) return '';
     let v;
-    try { v = serverSetting('channels.slackRelayUrl'); } catch { v = undefined; }
-    return v === undefined || v === null ? SLACK_RELAY_DEFAULT : String(v).trim();
+    try { v = serverSetting(`channels.${s.key}`); } catch { v = undefined; }
+    return v === undefined || v === null ? s.fallback : String(v).trim();
   }
-  const slackConsent = Object.freeze({ sign: signState, relayUrl: slackRelayUrl });
+  /** The consent facts an adapter whose row declares a LANDING is handed (`deps.consent`): `sign` = the per-boot state
+   *  HMAC, `relayUrl()` = its row's relay setting; every other adapter gets none. */
+  const consentDepsOf = (kind) => { const row = consentRowOf(kind); return row && row.landing ? Object.freeze({ sign: signState, relayUrl: () => relayUrlOf(row) }) : null; };
 
   // Built-ins. The three fakes exercise BOTH axes; the real adapters register
   // the same way and nothing downstream learns their names.
-  for (const mod of [fake.fakePoll, fake.fakePush, fake.fakeScan, agents, ...REAL_ADAPTERS.map((m) => m.adapter)]) {
-    if (!registry.has(mod.kind)) registry.register(mod);
+  for (const mod of [fake.fakePoll, fake.fakePush, fake.fakeScan, agents, ...REAL_ADAPTERS]) {
+    if (!registry.has(mod.kind)) registry.register(mod, { vendor: REAL_ADAPTERS.includes(mod) });
   }
   // The built-in Agents adapter (§12.3) exists where the server NAMES its
   // agent sessions: seeded whenever `liveSessions` was handed in (the wiring
@@ -509,8 +522,7 @@ function create(deps = {}) {
     // is never registered (the adapter modules keep `integrationTest` for
     // their own shape suites).
     const reg = (id, fn) => { if (R.bindsPerAccount(id)) return; if (!(integrations.hasTestRunner && integrations.hasTestRunner(id))) integrations.registerTest(id, fn); };
-    reg('fake', fake.integrationTest);
-    for (const m of REAL_ADAPTERS) if (m.integration && typeof m.integrationTest === 'function') reg(m.integration, (args) => m.integrationTest(args, fetchFn));
+    for (const m of [fake, ...REAL_ADAPTERS]) if (m.integration && typeof m.integrationTest === 'function') reg(m.integration, (args) => m.integrationTest(args, fetchFn));
   }
   const resolveIntegration = integrations && typeof integrations.resolveIntegration === 'function'
     ? (id, opts) => integrations.resolveIntegration(id, opts) : undefined;
@@ -523,7 +535,7 @@ function create(deps = {}) {
    *  unchanged. A preset the env stopped offering answers `preset-gone`
    *  naming its key — never another client (the store's rule). */
   function clientFor(rec) {
-    const mod = realByKind.get(rec && rec.kind) || null;
+    const mod = registry.vendor(rec && rec.kind) || null;
     const row = rowOf(mod) || (rec && R.rowById(rec.kind)) || null;
     const key = (rec && typeof rec.credentialKey === 'string' && rec.credentialKey) || null;
     if (row && row.signin === 'paste' && !isClientKey(key)) return pasteClientOf(row);   // design 018: a key-less Slack account is the paste rung
@@ -839,7 +851,7 @@ function create(deps = {}) {
       // `pace` (lane R5): the adapter AWAITS it before every request it sends
       // (drain rule 18's bucket, the SAME one the pass's `wait` reads) and
       // then meters it — the per-second shape is enforced call by call.
-      const adapterDeps = { fetch: fetchFn, log, tokens: tokensFor(rec), state: stateFor(rec), oauth: flows, slackConsent, onAuthDone: (adapterId, r) => onAuthDone(adapterId, r), deliver, liveSessions, credentialKey: rec.credentialKey || null, meter: (units) => { const x = live.get(rec.id) || paceCarry.get(rec.id); if (x) charge(x, units); }, pace: (units) => paceWait(rec.id, units, rec) };
+      const adapterDeps = { fetch: fetchFn, log, tokens: tokensFor(rec), state: stateFor(rec), people: { read: () => store.peopleRead(rec.id), write: (m) => store.peopleWrite(rec.id, m) }, oauth: flows, consent: consentDepsOf(rec.kind), onAuthDone: (adapterId, r) => onAuthDone(adapterId, r), deliver, liveSessions, credentialKey: rec.credentialKey || null, meter: (units) => { const x = live.get(rec.id) || paceCarry.get(rec.id); if (x) charge(x, units); }, pace: (units) => paceWait(rec.id, units, rec) };
       // r4: the resolver is PER RECORD (`resolverFor`) — an account's own
       // (`custom`) client lives on its record, a preset in the store.
       const adapter = registry.create(rec.kind, rec, { now, resolveIntegration: resolverFor(rec), ...adapterDeps });
@@ -1799,6 +1811,7 @@ function create(deps = {}) {
       if (fresh.length) {
         en.unread = (Number(en.unread) || 0) + fresh.filter((x) => Number(x.at) > (Number(en.readAt) || 0)).length;
         en.authors = mergeAuthors(en.authors, fresh);
+        en.authors = Av.stampSelf(en.authors, selfIdOf(rec));   // lane channels-list-polish: the account's id, at index time
         const newest = fresh.reduce((m, x) => (Number(x.at) > m ? Number(x.at) : m), 0);
         if (newest && (!en.lastAt || newest > en.lastAt)) en.lastAt = newest;
       }
@@ -1882,7 +1895,7 @@ function create(deps = {}) {
     if (!fs.on) return;
     const f = feedRow(rec);
     const coveredTo = Number(f.cursorAt) > 0 ? Number(f.cursorAt) - feedOpts().overlapSec * 1000 : null;
-    const sm = Feed.sample(records.map((r) => ({ vendorId: r && r.vendorId, at: r && r.at, msgType: r && r.raw && r.raw.msg_type })), { coveredTo, memStart: e.feedMemStart, seen: e.feedSeen, pending: e.feedPending });
+    const sm = Feed.sample(records.map((r) => ({ vendorId: r && r.vendorId, at: r && r.at, msgType: rawFactsOf(rec, r).type })), { coveredTo, memStart: e.feedMemStart, seen: e.feedSeen, pending: e.feedPending });
     e.feedPending = sm.pending;
     if (!sm.n) return;
     const t = now();
@@ -1937,7 +1950,7 @@ function create(deps = {}) {
     const held = new Set(((rec.auth && rec.auth.scopes) || []).map(String));
     const refusedBy = new Set(((rec.auth && rec.auth.refusedScopes) || []).map(String));
     const missing = g.scopes.filter((x) => !held.has(x));
-    const decls = ((realByKind.get(rec.kind) || mod).OPTIONS) || [];
+    const decls = ((registry.vendor(rec.kind) || mod).OPTIONS) || [];
     const opt = g.option ? (decls.find((o) => o.key === g.option) || null) : null;
     const v = opt ? ((rec.options && rec.options[g.option]) || opt.default) : null;
     return { scopes: g.scopes.slice(), missing, refused: missing.filter((x) => refusedBy.has(x)), console: !!g.console, wanted: !opt || v !== 'off' };
@@ -2362,6 +2375,7 @@ function create(deps = {}) {
       // largest synchronous cost at 873 conversations.
       if (freshRecs.length) en.unread = (Number(en.unread) || 0) + freshRecs.filter((r) => Number(r.at) > (Number(en.readAt) || 0)).length;
       if (freshRecs.length) en.authors = mergeAuthors(en.authors, freshRecs);
+      if (freshRecs.length) en.authors = Av.stampSelf(en.authors, selfIdOf(rec));   // lane channels-list-polish: the account's id, at index time
       // R3 (§23): the newest message the OWNER wrote here (`author.isSelf` — a reply from the vendor's own app
       // counts as much as one from our composer): one of the facts the first screen's attention list reads
       if (freshRecs.length) { const sa = selfAtOf(freshRecs); if (sa > (Number(en.selfAt) || 0)) en.selfAt = sa; }
@@ -2401,6 +2415,14 @@ function create(deps = {}) {
     // TRIM_EVERY_MS (it rewrites the log). The bounds and the 7-day floor are
     // the store's.
     if (trimNow) { try { store.trim(rec.id, convId); } catch (err) { console.warn('[channels] trim failed:', err && err.message); } }
+    // lane channels-list-polish: the account's own id resolved once (a sign-in that never named it), and this
+    // conversation's authors handed to the people warm-up (the adapter's bounds; never awaited by the pass)
+    if (typeof e.adapter.resolveSelf === 'function' && !selfIdOf(rec)) await e.adapter.resolveSelf().catch((err) => { if (err && err.code === 'rate-limited') throw err; });
+    if (typeof e.adapter.warmPeople === 'function') {
+      const en0 = store.index.live()[`${rec.id}/${convId}`];
+      const ids = (en0 && Array.isArray(en0.authors) ? en0.authors : []).filter((a) => a && a.id && !a.isSelf && !a.isBot).map((a) => String(a.id));
+      if (ids.length) e.adapter.warmPeople(ids).catch((err) => { if (!e.peopleWarmSaid) { e.peopleWarmSaid = true; log.warn(`[channels] ${rec.id}: the people warm-up stopped (${(err && err.message) || err})`); } });
+    }
     return { appended, duplicates, anchorMoved, complete, judged, missed, readAt };
   }
   /** The newest instant among records the OWNER wrote (`author.isSelf`), 0 when none (R3 §23). */
@@ -2411,13 +2433,23 @@ function create(deps = {}) {
   }
   /** The distinct authors seen in a conversation, newest first, bounded —
    *  the facts a pattern's `participant` / `from-address` rules match. */
-  function mergeAuthors(prev, recs) {
+  // lane channels-list-polish: an author keeps `isSelf` / `isBot` (a direct chat's peer is told by them), an EMPTY name
+  // is filled by another sighting of the same id, and the account's own id (`self`, resolved) is stamped at index time
+  function mergeAuthors(prev, recs, self = null) {
     const out = [];
-    const seen = new Set();
-    const add = (a) => { if (!a) return; const id = String(a.id || ''); const name = peerName(String(a.name || ''), 200) || ''; const k = id || name; if (!k || seen.has(k)) return; seen.add(k); out.push({ id, name }); };
+    const seen = new Map();
+    const add = (a) => {
+      if (!a) return;
+      const id = String(a.id || ''); const name = peerName(String(a.name || ''), 200) || ''; const k = id || name;
+      if (!k) return;
+      const had = seen.get(k);
+      if (had) { if (!had.name && name) had.name = name; return; }
+      const x = { id, name, ...(a.isSelf ? { isSelf: true } : {}), ...(a.isBot ? { isBot: true } : {}) };
+      seen.set(k, x); out.push(x);
+    };
     for (const r of [...recs].sort((x, y) => (Number(y.at) || 0) - (Number(x.at) || 0))) add(r.author);
     for (const a of Array.isArray(prev) ? prev : []) add(a);
-    return out.slice(0, AUTHORS_MAX);
+    return Av.stampSelf(out.slice(0, AUTHORS_MAX), self);
   }
 
   // ── the panel's digest + the ONE broadcast ───────────────────────────────
@@ -2766,6 +2798,15 @@ function create(deps = {}) {
     if (Array.isArray(out.attachments) && out.attachments.some((a) => a && a.role === 'body')) out = { ...out, attachments: out.attachments.filter((a) => !(a && a.role === 'body')) };
     return out;
   }
+  /** A STORED RECORD'S VENDOR FACTS (lane dc-channels-blocks, C5): the module's declared `rawFacts(record)` →
+   *  {tenant, type, subject} — the engine asks by NAME and never reads a vendor's raw field. {} when the adapter
+   *  declares none or its hook throws. */
+  function rawFactsOf(rec, r) {
+    let mod = null;
+    try { mod = rec ? registry.get(rec.kind) : null; } catch { mod = null; }
+    if (!r || !mod || typeof mod.rawFacts !== 'function') return {};
+    try { const f = mod.rawFacts(r); return f && typeof f === 'object' ? f : {}; } catch { return {}; }
+  }
   /** THE READ-TIME VIEW (lane channel-rich, D1 + D3): the module's declared `recordView(record)` — a bot a
    *  record stored before D3 calls "app" gets its name, a text stored before D1 with markup in it is read by
    *  the markup reader. ONE hook every read passes (the window's page, an agent's read, both searches); the
@@ -2782,18 +2823,19 @@ function create(deps = {}) {
   /**
    * WHO IS THIS, at the ONE view door (lane lark-threads B2–B5, 2026-10-01): the author as the owner reads it —
    * `display` = the owner's own name for the author (the VibeSpace 备注, `aliases.json`) › the vendor's way (the
-   * organization's nickname, else the name, then `(department)` / `(job title)` per `channels.larkNameField`) › the id;
+   * organization's nickname, else the name, then `(department)` / `(job title)` per the vendor's declared `nameField` row) › the id;
    * the vendor `name` kept (the title, the search key, what a filter matches); `external` when the sender's organization
    * is not the account's; a bot never "app" (the module's own view ran first; a nameless bot is "Bot <last 4>").
    */
   function withAuthor(rec, r) {
     if (!r || !r.author || typeof r.author !== 'object' || !rec) return r;
+    { const pa = personView(rec, r.author); if (pa !== r.author) r = { ...r, author: pa }; }   // lane channels-list-polish: self + the people memo
     let a = r.author;
     if (a.isBot && (!a.name || a.name === 'app')) a = { ...a, name: `Bot ${String(a.id || '').replace(/[^A-Za-z0-9]/g, '').slice(-4)}`.trim() };
     const alias = aliasOf(rec.id, a.id);
     let tenantSelf = null;
     try { const e = live.get(rec.id); tenantSelf = e && e.adapter && typeof e.adapter.selfTenant === 'function' ? e.adapter.selfTenant() : null; } catch { tenantSelf = null; }
-    const v = Authors.authorView(a, { alias, field: larkNameField(), selfTenant: tenantSelf, tenant: r.raw && r.raw.tenant_key });
+    const v = Authors.authorView(a, { alias, field: nameFieldOf(rec.kind), selfTenant: tenantSelf, tenant: rawFactsOf(rec, r).tenant });
     return { ...r, author: v };
   }
   /**
@@ -2838,10 +2880,14 @@ function create(deps = {}) {
     const row = t && t[adapterId] && t[adapterId][String(authorId)];
     return row && typeof row.alias === 'string' ? row.alias : '';
   }
-  /** `channels.larkNameField` (B5): none | department | jobTitle (default department). */
-  function larkNameField() {
+  /** B5: how a person of `kind` is named — the setting its vendor's table DECLARES for the `nameField` role (lane
+   *  dc-channels-manifest, rv C4 / F8: never a vendor's key here): none | department | jobTitle (default department);
+   *  a kind declaring no such row (a fake) reads the one row the vendors declare — today's single setting. */
+  function nameFieldOf(kind) {
+    const key = ChannelSettings.declaredKey(kind, 'nameField') || NAME_FIELD_KEY;
+    if (!key) return 'department';
     let v = null;
-    try { v = serverSetting('channels.larkNameField'); } catch { v = null; }
+    try { v = serverSetting(key); } catch { v = null; }
     return Authors.NAME_FIELDS.includes(v) ? v : 'department';
   }
   const viewsOf = (rec, records) => (Array.isArray(records) ? records.map((r) => viewOf(rec, r)) : records);
@@ -2919,11 +2965,40 @@ function create(deps = {}) {
   }
   /** lane lark-search-poll (§3.3 ③): a single chat with no title yet is named by its OTHER author (no vendor call) —
    *  else null, which the client words "Single chat" (never the raw id). */
+  /** lane channels-list-polish: THE ACCOUNT'S OWN ID — a resolved fact (the live adapter's, else the one the account's
+   *  people memo kept from an earlier resolution); null = not known, never a guess. */
+  function selfIdOf(rec) {
+    let s = null;
+    try { const x = rec && live.get(rec.id); s = x && x.adapter && typeof x.adapter.selfId === 'function' ? x.adapter.selfId() : null; } catch { s = null; }
+    if (typeof s === 'string' && s) return s;
+    try { s = rec ? store.peopleRead(rec.id).self : null; } catch { s = null; }
+    return typeof s === 'string' && s ? s : null;
+  }
+  /** ONE author as the account's people memo names it (read time; the store is never rewritten): the own id wears
+   *  `isSelf`; a person's EMPTY name goes down the ladder (member list › a message's sender name › the profile — the id
+   *  stays the caller's last rung) and the profile's alternatives (`alt`: the nickname…) ride along. */
+  function personView(rec, a, self = selfIdOf(rec)) {
+    if (!a || typeof a !== 'object' || !a.id) return a;
+    const id = String(a.id);
+    if (self && id === self) return a.isSelf ? a : { ...a, isSelf: true };
+    if (a.isSelf || a.isBot) return a;
+    let p = null;
+    try { p = store.peopleRead(rec.id).people[id] || null; } catch { p = null; }
+    if (!p || typeof p !== 'object') return a;
+    const name = a.name ? a.name : Av.nameLadder({ member: p.member, sender: p.sender, profile: p.name }).name;
+    const alt = !a.alt && p.alt && typeof p.alt === 'object' ? p.alt : null;
+    return name === a.name && !alt ? a : { ...a, name: name || a.name || '', ...(alt ? { alt } : {}) };
+  }
+  /** A conversation's authors as every surface reads them — an index written before the identity was known HEALS here. */
+  function authorsView(rec, en) {
+    const self = selfIdOf(rec);
+    return (Array.isArray(en && en.authors) ? en.authors : []).map((a) => personView(rec, a, self));
+  }
   function dmTitleOf(rec, en) {
     if (!en || en.kind !== 'dm') return null;
-    let self = null;
-    try { const x = live.get(rec.id); self = x && x.adapter && typeof x.adapter.selfId === 'function' ? x.adapter.selfId() : null; } catch { self = null; }
-    const a = (Array.isArray(en.authors) ? en.authors : []).find((x) => x && x.name && (!self || x.id !== self));
+    const self = selfIdOf(rec);
+    if (!self) return null;   // lane channels-list-polish: the OTHER member cannot be told without the account's own id
+    const a = authorsView(rec, en).find((x) => x && x.name && !x.isSelf && x.id !== self);
     return a ? peerName(String(a.name), 200) : null;
   }
   /** B-c127 THE NAME LADDER (src/channel-ref.js) — what a HUMAN reads for a conversation: ① its own name (a chat's
@@ -2931,8 +3006,8 @@ function create(deps = {}) {
    *  listed, the authors seen in it → null, the caller's ③ (the id, only when nothing else is known). */
   function humanNameOf(rec, en) {
     if (!rec || !en) return null;
-    let self = null;
-    try { const x = live.get(rec.id); self = x && x.adapter && typeof x.adapter.selfId === 'function' ? x.adapter.selfId() : null; } catch { self = null; }
+    const self = selfIdOf(rec);
+    en = { ...en, authors: authorsView(rec, en) };   // lane channels-list-polish: the healed authors (self stamped, names from the memo)
     // verify r1 (F1/F5): a title that IS the conversation's id (an adapter's own fallback — lark `name || chat_id`, gmail
     // `… || id`) or shows nothing (only invisible characters the name door keeps) names nothing — the next rung goes on
     const said = (s) => (s && s !== en.id && s !== en.vendorId && CR.nameOf([s], '') ? s : null);
@@ -2960,8 +3035,8 @@ function create(deps = {}) {
     const ob = ctx.outbox.get(en.key) || { awaiting: 0, unknown: 0 };
     const lw = en.stats && Array.isArray(en.stats.wakes) && en.stats.wakes.length ? en.stats.wakes[en.stats.wakes.length - 1] : null;
     return {
-      key: en.key, id: en.id, adapterId: en.adapterId, adapterLabel: rec.label || rec.id, title: humanNameOf(rec, en), kind: en.kind, ...(en.app ? { app: true } : {}), ...(en.kind === 'dm' && Av.avatarRow(c).fetch ? peerOf(en) : {}),   // B-c127: THE NAME LADDER (null = nothing known; the client's ③)
-      participants: en.participants, lastAt: en.lastAt, lastText: en.lastText || '', unread: en.unread || 0,
+      key: en.key, id: en.id, adapterId: en.adapterId, adapterLabel: rec.label || rec.id, title: humanNameOf(rec, en), kind: en.kind, ...(en.app ? { app: true } : {}), ...picOf(rec, en, c),   // B-c127: THE NAME LADDER (null = nothing known; the client's ③)
+      participants: en.participants, lastAt: en.lastAt, lastText: en.lastText || '', ...lastWhoOf(rec, en), unread: en.unread || 0,
       unlisted: !!en.unlistedAt,
       refresh: en.refresh && typeof en.refresh === 'object' ? { every: en.refresh.every, by: en.refresh.by || null } : null,
       cadence: { seconds: cadence.seconds, tier: cadence.tier, source: cadence.source, paused: !!cadence.paused },
@@ -3155,7 +3230,7 @@ function create(deps = {}) {
   function adapterView(rec, t = now()) {
     const c = registry.capsOf(rec.kind);
     const lane = laneOrScan(rec, {});
-    const mod = realByKind.get(rec.kind) || null;
+    const mod = registry.vendor(rec.kind) || null;
     const st = live.has(rec.id) ? live.get(rec.id).authState : null;
     // The adapter's OWN last answer outranks the record's stamps: a
     // withdrawn application credential is `needs-credentials` whatever
@@ -3649,6 +3724,11 @@ function create(deps = {}) {
   }
   /** The push half of an adapter row — public, no secrets. `null` for an
    *  adapter with no push lane (the panel gates its Push… control on it). */
+  function unavailableWordsOf(rec) {
+    let mod = null;
+    try { mod = registry.get(rec.kind); } catch { mod = null; }
+    return mod && mod.unavailableWords && typeof mod.unavailableWords === 'object' ? { ...mod.unavailableWords } : null;
+  }
   function pushView(rec, t = now()) {
     const c = registry.capsOf(rec.kind);
     if (c.receive !== 'push') return null;
@@ -3660,6 +3740,8 @@ function create(deps = {}) {
       demotedAt: p.demotedAt || null, demotedWhy: p.demotedWhy || null, demoted: p.demoted || null, redeclaredAt: p.redeclaredAt || null,
       missRate: { rate: m.rate, total: m.total, missed: m.missed, enough: m.enough, threshold: caps.PUSH_MISS_THRESHOLD },
       contentSince: p.contentSince || null, lastStateCode: p.lastStateCode || null,
+      // lane dc-channels-blocks (C6): the live lane's OWN words for its parked codes, while it is parked
+      unavailableWords: p.state === 'unavailable' ? unavailableWordsOf(rec) : null,
     };
   }
 
@@ -4737,6 +4819,7 @@ function create(deps = {}) {
       if (landed.fresh.length) {
         en.unread = (Number(en.unread) || 0) + landed.fresh.filter((r) => Number(r.at) > (Number(en.readAt) || 0)).length;
         en.authors = mergeAuthors(en.authors, landed.fresh);
+        en.authors = Av.stampSelf(en.authors, selfIdOf(rec));   // lane channels-list-polish: the account's id, at index time
         const newest = landed.fresh.reduce((m, r) => (Number(r.at) > m ? Number(r.at) : m), 0);
         if (newest && (!en.lastAt || newest > en.lastAt)) en.lastAt = newest;
       }
@@ -5184,9 +5267,34 @@ function create(deps = {}) {
    *  The bytes are bounded (≤ 256 KiB) and their type is SNIFFED; a stale picture is served when the refresh is refused. */
   const avatarFlights = new Map();
   /** A direct chat's other person (the panel row's picture): `{peer: id}` or nothing. */
-  const peerOf = (en) => { const p = (Array.isArray(en.authors) ? en.authors : []).find((a) => a && a.id && !a.isSelf); return p && Av.authorOk(String(p.id)) ? { peer: String(p.id) } : {}; };
-  function authorIsOurs(adapterId, author, convId) {
+  // lane channels-list-polish (the owner: "这个是我的头像，却展示在 Bob 私聊里"): a direct chat's peer is the author that
+  // is NOT the account's identity — and the identity is a resolved fact (Av.peerOf: unknown ⇒ no peer, initials, never
+  // the owner's face); a group chat's own picture is `chat~<id>`, a bot's `bot~<id>` — only the kinds the row fetches
+  function picOf(rec, en, c) {
+    const row = Av.avatarRow(c);
+    if (!row.fetch) return {};
+    if (en.kind === 'group' && row.kinds.includes('chat') && Av.authorOk(Av.memoKey('chat', en.id))) return { peer: Av.memoKey('chat', en.id) };
+    if (en.kind !== 'dm') return {};
+    const authors = authorsView(rec, en);
+    const id = Av.peerOf(authors, selfIdOf(rec));
+    const a = id ? authors.find((x) => x && String(x.id) === id) : null;
+    const kind = a && a.isBot ? 'bot' : 'person';
+    return id && row.kinds.includes(kind) ? { peer: Av.memoKey(kind, id) } : {};
+  }
+  /** The list row's LAST LINE head: who wrote the newest message (the authors are newest first) — `self` for the owner. */
+  function lastWhoOf(rec, en) {
+    const a = authorsView(rec, en)[0];
+    if (!a || !en.lastText) return {};
+    if (a.isSelf) return { lastWho: { self: true } };
+    const alt = a.alt && typeof a.alt === 'object' ? a.alt : null;
+    const name = String((alt && alt.nickname) || a.name || '').slice(0, 80);
+    return name ? { lastWho: { name } } : {};
+  }
+  function authorIsOurs(adapterId, key, convId) {
     const all = store.index.live();
+    // lane channels-list-polish: a picture key names (kind, id) — a group chat's own is ours when the account lists the chat
+    const pk = Av.keyOf(key), author = pk.id;
+    if (pk.kind === 'chat') return !!all[`${adapterId}/${author}`];
     const named = (en) => !!en && Array.isArray(en.authors) && en.authors.some((a) => a && String(a.id || '') === author);
     if (convId && named(all[`${adapterId}/${convId}`])) return true;
     for (const [k, en] of Object.entries(all)) if (k.startsWith(adapterId + '/') && named(en)) return true;
@@ -5200,6 +5308,9 @@ function create(deps = {}) {
     if (!Av.authorOk(a)) return { ok: false, code: 'not-found', error: 'no such person' };
     const row = Av.avatarRow(registry.capsOf(rec.kind));
     if (!row.fetch) return { ok: false, code: 'not-supported', error: row.why };
+    // lane channels-list-polish: the key is (kind, id) — a group chat's own picture, a bot's, a person's
+    const pk = Av.keyOf(a);
+    if (!row.kinds.includes(pk.kind)) return { ok: false, code: 'not-supported', error: row.kindsWhy || `no ${pk.kind} pictures` };
     const fk = `${adapterId}/${a}`;
     const t = now();
     const memo = store.avatarGet(adapterId, a);
@@ -5261,7 +5372,7 @@ function create(deps = {}) {
     const missing = g.scopes.filter((x) => !held.has(x));
     // owner ruling (2026-09-28): WANTED while the account's declared option is not `off` (the option's own default
     // when the record never set it); REFUSED = what the last consent dropped because the vendor refused it
-    const decls = ((realByKind.get(rec.kind) || mod).OPTIONS) || [];   // the module declares the options (the registered adapter object carries none)
+    const decls = ((registry.vendor(rec.kind) || mod).OPTIONS) || [];   // the module declares the options (the registered adapter object carries none)
     const opt = g.option ? (decls.find((o) => o.key === g.option) || null) : null;
     const v = opt ? ((rec.options && rec.options[g.option]) || opt.default) : null;
     return { scopes: g.scopes.slice(), missing, refused: missing.filter((x) => refusedBy.has(x)), console: !!g.console, wanted: !opt || v !== 'off' };
@@ -5634,7 +5745,7 @@ function create(deps = {}) {
   // ── failures SPOKEN and RETRACTED by the same producer (fence 8) ─────────
   /** What the user can DO about a code — the item's detail must say. */
   function remedyFor(rec, code) {
-    const mod = realByKind.get(rec.kind);
+    const mod = registry.vendor(rec.kind);
     // r4: an account's OAuth client lives ON the account (never an Integrations card)
     const perAccount = !!(mod && rowOf(mod) && rowOf(mod).bindsPerAccount);
     switch (code) {
@@ -5726,8 +5837,8 @@ function create(deps = {}) {
    *  conversation, reach entry and filter stays valid untouched); every
    *  further one is `<kind>:<8 hex>` with its own label and credential. */
   function connectableFor(kind) {
-    const mod = realByKind.get(kind);
-    if (!mod) throw new ChannelError('not-supported', `'${kind}' cannot be connected — it is not a channel adapter with a consent flow (connectable: ${[...realByKind.keys()].join(', ')})`, { retryable: false });
+    const mod = registry.vendor(kind);
+    if (!mod) throw new ChannelError('not-supported', `'${kind}' cannot be connected — it is not a channel adapter with a consent flow (connectable: ${registry.vendors().map((m) => m.kind).join(', ')})`, { retryable: false });
     return mod;
   }
   /** The id of the NEXT account of a kind: the kind itself while no record
@@ -5981,7 +6092,7 @@ function create(deps = {}) {
       async clear() { p.tokenEnc = null; p.tokenMeta = null; },
     };
     const memState = { read: () => ({}), write: async () => {} };
-    p.adapter = registry.create(mod.kind, rec, { now, resolveIntegration: resolverFor(rec), fetch: fetchFn, log, tokens: memTokens, state: memState, oauth: flows, slackConsent, onAuthDone: (_id, r) => onPendingDone(p, r), deliver, liveSessions, credentialKey: rec.credentialKey || null });
+    p.adapter = registry.create(mod.kind, rec, { now, resolveIntegration: resolverFor(rec), fetch: fetchFn, log, tokens: memTokens, state: memState, oauth: flows, consent: consentDepsOf(mod.kind), onAuthDone: (_id, r) => onPendingDone(p, r), deliver, liveSessions, credentialKey: rec.credentialKey || null });
     const flow = await p.adapter.auth.begin({ origin });   // design 018: the browser's own origin rides the Slack state (the relay's way back)
     p.flowId = flow.flowId;
     pendingFlows.set(p.flowId, p);
@@ -6078,12 +6189,18 @@ function create(deps = {}) {
       user: p.user, flow: safeFlow(st), token: p.done && p.ok ? p.flowId : null,
     };
   }
-  /** design 018: THE LANDING ROUTE (`GET /api/channels/oauth/cb/:kind?code&state[&error]`) — the browser Slack (or the
-   *  relay page) sent back. The state is judged FIRST (shape, this boot's HMAC, its age), then the flow it names must
-   *  be a running consent of `kind`, found by the WHOLE state (oauth-loopback `finishByState`): a code is exchanged at
-   *  most once. → `{ok, why, user, error}` — never the code, the state or a secret; refusals in STATE_REFUSALS + used. */
+  /** lane dc-channels-consent: the landing PAGE of `kind` — its consent row's `landing.landingHtml(r)`, or null (an
+   *  account type whose consent never lands here: the route answers 404 by name). */
+  function consentLandingOf(kind) { const row = consentRowOf(String(kind || '')); return row && row.landing ? row.landing.landingHtml : null; }
+  /** design 018: THE LANDING ROUTE (`GET /api/channels/oauth/cb/:kind?code&state[&error]`) — the browser the vendor (or
+   *  its relay page) sent back. The state is judged FIRST by `kind`'s declared row (shape, this boot's HMAC, its age), then
+   *  the flow it names must be a running consent of `kind`, found by the WHOLE state (oauth-loopback `finishByState`): a
+   *  code is exchanged at most once. A kind with no landing row is `wrong-flow`. → `{ok, why, user, error}` — never the
+   *  code, the state or a secret; refusals in the row's closed list + used. */
   async function oauthLanding({ kind, code = null, state = null, error = null } = {}) {
-    const v = SlackManifest.stateVerdict(state, { sign: signState, now: now(), ttlMs: PENDING_FLOW_TTL_MS });
+    const row = consentRowOf(String(kind || ''));
+    if (!row || !row.landing) { log.warn(`[channels] ${String(kind).slice(0, 20)}: a consent landing for an account type that declares none (wrong-flow)`); return { ok: false, why: 'wrong-flow', user: null, error: null }; }
+    const v = row.landing.stateVerdict(state, { sign: signState, now: now(), ttlMs: PENDING_FLOW_TTL_MS });
     if (!v.ok) { log.warn(`[channels] ${String(kind).slice(0, 20)}: a consent landing was refused (${v.why})`); return { ok: false, why: v.why, user: null, error: null }; }
     const st = flows.status(v.parts.flowId);
     const p = pendingFlows.get(v.parts.flowId) || null;
@@ -6095,7 +6212,11 @@ function create(deps = {}) {
     const refused = !!r.ok && !!p && p.ok === false;
     const ok = !!r.ok && !refused;
     if (!ok) log.warn(`[channels] ${st.id}: a consent landing ended ${refused ? 'refused' : (r.why || 'failed')}`);
-    return { ok, why: ok ? null : (refused ? 'failed' : (r.why || 'failed')), user: ok && r.result ? (r.result.user || null) : null, error: ok ? null : (refused ? (p.error || 'the sign-in was refused') : (r.error || null)) };
+    // slack-landing-nologin verify r1: the page is COOKIE-FREE (2.369.214) and the browser holding the state may be a
+    // stranger's — a re-authorize's refusal names the account it guards (its label, the HELD Slack identity beside the
+    // offered one), so a landing on an EXISTING account's flow says fixed words; the owner's window keeps the sentence
+    const onRecord = p ? !!p.targetId : true;
+    return { ok, why: ok ? null : (refused ? 'failed' : (r.why || 'failed')), user: ok && r.result ? (r.result.user || null) : null, error: ok ? null : (onRecord ? 'the account was not changed — the VibeSpace window where you pressed Re-authorize says why' : (refused ? (p.error || 'the sign-in was refused') : (r.error || null))) };
   }
   /** PASTE-BACK for a pending flow: the redirect URL the browser landed on. design 017: `box` = which box of a
    *  stepped paste card it came from; a STEP that landed (`step`) answers its public facts and NO token — the sign-in
@@ -6548,7 +6669,7 @@ function create(deps = {}) {
   const inlining = new Map();       // rec.id -> in-flight copy
   const inlineSaid = new Map();     // rec.id -> last failure logged
   function legacyCopyPlan(rec) {
-    const mod = realByKind.get(rec.kind);
+    const mod = registry.vendor(rec.kind);
     const row = rowOf(mod);
     if (!row || !row.bindsPerAccount) return { ok: false, code: 'no-integration', why: `${rec.kind} has no account-bound integration row` };
     if (!integrations || typeof integrations.legacyOwnValues !== 'function') return { ok: false, code: 'no-store', why: 'no integration store to read the legacy values from' };
@@ -6633,7 +6754,7 @@ function create(deps = {}) {
     const report = { stamped: [], skipped: [] };
     for (const rec of adapterRecords().adapters) {
       if (typeof rec.credentialKey === 'string' && rec.credentialKey) { report.skipped.push({ id: rec.id, why: 'already' }); continue; }
-      const mod = realByKind.get(rec.kind);
+      const mod = registry.vendor(rec.kind);
       if (!mod || !mod.integration) { report.skipped.push({ id: rec.id, why: 'no-integration' }); continue; }
       const ev = credentialKeyEvidence(rec, mod);
       if (!ev.key) { report.skipped.push({ id: rec.id, why: 'nothing-resolves', tokenKey: ev.tokenKey }); continue; }
@@ -6686,7 +6807,7 @@ function create(deps = {}) {
    *  conversation is). */
   async function setOptions(adapterId, patch) {
     const rec = recordOrThrow(adapterId);
-    const mod = realByKind.get(rec.kind);
+    const mod = registry.vendor(rec.kind);
     const decls = (mod && mod.OPTIONS) || [];
     if (!patch || typeof patch !== 'object' || Array.isArray(patch)) { const err = new Error('options must be an object'); err.status = 400; err.code = 'bad-request'; throw err; }
     const next = { ...(rec.options || {}) };
@@ -7114,6 +7235,7 @@ function create(deps = {}) {
     // log) and what THIS principal sent from here (the outbox's `sentBy`; a group = its live members') — and the
     // record's thread (the index over the log + this batch). Built once per batch, only when a filter asks.
     let placeBase = null;
+    const subjectOf = (r) => rawFactsOf(rec, r).subject;   // lane dc-channels-blocks: the `subject` rule asks the adapter
     const placeCtx = (principal) => {
       if (!placeBase) {
         let ix = null;
@@ -7153,7 +7275,7 @@ function create(deps = {}) {
         const filter = w.mode === 'filtered' ? filterFor(w.filterId) : null;
         if (w.mode === 'filtered' && !filter) { log.warn(`[channels] ${rec.id}/${convId}: ${pkOf(w.principal)}'s notification names filter ${w.filterId} which does not exist — not woken (fail closed)`); continue; }
         const hits = [];
-        const mctx = filter && Array.isArray(filter.rules) && filter.rules.some((x) => x && F.PLACE_RULE_KINDS.includes(x.kind)) ? placeCtx(w.principal) : {};
+        const mctx = { ...(filter && Array.isArray(filter.rules) && filter.rules.some((x) => x && F.PLACE_RULE_KINDS.includes(x.kind)) ? placeCtx(w.principal) : {}), subjectOf };
         for (const r of fresh) {
           try {
             if (w.mode === 'all') { hits.push({ record: r, why: [] }); continue; }
@@ -10416,7 +10538,7 @@ function create(deps = {}) {
       recs.push(...r);
       covered++;
     }
-    const est = F.estimate(f, recs, { now: now(), capHit });
+    const est = F.estimate(f, recs, { now: now(), capHit, ctx: { subjectOf: (r) => rawFactsOf(rec, r).subject } });
     return { ok: true, estimate: { ...est, conversations: convs.length, covered, sampled: !!(est.sampled || covered < convs.length) }, expectedWakesPerDay: F.expectedWakesPerDay({ notify: how, digestMinutes, matchedPerDay: est.matchedPerDay, dailyWakeCap }) };
   }
 
@@ -10562,7 +10684,8 @@ function create(deps = {}) {
       filter = v.filter;
     }
     const recs = store.readTail(adapterId, convId, { limit: ESTIMATE_CAP });
-    const e = F.estimate(filter, recs, { now: now(), capHit: recs.length >= ESTIMATE_CAP });
+    const acct = adapterRecords().adapters.find((a) => a.id === adapterId) || null;
+    const e = F.estimate(filter, recs, { now: now(), capHit: recs.length >= ESTIMATE_CAP, ctx: { subjectOf: (r) => rawFactsOf(acct, r).subject } });
     return { ok: true, estimate: e };
   }
 
@@ -10866,7 +10989,7 @@ function create(deps = {}) {
     // r4 (design-integrations-per-account): the account's own client, the
     // transient consent, duplicate / remove with its reference check, the
     // owner-only config (D3), the in-place edits and the legacy own → custom copy
-    clientFor, startOAuth, oauthStatus, oauthCallback, oauthLanding, duplicate, referencesOf, remove, setLabel, setCustomSecret, adapterConfig, mountClientsFor,
+    clientFor, startOAuth, oauthStatus, oauthCallback, oauthLanding, consentLandingOf, duplicate, referencesOf, remove, setLabel, setCustomSecret, adapterConfig, mountClientsFor,
     inlineLegacyClient, inlineLegacyClients, DUPLICATE_FIELDS, DUPLICATE_NEVER,
     // a fresh record of a connectable type, never stored — the suites' baseline for "a copy differs only where DUPLICATE_FIELDS says"
     blankRecord: (kind) => newRecord(connectableFor(kind), { id: kind }),

@@ -79,9 +79,10 @@
  */
 const { makeRecord, makeConversation } = require('../channel-record.js');
 const { ChannelError, retryAfterSeconds, sentSecrets, withoutSent } = require('./index.js');
-const { CHANNEL_SETTINGS, budgetOf, paceOf } = require('../channel-settings.js');   // B-df40 part 3: the budget + pace rows are DECLARED there (the schema row, the engine bound and this caps all read it)
+const { budgetOf, paceOf } = require('../channel-settings.js');   // B-df40 part 3: the budget + pace rows are DECLARED there (the schema row, the engine bound and this caps all read it)
+const MANIFEST = require('./gmail/manifest.js');   // lane dc-channels-manifest: this vendor's declarations (PURE) — its settings table, integration row, option rows
 const { namelessSentence, looksLikeEmail } = require('../channel-identity.js');   // verify r6: a consent must name its account; r7: an address by the ONE rule
-const { createGmailLive, PUBSUB_SCOPE } = require('./live/gmail.js');
+const { createGmailLive, PUBSUB_SCOPE, UNAVAILABLE_WORDS } = require('./live/gmail.js');
 // §25 (2026-09-27): THE MAIL RUNG — the quoted history folded with its
 // attribution, ticket banners and signatures set apart; `text` stays whole.
 const Blocks = require('../channel-blocks.js');
@@ -234,6 +235,10 @@ const SEARCH_PAGE = 10;
  *  push a visible hit off the page (at 10, ten did — the hit's absence counted mail the agent may not see). */
 const SEARCH_IDS_NARROW = 100;
 
+/** lane dc-channels-consent: THE CONSENT ROW (src/channels/index.js validateConsent) — Google's installed-app consent comes
+ *  back to an EPHEMERAL loopback port; nothing lands on the instance's own routes. */
+const CONSENT = Object.freeze({ mode: 'ephemeral', landing: null });
+
 const caps = Object.freeze({
   receive: 'push',
   pushTransport: 'pubsub-pull',
@@ -263,12 +268,14 @@ const caps = Object.freeze({
   // SUBJECT — the window and the row show it cleaned (`cleanSubject`)
   render: 'blocks',
   titleForm: 'subject',
+  // lane dc-channels-blocks: the library glyph a touch row wears (closed: chat | mail | robot)
+  glyph: 'mail',
   // 2026-09-26 (the aggregated IM): attachments FETCHED on demand
   // (`messages.get` → the part → `attachments.get`), no "older" paging (a
   // thread's first walk is the whole thread), and every request METERED in
   // Gmail's quota units against the account's budget (6000 units/min per
   // user is the vendor's cap; the default 3000 leaves the other half — the
-  // default and the setting come from the gmail table of src/channel-settings.js)
+  // default and the setting come from the settings table of ./gmail/manifest.js)
   attachments: 'fetch',
   // lane channel-avatars (B-5fe1): a mail sender has no picture any Gmail API answers — the initials stay
   avatars: null, avatarsWhy: 'Gmail has no profile pictures for mail senders',
@@ -281,7 +288,7 @@ const caps = Object.freeze({
   // design's bound; Gmail's own limit on the encoded message answers by name if it is lower)
   sendAttachments: Object.freeze({ maxCount: 10, maxTotalBytes: 25e6, withText: true }),
   olderHistory: 'none',
-  budget: { unit: 'quota-unit', metered: true, ...budgetOf(CHANNEL_SETTINGS.gmail) },
+  budget: { unit: 'quota-unit', metered: true, ...budgetOf(MANIFEST.settings) },
   // lane R5 (2026-09-26, the owner: "gmail一直被限速 你可能要控制下gmail默认的读
   // 取速度"): the vendor refused whole passes that stayed under the minute's
   // budget but spent ~2 000–2 800 units in ~20 s (100–200 units/s) — it meters
@@ -290,7 +297,7 @@ const caps = Object.freeze({
   // request awaited on the account's bucket before it is sent. `cost` = what
   // the drain expects one action to charge: a thread read (threads.get 40), a
   // discovery page (threads.list 10 + up to META_PER_LIST metadata reads).
-  pace: { ...paceOf(CHANNEL_SETTINGS.gmail), cost: { fetch: 40, discover: 10 + 40 * 10, scanHost: 1 } },
+  pace: { ...paceOf(MANIFEST.settings), cost: { fetch: 40, discover: 10 + 40 * 10, scanHost: 1 } },
   vendorName: i18nKey('Google'),
   // lane channel-threads (2026-09-28): the mail THREAD is the conversation (threadKey === convId — kind
   // `conversation`, the window draws nothing new) and mail has no reactions — declared, so no control appears
@@ -600,6 +607,12 @@ const sentLabel = (m) => (m && Array.isArray(m.labelIds) ? m.labelIds.includes('
 const FACT_HEADERS = Object.freeze(['Subject', 'From', 'To', 'Cc', 'Bcc', 'Reply-To', 'Sender', 'List-Id', 'Delivered-To', 'Importance', 'Priority', 'X-Priority', 'Auto-Submitted', 'Precedence']);
 /** §25: the render tree of a record stored BEFORE this layer (read time —
  *  the store is never rewritten): the same mail rung over its `text`. */
+/** A STORED RECORD'S VENDOR FACTS, by name (lane dc-channels-blocks, C5): the mail's subject (the `subject` filter
+ *  rule — the engine and the matcher read `raw.subject` themselves before). */
+function rawFacts(record) {
+  const raw = (record && record.raw) || {};
+  return { subject: raw.subject };
+}
 function blocksOf(record) {
   const r = record || {};
   return Blocks.emailToBlocks(String(r.text || ''), { subject: (r.raw && r.raw.subject) || null, attachments: r.attachments });
@@ -1638,12 +1651,15 @@ async function integrationTest({ resolved } = {}) {
   return { ok: true, detail: { source: r.source, clusterKey: r.clusterKey || null, clientId: id, authHost: new URL(url).host, scope: SCOPE } };
 }
 
-const adapter = { kind: KIND, caps, create, api: API_ROW, blocksOf, sendCapsOf };
 module.exports = {
-  kind: KIND, caps, create, adapter, API_ROW, label: LABEL, integration: INTEGRATION, integrationTest, OPTIONS, UNGATED, RATE_OK,
+  kind: KIND, caps, create, manifest: MANIFEST, api: API_ROW, API_ROW, consent: CONSENT, label: LABEL, integration: INTEGRATION, integrationTest, OPTIONS, UNGATED, RATE_OK,
   EGRESS, SCOPE, SCOPE_SEND, SCOPE_COMPOSE, SCOPE_MODIFY, SCOPE_MAIL, sendVerbsOf, PROPOSAL_HEADER, PUBSUB_SCOPE, TOKEN_URL, AUTH_URL, API, MAILBOX_MEMO_MS, THREAD_MEMO_MS, META_PER_LIST, unitsFor, queryOf, scopeOf, effectiveOptions,
   toRecord, walkParts, parseAddress, addressList, stripHtml, typedFailure, buildMime, replyHeaders, encodeHeader, encodeAddressHeader,
   rawRequest, JSON_RAW_MAX, UPLOAD_API,   // design 005 §2.B: the upload form past the JSON body's cap
   blocksOf, sendCapsOf,
+  rawFacts, unavailableWords: UNAVAILABLE_WORDS,   // lane dc-channels-blocks
   factsFromHeaders, decodeWords, FACT_HEADERS,   // lane message-facts (B-f066)
 };
+// lane dc-channels-manifest (rv F2): the module IS the registered thing — register() validates every field the engine
+// reads off it; `adapter` stays the module itself for the suites that register it by that name
+module.exports.adapter = module.exports;

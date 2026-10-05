@@ -190,6 +190,7 @@ module.exports = {
     spawnEnvVar: 'CODEX_HOME',
     loginLabel: 'ChatGPT',
     defaultIdField: 'defaultCodexAccountId',
+    spawnForm: 'isolated-home',                // accounts.resolveForSpawn: spawnEnvVar = the account's own dir (a pool = its symlink); no API keys, no oat
     keychainSensitive: false,                  // plain file ⇒ pools work wherever directory symlinks do
     parseAuth: parseCodexAuth,
     parseAuthFile: parseCodexAuthFile,
@@ -217,6 +218,10 @@ module.exports = {
   },
   billingIdentity: codexBillingIdentity,
   models: require('./codex-models.js').models, // the /api/available-models list (~/.codex/models_cache.json, union-persisted)
+  // THE DECLARED UI ROW (lane dc-client-billing, 2026-10-04): billing words, the accounts-store default field,
+  // the usage bucket, effort/lock facts and the legacy id forms — the chrome reads THESE, never an id. The
+  // client META mirrors it key for key (test-harness-contract deep-compares).
+  ui: { billing: { globalLogin: 'ChatGPT login', cliLogin: 'ChatGPT login', pickLogin: 'ChatGPT login', pickLoginHost: 'ChatGPT login (on the host)', planSuffix: '', switchLogin: 'ChatGPT login', defaultIdField: 'defaultCodexAccountId', apiKeys: false, longLivedToken: false, hostLogin: false, machineUsage: false, usage: 'codexAccounts', globalUsageKey: '__global_codex__', estimates: false }, effortReport: 'per-turn', effortLevels: 'model-catalog', modelLock: false, legacyIds: false, resumeResend: true },
   settingsPrefix: 'codex',
   // THE SETTINGS TABLE (design-harness-settings §2) — object identity, like caps.
   settings: HARNESS_SETTINGS.codex,

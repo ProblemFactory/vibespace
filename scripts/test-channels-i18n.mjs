@@ -46,7 +46,7 @@ const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 // The Lark callback URL is DEFINED in the registry and spelled nowhere else
 // (test-integration-registry's census fails a second holder) — the control
 // fixture below imports it, exactly as scripts/dbg-comm-surfaces.mjs does.
-const { LARK_CALLBACK_URL } = createRequire(import.meta.url)(path.join(repo, 'src/integration-registry.js'));
+const { LARK_CALLBACK_URL } = createRequire(import.meta.url)(path.join(repo, 'src/channels/lark/manifest.js'));
 
 // ── THE ALLOWLIST (printed by the run) ───────────────────────────────────────
 // A Latin token is excused when it is one of these words (case-insensitive),

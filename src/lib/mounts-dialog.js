@@ -287,7 +287,14 @@ export function renderFields(body, fields) {
 // `start(body)` → `{url, notice?}`, `status()` → `{token?, error?, running}`,
 // `callback({url})` → `{token?, error?}`. `extra()` adds body fields beside the
 // client id/secret (the channel side's preset key); `provider` names the
-// sign-in page; `pastePlaceholder` / `finishText` replace the storage words.
+// sign-in page; `pastePlaceholder` / `finishText` replace the storage words
+// (`finishText` may be a function of the vendor identity). `start` may answer
+// `pasteHint` for THIS flow (a design 018 `public` flow never lands on 127.0.0.1).
+//
+// The finish line NAMES the identity the status poll answered (`st.user`,
+// 2.369.214): the consent may have landed in another browser profile, so a
+// stranger's account is visible BEFORE Connect makes the record.
+export const connectedLine = (user) => (user ? tr('✓ Connected as {user} — finish with the “Connect” button below.', { user: String(user).slice(0, 200) }) : tr('✓ Connected — finish with the “Connect” button below.'));
 export function wireOAuthConnect(ctx, { tokenKey, backend, label, clientIdKey, clientSecretKey, endpoints = MOUNT_OAUTH_ENDPOINTS, extra = null, provider = null, pastePlaceholder = null, finishText = null, pasteHint = null, pasteSecret = false } = {}) {
   const PROVIDER_LABELS = { onedrive: 'Microsoft', drive: 'Google', dropbox: 'Dropbox', box: 'Box', pcloud: 'pCloud', yandex: 'Yandex', jottacloud: 'Jottacloud', hidrive: 'HiDrive' };
   const tokenInput = ctx.inputs[tokenKey];
@@ -306,7 +313,7 @@ export function wireOAuthConnect(ctx, { tokenKey, backend, label, clientIdKey, c
   sync();
   let pasteBox = null, poll = null;
   const stopPoll = () => { clearInterval(poll); poll = null; };
-  const finish = (token) => { stopPoll(); tokenInput.value = token; status.textContent = finishText || tr('✓ Connected — finish with the “Connect” button below.'); btn.textContent = tr('Reconnect'); btn.disabled = false; pasteBox?.remove(); pasteBox = null; };
+  const finish = (token, user = null) => { stopPoll(); tokenInput.value = token; status.textContent = typeof finishText === 'function' ? finishText(user) : (finishText || connectedLine(user)); btn.textContent = tr('Reconnect'); btn.disabled = false; pasteBox?.remove(); pasteBox = null; };
   btn.onclick = async () => {
     btn.disabled = true; status.textContent = tr('Preparing authorization…');
     try {
@@ -322,13 +329,13 @@ export function wireOAuthConnect(ctx, { tokenKey, backend, label, clientIdKey, c
       if (r.notice) status.textContent = r.notice;
       if (!pasteBox) {
         pasteBox = document.createElement('div');
-        pasteBox.innerHTML = `<div class="mounts-field-hint">${pasteHint ? escHtml(pasteHint) : escHtml(tr("If the final page fails to load (address starts with 127.0.0.1 — VibeSpace runs on another machine, or you authorized in a different browser), copy that address and paste it here:"))}</div>`;
+        pasteBox.innerHTML = `<div class="mounts-field-hint">${(r.pasteHint || pasteHint) ? escHtml(r.pasteHint || pasteHint) : escHtml(tr("If the final page fails to load (address starts with 127.0.0.1 — VibeSpace runs on another machine, or you authorized in a different browser), copy that address and paste it here:"))}</div>`;
         const inp = document.createElement('input'); inp.placeholder = pastePlaceholder || 'http://127.0.0.1:53682/?state=…&code=…';
         if (pasteSecret) { inp.type = 'password'; inp.autocomplete = 'off'; inp.spellcheck = false; }   // design 012: a pasted TOKEN is a secret — never drawn in the clear
-        inp.onchange = async () => { try { status.textContent = tr('Completing…'); const fr = await post(endpoints.callback, { url: inp.value }); if (fr.error) throw new Error(fr.error); if (fr.token) finish(fr.token); } catch (e) { status.textContent = e.message || tr('Failed'); } };
+        inp.onchange = async () => { try { status.textContent = tr('Completing…'); const fr = await post(endpoints.callback, { url: inp.value }); if (fr.error) throw new Error(fr.error); if (fr.token) finish(fr.token, fr.user || null); } catch (e) { status.textContent = e.message || tr('Failed'); } };
         pasteBox.appendChild(inp); wrap.appendChild(pasteBox);
       }
-      poll = setInterval(async () => { try { const st = await get(endpoints.status); if (st.token) finish(st.token); else if (st.error) { stopPoll(); status.textContent = st.error; btn.disabled = false; } else if (!st.running) { stopPoll(); btn.disabled = false; } } catch {} }, 1500);
+      poll = setInterval(async () => { try { const st = await get(endpoints.status); if (st.token) finish(st.token, st.user || null); else if (st.error) { stopPoll(); status.textContent = st.error; btn.disabled = false; } else if (!st.running) { stopPoll(); btn.disabled = false; } } catch {} }, 1500);
     } catch (e) { status.textContent = e.message || tr('Failed to start authorization'); btn.disabled = false; }
   };
 }
@@ -501,7 +508,7 @@ export function reauthDialog({ id = 'mount-reauth-dialog', title, hint: hintText
       if (r.notice) status.textContent = r.notice;
       if (!pasteBox) {
         pasteBox = document.createElement('div');
-        pasteBox.innerHTML = `<div class="mounts-field-hint">${pasteHint ? escHtml(pasteHint) : escHtml(tr("If the final page fails to load (address starts with 127.0.0.1 — VibeSpace runs on another machine, or you authorized in a different browser), copy that address and paste it here:"))}</div>`;
+        pasteBox.innerHTML = `<div class="mounts-field-hint">${(r.pasteHint || pasteHint) ? escHtml(r.pasteHint || pasteHint) : escHtml(tr("If the final page fails to load (address starts with 127.0.0.1 — VibeSpace runs on another machine, or you authorized in a different browser), copy that address and paste it here:"))}</div>`;
         const inp = document.createElement('input');
         inp.placeholder = pastePlaceholder;
         if (pasteSecret) { inp.type = 'password'; inp.autocomplete = 'off'; inp.spellcheck = false; }

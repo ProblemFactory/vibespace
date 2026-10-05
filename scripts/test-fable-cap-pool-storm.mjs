@@ -174,7 +174,7 @@ function mkWorld({ sameDeadline = false, engineModule = engMod, roster = MEMBERS
     getHosts: () => ({ device: async () => ({ poolOrders: async () => { }, ackPoolOrdersLog() { } }) }),
     getUsageHistory: () => ({ _cost: () => 0, ingestRemoteEvents() { } }),
     recordUsageAttribution() { }, adapterRegistry: { get: () => ClaudeCodeAdapter },
-    getAutoResume: () => autoResume, getOtelIngest: () => ({ observedOrgFor: () => null }), getQuotaProbe: () => null,
+    getAutoResume: () => autoResume, getQuotaProbe: () => null,
     // the session-meta store (r3 §7): only the legs that drive the reroute
     // stamp across a restart pass one — everywhere else it is absent, which is
     // exactly the `mk()`-over-null shape production takes before boot order

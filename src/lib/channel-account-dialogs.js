@@ -70,13 +70,11 @@ const PASTE_PLACEHOLDER = 'http://127.0.0.1:…/?state=…&code=…';
 const isPasteSpec = (x) => { const row = x ? R.rowById(x.integration || x.kind) : null; return !!(row && row.signin === 'paste'); };
 /** design 018: the paste type's select value for "no workspace app — make your own" (the route's `clientPreset:'paste'`). */
 const PASTE_CHOICE = 'paste';
+/** lane dc-channels-consent (F3): the paste row's DECLARED words and facts (src/integration-registry.js `paste`) — this
+ *  file is their renderer and names no vendor. */
+const pasteOf = (x) => { const row = x ? R.rowById(x.integration || x.kind) : null; return (row && row.signin === 'paste' && row.paste) || null; };
 function pasteSteps(spec) {
-  return [
-    tr('1. Press “Connect {label}” — Slack opens a page that makes your own app (pick your workspace, press Create).', { label: signinOf(spec) }),
-    tr('2. Press “Install to Workspace”, then Allow.'),
-    tr('3. Copy the User OAuth Token (it starts xoxp-) from “OAuth & Permissions” and paste it in the box below.'),
-    tr('Your workspace admin may have to approve the app; your company’s data policy comes first. The token stays on this server, sealed.'),
-  ];
+  return pasteOf(spec).steps.map((s) => tr(s, { label: signinOf(spec) }));
 }
 /** design 017 (Slack: two pastes, nothing to choose in Slack): the Connect dialog's paste type is THREE NUMBERED STEPS —
  *  ① a one-time setup token (the server makes the app with it once and keeps nothing), ② the app's own install page,
@@ -85,13 +83,12 @@ function pasteSteps(spec) {
  *  clicks, and opens step ③. The app made in step ① is REMEMBERED in this browser (its id, name and workspace — never
  *  a token), so a dialog closed after step ① opens at step ②. Each paste names its BOX (`config` / `user`): a token
  *  pasted into the wrong one is refused by its shape and worded here (`detail.code`). */
-const PASTE_APP_PAGE = 'https://api.slack.com/apps';
 const PASTE_REMEMBER_MS = 30 * 24 * 3600e3;
 const rememberKey = (kind) => `vs-paste-app:${kind}`;
-function recallApp(kind) {
+function recallApp(kind, idShape) {
   try {
     const x = JSON.parse(localStorage.getItem(rememberKey(kind)) || 'null');
-    return x && typeof x.appId === 'string' && /^A[A-Z0-9]{8,}$/.test(x.appId) && Date.now() - Number(x.at) < PASTE_REMEMBER_MS ? x : null;
+    return x && typeof x.appId === 'string' && new RegExp(idShape).test(x.appId) && Date.now() - Number(x.at) < PASTE_REMEMBER_MS ? x : null;
   } catch { return null; }
 }
 function rememberApp(kind, facts) {
@@ -107,57 +104,39 @@ function manifestOfLink(url) {
   try { return JSON.stringify(JSON.parse(decodeURIComponent(url.slice(i + 'manifest_json='.length))), null, 2); } catch { return ''; }
 }
 /** A refused paste in the device's language, by the server's closed `why` (`detail.code`). */
-function pasteWhyText(e) {
+function pasteWhyText(e, P) {
   const why = e && e.body && e.body.detail && typeof e.body.detail.code === 'string' ? e.body.detail.code : '';
   const code = (/: ([a-z_]{2,64})$/.exec(String((e && e.message) || '')) || [])[1] || '';
-  switch (why) {
-    case 'user-token-wrong-box': return tr('That is the User OAuth Token (xoxp-) — paste it in step 3. This box takes the setup token (xoxe.).');
-    case 'config-token-wrong-box': return tr('That is the setup token (xoxe.) — paste it in step 1. This box takes the User OAuth Token (xoxp-).');
-    case 'refresh-token-not-config': return tr('That is the refresh token (xoxe-) — copy the token above it on the same page (it starts xoxe.xoxp-).');
-    case 'not-a-config-token': return tr('That is not a setup token — copy the one under “Your App Configuration Tokens” (it starts xoxe.xoxp-).');
-    case 'not-a-user-token': return tr('That is not a User OAuth Token — copy the one that starts xoxp- from the install page.');
-    case 'config-token-expired': return tr('Slack refused the setup token — it has expired or was revoked. Generate a new one and paste it.');
-    case 'config-token-scope': return tr('That token cannot make apps — paste the token from “Your App Configuration Tokens”.');
-    case 'app-create-refused': return code ? tr('Slack did not create the app ({code}).', { code }) : tr('Slack did not create the app.');
-    case 'rate-limited': return tr('Slack asked to slow down — try again in a minute.');
-    case 'transport': return tr('Slack did not answer — try again.');
-    case 'token-invalid': case 'token-revoked': return tr('Slack refused that token — copy the User OAuth Token again from the install page.');
-    default: return (e && e.message) || tr('Failed');
-  }
+  const own = (o, k) => !!o && Object.prototype.hasOwnProperty.call(o, k);
+  if (code && own(P.whysWithCode, why)) return tr(P.whysWithCode[why], { code });
+  if (own(P.whys, why)) return tr(P.whys[why]);
+  return (e && e.message) || tr('Failed');
 }
 /** The words, endpoints and memory of the numbered paste steps; the steps are DRAWN by the shared renderer
  *  (mounts-dialog.js `wireStepPaste` — this file builds no form control). */
-function wirePasteSteps(ctx, { tokenKey, kind }) {
+function wirePasteSteps(ctx, { tokenKey, kind, paste: P }) {
+  const { made, madeNoTeam, madeAnother, makesAnother, ...plain } = P.words;
   return wireStepPaste(ctx, {
-    tokenKey, configPage: PASTE_APP_PAGE,
+    tokenKey, configPage: P.appPage,
     start: () => mountsApi(CHANNEL_OAUTH_ENDPOINTS.start, { method: 'POST', body: JSON.stringify({ kind, clientPreset: PASTE_CHOICE }) }),   // design 018: the per-person rung, named (never a preset by default)
     callback: (body) => mountsApi(CHANNEL_OAUTH_ENDPOINTS.callback, { method: 'POST', body: JSON.stringify(body) }),
-    whyText: pasteWhyText, manifestOf: manifestOfLink,
-    memory: { recall: () => recallApp(kind), save: (facts) => rememberApp(kind, facts), forget: () => forgetApp(kind) },
+    whyText: (e) => pasteWhyText(e, P), manifestOf: manifestOfLink,
+    memory: { recall: () => recallApp(kind, P.appIdShape), save: (facts) => rememberApp(kind, facts), forget: () => forgetApp(kind) },
     words: {
-      step1: tr('Get a one-time setup token'), openConfig: tr('Open Slack’s app page'),
-      step1Hint: tr('At the bottom of that page, under “Your App Configuration Tokens”, press Generate Token, pick your workspace and copy the token that starts xoxe. — paste it below. It stops working by itself after 12 hours; VibeSpace uses it once and keeps nothing.'),
-      vendorApp: tr('Generating a token adds Slack’s own “Slack Tooling Tokens Vendor” app to your workspace.'),
-      create: tr('Create the app'), creating: tr('Making the app in Slack…'), pasteSetupFirst: tr('Paste the setup token first (it starts xoxe.xoxp-).'),
-      step2: tr('Install it in your workspace'), openInstall: tr('Open the install page'),
-      step2Hint: tr('Press “Install to Workspace”, then “Allow”. Once installed, the same page shows the “User OAuth Token” (it starts xoxp-) near the top — copy it.'),
-      approval: tr('If your workspace needs an admin’s approval, the Install button appears on that page only after they approve; VibeSpace remembers the app you made.'),
-      step3: tr('Paste the token and connect'), step3Hint: tr('Paste the User OAuth Token (it starts xoxp-) here, then press Connect below.'),
-      pasteUserFirst: tr('Paste the User OAuth Token in step 3 first (it starts xoxp-).'), checking: tr('Checking…'), failed: tr('Failed'),
-      fallback: tr('Another way: make the app yourself in Slack'), openLink: tr('Open the create link'), copySetup: tr('Copy app setup'),
-      copied: tr('App setup copied'), copyFailed: tr('Could not copy — open the create link instead.'),
-      clicks: tr('Open the link → if a “Create new app” chooser appears, pick “From a manifest” and paste the copied setup → pick your workspace → Create → Install to Workspace → Allow → copy the User OAuth Token and paste it in step 3.'),
-      finePrint: tr('Your workspace admin may have to approve the app; your company’s data policy comes first. The token stays on this server, sealed.'),
-      another: tr('Make another app'),
-      made: (app) => (app.teamName ? tr('Made the app “{app}” in {team}.', { app: app.appName || app.appId, team: app.teamName }) : tr('Made the app “{app}”.', { app: app.appName || app.appId })),
-      madeAnother: (prev) => tr('This is another app — the earlier “{prev}” stays in Slack; remove it there if you do not need it.', { prev: prev.appName || prev.appId }),
-      makesAnother: (app) => tr('This makes another app in Slack — you already made “{app}”.', { app: app.appName || app.appId }),
+      ...Object.fromEntries(Object.entries(plain).map(([k, v]) => [k, tr(v)])),
+      checking: tr('Checking…'), failed: tr('Failed'),
+      made: (app) => (app.teamName ? tr(made, { app: app.appName || app.appId, team: app.teamName }) : tr(madeNoTeam, { app: app.appName || app.appId })),
+      madeAnother: (prev) => tr(madeAnother, { prev: prev.appName || prev.appId }),
+      makesAnother: (app) => tr(makesAnother, { app: app.appName || app.appId }),
     },
   });
 }
 const pasteOpts = (spec) => (isPasteSpec(spec)
-  ? { pastePlaceholder: tr('the code, or xoxp-…'), pasteSecret: true, pasteHint: tr('If Slack’s last page shows a code instead of coming back here, paste the code below. For your own app: paste its User OAuth Token (it starts xoxp-).') }
+  ? { pastePlaceholder: tr(pasteOf(spec).box.placeholder), pasteSecret: true, pasteHint: tr(pasteOf(spec).box.hint) }
   : { pastePlaceholder: PASTE_PLACEHOLDER });
+/** 2.369.214: a design 018 `public` flow lands on this instance's own page (or the relay page shows the code) — its
+ *  paste-back words never promise a 127.0.0.1 address; the loopback modes keep theirs. */
+const publicPasteHint = (flow) => (flow && flow.mode === 'public' ? tr('Slack’s last page says “Done here” and this dialog finishes by itself — even when you approved in another browser. If that page shows a code instead, or does not load, paste the code or its address here:') : undefined);
 
 /** A channel route that THROWS (the component's contract: a thrown Error
  *  lands in the dialog's `.cfg-err` / the consent block's status line),
@@ -288,6 +267,7 @@ function clientFieldSpecs(spec, { sfx = '', when = null, value, custom = null, s
  *  by the Connect dialog itself when `stepped`, one note per step elsewhere). Default: the first preset, else the
  *  per-person app — a local instance looks exactly as before. */
 function workspaceClientSpecs(spec, { sfx = '', when = null, value, custom = null, secretType = 'password', stepped = false } = {}) {
+  const P = pasteOf(spec);
   const presets = spec.presets || [];
   const v = value === undefined ? ((presets[0] && presets[0].key) || PASTE_CHOICE) : value;
   const options = presets.map((p) => [p.key, tr('Workspace app: {name}', { name: p.label })]);
@@ -298,12 +278,12 @@ function workspaceClientSpecs(spec, { sfx = '', when = null, value, custom = nul
   const isPaste = (vals) => on(vals) && vals[`client${sfx}`] === PASTE_CHOICE;
   const isApp = (vals) => on(vals) && vals[`client${sfx}`] !== PASTE_CHOICE;
   const cf = spec.clientFields || {};
-  const out = [{ key: `client${sfx}`, label: tr('Slack app'), type: 'select', options, value: v, when: when || undefined, hint: spec.clientHint ? tr(spec.clientHint) : undefined }];
+  const out = [{ key: `client${sfx}`, label: tr(P.fieldLabel), type: 'select', options, value: v, when: when || undefined, hint: spec.clientHint ? tr(spec.clientHint) : undefined }];
   if (cf.id) out.push({ key: `cid${sfx}`, label: customLabel(cf.id.label), placeholder: cf.id.placeholder || '', value: (custom && custom.appId) || '', when: isCustom, hint: cf.id.help ? tr(cf.id.help) : undefined });
   if (cf.secret) out.push({ key: `csec${sfx}`, label: customLabel(cf.secret.label), type: secretType, value: (custom && custom.appSecret) || '', when: isCustom, hint: cf.secret.help ? tr(cf.secret.help) : undefined });
-  out.push({ key: `wnote${sfx}`, type: 'note', value: tr('Slack opens its Allow page; press Allow and you are connected. The app must list the relay page (Settings → Channels → Slack relay page) under OAuth & Permissions → Redirect URLs.'), when: isCustom });
-  if (presets.length) out.push({ key: `wpnote${sfx}`, type: 'note', value: tr('Your workspace’s app: press Connect, then Allow on Slack’s page — nothing to copy.'), when: (vals) => isApp(vals) && !isCustom(vals) });
-  if (value === PASTE_CHOICE) out.push({ key: `swnote${sfx}`, type: 'note', value: tr('Switching to the workspace app keeps this account; the app you made yourself stays in Slack — remove it at api.slack.com/apps if you no longer need it.'), when: isApp });
+  out.push({ key: `wnote${sfx}`, type: 'note', value: tr(P.notes.custom), when: isCustom });
+  if (presets.length) out.push({ key: `wpnote${sfx}`, type: 'note', value: tr(P.notes.preset), when: (vals) => isApp(vals) && !isCustom(vals) });
+  if (value === PASTE_CHOICE) out.push({ key: `swnote${sfx}`, type: 'note', value: tr(P.notes.switchBack), when: isApp });
   if (!stepped) out.push(...pasteSteps(spec).map((s, i) => ({ key: `pnote${i}${sfx}`, type: 'note', value: s, when: isPaste })));
   return out;
 }
@@ -412,7 +392,7 @@ function authWatcher(app, id, base) {
     const row = (msg.digest.adapters || []).find((x) => x.id === id);
     if (!row || !row.lastAuthAt || row.lastAuthAt === base) return;
     if (row.lastAuthError) answer = { fail: tr('The consent flow ended: {error}', { error: row.lastAuthError }) };
-    else if (row.auth && row.auth.state === 'connected') answer = { token: id, running: false };
+    else if (row.auth && row.auth.state === 'connected') answer = { token: id, running: false, user: row.auth.user || null };
   };
   const unsub = app.ws.onGlobal(on);
   return { state: () => answer, off: () => { try { if (typeof unsub === 'function') unsub(); else app.ws.offGlobal(on); } catch {} } };
@@ -455,7 +435,7 @@ export async function showConnectAccountDialog(app, kinds) {
   ctx.body.dataset.chanDialog = 'connect';
   for (const k of list) {
     const sfx = `.${k.kind}`;
-    if (isPasteSpec(k)) { const s = wirePasteSteps(ctx, { tokenKey: `pflow${sfx}`, kind: k.kind }); if (s) steppers.set(k.kind, s); }   // design 017; design 018: the workspace app's Connect is wired below too
+    if (isPasteSpec(k)) { const s = wirePasteSteps(ctx, { tokenKey: `pflow${sfx}`, kind: k.kind, paste: pasteOf(k) }); if (s) steppers.set(k.kind, s); }   // design 017; design 018: the workspace app's Connect is wired below too
     let flowId = null;
     wireOAuthConnect(ctx, {
       tokenKey: `flow${sfx}`, backend: k.kind, label: tr('Connect {label}', { label: signinOf(k) }),
@@ -463,7 +443,7 @@ export async function showConnectAccountDialog(app, kinds) {
       // a storage mount's client is named by its id ALONE — a stale hidden custom id/secret never rides beside it
       extra: () => (!ctx.inputs[`client${sfx}`] ? { options: optionValues(Object.fromEntries(Object.entries(ctx.inputs).map(([key, x]) => [key, x.value])), k.optionsSchema, sfx, 1) } : { ...(mountOf(ctx.inputs[`client${sfx}`].value) ? { fromMount: mountOf(ctx.inputs[`client${sfx}`].value), clientId: undefined, clientSecret: undefined } : { clientPreset: ctx.inputs[`client${sfx}`].value }), options: optionValues(Object.fromEntries(Object.entries(ctx.inputs).map(([key, e]) => [key, e.value])), k.optionsSchema, sfx, 1) }),
       endpoints: {
-        start: async (body) => { const r = await post(CHANNEL_OAUTH_ENDPOINTS.start, body); flowId = r.flowId; return { url: r.url, notice: flowNotice(r.flow), narrow: narrowOf(r.flow, () => post(CHANNEL_OAUTH_ENDPOINTS.narrow, { flowId })) }; },
+        start: async (body) => { const r = await post(CHANNEL_OAUTH_ENDPOINTS.start, body); flowId = r.flowId; return { url: r.url, notice: flowNotice(r.flow), pasteHint: publicPasteHint(r.flow), narrow: narrowOf(r.flow, () => post(CHANNEL_OAUTH_ENDPOINTS.narrow, { flowId })) }; },
         status: () => capi(`${CHANNEL_OAUTH_ENDPOINTS.status}?flowId=${enc(flowId || '')}`),
         callback: (b) => post(CHANNEL_OAUTH_ENDPOINTS.callback, { url: b.url, flowId }),
       },
@@ -503,7 +483,7 @@ export async function showReauthAccountDialog(app, a, { kinds = null, preselect 
       const r = await post(`/api/channels/adapters/${enc(a.id)}/reauthorize`, choiceBody(vals));
       if (watcher) watcher.off();
       watcher = authWatcher(app, a.id, (r.adapter && r.adapter.lastAuthAt) || null);
-      return { url: r.flow && r.flow.consentUrl, notice: flowNotice(r.flow), narrow: narrowOf(r.flow, () => post(`/api/channels/adapters/${enc(a.id)}/auth/narrow`, {})) };
+      return { url: r.flow && r.flow.consentUrl, notice: flowNotice(r.flow), pasteHint: publicPasteHint(r.flow), narrow: narrowOf(r.flow, () => post(`/api/channels/adapters/${enc(a.id)}/auth/narrow`, {})) };
     },
     status: async () => (watcher ? watcher.state() : {}),
     callback: async (url) => { await post(`/api/channels/adapters/${enc(a.id)}/auth/finish`, { url }); return { token: a.id }; },
@@ -649,7 +629,7 @@ export async function showDuplicateAccountDialog(app, a, { kinds = null } = {}) 
   ctx.body.dataset.chanDialog = 'duplicate';
   wireOAuthConnect(ctx, {
     tokenKey: 'flow', backend: a.kind, label: tr('Connect {label}', { label: signin }), provider: signin, ...pasteOpts(spec),
-    finishText: tr('✓ Connected — finish with the “Create & connect” button below.'),
+    finishText: (user) => (user ? tr('✓ Connected as {user} — finish with the “Create & connect” button below.', { user: String(user).slice(0, 200) }) : tr('✓ Connected — finish with the “Create & connect” button below.')),
     endpoints: {
       start: async () => {
         const vals = readVals();

@@ -80,9 +80,9 @@ const LIGHT_LANGS = (process.env.VS_UI_LIGHT_LANGS || 'en').split(',').map((s) =
 const ONLY = process.env.VS_UI_ONLY || '';
 fs.mkdirSync(OUT, { recursive: true });
 
-// The Lark row's FIXED loopback port (src/integration-registry.js LARK_CALLBACK_URL)
+// The Lark row's FIXED loopback port (src/channels/lark/manifest.js LARK_CALLBACK_URL)
 // — read from the registry, never spelled here (the same rule oauth-loopback obeys).
-const { LARK_CALLBACK_URL } = require(path.join(repo, 'src/integration-registry.js'));
+const { LARK_CALLBACK_URL } = require(path.join(repo, 'src/channels/lark/manifest.js'));
 const LARK_PORT = Number(new URL(LARK_CALLBACK_URL).port);
 const { secretBox } = require(path.join(repo, 'src/secret-box.js'));
 
@@ -978,7 +978,7 @@ const IM_PANEL_GROUPS = {
   seg: { sel: '.chan-bar', parts: { focus: '.chan-view-btn[data-view="focus"]', all: '.chan-view-btn[data-view="all"]' } },
   head: { sel: '.chan-account > .chan-sec-head', parts: { chev: '.chan-sec-chev', kind: '.chan-sec-kind', name: '.chan-sec-name', chip: '.chan-cred-chip', dot: '.chan-dot', count: '.chan-sec-count', edit: '.chan-sec-edit', more: '.chan-sec-more' }, whole: ['count'] },
   health: { sel: '.chan-account > .chan-sec-health', parts: { tag: '.mounts-typetag', text: '.chan-sec-health-text' }, whole: ['tag'] },
-  row: { sel: '.chan-account .chan-row', parts: { arrow: '.mounts-child-arrow', title: '.chan-row-title', chip: '.chan-row-line .chan-chip', who: '.chan-row-who', unread: '.chan-unread', awaiting: '.chan-awaiting' }, whole: ['chip', 'unread'] },
+  row: { sel: '.chan-account .chan-row', parts: { av: '.chan-av', title: '.chan-row-title', at: '.chan-row-at', chip: '.chan-row-sub .chan-chip', who: '.chan-row-who', unread: '.chan-unread', awaiting: '.chan-awaiting' }, whole: ['at', 'chip', 'unread'] },   // int214 (call B): avatar · name · time / message · pill · counts
 };
 const IM_WIN_GROUPS = {
   titlerow: { sel: '.chanwin-title-row', parts: { av: '.chan-av', title: ':scope > b, .chanwin-title', chip: '.chan-assign-chip', more: '.icon-btn' } },

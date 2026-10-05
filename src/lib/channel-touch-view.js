@@ -172,7 +172,7 @@ export function createChannelTouchView(view) {
       const verdict = T.openVerdict(r).open;
       const tip = r.ops && r.ops.api ? t('Open API access and its log') : verdict === 'search' ? t('Show the search results') : verdict === 'outbox' ? t('Not sent yet — open the Outbox') : t('Open this conversation');   // B-2198: a raw API call row opens its credential's API access
       if (rowEl.title !== tip) rowEl.title = tip;
-      const glyph = T.glyphFor(r.kind || r.adapterId);
+      const glyph = T.glyphFor(r.icon);
       const g = rowEl.querySelector('.cct-glyph');
       if (g.dataset.glyph !== glyph) { g.replaceChildren(icon(glyph, 12)); g.dataset.glyph = glyph; }
       const set = (sel, text) => { const n = rowEl.querySelector(sel); if (n.textContent !== text) n.textContent = text; };

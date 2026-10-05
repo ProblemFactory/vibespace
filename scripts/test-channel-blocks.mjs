@@ -78,6 +78,8 @@ const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf-8');
 
 const REC = require(path.join(REPO, 'src/channel-record.js'));
 const B = require(path.join(REPO, 'src/channel-blocks.js'));
+// lane dc-channels-blocks: Lark's rungs live with Lark (src/channels/lark/blocks.js — the Slack precedent)
+const LB = require(path.join(REPO, 'src/channels/lark/blocks.js'));
 const CH = require(path.join(REPO, 'src/channels/index.js'));
 const lark = require(path.join(REPO, 'src/channels/lark.js'));
 const gmail = require(path.join(REPO, 'src/channels/gmail.js'));
@@ -547,10 +549,10 @@ console.log('⑫ controls: a patched copy per rule turns its own leg red');
   }
   // (h) Lark's image without its own block → "[image]" words back in the tree
   {
-    const src = mutate('src/channel-blocks.js', "    case 'image': return finish(c && c.image_key ? [{ k: 'img', attachmentId: String(c.image_key) }] : [{ k: 'sys', what: 'unknown', text: fallback }], fallback);", "    case 'image': return textToBlocks(fallback);");
+    const src = mutate('src/channels/lark/blocks.js', "    case 'image': return finish(c && c.image_key ? [{ k: 'img', attachmentId: String(c.image_key) }] : [{ k: 'sys', what: 'unknown', text: fallback }], fallback);", "    case 'image': return textToBlocks(fallback);");
     ok(!!src, 'CONTROL setup (h): the image rung is spelled once');
-    const B2 = M.load('src/channel-blocks.js', src, 'imgtext');
-    ok(B2.blockStrings(B2.larkToBlocks(larkItem('om_i', 'image', { image_key: 'k' }), [], { text: '[image]' })).includes('[image]'), 'CONTROL (h): drawing an image from its text puts "[image]" back on screen — ⑥ would redden');
+    const B2 = M.load('src/channels/lark/blocks.js', src, 'imgtext');
+    ok(B.blockStrings(B2.larkToBlocks(larkItem('om_i', 'image', { image_key: 'k' }), [], { text: '[image]' })).includes('[image]'), 'CONTROL (h): drawing an image from its text puts "[image]" back on screen — ⑥ would redden');
   }
   for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 8 })) ok(x.pass, 'tree: ' + x.name, x.detail);
 }
@@ -582,11 +584,11 @@ const LINEAR = [
   // verify round 2: the inline regex is compiled ONCE per rung call — with the message's own mention names in its
   // alternation it was rebuilt per PARAGRAPH (1 604 ms here before, 19 ms after; the stored-record rung runs at READ time)
   ['21 K one-line paragraphs under 256 mention names of 200 characters (the alternation was rebuilt per paragraph)', () => B.textToBlocks('a\n\n'.repeat(21 * K), { mentionNames: MANY_NAMES })],
-  ['the same through the stored-record Lark rung (every page read, every broadcast patch)', () => B.larkStoredBlocks({ text: 'a\n\n'.repeat(21 * K), mentions: MANY_NAMES, raw: { msg_type: 'text' }, attachments: [] })],
+  ['the same through the stored-record Lark rung (every page read, every broadcast patch)', () => LB.larkStoredBlocks({ text: 'a\n\n'.repeat(21 * K), mentions: MANY_NAMES, raw: { msg_type: 'text' }, attachments: [] })],
   ['a subject of 64 KiB of "=" (cleanSubject\'s rule patterns backtrack over the run: 5 632 ms unbounded)', () => B.cleanSubject('='.repeat(64 * K))],
-  ['a Lark post of 20 K lines', () => B.larkToBlocks({ msg_type: 'post', body: { content: JSON.stringify({ content: Array.from({ length: 20000 }, () => [{ tag: 'text', text: 'hi https://x.example ' }]) }) } }, [], { text: 'x' })],
-  ['a Lark card of 50 K elements', () => B.larkToBlocks({ msg_type: 'interactive', body: { content: JSON.stringify({ elements: Array.from({ length: 50000 }, () => ({ tag: 'div', text: { content: 'l' } })) }) } }, [], { text: 'x' })],
-  ['a Lark system template {a} × 100 000 over a 64 KiB part (threw RangeError)', () => B.larkToBlocks({ msg_type: 'system', body: { content: JSON.stringify({ template: '{a}'.repeat(100000), a: 'y'.repeat(64 * K) }) } }, [], { text: 'x' })],
+  ['a Lark post of 20 K lines', () => LB.larkToBlocks({ msg_type: 'post', body: { content: JSON.stringify({ content: Array.from({ length: 20000 }, () => [{ tag: 'text', text: 'hi https://x.example ' }]) }) } }, [], { text: 'x' })],
+  ['a Lark card of 50 K elements', () => LB.larkToBlocks({ msg_type: 'interactive', body: { content: JSON.stringify({ elements: Array.from({ length: 50000 }, () => ({ tag: 'div', text: { content: 'l' } })) }) } }, [], { text: 'x' })],
+  ['a Lark system template {a} × 100 000 over a 64 KiB part (threw RangeError)', () => LB.larkToBlocks({ msg_type: 'system', body: { content: JSON.stringify({ template: '{a}'.repeat(100000), a: 'y'.repeat(64 * K) }) } }, [], { text: 'x' })],
   // verify round 3: the FRAME regex backtracked over a whitespace run (`(\\s[^<>]*)?\\s*>`: 1 708 ms here on 64 KiB of
   // spaces after `<system-reminder`, at ingest AND at every read of the page holding it, in every client)
   ['"<system-reminder" + 64 KiB of spaces through inertFrames (the judge of every stored tree, every page read)', () => REC.inertFrames('<system-reminder' + ' '.repeat(64 * K) + 'x')],
@@ -609,16 +611,16 @@ const LINEAR_BOUND_MS = 800;
   ok(REC.validateBlocks(big).ok && total <= REC.BLOCK_LIMITS.text, `a rung bounds its INPUT to the record's own text bound first (a 1 MiB body → a valid tree of ${total} characters)`);
   // a rung NEVER THROWS: a defect (or an unimagined vendor shape) answers the plain paragraph, never a failed ingest page
   const boom = { msg_type: 'post', body: { content: { content: [[{ tag: 'text', get text() { throw new Error('boom'); } }]] } } };
-  const gt = B.larkToBlocks(boom, [], { text: 'the words' });
+  const gt = LB.larkToBlocks(boom, [], { text: 'the words' });
   ok(eq(gt, [p(T('the words'))]), 'a rung that THROWS inside answers the plain paragraph of the text (Lark\'s history() maps every item through toRecord with no per-item catch — a poison message no longer parks the account)', J(gt));
-  const gs = B.larkStoredBlocks({ text: 'stored words', raw: { get msg_type() { throw new Error('boom'); } } });
+  const gs = LB.larkStoredBlocks({ text: 'stored words', raw: { get msg_type() { throw new Error('boom'); } } });
   ok(eq(gs, [p(T('stored words'))]), 'the stored-record rung too');
   // the Lark bounds
-  const chip = B.larkToBlocks({ msg_type: 'post', body: { content: JSON.stringify({ content: [[{ tag: 'at', user_id: 'ou_z', user_name: 'Admin' }, { tag: 'emotion', emoji_type: 'E'.repeat(500) }]] }) } }, [{ id: 'ou_z', name: 'Zed' }], { text: 'x' });
+  const chip = LB.larkToBlocks({ msg_type: 'post', body: { content: JSON.stringify({ content: [[{ tag: 'at', user_id: 'ou_z', user_name: 'Admin' }, { tag: 'emotion', emoji_type: 'E'.repeat(500) }]] }) } }, [{ id: 'ou_z', name: 'Zed' }], { text: 'x' });
   ok(eq(chip, [p({ k: 'at', id: 'ou_z', name: 'Zed' }, T('[' + 'E'.repeat(40) + ']'))]), 'a mention chip is NAMED by the message\'s own mentions / the roster before the element\'s user_name (the sender\'s claim is the fallback only); an emotion\'s type is bounded to 40', J(chip));
-  const claim = B.larkToBlocks({ msg_type: 'post', body: { content: JSON.stringify({ content: [[{ tag: 'at', user_id: 'ou_q', user_name: '<b>Admin</b>' }]] }) } }, [], { text: 'x' });
+  const claim = LB.larkToBlocks({ msg_type: 'post', body: { content: JSON.stringify({ content: [[{ tag: 'at', user_id: 'ou_q', user_name: '<b>Admin</b>' }]] }) } }, [], { text: 'x' });
   ok(eq(claim, [p({ k: 'at', id: 'ou_q', name: 'Admin' })]), 'an id nobody names falls back to the claim — its MARKUP read (lane channel-rich D1: `<b>Admin</b>` is "Admin", never the tag), as TEXT in the chip', J(claim));
-  const sys = B.larkToBlocks({ msg_type: 'system', body: { content: JSON.stringify({ template: '{from_user} invited {to_chatters} {constructor}', from_user: 'x'.repeat(500), to_chatters: [{ name: 'A' }, { name: 'B' }] }) } }, [], { text: 'f' });
+  const sys = LB.larkToBlocks({ msg_type: 'system', body: { content: JSON.stringify({ template: '{from_user} invited {to_chatters} {constructor}', from_user: 'x'.repeat(500), to_chatters: [{ name: 'A' }, { name: 'B' }] }) } }, [], { text: 'f' });
   ok(sys[0].k === 'sys' && sys[0].text === 'x'.repeat(200) + ' invited A, B {constructor}', 'a system template fills only the parts the payload OWNS, each bounded to 200 characters; an inherited name stays the literal', sys[0].text);
 }
 // the engine judges a STORED tree at read time (a writer past makeRecord: a hostile or buggy adapter)
@@ -720,7 +722,9 @@ const LINEAR_BOUND_MS = 800;
   {
     const src = mutate('src/channel-blocks.js', '  try { return fn(); } catch { return plainOf(text); }', '  return fn();');
     ok(!!src, 'CONTROL setup (m): the guard is spelled once');
-    const B2 = M.load('src/channel-blocks.js', src, 'unguarded');
+    // a CLOSED WORLD: Lark's rungs (their own module since lane dc-channels-blocks) over the unguarded kit
+    const kit = M.write('src/channel-blocks.js', src, 'unguarded', { name: 'channel-blocks-unguarded' });
+    const B2 = M.load('src/channels/lark/blocks.js', read('src/channels/lark/blocks.js').split("require('../../channel-blocks.js')").join(`require(${JSON.stringify(kit)})`), 'unguarded-lark');
     let threw = false;
     try { B2.larkToBlocks({ msg_type: 'post', body: { content: { content: [[{ tag: 'text', get text() { throw new Error('boom'); } }]] } } }, [], { text: 'w' }); } catch { threw = true; }
     ok(threw, 'CONTROL (m): without the guard the poison item throws out of the rung (and out of toRecord, and out of the page) — ⑬ would redden');
@@ -1054,7 +1058,7 @@ console.log('⑯ the markup reader: linear at its bound, never deeper than the r
     const x = build(src);
     const t = process.hrtime.bigint();
     let threw = null;
-    try { B[fn](x); } catch (e) { threw = e; }
+    try { LB[fn](x); } catch (e) { threw = e; }
     const ms = Number(process.hrtime.bigint() - t) / 1e6;
     ok(!threw && ms < BUDGET_MS, `${what}: ${ms.toFixed(1)} ms (budget ${BUDGET_MS})`, threw ? String(threw) : `ms=${ms}`);
   }
@@ -1065,7 +1069,7 @@ console.log('⑯ the markup reader: linear at its bound, never deeper than the r
   const deepMd = '> '.repeat(20000) + 'deep words';
   const deepCard = { message_id: 'om_c', msg_type: 'interactive', create_time: '1', sender: { id: 'ou_x', sender_type: 'user' }, body: { content: JSON.stringify({ elements: [{ tag: 'markdown', content: deepMd }, { tag: 'div', text: { tag: 'plain_text', content: '<blockquote>'.repeat(5000) + 'card words' } }] }) } };
   let r1, r2, r3, r4, r5, e = null;
-  try { r1 = B.larkPlainText('<blockquote>'.repeat(5000) + 'deep words'); r2 = B.larkToBlocks(deepText); r3 = B.larkMdBlocks(deepMd); r4 = B.larkToBlocks(deepCard); r5 = lark.toRecord('a', 'c', deepText, {}); } catch (x) { e = x; }
+  try { r1 = LB.larkPlainText('<blockquote>'.repeat(5000) + 'deep words'); r2 = LB.larkToBlocks(deepText); r3 = LB.larkMdBlocks(deepMd); r4 = LB.larkToBlocks(deepCard); r5 = lark.toRecord('a', 'c', deepText, {}); } catch (x) { e = x; }
   ok(!e && /deep words/.test(r1) && /deep words/.test(r5.text), '5 000 <blockquote> opens (60 KB, inside the bound): the agent\'s text reads (no stack overflow — toRecord never throws on it)', e ? String(e) : r1.slice(0, 80));
   ok(!e && hasQuote(r2) && depthOf(r2) <= REC.BLOCK_LIMITS.depth && REC.validateBlocks(r2).ok && /deep words/.test(JSON.stringify(r2)), `…and its tree keeps its quotes, ${depthOf(r2)} deep (≤ ${REC.BLOCK_LIMITS.depth}) — the rung's own tree, not the plain fallback`, e ? String(e) : JSON.stringify(r2).slice(0, 200));
   ok(!e && hasQuote(r3) && depthOf(r3) <= REC.BLOCK_LIMITS.depth && /deep words/.test(JSON.stringify(r3)), `20 000 "> " levels of Lark markdown: quotes kept, ${depthOf(r3)} deep, the words at the bottom unquoted`, e ? String(e) : JSON.stringify(r3).slice(0, 200));
@@ -1080,7 +1084,7 @@ console.log('⑯ the markup reader: linear at its bound, never deeper than the r
     c.on('exit', (_code, sig) => { clearTimeout(cut); const ms = out ? Number(out) : null; res({ ms, killed: !!sig, over: !!sig || !(ms < BUDGET_MS) }); });
   });
   const M = mutantCopies('chan-blocks-linear', REPO);
-  const src = fs.readFileSync(path.join(REPO, 'src/channel-blocks.js'), 'utf-8');
+  const src = fs.readFileSync(path.join(REPO, 'src/channels/lark/blocks.js'), 'utf-8');
   const NEW_TAG = "const MK_TAG_RE = /<(\\/?)([A-Za-z][A-Za-z0-9_:-]{0,40})((?:\\s[^<>]*)?)(\\/?)>|<!--[\\s\\S]*?(?:-->|$)|<![^<>]{0,400}>/g;";
   const OLD_TAG = "const MK_TAG_RE = /<(\\/?)([A-Za-z][A-Za-z0-9_:-]{0,40})((?:\\s[^<>]*?)?)\\s*(\\/?)>|<!--[\\s\\S]*?(?:-->|$)|<![^<>]{0,400}>/g;";
   const NEW_FENCE = "    const fence = i < noCloserFrom ? /^\\s*```\\s*([A-Za-z0-9_+-]{0,30})\\s*$/.exec(l) : null;";
@@ -1089,17 +1093,17 @@ console.log('⑯ the markup reader: linear at its bound, never deeper than the r
   for (const [what, from, to, shape] of [['the lazy tag regex', NEW_TAG, OLD_TAG, 0], ['the lazy tag regex (through the rung)', NEW_TAG, OLD_TAG, 1], ['a fence walk per opener', NEW_FENCE, OLD_FENCE, 2], ['a fence walk per opener (a card)', NEW_FENCE, OLD_FENCE, 3]]) {
     const patched = src.replace(from, to);
     if (patched === src) { ok(false, `CONTROL setup: ${what} — the fixed line is present once`, from); continue; }
-    const file = M.write('src/channel-blocks.js', patched, `linear-${shape}`);
+    const file = M.write('src/channels/lark/blocks.js', patched, `linear-${shape}`);
     runs.push(inChild(file, SHAPES[shape][1], SHAPES[shape][2]).then((r) => ok(r.over, `CONTROL: a copy with ${what} is OVER the budget on "${SHAPES[shape][0]}" (${r.killed ? 'cut at the budget' : `${Math.round(r.ms)} ms`})`, JSON.stringify(r))));
   }
-  runs.push(inChild(path.join(REPO, 'src/channel-blocks.js'), SHAPES[0][1], SHAPES[0][2]).then((r) => ok(!r.over, `the child harness on the REAL module: under the budget (${r.ms == null ? 'no answer' : r.ms.toFixed(1) + ' ms'})`, JSON.stringify(r))));
+  runs.push(inChild(path.join(REPO, 'src/channels/lark/blocks.js'), SHAPES[0][1], SHAPES[0][2]).then((r) => ok(!r.over, `the child harness on the REAL module: under the budget (${r.ms == null ? 'no answer' : r.ms.toFixed(1) + ' ms'})`, JSON.stringify(r))));
   await Promise.all(runs);
   const NEW_Q = "      if (open) { flush(); if (baseDepth + stack.length + 1 > MAX_DEPTH) overQuote++; else stack.push({ blocks: [] }); continue; }";
   const NEW_MD = "      if (depth + 1 > MAX_DEPTH) {";
   const noQ = src.replace(NEW_Q, "      if (open) { flush(); stack.push({ blocks: [] }); continue; }");
   const noMd = src.replace(NEW_MD, "      if (false) {");
-  const mq = M.load('src/channel-blocks.js', noQ, 'unbounded-quote');
-  const mm = M.load('src/channel-blocks.js', noMd, 'unbounded-md');
+  const mq = M.load('src/channels/lark/blocks.js', noQ, 'unbounded-quote');
+  const mm = M.load('src/channels/lark/blocks.js', noMd, 'unbounded-md');
   let eq = null, em = null;
   try { mq.larkPlainText('<blockquote>'.repeat(5000) + 'deep words'); } catch (x) { eq = x; }
   try { mm.larkMdBlocks(deepMd); } catch (x) { em = x; }
@@ -1118,7 +1122,7 @@ console.log('⑯ the markup reader: linear at its bound, never deeper than the r
 console.log('⑰ an unclosed drop tag is a word, never a drop to the end of the message');
 {
   const item = (text) => ({ message_id: 'om_lone', msg_type: 'text', create_time: '1', chat_id: 'oc_1', sender: { id: 'ou_x', sender_type: 'user' }, body: { content: JSON.stringify({ text }) } });
-  const readBoth = (mod, text) => { const rec = lark.toRecord('lark', 'oc_1', item(text), {}); return { text: rec.text, blocks: B.blocksToPlain(B.larkStoredBlocks(rec) || []) }; };
+  const readBoth = (mod, text) => { const rec = lark.toRecord('lark', 'oc_1', item(text), {}); return { text: rec.text, blocks: B.blocksToPlain(LB.larkStoredBlocks(rec) || []) }; };
   const TABLE = [
     ['please set the <title> of the page to Foo', 'please set the ‹title› of the page to Foo'],
     ['the <select> is broken, use a <video> instead', 'the ‹select› is broken, use a ‹video› instead'],
@@ -1137,13 +1141,13 @@ console.log('⑰ an unclosed drop tag is a word, never a drop to the end of the 
   ];
   const got = TABLE.map(([t, want]) => { const r = readBoth(B, t); return r.text === want && r.blocks === want ? null : `${J(t)} ⇒ text ${J(r.text)} / blocks ${J(r.blocks)} (wanted ${J(want)})`; }).filter(Boolean);
   ok(!got.length, `${TABLE.length} plain messages: an unclosed drop tag keeps every word after it (walled ‹word›), a closed one is dropped with its contents, one with attributes is dropped alone — in rec.text AND the blocks`, got.join('\n    '));
-  const inline = B.markupRead('a <script>alert(1)</script><style>x{}</style> b', { mode: 'blocks' });
+  const inline = LB.markupRead('a <script>alert(1)</script><style>x{}</style> b', { mode: 'blocks' });
   ok(B.blocksToPlain(inline) === 'a  b', 'the closed pair still goes whole (a script\'s words are never the message)');
   // CONTROL: a reader without the rule loses the tail of every unclosed sentence
   const M = mutantCopies('channel-blocks-lone-drop', REPO);
-  const src = read('src/channel-blocks.js');
+  const src = read('src/channels/lark/blocks.js');
   const noRule = src.replace("    if (k.t === 'open' && MK_DROP.has(k.name) && !closed.has(k.name)) {", "    if (false) {");
-  const m = M.load('src/channel-blocks.js', noRule, 'drop-to-end');
+  const m = M.load('src/channels/lark/blocks.js', noRule, 'drop-to-end');
   const lost = m.larkPlainText('please set the <title> of the page to Foo');
   ok(noRule !== src && lost === 'please set the', `CONTROL: a reader without the rule reads "please set the <title> of the page to Foo" as ${J(lost)} — the round-1 shape`);
   for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(c.pass, c.name, c.detail);
@@ -1166,20 +1170,66 @@ console.log('⑱ the inline reader is linear on <li> / <br> / <td> (the tail cha
   const post = (text) => ({ message_id: 'om_li', msg_type: 'post', create_time: '1', chat_id: 'oc', sender: { id: 'ou_x', sender_type: 'user' }, body: { content: JSON.stringify({ title: '', content: [[{ tag: 'text', text }]] }) } });
   const judge = (file, label, shape) => { const v = judgeInChild({ module: file, run: "(M, x) => M.markupRead(x, { mode: 'inline' })", mk: shape, n: 8 * 1024, kind: 'linear' }); return { label, w1: v.w1, w2: v.w2, ratio: +(v.r || 0).toFixed(2), ok: v.ok === true, err: v.err }; };
   const SHAPES = [['<li>', "(n) => '<li>'.repeat(n / 4)"], ['<br>', "(n) => '<br>'.repeat(n / 4)"], ['<td>x', "(n) => '<td>x'.repeat(n / 5)"], ['<p>x</p>', "(n) => '<p>x</p>'.repeat(n / 8)"]];
-  const got = SHAPES.map(([l, sh]) => judge(path.join(REPO, 'src/channel-blocks.js'), l, sh));
+  const got = SHAPES.map(([l, sh]) => judge(path.join(REPO, 'src/channels/lark/blocks.js'), l, sh));
   ok(got.every((g) => g.ok), `inline markupRead: linear in WORK from 8 to 16 KB on ${SHAPES.map((x) => x[0]).join(' / ')} (${got.map((g) => `${g.label} ×${g.ratio}`).join('; ')}, bound ${LINEAR_BOUND})`, J(got));
-  const big = best((x) => B.larkToBlocks(post(x)), '<li>'.repeat(256 * 1024));
+  const big = best((x) => LB.larkToBlocks(post(x)), '<li>'.repeat(256 * 1024));
   // a DEADLINE, not a ratio (ci.mjs CLOCK_JUDGES): the megabyte's JSON.parse precedes the cut, so the meter's bounded()
   // would charge the parse; 250 ms is ~10× the reading here — it tells "cut, then linear" from half a minute
   ok(big < 250, `a 1 MB post element of <li> through larkToBlocks: ${big.toFixed(0)} ms (bounded to BLOCK_LIMITS.text, then linear)`);
-  ok(eq(B.markupRead('a<br>b<li>c<li>d<table><tr><td>e</td><td>f</td></tr></table><p>g</p>', { mode: 'inline' }), [{ k: 't', text: 'a\nb\n• c\n• d\ne  f\ng\n' }]), 'the inline shape is unchanged: a break once, a bullet per item, two spaces between cells, a block boundary a newline');
-  const src = read('src/channel-blocks.js');
+  ok(eq(LB.markupRead('a<br>b<li>c<li>d<table><tr><td>e</td><td>f</td></tr></table><p>g</p>', { mode: 'inline' }), [{ k: 't', text: 'a\nb\n• c\n• d\ne  f\ng\n' }]), 'the inline shape is unchanged: a break once, a bullet per item, two spaces between cells, a block boundary a newline');
+  const src = read('src/channels/lark/blocks.js');
   ok(/const t = bounded\(String\(el\.text \|\| ''\)\);/.test(src) && /if \(mode === 'inline'\) \{ if \(runs\.length && tail !== '\\n'\) pushRun/.test(src) && !/\/\\n\$\/\.test\(last\.text\)/.test(src.replace(/^\s*\/\/.*$/gm, '')), 'WIRING: the post text element is bounded(); brk() reads the tracked tail, never the run (the comment naming the old test aside)');
   const M = mutantCopies('channel-blocks-inline-tail', REPO);
   const reread = src.replace("    if (mode === 'inline') { if (runs.length && tail !== '\\n') pushRun({ k: 't', text: '\\n' }); return; }", "    if (mode === 'inline') { const last = runs[runs.length - 1]; if (runs.length && !(last && last.k === 't' && /\\n$/.test(last.text))) pushRun({ k: 't', text: '\\n' }); return; }");
-  const c = judge(M.write('src/channel-blocks.js', reread, 'reread-run'), '<li>', SHAPES[0][1]);
+  const c = judge(M.write('src/channels/lark/blocks.js', reread, 'reread-run'), '<li>', SHAPES[0][1]);
   ok(reread !== src && !c.ok && !c.err && c.ratio > 3, `CONTROL: a reader that re-reads the run on every <li> is NOT linear in WORK (×${c.ratio})`, J(c));
   for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(x.pass, x.name, x.detail);
+}
+
+// ═══ ⑲ lane dc-channels-blocks — THE PROOF of the seam ══════════════════════
+console.log('⑲ a vendor nobody shipped renders through the REAL engine with its OWN blocks module + declared hooks — no shared module names it');
+{
+  const ENG = require(path.join(REPO, 'src/server/channels-engine.js'));
+  const dataDir = scratch('chan-blocks-own');
+  fs.mkdirSync(path.join(dataDir, 'channels'), { recursive: true });
+  // ITS OWN rung module (the shape src/channels/lark/blocks.js has): the generic tree's rungs + THE KIT, nothing else
+  const ownFile = path.join(dataDir, 'zvendor-blocks.js');
+  fs.writeFileSync(ownFile, `'use strict';
+const K = require(${JSON.stringify(path.join(REPO, 'src/channel-blocks.js'))});
+function zStoredBlocks(r) {
+  const s = K.bounded(String((r && r.text) || ''));
+  return K.guarded(s, () => K.finish([{ k: 'card', title: 'Z ticket', lines: [] }, ...K.textToBlocks(s.replace(/^Z:/, ''))], s));
+}
+module.exports = { zStoredBlocks };
+`);
+  const own = require(ownFile);
+  const caps = { receive: 'poll', pollInterval: { hot: 30, cold: 300, floor: 10 }, history: 'page', listConversations: true, sendAs: [], identityMarking: 'none', budget: { unit: 'request', default: 600, settingKey: null, metered: true }, render: 'blocks', titleForm: 'subject', glyph: 'mail' };
+  const zmod = { kind: 'zvendor', label: 'Z', caps, create() { return {}; }, blocksOf: own.zStoredBlocks, rawFacts: (r) => ({ subject: r.raw && r.raw.zsubj }) };
+  const registry = CH.createChannelRegistry();
+  registry.register(zmod);
+  const regErr = (mod) => { try { CH.createChannelRegistry().register(mod); return null; } catch (e) { return String(e.message); } };
+  ok(/rawFacts must be a function/.test(regErr({ ...zmod, kind: 'zbad', rawFacts: 'subject' }) || '') && /caps\.glyph must be one of chat\|mail\|robot/.test(regErr({ ...zmod, kind: 'zbad2', caps: { ...caps, glyph: 'envelope' } }) || '') && /unavailableWords on an adapter with no push lane/.test(regErr({ ...zmod, kind: 'zbad3', unavailableWords: { 'z-off': 'Z is off' } }) || ''), 'the contract refuses a hook that is not a function, a glyph outside chat | mail | robot, lane words with no lane');
+  const acct = { id: 'z1', kind: 'zvendor', label: 'Z desk', enabled: false, auth: { tokenEnc: null, expiresAt: null, scopes: [] }, lastPass: null, consecutiveFailures: 0, push: { enabled: false, claimedExclusive: 'unknown', state: null, lastEventAt: null, missRate: 0, demotedAt: null, demotedWhy: null, samples: [] }, scan: null };
+  fs.writeFileSync(path.join(dataDir, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: [acct] }));
+  const fetched = [];
+  const eng = ENG.create({ dataDir, registry, env: {}, now: () => 1790000000000, broadcast: () => {}, serverSetting: () => undefined, liveSessions: () => [], log: { log() {}, warn() {}, error() {}, info() {} }, fetch: async (u) => { fetched.push(String(u)); throw new Error('no network in this suite'); } });
+  try {
+    await eng.store.index.update(() => { const z = eng.store.index.entry('z1', 'c1'); z.title = 'Re: Invoice 42'; z.kind = 'thread'; });
+    eng.store.appendRecords('z1', 'c1', [REC.makeRecord({ adapterId: 'z1', convId: 'c1', vendorId: 'z_1', at: 1789999990000, author: { id: 'u1', name: 'Ada' }, text: 'Z:see https://a.example', raw: { zsubj: 'Invoice 42' } })]);
+    const m = eng.messages('z1', 'c1');
+    ok(m.length === 1 && m[0].blocks && m[0].blocks[0].k === 'card' && m[0].blocks[0].title === 'Z ticket' && JSON.stringify(m[0].blocks).includes('"href":"https://a.example/"'), 'the window\'s page draws the vendor\'s OWN rung (its declared blocksOf over a module of its own: a card + the generic linkify)', J(m[0] && m[0].blocks));
+    const est = (value) => eng.estimateFilter('z1', 'c1', { match: 'any', rules: [{ kind: 'subject', value }] });
+    ok(est('invoice').estimate.matched === 1 && est('budget').estimate.matched === 0, 'the `subject` rule matches the subject the vendor DECLARES (rawFacts) — the matcher never read its raw field', J([est('invoice'), est('budget')]));
+    const title = eng.conversationView('z1', 'c1').title;
+    ok(eng.registry.capsOf('zvendor').glyph === 'mail' && title === B.cleanSubject('Re: Invoice 42'), 'its touch rows wear the glyph it DECLARES (caps.glyph), its title is a cleaned subject (titleForm)', J([eng.registry.capsOf('zvendor').glyph, title]));
+    const shared = ['src/channel-blocks.js', 'src/channel-caps.js', 'src/channel-touch.js', 'src/channel-filter.js', 'src/channels/index.js', 'src/server/channels-engine.js'];
+    ok(shared.every((f) => !read(f).includes('zvendor')), 'no shared module names the vendor — the module + its hooks are the whole of it');
+    ok(!fetched.length, `zero vendor calls (${fetched.length})`);
+  } finally { try { eng.stop(); } catch {} }
+  // the shared modules name NO vendor's message shape any more (C2 / C5): no Lark rung in the tree module, no raw read
+  const code = (f) => read(f).split('\n').filter((l) => !/^\s*(\*|\/\/|\/\*)/.test(l)).join('\n');
+  ok(!/\blark[A-Z]\w*|LARK_|markupRead/.test(code('src/channel-blocks.js')), 'channel-blocks.js carries no Lark rung (they live in src/channels/lark/blocks.js)');
+  ok(['src/channel-filter.js', 'src/server/channels-engine.js'].every((f) => !/\.raw(\.(tenant_key|msg_type|subject)\b| && [a-z.]*raw\.(tenant_key|msg_type|subject)\b)/.test(code(f))), 'the engine and the matcher read no vendor raw field (tenant_key / msg_type / subject) — they ask rawFacts');
 }
 
 console.log(`\n(${Date.now() - t0} ms)`);

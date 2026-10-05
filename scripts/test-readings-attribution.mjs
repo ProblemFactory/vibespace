@@ -143,7 +143,7 @@ function mkWorld({ hosts = null } = {}) {
     wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { }, serverNotice: (k, t) => notices.push(t),
     serverSetting: () => undefined, getAccounts: () => am, getHosts: () => hosts, getUsageHistory: () => null,
     recordUsageAttribution() { }, adapterRegistry: { get() { return null; } },
-    getAutoResume: () => null, getOtelIngest: () => ({ observedOrgFor: (cid) => obs.get(cid) || null }), getQuotaProbe: () => null,
+    getAutoResume: () => null, getQuotaProbe: () => null,
   });
   const eng = mkEngine();
   const SID = 'sess-r-1', CID = 'cid-r-1';
@@ -796,7 +796,7 @@ if (!probe) {
   // names the file we just proved untouched.
   const preFixKey = (s2) => (s2.host && !s2._accountId) ? 'host-' + s2.host : (s2._accountId || '__global__');
   ok('§11a NEGATIVE CONTROL: the pre-fix host rule sends that codex snapshot to host-h1 — the claude file, with codex numbers and no `source`', preFixKey(remoteCodex) === 'host-h1' && w.eng.readingSlotFor(remoteCodex).key === '__global_codex__', `pre-fix=${preFixKey(remoteCodex)} now=${w.eng.readingSlotFor(remoteCodex).key}`);
-  ok('§11a …and the reading resolver agrees with the un-pinned codex twin again (readingSlotFor vs codexQuotaKeyFor, which noteWallSignal uses on the same session)', w.eng.readingSlotFor(remoteCodex).key === '__global_codex__' && w.eng.resolveUsageKey(remoteCodex) === '__global_codex__');
+  ok('§11a …and the reading resolver agrees with the un-pinned codex twin again (readingSlotFor vs liveQuotaKeyFor, which noteWallSignal uses on the same session)', w.eng.readingSlotFor(remoteCodex).key === '__global_codex__' && w.eng.resolveUsageKey(remoteCodex) === '__global_codex__');
   // the codex panel's disk seed must actually be able to see it
   const seedLine = read('src/usage-routes.js').split('\n').find((l) => /exec\(fn\)/.test(l) && /cxs/.test(l));
   const lit = seedLine && seedLine.match(/\/(\^\(cxs[^/]+)\//);
@@ -2897,7 +2897,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
     ok('§16c …and a PSEUDO key is never resolved from the streams at all: `accountId: null` cannot tell the machine login from the codex one',
       g && g.ident === null && /no established stream names this account/.test(g.why), JSON.stringify(g && [g.ident, g.why]));
     ok('§16c SOURCE PIN: that is the engine\'s own spelling — both pseudo caches are recorded with a null accountId',
-      /const accountId = \(fn === '__global__\.json' \|\| fn === '__global_codex__\.json'\) \? null : fn\.slice\(0, -5\);/.test(read('src/server/usage-pool-engine.js')));
+      /const gOwner = globalKeyOwner\(fn\.slice\(0, -5\)\);[^\n]*\n\s*const accountId = \(fn === '__global__\.json' \|\| gOwner\) \? null : fn\.slice\(0, -5\);/.test(read('src/server/usage-pool-engine.js')));
   }
 
   // (f) NEGATIVE CONTROL — the r4 cache half, as a PATCHED COPY of the real
@@ -3645,7 +3645,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
         wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { }, serverNotice() { },
         serverSetting: () => undefined, getAccounts: () => w2.am, getHosts: () => null, getUsageHistory: () => null,
         recordUsageAttribution() { }, adapterRegistry: { get() { return null; } },
-        getAutoResume: () => null, getOtelIngest: () => ({ observedOrgFor: () => null }), getQuotaProbe: () => null,
+        getAutoResume: () => null, getQuotaProbe: () => null,
       });
       const cap2 = quiet();
       const rej2 = (r) => eng2.recordRateLimitEvent(w2.session, { type: 'rate_limit_event', rate_limit_info: { status: 'rejected', rateLimitType: 'five_hour', utilization: 1, resets_at: r, resetsAt: r } });
@@ -3794,7 +3794,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
         wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { }, serverNotice() { },
         serverSetting: () => undefined, getAccounts: () => T2.w.am, getHosts: () => null, getUsageHistory: () => null,
         recordUsageAttribution() { }, adapterRegistry: { get() { return null; } },
-        getAutoResume: () => null, getOtelIngest: () => ({ observedOrgFor: () => null }), getQuotaProbe: () => null,
+        getAutoResume: () => null, getQuotaProbe: () => null,
       });
       const cap2 = quiet();
       runTwoBucket(eng2, T2.w, T2.OWN_V7, T2.OWN_T5);

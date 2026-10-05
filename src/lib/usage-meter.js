@@ -1,6 +1,6 @@
 // Taskbar quota pies + usage popup + on-demand quota refresh (mixin split from app.js, 2.82.0 audit seam).
 import { UI_ICONS } from './icons.js'; // the credits chip's money glyph (2.369.189)
-import { createBackendIconHtml } from './agent-meta.js';
+import { createBackendIconHtml, billingRow, getBackendMeta } from './agent-meta.js';
 import { t, tc, deviceLocale } from './i18n.js';
 import { anchorFixedPopup, escHtml, estDisplayPair, fetchJson, onOutsidePress, showConfirmDialog, showToast } from './utils.js';
 import { backendFeatureCaps } from './agent-meta.js';
@@ -66,7 +66,7 @@ export function installUsageMeter(App, ctx = {}) {
       const chip = e.target.closest('.usage-acct-chip');
       if (!chip) return;
       e.stopPropagation();
-      if (chip.dataset.be === 'codex') {
+      if (billingRow(chip.dataset.be).usage === 'codexAccounts') {
         this._usageAcctSelCodex = chip.dataset.key || 'auto';
         try { localStorage.setItem('vibespace.usageAccountCodex', this._usageAcctSelCodex); } catch {}
       } else {
@@ -105,7 +105,7 @@ export function installUsageMeter(App, ctx = {}) {
   // token is the freshest — the CLI keeps it alive), and follows the default
   // account under 'auto' only when that default is a subscription.
   _claudeSelResolved() {
-    const claudeSubs = (this._accounts?.accounts || []).filter(a => (a.backend || 'claude') !== 'codex' && a.type === 'subscription');
+    const claudeSubs = (this._accounts?.accounts || []).filter(a => billingRow(a.backend).usage === 'accounts' && a.type === 'subscription');
     const gl = this._usageGlobal || {};
     const claudeDefId = this._accounts?.defaultAccountId;
     let sel = this._usageAcctSel || 'auto';
@@ -218,7 +218,7 @@ export function installUsageMeter(App, ctx = {}) {
     // login IS one of the named accounts (email match — the server merges their
     // caches newest-wins), '__global__' resolves to that account so there is
     // one entry, not a duplicate pair.
-    const claudeSubs = (this._accounts?.accounts || []).filter(a => (a.backend || 'claude') !== 'codex' && a.type === 'subscription');
+    const claudeSubs = (this._accounts?.accounts || []).filter(a => billingRow(a.backend).usage === 'accounts' && a.type === 'subscription');
     const gl = this._usageGlobal || {};
     const claudeDefId = this._accounts?.defaultAccountId;
     let sel = this._usageAcctSel || 'auto';
@@ -255,7 +255,7 @@ export function installUsageMeter(App, ctx = {}) {
     // Same exclusion as claudeSubs above: a codex POOL is not a quota holder —
     // its usage is its current member's (the roster shows that); as a chip
     // it rendered as an account with "no usage captured yet" (2.369.18).
-    const codexSubs = (this._accounts?.accounts || []).filter(a => a.backend === 'codex' && a.type === 'subscription');
+    const codexSubs = (this._accounts?.accounts || []).filter(a => billingRow(a.backend).usage === 'codexAccounts' && a.type === 'subscription');
     const cgl = this._usageCodexGlobal || {};
     const cBuckets = this._codexAccountUsage || {};
     const codexDefId = this._accounts?.defaultCodexAccountId;
@@ -387,7 +387,7 @@ export function installUsageMeter(App, ctx = {}) {
     };
     const renderRow = (backend, primaryLabel, primaryPct, secondaryLabel, secondaryPct, noData, pairs) => (
       `<div class="taskbar-usage-row">
-        ${createBackendIconHtml(backend, { className: 'taskbar-usage-backend', title: backend === 'codex' ? 'Codex' : 'Claude' })}
+        ${createBackendIconHtml(backend, { className: 'taskbar-usage-backend', title: getBackendMeta(backend).label })}
         <div class="taskbar-usage-pair">
           ${renderPie(primaryLabel, primaryPct, noData, pairs?.[0])}
           ${renderPie(secondaryLabel, secondaryPct, noData, pairs?.[1])}

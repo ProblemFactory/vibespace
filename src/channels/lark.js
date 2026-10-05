@@ -58,14 +58,16 @@ const crypto = require('crypto');
 const { makeRecord, makeConversation, peerName, validateFacts } = require('../channel-record.js');   // peerName: THE name door (the .197 integration — the D3 app names pass it, lark-search-poll ④g)
 const { ChannelError, retryAfterSeconds, sentSecrets, withoutSent } = require('./index.js');
 const { namelessSentence } = require('../channel-identity.js');   // verify r6: a consent must name its account
-const { createLarkLive, NAMES_WAIT_MS } = require('./live/lark.js');
+const { createLarkLive, NAMES_WAIT_MS, UNAVAILABLE_WORDS } = require('./live/lark.js');
 // §25 (2026-09-27): THE RENDER RUNGS — a vendor item → the typed block tree
 // the window draws (a post's rich text kept, mentions as chips, a picture as
 // the picture); `text` stays the agent-facing string.
-const Blocks = require('../channel-blocks.js');
+const Blocks = require('./lark/blocks.js');   // lane dc-channels-blocks: Lark's rungs live with Lark
+const { blocksToPlain } = require('../channel-blocks.js');
 // lane lark-search-poll (B-5aab): the change feed's PURE arithmetic — the hit shape, the declared unit, the ISO window
 const Feed = require('../channel-feed.js');
-const { CHANNEL_SETTINGS, budgetOf, paceOf } = require('../channel-settings.js');   // B-df40 part 3: the budget + pace rows are DECLARED there (the schema row, the engine bound and this caps all read it)
+const { budgetOf, paceOf } = require('../channel-settings.js');   // B-df40 part 3: the budget + pace rows are DECLARED there (the schema row, the engine bound and this caps all read it)
+const MANIFEST = require('./lark/manifest.js');   // lane dc-channels-manifest: this vendor's declarations (PURE) — its settings table, integration row, option rows
 const SR = require('../channel-search.js');   // design 010: THE snippet reader + the shape-only measurement (PURE)
 
 const KIND = 'lark';
@@ -263,6 +265,11 @@ const RATE_OK = Object.freeze([
   { id: 'integration-test', why: 'the integrations panel\'s Test button (a human POST): the refusal\'s words ARE the answer; no pass, nothing retried' },  { id: 'send-parts', why: 'lane channel-send-files: a message sent in PARTS (the text, then one message per file) whose LATER part is refused — a rate refusal included — STOPS the chain: no further request, nothing retried, the receipt names the refusal; a refusal before anything landed is re-thrown to the ladder' },
 ]);
 
+/** lane dc-channels-consent: THE CONSENT ROW (src/channels/index.js validateConsent) — Lark's consent comes back to the
+ *  FIXED loopback its registry row registers (`setup.callbackUrl`, src/integration-registry.js); nothing lands on the
+ *  instance's own routes. */
+const CONSENT = Object.freeze({ mode: 'fixed', landing: null, callbackUrl: require('../integration-registry.js').rowById(INTEGRATION).setup.callbackUrl });
+
 const caps = Object.freeze({
   receive: 'push',
   pushTransport: 'ws-long-conn',
@@ -297,19 +304,23 @@ const caps = Object.freeze({
   // `end_time`, and every request is metered against the account's budget —
   // 1000/min per API per app per TENANT is the vendor's pool (a cluster app
   // shares it), so the default is 60 (6 %) — the default and the setting come
-  // from the lark table of src/channel-settings.js BY IDENTITY (B-df40 part 3)
+  // from the settings table of ./lark/manifest.js BY IDENTITY (B-df40 part 3)
   attachments: 'fetch',
   // lane channel-avatars (B-5fe1): a person's picture from the contact profile (`avatarImage`, PEOPLE_SCOPE)
   avatars: 'fetch',
+  // lane channels-list-polish: a GROUP's own picture (`im/v1/chats/:id` → `avatar`, readable to a member on the user token);
+  // a bot's picture is its APP's avatar — no user-token answer carries it, so a bot keeps its glyph, said here by name
+  avatarKinds: ['person', 'chat'],
+  avatarKindsWhy: 'a Lark bot\'s picture is its app\'s avatar, which no user sign-in can read (the application API takes the tenant token) — a bot keeps its robot glyph',
   olderHistory: 'page',
-  budget: { unit: 'request', metered: true, ...budgetOf(CHANNEL_SETTINGS.lark) },
+  budget: { unit: 'request', metered: true, ...budgetOf(MANIFEST.settings) },
   // lane R5 (2026-09-26): PACED PER SECOND as well (drain rule 18). The
   // vendor's frequency tiers are per API, per app, per TENANT — the chat /
   // message / member / resource reads are tier 4, "1000/min, 50/s" — and a
   // cluster app shares that pool with every instance and user, so the
   // default is 5 requests/s (10 % of the per-second tier); the engine also
   // spreads the minute's budget (60 ⇒ about one a second).
-  pace: { ...paceOf(CHANNEL_SETTINGS.lark), cost: { fetch: 1, discover: 1, scanHost: 1, feed: 1 } },
+  pace: { ...paceOf(MANIFEST.settings), cost: { fetch: 1, discover: 1, scanHost: 1, feed: 1 } },
   vendorName: i18nKey('Lark'),
   // lane channel-threads (2026-09-28; vendor facts L3, L6–L12): a VENDOR thread object (`omt_…`) whose replies are
   // NOT in the chat listing (`threadHistory` walks `container_id_type=thread`), a reply INTO it (`reply_in_thread`);
@@ -486,7 +497,7 @@ function postText(c0) {
 /** An interactive card's words for an agent (lane channel-rich, D1): "[card] <title>" then its elements' text. */
 function cardText(c) {
   const title = Blocks.markupPlainLine(Blocks.cardTitleOf(c));
-  const body = Blocks.blocksToPlain(Blocks.larkCardBlocks(c, [], {})).trim();
+  const body = blocksToPlain(Blocks.larkCardBlocks(c, [], {})).trim();
   return [title ? `[card] ${title}` : '[card]', body].filter(Boolean).join('\n');
 }
 /** Plain text for every `msg_type` this adapter recognises; an unknown type
@@ -630,6 +641,17 @@ function avatarUrlOf(data) {
   try { url = new URL(raw); } catch { return ''; }
   return url.protocol === 'https:' && !url.username && !url.password && avatarHostOk(url.hostname) ? url.href : '';
 }
+/** lane channels-list-polish: a GROUP's picture address — `im/v1/chats/:id` answers `data.avatar` (a URL string on Lark's
+ *  picture hosts) to a member, user token included; the same host rule, ≤ 2048 chars; '' = the chat has no picture. */
+function chatAvatarUrlOf(data) {
+  const raw = data && typeof data === 'object' && typeof data.avatar === 'string' && data.avatar.length <= 2048 ? data.avatar : '';
+  if (!raw) return '';
+  let url;
+  try { url = new URL(raw); } catch { return ''; }
+  return url.protocol === 'https:' && !url.username && !url.password && avatarHostOk(url.hostname) ? url.href : '';
+}
+/** How many people ONE account's memo keeps (the oldest answer goes first). */
+const PEOPLE_MEMO_MAX = 2000;
 /** The picture's bytes, bounded at 256 KiB WHILE reading (a chunked answer says no length; a wrong one says less). */
 async function readAvatarBytes(r, what) {
   const MAX = 256 * 1024;
@@ -671,6 +693,13 @@ function rememberPerson(id, v, at) {
 /** THE READ-TIME VIEW of a stored record (the engine asks it for every read — the window, an agent's read,
  *  a search): a bot a record stored before D3 calls "app" gets its name (or the fallback), and a text a
  *  record stored before D1 carries markup in is read by the same markup reader. The store is never rewritten. */
+/** A STORED RECORD'S VENDOR FACTS, by name (lane dc-channels-blocks, C5 — the engine read `raw.tenant_key` and
+ *  `raw.msg_type` itself): the sender's tenant (the external-author verdict) and the message type (the change
+ *  feed's missed-type counters). */
+function rawFacts(record) {
+  const raw = (record && record.raw) || {};
+  return { tenant: raw.tenant_key, type: raw.msg_type };
+}
 function recordView(record) {
   const r = record;
   if (!r || typeof r !== 'object') return r;
@@ -906,6 +935,45 @@ function create(record = {}, deps = {}) {
   const pace = typeof deps.pace === 'function' ? deps.pace : async () => {};   // lane R5: awaited BEFORE every request (drain rule 18's bucket)
   const walks = new Map();      // convId -> { stopAt, pageToken, newest, at, count }; a THREAD walk is keyed `${convId}#${threadKey}`
   const members = new Map();    // convId -> { names: Map, at }
+  // lane channels-list-polish: THE ACCOUNT'S PEOPLE MEMO (deps.people → <account>/people.json): who the account IS (`self`,
+  // resolved once by user_info when the sign-in never named it — the owner's record had no open_id, so no author was ever
+  // `isSelf` and his own face stood on a direct chat) and what each author was named by (member list, a message's sender
+  // name, the profile + its alternatives) — so a restart forgets nobody; bounded PEOPLE_MEMO_MAX, written at most every 10 s
+  const peopleStore = deps.people && typeof deps.people.read === 'function' ? deps.people : null;
+  const memo = (() => { let m = null; try { m = peopleStore ? peopleStore.read() : null; } catch { m = null; } return { self: m && typeof m.self === 'string' ? m.self : null, people: { ...((m && m.people) || {}) } }; })();
+  let memoDirty = false, memoWrittenAt = 0, selfAskedUntil = 0;
+  const flushMemo = (force = false) => {
+    if (!peopleStore || !memoDirty || (!force && now() - memoWrittenAt < 10e3)) return;
+    const ids = Object.keys(memo.people);
+    if (ids.length > PEOPLE_MEMO_MAX) for (const id of ids.sort((a, b) => (Number(memo.people[a].at) || 0) - (Number(memo.people[b].at) || 0)).slice(0, ids.length - PEOPLE_MEMO_MAX)) delete memo.people[id];
+    memoDirty = false; memoWrittenAt = now();
+    try { peopleStore.write({ self: memo.self, people: memo.people }); } catch (e) { log.warn && log.warn(`[channels] lark: the people memo was not written (${(e && e.message) || e})`); }
+  };
+  const noteName = (id, field, name) => {
+    const k = String(id || ''), v = pName(String(name || ''));
+    if (!Feed.idOf(k) || !v) return;
+    const cur = memo.people[k] || {};
+    if (cur[field] === v) return;
+    memo.people[k] = { ...cur, [field]: v, at: cur.at || now() };
+    memoDirty = true;
+  };
+  const notePerson = (id) => {
+    const p = PEOPLE.get(id);
+    if (!p) return;
+    const cur = memo.people[id] || {};
+    const alt = personAltOf(id);
+    memo.people[id] = { ...cur, name: p.name || '', ...(alt ? { alt } : { alt: undefined }), at: p.at, ...(p.why ? { why: p.why, until: p.at + MEMBERS_TTL_MS } : { why: undefined, until: undefined }) };
+    memoDirty = true;
+  };
+  // a profile the memo kept (read before a restart) is known again without a request
+  for (const [id, p] of Object.entries(memo.people)) {
+    if (!p || !p.at || p.why || PEOPLE.has(id) || !(p.name || p.alt)) continue;
+    const alt = p.alt && typeof p.alt === 'object' ? p.alt : {};
+    rememberPerson(id, { name: p.name || '', enName: alt.enName || '', nickname: alt.nickname || '', jobTitle: alt.jobTitle || '', deptIds: [], why: null }, Number(p.at) || 0);
+  }
+  /** The account's own open_id: the consent's, else the one resolved later (memo) — null = not known. */
+  const selfOpenId = () => ((readToken().token || {}).openId || memo.self || null);
+
   const topicForbidden = new Map();   // convId -> until (a 230071 "this group does not support replies in threads", remembered)
   // lane lark-search-poll: the SINGLE chats this adapter learned of (a feed hit's `is_p2p_chat`, a describe) — U7: the
   // chat lookup may refuse a p2p id under a user token, so for these the membership answer is the last good history
@@ -1097,7 +1165,7 @@ function create(record = {}, deps = {}) {
    *  it, else learned (no call) from the chat members' answer (the owner's own row) or one of the owner's own messages. */
   let learnedTenant = null;
   const selfTenant = () => ((readToken().token || {}).tenantKey || learnedTenant || null);
-  const learnTenant = (memberId, tenantKey) => { const me = (readToken().token || {}).openId || null; if (me && String(memberId) === me && typeof tenantKey === 'string' && tenantKey && tenantKey.length <= 64) learnedTenant = tenantKey; };
+  const learnTenant = (memberId, tenantKey) => { const me = selfOpenId(); if (me && String(memberId) === me && typeof tenantKey === 'string' && tenantKey && tenantKey.length <= 64) learnedTenant = tenantKey; };
   /** lane lark-threads (B1): a DISSOLVED chat (232009) — its members are asked again only after this, and said ONCE. */
   const DISSOLVED_TTL_MS = 24 * 3600e3;
   async function namesFor(convId) {
@@ -1111,7 +1179,7 @@ function create(record = {}, deps = {}) {
         const p = new URLSearchParams({ member_id_type: 'open_id', page_size: '100' });
         if (pageToken) p.set('page_token', pageToken);
         const d = await api(`/im/v1/chats/${encodeURIComponent(convId)}/members?${p}`, { what: 'lark chat members' });
-        for (const m of (d.data && d.data.items) || []) if (m && m.member_id) { names.set(String(m.member_id), String(m.name || '')); learnTenant(m.member_id, m.tenant_key); }
+        for (const m of (d.data && d.data.items) || []) if (m && m.member_id) { names.set(String(m.member_id), String(m.name || '')); learnTenant(m.member_id, m.tenant_key); noteName(m.member_id, 'member', m.name); }
         pageToken = nextToken(d.data);
       } while (pageToken && ++pages < 10);
     } catch (e) {
@@ -1163,6 +1231,7 @@ function create(record = {}, deps = {}) {
       const v = readPersonAnswer(d && d.data) || { name: '', enName: '', nickname: '', jobTitle: '', deptIds: [] };
       rememberPerson(key, { ...v, why: null }, now());
       if (v.deptIds.length) await departmentName(v.deptIds[0]);
+      notePerson(key);
     } catch (e) {
       if (e instanceof ChannelError && e.code === 'auth-expired') throw e;
       const vc = e && e.detail ? Number(e.detail.code) : null;
@@ -1181,6 +1250,7 @@ function create(record = {}, deps = {}) {
         return hit || null;
       }
       rememberPerson(key, { name: (hit && hit.name) || '', enName: '', nickname: '', jobTitle: '', deptIds: [], why: (e && e.code) || 'vendor-error' }, now());
+      notePerson(key);
     }
     return PEOPLE.get(key) || null;
   }
@@ -1217,7 +1287,7 @@ function create(record = {}, deps = {}) {
    * PEOPLE_LOOKUPS_PER_CALL per page, PEOPLE_PER_MIN per minute per account; a name the profile gives fills `names`.
    */
   async function peopleFor(convId, items, names) {
-    const me = (readToken().token || {}).openId || null;   // the account's own profile is never looked up (the consent named it)
+    const me = selfOpenId();   // the account's own profile is never looked up (the consent named it)
     const ids = [...new Set((items || []).filter((m) => m && m.sender && m.sender.sender_type !== 'app' && m.sender.id && String(m.sender.id) !== me).map((m) => String(m.sender.id)))];
     for (const m of items || []) if (m && m.sender && m.sender.id) learnTenant(m.sender.id, m.sender.tenant_key);
     const due = ids.filter((id) => { const p = PEOPLE.get(id); return !(p && now() - p.at < MEMBERS_TTL_MS); }).sort((a, b) => Number(!!names.get(a)) - Number(!!names.get(b)));
@@ -1306,6 +1376,9 @@ function create(record = {}, deps = {}) {
     if (apps.length) { await appNamesFor(apps); for (const id of apps) { const nm = knownAppName(id); if (nm) names.set(id, nm); } }
     // lane lark-threads (B1/B5): every person sender named as Lark shows them — a profile per id per 6 h (the unnamed first)
     await peopleFor(convId, items, names);
+    // lane channels-list-polish: a person a message @-mentions carries their name (`id_type: open_id`) — the ladder's sender rung
+    for (const m of items || []) for (const x of Array.isArray(m && m.mentions) ? m.mentions : []) if (x && x.id_type === 'open_id' && typeof x.id === 'string') { noteName(x.id, 'sender', x.name); if (!names.get(x.id) && x.name) names.set(x.id, pName(String(x.name))); }
+    flushMemo();
     return names;
   }
 
@@ -1339,7 +1412,7 @@ function create(record = {}, deps = {}) {
         });
         names = (await Promise.race([lookup, sleep(NAMES_WAIT_MS).then(cached)])) || cached();
       }
-      const selfId = (readToken().token || {}).openId || null;
+      const selfId = selfOpenId();
       return toRecord(adapterId, convId, item, { names, selfId, selfTenant: selfTenant() });
     },
   });
@@ -1478,7 +1551,7 @@ function create(record = {}, deps = {}) {
     const foreign = all.length - items.length;
     if (foreign && log.warn) log.warn(`[channels] lark: thread ${String(threadKey).slice(0, 64)} of ${convId}: ${foreign} message(s) of another chat in its listing — dropped`);
     const names = items.length ? await allNamesFor(convId, items) : new Map();   // lane lark-threads: + the profiles (B1/B5)
-    const selfId = (readToken().token || {}).openId || null;
+    const selfId = selfOpenId();
     const fresh = [];
     let reached = false;
     for (const m of items) {
@@ -1512,7 +1585,7 @@ function create(record = {}, deps = {}) {
     const d = await api(`/im/v1/messages?${p}`, { what: 'lark recent roots' });
     const items = ((d.data && d.data.items) || []).filter((m) => m && m.message_id && (!m.chat_id || String(m.chat_id) === String(convId))).slice(0, size);
     const names = items.length ? await allNamesFor(convId, items) : new Map();
-    const selfId = (readToken().token || {}).openId || null;
+    const selfId = selfOpenId();
     return { records: items.reverse().map((m) => toRecord(adapterId, convId, m, { names, selfId, selfTenant: selfTenant() })), topics: items.filter((m) => m.thread_id).length };
   }
   /**
@@ -1528,7 +1601,7 @@ function create(record = {}, deps = {}) {
     const v = readByIdAnswer((d && d.data) || null, { messageId, convId });
     if (v.kind !== 'reply') return { kind: v.kind, record: null, rootPatch: v.rootPatch, threadKey: v.threadKey };
     const names = await allNamesFor(convId, [v.item]);
-    const selfId = (readToken().token || {}).openId || null;
+    const selfId = selfOpenId();
     return { kind: v.kind, record: toRecord(adapterId, convId, v.item, { names, selfId, selfTenant: selfTenant() }), rootPatch: v.rootPatch, threadKey: v.threadKey };
   }
   /** ONE message's reactions (L8): the vendor's list, paged to `has_more === false` but at most REACTION_PAGES_MAX
@@ -1578,7 +1651,7 @@ function create(record = {}, deps = {}) {
     catch (e) { throw reactionFailure(e); }
     const m = (d && d.data) || {};
     const op = m.operator || {};
-    return { ok: true, reactionId: m.reaction_id ? String(m.reaction_id) : null, at: Number(m.action_time) || now(), actor: op.operator_id ? String(op.operator_id) : ((readToken().token || {}).openId || null) };
+    return { ok: true, reactionId: m.reaction_id ? String(m.reaction_id) : null, at: Number(m.action_time) || now(), actor: op.operator_id ? String(op.operator_id) : (selfOpenId()) };
   }
   /** REMOVE OUR reaction (L8): needs the vendor's `reaction_id` (the engine knows ours, or lists first). */
   async function unreactImpl(convId, { messageId, reactionId } = {}) {
@@ -1588,6 +1661,7 @@ function create(record = {}, deps = {}) {
     return { ok: true, at: now() };
   }
 
+    /** lane channels-list-polish: the paced, metered, token-free fetch of a picture address one of the readers vetted. */
   return {
     live,
     // B-2198: the raw API's bearer — handed to src/server/channel-api.js's ONE fetch site only, never to a route; its
@@ -1615,7 +1689,7 @@ function create(record = {}, deps = {}) {
         if (!cred.values) throw new ChannelError('auth-expired', `cannot start a Lark consent flow: ${cred.why}`, { retryable: false, detail: { needsCredentials: true, missing: cred.missing } });
         const { appId, appSecret } = cred.values;
         return oauth.begin({
-          id: adapterId, mode: 'fixed', label: 'Lark',
+          id: adapterId, mode: 'fixed', registeredCallbackUrl: CONSENT.callbackUrl, label: 'Lark',
           successText: 'VibeSpace: Lark connected — you can close this tab.',
           buildConsentUrl: ({ redirectUri, state, without = [] }) => `${H.accounts}/open-apis/authen/v1/authorize?` + new URLSearchParams({ client_id: appId, redirect_uri: redirectUri, scope: consentScopes(without).join(' '), state }),
           // the ORDERED groups this consent actually names (a group whose scopes the owner's options leave out is not offered)
@@ -1803,7 +1877,7 @@ function create(record = {}, deps = {}) {
       } catch (e) {
         if (e instanceof ChannelError && (e.code === 'auth-expired' || e.code === 'rate-limited')) throw e;   // verify r2 F1: a 429 on the chat lookup is the account's, never a fall-through to two more reads
       }
-      const self = (readToken().token || {}).openId || null;
+      const self = selfOpenId();
       // B-64f6 (the owner's oc_e53d…, 2026-10-03): production's 12 single chats were ALL titled null — the chat lookup
       // names no single chat and the contact lookup refused every peer, while the chat's member list (the one that names
       // its authors) named both people. So ② = the OTHER member by that list (cached MEMBERS_TTL_MS, one request when
@@ -1826,7 +1900,48 @@ function create(record = {}, deps = {}) {
     },
 
     /** The account's own open id (a reaction's `mine`). */
-    selfId() { return (readToken().token || {}).openId || null; },
+    selfId() { return selfOpenId(); },
+    /** lane channels-list-polish: WHO THIS ACCOUNT IS, resolved ONCE when the sign-in never named it (a consent from before
+     *  user_info was read): `authen/v1/user_info` on the user token, through the gate; kept in the people memo (a restart
+     *  does not ask again); a refusal is remembered MEMBERS_TTL_MS (a rate refusal goes to the pass's ladder). */
+    async resolveSelf() {
+      const known = selfOpenId();
+      if (known || now() < selfAskedUntil) return known;
+      selfAskedUntil = now() + MEMBERS_TTL_MS;
+      let d;
+      try { d = await api('/authen/v1/user_info', { what: 'lark user info' }); }
+      catch (e) {
+        if (e instanceof ChannelError && (e.code === 'auth-expired' || e.code === 'rate-limited')) { if (e.code === 'rate-limited') selfAskedUntil = now() + peoplePauseMs(e); throw e; }
+        log.warn && log.warn(`[channels] lark: this account's own id could not be read (${(e && e.message) || e}) — a direct chat shows no picture until it is; asked again in 6 h`);
+        return null;
+      }
+      const id = d && d.data && typeof d.data.open_id === 'string' ? d.data.open_id.trim() : '';
+      if (!Feed.idOf(id)) return null;
+      memo.self = id; memoDirty = true; flushMemo(true);
+      return id;
+    },
+    /** lane channels-list-polish (the owner's "Kit" is Lark's "Mia (Marketing)"): EVERY author id a conversation carries
+     *  is looked up — the nameless first, then those with no profile in the memo — within the adapter's bounds
+     *  (PEOPLE_LOOKUPS_PER_CALL per call, PEOPLE_PER_MIN per minute, the pause), and the answers kept on disk. */
+    async warmPeople(ids) {
+      const me = selfOpenId();
+      if (!canReadPeople()) {
+        if (!SAID_MEMBERS.has(`people-scope:${adapterId}`)) { SAID_MEMBERS.add(`people-scope:${adapterId}`); log.warn && log.warn(`[channels] lark: people's profiles are not read — this sign-in holds none of ${PEOPLE_READ_SCOPES.join(' / ')}; re-authorize to read nicknames and pictures`); }
+        return { asked: 0 };
+      }
+      const named = (id) => !!(memo.people[id] && (memo.people[id].member || memo.people[id].sender || memo.people[id].name));
+      // a profile (or a refusal) younger than MEMBERS_TTL_MS is not asked again — the schedule, never every draw
+      const due = [...new Set(ids)].filter((id) => Feed.idOf(id) && id !== me && !knownAppName(id) && !(PEOPLE.get(id) && now() - PEOPLE.get(id).at < MEMBERS_TTL_MS))
+        .sort((a, b) => Number(named(a)) - Number(named(b)));
+      let asked = 0;
+      for (const id of due) {
+        if (asked >= PEOPLE_LOOKUPS_PER_CALL || now() < peopleRefusedUntil || peopleBudget() <= 0) break;
+        asked++;
+        await lookupPerson(id);
+      }
+      flushMemo(asked > 0);
+      return { asked };
+    },
     /** lane lark-threads (B4): the account's own organization (the consent's, else learned without a call) — null unknown. */
     selfTenant() { return selfTenant(); },
     threadHistory: threadHistoryImpl,
@@ -1853,7 +1968,7 @@ function create(record = {}, deps = {}) {
      * `unknown` with the reason.
      */
     async reconcile(convId, { idemKey, sentAt = null, text = null, replyTo = null, replyAnchor = null, inThread = false, threadKey = null } = {}) {
-      const selfId = (readToken().token || {}).openId || null;
+      const selfId = selfOpenId();
       const wanted = String(text == null ? '' : text);
       const sent = Number(sentAt) || now();
       const since = sent - RECONCILE_SLACK_MS;
@@ -1919,7 +2034,7 @@ function create(record = {}, deps = {}) {
       if (p2pIds.has(convId)) p2pRead.set(convId, now());   // lane lark-search-poll: a single chat we can read (U7's membership evidence)
       const items = ((d.data && d.data.items) || []).filter((m) => m && m.message_id);
       const names = items.length ? await allNamesFor(convId, items) : new Map();   // lane lark-threads: the profiles ride allNamesFor (B1 — every chat, not only single ones)
-      const selfId = (readToken().token || {}).openId || null;
+      const selfId = selfOpenId();
       const fresh = [];
       let reached = false;
       for (const m of items) {
@@ -1963,7 +2078,7 @@ function create(record = {}, deps = {}) {
       const b = before && Number(before.at) > 0 ? before : null;
       const olderOnes = b ? items.filter((m) => { const at = Number(m.create_time) || 0; return at < Number(b.at) || (at === Number(b.at) && b.vendorId && String(m.message_id) < String(b.vendorId)); }) : items;
       const names = olderOnes.length ? await allNamesFor(convId, olderOnes) : new Map();
-      const selfId = (readToken().token || {}).openId || null;
+      const selfId = selfOpenId();
       const records = olderOnes.reverse().map((m) => toRecord(adapterId, convId, m, { names, selfId, selfTenant: selfTenant() }));
       return { records: records.slice(-size), exhausted: !nextToken(d.data) && items.length < size };
     },
@@ -2029,7 +2144,7 @@ function create(record = {}, deps = {}) {
       }
       items.sort((x, y) => (Number(x.create_time) || 0) - (Number(y.create_time) || 0) || (String(x.message_id) < String(y.message_id) ? -1 : 1));
       const names = items.length ? await allNamesFor(convId, items) : new Map();
-      const selfId = (readToken().token || {}).openId || null;
+      const selfId = selfOpenId();
       const records = items.slice(0, SR.AROUND_MAX).map((m) => toRecord(adapterId, convId, m, { names, selfId, selfTenant: selfTenant() }));
       return { records, requests: 2, facts: { before: ((before.data && before.data.items) || []).length, after: ((after.data && after.data.items) || []).length, target: !!vendorId && seen.has(String(vendorId)) } };
     },
@@ -2048,7 +2163,18 @@ function create(record = {}, deps = {}) {
      * "No picture" is `not-found` + `why: 'no-picture'` (the engine remembers it).
      */
     async avatarImage(author) {
-      const key = String(author || '');
+      // lane channels-list-polish: the engine's picture key names (kind, id) — `chat~<chat_id>` is a group's own picture
+      const pk = /^(chat|bot)~(.+)$/.exec(String(author || ''));
+      const kind = pk ? pk[1] : 'person', key = pk ? pk[2] : String(author || '');
+      let url = '';
+      // lane channels-list-polish: a GROUP's own picture — `im/v1/chats/:id` names it (`avatar`) to a member, user token
+      if (kind === 'chat') {
+        if (!Feed.idOf(key)) throw new ChannelError('not-found', 'lark: a chat is named by its chat_id', { retryable: false, detail: { why: 'no-picture' } });
+        const d = await api(`/im/v1/chats/${encodeURIComponent(key)}`, { what: 'lark chat avatar' });
+        url = chatAvatarUrlOf(d && d.data);
+        if (!url) throw new ChannelError('not-found', 'lark: this chat has no picture', { retryable: false, detail: { why: 'no-picture' } });
+      } else if (kind !== 'person') throw new ChannelError('not-supported', caps.avatarKindsWhy, { retryable: false });
+      else {
       if (!Feed.idOf(key)) throw new ChannelError('not-found', 'lark: a person is named by an open_id', { retryable: false, detail: { why: 'no-picture' } });
       if (!canReadPeople()) throw new ChannelError('forbidden', `lark: people's profiles cannot be read — re-authorize to grant ${PEOPLE_SCOPE}`, { retryable: false, detail: { why: 'scope', scope: PEOPLE_SCOPE } });
       let d;
@@ -2058,8 +2184,9 @@ function create(record = {}, deps = {}) {
         if (vc === 99991679) throw new ChannelError('forbidden', `lark: people's profiles cannot be read — re-authorize to grant ${PEOPLE_SCOPE}`, { retryable: false, detail: { why: 'scope', scope: PEOPLE_SCOPE } });
         throw e;
       }
-      const url = avatarUrlOf(d && d.data);
+      url = avatarUrlOf(d && d.data);
       if (!url) throw new ChannelError('not-found', 'lark: this person has no profile picture', { retryable: false, detail: { why: 'no-picture' } });
+      }
       await pace(1);
       meter(1);
       let r;
@@ -2148,13 +2275,14 @@ const FEED_GRANT = Object.freeze({ scopes: Object.freeze([SEARCH_SCOPE, P2P_READ
 /** lane lark-threads (B1/B5): WHAT UNLOCKS READING PEOPLE'S PROFILES — the measured scope (a person who left a chat, an
  *  external contact, the organization's nickname, the department) — the card's ONE Re-authorize line names it. */
 const PEOPLE_GRANT = Object.freeze({ scopes: Object.freeze([PEOPLE_SCOPE]), console: true });
-const adapter = { kind: KIND, caps, create, api: API_ROW, vendorNameOf, blocksOf: Blocks.larkStoredBlocks, recordView, sendGrant: SEND_GRANT, sendCapsOf, capsOfScopes, reactionsGrant: REACTIONS_GRANT, feedGrant: FEED_GRANT, peopleGrant: PEOPLE_GRANT };
 module.exports = {
   attachmentPlan, LARK_IMAGE_MAX, LARK_FILE_MAX,
-  kind: KIND, caps, create, adapter, API_ROW, label: LABEL, integration: INTEGRATION, integrationTest, OPTIONS, UNGATED, RATE_OK,
+  kind: KIND, caps, create, manifest: MANIFEST, api: API_ROW, sendGrant: SEND_GRANT, reactionsGrant: REACTIONS_GRANT, feedGrant: FEED_GRANT, peopleGrant: PEOPLE_GRANT, API_ROW, consent: CONSENT, label: LABEL, integration: INTEGRATION, integrationTest, OPTIONS, UNGATED, RATE_OK,
   EGRESS, HOSTS, BRANDS, SCOPES, SEND_SCOPES, FIRST_INGEST_MAX, WALK_TTL_MS, UUID_WINDOW_MS, UUID_MAX, RECONCILE_SLACK_MS, RECONCILE_SCAN_MAX, RENEW_WINDOW_MS,
   toRecord, textOf, mentionsOf, attachmentsOf, typedFailure, avatarUrlOf, AVATAR_ORIGINS, nextToken, uuidFor, hasSendScopes, vendorNameOf,
   SEND_GRANT, blocksOf: Blocks.larkStoredBlocks, sendCapsOf,
+  // lane dc-channels-blocks: the record's vendor facts by name + the live lane's words for its parked codes
+  rawFacts, unavailableWords: UNAVAILABLE_WORDS,
   // D3 (lane channel-rich): the ONE bot-name resolver's module half + the read-time view
   recordView, botFallbackName, appNameOf, knownAppName, rememberAppName, APP_NAMES,
   // lane channel-threads: the reaction vocabulary (L9), the scope verdict, what unlocks reading
@@ -2168,5 +2296,8 @@ module.exports = {
   // lane lark-threads (A4): the by-id answer's verdict
   readByIdAnswer, BYID_KINDS, BYID_ITEMS_MAX,
   // lane lark-threads (B): reading people — the measured scope, the field scopes, the grant, the profile reader, the cache
-  PEOPLE_SCOPE, JOB_SCOPE, DEPT_SCOPE, PEOPLE_READ_SCOPES, PEOPLE_GRANT, readPersonAnswer, PEOPLE, DEPTS, personAltOf, PEOPLE_LOOKUPS_PER_CALL, PEOPLE_PER_MIN,
+  PEOPLE_SCOPE, JOB_SCOPE, DEPT_SCOPE, PEOPLE_READ_SCOPES, PEOPLE_GRANT, readPersonAnswer, PEOPLE, DEPTS, personAltOf, PEOPLE_LOOKUPS_PER_CALL, PEOPLE_PER_MIN, chatAvatarUrlOf, PEOPLE_MEMO_MAX,
 };
+// lane dc-channels-manifest (rv F2): the module IS the registered thing — register() validates every field the engine
+// reads off it; `adapter` stays the module itself for the suites that register it by that name
+module.exports.adapter = module.exports;

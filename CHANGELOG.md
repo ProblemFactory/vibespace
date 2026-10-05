@@ -2,6 +2,16 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.214 — 2026-10-05
+
+### Changed
+- Channels: each account's list reads like a chat app — picture, name and time, then the last message and who wrote it; people show their real names.
+
+### Fixed
+- Channels: a direct chat shows the other person's picture, not yours; a group shows its own; the account badge sits on top with the app's real logo.
+- Two windows side by side on another desktop stay side by side after you reload the page.
+- Approving Slack access in another browser profile now finishes the sign-in; that page asks for no VibeSpace login and the dialog names who connected.
+
 ## 2.369.213 — 2026-10-05
 
 ### Added

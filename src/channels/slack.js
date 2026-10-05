@@ -55,7 +55,8 @@
  */
 const { makeRecord, makeConversation, peerName, validateFacts } = require('../channel-record.js');
 const { ChannelError, retryAfterSeconds, sentSecrets, withoutSent } = require('./index.js');
-const { CHANNEL_SETTINGS, budgetOf, paceOf } = require('../channel-settings.js');
+const { budgetOf, paceOf } = require('../channel-settings.js');
+const MANIFEST = require('./slack/manifest.js');   // lane dc-channels-manifest: this vendor's declarations (PURE) — its settings table, integration row, option rows
 const Text = require('./slack-text.js');
 const Limits = require('./slack-limits.js');
 const Manifest = require('./slack-manifest.js');
@@ -122,6 +123,15 @@ const ID_RE = /^[A-Z0-9][A-Z0-9_]{1,40}$/;
 const tsMs = (ts) => (TS_RE.test(String(ts || '')) ? Math.round(Number(ts) * 1000) : 0);
 const msTs = (ms) => (Number(ms) > 0 ? (Number(ms) / 1000).toFixed(6) : null);
 
+/** lane dc-channels-consent: THE CONSENT ROW (src/channels/index.js validateConsent) — a workspace app's Allow comes back
+ *  to `GET /api/channels/oauth/cb/slack` (design 018: the state is Slack's `v1.<facts>.<hmac>`, judged here, signed by
+ *  the engine's per-boot key; the page in en / zh / ja); the per-person app is the paste-back. */
+const CONSENT = Object.freeze({
+  mode: Object.freeze(['public', 'paste']),
+  landing: Object.freeze({ stateVerdict: Manifest.stateVerdict, landingHtml: Words.landingHtml }),
+  relayUrlSetting: Object.freeze({ key: 'slackRelayUrl', fallback: Manifest.RELAY_DEFAULT }),   // the server setting channels.<key>
+});
+
 /** THE CAPABILITY ROW (design §4 Lane S1). */
 const caps = Object.freeze({
   receive: 'poll',
@@ -151,8 +161,8 @@ const caps = Object.freeze({
   // lane channel-avatars (B-5fe1): a person's picture from `users.info` (`avatarImage`)
   avatars: 'fetch',
   olderHistory: 'page',
-  budget: { unit: 'request', metered: true, ...budgetOf(CHANNEL_SETTINGS.slack) },
-  pace: { ...paceOf(CHANNEL_SETTINGS.slack), cost: { fetch: 1, discover: 1 } },
+  budget: { unit: 'request', metered: true, ...budgetOf(MANIFEST.settings) },
+  pace: { ...paceOf(MANIFEST.settings), cost: { fetch: 1, discover: 1 } },
   vendorName: i18nKey('Slack'),
   facts: Object.freeze(['via', 'edited']),
   // F3: Slack's thread object (`thread_ts`), replies listed separately (`conversations.replies`), a reply in the
@@ -305,7 +315,7 @@ function create(record = {}, deps = {}) {
   // design 018: the workspace app's client (the engine's per-record resolver) and the instance's consent facts
   // (`sign` = the per-boot state HMAC, `relayUrl()` = the custom rung's relay page setting, `ttlMs`)
   const resolveIntegration = typeof deps.resolveIntegration === 'function' ? deps.resolveIntegration : null;
-  const consent = deps.slackConsent || null;
+  const consent = deps.consent || null;
   const clientKey = () => { const k = deps.credentialKey || record.credentialKey || null; return k === 'custom' || (typeof k === 'string' && k.startsWith('cluster:')) ? k : null; };
   const log = deps.log || console;
   const meter = typeof deps.meter === 'function' ? deps.meter : () => {};
@@ -969,10 +979,12 @@ function create(record = {}, deps = {}) {
 
 const SEND_GRANT = Object.freeze({ scopes: SEND_SCOPES, console: true });
 const REACTIONS_GRANT = Object.freeze({ scopes: Object.freeze(['reactions:read']), console: true });
-const adapter = { kind: KIND, caps, create, api: API_ROW, vendorNameOf, blocksOf: Text.slackStoredBlocks, recordView, sendGrant: SEND_GRANT, sendCapsOf, capsOfScopes, reactionsGrant: REACTIONS_GRANT };
 module.exports = {
-  kind: KIND, caps, create, adapter, API_ROW, label: LABEL, integration: INTEGRATION, OPTIONS, optionOf,
+  kind: KIND, caps, create, manifest: MANIFEST, api: API_ROW, sendGrant: SEND_GRANT, reactionsGrant: REACTIONS_GRANT, API_ROW, consent: CONSENT, label: LABEL, integration: INTEGRATION, OPTIONS, optionOf,
   EGRESS, API, FILES_ORIGIN, FIRST_INGEST_MAX, WALK_TTL_MS, PAGE_MAX, PEOPLE_TTL_MS, PEOPLE_LOOKUPS_PER_CALL, RX_CACHE_TTL_MS, ATTACH_MAX_BYTES,
   toRecord, recordView, factsOfMessage, personOf, avatarUrlOf, AVATAR_ORIGIN, callSlack, sendCapsOf, capsOfScopes, vendorNameOf, tsMs, msTs,
   SEND_GRANT, REACTIONS_GRANT, READ_SCOPES, SEND_SCOPES, blocksOf: Text.slackStoredBlocks,
 };
+// lane dc-channels-manifest (rv F2): the module IS the registered thing — register() validates every field the engine
+// reads off it; `adapter` stays the module itself for the suites that register it by that name
+module.exports.adapter = module.exports;

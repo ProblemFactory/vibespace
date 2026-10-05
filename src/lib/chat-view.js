@@ -11,7 +11,7 @@ import { ChatInput } from './chat-input.js';
 import { ChatStatusBar } from './chat-status-bar.js';
 import { UI_ICONS } from './icons.js';
 import { t } from './i18n.js';
-import { isAgentMemoryPath, effortDisplay, getBackendMeta, backendFeatureCaps, noteMemoryPaths, initHealthIssues, initFrameOf, notificationDeliveryFor } from './agent-meta.js';
+import { isAgentMemoryPath, effortDisplay, getBackendMeta, backendFeatureCaps, noteMemoryPaths, initHealthIssues, initFrameOf, notificationDeliveryFor, billingRow, viewIdFor, legacyIdFor } from './agent-meta.js';
 import { registerCommand, registerKeybinding, runCommand, hasCommand } from './contributions.js';
 // The verb list a wrapper that publishes a queue WITHOUT naming verbs serves —
 // the SAME array the server maps a verb-less sidecar onto (src/server/
@@ -2220,7 +2220,7 @@ class ChatView {
           } else {
             // global bucket = the machine's own login of THAT harness (the
             // ledger event says which: codex → ChatGPT, claude → the CLI login)
-            val = r.aname || (r.atype === 'global' || !r.acct ? (r.be === 'codex' ? t('ChatGPT login') : t('CLI login')) : r.acct);
+            val = r.aname || (r.atype === 'global' || !r.acct ? t(billingRow(r.be).cliLogin) : r.acct);
             if (r.poolName) val += ` · ${t('via pool “{name}”', { name: r.poolName })}`;
             // a remote request bills to a real account AND ran on a machine —
             // both matter (2.294.0), so name the machine after the account
@@ -2276,13 +2276,13 @@ class ChatView {
         const backend = s.backend || 'claude';
         const backendSessionId = s.backendSessionId || s.sessionId;
         const legacyViewId = `view-${s.sessionId}`;
-        const backendViewId = backend === 'claude' ? legacyViewId : `view-${backend}-${backendSessionId}`;
+        const backendViewId = legacyIdFor(backend, legacyViewId) || viewIdFor(backend, backendSessionId); // the legacy row matches by the record's own sessionId
         return this.sessionId === legacyViewId || this.sessionId === backendViewId;
       });
       if (match) {
         const backend = match.backend || 'claude';
         const backendSessionId = match.backendSessionId || match.sessionId;
-        return { backend, backendSessionId, claudeId: backend === 'claude' ? backendSessionId : null, cwd: match?.cwd || '', host: match.host || specHost };
+        return { backend, backendSessionId, claudeId: legacyIdFor(backend, backendSessionId), cwd: match?.cwd || '', host: match.host || specHost };
       }
       const rawId = this.sessionId.slice('view-'.length);
       const sep = rawId.indexOf('-');
@@ -2297,7 +2297,7 @@ class ChatView {
           return {
             backend,
             backendSessionId,
-            claudeId: backend === 'claude' ? backendSessionId : null,
+            claudeId: legacyIdFor(backend, backendSessionId),
             cwd: this.winInfo?._openSpec?.cwd || '',
             host: specHost,
           };
@@ -2319,7 +2319,7 @@ class ChatView {
     const spec = this.winInfo?._openSpec || {};
     const backend = match?.backend || spec.backend || 'claude';
     const backendSessionId = match?.backendSessionId || match?.sessionId || spec.backendSessionId || null;
-    return { backend, backendSessionId, claudeId: backend === 'claude' ? backendSessionId : null, cwd: match?.cwd || spec.cwd || '', host: match?.host || specHost };
+    return { backend, backendSessionId, claudeId: legacyIdFor(backend, backendSessionId), cwd: match?.cwd || spec.cwd || '', host: match?.host || specHost };
   }
 
   // Fetch a range of messages from server
@@ -5383,7 +5383,7 @@ class ChatView {
   _openSubagentViewer({ parentToolUseId, threadId, agentId, description, agentRole = '', agentNickname = '' }) {
     const { backend, backendSessionId, claudeId, cwd, host } = this._getSessionIds();
     if (backend === 'codex' && threadId) {
-      const viewId = `view-${backend}-${threadId}`;
+      const viewId = viewIdFor(backend, threadId);
       if (!this._subagentViewers) this._subagentViewers = new Map();
       const existingWinId = this._subagentViewers.get(viewId);
       if (existingWinId && this.app.wm.windows.has(existingWinId)) {
@@ -6182,7 +6182,7 @@ class ChatView {
     if (!bsid || /^sess-\d/.test(bsid)) return false;
     this._rescueTried = true;
     const backend = ids.backend || 'claude';
-    const viewId = backend === 'claude' ? `view-${bsid}` : `view-${backend}-${bsid}`;
+    const viewId = viewIdFor(backend, bsid);
     const handler = (msg) => {
       if (this._disposed) { this.ws.offGlobal(handler); return; }
       if (msg.sessionId !== viewId) return;
@@ -6205,7 +6205,7 @@ class ChatView {
     this.ws.onGlobal(handler);
     this.ws.send({
       type: 'attach', sessionId: viewId, viewOnly: true, backend, slab: this._attachSlabHint(),
-      backendSessionId: bsid, claudeSessionId: backend === 'claude' ? bsid : undefined,
+      backendSessionId: bsid, claudeSessionId: legacyIdFor(backend, bsid) ?? undefined,
       host: ids.host || undefined, cwd: ids.cwd || '', name: this.winInfo?.title || '',
     });
     try { track('event', 'chat-attach-rescued'); } catch {}

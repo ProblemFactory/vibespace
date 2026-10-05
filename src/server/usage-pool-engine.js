@@ -14,7 +14,7 @@ const crypto = require('crypto');
 
 const { mk } = require('./lazy.js');
 
-function create({ app, rootDir, USAGE_CACHE_DIR, activeSessions, wss, WS_OPEN, getAutoResume = () => null, getOtelIngest = () => null, getQuotaProbe = () => null,
+function create({ app, rootDir, USAGE_CACHE_DIR, activeSessions, wss, WS_OPEN, getAutoResume = () => null, getQuotaProbe = () => null,
   broadcastToSession, serverNotice, serverSetting, harnessSetting: injectedHarnessSetting = null, harnessDeclares: injectedHarnessDeclares = null, getAccounts, getHosts,
   getUsageHistory, recordUsageAttribution, adapterRegistry, readUserState = () => ({}),
   // THE SPEND CEILING (design §4.4c / P9) is CONSTRUCTED here (`spendGuard`,
@@ -199,11 +199,25 @@ function quotaSourceFor(backend) {
     return harnesses.NULL_QUOTA;
   }
 }
+// THE MACHINE LOGIN'S USAGE KEY per harness (rv-harnesses H2, lane dc-pool-quota): the harness declaring
+// creds.legacyGlobalKey keeps it ('__global__'); any other harness with credential mechanics is
+// '__global_<id>__' (codex: '__global_codex__'); one without creds (shell, ACP) has no login of its own → '__global__'.
+function credsOf(backend) { try { return harnesses.get(backend || 'claude').creds || null; } catch { return null; } }
+function globalUsageKey(backend) {
+  const c = backend && harnesses.has(backend) ? credsOf(backend) : null;
+  return !c ? '__global__' : (c.legacyGlobalKey || '__global_' + backend + '__');
+}
+function globalKeyOwner(key) {
+  const m = /^__global_([a-z][a-z0-9-]*)__$/.exec(String(key || ''));
+  return m && harnesses.has(m[1]) && globalUsageKey(m[1]) === key ? m[1] : null;
+}
+// the `-p /usage` / control-channel get_usage rung is gated on the DECLARED probe (caps.quotaProbe), never an id
+function cliUsageRung(backend) { return !!backend && harnesses.has(backend) && capsOf(backend).quotaProbe === 'cli-usage'; }
 // The backend a usage-cache KEY belongs to: named accounts carry it;
-// '__global_codex__' is the codex CLI login; the asking session's own backend
+// '__global_<id>__' is that harness's CLI login (globalKeyOwner); the asking session's own backend
 // decides for identity-less keys ('__global__', host-*); else claude.
 function quotaBackendFor(key, session) {
-  if (key === '__global_codex__') return 'codex';
+  const own = globalKeyOwner(key); if (own) return own;
   try { const a = key && accounts.get(key); if (a) return a.backend || 'claude'; } catch { }
   if (session?.backend) return session.backend;
   return 'claude';
@@ -245,8 +259,8 @@ function usageIdentityGroups() {
     try {
       // '__global_codex__' is a PSEUDO id like '__global__' (the machine's
       // ChatGPT login) — roster-less by design, never a "deleted account".
-      const accountId = (fn === '__global__.json' || fn === '__global_codex__.json') ? null : fn.slice(0, -5);
-      const isCodexGlobal = fn === '__global_codex__.json';
+      const gOwner = globalKeyOwner(fn.slice(0, -5)); // a harness's own machine login ('__global_<id>__')
+      const accountId = (fn === '__global__.json' || gOwner) ? null : fn.slice(0, -5);
       const cache = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, fn), 'utf-8'));
       if (!cache?.fetchedAt) continue;
       const acctRec = accountId ? roster.find((x) => x.id === accountId) : null;
@@ -266,11 +280,11 @@ function usageIdentityGroups() {
       // codex key carries a 'codex:' prefix: identityKeyFor falls back to
       // EMAIL, and one person's ChatGPT + Anthropic logins sharing an email
       // must never merge into one identity (different quotas entirely).
-      const isCodex = isCodexGlobal || acctRec?.backend === 'codex';
-      const key = isCodexGlobal ? 'codex:__global__'
-        : (isCodex ? 'codex:' : '') + identityKeyFor({ accountId, cache, email: acctRec?.email });
-      const g = groups.get(key) || { accountIds: [], cache: null, accountId: null, backend: isCodex ? 'codex' : 'claude' };
-      g.accountIds.push(isCodexGlobal ? '__global_codex__' : (accountId || '__global__'));
+      const ownBe = gOwner || (acctRec?.backend && globalUsageKey(acctRec.backend) !== '__global__' ? acctRec.backend : null);
+      const key = gOwner ? gOwner + ':__global__'
+        : (ownBe ? ownBe + ':' : '') + identityKeyFor({ accountId, cache, email: acctRec?.email });
+      const g = groups.get(key) || { accountIds: [], cache: null, accountId: null, backend: ownBe || 'claude' };
+      g.accountIds.push(gOwner ? fn.slice(0, -5) : (accountId || '__global__'));
       // freshest cache is the identity's anchor source (the same real login can
       // surface as BOTH __global__ and a named sub — one quota, two files)
       if (!g.cache || cache.fetchedAt > g.cache.fetchedAt) { g.cache = cache; g.accountId = accountId; }
@@ -942,7 +956,7 @@ function resolveUsageKey(session) {
   // account-less codex session's readings into the CLAUDE global identity;
   // it only stayed invisible because the codex producers carried their own
   // key resolver. Now that ONE reading resolver serves both, it must know.
-  return acct || (session?.backend === 'codex' ? '__global_codex__' : '__global__');
+  return acct || globalUsageKey(session?.backend);
 }
 function writeUsageCacheForKey(key, parsed) {
   try {
@@ -982,7 +996,7 @@ function writeUsageCacheForKey(key, parsed) {
 function probeUsageViaSession(session, timeoutMs = 8000) {
   return new Promise((resolve) => {
     try {
-      if (!session?.pty || session.backend !== 'claude' || session.mode !== 'chat' || session.host) return resolve(null);
+      if (!session?.pty || !cliUsageRung(session.backend) || session.mode !== 'chat' || session.host) return resolve(null);
       const req = ClaudeCodeAdapter.buildGetUsage();
       const pend = { resolve: null, timer: null, raw: null };
       pend.timer = setTimeout(() => { _vsuPending.delete(req.request_id); logControlProbe(session, resolveUsageKey(session), null, null, 'timeout', { timeoutMs }); resolve(null); }, timeoutMs);
@@ -1027,7 +1041,7 @@ function probeUsageForAccountKey(key, opts = {}) {
   const skipped = [];
   const detail = (parsed, extra) => (opts && opts.detailed) ? { parsed: parsed || null, rung: 'control', skipped, ...(extra || {}) } : (parsed || null);
   for (const [, s] of activeSessions) {
-    if (s.backend !== 'claude' || s.mode !== 'chat' || s.host || !s.pty) continue;
+    if (!cliUsageRung(s.backend) || s.mode !== 'chat' || s.host || !s.pty) continue;
     if (!ids.has(resolveUsageKey(s))) continue;
     const sh = inLagShadow(s);
     if (sh) { skipped.push({ sessionId: s._webuiId || null, why: `re-pointed ${nameOf(sh.from)} → ${nameOf(sh.to)} ${Math.round(sh.ageMs / 1000)}s ago and no reading has ended the lag shadow yet` }); continue; }
@@ -1340,7 +1354,7 @@ function noteWindowVerdict(sid, from, to, say) {
 // from it, the remote statusline harvest writes the host's `__global__` into
 // it, the on-demand ⟳ overwrites it with an OAuth panel, the Agents machine
 // rows render it). Codex's machine identity is NOT host-scoped: its own
-// resolver (`codexQuotaKeyFor`, still the twin `noteWallSignal` uses) has
+// resolver (`liveQuotaKeyFor`, still the twin `noteWallSignal` uses) has
 // always answered '__global_codex__' for an account-less session, and the
 // codex panel only seeds files matching /^(cxs-…|__global_codex__)\.json$/.
 // The pre-r2 rule keyed on "remote AND no account", so the moment readings and
@@ -1463,7 +1477,7 @@ function memberLoginState(id) {
   if (!id || typeof id !== 'string' || !/^sub-/.test(id)) return null;
   let fp = null;
   try {
-    if ((accounts.get(id)?.backend || 'claude') !== 'claude') return null;
+    if (!credsOf(accounts.get(id)?.backend)?.loginState) return null; // a harness whose login file states its lifetime
     fp = accounts.subCredsPath(id);
   } catch { return null; }
   let sig = 'none';
@@ -1498,7 +1512,7 @@ function accountCredentialState(id) {
   let fp = null, minted = null;
   try {
     const a = accounts.get(id);
-    if (!a || (a.backend || 'claude') !== 'claude') return null;
+    if (!a || !credsOf(a.backend)?.loginState) return null;
     fp = accounts.subCredsPath(id);
     minted = Number(a.oatMintedAt) || null;
   } catch { return null; }
@@ -2264,7 +2278,7 @@ function endLateBurst(session, how = 'live') {
 // account-level min (the conservative direction), names no wall the demotion
 // pass can act on (a scoped signal without a name is skipped), and is retired
 // by the next panel that enumerates the account's caps.
-const UNSCOPED_WEEKLY_TYPES = new Set(['seven_day', 'weekly']);
+// (the unscoped weekly rawTypes are the session harness's: quota.unscopedWeeklyTypes — claude-quota.js)
 // REACHABILITY, STATED HONESTLY (r3). A turn's rejections share ONE key by
 // construction — `rejectionSlotFor` pins the credential slot at the first keyed
 // signal and `noteTurnEnd` clears it — so the only way this cap binds is
@@ -2278,8 +2292,9 @@ const LANE_DEFER_MAX = 4;
 /** Is this rejection one whose LANE we cannot yet name? */
 function laneIsProvisional(session, ev) {
   if (!ev || ev.status !== 'rejected' || ev.kind !== 'sevenDay') return false;
-  if ((session?.backend || 'claude') !== 'claude') return false;
-  return UNSCOPED_WEEKLY_TYPES.has(String(ev.rawType || ''));
+  const unscoped = quotaSourceFor(session?.backend).unscopedWeeklyTypes;
+  if (!unscoped) return false;
+  return unscoped.has(String(ev.rawType || ''));
 }
 /** Stash one provisional rejection for the rest of this turn. */
 function deferTurnLane(session, { key, resetsAt, rawType }) {
@@ -3008,46 +3023,27 @@ function claimColdRestarts(affected, now = Date.now()) {
 // codex identity burned a pointless claude process and never got a fresh
 // reading (design-harness-plugins.md §1 P2). §ban-safety unchanged — both
 // rungs make the OFFICIAL client do the fetch; nothing here touches a vendor.
-function codexQuotaKeyFor(session) {
-  let key = session._accountId || '__global_codex__';
+function liveQuotaKeyFor(session) {
+  let key = session._accountId || globalUsageKey(session.backend);
   // a pool wrapper never owns quota — the reading belongs to the member its
   // app-server HOLDS (stamped at spawn: it cannot hot-switch, see
   // heldPoolMemberFor), else the pool's CURRENT member (no stamp)
   try { const a = accounts.get(key); if (a && a.type === 'pooled') key = heldPoolMemberFor(session, key) || accounts.poolCurrentFor(key, session._webuiId) || accounts.poolCurrent(key) || key; } catch { }
   return key;
 }
-function pickCodexProbeSession(target, session) {
-  const live = (s) => !!(s && s.pty && s.backend === 'codex' && s.mode === 'chat' && !s.host);
+function pickLiveProbeSession(target, session) {
+  const live = (s) => !!(s && s.pty && liveReadSource(s.backend) && s.mode === 'chat' && !s.host);
   // the asking session itself first: it sits idle-walled on exactly this
   // identity and its app-server is already up
   if (live(session)) return session;
   const ids = new Set(usageIdentityAccountIds(target));
-  for (const [, s] of activeSessions) if (live(s) && ids.has(codexQuotaKeyFor(s))) return s;
+  for (const [, s] of activeSessions) if (live(s) && ids.has(liveQuotaKeyFor(s))) return s;
   return null;
 }
-function readCodexLimitsViaSession(session, timeoutMs, { fresh = false } = {}) {
-  return new Promise((resolve) => {
-    const waiters = (session._codexLimitsWaiters = session._codexLimitsWaiters || []);
-    const entry = {};
-    const drop = () => { const i = waiters.indexOf(entry); if (i >= 0) waiters.splice(i, 1); };
-    entry.timer = setTimeout(() => { drop(); resolve({ ok: false, reason: `no rate_limits_updated within ${timeoutMs}ms` }); }, timeoutMs);
-    if (entry.timer.unref) entry.timer.unref();
-    entry.resolve = (r) => { clearTimeout(entry.timer); drop(); resolve(r); };
-    waiters.push(entry);
-    // SINGLE-FLIGHT per session (verify r1, reproduced: two presses in flight wrote two verbs = two vendor reads):
-    // a read already waiting on this session answers every waiter — the verb goes out once per round trip.
-    // `fresh` = a deliberate RE-ASK after silence (the reset hold's 30 s retry): the earlier push may be lost, so
-    // the verb goes out again and the older waiters ride its answer
-    if (waiters.length > 1 && !fresh) return;
-    try { session.pty.write(JSON.stringify({ type: 'codex-read-limits' }) + '\n'); }
-    catch (e) { entry.resolve({ ok: false, reason: 'stdin write failed: ' + e.message }); }
-  });
-}
-function settleCodexLimitsWaiters(session, result) {
-  const waiters = session._codexLimitsWaiters;
-  if (!waiters || !waiters.length) return;
-  for (const w of waiters.splice(0)) { try { w.resolve(result); } catch { } }
-}
+// the live read + its waiters are the HARNESS's (quota.readLive / quota.settleLive — codex: src/harnesses/codex-quota.js)
+function liveReadSource(backend) { if (!harnesses.has(backend || 'claude')) return null; const q = quotaSourceFor(backend); return typeof q.readLive === 'function' ? q : null; }
+function liveRead(session, timeoutMs, opts) { return liveReadSource(session.backend).readLive(session, timeoutMs, opts); }
+function settleLive(session, result) { const q = session && liveReadSource(session.backend); if (q && typeof q.settleLive === 'function') q.settleLive(session, result); }
 async function probeQuotaForKey(target, { session = null, timeoutMs = 20000, fresh = false } = {}) {
   const backend = quotaBackendFor(target, session);
   const rung = quotaSourceFor(backend).probe;
@@ -3058,10 +3054,10 @@ async function probeQuotaForKey(target, { session = null, timeoutMs = 20000, fre
     const ok = await Promise.resolve(probe(target)).catch(() => false);
     return { ok: !!ok, rung, backend, reason: ok ? null : 'cli panel did not answer' };
   }
-  if (rung === 'rpc-rate-limits') {
-    const s = pickCodexProbeSession(target, session);
-    if (!s) return { ok: false, rung, backend, reason: 'no live local codex chat session on this identity' };
-    const r = await readCodexLimitsViaSession(s, timeoutMs, { fresh });
+  if (liveReadSource(backend)) {
+    const s = pickLiveProbeSession(target, session);
+    if (!s) return { ok: false, rung, backend, reason: `no live local ${backend} chat session on this identity` };
+    const r = await liveRead(s, timeoutMs, { fresh });
     return { ok: !!r.ok, rung, backend, reason: r.reason || null };
   }
   return { ok: false, rung: null, backend, reason: `backend '${backend}' declares no quota probe` };
@@ -3081,11 +3077,11 @@ async function refreshCodexForPerson({ key = null, sessionId = null, timeoutMs =
   // member (the same rule a pool-billed reading lands by); the answer names the member
   if (key) { try { const a = accounts.get(String(key)); if (a && a.type === 'pooled') key = accounts.poolCurrentFor(String(key), null) || accounts.poolCurrent(String(key)) || key; } catch { } }
   let s = null;
-  if (key) { try { s = pickCodexProbeSession(String(key), null); } catch { s = null; } }
+  if (key) { try { s = pickLiveProbeSession(String(key), null); } catch { s = null; } }
   else { const c = sessionId ? activeSessions.get(String(sessionId)) : null; if (live(c)) s = c; }
   if (!s) return { ok: false, code: 'no_live_session', key: key || null, name: key ? nameOf(key) : null, error: key ? `no running Codex chat session holds ${nameOf(key)}'s login (the read rides that session's own app-server)` : 'no running Codex chat session (the read rides its own app-server)' };
-  const r = await readCodexLimitsViaSession(s, timeoutMs);
-  const k = (r && r.key) || codexQuotaKeyFor(s);
+  const r = await liveRead(s, timeoutMs);
+  const k = (r && r.key) || liveQuotaKeyFor(s);
   if (!r || !r.ok) {
     const reason = String((r && r.reason) || 'unknown');
     return { ok: false, code: /within \d+ms/.test(reason) ? 'timeout' : (r && r.archived) ? 'archived' : 'refused', key: k, name: nameOf(k), sessionId: s._webuiId, timeoutMs, error: reason };
@@ -3549,7 +3545,7 @@ function restatedResetWallTry(key, resetsAtSec, now = Date.now()) {
  *  the attempt's own conversation and every follower. */
 function walkLadderAfterCredit(s, { resetsAtSec = 0, lane = null, key = null } = {}) {
   maybePoolAutoSwitch(s);
-  try { noteWallSignal(s, { resetsAtMs: (Number(resetsAtSec) || 0) * 1000, bucket: 'sevenDay', key: key || codexQuotaKeyFor(s), lane: lane || null }); noteTurnEnd(s); } catch { }
+  try { noteWallSignal(s, { resetsAtMs: (Number(resetsAtSec) || 0) * 1000, bucket: 'sevenDay', key: key || liveQuotaKeyFor(s), lane: lane || null }); noteTurnEnd(s); } catch { }
 }
 /** Settle an attempt: the followers get the leader's answer. `failed` walks
  *  their ladder; `superseded` (the limit is open after all) walks nothing. */
@@ -3717,7 +3713,7 @@ function sweepResetCreditAsks() {
 function creditIdentityFor(session) {
   let key = null;
   try { key = wallKeyFor(session); } catch { }
-  key = key || codexQuotaKeyFor(session);
+  key = key || liveQuotaKeyFor(session);
   let current = key, moved = false, unknown = false;
   try {
     const a = session._accountId && accounts.get(session._accountId);
@@ -4042,10 +4038,10 @@ function settleResetCreditByReading(key, snap) {
  *  its push lands through recordCodexQuotaSignal, which settles the attempt. → {ok, settled, reason} */
 async function settleResetCreditByRead(key, { preferSessionId = null, timeoutMs = 20000 } = {}) {
   const pref = preferSessionId ? activeSessions.get(preferSessionId) : null;
-  const s = pickCodexProbeSession(key, pref && pref.backend === 'codex' ? pref : null);
+  const s = pickLiveProbeSession(key, pref);
   if (!s) return { ok: false, settled: false, how: null, reason: 'no live local codex chat session on this identity' };
   const t0 = Date.now();
-  const r = await readCodexLimitsViaSession(s, timeoutMs);
+  const r = await liveRead(s, timeoutMs);
   // THE VERDICT this read produced (the route proceeds on IT, never on the cache — a reading that lost a
   // same-millisecond tie at the cache writer still settled the attempt): the newest settle on the chain
   let how = null, why = null, unsettled = false;
@@ -4065,7 +4061,7 @@ function resetCreditCarriers(key) {
   const out = [];
   for (const [, s] of activeSessions) {
     // (a process whose held login nobody can name carries nobody's credit — r3)
-    try { if (s && s.pty && s.mode === 'chat' && capsOf(s.backend).resetCredit === true && ids.has(codexQuotaKeyFor(s)) && !heldPoolUnknown(s)) out.push(s); } catch { }
+    try { if (s && s.pty && s.mode === 'chat' && capsOf(s.backend).resetCredit === true && ids.has(liveQuotaKeyFor(s)) && !heldPoolUnknown(s)) out.push(s); } catch { }
   }
   return out;
 }
@@ -4605,7 +4601,7 @@ function resolveResetCreditCards(key, ev) {
  *  attempt `not-sent` (a wrapper busy for 90 s) re-opens it: the request did go out after all. */
 function onResetCreditSentRecord(session, payload, now = Date.now()) { // `now` = the record's own instant when read back from the wrapper's buffer file (verify r10), else its arrival
   try {
-    const tKey = session._resetCreditKey || codexQuotaKeyFor(session);
+    const tKey = session._resetCreditKey || liveQuotaKeyFor(session);
     const t = resetCreditTryByAnswer(payload, session, tKey);
     if (!t) return;
     if (t.outcome === 'not-sent') { console.log(`[reset-credit] ${session._webuiId}: the request on ${nameOf(t.key)} went out after all (${Math.round((Date.now() - t.at) / 1000)} s after it was written) — the ten-minute wait starts now`); t.outcome = null; t.outcomeAt = 0; persistResetCreditTries(); }
@@ -4636,7 +4632,7 @@ function handleResetCreditResult(session, payload) {
   // THE IDENTITY'S ATTEMPT this answer belongs to (r2) — its followers are settled with it; an
   // attempt already settled by the no-answer / not-sent timer has walked its ladder once and must
   // not walk it twice
-  const tKey0 = session ? (session._resetCreditKey || codexQuotaKeyFor(session)) : null;
+  const tKey0 = session ? (session._resetCreditKey || liveQuotaKeyFor(session)) : null;
   const tryRec = resetCreditTryByAnswer(payload, session, tKey0);
   const tKey = (tryRec && tryRec.key) || tKey0;
   const sid = (session && session._webuiId) || (tryRec && tryRec.sid) || 'helper';
@@ -4823,14 +4819,14 @@ function writeCodexReading(snap, source, { session = null, key: forKey = null } 
   // ONE attribution function for readings (2026-09-07): the codex snapshot
   // is a VALUE like every other, so it goes through the same turn-pinned
   // validated slot instead of re-deriving "the pool's current member" per
-  // record. codexQuotaKeyFor is the un-pinned twin (probe matching).
+  // record. liveQuotaKeyFor is the un-pinned twin (probe matching).
   // …and through the same window guard: `capsOf('codex').hotSwitch` is
   // 'impossible', so codex has no re-point to lag behind — but the guard is
   // about WHOSE numbers these are, and a key that is wrong for any other
   // reason is wrong the same way. The synthesized spent-bucket snapshot on
   // `task_failed` states no reset it did not receive, so it is inert there.
   // the helper's reading names its identity (lane reset-path: no session — the key IS the login it ran on)
-  const _k0 = forKey || readingSlotFor(session).key || codexQuotaKeyFor(session);
+  const _k0 = forKey || readingSlotFor(session).key || liveQuotaKeyFor(session);
   const key = guardReadingTarget(_k0, readingLag.windowOf(snap), { session, what: 'codex:' + source, entry: snap });
   // an ARCHIVED reading is not an unparseable one — the waiter must be told
   // which of the two happened (a probe that says "unparseable" about a
@@ -4886,7 +4882,7 @@ function recordCodexQuotaSignal(session, payload, rec = null, { asOf = null } = 
       try { v = ownReply ? null : liveFactVerdict(session, rec); } catch { v = null; }
       if (v && v.verdict === 'late') {
         noteLateFact(session, payload.type === 'task_failed' ? 'codex wall' : 'codex reading', v, (at) => recordCodexQuotaSignal(session, payload, rec, { asOf: at })); // held while no offset is declared (verify r7 ④); replayed at its own instant (verify r8 ②)
-        if (payload.type === 'rate_limits_updated') settleCodexLimitsWaiters(session, { ok: false, reason: `the reading is a backlog record (${recordLateness.lateWords(v.lateMs)} late) — not taken as live` });
+        if (payload.type === 'rate_limits_updated') settleLive(session, { ok: false, reason: `the reading is a backlog record (${recordLateness.lateWords(v.lateMs)} late) — not taken as live` });
         return;
       }
     }
@@ -4915,7 +4911,7 @@ function recordCodexQuotaSignal(session, payload, rec = null, { asOf = null } = 
       }
       // an rpc-rate-limits probe waiting on this session settles AFTER the
       // cache write — its next quotaVerdictFor already reads the fresh file
-      settleCodexLimitsWaiters(session, w && w.key ? { ok: true, key: w.key } // R4: the press is answered with WHOSE reading it wrote
+      settleLive(session, w && w.key ? { ok: true, key: w.key } // R4: the press is answered with WHOSE reading it wrote
         : { ok: false, archived: !!(w && w.archived), reason: w && w.archived ? 'the reading\'s window is not this account\'s (archived)' : 'unparseable rateLimits' });
       // the stored reset-credit count rides ONLY the on-demand read — remember it on
       // the session so the rung knows it even when a later passive push drops it
@@ -4961,13 +4957,13 @@ function recordCodexQuotaSignal(session, payload, rec = null, { asOf = null } = 
     if (payload.type === 'rate_limits_updated') {
       // an on-demand rateLimits/read that FAILED ({error, onDemand}) — settle
       // any rpc-rate-limits probe waiting on this session, honestly
-      settleCodexLimitsWaiters(session, { ok: false, reason: String(payload.error || 'no rateLimits in reply') });
+      settleLive(session, { ok: false, reason: String(payload.error || 'no rateLimits in reply') });
       // verify r8 T0: the read BEFORE a consume failed — the wrapper goes on to its consume on the count shown; SAID here
       if (payload.beforeReset === true && typeof payload.idempotencyKey === 'string' && payload.idempotencyKey) { try { answerReadBeforePress(session, payload.idempotencyKey, null, String(payload.error || 'no rateLimits in the read before the consume')); } catch { } }
       // …and a hold waiting on THIS session's post-reset re-read hears that it
       // FAILED (r4) — not merely that it is late: the pool keeps the account on
       // the vendor's `reset` and the hold's own timer asks again
-      try { const e = resetHoldEntry(codexQuotaKeyFor(session)); if (e && e[1].sid === session._webuiId) console.log(`[reset-credit] ${session._webuiId}: the post-reset re-read of ${nameOf(e[0])} failed (${String(payload.error || 'no rateLimits').slice(0, 120)}) — the pool keeps it on the vendor's word; asking again shortly`); } catch { }
+      try { const e = resetHoldEntry(liveQuotaKeyFor(session)); if (e && e[1].sid === session._webuiId) console.log(`[reset-credit] ${session._webuiId}: the post-reset re-read of ${nameOf(e[0])} failed (${String(payload.error || 'no rateLimits').slice(0, 120)}) — the pool keeps it on the vendor's word; asking again shortly`); } catch { }
       return;
     }
     if (payload.type === 'task_failed') {
@@ -5026,7 +5022,7 @@ function recordCodexQuotaSignal(session, payload, rec = null, { asOf = null } = 
         const poolBefore = poolDefaultOf(session);
         maybePoolAutoSwitch(session);
         if (rung === 'switch-first' && poolDefaultOf(session) === poolBefore && resetCreditRung(session, { ...rcArgs, ladderPosition: 'after-switch' }) === 'consumed') return; // the switch moved nothing: the cold conversation's credit rung
-        try { noteWallSignal(session, { resetsAtMs: resets > nowSec ? resets * 1000 : 0, bucket: 'sevenDay', key: w2?.key || codexQuotaKeyFor(session), lane: arSignal.laneOf(w2?.snap || snap) }); noteTurnEnd(session); } catch { }
+        try { noteWallSignal(session, { resetsAtMs: resets > nowSec ? resets * 1000 : 0, bucket: 'sevenDay', key: w2?.key || liveQuotaKeyFor(session), lane: arSignal.laneOf(w2?.snap || snap) }); noteTurnEnd(session); } catch { }
       } else if (sig.kind === 'auth-failure') {
         global.__vsEvent?.('codex-auth-failure', session._accountId || 'global'); // v1: surfaced, not auto-evicted (claude's evict is creds-path-specific)
       }
@@ -6318,7 +6314,7 @@ function projectionBillingIndex() {
   try {
     const out = new Map();
     for (const [, s] of activeSessions) {
-      if ((s.backend || 'claude') !== 'claude' || s.host || !s._accountId) continue;
+      if (!cliUsageRung(s.backend || 'claude') || s.host || !s._accountId) continue;
       const a = accounts.get(s._accountId);
       const on = a && a.type === 'pooled' ? sessionBillingMember(s, a.id).id : s._accountId;
       if (!on) continue; // no member answers it — never equal to a member id
@@ -6375,7 +6371,6 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
     // paths exist. The pool-level decide + cold-restart machinery below is
     // backend-agnostic.
     const poolCaps = capsOf(a.backend);
-    const isCodexPool = (a.backend || 'claude') === 'codex'; // (naming kept for the gates below)
     const hot = !!a.hot && poolCaps.hotSwitch === 'verified';
     // ESTIMATED bucket view (B-fcff v2): the raw cache goes stale the moment
     // its session pauses — overlay dead-reckoned utilizations (anchor + rate ×
@@ -6424,7 +6419,7 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
     const priority = poolPriorityOf(a); // MANUAL PRIORITY (2026-09-28): the owner's order — null = automatic (EDF + the warm hold)
     for (const [sid, s2] of activeSessions) {
       if (!poolCaps.planC) break; // plan-C per-session links need the backend's material path
-      if ((s2.backend || 'claude') === 'codex') continue;
+      if (capsOf(s2.backend || 'claude').hotSwitch === 'impossible') continue; // it holds its member for life — no per-session link
       if (s2._accountId !== poolId || s2.host) continue;
       let linkCur = null;
       try { linkCur = accounts.poolCurrentFor(poolId, sid); } catch { }

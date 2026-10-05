@@ -106,7 +106,6 @@ function census(files, allow) {
 // its reason. A NEW pair fails the suite until it is added HERE with one.
 const RAW_API_MOUNT = 'B-2198 (D3): a host of the storage mounts\' DECLARED raw-API row (MountManager.OAUTH_API) — the raw API\'s orchestrator (src/server/channel-api.js, ONE fetch site, behind the grant) reaches it with a mount\'s lent token';
 const ALLOW = {
-  'src/server/channels-engine.js|problemfactory.github.io': 'design 018: the DEFAULT of the `channels.slackRelayUrl` setting — the static relay page Slack sends a member\'s BROWSER back through (a redirect_uri); this server never requests it',
   // ── the two seeds §3.1 names ──
   'src/gmail-sync.js|oauth2.googleapis.com': 'Gmail-as-a-folder mount (2.134.0): the OAuth code exchange + refresh for the read-only mail sync, under the user\'s own consent — the ORIGINAL of oauth-loopback\'s ephemeral mode',
   'src/gmail-sync.js|accounts.google.com': 'the consent page the loopback flow opens for the Gmail mount',
@@ -123,9 +122,8 @@ const ALLOW = {
   // ── every other construction the tree held when the census was born ──
   'src/server/cli-env.js|api.anthropic.com': '§ban-safety: the guarded models fetch — its GATES are pinned by scripts/test-vendor-whitelist.mjs; this row only records that the host is a known decision',
   'src/usage-routes.js|api.anthropic.com': '§ban-safety: the opt-in / human-gated usage reads — GATES pinned by scripts/test-vendor-whitelist.mjs',
-  'src/plugins.js|pkgs.tailscale.com': 'the tailscale plugin\'s install download (release index + binary) — a human\'s Install click',
-  'src/plugins.js|github.com': 'the frp plugin\'s pinned release tarball download — a human\'s Install click',
-  'src/plugins.js|opencode.ai': 'a help URL inside an error message ("install OpenCode first"), not a request target — the census over-includes on purpose and this row classifies it',
+  'src/plugins/tailscale.js|pkgs.tailscale.com': 'the tailscale plugin\'s install download (release index + binary) — a human\'s Install click',
+  'src/plugins/frp.js|github.com': 'the frp plugin\'s pinned release tarball download — a human\'s Install click',
   'src/server/plugin-install.js|api.github.com': 'plugin install from a GitHub release (the release lookup) — a human\'s Install action, consent per package',
   'src/server/ops-routes.js|raw.githubusercontent.com': 'the update check (the public repo\'s package.json + CHANGELOG) behind ⚙ → Update VibeSpace — a human\'s click',
   'src/channels/fake.js|img.example.invalid': 'lane channel-rich: a REMOTE picture inside the fake world\'s mail HTML (a string the fake serves as a mail body, never a request this file makes) — the heavy leg proves the browser does not ask for it before Show pictures; `.invalid` never resolves',

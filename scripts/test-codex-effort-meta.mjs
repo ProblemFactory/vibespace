@@ -605,7 +605,7 @@ console.log('— ⑨ client wiring pins');
   const sb = fs.readFileSync(path.join(REPO, 'src/lib/chat-status-bar.js'), 'utf8');
   ok(/setEffort\(live, next\)/.test(sb), 'the status bar exposes setEffort(live, next)');
   ok(/effortDisplay\(this\._backend, this\._statusEffort/.test(sb), 'and its tooltip decorates the value the same way');
-  ok(/noteModelCatalog\('codex', models\)/.test(sb), 'the effort picker\'s own catalog fetch feeds the model catalog');
+  ok(/noteModelCatalog\(this\._backend, models\)/.test(sb), 'the effort picker\'s own catalog fetch feeds the model catalog');
   const appjs = fs.readFileSync(path.join(REPO, 'src/lib/app.js'), 'utf8');
   ok(/noteModelCatalog\(be, data\[be\]\)/.test(appjs), 'the boot catalog fetch feeds it too');
   const srv = fs.readFileSync(path.join(REPO, 'src/harnesses/codex-models.js'), 'utf8'); // the codex descriptor's models() (dc-ws-create; was server.js)
@@ -1574,7 +1574,7 @@ console.log('— ⑬ r3: a claude resume commands no model, and still gets a poo
       rootDir: root, USAGE_CACHE_DIR: cacheDir, activeSessions: new Map(), wss: { clients: new Set() }, WS_OPEN: 1,
       broadcastToSession() { }, serverNotice() { }, serverSetting: () => undefined, getAccounts: () => am, getHosts: () => null,
       getUsageHistory: () => null, recordUsageAttribution() { }, adapterRegistry: { get() { return null; } },
-      getAutoResume: () => null, getOtelIngest: () => null, getQuotaProbe: () => null });
+      getAutoResume: () => null, getQuotaProbe: () => null });
     const hclaude = require(path.join(REPO, 'src/harnesses/claude.js'));
     const SETTING = 'claude-opus-5';
     // ws-create's ladder for a CLAUDE resume with no pick, then its chooser arg

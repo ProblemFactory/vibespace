@@ -250,7 +250,9 @@ export class DesktopManager {
       this._noteDeparted(id, 'moved');
       return true;
     });
-    const rec = mergeDesktopRecord({ record: held, built: lm.captureWindows(desktopId), remove: [...this._unbuilt(desktopId, held), ...elsewhere] });
+    const unbuilt = this._unbuilt(desktopId, held);
+    lm.dropUnbuiltMembers?.(unbuilt); // a chain waiting for a window the page could not build is rebuilt without it
+    const rec = mergeDesktopRecord({ record: held, built: lm.captureWindows(desktopId), remove: [...unbuilt, ...elsewhere] });
     const { grid, ...chrome } = lm.captureChrome();
     Object.assign(rec, chrome);
     if (desktopId === this._activeId) rec.grid = grid;
@@ -352,7 +354,7 @@ export class DesktopManager {
   _replayMissing(desktopId, state) {
     let n = 0;
     const now = Date.now();
-    const noSpec = [];
+    const noSpec = [], building = [];
     // a webui SESSION already open on this page under ANOTHER window id: attachSession's "already open in a live
     // window" shortcut (_focusExistingSession, keyed on the server session id) focuses that window and builds
     // nothing. The key is the session's `serverId`, never the conversation id (verify r2): a fork's window carries
@@ -371,6 +373,7 @@ export class DesktopManager {
       if (a && a.desk === desktopId && now - a.at <= BUILD_GRACE_MS) continue; // already being built
       this.app.replayOpenSpec(ws.openSpec, winId);
       this._noteAttempts(desktopId, [winId], { at: now });
+      building.push(String(winId));
       n++;
       // Tag and position after creation
       setTimeout(() => {
@@ -385,6 +388,11 @@ export class DesktopManager {
       }, 500);
     }
     this._noteAttempts(desktopId, noSpec, { at: 0 });
+    // the record's tab groups (lane split-restore-hidden, userW inc-muundq37-cjay): a first visit after a reload built
+    // every member as a plain window and the next save wrote the split away — each chain waits for its last member.
+    // Only a chain naming a window THIS replay builds (int214: this runs on every switch — a chain whose members all stand
+    // here is the page's own truth, and re-queuing it re-formed a group the user had just split; test-stage-dragout-ui 6 T1)
+    if (building.length) this.app.layoutManager?.queueRecordChains?.(desktopId, state, { naming: building });
     return n;
   }
 

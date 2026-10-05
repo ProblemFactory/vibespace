@@ -150,6 +150,7 @@ class WindowManager {
     if (openSpec) winInfo._openSpec = openSpec;
     track('event', 'window-open:' + type);
     this._app?.stage?.onWindowCreated(winInfo); // stage aux binding / transient tag
+    this._app?.layoutManager?.onWindowCreated?.(winInfo); // a pending tab chain naming it reconciles (lane split-restore-hidden)
     // MULTIVIEW D5 (a)/(b): `quiet` = a TAB that changes nothing on screen (the two shown panes stay; it pulses) —
     // a live view born beside a chat that is ALREADY in a split lands on its `side` and is never focused
     const quiet = !!(born && intoChain.quiet && born._tabChain && born._tabChain.layout === 'split');

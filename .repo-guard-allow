@@ -90,3 +90,5 @@ cb_env_license_Z{16}
 clientSecret: WS_CLIENT_SECRET
 # lane channel-send-files (2.369.212): the Lark fixture user token in scripts/test-channel-send-files.mjs, not real
 u-fixture-user-token
+# dc-channels-consent (2.369.214): the consent leg's synthetic fake-vendor integration key in test-channels-engine, not real
+fake_consent_key_0001

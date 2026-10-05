@@ -26,6 +26,9 @@ const serve = require('../opencode-serve');
 const harness = acpHarness({
   id: 'opencode',
   label: 'OpenCode',
+  // no billing row (the agent holds its own login); modelLock true = the status bar's lock item as before
+  // (the turn-end re-pin in usage-pool-engine is protocol-neutral)
+  ui: { billing: null, effortReport: null, effortLevels: null, modelLock: true, legacyIds: false, resumeResend: false },
   command: 'opencode',
   args: ['acp'],
   store: {

@@ -58,6 +58,10 @@ export const BACKEND_META = {
     // Offline seed for the permission-mode dropdown before the first status
     // (the live list comes from the session's chatStatus.permissionModes).
     permissionModes: ['default', 'acceptEdits', 'bypassPermissions', 'plan', 'auto'],
+    // THE DECLARED UI ROW (lane dc-client-billing, 2026-10-04): billing words, the accounts-store default field,
+    // the usage bucket, effort/lock facts and the legacy id forms — the chrome reads THESE, never an id. The
+    // client META mirrors it key for key (test-harness-contract deep-compares).
+    ui: { billing: { globalLogin: 'Subscription', cliLogin: 'CLI login', pickLogin: 'Subscription (Pro/Max login)', pickLoginHost: '', planSuffix: ' (Pro/Max)', switchLogin: 'Subscription (Pro/Max)', defaultIdField: 'defaultAccountId', apiKeys: true, longLivedToken: true, hostLogin: true, machineUsage: true, usage: 'accounts', globalUsageKey: '__global__', estimates: true }, effortReport: 'commanded', effortLevels: null, modelLock: true, legacyIds: true, resumeResend: true },
   },
   shell: {
     id: 'shell',
@@ -122,6 +126,10 @@ export const BACKEND_META = {
     // seeing a TRUE fact stated as if it were their own pick. Surfaces gate on
     // THIS row, never on a backend id (2.369.58 law).
     multiAgentEffort: 'ultra',
+    // THE DECLARED UI ROW (lane dc-client-billing, 2026-10-04): billing words, the accounts-store default field,
+    // the usage bucket, effort/lock facts and the legacy id forms — the chrome reads THESE, never an id. The
+    // client META mirrors it key for key (test-harness-contract deep-compares).
+    ui: { billing: { globalLogin: 'ChatGPT login', cliLogin: 'ChatGPT login', pickLogin: 'ChatGPT login', pickLoginHost: 'ChatGPT login (on the host)', planSuffix: '', switchLogin: 'ChatGPT login', defaultIdField: 'defaultCodexAccountId', apiKeys: false, longLivedToken: false, hostLogin: false, machineUsage: false, usage: 'codexAccounts', globalUsageKey: '__global_codex__', estimates: false }, effortReport: 'per-turn', effortLevels: 'model-catalog', modelLock: false, legacyIds: false, resumeResend: true },
   },
   // OpenCode over ACP v1 (S8, design-harness-plugins §2.3). No accounts
   // roster (the agent holds its own provider login), no effort/fork/review
@@ -151,6 +159,10 @@ export const BACKEND_META = {
     // harness-store-updated pushes. Chrome gates on THIS, never on the id.
     servicePlugin: 'opencode-serve',
     service: null,
+    // THE DECLARED UI ROW (lane dc-client-billing, 2026-10-04): billing words, the accounts-store default field,
+    // the usage bucket, effort/lock facts and the legacy id forms — the chrome reads THESE, never an id. The
+    // client META mirrors it key for key (test-harness-contract deep-compares).
+    ui: { billing: null, effortReport: null, effortLevels: null, modelLock: true, legacyIds: false, resumeResend: false },
   },
 };
 
@@ -355,6 +367,34 @@ export function settingsPrefixFor(backend) {
 const NO_FEATURE_CAPS = Object.freeze({ fork: false, forkAtMessage: false, review: false, renameWriteback: false, effort: false, autoResume: Object.freeze({ signal: false, resume: null, supported: false }), responseStyle: Object.freeze({ live: false, closed: true, values: Object.freeze([]) }), worktree: NO_WORKTREE, permissionRules: Object.freeze({ source: null, session: false, instance: false, liveVerb: false }) });
 export function backendFeatureCaps(backend) {
   return BACKEND_META[backend]?.caps || NO_FEATURE_CAPS;
+}
+
+/** THE DECLARED UI ROW (lane dc-client-billing, 2026-10-04 — rv-client F1/F5/F7, rv-harnesses M8/M13). The New
+ *  Session account picker, the status bar, Session Properties, the usage meter, the billing switcher and the
+ *  window ids read their billing words / account fields / usage bucket / effort+lock facts from THIS row, so a
+ *  third subscription-billed harness is its descriptor `ui` row + its META row (scripts/test-billing-row.mjs
+ *  drives the surfaces with a fake one). An unknown backend gets the neutral row (no billing, no lock). */
+const NO_UI = Object.freeze({ billing: null, effortReport: null, effortLevels: null, modelLock: false, legacyIds: false, resumeResend: false });
+const NO_BILLING = Object.freeze({ globalLogin: 'Subscription', cliLogin: 'CLI login', pickLogin: 'Subscription', pickLoginHost: '', planSuffix: '', switchLogin: 'Subscription', defaultIdField: 'defaultAccountId', apiKeys: true, longLivedToken: false, hostLogin: false, machineUsage: false, usage: 'accounts', globalUsageKey: '__global__', estimates: false });
+export function uiRow(backend) {
+  return BACKEND_META[backend || 'claude']?.ui || NO_UI;
+}
+export function billingRow(backend) {
+  return uiRow(backend).billing || NO_BILLING;
+}
+/** The chat window id of a conversation — ONE spelling (F5/M7). The row with `legacyIds` keeps the pre-backend
+ *  form `view-<id>` (claude's saved layouts); every other backend is `view-<backend>-<id>`. Exact backend: no default. */
+export function viewIdFor(backend, bsid) {
+  return BACKEND_META[backend]?.ui?.legacyIds ? `view-${bsid}` : `view-${backend}-${bsid}`;
+}
+/** The legacy `claudeSessionId` field's value: the id on the `legacyIds` row, null elsewhere. */
+export function legacyIdFor(backend, bsid) {
+  return BACKEND_META[backend]?.ui?.legacyIds ? bsid : null;
+}
+// /api/usage carries a named account's quota in one of two maps; the billing row names which (app fields below)
+const USAGE_STORES = Object.freeze({ accounts: '_accountUsage', codexAccounts: '_codexAccountUsage' });
+export function accountUsageStore(app, backend) {
+  return app?.[USAGE_STORES[billingRow(backend).usage]] || null;
 }
 
 /** WHAT A **VIBESPACE NOTIFICATION** (a Background Work event, a system

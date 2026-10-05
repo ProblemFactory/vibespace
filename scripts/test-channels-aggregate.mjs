@@ -1101,7 +1101,9 @@ console.log('⑤ push first: the safety net, pushed records of unknown conversat
     ok(cEx.source === 'push-safety' && cEx.seconds === 900 && cSh.source === 'feed-safety' && cSh.seconds === 300, 'push EXCLUSIVE + a carrying feed ⇒ the push safety net (push wins); push in KICK mode + a carrying feed ⇒ the feed\'s relaxed net', JSON.stringify([cEx, cSh]));
     epf.stop();
   }
-  const words = caps.pushLaneText({ enabled: true, state: 'unavailable', lastStateCode: un && un.code, lastStateWhy: un && un.why }, { via: 'poll' });
+  // dc-channels-blocks (2.369.214): the remedy is the adapter's DECLARED unavailableWords — what the engine's pushView carries while parked
+  const declared = require(path.join(REPO, 'src/channels/lark.js')).unavailableWords;
+  const words = caps.pushLaneText({ enabled: true, state: 'unavailable', lastStateCode: un && un.code, lastStateWhy: un && un.why, unavailableWords: declared }, { via: 'poll' });
   ok(/npm install @larksuiteoapi\/node-sdk/.test(words) && /restart/.test(words) && /polled/.test(words), 'the card\'s sentence is the exact remedy + "polled meanwhile"', words);
 }
 

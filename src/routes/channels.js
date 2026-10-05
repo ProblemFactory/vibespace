@@ -24,7 +24,6 @@
 const fs = require('fs');
 const express = require('express');
 const { contentDisposition } = require('../file-disposition.js');   // lane-raw-filename: THE Content-Disposition builder
-const SlackWords = require('../channels/slack-words.js');   // PURE (design 018): the consent landing page's words
 const router = express.Router();
 
 let ctx = null;
@@ -214,22 +213,50 @@ router.post('/api/channels/oauth/narrow', (req, res) => {
     res.json({ ok: true, ...engine().oauthNarrow(typeof b.flowId === 'string' ? b.flowId : null) });
   } catch (e) { fail(res, e); }
 });
-/** design 018: THE CONSENT LANDING — Slack (or the relay page) sends the member's browser here with `code` + `state`
- *  (`error=access_denied` when they declined). A top-level GET behind the instance's own cookie (SameSite=Lax rides
- *  the redirect); the STATE is the flow's credential: this boot's HMAC, its age, a running flow of `:kind`, used once.
- *  Answers a small page in en / zh / ja — never the code, the state, a stack or a secret. */
+/** 2.369.214: THE LANDING'S DOOR LIMIT — the landing is cookie-free (src/auth.js exempts exactly this GET), so a
+ *  fixed one-minute window per remote address bounds what anybody can make it judge: the 31st landing in a minute is
+ *  429 with the landing page's own refused words, BEFORE the state is looked at. Bounded: at most LANDING_IPS
+ *  addresses are remembered (the oldest window forgotten first). */
+const LANDING_PER_MIN = 30, LANDING_WINDOW_MS = 60 * 1000, LANDING_IPS = 1000;
+const landingHits = new Map();   // remote address → { at, n }
+function landingAllowed(ip, t = Date.now()) {
+  let h = landingHits.get(ip);
+  if (!h || t - h.at >= LANDING_WINDOW_MS || t < h.at) {   // verify r1: a clock stepped BACK starts a new window (never pins an address)
+    landingHits.delete(ip);
+    if (landingHits.size >= LANDING_IPS) landingHits.delete(landingHits.keys().next().value);
+    h = { at: t, n: 0 };
+    landingHits.set(ip, h);
+  }
+  return ++h.n <= LANDING_PER_MIN;
+}
+const LANDING_HEADERS = Object.freeze({ 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'" });
+/** design 018: THE CONSENT LANDING — the vendor (or its relay page) sends the member's browser here with `code` +
+ *  `state` (`error=access_denied` when they declined). 2.369.214: NO COOKIE IS ASKED — the browser that pressed Allow
+ *  is often another profile (the person's identity at the vendor lives apart from their VibeSpace login), the normal
+ *  case and not an error. The STATE is the flow's credential: this boot's HMAC, its age, a running flow of `:kind`,
+ *  used once; the landing only moves a pending flow to done — the record is still made by the owner's tab (Connect
+ *  {flowId}). lane dc-channels-consent: the page is `:kind`'s declared consent row's (`landing.landingHtml`, the
+ *  engine's `consentLandingOf`) — a kind with no landing row is 404 by name. Never the code, the state, a stack or a
+ *  secret. */
 router.get('/api/channels/oauth/cb/:kind', async (req, res) => {
   const q = req.query || {};
   const one = (v) => (typeof v === 'string' ? v.slice(0, 2048) : null);
-  let r;
+  const kind = String(req.params.kind || '').slice(0, 20);
+  const pageOf = () => { try { return engine().consentLandingOf(kind); } catch { return null; } };
+  // the door limit judges the ADDRESS before anything else is looked at; its page is :kind's own (the refused words for
+  // 'too-many' — wait a minute, reload), a kind with no landing row answers JSON
+  if (!landingAllowed(req.socket.remoteAddress || '?')) { const p = pageOf(); return p ? res.status(429).set(LANDING_HEADERS).send(p({ ok: false, why: 'too-many' })) : res.status(429).json({ error: 'too many sign-in landings from this address in the last minute — wait a minute', code: 'too-many' }); }
+  let r, page = null;
   try {
     forHost(req);
     if (refuseAgentBearer(req, res, SIGNIN_IS_OWNERS)) return;
-    r = await engine().oauthLanding({ kind: String(req.params.kind || '').slice(0, 20), code: one(q.code), state: one(q.state), error: one(q.error) });
+    page = pageOf();
+    if (page) r = await engine().oauthLanding({ kind, code: one(q.code), state: one(q.state), error: one(q.error) });
   } catch { r = { ok: false, why: 'failed', user: null, error: null }; }
-  res.status(r.ok || r.why === 'denied' ? 200 : 400)
-    .set({ 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'" })
-    .send(SlackWords.landingHtml(r));
+  page = page || pageOf();
+  if (!page) return res.status(404).json({ error: `no consent lands here for "${kind}" — that account type declares no consent landing`, code: 'no-landing' });
+  r = r || { ok: false, why: 'failed', user: null, error: null };
+  res.status(r.ok || r.why === 'denied' ? 200 : 400).set(LANDING_HEADERS).send(page(r));
 });
 router.post('/api/channels/oauth/callback', async (req, res) => {
   try {

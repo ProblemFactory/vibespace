@@ -211,6 +211,9 @@ const libSrc = fs.readdirSync(path.join(REPO, 'src/lib')).filter((f) => f.endsWi
 ok(!/=== 'codex' \? 'codex' : 'claude'/.test(libSrc) && !/codex \? 'codex' : 'claude'/.test(libSrc), "no `codex ? 'codex' : 'claude'` collapse left in src/lib (a third backend would inherit claude's settings)");
 ok(!/backend !== 'claude' && backend !== 'codex'/.test(libSrc) && !/\(backend === 'claude' \|\| backend === 'codex'\) && acctList/.test(libSrc), 'account surfaces gate on META caps.accounts, not an id list');
 for (const id of chatHarnessIds()) ok(BACKEND_META[id].settingsPrefix === HARNESSES[id].settingsPrefix, `${id}: client settingsPrefix matches the server descriptor (${HARNESSES[id].settingsPrefix})`);
+// lane dc-client-billing (2026-10-04): the descriptor's `ui` row (billing words / account fields / usage bucket / effort+lock facts / legacy ids) is mirrored into the client META key for key, and its billing half agrees with the creds descriptor
+for (const id of chatHarnessIds()) ok(!!HARNESSES[id].ui && JSON.stringify(BACKEND_META[id].ui ?? null) === JSON.stringify(HARNESSES[id].ui), `${id}: client META ui row deep-equals the descriptor's ui row (no drift)`, JSON.stringify({ client: BACKEND_META[id].ui, server: HARNESSES[id].ui }));
+for (const id of chatHarnessIds()) { const b = HARNESSES[id].ui?.billing, c = HARNESSES[id].creds; ok(!b === !c && (!b || (b.defaultIdField === c.defaultIdField && b.longLivedToken === c.longLivedToken && b.apiKeys === c.supportsApiKeys)), `${id}: ui.billing ${b ? 'agrees with the creds descriptor (defaultIdField / longLivedToken / apiKeys)' : 'absent exactly where creds are (no account roster)'}`); }
 // S2 pins: credential mechanics live on the descriptor; accounts.js reads them
 for (const id of chatHarnessIds()) {
   const c = HARNESSES[id].creds;

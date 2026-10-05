@@ -316,7 +316,7 @@ const base = { adapterId: 'a', convId: 'c', vendorId: 'v1', at: 1700000000000, t
 // inline code and code blocks are shown as written, so they are the one exemption, named).
 {
   const lark = require(path.join(REPO, 'src/channels/lark.js'));
-  const B = require(path.join(REPO, 'src/channel-blocks.js'));
+  const B = require(path.join(REPO, 'src/channels/lark/blocks.js'));   // lane dc-channels-blocks: Lark's rungs live with Lark
   const TAG = B.TAG_LIKE_RE;
   const item = (id, type, content, extra = {}) => ({ message_id: id, create_time: '1790000000000', msg_type: type, chat_id: 'oc_c', sender: { id: 'ou_a', id_type: 'open_id', sender_type: 'user' }, body: { content: JSON.stringify(content) }, ...extra });
   const CENSUS = [
@@ -378,9 +378,9 @@ const base = { adapterId: 'a', convId: 'c', vendorId: 'v1', at: 1700000000000, t
   // CONTROL: the pre-lane rungs (the text through the generic rung, no wall) in a patched copy leak the store's own <p>
   const { mutantCopies, copiesCensus } = await import('./mutant-copy.mjs');
   const M7 = mutantCopies('chan-rich-d1', REPO);
-  const bsrc = require('node:fs').readFileSync(path.join(REPO, 'src/channel-blocks.js'), 'utf-8');
+  const bsrc = require('node:fs').readFileSync(path.join(REPO, 'src/channels/lark/blocks.js'), 'utf-8');
   const pre = bsrc.replace("      if (!carriesTag(t)) return finish(sealTags(textToBlocks(t, { ordinals: mentions })), fallback);", "      return textToBlocks(t, { ordinals: mentions });");
-  const Bm = M7.load('src/channel-blocks.js', pre, 'pre-d1');
+  const Bm = M7.load('src/channels/lark/blocks.js', pre, 'pre-d1');
   const cl = Bm.larkToBlocks(CENSUS[0][1], [], { text: 'x' });
   ok(pre !== bsrc && codeFree(cl).some((x) => TAG.test(x)), 'CONTROL: the pre-lane text rung in a patched copy leaks the stored "<p>" into a block — the census above would be red on it', J(cl));
   for (const c of copiesCensus(M7.files, M7.dir, REPO, { minCopies: 1 })) ok(c.pass, c.name, c.detail);
@@ -506,6 +506,7 @@ const base = { adapterId: 'a', convId: 'c', vendorId: 'v1', at: 1700000000000, t
     ['src/server/channels-engine.js', "en.title = null; en.bornBy = 'feed'", 'no name (the client words "Single chat")'],
     ['src/server/channels-engine.js', 'en.title = d.title', 'describe()\'s output — the registry\'s door'],
     ['src/server/channels-engine.js', 'en.authors = mergeAuthors(', 'mergeAuthors passes every author it keeps through the door (a stored legacy name heals at its next ingest)'],
+    ['src/server/channels-engine.js', 'en.authors = Av.stampSelf(en.authors, selfIdOf(rec))', 'lane channels-list-polish: stampSelf only marks the account\'s own author `isSelf` — every name is mergeAuthors\' door output, untouched'],
     ['src/server/channels-engine.js', 'if (en.title === undefined) en.title = null', 'no name'],
     ['src/server/channels-engine.js', 'name: peerName(att.name, 256) || peerName(r && r.name, 256)', 'the door (the fetched file name is the vendor\'s)'],
     ['src/server/channels-engine.js', 'name: peerName(a.name, 256) || null, mime: h.mime', 'the door (lane channel-rich: a formatted body the adapter held at ingest — the .197 integration routed its name through it)'],

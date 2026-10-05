@@ -1,6 +1,6 @@
 // Session lifecycle: create/attach/resume/fork/view/kill + billing switcher + openSpec replay (mixin split from app.js, 2.82.0 audit seam).
 import { ChatView } from './chat-view.js';
-import { backendFeatureCaps, worktreePick } from './agent-meta.js';
+import { backendFeatureCaps, worktreePick, uiRow, billingRow, accountUsageStore, viewIdFor, legacyIdFor } from './agent-meta.js';
 import { track, metric } from './telemetry-client.js';
 import { t } from './i18n.js';
 import { registerWindowType, replayOpenSpec as replayOpenSpecViaRegistry, svgIcon16 } from './window-types.js';
@@ -501,7 +501,7 @@ export function installSessionLifecycle(App, ctx = {}) {
           ? t('Still starting the session on {host} — this can take a minute on a slow machine. Leave the window open.', { host: createHostName })
           : t('Creating the session is taking unusually long — it may still be in progress; reloading the tab abandons it'), { type: 'error' });
       },
-      resend: (backend === 'claude' || backend === 'codex') && !!resumeId && !fork,
+      resend: uiRow(backend).resumeResend && !!resumeId && !fork,
     });
   },
 
@@ -1043,7 +1043,7 @@ export function installSessionLifecycle(App, ctx = {}) {
     const backend = live?.backend || spec.backend || 'claude';
     if (!backendFeatureCaps(backend).accounts) return; // billing switcher = backends with an account roster (META cap, not an id list)
     const backendSessionId = live?.backendSessionId || spec.backendSessionId || live?.sessionId || null;
-    const isCodex = backend === 'codex';
+    const bill = billingRow(backend); // the declared billing row: words, host-login semantics, api keys, usage bucket
     // exact-backend match (P4): the old boolean partition ('is codex' vs
     // 'is not') breaks structurally with a third backend
     const accts = (this._accounts?.accounts || []).filter(a => (a.backend || 'claude') === backend)
@@ -1151,12 +1151,12 @@ export function installSessionLifecycle(App, ctx = {}) {
     // Legacy cache-derived checks below survive only as fallback while the
     // probe is in flight or against a pre-verdict server.
     const vOf = (a) => (rHostId ? this._hostVerdicts?.[rHostId]?.[a.id] : null) || null;
-    const hostLinked = (a) => { const v = vOf(a); if (v) return v.usable && v.how === 'host-login'; return !isCodex && !!hostOwnEmail && acctEmailOf(a) === hostOwnEmail; };
+    const hostLinked = (a) => { const v = vOf(a); if (v) return v.usable && v.how === 'host-login'; return bill.hostLogin && !!hostOwnEmail && acctEmailOf(a) === hostOwnEmail; };
     // Per-account login held ON the host (2.199.0) — cached from the last
     // Manage-Agents visit to that machine; the server re-verifies at spawn.
-    const hostSubHeld = (a) => { const v = vOf(a); if (v) return v.usable && v.how === 'host-held'; return !isCodex && rHostId && (this._hostSubsKnown?.[rHostId] || []).includes(a.id); };
+    const hostSubHeld = (a) => { const v = vOf(a); if (v) return v.usable && v.how === 'host-held'; return bill.hostLogin && rHostId && (this._hostSubsKnown?.[rHostId] || []).includes(a.id); };
     const subBlock = (a) => {
-      const isSub = isCodex || (a.type || 'api') === 'subscription';
+      const isSub = !bill.apiKeys || (a.type || 'api') === 'subscription';
       if (!isSub) return null; // API keys always ship
       const v = vOf(a);
       if (v) { // verdict is authoritative — render it verbatim
@@ -1280,14 +1280,13 @@ export function installSessionLifecycle(App, ctx = {}) {
       if (rHostId && v?.usable && v.how === 'host-held') return this._hostAccountUsage?.[`${rHostId}:${a.id}`];
       // codex accounts carry their own persisted quota buckets (/api/usage
       // codexAccounts, 2.368.18) — the switcher rows were blind to them
-      if ((a.backend || 'claude') === 'codex') return this._codexAccountUsage?.[a.id];
-      return this._accountUsage?.[a.id];
+      return accountUsageStore(this, a.backend || 'claude')?.[a.id];
     };
     // Codex sessions bill the machine's ChatGPT login, not the claude CLI's —
     // the old backend-agnostic label ("CLI login") plus the CLAUDE global
     // quota chips below made a codex session's account row read as the claude
     // CLI login (owner report, 2.368.16).
-    const globalLoginName = isCodex ? t('ChatGPT login') : t('CLI login');
+    const globalLoginName = t(bill.cliLogin);
     const cliLabel = rHostId ? globalLoginName + ' @ ' + rHostName : globalLoginName;
     // apiKeyHelper honesty (2.191.0, CW-H200): when the CLI itself reported
     // apiKeySource=apiKeyHelper, "CLI login" IS the helper's API key — the
@@ -1301,7 +1300,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       labelHtml: rowHtml((currentId === null ? '✓ ' : '') + cliLabel, helperActive ? ' · apiKeyHelper (API)' : '',
         // the machine usage caches are the CLAUDE login's quota — attaching
         // them to a codex row dressed the ChatGPT login in claude percentages
-        isCodex ? (rHostId ? '' : usageHint(this._codexAccountUsage?.__global_codex__, this._usageEstimates?.__global_codex__)) : usageHint(rHostId ? this._hostOwnUsage?.[rHostId] : this._rateLimit, rHostId ? null : this._usageEstimates?.__global__)),
+        !bill.machineUsage ? (rHostId ? '' : usageHint(accountUsageStore(this, backend)?.[bill.globalUsageKey], this._usageEstimates?.[bill.globalUsageKey])) : usageHint(rHostId ? this._hostOwnUsage?.[rHostId] : this._rateLimit, rHostId ? null : this._usageEstimates?.__global__)),
       action: () => { if (currentId !== null) doSwitch('subscription', cliLabel); },
     });
     if (helperActive) {
@@ -1330,10 +1329,10 @@ export function installSessionLifecycle(App, ctx = {}) {
           const isLive = !!live?.webuiId;
           const pinId = isLive ? (live?.poolPin?.memberId || null) : (this.sidebar?.getSessionConfig?.(cfgKey)?.poolPin?.memberId || null);
           const roster = this._accounts?.accounts || [];
-          const stateOf = (id) => { const x = roster.find((y) => y.id === id) || {}; return memberState({ loggedIn: x.loggedIn !== false, loginState: x.loginState || null, usage: (isCodex ? this._codexAccountUsage?.[id] : this._accountUsage?.[id]) || null, nowSec: Date.now() / 1000 }); };
+          const stateOf = (id) => { const x = roster.find((y) => y.id === id) || {}; return memberState({ loggedIn: x.loggedIn !== false, loginState: x.loginState || null, usage: accountUsageStore(this, backend)?.[id] || null, nowSec: Date.now() / 1000 }); };
           const model = poolSubmenuModel({ pool: a, auth, pinId, live: isLive, applies: (a.hotSupported !== false && a.hot) ? 'now' : 'restart', stateOf });
           const fmtTime = (ms) => { try { return new Date(ms).toLocaleString(deviceLocale(), { weekday: 'short', hour: 'numeric', minute: '2-digit' }); } catch { return new Date(ms).toISOString(); } };
-          const memUsage = (id) => (id ? usageHint((isCodex ? this._codexAccountUsage?.[id] : this._accountUsage?.[id]) || null, isCodex ? null : (this._usageEstimates?.[id] || null)) : '');
+          const memUsage = (id) => (id ? usageHint(accountUsageStore(this, backend)?.[id] || null, bill.estimates ? (this._usageEstimates?.[id] || null) : null) : '');
           const pinTo = async (memberId, name) => {
             const cfg = this.sidebar?.getSessionConfig?.(cfgKey) || {};
             const saveCfg = (pin) => { const next = { ...cfg }; if (pin) next.poolPin = pin; else delete next.poolPin; this.sidebar?.setSessionConfig?.(cfgKey, next); };
@@ -1364,9 +1363,9 @@ export function installSessionLifecycle(App, ctx = {}) {
         items.push({ labelHtml: rowHtml((cur ? '✓ ' : '') + a.name, sfx, usageHint(a.current ? this._accountUsage?.[a.current] : null, estP)), action: () => { if (!cur) doSwitch(a.id, a.name); } });
         continue;
       }
-      const linked = rHostId && hostLinked(a) && (isCodex || (a.type || 'api') === 'subscription');
+      const linked = rHostId && hostLinked(a) && (!bill.apiKeys || (a.type || 'api') === 'subscription');
       const held = !linked && rHostId && hostSubHeld(a) && (a.type || 'api') === 'subscription';
-      const suffix = (!isCodex && (a.type || 'api') !== 'subscription') ? ' · API'
+      const suffix = (bill.apiKeys && (a.type || 'api') !== 'subscription') ? ' · API'
         : linked ? ' ' + t('· is {host}’s machine login (same account)', { host: rHostName })
         : held ? ' ' + t('· own login held on {host}', { host: rHostName }) : '';
       let block = subBlock(a);
@@ -1519,7 +1518,7 @@ export function installSessionLifecycle(App, ctx = {}) {
     this._closeSidebarOnMobile();
     this._hideWelcome();
     const resolvedSessionId = backendSessionId || sessionId;
-    const viewId = backend === 'claude' ? `view-${resolvedSessionId}` : `view-${backend}-${resolvedSessionId}`;
+    const viewId = viewIdFor(backend, resolvedSessionId);
     const openSpec = {
       action: 'viewSession',
       sessionId,
@@ -1581,7 +1580,7 @@ export function installSessionLifecycle(App, ctx = {}) {
   // (the blank-window class: a stale serverId replayed after the server lost
   // its sessions used to leave a bare shell with no ChatView at all).
   _viewIntoWindow(winInfo, { backend = 'claude', backendSessionId, cwd, name, hostId, subagentView = false } = {}) {
-    const viewId = backend === 'claude' ? `view-${backendSessionId}` : `view-${backend}-${backendSessionId}`;
+    const viewId = viewIdFor(backend, backendSessionId);
     const chatView = new ChatView(winInfo, this.ws, viewId, this, { readOnly: true, subagentView });
     this.sessions.set(winInfo.id, chatView); this.wm.syncHiddenViews?.(); // a view born hidden (mobile/tab/minimized) starts suspended (inc-mu6bfv1t-4drq)
     const hostName = this._hostLabel(hostId);
@@ -1604,7 +1603,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       slab: attachSlab({ suspended: !!chatView._suspended, inFlight: this.ws.attachesInFlight?.() ?? 0 }), // perf r1 (a boot resume-all opens N at once)
       backend,
       backendSessionId,
-      claudeSessionId: backend === 'claude' ? backendSessionId : undefined,
+      claudeSessionId: legacyIdFor(backend, backendSessionId) ?? undefined,
       host: hostId || undefined, // remote session: server pulls the transcript over ssh first
       cwd,
       name,

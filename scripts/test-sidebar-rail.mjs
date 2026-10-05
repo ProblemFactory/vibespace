@@ -191,6 +191,18 @@ try {
   await evalJs(`app.openPluginsDialog()`);
   await sleep(500);
   check('openPluginsDialog redirects to rail panel', await evalJs(`!!document.querySelector('.rail-panel-plugins') && !document.getElementById('plugins-dialog')`));
+  // lane dc-plugins: every built-in row is drawn from its DECLARED capability (src/plugins/<id>.js provides), never
+  // its id — the relay card carries the relay fields, the serve card its one on-switch, the tunnel card neither
+  for (let i = 0; i < 40 && !(await evalJs(`document.querySelectorAll('.rail-panel-plugins .plugin-card').length >= 3`)); i++) await sleep(250);
+  const cards = JSON.parse(await evalJs(`JSON.stringify([...document.querySelectorAll('.rail-panel-plugins .plugin-card')].slice(0, 3).map((c) => ({
+    name: (c.querySelector('.plugin-name')?.textContent || '').trim(),
+    relayFields: [...c.querySelectorAll('.plugin-cfg-label')].filter((l) => /^Relay /.test(l.textContent)).length,
+    serveSwitch: /Run this service whenever VibeSpace runs/.test(c.textContent),
+    state: (c.querySelector('.plugin-state')?.textContent || '').trim() })))`));
+  check('plugin rows: the ONE list in order (tailscale, frp, opencode-serve)', cards.map((c) => c.name).join('|') === 'Tailscale|Public URLs (frp)|OpenCode background service', JSON.stringify(cards));
+  check('the relay card (provides relay) draws the relay fields and its relay state; no service switch', cards[1]?.relayFields === 3 && !cards[1]?.serveSwitch && /relay not configured|connected|stopped|not installed/.test(cards[1]?.state || ''), JSON.stringify(cards[1]));
+  check('the serve card (provides serve) draws its on-switch, no relay fields', cards[2]?.serveSwitch && cards[2]?.relayFields === 0, JSON.stringify(cards[2]));
+  check('the tunnel card (provides tunnel) draws neither', cards[0] && !cards[0].serveSwitch && cards[0].relayFields === 0, JSON.stringify(cards[0]));
 
   // re-click active item collapses the sidebar — but the rail STRIP persists
   // (sidebar.railPersistent, default ON) and a rail click expands back

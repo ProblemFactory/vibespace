@@ -31,6 +31,7 @@ const KIND = 'agents';
 
 const caps = {
   receive: 'poll',
+  glyph: 'robot',   // lane dc-channels-blocks: the touch row's library glyph (closed: chat | mail | robot)
   pushTransport: null, pushAckBudgetMs: null,
   // A no-op pass: discovery only (the roster of live sessions). Slow on
   // purpose — nothing is fetched, and the roster changes on a session

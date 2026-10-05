@@ -20,7 +20,7 @@ const ACP_DEFAULT_CAPS = Object.freeze({
   fork: false, streamProtocol: 'acp-events', peerDelivery: 'stash-only', frameFile: true,
 });
 
-function acpHarness({ id, label, command, args = ['acp'], env = {}, store = {}, brand = null, terminal = {}, caps = null } = {}) {
+function acpHarness({ ui, id, label, command, args = ['acp'], env = {}, store = {}, brand = null, terminal = {}, caps = null } = {}) {
   if (typeof id !== 'string' || !/^[a-z][a-z0-9-]*$/.test(id)) throw new Error(`acpHarness: id must be a lowercase slug (got ${JSON.stringify(id)})`);
   if (typeof command !== 'string' || !command) throw new Error(`acpHarness('${id}'): command (the agent executable name) is required`);
   const capsRow = caps || BACKEND_CAPS[id] || ACP_DEFAULT_CAPS;
@@ -76,6 +76,7 @@ function acpHarness({ id, label, command, args = ['acp'], env = {}, store = {}, 
       form: 'prompt',
       deliver: (session, text, deps) => !!deps.sendChatInput(session, text),
     },
+    ui: ui || null,               // the declared UI row the client META mirrors (lane dc-client-billing)
     creds: null,                  // the agent holds its own login; VibeSpace never manages ACP credentials
     settingsPrefix: id,
     // THE SETTINGS TABLE (design-harness-settings §2/§7): the built-in ACP

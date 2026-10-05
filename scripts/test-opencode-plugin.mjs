@@ -74,7 +74,7 @@ console.log('— ① the built-in plugin def + its state');
   ok('list() carries it too (the ⚙ → Plugins panel)', pm.list().some((p) => p.id === 'opencode-serve' && p.enabled === false));
   let cfgErr = null; try { pm.setConfig(OPENCODE_SERVE_ID, { port: 1 }); } catch (e) { cfgErr = e; }
   ok('there is NOTHING to configure — setConfig refuses loudly instead of pretending to store a port', /nothing to configure/.test(cfgErr?.message || ''), cfgErr?.message);
-  let insErr = null; try { pm._ocInstall(); } catch (e) { insErr = e; }
+  let insErr = null; try { pm._verb(OPENCODE_SERVE_ID, 'install')(); } catch (e) { insErr = e; }
   ok('install() with no `opencode` on PATH says how to get it (VibeSpace runs YOUR CLI, it never downloads one)', /not on PATH/.test(insErr?.message || '') && /opencode\.ai/.test(insErr?.message || ''), insErr?.message);
 
   pm.setPrompted(OPENCODE_SERVE_ID);
@@ -520,7 +520,7 @@ console.log('— ⑥ wiring pins');
   ok('ONE offer at a time (a layout restore can open five history windows in a tick)', /this\._svcOffers \|\|= new Map\(\)/.test(pu) && /if \(inFlight\) return inFlight\.then/.test(pu));
   ok('"Not now" POSTs the instance-wide flag; Enable POSTs enabled+start and then WAITS bounded for the serve', /\/prompted`, \{ method: 'POST'/.test(pu) && /post\('enabled', \{ enabled: true \}\)/.test(pu) && /post\('start'\)/.test(pu) && /SERVICE_START_WAIT_MS/.test(pu));
   ok('every failure on that path reaches the user (no silent failure)', /showToast\(e\.message \|\| t\('Failed'\), \{ type: 'error' \}\); return false;/.test(pu) && /has not answered yet/.test(pu));
-  ok('the ⚙ → Plugins card renders the service (state, env-forced notice, Start/Stop, the on-switch) without a config box', /const isOc = p\.id === 'opencode-serve'/.test(pu) && /Forced OFF by the environment/.test(pu) && /t\('Enable & start'\)/.test(pu) && /Run this service whenever VibeSpace runs/.test(pu));
+  ok('the ⚙ → Plugins card renders the service (state, env-forced notice, Start/Stop, the on-switch) without a config box', /const isServe = provides\(p, 'serve'\)/.test(pu) && /Forced OFF by the environment/.test(pu) && /t\('Enable & start'\)/.test(pu) && /Run this service whenever VibeSpace runs/.test(pu));
   const app = read('src/lib/app.js');
   ok('app.js fills BACKEND_META.service from /api/home AND keeps it live from plugins-updated + harness-store-updated (multi-client law)', /BACKEND_META\[h\.id\]\.service = h\.service \|\| null;/.test(app) && /msg\.type !== 'plugins-updated' \|\| !msg\.services/.test(app) && /if \(msg\.service !== undefined\) BACKEND_META\[msg\.backend\]\.service = msg\.service \|\| null;/.test(app));
   ok('agent-meta declares the control plugin for opencode (the client mirror of store.servicePlugin)', /servicePlugin: 'opencode-serve'/.test(read('src/lib/agent-meta.js')));
@@ -535,8 +535,8 @@ console.log('— ⑥ wiring pins');
   const os_ = read('src/opencode-serve.js');
   ok('the ops kill switch is checked INSIDE the adoption rung (before the reuse is taken), not only at the spawn gate below it', /serveEnvOverride\(\) === false\s*\n?\s*\? 'VIBESPACE_OPENCODE_SERVE=0 is set on this instance/.test(os_) && /const bad = serveEnvOverride\(\) === false/.test(os_));
   ok('…and install() runs the ladder ONCE under the switch, so an instance nobody polls does not leave an inherited daemon indexing', /if \(serveEnvOverride\(\) === false && locator\?\.ensure\)/.test(os_) && /setImmediate\(\(\) => \{ Promise\.resolve\(locator\.ensure\(\)\)/.test(os_));
-  const pl = read('src/plugins.js');
-  ok('plugins.js is the CONTROL SURFACE only: it holds no keeper, no spawn of `opencode serve`, and reads every fact from the shared module', /this\._serve = opencodeServe \|\| require\('\.\/opencode-serve'\)/.test(pl) && !/spawn\([^)]*serve/.test(pl) && /_ocServeState\(\)/.test(pl) && /_ocLocator\(\)\?\.stop\?\.\(\{ killRecorded: true \}\)/.test(pl));
+  const pl = read('src/plugins/opencode-serve.js');
+  ok('the opencode-serve plugin (src/plugins/opencode-serve.js) is the CONTROL SURFACE only: it holds no keeper, no spawn of `opencode serve`, and reads every fact from the shared module', /const serve = h\.opts\.opencodeServe \|\| require\('\.\.\/opencode-serve'\)/.test(pl) && !/spawn\([^)]*serve/.test(pl) && /ocServeState\(\)/.test(pl) && /ocLocator\(\)\?\.stop\?\.\(\{ killRecorded: true \}\)/.test(pl));
   ok('cli-env puts the control plugin\'s state on the harness row (declaration-driven, not an id list)', /if \(h\.store\?\.servicePlugin\) \{ try \{ row\.service = getPlugins\(\)\?\.serviceState\?\.\(h\.store\.servicePlugin\)/.test(read('src/server/cli-env.js')));
   const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
   const keys = ['Not now', 'Enable & start', 'Run this service whenever VibeSpace runs'];

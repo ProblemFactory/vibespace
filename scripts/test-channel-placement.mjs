@@ -173,7 +173,7 @@ const censusFindings = (mods) => [...mods].filter(([, x]) => !(x.mod.caps.thread
   // the engine's built-in list (what a server registers) is the SAME set: parsed from its source, never retyped
   const esrc = read('src/server/channels-engine.js');
   const builtin = /for \(const mod of \[([^\]]+)\]\)/.exec(esrc);
-  const real = /const REAL_ADAPTERS = (?:Object\.freeze\()?\[([^\]]+)\]/.exec(esrc);
+  const real = /^const MANIFESTS = Object\.freeze\(\[([^\]]+)\]/m.exec(read('src/channels/registry-list.js'));   // lane dc-channels-manifest: REAL_ADAPTERS derives from the vendor list
   ok(kinds.length >= 6 && ['agents', 'fake-poll', 'fake-push', 'fake-scan', 'gmail', 'lark'].every((k) => kinds.includes(k)), `the census reads ${kinds.length} adapter modules under src/channels/: ${kinds.join(', ')}`);
   ok(!!builtin && /fake\.fakePoll/.test(builtin[1]) && /agents/.test(builtin[1]) && /REAL_ADAPTERS/.test(builtin[1]) && !!real && /lark/.test(real[1]) && /gmail/.test(real[1]), 'the engine registers exactly these (its built-in loop + REAL_ADAPTERS name the fakes, agents, lark, gmail — all in the census)', builtin && builtin[1]);
   const missing = censusFindings(mods);

@@ -1020,7 +1020,7 @@ if (fs.existsSync('/proc/self')) {
   ok(!/backend === '(claude|codex)'/.test(fs.readFileSync(new URL('../src/writer-sweep.js', import.meta.url), 'utf8')) && !/=== '(claude|codex)'/.test(rstore), 'writer-sweep.js / resume-store.js carry no harness id branch (dc-harness-store)');
   ok(/&& hasWriterSweep\(backend\) && \/\^\[\\w-\]\+\$\/\.test\(data\.resumeId\) && hosts\)/.test(src), 'the LOCAL sweep gate admits every harness that declares store.writerSweep (codex included)');
   const client = fs.readFileSync(new URL('../src/lib/session-lifecycle.js', import.meta.url), 'utf8');
-  ok(/resend: \(backend === 'claude' \|\| backend === 'codex'\) && !!resumeId && !fork/.test(client), 'client re-sends codex resumes on reconnect (safe only because the guard now covers codex)');
+  ok(/resend: uiRow\(backend\)\.resumeResend && !!resumeId && !fork/.test(client), 'client re-sends codex resumes on reconnect (safe only because the guard now covers codex)');
 }
 
 // ── 11. THE fd scan is ONE implementation (B-3185 wiring pin). boot-restore's
@@ -1979,7 +1979,7 @@ if (fs.existsSync('/proc/self')) {
   // was a place a new `ps -p` existence probe could have landed under r6
   // without reddening a thing.
   const R7_GAINED_MUST = ['server.js', 'src/jobs.js', 'src/server/boot-restore.js',
-    'src/plugins.js', 'src/vnc.js', 'src/port-forward.js', 'src/agentd/agentd.js',
+    'src/plugins/tailscale.js', 'src/plugins/frp.js', 'src/vnc.js', 'src/port-forward.js', 'src/agentd/agentd.js',
     'src/ws-handler.js', 'src/ws-create.js', 'src/opencode-serve.js'];
   const gained = swp.files.filter((f) => !R6_HAND.has(f));
   ok(R7_GAINED_MUST.every((f) => swp.files.includes(f) && !R6_HAND.has(f)) && gained.length >= R7_GAINED_MUST.length,

@@ -37,6 +37,7 @@
 /** The CLOSED failure set. A code outside it is itself a contract violation. */
 // the reply PLACEMENT vocabulary (2026-09-28) — ONE spelling, the PURE outbox policy's (the verdict lives there)
 const { PLACEMENTS, ROOT_REPLIES, isThreadPlacement, placementsOf, POLICY_MODES } = require('../channel-policy.js');
+const IntegrationRegistry = require('../integration-registry.js');   // lane dc-channels-manifest: a vendor's `integration` must name a row
 const ChannelSettings = require('../channel-settings.js');   // B-df40 part 3: the declared per-vendor rows a caps settingKey must name
 
 const CHANNEL_ERROR_CODES = Object.freeze([
@@ -199,6 +200,8 @@ const TITLE_MAX = 200;
  *  (a chat) or a mail `subject` (shown through `cleanSubject`). */
 const RENDER_MODES = Object.freeze(['text', 'blocks']);
 const TITLE_FORMS = Object.freeze(['name', 'subject']);
+/** lane dc-channels-blocks (C7): the library glyph a touch row of this adapter wears — closed; absent = `chat`. */
+const GLYPHS = Object.freeze(['chat', 'mail', 'robot']);
 /**
  * THREADS + REACTIONS (lane channel-threads, 2026-09-28): two UPPER-BOUND rows
  * a module may declare (absent = none — a flat, reaction-less channel):
@@ -352,6 +355,9 @@ function validateCaps(kind, caps, { channelSettings } = {}) {
 
   if (c.avatars !== undefined && c.avatars !== null && c.avatars !== 'fetch') bad(`caps.avatars must be 'fetch' or null (got ${JSON.stringify(c.avatars)})`);
   if (c.avatars === null && !(typeof c.avatarsWhy === 'string' && c.avatarsWhy.trim())) bad('caps.avatars is null without caps.avatarsWhy (the reason a person shows initials is said, never a silent blank)');
+  // lane channels-list-polish: WHICH pictures ('person' | 'chat' | 'bot'); a kind left out is said by `avatarKindsWhy`
+  if (c.avatarKinds !== undefined && !(Array.isArray(c.avatarKinds) && c.avatarKinds.length && c.avatarKinds.every((k) => ['person', 'chat', 'bot'].includes(k)))) bad(`caps.avatarKinds must list 'person' / 'chat' / 'bot' (got ${JSON.stringify(c.avatarKinds)})`);
+  if (Array.isArray(c.avatarKinds) && c.avatarKinds.length < 3 && !(typeof c.avatarKindsWhy === 'string' && c.avatarKindsWhy.trim())) bad('caps.avatarKinds leaves a kind out without caps.avatarKindsWhy (why a bot / a group shows its glyph is said by name)');
   if (c.olderHistory !== undefined && !OLDER_HISTORY.includes(c.olderHistory)) bad(`caps.olderHistory must be one of ${OLDER_HISTORY.join('|')}`);
   if (c.compose !== undefined && typeof c.compose !== 'boolean') bad('caps.compose must be a boolean (true = the adapter can start a NEW conversation)');
   if (c.replyEnvelope !== undefined && typeof c.replyEnvelope !== 'boolean') bad('caps.replyEnvelope must be a boolean (true = a reply\'s recipients follow from the message it answers, resolved when it is proposed)');
@@ -404,6 +410,7 @@ function validateCaps(kind, caps, { channelSettings } = {}) {
   }
   if (c.render !== undefined && !RENDER_MODES.includes(c.render)) bad(`caps.render must be one of ${RENDER_MODES.join('|')}`);
   if (c.titleForm !== undefined && !TITLE_FORMS.includes(c.titleForm)) bad(`caps.titleForm must be one of ${TITLE_FORMS.join('|')}`);
+  if (c.glyph !== undefined && !GLYPHS.includes(c.glyph)) bad(`caps.glyph must be one of ${GLYPHS.join('|')}`);
   if (c.vendorName !== undefined && !(typeof c.vendorName === 'string' && c.vendorName.trim() && c.vendorName.length <= 40)) bad('caps.vendorName must be a non-empty string of at most 40 characters (the vendor as the card names it)');
   // design 005 §2.B (B-fd1f): WHAT AN AGENT MAY ATTACH — absent / null ⇒ nothing (`attachments-not-offered`, with
   // `sendAttachmentsWhy` as the reason); ONE row `{maxCount, maxTotalBytes, withText}` (text and files in one message) or
@@ -582,10 +589,42 @@ function validateMethods(kind, caps, mod) {
  * the shipped CHANNEL_SETTINGS when absent. A suite's scripted module that reads a budget key of its own declares
  * it in a table for its kind (the S6 shape); NO production caller passes it (test-channel-adapter-contract ⑦'s census).
  */
+/** lane dc-channels-manifest (rv F2): the fields the engine reads off a VENDOR module, checked at register — `label`
+ *  (≤ 40), `integration` (an existing integration-registry row) with its `integrationTest` (a function, or absent),
+ *  `OPTIONS` (a declared table: key / label / default, the default among its `choices`), `optionOf` / `effectiveOptions`
+ *  / `vendorNameOf` (functions), `builtin` (boolean), `policyDefault` (a word), `manifest` (its own kind). */
+function validateVendor(kind, mod) {
+  const bad = (why) => { throw new Error(`channel vendor '${kind}': ${why}`); };
+  if (typeof mod.label !== 'string' || !mod.label.trim() || mod.label.length > 40) bad('label must be a non-empty string of at most 40 characters');
+  if (mod.integration !== undefined && !(typeof mod.integration === 'string' && IntegrationRegistry.rowById(mod.integration))) bad(`integration ${JSON.stringify(mod.integration)} is not an integration-registry row (declare it in the vendor's manifest)`);
+  if (mod.integrationTest !== undefined && (typeof mod.integrationTest !== 'function' || mod.integration === undefined)) bad('integrationTest must be a function, on a module that names its integration row');
+  for (const f of ['optionOf', 'effectiveOptions', 'vendorNameOf']) if (mod[f] !== undefined && typeof mod[f] !== 'function') bad(`${f} must be a function`);
+  if (mod.builtin !== undefined && typeof mod.builtin !== 'boolean') bad('builtin must be a boolean');
+  if (mod.policyDefault !== undefined && !(typeof mod.policyDefault === 'string' && /^[a-z][a-z-]{0,31}$/.test(mod.policyDefault))) bad('policyDefault must be a policy word');
+  if (mod.OPTIONS !== undefined) {
+    if (!Array.isArray(mod.OPTIONS)) bad('OPTIONS must be an array of {key, label, default}');
+    const keys = new Set();
+    for (const o of mod.OPTIONS) {
+      const at = `OPTIONS ${JSON.stringify(o && o.key)}`;
+      if (!o || typeof o !== 'object' || typeof o.key !== 'string' || !/^[a-z][A-Za-z0-9]{0,31}$/.test(o.key)) bad(`${at}: key must be an option key`);
+      if (keys.has(o.key)) bad(`${at}: duplicate key`);
+      keys.add(o.key);
+      if (typeof o.label !== 'string' || !o.label.trim()) bad(`${at}: label must be a non-empty string`);
+      if (o.default === undefined) bad(`${at}: default is required`);
+      if (o.choices !== undefined && !(Array.isArray(o.choices) && o.choices.length && o.choices.includes(o.default))) bad(`${at}: choices must be a non-empty list holding the default`);
+    }
+  }
+  if (mod.manifest !== undefined && !(mod.manifest && typeof mod.manifest === 'object' && mod.manifest.kind === kind)) bad('manifest must be its own vendor manifest (manifest.kind === kind)');
+}
+
 function createChannelRegistry({ channelSettings } = {}) {
   const mods = new Map();
+  const vendorKinds = new Set();
 
-  function register(mod) {
+  /** `vendor` (lane dc-channels-manifest, rv F2): the module is a channel VENDOR (an entry of the vendor list — the
+   *  engine registers each REAL_ADAPTERS module whole; a module declaring its `manifest` is one by default): every field
+   *  the engine reads off it is checked HERE, so a missing or malformed declaration refuses to register, by name. */
+  function register(mod, { vendor = !!(mod && typeof mod === 'object' && mod.manifest !== undefined) } = {}) {
     if (!mod || typeof mod !== 'object') throw new Error('registerChannelAdapter: a module object is required');
     const kind = mod.kind;
     if (typeof kind !== 'string' || !kind) throw new Error('registerChannelAdapter: `kind` (non-empty string) is required');
@@ -603,6 +642,14 @@ function createChannelRegistry({ channelSettings } = {}) {
     if (mod.sendCapsOf !== undefined && (typeof mod.sendCapsOf !== 'function' || !(mod.caps.sendAs || []).length)) throw new Error(`channel adapter '${kind}': sendCapsOf must be a function of the held scopes, on a sendable adapter`);
     // lane channel-rich: the READ-TIME VIEW of a stored record (a bot's name, markup read) — a function or absent
     if (mod.recordView !== undefined && typeof mod.recordView !== 'function') throw new Error(`channel adapter '${kind}': recordView must be a function(record) → record`);
+    // lane dc-channels-blocks (C5/C6): a stored record's VENDOR FACTS by name — `rawFacts(record)` → {tenant?, type?,
+    // subject?} (the engine never reads a vendor's raw field) — and the live lane's words for the codes it parks with
+    if (mod.rawFacts !== undefined && typeof mod.rawFacts !== 'function') throw new Error(`channel adapter '${kind}': rawFacts must be a function(record) → {tenant, type, subject}`);
+    if (mod.unavailableWords !== undefined) {
+      const w = mod.unavailableWords;
+      if (!w || typeof w !== 'object' || !Object.keys(w).length || !Object.entries(w).every(([k, v]) => /^[a-z][a-z0-9-]{0,63}$/.test(k) && typeof v === 'string' && v)) throw new Error(`channel adapter '${kind}': unavailableWords must be {code: words} (non-empty strings)`);
+      if (mod.caps.receive !== 'push') throw new Error(`channel adapter '${kind}': unavailableWords on an adapter with no push lane`);
+    }
     // what unlocks SENDING (the window's read-only line): {scopes: [...], console: boolean}
     if (mod.sendGrant !== undefined) {
       const g = mod.sendGrant;
@@ -632,7 +679,9 @@ function createChannelRegistry({ channelSettings } = {}) {
       const g = mod.peopleGrant;
       if (!g || !Array.isArray(g.scopes) || !g.scopes.length || !g.scopes.every((x) => typeof x === 'string' && x) || typeof g.console !== 'boolean') throw new Error(`channel adapter '${kind}': peopleGrant must be {scopes: [non-empty strings], console: boolean}`);
     }
+    if (vendor) validateVendor(kind, mod);
     mods.set(kind, mod);
+    if (vendor) vendorKinds.add(kind);
     return mod;
   }
 
@@ -642,6 +691,10 @@ function createChannelRegistry({ channelSettings } = {}) {
     return m;
   }
   const has = (kind) => mods.has(kind);
+  /** The registered VENDOR module of `kind` (a REAL_ADAPTERS entry), or null — a fake / built-in kind is none. */
+  const vendor = (kind) => (vendorKinds.has(kind) ? mods.get(kind) : null);
+  /** Every registered vendor module, in registration order (= the vendor list's). */
+  const vendors = () => [...vendorKinds].map((k) => mods.get(k));
   const list = () => [...mods.values()].map((m) => ({ kind: m.kind, caps: m.caps }));
   const capsOf = (kind) => get(kind).caps;
 
@@ -963,18 +1016,60 @@ function createChannelRegistry({ channelSettings } = {}) {
       selfId: () => { try { return typeof impl.selfId === 'function' ? (impl.selfId() || null) : null; } catch { return null; } },
       /** lane lark-threads (B4): the ACCOUNT's own organization (a tenant key) — an author of another one is EXTERNAL;
        *  null when the adapter cannot say. Never throws, never a vendor call. */
+      /** lane channels-list-polish: the account's own id as a RESOLVED fact — one paced vendor read when the sign-in never
+       *  named it (Lark's user_info on the user token), remembered; null when it could not be told. */
+      resolveSelf: typeof impl.resolveSelf === 'function' ? async () => { const v = await impl.resolveSelf(); return typeof v === 'string' && v && v.length <= 128 ? v : null; } : null,
+      /** …and the people warm-up: the ids a conversation's authors carry, looked up within the adapter's own bounds. */
+      warmPeople: typeof impl.warmPeople === 'function' ? (ids) => impl.warmPeople((Array.isArray(ids) ? ids : []).slice(0, 200).map(String)) : null,
       selfTenant: () => { try { const v = typeof impl.selfTenant === 'function' ? impl.selfTenant() : null; return typeof v === 'string' && v && v.length <= 64 ? v : null; } catch { return null; } },
     };
   }
 
-  return { register, get, has, list, capsOf, create, validateCaps, validateMethods, validateApi };
+  return { register, vendor, vendors, get, has, list, capsOf, create, validateCaps, validateMethods, validateApi };
+}
+
+/** lane dc-channels-consent: THE CONSENT ROW — how a vendor's sign-in comes back, declared by its adapter MODULE
+ *  (`consent`, beside `API_ROW`). The engine keeps ONE consent machine (the per-boot state signer, the relay setting's
+ *  reader, the landing route's dispatch on `:kind`'s row) and names no vendor:
+ *   · mode            — the oauth-loopback mode its sign-ins use: one of CONSENT_MODES, or a list of them
+ *   · landing         — null, or {stateVerdict(state, {sign, now, ttlMs}) → {ok, why, parts: {flowId}}, landingHtml(r)}:
+ *                       the vendor sends the browser to `GET /api/channels/oauth/cb/<kind>` (needs mode 'public')
+ *   · relayUrlSetting — (optional, with a landing) {key, fallback}: the server setting `channels.<key>` naming its relay
+ *                       page (the settings schema's row), and its default
+ *   · callbackUrl     — (mode 'fixed') the registered http://127.0.0.1:<port>/… callback the loopback binds */
+const CONSENT_MODES = Object.freeze(['ephemeral', 'fixed', 'paste', 'public']);
+const CONSENT_ROW_KEYS = Object.freeze(['mode', 'landing', 'relayUrlSetting', 'callbackUrl']);
+function validateConsent(kind, row) {
+  const bad = (msg) => { throw new Error(`channel adapter '${kind}': consent.${msg}`); };
+  if (!row || typeof row !== 'object' || Array.isArray(row)) throw new Error(`channel adapter '${kind}': consent must be the consent row {${CONSENT_ROW_KEYS.join(', ')}}`);
+  for (const k of Object.keys(row)) if (!CONSENT_ROW_KEYS.includes(k)) bad(`${k} is not a key of the consent row (${CONSENT_ROW_KEYS.join(', ')})`);
+  const modes = [].concat(row.mode);
+  if (!modes.length || !modes.every((m) => CONSENT_MODES.includes(m)) || new Set(modes).size !== modes.length) bad(`mode must be one of ${CONSENT_MODES.join('|')} or a list of them (got ${JSON.stringify(row.mode)})`);
+  if (row.landing !== null && row.landing !== undefined) {
+    if (typeof row.landing !== 'object' || typeof row.landing.stateVerdict !== 'function' || typeof row.landing.landingHtml !== 'function') bad('landing must be null or {stateVerdict(state, {sign, now, ttlMs}), landingHtml(r)}');
+    if (!modes.includes('public')) bad('landing needs mode \'public\' (a browser lands on the instance only after a public consent)');
+  }
+  if (row.relayUrlSetting !== undefined) {
+    const s = row.relayUrlSetting;
+    if (!row.landing) bad('relayUrlSetting needs a landing (the relay page sends the browser to it)');
+    if (!s || typeof s.key !== 'string' || !/^[a-zA-Z][a-zA-Z0-9]{0,63}$/.test(s.key) || typeof s.fallback !== 'string' || !httpsUrl(s.fallback)) bad('relayUrlSetting must be {key: the name under channels.*, fallback: an https URL}');
+  }
+  if (modes.includes('fixed')) {
+    let u = null;
+    try { u = new URL(String(row.callbackUrl)); } catch { u = null; }
+    if (!u || u.protocol !== 'http:' || u.hostname !== '127.0.0.1' || !(Number(u.port) > 0)) bad('callbackUrl must be the registered http://127.0.0.1:<port>/… callback of a fixed consent');
+  } else if (row.callbackUrl !== undefined) bad('callbackUrl belongs to mode \'fixed\' only');
+  return row;
 }
 
 module.exports = {
   createChannelRegistry, ChannelError, validateCaps, validateMethods, validateApi, API_ROW_KEYS,
-  CHANNEL_ERROR_CODES, RETENTION_MODES, AUDIENCE_KINDS, RECEIVE_MODES, SCAN_SOURCES, HISTORY_MODES, SEND_IDENTITIES, IDENTITY_MARKING, TOS_RISK, METHOD_GATES, OLDER_HISTORY, BUDGET_UNITS, PACE_COSTS, RENDER_MODES, TITLE_FORMS, FEED_METHODS, BY_ID_KINDS,
+  CHANNEL_ERROR_CODES, RETENTION_MODES, AUDIENCE_KINDS, RECEIVE_MODES, SCAN_SOURCES, HISTORY_MODES, SEND_IDENTITIES, IDENTITY_MARKING, TOS_RISK, METHOD_GATES, OLDER_HISTORY, BUDGET_UNITS, PACE_COSTS, RENDER_MODES, GLYPHS, TITLE_FORMS, FEED_METHODS, BY_ID_KINDS,
   SEARCH_METHODS, SEARCH_HIT_FIELDS, searchRowOf,
   peerName,
   THREAD_READ, THREAD_LISTING, REACTION_READ, REACTION_REMOVE, REACTION_VOCABULARY, REACTION_CUSTOM, NO_THREADS, NO_REACTIONS, THREAD_REACTION_METHODS, threadsOf, reactionsOf,
   retryAfterSeconds, sentSecrets, withoutSent, bearerOf, SENT_SECRET_FIELDS,
+  // lane dc-channels-consent: the consent row's ONE schema
+  validateConsent, CONSENT_MODES, CONSENT_ROW_KEYS,
+  validateVendor,   // lane dc-channels-manifest
 };

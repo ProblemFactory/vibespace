@@ -6,7 +6,7 @@ import { UI_ICONS } from './icons.js';
 import { shownText } from './record-clear-ui.js'; // "Clear content…": a cleared status reason is worded in this device's language
 import { browserFactWords } from '../browser-fact.js'; // lane S2: THE browser fact's words (the card's chip prints them)
 import { stashHintChip } from './stash-strip.js'; // 2026-09-27: "N waiting" — what waits for this agent's next turn (the stash fact)
-import { createBackendIcon, createAgentKindIcon, createModeBackendIcon, getBackendMeta, getAgentKindMeta, getAgentRoleLabel, getAgentRoleShortLabel, getSessionKey, backendFeatureCaps, settingsPrefixFor } from './agent-meta.js';
+import { createBackendIcon, createAgentKindIcon, createModeBackendIcon, getBackendMeta, getAgentKindMeta, getAgentRoleLabel, getAgentRoleShortLabel, getSessionKey, backendFeatureCaps, settingsPrefixFor, billingRow } from './agent-meta.js';
 
 /** Inline SVG icon helper — returns an HTML string for a 12x12 stroked icon */
 const _s = (d, fill = false) => `<svg style="width:12px;height:12px;vertical-align:-2px" viewBox="0 0 16 16" fill="${fill ? 'currentColor' : 'none'}" stroke="${fill ? 'none' : 'currentColor'}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">${d}</svg>`;
@@ -161,7 +161,7 @@ export function registerSessionCardMenu() {
   registerMenuItem({ menu: M, group: '2_locate', order: 60, command: 'session.moveWindow', when: (c) => !!c.s.webuiId && !c.app.isMobile });
   // 3_admin: billing / rescue / properties / terminate
   registerMenuItem({ menu: M, group: '3_admin', order: 0, separator: true });
-  registerMenuItem({ menu: M, group: '3_admin', order: 10, command: 'session.switchBilling', when: (c) => (c.s.backend || 'claude') === 'claude' || c.s.backend === 'codex' });
+  registerMenuItem({ menu: M, group: '3_admin', order: 10, command: 'session.switchBilling', when: (c) => backendFeatureCaps(c.s.backend || 'claude').accounts });
   registerMenuItem({ menu: M, group: '3_admin', order: 15, command: 'session.pinBrowser', when: (c) => !!(c.app && c.app._browserProfiles && Array.isArray(c.app._browserProfiles.profiles)) && c.s.status === 'live' && !!c.s.webuiId && !c.s.host });
   registerMenuItem({ menu: M, group: '3_admin', order: 16, command: 'session.browserLive', when: (c) => !!(c.app && c.app._browserProfiles) && c.s.status === 'live' && !!c.s.webuiId && !!c.s.browserKey && !c.s.host });
   registerMenuItem({ menu: M, group: '3_admin', order: 17, command: 'session.browserHandback', when: (c) => c.s.status === 'live' && !!c.s.webuiId && !!c.s.browserKey && !c.s.host && c.s.browserInput === 'user' });
@@ -926,7 +926,7 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
       const acctList = (app._accounts?.accounts || []).filter(a => (a.backend || 'claude') === backend);
       if (backendFeatureCaps(backend).accounts && acctList.length) {
         pop.appendChild(makeRow(tr('Account'), [
-          { value: 'subscription', label: backend === 'codex' ? tr('ChatGPT login') : tr('Subscription (Pro/Max)') },
+          { value: 'subscription', label: tr(billingRow(backend).switchLogin) },
           // Pooled pseudo-account (either backend): names its CURRENT target —
           // the old else-branch labeled it "— API …undefined" (2.369.18, same
           // class as the New Session dialog's fix)

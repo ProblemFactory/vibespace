@@ -487,13 +487,13 @@ for (const { kind, caps } of REGISTERED) {
     return m.caps.budget.settingKey === CS.settingPath(b.key) && m.caps.budget.default === b.default && m.caps.pace.settingKey === CS.settingPath(p.key) && m.caps.pace.unitsPerSec === p.default;
   });
   const QUOTED_KEY = /['"`]channels\.[A-Za-z0-9]+['"`]/;
-  J.spread = (src, vendor) => src.includes(`...budgetOf(CHANNEL_SETTINGS.${vendor})`) && src.includes(`...paceOf(CHANNEL_SETTINGS.${vendor})`) && !QUOTED_KEY.test(src);
+  J.spread = (src, vendor) => src.includes('...budgetOf(MANIFEST.settings)') && src.includes('...paceOf(MANIFEST.settings)') && src.includes(`require('./${vendor}/manifest.js')`) && !QUOTED_KEY.test(src);
   ok(J.values([[lark, CS.CHANNEL_SETTINGS.lark], [gmail, CS.CHANNEL_SETTINGS.gmail]]) && lark.caps.budget.default === 60 && lark.caps.pace.unitsPerSec === 5 && gmail.caps.budget.default === 3000 && gmail.caps.pace.unitsPerSec === 40,
     'lark / gmail caps.budget + caps.pace carry their table rows\' settings key and default (60 · 5 · 3000 · 40, today\'s numbers)');
-  ok(J.spread(srcOf('lark.js'), 'lark') && J.spread(srcOf('gmail.js'), 'gmail'), 'both adapters SPREAD budgetOf / paceOf(CHANNEL_SETTINGS.<vendor>) into their caps — the table by identity');
+  ok(J.spread(srcOf('lark.js'), 'lark') && J.spread(srcOf('gmail.js'), 'gmail'), 'both adapters SPREAD budgetOf / paceOf(MANIFEST.settings — their own manifest, lane dc-channels-manifest) into their caps — the table by identity');
   const literal = fs.readdirSync(path.join(REPO, 'src/channels')).filter((f) => f.endsWith('.js') && QUOTED_KEY.test(srcOf(f)));
   ok(!literal.length, `no module under src/channels/ spells a quoted channels.* key (${literal.join(', ') || 'clean'}) — a vendor's settings live in its table`);
-  const FROM = "budget: { unit: 'request', metered: true, ...budgetOf(CHANNEL_SETTINGS.lark) },";
+  const FROM = "budget: { unit: 'request', metered: true, ...budgetOf(MANIFEST.settings) },";
   const lsrc = srcOf('lark.js');
   ok(lsrc.includes(FROM), 'the patch site of the planted-literal control is in lark.js (a moved line would make the control vacuous)');
   const litFile = MC.write('src/channels/lark.js', lsrc.replace(FROM, "budget: { unit: 'request', default: 60, settingKey: 'channels.budgetLarkPerMin', metered: true },"), 'literal');

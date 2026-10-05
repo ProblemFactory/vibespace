@@ -414,7 +414,8 @@ console.log('⑨ the workspace app through the engine');
     const rx = await Wx.eng.reauthorize(cx.adapter.id, { clientPreset: 'acme', origin: ORIGIN });
     const Lx = await land(Wx.eng, Wx.v, rx.flow.consentUrl, { token: tok });
     const after = recsX();
-    ok(Lx.r.ok === false && /must be the same account/.test(Lx.r.error || '') && /data-landing="failed"/.test(SW.landingHtml(Lx.r)) && after.length === 1 && after[0].credentialKey == null && JSON.stringify(after[0].auth) === held && /must be the same account/.test(after[0].lastAuthError || ''), `a paste account re-pointed onto the preset as ${who}: the landing page and the record both refuse it by name, the paste binding + token untouched`, JSON.stringify({ r: Lx.r, key: after[0] && after[0].credentialKey, err: after[0] && after[0].lastAuthError }));
+    // slack-landing-nologin verify r1: the landing page is cookie-free — it says the refusal in fixed words and never the held / offered identity
+    ok(Lx.r.ok === false && /the account was not changed/.test(Lx.r.error || '') && /data-landing="failed"/.test(SW.landingHtml(Lx.r)) && !/t0acme001|u0self001|u0second|t0otherteam/i.test(SW.landingHtml(Lx.r)) && after.length === 1 && after[0].credentialKey == null && JSON.stringify(after[0].auth) === held && /must be the same account/.test(after[0].lastAuthError || ''), `a paste account re-pointed onto the preset as ${who}: the landing page refuses it in fixed words (no identity) and the record by name, the paste binding + token untouched`, JSON.stringify({ r: Lx.r, key: after[0] && after[0].credentialKey, err: after[0] && after[0].lastAuthError }));
   }
   {   // …and through the re-authorize dialog's PASTE-BACK (a public origin: the relay SHOWS the code, the member pastes it)
     const Wp = await mkEngine('repoint-paste', { storeEnv: preset(), mode: { whoami: { [WS_TOKEN2]: { user_id: 'U0SECOND', user: 'kim' } } } });

@@ -389,7 +389,11 @@ app.delete('/api/accounts/:id', (req, res) => {
 // for why a directory symlink is the only shape that keeps ONE credential copy
 // (and therefore one refresh-token holder) while still swapping per-spawn.
 app.post('/api/accounts/pool', (req, res) => {
-  try { res.json({ success: true, ...accounts.createPool({ name: req.body?.name, members: req.body?.members, backend: req.body?.backend === 'codex' ? 'codex' : 'claude' }) }); }
+  // any REGISTERED harness whose caps row pools (rv-harnesses H3, lane dc-pool-quota): an unknown or non-pooling
+  // backend is refused here — it used to be coerced, silently, into a claude pool
+  const b = req.body?.backend || 'claude';
+  if (!require('../harnesses').has(b) || !require('../backend-caps.js').capsOf(b).pool) return res.status(400).json({ error: 'pooling is not supported for backend ' + String(b).slice(0, 40) });
+  try { res.json({ success: true, ...accounts.createPool({ name: req.body?.name, members: req.body?.members, backend: b }) }); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 const isAgentBearer = (req) => /^Bearer\s+(vsst_|jbt_)/i.test(String((req.headers && req.headers.authorization) || '')); // the pool's placement is the owner's to set — an agent's session/job token is refused

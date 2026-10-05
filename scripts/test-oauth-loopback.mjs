@@ -95,9 +95,10 @@ const quiet = { warn() {}, log() {}, error() {} };
   await sleep(30);
   ok(good.status === 200 && exchanges.length === 1 && exchanges[0] === 'lark-code-1' && ol.status(f.flowId).ok === true, 'fixed: the right state on the registered path exchanges the code');
   ok((await portFree(P_FIXED)), 'fixed: the port is RELEASED on completion');
-  // the default fixed target IS the registry's literal (imported, never spelled here)
-  const t = OL.fixedTarget();
-  ok(t.url === R.LARK_CALLBACK_URL && t.pathname === '/lark/cb' && t.port === Number(new URL(R.LARK_CALLBACK_URL).port), 'fixed: with no callbackUrl the target is the registry\'s ONE definition (LARK_CALLBACK_URL)');
+  // lane dc-channels-consent: the machine holds NO default fixed target — the caller's consent row names its callback
+  let noDefault = null; try { OL.fixedTarget(); } catch (e) { noDefault = e.message; }
+  const t = OL.fixedTarget(require(path.join(REPO, 'src/channels/lark/manifest.js')).LARK_CALLBACK_URL);
+  ok(/no default/.test(noDefault || '') && t.url === require(path.join(REPO, 'src/channels/lark/manifest.js')).LARK_CALLBACK_URL && t.pathname === '/lark/cb' && t.port === Number(new URL(require(path.join(REPO, 'src/channels/lark/manifest.js')).LARK_CALLBACK_URL).port), 'fixed: with no callback the machine refuses by name (no vendor default); the Lark row\'s registered callback parses to its port and path');
   let refusedTarget = null; try { OL.fixedTarget('https://my-instance.example/lark/cb'); } catch (e) { refusedTarget = e.message; }
   ok(/loopback/.test(refusedTarget || ''), 'fixed: a non-loopback callback is refused by name (decision 4/21: the callback is a VibeSpace-owned loopback, never an instance address)');
 }
@@ -175,8 +176,8 @@ const quiet = { warn() {}, log() {}, error() {} };
   const PASTE = "if (u.searchParams.get('state') !== st.state) throw new Error('state mismatch — restart the flow');";
   ok(src.includes(HANDLER) && gs.includes(HANDLER), 'the request-handler `state` check is carried VERBATIM from src/gmail-sync.js');
   ok(src.includes(PASTE) && gs.includes(PASTE), 'the paste-back `state` check is carried VERBATIM from src/gmail-sync.js');
-  const LIT = R.LARK_CALLBACK_URL;
-  ok(!src.includes(LIT) && /LARK_CALLBACK_URL/.test(src), 'the Lark callback literal is IMPORTED from the registry, never spelled here (the registry census asserts the same from its side)');
+  const LIT = require(path.join(REPO, 'src/channels/lark/manifest.js')).LARK_CALLBACK_URL;
+  ok(!src.includes(LIT) && !/LARK_CALLBACK_URL|require\('\.\/integration-registry\.js'\)/.test(src), 'lane dc-channels-consent: the loopback names no vendor callback — neither the Lark literal nor its registry name (the caller\'s consent row hands it; the registry census asserts the same from its side)');
   ok(!fs.readFileSync(new URL(import.meta.url).pathname, 'utf-8').includes(LIT), 'this suite never spells the literal either — every fixed port under test is a FREE one built at runtime');
 }
 

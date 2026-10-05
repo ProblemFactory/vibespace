@@ -35,6 +35,18 @@
 const { startLane } = require('./lane.js');
 
 const PUBSUB = 'https://pubsub.googleapis.com/v1';
+const i18nKey = (s) => s;   // extraction marker (scripts/i18n-extract.mjs) — the panel words it through t()
+/** THE LANE'S WORDS for the codes it parks `unavailable` with (lane dc-channels-blocks — they lived in the shared
+ *  src/channel-caps.js switch): the card says what to DO, in the device's language. */
+const UNAVAILABLE_WORDS = Object.freeze({
+  'push-not-configured': i18nKey('Push is on but not configured: set the Pub/Sub topic and subscription options in Edit, then re-authorize. Until then messages are polled.'),
+  'push-misconfigured': i18nKey('Push is misconfigured: the Pub/Sub topic or subscription option is not a valid resource name — fix it in Edit. Until then messages are polled.'),
+  'scope-missing': i18nKey('Push needs the Pub/Sub permission: re-authorize this account (the consent now asks for it). Until then messages are polled.'),
+  'watch-refused': i18nKey('Gmail refused the push watch: grant gmail-api-push@system.gserviceaccount.com the Publisher role on the topic. Until then messages are polled.'),
+  'pubsub-forbidden': i18nKey('The Pub/Sub subscription refused this account: grant it the Subscriber role on the subscription. Until then messages are polled.'),
+  'subscription-not-found': i18nKey('The Pub/Sub subscription does not exist: create it (a pull subscription of the topic) or fix the option in Edit. Until then messages are polled.'),
+  'watch-renew-failed': i18nKey('The push watch could not be renewed three times — push stopped; re-save the Push settings to retry. Until then messages are polled.'),
+});
 /** The scope the user's token must carry for THIS instance to pull. */
 const PUBSUB_SCOPE = 'https://www.googleapis.com/auth/pubsub';
 /** THE DECLARED EGRESS (§3.1). `www.googleapis.com` is the SCOPE identifier. */
@@ -189,4 +201,4 @@ function createGmailLive({ adapterId, api, accessToken, tokenScopes, options, fe
   };
 }
 
-module.exports = { createGmailLive, decodeNote, EGRESS, RATE_OK, PUBSUB_SCOPE, WATCH_RENEW_MS, WATCH_RENEW_MAX_FAILS, PULL_TIMEOUT_MS, PULL_MAX, SUBSCRIPTION_RE, TOPIC_RE };
+module.exports = { UNAVAILABLE_WORDS, createGmailLive, decodeNote, EGRESS, RATE_OK, PUBSUB_SCOPE, WATCH_RENEW_MS, WATCH_RENEW_MAX_FAILS, PULL_TIMEOUT_MS, PULL_MAX, SUBSCRIPTION_RE, TOPIC_RE };

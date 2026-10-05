@@ -730,16 +730,38 @@ const card2 = await p2.evaljs(`(async () => {
   const l = document.querySelector('.rail-panel-channels .chan-sec[data-adapter="fake-poll"] .chan-grain-line[data-grain="account"]'); return l ? l.textContent : null;
 })()`);
 ok(card2 === CARD, `a SECOND client shows the same access + notification line without a reload: "${card2}"`, card2);
-const inh = await p1.evaljs(`(async () => {
+// lane channels-list-polish (2.369.214, the owner's item 6): a row draws the access / notification line ONLY where the
+// conversation's OWN grain differs from the account's — an inherited row says nothing (the card above says it once)
+const ROWS_NOW = `(async () => {
   for (let i = 0; i < 60; i++) {
     const rows = [...document.querySelectorAll('.rail-panel-channels .chan-row')].filter((r) => (r.dataset.conv || '').startsWith('fake-poll/'));
-    const tags = rows.map((r) => r.querySelector('.chan-row-assign'));
-    if (tags.length && tags.every(Boolean) && tags.every((x) => /工作/.test(x.textContent))) return { rows: rows.map((r) => ({ conv: r.dataset.conv, text: r.querySelector('.chan-row-assign').textContent, grain: r.querySelector('.chan-row-assign').dataset.grain, dim: r.querySelector('.chan-row-assign').classList.contains('chan-row-inherited') })) };
+    if (rows.length === 5) return { rows: rows.map((r) => { const a = r.querySelector('.chan-row-assign'); return { conv: r.dataset.conv, assign: a ? a.textContent : null, grain: a ? a.dataset.grain : null }; }) };
     await new Promise((r) => setTimeout(r, 200));
   }
-  return { fail: 'the rows never showed the inherited access / notification' };
-})()`);
-ok(!inh.fail && inh.rows.length === 5 && inh.rows.every((r) => r.grain === 'account' && r.dim && /Xi/.test(r.text) && /工作/.test(r.text) && /（账号）/.test(r.text)), 'EVERY row of the account wears the INHERITED line (访问 … · 通知 …), dim and labelled （账号）', JSON.stringify(inh).slice(0, 500));
+  return { fail: 'the 5 rows of the account never drew' };
+})()`;
+const inh = await p1.evaljs(ROWS_NOW);
+ok(!inh.fail && inh.rows.length === 5 && inh.rows.every((r) => r.assign === null), 'an INHERITED row says nothing: none of the account\'s 5 rows draws the access / notification line (the account card says it once)', JSON.stringify(inh));
+const OVR = ((inh.rows || []).map((r) => r.conv.slice('fake-poll/'.length)).filter((c) => !/^fake-poll-room-[123]$/.test(c))[0]) || 'fake-poll-room-1';
+// a row's assignment is its LEAD watcher's grain (effectiveView): the conversation's OWN grain = its own access + its own watcher
+const XI = { kind: 'agent', id: 'agent-xi', name: 'Xi' };
+const ovAcc = await api('PUT', `/api/channels/fake-poll/${encodeURIComponent(OVR)}/access`, { access: [{ principal: XI, authority: 'draft' }] });
+const ovSet = ovAcc.status === 200 ? await api('PUT', `/api/channels/fake-poll/${encodeURIComponent(OVR)}/watchers`, { watchers: [{ principal: XI, notify: 'wake' }] }) : ovAcc;
+const ROW_OF = (conv, want) => `(async () => {
+  for (let i = 0; i < 60; i++) {
+    const r = document.querySelector('.rail-panel-channels .chan-row[data-conv="fake-poll/${conv}"]');
+    const a = r && r.querySelector('.chan-row-assign');
+    if (${want} ? !!a : (r && !a)) return { assign: a ? a.textContent : null, grain: a ? a.dataset.grain : null, others: [...document.querySelectorAll('.rail-panel-channels .chan-row')].filter((x) => (x.dataset.conv || '').startsWith('fake-poll/') && x !== r && x.querySelector('.chan-row-assign')).length };
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  return { fail: 'timed out', want: ${want} };
+})()`;
+const ov = await p1.evaljs(ROW_OF(OVR, true));
+ok(ovAcc.status === 200 && ovSet.status === 200 && !ov.fail && ov.grain === 'conversation' && /^与账号不同：/.test(ov.assign || '') && /Xi/.test(ov.assign) && ov.others === 0, `a conversation given its OWN grain (access + a watcher) draws the line, worded as the difference ("${ov.assign}") — and only that row`, JSON.stringify({ status: [ovAcc.status, ovSet.status], body: ovSet.json, ov }));
+const ovBackW = await api('PUT', `/api/channels/fake-poll/${encodeURIComponent(OVR)}/watchers`, { watchers: [] });
+const ovBack = ovBackW.status === 200 ? await api('PUT', `/api/channels/fake-poll/${encodeURIComponent(OVR)}/access`, { access: [] }) : ovBackW;
+const back = await p1.evaljs(ROW_OF(OVR, false));
+ok(ovBack.status === 200 && !back.fail && back.assign === null && back.others === 0, 'set back to [] it inherits again and the line goes (the legs below see the account grain)', JSON.stringify({ status: [ovBackW.status, ovBack.status], back }));
 const win2 = await p1.evaljs(`(async () => {
   const w = window.app.openChannel('fake-poll', 'fake-poll-room-3');
   for (let i = 0; i < 60; i++) { const c = w.content.querySelector('.chan-assign-chip'); if (c && /工作/.test(c.textContent)) return { chip: c.textContent, inherited: c.classList.contains('chan-assign-inherited') }; await new Promise((r) => setTimeout(r, 200)); }

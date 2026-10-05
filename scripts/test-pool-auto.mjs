@@ -643,7 +643,7 @@ await (async () => {
       getHosts: () => ({ device: async () => ({ poolOrders: async () => { }, ackPoolOrdersLog() { } }) }),
       getUsageHistory: () => ({ _cost: () => 0, ingestRemoteEvents() { } }), recordUsageAttribution() { }, adapterRegistry: { get: () => ClaudeCodeAdapter },
       getAutoResume: () => ({ armIfEnabled() { }, noteFireOutcome() { }, noteRecovered() { }, noteNoPoolTarget() { }, statusFor: () => null, enabledFor: () => false, fireNow() { } }),
-      getOtelIngest: () => ({ observedOrgFor: () => null }), getQuotaProbe: () => null, getSessionMetaStore: () => null,
+      getQuotaProbe: () => null, getSessionMetaStore: () => null,
     });
     // the estimator's burn, injected on the engine's OWN instance (the ledger is
     // a stub here): member A burns its 5h at 1.2 %/min, B is idle
@@ -805,7 +805,7 @@ await (async () => {
       getHosts: () => ({ device: async () => ({ poolOrders: async () => { }, ackPoolOrdersLog() { } }) }),
       getUsageHistory: () => ({ _cost: () => 0, ingestRemoteEvents() { } }), recordUsageAttribution() { }, adapterRegistry: { get: () => ClaudeCodeAdapter },
       getAutoResume: () => ({ armIfEnabled() { }, noteFireOutcome() { }, noteRecovered() { }, noteNoPoolTarget() { }, statusFor: () => null, enabledFor: () => false, fireNow: (sid) => { fires.push(sid); return false; }, armedIds: () => [] }),
-      getOtelIngest: () => ({ observedOrgFor: () => null }), getQuotaProbe: () => null, getSessionMetaStore: () => null,
+      getQuotaProbe: () => null, getSessionMetaStore: () => null,
     });
     eng.usageEstimator.burnFor = () => ({});
     const mk = (sid, on, { warm = false, inTurn = false } = {}) => {
@@ -1236,7 +1236,7 @@ await (async () => {
       getHosts: () => ({ device: async () => ({ poolOrders: async () => { }, ackPoolOrdersLog() { } }) }),
       getUsageHistory: () => ({ _cost: () => 0, ingestRemoteEvents() { } }), recordUsageAttribution() { }, adapterRegistry: { get: () => ClaudeCodeAdapter },
       getAutoResume: () => ({ armIfEnabled() { }, noteFireOutcome() { }, noteRecovered() { }, noteNoPoolTarget() { }, statusFor: () => null, enabledFor: () => false, fireNow: (sid) => { fires.push(sid); return false; }, armedIds: () => [] }),
-      getOtelIngest: () => ({ observedOrgFor: () => null }), getQuotaProbe: () => null, getSessionMetaStore: () => null,
+      getQuotaProbe: () => null, getSessionMetaStore: () => null,
     });
     eng.usageEstimator.burnFor = () => ({});
     const mk = (sid, on, { warm = false, inTurn = false } = {}) => {
@@ -1419,7 +1419,7 @@ await (async () => {
       getHosts: () => ({ device: async () => ({ poolOrders: async () => { }, ackPoolOrdersLog() { } }) }),
       getUsageHistory: () => ({ _cost: () => 0, ingestRemoteEvents() { } }), recordUsageAttribution() { }, adapterRegistry: { get: () => ClaudeCodeAdapter },
       getAutoResume: () => ({ armIfEnabled() { }, noteFireOutcome() { }, noteRecovered() { }, noteNoPoolTarget() { }, statusFor: () => null, enabledFor: () => false, fireNow: (sid) => { fires.push(sid); return false; }, armedIds: () => [] }),
-      getOtelIngest: () => ({ observedOrgFor: () => null }), getQuotaProbe: () => null,
+      getQuotaProbe: () => null,
       getSessionMetaStore: () => ({ readSessionMeta: (k) => metas.get(k) || {}, writeSessionMeta: (k, v) => metas.set(k, v) }),
     });
     eng.usageEstimator.burnFor = () => ({});
@@ -1514,7 +1514,7 @@ await (async () => {
     ck('codex: a pin naming a non-member falls back to the pool link', !cam.resolveForSpawn(CP, 'codex', { pinned: true, chooseMember: () => 'cxs-stranger' }).pinnedMember);
     ck('codex: an UNPINNED spawn never follows the chooser (byte-identical: the pool link)', !cam.resolveForSpawn(CP, 'codex', { chooseMember: () => B }).pinnedMember);
     const cs = new Map(); cs.set('s-x', { backend: 'codex', mode: 'chat', host: null, _webuiId: 's-x', _accountId: CP, sockName: 'cw-x', name: 'x', _heldPoolMember: A, createdAt: Date.now() });
-    const ceng = engMod.create({ app: { get() { }, post() { }, put() { }, patch() { }, delete() { }, use() { }, locals: {} }, rootDir: root, USAGE_CACHE_DIR: path.join(root, 'data', 'usage-cache'), activeSessions: cs, wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { }, serverNotice() { }, serverSetting: () => undefined, getAccounts: () => cam, getHosts: () => ({ device: async () => ({ poolOrders: async () => { }, ackPoolOrdersLog() { } }) }), getUsageHistory: () => ({ _cost: () => 0, ingestRemoteEvents() { } }), recordUsageAttribution() { }, adapterRegistry: { get: () => ClaudeCodeAdapter }, getAutoResume: () => null, getOtelIngest: () => null, getQuotaProbe: () => null, getSessionMetaStore: () => null });
+    const ceng = engMod.create({ app: { get() { }, post() { }, put() { }, patch() { }, delete() { }, use() { }, locals: {} }, rootDir: root, USAGE_CACHE_DIR: path.join(root, 'data', 'usage-cache'), activeSessions: cs, wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { }, serverNotice() { }, serverSetting: () => undefined, getAccounts: () => cam, getHosts: () => ({ device: async () => ({ poolOrders: async () => { }, ackPoolOrdersLog() { } }) }), getUsageHistory: () => ({ _cost: () => 0, ingestRemoteEvents() { } }), recordUsageAttribution() { }, adapterRegistry: { get: () => ClaudeCodeAdapter }, getAutoResume: () => null, getQuotaProbe: () => null, getSessionMetaStore: () => null });
     const cr = quietly(() => { ceng._r = ceng.setConversationPin('s-x', B); });
     ck('codex: the pin is recorded and applies at the next restart (code codex_cold) — never a restart by itself', ceng._r.ok && ceng._r.placed === false && ceng._r.code === 'codex_cold' && cs.get('s-x')._poolPin.memberId === B, JSON.stringify(ceng._r));
     if (prevHome === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = prevHome;
@@ -1734,7 +1734,7 @@ await (async () => {
       cs.set('s-h', { backend: 'codex', mode: 'chat', host: null, _webuiId: 's-h', _accountId: CP, sockName: 'cw-h', name: 'held', _heldPoolMember: A, createdAt: Date.now(), backendSessionId: 'thr-h', cwd: root });
       const ceng = engine.create({ app: { get() { }, post() { }, put() { }, patch() { }, delete() { }, use() { }, locals: {} }, rootDir: root, USAGE_CACHE_DIR: cacheDir, activeSessions: cs,
         wss: { clients: new Set([{ readyState: 1, send: (p) => { try { const m = JSON.parse(p); if (m.type === 'pool-auto-switched') asked.push(...(m.affected || []).map((x) => x.serverId)); } catch { } } }]) }, WS_OPEN: 1, broadcastToSession() { }, serverNotice: (k, t) => said.push(t), serverSetting: () => undefined, getAccounts: () => cam,
-        getHosts: () => ({ device: async () => ({ poolOrders: async () => { }, ackPoolOrdersLog() { } }) }), getUsageHistory: () => ({ _cost: () => 0, ingestRemoteEvents() { } }), recordUsageAttribution() { }, adapterRegistry: { get: () => ClaudeCodeAdapter }, getAutoResume: () => null, getOtelIngest: () => null, getQuotaProbe: () => null, getSessionMetaStore: () => null });
+        getHosts: () => ({ device: async () => ({ poolOrders: async () => { }, ackPoolOrdersLog() { } }) }), getUsageHistory: () => ({ _cost: () => 0, ingestRemoteEvents() { } }), recordUsageAttribution() { }, adapterRegistry: { get: () => ClaudeCodeAdapter }, getAutoResume: () => null, getQuotaProbe: () => null, getSessionMetaStore: () => null });
       const rts = {};
       const app = { get() { }, post: (p, h) => { rts['POST ' + p] = h; }, patch: (p, h) => { rts['PATCH ' + p] = h; }, put() { }, delete() { }, use() { }, locals: {} };
       require(path.resolve('src/server/account-usage-routes.js')).create({ app, rootDir: root, activeSessions: cs, auth: {}, engine: ceng, serverSetting: () => undefined, recordUsageAttribution() { }, liveAccountIdSet: () => new Set(), getAccounts: () => cam, broadcastActiveSessions() { }, getHosts: () => ({ list: () => [] }), getMounts: () => ({}), getTelemetry: () => ({}), getUsageHistory: () => ({}), getLoginExpiryWatch: () => null });

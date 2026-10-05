@@ -226,6 +226,16 @@ class Auth {
       // and lets `public` ones through (the shareable-link case). Pinned by
       // scripts/test-published-pages.mjs.
       if (p.startsWith('/p/')) return next();
+      // Slack consent landing (2.369.214, design 018): Slack / the relay page
+      // sends the browser that pressed Allow here — often ANOTHER browser
+      // profile with no cookie (a fleet user's Slack identity lives apart from
+      // their SSO login), and the redirect to /login lost the code. The signed
+      // STATE is the credential: src/routes/channels.js rate-limits per IP,
+      // judges this boot's HMAC + age, finds a running public flow by the whole
+      // state and exchanges once; the RECORD is still made by the owner's
+      // cookied tab (connect {flowId}). GET + exactly /api/channels/oauth/cb/<kind>
+      // — pinned by scripts/test-slack-landing-nologin.mjs.
+      if (req.method === 'GET' && /^\/api\/channels\/oauth\/cb\/[^/]+$/.test(p)) return next();
       if (this.requestAuthed(req)) return next();
       // Browsers navigating to pages get the login form; API calls get 401
       const wantsHtml = req.method === 'GET' && (req.headers.accept || '').includes('text/html');

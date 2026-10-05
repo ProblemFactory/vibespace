@@ -100,17 +100,19 @@ function neededScopes(body) {
 const EGRESS = Object.freeze([]);
 /** design 018: THE LANDING PAGE the member's browser shows after Slack's Allow (src/routes/channels.js), in en / zh /
  *  ja at once (the server has no language of its own). `r` = the engine's `{ok, why, user, error}`; every piece
- *  escaped; the code and the state never appear. */
+ *  escaped; the code and the state never appear. 2.369.214: the page is cookie-free (often another browser profile) —
+ *  `ok` says it is DONE here and sends the person back to the window where they pressed Connect; no sign-in on it. */
 const LANDING = Object.freeze({
-  ok: ['Slack is connected{user}. Go back to VibeSpace — you can close this tab.', '已连接 Slack{user}。回到 VibeSpace 即可，这个标签页可以关掉。', 'Slack に接続しました{user}。VibeSpace に戻ってください。このタブは閉じて構いません。'],
+  ok: ['Done here — Slack said yes{user}. Go back to the VibeSpace window where you pressed Connect: it finishes by itself. You can close this tab.', '这里已完成——Slack 已同意{user}。回到你按下“连接”的那个 VibeSpace 窗口，它会自己完成。这个标签页可以关掉。', 'ここでの操作は完了です — Slack が許可しました{user}。「接続」を押した VibeSpace のウィンドウに戻ってください。そちらで自動的に完了します。このタブは閉じて構いません。'],
   denied: ['You declined on Slack — nothing was connected.', '你在 Slack 上拒绝了，没有连接任何账号。', 'Slack で拒否されたため、何も接続されていません。'],
   refused: ['This sign-in link is not valid here ({why}). Start again from VibeSpace’s Connect dialog.', '这个登录链接在这里无效（{why}）。请回到 VibeSpace 的连接对话框重新开始。', 'このサインインリンクはここでは無効です（{why}）。VibeSpace の接続ダイアログからやり直してください。'],
+  'too-many': ['Too many sign-in pages were opened from this address in the last minute. Wait a minute, then reload this page — the sign-in is still waiting.', '这个地址在一分钟内打开了太多登录页面。请等一分钟后刷新本页——登录仍在等待。', 'このアドレスから直近 1 分間に開かれたサインインページが多すぎます。1 分待ってからこのページを再読み込みしてください — サインインはまだ待機中です。'],
   failed: ['Slack did not finish the sign-in: {error}', 'Slack 没有完成登录：{error}', 'Slack でサインインが完了しませんでした：{error}'],
 });
 const LANDING_WHY = Object.freeze({ 'bad-shape': 'malformed', 'bad-hmac': 'not signed by this VibeSpace', 'wrong-flow': 'no such sign-in is running', expired: 'expired', used: 'already used' });
 const escHtml = (x) => String(x).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 function landingHtml(r = {}) {
-  const kind = r.ok ? 'ok' : r.why === 'denied' ? 'denied' : r.why === 'failed' ? 'failed' : 'refused';
+  const kind = r.ok ? 'ok' : r.why === 'denied' ? 'denied' : r.why === 'failed' ? 'failed' : r.why === 'too-many' ? 'too-many' : 'refused';   // verify r1: 429 = wait + reload, never "start again"
   const user = r.ok && typeof r.user === 'string' && r.user ? ` (${r.user.slice(0, 200)})` : '';
   const fill = (t) => t.replace('{user}', user).replace('{why}', LANDING_WHY[r.why] || 'refused').replace('{error}', String(r.error || 'no answer').slice(0, 300));
   const lines = LANDING[kind].map((t, i) => `<p lang="${['en', 'zh', 'ja'][i]}">${escHtml(fill(t))}</p>`).join('');

@@ -137,7 +137,7 @@ function mkWorld({ dir = null, healthy = true, ignoreWorkedFlag = false, arModul
     wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { }, serverNotice: (k, t) => notices.push(t),
     serverSetting: () => undefined, getAccounts: () => am, getHosts: () => null, getUsageHistory: () => null,
     recordUsageAttribution() { }, adapterRegistry: { get() { return null; } },
-    getAutoResume: () => arSeenByEngine, getOtelIngest: () => ({ observedOrgFor: (cid) => obs.get(cid) || null }), getQuotaProbe: () => null,
+    getAutoResume: () => arSeenByEngine, getQuotaProbe: () => null,
   });
   const SID = 'sess-4-1788764794641', CID = 'cid-4';
   const session = { backend: 'claude', mode: 'chat', host: null, _webuiId: SID, claudeSessionId: CID, _accountId: P, _autoResume: true, _servedModel: 'claude-fable-5', _servedModelAt: Date.now(), pty: { write() { } }, name: 'work' };

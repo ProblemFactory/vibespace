@@ -76,7 +76,7 @@ console.log('⓪ the module');
   ok(JSON.stringify(c.threads) === JSON.stringify({ read: 'vendor', replyInto: true, listing: 'separate', placements: ['chat', 'thread', 'thread+chat'], rootReply: 'thread' }), 'threads: vendor, listed separately, chat / thread / thread+chat, a reply\'s norm is the thread (F3)');
   ok(c.reactions.read === 'list' && c.reactions.add === true && c.reactions.remove === 'own' && c.reactions.vocabulary === 'names', 'reactions: a per-message list (an inline read would drop them — F4), add, remove own, names');
   ok(c.facts.join() === 'via,edited' && c.budget.settingKey === 'channels.budgetSlackPerMin' && c.budget.default === 40, 'facts via + edited; the budget row is the slack table\'s (40 a minute)');
-  ok(slack.EGRESS.join() === 'slack.com,files.slack.com,avatars.slack-edge.com' && Manifest.EGRESS.join() === 'api.slack.com,slack.com', 'egress: the Web API host, the files host and the uploaded-avatar host (lane channel-avatars; the manifest link\'s host and design 018\'s consent page are the person\'s browser pages)');
+  ok(slack.EGRESS.join() === 'slack.com,files.slack.com,avatars.slack-edge.com' && Manifest.EGRESS.join() === 'api.slack.com,slack.com,problemfactory.github.io', 'egress: the Web API host, the files host and the uploaded-avatar host (lane channel-avatars; the manifest link\'s host and design 018\'s consent page are the person\'s browser pages)');
   const src = fs.readFileSync(path.join(REPO, 'src/channels/slack.js'), 'utf-8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   ok(!/process\.env/.test(src), 'it never reads process.env');
   const row = R.rowById('slack');
@@ -570,10 +570,12 @@ console.log('design 018: the workspace app (state, consent URL, relay rule)');
   const off = RT.filter(([o, want, allow]) => Manifest.relayTargetVerdict(o, { allow: allow || [] }) !== want);
   ok(!off.length, `relayTargetVerdict over ${RT.length} rows: private networks back, public hosts / look-alikes / http under an allow suffix / a one-label suffix shown the code`, JSON.stringify(off));
   globalThis.__SLACK_RELAY_TABLE = RT;
-  // the custom rung's relay default: ONE address in the settings schema and the engine
+  // the custom rung's relay default: ONE address in the settings schema and Slack's consent row (lane dc-channels-consent:
+  // the engine reads the row's setting and names no vendor)
   const schemaSrc = fs.readFileSync(path.join(REPO, 'src/lib/settings-schema.js'), 'utf-8'), engSrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
-  const d1 = (/'channels\.slackRelayUrl': \{\s*type: 'string', default: '([^']+)'/.exec(schemaSrc) || [])[1], d2 = (/const SLACK_RELAY_DEFAULT = '([^']+)';/.exec(engSrc) || [])[1];
-  ok(d1 && d1 === d2 && Manifest.redirectFor({ relayUrl: d1 }).via === 'relay', `the relay page default is one https address in the schema and the engine (${d1})`);
+  const relayRow = require(path.join(REPO, 'src/channels/slack.js')).consent.relayUrlSetting;
+  const d1 = ((require(path.join(REPO, 'src/channels/slack/manifest.js')).settings.options || []).find((r) => r.key === 'slackRelayUrl') || {}).default, d2 = relayRow.fallback;   // lane dc-channels-manifest: the schema row derives from Slack's manifest
+  ok(d1 && d1 === d2 && d2 === Manifest.RELAY_DEFAULT && `channels.${relayRow.key}` === 'channels.slackRelayUrl' && !/slackRelayUrl|problemfactory/.test(engSrc) && Manifest.redirectFor({ relayUrl: d1 }).via === 'relay', `the relay page default is one https address in the schema and Slack's consent row, the engine spells neither (${d1})`);
   // the fixture the deploy side runs its admin relay against (scripts/fixtures/slack-state.json)
   const FXS = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/slack-state.json'), 'utf-8'));
   const fsign = signer(FXS.key);

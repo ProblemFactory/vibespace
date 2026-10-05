@@ -344,7 +344,8 @@ function ruleHits(rule, record, ctx) {
       return !!want && (lower(author.id).includes(want) || lower(author.name).includes(want));
     }
     case 'subject': {
-      const s = lower(rec.raw && rec.raw.subject);
+      // lane dc-channels-blocks (C5): the subject is the ADAPTER's fact (`ctx.subjectOf` — its declared recordFacts)
+      const s = lower(ctx && typeof ctx.subjectOf === 'function' ? ctx.subjectOf(rec) : null);
       return !!s && s.includes(lower(rule.value));
     }
     // lane channel-rich: a mail's formatted BODY (`role: 'body'`) is the message, never an attachment it carries

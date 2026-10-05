@@ -111,7 +111,7 @@ const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const R = require(path.join(repo, 'src/integration-registry.js'));
-const LARK_CB = R.LARK_CALLBACK_URL;
+const LARK_CB = require(path.join(repo, 'src/channels/lark/manifest.js')).LARK_CALLBACK_URL;
 const BROWSER_ROWS = ['cloak', 'cloud:browserbase', 'cloud:browserless', 'cloud:kernel', 'cloud:browseruse', 'cloud:agentcore'];
 const SECRET40 = 'sk-' + 'Q7f3'.repeat(8) + 'ZZZ99';   // 40 chars
 const PRESETS = JSON.stringify([
@@ -561,7 +561,7 @@ const p2 = await newPage();
   ok((await accounts()).length === 0, 'a running sign-in creates nothing either');
   ok((await followConsent(url1)) === 200, 'the redirect lands on the product\'s own loopback (the stub answers the token exchange)');
   const signed = await p1.evaljs(`(async () => { for (let i = 0; i < 80; i++) { const b = [...${DLG('connect')}.querySelectorAll('.mounts-drive-connect')].find((x) => x.style.display !== 'none'); const s = b && b.querySelector('.mounts-field-hint').textContent; if (/Connected/.test(s || '')) return s; await new Promise((r) => setTimeout(r, 100)); } return null; })()`);
-  ok(/✓ Connected — finish with the “Connect” button below\./.test(signed || ''), `the block says the sign-in finished (${JSON.stringify(signed)})`);
+  ok(/✓ Connected as ada@example\.test — finish with the “Connect” button below\./.test(signed || ''), `the block says the sign-in finished and NAMES who signed in (slack-landing-nologin: the consent may land in another browser profile) (${JSON.stringify(signed)})`);
   ok((await accounts()).length === 0, 'STILL nothing created — the record waits for Connect');
 
   // (f) Connect creates the record
@@ -586,11 +586,11 @@ const p2 = await newPage();
   await p2.evaljs(`(() => { window.__marker = 'p2-alive'; window.__chanFetches = 0; const of = window.fetch; window.fetch = function (u, ...r) { if (/^\\/api\\/channels(\\?|$)/.test(String(u))) window.__chanFetches++; return of.call(this, u, ...r); }; return 1; })()`);
 
   // (h) every conversation is a ↳ CHILD row; a refresh override repaints page 2 in place
-  const rows = await p1.evaljs(`(() => { const c = ${card(A.id)}; return { arrows: [...c.querySelectorAll('.chan-row-child .chan-row-line > .mounts-child-arrow')].map((a) => a.textContent), dot: c.querySelector('.chan-sec-head .chan-dot').dataset.state, count: c.querySelector('.chan-sec-count').textContent }; })()`);
-  ok(rows.arrows.join('') === '↳↳↳' && rows.dot === 'ok' && rows.count === '3', `each child row leads with the storage ↳ arrow; the dot is ok; the count reads 3 (${JSON.stringify(rows)})`);
+  const rows = await p1.evaljs(`(() => { const c = ${card(A.id)}; return { arrows: [...c.querySelectorAll('.chan-row-child')].map((r) => (r.firstElementChild && r.firstElementChild.classList.contains('chan-av') ? 'av' : '') + (r.querySelector('.mounts-child-arrow') ? '↳' : '')), dot: c.querySelector('.chan-sec-head .chan-dot').dataset.state, count: c.querySelector('.chan-sec-count').textContent }; })()`);
+  ok(rows.arrows.join(',') === 'av,av,av' && rows.dot === 'ok' && rows.count === '3', `each child row is a chat row led by its avatar (channels-list-polish: no ↳); the dot is ok; the count reads 3 (${JSON.stringify(rows)})`);
   await p1.probe('the ↳ conversation rows', `.rail-panel-channels .chan-account[data-adapter="${A.id}"] .chan-rows`);
   const firstConv = (await api('GET', '/api/channels')).json.conversations.find((c) => c.adapterId === A.id);
-  const chipOfConv = `(() => { const r = document.querySelector('.rail-panel-channels .chan-row[data-conv="${A.id}/' + ${JSON.stringify(firstConv.id)} + '"]'); const c = r && r.querySelector('.chan-row-line .chan-chip'); return c ? c.textContent + '|' + (r.title || '') : null; })()`;
+  const chipOfConv = `(() => { const r = document.querySelector('.rail-panel-channels .chan-row[data-conv="${A.id}/' + ${JSON.stringify(firstConv.id)} + '"]'); const c = r && r.querySelector('.chan-row-sub .chan-chip'); return c ? c.textContent + '|' + (r.title || '') : null; })()`;
   const chipBefore = await p2.evaljs(chipOfConv);
   const ov = await api('PUT', `/api/channels/${encodeURIComponent(A.id)}/${encodeURIComponent(firstConv.id)}/refresh`, { every: 'paused' });
   ok(ov.status === 200, `FIXTURE: one conversation's refresh is paused (${ov.status})`);

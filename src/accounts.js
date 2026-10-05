@@ -261,7 +261,7 @@ class AccountManager {
           // loginState on a pool = its MEMBERS' worst (a pool has no login of
           // its own); the row names the member that earned it so the user can
           // act without opening the pool's Members dialog.
-          return { ...base, pooled: true, loggedIn: !!info.loggedIn, email: info.email || null, subscriptionType: info.subscriptionType || null, current: cur, currentName: curAcct?.name || null, members: a.members || null, memberOptions: this.poolMembers(a.id), auto: true, priority: Array.isArray(a.priority) ? a.priority.slice() : [], placement: Array.isArray(a.priority) && a.priority.length ? 'priority' : 'automatic', hot: !!a.hot, hotSupported: capsOf(backend).hotSwitch === 'verified', supported: backend === 'codex' || this.poolSupported(), loginState: this.poolLoginState(a.id) };
+          return { ...base, pooled: true, loggedIn: !!info.loggedIn, email: info.email || null, subscriptionType: info.subscriptionType || null, current: cur, currentName: curAcct?.name || null, members: a.members || null, memberOptions: this.poolMembers(a.id), auto: true, priority: Array.isArray(a.priority) ? a.priority.slice() : [], placement: Array.isArray(a.priority) && a.priority.length ? 'priority' : 'automatic', hot: !!a.hot, hotSupported: capsOf(backend).hotSwitch === 'verified', supported: !this._credsOf(backend).keychainSensitive || this.poolSupported(), loginState: this.poolLoginState(a.id) };
         }
         if (type === 'subscription') {
           // ONE branch for every harness (S2): the descriptor's parseAuth reads
@@ -486,7 +486,7 @@ class AccountManager {
       // id falls back to claude exactly like a legacy record with no backend);
       // harnesses without API keys only ever hold subscription-type records.
       const be = (() => { try { return rec.backend && harnessOf(rec.backend).creds ? rec.backend : 'claude'; } catch { return 'claude'; } })();
-      if (be !== 'claude') a.backend = be;
+      if (!this._credsOf(be).legacyGlobalKey) a.backend = be; // the pre-registry harness's records omit `backend`
       if (rec.type === 'subscription' || !this._credsOf(be).supportsApiKeys) a.type = 'subscription';
       if (rec.key && /^sk-ant-/.test(rec.key)) { a.keyEnc = this._enc(String(rec.key)); a.tail = String(rec.key).slice(-8); }
       else if (rec.tail) a.tail = rec.tail;
@@ -922,7 +922,7 @@ class AccountManager {
   setOat(id, token) {
     const a = this.get(id);
     if (!a) throw new Error('unknown account: ' + id);
-    if (this._acctBackend(a) !== 'claude' || this._acctType(a) !== 'subscription') throw new Error('long-lived tokens apply to Claude subscription accounts only');
+    if (!this._credsOf(this._acctBackend(a)).longLivedToken || this._acctType(a) !== 'subscription') throw new Error('long-lived tokens apply to Claude subscription accounts only');
     token = String(token || '').trim();
     // sk-ant-oat01-… today; tolerate future oat revisions, refuse everything
     // else (an API key or a pasted access token here would mis-bill silently)
@@ -1281,7 +1281,7 @@ class AccountManager {
     // The darwin exclusion is claude-specific (keychain service name = a hash
     // of the env string) — codex auth.json is a plain file, pools work anywhere
     // directory symlinks do.
-    if (be === 'claude' && !this.poolSupported()) throw new Error('pooled accounts need a platform with directory symlinks and no keychain-backed credentials (Linux)');
+    if (this._credsOf(be).keychainSensitive && !this.poolSupported()) throw new Error('pooled accounts need a platform with directory symlinks and no keychain-backed credentials (Linux)');
     const id = 'pool-' + crypto.randomBytes(6).toString('hex');
     // auto:true ALWAYS (2026-09-28): the whole-pool manual switch is retired — a pool is
     // placed automatically or by its manual `priority` list (empty = automatic)
@@ -1366,13 +1366,13 @@ class AccountManager {
   }
 
   resolveForSpawn(requested, backend = 'claude', opts = {}) {
-    if (backend === 'codex') return this._resolveCodexSpawn(requested, opts);
+    if (this._credsOf(backend)?.spawnForm === 'isolated-home') return this._resolveHomeSpawn(backend, requested, opts); // the descriptor's creds row picks the form (rv-harnesses H3)
     if (requested === 'subscription') return null; // the CLI's own global login
     const id = requested || this._state.defaultAccountId;
     if (!id) return null;
     const a = this.get(id);
     if (!a) throw new Error('unknown account: ' + id);
-    if (this._acctBackend(a) !== 'claude') throw new Error('not a Claude account: ' + a.name);
+    if (this._credsOf(this._acctBackend(a)).spawnForm !== 'securestorage') throw new Error('not a Claude account: ' + a.name);
     if (this._acctType(a) === 'pooled') {
       let cur = this.poolCurrent(id);
       // SELF-HEAL (2.330.2, real outage: BOTH the pool's target and every
@@ -1483,11 +1483,11 @@ class AccountManager {
     return { id: a.id, name: a.name, tail: a.tail, kind: 'api', localEnv: { ANTHROPIC_API_KEY: key }, secret: { var: 'ANTHROPIC_API_KEY', value: key } };
   }
 
-  // Codex spawn: undefined/null → the account's own global login (default) or
-  // ~/.codex when none; a 'cxs-…' id → that account's isolated CODEX_HOME.
-  _resolveCodexSpawn(requested, opts = {}) {
+  // ISOLATED-HOME spawn (creds.spawnForm 'isolated-home' — codex): undefined/null → the harness's own global
+  // login (default) or its shared home when none; an account id → that account's own dir as spawnEnvVar.
+  _resolveHomeSpawn(backend, requested, opts = {}) {
     if (requested === 'subscription') return null; // codex's own global login
-    const id = requested || this._state.defaultCodexAccountId;
+    const id = requested || this._state[this._credsOf(backend).defaultIdField];
     if (!id) return null;
     const a = this.get(id);
     if (!a) throw new Error('unknown account: ' + id);
@@ -1497,11 +1497,11 @@ class AccountManager {
     // (kill+resume, the existing cold machinery). Self-heal a dangling link
     // to the first healthy member, exactly like the claude resolve branch.
     if (this._acctType(a) === 'pooled') {
-      if (this._acctBackend(a) !== 'codex') throw new Error('not a Codex account: ' + a.name);
+      if (this._acctBackend(a) !== backend) throw new Error('not a ' + harnessOf(backend).label + ' account: ' + a.name);
       let cur = this.poolCurrent(id);
-      if (!cur || !this.readCodexSubAuth(cur).loggedIn) {
+      if (!cur || !this._readAuthFor(backend, cur).loggedIn) {
         const first = this.poolMembers(id)[0];
-        if (!first) throw new Error(`pool "${a.name}" has no logged-in ChatGPT member`);
+        if (!first) throw new Error(`pool "${a.name}" has no logged-in ${this._credsOf(backend).loginLabel} member`);
         this.setPoolTarget(id, first.id);
         cur = first.id;
       }
@@ -1510,20 +1510,20 @@ class AccountManager {
       // home (the pool's symlink would give it the pool's current member) — only when the pin is
       // a logged-in member of this pool; else the pool's member, as before (the pin kept)
       let pinned = null;
-      try { const m = opts.pinned && opts.chooseMember ? opts.chooseMember(id) : null; if (m && m !== cur && this.poolMembers(id).some((x) => x.id === m) && this.readCodexSubAuth(m).loggedIn) pinned = m; } catch { pinned = null; }
-      if (pinned) return { id: a.id, name: a.name, kind: 'codex-pooled', pinnedMember: pinned, localEnv: { [this._credsOf('codex').spawnEnvVar]: this._acctDir('codex', pinned) }, secret: null, remoteCreds: null };
-      return { id: a.id, name: a.name, kind: 'codex-pooled', localEnv: { [this._credsOf('codex').spawnEnvVar]: this._acctDir('codex', id) }, secret: null, remoteCreds: null };
+      try { const m = opts.pinned && opts.chooseMember ? opts.chooseMember(id) : null; if (m && m !== cur && this.poolMembers(id).some((x) => x.id === m) && this._readAuthFor(backend, m).loggedIn) pinned = m; } catch { pinned = null; }
+      if (pinned) return { id: a.id, name: a.name, kind: backend + '-pooled', pinnedMember: pinned, localEnv: { [this._credsOf(backend).spawnEnvVar]: this._acctDir(backend, pinned) }, secret: null, remoteCreds: null };
+      return { id: a.id, name: a.name, kind: backend + '-pooled', localEnv: { [this._credsOf(backend).spawnEnvVar]: this._acctDir(backend, id) }, secret: null, remoteCreds: null };
     }
-    if (this._acctBackend(a) !== 'codex') throw new Error('not a Codex account: ' + a.name);
-    const info = this.readCodexSubAuth(id);
-    if (!info.loggedIn) throw new Error('codex account not logged in: ' + a.name);
+    if (this._acctBackend(a) !== backend) throw new Error('not a ' + harnessOf(backend).label + ' account: ' + a.name);
+    const info = this._readAuthFor(backend, id);
+    if (!info.loggedIn) throw new Error(backend + ' account not logged in: ' + a.name);
     return {
-      id: a.id, name: a.name, kind: 'codex-subscription',
-      localEnv: { [this._credsOf('codex').spawnEnvVar]: this._acctDir('codex', id) }, secret: null,
+      id: a.id, name: a.name, kind: backend + '-subscription',
+      localEnv: { [this._credsOf(backend).spawnEnvVar]: this._acctDir(backend, id) }, secret: null,
       // REMOTE: ship auth.json to the host's CODEX_HOME copy; sessions/config
       // symlink the host's own ~/.codex (targets ensured first) so threads +
       // settings stay shared on the host, auth isolated per account.
-      remoteCreds: this._remoteCreds('codex', id, a),
+      remoteCreds: this._remoteCreds(backend, id, a),
     };
   }
 

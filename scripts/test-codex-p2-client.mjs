@@ -76,8 +76,8 @@ const sv = read('src/server/backend-status-route.js');
 ok(/out\.codex\.namedLoggedIn = \(l\.accounts \|\| \[\]\)\.filter\(\(a\) => a\.backend === 'codex' && a\.loggedIn\)\.length/.test(sv), '/api/backend-status reports codex.namedLoggedIn');
 ok(/require\('\.\/src\/server\/backend-status-route\.js'\)\.create\(/.test(read('server.js')), '…and server.js still wires that route (a rule with no call site is a rule nobody runs)');
 const sl = read('src/lib/session-lifecycle.js');
-ok(/if \(\(a\.backend \|\| 'claude'\) === 'codex'\) return this\._codexAccountUsage\?\.\[a\.id\];/.test(sl), 'billing switcher: codex account rows read the persisted codex quota buckets');
-ok(/isCodex \? \(rHostId \? '' : usageHint\(this\._codexAccountUsage\?\.__global_codex__/.test(sl), 'billing switcher: the ChatGPT-login row shows the global codex quota');
+ok(/return accountUsageStore\(this, a\.backend \|\| 'claude'\)\?\.\[a\.id\];/.test(sl) && /codexAccounts: '_codexAccountUsage'/.test(read('src/lib/agent-meta.js')), 'billing switcher: codex account rows read the persisted codex quota buckets');
+ok(/!bill\.machineUsage \? \(rHostId \? '' : usageHint\(accountUsageStore\(this, backend\)\?\.\[bill\.globalUsageKey\]/.test(sl), 'billing switcher: the ChatGPT-login row shows the global codex quota');
 ok(/_doForkSession\(sessionInfo/.test(sl) && /fork: true,/.test(sl), 'fork flows send fork:true for every backend (extraArgs stay claude-only: --fork-session)');
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

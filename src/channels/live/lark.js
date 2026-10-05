@@ -42,6 +42,13 @@
 const { startLane } = require('./lane.js');
 
 const SDK_NAME = '@larksuiteoapi/node-sdk';
+const i18nKey = (s) => s;   // extraction marker (scripts/i18n-extract.mjs) — the panel words it through t()
+/** THE LANE'S WORDS for the codes it parks `unavailable` with (lane dc-channels-blocks — they lived in the shared
+ *  src/channel-caps.js switch): the card says what to DO, in the device's language. */
+const UNAVAILABLE_WORDS = Object.freeze({
+  'sdk-not-installed': i18nKey('Real-time push is off: the official Lark SDK is not installed on this instance — run `npm install @larksuiteoapi/node-sdk` in the VibeSpace folder and restart; enable the event subscription (long-connection mode), grant `im:message.group_msg` and add the bot to the chats you want pushed. Until then messages are polled (every 30 s – 15 min).'),
+  'needs-credentials': i18nKey('Real-time push is off: this account has no usable app credential — fix the client in Edit. Until then messages are polled.'),
+});
 /** The message event (a v2 event; enable it in the app's Event
  *  Subscriptions with the long-connection mode). */
 const EVENT = 'im.message.receive_v1';
@@ -175,4 +182,4 @@ function createLarkLive({ adapterId, brand = 'feishu', credential, toRecord, now
   };
 }
 
-module.exports = { createLarkLive, eventToItem, eventToSide, eventIdOf, EVENT, EVENTS, REACTION_CREATED, REACTION_DELETED, EGRESS, SDK_NAME, NAMES_WAIT_MS };
+module.exports = { UNAVAILABLE_WORDS, createLarkLive, eventToItem, eventToSide, eventIdOf, EVENT, EVENTS, REACTION_CREATED, REACTION_DELETED, EGRESS, SDK_NAME, NAMES_WAIT_MS };

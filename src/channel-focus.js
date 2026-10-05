@@ -332,7 +332,25 @@ function internalBlock(rows, { folded = false, now = Date.now() } = {}) {
   return { rows: out, block };
 }
 
+/**
+ * lane channels-list-polish (the owner: "整体做的更接近一个聊天工具的列表"): THE PER-ACCOUNT LIST ROW — the attention
+ * list's shape: the avatar, the name, the LAST MESSAGE's first line ("author: text" — peer bytes, the client puts them
+ * through textContent; bounded), the time, the unread count. The "Access: … · Notify: …" line is shown ONLY when the
+ * conversation's own grain DIFFERS from the account's (`assignment.source === 'conversation'`) — worded as that
+ * difference; an inherited row says nothing.
+ */
+const LIST_LAST_MAX = 160;
+function listRowModel(conv) {
+  const c = conv && typeof conv === 'object' ? conv : {};
+  const first = String(c.lastText || '').split(/\r?\n/)[0].replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, LIST_LAST_MAX);
+  const w = c.lastWho && typeof c.lastWho === 'object' ? c.lastWho : null;
+  const who = !first || !w ? null : w.self ? { self: true } : (typeof w.name === 'string' && w.name.trim() ? { name: w.name.trim().slice(0, 80) } : null);
+  const own = !!(c.assignment && c.assignment.source === 'conversation');
+  return { last: first, who, at: Number(c.lastAt) || 0, unread: Math.max(0, Number(c.unread) || 0), grainLine: own };
+}
+
 module.exports = {
+  LIST_LAST_MAX, listRowModel,
   FOCUS_WINDOW_MS, HELD_WINDOW_MS, TAG_ORDER, heldPending, heldOf, statusTag, focusRows, filterRows, firstScreen,
   ATTENTION_MAX, HEAD_ROWS, PAGE_ROWS, PAGE_MAX, QUERY_MAX, candidateOf, pageOrder, pageCursor, afterCursor, selectPage, queryOf, textMatches,
   isInternal, needsOwner, internalBlock,

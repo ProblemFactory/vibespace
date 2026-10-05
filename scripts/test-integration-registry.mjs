@@ -73,7 +73,7 @@ function patchCopy(srcPath, tag, replacements) {
 console.log('§1 the PURE table');
 {
   const src = fs.readFileSync(path.join(REPO, 'src/integration-registry.js'), 'utf-8');
-  ok(!/\brequire\(|\bimport\s/.test(src.replace(/^\s*(\*|\/\/).*$/gm, '')), 'src/integration-registry.js imports NOTHING');
+  ok((src.replace(/^\s*(\*|\/\/).*$/gm, '').match(/\brequire\(|\bimport\s/g) || []).length === 1 && src.includes("require('./channels/registry-list.js')"), 'src/integration-registry.js imports NOTHING but the PURE vendor list (lane dc-channels-manifest: the vendors\' rows are their manifests\')');
   const ids = R.rowIds();
   ok(new Set(ids).size === ids.length && ids.length >= 4, `row ids are unique (${ids.join(', ')})`);
   for (const row of R.ROWS) { const errs = R.checkRow(row); ok(!errs.length, `row ${row.id} passes its own checks`, errs.join('; ')); }
@@ -82,7 +82,7 @@ console.log('§1 the PURE table');
   const fake = R.rowById('fake');
   ok(fake.consumers.length === 1 && fake.setup && fake.setup.callbackUrl && fake.setup.prerequisites.length >= 1 && fake.test.caveat, 'the fake row has a LIVE consumer, a setup block with a callback URL + prerequisites, and a caveat (§19 r7/r8 exits)');
   const lark = R.rowById('lark');
-  ok(lark.setup.callbackUrl === R.LARK_CALLBACK_URL && lark.setup.callbackUrl === 'http://127.0.0.1:17865/lark/cb', 'the Lark callback URL is the fixed VibeSpace loopback (decision 4) and the exported constant IS the row\'s value');
+  ok(lark.setup.callbackUrl === require(path.join(REPO, 'src/channels/lark/manifest.js')).LARK_CALLBACK_URL && lark.setup.callbackUrl === 'http://127.0.0.1:17865/lark/cb', 'the Lark callback URL is the fixed VibeSpace loopback (decision 4) and the exported constant IS the row\'s value');
   ok(lark.setup.prerequisites.length === 3 && lark.test.kind === 'credential-exchange' && /consent/i.test(lark.test.caveat), 'lark: three prerequisites, credential-exchange, a caveat naming the consent page');
   ok(lark.fields.find((f) => f.key === 'appSecret').secret === true && lark.fields.find((f) => f.key === 'appId').secret === false, 'lark: appSecret is secret, appId is not');
   const gmail = R.rowById('gmail');
@@ -623,7 +623,10 @@ const readRepo = (f) => fs.readFileSync(path.join(REPO, f), 'utf-8');
 // (a) ENV NAMES: the regex matches the NAME, whatever the spelling around it
 const ENV_RE = /VIBESPACE_INTEGRATIONS?\b|VIBESPACE_INTEGRATION_/;
 const ENV_ALLOW = new Map([
+  // lane dc-channels-manifest: DERIVED from the vendor list — each channel vendor's manifest declares its row's cluster env
+  ...require(path.join(REPO, 'src/channels/registry-list.js')).MANIFESTS.filter((m) => m.kind !== 'gmail').map((m) => [`src/channels/${m.kind}/manifest.js`, 'its integration row declares the cluster env (clusterEnv)']),
   ['scripts/test-channels-slack-send.mjs', 'design 018: the engine leg hands the store a `slack` preset in the JSON env form (the cluster rung a fleet mounts)'],
+  ['scripts/test-channels-engine.mjs', 'lane dc-channels-consent: the fake consent vendor\'s round trip hands the store a `fake` preset in the JSON env form (the client its Connect signs in under)'],
   ['src/server/integration-store.js', 'THE resolver (both forms)'],
   ['src/integration-registry.js', 'DECLARES the names a row is served under (never reads them)'],
   ['scripts/test-integration-registry.mjs', 'this census + the store legs'],
@@ -876,9 +879,9 @@ function consumerCensus(rows, read) {
 if (tracked.length) {
   const LIT = 'http://127.0.0.1:17865/lark/cb';
   const holders = tracked.filter((f) => !isDoc(f)).filter((f) => { try { return readRepo(f).includes(LIT); } catch { return false; } });
-  const allowed = new Set(['src/integration-registry.js', 'scripts/test-integration-registry.mjs', 'scripts/test-integrations-ui.mjs']);
-  ok(holders.includes('src/integration-registry.js') && holders.every((f) => allowed.has(f)), `the Lark callback literal is defined in src/integration-registry.js and nowhere else in code (holders: ${holders.join(', ')})`);
-  if (fs.existsSync(path.join(REPO, 'src/oauth-loopback.js'))) ok(!readRepo('src/oauth-loopback.js').includes(LIT) && /LARK_CALLBACK_URL/.test(readRepo('src/oauth-loopback.js')), 'src/oauth-loopback.js IMPORTS the URL and does not spell it');
+  const allowed = new Set(['src/channels/lark/manifest.js', 'scripts/test-integration-registry.mjs', 'scripts/test-integrations-ui.mjs']);
+  ok(holders.includes('src/channels/lark/manifest.js') && holders.every((f) => allowed.has(f)), `the Lark callback literal is defined in its manifest (src/channels/lark/manifest.js) and nowhere else in code (holders: ${holders.join(', ')})`);
+  if (fs.existsSync(path.join(REPO, 'src/oauth-loopback.js'))) ok(!readRepo('src/oauth-loopback.js').includes(LIT) && !/LARK_CALLBACK_URL/.test(readRepo('src/oauth-loopback.js')) && require(path.join(REPO, 'src/channels/lark.js')).consent.callbackUrl === LIT, 'lane dc-channels-consent: src/oauth-loopback.js names no vendor callback — the Lark adapter\'s consent row hands the loopback THIS row\'s URL');
   const fakeCb = R.rowById('fake').setup.callbackUrl;
   ok(new URL(fakeCb).origin === new URL(LIT).origin && fakeCb !== LIT, 'the fake row\'s callback shares the ONE VibeSpace loopback origin under its own path');
 }

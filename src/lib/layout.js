@@ -3,8 +3,9 @@ import { bootJson } from './boot-splash.js';
 import { cssVarDefault, showToast } from './utils.js';
 import { t } from './i18n.js';
 import { isTransientWindowType } from './window-types.js';
+import { legacyIdFor } from './agent-meta.js';
 import { wordlessTitleOf } from '../record-clear.js'; // PURE: the title a layout RECORD keeps for a window drawn from a record's words (lane-redact verify r7)
-import { chainSyncKey, ratioDiffers, heldRatio, releaseRatio, withoutMembers } from './chain-layout.js'; // agent browser P7 (§4.6): the sync key carries the layout; the ratio applies in place (unless a local divider drag holds it — v2 verify r1 ①)
+import { chainSyncKey, ratioDiffers, heldRatio, releaseRatio, withoutMembers, restoreVerdict } from './chain-layout.js'; // agent browser P7 (§4.6): the sync key carries the layout; the ratio applies in place (unless a local divider drag holds it — v2 verify r1 ①)
 
 // The MEMBERS of a chain (host first) — NOT a sync key (chainSyncKey is): two
 // records with the same members differ only in layout and are applied in place.
@@ -553,8 +554,8 @@ class LayoutManager {
         // until it appears (split tabs v2, F2's race): restoring without it left
         // a free viewer here, and this client's next user-caused save (no
         // chain) broke the other client's chain.
-        this._pendingChains = [];
-        const replaying = this._replaying || new Set();
+        // a newer record of THIS desktop supersedes its pending chains; another desktop's keep waiting (lane split-restore-hidden)
+        this._pendingChains = (this._pendingChains || []).filter((e) => e.desk && activeDesk && e.desk !== activeDesk);
         for (const [key, tc] of remoteChains) {
           if (localChainKeys.has(key)) continue;
           // a group this user tore a tab out of here (or took apart), no record has agreed with yet: never re-formed by a
@@ -564,7 +565,7 @@ class LayoutManager {
           // …nor is a record's group rebuilt around a member this page just moved out of (or into) a group (verify r5 ②: a
           // tear-off was undone by the older record's chain re-created around the window that left)
           if ((tc.tabs || []).some((id) => { const m = this.app.wm.windows.get(String(id)); return m && this.actHeld(m._chainAt, receivedAt, m); })) { heldKept = true; continue; }
-          this._queueChain(key, tc, { inFlight: replaying, waitMs: 8000 });
+          this._queueChain(key, tc, { desk: activeDesk || null });
         }
       }
     } catch (err) {
@@ -825,41 +826,72 @@ class LayoutManager {
     this.scheduleAutoSave();
   }
 
-  /** Rebuild ONE chain record (remote or persisted) now, or keep it PENDING
-   *  while a member it names is still being created (`inFlight` — a replayed
-   *  openSpec whose window lands asynchronously), bounded by `waitMs`; past the
-   *  deadline whatever members exist are grouped (never a hang). The retry
-   *  runs on a 200 ms timer while anything is pending. Never notifies (the
-   *  apply's user-dirty gate stays the only way a save leaves this client). */
-  _queueChain(key, tc, { inFlight = new Set(), waitMs = 8000 } = {}) {
-    const entry = { key, tc, inFlight, deadline: Date.now() + waitMs };
+  /** Rebuild ONE chain record (remote, persisted, or a desktop's first visit) now, or keep it PENDING until its LAST
+   *  member exists — for the whole life of the page (lane split-restore-hidden, userW inc-muundq37-cjay: a split on a
+   *  desktop the page had not built since the reload came back as two plain windows, and the next save wrote them flat
+   *  to every client). A pending chain reconciles when a window APPEARS (WindowManager.createWindow → onWindowCreated),
+   *  never on a timer, and is rebuilt WHOLE (chain-layout restoreVerdict: the split and its ratio as recorded — never
+   *  degraded to tabs because a member came late). It ends only when rebuilt, superseded (a newer record of its desktop;
+   *  a user's own group act on a member since), or shrunk by the record itself (dropUnbuiltMembers). Meanwhile the
+   *  members' capture carries the record's chain (pendingChainOf): no save writes a half-restored chain. Never notifies
+   *  (the apply's user-dirty gate stays the only way a save leaves this client). */
+  _queueChain(key, tc, { desk = null } = {}) {
+    const entry = { key, tc, desk, gone: [], at: Date.now() };
     if (this._reconcileChain(entry)) return;
-    (this._pendingChains ||= []).push(entry);
-    this._armPendingChains();
+    this._pendingChains = [...(this._pendingChains || []).filter((e) => e.key !== key), entry];
   }
 
-  /** true = done (restored, superseded or gave up); false = still waiting. */
-  _reconcileChain({ key, tc, inFlight, deadline }) {
+  /** true = done (restored, superseded or nothing left to group); false = still waiting for a member. */
+  _reconcileChain(entry) {
     const wm = this.app.wm;
-    for (const [, w] of wm.windows) if (w._tabChain && w._tabChain.tabs[0] === w.id && chainSyncKey(w._tabChain) === key) return true; // already here
-    const present = tc.tabs.filter((id) => wm.windows.has(id));
-    const waiting = tc.tabs.some((id) => !wm.windows.has(id) && inFlight.has(id));
-    if (waiting && Date.now() < deadline) return false;
-    if (present.length < 2) return true;
+    for (const [, w] of wm.windows) if (w._tabChain && w._tabChain.tabs[0] === w.id && chainSyncKey(w._tabChain) === entry.key) return true; // already here
+    // a member the USER grouped another way since this chain was queued (tab-group's chain witness): the act wins
+    if (entry.tc.tabs.some((id) => { const w = wm.windows.get(String(id)); return w && w._tabChain && (w._chainAt || 0) > entry.at; })) return true;
+    const v = restoreVerdict(entry.tc, (id) => wm.windows.has(id), entry.gone);
+    if (v.act !== 'restore') return v.act === 'drop';
+    const tc = v.chain;
     // a member still grouped locally (a chain the record does not name) leaves it first — never two chains claiming one window
-    for (const id of present) { const w = wm.windows.get(id); if (w && w._tabChain) wm._detachFromChain(w._tabChain, id); }
-    wm.restoreTabChain(present, tc.active, { layout: tc.layout, split: tc.split, order: tc.order });
+    for (const id of tc.tabs) { const w = wm.windows.get(id); if (w && w._tabChain) wm._detachFromChain(w._tabChain, id); }
+    wm.restoreTabChain(tc.tabs, tc.active, { layout: tc.layout, split: tc.split, order: tc.order });
     return true;
   }
 
-  _armPendingChains() {
-    if (this._pendingTimer) return;
-    const tick = () => {
-      this._pendingTimer = null;
-      this._pendingChains = (this._pendingChains || []).filter((e) => !this._reconcileChain(e));
-      if (this._pendingChains.length) this._pendingTimer = setTimeout(tick, 200);
-    };
-    this._pendingTimer = setTimeout(tick, 200);
+  /** A window APPEARED (WindowManager.createWindow, a restore's re-key): every pending chain naming it reconciles —
+   *  after the opener's own synchronous setup (a microtask, not a timer). */
+  onWindowCreated(win) {
+    if (!win || !(this._pendingChains || []).some((e) => e.tc.tabs.includes(win.id))) return;
+    queueMicrotask(() => this._settlePendingChains());
+  }
+
+  _settlePendingChains() { this._pendingChains = (this._pendingChains || []).filter((e) => !this._reconcileChain(e)); }
+
+  /** The record's chain a pending (not yet whole) chain holds for window `id` — what its capture writes, never a flat member. */
+  pendingChainOf(id) {
+    const e = (this._pendingChains || []).find((x) => x.tc.tabs.includes(id));
+    return e ? e.tc : null;
+  }
+
+  /** The page could not build these windows (desktop-manager drops them from their record — evidence 'unbuilt'): a
+   *  pending chain naming one is rebuilt without it, as the record now reads. */
+  dropUnbuiltMembers(ids) {
+    let hit = false;
+    for (const e of this._pendingChains || []) for (const id of ids || []) if (e.tc.tabs.includes(String(id)) && !e.gone.includes(String(id))) { e.gone.push(String(id)); hit = true; }
+    if (hit) this._settlePendingChains();
+  }
+
+  /** A RECORD's chains (a boot restore, a desktop's first visit) — each queued; the one door for both. `naming` (a desktop's
+   *  replay): only the chains naming a window that replay builds — never a group whose members all stand here already. */
+  queueRecordChains(desk, state, { naming = null } = {}) {
+    const seen = new Set();
+    const builds = naming ? new Set(naming.map(String)) : null;
+    for (const ws of (state && state.windows) || []) {
+      if (!ws.tabChain || ws.isTabGuest || !Array.isArray(ws.tabChain.tabs)) continue; // only from the host's perspective
+      if (builds && !ws.tabChain.tabs.some((id) => builds.has(String(id)))) continue;
+      const key = chainSyncKey(ws.tabChain);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      this._queueChain(key, ws.tabChain, { desk });
+    }
   }
 
   // Create a window from remote layout state using its saved openSpec
@@ -959,7 +991,7 @@ class LayoutManager {
           // backendSessionId makes every other client's rematch miss
           winState.backendSessionId = match.backendSessionId
             || (match.sessionId && match.sessionId !== match.webuiId ? match.sessionId : null);
-          winState.claudeSessionId = winState.backend === 'claude' ? winState.backendSessionId : null;
+          winState.claudeSessionId = legacyIdFor(winState.backend, winState.backendSessionId);
           winState.cwd = match.cwd || '';
         }
         // Save per-terminal overrides
@@ -976,7 +1008,7 @@ class LayoutManager {
           winState.backend = match.backend || 'claude';
           winState.backendSessionId = match.backendSessionId
             || (match.sessionId && match.sessionId !== match.webuiId ? match.sessionId : null); // see terminal branch
-          winState.claudeSessionId = winState.backend === 'claude' ? winState.backendSessionId : null;
+          winState.claudeSessionId = legacyIdFor(winState.backend, winState.backendSessionId);
           winState.cwd = match.cwd || '';
         }
       }
@@ -986,7 +1018,7 @@ class LayoutManager {
       if ((win.type === 'chat' || win.type === 'terminal') && !winState.backendSessionId && win._openSpec?.backendSessionId) {
         winState.backend = win._openSpec.backend || 'claude';
         winState.backendSessionId = win._openSpec.backendSessionId;
-        winState.claudeSessionId = winState.backend === 'claude' ? winState.backendSessionId : null;
+        winState.claudeSessionId = legacyIdFor(winState.backend, winState.backendSessionId);
         if (!winState.cwd) winState.cwd = win._openSpec.cwd || '';
       }
       // For file explorers, save current path (+ which host it browses)
@@ -1011,6 +1043,9 @@ class LayoutManager {
         winState.tabChain = { tabs: [...c.tabs], active: c.active, layout: c.layout === 'split' ? 'split' : 'tabs', order: [...(c.order || c.tabs)] };
         if (c.layout === 'split' && c.split) winState.tabChain.split = { pair: [...c.split.pair], ratio: c.split.ratio, dir: 'row', left: [...(c.split.left || [])], right: [...(c.split.right || [])] }; // split tabs v2: the strip order + the SIDES (a missing field reads as the pre-v2 default — repaired by rule)
         winState.isTabGuest = c.tabs[0] !== id;
+      } else {
+        const pc = this.pendingChainOf(id); // a member of a chain still waiting for its last member: the RECORD's chain, never flat
+        if (pc) { winState.tabChain = JSON.parse(JSON.stringify(pc)); winState.isTabGuest = pc.tabs[0] !== id; }
       }
       return winState;
     }
@@ -1097,6 +1132,7 @@ class LayoutManager {
         if (session) { this.app.sessions.delete(oldId); this.app.sessions.set(winState.winId, session); }
         winInfo.id = winState.winId;
         wm.windows.set(winState.winId, winInfo);
+        this.onWindowCreated(winInfo); // the record's id appeared: a pending chain naming it reconciles
         if (wm.activeWindowId === oldId) wm.activeWindowId = winState.winId; // the focus follows the re-key (it named a window that no longer existed — v2 verify r1 ⑦)
       }
       if (winState.gridBounds) {
@@ -1251,21 +1287,9 @@ class LayoutManager {
     }
 
 
-    // Restore tab chains after all windows are created
-    // Collect unique chains from saved state, deduplicate by tab list
-    const restoredChains = new Set();
-    setTimeout(() => {
-      for (const ws of state.windows) {
-        if (!ws.tabChain || ws.isTabGuest) continue; // only process from host's perspective
-        const key = chainSyncKey(ws.tabChain);
-        if (restoredChains.has(key)) continue;
-        restoredChains.add(key);
-        // a member still opening (an async openFile replay) is waited for — the
-        // ONE chain reconcile the remote apply uses (split tabs v2)
-        const inFlight = new Set(state.windows.filter((x) => x.openSpec && !this.app.wm.windows.has(x.winId || x.id)).map((x) => x.winId || x.id));
-        this._queueChain(key, ws.tabChain, { inFlight, waitMs: 5000 });
-      }
-    }, 1000);
+    // Restore tab chains after all windows are created — each one waits for its last member, however late (the one
+    // queue the remote apply and a desktop's first visit use: _queueChain)
+    setTimeout(() => this.queueRecordChains(this.app.desktopManager?.activeDesktopId || null, state), 1000);
   }
 
   // Auto-save (debounced, triggered on every window change)

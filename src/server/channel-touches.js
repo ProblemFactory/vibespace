@@ -91,6 +91,7 @@ function create({ sessions = () => null, broadcast = () => {}, metaStore = () =>
         title: inert(named || x.title, T.TITLE_MAX),
         account: inert(x.account || (acc && acc.label) || '', T.LABEL_MAX),
         kind: x.kind || (acc && acc.kind) || null,
+        icon: (acc && acc.glyph) || null,   // lane dc-channels-blocks: the adapter's DECLARED glyph (caps.glyph)
         ...(x.glyph ? { glyph: inert(x.glyph, 70) } : {}),
         ...(x.query ? { query: inert(x.query, T.QUERY_MAX) } : {}),   // .212: the agent's search words — its own text, made inert
       });
@@ -118,12 +119,19 @@ function create({ sessions = () => null, broadcast = () => {}, metaStore = () =>
     catch (e) { log.warn(`[channel-touches] broadcast failed: ${(e && e.message) || e}`); }
   }
   const record = (webuiId, touch) => recordMany(webuiId, [touch]);
+  /** A row restored from before the declared glyph (lane dc-channels-blocks) wears its adapter's caps.glyph at read. */
+  function withIcon(x) {
+    if (!x || x.icon) return { ...x };
+    let acc = null;
+    try { acc = accountOf(x.adapterId) || null; } catch { acc = null; }
+    return acc && acc.glyph ? { ...x, icon: acc.glyph } : { ...x };
+  }
 
   /** The chat view's read: this session's ring + its current turn's start. */
   function list(webuiId) {
     const s = sessionOf(webuiId);
     if (!s) return { ok: true, sessionId: String(webuiId || ''), live: false, touches: [], turnAt: 0 };
-    return { ok: true, sessionId: String(webuiId), live: true, touches: (Array.isArray(s._channelTouches) ? s._channelTouches : []).slice(-T.RING_MAX).map((x) => ({ ...x })), turnAt: turnAtOf(s) };   // a restored meta longer than the ring (hand-edited) is read as the newest RING_MAX, like the ring itself
+    return { ok: true, sessionId: String(webuiId), live: true, touches: (Array.isArray(s._channelTouches) ? s._channelTouches : []).slice(-T.RING_MAX).map(withIcon), turnAt: turnAtOf(s) };   // a restored meta longer than the ring (hand-edited) is read as the newest RING_MAX, like the ring itself
   }
 
   /** The conversation window's read: every live session that touched this conversation — its name, the strongest op,

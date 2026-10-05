@@ -435,5 +435,24 @@ console.log('— ⑮ wiring: src/lib/tab-group.js classifies the tab drag throug
   ok(!/Math\.abs\(dx0\) > Math\.abs\(dy0\)/.test(body) && !/mode = .*\? 'reorder' : 'detach'/.test(body), '⑮ no inline first-8-px classification left beside it (the rule lives in one place)');
 }
 
+// ⑯ A LATE MEMBER (inc-muundq37-cjay, lane split-restore-hidden): a split on a desktop the page had not built since the
+// reload came back as two plain windows. The queued chain's verdict (restoreVerdict): wait while ANY member is missing —
+// however late —, then the record's chain WHOLE (split, ratio, sides); only a member the record dropped shrinks it.
+{
+  const rec = { tabs: ['h', 'g'], active: 0, layout: 'split', order: ['h', 'g'], split: { pair: ['h', 'g'], ratio: 0.62, dir: 'row', left: ['h'], right: ['g'] } };
+  const before = JSON.stringify(rec);
+  const has = (ids) => (id) => ids.includes(id);
+  ok(C.restoreVerdict(rec, has(['h'])).act === 'wait', '⑯ one member present, the other late ⇒ WAIT (never a degraded group)');
+  ok(C.restoreVerdict(rec, has([])).act === 'wait', '⑯ no member present yet (a hidden desktop not built) ⇒ wait');
+  const v = C.restoreVerdict(rec, has(['h', 'g']));
+  ok(v.act === 'restore' && v.chain.layout === 'split' && v.chain.split.ratio === 0.62 && v.chain.split.right.join() === 'g' && v.chain.tabs.join() === 'h,g', '⑯ the late member appears ⇒ RESTORE with the split, the same ratio and sides', JSON.stringify(v));
+  ok(JSON.stringify(rec) === before, '⑯ the verdict never mutates the record it reads');
+  const r3 = { tabs: ['h', 'g', 'x'], active: 0, layout: 'split', order: ['h', 'g', 'x'], split: { pair: ['h', 'g'], ratio: 0.4, dir: 'row', left: ['h', 'x'], right: ['g'] } };
+  const v3 = C.restoreVerdict(r3, has(['h', 'g']), ['x']);
+  ok(v3.act === 'restore' && v3.chain.layout === 'split' && v3.chain.tabs.join() === 'h,g' && v3.chain.split.ratio === 0.4, '⑯ a third member the RECORD dropped (unbuildable) ⇒ the rest restored, split kept', JSON.stringify(v3));
+  ok(C.restoreVerdict(rec, has(['h']), ['g']).act === 'drop', '⑯ the pair\'s other member dropped by the record ⇒ nothing left to group (drop)');
+  ok(C.restoreVerdict(r3, has(['h', 'g'])).act === 'wait', '⑯ CONTROL: the same three-member chain with nothing dropped still waits for its third');
+}
+
 console.log(`\n${fail ? 'FAIL' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);
 process.exit(fail || realFailed.length ? 1 : 0);

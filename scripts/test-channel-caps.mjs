@@ -235,9 +235,13 @@ const rec = (push) => ({ push: { enabled: true, state: 'live', lastEventAt: NOW 
 // ── ⑨ THE CARD'S SENTENCES FOR PUSH AND THE BUDGET (2026-09-26) ──
 {
   const t = (s, p) => (p ? String(s).replace(/\{(\w+)\}/g, (m, k) => (k in p ? String(p[k]) : m)) : String(s));
-  const sdk = C.pushLaneText({ enabled: true, state: 'unavailable', lastStateCode: 'sdk-not-installed', lastStateWhy: 'the official Lark SDK (@larksuiteoapi/node-sdk) is not installed …' }, { via: 'poll' }, { t });
+  // lane dc-channels-blocks (C6): the words are the LIVE LANE's declaration (the account view carries them while parked)
+  const LW = require(path.join(REPO, 'src/channels/live/lark.js')).UNAVAILABLE_WORDS, GW = require(path.join(REPO, 'src/channels/live/gmail.js')).UNAVAILABLE_WORDS;
+  const sdk = C.pushLaneText({ enabled: true, state: 'unavailable', lastStateCode: 'sdk-not-installed', unavailableWords: LW, lastStateWhy: 'the official Lark SDK (@larksuiteoapi/node-sdk) is not installed …' }, { via: 'poll' }, { t });
   ok(/npm install @larksuiteoapi\/node-sdk/.test(sdk) && /restart/.test(sdk) && /im:message\.group_msg/.test(sdk) && /polled|polling/.test(sdk), 'the SDK-missing push lane says the exact remedy (install, restart, the event subscription, the scope) and that polling carries it meanwhile', sdk);
-  const g = C.pushLaneText({ enabled: true, state: 'unavailable', lastStateCode: 'push-not-configured' }, { via: 'poll' }, { t });
+  const g = C.pushLaneText({ enabled: true, state: 'unavailable', lastStateCode: 'push-not-configured', unavailableWords: GW }, { via: 'poll' }, { t });
+  const bare = C.pushLaneText({ enabled: true, state: 'unavailable', lastStateCode: 'sdk-not-installed', lastStateWhy: 'lane words' }, { via: 'poll' }, { t });
+  ok(bare === 'push unavailable: lane words' && C.pushUnavailableText('watch-refused', { t }) === '', 'channel-caps knows NO lane\'s code: undeclared words fall back to the lane\'s own sentence', bare);
   ok(/topic/i.test(g) && /subscription/i.test(g), 'a Gmail push without its Pub/Sub options says which two options', g);
   const unknownCode = C.pushLaneText({ enabled: true, state: 'unavailable', lastStateCode: 'something-new', lastStateWhy: 'vendor words' }, { via: 'poll' }, { t });
   ok(/vendor words/.test(unknownCode), 'an unknown code falls back to the lane\'s own words (a new code is a new row, never silence)', unknownCode);

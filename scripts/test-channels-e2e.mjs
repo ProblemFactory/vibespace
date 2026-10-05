@@ -757,23 +757,24 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
     const trackedRows = rows.length;   // 2026-09-26: every row is fetched, every row claims its cadence
     const R = (el) => el.getBoundingClientRect();
     const visible = (el) => el && R(el).width > 0;
-    const pills = rows.map((r) => r.querySelector('.chan-row-line .chan-chip')).filter(visible).map((e) => Math.round(R(e).right));
+    // int214 (call B): the pill is on line 2 — it ends where its row's needs-you badges begin, or at line 2's right edge
+    const pills = rows.map((r) => { const c = r.querySelector('.chan-row-sub .chan-chip'), s = r.querySelector('.chan-row-sub'); if (!visible(c)) return null; const b = [...s.querySelectorAll('.chan-unread, .chan-awaiting, .chan-row-needs')].filter(visible)[0]; const gap = parseFloat(getComputedStyle(s).columnGap) || 0; return Math.round((b ? R(b).left - gap : R(s).right) - R(c).right); }).filter((x) => x !== null);
     // the VISIBLE needs-you badge of each row (the narrow-rail container query swaps the pair for one pill)
     const badges = rows.map((r) => [...r.querySelectorAll('.chan-row-sub .chan-unread, .chan-row-sub .chan-awaiting, .chan-row-sub .chan-row-needs')].filter(visible).pop()).filter(Boolean).map((e) => Math.round(R(e).right));
     const titles = rows.map((r) => Math.round(R(r.querySelector('.chan-row-title')).left));
-    const lineOne = rows.map((r) => { const l = r.querySelector('.chan-row-line'); return [true, [...l.querySelectorAll('.chan-chip, .chan-unread, .chan-awaiting')].length]; });
+    const lineOne = rows.map((r) => { const l = r.querySelector('.chan-row-line'); return [true, [...l.querySelectorAll('.chan-chip, .chan-unread, .chan-awaiting')].length, r.querySelectorAll('.chan-row-sub .chan-chip').length]; });
     const spread = (xs) => xs.length ? Math.max(...xs) - Math.min(...xs) : 0;
     const panel = document.querySelector('.rail-panel-channels');
     const geo = { panel: panel && [Math.round(R(panel).left), Math.round(R(panel).width), panel.scrollWidth, panel.clientWidth], list: (() => { const l = window.app.sidebar.listEl; return l && [Math.round(R(l).left), Math.round(R(l).width), l.scrollLeft, l.scrollWidth, l.clientWidth]; })(), wide: [...panel.querySelectorAll('*')].filter((e) => R(e).right > R(panel).right + 1).slice(0, 6).map((e) => e.className + ':' + Math.round(R(e).width)) };
     return { rows: rows.length, trackedRows, pills, badges, titles, lineOne, pillSpread: spread(pills), badgeSpread: spread(badges), titleSpread: spread(titles), geo };
   })()`);
-  ok(grid.rows >= 4 && grid.pills.length === grid.rows && grid.pillSpread <= 1, `(a) every row's freshness pill sits on the same right edge (±1px over ${grid.rows} rows: spread ${grid.pillSpread})`, JSON.stringify(grid));
+  ok(grid.rows >= 4 && grid.pills.length === grid.rows && grid.pills.every((x) => Math.abs(x) <= 1), `(a) every row's freshness pill ends where its line-2 badges begin, or at the line's right edge (±1px over ${grid.rows} rows)`, JSON.stringify(grid));
   ok(grid.badgeSpread <= 1 && grid.titleSpread <= 1, `(a) the line-2 badges share a right edge and the titles a left edge (spreads ${grid.badgeSpread} / ${grid.titleSpread})`, JSON.stringify(grid));
-  ok(grid.lineOne.every(([, n]) => n === 1), '(a) line 1 carries exactly ONE pill on every row — the freshness claim; unread / awaiting live on line 2', JSON.stringify(grid.lineOne));
+  ok(grid.lineOne.every(([, n, n2]) => n === 0 && n2 === 1), '(a) line 1 = the name and the time (no pill, no badge); line 2 carries exactly ONE pill on every row — the freshness claim — beside the unread / awaiting badges (int214, call B)', JSON.stringify(grid.lineOne));
   // the badge PAIR is the default; the ONE-pill collapse belongs to the narrow rail only. The rows
   // are inline-size containers themselves, so an unnamed @container query used to resolve against
   // the 166px row and collapse the pair at the 260px default (round 3) — pinned at both widths.
-  const KINDS = `(() => { const R = (el) => el.getBoundingClientRect(); const vis = (el) => !!el && R(el).width > 0; const rows = [...document.querySelectorAll('.rail-panel-channels .chan-row')]; return { width: R(document.querySelector('.rail-panel-channels')).width, unread: rows.filter((r) => vis(r.querySelector('.chan-unread'))).length, needs: rows.filter((r) => vis(r.querySelector('.chan-row-needs'))).length, chips: rows.filter((r) => vis(r.querySelector('.chan-row-line .chan-chip'))).length, label: vis(document.querySelector('.rail-panel-channels .chan-outbox-label')), count: vis(document.querySelector('.rail-panel-channels .chan-sec-count')), name: vis(document.querySelector('.rail-panel-channels .chan-sec:not(.chan-connect) .chan-sec-name')), headTitle: (document.querySelector('.rail-panel-channels .chan-sec:not(.chan-connect) .chan-sec-head') || {}).title || '' }; })()`;
+  const KINDS = `(() => { const R = (el) => el.getBoundingClientRect(); const vis = (el) => !!el && R(el).width > 0; const rows = [...document.querySelectorAll('.rail-panel-channels .chan-row')]; return { width: R(document.querySelector('.rail-panel-channels')).width, unread: rows.filter((r) => vis(r.querySelector('.chan-unread'))).length, needs: rows.filter((r) => vis(r.querySelector('.chan-row-needs'))).length, chips: rows.filter((r) => vis(r.querySelector('.chan-row-sub .chan-chip'))).length, label: vis(document.querySelector('.rail-panel-channels .chan-outbox-label')), count: vis(document.querySelector('.rail-panel-channels .chan-sec-count')), name: vis(document.querySelector('.rail-panel-channels .chan-sec:not(.chan-connect) .chan-sec-name')), headTitle: (document.querySelector('.rail-panel-channels .chan-sec:not(.chan-connect) .chan-sec-head') || {}).title || '' }; })()`;
   const k260 = await p1.evaljs(KINDS);
   ok(k260.unread > 0 && k260.needs === 0 && k260.count && k260.name && k260.chips > 0, `(a) at the default rail (${Math.round(k260.width)}px of panel) the unread count and the awaiting pill are SEPARATE badges, the section name, count and the freshness pills show`, JSON.stringify(k260));
   await p1.evaljs(`(() => { const sb = window.app.sidebar; sb._resizer._setSize(200); sb._applySidebarLayoutWidth(200); return 1; })()`);
@@ -826,7 +827,7 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
     const rendered = {}; for (const el of ob.content.querySelectorAll('.chan-prop-state')) { const k = [...el.classList].find((x) => x.startsWith('chan-prop-state-')).slice('chan-prop-state-'.length); rendered[k] = c(el); }
     st.renderedAgree = Object.entries(rendered).every(([k, v]) => !(k in st) || st[k] === v);
     const panel = document.querySelector('.rail-panel-channels');
-    const chips = [...panel.querySelectorAll('.chan-row-line .chan-chip')].map((el) => ({ live: el.classList.contains('chan-chip-live'), off: el.classList.contains('chan-chip-off'), color: c(el) }));
+    const chips = [...panel.querySelectorAll('.chan-row-sub .chan-chip')].map((el) => ({ live: el.classList.contains('chan-chip-live'), off: el.classList.contains('chan-chip-off'), color: c(el) }));
     return { states: st, chips };
   })()`);
   const stc = colours.states;
@@ -1029,8 +1030,9 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
   const capsPre = MUT.load('src/channel-caps.js', capsSrc.replace(SHORT_RE, (m, a, b) => (/'\{age\} ago'/.test(a) ? m : `return ${b};`)), 'r3-words');
   const cssNow = fs.readFileSync(path.join(wt, 'public/style.css'), 'utf8');
   const CSS_EDITS = [
-    ['.chan-row-title { flex: 1 1 auto; min-width: 0;', '.chan-row-title { flex: 1 1 auto; min-width: 60px;'],
-    ['.chan-row-line .chan-chip { flex: 0 0 auto; }', '.chan-row-line .chan-chip { flex: 0 0 auto; max-width: calc(100% - 66px); overflow: hidden; text-overflow: ellipsis; }'],
+    // int214 (call B): the pill lives on line 2 beside the last message — the r4 cap's two rules, spelled there
+    ['.chan-row-who { flex: 1; min-width: 0;', '.chan-row-who { flex: 1; min-width: 60px;'],
+    ['.chan-row-sub .chan-chip { flex: 0 0 auto; }', '.chan-row-sub .chan-chip { flex: 0 0 auto; max-width: calc(100% - 66px); overflow: hidden; text-overflow: ellipsis; }'],
   ];
   ok(CSS_EDITS.every(([a]) => cssNow.split(a).length === 2), 'the two rules the control reverts are spelled once in style.css', JSON.stringify(CSS_EDITS.map(([a]) => cssNow.split(a).length - 1)));
   const cssPreFile = path.join(MUT.dir, 'style-r4-cap.css');
@@ -1045,10 +1047,10 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
   })()`;
   const r1 = (x) => Math.round(x * 10) / 10;
   const MEASURE = `const r1 = ${r1.toString()};
-    const m = (row) => { const c = row.querySelector('.chan-row-line .chan-chip'), ln = row.querySelector('.chan-row-line'), ti = row.querySelector('.chan-row-title');
+    const m = (row) => { const c = row.querySelector('.chan-row-sub .chan-chip'), ln = row.querySelector('.chan-row-sub'), ti = row.querySelector('.chan-row-who');
       if (!c) return { chip: null };
       const cr = c.getBoundingClientRect(), lr = ln.getBoundingClientRect();
-      return { chip: c.textContent, whole: c.scrollWidth <= c.clientWidth, inside: cr.right <= lr.right + 0.5, w: r1(cr.width), natural: c.scrollWidth, line: r1(lr.width), title: r1(ti.getBoundingClientRect().width), child: row.classList.contains('chan-row-child') }; };`;
+      return { chip: c.textContent, whole: c.scrollWidth <= c.clientWidth, inside: cr.right <= lr.right + 0.5, w: r1(cr.width), natural: c.scrollWidth, line: r1(lr.width), title: r1(ti.getBoundingClientRect().width), gap: parseFloat(getComputedStyle(ln).columnGap) || 0, child: row.classList.contains('chan-row-child') }; };`;
   // a · the fixture's own rows
   const ROWS = `(() => { ${MEASURE}
     const panel = document.querySelector('.rail-panel-channels');
@@ -1062,16 +1064,18 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
     const out = [];
     for (const child of ${JSON.stringify(kinds)}) {
       const r = base.cloneNode(true); r.dataset.conv = 'vs-pill-probe'; r.classList.toggle('chan-row-child', child);
-      const line = r.querySelector('.chan-row-line'), title = r.querySelector('.chan-row-title'), chip = r.querySelector('.chan-row-line .chan-chip');
-      if (child && !line.querySelector('.mounts-child-arrow')) { const ar = document.createElement('span'); ar.className = 'mounts-child-arrow'; ar.textContent = '↳'; line.insertBefore(ar, title); }
-      title.textContent = 'A conversation title long enough to be cut at every width';
+      // int214 (call B): line 2 — the last message yields beside the pill (the badges off the probe; the words' own form)
+      const line = r.querySelector('.chan-row-sub'), title = r.querySelector('.chan-row-who'), chip = r.querySelector('.chan-row-sub .chan-chip');
+      for (const x of line.querySelectorAll('.chan-unread, .chan-awaiting, .chan-row-needs')) x.remove();
+      delete chip.dataset.mode;
+      title.textContent = 'A last message long enough to be cut at every width';
       base.parentNode.appendChild(r);
       for (const w of ${JSON.stringify(words)}) { chip.textContent = w; out.push(m(r)); }
       r.remove();
     }
     return { rows: out };
   })()`;
-  const brief = (rows) => rows.map((x) => `"${x.chip}" ${x.w}/${x.natural}px${x.whole ? '' : ' CUT'} title ${x.title}${x.child ? ' ↳' : ''}`).join(' | ');
+  const brief = (rows) => rows.map((x) => `"${x.chip}" ${x.w}/${x.natural}px${x.whole ? '' : ' CUT'} message ${x.title}${x.child ? ' (child)' : ''}`).join(' | ');
   const setCss = async (pre) => p1.evaljs(`(() => {
     const link = [...document.querySelectorAll('link[rel="stylesheet"]')].find((l) => /^\\/?style\\.css/.test(l.getAttribute('href') || ''));
     if (!link) return 'no style.css link';
@@ -1100,12 +1104,12 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
       console.log(`    ${tag}${lang} words: ` + brief(pb.rows || []));
       const bad = (pb.rows || []).filter((x) => !x.whole || !x.inside || x.natural > PILL_BUDGET || (!x.child && x.title < PILL_TITLE_MIN));
       const widest = (pb.rows || []).reduce((a, x) => (x.natural > (a ? a.natural : -1) ? x : a), null);
-      ok(!pb.fail && pb.rows.length === words.length * 2 && !bad.length, `${tag}${lang}: b · every pill word (${words.length}: ${words.join(' · ')}) is ≤ ${PILL_BUDGET} px (widest "${widest && widest.chip}" ${widest && widest.natural} px) — whole and inside a plain row (title ≥ ${PILL_TITLE_MIN} px) and a ↳ child row`, JSON.stringify(pb.fail || bad));
+      ok(!pb.fail && pb.rows.length === words.length * 2 && !bad.length, `${tag}${lang}: b · every pill word (${words.length}: ${words.join(' · ')}) is ≤ ${PILL_BUDGET} px (widest "${widest && widest.chip}" ${widest && widest.natural} px) — whole and inside line 2 of a plain row (the message ≥ ${PILL_TITLE_MIN} px) and of a child row`, JSON.stringify(pb.fail || bad));
       const long = longest(capsNow, lang);
       const lp = await p1.evaljs(PROBE([long], [false]));
       const lr = (lp.rows || [])[0];
       if (lr && lr.natural <= PILL_BUDGET) console.log(`    ${tag}${lang}: c · no ${lang} sentence outgrows the budget ("${long}" ${lr.natural} px) — the structure is proven in the other languages`);
-      else { structural[FACE || 'default'] = (structural[FACE || 'default'] || 0) + 1; ok(!lp.fail && !!lr && lr.whole && lr.inside && Math.abs(lr.title + lr.w + 6 - lr.line) <= 1, `${tag}${lang}: c · a pill carrying the longest sentence ("${long}", ${lr && lr.natural} px > the budget) is still drawn whole — the title yields (${brief(lp.rows || [])})`, JSON.stringify(lp)); }
+      else { structural[FACE || 'default'] = (structural[FACE || 'default'] || 0) + 1; ok(!lp.fail && !!lr && lr.whole && lr.inside && Math.abs(lr.title + lr.w + lr.gap - lr.line) <= 1, `${tag}${lang}: c · a pill carrying the longest sentence ("${long}", ${lr && lr.natural} px > the budget) is still drawn whole — the message yields (${brief(lp.rows || [])})`, JSON.stringify(lp)); }
       if (lang === 'en') {
         // THE CONTROL: the pre-fix product through the SAME probes
         ok((await setCss(true)) === 'r4-cap', `${tag}CONTROL: the page now runs the pre-fix style.css (the scratch copy with the r4 cap)`);
@@ -1252,7 +1256,7 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
     const sec = document.querySelector('.rail-panel-channels .chan-sec[data-adapter="fake-poll"]');
     if (!sec) return { none: [...document.querySelectorAll('.rail-panel-channels .chan-sec[data-adapter]')].map((x) => x.dataset.adapter) };
     const notes = [...sec.querySelectorAll('.chan-sec-note')].map((n) => n.textContent.trim());
-    return { health: [((sec.querySelector('.chan-sec-health-text') || {}).textContent) || '', ...notes].join(' | '), notes, pills: [...sec.querySelectorAll('.chan-row')].map((r) => ({ conv: r.dataset.conv, pill: ((r.querySelector('.chan-row-line .chan-chip') || {}).textContent) || '' })) };
+    return { health: [((sec.querySelector('.chan-sec-health-text') || {}).textContent) || '', ...notes].join(' | '), notes, pills: [...sec.querySelectorAll('.chan-row')].map((r) => ({ conv: r.dataset.conv, pill: ((r.querySelector('.chan-row-sub .chan-chip') || {}).textContent) || '' })) };
   })()`;
   const seen = { rate: null, reads: [], gone: null, pausedJudged: null, failLine: false, first: undefined };
   const t0 = Date.now();

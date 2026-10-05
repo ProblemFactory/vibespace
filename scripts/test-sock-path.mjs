@@ -134,7 +134,7 @@ const TABLE = {
   'src/routes/browser.js': 'agent-browser — reports socketDir (browser-profiles\' rule)',
   'src/server/browser-env.js': 'agent-browser — creates + verifies the short dir (browser-profiles\' rule)',
   'src/server/browser-keeper.js': 'agent-browser — reads socketDir back (browser-profiles\' rule)',
-  'src/plugins.js': 'tailscaled plugin socket — socketPathFits asked at start: over ⇒ refused by name',
+  'src/plugins/tailscale.js': 'tailscaled plugin socket — socketPathFits asked at start: over ⇒ refused by name',
   'server.js': 'dtach session anchors data/sockets/cw-* — ONE boot line when cw- + 36 exceeds the bound',
   'src/incident.js': 'incident capture — a READER of data/sockets',
   'data/bin/vibespace-remote-keeper': 'remote keeper socket under ~/.vibespace/run on the remote host — short by construction (existing)',
@@ -170,7 +170,7 @@ const tracked = () => {
   eq(commented.unlisted, [], '…while the same shape in a comment is not code');
   // the wiring each row promises (pins on the named sites)
   // (ws-create's per-session channel socket and its reader in the ladder went with the VibeSpace channel, B-df40 — their rows with them)
-  ok(/socketPathFits\(this\._tsSock\(\), process\.platform\)/.test(readReal('src/plugins.js')), 'the tailscale plugin asks socketPathFits at start');
+  ok(/socketPathFits\(tsSock\(\), process\.platform\)/.test(readReal('src/plugins/tailscale.js')), 'the tailscale plugin asks socketPathFits at start');
   ok(/socketPathFits\(path\.join\(SOCKETS_DIR, 'cw-' \+ 'x'\.repeat\(36\)\)/.test(readReal('server.js')), 'server.js says the dtach anchors\' bound once at boot');
   const ad = readReal('src/agentd/agentd.js');
   ok(/SOCKP\.daemonSocketPath\(\{/.test(ad) && /SOCKP\.witnessOrRule\(\{/.test(ad) && /SOCKP\.ensureSocketDir\(/.test(ad) && /process\.exit\(7\)/.test(ad) && /process\.exit\(8\)/.test(ad) && /SOCKP\.witnessPathOf\(ROOT\)/.test(ad), 'the daemon: the rule at listen, the witness written, the bridge reads witness-or-rule, too-long exits 7, hijacked exits 8');

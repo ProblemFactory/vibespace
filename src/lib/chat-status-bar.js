@@ -2,7 +2,7 @@ import { pillMode, billingPillForms, billingPillHtml } from './title-chips.js'; 
 import { escHtml, showInputDialog, showConfirmDialog, uiScale, showToast, fetchJson, copyText, absUrl, onOutsidePress } from './utils.js';
 import { UI_ICONS } from './icons.js';
 import { systemSelect } from './design-home.js'; // lane design-systems-home: the design chip's "Design system" select
-import { BACKEND_META, getBackendMeta, backendFeatureCaps, autoResumeCapsFor, effortDisplay, effortLabel, noteModelCatalog, responseStyleLabel, responseStyleCaps, styleAppliesLive, initHealthLabel } from './agent-meta.js';
+import { BACKEND_META, getBackendMeta, backendFeatureCaps, autoResumeCapsFor, effortDisplay, effortLabel, noteModelCatalog, responseStyleLabel, responseStyleCaps, styleAppliesLive, initHealthLabel, uiRow, billingRow } from './agent-meta.js';
 import { t } from './i18n.js';
 import { shortWorkflowName } from '../workflow-name.js';
 import { waitingChip } from '../helper-ask.js'; // PURE (lane S1): the waiting chip names who waits
@@ -614,7 +614,7 @@ export class ChatStatusBar {
         ? effortDisplay(this._backend, this._statusEffortLive, { model: this._servedModel || this._statusModel })
         : '';
       const eTitle = eKnown
-        ? (this._backend === 'codex'
+        ? (uiRow(this._backend).effortReport === 'per-turn'
           ? t('Reasoning effort (as reported per turn) — click to change (applies from the next turn)')
           : t('Reasoning effort (as last commanded — the CLI does not report it back) — click to change'))
         : t('Reasoning effort not set/reported — click to change');
@@ -808,7 +808,7 @@ export class ChatStatusBar {
     // opens it (several this turn ⇒ a menu, drafted first). The title is a vendor's / an agent's string: escHtml.
     if (this._channelTouch) {
       const v = this._channelTouch;
-      const glyph = CHANNEL_GLYPH[channelGlyphFor(v.latest.kind || v.latest.adapterId)] || UI_ICONS.chat;
+      const glyph = CHANNEL_GLYPH[channelGlyphFor(v.latest.icon)] || UI_ICONS.chat;
       const tip = v.rows.length > 1 ? t('{n} conversations this turn read or drafted — click for the list', { n: v.rows.length }) : t('The conversation this turn read or drafted — click to open it');
       chip('channels', 'chat-status-channels chat-status-clickable', tip, `${glyph} <span class="chat-status-channels-text">${escHtml(channelChipText(v, t))}</span>`);
     }
@@ -837,7 +837,7 @@ export class ChatStatusBar {
       const isPooled = a.source === 'pooled';
       // remote session: its CLI login is the HOST's — name the machine.
       // codex bills the ChatGPT login, not the claude CLI's (2.368.16).
-      const glogin = this._backend === 'codex' ? t('ChatGPT login') : t('CLI login');
+      const glogin = t(billingRow(this._backend).cliLogin);
       const label = a.source === 'unknown' ? '?'
         : isPooled ? '⣿ ' + (a.name || t('Pool')) + (a.poolTarget ? ' → ' + a.poolTarget : '')
         : (a.name || (isApi ? (a.source === 'api-console' ? 'Console' : 'API')
@@ -1664,7 +1664,7 @@ export class ChatStatusBar {
           dropdown.appendChild(item);
         }
       };
-      if (this._backend === 'codex') {
+      if (uiRow(this._backend).effortLevels === 'model-catalog') {
         // Effort levels are MODEL-SPECIFIC since GPT-5.6 (sol/terra go up to
         // ultra, luna to max, older models stop at xhigh) — prefer the current
         // model's reported levels from the models cache, fall back to the union
@@ -1678,8 +1678,8 @@ export class ChatStatusBar {
         fetch('/api/available-models').then(r => r.json()).then(data => {
           if (!dropdown.isConnected) return;
           loading.remove();
-          const models = (data?.codex || []).filter(m => m.id);
-          noteModelCatalog('codex', models); // per-model multiAgentEffort for the effort tooltip (2.369.62)
+          const models = (data?.[this._backend] || []).filter(m => m.id);
+          noteModelCatalog(this._backend, models); // per-model multiAgentEffort for the effort tooltip (2.369.62)
           const rank = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
           const cur = models.find(m => m.id === this._statusModel);
           let levels = (cur?.efforts?.length ? cur.efforts : [...new Set(models.flatMap(m => m.efforts || []))])
@@ -1761,7 +1761,7 @@ export class ChatStatusBar {
       // completes its turn on the fallback but every subsequent turn retries
       // the original (the user's '总是变成opus 4.8' fix). Claude only — codex
       // has no fallback mechanism (a toggle would falsely imply protection).
-      if (this._backend !== 'codex') {
+      if (uiRow(this._backend).modelLock) {
         const lockItem = document.createElement('div');
         lockItem.className = 'chat-status-dropdown-item' + (this._modelLocked ? ' active' : '');
         lockItem.classList.add('chat-status-dropdown-lock');

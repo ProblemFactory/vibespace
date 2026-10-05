@@ -1055,6 +1055,7 @@ const CACHES = {
   'src/lib/channels-panel.js|EXPANDED': 'expanded section keys',
   'src/lib/channels-panel.js|ends': 'list name → its end element (a sentinel / skeleton row — no words of a row)',
   'src/lib/channels-panel.js|aroundCache': 'design 010: the search dialog\'s around sheets — the vendor\'s records per found message, a local of ONE dialog (gone with it; never stored)',
+  'src/lib/channels-panel.js|curBadges': 'lane channels-list-polish: account id → its badge spec (hue / internal / vendor glyph) of the last build — no words',
   'src/lib/channels-panel.js|chain': 'list name → how many pages read while its end stayed in view (a number)',
   'src/lib/channels-panel.js|chainTop': 'list name → the scroll box\'s scrollTop at its last page read (a number)',
   'src/lib/channels-panel.js|FOLD_LISTENERS': 'subscriber functions',

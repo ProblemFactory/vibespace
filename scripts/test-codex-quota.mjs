@@ -44,8 +44,15 @@ const { normalizeCodexRateLimit } = require(path.join(REPO, 'src/usage-routes.js
   ok('/api/usage estimates cover codex keys', /codex identities estimate too[\s\S]{0,300}codexRl\.byAccount/.test(ur));
   const eng = read('src/server/usage-pool-engine.js');
   ok('codex identities JOIN the groups (the "economics are separate" skip is gone)', !/backend === 'codex'\)\) continue; \/\/ pools have no quota/.test(eng) && /codex identities join the groups/.test(eng));
-  ok('codex identity keys are backend-prefixed (email collision with a claude login must never merge quotas)', /isCodex \? 'codex:' : ''\) \+ identityKeyFor/.test(eng));
-  ok("'__global_codex__' is a pseudo id, not a deleted account", /__global_codex__\.json'\) \? null/.test(eng));
+  // dc-pool-quota (2.369.214): the prefix and the pseudo id are DERIVED from the harness's creds row (globalUsageKey /
+  // globalKeyOwner) — codex keeps its 'codex:' prefix and '__global_codex__' because its creds row has no legacyGlobalKey
+  const H = require(path.join(REPO, 'src/harnesses/index.js'));
+  const cxCreds = H.get('codex').creds, clCreds = H.get('claude').creds;
+  const codexOwnKey = cxCreds && !cxCreds.legacyGlobalKey && clCreds && clCreds.legacyGlobalKey === '__global__';
+  ok('codex identity keys are backend-prefixed (email collision with a claude login must never merge quotas)',
+    /\(ownBe \? ownBe \+ ':' : ''\) \+ identityKeyFor/.test(eng) && /ownBe = gOwner \|\| \(acctRec\?\.backend && globalUsageKey\(acctRec\.backend\) !== '__global__'/.test(eng) && codexOwnKey);
+  ok("'__global_codex__' is a pseudo id, not a deleted account",
+    /const gOwner = globalKeyOwner\(fn\.slice\(0, -5\)\)/.test(eng) && /accountId = \(fn === '__global__\.json' \|\| gOwner\) \? null/.test(eng) && codexOwnKey);
   ok('codex identities learn WITHOUT the claude Max priors', /priorsFor: \(identityKey\) => String\(identityKey \|\| ''\)\.startsWith\('codex:'\) \? null : CLAUDE_MAX_PRIOR_FULL_USD/.test(eng));
   // (the gate grew a sibling clause in 2026-09-08 — autoCliReady — so the
   // adjacency is bounded to the same line rather than literal; what is pinned
