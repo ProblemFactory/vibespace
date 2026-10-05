@@ -22,6 +22,7 @@ import { scratch } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { gitEnvFrom } from './git-env.mjs';
 import { execFileSync } from 'node:child_process';
+import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-seams: the engine + its three family files as one text
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -1334,7 +1335,7 @@ console.log('\n⑳ design 010 S6: Gmail\'s full search — messages.list?q=, a m
   const c0 = await ask1c([anchor]), c1 = await ask1c([anchor, ...hiddenMail(10, 'hr@corp.example', ['payroll'])]);
   ok(c0 === 'msg_ops_d' && c1 === '', 'CONTROL 1c: the copy without the quoting answers the visible hit with 0 hidden mails and NOTHING with 10 — the oracle legs above would be RED', JSON.stringify([c0, c1]));
   // CONTROL 2: an engine copy that passes no hints — connected fresh, the same world: it reads the held hit and the hidden ones
-  const ESRC = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const ESRC = engineSource(REPO);
   const A2 = 'e.adapter.search({ query, pageToken: next, storedAt, shows })';
   ok(ESRC.split(A2).length === 2, 'CONTROL anchor: the hinted search call is in the engine once');
   const EC = MUT.load('src/server/channels-engine.js', ESRC.replace(A2, 'e.adapter.search({ query, pageToken: next })'), 'no-hints');

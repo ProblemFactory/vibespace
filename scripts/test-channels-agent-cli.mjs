@@ -16,6 +16,7 @@ import { createRequire } from 'node:module';
 import net from 'node:net';
 import { scratch } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-seams: the engine + its three family files as one text
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -63,7 +64,7 @@ const cliSrc = fs.readFileSync(CLI, 'utf-8');
 const cliSetM = /const REFRESH_REFUSED = \[([^\]]*)\]/.exec(cliSrc);
 const cliRefused = cliSetM ? [...cliSetM[1].matchAll(/'([^']+)'/g)].map((m) => m[1]).sort() : [];
 ok(ROUTE_STATUS.size >= 8 && routeRetryable.length >= 7, `CENSUS setup: the agent route's STATUS table parsed — ${ROUTE_STATUS.size} codes, ${routeRetryable.length} retry-able (429/409/503): ${routeRetryable.join(', ')}`);
-const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+const esrc = engineSource(REPO);
 const requestSetRegion = esrc.slice(esrc.indexOf('async function pass(adapterId'), esrc.indexOf('async function watch(adapterId'));
 ok(REPLY_ONLY.every((c) => !requestSetRegion.includes(`'${c}'`)) && REPLY_ONLY.every((c) => asrc.includes(`'${c}'`) || esrc.includes(`'${c}'`)), `CENSUS: the retry-able codes excepted as reply / compose only (${REPLY_ONLY.join(', ')}) are never spelled in the engine's pass / request-set region and are spelled by the reply path`);
 ok(cliRefused.length > 0 && JSON.stringify(cliRefused) === JSON.stringify(expectedRefused), `CENSUS: the CLI's REFRESH_REFUSED set == the route's retry-able refresh codes — [${cliRefused.join(', ')}]`, `cli [${cliRefused.join(', ')}] vs route [${expectedRefused.join(', ')}]`);
@@ -500,7 +501,7 @@ console.log('\n⑳ design 008 S6: list — the newest 200 visible + how many mor
   const ENG = require(path.join(REPO, ENGP));
   const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
   const MUTE = mutantCopies('chan-agent-cli', REPO);
-  const esrc = fs.readFileSync(path.join(REPO, ENGP), 'utf-8');
+  const esrc = engineSource(REPO);
   const patched = (from, to, tag) => { if (esrc.split(from).length !== 2) throw new Error(`control ${tag}: the anchor moved`); return MUTE.load(ENGP, esrc.replace(from, to), tag); };
   const AG = { kind: 'agent', id: 'agent-1', name: 'Worker', groups: [], msgLevelFor: () => 'none' };
   const A = 'fake-poll', T = 1_800_000_000_000;

@@ -28,11 +28,16 @@
  *                `pacerFor(sender)`, persisted in the store, refunded when the
  *                wake did not go out.
  *   REPORTS      `reportsForTurn(cid, budget)` = the next-turn reports for one
- *                conversation (agent-routes calls it on a USER-initiated turn
- *                only) and `commitReports` stamps `reportedUpTo` per (group,
+ *                conversation (agent-routes calls it on a turn of ANY origin —
+ *                lane stash-any-turn, 2026-10-05; a turn nobody typed passes
+ *                `aside` and its head carries ASIDE_LINE, the echo guard as
+ *                words) and `commitReports` stamps `reportedUpTo` per (group,
  *                member) — at render, the accepted-lost stance every other
  *                injection marker takes. A successful wake stamps it too, so a
- *                woken member is never handed the same message again.
+ *                woken member is never handed the same message again — and
+ *                WHILE a wake is on its way (`wakesInFlight`) that group sits
+ *                out the member's reports: the woken turn asks prompt-context
+ *                before the post resolves, and its frame already carries them.
  *   BROADCAST    every change pushes `channel-groups-updated` {changed, groups,
  *                messages?} — the recomputed list, never a dirty bit.
  *   CARDS        (lane group-report-card, the owner 2026-09-28: "怎么在那个对话里
@@ -64,6 +69,9 @@ const msgAcl = require('../msg-acl.js');
 const RC = require('../record-clear.js');
 
 const WAKE_BUDGET = 4096;       // one wake's report (it rides its own turn, not the 10 KiB injection)
+// THE ECHO GUARD AS WORDS (lane stash-any-turn): the next-turn reports ride a turn nobody typed too — once, under the
+// head, the agent is told they are an aside to this turn's task (agent-facing: English only)
+const ASIDE_LINE = "(these arrived while you were handling something else — answer each group in its own group; do not fold them into this turn's task)";
 const TURN_BUDGET = 4096;       // every group report on ONE user turn together
 const MIN_REPORT_ROOM = 320;    // below this a report waits for the next turn rather than arrive as a stub
 const TEXT_MAX = 16 * 1024;
@@ -118,6 +126,7 @@ function create({
   const sessionOf = (cid) => live().find((s) => s.cid === cid) || null;
   const all = () => store.groups.live().groups;
   const getGroup = (id) => (G.isGroupId(id) ? all()[id] || null : null);
+  const wakesInFlight = new Map();   // `${gid}|${member}` → wakes on their way (that group sits out the member's reports)
 
   /** msg-acl's level of `to` as seen from `by` (the owner reaches everyone live). */
   function reach(by, to) {
@@ -407,6 +416,14 @@ function create({
   async function wake(gid, member, rec, why) {
     const g = getGroup(gid);
     if (!g) return { ok: false, reason: 'group gone' };
+    const flight = gid + '|' + member;
+    wakesInFlight.set(flight, (wakesInFlight.get(flight) || 0) + 1);
+    try { return await wakeOnce(g, gid, member, rec, why); } finally {
+      const n = (wakesInFlight.get(flight) || 1) - 1;
+      if (n > 0) wakesInFlight.set(flight, n); else wakesInFlight.delete(flight);
+    }
+  }
+  async function wakeOnce(g, gid, member, rec, why) {
     const lead = `${WAKE_LEAD[why] || 'You were woken'} — group messages (vibespace-msg):`;
     const rep = G.reportFor(g, readLog(gid), member, { budget: WAKE_BUDGET, lead });
     if (!rep || rep.fits === false) return { ok: false, reason: rep ? 'the report does not fit a wake' : 'nothing to deliver' };
@@ -948,9 +965,9 @@ function create({
    *   draws each mark's cards, then stamps it). `{preview:true}` commits
    *   nothing: `marks` is empty and `pending` lists every waiting message.
    */
-  function reportsForTurn(cid, { budget = TURN_BUDGET, preview = false } = {}) {
+  function reportsForTurn(cid, { budget = TURN_BUDGET, preview = false, aside = false } = {}) {
     if (preview) return previewFor(cid, budget);
-    return composeReports(cid, budget);
+    return composeReports(cid, budget, aside);
   }
   /** THE CARDS a shown report carries (lane group-report-card): one per group MESSAGE the member was shown, oldest
    *  first — the sender, the words it was shown (whole, or cut as its line was), the group — and the count of the
@@ -1004,11 +1021,12 @@ function create({
     if (previewMemo.size > 1000) previewMemo.delete(previewMemo.keys().next().value);
     return value;
   }
-  function composeReports(cid, budget) {
+  function composeReports(cid, budget, aside = false) {
     const cands = [];
     for (const g of Object.values(all())) {
       const m = G.memberOf(g, cid);
       if (!m || m.notify === 'mute') continue;
+      if (wakesInFlight.has(g.id + '|' + cid)) continue;   // its wake's frame carries them (lane stash-any-turn)
       const since = Number.isFinite(m.reportedUpTo) ? m.reportedUpTo : m.joinedAt - 1;
       if (!((g.lastAt || 0) > since)) continue;
       cands.push(g);
@@ -1016,7 +1034,7 @@ function create({
     if (!cands.length) return { text: '', marks: [], cards: [] };
     cands.sort((a, b) => (b.lastAt || 0) - (a.lastAt || 0));
     const cap = Math.min(TURN_BUDGET, Number(budget) || 0);
-    const head = '### Group messages since your last turn (vibespace-msg — nobody was woken for these; reply only if it helps)';
+    const head = '### Group messages since your last turn (vibespace-msg — nobody was woken for these; reply only if it helps)' + (aside ? '\n' + ASIDE_LINE : '');
     // the trailer's reserve is MEASURED (r2): the widest line it can be —
     // the three longest clipped names, every candidate counted — never a guess
     const widest = cands.slice().sort((a, b) => Buffer.byteLength(clipName(inertFrames(b.name)), 'utf-8') - Buffer.byteLength(clipName(inertFrames(a.name)), 'utf-8'));
@@ -1102,4 +1120,4 @@ function create({
   };
 }
 
-module.exports = { create, WAKE_BUDGET, TURN_BUDGET, MIN_REPORT_ROOM, TEXT_MAX };
+module.exports = { create, WAKE_BUDGET, TURN_BUDGET, MIN_REPORT_ROOM, TEXT_MAX, ASIDE_LINE };

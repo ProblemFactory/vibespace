@@ -28,6 +28,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
+import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-seams: the engine + its three family files as one text
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -660,7 +661,7 @@ async function replaceLegs(ENGmod, name) {
   ok(!rl.refused.ok && rl.refused.code === 'bad-proposal' && rl.refused.oldState === 'awaiting-approval' && rl.refused.created === 0, 'ATOMIC: a new proposal the policy REFUSES (bad-proposal) leaves the old one standing and creates nothing', JSON.stringify(rl.refused));
   ok(rl.guards.siblingCode === 'not-yours' && rl.guards.sentCode === 'not-withdrawable' && rl.guards.made === 0, 'replacing somebody else\'s (not-yours) or a sent one (not-withdrawable) is refused BEFORE anything is made', JSON.stringify(rl.guards));
   ok(rl.hold.replaceOk && rl.hold.approveCode === 'bad-state' && rl.hold.approveState === 'withdrawn' && rl.hold.oldState === 'withdrawn', 'THE HOLD: the owner\'s Approve fired mid-replace waits for it and finds the old one withdrawn — it is never sent', JSON.stringify(rl.hold));
-  const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const esrc = engineSource(REPO);
   const MK = '      const r = await make();';
   const EXP = '    propose, approve: (id, o) => onProposal(id, () => approve(id, o)), reject: (id, o) => onProposal(id, () => reject(id, o)), outboxView, expireSweep, pointerSync, receipt,';
   ok(esrc.split(MK).length === 2 && esrc.split(EXP).length === 2, 'the make line and the held-decision export are present once (the controls patch exactly them)');
@@ -698,7 +699,7 @@ async function receiptLegs(ENGmod, name) {
   ok(/what the user changed \(- you proposed \/ \+ the user sent\):\n  Hi team,\n- the deploy is done\.\n\+ the deploy is finished — no action needed\.\n  thanks\nUse this as guidance for the next draft\./.test(rr.text), 'an EDITED approval: the stashed receipt carries the line DIFF (proposed vs sent) and the guidance sentence', rr.text);
   ok(rr.noWake, 'a plain Approve (no choice ⇒ next-turn) rides the next message — no billed wake by default');
   ok(rr.fate0 === 'waiting' && rr.fate1 === 'handed' && rr.drainedAt && rr.bc === 1, `THE FATE: "waiting" until the agent's next message drains the stash, then "handed" (one broadcast) — ${rr.fate0} → ${rr.fate1}`, JSON.stringify(rr));
-  const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const esrc = engineSource(REPO);
   const LINE = '    const text = P.renderReceiptBlock(rc, { adapterLabel: rec ? (rec.label || rec.id) : p.adapterId, title: rTitle, text: p.text, proposed: p.originalText, withheld });';
   ok(esrc.split(LINE).length === 2, 'the receipt-block line is present once (the control patches exactly it)');
   const { mutantCopies } = await import('./mutant-copy.mjs');
@@ -738,7 +739,7 @@ async function sweepWindowLeg(ENGmod, name) {
 {
   const sw = await sweepWindowLeg(ENG, 'sweep-window');
   ok(sw.d1 === 'expired' && sw.d2 === 'withdrawn' && sw.ok && sw.replaced && sw.made === 1 && sw.receipts === 1, `THE SWEEP RE-ASKS THE HOLD AT APPLY TIME: the due list taken before the hold, the first expires, the HELD second ends withdrawn (${sw.d2}), ONE new draft, ONE receipt (the first's expiry) — never an "expired" receipt for a draft the agent just replaced`, JSON.stringify(sw));
-  const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const esrc = engineSource(REPO);
   const GUARD = "      if (typeof unless === 'function' && unless(p)) { verdict = { ok: false, why: 'held: a replace of this proposal is in flight', held: true }; return; }";
   ok(esrc.split(GUARD).length === 2, 'the apply-time guard line is present once (the control removes exactly it)');
   const { mutantCopies } = await import('./mutant-copy.mjs');
@@ -770,7 +771,7 @@ async function sweepWindowLeg(ENGmod, name) {
   }
   const lg = await legacyLeg(ENG, 'legacy-fate');
   ok(lg.gone === 'handed' && lg.goneAt === null && lg.goneText === 'Handed to Worker with an earlier message' && lg.kept === 'waiting' && lg.bc === 1 && lg.changed.length === 1, `THE LEGACY FATE at boot: the receipt whose stash entry is gone reads "${lg.goneText}" (no time — nobody recorded it); the one still in the stash (matched by the id its text names) keeps "waiting"; ONE broadcast`, JSON.stringify(lg));
-  const RECON = "    if (!deliver || typeof deliver.stashPeek !== 'function' || stopped) return [];";
+  const RECON = "    if (!deliver || typeof deliver.stashPeek !== 'function' || engineCtx.stopped) return [];";   // lane dc-channels-seams: the engine's `stopped` read through its context
   ok(esrc.split(RECON).length === 2, 'the reconcile\'s entry line is present once (the control patches exactly it)');
   const norecon = MV.load('src/server/channels-engine.js', esrc.replace(RECON, '    return [];'), 'no-reconcile');
   const lc = await legacyLeg(norecon, 'legacy-fate-ctl');
@@ -846,7 +847,7 @@ function mkReal(opts = {}) {
 }
 const fateOf = (W, id) => { const f = P.receiptFateOf(W.eng.store.outbox.snapshot().proposals[id]); return { kind: f && f.kind, text: f ? P.receiptFateText(f) : '' }; };
 const dsrc = fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf-8');
-const esrcV2 = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+const esrcV2 = engineSource(REPO);
 const { mutantCopies: mutantCopiesV2 } = await import('./mutant-copy.mjs');
 const MV2 = mutantCopiesV2('chan-outbox-verify2', REPO);
 // THE STASH CAP: a stored receipt the ladder's cap drops (30 later entries — a peer flood, channel notices) was
@@ -1197,8 +1198,8 @@ async function rowWriteLeg(engMod, name) {
   const fc = PC4.receiptFateOf({ receipt: { status: 'rejected' }, draftedBy: { kind: 'agent', id: 'agent-1', name: 'Worker' }, state: 'rejected', receiptDelivery: { at: 1, ok: false, stashed: true, woke: false, choice: 'wake-now', verdict: 'row-unwritten' } });
   ok(fc && fc.kind === 'waiting' && !fc.wakeRefused, 'CONTROL: the policy without the line says a plain "waiting" over a wake the owner asked for and never got — the leg would go red');
   const LINE = "      try { await store.outbox.update((ob) => { const q = ob.proposals[id]; if (q && !q.receiptWake) { q.receiptWake = { at: tR, reserved: true, bootId: BOOT_ID, pid: process.pid }; took = true; } }); got = took; }";
-  ok(esrcV2.split(LINE).length === 2 || fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8').split(LINE).length === 2, 'the reservation line is present once (the control sets got inside the callback)');
-  const esrcV3 = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  ok(esrcV2.split(LINE).length === 2 || engineSource(REPO).split(LINE).length === 2, 'the reservation line is present once (the control sets got inside the callback)');
+  const esrcV3 = engineSource(REPO);
   const rwc = await rowWriteLeg(MV3.load('src/server/channels-engine.js', esrcV3.replace(LINE, "      try { await store.outbox.update((ob) => { const q = ob.proposals[id]; if (q && !q.receiptWake) { q.receiptWake = { at: tR, reserved: true, bootId: BOOT_ID, pid: process.pid }; took = true; got = true; } }); }"), 'row-got-in-callback'), 'v3-row-ctl');
   ok(rwc.trips === 1 && rwc.billed === 1, `CONTROL: a copy that answers from the callback wakes over the failed write (${rwc.billed} billed) — the leg would go red`);
 }
@@ -1220,7 +1221,7 @@ async function bootHoldsLeg(engMod, name) {
 {
   const bh = await bootHoldsLeg(ENG, 'v3-holds');
   ok(bh.states.every((x) => x === 'withdrawn') && bh.receipts === 0, `sweepReplaces ‖ expireSweep over four due half replaces: every old draft WITHDRAWN, no "expired" receipt (${JSON.stringify(bh.states)}, ${bh.receipts} receipts)`);
-  const esrcV3 = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const esrcV3 = engineSource(REPO);
   const LINE = "      runs.push(onProposal(old.id, () => withdrawNow(old.id, by, `replaced by ${q.id}`, { replacedBy: q.id })).then((w) => {";
   ok(esrcV3.split(LINE).length === 2, 'the up-front hold line is present once (the control takes each hold only after the previous finished)');
   const bhc = await bootHoldsLeg(MV3.load('src/server/channels-engine.js', esrcV3.replace(LINE, "      runs.push((runs.length ? runs[runs.length - 1] : Promise.resolve()).then(() => onProposal(old.id, () => withdrawNow(old.id, by, `replaced by ${q.id}`, { replacedBy: q.id }))).then((w) => {"), 'holds-sequential'), 'v3-holds-ctl');
@@ -1422,7 +1423,7 @@ async function durableLeg(ladderMod, name) {
   const w1 = await eng.withdrawProposal({ proposalId: mine.proposal.id, by: STR });
   ok(r1.code === 'not-found' && r2.code === 'not-found' && r1.error === r2.error && r1.error === w1.error && made === 0, `a stranger's --replaces / withdraw: one sentence for an existing draft and a nonexistent id ("${r1.error}"), nothing made`, JSON.stringify([r1, r2, w1]));
   eng.stop();
-  const esrcV3 = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const esrcV3 = engineSource(REPO);
   const LINE = "      if (!p0) return { ok: false, code: 'not-found', error: 'no such proposal (not found, or not yours)', replaces: oldId };";
   ok(esrcV3.split(LINE).length === 2, 'the one sentence is present once in replaceProposal (the control restores the telling one)');
   const EC = MV3.load('src/server/channels-engine.js', esrcV3.replace(LINE, "      if (!p0) return { ok: false, code: 'not-found', error: 'no such proposal to replace (not found, or not yours)', replaces: oldId };"), 'oracle');
@@ -1447,7 +1448,7 @@ async function durableLeg(ladderMod, name) {
 console.log('§6 r6 verify (2026-09-28, "what you approve is what runs"): the reply\'s anchor (F1), its recipients (F3), the card (F4), the digest + the arming (F6), the hidden characters (O1)');
 const { mutantCopies: mutantCopiesR6, copiesCensus: copiesCensusR6 } = await import('./mutant-copy.mjs');
 const MR6 = mutantCopiesR6('chan-outbox-r6', REPO);
-const ESRC_R6 = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+const ESRC_R6 = engineSource(REPO);
 const PSRC_R6 = fs.readFileSync(path.join(REPO, 'src/channel-policy.js'), 'utf-8');
 /** The fake poll adapter with a SPY on its send (and, with `envelope`, the F3 capability: a reply's recipients follow
  *  from the message it answers — `To = <anchor>@fixture.example`; without a stored envelope the send falls back to
@@ -2229,7 +2230,7 @@ const RX_KEY = 'hourglass';   // never seeded (the seed draws from the first 12 
 {
   const { mutantCopies } = await import('./mutant-copy.mjs');
   const M = mutantCopies('chan-outbox-rx', REPO);
-  const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const esrc = engineSource(REPO);
   const LINE = "    if (agent && row === 'off') return { ok: false, code: 'react-not-available', why: 'policy-off',";
   // TWO obedience points, both removed (a layered guard's control strips every layer — the PURE verdict's refusal
   // is obeyed by the second line, so a copy without only the first is still refused by the second)

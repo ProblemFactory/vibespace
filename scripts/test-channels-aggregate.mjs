@@ -66,6 +66,7 @@ import http from 'node:http';
 import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-seams: the engine + its three family files as one text
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -90,7 +91,7 @@ const routes = require(path.join(REPO, 'src/routes/channels.js'));
 // absolute path — a CLOSED WORLD — so every control still runs the real driver, store and scripted adapter
 // over the one patched rule.
 const DRAIN_SRC = fs.readFileSync(path.join(REPO, 'src/channel-drain.js'), 'utf-8');
-const ENGINE_SRC = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+const ENGINE_SRC = engineSource(REPO);
 const DRAIN_REQUIRE = "const Drain = require('../channel-drain.js');";
 function closedWorld(M, tag, { drain = [], engine = [] } = {}) {
   let d = DRAIN_SRC, e = ENGINE_SRC;
@@ -2334,7 +2335,7 @@ async function capRace(ENGmod, label, grain) {
   }
   // CONTROL: the pre-fix wake — a grain's wake NOT queued on its scope — breaks the cap
   const M9 = mutantCopies('chan-agg-race', REPO);
-  const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const esrc = engineSource(REPO);
   // R4 verify r4: the pre-fix shape is BOTH halves gone — the ONE door's scope leg dropped AND the row written after the
   // ladder (no reservation): with the row reserved before the bill, dropping the chain alone no longer overshoots here
   const unscoped = esrc.replace('        const r = await serialWake(`scope:${sk}`, () => (bounce < SCOPE_BOUNCE_MAX && scopeOf() !== sk ? SCOPE_MOVED : fn({ conv, scope: sk })));', '        const r = await fn({ conv, scope: sk });').replace('    const resId = await reserveWake(rec, convId, item, wk0);', "    const resId = 'late';");
@@ -2390,7 +2391,7 @@ async function capRace2(ENGmod, label) {
   ok(r.listW === r.n, `…and yet its member SEES every conversation of the account (${r.listW}) — access is reach, nothing else`);
   // CONTROL: the pre-fix wake — a watcher's wake NOT queued on its (scope, principal) chain — breaks both caps
   const M9c = mutantCopies('chan-agg-race2', REPO);
-  const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const esrc = engineSource(REPO);
   // R4 verify r4: the pre-fix shape is BOTH halves gone — the ONE door's scope leg dropped AND the row written after the
   // ladder (no reservation): with the row reserved before the bill, dropping the chain alone no longer overshoots here
   const unscoped = esrc.replace('        const r = await serialWake(`scope:${sk}`, () => (bounce < SCOPE_BOUNCE_MAX && scopeOf() !== sk ? SCOPE_MOVED : fn({ conv, scope: sk })));', '        const r = await fn({ conv, scope: sk });').replace('    const resId = await reserveWake(rec, convId, item, wk0);', "    const resId = 'late';");
@@ -2567,7 +2568,7 @@ console.log('⑫ the change feed at the owner\'s scale: measuring = ② + the fe
 console.log('⑪ controls: the old discovery bound, a scheduler that polls everything');
 {
   const M = mutantCopies('chan-agg', REPO);
-  const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const esrc = engineSource(REPO);
   // (a) the pre-fix discovery: every pass restarts the cursor, 5 pages at most
   const discOld = esrc.replace('const DISCOVERY_MAX_PAGES = 200;', 'const DISCOVERY_MAX_PAGES = 5;').replace('    if (!d.cursor) d.startedAt = now();', '    d.cursor = null; d.startedAt = now();');
   ok(discOld !== esrc && discOld.includes('DISCOVERY_MAX_PAGES = 5'), 'CONTROL setup: the pre-fix discovery is reconstructed from the shipped bytes');
@@ -2603,7 +2604,7 @@ console.log('⑪ controls: the old discovery bound, a scheduler that polls every
     const WLINE = "    if (watched) return { seconds: clamp(T.hotSec), tier, source: 'tier', paused: false };";
     ok(CAPS_SRC.split(WLINE).length === 2, 'CONTROL setup: the carrying feed\'s open-window line is spelled once');
     const capsCopy = M.write('src/channel-caps.js', CAPS_SRC.replace(WLINE, ''), null, { esm: false, name: `caps-nowatch-${process.pid}` });
-    const E3 = M.load('src/server/channels-engine.js', esrc.replace("const caps = require('../channel-caps.js');", `const caps = require(${JSON.stringify(capsCopy)});`), 'feed-nowatch');
+    const E3 = M.load('src/server/channels-engine.js', esrc.replaceAll("const caps = require('../channel-caps.js');", `const caps = require(${JSON.stringify(capsCopy)});`), 'feed-nowatch');
     const Wn = makeWorld(clock, { n: 4, hot: 4, warm: 0 });
     Wn.clock = () => clock;
     const dirN = path.join(ROOT, 'ctl-nowatch');

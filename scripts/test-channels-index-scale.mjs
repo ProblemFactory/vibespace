@@ -44,6 +44,7 @@ import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
 import { startWorkMeter, measure, measureAsync, BOUNDED_RATIO } from './work-meter.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-seams: the engine + its three family files as one text
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 startWorkMeter({ scan: 'whole' });   // ⑨'s bounds were calibrated on the pre-.209 whole-receiver scan charges (work-meter.mjs WHOLE_SCAN); BEFORE the modules load (a function compiled before coverage has no block counters)
@@ -319,7 +320,7 @@ console.log('⑥ the kept unread total = the old whole-index sum');
 
 console.log('⑦ source census');
 {
-  const src = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
+  const src = engineSource(REPO);
   const n = (src.match(/index\.snapshot\(\)/g) || []).length;
   ok(n === 0, `src/server/channels-engine.js calls store.index.snapshot() ${n} times (a read of one conversation is has/peek, a scan reads live())`);
 }
@@ -369,7 +370,7 @@ console.log(`⑩ design 011 lane 2: a quiet minute over ${N} rows`);
 {
   const MC = mutantCopies('chan-index-scale', REPO);
   const ssrc = fs.readFileSync(path.join(REPO, 'src/channel-store.js'), 'utf8');
-  const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
+  const esrc = engineSource(REPO);
   // the pre-lane row: the engine's pass stamps the ROW, the serializer keeps the stamps, nothing heals them
   const KEEP = ['  const s = JSON.stringify(value, INDEX_KEYS, 1);', '  const s = JSON.stringify(value, RUNTIME_KEYS, 1);'];
   const HEAL = ['      healRow(k, conv[k]);\n', ''];

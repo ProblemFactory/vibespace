@@ -728,9 +728,9 @@ console.log('§2 the routes over the REAL engine + store + ladder');
     ok(rp.posted === 200 && !rp.forkGot && rp.parentGot && !rp.afterAdoption, `a pending fork's prompt never carries the PARENT's group report; the parent's own next prompt does; an adopted fork hears nothing of the parent's (${JSON.stringify(rp)})`);
     const arsrc6 = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf-8');
     // B-c198 (lane for-you-jobs) moved the block up — the report is DECIDED FIRST — and assigns the hoisted `myCid`
-    const GR = "      myCid = ownConversationIdOf(s).cid;\n      if (ge && myCid && turnIsUserInitiated(s)) {";
+    const GR = "      myCid = ownConversationIdOf(s).cid;\n";   // lane stash-any-turn: the any-turn comment now sits between it and the `if`
     ok(arsrc6.split(GR).length === 2, 'the next-turn group-report block reads the caller through ownConversationIdOf, once (the control reads the raw id)');
-    const ARr = M6.load('src/agent-routes.js', arsrc6.replace(GR, "      myCid = s.claudeSessionId || s.backendSessionId || null;\n      if (ge && myCid && turnIsUserInitiated(s)) {"), 'reports-raw');
+    const ARr = M6.load('src/agent-routes.js', arsrc6.replace(GR, "      myCid = s.claudeSessionId || s.backendSessionId || null;\n"), 'reports-raw');
     const rpC = await reportLeg(ARr, 'r6-report-ctl');
     ok(rpC.forkGot && !rpC.parentGot, `CONTROL: with the raw id the FORK's prompt carries the parent's report and the parent's own prompt is empty (${JSON.stringify(rpC)}) — the leg would go red`);
     for (const c of copiesCensus(M6.files, M6.dir, REPO, { minCopies: 1, label: 'r6 fork control: ' })) ok(c.pass, c.name, c.detail);

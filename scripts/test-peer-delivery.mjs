@@ -182,7 +182,7 @@ ok('a claude session never rides rpc-queue (registry gate, even with a caps-bear
 {
   const NS = require(path.join(REPO, 'src/notification-senders.js'));
   ok('B-d963: a Background Work queue row is a notification; a person is not; a typed kind:notification row is', NS.isNotificationQueueItem({ kind: 'peer', from: 'Background Work · nightly' }) && !NS.isNotificationQueueItem({ kind: 'peer', from: 'session B' }) && !NS.isNotificationQueueItem({ kind: 'user', from: 'Background Work · x' }) && NS.isNotificationQueueItem({ kind: 'notification' }));
-  const files = ['src/jobs.js', 'src/server/browser-handback.js', 'src/server/channel-api-cards.js', 'src/server/channels-engine.js', 'src/server/stash-handover.js'];   // + the stash hand-over (2026-09-27), + B-2198's raw-API receipt (int212)
+  const files = ['src/jobs.js', 'src/server/browser-handback.js', 'src/server/channel-api-cards.js', 'src/server/channels-engine.js', 'src/server/channels-outbound.js', 'src/server/stash-handover.js'];   // + the stash hand-over (2026-09-27), + B-2198's raw-API receipt (int212)
   const producers = [];
   const walk = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const rel = path.join(d, e.name); if (e.isDirectory()) walk(rel); else if (/\.js$/.test(e.name) && /deliverToConversation\([^;]*kind: 'notification'/.test(read(rel))) producers.push(rel); } };
   walk('src');

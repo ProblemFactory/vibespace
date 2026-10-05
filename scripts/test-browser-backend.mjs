@@ -37,7 +37,7 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
-import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { mutantCopies, copiesCensus, keeperWithInstalls } from './mutant-copy.mjs';
 import { wiredCloak, unwired, REFUSED_PROOF } from './fixtures/browser-switcher-views.mjs'; // the cloak worlds (wired = shipped since lane-cloak; unwired = a refused record), one spelling shared with the switch dialog's fixtures
 const require = createRequire(import.meta.url);
 const REPO = new URL('..', import.meta.url).pathname;
@@ -854,11 +854,11 @@ process.stdout.write('fake npm installed ' + spec + '\\n');
   ok(seed.failed === true && /already in the cache at .*not downloaded by this install.*remove that directory/.test(seed.error) && fs.existsSync(path.join(vdirOf(kSeed), 'chrome')),
     'V3: a build that was in the cache BEFORE this install (seeded / linked — not ours) is never removed; its refusal names the directory to remove', JSON.stringify(seed));
   { // CONTROL: the keeper without the removal — the vendor's cache rule returns the rejected build for ever
-    const kSrcI = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+    const kSrcI = fs.readFileSync(path.join(REPO, 'src/server/browser-cloak-install.js'), 'utf8'); // rv-browser F7: the cloak row's file
     const cutI = "const dropOwnUnpack = () => { if (had) return;", cutM = "if (!had) { try { writeJsonAtomic(unpackMark,";
     ok(kSrcI.includes(cutI) && kSrcI.includes(cutM), 'V3 control: the install removes its own unpack (in the run, and by its marker at the next run) where the control cuts it');
     const MUT3 = mutantCopies('browser-backend-v3', REPO);
-    const K3 = MUT3.load('src/server/browser-keeper.js', kSrcI.replace(cutI, 'const dropOwnUnpack = () => { if (true) return;').replace(cutM, 'if (false) { try { writeJsonAtomic(unpackMark,'), 'keep-unpack');
+    const K3 = keeperWithInstalls(MUT3, REPO, { 'src/server/browser-cloak-install.js': kSrcI.replace(cutI, 'const dropOwnUnpack = () => { if (true) return;').replace(cutM, 'if (false) { try { writeJsonAtomic(unpackMark,') }, 'keep-unpack');
     const kK = K3.create({ dataDir: path.join(ROOT, 'data-install-keep'), homeDir: HOME, env: () => ({ PATH: PATH_NPM, HOME, ...envM }), serverSetting: (k2) => (k2 in noSetting ? noSetting[k2] : settings[k2]), egressResolve, liveKeys: () => new Set(), install: false, now: () => clock, log: { log() {}, warn() {}, error() {} }, providers: { ...wired, proof: proofFx }, hostKnown: () => false });
     setMode('tampered');
     await installOnce(kK);

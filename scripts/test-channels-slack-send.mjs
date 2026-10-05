@@ -23,6 +23,7 @@ import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
+import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-seams: the engine + its three family files as one text
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -161,7 +162,7 @@ console.log('③ the proposal decides who is notified');
   ok(a && a.ok !== false && sent && sent.text === '<@U0BOB0001> see &lt;this&gt; &amp; <@U0ALICE01> too, @nobody, @here', `what is sent is what was approved: the ids decided at propose, & < > escaped, @here left as words (${sent && sent.text})`);
   Object.assign(bob, JSON.parse(saved)); delete FX.users.U0BOB0002; FX['conversations.members'].C0GENERAL.members.pop();
   // CONTROL: an engine copy whose send does not hand the stored decision to the adapter sends the name as plain words
-  const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const esrc = engineSource(REPO);
   const DOOR = '...(p.prepared ? { prepared: p.prepared } : {}), ';
   ok(esrc.split(DOOR).length === 2, 'the patch site of the prepared-door control is in channels-engine.js (once)');
   const ENG2 = require(MC.write('src/server/channels-engine.js', esrc.replace(DOOR, ''), 'noprepared'));
@@ -272,7 +273,7 @@ async function editLeg(engMod, name) {
   ok(r.amb.ok === false && r.amb.why === 'mention-ambiguous' && r.amb.ambiguous.join() === 'Alice' && r.ambSent === 0 && r.st1 === 'awaiting-approval', `an edit that ADDS an @Alice two people answer is refused by name, nothing sent, the proposal still waits (${r.amb.why}, ${r.ambSent} sent, ${r.st1})`);
   ok(r.ok2 && r.ok2.ok !== false && r.sent === 'Thanks <@U0ALICE02> — <@U0BOB0001> is out, ask @nobody', `an edit adding @alice.w resolves her now, keeps Bob's decided id, leaves @nobody as words (${r.sent})`);
   ok(r.stored && r.stored.notifies.join() === 'Alice,Bob' && r.stored.plain.join() === 'nobody', `the decision is stored with the edit — the card and receipt say who was notified (${JSON.stringify(r.stored && { n: r.stored.notifies, p: r.stored.plain })})`);
-  const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const esrc = engineSource(REPO);
   const EDIT = '    if (edited && p0.prepared && !p0.compose) {';
   ok(esrc.split(EDIT).length === 2, 'the patch site of the edit-decision control is in channels-engine.js (once)');
   const r2 = await editLeg(require(MC.write('src/server/channels-engine.js', esrc.replace(EDIT, '    if (false) {'), 'noeditprep')), 'noeditprep');

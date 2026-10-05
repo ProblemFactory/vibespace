@@ -58,7 +58,7 @@
 //      the queue strip, ChatView feeding it, the sidebar patch + the card's hint, SPEND_REASONS + the census row +
 //      the sender list, zh + ja
 //   ②k (lane group-report-card) GROUP MESSAGES WAITING: the fact reads the groups engine's preview (commits nothing,
-//      memoised), the strip names them with no hand-over button ("they ride your next message"), beside a stash entry
+//      memoised), the strip names them with no hand-over button ("they ride the next turn"), beside a stash entry
 //      the button stays and names what rides the next message, the report's commit clears them, a pending fork shows
 //      none; control: a fact without the preview ⇒ the strip never appears
 //
@@ -595,8 +595,8 @@ function rig2({ dir = null, deferPost = false, backend = 'claude', streaming = f
   const O = rig2({ backend: 'opencode', inbox: false });
   O.deliver.stashFor(O.CID, { source: 'agent', kind: 'peer', fromName: 'Ada', text: 'o' });
   const strip = SS.createStashStrip({ sessionId: 'w1' }); strip.set(O.view.summaryFor(O.s), { turn: 'idle' });
-  ok(strip.el.querySelector('.chat-stash-go').hidden === true && strip.el.querySelector('.chat-stash-nobutton').hidden === false && strip.el.querySelector('.chat-stash-nobutton').textContent === 'they ride your next message' && strip.el.querySelector('.chat-stash-cost').textContent === '',
-    'the strip for a harness with no live lane: no button, the sentence "they ride your next message" (a button that always refuses is a greyed hint)');
+  ok(strip.el.querySelector('.chat-stash-go').hidden === true && strip.el.querySelector('.chat-stash-nobutton').hidden === false && strip.el.querySelector('.chat-stash-nobutton').textContent === 'they ride the next turn' && strip.el.querySelector('.chat-stash-cost').textContent === '',
+    'the strip for a harness with no live lane: no button, the sentence "they ride the next turn" (a button that always refuses is a greyed hint)');
 }
 {
   // ── the overflow words: what one hand-over would leave is NAMED on the fact, the result and the toast ──
@@ -1538,8 +1538,8 @@ console.log('②k group messages waiting for the next turn: the fact reads the e
   ok(f && f.count === 1 && f.items.length === 1 && f.items[0].kind === 'group' && f.items[0].label === 'alpha' && f.reachable === false,
     'the fact counts the waiting GROUP message (kind group, by its sender) — and `reachable: false`: a hand-over carries the stash, never a group report', f);
   const w = S.stashSummaryWords(f, tEn, { reachable: f.reachable });
-  ok(w.line === '1 notice is waiting for this agent’s next turn: a group message from alpha' && w.noButton === 'they ride your next message' && /^Group messages reach this agent with your next message — or at once when a member @mentions it$/.test(w.title) && w.cost === null,
-    'the words: "a group message from alpha", no button — "they ride your next message", the title says how it arrives', w);
+  ok(w.line === '1 notice is waiting for this agent’s next turn: a group message from alpha' && w.noButton === 'they ride the next turn' && /^Group messages ride this agent’s next turn, whoever starts it — your message, a notification, a reply receipt — or at once when a member @mentions it$/.test(w.title) && w.cost === null,
+    'the words: "a group message from alpha", no button — "they ride the next turn", the title says how it arrives', w);
   const pv = ge.reportsForTurn(B, { preview: true });
   const pv2 = ge.reportsForTurn(B, { preview: true });
   const reads0 = reads;
@@ -1557,28 +1557,28 @@ console.log('②k group messages waiting for the next turn: the fact reads the e
   const strip = SS.createStashStrip({ sessionId: 'w1' });
   strip.set(f, { turn: 'idle' });
   const q = (c) => strip.el.querySelector('.' + c);
-  ok(!strip.el.hidden && q('chat-stash-parts').textContent === ': a group message from alpha' && q('chat-stash-go').hidden === true && q('chat-stash-nobutton').hidden === false && q('chat-stash-nobutton').textContent === 'they ride your next message',
-    'the REAL strip: "a group message from alpha", NO Hand over button (it would refuse "nothing_waiting"), "they ride your next message" where it would be', strip.el.textContent);
-  // B-c198 (the owner 2026-10-02): "they ride your next message" while the agent is MID-TURN was false — a message typed
+  ok(!strip.el.hidden && q('chat-stash-parts').textContent === ': a group message from alpha' && q('chat-stash-go').hidden === true && q('chat-stash-nobutton').hidden === false && q('chat-stash-nobutton').textContent === 'they ride the next turn',
+    'the REAL strip: "a group message from alpha", NO Hand over button (it would refuse "nothing_waiting"), "they ride the next turn" where it would be', strip.el.textContent);
+  // B-c198 (the owner 2026-10-02): "they ride the next turn" while the agent is MID-TURN was false — a message typed
   // into a running turn is folded into it with no UserPromptSubmit, so the report waits for the turn after; the words say so
   strip.set(f, { turn: 'running' });
-  ok(q('chat-stash-nobutton').textContent === 'this agent is mid-turn — they ride your first message after this turn ends' && /^This agent is mid-turn — a message typed into a running turn carries no group message/.test(q('chat-stash-nobutton').title),
-    'B-c198: MID-TURN the strip says the agent is mid-turn and the messages ride the first message after this turn ends (never "your next message")', strip.el.textContent);
+  ok(q('chat-stash-nobutton').textContent === 'this agent is mid-turn — they ride the next turn, after this one ends' && /^This agent is mid-turn — a message typed into a running turn carries no group message/.test(q('chat-stash-nobutton').title),
+    'B-c198: MID-TURN the strip says the agent is mid-turn and the messages ride the next turn after this one ends (lane stash-any-turn: a turn of any origin)', strip.el.textContent);
   // verify r1: `waiting` (the harness's requires_action — paused on a permission or a question) is INSIDE the turn: the
   // user's answer continues it with no UserPromptSubmit, so "your next message" was false there too
   strip.set(f, { turn: 'waiting' });
-  ok(q('chat-stash-nobutton').textContent === 'this agent is mid-turn — they ride your first message after this turn ends', 'B-c198 verify r1: WAITING on the user (a permission, a question — still inside the turn) the strip says mid-turn too, never "your next message"', strip.el.textContent);
+  ok(q('chat-stash-nobutton').textContent === 'this agent is mid-turn — they ride the next turn, after this one ends', 'B-c198 verify r1: WAITING on the user (a permission, a question — still inside the turn) the strip says mid-turn too, never a bare "the next turn"', strip.el.textContent);
   strip.set(f, { turn: 'idle' });
-  ok(q('chat-stash-nobutton').textContent === 'they ride your next message', 'B-c198 CONTROL: the turn ends ⇒ the strip repaints to "they ride your next message" (the turn is in its patch key)', strip.el.textContent);
+  ok(q('chat-stash-nobutton').textContent === 'they ride the next turn', 'B-c198 CONTROL: the turn ends ⇒ the strip repaints to "they ride the next turn" (the turn is in its patch key)', strip.el.textContent);
   const wm = S.stashSummaryWords({ ...f, count: 2, items: [...f.items, { kind: 'peer', label: 'Bo', n: 1 }] }, tEn, { reachable: true, midTurn: true });
-  ok(wm.held === '1 group message rides your first message after this turn ends', 'B-c198: beside a stash entry, mid-turn, the held words say "after this turn ends" too', wm);
+  ok(wm.held === '1 group message rides the next turn, after this one ends', 'B-c198: beside a stash entry, mid-turn, the held words say "after this turn ends" too', wm);
   // beside a stash entry the button stays, and says what it will NOT carry
   deliver.stashFor(B, { source: 'agent', kind: 'peer', fromName: 'Bo', text: 'a peer note' });
   const f2 = view.summaryFor(sB);
   ok(f2.count === 2 && f2.reachable === true && f2.items.map((i) => i.kind).join() === 'group,peer', 'beside a stash entry: two waiting, the hand-over exists again', f2);
   strip.set(f2, { turn: 'idle' });
-  ok(q('chat-stash-go').hidden === false && q('chat-stash-held').hidden === false && q('chat-stash-held').textContent === '1 group message rides your next message',
-    '…the button stays, and the strip says the group message rides the next message (a hand-over carries only the stash)', strip.el.textContent);
+  ok(q('chat-stash-go').hidden === false && q('chat-stash-held').hidden === false && q('chat-stash-held').textContent === '1 group message rides the next turn',
+    '…the button stays, and the strip says the group message rides the next turn (a hand-over carries only the stash)', strip.el.textContent);
   const r = await view.handOver('w1');
   ok(r.ok === false && r.code === 'unreachable' && view.summaryFor(sB).items.some((i) => i.kind === 'group'), 'a hand-over never touches the group report (it stays waiting)', r);
   // the report is handed to B's turn ⇒ it leaves the fact, its card is drawn

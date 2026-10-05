@@ -17,6 +17,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-seams: the engine + its three family files as one text
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -700,7 +701,7 @@ console.log('⑬ owner decision A: a topic wakes, a quote chain does not, a quot
     `the words: "${QUOTED}" = 「${ZH.get(QUOTED)}」/「${JA.get(QUOTED)}」; the rules read 「${ZH.get(LABEL_R)}」 and 「${ZH.get(LABEL_T)}」`);
   const ED = fs.readFileSync(path.join(REPO, 'src/lib/channel-filter-editor.js'), 'utf-8'), WD = fs.readFileSync(path.join(REPO, 'src/lib/channel-words.js'), 'utf-8');
   ok(ED.includes(`'reply-to-mine': t('${LABEL_R}')`) && ED.includes(`'in-thread-with-me': t('${LABEL_T}')`) && ED.includes("lw.whys.map((w) => wakeWhyText(w))") && /case 'quoted your message': return t\('quoted your message'\);/.test(WD), 'WIRING: the Notify dialog labels the two rules with the quote clause and words the last wake\'s reasons (wakeWhyText)');
-  const ENG = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const ENG = engineSource(REPO);
   ok(/const kindOf = \(r\) => \(ix \? Thr\.placeKindOf\(r, ix\)/.test(ENG) && /return \{ mine, threadOf: placeBase\.threadOf, kindOf: placeBase\.kindOf \};/.test(ENG) && /if \(!th \|\| th\.kind !== 'vendor'\) return \[\];/.test(ENG), 'WIRING: the engine hands the rules THE classifier (Thr.placeKindOf over its index) and a threadOf that answers for a topic only');
   // CONTROLS (scripts/mutant-copy.mjs): (a) the PRE-DECISION rules — reply-to-mine = replyTo OR root, in-thread-with-me
   // = any thread the index keys (the engine's old threadOf: a chain included) ⇒ the chain rows wake: red

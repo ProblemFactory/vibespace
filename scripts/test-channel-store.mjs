@@ -20,6 +20,7 @@ import { createRequire } from 'node:module';
 import { spawnSync } from 'node:child_process';
 import { scratch } from './scratch.mjs';
 import { mutantCopies, copiesCensus, sweepLegacy } from './mutant-copy.mjs';
+import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-seams: the engine + its three family files as one text
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -729,7 +730,7 @@ function rebuildUnderFault(PS, name, code) {
 
 // ── ⑧b RETENTION HAS A CALLER — a policy nobody enforces is not a policy ──
 {
-  const eng = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8').replace(/^\s*\/\/.*$/gm, '');
+  const eng = engineSource(REPO).replace(/^\s*\/\/.*$/gm, '');
   ok(/store\.trim\(/.test(eng), 'the ingest engine CALLS store.trim — the retention bounds above are enforced by something, not just implemented');
   // 2026-09-26: at most every TRIM_EVERY_MS per conversation (the trim rewrites the log) — still
   // only after a pass that APPENDED, still on the ONE conversation that grew
@@ -1065,7 +1066,7 @@ console.log('\n⑫ the side-log cost census — bounded reads, append-only write
   ok(writes.sort().join() === 'appendSide,trimSide' && /appendLines\(fp, /.test(bodies.get('appendSide')) && /const tmp = `\$\{fp\}\.tmp-\$\{process\.pid\}`;[\s\S]*fs\.renameSync\(tmp, fp\)/.test(bodies.get('trimSide')), `(a) the side writes are appendSide's append (append-only) and trimSide's temp + rename (${writes.join(', ')})`);
   const walkJs = (d, out = []) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const f = `${d}/${e.name}`; if (e.isDirectory()) walkJs(f, out); else if (/\.(c|m)?js$/.test(e.name)) out.push(f); } return out; };
   const namers = walkJs('src').filter((f) => f !== STORE && /\bsidePath\(|\bSIDE_DIR\b|['"`]~side\b|\bsideTail\(|\bsideLines\(/.test(strip(fs.readFileSync(path.join(REPO, f), 'utf-8'))));
-  const eng = strip(fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8'));
+  const eng = strip(engineSource(REPO));
   const widened = [...eng.matchAll(/store\.readSide\([^)]*\)/g)].map((m) => m[0]).filter((c) => /maxBytes|limit/.test(c));
   ok(!namers.length && !widened.length && [...eng.matchAll(/store\.readSide\(/g)].length >= 2, `(a) nothing outside the store names the side log's place (${namers.length ? namers.join(', ') : 'none'}) and no engine read widens the window (${widened.length ? widened.join(' | ') : 'none'})`);
   // (b) + (c) the per-event cost at 1 / 2 / 4 MiB
@@ -1548,7 +1549,7 @@ console.log('\n⑭ design 011 lane 2: the poll stamps leave the row — a quiet 
   ok(!fc.v2.said && !fc.v2.aside && !fc.nofields.said && !fc.entries.said, `⑭ CONTROL: the loose shape check (lane head f469d942) — every one read as "no stamps" in silence, each conversation due at once unsaid — red: ${JSON.stringify(fc)}`);
 
   // the engine reads the stamps through ONE door (laneOf) and writes them through ONE (store.stamps.set)
-  const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
+  const esrc = engineSource(REPO);
   const census = (s) => ({ past: (s.match(/\blane\??\.(?:lastPollAt|lastScanAt|walkStartedAt)\b|\blane\s*=\s*\{[^}\n]*\b(?:lastPollAt|lastScanAt|walkStartedAt)\s*:/g) || []).length, reads: (s.match(/\blaneOf\(/g) || []).length, writes: (s.match(/\bstore\.stamps\.set\(/g) || []).length });
   const ce = census(esrc);
   ok(ce.past === 0 && ce.reads >= 9 && ce.writes === 2, `⑭ census: src/server/channels-engine.js reads the poll stamps through laneOf() only (${ce.reads} sites) and writes them through store.stamps.set() only (${ce.writes}); ${ce.past} reads / writes on the row`);

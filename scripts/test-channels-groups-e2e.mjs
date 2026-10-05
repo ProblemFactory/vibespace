@@ -48,6 +48,8 @@
 //      primary, "wake the agent now" reaches beta's stub ONCE ("Handed to beta at HH:MM — it was woken for
 //      it"), "tell it with its next message" reads "Waiting for beta's next message" until beta's next
 //      prompt drains the stash — the same card's fate line patched in place
+//   ⑫ lane stash-any-turn (2026-10-05): a group message parked for beta's next turn rides a group wake (alpha's @beta) —
+//      the woken turn's prompt-context carries it under the echo guard's words, the strip empties, the card is drawn
 //
 // Everything is per-pid (scripts/scratch.mjs), the server runs under a NAMED
 // scratch HOME, every process this suite starts is ended by it. AUTH IS ON
@@ -801,6 +803,45 @@ ok(watcher === false, 'CONTROL: the Message watcher section (never folded) is op
   for (let i = 0; i < 20; i++) { us3 = (await api('GET', '/api/user-state')).body; if (us3 && us3.channelsPanelFolds && us3.channelsPanelFolds.internal === false) break; await sleep(250); }
   ok(u1 && u1.folded === false && u1.groups >= 1 && us3 && us3.channelsPanelFolds && us3.channelsPanelFolds.internal === false,
     '⑪ unfolding on the second client unfolds the first (synced both ways) — and it is the explicit `internal: false` again', JSON.stringify({ u1, folds: us3 && us3.channelsPanelFolds }));
+}
+
+// ── ⑫ lane stash-any-turn (the owner 2026-10-05: "outbox 发的消息也是一个计费回合啊，也应该直接唤醒把"): a group message
+// parked for beta's NEXT TURN rides the next BILLED WAKE, whoever starts it — here alpha's @beta in another group (a
+// group wake through THE ladder into beta's stub; nobody typed): the woken turn's prompt-context (its UserPromptSubmit
+// hook route) carries the parked report under the echo guard's words, the strip above beta's composer empties, and
+// beta's chat draws the report's card at that injection point ──
+{
+  const BETA = AGENTS[1], ALPHA = AGENTS[0];
+  const pk = await api('POST', '/api/channel-groups', { name: 'parked lane', members: AGENTS.map((a) => a.cid), quiet: true });
+  const pkid = pk.body && pk.body.group && pk.body.group.id;
+  const PARKED = 'parked for beta: the schema review is ready';
+  const fr0 = frames(BETA).length;
+  const posted = await api('POST', '/api/agent/msg/send', { to: pkid, text: PARKED }, { Authorization: 'Bearer ' + ALPHA.token });
+  ok(!!pkid && posted.status === 200 && frames(BETA).length === fr0, '⑫ FIXTURE: alpha posts into a fresh group with nobody named — beta (next-turn) is woken by NOTHING, the message is parked', JSON.stringify(posted.body));
+  const BV = `[...app.sessions.values()].find((v) => v && v.sessionId === 'sess-grp-b')`;
+  await p1.evaljs(`app.attachSession('sess-grp-b', 'beta', ${JSON.stringify(wt)}, { mode: 'chat', backend: 'claude' }); true`);
+  const VIEWB = `(() => { const v = ${BV}; if (!v || !v._messageList) return null; const st = v._stashFact && v._stashFact.stash; const items = (st && st.items) || [];
+    return { group: items.filter((i) => i && i.kind === 'group').reduce((a, i) => a + (Number(i.n) || 0), 0), cards: [...v._messageList.querySelectorAll('.chat-group-message')].map((e) => e.textContent) }; })()`;
+  const viewUntil = async (pred, ms = 20000) => { const end = Date.now() + ms; let v = null; while (Date.now() < end) { try { v = await p1.evaljs(VIEWB); } catch {} if (v && pred(v)) return v; await sleep(250); } return v; };
+  const pre = await viewUntil((v) => v.group >= 1);
+  ok(pre && pre.group >= 1 && !pre.cards.some((t) => t.includes(PARKED)), '⑫ beta\'s strip counts the parked group message (waiting for the next turn) and its chat has no card for it yet', JSON.stringify(pre));
+  // the wake: alpha @mentions beta in a SECOND group (a group wake through THE ladder — the fixture sessions share no
+  // Task Group, so a direct `send beta` is out of reach here); the parked group is not the woken one
+  const wk = await api('POST', '/api/channel-groups', { name: 'wake lane', members: AGENTS.map((a) => a.cid), quiet: true });
+  const wkid = wk.body && wk.body.group && wk.body.group.id;
+  const woke = await api('POST', '/api/agent/msg/send', { to: wkid, text: '@beta one quick question' }, { Authorization: 'Bearer ' + ALPHA.token });
+  for (let i = 0; i < 40 && frames(BETA).length === fr0; i++) await sleep(250);
+  ok(woke.status === 200 && frames(BETA).length === fr0 + 1, `⑫ alpha's @beta in another group wakes beta's stub ONCE through the REAL ladder — a billed turn nobody typed (${frames(BETA).length - fr0})`, JSON.stringify(woke.body));
+  const ctx = await api('GET', '/api/agent/prompt-context', undefined, { Authorization: 'Bearer ' + BETA.token });
+  const c = String((ctx.body && ctx.body.context) || '');
+  ok(c.includes(PARKED) && c.includes('### Group messages since your last turn') && c.split('(these arrived while you were handling something else').length === 2,
+    '⑫ the WOKEN turn\'s prompt-context carries the parked report — under the echo guard\'s words, said once', c.slice(-1200));
+  ok(!c.includes('one quick question') && frames(BETA).slice(fr0).some((f) => JSON.stringify(f).includes('one quick question')), '⑫ …and not the wake\'s own message again (its frame carried it)', c.slice(-1200));
+  const post = await viewUntil((v) => v.group === 0 && v.cards.some((t) => t.includes(PARKED)));
+  ok(post && post.group === 0, '⑫ the strip EMPTIES — nothing waits for a keystroke', JSON.stringify(post));
+  ok(post && post.cards.some((t) => t.includes(PARKED)), '⑫ beta\'s chat draws the report\'s card at the injection point (the group-report-card rule)', JSON.stringify(post));
+  const again = await api('GET', '/api/agent/prompt-context', undefined, { Authorization: 'Bearer ' + BETA.token });
+  ok(!String((again.body && again.body.context) || '').includes(PARKED), '⑫ …exactly once: the next turn carries it no more');
 }
 
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);

@@ -20,6 +20,7 @@ import http from 'node:http';
 import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
+import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-seams: the engine + its three family files as one text
 
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
@@ -376,7 +377,7 @@ console.log('⑧ censuses: no agent route serves an outbox file; the server open
   const fsCalls = [...OFS.matchAll(/fs(?:\.promises)?\.(\w+)\(([^)]*)\)/g)].map((m) => [m[1], m[2]]);
   const named = fsCalls.filter(([, arg]) => /name/i.test(arg));
   ok(fsCalls.length >= 8 && !named.length, `V10: every fs call in src/channel-outbox-files.js takes a path built from the proposal id + index (${fsCalls.length} calls, none from a name)`, JSON.stringify(named));
-  const ENGS = SRC('src/server/channels-engine.js');
+  const ENGS = engineSource(REPO);
   const near = ENGS.split('\n').filter((l) => /attachments/.test(l) && /fs\.(read|open|stat|createReadStream)/.test(l));
   ok(!near.length, 'V10: the engine opens no file on an attachment line (bytes come IN the proposal; files go through OF)', near.join('\n'));
 }
@@ -390,7 +391,7 @@ ok(legRed(pureLegs(polCopy('no-count', 'if (v.length > ATTACH_MAX_COUNT)', 'if (
 ok(legRed(pureLegs(polCopy('no-sep', "if (/[/\\\\]/.test(name) || name === '.' || name === '..')", 'if (false)'), 'C '), /a path ⇒/), 'control: without the separator rule `../x` is a name');
 ok(legRed(pureLegs(polCopy('no-hidden', 'const hid = hiddenCharsOf(name, { joiners: true });', 'const hid = [];'), 'C '), /RTL override/), 'control: without the hidden-character rule an RTL override passes');
 ok(legRed(pureLegs(polCopy('no-digest', '...(storedAttachments(q).length ? [storedAttachments(q).map', '...(false ? [storedAttachments(q).map'), 'C '), /THE DIGEST/), 'control: a digest without the files approves other bytes');
-const ENGSRC = SRC('src/server/channels-engine.js');
+const ENGSRC = engineSource(REPO);
 function engCopy(tag, from, to) { if (!ENGSRC.includes(from)) throw new Error(`control ${tag}: anchor missing`); return M.load('src/server/channels-engine.js', ENGSRC.replace(from, to), tag); }
 {
   const Rv = await rig('ctl-noverify', { engineMod: engCopy('no-verify', 'const fv = !targetWhy && stored.length ? await OF.verify(store.dir, p.id, stored) : null;', 'const fv = null;') });
@@ -508,7 +509,7 @@ const doorOf = (src, route) => { const a = src.indexOf(`app.post('${route}'`); i
 const doorsReading = (src) => ['/api/agent/channels/reply', '/api/agent/channels/compose'].filter((r) => { const d = doorOf(src, r); return d === null || /\bfs\.|readFile|createReadStream|openSync|require\('fs'\)/.test(d); });
 const engReading = (src) => ['attachPrepare', 'outboxAttachment', 'filesSweep'].filter((n) => { const a = src.indexOf(`function ${n}(`); if (a < 0) return true; return /\bfs\.|readFile|createReadStream/.test(src.slice(a, src.indexOf('\n  }\n', a))); });
 {
-  const OFS = SRC('src/channel-outbox-files.js'), ARS = SRC('src/agent-routes.js'), ENS = SRC('src/server/channels-engine.js');
+  const OFS = SRC('src/channel-outbox-files.js'), ARS = SRC('src/agent-routes.js'), ENS = engineSource(REPO);
   ok(!ofOdd(OFS).length && fsFirstArgs(OFS).length >= 10, 'V10: every fs call in src/channel-outbox-files.js takes a PINNED path (the channels dir + the proposal id + the index) — a new one is red until reviewed', JSON.stringify(ofOdd(OFS)));
   ok(!doorsReading(ARS).length, 'V10: the agent\'s reply / compose doors read no file — the bytes come IN the body', JSON.stringify(doorsReading(ARS)));
   ok(!engReading(ENS).length, 'V10: the engine\'s attachPrepare / outboxAttachment / filesSweep touch the disk only through src/channel-outbox-files.js', JSON.stringify(engReading(ENS)));

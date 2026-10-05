@@ -29,6 +29,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-seams: the engine + its three family files as one text
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const MODEL = 'src/channel-feed.js';
@@ -327,7 +328,7 @@ function legCensus(src, F, label = '') {
   return clean;
 }
 function legEngineCensus() {
-  const eng = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
+  const eng = engineSource(REPO);
   const m = /async function feedPage\(rec, e\) \{[\s\S]*?\n {2}\}\n/.exec(eng);
   if (!m) { ok(false, '⑤ the engine\'s feed page (`async function feedPage(rec, e)`) exists — the census reads it'); return; }
   const body = m[0].replace(/\/\/[^\n]*/g, '');

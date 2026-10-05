@@ -42,6 +42,7 @@ import { createRequire } from 'node:module';
 import { freePort, scratch } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { startWorkMeter, bounded } from './work-meter.mjs';
+import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-seams: the engine + its three family files as one text
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -1362,7 +1363,7 @@ console.log('\n⑪ owner ruling: reactions read by default; the one narrowing re
     ok(full.pg.status === 302 && JSON.stringify(full.narrowed) === JSON.stringify(allOpt) && allOpt.length === 17, `seven presses drop all ${allOpt.length} optional scopes and the base consent is granted`);
     ok(JSON.stringify(full.rec.auth.refusedScopes) === JSON.stringify(allOpt) && fg && JSON.stringify(fg.refused) === JSON.stringify([lark.SEARCH_SCOPE, lark.P2P_READ_SCOPE]) && fw.includes(lark.SEARCH_SCOPE) && fw.includes(lark.P2P_READ_SCOPE), `the account records EXACTLY what Lark refused (${(full.rec.auth.refusedScopes || []).length} of 17) and the card names both feed scopes: "${fw.slice(0, 160)}…"`);
     { const ME = mutantCopies('chan-lark-refused16', REPO);
-      const srcE = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+      const srcE = engineSource(REPO);
       const BOUND = '].slice(0, OPTIONAL_SCOPES_MAX);';
       ok(srcE.split(BOUND).length === 2, 'CONTROL setup: the engine\'s refusal bound is spelled once');
       const cut = await narrowAll(ME.load('src/server/channels-engine.js', srcE.replace(BOUND, '].slice(0, 16);'), 'refused16'), 'cut16');

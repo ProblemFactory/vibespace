@@ -33,6 +33,8 @@ export const FAMILIES = {
   // lane dc-apps-rows (2026-10-04, rv-desktop-apps F-A1): an app KIND is one row of src/app-kinds.js (the generic words
   // source / remove / search / move are kinds too, but every other family's code says them — only the kind-only ids count)
   appkind: { ids: ['apt', 'deb', 'appimage', 'uv-tool', 'npm', 'installer'], owners: [{ file: 'src/app-kinds.js' }] },
+  // lane dc-mount-providers (rv-server M6): a storage provider is src/mount-providers/<id>.js + one index line
+  mount: { ids: ['s3', 'drive', 'gmail', 'onedrive', 'cloud', 'webdav', 'vibespace', 'sftp', 'rclone', 'cephfs'], owners: [{ dir: 'src/mount-providers/' }] },
 };
 
 // FALSE POSITIVES — a line the regexes match that is not a branch on a family member. Each row: the family, the
@@ -41,6 +43,7 @@ export const FAMILIES = {
 export const ALLOW = [
   { family: 'harness', file: /^src\/codex-message-manager\.js$/, line: /\bn === 'shell'/, reason: 'Codex\'s own tool name (exec / shell / local_shell → bash), not the shell harness' },
   { family: 'appkind', file: /^src\/browser-profiles\.js$/, line: /t\.phase === 'npm'/, reason: 'the browser install\'s npm STEP (its progress phase), not the npm app kind' },
+  { family: 'mount', file: /^src\/machine-mounts\.js$/, line: /rclone !== 'rclone'/, reason: 'the rclone BINARY resolved off PATH (the bare name = none found), not the rclone storage provider' },
   { family: 'channel', file: /^src\/lib\/(?:manage-agents|sidebar-rail)\.js$/, line: /_activeTab\s*[!=]==?\s*'agents'/, reason: 'the sidebar rail\'s Agents tab, not the agents channel vendor' },
 ];
 

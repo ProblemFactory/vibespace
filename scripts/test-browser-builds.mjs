@@ -24,7 +24,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { mutantCopies } from './mutant-copy.mjs';
+import { mutantCopies, keeperWithInstalls } from './mutant-copy.mjs';
 import { scratch } from './scratch.mjs';
 import { writeFakeAgentBrowser } from './fixtures/fake-agent-browser.mjs';
 const require = createRequire(import.meta.url);
@@ -539,6 +539,7 @@ console.log('— ⑤ controls: patched copies the gates above must turn red');
   const BBa = MUT.load('src/browser-builds.js', agentMay, 'agent-may');
   ok(judgeVerdict(BBa).length > 0, 'control (a): …and ①\'s verdict table goes red on it', judgeVerdict(BBa));
   const ks = read('src/server/browser-keeper.js');
+  const kbk = read('src/server/browser-builds-keeper.js'), CBK = 'src/server/browser-builds-keeper.js'; // rv-browser F7: Change build… is the builds row's file
   const fallback = ks.replace("    noteBuildMissing(p, c, v);\n    throw namedError(", "    noteBuildMissing(p, c, v);\n    return {};\n    throw namedError(");
   ok(fallback !== ks, 'control (b): the patch (a keeper that falls back to the default build when the chosen one vanished) applies');
   const Kb = MUT.load('src/server/browser-keeper.js', fallback, 'fallback');
@@ -563,9 +564,9 @@ console.log('— ⑤ controls: patched copies the gates above must turn red');
   ok(cs.length >= 2 && !cs.every((c) => c.exe), 'control (c): …a later call of the session carried no executable — exactly what ②\'s "on EVERY call" catches', cs);
   try { await kc.stop(pc.id, { why: 'user' }); } catch { /* none */ }
   // verify r1 (F1): a keeper that does not ask who DRIVES the browser ⇒ Change build… restarts it under the user's hands
-  const blind = ks.replace("    const drivenNow = () => SW.holdOf(reg.leases.filter((l) => l.profileId === p.id), inputsView({ withHumans: false }));", "    const drivenNow = () => ({ hold: null, driver: null });");
-  ok(blind !== ks, 'control (d): the patch (a Change build… blind to a takeover) applies');
-  const Kd = MUT.load('src/server/browser-keeper.js', blind, 'blind');
+  const blind = kbk.replace("    const drivenNow = () => SW.holdOf(ctx.reg.leases.filter((l) => l.profileId === p.id), inputsView({ withHumans: false }));", "    const drivenNow = () => ({ hold: null, driver: null });");
+  ok(blind !== kbk, 'control (d): the patch (a Change build… blind to a takeover) applies');
+  const Kd = keeperWithInstalls(MUT, REPO, { [CBK]: blind }, 'blind');
   fs.mkdirSync(path.join(ROOT, 'data-cd'), { recursive: true });
   const kd = Kd.create({ dataDir: path.join(ROOT, 'data-cd'), homeDir: HOME, env: () => ({ PATH: PATH_ENV, HOME, FAKE_AB_STATE: path.join(ROOT, 'ab-state'), FAKE_AB_CDP_PORT: String(CDP_PORT) }), serverSetting: () => undefined, liveKeys: () => new Set([KEY_A]), install: false, tickMs: 3600e3, log: { log() { }, warn() { }, error() { } }, hostKnown: () => false });
   const pd = kd.createProfile({ label: 'Blind', browser: { kind: 'build', version: '152.0.1.2' } });
@@ -588,9 +589,9 @@ console.log('— ⑤ controls: patched copies the gates above must turn red');
   const hr = await raceLeg(kh, ph.id, '153.0.1.1');
   ok(hr.sawStop && hr.take && hr.take.ok === true && hr.change.ok && hr.inputAfter === 'user', 'control (h): …the take over inside the restart was ACCEPTED and the restart went on under it — exactly what ②\'s race leg catches', hr);
   try { kh.handback({ browserKey: KEY_A, profileId: ph.id, cause: 'explicit' }); await kh.stop(ph.id, { why: 'user' }); } catch { /* none */ }
-  const noBrowseGate = ks.replace("    const refuseBrowsing = () => { if (humans.get(p.id) || browsing.has(p.id)) throw", "    const refuseBrowsing = () => { if (humans.get(p.id)) throw");
-  ok(noBrowseGate !== ks, 'control (i): the patch (Change build… blind to a Browse yourself in flight) applies');
-  const Ki = MUT.load('src/server/browser-keeper.js', noBrowseGate, 'no-browse-gate');
+  const noBrowseGate = kbk.replace("    const refuseBrowsing = () => { if (humans.get(p.id) || browsing.has(p.id)) throw", "    const refuseBrowsing = () => { if (humans.get(p.id)) throw");
+  ok(noBrowseGate !== kbk, 'control (i): the patch (Change build… blind to a Browse yourself in flight) applies');
+  const Ki = keeperWithInstalls(MUT, REPO, { [CBK]: noBrowseGate }, 'no-browse-gate');
   fs.mkdirSync(path.join(ROOT, 'data-ci'), { recursive: true });
   const ki = Ki.create({ dataDir: path.join(ROOT, 'data-ci'), homeDir: HOME, env: () => ({ PATH: PATH_ENV, HOME, FAKE_AB_STATE: path.join(ROOT, 'ab-state'), FAKE_AB_CDP_PORT: String(CDP_PORT) }), serverSetting: () => undefined, liveKeys: () => new Set([KEY_A]), install: false, tickMs: 3600e3, log: { log() { }, warn() { }, error() { } }, hostKnown: () => false });
   const pi = ki.createProfile({ label: 'Opening', browser: { kind: 'build', version: '152.0.1.2' } });
@@ -606,11 +607,11 @@ console.log('— ⑤ controls: patched copies the gates above must turn red');
   const fj = await fallBackLeg(MUT.load('src/server/browser-keeper.js', noSettle, 'no-settle'));
   ok(fj.events.map((e) => e.outcome).join() === 'changed' && fj.choice === '157.0.1.1' && fj.todos.length === 0, 'control (j): …the conversation heard only "changed" and the choice stayed on the build that closed — exactly what ②\'s fall-back leg catches', fj);
   // verify r1 (F9): a keeper that tells the holders BEFORE the stop, "changed", whatever happens (the pre-fix order)
-  const early = ks.replace("      const pre = leases.map((l) => interruptForRelaunch(p, l, { from, to })); // what each holder had in flight is cut NOW, before the stop\n", "      const pre = leases.map((l) => interruptForRelaunch(p, l, { from, to })); told = tellRelaunch(pre, 'changed');\n")
+  const early = kbk.replace("      const pre = leases.map((l) => interruptForRelaunch(p, l, { from, to })); // what each holder had in flight is cut NOW, before the stop\n", "      const pre = leases.map((l) => interruptForRelaunch(p, l, { from, to })); told = tellRelaunch(pre, 'changed');\n")
     .replace("        told = tellRelaunch(pre, restored ? 'restored' : 'down'); // verify r1 (F9): said as it happened\n", '')
     .replace("      told = tellRelaunch(pre, 'changed'); // verify r1 (F9): said once the new build runs\n", '');
-  ok(early !== ks && early.split("told = tellRelaunch(pre,").length === 2, 'control (g): the patch (holders told "changed" before the stop, whatever the outcome) applies');
-  const eg = await relaunchOutcomeLeg(MUT.load('src/server/browser-keeper.js', early, 'tell-early'));
+  ok(early !== kbk && early.split("told = tellRelaunch(pre,").length === 2, 'control (g): the patch (holders told "changed" before the stop, whatever the outcome) applies');
+  const eg = await relaunchOutcomeLeg(keeperWithInstalls(MUT, REPO, { [CBK]: early }, 'tell-early'));
   ok(eg.restored.err && eg.restored.err.restored === true && eg.restored.events.length === 1 && eg.restored.events[0].outcome === 'changed', 'control (g): …the holder read "changed to Chrome 160" while the old build ran again — exactly what ②\'s outcome leg catches', eg.restored.events);
   // verify r1 (F5): the agent's profile view that keeps a named file's path; a status that hands the agent the launch view
   const ps = read('src/browser-profiles.js');

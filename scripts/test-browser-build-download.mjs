@@ -29,7 +29,7 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { mutantCopies } from './mutant-copy.mjs';
+import { mutantCopies, keeperWithInstalls } from './mutant-copy.mjs';
 import { scratch } from './scratch.mjs';
 import { chromeZip } from './fixtures/chrome-for-testing/fake-zip.mjs';
 const require = createRequire(import.meta.url);
@@ -309,10 +309,11 @@ console.log('— ⑧ removal: pinned / running / hand-installed refused by name;
 console.log('— ⑨ controls: patched keeper copies the gates above must turn red');
 {
   const MUT = mutantCopies('cbdl-download', REPO);
-  const src = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+  // rv-browser F7 (lane dc-browser-installs): the download is the builds ROW's file — patched there, run by the real keeper
+  const src = fs.readFileSync(path.join(REPO, 'src/server/browser-builds-keeper.js'), 'utf8');
   const runCopy = async (label, from, to, v, mode, zip) => {
     ok(src.includes(from), `control (${label}): the patch applies`);
-    const Kc = MUT.load('src/server/browser-keeper.js', src.replace(from, to), label);
+    const Kc = keeperWithInstalls(MUT, REPO, { 'src/server/browser-builds-keeper.js': src.replace(from, to) }, label);
     const kc = mkKeeper(path.join(ROOT, 'data-' + label), {}, Kc);
     await kc.chromeBuildsAvailable({ lists: 'older' });
     plant(v, mode, zip);
@@ -359,5 +360,53 @@ console.log('— verify r1: a download newer than every build is the CLI\'s next
   } finally { fs.statfsSync = real; }
 }
 
+// ═══ rv-browser F7 (lane dc-browser-installs): a NEW installable = its own row file + ONE line in INSTALLERS ═══════
+console.log('— ⑩ a fake installable through ONE INSTALLERS line: THE slot, the other rows\' refusals and the re-attach know it by its row');
+{
+  const MUT = mutantCopies('cbdl-rows', REPO);
+  const FAKE = `'use strict';
+function create(ctx, slot) {
+  const ROW = { id: 'acme', words: () => 'the Acme tool', logName: 'Acme tool', afterRestart: () => {} };
+  function installAcme() {
+    if (slot.installState.running) throw Object.assign(new Error('busy'), { code: 'install_running' });
+    Object.assign(slot.installState, { running: true, kind: ROW.id, startedAt: Date.now(), finishedAt: null, exitCode: null, spec: 'acme@1', pid: process.pid, error: null, step: 'package', refused: [] });
+    slot.markInstall({ kind: ROW.id, spec: 'acme@1', step: 'package', pid: process.pid, starttime: null, startedAt: Date.now(), stepAt: Date.now() });
+    return { ok: true, started: true };
+  }
+  return { row: ROW, api: { installAcme } };
+}
+module.exports = { create };
+`;
+  const SLOT = 'src/server/browser-installs.js', CB = 'src/server/browser-builds-keeper.js';
+  const slot0 = fs.readFileSync(path.join(REPO, SLOT), 'utf8'), cb0 = fs.readFileSync(path.join(REPO, CB), 'utf8');
+  const LINE = "  require('./browser-builds-keeper.js'),\n";
+  const fakeAt = MUT.write('src/server/browser-acme-install.js', FAKE, 'acme');
+  const withFake = (slotSrc) => slotSrc.replace(LINE, LINE + `  require(${JSON.stringify(fakeAt)}),\n`);
+  ok(slot0.includes(LINE) && withFake(slot0) !== slot0, 'the fake row is registered by ONE added INSTALLERS line (its file is the only other one)');
+  const leg = async (label, patched) => {
+    const KA = keeperWithInstalls(MUT, REPO, patched, label);
+    const dir = path.join(ROOT, 'data-rows-' + label);
+    const k1 = mkKeeper(dir, {}, KA);
+    const started = k1.installAcme();
+    const cv = k1.installVerdict(), cf = k1.chromeBuildFacts().install;
+    const e = await thr(() => k1.installChromeBuild({ version: '154.0.8099.0' }));
+    k1.shutdown();
+    const k2 = mkKeeper(dir, {}, KA); // a restart while the fake's step (this pid) still runs
+    const re = k2._reattached(), cv2 = k2.installVerdict();
+    k2.shutdown();
+    return { started: !!(started && started.ok), cv: { ok: cv.ok, code: cv.code, other: cv.otherInstall || null, running: cv.state && cv.state.running }, cfOther: cf.other, refusal: e && e.code, words: e && e.message, re, cv2: { ok: cv2.ok, code: cv2.code } };
+  };
+  const a = await leg('fake', { [SLOT]: withFake(slot0) });
+  ok(a.started && a.cv.ok === false && a.cv.code === 'install_running' && a.cv.other === 'acme' && a.cv.running === false && a.cfOther === 'acme',
+    'the fake holds THE slot: CloakBrowser\'s verdict refuses (install_running) naming the other row (otherInstall: acme, its own state not "installing"); the Chrome-build row says other: acme', a);
+  ok(a.refusal === 'install_running' && /an install is already running \(the Acme tool\)/.test(a.words || ''), 'a Chrome download is refused in the fake row\'s own words', a);
+  ok(a.re === 'running' && a.cv2.ok === false && a.cv2.code === 'install_running', 'a restart RE-ATTACHES to the fake\'s marker (its row is registered) — the slot stays busy', a);
+  // controls: the slot / the refusal with their old kind lists restored ⇒ the fake is not known
+  const oldGuard = withFake(slot0).replace('    const row = m ? rows.get(m.kind) : null;', "    const row = m && ['cli', 'cloak', 'chrome-build'].includes(m.kind) ? rows.get(m.kind) : null;");
+  const oldWords = cb0.replace('(${busyWords()})', "(${installState.kind === 'chrome-build' ? 'Chrome ' + cbState.version : installState.kind === 'cli' ? 'the browser CLI' : 'CloakBrowser'})");
+  ok(oldGuard !== withFake(slot0) && oldWords !== cb0, 'control: the patches (the old kind list in the re-attach, the old words ladder) apply');
+  const c = await leg('old', { [SLOT]: oldGuard, [CB]: oldWords });
+  ok(c.re === null && c.cv2.ok !== false && !/the Acme tool/.test(c.words || ''), 'control: …the old lists drop the fake\'s marker at a restart (a second install admitted) and name it "CloakBrowser" — exactly what ⑩ catches', c);
+}
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

@@ -128,7 +128,7 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
   }
   /** THE GROUP MESSAGES WAITING for this conversation's next turn (lane group-report-card): the groups engine's
    *  PREVIEW (`reportsForTurn(cid, {preview:true})` — commits nothing, memoised), as summary entries (source 'group').
-   *  They live in the engine, not in a stash: a hand-over never carries them (they ride the next message). */
+   *  They live in the engine, not in a stash: a hand-over never carries them (they ride the next turn, whoever starts it — lane stash-any-turn). */
   function groupEntriesOf(s) {
     try {
       const ge = getGroups();

@@ -27,6 +27,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-seams: the engine + its three family files as one text
 const require = createRequire(import.meta.url);
 
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
@@ -520,8 +521,12 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
   const { mutantCopies, copiesCensus } = await import('./mutant-copy.mjs');
   const strip = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   const keeperRel = 'src/server/browser-keeper.js', routesRel = 'src/routes/browser.js';
-  const keeperSrc = fs.readFileSync(path.join(REPO, keeperRel), 'utf-8'), routesSrc = fs.readFileSync(path.join(REPO, routesRel), 'utf-8');
+  // rv-browser F7 (lane dc-browser-installs): the install slot and its rows moved out of the keeper — the census reads them AS
+  // the keeper (ONE text: the keeper + the slot + every INSTALLERS row file), never as "another module" calling the installs
+  const INSTALL_FILES = ['src/server/browser-installs.js', ...[...fs.readFileSync(path.join(REPO, 'src/server/browser-installs.js'), 'utf-8').matchAll(/require\('\.\/([\w-]+\.js)'\)/g)].map((m) => 'src/server/' + m[1])];
+  const keeperSrc = [keeperRel, ...INSTALL_FILES].map((rel) => fs.readFileSync(path.join(REPO, rel), 'utf-8')).join('\n'), routesSrc = fs.readFileSync(path.join(REPO, routesRel), 'utf-8');
   const serverTexts = Object.fromEntries(files.map((f) => [path.relative(REPO, f), (() => { try { return fs.readFileSync(f, 'utf-8'); } catch { return ''; } })()]));
+  for (const rel of INSTALL_FILES) { if (serverTexts[rel] != null) serverTexts[keeperRel] = keeperSrc; delete serverTexts[rel]; } // the slot + rows ride the keeper's text
   const slotCensus = (K, R, texts) => {
     const rows = [];
     const k = strip(K), r = strip(R);
@@ -561,7 +566,7 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
   const mut = (label, rel, src, from, to) => { ok(src.includes(from), `§8 CONTROL ${label}: the edit's anchor is in ${rel}`); const f = MUT.write(rel, src.replace(from, to), label); return fs.readFileSync(f, 'utf-8'); };
   const scripts = mut('scripts-run', keeperRel, keeperSrc, "    const argv = [...SW.installArgv({ spec: v0.spec, prefix }), '--ignore-scripts'];", '    const argv = [...SW.installArgv({ spec: v0.spec, prefix })];');
   ok(reds(slotCensus(scripts, routesSrc, { ...serverTexts, [keeperRel]: scripts })).some((n) => /REGISTRY|ONE SPAWN/.test(n)), '§8 CONTROL: a CLI install that lets the package\'s scripts run is RED');
-  const timer = mut('timer', keeperRel, keeperSrc, '  const reattached = reattachInstall();', '  const reattached = reattachInstall(); setInterval(() => { try { api.installCli({}); } catch { /* none */ } }, 3600e3);');
+  const timer = mut('timer', keeperRel, keeperSrc, '  const reattached = installs.reattach();', '  const reattached = installs.reattach(); setInterval(() => { try { api.installCli({}); } catch { /* none */ } }, 3600e3);');
   ok(reds(slotCensus(timer, routesSrc, { ...serverTexts, [keeperRel]: timer })).some((n) => /USER-ONLY/.test(n)), '§8 CONTROL: a keeper that installs on a timer is RED');
   const open = mut('agent-token', routesRel, routesSrc, "  if (refuseAgentBearer(req, res, INSTALL_IS_USERS)) return;\n  const k = keeperOr503(res); if (!k) return;\n  if (typeof k.installCli", "  const k = keeperOr503(res); if (!k) return;\n  if (typeof k.installCli");
   ok(reds(slotCensus(keeperSrc, open, { ...serverTexts, [routesRel]: open })).some((n) => /USER-ONLY/.test(n)), '§8 CONTROL: a CLI install route an agent token reaches is RED');
@@ -591,7 +596,7 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
     const rs = [route('get', '/api/browser/builds/available'), route('post', '/api/browser/builds/download'), route('delete', '/api/browser/builds/:version')];
     rows.push(['USER-ONLY: each of the three routes refuses an agent\'s token (refuseAgentBearer) BEFORE the keeper is asked', rs.every((x) => /refuseAgentBearer\(req, res, BUILDS_DOWNLOAD_IS_USERS\)/.test(x) && x.indexOf('refuseAgentBearer') < x.search(/k\.(chromeBuildsAvailable|installChromeBuild|removeChromeBuild)\(/)), '']);
     rows.push(['no AGENT route downloads a build', !/router\.(get|post|delete)\('\/api\/agent\/[^']*'[\s\S]{0,800}?(installChromeBuild|removeChromeBuild|chromeBuildsAvailable)\(/.test(r.replace(/router\.(get|post|patch|delete)\('\/api\/(?!agent)/g, '§')), '']);
-    rows.push(['ONE SLOT: the download asks the slot\'s running state and takes it as `chrome-build`', /if \(installState\.running\) throw namedError\('install_running',/.test(inst) && /Object\.assign\(installState, \{ running: true, kind: 'chrome-build',/.test(inst), '']);
+    rows.push(['ONE SLOT: the download asks the slot\'s running state and takes it as its row\'s id (`chrome-build`)', /if \(installState\.running\) throw namedError\('install_running',/.test(inst) && /Object\.assign\(installState, \{ running: true, kind: ROW\.id,/.test(inst) && /const ROW = \{ id: 'chrome-build',/.test(keeperSrc), '']);
     return rows;
   };
   for (const [n, p, d] of buildCensus(keeperSrc, routesSrc, serverTexts)) ok(p, '§8 ' + n + (p || !d ? '' : ' — ' + d));
@@ -601,7 +606,7 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
   ok(reds(buildCensus(secondFetch, routesSrc, { ...serverTexts, [keeperRel]: secondFetch })).some((n) => /ONE FETCH/.test(n)), '§8 CONTROL: a second fetch site beside buildFetch is RED');
   const openDl = mut('build-agent-token', routesRel, routesSrc, "router.post('/api/browser/builds/download', async (req, res) => {\n  if (refuseHost(req, res)) return;\n  if (refuseAgentBearer(req, res, BUILDS_DOWNLOAD_IS_USERS)) return;", "router.post('/api/browser/builds/download', async (req, res) => {\n  if (refuseHost(req, res)) return;");
   ok(reds(buildCensus(keeperSrc, openDl, { ...serverTexts, [routesRel]: openDl })).some((n) => /USER-ONLY/.test(n)), '§8 CONTROL: a download route an agent token reaches is RED');
-  const atBoot = mut('build-at-boot', keeperRel, keeperSrc, '  const reattached = reattachInstall();', "  const reattached = reattachInstall(); setTimeout(() => { api.installChromeBuild({ version: VERBS.CHROME_BUILDS_RECORD.measured.stable }).catch(() => {}); }, 0);");
+  const atBoot = mut('build-at-boot', keeperRel, keeperSrc, '  const reattached = installs.reattach();', "  const reattached = installs.reattach(); setTimeout(() => { api.installChromeBuild({ version: VERBS.CHROME_BUILDS_RECORD.measured.stable }).catch(() => {}); }, 0);");
   ok(reds(buildCensus(atBoot, routesSrc, { ...serverTexts, [keeperRel]: atBoot })).some((n) => /USER-ONLY/.test(n)), '§8 CONTROL: a keeper that downloads a build at boot is RED');
   for (const x of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 4, label: '§8 ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
 }
@@ -640,7 +645,7 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
   const serverTexts = {};
   for (const f of files) { const rel = path.relative(REPO, f); try { serverTexts[rel] = fs.readFileSync(f, 'utf-8'); } catch { } }
   const engineRel = 'src/server/channels-engine.js';
-  const engineSrc = serverTexts[engineRel];
+  const engineSrc = engineSource(REPO);   // lane dc-channels-seams: the engine + its three family files as one text
   ok(typeof engineSrc === 'string', '§9 the engine is in the server census');
   for (const [name, pass0, detail] of census(engineSrc, serverTexts)) ok(pass0, `§9 ${name}`, detail);
   const MUT = mutantCopies('vendor-whitelist-lkt', REPO);
@@ -863,7 +868,7 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
 // lane message-facts (B-f066, design 007 S5): THE BACKFILL IS ON DEMAND — the ONE caller of an adapter's `factsOf` is the engine's
 // `messageFacts`, reached only from the owner's facts route; no timer, no ingest / pass path, no agent route asks it
 {
-  const engSrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const engSrc = engineSource(REPO);
   const calls = [...engSrc.matchAll(/adapter\.factsOf\(/g)].map((m) => m.index);
   const at = engSrc.indexOf('async function messageFacts(');
   const end = engSrc.indexOf('\n  }\n', at);
@@ -897,7 +902,7 @@ console.log('§FS the full search: the call sites (a press, an explicit --full �
     };
   };
   const want = { adapterSearch: 'vendorSearch', vendorSearch: 'searchFullFor,searchVendor', searchFullFor: 'searchFor', adapterAround: 'aroundFor', aroundFor: 'aroundOwner,readAroundFor', clientRoutes: 1, keystroke: false, askCalls: 3 };
-  const ENGS = read('src/server/channels-engine.js'), PANEL = read('src/lib/channels-panel.js');
+  const ENGS = engineSource(REPO), PANEL = read('src/lib/channels-panel.js');
   const j = judge(ENGS, PANEL);
   ok(JSON.stringify(j) === JSON.stringify(want), 'the full search\'s ONE adapter call is reached only from the press route and the agent\'s --full; around only from the sheet and --around; the client asks only on a press / the scroll sentinel / the once-retry', JSON.stringify(j));
   const rc = read('src/routes/channels.js'), ar = read('src/agent-routes.js');

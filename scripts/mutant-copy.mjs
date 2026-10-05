@@ -120,6 +120,18 @@ export function mutantCopies(name, repo) {
   return { dir, files, write, load, pathFor };
 }
 
+/** rv-browser F7 (lane dc-browser-installs): the REAL keeper over PATCHED install files — a closed world of copies: each
+ *  patched installer row file, src/server/browser-installs.js (patched or not) with its INSTALLERS line pointing at the row
+ *  copy, src/server/browser-keeper.js (patched or not) with its slot require pointing at that. `patched` = {repo-rel: src}. */
+export function keeperWithInstalls(M, repo, patched, tag) {
+  const SLOT = 'src/server/browser-installs.js', KEEPER = 'src/server/browser-keeper.js';
+  const read = (rel) => (rel in patched ? patched[rel] : fs.readFileSync(path.join(repo, rel), 'utf8'));
+  const swap = (src, from, to, what) => { if (!src.includes(from)) throw new Error(`keeperWithInstalls: ${what} has no ${from}`); return src.replace(from, to); };
+  let slot = read(SLOT);
+  for (const rel of Object.keys(patched)) if (rel !== SLOT && rel !== KEEPER) slot = swap(slot, `require('./${path.basename(rel)}')`, `require(${JSON.stringify(M.write(rel, patched[rel], tag))})`, SLOT);
+  return M.load(KEEPER, swap(read(KEEPER), "require('./browser-installs.js')", `require(${JSON.stringify(M.write(SLOT, slot, tag))})`, KEEPER), tag);
+}
+
 /** git's own view of `sub` (default src/), untracked AND ignored — the pre-fix
  *  copies were gitignored, so a plain `git status` never saw them — narrowed to
  *  what THIS process could have written (its pid in the name, or `match`).

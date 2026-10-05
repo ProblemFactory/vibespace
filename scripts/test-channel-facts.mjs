@@ -25,6 +25,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-seams: the engine + its three family files as one text
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 let pass = 0, fail = 0;
@@ -61,7 +62,7 @@ console.log('§1 the table ⇔ the schema ⇔ the words');
   const onKind = (src, k) => new RegExp(`\\bk\\s*===?\\s*['"]${k}['"]|case\\s*['"]${k}['"]|\\bk:\\s*['"]${k}['"]|\\[['"]${k}['"]\\]`).test(code(src));
   const named = kinds.filter((k) => onKind(viewSrc, k));
   ok(!named.length, 'V7: the window\'s facts view names no fact kind (it draws by value type)', J(named));
-  const eng = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const eng = engineSource(REPO);
   const mf = eng.slice(eng.indexOf('lane message-facts (B-f066, design 007 S5)'), eng.indexOf('lane channel-threads (2026-09-28): THREADS + REACTIONS'));
   const win = fs.readFileSync(path.join(REPO, 'src/lib/channel-window.js'), 'utf-8');
   const engNamed = kinds.filter((k) => onKind(mf, k) || onKind(eng, k) || onKind(win, k));

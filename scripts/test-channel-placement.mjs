@@ -35,6 +35,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-seams: the engine + its three family files as one text
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -171,7 +172,7 @@ const censusFindings = (mods) => [...mods].filter(([, x]) => !(x.mod.caps.thread
   const mods = adapterModules();
   const kinds = [...mods.keys()].sort();
   // the engine's built-in list (what a server registers) is the SAME set: parsed from its source, never retyped
-  const esrc = read('src/server/channels-engine.js');
+  const esrc = engineSource(REPO);
   const builtin = /for \(const mod of \[([^\]]+)\]\)/.exec(esrc);
   const real = /^const MANIFESTS = Object\.freeze\(\[([^\]]+)\]/m.exec(read('src/channels/registry-list.js'));   // lane dc-channels-manifest: REAL_ADAPTERS derives from the vendor list
   ok(kinds.length >= 6 && ['agents', 'fake-poll', 'fake-push', 'fake-scan', 'gmail', 'lark'].every((k) => kinds.includes(k)), `the census reads ${kinds.length} adapter modules under src/channels/: ${kinds.join(', ')}`);
@@ -354,8 +355,8 @@ console.log('⑥ the words: the card, the refusal, the touch row — zh / ja / e
     ['src/agent-routes.js', "r.code === 'placement-not-offered')) return rxAnswer(res, r);", '…and answers the refusal by name (409)'],
     ['src/routes/channels.js', "code === 'placement-not-offered' ? 409", 'the owner routes answer it 409'],
     ['src/lib/channel-thread-pane.js', "placement: 'thread', expectWakes: 0", 'the thread pane\'s composer asks for `thread`'],
-    ['src/server/channels-engine.js', 'const pv = P.placementVerdict({', 'the engine decides the placement before a proposal exists'],
-    ['src/server/channels-engine.js', 'onHandle, placement: P.placementOf(p), ...(anchor ? { replyAnchor: anchor } : {}),', 'sendNow hands the adapter the stored placement (through the alias) beside lane-pairing\'s stored anchor'],
+    ['src/server/channels-outbound.js', 'const pv = P.placementVerdict({', 'the engine decides the placement before a proposal exists'],
+    ['src/server/channels-outbound.js', 'onHandle, placement: P.placementOf(p), ...(anchor ? { replyAnchor: anchor } : {}),', 'sendNow hands the adapter the stored placement (through the alias) beside lane-pairing\'s stored anchor'],
     ['data/bin/vibespace-channels', "if (alsoInChat) body.placement = 'thread+chat';", 'the CLI sends --also-in-chat'],
   ];
   const unwired = PINS.filter(([f, s]) => !read(f).includes(s));

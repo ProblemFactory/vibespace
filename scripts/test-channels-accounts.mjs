@@ -77,6 +77,7 @@ import { createRequire } from 'node:module';
 import { scratch, freePort } from './scratch.mjs';
 import { gitEnvFrom } from './git-env.mjs';
 import { mutantCopies, copiesCensus, sweepLegacy } from './mutant-copy.mjs';
+import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-seams: the engine + its three family files as one text
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -197,7 +198,7 @@ const rawDisk = (dir) => fs.readFileSync(path.join(dir, 'channels', 'adapters.js
  *  unique per copy). Every needle must exist EXACTLY once — the control really
  *  removes what it names. */
 function patchedEngine(needles) {
-  const src = fs.readFileSync(ENGINE_PATH, 'utf-8');
+  const src = engineSource(REPO);   // lane dc-channels-seams: the engine + its three family files as one text (one closed world)
   for (const [n] of needles) if (src.split(n).length !== 2) throw new Error(`control needle not found exactly once: ${n.slice(0, 90)}`);
   return require(MUTA.write(ENGINE_PATH, needles.reduce((acc, [a, b]) => acc.replace(a, b), src), 'prefix'));
 }
@@ -814,7 +815,7 @@ console.log('⑫ verify r5: refresh races + the identity door');
   //     credential law's push-blocking half, B-f4cb 2026-09-27); this suite (heavy) keeps the door's behaviour.
   // (e) CONTROL: an engine copy without the identity check stores the stranger's consent (RED as asserted)
   {
-    const src = fs.readFileSync(ENGINE_PATH, 'utf-8');
+    const src = engineSource(REPO);
     const noCheck = src.replace("            if (mm) { verdict = { written: false, mismatch: mm }; return; }\n", '');   // verify r7: the check sits INSIDE the serialized callback
     ok(noCheck !== src, 'CONTROL fixture: the token door\'s identity check removed from a copy');
     const ENG2 = require(MUTA.write(ENGINE_PATH, noCheck, 'no-identity'));
@@ -895,7 +896,7 @@ console.log('⑫ verify r5: refresh races + the identity door');
     const gap = gsrc.replace("    const w = await persistToken(next, String(token.refresh_token || ''));", "    await new Promise((r) => setTimeout(r, 150));   // CONTROL: an await between the refresh's re-read and its persist\n    const w = await persistToken(next, String(token.refresh_token || ''));");
     ok(gap !== gsrc, 'CONTROL fixture: a gmail copy with a 150 ms await between the refresh\'s re-read and its persist');
     const gmailGap = MUTA.load('src/channels/gmail.js', gap, 'await-gap');
-    const esrc = fs.readFileSync(ENGINE_PATH, 'utf-8');
+    const esrc = engineSource(REPO);
     const noCas = esrc.replace("            if (supersedes !== undefined) {\n              const cur = read().token; const curRt = cur ? String(cur.refresh_token || '') : '';\n              if (!cur || curRt !== supersedes) { verdict = { written: false, superseded: true, held: cur ? curRt : null }; return; }\n            }\n", '');
     ok(noCas !== esrc, 'CONTROL fixture: the door\'s compare-and-swap removed from an engine copy');
     const ENG3 = require(MUTA.write(ENGINE_PATH, noCas, 'no-cas'));
@@ -987,7 +988,7 @@ console.log('⑫ verify r5: refresh races + the identity door');
     ok(real.twoConsents.c1.written === true && real.twoConsents.c2.err === 'forbidden' && real.twoConsents.held === 'P' && real.twoConsents.identity === 'person@x.com', `(k) two consents in one tick on an unbound record: the first lands, the second is judged against ITS stamp and refused (held ${real.twoConsents.held}, bound to ${real.twoConsents.identity})`, JSON.stringify(real.twoConsents));
     ok(real.cleared.named.superseded === true && real.cleared.named.held === null && real.cleared.blank.superseded === true && real.cleared.held === null, '(k) a CAS write never lands on a CLEARED store — naming the old token or naming nothing (a writer that read no token has nothing to persist; a landing would resurrect a disconnected account)', JSON.stringify(real.cleared));
     // CONTROL: the identity judgement lifted out of the serialized callback (judged once, before the store's await — the r6 shape) ⇒ both consents land, the record ends bound to the stranger
-    const src = fs.readFileSync(ENGINE_PATH, 'utf-8');
+    const src = engineSource(REPO);
     const hoisted = src.replace("            const held = heldIdentity(rec, read().token);\n            const mm = identityMismatch(held, offered);\n            if (mm) { verdict = { written: false, mismatch: mm }; return; }\n", '')
       .replace("        let verdict = { written: true };\n        try {\n          await store.adapters.update(() => {\n            if (consent) {", "        let verdict = { written: true };\n        { const held0 = heldIdentity(rec, read().token); const mm0 = identityMismatch(held0, offered); if (mm0) throw new ChannelError('forbidden', mismatchSentence(rec.label || rec.id, mm0), { retryable: false, detail: { identityMismatch: mm0 } }); }\n        try {\n          await store.adapters.update(() => {\n            if (consent) {");
     ok(hoisted !== src && hoisted.split('heldIdentity(rec, read().token)').length === src.split('heldIdentity(rec, read().token)').length, 'CONTROL fixture: the identity judgement hoisted out of the serialized callback in an engine copy');
@@ -1076,7 +1077,7 @@ console.log('⑫ verify r5: refresh races + the identity door');
       const o = await late(ENG, OL7, 'cancel', 'ctl');
       ok(o.held && o.acted && o.landed && o.flowOk === false && o.state === 'connected' && /nothing was connected/.test(o.err || '') && !o.connectedLine && o.calls === 0, `CONTROL: with r7's override the report says cancelled ("${o.err}") while the token is on disk (${o.disk}, state ${o.state}) and no pass runs — the contradiction`, JSON.stringify(o)); }
     // CONTROL: an engine copy without onAuthDone's stop guard ⇒ adapters.json written after store.close() (RED as asserted)
-    { const ENG7 = patchedEngine([["    if (stopped) { log.log(`[channels] ${rec.id}: a sign-in completed after the engine stopped — nothing is written after stop (${r && r.ok ? 'its consent had landed and stands' : (r && r.error) || 'the consent flow failed'})`); return; }\n", '']]);
+    { const ENG7 = patchedEngine([["    if (engineCtx.stopped) { log.log(`[channels] ${rec.id}: a sign-in completed after the engine stopped — nothing is written after stop (${r && r.ok ? 'its consent had landed and stands' : (r && r.error) || 'the consent flow failed'})`); return; }\n", '']]);
       const o = await late(ENG7, OL8, 'shutdown', 'ctl');
       ok(o.held && o.acted && o.writtenAfterStop, `CONTROL: without the stop guard onAuthDone writes adapters.json after stop() (written after stop: ${o.writtenAfterStop})`, JSON.stringify(o)); }
     // (l2) stop() while the exchange is IN FLIGHT, the engine's OWN loopback: refused by name, nothing written after stop, the listener closed

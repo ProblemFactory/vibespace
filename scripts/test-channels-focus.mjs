@@ -53,6 +53,7 @@ import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { scratch } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-seams: the engine + its three family files as one text
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -68,7 +69,7 @@ const CH = require(path.join(REPO, 'src/channels/index.js'));
 const fake = require(path.join(REPO, 'src/channels/fake.js'));
 const REC = require(path.join(REPO, 'src/channel-record.js'));
 const FOCUS_SRC = fs.readFileSync(FOCUS_PATH, 'utf-8');
-const ENGINE_SRC = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+const ENGINE_SRC = engineSource(REPO);
 
 const ROOT = scratch('chan-focus');
 const cleanup = () => { try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch {} };

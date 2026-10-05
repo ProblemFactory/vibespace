@@ -117,7 +117,11 @@ console.log('§A file ownership: a store\'s data file is named by its owner modu
 // §B THE GROUP LOG (append-only): every store read is folded, the clear's own, or gated off the groups adapter
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════
 const LOG_READ_RE = /\bstore\.(readTail|findRecord|countSince|search|oldestRecord)\s*\(/;
-const STORE_MODULES = new Set(['src/channel-store.js', 'src/server/groups-engine.js', 'src/server/channels-engine.js']);
+// lane dc-channels-seams: the engine's three family files (moved VERBATIM out of its create() — access, outbound, auth)
+// answer to the engine's rows: one owner, four files
+const ENGINE_FAMILY = new Set(['src/server/channels-access.js', 'src/server/channels-outbound.js', 'src/server/channels-auth.js']);
+const iRel = (rel) => (ENGINE_FAMILY.has(rel) ? 'src/server/channels-engine.js' : rel);
+const STORE_MODULES = new Set(['src/channel-store.js', 'src/server/groups-engine.js', 'src/server/channels-engine.js', ...ENGINE_FAMILY]);
 /** the 2-space-indented function a line sits in (the engines define their verbs inside create()) */
 function enclosing(lines, idx) {
   for (let k = idx; k >= 0; k--) {
@@ -197,7 +201,7 @@ function groupLogCensus(src) {
       const before = lines.slice(fn.start, i + 1).join('\n');
       if (!before.includes(gate)) out.channelsUngated.push(`${fn.name}@${i + 1} (no ${gate} before the read)`);
     });
-    if (rel === 'src/server/channels-engine.js') out.groupsNamed = codeLines(text).some(({ l }) => /GROUP_ADAPTER_ID|['"`]groups['"`]/.test(l));
+    if (iRel(rel) === 'src/server/channels-engine.js') out.groupsNamed = out.groupsNamed || codeLines(text).some(({ l }) => /GROUP_ADAPTER_ID|['"`]groups['"`]/.test(l));
   }
   return out;
 }
@@ -213,8 +217,10 @@ console.log('§B the group log: every read folded, the clear\'s own, or gated of
   ok(!c.groupsNamed, 'channels-engine never names the groups adapter (a group log is not one of its conversations)');
   // the declared functions really read (a dead row would let a renamed reader hide behind it)
   const seen = new Set();
-  const lines = read('src/server/channels-engine.js').split('\n');
-  lines.forEach((l, i) => { if (!/^\s*(\/\/|\*)/.test(l) && LOG_READ_RE.test(l)) seen.add(enclosing(lines, i).name); });
+  for (const rel of ['src/server/channels-engine.js', ...ENGINE_FAMILY]) {
+    const lines = read(rel).split('\n');
+    lines.forEach((l, i) => { if (!/^\s*(\/\/|\*)/.test(l) && LOG_READ_RE.test(l)) seen.add(enclosing(lines, i).name); });
+  }
   const callerOnly = new Set(Object.values(CHANNELS_GATES).filter((g) => typeof g === 'object').flatMap((g) => g.callers));
   const dead = Object.keys(CHANNELS_GATES).filter((f) => !seen.has(f) && !callerOnly.has(f));
   ok(!dead.length, 'every declared channels-engine reader still reads (no dead row)', dead);
@@ -1753,7 +1759,7 @@ const I_RECV = {
   'src/lib/session-lifecycle.js|a': ['account', 'an account'], 'src/lib/session-props.js|s0': ['session', 'the session\'s own name'],
   'src/lib/settings-ui.js|schema': ['setting', 'a setting\'s label'], 'src/lib/sidebar-mounts.js|h': ['host', 'a machine name'], 'src/lib/sidebar-mounts.js|s': ['share', 'a share name'], 'src/lib/sidebar-mounts.js|t': ['mount token', 'a token name'],
   'src/lib/window-share.js|r': ['session', 'an agent\'s name'],
-  'src/mounts.js|cb': ['mount', 'a storage label'], 'src/mounts.js|head': ['mount', 'a head file\'s name'], 'src/oauth-loopback.js|st': ['integration', 'a consent flow\'s label'],
+  'src/mount-providers/cloud.js|cb': ['mount', 'a storage label'], 'src/mounts.js|head': ['mount', 'a head file\'s name'], 'src/oauth-loopback.js|st': ['integration', 'a consent flow\'s label'],
   'src/office-open.js|fv': ['file', 'a viewer verdict\'s label'], 'src/office-open.js|row': ['file', 'an office row\'s label'], 'src/office-open.js|served': ['file', 'a machine\'s refusal reason'], 'src/office-open.js|want': ['file', 'an office row\'s label'],
   'src/opencode-serve.js|info.error': ['harness', 'the serve\'s error name'], 'src/quota-model.js|byHint': ['quota', 'a limit\'s name'], 'src/quota-model.js|c': ['quota', 'a limit\'s name'],
   'src/remote-fs.js|h': ['host', 'a machine name'], 'src/routes/browser-trace.js|p': ['browser profile', 'a profile label'], 'src/routes/browser-trace.js|rs': ['browser profile', 'a recording\'s file name'],
@@ -1797,7 +1803,7 @@ const I_RECV = {
   'src/port-forward.js|h': ['host', 'a machine name'], 'src/server/auto-cli-loop.js|it.pj': ['quota', 'a projection\'s label'],
   'src/server/auto-resume.js|chk': ['quota', 'a pre-fire check\'s reason'], 'src/server/auto-resume.js|ident': ['account', 'a billing identity'],
   'src/server/boot-restore.js|h': ['host', 'a machine name'], 'src/server/boot-restore.js|session': ['session', 'a session\'s name'],
-  'src/server/browser-env.js|f': ['browser profile', 'a pin repoint\'s previous profile'], 'src/server/browser-keeper.js|rec': ['browser profile', 'a browser record\'s label'], 'src/server/browser-keeper.js|bc': ['browser profile', 'verify r2 (B5): a Chrome build change\'s from / to — build words ("Chrome 151.0.7922.34"), never a record\'s text'],
+  'src/server/browser-env.js|f': ['browser profile', 'a pin repoint\'s previous profile'], 'src/server/browser-keeper.js|rec': ['browser profile', 'a browser record\'s label'], 'src/server/browser-builds-keeper.js|p': ['browser profile', 'a profile label (rv-browser F7: Change build… moved out of the keeper)'], 'src/server/browser-builds-keeper.js|bc': ['browser profile', 'verify r2 (B5): a Chrome build change\'s from / to — build words ("Chrome 151.0.7922.34"), never a record\'s text'],
   'src/server/browser-keeper.js|v': ['browser profile', 'a resource verdict\'s reason'], 'src/server/browser-stream.js|next.switched': ['browser profile', 'the browser a view switched from'],
   'src/server/browser-trace.js|p': ['browser profile', 'a profile label'], 'src/server/channels-engine.js|choice.fromMount': ['mount', 'a storage mount\'s name'],
   'src/server/channels-engine.js|p1': ['outbox proposal', 'a proposal\'s decision reason'], 'src/server/channels-engine.js|s': ['channel', 'a channel state\'s reason'],
@@ -1911,7 +1917,7 @@ const I_SITES = {
 const iJudge = (rows) => {
   const unknownRecv = new Set(), bad = [], used = new Set(), usedSites = new Set(), bySink = {}, recordSites = [];
   for (const r of rows) {
-    const rk = `${r.rel}|${iRecvOf(r.read)}`;
+    const rk = `${iRel(r.rel)}|${iRecvOf(r.read)}`;
     bySink[r.sink] = bySink[r.sink] || { sites: 0, record: 0 };
     bySink[r.sink].sites++;
     const kind = I_RECV[rk];
@@ -1919,7 +1925,7 @@ const iJudge = (rows) => {
     used.add(rk);
     if (!I_RECORD_KINDS.has(kind[0])) continue;
     bySink[r.sink].record++;
-    const sk = `${r.rel}|${r.sink}|${r.read}`, site = I_SITES[sk];
+    const sk = `${iRel(r.rel)}|${r.sink}|${r.read}`, site = I_SITES[sk];
     usedSites.add(sk);
     recordSites.push({ ...r, cls: site && site[0] });
     if (!site) { bad.push(`${sk} @${r.line}: a ${kind[0]} read with no class`); continue; }
@@ -1956,7 +1962,7 @@ console.log('§I the interpolation census (verify r8): every message that embeds
   ok(J8.bad.length === 0, `I every read of a record / a carrier at a sink is of a class the sink allows AND shows it (${J8.recordSites.length}: ${[...new Set(J8.recordSites.map((s) => s.cls))].join(' / ')})`, J8.bad);
   ok(Object.values(I_RECV).every(([k, why]) => k && why.length >= 6) && Object.values(I_SITES).every(([c, why]) => I_CHECK[c] && why.length >= 20), 'I every receiver names what it is; every site class names why');
   { const al = rows.filter((r) => r.alias), defs = new Set(al.map((r) => `${r.rel}:${r.defLine}:${r.alias}`));
-    ok(al.length >= 25 && defs.size >= 15 && al.every((r) => r.read && r.sink && I_RECV[`${r.rel}|${iRecvOf(r.read)}`]), `I verify r9 — THE ONE-LEVEL ALIAS PASS: a text field COPIED into a local (\`const x = rec.<field>\` / \`const { field } = rec\`) and handed to a sink in its block is a read at that sink — ${defs.size} copies, ${al.length} sink reads, every one judged by the receiver + site tables above (a copy into an object's member or through two locals is declared)`, al.length); }
+    ok(al.length >= 25 && defs.size >= 15 && al.every((r) => r.read && r.sink && I_RECV[`${iRel(r.rel)}|${iRecvOf(r.read)}`]), `I verify r9 — THE ONE-LEVEL ALIAS PASS: a text field COPIED into a local (\`const x = rec.<field>\` / \`const { field } = rec\`) and handed to a sink in its block is a read at that sink — ${defs.size} copies, ${al.length} sink reads, every one judged by the receiver + site tables above (a copy into an object's member or through two locals is declared)`, al.length); }
   ok(iAbsent(srcs).length === 0, `I the absent sinks stay absent — ${I_ABSENT.map(([w]) => w).join(', ')}: zero sites`, iAbsent(srcs));
   // the classes' own standing statements: the cascade reaches every item a job filed; the dialog says agents keep what they received
   ok(read('src/server/record-clear.js').includes('userTodos.idsWhere((i) => i.jobId && gone.has(i.jobId))') && /userTodos\.add\(sessKey, \{\s*origin: 'jobs', \/\/ B-328d\s*text, urgency: urgency \|\| 'normal', by: 'agent', jobId,/.test(read('src/server/jobs-wiring.js')), 'I `cascade`: a job\'s clear cascades to every For-you item carrying its jobId, and the ONE filing door (jobs-wiring notifyUser) stamps it');

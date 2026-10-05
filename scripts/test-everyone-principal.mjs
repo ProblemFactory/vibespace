@@ -28,6 +28,7 @@ import { pathToFileURL } from 'node:url';
 import { scratch } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { gitEnvFrom } from './git-env.mjs';
+import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-seams: the engine + its three family files as one text
 
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
@@ -323,7 +324,7 @@ const B = require(path.join(REPO, 'src/browser-profiles.js'));
 console.log('③ the money rule: an All-agents watcher wakes every running conversation, each under ITS OWN cap');
 const CH = require(path.join(REPO, 'src/channels/index.js'));
 const { makeRecord, makeConversation } = require(path.join(REPO, 'src/channel-record.js'));
-const ENGINE_SRC = read('src/server/channels-engine.js');
+const ENGINE_SRC = engineSource(REPO);
 const engines = [];
 async function world(ENGmod, name, { live }) {
   const A = 'evp', OPS = 'ops';
@@ -434,7 +435,7 @@ async function moneyLeg(ENGmod, name) {
   const FAN_READ = '  return { ...root, principal: { kind: \'everyone\', id: EVERYONE_ID, target: str(cid), name: name || null }, stats: fanStatsOf(root, cid) };';
   ok(FSRC.split(FAN_READ).length === 2, 'CONTROL setup: the fan-out target\'s ledger read');
   const fCopy = M.write('src/channel-filter.js', FSRC.replace(FAN_READ, FAN_READ.replace('stats: fanStatsOf(root, cid)', 'stats: root.stats || { wakes: [], hits: [] }')), 'shared-f', { esm: false });
-  const shared = M.load('src/server/channels-engine.js', ENGINE_SRC.replace(SHARED, SHARED.replace('if (!w || !fan) return w;', 'if (!w || fan || !fan) return w;')).replace("const F = require('../channel-filter.js');", `const F = require(${JSON.stringify(fCopy)});`), 'shared');
+  const shared = M.load('src/server/channels-engine.js', ENGINE_SRC.replace(SHARED, SHARED.replace('if (!w || !fan) return w;', 'if (!w || fan || !fan) return w;')).replaceAll("const F = require('../channel-filter.js');", `const F = require(${JSON.stringify(fCopy)});`), 'shared');
   const c1 = await moneyLeg(shared, 'ctl-shared');
   const tot1 = Object.values(c1.counts).reduce((x, y) => x + y, 0);
   ok(tot1 === 2, `CONTROL (a): ONE ledger shared by every conversation ⇒ only ${tot1} wakes in all (not 2 each) — the "2 each" leg above would go red`, c1.counts);

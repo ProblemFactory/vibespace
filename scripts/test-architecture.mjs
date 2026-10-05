@@ -21,6 +21,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { GIT_REDIRECTORS, gitEnvFrom } from './git-env.mjs';
+import { engineSource, FAMILIES as ENGINE_FAMILIES } from './channels-engine-src.mjs';   // lane dc-channels-seams: the engine + its three family files as one text
 
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -66,6 +67,9 @@ const PURE = new Set(['src/timed-sync.js' /* design 011 lane 1 (store-timing): t
   // lane dc-browser-backends: every browser backend file (and the folder's registration list) is PURE — the folder is
   // read, so a new backend adds no line here
   ...fs.readdirSync(path.join(REPO, 'src/browser-backends')).filter((f) => f.endsWith('.js')).map((f) => 'src/browser-backends/' + f),
+  // lane dc-mount-providers (rv-server M6): every storage-provider row (and the folder's registration list) is PURE — its
+  // hooks reach the manager's key / engines / statics through the `x` they are handed, so a new provider adds no line here
+  ...fs.readdirSync(path.join(REPO, 'src/mount-providers')).filter((f) => f.endsWith('.js')).map((f) => 'src/mount-providers/' + f),
   'src/browser-job-principal.js', // lane jobs-browser: a Background Work job browses AS its owner conversation (child handle, the owner's admission + pin, route lists, the release rule); imports only browser-profiles
   // BROWSER TAKEOVER (design-browser-takeover §3): the ONE browser CLI's verb table — the router,
   // the child env and (r3) the config rule; imports nothing, shipped beside the CLI to hosts
@@ -3041,7 +3045,7 @@ console.log('§64 a reaction never opens a turn (the side-record census)');
     const deadBoundary = Object.keys(BOUNDARY).filter((k) => !seen.has(k));
     return { seeds, reached: [...seen], bad, deadBoundary };
   };
-  const esrc = read(ENGP);
+  const esrc = engineSource(REPO);
   const c = census(esrc);
   ok(c.seeds.length >= 2 && c.seeds.includes('appendSides') && c.reached.includes('flushSide') && c.reached.includes('reactionDigest'), `§64 census scope is non-vacuous (seeds: ${c.seeds.join(', ')}; ${c.reached.length} functions reached, incl. the side broadcast and the digest)`);
   ok(c.bad.length === 0, `§64 no path from a side record reaches a wake site (billedWake / onFresh / deliverToConversation / wake)${c.bad.length ? ' — ' + c.bad.join('; ') : ''}`);
@@ -3052,7 +3056,7 @@ console.log('§64 a reaction never opens a turn (the side-record census)');
   const e2s = [...strip(lark).matchAll(/eventToSide\(/g)].length;
   ok(e2s >= 2 && /kind: 'side'/.test(lark) && !/kind: 'record'[^\n]*eventToSide|eventToSide[^\n]*kind: 'record'/.test(lark), `§64 the Lark lane's eventToSide results (${e2s} sites) leave as kind 'side' events — never as a record the funnel would judge`);
   const walkJs = (d, out = []) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const f = `${d}/${e.name}`; if (e.isDirectory()) walkJs(f, out); else if (/\.js$/.test(e.name)) out.push(f); } return out; };
-  const writers = walkJs('src').filter((f) => !['src/channel-store.js', ENGP].includes(f) && /\.appendSide\(/.test(strip(read(f))));
+  const writers = walkJs('src').filter((f) => !['src/channel-store.js', ENGP, ...Object.values(ENGINE_FAMILIES)].includes(f) && /\.appendSide\(/.test(strip(read(f))));
   ok(writers.length === 0, `§64 only the engine writes a side record (store.appendSide callers outside it: ${writers.length ? writers.join(', ') : 'none'})`);
   // NEGATIVE CONTROLS: the digest through the ladder, the side branch through the funnel, a new helper that wakes
   const viaLadder = esrc.replace("try { deliver.stashFor(cid, { source: 'channel', kind: 'notification', fromName: RX_DIGEST_FROM,", "try { deliver.deliverToConversation(cid, '', {}); deliver.stashFor(cid, { source: 'channel', kind: 'notification', fromName: RX_DIGEST_FROM,");
@@ -3147,7 +3151,7 @@ console.log('§65 every producer that can carry a conversation\'s facts to an ag
   // (GET /api/agent/exit/runs — the caller's own); data/bin/vibespace-exit may name agent routes only
   const exitCliPaths = (src) => [...src.matchAll(/['`"](\/api\/[^'`"$?]*)/g)].map((m) => m[1]);
   const exitCliBad = (src) => exitCliPaths(src).filter((p) => !p.startsWith('/api/agent/exit')).map((p) => `(D) vibespace-exit calls ${p} — not an agent route`);
-  const esrc = read(ENGP), asrc = read('src/agent-routes.js'), cli = read('data/bin/vibespace-channels');
+  const esrc = engineSource(REPO), asrc = read('src/agent-routes.js'), cli = read('data/bin/vibespace-channels');
   const c = census(esrc, asrc, cli);
   const xcli = read('data/bin/vibespace-exit');
   const xpaths = exitCliPaths(xcli);
@@ -3250,7 +3254,7 @@ console.log('§65b the owner\'s name for an author: owner-only, never an agent s
       ownerOnly: /notify\(\[\], \{ full: false, extra: \{ authors:/.test(fn) && !/deliver\.(?:stashFor|deliverToConversation)\(/.test(fn),
     };
   };
-  const rsrc = read('src/routes/channels.js'), asrc = read('src/agent-routes.js'), cli = read('data/bin/vibespace-channels'), esrc = read('src/server/channels-engine.js');
+  const rsrc = read('src/routes/channels.js'), asrc = read('src/agent-routes.js'), cli = read('data/bin/vibespace-channels'), esrc = engineSource(REPO);
   const j = judge(rsrc, asrc, cli, esrc);
   ok(j.route && j.agentFree && j.ownerOnly, '§65b the alias route refuses an agent bearer before the engine; no agent route / CLI path names it; the setter answers the owner\'s broadcast only', JSON.stringify(j));
   const noRefuse = rsrc.replace("    if (refuseAgentBearer(req, res, 'a name for an author is the owner\\'s — an agent token may not set one')) return;\n", '');
@@ -3942,10 +3946,10 @@ console.log('§76b the consent machine names no vendor: the engine, the channels
     }
     return bad;
   };
-  const FILES = ['src/server/channels-engine.js', 'src/routes/channels.js', 'src/oauth-loopback.js', 'src/lib/channel-account-dialogs.js'];
+  const FILES = ['src/server/channels-engine.js', ...Object.values(ENGINE_FAMILIES), 'src/routes/channels.js', 'src/oauth-loopback.js', 'src/lib/channel-account-dialogs.js'];
   const bad = census76b(FILES.map((f) => [f, read(f)]));
   ok(FILES.every((f) => read(f).length > 5000) && bad.length === 0, `§76b the consent machine and the account dialog name no vendor — no quoted id, no vendor consent module, no paste fact (${bad.slice(0, 3).join(' | ') || 'clean'})`);
-  const eng = read('src/server/channels-engine.js'), route = read('src/routes/channels.js'), dlg = read('src/lib/channel-account-dialogs.js');
+  const eng = engineSource(REPO), route = read('src/routes/channels.js'), dlg = read('src/lib/channel-account-dialogs.js');
   ok(/for \(const m of REAL_ADAPTERS\) validateConsent\(m\.kind, m\.consent\);/.test(eng) && /const v = row\.landing\.stateVerdict\(state, \{ sign: signState,/.test(eng)
     && /page = engine\(\)\.consentLandingOf\(kind\)|engine\(\)\.consentLandingOf\(kind\)/.test(route) && /\.send\(page\(r\)\);/.test(route) && /for \(const m of \[fake, \.\.\.REAL_ADAPTERS\]\) if \(m\.integration/.test(eng)
     && /row\.signin === 'paste' && row\.paste/.test(dlg),
@@ -4064,10 +4068,13 @@ console.log('§78 literal-id branches per family + unused i18n keys + unreferenc
     'src/zz-kinds.js': "if (k === 'deb' || k === 'appimage') d();",
     'src/app-kinds.js': "if (k === 'apt') owner();",
     'src/browser-profiles.js': "const b = t.phase === 'npm' ? 1 : 0;",
+    // lane dc-mount-providers: the mount family — a core file's provider branch counts once per line, the provider's own row file never
+    'src/zz-mounts.js': "if (m.type === 'onedrive' || rt === 'rclone') x();",
+    'src/mount-providers/zz.js': "if (m.rcloneType !== 'drive') own();",
   };
   const pc = IB.census(REPO, { files: Object.keys(PLANT), read: (f) => PLANT[f] });
   const got = Object.fromEntries(Object.keys(IB.FAMILIES).map((f) => [f, pc.counts[f]]));
-  const want = { harness: { 'src/zz-shared.js': 1, 'src/channels/zz.js': 1 }, channel: { 'src/zz-shared.js': 2 }, display: { 'src/zz-shared.js': 1, 'src/desktop-backends.js': 1 }, browser: { 'src/zz-shared.js': 2 }, plugin: { 'src/zz-shared.js': 1 }, appkind: { 'src/zz-kinds.js': 1 } };
+  const want = { harness: { 'src/zz-shared.js': 1, 'src/channels/zz.js': 1 }, channel: { 'src/zz-shared.js': 2 }, display: { 'src/zz-shared.js': 1, 'src/desktop-backends.js': 1 }, browser: { 'src/zz-shared.js': 2 }, plugin: { 'src/zz-shared.js': 1 }, appkind: { 'src/zz-kinds.js': 1 }, mount: { 'src/zz-shared.js': 1, 'src/zz-mounts.js': 1 } };
   ok(JSON.stringify(got) === JSON.stringify(want) && pc.allowed.harness === 1 && pc.allowed.appkind === 1,
     `§78 NEGATIVE CONTROLS: compare / reversed compare / case / one-line + multi-line dispatch maps counted; a comment, a lone { shell: true } / { agents: 0 } key, the owner folder, the DISPLAY_BACKENDS table and an ALLOW row not (${JSON.stringify(got)}, allowed ${pc.allowed.harness})`);
   const raised = IB.judge({ harness: { 'a.js': 2 } }, { harness: { 'a.js': 3, 'b.js': 1 } }), low = IB.lowered({ harness: { 'a.js': 2, 'b.js': 4 } }, { harness: { 'a.js': 5, 'b.js': 1 } });
@@ -4119,6 +4126,55 @@ console.log('§76c a channel vendor is its folder + one list line: the three der
   ];
   const r = ctl.map(([n, f, add]) => ({ n, red: census76c([[f, read(f) + add]]).length > 0 }));
   ok(r.every((x) => x.red), `§76c CONTROLS: ${r.map((x) => `${x.n} (${x.red ? 'RED' : 'missed'})`).join(', ')}`);
+}
+
+// §79 THE CHANNELS ENGINE'S FAMILIES MEET ONLY IN ITS ONE CONTEXT OBJECT (lane dc-channels-seams, rv-channels-core C11):
+// src/server/channels-engine.js's create() composes channels-access.js, channels-outbound.js and channels-auth.js (each
+// moved VERBATIM out of its closure) over `engineCtx`. Per family file: its requires are exactly its row (no family
+// requires another family or the engine); every field its `const { … } = engineCtx;` names is a field the engine's root
+// declares or an EARLIER family answers; every `engineCtx.<door>(` it reads at call time is a LATER family's answer; a
+// plain `engineCtx.<name>` read is one of the root's getters (the engine's `let`s); and every name the engine takes back
+// from a family is in that family's answer. Controls: a planted cross-family require, an unanswered late door and a
+// field dropped from the root are each red.
+console.log('§79 the channels engine\'s families meet only through its one context object');
+{
+  const FAM_REQ = {
+    'src/server/channels-access.js': ['../channel-acl.js', '../channel-caps.js', '../channel-filter.js', '../channel-policy.js', '../channel-search.js', '../channels/index.js', '../peer-text.js', 'crypto'],
+    'src/server/channels-outbound.js': ['../channel-acl.js', '../channel-caps.js', '../channel-drain.js', '../channel-filter.js', '../channel-outbox-files.js', '../channel-policy.js', '../channel-ref.js', '../channel-thread.js', '../channels/index.js', '../peer-text.js'],
+    'src/server/channels-auth.js': ['../channel-acl.js', '../channel-caps.js', '../channel-filter.js', '../channel-identity.js', '../channel-outbox-files.js', '../channel-policy.js', '../channels/index.js', '../integration-registry.js', './integration-store.js', 'crypto'],
+  };
+  const VAR = { ChannelsAccess: 'src/server/channels-access.js', ChannelsOutbound: 'src/server/channels-outbound.js', ChannelsAuth: 'src/server/channels-auth.js' };
+  const names = (block) => block.replace(/\/\/.*$/gm, '').split(',').map((x) => x.trim()).filter((x) => /^\w+$/.test(x));
+  const judge79 = (eng, fams) => {
+    const bad = [];
+    const root = (/\n  const engineCtx = \{\n([\s\S]*?)\n  \};\n/.exec(eng) || [])[1] || '';
+    const getters = new Set([...root.matchAll(/^\s*get (\w+)\(\)/gm)].map((m) => m[1]));
+    const known = new Set([...names(root.replace(/^\s*get .*$/gm, '')), ...getters]);
+    const order = [...eng.matchAll(/\n  const \{\n([^{}]*?)\n  \} = Object\.assign\(engineCtx, (\w+)\.create\(engineCtx\)\);/g)].map((m) => ({ taken: names(m[1]), file: VAR[m[2]] }));
+    if (!root || order.length !== 3 || order.some((o) => !o.file)) bad.push(`the root: ${root ? 'found' : 'missing'}, ${order.length} family factories`);
+    const answers = {};
+    for (const [rel, src] of Object.entries(fams)) answers[rel] = new Set(names((/\n  return \{\n([\s\S]*?)\n  \};\n\}\n\nmodule\.exports = \{ create \};\n?$/.exec(src) || [])[1] || ''));
+    order.forEach(({ taken, file }, i) => {
+      const src = fams[file] || '';
+      const reqs = [...new Set([...src.matchAll(/require\('([^']+)'\)/g)].map((m) => m[1]))].sort();
+      if (reqs.join() !== FAM_REQ[file].slice().sort().join()) bad.push(`${file} requires ${reqs.join(' ')} (its row: ${FAM_REQ[file].join(' ')})`);
+      const before = new Set(order.slice(0, i).flatMap((o) => [...answers[o.file]])), after = new Set(order.slice(i + 1).flatMap((o) => [...answers[o.file]]));
+      const fields = names((/\nfunction create\(engineCtx\) \{\n  const \{\n([\s\S]*?)\n  \} = engineCtx;\n/.exec(src) || [])[1] || '');
+      if (!fields.length) bad.push(`${file}: no \`const { … } = engineCtx;\` at its factory's top`);
+      for (const f of fields) if (!known.has(f) && !before.has(f)) bad.push(`${file} reads ${f}: no field of the root, no earlier family's answer`);
+      for (const m of src.matchAll(/engineCtx\.(\w+)(\()?/g)) if (m[2] ? !after.has(m[1]) : !getters.has(m[1])) bad.push(`${file} reads engineCtx.${m[1]}${m[2] ? '(' : ''}: ${m[2] ? 'no later family answers it' : 'not a getter of the root'}`);
+      for (const t of taken) if (!answers[file].has(t)) bad.push(`the engine takes ${t} from ${file}, which does not answer it`);
+    });
+    return { bad, fields: order.map((o) => o.file && names((/\n  const \{\n([\s\S]*?)\n  \} = engineCtx;\n/.exec(fams[o.file]) || [])[1] || '').length) };
+  };
+  const eng = read('src/server/channels-engine.js'), fams = Object.fromEntries(Object.values(VAR).map((f) => [f, read(f)]));
+  const j = judge79(eng, fams);
+  ok(j.bad.length === 0, `§79 the three families (access ${j.fields[0]} / outbound ${j.fields[1]} / auth ${j.fields[2]} context fields) require only their rows and meet only in engineCtx — ${j.bad.slice(0, 4).join(' | ') || 'clean'}`);
+  const A = 'src/server/channels-access.js', O = 'src/server/channels-outbound.js';
+  const c1 = judge79(eng, { ...fams, [A]: fams[A].replace("const crypto = require('crypto');", "const crypto = require('crypto');\nconst Auth = require('./channels-auth.js');") }).bad.length > 0;
+  const c2 = judge79(eng, { ...fams, [O]: fams[O].replace('  function outboxView(', '  const leak = () => engineCtx.tokensOf();\n  function outboxView(') }).bad.length > 0;
+  const c3 = judge79(eng.replace(/(\n  const engineCtx = \{\n[^}]*?)\bbilledWake,/, '$1'), fams).bad.length > 0;
+  ok(c1 && c2 && c3, `§79 CONTROLS: a family requiring another (${c1 ? 'RED' : 'missed'}), a late door nobody answers (${c2 ? 'RED' : 'missed'}), a field dropped from the root (${c3 ? 'RED' : 'missed'})`);
 }
 
 // §80 ONE BUILT-IN PLUGIN REGISTRY, NO ID DISPATCH (lane dc-plugins, 2026-10-04 — rv-server H3 + rv-client F9). A

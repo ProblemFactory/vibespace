@@ -19,6 +19,7 @@ import http from 'node:http';
 import { spawnSync, spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-seams: the engine + its three family files as one text
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const F = require(path.join(REPO, 'src/channel-api.js'));
@@ -342,7 +343,7 @@ console.log('⑥ the declared row: census, the registry contract, a fake vendor 
 {
   const CH = require(path.join(REPO, 'src/channels/index.js'));
   const { makeFakeAdapter } = require(path.join(REPO, 'src/channels/fake.js'));
-  const ESRC = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
+  const ESRC = engineSource(REPO);
   const quiet = { log() {}, info() {}, warn() {}, error() {} };
   // the census over the SHIPPED registry (the engine's own): a row ⇔ a bearer, every row valid; the mounts' row valid
   const { create } = require(path.join(REPO, 'src/server/channels-engine.js'));

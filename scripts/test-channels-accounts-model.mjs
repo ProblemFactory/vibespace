@@ -19,6 +19,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-seams: the engine + its three family files as one text
 
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
@@ -50,7 +51,7 @@ console.log('① the PURE identity table (src/channel-identity.js)');
 
 console.log('② the door and the rebind ask the judge and refuse on its answer (src/server/channels-engine.js)');
 {
-  const src = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const src = engineSource(REPO);
   ok(/const \{[^}]*\bidentityMismatch\b[^}]*\bheldIdentity\b[^}]*\} = require\('\.\.\/channel-identity\.js'\);/.test(src), 'the engine takes identityMismatch + heldIdentity from src/channel-identity.js (one judge)');
   // THE DOOR: inside the serialized store update, a consent naming nobody is refused, then the held identity (off the
   // token the record holds) is judged against the offered one and a mismatch writes nothing — then thrown as `forbidden`.

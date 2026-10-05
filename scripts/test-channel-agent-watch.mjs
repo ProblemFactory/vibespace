@@ -24,6 +24,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
+import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-seams: the engine + its three family files as one text
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -183,7 +184,7 @@ async function deliveryLeg(ENGM, name) {
   ok(r.toAgent2Billed >= 1, `the legacy row (no delivery) still wakes, as before (${r.toAgent2Billed})`, JSON.stringify(r));
   ok(/Ops room/.test(r.stashText), 'the stashed block is the same block a wake carries (names the conversation)', r.stashText.slice(0, 200));
   // CONTROL: the dispatch without its next-turn branch bills the next-turn watcher
-  const src = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
+  const src = engineSource(REPO);
   const cut = src.replace("if (F.deliveryModeOf(w) === 'next-turn') { runs.push(stashHits(rec, convId, hits, { item, pk, batch })); continue; }", '');
   const E2 = MUT.load('src/server/channels-engine.js', cut, 'no-next-turn');
   const rc = await deliveryLeg(E2, 'e5c');
@@ -275,7 +276,7 @@ async function removalLeg(ENGM, name) {
   ok(more.ok && more.proposed && list.length === 100 && list.filter((r) => r.status === 'open').length === n0 + 1 && list.some((r) => r.id === more.request.id), 'past 100 rows a DECIDED one is dropped, every open one kept', JSON.stringify({ len: list.length, open: list.filter((r) => r.status === 'open').length }));
 }
 { // CONTROL: an engine without the removed-by-user check lets the agent write its row back
-  const src = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
+  const src = engineSource(REPO);
   const cut = src.replace("if (blk && d !== 'wake') return { ok: false, code: 'removed-by-user'", "if (false) return { ok: false, code: 'removed-by-user'");
   const E3 = MUT.load('src/server/channels-engine.js', cut, 'no-removed-mark');
   const r = await removalLeg(E3, 'e7c');

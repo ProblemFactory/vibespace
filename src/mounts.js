@@ -37,7 +37,11 @@ const { spawn, execFile, execFileSync } = require('child_process');
 // is created on ENOENT ONLY — the inline `_key()` used to mint a fresh key on
 // ANY read failure and silently orphan every stored ciphertext.
 const { secretBox, describeJsonError } = require('./secret-box');
-const { parseDriveClients } = require('./preset-layers.js');                 // lane cluster-presets: ONE parser for the file and the env
+const { parseDriveClients } = require('./preset-layers.js');
+const PROVIDERS = require('./mount-providers/index.js');   // lane dc-mount-providers: a storage provider = its row file + one list line
+/** A record's storage-provider ROW (src/mount-providers/): every per-provider fact and branch is asked of it. A module
+ *  function, not a method — suites call the manager's predicates on a bare `this`. */
+const rowOf = (m) => PROVIDERS.rowOf(m && m.type);                 // lane cluster-presets: ONE parser for the file and the env
 const clusterPresets = require('./server/cluster-presets.js');              // the presets DIRECTORY's reader (the file rung, live)
 
 const SHARE_PREFIX = 'vibespace-share:v1:';
@@ -122,14 +126,14 @@ class MountManager {
     // always want to be mounted (the user can't un-provision it — only
     // unmount transiently). This also covers the one-shot where a prior boot
     // (e.g. running the pre-cephfs code, or an import race) left it unmounted.
-    const cephMs = this._state.mounts.find(m => m.origin === 'my-storage' && m.type === 'cephfs');
+    const cephMs = this._state.mounts.find(m => m.origin === 'my-storage' && rowOf(m).replacesMyStorage);
     if (cephMs && cephMs.desired !== 'mounted') { cephMs.desired = 'mounted'; this._save(); }
     if (this._state._cephImportedSig === sig) return;
     const hadMyStorage = this._state.mounts.some(m => m.origin === 'my-storage');
     // A prior S3 my-storage is REPLACED by cephfs (user directive) — unmount
     // + drop it so the flash mount takes the "My storage" slot.
-    if (!hadMyStorage || !this._state.mounts.some(m => m.origin === 'my-storage' && m.type === 'cephfs')) {
-      for (const old of this._state.mounts.filter(m => m.origin === 'my-storage' && m.type !== 'cephfs')) {
+    if (!hadMyStorage || !this._state.mounts.some(m => m.origin === 'my-storage' && rowOf(m).replacesMyStorage)) {
+      for (const old of this._state.mounts.filter(m => m.origin === 'my-storage' && !rowOf(m).replacesMyStorage)) {
         try { this.unmount(old.id); } catch {}
         this._state.mounts = this._state.mounts.filter(x => x.id !== old.id);
       }
@@ -347,7 +351,7 @@ class MountManager {
       // copy older releases committed — reinstall it when some mount actually
       // needs rclone and the PATH has none (a user's own PATH rclone is
       // respected; we never shadow it).
-      const needsRclone = this._state.mounts.some((m) => m.type !== 'gmail' && m.type !== 'cephfs');
+      const needsRclone = this._state.mounts.some((m) => rowOf(m).rclone !== false);
       if (needsRclone && !this.rcloneAvailable()) {
         console.log(`[mounts] data/bin/rclone missing and no PATH rclone — installing ${MountManager.RCLONE_PIN}`);
         this.installRclone().then(
@@ -395,63 +399,14 @@ class MountManager {
   // rcloneType:'drive'` record (rclone.conf import / custom-backend) is the
   // same thing wearing raw params. We normalize every such record to the
   // native `drive` type so users + code see a single concept.
-  _normalizeCloudRecord(m) {
-    if (m.type !== 'rclone' || !MountManager.CLOUD_BACKENDS[m.rcloneType]) return false;
-    m.type = 'cloud';
-    m.backend = m.rcloneType;
-    const pe = m.paramsEnc || {};
-    if (pe.token && !m.tokenEnc) m.tokenEnc = pe.token; // both are enc-at-rest — move, don't re-encrypt
-    if (!m.clientId) { try { m.clientId = pe.client_id ? this._dec(pe.client_id) : null; } catch { m.clientId = null; } }
-    if (pe.client_secret && !m.clientSecretEnc) m.clientSecretEnc = pe.client_secret;
-    m.remotePath = m.remotePath || '';
-    const DK = new Set(['token', 'client_id', 'client_secret']);
-    const rest = Object.fromEntries(Object.entries(pe).filter(([k]) => !DK.has(k)));
-    m.extraParamsEnc = { ...rest, ...(m.extraParamsEnc || {}) };
-    delete m.paramsEnc; delete m.rcloneType;
+  // the generic rclone row's record of a backend another row ADOPTS → that row's record (its adoptRecord moves the params)
+  _adoptRawRclone(m) {
+    const row = rowOf(m).rawRclone && this._adopterOf(m.rcloneType);
+    if (!row) return false;
+    row.adoptRecord(m, this);
     return true;
   }
-
-  _normalizeOnedriveRecord(m) {
-    if (m.type !== 'rclone' || m.rcloneType !== 'onedrive') return false;
-    const pr = {};
-    for (const [k, v] of Object.entries(m.paramsEnc || {})) { try { pr[k] = this._dec(v); } catch {} }
-    m.type = 'onedrive';
-    if (pr.token && !m.tokenEnc) m.tokenEnc = this._enc(pr.token);
-    if (pr.client_id && !m.clientId) m.clientId = pr.client_id;
-    if (pr.client_secret && !m.clientSecretEnc) m.clientSecretEnc = this._enc(pr.client_secret);
-    if (pr.drive_id && !m.driveId) m.driveId = pr.drive_id;
-    m.driveType = m.driveType || pr.drive_type || 'personal';
-    if (pr.region && !m.region) m.region = pr.region;
-    m.remotePath = m.remotePath || '';
-    const DK = new Set(['token', 'client_id', 'client_secret', 'drive_id', 'drive_type', 'region']);
-    const extra = {};
-    for (const [k, v] of Object.entries(m.paramsEnc || {})) if (!DK.has(k)) extra[k] = v;
-    m.extraParamsEnc = { ...(m.extraParamsEnc || {}), ...extra };
-    delete m.rcloneType; delete m.paramsEnc;
-    return true;
-  }
-
-  _normalizeDriveRecord(m) {
-    if (m.type !== 'rclone' || m.rcloneType !== 'drive') return false;
-    const pr = {};
-    for (const [k, v] of Object.entries(m.paramsEnc || {})) { try { pr[k] = this._dec(v); } catch {} }
-    m.type = 'drive';
-    if (pr.client_id && !m.clientId) m.clientId = pr.client_id;
-    if (pr.client_secret && !m.clientSecretEnc) m.clientSecretEnc = this._enc(pr.client_secret);
-    if (pr.token && !m.tokenEnc) m.tokenEnc = this._enc(pr.token);
-    m.driveMode = m.driveMode || (pr.team_drive ? 'shared-drive' : pr.shared_with_me === 'true' ? 'shared-with-me' : 'mydrive');
-    if (pr.team_drive && !m.teamDriveId) m.teamDriveId = pr.team_drive;
-    if (pr.root_folder_id && !m.rootFolderId) m.rootFolderId = pr.root_folder_id;
-    if (!m.parentId) m.driveFolder = m.driveFolder || m.remotePath || '';
-    else m.driveFolder = m.driveFolder || m.remotePath || ''; // child too
-    // preserve any NON-drive params (rare custom tuning) as extra options
-    const DRIVE_KEYS = new Set(['client_id', 'client_secret', 'token', 'scope', 'team_drive', 'shared_with_me', 'root_folder_id']);
-    const extra = {};
-    for (const [k, v] of Object.entries(m.paramsEnc || {})) if (!DRIVE_KEYS.has(k)) extra[k] = v;
-    m.extraParamsEnc = { ...(m.extraParamsEnc || {}), ...extra };
-    delete m.rcloneType; delete m.paramsEnc; delete m.remotePath;
-    return true;
-  }
+  _adopterOf(rcloneType) { return PROVIDERS.rows.find((r) => r.adopts && r.adopts(rcloneType, MountManager)) || null; }
 
   _maybeMigrateDrive() {
     // v2 guard (2.137.1): the generic-cloud wave came AFTER _cloudUnified — a
@@ -460,7 +415,7 @@ class MountManager {
     if (this._state._cloudUnified2) return;
     let changed = false;
     for (const m of this._state.mounts) {
-      if (this._normalizeDriveRecord(m) || this._normalizeOnedriveRecord(m) || this._normalizeCloudRecord(m)) changed = true;
+      if (this._adoptRawRclone(m)) changed = true;
     }
     this._state._cloudUnified = true;
     this._state._cloudUnified2 = true;
@@ -545,12 +500,13 @@ class MountManager {
   }
 
   isMounted(m, live = this._liveMounts()) {
-    // gmail "mounts" are sync workers, not filesystems
-    if (m.type === 'gmail') return !!this.gmail.status(m.id);
+    // a row with its own liveness (a sync worker is not a filesystem) answers itself
+    const prow = rowOf(m);
+    if (prow.isMounted) return prow.isMounted(m, this);
     // /proc/mounts escapes spaces as \040
     const p = this.pathOf(m).replace(/ /g, '\\040');
-    // cephfs = native KERNEL mount (fstype 'ceph'), not fuse.rclone
-    const fstypeRe = (m.type === 'cephfs') ? /^ceph$/ : /fuse\.rclone/;
+    // the row's fstype (a native KERNEL mount says its own), else fuse.rclone
+    const fstypeRe = prow.fstype || /fuse\.rclone/;
     return live.split('\n').some(l => {
       const parts = l.split(' ');
       return parts[1] === p && fstypeRe.test(parts[2] || '');
@@ -572,7 +528,7 @@ class MountManager {
     const rp = String(p);
     const live = this._liveMounts();
     for (const m of this._state.mounts) {
-      if (m.type === 'gmail' || this._kindOf(m) === 'credential') continue;
+      if (rowOf(m).filesystem === false || this._kindOf(m) === 'credential') continue;
       let mp; try { mp = this.pathOf(m); } catch { continue; }
       if (rp !== mp && !rp.startsWith(mp + '/')) continue;
       if (!this.isMounted(m, live)) return m;
@@ -606,21 +562,8 @@ class MountManager {
 
   _sourceLabel(m) {
     m = this._connOf(m);
-    switch (m.type || 's3') {
-      case 'drive': {
-        const scope = m.driveMode === 'shared-with-me' ? ' (shared with me)' : m.driveMode === 'shared-drive' ? ' (shared drive)' : '';
-        return 'Google Drive' + scope + (m.driveFolder ? `: ${m.driveFolder}` : '');
-      }
-      case 'webdav': return m.url;
-      case 'vibespace': return m.url;
-      case 'sftp': return `${m.sshUser}@${m.sshHost}:${m.sshPath || '~'}`;
-      case 'rclone': return `${m.rcloneType}:${m.remotePath || ''}`;
-      case 'cephfs': return `CephFS ${m.cephPath || '/'} @ ${(m.cephMonHosts || '').split(',')[0] || '?'}`;
-      case 'gmail': return 'Gmail' + (m.email ? `: ${m.email}` : '') + (m.query ? ` (${m.query})` : '');
-      case 'onedrive': return 'OneDrive' + (m.driveType && m.driveType !== 'personal' ? ` (${m.driveType})` : '') + (m.remotePath ? `: ${m.remotePath}` : '');
-      case 'cloud': return (MountManager.CLOUD_BACKENDS[m.backend]?.label || m.backend || 'Cloud') + (m.remotePath ? `: ${m.remotePath}` : '');
-      default: return `${m.bucket}${m.prefix ? '/' + m.prefix : ''} @ ${m.endpoint}`;
-    }
+    const row = rowOf(m);
+    return (row.label ? row : PROVIDERS.defaultRow).label(m, MountManager);
   }
 
   list() {
@@ -633,11 +576,11 @@ class MountManager {
         childCount: m.parentId ? undefined : this._childrenOf(m.id).length,
         endpoint: conn.endpoint, bucket: conn.bucket, prefix: conn.prefix,
         rcloneType: conn.rcloneType, remotePath: conn.remotePath, driveFolder: conn.driveFolder,
-        driveMode: conn.driveMode || (conn.type === 'drive' ? 'mydrive' : undefined), teamDriveId: conn.teamDriveId, clientPreset: conn.clientPreset,
-        ...(m.type === 'gmail' ? (() => { const st = this.gmail.status(m.id); return { email: m.email || st?.email, syncCount: m.syncCount, labelIds: m.labelIds, query: m.query, gmailState: st?.state || null, gmailCount: st?.count ?? null, gmailError: st?.error || null, lastSyncAt: st?.lastSyncAt || null, gmailProgress: st?.progress || null }; })() : {}),
+        driveMode: conn.driveMode || rowOf(conn).driveModeDefault, teamDriveId: conn.teamDriveId, clientPreset: conn.clientPreset,
+        ...(rowOf(m).listFields?.(m, this) || {}),   // a row's own list cells (Gmail's sync state)
         // secret VALUES never leave the server; keys let the edit dialog offer
         // per-parameter replacement (blank = keep) for custom rclone records
-        paramKeys: (conn.type === 'rclone' && !m.parentId) ? Object.keys(conn.paramsEnc || {}) : undefined,
+        paramKeys: (rowOf(conn).rawRclone && !m.parentId) ? Object.keys(conn.paramsEnc || {}) : undefined,
         url: conn.url, user: conn.user, vendor: conn.vendor,
         sshHost: conn.sshHost, sshUser: conn.sshUser, sshPort: conn.sshPort, sshPath: conn.sshPath, keyPath: conn.keyPath,
         clientId: conn.clientId,
@@ -688,7 +631,7 @@ class MountManager {
   // A child mount never holds a client of its own (it resolves its parent's
   // at use time), so only top-level records are listed; a preset-backed
   // record holds no client to lend.
-  static OAUTH_CLIENT_VENDOR = Object.freeze({ drive: 'google', gmail: 'google', onedrive: 'microsoft' });
+  static OAUTH_CLIENT_VENDOR = Object.freeze(Object.fromEntries(PROVIDERS.rows.filter((r) => r.oauth).map((r) => [r.id, r.oauth])));   // each row's `oauth` cell
   /** B-2198 (D3): a lent client's RAW-API ROW per vendor — the channel registry's one raw-API schema (`validateApi`), plus
    *  `refresh` (the token endpoint the raw API's orchestrator refreshes a mount's token at, in memory). Declared HERE, by
    *  the owner of the storage OAuth clients (the vendor map above, `oauthClientOf` / `oauthTokenOf`): the orchestrator
@@ -780,55 +723,7 @@ class MountManager {
       };
     }
     const out = { ...base, type: m.type || 's3' };
-    switch (m.type || 's3') {
-      case 's3':
-        Object.assign(out, { endpoint: m.endpoint, bucket: m.bucket, prefix: m.prefix, accessKey: m.accessKey, secretKey: dec(m.secretKeyEnc), sessionToken: dec(m.sessionTokenEnc) });
-        break;
-      case 'drive':
-        Object.assign(out, {
-          driveFolder: m.driveFolder, token: dec(m.tokenEnc), clientId: m.clientId, clientSecret: dec(m.clientSecretEnc),
-          driveMode: m.driveMode, teamDriveId: m.teamDriveId, rootFolderId: m.rootFolderId, clientPreset: m.clientPreset,
-        });
-        break;
-      case 'gmail':
-        Object.assign(out, {
-          token: dec(m.tokenEnc), clientId: m.clientId, clientSecret: dec(m.clientSecretEnc), clientPreset: m.clientPreset,
-          syncCount: m.syncCount, labelIds: m.labelIds, query: m.query, groupBy: m.groupBy, email: m.email,
-        });
-        break;
-      case 'onedrive':
-        Object.assign(out, {
-          token: dec(m.tokenEnc), remotePath: m.remotePath, driveId: m.driveId, driveType: m.driveType || 'personal',
-          region: m.region, clientId: m.clientId, clientSecret: dec(m.clientSecretEnc),
-        });
-        break;
-      case 'cloud':
-        Object.assign(out, {
-          backend: m.backend, token: dec(m.tokenEnc), remotePath: m.remotePath,
-          clientId: m.clientId, clientSecret: dec(m.clientSecretEnc),
-        });
-        break;
-      case 'webdav': case 'vibespace':
-        Object.assign(out, { url: m.url, vendor: m.vendor, user: m.user, pass: dec(m.passEnc), bearerToken: dec(m.bearerTokenEnc) });
-        break;
-      case 'sftp':
-        Object.assign(out, { sshHost: m.sshHost, sshUser: m.sshUser, sshPort: m.sshPort, sshPath: m.sshPath, keyPath: m.keyPath, pass: dec(m.passEnc) });
-        break;
-      case 'rclone': {
-        const pr = Object.fromEntries(Object.entries(m.paramsEnc || {}).map(([k, v]) => [k, this._dec(v)]));
-        Object.assign(out, { rcloneType: m.rcloneType, remotePath: m.remotePath, params: pr });
-        if (m.rcloneType === 'drive') {
-          out.clientPreset = m.clientPreset;
-          out.driveMode = m.driveMode || (pr.team_drive ? 'shared-drive' : pr.shared_with_me === 'true' ? 'shared-with-me' : 'mydrive');
-          out.teamDriveId = m.teamDriveId || pr.team_drive || '';
-          out.rootFolderId = m.rootFolderId || pr.root_folder_id || '';
-        }
-        break;
-      }
-      case 'cephfs':
-        Object.assign(out, { cephMonHosts: m.cephMonHosts, cephFsName: m.cephFsName, cephPath: m.cephPath, cephUser: m.cephUser }); // secret withheld
-        break;
-    }
+    rowOf(m).config?.(m, out, dec, this);
     if (m.extraParamsEnc) out.extraParams = Object.fromEntries(Object.entries(m.extraParamsEnc).map(([k, v]) => [k, this._dec(v)]));
     return out;
   }
@@ -836,40 +731,9 @@ class MountManager {
   // ── CRUD ──
 
   add(cfg) {
-    // ONE Google Drive: a custom-added rclone-drive normalizes to native drive
-    if ((cfg.type === 'rclone') && (cfg.rcloneType === 'onedrive')) {
-      const pr = cfg.params || {};
-      cfg = { ...cfg, type: 'onedrive',
-        token: cfg.token || pr.token,
-        remotePath: cfg.remotePath || '',
-        driveId: cfg.driveId || pr.drive_id || null,
-        driveType: cfg.driveType || pr.drive_type || 'personal',
-        region: cfg.region || pr.region || null,
-        clientId: cfg.clientId || pr.client_id || null,
-        clientSecret: cfg.clientSecret || pr.client_secret || undefined,
-      };
-    }
-    if ((cfg.type === 'rclone') && MountManager.CLOUD_BACKENDS[cfg.rcloneType]) {
-      const pr = cfg.params || {};
-      cfg = { ...cfg, type: 'cloud', backend: cfg.rcloneType,
-        token: cfg.token || pr.token,
-        remotePath: cfg.remotePath || '',
-        clientId: cfg.clientId || pr.client_id || null,
-        clientSecret: cfg.clientSecret || pr.client_secret || undefined,
-      };
-    }
-    if ((cfg.type === 'rclone') && (cfg.rcloneType === 'drive')) {
-      const pr = cfg.params || {};
-      cfg = { ...cfg, type: 'drive',
-        clientId: cfg.clientId || pr.client_id || null,
-        clientSecret: cfg.clientSecret || pr.client_secret || undefined,
-        token: cfg.token || pr.token,
-        driveFolder: cfg.driveFolder || cfg.remotePath || '',
-        driveMode: cfg.driveMode || (pr.team_drive ? 'shared-drive' : pr.shared_with_me === 'true' ? 'shared-with-me' : 'mydrive'),
-        teamDriveId: cfg.teamDriveId || pr.team_drive,
-        rootFolderId: cfg.rootFolderId || pr.root_folder_id,
-      };
-    }
+    // a raw rclone cfg of a backend another row ADOPTS (ONE Google Drive, OneDrive, the cloud list) is added as that row
+    const adopter = rowOf(cfg).rawRclone && this._adopterOf(cfg.rcloneType);
+    if (adopter) cfg = adopter.fromRclone(cfg);
     const type = cfg.type || 's3';
     if (!cfg.name) throw new Error('name required');
     if (this._state.mounts.some(m => m.name === cfg.name)) throw new Error('A mount with that name exists');
@@ -885,154 +749,9 @@ class MountManager {
       desired: 'unmounted',
       createdAt: Date.now(),
     };
-    switch (type) {
-      case 's3': {
-        for (const k of ['endpoint', 'bucket', 'accessKey', 'secretKey']) if (!cfg[k]) throw new Error(`${k} required`);
-        Object.assign(m, {
-          endpoint: String(cfg.endpoint), bucket: String(cfg.bucket),
-          prefix: String(cfg.prefix || '').replace(/^\/+|\/+$/g, ''),
-          accessKey: String(cfg.accessKey), secretKeyEnc: this._enc(cfg.secretKey),
-          sessionTokenEnc: cfg.sessionToken ? this._enc(cfg.sessionToken) : null,
-        });
-        break;
-      }
-      case 'drive': {
-        // token = the JSON blob printed by `rclone authorize "drive"` (run it
-        // on any machine with a browser and paste the result here)
-        if (!cfg.token) throw new Error('token required (run: rclone authorize "drive")');
-        let tok = String(cfg.token).trim();
-        const jsonMatch = tok.match(/\{[\s\S]*\}/); // tolerate the surrounding "Paste the following…" noise
-        if (jsonMatch) tok = jsonMatch[0];
-        try { JSON.parse(tok); } catch { throw new Error('token must be the JSON printed by rclone authorize'); }
-        Object.assign(m, {
-          tokenEnc: this._enc(tok),
-          driveFolder: String(cfg.driveFolder || '').replace(/^\/+|\/+$/g, ''),
-          driveMode: MountManager._driveMode(cfg.driveMode),
-          teamDriveId: cfg.teamDriveId ? String(cfg.teamDriveId).trim() : null,
-          rootFolderId: cfg.rootFolderId ? String(cfg.rootFolderId).trim() : null,
-          clientId: cfg.clientId || null,
-          clientPreset: cfg.clientPreset ? String(cfg.clientPreset) : null,
-          clientSecretEnc: cfg.clientSecret ? this._enc(cfg.clientSecret) : null,
-        });
-        break;
-      }
-      case 'gmail': {
-        if (!cfg.token) throw new Error('token required — use "Connect Gmail" (guided sign-in)');
-        let tok = String(cfg.token).trim();
-        try { JSON.parse(tok); } catch { throw new Error('gmail token must be the JSON from the guided flow'); }
-        Object.assign(m, {
-          tokenEnc: this._enc(tok),
-          clientPreset: cfg.clientPreset ? String(cfg.clientPreset) : null,
-          clientId: cfg.clientId || null,
-          clientSecretEnc: cfg.clientSecret ? this._enc(cfg.clientSecret) : null,
-          // syncCount 0 = EVERYTHING (engine hard-caps at 200k); blank = 200
-          syncCount: String(cfg.syncCount ?? '').trim() === '' ? 200 : Math.max(0, Number(cfg.syncCount) || 0),
-          groupBy: ['none', 'month', 'day', 'label-month', 'label-day'].includes(cfg.groupBy) ? cfg.groupBy : 'label-month',
-          labelIds: String(cfg.labelIds || ''),
-          query: String(cfg.query || ''),
-          email: cfg.email ? String(cfg.email) : null,
-          mode: 'ro', // read-only archive by design
-        });
-        break;
-      }
-      case 'onedrive': {
-        if (!cfg.token) throw new Error('token required — use "Connect OneDrive" (guided sign-in)');
-        let tok = String(cfg.token).trim();
-        const jm = tok.match(/\{[\s\S]*\}/); if (jm) tok = jm[0];
-        try { JSON.parse(tok); } catch { throw new Error('token must be the JSON printed by rclone authorize'); }
-        Object.assign(m, {
-          tokenEnc: this._enc(tok),
-          remotePath: String(cfg.remotePath || cfg.driveFolder || '').replace(/^\/+|\/+$/g, ''),
-          driveId: cfg.driveId ? String(cfg.driveId).trim() : null,
-          driveType: cfg.driveType || 'personal',
-          region: cfg.region || null,
-          clientId: cfg.clientId || null,
-          clientSecretEnc: cfg.clientSecret ? this._enc(cfg.clientSecret) : null,
-        });
-        break;
-      }
-      case 'cloud': {
-        const cb = MountManager.CLOUD_BACKENDS[cfg.backend];
-        if (!cb) throw new Error('unknown cloud provider: ' + cfg.backend);
-        if (!cfg.token) throw new Error(`token required — use "Connect ${cb.label}" (guided sign-in)`);
-        let tok = String(cfg.token).trim();
-        const jm = tok.match(/\{[\s\S]*\}/); if (jm) tok = jm[0];
-        try { JSON.parse(tok); } catch { throw new Error('token must be the JSON printed by rclone authorize'); }
-        Object.assign(m, {
-          backend: cfg.backend,
-          tokenEnc: this._enc(tok),
-          remotePath: String(cfg.remotePath || '').replace(/^\/+|\/+$/g, ''),
-          clientId: cfg.clientId || null,
-          clientSecretEnc: cfg.clientSecret ? this._enc(cfg.clientSecret) : null,
-        });
-        break;
-      }
-      case 'webdav': {
-        for (const k of ['url']) if (!cfg[k]) throw new Error(`${k} required`);
-        if (!cfg.bearerToken && !cfg.user) throw new Error('user/pass or bearerToken required');
-        Object.assign(m, {
-          url: String(cfg.url), vendor: cfg.vendor === 'nextcloud' ? 'nextcloud' : 'other',
-          user: cfg.user ? String(cfg.user) : null,
-          passEnc: cfg.pass ? this._enc(cfg.pass) : null,
-          bearerTokenEnc: cfg.bearerToken ? this._enc(cfg.bearerToken) : null,
-        });
-        break;
-      }
-      case 'vibespace': {
-        // another VibeSpace instance's /dav bridge — webdav + scoped bearer token
-        for (const k of ['url', 'bearerToken']) if (!cfg[k]) throw new Error(`${k} required`);
-        // Self-mount guard: a token WE minted means the link points back at
-        // THIS instance — fuse→HTTP→self is a threadpool deadlock loop (real
-        // incident: a self-imported test share froze the instance on open).
-        if (this.selfTokenCheck?.(String(cfg.bearerToken))) {
-          throw new Error('This share link was minted by THIS VibeSpace — mounting your own share back onto yourself deadlocks the server. Open the shared folder directly instead.');
-        }
-        Object.assign(m, { url: String(cfg.url).replace(/\/+$/, ''), bearerTokenEnc: this._enc(cfg.bearerToken) });
-        break;
-      }
-      case 'sftp': {
-        for (const k of ['sshHost', 'sshUser']) if (!cfg[k]) throw new Error(`${k} required`);
-        if (!cfg.keyPath && !cfg.pass) throw new Error('keyPath or pass required');
-        if (cfg.keyPath && !path.isAbsolute(cfg.keyPath)) throw new Error('keyPath must be absolute');
-        Object.assign(m, {
-          sshHost: String(cfg.sshHost), sshUser: String(cfg.sshUser),
-          sshPort: parseInt(cfg.sshPort) || 22,
-          sshPath: String(cfg.sshPath || ''),
-          keyPath: cfg.keyPath || null,
-          passEnc: cfg.pass ? this._enc(cfg.pass) : null,
-        });
-        break;
-      }
-      case 'rclone': {
-        // Any rclone backend the user knows how to configure: backend name +
-        // freeform params → RCLONE_CONFIG_VS_<KEY>. All param values encrypted
-        // (safe default — many are secrets); non-secret ones cost nothing.
-        if (!cfg.rcloneType) throw new Error('rclone backend type required (e.g. dropbox, b2, azureblob)');
-        const params = cfg.params && typeof cfg.params === 'object' ? cfg.params : {};
-        if (!Object.keys(params).length && !cfg.remotePath) throw new Error('at least one parameter required');
-        m.rcloneType = String(cfg.rcloneType).trim();
-        m.paramsEnc = {};
-        for (const [k, v] of Object.entries(params)) m.paramsEnc[k] = this._enc(String(v));
-        m.remotePath = String(cfg.remotePath || '').replace(/^\/+/, '');
-        break;
-      }
-      case 'cephfs': {
-        // Native KERNEL CephFS mount (all-flash shared storage; deployment-
-        // provisioned). `mount -t ceph <mons>:<path> <mp> -o name=…,secret=…`
-        // — needs root, so the app sudo's it (the container has passwordless
-        // sudo). NOT rclone; mount()/unmount()/isMounted() have cephfs branches.
-        for (const k of ['cephMonHosts', 'cephSecret']) if (!cfg[k]) throw new Error(`${k} required`);
-        Object.assign(m, {
-          cephMonHosts: String(cfg.cephMonHosts),          // "10.0.0.1,10.0.0.2:6789"
-          cephFsName: String(cfg.cephFsName || 'cephfs'),
-          cephPath: '/' + String(cfg.cephPath || '/').replace(/^\/+/, ''),
-          cephUser: String(cfg.cephUser || 'admin'),
-          cephSecretEnc: this._enc(cfg.cephSecret),
-        });
-        break;
-      }
-      default: throw new Error('unknown mount type: ' + type);
-    }
+    const row = PROVIDERS.byId[type];
+    if (!row || !row.create) throw new Error('unknown mount type: ' + type);
+    row.create(m, cfg, this);
     // Advanced: extra rclone params merged into ANY type's config (custom API
     // keys, tuning flags, etc.) — encrypted like everything else.
     if (cfg.extraParams && typeof cfg.extraParams === 'object' && Object.keys(cfg.extraParams).length) {
@@ -1068,42 +787,9 @@ class MountManager {
       desired: 'unmounted',
       createdAt: Date.now(),
     };
-    switch (p.type || 's3') {
-      case 's3':
-        if (!cfg.bucket) throw new Error('bucket required');
-        m.bucket = String(cfg.bucket);
-        m.prefix = String(cfg.prefix || '').replace(/^\/+|\/+$/g, '');
-        break;
-      case 'rclone':
-        if (p.rcloneType === 'drive') {
-          // rclone-drive submount: remotePath = folder inside the chosen scope
-          m.remotePath = String(cfg.remotePath || '').replace(/^\/+/, '');
-          if (cfg.driveMode !== undefined) m.driveMode = MountManager._driveMode(cfg.driveMode) || 'mydrive';
-          if (cfg.teamDriveId !== undefined) m.teamDriveId = cfg.teamDriveId ? String(cfg.teamDriveId).trim() : null;
-          if (cfg.rootFolderId !== undefined) m.rootFolderId = cfg.rootFolderId ? String(cfg.rootFolderId).trim() : null;
-        } else {
-          if (!cfg.remotePath) throw new Error('remote path required (e.g. bucket-name or bucket/prefix)');
-          m.remotePath = String(cfg.remotePath).replace(/^\/+/, '');
-        }
-        break;
-      case 'onedrive':
-        m.remotePath = String(cfg.remotePath || cfg.driveFolder || '').replace(/^\/+|\/+$/g, '');
-        break;
-      case 'cloud':
-        m.remotePath = String(cfg.remotePath || '').replace(/^\/+|\/+$/g, '');
-        break;
-      case 'drive':
-        m.driveFolder = String(cfg.driveFolder || '').replace(/^\/+|\/+$/g, '');
-        if (cfg.driveMode !== undefined) m.driveMode = MountManager._driveMode(cfg.driveMode);
-        if (cfg.teamDriveId !== undefined) m.teamDriveId = cfg.teamDriveId ? String(cfg.teamDriveId).trim() : null;
-        if (cfg.rootFolderId !== undefined) m.rootFolderId = cfg.rootFolderId ? String(cfg.rootFolderId).trim() : null;
-        break;
-      case 'sftp':
-        m.sshPath = String(cfg.sshPath || '');
-        break;
-      default:
-        throw new Error(`credentials of type "${p.type}" don't support mount points yet`);
-    }
+    const row = rowOf(p);
+    if (!row.child) throw new Error(`credentials of type "${p.type}" don't support mount points yet`);
+    row.child(m, cfg, p, this);
     this._state.mounts.push(m);
     this._save();
     this._notify();
@@ -1216,114 +902,12 @@ class MountManager {
     // A mount point under a credential owns ONLY its path — connection fields
     // live on (and are edited via) the parent credential.
     const parentType = m.parentId ? (this._get(m.parentId).type || 's3') : null;
-    switch (envLocked ? '__locked__' : (parentType ? '__child_' + parentType : (m.type || 's3'))) {
-      case '__child_s3':
-        setIf('bucket');
-        if (patch.prefix !== undefined) m.prefix = String(patch.prefix || '').replace(/^\/+|\/+$/g, '');
-        break;
-      case '__child_rclone':
-        if (patch.remotePath !== undefined && patch.remotePath !== '') m.remotePath = String(patch.remotePath).replace(/^\/+/, '');
-        break;
-      case '__child_drive':
-        if (patch.driveFolder !== undefined) m.driveFolder = String(patch.driveFolder || '').replace(/^\/+|\/+$/g, '');
-        if (patch.driveMode !== undefined) m.driveMode = MountManager._driveMode(patch.driveMode);
-        if (patch.teamDriveId !== undefined) m.teamDriveId = patch.teamDriveId ? String(patch.teamDriveId).trim() : null;
-        if (patch.rootFolderId !== undefined) m.rootFolderId = patch.rootFolderId ? String(patch.rootFolderId).trim() : null;
-        break;
-      case '__child_sftp':
-        if (patch.sshPath !== undefined) m.sshPath = String(patch.sshPath || '');
-        break;
-      case 's3':
-        setIf('endpoint'); setIf('bucket');
-        if (patch.prefix !== undefined) m.prefix = String(patch.prefix || '').replace(/^\/+|\/+$/g, '');
-        setIf('accessKey');
-        if (patch.secretKey) m.secretKeyEnc = this._enc(String(patch.secretKey));
-        if (patch.sessionToken) m.sessionTokenEnc = this._enc(String(patch.sessionToken));
-        break;
-      case 'rclone':
-        setIf('rcloneType', (v) => String(v).trim());
-        if (patch.remotePath !== undefined) m.remotePath = String(patch.remotePath || '').replace(/^\/+/, '');
-        if ((m.rcloneType === 'drive') || patch.rcloneType === 'drive') {
-          if (patch.clientPreset !== undefined) {
-            m.clientPreset = patch.clientPreset ? String(patch.clientPreset) : null;
-            if (m.clientPreset) { delete m.paramsEnc.client_id; delete m.paramsEnc.client_secret; } // preset wins
-          }
-          if (patch.driveMode !== undefined) m.driveMode = MountManager._driveMode(patch.driveMode) || 'mydrive';
-          if (patch.teamDriveId !== undefined) m.teamDriveId = patch.teamDriveId ? String(patch.teamDriveId).trim() : null;
-          if (patch.rootFolderId !== undefined) m.rootFolderId = patch.rootFolderId ? String(patch.rootFolderId).trim() : null;
-          // retire the legacy scope params so the independent fields are authoritative
-          for (const k of ['shared_with_me', 'team_drive', 'root_folder_id']) delete m.paramsEnc[k];
-        }
-        if (patch.params && typeof patch.params === 'object') {
-          for (const [k, v] of Object.entries(patch.params)) {
-            if (v === '' || v == null) delete m.paramsEnc[k];
-            else m.paramsEnc[k] = this._enc(String(v));
-          }
-        }
-        break;
-      case 'gmail': {
-        // Scope changes (filter/count) must FORCE A RESEED: the persisted
-        // history cursor keeps the sync incremental, so newly-in-scope OLD
-        // mail (e.g. clearing the INBOX filter to sync archived) would never
-        // arrive. Dropping the state file is safe — the directory is the
-        // dedup index, a reseed re-lists and skips every existing file.
-        const scopeChanged = ['syncCount', 'labelIds', 'query'].some((k) => patch[k] !== undefined);
-        if (patch.syncCount !== undefined) m.syncCount = String(patch.syncCount).trim() === '' ? 200 : Math.max(0, Number(patch.syncCount) || 0);
-        if (patch.groupBy !== undefined) m.groupBy = ['none', 'month', 'day', 'label-month', 'label-day'].includes(patch.groupBy) ? patch.groupBy : 'none';
-        if (patch.labelIds !== undefined) m.labelIds = String(patch.labelIds || '');
-        if (patch.query !== undefined) m.query = String(patch.query || '');
-        if (patch.clientPreset !== undefined) m.clientPreset = patch.clientPreset ? String(patch.clientPreset) : null;
-        if (patch.token) { JSON.parse(String(patch.token).trim()); m.tokenEnc = this._enc(String(patch.token).trim()); }
-        if (scopeChanged) { try { fs.rmSync(path.join(this.pathOf(m), '.vibespace-gmail-state.json'), { force: true }); } catch { } }
-        break;
-      }
-      case 'onedrive':
-        if (patch.remotePath !== undefined) m.remotePath = String(patch.remotePath || '').replace(/^\/+|\/+$/g, '');
-        if (patch.driveId !== undefined) m.driveId = patch.driveId ? String(patch.driveId).trim() : null;
-        if (patch.driveType !== undefined) m.driveType = patch.driveType || 'personal';
-        if (patch.region !== undefined) m.region = patch.region || null;
-        setIf('clientId');
-        if (patch.clientSecret) m.clientSecretEnc = this._enc(String(patch.clientSecret));
-        if (patch.token) { let t = String(patch.token).trim(); const jm = t.match(/\{[\s\S]*\}/); if (jm) t = jm[0]; JSON.parse(t); m.tokenEnc = this._enc(t); }
-        break;
-      case 'cloud':
-        if (patch.remotePath !== undefined) m.remotePath = String(patch.remotePath || '').replace(/^\/+|\/+$/g, '');
-        setIf('clientId');
-        if (patch.clientSecret) m.clientSecretEnc = this._enc(String(patch.clientSecret));
-        if (patch.token) { let t = String(patch.token).trim(); const jm = t.match(/\{[\s\S]*\}/); if (jm) t = jm[0]; JSON.parse(t); m.tokenEnc = this._enc(t); }
-        break;
-      case 'drive':
-        if (patch.driveFolder !== undefined) m.driveFolder = String(patch.driveFolder || '').replace(/^\/+|\/+$/g, '');
-        if (patch.driveMode !== undefined) m.driveMode = MountManager._driveMode(patch.driveMode);
-        if (patch.teamDriveId !== undefined) m.teamDriveId = patch.teamDriveId ? String(patch.teamDriveId).trim() : null;
-        if (patch.rootFolderId !== undefined) m.rootFolderId = patch.rootFolderId ? String(patch.rootFolderId).trim() : null;
-        if (patch.clientPreset !== undefined) m.clientPreset = patch.clientPreset ? String(patch.clientPreset) : null;
-        setIf('clientId');
-        if (patch.clientSecret) m.clientSecretEnc = this._enc(String(patch.clientSecret));
-        if (patch.token) {
-          let tok = String(patch.token).trim();
-          const jm = tok.match(/\{[\s\S]*\}/); if (jm) tok = jm[0];
-          JSON.parse(tok); // validate
-          m.tokenEnc = this._enc(tok);
-        }
-        break;
-      case 'webdav': case 'vibespace':
-        setIf('url', (v) => String(v).replace(/\/+$/, ''));
-        setIf('vendor', (v) => (v === 'nextcloud' ? 'nextcloud' : 'other'));
-        setIf('user');
-        if (patch.pass) m.passEnc = this._enc(String(patch.pass));
-        if (patch.bearerToken) m.bearerTokenEnc = this._enc(String(patch.bearerToken));
-        break;
-      case 'sftp':
-        setIf('sshHost'); setIf('sshUser');
-        if (patch.sshPort) m.sshPort = parseInt(patch.sshPort) || 22;
-        if (patch.sshPath !== undefined) m.sshPath = String(patch.sshPath || '');
-        if (patch.keyPath) {
-          if (!path.isAbsolute(String(patch.keyPath))) throw new Error('keyPath must be absolute');
-          m.keyPath = String(patch.keyPath);
-        }
-        if (patch.pass) m.passEnc = this._enc(String(patch.pass));
-        break;
+    if (!envLocked) {
+      // the row edits the record: a mount point's PARENT row its path (`updateChild`), a top-level record its own row
+      const row = parentType ? PROVIDERS.rowOf(parentType) : rowOf(m);
+      const said = parentType ? row.updateChild?.(m, patch, setIf, this) : row.update?.(m, patch, setIf, this);
+      // a sync worker's scope change answers 'reseed': its state file goes (the folder is the dedup index)
+      if (said === 'reseed' && row.syncStateFile) { try { fs.rmSync(path.join(this.pathOf(m), row.syncStateFile), { force: true }); } catch { } }
     }
     this._save();
     this._notify();
@@ -1356,7 +940,7 @@ class MountManager {
   static _clientIdentity(type, r) {
     const presets = MountManager.drivePresets();
     const fallback = presets.length === 1 ? presets[0].key : (presets.find((p) => p.key === 'default')?.key || '');
-    const custom = type === 'drive' ? (r.clientId || '') : (r.clientId && r.hasSecret ? r.clientId : '');
+    const custom = PROVIDERS.rowOf(type).presetClient?.idAlone ? (r.clientId || '') : (r.clientId && r.hasSecret ? r.clientId : '');
     return custom ? `custom:${custom}` : `preset:${r.clientPreset || fallback}`;
   }
 
@@ -1366,13 +950,13 @@ class MountManager {
    *  semantics (Drive: `clientPreset` any value, `clientId` only when
    *  non-empty; Gmail: `clientPreset` only). */
   _refuseClientSwitch(m, patch) {
-    const type = m.type || 's3';
-    if (!['drive', 'gmail'].includes(type) || m.parentId || m.origin === 'my-storage' || !m.tokenEnc) return;
+    const type = m.type || 's3', pc = rowOf(m).presetClient;
+    if (!pc || m.parentId || m.origin === 'my-storage' || !m.tokenEnc) return;
     if (patch.token !== undefined && String(patch.token).trim() !== '') return; // the token lands with its client
     const cur = { clientId: m.clientId || '', clientPreset: m.clientPreset || null, hasSecret: !!m.clientSecretEnc };
     const next = { ...cur };
     if (patch.clientPreset !== undefined) next.clientPreset = patch.clientPreset ? String(patch.clientPreset) : null;
-    if (type === 'drive' && patch.clientId !== undefined && patch.clientId !== '') next.clientId = String(patch.clientId);
+    if (pc.idAlone && patch.clientId !== undefined && patch.clientId !== '') next.clientId = String(patch.clientId);
     if (MountManager._clientIdentity(type, cur) === MountManager._clientIdentity(type, next)) return;
     const e = new Error('Switching the OAuth client needs a new sign-in — use Re-authorize (a token only works with the client that minted it; the new client is saved together with the token minted under it)');
     e.code = 'client-change-needs-reauth';
@@ -1400,102 +984,8 @@ class MountManager {
     const P = (k) => `RCLONE_CONFIG_${R}_${k}`;
     const env = { ...process.env };
     let remote;
-    switch (m.type || 's3') {
-      case 'drive': {
-        env[P('TYPE')] = 'drive';
-        env[P('TOKEN')] = this._dec(m.tokenEnc);
-        env[P('SCOPE')] = 'drive';
-        if (m.clientId) { env[P('CLIENT_ID')] = m.clientId; if (m.clientSecretEnc) env[P('CLIENT_SECRET')] = this._dec(m.clientSecretEnc); }
-        else {
-          // Instance-preset client (admin-injected env; record stores only the
-          // preset KEY — see drivePresets). Never persisted app-side.
-          const pc = MountManager._driveClient(m);
-          if (pc) { env[P('CLIENT_ID')] = pc.clientId; env[P('CLIENT_SECRET')] = pc.clientSecret; }
-        }
-        // Cloud-side SCOPE of the mount (2.131.0): shared-with-me / a Shared
-        // Drive are separate namespaces in the Drive API — rclone exposes them
-        // as per-remote params. Each VibeSpace mount runs its OWN rclone
-        // daemon+env, so these are freely per-child (same credential parent,
-        // different scopes).
-        // root_folder_id ALONE is the mount-one-shared-folder pattern; combining
-        // it with shared_with_me breaks path resolution (rclone forum guidance) —
-        // an explicit folder id wins over the scope flag.
-        if (m.rootFolderId) env[P('ROOT_FOLDER_ID')] = m.rootFolderId;
-        else if (m.driveMode === 'shared-with-me') env[P('SHARED_WITH_ME')] = 'true';
-        if (m.driveMode === 'shared-drive' && m.teamDriveId) env[P('TEAM_DRIVE')] = m.teamDriveId;
-        remote = `${R}:${m.driveFolder || ''}`;
-        break;
-      }
-      case 'onedrive': {
-        env[P('TYPE')] = 'onedrive';
-        env[P('TOKEN')] = this._dec(m.tokenEnc);
-        if (m.driveId) env[P('DRIVE_ID')] = m.driveId;
-        if (m.driveType) env[P('DRIVE_TYPE')] = m.driveType;
-        if (m.region) env[P('REGION')] = m.region;
-        if (m.clientId) { env[P('CLIENT_ID')] = m.clientId; if (m.clientSecretEnc) env[P('CLIENT_SECRET')] = this._dec(m.clientSecretEnc); }
-        remote = `${R}:${m.remotePath || ''}`;
-        break;
-      }
-      case 'cloud': {
-        env[P('TYPE')] = m.backend;
-        env[P('TOKEN')] = this._dec(m.tokenEnc);
-        if (m.clientId) { env[P('CLIENT_ID')] = m.clientId; if (m.clientSecretEnc) env[P('CLIENT_SECRET')] = this._dec(m.clientSecretEnc); }
-        remote = `${R}:${m.remotePath || ''}`;
-        break;
-      }
-      case 'webdav':
-      case 'vibespace': {
-        env[P('TYPE')] = 'webdav';
-        env[P('URL')] = m.type === 'vibespace' ? m.url + '/dav' : m.url;
-        env[P('VENDOR')] = m.vendor === 'nextcloud' ? 'nextcloud' : 'other';
-        if (m.user) env[P('USER')] = m.user;
-        if (m.passEnc) env[P('PASS')] = this._obscure(this._dec(m.passEnc));
-        if (m.bearerTokenEnc) env[P('BEARER_TOKEN')] = this._dec(m.bearerTokenEnc);
-        remote = `${R}:`;
-        break;
-      }
-      case 'sftp': {
-        env[P('TYPE')] = 'sftp';
-        env[P('HOST')] = m.sshHost;
-        env[P('USER')] = m.sshUser;
-        env[P('PORT')] = String(m.sshPort || 22);
-        if (m.keyPath) env[P('KEY_FILE')] = m.keyPath;
-        if (m.passEnc) env[P('PASS')] = this._obscure(this._dec(m.passEnc));
-        remote = `${R}:${m.sshPath || ''}`;
-        break;
-      }
-      case 'rclone': {
-        env[P('TYPE')] = m.rcloneType;
-        for (const [k, blob] of Object.entries(m.paramsEnc || {})) env[P(k.toUpperCase())] = this._dec(blob);
-        // rclone-backed Google Drive is a first-class Drive (2.135.3): the same
-        // preset client + cloud-side scope as a native 'drive' record, stored
-        // in INDEPENDENT fields that OVERRIDE the raw rclone params (which stay
-        // as a fallback for records imported before this).
-        if (m.rcloneType === 'drive') {
-          if (m.clientPreset) {
-            const pc = MountManager._driveClient({ clientPreset: m.clientPreset });
-            if (pc) { env[P('CLIENT_ID')] = pc.clientId; env[P('CLIENT_SECRET')] = pc.clientSecret; }
-          }
-          if (m.rootFolderId) env[P('ROOT_FOLDER_ID')] = m.rootFolderId;
-          else if (m.driveMode === 'shared-with-me') { env[P('SHARED_WITH_ME')] = 'true'; delete env[P('TEAM_DRIVE')]; }
-          if (m.driveMode === 'shared-drive' && m.teamDriveId) { env[P('TEAM_DRIVE')] = m.teamDriveId; delete env[P('SHARED_WITH_ME')]; }
-          if (m.driveMode === 'mydrive') { delete env[P('SHARED_WITH_ME')]; delete env[P('TEAM_DRIVE')]; }
-        }
-        remote = `${R}:${m.remotePath || ''}`;
-        break;
-      }
-      default: { // s3
-        env[P('TYPE')] = 's3';
-        env[P('PROVIDER')] = 'Other';
-        env[P('ENDPOINT')] = m.endpoint;
-        env[P('ACCESS_KEY_ID')] = m.accessKey;
-        env[P('SECRET_ACCESS_KEY')] = this._dec(m.secretKeyEnc);
-        env[P('FORCE_PATH_STYLE')] = 'true';
-        env[P('NO_CHECK_BUCKET')] = 'true';
-        if (m.sessionTokenEnc) env[P('SESSION_TOKEN')] = this._dec(m.sessionTokenEnc);
-        remote = `${R}:${m.bucket}${m.prefix ? '/' + m.prefix : ''}`;
-      }
-    }
+    const row = rowOf(m);
+    remote = (row.rclone ? row : PROVIDERS.defaultRow).rclone(m, env, P, R, this);
     // Advanced extra params (custom API keys, tuning) override/extend any type
     for (const [k, blob] of Object.entries(m.extraParamsEnc || {})) env[P(k.toUpperCase())] = this._dec(blob);
     return { env, remote };
@@ -1540,10 +1030,9 @@ class MountManager {
     // STARTING (2.369.213): a connect while the daemon still rebuilds its
     // cache index JOINS it — never a second daemon, never a kill.
     if (this._starting?.has(id)) return 'starting';
-    // Gmail = a sync WORKER writing .eml files, not a filesystem.
-    if (m.type === 'gmail') return this._mountGmail(id);
-    // CephFS = native kernel mount (not rclone) — its own path.
-    if (m.type === 'cephfs') return this._mountCephfs(id);
+    // A row with its OWN mount (Gmail = a sync WORKER writing .eml files; CephFS = a native kernel mount) — not rclone.
+    const prow = rowOf(m);
+    if (prow.mount) return prow.mount(id, this);
     // A daemon ALREADY on this mountpoint with no mount yet (a server restart
     // mid-scan, a Connect after the old 5 s verdict) is ADOPTED and watched
     // like a fresh spawn: killing it restarted its scan from zero (the
@@ -1551,25 +1040,9 @@ class MountManager {
     let pid0 = 0;
     try { pid0 = this._daemonPids(this.pathOf(m))[0] || 0; } catch {}
     if (pid0) { m.desired = 'mounted'; this._save(); return this._watchStart(m, this.pathOf(m), pid0, opts); }
-    // OneDrive backstop: rclone refuses to create the fs without a resolved
-    // drive_id/drive_type — resolve via Graph before spawning (an honest
-    // error instead of rclone's cryptic "upgrading from older versions" one;
-    // on success the ids persist on the record). Error recorded on the row
-    // like the mountpoint branch — the route reply alone never reaches it.
-    if (m.type === 'onedrive' && !m.driveId) {
-      try { await this._resolveOneDriveDrive(m); this._save(); }
-      catch (e) { this._errors.set(id, String(e.message || e)); this._notify(); throw e; }
-    }
-    // Self-mount guard for EXISTING records too (imported before the add()
-    // guard existed): our own bridge token = the URL points back at this
-    // instance — refuse instead of fuse-mounting a self-referential loop.
-    if (m.type === 'vibespace' && m.bearerTokenEnc && this.selfTokenCheck?.(this._dec(m.bearerTokenEnc))) {
-      this._errors.set(id, 'this share was minted by this same VibeSpace (self-mount deadlocks the server) — open the shared folder directly instead');
-      m.desired = 'unmounted';
-      this._save();
-      this._notify();
-      return false;
-    }
+    // The row's own pre-flight (OneDrive resolves its drive through Graph; a VibeSpace bridge refuses a token THIS
+    // instance minted — a self-mount deadlocks the server): `undefined` = go on, anything else is the answer.
+    if (prow.preMount) { const said = await prow.preMount(m, id, this); if (said !== undefined) return said; }
     // Credential model (user-refined): a credential IS the rclone remote (the
     // part before the colon); a mount is remote:path. A credential itself IS
     // mountable when its token can reach the remote's root (Google Drive,
@@ -1577,7 +1050,7 @@ class MountManager {
     // tokens CAN'T list the root: the fuse mount would "succeed" and EIO on
     // every IO, so probe first and convert such records to credentials with
     // guidance instead of mounting a dead folder.
-    if (!m.parentId && m.type === 'rclone' && MountManager.BUCKETY_BACKENDS.has(m.rcloneType) && !m.remotePath) {
+    if (!m.parentId && prow.rootMayBeDenied?.(m, MountManager) && !m.remotePath) {
       if (await this._probeRootDenied(m)) {
         m.kind = 'credential';
         m.desired = 'unmounted';
@@ -1636,7 +1109,7 @@ class MountManager {
     // s3-backed whether it's the native type OR a custom rclone mount using
     // the s3 backend (rclone.conf import, Custom type) — both hit the proxy
     // signing issue, so the fix must key off the BACKEND, not our type name.
-    const isS3 = (m.type || 's3') === 's3' || m.rcloneType === 's3';
+    const isS3 = !!rowOf(m).s3Backend?.(m);
     if (isS3 && this._rcloneSupportsAcceptEncodingFlag()) args.push('--s3-use-accept-encoding-gzip=false');
     if (m.mode === 'ro') args.push('--read-only');
     // One-time signing probe: some proxies (Cloudflare) rewrite the signed
@@ -1874,7 +1347,7 @@ class MountManager {
   /** A mount whose access can be REVOKED/EXPIRE out from under us (an imported
    *  share, a VibeSpace bridge, or an STS-style expiring credential). Only
    *  these get the (heavier) backend re-auth probe — my own S3/Drive don't. */
-  _revocable(m) { return m.origin === 'imported' || m.type === 'vibespace' || !!m.expiresAt; }
+  _revocable(m) { return m.origin === 'imported' || !!rowOf(m).revocable || !!m.expiresAt; }
 
   /** OAuth-backed mount (Drive/OneDrive/Dropbox/…): its refresh token can die
    *  out from under a HEALTHY-looking mount (revoked, password change, expiry)
@@ -1882,8 +1355,7 @@ class MountManager {
    *  so the UI showed a fine mount whose every file open was EIO (real
    *  OneDrive incident: "unauthenticated: Unauthenticated" on every read). */
   _oauthBacked(m) {
-    return m.type === 'drive' || m.type === 'onedrive' || m.type === 'cloud'
-      || (m.type === 'rclone' && MountManager.OAUTH_BACKENDS.includes(m.rcloneType));
+    return !!rowOf(m).oauthBacked?.(m, MountManager);
   }
 
   /** Uncached BACKEND access probe (fresh rclone process re-auths, bypassing
@@ -1894,7 +1366,7 @@ class MountManager {
     try { ({ env, remote } = this._rcloneFor(m)); } catch { return Promise.resolve('ok'); }
     if (m.v2Auth) env.RCLONE_CONFIG_VS_V2_AUTH = 'true';
     const args = ['lsf', remote, '--max-depth', '1', '--retries', '1', '--low-level-retries', '1'];
-    if (((m.type || 's3') === 's3' || m.rcloneType === 's3') && this._rcloneSupportsAcceptEncodingFlag()) args.push('--s3-use-accept-encoding-gzip=false');
+    if (rowOf(m).s3Backend?.(m) && this._rcloneSupportsAcceptEncodingFlag()) args.push('--s3-use-accept-encoding-gzip=false');
     return new Promise((resolve) => {
       let done = false;
       const child = execFile(this.rcloneBin(), args, { env, timeout: timeoutMs },
@@ -1998,7 +1470,7 @@ class MountManager {
    *  own S3) there is no share to revoke, so a generic "couldn't list" message
    *  avoids the misleading banner (user report: a working SMB mount). */
   _accessErrorMsg(m) {
-    if (m.type === 'vibespace') return 'connected but every file errors — the share may have been revoked, or the source instance is unreachable';
+    if (rowOf(m).everyFileErrors) return rowOf(m).everyFileErrors;
     if (m.expiresAt && Date.now() > m.expiresAt) return 'connected but access denied — this share credential has expired';
     if (m.origin === 'imported') return 'connected but access denied — the share may have been revoked or its credentials changed';
     if (this._oauthBacked(m)) return 'connected but the sign-in has expired or been revoked — listings come from cache while every file read fails; re-authorize to fix';
@@ -2063,7 +1535,7 @@ class MountManager {
     try {
       for (const m of [...this._state.mounts]) {
         if (this._kindOf(m) === 'credential') continue;
-        if (m.type === 'gmail') {
+        if (rowOf(m).filesystem === false) {
           // sync worker, not a filesystem — restart it if it died, skip all
           // fuse/mountpoint probing (a plain dir can't hang the pool)
           if (!this.isMounted(m) && m.desired === 'mounted') await this._maybeAutoRemount(m);
@@ -2085,7 +1557,7 @@ class MountManager {
         // would read the zombie's ENOTCONN as an access error, poisoning the
         // record with a "revoked?" message that blocks auto-remount (found by
         // the 2.110.0 e2e). Overwrite any stale error and reconnect NOW.
-        if (m.type !== 'cephfs' && !this._daemonAlive(mp)) {
+        if (rowOf(m).daemon !== false && !this._daemonAlive(mp)) {
           this._errors.set(m.id, 'mount daemon died — reconnecting…');
           await this.unmount(m.id, { internal: true }); // clears the zombie entry
           if (m.desired === 'mounted') await this._maybeAutoRemount(m);
@@ -2096,9 +1568,9 @@ class MountManager {
         // session on a cold mount can spike a first `ls` past the fuse budget,
         // and a single blip must not disconnect a trusted deployment mount.
         let pid = 0;
-        try { pid = m.type === 'cephfs' ? 0 : (this._daemonPids(mp)[0] || 0); } catch {}
+        try { pid = rowOf(m).daemon === false ? 0 : (this._daemonPids(mp)[0] || 0); } catch {}
         const cpu0 = pid ? this._cpuTicks(pid) : null;
-        const health = await this._probeMountpoint(mp, m.type === 'cephfs' ? 12000 : 6000);
+        const health = await this._probeMountpoint(mp, rowOf(m).probeMs || 6000);
         // 2026-10-04 15:09:43 / 16:41:43 (this sweep's :43 phase): THIS branch
         // lazily unmounted the owner's OneDrive while its daemon was busy, then
         // killed it ("survived lazy unmount"). A daemon making CPU progress is
@@ -2117,7 +1589,7 @@ class MountManager {
           // immediately (a hung fuse mount is the outage class we defend).
           this._hungStrikes = this._hungStrikes || new Map();
           const strikes = (this._hungStrikes.get(m.id) || 0) + 1;
-          if (m.type === 'cephfs' && strikes < 2) { this._hungStrikes.set(m.id, strikes); continue; }
+          if (strikes < (rowOf(m).hungStrikes || 0)) { this._hungStrikes.set(m.id, strikes); continue; }
           this._hungStrikes.delete(m.id);
           this.blockPath(mp, 90000); // fail fast while teardown + in-flight stragglers drain
           // desired stays 'mounted' → the sweep's dead-mount branch reconnects
@@ -2174,7 +1646,7 @@ class MountManager {
     this._notify();
     // A crashed daemon leaves a dead fuse endpoint ("Transport endpoint is
     // not connected") that blocks the fresh mount — clear it first.
-    if (m.type !== 'cephfs') {
+    if (rowOf(m).daemon !== false) {
       await new Promise((res) => execFile('fusermount3', ['-uz', mp], () =>
         execFile('fusermount', ['-uz', mp], () => res())));
     }
@@ -2195,6 +1667,13 @@ class MountManager {
   async _ensureModprobeShim() {
     return new Promise((resolve) => {
       execFile('sh', ['-c', 'command -v /sbin/modprobe >/dev/null 2>&1 || sudo -n sh -c \'mkdir -p /sbin && printf "#!/bin/sh\\nexit 0\\n" > /sbin/modprobe && chmod 755 /sbin/modprobe\' 2>/dev/null; true'], { timeout: 10000 }, () => resolve());
+    });
+  }
+
+  /** A KERNEL mount's unmount (no fuse daemon to stop) — the cephfs row's `unmount` hook. */
+  _kernelUnmount(m, mp, finish) {
+    return new Promise((resolve) => {
+      execFile('sudo', ['-n', 'umount', '-l', mp], () => resolve(finish(!this.isMounted(m))));
     });
   }
 
@@ -2325,15 +1804,8 @@ class MountManager {
       this._notify();
       return ok;
     };
-    if (m.type === 'gmail') {
-      this.gmail.stop(id);
-      return Promise.resolve(finish(true)); // synced .eml files stay — they're the archive
-    }
-    if (m.type === 'cephfs') {
-      return new Promise((resolve) => {
-        execFile('sudo', ['-n', 'umount', '-l', mp], () => resolve(finish(!this.isMounted(m))));
-      });
-    }
+    const urow = rowOf(m);   // a row with its own unmount (a sync worker stops; a kernel mount umounts)
+    if (urow.unmount) return urow.unmount(m, id, mp, finish, this);
     return new Promise((resolve) => {
       // A lazy detach can leave the DAEMON alive: an EIO-wedged rclone (dead
       // OAuth token, VFS waiters stuck) survives `fusermount -uz`, and the
@@ -2494,7 +1966,7 @@ class MountManager {
     let env;
     if (id) {
       const m = this._connOf(this._get(id));
-      if ((m.type || 's3') !== 'drive') throw new Error('not a Google Drive record');
+      if (!rowOf(m).sharedDrives) throw new Error('not a Google Drive record');
       ({ env } = this._rcloneFor(m));
     } else {
       if (!token) throw new Error('token required');
@@ -2522,7 +1994,7 @@ class MountManager {
   listGmailLabels({ id, token, clientId, clientSecret, clientPreset } = {}) {
     if (id) {
       const m = this._get(id);
-      if (m.type !== 'gmail') throw new Error('not a Gmail record');
+      if (!rowOf(m).labels) throw new Error('not a Gmail record');
       return this.gmail.listLabels({
         token: this._dec(m.tokenEnc),
         clientPreset: m.clientPreset || null,
@@ -2600,7 +2072,7 @@ class MountManager {
     // client falls back to the instance-preset client (VIBESPACE_GDRIVE_*);
     // other backends use their own custom client or rclone's built-in.
     const authArgs = ['authorize', backend];
-    if (!clientId && backend === 'drive') {
+    if (!clientId && PROVIDERS.rows.some((r) => r.rcloneType === backend && r.presetClient)) {   // the backend's row resolves preset clients
       const pc = MountManager._driveClient({ clientPreset: this._driveAuthPreset || null });
       if (pc) { clientId = pc.clientId; clientSecret = pc.clientSecret; }
     }
@@ -2649,30 +2121,9 @@ class MountManager {
    */
   startDriveAuthForMount(id) {
     const m = this._connOf(this._get(id));
-    let clientId, clientSecret;
-    if (m.type === 'drive') {
-      clientId = m.clientId || undefined;
-      clientSecret = m.clientSecretEnc ? this._dec(m.clientSecretEnc) : undefined;
-      if (!clientId) {
-        const pc = MountManager._driveClient(m); // record's preset (or single default)
-        if (pc) { clientId = pc.clientId; clientSecret = pc.clientSecret; }
-      }
-    } else if (m.type === 'onedrive') {
-      clientId = m.clientId || undefined;
-      clientSecret = m.clientSecretEnc ? this._dec(m.clientSecretEnc) : undefined;
-      return this.startDriveAuth({ backend: 'onedrive', clientId, clientSecret });
-    } else if (m.type === 'cloud') {
-      clientId = m.clientId || undefined;
-      clientSecret = m.clientSecretEnc ? this._dec(m.clientSecretEnc) : undefined;
-      return this.startDriveAuth({ backend: m.backend, clientId, clientSecret });
-    } else if (m.type === 'rclone' && m.rcloneType === 'drive') {
-      const p = (k) => m.paramsEnc?.[k] ? this._dec(m.paramsEnc[k]) : undefined;
-      clientId = p('client_id');
-      clientSecret = p('client_secret');
-    } else {
-      throw new Error('Not an OAuth cloud connection');
-    }
-    return this.startDriveAuth({ clientId, clientSecret });
+    const row = rowOf(m);   // the row says which client re-signs it in (its own, a preset, rclone's)
+    if (!row.reauthClient) throw new Error('Not an OAuth cloud connection');
+    return this.startDriveAuth(row.reauthClient(m, this));
   }
 
   /** Write a freshly minted token back into a Drive-backed record + remount. */
@@ -2726,7 +2177,7 @@ class MountManager {
       throw new Error('client must name a preset ("" = built-in) or a custom id + secret');
     }
     if (client && typeof client === 'object') {
-      if (holder.type !== 'drive') throw new Error('Switching the OAuth client with a new sign-in is only for Google Drive records');
+      if (!rowOf(holder).presetClient?.reauthSwitch) throw new Error('Switching the OAuth client with a new sign-in is only for Google Drive records');
       const cid = String(client.clientId || '').trim();
       if (cid && !client.clientSecret) throw new Error('A custom OAuth client needs its client secret too');
       if (cid) { holder.clientId = cid; holder.clientSecretEnc = this._enc(String(client.clientSecret)); holder.clientPreset = null; }
@@ -2734,18 +2185,12 @@ class MountManager {
     }
     // OneDrive + generic cloud backends re-auth through the same dialog —
     // rejecting them here left the edit-dialog button dead for those types.
-    if (holder.type === 'drive' || holder.type === 'onedrive' || holder.type === 'cloud') holder.tokenEnc = this._enc(tok);
-    else if (holder.type === 'rclone' && holder.rcloneType === 'drive') {
-      holder.paramsEnc = holder.paramsEnc || {};
-      holder.paramsEnc.token = this._enc(tok);
-    } else throw new Error('Not an OAuth cloud connection');
+    const hrow = rowOf(holder);   // the row stores the token where its record keeps it
+    if (!hrow.writeToken) throw new Error('Not an OAuth cloud connection');
+    hrow.writeToken(holder, tok, this);
     this._save();
     this._notify();
-    // Fresh token in hand — resolve the OneDrive drive now (best-effort;
-    // the mount-time backstop retries and reports honestly if this fails).
-    if (holder.type === 'onedrive' && !holder.driveId) {
-      try { await this._resolveOneDriveDrive(holder); this._save(); } catch {}
-    }
+    if (hrow.afterToken) await hrow.afterToken(holder, this);   // the row's follow-up (OneDrive resolves its drive now)
     const bounce = async (m) => {
       if (this.isMounted(m) || m.desired === 'mounted') {
         try { await this.unmount(m.id); await this.mount(m.id); } catch {}
@@ -2851,7 +2296,7 @@ class MountManager {
   // imported down-scoped share, not a session-token STS credential).
   canShareFromMount(m) {
     m = this._connOf(m); // a child mount shares with its credential's keys
-    return (m.type || 's3') === 's3' && !!m.secretKeyEnc && !m.sessionTokenEnc && m.origin !== 'imported';
+    return !!rowOf(m).s3Share && !!m.secretKeyEnc && !m.sessionTokenEnc && m.origin !== 'imported';
   }
 
   async mintShareFromMount(mountId, { folder, mode, name, expiryDays }) {
@@ -2906,7 +2351,7 @@ class MountManager {
   // embeds it, the receiver adds a normal `cephfs` mount. Env-gated: absent
   // the minter, the row keeps only the WebDAV bridge.
   cephMintAvailable() { return !!(process.env.VIBESPACE_CEPHMINT_URL && process.env.VIBESPACE_CEPHMINT_TOKEN); }
-  canCephShare(m) { return !!m && m.type === 'cephfs' && this.cephMintAvailable(); }
+  canCephShare(m) { return !!m && !!rowOf(m).cephShare && this.cephMintAvailable(); }
 
   async _mintCall(path, body) {
     const url = process.env.VIBESPACE_CEPHMINT_URL.replace(/\/+$/, '') + path;

@@ -21,6 +21,7 @@ import os from 'node:os';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { mutantCopies } from './mutant-copy.mjs';
+import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-seams: the engine + its three family files as one text
 
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -145,6 +146,12 @@ function slackJudge(slack) {
 
 /** A patched COPY (scripts/mutant-copy.mjs: outside the tree, requires re-bound to the real files), the judge run on it. */
 const MC = mutantCopies('send-files', REPO);
+// lane dc-channels-seams: the engine's patched copy is the engine + its three family files as ONE closed world
+async function mutantEngine(from, to, judge, tag) {
+  const s = engineSource(REPO);
+  if (!s.includes(from)) return null;
+  return judge(require(MC.write('src/server/channels-engine.js', s.replace(from, to), tag)));
+}
 async function mutant(file, from, to, judge, tag) {
   const s = fs.readFileSync(path.join(REPO, 'src', file), 'utf8');
   if (!s.includes(from)) return null;
@@ -237,7 +244,7 @@ const ctl = [
   ['slack.js', 'if (files.length && params.reply_broadcast) throw', 'if (false) throw', slackJudge, 'channels/slack.js', 'slack: thread+chat with a file NOT refused'],
   ['slack.js', 'parts.push(no, ...rest);', 'parts.push({ ...label, ok: true }, ...rest);', slackJudge, 'channels/slack.js', 'slack: a refusal DROPPED'],
 ];
-{ const red = await mutant('server/channels-engine.js', '...(rp ? { parts: rp } : {}) }; q.reason = rp && rp.some((x) => !x.ok) ? `partly sent — ${P.partsWords(rp)}` : null;', '}; q.reason = null;', reconcileJudge, 'engine-reconcile-parts');
+{ const red = await mutantEngine('...(rp ? { parts: rp } : {}) }; q.reason = rp && rp.some((x) => !x.ok) ? `partly sent — ${P.partsWords(rp)}` : null;', '}; q.reason = null;', reconcileJudge, 'engine-reconcile-parts');
   ok(Array.isArray(red) && red.length > 0, `control — engine: the reconcile forgets the parts: red (${red === null ? 'the patch site is gone' : red.length ? red[0].slice(0, 120) : 'GREEN — the judge missed it'})`); }
 for (const [f, from, to, judge, mod, what] of ctl) {
   const red = await mutant(`channels/${f}`, from, to, judge, what.replace(/\W+/g, '-'));

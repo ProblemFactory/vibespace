@@ -40,6 +40,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-seams: the engine + its three family files as one text
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -204,7 +205,7 @@ console.log('§1 channel-groups-view (PURE)');
   {
     const AV = await import(path.join(REPO, 'src/lib/channel-avatar.js'));
     const IC = await import(path.join(REPO, 'src/lib/icons.js'));
-    const ES = read('src/server/channels-engine.js');
+    const ES = engineSource(REPO);
     const kinds = require(path.join(REPO, 'src/channels/registry-list.js')).MANIFESTS.map((m) => m.kind);   // lane dc-channels-manifest: REAL_ADAPTERS derives from the vendor list (ES kept for the census below)
     void ES;
     const missing = (lib) => kinds.filter((k) => { const g = AV.accountBadges([{ id: k, kind: k, label: k }]).get(k).glyph; return !(typeof lib[g] === 'string' && /^<svg /.test(lib[g])); });
@@ -466,7 +467,7 @@ const CLIENT = ['src/lib/channels-panel.js', 'src/lib/channel-window.js', 'src/l
 // ── §4 WIRING PINS ────────────────────────────────────────────────────────
 console.log('§4 wiring pins');
 {
-  const P = read('src/lib/channels-panel.js'), W = read('src/lib/channel-window.js'), R = read('src/routes/channels.js'), E = read('src/server/channels-engine.js'), S = read('src/channel-store.js'), GEsrc = read('src/server/groups-engine.js');
+  const P = read('src/lib/channels-panel.js'), W = read('src/lib/channel-window.js'), R = read('src/routes/channels.js'), E = engineSource(REPO), S = read('src/channel-store.js'), GEsrc = read('src/server/groups-engine.js');
   ok(/const \{ rows, archived \} = groupListRows\(\{ groups: groups \|\| \[\], conversations: convs, adapters, untitled: \(kind\) => chanCaps\.untitledText\(kind, \{ t \}\) \}\);/.test(P), 'PIN: the panel\'s first screen is drawn from groupListRows (lane lark-search-poll: an untitled row worded — never its raw id)');
   ok(/const fs = firstScreen\(rows, \{ view: VIEW, q, now \}\);/.test(P) && /export \{ focusRows, statusTag, filterRows, firstScreen,/.test(read('src/lib/channel-groups-view.js')), 'PIN (R3): …and narrowed to the ATTENTION list by firstScreen / focusRows (re-exported from the PURE channel-focus.js) — the full list one switch away');
   // lane-redact verify r6: the broadcast's list is kept (groupsGen) even before the first paint, which stays refresh()'s

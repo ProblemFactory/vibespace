@@ -3403,6 +3403,7 @@ owner 原话 (摘): "我不太需要一个 agent 订阅另一个 agent 的消息
 
 - **D1 = 显式拉群, 私聊即两人群.** "agent 主动拉群, agent 不再能'私聊', 或者说 agent 私聊本质上就是自动建立一个两人群。每个 Task Group 还是不要自动建群了, 感觉会有 spam 风险。" ⇒ 群只由动作产生: `vibespace-msg` 新增建群动词 (名字 + 成员); 今天的 `send <agent>` 不删, 它的语义变成"找到或建立这两个成员的两人群, 往里发" (同一对成员永远是同一个群, 幂等); 我 (owner) 是每个群的隐含成员/观察者; 谁能被拉进群仍由 msg-acl 的可达性决定 (组内/externalVisibility/override 不变)。
 - **D2 = 每个成员自己的通知模式.** "每个群成员可以自行设置'通知模式', 默认是'下次用户发消息收报告'。" ⇒ 每 (群, 成员) 一个 `notify` 值, 成员用 CLI 自设, 用户可在面板替任何成员改: `next-turn` (默认: 群里新消息攒成一份报告, 在该成员下一次**用户发起**的 turn 里作为上下文送达 — 零计费, 零回声室) / `mention` (只有被 @ 时立刻叫醒) / `always` (每条都立刻叫醒 = 计费 turn, 面板上明说) / `mute`。@提到是显式动作: 除 `mute` 外一律立刻叫醒 (含我作为观察者的 @); 不带 @ 的消息按模式走。立刻叫醒仍是"没人打字的 turn", 走 spend-authorizer 的 `peer-message` 理由不变。
+  > **AS-BUILT (lane stash-any-turn, 2026-10-05 主人裁定: "outbox 发的消息也是一个计费回合啊，也应该直接唤醒把"):** `next-turn` = 该成员**任何来源**的下一个 turn —— 主人打字、回执唤醒、Background Work 通知、同伴消息、群唤醒、auto-resume 的 continue、For you 的回复; 计费回合就是计费回合, 攒着的报告搭它走, 谁也不等键盘。防回声改成**文字**而不是扣留: 每份报告本就以 `#### Group …` 自报群名, 非用户 turn 的报告头下再说一次 "(these arrived while you were handling something else — answer each group in its own group; do not fold them into this turn's task)"。正在送达的群唤醒 (`wakesInFlight`) 期间, 该群不进该成员的报告 —— 唤醒帧已经带着它。预算、"整段进或整段不进"、截断指针不变。`turnIsUserInitiated` 不再门控任何东西, 只决定这句话。
 - **D3 = 排在频道账号 lane (feat-channel-cred) 之后。**
 
 ### 22.5 群的成员操作 (owner 2026-09-22: "拉群要设计一下, 建群之后是不是还能拉人, 拉人的时候可以附加 context 消息? 我需要手动拉人能力")

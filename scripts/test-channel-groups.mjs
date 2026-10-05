@@ -1032,7 +1032,7 @@ console.log('§3k a renamed member session: the panel\'s count and the server\'s
   ok(/wake-count-mismatch'[\s\S]{0,200}r\.group/.test(read('src/lib/channel-window.js')), 'PIN: the group composer repaints from the 409\'s group view');
 }
 
-console.log('§4 the turn gate through the REAL prompt-context route');
+console.log('§4 the next-turn drain through the REAL prompt-context route — a turn of ANY origin (lane stash-any-turn)');
 {
   const AR = require(path.join(REPO, 'src/agent-routes.js'));
   ok(AR.turnIsUserInitiated({}) === true && AR.turnIsUserInitiated({ _userInputAt: 5, _machineInputAt: 4 }) === true && AR.turnIsUserInitiated({ _userInputAt: 4, _machineInputAt: 5 }) === false,
@@ -1046,28 +1046,63 @@ console.log('§4 the turn gate through the REAL prompt-context route');
   const wB = [...f.sessions.keys()].find((k) => f.sessions.get(k).claudeSessionId === B);
   const sB = Object.assign(f.sessions.get(wB), { agentToken: 'vsst_beta', cwd: '/tmp', _toolsIntroSeen: true, _mgrIntroSeen: true });
   const activeSessions = f.sessions;
-  AR.setupAgentRoutes({
+  const arDeps = {
     app, activeSessions,
     tasks: { groupsForSession: () => [], _persistRescueLine: () => '', backlogNudgeFor: () => '' },
     sessionStatus: { consumeNotices: () => [], pendingNotices: () => [], get: () => null, rekey() {} }, SessionStatusManager: { renderNotices: () => '' },
     userTodos: {}, sessionStatusKey: (s) => 'claude:' + s.claudeSessionId, serverSetting: (k) => (k === 'agents.perTurnToolReminder' ? false : undefined),
     integrationEnabled: () => true, scheduleCtxSync() {}, remoteCtxBaseFor: () => null, readUserState: () => ({}), getJobs: () => null, deliver: null,
     getGroups: () => f.eng,
-  });
+  };
+  AR.setupAgentRoutes(arDeps);
   const ask = () => new Promise((resolve) => { routes['GET /api/agent/prompt-context']({ headers: { authorization: 'Bearer vsst_beta' }, query: {} }, { json: (o) => resolve(o), status() { return this; } }); });
-  // a MACHINE turn: the ladder hands B a frame (a wake from somebody else)
-  sB._userInputAt = 1;
-  await f.deliver.deliverToConversation(B, 'a job finished', { kind: 'notification', spendReason: 'job-notification' });
-  ok(Number(sB._machineInputAt) > 1, 'the REAL ladder stamps the live session when it hands it a turn nobody typed');
-  const onMachine = await ask();
-  ok(!String(onMachine.context || '').includes('news for beta'), 'a MACHINE turn is handed NO group report', onMachine.context);
-  sB._userInputAt = Date.now() + 1;   // the owner types
-  const onUser = await ask();
-  ok(String(onUser.context || '').includes('news for beta') && onUser.context.includes('### Group messages since your last turn'), 'the next USER turn gets it', onUser.context);
-  await new Promise((r) => setTimeout(r, 30));   // the marker commit is async
-  const again = await ask();
-  ok(!String(again.context || '').includes('news for beta'), '…exactly ONCE (the marker advanced)');
-  ok(Buffer.byteLength(onUser.context, 'utf-8') <= 9600, 'the whole delivery stays under the 9600 B inline cap');
+  // THE DRAIN TABLE (lane stash-any-turn, the owner 2026-10-05: "outbox 发的消息也是一个计费回合啊"): whoever starts the
+  // turn — the owner typing, the REAL ladder's job notification / channel receipt / peer message, auto-resume's
+  // continue (a fresh CLI process: neither stamp) — the pending group report RIDES it, once; a turn nobody typed
+  // carries the echo guard's words under the head, said once; the owner's own turn does not
+  const ORIGINS = [
+    ['the owner types', async () => { sB._userInputAt = Date.now() + 1; }, false],
+    ['a Background Work notification (the REAL ladder)', () => f.deliver.deliverToConversation(B, 'a job finished', { kind: 'notification', spendReason: 'job-notification' }), true],
+    ['a channel reply receipt (the REAL ladder)', () => f.deliver.deliverToConversation(B, 'your reply was posted', { kind: 'notification', spendReason: 'channel-receipt' }), true],
+    ['a peer message (the REAL ladder)', () => f.deliver.deliverToConversation(B, 'hello from a peer', { kind: 'peer', spendReason: 'peer-message', fromName: 'gamma' }), true],
+    ["auto-resume's continue (a fresh process: neither stamp)", async () => { delete sB._userInputAt; delete sB._machineInputAt; }, false],
+  ];
+  let nth = 0;
+  const drainRow = async (label, start, machine, askVia = ask) => {
+    const text = `news for beta #${++nth}`;
+    await f.eng.post({ group: made.group.id, from: A, text });
+    sB._userInputAt = 1; sB._machineInputAt = 0;
+    await start();
+    if (machine) ok(Number(sB._machineInputAt) > Number(sB._userInputAt), `${label}: the REAL ladder stamps the live session — a turn nobody typed`);
+    const got = String((await askVia()).context || '');
+    await new Promise((r) => setTimeout(r, 30));   // the marker commit is async
+    const again = String((await askVia()).context || '');
+    return { text, got, again };
+  };
+  for (const [label, start, machine] of ORIGINS) {
+    const { text, got, again } = await drainRow(label, start, machine);
+    ok(got.includes(text) && got.includes('### Group messages since your last turn'), `${label}: the pending group report RIDES this turn`, got);
+    ok(machine ? got.split(GE.ASIDE_LINE).length === 2 : !got.includes(GE.ASIDE_LINE), machine ? `${label}: …under the echo guard's words, said ONCE` : `${label}: …with no aside line (no machine hand-off newer than a keystroke)`, got);
+    ok(!again.includes(text), `${label}: …exactly ONCE (the marker moved)`);
+    ok(Buffer.byteLength(got, 'utf-8') <= 9600, `${label}: the whole delivery stays under the 9600 B inline cap`);
+  }
+  // CONTROL: a patched copy with the keystroke gate restored — the wake's turn carries NOTHING (the table would go red)
+  {
+    const MUTG = mutantCopies('chan-groups-gate', REPO);
+    const arSrc = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf-8');
+    const NEEDLE = '      if (ge && myCid) {\n';
+    if (arSrc.split(NEEDLE).length !== 2) throw new Error('mutation anchor missing: the any-turn report gate');
+    const ARg = MUTG.load('src/agent-routes.js', arSrc.replace(NEEDLE, '      if (ge && myCid && turnIsUserInitiated(s)) {\n'), 'gate');
+    const routesG = {};
+    ARg.setupAgentRoutes({ ...arDeps, app: { get: (p, h) => { routesG['GET ' + p] = h; }, post() {}, put() {}, delete() {}, use() {} } });
+    const askG = () => new Promise((resolve) => { routesG['GET /api/agent/prompt-context']({ headers: { authorization: 'Bearer vsst_beta' }, query: {} }, { json: (o) => resolve(o), status() { return this; } }); });
+    const c = await drainRow('CONTROL', ORIGINS[1][1], true, askG);
+    ok(!c.got.includes(c.text), 'CONTROL: a copy with the keystroke gate restored hands the notification\'s turn NO group report (the table above can go red)', c.got);
+    sB._userInputAt = Date.now() + 1;
+    const drained = String((await ask()).context || '');   // the real route drains it on the next turn: the fixture moves on clean
+    ok(drained.includes(c.text), '…and the real route hands it over on the next turn');
+    await new Promise((r) => setTimeout(r, 30));
+  }
 
   // MANY long-named pending groups: the section is budgeted WHOLE (trailer included) — capInline never trims it
   const LONG = (i) => '长'.repeat(76) + String(i).padStart(4, '0');
@@ -1213,7 +1248,7 @@ console.log('§4b wiring pins');
 {
   const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf-8');
   const ar = read('src/agent-routes.js');
-  ok(/if \(ge && myCid && turnIsUserInitiated\(s\)\) \{[\s\S]{0,400}ge\.reportsForTurn\(myCid/.test(ar), 'PIN: prompt-context asks reportsForTurn ONLY under turnIsUserInitiated(s)');
+  ok(/if \(ge && myCid\) \{[\s\S]{0,400}ge\.reportsForTurn\(myCid, \{ budget: room, aside: !turnIsUserInitiated\(s\) \}\)/.test(ar) && !/&& turnIsUserInitiated\(s\)/.test(ar), 'PIN: prompt-context asks reportsForTurn on EVERY turn — turnIsUserInitiated(s) only picks the aside words, it gates nothing (lane stash-any-turn)');
   ok(/ge\.commitReports\(myCid, rep\.marks\)/.test(ar), 'PIN: …and commits the markers it handed out');
   ok(/getGroups = \(\) => null/.test(ar) && /getGroups: \(\) => channelsWiring\.groups/.test(read('server.js')), 'PIN: server.js hands the agent routes the groups engine');
   ok(/const groups = createGroups\(\{ store: channels\.store, deliver,/.test(read('src/server/channels-wiring.js')), 'PIN: the wiring builds the engine over the channels store + THE ladder');
@@ -1444,11 +1479,37 @@ console.log('§7 the cards: a group message handed to a turn is SEEN in that cha
     return { ok: r.ok, during, after: sx._machineInputAt };
   };
   const st1 = await stampLeg(DELIVER, 'gc-st1', true);
-  ok(st1.ok && st1.during.length === 1 && st1.during[0] === false, 'the machine turn is STAMPED BEFORE the post: a hook the CLI runs while the post is in flight reads the turn as nobody\'s typing (no group report rides a wake)', st1);
+  ok(st1.ok && st1.during.length === 1 && st1.during[0] === false, 'the machine turn is STAMPED BEFORE the post: a hook the CLI runs while the post is in flight reads the turn as nobody\'s typing (its report carries the echo guard\'s words)', st1);
   const st2 = await stampLeg(DELIVER, 'gc-st2', false);
-  ok(!st2.ok && st2.during[0] === false && st2.after === 7, '…and a post that did not land GIVES THE STAMP BACK (a failed wake never holds the user\'s own next report)', st2);
+  ok(!st2.ok && st2.during[0] === false && st2.after === 7, '…and a post that did not land GIVES THE STAMP BACK (a failed wake never words the user\'s own next report as an aside)', st2);
 
-  // (h) through the REAL prompt-context route: a user turn draws the cards, a machine turn none
+  // (g3) A WAKE IN FLIGHT (lane stash-any-turn): the report now rides a turn nobody typed, and the woken turn asks
+  // prompt-context while its post is still on its way (the marker moves only after) — the group being woken sits that
+  // report out: its frame already carries the message
+  const inflight = async (Eng, tag) => {
+    const fx = fixture('gc-if-' + tag, { ge: Eng });
+    const gid = (await fx.eng.create({ by: A, name: 'inflight', members: [B], quiet: true })).group.id;
+    await fx.eng.setNotify({ by: B, group: gid, notify: 'mention' });
+    const real = fx.deliver.deliverToConversation;
+    const during = [];
+    fx.deliver.deliverToConversation = async (cid, ...rest) => { during.push(fx.eng.reportsForTurn(cid).text); return real.call(fx.deliver, cid, ...rest); };
+    const p = await fx.eng.post({ group: gid, from: A, text: 'hey @beta the woken words' });
+    const out = { woke: p.woke.length, during, after: fx.eng.reportsForTurn(B).text };
+    if (fx.close) fx.close();
+    return out;
+  };
+  const if1 = await inflight(GE, 'real');
+  ok(if1.woke === 1 && if1.during.length === 1 && !if1.during[0].includes('the woken words') && if1.after === '', 'a WAKE IN FLIGHT: a prompt-context asked before the post resolves does not carry the woken group again (its frame does) — and after the wake nothing is left', JSON.stringify(if1));
+  {
+    const MUTW = mutantCopies('chan-groups-inflight', REPO);
+    const geSrc = fs.readFileSync(path.join(REPO, 'src/server/groups-engine.js'), 'utf-8');
+    const SKIP = "      if (wakesInFlight.has(g.id + '|' + cid)) continue;";
+    if (geSrc.split(SKIP).length !== 2) throw new Error('mutation anchor missing: the in-flight skip');
+    const if2 = await inflight(MUTW.load('src/server/groups-engine.js', geSrc.replace(SKIP, ''), 'inflight'), 'mut');
+    ok(if2.woke === 1 && if2.during.length === 1 && if2.during[0].includes('the woken words'), 'CONTROL: a copy without the in-flight skip hands the woken message to the wake\'s own turn TWICE (frame + report)', JSON.stringify(if2));
+  }
+
+  // (h) through the REAL prompt-context route: a machine turn draws the report AND its card (lane stash-any-turn)
   const AR = require(path.join(REPO, 'src/agent-routes.js'));
   const f6 = fixture('gc-f');
   const g6 = (await f6.eng.create({ by: A, name: 'route', members: [B], quiet: true })).group.id;
@@ -1468,14 +1529,14 @@ console.log('§7 the cards: a group message handed to a turn is SEEN in that cha
   const ask = () => new Promise((resolve) => { routes['GET /api/agent/prompt-context']({ headers: { authorization: 'Bearer vsst_beta7' }, query: {} }, { json: (o) => resolve(o), status() { return this; } }); });
   sB._userInputAt = 1;
   await f6.deliver.deliverToConversation(B, 'a job finished', { kind: 'notification', spendReason: 'job-notification' });
-  const n0 = f6.cards.filter((c) => c.kind === 'group').length;
   const onMachine = await ask();
-  ok(!String(onMachine.context || '').includes('news for beta via the route') && f6.cards.filter((c) => c.kind === 'group').length === n0, 'a MACHINE turn: no report — and no card');
-  sB._userInputAt = Date.now() + 1;
-  const onUser = await ask();
   const gcards = f6.cards.filter((c) => c.kind === 'group');
-  ok(String(onUser.context || '').includes('news for beta via the route') && gcards.length === 1 && gcards[0].cid === B && gcards[0].text === 'news for beta via the route' && gcards[0].group.id === g6,
-    'the REAL prompt-context route on a USER turn: the report is injected AND its card is drawn in B\'s chat (the injection point)', gcards);
+  ok(String(onMachine.context || '').includes('news for beta via the route') && gcards.length === 1 && gcards[0].cid === B && gcards[0].text === 'news for beta via the route' && gcards[0].group.id === g6,
+    'the REAL prompt-context route on a MACHINE turn (a job notification\'s wake — lane stash-any-turn): the report is injected AND its card is drawn in B\'s chat (the injection point)', gcards);
+  sB._userInputAt = Date.now() + 1;
+  await new Promise((r) => setTimeout(r, 30));
+  const onUser = await ask();
+  ok(!String(onUser.context || '').includes('news for beta via the route') && f6.cards.filter((c) => c.kind === 'group').length === 1, '…and the owner\'s next turn: neither the report nor a second card');
 
   // (i) the fold kind: its own, off by default
   ok(RS.RUN_KINDS.includes('group') && RS.messageKind(pm[0], { toolCard: false }) === 'group' && RS.messageKind({ role: 'user', originKind: 'peer-message', peerFrom: 'x', content: [] }, { toolCard: false }) === 'peer',

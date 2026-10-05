@@ -64,6 +64,7 @@ import { pathToFileURL } from 'node:url';
 import { scratch } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { judgeInChild, LINEAR_BOUND } from './work-meter.mjs';
+import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-seams: the engine + its three family files as one text
 
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
@@ -464,7 +465,7 @@ const VIEW = await import(pathToFileURL(path.join(REPO, 'src/lib/channel-blocks-
 console.log('⑪ wiring pins');
 const SRC = {
   lark: read('src/channels/lark.js'), gmail: read('src/channels/gmail.js'), win: read('src/lib/channel-window.js'), view: read('src/lib/channel-blocks-view.js'),
-  eng: read('src/server/channels-engine.js'), store: read('src/channel-store.js'), blocks: read('src/channel-blocks.js'), record: read('src/channel-record.js'),
+  eng: engineSource(REPO), store: read('src/channel-store.js'), blocks: read('src/channel-blocks.js'), record: read('src/channel-record.js'),
 };
 {
   const code = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
@@ -652,7 +653,7 @@ const LINEAR_BOUND_MS = 800;
   } finally { try { eng.stop(); } catch {} }
   // CONTROL: the engine copy that trusts a stored tree serves the iframe as stored
   {
-    const src = read('src/server/channels-engine.js');
+    const src = engineSource(REPO);
     const from = `      if (r.blocks !== undefined) {
         try { const v = Blocks.validateBlocks(r.blocks); b = v.ok && v.blocks.length ? v.blocks : null; } catch { b = null; }
         if (!b) { const { blocks, ...rest } = r; return rest; }

@@ -26,7 +26,7 @@ const setText = (el, v) => { if (el && el.textContent !== v) el.textContent = v;
 /** A refused hand-over in the device's words (by the route's CODE; the English `error` is the contract). */
 export function handOverRefusalText(r) {
   const code = r && r.code;
-  if (code === 'spend_refused') return t('Not handed over — the limit for turns nobody typed is reached; the notices keep waiting for your next message');
+  if (code === 'spend_refused') return t('Not handed over — the limit for turns nobody typed is reached; the notices keep waiting for the next turn');
   if (code === 'unreachable') return t('Not handed over — the agent could not be reached; the notices keep waiting for its next turn');
   if (code === 'in_flight') return t('A hand-over for this agent is already in progress');
   if (code === 'held_for_next_turn') return t('Not handed over — this agent’s process predates mid-turn notifications; the notices ride its next prompt (restart the session to receive them mid-turn)');
@@ -109,7 +109,7 @@ export function createStashStrip({ sessionId }) {
     const held = Number(summary && summary.held) || 0;
     const reachable = summary && typeof summary.reachable === 'boolean' ? summary.reachable : true;
     const armed = !!(summary && summary.armed);
-    // B-c198: "your next message" is false while a turn runs — the words say "after this turn ends"; verify r1: `waiting` (paused
+    // B-c198: "the next turn" is not the running one — the words say "after this one ends"; verify r1: `waiting` (paused
     // on the user — a permission, a question) is INSIDE the turn too: the answer continues it, no UserPromptSubmit
     const midTurn = turn === 'running' || turn === 'waiting';
     const key = summary && summary.count ? summaryDigest(summary) + '|' + billed + '|' + inFlight + '|' + held + '|' + reachable + '|' + armed + '|' + midTurn + '|' + previewDigest(summary) : '';

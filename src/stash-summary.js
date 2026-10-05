@@ -23,7 +23,8 @@
 
 // 'group' (lane group-report-card): a group message waiting for this member's next turn — it lives in the groups
 // engine, not in a stash (src/server/stash-handover.js adds the engine's preview as entries with source 'group'), so a
-// hand-over never carries it: it rides the next message the owner types (or an @mention's wake)
+// hand-over never carries it: it rides the next turn, whoever starts it (lane stash-any-turn: the owner's message, a
+// notification's or a receipt's wake, auto-resume's continue — or an @mention's wake)
 const { CLEARED_TEXT } = require('./record-clear.js');   // PURE: the stored sentence a clear leaves (worded by previewWords)
 // 'retrying' (lane notify-retry, 2026-10-01): a notification the delivery ladder PARKED — the agent was alive and did
 // not accept it at once (a transient miss on a live pid); it is posted again at the conversation's turn end and on a
@@ -170,10 +171,10 @@ function partWords(item, t) {
  *  notification into the turn already running — the MECHANISM, not a price, because that fold is the wrapper's to
  *  refuse (a review / compact turn, a turn that ends first: the frame then runs as its own billed turn, and the ledger
  *  says so; measured through the real codex consumer). `cost` = that word alone; `held` rides beside the button.
- *  `midTurn` (B-c198, the owner 2026-10-02): the agent is running a turn. What waits for "your next message" rides the
- *  next USER turn's injection (UserPromptSubmit) — a message typed into a running turn is folded into it with no such
- *  hook, so "your next message" was false there (and a long-running agent's turn can last hours): mid-turn the strip
- *  says the first message you send AFTER this turn ends. */
+ *  `midTurn` (B-c198, the owner 2026-10-02): the agent is running a turn. What waits for "the next turn" rides the
+ *  next turn's injection (UserPromptSubmit — a turn of ANY origin since lane stash-any-turn, 2026-10-05) — a message
+ *  typed into a running turn is folded into it with no such hook (and a long-running agent's turn can last hours):
+ *  mid-turn the strip says the next turn AFTER this one ends. */
 function stashSummaryWords(summary, t, { billed = true, inFlight = false, held = 0, reachable = true, now = Date.now(), armed = false, midTurn = false } = {}) {
   if (!summary || !summary.count) return null;
   const n = summary.count;
@@ -194,8 +195,8 @@ function stashSummaryWords(summary, t, { billed = true, inFlight = false, held =
   const rides = (summary.items || []).filter((i) => i && i.kind === 'group').reduce((a, i) => a + (Number(i.n) || 0), 0);
   const groupOnly = rides > 0 && rides >= n;
   const ridesWords = rides && !groupOnly ? (midTurn
-    ? (rides === 1 ? t('1 group message rides your first message after this turn ends') : t('{n} group messages ride your first message after this turn ends', { n: rides }))
-    : (rides === 1 ? t('1 group message rides your next message') : t('{n} group messages ride your next message', { n: rides }))) : null;
+    ? (rides === 1 ? t('1 group message rides the next turn, after this one ends') : t('{n} group messages ride the next turn, after this one ends', { n: rides }))
+    : (rides === 1 ? t('1 group message rides the next turn') : t('{n} group messages ride the next turn', { n: rides }))) : null;
   const costWords = billed ? t('starts a turn') : t('joins the running turn');
   return {
     head,
@@ -205,10 +206,10 @@ function stashSummaryWords(summary, t, { billed = true, inFlight = false, held =
     cost: reachable ? costWords : null,
     held: [armed ? t('they will arrive as a message when this turn ends') : null, retryWords, heldWords, ridesWords].filter(Boolean).join(' · ') || null,   // `armed` (R3): the last prompt could not carry them inline
     // no hand-over for this harness: the sentence stands where the button would
-    noButton: reachable ? null : midTurn ? t('this agent is mid-turn — they ride your first message after this turn ends') : t('they ride your next message'),
+    noButton: reachable ? null : midTurn ? t('this agent is mid-turn — they ride the next turn, after this one ends') : t('they ride the next turn'),
     title: allRetrying ? t('The agent did not accept this at once; VibeSpace posts it again when its turn ends and on a schedule — Hand over now delivers it this instant')
-      : groupOnly ? (midTurn ? t('This agent is mid-turn — a message typed into a running turn carries no group message; they reach it with your first message after this turn ends, or at once when a member @mentions it') : t('Group messages reach this agent with your next message — or at once when a member @mentions it'))
-      : !reachable ? (midTurn ? t('This agent has no live inbox and is mid-turn — every waiting notice is delivered with your first message after this turn ends') : t('This agent has no live inbox — every waiting notice is delivered with your next message'))
+      : groupOnly ? (midTurn ? t('This agent is mid-turn — a message typed into a running turn carries no group message; they ride its next turn after this one ends, whoever starts it, or at once when a member @mentions it') : t('Group messages ride this agent’s next turn, whoever starts it — your message, a notification, a reply receipt — or at once when a member @mentions it'))
+      : !reachable ? (midTurn ? t('This agent has no live inbox and is mid-turn — every waiting notice rides its next turn, after this one ends') : t('This agent has no live inbox — every waiting notice rides its next turn'))
       : inFlight ? t('A hand-over is on its way')
         : billed ? t('Delivers every waiting notice now, as one message — it starts a billed turn for this agent')
           : t('Delivers every waiting notice now, as one message — it joins the turn already running; if that turn cannot take it, it runs as its own billed turn right after'),

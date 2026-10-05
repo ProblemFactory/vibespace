@@ -48,8 +48,8 @@ function createUserInputSender({ activeSessions, adapterRegistry, BUFFERS_DIR, b
     if (!session) return { ok: false, code: 'no_session', error: 'no live session ' + sessionId };
     if (!(session.pty && session.mode === 'chat')) return { ok: false, code: 'not_chat', error: 'not a live chat session' };
     const human = origin !== 'dispatch';   // lane worker-dispatch: an agent's dispatch typing `/compact` is not the owner
-    if (human) session._userInputAt = Date.now();   // the owner's own turn (§22 D2: next-turn reports ride THIS kind of turn only)
-    else session._machineInputAt = Date.now();      // a machine turn: the next-turn group reports wait for the owner's own
+    if (human) session._userInputAt = Date.now();   // the owner's own turn (§22 D2: the next-turn reports ride it as they ride any turn)
+    else session._machineInputAt = Date.now();      // a machine turn: the next-turn group reports ride it under the echo guard's words
     const adapter = adapterRegistry.get(session.backend);
     if (!adapter) return { ok: false, code: 'send_failed', error: `no adapter for backend "${session.backend}"` };
     // New input means prior interrupt succeeded (or user proceeded) —

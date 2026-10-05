@@ -2,6 +2,12 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.219 — 2026-10-05
+
+### Changed
+- A message waiting for an agent's next turn now rides whichever turn starts next (an Outbox send, a job notification, a wake), not only your next message.
+- While a Chrome build downloads in the Agent browser panel, the CloakBrowser install no longer shows as installing.
+
 ## 2.369.218 — 2026-10-05
 
 ### Added

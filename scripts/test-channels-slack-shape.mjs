@@ -24,6 +24,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-seams: the engine + its three family files as one text
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -572,7 +573,7 @@ console.log('design 018: the workspace app (state, consent URL, relay rule)');
   globalThis.__SLACK_RELAY_TABLE = RT;
   // the custom rung's relay default: ONE address in the settings schema and Slack's consent row (lane dc-channels-consent:
   // the engine reads the row's setting and names no vendor)
-  const schemaSrc = fs.readFileSync(path.join(REPO, 'src/lib/settings-schema.js'), 'utf-8'), engSrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const schemaSrc = fs.readFileSync(path.join(REPO, 'src/lib/settings-schema.js'), 'utf-8'), engSrc = engineSource(REPO);
   const relayRow = require(path.join(REPO, 'src/channels/slack.js')).consent.relayUrlSetting;
   const d1 = ((require(path.join(REPO, 'src/channels/slack/manifest.js')).settings.options || []).find((r) => r.key === 'slackRelayUrl') || {}).default, d2 = relayRow.fallback;   // lane dc-channels-manifest: the schema row derives from Slack's manifest
   ok(d1 && d1 === d2 && d2 === Manifest.RELAY_DEFAULT && `channels.${relayRow.key}` === 'channels.slackRelayUrl' && !/slackRelayUrl|problemfactory/.test(engSrc) && Manifest.redirectFor({ relayUrl: d1 }).via === 'relay', `the relay page default is one https address in the schema and Slack's consent row, the engine spells neither (${d1})`);

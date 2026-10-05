@@ -17,6 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
+import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-seams: the engine + its three family files as one text
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -272,7 +273,7 @@ console.log('§2c agents never receive HTML: the agent route census + every agen
   // CONTROL: the same drive on an engine whose readFor forgets withoutBlocks
   const { mutantCopies, copiesCensus } = await import('./mutant-copy.mjs');
   const M = mutantCopies('chan-acl-html', REPO);
-  const engSrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const engSrc = engineSource(REPO);
   // the .197 integration: the agent's copy is withView's agent branch (viewsOf → agentCopy, which calls withoutBlocks) — the control drops that strip
   const noStrip = engSrc.replace('const base = agent ? viewsOf(rec, records).map(agentCopy) : withBlocks(rec, records);', 'const base = agent ? viewsOf(rec, records) : withBlocks(rec, records);');
   const bad = await drive(M.load('src/server/channels-engine.js', noStrip, 'read-keeps-body'), 'control');

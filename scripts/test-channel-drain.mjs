@@ -50,6 +50,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-seams: the engine + its three family files as one text
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const MODEL = 'src/channel-drain.js';
@@ -1548,7 +1549,7 @@ console.log('⑤ THE CENSUS: a pure model, codes the routes and the CLI know, an
   const cli = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-channels'), 'utf8');
   const cliSet = (/const REFRESH_REFUSED = \[([^\]]*)\]/.exec(cli) || [])[1] || '';
   ok(retry.every((c) => cliSet.includes(`'${c}'`)), `the CLI's REFRESH_REFUSED names every one of them (exit 4, "not refreshed: …")`, cliSet);
-  const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
+  const esrc = engineSource(REPO);
   const ecode = esrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   const region = ecode.slice(ecode.indexOf('async function pass(adapterId'), ecode.indexOf('function lastPollOf(key)'))
     + ecode.slice(ecode.indexOf('const DRAIN_ORIGIN'), ecode.indexOf('async function agentRefresh('));
@@ -1639,7 +1640,7 @@ console.log('\nverify r3 (T2 ②): the sliding minute = 60·r + burst − 1, sai
   const words = (b) => C.budgetText({ unit: 'request', limit: 60, exhausted: true, waiting: 2, resetInSeconds: 12, perSec: 1, spentBy: { agent: 0 }, ...b });
   ok(/60 requests\/min \(at most 1\/s, 5 at once\)/.test(words({ burst: 5 })) && /60 requests\/min \(at most 1\/s\)/.test(words({ burst: 1 })) && !/at once/.test(words({ burst: null })), 'the card\'s budget sentence names the burst beside the minute and the per-second figure ("5 at once"); a bucket of one says nothing more');
   ok(/\(at most 1\/s, 5 at once\) for this account, 3 of them by agent refreshes/.test(words({ burst: 5, spentBy: { agent: 3 } })), '…and the agent-share variant carries the same burst');
-  const eng = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
+  const eng = engineSource(REPO);
   ok(/burst: pd \? Math\.round\(pd\.burst \* 100\) \/ 100 : null \};/.test(eng), 'WIRING: budgetView serves `burst` from the pace declaration (the card reads it; nothing else computes a ceiling)');
 }
 

@@ -43,6 +43,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-seams: the engine + its three family files as one text
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -57,7 +58,7 @@ const CH = require(path.join(REPO, 'src/channels/index.js'));
 const fake = require(path.join(REPO, 'src/channels/fake.js'));
 const express = require('express');
 const ATT_SRC = fs.readFileSync(path.join(REPO, 'src/channel-attachments.js'), 'utf-8');
-const ENGINE_SRC = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+const ENGINE_SRC = engineSource(REPO);
 const STORE_SRC = fs.readFileSync(path.join(REPO, 'src/channel-store.js'), 'utf-8');
 
 const ROOT = scratch('chan-images');

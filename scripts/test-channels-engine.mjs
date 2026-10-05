@@ -39,6 +39,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
 import { mutantCopies, copiesCensus, sweepLegacy } from './mutant-copy.mjs';
+import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-seams: the engine + its three family files as one text
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let BYPASS_COPY = null;   // ⑫: the (h) control copy — a receipt started outside the ONE door
@@ -166,7 +167,7 @@ function dayStartClock() {
   const storeCopy = patchPath('src', 'channel-store');
   const engCopy = patchPath('src/server', 'channels-engine');
   writeCopy(storeCopy, PRE);
-  const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const esrc = engineSource(REPO);
   writeCopy(engCopy, esrc.replace("require('../channel-store.js')", `require(${JSON.stringify(storeCopy)})`));
   try {
     const PE = require(engCopy);
@@ -260,7 +261,7 @@ function dayStartClock() {
 // from disk on every call, writing its own private copy back (the retired
 // shape), loses the failing row to the neighbour.
 {
-  const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const esrc = engineSource(REPO);
   const PRE = esrc
     .replace('    const a = store.adapters.live();', '    const a = JSON.parse(JSON.stringify(store.adapters.live()));')
     .replace("await store.adapters.update(() => { rec.lastPass = { at: now(), ok: true, code: null }; rec.consecutiveFailures = 0; });",
@@ -361,7 +362,7 @@ function dayStartClock() {
 // ③b NEGATIVE CONTROL — a patched engine with `now()` as the default instant
 // and an unconditional notify reproduces both halves of the loop.
 {
-  const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const esrc = engineSource(REPO);
   const PRE = esrc
     .replace("      const newest = store.readTail(adapterId, convId, { limit: 1 })[0];\n      const stamp = Number.isFinite(at) ? at : (newest ? (Number(newest.at) || 0) : (en.readAt || 0));",
              "      const stamp = Number.isFinite(at) ? at : now();")
@@ -535,7 +536,7 @@ function dayStartClock() {
   // Scoped to the two functions that DECIDE (`laneOrScan`, `ingest`); the
   // seed shapes a record off the declaration and the digest publishes it,
   // which is what a declaration is for.
-  const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const esrc = engineSource(REPO).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   const between = (a, b) => { const i = esrc.indexOf(a), j = esrc.indexOf(b, i); return i >= 0 && j > i ? esrc.slice(i, j) : null; };
   const laneFn = between('function laneOrScan(', 'async function pass('), ingestFn = between('async function ingest(', 'function digest(');
   ok(laneFn && ingestFn && !/\.receive\b/.test(laneFn) && !/\.receive\b/.test(ingestFn),
@@ -555,7 +556,7 @@ function dayStartClock() {
   const fsrc = fs.readFileSync(path.join(REPO, 'src/channels/fake.js'), 'utf-8');
   const FPRE = fsrc.replace("        const synthetic = receive === 'scan' && source === 'ui';",
     "        const synthetic = receive === 'scan' && (((record.scan && record.scan.chosenSource) || (caps.scanSources && caps.scanSources[process.platform]) || 'ui') === 'ui');");
-  const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const esrc = engineSource(REPO);
   const idxCopy = patchPath('src/channels', 'index');
   const fakeCopy = patchPath('src/channels', 'fake');
   const engCopy = patchPath('src/server', 'channels-engine');
@@ -565,7 +566,7 @@ function dayStartClock() {
     .replace('e.dq = Drain.open(e.dq, { origin, force, backoff, timerDue: e.timerDue, hostScan: scanLane });', 'e.dq = Drain.open(e.dq, { origin, force, backoff, timerDue: e.timerDue, hostScan: false });')
     .replace(/            else if \(act\.type === 'scanHost'\) \{[\s\S]*?\n            \} else throw/, '            else throw')
     .replace("      if (lane.via === 'scan') opts.source = lane.source;   // HANDED DOWN, never re-derived by the adapter\n", '')
-    .replace("require('../channels/index.js')", `require(${JSON.stringify(idxCopy)})`)
+    .replaceAll("require('../channels/index.js')", `require(${JSON.stringify(idxCopy)})`)
     .replace("require('../channels/fake.js')", `require(${JSON.stringify(fakeCopy)})`);
   ok(IPRE !== isrc && FPRE !== fsrc && !/opts\.source = lane\.source/.test(EPRE) && !/scanHost\(/.test(EPRE.replace(/^\s*\/\/.*$/gm, '')) && !/!lane\.source\) return/.test(EPRE),
     'NEGATIVE CONTROL setup: all three pre-fix pieces were reconstructed from the shipped bytes');
@@ -643,7 +644,7 @@ function dayStartClock() {
   ok(r.unread === 1, 'a message stamped before the mark but FETCHED after it stays UNREAD and badges (the direction the docs promised)', String(r.unread));
 
   // ⑦b NEGATIVE CONTROL — the r2 spelling `Math.max(now(), newest.at)`.
-  const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const esrc = engineSource(REPO);
   const PRE = esrc.replace("      const stamp = Number.isFinite(at) ? at : (newest ? (Number(newest.at) || 0) : (en.readAt || 0));",
                            "      const stamp = Number.isFinite(at) ? at : Math.max(now(), Number(newest && newest.at) || 0);");
   ok(PRE !== esrc, 'NEGATIVE CONTROL setup: the r2 stamp was reconstructed from the shipped bytes');
@@ -701,7 +702,7 @@ function dayStartClock() {
   ok(r.budgetHit, 'FIXTURE: the account\'s vendor budget really was exhausted before the overrides (a zero below would otherwise be vacuous)');
   ok(r.onDisk === 30, 'FIXTURE: all 30 overrides are persisted', String(r.onDisk));
   ok(r.silent === 0 && r.said === 30, 'EVERY override broadcast a digest showing the row\'s new period — a persisted change never depends on whether a pass was affordable', JSON.stringify(r));
-  const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const esrc = engineSource(REPO);
   const PRE = esrc.replace("    notify([`${adapterId}/${convId}`]);\n    const en = store.index.peek(`${adapterId}/${convId}`);", "    const en = store.index.peek(`${adapterId}/${convId}`);");
   ok(PRE !== esrc, 'NEGATIVE CONTROL setup: an override with no notify of its own was reconstructed from the shipped bytes');
   const engCopy = patchPath('src/server', 'channels-engine');
@@ -1213,7 +1214,7 @@ console.log('⑩ the inline filter at the account and pattern grains (the owner\
   ok(Wd.routeErrorText({ code: 'bad-assignment', error: "mode 'filtered' needs a filterId" }).includes("mode 'filtered' needs a filterId"), 'CONTROL: without its code the refusal still falls back to the English sentence — the census above would see it');
 
   // (e) NEGATIVE CONTROL — the pre-fix engine (validate FIRST, mint after) reproduces the toast
-  const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const esrc = engineSource(REPO);
   const FIX = "    const v = F.validateAssignment({ ...b, ...(inlineFilterId ? { filterId: inlineFilterId } : {}), scope: { kind, id: site.id } }, site.caps);";
   const PRE = esrc.replace(FIX, '    const v = F.validateAssignment({ ...b, scope: { kind, id: site.id } }, site.caps);');
   ok(PRE !== esrc && esrc.split(FIX).length === 2, 'NEGATIVE CONTROL setup: the pre-fix validate-first order was reconstructed from the shipped bytes');
@@ -1317,7 +1318,7 @@ console.log('⑪ R4 access and notification (two operations), compose, search');
   ok(a2.ok && !(en().watchers || []).some((w) => w.principal.id === 'agent-B') && !en().reachEntries.some((g) => g.principal.id === 'agent-B') && eng.listFor({ kind: 'agent', id: 'agent-B', groups: [] }).conversations.length === 0, 'removing Beta\'s ACCESS removes its notification and its grant in the same write — Beta sees nothing any more');
   // CONTROL: a copy that keeps the watcher when its access goes
   {
-    const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+    const esrc = engineSource(REPO);
     const LINE = '      watchers = cur.watchers.filter((w) => F.eligibleFor(keep, w.principal));';   // lane channel-agent-watch: the one eligibility rule (access here or above)
     const keep = esrc.replace(LINE, '      watchers = cur.watchers;');
     ok(keep !== esrc && esrc.split(LINE).length === 2, 'CONTROL setup: a copy whose access removal keeps the watcher is reconstructed from the shipped bytes');
@@ -1433,7 +1434,7 @@ console.log('⑪ R4 access and notification (two operations), compose, search');
   // Alpha's wake sits inside the ladder (a spend hold, a remote peer-post); the ladder then REFUSES.
   // The refused block used to be filed into Alpha's durable stash — drained into a session that no
   // longer held access. Now: re-asked after the await, dropped by name, nothing held for Alpha.
-const esrc2 = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+const esrc2 = engineSource(REPO);
   async function midFlight(ENGmod2, name) {
     const e = mk(ENGmod2, name);
     await e.pass(A, { force: true });
@@ -1815,7 +1816,7 @@ const esrc2 = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 
     ok(cfsrc.split(CFA).length === 2, 'the matchRecord anchor is present once (the poison mutant patches it)');
     const cfp = patchPath('src', 'channel-filter');
     writeCopy(cfp, cfsrc.replace(CFA, CFA + "\n  if (record && typeof record.text === 'string' && record.text.indexOf('POISON') >= 0) throw new Error('poison: matchRecord cannot handle this record');"));
-    const engPoison = esrc2.replace("require('../channel-filter.js')", `require(${JSON.stringify(cfp)})`);
+    const engPoison = esrc2.replaceAll("require('../channel-filter.js')", `require(${JSON.stringify(cfp)})`);
     const CATCH = "} catch (err) { log.warn(`[channels] ${rec.id}/${convId}: a record could not be matched for ${pkOf(w.principal)} — skipped: ${(err && err.message) || err}`); }";
     ok(esrc2.split(CATCH).length === 2, 'the per-record match guard is present once (the control reverts exactly it)');
     async function onFreshThrow(engSrc, name) {
@@ -1930,7 +1931,7 @@ const esrc2 = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 
 // channel reason outside a section, a ledger write outside, a hand-rolled chain) reddens it; the
 // concurrency pins (⑪(h), aggregate ⑨c) guard what the door DOES.
 console.log('\n⑫ the ONE door: the chain census over the shipped engine');
-const esrc12 = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+const esrc12 = engineSource(REPO);
 const SECTIONS = ['wakeNow', 'flushScopeNow', 'receiptNow'];
 const LEDGER_HELPERS = ['reserveWake', 'finalizeRow'];   // the two writers a section calls; their own bodies write
 function chainCensus(src) {
@@ -2198,7 +2199,7 @@ console.log('\n⑮ a storage mount\'s own OAuth client, borrowed by a Gmail acco
   await R1.close();
 
   // CONTROLS — each check above is not decorative
-  const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const esrc = engineSource(REPO);
   const SEAL = '    const credential = sealCustom(mod, { appId: c.clientId, appSecret: c.clientSecret });';
   const READ = '    try { secret = box.dec(c.appSecretEnc); }\n';
   ok(esrc.split(SEAL).length === 2 && esrc.split(READ).length === 2, 'CONTROL setup: the seal and the read-back lines are present once');
@@ -2681,7 +2682,7 @@ console.log('⑬ mirror-193: a whole-list write from a stale copy is refused by 
   ok(rc.status === 409 && rc.body.code === 'grain-changed' && eng.conversationView(A, C).own.access.map((r) => r.principal.name).join() === 'Xi', 'the CONVERSATION grain: a stale write is refused 409 and Xi keeps its access', JSON.stringify(rc.body));
   ok(F.grainStamp(eng.conversationView(A, C).own) === F.grainStamp(F.grainOf(eng.store.index.peek(`${A}/${C}`))), '…and its view (rows clamped by the caps carry authorityStored) stamps like the stored lists');
   // NEGATIVE CONTROL: the engine without the verdict line writes the mirror's outcome
-  const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const esrc = engineSource(REPO);
   const LINE = '    const bv = F.grainBaseVerdict(cur, p.base);\n    if (!bv.ok) return bv;\n';
   ok(esrc.split(LINE).length === 2, 'the verdict line is present once (the control removes exactly it)');
   const engCopy = patchPath('src/server', 'channels-engine');
@@ -2732,7 +2733,7 @@ console.log('⑰ the generic messages reader answers only a KNOWN conversation (
   const rk = await call(eng, 'GET', { path: MSG.path, params: { adapterId: A, convId: C } });
   ok(rk.status === 200 && Array.isArray(rk.body.records) && rk.body.records.length > 0, '…and the known conversation\'s route still pages', JSON.stringify(rk.status));
   // NEGATIVE CONTROL: the reader without the gate serves the group log's ORIGINAL line by path
-  const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const esrc = engineSource(REPO);
   const GATE = '    if (!known(adapterId, convId)) return null;\n';
   ok(esrc.split(GATE).length === 2, 'the gate line is present once (the control removes exactly it)');
   const engCopy = patchPath('src/server', 'channels-engine');
@@ -2831,7 +2832,7 @@ async function reauthLeg(E, name, { pure = true } = {}) {
   const u = await reauthLeg(ENG, 'reauth-unscoped', { pure: false });
   ok(u.onRead.every((x) => !x.offered && x.why === 'stale') && u.disk.every((cc) => cc && cc.rejudged === 'stale'), 'an adapter with NO pure rule: the old verdict is marked STALE (the next open / pass re-asks the vendor) — never the pre-consent "read-only" kept', JSON.stringify([u.onRead, u.disk]));
   // CONTROL: the engine that skips the invalidation — the incident, reproduced
-  const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const esrc = engineSource(REPO);
   const GATE = '    const cc = en && en.convCaps;\n    if (!cc || !rec) return cc || null;\n';
   ok(esrc.includes(GATE), 'CONTROL setup: the re-judge gate is spelled once');
   const engCopy = patchPath('src/server', 'channels-engine');
@@ -2839,7 +2840,7 @@ async function reauthLeg(E, name, { pure = true } = {}) {
   const c = await reauthLeg(require(engCopy), 'reauth-control');
   ok(c.onRead.every((x) => !x.offered) && c.rows.every(([, o]) => o === false) && c.disk.every((cc) => cc.why === 'send-scope-not-granted'), 'CONTROL: the engine without the invalidation keeps BOTH threads read-only after the re-authorization — on read, in the digest and on disk (the owner\'s incident); the legs above would redden on it', JSON.stringify([c.onRead, c.rows]));
   // wiring pins
-  ok(/if \(r && r\.ok\) await rejudgeConvCaps\(rec, 'connected'\);\s*\n\s*if \(!stopped\) notify\(\[\]\);/.test(esrc) && /await rejudgeConvCaps\(rec, 're-authorized'\);/.test(esrc) && /await rejudgeConvCaps\(rec, 'disconnected'\);/.test(esrc) && /rejudgeConvCaps\(rec, 'boot'\)/.test(esrc), 'PIN: the consent hook, the switched-client rebind, the disconnect and the boot all re-judge BEFORE their one whole digest');
+  ok(/if \(r && r\.ok\) await rejudgeConvCaps\(rec, 'connected'\);\s*\n\s*if \(!engineCtx\.stopped\) notify\(\[\]\);/.test(esrc) && /await rejudgeConvCaps\(rec, 're-authorized'\);/.test(esrc) && /await rejudgeConvCaps\(rec, 'disconnected'\);/.test(esrc) && /rejudgeConvCaps\(rec, 'boot'\)/.test(esrc), 'PIN: the consent hook, the switched-client rebind, the disconnect and the boot all re-judge BEFORE their one whole digest');
   ok(!/caps\.offers\(c, en(?: && en)?\.convCaps/.test(esrc) && !/convCapsState\(en\.convCaps/.test(esrc), 'PIN: no reader of a cached verdict bypasses `effectiveConvCaps` (views AND send decisions)');
   // THE CONVERSE (verify round, 2026-09-27): a DISCONNECT drops the credential — every conversation of the account flips to
   // read-only on read AND on disk, and a send the composer would have offered a moment earlier is REFUSED BY NAME
@@ -2899,7 +2900,7 @@ console.log('\n⑭ the server belt under /older: one flight, the floor, the reme
 {
   const { makeRecord, makeConversation } = require(path.join(REPO, 'src/channel-record.js'));
   const DRAIN_SRC = fs.readFileSync(path.join(REPO, 'src/channel-drain.js'), 'utf-8');
-  const ENGINE_SRC = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const ENGINE_SRC = engineSource(REPO);
   const DRAIN_REQUIRE = "const Drain = require('../channel-drain.js');";
   const worldOf = () => { const convs = new Map(); const at0 = Date.now() - 3600e3; const add = (id, count) => { const recs = []; for (let i = 0; i < count; i++) recs.push({ vendorId: `${id}-m${String(i).padStart(4, '0')}`, at: at0 - (count - 1 - i) * 60e3, author: { id: `u-${i % 3}`, name: ['Ada', 'Brook', 'Cass'][i % 3] }, text: `message ${i} in ${id}` }); convs.set(id, { id, recs }); }; add('deep', 260); add('flat', 3); return { convs, older: 0, log: [], delayMs: 0, failNext: null, arrived: 0, holdFor: 0 }; };
   const modFor = (world, receive = 'poll') => ({
@@ -3260,7 +3261,7 @@ console.log('\n⑰ lane channel-threads: the read shape (place + reactions), the
     ok(named.ok && named.dropped === 'message-unknown' && named.why === 'not-in-conversation' && eng.store.readSide('th-poll', C, { msgs: new Set(['om_never_here']) }).length === 0 && locates === (locates | 0), 'an event naming a conversation for a message that conversation never held is dropped by name (not-in-conversation), nothing appended', JSON.stringify(named));
     eng.store.locateMessage = locate0;
     // CONTROL: a copy without the remembered miss and the budget searches the store on EVERY event
-    const esrcM = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+    const esrcM = engineSource(REPO);
     const L1 = "    if (missAt && t - missAt < MSG_MISS_TTL_MS) return { convId: null, why: 'remembered' };";
     const L2 = "    if (calls.length >= LOCATE_PER_MIN) { locateMinute.set(rec.id, calls); return { convId: null, why: 'locate-budget' }; }";
     ok(esrcM.split(L1).length === 2 && esrcM.split(L2).length === 2, 'CONTROL setup: the miss memo and the budget lines are present once');
@@ -3328,7 +3329,7 @@ console.log('\n⑰ lane channel-threads: the read shape (place + reactions), the
   ok(real.ok.calls === 1 && real.ok.codes.join() === 'ok,cached', 'a custom emoji\'s picture: ONE vendor call, then the account\'s cache', JSON.stringify(real.ok));
   ok(real.gone.calls === 1 && real.gone.codes.join() === 'forbidden' && real.huge.calls === 1 && real.huge.codes.join() === 'too-large', `a picture the vendor REFUSED (10 asks) and one past 1 MB (4 asks) are each fetched ONCE — the refusal is remembered and said by name (${real.gone.calls}, ${real.huge.calls} calls)`, JSON.stringify([real.gone, real.huge]));
   ok(real.limited.calls === 1 && real.limited.codes.join() === 'rate-limited' && real.other.calls === 0 && real.other.codes.join() === 'backoff', 'a 429 answered to one picture: asked again = remembered (no call), and the account\'s OTHER pictures wait it out (`backoff`, no call) — rule 18/19\'s shape: refused, not retried', JSON.stringify([real.limited, real.other]));
-  const esrcE = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const esrcE = engineSource(REPO);
   const M1 = "        if (ttl && !ended) emojiRefused.set(fk, { code, error, retryAfterSec: Att.TRANSIENT.includes(code) || code === 'vendor-error' ? Math.ceil(ttl / 1000) : null, until: now() + ttl });";
   const M2 = "        if (code === 'rate-limited' && !ended) e.attBackoffUntil = now() + (ttl || Att.NEGATIVE_TTL.transient);\n        return { ok: false, code, error, ...(Att.TRANSIENT.includes(code) || code === 'vendor-error' ? { retryAfterSec: Math.max(1, Math.ceil((ttl || Att.NEGATIVE_TTL.transient) / 1000)) } : {}) };\n      }\n      if (outlived(rec, e)) return { ok: false, code: 'account-changed', error: 'the account changed while the picture was fetched";
   ok(esrcE.split(M1).length === 2 && esrcE.split(M2).length === 2, 'CONTROL setup: the emoji route\'s refusal memory and its rate-limit wait are each present once');
@@ -3398,7 +3399,7 @@ console.log('\n⑰ lane channel-threads: the read shape (place + reactions), the
   const real = await rlRun(ENG, 'real');
   ok(real.account.calls === 0 && real.account.asked === 0 && real.account.codes.join() === 'backoff' && real.account.reserved === 0 && real.account.react === 0 && real.account.walk === 0 && real.account.others.every((c) => c === 'backoff'), 'inside the ACCOUNT\'s back-off (a pass the vendor rate-limited): the trickle refuses the whole batch `backoff` before the verdict (0 calls, 0 slots of the minute\'s ceiling reserved), and react / unreact / the thread walk are refused `backoff` — nothing sent', JSON.stringify(real.account));
   ok(real.list.first === 1 && real.list.firstCodes.join() === 'rate-limited' && real.list.next === 0 && real.list.nextCodes.join() === 'backoff' && real.list.after === 3 && real.list.afterAsked === 3 && real.n >= 9, `a 429 answered to a reaction list: its batch stops at the first call (the rest named rate-limited), the NEXT batch inside the vendor's Retry-After is refused \`backoff\` with NO call, after the wait the rows (those the account's back-off refused — none floored) are asked (${real.list.after})`, JSON.stringify(real));
-  const esrcR = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const esrcR = engineSource(REPO);
   const NOTE = "        if (code === 'rate-limited' && !outlived(rec, e)) noteRxRateLimit(e, err);\n";
   ok(esrcR.split(NOTE).length === 2, 'CONTROL setup: the trickle\'s 429 wait is present once');
   const ctl = await rlRun(MUTE.load('src/server/channels-engine.js', esrcR.replace(NOTE, ''), 'rx-no-429-wait'), 'no429');
@@ -3478,7 +3479,7 @@ console.log('\n⑱ lane channel-threads §5: the agent\'s thread read, its walk 
   ok(wb.ok && wb.appended === 1 && wb.foreign === 1 && !eng.store.findRecord('th-agent', C, 'om_k2') && eng.store.findRecord('th-agent', C, 'om_k1'), 'verify r1 belt: a walk record stamped with another conversation is dropped (foreign:1) — the one of this conversation lands', JSON.stringify(wb));
   // CONTROL: a copy with the raw-id fallback restored walks Y's thread into C and the agent reads it
   {
-    const esrcX = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+    const esrcX = engineSource(REPO);
     // quote-vs-topic (2026-09-28): the key now comes through the ONE classifier (`topicKeyOf` → `Thr.placeKindOf`)
     const LINE = "    const key = tk.key || (vendorNamed === true ? id : null);";
     ok(esrcX.split(LINE).length === 2, 'CONTROL setup: the walk key line is present once');
@@ -3566,10 +3567,10 @@ console.log('\n⑱ lane channel-threads §5: the agent\'s thread read, its walk 
   const L1 = "      replies: all.length > THREAD_REPLIES_MAX ? all.slice(all.length - THREAD_REPLIES_MAX) : all,";
   const L2 = '  let replies = (e.all || e.replies).map((id) => ix.byId.get(id)).filter(Boolean);';
   const thrCopy = MUTE.write('src/channel-thread.js', thrSrc.replace(L1, '      replies: all.slice(0, THREAD_REPLIES_MAX),').replace(L2, '  let replies = e.replies.map((id) => ix.byId.get(id)).filter(Boolean);'), 'oldest-500');
-  const esrcB = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const esrcB = engineSource(REPO);
   const IMP = "const Thr = require('../channel-thread.js');";
-  ok(thrSrc.split(L1).length === 2 && thrSrc.split(L2).length === 2 && esrcB.split(IMP).length === 2, 'CONTROL setup: the newest-500 list, the full-list view and the engine\'s one import of the index are each present once');
-  const pre = await bigRun(MUTE.load('src/server/channels-engine.js', esrcB.replace(IMP, `const Thr = require(${JSON.stringify(thrCopy)});`), 'thr-oldest-500'), 'pre');
+  ok(thrSrc.split(L1).length === 2 && thrSrc.split(L2).length === 2 && esrcB.split(IMP).length === 3, 'CONTROL setup: the newest-500 list, the full-list view and the engine family\'s two imports of the index (the engine + channels-outbound.js) are each present once');
+  const pre = await bigRun(MUTE.load('src/server/channels-engine.js', esrcB.replaceAll(IMP, `const Thr = require(${JSON.stringify(thrCopy)});`), 'thr-oldest-500'), 'pre');
   ok(pre.rewalk >= 3 && pre.lastOnPage === 'b-000500', `CONTROL: bound to the pre-fix index the same re-walk spends ${pre.rewalk} vendor calls (paging back to reply 500) and the "newest" page ends at ${pre.lastOnPage} — the leg above would be red`, JSON.stringify(pre));
 }
 // (a'') verify r3 (MONEY/completeness — r2's held LOW): A WALK CUT MID-WAY, THEN A RESTART. The walk's anchor is
@@ -3649,7 +3650,7 @@ console.log('\n⑱ lane channel-threads §5: the agent\'s thread read, its walk 
   const inproc = await cutRun(ENG, 'inproc', { restart: false });
   ok(inproc.afterWalk === 250 && inproc.second === 2 && !inproc.cutLeft, `in the SAME process the adapter's live continuation wins over the stop: ${inproc.second} calls (the unread page + its last), never a re-read`, JSON.stringify(inproc));
   // CONTROL: the engine copy that never writes the stop — after the restart the walk stops at the log's newest reply
-  const esrcC = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const esrcC = engineSource(REPO);
   const CW = '{ await writeThreadCut(adapterId, convId, key, stopAt); cutWritten = true; }';
   ok(esrcC.split(CW).length === 2, 'CONTROL setup: the walk writes its stop at one site');
   const pre = await cutRun(MUTE.load('src/server/channels-engine.js', esrcC.replace(CW, '{ cutWritten = true; }'), 'no-thread-cut'), 'pre');
@@ -3727,7 +3728,7 @@ console.log('\n⑱ lane channel-threads §5: the agent\'s thread read, its walk 
   const b = r320.presses;
   ok(b[2].held === 200 && b[3].got === 0 && b[3].beyond && b[3].calls === 4 && b[4].calls === 0 && b[4].beyond, 'a 320-reply thread: the walk reaches the adapter\'s bound (the newest 200), then says `olderBeyondReach` ONCE for 4 calls and answers from memory after (0 calls) — the pane words it, never a silent "start of the thread"', JSON.stringify(b));
   // CONTROL: the engine copy whose older walk has no depth (the r2 shape) — one call per press, nothing older, ever
-  const esrcO = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const esrcO = engineSource(REPO);
   const OW = '    const w = await threadRefresh(adapterId, convId, msg, { older: true, depth: held + n });';
   const OM = '    if (none && none.count === held && now() - none.at < Drain.OLDER_MEMORY_MS) return';
   ok(esrcO.split(OW).length === 2 && esrcO.split(OM).length === 2, 'CONTROL setup: the older walk asks its depth, and its memory is read, once each');
@@ -3919,7 +3920,7 @@ console.log('\n⑱ lane channel-threads §5: the agent\'s thread read, its walk 
   };
   const real = await digestRun(ENG, 'real');
   ok(real.withReach === 1 && real.secondHour === 2 && real.readCode === 'not-found' && real.afterRevoke === 2 && real.woke === 0, `the reaction digest asks REACH first: with reach a line per message per hour (${real.withReach}, then ${real.secondHour}); once the owner removed the agent's reach (its read is ${real.readCode}) a new reaction on its old message adds NO line (${real.afterRevoke})`, JSON.stringify(real));
-  const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const esrc = engineSource(REPO);
   const GATE = '      if (!mayHear(cid)) continue;\n';
   ok(esrc.split(GATE).length === 2, 'CONTROL setup: the digest\'s reach gate is present once');
   const ctl = await digestRun(MUTE.load('src/server/channels-engine.js', esrc.replace(GATE, ''), 'digest-noreach'), 'noreach');
@@ -4069,7 +4070,7 @@ async function revokeRun(EM, tag) {
   ok(real.read === 'not-found' && real.readThread === 'not-found' && real.list === 0 && real.searchAfter === 0 && real.walkAfter === 'not-found', 'after the revoke: read, read --thread, list, search and the walk verb give NOTHING (the uniform not-found / no rows)', JSON.stringify([real.read, real.readThread, real.list, real.searchAfter, real.walkAfter]));
   ok(real.afterRevoke.wakes === 0 && real.afterRevoke.stash === 0 && real.withAccessWakes === 1, 'after the revoke: a peer\'s reply to what the agent sent wakes and stashes nothing for it (its reply-to-mine watcher went with its access), and a reaction on that message adds no digest line — while with access the same reply wakes it once (the leg\'s positive control)', JSON.stringify([real.afterRevoke, real.withAccessWakes]));
   // CONTROL: the copy without the re-asks — each channel answers after the revoke
-  const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const esrc = engineSource(REPO);
   const sites = esrc.match(/!stillSees\(ctx, /g) || [];
   ok(sites.length >= 6, `CONTROL setup: the re-asks are present (${sites.length} sites: walk, refresh, the two drafts, compose, search)`);
   const noReask = esrc.replace(/!stillSees\(ctx, /g, 'false && !stillSees(ctx, ');
@@ -4231,7 +4232,7 @@ async function stashRevokeRun(EM, DM, tag, { revoke = true } = {}) {
   ok(dsrc.split(G1).length === 2 && dsrc.split(G2).length === 2, 'CONTROL setup: both reads ask the gate, once each');
   const noGate = await stashRevokeRun(ENG, MUTE.load('src/server/conversation-deliver.js', dsrc.replace(G1, '  function stashEntries(cid) { return (stash[cid] || []).slice(); }').replace(G2, '  function stashPeek(cid) { return (stash[cid] || []).map((e) => ({ ...e })); }'), 'no-stash-gate'), 'nogate');
   ok(noGate.read === 'not-found' && noGate.leaks(noGate.injected) && /launch code is 0417/.test(noGate.injected), 'CONTROL: a ladder that never asks the gate hands the revoked agent the message text, the title and the vendor id (the reproduction) — the asserts above would be red', JSON.stringify(noGate.injected).slice(0, 300));
-  const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const esrc = engineSource(REPO);
   const aboutSites = esrc.match(/, about: stashAbout\(/g) || [];
   ok(aboutSites.length === 5, `CONTROL setup: the five channel producers file \`about\` (${aboutSites.length}) — lane channel-agent-watch added the next-turn notification`);
   const noAbout = await stashRevokeRun(MUTE.load('src/server/channels-engine.js', esrc.replace(/, about: stashAbout\(\{[^)]*\}\)/g, ''), 'no-about'), DLV, 'noabout');
@@ -4280,7 +4281,7 @@ async function gateCostRun(EM, DM, tag) {
   const DLV = require(path.join(REPO, 'src/server/conversation-deliver.js'));
   const r = await gateCostRun(ENG, DLV, 'real');
   ok(r.got === 30 && r.clones === 0 && r.rosterCalls <= 1, `one read of a 30-entry stash whose recipient still sees: all 30 kept, ${r.clones} index clones, ${r.rosterCalls} roster lookup(s)`, JSON.stringify(r));
-  const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const esrc = engineSource(REPO);
   const LV = "      const en = store.index.live()[`${adapterId}/${convId}`] || null;\n      const rec = en ? adapterRecords().adapters.find((r) => r.id === adapterId) || null : null;";
   const dsrc = fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf-8');
   const MM = '        try { v = fn(cid, e, memo) || null; }';
@@ -4347,7 +4348,7 @@ async function pagesRun(EM, tag, PAGES) {
   const three = await pagesRun(ENG, 'p3', 3);
   ok(three.spent <= 20 + 2 && three.asked === 7 && three.cut === 13 && three.timerPass === 1, `three-page lists: the batch stops at the ceiling IN REQUESTS (${three.spent} requests for ${three.asked} lists, ${three.cut} rows cut from the end) — the timer's pass right after runs`, JSON.stringify(three));
   ok(three.againAsked === 5 && three.againFloored === 0, 'the rows the ceiling cut were never asked — a minute later they are asked (never floored for 5 min, their slots were given back)', JSON.stringify(three));
-  const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const esrc = engineSource(REPO);
   const NP = '        notePages(e, r);\n';
   ok(esrc.split(NP).length === 2, 'CONTROL setup: the trickle charges a list\'s extra pages at one site');
   const pre = await pagesRun(MUTE.load('src/server/channels-engine.js', esrc.replace(NP, ''), 'rx-lists-not-requests'), 'pre', 3);
@@ -4424,7 +4425,7 @@ async function capsRun(EM, tag) {
   const r = await capsRun(ENG, 'real');
   ok(r.inFlight === 1 && r.storm === 1 && r.ok, `20 concurrent reaction refreshes on a conversation whose convCaps went stale: ONE chat lookup (${r.storm}), every caller answered`, JSON.stringify(r));
   ok(r.during === 2 && r.approveOk, 'approve re-resolves on its OWN lookup (asked after the decision), and a refresh after it joins that one — 2 lookups for the three callers', JSON.stringify(r));
-  const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const esrc = engineSource(REPO);
   const SF = '    const f = join ? convCapsFlights.get(k) : null;';
   ok(esrc.split(SF).length === 2, 'CONTROL setup: the lookup joins the flight in one place');
   const ctl = await capsRun(MUTE.load('src/server/channels-engine.js', esrc.replace(SF, '    const f = null;'), 'no-caps-flight'), 'nofl');
@@ -4440,7 +4441,7 @@ async function capsRun(EM, tag) {
 // first, an in-flight row survives. CONTROL: the copy that never bounds keeps every row.
 console.log('\n㉑ verify r3 (money/memory): the per-account memories — the census, the 30-day trim, the cap');
 {
-  const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const esrc = engineSource(REPO);
   const code = esrc.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*\*)/.test(l)).join('\n');
   const names = new Set();
   for (const m of code.matchAll(/\be\.(\w+) = new (?:Map|Set)\(/g)) names.add(m[1]);
@@ -4754,7 +4755,7 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
   };
   const real = await crashRun(ENG, 'real');
   ok(real.found && real.windowOnDisk && real.windowOnDisk.to > real.cursorOnDisk, 'OWED BEFORE CURSOR: the owed write threw ⇒ the cursor on disk never moved (the window still in flight) ⇒ the restart re-reads the window and finds the hit', JSON.stringify(real));
-  const esrcF = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const esrcF = engineSource(REPO);
   const OWED = '    const observed = t;\n    const born = [];';
   ok(esrcF.split(OWED).length === 2, 'CONTROL setup: the owed write\'s head is spelled once');
   const EC = MUTE.load('src/server/channels-engine.js', esrcF.replace(OWED, "    const observed = t;\n    if (kind === 'steady' && !page.more) { f.cursorAt = win.to; f.window = null; await store.adapters.update(() => {}); }\n    const born = [];"), 'feed-cursor-first');
@@ -6017,7 +6018,7 @@ console.log('\n㉓ lane lark-threads: a thread born after its root was stored');
   ok(W3.calls.thread.includes('oc_e#omt_e') && rE && rE.threadKey === 'omt_e' && E3.eng.store.readTail('larky', 'oc_e', { limit: 50 }).some((r) => r.vendorId === 'om_e1'), '(E) A3: a search hit on the STORED root naming its new topic marks the thread owed (never dropped as "stored"); the walk lands the reply and its repeated root WIDENS the stored copy', JSON.stringify({ thread: W3.calls.thread, root: rE && rE.threadKey }));
 
   // ── (F) CONTROL: an engine copy that never hands the drain its recheck rows — the root never heads its topic
-  const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const esrc = engineSource(REPO);
   const FIXL = ', recheckDue: recheckDueFor(rec) });';
   ok(esrc.split(FIXL).length === 2, '(F) CONTROL setup: the turn hands rule 22a its rows exactly once');
   const engCopyL = patchPath('src/server', 'channels-engine');
@@ -6414,7 +6415,7 @@ console.log('\n§ design 011 lane 2: the poll stamps — a restart keeps every d
   const JOURNAL = '    journal(k);\n    armStamps();\n';
   ok(ssrc.split(JOURNAL).length === 2, 'design 011 lane 2 · CONTROL setup: stamps.set appends the journal line where the control cuts it');
   const scQ = patchPath('src', 'channel-store'); writeCopy(scQ, ssrc.replace(JOURNAL, '    armStamps();\n'));
-  const ecQ = patchPath('src/server', 'channels-engine'); writeCopy(ecQ, fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8').replace("require('../channel-store.js')", `require(${JSON.stringify(scQ)})`));
+  const ecQ = patchPath('src/server', 'channels-engine'); writeCopy(ecQ, engineSource(REPO).replace("require('../channel-store.js')", `require(${JSON.stringify(scQ)})`));
   const c = await run(require(ecQ), 'q011-nojournal', { kill: true });
   ok(c.n > 0 && c.due === c.n, `design 011 lane 2 · CONTROL: no journal (the side file alone) — after the same kill ${c.due} of ${c.n} conversations are due at once — red`, JSON.stringify(c));
   {   // the head's data again, its side file deleted
@@ -6482,7 +6483,7 @@ console.log('\nconsent: a vendor declares its consent row; the engine + route na
     },
   };
   globalThis.__VS_CONSENT_FAKE = FC.adapter ? { ...FC.adapter, ...FC } : FC;   // lane dc-channels-manifest: the module IS the registered thing
-  const engSrcC = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const engSrcC = engineSource(REPO);
   const routeSrcC = fs.readFileSync(path.join(REPO, 'src/routes/channels.js'), 'utf-8');
   const LIST = 'const REAL_ADAPTERS = Object.freeze(VendorList.MANIFESTS.map(adapterOf));';
   const JUDGE = 'const v = row.landing.stateVerdict(state, {';

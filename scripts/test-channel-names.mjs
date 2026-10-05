@@ -28,6 +28,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
+import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-seams: the engine + its three family files as one text
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -72,8 +73,8 @@ const JUDGED = [
   ['src/lib/channel-outbox.js', '`${p.adapterLabel || p.adapterId} · ${p.title || p.convId}`', '③ — proposalView names a proposal by the ladder NOW'],
   ['src/lib/channel-outbox.js', 'const convNameOf = (p) => p.title || p.convId', '③ — the Outbox row\'s WHERE (B-f467): proposalView names a proposal by the ladder NOW'],
   ['src/server/channels-engine.js', 'agentText(en.title || convId', 'AGENT-FACING reaction digest line'],
-  ['src/server/channels-engine.js', 'conversationName(p.adapterId, p.convId) || p.title || p.convId', '③ after the ladder (an unknown outcome)'],
-  ['src/server/channels-engine.js', 'const rTitle = conversationName(p.adapterId, p.convId) || p.title || p.convId', '③ after the ladder (a receipt)'],
+  ['src/server/channels-outbound.js', 'conversationName(p.adapterId, p.convId) || p.title || p.convId', '③ after the ladder (an unknown outcome)'],
+  ['src/server/channels-outbound.js', 'const rTitle = conversationName(p.adapterId, p.convId) || p.title || p.convId', '③ after the ladder (a receipt)'],
   ['src/task-groups.js', 'raw.title || raw.id', 'not a channel (a task group)'],
   ['src/task-groups.js', 'existing?.title || id', 'not a channel (a task group)'],
   ['src/lib/tab-group.js', 'this.windows.get(id)?.title || id', 'not a channel (a window\'s own title)'],
@@ -91,11 +92,11 @@ const census = censusOf(read);
 ok(census.hits.length >= JUDGED.length && census.unjudged.length === 0, `every title-or-id fallback in src/ is judged (${census.hits.length} sites: fed by the ladder upstream, or agent-facing) — none unjudged`, JSON.stringify(census.unjudged));
 const stale = JUDGED.filter(([f, phrase]) => !read(f).includes(phrase));
 ok(stale.length === 0, 'every judged site still exists (a census row whose line moved is re-judged, never silently dropped)', JSON.stringify(stale));
-const eng = read('src/server/channels-engine.js');
+const eng = engineSource(REPO);   // lane dc-channels-seams: the engine + its three family files as one text
 const rend = read('src/lib/chat-renderers.js');
 ok(!/Receipt: proposal \$\{p\.id\}/.test(eng) && !/detail: `Proposal \$\{p\.id\}/.test(eng) && !/en\.title \|\| en\.id/.test(eng), 'the engine prints no `proposal p-…` / `Proposal p-… (adapter)` / `en.title || en.id` toward the human any more');
 ok(!/\{ group: g\.id \}/.test(rend), 'the group card\'s notes name the group by its name, never `vibespace-msg read g-…`');
-const calls = eng.split('\n').filter((l) => /deliver\.deliverToConversation\(/.test(l) && /spendReason: 'channel-(?:message|receipt)'/.test(l));
+const calls = engineSource(REPO).split('\n').filter((l) => /deliver\.deliverToConversation\(/.test(l) && /spendReason: 'channel-(?:message|receipt)'/.test(l));
 const perConv = calls.filter((l) => !/groups, windowMinutes|conversation\(s\)/.test(l));
 ok(calls.length === 3 && calls.filter((l) => /\bchannel\b(?: \}|,| \?)/.test(l.replace(/'channel-(?:message|receipt)'/g, ''))).length === 2, `the per-conversation wake and the receipt hand the ladder their \`channel\` ref (2 of the ${calls.length} channel deliveries; the third is a multi-conversation scope digest)`, calls.map((l) => l.trim().slice(0, 160)).join('\n'));
 const filings = [...eng.matchAll(/userTodos\.add\(INBOX_KEY/g)].map((m) => eng.slice(Math.max(0, m.index - 2000), m.index + 1400));
@@ -250,7 +251,7 @@ const swap = (src, from, to) => { if (!src.includes(from)) throw new Error('cont
 {
   const view = NS.noticeCardView(null, NS.vibespaceNoticeText(wb), { facts: () => null });
   ok(!view.ref && /oc_e53d|Incident room/.test(view.title.text + view.body), 'CONTROL without the channel facts a rebuilt card has no ref (nothing to click) and draws the agent block as the body');
-  const preCensus = censusOf((rel) => (rel === 'src/server/channels-engine.js' ? eng.replace("title: conversationName(en.adapterId, en.id) || en.id, scope:", "title: en.title || en.id, scope:") : read(rel)));
+  const preCensus = censusOf((rel) => (rel === 'src/server/channels-auth.js' ? read(rel).replace("title: conversationName(en.adapterId, en.id) || en.id, scope:", "title: en.title || en.id, scope:") : read(rel)));
   ok(preCensus.unjudged.length === 1 && /en\.title \|\| en\.id/.test(preCensus.unjudged[0].text), 'CONTROL the census flags a restored `en.title || en.id` (the account dialog\'s refs) as an unjudged site', JSON.stringify(preCensus.unjudged));
 }
 

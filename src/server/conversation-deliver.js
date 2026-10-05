@@ -1105,7 +1105,8 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
       // THE TURN THIS OPENS IS NOBODY'S TYPING (design-communication-panel
       // §22 D2): stamped on the live local session at every rung that hands it
       // the frame, so prompt-context can tell the next UserPromptSubmit is a
-      // machine turn and hold the next-turn group reports for the owner's own.
+      // machine turn — its next-turn group reports ride it under the echo guard's
+      // words (lane stash-any-turn: they no longer wait for the owner's own).
       const machineTurn = () => { try { const s = localSessionFor(cid); if (s) s._machineInputAt = Date.now(); } catch { } };
       // THE STAMP PRECEDES THE FRAME (lane group-report-card — reproduced on a real page: the CLI takes the inbox
       // frame and starts the turn, and that turn's UserPromptSubmit hook asks prompt-context, while `postToPeer` is

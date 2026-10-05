@@ -138,9 +138,12 @@ const GROUP_REPORT_BUDGET = 4096;
  *  chat-input) and the last instant a turn nobody typed was handed to it (the
  *  delivery ladder, auto-resume's continue). A machine hand-off newer than the
  *  last keystroke ⇒ this UserPromptSubmit is that machine turn. Neither stamp
- *  (a fresh boot, a terminal typed before the restart) reads as a user turn —
- *  the report is free either way; what this gate stops is a woken agent's
- *  turn carrying every OTHER group's news into an echo. */
+ *  (a fresh boot, a terminal typed before the restart) reads as a user turn.
+ *  IT GATES NOTHING (lane stash-any-turn, the owner 2026-10-05: "outbox 发的消息也是
+ *  一个计费回合啊"): the next-turn group reports ride a turn of ANY origin; on a
+ *  machine turn this only picks the WORDS of the echo guard — the report's head
+ *  says once that these arrived while the agent handled something else, to be
+ *  answered each in its own group (src/server/groups-engine.js ASIDE_LINE). */
 function turnIsUserInitiated(s) {
   const u = Number(s && s._userInputAt) || 0;
   const m = Number(s && s._machineInputAt) || 0;
@@ -685,10 +688,13 @@ app.get('/api/agent/prompt-context', (req, res) => {
       // verify r6 (lane channel-withdraw): the caller's OWN id — a pending fork read the raw id here, rendered the
       // PARENT's pending group messages into its own prompt and moved the parent's markers (the parent never saw them)
       myCid = ownConversationIdOf(s).cid;
-      if (ge && myCid && turnIsUserInitiated(s)) {
+      // ANY TURN (lane stash-any-turn): a receipt's wake, a Background Work notification, a peer message, auto-resume's
+      // continue — a billed turn is a billed turn, and what waits for the next turn rides it; nobody waits for a
+      // keystroke. The echo guard is WORDS: a machine turn's report says once to answer each group in its own group.
+      if (ge && myCid) {
         // verify r1: a re-delivery's cut pointer keeps its room (CUT_PTR_MAX)
         const room = Math.min(GROUP_REPORT_BUDGET, INLINE_CAP - INLINE_TAIL_MARGIN - committed() - (injectGroups.length ? CUT_PTR_MAX + 4 : 0));
-        rep = room >= 400 ? ge.reportsForTurn(myCid, { budget: room }) : { text: '', marks: [] };
+        rep = room >= 400 ? ge.reportsForTurn(myCid, { budget: room, aside: !turnIsUserInitiated(s) }) : { text: '', marks: [] };
         if (rep.text) tailHeld += B(rep.text) + 2;
         else if (room < 400) console.log(`[groups] ${key}: the next-turn group reports wait for the next prompt — ${room} B left under the inline cap`);
       }
@@ -952,14 +958,14 @@ app.get('/api/agent/prompt-context', (req, res) => {
     }
     // NEXT-TURN GROUP REPORTS (design-communication-panel §22 D2): every agent
     // group this conversation is in that has news since its last report
-    // yields ONE report — on a USER-initiated turn only (a turn somebody typed:
-    // `_userInputAt` not older than the last machine hand-off), never a billed
-    // turn of its own. DECIDED FIRST (B-c198 — above, its room held through every
-    // producer), pushed LAST: capInline must never be the thing that trims it
-    // (its markers advance when it is handed out). Only groups that fit are
-    // marked; the rest wait for the next turn and are NAMED.
+    // yields ONE report — on the next turn of ANY origin (lane stash-any-turn,
+    // 2026-10-05: a turn somebody typed, a wake, a notification, auto-resume's
+    // continue), never a billed turn of its own. DECIDED FIRST (B-c198 — above,
+    // its room held through every producer), pushed LAST: capInline must never be
+    // the thing that trims it (its markers advance when it is handed out). Only
+    // groups that fit are marked; the rest wait for the next turn and are NAMED.
     try {
-      if (rep && turnIsUserInitiated(s)) {
+      if (rep) {
         const used = Buffer.byteLength(outParts.join('\n\n'), 'utf-8');
         // the section goes in WHOLE or not at all: its markers move only when
         // it is handed out uncut (2026-09-23 verifier — capInline trimmed a

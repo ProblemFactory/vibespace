@@ -20,7 +20,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
-import { mutantCopies } from './mutant-copy.mjs';
+import { mutantCopies, keeperWithInstalls } from './mutant-copy.mjs';
 import { scratch } from './scratch.mjs';
 import { writeFakeAgentBrowser } from './fixtures/fake-agent-browser.mjs';
 const require = createRequire(import.meta.url);
@@ -516,9 +516,11 @@ console.log('— ⑥ controls');
   const Vl = MUT.load('src/browser-verbs.js', late, 'no-pin');
   ok(judgeRungs(Vl).length > 0, 'control (a): …and ①\'s rung order goes red on it', judgeRungs(Vl));
   const ks = read('src/server/browser-keeper.js');
-  const twice = ks.replace("    const v0 = VERBS.cliInstallVerdict({ version: String(version || ''), running: installState.running,", "    const v0 = VERBS.cliInstallVerdict({ version: String(version || ''), running: false,");
-  ok(twice !== ks, 'control (b): the patch (a CLI install that ignores THE slot) applies');
-  const Kt = MUT.load('src/server/browser-keeper.js', twice, 'two');
+  const kci = read('src/server/browser-cli-install.js'), kbi = read('src/server/browser-installs.js'); // rv-browser F7: the CLI row's file, THE slot's file
+  const CLI_ROW = 'src/server/browser-cli-install.js', SLOT = 'src/server/browser-installs.js';
+  const twice = kci.replace("    const v0 = VERBS.cliInstallVerdict({ version: String(version || ''), running: installState.running,", "    const v0 = VERBS.cliInstallVerdict({ version: String(version || ''), running: false,");
+  ok(twice !== kci, 'control (b): the patch (a CLI install that ignores THE slot) applies');
+  const Kt = keeperWithInstalls(MUT, REPO, { [CLI_ROW]: twice }, 'two');
   const Dt = path.join(ROOT, 'data-ct'); fs.mkdirSync(Dt, { recursive: true });
   const kt = Kt.create({ dataDir: Dt, homeDir: HOME, env: () => ({ PATH: PATH_ENV, HOME, FAKE_NPM_DELAY_MS: '400' }), serverSetting: () => undefined, liveKeys: () => new Set(), install: false, tickMs: 3600e3, log: { log() { }, warn() { }, error() { } }, hostKnown: () => false });
   const n0 = npmCalls().length;
@@ -542,9 +544,9 @@ console.log('— ⑥ controls');
   ok(fw.install.running && fw.pinned.installed === true && fw.pinned.path.endsWith('agent-browser.js') && fs.existsSync(path.join(Dw, 'browser-tools', 'cli-pin.json')), 'control (c): …the half-written package\'s LAUNCHER was pinned while npm still ran (the pin file written) — exactly what ②\'s mid-install leg catches', { install: fw.install, pinned: fw.pinned });
   await waitFor(async () => !(await kw.cliFacts()).install.running, 6000);
   // verify r1 (F3): a keeper whose re-attach knows the CLI install only ⇒ a restart mid-CloakBrowser-install frees the slot
-  const cliOnly = ks.replace("    if (!m || !['cli', 'cloak', 'chrome-build'].includes(m.kind) || (!Number.isInteger(m.pid) && m.kind !== 'chrome-build'))", "    if (!m || m.kind !== 'cli' || !Number.isInteger(m.pid))");
-  ok(cliOnly !== ks, 'control (d): the patch (a re-attach that drops a CloakBrowser marker) applies');
-  const Kr = MUT.load('src/server/browser-keeper.js', cliOnly, 'cli-only');
+  const cliOnly = kbi.replace("    const row = m ? rows.get(m.kind) : null;", "    const row = m && m.kind === 'cli' && Number.isInteger(m.pid) ? rows.get(m.kind) : null;");
+  ok(cliOnly !== kbi, 'control (d): the patch (a re-attach that drops a CloakBrowser marker) applies');
+  const Kr = keeperWithInstalls(MUT, REPO, { [SLOT]: cliOnly }, 'cli-only');
   const Dr = path.join(ROOT, 'data-cr'); const Tr = path.join(Dr, 'browser-tools'); fs.mkdirSync(Tr, { recursive: true });
   const slow2 = spawn('sleep', ['2'], { stdio: 'ignore', detached: true }); kids.add(slow2.pid);
   const Fr = require('../src/browser-facts.js');
@@ -574,10 +576,10 @@ console.log('— ⑥ controls');
   const o0 = Wo.cliRowWords({ ...base, choice: { mode: 'version', version: '0.39.2' }, pinned: { version: '0.39.2', installed: false }, onPath: { version: '0.38.1' } }, t), o1 = Wo.cliRowWords({ ...base, choice: { mode: 'version', version: '0.39.2' }, pinned: { version: '0.39.2', installed: true }, onPath: { version: '0.38.1' } }, t);
   ok(Wo.cliOfferLabel(o0.offer, t, { version: o0.version, table: base.table }) === 'Install the measured version…' && !o1.warn, 'control (g): …the button said "the measured version" for 0.39.2 and the row in use never drifted — exactly what ⑤\'s named-version leg catches');
   // verify r1 (F8): a keeper whose steps have no wall clock (the CLI's npm, the re-attach) ⇒ the slot is held while npm lives
-  const unbounded = ks.replace("      if (child.exitCode != null || child.signalCode != null) return;\n", "      return;\n")
-    .replace("      if (stalled || now() < deadlineAt) return;\n", "      return;\n");
-  ok(unbounded !== ks && !unbounded.includes('if (child.exitCode != null || child.signalCode != null) return;') && !unbounded.includes('if (stalled || now() < deadlineAt) return;'), 'control (f): the patch (no wall clock on the CLI install nor on a re-attached step) applies');
-  const fu = await slotBoundLeg(MUT.load('src/server/browser-keeper.js', unbounded, 'unbounded'));
+  const unboundedCli = kci.replace("      if (child.exitCode != null || child.signalCode != null) return;\n", "      return;\n");
+  const unboundedSlot = kbi.replace("      if (stalled || now() < deadlineAt) return;\n", "      return;\n");
+  ok(unboundedCli !== kci && unboundedSlot !== kbi && !unboundedCli.includes('if (child.exitCode != null || child.signalCode != null) return;') && !unboundedSlot.includes('if (stalled || now() < deadlineAt) return;'), 'control (f): the patch (no wall clock on the CLI install nor on a re-attached step) applies');
+  const fu = await slotBoundLeg(keeperWithInstalls(MUT, REPO, { [CLI_ROW]: unboundedCli, [SLOT]: unboundedSlot }, 'unbounded'));
   ok(!fu.inProcess.ended && !fu.inProcess.slotFree && fu.reattach.re === 'running' && !fu.reattach.ended && !fu.reattach.slotFree, 'control (f): …a hung npm held THE slot past its deadline, before and after a restart — exactly what ②\'s slot-bound legs catch', fu);
   // verify r2 (H1): a keeper that runs the CURRENT `browser.cli` on every call (the pre-ruling wiring) ⇒ its own call on a
   // browser launched under 0.38.0 runs 0.38.1 and the fake daemon restarts; a removed install falls silently to PATH

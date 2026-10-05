@@ -37,6 +37,7 @@ import { pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { scratch } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-seams: the engine + its three family files as one text
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -267,7 +268,7 @@ ok(E.read.om_q.startsWith('ok:not-a-thread::0') && E.read.om_p.startsWith('ok:no
 ok(/not in a thread — a quoted reply and the message it quotes are both shown in the conversation itself/.test(E.agentNote || ''), `the agent's thread read of a quote says so: "${E.agentNote}"`);
 ok(E.walkQuote.code === 'not-a-thread' && E.walkQuote.agent === 'not-a-thread' && E.walkQuote.calls === 0 && E.walkTopic.ok && E.walkTopic.calls === 1, `the WALK of a quote is refused not-a-thread (the owner's and the agent's door) with ZERO vendor calls; a topic's walk is one call (${J({ quote: E.walkQuote, topic: E.walkTopic })})`);
 {
-  const eng = read('src/server/channels-engine.js');
+  const eng = engineSource(REPO);   // lane dc-channels-seams: the engine + its three family files
   const words = read('src/lib/channel-words.js');
   const rx = read('src/routes/channels.js'), ag = read('src/agent-routes.js');
   ok(eng.includes("parentKey = Thr.placeKindOf(String(v.proposal.replyTo), ix).topic;") && eng.includes('const tk = topicKeyOf(ix, id);') && /function topicKeyOf\(ix, id\) \{\n    const c = Thr\.placeKindOf\(id, ix\);/.test(eng), 'WIRING: the engine\'s placement parent fact, its thread read and its walk all ask Thr.placeKindOf (one classifier)');
@@ -372,7 +373,7 @@ console.log('⑤ patched-copy controls');
   const layerModel = judgeRender(Pb, T).filter((r) => QUOTE_ROWS.includes(r.id) || r.id === 'om_p');
   ok(layerPane.every((r) => !r.d.tag && !r.d.chip) && layerModel.every((r) => !r.d.tag && !r.d.chip), 'each layer alone holds: the REAL pane under the lying placeOf draws no tag / chip on a quote (it reads the kind), and the pre-fix pane under the REAL placeOf draws none either (no thread fact)');
   // (c) the ENGINE's parent fact on its own rule (the index entry, a chain counted): --to on a quote defaults INTO a thread
-  const engSrc = fs.readFileSync(ENG_PATH, 'utf-8');
+  const engSrc = engineSource(REPO);
   const C_LINE = '        parentKey = Thr.placeKindOf(String(v.proposal.replyTo), ix).topic;';
   ok(engSrc.split(C_LINE).length === 2, 'CONTROL (c) setup: the engine\'s parent fact is one line');
   const Ec = M.load('src/server/channels-engine.js', engSrc.replace(C_LINE, "        parentKey = ix.byRecord.get(String(v.proposal.replyTo)) || null; if (parentKey && ix.threads.get(parentKey).kind === 'conversation') parentKey = null;"), 'own-parent-rule');
