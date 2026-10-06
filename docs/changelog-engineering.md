@@ -4,6 +4,14 @@ This file is the engineers' record of every release: the lanes, the verification
 
 `CHANGELOG.md` (with `CHANGELOG.zh.md` and `CHANGELOG.ja.md`) is the user's: what changed for the person using VibeSpace, one plain line per change, in the interface's language — the rules are in docs/changelog-style.md. From 2.369.199 on, every release also writes its section here, under the same `## <version> — <date>` heading as its user entry and in the same commit, newest first above the verbatim record.
 
+## 2.369.226 — 2026-10-06
+
+### HOTFIX — the channels refresh drain yields the event loop between its steps (a fleet pod, 2026-10-06 22:37Z)
+
+- **Measured** (read-only, a fleet pod on 2.369.221 with 4 Gmail accounts = 88 915 index rows): every ws heartbeat round "tainted (tick 10 s late, longest loop gap 18–19 s)", liveness + readiness probes timing out, the main thread 23 of 24 s in state R; a 16 s inspector CPU profile — `apply` channel-drain.js 8.8 s + `itemsOf` 3.4 s self, the pass loop channels-engine.js:1906 14.1 s of 16.9 s inclusive. Lane channel-drain-scale measured the same shape here: a forced pass over a fake-poll of 90 000 rows + 300 requests = ONE 14.2 s synchronous block (≈ 23 ms per step of O(due) work).
+- **Fix** (src/server/channels-engine.js, the pass's step loop): `STEP_SLICE_MS = 25` — after 25 ms of synchronous stepping the loop `await`s one `setImmediate` before the next step. The drain's decisions are untouched (the slice boundary is not a `wait`; rule 18 stays the vendor pace). With the slice the longest blocks left are the three whole-index walks outside the loop (the opening turn's dueList ≈ 128 ms, discovery's unlisting scan ≈ 193 ms, the end-of-pass schedulerScan ≈ 240 ms on 90 000 rows) — the next release's lanes remove them (channel-drain-scale: O(due + steps) structures + paced views; channel-feed-authority: an authoritative change feed means NO per-row timers and an indexed due list — the owner's law: fetch updates, never ask each row).
+- Gates: test-channel-drain 404, test-channels-engine 779, test-channels-aggregate 399, npm run build, the fast tier (2 lanes) on the bumped tree.
+
 ## 2.369.225 — 2026-10-06
 
 ### int225 — the integration (Opus): a Services row links where the user can reach it — on int224b's history (06621d688, tree == master b652f0850)

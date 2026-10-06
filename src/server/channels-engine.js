@@ -293,6 +293,8 @@ const PACE_RESERVE_TTL_MS = 2000;
  *  read so far and the account's first-read count — at most this often, never
  *  per fetch (the broadcast law: one recomputed result per change, bounded). */
 const PROGRESS_EVERY_MS = 5000;
+/** HOTFIX 2.369.226: the longest synchronous run of drain steps before the pass yields the event loop once. */
+const STEP_SLICE_MS = 25;
 const RATE_RETRY_AFTER_MAX_MS = 15 * 60e3;
 const RATE_STRIKES_LOUD = 10;
 /** THE REFRESH REQUEST SET (lane R2 verify r5): a refresh is a REQUEST into
@@ -2047,7 +2049,14 @@ function create(deps = {}) {
         const scanLane = laneOrScan(rec, {}).via === 'scan';
         e.dq = Drain.open(e.dq, { origin, force, backoff, timerDue: e.timerDue, hostScan: scanLane });
         if (e.dq.pass.timerWork) e.timerDue = false;
+        // HOTFIX 2.369.226 (a fleet pod, 2026-10-06 22:37Z): on a 89 000-row mailbox the synchronous steps below
+        // (`turn` → `next` → `apply`, every refuse / answer settled inline) ran 18 s back to back inside every 20 s
+        // heartbeat round — the ws heartbeat, the liveness probes and every other tenant of the loop starved. The pass
+        // now steps in TIME-BOUNDED SLICES: after STEP_SLICE_MS of synchronous stepping it yields one macrotask. The
+        // drain's decisions are untouched (the slice boundary is not a `wait`; rule 18 stays the vendor pace).
+        let sliceAt = now();
         for (;;) {
+          if (now() - sliceAt >= STEP_SLICE_MS) { await new Promise((r) => setImmediate(r)); sliceAt = now(); }
           // THE TIMER'S TURN (Drain rule 13): the pass's opening one, or a tick that found this pass busy while the account was due (`e.timerDue`, r5 verify) — the due rows by the clock NOW
           if (Drain.wantsTurn(e.dq, e.timerDue)) {
             e.timerDue = false;

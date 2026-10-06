@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.226 — 2026-10-06
+
+### Fixed
+- A very large mailbox no longer freezes the workspace while it refreshes (a hotfix; the full repair follows in the next release).
+
 ## 2.369.225 — 2026-10-06
 
 ### Fixed
