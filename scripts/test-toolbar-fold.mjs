@@ -25,6 +25,9 @@
 //      after the arrangement; Customize suspends / reschedules it; toolbar-fold.js drives createBarFold (rulerIn, groups,
 //      suspended); bar-fold.js carries the icon step; the CSS (no 160 px zone minimum, no-shrink children, the title the
 //      flexible item, the fold's classes scoped to #toolbar, the compact form, the Customize wrap); every t() has zh + ja;
+//   §6 THE DOC WINDOW'S BAR (design 020, lane doc-editor-ui): its groups + priorities as the design names them, never
+//      falling left to right; barLadder over its shape folds raw first, the inserts next, B / I last; every glyph an
+//      icons.js SVG; its CSS names no literal colour and no literal radius (a planted one is caught);
 //   NEGATIVE CONTROLS (scripts/mutant-copy.mjs): a barLadder that folds WITHOUT the icon step, one that compacts by
 //      POSITION, and a barLayout whose groups forget the zone gaps each fail §1/§1b/§2; the pre-fix `.toolbar-right`
 //      rule planted into a patched listing fails the CSS pin.
@@ -304,6 +307,39 @@ const cssPins = (css) => {
   const bf = libTexts['bar-fold.js'];
   ok(/import \{ barLadder \} from '\.\/live-bar-layout\.js';/.test(bf) && /const v = barLadder\(\{ widthPx, gapPx, overflowPx, groups: zones, items: rows \}\);/.test(bf) && /if \(r\.compactClass\) setCls\(r\.el, r\.compactClass, small\.has\(r\.key\)\);/.test(bf) && /!host\.contains\(r\.target\)/.test(bf), 'bar-fold.js: barLadder (the icon step), the compact class applied, mutations inside the ruler ignored');
   ok(!/^import /m.test(read('src/lib/toolbar-fold-model.js')) && !/\bdocument\b|\bwindow\./.test(read('src/lib/toolbar-fold-model.js').replace(/\/\/.*$/gm, '')), 'toolbar-fold-model.js is PURE (imports nothing, no DOM)');
+}
+
+// ── §6 the Doc window's bar (design 020, lane doc-editor-ui, 2.369.223): the same fold (bar-fold.js), its own groups ──
+console.log('§6 the Doc window\'s bar — groups, priorities, glyphs, theme colours (design 020)');
+{
+  const ui = read('src/lib/doc-window-ui.js');
+  // the bar in source order: tool('key', I.glyph | '', t('…'), priority, …) and sep(priority)
+  const items = [...ui.matchAll(/\btool\('(\w+)', (?:I\.(\w+)|''), t\('[^']+'\), (\d)|\bsep\((\d)\)/g)].map((m) => (m[4] ? { key: 'sep', p: +m[4] } : { key: m[1], glyph: m[2] || null, p: +m[3] }));
+  const got = items.map((x) => x.key + ':' + x.p).join(' ');
+  ok(got === 'style:0 sep:1 bold:1 italic:1 code:2 sep:3 ul:3 ol:3 task:3 sep:4 table:4 link:4 image:4 sep:5 raw:5', 'the groups + priorities are design 020 §2\'s: [style ▾] | B I </> | • 1. ☑ | table link image | raw', got);
+  ok(items.every((x, i) => i === 0 || x.p >= items[i - 1].p) && /btnStrip\.dataset\.prio = '0'/.test(ui) && /BAR\.push\(\{ el: btnStrip, key: 'comments', priority: 0 \}\)/.test(ui), 'priorities never fall left to right (the fold takes a suffix); the comments button at the end never folds');
+  // barLadder over the bar's shape (28 px glyphs, the style ≈ 80, a separator 11, gap 2): every width folds by priority
+  const row = items.map((x, i) => ({ key: x.key + i, px: x.key === 'style' ? 80 : x.key === 'sep' ? 11 : 28, priority: x.p })).concat([{ key: 'comments', px: 44, priority: 0 }]);
+  const bad = [], seen = new Set();
+  for (let w = 520; w >= 150; w -= 3) {
+    const v = L.barLadder({ widthPx: w, gapPx: 2, overflowPx: 30, items: row });
+    const pr = (keys) => row.filter((r) => keys.includes(r.key) && !/^sep/.test(r.key)).map((r) => r.priority);
+    const sp = pr(v.shown), op = pr(v.overflow);
+    if (op.some((p) => sp.some((q) => q > p))) bad.push({ w, shown: v.shown, overflow: v.overflow });
+    seen.add(v.overflow.filter((k) => !/^sep/.test(k)).join(' '));
+  }
+  ok(!bad.length && seen.has('') && [...seen].some((f) => /raw/.test(f) && !/table/.test(f)) && [...seen].some((f) => /table/.test(f) && !/bold/.test(f)), 'barLadder 520 → 150 px: no shown item outranks a folded one — raw folds first, then the inserts, B / I last', { bad: bad.slice(0, 3), seen: [...seen] });
+  const icons = await import('../src/lib/icons.js');
+  const glyphs = [...new Set([...ui.matchAll(/\bI\.(\w+)/g)].map((m) => m[1]))];
+  ok(['bold', 'italic', 'code', 'listUl', 'listOl', 'task', 'table', 'link', 'image', 'raw'].every((g) => glyphs.includes(g)) && glyphs.every((g) => /^<svg aria-hidden="true"/.test(icons.UI_ICONS[g] || '')), 'every glyph the window draws is an icons.js SVG (aria-hidden) — the ten editor glyphs among them', glyphs.filter((g) => !icons.UI_ICONS[g]));
+  ok(!/(?:textContent = |mk\('button', [^,]+, )'[⋯…☑•✓]/.test(ui), 'no text glyph stands in for an icon on a button');
+  const cssOf = (src) => (/const CSS = `([\s\S]*?)`;/.exec(src) || [])[1] || '';
+  const literals = (css) => css.match(/#[0-9a-f]{3,8}\b|\b(?:rgba?|hsla?)\(|(?<![-\w])(?:white|black)(?![-\w])/gi) || [];
+  const radii = (css) => (css.match(/border-radius:[^;}]+/g) || []).filter((r) => !/^border-radius:(var\(--radius(-sm)?\)( var\(--radius(-sm)?\) 0 0)?|50%|12px 12px 0 0|0)$/.test(r));
+  const css = cssOf(ui);
+  ok(css.length > 2000 && !literals(css).length, 'the Doc window\'s CSS names no literal colour — theme vars and color-mix of them only', literals(css));
+  ok(!radii(css).length, 'every radius is --radius / --radius-sm (a dot 50 %, the bottom sheet\'s top corners)', radii(css));
+  ok(literals(css + '.x{color:#fff;box-shadow:0 1px rgba(0,0,0,.2)}').length === 2 && radii(css + '.x{border-radius:6px}').length === 1, 'CONTROL: a planted literal colour and a literal radius are caught');
 }
 
 for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 3 })) ok(r.pass, 'tree: ' + r.name + (r.pass ? '' : ' — ' + r.detail));

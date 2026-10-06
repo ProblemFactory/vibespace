@@ -23,3 +23,7 @@ Adoption fixes on Tiptap measured above: the table serializer without padding, b
 
 ## After the adoption (scripts/test-doc-wheel.mjs, the adopted core)
 Unedited save byte-identical 29/29 · one cell / item edited, untouched lines byte-identical 29/29 (+ the CRLF one refused by name) · only the edited line changed 28/29 (a loose list's blank line between items) · DROPPED: none (raw HTML + front matter ride as raw blocks) · raw reasons left: crlf, too_big.
+
+## § UI (design 020) — as built (lane doc-editor-ui, 2.369.223)
+
+The window's face over this core: the design desk's spec /var/tmp/vibespace-lanes/design-desk/q-020/doc-editor-ui.md (§0 the impact table, §1 the audit, §2 the direction in theme tokens; artboards q-020/design/doc-editor-ui/). Built: T4 the task-item fix (the node view's missing `data-type`, a doc-markdown option — the serializer untouched, test-doc-wheel byte-identical), T1 the 76ch column + rhythm, T2 the one folding bar (bar-fold), T3 the one status strip, T5 the table chrome + hover grips onto the existing menu, T6 the code language chip, T7 quote / image caption / raw head / links, T8 the phone. Not built (the spec's 不做): a selection bubble toolbar, an outline pane, syntax colouring. Where it lives: docs/kb-file-structure.md § src/lib/doc-window-ui.js (Design 020); gates scripts/test-doc-window.mjs §9 and scripts/test-toolbar-fold.mjs §6.

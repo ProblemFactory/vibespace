@@ -54,6 +54,7 @@ function readStarttime(pid) {
     return Number(s.slice(s.lastIndexOf(')') + 2).split(' ')[19]);
   } catch { return 0; }
 }
+const LISTEN_READ_MS = 30_000; // lane artifacts-services: a running job's listening ports, re-read at most this often (the sweep's tick)
 function bootId() { try { return fs.readFileSync('/proc/sys/kernel/random/boot_id', 'utf-8').trim(); } catch { return ''; } }
 // mirror of ws-handler's agentEnv drops (jobs must never inherit ambient vendor
 // credentials or server config — §ban-safety structural leg)
@@ -1206,6 +1207,7 @@ class JobManager {
         this._finalizeRun(job, run, exit, 'sweep');
         continue;
       }
+      if (stamp) this._listenRead(job, stamp); // lane artifacts-services: the port it serves (async, ≤ 1 read / job / 30 s)
       // timeout
       if (job.kind === 'task' && job.timeoutMs && run && !run.endedAt && now() - run.startedAt > job.timeoutMs) {
         job._timedOut = true; this._killGroup(job, 'SIGTERM');
@@ -1224,6 +1226,36 @@ class JobManager {
         try { this.d.resolveJobAsk && this.d.resolveJobAsk(job.id); } catch { } // expired ask is moot — clear its inbox entry too
         this._touch(job, { what: 'interaction panel expired unanswered', verb: 'answers' });
       }
+    }
+    this._serviceDoor();
+  }
+  // ── SERVICES (lane artifacts-services): a job that LISTENS is a deliverable of its owner conversation ──
+  /** The job's pid tree → the TCP ports it listens on (src/proc-listen.js: async, bounded, no exec), on THIS tick, at
+   *  most once per job per LISTEN_READ_MS. `job.listen` = {port, firstAt, at} — persisted, so a stopped job's row
+   *  still names its last address; the lowest port is the row's (a moved port patches it). */
+  _listenRead(job, stamp) {
+    if (job._listenBusy || now() - (job._listenAt || 0) < (this.d.listenReadMs ?? LISTEN_READ_MS)) return; // the deps knob = a fast suite's seam only
+    job._listenBusy = true; job._listenAt = now();
+    const PL = require('./proc-listen.js');
+    PL.pidTree(stamp.pid).then((pids) => PL.listenPortsOf(pids)).then((ports) => {
+      const port = ports[0] || 0;
+      if (!port || (job.listen && job.listen.port === port)) return;
+      const t = now();
+      job.listen = { port, firstAt: (job.listen && job.listen.firstAt) || t, at: t };
+      this._dirty = true;
+      this._serviceDoor(); // the row is born / patched the moment the read lands, not a tick later
+    }).catch(() => { }).finally(() => { job._listenBusy = false; });
+  }
+  /** The registry's door (src/server/artifact-registry.js noteService): a service row's facts moved — born, port
+   *  moved, stopped, started again. No I/O: a signature per job, compared on the tick. */
+  _serviceDoor() {
+    if (typeof this.d.onService !== 'function') return;
+    for (const job of this.jobs.values()) {
+      if (!job.listen) continue;
+      const sig = `${['up', 'starting', 'awaiting-user'].includes(job.state) ? 'r' : 's'}:${job.listen.port}`;
+      if (job._svcSig === sig) continue;
+      job._svcSig = sig;
+      try { this.d.onService(job); } catch (e) { this.d.log('[jobs] service door failed:', e.message); }
     }
   }
   _untilScan(job, run) {

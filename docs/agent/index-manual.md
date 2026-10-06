@@ -34,6 +34,9 @@ server. `vibespace-docs <topic>` prints it.
 - Anything the USER needs must be in your CHAT REPLY too; tool writes are for
   the board/other agents, not a substitute for telling the human.
 - IDs you cannot see behave as nonexistent (uniform not-found, no oracle).
+- Files you create or change with your file tools (Write / Edit … — your harness's own write tools)
+  are collected into this conversation's Artifacts (a card in chat + the Artifacts list; Markdown opens in the Doc window).
+  Shell redirection (`cat >`, heredocs, scripts) is NOT collected — use the file tools for anything the user should find later.
 
 - **vibespace-msg** — message other agent sessions in explicit GROUPS (a direct message = the pair's two-member group; each member's notify mode decides next-turn report vs a billed wake; Task-Group scoped reach; `vibespace-docs msg`).
 - **vibespace-channels** — read the external channels (Lark, Gmail, other agents) the user let you see and PROPOSE replies the user approves (`vibespace-docs channels`).

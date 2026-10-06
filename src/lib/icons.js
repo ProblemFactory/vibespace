@@ -177,5 +177,16 @@ export const UI_ICONS = {
   // lane channels-fold: SLACK's silhouette — its "#": each bar covers ONE crossing out to its edge, each line's other
   // end is a dot; no two pieces touch (no brand colours)
   'vendor-slack': _s('<path d="M2.9 6.4h3.5M9.6 2.9v3.5M13.1 9.6H9.6M6.4 13.1V9.6"/><path d="M6.4 2.9h0M13.1 6.4h0M9.6 13.1h0M2.9 9.6h0"/>', { sw: 1.8 }),
+  // design 020 (lane doc-editor-ui): the Doc window's formatting bar — Bold, Italic, inline code, bulleted / numbered /
+  // task lists, table, link, Raw (the markdown source: a page with a corner turned and `#`); the image is `image` above
+  bold:      _s('<path d="M4.5 2.5h4.25a2.75 2.75 0 010 5.5H4.5zM4.5 8h5a2.75 2.75 0 010 5.5h-5z"/>', { sw: 1.8 }),
+  italic:    _s('<path d="M6.5 2.5h6M3.5 13.5h6M9.5 2.5l-3 11"/>'),
+  code:      _s('<path d="M5.5 4.5L2 8l3.5 3.5M10.5 4.5L14 8l-3.5 3.5"/>'),
+  listUl:    _s('<path d="M6 4h8M6 8h8M6 12h8"/><circle cx="2.75" cy="4" r=".9" fill="currentColor" stroke="none"/><circle cx="2.75" cy="8" r=".9" fill="currentColor" stroke="none"/><circle cx="2.75" cy="12" r=".9" fill="currentColor" stroke="none"/>'),
+  listOl:    _s('<path d="M7 4h7M7 8h7M7 12h7M2.5 2.75L3.5 2.25v3.5M2.25 9.25c.2-.6 1.75-.8 1.75.2 0 .7-1.75 1.4-1.75 2.3h1.9"/>', { sw: 1.3 }),
+  task:      _s('<rect x="2" y="2.5" width="11" height="11" rx="2"/><path d="M5 8l2 2 4-4.5"/>'),
+  table:     _s('<rect x="2" y="2.5" width="12" height="11" rx="1.5"/><path d="M2 6.5h12M2 10h12M6.5 6.5v7"/>'),
+  link:      _s('<path d="M6.75 9.25a3 3 0 004.25.25l2-2a3 3 0 00-4.25-4.25l-1 1"/><path d="M9.25 6.75A3 3 0 005 6.5l-2 2a3 3 0 004.25 4.25l1-1"/>'),
+  raw:       _s('<path d="M4 1.5h5.5L13 5v9.5H4z"/><path d="M9.5 1.5V5H13M6.5 8.5l-.5 4M8.5 8.5l-.5 4M5.75 9.75h3.5M5.5 11.25h3.5"/>', { sw: 1.2 }),
   forkBranch: _s('<path d="M5 5.372v.878c0 .414.336.75.75.75h4.5a.75.75 0 0 0 .75-.75v-.878a2.25 2.25 0 1 1 1.5 0v.878a2.25 2.25 0 0 1-2.25 2.25h-1.5v2.128a2.251 2.251 0 1 1-1.5 0V8.5h-1.5A2.25 2.25 0 0 1 3.5 6.25v-.878a2.25 2.25 0 1 1 1.5 0ZM5 3.25a.75.75 0 1 0-1.5 0 .75.75 0 0 0 1.5 0Zm6.75.75a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5Zm-3 8.75a.75.75 0 1 0-1.5 0 .75.75 0 0 0 1.5 0Z"/>', { fill: true }),
 };

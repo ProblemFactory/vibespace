@@ -12,6 +12,7 @@ const path = require('path');
 function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, taskGroups, activeSessions, deliver, getTelemetry = () => null, onStash = () => {}, onRunEnded = () => {} }) {
   const jm = new JobManager({
     dataDir,
+    onService: (job) => require('./artifact-registry.js').noteService(job), // lane artifacts-services: a job that listens ⇒ its conversation's `service` row + card
     onRunEnded: (job, run) => onRunEnded(job, run), // lane jobs-browser: a run's end releases its browser lease (the keeper's releaseJob)
     onStash: (cid) => onStash(cid), // every stash write / drain — the conversation's `stash` session fact follows (the strip above its composer)
     // every jobs-updated carries the HELD digest (5b ①): one dirty signal, one

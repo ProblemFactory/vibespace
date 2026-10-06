@@ -59,9 +59,12 @@ const SafeLink = Link.extend({ renderHTML({ HTMLAttributes: a }) { const href = 
   .configure({ openOnClick: false, autolink: false, linkOnPaste: true, isAllowedUri: (url) => !!safeHref(url) });
 /** The document extensions (the window adds its UI-only ones beside them). */
 export const extensions = [
-  StarterKit.configure({ link: false }), SafeLink,
+  // int223: the browser's spell check underlined code — a code block and inline code opt out; the prose keeps it
+  StarterKit.configure({ link: false, codeBlock: { HTMLAttributes: { spellcheck: 'false' } }, code: { HTMLAttributes: { spellcheck: 'false' } } }), SafeLink,
   Table.extend({ renderMarkdown: compactTable }).configure({ resizable: false }), TableRow, TableHeader, TableCell,
-  TaskList, TaskItem.configure({ nested: true }),
+  // design 020 T4 (lane doc-editor-ui): Tiptap's task-item NODE VIEW draws `li > label + div` without the `data-type` its
+  // renderHTML carries, so `li[data-type=taskItem]` (the row rule) never matched and each checkbox sat on its own line
+  TaskList, TaskItem.configure({ nested: true, HTMLAttributes: { 'data-type': 'taskItem' } }),
   Image.extend({ renderHTML({ HTMLAttributes: a }) { const src = safeImageSrc(a.src); return ['img', { ...(src ? { src } : {}), alt: a.alt || '', title: a.title || null }]; } }),
   RawBlock,
 ];

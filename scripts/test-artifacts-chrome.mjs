@@ -11,6 +11,9 @@
 //   ⑤ lane artifacts-registries: turn 4 Writes site.html and runs the REAL vibespace-page publish + vibespace-design new
 //     ⇒ ONE page card (its write and its publish are one row) + a design card; the composer attaches a file ⇒ an
 //     upload card; each card opens its own door (/p/ link · Design window · the file); a reload replays all three.
+//   ⑥ lane artifacts-services: turn 5 starts a REAL Background Work job (vibespace-job run) that serves a page on an
+//     ephemeral port ⇒ a `service` card + the chip's Services head (after the documents); zh at 390 px: the card says
+//     服务, one click opens the page in the Web view (its frame shows the served text).
 // Run: node scripts/test-artifacts-chrome.mjs   (SKIPs without chrome)
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -50,7 +53,10 @@ const TURNS = [
   [A('msg_b1', [{ type: 'tool_use', id: 'toolu_af2', name: 'Edit', input: { file_path: BRIEF, old_string: 'first draft', new_string: 'second draft' } }]), R('toolu_af2'), A('msg_b2', [{ type: 'text', text: 'Brief edited.' }])],
   [A('msg_c1', [{ type: 'tool_use', id: 'toolu_af3', name: 'Write', input: { file_path: NOTES, content: '# Notes\n' } }]), R('toolu_af3'), A('msg_c2', [{ type: 'text', text: 'Notes written.' }])],
   [A('msg_d1', [{ type: 'tool_use', id: 'toolu_af4', name: 'Write', input: { file_path: SITE, content: '<!doctype html><title>Site</title><h1>Site</h1>' } }]), R('toolu_af4'), A('msg_d2', [{ type: 'text', text: 'Published and designed.' }])],
+  [A('msg_e1', [{ type: 'text', text: 'Site served.' }])], // lane artifacts-services: turn 5 = the stub's REAL vibespace-job run (below)
 ];
+const SERVE = path.join(CWD, 'serve.js'); // a static page on an EPHEMERAL port (bound, then known — never a fixed port)
+fs.writeFileSync(SERVE, "require('http').createServer((q, r) => { r.setHeader('content-type', 'text/html'); r.end('<!doctype html><title>House 3D</title><h1>House 3D viewer</h1>'); }).listen(0, '127.0.0.1');\n");
 const DISK = [[BRIEF, '# Brief\n\nfirst draft\n'], [BRIEF, '# Brief\n\nsecond draft\n'], [NOTES, '# Notes\n'], [SITE, '<!doctype html><title>Site</title><h1>Site</h1>']];
 const stubPath = path.join(stubDir, 'claude');
 fs.writeFileSync(stubPath, `#!${process.execPath}
@@ -80,6 +86,11 @@ process.stdin.on('data', (d) => {
         try { fs.appendFileSync(${JSON.stringify(path.join(stubDir, 'cli.log'))}, cp.execFileSync(process.execPath, [BIN + '/' + a[0], ...a.slice(1)], { cwd: ${JSON.stringify(CWD)}, encoding: 'utf8' })); }
         catch (e) { fs.appendFileSync(${JSON.stringify(path.join(stubDir, 'cli.log'))}, 'FAIL ' + a[0] + ': ' + (e.stderr || e.message) + '\\n'); }
       }
+    }
+    if (k === 4) { // lane artifacts-services: the agent RUNS its site as a Background Work job (the owner's house3d shape)
+      const cp = require('child_process'), BIN = ${JSON.stringify(path.join(wt, 'data/bin'))};
+      try { fs.appendFileSync(${JSON.stringify(path.join(stubDir, 'cli.log'))}, cp.execFileSync(process.execPath, [BIN + '/vibespace-job', 'run', ${JSON.stringify(process.execPath + ' ' + path.join(CWD, 'serve.js'))}, '--name', 'house-web', '--keep-up'], { cwd: ${JSON.stringify(CWD)}, encoding: 'utf8' })); }
+      catch (e) { fs.appendFileSync(${JSON.stringify(path.join(stubDir, 'cli.log'))}, 'FAIL vibespace-job: ' + (e.stderr || e.message) + '\\n'); }
     }
     let j = 0;
     const next = () => {
@@ -238,6 +249,45 @@ try {
   await waitFor(`!!(${VIEW}) && (${CARDS}).length >= 5`, 20000);
   const r5 = await five();
   check('after a reload all three replay (page · design · upload beside the two documents)', r5.length === 5 && ['page', 'design', 'upload'].every((k) => r5.some((c) => c.kind === k)), r5);
+
+  console.log('⑥ lane artifacts-services — a job the conversation runs that listens ⇒ a service card + the Services head; zh 390 px opens it in the Web view');
+  check('turn 5 played (the REAL vibespace-job run of a page server)', await turn('Serve the site', /Site served/));
+  const SVC = `(${CARDS}).filter((e) => e.dataset.kind === 'service')`;
+  const born6 = await waitFor(`${SVC}.length === 1`, 45000); // the engine's 5 s tick + its ≤ 30 s listen read
+  const c6 = await evalJs(`(() => { const e = ${SVC}[0]; return e ? { name: e.querySelector('.chat-artifact-name')?.textContent, path: e.querySelector('.chat-artifact-path')?.textContent, meta: e.querySelector('.chat-artifact-meta')?.textContent, state: e.dataset.state } : null; })()`);
+  const href = String((c6 && c6.path) || '').replace(/^\u200e/, '');
+  check('ONE service card names the job and its link on this instance\'s host', born6 && c6.name === 'house-web' && /^http:\/\/127\.0\.0\.1:\d+\/$/.test(href) && c6.state === 'running' && /Running/.test(c6.meta), { c6, cli: (() => { try { return fs.readFileSync(path.join(stubDir, 'cli.log'), 'utf8').slice(-600); } catch { return ''; } })() });
+  const served = await fetch(href).then((r) => r.text()).catch((e) => 'ERR ' + e.message);
+  check('the link answers with the served page', /House 3D viewer/.test(served), served.slice(0, 200));
+  await waitFor(`/Artifacts · 6/.test(document.querySelector('.chat-status-artifacts')?.textContent || '')`, 5000); // the chip re-reads on the card's live birth (debounced)
+  await evalJs(`document.querySelector('.chat-status-artifacts')?.click(); true`);
+  await waitFor(`!!document.querySelector('.chat-artifact-head')`, 5000);
+  const list6 = await evalJs(`[...document.querySelectorAll('.chat-artifact-head, .chat-artifact-row')].filter((e) => !e.closest('.chat-artifact-code')).map((e) => e.classList.contains('chat-artifact-head') ? 'HEAD:' + e.textContent : e.dataset.kind)`);
+  const hi = list6.indexOf('HEAD:Services');
+  check('the chip lists Services under their own head, after the documents and before the page / design / upload', hi > 0 && list6[hi + 1] === 'service' && list6.slice(0, hi).every((k) => k === 'doc') && list6.slice(hi + 2).every((k) => k !== 'doc'), { list6, api: await fetch(`http://127.0.0.1:${PORT}/api/artifacts?sessionId=${encodeURIComponent(sid)}`).then((r) => r.json()).then((v) => v.items.map((b) => b.kind)).catch((e) => e.message) });
+  await evalJs(`document.body.click(); localStorage.setItem('vibespace.lang', 'zh'); true`);
+  await cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+  await cdp('Page.reload', {});
+  await waitApp(); await sleep(1000);
+  await evalJs(`window.__sid = ${JSON.stringify(sid)}; if (!${VIEW}) app.attachSession(${JSON.stringify(sid)}, 'artifacts', ${JSON.stringify(CWD)}, { mode: 'chat', backend: 'claude' }); true`);
+  await waitFor(`!!(${VIEW}) && ${SVC}.length === 1`, 20000);
+  const z6 = await evalJs(`(() => { const e = (${VIEW}) && ${SVC}[0]; return e ? { kind: e.querySelector('.chat-artifact-kind')?.textContent, meta: e.querySelector('.chat-artifact-meta')?.textContent, w: Math.round(e.getBoundingClientRect().width), vw: innerWidth } : null; })()`);
+  check('zh at 390 px: the service card says 服务 and 运行中, inside the viewport', z6 && z6.kind === '服务' && /运行中/.test(z6.meta) && z6.w > 0 && z6.w <= z6.vw, z6);
+  await evalJs(`${SVC}[0].scrollIntoView(); ${SVC}[0].click(); true`);
+  const webOk = await waitFor(`[...app.wm.windows.values()].some((w) => w.type === 'browser' && w.content?.querySelector('iframe')?.src === ${JSON.stringify(href)})`, 10000);
+  check('one click opens the link in the Web view (a browser window, never a new tab)', webOk);
+  let frameText = '';
+  for (let i = 0; i < 40 && !/House 3D viewer/.test(frameText); i++) {
+    try {
+      const tree = await cdp('Page.getFrameTree');
+      const all = []; const walk = (n) => { all.push(n.frame); (n.childFrames || []).forEach(walk); }; walk(tree.frameTree);
+      const fr = all.find((f) => f.url === href);
+      if (fr) { const w = await cdp('Page.createIsolatedWorld', { frameId: fr.id }); const r = await cdp('Runtime.evaluate', { expression: 'document.body ? document.body.textContent : ""', contextId: w.executionContextId, returnByValue: true }); frameText = String(r.result.value || ''); }
+    } catch { }
+    if (!/House 3D viewer/.test(frameText)) await sleep(250);
+  }
+  check('the Web view shows the served page', /House 3D viewer/.test(frameText), frameText.slice(0, 200));
+  await evalJs(`localStorage.removeItem('vibespace.lang'); true`);
   check('no page error', pageErrors.length === 0, pageErrors.slice(0, 3));
 } catch (e) {
   failed++; console.error('✗ threw:', e && e.stack || e);

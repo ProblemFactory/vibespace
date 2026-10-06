@@ -1644,7 +1644,7 @@ class ChatRenderers {
     // LANE ARTIFACTS-MODEL: a deliverable the agent wrote (derived from the harness's write record) — ONE card per file,
     // patched in place on every later write / edit; one click opens it beside the chat (the Cmd+click door, no Cmd)
     if (msg.noticeKind === 'artifact' && msg.content?.[0]?.type === 'artifact') {
-      return { el: renderArtifactCard(msg, { open: (b) => (this._onOpenArtifact ? this._onOpenArtifact(b) : this.app?.openFile(b.path, b.name || b.path.split('/').pop(), { host: b.host || undefined, from: this._sourceWinId() })) }), sideEffect: null };
+      return { el: renderArtifactCard(msg, { showJob: (id) => this.app?.openJobs?.({ focusJobId: id }), open: (b) => (this._onOpenArtifact ? this._onOpenArtifact(b) : this.app?.openFile(b.path, b.name || b.path.split('/').pop(), { host: b.host || undefined, from: this._sourceWinId() })) }), sideEffect: null };
     }
     // UNKNOWN EVENT — the fall-back card (2.369.119/.120, owner): a harness
     // record VibeSpace does not recognize sits in the flow like any other

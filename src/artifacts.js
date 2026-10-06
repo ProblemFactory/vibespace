@@ -13,7 +13,7 @@
 //           row. Rows are a plain object keyed by `key` (session-meta `artifacts` persists it as is).
 // BOUNDS:   ≤ MAX_ROWS per conversation; past it the oldest CODE rows go first, then the oldest of the rest — every
 //           eviction is returned (the consumer logs it) and `view()` says the list is `full`.
-// THE VIEW: `view(rows)` = the chip's order: doc › page › design › media › upload › other, newest-changed first in each,
+// THE VIEW: `view(rows)` = the chip's order: doc › service › page › design › media › upload › other, newest-changed first in each,
 //           code folded behind a count.
 //
 // THE CONTRACT TOWARD doc-window (the Doc window lane — it calls both; spelled here and in kb-file-structure):
@@ -35,8 +35,8 @@
 // the persisted rows — the composer's record IS this registry).
 const { FILE_TYPES } = require('./file-type-table.js');
 
-const KINDS = Object.freeze(['doc', 'page', 'design', 'media', 'upload', 'code', 'other']);
-const VIEW_ORDER = Object.freeze(['doc', 'page', 'design', 'media', 'upload', 'other']);
+const KINDS = Object.freeze(['doc', 'service', 'page', 'design', 'media', 'upload', 'code', 'other']);
+const VIEW_ORDER = Object.freeze(['doc', 'service', 'page', 'design', 'media', 'upload', 'other']); // lane artifacts-services: what a conversation RUNS reads first after its docs
 const OPS = Object.freeze(['write', 'edit']);
 const REG_OPS = Object.freeze(['publish', 'unpublish', 'open', 'upload']); // a store's fact: births / names a row, never counts
 const KIND_RANK = Object.freeze({ design: 3, page: 2, upload: 1 }); // a registry's kind over an extension's (and design › page › upload)
@@ -64,6 +64,7 @@ const KIND_WORDS = Object.freeze({
   media: { en: 'Media', zh: '媒体', ja: 'メディア' },
   upload: { en: 'Upload', zh: '上传', ja: 'アップロード' },
   code: { en: 'Code', zh: '代码', ja: 'コード' },
+  service: { en: 'Service', zh: '服务', ja: 'サービス' },
   other: { en: 'File', zh: '文件', ja: 'ファイル' },
 });
 
@@ -162,12 +163,14 @@ function cardBlock(row) {
   if (!row || !row.key) return null;
   return { type: 'artifact', key: row.key, host: row.host || '', path: row.path, name: row.name, kind: row.kind,
     by: row.by, writes: row.writes || 0, edits: row.edits || 0, lastOp: row.lastOp, firstAt: row.firstAt || 0, lastAt: row.lastAt || 0,
-    ...(row.url ? { url: row.url } : {}), ...(row.state ? { state: row.state } : {}) };
+    ...(row.url ? { url: row.url } : {}), ...(row.state ? { state: row.state } : {}),
+    ...(row.kind === 'service' ? { jobId: row.jobId, port: row.port, since: row.since || 0, stoppedAt: row.stoppedAt || 0 } : {}) };
 }
 /** The card's / list row's FACTS (the client words them through t()): `changes` = re-writes + edits. */
 function cardFacts(b) {
   const w = (b && b.writes) || 0, e = (b && b.edits) || 0;
-  return { name: (b && b.name) || '', kind: (b && b.kind) || 'other', path: (b && b.path) || '', changes: Math.max(0, w - 1) + e, byUser: !!(b && b.by === 'user'), lastAt: (b && b.lastAt) || 0, state: (b && b.state) || '', url: (b && b.url) || '' };
+  return { name: (b && b.name) || '', kind: (b && b.kind) || 'other', path: (b && b.path) || '', changes: Math.max(0, w - 1) + e, byUser: !!(b && b.by === 'user'), lastAt: (b && b.lastAt) || 0, state: (b && b.state) || '', url: (b && b.url) || '',
+    ...(b && b.kind === 'service' ? { port: b.port || 0, since: b.since || 0, stoppedAt: b.stoppedAt || 0 } : {}) };
 }
 /** AUTO-OPEN (setting artifacts.autoOpenDocs): only the BIRTH of a doc by the agent's write — an edit never re-opens. */
 const autoOpenVerdict = ({ born, row } = {}) => !!(born && row && row.kind === 'doc' && row.by === 'agent' && row.lastOp === 'write');
@@ -223,8 +226,49 @@ function storeRows({ pages = [], designs = [] } = {}) {
   for (const op of [...(pages || []).map((p) => pageOp(p)), ...(designs || []).map(designOp)]) if (op) rows = fold(rows, op);
   return rows;
 }
+// ── THE SERVICES (lane artifacts-services, owner 2026-10-06 "这个对话发布的最新页面也没有出现在下面") — a site or
+// service a conversation RUNS: a Background Work job its conversation OWNS (the jobs engine's lineage: the owner
+// conversation id, the same rule as job-model's ownedJobsView) that LISTENS on a TCP port (src/jobs.js `job.listen`,
+// read off the job's pid tree on the engine's own tick). DERIVED, never stored here: the registry asks the jobs engine
+// at every read (`serviceRows`), so a "Clear content…" has nothing of it to clear. A stopped job's row stays
+// SERVICE_KEEP_MS greyed ("stopped at …"), then goes. The row's url = http://<the instance URL's host>:<port>/
+// (`serviceUrl`; the client resolves the host again through absUrl — never location.origin).
+const SERVICE_KEEP_MS = 24 * 60 * 60 * 1000;
+const SERVICE_RUNNING = Object.freeze(['up', 'starting', 'awaiting-user']);
+const jobOwnerCid = (j) => (j && ((j.ownerSession && j.ownerSession.conversationId) || (j.owner && j.owner.conversation && j.owner.conversation.id))) || null;
+/** http://<host of `base`, else 127.0.0.1>:<port>/ */
+function serviceUrl(port, base = '') {
+  let h = '127.0.0.1';
+  try { if (base) h = new URL(String(base)).hostname || h; } catch { }
+  return `http://${h.includes(':') && !h.startsWith('[') ? '[' + h + ']' : h}:${Number(port) || 0}/`;
+}
+/** ONE job → its service row, or null (never listened; or stopped longer than SERVICE_KEEP_MS ago). */
+function serviceRow(job, { now = Date.now(), base = '' } = {}) {
+  const l = job && job.listen;
+  if (!job || !job.id || !l || !(Number(l.port) > 0)) return null;
+  const running = SERVICE_RUNNING.includes(job.state);
+  const run = (Array.isArray(job.runs) && job.runs[job.runs.length - 1]) || job.run || null;
+  const stoppedAt = running ? 0 : Number((run && run.endedAt) || job.updatedAt || l.at) || 0;
+  if (!running && now - stoppedAt > SERVICE_KEEP_MS) return null;
+  const firstAt = Number(l.firstAt) || Number(l.at) || 0;
+  return { key: 'job:' + job.id, host: '', path: '', name: String(job.name || job.id), kind: 'service', jobId: String(job.id), port: Number(l.port),
+    url: serviceUrl(l.port, base), since: Number(run && run.startedAt) || firstAt, state: running ? 'running' : 'stopped', stoppedAt,
+    firstAt, lastAt: Math.max(Number(l.at) || 0, stoppedAt, firstAt), by: 'agent', writes: 0, edits: 0, lastOp: 'listen', bytes: null, lastId: null };
+}
+/** THE LINEAGE RULE: the rows of the jobs whose OWNER conversation is `cid` (another conversation's job ⇒ no row). */
+function serviceRows(jobs, { cid = null, now = Date.now(), base = '' } = {}) {
+  const rows = {};
+  if (!cid) return rows;
+  for (const j of jobs || []) {
+    if (jobOwnerCid(j) !== cid) continue;
+    const r = serviceRow(j, { now, base });
+    if (r) rows[r.key] = r;
+  }
+  return rows;
+}
 const kindWord = (kind, lang = 'en') => (KIND_WORDS[kind] || KIND_WORDS.other)[lang] || (KIND_WORDS[kind] || KIND_WORDS.other).en;
 
 module.exports = { KINDS, VIEW_ORDER, OPS, REG_OPS, KIND_RANK, BY, MAX_ROWS, CATEGORY_KIND, KIND_WORDS, kindOf, absPath, keyOf, apply, fold, merge, view,
   cardWorthy, cardBlock, cardFacts, autoOpenVerdict, ownerOfIn, editNoteText, lineDelta, kindWord, baseName,
-  pageOp, designOp, uploadOp, storeRows };
+  pageOp, designOp, uploadOp, storeRows,
+  SERVICE_KEEP_MS, jobOwnerCid, serviceUrl, serviceRow, serviceRows };

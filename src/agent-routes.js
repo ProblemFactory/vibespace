@@ -30,6 +30,7 @@ const { searchTouches } = require('./channel-touch.js'); // §26 (B-099e): a sea
 // the backlog's ONE read order (priority, then newest) + its closed priority set
 const { PRIORITIES: BACKLOG_PRIORITIES, sortBacklog, nudgeThreshold, backlogNudge, nudgeText } = require('./backlog-select.js');
 const { BACKLOG_CAPS } = require('./task-groups.js');
+const { artifactsIntroLine } = require('./harnesses/artifacts-of.js'); // PURE: the one Artifacts sentence (lane artifacts-prompt-hint)
 const { liveForkPending, addressableId } = require('./claude-lock-capture.js'); // verify r3 (lane channel-withdraw): a pending fork carries its PARENT's conversation id — never an owner of a channel draft
 const stashSummary = require('./stash-summary.js'); // the stash's kinds, spelled once (a reaction digest is not a channel message)
 const { VIBESPACE_NOTICE_HEAD, stashKindOf, withoutNoticeHead } = require('./notification-senders.js'); // lane S3: a stashed VibeSpace notification drains under the head that names VibeSpace as its speaker — decided by the entry's PATH (`kind`), never its sender's name (S3 verify F3)
@@ -524,7 +525,7 @@ app.get('/api/agent/task-context', (req, res) => {
     const fitsHere = (text) => B(context) + (context ? 2 : 0) + B(text) + pendingPreambleBytes(s) <= INLINE_CAP - INLINE_TAIL_MARGIN;
     if (injectGroups.length) {
       // Remote sessions read the auto-synced copy — translate file paths
-      context = tasks.renderMultiContext(injectGroups.map((g) => g.id), { ctxBaseFor: remoteCtxBaseFor(s), sessionKey: key, tools: enabledTools(), isLiveClaim: liveClaimPredicate() });
+      context = tasks.renderMultiContext(injectGroups.map((g) => g.id), { ctxBaseFor: remoteCtxBaseFor(s), sessionKey: key, tools: enabledTools(), isLiveClaim: liveClaimPredicate(), fileTools: fileToolsOf(s) });
       // Only Claude injects the SessionStart output; codex runs the command but
       // ignores it, so don't mark groups "seen" for codex (that would starve its
       // UserPromptSubmit delivery).
@@ -549,7 +550,7 @@ app.get('/api/agent/task-context', (req, res) => {
       // codex ignores SessionStart output, so it gets this via prompt-context.
       // r7: beside a 3 000-char preamble the 6.4 KB intro crossed the cap — its tail (the last tools' teaching) was
       // cut and it was stamped seen; now it waits for the first prompt when it does not fit whole.
-      const intro = sessionToolsIntro(enabledTools(), { browserVariant: s._browserVariant, browserSet: browserSetFacts(s), browserDisplay: browserDisplayFacts(s) });
+      const intro = sessionToolsIntro(enabledTools(), { browserVariant: s._browserVariant, browserSet: browserSetFacts(s), browserDisplay: browserDisplayFacts(s), fileTools: fileToolsOf(s) });
       if (intro && fitsHere(intro)) { context = intro; s._toolsIntroSeen = true; }
       else if (intro) console.log(`[inject] ${key}: the tools intro (${B(intro)} B) waits for the first prompt — it does not fit the ${Math.max(0, INLINE_CAP - INLINE_TAIL_MARGIN - pendingPreambleBytes(s))} B left under the inline cap beside the user's preamble`);
     }
@@ -768,7 +769,7 @@ app.get('/api/agent/prompt-context', (req, res) => {
           : tasks.renderContextDiffMulti(changedDiffs.map((x) => ({ id: x.g.id, changes: x.changes })));
       const fullBlocks = [];
       for (const g of updatedFulls) {
-        const ctx = tasks.renderContext(g.id, { multi, ctxBase: ctxBaseFor ? ctxBaseFor(g.id) : null, sessionKey: key, tools: toolFlags, isLiveClaim: liveClaimPredicate() });
+        const ctx = tasks.renderContext(g.id, { multi, ctxBase: ctxBaseFor ? ctxBaseFor(g.id) : null, sessionKey: key, tools: toolFlags, isLiveClaim: liveClaimPredicate(), fileTools: fileToolsOf(s) });
         if (ctx) { fullBlocks.push(`The Task Group below was UPDATED since you last saw it — this is the current state (supersedes any earlier copy).\n\n${ctx}`); fullCovered.add(g.id); }
       }
       let newFullGroups = [];
@@ -783,8 +784,8 @@ app.get('/api/agent/prompt-context', (req, res) => {
         // count-free multi phrasing instead.
         const allNew = firstGroups.length === injectGroups.length;
         const fulls = (firstGroups.length > 1 && allNew)
-          ? [tasks.renderMultiContext(firstGroups.map((g) => g.id), { ctxBaseFor, sessionKey: key, tools: toolFlags, isLiveClaim: liveClaimPredicate() })].filter(Boolean)
-          : firstGroups.map((g) => tasks.renderContext(g.id, { multi, ctxBase: ctxBaseFor ? ctxBaseFor(g.id) : null, sessionKey: key, tools: toolFlags, isLiveClaim: liveClaimPredicate() })).filter(Boolean);
+          ? [tasks.renderMultiContext(firstGroups.map((g) => g.id), { ctxBaseFor, sessionKey: key, tools: toolFlags, isLiveClaim: liveClaimPredicate(), fileTools: fileToolsOf(s) })].filter(Boolean)
+          : firstGroups.map((g) => tasks.renderContext(g.id, { multi, ctxBase: ctxBaseFor ? ctxBaseFor(g.id) : null, sessionKey: key, tools: toolFlags, isLiveClaim: liveClaimPredicate(), fileTools: fileToolsOf(s) })).filter(Boolean);
         if (fulls.length) {
           fullBlocks.push(...fulls);
           newFullGroups = firstGroups;
@@ -819,7 +820,7 @@ app.get('/api/agent/prompt-context', (req, res) => {
       // No injectable group → baseline tools intro once (see task-context note).
       // In no group: deliver the baseline tools intro on the FIRST prompt (covers
       // codex — its app-server runs the hook but ignores SessionStart output).
-      const intro = sessionToolsIntro(toolFlags, { browserVariant: s._browserVariant, browserSet: browserSetFacts(s), browserDisplay: browserDisplayFacts(s) });
+      const intro = sessionToolsIntro(toolFlags, { browserVariant: s._browserVariant, browserSet: browserSetFacts(s), browserDisplay: browserDisplayFacts(s), fileTools: fileToolsOf(s) });
       if (intro && fits(intro)) { parts.push(intro); s._toolsIntroSeen = true; }   // r7: whole or it waits (a 3 000-char preamble rides above it)
       else if (intro) console.log(`[inject] ${key}: the tools intro (${B(intro)} B) waits for the next prompt — it does not fit the ${roomLeft()} B left under the inline cap`);
     }
@@ -2440,6 +2441,17 @@ app.post('/api/agent/jobs/:ref/:act', (req, res) => {
 // own browser … `close --all` closes only yours" unconditionally — including a
 // session on the shared browser (`browser.isolateSessions=false`, rung `none`,
 // a resolver that threw), which is exactly the incident P0 exists to stop.
+// lane artifacts-prompt-hint: the session's harness declares the file tools whose writes become Artifacts (descriptor
+// `artifactTools`; a descriptor without an `artifactsOf` reader ⇒ null = no line). A session with no known backend gets the
+// unnamed sentence (undefined) — never a guessed harness.
+function fileToolsOf(s) {
+  const H = require('./harnesses');
+  const id = s && s.backend;
+  if (!id || !H.has(id)) return undefined;
+  const h = H.get(id);
+  if (typeof h.artifactsOf !== 'function') return null;
+  return Array.isArray(h.artifactTools) ? h.artifactTools : [];
+}
 function sessionToolsIntro(T, facts = {}) {
   if (!T.status && !T.ask) return '';
   const L = ['<vibespace-session-tools>'];
@@ -2481,12 +2493,15 @@ function sessionToolsIntro(T, facts = {}) {
   L.push(
     'Designs, mockups, screens, posters: read `vibespace-docs design` first (the CLI + the craft rules), then `vibespace-design new <slug>` — it makes designs/<slug>/ here and opens the Design window the user watches. Each screen is ONE plain HTML file in that folder; end every edit with `vibespace-design add <file.html>` (a new one) or `sync`, `check` before handing over, `publish` for a share link (it asks the user). Other self-contained HTML: `vibespace-page publish` (vibespace-docs pages).');
   L.push(
-    'When your reply references files you created or discuss (audio, images, reports, code, HTML…), write their ABSOLUTE paths — the chat UI turns absolute paths into clickable links that open in the right viewer (audio plays, images preview, HTML renders). Bare filenames or project-relative paths may not resolve.',
+    // lane artifacts-prompt-hint: tightened 314 → 208 B to pay for the Artifacts line below (the 9600 B inline-cap fixtures had ~100 B of room)
+    'When your reply references a file, write its ABSOLUTE path — the chat turns it into a link that opens in the right viewer (audio plays, images preview, HTML renders); bare or relative names may not resolve.',
     'If a request needs a DIFFERENT machine\'s network position (a region, an internal/VPN network, a fixed source IP), you can borrow a paired machine\'s network for that ONE command with `vibespace-exit` (default: go direct — only reach for an exit deliberately):',
     '  vibespace-exit list                     machines the user enabled as exits',
     '  eval "$(vibespace-exit use <machine>)"; curl https://ifconfig.me   (borrow its egress via SOCKS for proxy-aware TCP tools)',
     '  vibespace-exit run <machine> -- <cmd>   run the command ON that machine (ICMP/UDP/its DNS); a file: vibespace-exit pull / push',
     '  (SOCKS can\'t carry ping/UDP and needs a proxy-aware tool — when `use` won\'t work, `run` will. Nothing is available until the user enables a machine as an exit.)');
+  const artifactsLine = artifactsIntroLine(facts.fileTools);   // lane artifacts-prompt-hint: which writes become Artifacts (the harness's own file tools)
+  if (artifactsLine) L.push(artifactsLine);
   if (T.task) L.push('(If this session is later linked to a VibeSpace task, you will also get `vibespace-task` for task-level progress/plan/status — you have no task right now, so it is not active yet.)');
   L.push('</vibespace-session-tools>');
   return L.join('\n');
@@ -2552,6 +2567,6 @@ function browserSetLine(set) {
 
 
 module.exports = {
-  turnIsUserInitiated, GROUP_REPORT_BUDGET, setupAgentRoutes, renderMsgStash, drainStashUnderCap, drainNotifsUnderCap, roomUnderCap, INLINE_CAP, INLINE_TAIL_MARGIN, JOBS_DIGEST_BUDGET, MSG_STASH_LINE_MAX, MSG_STASH_MAX_ENTRIES, MSG_STASH_MAX_BYTES, sessionToolsIntro, browserIntroLine, browserSetLine, stopNudgeReason, STOP_NUDGE_CLOSE, BROWSER_DIALOG_LINE,
+  turnIsUserInitiated, GROUP_REPORT_BUDGET, setupAgentRoutes, renderMsgStash, drainStashUnderCap, drainNotifsUnderCap, roomUnderCap, INLINE_CAP, INLINE_TAIL_MARGIN, JOBS_DIGEST_BUDGET, MSG_STASH_LINE_MAX, MSG_STASH_MAX_ENTRIES, MSG_STASH_MAX_BYTES, sessionToolsIntro, fileToolsOf, browserIntroLine, browserSetLine, stopNudgeReason, STOP_NUDGE_CLOSE, BROWSER_DIALOG_LINE,
   msgPeerRow, msgGroupsAnswer, msgReadAnswer, msgSendAnswer, msgGroupOpAnswer, msgRefusalAnswer, dispatchAnswer,   // lane peer-census verify r1 / r2: the msg answers' doors, the refusal's too (test-peer-text-census drives them)
   taskShowAnswer, taskItemAnswer, taskEntryAnswer, taskGroupBrief };   // verify r4 F1: the task answers' doors

@@ -11,7 +11,8 @@
 //      start / end via Runtime.bindingCalled, passkey_open in the fact + the chip's stuck fact, the verb in flight woken,
 //      cancel = Runtime.evaluate in the ceremony's own context, ONE For-you item per (profile, rpId), resolved at the end,
 //      a navigation (context destroyed) ends the ceremony
-//   ⑤ patched-copy controls: the 3 s said at 0 s ⇒ ① red; the hook never armed ⇒ `unknown`, never passkey_open
+//   ⑤ patched-copy controls: the 3 s said at 0 s ⇒ ① red; the hook never armed ⇒ `unknown`, never passkey_open;
+//     a watch ready before its hook is armed ⇒ `unknown` right after `arm` (lane mirror-green-222: the mirror's red)
 //   ⑥ the surfaces: the verb in the CLI's tables, the route, the manual's recipe + section, the boot copy beside the CLI
 import { createRequire } from 'module';
 import path from 'path';
@@ -189,7 +190,7 @@ async function watchOver(modPath, o = {}) {
   // arm the way the routes do: the keeper names the endpoint
   let armed = null;
   try { armed = await D.arm('bp-1'); } catch (e) { armed = { error: String(e && e.message) }; }
-  for (let i = 0; i < 20 && !f.log.some((m) => m.method === 'Runtime.enable'); i++) await tick();
+  // lane mirror-green-222: read at once — `arm` resolves once the hook is armed (a wait for Runtime.enable to be SENT raced its answer)
   const m = (name) => f.log.find((x) => x.method === name);
   const bind = m('Runtime.addBinding'), scr = m('Page.addScriptToEvaluateOnNewDocument');
   ok(armed && bind && bind.sessionId === 'S1' && scr && scr.sessionId === 'S1' && scr.params.runImmediately === true && !scr.params.worldName && scr.params.source.includes(bind.params.name) && m('Runtime.enable'), 'armed: Runtime.addBinding (a random name) + the hook in the MAIN world (no worldName, runImmediately) + Runtime.enable, on the tab\'s own session', { armed, methods: f.log.map((x) => x.method) });
@@ -234,6 +235,15 @@ async function watchOver(modPath, o = {}) {
   W1.step(60000);
   ok(src.includes(needle) && W1.D.passkeyIn('bp-1', null).state === 'unknown' && W1.D.factFor({ ...t, consume: false }).passkey.state === 'unknown', 'CONTROL: a watch that never armed the hook (the pre-hook browser) ⇒ unknown, never passkey_open');
   W1.D.shutdown();
+  // lane mirror-green-222: a copy whose watch is ready before the hook's last answer (the order before the fix) ⇒ `unknown`
+  const aneedle = '      await Promise.allSettled([...w.targets.values()].map((e) => e.pk.arming));\n';
+  fs.writeFileSync(path.join(dir, 'src/server/browser-dialogs.js'), src.replace(aneedle, ''));
+  delete require.cache[path.join(dir, 'src/server/browser-dialogs.js')];
+  const W3 = await watchOver(path.join(dir, 'src/server/browser-dialogs.js'));
+  await W3.D.arm('bp-1');
+  const early = W3.D.passkeyIn('bp-1', null).state;
+  ok(src.includes(aneedle) && early === 'unknown', 'CONTROL: a copy whose watch is ready before the hook is armed ⇒ unknown right after arm (the mirror\'s red, run 37419676410)', early);
+  W3.D.shutdown();
   const W2 = await watchOver(path.join(REPO, 'src/server/browser-dialogs.js'), { addBinding: false });
   await W2.D.arm('bp-1');
   for (let i = 0; i < 10; i++) await tick();

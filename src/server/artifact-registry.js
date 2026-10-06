@@ -14,6 +14,8 @@
  *   · notePage(page, extra)  — src/server/published-pages.js `onPublished` (server.js): a `page` row, unpublish = its state
  *   · noteDesign(design)     — src/server/design-engine.js `onDesign` (designs.json at registration / open / rename)
  *   · noteUploads({sessionId, host, files}) — POST /api/upload when the composer names its chat (src/routes/files.js)
+ *   · noteService(job)       — src/jobs.js `_serviceDoor` (jobs-wiring `onService`): a job its conversation OWNS that
+ *     listens on a port is a `service` row (lane artifacts-services) — DERIVED at every read (`servicesOf`), never stored
  *   At every rebuild the pages + designs rows come back from THEIR stores (`storeRowsOf`, normalizers' store-rows seam);
  *   the uploads live in the persisted rows (the composer's attachment record IS this registry).
  * THE CONTRACT TOWARD doc-window (spelled in src/artifacts.js's header + kb-file-structure):
@@ -23,12 +25,13 @@ const AF = require('../artifacts.js');
 const { toAgentText: agentText } = require('../peer-text.js');
 const DOC_EDIT_FROM = 'Doc edit'; // the stash's `doc-edit` source (lane doc-window): drained as "the user edited a document:" + the re-read hint
 
-let deps = { activeSessions: () => new Map(), deliver: null, sessionMeta: null, pages: () => null, designs: () => null, log: console };
+let deps = { activeSessions: () => new Map(), deliver: null, sessionMeta: null, pages: () => null, designs: () => null, jobs: () => null, instanceUrl: null, log: console };
 /** server.js's ONE line: the live sessions, the delivery ladder (stashFor), the session-meta store and the two stores
  *  a rebuild reads its pages / designs rows from. */
 function configure(d = {}) {
   deps = { ...deps, ...d };
   try { normalizers().setArtifactStoreSource(storeRowsOf); } catch (e) { deps.log.warn?.(`[artifacts] store-rows seam not set: ${e.message}`); }
+  try { normalizers().setArtifactServiceSource(servicesOf); } catch (e) { deps.log.warn?.(`[artifacts] service-rows seam not set: ${e.message}`); }
   return api;
 }
 const sessions = () => { try { const m = deps.activeSessions(); return m && typeof m.entries === 'function' ? m : new Map(); } catch { return new Map(); } };
@@ -107,6 +110,30 @@ function storeRowsOf(session, sessionId) {
   return AF.storeRows({ pages: ask(deps.pages), designs: ask(deps.designs) });
 }
 
+// ── THE SERVICES (lane artifacts-services) — the jobs door: a job this conversation OWNS that listens on a port ──
+const conversationOf = (session) => { try { return require('../claude-lock-capture.js').addressableId(session); } catch { return null; } };
+const instanceBase = () => { try { return (deps.instanceUrl && deps.instanceUrl.url && deps.instanceUrl.url()) || ''; } catch { return ''; } };
+const jobsList = () => { try { const jm = deps.jobs && deps.jobs(); return jm && jm.jobs ? [...jm.jobs.values()] : []; } catch { return []; } };
+/** A conversation's service rows, DERIVED from the jobs engine at every read (AF.serviceRows: the lineage rule, the 24 h
+ *  stopped window) — never folded into `session._artifacts`, never persisted. */
+function servicesOf(session) {
+  const cid = conversationOf(session);
+  return cid ? AF.serviceRows(jobsList(), { cid, now: Date.now(), base: instanceBase() }) : {};
+}
+/** THE JOBS DOOR (src/jobs.js `_serviceDoor` via jobs-wiring's `onService`): a job's service facts moved (first listen,
+ *  a moved port, stopped, up again) ⇒ its owner conversation's card is born at the first listen, then patched in place. */
+function noteService(job) {
+  const cid = AF.jobOwnerCid(job);
+  const row = cid ? AF.serviceRow(job, { now: Date.now(), base: instanceBase() }) : null;
+  if (!row) return 0;
+  let n = 0;
+  for (const [, s] of sessions()) {
+    if (!s || conversationOf(s) !== cid) continue;
+    try { if (normalizers().feedArtifactCard(s, AF.cardBlock(row))) n++; } catch (e) { deps.log.warn?.(`[artifacts] service card not fed: ${e.message}`); }
+  }
+  return n;
+}
+
 function registries() {
   const out = [];
   for (const [sessionId, s] of sessions()) if (s && s._artifacts) out.push({ sessionId, rows: s._artifacts });
@@ -137,10 +164,10 @@ function touch({ sessionId, host, path, summary } = {}) {
 /** The Artifacts chip's list (the chat status bar asks on attach and after each card op): `view(rows)` as blocks. */
 function listFor(sessionId) {
   const s = sessions().get(String(sessionId || ''));
-  const v = AF.view((s && s._artifacts) || {});
+  const v = AF.view({ ...((s && s._artifacts) || {}), ...(s ? servicesOf(s) : {}) }); // + the derived service rows
   return { ok: true, items: v.items.map(AF.cardBlock), code: v.code.map(AF.cardBlock), count: v.count, codeCount: v.codeCount, full: v.full };
 }
 function mount(app) { app.get('/api/artifacts', (req, res) => res.json(listFor(req.query && req.query.sessionId))); return api; }
 
-const api = { configure, mount, listFor, observe, ownerOf, noteEdit, touch, notePage, noteDesign, noteUploads, storeRowsOf, DOC_EDIT_FROM };
+const api = { configure, mount, listFor, observe, ownerOf, noteEdit, touch, notePage, noteDesign, noteUploads, storeRowsOf, servicesOf, noteService, DOC_EDIT_FROM };
 module.exports = api;

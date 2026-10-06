@@ -7,15 +7,22 @@
 import { t, resolveLang } from './i18n.js';
 import { getFileIcon } from './file-types.js';
 import { agoText } from './user-todos-row.js';
-import { cardFacts, kindWord } from '../artifacts.js';
+import { cardFacts, kindWord, serviceUrl } from '../artifacts.js';
+import { UI_ICONS } from './icons.js';
+import { absUrl, showContextMenu, copyText } from './utils.js';
 
 const lang = () => { try { const l = resolveLang(); return l === 'zh' || l === 'ja' ? l : 'en'; } catch { return 'en'; } }; // the house language (i18n.js) — <html lang> is never set (the real-Opus zh run read "Document")
 const div = (cls) => { const n = document.createElement('div'); n.className = cls; return n; };
 const span = (cls) => { const n = document.createElement('span'); n.className = cls; return n; };
 
 /** "Edited 3 times · 2min ago · last by you" (the card's meta line and the list row's words). */
+/** lane artifacts-services: a service row's link — its port on the instance's host, resolved through absUrl (the
+ *  instance URL when one is mapped), never location.origin. */
+export const serviceHref = (b) => serviceUrl(b && b.port, absUrl('/'));
+const stamp = (ts) => { try { return new Date(ts).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch { return ''; } };
 export function artifactMetaText(b) {
   const f = cardFacts(b);
+  if (f.kind === 'service') return f.state === 'stopped' ? t('Stopped at {time}', { time: stamp(f.stoppedAt) }) : `${t('Running')} · ${t('since {ago}', { ago: agoText(f.since || f.lastAt, t) })}`;
   const upload = f.kind === 'upload' && f.byUser && !f.changes; // lane artifacts-registries: the registries' rows say their store's fact
   const parts = [f.state === 'unpublished' ? t('Unpublished') : f.state === 'published' ? t('Published') : upload ? t('Attached by you') : f.changes ? t('Changed {n} times', { n: f.changes }) : t('Written by the agent')];
   if (f.lastAt) parts.push(agoText(f.lastAt, t));
@@ -23,7 +30,17 @@ export function artifactMetaText(b) {
   return parts.join(' · ');
 }
 
-export function renderArtifactCard(msg, { open = null } = {}) {
+/** ⋯ on a service: copy the link / open it in a new tab / show its job. */
+function serviceMenu(e, b, { showJob = null } = {}) {
+  e.preventDefault(); e.stopPropagation();
+  const r = e.currentTarget.getBoundingClientRect();
+  showContextMenu(r.left, r.bottom, [
+    { label: t('Copy URL'), action: () => copyText(serviceHref(b)) },
+    { label: t('Open in a new tab'), action: () => window.open(serviceHref(b), '_blank', 'noopener') },
+    { label: t('Show the job'), action: () => showJob && showJob(b.jobId) },
+  ]);
+}
+export function renderArtifactCard(msg, { open = null, showJob = null } = {}) {
   const el0 = div('chat-msg chat-msg-system chat-vs-notice chat-artifact-card');
   el0.tabIndex = 0;
   el0.setAttribute('role', 'button');
@@ -31,6 +48,12 @@ export function renderArtifactCard(msg, { open = null } = {}) {
   const ic = span('chat-artifact-ic'); ic.setAttribute('aria-hidden', 'true');
   head.append(ic, span('chat-vs-notice-title chat-artifact-name'), span('chat-artifact-kind chat-status-dim'));
   el0.append(head, div('chat-artifact-path chat-status-dim'), div('chat-artifact-meta chat-status-dim'));
+  if ((msg && msg.content && msg.content[0] && msg.content[0].kind) === 'service') {
+    const more = document.createElement('button'); more.type = 'button'; more.className = 'chat-artifact-more'; more.textContent = '⋯'; more.title = t('More');
+    more.addEventListener('click', (e) => serviceMenu(e, el0._rawMsg.content[0], { showJob }));
+    more.addEventListener('keydown', (e) => e.stopPropagation());
+    head.appendChild(more);
+  }
   const go = (e) => { e.preventDefault(); e.stopPropagation(); const b = el0._rawMsg && el0._rawMsg.content && el0._rawMsg.content[0]; if (b && open) open(b); };
   el0.addEventListener('click', go);
   el0.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') go(e); });
@@ -45,14 +68,15 @@ export function patchArtifactCard(el0, msg) {
   el0._rawMsg = msg;
   el0.dataset.key = String(b.key || '');
   el0.dataset.kind = String(b.kind || 'other');
+  if (b.kind === 'service') el0.dataset.state = b.state || 'running'; // stopped ⇒ greyed (chat.css)
   const set = (sel, v) => { const n = el0.querySelector(sel); if (n && n.textContent !== v) n.textContent = v; };
   const ic = el0.querySelector('.chat-artifact-ic');
-  if (ic && ic.dataset.name !== b.name) { ic.innerHTML = getFileIcon(b.name || '') || ''; ic.dataset.name = b.name || ''; } // the icon table's own SVG (trusted), keyed by name
+  if (ic && ic.dataset.name !== b.name) { ic.innerHTML = (b.kind === 'service' ? UI_ICONS.globe : getFileIcon(b.name || '')) || ''; ic.dataset.name = b.name || ''; } // the icon table's own SVG (trusted), keyed by name
   set('.chat-artifact-name', b.name || '');
   set('.chat-artifact-kind', kindWord(b.kind, lang()));
-  set('.chat-artifact-path', b.path ? '\u200e' + b.path : ''); // LRM: the row is direction:rtl (front-truncate) — without it the path's leading "/" is drawn at its END (the real-Opus e2e shot)
+  set('.chat-artifact-path', b.kind === 'service' ? '\u200e' + serviceHref(b) : b.path ? '\u200e' + b.path : ''); // LRM: the row is direction:rtl (front-truncate) — without it the path's leading "/" is drawn at its END (the real-Opus e2e shot)
   set('.chat-artifact-meta', artifactMetaText(b));
-  el0.title = t('Open {name} beside the chat', { name: b.name || '' });
+  el0.title = b.kind === 'service' ? t('Open {url} in the Web view', { url: serviceHref(b) }) : t('Open {name} beside the chat', { name: b.name || '' });
 }
 
 /** The Artifacts chip's popover: deliverables by kind (the server's view order), code folded behind "Code (n)". */
@@ -61,19 +85,23 @@ export function renderArtifactList(box, v, { onOpen = null, close = null } = {})
     const it = div('chat-status-dropdown-item chat-artifact-row');
     it.dataset.key = b.key;
     it.dataset.kind = b.kind;
-    const ic = span('chat-artifact-ic'); ic.innerHTML = getFileIcon(b.name || '') || '';
+    if (b.kind === 'service') it.dataset.state = b.state || 'running';
+    const ic = span('chat-artifact-ic'); ic.innerHTML = (b.kind === 'service' ? UI_ICONS.globe : getFileIcon(b.name || '')) || '';
     const name = span('chat-artifact-name'); name.textContent = b.name || '';
     const words = div('chat-status-dim chat-artifact-meta'); words.textContent = `${kindWord(b.kind, lang())} · ${artifactMetaText(b)}`;
     const top = div('chat-artifact-row-top'); top.append(ic, name);
     it.append(top, words);
-    it.title = b.path || '';
+    it.title = b.kind === 'service' ? serviceHref(b) : b.path || '';
     it.onclick = (ev) => { ev.stopPropagation(); if (close) close(); if (onOpen) onOpen(b); };
     return it;
   };
   const items = Array.isArray(v && v.items) ? v.items : [];
   const code = Array.isArray(v && v.code) ? v.code : [];
   if (!items.length) { const n = div('chat-status-dropdown-note'); n.textContent = t('No documents yet — only code.'); box.appendChild(n); }
-  for (const b of items) box.appendChild(row(b));
+  for (const b of items) {
+    if (b.kind === 'service' && !box.querySelector('.chat-artifact-head')) { const h = div('chat-artifact-head chat-status-dim'); h.textContent = t('Services'); box.appendChild(h); } // lane artifacts-services: its own head, after the docs
+    box.appendChild(row(b));
+  }
   if (code.length) {
     const d = document.createElement('details'); d.className = 'chat-artifact-code';
     const s = document.createElement('summary'); s.textContent = t('Code ({n})', { n: code.length });

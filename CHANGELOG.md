@@ -2,6 +2,17 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.223 — 2026-10-06
+
+### Added
+- A site or service a conversation runs (a Background Work job on a port) appears in its Artifacts with the link.
+
+### Changed
+- The Doc window reads like a document: a folding toolbar, one status line, proper spacing, tables with a hover handle, task lists that line up.
+
+### Fixed
+- When a site asks an Agent browser for a passkey, VibeSpace now notices it reliably, even on a busy machine.
+
 ## 2.369.222 — 2026-10-05
 
 ### Changed

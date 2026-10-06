@@ -232,6 +232,7 @@ module.exports = {
   // comment-preserving TOML setter; `[history] persistence` is the managed
   // row). Both objects are shared with `inject`/`creds` by identity.
   configFiles: { hooks: HOOKS_FILE, config: CONFIG_TOML },
+  artifactTools: require('./artifacts-of.js').ARTIFACT_TOOLS.codex, // lane artifacts-prompt-hint: the tools the intro names (artifactsIntroLine)
   artifactsOf: require('./artifacts-of.js').codex, // lane artifacts-model: apply_patch (envelope or JSON changes) → the deliverable rows
   // CONTEXT INJECTION strategy (S6): hooks are registered (the app-server
   // RUNS them) but their SessionStart output is IGNORED, so the WRAPPER

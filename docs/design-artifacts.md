@@ -46,4 +46,10 @@ The three stores that already listed a conversation's things feed the ONE reduce
 - **The card** opens its kind's door through ONE function (ChatView._openArtifact — the chip's row and the card share it): a published page its /p/ link (app.openBrowser), a design the Design window (app.openDesign with this chat), everything else (an unpublished page, an upload) the file beside the chat. The meta line says Published / Unpublished / Attached by you.
 - **Not done:** the view-only history of a dead conversation (ws-handler's read) derives the transcript rows only — no store rows there.
 
+## Services (as-built, lane artifacts-services)
+The owner looked for the latest page of a conversation whose site is SERVED by its own Background Work job — no published page, so the chip showed code only. A `service` row = a job this conversation OWNS (the owner-conversation lineage) that LISTENS on a TCP port:
+- **The facts** — src/proc-listen.js reads the job's pid tree's listening port (/proc/net/tcp ∩ socket inodes; async, bounded, no exec) on the jobs engine's own 5 s sweep, ≤ once per job per 30 s; `job.listen` {port, firstAt, at} persists.
+- **The row** — DERIVED at every read (src/artifacts.js `serviceRows`; the registry's `servicesOf`), never stored: {kind: service, jobId, name, port, url http://<instance host>:<port>/, since, state running | stopped, stoppedAt}; a stopped job's row stays 24 h greyed, then goes.
+- **The card** — the jobs door (`_serviceDoor` → `noteService`) places it at the first listen and patches it in place; a click opens the Web view; ⋯ = copy URL / open in a new tab / show the job. The chip lists Services under their own head after the documents.
+
 ## Not done / next

@@ -1341,7 +1341,9 @@ function producerCensus(src) {
     const MUTO = mutantCopies('stash-strip-r7-order', REPO);
     const R5 = MUTO.load('src/agent-routes.js', r5src, 'r5');
     const then = Object.fromEntries(Object.entries(shapes).map(([k, sh]) => [k, run(R5, sh)]));
-    const same = Object.keys(shapes).filter((k) => then[k] === now[k]);
+    // lane artifacts-prompt-hint: r5's calls predate `fileTools`, so its Artifacts sentence is the UNNAMED one — that one delta is folded before the identity
+    const unnamed = (c) => c.replace(/Use your file tools \([^)\n]*\) for files/g, 'Use your file tools for files');
+    const same = Object.keys(shapes).filter((k) => then[k] === unnamed(now[k]));
     const common = (k) => { const a = orderOf(then[k]), b = orderOf(now[k]); const both = a.filter((t) => b.includes(t)); return a.filter((t) => both.includes(t)).join() === b.filter((t) => both.includes(t)).join(); };
     ok(same.includes('full') && same.includes('diff') && same.includes('quiet') && same.includes('reminder') && Object.keys(shapes).every(common) && orderOf(then.manager).includes('<vibespace-jobs-missed-while-away>') && !orderOf(now.manager).includes('<vibespace-jobs-missed-while-away>'),
       `r5's module on the same stores: byte-identical on the full / diff / quiet / reminder shapes; the manager shape differs only by r6's fit decisions (r5 drained the jobs digest with the tail uncounted, r7 holds it) — every section that rides both stands in the same order`, { same, manager: [B(then.manager), B(now.manager)] });

@@ -54,6 +54,7 @@ const { applyClear } = require('./record-clear');
 // The STORE keeps the words as written (the user's board draws them as textContent); the agent routes' answers take the
 // same belt in src/agent-routes.js (taskShowAnswer / taskItemAnswer / taskEntryAnswer / taskGroupBrief).
 const { toAgentText } = require('./peer-text.js');
+const { artifactsIntroLine } = require('./harnesses/artifacts-of.js'); // PURE: the one Artifacts sentence (lane artifacts-prompt-hint)
 const agentLine = (s, max = 0) => toAgentText(s == null ? '' : s, { kind: 'line', ...(max > 0 ? { max } : {}) });
 const agentBlock = (s) => toAgentText(s == null ? '' : s, { kind: 'block' });
 
@@ -480,7 +481,7 @@ class TaskGroupManager {
   // The shared tools teaching, one emission per payload. gid = the --group
   // prefix agents must use ('' single-group; '--group <id> ' generic in the
   // shared multi-group section).
-  _toolsSectionParts(gid, multi, tools = null) {
+  _toolsSectionParts(gid, multi, tools = null, fileTools = undefined) {
     // DISCOVERY layer (2.111.22) with COPY-READY samples (2.111.25, user
     // directive): every line shows the COMPLETE correct invocation — waiting
     // states carry both --reason and --detail (enforced server-side), ask
@@ -532,12 +533,17 @@ class TaskGroupManager {
       `vibespace-job run "python3 collect.py" --name collect-x --context "goal: 500 prompts; output: /data/x.jsonl; resume: rerun with --resume"`,
       `\`\`\``,
       '(`vibespace-job poll <id>` echoes your --context brief with the result — write one your amnesiac future self can act on. --keep-up = keep-alive service · --every 30m / --cron "41 9 * * *" / --at "2026-09-05 06:00" = schedule · dated obligations go to --at, not the backlog. Your conversation is auto-messaged on completion/failure/ask; in-job `announce "found X"` notifies NOW; `subscribe <id> [--filter regex]` follows another visible job; `list --mine|--subscribed` / `show <id>` re-inspect full params. Full manual: `vibespace-job docs`.)');
+    // lane artifacts-prompt-hint: which writes become Artifacts — the session's harness names its file tools (agent-routes
+    // fileToolsOf). It rides the paths line, whose half is tightened then (141 → 69 B): the 9600 B fixtures had ~100 B of room
+    const artifactsLine = artifactsIntroLine(fileTools);
     // AGENT GROUPS (design §22): ONE pointer line — the manual carries the rest
     out.push(
       '',
       'Other agents: `vibespace-msg send <agent|group> "…"` reaches them on THEIR next turn at no cost (`--wake` or an @name = a billed turn now); `vibespace-msg group create <name> <member…>` makes a group; group news arrives here on your next turn. Manual: `vibespace-docs msg`.',
       '',
-      'In chat replies use ABSOLUTE file paths (e.g. /home/user/out/final.wav) — the UI makes them clickable; bare/relative names may not resolve.');
+      artifactsLine
+        ? `In chat replies use ABSOLUTE file paths (the UI makes them clickable). ${artifactsLine}`
+        : 'In chat replies use ABSOLUTE file paths (e.g. /home/user/out/final.wav) — the UI makes them clickable; bare/relative names may not resolve.');
     return out;
   }
 
@@ -646,7 +652,7 @@ class TaskGroupManager {
     try { return nudgeThreshold(this._getSetting?.('tasks.backlogNudgeAt')); } catch { return nudgeThreshold(undefined); }
   }
 
-  renderContext(id, { multi = false, ctxBase = null, logBudget = 8000, skipTools = false, sessionKey = null, tools = null, isLiveClaim = null } = {}) {
+  renderContext(id, { multi = false, ctxBase = null, logBudget = 8000, skipTools = false, sessionKey = null, tools = null, isLiveClaim = null, fileTools = undefined } = {}) {
     const t = this.get(id);
     const parts = [
       `<vibespace-task-context>`,
@@ -663,7 +669,7 @@ class TaskGroupManager {
     // a 2-group payload to 9.8KB / 3-group to 15.7KB, past the hook persist
     // threshold (agents then see only a ~2KB head preview and never learn the
     // tools — the same fleet-wide failure 2.68.0 fixed for the single-group case).
-    if (!skipTools) parts.push(...this._toolsSectionParts(multi ? `--group ${t.id} ` : '', multi, tools));
+    if (!skipTools) parts.push(...this._toolsSectionParts(multi ? `--group ${t.id} ` : '', multi, tools, fileTools));
     if (t.contextDir) {
       const base = ctxBase || t.contextDir;
       parts.push('', `## Shared context folder (the group's shared memory)`, '',
@@ -971,11 +977,11 @@ class TaskGroupManager {
   // to the baseline tools intro). 1 → the normal single-group context. N → each
   // group's context, prefaced so the agent knows it spans multiple 岗位 and must
   // use `--group <id>` to act on a specific one.
-  renderMultiContext(groupIds, { ctxBaseFor = null, sessionKey = null, tools = null, isLiveClaim = null } = {}) {
+  renderMultiContext(groupIds, { ctxBaseFor = null, sessionKey = null, tools = null, isLiveClaim = null, fileTools = undefined } = {}) {
     const ids = (groupIds || []).filter((id) => this._state.tasks[id] && !this._state.tasks[id].archived);
     if (!ids.length) return '';
     const baseOf = (id) => (ctxBaseFor ? ctxBaseFor(id) : null);
-    if (ids.length === 1) return this.renderContext(ids[0], { ctxBase: baseOf(ids[0]), sessionKey, tools, isLiveClaim });
+    if (ids.length === 1) return this.renderContext(ids[0], { ctxBase: baseOf(ids[0]), sessionKey, tools, isLiveClaim, fileTools });
     // LAYERED, not per-group blocks (user directive): tools → ALL identities →
     // ALL shared folders → ALL activity logs. Truncation then degrades by
     // LAYER — the first group's bulk can no longer erase the very EXISTENCE of
@@ -987,7 +993,7 @@ class TaskGroupManager {
       `This session belongs to ${ids.length} VibeSpace Task Groups (岗位): ${titles}. Their shared state follows in LAYERS (all groups' identities → shared folders → recent activity)${(!tools || tools.task !== false) ? '; use \`vibespace-task --group <id> …\` to act on a specific group' : ''}.`,
       this._persistRescueLine(),
     ];
-    head.push(...this._toolsSectionParts('--group <id> ', true, tools));
+    head.push(...this._toolsSectionParts('--group <id> ', true, tools, fileTools));
     head.push('', '## Your Task Groups');
     // ONE text budget for every group's unclaimed-HIGH line — past it, ids
     // only — and ONE for every group's claimed-item lines (short clips past it)

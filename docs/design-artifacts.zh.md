@@ -55,3 +55,9 @@
 - **未做：**已结束对话的只读历史（ws-handler 的读取）只推导转录行——那里没有存储行。
 
 ## 未做 / 后续
+## 服务（已实现，lane artifacts-services）
+对话自己跑的站点/服务：本对话**拥有**（owner 对话 lineage）且**监听 TCP 端口**的后台任务 = 一行 `service`。
+- **事实**：src/proc-listen.js 在 jobs 引擎自己的 5 s 扫描里读该任务进程树的监听端口（/proc/net/tcp ∩ socket inode；异步、有界、不 exec），每任务每 30 s 至多一次；`job.listen` {port, firstAt, at} 持久化。
+- **行**：每次读取时**派生**（src/artifacts.js `serviceRows`；registry 的 `servicesOf`），从不存储：{kind: service, jobId, name, port, url http://<实例主机>:<port>/, since, state running | stopped, stoppedAt}；停止的任务行置灰保留 24 h 后消失。
+- **卡片**：jobs 门（`_serviceDoor` → `noteService`）在首次监听时放置、原地更新；点击在网页视图打开；⋯ = 复制 URL / 新标签页打开 / 查看该任务。产物芯片里 Services 在文档之后有自己的标题。
+

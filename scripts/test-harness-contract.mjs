@@ -904,6 +904,74 @@ console.log('\n— the long tail\'s declared rows (terminalOnly / oauthUsage / g
   ok(!H.has('acme-term') && capsOf('acme-term').terminalOnly === false, 'the fakes are gone after the proof (unregister drops the contributed row)');
 }
 
+// ── lane artifacts-prompt-hint: THE ARTIFACTS SENTENCE names the descriptor's own file tools ──
+// Files written through a shell are not Artifacts (only the harness's own write tools are witnessed), so the tools intro +
+// the task context's tools section say so ONCE per session, naming the tools the session's descriptor declares
+// (`artifactTools`) — never a spelled harness id; a harness with no `artifactsOf` reader is promised nothing.
+console.log('\n— the Artifacts sentence (lane artifacts-prompt-hint)');
+{
+  const H = require(path.join(REPO, 'src/harnesses/index.js'));
+  const AO = require(path.join(REPO, 'src/harnesses/artifacts-of.js'));
+  const AR = require(path.join(REPO, 'src/agent-routes.js'));
+  const T = { status: true, ask: true, task: true, jobs: true };
+  const MARK = 'for files the user should see — they become this conversation\'s Artifacts';
+  for (const id of harnessIds()) {
+    const h = harnessOf(id);
+    const ft = AR.fileToolsOf({ backend: id });
+    const line = AO.artifactsIntroLine(ft);
+    if (typeof h.artifactsOf === 'function') {
+      ok(Array.isArray(h.artifactTools) && h.artifactTools.every((n) => typeof n === 'string' && n) && line.includes(MARK) && Buffer.byteLength(line) <= 300,
+        `${id}: declares artifactTools [${(h.artifactTools || []).join(', ')}] → one sentence of ${Buffer.byteLength(line)} B (≤ 300)`);
+      ok(h.artifactTools.every((n) => line.includes(n)) && !line.includes(`'${id}'`), `${id}: the sentence names exactly the declared tools, no harness id`);
+    } else ok(ft === null && line === '', `${id}: no artifactsOf reader ⇒ no Artifacts sentence (never promise a collection)`);
+  }
+  // the claude row IS the reader's own table: a record per declared name yields a row (the names cannot drift from what is witnessed)
+  const rec = (name) => ({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 't-' + name, name, input: { file_path: '/w/a.md', notebook_path: '/w/a.ipynb', content: 'x' } }] } });
+  const cl = harnessIds().map(harnessOf).find((h) => h.artifactsOf === AO.claude);
+  ok(cl && cl.artifactTools.length === 4 && cl.artifactTools.every((n) => AO.claude(rec(n)).length === 1) && AO.claude(rec('Bash')).length === 0,
+    'the declared names are exactly the tools the reader witnesses (each yields a row; Bash yields none)');
+  // THE PROOF: a register()ed fake declaring X / Y renders "X / Y" with zero core edits; a fake without a reader renders nothing
+  H.register({ id: 'acme-files', label: 'Acme Files', kind: 'chat', quota: H.NULL_QUOTA, artifactsOf: () => [], artifactTools: ['X', 'Y'] });
+  H.register({ id: 'acme-noart', label: 'Acme NoArt', kind: 'chat', quota: H.NULL_QUOTA, artifactsOf: null, artifactTools: ['Z'] });
+  try {
+    const intro = AR.sessionToolsIntro(T, { fileTools: AR.fileToolsOf({ backend: 'acme-files' }) });
+    ok(intro.includes('Use your file tools (X / Y) for files') && intro.split(MARK).length === 2, 'PROOF: a register()ed harness declaring X / Y is taught "(X / Y)" — once in the intro');
+    const none = AR.sessionToolsIntro(T, { fileTools: AR.fileToolsOf({ backend: 'acme-noart' }) });
+    ok(!none.includes(MARK) && !none.includes('(Z)'), 'CONTROL: a register()ed harness with no reader gets no sentence (its declared names are ignored)');
+    ok(AR.sessionToolsIntro(T, { fileTools: AR.fileToolsOf({}) }).includes('Use your file tools for files'), 'a session with no backend gets the unnamed sentence (never a guessed harness)');
+  } finally { H.unregister('acme-files'); H.unregister('acme-noart'); }
+  const fn = AR.fileToolsOf.toString();
+  ok(!/['"](?:claude|codex|opencode|shell)['"]/.test(fn) && /artifactTools/.test(fn), 'fileToolsOf reads the descriptor and spells no harness id (§46 spirit)');
+  // the task context's tools section carries it too, after the absolute-paths line, once (single + multi)
+  const { TaskGroupManager } = require(path.join(REPO, 'src/task-groups.js'));
+  const proto = TaskGroupManager.prototype;
+  const one = proto._toolsSectionParts.call({}, '', false, null, ['X', 'Y']).join('\n');
+  const multi = proto._toolsSectionParts.call({}, '--group <id> ', true, null, ['X', 'Y']).join('\n');
+  ok(one.split(MARK).length === 2 && multi.split(MARK).length === 2 && one.indexOf(MARK) > one.indexOf('ABSOLUTE file paths'), 'the task context\'s tools section carries the sentence once, after the absolute-paths line');
+  ok(!proto._toolsSectionParts.call({}, '', false, null, null).join('\n').includes(MARK), '…and none for a reader-less harness (fileTools null)');
+  // THE ROUTE: a no-task claude-descriptor session gets the sentence ONCE (the tools intro), never in the per-turn reminder
+  const { SessionStatusManager } = require(path.join(REPO, 'src/session-status.js'));
+  const ROOT = scratch('harness-contract-art');
+  fs.mkdirSync(path.join(ROOT, 'st'), { recursive: true }); fs.mkdirSync(path.join(ROOT, 'work'), { recursive: true });
+  const tasks = new TaskGroupManager({ dataDir: ROOT, onChange: () => { } });
+  const sessionStatus = new SessionStatusManager({ dataDir: path.join(ROOT, 'st'), onChange: () => { } });
+  const routes = {};
+  const backend = harnessIds().find((id) => harnessOf(id) === cl);
+  const session = { agentToken: 'vsst_art', backend, cwd: path.join(ROOT, 'work'), name: 'art' };
+  AR.setupAgentRoutes({
+    app: { get: (p, h) => { routes[`GET ${p}`] = h; }, post: (p, h) => { routes[`POST ${p}`] = h; } }, activeSessions: new Map([['sessA', session]]), tasks, sessionStatus, SessionStatusManager,
+    userTodos: { rekey: () => { }, forSession: () => [], resolveByAgent: () => null, add: () => ({}) },
+    sessionStatusKey: (s, id) => `${s.backend}:${id}`, serverSetting: () => undefined, scheduleCtxSync: () => { }, remoteCtxBaseFor: () => null,
+  });
+  const call = (r) => { let out; const req = { headers: { authorization: 'Bearer vsst_art' }, query: {}, body: {} }; const res = { json: (o) => { out = o; }, status: () => res }; routes[`GET /api/agent/${r}`](req, res); return (out && out.context) || ''; };
+  const start = call('task-context');
+  const turns = [call('prompt-context'), call('prompt-context'), call('prompt-context')];
+  const all = [start, ...turns].join('\n');
+  ok(start.includes('Use your file tools (' + cl.artifactTools.join(' / ') + ') for files') && all.split(MARK).length === 2,
+    `the REAL routes: SessionStart's tools intro carries the sentence and a whole session sees it exactly once (${all.split(MARK).length - 1})`);
+  ok(turns.filter(Boolean).length >= 1 && turns.every((t) => !t.includes(MARK)), `…and the per-turn reminder never carries it (${turns.filter(Boolean).length} non-empty turn contexts read)`);
+}
+
 // ── tree: THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──
 // Measured HERE, while every patched copy this run made still exists (the exit
 // handlers remove them — a census taken after exit passes on the pre-fix

@@ -1490,6 +1490,7 @@ const CENSUS = [
   ['desktop-app-launcher.js', 'input', 'text+control', 'URL / command / arguments / cwd; keep-profile checkbox'],
   ['doc-window-ui.js', 'tiptap', 'text', 'THE DOC PAGE (Tiptap v3\'s Editor over ProseMirror\'s view: a contentEditable the user types into — lane doc-window; Tiptap since doc-editor-wheel, composed at the 2.369.221 integration)'],
   ['doc-window-ui.js', 'textarea', 'text', 'a comment\'s note ("What should change?" — lane doc-window)'],
+  ['doc-window-ui.js', 'contenteditable', 'none', 'the table grips\' contentEditable \'false\' (design 020, lane doc-editor-ui; composed at the 2.369.223 integration): buttons kept OUT of the page\'s editing — never a key surface; a press opens the existing table menu'],
   ['machine-desktop.js', 'input', 'text', 'design 014 D1: "Run on its desktop…"\'s command box + the sign-in\'s name / password fields (a page dialog — the picture is not focused while they are)'],
   ['desktop-app-window.js', 'tabindex', 'control', 'the scale chip (role=button)'],
   ['dial-address-picker.js', 'input', 'text+control', 'the pairing sheet\'s address radios; the custom address (lane-pairing)'],

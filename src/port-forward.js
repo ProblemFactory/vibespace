@@ -369,16 +369,7 @@ class PortForwardManager {
     // lets a bounded /proc/*/fd scan recover the owning process name (same-user
     // processes only — exactly what a single-user container is).
     const found = new Map(); // port → inode
-    for (const f of ['/proc/net/tcp', '/proc/net/tcp6']) {
-      let txt = '';
-      try { txt = await fs.promises.readFile(f, 'utf-8'); } catch { continue; }
-      for (const line of txt.split('\n').slice(1)) {
-        const cols = line.trim().split(/\s+/);
-        if (cols.length < 10 || cols[3] !== '0A') continue;
-        const port = parseInt(String(cols[1]).split(':').pop(), 16);
-        if (port && !found.has(port)) found.set(port, cols[9]);
-      }
-    }
+    for (const s of await require('./proc-listen.js').listenSockets()) if (!found.has(s.port)) found.set(s.port, s.inode); // the ONE /proc reader (src/proc-listen.js — the jobs engine's service facts read it too)
     const byInode = await this._resolveInodeProcs(new Set([...found.values()]));
     return [...found.entries()]
       .map(([port, inode]) => { const hit = byInode.get(inode); return this._classifyOrphan(this._classify({ port, proc: hit?.comm || '', ...(hit?.pid ? { pid: hit.pid } : {}) })); })

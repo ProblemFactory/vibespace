@@ -138,6 +138,9 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       // named nothing (a ghost-only scope read as attributed: the named refusal never fired, `stop` said "nothing of yours")
       if (keeper && typeof keeper.pruneOwnTabs === 'function') { try { const n = keeper.pruneOwnTabs(w.profileId, infos.filter((t) => t && t.type === 'page' && t.targetId).map((t) => String(t.targetId))); if (n) say('prune:' + w.profileId + ':' + now(), `${w.profileId}: ${n} persisted tab witness(es) named tabs this browser does not have — dropped`); } catch (err) { say('prune-err:' + (err && err.message), `${w.profileId}: the persisted tab witness was not pruned — ${err && err.message}`); } }
       w.readySeen = true; // lane site-reset: tabs tracked from here on appeared while watched
+      // lane mirror-green-222: ready = the tabs enabled here carry the passkey hook — `arm` resolved between Page.enable and
+      // the hook's last CDP answer, so a verb's first fact read the tab as `unknown` (the mirror's red, run 37419676410)
+      await Promise.allSettled([...w.targets.values()].map((e) => e.pk.arming));
       w.ready();
     });
     ws.on('message', (d) => onMessage(w, d));
@@ -520,7 +523,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
 
   // ── arming ──
   /** Arm the watch on a LOCAL live browser (idempotent; a down watch re-resolves the endpoint — the browser may have
-   *  restarted on a new port). Waits at most `budgetMs` for the tabs to be enabled — never holds a verb longer. */
+   *  restarted on a new port). Waits at most `budgetMs` for the tabs to be enabled and their passkey hook armed — never holds a verb longer. */
   async function arm(profileId, { budgetMs = 800 } = {}) {
     const pid = String(profileId || '');
     if (!pid || !keeper || typeof keeper.cdpEndpointFor !== 'function') return { ok: false, code: 'not_watched', error: 'no keeper' };
@@ -935,14 +938,14 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     return out;
   }
   // ── lane browser-passkey: the ceremony hook ──
-  async function armPasskey(w, e) {
-    if (e.pk.armed || e.pk.arming || !e.sid) return;
-    e.pk.arming = true;
-    const sid = e.sid;
+  function armPasskey(w, e) {
+    if (!e.pk.armed && !e.pk.arming && e.sid) e.pk.arming = armHook(w, e, e.sid).finally(() => { e.pk.arming = null; });
+    return e.pk.arming || null;
+  }
+  async function armHook(w, e, sid) {
     const r1 = await call(w, 'Runtime.addBinding', { name: w.pkBinding }, sid);
     const r2 = r1 && r1.result ? await call(w, 'Page.addScriptToEvaluateOnNewDocument', { source: PK.hookSource({ binding: w.pkBinding, key: w.pkKey }), runImmediately: true }, sid) : null;
     const r3 = r2 && r2.result ? await call(w, 'Runtime.enable', {}, sid) : null; // the documents that go (a navigation ends its ceremonies)
-    e.pk.arming = false;
     e.pk.armed = !!(r3 && r3.result) && e.sid === sid;
     if (!e.pk.armed) say('pk-arm:' + w.profileId, `${w.profileId}: the passkey hook did not arm on a tab — its passkey requests read as unknown (${(r1 && r1.error && r1.error.message) || (r2 && r2.error && r2.error.message) || (r3 && r3.error && r3.error.message) || 'no answer'})`);
   }

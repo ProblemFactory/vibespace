@@ -61,4 +61,16 @@ function acp(record) {
   return out;
 }
 
-module.exports = { claude, codex, acp };
+/** lane artifacts-prompt-hint: the tools each reader above witnesses, as the agent knows them — a descriptor declares
+ *  its row as `artifactTools` (ACP: the agent's own tool names are not ours to know ⇒ `[]` = unnamed). */
+const ARTIFACT_TOOLS = { claude: Object.keys(CLAUDE_OPS), codex: ['apply_patch'], acp: [] };
+/** THE ONE agent-facing sentence (tools intro + the task context's tools section, once per session): which writes become
+ *  Artifacts. `names` = the session's descriptor `artifactTools` (`[]`/absent = "your file tools"; `null` = a harness with
+ *  no artifacts reader ⇒ no line — never promise a collection that cannot happen). English, never through t(). */
+function artifactsIntroLine(names) {
+  if (names === null) return '';
+  const list = Array.isArray(names) && names.length ? ` (${names.join(' / ')})` : '';
+  return `Use your file tools${list} for files the user should see — they become this conversation's Artifacts; shell-written files do not.`;
+}
+
+module.exports = { claude, codex, acp, ARTIFACT_TOOLS, artifactsIntroLine };
