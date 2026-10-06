@@ -124,7 +124,8 @@ const OD = { id: 'od1', type: 'onedrive', origin: 'rclone-conf' };
     /stale daemon still on[\s\S]{0,200}_killMountDaemon\(mp\)/.test(src));
   const sb = read('src/lib/sidebar-mounts.js');
   ok('the client Re-authorize button matches the new health message', /invalid_grant\|token expired\|couldn.t fetch token\|unauthenticated\|re-authorize/.test(sb));
-  ok('…and OneDrive rows are eligible for it', /_isDriveBacked\(m\)\s*{[^}]*'onedrive'/.test(sb));
+  // lane dc-mount-client: eligibility is the row's declared client.driveReauth cell, read by _isDriveBacked
+  ok('…and OneDrive rows are eligible for it', /\bdriveReauth: true\b/.test(read('src/mount-providers/onedrive.js')) && /_isDriveBacked\(m\)\s*{[^}]*\.driveReauth\b/.test(sb));
 }
 
 // ── 4. D2 (design-integrations-per-account §6): switching a Drive record's

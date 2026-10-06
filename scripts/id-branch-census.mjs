@@ -30,9 +30,9 @@ export const FAMILIES = {
   display: { ids: ['xpra', 'vnc', 'desktop-singleton', 'x11vnc'], owners: [{ file: 'src/desktop-backends.js', table: /^const DISPLAY_BACKENDS\s*=/m }] },
   browser: { ids: ['cloak', 'chromium', 'agent-browser'], owners: [{ file: 'src/browser-switch.js' }, { file: 'src/browser-profiles.js', table: /^const PROVIDERS\s*=/m }] },
   plugin: { ids: ['tailscale', 'frp'], owners: [{ dir: 'src/plugins/' }] },   // lane dc-plugins: a member = src/plugins/<id>.js + one index line
-  // lane dc-apps-rows (2026-10-04, rv-desktop-apps F-A1): an app KIND is one row of src/app-kinds.js (the generic words
+  // lane dc-apps-rows (2026-10-04, rv-desktop-apps F-A1): an app KIND is its own file in src/app-kinds/ + one index line (lane dc-app-kinds; the generic words
   // source / remove / search / move are kinds too, but every other family's code says them — only the kind-only ids count)
-  appkind: { ids: ['apt', 'deb', 'appimage', 'uv-tool', 'npm', 'installer'], owners: [{ file: 'src/app-kinds.js' }] },
+  appkind: { ids: ['apt', 'deb', 'appimage', 'uv-tool', 'npm', 'installer'], owners: [{ dir: 'src/app-kinds/' }] },
   // lane dc-mount-providers (rv-server M6): a storage provider is src/mount-providers/<id>.js + one index line
   mount: { ids: ['s3', 'drive', 'gmail', 'onedrive', 'cloud', 'webdav', 'vibespace', 'sftp', 'rclone', 'cephfs'], owners: [{ dir: 'src/mount-providers/' }] },
 };
@@ -45,6 +45,22 @@ export const ALLOW = [
   { family: 'appkind', file: /^src\/browser-profiles\.js$/, line: /t\.phase === 'npm'/, reason: 'the browser install\'s npm STEP (its progress phase), not the npm app kind' },
   { family: 'mount', file: /^src\/machine-mounts\.js$/, line: /rclone !== 'rclone'/, reason: 'the rclone BINARY resolved off PATH (the bare name = none found), not the rclone storage provider' },
   { family: 'channel', file: /^src\/lib\/(?:manage-agents|sidebar-rail)\.js$/, line: /_activeTab\s*[!=]==?\s*'agents'/, reason: 'the sidebar rail\'s Agents tab, not the agents channel vendor' },
+  // lane dc-harness-tail (2026-10-05)
+  { family: 'harness', file: /^src\/acp-message-manager\.js$|^src\/server\/stdout\/acp-events\.js$/, line: /\.type [!=]== 'acp'/, reason: 'the ACP wrapper journal\'s FRAME type (data/bin/acp-wrapper.js writes {type:\'acp\'}), not the acp harness id' },
+  { family: 'harness', file: /^server\.js$/, line: /console\.log\(`\s*dtach: /, reason: 'the boot log line naming the resolved CLI paths (ids inside a template string, not keys)' },
+];
+
+// EXEMPT — a DECLARED registry / table / oracle keyed by member ids BY DESIGN (lane dc-harness-tail, 2026-10-05): its
+// rows ARE the members' declarations, so the ratchet counts the real branches only. Each row: the family, the file,
+// the table it covers (a regex for the table's first line; no table = the whole file) and WHY. The census prints every
+// row with the lines it covers; test-architecture §78 reds a row whose table is gone or that covers nothing (a dead
+// exemption would hide a new branch).
+export const EXEMPT = [
+  { family: 'harness', file: 'src/backend-caps.js', table: /^const BACKEND_CAPS\s*=/m, reason: 'THE caps registry — one declared row per built-in harness (a contributed one arrives through register())' },
+  { family: 'harness', file: 'src/harness-settings.js', table: /^const HARNESS_SETTINGS\s*=/m, reason: 'the declared per-harness settings tables (design-harness-settings §2) — the descriptor joins its own by identity' },
+  { family: 'harness', file: 'src/lib/agent-meta.js', table: /^export const BACKEND_META\s*=/m, reason: 'the client META registry — the descriptor rows mirrored key for key (test-harness-contract deep-compares)' },
+  { family: 'harness', file: 'src/record-shape.js', reason: 'the transcript-record SCHEMA ORACLE per harness:carrier:shape — naming the harness whose record shape it states is its job' },
+  { family: 'harness', file: 'src/server/cli-env.js', table: /^const AVAILABLE_MODELS\s*=/m, reason: 'the /api/available-models seed table (the model list a harness offers before its own source answers)' },
 ];
 
 const BRANCH = (ids) => {
@@ -83,14 +99,16 @@ export function scopeFiles(repo) {
     && !/^src\/lib\/i18n-[a-z]+\.js$/.test(f) && f !== 'src/lib/build-version.js' && fs.existsSync(path.join(repo, f))).sort();
 }
 
-// the [first, last] 1-based line span of a balanced { … } / [ … ] block that starts at `re`
-export function tableSpan(text, re) {
+// the [first, last] 1-based line span of a balanced { … } / [ … ] block that starts at `re`; `skipComments` (the
+// EXEMPT rows' tables, whose essays say "harness's") steps over // and /* */ comments so an apostrophe there is no quote
+export function tableSpan(text, re, { skipComments = false } = {}) {
   const m = re.exec(text);
   if (!m) return null;
   let i = m.index + m[0].length, d = 0, opened = false, q = null;
   for (; i < text.length; i++) {
     const c = text[i];
     if (q) { if (c === '\\') i++; else if (c === q) q = null; continue; }
+    if (skipComments && c === '/' && (text[i + 1] === '/' || text[i + 1] === '*')) { const end = text[i + 1] === '/' ? '\n' : '*/'; const k = text.indexOf(end, i + 2); i = k < 0 ? text.length : k + end.length - 1; continue; }
     if (c === '\'' || c === '"' || c === '`') { q = c; continue; }
     if (c === '{' || c === '[' || c === '(') { d++; opened = true; } else if (c === '}' || c === ']' || c === ')') { d--; if (opened && d <= 0) break; }
   }
@@ -100,11 +118,12 @@ export function tableSpan(text, re) {
 
 const ownerOf = (fam, f) => FAMILIES[fam].owners.find((o) => (o.dir && f.startsWith(o.dir)) || o.file === f);
 
-// census(repo, { read }) → { counts: {family: {file: n}}, lines: {family: [{file, line, text}]}, allowed: {family: n}, owners }
+// census(repo, { read }) → { counts: {family: {file: n}}, lines: {family: [{file, line, text}]}, allowed: {family: n}, owners,
+//   exempt: {family: [{file, span, lines, reason}]} }
 // `read` lets a negative control hand in a planted text for one file.
 export function census(repo, { read = (f) => fs.readFileSync(path.join(repo, f), 'utf8'), files = scopeFiles(repo) } = {}) {
-  const counts = {}, lines = {}, allowed = {}, owners = {};
-  for (const fam of Object.keys(FAMILIES)) { counts[fam] = {}; lines[fam] = []; allowed[fam] = 0; owners[fam] = []; }
+  const counts = {}, lines = {}, allowed = {}, owners = {}, exempt = {};
+  for (const fam of Object.keys(FAMILIES)) { counts[fam] = {}; lines[fam] = []; allowed[fam] = 0; owners[fam] = []; exempt[fam] = []; }
   for (const f of files) {
     let text; try { text = read(f); } catch { continue; }
     if (!text) continue;
@@ -117,18 +136,22 @@ export function census(repo, { read = (f) => fs.readFileSync(path.join(repo, f),
         span = tableSpan(text, own.table);
         owners[fam].push(span ? `${f}:${span[0]}-${span[1]}` : `${f} (table NOT FOUND)`);
       }
+      const ex = EXEMPT.filter((e) => e.family === fam && e.file === f).map((e) => ({ e, span: e.table ? tableSpan(text, e.table, { skipComments: true }) : [1, L.length], n: 0 }));
       L.forEach((ln, i) => {
         if (span && i + 1 >= span[0] && i + 1 <= span[1]) return;
         const t = ln.trim();
         if (!t || t.startsWith('//') || t.startsWith('*') || t.startsWith('/*')) return;
         if (!PATTERNS[fam].some((re) => re.test(ln)) && !dispatchKey(fam, L, i)) return;
         if (ALLOW.some((a) => a.family === fam && a.file.test(f) && a.line.test(ln))) { allowed[fam]++; return; }
+        const x = ex.find((r) => r.span && i + 1 >= r.span[0] && i + 1 <= r.span[1]);
+        if (x) { x.n++; return; }
         counts[fam][f] = (counts[fam][f] || 0) + 1;
         lines[fam].push({ file: f, line: i + 1, text: t.slice(0, 160) });
       });
+      for (const r of ex) exempt[fam].push({ file: f, span: r.span, lines: r.n, reason: r.e.reason });
     }
   }
-  return { counts, lines, allowed, owners };
+  return { counts, lines, allowed, owners, exempt };
 }
 
 // judge(baseline, counts) → { rises: [{family, file, base, now}], falls: [...] }
@@ -161,7 +184,7 @@ export function lowered(baseline, counts) {
 if (import.meta.url === `file://${process.argv[1]}`) {
   const repo = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
   const BASE = path.join(repo, 'scripts/fixtures/id-branch-baseline.json');
-  const { counts, lines } = census(repo);
+  const { counts, lines, exempt } = census(repo);
   if (process.argv.includes('--write-initial')) {
     if (fs.existsSync(BASE)) { console.error('baseline exists — use --lower'); process.exit(1); }
     fs.writeFileSync(BASE, JSON.stringify(counts, null, 1) + '\n');
@@ -171,4 +194,5 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     for (const [fam, rows] of Object.entries(lines)) for (const r of rows) console.log(`${fam}\t${r.file}:${r.line}\t${r.text}`);
   }
   for (const fam of Object.keys(counts)) console.log(`${fam}: ${total(counts[fam])} lines in ${Object.keys(counts[fam]).length} files`);
+  for (const [fam, rows] of Object.entries(exempt)) for (const r of rows) console.log(`  EXEMPT ${fam}\t${r.file}${r.span ? ':' + r.span.join('-') : ' (table NOT FOUND)'}\t${r.lines} lines — ${r.reason}`);
 }

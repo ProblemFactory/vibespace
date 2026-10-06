@@ -1,6 +1,6 @@
 // Session lifecycle: create/attach/resume/fork/view/kill + billing switcher + openSpec replay (mixin split from app.js, 2.82.0 audit seam).
 import { ChatView } from './chat-view.js';
-import { backendFeatureCaps, worktreePick, uiRow, billingRow, accountUsageStore, viewIdFor, legacyIdFor } from './agent-meta.js';
+import { backendFeatureCaps, terminalOnly, worktreePick, uiRow, billingRow, accountUsageStore, viewIdFor, legacyIdFor } from './agent-meta.js';
 import { track, metric } from './telemetry-client.js';
 import { t } from './i18n.js';
 import { registerWindowType, replayOpenSpec as replayOpenSpecViaRegistry, svgIcon16 } from './window-types.js';
@@ -401,7 +401,7 @@ export function installSessionLifecycle(App, ctx = {}) {
         // first user message unless a CUSTOM NAME exists — so the typed name
         // silently lost to the first message once the transcript appeared.
         // Persist it as the custom name when the backend id is adopted.
-        else if (name && name.trim() && !resumeId && backend !== 'shell' && !ephemeral) {
+        else if (name && name.trim() && !resumeId && !terminalOnly(backend) && !ephemeral) {
           (this._pendingCreateNames ??= new Map()).set(msg.sessionId, name.trim());
         }
         // Session created "in" a task — bind once the backend session id shows
@@ -519,7 +519,7 @@ export function installSessionLifecycle(App, ctx = {}) {
     // Exited-overlay Resume (2.206.0): agent terminals resume by conversation
     // id (kept fresh in the openSpec by syncSessionIdentity); plain shells
     // have nothing to resume — no callback, the overlay shows message-only.
-    if (backend !== 'shell') {
+    if (!terminalOnly(backend)) {
       term.onSessionExited = () => {
         const spec = winInfo._openSpec || {};
         const backendSessionId = spec.backendSessionId;

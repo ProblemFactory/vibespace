@@ -295,8 +295,8 @@ export function renderFields(body, fields) {
 // 2.369.214): the consent may have landed in another browser profile, so a
 // stranger's account is visible BEFORE Connect makes the record.
 export const connectedLine = (user) => (user ? tr('✓ Connected as {user} — finish with the “Connect” button below.', { user: String(user).slice(0, 200) }) : tr('✓ Connected — finish with the “Connect” button below.'));
-export function wireOAuthConnect(ctx, { tokenKey, backend, label, clientIdKey, clientSecretKey, endpoints = MOUNT_OAUTH_ENDPOINTS, extra = null, provider = null, pastePlaceholder = null, finishText = null, pasteHint = null, pasteSecret = false } = {}) {
-  const PROVIDER_LABELS = { onedrive: 'Microsoft', drive: 'Google', dropbox: 'Dropbox', box: 'Box', pcloud: 'pCloud', yandex: 'Yandex', jottacloud: 'Jottacloud', hidrive: 'HiDrive' };
+export function wireOAuthConnect(ctx, { tokenKey, backend, label, clientIdKey, clientSecretKey, endpoints = MOUNT_OAUTH_ENDPOINTS, extra = null, provider = null, pastePlaceholder = null, finishText = null, pasteHint = null, pasteSecret = false, signins = {} } = {}) {
+  // `signins`: rclone backend → the sign-in provider's name (the storage rows' client.signins cells; a caller may name `provider`)
   const tokenInput = ctx.inputs[tokenKey];
   if (!tokenInput) return;
   const post = (ep, payload) => typeof ep === 'function' ? ep(payload) : api(ep, { method: 'POST', body: JSON.stringify(payload), headers: { 'Content-Type': 'application/json' } });
@@ -323,8 +323,8 @@ export function wireOAuthConnect(ctx, { tokenKey, backend, label, clientIdKey, c
       const r = await post(endpoints.start, body);
       if (r.error) throw new Error(r.error);
       const _w = window.open(r.url, '_blank');
-      drawConsentLinks(status, r, provider || PROVIDER_LABELS[body.backend] || body.backend);
-      status.textContent = tr('A {provider} sign-in page opened. Approve access, then come back here.', { provider: provider || PROVIDER_LABELS[body.backend] || body.backend });
+      drawConsentLinks(status, r, provider || signins[body.backend] || body.backend);
+      status.textContent = tr('A {provider} sign-in page opened. Approve access, then come back here.', { provider: provider || signins[body.backend] || body.backend });
       if (!_w) status.textContent = tr('Popup blocked — copy the link below and open it in a browser yourself.');
       if (r.notice) status.textContent = r.notice;
       if (!pasteBox) {

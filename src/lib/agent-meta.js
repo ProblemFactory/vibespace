@@ -394,6 +394,11 @@ export function backendFeatureCaps(backend) {
  *  drives the surfaces with a fake one). An unknown backend gets the neutral row (no billing, no lock). */
 const NO_UI = Object.freeze({ billing: null, effortReport: null, effortLevels: null, modelLock: false, legacyIds: false, resumeResend: false });
 const NO_BILLING = Object.freeze({ globalLogin: 'Subscription', cliLogin: 'CLI login', pickLogin: 'Subscription', pickLoginHost: '', planSuffix: '', switchLogin: 'Subscription', defaultIdField: 'defaultAccountId', apiKeys: true, longLivedToken: false, hostLogin: false, machineUsage: false, usage: 'accounts', globalUsageKey: '__global__', estimates: false });
+/** A harness with NO agent (caps.terminalOnly = the descriptor's `kind: 'terminal'` — a plain login shell): no chat,
+ *  no browser pin, no name prompt. ONE row both tiers read (lane dc-harness-tail). */
+export function terminalOnly(backend) {
+  return serverCapsOf(backend).terminalOnly === true;
+}
 export function uiRow(backend) {
   return BACKEND_META[backend || 'claude']?.ui || NO_UI;
 }

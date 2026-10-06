@@ -13,6 +13,7 @@ const { createMessageManager } = require('../normalizers');
 const { pipePtyShim } = require('../pty-duck'); // B-ae4b: the R6 re-open duck holds a listener SET (the liveness stamp + the consumer)
 const { dedupWebuiSockets } = require('../session-store');
 const { list: harnessList } = require('../harnesses');
+const { capsOf } = require('../backend-caps.js'); // PURE: caps.streamProtocol (the apiKeySource field lives in a stream-json init record)
 const { pickCodexThreadCandidate } = require('../ws-handler');
 const { fdScanShellFns } = require('../writer-sweep.js');
 const { lockCaptureWanted, captureLockId, armLockCapture, adoptCapturedId, restoredForkPending, ownsItsId } = require('../claude-lock-capture'); // the ONE local lock capture (ws-create's create chain + this boot re-arm; the witness is the wrapper's pid)
@@ -445,7 +446,7 @@ function restoreSessions() {
     let pending = 0, changed = false;
     const finish = () => { if (--pending === 0 && changed) broadcastActiveSessions(); };
     for (const [id, s] of activeSessions) {
-      if (s.backend !== 'claude' || s._apiKeySource) continue;
+      if (!s.backend || capsOf(s.backend).streamProtocol !== 'stream-json' || s._apiKeySource) continue;
       const buf = path.join(BUFFERS_DIR, `${id}.buf`);
       pending++;
       execFile('sh', ['-c', `grep -o 'apiKeySource":"[^"]*"' ${JSON.stringify(buf)} 2>/dev/null | tail -1`], { timeout: 20000 }, (err, out) => {

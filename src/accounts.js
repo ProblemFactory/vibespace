@@ -346,7 +346,7 @@ class AccountManager {
       }
     };
     const other = this._state.accounts.find((x) => x.id !== id
-      && this._acctBackend(x) === 'claude' && this._acctType(x) === 'subscription'
+      && capsOf(this._acctBackend(x)).oauthUsage && this._acctType(x) === 'subscription'
       && norm(x.email || (String(x.name || '').includes('@') ? x.name : '')) === freshEmail);
     if (other) {
       moveLogin(this.subDir(other.id));
@@ -516,7 +516,7 @@ class AccountManager {
    *  wins, then the declared email, then an email-shaped name. */
   identityEmailOf(a) {
     let dirEmail = null;
-    try { if (this._acctType(a) === 'subscription' && (a.backend || 'claude') === 'claude') dirEmail = this.readSubCreds(a.id).email; } catch { }
+    try { if (this._acctType(a) === 'subscription' && capsOf(a.backend).oauthUsage) dirEmail = this.readSubCreds(a.id).email; } catch { }
     const v = dirEmail || a.email || (String(a.name || '').includes('@') ? a.name : '');
     return String(v || '').trim().toLowerCase();
   }
@@ -707,7 +707,7 @@ class AccountManager {
     // dangling — the whole pool showed signed-out and running sessions read
     // creds through a dead link until some spawn happened to heal it).
     // Deleting a member must leave every pool self-consistent NOW.
-    if (this._acctBackend(a) === 'claude' && this._acctType(a) === 'subscription') {
+    if (capsOf(this._acctBackend(a)).oauthUsage && this._acctType(a) === 'subscription') {
       this._save(); // poolMembers below must not offer the removed account
       this._healPoolsAfterRemoval(id, opts);
     }
@@ -1564,7 +1564,7 @@ class AccountManager {
   usageToken(id) {
     const a = this.get(id);
     // Anthropic-only poll — codex usage is OpenAI-side, not surfaced here.
-    if (!a || this._acctBackend(a) !== 'claude' || this._acctType(a) !== 'subscription') return null;
+    if (!a || !capsOf(this._acctBackend(a)).oauthUsage || this._acctType(a) !== 'subscription') return null;
     return this.readSubCreds(id).accessToken || null;
   }
 

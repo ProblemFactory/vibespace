@@ -364,6 +364,7 @@ const BACKEND_CAPS = {
     permissionRules: { source: 'settings-files', session: true, instance: true, liveVerb: false },
     // PLACEHOLDER — src/harnesses/index.js writes the DERIVED row from the
     // descriptor at registration (see deriveAutoResume above).
+    terminalOnly: false, oauthUsage: true, globalUsageKey: '__global__', // lane dc-harness-tail: the rows' essay is at capsOf
     autoResume: NO_AUTO_RESUME,
   },
   codex: {
@@ -412,6 +413,7 @@ const BACKEND_CAPS = {
     // instance'`; test-vendor-whitelist asserts THIS row and that entry agree,
     // so re-enabling it without re-measuring fails the build.
     permissionRules: { source: 'config-read', session: true, instance: false, liveVerb: true },
+    terminalOnly: false, oauthUsage: false, globalUsageKey: '__global_codex__',
     autoResume: NO_AUTO_RESUME, // placeholder — the registry derives it
   },
   shell: {
@@ -425,6 +427,7 @@ const BACKEND_CAPS = {
     responseStyle: { live: false, closed: true, values: [] }, // terminal-only: no agent to style
     worktree: NO_WORKTREE,
     permissionRules: { source: null, session: false, instance: false, liveVerb: false }, // no agent ⇒ no rules
+    terminalOnly: true, oauthUsage: false, globalUsageKey: null, // no agent: no chat, no window reach, no browser pin, no name prompt
     autoResume: NO_AUTO_RESUME, // placeholder — the registry derives it (shell has neither half)
   },
   // ACP v1 harnesses (S8, design-harness-plugins §2.3): the agent holds its
@@ -466,6 +469,7 @@ const BACKEND_CAPS = {
     // OpenCode does not give. liveVerb:false — the wrapper is not the source
     // (it answers 'unsupported-by-protocol'; the serve is).
     permissionRules: { source: 'serve-config', session: false, instance: true, liveVerb: false },
+    terminalOnly: false, oauthUsage: false, globalUsageKey: null,
     autoResume: NO_AUTO_RESUME, // placeholder — the registry derives it
   },
 };
@@ -475,7 +479,7 @@ const BACKEND_CAPS = {
 // row whose `steer` disagrees with its `queueVerbs`.
 for (const row of Object.values(BACKEND_CAPS)) row.inputModes = deriveInputModes(row.inputModes);
 
-const NO_CAPS = Object.freeze({ pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, fork: false, forkAtMessage: false, review: false, renameWriteback: false, titleRecord: null, streamProtocol: null, worktree: NO_WORKTREE, peerDelivery: 'stash-only', compactEnd: null, inputModes: deriveInputModes({ queue: false, queueVerbs: [] }), turnState: null, inProgressTools: false, permissionRules: Object.freeze({ source: null, session: false, instance: false, liveVerb: false }), responseStyle: Object.freeze({ live: false, closed: true, values: Object.freeze([]) }), autoResume: NO_AUTO_RESUME });
+const NO_CAPS = Object.freeze({ terminalOnly: false, oauthUsage: false, globalUsageKey: null, pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, fork: false, forkAtMessage: false, review: false, renameWriteback: false, titleRecord: null, streamProtocol: null, worktree: NO_WORKTREE, peerDelivery: 'stash-only', compactEnd: null, inputModes: deriveInputModes({ queue: false, queueVerbs: [] }), turnState: null, inProgressTools: false, permissionRules: Object.freeze({ source: null, session: false, instance: false, liveVerb: false }), responseStyle: Object.freeze({ live: false, closed: true, values: Object.freeze([]) }), autoResume: NO_AUTO_RESUME });
 
 // A CONTRIBUTED harness's row (src/harnesses/index.js register(), lane
 // dc-ws-create): the shipped table above stays the built-in truth; a register()ed
@@ -495,6 +499,18 @@ function capsOf(backend) {
   const id = backend || 'claude';
   return BACKEND_CAPS[id] || CONTRIBUTED_CAPS.get(id) || NO_CAPS;
 }
+
+// THREE DECLARED ROWS the long tail used to spell as an id (lane dc-harness-tail, 2026-10-05):
+//   terminalOnly    the harness has NO agent (a plain login shell): no chat, no window reach, no browser pin, no
+//                   session-name prompt. = the descriptor's `kind: 'terminal'` (test-harness-contract ties the two;
+//                   a register()ed descriptor gets it derived from its kind).
+//   oauthUsage      a SUBSCRIPTION account's OAuth token answers the vendor's per-account usage poll
+//                   (accounts.usageToken): the readings roster, the same-login email dedupe, the account-dir email
+//                   and the pool-member delete heal read it. Tied to the descriptor's ui.billing.usage === 'accounts'.
+//   globalUsageKey  the usage ledger's key for this harness's MACHINE login (no named account) — the descriptor's
+//                   ui.billing.globalUsageKey (a harness without one books under '__global__').
+function globalUsageKeyOf(backend) { return capsOf(backend).globalUsageKey || '__global__'; }
+function oauthUsageAccount(a) { return !!a && a.type === 'subscription' && capsOf(a.backend).oauthUsage === true; }
 
 // WHICH LANE A **VIBESPACE NOTIFICATION** TAKES WHEN THE RECEIVER IS BUSY
 // (owner decision 2026-09-07, after a codex session accumulated 20
@@ -659,6 +675,6 @@ function worktreeSpawnArgs({ backend, want, resume, fork }) {
   return { args: [wt.flag], pass: true, why: fork ? 'fork' : 'new' };
 }
 
-module.exports = { BACKEND_CAPS, capsOf, contributeCaps, setVerifiedCap, QUEUE_VERBS, LEGACY_QUEUE_VERBS, deriveInputModes, notificationDelivery,
+module.exports = { BACKEND_CAPS, capsOf, globalUsageKeyOf, oauthUsageAccount, contributeCaps, setVerifiedCap, QUEUE_VERBS, LEGACY_QUEUE_VERBS, deriveInputModes, notificationDelivery,
   AUTO_RESUME_FORMS, NO_AUTO_RESUME, deriveAutoResume,
   NO_WORKTREE, worktreeCaps, worktreeRefusal, worktreeSpawnArgs, worktreePick, worktreeLatchWrite };

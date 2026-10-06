@@ -39,7 +39,7 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const A = require('../app-manifest.js');
-const K = require('../app-kinds.js'); // PURE — an app kind is one row (lane dc-apps-rows, F-A1)
+const K = require('../app-kinds/index.js'); // PURE — an app kind is one row (lane dc-apps-rows, F-A1)
 const { liveForkPending, addressableId } = require('../claude-lock-capture.js');
 const { toAgentText } = require('../peer-text.js');
 const { sameToken } = require('../pairing-token.js'); // B-8dda (lane agent-cli-fixes): a raw secret is compared in constant time
@@ -283,7 +283,7 @@ router.post('/api/agent/apps/user-kind', async (req, res) => {
   if (!kr || !kr.addArgv) return fail(res, { code: 'bad-request', message: `kind must be ${K.ROWS.filter((r) => r.addArgv).map((r) => r.id).join(' / ')}` });
   try { res.json({ ok: true, ...(await g.engine.recordUserKind(agentHost(req, g.who), { kind, name: String(b.name || ''), why: String(b.why || '').slice(0, 500), by: { kind: 'agent', conversation: g.who.conversation, name: g.who.name } })) }); } catch (e) { fail(res, e); }
 });
-/** THE DECLARED KIND ROWS (src/app-kinds.js) — the CLI's copy reads them (vibespace-app add: its --kind words, the argv
+/** THE DECLARED KIND ROWS (src/app-kinds/) — the CLI's copy reads them (vibespace-app add: its --kind words, the argv
  *  that installs a home tool; the proposal view's card words). Data only. */
 router.get('/api/agent/apps/kinds', (req, res) => {
   const g = agentGate(req, res); if (!g) return;

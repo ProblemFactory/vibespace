@@ -22,4 +22,8 @@ const defaultRow = ROWS.find((r) => r.default);
 /** A record's row: a record without a type is the default row's; an unknown type has none (`{}` — every cell absent). */
 const rowOf = (type) => byId[type || defaultRow.id] || NONE;
 
-module.exports = { rows: ROWS, byId, rowOf, defaultRow };
+/** The rows' CLIENT cells (lane dc-mount-client), published once by GET /api/mounts as `providers`: pure data the
+ *  sidebar + the storage dialogs render from (src/lib/sidebar-mounts.js names no provider). */
+const clientRows = () => ROWS.map((r) => ({ id: r.id, default: !!r.default, oauth: r.oauth || null, ...(r.client || {}) }));
+
+module.exports = { rows: ROWS, byId, rowOf, defaultRow, clientRows };

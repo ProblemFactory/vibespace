@@ -11,6 +11,7 @@
 import { escHtml, fetchJson, showContextMenu, showToast } from './utils.js';
 import { t } from './i18n.js';
 import { learnBackendRows } from './browser-switcher-model.js';
+import { terminalOnly } from './agent-meta.js'; // lane dc-harness-tail: a plain shell has no agent to pin a browser to
 import { browserFactWords } from '../browser-fact.js'; // lane S2: THE browser fact — the pin, the browser in use, why they differ
 import { openNewProfileDialog } from './browser-new-profile.js'; // lane browser-admin: the picker's adopt rows open THE New profile… dialog
 
@@ -156,7 +157,7 @@ export function installBrowserProfilePicker(App) {
     // identity verify r3 (2026-09-28, round 2's finding 6): a session on ANOTHER machine (a host picked) can never open a
     // profile here — the row is not offered for it (the server records nothing but an inert pin for such a pick)
     const onHost = !!document.getElementById('input-host')?.value;
-    const show = !!(d && Array.isArray(d.profiles) && backend !== 'shell' && !onHost);
+    const show = !!(d && Array.isArray(d.profiles) && !terminalOnly(backend) && !onHost);
     row.style.display = show ? '' : 'none'; // no global .hidden in this repo — display is the honest switch
     if (!show) { sel.value = ''; sel.dataset.origin = ''; return; }
     this._browserProfileRowTask = taskId || null; // lane S2: the digest broadcast re-fills an OPEN dialog with the same facts

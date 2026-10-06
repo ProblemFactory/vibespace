@@ -71,7 +71,7 @@ async function call(method, p, body) {
 const hostQ = () => { const h = flag('--host'); return h ? `host=${encodeURIComponent(h)}` : ''; };
 const hostB = () => { const h = flag('--host'); return h ? { host: h } : {}; };
 const size = (n) => (n == null ? '?' : n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : n >= 1e6 ? `${Math.round(n / 1e6)} MB` : n >= 1e3 ? `${Math.round(n / 1e3)} kB` : `${n} B`);
-// THE KIND ROWS this CLI reads — the API's declared rows (src/app-kinds.js via GET /api/agent/apps/kinds), never a copy
+// THE KIND ROWS this CLI reads — the API's declared rows (src/app-kinds/ via GET /api/agent/apps/kinds), never a copy
 let kindRows = null;
 const kinds = async () => kindRows || (kindRows = (await call('GET', '/api/agent/apps/kinds')).kinds || []);
 const cardRow = (rows, card) => rows.find((r) => r.card === card) || {};
@@ -172,9 +172,9 @@ function planLine(p) {
     const target = words()[0];
     const why = flag('--why') || '';
     const kr = (await kinds()).find((r) => r.cliWord && r.cliWord === kind);
-    if (!kr || !target) { console.error('vibespace-app add --kind uv|npm <name> --why "…"  (an AppImage: vibespace-app install --file <file> --why "…")'); process.exit(2); }
+    if (!kr || !target) { console.error(`vibespace-app add --kind ${(await kinds()).filter((r) => r.cliWord && r.addArgv).map((r) => r.cliWord).join('|')} <name> --why "…"  (an AppImage: vibespace-app install --file <file> --why "…")`); process.exit(2); }
     if (!kr.addArgv) { // design 009: an AppImage is PROPOSED like any installer (its row installs nothing as the user) — VibeSpace unpacks it in its own directory at the user's click
-      if (!why.trim()) { console.error('vibespace-app add --kind appimage: say why (--why "…") — the user reads it before deciding'); process.exit(2); }
+      if (!why.trim()) { console.error(`vibespace-app add --kind ${kind}: say why (--why "…") — the user reads it before deciding`); process.exit(2); }
       const file = path.resolve(target);
       const j = await call('POST', '/api/agent/apps/proposals', { ...hostB(), request: { kind: 'installer', file }, why });
       const p = j.proposal;

@@ -36,6 +36,13 @@ const MC = mutantCopies('mount-providers', REPO);   // patched copies live outsi
 }
 
 // ── ② a FAKE provider through ONE registration line drives the real manager ──
+// lane dc-mount-client: the fake row's CLIENT cells (pure data, published by clientRows()) — ④ renders them
+const ACME_CLIENT = { pick: 10, form: 10, pickLabel: 'Acme Cloud', tag: 'ACME', offersChild: true, driveReauth: true,
+  names: { product: 'Acme Drive', signin: 'Acme' }, signins: { acme: 'Acme' },
+  connect: [{ key: 'acmeHost', label: 'Acme host', placeholder: 'acme.example.test' }, { key: 'acmeToken', label: 'Acme access', type: 'textarea' }],
+  child: { path: { key: 'remotePath', label: 'Acme folder', placeholder: 'acme/sub' } },
+  edit: [{ key: 'acmeHost', label: 'Acme host', placeholder: 'acme.example.test' }, { key: 'acmeKey', label: 'Acme key' }],
+  submit: { map: { token: 'acmeToken' }, drop: ['acmeToken'] } };
 const ACME = `'use strict';
 module.exports = {
   id: 'acme',
@@ -49,6 +56,7 @@ module.exports = {
   },
   child(m, cfg) { m.remotePath = String(cfg.remotePath || ''); },
   update(m, patch, setIf, x) { setIf('acmeHost'); if (patch.acmeKey) m.acmeKeyEnc = x._enc(String(patch.acmeKey)); },
+  client: ${JSON.stringify(ACME_CLIENT)},   // lane dc-mount-client: its CLIENT cells ride the same row
   rclone(m, env, P, R, x) { env[P('TYPE')] = 'acme'; env[P('HOST')] = m.acmeHost; env[P('KEY')] = x._dec(m.acmeKeyEnc); return R + ':' + (m.remotePath || ''); },
 };
 `;
@@ -176,6 +184,94 @@ ok(fake.oauth && fake.lent, '② its declared cells reach the OAuth facts: OAuth
     before.forEach((b, i) => { if (JSON.stringify(b) === JSON.stringify(after[i])) same++; else diffs.push(`scenario ${i}: ` + firstDiff(b, after[i])); });
     ok(before.length === after.length && diffs.length === 0, `③ every provider answers the same before and after the move (${same}/${before.length} scenarios: add · list · config · child · edit · rclone env · OAuth/share facts · re-auth client · raw-rclone adoption)`, diffs.join('\n    '));
     ok(before.filter((r) => r.add && !r.add.err).length >= 15 && before.some((r) => r.add && r.add.err), '③ the scenarios reach every row (15+ adds land, the unknown type is refused)');
+  }
+}
+// ⑤ lane dc-mount-client — the CLIENT half: the same ONE index line carries acme's client cells to GET /api/mounts
+// (`providers` = clientRows()) and the REAL src/lib/sidebar-mounts.js (an esbuild node bundle, DOM stubbed) renders
+// them — the Connect dialog's type + fields + submit body, the Edit fields, the submount path, the re-authorize
+// names, the sign-in name — with ZERO client edits. Controls (patched copies, never src/): the old PROVIDER_LABELS
+// literal table back in the client ⇒ acme unnamed ⇒ red; a literal type branch planted ⇒ §78 rise ⇒ red.
+{
+  const esbuild = require(path.join(REPO, 'node_modules/esbuild'));
+  const { census } = await import(path.join(REPO, 'scripts/id-branch-census.mjs'));
+  const noop = new Proxy(function () {}, { get: (t, k) => (k === Symbol.toPrimitive ? () => '' : k === 'then' ? undefined : noop), apply: () => noop, construct: () => noop, set: () => true, has: () => true });
+  for (const g of ['window', 'document', 'localStorage', 'sessionStorage', 'location', 'matchMedia', 'getComputedStyle', 'requestAnimationFrame', 'HTMLElement', 'Element', 'Node', 'MutationObserver', 'ResizeObserver', 'IntersectionObserver', 'customElements', 'history', 'screen']) if (!(g in globalThis)) globalThis[g] = noop;
+  const calls = [];
+  globalThis.fetch = async (url, opts = {}) => { calls.push({ url: String(url), method: opts.method || 'GET', body: opts.body ? JSON.parse(opts.body) : null }); const j = String(url).endsWith('/drive-defaults') ? { presets: [] } : { id: 'acme-1' }; return { ok: true, status: 200, headers: { get: () => 'application/json' }, json: async () => j, text: async () => JSON.stringify(j) }; };
+  const SM = path.join(REPO, 'src/lib/sidebar-mounts.js');
+  const bundle = async (src, tag) => {
+    const out = path.join(ROOT, `sidebar-mounts.${tag}.mjs`);
+    await esbuild.build({ stdin: { contents: src, resolveDir: path.dirname(SM), sourcefile: SM }, bundle: true, format: 'esm', platform: 'browser', outfile: out, logLevel: 'silent', loader: { '.css': 'empty' },
+      plugins: [{ name: 'bv', setup(b) { b.onResolve({ filter: /build-version\.js$/ }, () => ({ path: 'bv', namespace: 'bv' })); b.onLoad({ filter: /.*/, namespace: 'bv' }, () => ({ contents: "export const BUILD_VERSION = '0';" })); } }] });
+    return (await import(out)).installSidebarMounts;
+  };
+  const acmeRows = require(idxCopy).clientRows();
+  const probe = async (install, rows) => {
+    function S() { this._mountsData = { providers: rows }; this._hostsData = { hosts: [] }; }
+    install(S);
+    const s = new S(); let dlg = null;
+    s._mountsDialog = (title, fields, submitLabel, onSubmit) => { dlg = { fields, onSubmit }; };
+    s._connectNewMount = async () => false;
+    await s._showAddMountDialog();
+    const typeOpts = dlg.fields.find((f) => f.key === 'type').options;
+    const host = dlg.fields.find((f) => f.key === 'acmeHost');
+    calls.length = 0;
+    try { await dlg.onSubmit({ type: 'acme', name: 'a1', acmeHost: 'h.example.test', acmeToken: '{"t":1}', mode: 'rw' }, { close() {} }); } catch {}
+    const post = calls.find((c) => c.url.endsWith('/api/mounts') && c.method === 'POST');
+    return { typeOpts, host: host && { label: host.label, ph: host.placeholder, mine: host.when({ type: 'acme' }), other: host.when({ type: 's3' }) }, body: post && post.body,
+      edit: s._mountEditFields({ type: 'acme', acmeHost: 'h.example.test' }), editChild: s._mountEditFields({ type: 'acme', parentId: 'p' }),
+      names: s._oauthProviderNames({ type: 'acme' }), reauth: s._isDriveBacked({ type: 'acme' }), signin: s._signins().acme, row: s._providerRow('acme') };
+  };
+  const smSrc = read('src/lib/sidebar-mounts.js');
+  const real = await probe(await bundle(smSrc, 'tree'), acmeRows);
+  ok(JSON.stringify(real.typeOpts.at(-1)) === '["acme","Acme Cloud"]' && real.typeOpts.length === 10, '⑤ Connect storage: the type list offers acme last (its pick + pickLabel cells)', JSON.stringify(real.typeOpts));
+  ok(real.host && real.host.label === 'Acme host' && real.host.ph === 'acme.example.test' && real.host.mine === true && real.host.other === false, '⑤ …acme\'s own fields render, shown only while acme is picked', JSON.stringify(real.host));
+  ok(real.body && real.body.type === 'acme' && real.body.token === '{"t":1}' && !('acmeToken' in real.body) && real.body.acmeHost === 'h.example.test', '⑤ …and its submit cells shape the POST body (acmeToken → token, the UI key dropped)', JSON.stringify(real.body));
+  ok(JSON.stringify(real.edit) === JSON.stringify([['acmeHost', 'Acme host', 'acme.example.test', 'h.example.test'], ['acmeKey', 'Acme key', '', '']]) && JSON.stringify(real.editChild) === '[]', '⑤ the Edit dialog prefills acme\'s edit cells (a child without editChild cells edits nothing)', JSON.stringify(real.edit));
+  ok(real.names.product === 'Acme Drive' && real.names.signin === 'Acme' && real.reauth === true && real.signin === 'Acme' && real.row.tag === 'ACME' && real.row.offersChild === true, '⑤ the re-authorize names, the sign-in name, the chip tag and the ＋ come off acme\'s row', JSON.stringify({ names: real.names, signin: real.signin }));
+  ok(!PROV.clientRows().some((r) => r.id === 'acme') && PROV.clientRows().every((r) => r.client === undefined && 'oauth' in r), '⑤ the real providers list publishes no acme row (flat client cells, the oauth cell beside them)');
+  const old = smSrc.replace(/_signins\(\) \{[^\n]*\},/, "_signins() { return { onedrive: 'Microsoft', drive: 'Google', dropbox: 'Dropbox', box: 'Box', pcloud: 'pCloud', yandex: 'Yandex', jottacloud: 'Jottacloud', hidrive: 'HiDrive' }; },");
+  const ctl = old !== smSrc && await probe(await bundle(old, 'old-labels'), acmeRows);
+  ok(ctl && ctl.signin === undefined, '⑤ CONTROL: the old PROVIDER_LABELS literal table back in the client ⇒ acme has no sign-in name (red)', JSON.stringify(ctl && ctl.signin));
+  const planted = smSrc.replace('    _providerRows() {', "    _plant(m) { if (m.type === 'gmail') return 1; },\n    _providerRows() {");
+  const c = census(REPO, { read: (f) => (f === 'src/lib/sidebar-mounts.js' ? planted : fs.readFileSync(path.join(REPO, f), 'utf8')) });
+  const base = JSON.parse(read('scripts/fixtures/id-branch-baseline.json'));
+  const n = (c.counts.mount || {})['src/lib/sidebar-mounts.js'] || 0, b0 = ((base.mount || {})['src/lib/sidebar-mounts.js']) || 0;
+  ok(planted !== smSrc && n === 1 && b0 === 0, '⑤ CONTROL: a literal `m.type === \'gmail\'` planted in sidebar-mounts.js is a §78 mount rise (0 → 1)', JSON.stringify({ n, b0 }));
+  // ⑤ DIFFERENTIAL: the client of the base (f02c9dfa9, before the rows' client cells) vs this tree over every real
+  // provider — the Connect dialog's fields (+ each `when` over the types), the submit body, the Edit fields (top +
+  // child), the re-authorize names, the D2 client-switch rule: identical. SKIP by name on a shallow clone (§75).
+  let baseSm = null; try { baseSm = execFileSync('git', ['-C', REPO, 'show', 'f02c9dfa9:src/lib/sidebar-mounts.js'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); } catch {}
+  if (!baseSm) console.log('  SKIP ⑤ differential base-vs-tree client — f02c9dfa9 not in this clone (shallow)');
+  else {
+    const TYPES = PROV.rows.map((r) => r.id);
+    const sorted = (o) => JSON.stringify(o, (k, v) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort()) : v));
+    const facts = async (install) => {
+      function S() { this._mountsData = { providers: PROV.clientRows() }; this._hostsData = { hosts: [{ id: 'h1', name: 'Box', host: 'b', user: 'u', port: 22 }] }; }
+      install(S);
+      const s = new S(); let dlg = null; const out = {};
+      s._mountsDialog = (title, fields, submitLabel, onSubmit) => { dlg = { fields, onSubmit }; };
+      s._connectNewMount = async () => false;
+      for (const presets of [[], [{ key: 'acme', label: 'Acme' }]]) {
+        globalThis.__presets = presets;
+        await s._showAddMountDialog();
+        out['connect' + presets.length] = dlg.fields.map((f) => sorted({ ...f, when: f.when && TYPES.flatMap((t) => [f.when({ type: t }), f.when({ type: t, clientChoice: 'custom', gmailClientChoice: 'custom', driveMode: 'shared-drive' })]), autocomplete: typeof f.autocomplete === 'function' ? [f.autocomplete({ fromHost: { value: 'h1' } }), f.autocomplete({})] : f.autocomplete }));
+        const all = Object.fromEntries(dlg.fields.map((f) => [f.key, f.key === 'params' || f.key === 'extraParams' ? 'a = 1\nb = 2' : f.key + '-v']));
+        for (const t of TYPES) for (const ch of ['custom', '']) { calls.length = 0; try { await dlg.onSubmit({ ...all, type: t, clientChoice: ch, gmailClientChoice: ch }, { close() {} }); } catch {} out[`submit-${t}-${ch}-${presets.length}`] = sorted(calls.find((c) => c.url.endsWith('/api/mounts'))?.body); }
+      }
+      const cfg = { endpoint: 'e', bucket: 'b', prefix: 'p', accessKey: 'a', secretKey: 's', remotePath: 'r', params: { region: 'x', n: null }, driveFolder: 'f', driveMode: '', teamDriveId: 't', rootFolderId: 'r', clientPreset: 'acme', token: 'tok', clientId: 'c', clientSecret: 'cs', syncCount: 0, groupBy: '', labelIds: 'L', query: 'q', driveType: '', driveId: 'd', url: 'u', vendor: '', user: 'us', pass: 'pw', bearerToken: 'bt', sshHost: 'h', sshUser: 'u', sshPort: 22, sshPath: '/p', keyPath: '/k', backend: 'box', source: 'remote:x', rcloneType: 'drive' };
+      for (const t of [...TYPES, undefined]) {
+        out['edit-' + t] = sorted([s._mountEditFields({ ...cfg, type: t }, [{ key: 'acme', label: 'Acme' }]), s._mountEditFields({ ...cfg, type: t, parentId: 'p' }), s._mountEditFields({ ...cfg, type: t, syncCount: undefined, sshPort: 0 })]);
+        out['names-' + t] = sorted([s._isDriveBacked({ ...cfg, type: t }) && s._oauthProviderNames({ ...cfg, type: t }), s._isDriveBacked({ ...cfg, type: t, rcloneType: 's3' }), s._isDriveBacked({ ...cfg, type: t }) && s._oauthProviderNames({ ...cfg, type: t, backend: 'zz' })]);   // names are only ever asked for a drive-backed record (D2's own rows: the d2 facts)
+        out['d2-' + t] = sorted([s._mountClientSwitch({ type: t, clientPreset: 'acme' }, { clientPreset: 'lab' }, []), s._mountClientSwitch({ type: t, clientId: 'a', clientSecret: 'x' }, { clientId: 'b' }, []), s._mountClientSwitch({ type: t, clientId: 'a', clientSecret: 'x' }, { clientSecret: 'y' }, [])]);
+      }
+      return out;
+    };
+    const fetch0 = globalThis.fetch;
+    globalThis.fetch = async (url, opts) => (String(url).endsWith('/drive-defaults') ? { ok: true, status: 200, headers: { get: () => 'application/json' }, json: async () => ({ presets: globalThis.__presets }), text: async () => JSON.stringify({ presets: globalThis.__presets }) } : fetch0(url, opts));
+    const before = await facts(await bundle(baseSm, 'base')), after = await facts(await bundle(smSrc, 'tree2'));
+    const diffs = Object.keys(before).filter((k) => JSON.stringify(before[k]) !== JSON.stringify(after[k]));
+    ok(diffs.length === 0 && Object.keys(before).length === Object.keys(after).length, `⑤ DIFFERENTIAL: the base client and this tree answer the same over every real provider (${Object.keys(before).length} facts: Connect fields ×2 preset sets, ${TYPES.length * 4} submit bodies, Edit top/child, names, D2)`, diffs.slice(0, 3).map((k) => { const a = [].concat(before[k]), b = [].concat(after[k]); const i = a.findIndex((x, n) => x !== b[n]); return `${k}[${i}]: ${String(a[i]).slice(0, 300)} ≠ ${String(b[i]).slice(0, 300)}`; }).join('\n    '));
   }
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

@@ -13,6 +13,7 @@
 // answer; the bucket rules below are a deliberate second spelling of its
 // keyOf, and a drift between the two is exactly what a comparison reports.
 
+const { globalUsageKeyOf } = require('./backend-caps.js'); // PURE → PURE: the machine login's ledger key per harness
 const SCHEMA_VERSION = 1; // PRAGMA user_version — a database at any other version is deleted and rebuilt
 const HEAD_BYTES = 4096;  // a shard's fingerprint covers at most its first 4 KiB
 const SHARD_RE = /^events-\d{4}-\d{2}\.ndjson$/; // the ledger's monthly shards (usage-history.js _loadEvents)
@@ -54,7 +55,7 @@ function rowOf(ev, shard) {
   const hm = rid && /^h:[^:]*:(.*)$/.exec(rid);
   return [rid, hm ? hm[1] : rid, str(ev.mid), num(ev.ts) || 0, ev.sid == null ? null : String(ev.sid),
     ev.be == null ? null : String(ev.be), ev.model == null ? null : String(ev.model), str(ev.effort), str(ev.tier),
-    acct, acct || (ev.be === 'codex' ? '__global_codex__' : '__global__'), str(ev.pool), ev.atype == null ? null : String(ev.atype),
+    acct, acct || globalUsageKeyOf(ev.be), str(ev.pool), ev.atype == null ? null : String(ev.atype),
     str(ev.aname), str(ev.mode), str(ev.host), str(ev.cwd), str(ev.wcwd), str(ev.origin), str(ev.wf), str(ev.agent),
     str(ev.slotRekeyedBy), num(ev.i), num(ev.cw5), num(ev.cw1), num(ev.cr), num(ev.o), String(shard)];
 }
@@ -144,7 +145,7 @@ function keysOf(r) {
   return {
     day: r.day,
     model: r.model || 'unknown',
-    account: r.acct || (r.be === 'codex' ? '__global_codex__' : '__global__'),
+    account: r.acct || globalUsageKeyOf(r.be),
     billing: r.atype === 'api' ? 'api-key' : r.atype === 'subscription' ? 'subscription' : r.atype === 'codex-subscription' ? 'chatgpt' : r.atype === 'host' ? 'remote-host' : (r.acct ? 'unknown-account' : (r.be === 'codex' ? 'codex-cli-login' : 'cli-global-login')),
     project: r.cwd || 'unknown',
     mode: r.mode || 'unknown',

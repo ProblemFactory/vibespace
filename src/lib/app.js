@@ -65,7 +65,7 @@ import { installBrowserSwitcher } from './browser-switcher.js'; // agent browser
 import { installBrowserTrace } from './browser-trace-view.js'; // agent browser P5 (§4.5/§8 step 3): the profiles panel (the trace surfaces install themselves)
 import { installBrowserReplay } from './browser-replay-window.js'; // 2026-09-27: a browser session's replay (window type browser-replay)
 import { permissionModeOptions } from './permission-mode-labels.js'; // lane L: permission modes in plain words, the raw value as a hint
-import { BACKEND_META, createBackendIconHtml, getSessionKey, pickAgentIdentity, settingsPrefixFor, effortLabel, effortOptions, noteModelCatalog, worktreeCapsFor, backendFeatureCaps, billingRow } from './agent-meta.js';
+import { BACKEND_META, createBackendIconHtml, getSessionKey, pickAgentIdentity, settingsPrefixFor, effortLabel, effortOptions, noteModelCatalog, worktreeCapsFor, backendFeatureCaps, billingRow, terminalOnly } from './agent-meta.js';
 import { sessionGivenName } from '../session-name.js'; // lane session-title-record: THE name ladder's given rungs (the window title)
 
 const BACKEND_SESSION_OPTIONS = {
@@ -108,21 +108,17 @@ const BACKEND_SESSION_OPTIONS = {
 fetchJson('/api/available-models').then(data => {
   if (!data) return;
   const toSchemaOptions = (models) => models.map(m => ({ value: m.id, label: m.label || m.id || t('Default') }));
-  for (const be of Object.keys(data)) { // ACP harnesses (S8): the agent's offered models, learned server-side from session/config records
-    if (be === 'claude' || be === 'codex' || !BACKEND_SESSION_OPTIONS[be] || !data[be]?.length) continue;
+  // EVERY harness's offered models, one rule (lane dc-harness-tail): claude's from bootstrap/v1/models, codex's from
+  // its cache, an ACP agent's learned server-side from session/config records (S8)
+  for (const be of Object.keys(data)) {
+    if (!BACKEND_SESSION_OPTIONS[be] || !data[be]?.length) continue;
     BACKEND_SESSION_OPTIONS[be].models = data[be];
     if (SETTINGS_SCHEMA[`${be}.defaultModel`]) SETTINGS_SCHEMA[`${be}.defaultModel`].options = toSchemaOptions(data[be]);
-  }
-  if (data.claude?.length) {
-    BACKEND_SESSION_OPTIONS.claude.models = data.claude;
-    SETTINGS_SCHEMA['claude.defaultModel'].options = toSchemaOptions(data.claude);
   }
   // Per-model facts that are not pickable options (multiAgentEffort) — the
   // metadata popup and the status-bar tooltip read them from here (2.369.62).
   for (const be of Object.keys(data)) noteModelCatalog(be, data[be]);
   if (data.codex?.length) {
-    BACKEND_SESSION_OPTIONS.codex.models = data.codex;
-    SETTINGS_SCHEMA['codex.defaultModel'].options = toSchemaOptions(data.codex);
     // Codex effort levels are model-specific since GPT-5.6 (sol/terra add
     // max+ultra) — build the dropdown from the union of the models' reported
     // levels instead of the stale hardcoded ladder. Rank keeps a sane order.
@@ -1483,7 +1479,7 @@ class App {
         const ok = await this._ensureCwdExists(cwd, hostId).finally(() => delete createBtn.dataset.busy);
         if (!ok) return;
       }
-      if (backend === 'shell') {
+      if (terminalOnly(backend)) {
         // Plain terminal — reuse openShellTerminal (handles host + defaults)
         this.openShellTerminal(cwd || undefined, { hostId });
         this.hideDialogs();
@@ -1564,7 +1560,7 @@ class App {
   _applySessionBackendOptions(backend, { applyDefaults = false } = {}) {
     // Plain shell terminal has no model/permission/effort/mode — hide those
     // rows so the dialog is just Backend / Host / Working Directory / Name.
-    const isShell = backend === 'shell';
+    const isShell = terminalOnly(backend);
     for (const [id, hide] of [
       ['row-mode', isShell], ['row-model', isShell], ['custom-model-row', isShell],
       ['row-permission', isShell], ['row-effort', isShell || BACKEND_META[backend]?.caps?.effort === false], ['row-extra-args', isShell],

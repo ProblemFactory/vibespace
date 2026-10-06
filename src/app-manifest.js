@@ -63,12 +63,12 @@ const ENTRY_ID_RE = /^[a-z0-9][a-z0-9-]{0,39}$/;
 const NONCE_RE = /^[a-z0-9]{8,32}$/;
 const SHA256_RE = /^[0-9a-f]{64}$/;
 const FPR_RE = /^[0-9A-F]{40}(?:[0-9A-F]{24})?$/;
-/** Kinds of entry — ONE row each in src/app-kinds.js (lane dc-apps-rows, F-A1). `apt` = packages from the machine's
+/** Kinds of entry — ONE file each in src/app-kinds/ (lanes dc-apps-rows F-A1, dc-app-kinds). `apt` = packages from the machine's
  *  sources (or an approved third-party one), `deb` = a .deb file the user had (its bytes copied into the repo, sha256
  *  kept) — the rows declaring `entry: 'root'`. The user-level kinds (§3.4, `entry: 'home'`) live in HOME and need no
  *  replay (the home volume keeps them); uv-tool / npm are recorded (POST /api/agent/apps/user-kind), an AppImage is
  *  proposed. */
-const K = require('./app-kinds'); // PURE — an app kind is one row
+const K = require('./app-kinds/index.js'); // PURE — an app kind is its own file + one index line
 const { ENTRY_KINDS, HOME_KINDS } = K;
 const BY_KINDS = Object.freeze(['user', 'agent']);
 /** Every refusal a plan may carry, by name (the dialog and the CLI word them). */
@@ -193,12 +193,12 @@ function normEntry(e) {
   if (typeof e.why === 'string' && e.why) out.why = e.why.slice(0, 500);
   if (typeof e.label === 'string' && e.label) out.label = e.label.slice(0, 80);
   if (e.layer === 'sys' && K.kindRow(e.kind).entry === 'root') out.layer = 'sys'; // installed INTO the app system (Layer 1) — nothing to replay
-  if (e.kind === 'deb') {
-    const d = e.deb;
-    if (!isObj(d) || !SHA256_RE.test(String(d.sha256 || '')) || !PKG_RE.test(String(d.package || ''))) return { ok: false, error: `entry ${e.id}: a deb entry carries {package, sha256, name}` };
-    out.deb = { package: d.package, sha256: d.sha256, name: str(d.name, 200) || `${d.package}.deb`, size: num(d.size) };
+  const readRecord = K.kindRow(e.kind).record; // the kind's own record reader (what root / the home wrote for it)
+  if (readRecord) {
+    const x = readRecord(e, { isObj, str, num, SHA256_RE, PKG_RE });
+    if (x && x.error) return { ok: false, error: `entry ${e.id}: ${x.error}` };
+    if (x) Object.assign(out, x);
   }
-  if (e.kind === 'appimage' && isObj(e.appimage) && SHA256_RE.test(String(e.appimage.sha256 || ''))) out.appimage = { sha256: e.appimage.sha256, name: str(e.appimage.name, 200), size: num(e.appimage.size), from: str(e.appimage.from, 300) };
   return { ok: true, entry: out };
 }
 /** The index → `{ok, manifest}` (normalized: unknown keys dropped) | `{ok:false, error}`. */
@@ -377,7 +377,7 @@ function parsePlan(simText, urisText, ctx = {}) {
   if (!facts) return { ok: false, code: 'no_facts', error: 'the machine did not report its facts (an older agent?)', ...base };
   if ((facts.platform && facts.platform !== 'linux') || !facts.apt) return { ok: false, code: 'no_apt', error: `${facts.prettyName || facts.distro || 'this machine'} has no apt-get — VibeSpace installs apps with apt only`, ...base };
   const badName = requested.find((p) => !PKG_RE.test(p));
-  if (badName !== undefined || (!requested.length && kind !== 'deb')) return { ok: false, code: 'bad_name', error: badName !== undefined ? `${JSON.stringify(String(badName).slice(0, 64))} is not a Debian package name` : 'no package named', ...base };
+  if (badName !== undefined || (!requested.length && !(K.kindRow(kind) || {}).fileBound)) return { ok: false, code: 'bad_name', error: badName !== undefined ? `${JSON.stringify(String(badName).slice(0, 64))} is not a Debian package name` : 'no package named', ...base };
   const sim = parseSim(simText);
   const uris = parseUris(urisText);
   if (sim.notFound.length) return { ok: false, code: 'not_found', error: `no package named ${sim.notFound.join(', ')} in this machine's package sources`, notFound: sim.notFound, ...base };
@@ -930,8 +930,8 @@ function appCommands({ mode, packages = [], deb = null, source = null, entryLabe
   const lock = `-o DPkg::Lock::Timeout=${APT_LOCK_WAIT_S}`;
   const cache = '-o Dir::Cache::archives=~/.vibespace/apps/debs/ -o APT::Keep-Downloaded-Packages=true';
   const keep = '# VibeSpace keeps every .deb it needs in ~/.vibespace/apps/debs (root-owned) so the app comes back after the machine is rebuilt';
-  if (mode === 'install') return [`sudo apt-get ${lock} update`, `sudo DEBIAN_FRONTEND=noninteractive apt-get ${lock} ${cache} install -y ${packages.join(' ')}`, keep];
-  if (mode === 'deb') return [`# the file is copied into ~/.vibespace/apps/debs (sha256 ${deb && deb.sha256 ? deb.sha256 : '?'})`, `sudo apt-get ${lock} update`, `sudo DEBIAN_FRONTEND=noninteractive apt-get ${lock} ${cache} install -y ./${deb && deb.name ? deb.name : 'package.deb'}`, keep];
+  const kindOfMode = K.ROWS.find((r) => r.mode === mode && r.commands); // a root kind's own install steps (its file)
+  if (kindOfMode) return kindOfMode.commands({ packages, deb, lock, cache, keep });
   if (mode === 'remove') return [`sudo apt-get ${lock} remove --autoremove -y ${packages.join(' ')}`, `# VibeSpace drops ${entryLabel || 'the app'} from ~/.vibespace/apps and its .deb files from the cache`];
   if (mode === 'refresh') return [`sudo apt-get ${lock} update`, `sudo apt-get ${lock} ${cache} install --only-upgrade -y ${packages.join(' ') || '<your apps>'}`, '# VibeSpace keeps one version of each package in the cache'];
   if (mode === 'adopt') return [`# VibeSpace saves the installed ${packages.join(' ')} .deb files into ~/.vibespace/apps/debs so they come back after a rebuild`, `sudo apt-get download ${packages.join(' ')}`];

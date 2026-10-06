@@ -335,7 +335,7 @@ export function installSidebarMounts(Sidebar) {
       if (m.mounted) {
         actions.append(
           ibtn(MI.folder, 'Browse in file explorer', () => { this.app.openFileExplorer(m.path); }),
-          ibtn(MI.eject, m.type === 'gmail' ? tr('Stop syncing (synced emails stay)') : 'Disconnect', () => api(`/api/mounts/${m.id}/unmount`, { method: 'POST' })),
+          ibtn(MI.eject, this._providerRow(m.type).unmountLabel ? tr(this._providerRow(m.type).unmountLabel) : 'Disconnect', () => api(`/api/mounts/${m.id}/unmount`, { method: 'POST' })),
         );
       } else if (!isCred && !m.starting) { // STARTING: no Connect — the row's line says what it waits for
         // Power icon (⏻) in the same icon-button family — the old glyph read
@@ -361,7 +361,7 @@ export function installSidebarMounts(Sidebar) {
       }
       // EVERY top-level storage can act as a credential (user directive):
       // ＋ adds a submount (remote:path) under it, for types with a path notion.
-      if (!m.parentId && ['s3', 'rclone', 'drive', 'onedrive', 'sftp', 'cloud'].includes(m.type || 's3')) {
+      if (!m.parentId && this._providerRow(m.type).offersChild) {   // the row offers the ＋ (client.offersChild)
         actions.append(ibtn(MI.plus, tr('Add a submount (a specific bucket/path of this storage)'), () => { this._showAddChildDialog(m); }, isCred ? 'mounts-icon-accent' : ''));
       }
       actions.append(ibtn(MI.pencil, 'Edit connection (path, credentials, name)', () => { this._showEditMountDialog(m); }));
@@ -377,7 +377,8 @@ export function installSidebarMounts(Sidebar) {
       pathEl.title = isCred ? (m.source || '') : `${m.source || ''} → ${m.path}`;
       const tag = document.createElement('span');
       tag.className = 'mounts-typetag';
-      tag.textContent = { s3: 'S3', drive: 'Drive', onedrive: 'OneDrive', gmail: 'Gmail', cloud: (m.source || 'Cloud').split(':')[0], webdav: 'WebDAV', sftp: 'SFTP', vibespace: 'VibeSpace', cephfs: 'CephFS', rclone: (m.source || 'rclone').split(':')[0] }[m.type || 's3'] || m.type;
+      const tagRow = this._providerRow(m.type);   // the row's chip: its tag, or (a remote-backed row) the source's remote name
+      tag.textContent = tagRow.tagFromSource ? (m.source || tagRow.tagFromSource).split(':')[0] : (tagRow.tag || m.type);
       // The path keeps its rtl left-truncation trick in its OWN span — the
       // chip must stay outside the rtl context or bidi reorders it to the end.
       const pt = document.createElement('span');
@@ -388,7 +389,7 @@ export function installSidebarMounts(Sidebar) {
       // Gmail rows: this is a SYNC, not a filesystem — say so, with a live
       // progress bar while a pass is fetching (server broadcasts throttled
       // mounts-updated during the pass, so this re-renders as it moves).
-      if (m.type === 'gmail' && !m.parentId) {
+      if (this._providerRow(m.type).sync && !m.parentId) {
         const sync = document.createElement('div');
         sync.className = 'mounts-syncline';
         const prog = m.gmailProgress;
@@ -474,21 +475,68 @@ export function installSidebarMounts(Sidebar) {
       return row;
     },
 
-    _isDriveBacked(m) { return m.type === 'drive' || m.type === 'onedrive' || m.type === 'cloud' || (m.type === 'rclone' && m.rcloneType === 'drive'); },
+    // lane dc-mount-client: the storage providers' CLIENT cells — src/mount-providers/<id>.js `client`, published once
+    // by GET /api/mounts (`providers`) and cached with the panel's data. Every word, field, widget and rule below reads
+    // a row; nothing here names a provider (test-architecture §78 family `mount`).
+    _providerRows() { return this._mountsData?.providers || []; },
+    _providerRow(type) {
+      const rows = this._providerRows();
+      return rows.find((r) => r.id === (type || rows.find((x) => x.default)?.id)) || {};
+    },
+    _hasWidget(type, w) { return (this._providerRow(type).widgets || []).includes(w); },
+    _signins() { return Object.assign({}, ...this._providerRows().map((r) => r.signins || {})); },
+    // A row's declared field → the dialog's field: words through tr(), the OAuth-client select over the instance
+    // presets, a host-list select, the host dir-complete, and `when` (the row's type picked + the cell's key tests).
+    _fieldOf(f, presets = [], typeId = null) {
+      const o = { ...f };
+      for (const k of ['label', 'placeholder']) if (typeof o[k] === 'string') o[k] = tr(o[k]);
+      if (o.hint && typeof o.hint === 'object') o.hint = presets.length ? o.hint.presets : o.hint.none;
+      if (typeof o.hint === 'string') o.hint = tr(o.hint);
+      if (o.clients) o.options = [...presets.map((p) => [p.key, tr('Preset: {name}', { name: p.label })]), ...(o.clients.builtin ? [['', tr(o.clients.builtin)]] : []), ['custom', tr('Custom (own client id/secret)')]];
+      else if (o.options) o.options = [...o.options.map(([v, l]) => [v, tr(l)]), ...(o.hosts ? (this._hostsData?.hosts || []).map((h) => [h.id, h.name]) : [])];
+      if (o.value && typeof o.value === 'object') o.value = presets[0]?.key || o.value.preset;
+      if (o.autocomplete?.hostDir) { const k = o.autocomplete.hostDir; o.autocomplete = (inputs) => (inputs[k]?.value ? `/api/hosts/${inputs[k].value}/dir-complete` : '/api/hosts/none/dir-complete'); }
+      const w = o.when;
+      if (typeId != null || w) o.when = (v) => (typeId == null || v.type === typeId) && (!w || Object.entries(w).every(([k, c]) => (c && typeof c === 'object' ? v[k] !== c.not : v[k] === c)));
+      delete o.clients; delete o.hosts;
+      return o;
+    },
+    // A row's declared widget on an open dialog: a guided OAuth connect over rclone authorize, or a named one below.
+    _wireWidget(ctx, w) {
+      if (w && w.oauth) {
+        const o = w.oauth;
+        return this._wireOAuthConnect(ctx, { tokenKey: o.tokenKey, backend: o.backendKey ? () => ctx.inputs[o.backendKey]?.value || o.backend : o.backend,
+          label: tr(o.label), ...(o.clientIdKey ? { clientIdKey: o.clientIdKey, clientSecretKey: o.clientSecretKey } : {}) });
+      }
+      const fn = { 'host-prefill': '_wireHostPrefill', 'drive-connect': '_wireDriveConnect', 'shared-drives': '_wireSharedDrivePicker', 'gmail-connect': '_wireGmailConnect', 'gmail-labels': '_wireGmailLabelsPicker' }[w];
+      return fn ? this[fn](ctx) : undefined;
+    },
+    // picking a registered host prefills connection fields (key incl.)
+    _wireHostPrefill(ctx) {
+      ctx.inputs.fromHost?.addEventListener('change', () => {
+        const h = (this._hostsData?.hosts || []).find(x => x.id === ctx.inputs.fromHost.value);
+        if (!h) return;
+        ctx.inputs.sshHost.value = h.host;
+        ctx.inputs.sshUser.value = h.user;
+        ctx.inputs.sshPort.value = String(h.port || 22);
+        if (h.keyPath) ctx.inputs.keyPath.value = h.keyPath;
+        if (!ctx.inputs.name.value) ctx.inputs.name.value = h.name.toLowerCase().replace(/[^\w-]+/g, '-') + '-files';
+      });
+    },
+
+    _isDriveBacked(m) { const d = this._providerRow(m?.type).driveReauth; return !!d && (d === true || m.rcloneType === d.rcloneType); },
 
     // Product + sign-in-provider names for the re-auth surfaces — the flow is
     // shared across every OAuth-backed type, so the wording must follow the
     // record's actual provider (a OneDrive mount offered "Re-authorize Google
     // Drive…" was a real report). Brand names stay untranslated.
     _oauthProviderNames(m) {
-      const ty = m?.type;
-      if (ty === 'onedrive') return { product: 'OneDrive', signin: 'Microsoft' };
-      if (ty === 'cloud') {
-        const label = { dropbox: 'Dropbox', box: 'Box', pcloud: 'pCloud', yandex: 'Yandex Disk', premiumizeme: 'Premiumize.me', sharefile: 'ShareFile', hidrive: 'HiDrive', jottacloud: 'Jottacloud' }[m.backend]
-          || (m.source || '').split(':')[0] || 'Cloud';
+      const n = this._providerRow(m?.type).names || {};   // the row's names; a multi-vendor row names them per backend
+      if (n.byBackend) {
+        const label = n.byBackend[m.backend] || (m.source || '').split(':')[0] || n.fromSource;
         return { product: label, signin: label };
       }
-      return { product: 'Google Drive', signin: 'Google' };
+      return { product: n.product || m?.type, signin: n.signin || m?.type };
     },
 
     // Re-authorize an EXISTING Drive mount/credential whose token died. Same
@@ -527,16 +575,17 @@ export function installSidebarMounts(Sidebar) {
     // the Save does not switch the client, else what the consent starts with
     // (`start`) and what lands with the token (`client`).
     _mountClientSwitch(cfg, cur, presets = []) {
-      const type = cfg.type || 's3';
-      if (!['drive', 'gmail'].includes(type) || cfg.parentId || cfg.envLocked || cfg.origin === 'my-storage') return null;
+      const sw = this._providerRow(cfg.type).clientSwitch;   // the row's D2 rule (client.clientSwitch)
+      if (!sw || cfg.parentId || cfg.envLocked || cfg.origin === 'my-storage') return null;
+      const type = cfg.type;
       const fallback = presets.length === 1 ? presets[0].key : (presets.find((p) => p.key === 'default')?.key || '');
       const of = (r) => {
-        const custom = type === 'drive' ? (r.clientId || '') : (r.clientId && r.clientSecret ? r.clientId : '');
+        const custom = sw.identity === 'id' ? (r.clientId || '') : (r.clientId && r.clientSecret ? r.clientId : '');
         return custom ? `custom:${custom}` : `preset:${r.clientPreset || fallback}`;
       };
       const next = { ...cfg, ...cur };
       if (of(cfg) === of(next)) return null;
-      if (type === 'drive' && next.clientId) {
+      if (sw.customStart && next.clientId) {
         const client = { clientId: next.clientId, clientSecret: next.clientSecret || '' };
         return { type, start: client, client };
       }
@@ -550,27 +599,27 @@ export function installSidebarMounts(Sidebar) {
     // drive-token {token, client}, Gmail through one PATCH {clientPreset,
     // token}. Abandoned, the record keeps its current client and sign-in.
     _showClientSwitchReauthDialog(m, cfg, sw, presets = []) {
-      const gmail = sw.type === 'gmail';
-      const prov = gmail ? { product: 'Gmail', signin: 'Google' } : this._oauthProviderNames(cfg);
+      const rule = this._providerRow(sw.type).clientSwitch || {};
+      const prov = this._oauthProviderNames(cfg);
       const preset = presets.find((p) => p.key === sw.client.clientPreset);
       const clientName = sw.client.clientId || (preset ? tr('Preset: {name}', { name: preset.label }) : tr('(custom / built-in client)'));
-      const base = gmail ? '/api/mounts/gmail-auth' : '/api/mounts/gdrive-auth';
+      const base = rule.authBase;
       return reauthDialog({
         title: tr('Re-authorize "{name}"', { name: m.name }),
         hint: tr('The OAuth client changed to {client}. A token only works with the client that minted it — sign in with {provider} again to finish the switch. Until then the connection keeps its current client and sign-in.', { client: clientName, provider: prov.signin }),
         signinLabel: tr('Sign in with {provider}', { provider: prov.signin }),
         provider: prov.signin,
         start: () => api(`${base}/start`, { method: 'POST', body: JSON.stringify(sw.start) }),
-        // Gmail's status names a failure `error` (the storage block reads `fail`)
-        status: gmail ? async () => { const st = await api(`${base}/status`); return { token: st.token, fail: st.error }; } : () => api(`${base}/status`),
+        // a row whose status names a failure otherwise (Gmail: `error`) maps it onto the storage block's `fail`
+        status: rule.statusFail ? async () => { const st = await api(`${base}/status`); return { token: st.token, fail: st[rule.statusFail] }; } : () => api(`${base}/status`),
         callback: async (url) => {
           const r = await api(`${base}/callback`, { method: 'POST', body: JSON.stringify({ url }) });
           if (!r.token) throw new Error(r.error || tr('Failed'));
           return r;
         },
-        ...(gmail ? { pastePlaceholder: 'http://127.0.0.1:…/?state=…&code=…' } : {}),
+        ...(rule.pastePlaceholder ? { pastePlaceholder: rule.pastePlaceholder } : {}),
         finish: async (token, { close }) => {
-          if (gmail) await api(`/api/mounts/${m.id}`, { method: 'PATCH', body: JSON.stringify({ clientPreset: sw.client.clientPreset, token }) });
+          if (rule.finish === 'patch') await api(`/api/mounts/${m.id}`, { method: 'PATCH', body: JSON.stringify({ clientPreset: sw.client.clientPreset, token }) });
           else await api(`/api/mounts/${m.id}/drive-token`, { method: 'POST', body: JSON.stringify({ token, client: sw.client }) });
           showToast(tr('{provider} re-authorized', { provider: prov.product }));
           close(); this._renderMounts();
@@ -581,30 +630,12 @@ export function installSidebarMounts(Sidebar) {
     // Add a submount under any storage — the rclone remote:path model:
     // the parent connection is the part before the colon, this adds the path.
     _showAddChildDialog(cred) {
-      const type = cred.type || 's3';
-      const pathField = type === 's3' ? { key: 'bucket', label: tr('Bucket'), placeholder: 'bucket-name' }
-        : type === 'rclone' ? { key: 'remotePath', label: tr('Remote path (bucket[/prefix])'), placeholder: 'bucket-name/optional/prefix' }
-        : type === 'drive' ? { key: 'driveFolder', label: tr('Folder path'), placeholder: 'My Folder/sub' }
-        : type === 'onedrive' ? { key: 'remotePath', label: tr('Folder path'), placeholder: 'Documents/sub' }
-        : type === 'sftp' ? { key: 'sshPath', label: tr('Remote path'), placeholder: '/data' }
-        : null;
-      if (!pathField) { showToast(tr('This storage type doesn’t support submounts'), { type: 'error' }); return; }
+      const ch = this._providerRow(cred.type).child;   // the row's submount cells: its path field + extras
+      if (!ch) { showToast(tr('This storage type doesn’t support submounts'), { type: 'error' }); return; }
       this._mountsDialog(tr('New submount under "{name}"', { name: cred.name }), [
         { key: 'name', label: tr('Name'), value: `${cred.name}-`, placeholder: 'datasets' },
-        { key: pathField.key, label: pathField.label, placeholder: pathField.placeholder },
-        ...(type === 's3' ? [{ key: 'prefix', label: tr('Prefix (optional)'), placeholder: 'sub/path' }] : []),
-        ...(type === 'drive' ? [
-          // Submounts are the natural home for cloud-side scopes (user
-          // insight): ONE authorized credential, N children each pointing at
-          // My Drive / a Shared drive / shared-with-me — no re-auth ever
-          // (each child runs its own rclone daemon+env over the parent creds).
-          { key: 'driveMode', label: tr('Cloud-side scope'), type: 'select',
-            options: [['mydrive', 'My Drive'], ['shared-with-me', tr('Shared with me')], ['shared-drive', tr('Shared drive (team)')]] },
-          { key: 'teamDriveId', label: tr('Shared drive'), placeholder: tr('click “List shared drives” or paste an id'), when: (v) => v.driveMode === 'shared-drive' },
-          { key: 'rootFolderId', label: tr('Folder ID (advanced — mount ONE shared folder)'), placeholder: '1AbC…',
-            hint: tr('From the folder’s Drive URL. Mounts just that folder — the way to mount a single folder someone shared with you (keep scope = My Drive).'),
-            when: (v) => v.driveMode !== 'shared-drive' },
-        ] : []),
+        this._fieldOf(ch.path),
+        ...(ch.extra || []).map((f) => this._fieldOf(f)),
         { key: 'customPath', label: tr('Mount point (blank = default)'), placeholder: '/absolute/path' },
         { key: 'mode', label: tr('Access'), type: 'select', options: [['rw', 'Read-write'], ['ro', 'Read-only']] },
       ], tr('Create & connect'), async (v, { close }) => {
@@ -614,7 +645,7 @@ export function installSidebarMounts(Sidebar) {
         close(); this._renderMounts();
       });
       // Shared-drive picker over the PARENT's stored credentials (id-based)
-      if (type === 'drive') this._wireSharedDrivePicker(this._lastMountsDialog, cred.id);
+      if (this._hasWidget(cred.type, 'shared-drives')) this._wireSharedDrivePicker(this._lastMountsDialog, cred.id);
     },
 
     // Auto-probe connectivity so the dots are meaningful without clicking:
@@ -1831,101 +1862,21 @@ export function installSidebarMounts(Sidebar) {
     },
 
     async _showAddMountDialog() {
-      const is = (t) => (v) => v.type === t;
+      const rows = this._providerRows();
       // Instance-preset Google clients (admin-injected; keys+labels only)
       let presets = [];
       try { presets = (await api('/api/mounts/drive-defaults')).presets || []; } catch {}
-      const clientOpts = [
-        ...presets.map((p) => [p.key, tr('Preset: {name}', { name: p.label })]),
-        ['', tr('Built-in client (rclone shared — being retired by Google)')],
-        ['custom', tr('Custom (own client id/secret)')],
-      ];
-      const isDriveCustom = (v) => v.type === 'drive' && v.clientChoice === 'custom';
-      this._mountsDialog(tr('Connect storage'), [
-        { key: 'type', label: tr('Source type'), type: 'select', options: [
-          ['s3', tr('Cloud storage (S3 / MinIO)')], ['drive', 'Google Drive'], ['onedrive', 'OneDrive'], ['gmail', 'Gmail'], ['cloud', tr('Other cloud (Dropbox / Box / pCloud …)')], ['webdav', 'Nextcloud / WebDAV'],
-          ['sftp', tr('A server over SSH (SFTP)')], ['vibespace', tr('Another VibeSpace')], ['rclone', tr('Custom / advanced (rclone)')],
-        ] },
-        { key: 'name', label: tr('Name'), placeholder: 'my-mount' },
-        // S3
-        { key: 'endpoint', label: tr('Server address (endpoint)'), placeholder: 'https://s3.amazonaws.com  or  https://s3.mycompany.com', when: is('s3'), hint: tr('The address your storage provider gave you. For Amazon S3 use https://s3.amazonaws.com; for MinIO/other providers use the link from their console.') },
-        { key: 'bucket', label: tr('Bucket (storage container)'), placeholder: 'company-workspace', when: is('s3'), hint: tr('The container name from your provider’s console — like a top-level drive.') },
-        { key: 'prefix', label: tr('Subfolder (optional)'), placeholder: 'users/alice', when: is('s3'), hint: tr('Limit this connection to one folder inside the bucket. Leave blank for the whole bucket.') },
-        { key: 'accessKey', label: tr('Access key'), when: is('s3'), hint: tr('From your provider’s “Access Keys” / API credentials page.') },
-        { key: 'secretKey', label: tr('Secret key'), type: 'password', when: is('s3'), hint: tr('The secret half of the access key — treat it like a password.') },
-        // Google Drive
-        { key: 'token', label: tr('Google Drive access'), type: 'textarea', placeholder: tr('click "Connect Google Drive" below — no terminal needed'), when: is('drive'), hint: tr('Advanced: you can also paste the JSON from `rclone authorize "drive"` run elsewhere.') },
-        { key: 'driveFolder', label: tr('Folder (optional, blank = whole Drive)'), placeholder: 'Projects/Data', when: is('drive') },
-        { key: 'clientChoice', label: tr('OAuth client'), type: 'select', options: clientOpts, value: presets[0]?.key || '', when: is('drive'),
-          // lane cluster-presets (P3): no company client is SAID, never just an absent option
-          hint: presets.length ? tr('Pick the preset matching your Google account\'s organization; external accounts may see a one-time "unverified app" warning.') : tr("No company OAuth client on this instance — ask your admin. Meanwhile the built-in client works, and your own avoids rclone's shared quota.") },
-        { key: 'clientId', label: tr('Custom OAuth client ID'), placeholder: '….apps.googleusercontent.com', when: isDriveCustom },
-        { key: 'clientSecret', label: tr('Custom OAuth client secret'), type: 'password', when: isDriveCustom },
-        { key: 'driveMode', label: tr('Cloud-side scope'), type: 'select', when: is('drive'),
-          options: [['mydrive', 'My Drive'], ['shared-with-me', tr('Shared with me')], ['shared-drive', tr('Shared drive (team)')]],
-          hint: tr('“Shared with me” and Shared drives are separate spaces in Google Drive — this picks which one the mount shows; the folder path above is inside it.') },
-        { key: 'teamDriveId', label: tr('Shared drive'), placeholder: tr('click “List shared drives” (needs access above) or paste an id'), when: is('drive') },
-        { key: 'rootFolderId', label: tr('Folder ID (advanced — mount ONE shared folder)'), placeholder: '1AbC…', when: is('drive'), advanced: true,
-          hint: tr('From the folder’s Drive URL. Mounts just that folder — the way to mount a single folder someone shared with you (keep scope = My Drive).') },
-        // Gmail (emails sync into the mount folder as .eml files, read-only)
-        { key: 'gmailClientChoice', label: tr('OAuth client'), type: 'select', options: clientOpts.filter(([v]) => v !== ''), value: presets[0]?.key || 'custom', when: is('gmail'),
-          hint: presets.length ? tr('Gmail has no built-in fallback client — pick a preset or provide your own. The client needs the gmail.readonly scope.') : tr('No company OAuth client on this instance — ask your admin, or provide your own (it needs the gmail.readonly scope).') },
-        { key: 'gmailClientId', label: tr('Custom OAuth client ID'), placeholder: '….apps.googleusercontent.com', when: (v) => v.type === 'gmail' && v.gmailClientChoice === 'custom' },
-        { key: 'gmailClientSecret', label: tr('Custom OAuth client secret'), type: 'password', when: (v) => v.type === 'gmail' && v.gmailClientChoice === 'custom' },
-        { key: 'gmailToken', label: tr('Gmail access'), type: 'textarea', placeholder: tr('click "Connect Gmail" below — no terminal needed'), when: is('gmail'),
-          hint: tr('This is a SYNC, not a live mount: emails download into the folder as .eml files (read-only archive) and keep syncing while connected.') },
-        { key: 'syncCount', label: tr('Messages to sync (newest N; 0 = everything)'), placeholder: '200', when: is('gmail'),
-          hint: tr('0 syncs the ENTIRE mailbox — archived and spam/trash included when no label filter is set. Large mailboxes take a while (quota-paced); the card shows live progress.') },
-        { key: 'groupBy', label: tr('Organize into folders'), type: 'select', when: is('gmail'),
-          options: [['label-month', tr('By label, then month (Inbox/2026-07)')], ['label-day', tr('By label, then day')], ['month', tr('By month (YYYY-MM)')], ['day', tr('By day (YYYY-MM-DD)')], ['none', tr('No grouping (flat)')]],
-          hint: tr('Label layout files each mail under Inbox / Archive / Sent / Spam / Trash / Drafts (Gmail precedence; "archived" = not in the inbox), with a date folder inside.') },
-        { key: 'labelIds', label: tr('Labels filter (blank = whole mailbox)'), placeholder: tr('blank = everything — or e.g. INBOX, SENT, STARRED'), when: is('gmail'), advanced: true,
-          hint: tr('Comma list of Gmail label ids — use “List labels” after connecting to pick from your real labels.') },
-        { key: 'query', label: tr('Search filter (Gmail query, optional)'), placeholder: 'from:boss@example.com newer_than:30d', when: is('gmail'), advanced: true },
-        // OneDrive (native — guided OAuth, first-class fields)
-        { key: 'onedriveToken', label: tr('OneDrive access'), type: 'textarea', placeholder: tr('click "Connect OneDrive" below — no terminal needed'), when: is('onedrive') },
-        { key: 'driveType', label: tr('Account type'), type: 'select', when: is('onedrive'),
-          options: [['personal', tr('Personal')], ['business', tr('Work / School (OneDrive for Business)')], ['documentLibrary', tr('SharePoint document library')]] },
-        { key: 'remotePath', label: tr('Folder (optional, blank = whole drive)'), placeholder: 'Documents/Projects', when: is('onedrive') },
-        { key: 'driveId', label: tr('Drive ID (advanced — a specific/shared drive)'), placeholder: 'b!… (blank = your main drive)', when: is('onedrive'), advanced: true },
-        { key: 'onedriveClientId', label: tr('Custom OAuth client ID (optional — own Azure app)'), placeholder: tr('leave blank to use the built-in client'), when: is('onedrive'), advanced: true },
-        { key: 'onedriveClientSecret', label: tr('Custom OAuth client secret (optional)'), type: 'password', when: is('onedrive'), advanced: true },
 
-        { key: 'cloudBackend', label: tr('Provider'), type: 'select', when: is('cloud'), options: [
-          ['dropbox', 'Dropbox'], ['box', 'Box'], ['pcloud', 'pCloud'], ['yandex', 'Yandex Disk'], ['jottacloud', 'Jottacloud'], ['hidrive', 'HiDrive']] },
-        { key: 'cloudToken', label: tr('Access'), type: 'textarea', placeholder: tr('click "Connect" below — no terminal needed'), when: is('cloud'),
-          hint: tr('Advanced: you can also paste the JSON from `rclone authorize "<provider>"` run elsewhere.') },
-        { key: 'cloudPath', label: tr('Folder (optional, blank = whole drive)'), placeholder: 'Projects/Data', when: is('cloud') },
-        { key: 'cloudClientId', label: tr('Custom OAuth client ID (optional — your own app)'), when: is('cloud'), advanced: true,
-          hint: tr('Most providers work with the built-in client — leave blank.') },
-        { key: 'cloudClientSecret', label: tr('Custom OAuth client secret (optional)'), type: 'password', when: is('cloud'), advanced: true },
-        // WebDAV / Nextcloud
-        { key: 'url', label: tr('WebDAV URL'), placeholder: 'https://cloud.example.com/remote.php/dav/files/me', when: is('webdav'), hint: tr('Nextcloud: Settings → Files shows this address. Use an app password if you have 2FA.') },
-        { key: 'vendor', label: tr('Vendor'), type: 'select', options: [['other', tr('Generic WebDAV')], ['nextcloud', 'Nextcloud']], when: is('webdav') },
-        { key: 'user', label: tr('Username'), when: is('webdav') },
-        { key: 'pass', label: tr('Password / app token'), type: 'password', when: is('webdav') },
-        // SFTP
-        { key: 'fromHost', label: tr('From registered host (optional)'), type: 'select', when: is('sftp'),
-          options: [['', tr('— pick to prefill —')], ...((this._hostsData?.hosts || []).map(h => [h.id, h.name]))] },
-        { key: 'sshHost', label: tr('SSH host'), placeholder: 'box.example.com', when: is('sftp') },
-        { key: 'sshUser', label: tr('SSH user'), placeholder: 'ubuntu', when: is('sftp') },
-        { key: 'sshPort', label: tr('Port'), placeholder: '22', when: is('sftp') },
-        { key: 'sshPath', label: tr('Remote path (optional)'), placeholder: '/home/ubuntu/data', when: is('sftp'), autocomplete: (inputs) => inputs.fromHost?.value ? `/api/hosts/${inputs.fromHost.value}/dir-complete` : '/api/hosts/none/dir-complete' },
-        { key: 'keyPath', label: tr('Private key path (absolute) — or use password'), placeholder: '~/.ssh/id_ed25519', when: is('sftp'), autocomplete: 'local' },
-        { key: 'pass', label: tr('Password (if no key)'), type: 'password', when: is('sftp') },
-        // Another VibeSpace
-        { key: 'url', label: tr('VibeSpace URL'), placeholder: 'https://vibespace.example.com', when: is('vibespace') },
-        { key: 'bearerToken', label: tr('Mount token (vsmt_…)'), type: 'password', when: is('vibespace'), hint: tr('Ask the other VibeSpace to create one under Storage → “Share a local folder”.') },
-        // Custom rclone backend
-        { key: 'rcloneType', label: tr('rclone backend'), placeholder: 'dropbox / b2 / azureblob / mega / …', when: is('rclone'), hint: tr("Any backend rclone supports — see rclone.org/docs. Params below map to that backend's config keys.") },
-        { key: 'params', label: tr('Parameters (one key = value per line)'), type: 'textarea', placeholder: 'token = {"access_token":…}\naccount = my-account\nkey = …', when: is('rclone'), hint: tr('e.g. b2 wants account + key; dropbox wants token. All values encrypted at rest.') },
-        { key: 'remotePath', label: tr('Path within the remote (optional)'), placeholder: 'folder/subfolder', when: is('rclone') },
+      this._mountsDialog(tr('Connect storage'), [
+        { key: 'type', label: tr('Source type'), type: 'select', options: rows.filter((r) => r.pickLabel).sort((a, b) => (a.pick || 0) - (b.pick || 0)).map((r) => [r.id, tr(r.pickLabel)]) },
+        { key: 'name', label: tr('Name'), placeholder: 'my-mount' },
+        // each provider's own fields (its row's client.connect cells), shown while its type is picked
+        ...rows.filter((r) => r.connect).sort((a, b) => (a.form || 0) - (b.form || 0)).flatMap((r) => r.connect.map((f) => this._fieldOf(f, presets, r.id))),
         // common
         { key: 'extraParams', label: tr('Extra options (key = value per line)'), type: 'textarea', placeholder: 'e.g.  chunk_size = 64M', hint: tr('Passed to the underlying transfer engine (rclone) — custom API keys, tuning, provider quirks. See rclone.org/docs.'), advanced: true },
         { key: 'mode', label: tr('Mode'), type: 'select', options: [['rw', tr('Read-write')], ['ro', tr('Read-only')]] },
         { key: 'customPath', label: tr('Where to put it on this computer (optional)'), placeholder: tr('leave blank — we choose automatically'), hint: tr('Advanced: an absolute path if you need it in a specific place.'), advanced: true, autocomplete: 'local' },
       ], tr('Connect'), async (v, { close }) => {
-        delete v.fromHost; // UI-only prefill helper
         const parseKV = (text) => {
           const o = {};
           for (const line of String(text || '').split('\n')) {
@@ -1936,58 +1887,25 @@ export function installSidebarMounts(Sidebar) {
           }
           return o;
         };
-        if (v.type === 'rclone') v.params = parseKV(v.params);
+        const sub = rows.find((r) => r.id === v.type)?.submit || {};   // the picked row's submit cells
+        for (const k of sub.kv || []) v[k] = parseKV(v[k]);
         if (v.extraParams) v.extraParams = parseKV(v.extraParams);
-        if (v.type === 'drive') {
-          if (v.clientChoice === 'custom') v.clientPreset = null;
-          else { v.clientPreset = v.clientChoice || null; v.clientId = ''; v.clientSecret = ''; }
-        }
-        delete v.clientChoice;
-        if (v.type === 'gmail') {
-          v.token = v.gmailToken;
-          v.mode = 'ro';
-          if (v.gmailClientChoice === 'custom') { v.clientId = v.gmailClientId; v.clientSecret = v.gmailClientSecret; v.clientPreset = null; }
-          else v.clientPreset = v.gmailClientChoice || null;
-        }
-        delete v.gmailToken; delete v.gmailClientChoice; delete v.gmailClientId; delete v.gmailClientSecret;
-        if (v.type === 'onedrive') {
-          v.token = v.onedriveToken;
-          v.clientId = v.onedriveClientId || null;
-          v.clientSecret = v.onedriveClientSecret || undefined;
-        }
-        delete v.onedriveToken; delete v.onedriveClientId; delete v.onedriveClientSecret;
-        if (v.type === 'cloud') {
-          v.backend = v.cloudBackend;
-          v.token = v.cloudToken;
-          v.remotePath = v.cloudPath;
-          v.clientId = v.cloudClientId || null;
-          v.clientSecret = v.cloudClientSecret || undefined;
-        }
-        delete v.cloudBackend; delete v.cloudToken; delete v.cloudPath; delete v.cloudClientId; delete v.cloudClientSecret;
+        for (const [to, from] of Object.entries(sub.map || {})) v[to] = v[from];
+        for (const [to, from] of Object.entries(sub.orNull || {})) v[to] = v[from] || null;
+        for (const [to, from] of Object.entries(sub.orUndef || {})) v[to] = v[from] || undefined;
+        Object.assign(v, sub.set || {});
+        const c = sub.client;   // the OAuth-client choice: custom (the row's own id/secret keys, else the form's) or a preset
+        if (c && v[c.choice] === 'custom') { if (c.id) { v.clientId = v[c.id]; v.clientSecret = v[c.secret]; } v.clientPreset = null; }
+        else if (c) { v.clientPreset = v[c.choice] || null; if (!c.id) { v.clientId = ''; v.clientSecret = ''; } }
+        for (const r of rows) for (const k of r.submit?.drop || []) delete v[k];   // every row's UI-only keys leave the body
         const r = await api('/api/mounts', { method: 'POST', body: JSON.stringify(v), headers: { 'Content-Type': 'application/json' } });
         if (!await this._connectNewMount(r.id, close)) return;
         close(); showToast(tr('Storage connected')); this._renderMounts();
       });
       const ctx = this._lastMountsDialog;
       if (!ctx) return;
-      // SFTP: picking a registered host prefills connection fields (key incl.)
-      ctx.inputs.fromHost?.addEventListener('change', () => {
-        const h = (this._hostsData?.hosts || []).find(x => x.id === ctx.inputs.fromHost.value);
-        if (!h) return;
-        ctx.inputs.sshHost.value = h.host;
-        ctx.inputs.sshUser.value = h.user;
-        ctx.inputs.sshPort.value = String(h.port || 22);
-        if (h.keyPath) ctx.inputs.keyPath.value = h.keyPath;
-        if (!ctx.inputs.name.value) ctx.inputs.name.value = h.name.toLowerCase().replace(/[^\w-]+/g, '-') + '-files';
-      });
-      // Google Drive: guided OAuth — no terminal needed
-      this._wireDriveConnect(ctx);
-      this._wireSharedDrivePicker(ctx);
-      this._wireGmailConnect(ctx);
-      this._wireGmailLabelsPicker(ctx);
-      this._wireOAuthConnect(ctx, { tokenKey: 'onedriveToken', backend: 'onedrive', label: tr('Connect OneDrive') });
-      this._wireOAuthConnect(ctx, { tokenKey: 'cloudToken', backend: () => ctx.inputs.cloudBackend?.value || 'dropbox',
-        label: tr('Connect'), clientIdKey: 'cloudClientId', clientSecretKey: 'cloudClientSecret' });
+      // each row's widgets in row order (client.widgets): a host prefill, a guided OAuth connect, a picker
+      for (const r of rows) for (const w of r.widgets || []) this._wireWidget(ctx, w);
     },
 
     // Generic guided OAuth (rclone authorize <backend>) for a native record —
@@ -1997,7 +1915,7 @@ export function installSidebarMounts(Sidebar) {
     // (the block itself lives in ./mounts-dialog.js since D1 — shared with the
     // channel account dialogs; this delegate keeps every storage caller as is)
     _wireOAuthConnect(ctx, opts) {
-      return wireOAuthConnect(ctx, opts);
+      return wireOAuthConnect(ctx, { signins: this._signins(), ...opts });
     },
 
     // "List labels" next to the Gmail labels filter: real labels from the
@@ -2291,91 +2209,15 @@ export function installSidebarMounts(Sidebar) {
       // Env-provisioned storage: connection is deployment-owned — only the
       // mount point (and name) are editable, both added by the caller.
       if (cfg.envLocked || cfg.origin === 'my-storage') return [];
-      const type = cfg.type || 's3';
-      // A mount point under a credential owns ONLY its path — connection
-      // params are edited on the credential itself.
-      if (cfg.parentId) {
-        if (type === 's3') return [
-          ['bucket', tr('Bucket'), 'bucket-name', cfg.bucket || ''],
-          ['prefix', tr('Prefix (optional)'), 'sub/path', cfg.prefix || ''],
-        ];
-        if (type === 'rclone') return [['remotePath', tr('Remote path (bucket[/prefix])'), 'bucket-name/optional/prefix', cfg.remotePath || '']];
-        if (type === 'cloud') return [
-        ['remotePath', tr('Folder (optional)'), 'Projects/Data', cfg.remotePath || ''],
-        ['clientId', tr('Custom OAuth client id (optional)'), '', cfg.clientId || ''],
-        ['clientSecret', tr('Custom OAuth client secret'), '', cfg.clientSecret || ''],
-        ['token', tr('OAuth token (re-run Connect to replace)'), '', cfg.token || '', { type: 'textarea' }],
-      ];
-      if (type === 'onedrive') return [['remotePath', tr('Folder path'), 'Documents/sub', cfg.remotePath || '']];
-        if (type === 'cloud') return [['remotePath', tr('Folder path'), 'Projects/sub', cfg.remotePath || '']];
-        if (type === 'drive') return [
-          ['driveFolder', tr('Folder path (optional)'), 'My Folder/sub', cfg.driveFolder || ''],
-          ['driveMode', tr('Cloud-side scope'), '', cfg.driveMode || 'mydrive', { type: 'select', options: [['mydrive', 'My Drive'], ['shared-with-me', tr('Shared with me')], ['shared-drive', tr('Shared drive (team)')]] }],
-          ['teamDriveId', tr('Shared drive id'), '0AbC…', cfg.teamDriveId || ''],
-          ['rootFolderId', tr('Folder ID (advanced)'), '1AbC…', cfg.rootFolderId || ''],
-        ];
-        if (type === 'sftp') return [['sshPath', tr('Remote path'), '/data', cfg.sshPath || '']];
-        return [];
-      }
-      if (type === 's3') return [
-        ['endpoint', tr('Endpoint'), 'https://…', cfg.endpoint || ''],
-        ['bucket', tr('Bucket'), 'bucket-name', cfg.bucket || ''],
-        ['prefix', tr('Prefix (optional)'), 'sub/path', cfg.prefix || ''],
-        ['accessKey', tr('Access key'), '', cfg.accessKey || ''],
-        ['secretKey', tr('Secret key'), '', cfg.secretKey || ''],
-      ];
-      if (type === 'rclone') return [
-        ['remotePath', tr('Remote path (bucket[/prefix])'), 'bucket-name/optional/prefix', cfg.remotePath || ''],
-        // each stored parameter is prefilled; clearing its value removes it
-        ...Object.entries(cfg.params || {}).map(([k, v]) => [`param:${k}`, k, '', v == null ? '' : String(v)]),
-        ['newParamKey', tr('Add parameter — name'), 'e.g. region', ''],
-        ['newParamValue', tr('Add parameter — value'), '', ''],
-      ];
-      if (type === 'drive') return [
-        ['driveFolder', tr('Folder path (optional)'), 'My Folder/sub', cfg.driveFolder || ''],
-        ['driveMode', tr('Cloud-side scope'), '', cfg.driveMode || 'mydrive', { type: 'select', options: [['mydrive', 'My Drive'], ['shared-with-me', tr('Shared with me')], ['shared-drive', tr('Shared drive (team)')]] }],
-        ['teamDriveId', tr('Shared drive id'), '0AbC…', cfg.teamDriveId || ''],
-        ['rootFolderId', tr('Folder ID (advanced)'), '1AbC…', cfg.rootFolderId || ''],
-        ['clientPreset', tr('OAuth client'), '', cfg.clientPreset || '', { type: 'select', options: [['', tr('(custom / built-in client)')], ...presets.map((c) => [c.key, tr('Preset: {name}', { name: c.label })])] }],
-        ['token', tr('OAuth token'), '{"access_token":…}', cfg.token || '', { type: 'textarea' }],
-        ['clientId', tr('Custom OAuth client id (when no preset)'), '', cfg.clientId || ''],
-        ['clientSecret', tr('Custom OAuth client secret'), '', cfg.clientSecret || ''],
-      ];
-      if (type === 'gmail') return [
-        ['syncCount', tr('Messages to sync (newest N; 0 = everything)'), '200', cfg.syncCount != null ? String(cfg.syncCount) : ''],
-        ['groupBy', tr('Organize into folders'), '', cfg.groupBy || 'none',
-          { type: 'select', options: [['none', tr('No grouping (flat)')], ['month', tr('By month (YYYY-MM)')], ['day', tr('By day (YYYY-MM-DD)')], ['label-month', tr('By label, then month (Inbox/2026-07)')], ['label-day', tr('By label, then day')]] }],
-        ['labelIds', tr('Labels (comma list)'), 'INBOX', cfg.labelIds || ''],
-        ['query', tr('Search filter (Gmail query)'), '', cfg.query || ''],
-        ['clientPreset', tr('OAuth client'), '', cfg.clientPreset || '', { type: 'select', options: [['', tr('(custom / built-in client)')], ...presets.map((c) => [c.key, tr('Preset: {name}', { name: c.label })])] }],
-        ['token', tr('OAuth token (JSON — re-run Connect Gmail to replace)'), '', cfg.token || '', { type: 'textarea' }],
-      ];
-      if (type === 'onedrive') return [
-        ['remotePath', tr('Folder (optional)'), 'Documents/Projects', cfg.remotePath || ''],
-        ['driveType', tr('Account type'), '', cfg.driveType || 'personal', { type: 'select', options: [['personal', tr('Personal')], ['business', tr('Work / School')], ['documentLibrary', tr('SharePoint library')]] }],
-        ['driveId', tr('Drive ID (advanced)'), 'b!…', cfg.driveId || ''],
-        ['clientId', tr('Custom OAuth client id (optional)'), '', cfg.clientId || ''],
-        ['clientSecret', tr('Custom OAuth client secret'), '', cfg.clientSecret || ''],
-        ['token', tr('OAuth token (re-run Connect OneDrive to replace)'), '', cfg.token || '', { type: 'textarea' }],
-      ];
-      if (type === 'webdav' || type === 'vibespace') return [
-        ['url', 'URL', 'https://…', cfg.url || ''],
-        ...(type === 'webdav' ? [
-          ['vendor', tr('Vendor'), '', cfg.vendor || 'other', { type: 'select', options: [['other', tr('Generic WebDAV')], ['nextcloud', 'Nextcloud']] }],
-          ['user', tr('User'), '', cfg.user || ''],
-          ['pass', tr('Password'), '', cfg.pass || ''],
-        ] : []),
-        ['bearerToken', tr('Bearer token'), '', cfg.bearerToken || ''],
-      ];
-      if (type === 'sftp') return [
-        ['sshHost', tr('Host'), 'example.com', cfg.sshHost || ''],
-        ['sshUser', tr('User'), '', cfg.sshUser || ''],
-        ['sshPort', tr('Port'), '22', cfg.sshPort ? String(cfg.sshPort) : ''],
-        ['sshPath', tr('Remote path (optional)'), '/data', cfg.sshPath || ''],
-        ['keyPath', tr('Private key path (absolute, optional)'), '/home/me/.ssh/id_ed25519', cfg.keyPath || ''],
-        ['pass', tr('Password'), '', cfg.pass || ''],
-      ];
-      return [];
+      // A mount point under a credential owns ONLY its path — connection params are edited on the credential itself:
+      // the row's editChild cells, else its edit cells; a `params` cell = each stored rclone parameter, prefilled
+      // (clearing its value removes it).
+      const row = this._providerRow(cfg.type);
+      return ((cfg.parentId ? row.editChild : row.edit) || []).flatMap((f) => (f.params
+        ? Object.entries(cfg.params || {}).map(([k, v]) => [`param:${k}`, k, '', v == null ? '' : String(v)])
+        : [[f.key, tr(f.label), f.placeholder ? tr(f.placeholder) : '',
+          f.keepZero ? (cfg[f.key] != null ? String(cfg[f.key]) : '') : String(cfg[f.key] || f.default || ''),
+          ...(f.type ? [{ type: f.type, ...(f.options ? { options: [...f.options.map(([v, l]) => [v, tr(l)]), ...(f.presets ? presets.map((c) => [c.key, tr('Preset: {name}', { name: c.label })]) : [])] } : {}) }] : [])]]));
     },
 
     async _showEditMountDialog(m) {
@@ -2389,14 +2231,14 @@ export function installSidebarMounts(Sidebar) {
       const form = document.createElement('form');
       form.className = 'mounts-form';
       let editPresets = [];
-      if (['drive', 'gmail'].includes(cfg.type || 's3')) {
+      if (this._providerRow(cfg.type).presets) {   // the row's OAuth client may be an instance preset
         try { editPresets = (await api('/api/mounts/drive-defaults')).presets || []; } catch {}
       }
       const fields = [['name', tr('Name'), '', name], ...this._mountEditFields(cfg, editPresets)];
       // Mount point: empty = default location — m.path shows the current/default
       // spot as a placeholder (prefilling the computed default would freeze it).
       fields.push(['customPath', tr('Mount point'), m.path || '/absolute/path', cfg.customPath || '']);
-      const isRclone = (cfg.type || 's3') === 'rclone' && !cfg.parentId && !cfg.envLocked && cfg.origin !== 'my-storage';
+      const isRclone = (this._providerRow(cfg.type).edit || []).some((f) => f.params) && !cfg.parentId && !cfg.envLocked && cfg.origin !== 'my-storage';
       form.innerHTML = fields.map(([k, label, ph, val, opts]) => {
         if (opts?.type === 'select') {
           return `<label>${escHtml(label)}<select name="${k}">${(opts.options || []).map(([v, l]) =>
@@ -2417,7 +2259,7 @@ export function installSidebarMounts(Sidebar) {
       // teamDriveId gets the same "List shared drives" picker as the add
       // dialog (id-based: the record's stored credentials resolve server-side,
       // children through their parent).
-      if ((cfg.type || 's3') === 'drive') {
+      if (this._hasWidget(cfg.type, 'shared-drives')) {
         const tdInput = form.querySelector('[name="teamDriveId"]');
         if (tdInput) {
           const pick = document.createElement('button');
@@ -2445,7 +2287,7 @@ export function installSidebarMounts(Sidebar) {
         }
       }
       // Gmail records: labels picker over the record's stored credentials
-      if ((cfg.type || 's3') === 'gmail') {
+      if (this._hasWidget(cfg.type, 'gmail-labels')) {
         const li = form.querySelector('[name="labelIds"]');
         if (li) this._wireGmailLabelsPicker({ inputs: { labelIds: li } }, m.id);
       }

@@ -138,6 +138,7 @@ const R = require('../window-reach'); // lane E: reach + the share mode + the pi
 // moment it adopted its own id. A borrowed id is never a key: the fork's key is its `webui:<id>` placeholder (the same
 // rule as the For-you item and the status record), which it answers to for life.
 const { addressableId } = require('../claude-lock-capture.js');
+const { capsOf } = require('../backend-caps.js'); // PURE: caps.terminalOnly (a plain shell is never a reach target)
 const keyOf = (s, id) => (addressableId(s) ? R.sessionKeyOf(s, id) : `webui:${id}`);
 const keysOf = (s, id) => (addressableId(s) ? R.callerKeys(s, id) : [`webui:${id}`]);
 
@@ -1177,7 +1178,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
       if (id.includes(':') && !id.startsWith('webui:')) {
         let addressable = false; const pending = [];
         for (const [wid, t] of sessionsMap()) {
-          if (!t || t.backend === 'shell' || R.sessionKeyOf(t, wid) !== id) continue;
+          if (!t || capsOf(t.backend).terminalOnly || R.sessionKeyOf(t, wid) !== id) continue;
           if (addressableId(t)) { addressable = true; break; }
           pending.push([wid, t]);
         }
@@ -1196,7 +1197,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     const out = [];
     let unreadable = 0;
     for (const [id, s] of sessionsMap()) {
-      if (!s || s.backend === 'shell') continue;
+      if (!s || capsOf(s.backend).terminalOnly) continue;
       let hit = false;
       if (row.principal.kind === 'everyone') hit = true;   // All agents (lane everyone-principal): every live agent session
       else if (row.principal.kind === 'session') hit = keysOf(s, id).includes(row.principal.id);

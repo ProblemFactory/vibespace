@@ -853,6 +853,57 @@ console.log('\nstore: every declared field is read outside src/harnesses; a fake
   ok(!/'--output-format'/.test(wsc) && !/'--output-format'/.test(wrap) && /claude-transport\.js/.test(wrap), 'the stream-json flags are spelled in neither ws-create nor chat-wrapper');
 }
 
+// ── THE LONG TAIL'S DECLARED ROWS (lane dc-harness-tail, 2026-10-05) ──
+// terminalOnly / oauthUsage / globalUsageKey replaced 21 `=== 'shell'` / `=== 'claude'` / `=== 'codex'` spellings in the
+// window reach, the browser pickers, the New Session path, the usage ledger and the account roster. Conformance: every
+// descriptor re-derives its row (a row missing or drifted ⇒ red). Proof: a FAKE harness added through register() alone
+// drives the real consumers; two patched copies with the old branch restored cannot tell the fake apart.
+console.log('\n— the long tail\'s declared rows (terminalOnly / oauthUsage / globalUsageKey)');
+{
+  const ROWS = ['terminalOnly', 'oauthUsage', 'globalUsageKey'];
+  for (const id of Object.keys(BACKEND_CAPS)) ok(ROWS.every((r) => r in BACKEND_CAPS[id]), `${id}: the shipped caps row declares ${ROWS.join(' / ')}`);
+  for (const id of harnessIds()) {
+    const h = harnessOf(id), c = capsOf(id), b = h.ui?.billing || null;
+    ok(c.terminalOnly === (h.kind === 'terminal'), `${id}: caps.terminalOnly === (kind === 'terminal') (${c.terminalOnly})`);
+    ok(c.globalUsageKey === (b ? b.globalUsageKey : null), `${id}: caps.globalUsageKey is the descriptor's ui.billing.globalUsageKey (${c.globalUsageKey})`);
+    ok(c.oauthUsage === (!!b && b.usage === 'accounts' && !!h.creds), `${id}: caps.oauthUsage === (its named accounts' quota lands in the 'accounts' usage map) (${c.oauthUsage})`);
+  }
+  const { globalUsageKeyOf, oauthUsageAccount } = require(path.join(REPO, 'src/backend-caps.js'));
+  const { terminalOnly } = await import(path.join(REPO, 'src/lib/agent-meta.js'));
+  ok(Object.keys(BACKEND_META).every((id) => terminalOnly(id) === capsOf(id).terminalOnly) && terminalOnly(undefined) === false && terminalOnly('nope') === false,
+    'client terminalOnly() reads the SAME caps row (every META id; absent = claude = false; unknown = false)');
+  ok(globalUsageKeyOf(undefined) === '__global__' && globalUsageKeyOf('codex') === '__global_codex__' && globalUsageKeyOf('opencode') === '__global__' && globalUsageKeyOf('nope') === '__global__',
+    'globalUsageKeyOf: legacy / claude / codex / opencode / unknown answer what the old ternary did');
+  ok(oauthUsageAccount({ type: 'subscription' }) && oauthUsageAccount({ type: 'subscription', backend: 'claude' }) && !oauthUsageAccount({ type: 'subscription', backend: 'codex' }) && !oauthUsageAccount({ type: 'api', backend: 'claude' }) && !oauthUsageAccount(null),
+    'oauthUsageAccount: a legacy / claude subscription yes; codex, an API key, nothing — no');
+
+  // THE PROOF: two fakes through register() alone (zero consumer edits)
+  const H = require(path.join(REPO, 'src/harnesses/index.js'));
+  H.register({ id: 'acme-term', label: 'Acme Term', kind: 'terminal', quota: H.NULL_QUOTA });
+  H.register({ id: 'acme-chat', label: 'Acme', kind: 'chat', quota: H.NULL_QUOTA, ui: { billing: { globalUsageKey: '__global_acme__', usage: 'accounts' } }, caps: { oauthUsage: true } });
+  try {
+    const WR = require(path.join(REPO, 'src/window-reach.js'));
+    const sessions = [{ id: 'sess-acme-term-1', backend: 'acme-term', name: 'acme' }, { id: 'sess-claude-1', backend: 'claude', name: 'cl' }];
+    const seen = (M) => JSON.stringify(M.pickerModel({ sessions }));
+    const real = seen(WR);
+    ok(!real.includes('sess-acme-term-1') && real.includes('sess-claude-1'), 'PROOF: window reach drops a register()ed TERMINAL harness\'s session (its kind alone) and keeps a chat one', real.slice(0, 300));
+    const UIM = require(path.join(REPO, 'src/usage-index-model.js'));
+    ok(UIM.keysOf({ be: 'acme-chat' }).account === '__global_acme__' && UIM.keysOf({ be: 'codex' }).account === '__global_codex__' && UIM.keysOf({}).account === '__global__',
+      'PROOF: the usage index books a register()ed harness\'s machine login under ITS declared key (claude / codex unchanged)');
+    ok(oauthUsageAccount({ type: 'subscription', backend: 'acme-chat' }), 'PROOF: a register()ed harness that declares oauthUsage joins the OAuth usage-poll accounts');
+    // CONTROLS: the old branch restored in a patched copy cannot see the fakes
+    const wrSrc = fs.readFileSync(path.join(REPO, 'src/window-reach.js'), 'utf8');
+    const wrMut = wrSrc.split('capsOf(s.backend).terminalOnly').join("s.backend === 'shell'");
+    ok(wrMut !== wrSrc && seen(MUTH.load('src/window-reach.js', wrMut, 'tail-shell')).includes('sess-acme-term-1'),
+      'CONTROL: window-reach with `s.backend === \'shell\'` restored offers the fake terminal session (the declared row is what drops it)');
+    const uimSrc = fs.readFileSync(path.join(REPO, 'src/usage-index-model.js'), 'utf8');
+    const uimMut = uimSrc.replace('r.acct || globalUsageKeyOf(r.be)', "r.acct || (r.be === 'codex' ? '__global_codex__' : '__global__')");
+    ok(uimMut !== uimSrc && MUTH.load('src/usage-index-model.js', uimMut, 'tail-key').keysOf({ be: 'acme-chat' }).account === '__global__',
+      'CONTROL: usage-index-model with the codex ternary restored books the fake under __global__ (the declared key is what routes it)');
+  } finally { H.unregister('acme-term'); H.unregister('acme-chat'); }
+  ok(!H.has('acme-term') && capsOf('acme-term').terminalOnly === false, 'the fakes are gone after the proof (unregister drops the contributed row)');
+}
+
 // ── tree: THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──
 // Measured HERE, while every patched copy this run made still exists (the exit
 // handlers remove them — a census taken after exit passes on the pre-fix

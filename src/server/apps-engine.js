@@ -33,7 +33,7 @@ const crypto = require('crypto');
 const A = require('../app-manifest.js');
 const R = require('../app-recipes.js');
 const { toAgentText } = require('../peer-text.js');
-const K = require('../app-kinds.js'); // PURE — an app kind is one row (lane dc-apps-rows, F-A1)
+const K = require('../app-kinds/index.js'); // PURE — an app kind is its own file + one index line (lanes dc-apps-rows, dc-app-kinds)
 const SYS = require('../app-system.js'); // PURE — the app system's own request rows (SYS_KINDS)
 const AC = require('../app-card.js'); // PURE: THE one card of an install (design 009 §4) — its view and the digest of what it showed
 const HC = require('../hidden-chars.js'); // THE one set: an agent's why on the approval card carries no hidden / reordering character (verify-r1 F8) // THE belt on text toward an agent: a package's .desktop Name / the machine's error words ride the outcome
@@ -82,13 +82,6 @@ function normRequest(r, { agent = false } = {}) {
   if (!REQUEST_KINDS.includes(kind)) return { ok: false, code: 'bad-request', error: `unknown request kind ${JSON.stringify(kind.slice(0, 20))}` };
   if (agent && kind === 'move') return { ok: false, code: 'agent_forbidden', error: 'moving apps into the app system is the user\'s click (Desktop apps → Move) — an agent cannot propose a move' };
   if (agent && !AGENT_KINDS.includes(kind)) return { ok: false, code: 'agent_forbidden', error: `an agent may propose ${AGENT_KINDS.join(' / ')} — ${kind} is the user's` };
-  if (kind === 'apt' || kind === 'adopt') {
-    const packages = (Array.isArray(x.packages) ? x.packages : String(x.packages || '').split(/[\s,]+/)).map(String).filter(Boolean);
-    if (!packages.length || packages.length > 32) return { ok: false, code: 'bad_name', error: 'name one to 32 packages' };
-    const bad = packages.find((p) => !A.PKG_RE.test(p));
-    if (bad !== undefined) return { ok: false, code: 'bad_name', error: `${JSON.stringify(bad.slice(0, 64))} is not a Debian package name` };
-    return { ok: true, request: { kind, packages } };
-  }
   const kr = K.kindRow(kind) || {};
   if (kr.fetches || (kr.staged && (x.url != null || x.file != null || (agent && x.debPath != null)))) {
     const url = x.url != null ? String(x.url) : null, file = x.file != null ? String(x.file) : x.debPath != null ? String(x.debPath) : null;
@@ -103,8 +96,7 @@ function normRequest(r, { agent = false } = {}) {
     const from = x.from && typeof x.from === 'object' ? { ...(typeof x.from.url === 'string' ? { url: x.from.url.slice(0, 2048) } : {}), ...(Array.isArray(x.from.hosts) ? { hosts: x.from.hosts.map(String).slice(0, 8) } : {}), ...(typeof x.from.file === 'string' ? { file: x.from.file.slice(0, 4096) } : {}), ...(typeof x.from.recipe === 'string' ? { recipe: x.from.recipe.slice(0, 40) } : {}) } : null;
     return { ok: true, request: { kind, staged, sha256, size: Number(x.size) || null, name: String(x.name || '').replace(/[^A-Za-z0-9@._+-]+/g, '-').slice(0, 120) || null, from } };
   }
-  if (kind === 'appimage') return { ok: false, code: 'bad-request', error: 'name the AppImage by its address or file' };
-  if (kind === 'deb') { const p = String(x.debPath || ''); if (!p.startsWith('/') || !p.endsWith('.deb') || p.length > 4096 || /[\0\n]/.test(p)) return { ok: false, code: 'bad_name', error: 'name a .deb file by its absolute path on that machine' }; return { ok: true, request: { kind, debPath: p } }; }
+  if (kr.requestOf) return kr.requestOf(x, { kind, PKG_RE: A.PKG_RE }); // the kind's own request words (its file)
   if (kind === 'source') { const v = A.validateSourceSpec(x.source); return v.ok ? { ok: true, request: { kind, source: v.source } } : { ok: false, code: v.code, error: v.error }; }
   if (kind === 'source-remove') { const id = String(x.sourceId || ''); return A.ENTRY_ID_RE.test(id) ? { ok: true, request: { kind, sourceId: id } } : { ok: false, code: 'bad-request', error: 'name the source' }; }
   if (kind === 'remove') { const id = String(x.entryId || ''); return A.ENTRY_ID_RE.test(id) ? { ok: true, request: { kind, entryId: id } } : { ok: false, code: 'bad-request', error: 'name the app (its entry id)' }; }
@@ -310,7 +302,7 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
       const text = k === 'remove' ? `${name} wants to remove ${label}` : k === 'source' ? `${name} wants to add the package source ${label}` : one ? `${name} wants to install ${label} (${size} to download)` : `${name} wants to install ${label} (${n} packages, ${size} to download)`;
       const lines = [];
       if (p.why) lines.push(`Why: ${p.why}`);
-      if (fetched) lines.push(`From: ${card.from.host ? `${card.from.host}${card.from.recipe ? ` (${card.from.recipe}'s official download address)` : ' (VibeSpace cannot confirm who published it)'}` : `the file ${shown.request.from && shown.request.from.file}`}`, `sha256 ${shown.request.sha256}`, ...(k === 'deb' && pl.deb && pl.deb.scripts && pl.deb.scripts.length ? [`Runs its own install scripts as administrator: ${pl.deb.scripts.join(' ')}`] : []));
+      if (fetched) lines.push(`From: ${card.from.host ? `${card.from.host}${card.from.recipe ? ` (${card.from.recipe}'s official download address)` : ' (VibeSpace cannot confirm who published it)'}` : `the file ${shown.request.from && shown.request.from.file}`}`, `sha256 ${shown.request.sha256}`, ...((K.kindRow(k) || {}).proposeLines ? K.kindRow(k).proposeLines(pl) : []));
       if ((K.kindRow(k) || {}).entry === 'home') lines.push(`Download ${size}, ${sizeWords(pl.installedBytes)} on disk — unpacked in your home, nothing runs as administrator`);
       else if (k === 'source') lines.push(`Address: ${shown.request.source.uris.join(' ')}`, `Key fingerprint: ${(pl.sourceSpec && pl.sourceSpec.fingerprints || []).join(' ')}`);
       else if (k !== 'remove') lines.push(`Packages: ${(pl.closure || []).map((c) => c.package).slice(0, 60).join(' ')}${n > 60 ? ` … (+${n - 60})` : ''}`, `From: ${(pl.origins || []).join(', ')}`, `Download ${size}, ${sizeWords(pl.installedBytes)} on disk`);
@@ -326,7 +318,7 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
     log.log?.(`[apps] ${p.by.name || p.by.conversation} proposed ${k3(shown.request)} ${label} on ${p.host} (${id})`);
     return view(p);
   }
-  const k3 = (rq) => (rq.kind === 'apt' ? 'installing' : rq.kind === 'remove' ? 'removing' : rq.kind === 'source' ? 'adding the source' : rq.kind);
+  const k3 = (rq) => ((K.kindRow(rq.kind) || {}).doing || rq.kind); // the request's own -ing word (its row in src/app-kinds/)
 
   // ── THE RUN (the user's press — the dialog, or the For-you item's Install) ──
   /** Run a request (or a proposal) through the machine's ONE package slot, then the record op. Throws coded errors (the
@@ -480,7 +472,7 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
     if (p.state === 'withdrawn') return `Your proposal ${p.id} (${what}) ${p.result && p.result.code === 'expired' ? 'expired unanswered after 24 h' : 'was withdrawn'} — nothing was installed and its download was deleted. Propose it again only if the user still wants it.`;
     if (p.state === 'done') {
       const rows = (p.result && p.result.rows) || [];
-      return `Your proposal ${p.id} (${what}) was approved by the user and is done.` + (rows.length ? ` Open it with: ${rows.map((x) => `vibespace-window open ${piece(x.id, 64)}`).join(' · ')}` : p.request.kind === 'apt' ? ' It added no desktop app (no .desktop file) — the programs are on PATH.' : '');
+      return `Your proposal ${p.id} (${what}) was approved by the user and is done.` + (rows.length ? ` Open it with: ${rows.map((x) => `vibespace-window open ${piece(x.id, 64)}`).join(' · ')}` : ((K.kindRow(p.request.kind) || {}).doneNote || ''));
     }
     if (p.state === 'rejected') return `Your proposal ${p.id} (${what}) was declined by the user (Not now). Nothing was installed. Do not propose it again unless they ask.`;
     if (p.state === 'failed') return `Your proposal ${p.id} (${what}) was approved but failed: ${piece((p.result && p.result.error) || 'see the Desktop apps dialog', 400)}.`;

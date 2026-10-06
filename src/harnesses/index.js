@@ -178,7 +178,8 @@ function register(h, { replace = false } = {}) {
   if (BUILTIN.has(h.id)) throw new Error(`harness '${h.id}' is built-in and cannot be replaced`);
   if (REGISTRY.has(h.id) && !replace) throw new Error(`harness '${h.id}' already registered (pass {replace:true} to override)`);
   REGISTRY.set(h.id, h);
-  contributeCaps(h.id, h.caps && typeof h.caps === 'object' ? h.caps : null); // capsOf(id) answers the DECLARED row
+  // capsOf(id) answers the DECLARED row, over the rows the descriptor itself implies (lane dc-harness-tail)
+  contributeCaps(h.id, { terminalOnly: h.kind === 'terminal', globalUsageKey: h.ui?.billing?.globalUsageKey ?? null, ...(h.caps && typeof h.caps === 'object' ? h.caps : {}) });
   return h;
 }
 function unregister(id) {

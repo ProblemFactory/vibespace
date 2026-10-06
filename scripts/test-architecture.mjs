@@ -226,7 +226,7 @@ const PURE = new Set(['src/timed-sync.js' /* design 011 lane 1 (store-timing): t
   // DESKTOP APPS (docs/design-desktop-apps §2, 2026-09-13): the ONE constants home every
   // process keeper bounds by (opencode-serve reads it too) + the registry/ladder/state-machine
   // model — decisions only, the machine facts are src/desktop-display.js (SHARED)
-  'src/keeper-limits.js', 'src/desktop-apps.js', 'src/install-slot.js' /* lane dc-apps-rows: the machine's ONE package slot — imports nothing */, 'src/installs.js' /* lane dc-apps-rows: THE INSTALLABLES — one row each, imports only PURE owners */, 'src/app-kinds.js' /* lane dc-apps-rows: an app KIND is one row — imports nothing */,
+  'src/keeper-limits.js', 'src/desktop-apps.js', 'src/install-slot.js' /* lane dc-apps-rows: the machine's ONE package slot — imports nothing */, 'src/installs.js' /* lane dc-apps-rows: THE INSTALLABLES — one row each, imports only PURE owners */, ...fs.readdirSync(path.join(REPO, 'src/app-kinds')).map((f) => `src/app-kinds/${f}`) /* lane dc-app-kinds: an app KIND is its own file + one index line — each imports nothing but its siblings */,
   // rv-desktop-apps F-S1 (lane dc-seams-desktop): its families, each its own PURE file
   'src/desktop-backends.js', 'src/desktop-fit.js', 'src/desktop-browser-app.js', 'src/machine-desktop-model.js',
   // OPEN WITH LIBREOFFICE (docs/design-desktop-apps §7.9, the owner's ruling 2026-09-27 ②): the office table, the
@@ -3423,7 +3423,7 @@ console.log('§69 every root package run goes through the machine\'s ONE package
   // app-system-l1 (2.369.210): src/app-system.js is the THIRD plan builder — the app system's SYS_SCRIPT / INSTALL_SCRIPT
   // (design §3.2), run through the same package slot (sysArgv) and the boot install (installArgv, app-system-serve.js)
   ok(JSON.stringify(c.argvBuilders) === JSON.stringify(['src/app-manifest.js', 'src/app-system.js', 'src/install-slot.js']), `§69b the root-script argv ['sudo', '-n', …] is built only by the three plan builders (${c.argvBuilders.join(' ')})`);
-  ok(JSON.stringify(c.consumers.installArgv) === JSON.stringify(['src/server/desktop-access.js']) && JSON.stringify(c.consumers.planArgv) === JSON.stringify(['src/server/desktop-access.js']) && JSON.stringify(c.consumers.launcher) === JSON.stringify(['src/server/desktop-access.js']) && JSON.stringify(c.consumers.appArgv) === JSON.stringify(['src/app-serve.js']),
+  ok(JSON.stringify(c.consumers.installArgv) === JSON.stringify(['src/server/desktop-access.js']) && JSON.stringify(c.consumers.planArgv) === JSON.stringify(['src/server/desktop-access.js']) && JSON.stringify(c.consumers.launcher) === JSON.stringify(['src/server/desktop-access.js']) && c.consumers.appArgv.includes('src/app-serve.js') && c.consumers.appArgv.every((f) => f === 'src/app-serve.js' || f.startsWith('src/app-kinds/')) /* lane dc-app-kinds: a kind's planner runs inside the machine half */,
     `§69c their argv reaches a machine only through the slot (installArgv / plan.argv / installLauncherArgv in desktop-access.js; appArgv in the machine half): ${JSON.stringify(c.consumers)}`);
   ok(c.directSudo.length === 0, `§69d no direct sudo exec of a package manager or a shell${c.directSudo.length ? ' — ' + c.directSudo.join(' ') : ''}`);
   // NEGATIVE CONTROLS — each planted shape in a patched listing is caught by its rule
@@ -4061,6 +4061,11 @@ console.log('§78 literal-id branches per family + unused i18n keys + unreferenc
   ok(jDC.falls.length === 0, `§78 the dead-code baseline is current${jDC.falls.length ? ' — FALLS (good): lower the baseline in this commit with `node scripts/dead-code-census.mjs --lower`: ' + jDC.falls.map((r) => `${r.family} ${r.file} ${r.base} → ${r.now}`).join(' | ') : ''}`);
   ok(Object.values(ib.owners).flat().every((o) => !/NOT FOUND/.test(o)) && ib.owners.display.some((o) => /^src\/desktop-backends\.js:\d+-\d+$/.test(o)) && ib.owners.browser.some((o) => /^src\/browser-profiles\.js:\d+-\d+$/.test(o)) && ib.owners.plugin.some((o) => o === 'src/plugins/'),
     `§78 every owner table is found (a renamed table would silently count its own rows): ${['display', 'browser', 'plugin'].map((f) => ib.owners[f].join(' ')).join(' · ')}`);
+  { // lane dc-harness-tail: an EXEMPT row (a declared registry / table / oracle) must still find its table and cover a line
+    const exRows = Object.values(ib.exempt).flat();
+    ok(exRows.length === IB.EXEMPT.length && exRows.every((r) => r.span && r.lines > 0 && r.reason),
+      `§78 every EXEMPT row finds its table and covers ≥ 1 member line (a dead exemption would hide a new branch): ${exRows.map((r) => `${r.file}:${r.span ? r.span.join('-') : 'NOT FOUND'} ${r.lines}`).join(' · ')}`);
+  }
   // lane dc-dead-sweep (2026-10-05) deleted F3's 243 × 2 unused entries (+ the test-only ones), so the i18n half of the
   // control now PLANTS a key: the judge must flag a key no source says, and credit one a t() call or the extracted set says
   const { keyUnused } = await import('./dead-code-census.mjs');
@@ -4082,7 +4087,7 @@ console.log('§78 literal-id branches per family + unused i18n keys + unreferenc
     'src/codex-message-manager.js': "if (n === 'shell') return 'bash';",
     // lane dc-apps-rows: the appkind family — a shared file's kind branch counts once, the table file and the browser install's npm step never
     'src/zz-kinds.js': "if (k === 'deb' || k === 'appimage') d();",
-    'src/app-kinds.js': "if (k === 'apt') owner();",
+    'src/app-kinds/zz.js': "if (k === 'apt') owner();",
     'src/browser-profiles.js': "const b = t.phase === 'npm' ? 1 : 0;",
     // lane dc-mount-providers: the mount family — a core file's provider branch counts once per line, the provider's own row file never
     'src/zz-mounts.js': "if (m.type === 'onedrive' || rt === 'rclone') x();",

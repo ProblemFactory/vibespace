@@ -3,6 +3,7 @@
 // facts, the hooks are this provider's branches of MountManager's generic lifecycle, called with the manager `x`
 // (its key, its statics, its engines); the fact predicates (label / adopts / oauthBacked / rootMayBeDenied) get the class `MM`. Moved verbatim from src/mounts.js's per-type switches (lane dc-mount-providers).
 'use strict';
+const i18nKey = (s) => s; // extraction marker (scripts/i18n-extract.mjs) — the client words it through tr()
 
 module.exports = {
   id: 'drive',
@@ -138,5 +139,62 @@ module.exports = {
   },
   writeToken(holder, tok, x) {
     holder.tokenEnc = x._enc(tok);
+  },
+  // the CLIENT cells (lane dc-mount-client): pure data GET /api/mounts publishes once (`providers`); src/lib/sidebar-mounts.js
+  // renders the sidebar row, the Connect / submount / Edit dialogs and the re-authorize words from them — it names no provider
+  client: {
+    offersChild: true,   // the sidebar row's ＋ (a submount under it)
+    pick: 2, form: 2, pickLabel: 'Google Drive', tag: 'Drive',
+    names: { product: 'Google Drive', signin: 'Google' }, signins: { drive: 'Google' },
+    driveReauth: true, presets: true,
+    clientSwitch: { identity: 'id', customStart: true, authBase: '/api/mounts/gdrive-auth' },
+    widgets: ['drive-connect', 'shared-drives'],
+    submit: { client: { choice: 'clientChoice' }, drop: ['clientChoice'] },
+    child: {
+      path: { key: 'driveFolder', label: i18nKey('Folder path'), placeholder: 'My Folder/sub' },
+      extra: [
+        // Submounts are the natural home for cloud-side scopes (user
+        // insight): ONE authorized credential, N children each pointing at
+        // My Drive / a Shared drive / shared-with-me — no re-auth ever
+        // (each child runs its own rclone daemon+env over the parent creds).
+        { key: 'driveMode', label: i18nKey('Cloud-side scope'), type: 'select',
+          options: [['mydrive', 'My Drive'], ['shared-with-me', i18nKey('Shared with me')], ['shared-drive', i18nKey('Shared drive (team)')]] },
+        { key: 'teamDriveId', label: i18nKey('Shared drive'), placeholder: i18nKey('click “List shared drives” or paste an id'), when: { driveMode: 'shared-drive' } },
+        { key: 'rootFolderId', label: i18nKey('Folder ID (advanced — mount ONE shared folder)'), placeholder: '1AbC…',
+          hint: i18nKey('From the folder’s Drive URL. Mounts just that folder — the way to mount a single folder someone shared with you (keep scope = My Drive).'),
+          when: { driveMode: { not: 'shared-drive' } } },
+      ],
+    },
+    edit: [
+      { key: 'driveFolder', label: i18nKey('Folder path (optional)'), placeholder: 'My Folder/sub' },
+      { key: 'driveMode', label: i18nKey('Cloud-side scope'), default: 'mydrive', type: 'select', options: [['mydrive', 'My Drive'], ['shared-with-me', i18nKey('Shared with me')], ['shared-drive', i18nKey('Shared drive (team)')]] },
+      { key: 'teamDriveId', label: i18nKey('Shared drive id'), placeholder: '0AbC…' },
+      { key: 'rootFolderId', label: i18nKey('Folder ID (advanced)'), placeholder: '1AbC…' },
+      { key: 'clientPreset', label: i18nKey('OAuth client'), type: 'select', options: [['', i18nKey('(custom / built-in client)')]], presets: true },
+      { key: 'token', label: i18nKey('OAuth token'), placeholder: '{"access_token":…}', type: 'textarea' },
+      { key: 'clientId', label: i18nKey('Custom OAuth client id (when no preset)') },
+      { key: 'clientSecret', label: i18nKey('Custom OAuth client secret') },
+    ],
+    editChild: [
+      { key: 'driveFolder', label: i18nKey('Folder path (optional)'), placeholder: 'My Folder/sub' },
+      { key: 'driveMode', label: i18nKey('Cloud-side scope'), default: 'mydrive', type: 'select', options: [['mydrive', 'My Drive'], ['shared-with-me', i18nKey('Shared with me')], ['shared-drive', i18nKey('Shared drive (team)')]] },
+      { key: 'teamDriveId', label: i18nKey('Shared drive id'), placeholder: '0AbC…' },
+      { key: 'rootFolderId', label: i18nKey('Folder ID (advanced)'), placeholder: '1AbC…' },
+    ],
+    connect: [
+      { key: 'token', label: i18nKey('Google Drive access'), type: 'textarea', placeholder: i18nKey('click "Connect Google Drive" below — no terminal needed'), hint: i18nKey('Advanced: you can also paste the JSON from `rclone authorize "drive"` run elsewhere.') },
+      { key: 'driveFolder', label: i18nKey('Folder (optional, blank = whole Drive)'), placeholder: 'Projects/Data' },
+      { key: 'clientChoice', label: i18nKey('OAuth client'), type: 'select', clients: { builtin: i18nKey('Built-in client (rclone shared — being retired by Google)') }, value: { preset: '' },
+        // lane cluster-presets (P3): no company client is SAID, never just an absent option
+        hint: { presets: i18nKey('Pick the preset matching your Google account\'s organization; external accounts may see a one-time "unverified app" warning.'), none: i18nKey("No company OAuth client on this instance — ask your admin. Meanwhile the built-in client works, and your own avoids rclone's shared quota.") } },
+      { key: 'clientId', label: i18nKey('Custom OAuth client ID'), placeholder: '….apps.googleusercontent.com', when: { clientChoice: 'custom' } },
+      { key: 'clientSecret', label: i18nKey('Custom OAuth client secret'), type: 'password', when: { clientChoice: 'custom' } },
+      { key: 'driveMode', label: i18nKey('Cloud-side scope'), type: 'select',
+        options: [['mydrive', 'My Drive'], ['shared-with-me', i18nKey('Shared with me')], ['shared-drive', i18nKey('Shared drive (team)')]],
+        hint: i18nKey('“Shared with me” and Shared drives are separate spaces in Google Drive — this picks which one the mount shows; the folder path above is inside it.') },
+      { key: 'teamDriveId', label: i18nKey('Shared drive'), placeholder: i18nKey('click “List shared drives” (needs access above) or paste an id') },
+      { key: 'rootFolderId', label: i18nKey('Folder ID (advanced — mount ONE shared folder)'), placeholder: '1AbC…', advanced: true,
+        hint: i18nKey('From the folder’s Drive URL. Mounts just that folder — the way to mount a single folder someone shared with you (keep scope = My Drive).') },
+    ],
   },
 };

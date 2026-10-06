@@ -3,6 +3,7 @@
 // facts, the hooks are this provider's branches of MountManager's generic lifecycle, called with the manager `x`
 // (its key, its statics, its engines); the fact predicates (label / adopts / oauthBacked / rootMayBeDenied) get the class `MM`. Moved verbatim from src/mounts.js's per-type switches (lane dc-mount-providers).
 'use strict';
+const i18nKey = (s) => s; // extraction marker (scripts/i18n-extract.mjs) — the client words it through tr()
 
 module.exports = {
   id: 'cloud',
@@ -74,5 +75,33 @@ module.exports = {
   },
   writeToken(holder, tok, x) {
     holder.tokenEnc = x._enc(tok);
+  },
+  // the CLIENT cells (lane dc-mount-client): pure data GET /api/mounts publishes once (`providers`); src/lib/sidebar-mounts.js
+  // renders the sidebar row, the Connect / submount / Edit dialogs and the re-authorize words from them — it names no provider
+  client: {
+    offersChild: true,   // the sidebar row's ＋ (a submount under it) — the dialog then says submounts are unsupported (no `child` cell; kept as found)
+    pick: 5, form: 5, pickLabel: i18nKey('Other cloud (Dropbox / Box / pCloud …)'), tagFromSource: 'Cloud',
+    names: { byBackend: { dropbox: 'Dropbox', box: 'Box', pcloud: 'pCloud', yandex: 'Yandex Disk', premiumizeme: 'Premiumize.me', sharefile: 'ShareFile', hidrive: 'HiDrive', jottacloud: 'Jottacloud' }, fromSource: 'Cloud' },
+    signins: { dropbox: 'Dropbox', box: 'Box', pcloud: 'pCloud', yandex: 'Yandex', jottacloud: 'Jottacloud', hidrive: 'HiDrive' },
+    driveReauth: true,
+    widgets: [{ oauth: { tokenKey: 'cloudToken', backendKey: 'cloudBackend', backend: 'dropbox', label: i18nKey('Connect'), clientIdKey: 'cloudClientId', clientSecretKey: 'cloudClientSecret' } }],
+    submit: { map: { backend: 'cloudBackend', token: 'cloudToken', remotePath: 'cloudPath' }, orNull: { clientId: 'cloudClientId' }, orUndef: { clientSecret: 'cloudClientSecret' }, drop: ['cloudBackend', 'cloudToken', 'cloudPath', 'cloudClientId', 'cloudClientSecret'] },
+    // a top-level record has NO edit fields; a child edits these four (kept as found — behaviour identical)
+    editChild: [
+      { key: 'remotePath', label: i18nKey('Folder (optional)'), placeholder: 'Projects/Data' },
+      { key: 'clientId', label: i18nKey('Custom OAuth client id (optional)') },
+      { key: 'clientSecret', label: i18nKey('Custom OAuth client secret') },
+      { key: 'token', label: i18nKey('OAuth token (re-run Connect to replace)'), type: 'textarea' },
+    ],
+    connect: [
+      { key: 'cloudBackend', label: i18nKey('Provider'), type: 'select', options: [
+        ['dropbox', 'Dropbox'], ['box', 'Box'], ['pcloud', 'pCloud'], ['yandex', 'Yandex Disk'], ['jottacloud', 'Jottacloud'], ['hidrive', 'HiDrive']] },
+      { key: 'cloudToken', label: i18nKey('Access'), type: 'textarea', placeholder: i18nKey('click "Connect" below — no terminal needed'),
+        hint: i18nKey('Advanced: you can also paste the JSON from `rclone authorize "<provider>"` run elsewhere.') },
+      { key: 'cloudPath', label: i18nKey('Folder (optional, blank = whole drive)'), placeholder: 'Projects/Data' },
+      { key: 'cloudClientId', label: i18nKey('Custom OAuth client ID (optional — your own app)'), advanced: true,
+        hint: i18nKey('Most providers work with the built-in client — leave blank.') },
+      { key: 'cloudClientSecret', label: i18nKey('Custom OAuth client secret (optional)'), type: 'password', advanced: true },
+    ],
   },
 };

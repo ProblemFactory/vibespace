@@ -3,6 +3,7 @@
 // facts, the hooks are this provider's branches of MountManager's generic lifecycle, called with the manager `x`
 // (its key, its statics, its engines); the fact predicates (label / adopts / oauthBacked / rootMayBeDenied) get the class `MM`. Moved verbatim from src/mounts.js's per-type switches (lane dc-mount-providers).
 'use strict';
+const i18nKey = (s) => s; // extraction marker (scripts/i18n-extract.mjs) — the client words it through tr()
 
 module.exports = {
   id: 's3',
@@ -49,5 +50,30 @@ module.exports = {
     env[P('NO_CHECK_BUCKET')] = 'true';
     if (m.sessionTokenEnc) env[P('SESSION_TOKEN')] = x._dec(m.sessionTokenEnc);
     return `${R}:${m.bucket}${m.prefix ? '/' + m.prefix : ''}`;
+  },
+  // the CLIENT cells (lane dc-mount-client): pure data GET /api/mounts publishes once (`providers`); src/lib/sidebar-mounts.js
+  // renders the sidebar row, the Connect / submount / Edit dialogs and the re-authorize words from them — it names no provider
+  client: {
+    offersChild: true,   // the sidebar row's ＋ (a submount under it)
+    pick: 1, form: 1, pickLabel: i18nKey('Cloud storage (S3 / MinIO)'), tag: 'S3',
+    child: { path: { key: 'bucket', label: i18nKey('Bucket'), placeholder: 'bucket-name' }, extra: [{ key: 'prefix', label: i18nKey('Prefix (optional)'), placeholder: 'sub/path' }] },
+    edit: [
+      { key: 'endpoint', label: i18nKey('Endpoint'), placeholder: 'https://…' },
+      { key: 'bucket', label: i18nKey('Bucket'), placeholder: 'bucket-name' },
+      { key: 'prefix', label: i18nKey('Prefix (optional)'), placeholder: 'sub/path' },
+      { key: 'accessKey', label: i18nKey('Access key') },
+      { key: 'secretKey', label: i18nKey('Secret key') },
+    ],
+    editChild: [
+      { key: 'bucket', label: i18nKey('Bucket'), placeholder: 'bucket-name' },
+      { key: 'prefix', label: i18nKey('Prefix (optional)'), placeholder: 'sub/path' },
+    ],
+    connect: [
+      { key: 'endpoint', label: i18nKey('Server address (endpoint)'), placeholder: 'https://s3.amazonaws.com  or  https://s3.mycompany.com', hint: i18nKey('The address your storage provider gave you. For Amazon S3 use https://s3.amazonaws.com; for MinIO/other providers use the link from their console.') },
+      { key: 'bucket', label: i18nKey('Bucket (storage container)'), placeholder: 'company-workspace', hint: i18nKey('The container name from your provider’s console — like a top-level drive.') },
+      { key: 'prefix', label: i18nKey('Subfolder (optional)'), placeholder: 'users/alice', hint: i18nKey('Limit this connection to one folder inside the bucket. Leave blank for the whole bucket.') },
+      { key: 'accessKey', label: i18nKey('Access key'), hint: i18nKey('From your provider’s “Access Keys” / API credentials page.') },
+      { key: 'secretKey', label: i18nKey('Secret key'), type: 'password', hint: i18nKey('The secret half of the access key — treat it like a password.') },
+    ],
   },
 };

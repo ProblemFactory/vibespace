@@ -18,6 +18,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
+const { globalUsageKeyOf } = require('./backend-caps.js'); // PURE: the machine login's ledger key per harness
 const { runUsageWalk } = require('./usage-walker.js');
 const { timedSync } = require('./timed-sync.js'); // PURE: the store-write clock (design 011 lane 1, store-timing)
 
@@ -976,7 +977,7 @@ class UsageHistory {
       // The two CLIs' machine logins are DIFFERENT identities — separate buckets
       // ('__global__' = claude, '__global_codex__' = codex), else the account
       // dimension/filter conflates them.
-      const acctKey = ev.acct || (ev.be === 'codex' ? '__global_codex__' : '__global__');
+      const acctKey = ev.acct || globalUsageKeyOf(ev.be);
       // accounts = Set of bucket keys (account ids / globals); the UI can pass
       // several at once (e.g. a named sub + its global when the machine login
       // IS that account) — the whole dashboard then shows one account.

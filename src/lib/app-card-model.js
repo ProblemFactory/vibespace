@@ -5,7 +5,7 @@
 // scripts/test-app-card.mjs is the census, in en / zh / ja, with a planted word as its control.
 import { shownDigest as digestOfView } from '../app-card.js';
 import { fmtBytes } from '../app-manifest.js';
-import { ROWS } from '../app-kinds.js'; // PURE — an app kind is one row (lane dc-apps-rows)
+import { ROWS } from '../app-kinds/index.js'; // PURE — an app kind is one row (lane dc-apps-rows)
 
 /** The digest of the view a card drew — what its Install sends (`shown`); the engine compares it with the proposal. */
 export const shownDigest = (view) => digestOfView(view);
@@ -16,7 +16,7 @@ export function appName(view, lang = 'en') {
   const a = (view && view.app) || {};
   return String((lang === 'zh' || lang === 'ja') && a.labels && a.labels[lang] ? a.labels[lang] : a.name || '');
 }
-const isInstall = (k) => ROWS.some((r) => r.entry && r.card === k); // the card word of an entry kind (src/app-kinds.js)
+const isInstall = (k) => ROWS.some((r) => r.entry && r.card === k); // the card word of an entry kind (src/app-kinds/)
 /** An installed catalog row's name in the reader's language (design 009: the row carries `labels {zh, ja}` from its own
  *  .desktop — Name[zh_CN] / Name[ja] — and the client picks; apps-joint r1 F2) › its unlocalised label. */
 export function rowName(row, lang = 'en') {

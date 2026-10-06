@@ -18,6 +18,7 @@ const { execFileSync } = require('child_process');
 // functions this file used to define (moved verbatim) — re-exported at the
 // bottom for current callers (tests, the engine) so nothing drifts.
 const harnesses = require('./harnesses');
+const { oauthUsageAccount } = require('./backend-caps.js'); // PURE: caps.oauthUsage — the OAuth usage-poll accounts
 // THE ONE WRITE PATH (src/usage-cache-write.js, design-account-hardening §4.2):
 // every producer in this file reaches data/usage-cache/*.json through it. It
 // merges each reading into the file's typed `limits` PER limitId and rewrites
@@ -279,7 +280,7 @@ let _codexUsageGlobalLink = { email: null, loggedIn: false, accountId: null };
 function reloadRateLimitCache() { _rateLimitCache = readUsageCache(); ingestPassiveUsage(); }
 function ingestPassiveUsage() {
   const allAccts = accounts.list().accounts || [];
-  const roster = allAccts.filter((a) => (a.backend || 'claude') !== 'codex' && a.type === 'subscription');
+  const roster = allAccts.filter((a) => oauthUsageAccount(a));
   const subIds = new Set(roster.map((a) => a.id));
   for (const id of Object.keys(_accountUsage)) if (!subIds.has(id)) delete _accountUsage[id]; // drop removed accounts
   // Same-account link for CODEX: the machine's own ~/.codex login vs the named
@@ -1428,7 +1429,7 @@ app.get('/api/usage', (req, res) => {
       try {
         const out = {};
         for (const a of (accounts.list().accounts || [])) {
-          if ((a.backend || 'claude') !== 'claude' || a.type !== 'subscription') continue;
+          if (!oauthUsageAccount(a)) continue;
           const st = accountLoginState(accounts.subCredsPath(a.id), { backend: 'claude', oatMintedAt: a.oat ? (a.oatMintedAt || null) : null });
           out[a.id] = { state: st.state, usable: st.usable, since: st.since || null };
         }

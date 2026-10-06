@@ -14,6 +14,7 @@
 const fs = require('fs');
 const path = require('path');
 const { bucketCounts } = require('./quota-model.js');
+const { globalUsageKeyOf } = require('./backend-caps.js'); // PURE: the machine login's ledger key per harness
 
 // THE ANCHOR-FILE SLUG. Exported because the repair has to walk this the OTHER
 // way — from a stream file name back to the identity it stands for, and from a
@@ -171,7 +172,7 @@ function costBetweenMulti(usageHistory, accountIds, fromMs, toMs) {
       // counted codex CLI-login events into the CLAUDE global identity's cost
       // (and starved '__global_codex__' of its own) — found wiring codex into
       // the estimator (P1, 2.368.18).
-      const acct = ev.acct || (ev.be === 'codex' ? '__global_codex__' : '__global__');
+      const acct = ev.acct || globalUsageKeyOf(ev.be);
       if (!want.has(acct)) continue;
       // Remote events RESOLVED to a real account (2.294.0 attribution) COUNT:
       // quota is a per-account global fact, and excluding another machine's

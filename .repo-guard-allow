@@ -92,3 +92,5 @@ clientSecret: WS_CLIENT_SECRET
 u-fixture-user-token
 # dc-channels-consent (2.369.214): the consent leg's synthetic fake-vendor integration key in test-channels-engine, not real
 fake_consent_key_0001
+# dc-mount-client (2.369.222): the storage rows' client cells name the Connect form's FIELD KEYS, not values:
+(clientSecretKey|clientSecret|secret): '(cloud|gmail|onedrive)ClientSecret'

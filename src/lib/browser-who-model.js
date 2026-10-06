@@ -21,6 +21,7 @@
 //   · ALL AGENTS (lane everyone-principal, 2026-10-02): the picker's first row (`EVERYONE_KEY`) IS `use.mode:'all'` —
 //     never a second spelling; the rows picked beside it are KEPT (`use.who` under `all`, restored when All is taken
 //     away), the panel shows "All agents" first ("All agents (N more rows)" when rows are kept).
+import { capsOf } from '../backend-caps.js'; // PURE → PURE (lane dc-harness-tail): caps.terminalOnly — a plain shell has no agent to hold a browser
 
 /** The picker key of ALL AGENTS — the dialog's first row (it maps to `use.mode:'all'`). */
 export const EVERYONE_KEY = 'everyone:*';
@@ -102,7 +103,7 @@ export function pickerRows(view, { sessions = [], groups = [], groupsOfSession =
   const liveByKey = new Map();
   for (const s of Array.isArray(sessions) ? sessions : []) {
     if (!s || !s.id) continue;
-    if (s.backend === 'shell') continue;
+    if (capsOf(s.backend).terminalOnly) continue;
     if (s.host || s.hostId) { remote = true; continue; }
     const cid = s.backendSessionId || s.claudeSessionId || null;
     let tgs = [];

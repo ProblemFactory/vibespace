@@ -316,7 +316,7 @@ export const SUITES = [
 
   { name: 'test-public-links', tier: 'fast', why: 'PURE · 24 ms' }, // every "link to something here" surface uses the instance's public address (not the browser origin)
   { name: 'test-remote-shell', tier: 'fast', why: 'LAW architecture · 57 ms — the shared remote-shell drift guard; its one `command -v agent-browser` runs a real sh under a scratch PATH holding only the shim and a fake, never the program', allow: ['binary'] },
-  { name: 'test-mount-providers', tier: 'fast', why: 'in-process · 430 ms' }, // lane dc-mount-providers: a storage provider = its row file + one index line (fake acme provider through the real manager; base-vs-tree differential; patched-copy controls)
+  { name: 'test-mount-providers', tier: 'fast', why: 'in-process + 4 esbuild client bundles · 2.7 s' }, // lane dc-mount-providers: a storage provider = its row file + one index line (fake acme provider through the real manager; base-vs-tree differential; patched-copy controls)
   { name: 'test-mount-oauth-probe', tier: 'fast', why: 'in-process · 31 ms' }, // dead OAuth token behind a healthy-looking mount: probe eligibility + slow clock + phrasings + Re-authorize button; §4 D2 (integrations 4a): a Drive client switch lands WITH its token (applyDriveToken client), children bounce, Gmail through its PATCH
   { name: 'test-compaction-ux', tier: 'fast', why: 'PURE · 91 ms' }, // prompt_too_long → guidance card + /compact turn label + two-step Stop (normalizer behavioral + wiring pins)
   { name: 'test-job-model', tier: 'fast', why: 'PURE · 34 ms' },

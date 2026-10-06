@@ -33,4 +33,9 @@ module.exports = {
       cephSecretEnc: x._enc(cfg.cephSecret),
     });
   },
+  // the CLIENT cells (lane dc-mount-client): pure data GET /api/mounts publishes once (`providers`); src/lib/sidebar-mounts.js
+  // renders the sidebar row, the Connect / submount / Edit dialogs and the re-authorize words from them — it names no provider
+  client: {
+    tag: 'CephFS',
+  },
 };

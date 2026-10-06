@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.222 — 2026-10-05
+
+### Changed
+- Internal: storage providers, app kinds and agent harnesses are each one file + one line (no behaviour change).
+
 ## 2.369.221 — 2026-10-05
 
 ### Added

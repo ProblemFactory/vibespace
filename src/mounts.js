@@ -406,6 +406,8 @@ class MountManager {
     row.adoptRecord(m, this);
     return true;
   }
+  /** The providers' client cells for GET /api/mounts (`providers`) — lane dc-mount-client. */
+  providers() { return PROVIDERS.clientRows(); }
   _adopterOf(rcloneType) { return PROVIDERS.rows.find((r) => r.adopts && r.adopts(rcloneType, MountManager)) || null; }
 
   _maybeMigrateDrive() {

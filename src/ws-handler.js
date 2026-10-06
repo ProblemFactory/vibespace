@@ -10,7 +10,7 @@ const { createWsHeartbeat } = require('./server/ws-heartbeat');
 const { listCodexThreads } = require('./codex-session-store');
 const { findCodexSessionJsonlPath, extractCodexThreadMeta } = require('./adapters/codex');
 const { cwdToProjectDir, findSessionJsonlPath } = require('./session-store');
-const { get: harnessOf } = require('./harnesses'); // S3: store.warmTranscript per harness (claude parse-cache warm / codex thread/read fallback)
+const { get: harnessOf, spawnOf } = require('./harnesses'); // S3: store.warmTranscript per harness (claude parse-cache warm / codex thread/read fallback)
 const { capsOf } = require('./backend-caps');      // inputModes.queueVerbs / review / renameWriteback gates (never a backend-id branch)
 const { reconcileAttachStreaming } = require('./turn-state'); // §2.5: ONE attach-time streaming decision, shared with the live consumer
 const { pidsMatchingCmdline } = require('./cli-identity'); // THE process reader: the kill path's `pgrep -f` without the fork
@@ -158,7 +158,7 @@ function pickCodexThreadCandidate({ activeSessions, webuiSessionId, cwd, created
   const reservedThreadIds = new Set();
   for (const [otherId, otherSession] of activeSessions || []) {
     if (otherId === webuiSessionId) continue;
-    if ((otherSession.backend || 'claude') !== 'codex') continue;
+    if (typeof spawnOf(otherSession.backend || 'claude').threadBaseline !== 'function') continue; // only a CLI that mints its id after the spawn reserves one (spawn.threadBaseline)
     const reservedId = otherSession.backendSessionId || otherSession.claudeSessionId || otherSession._captureReservedThreadId || null;
     if (reservedId) reservedThreadIds.add(reservedId);
   }
@@ -982,8 +982,7 @@ function registerWsHandler(wss, ctx) {
               if (session.host && hosts && !session._historyLoaded && (session.claudeSessionId || session.backendSessionId)) {
                 try {
                   const rid = session.claudeSessionId || session.backendSessionId;
-                  if ((session.backend || 'claude') === 'codex') await hosts.fetchCodexJsonl(session.host, rid);
-                  else await hosts.fetchSessionJsonl(session.host, rid);
+                  await hosts.fetchTranscript(session.host, session.backend || 'claude', rid); // the harness's store.remoteFind names where it lives
                 }
                 catch (e) { console.error('remote jsonl fetch failed:', e.message); }
               }
@@ -1271,8 +1270,7 @@ function registerWsHandler(wss, ctx) {
             // loads through the normal path. Stale cache beats no history.
             if (data.host && hosts) {
               try {
-                if ((data.backend || 'claude') === 'codex') await hosts.fetchCodexJsonl(data.host, backendSessionId);
-                else await hosts.fetchSessionJsonl(data.host, backendSessionId);
+                await hosts.fetchTranscript(data.host, data.backend || 'claude', backendSessionId); // the harness's store.remoteFind names where it lives
               }
               catch (e) { console.error('remote jsonl fetch failed:', e.message); }
             }

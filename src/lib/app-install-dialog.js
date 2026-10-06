@@ -21,6 +21,7 @@ import { cardWords } from './app-card-model.js'; // design 009: THE words of an 
 import { createModalShell, fetchJson, showContextMenu, showToast } from './utils.js';
 import { showInstallDialog, machineName, machineInSentence } from './desktop-app-launcher.js';
 import { fmtBytes } from '../app-manifest.js';
+import { kindRow } from '../app-kinds/index.js'; // PURE — an app kind is its own file: its title, plan rows and words (lane dc-app-kinds)
 
 const el = (tag, cls = '', text = null) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = String(text); return e; };
 const btn = (label, cls = 'file-tool-btn', title = '') => { const b = el('button', cls, label); b.type = 'button'; b.style.cssText = 'width:auto;padding:0 10px'; if (title) b.title = title; return b; };
@@ -65,7 +66,7 @@ export function appDialogTitle(request, name) {
   if (r.kind === 'adopt') return t('Keep these packages on {machine}', { machine: name });
   if (r.kind === 'source') return t('Add a package source to {machine}', { machine: name });
   if (r.kind === 'source-remove') return t('Remove a package source from {machine}', { machine: name });
-  if (r.kind === 'deb') return t('Install a .deb file on {machine}', { machine: name });
+  if ((kindRow(r.kind) || {}).dialogTitle) return kindRow(r.kind).dialogTitle(t, name);
   if (r.kind === 'replay') return t('Put your apps back on {machine}', { machine: name });
   if (r.kind === 'move') return t('Move your apps into the app system on {machine}', { machine: name }); // design 019 M2
   if (r.kind === 'sys-create') return t('Set up the app system on {machine}', { machine: name }); // Layer 1 (design §3.2)
@@ -132,14 +133,12 @@ export function appPlanBlock(plan, { proposal = null } = {}) {
     if (proposal.why) line(t('Why: {why}', { why: proposal.why }), 'app-plan-why');
   }
   const k = plan.kind;
-  if (k === 'apt' || k === 'deb' || k === 'adopt') {
+  const kindR = kindRow(k) || {};
+  if (kindR.closurePlan) {
     const n = (plan.closure || []).length;
     if (k !== 'adopt') line(n ? t(n === 1 ? '1 package · {download} to download · {disk} on disk' : '{n} packages · {download} to download · {disk} on disk', { n, download: fmtBytes(plan.downloadBytes || 0), disk: fmtBytes(Math.max(0, plan.installedBytes || 0)) }) : t('Already installed — VibeSpace keeps it so it comes back after a rebuild.'));
     if ((plan.origins || []).length) line(t('From: {origins}', { origins: plan.origins.join(', ') }));
-    if (k === 'deb' && plan.deb) {
-      line(t('File: {name} · sha256 {sha}', { name: plan.deb.name, sha: plan.deb.sha256 }), 'app-plan-mono');
-      if ((plan.deb.scripts || []).length) line(t('It runs its own install scripts as root: {scripts}', { scripts: plan.deb.scripts.join(', ') }), 'app-plan-warn');
-    }
+    if (kindR.dialogRows) kindR.dialogRows(plan, line, t);
     const names = k === 'adopt' ? (plan.packages || []) : (plan.closure || []).map((c) => c.package);
     if (names.length) {
       const d = el('details', 'app-plan-pkgs');
@@ -355,7 +354,7 @@ export function renderAppsSection(app, root, { host = 'local', machine = null, o
       row.dataset.entry = e.id;
       const rows = (st.rows || []).filter((r) => r.app === e.id);
       row.appendChild(el('span', 'app-sec-label', rows.length ? rows.map((r) => r.label).join(', ') : (e.label || e.packages.join(' '))));
-      row.appendChild(el('span', 'app-sec-sub', [e.packages.join(' '), e.layer === 'sys' ? t('in the app system') : '', e.kind === 'deb' ? t('from a .deb file') : '', e.by && e.by.kind === 'agent' ? t('proposed by {name}', { name: e.by.name || t('an agent') }) : ''].filter(Boolean).join(' · ')));
+      row.appendChild(el('span', 'app-sec-sub', [e.packages.join(' '), e.layer === 'sys' ? t('in the app system') : '', ((kindRow(e.kind) || {}).entryNote || (() => ''))(t), e.by && e.by.kind === 'agent' ? t('proposed by {name}', { name: e.by.name || t('an agent') }) : ''].filter(Boolean).join(' · ')));
       const unsaved = unsavedText(((st.entries || []).find((x) => x.id === e.id) || {}).uncached);
       if (unsaved) row.appendChild(el('span', 'app-sec-sub app-plan-warn app-sec-unsaved', unsaved));
       const rm = btn(t('Remove…'), 'file-tool-btn app-sec-remove');

@@ -3,6 +3,7 @@
 // facts, the hooks are this provider's branches of MountManager's generic lifecycle, called with the manager `x`
 // (its key, its statics, its engines); the fact predicates (label / adopts / oauthBacked / rootMayBeDenied) get the class `MM`. Moved verbatim from src/mounts.js's per-type switches (lane dc-mount-providers).
 'use strict';
+const i18nKey = (s) => s; // extraction marker (scripts/i18n-extract.mjs) — the client words it through tr()
 
 module.exports = {
   id: 'gmail',
@@ -58,5 +59,40 @@ module.exports = {
     if (patch.clientPreset !== undefined) m.clientPreset = patch.clientPreset ? String(patch.clientPreset) : null;
     if (patch.token) { JSON.parse(String(patch.token).trim()); m.tokenEnc = x._enc(String(patch.token).trim()); }
     return scopeChanged ? 'reseed' : undefined;
+  },
+  // the CLIENT cells (lane dc-mount-client): pure data GET /api/mounts publishes once (`providers`); src/lib/sidebar-mounts.js
+  // renders the sidebar row, the Connect / submount / Edit dialogs and the re-authorize words from them — it names no provider
+  client: {
+    pick: 4, form: 3, pickLabel: 'Gmail', tag: 'Gmail',
+    sync: true,             // a SYNC, not a filesystem: the row shows the sync line (the list cells gmailState / gmailProgress)
+    unmountLabel: i18nKey('Stop syncing (synced emails stay)'),
+    names: { product: 'Gmail', signin: 'Google' }, presets: true,
+    clientSwitch: { identity: 'id+secret', authBase: '/api/mounts/gmail-auth', statusFail: 'error', pastePlaceholder: 'http://127.0.0.1:…/?state=…&code=…', finish: 'patch' },
+    widgets: ['gmail-connect', 'gmail-labels'],
+    submit: { map: { token: 'gmailToken' }, set: { mode: 'ro' }, client: { choice: 'gmailClientChoice', id: 'gmailClientId', secret: 'gmailClientSecret' }, drop: ['gmailToken', 'gmailClientChoice', 'gmailClientId', 'gmailClientSecret'] },
+    edit: [
+      { key: 'syncCount', label: i18nKey('Messages to sync (newest N; 0 = everything)'), placeholder: '200', keepZero: true },
+      { key: 'groupBy', label: i18nKey('Organize into folders'), default: 'none', type: 'select', options: [['none', i18nKey('No grouping (flat)')], ['month', i18nKey('By month (YYYY-MM)')], ['day', i18nKey('By day (YYYY-MM-DD)')], ['label-month', i18nKey('By label, then month (Inbox/2026-07)')], ['label-day', i18nKey('By label, then day')]] },
+      { key: 'labelIds', label: i18nKey('Labels (comma list)'), placeholder: 'INBOX' },
+      { key: 'query', label: i18nKey('Search filter (Gmail query)') },
+      { key: 'clientPreset', label: i18nKey('OAuth client'), type: 'select', options: [['', i18nKey('(custom / built-in client)')]], presets: true },
+      { key: 'token', label: i18nKey('OAuth token (JSON — re-run Connect Gmail to replace)'), type: 'textarea' },
+    ],
+    connect: [
+      { key: 'gmailClientChoice', label: i18nKey('OAuth client'), type: 'select', clients: {}, value: { preset: 'custom' },
+        hint: { presets: i18nKey('Gmail has no built-in fallback client — pick a preset or provide your own. The client needs the gmail.readonly scope.'), none: i18nKey('No company OAuth client on this instance — ask your admin, or provide your own (it needs the gmail.readonly scope).') } },
+      { key: 'gmailClientId', label: i18nKey('Custom OAuth client ID'), placeholder: '….apps.googleusercontent.com', when: { gmailClientChoice: 'custom' } },
+      { key: 'gmailClientSecret', label: i18nKey('Custom OAuth client secret'), type: 'password', when: { gmailClientChoice: 'custom' } },
+      { key: 'gmailToken', label: i18nKey('Gmail access'), type: 'textarea', placeholder: i18nKey('click "Connect Gmail" below — no terminal needed'),
+        hint: i18nKey('This is a SYNC, not a live mount: emails download into the folder as .eml files (read-only archive) and keep syncing while connected.') },
+      { key: 'syncCount', label: i18nKey('Messages to sync (newest N; 0 = everything)'), placeholder: '200',
+        hint: i18nKey('0 syncs the ENTIRE mailbox — archived and spam/trash included when no label filter is set. Large mailboxes take a while (quota-paced); the card shows live progress.') },
+      { key: 'groupBy', label: i18nKey('Organize into folders'), type: 'select',
+        options: [['label-month', i18nKey('By label, then month (Inbox/2026-07)')], ['label-day', i18nKey('By label, then day')], ['month', i18nKey('By month (YYYY-MM)')], ['day', i18nKey('By day (YYYY-MM-DD)')], ['none', i18nKey('No grouping (flat)')]],
+        hint: i18nKey('Label layout files each mail under Inbox / Archive / Sent / Spam / Trash / Drafts (Gmail precedence; "archived" = not in the inbox), with a date folder inside.') },
+      { key: 'labelIds', label: i18nKey('Labels filter (blank = whole mailbox)'), placeholder: i18nKey('blank = everything — or e.g. INBOX, SENT, STARRED'), advanced: true,
+        hint: i18nKey('Comma list of Gmail label ids — use “List labels” after connecting to pick from your real labels.') },
+      { key: 'query', label: i18nKey('Search filter (Gmail query, optional)'), placeholder: 'from:boss@example.com newer_than:30d', advanced: true },
+    ],
   },
 };

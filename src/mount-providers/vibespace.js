@@ -3,6 +3,7 @@
 // facts, the hooks are this provider's branches of MountManager's generic lifecycle, called with the manager `x`
 // (its key, its statics, its engines); the fact predicates (label / adopts / oauthBacked / rootMayBeDenied) get the class `MM`. Moved verbatim from src/mounts.js's per-type switches (lane dc-mount-providers).
 'use strict';
+const i18nKey = (s) => s; // extraction marker (scripts/i18n-extract.mjs) — the client words it through tr()
 
 const webdav = require('./webdav.js');
 
@@ -34,5 +35,18 @@ module.exports = {
       x._notify();
       return false;
     }
+  },
+  // the CLIENT cells (lane dc-mount-client): pure data GET /api/mounts publishes once (`providers`); src/lib/sidebar-mounts.js
+  // renders the sidebar row, the Connect / submount / Edit dialogs and the re-authorize words from them — it names no provider
+  client: {
+    pick: 8, form: 8, pickLabel: i18nKey('Another VibeSpace'), tag: 'VibeSpace',
+    edit: [
+      { key: 'url', label: 'URL', placeholder: 'https://…' },
+      { key: 'bearerToken', label: i18nKey('Bearer token') },
+    ],
+    connect: [
+      { key: 'url', label: i18nKey('VibeSpace URL'), placeholder: 'https://vibespace.example.com' },
+      { key: 'bearerToken', label: i18nKey('Mount token (vsmt_…)'), type: 'password', hint: i18nKey('Ask the other VibeSpace to create one under Storage → “Share a local folder”.') },
+    ],
   },
 };

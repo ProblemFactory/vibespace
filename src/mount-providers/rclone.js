@@ -3,6 +3,7 @@
 // facts, the hooks are this provider's branches of MountManager's generic lifecycle, called with the manager `x`
 // (its key, its statics, its engines); the fact predicates (label / adopts / oauthBacked / rootMayBeDenied) get the class `MM`. Moved verbatim from src/mounts.js's per-type switches (lane dc-mount-providers).
 'use strict';
+const i18nKey = (s) => s; // extraction marker (scripts/i18n-extract.mjs) — the client words it through tr()
 
 module.exports = {
   id: 'rclone',
@@ -98,5 +99,27 @@ module.exports = {
     if (holder.rcloneType !== 'drive') throw new Error('Not an OAuth cloud connection');
     holder.paramsEnc = holder.paramsEnc || {};
     holder.paramsEnc.token = x._enc(tok);
+  },
+  // the CLIENT cells (lane dc-mount-client): pure data GET /api/mounts publishes once (`providers`); src/lib/sidebar-mounts.js
+  // renders the sidebar row, the Connect / submount / Edit dialogs and the re-authorize words from them — it names no provider
+  client: {
+    offersChild: true,   // the sidebar row's ＋ (a submount under it)
+    pick: 9, form: 9, pickLabel: i18nKey('Custom / advanced (rclone)'), tagFromSource: 'rclone',
+    names: { product: 'Google Drive', signin: 'Google' },
+    driveReauth: { rcloneType: 'drive' },   // a raw record over rclone's drive backend re-authorizes like Drive
+    submit: { kv: ['params'] },
+    child: { path: { key: 'remotePath', label: i18nKey('Remote path (bucket[/prefix])'), placeholder: 'bucket-name/optional/prefix' } },
+    edit: [
+      { key: 'remotePath', label: i18nKey('Remote path (bucket[/prefix])'), placeholder: 'bucket-name/optional/prefix' },
+      { params: true },   // each stored parameter is prefilled; clearing its value removes it
+      { key: 'newParamKey', label: i18nKey('Add parameter — name'), placeholder: 'e.g. region' },
+      { key: 'newParamValue', label: i18nKey('Add parameter — value') },
+    ],
+    editChild: [{ key: 'remotePath', label: i18nKey('Remote path (bucket[/prefix])'), placeholder: 'bucket-name/optional/prefix' }],
+    connect: [
+      { key: 'rcloneType', label: i18nKey('rclone backend'), placeholder: 'dropbox / b2 / azureblob / mega / …', hint: i18nKey("Any backend rclone supports — see rclone.org/docs. Params below map to that backend's config keys.") },
+      { key: 'params', label: i18nKey('Parameters (one key = value per line)'), type: 'textarea', placeholder: 'token = {"access_token":…}\naccount = my-account\nkey = …', hint: i18nKey('e.g. b2 wants account + key; dropbox wants token. All values encrypted at rest.') },
+      { key: 'remotePath', label: i18nKey('Path within the remote (optional)'), placeholder: 'folder/subfolder' },
+    ],
   },
 };

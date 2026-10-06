@@ -116,7 +116,8 @@ window.fetch = async (url, opts = {}) => {
   return J({});
 };
 window.open = () => null; // "popup blocked" — the cross-browser link row + paste-back render
-function S() { this._hostsData = { hosts: [{ id: 'h1', name: 'Build box', host: 'build.example.test', user: 'dev', port: 22 }] }; }
+// lane dc-mount-client: the dialogs render from the providers' client cells (GET /api/mounts providers) — the REAL rows
+function S() { this._mountsData = { providers: ${JSON.stringify(require(path.join(REPO, 'src/mount-providers/index.js')).clientRows())} }; this._hostsData = { hosts: [{ id: 'h1', name: 'Build box', host: 'build.example.test', user: 'dev', port: 22 }] }; }
 installSidebarMounts(S);
 S.prototype._renderMounts = () => {};
 if (variant !== 'A') installBaseline(S);

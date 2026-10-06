@@ -7,6 +7,7 @@
 // account-pool-auto.js; this is HTTP wiring.
 const fs = require('fs');
 const os = require('os');
+const { oauthUsageAccount } = require('../backend-caps.js'); // PURE: caps.oauthUsage — the OAuth usage-poll accounts
 const path = require('path');
 const { spawn } = require('child_process');
 
@@ -277,7 +278,7 @@ app.get('/api/hosts/:id/accounts-status', async (req, res) => {
           const rec = all.find((x) => x.id === dirId);
           if (!rec) continue;
           if (!rec.email) { try { accounts.setEmail(dirId, email); } catch { } }
-          const dup = all.find((x) => x.id !== dirId && (x.backend || 'claude') === 'claude' && x.type === 'subscription'
+          const dup = all.find((x) => x.id !== dirId && oauthUsageAccount(x)
             && String(x.email || (String(x.name || '').includes('@') ? x.name : '')).trim().toLowerCase() === em);
           if (dup) {
             // A Darwin VibeSpace marks these records local-only even when this
@@ -620,7 +621,7 @@ app.post('/api/accounts/subscription', (req, res) => {
 app.post('/api/accounts/:id/relogin', (req, res) => {
   try {
     const a = accounts.get(req.params.id);
-    if (!a || a.type !== 'subscription' || (a.backend || 'claude') !== 'claude') {
+    if (!oauthUsageAccount(a)) {
       return res.status(400).json({ error: 'not a Claude subscription account' });
     }
     const dir = accounts.subDir(a.id);
@@ -701,7 +702,7 @@ app.post('/api/accounts/subscription/:id/finalize', (req, res) => {
     const dupOf = (fin?.loggedIn && fin?.email && !fin.localOnly && accounts) ? (() => {
       const em = String(fin.email).trim().toLowerCase();
       return (accounts.list().accounts || []).find((x) =>
-        x.id !== req.params.id && (x.backend || 'claude') === 'claude' && x.type === 'subscription'
+        x.id !== req.params.id && oauthUsageAccount(x)
         && String(x.email || (String(x.name || '').includes('@') ? x.name : '')).trim().toLowerCase() === em) || null;
     })() : null;
     // The wake is FINGERPRINT-GATED where the sweep is not: this route is

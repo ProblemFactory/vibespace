@@ -50,6 +50,7 @@ const fs = require('fs');
 const path = require('path');
 const { decideCliRefresh, cliRefreshWhy, projectionReadsAfter, projectionBucketBought, PROJECTION_WINDOW_MS } = require('../account-pool-auto.js');
 const { cliRefreshDrift } = require('../usage-estimator.js');
+const { capsOf } = require('../backend-caps.js'); // PURE: caps.quotaProbe — the harness whose quota rung IS `<cli> -p /usage`
 
 const STATE_FILE = 'auto-cli-state.json';
 const ATTEMPT_KEEP_MS = 24 * 3600e3; // an attempt older than a day paces nothing (the longest backoff is 5 min × 2^6 = 5.3 h)
@@ -134,7 +135,7 @@ function createAutoCliLoop(d) {
       let billing;
       const billingIndex = () => (billing === undefined ? (billing = d.projectionBillingIndex ? d.projectionBillingIndex() : null) : billing);
       for (const a of (d.accounts.list().accounts || [])) {
-        if (a.type !== 'subscription' || !a.loggedIn || a.pooled || (a.backend || 'claude') !== 'claude' || !d.autoCliReady(a.id)) continue; // auto-cli spawns `claude -p /usage` — claude accounts only, and NOT READY IS NOT FAILED (autoCliReady, 2026-09-08)
+        if (a.type !== 'subscription' || !a.loggedIn || a.pooled || capsOf(a.backend).quotaProbe !== 'cli-usage' || !d.autoCliReady(a.id)) continue; // auto-cli spawns `claude -p /usage` — claude accounts only, and NOT READY IS NOT FAILED (autoCliReady, 2026-09-08)
         let raw = null, mem = [a.id];
         try { raw = JSON.parse(fs.readFileSync(path.join(d.USAGE_CACHE_DIR, a.id + '.json'), 'utf-8')); } catch { }
         try {

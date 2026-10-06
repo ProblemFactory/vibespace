@@ -15,7 +15,7 @@
  *
  * The face of a card never carries a package-system word; Details may (scripts/test-app-card.mjs is the census).
  */
-const K = require('./app-kinds'); // PURE — an app kind is one row: its card word, its keeps, its from (lane dc-apps-rows, F-A2)
+const K = require('./app-kinds/index.js'); // PURE — an app kind is one row: its card word, its keeps, its from (lane dc-apps-rows, F-A2)
 const KEEPS = Object.freeze(['replay', 'home', 'system']);
 /** where a run stopped, by its code: before the package slot ran anything, inside it, or at the record after it */
 const RUN_STEP_CODES = Object.freeze(['install_failed', 'install_timeout', 'install_link_lost', 'install_unrecorded']);

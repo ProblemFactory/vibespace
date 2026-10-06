@@ -439,6 +439,7 @@ app.get('/api/mounts', async (req, res) => {
   const cfg = mounts.getMyStorageConfig(); // redacted (no secret)
   res.json({
     mounts: mounts.list(),
+    providers: mounts.providers(),   // the storage providers' client cells (lane dc-mount-client)
     shares: mounts.listShares(),
     env: cfg ? { endpoint: cfg.endpoint, bucket: cfg.bucket, prefix: cfg.prefix, accessKey: cfg.accessKey, configured: cfg.configured, importedFromEnv: cfg.importedFromEnv } : null,
     mountBase: mounts.mountBase,

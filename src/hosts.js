@@ -1302,7 +1302,7 @@ class HostManager {
     if (!h.store || typeof h.store.remoteFind !== 'function') throw new Error(`${h.id} conversations cannot be fetched from a host (no remote transcript location)`);
     const rf = h.store.remoteFind(sessionId);
     const r = await this._fetchRemoteByFind(id, rf.findExpr, path.join(id, rf.cacheRel), { maxBytes: maxBytes || rf.maxBytes || 64 * 1024 * 1024, root: rf.root });
-    if (h.id === 'claude') { try { this.convIndex.note(sessionId, id, { src: 'fetch' }); } catch { } } // conversation-location index (R3 tail)
+    if (h.spawn?.isLocalConversation) { try { this.convIndex.note(sessionId, id, { src: 'fetch' }); } catch { } } // conversation-location index (R3 tail)
     return r;
   }
   /** APPEND A DELTA ONLY AT THE OFFSET IT WAS COMPUTED FROM (B-7638 round 4).

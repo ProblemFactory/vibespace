@@ -209,6 +209,9 @@ const importsComponent = (text, names) => !!text && names.every((n) => new RegEx
 export const DESIGN = 'docs/design-integrations-per-account.zh.md';
 export const EDIT_MOCKUP = 'docs/mockups/integrations-per-account/edit-dialog.html';
 export const MOUNTS_SERVER = 'src/mounts.js';
+// lane dc-mount-client: the storage dialogs' words live in the provider rows' client cells (src/mount-providers/<id>.js,
+// i18nKey(…) — sidebar-mounts renders them through tr()), so the storage side = sidebar-mounts + those rows
+export const MOUNT_ROWS_DIR = 'src/mount-providers/';
 // the files a channel-side KEY may be spelled in: the panel, the dialogs, their words, and the adapters'
 // declared option labels (i18nKey — the Settings / Options / Edit dialogs draw them)
 export const CHANNEL_KEY_FILES = [...CHANNEL_SIDE, 'src/lib/channel-words.js', 'src/channels/gmail.js', 'src/channels/lark.js'];
@@ -326,7 +329,8 @@ export function designI18nKeys(doc) {
 export function census(texts) {
   const out = []; // {rule, ok, why}
   const mod = texts[MODULE];
-  const mounts = texts[MOUNTS];
+  const rowFiles = Object.keys(texts).filter((f) => f.startsWith(MOUNT_ROWS_DIR));
+  const mounts = texts[MOUNTS] == null ? undefined : [texts[MOUNTS], ...rowFiles.map((f) => texts[f].split('i18nKey(').join('tr('))].join('\n');
   out.push({ rule: `§1 ${MODULE} exists`, ok: typeof mod === 'string', why: 'missing' });
   for (const [name, re] of EXPORTS) out.push({ rule: `§1 the module exports ${name}`, ok: !!mod && re.test(mod), why: `no ${re}` });
   out.push({ rule: '§2 sidebar-mounts imports the component from ./mounts-dialog.js',
@@ -435,7 +439,7 @@ export function census(texts) {
   const zh = texts['src/lib/i18n-zh.js'] || '', ja = texts['src/lib/i18n-ja.js'] || '';
   const inDict = (k) => zh.includes(JSON.stringify(k) + ':') && ja.includes(JSON.stringify(k) + ':');
   const drawnIn = (files, k) => files.some((f) => (texts[f] || '').includes(`'${k}'`));
-  const mountsFiles = [MOUNTS, MODULE];
+  const mountsFiles = [MOUNTS, MODULE, ...rowFiles];
   for (const r of DESIGN_I18N) {
     if (r.built === null) { out.push({ rule: `§8 "${r.key.slice(0, 60)}" — not drawn (${r.why})`, ok: !drawnIn(CHANNEL_KEY_FILES, r.key), why: 'it IS drawn now — give the row its sides' }); continue; }
     const spellings = Array.isArray(r.built) ? r.built : [r.built || r.key];
@@ -486,6 +490,7 @@ function loadTexts() {
     }
   };
   walk('src/lib');
+  walk(MOUNT_ROWS_DIR.slice(0, -1));
   for (const rel of ['src/channels/gmail.js', 'src/channels/lark.js', DESIGN, EDIT_MOCKUP, MOUNTS_SERVER]) texts[rel] = read(rel);
   return texts;
 }
@@ -514,7 +519,7 @@ if (isMain) {
   reddens('a second cross-browser row (another file writes mounts-oauth-link)', 'writes the cross-browser link row', (t) => { t['src/lib/zz-control.js'] = "el.className = 'mounts-oauth-link';"; });
   reddens('the module stops exporting wireOAuthConnect', 'exports wireOAuthConnect', (t) => { t[MODULE] = M(t).replace('export function wireOAuthConnect(', 'function wireOAuthConnect('); });
   reddens('the mounts side drops the import', 'imports the component', (t) => { t[MOUNTS] = t[MOUNTS].replace("from './mounts-dialog.js'", "from './mounts-dialog-copy.js'"); });
-  reddens('the mounts side renames "OAuth client"', "tr('OAuth client') — the mounts side", (t) => { t[MOUNTS] = t[MOUNTS].split("tr('OAuth client')").join("tr('OAuth app')"); });
+  reddens('the mounts side renames "OAuth client"', "tr('OAuth client') — the mounts side", (t) => { for (const f of Object.keys(t)) if (f === MOUNTS || f.startsWith(MOUNT_ROWS_DIR)) t[f] = t[f].split("tr('OAuth client')").join("tr('OAuth app')").split("i18nKey('OAuth client')").join("i18nKey('OAuth app')"); });
   reddens('the module renames the hint class', "'mounts-field-hint' — the shared module", (t) => { t[MODULE] = M(t).split("'mounts-field-hint'").join("'mounts-hint'"); });
   reddens('_mountsDialog renders its own fields again', 'delegates to the shared renderer', (t) => { t[MOUNTS] = t[MOUNTS].replace(/const ctx = mountsDialog\(/, 'const ctx = localRender('); });
   // chunk 3: the channel side

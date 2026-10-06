@@ -69,6 +69,7 @@
  * patched-copy control).
  */
 
+const { capsOf } = require('./backend-caps.js'); // PURE → PURE: caps.terminalOnly (a plain shell has no agent to reach)
 const LEVELS = Object.freeze(['hidden', 'exposed']);
 const RANK = Object.freeze({ hidden: 0, exposed: 1 });
 const PRINCIPAL_KINDS = Object.freeze(['session', 'group', 'everyone']);
@@ -347,7 +348,7 @@ function pickerModel({ sessions = [], groups = [], record = null, principals = n
   const out = { everyone: { checked: !!allRow, by: allRow ? allRow.by : null }, sessions: [], groups: [], others: [], mode: rec.mode };
   const seen = new Set([principalKey({ kind: 'everyone', id: EVERYONE_ID })]);
   for (const s of Array.isArray(sessions) ? sessions : []) {
-    if (!s || !s.id || s.backend === 'shell') continue;
+    if (!s || !s.id || capsOf(s.backend).terminalOnly) continue;
     const key = sessionKeyOf(s, s.id);
     if (seen.has('session\u0000' + key)) continue;
     seen.add('session\u0000' + key);
@@ -412,7 +413,7 @@ function launchSummary({ touched = false, choice = null, proposal = null, roster
 function principalsNow(principals, roster) {
   const live = new Map();
   for (const s of roster && Array.isArray(roster.sessions) ? roster.sessions : []) {
-    if (!s || !s.id || s.backend === 'shell') continue;
+    if (!s || !s.id || capsOf(s.backend).terminalOnly) continue;
     for (const k of callerKeys(s, s.id)) if (!live.has(k)) live.set(k, s);
   }
   const listed = new Map();

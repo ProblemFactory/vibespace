@@ -1,56 +1,40 @@
 {
  "harness": {
-  "server.js": 2,
-  "src/accounts.js": 6,
-  "src/acp-message-manager.js": 1,
+  "server.js": 1,
+  "src/accounts.js": 2,
   "src/agentd/agentd.js": 2,
-  "src/backend-caps.js": 4,
   "src/claude-lock-capture.js": 2,
   "src/codex-session-store.js": 1,
   "src/exit-facts.js": 1,
-  "src/harness-settings.js": 3,
-  "src/hosts.js": 5,
+  "src/hosts.js": 4,
   "src/ledger-slot-backfill.js": 2,
-  "src/lib/agent-meta.js": 4,
-  "src/lib/app.js": 6,
-  "src/lib/browser-profile-picker.js": 1,
-  "src/lib/browser-who-model.js": 1,
+  "src/lib/app.js": 3,
   "src/lib/chat-view.js": 4,
   "src/lib/manage-agents.js": 10,
   "src/lib/permission-mode-labels.js": 2,
   "src/lib/session-card.js": 1,
-  "src/lib/session-lifecycle.js": 4,
+  "src/lib/session-lifecycle.js": 2,
   "src/login-state.js": 1,
   "src/machine-probes.js": 1,
   "src/opencode-serve.js": 1,
-  "src/reading-repair.js": 3,
-  "src/record-shape.js": 5,
+  "src/reading-repair.js": 1,
   "src/routes/sessions.js": 2,
-  "src/server/account-usage-routes.js": 3,
-  "src/server/auto-cli-loop.js": 1,
   "src/server/backend-status-route.js": 3,
-  "src/server/boot-restore.js": 4,
-  "src/server/cli-env.js": 2,
+  "src/server/boot-restore.js": 3,
   "src/server/jobs-wiring.js": 1,
   "src/server/mounts-plugins-wiring.js": 2,
   "src/server/permission-rules.js": 1,
-  "src/server/stdout/acp-events.js": 1,
-  "src/server/window-request.js": 1,
-  "src/server/window-targets-engine.js": 2,
   "src/session-store.js": 1,
   "src/transcript-service.js": 1,
-  "src/usage-anchors.js": 1,
   "src/usage-cache-write.js": 2,
-  "src/usage-history.js": 6,
-  "src/usage-index-model.js": 3,
+  "src/usage-history.js": 5,
+  "src/usage-index-model.js": 1,
   "src/usage-origin-backfill.js": 1,
-  "src/usage-routes.js": 5,
+  "src/usage-routes.js": 3,
   "src/weekly-lanes-unfold.js": 2,
-  "src/window-reach.js": 2,
-  "src/ws-handler.js": 4
+  "src/ws-handler.js": 1
  },
  "channel": {
-  "src/lib/sidebar-mounts.js": 8,
   "src/preset-layers.js": 1
  },
  "display": {
@@ -65,15 +49,8 @@
  },
  "plugin": {},
  "appkind": {
-  "src/app-manifest.js": 4,
-  "src/app-serve.js": 11,
   "src/app-system-serve.js": 1,
-  "src/app-system.js": 1,
-  "src/lib/app-install-dialog.js": 4,
-  "src/server/apps-engine.js": 6
+  "src/app-system.js": 1
  },
- "mount": {
-  "src/lib/mounts-dialog.js": 1,
-  "src/lib/sidebar-mounts.js": 43
- }
+ "mount": {}
 }

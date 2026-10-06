@@ -3,6 +3,7 @@
 // facts, the hooks are this provider's branches of MountManager's generic lifecycle, called with the manager `x`
 // (its key, its statics, its engines); the fact predicates (label / adopts / oauthBacked / rootMayBeDenied) get the class `MM`. Moved verbatim from src/mounts.js's per-type switches (lane dc-mount-providers).
 'use strict';
+const i18nKey = (s) => s; // extraction marker (scripts/i18n-extract.mjs) — the client words it through tr()
 
 module.exports = {
   id: 'onedrive',
@@ -106,5 +107,34 @@ module.exports = {
     if (!holder.driveId) {
       try { await x._resolveOneDriveDrive(holder); x._save(); } catch {}
     }
+  },
+  // the CLIENT cells (lane dc-mount-client): pure data GET /api/mounts publishes once (`providers`); src/lib/sidebar-mounts.js
+  // renders the sidebar row, the Connect / submount / Edit dialogs and the re-authorize words from them — it names no provider
+  client: {
+    offersChild: true,   // the sidebar row's ＋ (a submount under it)
+    pick: 3, form: 4, pickLabel: 'OneDrive', tag: 'OneDrive',
+    names: { product: 'OneDrive', signin: 'Microsoft' }, signins: { onedrive: 'Microsoft' },
+    driveReauth: true,
+    widgets: [{ oauth: { tokenKey: 'onedriveToken', backend: 'onedrive', label: i18nKey('Connect OneDrive') } }],
+    submit: { map: { token: 'onedriveToken' }, orNull: { clientId: 'onedriveClientId' }, orUndef: { clientSecret: 'onedriveClientSecret' }, drop: ['onedriveToken', 'onedriveClientId', 'onedriveClientSecret'] },
+    child: { path: { key: 'remotePath', label: i18nKey('Folder path'), placeholder: 'Documents/sub' } },
+    edit: [
+      { key: 'remotePath', label: i18nKey('Folder (optional)'), placeholder: 'Documents/Projects' },
+      { key: 'driveType', label: i18nKey('Account type'), default: 'personal', type: 'select', options: [['personal', i18nKey('Personal')], ['business', i18nKey('Work / School')], ['documentLibrary', i18nKey('SharePoint library')]] },
+      { key: 'driveId', label: i18nKey('Drive ID (advanced)'), placeholder: 'b!…' },
+      { key: 'clientId', label: i18nKey('Custom OAuth client id (optional)') },
+      { key: 'clientSecret', label: i18nKey('Custom OAuth client secret') },
+      { key: 'token', label: i18nKey('OAuth token (re-run Connect OneDrive to replace)'), type: 'textarea' },
+    ],
+    editChild: [{ key: 'remotePath', label: i18nKey('Folder path'), placeholder: 'Documents/sub' }],
+    connect: [
+      { key: 'onedriveToken', label: i18nKey('OneDrive access'), type: 'textarea', placeholder: i18nKey('click "Connect OneDrive" below — no terminal needed') },
+      { key: 'driveType', label: i18nKey('Account type'), type: 'select',
+        options: [['personal', i18nKey('Personal')], ['business', i18nKey('Work / School (OneDrive for Business)')], ['documentLibrary', i18nKey('SharePoint document library')]] },
+      { key: 'remotePath', label: i18nKey('Folder (optional, blank = whole drive)'), placeholder: 'Documents/Projects' },
+      { key: 'driveId', label: i18nKey('Drive ID (advanced — a specific/shared drive)'), placeholder: 'b!… (blank = your main drive)', advanced: true },
+      { key: 'onedriveClientId', label: i18nKey('Custom OAuth client ID (optional — own Azure app)'), placeholder: i18nKey('leave blank to use the built-in client'), advanced: true },
+      { key: 'onedriveClientSecret', label: i18nKey('Custom OAuth client secret (optional)'), type: 'password', advanced: true },
+    ],
   },
 };

@@ -21,6 +21,7 @@
  * (file, 'deliver-ladder'); the reason literal below is what its reason table reads.
  */
 const R = require('../window-reach.js');
+const { capsOf } = require('../backend-caps.js'); // PURE: caps.terminalOnly (no agent to reach)
 const { liveForkPending } = require('../claude-lock-capture.js');   // verify r5: a pending fork's id is its parent's — never a delivery target
 
 /** Who the message is from, as the agent's card and the stash name it (a stored string — English, never t()). */
@@ -43,7 +44,7 @@ function create({ engine, deliver = null, activeSessions = null, now = Date.now,
     const view = engine.reachOf(handle);
     if (!view) throw namedError('not-found', `no desktop-app window ${JSON.stringify(String(handle || ''))} is live on this machine`);
     const s = sessionsMap().get(String(sessionId || ''));
-    if (!s || s.backend === 'shell') throw namedError('not_live', 'that agent session is not live any more — pick another one');
+    if (!s || capsOf(s.backend).terminalOnly) throw namedError('not_live', 'that agent session is not live any more — pick another one');
     const cid = s.backendSessionId || s.claudeSessionId || null;
     if (!cid) throw namedError('no_conversation', `${s.name || sessionId} has no conversation yet — say something to it first, then ask again`);
     // verify r5 (channel-withdraw): a BORROWED id (a fork that has not announced its own conversation id) is not a

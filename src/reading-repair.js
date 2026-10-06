@@ -35,6 +35,7 @@
 const fs = require('fs');
 const path = require('path');
 const { accountLoginState } = require('./login-state.js');
+const { oauthUsageAccount } = require('./backend-caps.js'); // PURE: caps.oauthUsage — the accounts a reading can land on
 
 function _readJson(f) { try { return JSON.parse(fs.readFileSync(f, 'utf-8')); } catch { return null; } }
 function _writeAtomic(f, text) { fs.writeFileSync(f + '.tmp', text); fs.renameSync(f + '.tmp', f); }
@@ -1254,8 +1255,8 @@ function repairSidecarsByApiPhase({ dataDir, roster = null, accounts = null, id 
   // receive a reading (the same three rules the by-window repair applies).
   const rec = (k) => (accounts || []).find((a) => a && a.id === k) || null;
   let ids = roster;
-  if (!ids && accounts) ids = accounts.filter((a) => a && a.id && a.type === 'subscription' && (a.backend || 'claude') === 'claude').map((a) => a.id);
-  ids = (ids || []).filter((k) => { const a = rec(k); return !a || (a.type === 'subscription' && (a.backend || 'claude') === 'claude'); });
+  if (!ids && accounts) ids = accounts.filter((a) => a && a.id && oauthUsageAccount(a)).map((a) => a.id);
+  ids = (ids || []).filter((k) => { const a = rec(k); return !a || oauthUsageAccount(a); });
   const nameOf = (k) => (rec(k) && rec(k).name) || k;
   const report = { id, at: now, ms: 0, identities: [], counts: { evidence: 0, noEvidence: 0, stamped: 0, restamped: 0, confirmed: 0, kept: 0, replaced: 0, emptied: 0, stripped: 0, readmitted: 0 } };
   const archived = [];

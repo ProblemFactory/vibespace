@@ -24,7 +24,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
@@ -618,41 +618,96 @@ console.log('§D019 design 019 — reconcileIndex (the index follows root), dedu
   const runF = (...a) => { const r = spawnSync('sh', [shF, ...a], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: path.join(dirF, 'home') } }); return (r.stdout || '') + (r.stderr || ''); };
   ok(/= refused bad-id/.test(runF(appsF, 'forget', '-x', 'abcdefgh1', '--')) && /= refused bad-args/.test(runF(appsF, 'forget', 'hello', 'abcdefgh1', '--', 'other')) && /= run hello abcdefgh1 forget\n= refused not-root/.test(runF(appsF, 'forget', 'hello', 'abcdefgh1', '--')), 'the script: forget with a bad id / an extra argument is refused before root; valid arguments reach the root check (nothing touched here)');
 }
-console.log('§kinds a NEW app kind is ONE row of src/app-kinds.js (lane dc-apps-rows, F-A1/F-A2/F-A3): a fake member drives the real consumers');
+console.log('§kinds a NEW app kind is its OWN FILE + ONE line of src/app-kinds/index.js (lanes dc-apps-rows, dc-app-kinds): a fake member drives the real consumers');
 {
-  // the fake members: ONE registration line each in a copy of src/app-kinds.js; the REAL consumers are loaded fresh over it
-  // (the copy seeded as src/app-kinds.js in the require cache) — nothing else is edited
-  const KSRC = fs.readFileSync(path.join(repo, 'src/app-kinds.js'), 'utf8');
-  const ANCHOR = "  row({ id: 'forget', plan: true }),\n";
-  const LINE = "  row({ id: 'acme-root', entry: 'root', plan: true, request: true, agent: true, sysView: true }), row({ id: 'acme', entry: 'home', cliWord: 'acme', addArgv: ['acme', 'get'], removeArgv: ['acme', 'drop'] }),\n";
-  ok(KSRC.includes(ANCHOR), '§kinds the registration anchor is the table itself');
-  const K2 = MUT.load('src/app-kinds.js', KSRC.replace(ANCHOR, ANCHOR + LINE), 'fake-kind');
-  const realK = require.resolve('../src/app-kinds.js');
-  const over = (kx, rels, srcOf = {}) => { // load `rels` fresh with `kx` standing in for src/app-kinds.js (patched copies by `srcOf`)
+  // the fake members: a kind file in a scratch dir + ONE registration line in a copy of src/app-kinds/index.js; the REAL
+  // consumers (manifest, card, engine, machine half, dialog, CLI) are loaded fresh over it — nothing else is edited
+  const http = require('node:http');
+  const KDIR = myDir('acme-kind');
+  fs.writeFileSync(path.join(KDIR, 'acme.js'), `'use strict';
+async function planner(c) { const { p, f, kind, canRun, ret } = c; return ret({ ok: true, code: null, error: null, canRun, kind, mode: 'acme', entryId: 'acme-x', packages: [String(p.thing || '')], closure: [], closureKey: 'acme', newCount: 0, upgradeCount: 0, downloadBytes: 0, installedBytes: 0, origins: [], commands: ['# acme gets ' + p.thing + ' on ' + (f.platform || '?')] }); }
+const record = (e, { isObj, str }) => (isObj(e.acme) ? { acme: { tag: str(e.acme.tag, 20) } } : (e.acme ? { error: 'an acme entry carries {tag}' } : null));
+const requestOf = (x, { kind }) => (/^[a-z]{1,20}$/.test(String(x.thing || '')) ? { ok: true, request: { kind, thing: String(x.thing) } } : { ok: false, code: 'bad_name', error: 'name the acme thing' });
+module.exports = Object.freeze([
+  Object.freeze({ id: 'acme-root', entry: 'root', plan: true, request: true, agent: true, sysView: true, closurePlan: true, doing: 'acme-ing', planner, record, requestOf,
+    dialogTitle: (t, machine) => t('Install a .deb file on {machine}', { machine }) + ' [acme]', dialogRows: (plan, line) => { line('acme rows: ' + plan.packages.join(' '), 'app-plan-mono'); }, entryNote: () => 'from acme' }),
+  Object.freeze({ id: 'acme', entry: 'home', cliWord: 'acme', addArgv: Object.freeze(['acme', 'get']), removeArgv: Object.freeze(['acme', 'drop']) }),
+]);
+`);
+  const realK = require.resolve('../src/app-kinds/index.js');
+  const KSRC = fs.readFileSync(realK, 'utf8');
+  const ANCHOR = "  require('./installer.js'),\n";
+  const LINE = `  ...require(${JSON.stringify(path.join(KDIR, 'acme.js'))}),\n`;
+  ok(KSRC.includes(ANCHOR), '§kinds the registration anchor is the index list itself');
+  const K2PATH = MUT.write('src/app-kinds/index.js', KSRC.replace(ANCHOR, ANCHOR + LINE), 'fake-kind');
+  const K2 = require(K2PATH);
+  const over = (kx, rels, srcOf = {}) => { // load `rels` fresh with `kx` standing in for src/app-kinds/index.js (patched copies by `srcOf`)
     const keys = [realK, ...rels.map((r) => require.resolve(`../${r}`))];
     const saved = keys.map((k) => require.cache[k]);
     for (const k of keys) delete require.cache[k];
     require.cache[realK] = { id: realK, filename: realK, loaded: true, exports: kx, children: [], paths: [] };
     try { return rels.map((r) => (srcOf[r] ? MUT.load(r, srcOf[r], `over-${path.basename(r, '.js')}`) : require(`../${r}`))); } finally { keys.forEach((k, i) => { if (saved[i]) require.cache[k] = saved[i]; else delete require.cache[k]; }); }
   };
-  const [A2, AC2, E2] = over(K2, ['src/app-manifest.js', 'src/app-card.js', 'src/server/apps-engine.js']);
-  const m0 = A2.emptyManifest();
-  const ent = (kind, extra = {}) => A2.validateManifest({ ...m0, entries: [{ id: `x-${kind}`, kind, packages: [], by: { kind: 'agent' }, addedAt: 1, label: 'tool', ...extra }] });
-  ok(A2.ENTRY_KINDS.includes('acme') && A2.HOME_KINDS.includes('acme') && !A2.HOME_KINDS.includes('acme-root') && ent('acme').ok && !ent('acme-root').ok && ent('acme-root', { packages: ['acme-pkg'] }).ok, '§kinds a fake home kind is an entry (its packages free); a fake ROOT kind must carry Debian packages — the manifest asked the row');
-  const rp = A2.removePlanFor({ id: 'x-acme', kind: 'acme', label: 'tool' });
-  ok(rp.ok && JSON.stringify(rp.homeArgv) === '["acme","drop","tool"]', '§kinds the fake home kind is removed by its row\'s argv (removePlanFor)', rp);
-  ok(E2.AGENT_KINDS.includes('acme-root') && E2.normRequest({ kind: 'acme-root' }, { agent: true }).ok && E2.recordOf({ kind: 'acme-root' }, { entryId: 'e1', nonce: 'n1' }, { by: { kind: 'user' } })[1].kind === 'acme-root', '§kinds the engine takes the fake root kind as a request an agent may propose, recorded as an app install of its own kind');
-  ok(AC2.cardView({ request: { kind: 'acme-root' } }).kind === 'package' && AC2.cardView({ request: { kind: 'acme-root' } }).keeps === 'replay', '§kinds THE card draws an undeclared card kind as the machine\'s packages (the default card row)');
-  // the control: the manifest with the OLD id branch restored — the fake root kind's empty package list slips through (red)
-  const MSRC = fs.readFileSync(path.join(repo, 'src/app-manifest.js'), 'utf8');
-  const NEW = "if (K.kindRow(e.kind).entry === 'root' && (!packages.length";
-  ok(MSRC.includes(NEW), '§kinds control anchor: the manifest asks the row');
-  const [Aold] = over(K2, ['src/app-manifest.js'], { 'src/app-manifest.js': MSRC.replace(NEW, "if ((e.kind === 'apt' || e.kind === 'deb') && (!packages.length") });
-  const entOld = Aold.validateManifest({ ...m0, entries: [{ id: 'x-acme-root', kind: 'acme-root', packages: [], by: { kind: 'agent' }, addedAt: 1 }] });
-  ok(entOld.ok, '§kinds CONTROL: with the old `apt || deb` branch the fake root kind passes with no packages (the row is what refuses it)');
-  // files a NEW kind touches: the table only (its planner aside — src/app-serve.js plans it)
-  const real = require('../src/app-kinds.js');
-  ok(['ENTRY_KINDS', 'HOME_KINDS'].every((n) => A[n] === real[n]) && E.REQUEST_KINDS.slice(0, real.REQUEST_KINDS.length).join() === real.REQUEST_KINDS.join() && E.AGENT_KINDS === real.AGENT_KINDS, '§kinds every kind list derives from the ONE table (manifest, engine)');
+  // a tiny document for the dialog's plan block (it builds plain elements)
+  const node = (tag) => ({ tag, className: '', textContent: '', children: [], style: {}, dataset: {}, classList: { add() { }, remove() { }, toggle() { } }, appendChild(c) { this.children.push(c); return c; }, append(...c) { this.children.push(...c); }, setAttribute() { }, addEventListener() { } });
+  const texts = (n) => [n.textContent, ...n.children.flatMap(texts)].filter(Boolean);
+  const cli = (api, args) => new Promise((resolve) => { // async: the stub API answers from this process
+    const c = spawn(process.execPath, [path.join(repo, 'data/bin/vibespace-app'), ...args], { env: { PATH: process.env.PATH, HOME: KDIR, VIBESPACE_API: api, VIBESPACE_SESSION_TOKEN: 'tok' } });
+    let stderr = ''; c.stderr.on('data', (d) => { stderr += d; }); c.stdout.resume();
+    const kill = setTimeout(() => c.kill('SIGKILL'), 20000);
+    c.on('close', (status) => { clearTimeout(kill); resolve({ status, stderr }); });
+  });
+  const DSRC = fs.readFileSync(path.join(repo, 'src/lib/app-install-dialog.js'), 'utf8');
+  const acmeLegs = async (kx, tag, idxPath) => {
+    const [A2, AC2, E2, S2] = over(kx, ['src/app-manifest.js', 'src/app-card.js', 'src/server/apps-engine.js', 'src/app-serve.js']);
+    const legs = {};
+    const m0 = A2.emptyManifest();
+    const ent = (kind, extra = {}) => A2.validateManifest({ ...m0, entries: [{ id: `x-${kind}`, kind, packages: [], by: { kind: 'agent' }, addedAt: 1, label: 'tool', ...extra }] });
+    const rec = ent('acme-root', { packages: ['acme-pkg'], acme: { tag: 'v1' } });
+    legs.records = A2.HOME_KINDS.includes('acme') && ent('acme').ok && !ent('acme-root').ok && rec.ok && rec.manifest.entries[0].acme.tag === 'v1' && !ent('acme-root', { packages: ['acme-pkg'], acme: 'x' }).ok;
+    const rp = A2.removePlanFor({ id: 'x-acme', kind: 'acme', label: 'tool' });
+    legs.removes = rp.ok && JSON.stringify(rp.homeArgv) === '["acme","drop","tool"]';
+    const nr = E2.normRequest({ kind: 'acme-root', thing: 'widget' }, { agent: true });
+    legs.requests = E2.AGENT_KINDS.includes('acme-root') && nr.ok && nr.request.thing === 'widget' && E2.normRequest({ kind: 'acme-root', thing: '1!' }, { agent: true }).code === 'bad_name' && E2.recordOf({ kind: 'acme-root' }, { entryId: 'e1', nonce: 'n1' }, { by: { kind: 'user' } })[1].kind === 'acme-root';
+    legs.card = AC2.cardView({ request: { kind: 'acme-root' } }).kind === 'package' && AC2.cardView({ request: { kind: 'acme-root' } }).keeps === 'replay';
+    const home = myDir(`acme-home-${tag}`), st = path.join(home, 'state'); fs.mkdirSync(st, { recursive: true }); fs.mkdirSync(path.join(home, 'no-lists'));
+    const runner = async (cmd, args) => (cmd === 'dpkg' && args.join(' ') === '--print-architecture' ? { code: 0, stdout: 'amd64\n', stderr: '' } : cmd === 'sudo' ? { code: 0, stdout: '', stderr: '' } : { code: 100, stdout: '', stderr: `E: unexpected ${cmd}` });
+    const ap = S2.create({ home, stateDir: st, env: () => ({ PATH: '/usr/bin:/bin', HOME: home }), log: { log() { }, warn() { } }, binOnPath: (n) => `/usr/bin/${n}`, installState: async () => ({ installing: null, lastInstall: null }), runner, isRoot: false, systemLists: path.join(home, 'no-lists'), dpkgStatus: path.join(FX, 'debian-dpkg-status.txt'), markerDir: path.join(home, 'markers'), osRelease: '/nonexistent' });
+    let pl = null; try { pl = (await ap.plan({ kind: 'acme-root', thing: 'widget' })).plan; } catch (e) { pl = { error: String(e.message || e) }; }
+    legs.plans = !!(pl && pl.ok && pl.mode === 'acme' && pl.packages[0] === 'widget' && /acme gets widget/.test(pl.commands[0]));
+    // the dialog: a copy whose ONE index import names this run's index (the fake's copy / the real one)
+    const D = await import(MUT.write('src/lib/app-install-dialog.js', DSRC.replace("from '../app-kinds/index.js'", `from ${JSON.stringify(idxPath)}`), `dialog-${tag}`, { esm: true }));
+    globalThis.document = { createElement: node };
+    try { legs.dialog = /\[acme\]/.test(D.appDialogTitle({ kind: 'acme-root' }, 'box')) && texts(D.appPlanBlock({ ...(pl && pl.ok ? pl : { kind: 'acme-root', packages: ['widget'] }), closure: [] })).some((x) => x === 'acme rows: widget'); } catch (e) { legs.dialog = false; } finally { delete globalThis.document; }
+    // the CLI reads the declared rows (GET /api/agent/apps/kinds) — it accepts / refuses by them
+    const srv = http.createServer((q, s) => { s.setHeader('content-type', 'application/json'); s.end(q.url.startsWith('/api/agent/apps/kinds') ? JSON.stringify({ kinds: kx.kindsView() }) : '{"error":"nope"}'); });
+    await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    const api = `http://127.0.0.1:${srv.address().port}`;
+    const acc = await cli(api, ['add', '--kind', 'acme', 'tool', '--why', 'w']);
+    const ref = await cli(api, ['add', '--kind', 'nope', 'tool']);
+    srv.close();
+    legs.cliSaid = `${acc.status} ${acc.stderr.slice(0, 160)} | ${ref.status} ${ref.stderr.slice(0, 120)}`;
+    legs.cli = acc.status !== 2 && /acme/.test(acc.stderr) && ref.status === 2 && /--kind uv\|npm\|acme /.test(ref.stderr);
+    legs.lists = kx.kindsView().some((r) => r.id === 'acme-root' && r.doing === 'acme-ing' && !('planner' in r));
+    return legs;
+  };
+  const got = await acmeLegs(K2, 'fake', K2PATH);
+  for (const [k, v] of Object.entries(got)) if (k !== 'cliSaid') ok(v, `§kinds the fake kind ${k}: its own file + ONE index line, the real consumer asks its row`, k === 'cli' ? got.cliSaid : undefined);
+  // CONTROL 1: the fake row removed (the real index) — every acme leg goes red
+  const ctl = await acmeLegs(require(realK), 'real', realK);
+  // (the card leg is the DEFAULT card row — it draws any undeclared kind, so it is no member leg)
+  ok(Object.entries(ctl).every(([k, v]) => k === 'cliSaid' || k === 'card' || !v), '§kinds CONTROL: without the index line every acme leg is red', ctl);
+  // CONTROL 2: a literal kind branch planted back in the machine half — the §78 ratchet sees the rise
+  const IB = await import('./id-branch-census.mjs');
+  const baseIB = JSON.parse(fs.readFileSync(path.join(repo, 'scripts/fixtures/id-branch-baseline.json'), 'utf8'));
+  const ASRC = fs.readFileSync(path.join(repo, 'src/app-serve.js'), 'utf8');
+  const PLANT = "    if (planRow.planner) return planRow.planner(";
+  ok(ASRC.includes(PLANT), '§kinds control anchor: the machine half dispatches on the row');
+  const planted = IB.census(repo, { files: ['src/app-serve.js'], read: () => ASRC.replace(PLANT, "    if (kind === 'deb') return null;\n" + PLANT) });
+  const jr = IB.judge({ appkind: baseIB.appkind || {} }, { appkind: planted.counts.appkind });
+  ok(jr.rises.some((r) => r.file === 'src/app-serve.js'), '§kinds CONTROL: a planted `kind === \'deb\'` branch in src/app-serve.js is a §78 appkind rise', jr);
+  const real = require('../src/app-kinds/index.js');
+  ok(['ENTRY_KINDS', 'HOME_KINDS'].every((n) => A[n] === real[n]) && E.REQUEST_KINDS.slice(0, real.REQUEST_KINDS.length).join() === real.REQUEST_KINDS.join() && E.AGENT_KINDS === real.AGENT_KINDS, '§kinds every kind list derives from the ONE index (manifest, engine)');
 }
 for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 8 })) ok(r.pass, '§tree ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 console.log(`\n${fail ? `${fail} FAILED` : 'ALL PASS'} (${pass}) in ${Date.now() - T0} ms`);
