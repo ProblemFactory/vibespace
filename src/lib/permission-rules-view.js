@@ -70,7 +70,6 @@ export function renderInto(el, record) {
 }
 
 /** The one-line summary a collapsed row shows. */
-export function summaryLine(record) { return ruleTreeSummary(record, { t }); }
 
 /**
  * Load + render, with an honest in-flight state. HUMAN-TRIGGERED by every
@@ -165,7 +164,3 @@ export async function runLocalOracle({ id, label, accountId = '', accountName = 
 }
 
 /** Does this backend have a rule surface at the given scope? (chrome gate) */
-export function hasRuleSurface(backend, scope = 'session') {
-  const c = permissionRulesCaps(backend);
-  return !!c.source && (scope === 'instance' ? !!c.instance : !!c.session);
-}

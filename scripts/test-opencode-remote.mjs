@@ -37,7 +37,7 @@ const SCRIPT = read('data/bin/vibespace-opencode-op');
 console.log('\n— THE OP TABLE IS ONE DEFINITION —');
 {
   const names = remote.OPENCODE_OP_NAMES;
-  ok('the table is non-empty and frozen', names.length >= 12 && Object.isFrozen(names), names);
+  ok('the table is non-empty and frozen', names.length >= 10 && Object.isFrozen(names), names);
   // the shipped ssh script's own OPS object, parsed out of the source
   const opsBlock = SCRIPT.slice(SCRIPT.indexOf('const OPS = {'), SCRIPT.indexOf('\n};', SCRIPT.indexOf('const OPS = {')));
   // exactly-two-space indent = a top-level entry of the OPS object; anything
@@ -54,7 +54,7 @@ console.log('\n— THE OP TABLE IS ONE DEFINITION —');
     try { remote.checkOpParams('revert', { id: 'ses_a1' }); return false; } catch (e) { return /revert/.test(e.message) && /messageID/.test(e.message); }
   })());
   ok('an UNKNOWN op is refused with the known list (never a silent 500)', (() => {
-    try { remote.checkOpParams('teleport', {}); return false; } catch (e) { return /teleport/.test(e.message) && /discover/.test(e.message); }
+    try { remote.checkOpParams('teleport', {}); return false; } catch (e) { return /teleport/.test(e.message) && /revert/.test(e.message); }
   })());
   ok("the ssh script refuses an unknown op the same way", /unknown opencode op/.test(SCRIPT) && /known:/.test(SCRIPT));
   ok('every required param the table names is READ by the shipped script', requiredIn('revert').every((k) => SCRIPT.includes(`p.${k}`)) && requiredIn('answer').every((k) => SCRIPT.includes(`p.${k}`)));
@@ -67,10 +67,9 @@ console.log('\n— RESULT SHAPES —');
   const facts = serve.createFacts({ client: async () => client, ensure: async () => client, state: () => ({ ready: true, installed: true, parked: false, caps: { fork: true }, version: '1.18.29' }), invalidate: () => { } }, { log: { warn() { } } });
 
   const local = {};
-  for (const op of ['state', 'discover', 'read', 'questions', 'status', 'todos']) {
-    local[op] = await remote.runOpencodeOp(facts, op, op === 'read' || op === 'todos' ? { id: 'ses_a1' } : {});
+  for (const op of ['state', 'read', 'status']) { // discover / questions / todos left the table with their caller-less routes (lane dc-dead-sweep, 2026-10-05)
+    local[op] = await remote.runOpencodeOp(facts, op, op === 'read' ? { id: 'ses_a1' } : {});
   }
-  ok('local `discover` returns {sessions:[…]} in the entry shape the sidebar consumes', Array.isArray(local.discover.sessions) && local.discover.sessions[0]?.sessionKey?.startsWith('opencode:'), local.discover.sessions[0]);
   ok('local `read` returns {session, records}', !!local.read.session && Array.isArray(local.read.records));
   ok('local `state` reports the shape the panel reads', ['installed', 'ready', 'parked', 'version', 'liveLaneHealthy'].every((k) => k in local.state), local.state);
 
@@ -85,13 +84,9 @@ console.log('\n— RESULT SHAPES —');
     });
     child.stdin.end(JSON.stringify({ op, params }));
   });
-  const sshDiscover = await runShipped('discover');
-  ok('the SSH rung reuses a RECORDED healthy serve instead of starting one', sshDiscover.ok === true, sshDiscover);
-  const keys = (o) => Object.keys(o || {}).sort().join(',');
-  ok('…and its `discover` entries carry the SAME keys as the local rung', keys(sshDiscover.result.sessions[0]) === keys(local.discover.sessions[0]), { ssh: keys(sshDiscover.result.sessions[0]), local: keys(local.discover.sessions[0]) });
-  ok('…including the opencode sub-object', keys(sshDiscover.result.sessions[0].opencode) === keys(local.discover.sessions[0].opencode), { ssh: keys(sshDiscover.result.sessions[0].opencode), local: keys(local.discover.sessions[0].opencode) });
 
   const sshState = await runShipped('state');
+  ok('the SSH rung reuses a RECORDED healthy serve instead of starting one', sshState.ok === true, sshState);
   ok('…and `state` answers the same keys', ['installed', 'ready', 'parked', 'version', 'liveLaneHealthy'].every((k) => k in sshState.result), sshState.result);
 
   const sshRead = await runShipped('read', { id: 'ses_a1' });
@@ -103,8 +98,6 @@ console.log('\n— RESULT SHAPES —');
   const viaLocal = await layer.readConversation(null, 'ses_a1');
   ok('the hub synthesises the records ONCE for every rung (ssh === local, record for record)', JSON.stringify(viaSsh.records) === JSON.stringify(viaLocal.records), { ssh: viaSsh.records.length, local: viaLocal.records.length });
 
-  const sshQ = await runShipped('questions');
-  ok('…`questions` answers {questions:[…]}', Array.isArray(sshQ.result.questions));
   const sshRevert = await runShipped('revert', { id: 'ses_a1', messageID: 'msg_u2' });
   ok('…`revert` returns {session} with the staged roll-back, exactly like the local rung', sshRevert.result.session?.revert?.messageID === 'msg_u2', sshRevert.result.session?.revert);
   await runShipped('unrevert', { id: 'ses_a1' });
@@ -168,7 +161,7 @@ console.log('\n— RESOURCE DISCIPLINE ON SOMEONE ELSE\'S MACHINE —');
   // strip comments first: the header EXPLAINS the v2 rule, the code must not USE it
   const CODE = SCRIPT.split('\n').filter((l) => !/^\s*(\*|\/\/|\/\*)/.test(l)).join('\n');
   ok('…uses v1 routes ONLY (every /api/session/:id/… route boots an indexing instance)', !/\/api\/session/.test(CODE), (CODE.match(/.*\/api\/session.*/g) || []).slice(0, 3));
-  ok('…takes the DIRECTORY-LESS listing and never bootstraps a project on a host that is not ours', /'\/session' \+ q\(\{ limit/.test(SCRIPT) && !/scope=project/.test(SCRIPT) && !/scope: 'project'/.test(SCRIPT));
+  ok('…never asks for a project-scoped listing on a host that is not ours (the listing itself left with `discover`, lane dc-dead-sweep)', !/scope=project/.test(SCRIPT) && !/scope: 'project'/.test(SCRIPT));
   ok('…caps every response it reads into memory', /maxBytes/.test(SCRIPT));
   ok('…writes its record atomically (tmp + rename)', /renameSync/.test(SCRIPT));
   ok('…and reuses a healthy recorded serve instead of spawning per call, then SETTLES the record before anything overwrites it (round 11)',

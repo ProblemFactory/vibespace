@@ -49,8 +49,5 @@ const canSee = (lv) => RANK[lv] >= RANK.visible;
 const canMessage = (lv) => RANK[lv] >= RANK.messageable;
 
 /** Validate a stored level value (group setting / session override). */
-function validLevel(v, { allowInherit = false } = {}) {
-  return LEVELS.includes(v) || (allowInherit && v === 'inherit');
-}
 
-module.exports = { levelFor, canSee, canMessage, validLevel, RANK, LEVELS };
+module.exports = { levelFor, canSee, canMessage, RANK, LEVELS };

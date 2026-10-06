@@ -110,7 +110,6 @@ const LAUNCH_FLAGS = Object.freeze(['--executable-path', '--provider', '-p', '--
 const OPEN_FLAGS = Object.freeze(['--enable', '--init-script']);
 /** Output/format flags that pass through (documentation; an unknown flag also
  *  passes — subcommands own many: --clear, --bail, --baseline, --url …). */
-const PASS_FLAGS = Object.freeze(['--json', '--annotate', '--screenshot-dir', '--screenshot-quality', '--screenshot-format', '--content-boundaries', '--max-output', '--debug', '-i', '-c', '-d', '-s', '--full', '--load', '--text', '--url', '--fn', '--stdin', '-b', '--pin-tab', '--interactive', '--compact', '--depth', '--selector', '--input-mode', '--tags']);
 /** THE BINARY'S OWN GLOBAL FLAGS, BY ARITY — MEASURED, never read off its
  *  --help (r3). 0.32.0 strips a global flag ANYWHERE in the argv, so every
  *  decision below that names "the verb" or "the noun" is only as good as this
@@ -1246,7 +1245,7 @@ function childEnv(base, answer = {}, { home = '', uid = null, ownDir = null } = 
 }
 
 module.exports = {
-  REAL_BINARY, SHIM_MARKER, OURS, OURS_PAGE, PAGE_VERBS, REFUSED_VERBS, IDENTITY_FLAGS, RAW_CDP_FLAGS, LAUNCH_FLAGS, OPEN_FLAGS, PASS_FLAGS,
+  REAL_BINARY, SHIM_MARKER, OURS, OURS_PAGE, PAGE_VERBS, REFUSED_VERBS, IDENTITY_FLAGS, RAW_CDP_FLAGS, LAUNCH_FLAGS, OPEN_FLAGS,
   ENV_PASS, ENV_LEGACY_KEEP, SOCKET_KEY, VALUE_FLAGS: Object.freeze([...VALUE_FLAGS]), BOOL_FLAGS: Object.freeze([...BOOL_FLAGS]), GET_NOUNS,
   classify, splitWords, collisions, known, resolveRealBinary, childEnv, hostProfilePath, hostSocketDirPath,
   CONFIG_KEY, PROJECT_CONFIG_KEYS, RAW_CONFIG_KEYS, RAW_ARG_RE, sanitizeArgs, sanctionedConfig,

@@ -509,10 +509,6 @@ function unknownFieldsSample(record) {
 }
 
 /** Every declared field of a shape (known ∪ ignored), for the census legs. */
-function declaredFields(shapeKey) {
-  const s = SHAPES[shapeKey];
-  return s ? new Set([...s.known, ...s.ignored.keys()]) : null;
-}
 
 // The claude build the STREAM shapes are verified against (2.1.274 dump + the 2.1.280 additions declared
 // 2026-09-22 + the 2.1.281 additions declared 2026-09-23 — one new subtype, six fields on three shapes).
@@ -521,4 +517,4 @@ function declaredFields(shapeKey) {
 // and skipped, never a red gate nobody reads.
 const SCHEMA_CLI_VERSION = '2.1.281';
 
-module.exports = { SCHEMA_CLI_VERSION, SHAPE_SINCE, SHAPES, ENVELOPES, OURS, isOurs, CONTENT_BLOCK_TYPES, CORPUS_KNOWN, DECLARED_UPSTREAM_UNSEEN, CORPUS_ONLY_SUBTYPES, carrierOf, shapeKeyOf, unknownFields, redactRecord, unknownFieldsSample, declaredFields, isSecretKey, keySegments };
+module.exports = { SCHEMA_CLI_VERSION, SHAPE_SINCE, SHAPES, ENVELOPES, OURS, isOurs, CONTENT_BLOCK_TYPES, CORPUS_KNOWN, DECLARED_UPSTREAM_UNSEEN, CORPUS_ONLY_SUBTYPES, carrierOf, shapeKeyOf, unknownFields, redactRecord, unknownFieldsSample, isSecretKey, keySegments };

@@ -706,7 +706,6 @@ const SIDE_SOURCES = Object.freeze(['event', 'list', 'history', 'self', 'agent',
  *  the truth for the counts. */
 const SIDE_LINE_MAX_BYTES = 8 * 1024;
 const SIDE_ID_MAX = 256;
-const THREAD_USERS_MAX = 8;
 
 /** Is `k` a reaction key? Length FIRST (a 64 KiB key never reaches the regex). */
 function isReactionKey(k) { return typeof k === 'string' && k.length > 0 && k.length <= REACTION_KEY_MAX && REACTION_KEY_RE.test(k); }
@@ -885,7 +884,7 @@ module.exports = {
   safeHref, validateBlocks,
   // lane channel-threads (2026-09-28): reactions + the side log's schema and bounds
   REACTIONS_MAX, REACTION_BY_MAX, REACTION_KEY_MAX, REACTION_KEY_RE, REACTION_GLYPH_MAX, REACTION_LABEL_MAX, REACTION_COUNT_MAX,
-  CUSTOM_IMAGE_MAX, SIDE_KINDS, SIDE_FORMS, SIDE_OPS, SIDE_SOURCES, SIDE_LINE_MAX_BYTES, THREAD_USERS_MAX,
+  CUSTOM_IMAGE_MAX, SIDE_KINDS, SIDE_FORMS, SIDE_OPS, SIDE_SOURCES, SIDE_LINE_MAX_BYTES,
   isReactionKey, isReactionGlyph, validateReactions, validateSide, sideKey,
   // lane message-facts (B-f066): a message's facts — the closed types, the kinds' schema, the bounds, the validator
   FACT_TYPES, FACT_SCHEMA, FACT_KIND_NAMES, FACT_LIMITS, validateFacts,

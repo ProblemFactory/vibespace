@@ -191,9 +191,6 @@ function unregister(id) {
  *  and the engine use, so "can this session be armed / continued" is never a
  *  backend-id branch. Unknown id = the honest nothing (never a throw: this is
  *  asked about live sessions whose backend may predate the registry). */
-function autoResumeCaps(id) {
-  try { return get(id).caps.autoResume || NO_AUTO_RESUME; } catch { return NO_AUTO_RESUME; }
-}
 /** The harness's own resume verb `{form, deliver}` — null when it has none.
  *  auto-resume's fire path calls THIS; the ORCH channel arrives in `deps`. */
 function resumeVerb(id) {
@@ -201,4 +198,4 @@ function resumeVerb(id) {
 }
 
 module.exports = { HARNESSES, harnessOf, harnessIds, chatHarnessIds, REQUIRED_DESCRIPTOR_KEYS: REQUIRED, get, has, isBuiltin, list, ids, register, unregister, assertSettingsContract, assertQuotaContract, QUOTA_PROBE_RUNGS, NULL_QUOTA,
-  hasLimitSignal, assertResumeContract, autoResumeCaps, resumeVerb, AUTO_RESUME_FORMS, NO_AUTO_RESUME, SPAWN_ROWS, assertSpawnContract, spawnOf };
+  hasLimitSignal, assertResumeContract, resumeVerb, AUTO_RESUME_FORMS, NO_AUTO_RESUME, SPAWN_ROWS, assertSpawnContract, spawnOf };

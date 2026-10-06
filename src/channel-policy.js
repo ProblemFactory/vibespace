@@ -368,7 +368,6 @@ const PLACEMENTS = Object.freeze(['chat', 'quote', 'thread', 'thread+chat']);
 const THREAD_PLACEMENTS = Object.freeze(['thread', 'thread+chat']);
 /** The placements a vendor may declare as its norm for a reply to a message outside any thread. */
 const ROOT_REPLIES = Object.freeze(['quote', 'thread']);
-const PLACEMENT_WHYS = Object.freeze(['not-declared', 'parent-in-thread', 'no-replies']);
 const isThreadPlacement = (x) => THREAD_PLACEMENTS.includes(x);
 const capsThreads = (caps) => (caps && typeof caps === 'object' && caps.threads && typeof caps.threads === 'object' ? caps.threads : null);
 /**
@@ -1365,7 +1364,7 @@ module.exports = {
   canTransition, isTerminal, policyMode, policyModesOf, hasLinks, offHoursVerdict, decideOutbound, validateProposal, validateCompose, COMPOSE_MAX_RECIPIENTS, expiryVerdict, receiptFor, renderReceiptBlock,
   ACCESS_REMOVED_NOTE, withheldReceiptLine,
   REACTION_POLICIES, reactionPolicyOf, REACTION_OPS, validateReaction, reactionQuote, decideReaction,
-  PLACEMENTS, THREAD_PLACEMENTS, ROOT_REPLIES, PLACEMENT_WHYS, isThreadPlacement, placementsOf, rootReplyOf, placementOf, placementWords, placementVerdict, placementText, placementRefusalText,
+  PLACEMENTS, THREAD_PLACEMENTS, ROOT_REPLIES, isThreadPlacement, placementsOf, rootReplyOf, placementOf, placementWords, placementVerdict, placementText, placementRefusalText,
   honestyLine, withHonestyLine, canReconcile, reconcileVerdict,
   REJECTED_DEFAULT_REASON, outcomeOf, outcomeText, reconcileWhyText,
   // r6 verify (2026-09-28): what you approve is what runs — the reply's anchor (F1), its recipients (F3),

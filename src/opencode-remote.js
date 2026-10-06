@@ -39,10 +39,6 @@ const OPENCODE_OPS = {
       busySessions: v?.busySessions || 0, lastError: v?.lastError || null,
     }),
   },
-  discover: {
-    member: 'discover', required: [], build: (p) => [{ activeSessions: new Map(), budgetMs: p?.budgetMs || undefined }],
-    result: (v) => ({ sessions: Array.isArray(v) ? v : [] }),
-  },
   read: {
     member: 'readConversation', required: ['id'], build: (p) => [String(p.id), {}],
     // the records ARE the payload (the reader replays them); messages are dropped
@@ -57,11 +53,6 @@ const OPENCODE_OPS = {
   unrevert: {
     member: 'unrevert', required: ['id'], build: (p) => [String(p.id), { cwd: p.cwd || null }],
     result: (v) => ({ session: v || null }),
-  },
-  questions: {
-    member: 'pendingQuestions', required: [],
-    build: (p) => [{ sessionId: p?.sessionId || null, refresh: p?.refresh !== false }],
-    result: (v) => ({ questions: Array.isArray(v) ? v : [] }),
   },
   answer: {
     member: 'answerQuestion', required: ['requestId', 'answers'],
@@ -93,10 +84,6 @@ const OPENCODE_OPS = {
   status: {
     member: 'statusMap', required: [], build: () => [{}],
     result: (v) => ({ statuses: v && typeof v === 'object' ? v : {} }),
-  },
-  todos: {
-    member: 'todos', required: ['id'], build: (p) => [String(p.id), {}],
-    result: (v) => ({ todos: Array.isArray(v) ? v : [] }),
   },
 };
 

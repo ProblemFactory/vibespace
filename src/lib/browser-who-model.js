@@ -27,7 +27,6 @@ export const EVERYONE_KEY = 'everyone:*';
 
 /** How many chips the panel row shows before "+N more" (the phone: 2). */
 export const CHIPS_WIDE = 4;
-export const CHIPS_NARROW = 2;
 
 /** The key a list row is drawn under (the keyed reconcile's identity). */
 export function chipKeyOf(row) {

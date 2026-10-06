@@ -143,9 +143,5 @@ function accountLoginState(credsPath, { oatMintedAt = null, oatTtlMs = OAT_TTL_M
 
 /** "Believe nothing this identity produced after T." null = no such instant
  *  (the login is live, or we cannot prove when it died). */
-function lastKnownGoodAt(state) {
-  if (!state || state.state === 'live') return null;
-  return Number(state.since) || null;
-}
 
-module.exports = { loginState, accountLoginState, lastKnownGoodAt, STATES, OAT_TTL_MS };
+module.exports = { loginState, accountLoginState, STATES, OAT_TTL_MS };

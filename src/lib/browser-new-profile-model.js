@@ -15,7 +15,6 @@ import { backendName, blurbOf, learnBackendRows } from './browser-switcher-model
 const i18nKey = (s) => s;
 
 /** The closed set of a provider row's states in this dialog (first match wins, `providerChoices`). */
-export const PROVIDER_STATES = Object.freeze(['ready', 'needs-port', 'needs-key', 'needs-install', 'installing', 'install-failed', 'not-a-profile', 'other-machine', 'unavailable']);
 /** The states a person may pick. */
 export const PICKABLE = Object.freeze(['ready', 'needs-port', 'needs-key']);
 /** The closed set of a machine row's states. */

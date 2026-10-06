@@ -35,7 +35,6 @@
  * refusal at call time, never a boot failure — this wiring throws only on a
  * missing dependency of its OWN (a programming error).
  */
-const path = require('path');
 
 function install({ app, auth, vnc, keeper, DESKTOP_SINGLETON_ID, dataDir, env, activeSessions, serverSetting, broadcast, browserHandback = null, netemEnabled = false, access = null, deliver = null, groupsOf = null, log = console } = {}) {
   if (!app || !auth || !keeper || !vnc) throw new Error('window-live wiring: app, auth, vnc and keeper are required');
@@ -86,4 +85,4 @@ function install({ app, auth, vnc, keeper, DESKTOP_SINGLETON_ID, dataDir, env, a
   };
 }
 
-module.exports = { install, LEASE_FILE: require('./window-targets-engine.js').LEASE_FILE, auditPath: (dataDir) => path.join(dataDir, require('./window-targets-engine.js').AUDIT_FILE) };
+module.exports = { install, LEASE_FILE: require('./window-targets-engine.js').LEASE_FILE };

@@ -7,7 +7,7 @@
 //     live in the LAZY second esbuild entry public/doc-editor.js (src/doc-editor-entry.js), imported on the first Doc
 //     window; the main bundle's helpers are handed to it (`deps`) so it carries no second copy of utils / i18n.
 //   · Raw = the existing CodeEditor for the same file, mounted IN this window (`makeRaw`).
-import { showToast, fetchJson, createModalShell, showConfirmDialog, createPopover, uiScale } from './utils.js';
+import { showToast, fetchJson, createModalShell, showConfirmDialog, createPopover, showContextMenu, uiScale } from './utils.js';
 import { t } from './i18n.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { onFileChanged, sameFile, foldPath } from './file-changed.js';
@@ -34,7 +34,7 @@ export function openDoc(app, { host = '', path = '', from = '', syncId, intoChai
   winInfo.content.appendChild(root);
   const signal = winInfo._listenerCtl.signal;
   const makeRaw = (pane) => { const sub = Object.create(winInfo); sub.content = pane; return new CodeEditor(sub, p, name, app, { host: h }); };
-  const deps = { t, showToast, fetchJson, createModalShell, showConfirmDialog, createPopover, uiScale, onFileChanged, sameFile, makeRaw, isPhone: () => !!app.isMobile || window.innerWidth <= 768 };
+  const deps = { t, showToast, fetchJson, createModalShell, showConfirmDialog, createPopover, showContextMenu, uiScale, onFileChanged, sameFile, makeRaw, isPhone: () => !!app.isMobile || window.innerWidth <= 768 };
   loadEditor().then((mod) => { if (!signal.aborted) { root.textContent = ''; mod.mountDocWindow({ root, winInfo, host: h, path: p, name, from: from || '', signal, deps }); } },
     () => { root.textContent = t('Could not load the document editor — reload the page'); });
   winInfo.onClose = () => { try { winInfo._docClose?.(); } catch { } app._checkWelcome?.(); };

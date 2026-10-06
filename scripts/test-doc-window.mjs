@@ -122,13 +122,13 @@ const stdinTexts = () => {
 
 const FILLER = Array.from({ length: 40 }, (_, i) => `Filler line ${i + 1}.`).join('\n\n');
 const BRIEF = `# Launch brief\n\nIntro paragraph.\n\n## Goals\n\n- ship the rendered view\n- keep the agent informed\n\n## Plan\n\nParagraph P0.\n\n1. read\n2. edit\n\n> a quote\n\n\`\`\`js\nconst x = 1;\n\`\`\`\n\n## Notes\n\n${FILLER}\n`;
-const TABLE = '# Prices\n\n| item | cost |\n|------|-----:|\n| a    | 1    |\n';
+const TABLE = '# 价格\n\n| 项目 | 价格 |\n|------|-----:|\n| 苹果 | 1    |\n| 香蕉 | 2    |\n\n- [ ] 核对\n\n尾段。\n'; // lane doc-editor-wheel: a Chinese table opens RICH
 let P, TP, SIDW, CONV;
 try {
   section('§0 the throwaway server + the stub agent + the real client');
   const up = await until(async () => { try { return (await fetch(base + '/api/version')).ok; } catch { return false; } }, 60000, 300);
   if (!ok(!!up, `the throwaway server answered on :${PORT}`, journal.join('').slice(-1500))) throw new Error('no server');
-  ok(MD.docFidelity(BRIEF).ok && !MD.docFidelity(TABLE).ok, 'fixtures: the brief is lossless, the table file is not');
+  ok(MD.docFidelity(BRIEF).ok && MD.docFidelity(TABLE).ok && !MD.docFidelity(TABLE.replace(/\n/g, '\r\n')).ok, 'fixtures: the brief and the table file open rich (the wheel), a CRLF copy would not');
   ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`); const msgs = [];
   ws.on('message', (d) => { try { msgs.push(JSON.parse(d)); } catch { } });
   await new Promise((r, e) => { ws.on('open', r); ws.on('error', e); });
@@ -192,7 +192,7 @@ try {
   await ctrlS();
   const want1 = BRIEF.replace('Intro paragraph.', 'Intro paragraph. EDITED-1');
   const disk1 = await until(() => { const s = fs.readFileSync(P, 'utf8'); return s !== BRIEF ? s : null; }, 8000);
-  ok(disk1 === want1 && disk1 === DM.saveText(MD.roundTrip(want1), BRIEF), 'Ctrl+S ⇒ the file on disk is the serializer\'s output — exactly the typed line changed', disk1 && disk1.slice(0, 120));
+  ok(disk1 === want1, 'Ctrl+S ⇒ block patching: exactly the typed line changed, every other line byte-identical', disk1 && disk1.slice(0, 120));
   const st1 = await until(() => ev(`const w = ${W}; const s = w.content.querySelector('.doc-stamp').textContent; return /next turn/.test(s) ? s : null;`), 5000);
   ok(!!st1, 'the stamp says the chat sees the edit on its next turn', st1);
   const pc = await stub({ kind: 'http', method: 'GET', path: '/api/agent/prompt-context' });
@@ -255,7 +255,10 @@ try {
   const before = stdinTexts().length;
   await click(await rectIn('.doc-send'));
   const sent = await until(() => stdinTexts().slice(before).filter((t) => t.startsWith('[Doc comments]')), 8000);
-  const want = `[Doc comments] ${P}\n① "${strip[0].q}" — make this punchier\n② "${strip[1].q}" — add a date`;
+  const qOf = (x) => String(x.q).replace(/^L\d+ /, ''), lineOf = (x) => +(/^L(\d+) /.exec(x.q) || [])[1];
+  const srcL = fs.readFileSync(P, 'utf8').split('\n');
+  ok(lineOf(strip[0]) === 5 && lineOf(strip[1]) === 7 && srcL[4].includes(qOf(strip[0])) && srcL[6].includes(qOf(strip[1])), 'each comment maps to its SOURCE line (PM state + the block map): the heading → L5, the first list item → L7', strip);
+  const want = `[Doc comments] ${P}\n① L5 "${qOf(strip[0])}" — make this punchier\n② L7 "${qOf(strip[1])}" — add a date`;
   ok(!!sent && sent.length === 1 && sent[0] === want, 'Send all ⇒ exactly ONE message on the agent\'s stdin, in the contract\'s shape', sent || stdinTexts().slice(-2));
   await sleep(500);
   ok(stdinTexts().slice(before).length === 1 && (await ev(`return ${W}.content.querySelectorAll('.doc-cmt').length;`)) === 0 && !(await ev(`return localStorage.getItem('vs-doc-comments:' + '\\u0001' + ${S(P)});`)), 'one message only; the strip and its device copy are empty after');
@@ -268,12 +271,41 @@ try {
   const back = await until(() => ev(`const w = ${W}; return !w.content.querySelector('.doc-pane').hidden && w.content.querySelector('.doc-raw').hidden ? true : null;`), 5000);
   ok(!!back, 'pressed again ⇒ back to the rendered view');
 
-  section('§7 a table file opens RAW with the chip, untouched');
+  section('§7 a Chinese table opens RICH: IME into a cell, Save ⇒ only that row changes; a task toggles; the toolbar inserts a table; a comment maps to its row');
   await ev(`app.openFile(${S(TP)}, 'TABLE.md', { from: ${S(chatWin)} }); return true;`);
-  const tw = await until(() => ev(`const w = ${DW(TP)}; if (!w) return null; const c = w.content.querySelector('.doc-chip'); const cm = w.content.querySelector('.doc-raw .cm-content'); return !c.hidden && cm && cm.textContent.includes('| item |') ? { chip: c.textContent, pane: w.content.querySelector('.doc-pane').hidden } : null;`), 10000);
-  ok(!!tw && /rich editor would change — editing raw/.test(tw.chip) && /a table/.test(tw.chip) && tw.pane, 'the table file opens raw and the chip says why', tw);
-  await sleep(2500);
-  ok(fs.readFileSync(TP, 'utf8') === TABLE, 'the table file was never written');
+  const TW = DW(TP);
+  const tw = await until(() => ev(`const w = ${TW}; if (!w) return null; const pm = w.content.querySelector('.ProseMirror'); return pm && pm.querySelector('table td') ? { chip: w.content.querySelector('.doc-chip').hidden, cells: pm.querySelectorAll('td').length, tbl: !w.content.querySelector('.doc-table-btn').hidden } : null;`), 20000, 200);
+  ok(!!tw && tw.chip && tw.cells === 4 && tw.tbl, 'the table file opens RICH (no chip): a real table, the Table button in the bar', tw);
+  const cell = await rectIn('.ProseMirror tr:nth-child(2) td', TP);
+  await click({ x: cell.right - 4, y: cell.y }); await sleep(250);
+  await call('Input.imeSetComposition', { text: 'q', selectionStart: 1, selectionEnd: 1 });
+  await call('Input.imeSetComposition', { text: '青', selectionStart: 1, selectionEnd: 1 });
+  await call('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 229, nativeVirtualKeyCode: 229 }); // Enter DURING the composition (the IME's commit key)
+  await call('Input.insertText', { text: '青' });
+  await call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 });
+  await sleep(300);
+  await click(await rectIn('.doc-save-btn', TP));
+  const T1 = TABLE.replace('| 苹果 | 1    |', '| 苹果青 | 1    |');
+  const dt1 = await until(() => { const x = fs.readFileSync(TP, 'utf8'); return x !== TABLE ? x : null; }, 8000);
+  ok(dt1 === T1, 'IME into a cell (Enter mid-composition) ⇒ 青 lands ONCE in that cell, the row not split; Save ⇒ only that row changed (its padding kept), every other line byte-identical', dt1);
+  const box = await rectIn('.ProseMirror input[type="checkbox"]', TP);
+  if (!box) console.log('[doc-window] no checkbox:', await ev(`const u = ${TW}.content.querySelectorAll('.ProseMirror ul'); return [...u].map((x) => x.outerHTML.slice(0, 300)).join(' | ');`));
+  await click(box); await sleep(250);
+  await click(await rectIn('.doc-save-btn', TP));
+  const dt2 = await until(() => { const x = fs.readFileSync(TP, 'utf8'); return x !== T1 ? x : null; }, 8000);
+  ok(dt2 === T1.replace('- [ ] 核对', '- [x] 核对'), 'a task toggles ⇒ exactly its line changed on save', dt2);
+  const tail = await rectIn('.ProseMirror > p:last-child', TP);
+  await click({ x: tail.right - 2, y: tail.y }); await sleep(200);
+  await click(await rectIn('.doc-table-btn', TP)); await sleep(300);
+  await type('列一'); await sleep(200);
+  const tbls = await ev(`return ${TW}.content.querySelectorAll('.ProseMirror table').length;`);
+  await click(await rectIn('.doc-save-btn', TP));
+  const dt3 = await until(() => { const x = fs.readFileSync(TP, 'utf8'); return x !== dt2 ? x : null; }, 8000);
+  ok(tbls === 2 && !!dt3 && dt3.startsWith(dt2.replace(/\n$/, '')) && /\| 列一 \| {2}\|\n\| --- \| --- \|\n\| {2}\| {2}\|\n\| {2}\| {2}\|/.test(dt3), 'the toolbar inserts a 3×2 table (typed into its first cell) ⇒ saved as a new block after the untouched lines', { tbls, dt3 });
+  const c4 = await comment('.ProseMirror table tr:nth-child(3) td', 8, '香蕉要改', TP);
+  const s4 = await ev(`return [...${TW}.content.querySelectorAll('.doc-cmt-q')].map((e) => e.textContent);`);
+  ok(s4.some((q) => /^L6 /.test(q)), 'a comment on the 香蕉 row maps to its source line L6', { c4, s4 });
+  await ev(`const w = ${TW}; for (const x of w.content.querySelectorAll('.doc-cmt-x')) x.click(); return true;`);
   ok(pageErrors.length === 0, 'no uncaught exception in the page (desktop legs)', pageErrors.slice(0, 4));
 
   section('§8 zh at 390 px (a phone): the bar fits, 44 px targets, the strip is a bottom sheet');

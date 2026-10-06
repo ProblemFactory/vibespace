@@ -54,14 +54,14 @@ if (!fs.existsSync(path.join(repo, 'src/lib/build-version.js'))) {
 //   design — the Design window: a conversation's designs/<slug>/ artboards live on a canvas, one window per (host, dir) (lane design-window, 2026-10-02)
 //   doc — the Doc window: a markdown file read, edited and commented in one rendered view, one window per (host, path) (lane doc-window, 2026-10-05)
 const CORE_TYPES = ['browser', 'browser-live', 'browser-profiles', 'browser-replay', 'channel', 'channel-outbox', 'channels', 'chat', 'design', 'desktop', 'doc', 'desktop-app', 'editor', 'files', 'hex-viewer', 'inbox', 'integrations', 'job-interact', 'jobs',
-  'machine-desktop', 'ports', 'settings', 'stage-placeholder', 'system', 'task', 'terminal', 'usage', 'viewer', 'workflow'];
+  'machine-desktop', 'ports', 'search', 'settings', 'stage-placeholder', 'system', 'task', 'terminal', 'usage', 'viewer', 'workflow']; // + search (lane global-search)
 const CORE_ACTIONS = ['attachSession', 'openFileExplorer', 'openFile', 'openEditor', 'openBrowser', 'openBrowserLive', 'openBrowserProfiles', 'openDesktop', 'openDesktopApp',
   'openTaskDetail', 'openTaskLog', 'openJobs', 'openJobInteract', 'openUsage', 'openSettings', 'openSessionProps',
-  'openWorkflowDetail', 'attachTmuxSession', 'viewSession', 'viewSubagent', 'openChannel', 'openChannelOutbox', 'openIntegrations', 'openChannels', 'openSystem', 'openPorts', 'openInbox', 'openBrowserReplay', 'openDesign', 'openDoc'];
+  'openWorkflowDetail', 'attachTmuxSession', 'viewSession', 'viewSubagent', 'openChannel', 'openChannelOutbox', 'openIntegrations', 'openChannels', 'openSystem', 'openPorts', 'openInbox', 'openBrowserReplay', 'openDesign', 'openDoc', 'openSearch'];
 // layout.js's former `TRANSIENT_WINDOW_TYPES = new Set(['chat', 'terminal', 'stage-placeholder'])`
 const CORE_TRANSIENT = ['chat', 'terminal', 'stage-placeholder', 'machine-desktop']; // + design 014 D1: a machine's whole desktop is never re-opened by a reload (it asks the sign-in)
 // kinds whose opener focuses an existing window of the kind instead of opening a second
-const CORE_SINGLETONS = ['browser-profiles', 'channel-outbox', 'channels', 'desktop', 'inbox', 'integrations', 'jobs', 'ports', 'settings', 'system', 'usage'];
+const CORE_SINGLETONS = ['browser-profiles', 'channel-outbox', 'channels', 'desktop', 'inbox', 'integrations', 'jobs', 'ports', 'search', 'settings', 'system', 'usage'];
 
 console.log('window-type registry — functional (node, DOM-free)');
 ok(typeof document === 'undefined' && typeof window === 'undefined', 'harness has no DOM (the import below must not need one)');

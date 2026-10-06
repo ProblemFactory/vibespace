@@ -88,6 +88,18 @@ class ChatSearch {
     this._input.select();
   }
 
+  /** GLOBAL SEARCH's landing (lane global-search): open the bar on `query` and land on the match whose card id is
+   *  `<session>:<mid>` — the same server search + _jumpToSearchResult path a typed query takes (no new scroll path). */
+  async seek(query, { mid } = {}) {
+    this._bar.classList.remove('hidden');
+    this._input.value = query;
+    await this._executeSearch(query);
+    const res = this._serverSearchResults || [];
+    const i = mid && !this._fullFileMode ? res.findIndex((m) => String(m.id || '').endsWith(':' + mid)) : -1;
+    if (i > 0) { this._searchResultIdx = i; this._updateSearchStatus(); await this._jumpToSearchResult(i); }
+    return res.length;
+  }
+
   // ── Search dispatch ──
 
   _doSearch(query) {

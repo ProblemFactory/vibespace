@@ -195,7 +195,7 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
   ok('session-props billing row: pooled / codex-subscription / codex-cli are labeled, never "Unknown"', /a\.source === 'pooled' \? t\('Pooled account — \{name\}'/.test(read('src/lib/session-props.js')) && /a\.source === 'codex-subscription' \? t\('ChatGPT account — \{name\}'/.test(read('src/lib/session-props.js')) && /a\.source === 'codex-cli' \? t\('ChatGPT login \(the machine’s own\)'\)/.test(read('src/lib/session-props.js')));
   // i18n: every new human-visible string has zh + ja entries
   const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
-  const keys = ['no logged-in ChatGPT accounts', 'Hot switch unavailable — every switch restarts the session', 'All ChatGPT accounts', 'Pool set to all ChatGPT accounts (incl. future ones)',
+  const keys = ['Hot switch unavailable — every switch restarts the session', 'All ChatGPT accounts', 'Pool set to all ChatGPT accounts (incl. future ones)',
     'no target — pick a ChatGPT account in ⋯', 'Pooled account — one billing identity auto-switching across your ChatGPT accounts', 'Pooled account — {name}', 'ChatGPT account — {name}', 'ChatGPT login (the machine’s own)',
     'The pool switches between these ChatGPT accounts. Not-signed-in accounts are skipped until they log in.'];
   const missing = keys.filter((k) => !zh.includes(`"${k}":`) || !ja.includes(`"${k}":`));

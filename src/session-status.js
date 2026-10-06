@@ -379,4 +379,4 @@ const NOTICE_RENDERERS = Object.freeze({
   'browser-relaunch': (n) => '<system-reminder>\n' + require('./browser-interrupt').relaunchText({ label: n && n.label, from: n && n.from, to: n && n.to, n: n && n.n, verbs: n && n.verbs, outcome: n && n.outcome }) + '\n</system-reminder>',
 });
 
-module.exports = { SessionStatusManager, SESSION_STATES: STATES, SESSION_URGENCIES: URGENCIES, NOTICE_KINDS: Object.keys(NOTICE_RENDERERS) };
+module.exports = { SessionStatusManager, NOTICE_KINDS: Object.keys(NOTICE_RENDERERS) };

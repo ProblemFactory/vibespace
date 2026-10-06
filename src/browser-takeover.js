@@ -113,7 +113,6 @@ const INT = require('./browser-interrupt.js'); // PURE: the interruption's words
 const TBS = require('./browser-tabs.js'); // lane browser-resume C (PURE): the user's tab acts while he drove, said at the handback
 // re-exported under their own names (shorthand keeps node's CJS named-export detection whole: the client imports this file as ESM)
 const { INTERRUPTED_CODE, INTERRUPTED_TEXT, inFlightAt, openInterruption, noteRefused, closeInterruption, interruptedVerbs, interruptionView, takeoverText, rerunSentence } = INT;
-const INPUT_SIDES = Object.freeze(['agent', 'user']);
 // lane H verify r6 LOW 3: `stop` — the browser the takeover was on was STOPPED (a panel Stop while the user drove it): the
 // takeover cannot outlive its browser, so control goes back with the stop (a state change, never a delivered turn)
 // lane browser-resume B (§3.9, the owner's ruling 2): `continue` — the user's "Hand back and continue": the takeover ends and
@@ -1003,7 +1002,7 @@ function inputSummary(states, hasBrowser) {
 }
 
 module.exports = {
-  INPUT_SIDES, HANDBACK_CAUSES, TARGETS, SPEND_REASON, CONFIRM_TTL_MS, DEFAULT_TAKEOVER_IDLE_MS, MIN_TAKEOVER_IDLE_MS, POINTER_ACTIONS,
+  HANDBACK_CAUSES, TARGETS, SPEND_REASON, CONFIRM_TTL_MS, DEFAULT_TAKEOVER_IDLE_MS, MIN_TAKEOVER_IDLE_MS, POINTER_ACTIONS,
   inputKeyFor, newInputState, takeoverIdleMs, decideTakeover, decideHandback, decidePass, idleHandbackVerdict, announceVerdict,
   handbackWakes, handbackWakeEcho, // r6 A-F9: the count one explicit Hand back spends + its echo
   browserPausedRefusal, handbackText, handbackFacts, handbackNotice, renderHandbackNotice, idleInboxItem,

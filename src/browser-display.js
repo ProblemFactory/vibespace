@@ -230,7 +230,6 @@ function withSoftwareGl(args) {
 }
 
 /** `browser.noDisplayMode`: 'auto' (the hidden window where Xvfb is installed, else headless — the default) | 'headless'. */
-const NO_DISPLAY_MODES = Object.freeze(['auto', 'headless']);
 function noDisplayModeOf(v) { return v === 'headless' ? 'headless' : 'auto'; }
 
 /** Does a display verdict / fact say this machine has NO desktop session (no live Wayland or X socket)? */
@@ -371,6 +370,6 @@ module.exports = {
   DISPLAY_KINDS, X11_DIR, OZONE_PREFIX, DISPLAY_PLATFORMS,
   runtimeDirOf, parseX11Display, displayCandidates, displayVerdict,
   argsList, ozonePlatformsOf, ozoneOf, withoutDisplayOzone, withOzone, SOFTWARE_GL_ARGS, withSoftwareGl,
-  NO_DISPLAY_MODES, noDisplayModeOf, noDesktop, resolveHeaded, NO_DESKTOP_WINDOW_DEFAULT,
+  noDisplayModeOf, noDesktop, resolveHeaded, NO_DESKTOP_WINDOW_DEFAULT,
   wantedOf, launchPlan, applyPlan, displayFact, planApplies, planForFact, factCode, kindName, agentNote, journalLine,
 };

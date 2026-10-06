@@ -28,7 +28,7 @@
  *   GET  /api/vnc/status · POST /api/vnc/start   the singleton desktop's two
  *                                     routes (moved from server.js — same
  *                                     answers, one home for desktop routes)
- *   GET  /api/desktop/apps/:id/windows       P8-2: the app's windows on its display
+ *   GET  /api/desktop/apps/:id/windows       P8-2: the app's windows on its display — no client calls it: a TEST SEAM the heavy desktop suites read
  *                                     (title / class / geometry — the on-demand
  *                                     snapshot; the live title rides the picture)
  *   GET  /api/desktop/:id/xpra-ui/           P8-2, D21 (c) (a) THE VALIDATION SLICE:

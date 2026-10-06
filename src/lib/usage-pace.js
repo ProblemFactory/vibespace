@@ -1,4 +1,5 @@
 // Usage pacing — is a weekly quota bucket AHEAD of or BEHIND a linear burn?
+// KEPT, NOT WIRED (lane dc-dead-sweep, 2026-10-05): a parked feature (backlog B-87fe); no bundle imports it yet.
 // Pure functions, ZERO I/O — ported from claude-swap's pace.py (B-87fe), which
 // worked out the edge cases the hard way; this keeps their constants + guards
 // so we don't re-discover them. NO network, NO polling — it only interprets a

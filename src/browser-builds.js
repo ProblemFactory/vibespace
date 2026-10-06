@@ -37,7 +37,6 @@ const BUILD_DIR_RE = /^chrome-(\d{2,4}(?:\.\d{1,6}){2,3})$/;
 const VERSION_RE = /^\d{2,4}(?:\.\d{1,6}){2,3}$/;
 /** The listing's bound (a directory a person fills by hand stays small; a runaway one is cut, said by `cut`). */
 const BUILDS_MAX = 64;
-const CHOICE_KINDS = Object.freeze(['default', 'build', 'path']);
 /** Every refusal this module answers — a closed set the routes' STATUS table mirrors. */
 const BUILD_CODES = Object.freeze(['browser_choice_invalid', 'browser_choice_user_only', 'browser_choice_provider', 'builds_unsupported', 'builds_unreadable', 'browser_build_missing', 'browser_build_not_executable', 'browser_path_missing', 'browser_path_not_executable', 'downgrade_refused', 'downgrade_unknown',
   // lane chrome-builds-download (design 004): the download's refusals, each said by name
@@ -339,6 +338,6 @@ function versionSays(out, version) {
   return { ok: !!m && m[1] === String(version), says: m ? m[1] : null };
 }
 
-module.exports = { buildWords, missingNotice, BUILDS_REL, BUILD_DIR_RE, BUILDS_MAX, CHOICE_KINDS, BUILD_CODES, parseBuildDir, compareVersions, buildExecutable, fileFact, listBuilds, normalizeBrowserChoice, sameChoice, browserChoiceVerdict, runningBuildOf, choiceView, agentChoiceView, agentMissingView, buildsView,
+module.exports = { buildWords, missingNotice, BUILDS_REL, BUILD_DIR_RE, BUILDS_MAX, BUILD_CODES, parseBuildDir, compareVersions, buildExecutable, fileFact, listBuilds, normalizeBrowserChoice, sameChoice, browserChoiceVerdict, runningBuildOf, choiceView, agentChoiceView, agentMissingView, buildsView,
   // lane chrome-builds-download (design 004)
   CFT_CHANNELS, DOWNLOAD_PLATFORM, DISK_FACTOR, WITNESS_FILE, VERSION_RE, downloadUrlVerdict, parseLastKnownGood, parseKnownGood, majorsOf, buildCompatVerdict, downloadPlan, parseZipListing, zipShapeVerdict, versionSays };

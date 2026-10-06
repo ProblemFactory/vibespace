@@ -27,7 +27,6 @@
 export const PICK_KIND = 'design-pick';
 export const KEY_KIND = 'design-key';
 export const MODE_KIND = 'design-mode';
-export const EDIT_KIND = 'design-edit';
 
 /* eslint-disable no-var */
 export function designPicker() {

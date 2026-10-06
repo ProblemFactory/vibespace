@@ -491,9 +491,24 @@ await turn('second turn');
 {
   const out = execSync(`grep -rl -F ${J(S)} ${J(DATA)} ${J(fakeHome)} 2>/dev/null || true`, { encoding: 'utf8' }).trim().split('\n').filter(Boolean);
   const rel = out.map((f) => f.replace(DATA + '/', 'data/').replace(fakeHome + '/', '$HOME/'));
-  const declared = (f) => /^data\/channels\/msgs\/groups\/[^/]+\.ndjson$/.test(f) || /^data\/job-logs\/[^/]+\/\d+\/current\.log$/.test(f);
+  // the 2.369.221 integration (lane global-search): the search index under $HOME/.vibespace/db/<hash>/ is a TRANSCRIPT-CLASS copy
+  // (test-record-clear-census EXCEPTIONS: it re-derives from the conversation's own record). Its holder is declared by what its own
+  // reader finds: every word in its files is found by GET /api/search ONLY as a USER-side message of the seat's own conversation — what went INTO the
+  // agent: a typed turn, or a server delivery (a drained job notification, a group report) that the CLI records in its transcript
+  // (this stub keeps none, and a delivery never crosses its stdin) — and no artifact row holds one. A word that reached the index
+  // any other way (an assistant row, another conversation, an artifact, a byte no row explains) stays undeclared ⇒ red.
+  const IX = /^\$HOME\/\.vibespace\/db\/[0-9a-f]+\/search\.db(?:-wal|-shm)?$/;
+  const ixFiles = out.filter((f, i) => IX.test(rel[i]));
+  const ixWords = [...new Set(ixFiles.flatMap((f) => wordsIn(fs.readFileSync(f, 'latin1'))))];
+  // read through the index's OWN reader (the worker holds the db with locking_mode=EXCLUSIVE — a second connection reads "locked")
+  const ixHits = [];
+  for (const x of ixWords) { const r = await raw(`/api/search?q=${encodeURIComponent(x)}&limit=100`); for (const h of (r.json && r.json.hits) || []) ixHits.push({ word: x, kind: h.kind, sid: h.sid || h.sessionId || null, role: h.role || null, at: h.uuid || h.path || null, has: has(h.snippet) }); }
+  const found = new Set(ixHits.filter((h) => h.has).map((h) => h.word));   // (raw page bytes: a word at the end of a value can carry the next record byte — a found prefix counts)
+  const ixDeclared = ixHits.every((h) => h.kind === 'message' && h.sid === SID && h.role === 'user') && ixWords.every((x) => found.has(x) || [...found].some((d) => x.startsWith(d)));
+  const declared = (f) => /^data\/channels\/msgs\/groups\/[^/]+\.ndjson$/.test(f) || /^data\/job-logs\/[^/]+\/\d+\/current\.log$/.test(f) || (IX.test(f) && ixDeclared);
   const undeclared = rel.filter((f) => !declared(f));
   check(`the data dir + HOME: every file still holding a word is a DECLARED append-only holder (${rel.length} files: ${rel.join(', ')})`, !undeclared.length, undeclared);
+  check(`…the search index holds a word only in the seat's own user-side rows (${ixWords.length} word(s) in its files; GET /api/search finds them in: ${[...new Set(ixHits.map((h) => h.kind + ' ' + (h.role || '') + ' ' + h.at))].join(', ') || 'nothing'})`, !ixFiles.length || ixDeclared, { hits: ixHits, words: ixWords });
   check('…and the declared holders are exactly the group log and the run logs (the clear withholds both from every reader)', rel.some((f) => f.startsWith('data/channels/msgs/groups/')) && rel.some((f) => f.startsWith('data/job-logs/')), rel);
 }
 // the server's own journal: ids only

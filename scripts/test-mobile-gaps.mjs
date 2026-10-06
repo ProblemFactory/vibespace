@@ -371,7 +371,12 @@ try {
     return { barH: Math.round(bar.getBoundingClientRect().height), search: !!bar.querySelector('.chat-status-search'), searchBar: !!document.querySelector('.window-active .chat-search-bar'),
       chips: [...bar.querySelectorAll('.chat-status-clickable')].map((c) => ({ cls: c.className.split(' ')[0], h: Math.round(c.getBoundingClientRect().height) })) }; })()`);
   check(`every status-bar chip is ≥ 36 px tall (${chips.chips.map((c) => c.h).join('/')})`, chips.chips.length >= 3 && chips.chips.every((c) => c.h >= 36), chips);
-  check('a VIEW-ONLY window builds no ChatSearch, so it shows no magnifier either (the chip follows Ctrl+F\'s own gate)', !chips.search && !chips.searchBar, chips);
+  // 2.369.221 (lane global-search-chrome): every chat view mounts ChatSearch — Search everything lands a hit on a read-only viewer
+  // too — so the chip, which follows Ctrl+F's own gate, shows on a VIEW-ONLY window as well (before: neither)
+  check('a VIEW-ONLY window builds ChatSearch (Search everything lands there), so it shows the magnifier too (the chip follows Ctrl+F\'s own gate)', chips.search && chips.searchBar, chips);
+  await evalJs(`document.querySelector('.window-active .chat-view .chat-status-search')?.click(); true`); await sleep(250);
+  check('…and tapping it opens the view-only window\'s search bar', await evalJs(`(() => { const b = document.querySelector('.window-active .chat-view .chat-search-bar'); return !!b && !b.classList.contains('hidden') && getComputedStyle(b).display !== 'none'; })()`));
+  await evalJs(`document.querySelector('.window-active .chat-view .chat-search-close')?.click(); true`); await sleep(150);
   await evalJs(`document.querySelector('.window-active .chat-view .chat-status-model').click(); true`); await sleep(250);
   const ddRows = await evalJs(`[...document.querySelectorAll('.chat-view .chat-status-dropdown-item')].map((el) => Math.round(el.getBoundingClientRect().height))`);
   check(`the model dropdown rows are ≥ 36 px (${ddRows.join('/')})`, ddRows.length > 0 && ddRows.every((h) => h >= 36), ddRows);

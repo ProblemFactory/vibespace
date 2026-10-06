@@ -20,7 +20,6 @@
 // the door cancels, no drop). Never ends: another pointer's events (a second finger), a move with the
 // button held, the page becoming visible, anything while no drag is active (so a second end event is a no-op — the
 // drag ended ONCE).
-export const END_KINDS = Object.freeze(['release', 'cancel', 'capture-lost', 'blur', 'hidden', 'released-unseen', 'owner-gone']);
 /** The feed's event names (the control copy of window.js names the pre-fix mouse feed here). */
 export const DRAG_FEED = Object.freeze({ move: 'pointermove', up: 'pointerup', cancel: 'pointercancel', lost: 'lostpointercapture' });
 /** `body.<SHIELD_CLASS>` while a drag or a resize is in flight: every window's content is pointer-events:none

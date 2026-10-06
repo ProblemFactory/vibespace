@@ -377,9 +377,10 @@ class ChatView {
       // the server's stalled verdict on a run (2026-09-26) → the Workflow card's chip
       onWorkflowVerdict: (runId, verdict) => this._setWorkflowVerdict(runId, verdict),
       // Ctrl+F's touch face (design-mobile-gaps #4) — the same open() the key
-      // runs, and the same gate: a read-only viewer builds no ChatSearch, so
-      // it gets no chip either (a control that cannot do what it says).
-      onSearch: readOnly ? null : () => this._search?.open(),
+      // runs, and the same gate: every view builds ChatSearch since 2.369.221
+      // (Search everything lands a hit on a read-only viewer too — _mountSearch),
+      // so a read-only viewer gets the chip as well (a phone has no Ctrl+F).
+      onSearch: () => this._search?.open(),
       onJumpToAsk: () => { this.jumpToPendingAsk().catch(() => {}); }, // lane S1: the waiting chip goes to the card that waits
       // agent browser P2 (§3.8 ③): the Browser chip's three actions
       onBrowserAction: (what, ev) => this._onBrowserAction(what, ev),
@@ -906,6 +907,7 @@ class ChatView {
     // Read-only viewers: status displays but no input
     if (this._readOnly) {
       container.classList.add('chat-no-content-visibility');
+      this._mountSearch(container); // lane global-search-chrome: a dead conversation's hit lands too (ChatSearch.seek)
 
       // Minimal TODO + streaming status (no full ChatInput)
       this._todoDisplay = document.createElement('div');
@@ -1006,31 +1008,7 @@ class ChatView {
     });
     this._setupChatDrop(container);
 
-    // Search (extracted to ChatSearch)
-    this._search = new ChatSearch(this._messageList, {
-      getSessionIds: () => this._getSessionIds(),
-      getSessionId: () => this.sessionId,
-      jumpToIndex: (idx) => this.jumpToIndex(idx),
-      getWindowBounds: () => ({ windowStart: this._windowStart, windowEnd: this._windowEnd }),
-      // Huge (elided) sessions: search the WHOLE file in {line, ts} coordinates
-      getGapActive: () => !!this._gapMinimapActive,
-      jumpToFileMatch: (m) => this.jumpToFileMatch(m),
-      // a REVEAL positions the viewport without any event the message list can
-      // see — it must end the resume settle like a wheel does
-      // the revealed card stays in the accessibility tree even when a settle
-      // leaves it just outside the reader's band (_syncAxExposure)
-      onReveal: (el) => { this._axRevealEl = el; this._axRevealAt = Date.now(); },
-      onNav: () => this._noteUserNav('search-reveal'),
-    });
-    container.insertBefore(this._search.element, this._messageList);
-
-    // Ctrl+F to search
-    container.addEventListener('keydown', (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
-        e.preventDefault();
-        this._search.open();
-      }
-    });
+    this._mountSearch(container);
     container.tabIndex = -1;
     winInfo.content.appendChild(container);
 
@@ -2265,6 +2243,36 @@ class ChatView {
     try { cid = this._getSessionIds()?.backendSessionId || null; } catch { cid = null; }
     this._statusBar.setJobsHeld(cid ? heldText(digest, { t, cid }) : '');
   }
+  /** The conversation's search bar (ChatSearch) + its Ctrl+F — on EVERY chat view, a read-only history viewer too:
+   *  Search everything (src/lib/search-window.js) lands a hit through `_search.seek` on whichever view opened. */
+  _mountSearch(container) {
+    // Search (extracted to ChatSearch)
+    this._search = new ChatSearch(this._messageList, {
+      getSessionIds: () => this._getSessionIds(),
+      getSessionId: () => this.sessionId,
+      jumpToIndex: (idx) => this.jumpToIndex(idx),
+      getWindowBounds: () => ({ windowStart: this._windowStart, windowEnd: this._windowEnd }),
+      // Huge (elided) sessions: search the WHOLE file in {line, ts} coordinates
+      getGapActive: () => !!this._gapMinimapActive,
+      jumpToFileMatch: (m) => this.jumpToFileMatch(m),
+      // a REVEAL positions the viewport without any event the message list can
+      // see — it must end the resume settle like a wheel does
+      // the revealed card stays in the accessibility tree even when a settle
+      // leaves it just outside the reader's band (_syncAxExposure)
+      onReveal: (el) => { this._axRevealEl = el; this._axRevealAt = Date.now(); },
+      onNav: () => this._noteUserNav('search-reveal'),
+    });
+    container.insertBefore(this._search.element, this._messageList);
+
+    // Ctrl+F to search
+    container.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+        e.preventDefault();
+        this._search.open();
+      }
+    });
+  }
+
   _getSessionIds() {
     const allSess = this.app.sidebar?._allSessions || [];
     // Remote sessions: every history consumer (initial load, pagination,

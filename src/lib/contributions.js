@@ -120,7 +120,6 @@ export function registerCommand({ id, title, run, when, icon, signal } = {}) {
   return dispose;
 }
 
-export function unregisterCommand(id) { return COMMANDS.delete(id); }
 export function hasCommand(id) { return COMMANDS.has(id); }
 /** Read-only view of a command record ({ id, title, when, icon }) or null. */
 export function getCommand(id) {

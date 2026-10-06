@@ -526,6 +526,7 @@ const EXCEPTIONS = [
   // words already delivered
   ['agent transcripts / the CLI\'s stdin', 'what a turn was injected with, a wake delivered, a reply quoted — delivered words are the harness\'s record, out of the clear\'s reach by design — and SAID where the owner decides: the confirm dialog\'s .rc-copies line (verify r4)'],
   ['peer cards in a session window (`msg` frames)', 'emitted at delivery time from the delivery ladder; the chat view is a transcript surface'],
+  ['the search index (~/.vibespace/db/<hash>/search.db — src/server/search-index.js, lane global-search)', 'a REBUILDABLE copy of conversation transcripts (user / assistant text) and of the files agents wrote — the transcript class above: delivered words stay in the transcript and the index re-derives from it; it reads none of the five stores (scripts/test-global-search.mjs censuses that) and serves the owner only (an agent token is refused)'],
   ['incident bundles (data/incidents/*)', 'a frozen scene copies terminal / transcript tails verbatim (src/incident.js); the owner made the capture'],
   // the user's own files
   ['the repo task file (POST /api/tasks/:id/export)', 'a one-shot file written to a path the user picks (last 30 notes, no detail); the product does not track it, so no later clear can follow it'],
@@ -1872,6 +1873,7 @@ const I_RECV = {
   // design 012 (Slack S1): a typed ChannelError of the Slack adapter — its `detail` carries the vendor's error CODE and the closed `why` (src/channels/slack-words.js), never a record's text
   'src/channels/slack.js|e': ['error', 'a typed ChannelError: detail.error is Slack\'s error code, detail.why a closed word'],
   // design 011 lane 3: the usage index owner's own words — no record text reaches it
+  'src/server/search-index.js|m': ['index worker', 'the search index worker\'s own state message (a reason NAME, a SQLite error text)'],
   'src/server/usage-index.js|m': ['index worker', 'the usage index worker\'s own state message (a reason NAME, a SQLite error text)'], 'src/server/usage-index.js|a': ['index worker', 'the owner\'s own available() verdict (a reason NAME)'],
 };
 // the per-site class of every record / carrier read: `file|sink|read` → [class, why]

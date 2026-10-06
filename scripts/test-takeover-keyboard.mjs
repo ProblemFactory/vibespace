@@ -1488,7 +1488,7 @@ const CENSUS = [
   ['design-window.js', 'textarea', 'text', 'THE DESIGN COMMENT COMPOSER (Comment mode)'],
   ['desktop-app-launcher.js', 'details', 'control', 'design 009: the app install dialog\'s Details fold (the plan\'s facts, the root sentence, the commands)'],
   ['desktop-app-launcher.js', 'input', 'text+control', 'URL / command / arguments / cwd; keep-profile checkbox'],
-  ['doc-window-ui.js', 'codemirror', 'text', 'THE DOC PAGE (ProseMirror\'s EditorView: a contentEditable the user types into — lane doc-window)'],
+  ['doc-window-ui.js', 'tiptap', 'text', 'THE DOC PAGE (Tiptap v3\'s Editor over ProseMirror\'s view: a contentEditable the user types into — lane doc-window; Tiptap since doc-editor-wheel, composed at the 2.369.221 integration)'],
   ['doc-window-ui.js', 'textarea', 'text', 'a comment\'s note ("What should change?" — lane doc-window)'],
   ['machine-desktop.js', 'input', 'text', 'design 014 D1: "Run on its desktop…"\'s command box + the sign-in\'s name / password fields (a page dialog — the picture is not focused while they are)'],
   ['desktop-app-window.js', 'tabindex', 'control', 'the scale chip (role=button)'],
@@ -1522,6 +1522,8 @@ const CENSUS = [
   ['principal-picker.js', 'input', 'text', 'the picker\'s search box (type=search)'],
   ['reaction-picker.js', 'input', 'text', 'the reaction picker\'s search box (type=search, lane channel-threads)'],
   ['record-clear-ui.js', 'tabindex', 'dialog', 'the "Clear content…" confirm\'s overlay (-1, lane redact)'],
+  ['search-window.js', 'input', 'text', 'the Search everything box (type=search, lane global-search — composed at the 2.369.221 integration)'],
+  ['search-window.js', 'combobox', 'widget', 'the Search everything results (role=listbox; Enter / a click opens a hit)'],
   ['session-card.js', 'input', 'text+control', 'the per-session config input; checkboxes'],
   ['session-card.js', 'select', 'choice', 'the per-session config select'],
   ['session-palette.js', 'input', 'text', 'the Ctrl+K palette'],
@@ -1677,6 +1679,7 @@ const LIB_CTORS = [
   { kind: 'codemirror', name: 'EditorView', from: /^(?:codemirror|@codemirror\/view)$/ },
   { kind: 'xterm', name: 'Terminal', from: /^@?xterm(?:\/xterm)?$/ },
   { kind: 'novnc', name: 'RFB', from: /novnc/, dflt: true },
+  { kind: 'tiptap', name: 'Editor', from: /^@tiptap\/core$/, importedOnly: true },   // (2.369.221) `Editor` is a generic name: only the one imported from @tiptap/core
 ];
 function surfaceHits(files) {
   const codes = files.map(([f, t]) => [f, codeOnly(t)]);
@@ -1693,7 +1696,7 @@ function surfaceHits(files) {
     }
     for (const [k, re] of Object.entries(RE_KINDS)) if (re.test(c)) out.add(f + ' ' + k);
     for (const L of LIB_CTORS) {
-      const names = [L.name];
+      const names = L.importedOnly ? [] : [L.name];
       for (const m of c.matchAll(/import\s+(?:([A-Za-z_$][\w$]*)|\{([^}]*)\})\s*from\s*['"]([^'"]+)['"]/g)) {
         if (!L.from.test(m[3])) continue;
         if (m[1] && L.dflt) names.push(m[1]);
@@ -1759,6 +1762,8 @@ ok(CV.ok && HITS.size === CENSUS.length && HITS.size >= 120, `the census: ${HITS
   probe('p10.js', "import Rfb from '../../public/novnc.js';\nconst v = new Rfb(el, url);\n", ['novnc']);
   probe('p11.js', "const d = document.createElement('div'); d.setAttribute('role', 'textbox'); d.inputMode = 'numeric'; document.designMode = 'on'; const s = h.attachShadow({ mode: 'open', delegatesFocus: true }); document.execCommand('copy'); const l = '<datalist id=x>'; const c = '<div role=\"combobox\">';\n", ['textbox', 'inputmode', 'designmode', 'shadow', 'delegatesfocus', 'execcommand', 'datalist', 'combobox']);
   probe('p12.js', "const d = document.createElement(exp ? 'details' : 'div'); const s = '<summary>x</summary>'; d.setAttribute('contenteditable', 'true'); d.setAttribute('tabindex', '0');\n", ['details', 'contenteditable', 'tabindex']);
+  probe('p14.js', "import { Editor as TE } from '@tiptap/core';\nconst e = new TE({ element: host });\n", ['tiptap']);
+  probe('p15.js', "const e = new Editor({});\n", []); // an `Editor` imported from nowhere (or elsewhere) is nobody's surface
   probe('p13.js', "// <input> here\n/* <textarea> */ const x = 1; /* <select>\n<iframe> */\nconst re = /<canvas>/; const s = \"// <details>\";\n", ['canvas', 'details']); // a regex literal and a string are code; the comments are not
 }
 

@@ -160,7 +160,6 @@ function notifyFreeze(f) { for (const fn of _freezeListeners) { try { fn(f); } c
 // scale) and a screen move are the owner's two named triggers — recorded as
 // events with the numbers, and kept in a ring the snapshot carries.
 const _screenEvents = [];
-export function recentScreenEvents() { return _screenEvents.slice(); }
 function noteScreen(kind, detail) {
   _screenEvents.push({ t: Date.now(), k: kind, ...detail });
   if (_screenEvents.length > 40) _screenEvents.shift();

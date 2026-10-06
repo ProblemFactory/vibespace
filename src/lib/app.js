@@ -43,6 +43,7 @@ import { openTaskDetail as openTaskDetailFn } from './task-detail.js';
 import { openTaskLog as openTaskLogFn } from './task-log.js';
 import { openUsageWindow } from './usage-window.js';
 import { openJobsWindow, openInteractWindow } from './jobs-panel.js';
+import { openSearchWindow } from './search-window.js'; // lane global-search: Search everything (window type `search`, ⚙ Tools row, Ctrl+Shift+F)
 import { openChannelWindow } from './channel-window.js';
 import { focusChannelsPanel, openSearchResults } from './channels-panel.js';
 import { openChannelOutbox as openChannelOutboxFn } from './channel-outbox.js';
@@ -2141,6 +2142,7 @@ class App {
   openTaskLog(taskId, opts) { return openTaskLogFn(this, taskId, opts); }
   openUsage(opts) { return openUsageWindow(this, opts || {}); }
   openJobs(opts) { return openJobsWindow(this, opts || {}); }
+  openSearch(opts) { return openSearchWindow(this, opts || {}); }
   openJobInteract(jobId, opts) { return openInteractWindow(this, jobId, opts || {}); }
   openChannel(adapterId, convId, opts) { return openChannelWindow(this, adapterId, convId, opts || {}); }
   /** .212: an agent's channel search AS RESULTS — the search dialog pre-filled, scoped to one conversation or grouped. */

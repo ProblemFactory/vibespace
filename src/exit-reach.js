@@ -676,7 +676,6 @@ function summaryOf(access) {
   return { use: { mode: access.use.mode, n: access.use.who.length }, run: { mode: access.run.mode, n: access.run.who.length, ask: !!access.run.ask } };
 }
 /** Is anybody granted anything (the row's accent)? */
-const anyGrant = (access) => !isUnknown(access) && (access.use.mode !== 'nobody' || access.run.mode !== 'nobody');
 
 // ── the migration (2026-09-exit-access-lists) ───────────────────────────────
 /** ONE record: `exit` present ⇒ kept; `allowExit === true` ⇒ everyone / everyone (behaviour unchanged — every
@@ -696,7 +695,7 @@ module.exports = {
   sessionKeyOf, callerKeys, principalsNow, cmdBytes, hiddenOrderOf, askDetailOf,
   encodedCommandOf, commandHeadOf,   // lane machine-card-fold
   exitAccessOf, exitVerdict, agentView, exitStamp, exitBaseVerdict, patchVerdict, storedExit,
-  askState, answerVerdict, runRecord, resolveMachine, refusalText, cardText, cliLine, summaryOf, anyGrant, migrateExitAccess,
+  askState, answerVerdict, runRecord, resolveMachine, refusalText, cardText, cliLine, summaryOf, migrateExitAccess,
   spawnErrorOf, outputHeads, outputPreview, cardOutput, cmdFold, cleanLines, runRow, platformLabel, interpreterOf, knownInterpreter, spawnFailureText,
   TRANSFER_VERBS, TRANSFER_WINDOW_BYTES, TRANSFER_SETTING, TRANSFER_MAX_DEFAULT_MB, TRANSFER_MAX_MB, PATH_MAX_BYTES, PUSH_SINCE, PUSH_CAP,
   transferMaxOf, fmtBytes, statFacts, transferPathVerdict, transferVerdict, transferLine, transferCardText, transferCliLine, verifiedText,

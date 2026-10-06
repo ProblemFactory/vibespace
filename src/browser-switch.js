@@ -566,9 +566,7 @@ function signinDependenciesOf(host) {
   return row ? { id: row.id, vendor: row.vendor, also: row.also.filter((x) => x !== h) } : null;
 }
 /** Why a proposal offers nothing (plan `none`) — each is a plain sentence on the card, never a greyed button. */
-const PROPOSAL_NONE_WHY = Object.freeze(['remote', 'other-machine', 'already-cloak', 'install-unavailable', 'never-admitted']);
 /** Why the plan is a NEW profile rather than the in-place switch. */
-const PROPOSAL_NEW_WHY = Object.freeze(['ephemeral', 'newer-profile', 'not-switchable']);
 /** The label a new CloakBrowser profile gets (unique: `taken(label)` asked, " 2".." 9" appended). */
 function proposalLabel(sessionName, taken = () => false) {
   const base = String(sessionName || '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40);
@@ -1337,7 +1335,7 @@ module.exports = {
   testHostFor, hostOfUrl, testRequestFor,
   HINT_BY, TIERS, normalizeHost, siteHintVerdict, siteHintFor, blockedClaim, blockedText, navHint, SIGNIN_REFUSAL_ROWS, signinRefusalOf,
   SIGNIN_DEPENDENCIES, signinDependenciesOf, egressRefusedText, // verify r1 V1: the sign-in page's own sites; a refused site told to the agent
-  PROPOSAL_STATES, PROPOSAL_INSTALL, PROPOSAL_PLANS, PROPOSAL_NONE_WHY, PROPOSAL_NEW_WHY, proposalLabel, proposalInstall, proposalPlan, proposalDigest, proposalUrlOf, proposalFor, claimVerdict, proposalStep,
+  PROPOSAL_STATES, PROPOSAL_INSTALL, PROPOSAL_PLANS, proposalLabel, proposalInstall, proposalPlan, proposalDigest, proposalUrlOf, proposalFor, claimVerdict, proposalStep,
   PROPOSAL_ID_RE, SITE_RESET_ID_RE, siteResetDigest, siteResetProposalFor, siteResetClaimVerdict, siteResetCardBlock, siteResetLines, siteResetInboxItem, siteResetProposalNext, // lane site-reset step 3
   BLOCKED_KEEP_MAX, blockedRank, blockedKeep, // verify r1: the claim store's bound drops the entries nobody waits on first
   siteAdmitted, allowlistWith, rejectionText, approvedText, proposalCardBlock, proposalLines, lineText, INSTALL_WHY_WORDS, proposalInboxItem,

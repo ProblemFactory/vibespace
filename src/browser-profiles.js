@@ -2056,7 +2056,6 @@ function reconcileLeases({ leases, liveKeys, now = 0, graceMs = 0 } = {}) {
 }
 
 // ── §3.5 the keeper's verdicts ─────────────────────────────────────────────
-const BROWSER_STATES = Object.freeze(['starting', 'ready', 'stopped', 'failed']);
 const LIVE_BROWSER_STATES = Object.freeze(['starting', 'ready']);
 function isLiveBrowser(rec) { return !!rec && LIVE_BROWSER_STATES.includes(rec.state); }
 /** A browser is idle when it has NO lease: the daemon is launched with the
@@ -3248,7 +3247,7 @@ module.exports = {
   normalizeProxy, proxyPublicView, validateProfileInput, newProfileRecord, normalizeRegistry, findProfile, publicProfileView,
   SHARING_VALUES, sharingVerdict, isMediatedProfile, isEphemeralProfile, ephemeralLabel, holderRows, ephemeralPairsVerdict, pairsIdleMs, ephemeralDirOf, mayAttach, CHILD_KEY_RE, isChildKey, parentKeyOf, findLease, decideAttach, decideDetach, leasesOf, keyCarried,
   LEASE_DROP_GRACE_MS, reconcileLeases,
-  BROWSER_STATES, LIVE_BROWSER_STATES, isLiveBrowser, browserIdle, ceilingVerdict,
+  LIVE_BROWSER_STATES, isLiveBrowser, browserIdle, ceilingVerdict,
   // MULTIVIEW D4 / B-325a: the per-conversation cap + the release after the turn
   CONVERSATION_CAP_DEFAULT, CONVERSATION_CAP_MIN, CONVERSATION_CAP_MAX, clampConversationCap, conversationCapFor, conversationCapVerdict, DEFAULT_IDLE_RELEASE_MS, idleReleaseMs, idleReleaseVerdict,
   pidVerdict, adoptVerdict, attachedEnvFor, isLoopbackCdpUrl,

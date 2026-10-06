@@ -1254,6 +1254,8 @@ console.log('— §6c every kill door is declared: an actor marked before the ki
     'src/window-targets.js': [2, 'not a conversation: X helpers'],
     // the 2.369.204 integration — usage-index-shadow (on the .202 base) re-raises the server's OWN exit: at process exit the index worker is joined; past its 2 s bound the server ends itself (SIGTERM, then SIGKILL if ignored) — never a conversation
     'src/server/usage-index.js': [2, "not a conversation: the server's own exit, re-raised past the index worker's 2 s join bound (usage-index-shadow)"],
+    // the 2.369.221 integration — lane global-search's ORCH joins its index worker at process exit the same way (its own close bound)
+    'src/server/search-index.js': [1, "not a conversation: the server's own exit, re-raised past the search index worker's close bound (global-search)"],
   };
   // the actor pins: the mark is set BEFORE the kill it names (the teardown reads it; the kill case deletes the session late)
   const ACTOR_PINS = [

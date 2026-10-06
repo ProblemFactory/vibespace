@@ -1,0 +1,6 @@
+{"timestamp": "2026-10-05T10:00:00.000Z", "type": "session_meta", "payload": {"id": "0199aaaa-0000-7000-8000-00000000c0a1", "timestamp": "2026-10-05T10:00:00.000Z", "cwd": "/w/codex", "originator": "codex_cli_rs", "cli_version": "0.153.0"}}
+{"timestamp": "2026-10-05T10:00:01.000Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "codex 线程里也问了限额"}]}}
+{"timestamp": "2026-10-05T10:00:02.000Z", "type": "response_item", "payload": {"type": "reasoning", "summary": [{"type": "summary_text", "text": "zebrathought 限额"}]}}
+{"timestamp": "2026-10-05T10:00:03.000Z", "type": "response_item", "payload": {"type": "function_call", "name": "shell", "arguments": "{\"command\":[\"echo\",\"toolargword 限额\"]}", "call_id": "call_gs_1"}}
+{"timestamp": "2026-10-05T10:00:04.000Z", "type": "response_item", "payload": {"type": "function_call_output", "call_id": "call_gs_1", "output": "toolresultword 限额"}}
+{"timestamp": "2026-10-05T10:00:05.000Z", "type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "限额 lives in the codex rollout too"}]}}

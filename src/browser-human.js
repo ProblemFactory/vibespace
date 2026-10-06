@@ -36,7 +36,6 @@ const HUMAN_STATES = Object.freeze(['driving', 'away']);
  *  the profile deleted), `restart` (the server restarted: nothing of it is persisted). */
 const HUMAN_END_REASONS = Object.freeze(['released', 'left', 'stopped', 'restart']);
 /** The lifecycle's events (the table's columns). */
-const HUMAN_EVENTS = Object.freeze(['attach', 'viewer-left', 'idle', 'away-timeout', 'close', 'stop']);
 /** The keep while away when the USER launched the browser (the owner, 8: his page and the browser stay 12 h). */
 const DEFAULT_HUMAN_KEEP_MS = 12 * 60 * 60 * 1000;
 const MIN_HUMAN_KEEP_MS = 60 * 1000;
@@ -443,7 +442,7 @@ function humanStateLine(h, tIn) {
 }
 
 module.exports = {
-  HUMAN_KEY_RE, HUMAN_HOLDER, HUMAN_SYNC_PREFIX, HUMAN_STATES, HUMAN_END_REASONS, HUMAN_EVENTS, NAV_VERBS, TAB_REF_RE, REFUSAL_CODES, LAUNCH_CODES,
+  HUMAN_KEY_RE, HUMAN_HOLDER, HUMAN_SYNC_PREFIX, HUMAN_STATES, HUMAN_END_REASONS, NAV_VERBS, TAB_REF_RE, REFUSAL_CODES, LAUNCH_CODES,
   DEFAULT_HUMAN_KEEP_MS, MIN_HUMAN_KEEP_MS, HUMAN_KEEP_SETTING, TYPE_IDLE_MS, WHEEL_IDLE_MS, CLICK_SLOP_PX,
   humanKeyFor, isHumanKey, profileOfHumanKey, humanSyncId, recordsMine, humanKeepMs, keepFor,
   browseYourselfVerdict, humanStep, endReasonOf, awayExpired, humanAttachVerdict, humanEndChoices, humanHolderRow, addressVerdict, navArgv, humanTabSet, orphanTabSet, humanTabVerdict,

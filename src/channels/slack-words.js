@@ -65,7 +65,6 @@ const CREATE_WHY = Object.freeze({
   missing_scope: 'config-token-scope', not_allowed_token_type: 'config-token-scope',
   ratelimited: 'rate-limited',
 });
-const CREATE_WHYS = Object.freeze([...new Set([...Object.values(CREATE_WHY), 'app-create-refused', 'transport'])]);
 function createWhyOf(error, { status = 200 } = {}) {
   const f = failureOf(error, { status });
   if (f.code === 'rate-limited' || f.code === 'transport') return f.why;
@@ -79,7 +78,6 @@ const EXCHANGE_WHY = Object.freeze({
   invalid_client_id: 'client-invalid', invalid_client: 'client-invalid', bad_client_secret: 'client-invalid',
   ratelimited: 'rate-limited',
 });
-const EXCHANGE_WHYS = Object.freeze([...new Set([...Object.values(EXCHANGE_WHY), 'exchange-refused'])]);
 const exchangeWhyOf = (error) => (typeof error === 'string' && EXCHANGE_WHY[error]) || 'exchange-refused';
 const EXCHANGE_SENTENCE = Object.freeze({
   'code-invalid': 'the sign-in code was already used or has expired — sign in again',
@@ -118,4 +116,4 @@ function landingHtml(r = {}) {
   const lines = LANDING[kind].map((t, i) => `<p lang="${['en', 'zh', 'ja'][i]}">${escHtml(fill(t))}</p>`).join('');
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta name="referrer" content="no-referrer"><title>VibeSpace · Slack</title><style>body{font:16px/1.5 system-ui,sans-serif;max-width:36em;margin:3em auto;padding:0 1em;color:#222}</style></head><body data-landing="${kind}">${lines}</body></html>`;
 }
-module.exports = { EGRESS, WHY, WHYS, AUTH, NOT_FOUND, FORBIDDEN, TRANSPORT, CREATE_WHY, CREATE_WHYS, EXCHANGE_WHY, EXCHANGE_WHYS, failureOf, createWhyOf, exchangeWhyOf, exchangeSentenceOf, neededScopes, LANDING, landingHtml };
+module.exports = { EGRESS, WHY, WHYS, AUTH, NOT_FOUND, FORBIDDEN, TRANSPORT, CREATE_WHY, EXCHANGE_WHY, failureOf, createWhyOf, exchangeWhyOf, exchangeSentenceOf, neededScopes, LANDING, landingHtml };

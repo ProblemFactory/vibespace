@@ -166,6 +166,3 @@ export async function clearRecords(rows) {
 }
 
 /** The context-menu row every surface adds: `{label: 'Clear content…', action}`. */
-export function clearMenuItem(rowsFn) {
-  return { label: t('Clear content…'), action: () => { clearRecords(typeof rowsFn === 'function' ? rowsFn() : rowsFn); } };
-}

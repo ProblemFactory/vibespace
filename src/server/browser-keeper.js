@@ -1884,8 +1884,13 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   function noteAnswer(rec, p, answered, by) {
     if (!rec || !p || !isLocalRec(rec)) return null;
     const at = now(), pid = browserPidOf(rec);
-    const v = BS.browserAnswerVerdict(answers.get(p.id) || null, { answered, at, pidAlive: Number.isInteger(pid) && F.pidAlive(pid) });
-    if (v.next) answers.set(p.id, v.next); else answers.delete(p.id);
+    // mirror-green-220 (the .220 Actions mirror: B-47f9's slow closer judged "has not answered since …"): the asks are ONE
+    // browser process's — a closed one started again (another pid) begins a new run, never adds its misses to the dead one's;
+    // a browser the keeper KNOWS is closed (rec.closed / browserLost) or mid-relaunch (a heal in flight) is never asked
+    const known = answers.get(p.id) || null, replaced = !!known && known.pid !== pid;
+    const running = !rec.closed && !rec.browserLost && !healing.has(p.id) && Number.isInteger(pid) && F.pidAlive(pid);
+    const v = BS.browserAnswerVerdict(replaced ? null : known, { answered, at, pidAlive: running });
+    if (v.next) answers.set(p.id, { ...v.next, pid }); else answers.delete(p.id);
     const was = rec.unresponsive || null;
     if (v.state === 'unresponsive') {
       const fact = BS.unresponsiveFact(v.next);
@@ -1893,7 +1898,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       if (!was || was.since !== fact.since) { log.warn?.(`[browser] ${BS.unresponsiveLine({ id: p.id, label: p.label, since: fact.since, asks: fact.asks, pid, gpu: gpuPctOf(p.id) })}`); noticeUnresponsive(rec, p); commit(); }
     } else if (was) {
       rec.unresponsive = null; dirty = true;
-      log.log?.(`[browser] ${BS.answeredAgainLine({ id: p.id, label: p.label, since: was.since, at, by: v.state === 'closed' ? 'its process ended' : by })}`);
+      log.log?.(`[browser] ${BS.answeredAgainLine({ id: p.id, label: p.label, since: was.since, at, by: v.state === 'closed' || replaced ? 'its process ended' : by })}`);
       resolveUnresponsive(rec, 'browser-answered'); commit();
     }
     return rec.unresponsive || null;

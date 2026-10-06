@@ -11,6 +11,7 @@
 // never vendor APIs. Late-created deps arrive lazily — all uses are at runtime.
 const { classifyCliDeath } = require('./agent-tool-generators.js');
 const { feedLive } = require('../normalizers');
+const SEARCH = require('./search-index.js'); // the live door of the search index (no-op until server.js wires it)
 const { capsOf } = require('../backend-caps.js'); // streamProtocol picks the parse pipeline — never the backend id (P4)
 const { createStdoutRegistry } = require('./stdout/index.js'); // protocol → consumer (S5)
 const { exitFacts, tombExpired, awaitsWrapper, WRAPPER_SETTLE_MS, WRAPPER_SETTLE_STEP_MS } = require('../exit-facts.js'); // PURE: the exit record's facts (B-3052)
@@ -45,7 +46,8 @@ function create({ rootDir, BUFFERS_DIR, META_DIR, DTACH_CMD, USAGE_SCANNER_PATH,
   // feedLive gate) ride `stdoutHelpers` into every attach.
   const stdoutConsumers = createStdoutRegistry({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes, USAGE_SCANNER_PATH,
     checkClaudeGoalStatus, noteModelSeen, noteHarnessModels, sbSeenFirst, hosts, usageHistory, deliverRef, pagesRef, permissionRulesRef, brainRef });
-  const stdoutHelpers = { feedLive, broadcastToSession, broadcastActiveSessions, readSessionMeta, writeSessionMeta,
+  // lane global-search: the ONE live gate every consumer feeds the normalizer through also tells the search index (debounced, never throws)
+  const stdoutHelpers = { feedLive: (s, m) => { feedLive(s, m); SEARCH.noteLive(s); }, broadcastToSession, broadcastActiveSessions, readSessionMeta, writeSessionMeta,
     updateSessionTodos, applyTaskToolUpdate, emitTaskListTodos };
 // ── PTY setup helper (onData + onExit wiring) ──
 // Live TODO capture — the agent's own TodoWrite (claude) / plan tool (codex)

@@ -76,7 +76,6 @@ const RAW_TEXT = Object.freeze(['script', 'style', 'textarea', 'title', 'xmp', '
 const VOID_TAGS = Object.freeze(['br', 'col', 'hr', 'img', 'wbr']);
 /** ATTRIBUTES the output may carry (per element where it matters). */
 const ALLOWED_ATTR = Object.freeze(['href', 'src', 'alt', 'title', 'width', 'height', 'align', 'valign', 'bgcolor', 'color', 'border', 'cellpadding', 'cellspacing', 'colspan', 'rowspan', 'style', 'class', 'dir', 'lang', 'face', 'size', 'span', 'start', 'type', 'summary', 'headers', 'scope', 'nowrap', 'hspace', 'vspace', 'abbr', 'datetime', 'reversed', 'open']);
-const URL_ATTRS = Object.freeze({ href: ['a'], src: ['img'] });
 /** The ONE scheme set a link may carry (the parent re-judges on open). */
 const LINK_SCHEMES = Object.freeze(['http:', 'https:', 'mailto:']);
 /** THE QUOTED-HISTORY CONTAINERS (naive-user verify, 2026-09-28): a reply's quoted mail is FOLDED in the frame
@@ -558,7 +557,7 @@ function bodyAttachmentOf(rec) {
 module.exports = {
   MAX_HTML_BYTES, MAX_IMAGES, MAX_DATA_URL, MAX_CID_FETCH, MAX_CID_BYTES, HEIGHT_MIN, HEIGHT_MAX, LIVE_FRAME_CAP, KEEP_ZONE_PX, PLACEHOLDER_PX,
   HEIGHT_SETTLE_MS, HEIGHT_MIN_GAP_MS, HEIGHT_FLIP_CAP, HEIGHT_FLIP_WINDOW_MS, heightBudget, heightVerdict, heightPending, cssKeyframes,
-  ALLOWED_TAGS, DROP_TAGS, ALLOWED_ATTR, URL_ATTRS, LINK_SCHEMES, DATA_IMAGE_RE, DOMPURIFY_CONFIG,
+  ALLOWED_TAGS, DROP_TAGS, ALLOWED_ATTR, LINK_SCHEMES, DATA_IMAGE_RE, DOMPURIFY_CONFIG,
   decodeAttr, safeOpenHref, imageSrcVerdict, sanitizeCss, sanitizeMailHtml, cidRefs, isQuoteContainer,
   cspFor, resizerScript, composeSrcdoc, clampHeight, frameMessageVerdict,
   picturesState, picturesShown, showPictures, liveFrames, bodyAttachmentOf,

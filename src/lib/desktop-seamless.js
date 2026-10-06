@@ -18,7 +18,6 @@
 export const SEAMLESS_WHY = Object.freeze(['csd', 'user', 'setting-off', 'ssd', 'lease', 'chain', 'phone', 'disconnected']);
 /** The per-app toggle ('auto' follows the verdict; 'on' / 'off' force it) and the global setting's values. */
 export const FRAME_TOGGLES = Object.freeze(['auto', 'on', 'off']);
-export const SEAMLESS_SETTINGS = Object.freeze(['auto', 'off']);
 
 /** A window draws its own frame (CSD) ⇔ xpra says `decorations: 0` (§2.3 M3a: GNOME Calculator 0, xterm has no key). */
 export function isCsd(meta) {

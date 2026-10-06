@@ -606,11 +606,6 @@ function checkTable(table, ctx = {}) {
   return errs;
 }
 /** checkTable that THROWS (registration paths). */
-function assertTable(table, ctx) {
-  const errs = checkTable(table, ctx);
-  if (errs.length) throw new Error(`harness settings table ${table && table.prefix ? JSON.stringify(table.prefix) + ' ' : ''}invalid: ${errs.join('; ')}`);
-  return table;
-}
 
 /** THE CONFIG PLAN (design §6): self-contained, relative paths only, ONE
  *  object every machine applies with the ONE shared applier. Input = one spec
@@ -648,9 +643,8 @@ function buildConfigPlan(specs) {
   return { v: 1, files };
 }
 /** Is this a plan this applier understands? (an unknown `v` is refused) */
-function isPlan(p) { return isPlainObject(p) && p.v === 1 && Array.isArray(p.files); }
 
 module.exports = {
   HARNESS_SETTINGS, BUILTIN_PREFIXES, APPLY_KINDS, ROW_TYPES, FILE_FORMATS, SPAWN_MODES, ON_UNINSTALL, MAX_ROWS, GENERIC_LEGACY_KEYS,
-  settingPath, rowOf, rowsOfKind, coerce, refusedValue, isOff, checkRel, checkTable, assertTable, buildConfigPlan, isPlan,
+  settingPath, rowOf, rowsOfKind, coerce, refusedValue, isOff, checkRel, checkTable, buildConfigPlan,
 };

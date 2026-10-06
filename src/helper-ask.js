@@ -104,7 +104,6 @@ function helperParentOf(agentId, taskRecords) {
 // verify-r6 Z2: THE SET is src/hidden-chars.js (one answer for every approval surface) — a permission surface keeps a
 // Windows line ending (a Write's CR is not a trick) and marks everything else, joiners included
 const HC = require('./hidden-chars.js');
-const HIDDEN_CHAR_RE = HC.HIDDEN_RE;
 const HA_OPTS = Object.freeze({ allowCR: true, allowJoiners: false });
 /** The hidden characters a value holds, as `U+XXXX` codes (unique, in order of appearance; at most 32). */
 function hiddenCharsOf(value) { return HC.hiddenCharsOf(value, { ...HA_OPTS, max: 32 }); }
@@ -523,7 +522,7 @@ function answerSessionFor(data, sessions) {
 
 module.exports = {
   // verify r6: the WHOLE subject (F3), the hidden-character screen + the second press (F7)
-  askSubject, INBOX_SUBJECT_MAX, HIDDEN_CHAR_RE, hiddenCharsOf, revealParts, revealHidden, SECOND_PRESS_MS, secondPressVerdict,
+  askSubject, INBOX_SUBJECT_MAX, hiddenCharsOf, revealParts, revealHidden, SECOND_PRESS_MS, secondPressVerdict,
   HELPER_ASK_INBOX_MS, helperAskOf, askRecordOf, helperParentOf, askTarget, askState, hasPendingHelperAsk, helperLabelOf,
   pendingAsksOf, asksSignature, waitingChip, helperAskHead, helperAskSettledWords, mainAskSettledWords, inboxItemFor, inboxDueAt,
   isStopRejection, agentStatusWords, answerSessionFor, answerRefusalWords,

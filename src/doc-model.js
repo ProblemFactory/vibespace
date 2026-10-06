@@ -4,9 +4,9 @@
 // window (src/lib/doc-window.js + the lazy src/doc-editor-entry.js) judges with the SAME functions, and
 // scripts/test-doc-model.mjs reads every table below.
 //   · THE FIDELITY RULE (owner: never a silent rewrite of her or the agent's file): `rawReasons(source)` names what the
-//     rich editor does not carry (a table, raw HTML, a footnote, front matter, CRLF, a setext heading, a size past the
-//     cap); `fidelityVerdict(source, roundTripped)` compares parse → serialize to the source modulo trailing
-//     whitespace and the final newline. Either one ⇒ the window opens RAW and says why.
+//     rich editor cannot carry even block by block (CRLF, a size past the cap — each with its WHY in `RAW_WHY`) ⇒ the
+//     window opens RAW and says why. `patchBlocks` is the save: untouched blocks keep their lines byte-identical
+//     (lane doc-editor-wheel). `fidelityVerdict(source, roundTripped)` = the whole-document compare (kept for callers).
 //   · THE COMMENTS MESSAGE: `commentsText(path, items)` = `[Doc comments] <path>\n① "quoted…" — note\n② …` (a quote
 //     ≤ 200 chars, a note ≤ 1000, ≤ 20 items, the whole ≤ 4 KB UTF-8); `commentsVerdict` refuses by name.
 //   · THE EDIT NOTE: `editSummary(before, after)` = "+a −b lines; sections: <the headings whose section changed, ≤ 3>".
@@ -36,12 +36,14 @@ function proseLines(source) {
 }
 const RAW_RULES = [
   ['crlf', (s) => s.includes('\r')],
-  ['front_matter', (s) => /^(---|\+\+\+)[ \t]*\n/.test(s)],
-  ['table', (_s, prose) => prose.some(({ line }, k) => /^ {0,3}\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)+\|?\s*$/.test(line) && k > 0 && /\|/.test(prose[k - 1].line))],
-  ['html', (_s, prose) => prose.some(({ line }) => /<\/?[A-Za-z][A-Za-z0-9-]*(\s[^<>]*)?\/?>|<!--/.test(line.replace(/`[^`]*`/g, '')))],
-  ['footnote', (_s, prose) => prose.some(({ line }) => /\[\^[^\]\s]+\]/.test(line))],
-  ['setext', (_s, prose) => prose.some(({ line }, k) => k > 0 && /^ {0,3}(=+|-+)[ \t]*$/.test(line) && prose[k - 1].i === prose[k].i - 1 && prose[k - 1].line.trim() && !/^ {0,3}([-*+]|\d+[.)])\s/.test(prose[k - 1].line))],
 ];
+// THE WHY of each reason (lane doc-editor-wheel: the wheel carries tables, task lists, setext headings, footnotes,
+// front matter and raw HTML as blocks — measured over scripts/fixtures/doc-wheel/ — so only these remain), plain words.
+const RAW_WHY = Object.freeze({
+  crlf: 'it uses Windows line endings (CRLF) — a rich save would rewrite every line ending',
+  too_big: 'it is larger than 1 MB — too large for the rich editor',
+  unparsed: 'the rich editor could not read it',
+});
 /** What the rich editor would not carry → the reason codes, in RAW_RULES order ([] = none). */
 function rawReasons(source) {
   const s = String(source == null ? '' : source);
@@ -60,6 +62,62 @@ function fidelityVerdict(source, roundTripped) {
   for (let i = 0; i < Math.max(a.length, b.length); i++) if (a[i] !== b[i]) return { ok: false, code: 'lossy', line: i + 1 };
   return { ok: true };
 }
+// ── block patching (lane doc-editor-wheel) ──
+const blankLine = (x) => !/\S/.test(x);
+/** THE SAVE THAT TOUCHES ONLY WHAT CHANGED: the source, its top-level blocks' line ranges (`maps`, [start, end) 0-based,
+ *  in order) and the save plan in the new order — `{keep: k}` (block k untouched: its lines stay byte-identical) or
+ *  `{text}` (an edited / new block's markdown). A block absent from the plan is deleted with its lines; a text takes the
+ *  place of the deleted blocks it sits among, else goes in after the previous kept block; every line between blocks
+ *  (blank lines, link definitions) stays; a blank line keeps new text apart from a neighbour.
+ *  → {ok:true, text} | {ok:false, code: crlf | overlap | order | plan}. */
+function patchBlocks(source, maps, plan) {
+  const src = String(source == null ? '' : source);
+  if (src.includes('\r')) return { ok: false, code: 'crlf' };
+  const tail = /\n*$/.exec(src)[0], body = src.slice(0, src.length - tail.length), L = body ? body.split('\n') : [];
+  const B = (maps || []).map(([a, b]) => { a = Math.max(0, Math.min(a, L.length)); b = Math.max(a, Math.min(b, L.length)); while (b > a && blankLine(L[b - 1])) b--; return [a, b]; });
+  for (let k = 1; k < B.length; k++) if (B[k][0] < B[k - 1][1]) return { ok: false, code: 'overlap' };
+  const owner = new Array(L.length).fill(-1);
+  B.forEach(([a, b], k) => { for (let i = a; i < b; i++) owner[i] = k; });
+  const kept = new Set(), replaceAt = new Map(), insertAfter = new Map(); // -1 = before the first block
+  let last = -1, pending = [];
+  const flush = (upto) => { let gone = -1; for (let k = last + 1; k < upto && gone < 0; k++) gone = k; if (pending.length) (gone >= 0 ? replaceAt.set(gone, pending) : insertAfter.set(last, pending)); pending = []; };
+  for (const p of plan || []) {
+    if (p && Number.isInteger(p.keep)) { if (p.keep <= last || p.keep >= B.length) return { ok: false, code: 'order' }; flush(p.keep); kept.add(p.keep); last = p.keep; }
+    else if (p && typeof p.text === 'string') pending.push(p.text.replace(/^\n+|\n+$/g, ''));
+    else return { ok: false, code: 'plan' };
+  }
+  flush(B.length);
+  const out = []; // {t} a line · {fresh: [lines]} new text · {cut} a deleted block
+  const fresh = (texts) => { for (const x of texts) out.push({ fresh: x.split('\n') }); };
+  if (insertAfter.has(-1)) fresh(insertAfter.get(-1));
+  for (let i = 0; i < L.length;) {
+    const k = owner[i];
+    if (k < 0) { out.push({ t: L[i] }); i++; continue; }
+    if (kept.has(k)) for (let j = B[k][0]; j < B[k][1]; j++) out.push({ t: L[j] });
+    else if (replaceAt.has(k)) fresh(replaceAt.get(k));
+    else out.push({ cut: 1 });
+    i = B[k][1];
+    if (insertAfter.has(k)) fresh(insertAfter.get(k));
+  }
+  // a deleted block: blank on both sides (or a document edge) ⇒ the blank run after it goes (before it at the end)
+  const isB = (x) => x && x.t != null && blankLine(x.t);
+  for (let i = 0; i < out.length; i++) {
+    if (!out[i].cut) continue;
+    let p = i - 1; while (p >= 0 && out[p].cut) p--;
+    let n = i + 1; while (n < out.length && out[n].cut) n++;
+    if (p < 0 || (n < out.length && isB(out[p]) && isB(out[n]))) for (let j = n; j < out.length && (out[j].cut || isB(out[j])); j++) out[j] = { cut: 1 };
+    else if (n >= out.length) for (let j = p; j >= 0 && (out[j].cut || isB(out[j])); j--) out[j] = { cut: 1 };
+  }
+  const res = []; let gap = false;
+  for (const x of out) {
+    if (x.cut) continue;
+    if (x.fresh) { if (res.length && !blankLine(res[res.length - 1])) res.push(''); res.push(...x.fresh); gap = true; continue; }
+    if (gap && !blankLine(x.t)) res.push('');
+    gap = false; res.push(x.t);
+  }
+  return { ok: true, text: res.join('\n') + tail };
+}
+
 /** The text a save writes: the serializer's output with ONE final newline (the source's own ending kept when it had none). */
 function saveText(serialized, source) {
   const body = String(serialized).replace(/\n+$/, '');
@@ -74,10 +132,11 @@ function commentItem(x) {
   const quote = clip(oneLine(x.quote), LIMITS.quote);
   const note = String(x.note == null ? '' : x.note).trim();
   if (!note) return null;
-  return { quote, note: Array.from(note).length > LIMITS.note ? Array.from(note).slice(0, LIMITS.note).join('') : note };
+  const line = Number.isInteger(x.line) && x.line > 0 ? x.line : 0; // the SOURCE line the selection maps to (0 = none)
+  return { quote, ...(line ? { line } : {}), note: Array.from(note).length > LIMITS.note ? Array.from(note).slice(0, LIMITS.note).join('') : note };
 }
 function commentsText(path, items) {
-  const rows = (items || []).map(commentItem).filter(Boolean).map((c, i) => `${CIRCLED(i + 1)} ${c.quote ? `"${c.quote}" — ` : ''}${c.note.replace(/\n+/g, ' / ')}`);
+  const rows = (items || []).map(commentItem).filter(Boolean).map((c, i) => `${CIRCLED(i + 1)} ${c.line ? `L${c.line} ` : ''}${c.quote ? `"${c.quote}" — ` : ''}${c.note.replace(/\n+/g, ' / ')}`);
   return `[Doc comments] ${clip(oneLine(path), LIMITS.pathChars)}\n${rows.join('\n')}`;
 }
 /** → {ok, text, count} | {ok:false, code: empty | too_many | too_long | bad_path, why}. */
@@ -150,4 +209,4 @@ function saveVerdict({ disk = 0, base = 0, confirmed = 0 } = {}) {
   return disk && disk > base && !(confirmed && confirmed >= disk) ? 'ask' : 'write';
 }
 
-module.exports = { LIMITS, isDocPath, utf8Len, rawReasons, fidelityVerdict, saveText, commentItem, commentsText, commentsVerdict, lineDelta, sectionsOf, editSummary, conflictVerdict, saveVerdict };
+module.exports = { LIMITS, RAW_WHY, isDocPath, utf8Len, rawReasons, fidelityVerdict, patchBlocks, saveText, commentItem, commentsText, commentsVerdict, lineDelta, sectionsOf, editSummary, conflictVerdict, saveVerdict };

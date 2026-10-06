@@ -38,7 +38,6 @@
  * WAS the active viewer — the re-election's "most recently active".
  */
 
-const VIEWER_STATES = Object.freeze(['active', 'blocked', 'watch']);
 
 /** What each state may do — the table above as data (the suites read it). */
 const RELAY_RULES = Object.freeze({
@@ -140,4 +139,4 @@ function viewerLabel(ua) {
   return os ? `${browser} · ${os}` : browser;
 }
 
-module.exports = { VIEWER_STATES, RELAY_RULES, viewerState, nextActive, activeAfterJoin, viewersView, paneState, viewerLabel };
+module.exports = { RELAY_RULES, viewerState, nextActive, activeAfterJoin, viewersView, paneState, viewerLabel };

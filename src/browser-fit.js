@@ -112,12 +112,10 @@ const ZOOM_MIN = 1;
 const ZOOM_MAX = 4;
 /** A double tap on an unzoomed picture zooms to this. */
 const ZOOM_DOUBLE_TAP = 2;
-const FIT_RULES = Object.freeze(['holder', 'claimed', 'largest']);
 /** lane live-input: a view's PLACE tags (random, opaque — `page` per loaded page, `device` per browser profile of this
  *  device, localStorage) ride its pane report so a viewer can be told WHERE the page's size comes from. */
 const PLACE_TAG_RE = /^[A-Za-z0-9_-]{4,40}$/;
 /** What the bridge tells every viewer about the page's size (`{type:'fit', state, …}`). */
-const FIT_STATES = Object.freeze(['fitted', 'agent', 'restored', 'unavailable']);
 
 const posNum = (v) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : 0; };
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
@@ -514,7 +512,7 @@ function transformCss(z) { return isZoomed(z) ? `translate(${Number(z.tx) || 0}p
 
 module.exports = {
   FIT_SCALE, FIT_MIN_W, FIT_MIN_H, FIT_MAX_W, FIT_MAX_H, HEADED_MIN_W, FIT_SLACK_PX, FIT_REPORT_MS, FIT_DEBOUNCE_MS, RESTORE_AFTER_MS, OWN_WINDOW_MS,
-  FRESH_FRAME_MS, REFRESH_EVERY_MS, WAIT_PICTURE_MS, NO_PICTURE_MS, ZOOM_MIN, ZOOM_MAX, ZOOM_DOUBLE_TAP, ZOOM_NONE, FIT_RULES, FIT_STATES,
+  FRESH_FRAME_MS, REFRESH_EVERY_MS, WAIT_PICTURE_MS, NO_PICTURE_MS, ZOOM_MIN, ZOOM_MAX, ZOOM_DOUBLE_TAP, ZOOM_NONE,
   fitReport, paneViewport, fitTarget, fitVerdict, viewportArgv, agentViewportOf, deviceSizeOf, ownViewportRecord, fitHonored, fitChipState, pictureState,
   FIT_MIRROR_WAIT_MS, FIT_STALE_ASK_MS, frameJudgeVerdict, // 2.369.198: is this picture THIS fit's answer (an earlier fit's late frame / a frame before the daemon's mirror is not)
   fitChipWords, PLACE_TAG_RE, buttonStep, fitHoldVerdict, // lane live-input (+ builder r2: the driver's held buttons hold a resize): the chip's words (where the page's size comes from + what a click does); a view's place tags

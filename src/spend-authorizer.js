@@ -465,10 +465,6 @@ function spendControlState(cache, { now = Date.now(), staleMs = OVERAGE_STALE_MS
 }
 
 /** PURE. The one sentence every surface says about it. null = nothing to say. */
-function spendControlText(cache, opts = undefined) {
-  const s = spendControlState(cache, opts);
-  return s.reached === 'yes' ? 'spend control reached' : null;
-}
 
 /** PURE. THE DECISION. Everything it needs is an argument; nothing is read.
  *  @param reason      one of SPEND_REASONS
@@ -616,6 +612,6 @@ module.exports = {
   LOAD_RETENTION, RESERVE_TTL_MS, RESERVE_CAP,
   budgetLimits, emptyBudget, pruneBudget, spendCounts, stampAt, stampReason, producerCounts, producersText,
   pendingCounts, reservePending, releasePending, expirePending,
-  overageState, overageAllowed, overageText, spendControlState, spendControlText,
+  overageState, overageAllowed, overageText, spendControlState,
   authorizeUnattendedSpend, noteUnattendedSpend, refusalText, noticeText,
 };

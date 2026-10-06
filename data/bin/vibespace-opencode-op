@@ -14,7 +14,7 @@
  * `opencode-serve` agentd op on a PAIRED device both run the REAL shared
  * module. This script exists only for an ssh host with no daemon.
  *
- * USAGE:  echo '{"op":"discover","params":{}}' | node vibespace-opencode-op
+ * USAGE:  echo '{"op":"state","params":{}}' | node vibespace-opencode-op
  *         → one JSON object on stdout: {ok:true, result:{…}} | {ok:false, error:"…"}
  *
  * RESOURCE DISCIPLINE (the 2.369.42 runaway, in full force on someone else's
@@ -269,27 +269,6 @@ const OPS = {
     try { const doc = await req(port, 'GET', '/doc', { timeoutMs: 15000 }); caps = { fork: !!(doc && doc.paths && doc.paths['/session/{sessionID}/fork']) }; } catch { }
     return { installed: true, ready: true, parked: false, parkedKind: null, version, port, caps, liveLaneHealthy: false, pendingQuestions: 0, busySessions: 0, lastError: null };
   },
-  async discover(port) {
-    // RUNG 1 = the directory-less listing (boots no instance). RUNG 2 (a
-    // per-project scope query) is deliberately NOT taken here: an ssh host's
-    // project rows are not ours to bootstrap.
-    const list = await req(port, 'GET', '/session' + q({ limit: LIST_LIMIT }), { timeoutMs: 15000, maxBytes: 8 << 20 }) || [];
-    const sessions = [];
-    for (const s of list) {
-      if (!s || typeof s.id !== 'string') continue;
-      let name = typeof s.title === 'string' && !/^New session - /.test(s.title) ? s.title.trim() : '';
-      sessions.push({
-        backend: 'opencode', backendSessionId: s.id, sessionId: s.id, sessionKey: 'opencode:' + s.id,
-        cwd: s.directory || '', startedAt: (s.time && (s.time.updated || s.time.created)) || Date.now(),
-        createdAt: (s.time && s.time.created) || null, status: 'stopped', name,
-        agentKind: s.parentID ? 'subagent' : 'primary', parentThreadId: s.parentID || null,
-        webuiId: null, webuiName: null, webuiMode: null,
-        opencode: { slug: s.slug || null, agent: s.agent || null, model: s.model ? `${s.model.providerID}/${s.model.id}` : null, projectID: s.projectID || null, revert: s.revert ? { messageID: s.revert.messageID || '', files: Array.isArray(s.revert.files) ? s.revert.files.length : 0 } : null, questions: 0, busy: null },
-      });
-    }
-    sessions.sort((a, b) => b.startedAt - a.startedAt);
-    return { sessions };
-  },
   async read(port, p) {
     const [session, messages] = await Promise.all([
       req(port, 'GET', `/session/${enc(p.id)}`, { timeoutMs: 15000 }),
@@ -302,11 +281,6 @@ const OPS = {
   },
   async revert(port, p) { return { session: await req(port, 'POST', `/session/${enc(p.id)}/revert` + q({ directory: p.cwd }), { body: p.partID ? { messageID: p.messageID, partID: p.partID } : { messageID: p.messageID }, timeoutMs: 20000 }) }; },
   async unrevert(port, p) { return { session: await req(port, 'POST', `/session/${enc(p.id)}/unrevert` + q({ directory: p.cwd }), { timeoutMs: 20000 }) }; },
-  async questions(port, p) {
-    const list = await req(port, 'GET', '/question', { timeoutMs: 10000 }) || [];
-    const all = Array.isArray(list) ? list : [];
-    return { questions: p && p.sessionId ? all.filter((x) => x && x.sessionID === p.sessionId) : all };
-  },
   async answer(port, p) {
     const answers = Array.isArray(p.answers) ? p.answers.map((a) => (Array.isArray(a) ? a.map(String) : [String(a)])) : null;
     if (!answers || !answers.length) throw new Error('the ssh rung needs POSITIONAL answers (the hub converts the card map)');
@@ -315,7 +289,6 @@ const OPS = {
   },
   async reject(port, p) { await req(port, 'POST', `/question/${enc(p.requestId)}/reject`, { timeoutMs: 20000 }); return { ok: true, sessionID: null }; },
   async status(port) { return { statuses: await req(port, 'GET', '/session/status', { timeoutMs: 10000 }) || {} }; },
-  async todos(port, p) { return { todos: await req(port, 'GET', `/session/${enc(p.id)}/todo`, { timeoutMs: 10000 }) || [] }; },
   // pty ops need a ws the HUB can reach; over ssh the serve's socket is not
   // reachable from there. Refuse LOUDLY and name the reason — a rung that
   // silently returned "ok" would leave a terminal window that never opens.

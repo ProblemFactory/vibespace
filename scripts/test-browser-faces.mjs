@@ -88,7 +88,6 @@ const ja = (await import('../src/lib/i18n-ja.js')).default;
     'Open a web view': null,
     'action trace is off (Settings → Agent browser)': null,
     'The action trace is OFF (Settings → Agent browser → Action trace).': null,
-    'Recording is a per-profile opt-in — turn it on in Agent browser…': null,
     'Agent browser is not available': null,
     'not traced — this browser was not started through VibeSpace (Agent browser)': null,
   };

@@ -44,8 +44,6 @@ const SPLIT_RATIO_MIN = 0.15;
 const SPLIT_RATIO_MAX = 0.85;
 const SPLIT_RATIO_DEFAULT = 0.5;
 const SPLIT_DIVIDER_PX = 6;
-const SPLIT_SIDES = Object.freeze(['left', 'right']);
-const LAYOUTS = Object.freeze(['tabs', 'split']);
 
 function clampRatio(r) {
   const n = Number(r);
@@ -718,7 +716,7 @@ function ownerDots({ leases = [], profileId = null, sessionId = null, nameOf = n
 }
 
 module.exports = {
-  SPLIT_RATIO_MIN, SPLIT_RATIO_MAX, SPLIT_RATIO_DEFAULT, SPLIT_DIVIDER_PX, SPLIT_TAIL_FLOOR_PX, SPLIT_SIDES, LAYOUTS, SPLIT_PANE_MIN_MAX,
+  SPLIT_RATIO_MIN, SPLIT_RATIO_MAX, SPLIT_RATIO_DEFAULT, SPLIT_DIVIDER_PX, SPLIT_TAIL_FLOOR_PX, SPLIT_PANE_MIN_MAX,
   RATIO_HOLD_MS, holdRatio, heldRatio, releaseRatio,
   clampRatio, splitValid, normalizeChain, cloneChain, chainSyncKey, ratioDiffers, displayedPanes, splitAnchor, pairFor, splitColumns, paneMinPx, visualTabOrder, sidesOf, sideOf, swappedPair, splitPartner,
   showTab, enterSplit, insertTab, moveTab, removeTab, swapSides,

@@ -537,7 +537,6 @@ function desktopNames(names) {
   return zh || ja ? { ...(zh ? { zh } : {}), ...(ja ? { ja } : {}) } : null;
 }
 /** The directories a catalog row's .desktop may come from (root-owned, apt's). */
-const DESKTOP_DIRS = Object.freeze(['/usr/share/applications/', '/usr/local/share/applications/']);
 const desktopPathOk = (p) => typeof p === 'string' && /^\/usr(?:\/local)?\/share\/applications\/[A-Za-z0-9@._+-]+\.desktop$/.test(p) && !p.includes('/../');
 /** An icon NAME → the files the icon route may serve, best first (PNG/SVG only — a browser draws them). An absolute
  *  path is accepted only under /usr/share/{icons,pixmaps}. */
@@ -1126,7 +1125,7 @@ function removePlanFor(entry, { appsDir = '~/.vibespace/apps' } = {}) {
 
 module.exports = {
   MANIFEST_V, APPS_REL, PKG_RE, ENTRY_ID_RE, NONCE_RE, SHA256_RE, FPR_RE, ENTRY_KINDS, BY_KINDS, PLAN_CODES, DISK_FLOOR_BYTES, APT_LOCK_WAIT_S,
-  MARKER_DIR, REPLAY_MARKER, DRIFT_MARKER, SLOT_ENDED, LAST_LIST, DRIFT_HOOK, APP_ID_PREFIX, SCRIPT_MODES, DRIFT_SLACK_MS, DESKTOP_DIRS,
+  MARKER_DIR, REPLAY_MARKER, DRIFT_MARKER, SLOT_ENDED, LAST_LIST, DRIFT_HOOK, APP_ID_PREFIX, SCRIPT_MODES, DRIFT_SLACK_MS,
   PIN_LOW, PIN_APPROVED, GRAB_MAX_MB, pinHost, sourcePin, originOf, withPins,
   emptyManifest, validateManifest, withEntry, withoutEntry, withSource, withoutSource, entryIdFor, validateSourceSpec, sourceDeb822,
   reconcileIndex, dedupeRows, // design 019 M1 / M3

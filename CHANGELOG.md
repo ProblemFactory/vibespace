@@ -2,6 +2,15 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.221 — 2026-10-05
+
+### Added
+- Search everything finds any conversation by what was said in it and any file an agent wrote by its contents (⚙ Tools, the last row of Ctrl+K, or Ctrl+Shift+F).
+- The Doc window edits tables and task lists as such, and a save only touches the lines you changed.
+
+### Fixed
+- An Agent browser that keeps closing on its own no longer also gets a “Not answering since …” item in For you.
+
 ## 2.369.220 — 2026-10-05
 
 ### Changed

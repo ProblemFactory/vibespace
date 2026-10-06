@@ -124,7 +124,6 @@ const ASSIGN_SCOPES = Object.freeze(['conversation', 'pattern', 'account']);
 const ASSIGN_REFUSALS = Object.freeze(['not-an-object', 'principal', 'mode', 'filter-missing', 'notify', 'digest', 'authority', 'wake-cap', 'scope', 'digest-cap-zero']);
 /** R4: the CLOSED route codes an access / watchers refusal carries (the
  *  field inside rides `why`, from ASSIGN_REFUSALS) — channel-words says each. */
-const GRANT_REFUSALS = Object.freeze(['bad-access', 'bad-watcher', 'duplicate-principal', 'watcher-needs-access', 'too-many-rows', 'authority-capped']);
 /** At most this many rows per list per grain (a refusal names it). */
 const MAX_ACCESS_ROWS = 16;
 // verify r1 F2 (lane channel-agent-watch): what ONE agent may hold of its own — rows across every grain, and wake asks waiting
@@ -1215,7 +1214,7 @@ module.exports = {
   DEFAULT_DIGEST_MINUTES, MIN_DIGEST_MINUTES, MAX_DIGEST_MINUTES, DEFAULT_DAILY_WAKE_CAP, MAX_DAILY_WAKE_CAP,
   BLOCK_MAX_RECORDS, BLOCK_MAX_CHARS, BLOCK_MAX_BYTES,
   validateRule, validateFilter, filterProblemText, MAX_RULES, ruleWhy, placeHit, PLACE_WHYS, matchRecord, estimate,
-  validateAssignment, ASSIGN_REFUSALS, GRANT_REFUSALS, authorityCap, authorityCapCode, authorityCapText, effectiveAuthority, pickRoundRobin, paceVerdict, digestCap, pruneLedger, countSince,
+  validateAssignment, ASSIGN_REFUSALS, authorityCap, authorityCapCode, authorityCapText, effectiveAuthority, pickRoundRobin, paceVerdict, digestCap, pruneLedger, countSince,
   renderWakeBlock, renderDigestBlock, whyText,
   // 2026-09-26: the three grains + conversation patterns + the scope digest
   ASSIGN_SCOPES, CONV_RULE_KINDS, CONV_KINDS, validatePattern, matchConversation, patternSummary, expectedWakesPerDay, renderScopeDigestBlock,

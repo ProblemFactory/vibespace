@@ -4,6 +4,7 @@
 // except inside terminals (.xterm owns its keys).
 import { escHtml } from './utils.js';
 import { registerCommand, runCommand } from './contributions.js';
+import { t } from './i18n.js';
 
 function subseq(t, s) {
   let qi = 0;
@@ -78,6 +79,9 @@ export function installSessionPalette(app) {
         row.className = 'palette-item' + (i === sel ? ' active' : '');
         if (it.newSession) {
           row.innerHTML = `<span class="palette-name">New session in <b>${escHtml(it.cwd)}</b></span>`;
+        } else if (it.searchAll) {
+          row.classList.add('palette-search-all');
+          row.append(Object.assign(document.createElement('span'), { className: 'palette-name', textContent: t('Search conversations and files for \'{q}\'', { q: it.q }) }));
         } else {
           const s = it.s;
           const live = s.status === 'live' || s.status === 'tmux' || s.status === 'external';
@@ -87,7 +91,7 @@ export function installSessionPalette(app) {
             ${s.hostName ? `<span class="session-host-badge">${escHtml(s.hostName)}</span>` : ''}
             <span class="palette-path">${escHtml(s.cwd || '')}</span>`;
         }
-        row.onclick = () => it.newSession ? (close(), app.showNewSessionDialog({ cwd: it.cwd })) : activate(it.s);
+        row.onclick = () => it.newSession ? (close(), app.showNewSessionDialog({ cwd: it.cwd })) : it.searchAll ? (close(), app.openSearch({ q: it.q })) : activate(it.s);
         row.onmousemove = () => { if (sel !== i) { sel = i; render(); } };
         listEl.appendChild(row);
       });
@@ -127,6 +131,8 @@ export function installSessionPalette(app) {
       }
       scored.sort((a, b) => b.sc - a.sc);
       items = scored.slice(0, 12);
+      // lane global-search: ONE last row hands the typed words to Search everything (the only row when no name matches)
+      if (q) items.push({ searchAll: true, q: input.value.trim() });
       sel = 0; render();
     };
 
@@ -140,6 +146,7 @@ export function installSessionPalette(app) {
         const it = items[sel];
         if (!it) return;
         if (it.newSession) { close(); app.showNewSessionDialog({ cwd: it.cwd }); }
+        else if (it.searchAll) { close(); app.openSearch({ q: it.q }); }
         else activate(it.s);
       }
     };

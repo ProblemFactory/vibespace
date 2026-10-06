@@ -43,19 +43,10 @@ function notify(kind, sessionId, extra = {}) {
   try { ctx?.broadcast?.({ type: 'opencode-updated', kind, sessionId: sessionId || null, ...extra }); } catch { }
 }
 
-/** The serve's own state on a machine (panel + diagnostics). */
+/** The serve's own state on a machine (panel + diagnostics). No client calls it: kept as the test seam the heavy
+ *  test-opencode-s9 legs + test-restore-smoke wait on (lane dc-dead-sweep, 2026-10-05). */
 router.get('/api/opencode/state', async (req, res) => {
   try { res.json(await call(req, 'state')); }
-  catch (e) { fail(res, e); }
-});
-
-/** The OpenCode conversations a machine's serve knows (the same entry shape
- *  the sidebar consumes). This is how a REMOTE machine's OpenCode store is
- *  reachable at all today: the 5s /api/sessions discovery is local-only, so a
- *  remote host answers here on demand rather than pretending its conversations
- *  are in the merged list. */
-router.get('/api/opencode/sessions', async (req, res) => {
-  try { res.json(await call(req, 'discover')); }
   catch (e) { fail(res, e); }
 });
 
@@ -80,53 +71,6 @@ router.post('/api/opencode/unrevert', async (req, res) => {
     notify('unrevert', id, { revert: null, host: host || null });
     res.json({ ok: true, session: r?.session || null });
   } catch (e) { fail(res, e); }
-});
-
-/** Pending asks. `refresh=0` reads the live-lane cache; the default re-reads
- *  the authoritative list, which is what makes a pending card survive a page
- *  reload (the client asks on window open). */
-router.get('/api/opencode/questions', async (req, res) => {
-  try {
-    const r = await call(req, 'questions', {
-      sessionId: req.query.sessionId || null,
-      refresh: req.query.refresh !== '0',
-    });
-    res.json({ questions: r?.questions || [] });
-  } catch (e) { fail(res, e); }
-});
-
-/** Answer an ask through the REAL OpenCode route. `answers` is either the
- *  positional array-of-arrays or the card's question-text map. */
-router.post('/api/opencode/question/:requestId/reply', async (req, res) => {
-  const { answers, host } = req.body || {};
-  if (!answers) return bad(res, 400, 'answers are required');
-  try {
-    const r = await call(req, 'answer', { requestId: req.params.requestId, answers });
-    notify('question-replied', r?.sessionID || req.body?.sessionId || null, { requestId: req.params.requestId, host: host || null });
-    res.json({ ok: true, ...r });
-  } catch (e) { fail(res, e); }
-});
-
-router.post('/api/opencode/question/:requestId/reject', async (req, res) => {
-  const { host } = req.body || {};
-  try {
-    const r = await call(req, 'reject', { requestId: req.params.requestId });
-    notify('question-rejected', r?.sessionID || req.body?.sessionId || null, { requestId: req.params.requestId, host: host || null });
-    res.json({ ok: true, ...r });
-  } catch (e) { fail(res, e); }
-});
-
-/** The serve's in-process busy map (idle|busy|retry per conversation). */
-router.get('/api/opencode/status', async (req, res) => {
-  try { res.json(await call(req, 'status')); }
-  catch (e) { fail(res, e); }
-});
-
-/** The agent's own todo list for a conversation. */
-router.get('/api/opencode/todos', async (req, res) => {
-  if (!req.query.id) return bad(res, 400, 'id is required');
-  try { res.json(await call(req, 'todos', { id: req.query.id })); }
-  catch (e) { fail(res, e); }
 });
 
 module.exports = { router, setup };

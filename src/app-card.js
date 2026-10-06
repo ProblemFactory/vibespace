@@ -16,7 +16,6 @@
  * The face of a card never carries a package-system word; Details may (scripts/test-app-card.mjs is the census).
  */
 const K = require('./app-kinds'); // PURE — an app kind is one row: its card word, its keeps, its from (lane dc-apps-rows, F-A2)
-const CARD_KINDS = Object.freeze(['package', 'deb', 'appimage', 'remove', 'source']);
 const KEEPS = Object.freeze(['replay', 'home', 'system']);
 /** where a run stopped, by its code: before the package slot ran anything, inside it, or at the record after it */
 const RUN_STEP_CODES = Object.freeze(['install_failed', 'install_timeout', 'install_link_lost', 'install_unrecorded']);
@@ -102,4 +101,4 @@ function shownDigest(v) {
   return `a1:${fnv32(canon, 0x811c9dc5)}${fnv32(canon.split('').reverse().join(''), 0x9747b28c)}:${canon.length}`;
 }
 
-module.exports = { CARD_KINDS, KEEPS, RUN_STEP_CODES, stepOf, planSummary, cardView, shownFields, shownDigest };
+module.exports = { KEEPS, RUN_STEP_CODES, stepOf, planSummary, cardView, shownFields, shownDigest };

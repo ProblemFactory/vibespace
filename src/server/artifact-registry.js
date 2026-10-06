@@ -62,6 +62,7 @@ function noteOp(session, op) {
     try { normalizers().feedArtifactCard(session, block); } catch (e) { deps.log.warn?.(`[artifacts] card not fed: ${e.message}`); }
   }
   persistSoon(session);
+  require('./search-index.js').noteArtifact({ sessionId: session.sockName || null, host: r.row.host || session.host || '', path: r.row.path }); // lane global-search: every new / edited row's file is (re)indexed
   return r;
 }
 
@@ -115,6 +116,7 @@ function registries() {
 function ownerOf({ host, path } = {}) { return AF.ownerOfIn(registries(), { host, path }); }
 /** THE CONTRACT (doc-window): ONE next-turn note to the conversation through the stash — free, never a billed wake. */
 function noteEdit({ sessionId, host, path, summary } = {}) {
+  require('./search-index.js').noteArtifact({ sessionId, host, path }); // lane global-search: the saved file is re-read into the index
   const session = sessions().get(sessionId);
   if (!session || !deps.deliver || typeof deps.deliver.stashFor !== 'function') return false;
   let cid = null;

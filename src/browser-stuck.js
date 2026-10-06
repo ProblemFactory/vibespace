@@ -24,9 +24,7 @@
  * (`dialogWords`, `stuckWords`) take the client's `t` — every key a literal `t('…')` with zh + ja entries.
  */
 
-const DIALOG_OPEN_CODE = 'dialog_open';
 /** The kinds Chrome's `Page.javascriptDialogOpening` names today (CDP `DialogType`). */
-const DIALOG_TYPES = Object.freeze(['alert', 'confirm', 'prompt', 'beforeunload']);
 /** A page's message is page content: bounded before it reaches a sentence, a record or a notice. */
 const MESSAGE_MAX = 500;
 const URL_MAX = 300;
@@ -741,7 +739,7 @@ function unresponsiveWords(f, tIn) {
 }
 
 module.exports = {
-  DIALOG_OPEN_CODE, DIALOG_TYPES, MESSAGE_MAX, BEFOREUNLOAD_TEXT, STUCK_AFTER, COMMAND_TIMEOUT_MS, ENABLE_TIMEOUT_MS, NO_DIALOG_TEXT,
+  MESSAGE_MAX, BEFOREUNLOAD_TEXT, STUCK_AFTER, COMMAND_TIMEOUT_MS, ENABLE_TIMEOUT_MS, NO_DIALOG_TEXT,
   FRAME_TAGS, FRAME_TAG_RE, FRAME_OPEN_RE, inertOpeners, pageText, quoted, // verify r1 A2: page text is frame-inert, delimited, bounded
   AUTO_ACCEPT_MAX, AUTO_ACCEPT_WINDOW_MS, ALERT_NOTES_MAX, alertsNote, // verify r1 A3: an alert storm is bounded and told as one line
   LOADING_GRACE_MS, loadingText, // verify r1 A7: a timeout during a navigation the site has not answered is the network's (+ r2 #5: said, with the time so far)

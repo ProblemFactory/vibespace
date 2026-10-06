@@ -123,6 +123,8 @@ const brainStub = {
   ok('engine-dep census: the stub carries every dep the three consumers destructure (' + need.size + ' names)',
     missing.length === 0, 'missing: ' + missing.join(', '));
 }
+const searchLive = []; // lane global-search: the live door of the search index, pointed at a recorder
+require(path.join(REPO, 'src/server/search-index.js')).use({ noteLive: (s) => searchLive.push(s), noteArtifact() { } });
 const fakePty = () => { const h = { data: null, exit: null, onData(cb) { h.data = cb; }, onExit(cb) { h.exit = cb; } }; return h; };
 const mkSession = (backend, id, { normalizer = true } = {}) => {
   const s = { mode: 'chat', backend, name: 'n-' + id, cwd: tmp, sockName: 'cw-' + id, buffer: '', createdAt: Date.now(), backendSessionId: null, claudeSessionId: null };
@@ -164,6 +166,7 @@ console.log('— stream-json (claude)');
   p.data(asstLine.slice(40));
   ok('assistant record (real shape) → REAL normalizer emitted a create op with the text', s._fed.some((m) => m.type === 'assistant') && s._ops.some((o) => o.op === 'create' && (o.message || o.msg)?.role === 'assistant' && JSON.stringify((o.message || o.msg).content).includes('hello from claude')), JSON.stringify(s._ops.filter((o) => o.op === 'create').slice(-1)));
   ok('…REGISTERED through sbSeenFirst (session-brain first-writer-wins gate) before the side-effect families', calls.sbSeen.includes('assistant'));
+  ok('…and the SAME feedLive gate told the search index\'s live door (lane global-search: every consumer feeds through it)', searchLive.includes(s));
   ok('…served-model latch + model registry + noteSessionProduced fired (main-thread record)', s._servedModel === 'claude-fable-5' && calls.modelSeen.includes('claude-fable-5') && calls.produced.includes(s));
   ok("…streaming label 'responding' broadcast for a text-final assistant record", labels('w-claude').includes('responding'));
   p.data(J({ type: '_stdin_ack', timestamp: Date.now() }));
@@ -1832,7 +1835,7 @@ console.log('— wiring pins');
   // codex/acp consumers route a `permission_rules` answer back to the pending
   // READ — a lazy ref like the others, never a new inline consumer.
   ok('session-stdout requires the registry and builds it ONCE in create() with the orchestrator deps', /require\('\.\/stdout\/index\.js'\)/.test(ss) && (ss.match(/createStdoutRegistry\(/g) || []).length === 1 && /createStdoutRegistry\(\{ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes, USAGE_SCANNER_PATH,\s*\n\s*checkClaudeGoalStatus, noteModelSeen, noteHarnessModels, sbSeenFirst, hosts, usageHistory, deliverRef, pagesRef, permissionRulesRef, brainRef \}\)/.test(ss));
-  ok('…hands its own closures (feedLive, broadcasts, meta store, todo helpers) as ONE helpers object', /const stdoutHelpers = \{ feedLive, broadcastToSession, broadcastActiveSessions, readSessionMeta, writeSessionMeta,\s*\n\s*updateSessionTodos, applyTaskToolUpdate, emitTaskListTodos \};/.test(ss));
+  ok('…hands its own closures (feedLive, broadcasts, meta store, todo helpers) as ONE helpers object', /const stdoutHelpers = \{ feedLive: \(s, m\) => \{ feedLive\(s, m\); SEARCH\.noteLive\(s\); \}, broadcastToSession, broadcastActiveSessions, readSessionMeta, writeSessionMeta,\s*\n\s*updateSessionTodos, applyTaskToolUpdate, emitTaskListTodos \};/.test(ss)); // lane global-search: feedLive also tells the search index
   ok('…setupSessionPty resolves caps.streamProtocol → registry → attach (no protocol branch left in session-stdout)', /const consumer = streamProto \? stdoutConsumers\.get\(streamProto\) : null;/.test(ss) && /consumer\.attach\(session, id, ptyProcess, stdoutHelpers\);/.test(ss) && !/streamProto === '/.test(ss) && !/feedLive\(session, /.test(ss) && !/_stdin_ack/.test(ss));
   ok('…the no-protocol text is unchanged and the no-consumer case is its own loud line + event', /has no streamProtocol in src\/backend-caps\.js — chat output passes through RAW \(register a pipeline\)/.test(ss) && /registers no consumer for it — chat output passes through RAW \(register one\)/.test(ss) && /'chat-protocol-no-consumer'/.test(ss));
   ok('…still dispatches on capsOf(session.backend) (the `backend || claude` default + NO_CAPS fallback are unchanged)', /const streamProto = capsOf\(session\.backend\)\.streamProtocol;/.test(ss));

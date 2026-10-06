@@ -103,7 +103,6 @@ const KEY_MODIFIERS = Object.freeze({ alt: 1, ctrl: 2, meta: 4, shift: 8 });
 /** Where the live view draws its picture inside the pane (lane J r2): the CSS
  *  says `object-position: 50% 0` and every conversion reads THIS word. */
 const LIVE_ALIGN = 'top';
-const ALIGNS = Object.freeze(['center', 'top']);
 /** Text a viewer may hand the page in one act (a paste, a composition): refused
  *  as a whole past `TEXT_MAX` code points (a paste of a whole document into a
  *  page is not a keystroke — say so, never trim). */
@@ -1008,7 +1007,7 @@ module.exports = {
   // verify r3: a takeover is anchored to the tab it began on (an agent's switch while the user drives is refused at the bridge)
   TAKEOVER_ANCHOR_GRACE_MS, TABS_RECORD_LATENCY_P99_MS, takeoverAnchor, takeoverAnchorStep, tabSwitchedReceipt, // verify r4: the grace is 3 × the measured p99
   // lane J r2: the picture's placement (top-aligned) and text a viewer hands the page (a paste, an IME composition)
-  LIVE_ALIGN, ALIGNS, textRecords, TEXT_MAX,
+  LIVE_ALIGN, textRecords, TEXT_MAX,
   // lane live-input: the browser's measured 3-unit cap on a key event's text, the chunker, the viewer's one-record act
   CHAR_TEXT_MAX_UNITS, textChunks, inputTextRecord,
   // MULTIVIEW (design-browser-multiview §2 / §4 / D3): the strip's list, the helper witness

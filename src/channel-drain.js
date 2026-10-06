@@ -677,11 +677,9 @@ function olderApply(mem, ev, now) {
  *     Rules 9 (the minute) and 18 (the pace) stay the OUTER caps: the engine asks them before each call.
  */
 const REACTIONS_FLOOR_MS = 300e3;
-const REACTIONS_TTL_MS = 600e3;
 const REACTIONS_PER_MINUTE = 20;
 const REACTIONS_BATCH_MAX = 20;
 const THREAD_FLOOR_MS = 60e3;
-const RX_EVENTS = Object.freeze(['ask', 'landed', 'failed']);
 /** A message's reaction memory: never asked, nothing in flight, never fetched. */
 function rxEmpty() { return { askedAt: 0, inflight: false, fetchedAt: 0 }; }
 /** The account's ROLLING minute of reaction list calls as of `now`: `{calls: [instants in the last 60 s], n, at}`
@@ -852,6 +850,6 @@ module.exports = {
   paceFresh, paceLevel, paceNeed, paceWaitMs, paceCharge, paceCost,
   olderEmpty, olderVerdict, olderApply,
   // lane channel-threads: rule 20
-  REACTIONS_FLOOR_MS, REACTIONS_TTL_MS, REACTIONS_PER_MINUTE, REACTIONS_BATCH_MAX, THREAD_FLOOR_MS, RX_EVENTS,
+  REACTIONS_FLOOR_MS, REACTIONS_PER_MINUTE, REACTIONS_BATCH_MAX, THREAD_FLOOR_MS,
   rxEmpty, rxMinuteAt, rxReserve, rxRelease, reactionsVerdict, rxApply, threadVerdict, threadApply,
 };

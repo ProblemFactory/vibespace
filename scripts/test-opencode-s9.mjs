@@ -300,7 +300,9 @@ console.log('\n— (f) HONEST LIVENESS —');
 console.log('\n— WIRING PINS (a fix that is not wired is not a fix) —');
 {
   const routes = read('src/routes/opencode.js');
-  ok('routes exist for roll-back / restore / asks / status / todos / a machine\'s session list', ['/api/opencode/revert', '/api/opencode/unrevert', '/api/opencode/questions', '/api/opencode/question/:requestId/reply', '/api/opencode/question/:requestId/reject', '/api/opencode/status', '/api/opencode/todos', '/api/opencode/sessions'].every((r) => routes.includes(r)));
+  ok('routes exist for roll-back / restore (the only ones a client calls)', ['/api/opencode/revert', '/api/opencode/unrevert'].every((r) => routes.includes(r)));
+  // lane dc-dead-sweep (2026-10-05): the asks / status / todos / session-list routes had no caller outside this suite — deleted
+  ok('the caller-less asks / status / todos / session-list routes are gone', !['/api/opencode/questions', '/api/opencode/question/:requestId/reply', '/api/opencode/question/:requestId/reject', '/api/opencode/status', '/api/opencode/todos', '/api/opencode/sessions'].some((r) => routes.includes(r)));
   ok('…and every op in the SHARED table is reachable (a route, the ws ask lane or the pty bridge) — no dead rows', (() => {
     const table = require(path.join(REPO, 'src/opencode-remote.js')).OPENCODE_OP_NAMES;
     const surfaces = routes + read('src/ws-handler.js') + read('src/server/opencode-pty-bridge.js') + read('src/server/opencode-access.js') + read('src/ws-create.js');
@@ -309,9 +311,9 @@ console.log('\n— WIRING PINS (a fix that is not wired is not a fix) —');
   ok('…every route reaches a machine through ONE helper (hostId is a parameter, never a branch) and NOTHING calls the access layer around it',
     /const host = \(req\.method === 'GET' \? req\.query\.host : req\.body\?\.host\) \|\| null;/.test(routes)
     && (routes.match(/ctx\.access\.call\(/g) || []).length === 1
-    && (routes.match(/await call\(req,/g) || []).length >= 9);
+    && (routes.match(/await call\(req,/g) || []).length >= 3); // state + revert + unrevert since lane dc-dead-sweep
   ok('…and every result a route hands back is filtered through publicView (transport secrets are stripped STRUCTURALLY, not by "no route asks for that op today")', /return ctx\.access\.publicView\(op, await ctx\.access\.call\(host, op, params\)\);/.test(routes));
-  ok('…every mutating route BROADCASTS (multi-client law)', (routes.match(/notify\(/g) || []).length >= 5);
+  ok('…every mutating route BROADCASTS (multi-client law)', (routes.match(/notify\(/g) || []).length >= (routes.match(/router\.post\(/g) || []).length + 1);
   ok('…and every failure answers with the machine-side reason', /function fail\(res, e\)/.test(routes) && /res\.status\(status\)\.json\(\{ error/.test(routes));
   ok('the access layer + its routes are wired from a src/server wiring module (server.js stays bootstrap-sized)', read('src/server/mounts-plugins-wiring.js').includes("require('./opencode-access').create("));
   const wsh = read('src/ws-handler.js');

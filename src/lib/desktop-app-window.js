@@ -1245,6 +1245,3 @@ registerMenuItem({
 
 /** A one-line HTML label for lists (escaped — labels come from the user's own
  *  command line and sync to every client). */
-export function appRowHtml(rec) {
-  return `<span class="desktop-app-row-label">${escHtml(rec.label || rec.exec || rec.id)}</span> <span class="desktop-app-row-state">${escHtml(rec.state === 'ready' ? t('running') : rec.state === 'launching' ? t('starting') : endedText(rec))}</span>`;
-}

@@ -2783,6 +2783,7 @@ console.log('§62 every path where the user names a window goes through wm.revea
     'src/lib/chat-view.js': [2, 'the two sub-agent viewer dedupes'],
     'src/lib/workflow-detail.js': [2, 'the workflow window + its agent-log dedupe'],
     'src/lib/design-window.js': [1, 'the Design window\'s one-per-(host, dir) re-open (a replay passes { replay })'],
+    'src/lib/search-window.js': [1, 'Search everything\'s singleton re-open (a replay passes { replay }; a new query rides it)'],
     'src/lib/doc-window.js': [1, 'the Doc window\'s one-per-(host, path) re-open (a replay passes { replay })'],
     'src/lib/design-home.js': [1, 'the Design window home\'s one-per-client re-open (a replay passes { replay }) — lane design-systems-home'],
     'src/lib/machine-desktop.js': [1, 'a machine\'s whole-desktop window: one per machine per page, a second open reveals it — design 014 D1'],
@@ -3628,12 +3629,16 @@ console.log('§73 the usage index: node:sqlite in one file, never on the main th
   const walk72 = (d) => fs.readdirSync(path.join(REPO, d), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk72(d + '/' + e.name) : /\.(c|m)?js$/.test(e.name) ? [d + '/' + e.name] : []));
   const files72 = ['server.js', ...walk72('src')];
   const WORKER = 'src/usage-index-worker.js', OWNER = 'src/server/usage-index.js', WIRING = 'src/server/account-usage-routes.js';
+  // lane global-search (.221): the SEARCH index is the second node:sqlite file — its worker spawned by its owner alone
+  const SWORKER = 'src/search-index-worker.js', SOWNER = 'src/server/search-index.js';
   const judge72 = (texts) => {
     const bad = [];
     for (const [f, raw] of Object.entries(texts)) {
       const t = strip72(raw);
-      if (f !== WORKER && /['"`]node:sqlite['"`]/.test(t)) bad.push(`${f} names node:sqlite`);
-      if (f !== WORKER && /\bDatabaseSync\b/.test(t)) bad.push(`${f} spells DatabaseSync`);
+      if (f !== WORKER && f !== SWORKER && /['"`]node:sqlite['"`]/.test(t)) bad.push(`${f} names node:sqlite`);
+      if (f !== WORKER && f !== SWORKER && /\bDatabaseSync\b/.test(t)) bad.push(`${f} spells DatabaseSync`);
+      if (/require\(\s*[^)]*search-index-worker/.test(t)) bad.push(`${f} require()s the search worker`);
+      if (f !== SOWNER && f !== SWORKER && /search-index-worker/.test(t)) bad.push(`${f} spawns the search worker`);
       if (/require\(\s*[^)]*usage-index-worker/.test(t)) bad.push(`${f} require()s the worker`);
       if (f !== OWNER && f !== WORKER && /usage-index-worker/.test(t)) bad.push(`${f} spawns the worker`);
       if (f !== OWNER && /\b(?:queryAggregate|workerStats)\s*\(/.test(t)) bad.push(`${f} reads the index`);
@@ -3647,6 +3652,8 @@ console.log('§73 the usage index: node:sqlite in one file, never on the main th
   const texts72 = Object.fromEntries(files72.map((f) => [f, read(f)]));
   const found72 = judge72(texts72);
   ok(files72.length > 300 && texts72[WORKER] && texts72[OWNER] && found72.length === 0, `§73 the census over ${files72.length} files is clean${found72.length ? ' — ' + found72.join(' | ') : ''}`);
+  ok(/['"]node:sqlite['"]/.test(strip72(texts72[SWORKER])) && /if \(isMainThread\) throw new Error\(/.test(texts72[SWORKER]) && /new Worker\(workerFile/.test(texts72[SOWNER]),
+    '§73 the SEARCH index worker names node:sqlite, refuses the main thread, and its owner spawns it as a Worker (lane global-search)');
   ok(/['"]node:sqlite['"]/.test(strip72(texts72[WORKER])) && /if \(isMainThread\) throw new Error\(/.test(texts72[WORKER]) && /new Worker\(workerFile/.test(texts72[OWNER]),
     '§73 the worker names node:sqlite, refuses the main thread, and the owner spawns it as a Worker');
   ok(/usageIndex\.compare\(answer, \{ from, to, backend, accounts, hostFilter, pivots \}\);\n\s*res\.json\(answer\);/.test(texts72[WIRING]),
@@ -3662,6 +3669,9 @@ console.log('§73 the usage index: node:sqlite in one file, never on the main th
     [OWNER, "require('../usage-index-worker.js');"],
     ['src/server/session-stdout.js', "const ix = require('./usage-index.js').create({});"],
     [WIRING, 'usageIndex.queryAggregate({}).then((x) => res.json(x));'],
+    ['src/server/artifact-registry.js', "const { DatabaseSync } = require('node:sqlite');"],
+    ['src/server/session-stdout.js', "new Worker(path.join(__dirname, '..', 'search-index-worker.js'));"],
+    [SOWNER, "require('../search-index-worker.js');"],
   ];
   const missed72 = PLANTS.filter(([f, l]) => judge72(plant(f, l)).length === 0).map(([f, l]) => `${f}: ${l}`);
   const legal72 = judge72(plant('src/server/usage-pool-engine.js', '// the usage index (node:sqlite, DatabaseSync, queryAggregate) feeds nothing yet'));
@@ -4051,7 +4061,12 @@ console.log('§78 literal-id branches per family + unused i18n keys + unreferenc
   ok(jDC.falls.length === 0, `§78 the dead-code baseline is current${jDC.falls.length ? ' — FALLS (good): lower the baseline in this commit with `node scripts/dead-code-census.mjs --lower`: ' + jDC.falls.map((r) => `${r.family} ${r.file} ${r.base} → ${r.now}`).join(' | ') : ''}`);
   ok(Object.values(ib.owners).flat().every((o) => !/NOT FOUND/.test(o)) && ib.owners.display.some((o) => /^src\/desktop-backends\.js:\d+-\d+$/.test(o)) && ib.owners.browser.some((o) => /^src\/browser-profiles\.js:\d+-\d+$/.test(o)) && ib.owners.plugin.some((o) => o === 'src/plugins/'),
     `§78 every owner table is found (a renamed table would silently count its own rows): ${['display', 'browser', 'plugin'].map((f) => ib.owners[f].join(' ')).join(' · ')}`);
-  ok((dc.libFiles || []).includes('src/lib/usage-pace.js') && IB.total(dc.counts['i18n-unused']) >= 400, `§78 POSITIVE CONTROL: the census re-derives the review's findings (usage-pace.js unreached — rv-client F10; ${IB.total(dc.counts['i18n-unused'])} unused dictionary entries — F3's 243 × 2 + the test-only ones)`);
+  // lane dc-dead-sweep (2026-10-05) deleted F3's 243 × 2 unused entries (+ the test-only ones), so the i18n half of the
+  // control now PLANTS a key: the judge must flag a key no source says, and credit one a t() call or the extracted set says
+  const { keyUnused } = await import('./dead-code-census.mjs');
+  const planted = 'a planted key no source says ' + process.pid;
+  const judgeOk = keyUnused(planted, new Set(), "x = t('Web view');") && !keyUnused('Web view', new Set(), "x = t('Web view');") && !keyUnused('Web view', new Set(['Web view']), '');
+  ok((dc.libFiles || []).includes('src/lib/usage-pace.js') && judgeOk, `§78 POSITIVE CONTROL: the census re-derives the review's findings (usage-pace.js unreached — rv-client F10) and flags a PLANTED unused dictionary key (${IB.total(dc.counts['i18n-unused'])} unused entries left)`);
   // dc-browser-providers' CONTROL (its §79, folded into this family at int213): the keeper with ONE `=== 'chromium'` ladder
   // restored rises above its browser row — the launch shape is read from the PROVIDERS row, never branched on the id
   const KEEPER = 'src/server/browser-keeper.js';

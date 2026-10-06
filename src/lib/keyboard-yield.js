@@ -125,7 +125,6 @@ export function sameInput(pressed, focused) {
   try { return host !== focused && !!host && typeof host.contains === 'function' && host.contains(pressed); } catch { return false; }
 }
 /** Where the keys went, for the view's words: a chat composer, a terminal, or something else. */
-export const YIELD_KINDS = Object.freeze(['chat', 'terminal', 'other']);
 export function yieldKindOf(el) {
   try {
     if (el && typeof el.closest === 'function') {

@@ -169,7 +169,6 @@ const CONTEXT_METHODS = new Set(['Target.disposeBrowserContext']);
 /** The paused classes as sets (readers only — `pausedVerdict` is the rule): every `Input.*` is an `input` row
  *  (the deaf-page arm is `refused`), so the old prefix stays true by construction. Since the owner's ruling of
  *  2026-09-27 the page-mutation rows are in the set too (the census's PAUSED_RULE says 'refuse' for all three). */
-const PAUSED_PREFIXES = ['Input.'];
 const PAUSED_METHODS = new Set(CENSUS.rows().filter((r) => CENSUS.PAUSED_RULE[r.cls] === 'refuse' && r.fence === 'mediator' && r.domain !== 'Input').map((r) => r.domain + '.' + r.method));
 /**
  * THE PAUSED FENCE IS A CENSUS, NOT A LIST (verify S2 r4). `{refuse, why, row}`: `why` names the class that refused
@@ -513,7 +512,7 @@ function mediationSentence({ profileLabel = '', others = 0 } = {}) {
 module.exports = {
   TOKEN_RE, isToken, parseMediatedPath, mediatedBrowserUrl, mediatedHttpBase, versionAnswer, listAnswer,
   newScope, inScope, admissible, admitTarget, remember, RECENT_MAX,
-  ALWAYS_REFUSED, TARGET_METHODS, CONTEXT_METHODS, PAUSED_METHODS, PAUSED_PREFIXES, isPausedMethod, AUTO_ATTACH_PAUSE_WORDS, // identity verify r4: the browser-level pause refusal's words
+  ALWAYS_REFUSED, TARGET_METHODS, CONTEXT_METHODS, PAUSED_METHODS, isPausedMethod, AUTO_ATTACH_PAUSE_WORDS, // identity verify r4: the browser-level pause refusal's words
   CENSUS, pausedVerdict, pausedWords, // verify r4: the paused fence is a CENSUS over the vendor's own method list (src/cdp-census.js)
   interruptPlan, INTERRUPTED_CODE, // the owner's ruling (2026-09-27): a takeover interrupts what is in flight
   CDP_REFUSAL_CODE, refusal, refusalCodeOf, judge, admitReply, filterEvent,

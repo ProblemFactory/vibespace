@@ -975,7 +975,6 @@ async function utf8LocalesOf(tool, env, { now = Date.now, timeout = LOCALE_PROBE
   _localesMemo.set(key, v);
   return v;
 }
-function resetCharmapMemo() { _charmapMemo.clear(); _localesMemo.clear(); }
 /**
  * An env in which a child can carry non-ASCII text (lane E verify r3, F3) — `{ok, env, locale, verified}` or
  * `{ok:false, tried, why}`. Candidates in order: the UTF-8 rule (LC_ALL=C.UTF-8), then the env's OWN locale when its
@@ -1305,6 +1304,6 @@ module.exports = {
   pidAlive, procStart, sameProcess, procSample,
   sessionMembers, refreshSessions, sessionCensus, environHas, sessionSample, sessionSampleSync, markerCensus, environCensus,
   parseWininfoTree, windowTree, viewableWindows, enumerateWindows, displaySize, applyWindowPlan, xpraVersion, installFacts, installState,
-  UTF8_LOCALE, utf8Env, utf8LocaleEnv, resetCharmapMemo,
+  UTF8_LOCALE, utf8Env, utf8LocaleEnv,
   VNC_NATIVE, RFB_VIEWER_TYPES, RFB_VERSIONS, rfbAuthOf, rfbGreeting, // design 014 D1
 };

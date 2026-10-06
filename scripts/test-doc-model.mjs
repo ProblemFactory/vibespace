@@ -38,59 +38,45 @@ const LOSSLESS = {
   'snug blocks (the real-Opus FAQ, lane artifacts-e2e)': '# Demo 3 FAQ\n> 草稿\n\n### 改进了什么？\n三点：**[XX] ms**。\n\n### 接入方式？\n- 实时\n- SDK\n\n### 示例\n```js\nx()\n```\n之后一段。\n\n---\n### 尾\n1. 一\n',
   'bracket placeholders (the real-Opus draft, lane artifacts-e2e)': '# Demo 3\n\n首包延迟 **[XX] ms**，快约 **[X] 倍**；见 [文档](https://example.com/docs) 和 [TBD]。\n\n- [ ] not a task list\n- a [[nested]] pair\n',
 };
+const unedited = (src) => { const ld = MD.loadDoc(src); const r = MD.saveDoc(src, ld, ld.doc); return r.ok && r.text === src; };
 for (const [name, src] of Object.entries(LOSSLESS)) {
   const v = MD.docFidelity(src);
   ok(v.ok, `lossless: ${name} ⇒ the rendered editor`, v);
+  ok(unedited(src), `lossless: ${name} ⇒ an unedited save writes it byte-identical (block patching)`);
 }
-ok(MD.roundTrip(LOSSLESS['an agent brief']) + '\n' === LOSSLESS['an agent brief'], 'the supported subset round-trips BYTE-EQUAL (headings, emphasis, code, links, nested lists, quotes, fences, rules, images)');
+// lane doc-editor-wheel: what opened RAW before (a table, HTML, a footnote, front matter, a setext heading, escapes, a
+// hard break, a 4-space nest, lazy numbering) opens RICH on the wheel — untouched blocks keep their bytes; raw HTML and
+// front matter ride as RAW BLOCKS (carried as written, read-only). Only CRLF and the size cap stay raw reasons.
 const RAW = {
-  'a GFM table': ['table', '# Prices\n\n| item | cost |\n|------|-----:|\n| a    | 1    |\n'],
-  'raw HTML': ['html', 'Some <b>bold</b> words.\n'],
-  'an HTML comment': ['html', '<!-- note -->\n\ntext\n'],
-  'a footnote': ['footnote', 'Claim.[^1]\n\n[^1]: Source.\n'],
-  'front matter': ['front_matter', '---\ntitle: x\n---\n\n# Body\n'],
-  'CRLF line ends': ['crlf', '# t\r\n\r\ntext\r\n'],
-  'a setext heading': ['setext', 'Title\n=====\n\ntext\n'],
-  'escaped punctuation': ['lossy', 'Price 5 * 3 [x]\n'],
-  'a two-space hard break': ['lossy', 'line one  \nline two\n'],
-  'four-space nested list': ['lossy', '- a\n    - b\n'],
-  'lazy numbering': ['lossy', '1. a\n1. b\n'],
+  'a GFM table': ['', '# Prices\n\n| item | cost |\n|------|-----:|\n| a    | 1    |\n'],
+  'raw HTML': ['rawBlock', 'Some <b>bold</b> words.\n'],
+  'an HTML comment': ['rawBlock', '<!-- note -->\n\ntext\n'],
+  'a footnote': ['', 'Claim.[^1]\n\n[^1]: Source.\n'],
+  'front matter': ['rawBlock', '---\ntitle: x\n---\n\n# Body\n'],
+  'a setext heading': ['', 'Title\n=====\n\ntext\n'],
+  'escaped punctuation': ['', 'Price 5 * 3 [x]\n'],
+  'a two-space hard break': ['', 'line one  \nline two\n'],
+  'four-space nested list': ['', '- a\n    - b\n'],
+  'lazy numbering': ['', '1. a\n1. b\n'],
 };
-{ // bare brackets never MAKE a link, a reference or a definition the text did not have (parse → serialize → parse = the same doc)
-  const same = (src) => { const d = MD.parseMd(src); const again = MD.parseMd(MD.serializeMd(d)); return d.eq(again); };
-  for (const src of ['\\[a\\](b) stays text\n', '\\[a\\]: http://x stays text\n', '\\[a\\]\\[b\\] stays text\n', 'a \\\\[b] backslash\n', '[l](http://x) then \\[t\\](u)\n', '![i](p.png) \\[x\\]\n'])
-    ok(same(src), `brackets: ${JSON.stringify(src)} ⇒ the same doc after a save (no link born)`, MD.serializeMd(MD.parseMd(src)));
-  ok(MD.bareBrackets('\\[XX\\] ms') === '[XX] ms' && MD.bareBrackets('\\[a\\](b)') === '[a\\](b)' && MD.bareBrackets('\\[a\\]: x') === '[a\\]: x' && MD.bareBrackets('\\\\\\[') === '\\\\[', 'bareBrackets: bare unless (, [ or : follows the ]; an escaped backslash stays one', [MD.bareBrackets('\\\\\\[')]);
-  { // an edit that makes an UNSAFE snug pair (a paragraph under a paragraph) writes a blank line: never one merged block
-    const { EditorState } = await import('prosemirror-state');
-    const d = MD.parseMd('# H\nP1\n\n## H2\nP2\n');
-    ok(d.child(1).attrs.snug === true && d.child(2).attrs.snug === false && d.child(3).attrs.snug === true, 'the parser marks a block with no blank line above it (snug) — and only those', d.toJSON().content.map((n) => n.attrs.snug));
-    let from = -1, to = -1; d.forEach((n, off) => { if (n.type.name === 'heading' && n.attrs.level === 2) { from = off; to = off + n.nodeSize; } });
-    const st = EditorState.create({ doc: d });
-    const out = MD.serializeMd(st.apply(st.tr.delete(from, to)).doc);
-    ok(out === '# H\nP1\n\nP2' && MD.parseMd(out).childCount === 3, 'H2 deleted ⇒ P2 (snug) follows P1: a blank line is written, the two paragraphs stay two', out);
-    const pair = (a, b) => MD.snugOK(MD.parseMd(a).child(0), MD.parseMd(b).child(0));
-    ok(pair('# h', 'p') && pair('p', '# h') && pair('p', '- x') && pair('p', '> q') && pair('p', '***') && pair('```\nx\n```', 'p') && !pair('p', 'p') && !pair('p', '---') && !pair('p', '3. x') && !pair('- x', 'p') && !pair('> q', 'p') && !pair('- x', '- y') && !pair('p', '    code'), 'snugOK: only the pairs CommonMark reads back as two blocks');
-  }
-  ok(MD.docFidelity('a \\[b\\] c\n').code === 'lossy', 'a source that ESCAPES its brackets now opens raw (its save would drop the backslashes) — the trade for agent placeholders');
+for (const [name, [kind, src]] of Object.entries(RAW)) {
+  const v = MD.docFidelity(src), ld = MD.loadDoc(src);
+  ok(v.ok && unedited(src), `rich now: ${name} ⇒ the rendered editor, an unedited save byte-identical`, v);
+  if (kind) ok(ld.nodes.some((n) => n.type.name === 'rawBlock'), `${name} rides as a raw block (carried as written, read-only)`);
 }
-for (const [name, [code, src]] of Object.entries(RAW)) {
-  const v = MD.docFidelity(src);
-  ok(!v.ok && v.code === code, `raw: ${name} ⇒ ${code}`, v);
-}
-ok(M.rawReasons('```\n| a | b |\n|---|---|\n<b>x</b>\n```\n').length === 0, 'a table / a tag INSIDE a fenced block is code, not formatting (no raw reason)');
+ok(MD.docFidelity('# t\r\n\r\ntext\r\n').code === 'crlf', 'CRLF line ends ⇒ raw (crlf)');
 ok(M.rawReasons('x'.repeat(M.LIMITS.source + 1))[0] === 'too_big', 'a file past 1 MiB opens raw (too_big)');
-ok(M.fidelityVerdict('a\nb\n', 'a\nc').line === 2 && M.fidelityVerdict('a', null).code === 'unparsed', 'the verdict names the first differing line; a parser failure is unparsed (raw)');
-{ // an edit in the rendered view changes ONLY its own line on save
-  const src = LOSSLESS['an agent brief'];
-  const doc = MD.parseMd(src);
-  let pos = -1; doc.descendants((n, p) => { if (pos < 0 && n.isText && n.text === 'the edit note') pos = p; });
-  const { EditorState } = await import('prosemirror-state');
-  const st = EditorState.create({ doc });
-  const after = M.saveText(MD.serializeMd(st.apply(st.tr.insertText(' (free)', pos + 'the edit note'.length)).doc), src);
-  const a = src.split('\n'), b = after.split('\n');
+ok(M.fidelityVerdict('a\nb\n', 'a\nc').line === 2 && M.fidelityVerdict('a', null).code === 'unparsed', 'the whole-document verdict names the first differing line; a parser failure is unparsed (raw)');
+{ // an edit in the rendered view changes ONLY its own line on save — the line merge keeps the line's own markup
+  const { Transform } = await import('@tiptap/pm/transform');
+  const src = LOSSLESS['an agent brief'] + '\n* star [XX] _em_\n* other\n';
+  const ld = MD.loadDoc(src);
+  let pos = -1, pos2 = -1; ld.doc.descendants((n, p) => { if (pos < 0 && n.isText && n.text === 'the edit note') pos = p; if (pos2 < 0 && n.isText && n.text.startsWith('star [XX] ')) pos2 = p; });
+  const edited = new Transform(ld.doc).insert(pos + 'the edit note'.length, ld.doc.type.schema.text(' (free)')).insert(pos2 + ' (free)'.length + 'star [XX] '.length, ld.doc.type.schema.text('new ')).doc;
+  const after = MD.saveDoc(src, ld, edited).text;
+  const a = src.split('\n'), b = String(after).split('\n');
   const diff = a.map((l, i) => (l === b[i] ? null : i)).filter((x) => x !== null);
-  ok(a.length === b.length && diff.length === 1 && b[diff[0]] === '- the edit note (free)', 'a typed edit ⇒ the saved file differs in exactly that line', diff);
+  ok(a.length === b.length && diff.length === 2 && b[diff[0]] === '- the edit note (free)' && b[diff[1]] === '* star [XX] new _em_', 'two typed edits ⇒ the saved file differs in exactly those two lines, each keeping its bullet, bare brackets and _em_', diff.map((i) => b[i]));
 }
 
 // ── §2 the save text ──
@@ -194,7 +180,7 @@ const { addressableId } = require('../src/claude-lock-capture.js');
 console.log('§7 wiring pins');
 const ui = read('src/lib/doc-window-ui.js'), dmd = read('src/lib/doc-markdown.js'), door = read('src/lib/doc-window.js'), eng = read('src/server/doc-engine.js');
 ok(!/innerHTML|outerHTML|insertAdjacentHTML|document\.write/.test(ui + dmd), 'the window writes no HTML strings — the view is ProseMirror\'s DOM, every word textContent');
-ok(/const src = safeImageSrc\(node\.attrs\.src\);\n\s+if \(src\) img\.src = /.test(ui) && /toDOM\(mark\) \{ const href = safeHref\(mark\.attrs\.href\);/.test(dmd), 'images are set via .src after safeImageSrc; a link\'s href is re-validated at every render (safeHref)');
+ok(/const src = safeImageSrc\(node\.attrs\.src\);\n\s+if \(src\) img\.src = /.test(ui) && /renderHTML\(\{ HTMLAttributes: a \}\) \{ const href = safeHref\(a\.href\);/.test(dmd), 'images are set via .src after safeImageSrc; a link\'s href is re-validated at every render (safeHref)');
 const HREF = [['https://a.b/c', true], ['mailto:x@y', true], ['docs/x.md', true], ['#top', true], ['javascript:alert(1)', false], ['JAVASCRIPT:x', false], ['data:text/html,x', false], ['vbscript:x', false], ['java\nscript:x', false]];
 ok(HREF.every(([h, w]) => !!MD.safeHref(h) === w), 'safeHref: http(s) / mailto / relative / #fragment only', HREF.filter(([h, w]) => !!MD.safeHref(h) !== w));
 const IMG = [['https://a/x.png', true], ['img/x.png', true], ['data:image/png;base64,AA', true], ['data:image/svg+xml,<svg>', false], ['javascript:x', false], ['file:///etc/passwd', false]];
@@ -209,9 +195,9 @@ ok(/const timer = host \? 0 : setInterval\(check, POLL_MS\);/.test(ui) && /const
 }
 ok(/const STORE_PREFIX = 'vs-doc-comments:';/.test(ui) && /slice\(0, M\.LIMITS\.items\)/.test(ui), 'the strip is device-kept per (host, path) under vs-doc-comments:, bounded');
 ok(/const line = agentText\(v\.text, \{ kind: 'block', max: M\.LIMITS\.messageBytes \}\);/.test(eng), 'the comments block goes through THE belt (peer-text toAgentText) before the sender or the stash');
-ok(!/from 'prosemirror|from 'markdown-it/.test(door) && /import\(new URL\('\/doc-editor\.js', location\.origin\)\.href\)/.test(door), 'the door (main bundle) imports no editor module — the editor is the lazy public/doc-editor.js');
+ok(!/from '(prosemirror|markdown-it|@tiptap)/.test(door) && /import\(new URL\('\/doc-editor\.js', location\.origin\)\.href\)/.test(door), 'the door (main bundle) imports no editor module — the editor is the lazy public/doc-editor.js');
 const pkg = JSON.parse(read('package.json'));
-const PINS = ['prosemirror-commands', 'prosemirror-history', 'prosemirror-keymap', 'prosemirror-markdown', 'prosemirror-model', 'prosemirror-schema-list', 'prosemirror-state', 'prosemirror-transform', 'prosemirror-view'];
+const PINS = ['@tiptap/core', '@tiptap/extension-image', '@tiptap/extension-link', '@tiptap/extension-list', '@tiptap/extension-table', '@tiptap/markdown', '@tiptap/pm', '@tiptap/starter-kit']; // lane doc-editor-wheel
 ok(PINS.every((p) => /^\d+\.\d+\.\d+$/.test(pkg.dependencies[p] || '')), 'the editor packages are pinned EXACT', PINS.map((p) => p + '@' + pkg.dependencies[p]));
 ok(/esbuild src\/doc-editor-entry\.js --bundle --outfile=public\/doc-editor\.js --format=esm/.test(pkg.scripts.build) && /^public\/doc-editor\.js$/m.test(read('.gitignore')), 'npm run build makes public/doc-editor.js (gitignored build output)');
 
@@ -221,7 +207,7 @@ const MUT = mutantCopies('docmodel', REPO);
 const msrc = read('src/doc-model.js');
 const RULES = [
   ['the round-trip compare removed (every file "lossless")', "for (let i = 0; i < Math.max(a.length, b.length); i++) if (a[i] !== b[i]) return { ok: false, code: 'lossy', line: i + 1 };", '', (X) => X.fidelityVerdict('Price 5 * 3\n', 'Price 5 \\* 3').ok === true],
-  ['the table rule removed', "  ['table',", "  ['table_off', () => false, ", (X) => !X.rawReasons(RAW['a GFM table'][1]).includes('table')],
+  ['the CRLF rule removed', "  ['crlf', (s) => s.includes('\\r')],", "  ['crlf_off', () => false],", (X) => !X.rawReasons('a\\r\\nb').includes('crlf')],
   ['the 4 KB bound removed', 'if (utf8Len(text) > LIMITS.messageBytes)', 'if (false)', (X) => X.commentsVerdict('/a.md', Array.from({ length: 5 }, () => ({ quote: 'q'.repeat(200), note: '注'.repeat(1000) }))).ok === true],
   ['the quote bound removed', 'const quote = clip(oneLine(x.quote), LIMITS.quote);', 'const quote = oneLine(x.quote);', (X) => X.commentsVerdict('/a.md', [{ quote: 'q'.repeat(500), note: 'n' }]).text.includes('q'.repeat(300))],
   ['the dirty check removed (a repaint over unsaved edits)', "  if (!dirty) return 'repaint';", "  return 'repaint';", (X) => X.conflictVerdict({ disk: 11, base: 10, dirty: true }) === 'repaint'],

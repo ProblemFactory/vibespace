@@ -8,6 +8,7 @@
 // modal dialogs when off. Mobile keeps its own nav — the rail never renders.
 import { t as tr } from './i18n.js';
 import { openJobsWindow } from './jobs-panel.js';
+import { paintIndexLine } from './search-window.js';
 import { badgeCounts, badgeText, heldText } from './jobs-layout.js';
 import { renderChannelsPanel } from './channels-panel.js';
 import { copyText, escHtml, showToast, fetchJson, showContextMenu, showConfirmDialog, showInputDialog, absUrl } from './utils.js';
@@ -514,7 +515,8 @@ export function installSidebarRail(Sidebar) {
       if (!c.isConnected) return;
       // zone order: bars → history charts → process table LAST (owner
       // report: the long table pushed the charts out of sight)
-      c.innerHTML = '<div class="sys-host-row"></div><div class="sys-live"></div><div class="sys-hist"></div><div class="sys-procs"></div>';
+      c.innerHTML = '<div class="sys-host-row"></div><div class="sys-live"></div><div class="sys-hist"></div><div class="sys-procs"></div><div class="sys-search"></div>';
+      paintIndexLine(c.querySelector('.sys-search')).catch(() => {}); // lane global-search: the search index's size + Rebuild (one line)
       const hostRow = c.querySelector('.sys-host-row');
       const live = c.querySelector('.sys-live');
       const procsEl = c.querySelector('.sys-procs');

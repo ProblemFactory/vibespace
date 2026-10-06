@@ -616,7 +616,6 @@ function setVerifiedCap(backend, key, value) {
 //     deleted worktree), so letting it write would silently discard a
 //     preference because of a transient; and an explicit `false` is a decision
 //     the user made, which a fact never overrules.
-const WORKTREE_REASONS = Object.freeze(['unsupported', 'not-a-git-repo']);
 
 function worktreeCaps(backend) {
   return capsOf(backend).worktree || NO_WORKTREE;
@@ -662,4 +661,4 @@ function worktreeSpawnArgs({ backend, want, resume, fork }) {
 
 module.exports = { BACKEND_CAPS, capsOf, contributeCaps, setVerifiedCap, QUEUE_VERBS, LEGACY_QUEUE_VERBS, deriveInputModes, notificationDelivery,
   AUTO_RESUME_FORMS, NO_AUTO_RESUME, deriveAutoResume,
-  NO_WORKTREE, WORKTREE_REASONS, worktreeCaps, worktreeRefusal, worktreeSpawnArgs, worktreePick, worktreeLatchWrite };
+  NO_WORKTREE, worktreeCaps, worktreeRefusal, worktreeSpawnArgs, worktreePick, worktreeLatchWrite };

@@ -78,7 +78,8 @@ function loadVerbs() {
 const V = loadVerbs();
 /** lane browser-stuck (2026-09-28): the page-dialog words (PURE src/browser-stuck.js — the source in a checkout, the
  *  boot-time copy `vibespace-browser-stuck.js` beside this file on a host). OPTIONAL: without it (an older install) the
- *  browser CLI's own dialog lines pass through unchanged; the server's answers carry their own sentences either way. */
+ *  browser CLI's own dialog lines pass through unchanged; the server's answers carry their own sentences either way.
+ *  KEPT on purpose (lane dc-dead-sweep, 2026-10-05): a partial install (this CLI without its rules file) is a real fleet shape. */
 function loadStuck() {
   const root = path.join(__dirname, '..', '..');
   const cands = fs.existsSync(path.join(root, 'server.js')) && fs.existsSync(path.join(root, 'src', 'browser-stuck.js'))
@@ -224,7 +225,8 @@ const handlesLine = (handles) => (handles && handles.length ? handles.map((h) =>
 /** P4 (§7.4): the verbs that navigate — their URL is stamped on the lease (what a backend switch re-opens) and their output is read for the 403/429 HINT. */
 const NAV_VERBS = new Set(['open', 'goto', 'navigate', 'nav']);
 /** lane site-reset: the loop's ways out where the rules file beside this one predates the loop (the same list as
- *  src/browser-stuck.js LOOP_PASS_VERBS — pinned equal by test-browser-stuck), and a looping tab's screenshot bound. */
+ *  src/browser-stuck.js LOOP_PASS_VERBS — pinned equal by test-browser-stuck), and a looping tab's screenshot bound.
+ *  KEPT on purpose (lane dc-dead-sweep, 2026-10-05): the fallbacks serve a partial install, a real fleet shape. */
 const LOOP_PASS_FALLBACK = new Set(['stop', 'site-reset', 'tab', 'close', 'screenshot', 'dialog', 'open', 'goto', 'navigate', 'nav', 'back', 'forward', 'reload']);
 /** verify r4 #4: the READING verbs (src/browser-stuck.js LOOP_READ_VERBS, pinned equal) — they run on a loop whose pages load between hops. */
 const LOOP_READ_FALLBACK = new Set(['snapshot', 'get', 'is', 'console', 'errors']);

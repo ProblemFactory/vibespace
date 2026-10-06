@@ -107,6 +107,9 @@ const argv = process.argv.slice(2).filter((x) => x !== '--pin-tab');
 const [a, b] = argv;
 if (a === '--version') { console.log('agent-browser 0.38.0'); process.exit(0); }
 if (a === 'session' && b === 'info') { const s = read(); const act = !!(s && alive(s.pid)); out({ success: true, data: { active: act, namespace: ns, pid: act ? s.pid : null, session: process.env.AGENT_BROWSER_SESSION || null, socketDir: path.join(st, ns, 'run'), version: act ? '0.38.0' : null } }); process.exit(0); }
+// mirror-green-220: FAKE_CLOSER — the daemon is a real process whose chrome (a child holding the profile's lock) closes (the leg ends it between ticks); \`get cdp-url\` relaunches it in that daemon (0.38.1's heal) and names a port nobody listens on
+if (process.env.FAKE_CLOSER === '1' && a === 'open') { let s = read(); if (!(s && alive(s.pid))) { const c = spawn(process.execPath, ['-e', process.env.FAKE_DAEMON_SRC], { detached: true, stdio: 'ignore', env: process.env }); c.unref(); s = { pid: c.pid, profile: process.env.AGENT_BROWSER_PROFILE || null }; fs.writeFileSync(f, JSON.stringify(s)); fs.appendFileSync(path.join(st, 'launches.log'), JSON.stringify({ ns, ...s }) + '\\n'); } out({ success: true, data: {} }); process.exit(0); }
+if (process.env.FAKE_CLOSER === '1' && a === 'get' && b === 'cdp-url') { const s = read(); if (!(s && alive(s.pid))) { out({ success: false, error: 'fake: no browser' }); process.exit(1); } try { process.kill(s.pid, 'SIGUSR2'); } catch { } Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 120); out({ success: true, data: { cdpUrl: 'ws://127.0.0.1:' + process.env.FAKE_CDP_PORT + '/devtools/browser/fake-' + ns } }); process.exit(0); }
 if (a === 'open') { let s = read(); if (!(s && alive(s.pid))) { const c = spawn('sleep', ['600'], { detached: true, stdio: 'ignore' }); c.unref(); s = { pid: c.pid, profile: process.env.AGENT_BROWSER_PROFILE || null }; fs.writeFileSync(f, JSON.stringify(s)); fs.appendFileSync(path.join(st, 'launches.log'), JSON.stringify({ ns, ...s }) + '\\n'); } out({ success: true, data: { url: b } }); process.exit(0); }
 if (a === 'get' && b === 'cdp-url') { const s = read(); if (!(s && alive(s.pid))) { out({ success: false, error: 'fake: no browser' }); process.exit(1); } out({ success: true, data: { cdpUrl: 'ws://127.0.0.1:' + process.env.FAKE_CDP_PORT + '/devtools/browser/fake-' + ns } }); process.exit(0); }
 if (a === 'get' && b === 'box') { out({ success: true, data: { x: 10, y: 20, width: 100, height: 30 } }); process.exit(0); }
@@ -166,6 +169,55 @@ const noVerdict = mutant('no-verdict', "return { state: hung ? 'unresponsive' : 
 ok(noVerdict && table(noVerdict).hung === false && table(noVerdict).oneMiss === true, 'control: with no verdict the table\'s "≥ 60 s ⇒ unresponsive" row goes red (every refusal stays "run the command again")');
 const ungated = mutant('ungated', "  if (by === 'user') return { ok: true };", "  return { ok: true };");
 ok(ungated && admission(ungated).agentAnswering === false && admission(ungated).agentDriven === false, 'control: an ungated agent restart turns the "answering ⇒ refused" and "a human drives ⇒ refused" rows red');
+
+// ═══ ⑥ mirror-green-220: A CLOSED-AGAIN BROWSER INSIDE ITS RELAUNCH LOOP IS NEVER JUDGED UNRESPONSIVE ═══
+// The .220 Actions mirror (heavy 3/4, twice): B-47f9's slow closer — a chrome that closes after every relaunch, 4 min apart on
+// the keeper's clock, its DevTools port refusing — filed "has not answered since …" instead of the unstable notice: the
+// misses of each RELAUNCHED chrome (another pid) were added to the closed one's. Fake clock, 14 leased ticks over a real
+// daemon whose chrome keeps closing (ended between ticks): relaunched every tick, 0 verdicts, 0 notices; a patched copy without the guard files one.
+console.log('— ⑥ a closed-again browser inside its relaunch loop (fake clock, 14 ticks)');
+const CHROME_SRC = "const fs=require('fs'),path=require('path'),os=require('os');const d=(process.argv.find((x)=>x.startsWith('--user-data-dir='))||'').slice(16);fs.mkdirSync(d,{recursive:true});const L=path.join(d,'SingletonLock');try{fs.unlinkSync(L)}catch{}fs.symlinkSync(os.hostname()+'-'+process.pid,L);fs.writeFileSync(path.join(d,'DevToolsActivePort'),'1\\n/devtools/browser/x\\n');setInterval(()=>{},1e9);";
+const DAEMON_SRC = "const {spawn}=require('child_process'),fs=require('fs'),path=require('path');let cur=null;const d=process.env.AGENT_BROWSER_PROFILE;const go=()=>{cur=spawn(process.execPath,['-e',process.env.FAKE_CHROME_SRC,'--','--user-data-dir='+d],{stdio:'ignore',env:{}});fs.appendFileSync(path.join(process.env.FAKE_AB_STATE,'chromes.log'),cur.pid+'\\n');};process.on('SIGUSR2',()=>{if(!cur||cur.exitCode!==null||cur.signalCode!==null)go();});go();setInterval(()=>{},1e9);";
+const deadSrv = net.createServer(); await new Promise((r) => deadSrv.listen(0, '127.0.0.1', r)); const DEAD_PORT = deadSrv.address().port; await new Promise((r) => deadSrv.close(r));
+const KEY_C = 'bk-0000000c';
+const goneSoon = async (pid) => { for (let i = 0; i < 100 && fs.existsSync('/proc/' + pid); i++) await sleep(10); }; // dead AND reaped by its daemon
+async function closerLeg(Kmod, tag, ticks = 14) {
+  const st = path.join(ROOT, 'closer-' + tag); fs.mkdirSync(st, { recursive: true });
+  const env = { ...rtEnv, FAKE_AB_STATE: st, FAKE_CLOSER: '1', FAKE_CDP_PORT: String(DEAD_PORT), FAKE_CHROME_SRC: CHROME_SRC, FAKE_DAEMON_SRC: DAEMON_SRC };
+  let c = Date.now(); const items = [], jl = [];
+  const store = { add: (k, it) => { const x = { id: 'uc-' + (items.length + 1), status: 'open', ...it }; items.push(x); return x; }, get: (id) => items.find((x) => x.id === id) || null, setStatus() { } };
+  const jlog = (m) => jl.push(String(m));
+  const kk = Kmod.create({ dataDir: path.join(st, 'data'), homeDir: HOME, env: () => env, broadcast: () => { }, serverSetting: () => undefined, serverNotice: null, getTelemetry: () => null,
+    liveKeys: () => new Set([KEY_C]), runtime: F.createBrowserRuntime({ env }), facts: F.createBrowserFacts({ env }), log: { log: jlog, warn: jlog, error: jlog }, now: () => c, install: false, tickMs: 3600e3, answerAskMs: 250, userTodos: store });
+  const r = { tag, verdicts: 0 };
+  try {
+    const q = kk.createProfile({ label: 'Closer ' + tag }, { owner: { kind: 'instance', id: null } });
+    await kk.attach({ profileId: q.id, browserKey: KEY_C, sessionId: 'sess-c' });
+    const chromes = () => fs.readFileSync(path.join(st, 'chromes.log'), 'utf8').trim().split('\n').map(Number);
+    for (let i = 0; i < ticks; i++) { const last = chromes().pop(); try { process.kill(last, 'SIGKILL'); } catch { } await goneSoon(last); c += 4 * 60000; await kk.tick(); if (kk.browserOf(q.id).unresponsive) r.verdicts++; }
+    r.chromes = chromes().length;
+    r.closed = (kk.browserOf(q.id).closed || {}).code || null;
+    r.notices = items.filter((x) => x.action && x.action.type === 'browser-restart').map((x) => x.text);
+    r.lines = jl.filter((l) => /not answering since/.test(l)).length;
+    await kk.stop(q.id).catch(() => { });
+  } catch (e) { r.threw = String(e && e.stack); }
+  kk.shutdown();
+  for (const n of ['launches.log', 'chromes.log']) { let t = ''; try { t = fs.readFileSync(path.join(st, n), 'utf8'); } catch { } for (const l of t.trim().split('\n').filter(Boolean)) { try { process.kill(n === 'chromes.log' ? Number(l) : JSON.parse(l).pid, 'SIGKILL'); } catch { } } }
+  return r;
+}
+const cl = await closerLeg(K, 'fixed');
+ok(!cl.threw && cl.chromes >= 6 && cl.verdicts === 0 && cl.notices.length === 0 && cl.lines === 0, `⑥ a closed-again browser inside its relaunch loop is never judged unresponsive: ${cl.chromes} chromes in 14 ticks 4 min apart (each relaunched one refused its ask), ${cl.verdicts} verdicts, ${cl.notices.length} notices, ${cl.lines} journal lines (then \`${cl.closed}\`)`, cl);
+// the control: the keeper's guard removed (the .220 shape — the asks chained across processes, a closed record asked)
+const kSrc = fs.readFileSync(new URL('../src/server/browser-keeper.js', import.meta.url), 'utf8');
+const SRV = path.dirname(new URL('../src/server/browser-keeper.js', import.meta.url).pathname);
+const G_FROM = 'const v = BS.browserAnswerVerdict(replaced ? null : known, { answered, at, pidAlive: running });';
+const G_TO = 'const v = BS.browserAnswerVerdict(known, { answered, at, pidAlive: Number.isInteger(pid) && F.pidAlive(pid) });';
+if (kSrc.includes(G_FROM)) {
+  const mf = path.join(MUT, 'keeper-unguarded.js');
+  fs.writeFileSync(mf, kSrc.replace(G_FROM, G_TO).replace(/require\((['"])(\.\.?\/[^'"]+)\1\)/g, (m, q, rel) => 'require(' + JSON.stringify(path.resolve(SRV, rel)) + ')'));
+  const cm = await closerLeg(require(mf), 'unguarded', 4);
+  ok(!cm.threw && cm.verdicts > 0 && cm.notices.length >= 1 && /has not answered since/.test(cm.notices[0]), `⑥ CONTROL: a keeper copy without the guard judges the closing-again browser unresponsive (${cm.verdicts} verdict ticks) and files "${cm.notices && cm.notices[0]}" — the leg above can go red`, cm);
+} else ok(false, '⑥ CONTROL: the guarded verdict call was not found in src/server/browser-keeper.js');
 
 console.log(`\n${fail ? '✗' : '✓'} test-browser-unresponsive: ${pass} passed, ${fail} failed`);
 keeper.shutdown(); keeper = null;

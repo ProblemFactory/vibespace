@@ -372,7 +372,6 @@ function rosterResetOffer(u, { capable = false } = {}) {
 // THE EGRESS IS SAID (verify r1, M3): the helper is an app-server on the account's login, and its STARTUP
 // reaches github.com (the plugin marketplace sync — MEASURED, src/codex-reset-helper.js MEASURED_CONNECTS) and
 // chatgpt.com on its own; a person pressing Use is told so on the dialog, never after.
-const HELPER_WHY = Object.freeze(['no-session', 'wrapper-predates']);
 function helperLine(pv) {
   if (!pv || pv.via !== 'helper' || pv.code) return null;
   if (pv.helperWhy === 'wrapper-predates') return { key: i18nKey('The conversation on this account runs a codex wrapper that predates the reset-credit fix — Terminate + Resume it, or use the credit from here: it is sent through a short-lived codex helper process on this account’s login, whose startup also reaches github.com (codex’s plugin marketplace sync) and chatgpt.com.'), params: {} };
@@ -685,7 +684,6 @@ function rungBlockUntil(t, { now = Date.now(), eventKey = null, resetsAtSec = nu
 //   is ADMITTED with that attempt as its prior — its read-first settles it, and the send is refused while any prior
 //   is still unsettled and not lapsed (the engine's readFirst gate).
 const ATTEMPT_PHASES = Object.freeze(['none', 'open', 'sent', 'landed', 'unspent', 'not-sent', 'unanswered', 'unsettled', 'lapsed', 'settled']);
-const ATTEMPT_EVENTS = Object.freeze(['press', 'sent', 'answer', 'skipped', 'ack-expired', 'floor-expired', 'reading', 'clock', 'boot', 'torn', 'pool-move', 'clear']);
 // what the engine WRITES (data/reset-credit-tries.json, resetCreditTryRecord) — the phase is a function of these alone
 const PERSISTED_FIELDS = Object.freeze(['key', 'at', 'sentAt', 'sid', 'via', 'origin', 'resetsAtSec', 'lane', 'eventKey', 'idempotencyKey', 'identity', 'charged', 'outcome', 'outcomeAt', 'creditsAt', 'reportsSent', 'window', 'settled', 'supersededAt']);
 function persistedView(t) { if (!t || typeof t !== 'object') return null; const o = {}; for (const k of PERSISTED_FIELDS) if (t[k] !== undefined) o[k] = t[k]; o.prior = persistedView(t.prior); return JSON.parse(JSON.stringify(o)); }
@@ -867,7 +865,7 @@ module.exports = {
   resetCreditVerdict, offerOf, kneeSec, windowPaceRate, describeUse, reasonText, fmtWait,
   dialogModel, refusalLine, rosterResetOffer, // p2: the ONE confirm dialog's sentences + the roster chip (client, DOM-free)
   // lane reset-path: when an attempt arms the floor (only a consume that went out), the auto rung's one-try-per-event bound, the helper path's words
-  RESET_CREDIT_FLOOR_MS, RESET_CREDIT_ACK_MS, ATTEMPT_OUTCOMES, FLOOR_OUTCOMES, VENDOR_OUTCOMES, HELPER_WHY,
+  RESET_CREDIT_FLOOR_MS, RESET_CREDIT_ACK_MS, ATTEMPT_OUTCOMES, FLOOR_OUTCOMES, VENDOR_OUTCOMES,
   creditAnswerOf, outcomeArmsFloor, attemptBlock, rungBlockUntil, helperLine,
   // verify r1: the unknown consume — unsettled after the floor until a reading says whether it landed
   UNSETTLED_OUTCOMES, isUnsettled, unsettledInChain, priorForPress, armedByClock, settleByReading, unsettledLine,
@@ -878,5 +876,5 @@ module.exports = {
   // lane reset-path R3: the card the credit outlived — resolved on the message, said in one line
   RESOLVE_HOW, resolvedOf, offerResolution, resetCreditCardView,
   // verify r3: the attempt lifecycle as ONE closed table (the phases, the events, the persisted view, the step)
-  ATTEMPT_PHASES, ATTEMPT_EVENTS, PERSISTED_FIELDS, persistedView, phaseOf, attemptStep,
+  ATTEMPT_PHASES, PERSISTED_FIELDS, persistedView, phaseOf, attemptStep,
 };

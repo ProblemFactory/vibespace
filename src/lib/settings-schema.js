@@ -1578,7 +1578,6 @@ export function unregisterPluginSettings(pluginId) {
   }
   return true;
 }
-export function listPluginSettings(pluginId) { return [...(PLUGIN_SETTING_OWNERS.get(pluginId)?.paths || [])]; }
 
 // ── SETTINGS GROUPS (2.369.132, owner: "所有设置界面也可以做一下设置分级") ──
 // The nav is a TREE: group heads over the categories. SETTINGS_CATEGORIES stays

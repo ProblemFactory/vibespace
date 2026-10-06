@@ -25,7 +25,6 @@ const shown = (v, n = 60) => { const s = String(v == null ? '' : v).replace(/[\x
 // with the folder) and `system: {name}` in design.json. The check below is advice, never a refusal: a literal colour or
 // font size in an artboard that is none of the tokens' values is WARNED ("checked against the system", F51).
 const TOKENS_FILE = 'tokens.css';
-const SYSTEM_FILE = 'system.md';
 const TOKEN_LIMITS = Object.freeze({ tokensBytes: 256 * 1024, lintPerArtboard: 6, valueShown: 60 });
 const COLOR_RE = /#[0-9a-fA-F]{3,8}(?![0-9a-zA-Z_-])|\b(?:rgba?|hsla?)\([^()]{0,120}\)/g;
 const LENGTH_RE = /(?:^|[^\w.#-])(\d+(?:\.\d+)?|\.\d+)(px|rem|em|pt)\b/g;   // one start per number: linear
@@ -153,4 +152,4 @@ function tokensVerdict(text) {
   return { ok: true, text };
 }
 
-module.exports = { TOKENS_FILE, SYSTEM_FILE, TOKEN_LIMITS, tokensOf, tokenLint, tokensVerdict, declarationsOf };
+module.exports = { TOKENS_FILE, TOKEN_LIMITS, tokensOf, tokenLint, tokensVerdict, declarationsOf };
