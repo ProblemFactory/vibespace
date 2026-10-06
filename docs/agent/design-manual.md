@@ -28,6 +28,7 @@ vibespace-design add <file.html> [--title "…"] [--w 1280 --h 800] [--x 0 --y 0
 vibespace-design check [dir]                                   every artboard's verdict and design.json's, by name (exit 1 on a refusal)
 vibespace-design sync [dir]                                    "these files changed" — the LAST step of every edit
 vibespace-design open [dir] [--title "…"]                      open (or bring forward) the Design window on the folder
+vibespace-design open [dir] --for <conversation>               HAND the design over: its chat + Artifacts, the Design window opens for its user
 vibespace-design show [dir]                                    design.json in words: artboards, pages, notes, tweaks + what the user set
 vibespace-design ask [dir] < questions.json                    BEFORE drawing a new design: your questions as a form in the window; then stop
 vibespace-design preview <file.html>                           an address your browser opens: look at the artboard before you hand over

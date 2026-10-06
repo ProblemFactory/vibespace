@@ -184,12 +184,21 @@ ok(await Q("chip.click(); const dd = w.element.parentElement.querySelector('.cha
 await Q("document.querySelector('.chat-status-dropdown .chat-status-browser-nudge').click(); return true");
 await sleep(600);
 ok(await evaluate("!!document.querySelector('.toast, .vs-toast, [class*=\"toast\"]')") || true, 'the nudge click answered (toast)');
-// the notice rides the agent's NEXT prompt context, once, and is free
+// the notice rides the agent's NEXT prompt context, once, and is free. The fetch loop waits for THIS notice, not any:
+// the attaches + the pin queued older ones, and behind the first prompt's tools intro the cap can hold a tail of the
+// queue — the OLDEST changes ride first (mirror-green-223: key-first order let the pin ride after the nudge, '…once' red)
+const NUDGED = /browser profile changed: Personal → Work \(by user\)/;
 let ctxText = '';
-for (let i = 0; i < 3 && !/browser profile changed/.test(ctxText); i++) { const pc = await agent('GET', '/api/agent/prompt-context'); ctxText = String(pc.json?.context || ''); }
-ok(/browser profile changed: Personal → Work \(by user\)/.test(ctxText), 'the next prompt context carries `browser profile changed: Personal → Work (by user)` as the layer-② notice', ctxText.slice(0, 400));
+const sizeOf = (t) => `${Buffer.byteLength(t, 'utf8')} B${/browser profile changed/.test(t) ? ` carrying the notice ×${t.split('browser profile changed').length - 1}` : ' (no notice)'}`;
+const fetched = []; let seen = '';
+for (let i = 0; i < 3 && !NUDGED.test(ctxText); i++) { const pc = await agent('GET', '/api/agent/prompt-context'); ctxText = String(pc.json?.context || ''); seen += ctxText; fetched.push(sizeOf(ctxText)); }
+console.log(`    prompt context fetch(es) until the notice: ${fetched.join(' · ')}`);
+ok(NUDGED.test(ctxText), 'the next prompt context carries `browser profile changed: Personal → Work (by user)` as the layer-② notice', ctxText.slice(0, 400));
 const pc2 = await agent('GET', '/api/agent/prompt-context');
+console.log(`    the next prompt context: ${sizeOf(String(pc2.json?.context || ''))}`);
 ok(!/browser profile changed/.test(String(pc2.json?.context || '')), '…once');
+for (const l of journal.split('\n').filter((x) => /pending notice\(s\) wait/.test(x))) console.log(`    server: ${l.replace(/^.*?\[inject\]/, '[inject]').slice(0, 200)}`);
+ok(seen.lastIndexOf('browser profile changed') === seen.search(/browser profile changed: Personal → Work \(by user\)(?![\s\S]*browser profile changed)/), 'the queued profile changes rode OLDEST FIRST — the last one the agent read is the present (the nudge\'s Personal → Work)');
 const routeSrc = fs.readFileSync(path.join(repo, 'src/routes/browser.js'), 'utf8');
 ok(!/spendGuard|authorizeUnattendedSpend|spendReason|deliverToConversation/.test(routeSrc), 'the nudge route names no spend reason and asks no ladder — zero billed turns by construction');
 // back on the pin ⇒ neutral again, and the nudge has nothing to say

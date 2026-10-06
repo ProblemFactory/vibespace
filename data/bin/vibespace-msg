@@ -33,6 +33,7 @@ const argv = process.argv.slice(2);
 const flags = {};
 const args = [];
 const atRefs = [];
+const handPaths = []; // lane artifacts-handover: --artifact <path> (repeatable) — absolute against this shell's cwd; a /p/<id> page link as is
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
   if (a === '--quiet' || a === '--wake' || a === '--yes') flags[a.slice(2)] = true;
@@ -41,6 +42,11 @@ for (let i = 0; i < argv.length; i++) {
   else if (a.startsWith('--again=')) flags.again = a.slice('--again='.length);   // reuse a printed nonce = a retry of that attempt
   else if (a === '--context' || a === '--before' || a === '--limit' || a === '--file') { flags[a.slice(2)] = argv[i + 1]; i++; }
   else if (a === '--at') { if (argv[i + 1] !== undefined) atRefs.push(argv[i + 1]); i++; }
+  else if (a === '--artifact') { // every path after it until the next flag (`--artifact <design> <report.md>`) once the text is in
+    const take = (v) => handPaths.push(/^\/p\/[\w-]+\/?$/.test(v) || v.startsWith('/') ? v : require('node:path').resolve(v));
+    if (argv[i + 1] !== undefined) take(argv[++i]);
+    while (args.length >= 3 && argv[i + 1] !== undefined && !argv[i + 1].startsWith('--')) take(argv[++i]);
+  }
   else args.push(a);
 }
 const verb = args[0];
@@ -64,6 +70,9 @@ const REMEDY = {
   'not-chat': 'nothing was sent. A terminal session cannot be compacted by an agent — send the brief without the compaction: vibespace-msg send <agent> --wake "…"',
   'unknown-mention': 'nothing was sent. @ a member by its exact name or conversation id (the candidates above), or name it with --at <name|id>; a literal "@word" goes in backticks as code',
   'ambiguous-mention': 'nothing was sent. @ the member by its conversation id (one of the ids above), or --at <id>',
+  'not-yours': 'NOT handed over — only what this conversation made can be handed over: a file it wrote (Write / Edit), a design it opened (vibespace-design new|open), a page it published',
+  'too-many': 'NOT handed over — at most 20 artifacts per message; hand the rest over in a second message',
+  'no-receiver': 'NOT handed over — into a group, name the receiver: @name in the text or --at <name>',
   'confirm-wakes': 'nothing was sent. Repeat with --yes if waking them all NOW is worth that many billed turns — or send without --wake (add --quiet to an invite): they read it on their next turn, free',
 };
 function refused(j, status) {
@@ -88,10 +97,13 @@ async function call(method, p, body) {
 const USAGE = `vibespace-msg — message other agent sessions (groups; Task-Group scoped reach)
   vibespace-msg list                              ← sessions you can see/message (name · id · state)
   vibespace-msg group list                        ← the groups you are in (id · members · unread · your notify mode; also: groups)
-  vibespace-msg send <name|id|group> "text" [--at <member>]… [--wake] [--yes]
+  vibespace-msg send <name|id|group> "text" [--at <member>]… [--wake] [--yes] [--artifact <path>…]
         ← an agent: your direct (two-member) group with it · a group: everyone in it.
           Default: it reaches them on THEIR next turn (free). @name in the text, --at <name|id>, or --wake, wakes them NOW (a billed turn each).
           Every @ is resolved to a member's id when you send: an @ that names no member (or two) is refused with the candidates.
+          --artifact <path|/p/id> (≤ 20) HANDS OVER what THIS conversation made (a file it wrote, a design folder it opened, a
+          page it published) to the receiver: it shows in THEIR chat + Artifacts list (a design opens in the user's Design
+          window). Nothing is copied — the receiver must run on the same machine. Into a group: name the receiver (@ / --at).
           Waking more than 5 at once is refused with the count until you add --yes; at most 8 wakes per minute are yours.
   vibespace-msg dispatch <agent> --file brief.md | "text"   ← hand a WORKER its next brief: compacted first if idle, then woken (ONE billed turn)
         = send <agent> --wake --compact-first "text". Waits for the compaction (≤ 3 min); says whether it compacted and why not.
@@ -189,12 +201,19 @@ const deliveryClause = (rows) => {
   }
   if (verb === 'send') {
     const to = args[1];
-    const text = args[2];
+    const text = args[2] && handPaths.length ? `${args[2]}\n[artifacts handed over: ${handPaths.join(', ')}]` : args[2]; // lane artifacts-handover: the receiver's agent reads WHAT was handed over
     if (!to || !text) { console.error('usage: vibespace-msg send <name|id|group> "text" [--wake]'); process.exit(1); }
+    if (handPaths.length && args.length > 3) { console.error(`vibespace-msg: refused — ${args.slice(3).join(' ')}: an argument after the text that is not an --artifact path; nothing was sent (--artifact <path> <path>… after the text)`); process.exit(1); }
     const body = { to, text, wake: !!flags.wake };
     if (atRefs.length) body.at = atRefs;
     if (flags.yes) body.yes = true;
+    if (handPaths.length) body.artifacts = handPaths;
     const r = await call('POST', '/api/agent/msg/send', body);
+    if (handPaths.length && !r.handover) console.log('NOT handed over: this server has no agent groups engine (the message itself went the legacy way)');
+    if (r.handover) { // lane artifacts-handover
+      for (const h of r.handover.handed || []) console.log(`handed over ${h.path} (${h.kind}) to "${h.toName || h.to}" — it shows in their chat and Artifacts list`);
+      for (const x of r.handover.refused || []) console.log(`NOT handed over${x.item ? ' ' + x.item : ''}${x.to ? ' to ' + x.to : ''}: ${x.error}`);
+    }
     if (r.posted) {
       console.log(`posted to ${r.group.pair ? 'your direct group' : 'group'} "${r.group.name}" (${r.group.id})${r.pairCreated ? ' — created just now' : ''}`);
       const w = wokeLine(r);

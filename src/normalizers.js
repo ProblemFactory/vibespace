@@ -346,14 +346,17 @@ function feedArtifactCard(session, block) {
 }
 /** The rebuild's / history read's derivation: the harness hook over every record, folded AFTER the record (the hook
  *  has no afterRecord — the PREVIOUS record folds before the next one), its cards placed/patched silently. */
-function artifactDeriver(mm, { artifactsOf, cwd = '', host = '' }) {
+function artifactDeriver(mm, { artifactsOf, cwd = '', host = '', helper = null }) {
   let rows = {};
   let prev = null;
+  const hstate = { runs: new Map(), seen: new Set() }; // lane artifacts-handover: the helper door's state for THIS derivation
   const fold = (raw) => {
     let ops = [];
     try { ops = artifactsOf(raw) || []; } catch { ops = []; }
+    if (raw && (raw.parent_tool_use_id || raw.isSidechain)) ops = []; // a helper's own record: the helper door folds it at the Task's end
+    if (helper && artifactHelperSource && raw && raw.type === 'user') { try { ops = ops.concat(artifactHelperSource({ backend: helper.backend, cwd, host, claudeSessionId: helper.sessionId }, raw, hstate) || []); } catch { } }
     for (const o of ops) {
-      const r = AF.apply(rows, { ...o, host, cwd, at: recordAt(raw), by: 'agent' });
+      const r = AF.apply(rows, { host, cwd, ...o, at: recordAt(raw), by: 'agent' });
       if (r.skipped || !r.row) continue;
       rows = r.rows;
       if (AF.cardWorthy(r.row)) { const b = AF.cardBlock(r.row); if (!patchArtifactCard(mm, b, { emit: false })) placeArtifactCard(mm, b); }
@@ -369,6 +372,10 @@ function setArtifactStoreSource(fn) { artifactStoreSource = typeof fn === 'funct
 // the persisted rows); a rebuild draws their cards beside the others
 let artifactServiceSource = null;
 function setArtifactServiceSource(fn) { artifactServiceSource = typeof fn === 'function' ? fn : null; }
+// lane artifacts-handover: THE HELPER DOOR (src/server/artifact-registry.js helperOps, set by its configure) — a record
+// that ends a Task / workflow agent brings the helper transcript's writes as this conversation's rows (via: subagent)
+let artifactHelperSource = null;
+function setArtifactHelperSource(fn) { artifactHelperSource = typeof fn === 'function' ? fn : null; }
 function artifactServiceRows(session) { if (!artifactServiceSource) return {}; try { return artifactServiceSource(session) || {}; } catch { return {}; } }
 function artifactStoreRows(session, sessionId) {
   if (!artifactStoreSource) return {};
@@ -578,12 +585,12 @@ function taskReplayRecords(taskRecords) {
   return out;
 }
 /** A conversation's derivation options: its DESCRIPTOR's hook (lane artifacts-model; null = the harness never produces). */
-function artifactDeriveOpts({ backend, cwd, host } = {}) {
+function artifactDeriveOpts({ backend, cwd, host, sessionId = null } = {}) {
   let of = null;
   try { of = harnessReg.harnessOf(backend || 'claude').artifactsOf; } catch { of = null; }
-  return typeof of === 'function' ? { artifactsOf: of, cwd: cwd || '', host: host || '' } : null;
+  return typeof of === 'function' ? { artifactsOf: of, cwd: cwd || '', host: host || '', helper: { backend: backend || 'claude', sessionId } } : null;
 }
-const artifactsOptsOf = (session) => artifactDeriveOpts({ backend: session.backend, cwd: session.cwd, host: session.host });
+const artifactsOptsOf = (session) => artifactDeriveOpts({ backend: session.backend, cwd: session.cwd, host: session.host, sessionId: session.claudeSessionId || session.backendSessionId || null });
 function rebuildHistory(session, sessionId, records, { budgetMs, onProgress, replay = null, helperResults = null } = {}) {
   if (session._rebuildPromise) return session._rebuildPromise;
   const opHandlers = [...(session._normalizer?.listeners || [])];
@@ -646,5 +653,5 @@ function rebuildHistory(session, sessionId, records, { budgetMs, onProgress, rep
 module.exports = { createMessageManager, NORMALIZERS, feedLive, feedPeerCard, rebuildHistory, taskReplayRecords, pendingPermissions, pendingHelperApprovals, notePermissionStale, routeToHelperView, seedHelperView, setAsksObserver, noteHelperResults, HELD_PEER_CARDS_CAP,
   setBrowserCardSource, browserCardsFor, placeBrowserCard, convertWithCards, feedBrowserCard,
   setProposalCardSource, placeProposalCard, patchProposalCard, feedProposalCard,
-  placeArtifactCard, patchArtifactCard, feedArtifactCard, artifactCardId, artifactDeriveOpts, setArtifactStoreSource, artifactStoreRows, setArtifactServiceSource, // lane artifacts-model: the deliverable card // lane browser-propose: the proposal card
+  placeArtifactCard, patchArtifactCard, feedArtifactCard, artifactCardId, artifactDeriveOpts, setArtifactStoreSource, setArtifactHelperSource, artifactStoreRows, setArtifactServiceSource, // lane artifacts-model: the deliverable card // lane browser-propose: the proposal card
   setGroupCardPersist, feedGroupCard, placeGroupCard, upgradeWakeCards, redactGroupCards };

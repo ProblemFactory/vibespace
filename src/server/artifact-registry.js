@@ -7,6 +7,14 @@
  *   · observe(session, record) — every harness's stdout consumer (claude: the parse AND the device feed's
  *     claudeSideEffects; codex-events; acp-events) hands each record here; the session's DESCRIPTOR reads it
  *     (`artifactsOf`, src/harnesses/artifacts-of.js — never an id branch here; a `null` hook never produces).
+ *     A HELPER's writes (lane artifacts-handover): a record that ENDS a Task / workflow agent names its transcript
+ *     (the descriptor's `helperTranscriptsOf`, src/harnesses/helper-transcripts.js); its write records go through the
+ *     SAME `artifactsOf` and land as THIS conversation's rows with `via: {kind:'subagent', name}` — live here, and the
+ *     rebuild's deriver asks the same door (normalizers' helper seam). A stream record stamped as a sidechain's is left
+ *     to that door (one birth, at the Task's end, with its `via`).
+ *   · handover({from, to, items, reach}) — `vibespace-msg send <agent> "…" --artifact <path>…`: the helper's OWN rows
+ *     land as the receiver's rows with `via: {kind:'handover', from}`; a design re-registers under the receiver and
+ *     opens its Design window; the helper's row keeps `handedTo`.
  *   · touch({sessionId, host, path, summary}) — the user's own save in an editor window linked to the chat
  *     (ws `artifact-touch`): the row gets `by: user, edits+1` and the conversation hears ONE next-turn note.
  * THE REGISTRIES (lane artifacts-registries) — the three stores' ONE notification points hand their records here; the
@@ -32,6 +40,7 @@ function configure(d = {}) {
   deps = { ...deps, ...d };
   try { normalizers().setArtifactStoreSource(storeRowsOf); } catch (e) { deps.log.warn?.(`[artifacts] store-rows seam not set: ${e.message}`); }
   try { normalizers().setArtifactServiceSource(servicesOf); } catch (e) { deps.log.warn?.(`[artifacts] service-rows seam not set: ${e.message}`); }
+  try { normalizers().setArtifactHelperSource(helperOps); } catch (e) { deps.log.warn?.(`[artifacts] helper seam not set: ${e.message}`); }
   return api;
 }
 const sessions = () => { try { const m = deps.activeSessions(); return m && typeof m.entries === 'function' ? m : new Map(); } catch { return new Map(); } };
@@ -74,11 +83,91 @@ function observe(session, record) {
   if (!session || !record) return 0;
   const of = hookOf(session);
   if (!of) return 0;
+  if (record.parent_tool_use_id || record.isSidechain) return 0; // a helper's own record: the helper door folds it at the Task's end (with its `via`)
   let ops = [];
   try { ops = of(record) || []; } catch { return 0; }
+  if (record.type === 'user') { if (!session._helperArtifacts) session._helperArtifacts = { runs: new Map(), seen: new Set() }; ops = ops.concat(helperOps(session, record, session._helperArtifacts)); }
   let n = 0;
   for (const o of ops) { try { if (!noteOp(session, { ...o, by: 'agent' }).skipped) n++; } catch (e) { deps.log.warn?.(`[artifacts] op skipped: ${e.message}`); } }
   return n;
+}
+
+// ── THE HELPER DOOR (lane artifacts-handover) ──
+/** The ops a record that ENDS a helper brings: the helper transcript's write records through the session's own
+ *  `artifactsOf`, each tagged `via`. `state` = {runs: Map (workflow launches), seen: Set (op ids already folded — the
+ *  parse + the device feed, or a background agent read at its launch and again at its end, fold an op once)}.
+ *  A remote conversation (host ≠ '') reads nothing (its sidechains are on its machine; none is fetched). */
+function helperOps(session, record, state = { runs: new Map(), seen: new Set() }) {
+  if (!session || !record || record.type !== 'user' || (session.host && session.host !== 'local')) return [];
+  let h = null;
+  try { h = require('../harnesses').harnessOf(session.backend || 'claude'); } catch { h = null; }
+  const of = h && h.artifactsOf, helpers = h && h.helperTranscriptsOf;
+  if (typeof of !== 'function' || typeof helpers !== 'function') return [];
+  let files = [];
+  try { files = helpers(record, { sessionId: session.claudeSessionId || session.backendSessionId || null, cwd: session.cwd || '', runs: state.runs }) || []; } catch { return []; }
+  const out = [];
+  for (const { file, via } of files) {
+    for (const rec of require('../harnesses/helper-transcripts.js').readRecords(file)) {
+      let ops = [];
+      try { ops = of(rec) || []; } catch { ops = []; }
+      for (const o of ops) {
+        const id = o.id ? 'sub:' + o.id : null;
+        if (id && state.seen) { if (state.seen.has(id)) continue; state.seen.add(id); }
+        out.push({ ...o, id, via, cwd: rec.cwd || session.cwd || '' });
+      }
+    }
+  }
+  return out;
+}
+
+// ── THE HAND-OVER (lane artifacts-handover) — a helper CONVERSATION's own rows → its upstream conversation ──
+/** `from` = {cid, name, session} (the helper's live session holds its rows); `to` = [cid]; `items` = paths / page links;
+ *  `reach(cid)` → boolean = the message's reach (msg-acl, the groups engine) — REQUIRED, never assumed.
+ *  Every refusal names the item: ≤ MAX_HANDOVER items; the item must be the helper's OWN row; the receiver must be
+ *  reachable and live here, on the row's machine. A design re-registers under the receiver (the Design window's home
+ *  lists it "via <helper>") and opens on the receiver's screen. No turn is started here (the message's notify decides). */
+function handover({ from = {}, to = [], items = [], reach = null, at = Date.now() } = {}) {
+  const list = (Array.isArray(items) ? items : []).map((x) => String(x || '').trim()).filter(Boolean);
+  if (!list.length) return { ok: false, code: 'bad-request', error: 'name what to hand over: --artifact <path>' };
+  if (list.length > AF.MAX_HANDOVER) return { ok: false, code: 'too-many', error: `${list.length} items — at most ${AF.MAX_HANDOVER} per hand-over` };
+  if (typeof reach !== 'function') return { ok: false, code: 'no-reach', error: 'hand-over needs the message reach check' };
+  const helper = from.session;
+  if (!helper || !from.cid) return { ok: false, code: 'bad-member', error: 'the helper has no live session here' };
+  const fromRef = { cid: String(from.cid), name: String(from.name || helper.name || '') };
+  const handed = [], refused = [];
+  const rows = [];
+  for (const it of list) {
+    const row = AF.rowFor(helper._artifacts || {}, it, helper.host || '');
+    if (!row) { refused.push({ item: it, why: 'not-yours', error: `${it} is not an artifact of this conversation (only a file it wrote, a design it opened or a page it published can be handed over)` }); continue; }
+    rows.push({ it, row });
+  }
+  const receivers = [];
+  for (const cid of [...new Set((Array.isArray(to) ? to : [to]).map(String).filter(Boolean))]) {
+    if (cid === fromRef.cid) continue;
+    if (!reach(cid)) { refused.push({ to: cid, why: 'unreachable', error: `${cid} is not reachable from this conversation (the message rules: vibespace-msg list)` }); continue; }
+    const live = [...sessions()].filter(([, s]) => s && conversationOf(s) === cid);
+    if (!live.length) { refused.push({ to: cid, why: 'not-live', error: `${cid} has no live session on this server` }); continue; }
+    receivers.push({ cid, live });
+  }
+  for (const { cid, live } of receivers) {
+    for (const { it, row } of rows) {
+      const [sid, s] = live[0];
+      if ((row.host || '') !== (s.host && s.host !== 'local' ? s.host : '')) { refused.push({ item: it, to: cid, why: 'other-machine', error: `${it} is on ${row.host || 'this server'}; ${cid} runs on ${s.host || 'this server'}` }); continue; }
+      const op = AF.handoverOp(row, { from: fromRef, at });
+      for (const [, rs] of live) noteOp(rs, op);
+      if (row.kind === 'design') { // the Design window's registry: the receiver's now; its window opens for the user
+        try {
+          const de = deps.designs && deps.designs();
+          const r = de && typeof de.register === 'function' ? de.register({ host: row.host || null, dir: row.path, sessionId: sid, conversationId: cid, via: fromRef }) : null;
+          if (r && r.ok && typeof de.openOn === 'function') de.openOn(s, sid, r.design);
+        } catch (e) { deps.log.warn?.(`[artifacts] design hand-over not registered: ${e.message}`); }
+      }
+      const marked = AF.markHanded(helper._artifacts || {}, row.key, { cid, name: s.name || '', at });
+      if (marked) { helper._artifacts = marked; persistSoon(helper); try { normalizers().feedArtifactCard(helper, AF.cardBlock(marked[row.key])); } catch { } }
+      handed.push({ item: it, to: cid, toName: s.name || '', kind: row.kind, path: row.path });
+    }
+  }
+  return { ok: handed.length > 0, handed, refused, ...(handed.length ? {} : { code: 'nothing-handed', error: (refused[0] && refused[0].error) || 'nothing handed over' }) };
 }
 
 // ── THE REGISTRIES (lane artifacts-registries) ──
@@ -169,5 +258,5 @@ function listFor(sessionId) {
 }
 function mount(app) { app.get('/api/artifacts', (req, res) => res.json(listFor(req.query && req.query.sessionId))); return api; }
 
-const api = { configure, mount, listFor, observe, ownerOf, noteEdit, touch, notePage, noteDesign, noteUploads, storeRowsOf, servicesOf, noteService, DOC_EDIT_FROM };
+const api = { configure, mount, listFor, observe, helperOps, handover, ownerOf, noteEdit, touch, notePage, noteDesign, noteUploads, storeRowsOf, servicesOf, noteService, DOC_EDIT_FROM };
 module.exports = api;

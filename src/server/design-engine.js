@@ -231,7 +231,7 @@ function create({
     saving = saving.then(() => writeJsonAtomic(storeFile, snap)).catch((e) => log('[design] registry save failed:', e.message));
     return saving;
   };
-  const pub = (r) => ({ id: r.id, sessionId: r.sessionId || null, conversationId: r.conversationId || null, host: r.host || null, dir: r.dir, title: r.title || '', kind: r.kind === 'system' ? 'system' : 'design', createdAt: r.createdAt, openedAt: r.openedAt });
+  const pub = (r) => ({ id: r.id, sessionId: r.sessionId || null, conversationId: r.conversationId || null, host: r.host || null, dir: r.dir, title: r.title || '', kind: r.kind === 'system' ? 'system' : 'design', createdAt: r.createdAt, openedAt: r.openedAt, ...(r.via ? { via: r.via } : {}) });
   const find = (host, dir) => store.designs.find((r) => (r.host || null) === (host || null) && r.dir === dir) || null;
   const notify = (row, extra = {}) => {
     try { broadcastAll({ type: 'designs-updated', design: pub(row), ...extra }); } catch (e) { log('[design] designs-updated broadcast failed:', e.message); }
@@ -240,7 +240,7 @@ function create({
   const lastRead = new Map();   // key → {at, mtimes:{name: ms}} — primes a new watch, so a change after the read is seen
 
   // ── registry ──
-  function register({ host = null, dir, title = '', sessionId = null, conversationId = null, kind = null } = {}) {
+  function register({ host = null, dir, title = '', sessionId = null, conversationId = null, kind = null, via = null } = {}) {
     const d = dirOf(dir);
     if (!d) return fail('bad_dir', 'name the design folder by its absolute path (vibespace-design new prints it)');
     const h = hostOf(host);
@@ -255,8 +255,11 @@ function create({
         store.designs.length = REGISTRY_MAX;
       }
     }
-    if (sessionId) row.sessionId = String(sessionId);
-    if (conversationId) row.conversationId = String(conversationId);
+    const keptByReceiver = !via && row.via && conversationId && row.via.cid === String(conversationId); // lane artifacts-handover: the helper re-opening a design it handed over — the receiver keeps it
+    if (sessionId && !keptByReceiver) row.sessionId = String(sessionId);
+    if (conversationId && !keptByReceiver) row.conversationId = String(conversationId);
+    if (via && via.cid) row.via = { cid: String(via.cid).slice(0, 64), name: String(via.name || '').slice(0, 120) }; // handed over by a helper conversation (the home says "via <helper>")
+    else if (sessionId && !keptByReceiver) delete row.via;
     const t = cleanTitle(title);
     if (t && !row.named) row.title = t; else if (!row.title) row.title = path.posix.basename(d);   // a name the user gave (the home's Rename) stays
     if (kind === 'system' || kind === 'design') row.kind = kind;

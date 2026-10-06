@@ -98,6 +98,17 @@ vibespace-msg group notify <group> <next-turn|mention|always|mute>
   `kick` / `rename` / `archive` / `notify`) is refused with `job-token` — do
   that from the conversation.
 
+## Hand over what you made (--artifact)
+
+`vibespace-msg send <agent> "the design is ready" --artifact /abs/designs/doc-ui /abs/path/report.md` (every path after
+`--artifact` until the next flag; `--artifact` may also repeat)
+hands YOUR OWN artifacts (a file this conversation wrote, a design folder it opened, a page it published as `/p/<id>`)
+to the receiver: they appear in the receiver's chat as cards ("Handed over by <you>") and in its Artifacts list; a
+design opens in the user's Design window. Up to 20 per message; nothing is copied (the receiver must run on the same
+machine); the reach is the message's. Into a group, name the receiver (`@name` or `--at`). `vibespace-design open
+<dir> --for <conversation>` does the same for one design. A subagent (Task) needs none of this — its writes are
+already the parent conversation's.
+
 ## When does the receiver see it? (READ THIS — it decides the cost)
 
 Each member of each group has a **notify mode** — its own choice, set with

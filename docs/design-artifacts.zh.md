@@ -61,3 +61,7 @@
 - **行**：每次读取时**派生**（src/artifacts.js `serviceRows`；registry 的 `servicesOf`），从不存储：{kind: service, jobId, name, port, url http://<实例主机>:<port>/, since, state running | stopped, stoppedAt}；停止的任务行置灰保留 24 h 后消失。
 - **卡片**：jobs 门（`_serviceDoor` → `noteService`）在首次监听时放置、原地更新；点击在网页视图打开；⋯ = 复制 URL / 新标签页打开 / 查看该任务。产物芯片里 Services 在文档之后有自己的标题。
 
+
+## 实现 —— 助手的产物（lane artifacts-handover，.224）
+- **子代理**——父对话里“结束”一个 Task / 工作流 agent 的记录（它的 tool_result、task-notification）指向该 agent 自己的转录（`helperTranscriptsOf`，src/harnesses/helper-transcripts.js）；其中的 Write / Edit 走同一个 `artifactsOf`，成为父对话的行，带 `via: {kind: subagent, name}`——卡片在 Task 结束处，重建一致。之前：实时 0 行，重建 0 行（夹具实测）。
+- **移交**——`vibespace-msg send <agent> "…" --artifact <path>…`（≤ 20；沿用消息的可达规则；只能移交自己的行；同一台机器——从不复制）：接收方得到 `via: {kind: handover, from}` 的行和卡片“移交自 …”；助手自己的行记 `handedTo`。设计在接收方名下重新登记并打开设计窗口；`vibespace-design open --for <对话>` 走同一扇门。

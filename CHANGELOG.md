@@ -2,6 +2,14 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.224 — 2026-10-06
+
+### Added
+- Files a helper writes (a subagent, or another conversation via `vibespace-msg send … --artifact`) show in your conversation; designs open in your Design window.
+
+### Fixed
+- Notices for an agent (such as a browser profile change) now arrive in the order they happened.
+
 ## 2.369.223 — 2026-10-06
 
 ### Added

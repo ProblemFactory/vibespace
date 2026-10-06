@@ -27,6 +27,10 @@ export function artifactMetaText(b) {
   const parts = [f.state === 'unpublished' ? t('Unpublished') : f.state === 'published' ? t('Published') : upload ? t('Attached by you') : f.changes ? t('Changed {n} times', { n: f.changes }) : t('Written by the agent')];
   if (f.lastAt) parts.push(agoText(f.lastAt, t));
   if (f.byUser && !upload) parts.push(t('last by you'));
+  // lane artifacts-handover: WHO made it for this conversation, and whom the helper handed it to
+  if (f.via && f.via.kind === 'handover') parts.unshift(t('Handed over by {name}', { name: f.via.from.name || f.via.from.cid }));
+  else if (f.via && f.via.kind === 'subagent') parts.push(t('By subagent {name}', { name: f.via.name }));
+  if (f.handedTo.length) parts.push(t('Handed to {names}', { names: f.handedTo.join(', ') }));
   return parts.join(' · ');
 }
 

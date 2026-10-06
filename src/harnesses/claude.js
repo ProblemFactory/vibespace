@@ -285,6 +285,7 @@ module.exports = {
   configFiles: { settings: SETTINGS_FILE },
   artifactTools: require('./artifacts-of.js').ARTIFACT_TOOLS.claude, // lane artifacts-prompt-hint: the tools the intro names (artifactsIntroLine)
   artifactsOf: require('./artifacts-of.js').claude, // lane artifacts-model: Write / Edit / MultiEdit / NotebookEdit → the deliverable rows (src/artifacts.js)
+  helperTranscriptsOf: require('./helper-transcripts.js').claude, // lane artifacts-handover: a Task / workflow agent's own transcript at its end → the parent's rows (via: subagent)
   // CONTEXT INJECTION strategy (S6): the CLI's own hooks carry task context
   // (SessionStart), per-prompt notices (UserPromptSubmit) and the stop-time
   // bookkeeping nudge (Stop); SessionStart output is honoured, so the

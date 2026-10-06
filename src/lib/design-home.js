@@ -28,6 +28,7 @@ export function readDesignRows(list) {
     id: words(d.id, 40), host: hostKey(d.host), dir: words(d.dir, 1024), title: words(d.title, 120), kind: d.kind === 'system' ? 'system' : 'design',
     sessionId: words(d.sessionId, 80), conversationId: words(d.conversationId, 200), openedAt: Number(d.openedAt) || Number(d.createdAt) || 0,
     page: d.page && typeof d.page.path === 'string' && d.page.path.startsWith('/') ? { path: words(d.page.path, 300), public: !!d.page.public } : null,
+    via: d.via && typeof d.via === 'object' && d.via.cid ? { cid: words(d.via.cid, 64), name: words(d.via.name, 120) } : null, // lane artifacts-handover: handed over by a helper conversation
   }));
 }
 /** The find box: every word of the query must appear in the row's name, folder, machine or conversation name. */
@@ -116,7 +117,7 @@ export function openDesignHome(app, { syncId } = {}) {
     f.name.title = d.title || d.dir;
     f.badge.style.display = d.kind === 'system' ? '' : 'none';
     f.meta.textContent = '';
-    const bits = [convName(d), (d.host ? d.host + ':' : '') + folderTail(d.dir), openedWords(d.openedAt)].filter(Boolean);
+    const bits = [convName(d), d.via ? t('via {name}', { name: d.via.name || d.via.cid }) : '', (d.host ? d.host + ':' : '') + folderTail(d.dir), openedWords(d.openedAt)].filter(Boolean); // lane artifacts-handover: "via <helper>"
     const full = (d.host ? d.host + ':' : '') + d.dir;
     for (const [i, b] of bits.entries()) {
       if (i) f.meta.appendChild(mk('span', 'design-home-dot', '·'));

@@ -53,3 +53,7 @@ The owner looked for the latest page of a conversation whose site is SERVED by i
 - **The card** — the jobs door (`_serviceDoor` → `noteService`) places it at the first listen and patches it in place; a click opens the Web view; ⋯ = copy URL / open in a new tab / show the job. The chip lists Services under their own head after the documents.
 
 ## Not done / next
+
+## As built — a helper's deliverables (lane artifacts-handover, .224)
+- **Subagents** — a parent record that ENDS a Task / workflow agent (its tool_result, a task-notification) names the agent's own transcript (`helperTranscriptsOf`, src/harnesses/helper-transcripts.js); its Write / Edit records go through the SAME `artifactsOf` and become the PARENT's rows with `via: {kind: subagent, name}` — card at the Task's end, the rebuild the same (replay parity). Before: 0 rows live, 0 at a rebuild (measured on a fixture).
+- **Hand-over** — `vibespace-msg send <agent> "…" --artifact <path>…` (≤ 20; the message's reach; the helper's OWN rows only; same machine — never copied): the receiver's row `via: {kind: handover, from}` + its card "Handed over by …"; the helper's row `handedTo`. A design re-registers under the receiver and its Design window opens; `vibespace-design open --for <conversation>` = the same door.

@@ -38,7 +38,7 @@ const { FILE_TYPES } = require('./file-type-table.js');
 const KINDS = Object.freeze(['doc', 'service', 'page', 'design', 'media', 'upload', 'code', 'other']);
 const VIEW_ORDER = Object.freeze(['doc', 'service', 'page', 'design', 'media', 'upload', 'other']); // lane artifacts-services: what a conversation RUNS reads first after its docs
 const OPS = Object.freeze(['write', 'edit']);
-const REG_OPS = Object.freeze(['publish', 'unpublish', 'open', 'upload']); // a store's fact: births / names a row, never counts
+const REG_OPS = Object.freeze(['publish', 'unpublish', 'open', 'upload', 'handover']); // a store's fact: births / names a row, never counts (lane artifacts-handover: + a helper conversation's hand-over)
 const KIND_RANK = Object.freeze({ design: 3, page: 2, upload: 1 }); // a registry's kind over an extension's (and design › page › upload)
 const outranks = (a, b) => (KIND_RANK[a] || 0) > (KIND_RANK[b] || 0);
 const BY = Object.freeze(['agent', 'user']);
@@ -109,6 +109,8 @@ function apply(rows, op) {
   if (prev && isKind(o.kind) && o.kind !== 'code' && row.kind !== o.kind && !outranks(row.kind, o.kind)) row.kind = o.kind; // a registry's kind (page / design / upload) names it better than an extension
   if (REG_OPS.includes(o.op)) { if (o.url !== undefined) row.url = o.url ? String(o.url) : null; if (o.state) row.state = String(o.state); if (o.name) row.name = String(o.name).slice(0, 200); }
   else if (o.op === 'write' && by === 'agent') row.writes += 1; else row.edits += 1;
+  const via = viaOf(o.via);
+  if (via && (!prev || !row.via)) row.via = via; // lane artifacts-handover: WHO made it for this conversation (a subagent / a helper conversation) — the birth's
   row.by = by; row.lastOp = o.op;
   if (at) { row.lastAt = Math.max(row.lastAt || 0, at); if (!row.firstAt) row.firstAt = at; }
   if (Number.isFinite(o.bytes)) row.bytes = o.bytes;
@@ -139,6 +141,8 @@ function merge(a, b) {
     const later = (r.lastAt || 0) > (p.lastAt || 0) ? r : p;
     const reg = {}; // the registries' facts: the later side's, else whichever side has them; the higher-ranked kind
     for (const f of ['url', 'state']) { const v = later[f] !== undefined ? later[f] : (p[f] !== undefined ? p[f] : r[f]); if (v !== undefined) reg[f] = v; }
+    if (!p.via && r.via) reg.via = r.via; // lane artifacts-handover: the birth's helper; the hand-overs of both sides
+    if (r.handedTo || p.handedTo) reg.handedTo = handedUnion(p.handedTo, r.handedTo);
     if (outranks(r.kind, p.kind)) reg.kind = r.kind;
     if (r.name && (outranks(r.kind, p.kind) || (r.kind === p.kind && later === r))) reg.name = r.name; // a design's newer title
     out[k] = { ...p, ...reg, writes: Math.max(p.writes || 0, r.writes || 0), edits: Math.max(p.edits || 0, r.edits || 0),
@@ -164,12 +168,14 @@ function cardBlock(row) {
   return { type: 'artifact', key: row.key, host: row.host || '', path: row.path, name: row.name, kind: row.kind,
     by: row.by, writes: row.writes || 0, edits: row.edits || 0, lastOp: row.lastOp, firstAt: row.firstAt || 0, lastAt: row.lastAt || 0,
     ...(row.url ? { url: row.url } : {}), ...(row.state ? { state: row.state } : {}),
+    ...(row.via ? { via: row.via } : {}), ...(row.handedTo && row.handedTo.length ? { handedTo: row.handedTo } : {}),
     ...(row.kind === 'service' ? { jobId: row.jobId, port: row.port, since: row.since || 0, stoppedAt: row.stoppedAt || 0 } : {}) };
 }
 /** The card's / list row's FACTS (the client words them through t()): `changes` = re-writes + edits. */
 function cardFacts(b) {
   const w = (b && b.writes) || 0, e = (b && b.edits) || 0;
   return { name: (b && b.name) || '', kind: (b && b.kind) || 'other', path: (b && b.path) || '', changes: Math.max(0, w - 1) + e, byUser: !!(b && b.by === 'user'), lastAt: (b && b.lastAt) || 0, state: (b && b.state) || '', url: (b && b.url) || '',
+    via: viaOf(b && b.via), handedTo: (b && Array.isArray(b.handedTo) ? b.handedTo.map((x) => x && x.name).filter(Boolean) : []),
     ...(b && b.kind === 'service' ? { port: b.port || 0, since: b.since || 0, stoppedAt: b.stoppedAt || 0 } : {}) };
 }
 /** AUTO-OPEN (setting artifacts.autoOpenDocs): only the BIRTH of a doc by the agent's write — an edit never re-opens. */
@@ -266,9 +272,51 @@ function serviceRows(jobs, { cid = null, now = Date.now(), base = '' } = {}) {
   }
   return rows;
 }
+// ── WHO MADE IT FOR US (lane artifacts-handover, owner 2026-10-06 "一个 helper agent 做的 design 或者 artifact，能不能转移给上游主
+// agent 展示给用户") — a row a HELPER made carries `via`: {kind: 'subagent', name, wf?} = a Task / workflow agent inside THIS
+// conversation (its sidechain transcript's writes, read at the Task's end — the registry's helper door); {kind: 'handover',
+// from: {cid, name}, at} = another conversation handed it over (`vibespace-msg send <agent> "…" --artifact <path>`). The
+// helper's own row keeps `handedTo` [{cid, name, at}]. A hand-over is a REG_OP: it births / names the receiver's row and
+// never counts as a write; files are never copied (the path + host ARE the row).
+const VIA_KINDS = Object.freeze(['subagent', 'handover']);
+const MAX_HANDOVER = 20; // items per hand-over
+const HANDED_MAX = 8; // receivers remembered on the helper's row
+const cut = (v, n) => String(v == null ? '' : v).slice(0, n);
+/** A row's `via`, normalized (bounded strings; an unknown kind ⇒ null). */
+function viaOf(v) {
+  if (!v || typeof v !== 'object' || !VIA_KINDS.includes(v.kind)) return null;
+  if (v.kind === 'subagent') return { kind: 'subagent', name: cut(v.name, 120) || 'subagent', ...(v.wf ? { wf: cut(v.wf, 64) } : {}) };
+  const f = v.from && typeof v.from === 'object' ? v.from : {};
+  return { kind: 'handover', from: { cid: cut(f.cid, 64), name: cut(f.name, 120) }, at: Number(v.at) || 0 };
+}
+function handedUnion(a, b) {
+  const by = new Map();
+  for (const x of [...(Array.isArray(a) ? a : []), ...(Array.isArray(b) ? b : [])]) if (x && x.cid && (!by.has(x.cid) || (by.get(x.cid).at || 0) < (x.at || 0))) by.set(x.cid, { cid: cut(x.cid, 64), name: cut(x.name, 120), at: Number(x.at) || 0 });
+  return [...by.values()].sort((p, q) => (q.at || 0) - (p.at || 0)).slice(0, HANDED_MAX);
+}
+/** The helper's row → the RECEIVER's op: same host + path + kind + name (+ a page's url / state), `via` = the hand-over. */
+function handoverOp(row, { from, at = Date.now() } = {}) {
+  if (!row || !row.path || row.kind === 'service') return null;
+  return { op: 'handover', kind: row.kind, host: row.host || '', path: row.path, name: row.name || '', ...(row.url ? { url: row.url } : {}), ...(row.state ? { state: row.state } : {}),
+    via: { kind: 'handover', from, at }, at, id: `handover:${(from && from.cid) || ''}:${at}` };
+}
+/** The helper's rows with `key` marked handed to `to` ({cid, name, at}); a NEW rows object (null = no such row). */
+function markHanded(rows, key, to) {
+  const r = rows && rows[key];
+  if (!r || !to || !to.cid) return null;
+  return { ...rows, [key]: { ...r, handedTo: handedUnion(r.handedTo, [to]) } };
+}
+/** The helper's row an argument names: an absolute path (its key on `host`) or a page link (/p/<id>, its row's url). */
+function rowFor(rows, arg, host = '') {
+  const a = String(arg || '').trim();
+  if (!a) return null;
+  if (/^\/p\/[\w-]+\/?$/.test(a)) return Object.values(rows || {}).find((r) => r && r.url && r.url.replace(/\/+$/, '') === a.replace(/\/+$/, '')) || null;
+  return (rows || {})[keyOf(host, a.replace(/\/+$/, '') || a)] || null;
+}
 const kindWord = (kind, lang = 'en') => (KIND_WORDS[kind] || KIND_WORDS.other)[lang] || (KIND_WORDS[kind] || KIND_WORDS.other).en;
 
 module.exports = { KINDS, VIEW_ORDER, OPS, REG_OPS, KIND_RANK, BY, MAX_ROWS, CATEGORY_KIND, KIND_WORDS, kindOf, absPath, keyOf, apply, fold, merge, view,
   cardWorthy, cardBlock, cardFacts, autoOpenVerdict, ownerOfIn, editNoteText, lineDelta, kindWord, baseName,
   pageOp, designOp, uploadOp, storeRows,
-  SERVICE_KEEP_MS, jobOwnerCid, serviceUrl, serviceRow, serviceRows };
+  SERVICE_KEEP_MS, jobOwnerCid, serviceUrl, serviceRow, serviceRows,
+  VIA_KINDS, MAX_HANDOVER, viaOf, handoverOp, markHanded, rowFor };

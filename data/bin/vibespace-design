@@ -13,7 +13,7 @@ const TOKEN = process.env.VIBESPACE_SESSION_TOKEN || process.env.VIBESPACE_JOB_T
 
 const args = process.argv.slice(2);
 const verb = args[0];
-const VALUE_FLAGS = new Set(['--title', '--dir', '--w', '--h', '--x', '--y', '--page', '--system', '--kind']);
+const VALUE_FLAGS = new Set(['--title', '--dir', '--w', '--h', '--x', '--y', '--page', '--system', '--kind', '--for']);
 const flag = (name) => { const i = args.indexOf(name); return i >= 0 ? (args[i + 1] ?? '') : undefined; };
 const has = (name) => args.includes(name);
 /** The positional arguments after the verb (a value flag's value is not one). */
@@ -31,6 +31,7 @@ const USAGE = `vibespace-design — plain-HTML design artboards, shown live in t
   vibespace-design check [dir]      ← every artboard's verdict and design.json's, by name (exit 1 on a refusal)
   vibespace-design sync [dir]       ← "these files changed" — run it after every edit (on any machine)
   vibespace-design open [dir]       ← opens (or brings forward) the Design window on the folder
+  vibespace-design open [dir] --for <conversation>   ← HANDS the design over to that conversation (its chat + Artifacts; the Design window opens for its user)
   vibespace-design show [dir]       ← design.json in words: artboards, pages, the notes, the tweaks + what the user set
   vibespace-design ask [dir] < questions.json
         ← BEFORE drawing a new design: 3–6 questions as a form in the Design window; then stop until the
@@ -335,6 +336,15 @@ function printTweaks(b, { full = false } = {}) {
     if (title === undefined) { try { const j = JSON.parse(fs.readFileSync(path.join(dir, 'design.json'), 'utf8')); if (j && typeof j.title === 'string' && j.title.trim()) title = j.title; } catch { } }
     const r = await call('POST', '/api/agent/design/register', { dir, kind: kindOf(dir), ...(title !== undefined ? { title } : {}) });
     if (!r.ok) refuse(r);
+    const forConv = flag('--for'); // lane artifacts-handover: `open --for <conversation>` = the hand-over (the message's door and reach)
+    if (forConv) {
+      const h = await call('POST', '/api/agent/msg/send', { to: forConv, text: `Design handed over: ${title || path.basename(dir)} (${dir})`, artifacts: [dir] });
+      if (!h.ok) refuse(h);
+      const hv = h.body.handover || {};
+      for (const x of hv.handed || []) console.log(`handed ${dir} over to "${x.toName || x.to}" — the Design window opens on their user's screen; their chat says 移交自 / handed over`);
+      for (const x of hv.refused || []) console.log(`NOT handed over: ${x.error}`);
+      return;
+    }
     console.log(r.body.opened ? `opened the Design window on ${dir}` : `${dir} is registered (no Design window confirmed it on the user's screen — the chat's design chip lists it; \`vibespace-design sync\` says when one watches)`);
     if (r.body.design && r.body.design.kind === 'system') console.log('(a design system: it holds system.md + tokens.css — vibespace-design systems lists it)');
     return;

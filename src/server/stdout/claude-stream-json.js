@@ -896,7 +896,8 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
 
           // lane artifacts-model: Write / Edit → the conversation's deliverable rows + their cards (the registry asks the
           // session's descriptor hook; the device feed's claudeSideEffects makes the SAME call — the row moves once per call id)
-          if (msg.type === 'assistant') { try { require('../artifact-registry.js').observe(session, msg); } catch (e) { console.warn('[claude] artifacts consumer failed:', e.message); } }
+          // lane artifacts-handover: + the user record that ENDS a Task / workflow agent (its sidechain's writes are this conversation's)
+          if (msg.type === 'assistant' || msg.type === 'user') { try { require('../artifact-registry.js').observe(session, msg); } catch (e) { console.warn('[claude] artifacts consumer failed:', e.message); } }
           // TodoWrite / TaskCreate / TaskUpdate → the session's live TODO
           // summary (board pill). TaskCreate's id arrives in the RESULT.
           if (msg.type === 'assistant' && Array.isArray(msg.message?.content)) {

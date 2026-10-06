@@ -864,20 +864,31 @@ app.get('/api/agent/prompt-context', (req, res) => {
       // a late-hooks note queued for ANOTHER process of this conversation is stale here (lane hooks-create): a Terminate +
       // Resume started with the hooks in place — it never reads "Terminate and Resume it"
       for (const k of keys) sessionStatus.dropNotices(k, (n) => hooksLateStale(n, id));
-      const queue = [];   // [{k, n, text}] in the order they would ride (the record's key first, then the pre-id key)
+      const queue = [];   // [{k, n, text}] in the order they would ride (one timeline over both keys, below)
       // EVERY queued record is a POSITION (channel-jump verify r8): the prefix is consumed BY COUNT, so a record the
       // renderer cannot spell (a kind a newer build wrote before a rollback) stays in the queue as an empty row —
       // else the count lands on it and the renderable notice the fit admitted slides a prompt (reproduced). It rides
       // as nothing, is consumed with its prefix, and is named in the log.
-      for (const k of keys) for (const n of (sessionStatus.pendingNotices(k) || [])) { const t = SessionStatusManager.renderNotice(n); queue.push({ k, text: t || '' }); if (!t) console.warn(`[inject] ${key}: a queued notice of unknown kind ${JSON.stringify(n && n.kind)} cannot be rendered by this build — dropped unrendered with its prefix`); }
+      // ONE TIMELINE, oldest first (mirror-green-223): the two keys' queues are MERGED by `at`, each key's own order kept.
+      // Key-first put a pre-id record's older notices behind the record's newer one — read in that order the last line the
+      // agent saw was not the present, and when the cap held the tail it was the OLDEST change (the pin) that rode a prompt
+      // later, as news (reproduced: 4 browser-profile notices behind the first prompt's tools intro, 1228 B for 258 B left).
+      const lists = keys.map(() => []);
+      for (const k of keys) for (const n of (sessionStatus.pendingNotices(k) || [])) lists[keys.indexOf(k)].push({ k, n, at: Number(n && n.at) || 0 });
+      const timeline = [];   // [{k, n}] — queue[i] is timeline[i] rendered
+      while (lists.some((l) => l.length)) { let head = null; for (const l of lists) if (l.length && (!head || l[0].at < head[0].at)) head = l; timeline.push(head.shift()); }
+      for (const { k, n } of timeline) { const t = SessionStatusManager.renderNotice(n); queue.push({ k, text: t || '' }); if (!t) console.warn(`[inject] ${key}: a queued notice of unknown kind ${JSON.stringify(n && n.kind)} cannot be rendered by this build — dropped unrendered with its prefix`); }
       let taken = 0, needAll = 0;
       for (const q of queue) if (q.text) needAll += B(q.text) + 2;
-      const fitsPrefix = (m) => { const byKey = new Map(); for (const q of queue.slice(0, m)) if (q.text) byKey.set(q.k, [...(byKey.get(q.k) || []), q.text]); let need = 0; for (const ts of byKey.values()) need += B(ts.join('\n')) + 2; return need <= INLINE_CAP - INLINE_TAIL_MARGIN - committed(); };
+      const fitsPrefix = (m) => { const need = B(SessionStatusManager.renderNotices(timeline.slice(0, m).map((r) => r.n))) + 2; return need <= INLINE_CAP - INLINE_TAIL_MARGIN - committed(); };
       for (let m = queue.length; m >= 1; m--) if (fitsPrefix(m)) { taken = m; break; }
+      // a merged prefix is a prefix of each key's queue, so consuming BY COUNT per key takes exactly the rows that ride
       if (taken) {
         const byKey = new Map();
         for (const q of queue.slice(0, taken)) byKey.set(q.k, (byKey.get(q.k) || 0) + 1);
-        for (const k of keys) if (byKey.get(k)) { const t = SessionStatusManager.renderNotices(sessionStatus.consumeNotices(k, byKey.get(k))); if (t) { noticeTexts.push(t); tailHeld += B(t) + 2; } }
+        for (const k of keys) if (byKey.get(k)) sessionStatus.consumeNotices(k, byKey.get(k));
+        const t = SessionStatusManager.renderNotices(timeline.slice(0, taken).map((r) => r.n));
+        if (t) { noticeTexts.push(t); tailHeld += B(t) + 2; }
       }
       if (taken < queue.length) console.log(`[inject] ${key}: ${queue.length - taken} of ${queue.length} pending notice(s) wait for the next prompt — ${needAll} B do not fit the ${roomLeft()} B left under the inline cap`);
     } catch (e) { console.warn(`[inject] ${key}: notices not read — ${e && e.message}`); }
@@ -1597,6 +1608,26 @@ function ownConversationIdOf(s) {
   return { cid: addressableId(s), why: null };   // verify r5: the ONE predicate (claude-lock-capture) — the same answer the rosters give
 }
 const JOB_NO_MEMBERSHIP = 'a job token may list, read and send — it never creates a group or changes membership (create / invite / leave / kick / rename / archive / notify); run that from the conversation that owns this job';
+// lane artifacts-handover: `vibespace-msg send <agent> "…" --artifact <path>…` — checked BEFORE anything is sent (the
+// bound, the helper's OWN rows, a group's named receiver); the hand-over itself rides the message's reach
+// (src/server/artifact-registry.js handover)
+const handoverItems = (b) => (b && Array.isArray(b.artifacts) ? b.artifacts.map((x) => String(x || '').trim()).filter(Boolean) : []);
+function handoverPrecheck(s, items, tgt, body) {
+  const AF = require('./artifacts.js');
+  if (items.length > AF.MAX_HANDOVER) return { status: 400, code: 'too-many', error: `${items.length} artifacts — at most ${AF.MAX_HANDOVER} per hand-over; nothing was sent` };
+  const missing = items.filter((it) => !AF.rowFor((s && s._artifacts) || {}, it, (s && s.host && s.host !== 'local') ? s.host : ''));
+  if (missing.length) return { status: 403, code: 'not-yours', error: `not an artifact of this conversation: ${missing.slice(0, 5).join(', ')} — only a file it wrote, a design it opened or a page it published can be handed over; nothing was sent` };
+  if (tgt.kind === 'group' && !(Array.isArray(body.at) && body.at.length) && !String(body.text || '').includes('@')) return { status: 400, code: 'no-receiver', error: 'a hand-over into a group names its receiver: @name or --at <name>; nothing was sent' };
+  return null;
+}
+/** After the message is posted: the receivers (a pair's other member, or the members a group message @names) get the
+ *  helper's rows — reach = the message's own (the groups engine's resolveTarget over msg-acl). */
+function handoverAfterSend({ ge, r, tgt, myCid, s, items }) {
+  const toCids = tgt.kind === 'group' ? ((r.message && r.message.mentions) || []).map((m) => m && m.id).filter((x) => x && x !== myCid) : [tgt.cid];
+  const reach = (cid) => { const t = ge.resolveTarget(cid, myCid); return !!(t && t.ok && t.kind === 'agent' && t.cid === cid); };
+  const hr = require('./server/artifact-registry.js').handover({ from: { cid: myCid, name: (s && s.name) || '', session: s }, to: toCids, items, reach });
+  return { handed: (hr.handed || []).map((h) => ({ path: h.path, kind: h.kind, to: h.to, toName: msgName(h.toName || '') || null })), refused: (hr.refused || []).map((x) => ({ item: x.item || null, to: x.to || null, why: x.why, error: msgName(x.error || '') })) };
+}
 app.post('/api/agent/msg/send', async (req, res) => {
   const who = msgCaller(req, res);
   if (!who) return;
@@ -1613,6 +1644,7 @@ app.post('/api/agent/msg/send', async (req, res) => {
   // group of the pair and posts there. Either way the receivers' notify modes
   // decide — the default is their NEXT turn at no cost; `wake:true` (= an @ of
   // every other member) is a billed turn through the ladder's authorizer.
+  const handItems = handoverItems(req.body); // lane artifacts-handover: --artifact <path>…
   const ge = groupsEngine();
   if (ge) {
     // no conversation id yet (a chat before its init record, a terminal before
@@ -1624,6 +1656,7 @@ app.post('/api/agent/msg/send', async (req, res) => {
     // exactly one of them — a name that is BOTH is refused `ambiguous`
     const tgt = ge.resolveTarget(to, myCid);
     if (!tgt.ok) return groupAnswer(res, tgt);
+    if (handItems.length) { const no = handoverPrecheck(s, handItems, tgt, req.body || {}); if (no) return res.status(no.status).json({ error: no.error, code: no.code }); }
     const floorKey = myCid + '|' + (tgt.kind === 'group' ? tgt.group.id : tgt.cid);   // the RESOLVED target, never the `to` spelling
     const rate = _msgRate.get(floorKey) || {};
     if (rate.h === _msgDigest(text) && rate.ts && Date.now() - rate.ts < 600000) return res.status(429).json({ error: 'identical message within 10min — not resent' });
@@ -1636,6 +1669,7 @@ app.post('/api/agent/msg/send', async (req, res) => {
     if (!r || !r.ok) return groupAnswer(res, r);
     _msgRate.set(floorKey, { ts: Date.now(), h: _msgDigest(text) });
     if (_msgRate.size > 500) { const cut = Date.now() - 600000; for (const [k, v] of _msgRate) if (v.ts < cut) _msgRate.delete(k); }
+    if (handItems.length) return res.json({ ...msgSendAnswer(r), handover: handoverAfterSend({ ge, r, tgt, myCid, s, items: handItems }) });
     return res.json(msgSendAnswer(r));   // verify r2 (lane peer-census): every name in the echo through the belt (the door)
   }
   // the legacy direct lane — ONLY when this instance has no groups engine; it speaks as a SESSION only

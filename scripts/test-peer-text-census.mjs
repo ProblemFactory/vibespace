@@ -721,6 +721,7 @@ const PRINTS = {
     // verify r3 F1: `refused(j, status)` prints its parameter `status` bare, so it is a PRINT HEAD — every `refused(j, res.status)` is walked (the answer object and the HTTP status)
     'res.status': `${V}:the HTTP status (refused's second argument)`, 'j': `${V}:the route's answer object handed to refused — the fields it prints are the rows j.error / c.name / code`,
     'op': `${O}:the group op the caller named`, 'to': `${O}:the target the caller named`,
+    'args': `${O}:the caller's own stray arguments after the text (lane artifacts-handover-chrome: a hand-over refuses them, nothing sent)`,
     'w': 'judged:msgSendAnswer — wokeLine over the belted woke / refused / next-turn names',
     'c.conversationId': `${V}:a candidate's conversation id`, 'c.groupId': `${V}:a candidate's group id`, 'c.name': 'judged:msgRefusalAnswer — a candidate\'s name (stderr)',
     'j.error': 'judged:msgRefusalAnswer — the refusal sentence (it embeds the stored group name; stderr)',
@@ -758,6 +759,11 @@ const PRINTS = {
     // the --again attempt nonce (minted by the hub as hex, or the caller's own value sanitized to [A-Za-z0-9_-] at the route)
     'rec.reply.words': `${V}:our sentence for the pair-group notify the dispatch left (replyWords — a closed set)`,
     'r.attempt': `${V}:the dispatch attempt nonce (hub-minted hex, or the caller's own --again value sanitized at the route)`,
+    // lane artifacts-handover: the hand-over's lines (`send … --artifact`) — the route's handover answer, each printed field its own row
+    'r.handover.handed': `${V}:the hand-over's handed rows (h.* — each printed field a row)`, 'r.handover.refused': `${V}:the hand-over's refused rows (x.* — each printed field a row)`,
+    'h.path': `${O}:the path of the caller's OWN artifact row it handed over`, 'h.kind': `${V}:the artifact kind (src/artifacts.js KINDS — a closed set)`, 'h.to': `${V}:the receiver's conversation id`,
+    'h.toName': 'judged:msgName — the receiver\'s session name', 'x.item': `${O}:the caller's own --artifact argument`, 'x.to': `${V}:a receiver's conversation id`,
+    'x.error': 'judged:msgName — the hand-over refusal sentence (our words around the caller\'s own path and a conversation id)',
   }),
   ...rows('data/bin/vibespace-channels', {
     // B-2198 the raw API verb (`api …`): the vendor's answer is belted at the door (apiAnswer); ids, codes, counts are ours
