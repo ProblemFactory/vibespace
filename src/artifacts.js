@@ -169,7 +169,8 @@ function cardBlock(row) {
     by: row.by, writes: row.writes || 0, edits: row.edits || 0, lastOp: row.lastOp, firstAt: row.firstAt || 0, lastAt: row.lastAt || 0,
     ...(row.url ? { url: row.url } : {}), ...(row.state ? { state: row.state } : {}),
     ...(row.via ? { via: row.via } : {}), ...(row.handedTo && row.handedTo.length ? { handedTo: row.handedTo } : {}),
-    ...(row.kind === 'service' ? { jobId: row.jobId, port: row.port, since: row.since || 0, stoppedAt: row.stoppedAt || 0 } : {}) };
+    ...(row.kind === 'service' ? { jobId: row.jobId, port: row.port, since: row.since || 0, stoppedAt: row.stoppedAt || 0,
+      via: row.via, localUrl: row.localUrl, forwardId: row.forwardId || null, ...(row.target ? { target: row.target } : {}), ...(row.publishedBy ? { publishedBy: row.publishedBy } : {}) } : {}) };
 }
 /** The card's / list row's FACTS (the client words them through t()): `changes` = re-writes + edits. */
 function cardFacts(b) {
@@ -237,19 +238,41 @@ function storeRows({ pages = [], designs = [] } = {}) {
 // conversation id, the same rule as job-model's ownedJobsView) that LISTENS on a TCP port (src/jobs.js `job.listen`,
 // read off the job's pid tree on the engine's own tick). DERIVED, never stored here: the registry asks the jobs engine
 // at every read (`serviceRows`), so a "Clear content…" has nothing of it to clear. A stopped job's row stays
-// SERVICE_KEEP_MS greyed ("stopped at …"), then goes. The row's url = http://<the instance URL's host>:<port>/
-// (`serviceUrl`; the client resolves the host again through absUrl — never location.origin).
+// SERVICE_KEEP_MS greyed ("stopped at …"), then goes.
+// THE LINK (lane artifacts-services-url, owner 2026-10-06 "你识别的这些服务怎么都是 raw tcp 链接，而不是用的转发后的地址") —
+// a link the user clicks is an address the user can REACH (`serviceLink`, one ladder over server-side facts; the client
+// only prints): ① the port's forward record (src/port-forward.js list()) is PUBLISHED ⇒ its publicUrl (frp — from
+// anywhere) ▸ ② else this instance's own proxy, `<instance url>/proxy/<target>` (server.js mounts the unblocker at
+// /proxy/ behind auth — reachable wherever the instance is, with the user's own session); the target = the job's port on
+// this box, or a paired machine's forward listener `http://127.0.0.1:<localPort>/` ▸ ③ the raw `http://127.0.0.1:<port>/`
+// is only the copyable "on the machine" line (`localUrl`) — never the link (a paired machine's port with no forward has
+// no other address: via 'local'). NEVER the instance URL's HOST with the job's RAW port (an frp name forwards only the
+// VibeSpace port — the .223 card linked a dead `http://<frp host>:8766/`).
 const SERVICE_KEEP_MS = 24 * 60 * 60 * 1000;
 const SERVICE_RUNNING = Object.freeze(['up', 'starting', 'awaiting-user']);
 const jobOwnerCid = (j) => (j && ((j.ownerSession && j.ownerSession.conversationId) || (j.owner && j.owner.conversation && j.owner.conversation.id))) || null;
-/** http://<host of `base`, else 127.0.0.1>:<port>/ */
-function serviceUrl(port, base = '') {
-  let h = '127.0.0.1';
-  try { if (base) h = new URL(String(base)).hostname || h; } catch { }
-  return `http://${h.includes(':') && !h.startsWith('[') ? '[' + h + ']' : h}:${Number(port) || 0}/`;
+const LOCAL_HOST_ID = '__local__'; // src/port-forward.js LOCAL_ID — this box (the jobs engine's pid trees are local)
+/** The forward record of (hostId, port) in PortForwardManager.list() — a published one first, then a live one. A record
+ *  with a targetHost forwards a LAN machine behind that host — another address, never this port. */
+function forwardFor(forwards, hostId, port) {
+  const p = Number(port) || 0, h = hostId || LOCAL_HOST_ID;
+  const mine = (Array.isArray(forwards) ? forwards : []).filter((f) => f && (f.hostId || LOCAL_HOST_ID) === h && Number(f.remotePort) === p && !f.targetHost);
+  return mine.find((f) => f.publicUrl) || mine.find((f) => Number(f.localPort) > 0) || mine[0] || null;
+}
+/** THE LINK LADDER → {url, via: 'published'|'proxy'|'local', target?, localUrl, forwardId, publishedBy?} (header above). */
+function serviceLink({ port, host = '', forward = null, instanceUrl = '' } = {}) {
+  const p = Number(port) || 0, f = forward || null;
+  const localUrl = `http://127.0.0.1:${p}/`, forwardId = (f && f.id) || null;
+  if (f && f.publicUrl) return { url: String(f.publicUrl), via: 'published', localUrl, forwardId, publishedBy: String(f.label || f.publicSub || f.id || '') }; // the forward's name on the Ports panel
+  const onBox = !host || host === LOCAL_HOST_ID;
+  const lp = f && Number(f.localPort) > 0 ? Number(f.localPort) : 0;
+  const target = onBox ? localUrl : lp ? `http://127.0.0.1:${lp}/` : '';
+  if (!target) return { url: localUrl, via: 'local', localUrl, forwardId };
+  const base = /^https?:\/\//i.test(String(instanceUrl || '')) ? String(instanceUrl).replace(/\/+$/, '') : ''; // absent ⇒ relative (the client's absUrl)
+  return { url: `${base}/proxy/${target}`, via: 'proxy', target, localUrl, forwardId };
 }
 /** ONE job → its service row, or null (never listened; or stopped longer than SERVICE_KEEP_MS ago). */
-function serviceRow(job, { now = Date.now(), base = '' } = {}) {
+function serviceRow(job, { now = Date.now(), base = '', forwards = [] } = {}) {
   const l = job && job.listen;
   if (!job || !job.id || !l || !(Number(l.port) > 0)) return null;
   const running = SERVICE_RUNNING.includes(job.state);
@@ -258,16 +281,17 @@ function serviceRow(job, { now = Date.now(), base = '' } = {}) {
   if (!running && now - stoppedAt > SERVICE_KEEP_MS) return null;
   const firstAt = Number(l.firstAt) || Number(l.at) || 0;
   return { key: 'job:' + job.id, host: '', path: '', name: String(job.name || job.id), kind: 'service', jobId: String(job.id), port: Number(l.port),
-    url: serviceUrl(l.port, base), since: Number(run && run.startedAt) || firstAt, state: running ? 'running' : 'stopped', stoppedAt,
+    ...serviceLink({ port: l.port, host: LOCAL_HOST_ID, forward: forwardFor(forwards, LOCAL_HOST_ID, l.port), instanceUrl: base }),
+    since: Number(run && run.startedAt) || firstAt, state: running ? 'running' : 'stopped', stoppedAt,
     firstAt, lastAt: Math.max(Number(l.at) || 0, stoppedAt, firstAt), by: 'agent', writes: 0, edits: 0, lastOp: 'listen', bytes: null, lastId: null };
 }
 /** THE LINEAGE RULE: the rows of the jobs whose OWNER conversation is `cid` (another conversation's job ⇒ no row). */
-function serviceRows(jobs, { cid = null, now = Date.now(), base = '' } = {}) {
+function serviceRows(jobs, { cid = null, now = Date.now(), base = '', forwards = [] } = {}) {
   const rows = {};
   if (!cid) return rows;
   for (const j of jobs || []) {
     if (jobOwnerCid(j) !== cid) continue;
-    const r = serviceRow(j, { now, base });
+    const r = serviceRow(j, { now, base, forwards });
     if (r) rows[r.key] = r;
   }
   return rows;
@@ -318,5 +342,5 @@ const kindWord = (kind, lang = 'en') => (KIND_WORDS[kind] || KIND_WORDS.other)[l
 module.exports = { KINDS, VIEW_ORDER, OPS, REG_OPS, KIND_RANK, BY, MAX_ROWS, CATEGORY_KIND, KIND_WORDS, kindOf, absPath, keyOf, apply, fold, merge, view,
   cardWorthy, cardBlock, cardFacts, autoOpenVerdict, ownerOfIn, editNoteText, lineDelta, kindWord, baseName,
   pageOp, designOp, uploadOp, storeRows,
-  SERVICE_KEEP_MS, jobOwnerCid, serviceUrl, serviceRow, serviceRows,
+  SERVICE_KEEP_MS, jobOwnerCid, forwardFor, serviceLink, serviceRow, serviceRows,
   VIA_KINDS, MAX_HANDOVER, viaOf, handoverOp, markHanded, rowFor };

@@ -7,18 +7,37 @@
 import { t, resolveLang } from './i18n.js';
 import { getFileIcon } from './file-types.js';
 import { agoText } from './user-todos-row.js';
-import { cardFacts, kindWord, serviceUrl } from '../artifacts.js';
+import { cardFacts, kindWord } from '../artifacts.js';
 import { UI_ICONS } from './icons.js';
 import { absUrl, showContextMenu, copyText } from './utils.js';
+import { replayOpenSpec } from './window-types.js'; // lane artifacts-services-url: "Show in Ports" = the Ports window's own open action
 
 const lang = () => { try { const l = resolveLang(); return l === 'zh' || l === 'ja' ? l : 'en'; } catch { return 'en'; } }; // the house language (i18n.js) — <html lang> is never set (the real-Opus zh run read "Document")
 const div = (cls) => { const n = document.createElement('div'); n.className = cls; return n; };
 const span = (cls) => { const n = document.createElement('span'); n.className = cls; return n; };
 
 /** "Edited 3 times · 2min ago · last by you" (the card's meta line and the list row's words). */
-/** lane artifacts-services: a service row's link — its port on the instance's host, resolved through absUrl (the
- *  instance URL when one is mapped), never location.origin. */
-export const serviceHref = (b) => serviceUrl(b && b.port, absUrl('/'));
+/** lane artifacts-services-url: a service row's link = the ROW's url (the server's ladder, src/artifacts.js serviceLink:
+ *  the port's published forward, else this instance's /proxy/) — the client never builds a host:port; a relative proxy
+ *  url resolves through absUrl (the instance URL when one is mapped), never location.origin. */
+export const serviceHref = (b) => absUrl((b && b.url) || '');
+/** The Web view's open: a proxied row opens its TARGET in proxy mode (the Web view loads /proxy/<target>), else its url. */
+export const serviceOpenSpec = (b) => (b && b.via === 'proxy' && b.target ? { url: b.target, proxy: true } : { url: serviceHref(b), proxy: false });
+/** The small word beside the url: how the link reaches the service. */
+export const serviceViaText = (b) => (b && b.via === 'published' ? t('Published') : b && b.via === 'proxy' ? t('Through this VibeSpace') : t('Only on its machine'));
+/** ⋯ "Show in Ports": the Ports window (its forward row — data-forward-id — scrolled to and flashed once it renders; a
+ *  port not yet forwarded is in its scan list, where the existing Forward / Publish acts are). */
+export function showInPorts(app, forwardId) {
+  if (!app) return;
+  replayOpenSpec(app, { action: 'openPorts' });
+  let tries = 0;
+  const find = () => {
+    const r = forwardId && document.querySelector(`.rail-panel-ports .ports-row[data-forward-id="${CSS.escape(String(forwardId))}"]`);
+    if (r) { r.scrollIntoView({ block: 'nearest' }); r.classList.add('ports-row-flash'); setTimeout(() => r.classList.remove('ports-row-flash'), 1600); }
+    else if (forwardId && ++tries < 30) setTimeout(find, 100); // the panel paints after its /api/port-forwards read
+  };
+  find();
+}
 const stamp = (ts) => { try { return new Date(ts).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch { return ''; } };
 export function artifactMetaText(b) {
   const f = cardFacts(b);
@@ -34,27 +53,32 @@ export function artifactMetaText(b) {
   return parts.join(' · ');
 }
 
-/** ⋯ on a service: copy the link / open it in a new tab / show its job. */
-function serviceMenu(e, b, { showJob = null } = {}) {
+/** ⋯ on a service: copy the link / open it in a new tab / show it in Ports / copy the machine-local address / show its job. */
+function serviceMenu(e, b, { showJob = null, showPorts = null } = {}) {
   e.preventDefault(); e.stopPropagation();
   const r = e.currentTarget.getBoundingClientRect();
   showContextMenu(r.left, r.bottom, [
     { label: t('Copy URL'), action: () => copyText(serviceHref(b)) },
     { label: t('Open in a new tab'), action: () => window.open(serviceHref(b), '_blank', 'noopener') },
+    { label: t('Show in Ports'), action: () => showPorts && showPorts(b.forwardId || null) },
+    { label: t('Copy the machine-local address'), action: () => copyText(b.localUrl || '') },
     { label: t('Show the job'), action: () => showJob && showJob(b.jobId) },
   ]);
 }
-export function renderArtifactCard(msg, { open = null, showJob = null } = {}) {
+export function renderArtifactCard(msg, { open = null, showJob = null, showPorts = null } = {}) {
   const el0 = div('chat-msg chat-msg-system chat-vs-notice chat-artifact-card');
   el0.tabIndex = 0;
   el0.setAttribute('role', 'button');
   const head = div('chat-vs-notice-head');
   const ic = span('chat-artifact-ic'); ic.setAttribute('aria-hidden', 'true');
   head.append(ic, span('chat-vs-notice-title chat-artifact-name'), span('chat-artifact-kind chat-status-dim'));
-  el0.append(head, div('chat-artifact-path chat-status-dim'), div('chat-artifact-meta chat-status-dim'));
-  if ((msg && msg.content && msg.content[0] && msg.content[0].kind) === 'service') {
+  const service = (msg && msg.content && msg.content[0] && msg.content[0].kind) === 'service';
+  const where = div(service ? 'chat-artifact-path chat-artifact-url chat-status-dim' : 'chat-artifact-path chat-status-dim'); // a URL is not a path: LTR, END-truncated (chat.css)
+  if (service) where.append(span('chat-artifact-href'), span('chat-artifact-via'));
+  el0.append(head, where, div('chat-artifact-meta chat-status-dim'));
+  if (service) {
     const more = document.createElement('button'); more.type = 'button'; more.className = 'chat-artifact-more'; more.textContent = '⋯'; more.title = t('More');
-    more.addEventListener('click', (e) => serviceMenu(e, el0._rawMsg.content[0], { showJob }));
+    more.addEventListener('click', (e) => serviceMenu(e, el0._rawMsg.content[0], { showJob, showPorts }));
     more.addEventListener('keydown', (e) => e.stopPropagation());
     head.appendChild(more);
   }
@@ -78,9 +102,10 @@ export function patchArtifactCard(el0, msg) {
   if (ic && ic.dataset.name !== b.name) { ic.innerHTML = (b.kind === 'service' ? UI_ICONS.globe : getFileIcon(b.name || '')) || ''; ic.dataset.name = b.name || ''; } // the icon table's own SVG (trusted), keyed by name
   set('.chat-artifact-name', b.name || '');
   set('.chat-artifact-kind', kindWord(b.kind, lang()));
-  set('.chat-artifact-path', b.kind === 'service' ? '\u200e' + serviceHref(b) : b.path ? '\u200e' + b.path : ''); // LRM: the row is direction:rtl (front-truncate) — without it the path's leading "/" is drawn at its END (the real-Opus e2e shot)
+  if (b.kind === 'service') { set('.chat-artifact-href', serviceHref(b)); set('.chat-artifact-via', serviceViaText(b)); } // lane artifacts-services-url: the url as it reads, LTR (the .223 rtl box painted its trailing "/" first: "/http://…")
+  else set('.chat-artifact-path', b.path ? '\u200e' + b.path : ''); // LRM: the row is direction:rtl (front-truncate) — without it the path's leading "/" is drawn at its END (the real-Opus e2e shot)
   set('.chat-artifact-meta', artifactMetaText(b));
-  el0.title = b.kind === 'service' ? t('Open {url} in the Web view', { url: serviceHref(b) }) : t('Open {name} beside the chat', { name: b.name || '' });
+  el0.title = b.kind === 'service' ? `${t('Open {url} in the Web view', { url: serviceHref(b) })} · ${serviceViaText(b)}${b.publishedBy ? ' · ' + b.publishedBy : ''}` : t('Open {name} beside the chat', { name: b.name || '' });
 }
 
 /** The Artifacts chip's popover: deliverables by kind (the server's view order), code folded behind "Code (n)". */

@@ -4,6 +4,25 @@ This file is the engineers' record of every release: the lanes, the verification
 
 `CHANGELOG.md` (with `CHANGELOG.zh.md` and `CHANGELOG.ja.md`) is the user's: what changed for the person using VibeSpace, one plain line per change, in the interface's language — the rules are in docs/changelog-style.md. From 2.369.199 on, every release also writes its section here, under the same `## <version> — <date>` heading as its user entry and in the same commit, newest first above the verbatim record.
 
+## 2.369.225 — 2026-10-06
+
+### int225 — the integration (Opus): a Services row links where the user can reach it — on int224b's history (06621d688, tree == master b652f0850)
+
+- **Entered (cherry-pick -x):** artifacts-services-url (da3f65bb2 → f24dac81b), ONE commit on 425af264e (2.369.223), so it crosses 2.369.224's hand-over. Drift: none outside the merged lines below.
+- **Conflicts (kept BOTH):** the three user changelogs + this log's heading (2.369.225 above .224); kb-bugfix-invariants (both new sections); `src/artifacts.js` `cardBlock` (the hand-over's `via` / `handedTo` spread + the service branch's link fields) and its exports (`forwardFor`, `serviceLink` in place of `serviceUrl`, beside the hand-over's `VIA_KINDS … rowFor`); `src/server/artifact-registry.js` api (`helperOps`, `handover` + `noteForwards`). The two `via`s never share a row: a service row's is the link's word (`published` / `proxy` / `local`), `handoverOp` refuses service rows, and `viaOf` reads a string as no helper.
+- **The user entry:** reworded to the brief's — never a bare host:port, shown left to right (en 148 / zh 69 / ja 85 code points).
+- **Hygiene:** the instance user's name left the added lines (test-artifacts-services ①b's https instance is someone-local-x.frp.example.test; the kb note quotes the .223 card as `/http://<instance>-local-….frp….cc:8766`).
+- **Gates after the pick:** build + i18n 7674 / 7674; §78 both `--lower`: 0 rises, 0 falls; artifacts-services 36, artifacts 53, artifacts-handover 37, architecture 604, port-forward, changelog-style 40; on a snapshot (private XDG_RUNTIME_DIR + HOME, no DISPLAY) artifacts-chrome 34 / 0 and artifacts-handover-ui 31 / 0, one at a time.
+- **The ONE heavy before the bump:** `fullTierDue` over the production checkout's markers (read-only) said "the newest FULL green (b924041f) is 122 h old" — int224's FULL was red, so it left no green — ⇒ FULL (the AFFECTED pick would have been 229 / 258 anyway: chat.css under public/ boots the product) at one lane on bef1b3b8b: "HEAVY GATE GREEN for bef1b3b8 in 13548s (258 of 258 suites)"; FLAKY: test-channel-api-chrome (the non-sensitive write card's text read empty once — `"text":""`, its tier line with it — the same two checks as int215's heavy; alone on HEAD 39 / 0 three times; the lane touches no API card). Available memory 73–76 G around it.
+- **After the bump (a5ac5bce2):** the whole fast tier 289 in 281 s (2 lanes behind the memory guard: available 75 G, peak pressure avg10 0); the runner shape (a depth-1 clone, `npm ci` under node 22 — 235 packages, rc 0 — taskset 0-3, its own lane count) "ALL GREEN — fast gate passed in 187s" first try. Before the heavy, the fast tier on 3a55b3882: 289 in 296 s.
+- **Hygiene over 06621d688..HEAD:** names 0, token shapes 0, repo-guard generic / company + live creds / commit messages clean from the worktree's cwd (832 patch lines, no new allow row).
+
+### lane artifacts-services-url (Opus) — a Services row links the address the user can reach (owner 2026-10-06 on .223: "你识别的这些服务怎么都是 raw tcp 链接，而不是用的转发后的地址")
+
+- **Cause:** `serviceUrl(port, base)` = the instance URL's HOST + the job's RAW port (an frp name forwards only the VibeSpace port ⇒ dead off-box), printed in the rtl path box (trailing `/` painted first: "/http://…"); the port's forward record (published https URL) was never read.
+- **Fix:** PURE `serviceLink` ladder (published forward ⇒ publicUrl ▸ this instance's `/proxy/<target>` ▸ a paired machine's raw port only as via `local`), `forwardFor` over `PortForwardManager.list()`; the registry's ports door `noteForwards` on the PortForwardManager broadcast (server.js) patches live cards; the card prints `.chat-artifact-url` LTR + a via word, the Web view opens a proxied row in proxy mode, ⋯ Show in Ports (`.ports-row[data-forward-id]`) + Copy the machine-local address. `serviceUrl` removed.
+- **Proof:** test-artifacts-services 36/36 (①b link table, ②b REAL PortForwardManager + stub frp: publish/unpublish patch within one broadcast, ③b printing rule via an esbuild-stubbed card + chat.css cascade, 3 patched-copy controls red as designed); test-artifacts-chrome 34/34 (⑥ re-pinned: proxy link LTR by Range rects, proxy-mode Web view shows the page, `-r` relay stub ⇒ 已发布 then 经本实例代理, zh 390 px).
+
 ## 2.369.224 — 2026-10-06
 
 ### int224 — the integration (Opus): a helper's files reach the conversation you talk to, and agent notices ride oldest first — on int223b's history (8cbaf7caa, tree == master 425af264e)

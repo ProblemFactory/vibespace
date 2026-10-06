@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.225 — 2026-10-06
+
+### Fixed
+- A service in Artifacts links where you can reach it: its published address, or through this VibeSpace (never a bare host:port), shown left to right.
+
 ## 2.369.224 — 2026-10-06
 
 ### Added

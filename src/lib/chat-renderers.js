@@ -52,7 +52,7 @@ import { openResetCreditDialog, fmtInstant } from './reset-credit-dialog.js';
 import { resetCreditCardView } from '../reset-credit.js';
 import { startCardText, endCardText, endCardReplays, framesGoneText } from './browser-session-words.js'; // 2026-09-27: a browser session's start / end card — the words shared with the live view and the replay window
 import { btn as textBtn } from './channel-chrome.js'; // the house text button (`mounts-btn`): a button says what it does
-import { renderArtifactCard, patchArtifactCard } from './artifact-card.js'; // lane artifacts-model: a deliverable's ONE card (patched in place)
+import { renderArtifactCard, patchArtifactCard, showInPorts } from './artifact-card.js'; // lane artifacts-model: a deliverable's ONE card (patched in place)
 import { renderProposalCard, patchProposalCard } from './browser-proposal-card.js'; // lane browser-propose: the agent's proposal, ONE Approve (patched in place)
 import { peerCore, peerCardFold, demoteHeadings, PEER_FOLD_SETTING } from './peer-card-model.js'; // lane peer-card-fold: the ONE fold verdict + preview + demoted headings
 import { parseReply as parseInboxReply } from '../inbox-reply.js'; // PURE: the For-you reply's marker + quote block (design-user-inbox-reply D1.8) — text-derived, so live and history agree
@@ -1644,7 +1644,7 @@ class ChatRenderers {
     // LANE ARTIFACTS-MODEL: a deliverable the agent wrote (derived from the harness's write record) — ONE card per file,
     // patched in place on every later write / edit; one click opens it beside the chat (the Cmd+click door, no Cmd)
     if (msg.noticeKind === 'artifact' && msg.content?.[0]?.type === 'artifact') {
-      return { el: renderArtifactCard(msg, { showJob: (id) => this.app?.openJobs?.({ focusJobId: id }), open: (b) => (this._onOpenArtifact ? this._onOpenArtifact(b) : this.app?.openFile(b.path, b.name || b.path.split('/').pop(), { host: b.host || undefined, from: this._sourceWinId() })) }), sideEffect: null };
+      return { el: renderArtifactCard(msg, { showJob: (id) => this.app?.openJobs?.({ focusJobId: id }), showPorts: (fid) => showInPorts(this.app, fid), open: (b) => (this._onOpenArtifact ? this._onOpenArtifact(b) : this.app?.openFile(b.path, b.name || b.path.split('/').pop(), { host: b.host || undefined, from: this._sourceWinId() })) }), sideEffect: null };
     }
     // UNKNOWN EVENT — the fall-back card (2.369.119/.120, owner): a harness
     // record VibeSpace does not recognize sits in the flow like any other

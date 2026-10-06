@@ -103,7 +103,11 @@ process.stdin.on('data', (d) => {
 process.stdin.on('end', () => process.exit(0));
 `, { mode: 0o755 });
 
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: 'ignore' });
+// lane artifacts-services-url: the frp relay is the ONE fake (a scratch server has none) — the forward, the publish route, the
+// forwards broadcast, the registry and the card are real
+const RELAY = path.join(stubDir, 'relay-stub.cjs');
+fs.writeFileSync(RELAY, "const { PluginManager } = require(process.cwd() + '/src/plugins.js');\nPluginManager.prototype.frpPublish = async (name, lp, o) => ({ url: 'https://house-web.relay.example.test/', name: 'house-web', proto: (o && o.proto) || 'http', subdomain: 'house-web' });\nPluginManager.prototype.frpUnpublish = async () => ({ ok: true });\n");
+const srv = spawn(process.execPath, ['-r', RELAY, 'server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: 'ignore' });
 const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',
   '--no-sandbox', '--disable-dev-shm-usage', '--disable-background-timer-throttling', `--user-data-dir=${wt}-chrome`, 'about:blank'], { stdio: 'ignore' });
 let cleaned = false;
@@ -254,11 +258,14 @@ try {
   check('turn 5 played (the REAL vibespace-job run of a page server)', await turn('Serve the site', /Site served/));
   const SVC = `(${CARDS}).filter((e) => e.dataset.kind === 'service')`;
   const born6 = await waitFor(`${SVC}.length === 1`, 45000); // the engine's 5 s tick + its ≤ 30 s listen read
-  const c6 = await evalJs(`(() => { const e = ${SVC}[0]; return e ? { name: e.querySelector('.chat-artifact-name')?.textContent, path: e.querySelector('.chat-artifact-path')?.textContent, meta: e.querySelector('.chat-artifact-meta')?.textContent, state: e.dataset.state } : null; })()`);
-  const href = String((c6 && c6.path) || '').replace(/^\u200e/, '');
-  check('ONE service card names the job and its link on this instance\'s host', born6 && c6.name === 'house-web' && /^http:\/\/127\.0\.0\.1:\d+\/$/.test(href) && c6.state === 'running' && /Running/.test(c6.meta), { c6, cli: (() => { try { return fs.readFileSync(path.join(stubDir, 'cli.log'), 'utf8').slice(-600); } catch { return ''; } })() });
+  const CARD6 = `(() => { const e = ${SVC}[0]; if (!e) return null; const box = e.querySelector('.chat-artifact-path'), h = e.querySelector('.chat-artifact-href'), tn = h && h.firstChild; let firstLeft = null; if (tn && tn.length > 2) { const r = document.createRange(); r.setStart(tn, 0); r.setEnd(tn, 1); const a = r.getBoundingClientRect().left; r.setStart(tn, tn.length - 1); r.setEnd(tn, tn.length); firstLeft = a < r.getBoundingClientRect().left; } return { name: e.querySelector('.chat-artifact-name')?.textContent, kind: e.querySelector('.chat-artifact-kind')?.textContent, href: h?.textContent, via: e.querySelector('.chat-artifact-via')?.textContent, dir: box && getComputedStyle(box).direction, firstLeft, meta: e.querySelector('.chat-artifact-meta')?.textContent, state: e.dataset.state, w: Math.round(e.getBoundingClientRect().width), vw: innerWidth, n: ${SVC}.length }; })()`;
+  const c6 = await evalJs(CARD6);
+  const href = String((c6 && c6.href) || '');
+  const PROXIED = new RegExp(`^http://127\\.0\\.0\\.1:${PORT}/proxy/http://127\\.0\\.0\\.1:(\\d+)/$`);
+  check('ONE service card names the job and links it THROUGH this instance\'s /proxy/ (never a raw host:port), printed LTR — its "h" painted left of its trailing "/"', born6 && c6.name === 'house-web' && PROXIED.test(href) && c6.via === 'Through this VibeSpace' && c6.dir === 'ltr' && c6.firstLeft === true && c6.state === 'running' && /Running/.test(c6.meta), { c6, cli: (() => { try { return fs.readFileSync(path.join(stubDir, 'cli.log'), 'utf8').slice(-600); } catch { return ''; } })() });
+  const svcPort = Number((PROXIED.exec(href) || [])[1]) || 0;
   const served = await fetch(href).then((r) => r.text()).catch((e) => 'ERR ' + e.message);
-  check('the link answers with the served page', /House 3D viewer/.test(served), served.slice(0, 200));
+  check('the link answers with the served page (through the instance\'s proxy)', /House 3D viewer/.test(served), served.slice(0, 200));
   await waitFor(`/Artifacts · 6/.test(document.querySelector('.chat-status-artifacts')?.textContent || '')`, 5000); // the chip re-reads on the card's live birth (debounced)
   await evalJs(`document.querySelector('.chat-status-artifacts')?.click(); true`);
   await waitFor(`!!document.querySelector('.chat-artifact-head')`, 5000);
@@ -271,11 +278,12 @@ try {
   await waitApp(); await sleep(1000);
   await evalJs(`window.__sid = ${JSON.stringify(sid)}; if (!${VIEW}) app.attachSession(${JSON.stringify(sid)}, 'artifacts', ${JSON.stringify(CWD)}, { mode: 'chat', backend: 'claude' }); true`);
   await waitFor(`!!(${VIEW}) && ${SVC}.length === 1`, 20000);
-  const z6 = await evalJs(`(() => { const e = (${VIEW}) && ${SVC}[0]; return e ? { kind: e.querySelector('.chat-artifact-kind')?.textContent, meta: e.querySelector('.chat-artifact-meta')?.textContent, w: Math.round(e.getBoundingClientRect().width), vw: innerWidth } : null; })()`);
-  check('zh at 390 px: the service card says 服务 and 运行中, inside the viewport', z6 && z6.kind === '服务' && /运行中/.test(z6.meta) && z6.w > 0 && z6.w <= z6.vw, z6);
+  const z6 = await evalJs(CARD6);
+  check('zh at 390 px: the service card says 服务 · 运行中 · 经本实例代理, its url LTR, inside the viewport', z6 && z6.kind === '服务' && /运行中/.test(z6.meta) && z6.via === '经本实例代理' && z6.dir === 'ltr' && z6.firstLeft === true && z6.w > 0 && z6.w <= z6.vw, z6);
   await evalJs(`${SVC}[0].scrollIntoView(); ${SVC}[0].click(); true`);
   const webOk = await waitFor(`[...app.wm.windows.values()].some((w) => w.type === 'browser' && w.content?.querySelector('iframe')?.src === ${JSON.stringify(href)})`, 10000);
-  check('one click opens the link in the Web view (a browser window, never a new tab)', webOk);
+  const pmode = await evalJs(`[...app.wm.windows.values()].filter((w) => w.type === 'browser').map((w) => ({ input: w.content?.querySelector('input.file-path-input')?.value, proxy: w._openSpec && w._openSpec.proxy }))`);
+  check('one click opens the link in the Web view (a browser window, never a new tab) in PROXY mode on the service\'s target', webOk && pmode.some((w) => w.proxy === true && w.input === `http://127.0.0.1:${svcPort}/`), pmode);
   let frameText = '';
   for (let i = 0; i < 40 && !/House 3D viewer/.test(frameText); i++) {
     try {
@@ -287,6 +295,15 @@ try {
     if (!/House 3D viewer/.test(frameText)) await sleep(250);
   }
   check('the Web view shows the served page', /House 3D viewer/.test(frameText), frameText.slice(0, 200));
+  // lane artifacts-services-url: a (scratch) publish of the port ⇒ the SAME card is patched to the public URL + 已发布; unpublish ⇒ back
+  const J6 = { method: 'POST', headers: { 'Content-Type': 'application/json' } };
+  const fw6 = await fetch(`http://127.0.0.1:${PORT}/api/hosts/__local__/port-forward`, { ...J6, body: JSON.stringify({ port: svcPort, label: 'service: house-web' }) }).then((r) => r.json()).catch((e) => ({ error: e.message }));
+  const pub6 = fw6 && fw6.id ? await fetch(`http://127.0.0.1:${PORT}/api/port-forward/${encodeURIComponent(fw6.id)}/publish`, { ...J6, body: '{}' }).then((r) => r.json()).catch((e) => ({ error: e.message })) : null;
+  const pubOk = await waitFor(`(() => { const c = ${CARD6}; return !!c && c.n === 1 && c.href === 'https://house-web.relay.example.test/' && c.via === '已发布'; })()`, 10000);
+  check('after a scratch publish the SAME card links the published address + 已发布 (patched in place by the forwards broadcast)', pubOk, { fw6, pub6, card: await evalJs(CARD6) });
+  if (fw6 && fw6.id) await fetch(`http://127.0.0.1:${PORT}/api/port-forward/${encodeURIComponent(fw6.id)}/publish`, { method: 'DELETE' }).catch(() => null);
+  const backOk = await waitFor(`(() => { const c = ${CARD6}; return !!c && c.n === 1 && c.href === ${JSON.stringify(href)} && c.via === '经本实例代理'; })()`, 10000);
+  check('unpublish ⇒ the card is back on the proxy url + 经本实例代理', backOk, await evalJs(CARD6));
   await evalJs(`localStorage.removeItem('vibespace.lang'); true`);
   check('no page error', pageErrors.length === 0, pageErrors.slice(0, 3));
 } catch (e) {

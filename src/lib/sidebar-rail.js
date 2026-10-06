@@ -919,6 +919,7 @@ export function installSidebarRail(Sidebar) {
         for (const f of fwds) {
           const row = document.createElement('div');
           row.className = 'ports-row';
+          row.dataset.forwardId = f.id; // lane artifacts-services-url: a service card's "Show in Ports" finds its forward's row
           const label = `${escHtml(nameOf(f.hostId))}${f.targetHost ? '→' + escHtml(f.targetHost) : ''}:${f.remotePort}`;
           // service tag rides the forward's own label (owner report: it only
           // showed on scan rows) — forwards created by a Background Work

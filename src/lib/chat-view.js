@@ -28,7 +28,7 @@ import { heldText } from './jobs-layout.js';
 import { browserFactWords } from '../browser-fact.js'; // lane S2: THE words of THE browser fact (the chip prints them, never its own)
 import { createCardTraceLoader } from './browser-trace-view.js'; // agent browser P5 (§4.5 / D35): the tool card's action trace
 import { createChannelTouchView, openTouchRow } from './channel-touch-view.js'; // §26 (B-099e): the conversations an agent read / drafted, as rows on the tool card + the status-bar chip
-import { serviceHref } from './artifact-card.js'; // lane artifacts-services: a service row's link (its port on the instance's host)
+import { serviceHref, serviceOpenSpec } from './artifact-card.js'; // lane artifacts-services(-url): a service row's link (the server's ladder: published forward, else this instance's proxy)
 import { hasPendingHelperAsk, askState, isWaiting } from '../helper-ask.js'; // PURE (lane S1): a helper's permission ask — the fold rule + the waiting chip's words
 
 // Agent-memory paths: the claude init frame's own `memory_paths` when the
@@ -3970,7 +3970,7 @@ class ChatView {
   /** Open a deliverable in its kind's viewer BESIDE this chat (`from` — the Cmd+click door). lane artifacts-registries: a
    *  published page opens its /p/ link (an unpublished one its source file), a design the Design window. */
   _openArtifact(b) {
-    if (b && b.kind === 'service') { const u = serviceHref(b); if (this.app.openBrowser) this.app.openBrowser(u); else window.open(u, '_blank', 'noopener'); return; } // lane artifacts-services: the Web view, never a new tab by default
+    if (b && b.kind === 'service') { const o = serviceOpenSpec(b); if (this.app.openBrowser) this.app.openBrowser(o.url, { proxy: o.proxy }); else window.open(serviceHref(b), '_blank', 'noopener'); return; } // lane artifacts-services: the Web view, never a new tab by default; -url: proxy mode for a proxied row
     if (!b || !b.path) return;
     if (b.kind === 'page' && b.url && b.state === 'published') { const u = new URL(b.url, location.origin).href; if (this.app.openBrowser) this.app.openBrowser(u); else window.open(u, '_blank'); return; }
     if (b.kind === 'design') { this.app.openDesign({ host: b.host || '', dir: b.path, sessionId: this.sessionId }); return; }
