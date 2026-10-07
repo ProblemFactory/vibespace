@@ -25,8 +25,9 @@ import http from 'node:http';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { mutantCopies, keeperWithInstalls } from './mutant-copy.mjs';
-import { scratch } from './scratch.mjs';
+import { scratch, deadPort } from './scratch.mjs';
 import { writeFakeAgentBrowser } from './fixtures/fake-agent-browser.mjs';
+const DEAD_CDP = await deadPort(); // the stub's cdp-url: a port the kernel just released, never a fixed one (§81)
 const require = createRequire(import.meta.url);
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
@@ -317,7 +318,7 @@ const S = require('../src/browser-serve.js');
     launch: async (ns, o) => { seen.push({ op: 'launch', env: { ...(o.extraEnv || {}) } }); return { ok: true }; },
     // the daemon's pid is one that is GONE (as after a real close --all): this suite's own pid kept `stop` in its 8 s grace (lane fast-budget)
     info: async () => ({ ok: true, active: true, pid: 2147483000, socketDir: '/tmp', version: '0.38.1' }),
-    cdpUrl: async (ns, o) => { seen.push({ op: 'cdp-url', env: { ...(o.extraEnv || {}) } }); return { ok: true, url: 'ws://127.0.0.1:9333/devtools/browser/x' }; },
+    cdpUrl: async (ns, o) => { seen.push({ op: 'cdp-url', env: { ...(o.extraEnv || {}) } }); return { ok: true, url: `ws://127.0.0.1:${DEAD_CDP}/devtools/browser/x` }; },
     closeAll: async (ns, o) => { seen.push({ op: 'stop', env: { ...(o.extraEnv || {}) } }); return { ok: true }; },
   };
   const bs = { facts: { probeVersion: async () => '0.38.1' }, runtime: rt, homeDir: H3, cmd: 'fake-cli', displayProbe: async () => ({ ok: true, x11: [], wayland: [], why: [] }) };

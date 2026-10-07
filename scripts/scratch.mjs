@@ -102,6 +102,18 @@ export async function freePorts(n) {
 
 export async function freePort() { return (await freePorts(1))[0]; }
 
+/** A DEAD loopback port: bound on 127.0.0.1:0, read, closed — a port the kernel just released and nothing on this
+ *  box holds, so a connect is refused. Dead for the NEXT SECONDS only: use it at once, never write it down. NEVER a
+ *  fixed "nobody listens on 19888" literal (2026-10-06, mirror-green-220: test-browser-ephemeral's fake answered
+ *  `get cdp-url` with ws://127.0.0.1:19888 — another project's workbench listened there on the dev box and answered
+ *  404, the product read "answered", the local heavy stayed green while the runner was red). test-architecture §81
+ *  is the census: no suite names a literal loopback endpoint. */
+export async function deadPort() { return (await freePorts(1))[0]; }
+/** N distinct dead ports (all held until every one is chosen — see freePorts). */
+export async function deadPorts(n) { return freePorts(n); }
+/** `${scheme}://127.0.0.1:<deadPort>${rest}` — a URL nothing answers. */
+export async function deadUrl(scheme = 'http', rest = '') { return `${scheme}://127.0.0.1:${await deadPort()}${rest}`; }
+
 /** THE SINGLETON DESKTOP'S NAMES, PER RUN (2026-09-25 — the heavy RED on
  *  69720f2b). src/vnc.js's singleton Desktop claims the MACHINE-GLOBAL X display
  *  `:7` and RFB port 5901 unless VIBESPACE_VNC_DISPLAY / VIBESPACE_VNC_PORT name

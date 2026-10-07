@@ -34,8 +34,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch } from './scratch.mjs';
+import { scratch, deadPort } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+const DEAD_CDP = await deadPort(); // the fake's cdp-url: a port the kernel just released, never a fixed one (§81)
 const require = createRequire(import.meta.url);
 const B = require('../src/browser-profiles.js');
 const F = require('../src/browser-facts.js');
@@ -79,7 +80,7 @@ const [a, b] = argv;
 if (a === '--version') { console.log('agent-browser 0.38.0'); process.exit(0); }
 if (a === 'session' && b === 'info') { const s = read(); const act = !!(s && alive(s.pid)); out({ success: true, data: { active: act, namespace: ns, pid: act ? s.pid : null, session: process.env.AGENT_BROWSER_SESSION || null, socketDir: path.join(st, ns, 'run'), version: act ? '0.38.0' : null } }); process.exit(0); }
 if (a === 'open') { let s = read(); if (!(s && alive(s.pid))) { const c = spawn('sleep', ['600'], { detached: true, stdio: 'ignore' }); c.unref(); s = { pid: c.pid, profile: process.env.AGENT_BROWSER_PROFILE || null, idle: process.env.AGENT_BROWSER_IDLE_TIMEOUT_MS || null }; fs.writeFileSync(f, JSON.stringify(s)); fs.appendFileSync(path.join(st, 'launches.log'), JSON.stringify({ ns, ...s, session: process.env.AGENT_BROWSER_SESSION || null }) + '\\n'); } out({ success: true, data: { url: b } }); process.exit(0); }
-if (a === 'get' && b === 'cdp-url') { const s = read(); if (!(s && alive(s.pid))) { out({ success: false, error: 'fake: no browser' }); process.exit(1); } out({ success: true, data: { cdpUrl: 'ws://127.0.0.1:19222/devtools/browser/fake-' + ns } }); process.exit(0); }
+if (a === 'get' && b === 'cdp-url') { const s = read(); if (!(s && alive(s.pid))) { out({ success: false, error: 'fake: no browser' }); process.exit(1); } out({ success: true, data: { cdpUrl: 'ws://127.0.0.1:${DEAD_CDP}/devtools/browser/fake-' + ns } }); process.exit(0); }
 if (a === 'close' && b === '--all') { const s = read(); let closed = 0; if (s && alive(s.pid)) { try { process.kill(s.pid, 'SIGKILL'); closed = 1; } catch { } } try { fs.unlinkSync(f); } catch { } out({ success: true, data: { closed, failed: [], sessions: [] } }); process.exit(0); }
 if (a === 'snapshot' || a === 'fill') { fs.appendFileSync(path.join(st, 'cmds.log'), JSON.stringify({ verb: a, ns, session: process.env.AGENT_BROWSER_SESSION || null, profile: process.env.AGENT_BROWSER_PROFILE || null, cdp: process.env.AGENT_BROWSER_CDP || null, config: process.env.AGENT_BROWSER_CONFIG || null, pinTab, argv }) + '\\n'); out({ success: true, data: { ok: true } }); process.exit(0); }
 out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.slice(2).join(' ') }); process.exit(1);
@@ -297,7 +298,7 @@ console.log('— ③ the routes, the shipped CLI and the per-session config: a m
   c = await cli(['--profile', 'work', '--', 'snapshot']);
   let last = cmds()[cmds().length - 1];
   // naive study 2: the command reaches Work's browser over its CDP url — never Work's directory (0.38.1: a second Chrome on it dies on SingletonLock)
-  ok(c.status === 0 && last && last.verb === 'snapshot' && last.ns === 'vs-' + work.id && last.session === 'vs-' + KEY_A && last.profile === null && last.cdp === 'ws://127.0.0.1:19222/devtools/browser/fake-vs-' + work.id && /profile: Work account \(bp-.*handle work/.test(c.stderr), '`--profile work -- snapshot` runs in Work\'s namespace with MY session, over Work\'s browser\'s CDP url (never its directory), and names the profile it acted on');
+  ok(c.status === 0 && last && last.verb === 'snapshot' && last.ns === 'vs-' + work.id && last.session === 'vs-' + KEY_A && last.profile === null && last.cdp === `ws://127.0.0.1:${DEAD_CDP}/devtools/browser/fake-vs-` + work.id && /profile: Work account \(bp-.*handle work/.test(c.stderr), '`--profile work -- snapshot` runs in Work\'s namespace with MY session, over Work\'s browser\'s CDP url (never its directory), and names the profile it acted on');
   c = await cli(['--', 'snapshot'], { ...cliEnv, VIBESPACE_BROWSER: 'personal' });
   last = cmds()[cmds().length - 1];
   ok(c.status === 0 && last.ns === 'vs-' + pers.id, 'VIBESPACE_BROWSER=<handle> is the shell\'s default (identical to --profile on every command)');

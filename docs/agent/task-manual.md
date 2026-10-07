@@ -107,3 +107,25 @@ read-only.
 A session the user marked as Group Manager (Session Properties) additionally
 gets create/configure/bind verbs across ALL groups — taught in-context when
 granted; actions are audited in each group's activity log.
+
+## The full teaching behind the session intro's pointer line
+
+Every session's first prompt carries ONE line for this tool and points here (2.369.227 — the first prompt context must leave room for notices and messages). These are the words it used to carry in full:
+
+(If this session is later linked to a VibeSpace task, you will also get `vibespace-task` for task-level progress/plan/status — you have no task right now, so it is not active yet.)
+
+After each meaningful piece of work, log it for the group:
+
+```sh
+vibespace-task progress "one-line summary" --detail "specifics other agents may need"
+```
+
+(`vibespace-task show --full` re-reads the group's full state; keep your own working steps in your session todo list, not here)
+
+When the user DEFERS something ('later' / 'let me think about it') — park it in the group's backlog so it isn't lost (backlog = NON-immediate items only: deferred decisions, future work; never start one unasked):
+
+```sh
+vibespace-task backlog-add "one-line item" --detail "context for whoever picks it up later"
+```
+
+(parking auto-CLAIMS the item for you — claimed items are re-surfaced to you and their changes notify you. `vibespace-task backlog` lists; `backlog <id>` shows one in full; `backlog-claim/-unclaim <id>` take/hand back ownership — if the user hands you a backlog id, view it and claim it; `backlog-done <id>` once decided or finished; `--priority high|low` on backlog-add/-edit ranks it — an unclaimed high item is shown to every session)

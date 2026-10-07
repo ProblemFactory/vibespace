@@ -215,7 +215,9 @@ function laneState(caps, adapterRecord, entry, now, { feed = null } = {}) {
   if (l.via === 'scan' || l.pollCadence === 'reconcile') return l;
   const fo = feed && typeof feed === 'object' ? feed : {};
   const fs = feedState(c, adapterRecord, now, fo);
-  if (fs.carrying) return { via: 'poll', carryContent: false, live: false, pollCadence: 'feed', why: 'feed', feedSeconds: feedBoundSec(fo) };
+  // lane channel-feed-authority (OWNER'S LAW 2026-10-06: fetch the updates, never ask each conversation): an AUTHORITATIVE
+  // feed (Gmail's history.list — the vendor's own sync primitive) carrying ⇒ `feed-only`: no per-row timer at all
+  if (fs.carrying) return { via: 'poll', carryContent: false, live: false, pollCadence: feedAuthoritative(c) ? 'feed-only' : 'feed', why: 'feed', feedSeconds: feedBoundSec(fo) };
   return l;
 }
 function baseLane(c, adapterRecord, now) {
@@ -669,8 +671,8 @@ function freshnessClaim(caps, laneOrScan, entry, now, { enabled = true, cadence 
   if (cad.seconds === null || cad.seconds === undefined) return { kind: 'within', state: 'unknown', seconds: null };
   // lane lark-search-poll: a CARRYING feed's claim is its own bound (every + overlap) — never the relaxed safety net it
   // no longer depends on; an open window's hot poll is shorter and is what it claims
-  const fb = l.pollCadence === 'feed' ? num(l.feedSeconds) : null;
-  if (fb !== null && fb < cad.seconds) return { kind: 'within', state: 'bound', seconds: fb, tier: cad.tier || null, source: 'feed' };
+  const fb = l.pollCadence === 'feed' || l.pollCadence === 'feed-only' ? num(l.feedSeconds) : null;
+  if (fb !== null && (fb < cad.seconds || !cad.seconds)) return { kind: 'within', state: 'bound', seconds: fb, tier: cad.tier || null, source: 'feed' };
   return { kind: 'within', state: 'bound', seconds: cad.seconds, tier: cad.tier || null, source: cad.source };
 }
 
@@ -718,6 +720,13 @@ function cadenceFor(caps, laneOrScan, entry, now, { tiers = null, watched = fals
   const l = laneOrScan || {};
   const cold = clamp(T.coldSec);
   if (l.pollCadence === 'reconcile') return { seconds: cold, tier, source: 'push-safety', paused: false };
+  // lane channel-feed-authority: an AUTHORITATIVE carrying feed names every changed conversation — a row it did not name
+  // is not polled by a timer (0 s = never due by the clock); an open window (`watched`) keeps the hot refresh (the owner
+  // looking). The feed's named rows, a kick, the owner's press and the owed marks are due by the engine, not by this.
+  if (l.pollCadence === 'feed-only') {
+    if (watched) return { seconds: clamp(T.hotSec), tier, paused: false, source: 'tier' };
+    return { seconds: 0, tier, source: 'feed', paused: false };
+  }
   const secs = tier === 'hot' ? T.hotSec : tier === 'warm' ? T.warmSec : T.coldSec;
   // lane lark-search-poll (owner decision 4, 2026-09-28: "5 minutes, not 15"): a CARRYING change feed relaxes every
   // row to AT LEAST the relaxed safety net (`channels.relaxedPollSec`, 300) — a cold row stays cold, never polled MORE
@@ -963,6 +972,11 @@ const FEED_MODES = Object.freeze(['measuring', 'carrying', 'demoted']);
 const FEED_DEFAULTS = Object.freeze({ everySec: 30, overlapSec: 60 });
 /** The adapter's declared change feed (`caps.changeFeed`), or null. */
 const changeFeedRow = (c) => (c && c.changeFeed && typeof c.changeFeed === 'object' ? c.changeFeed : null);
+/** lane channel-feed-authority: the feed's AUTHORITY — `authoritative` (the vendor's own change log: Gmail's history.list;
+ *  carrying from its first good answer, it replaces every per-row timer) | `measured` (Lark's search: coverage measured,
+ *  never promised — carrying only once measured complete, and then only relaxes the rows). Undeclared = measured. */
+const FEED_AUTHORITIES = Object.freeze(['authoritative', 'measured']);
+const feedAuthoritative = (c) => { const d = changeFeedRow(c); return !!d && d.authority === 'authoritative'; };
 /** The last instant the account's SCOPES changed or a consent landed (inc-muk9jj0j-rel3) — never `auth.updatedAt`,
  *  which every hourly refresh moves. ONE spelling: the engine's `credentialChangedAt` delegates here. */
 function credentialChangedAt(rec) {
@@ -1019,7 +1033,9 @@ function feedState(caps, rec, now, { everySec = FEED_DEFAULTS.everySec, overlapS
     return { ...base, why: 'scope-not-granted', consentRefused: refusedBy.includes(d.scope) };
   }
   const f = r.feed && typeof r.feed === 'object' ? r.feed : {};
-  const mode = FEED_MODES.includes(f.mode) ? f.mode : 'measuring';
+  // an AUTHORITATIVE feed is not measured: its mode is `carrying` by declaration — still positive evidence only (a fresh
+  // good answer below; never run / behind / backing off / refused carries nothing)
+  const mode = d.authority === 'authoritative' ? 'carrying' : FEED_MODES.includes(f.mode) ? f.mode : 'measuring';
   const ref = f.refused && typeof f.refused === 'object' ? f.refused : null;
   if (ref) {
     const lifted = credentialChangedAt(r) > (Number(ref.at) || 0) || (Number(ref.retryAt) > 0 && Number(now) >= Number(ref.retryAt));
@@ -1197,7 +1213,7 @@ module.exports = {
   authWhyText, laneWhyText, errorCodeText, deliveryLaneText, scanSourceText, wakeRefusalText,
   pushWindow, pushSamplesAdd, pushMissRate, pushDemotionVerdict, pushLaneText,
   // lane lark-search-poll: the change feed's one lane answer + its words
-  FEED_MODES, FEED_DEFAULTS, feedState, feedText, feedCatchUpText, grantsText, untitledText, credentialChangedAt, feedBoundSec, feedFreshMs, changeFeedRow,
+  FEED_MODES, FEED_DEFAULTS, feedState, FEED_AUTHORITIES, feedAuthoritative, feedText, feedCatchUpText, grantsText, untitledText, credentialChangedAt, feedBoundSec, feedFreshMs, changeFeedRow,
   // lane lark-p2p: a shape park's bounded field lists + the unreadable-hits line; verify r1: the lone-miss bound
   shapeFields, feedUnreadableText, FEED_LOUD_STRIKES,
   // lane lark-threads (A5): the thread measurement's one sentence

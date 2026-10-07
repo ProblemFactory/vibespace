@@ -159,7 +159,7 @@ const PACE_COSTS = Object.freeze(['fetch', 'discover', 'scanHost', 'feed']);
  * THE CHANGE FEED (lane lark-search-poll, B-5aab, 2026-09-28 — design §27): a SECOND declaration on the arrival axis,
  * beside (never instead of) `receive` — ONE account-wide "what changed" read that names the conversations holding new
  * messages (Lark's empty-query message search). Declared per ADAPTER; nothing downstream names the vendor:
- *   changeFeed { via: 'search' (FEED_VIA), scope: the HELD scope that turns it on (null = none needed),
+ *   changeFeed { via: 'search' | 'history' (FEED_VIA; 'history' = authority 'authoritative' — lane channel-feed-authority), scope: the HELD scope that turns it on (null = none needed),
  *                option: the account option that switches it off (null = none), pageSize, pagesPerPass, perMin (pages
  *                per sliding minute), maxWindowSec, catchUp: {chatType, pagesMax} | null, describes: bool,
  *                timeUnit: 'ms' | 's' | 'iso' (THE ONE declared form a hit's instant is read in — never guessed),
@@ -470,12 +470,17 @@ function validateCaps(kind, caps, { channelSettings } = {}) {
     if (!Feed.FEED_VIA.includes(f.via)) bad(`caps.changeFeed.via must be one of ${Feed.FEED_VIA.join('|')}`);
     if (f.scope !== null && f.scope !== undefined && !(typeof f.scope === 'string' && f.scope && f.scope.length <= 100)) bad('caps.changeFeed.scope must be a scope name or null');
     if (f.option !== null && f.option !== undefined && !(typeof f.option === 'string' && /^[a-z][A-Za-z0-9]{0,31}$/.test(f.option))) bad('caps.changeFeed.option must be an option key or null');
-    for (const k of ['pageSize', 'pagesPerPass', 'perMin', 'maxWindowSec']) if (!(Number.isInteger(f[k]) && f[k] > 0)) bad(`caps.changeFeed.${k} must be a positive integer`);
-    if (f.catchUp !== null && f.catchUp !== undefined) {
+    // lane channel-feed-authority: the AUTHORITY is declared, never inferred — `history` (the vendor's own change log) is
+    // authoritative and only it; a search is measured. An authoritative row has no window / page size / hit reader.
+    if (f.authority !== undefined && !Feed.FEED_AUTHORITY.includes(f.authority)) bad(`caps.changeFeed.authority must be one of ${Feed.FEED_AUTHORITY.join('|')}`);
+    const authoritative = f.authority === 'authoritative';
+    if ((f.via === 'history') !== authoritative) bad("caps.changeFeed: via 'history' is the AUTHORITATIVE change log (authority 'authoritative'), and only it — a search is measured, never trusted whole");
+    for (const k of authoritative ? ['pagesPerPass', 'perMin'] : ['pageSize', 'pagesPerPass', 'perMin', 'maxWindowSec']) if (!(Number.isInteger(f[k]) && f[k] > 0)) bad(`caps.changeFeed.${k} must be a positive integer`);
+    if (!authoritative && f.catchUp !== null && f.catchUp !== undefined) {
       if (!f.catchUp || typeof f.catchUp !== 'object' || typeof f.catchUp.chatType !== 'string' || !(Number.isInteger(f.catchUp.pagesMax) && f.catchUp.pagesMax > 0)) bad('caps.changeFeed.catchUp must be {chatType, pagesMax (a positive integer)} or null');
     }
-    if (typeof f.describes !== 'boolean') bad('caps.changeFeed.describes must be a boolean');
-    if (!Feed.TIME_UNITS.includes(f.timeUnit)) bad(`caps.changeFeed.timeUnit must be one of ${Feed.TIME_UNITS.join('|')} — ONE declared unit, never guessed from a value's size`);
+    if (!authoritative && typeof f.describes !== 'boolean') bad('caps.changeFeed.describes must be a boolean');
+    if (!authoritative && !Feed.TIME_UNITS.includes(f.timeUnit)) bad(`caps.changeFeed.timeUnit must be one of ${Feed.TIME_UNITS.join('|')} — ONE declared unit, never guessed from a value's size`);
     // lane lark-p2p: the adapter's HIT-READER revision (optional, default 1) — a reader fix that makes hits readable which
     // the previous reader refused bumps it, and a feed row the old reader wrote starts over (the engine's `feedReaderHeal`)
     if (f.reader !== undefined && !(Number.isInteger(f.reader) && f.reader > 0 && f.reader <= 1000)) bad('caps.changeFeed.reader must be a positive integer (the hit reader\'s revision) or absent');
@@ -952,6 +957,14 @@ function createChannelRegistry({ channelSettings } = {}) {
        */
       async changes(opts = {}) {
         const r = (await gated('changes', impl.changes && impl.changes.bind(impl))(opts)) || {};
+        // lane channel-feed-authority: an AUTHORITATIVE feed's answer is `{changed: [conv id], conversations: [listed
+        // conversation to birth], mustWalk}` — bounded the same way: ids are strings, the lists capped, nothing else kept
+        if (caps.changeFeed && caps.changeFeed.authority === 'authoritative') {
+          const ids = (Array.isArray(r.changed) ? r.changed : []).filter((x) => (typeof x === 'string' || typeof x === 'number') && String(x).length > 0 && String(x).length <= 256).map(String);
+          if (ids.length > 5000) throw new ChannelError('vendor-error', `${kind}.changes named ${ids.length} conversations — more than 5000 is a reseed (mustWalk), never a list`, { retryable: false, detail: { contract: 'page-size' } });
+          const convs = (Array.isArray(r.conversations) ? r.conversations : []).filter((c) => c && typeof c === 'object' && typeof c.id === 'string' && c.id).slice(0, 100);
+          return { changed: ids, conversations: convs, mustWalk: r.mustWalk === true };
+        }
         const size = Number(caps.changeFeed && caps.changeFeed.pageSize) || 30;
         const raw = Array.isArray(r.hits) ? r.hits : [];
         if (raw.length > size) throw new ChannelError('vendor-error', `${kind}.changes returned ${raw.length} hits for a page size of ${size} — an adapter never returns more than a page`, { retryable: false, detail: { contract: 'page-size' } });

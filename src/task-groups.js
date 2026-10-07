@@ -493,46 +493,27 @@ class TaskGroupManager {
     const n = [T.task, T.status, T.ask, T.jobs].filter(Boolean).length;
     if (!n) return [];
     const g = gid || '';
-    const out = ['', `### Reporting back — ${n > 1 ? n + ' CLIs' : 'one CLI'} on your PATH (run ${n > 1 ? 'any' : 'it'} with no args for full usage; \`vibespace-docs\` = the full manual for every tool)`, '',
+    const out = ['', `### Reporting back — ${n > 1 ? n + ' CLIs' : 'one CLI'} on your PATH (run ${n > 1 ? 'any' : 'it'} with no args for full usage; \`vibespace-docs <topic>\` = the full manual)`, '',
       multi
         ? (T.task
           ? `You belong to MORE THAN ONE Task Group; pass \`--group <id>\` to \`vibespace-task\` (each block below names its id).${(T.status || T.ask) ? ` \`${[T.status && 'vibespace-status', T.ask && 'vibespace-ask'].filter(Boolean).join('`/`')}\` always mean${T.status && T.ask ? '' : 's'} THIS session.` : ''}`
           : `These are bound to THIS session.`)
         : `They're bound to THIS session — you never pass a group id.`];
+    // lane prompt-budget (B-2aad, 2.369.227): ONE copy-ready line per CLI (the waiting state with BOTH flags, ask with
+    // --detail — the 2.111.25 rule) and its manual's name; the teaching the code blocks and parentheses carried lives in
+    // docs/agent/{task,status,ask,background-work}-manual.md (test-prompt-budget finds every dropped line there)
     if (T.task) out.push(
       '',
-      'After each meaningful piece of work, log it for the group:',
-      `\`\`\``,
-      `vibespace-task ${g}progress "one-line summary" --detail "specifics other agents may need"`,
-      `\`\`\``,
-      `(\`${g ? 'vibespace-task ' + g.trim() + ' ' : 'vibespace-task '}show --full\` re-reads the group's full state; keep your own working steps in your session todo list, not here)`,
-      '',
-      "When the user DEFERS something ('later' / 'let me think about it') — park it in the group's backlog so it isn't lost (backlog = NON-immediate items only: deferred decisions, future work; never start one unasked):",
-      `\`\`\``,
-      `vibespace-task ${g}backlog-add "one-line item" --detail "context for whoever picks it up later"`,
-      `\`\`\``,
-      `(parking auto-CLAIMS the item for you — claimed items are re-surfaced to you and their changes notify you. \`vibespace-task ${g}backlog\` lists; \`backlog <id>\` shows one in full; \`backlog-claim/-unclaim <id>\` take/hand back ownership — if the user hands you a backlog id, view it and claim it; \`backlog-done <id>\` once decided or finished; \`--priority high|low\` on backlog-add/-edit ranks it — an unclaimed high item is shown to every session)`);
+      `After each meaningful piece of work, log it for the group: \`vibespace-task ${g}progress "one-line summary" --detail "specifics other agents may need"\`. The user DEFERS something ('later') → park it: \`vibespace-task ${g}backlog-add "item" --detail "context"\` (non-immediate items only, never started unasked; \`backlog\` lists, \`backlog-claim <id>\` takes one). Manual: \`vibespace-docs task\`.`);
     if (T.status) out.push(
       '',
-      "Your session's live state on the board — set it the MOMENT it changes. Waiting states REQUIRE both flags:",
-      `\`\`\``,
-      `vibespace-status blocked --reason "what you're waiting on" --detail "context: options, what you tried, your recommendation" --urgency high`,
-      `\`\`\``,
-      '(states: working | needs-input | blocked | review | done — `done` when this piece of work is finished)');
+      'Your live state on the board, the MOMENT it changes: `vibespace-status working|review|done`; a waiting state needs both flags — `vibespace-status blocked --reason "what you\'re waiting on" --detail "options + your recommendation" --urgency high` (or needs-input). Manual: `vibespace-docs status`.');
     if (T.ask) out.push(
       '',
-      'Whenever you ask the user anything or end a turn waiting on them — file it in their For you tray (bottom right of their screen: say that, never "your inbox") AND write the full question (options + recommendation) in your CHAT REPLY; the tray only notifies, never the sole copy:',
-      `\`\`\``,
-      `vibespace-ask "the question" --detail "options + your recommendation" --urgency high`,
-      `\`\`\``,
-      'Resolve it YOURSELF the moment they answer (chat counts): `vibespace-ask resolve <id>`');
+      'Asking the user anything / ending a turn waiting on them: ALSO file it in their For you tray (bottom right of their screen: say that, never "your inbox") — `vibespace-ask "the question" --detail "options + your recommendation"` — AND write the full question in your CHAT REPLY; `vibespace-ask resolve <id>` the moment they answer. Manual: `vibespace-docs ask`.');
     if (T.jobs) out.push(
       '',
-      'Background work that must OUTLIVE this conversation (a dev server, a monitor, a batch job, a schedule) — never nohup/systemd/harness-cron. Register it with `vibespace-job` and get the result later BY POLLING, even from a future session:',
-      `\`\`\``,
-      `vibespace-job run "python3 collect.py" --name collect-x --context "goal: 500 prompts; output: /data/x.jsonl; resume: rerun with --resume"`,
-      `\`\`\``,
-      '(`vibespace-job poll <id>` echoes your --context brief with the result — write one your amnesiac future self can act on. --keep-up = keep-alive service · --every 30m / --cron "41 9 * * *" / --at "2026-09-05 06:00" = schedule · dated obligations go to --at, not the backlog. Your conversation is auto-messaged on completion/failure/ask; in-job `announce "found X"` notifies NOW; `subscribe <id> [--filter regex]` follows another visible job; `list --mine|--subscribed` / `show <id>` re-inspect full params. Full manual: `vibespace-job docs`.)');
+      'Work that must OUTLIVE this conversation (a server, a monitor, a batch, a schedule) — never nohup/systemd/harness-cron: `vibespace-job run "<cmd>" --name <name> --context "<what your future self needs>"`, later `vibespace-job poll <id>`. Manual: `vibespace-docs jobs`.');
     // lane artifacts-prompt-hint: which writes become Artifacts — the session's harness names its file tools (agent-routes
     // fileToolsOf). It rides the paths line, whose half is tightened then (141 → 69 B): the 9600 B fixtures had ~100 B of room
     const artifactsLine = artifactsIntroLine(fileTools);

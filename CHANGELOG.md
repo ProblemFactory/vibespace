@@ -2,6 +2,15 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.227 — 2026-10-06
+
+### Changed
+- Gmail is synced the way a mail client does it — only what changed is fetched; a huge mailbox no longer costs quota or time to keep fresh.
+- Internal: agents get a shorter tools intro with the manuals a command away; test fixtures never name a fixed port.
+
+### Fixed
+- A very large mailbox no longer freezes the workspace while it refreshes.
+
 ## 2.369.226 — 2026-10-06
 
 ### Fixed

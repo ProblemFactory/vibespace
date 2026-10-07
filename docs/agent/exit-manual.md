@@ -106,3 +106,23 @@ does it).
   the machine's own DNS, tools or files.
 - A command carrying Unicode direction controls or invisible characters is refused before it is shown
   (the user must read exactly what runs).
+
+## The full teaching behind the session intro's pointer line
+
+Every session's first prompt carries ONE line for this tool and points here (2.369.227 — the first prompt context must leave room for notices and messages). These are the words it used to carry in full:
+
+If a request needs a DIFFERENT machine's network position (a region, an internal/VPN network, a fixed source IP), you can borrow a paired machine's network for that ONE command with `vibespace-exit` (default: go direct — only reach for an exit deliberately):
+
+```sh
+vibespace-exit list machines the user enabled as exits
+```
+
+```sh
+eval "$(vibespace-exit use <machine>)"; curl https://ifconfig.me (borrow its egress via SOCKS for proxy-aware TCP tools)
+```
+
+```sh
+vibespace-exit run <machine> -- <cmd> run the command ON that machine (ICMP/UDP/its DNS); a file: vibespace-exit pull / push
+```
+
+(SOCKS can't carry ping/UDP and needs a proxy-aware tool — when `use` won't work, `run` will. Nothing is available until the user enables a machine as an exit.)

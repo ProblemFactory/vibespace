@@ -835,8 +835,8 @@ const ends = (ctx) => Array.from({ length: 6 }, (_, i) => ctx.includes(`END-${i}
   const H = routesRig({ backend: 'claude' });
   H.deliver.stashFor(H.cid, { source: 'agent', kind: 'notification', fromName: 'VibeSpace notices', text: frame6 });
   const tc = H.get('/api/agent/task-context');
-  ok(Buffer.byteLength(tc, 'utf-8') > 7000 && !/context trimmed to stay inline/.test(tc) && !tc.includes('### Messages that arrived') && H.deliver.stashCount(H.cid) === 1 && H.cards.length === 0 && H.logs.some((l) => /1 stashed message\(s\) wait for the next prompt — \d+ B do not fit the \d+ B left under the inline cap/.test(l)),
-    'a resume\'s SessionStart (8 KB of context) + a 4 KiB handed-back frame: the frame WAITS whole (still in its store, no card yet) and the log names the sizes (was: drained, then capInline cut five of six notices off the tail, the card showing all six)', { bytes: Buffer.byteLength(tc, 'utf-8'), store: H.deliver.stashCount(H.cid), logs: H.logs });
+  ok(Buffer.byteLength(tc, 'utf-8') + 2 + Buffer.byteLength(frame6, 'utf-8') > AR.INLINE_CAP - AR.INLINE_TAIL_MARGIN && !/context trimmed to stay inline/.test(tc) && !tc.includes('### Messages that arrived') && H.deliver.stashCount(H.cid) === 1 && H.cards.length === 0 && H.logs.some((l) => /1 stashed message\(s\) wait for the next prompt — \d+ B do not fit the \d+ B left under the inline cap/.test(l)),
+    'a resume\'s SessionStart (two groups\' full context — less room left than the frame needs) + a 4 KiB handed-back frame: the frame WAITS whole (still in its store, no card yet) and the log names the sizes (was: drained, then capInline cut five of six notices off the tail, the card showing all six)', { bytes: Buffer.byteLength(tc, 'utf-8'), store: H.deliver.stashCount(H.cid), logs: H.logs });
   const p1 = H.get('/api/agent/prompt-context');
   ok(ends(p1) === 6 && !/context trimmed/.test(p1) && H.deliver.stashCount(H.cid) === 0 && H.cards.length === 1, 'the next (quiet) prompt carries all six notices whole and the store empties — one card', { ends: ends(p1), store: H.deliver.stashCount(H.cid) });
   // ── the codex FIRST prompt is the same shape (its full context rides prompt-context) ──
@@ -1071,17 +1071,22 @@ function tailSweep(routesMod, Ps = [3000, 3600]) {
       'identity: three identical-byte entries are three objects, a Set take of one leaves the other two (by reference), a stale peek takes nothing new; the helper is synchronous between its peek and its take');
   } finally { H.done(); }
   // THE ORDER: the tools intro (the agent\'s contract for the vibespace-* verbs) rides FIRST — a full stash never pushes it out
-  const X = rigR6({ backend: 'codex', n: 5 });
+  // RULE PRESSURE (lane prompt-budget): the room beside the intro sits between six 300-char lines and ONE 4 KiB block —
+  // the halved intro left a 4 KiB block room beside it; measured on a twin (the group archived, a 1-char preamble)
+  const oneBlk = B(AR.renderMsgStash([{ source: 'channel', kind: 'notification', fromName: 'Channels · Lark', text: 'lark-0 ' + 'z'.repeat(3900), ts: 1000 }]).text);
+  const sixLines = B(AR.renderMsgStash(Array.from({ length: 6 }, (_, i) => ({ source: 'agent', kind: 'peer', fromName: 'Ada', text: `m${i} ` + 'y'.repeat(300), ts: 3000 + i }))).text);
+  const afterPre = (c) => c.replace(/<vibespace-user-instructions>[\s\S]*?<\/vibespace-user-instructions>\n\n/, '');   // the preamble rides first (THE ORDER)
+  const X = rigR6({ backend: 'codex', n: 5, settings: fillFor({ backend: 'codex', n: 5 }, { rig: rigR6, leave: Math.floor((oneBlk + sixLines) / 2) + 2, twin: (T1) => T1.store.update(T1.gid, { archived: true }) }) });
   try {
     X.store.update(X.gid, { archived: true });   // no group ⇒ the baseline intro on the codex first prompt
     for (let i = 0; i < 6; i++) X.deliver.stashFor(X.cid, { source: 'channel', kind: 'notification', fromName: 'Channels · Lark', text: `lark-${i} ` + 'z'.repeat(3900), ts: 1000 + i });
     const c0 = X.get('/api/agent/prompt-context');   // the intro alone is ~6.4 KB with every tool on: a 4 KiB block does not fit beside it and WAITS (no card) — it never displaces the intro
-    ok(c0.startsWith('<vibespace-session-tools>') && !c0.includes('### Messages that arrived') && X.cards.length === 0 && X.deliver.stashCount(X.cid) === 6, 'the order: the 6.4 KB tools intro rides whole on the codex first prompt and six 4 KiB blocks wait behind it (no card, the store full)');
+    ok(c0.startsWith('<vibespace-user-instructions>') && afterPre(c0).startsWith('<vibespace-session-tools>') && !c0.includes('### Messages that arrived') && X.cards.length === 0 && X.deliver.stashCount(X.cid) === 6, 'the order: the tools intro rides whole (right after the rule-sized preamble) on the codex first prompt and six 4 KiB blocks wait behind it (no card, the store full)');
     for (let i = 0; i < 6; i++) X.deliver.stashFor(X.cid, { source: 'agent', kind: 'peer', fromName: 'Ada', text: `m${i} ` + 'y'.repeat(300), ts: 3000 + i });
-    X.s._toolsIntroSeen = false;   // the same first-prompt shape again, with six 300-char lines waiting newest
-    const c = X.get('/api/agent/prompt-context');
+    X.s._toolsIntroSeen = false; X.s._preambleSeen = undefined;   // the same first-prompt shape again, with six 300-char lines waiting newest
+    const cRaw = X.get('/api/agent/prompt-context'), c = afterPre(cRaw);
     const i0 = c.indexOf('<vibespace-session-tools>'), i1 = c.indexOf('</vibespace-session-tools>'), i2 = c.indexOf('### Messages that arrived');
-    ok(i0 >= 0 && i1 > i0 && i2 > i1 && (i0 === 0 || c.startsWith('(If this arrives wrapped in <persisted-output>')) && !/context trimmed/.test(c) && B(c) <= AR.INLINE_CAP && X.cards.length === 6 && c.includes('m5 ') && c.includes('m0 ') && X.deliver.stashCount(X.cid) === 6,
+    ok(i0 >= 0 && i1 > i0 && i2 > i1 && (i0 === 0 || c.startsWith('(If this arrives wrapped in <persisted-output>')) && !/context trimmed/.test(c) && B(cRaw) <= AR.INLINE_CAP && X.cards.length === 6 && c.includes('m5 ') && c.includes('m0 ') && X.deliver.stashCount(X.cid) === 6,
       'the order: the tools intro rides whole before the stash (the six lines that fit; the six blocks still wait) on the codex first prompt — only the oversize belt\'s one rescue line may precede it — under the cap', { bytes: B(c), head: c.slice(0, 80), cards: X.cards.length });
   } finally { X.done(); }
   // THE REAL HOOK: data/bin/vibespace-hook.mjs hands the route\'s answer to the CLI byte for byte at the cap (9 600 < the 10 000 B measured inline bound)
@@ -1159,6 +1164,46 @@ function rigR7({ backend = 'claude', groups = 1, n = 5, routesMod = AR, settings
   const done = () => { if (sessionStatus._writeTimer) { clearTimeout(sessionStatus._writeTimer); sessionStatus._writeTimer = null; } sessionStatus._dirty = false; for (const t of jm._timers || []) clearInterval(t); jm._dirty = false; try { fs.rmSync(dir, { recursive: true }); } catch { } };
   return { dir, cid, key, gids, store, deliver, jm, sessionStatus, get, cards, logs, warns, dlogs, s, sessions, notice, events, done };
 }
+/** RULE PRESSURE (lane prompt-budget, 2.369.227). The legs that need the head NEAR the cap size it from the head a TWIN rig
+ *  renders (same groups / backlog / flags, nothing pending, a 1-char preamble): a preamble of cap − margin − head − the
+ *  rescue line's reserve − `leave` chars, never the head's bytes as a literal — the tools intro halved (7.6 → 3.4 KB)
+ *  and every leg sized against "the 6.4 KB intro" / "8.6 KB for two groups" went vacuous at once. `minus` = bytes of
+ *  the twin's answer that are not head (the intro that must wait). Returns the settings for the real rig (the fill is
+ *  CJK: the preamble is cut at 4 000 characters, and a no-group head now needs more bytes than that in ASCII). */
+const blockOf = (c, open, close) => { const i = c.indexOf(open), j = c.indexOf(close, i); return i >= 0 && j > i ? B(c.slice(i, j + close.length)) : 0; };
+function fillFor(opts, { route = '/api/agent/prompt-context', leave, minus = 0, rig = rigR7, twin = null } = {}) {
+  const T1 = rig({ ...opts, settings: { ...(opts.settings || {}), 'agents.injectPreamble': 'p' } });
+  let head, rescue;
+  try { if (twin) twin(T1); head = B(T1.get(route)) - minus; rescue = B(T1.store._persistRescueLine()) + 2; } finally { T1.done(); }
+  const need = AR.INLINE_CAP - AR.INLINE_TAIL_MARGIN - head - rescue - leave + 1;   // the preamble's BYTES (the twin's 1 B 'p' is in `head`)
+  if (need < 1) throw new Error(`fillFor: the head alone (${head} B) leaves less than ${leave} B — no preamble makes that room`);
+  // the preamble keeps its first 4 000 CHARACTERS (customPreamble) — a 3-byte character carries up to 12 000 B
+  return { ...(opts.settings || {}), 'agents.injectPreamble': '页'.repeat(Math.floor(need / 3)) + 'p'.repeat(need % 3) };
+}
+/** the restart shape (two groups, 25 owned items): the jobs update (8 events) fits, the FIRST notice needs twice the room
+ *  left (the notices ride as the longest prefix that fits — none must) */
+function restartSettings(routesMod = AR) {
+  const P = rigR7({ groups: 0, routesMod });
+  let U, N;
+  try { P.notice('status-override'); P.notice('browser-takeover'); P.events(8); N = B(SSM.renderNotices(P.sessionStatus.pendingNotices(P.key).slice(0, 1))); U = blockOf(P.get('/api/agent/prompt-context'), '<vibespace-jobs-update>', '</vibespace-jobs-update>'); } finally { P.done(); }
+  if (!U || !N) throw new Error(`restartSettings: the probe rendered no update (${U}) / notices (${N})`);
+  return fillFor({ groups: 2, n: 25, routesMod }, { leave: U + 2 + Math.ceil((N + 2) / 2) });
+}
+/** two groups + the manager intro on `route`: half the manager intro's bytes left */
+function managerSettings(route, routesMod = AR) {
+  const flags = { 'agents.allowGroupManagement': true };
+  const P = rigR7({ groups: 0, manager: true, settings: flags, routesMod });
+  let MI; try { MI = blockOf(P.get('/api/agent/prompt-context'), '<vibespace-group-manager>', '</vibespace-group-manager>'); } finally { P.done(); }
+  if (!MI) throw new Error('managerSettings: the probe rendered no manager intro');
+  return fillFor({ groups: 2, n: 25, settings: flags, routesMod }, { route, leave: Math.floor(MI / 2) });
+}
+/** no group, the tools intro on the first call: half the intro's bytes left beside the preamble */
+function introFill(backend, first, routesMod = AR) {
+  const P = rigR7({ backend, groups: 0, routesMod });
+  let I; try { I = blockOf(P.get(first), '<vibespace-session-tools>', '</vibespace-session-tools>'); } finally { P.done(); }
+  if (!I) throw new Error('introFill: the probe rendered no tools intro');
+  return fillFor({ backend, groups: 0, routesMod }, { route: first, leave: Math.floor(I / 2), minus: I + 2 });
+}
 /** THE CENSUS: every append site of the prompt-context route, classified by where it stands relative to the drains. */
 function producerCensus(src) {
   const i0 = src.indexOf("app.get('/api/agent/prompt-context'"), i1 = src.indexOf("app.get('/api/agent/stop-check'", i0);
@@ -1210,30 +1255,30 @@ function producerCensus(src) {
 {
   // ── 2. CONSUME-THEN-CUT FROM THE HEAD (the REAL routes) ──
   // (a) the restart's first prompt: two groups, a long owned backlog, two persisted notices, eight job events
-  const H = rigR7({ groups: 2, n: 25 });
+  const H = rigR7({ groups: 2, n: 25, settings: restartSettings() });   // rule pressure (lane prompt-budget): the update fits, the notices do not
   try {
     H.notice('status-override'); H.notice('browser-takeover'); H.events(8);
     const c1 = H.get('/api/agent/prompt-context');
     const w1 = { bytes: B(c1), trimmed: /context trimmed/.test(c1), noticeIn: c1.includes('<system-reminder>'), updateIn: c1.includes('</vibespace-jobs-update>'), pending: H.sessionStatus.pendingNotices(H.key).length, seenTs: H.s._jobsEventsSeenTs, wait: H.logs.filter((l) => /waits? for the next prompt/.test(l)).map((l) => l.replace(/^\[\w+\] \S+: /, '').slice(0, 60)) };
     ok(!w1.trimmed && w1.bytes <= AR.INLINE_CAP - AR.INLINE_TAIL_MARGIN && !w1.noticeIn && w1.updateIn && w1.pending === 2 && w1.seenTs > 0 && w1.wait.length === 1 && /2 of 2 pending notice\(s\) wait/.test(w1.wait[0]),
-      'the restart\'s first prompt (two groups\' full context 8.6 KB + the jobs update): the two persisted notices do not fit — they WAIT UNCONSUMED (was: consumed, the takeover notice cut mid-sentence), the update rides, nothing trimmed, the wait said', w1);
+      'the restart\'s first prompt (two groups\' full context + a preamble sized by rule: the jobs update fits, the first notice needs twice the room left): the two persisted notices do not fit — they WAIT UNCONSUMED (was: consumed, the takeover notice cut mid-sentence), the update rides, nothing trimmed, the wait said', w1);
     const c2 = H.get('/api/agent/prompt-context');
     ok((c2.match(/<\/system-reminder>/g) || []).length === 2 && /took over your browser/.test(c2) && H.sessionStatus.pendingNotices(H.key).length === 0 && !/context trimmed/.test(c2) && !c2.includes('</vibespace-jobs-update>'),
       '…the next prompt carries both notices whole (the takeover\'s "wait for the handback" among them) and consumes them; the update does not repeat');
   } finally { H.done(); }
   // (b) three groups: the head alone passes the cap (accepted — the group markers advance, the trim names show --full); every consumer waits
-  const T = rigR7({ groups: 3, n: 25 });
+  const T = rigR7({ groups: 3, n: 25, settings: fillFor({ groups: 3, n: 25 }, { leave: -400 }) });   // rule pressure: the head 400 B past the cap
   try {
     T.notice('status-override'); T.events(8);
     const c1 = T.get('/api/agent/prompt-context');
     const w = { trimmed: /context trimmed/.test(c1), pending: T.sessionStatus.pendingNotices(T.key).length, seenTs: T.s._jobsEventsSeenTs, groupsSeen: Object.keys(T.s._groupSeenAt).length, waits: T.logs.filter((l) => /waits? for the next prompt/.test(l)).length };
-    ok(w.trimmed && w.pending === 1 && w.seenTs === undefined && w.groupsSeen === 3 && w.waits === 2, 'three groups (9.5 KB head, trimmed by design): the notice and the jobs update both wait UNCONSUMED — the marker has not moved, the queue is whole (was: both consumed and cut)', w);
+    ok(w.trimmed && w.pending === 1 && w.seenTs === undefined && w.groupsSeen === 3 && w.waits === 2, 'three groups + a preamble sized 400 B past the cap (the head trimmed by design): the notice and the jobs update both wait UNCONSUMED — the marker has not moved, the queue is whole (was: both consumed and cut)', w);
     const c2 = T.get('/api/agent/prompt-context');
     ok(/<\/system-reminder>/.test(c2) && c2.includes('</vibespace-jobs-update>') && c2.includes('item-0') && /\+\d+ more — vibespace-job list/.test(c2) && T.sessionStatus.pendingNotices(T.key).length === 0 && T.s._jobsEventsSeenTs > 0 && !/context trimmed/.test(c2), '…the next (quiet) prompt carries the notice and the update (whole under its own 600 B budget: the first lines + "+N more"), and consumes them', { bytes: B(c2) });
   } finally { T.done(); }
   // (c) the manager intro on both routes: two groups leave no room — it waits UNSTAMPED, rides the next prompt whole
   for (const route of ['/api/agent/task-context', '/api/agent/prompt-context']) {
-    const M = rigR7({ groups: 2, n: 25, manager: true, settings: { 'agents.allowGroupManagement': true } });
+    const M = rigR7({ groups: 2, n: 25, manager: true, settings: managerSettings(route) });   // rule pressure: half the manager intro left
     try {
       const c1 = M.get(route); const seen1 = M.s._mgrIntroSeen;
       const c2 = M.get('/api/agent/prompt-context');
@@ -1241,14 +1286,14 @@ function producerCensus(src) {
       ok(c2.includes('</vibespace-group-manager>') && M.s._mgrIntroSeen === true && !/context trimmed/.test(c2), '…and rides the next prompt whole, stamped then', { seen: M.s._mgrIntroSeen });
     } finally { M.done(); }
   }
-  // (d) the tools intro beside a 3 000-char preamble (no group): the intro waits unstamped, the preamble rides; the next prompt carries the intro whole
+  // (d) the tools intro beside a preamble sized to leave half of it (no group): the intro waits unstamped, the preamble rides; the next prompt carries the intro whole
   for (const [backend, first] of [['codex', '/api/agent/prompt-context'], ['claude', '/api/agent/task-context']]) {
-    const P = rigR7({ backend, groups: 0, settings: { 'agents.injectPreamble': 'p'.repeat(3000) } });
+    const P = rigR7({ backend, groups: 0, settings: introFill(backend, first) });   // rule pressure: half the intro left beside the preamble
     try {
       const c1 = P.get(first); const seen1 = P.s._toolsIntroSeen;
       const c2 = P.get('/api/agent/prompt-context');
       ok(c1.includes('</vibespace-user-instructions>') && !c1.includes('<vibespace-session-tools>') && seen1 !== true && !/context trimmed/.test(c1) && P.logs.some((l) => /the tools intro \(\d+ B\) waits/.test(l)),
-        `${backend} ${first.split('/').pop()}: a 3 000-char preamble + the 6.4 KB intro cross the cap — the preamble rides, the intro WAITS unstamped (was: the intro's tail cut, stamped seen)`, { seen1, bytes: B(c1) });
+        `${backend} ${first.split('/').pop()}: a preamble sized by rule (cap − head − half the intro) + the intro cross the cap — the preamble rides, the intro WAITS unstamped (was: the intro's tail cut, stamped seen)`, { seen1, bytes: B(c1) });
       ok(c2.startsWith('<vibespace-session-tools>') && c2.includes('</vibespace-session-tools>') && P.s._toolsIntroSeen === true && !/context trimmed/.test(c2), '…the next prompt carries the intro whole and stamps it');
     } finally { P.done(); }
   }
@@ -1256,6 +1301,22 @@ function producerCensus(src) {
   // intro line + lane browser-recipes' login clause grew the intro to ~6.9 KB; a 2 400-char preamble now WAITS the intro, (d)'s rule)
   const Q = rigR7({ backend: 'codex', groups: 0, settings: { 'agents.injectPreamble': 'p'.repeat(2000) } });
   try { const c = Q.get('/api/agent/prompt-context'); ok(c.includes('</vibespace-user-instructions>') && c.includes('</vibespace-session-tools>') && Q.s._toolsIntroSeen === true && !/context trimmed/.test(c) && B(c) <= AR.INLINE_CAP - AR.INLINE_TAIL_MARGIN, 'a 2 000-char preamble + the intro fit one prompt (unchanged)'); } finally { Q.done(); }
+}
+{
+  // CONTROL (lane prompt-budget, 2.369.227): the rule pressure is load-bearing and follows the head. The literal (d) used
+  // before — a 3 000-char preamble beside "the 6.4 KB intro" — goes RED on this tree (the halved intro fits beside it);
+  // on the base's module (189aadbb0: the old intro restored) the literal and the rule both hold. SKIP with evidence where
+  // the ref is unavailable (a depth-1 checkout).
+  const PC = '/api/agent/prompt-context';
+  const waits = (routesMod, settings) => { const P = rigR7({ backend: 'codex', groups: 0, routesMod, settings }); try { const c1 = P.get(PC); return c1.includes('</vibespace-user-instructions>') && !c1.includes('<vibespace-session-tools>') && P.s._toolsIntroSeen !== true && !/context trimmed/.test(c1); } finally { P.done(); } };
+  const literal = { 'agents.injectPreamble': 'p'.repeat(3000) };
+  ok(waits(AR, introFill('codex', PC)) && !waits(AR, literal), 'CONTROL the old literal (a 3 000-char preamble) beside the halved intro: the intro rides — the "waits" judge goes RED; the rule-sized fill holds it');
+  let oldSrc = null; try { oldSrc = require('node:child_process').execFileSync('git', ['-C', REPO, 'show', '189aadbb0:src/agent-routes.js'], { encoding: 'utf-8', maxBuffer: 64 << 20, stdio: ['ignore', 'pipe', 'ignore'] }); } catch { oldSrc = null; }
+  if (oldSrc) {
+    const OLD = mutantCopies('stash-strip-old-intro', REPO).load('src/agent-routes.js', oldSrc, 'old-intro');
+    const big = B(OLD.sessionToolsIntro({ status: true, ask: true, task: true, jobs: true }, {}));
+    ok(big > 6000 && waits(OLD, literal) && waits(OLD, introFill('codex', PC, OLD)), `CONTROL …on the base's module (the old ${big} B intro restored) the literal and the rule-sized fill both make it wait (the rule follows the head)`);
+  } else console.log('  (old-intro control SKIPPED: `git show 189aadbb0` is not available in this checkout)');
 }
 {
   // ── 3. THE CODEX SessionStart DOOR ──
@@ -1308,7 +1369,7 @@ function producerCensus(src) {
   const tags = ['<vibespace-reminder>', '<vibespace-user-instructions>', '<vibespace-cwd-notice>', '<vibespace-delivery-note>', '<vibespace-task-context>', '<vibespace-task-update>', '<vibespace-session-tools>', '<vibespace-group-manager>', '<vibespace-jobs-missed-while-away>', '<vibespace-jobs-update>', '### Messages that arrived', '<system-reminder>', 'Clean up before parking more'];
   const orderOf = (c) => tags.map((t) => [t, c.indexOf(t)]).filter(([, i]) => i >= 0).sort((x, y) => x[1] - y[1]).map(([t]) => t);
   const run = (routesMod, shape) => {
-    const H = rigR7({ backend: 'claude', groups: shape.groups, n: shape.n, routesMod, settings: { 'agents.injectPreamble': 'standing instructions '.repeat(shape.pre || 0), 'agents.perTurnExtra': shape.extra ? 'per-turn extra line' : '', 'agents.allowGroupManagement': !!shape.manager }, manager: !!shape.manager });
+    const H = rigR7({ backend: 'claude', groups: shape.groups, n: shape.n, routesMod, settings: { 'agents.injectPreamble': shape.fillChars ? 'p'.repeat(shape.fillChars) : 'standing instructions '.repeat(shape.pre || 0), 'agents.perTurnExtra': shape.extra ? 'per-turn extra line' : '', 'agents.allowGroupManagement': !!shape.manager }, manager: !!shape.manager });
     const D = Date.now; Date.now = () => 1790000000000;
     try {
       if (shape.sessionStart) H.get('/api/agent/task-context');
@@ -1328,11 +1389,21 @@ function producerCensus(src) {
     manager: { groups: 1, n: 5, extra: true, notice: true, events: 2, notifs: 2, stash: 3, manager: true, pad: 60 },
     reminder: { groups: 1, n: 5, sessionStart: true },
   };
+  // RULE PRESSURE (lane prompt-budget): the manager shape's room ahead of the drains sits between the stash's need and the
+  // jobs digest's budget — measured on a twin of the shape (no stashed job notifications, a 1-char preamble)
+  {
+    const tw = run(AR, { ...shapes.manager, notifs: 0, fillChars: 1 });
+    const i0 = tw.indexOf('### Messages that arrived'), i1 = tw.indexOf('<system-reminder>');
+    const S = B(tw.slice(i0, i1)), ahead = B(tw) - S;
+    const R = Math.floor((S + AR.JOBS_DIGEST_BUDGET + 2) / 2);
+    if (i0 < 0 || i1 < i0 || S >= AR.JOBS_DIGEST_BUDGET) throw new Error(`the manager twin: no stash section or one over the digest budget (${S} B)`);
+    shapes.manager.fillChars = AR.INLINE_CAP - AR.INLINE_TAIL_MARGIN - R - ahead + 1;
+  }
   const now = Object.fromEntries(Object.entries(shapes).map(([k, sh]) => [k, run(AR, sh)]));
   ok(orderOf(now.full).join(' → ') === '<vibespace-reminder> → <vibespace-user-instructions> → <vibespace-cwd-notice> → <vibespace-task-context> → <vibespace-jobs-update> → ### Messages that arrived → <system-reminder>'
     && orderOf(now.diff).join(' → ') === '<vibespace-reminder> → <vibespace-jobs-missed-while-away> → <vibespace-jobs-update> → ### Messages that arrived → <system-reminder>'
     && orderOf(now.quiet).join(' → ') === '<vibespace-jobs-update> → ### Messages that arrived → <system-reminder>'
-    && orderOf(now.manager).join(' → ') === '<vibespace-reminder> → <vibespace-task-context> → <vibespace-group-manager> → <vibespace-jobs-update> → ### Messages that arrived → <system-reminder>'
+    && orderOf(now.manager).join(' → ') === '<vibespace-reminder> → <vibespace-user-instructions> → <vibespace-task-context> → <vibespace-group-manager> → <vibespace-jobs-update> → ### Messages that arrived → <system-reminder>'
     && now.reminder.startsWith('<vibespace-reminder>') && Object.values(now).every((c) => !/context trimmed/.test(c) && B(c) <= AR.INLINE_CAP),
     'THE ORDER: extra → preamble → cwd notice → context/diff → tools/manager intro → jobs missed → jobs update → stash → notices → nudge — on the full, diff, quiet, manager and reminder shapes; nothing trimmed', Object.fromEntries(Object.entries(now).map(([k, c]) => [k, orderOf(c).join(' → ')])));
   // r5's own module (the branch's pre-r6 tip): byte-identical where every producer fits — SKIP with evidence where the ref is unavailable (a depth-1 checkout)
@@ -1385,14 +1456,14 @@ function producerCensus(src) {
   const a2 = "      if (taken) {\n        const byKey = new Map();\n";
   if (!ar.includes(a2)) throw new Error('mutation anchor missing: notice fit');
   const Early = MUT7.load('src/agent-routes.js', ar.replace(a2, "      taken = queue.length;   // every notice consumed whether it fits or not (r6's form)\n      if (taken) {\n        const byKey = new Map();\n"), 'consume-first');
-  const H = rigR7({ groups: 2, n: 25, routesMod: Early });
+  const H = rigR7({ groups: 2, n: 25, routesMod: Early, settings: restartSettings() });
   try { H.notice('status-override'); H.notice('browser-takeover'); H.events(8); const c1 = H.get('/api/agent/prompt-context'); const c2 = H.get('/api/agent/prompt-context');
     ok(/context trimmed/.test(c1) && H.sessionStatus.pendingNotices(H.key).length === 0 && !/took over your browser/.test(c1) && !/took over your browser/.test(c2), 'CONTROL the notices consumed before their fit: the restart\'s first prompt is trimmed, the takeover notice is consumed and gone from both prompts (②h can go red)'); } finally { H.done(); }
   // (iii) the manager intro stamped before its fit
   const a3 = "      if (fits(MANAGER_INTRO)) { parts.push(MANAGER_INTRO); s._mgrIntroSeen = true; }";
   if (!ar.includes(a3)) throw new Error('mutation anchor missing: manager fit');
   const Mgr = MUT7.load('src/agent-routes.js', ar.replace(a3, "      if (true) { parts.push(MANAGER_INTRO); s._mgrIntroSeen = true; }"), 'manager-unfit');
-  const M = rigR7({ groups: 2, n: 25, manager: true, settings: { 'agents.allowGroupManagement': true }, routesMod: Mgr });
+  const M = rigR7({ groups: 2, n: 25, manager: true, settings: managerSettings('/api/agent/prompt-context'), routesMod: Mgr });
   try { const c1 = M.get('/api/agent/prompt-context'); const c2 = M.get('/api/agent/prompt-context'); ok(/context trimmed/.test(c1) && !c1.includes('</vibespace-group-manager>') && M.s._mgrIntroSeen === true && !c2.includes('<vibespace-group-manager>'), 'CONTROL the manager intro stamped before its fit: cut mid-verb on the first prompt, never again (②h can go red)'); } finally { M.done(); }
   // (iv) the codex SessionStart door removed: the stash drains into the dropped answer
   const a4 = "    if (!honoursSessionStart(s)) return res.json({ success: true, context: '' });\n";

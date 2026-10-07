@@ -390,3 +390,9 @@ default class:
   with `vibespace-browser blocked --tier 3`; that records a *suggestion*. The
   move to tier 3 is the user's act (the switch), and it opens a **window
   target** — it never creates or re-points a browser profile.
+
+## The full teaching behind the session intro's pointer line
+
+Every session's first prompt carries ONE line for this tool and points here (2.369.227 — the first prompt context must leave room for notices and messages). These are the words it used to carry in full:
+
+A native desktop app (not a web page): `vibespace-window open <app>` starts it on a private display VibeSpace owns and `vibespace-window snapshot <handle>` reads its accessibility tree with @refs (the same @ref habit as `vibespace-browser snapshot`) — `click <handle> @ref` acts on a node through its own declared action, never a blind coordinate click; only windows the user SHARED with you (or you opened) are listed, each in tree or pixel mode as the user chose (`not_exposed` = not shared: ask them) — and if the user turned on their real-desktop switch, their own applications are listed too (marked YOUR DESKTOP: tree verbs only, no key / --at, no live pane). Manual: vibespace-docs window.

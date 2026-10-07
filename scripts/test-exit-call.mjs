@@ -20,6 +20,8 @@ import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { mutantCopies } from './mutant-copy.mjs';
+import { deadPort } from './scratch.mjs';
+const DEAD_EXIT = await deadPort(); // the stub's exit proxy: a port the kernel just released, never a fixed one (§81)
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
@@ -57,7 +59,7 @@ const server = http.createServer((req, res) => {
     let body = {}; try { body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'); } catch { }
     if (u.pathname === '/api/agent/exit' && req.method === 'GET') return send(res, 200, { exits: [{ id: 'host-dial-BOX-STUDIO', name: M, online: true, grants: { use: true, run: true } }, { id: 'host-dial-WIN-DESK1', name: WIN, online: true, grants: { use: false, run: true, runAsk: true } }] });
     if (u.pathname === '/api/agent/exit/runs') return send(res, 200, { runs: [{ at: Date.UTC(2026, 9, 4, 9, 40), machine: M, outcome: 'ran', code: 0, ms: 412, cmd: 'hostname', stdout: 'BOX-STUDIO' }] });
-    if (u.pathname === '/api/agent/exit/use') return send(res, 200, { url: 'socks5h://vs-u1:s3cretpass@127.0.0.1:41234', machine: M });
+    if (u.pathname === '/api/agent/exit/use') return send(res, 200, { url: `socks5h://vs-u1:s3cretpass@127.0.0.1:${DEAD_EXIT}`, machine: M });
     if (u.pathname === '/api/agent/exit/run') {
       const r = RUNS[body.cmd];
       if (!r) return send(res, 400, { error: 'unknown fixture', code: 'bad_command' });
@@ -122,7 +124,7 @@ for (const c of CASES) {
   const outText = card && card.exitRun ? card.exitRun.stdout : '';
   const good = !!p && p.verb === c.verb && p.machine === c.machine && p.outcome === c.outcome && p.code === c.code && r.code === c.code
     && (!c.live || words === c.live) && (!c.words || words.includes(c.words)) && (!c.out || outText.includes(c.out))
-    && (!c.noSecret || (!outText.includes('s3cretpass') && outText.includes('127.0.0.1:41234')))
+    && (!c.noSecret || (!outText.includes('s3cretpass') && outText.includes(`127.0.0.1:${DEAD_EXIT}`)))
     && card.exitCall.failed === (c.outcome !== 'ok') && card.exitCall.verb === (c.verb === 'run' ? 'run' : ['push', 'pull'].includes(c.verb) ? 'copy' : 'info');
   ok(good, `${c.name}: ${c.verb} · ${c.machine || '(no machine named)'} · ${c.outcome}${c.live ? ' · words = the live card\'s' : ''}`, { p: p && { ...p, output: p.output.slice(0, 120) }, words, rc: r.code, content: r.content.slice(-300) });
 }

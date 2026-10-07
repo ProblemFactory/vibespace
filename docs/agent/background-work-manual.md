@@ -218,3 +218,23 @@ conversation's browser trace as the job's. Concretely:
 - Harness cron → never (dies with the session); dated obligations → `--at`
 - Reminders for YOURSELF (dated obligations) → `notify-cron` (each fire wakes YOUR conversation; since 2.363.1 the user's inbox is NOT copied unless you add `--notify-user` — the fire text is usually agent-facing, so relay to the user yourself via chat/vibespace-ask when warranted)
 - Simple user forms → Interaction Panels (§5) before building a web page (§6)
+
+## The full teaching behind the session intro's pointer line
+
+Every session's first prompt carries ONE line for this tool and points here (2.369.227 — the first prompt context must leave room for notices and messages). These are the words it used to carry in full:
+
+Background work that must OUTLIVE this conversation (a dev server, a monitor, a batch job, a schedule) — never nohup/systemd/harness-cron. Register it with `vibespace-job` and get it back later BY POLLING, even from a future session:
+
+```sh
+vibespace-job run "python3 collect.py" --name collect-x --context "goal: 500 prompts; output: /data/x.jsonl; resume: rerun with --resume"
+```
+
+```sh
+vibespace-job poll <id> (echoes your --context brief with the result — write one that explains everything to your future amnesiac self)
+```
+
+Flags pick the kind: --keep-up = keep-alive service · --every 30m / --cron "41 9 * * *" / --at "2026-09-05 06:00" = schedule. Your conversation is auto-messaged when a job finishes/fails/asks (create output says so); inside a job, `vibespace-job announce "found X"` notifies NOW (watch jobs: exit code ≠ newsworthiness); `subscribe <id> [--filter regex]` = get another visible job's messages; `list --mine|--subscribed` and `show <id>` re-inspect everything you registered. Turn-scoped waits stay in background Bash/Monitor; /goal covers in-session continuation; dated obligations go to --at, not the group backlog. FULL manual anytime: `vibespace-job docs`; every tool: `vibespace-docs [status|ask|task|jobs]`.
+
+Background work that must OUTLIVE this conversation (a dev server, a monitor, a batch job, a schedule) — never nohup/systemd/harness-cron. Register it with `vibespace-job` and get the result later BY POLLING, even from a future session:
+
+(`vibespace-job poll <id>` echoes your --context brief with the result — write one your amnesiac future self can act on. --keep-up = keep-alive service · --every 30m / --cron "41 9 * * *" / --at "2026-09-05 06:00" = schedule · dated obligations go to --at, not the backlog. Your conversation is auto-messaged on completion/failure/ask; in-job `announce "found X"` notifies NOW; `subscribe <id> [--filter regex]` follows another visible job; `list --mine|--subscribed` / `show <id>` re-inspect full params. Full manual: `vibespace-job docs`.)

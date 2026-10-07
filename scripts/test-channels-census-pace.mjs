@@ -157,6 +157,54 @@ console.log('CONTROLS');
   try { C.eng.stop(); } catch {}
 }
 
+// ── lane channel-drain-scale (2026-10-06): THE VIEWS ARE PACED INSIDE A PASS ───────────────────────────────────────
+// A 89 000-row mailbox rebuilt the account views (`digest` → `adapterView` → `schedulerView` → `clockCensus`) at EVERY
+// answered fetch of a pass: one broadcast per waiter's key. A pass says its early keys at most once per VIEW_PACE_MS
+// (250 ms, physical) + its end; every key with news is still named, and every answer still comes AFTER the broadcast
+// naming its key (r8). The fixture: 10 000 due rows + 300 refreshes of conversations that land mail (200 admitted).
+// CONTROL: the per-fetch broadcast restored (a patched engine copy) reads one broadcast per answered key — red.
+{
+  console.log('\nlane channel-drain-scale: the views are paced inside a pass');
+  process.env.VIBESPACE_CHANNELS_FAKE_CONVS = '300';   // fake-poll's rooms 1…300 hold mail (read when an engine builds its adapters)
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const MC = mutantCopies('census-pace-views', REPO);
+  const ENG_SRC = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
+  const PACED = '          if (act.waiters.length) sayEarly(key);';
+  const T0 = Date.UTC(2026, 9, 6, 22, 0, 0);
+  async function viewsPass(E, tag) {
+    const keysSaid = new Set();
+    let n = 0;
+    const ticks = [], rsi = globalThis.setInterval;
+    globalThis.setInterval = (fn) => { ticks.push(fn); return { unref() {}, ref() {}, [Symbol.toPrimitive]: () => 0 }; };
+    const e = E.create({ dataDir: path.join(ROOT, `views-${tag}`), env: { VIBESPACE_CHANNELS_FAKE: '1' }, broadcast: (m) => { if (m && m.type === 'channels-updated') { n++; for (const k of m.changedKeys || []) keysSaid.add(k); } }, now: () => T0, log: quiet, censusTimer: () => ({ cancel() {} }) });
+    globalThis.setInterval = rsi;
+    const A = 'fake-poll', ix = e.store.index;
+    const lane = { via: 'poll', lastPollAt: T0 - 30 * 86400e3, lastScanAt: null, firstSeenByPoll: 1, firstSeenTotal: 1 };
+    await ix.update(() => {
+      for (let i = 0; i < 10000; i++) Object.assign(ix.entry(A, `thr_${i.toString(16).padStart(12, '0')}`), { title: `t ${i}`, kind: 'group', lastAt: T0 - 86400e3, unread: 0, convCaps: { at: T0, read: 'yes', sendAs: [], why: null }, lane: { ...lane } });
+      for (let i = 1; i <= 300; i++) Object.assign(ix.entry(A, `fake-poll-room-${i}`), { title: `Room ${i}`, kind: 'group', lastAt: T0 - 86400e3, unread: 0, convCaps: { at: T0, read: 'yes', sendAs: [], why: null }, lane: { ...lane } });
+    });
+    ix.flush();
+    n = 0;
+    const t = performance.now();
+    const p = e.pass(A, { force: true });
+    let late = 0, okN = 0;
+    const answers = [];
+    for (let j = 1; j <= 300; j++) answers.push(e.refresh(A, `fake-poll-room-${j}`, { origin: j % 3 ? 'agent' : 'refresh' }).then((a) => { if (a && a.ok) { okN++; if (a.appended && !keysSaid.has(`${A}/fake-poll-room-${j}`)) late++; } }));
+    const r = await p;
+    await Promise.all(answers);
+    const ms = performance.now() - t;
+    const unsaid = (r.changed || []).filter((k) => !keysSaid.has(k)).length;
+    try { await e.stop(); } catch { }
+    return { broadcasts: n, ms: Math.round(ms), okN, late, unsaid, changed: (r.changed || []).length, bound: 2 + Math.ceil(ms / 250) };
+  }
+  const got = await viewsPass(ENG, 'paced');
+  console.log(`    the pass: ${got.broadcasts} broadcasts in ${got.ms} ms for ${got.okN} answered keys (the per-fetch shape: one per answered key)`);
+  ok(got.okN === 200 && got.changed >= 200 && got.broadcasts <= got.bound && got.unsaid === 0 && got.late === 0, `a pass broadcasts its early keys at most once per 250 ms + its end (${got.broadcasts} ≤ ${got.bound}), every changed key named, every answer after its key's broadcast`, got);
+  const ctl = ENG_SRC.includes(PACED) ? await viewsPass(MC.load('src/server/channels-engine.js', ENG_SRC.replace(PACED, '          if (act.waiters.length) { notify([key], { full: false }); early.add(key); }'), 'per-fetch'), 'per-fetch') : null;
+  ok(ctl && ctl.broadcasts > ctl.bound && ctl.broadcasts >= 200, `CONTROL: the per-fetch broadcast restored reads ${ctl && ctl.broadcasts} broadcasts for ${ctl && ctl.okN} answered keys — red`, ctl);
+}
+
 console.log(`\ntest-channels-census-pace: ${pass} passed, ${fail} failed`);
 if (!fail) console.log(`ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

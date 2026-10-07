@@ -449,3 +449,9 @@ the Design window — tell them where it is; never build an exporter:
 
 A deck is artboards like any design — one per slide, every slide the same
 size, in reading order; the craft rules say how (§8 of How to design here).
+
+## The full teaching behind the session intro's pointer line
+
+Every session's first prompt carries ONE line for this tool and points here (2.369.227 — the first prompt context must leave room for notices and messages). These are the words it used to carry in full:
+
+Designs, mockups, screens, posters: read `vibespace-docs design` first (the CLI + the craft rules), then `vibespace-design new <slug>` — it makes designs/<slug>/ here and opens the Design window the user watches. Each screen is ONE plain HTML file in that folder; end every edit with `vibespace-design add <file.html>` (a new one) or `sync`, `check` before handing over, `publish` for a share link (it asks the user). Other self-contained HTML: `vibespace-page publish` (vibespace-docs pages).

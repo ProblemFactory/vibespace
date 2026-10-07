@@ -507,5 +507,24 @@ const rec = (push) => ({ push: { enabled: true, state: 'live', lastEventAt: NOW 
   ok(!/\brequire\(|\bimport\s/.test(src.replace(/^\s*\*.*$/gm, '')), 'src/channel-caps.js imports NOTHING (the panel, the engine and this suite all take the same rules)');
 }
 
+console.log("lane channel-feed-authority: the feed's AUTHORITY (authoritative ⇒ feed-only; measured ⇒ the relaxed net)");
+{
+  const NOW = Date.UTC(2026, 9, 6, 12);
+  const base = { receive: 'poll', pollInterval: { hot: 60, cold: 300, floor: 30 } };
+  const auth = { ...base, changeFeed: { via: 'history', authority: 'authoritative', scope: 'r', pagesPerPass: 1, perMin: 6 } };
+  const meas = { ...base, changeFeed: { via: 'search', scope: 'r', pageSize: 30, pagesPerPass: 5, perMin: 10, maxWindowSec: 3600, describes: true, timeUnit: 'iso' } };
+  const rec = (feed) => ({ auth: { scopes: ['r'] }, feed });
+  const fresh = { lastOkAt: NOW - 10e3 };
+  const cad = (c, r, en, watched = false) => C.cadenceFor(c, C.laneState(c, r, en, NOW), en, NOW, { watched });
+  const cold = { lastAt: NOW - 3 * 86400e3 }, hot = { lastAt: NOW - 60e3 };
+  ok(C.feedAuthoritative(auth) && !C.feedAuthoritative(meas) && C.FEED_AUTHORITIES.join() === 'authoritative,measured', 'feedAuthoritative: only the declared authoritative row');
+  ok(C.feedState(auth, rec(fresh), NOW).carrying === true && C.feedState(auth, rec(fresh), NOW).mode === 'carrying', 'an authoritative feed carries from a fresh good answer — never measured');
+  ok(C.laneState(auth, rec(fresh), {}, NOW).pollCadence === 'feed-only' && C.laneState(meas, rec({ ...fresh, mode: 'carrying' }), {}, NOW).pollCadence === 'feed', 'carrying: authoritative ⇒ feed-only; measured ⇒ feed');
+  ok(cad(auth, rec(fresh), cold).seconds === 0 && cad(auth, rec(fresh), hot).seconds === 0 && cad(auth, rec(fresh), cold).source === 'feed', 'feed-only: an unwatched row is never due by the clock (0 s, hot or cold)');
+  ok(cad(auth, rec(fresh), cold, true).seconds === 30, 'feed-only: a WATCHED row keeps the hot refresh (30 s — the owner looking)');
+  ok(cad(meas, rec({ ...fresh, mode: 'carrying' }), hot).seconds === 300 && cad(meas, rec({ ...fresh, mode: 'carrying' }), cold).seconds === 900, "a measured carrying feed: Lark's relaxed net unchanged (300 s at least, a cold row stays cold)");
+  ok(cad(auth, rec({ lastOkAt: NOW - 3600e3 }), hot).seconds === 30 && cad(auth, rec({}), cold).seconds === 900 && cad(auth, rec({ ...fresh, backoffUntil: NOW + 60e3, backoffWhy: 'rate-limited' }), hot).seconds === 30, 'NOT carrying (behind / never ran / backing off) ⇒ the tiers (positive evidence only)');
+}
+
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

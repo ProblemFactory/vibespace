@@ -33,8 +33,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFile, execFileSync, spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch } from './scratch.mjs';
+import { scratch, deadPort } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+const DEAD_CDP = await deadPort(); // the fake's cdp-url: a port the kernel just released, never a fixed one (§81)
 const require = createRequire(import.meta.url);
 const REPO = new URL('..', import.meta.url).pathname;
 const B = require('../src/browser-profiles.js');
@@ -245,7 +246,7 @@ const daemon = (by) => {
 };
 if (a === '--version') { console.log('agent-browser 0.38.1'); process.exit(0); }
 if (a === 'session' && b === 'info') { const s = read(); const act = !!(s && alive(s.pid)); out({ success: true, data: { active: act, namespace: ns, pid: act ? s.pid : null, session: sess, socketDir: path.join(st, ns, 'run') } }); process.exit(0); }
-if (a === 'get' && b === 'cdp-url') { const s0 = read(); if (!(s0 && alive(s0.pid))) { out({ success: false, error: 'fake: no browser' }); process.exit(1); } out({ success: true, data: { cdpUrl: 'ws://127.0.0.1:19777/devtools/browser/fake-' + ns } }); process.exit(0); }
+if (a === 'get' && b === 'cdp-url') { const s0 = read(); if (!(s0 && alive(s0.pid))) { out({ success: false, error: 'fake: no browser' }); process.exit(1); } out({ success: true, data: { cdpUrl: 'ws://127.0.0.1:${DEAD_CDP}/devtools/browser/fake-' + ns } }); process.exit(0); }
 if (a === 'close' && b === '--all') { const s = read(); if (s && alive(s.pid)) { try { process.kill(s.pid, 'SIGKILL'); } catch { } } try { fs.unlinkSync(f); } catch { } if (s && s.profile) { try { fs.unlinkSync(path.join(s.profile, 'SingletonLock.fake')); } catch { } } out({ success: true, data: { closed: 1 } }); process.exit(0); }
 if (a === 'close' && b !== '--all') { log('closes.log', { verb: 'close', ns, sess, cdp }); out({ success: true, data: { closed: 1 } }); process.exit(0); }
 if (a === 'tab' && /^[0-9A-F]{32}$/.test(String(b || ''))) { if (fs.existsSync(path.join(st, 'refuse-bind'))) { out({ success: false, error: 'fake: no such tab' }); process.exit(1); } const s = daemon('tab'); if (s.refused) { out({ success: false, error: s.refused }); process.exit(1); } log('binds.log', { ns, sess, cdp, targetId: b }); out({ success: true, data: { targetId: b } }); process.exit(0); }
@@ -323,7 +324,7 @@ try {
   ok(r.status === 200 && logOf('launches.log').length === 1 && logOf('launches.log')[0].profile === work.dir, 'conversation 1 attaches: the keeper launched the ONE browser on work\'s directory');
   r = await j('POST', '/api/agent/browser/use', { profile: 'work' }, as(sD));
   const envD = r.json && r.json.env;
-  ok(r.status === 200 && r.json.others === 1 && logOf('launches.log').length === 1 && Array.isArray(envD) && envD.some((kv) => kv === `AGENT_BROWSER_CDP=ws://127.0.0.1:19777/devtools/browser/fake-vs-${work.id}`) && !envD.some((kv) => kv.startsWith('AGENT_BROWSER_PROFILE=')), 'path A: conversation 4 `use work` is ADMITTED (was not_owner) and JOINS the running browser — the same CDP endpoint, others 1, still ONE launch', r.json);
+  ok(r.status === 200 && r.json.others === 1 && logOf('launches.log').length === 1 && Array.isArray(envD) && envD.some((kv) => kv === `AGENT_BROWSER_CDP=ws://127.0.0.1:${DEAD_CDP}/devtools/browser/fake-vs-${work.id}`) && !envD.some((kv) => kv.startsWith('AGENT_BROWSER_PROFILE=')), 'path A: conversation 4 `use work` is ADMITTED (was not_owner) and JOINS the running browser — the same CDP endpoint, others 1, still ONE launch', r.json);
   const cA = await runAs(envA, ['open', 'https://work.example/a']), cD = await runAs(envD, ['open', 'https://work.example/d']);
   ok(cA.status === 0 && cD.status === 0 && logOf('launches.log').length === 1 && !logOf('refused.log').length && logOf('connects.log').length === 2, 'both conversations\' commands run over the CDP url — two connections, one browser, no SingletonLock');
 
@@ -333,7 +334,7 @@ try {
   ok(r.status === 200 && r.json.pin && r.json.pin.profileId === work.id && r.json.pin.by === 'user' && be.resolvedProfileDir(KB) === be.scratchDirFor(KB) && /opens "work"/.test(r.json.appliesFrom), 'path B: the user\'s pin names the profile and re-points NOTHING at its directory (the config still names only the conversation\'s own kept one)', r.json);
   r = await j('POST', '/api/agent/browser/resolve', { argv: ['open', 'https://work.example/b'], wrapper: true }, as(sB));
   const envB = r.json && r.json.env;
-  ok(r.status === 200 && r.json.kind === 'attachment' && Array.isArray(envB) && envB.some((kv) => kv === `AGENT_BROWSER_CDP=ws://127.0.0.1:19777/devtools/browser/fake-vs-${work.id}`) && logOf('launches.log').length === 1 && !k.ephemeralFor(KB), 'path B: conversation 2\'s first bare command opens its pin THROUGH THE KEEPER — kind attachment, the same browser\'s CDP url, NO second launch, no temporary browser started', r.json);
+  ok(r.status === 200 && r.json.kind === 'attachment' && Array.isArray(envB) && envB.some((kv) => kv === `AGENT_BROWSER_CDP=ws://127.0.0.1:${DEAD_CDP}/devtools/browser/fake-vs-${work.id}`) && logOf('launches.log').length === 1 && !k.ephemeralFor(KB), 'path B: conversation 2\'s first bare command opens its pin THROUGH THE KEEPER — kind attachment, the same browser\'s CDP url, NO second launch, no temporary browser started', r.json);
   const cB = await runAs(envB, ['open', 'https://work.example/b']);
   ok(cB.status === 0 && !logOf('refused.log').length && logOf('launches.log').length === 1 && leasesOn(work.id).join() === [KA, KB, KD].sort().join() && k.leasesFor(KB).find((l) => l.profileId === work.id).via === 'pin', 'path B: its command runs in the one browser (no exit 21) — three conversations lease work; conversation 2\'s lease says the pin made it');
   const view = await k.streamPortFor(S.streamTargetFor({ browserKey: KB, set: k.setFor(KB), profiles: k.list().profiles }));

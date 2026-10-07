@@ -266,6 +266,12 @@ const ROW_RESUM_MS = 60 * 1000;
 // cadence at the instant) is recomputed at most this often; a broadcast inside the window reads the last one and arms
 // ONE trailing recompute + broadcast at the window's end, so the card always settles on the exact numbers
 const CENSUS_EVERY_MS = 5 * 1000;
+// lane channel-drain-scale (2026-10-06 — a 89 000-row mailbox: `digest` / `adapterView` / `schedulerView` /
+// `clockCensus` rebuilt the account views at EVERY answered fetch of a pass): THE VIEWS ARE PACED — a pass broadcasts
+// its early keys at most once per VIEW_PACE_MS (physical time); a key answered inside the window waits with its answer
+// for the window's broadcast (≤ VIEW_PACE_MS, or the pass's end), which still goes out FIRST (r8: the window repaints
+// with the toast). The `early` set keeps its rule: a key said early is not said again at the end.
+const VIEW_PACE_MS = 250;
 /** An attachment larger than this is refused by name (Lark serves ≤ 100 MB without Range). */
 const ATTACHMENT_MAX_BYTES = 100 * 1024 * 1024;
 /** Hints a history() page may hand back (Gmail's `changed` threads) — bounded. */
@@ -364,6 +370,8 @@ const MAX_PAGES = 20;
  *  budget or this bound cuts short keeps its cursor for the next pass. The
  *  old bound of 5 pages meant conversation 501 was never discovered. */
 const DISCOVERY_MAX_PAGES = 200;
+/** lane channel-feed-authority: the listing's re-walk under an authoritative carrying feed (the unlisted net only). */
+const FEED_ONLY_REWALK_MS = 24 * 3600e3;
 /** P1b — the push lanes. A kick-origin pass is coalesced to at most one per
  *  this interval per adapter (a burst of kicks is one pass); the index
  *  update + broadcast after pushed records is debounced by this much (ONE
@@ -1079,32 +1087,124 @@ function create(deps = {}) {
   /** Every DUE conversation of one account, most-overdue first. `all` makes
    *  every listed one due (a forced pass); `dueNow` holds the ones a kick, a
    *  hint or a refresh named. A PAUSED override is never due by the timer; a
-   *  conversation the vendor no longer lists (`unlistedAt`) is not polled. */
+   *  conversation the vendor no longer lists (`unlistedAt`) is not polled.
+   *  lane channel-feed-authority: read from THE DUE INDEX (below) — the named rows, the owed-mark rows and the index's
+   *  head ≤ t, each judged by `dueRow` (the one rule); only the forced pass (`all`) walks every row. */
   function dueList(rec, e, t = now(), { all = false } = {}) {
     const T = tiers();
     const out = [];
-    for (const en of Object.values(store.index.live())) {
-      if (!en || en.adapterId !== rec.id) continue;
-      const named = e.dueNow.has(en.key);
-      if (en.unlistedAt && !named) continue;
-      // lane lark-search-poll: THE FEED'S OWED MARKS — durable, named rows at the owed instant (a restart, a cut or a
-      // refused fetch never loses one); never for a PAUSED row (the owner's pause wins over the timer — the mark waits)
-      const cad = cadenceOf(rec, en, t, T);
-      const owedAt = Number(en.feedOwedAt) || 0;
-      if (!cad.paused && en.threadOwed && typeof en.threadOwed === 'object') for (const [tk, at] of Object.entries(en.threadOwed)) out.push({ key: Feed.threadDueKey(en.key, tk), id: en.id, dueAt: Number(at) || 0 });
-      if (all || named) { out.push({ key: en.key, id: en.id, dueAt: named ? -1 : 0 }); continue; }
-      if (owedAt && !cad.paused) { out.push({ key: en.key, id: en.id, dueAt: owedAt }); continue; }
-      if (cad.paused || !cad.seconds) continue;
-      const last = Number(laneOf(en).lastPollAt) || 0;
-      const dueAt = last + cad.seconds * 1000;
-      if (dueAt <= t) out.push({ key: en.key, id: en.id, dueAt });
+    if (all) {
+      for (const en of Object.values(store.index.live())) if (en && en.adapterId === rec.id) dueRow(rec, e, en, t, T, out, true);
+    } else {
+      const ix = dueIndex(rec, t, T);
+      const cand = new Set(e.dueNow);
+      for (const k of ix.marks) cand.add(k);
+      const late = [];
+      for (let i = 0; i < ix.keys.length && ix.keys[i].at <= t; i++) { cand.add(ix.keys[i].key); late.push(ix.keys[i].key); }
+      for (const k of cand) { const en = store.index.peek(k); if (en && en.adapterId === rec.id) dueRow(rec, e, en, t, T, out, false); }
+      // a head the clock did not make due after all (its tier relaxed since it was keyed — the key is a LOWER bound) moves
+      // to its true instant: each row is re-keyed once per tier step, never re-judged every pass
+      const due = new Set(out.map((d) => d.key));
+      for (const k of late) if (!due.has(k)) dueRekey(rec, ix, k, t, T);
     }
     out.sort((x, y) => x.dueAt - y.dueAt || (x.key < y.key ? -1 : 1));
     return out;
   }
+  /** THE ONE DUE RULE for one row (the scan's and the index's): pushes its due rows (owed thread marks, then the row). */
+  function dueRow(rec, e, en, t, T, out, all) {
+    const named = e.dueNow.has(en.key);
+    if (en.unlistedAt && !named) return;
+    // lane lark-search-poll: THE FEED'S OWED MARKS — durable, named rows at the owed instant (a restart, a cut or a
+    // refused fetch never loses one); never for a PAUSED row (the owner's pause wins over the timer — the mark waits)
+    const cad = cadenceOf(rec, en, t, T);
+    const owedAt = Number(en.feedOwedAt) || 0;
+    if (!cad.paused && en.threadOwed && typeof en.threadOwed === 'object') for (const [tk, at] of Object.entries(en.threadOwed)) out.push({ key: Feed.threadDueKey(en.key, tk), id: en.id, dueAt: Number(at) || 0 });
+    if (all || named) { out.push({ key: en.key, id: en.id, dueAt: named ? -1 : 0 }); return; }
+    if (owedAt && !cad.paused) { out.push({ key: en.key, id: en.id, dueAt: owedAt }); return; }
+    if (cad.paused || !cad.seconds) return;
+    const last = Number(laneOf(en).lastPollAt) || 0;
+    const dueAt = last + cad.seconds * 1000;
+    if (dueAt <= t) out.push({ key: en.key, id: en.id, dueAt });
+  }
+
+  // ── THE DUE INDEX (lane channel-feed-authority, 2026-10-06: `dueList` walked all 88 915 rows of a mailbox every pass) ──
+  // Per account: `keys` sorted by (at, key) — each row's TIMER due instant under the cadence it had when keyed, a LOWER
+  // bound (a tier only relaxes as time passes; a watch start re-keys) — and `marks` = the rows holding owed marks. A row
+  // is re-keyed at the writes that move it: every index write (`store.index.onTouch`: a message's lastAt, an override, a
+  // pause, an owed mark, unlisted), its poll stamp (`store.stamps.set`), a watch start. Built in ONE O(rows) pass at
+  // boot and whenever the account's shared inputs change (the tier settings; the lane: push, the feed carrying or not).
+  const dueIx = new Map();   // adapterId -> { sig, keys: [{key, at}], at: Map<key, at>, marks: Set<key>, dirty: Set<key>, stale }
+  const dueStats = { builds: 0, rekeys: 0, lastBuildMs: 0 };
+  function markDue(key) {
+    if (key === null || key === undefined) { for (const ix of dueIx.values()) ix.stale = true; return; }
+    const k = String(key), i = k.indexOf('/');
+    const ix = i > 0 ? dueIx.get(k.slice(0, i)) : null;
+    if (ix) ix.dirty.add(k);
+  }
+  store.index.onTouch(markDue);
+  { const set0 = store.stamps.set; store.stamps.set = (key, patch) => { const r = set0(key, patch); markDue(key); return r; }; }
+  /** One row's timer instant (Infinity = never by the clock) and whether it holds owed marks. */
+  function dueKeyOf(rec, lane, en, t, T) {
+    if (en.unlistedAt) return { at: Infinity, owed: false };
+    const cad = caps.cadenceFor(registry.capsOf(rec.kind), lane, en, t, { tiers: T, watched: isWatched(en.key, t) });
+    const owed = !cad.paused && ((Number(en.feedOwedAt) || 0) > 0 || !!(en.threadOwed && typeof en.threadOwed === 'object' && Object.keys(en.threadOwed).length));
+    if (cad.paused || !cad.seconds) return { at: Infinity, owed };
+    return { at: (Number(laneOf(en).lastPollAt) || 0) + cad.seconds * 1000, owed };
+  }
+  const dueCmp = (a, at, key) => (a.at - at) || (a.key < key ? -1 : a.key > key ? 1 : 0);
+  function dueSeek(keys, at, key) { let lo = 0, hi = keys.length; while (lo < hi) { const m = (lo + hi) >> 1; if (dueCmp(keys[m], at, key) < 0) lo = m + 1; else hi = m; } return lo; }
+  function dueDrop(ix, key) {
+    const at = ix.at.get(key);
+    ix.marks.delete(key);
+    if (at === undefined) return;
+    ix.at.delete(key);
+    const i = dueSeek(ix.keys, at, key);
+    if (ix.keys[i] && ix.keys[i].key === key) ix.keys.splice(i, 1);
+  }
+  function duePut(ix, key, d) {
+    if (d.owed) ix.marks.add(key);
+    if (d.at === Infinity) return;
+    ix.at.set(key, d.at);
+    ix.keys.splice(dueSeek(ix.keys, d.at, key), 0, { key, at: d.at });
+  }
+  function dueRekey(rec, ix, key, t, T) {
+    dueDrop(ix, key);
+    const en = store.index.peek(key);
+    if (en && en.adapterId === rec.id) duePut(ix, key, dueKeyOf(rec, ix.lane, en, t, T));
+    dueStats.rekeys++;
+  }
+  /** The account's due index, current: built (one O(rows) pass) when absent / stale / its shared inputs changed; else
+   *  the rows written since are re-keyed (O(written · log rows)). */
+  function dueIndex(rec, t, T) {
+    const lane = laneOrScan(rec, {});
+    const sig = JSON.stringify([T, lane.via, lane.pollCadence, lane.why || null, lane.feedSeconds || null]);
+    let ix = dueIx.get(rec.id);
+    // a mass write (a boot's stamps, a big discovery page run) is one O(rows) build, never thousands of O(rows) splices
+    if (!ix || ix.stale || ix.sig !== sig || ix.dirty.size > (ix.at.size >> 3) + 256) {
+      const t0 = Date.now();
+      ix = { sig, lane, keys: [], at: new Map(), marks: new Set(), dirty: new Set(), stale: false };
+      for (const en of Object.values(store.index.live())) {
+        if (!en || en.adapterId !== rec.id) continue;
+        const d = dueKeyOf(rec, lane, en, t, T);
+        if (d.owed) ix.marks.add(en.key);
+        if (d.at !== Infinity) { ix.at.set(en.key, d.at); ix.keys.push({ key: en.key, at: d.at }); }
+      }
+      ix.keys.sort((a, b) => dueCmp(a, b.at, b.key));
+      dueIx.set(rec.id, ix);
+      dueStats.builds++; dueStats.lastBuildMs = Date.now() - t0;
+      return ix;
+    }
+    ix.lane = lane;
+    if (ix.dirty.size) { const ks = [...ix.dirty]; ix.dirty.clear(); for (const k of ks) dueRekey(rec, ix, k, t, T); }
+    return ix;
+  }
   function discoveryDue(rec, e, t = now()) {
     if (e.disc.cursor || e.discoverSoon || !e.disc.lastCompleteAt) return true;
-    return t - e.disc.lastCompleteAt >= tiers().coldSec * 1000;
+    // lane channel-feed-authority: under an AUTHORITATIVE carrying feed a new conversation is born by the feed (its head
+    // listing) and a reseed asks the walk itself (`discoverSoon`) — the periodic re-walk is only the net for a conversation
+    // that LEFT the listing (a label removed), once a day; never every cold cycle (88 915 threads = 890 pages each 15 min)
+    const every = laneOrScan(rec, {}).pollCadence === 'feed-only' ? FEED_ONLY_REWALK_MS : tiers().coldSec * 1000;
+    return t - e.disc.lastCompleteAt >= every;
   }
 
   /**
@@ -1128,22 +1228,7 @@ function create(deps = {}) {
       if (outlived(rec, e)) return { pages, complete: false };   // verify r4: a listing that outlived its entry mints no row
       const listedAt = now();
       await store.index.update(() => {
-        for (const c of page.conversations || []) {
-          const isNew = !store.index.has(`${rec.id}/${c.id}`);   // B-f32b: a lookup — `ix.conversations` here made every page's index write a whole one
-          const en = store.index.entry(rec.id, c.id);
-          en.vendorId = c.vendorId; en.kind = c.kind;
-          // lane gmail-quota-share: a STAND-IN title (the adapter skipped the naming read: the row is named) keeps the stored name
-          const keepName = c.standIn === true && en.named === true;
-          if (!keepName) en.title = c.title;
-          if (!keepName) en.participants = c.participants;
-          if (c.standIn === false) en.named = true;
-          if (c.app === true) en.app = true; else if (en.app) delete en.app;   // design 012: the other side is an app
-          if (c.lastAt && (!en.lastAt || c.lastAt > en.lastAt)) en.lastAt = c.lastAt;
-          if (isNew) en.readAt = Number(rec.linkedAt) || listedAt;
-          en.listedAt = listedAt;
-          if (en.unlistedAt) delete en.unlistedAt;
-          if ('tracked' in en) delete en.tracked;   // a pre-2026-09-26 row: the field gates nothing any more
-        }
+        for (const c of page.conversations || []) admitListed(rec, c, listedAt);
       });
       d.cursor = page.cursor || null;
       pages++;
@@ -1180,6 +1265,24 @@ function create(deps = {}) {
       if (unlistedHits && rec.feed) { feedRow(rec).counters.unlistedHits += unlistedHits; }
     }
     return { pages, complete };
+  }
+  /** ONE listed conversation into the index — discovery's page and the authoritative feed's births share it (inside an
+   *  index update; lane channel-feed-authority moved it out of `discover` verbatim). */
+  function admitListed(rec, c, listedAt) {
+    const isNew = !store.index.has(`${rec.id}/${c.id}`);   // B-f32b: a lookup — `ix.conversations` here made every page's index write a whole one
+    const en = store.index.entry(rec.id, c.id);
+    en.vendorId = c.vendorId; en.kind = c.kind;
+    // lane gmail-quota-share: a STAND-IN title (the adapter skipped the naming read: the row is named) keeps the stored name
+    const keepName = c.standIn === true && en.named === true;
+    if (!keepName) en.title = c.title;
+    if (!keepName) en.participants = c.participants;
+    if (c.standIn === false) en.named = true;
+    if (c.app === true) en.app = true; else if (en.app) delete en.app;   // design 012: the other side is an app
+    if (c.lastAt && (!en.lastAt || c.lastAt > en.lastAt)) en.lastAt = c.lastAt;
+    if (isNew) en.readAt = Number(rec.linkedAt) || listedAt;
+    en.listedAt = listedAt;
+    if (en.unlistedAt) delete en.unlistedAt;
+    if ('tracked' in en) delete en.tracked;   // a pre-2026-09-26 row: the field gates nothing any more
   }
   /** The account's link instant (unread counts start there), stamped once. */
   async function ensureLinked(rec) {
@@ -1347,6 +1450,7 @@ function create(deps = {}) {
   async function feedPage(rec, e) {
     const decl = feedDecl(rec);
     if (!decl) return { noCall: true };
+    if (decl.authority === 'authoritative') return historyFeed(rec, e);
     const t = now();
     const f = feedRow(rec);
     const opts = feedOpts();
@@ -1569,6 +1673,39 @@ function create(deps = {}) {
     }
     if (born.length) notify(born.map((cid) => `${rec.id}/${cid}`), { full: false });
     return { due, more };
+  }
+  /**
+   * lane channel-feed-authority (OWNER'S LAW 2026-10-06: "获取更新" — fetch the updates, never ask each conversation):
+   * THE AUTHORITATIVE FEED's page — ONE `changes()` (Gmail: one history.list, the pass's; the reads after it reuse its
+   * memo) names the conversations that changed: they are the pass's due rows (under `feed-only` the clock makes none
+   * due). A changed conversation the index lacks is born from the adapter's own listing (`admitListed`); a reseeded
+   * cursor asks discovery's listing walk, never a per-row poll. A refusal is the feed's own (`feedRefusal`: the rows fall
+   * back to their tiers — positive evidence only). → `{due}` | `{skip}` | `{noCall}` for drain rule 21.
+   */
+  async function historyFeed(rec, e) {
+    const t = now();
+    const f = feedRow(rec);
+    if (f.refused) { if (feedStateOf(rec, t).state === 'refused') return { noCall: true }; f.refused = null; f.strikes = 0; f.strikeWhy = null; }
+    if (Number(f.backoffUntil) > t) return { noCall: true };
+    f.lastRunAt = t;
+    e.feedCalls = Feed.minuteAt(e.feedCalls, t).calls.concat([t]);
+    let page;
+    try { page = await vendor(rec, e, () => e.adapter.changes({})); }
+    catch (err) { if (outlived(rec, e)) throw err; return feedRefusal(rec, e, f, 'steady', err, false); }
+    if (outlived(rec, e)) return { skip: 'account-changed' };
+    const changed = Array.isArray(page && page.changed) ? page.changed.map(String) : [];
+    const births = (Array.isArray(page && page.conversations) ? page.conversations : []).filter((c) => c && c.id && !store.index.has(`${rec.id}/${c.id}`));
+    if (births.length) { await ensureLinked(rec); await store.index.update(() => { for (const c of births) admitListed(rec, c, t); }); }
+    if (page && page.mustWalk && !e.disc.cursor) e.discoverSoon = true;
+    f.lastOkAt = now(); f.lastHits = changed.length; f.strikes = 0; f.strikeWhy = null; f.backoffUntil = null; f.backoffWhy = null;
+    await store.adapters.update(() => {});
+    const due = [];
+    for (const id of changed) {
+      const en = store.index.peek(`${rec.id}/${id}`);
+      if (en && !(en.refresh && en.refresh.every === 'paused')) due.push({ key: en.key, dueAt: t });   // the owner's pause wins
+    }
+    if (births.length) notify(births.map((c) => `${rec.id}/${c.id}`), { full: false });
+    return { due };
   }
   /** Ask the adapter to NAME conversations the feed found (§3.3): the births of this page first, then an untitled
    *  feed-born row not described for 6 h — at most DESCRIBE_MAX per feed tick, only while the minute's budget holds;
@@ -1920,6 +2057,22 @@ function create(deps = {}) {
       let failure = null;        // the pass's typed failure — what a taken waiter hears (Drain rule 3)
       let progressAt = now();    // lane R5: the bounded progress broadcast of a long (paced) pass
       let ended = null;          // the model's `end`
+      const held = { keys: [], answers: [], timer: null, at: -Infinity };   // THE VIEWS ARE PACED: the window's early keys + their answers
+      const flushEarly = () => {
+        if (held.timer) { clearTimeout(held.timer); held.timer = null; }
+        if (!held.keys.length) return;
+        const keys = held.keys, answers = held.answers;
+        held.keys = []; held.answers = []; held.at = performance.now();
+        notify(keys, { full: false });
+        for (const [list, outcome] of answers) deliver(list, outcome);
+      };
+      const sayEarly = (key) => {
+        early.add(key); held.keys.push(key);
+        const wait = held.at + VIEW_PACE_MS - performance.now();
+        if (wait <= 0) flushEarly();
+        else if (!held.timer) { held.timer = setTimeout(flushEarly, wait); if (held.timer.unref) held.timer.unref(); }
+      };
+      const answerAfterSaid = (key, list, outcome) => { if (held.keys.includes(key)) held.answers.push([list, outcome]); else deliver(list, outcome); };
       const idOf = (key) => key.slice(key.indexOf('/') + 1);
       // THE DELIVERY: exactly the waiters an action names, the moment it names them — a refusal at its judgement (r6), an `ok` at ITS fetch (r7), a settlement in one step (Drain rules 2–4). A waiter that already left (its bound's `pending`, a stop, a drop) is not in `e.waiters`: nothing to deliver
       const deliver = (list, outcome) => { for (const id of list) { const w = e.waiters.get(id); if (w && w.outcome === undefined) { w.outcome = outcome; w.resolve(outcome); } } };
@@ -2017,7 +2170,7 @@ function create(deps = {}) {
         results[key] = { ok: true, appended: got.appended, complete: got.complete };
         if (got.appended || got.anchorMoved) {
           changed.push(key);
-          if (act.waiters.length) { notify([key], { full: false }); early.add(key); }   // the broadcast naming the key goes out BEFORE the answer: the window repaints with the toast, not a pass later
+          if (act.waiters.length) sayEarly(key);   // the broadcast naming the key goes out BEFORE the answer: the window repaints with the toast, not a pass later (paced: VIEW_PACE_MS)
         }
         // lane lark-threads (rule 22b): THE OWNER'S PRESS re-lists the conversation's newest page at once (a stored root that
         // grew a thread widens before the answer) — never a window's open, never an agent's refresh, never twice inside
@@ -2032,7 +2185,7 @@ function create(deps = {}) {
           catch (err) { if (err instanceof ChannelError && (err.code === 'auth-expired' || err.code === 'rate-limited')) throw err; log.warn(`[channels] ${key}: the recheck on the owner's Refresh failed (${(err && err.message) || err}) — the next timer recheck tries again`); }
         }
         // THE ANSWER: this key's own fetch, completed now — after every one of its waiters began
-        deliver(act.waiters, { ok: true, appended: got.appended || 0, polledAt: lastPollOf(key) });
+        answerAfterSaid(key, act.waiters, { ok: true, appended: got.appended || 0, polledAt: lastPollOf(key) });
         return { ok: true, appended: got.appended || 0, hints: [...e.dueNow] };
       };
       e.chargeBy = 'timer';
@@ -2095,6 +2248,7 @@ function create(deps = {}) {
             progressAt = now();
           }
         }
+        flushEarly();   // the held window's keys before the pass's own sentences
         if (ended.why === 'stopped' || ended.why === 'dropped') return { ok: false, why: ended.why === 'dropped' ? 'account-changed' : 'stopped', changed, results };
         if (ended.why === 'not-connected') return { ok: false, why: 'not-connected' };
         if (failure) { notify(changed.filter((k) => !early.has(k)), { full: false }); return { ok: false, why: failure.code, changed, results }; }
@@ -2122,6 +2276,7 @@ function create(deps = {}) {
         notify(changed.filter((k) => !early.has(k)), { full: false });
         return { ok: false, why: failure.code, changed, results };
       } finally {
+        flushEarly();   // every exit: the held window's broadcast and answers before the safety net below
         e.passing = null;
         e.chargeBy = null;
         if (e.dq.pass) e.dq = Drain.close(e.dq);
@@ -3877,6 +4032,7 @@ function create(deps = {}) {
     const t = now();
     const was = isWatched(key, t);
     watching.set(key, t + WATCH_TTL_MS);
+    if (!was) markDue(key);   // lane channel-feed-authority: the due index re-keys a row whose cadence just shortened
     for (const [k, exp] of watching) if (exp <= t) watching.delete(k);
     const en = store.index.peek(key) || {};
     const last = Number(laneOf(en).lastPollAt) || 0;
@@ -6840,6 +6996,9 @@ function create(deps = {}) {
     setScopeAssignment, estimateScope, effectiveFor: (adapterId, convId) => effectiveFor(store.index.peek(`${adapterId}/${convId}`)), migrateAggregated,
     // R4 (2026-09-27): access and notification — two operations, access first; the compose verb; the agent's search
     setGrain, setAccess, setWatchers, removePattern, accessFor, migrateGrants, compose, searchFor, setAccountPolicy, effectiveForAccount,
+    // lane channel-feed-authority: the scheduler's due rows of one account (the census legs) and the due index's counters
+    dueListOf: (adapterId, { all = false } = {}) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId); const e = rec && live.get(rec.id); return rec ? dueList(rec, e || { dueNow: new Set() }, now(), { all }) : null; },
+    dueIndexStats: () => ({ ...dueStats }),
     cadenceOf: (adapterId, convId) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId); const en = store.index.peek(`${adapterId}/${convId}`); return rec && en ? cadenceOf(rec, en) : null; },
     budgetOf: (adapterId) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId); return rec ? budgetView(rec, live.get(rec.id) || paceCarry.get(rec.id) || null) : null; },
     // R4: one scope digest per WATCHER — `pk` (`kind:id`) names it; without one, every watcher of that grain is flushed

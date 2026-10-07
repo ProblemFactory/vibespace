@@ -208,7 +208,7 @@ function judgeIntro(ARx) {
   ok(/const clause = browserVariant === VARIANTS\.H \? R\.INTRO_REMOTE_CLAUSE : R\.INTRO_CLAUSE;/.test(asrc), 'wiring: rung H picks the remote clause (verify r1 F1)');
   // CONTROL: an agent-routes copy whose isolated Browsing line lost the clause ⇒ RED (a mutant copy outside the tree)
   const MUT = mutantCopies('brcp', REPO);
-  const lost = asrc.replace("keeps its tabs only) — ' + clause + '. While the user drives", "keeps its tabs only). While the user drives");
+  const lost = asrc.replace("kept for this conversation) — ' + clause + '; a site", "kept for this conversation); a site");
   const ARm = MUT.load('src/agent-routes.js', lost, 'no-clause');
   const badm = judgeIntro(ARm);
   ok(lost !== asrc && badm.length > 0 && badm.some((x) => /^rung D/.test(x)), 'CONTROL: an intro whose Browsing line lost the clause FAILS ⑥', badm.join(' | ').slice(0, 300));

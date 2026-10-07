@@ -78,7 +78,10 @@ const PAGE_SIGS_MAX = 256;
 /** Records the measurement holds while their instant is not yet covered by a complete window. */
 const PENDING_SAMPLES_MAX = 2000;
 /** The closed set of feed readings (`caps.changeFeed.via`). */
-const FEED_VIA = Object.freeze(['search']);
+const FEED_VIA = Object.freeze(['search', 'history']);
+/** lane channel-feed-authority: a feed's AUTHORITY — `history` (the vendor's own change log, Gmail's history.list) is
+ *  `authoritative` and replaces the per-row timers; a `search` is `measured` (its coverage proved, never promised). */
+const FEED_AUTHORITY = Object.freeze(['authoritative', 'measured']);
 /** The time FORMS a feed may declare — ONE per adapter, never guessed: an integer of milliseconds, an integer of
  *  seconds, or an ISO 8601 string (lane lark-p2p, 2026-09-30: Lark's message search answers `create_time` as
  *  `2026-03-21T16:15:30+08:00` — its own doc and its own answer; the .197 declaration `ms` read every hit malformed). */
@@ -585,7 +588,7 @@ function freshMs(everySec, overlapSec) { return Math.max(180e3, (3 * (Number(eve
 module.exports = {
   FEED_SEEN_MAX, FEED_SEEN_TTL_MS, FEED_SKEW_MS, THREAD_OWED_MAX, OWED_HITS_MAX, DESCRIBE_MAX, RANGE_SLACK_MS, TOTAL_PER_SEC_MAX,
   PROMOTE_MIN, DEMOTE_MIN, MISS_THRESHOLD, OVERLAP_MIN_SEC, OVERLAP_DEFAULT_SEC, PAGE_TOKEN_TTL_MS, PAGE_SIGS_MAX, PENDING_SAMPLES_MAX,
-  FEED_VIA, TIME_UNITS, HIT_FIELDS, PARK_CODES, MODES, EPOCH_MIN_MS, ID_MAX, THREAD_KEY_SEP,
+  FEED_VIA, FEED_AUTHORITY, TIME_UNITS, HIT_FIELDS, PARK_CODES, MODES, EPOCH_MIN_MS, ID_MAX, THREAD_KEY_SEP,
   SHAPE_BAD_SHARE, SHAPE_MIN_ITEMS, SHAPE_FIELDS_MAX, SHAPE_FIELD_NAMES_MAX, UNREADABLE_RECENT_MS, UNREADABLE_RING_MAX,
   window, isoSec, isoMs, readTime, normalizeHit, cleanHit, pageVerdict, pageSig, foldHits, mergeThreadOwed, mergeThreadReach, owedSatisfied, birthFacts,
   sample, minuteAt, pagesLeft, modeVerdict, trimSeen, threadDueKey, splitThreadDueKey, freshMs, idOf,

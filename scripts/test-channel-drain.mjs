@@ -51,6 +51,7 @@ import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-seams: the engine + its three family files as one text
+import { spawn } from 'node:child_process';   // lane channel-drain-scale: ⑦'s meter children, overlapped with the walk
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const MODEL = 'src/channel-drain.js';
@@ -60,6 +61,20 @@ const D0 = require(path.join(REPO, MODEL));
 let passN = 0, failN = 0;
 const ok = (c, n, extra) => { if (c) { passN++; console.log('  ✓ ' + n); } else { failN++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 900) : '')); } return !!c; };
 const J = (x) => JSON.stringify(x);
+// ⑦ (lane channel-drain-scale): the work meter's verdicts come from CHILD processes (the meter must start before the model
+// loads) — launched here, read at ⑦, so they run beside the walk instead of after it
+const SCALE_PASS = {
+  mk: "(n) => ({ due: Array.from({ length: n }, (_, i) => ({ key: 'a/c' + i, dueAt: 0 })), reqs: Array.from({ length: 100 }, (_, j) => ({ id: 'w' + j, key: j % 2 && n ? 'a/c' + ((j * 7919) % n) : 'a/x' + j, origin: j % 3 ? 'agent' : 'owner', at: 1 })) })",
+  run: "(M, x) => { let s = M.empty(); for (const r of x.reqs) { const a = M.admit(s, r); if (a.ok) s = a.snap; } s = M.turn(M.open(s, { origin: 'timer' }), { due: x.due }); const F = { now: 1, stopped: false, dropped: false, connected: true, backoff: { epoch: 0, pressEpoch: 0 }, budget: { remainingUnits: 1e9 }, agentShare: { remaining: 1e9 }, floors: {}, floorMs: 0, pace: null }; let steps = 0; for (;;) { const act = M.next({ ...s, ...F }); s = M.apply(s, act); steps++; if (act.type === 'end') break; if (act.type === 'fetch') s = M.apply(s, act, { ok: true }); } return steps; }",
+};
+const judgeLater = (spec) => new Promise((resolve) => {
+  const c = spawn(process.execPath, [path.join(path.dirname(new URL(import.meta.url).pathname), 'work-meter.mjs'), '--judge', JSON.stringify(spec)], { stdio: ['ignore', 'pipe', 'pipe'] });
+  let out = '', err = '';
+  c.stdout.on('data', (b) => { out += b; });
+  c.stderr.on('data', (b) => { err += b; });
+  c.on('close', (code) => { try { resolve(JSON.parse(out.trim().split('\n').pop())); } catch { resolve({ ok: false, n: spec.n, err: `child exit ${code} ${err.slice(-300)}` }); } });
+});
+const SCALE_ROWS = [1000, 10000, 45000].map((n) => judgeLater({ module: path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'src/channel-drain.js'), ...SCALE_PASS, n, kind: 'linear' }));
 
 // ── the rule numbers the spec states (the constants are asserted equal below, never trusted) ──
 const CAP = 200, RESERVE = 20, K = 25;
@@ -162,9 +177,16 @@ function createSim(D, o = {}) {
     const now = new Set(snap.requests.map((r) => r.id));
     for (const id of beforeIds) if (!now.has(id)) { const w = waiters.get(id); if (!w || !w.answer) V('22-lost', `waiter ${id} left the model with no answer (${where})`); }
   };
+  /** lane channel-drain-scale: the model's snapshots are PERSISTENT (the due queue and the fetch log share structure
+   *  down a pass) — what a snapshot says, read through the model, never changes after a step took it. */
+  const pureView = (x) => J({ seq: x.seq, requests: x.requests, pass: x.pass && { ...x.pass, due: D.dueRows(x.pass), fetched: x.pass.fetched ? x.pass.fetched.log.keys.slice(0, x.pass.fetched.n).map((k) => [k, D.fetchedAt(x.pass, k)]) : null } });
+  const pureCheck = ([was, view], got) => {
+    if (got === was) V('0-pure', 'apply answered the snapshot it was handed, not a new one');
+    else if (pureView(was) !== view) V('0-pure', `apply changed the snapshot it was handed: ${view.slice(0, 120)} → ${pureView(was).slice(0, 120)}`);
+  };
   /** THE ORACLE — the rules written again from the spec, never from the model. */
   const oracle = (s, pv) => {
-    const dueKeys = new Set(s.pass.due.map((d) => d.key));
+    const dueKeys = new Set(D.dueRows(s.pass).map((d) => d.key));
     const takenKeys = new Set(s.requests.filter((r) => r.taken).map((r) => r.key));
     const groups = new Map();   // fresh groups: untaken requests on a key with no pending item, filing order of the key's first request
     for (const r of s.requests) {
@@ -187,12 +209,12 @@ function createSim(D, o = {}) {
     }
     // the queue, every request accepted: items by key
     const items = new Map();
-    for (const d of s.pass.due) items.set(d.key, { key: d.key, due: true, dueAt: d.dueAt, reqs: [] });
+    for (const d of D.dueRows(s.pass)) items.set(d.key, { key: d.key, due: true, dueAt: d.dueAt, reqs: [] });
     for (const r of s.requests) { if (!items.has(r.key)) items.set(r.key, { key: r.key, due: false, reqs: [] }); items.get(r.key).reqs.push(r); }
     const all = [...items.values()];
     for (const it of all) { it.human = it.reqs.some((r) => isHuman(r.origin)); it.minSeq = it.reqs.length ? Math.min(...it.reqs.map((r) => r.seq)) : Infinity; }
     const waitingItems = all.filter((it) => it.reqs.length).sort((a, b) => (Number(b.human) - Number(a.human)) || (a.minSeq - b.minSeq));
-    const plain = s.pass.due.filter((d) => !items.get(d.key).reqs.length).map((d) => items.get(d.key));
+    const plain = D.dueRows(s.pass).filter((d) => !items.get(d.key).reqs.length).map((d) => items.get(d.key));
     const queue = waitingItems.concat(plain);
     const head = queue[0] || null;
     let pick = head, redirect = false;
@@ -324,7 +346,7 @@ function createSim(D, o = {}) {
     if (act.type === 'end') {
       if (act.carry) { bump('15-carry'); if (!(pv.streak >= K && !O.duePending)) V('15-bound', `carried with streak ${pv.streak}, due pending ${O.duePending}`); }
       else if (!act.cut) {
-        if (s.requests.length || s.pass.due.length) V('16-end', `ended with ${s.requests.length} waiting and ${s.pass.due.length} due`);
+        if (s.requests.length || D.dueRows(s.pass).length) V('16-end', `ended with ${s.requests.length} waiting and ${D.dueRows(s.pass).length} due`);
         const idle = s.pass.backoff && pv.okFetches === 0;
         if (act.ok === idle || (idle && act.why !== 'backoff')) V('16-end', `a ${idle ? 'fetchless back-off' : 'working'} pass ended ${J(act)}`);
         if (idle) bump('16-backoff-end');
@@ -350,7 +372,7 @@ function createSim(D, o = {}) {
       const f = pv.fetchedAt[act.key];
       if (f !== undefined) {
         const newRound = act.waiters.length > 0 && act.waiters.every((id) => waiters.get(id).filedTick > pv.fetchTick[act.key]);
-        const dueRow = s.pass.due.find((d) => d.key === act.key);
+        const dueRow = D.dueRows(s.pass).find((d) => d.key === act.key);
         const dueAgain = !!dueRow && dueRow.dueAt > f;
         if (!newRound && !dueAgain) V('13-refetch', `${act.key} fetched twice in one pass for no new round and no due-again row`);
         else bump(newRound ? '10-new-round' : '13-due-again');
@@ -436,7 +458,7 @@ function createSim(D, o = {}) {
     const pv = { last: null, streak: 0, fetchedAt: {}, fetchTick: {}, discovered: false, scanned: false, pressKey: null, pressFetched: null, cutPending: false, failed: null, okFetches: 0, vendorCalls: 0, calls: 0, backoff, wasInBackoff, timerWork: snap.pass.timerWork, pass: passNo, feedPages: 0, feedSkipped: false, feedRows: null, recheckArmed: [], rechecks: 0, rechecked: [] };
     for (let guard = 0; guard < 20000; guard++) {
       if (D.wantsTurn(snap, W.timerDue)) {
-        const before = snap.pass.due;
+        const before = D.dueRows(snap.pass);
         W.timerDue = false;
         const rows = dueList(snap.pass.force);
         const takenKeys = new Set(snap.requests.filter((r) => r.taken).map((r) => r.key));
@@ -445,7 +467,7 @@ function createSim(D, o = {}) {
         pv.timerWork = true;
         if (W.recheck && !pv.recheckTurned) { pv.recheckTurned = true; pv.recheckArmed = [...new Set(rd.map((d) => d.key))]; if (pv.recheckArmed.length) bump('r22-armed'); }
         else if (W.recheck && rd.length && pv.recheckTurned) bump('r22-not-rearmed');
-        checkMerge('13-turn', before, rows, snap.pass.due, pv, takenKeys);
+        checkMerge('13-turn', before, rows, D.dueRows(snap.pass), pv, takenKeys);
       }
       const s = { ...snap, ...facts() };
       if (hooks.onStep) hooks.onStep(s, api);
@@ -455,7 +477,9 @@ function createSim(D, o = {}) {
       if (act.press) pv.pressKey = act.press;
       if (act.type === 'fetch' && act.pressed) pv.pressFetched = pv.pressFetched || act.key;
       let beforeIds = new Set(snap.requests.map((r) => r.id));
+      let pin = steps % 29 === 0 ? [snap, pureView(snap)] : null;   // lane channel-drain-scale: a NEW snapshot, the one handed over untouched
       snap = D.apply(snap, act);
+      if (pin) pureCheck(pin, snap);
       if (act.type === 'end') {
         lostCheck(beforeIds, 'end');
         if (act.ok) { W.backoff.failures = 0; W.backoff.until = 0; }
@@ -485,16 +509,18 @@ function createSim(D, o = {}) {
       }
       const result = perform(act, pv, beginTick);
       beforeIds = new Set(snap.requests.map((r) => r.id));
-      const dueBefore = act.type === 'feed' && snap.pass ? snap.pass.due.slice() : null;
+      const dueBefore = act.type === 'feed' && snap.pass ? D.dueRows(snap.pass).slice() : null;
       const takenBefore = act.type === 'feed' ? new Set(snap.requests.filter((r) => r.taken).map((r) => r.key)) : null;
+      pin = steps % 29 === 0 ? [snap, pureView(snap)] : null;
       snap = D.apply(snap, act, result);
+      if (pin) pureCheck(pin, snap);
       if (act.type === 'feed' && snap.pass) {
         if (result && result.skip && snap.pass.failed) V('f21-skip-fails', 'a feed-local refusal failed the pass');
         if (result && Array.isArray(result.due)) {
           // THE FRONT: the eligible rows first, in the page's order; every other pending row after them, in its order
           const want = [];
           for (const d of result.due) { if (want.includes(d.key) || takenBefore.has(d.key)) continue; const f = pv.fetchedAt[d.key]; if (f !== undefined && !(Number(d.dueAt) > f)) { bump('f21-fetched-not-again'); continue; } want.push(d.key); }
-          const got = snap.pass.due.map((d) => d.key);
+          const got = D.dueRows(snap.pass).map((d) => d.key);
           const rest = dueBefore.map((d) => d.key).filter((k) => !want.includes(k));
           if (J(got) !== J(want.concat(rest))) V('f21-front', `the feed's rows ${J(want)} are not at the front of ${J(got.slice(0, 12))}`);
           else if (want.length && rest.length) bump('f21-front');
@@ -581,7 +607,7 @@ function walk(D, seed, profileName, steps = 3000, { forceFeed = false, noFeed = 
     const pickOrigin = () => { const x = rnd(); return x < 0.3 ? 'owner' : x < 0.5 ? 'open' : 'agent'; };
     if (r < P.arrivals) for (let i = 1 + ri(3); i > 0; i--) sim.file(pickOrigin(), pickKey());
     if (rnd() < P.rerequest) {   // a re-request: the in-flight key, or a pending one
-      const pend = sim.snap.requests.map((q) => q.key).concat(sim.snap.pass ? sim.snap.pass.due.map((d) => d.key) : []);
+      const pend = sim.snap.requests.map((q) => q.key).concat(sim.snap.pass ? D.dueRows(sim.snap.pass).map((d) => d.key) : []);
       const key = rnd() < 0.5 && act.key ? act.key : pend.length ? pend[ri(pend.length)] : pickKey();
       sim.file(pickOrigin(), key);
     }
@@ -1381,9 +1407,9 @@ const R21 = {
     sim.runPass({ origin: 'timer' });
     const snap0 = sim.snap;
     // the model's own merge: a stale hit on a fetched key is dropped, a newer one re-added
-    const p = { ...D.open(D.empty(), { origin: 'timer' }).pass, fetchedAt: { [keyOf(0)]: T0 + 31e3 }, due: [{ key: keyOf(1), dueAt: 0 }] };
-    const stale = D.mergeFront(p, [{ key: keyOf(0), dueAt: T0 }], []).map((d) => d.key);
-    const newer = D.mergeFront(p, [{ key: keyOf(0), dueAt: T0 + 60e3 }], []).map((d) => d.key);
+    const p = { ...D.open(D.empty(), { origin: 'timer' }).pass, fetched: D.fetchLogAdd(D.fetchLog(), keyOf(0), T0 + 31e3), due: D.dueQueue([{ key: keyOf(1), dueAt: 0 }]) };
+    const stale = D.dueRows({ due: D.mergeFront(p, [{ key: keyOf(0), dueAt: T0 }], []) }).map((d) => d.key);
+    const newer = D.dueRows({ due: D.mergeFront(p, [{ key: keyOf(0), dueAt: T0 + 60e3 }], []) }).map((d) => d.key);
     return { stale, newer, snap0: !!snap0 };
   },
 };
@@ -1409,7 +1435,7 @@ const R21 = {
   const MUT21 = [
     { tag: 'feed-ahead-of-human', clause: 'never ahead of a waiting human', edits: [['  if (!f || !f.wanted || f.done || p.backoff || !p.timerWork || humanWaiting) return false;', '  if (!f || !f.wanted || f.done || p.backoff || !p.timerWork) return false;']], walk: ['f21-human'], repro: (D) => { const r = R21.order(D); return { red: r.log[0] !== 'c0003', said: J(r.log.slice(0, 4)) }; } },
     { tag: 'feed-minute-ignored', clause: 'its own sliding minute', edits: [['  if (!(s.feedPages && Number(s.feedPages.remaining) > 0)) return false;', '']], walk: ['f21-minute'], repro: (D) => { const r = R21.minute(D); return { red: r.feeds > 0, said: J(r) }; } },
-    { tag: 'feed-rows-tail', clause: 'its rows ahead of the plain due rows', edits: [['  return front.concat(p.due.filter((d) => !moved.has(d.key)));', '  return p.due.filter((d) => !moved.has(d.key)).concat(front);']], walk: ['f21-front'], repro: (D) => { const r = R21.order(D); return { red: r.log.indexOf('c0009') > r.log.indexOf('c0000'), said: J(r.log.slice(3, 8)) }; } },
+    { tag: 'feed-rows-tail', clause: 'its rows ahead of the plain due rows', edits: [['  return dqOf(front.concat(dqRows(p.due).filter((d) => !moved.has(d.key))));', '  return dqOf(dqRows(p.due).filter((d) => !moved.has(d.key)).concat(front));']], walk: ['f21-front'], repro: (D) => { const r = R21.order(D); return { red: r.log.indexOf('c0009') > r.log.indexOf('c0000'), said: J(r.log.slice(3, 8)) }; } },
     { tag: 'feed-skip-fails', clause: 'a feed-local refusal never fails the pass', edits: [["      if (result && result.skip) { p.feed = { ...p.feed, wanted: false, done: true, skipped: String(result.skip) }; break; }", "      if (result && result.skip) { p.failed = String(result.skip); break; }"]], walk: ['f21-skip-fails'], repro: (D) => { const r = R21.skip(D); return { red: !r.ok || r.fetches < 4, said: J(r) }; } },
     { tag: 'feed-unbounded', clause: 'at most perPass pages a pass (both layers stripped)', edits: [['  return f.pages < (Number(f.perPass) || FEED_PAGES_PER_PASS);\n}', '  return true;\n}'], ['      { const more = !!(result && result.more) && p.feed.pages < (Number(p.feed.perPass) || FEED_PAGES_PER_PASS);', '      { const more = !!(result && result.more);']], walk: ['f21-per-pass'], repro: (D) => { const r = R21.bound(D); return { red: r.feeds > 3, said: J(r) }; } },
   ];
@@ -1628,6 +1654,27 @@ console.log('⑥ RULE 19: one conversation\'s older history — join, the rememb
 //    (1/s, burst 5) is what bounds a SLIDING minute; the burst and the first refill share instant 0, so any half-open 60 s
 //    window holds at most 60·r + burst − 1 = 64 — exactly what r2's day walk measured ("max in any sliding minute: 64"). Pinned
 //    PURE on paceFresh/paceLevel with a greedy sender; the card's words name the burst beside the minute and the per-second figure.
+// ═══ ⑦ SCALE (lane channel-drain-scale, 2026-10-06) — a pass is O(due + steps · requests) ════════════════════════
+// A fleet mailbox of 88 915 conversations held the server's loop 18 s in every 20 (liveness probes failed): `itemsOf`
+// rebuilt every due row on every `next`, `apply` copied the due list and `fetchedAt` on every fetch — a pass of D due
+// rows was D steps of O(D). Counted by the work meter (scripts/work-meter.mjs — block executions + the natives' element
+// work, never the clock): ONE pure pass (D due rows + 100 requests, half of them riders, every fetch ok) at n vs 2n for
+// n ∈ {1 000, 10 000, 45 000} — D up to 90 000 — is LINEAR (ratio ≤ 2.2; the base read 3.79 at 1 000 and 3.96 at 5 000).
+// CONTROL: the queue rebuilt from every due row per step (the base's shape) reads non-linear at 500.
+console.log('\n⑦ scale: a pass is O(due + steps · requests) — the work meter over D due rows');
+{
+  const rows = await Promise.all(SCALE_ROWS);
+  const said = rows.map((v) => v.err ? `n=${v.n}: ${v.err}` : `${v.n}→${2 * v.n}: ×${Number(v.r).toFixed(3)} (${Math.round((v.w2 - v.w1) / v.n)} per row)`).join(' · ');
+  console.log(`    the meter: ${said}`);
+  ok(rows.every((v) => v.ok), `⑦ a pass over D due rows is LINEAR in D by the work meter, D up to 90 000 (${said})`, J(rows));
+  const ctl = mutant('rebuild-per-step', [['  const queue = queueOf(waiting, p.due);', '  const queue = queueOf(waiting, dqOf(dqRows(p.due)));']]);
+  const cv = ctl.setup ? await judgeLater({ module: M.write(MODEL, SRC.replace('  const queue = queueOf(waiting, p.due);', '  const queue = queueOf(waiting, dqOf(dqRows(p.due)));'), 'rebuild-meter'), ...SCALE_PASS, n: 500, kind: 'linear' }) : { ok: true, err: ctl.why };
+  const mut = mutant('apply-in-place', [['  const p = snap.pass ? { ...snap.pass } : null;', '  const p = snap.pass;']]);
+  const mh = mut.setup ? walkMutant(mut.D, ['0-pure'], 2, 600) : {};
+  ok(mut.setup && mh['0-pure'] > 0, `⑦ CONTROL: an apply that writes the pass it was handed is named by the walk (0-pure ×${mh['0-pure'] || 0})`, J(mh));
+  ok(ctl.setup && cv.ok === false && cv.r > 2.5, `⑦ CONTROL: the queue rebuilt from every due row per step reads non-linear (×${Number(cv.r).toFixed(3)} at 500 → 1 000)`, J(cv));
+}
+
 console.log('\nverify r3 (T2 ②): the sliding minute = 60·r + burst − 1, said on the card');
 {
   const D = require(path.join(REPO, 'src/channel-drain.js'));

@@ -249,6 +249,11 @@ const caps = Object.freeze({
   pushAckBudgetMs: 10000,          // Pub/Sub's default ack deadline — we ack after the engine answered (fence 11)
   pushOptIn: true,                 // DEFAULT OFF (decision 20): `push.enabled === true` on the record turns it on
   pollInterval: { hot: 60, cold: 300, floor: 30 },
+  // lane channel-feed-authority (OWNER'S LAW 2026-10-06: fetch the updates, never ask each conversation): history.list
+  // is Google's own sync primitive — AUTHORITATIVE. Carrying, it replaces every per-row timer (channel-caps `feed-only`):
+  // a pass = ONE history.list (`changes()`, 2 units) + a read of each thread it named. Its one gap — an expired cursor —
+  // is the listing walk (threads.list pages), never a read per thread.
+  changeFeed: Object.freeze({ via: 'history', authority: 'authoritative', scope: SCOPE, pagesPerPass: 1, perMin: 6 }),
   scanSources: null,
   scanLatency: null,
   history: 'page',
@@ -872,7 +877,7 @@ function create(record = {}, deps = {}) {
   // the last (re)seed: a thread not in it is fetched whatever history.list
   // says (the first pass after a restart, or after a reseed), one in it is
   // fetched only when history.list names it.
-  const mailbox = { historyId: null, at: 0, changed: new Set(), walked: new Set(), self: null, mustWalk: true };
+  const mailbox = { historyId: null, at: 0, changed: new Set(), walked: new Set(), self: null, mustWalk: true, walkFrom: null };
   // THE CURSOR SURVIVES A RESTART (2026-09-26): the mailbox's `historyId` and
   // the threads it named but nobody fetched yet are persisted in the
   // account's `state` (plain JSON, the engine's serialized door). A restored
@@ -882,17 +887,17 @@ function create(record = {}, deps = {}) {
   const stateStore = deps.state && typeof deps.state.read === 'function' ? deps.state : null;
   try {
     const st0 = stateStore ? stateStore.read() : {};
-    if (st0 && st0.gmailHistoryId) { mailbox.historyId = String(st0.gmailHistoryId); mailbox.mustWalk = false; for (const id of Array.isArray(st0.gmailChanged) ? st0.gmailChanged : []) mailbox.changed.add(String(id)); }
+    if (st0 && st0.gmailHistoryId) { mailbox.historyId = String(st0.gmailHistoryId); mailbox.mustWalk = !!st0.gmailWalkFrom; mailbox.walkFrom = st0.gmailWalkFrom ? String(st0.gmailWalkFrom) : null; for (const id of Array.isArray(st0.gmailChanged) ? st0.gmailChanged : []) mailbox.changed.add(String(id)); }
   } catch { /* an unreadable state is a fresh seed */ }
   let persistTimer = null, persisted = '';
   function persistCursor(soon = true) {
     if (!stateStore) return;
     const doIt = () => {
       persistTimer = null;
-      const next = JSON.stringify([mailbox.historyId, [...mailbox.changed].slice(0, 2000)]);
+      const next = JSON.stringify([mailbox.historyId, [...mailbox.changed].slice(0, 2000), mailbox.walkFrom]);
       if (next === persisted) return;
       persisted = next;
-      Promise.resolve(stateStore.write({ gmailHistoryId: mailbox.historyId, gmailChanged: [...mailbox.changed].slice(0, 2000) })).catch((e) => log.warn && log.warn(`[channels] gmail: the mailbox cursor could not be persisted: ${(e && e.message) || e}`));
+      Promise.resolve(stateStore.write({ gmailHistoryId: mailbox.historyId, gmailChanged: [...mailbox.changed].slice(0, 2000), gmailWalkFrom: mailbox.walkFrom })).catch((e) => log.warn && log.warn(`[channels] gmail: the mailbox cursor could not be persisted: ${(e && e.message) || e}`));
     };
     if (!soon) { if (persistTimer) { clearTimeout(persistTimer); persistTimer = null; } doIt(); return; }
     if (persistTimer) return;
@@ -1084,6 +1089,7 @@ function create(record = {}, deps = {}) {
       return mailbox;
     }
     let pageToken = null, pages = 0, newest = mailbox.historyId;
+    const from = mailbox.historyId;
     try {
       do {
         const q = new URLSearchParams({ startHistoryId: mailbox.historyId, historyTypes: 'messageAdded', maxResults: '500' });
@@ -1094,7 +1100,7 @@ function create(record = {}, deps = {}) {
         pageToken = h.nextPageToken ? String(h.nextPageToken) : null;
       } while (pageToken && ++pages < 20);
       mailbox.historyId = newest;
-      if (mailbox.changed.size > CHANGED_CAP) { mailbox.changed.clear(); mailbox.walked.clear(); mailbox.mustWalk = true; }
+      if (mailbox.changed.size > CHANGED_CAP) { mailbox.changed.clear(); mailbox.walked.clear(); mailbox.mustWalk = true; mailbox.walkFrom = mailbox.walkFrom || from; }
       persistCursor(false);
     } catch (e) {
       if (e instanceof ChannelError && e.code === 'not-found') {
@@ -1106,6 +1112,7 @@ function create(record = {}, deps = {}) {
         mailbox.changed.clear();
         mailbox.walked.clear();
         mailbox.mustWalk = true;
+        mailbox.walkFrom = mailbox.walkFrom || from;   // lane channel-feed-authority: the walk judges each thread against the LOST cursor
         persistCursor(false);
         return mailbox;
       }
@@ -1235,11 +1242,47 @@ function create(record = {}, deps = {}) {
     /** Threads under the include query. Titles come from ONE bounded batch
      *  of metadata reads per call; an untitled thread shows its snippet
      *  until its turn comes. */
+    /** lane channel-feed-authority: THE AUTHORITATIVE CHANGE FEED (`caps.changeFeed`) — the pass's ONE history.list (the
+     *  per-thread `history()` reads after it reuse its memo) → `changed` = every thread that gained a message since the
+     *  cursor. A changed thread the engine has not NAMED (a new thread, most often) is listed the way discovery lists it —
+     *  the head page of the listing's own query, newest first — so the feed never births a thread outside the query; one
+     *  the head page does not hold is dropped (the cold discovery walk is its net). `mustWalk` = the cursor was reseeded:
+     *  the engine walks the listing (above), never a read per thread. */
+    async changes() {
+      mailbox.at = 0;   // the feed's call IS the pass's sync
+      const mb = await syncMailbox();
+      const fresh = mb.mustWalk ? [] : [...mb.changed].filter((id) => !named(id));
+      let conversations = [];
+      if (fresh.length) {
+        const head = await this.listConversations({ limit: 100 });
+        const listed = new Set(head.conversations.map((c) => c.id));
+        conversations = head.conversations.filter((c) => fresh.includes(c.id));
+        let dropped = 0;
+        for (const id of fresh) if (!listed.has(id) && mb.changed.delete(id)) dropped++;
+        if (dropped) persistCursor();
+      }
+      return { changed: [...mb.changed], conversations, mustWalk: mb.mustWalk === true };
+    },
     async listConversations({ cursor = null, limit = 100 } = {}) {
       const p = new URLSearchParams({ q: query(), maxResults: String(Math.min(100, Math.max(1, Number(limit) || 100))) });
       if (cursor) p.set('pageToken', String(cursor));
       const d = await api(`/threads?${p}`, { what: 'gmail threads' });
       const items = (d.threads || []).filter((t) => t && t.id);
+      // lane channel-feed-authority: THE RESEED WALK (an expired cursor, a CHANGED_CAP overflow, a first connect) — threads.list
+      // answers each thread's historyId, so a thread is judged against the LOST cursor right here: newer ⇒ named changed (the
+      // feed's next pass reads it), else walked (nothing to read). No per-thread read rides the walk; a complete walk ends it.
+      if (!mailbox.mustWalk) mailbox.walkHead = false;
+      if (mailbox.mustWalk) {
+        for (const t of items) {
+          const id = String(t.id);
+          if (mailbox.walkFrom && t.historyId && Number(t.historyId) > Number(mailbox.walkFrom)) mailbox.changed.add(id);
+          else mailbox.walked.add(id);
+        }
+        // complete = from the listing's FIRST page to its last under this walk (a reseed mid-listing waits for the next walk)
+        if (!cursor) mailbox.walkHead = true;
+        if (!d.nextPageToken && mailbox.walkHead) { mailbox.mustWalk = false; mailbox.walkFrom = null; mailbox.walkHead = false; }
+        persistCursor();
+      }
       let budget = META_PER_LIST;
       const conversations = [];
       for (const t of items) {

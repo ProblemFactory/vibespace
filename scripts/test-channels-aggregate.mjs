@@ -157,6 +157,8 @@ function makeWorld(t0, { n = 873, hot = 50, warm = 200, perConv = 3, deep = [] }
  *  so two ACCOUNTS of the same kind read two different mailboxes. */
 /** lane lark-search-poll: the CHANGE FEED a scripted module may declare (scope null — the held-scope gate is test-channels-engine's) */
 const FEED_DECL = Object.freeze({ via: 'search', scope: null, option: null, pageSize: 30, pagesPerPass: 5, perMin: 10, maxWindowSec: 3600, catchUp: Object.freeze({ chatType: 'p2p', pagesMax: 20 }), describes: false, timeUnit: 'ms' });
+/** lane channel-feed-authority: an AUTHORITATIVE feed (Gmail's history.list shape) — `world.changed` is what the vendor's change log names. */
+const HISTORY_DECL = Object.freeze({ via: 'history', authority: 'authoritative', scope: null, pagesPerPass: 1, perMin: 60 });
 /** A message the scripted SEARCH hides (the `dropRate` share, by a stable hash of its id — never random). */
 const hiddenBySearch = (vid, rate) => { if (!(rate > 0)) return false; let h = 0x811c9dc5; for (let i = 0; i < vid.length; i++) { h ^= vid.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; } return (h % 10000) / 10000 < rate; };
 function worldModule(kind, worlds, { receive = 'poll', unitsPerHistory = 1, budgetDefault = 100000, budgetSettingKey = null, live = null, pace = null, vendorName = null, feed = false } = {}) {
@@ -171,7 +173,7 @@ function worldModule(kind, worlds, { receive = 'poll', unitsPerHistory = 1, budg
     budget: { unit: unitsPerHistory > 1 ? 'quota-unit' : 'request', default: budgetDefault, settingKey: budgetSettingKey, metered: true },
     // lane R5: a scripted module may declare the per-second pace (drain rule 18) and the vendor's name
     ...(pace ? { pace } : {}), ...(vendorName ? { vendorName } : {}),
-    ...(feed ? { changeFeed: FEED_DECL } : {}),
+    ...(feed === 'history' ? { changeFeed: HISTORY_DECL } : feed ? { changeFeed: FEED_DECL } : {}),
   };
   return {
     kind, caps: c,
@@ -237,7 +239,11 @@ function worldModule(kind, worlds, { receive = 'poll', unitsPerHistory = 1, budg
         live: receive === 'push' ? live : undefined,
         // lane lark-search-poll: THE SCRIPTED SEARCH over the world's own records — a message is searchable `lagMs` after
         // its instant, `dropRate` of them never (a stable hash), newest first, 30 a page, an offset token
-        changes: feed ? async ({ from, to, pageToken = null, chatType = null, pageSize = 30 } = {}) => {
+        changes: feed === 'history' ? async () => {
+          meter(2); world.calls.changes = (world.calls.changes || 0) + 1;
+          const ids = [...(world.changed || [])]; world.changed = new Set();
+          return { changed: ids, conversations: [], mustWalk: false };
+        } : feed ? async ({ from, to, pageToken = null, chatType = null, pageSize = 30 } = {}) => {
           meter(1); world.calls.changes = (world.calls.changes || 0) + 1; (world.calls.feedAt = world.calls.feedAt || []).push(world.clock ? world.clock() : 0);
           const f = world.feed || {};
           const nowT = world.clock ? world.clock() : Date.now();
@@ -2016,7 +2022,7 @@ console.log('⑥g the request set under attack: a storm cannot starve the timer,
     }
     // (8b) control: the driver without the at-fetch broadcast — the key is named only by the pass's end broadcast
     {
-      const EARLY = "          if (act.waiters.length) { notify([key], { full: false }); early.add(key); }   // the broadcast naming the key goes out BEFORE the answer: the window repaints with the toast, not a pass later\n";
+      const EARLY = "          if (act.waiters.length) sayEarly(key);   // the broadcast naming the key goes out BEFORE the answer: the window repaints with the toast, not a pass later (paced: VIEW_PACE_MS)\n";
       const cwLate = closedWorld(M6h, 'bcast-at-end', { engine: [[EARLY, '']] });
       ok(cwLate.setup, 'CONTROL setup: the driver without the at-fetch broadcast (r8\'s pass-end-only notify) is reconstructed', cwLate.missing);
       const events = [];
@@ -2583,7 +2589,8 @@ console.log('⑪ controls: the old discovery bound, a scheduler that polls every
   ok(seen === 500, `CONTROL: the old bound discovers only 500 of 873 however many passes run (${seen}) — the leg above would go red`);
   ec.stop();
   // (b) a scheduler that makes EVERY conversation due each pass
-  const allDue = esrc.replace('      if (all || named) { out.push(', '      if (true) { out.push(');
+  // lane channel-feed-authority: the due rule is `dueRow` behind the due INDEX — the copy scans every row and makes each due
+  const allDue = esrc.replace('    if (all || named) { out.push(', '    if (true) { out.push(').replace('    if (all) {\n      for (const en of Object.values(store.index.live()))', '    if (true) {\n      for (const en of Object.values(store.index.live()))');
   ok(allDue !== esrc, 'CONTROL setup: a poll-everything scheduler is reconstructed');
   const E2 = M.load('src/server/channels-engine.js', allDue, 'alldue');
   const Wd = makeWorld(clock, { n: 300, hot: 20, warm: 30 });
@@ -2655,6 +2662,106 @@ console.log('⑪ controls: the old discovery bound, a scheduler that polls every
     ok(realOwed && !memOwed, `CONTROL: owed marks kept in memory only — the restart loses the hit (real ${realOwed}, in-memory copy ${memOwed}); the durable mark is what finds it`);
   }
   for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 2 })) ok(r.pass, r.name, r.detail);
+}
+
+console.log("㉑ lane channel-feed-authority (OWNER'S LAW 2026-10-06: fetch the updates, never ask each conversation): an AUTHORITATIVE feed replaces every per-row timer; the due list is an index");
+{
+  const Mf = mutantCopies('chan-agg-feedauth', REPO);
+  const CAPS_SRC = fs.readFileSync(path.join(REPO, 'src/channel-caps.js'), 'utf-8');
+  const capsReq = "require('../channel-caps.js')";
+  const swap = (src, a, b, what) => { if (!src.includes(a)) throw new Error(`control needle gone: ${what}`); return src.split(a).join(b); };
+  /** an engine copy over a patched channel-caps (every family requires it: replaceAll) */
+  const engOverCaps = (capsSrc, tag) => Mf.load('src/server/channels-engine.js', swap(ENGINE_SRC, capsReq, `require(${JSON.stringify(Mf.write('src/channel-caps.js', capsSrc, tag))})`, tag), tag);
+  const FEED_ONLY_NEEDLE = "  if (l.pollCadence === 'feed-only') {\n    if (watched) return { seconds: clamp(T.hotSec), tier, paused: false, source: 'tier' };\n";
+  // ONE world of n rows behind the authoritative feed: discovered (no row is read — none is named), then ONE timer pass a
+  // minute later with `changed` names. → the pass's vendor calls and wall time.
+  const runHist = async (mod, n, { changed = 20, watchId = null, label = 'real' } = {}) => {
+    const t00 = clock;
+    const Wh = makeWorld(clock, { n, hot: Math.min(50, n), warm: Math.min(200, n) });
+    Wh.calls.changes = 0;
+    const kh = worldModule('hist', Wh, { feed: 'history', budgetDefault: 1e9 });
+    const dirH = path.join(ROOT, `hist-${label}-${n}`);
+    seedAccounts(dirH, [['hist', 'hist']]);
+    const regH = CH.createChannelRegistry(); regH.register(kh);
+    const eh = mod.create({ dataDir: dirH, registry: regH, env: {}, now, broadcast: () => {}, serverSetting: () => undefined, liveSessions: () => SESS, deliver: null, log: quiet });
+    try {
+      for (let i = 0; i < 12 && Object.keys(eh.store.index.live()).length < n; i++) { clock += 1000; await eh.pass('hist'); }
+      const rows = Object.keys(eh.store.index.live()).length;
+      const setupHist = historyCalls(Wh);
+      if (watchId) { await eh.watch('hist', watchId); clock += 1000; await eh.pass('hist'); }   // the watch's own first read is spent here: what follows is the hot timer alone
+      clock += 60e3;
+      const ids = [...Wh.convs.keys()];
+      Wh.changed = new Set(ids.filter((_, i) => i % Math.max(1, Math.floor(n / changed)) === 3).slice(0, changed));
+      const named = [...Wh.changed];
+      Wh.calls.history = new Map(); Wh.calls.list = 0; Wh.calls.changes = 0;
+      const dueBefore = eh.dueListOf('hist').length;
+      const t0 = performance.now();
+      await eh.pass('hist');
+      const ms = performance.now() - t0;
+      const fetched = [...Wh.calls.history.keys()];
+      return { rows, setupHist, dueBefore, ms, calls: Wh.calls.changes + historyCalls(Wh) + Wh.calls.list, feed: Wh.calls.changes, hist: historyCalls(Wh), list: Wh.calls.list, named, fetched };
+    } finally { eh.stop(); clock = t00 + 3600e3; }
+  };
+  const legs = [];
+  for (const n of [1000, 10000, 90000]) legs.push([n, await runHist(ENG, n)]);
+  for (const [n, r] of legs) console.log(`    ${n} rows: a pass = ${r.calls} vendor calls (feed ${r.feed} + named reads ${r.hist} + listing ${r.list}) · ${r.ms.toFixed(1)} ms · discovery read ${r.setupHist} rows`);
+  ok(legs.every(([n, r]) => r.rows === n), 'every world is discovered whole (1 000 / 10 000 / 90 000 rows)', legs.map(([n, r]) => `${n}:${r.rows}`).join(' '));
+  ok(legs.every(([, r]) => r.setupHist === 0), 'discovery names rows and reads NONE of them (no per-row read rides the walk under the authoritative feed)', legs.map(([, r]) => r.setupHist).join(' '));
+  ok(legs.every(([, r]) => r.calls === 21 && r.feed === 1 && r.hist === 20 && r.list === 0), "OWNER'S LAW: a pass = 1 feed call + the 20 named rows = 21 vendor calls at 1 000, 10 000 AND 90 000 rows", legs.map(([n, r]) => `${n}:${r.calls}`).join(' '));
+  ok(legs.every(([, r]) => r.fetched.length === 20 && r.fetched.every((id) => r.named.includes(id))), 'the reads are EXACTLY the rows the feed named — no other row is asked whether it changed');
+  const big = legs[2][1];
+  // the pass's remaining O(rows) cost is the scheduler VIEW (`schedulerScan`, the card's census — lane channel-drain-scale paces it), not the due path
+  console.log(`    the 90 000-row pass: ${big.ms.toFixed(1)} ms wall (the scheduler card's census included); due rows by the clock before it: ${big.dueBefore}`);
+  ok(legs.every(([, r]) => r.dueBefore === 0), 'under the carrying authoritative feed the clock makes NO row due (feed-only), at every size', legs.map(([n, r]) => `${n}:${r.dueBefore}`).join(' '));
+  // the open window: a watched row keeps its hot refresh (the owner looking) — the feed names nothing, it is read
+  const watched = 'c0007';
+  const rw = await runHist(ENG, 1000, { changed: 0, watchId: watched, label: 'watch' });
+  ok(rw.fetched.includes(watched) && rw.fetched.length === 1 && rw.feed === 1, `an OPEN window's row is refreshed though the feed named nothing (reads: ${rw.fetched.join(',') || 'none'})`);
+  // CONTROL ① the per-row timer restored (feed-only answers the tiers again) ⇒ thousands due
+  const timerSrc = swap(CAPS_SRC, FEED_ONLY_NEEDLE, "  if (false) {\n", 'feed-only branch');
+  const rt = await runHist(engOverCaps(timerSrc, 'row-timer'), 10000, { label: 'timer' });
+  // (int227: a born row's readAt is its listing instant — 60 s after discovery the restored timer makes exactly the HOT rows
+  // due (the 30 s tier; the world's 50), not every row: the control asserts that, against the real engine's 0 due / 21 calls.)
+  ok(rt.dueBefore >= Math.min(50, 10000) && rt.calls > 21 && legs[1][1].dueBefore === 0 && legs[1][1].calls === 21, `CONTROL: the per-row timer restored ⇒ ${rt.dueBefore} of 10 000 rows due by the clock 60 s after discovery (the hot rows' 30 s tier), ${rt.calls} calls in the pass (the real one: ${legs[1][1].dueBefore} due, ${legs[1][1].calls} calls)`);
+  // CONTROL ④ the watched row's refresh removed ⇒ the open window never refreshes
+  const noWatchSrc = swap(CAPS_SRC, FEED_ONLY_NEEDLE, "  if (l.pollCadence === 'feed-only') {\n", 'watched hot refresh');
+  const rnw = await runHist(engOverCaps(noWatchSrc, 'no-watch'), 1000, { changed: 0, watchId: watched, label: 'nowatch' });
+  ok(!rnw.fetched.includes(watched) && rw.fetched.includes(watched), "CONTROL: the watched row's hot refresh removed ⇒ the open window is never refreshed (real: read; copy: not)");
+  // CONTROL ③ a MEASURED feed treated as authoritative ⇒ Lark's relaxed net is gone (PURE: channel-caps)
+  const measured = { ...fake.fakePoll.caps, changeFeed: { via: 'search', scope: null, pageSize: 30, pagesPerPass: 5, perMin: 10, maxWindowSec: 3600, describes: false, timeUnit: 'ms' } };
+  const feedRec = { feed: { mode: 'carrying', lastOkAt: clock - 1000 } };
+  const cadOf = (C) => C.cadenceFor(measured, C.laneState(measured, feedRec, {}, clock), { lastAt: clock - 3 * DAY }, clock, {}).seconds;
+  const C2 = Mf.load('src/channel-caps.js', swap(CAPS_SRC, "feedAuthoritative(c) ? 'feed-only' : 'feed'", "'feed-only'", 'authority gate'), 'measured-as-authoritative');
+  ok(cadOf(caps) === 900 && cadOf(C2) === 0, `CONTROL: a measured (Lark) feed treated as authoritative ⇒ its row loses the safety net (real ${cadOf(caps)} s, copy ${cadOf(C2)} s)`);
+  // THE DUE INDEX: a tier account (no feed), every row polled just now but `due` of them ⇒ dueList reads the head
+  const meter = async (mod, n, due, label) => {
+    const Wd = makeWorld(clock, { n, hot: 0, warm: 0 });
+    const kd = worldModule('due', Wd, { budgetDefault: 1e9 });
+    const dirD = path.join(ROOT, `due-${label}-${n}-${due}`);
+    seedAccounts(dirD, [['due', 'due']]);
+    const regD = CH.createChannelRegistry(); regD.register(kd);
+    const ed = mod.create({ dataDir: dirD, registry: regD, env: {}, now, broadcast: () => {}, serverSetting: () => undefined, liveSessions: () => SESS, deliver: null, log: quiet });
+    try {
+      const ids = [...Wd.convs.keys()];
+      await ed.store.index.update(() => { for (const id of ids) { const en = ed.store.index.entry('due', id); en.title = id; en.kind = 'group'; en.lastAt = clock - 3 * DAY; en.listedAt = clock; } });
+      ids.forEach((id, i) => ed.store.stamps.set(`due/${id}`, { lastPollAt: i % Math.floor(n / due) === 0 && i / Math.floor(n / due) < due ? clock - 2 * HOUR : clock }));
+      const got = ed.dueListOf('due').length;
+      const ts = [];
+      for (let i = 0; i < 15; i++) { const t0 = performance.now(); ed.dueListOf('due'); ts.push(performance.now() - t0); }
+      ts.sort((a, b) => a - b);
+      return { got, ms: ts[7] };
+    } finally { ed.stop(); }
+  };
+  const m10 = await meter(ENG, 10000, 20, 'real'), m90 = await meter(ENG, 90000, 20, 'real'), m90d = await meter(ENG, 90000, 2000, 'real');
+  console.log(`    dueList (median of 15): 10 000 rows · 20 due ${m10.ms.toFixed(3)} ms · 90 000 rows · 20 due ${m90.ms.toFixed(3)} ms · 90 000 rows · 2 000 due ${m90d.ms.toFixed(3)} ms`);
+  ok(m10.got === 20 && m90.got === 20 && m90d.got === 2000, `the index answers the due rows exactly (${m10.got} / ${m90.got} / ${m90d.got})`);
+  ok(m90.ms < 2, `90 000 rows, 20 due ⇒ dueList < 2 ms (${m90.ms.toFixed(3)} ms)`);
+  ok(m90.ms < 3 * m10.ms + 0.3 && m90d.ms > m90.ms, `the meter is linear in DUE, not rows (9× the rows: ${(m90.ms / m10.ms).toFixed(2)}×; 100× the due: ${(m90d.ms / m90.ms).toFixed(1)}×)`);
+  // CONTROL ② the scan restored ⇒ the meter follows the rows
+  const scanEng = Mf.load('src/server/channels-engine.js', swap(ENGINE_SRC, '    if (all) {\n      for (const en of Object.values(store.index.live())) if (en && en.adapterId === rec.id) dueRow(rec, e, en, t, T, out, true);', '    if (true) {\n      for (const en of Object.values(store.index.live())) if (en && en.adapterId === rec.id) dueRow(rec, e, en, t, T, out, all);', 'indexed dueList'), 'due-scan');
+  const s10 = await meter(scanEng, 10000, 20, 'scan'), s90 = await meter(scanEng, 90000, 20, 'scan');
+  ok(s90.got === 20 && !(s90.ms < 2 && s90.ms < 3 * s10.ms + 0.3), `CONTROL: the scan restored ⇒ the meter follows the ROWS (90 000 rows · 20 due: ${s90.ms.toFixed(2)} ms, ${(s90.ms / s10.ms).toFixed(1)}× the 10 000-row figure)`);
+  for (const r of copiesCensus(Mf.files, Mf.dir, REPO, { minCopies: 2 })) ok(r.pass, r.name, r.detail);
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

@@ -4288,5 +4288,101 @@ console.log('§80 built-in plugins: one list, one file each, no id branch in the
   const r = ctl.map(([n, files, ex, wantRed]) => ({ n, ok: doc.length > 0 && (nameCensus(files, D, ex).length > 0) === wantRed, wantRed }));
   ok(r.every((x) => x.ok), `public repo hygiene CONTROLS: ${r.map((x) => `${x.n} (${x.ok ? (x.wantRed ? 'RED' : 'green') : 'WRONG'})`).join(', ')}`);
 }
+// §81 A FIXTURE NEVER NAMES A FIXED LOOPBACK ENDPOINT (lane fixture-ports, B-b6cd, 2026-10-06 — mirror-green-220). The
+// fake agent-browser of test-browser-ephemeral answered `get cdp-url` with the FIXED ws://127.0.0.1:19888 as its "dead"
+// browser; on the dev box another project's workbench listened there and answered 404, the product read "answered", and
+// the local heavy stayed green while the Actions runner was red. A port is dead only when the kernel just released it:
+// scratch.mjs deadPort() / deadPorts(n) / deadUrl(). §6 (test-ci-gate) already catches a literal that is LISTENED on or
+// handed over as PORT; this census catches the rest — every loopback endpoint (127.0.0.1 / localhost / 0.0.0.0 / [::1])
+// whose port is a LITERAL in a string, template or regex token of scripts/test-*.mjs + scripts/*-stub*.mjs (acorn tokens — a
+// comment is never one), and a `host:${NAME}` / `'host:' + NAME` whose NAME the file binds to a number literal (the
+// census follows the variable; a NAME from deadPort / freePort / listen(0) is no hit). Each hit is EXEMPT by a row below
+// (data a pure function reads, or a port the product pins by contract) or RED. A row that covers no hit is red too.
+console.log('§81 no suite names a fixed loopback endpoint (scratch.mjs deadPort / listen(0)) — the census table:');
+{
+  const req81 = (await import('node:module')).createRequire(import.meta.url);
+  // a hit = a loopback endpoint whose port is a LITERAL: in a string / template token (acorn — a comment is never one), or
+  // a `host:${NAME}` / `'host:' + NAME` whose NAME this file binds to a number literal (the census follows the variable)
+  const HOST = '(?:127\\.0\\.0\\.1|localhost|0\\.0\\.0\\.0|\\[::1\\])';
+  const LIT = new RegExp(`${HOST}:(\\d{2,5})(?!\\d)`, 'g'), TAIL = new RegExp(`${HOST}:$`);
+  const endpointHits = (src) => {
+    const acorn = req81('acorn'), T = acorn.tokTypes, hits = [];
+    let toks; try { toks = [...acorn.tokenizer(src, { ecmaVersion: 'latest', allowHashBang: true, sourceType: 'module', allowAwaitOutsideFunction: true, locations: true })]; } catch (e) { return [{ port: 0, line: 0, via: 'UNPARSED ' + e.message }]; }
+    const numOf = (name) => { const m = new RegExp(`\\b(?:const|let|var)\\s+${name.replace(/\$/g, '\\$')}\\s*=\\s*(\\d{2,5})\\b`).exec(src); return m ? Number(m[1]) : null; };
+    toks.forEach((t, i) => {
+      if (t.type !== T.string && t.type !== T.template && t.type !== T.regexp) return;
+      // a regex token's pattern reads with its escapes dropped (`127\\.0\\.0\\.1:19777` — test-browser-human's missed shape)
+      const v = t.type === T.regexp ? t.value.pattern.replace(/\\(.)/g, '$1') : String(t.value);
+      for (const m of v.matchAll(LIT)) hits.push({ port: Number(m[1]), line: t.loc.start.line, via: 'literal' });
+      if (!TAIL.test(v)) return;
+      const a = toks[i + 1], b = toks[i + 2];
+      const viaName = a && b && b.type === T.name && (a.type === T.dollarBraceL || (a.type === T.plusMin && a.value === '+')) ? b.value : null;
+      const n = viaName && numOf(viaName);
+      if (n) hits.push({ port: n, line: t.loc.start.line, via: 'name ' + viaName });
+    });
+    return hits;
+  };
+  const PURE = 'text a pure function reads or builds — nothing dials it';
+  const EXEMPT = {
+    'test-agent-env.mjs': [[3456], 'an env object the allowlist filter keeps — nothing dials it'],
+    'test-artifacts-services.mjs': [[3000, 8100, 8200, 8766, 41002], 'service-link URLs ' + PURE],
+    'test-browser-ephemeral.mjs': [[3128], 'a proxy VALUE written into a config and read back'],
+    'test-browser-housekeeping.mjs': [[19555], 'an in-process lease stub\'s env, compared as text — the fake CLI dials nothing'],
+    'test-browser-human.mjs': [[3000, 8080], 'the address-normalizer table — ' + PURE],
+    'test-browser-live.mjs': [[39927], 'originHeaderFor(port) — ' + PURE],
+    'test-browser-mediation.mjs': [[4321, 9222], 'the mediated-URL / answer rewriters — ' + PURE],
+    'test-browser-pin.mjs': [[9333], 'attachedEnvFor — ' + PURE],
+    'test-browser-profiles.mjs': [[7890], 'a proxy VALUE written into a config and read back'],
+    'test-browser-propose.mjs': [[5173], 'a blocked page\'s URL posted to the route as data'],
+    'test-browser-providers.mjs': [[4444, 5555, 9222, 19222], 'attachedEnvFor / forwardedCdpUrl / cdpPortOf — ' + PURE],
+    'test-browser-share-model.mjs': [[43181], 'a DevToolsActivePort file\'s text — ' + PURE],
+    'test-browser-site-reset.mjs': [[8080], 'a recorded journey\'s page host — ' + PURE],
+    'test-browser-stuck.mjs': [[8080], 'a verdict sentence\'s text'],
+    'test-browser-switch.mjs': [[1234], 'navFacts parses CLI output text'],
+    'test-browser-verbs.mjs': [[3000, 3128, 4444], 'the verb classifier table, a proxy config VALUE, a stub answer\'s env compared as text'],
+    'test-channels-egress.mjs': [[3456], 'an egress-census input file\'s text'],
+    'test-channels-slack-shape.mjs': [[3000], 'the redirect-URL classifier table — ' + PURE],
+    'test-desktop-apps.mjs': [[3456, 8080], 'the browser argv builder / URL validator — ' + PURE],
+    'test-desktop-display.mjs': [[4321], 'the xpra argv builder — ' + PURE],
+    'test-dial-facts.mjs': [[3456, 41725], 'dialAddressCandidates from an origin — ' + PURE],
+    'test-integration-registry.mjs': [[17865], 'CONTRACT: the Lark callback URL the product registers (src/channels/lark/manifest.js)'],
+    'test-mounts-dialog-extract.mjs': [[53682], 'CONTRACT: rclone\'s OAuth loopback port, as the dialog prints it'],
+    'test-port-forward.mjs': [[22, 3000, 5173, 8080, 49999], 'ss / lsof output text the sweep parses'],
+    'test-slack-relay.mjs': [[3000], 'the redirect-URL classifier table — ' + PURE],
+  };
+  const judge81 = (files, exempt) => {
+    const red = [], rows = [], used = new Set();
+    for (const [f, src] of files) {
+      const hits = endpointHits(src); if (!hits.length) continue;
+      const ex = exempt[f], ports = [...new Set(hits.map((h) => h.port))];
+      const bad = hits.filter((h) => !(ex && ex[0].includes(h.port)));
+      for (const p of ports) if (ex && ex[0].includes(p)) used.add(f + ':' + p);
+      if (bad.length) red.push(`${f}: ${bad.map((h) => `${h.port}@${h.line}${h.via === 'literal' ? '' : ' (' + h.via + ')'}`).join(' ')}`);
+      rows.push(`${f.padEnd(34)} ${ports.join(',').padEnd(26)} ${bad.length ? 'RED' : 'EXEMPT — ' + ex[1]}`);
+    }
+    const dead = Object.entries(exempt).flatMap(([f, [ps]]) => ps.filter((p) => !used.has(f + ':' + p)).map((p) => `${f}:${p}`));
+    return { red, rows, dead };
+  };
+  const files81 = fs.readdirSync(path.join(REPO, 'scripts')).filter((f) => /^test-.*\.mjs$/.test(f) || /-stub.*\.mjs$/.test(f)).sort()
+    .map((f) => [f, fs.readFileSync(path.join(REPO, 'scripts', f), 'utf8')]);
+  const j81 = judge81(files81, EXEMPT);
+  for (const r of j81.rows) console.log('    ' + r);
+  ok(j81.red.length === 0, `§81 ${files81.length} suites: ${j81.rows.length} name a literal loopback endpoint, all EXEMPT rows (${Object.keys(EXEMPT).length}) — no fixed fixture endpoint${j81.red.length ? ' — RED (use scratch.mjs deadPort() / listen(0)):\n      ' + j81.red.join('\n      ') : ''}`);
+  ok(j81.dead.length === 0, `§81 every EXEMPT row covers a hit (a dead row would hide a new fixed port)${j81.dead.length ? ' — DEAD: ' + j81.dead.join(' ') : ''}`);
+  // CONTROLS: the incident's shape planted back into the real suite, a literal through a name / a concatenation, a
+  // dead port and a comment that must stay quiet, a dead EXEMPT row
+  const eph = files81.find(([f]) => f === 'test-browser-ephemeral.mjs')[1];
+  const planted = eph.replace(/\$\{DEAD_CDP3\}/g, '19888');
+  const c = (name, src) => judge81([[name, src]], EXEMPT).red.length > 0;
+  const r81 = [
+    ['19888 planted back into test-browser-ephemeral', planted !== eph && c('test-browser-ephemeral.mjs', planted), true],
+    ['a regex literal', c('test-x.mjs', 'ok(/^ws:\\/\\/127\\.0\\.0\\.1' + ':19777\\//.test(u));\n'), true],
+    ['a port through a name', c('test-x.mjs', 'const P = 19888;\nconst u = `ws://127.0.0.1:${P}/devtools`;\n'), true],
+    ['a concatenated name', c('test-x-stub.mjs', "const PORT2 = 41999;\nconst u = 'http://localhost:' + PORT2 + '/x';\n"), true],
+    ['a deadPort() and a comment', c('test-x.mjs', "const P = await deadPort(); // ws://127.0.0.1' + ':19888 was alive\nconst u = `ws://127.0.0.1:${P}/x`;\n"), false],
+    ['a dead EXEMPT row', judge81([['test-x.mjs', "const u = 'http://127.0.0.1" + ":3000/';\n"]], { 'test-x.mjs': [[3000, 4000], 'x'] }).dead.join() === 'test-x.mjs:4000', true],
+  ];
+  ok(r81.every(([, got, want]) => got === want), `§81 CONTROLS: ${r81.map(([n, got, want]) => `${n} (${got === want ? (want ? 'RED' : 'quiet') : 'WRONG'})`).join(', ')}`);
+}
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

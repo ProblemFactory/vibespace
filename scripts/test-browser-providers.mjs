@@ -39,7 +39,8 @@ import http from 'node:http';
 import path from 'node:path';
 import { spawn, execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch } from './scratch.mjs';
+import { scratch, deadPort } from './scratch.mjs';
+const DEAD_CDP = await deadPort(); // the fake's cdp-url: a port the kernel just released, never a fixed one (§81)
 const require = createRequire(import.meta.url);
 const REPO = new URL('..', import.meta.url).pathname;
 const B = require('../src/browser-profiles.js');
@@ -83,7 +84,7 @@ const [a, b] = argv;
 if (a === '--version') { console.log('agent-browser 0.38.0'); process.exit(0); }
 if (a === 'session' && b === 'info') { const s = read(); const act = !!(s && alive(s.pid)); out({ success: true, data: { active: act, namespace: ns, pid: act ? s.pid : null, session: process.env.AGENT_BROWSER_SESSION || null, socketDir: path.join(st, ns, 'run'), version: act ? '0.38.0' : null } }); process.exit(0); }
 if (a === 'open') { let s = read(); if (!(s && alive(s.pid))) { const c = spawn('sleep', ['600'], { detached: true, stdio: 'ignore' }); c.unref(); s = { pid: c.pid, profile: process.env.AGENT_BROWSER_PROFILE || null, idle: process.env.AGENT_BROWSER_IDLE_TIMEOUT_MS || null, cdp: process.env.AGENT_BROWSER_CDP || null }; fs.writeFileSync(f, JSON.stringify(s)); fs.appendFileSync(path.join(st, 'launches.log'), JSON.stringify({ ns, ...s, session: process.env.AGENT_BROWSER_SESSION || null }) + '\\n'); } out({ success: true, data: { url: b } }); process.exit(0); }
-if (a === 'get' && b === 'cdp-url') { const s = read(); if (!(s && alive(s.pid))) { out({ success: false, error: 'fake: no browser' }); process.exit(1); } out({ success: true, data: { cdpUrl: 'ws://127.0.0.1:' + (process.env.FAKE_AB_CDP_PORT || '19222') + '/devtools/browser/fake-' + ns } }); process.exit(0); }
+if (a === 'get' && b === 'cdp-url') { const s = read(); if (!(s && alive(s.pid))) { out({ success: false, error: 'fake: no browser' }); process.exit(1); } out({ success: true, data: { cdpUrl: 'ws://127.0.0.1:' + (process.env.FAKE_AB_CDP_PORT || '${DEAD_CDP}') + '/devtools/browser/fake-' + ns } }); process.exit(0); }
 if (a === 'close' && b === '--all') { const s = read(); let closed = 0; if (s && alive(s.pid)) { try { process.kill(s.pid, 'SIGKILL'); closed = 1; } catch { } } try { fs.unlinkSync(f); } catch { } fs.appendFileSync(path.join(st, 'closes.log'), JSON.stringify({ ns, session: process.env.AGENT_BROWSER_SESSION || null, closed }) + '\\n'); out({ success: true, data: { closed, failed: [], sessions: [] } }); process.exit(0); }
 out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.slice(2).join(' ') }); process.exit(1);
 `, { mode: 0o755 });
@@ -208,12 +209,12 @@ const localEnv = { PATH: PATH_ENV, HOME, FAKE_AB_STATE: AB_STATE };
   const st0 = await S.runBrowserServeOp(bs, 'status', { profileId: id });
   ok(st0.ok && st0.active === false && st0.exists === false && st0.dir === path.join(HOME, '.agent-browser', 'vs-' + id), 'status before start: inactive, the directory named but not yet made');
   const s1 = await S.runBrowserServeOp(bs, 'start', { profileId: id, idleMs: 0 });
-  ok(s1.ok && s1.active && Number.isInteger(s1.pid) && s1.starttime != null && s1.cdpUrl === `ws://127.0.0.1:19222/devtools/browser/fake-vs-${id}` && s1.cdpPort === 19222 && s1.dir === st0.dir, `start: pid ${s1.pid} + starttime, the machine's own loopback cdp url + its port, the dir it composed`);
+  ok(s1.ok && s1.active && Number.isInteger(s1.pid) && s1.starttime != null && s1.cdpUrl === `ws://127.0.0.1:${DEAD_CDP}/devtools/browser/fake-vs-${id}` && s1.cdpPort === DEAD_CDP && s1.dir === st0.dir, `start: pid ${s1.pid} + starttime, the machine's own loopback cdp url + its port, the dir it composed`);
   ok((fs.statSync(s1.dir).mode & 0o777) === 0o700 && launches().some((l) => l.ns === 'vs-' + id && l.profile === s1.dir && l.idle === '0'), 'the directory is 0700 and the launch used it with the CLI timeout OFF');
   const s2 = await S.runBrowserServeOp(bs, 'start', { profileId: id });
   ok(s2.ok && s2.pid === s1.pid && launches().filter((l) => l.ns === 'vs-' + id).length === 1, 'a second start reuses the live daemon (one launch)');
   const cu = await S.runBrowserServeOp(bs, 'cdp-url', { profileId: id });
-  ok(cu.ok && cu.port === 19222 && cu.url === s1.cdpUrl, 'cdp-url answers the same url + port');
+  ok(cu.ok && cu.port === DEAD_CDP && cu.url === s1.cdpUrl, 'cdp-url answers the same url + port');
   const st1 = await S.runBrowserServeOp(bs, 'status', { profileId: id });
   ok(st1.ok && st1.active && st1.pid === s1.pid && st1.starttime === s1.starttime, 'status after start: active with the same identity');
   const sp = await S.runBrowserServeOp(bs, 'stop', { profileId: id });
@@ -233,11 +234,11 @@ console.log('— ③ a real agentd answers browser-serve; an old daemon is never
   ok(v.ok && v.version === '0.38.0', `the op answers over the mux (version ${v.version}) — reply routed by its own op`);
   const id = 'bp-0b0b0b0b';
   const s1 = await dmReal.browserServe('start', { profileId: id });
-  ok(s1.ok && s1.active && Number.isInteger(s1.pid) && s1.cdpPort === 19222 && s1.dir === path.join(HOME, '.agent-browser', 'vs-' + id), `start through the daemon: pid ${s1.pid}, the daemon composed the dir under ITS home`);
+  ok(s1.ok && s1.active && Number.isInteger(s1.pid) && s1.cdpPort === DEAD_CDP && s1.dir === path.join(HOME, '.agent-browser', 'vs-' + id), `start through the daemon: pid ${s1.pid}, the daemon composed the dir under ITS home`);
   const st = await dmReal.browserServe('status', { profileId: id });
   ok(st.ok && st.active && st.pid === s1.pid, 'status through the daemon agrees');
   const cu = await dmReal.browserServe('cdp-url', { profileId: id });
-  ok(cu.ok && cu.port === 19222, 'cdp-url through the daemon');
+  ok(cu.ok && cu.port === DEAD_CDP, 'cdp-url through the daemon');
   const sp = await dmReal.browserServe('stop', { profileId: id });
   ok(sp.ok && sp.closed === 1, 'stop through the daemon');
   // the op never throws across the wire (the daemon relays the runner's own

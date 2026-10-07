@@ -30,8 +30,10 @@
  *   pass      null between passes, else (written by open / turn / apply only):
  *             { origin: 'timer'|'kick'|'request', force, backoff (the pass
  *               runs inside a vendor back-off), timerWork, turnPending,
- *               due: [{ key, dueAt }] (the timer's PENDING rows, fetch order),
- *               fetchedAt: { key: at } (this pass's fetch instants),
+ *               due: the DUE QUEUE of the timer's PENDING rows { key, dueAt }
+ *                 in fetch order (persistent — `dueRows(pass)` lists it),
+ *               fetched: the FETCH LOG of this pass's fetch instants (an
+ *                 append-only log a snapshot sees `n` entries of; `fetchedAt`),
  *               inflight: null|{ type, key }, last: null|'request'|'rider'|
  *               'plain' (the class of the previous fetch), streak (request-
  *               class fetches since the last due-row fetch), calls, fetches
@@ -311,6 +313,64 @@ function paced(s, base, act) {
   return { ...base, type: 'wait', ms, next: act.type, key: act.key || null };   // THE PACE
 }
 
+// ── THE DUE QUEUE + THE FETCH LOG (lane channel-drain-scale, 2026-10-06 — a 89 000-row mailbox blocked the loop 18 s in
+// every 20: `itemsOf` rebuilt every due row on every `next`, `apply` copied the due list and `fetchedAt` on every
+// fetch — O(due) per step, O(due²) per pass). A pass is O(due + steps · requests): the structures below are
+// PERSISTENT — a step never mutates the snapshot it was handed, it returns a new one sharing what did not change.
+/** The pending due rows: `rows` (frozen, in queue order) + `at` (key → index, built with them, never written after)
+ *  shared by every snapshot until a merge ADDS a key (the one rebuild: O(due + rows) — the timer's turn, discovery, a
+ *  feed page, a kick's new hint); `head` = rows before it are consumed; `gone` = keys left out of order at an index ≥
+ *  head (a rider, a plain row fetched while a rider stood ahead of it — at most the waiters' keys); `size` = pending. */
+function dqOf(list) {
+  const rows = [];
+  const at = new Map();
+  for (const d of list) { if (at.has(d.key)) continue; at.set(d.key, rows.length); rows.push(Object.freeze({ key: d.key, dueAt: d.dueAt })); }
+  return Object.freeze({ rows: Object.freeze(rows), at, head: 0, gone: NO_KEYS, size: rows.length });
+}
+const NO_KEYS = Object.freeze(new Set());
+const DQ_EMPTY = dqOf([]);
+/** Is `key` a pending due row? O(1). */
+function dqHas(q, key) { const i = q.at.get(key); return i !== undefined && i >= q.head && !q.gone.has(key); }
+/** The pending rows from the head, in order (a generator: a caller that stops early pays for what it read). */
+function* dqIter(q) { for (let i = q.head; i < q.rows.length; i++) { const d = q.rows[i]; if (!q.gone.has(d.key)) yield d; } }
+/** Every pending row as a list — O(due): a merge's rebuild, and the gate's oracle. */
+function dqRows(q) { return [...dqIter(q)]; }
+/** The queue without `key` (its fetch began): the head moves past it, or it is `gone` — O(1 + gone). */
+function dqDrop(q, key) {
+  if (!dqHas(q, key)) return q;
+  const i = q.at.get(key);
+  let head = q.head, gone = q.gone;
+  if (i === head) {
+    head++;
+    while (head < q.rows.length && gone.has(q.rows[head].key)) head++;
+    if (head > i + 1) gone = new Set([...gone].filter((k) => q.at.get(k) >= head));   // the gone rows the head passed
+  } else { gone = new Set(gone); gone.add(key); }
+  return Object.freeze({ rows: q.rows, at: q.at, head, gone, size: q.size - 1 });
+}
+/** The pass's fetches (rule 13's `fetchedAt`): an APPEND-ONLY log shared down a pass, each snapshot seeing its first
+ *  `n` entries — what a snapshot sees never changes. A write from a snapshot that is not the log's tip (a fork: the
+ *  gate re-applying an older snapshot) copies its own `n` entries first. */
+function fetchLog() { return Object.freeze({ log: { keys: [], ats: [], idx: new Map() }, n: 0 }); }
+function fetchLogAdd(f, key, at) {
+  let log = f.log;
+  if (log.keys.length !== f.n) {   // a fork: another snapshot wrote past this one
+    log = { keys: log.keys.slice(0, f.n), ats: log.ats.slice(0, f.n), idx: new Map() };
+    log.keys.forEach((k, i) => { const xs = log.idx.get(k); if (xs) xs.push(i); else log.idx.set(k, [i]); });
+  }
+  log.keys.push(key); log.ats.push(at);
+  const xs = log.idx.get(key);
+  if (xs) xs.push(f.n); else log.idx.set(key, [f.n]);
+  return Object.freeze({ log, n: f.n + 1 });
+}
+/** When this pass last fetched `key` (as this snapshot sees it), or undefined. */
+function fetchedAt(p, key) {
+  const f = p.fetched;
+  const xs = f && f.log.idx.get(key);
+  if (!xs) return undefined;
+  for (let j = xs.length - 1; j >= 0; j--) if (xs[j] < f.n) return f.log.ats[xs[j]];
+  return undefined;
+}
+
 /** A pass begins. `backoff` = the account is inside a vendor back-off and the
  *  pass is not forced; `timerDue` = a tick handed the timer's turn to whoever
  *  runs next; `hostScan` = the account reads through a scan lane. */
@@ -320,7 +380,7 @@ function open(snap, { origin = 'timer', force = false, backoff = false, timerDue
     ...snap,
     pass: {
       origin, force: !!force, backoff: !!backoff, timerWork, turnPending: timerWork,
-      due: [], fetchedAt: {}, inflight: null, last: null, streak: 0, calls: 0, fetches: 0, vendorCalls: 0,
+      due: DQ_EMPTY, fetched: fetchLog(), inflight: null, last: null, streak: 0, calls: 0, fetches: 0, vendorCalls: 0,
       discovery: { wanted: false, done: false }, hostScan: { wanted: !!hostScan, done: false },
       feed: { wanted: false, done: false, pages: 0, perPass: FEED_PAGES_PER_PASS },
       recheck: { armed: false, pending: [], done: 0, perPass: RECHECK_PER_PASS },
@@ -337,21 +397,21 @@ function wantsTurn(snap, timerDue) {
 /** RULE 13 — merge due rows into the pending list (pending keys keep their
  *  place, new ones join the tail in the list's order). */
 function mergeDue(p, rows, requests) {
-  const out = p.due.slice();
-  const pending = new Set(out.map((d) => d.key));
+  const out = [];
+  const pending = new Set();
   if (p.inflight && p.inflight.key) pending.add(p.inflight.key);
   const grouped = new Set();
   for (const r of requests) if (r.taken) grouped.add(r.key);
   for (const d of rows || []) {
     if (!d || typeof d.key !== 'string' || !d.key) continue;
-    if (pending.has(d.key) || grouped.has(d.key)) continue;
+    if (dqHas(p.due, d.key) || pending.has(d.key) || grouped.has(d.key)) continue;
     const dueAt = Number(d.dueAt) || 0;
-    const f = p.fetchedAt[d.key];
+    const f = fetchedAt(p, d.key);
     if (f !== undefined && !(dueAt > f)) continue;   // fetched this pass and not due again
     out.push({ key: d.key, dueAt });
     pending.add(d.key);
   }
-  return out;
+  return out.length ? dqOf(dqRows(p.due).concat(out)) : p.due;   // a merge that names nothing new keeps the queue (a hint per fetch costs its own rows)
 }
 /** RULE 21 — the feed's rows go AHEAD of the plain due rows, in the page's order: a pending key moves up, a key in
  *  flight or with a taken group is left where it is (it is served already), a key this pass fetched only when a hit is
@@ -365,12 +425,12 @@ function mergeFront(p, rows, requests) {
   for (const d of rows || []) {
     if (!d || typeof d.key !== 'string' || !d.key || moved.has(d.key) || skip.has(d.key)) continue;
     const dueAt = Number(d.dueAt) || 0;
-    const f = p.fetchedAt[d.key];
+    const f = fetchedAt(p, d.key);
     if (f !== undefined && !(dueAt > f)) continue;   // fetched this pass and no newer hit
     front.push({ key: d.key, dueAt });
     moved.add(d.key);
   }
-  return front.concat(p.due.filter((d) => !moved.has(d.key)));
+  return dqOf(front.concat(dqRows(p.due).filter((d) => !moved.has(d.key))));
 }
 /** THE TIMER'S TURN: the due list by the clock NOW (and whether discovery / the change feed is due). */
 function turn(snap, { due = [], discoveryDue = false, feedDue = false, feedPerPass = FEED_PAGES_PER_PASS, recheckDue: rd = [], recheckPerPass = RECHECK_PER_PASS } = {}) {
@@ -397,17 +457,17 @@ function close(snap) { return snap.pass ? { ...snap, pass: null } : snap; }
 /** RULE 6's grouping: one slot per conversation. */
 function slotOf(r) { return r.key; }
 
-/** The pending items: every due row, every key with waiters (one per slot);
- *  `fresh` items are untaken groups with no pending item (rule 5 judges them). */
+/** The pending items WITH waiters, one per slot — O(requests): the due queue is asked, never walked (lane
+ *  channel-drain-scale). A slot on a pending due row is that row's item (`due`, a rider); any other is `fresh` while its
+ *  first waiter is untaken (rule 5 judges it). The plain due rows stay in the queue, in its order (`queueOf`). */
 function itemsOf(s, reqs) {
   const p = s.pass;
   const map = new Map();
   const order = [];
-  for (const d of p.due) { const it = { slot: d.key, key: d.key, due: true, reqs: [], fresh: false }; map.set(it.slot, it); order.push(it); }
   for (const r of reqs) {
     const slot = slotOf(r);
     let it = map.get(slot);
-    if (!it) { it = { slot, key: r.key, due: false, reqs: [], fresh: !r.taken }; map.set(slot, it); order.push(it); }
+    if (!it) { const due = dqHas(p.due, slot); it = { slot, key: r.key, due, reqs: [], fresh: !due && !r.taken }; map.set(slot, it); order.push(it); }
     it.reqs.push(r);
   }
   for (const it of order) {
@@ -446,6 +506,19 @@ function recheckEligible(s, p) {
 }
 /** RULE 7's order: humans first, then the filing order of the earliest waiter. */
 const byRank = (a, b) => (Number(b.human) - Number(a.human)) || (a.minSeq - b.minSeq);
+/** RULE 7's queue as a VIEW: the ranked items with waiters, then the plain due rows in the queue's order (a row with
+ *  waiters is its item, ranked above) — `length`, `[0]`, `find`, `some` read it from the head, never the whole list. */
+function queueOf(waiting, q) {
+  const riders = new Set();
+  for (const it of waiting) if (it.due) riders.add(it.slot);
+  const length = waiting.length + q.size - riders.size;
+  function* items() {
+    yield* waiting;
+    for (const d of dqIter(q)) if (!riders.has(d.key)) yield { slot: d.key, key: d.key, due: true, reqs: [], fresh: false, human: false, minSeq: Infinity };
+  }
+  const find = (f) => { for (const it of items()) if (f(it)) return it; return undefined; };
+  return { length, 0: length ? find(() => true) : undefined, find, some: (f) => find(f) !== undefined };
+}
 
 /** THE ONE NEXT ACTION. */
 function next(s) {
@@ -486,8 +559,7 @@ function next(s) {
   const refused = new Set(refusals.map((x) => x.g.slot));
   const live = order.filter((it) => !(it.fresh && refused.has(it.slot)));
   const waiting = live.filter((it) => it.reqs.length).sort(byRank);
-  const plain = live.filter((it) => it.due && !it.reqs.length);
-  const queue = waiting.concat(plain);
+  const queue = queueOf(waiting, p.due);   // the ranked items with waiters, then the plain due rows — a view of its head
   const first = refusals[0];
   if (first) return { ...none, type: 'refuse', key: first.g.key, code: first.v.code, rule: first.v.rule, waiters: ids(first.g.reqs) };   // AT SIGHT
   const accept = ids(seen.filter((r) => !r.taken && !refused.has(slotOf(r))));   // a refused group is answered, never accepted
@@ -591,13 +663,13 @@ function apply(snap, act, result) {
       if (!p) break;
       if (result === undefined) {   // the round is fixed; the key leaves the pending list
         p.inflight = { type: 'fetch', key: act.key };
-        p.due = p.due.filter((d) => d.key !== act.key);
+        p.due = dqDrop(p.due, act.key);
         break;
       }
       p.inflight = null;
       p.calls++;
       p.vendorCalls++;
-      p.fetchedAt = { ...p.fetchedAt, [act.key]: act.at };
+      p.fetched = fetchLogAdd(p.fetched, act.key, act.at);
       p.last = act.due ? (act.waiters.length ? 'rider' : 'plain') : 'request';
       p.streak = act.due ? 0 : p.streak + 1;
       if (result && result.error) { p.failed = String(result.error); break; }   // rule 3 answers the round with the rest
@@ -847,6 +919,8 @@ module.exports = {
   OLDER_FLOOR_MS, OLDER_MEMORY_MS, OLDER_EVENTS,
   empty, admit, withdraw, census, hasRequests, takenRequests, queueAsk,
   open, wantsTurn, turn, close, next, apply, mergeFront,
+  // lane channel-drain-scale: the pass's due queue and fetch log (the gate's oracle reads and builds them)
+  dueRows: (pass) => (pass ? dqRows(pass.due) : []), dueQueue: dqOf, fetchLog, fetchLogAdd, fetchedAt,
   paceFresh, paceLevel, paceNeed, paceWaitMs, paceCharge, paceCost,
   olderEmpty, olderVerdict, olderApply,
   // lane channel-threads: rule 20

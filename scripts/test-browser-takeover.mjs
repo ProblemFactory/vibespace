@@ -72,8 +72,9 @@ import path from 'node:path';
 import http from 'node:http';
 import { spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, freePort } from './scratch.mjs';
-import { mutantCopies, copiesCensus } from './mutant-copy.mjs'; // lane H: copiesCensus; lane J r2: the stale sweep's patched-copy control
+import { scratch, freePort, deadPort } from './scratch.mjs';
+import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+const DEAD_CDP = await deadPort(); // the fake's cdp-url: a port the kernel just released, never a fixed one (§81) // lane H: copiesCensus; lane J r2: the stale sweep's patched-copy control
 const require = createRequire(import.meta.url);
 const T = require('../src/browser-takeover.js');
 const S = require('../src/browser-stream.js');
@@ -116,7 +117,7 @@ if (a === '--version') { console.log('agent-browser 0.38.0'); process.exit(0); }
 if (a === 'wait') { setTimeout(() => { out({ success: true, data: { waited: Number(b) || 0 } }); process.exit(0); }, Number(b) || 0); return; }
 if (a === 'session' && b === 'info') { const s = read(); const act = !!(s && alive(s.pid)); out({ success: true, data: { active: act, namespace: ns, pid: act ? s.pid : null, session: process.env.AGENT_BROWSER_SESSION || null, socketDir: path.join(st, ns, 'run'), version: act ? '0.38.0' : null } }); process.exit(0); }
 if (a === 'open') { let s = read(); if (!(s && alive(s.pid))) { const c = spawn('sleep', ['600'], { detached: true, stdio: 'ignore' }); c.unref(); s = { pid: c.pid, profile: process.env.AGENT_BROWSER_PROFILE || null }; fs.writeFileSync(f, JSON.stringify(s)); fs.appendFileSync(path.join(st, 'launches.log'), JSON.stringify({ ns, ...s }) + '\\n'); } out({ success: true, data: { url: b } }); process.exit(0); }
-if (a === 'get' && b === 'cdp-url') { const s = read(); if (!(s && alive(s.pid))) { out({ success: false, error: 'fake: no browser' }); process.exit(1); } out({ success: true, data: { cdpUrl: 'ws://127.0.0.1:19222/devtools/browser/fake-' + ns } }); process.exit(0); }
+if (a === 'get' && b === 'cdp-url') { const s = read(); if (!(s && alive(s.pid))) { out({ success: false, error: 'fake: no browser' }); process.exit(1); } out({ success: true, data: { cdpUrl: 'ws://127.0.0.1:${DEAD_CDP}/devtools/browser/fake-' + ns } }); process.exit(0); }
 if (a === 'close' && b === '--all') { const s = read(); let closed = 0; if (s && alive(s.pid)) { try { process.kill(s.pid, 'SIGKILL'); closed = 1; } catch { } } try { fs.unlinkSync(f); } catch { } out({ success: true, data: { closed, failed: [], sessions: [] } }); process.exit(0); }
 if (a === 'confirm' || a === 'deny') { fs.appendFileSync(path.join(st, 'confirms.log'), JSON.stringify({ verb: a, id: b, ns, session: process.env.AGENT_BROWSER_SESSION || null, profile: process.env.AGENT_BROWSER_PROFILE || null }) + '\\n'); if (b === 'c_gone') { out({ success: false, data: null, error: 'No pending confirmation' }); process.exit(1); } out({ success: true, data: { confirmed: a === 'confirm', id: b }, error: null }); process.exit(0); }
 out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.slice(2).join(' ') }); process.exit(1);

@@ -37,8 +37,9 @@ import http from 'node:http';
 import net from 'node:net';
 import { execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch } from './scratch.mjs';
+import { scratch, deadPort } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+const DEAD_CDP = await deadPort(); // the fake's cdp-url: a port the kernel just released, never a fixed one (§81)
 const require = createRequire(import.meta.url);
 const REPO = new URL('..', import.meta.url).pathname;
 const HM = require('../src/browser-human.js');
@@ -327,7 +328,7 @@ const daemon = (by) => {
 };
 if (a === '--version') { console.log('agent-browser 0.38.1'); process.exit(0); }
 if (a === 'session' && b === 'info') { const s = read(); const act = !!(s && alive(s.pid)); out({ success: true, data: { active: act, namespace: ns, pid: act ? s.pid : null, session: sess, socketDir: path.join(st, ns, 'run') } }); process.exit(0); }
-if (a === 'get' && b === 'cdp-url') { const s0 = read(); if (!(s0 && alive(s0.pid))) { out({ success: false, error: 'fake: no browser' }); process.exit(1); } out({ success: true, data: { cdpUrl: 'ws://127.0.0.1:19777/devtools/browser/fake-' + ns } }); process.exit(0); }
+if (a === 'get' && b === 'cdp-url') { const s0 = read(); if (!(s0 && alive(s0.pid))) { out({ success: false, error: 'fake: no browser' }); process.exit(1); } out({ success: true, data: { cdpUrl: 'ws://127.0.0.1:${DEAD_CDP}/devtools/browser/fake-' + ns } }); process.exit(0); }
 if (a === 'close' && b === '--all') { const s = read(); if (s && alive(s.pid)) { try { process.kill(s.pid, 'SIGKILL'); } catch { } } try { fs.unlinkSync(f); } catch { } if (s && s.profile) { try { fs.unlinkSync(path.join(s.profile, 'SingletonLock.fake')); } catch { } } out({ success: true, data: { closed: 1 } }); process.exit(0); }
 log('cmds.log', { argv: raw, ns, sess, cdp, profile: prof });
 if (a === 'close') { out({ success: true, data: { closed: 1 } }); process.exit(0); }
@@ -394,7 +395,7 @@ let work, solo, shop;
   let r = await j('POST', `/api/browser/profiles/${work.id}/browse`, {});
   const tabNew = cmdsOf('vs-' + HW).filter((c) => /^--pin-tab tab new$/.test(c));
   ok(r.status === 200 && r.json.ok && r.json.how === 'launch' && r.json.key === HW && r.json.syncId === 'win-bhuman-' + work.id && /^[0-9a-f]{16}$/.test(r.json.fresh || '') && logOf('launches.log').length === 1 && logOf('launches.log')[0].profile === work.dir, 'Browse yourself on a STOPPED profile: ONE launch (the keeper\'s start, on the profile directory) — the answer names his key, the window\'s sync id and a fresh token', r.json);
-  ok(logOf('connects.log').some((c) => c.sess === 'vs-' + HW && /^ws:\/\/127\.0\.0\.1:19777\//.test(c.cdp)) && !logOf('refused.log').length && tabNew.length === 1, 'his session joins over the keeper browser\'s CDP url (never the directory — no SingletonLock) and opens HIS OWN pinned tab: `--pin-tab tab new` under vs-hu-…', { connects: logOf('connects.log'), tabNew });
+  ok(logOf('connects.log').some((c) => c.sess === 'vs-' + HW && c.cdp.startsWith(`ws://127.0.0.1:${DEAD_CDP}/`)) && !logOf('refused.log').length && tabNew.length === 1, 'his session joins over the keeper browser\'s CDP url (never the directory — no SingletonLock) and opens HIS OWN pinned tab: `--pin-tab tab new` under vs-hu-…', { connects: logOf('connects.log'), tabNew });
   const h = k.humanOf(work.id);
   ok(h && h.state === 'away' && h.launched === true && h.keepMs === 12 * 3600e3 && h.sessionId === null && h.human === true, 'he is a HOLDER (away until a window of his takes his tab), he LAUNCHED it ⇒ kept 12 h while away', h);
   const dig = k.list().leases.filter((l) => l.profileId === work.id);
@@ -1076,7 +1077,7 @@ let work, solo, shop;
   const HMd = HM.humanKeyFor(mp.id);
   await km.browse(mp.id);
   const port = await km.streamPortFor(km.humanTargetFor(HMd));
-  ok(km.isMediated(km.profile(mp.id)) && port.ok && grants.every((g) => !HM.isHumanKey(g)) && cmdsOf('vs-' + HMd).some((c) => /tab new/.test(c)) && logOf('connects.log').some((c) => c.sess === 'vs-' + HMd && /19777/.test(c.cdp)), 'a MEDIATED profile: his session goes over the RAW url (his tab outside every agent grant) — no grant is ever minted for his key, his live view\'s port too', { grants, port });
+  ok(km.isMediated(km.profile(mp.id)) && port.ok && grants.every((g) => !HM.isHumanKey(g)) && cmdsOf('vs-' + HMd).some((c) => /tab new/.test(c)) && logOf('connects.log').some((c) => c.sess === 'vs-' + HMd && c.cdp.includes(`:${DEAD_CDP}/`)), 'a MEDIATED profile: his session goes over the RAW url (his tab outside every agent grant) — no grant is ever minted for his key, his live view\'s port too', { grants, port });
   await km.stop(mp.id, { why: 'user' });
 }
 // verify r1 (H3): QUIT THE WHOLE BROWSER on a MEDIATED profile — measured on the real 0.38.1 + the real mediator

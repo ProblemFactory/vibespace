@@ -271,3 +271,9 @@ vibespace-msg send <agent> --wake --compact-first "text"   # the same thing
 - Replies arrive in YOUR conversation (a report on your next turn, or a wake
   if they @name you); there is nothing to poll. `vibespace-msg group list`
   shows unread counts.
+
+## The full teaching behind the session intro's pointer line
+
+Every session's first prompt carries ONE line for this tool and points here (2.369.227 — the first prompt context must leave room for notices and messages). These are the words it used to carry in full:
+
+Other agent sessions may be working alongside you. `vibespace-msg list` shows the ones you can reach (your Task Group by default); `vibespace-msg send <name|id|group> "text"` posts into your direct (two-member) group with them, or into a group — by default it reaches them on THEIR next turn at no cost, `--wake` (or an @name in the text) wakes them now as a billed turn. `vibespace-msg group create <name> <member…>` makes a group. Group messages reach you here as a report on your next turn. Manual: vibespace-docs msg.

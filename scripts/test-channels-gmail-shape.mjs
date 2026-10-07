@@ -1428,6 +1428,75 @@ console.log('\n㉑ lane gmail-reply-known: a listed thread\'s send row needs no 
   ok(rc.reads === 1 && rc.offered === false && rc.viewWhy === 'rate-limited', 'CONTROL: the vendor call restored ⇒ the 429 blocks the reply box (said by name) — the leg above would be red', JSON.stringify(rc));
 }
 
+
+console.log("lane channel-feed-authority (OWNER'S LAW): Gmail's history.list is the AUTHORITATIVE feed — only what changed is read");
+{
+  ok(gmail.caps.changeFeed && gmail.caps.changeFeed.via === 'history' && gmail.caps.changeFeed.authority === 'authoritative' && gmail.caps.changeFeed.scope === gmail.SCOPE, 'caps.changeFeed: via history, AUTHORITATIVE, gated on the read scope it already holds');
+  // a 10 000-thread mailbox: every thread already NAMED by the engine, the cursor persisted at 1000
+  const N = 10000;
+  const ids = Array.from({ length: N }, (_, i) => `t${String(i).padStart(5, '0')}`);
+  const thrHist = new Map(ids.map((id, i) => [id, 900 - (i % 50)]));   // every thread's own historyId: older than the cursor
+  const named = new Set(ids);
+  let hist = { status: 200, threads: ['t00010', 't04242', 't09999'] };
+  const calls = [];
+  const fetchFn = async (url) => {
+    const u = new URL(String(url));
+    if (u.hostname === 'oauth2.googleapis.com') return jsonRes({ access_token: 'ya', expires_in: 3600 });
+    const p = u.pathname.replace(/^\/gmail\/v1\/users\/me/, '');
+    calls.push(p + (p === '/threads' ? `?${u.searchParams.get('pageToken') || ''}` : ''));
+    if (p === '/profile') return jsonRes({ historyId: '5000', emailAddress: 'me@example.com' });
+    if (p === '/history') {
+      if (hist.status === 404) return jsonRes({ error: { code: 404, message: 'Requested entity was not found.' } }, 404);
+      return jsonRes({ historyId: '1200', history: hist.threads.map((t, i) => ({ id: String(1100 + i), messagesAdded: [{ message: { id: `${t}-new`, threadId: t } }] })) });
+    }
+    if (p === '/threads') {
+      const from = Number(u.searchParams.get('pageToken') || 0);
+      const page = ids.slice(from, from + 100);
+      return jsonRes({ threads: page.map((id) => ({ id, snippet: `about ${id}`, historyId: String(thrHist.get(id)) })), ...(from + 100 < ids.length ? { nextPageToken: String(from + 100) } : {}) });
+    }
+    let m;
+    if ((m = /^\/threads\/([^/]+)$/.exec(p))) return jsonRes({ id: m[1], historyId: '1200', messages: [{ id: `${m[1]}-old`, threadId: m[1], internalDate: String(T0 - 3600e3), labelIds: ['INBOX'], payload: { headers: [{ name: 'Subject', value: `S ${m[1]}` }, { name: 'From', value: 'Ada <ada@example.com>' }] } }, { id: `${m[1]}-new`, threadId: m[1], internalDate: String(T0), labelIds: ['INBOX'], payload: { headers: [{ name: 'Subject', value: `S ${m[1]}` }, { name: 'From', value: 'Ada <ada@example.com>' }], body: { data: '' } } }] });
+    if ((m = /^\/messages\/([^/]+)$/.exec(p))) return jsonRes({ id: m[1], threadId: m[1], internalDate: String(T0), payload: { headers: [{ name: 'Subject', value: `S ${m[1]}` }, { name: 'From', value: 'Ada <ada@example.com>' }] } });
+    return jsonRes({ error: { code: 404, message: 'unrouted ' + p } }, 404);
+  };
+  let st = { gmailHistoryId: '1000', gmailChanged: [] };
+  const tok = { token: { access_token: 'ya', expiresAt: T0 + 3600e3, refresh_token: 'r', scopes: [gmail.SCOPE], email: 'me@example.com' } };
+  const a = gmail.create({ id: 'gmail-fa', options: {} }, { now, fetch: fetchFn, named: (id) => named.has(id), state: { read: () => st, write: async (x) => { st = { ...st, ...x }; } },
+    tokens: { read: () => ({ token: tok.token, why: null }), async write(t) { tok.token = t; }, async clear() {} }, resolveIntegration: () => ({ values: { clientId: 'c', clientSecret: 's' }, why: null }), log: { warn() {}, log() {} } });
+  const count = (re) => calls.filter((c) => re.test(c)).length;
+  const ch = await a.changes();
+  for (const id of ch.changed) await a.history(id, { anchor: `${id}-old` });
+  for (const id of ['t00011', 't05000', 't09998']) await a.history(id, { anchor: `${id}-old` });   // a stray ask of an unnamed-by-the-feed row
+  console.log(`    10 000 threads, history names 3: ${calls.length} calls (${calls.join(' ')})`);
+  ok(JSON.stringify(ch.changed) === JSON.stringify(['t00010', 't04242', 't09999']) && ch.mustWalk === false && ch.conversations.length === 0, 'changes(): ONE history page names the 3 threads (all named already: no listing)');
+  ok(count(/^\/history$/) === 1 && count(/^\/threads\/t/) === 3 && count(/^\/threads\?/) === 0 && count(/^\/messages\//) === 0 && calls.length === 4, `1 history.list + 3 thread reads, 0 for the other 9 997 (calls: ${calls.length})`);
+  // a NEW thread the engine never named: born from the head listing of the query (its first page), named there
+  ids.unshift('tnew01'); thrHist.set('tnew01', 1150);
+  hist = { status: 200, threads: ['tnew01', 'tgone9'] };
+  calls.length = 0; clock += 60e3;
+  const ch2 = await a.changes();
+  ok(ch2.conversations.length === 1 && ch2.conversations[0].id === 'tnew01' && !ch2.changed.includes('tgone9') && count(/^\/threads\?/) === 1 && count(/^\/history$/) === 1,
+    `a changed thread nobody named is listed from the query's head page and handed to the engine to birth; one outside the query is dropped (calls: ${calls.join(' ')})`);
+  await a.history('tnew01', { anchor: null });
+  named.add('tnew01');
+  // THE EXPIRED CURSOR: 404 ⇒ reseed ⇒ ONE listing walk; a thread newer than the LOST cursor is named changed, the rest walked
+  hist = { status: 404, threads: [] };
+  calls.length = 0; clock += 60e3;
+  const ch3 = await a.changes();
+  ok(ch3.mustWalk === true && count(/^\/profile$/) === 1, 'an expired cursor (404) reseeds from the profile and asks the listing walk (mustWalk)');
+  thrHist.set('t00500', 1250); thrHist.set('t07777', 1300); thrHist.set('t00600', 1150);   // two gained mail while the cursor (1200) was lost; one before it
+  for (let i = 0; i < 4; i++) { ids.push(`tun${i}`); thrHist.set(`tun${i}`, 800); }   // four threads the engine never named
+  hist = { status: 200, threads: [] };
+  let cur = null, pages = 0;
+  do { const pg = await a.listConversations({ cursor: cur, limit: 100 }); cur = pg.cursor; pages++; } while (cur && pages < 500);
+  console.log(`    the walk: ${pages} listing pages, ${count(/^\/threads\/t/)} thread reads, ${count(/^\/messages\//)} name reads`);
+  ok(pages === Math.ceil(ids.length / 100) && count(/^\/threads\/t/) === 0 && count(/^\/messages\//) === 4, `the walk = ${pages} threads.list pages naming only the 4 unnamed threads — 0 per-thread reads`);
+  calls.length = 0; clock += 60e3;
+  const ch4 = await a.changes();
+  ok(ch4.mustWalk === false && ch4.changed.includes('t00500') && ch4.changed.includes('t07777') && !ch4.changed.includes('t00010') && !ch4.changed.includes('t00600') && count(/^\/history$/) === 1, `after the walk the feed carries again and names the 2 threads that changed while the cursor was lost (${ch4.changed.join(',')})`);
+  ok(st.gmailWalkFrom === null && st.gmailHistoryId, 'the walk ends durably: the persisted cursor no longer asks for a walk');
+}
+
 eng.stop();
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

@@ -82,3 +82,27 @@ wait for backup — and tell me when it is done.
 - Progress reports → `vibespace-task progress` (group log), not the inbox.
 - Things YOU will do later → your own todo list / group backlog.
 - Job events → automatic (Background Work notifies); don't hand-file those.
+
+## The full teaching behind the session intro's pointer line
+
+Every session's first prompt carries ONE line for this tool and points here (2.369.227 — the first prompt context must leave room for notices and messages). These are the words it used to carry in full:
+
+Whenever you ask the user ANYTHING — a question in chat, or ending a turn waiting on their decision/input/review — ALSO file it in their For you tray with `vibespace-ask`. They are often NOT watching this window; the tray is how they find waiting questions across all sessions. When you mention it to the user, call it "the For you tray at the bottom right" (where it sits on their screen) — never "your inbox", a word they cannot find on screen:
+
+```sh
+vibespace-ask "question or decision needed" [--detail "context + your recommendation"] [--urgency low|normal|high|urgent] [--options "A|B|C"]
+```
+
+```sh
+vibespace-ask list / vibespace-ask resolve <id|text> / vibespace-ask show <id>
+```
+
+The user can reply from the For you tray: that message opens with `[For you reply #<id>]` and quotes your item; an option chip replies with the label itself.
+
+The MOMENT the user answers (in chat or anywhere), resolve the item YOURSELF with `vibespace-ask resolve` — never leave answered items for them to tick. Not for your own working steps — those belong in your normal todo list.
+
+The For you item is a NOTIFICATION MIRROR, not the message itself: everything you file (the question, options, your recommendation) must ALSO appear IN FULL in your chat reply — never say something only in the tray (the user reads and copies from chat; tray rows are hard to read at length).
+
+Whenever you ask the user anything or end a turn waiting on them — file it in their For you tray (bottom right of their screen: say that, never "your inbox") AND write the full question (options + recommendation) in your CHAT REPLY; the tray only notifies, never the sole copy:
+
+Resolve it YOURSELF the moment they answer (chat counts): `vibespace-ask resolve <id>`
