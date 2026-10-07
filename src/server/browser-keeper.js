@@ -1847,10 +1847,10 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   /** r5: the budget is spent — `browser_unstable` (no more relaunches until a stop ends the record) + the ONE notice. r6
    *  MINOR 1: `kind` 'closing' (HEAL_BUDGET relaunches that each produced a browser that closed) or 'failing' (the failed-ask
    *  cap: every ask to start it again failed, `spanMs` the time they spanned) — two verdicts, two sets of words, one code. */
-  function markUnstable(rec, p, count, seenBy, { kind = 'closing', spanMs = null, windowMs = B.HEAL_WINDOW_MS } = {}) {
+  function markUnstable(rec, p, count, seenBy, { kind = 'closing', spanMs = null, windowMs = B.HEAL_WINDOW_MS, display = null } = {}) {
     const failing = kind === 'failing';
     const first = setClosed(rec, { code: 'browser_unstable', error: B.unstableText({ label: p.label, count, windowMs, kind, spanMs }), ...(failing ? { unstable: 'failing' } : {}) });
-    noteHeal(rec, { lastOutcome: 'unstable', unstableCount: count, unstableKind: failing ? 'failing' : null, unstableSpanMs: failing ? spanMs : null, unstableWindowMs: failing ? null : windowMs });
+    noteHeal(rec, { lastOutcome: 'unstable', unstableCount: count, unstableKind: failing ? 'failing' : null, unstableSpanMs: failing ? spanMs : null, unstableWindowMs: failing ? null : windowMs, unstableDisplay: failing && display ? display : null }); // lane browser-unstable-rejudge: the fact it was parked under
     if (first) {
       if (failing) log.warn?.(`[browser] ${p.id} "${p.label}": its browser could not be started — ${count} relaunch asks in ${Math.round((spanMs || 0) / 1000)} s all failed (daemon ${rec.pid} alive, seen by ${seenBy}; no browser started) — NOT asked again (browser_unstable) until it is stopped from the Browser panel`);
       else log.warn?.(`[browser] ${p.id} "${p.label}": its browser closed again (daemon ${rec.pid} alive, seen by ${seenBy}) after ${count} restarts in ${windowMs >= 2 * 3600e3 ? Math.round(windowMs / 3600e3) + ' h' : Math.round(windowMs / 60000) + ' min'} — NOT started again (browser_unstable) until it is stopped from the Browser panel`);
@@ -1866,9 +1866,10 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const unfiled = (why) => { if (L.lastOutcome !== 'unstable-unfiled') { noteHeal(rec, { lastOutcome: 'unstable-unfiled' }); log.warn?.(`[browser] ${p.id} "${p.label}": keeps closing — ${why}`); } return false; };
     if (!userTodos || typeof userTodos.add !== 'function') return unfiled('no For-you store is wired, so only this journal says so');
     const n = B.unstableNotice({ label: p.label, count: L.unstableCount || B.HEAL_BUDGET, windowMs: L.unstableWindowMs || B.HEAL_WINDOW_MS, kind: L.unstableKind === 'failing' ? 'failing' : 'closing', spanMs: L.unstableSpanMs }); // r6: its own words
-    try { userTodos.add('browser', { origin: 'browser', kind: 'notice', urgency: 'normal', by: 'agent', text: n.text, detail: n.detail, sessionName: 'Agent browser' }); }
+    let it = null;
+    try { it = userTodos.add('browser', { origin: 'browser', kind: 'notice', urgency: 'normal', by: 'agent', text: n.text, detail: n.detail, sessionName: 'Agent browser' }); }
     catch (e) { return unfiled(`the For-you notice was not filed (${e && e.message}) — tried again on the next pass`); }
-    noteHeal(rec, { noticedAt: now() });
+    noteHeal(rec, { noticedAt: now(), noticeId: it && typeof it.id === 'string' ? it.id : null }); // lane browser-unstable-rejudge: resolved by a re-judge that brings it back
     return true;
   }
   // ── lane browser-unresponsive (a fleet user's inc 2026-10-05: the shared "jarvis-work" answered 0 bytes for 80 min while
@@ -1965,7 +1966,14 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (livenessOf(rec) !== 'ours') return Promise.resolve(null); // never under a daemon we cannot prove ours (the tick marks it gone)
     if (healing.has(p.id)) return healing.get(p.id);
     // r5 MAJOR 1: an UNSTABLE browser is never started again by itself — not by a verb's force either; only a stop ends it
-    if (rec.closed && rec.closed.code === 'browser_unstable') { if (noticeUnstable(rec, p)) commit(); return Promise.resolve(null); }
+    if (rec.closed && rec.closed.code === 'browser_unstable') {
+      if (noticeUnstable(rec, p)) commit();
+      if (rec.closed.unstable !== 'failing') return Promise.resolve(null);
+      // lane browser-unstable-rejudge: …except a `failing` verdict whose fact changed or whose world restarted — ONE fresh ask
+      const rj = rejudgeUnstable(rec, p, seenBy);
+      healing.set(p.id, rj);
+      return rj.finally(() => { if (healing.get(p.id) === rj) healing.delete(p.id); });
+    }
     if (!force && healGated(rec)) return Promise.resolve(null);
     // verify r2 (B5): a browser whose Chrome build was changed moments ago and is gone again: never healed on that build —
     // it falls back to the build it replaced (or says it is down), and the conversations told "changed" are told that too
@@ -2006,6 +2014,14 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       const L = B.healLedger(rec.heals);
       const bud = B.healBudgetVerdict({ attempts: L.attempts, now: now() });
       if (!bud.ok) { markUnstable(rec, p, bud.count, seenBy, { windowMs: bud.windowMs }); commit(); return null; }
+      // lane browser-unstable-rejudge: THE FRESH-DAEMON RUNG — the HEAL_FRESH_AT-th ask of a failed streak, when the display
+      // its daemon was launched under is not the display now, is never sent to that daemon (it relaunches with its frozen
+      // env): the keeper stops it (proven ours above — its pid + starttime, its launch mark) and starts a fresh one, probed now
+      if (L.failed) {
+        const dk = DSP.displayKey(await machineDisplay());
+        if (reg.browsers[p.id] !== rec || rec.state !== 'ready') return null;
+        if (B.freshDaemonDue({ failed: L.failed, launched: DSP.displayKey(rec.display), now: dk })) return freshDaemon(rec, p, seenBy, `${L.failed.count} relaunch asks failed through daemon ${rec.pid}, launched under the display ${DSP.displayKey(rec.display)} — the display now is ${dk}`);
+      }
       const tAsk = now();
       const t0 = Date.now();
       rec.cdpUrl = null;
@@ -2018,7 +2034,11 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         const failed = { count: (F0 ? F0.count : 0) + 1, since: F0 ? F0.since : tAsk };
         noteHeal(rec, { lastOutcome: 'failed', failed });
         const fv = B.failedAskVerdict({ failed, now: now() });
-        if (!fv.ok) { markUnstable(rec, p, fv.count, seenBy, { kind: 'failing', spanMs: fv.spanMs }); commit(); return null; }
+        if (!fv.ok) {
+          const dk = DSP.displayKey(await machineDisplay()); // lane browser-unstable-rejudge: the fact this verdict is parked under
+          if (reg.browsers[p.id] !== rec || rec.state !== 'ready') return null;
+          markUnstable(rec, p, fv.count, seenBy, { kind: 'failing', spanMs: fv.spanMs, display: dk }); commit(); return null;
+        }
         setClosed(rec, { code: 'browser_closed', error: closedText(p, 'its daemon answered no CDP url (the relaunch failed)') }, { retry: true });
         log.warn?.(`[browser] ${p.id} "${p.label}": its browser closed (daemon ${rec.pid} alive, seen by ${seenBy}) and the relaunch failed — ${rec.closed.error} (failed ask ${failed.count}; the tick tries again in ${HEAL_RETRY_MS / 1000} s, a command at once; ${B.HEAL_FAIL_BUDGET} failed asks over ${B.HEAL_FAIL_SPAN_MS / 60000} min ⇒ browser_unstable)`);
         commit();
@@ -2044,6 +2064,47 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     })();
     healing.set(p.id, pr);
     return pr.finally(() => { if (healing.get(p.id) === pr) healing.delete(p.id); });
+  }
+  // ── lane browser-unstable-rejudge (the owner's instance, 2026-10-06): A PARKED browser_unstable OUTLIVED THE DEAD
+  // COMPOSITOR THAT CAUSED IT. systemd-oomd killed the GNOME session at 01:44; both profiles' Chromes (Wayland clients) died
+  // with it; ten relaunch asks went to 42-h-old daemons whose frozen env named the dead compositor and all failed ⇒ parked
+  // `failing`; the compositor came back at 03:36 and the 16:32 restart ADOPTED both daemons with the verdict — 15 h of
+  // browser_unstable until a human pressed Stop. Now: a `failing` verdict is re-judged when its fact (the display key) changes
+  // or at the boot that adopted its daemon — ONE fresh ask (rejudgeVerdict), the key recorded so one change earns one ask —
+  // and that ask, like the ladder's fresh rung, is a NEW daemon launched with the display probed now (freshDaemon).
+  const bootRejudge = new Set(); // profile ids adopted at boot with a parked `failing` verdict — each earns one ask
+  async function rejudgeUnstable(rec, p, seenBy) {
+    const dk = DSP.displayKey(await machineDisplay());
+    if (reg.browsers[p.id] !== rec || rec.state !== 'ready' || !(rec.closed && rec.closed.code === 'browser_unstable')) return null;
+    const L = B.healLedger(rec.heals);
+    const v = B.rejudgeVerdict({ unstable: rec.closed.unstable || null, parked: L.unstableDisplay, now: dk, boot: bootRejudge.has(p.id) });
+    bootRejudge.delete(p.id);
+    if (!v.ask) { if (v.seed) { noteHeal(rec, { unstableDisplay: dk }); commit(); } return null; }
+    noteHeal(rec, { unstableDisplay: dk, lastOutcome: 'rejudged' }); commit(); // the key it is asked under: the same world never asks twice
+    const why = v.why === 'boot' ? 'VibeSpace restarted and adopted its daemon (a new world)' : `the display changed since it was parked (${L.unstableDisplay} → ${dk})`;
+    log.warn?.(`[browser] ${p.id} "${p.label}": its browser_unstable (could not be started) is re-judged — ${why} (seen by ${seenBy}): ONE fresh ask`);
+    return freshDaemon(rec, p, seenBy, `re-judged: ${why}`);
+  }
+  /** Heal from the one process that can launch: the record's daemon (proven ours by the caller — healBrowser's livenessOf)
+   *  is STOPPED (the CLI's close, then its pid + starttime) and a FRESH daemon started by the keeper's own start — the
+   *  display probed now, the planned config of THIS call. The day of relaunch attempts rides the new record (the B-47f9 tiers
+   *  keep counting); a fresh start that fails ends the record `failed` with its own words — the tick never relaunches a
+   *  failed record, the next command starts it again with the display probed then (never a loop). */
+  async function freshDaemon(rec, p, seenBy, why) {
+    const L = B.healLedger(rec.heals);
+    const old = rec.pid;
+    log.warn?.(`[browser] ${p.id} "${p.label}": ${why} — its daemon ${old} is stopped and a FRESH daemon started with the display probed now (seen by ${seenBy})`);
+    try { await stop(p.id, { why: 'relaunch' }); /* §54b: a sanctioned stop reason — the daemon is replaced, not ended */ } catch (e) { log.warn?.(`[browser] ${p.id} "${p.label}": its daemon ${old} could not be stopped for a fresh one (${e && e.message})`); return null; }
+    let v = null;
+    try { v = await start(p.id, { why: 'heal' }); }
+    catch (e) { log.warn?.(`[browser] ${p.id} "${p.label}": the fresh daemon did not start either — ${(e && e.code) || 'launch_failed'}: ${e && e.message} (failed by name; the next command starts it again with the display probed then — never a loop)`); return null; }
+    const nrec = reg.browsers[p.id];
+    if (!nrec || nrec === rec) return null;
+    nrec.heals = { ...B.healLedger(null), attempts: [...B.healBudgetVerdict({ attempts: L.attempts, now: now() }).kept, now()], lastOutcome: 'fresh-daemon' }; dirty = true;
+    if (L.noticeId && nrec.browser && userTodos && typeof userTodos.setStatus === 'function') { try { const it = typeof userTodos.get === 'function' ? userTodos.get(L.noticeId) : null; if (!it || it.status === 'open') userTodos.setStatus(L.noticeId, 'done', 'agent'); } catch { /* gone already */ } } // its "could not be started" notice is over
+    log.log?.(`[browser] ${p.id} "${p.label}": a fresh daemon ${nrec.pid} replaced ${old} — ${nrec.browser ? 'its browser pid ' + nrec.browser.pid + ' is up' : 'no browser identified yet'} (display ${DSP.displayKey(nrec.display)})`);
+    commit();
+    return nrec.browser || (v && v.browser) || null;
   }
   /** r4 MAJOR 1 + r5: the refusal a lease / a view gets while its profile's browser is not there — the close verdict
    *  (`profile_locked` — somebody else's browser holds the directory —, `browser_closed`, `browser_unstable`), else (r5
@@ -3257,7 +3318,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       // verify r3 M1 (a): a live record returned to a verb is re-captured first (the daemon may have relaunched its Chrome)
       // r4 MAJOR 1: …and a daemon with NO browser (the user closed it) is healed here — a verb is asking for it
       if (cur.state === 'ready' && isLocalRec(cur) && !starting.has(profileId) && !stopping.has(profileId)) await followRelaunch(cur, 'a start', { force: true });
-      return browserView(cur);
+      return browserView(reg.browsers[profileId] || cur); // lane browser-unstable-rejudge: a fresh daemon may have replaced it
     }
     if (isEph(p)) return startEphemeral(p, { why });
     const cap = ceilingNow({ ephemeral: false, browserKey });
@@ -5778,7 +5839,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       if (verdict === 'ours') { try { active = (isEph(p) && Array.isArray(rec.envPairs) ? await rt.info(null, { extraEnv: pairsEnv(rec.envPairs) }) : await rt.info(rec.ns, { dir: p ? p.dir : null })).active; } catch { active = false; } }
       const v = B.adoptVerdict(rec, { verdict, active });
       if (!v) continue;
-      if (v.state === 'ready') { rec.state = 'ready'; rec.adoptedAt = now(); recaptureBrowser(rec, 'boot'); log.log?.(`[browser] adopted ${rec.profileId} "${p ? p.label : ''}" (daemon pid ${rec.pid})`); if (isEph(p)) keptNote('start', p); }
+      if (v.state === 'ready') { rec.state = 'ready'; rec.adoptedAt = now(); recaptureBrowser(rec, 'boot'); if (rec.closed && rec.closed.code === 'browser_unstable' && rec.closed.unstable === 'failing') bootRejudge.add(rec.profileId); // lane browser-unstable-rejudge
+        log.log?.(`[browser] adopted ${rec.profileId} "${p ? p.label : ''}" (daemon pid ${rec.pid})`); if (isEph(p)) keptNote('start', p); }
       else {
         rec.state = v.state; rec.lastError = v.lastError; rec.endedAt = now(); log.warn?.(`[browser] ${rec.profileId} ${v.state} at boot: ${v.lastError}`);
         if (isEph(p)) keptNote('stop', p, { why: 'restart' }); // lane browser-resume: it died while VibeSpace was down — its last persisted tabs are kept (D2: reopened at its next start)

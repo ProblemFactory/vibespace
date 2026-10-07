@@ -3415,6 +3415,8 @@ owner 原话 (摘): "我不太需要一个 agent 订阅另一个 agent 的消息
 - **D1 = 显式拉群, 私聊即两人群.** "agent 主动拉群, agent 不再能'私聊', 或者说 agent 私聊本质上就是自动建立一个两人群。每个 Task Group 还是不要自动建群了, 感觉会有 spam 风险。" ⇒ 群只由动作产生: `vibespace-msg` 新增建群动词 (名字 + 成员); 今天的 `send <agent>` 不删, 它的语义变成"找到或建立这两个成员的两人群, 往里发" (同一对成员永远是同一个群, 幂等); 我 (owner) 是每个群的隐含成员/观察者; 谁能被拉进群仍由 msg-acl 的可达性决定 (组内/externalVisibility/override 不变)。
 - **D2 = 每个成员自己的通知模式.** "每个群成员可以自行设置'通知模式', 默认是'下次用户发消息收报告'。" ⇒ 每 (群, 成员) 一个 `notify` 值, 成员用 CLI 自设, 用户可在面板替任何成员改: `next-turn` (默认: 群里新消息攒成一份报告, 在该成员下一次**用户发起**的 turn 里作为上下文送达 — 零计费, 零回声室) / `mention` (只有被 @ 时立刻叫醒) / `always` (每条都立刻叫醒 = 计费 turn, 面板上明说) / `mute`。@提到是显式动作: 除 `mute` 外一律立刻叫醒 (含我作为观察者的 @); 不带 @ 的消息按模式走。立刻叫醒仍是"没人打字的 turn", 走 spend-authorizer 的 `peer-message` 理由不变。
   > **AS-BUILT (lane stash-any-turn, 2026-10-05 主人裁定: "outbox 发的消息也是一个计费回合啊，也应该直接唤醒把"):** `next-turn` = 该成员**任何来源**的下一个 turn —— 主人打字、回执唤醒、Background Work 通知、同伴消息、群唤醒、auto-resume 的 continue、For you 的回复; 计费回合就是计费回合, 攒着的报告搭它走, 谁也不等键盘。防回声改成**文字**而不是扣留: 每份报告本就以 `#### Group …` 自报群名, 非用户 turn 的报告头下再说一次 "(these arrived while you were handling something else — answer each group in its own group; do not fold them into this turn's task)"。正在送达的群唤醒 (`wakesInFlight`) 期间, 该群不进该成员的报告 —— 唤醒帧已经带着它。预算、"整段进或整段不进"、截断指针不变。`turnIsUserInitiated` 不再门控任何东西, 只决定这句话。
+
+  > **AS-BUILT (lane group-report-whole, 2.369.228; 主人 2026-10-07 "按照建议来吧" —— 方案 A):** 报告里一条消息的行上限 400 → **2000 字符** (`LINE_MAX`), 一份报告 2 KB → **4 KB** (`REPORT_BUDGET` 4096)。为什么: 集成者发给主开发的每条进度 (1–2 KB) 都在报告里被截在 400 字符, agent 逐条再 `vibespace-msg read`, 主人的聊天里每条一张 "Cut short in the agent's report" 卡。现在**房间够就整条送达**: 引擎仍按 `min(REPORT_BUDGET, room)` 给预算 (9600 B 注入上限不变), 其他生产者照旧放得下才进、放不下就等 (fit-or-wait); 放不下的旧消息整条不显示并给 `read --before` 指针, 只有真被截的一行 (超过 2000 字符或超过房间) 才有 "cut short" 指针与卡片脚注。卡片 (`group-card.js` TEXT_MAX 4 KiB, RECORDED_HEAD_MAX 400) 不变。(test-channel-groups §1c / §4d3 / §7, test-group-report-card ③)
 - **D3 = 排在频道账号 lane (feat-channel-cred) 之后。**
 
 ### 22.5 群的成员操作 (owner 2026-09-22: "拉群要设计一下, 建群之后是不是还能拉人, 拉人的时候可以附加 context 消息? 我需要手动拉人能力")
@@ -3538,6 +3540,8 @@ owner 看 2.369.185 (聚合 IM) 时的两句话, 原文:
 - 顺序 = 附件的同一个 `fetchVerdict`: 盘上备忘 (data/channels/<account>/avatars/, 30 天刷新; 无头像记 7 天, 权限被拒记 6 小时) · 记住的拒绝 · 只限本账号记录点名的作者 · 启用 · 单飞 · 退避 · 预算 · 一次 `vendor()` (两次请求, 各自限速+计量; 图片主机不带令牌)。字节 ≤ 256 KiB, 类型从字节嗅探。
 - 只由我们的路由供图 (`GET /api/channels/avatar`, `private, max-age=86400`); 厂商 URL 不进 DOM。客户端在同一个圆里就地覆盖缩写 (按 `data-av` 键), aria-hidden; 预热每次打开 ≤ 40。
 
+**as-built (2.369.228, lane channel-self-unread, userW inc-muxekkry-clfb 2026-10-07 "发消息在 channel 里面也会被视为一个未读")：账号自己发的消息 = 读过（按构造）。** `author.isSelf`（或已解析的本账号 id）的消息：未读 +0，`readAt` 推到它的时刻（发了 = 读到这里，与厂商自己的 app 一致；它之后的别人消息照常算未读），不会是 `new-since-read`（行最新一条是自己的 = 读过）；身份未解析的消息照旧计数，绝不猜。一条纯函数 src/channel-focus.js `selfRead` / `readAdvance`，引擎每个追加点 + 日志重算（`unreadSince`）+ statusTag 都问它；§24 的关注（关键词 / 正则 / 位置规则 / 全部）同样跳过自己的消息（B-c91b）。
+
 ## 24. R4 (2026-09-26 / 27): 访问与通知 —— 两种操作, 先访问
 
 > **验证 r2 (2026-09-27):** (1) 投递梯是一个 await —— 唤醒还在梯子里时访问被移除 ⇒ 被拒绝的块按名丢弃(`access-removed`), 绝不为其暂存; (2) 回执唤醒(`receiptWake`)是计费回合, 与唤醒共用同一日上限与同一账本 —— 超限时回执搭下一回合(`noWake`); (3) `compose` 按名拒绝 `bcc` / `replyTo`(只有 To / Cc); (4) 读者(`grainOf`)让无访问行的通知行失效, 启动时点名.
@@ -3655,6 +3659,8 @@ heavy: test-channels-aggregate-ui ⑤/⑦ (owner 的例子 —— 工作只有�
 失败点名并继续 (它本就按会话被 `track` 兜住 —— 抛错从不终结整趟 pass)。再攻击: 就地重启 (+1ms stop, +2ms
 新启动) 把每条持有各投一次; 同一 kind 的两个账号在一个进程里彼此独立 (一个卡住的梯子绝不挡住另一个)。
 门: test-channels-engine ⑪(j)(k)(l)(m)(n) + ⑫。
+
+**as-built (2.369.228, lane channel-self-unread, B-c91b)：** 账号自己的消息永远不是关注命中 —— 关键词 'inc-' 曾命中 owner 自己经 Outbox 回给 userW 的话并唤醒 agent。onFresh 的匹配循环先问 `FO.selfRead`，`all` 模式也跳过；自己消息里的 @ 归他自己处理，同样跳过。
 
 ## 25. 渲染层: raw → blocks → DOM (2026-09-27, lane channel-render)
 

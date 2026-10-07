@@ -1051,10 +1051,12 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   }
 
   /** How many records in the log are newer than `sinceAt` (the unread
-   *  re-derivation — invariant 7: cached in the index, never only there). */
-  function countSince(adapterId, convId, sinceAt) {
+   *  re-derivation — invariant 7: cached in the index, never only there).
+   *  `keep` (lane channel-self-unread): the caller's predicate — the engine
+   *  passes "not the owner's own message" (src/channel-focus.js selfRead). */
+  function countSince(adapterId, convId, sinceAt, keep = null) {
     let n = 0;
-    for (const r of readTail(adapterId, convId, { limit: DEDUP_MAX })) if (Number(r.at) > Number(sinceAt || 0)) n++;
+    for (const r of readTail(adapterId, convId, { limit: DEDUP_MAX })) if (Number(r.at) > Number(sinceAt || 0) && (!keep || keep(r))) n++;
     return n;
   }
 

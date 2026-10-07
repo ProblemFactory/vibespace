@@ -93,8 +93,12 @@ const ERROR_CODES = Object.freeze([
 const NAME_MAX = 80;
 const CONTEXT_MAX = 4000;
 const MEMBER_MAX = 32;
-const REPORT_BUDGET = 2048;
-const LINE_MAX = 400;
+// A MESSAGE RIDES WHOLE WHEN THE ROOM ALLOWS (lane group-report-whole, the owner 2026-10-07 "按照建议来吧"): at 400 / 2 KB
+// every 1–2 KB integrator progress message reached 主开发 cut at 400 characters, the agent re-read each one and the owner's
+// chat showed a "cut short" card per message. A line is cut only past 2 000 characters, a report holds 4 KB (still ≤ the
+// engine's room: groups-engine passes min(REPORT_BUDGET, room), the 10 KiB injection is never exceeded).
+const REPORT_BUDGET = 4096;
+const LINE_MAX = 2000;
 /** An agent's act that would wake MORE than this many members at once is
  *  refused `confirm-wakes` until it says `--yes` — the count said BEFORE the
  *  act, the agent-side twin of the panel's "will wake N" echo (r2). */

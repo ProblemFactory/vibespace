@@ -24,7 +24,7 @@
 - 重建：normalizers.convertWithCards 的 `opts.artifacts`（artifactDeriveOpts）在同一批记录上推导行并放卡片（钩子没有 afterRecord：前一条记录在下一条之前折叠）；rebuildHistory 再与持久化行合并（用户的保存只在那里），每张卡片显示合并后的计数。只读历史（已结束会话的转录）在读取时同样推导。重启不丢东西，重建出同样的卡片。
 
 ## 界面
-- **卡片**：每个交付物行在聊天里一张卡（system 消息，`noticeKind: 'artifact'`，id = `{view id}:af:{key 哈希}`），在第一次写的位置诞生，之后每次写 / 改**原地修补**（只带 content 的 edit 操作，从不重建）："BRIEF.md · 已改 3 次 · 2 分钟前"。点一下 = 按类型的查看器在聊天旁打开（`from`，与 Cmd+点击路径同一扇门，不需要 Cmd）。code 行没有卡片。
+- **卡片**：每个交付物行在聊天里一张卡（system 消息，`noticeKind: 'artifact'`，id = `{view id}:af:{key 哈希}`），放在它自己的时间点（实时诞生在末尾；重建时放进已加载片段里它的时间处，早于该片段则不放——清单里仍有它），之后每次写 / 改**原地修补**（只带 content 的 edit 操作，从不重建）："BRIEF.md · 已改 3 次 · 2 分钟前"。点一下 = 按类型的查看器在聊天旁打开（`from`，与 Cmd+点击路径同一扇门，不需要 Cmd）。code 行没有卡片。
 - **Artifacts 芯片**：聊天状态栏的键控芯片 `Artifacts · N`（GET /api/artifacts = 服务端的 `view(rows)`，整段对话而非已加载的分片）；弹层先列文档，代码折叠在 "Code (n)"。
 - **用户自己的保存**：从聊天打开的编辑器窗口（openFile 保留 `fromWin`）保存时发一条 ws `artifact-touch {sessionId, host, path, summary}`；所属对话的行得到 `by: user, edits+1`，卡片原地修补，智能体在下一轮收到一条注记 "[Doc edit] <path>: +a −b lines"（stash，免费，从不计费唤醒）。
 - **设置** `artifacts.autoOpenDocs`（Chat，默认开）：智能体**写**出新的 doc 行且聊天在屏幕上时，在聊天旁打开它；Edit 不会再次打开；关 = 只有卡片。

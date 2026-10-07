@@ -305,21 +305,28 @@ function feedProposalCard(session, block) {
   if (!session._historyLoaded) return false;
   return patchProposalCard(mm, block) || !!placeProposalCard(mm, block, { emit: true });
 }
-// ── DELIVERABLE CARDS (lane artifacts-model) — ONE card per deliverable row (src/artifacts.js cardBlock), born at the
-// first write's position, keyed by the row key (`{view id}:af:{hash of the key}`: the live op and every rebuild name the
+// ── DELIVERABLE CARDS (lane artifacts-model) — ONE card per deliverable row (src/artifacts.js cardBlock), placed where
+// AF.cardPlacement says (lane artifacts-settle-position: a live birth at the tail; a rebuild's card at its own instant
+// inside the loaded slab, or nowhere when the slab starts after it — the chip is its home), keyed by the row key (`{view id}:af:{hash of the key}`: the live op and every rebuild name the
 // SAME card), PATCHED IN PLACE on every later write / edit (an `edit` op with `content` only — the live-card rule).
 const isArtifactBlock = (c) => !!(c && c.type === 'artifact' && typeof c.key === 'string' && c.key);
 function artifactKeyHash(s) { let h = 5381; for (const ch of String(s)) h = (Math.imul(h, 33) ^ ch.codePointAt(0)) >>> 0; return h.toString(36) + '-' + String(s).length.toString(36); }
 const artifactCardId = (mm, key) => `${mm.sessionId || 'view'}:af:${artifactKeyHash(key)}`;
-function placeArtifactCard(mm, block, { emit = false } = {}) {
+/** `rebuilt` = a REBUILD places it (settle, a queued card): by its time against the slab `rebuildHistory` stamped on the
+ *  normalizer (`artifactSlab`); a mid-list card is placed silently (a live `create` op is appended at the client's tail). */
+function placeArtifactCard(mm, block, { emit = false, rebuilt = false } = {}) {
   if (!mm || !Array.isArray(mm.messages) || !mm.messageIndex || !isArtifactBlock(block)) return null;
   const id = artifactCardId(mm, block.key);
   if (mm.messageIndex.has(id)) return null;
+  const where = rebuilt ? AF.cardPlacement(block, mm.artifactSlab || {}) : 'tail';
+  if (where === 'none') return null;
   const msg = { id, role: 'system', status: 'complete', content: [{ ...block }], ts: Number(block.firstAt) || Date.now(), srcLine: null, uuid: null, turnIndex: mm.turnIndex || 0,
     toolCallId: null, toolName: null, toolStatus: null, permission: null, usage: null, taskInfo: null, meta: null, noticeKind: 'artifact' };
-  mm.messages.push(msg);
+  const slot = where === 'at' ? AF.timeSlot(mm.messages, msg.ts) : mm.messages.length;
+  if (slot < mm.messages.length) mm.messages.splice(slot, 0, msg);
+  else mm.messages.push(msg);
   mm.messageIndex.set(id, msg);
-  if (emit && typeof mm._emit === 'function') mm._emit({ op: 'create', message: msg });
+  if (emit && slot === mm.messages.length - 1 && typeof mm._emit === 'function') mm._emit({ op: 'create', message: msg });
   return msg;
 }
 /** The card already drawn gets the row's new block IN PLACE; false = not drawn (or unchanged). `emit` false = a history pass. */
@@ -382,12 +389,13 @@ function artifactStoreRows(session, sessionId) {
   try { return artifactStoreSource(session, sessionId) || {}; } catch (e) { console.warn('[normalizer] registry rows not read:', e && e.message); return {}; }
 }
 /** After the derivation merged with the persisted rows: every deliverable's card says the merged counts (a user's save
- *  lives only in the persisted rows) — patched, or placed at the end when the transcript no longer holds its write. */
+ *  lives only in the persisted rows) — patched, or (a card the slab's derivation did not draw) placed at its own instant
+ *  inside the loaded slab, NEVER appended for a write older than the slab (lane artifacts-settle-position). */
 function settleArtifactCards(mm, rows) {
   for (const row of Object.values(rows || {})) {
     if (!AF.cardWorthy(row)) continue;
     const b = AF.cardBlock(row);
-    if (!patchArtifactCard(mm, b, { emit: false })) placeArtifactCard(mm, b);
+    if (!patchArtifactCard(mm, b, { emit: false })) placeArtifactCard(mm, b, { rebuilt: true });
   }
 }
 /** THE ONE writer of a browser-session card into a normalizer (any harness: every normalizer keeps `messages`,
@@ -407,6 +415,15 @@ function placeBrowserCard(mm, card, { emit = false } = {}) {
 }
 /** A record's own instant (the transcripts' ISO `timestamp`; a stdout-ring record has none — it never moves a card). */
 function recordAt(raw) { const t = raw && typeof raw.timestamp === 'string' ? Date.parse(raw.timestamp) : NaN; return Number.isFinite(t) ? t : 0; }
+/** The loaded slab's instants (lane artifacts-settle-position): its first and last STAMPED record — a big conversation
+ *  loads a tail-only slab, so a row written before `slabFirstAt` has no place in it. 0 = no stamped record. */
+function slabOf(records) {
+  const list = Array.isArray(records) ? records : [];
+  let slabFirstAt = 0, slabLastAt = 0;
+  for (let i = 0; i < list.length && !slabFirstAt; i++) slabFirstAt = recordAt(list[i]);
+  for (let i = list.length - 1; i >= 0 && !slabLastAt; i--) slabLastAt = recordAt(list[i]);
+  return { slabFirstAt, slabLastAt };
+}
 /** convertHistoryAsync with the browser cards placed BY TIME: a card goes before the first record stamped after it;
  *  the rest (after every stamped record) at the end. */
 // lane group-report-card: the list may also hold GROUP cards (the ring's report cards) — each placed at its own
@@ -546,7 +563,7 @@ function drainQueue(session, mm, ctx = null) {
       if (e.kind === 'peer') { if (mm.injectPeerCard) replayCard(mm, e.card, ctx); }
       else if (e.kind === 'bcard') placeBrowserCard(mm, e.card, { emit: true }); // a card the rebuild's markers already held is the same id — never twice
       else if (e.kind === 'gcard') placeGroupCard(mm, e.card, { emit: true }); // lane group-report-card: the ring's card is the same id — never twice
-      else if (e.kind === 'acard') { if (!patchArtifactCard(mm, e.card)) placeArtifactCard(mm, e.card, { emit: true }); } // lane artifacts-model: the rebuild's card is the same id — patched, never twice
+      else if (e.kind === 'acard') { if (!patchArtifactCard(mm, e.card)) placeArtifactCard(mm, e.card, { emit: true, rebuilt: true }); } // lane artifacts-model: the rebuild's card is the same id — patched, never twice
       else if (e.kind === 'pcard') { if (!patchProposalCard(mm, e.card)) placeProposalCard(mm, e.card, { emit: true }); } // lane browser-propose: the rebuild's card is the same id — patched, never twice
       else if (e.kind === 'perm-stale') applyPermissionStale(mm, e.requestId, e.staleBy);
       else if (e.kind === 'helper-result') applyHelperResults(session, mm, e.msg);
@@ -599,6 +616,7 @@ function rebuildHistory(session, sessionId, records, { budgetMs, onProgress, rep
   if (typeof mm.setHelperAskedAt === 'function') mm.setHelperAskedAt(session._helperAskedAt || null); // verify r3: a rebuilt ask keeps its real arrival (the 60 s inbox clock survives the restart)
   session._normalizer = mm;
   session._normEpoch = Date.now();
+  mm.artifactSlab = slabOf(records); // lane artifacts-settle-position: a rebuild's deliverable card lands inside THIS slab or nowhere
   // …and the op ring dies with the epoch (perf lane chunk D): its frames carry
   // the OLD normalizer's ids; a client resuming by seq names the old epoch and
   // takes the full attach. seq itself stays monotonic (a reset never reuses one).

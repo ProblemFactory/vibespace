@@ -210,5 +210,100 @@ STORE.pages = [{ ...PG, sessionId: 's7' }];
 if (MN) await MN.rebuildHistory(s7, 's7', TRANSCRIPT);
 ok(MN && !s7._artifacts[pk] && REG.storeRowsOf(null, 's7')[pk], 'CONTROL: a rebuild without the store merge loses the published page (the ⑧ replay assert sees it)');
 
+console.log('⑩ a rebuild\'s card lands at ITS time inside the loaded slab or nowhere (lane artifacts-settle-position)');
+// the PURE rule + the splice point
+const SLAB = { slabFirstAt: 1000, slabLastAt: 2000 };
+const placeTable = [[{ firstAt: 500 }, SLAB, 'none'], [{ firstAt: 1000 }, SLAB, 'at'], [{ firstAt: 1500 }, SLAB, 'at'], [{ firstAt: 2000 }, SLAB, 'at'], [{ firstAt: 2500 }, SLAB, 'tail'],
+  [{ firstAt: 0 }, SLAB, 'none'], [{}, SLAB, 'none'], [{ firstAt: 500 }, { ...SLAB, live: true }, 'tail'], [{ firstAt: 0 }, { live: true }, 'tail'], [{ firstAt: 500 }, {}, 'tail'], [{ firstAt: 1500 }, { slabFirstAt: 1000 }, 'tail'], [{ firstAt: 1000 }, { slabFirstAt: 1000 }, 'at']];
+const placeBad = placeTable.filter(([r, o, want]) => AF.cardPlacement(r, o) !== want).map(([r, o, want]) => `${JSON.stringify(r)} ${JSON.stringify(o)}: ${AF.cardPlacement(r, o)}≠${want}`);
+ok(!placeBad.length, 'cardPlacement: older than the slab / no instant ⇒ none · inside ⇒ at · after the last record ⇒ tail · live ⇒ tail · a clockless slab ⇒ tail', placeBad);
+const tsList = [{ ts: 10 }, { ts: 20 }, { ts: 0 }, { ts: 20 }, { ts: 30 }];
+ok(AF.timeSlot(tsList, 5) === 0 && AF.timeSlot(tsList, 10) === 1 && AF.timeSlot(tsList, 20) === 4 && AF.timeSlot(tsList, 25) === 4 && AF.timeSlot(tsList, 30) === 5 && AF.timeSlot([], 7) === 0 && AF.timeSlot(null, 7) === 0,
+  'timeSlot = before the first message stamped LATER (an equal stamp keeps its place; an unstamped one never counts); the end when none', [5, 10, 20, 25, 30].map((x) => AF.timeSlot(tsList, x)));
+// the owner's shape: a long transcript whose loaded slab starts at T0; rows written before it (a doc 2 d, a page 1 d,
+// a service started 1 d before) + a page published 10 min into the slab
+const T0 = Date.UTC(2026, 9, 6, 8, 0, 0), MIN = 60000, DAY = 86400000;
+const S = (m) => new Date(T0 + m * MIN).toISOString();
+const sayAt = (text, m) => ({ type: 'assistant', uuid: 'q' + m, timestamp: S(m), cwd: CWD, sessionId: 'c-8', message: { id: 'msg_q' + m, role: 'assistant', model: 'claude-opus-5-5', content: [{ type: 'text', text }] } });
+const userAt = (text, m) => ({ type: 'user', uuid: 'p' + m, timestamp: S(m), cwd: CWD, sessionId: 'c-8', message: { role: 'user', content: text } }); // a turn boundary: one turn's assistant records fold into one message
+const WP = tool('Write', { file_path: CWD + '/docs/plan.md', content: '# Plan\n' }, 1); // re-stamped into the slab below
+WP.rec.timestamp = S(5);
+const SLAB_RECS = [userAt('slab starts', 0), WP.rec, { ...result(WP.id, 1), timestamp: S(6) }, sayAt('before the page', 8), userAt('after the page', 12), sayAt('later still', 20)];
+const oldDocKey = ':' + CWD + '/todo_wave9.md';
+const persisted8 = AF.fold({}, { path: CWD + '/todo_wave9.md', op: 'write', at: T0 - 2 * DAY, id: 'w-old' });
+const PG_OLD = { id: 'pgold', name: 'house-web', srcKey: 'local:' + CWD + '/web/index.html', srcPath: CWD + '/web/index.html', path: '/p/pgold', public: true, updatedAt: T0 - DAY, sessionId: 's8' };
+const PG_NEW = { id: 'pgnew', name: 'house-web-2', srcKey: 'local:' + CWD + '/web2/index.html', srcPath: CWD + '/web2/index.html', path: '/p/pgnew', public: true, updatedAt: T0 + 10 * MIN, sessionId: 's8' };
+const svcKey = 'svc:job-old';
+const SVC = { [svcKey]: { key: svcKey, host: '', path: '', name: 'preview server', kind: 'service', by: 'agent', writes: 0, edits: 0, lastOp: 'listen', firstAt: T0 - DAY, lastAt: T0 - DAY, jobId: 'job-old', port: 8123, since: T0 - DAY, state: 'running', stoppedAt: 0 } };
+const pgOldKey = ':' + PG_OLD.srcPath, pgNewKey = ':' + PG_NEW.srcPath;
+STORE.pages = [PG_OLD, PG_NEW]; STORE.designs = [];
+N.setArtifactServiceSource((s) => (s && s.svcFixture ? SVC : {}));
+const s8 = { backend: 'claude', cwd: CWD, host: '', svcFixture: true, _artifacts: { ...persisted8 }, _normalizer: null };
+const cardsOf = (sess) => sess._normalizer.messages.filter((m) => m.noticeKind === 'artifact');
+const keyOfCard = (m) => m.content[0].key;
+await N.rebuildHistory(s8, 's8', SLAB_RECS);
+const c8 = cardsOf(s8);
+ok(s8._normalizer.artifactSlab.slabFirstAt === T0 && s8._normalizer.artifactSlab.slabLastAt === T0 + 20 * MIN, 'the rebuild stamps the loaded slab\'s first / last record instants on the normalizer', s8._normalizer.artifactSlab);
+ok(!c8.some((m) => [oldDocKey, pgOldKey, svcKey].includes(keyOfCard(m))), 'after a rebuild: NO card for the doc written 2 d before the slab, the page published 1 d before, the service started 1 d before', c8.map(keyOfCard));
+const list8 = s8._normalizer.messages;
+const iNew = list8.findIndex((m) => m.noticeKind === 'artifact' && keyOfCard(m) === pgNewKey);
+const textOf = (m) => (m && Array.isArray(m.content) ? m.content.map((b) => b.text || '').join('') : '');
+ok(c8.length === 2 && iNew > 0 && textOf(list8[iNew - 1]) === 'before the page' && textOf(list8[iNew + 1]) === 'after the page' && list8[iNew].ts === T0 + 10 * MIN,
+  'the page published 10 min into the slab: ONE card at its time — between the message before it and the one after, never at the tail', { cards: c8.map(keyOfCard), at: iNew, of: list8.length, prev: textOf(list8[iNew - 1]), next: textOf(list8[iNew + 1]) });
+ok(textOf(list8[list8.length - 1]) === 'later still', 'the last message of the slab is still the last thing in the chat (no card after it)', textOf(list8[list8.length - 1]));
+const chip8 = AF.view(AF.merge(s8._artifacts, SVC)).items.map((r) => r.key);
+ok([oldDocKey, pgOldKey, pgNewKey, svcKey].every((k) => chip8.includes(k)), 'the chip still lists every row — the two old ones, the old service and the in-slab page (the chip is their home)', chip8);
+// a card queued behind a running rebuild (the ports door re-feeds the old service; a page published mid-slab; a new write)
+const em8 = []; s8._normalizer.onOp((o) => em8.push(JSON.parse(JSON.stringify(o))));
+const p8 = N.rebuildHistory(s8, 's8', SLAB_RECS);
+const freshRow = AF.fold({}, { path: CWD + '/out/report.md', op: 'write', at: T0 + 30 * MIN, id: 'w-fresh' })[':' + CWD + '/out/report.md'];
+const midRow = AF.fold({}, { path: CWD + '/notes/mid.md', op: 'write', at: T0 + 15 * MIN, id: 'w-mid' })[':' + CWD + '/notes/mid.md'];
+N.feedArtifactCard(s8, AF.cardBlock(SVC[svcKey])); N.feedArtifactCard(s8, AF.cardBlock(midRow)); N.feedArtifactCard(s8, AF.cardBlock(freshRow));
+const queued8 = (s8._rebuildQueue || []).filter((e) => e.kind === 'acard').length;
+await p8;
+const l8 = s8._normalizer.messages, c8b = cardsOf(s8).map(keyOfCard);
+const iMid = l8.findIndex((m) => m.noticeKind === 'artifact' && keyOfCard(m) === midRow.key);
+const cr8 = em8.filter((o) => o.op === 'create' && o.message.noticeKind === 'artifact').map((o) => o.message.content[0].key);
+ok(queued8 === 3 && !c8b.includes(svcKey) && iMid > 0 && textOf(l8[iMid - 1]) === 'after the page' && textOf(l8[iMid + 1]) === 'later still' && keyOfCard(l8[l8.length - 1]) === freshRow.key,
+  'cards queued behind the rebuild: the old service ⇒ none · a write inside the slab ⇒ at its time · a write after the slab ⇒ the tail', { queued8, c8b, iMid, last: keyOfCard(l8[l8.length - 1]) });
+ok(cr8.length === 1 && cr8[0] === freshRow.key, 'only the tail card is a live `create` op (a mid-list card is placed silently — the client appends a create at its tail)', cr8);
+// a LIVE birth (outside a rebuild) appends at the tail; a second refresh adds nothing new
+const liveRow = AF.fold({}, { path: CWD + '/out/summary.md', op: 'write', at: T0 + 40 * MIN, id: 'w-live' })[':' + CWD + '/out/summary.md'];
+const oldEdit = { ...persisted8[oldDocKey], edits: 1, lastAt: T0 + 41 * MIN, lastOp: 'edit' };
+const before8 = em8.length;
+N.feedArtifactCard(s8, AF.cardBlock(liveRow));
+const l8c = s8._normalizer.messages;
+ok(keyOfCard(l8c[l8c.length - 1]) === liveRow.key && em8.slice(before8).some((o) => o.op === 'create' && o.message.content[0].key === liveRow.key), 'a LIVE write ⇒ its card at the tail + a create op (unchanged)');
+N.feedArtifactCard(s8, AF.cardBlock(oldEdit));
+ok(keyOfCard(s8._normalizer.messages[s8._normalizer.messages.length - 1]) === oldDocKey, 'a LIVE edit of a file written before the slab ⇒ its card is born at the tail (a live birth — the agent just touched it)');
+s8._artifacts = AF.merge(s8._artifacts, { [freshRow.key]: freshRow, [midRow.key]: midRow, [liveRow.key]: liveRow });
+const s8r = { ...s8, _artifacts: { ...s8._artifacts, [oldDocKey]: persisted8[oldDocKey] }, _normalizer: null, _rebuildPromise: null, _rebuildQueue: null };
+await N.rebuildHistory(s8r, 's8', SLAB_RECS);
+const ids1 = cardsOf(s8r).map((m) => m.id);
+await N.rebuildHistory(s8r, 's8', SLAB_RECS);
+const ids2 = cardsOf(s8r).map((m) => m.id);
+ok(ids1.join() === ids2.join() && new Set(ids2).size === ids2.length && !cardsOf(s8r).some((m) => [oldDocKey, pgOldKey, svcKey].includes(keyOfCard(m))), 'a second refresh: the same cards (idempotent by id), still none for the old rows', { ids1: ids1.length, ids2: ids2.length });
+// patched-copy controls: the old push-at-tail in settle; the store rows placed without the range check
+const nsrc8 = (await import('node:fs')).readFileSync(path.join(REPO, 'src/normalizers.js'), 'utf8');
+const settleCall = 'if (!patchArtifactCard(mm, b, { emit: false })) placeArtifactCard(mm, b, { rebuilt: true });';
+ok(nsrc8.includes(settleCall), 'control anchor: settle places a REBUILT card');
+const MT = M.load('src/normalizers.js', nsrc8.replace(settleCall, 'if (!patchArtifactCard(mm, b, { emit: false })) placeArtifactCard(mm, b);'), 'tailsettle');
+MT.setArtifactStoreSource(REG.storeRowsOf); MT.setArtifactServiceSource((s) => (s && s.svcFixture ? SVC : {}));
+const s9 = { backend: 'claude', cwd: CWD, host: '', svcFixture: true, _artifacts: { ...persisted8 }, _normalizer: null };
+await MT.rebuildHistory(s9, 's8', SLAB_RECS);
+const l9 = s9._normalizer.messages, last9 = l9.findIndex((m) => textOf(m) === 'later still');
+const tail9 = l9.slice(last9 + 1).map((m) => (m.noticeKind === 'artifact' ? keyOfCard(m) : textOf(m)));
+ok(last9 > 0 && [oldDocKey, pgOldKey, svcKey].every((k) => tail9.includes(k)), 'CONTROL: with the old push-at-tail in settle the three stale cards sit after the last message (the ⑩ "no card" assert sees it)', tail9);
+const asrc8 = (await import('node:fs')).readFileSync(path.join(REPO, 'src/artifacts.js'), 'utf8');
+const range = '  if (at < slabFirstAt) return \'none\';\n';
+ok(asrc8.includes(range), 'control anchor: the slab range check is in cardPlacement');
+const afNoRange = M.write('src/artifacts.js', asrc8.replace(range, '\n'), 'norange');
+const MR8 = M.load('src/normalizers.js', nsrc8.replace("require('./artifacts.js')", 'require(' + JSON.stringify(afNoRange) + ')'), 'norange');
+MR8.setArtifactStoreSource(REG.storeRowsOf); MR8.setArtifactServiceSource(() => ({}));
+const s10 = { backend: 'claude', cwd: CWD, host: '', _artifacts: {}, _normalizer: null };
+await MR8.rebuildHistory(s10, 's8', SLAB_RECS);
+ok(s10._normalizer.messages.some((m) => m.noticeKind === 'artifact' && keyOfCard(m) === pgOldKey), 'CONTROL: the store rows placed without the range check draw the page published before the slab (the ⑩ "no card" assert sees it)');
+N.setArtifactServiceSource(REG.servicesOf);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

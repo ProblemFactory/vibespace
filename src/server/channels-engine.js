@@ -1828,7 +1828,7 @@ function create(deps = {}) {
       if (!en) return;
       if (separate && r.threadKey) { const prev = en.threadOwed; const mt = Feed.mergeThreadOwed(en.threadOwed, new Map([[r.threadKey, now()]])); en.threadOwed = mt.marks; en.threadReach = Feed.mergeThreadReach(en.threadReach, prev, [r.threadKey], Number(r.record.at) || now(), mt.marks); }
       if (fresh.length) {
-        en.unread = (Number(en.unread) || 0) + fresh.filter((x) => Number(x.at) > (Number(en.readAt) || 0)).length;
+        countFresh(rec, convId, en, fresh);   // lane channel-self-unread: the owner's own message is read by construction
         en.authors = mergeAuthors(en.authors, fresh);
         en.authors = Av.stampSelf(en.authors, selfIdOf(rec));   // lane channels-list-polish: the account's id, at index time
         const newest = fresh.reduce((m, x) => (Number(x.at) > m ? Number(x.at) : m), 0);
@@ -2425,7 +2425,8 @@ function create(deps = {}) {
       // and re-derived from the log on every mark-read. Maintained on APPEND
       // (2026-09-26): re-reading up to 8 000 records per ingest was a pass's
       // largest synchronous cost at 873 conversations.
-      if (freshRecs.length) en.unread = (Number(en.unread) || 0) + freshRecs.filter((r) => Number(r.at) > (Number(en.readAt) || 0)).length;
+      // lane channel-self-unread: the owner's OWN message adds 0 and moves `readAt` to its instant (FO.readAdvance)
+      if (freshRecs.length) countFresh(rec, convId, en, freshRecs);
       if (freshRecs.length) en.authors = mergeAuthors(en.authors, freshRecs);
       if (freshRecs.length) en.authors = Av.stampSelf(en.authors, selfIdOf(rec));   // lane channels-list-polish: the account's id, at index time
       // R3 (§23): the newest message the OWNER wrote here (`author.isSelf` — a reply from the vendor's own app
@@ -2477,11 +2478,25 @@ function create(deps = {}) {
     }
     return { appended, duplicates, anchorMoved, complete, judged, missed, readAt };
   }
-  /** The newest instant among records the OWNER wrote (`author.isSelf`), 0 when none (R3 §23). */
-  function selfAtOf(recs) {
+  /** The newest instant among records the OWNER wrote (`author.isSelf` / the resolved `selfId` — FO.selfRead), 0 when none (R3 §23). */
+  function selfAtOf(recs, selfId = null) {
     let t = 0;
-    for (const r of recs || []) if (r && r.author && r.author.isSelf && Number(r.at) > t) t = Number(r.at);
+    for (const r of recs || []) if (r && FO.selfRead(r, selfId) && Number(r.at) > t) t = Number(r.at);
     return t;
+  }
+  /** lane channel-self-unread: the log's records past `sinceAt` that are UNREAD — the re-derivation (invariant 7)
+   *  without the owner's own (FO.selfRead: read by construction). */
+  function unreadSince(adapterId, convId, sinceAt) {
+    const self = selfIdOf({ id: adapterId });
+    return store.countSince(adapterId, convId, sinceAt, (r) => !FO.selfRead(r, self));
+  }
+  /** lane channel-self-unread (userW inc-muxekkry-clfb): a batch into the row's count, at EVERY append site —
+   *  FO.readAdvance: the owner's newest message moves `readAt` to its instant and the row is re-derived past it
+   *  (older unread before it are read now); otherwise the batch's OTHER records past `readAt` add. */
+  function countFresh(rec, convId, en, fresh) {
+    const ra = FO.readAdvance(en.readAt, fresh, selfIdOf(rec));
+    if (ra.moved) { en.readAt = ra.readAt; en.unread = unreadSince(rec.id, convId, ra.readAt); }
+    else en.unread = (Number(en.unread) || 0) + ra.unread;
   }
   /** The distinct authors seen in a conversation, newest first, bounded —
    *  the facts a pattern's `participant` / `from-address` rules match. */
@@ -3679,7 +3694,7 @@ function create(deps = {}) {
     if (!e.pushBatch) e.pushBatch = new Map();
     const b = e.pushBatch.get(convId) || { appended: 0, lastAt: null, lastText: null, lastTextAt: -Infinity, selfAt: 0 };
     b.appended += w.appended;
-    if (Array.isArray(w.fresh)) { const sa = selfAtOf(w.fresh); if (sa > (b.selfAt || 0)) b.selfAt = sa; }
+    if (Array.isArray(w.fresh)) { const sa = selfAtOf(w.fresh, selfIdOf(rec)); if (sa > (b.selfAt || 0)) b.selfAt = sa; }
     if (w.lastAt && (!b.lastAt || w.lastAt > b.lastAt)) b.lastAt = w.lastAt;
     if (w.lastAt && w.lastAt >= b.lastTextAt && typeof w.lastText === 'string') { b.lastTextAt = w.lastAt; b.lastText = previewText(w); }
     e.pushBatch.set(convId, b);
@@ -3698,7 +3713,8 @@ function create(deps = {}) {
         if (b.lastAt && (!en.lastAt || b.lastAt > en.lastAt)) en.lastAt = b.lastAt;
         if (typeof b.lastText === 'string' && b.lastTextAt >= (Number(en.lastAt) || 0)) en.lastText = lastTextOf(b.lastText);
         if (b.selfAt > (Number(en.selfAt) || 0)) en.selfAt = b.selfAt;
-        en.unread = store.countSince(rec.id, convId, en.readAt || 0);
+        if (b.selfAt > (Number(en.readAt) || 0)) en.readAt = b.selfAt;   // lane channel-self-unread: sending = read up to it
+        en.unread = unreadSince(rec.id, convId, en.readAt || 0);
         en.lane = { ...(en.lane || {}), via: 'push', lastPushAt: now(), firstSeenTotal: ((en.lane && en.lane.firstSeenTotal) || 0) + b.appended };
         changed.push(`${rec.id}/${convId}`);
       }
@@ -4872,7 +4888,7 @@ function create(deps = {}) {
       // a COMPLETE walk clears its cut stop (verify r3) — an incomplete one keeps it for the next walk
       if (landed.complete && en.threadCuts && typeof en.threadCuts === 'object' && en.threadCuts[key]) { const tc = { ...en.threadCuts }; delete tc[key]; if (Object.keys(tc).length) en.threadCuts = tc; else delete en.threadCuts; }
       if (landed.fresh.length) {
-        en.unread = (Number(en.unread) || 0) + landed.fresh.filter((r) => Number(r.at) > (Number(en.readAt) || 0)).length;
+        countFresh(rec, convId, en, landed.fresh);   // lane channel-self-unread
         en.authors = mergeAuthors(en.authors, landed.fresh);
         en.authors = Av.stampSelf(en.authors, selfIdOf(rec));   // lane channels-list-polish: the account's id, at index time
         const newest = landed.fresh.reduce((m, r) => (Number(r.at) > m ? Number(r.at) : m), 0);
@@ -5846,7 +5862,7 @@ function create(deps = {}) {
       found = true;
       const newest = store.readTail(adapterId, convId, { limit: 1 })[0];
       const stamp = Number.isFinite(at) ? at : (newest ? (Number(newest.at) || 0) : (en.readAt || 0));
-      const unread = store.countSince(adapterId, convId, stamp);
+      const unread = unreadSince(adapterId, convId, stamp);
       changed = en.readAt !== stamp || en.unread !== unread;
       en.readAt = stamp;
       en.unread = unread;
@@ -6043,6 +6059,7 @@ function create(deps = {}) {
     // reads them (`author.display`: the owner's name › the vendor's way); the vendor `name` (what a rule matches) unchanged
     const fresh = fresh0.map((r) => viewOf(rec, r));
     const t = now();
+    const selfId = selfIdOf(rec);
     const en = store.index.peek(`${rec.id}/${convId}`);
     if (!en) return;
     // The two LEDGERS below are DERIVED counts (§5 invariant 7: cached for
@@ -6106,6 +6123,9 @@ function create(deps = {}) {
         const mctx = { ...(filter && Array.isArray(filter.rules) && filter.rules.some((x) => x && F.PLACE_RULE_KINDS.includes(x.kind)) ? placeCtx(w.principal) : {}), subjectOf };
         for (const r of fresh) {
           try {
+            // lane channel-self-unread (B-c91b: 'inc-' matched the owner's OWN Outbox replies to userW): the owner's
+            // own message is never a hit — no keyword / regex / place rule, no @ in it, no 'all' watcher (FO.selfRead)
+            if (FO.selfRead(r, selfId)) continue;
             if (w.mode === 'all') { hits.push({ record: r, why: [] }); continue; }
             const m = F.matchRecord(filter, r, mctx);
             if (m.hit) hits.push({ record: r, why: m.why });

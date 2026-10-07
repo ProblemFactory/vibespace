@@ -283,6 +283,36 @@ async function removalLeg(ENGM, name) {
   ok(cut !== src && r.again.ok && r.again.set && r.row(), 'CONTROL: without the check the removed row comes BACK (the leg above would be red)', JSON.stringify(r.again));
 }
 
+console.log('⑧ lane channel-self-unread (B-c91b): the owner\'s OWN words are never a watch hit');
+async function selfWatchLeg(ENGM, name) {
+  const { eng, delivered, stashed } = mkEngine(name, { ENGM });
+  await eng.pass(A, { force: true });
+  await eng.setGrain(A, { kind: 'account' }, { access: [acc(AGENT)] });
+  const w = await eng.agentWatch(AG, KEY, { keywords: ['inc-'] });
+  const rec = eng.adapterRecords().adapters.find((r) => r.id === A);
+  const got = eng.messages(A, C, { limit: 1 });
+  const r0 = (got.records || got)[0];
+  const mkR = (vendorId, author, text, dt) => ({ ...r0, id: `${r0.id}-${vendorId}`, vendorId, at: Number(r0.at) + dt, author, text });
+  const n = () => delivered.filter((d) => d.cid === 'agent-1').length + stashed.filter((d) => d.cid === 'agent-1').length;
+  // B-c91b's exact shape: the owner's OWN Outbox reply to userW carries the incident id the keyword watches
+  await eng.onFresh(rec, C, [mkR('own-1', { id: 'ou_owner', name: 'Owner', isSelf: true, isBot: false }, 'Re: inc-muxekkry-clfb — fixed, closing it', 1000)], { origin: 'test' });
+  await new Promise((r) => setTimeout(r, 50));
+  const afterSelf = n();
+  await eng.onFresh(rec, C, [mkR('userW-1', { id: 'ou_userW', name: 'userW', isSelf: false, isBot: false }, 'inc-muxekkry-clfb is back', 2000)], { origin: 'test' });
+  await new Promise((r) => setTimeout(r, 50));
+  return { set: !!(w.ok && w.set), afterSelf, afterPeer: n() };
+}
+{
+  const r = await selfWatchLeg(ENG, 'e8');
+  ok(r.set && r.afterSelf === 0, 'the owner\'s own \'inc-…\' reply (author.isSelf) is NO hit: nothing stashed, nobody woken', JSON.stringify(r));
+  ok(r.afterPeer >= 1, 'userW\'s \'inc-…\' message IS a hit (the watch still works)', JSON.stringify(r));
+  const src = engineSource(REPO);
+  const cut = src.replace('            if (FO.selfRead(r, selfId)) continue;\n', '');
+  const E8 = MUT.load('src/server/channels-engine.js', cut, 'no-self-skip');
+  const rc = await selfWatchLeg(E8, 'e8c');
+  ok(cut !== src && rc.afterSelf >= 1, 'CONTROL: the watch without its self skip hits on the owner\'s own words (B-c91b; the leg above would be red)', JSON.stringify(rc));
+}
+
 // ── wiring pins: the route + CLI spell the three verbs ──
 {
   const asrc = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf8');

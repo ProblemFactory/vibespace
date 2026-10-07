@@ -1244,8 +1244,20 @@ function childEnv(base, answer = {}, { home = '', uid = null, ownDir = null } = 
   return { env, dropped: dropped.sort(), needsConfig: !absPath(env[CONFIG_KEY]) };
 }
 
+/** lane browser-unstable-rejudge (the owner's instance, 2026-10-06: `status` said "browser: ready pid 3928207" — the DAEMON's
+ *  pid — while every verb answered browser_unstable for 15 h): the `browser:` cell of an attachment line in `status`, from the
+ *  keeper's browser view. A closed browser (`closed` — browser_unstable parked, browser_closed, profile_locked…) is said with
+ *  its code and the keeper's own words (B.unstableText: the state + the way out), never "ready"; the pid shown is the
+ *  browser's (Chrome's, `browser.pid`) or none — the daemon's pid is never a browser's. */
+function browserCell(b) {
+  if (!b || typeof b !== 'object') return 'not running';
+  const c = b.closed && typeof b.closed === 'object' && b.closed.code ? b.closed : null;
+  if (c) return `${c.code === 'browser_unstable' ? 'parked' : 'closed'} (${c.code}${c.unstable ? ', ' + c.unstable : ''}) — ${c.error || 'no browser is running'}`;
+  const chrome = b.browser && Number.isInteger(b.browser.pid) && b.browser.pid > 0 ? b.browser.pid : null;
+  return `${b.state || 'unknown'}${chrome ? ' pid ' + chrome : ''}`;
+}
 module.exports = {
-  REAL_BINARY, SHIM_MARKER, OURS, OURS_PAGE, PAGE_VERBS, REFUSED_VERBS, IDENTITY_FLAGS, RAW_CDP_FLAGS, LAUNCH_FLAGS, OPEN_FLAGS,
+  browserCell, REAL_BINARY, SHIM_MARKER, OURS, OURS_PAGE, PAGE_VERBS, REFUSED_VERBS, IDENTITY_FLAGS, RAW_CDP_FLAGS, LAUNCH_FLAGS, OPEN_FLAGS,
   ENV_PASS, ENV_LEGACY_KEEP, SOCKET_KEY, VALUE_FLAGS: Object.freeze([...VALUE_FLAGS]), BOOL_FLAGS: Object.freeze([...BOOL_FLAGS]), GET_NOUNS,
   classify, splitWords, collisions, known, resolveRealBinary, childEnv, hostProfilePath, hostSocketDirPath,
   CONFIG_KEY, PROJECT_CONFIG_KEYS, RAW_CONFIG_KEYS, RAW_ARG_RE, sanitizeArgs, sanctionedConfig,

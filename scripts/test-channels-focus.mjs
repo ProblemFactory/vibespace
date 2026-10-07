@@ -112,6 +112,10 @@ const FIXTURE = [
   }),
   [row('read-1h', { touch: { read: { id: 'cid-g', name: 'Gamma', at: NOW - H, upTo: NOW - 5 * 60e3 } } }), 'read'],
   [row('new-since', { lastAt: NOW - 60e3, touch: { read: { id: 'cid-g', name: 'Gamma', at: NOW - H, upTo: NOW - 2 * H } } }), 'new-since-read'],
+  // lane channel-self-unread: the OWNER's own message as the newest (`touch.selfAt` = lastAt) is never news since a read;
+  // a peer's message after it is
+  [row('self-newest', { lastAt: NOW - 60e3, touch: { selfAt: NOW - 60e3, read: { id: 'cid-g', name: 'Gamma', at: NOW - H, upTo: NOW - 2 * H } } }), 'read'],
+  [row('peer-after-self', { lastAt: NOW - 30e3, touch: { selfAt: NOW - 60e3, read: { id: 'cid-g', name: 'Gamma', at: NOW - H, upTo: NOW - 2 * H } } }), 'new-since-read'],
   [row('read-edge-in', { touch: { read: { name: 'Gamma', at: NOW - D + 1, upTo: NOW } } }), 'read'],
   [row('read-edge-out', { touch: { read: { name: 'Gamma', at: NOW - D, upTo: NOW } } }), null],
   [row('held-pending', { touch: { pending: 3 } }), 'held'],
@@ -138,6 +142,15 @@ const FIXTURE = [
     const got = Fo.statusTag({ kind: 'conv', conv: r }, NOW);
     ok((got ? got.code : null) === want, `statusTag ${r.id} → ${want || 'none (not on the first screen)'}`, JSON.stringify(got));
   }
+  // lane channel-self-unread (userW inc-muxekkry-clfb): THE PURE RULE every counter asks
+  const own = { at: 200, author: { id: 'ou_o', isSelf: true } }, peer = (at) => ({ at, author: { id: 'ou_w', isSelf: false } });
+  const unresolved = { at: 300, author: { id: 'ou_o' } };
+  ok(Fo.selfRead(own) && !Fo.selfRead(peer(1)) && !Fo.selfRead(unresolved) && Fo.selfRead(unresolved, 'ou_o') && !Fo.selfRead(unresolved, '') && !Fo.selfRead(null), 'selfRead: `isSelf`, or the RESOLVED own id; unknown self-ness is not self (never a guess)');
+  const ra = Fo.readAdvance(100, [peer(150), own, peer(250)]);
+  ok(ra.readAt === 200 && ra.unread === 1 && ra.moved, 'readAdvance: the owner\'s message moves the read line to its instant; only the peer\'s LATER message counts', JSON.stringify(ra));
+  const rb = Fo.readAdvance(100, [peer(150), unresolved]);
+  ok(rb.readAt === 100 && rb.unread === 2 && !rb.moved, 'readAdvance: no self record ⇒ the line stays and every record past it counts (as before)', JSON.stringify(rb));
+  ok(Fo.readAdvance(500, [own]).moved === false && Fo.readAdvance(500, [own]).unread === 0, 'readAdvance: a self record older than the line moves nothing and adds 0');
   // THE PRIORITY: a row that holds EVERY fact, then each dropped in turn
   const all = { outbox: { awaiting: 1, unknown: 1 }, assignment: principal('Alpha'), lastAt: NOW, touch: { read: { name: 'Gamma', at: NOW - H, upTo: NOW - 2 * H }, pending: 2, selfAt: NOW - H } };
   const steps = [];

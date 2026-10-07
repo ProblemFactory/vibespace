@@ -172,6 +172,26 @@ function cardBlock(row) {
     ...(row.kind === 'service' ? { jobId: row.jobId, port: row.port, since: row.since || 0, stoppedAt: row.stoppedAt || 0,
       via: row.via, localUrl: row.localUrl, forwardId: row.forwardId || null, ...(row.target ? { target: row.target } : {}), ...(row.publishedBy ? { publishedBy: row.publishedBy } : {}) } : {}) };
 }
+// THE PLACEMENT (lane artifacts-settle-position, owner 2026-10-07: every refresh grew stale cards at the bottom of a long
+// conversation). `cardPlacement(row, {slabFirstAt, slabLastAt, live})` → 'tail' | 'at' | 'none': a LIVE birth appends
+// ('tail'); a card a REBUILD places (the merged / store / service rows, a card queued behind it) lands at its OWN
+// instant (`firstAt`) inside the loaded slab ('at'), after the slab's last record ('tail'), and NOWHERE when it is older
+// than the slab's first record or has no instant ('none' — the chip is its home). A slab with no stamped record (a
+// clockless harness) cannot say "older" ⇒ 'tail'. `timeSlot(list, at)` = the index of the first message stamped LATER
+// than `at` (list.length when none): the splice point — never a sort of the list.
+function cardPlacement(row, { slabFirstAt = 0, slabLastAt = 0, live = false } = {}) {
+  if (live) return 'tail';
+  const at = Number(row && row.firstAt) || 0;
+  if (!at) return 'none';
+  if (!slabFirstAt) return 'tail';
+  if (at < slabFirstAt) return 'none';
+  return at > (slabLastAt || slabFirstAt) ? 'tail' : 'at';
+}
+function timeSlot(list, at) {
+  const n = Array.isArray(list) ? list.length : 0;
+  for (let i = 0; i < n; i++) if ((Number(list[i] && list[i].ts) || 0) > at) return i;
+  return n;
+}
 /** The card's / list row's FACTS (the client words them through t()): `changes` = re-writes + edits. */
 function cardFacts(b) {
   const w = (b && b.writes) || 0, e = (b && b.edits) || 0;
@@ -340,7 +360,7 @@ function rowFor(rows, arg, host = '') {
 const kindWord = (kind, lang = 'en') => (KIND_WORDS[kind] || KIND_WORDS.other)[lang] || (KIND_WORDS[kind] || KIND_WORDS.other).en;
 
 module.exports = { KINDS, VIEW_ORDER, OPS, REG_OPS, KIND_RANK, BY, MAX_ROWS, CATEGORY_KIND, KIND_WORDS, kindOf, absPath, keyOf, apply, fold, merge, view,
-  cardWorthy, cardBlock, cardFacts, autoOpenVerdict, ownerOfIn, editNoteText, lineDelta, kindWord, baseName,
+  cardWorthy, cardBlock, cardPlacement, timeSlot, cardFacts, autoOpenVerdict, ownerOfIn, editNoteText, lineDelta, kindWord, baseName,
   pageOp, designOp, uploadOp, storeRows,
   SERVICE_KEEP_MS, jobOwnerCid, forwardFor, serviceLink, serviceRow, serviceRows,
   VIA_KINDS, MAX_HANDOVER, viaOf, handoverOp, markHanded, rowFor };

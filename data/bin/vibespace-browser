@@ -1187,7 +1187,7 @@ async function runOursPage(cls, { r, head, profileId, wantsJson }) {
     if (r.noDisplay) console.log(r.noDisplay);
     for (const a of set) {
       const l = r.leases.find((x) => x.profileId === a.profileId) || {};
-      console.log(`${a.isDefault ? '*' : ' '} ${a.alias}  →  ${a.label} (${a.profileId})${l.mediated ? ' · shared (mediated: your own tabs only)' : ''} · attached ${ago(a.since)} · input: ${l.input || '?'} · browser: ${l.browser ? l.browser.state + (l.browser.pid ? ' pid ' + l.browser.pid : '') : 'not running'} · ${l.others ?? 0} other session(s)`);
+      console.log(`${a.isDefault ? '*' : ' '} ${a.alias}  →  ${a.label} (${a.profileId})${l.mediated ? ' · shared (mediated: your own tabs only)' : ''} · attached ${ago(a.since)} · input: ${l.input || '?'} · browser: ${typeof V.browserCell === 'function' ? V.browserCell(l.browser) : (l.browser ? l.browser.state : 'not running')} · ${l.others ?? 0} other session(s)`);
     }
     for (const c of r.children || []) console.log(`  child ${c.handle} (own ephemeral browser, minted ${ago(c.since)})`);
     if (set.length > 1) console.log(`${set.length} attachments: every command needs --profile <handle> (or VIBESPACE_BROWSER) — a bare one is refused profile_required; the default is ${r.defaultProfile ? (set.find((a) => a.isDefault) || {}).alias || 'set' : 'NONE (pin one)'}.`);

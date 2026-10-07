@@ -174,6 +174,14 @@ const CHANNELS_GATES = {
   // lane channel-avatars (int212): "is this person in OUR stored conversations" — a boolean, never a served record; the
   // tail is read only for a conversation with an index row (store.index.live() first)
   authorIsOurs: 'store.index',
+  // lane channel-self-unread (int228): the unread RE-DERIVATION — a count past readAt (never a served record), the owner's own skipped;
+  // flushPushBatch and markRead call it after their gates, countFresh (a helper of the three append sites) when the owner's own
+  // message moves readAt — and each append site holds the conversation's index row before it counts
+  unreadSince: { callers: ['flushPushBatch', 'markRead', 'countFresh'] },
+  countFresh: { callers: ['landById', 'ingest', 'threadRefresh'] },
+  landById: 'store.index.entry(',
+  ingest: 'store.index.entry(',
+  threadRefresh: 'store.index.entry(',
 };
 function groupLogCensus(src) {
   const out = { outside: [], groupsRaw: [], channelsUngated: [], channelsUnknown: [], groupsNamed: false, sites: 0 };
@@ -189,13 +197,16 @@ function groupLogCensus(src) {
       const gate = CHANNELS_GATES[fn.name];
       if (!gate) { out.channelsUnknown.push(`${fn.name}@${i + 1}`); return; }
       if (typeof gate === 'object') {
-        // a HELPER: every call site of it must sit inside a declared, gated function, the gate before the call
-        lines.forEach((cl, ci) => {
-          if (ci === fn.start || /^\s*(\/\/|\*)/.test(cl) || !cl.includes(fn.name + '(')) return;
+        // a HELPER: every call site of it must sit inside a declared, gated function, the gate before the call — or inside a
+        // declared HELPER of its own (int228: channel-self-unread's countFresh → unreadSince), whose call sites answer the same way
+        const helperCalls = (h, row, depth) => lines.forEach((cl, ci) => {
+          if (ci === h.start || /^\s*(\/\/|\*)/.test(cl) || !cl.includes(h.name + '(')) return;
           const caller = enclosing(lines, ci);
           const g = CHANNELS_GATES[caller.name];
-          if (!gate.callers.includes(caller.name) || typeof g !== 'string' || !lines.slice(caller.start, ci + 1).join('\n').includes(g)) out.channelsUngated.push(`${fn.name} called from ${caller.name}@${ci + 1} (not a declared gated caller)`);
+          if (row.callers.includes(caller.name) && g && typeof g === 'object' && depth < 3) return helperCalls(caller, g, depth + 1);
+          if (!row.callers.includes(caller.name) || typeof g !== 'string' || !lines.slice(caller.start, ci + 1).join('\n').includes(g)) out.channelsUngated.push(`${h.name} called from ${caller.name}@${ci + 1} (not a declared gated caller)`);
         });
+        helperCalls(fn, gate, 1);
         return;
       }
       const before = lines.slice(fn.start, i + 1).join('\n');
@@ -214,6 +225,17 @@ console.log('§B the group log: every read folded, the clear\'s own, or gated of
   { const ge = read('src/server/groups-engine.js'); ok(/const found = originalsOf\(gid, want\);/.test(ge) && /originalsOf\(gid, vids\)\.values\(\)\]\.filter\(Boolean\)\.map\(witnessOf\)/.test(ge), 'originalsOf has exactly its two callers: clearMessages (cleared copies out) and judgeHeldEntry (witnesses only, never a record kept)'); }
   ok(!c.channelsUnknown.length, 'every channels-engine reader is a declared function with a declared gate', c.channelsUnknown);
   ok(!c.channelsUngated.length, 'every channels-engine reader\'s gate stands before its read', c.channelsUngated);
+  // int228 CONTROLS for the helper-of-a-helper rule (channel-self-unread's countFresh → unreadSince): a stray caller, and a declared
+  // caller whose call stands BEFORE its gate, are each reported
+  { const E = 'src/server/channels-engine.js', src0 = sources(), eng = src0.get(E);
+    const sIn = "  async function ingest(e, rec, convId, origin = 'timer') {\n";
+    ok(eng.split(sIn).length === 2 && /\n  function countFresh\(/.test(eng), 'CONTROL setup (int228): the ingest head and countFresh are found once each');
+    const m1 = new Map(src0); m1.set(E, eng.replace(sIn, "  function strayCount(rec, en) { countFresh(rec, 'c', en, []); }\n" + sIn));
+    const u1 = groupLogCensus(m1).channelsUngated;
+    ok(u1.some((x) => /^countFresh called from strayCount@/.test(x)), 'CONTROL (int228): countFresh called from an undeclared function is reported (a helper of a helper still needs a gated caller)', u1);
+    const m2 = new Map(src0); m2.set(E, eng.replace(sIn, sIn + '    countFresh(rec, convId, null, []);\n'));
+    const u2 = groupLogCensus(m2).channelsUngated;
+    ok(u2.some((x) => /^countFresh called from ingest@/.test(x)), 'CONTROL (int228): a declared caller counting BEFORE its index row (store.index.entry( after the call) is reported', u2); }
   ok(!c.groupsNamed, 'channels-engine never names the groups adapter (a group log is not one of its conversations)');
   // the declared functions really read (a dead row would let a renamed reader hide behind it)
   const seen = new Set();

@@ -45,7 +45,8 @@ fs.rmSync(stubDir, { recursive: true, force: true });
 fs.mkdirSync(stubDir, { recursive: true });
 const CWD = { alpha: path.join(fakeHome, 'alpha'), beta: path.join(fakeHome, 'beta') };
 for (const d of Object.values(CWD)) fs.mkdirSync(d, { recursive: true });
-const MSG1 = 'URGENT: is the deploy blocked on your side?\nIt fails at step 3.';
+// lane group-report-whole: ~1 500 characters, past the old 400-character line cap — it must reach the agent and the card WHOLE
+const MSG1 = 'URGENT: is the deploy blocked on your side?\nIt fails at step 3.\nProgress so far: ' + 'step done, gate green; '.repeat(60) + 'END-OF-PROGRESS';
 const MSG2 = 'still blocked — please look now';
 let failed = 0, passed = 0;
 const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1500) : ''}`); } return !!c; };
@@ -250,6 +251,8 @@ try {
   const gi = c3.findIndex((c) => c.g), ui = c3.findIndex((c) => c.u && /hi beta/.test(c.u)), ai = c3.findIndex((c) => c.a && /noted: hi beta/.test(c.a));
   check(`the card is "alpha → ${gname}" with alpha's words (its own line breaks), "delivered with this turn" on its head`, gi >= 0 && c3[gi].g === `alpha → ${gname}` && c3[gi].body.includes('URGENT: is the deploy blocked on your side?') && c3[gi].body.includes('It fails at step 3.') && /delivered with this turn/.test(c3[gi].tip), c3[gi]);
   check('…under the owner\'s message, before beta\'s reply (the injection point)', ui >= 0 && ui < gi && gi < ai, c3);
+  const cutNote = await evalJs(`(() => { const e = (${VIEW(who.beta.wid)})._messageList.querySelector('.chat-group-message'); return { cut: e.textContent.includes('Cut short'), whole: e.textContent.includes('END-OF-PROGRESS') }; })()`);
+  check(`a ${MSG1.length}-character message rides WHOLE: the agent's report holds its last words, the card too, and the card draws NO "cut short" footer (lane group-report-whole)`, MSG1.length > 1400 && cutNote.whole && !cutNote.cut && ctxLog(who.beta.sid).some((x) => x.k === 'typed:hi beta' && x.context.includes('END-OF-PROGRESS') && !/cut short/.test(x.context)), cutNote);
   check('the strip and the card hint are gone (the report went with the turn)', await waitFor(`${STRIP}.hidden === true && ![...document.querySelectorAll('.session-item-card')].some((c) => c._webuiId === ${JSON.stringify(who.beta.wid)} && c.querySelector('.sess-stash-chip'))`, 8000));
   await evalJs(`(() => { const e = (${VIEW(who.beta.wid)})._messageList.querySelector('.chat-group-message'); e.id = 'gc-card1'; e.scrollIntoView({ block: 'center' }); return true; })()`);
   await sleep(200);

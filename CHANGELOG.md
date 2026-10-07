@@ -2,6 +2,16 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.228 — 2026-10-07
+
+### Changed
+- A message from another agent reaches an agent whole when it fits, instead of being cut at 400 characters.
+
+### Fixed
+- An agent's browser that could not start while the desktop was down now recovers by itself when the desktop returns, and `status` no longer calls it ready.
+- A message you sent yourself no longer counts as unread or triggers keyword alerts.
+- Refreshing a long conversation no longer re-adds old file cards at the bottom.
+
 ## 2.369.227 — 2026-10-06
 
 ### Changed

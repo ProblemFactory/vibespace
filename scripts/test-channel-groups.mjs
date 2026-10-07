@@ -260,11 +260,33 @@ console.log('§1c reportFor');
   const cm = rc && /vibespace-msg read (g-\w+) --before (\d+) --limit (\d+)/.exec(rc.text);
   ok(rc && rc.text.includes('MARKER-START') && !rc.text.includes('MARKER-END') && cm && cm[1] === gc.id && Number(cm[2]) === T0 + 6 && cm[3] === '1',
     'a 6 KB message cut to its line cap is POINTED to: "vibespace-msg read <group> --before <its at + 1> --limit 1"', rc && rc.text);
-  const rc2 = G.reportFor(gc, [recC(T0 + 5, BIG), recC(T0 + 6, 'my own words', B), recC(T0 + 7, 'short one'), recC(T0 + 8, 'Z'.repeat(900))], B, {});
+  // lane group-report-whole: two lines cut at LINE_MAX 2 000 cannot share a 4 KB report — the span rule is walked at 8 KB (PURE)
+  const rc2 = G.reportFor(gc, [recC(T0 + 5, BIG), recC(T0 + 6, 'my own words', B), recC(T0 + 7, 'short one'), recC(T0 + 8, 'Z'.repeat(2100))], B, { budget: 8192 });
   const cm2 = rc2 && /(\d+) message\(s\) above cut short[^\n]*vibespace-msg read (g-\w+) --before (\d+) --limit (\d+)/.exec(rc2.text);
   ok(cm2 && cm2[1] === '2' && Number(cm2[3]) === T0 + 9 && cm2[4] === '4', 'two cut lines ⇒ ONE pointer spanning both (the --limit counts the log records in between, the member\'s own included)', rc2 && rc2.text);
   const small = G.reportFor(gc, [recC(T0 + 5, 'y'.repeat(100))], B, {});
   ok(small && !/cut short|--limit/.test(small.text), 'CONTROL: a 100-char message carries no clip pointer', small && small.text);
+  // A MESSAGE RIDES WHOLE WHEN THE ROOM ALLOWS (lane group-report-whole, the owner 2026-10-07: every 1–2 KB integrator
+  // progress message reached 主开发 cut at 400 characters, with a "cut short" card per message)
+  ok(G.LINE_MAX === 2000 && G.REPORT_BUDGET === 4096, 'the caps: a report line holds 2 000 characters, a report 4 096 B', { LINE_MAX: G.LINE_MAX, REPORT_BUDGET: G.REPORT_BUDGET });
+  const M1900 = 'progress ' + 'w'.repeat(1882) + ' END-1900';
+  const walk1900 = (GG) => { const r = GG.reportFor(gc, [recC(T0 + 5, M1900)], B, {}); return r && r.shown === 1 && r.clipped === 0 && r.lines[0].cut === false && r.lines[0].body === M1900 && r.text.includes(M1900) && !/cut short|--limit|not shown/.test(r.text) && Buffer.byteLength(r.text, 'utf-8') <= GG.REPORT_BUDGET; };
+  ok(M1900.length === 1900 && walk1900(G), 'a 1 900-character message rides WHOLE (0 cut, no pointer, its card body = the whole text)');
+  const M1500 = [0, 1, 2].map((i) => `m${i} ` + 'q'.repeat(1491) + ` END-${i}`);
+  const r1500 = G.reportFor(gc, M1500.map((t, i) => recC(T0 + 5 + i, t)), B, {});
+  const p1500 = r1500 && new RegExp(`\\(1 earlier message\\(s\\) not shown — vibespace-msg read ${gc.id} --before ${T0 + 6}\\)`).exec(r1500.text);
+  ok(M1500.every((t) => t.length === 1500) && r1500 && r1500.shown === 2 && r1500.clipped === 1 && r1500.lines.every((l) => l.cut === false) && r1500.text.includes(M1500[1]) && r1500.text.includes(M1500[2]) && !r1500.text.includes('m0 ') && !!p1500 && !/cut short/.test(r1500.text) && Buffer.byteLength(r1500.text, 'utf-8') <= 4096,
+    'three 1 500-character messages ⇒ the newest TWO whole, the oldest dropped and POINTED ("1 earlier … vibespace-msg read <group> --before <oldest shown>"), nothing cut', r1500 && { shown: r1500.shown, clipped: r1500.clipped, bytes: Buffer.byteLength(r1500.text, 'utf-8') });
+  const M2100 = 'long ' + 'z'.repeat(2085) + ' TAIL-2100';
+  const r2100 = G.reportFor(gc, [recC(T0 + 5, M2100)], B, {});
+  ok(M2100.length === 2100 && r2100 && r2100.lines[0].cut === true && r2100.lines[0].body.length === 2000 && r2100.lines[0].body.endsWith('…') && !r2100.text.includes('TAIL-2100')
+    && r2100.text.includes(`(1 message(s) above cut short — the whole text: vibespace-msg read ${gc.id} --before ${T0 + 6} --limit 1)`),
+    'a 2 100-character message is CUT at 2 000 ("…") and its cut line names the read that returns it whole', r2100 && r2100.lines[0].body.length);
+  const MUTW = mutantCopies('chan-groups-whole', REPO);
+  const gsrcW = fs.readFileSync(path.join(REPO, 'src/channel-groups.js'), 'utf-8');
+  if (!gsrcW.includes('const LINE_MAX = 2000;')) throw new Error('mutation anchor missing: LINE_MAX');
+  const At400 = MUTW.load('src/channel-groups.js', gsrcW.replace('const LINE_MAX = 2000;', 'const LINE_MAX = 400;'), 'line-max-400');
+  ok(walk1900(At400) === false && At400.reportFor(gc, [recC(T0 + 5, M1900)], B, {}).lines[0].cut === true, 'CONTROL: a copy with LINE_MAX back at 400 cuts the 1 900-character message (the whole-message leg above goes red)');
   const cutOver = [];
   for (let b = GE.MIN_REPORT_ROOM; b <= 4096; b += 7) {
     const rp = G.reportFor(gc, [recC(T0 + 5, BIG)], B, { budget: b });
@@ -1244,6 +1266,89 @@ console.log('§4d2 three groups\' reports fill the held room beside a 6 KB pream
   ok(rode === rows && over === 0, `three groups' reports beside a 6 KB preamble ride on the restart's first USER turn in every row (${rode}/${rows}; was 0/4: the cut's cap fell under its own pointer), each delivery ≤ 9600 B (${over} over)`, seen.join(' · '));
 }
 
+console.log('§4d3 a 4 KB report rides WHOLE beside a 3.4 KB tools section + a task context + two notices — the first prompt AND a mid-session one; a 5th KB waits, never cut (lane group-report-whole)');
+{
+  // The owner, 2026-10-07 ("按照建议来吧"): at LINE_MAX 400 / REPORT_BUDGET 2 KB every 1–2 KB integrator progress message
+  // reached 主开发 cut short. At 2 000 / 4 096 the report must still FIT the injection beside what rides with it: its
+  // room is decided first (B-c198), the head producers fit or wait (r7), the engine budgets min(REPORT_BUDGET, room).
+  const AR = require(path.join(REPO, 'src/agent-routes.js'));
+  const { SessionStatusManager } = require(path.join(REPO, 'src/session-status.js'));
+  const f = fixture('e4d3');
+  const g1 = (await f.eng.create({ by: A, name: 'int226', members: [B], quiet: true })).group.id;
+  const prog = (tag) => (`${tag} progress: ` + 'step done, gate green; '.repeat(90)).slice(0, 1690) + ' END-' + tag;
+  for (const t of ['A1', 'A2']) await f.eng.post({ group: g1, from: A, text: prog(t) });
+  const routes = {};
+  const app = { get: (p, h) => { routes['GET ' + p] = h; }, post: (p, h) => { routes['POST ' + p] = h; }, put() {}, delete() {}, use() {} };
+  const wB = [...f.sessions.keys()].find((k) => f.sessions.get(k).claudeSessionId === B);
+  const sB = Object.assign(f.sessions.get(wB), { agentToken: 'vsst_beta4d3', cwd: '/tmp', _toolsIntroSeen: true, _mgrIntroSeen: true });
+  const fill = (head, n, end) => { let t = head; for (let i = 0; Buffer.byteLength(t, 'utf-8') < n - end.length - 1; i++) t += `\n- tool line ${i}: ` + 'use it this way. '.repeat(3); return t.slice(0, n - end.length - 1) + '\n' + end; };
+  const TOOLS = fill('### Reporting back — 4 CLIs on your PATH', 3400, 'TOOLS-END');
+  const TASK = fill('# Task Group "lanes" (T-lanes)\nObjective: the lanes', 700, 'TASK-END');
+  const queues = new Map();
+  const KEY = 'claude:' + B;
+  const notice = (i) => ({ kind: 'status-override', agent: { state: 'working', urgency: 'normal', reason: `gate ${i} running` }, user: { state: 'done', urgency: 'normal' }, at: Date.now() + i });
+  const push2 = (a, b) => queues.set(KEY, [...(queues.get(KEY) || []), notice(a), notice(b)]);
+  AR.setupAgentRoutes({
+    app, activeSessions: f.sessions,
+    tasks: { groupsForSession: () => [{ id: 'T-lanes', title: 'lanes', updatedAt: 1, contentUpdatedAt: 1 }], renderContext: () => TOOLS + '\n\n' + TASK, snapshotForDiff: () => ({}), contextDirSignature: () => '', _persistRescueLine: () => 'If a block is cut, read it with vibespace-task show --full (persisted-output).', backlogNudgeFor: () => '' },
+    sessionStatus: { pendingNotices: (k) => queues.get(k) || [], consumeNotices: (k, n) => { const q = queues.get(k) || []; queues.set(k, n === undefined ? [] : q.slice(n)); }, dropNotices: (k, pred) => { const q = queues.get(k) || []; const keep = q.filter((x) => !pred(x)); queues.set(k, keep); return q.length - keep.length; }, get: () => null, rekey() {} }, SessionStatusManager,
+    userTodos: {}, sessionStatusKey: (s) => 'claude:' + s.claudeSessionId, serverSetting: (k) => (k === 'agents.perTurnToolReminder' ? false : undefined),
+    integrationEnabled: () => true, scheduleCtxSync() {}, remoteCtxBaseFor: () => null, readUserState: () => ({}), getJobs: () => null, deliver: null,
+    getGroups: () => f.eng,
+  });
+  const ask = () => new Promise((resolve) => { routes['GET /api/agent/prompt-context']({ headers: { authorization: 'Bearer vsst_beta4d3' }, query: {} }, { json: (o) => resolve(o), status() { return this; } }); });
+  const B8 = (t) => Buffer.byteLength(t, 'utf-8');
+  const reportOf = (ctx) => { const i = ctx.indexOf('### Group messages since your last turn'); return i < 0 ? '' : ctx.slice(i); };
+  const whole = (ctx, tags) => tags.every((t) => ctx.includes(prog(t))) && !/cut short|not shown|more group\(s\) with new messages/.test(ctx) && /Reply: vibespace-msg send g-[0-9a-f]{8} "\.\.\."/.test(reportOf(ctx));
+  // ① the FIRST prompt: the task context (3.4 KB tools section + the task) first delivered, two notices, ~4 KB of news
+  push2(1, 2);
+  sB._userInputAt = Date.now();
+  const first = String((await ask()).context || '');
+  const rep1 = reportOf(first);
+  ok(B8(first) <= AR.INLINE_CAP && first.includes('TOOLS-END') && first.includes('TASK-END') && !/context trimmed/.test(first) && first.includes('reason="gate 1 running"') && first.includes('reason="gate 2 running"') && !(queues.get(KEY) || []).length,
+    `the FIRST prompt carries the whole tools section (${B8(TOOLS)} B), the whole task context and BOTH notices (consumed) — ${B8(first)} B ≤ ${AR.INLINE_CAP}`, { bytes: B8(first), left: (queues.get(KEY) || []).length });
+  ok(B8(rep1) > 3500 && whole(first, ['A1', 'A2']), `…and the ${B8(rep1)} B report beside them rides WHOLE: both 1 700-character messages, no cut, no pointer, its Reply line`, rep1.slice(0, 300));
+  sB._userInputAt = Date.now() + 1;
+  ok(!String((await ask()).context || '').includes('END-A1'), '…exactly once (the marker moved with it)');
+  // ② a MID-SESSION prompt: the task context already seen, two new notices, another ~4 KB of news
+  push2(3, 4);
+  for (const t of ['B1', 'B2']) await f.eng.post({ group: g1, from: A, text: prog(t) });
+  sB._userInputAt = Date.now() + 2;
+  const mid = String((await ask()).context || '');
+  ok(B8(mid) <= AR.INLINE_CAP && !mid.includes('TOOLS-END') && mid.includes('reason="gate 3 running"') && mid.includes('reason="gate 4 running"') && B8(reportOf(mid)) > 3500 && whole(mid, ['B1', 'B2']),
+    `a MID-SESSION prompt: two notices + the ${B8(reportOf(mid))} B report, WHOLE (${B8(mid)} B)`, reportOf(mid).slice(0, 300));
+  // ③ a 5th KB: a second group's 1 KB message beside the 4 KB report WAITS (named, its marker unmoved) — never cut
+  const g2 = (await f.eng.create({ by: A, name: 'side', members: [B], quiet: true })).group.id;
+  const SIDE = 'SIDE ' + 'one more kilobyte of news, '.repeat(37).trim() + ' SIDE-END';
+  await f.eng.post({ group: g2, from: A, text: SIDE });
+  for (const t of ['C1', 'C2']) await f.eng.post({ group: g1, from: A, text: prog(t) });
+  sB._userInputAt = Date.now() + 3;
+  const fifth = String((await ask()).context || '');
+  const rep5 = reportOf(fifth);
+  ok(B8(SIDE) > 1000 && tagsWhole(fifth) && !fifth.includes('SIDE ') && new RegExp(`\\(1 more group\\(s\\) with new messages — "side" ${g2} — arrive on your next turn`).test(rep5) && G.memberOf(f.eng.get(g2), B).reportedUpTo == null,
+    'a 5th KB (a second group\'s 1 KB message) beside the 4 KB report WAITS: none of its words ride, the trailer names it, its marker stays — the report keeps its own messages whole', rep5.slice(-500));
+  function tagsWhole(ctx) { return ['C1', 'C2'].every((t) => ctx.includes(prog(t))) && !/cut short|not shown/.test(ctx) && B8(ctx) <= AR.INLINE_CAP; }
+  sB._userInputAt = Date.now() + 4;
+  const next = String((await ask()).context || '');
+  ok(next.includes(SIDE) && !/cut short|not shown/.test(next), '…and it rides WHOLE on the next prompt', reportOf(next).slice(0, 300));
+  // the over-cap leg: a crowded turn (2 600 B left) — the report FITS the room: the newest message whole, the older one pointed
+  const crowd = (eng) => { const r = eng.reportsForTurn(B, { budget: 2600, preview: true }); return { r, ok: B8(r.text) <= 2600 && r.text.includes(prog('D2')) && !r.text.includes(prog('D1')) && /\(1 earlier message\(s\) not shown — vibespace-msg read /.test(r.text) }; };
+  for (const t of ['D1', 'D2']) await f.eng.post({ group: g1, from: A, text: prog(t) });
+  const cr = crowd(f.eng);
+  ok(cr.ok, `a crowded turn (2 600 B left): the report fits the ROOM — the newest 1 700-character message whole, the older one pointed (${B8(cr.r.text)} B)`, cr.r.text.slice(0, 400));
+  const MUTR = mutantCopies('chan-groups-room', REPO);
+  const geSrcR = fs.readFileSync(path.join(REPO, 'src/server/groups-engine.js'), 'utf-8');
+  const roomNeedle = '{ budget: Math.min(G.REPORT_BUDGET, room) }';
+  if (!geSrcR.includes(roomNeedle)) throw new Error('mutation anchor missing: the room budget');
+  const NoRoom = MUTR.load('src/server/groups-engine.js', geSrcR.replace(roomNeedle, '{ budget: G.REPORT_BUDGET }'), 'no-room');
+  const fr = fixture('e4d3-ctl', { ge: NoRoom });
+  const gr = (await fr.eng.create({ by: A, name: 'int226', members: [B], quiet: true })).group.id;
+  for (const t of ['D1', 'D2']) await fr.eng.post({ group: gr, from: A, text: prog(t) });
+  ok(crowd(fr.eng).ok === false, 'CONTROL: an engine copy budgeting REPORT_BUDGET without the room — the crowded turn\'s report no longer fits (the over-cap leg above goes red)', crowd(fr.eng).r.text.slice(0, 300));
+  fr.close();
+  f.close();
+}
+
 console.log('§4b wiring pins');
 {
   const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf-8');
@@ -1310,13 +1415,20 @@ console.log('§7 the cards: a group message handed to a turn is SEEN in that cha
   // (d) a line cut short: the card says what the agent saw
   const f3 = fixture('gc-c');
   const g3 = (await f3.eng.create({ by: A, name: 'cut', members: [B, C], quiet: true })).group.id;
-  const LONG = 'L'.repeat(300) + ' ' + 'M'.repeat(300);
+  const LONG = 'L'.repeat(1100) + ' ' + 'M'.repeat(1100);   // past LINE_MAX 2 000 (lane group-report-whole)
   await f3.eng.post({ group: g3, from: A, text: LONG });
   await f3.eng.post({ group: g3, from: G.OWNER, text: 'from the owner' });
   const r3 = f3.eng.reportsForTurn(B);
   const [c3, co] = r3.marks[0].cards;
   ok(c3.group.cut === true && c3.text.length <= G.LINE_MAX && c3.text.endsWith('…') && r3.text.includes(c3.text) && LONG.startsWith(c3.text.slice(0, -1)),
     'a message the report CUT SHORT: the card holds the words the agent was shown (its line, ≤ LINE_MAX, "…"), marked cut', { len: c3.text.length, cut: c3.group.cut });
+  const fw = fixture('gc-w');
+  const gw = (await fw.eng.create({ by: A, name: 'whole', members: [B], quiet: true })).group.id;
+  const WHOLE = 'integrator progress: ' + 'gate green, '.repeat(155).trim();
+  await fw.eng.post({ group: gw, from: A, text: WHOLE });
+  const cw = fw.eng.reportsForTurn(B).marks[0].cards.find((c) => c.text.startsWith('integrator progress'));
+  ok(WHOLE.length > 1800 && cw && cw.group.cut === false && cw.text === WHOLE, `CONTROL: a ${WHOLE.length}-character message rides whole — its card holds the whole text, NOT marked cut (the chat draws no "cut short" footer; lane group-report-whole)`, cw && { len: cw.text.length, cut: cw.group.cut });
+  fw.close();
   ok(co && co.group.self === true && co.fromName === null && co.text === 'from the owner', 'the OWNER\'s own message: `self`, no sender name (the chat says "You")', co);
   const inv = await f3.eng.invite({ by: A, group: g3, members: ['eps'], quiet: true, context: 'join us' });
   const rE = f3.eng.reportsForTurn(E);

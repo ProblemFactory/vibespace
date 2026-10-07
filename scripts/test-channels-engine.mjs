@@ -6208,6 +6208,40 @@ console.log('\n㉓ lane lark-threads: a thread born after its root was stored');
     ok(fv2.counters.missingWaiting === 0 && fv2.counters.missingFetched === 29 && !/waiting/.test(s2), `(J) …and once every one landed (29 read by id over 6 ticks) the count is 0 and the clause is gone: "${s2}"`, JSON.stringify(fv2.counters));
     E11.eng.stop();
   }
+  // ── (S) lane channel-self-unread, SITE 1 (the by-id landing): the OWNER replied in Lark itself (people memo `self` =
+  // ou_ann, the reply's author) — his reply is READ by construction: readAt moves to its instant, only the peer's later
+  // message counts (unread 1). CONTROL: the landing's old arithmetic counts it (and keeps every older unread)
+  const selfD = async (EM, name) => {
+    const W3 = mk();
+    say(W3, 'oc_old', 'om_ancient', T0 - 5 * 86400e3, { text: 'an old root' });
+    for (let i = 0; i < 60; i++) say(W3, 'oc_old', `om_n${String(i).padStart(2, '0')}`, T0 - 4 * 86400e3 + i * 1000);
+    const dS = path.join(ROOT, name);
+    writeRecL(dS, T0 - 6 * 86400e3);
+    clock = T0 + 20 * 3600e3;
+    const ES = mkL(dS, W3, { EM });
+    ES.eng.store.peopleWrite('larky', { self: 'ou_ann', people: {} });
+    await ES.eng.pass('larky');
+    W3.topicOf.set('om_ancient', 'omt_old'); W3.hitThreadIds = false;
+    clock += 31e3; reply(W3, 'oc_old', 'om_ancient', 'om_late', clock - 3e3);
+    say(W3, 'oc_old', 'om_plain', clock - 2e3);
+    await ES.eng.pass('larky'); await ES.eng.settleWakes();
+    clock += 31e3;
+    await ES.eng.pass('larky'); await ES.eng.settleWakes();
+    const late = ES.eng.store.readTail('larky', 'oc_old', { limit: 500 }).find((r) => r.vendorId === 'om_late');
+    const en = enL(ES.eng, 'oc_old');
+    ES.eng.stop();
+    return { landed: !!late, lateAt: late ? Number(late.at) : null, readAt: en.readAt, unread: en.unread };
+  };
+  const sd = await selfD(ENG, 'lkt-self');
+  ok(sd.landed && sd.readAt === sd.lateAt && sd.unread === 1, '(S) site 1: the owner\'s own reply read BY ID is read by construction — readAt = its instant, only the peer\'s later message is unread (1)', JSON.stringify(sd));
+  {
+    const src = engineSource(REPO);
+    const cut = src.replace('        countFresh(rec, convId, en, fresh);   // lane channel-self-unread: the owner\'s own message is read by construction',
+      '        en.unread = (Number(en.unread) || 0) + fresh.filter((x) => Number(x.at) > (Number(en.readAt) || 0)).length;');
+    const cp = patchPath('src/server', 'channels-engine'); writeCopy(cp, cut);
+    const sc = await selfD(require(cp), 'lkt-self-ctl');
+    ok(cut !== src && sc.landed && sc.unread > 1 && sc.readAt !== sc.lateAt, '(S) CONTROL: site 1 without the self rule counts the owner\'s reply as unread and never moves readAt (the leg above would be red)', JSON.stringify(sc));
+  }
   for (const x of [eng, E2.eng, E3.eng, E4.eng]) x.stop();
 }
 
@@ -6547,6 +6581,74 @@ console.log('\nconsent: a vendor declares its consent row; the engine + route na
   ok(!paged.err && paged.land && paged.land.status === 200 && !/data-fc=/.test(paged.land.body) && /Slack/.test(paged.land.body),
     'consent CONTROL: a route copy with Slack\'s landing page restored shows the fake vendor\'s member SLACK\'s words (the row\'s page is what the green leg read)', JSON.stringify(paged.land || paged.err).slice(0, 200));
   delete globalThis.__VS_CONSENT_FAKE;
+}
+
+console.log('\n㉕ lane channel-self-unread: the account\'s OWN message is read by construction (userW inc-muxekkry-clfb)');
+{
+  const base = Date.now() - 3600e3;
+  const OWNER = { id: 'ou_owner', name: 'Owner' }, USERW = { id: 'ou_userW', name: 'userW' };
+  const mkSelf = () => {
+    const recs = [];
+    const say = (vendorId, at, author, text, self = false) => recs.push({ vendorId, at: base + at * 60e3, author, text, self });
+    const mod = {
+      kind: 'self-poll', caps: { ...fake.fakePoll.caps },
+      create(record, deps) {
+        const impl = fake.fakePoll.create(record, deps);
+        impl.listConversations = async () => ({ conversations: [{ id: 'c', vendorId: 'c', title: 'userW', kind: 'group', participants: 'W', lastAt: recs.length ? recs[recs.length - 1].at : base }], cursor: null, complete: true });
+        impl.history = async (convId, { anchor = null, limit = 50 } = {}) => {
+          // the vendor stamps its OWN author `isSelf` (a reply from Lark itself / the Outbox's sent mail on the next listing)
+          const all = recs.map((m) => { const r = fake.toRecord('self-poll', 'c', m); return m.self ? { ...r, author: { ...r.author, isSelf: true } } : r; });
+          let idx = 0; if (anchor) { const at = all.findIndex((r) => r.vendorId === anchor); idx = at >= 0 ? at + 1 : 0; }
+          const found = !anchor || idx > 0; const page = all.slice(idx).slice(0, limit); const drained = page.length === all.slice(idx).length;
+          return { records: page, anchor: page.length ? page[page.length - 1].vendorId : anchor, reachedAnchor: found && drained, complete: found && drained };
+        };
+        return impl;
+      },
+    };
+    return { recs, say, mod };
+  };
+  const driveSelf = async (ENGINE, name) => {
+    const dataDir = path.join(ROOT, name);
+    fs.mkdirSync(path.join(dataDir, 'channels'), { recursive: true });
+    fs.writeFileSync(path.join(dataDir, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: [{ id: 'self-poll', kind: 'self-poll', label: 'self', enabled: true, linkedAt: base - 60e3, auth: { tokenEnc: null, expiresAt: null, scopes: [] }, lastPass: null, consecutiveFailures: 0, push: { enabled: false }, scan: null }] }));
+    const W = mkSelf();
+    const registry = CH.createChannelRegistry(); registry.register(W.mod);
+    const eng = ENGINE.create({ dataDir, registry, env: {}, broadcast: () => {} });
+    engines.push(eng);
+    const en = () => eng.store.index.snapshot().conversations['self-poll/c'];
+    const out = {};
+    // a group chat: userW, then the OWNER, then userW again ⇒ 1 unread, readAt = the owner's instant
+    W.say('w1', 1, USERW, 'inc-muxekkry-clfb is failing'); W.say('s1', 2, OWNER, 'looking at inc-muxekkry-clfb', true); W.say('w2', 3, USERW, 'thanks');
+    await eng.pass('self-poll', { force: true });
+    out.group = { unread: en().unread, readAt: en().readAt, ownerAt: base + 2 * 60e3 };
+    out.total = (eng.digest({ scope: 'totals' }) || {}).unreadTotal;
+    // the owner answers from the vendor's own app (Lark p2p) / the Outbox's SENT reply comes back on the next listing
+    W.say('s2', 4, OWNER, 'fixed in inc-muxekkry-clfb', true);
+    await eng.pass('self-poll', { force: true });
+    out.replied = { unread: en().unread, readAt: en().readAt, ownerAt: base + 4 * 60e3 };
+    // a record whose self-ness is UNKNOWN (no identity resolved: the owner's id, no `isSelf`) is counted, as before
+    W.say('u1', 5, OWNER, 'unknown self');
+    await eng.pass('self-poll', { force: true });
+    out.unknown = en().unread;
+    // the mark-read re-derivation skips the owner's records too (a mark before s2: s2 is his, u1 counts)
+    await eng.markRead('self-poll', 'c', base + 3.5 * 60e3);
+    out.marked = en().unread;
+    eng.stop();
+    return out;
+  };
+  const r = await driveSelf(ENG, 'self-unread');
+  ok(r.group.unread === 1 && r.group.readAt === r.group.ownerAt, 'a group chat: the owner\'s message moves readAt to its instant; only the peer\'s LATER message is unread (1)', JSON.stringify(r.group));
+  ok(r.total === 1, 'the digest\'s unread total (the kept row facts, B-f32b) follows the row: 1', String(r.total));
+  ok(r.replied.unread === 0 && r.replied.readAt === r.replied.ownerAt, 'the owner\'s reply from the vendor\'s own app / the Outbox\'s sent message: 0 unread, readAt = his instant', JSON.stringify(r.replied));
+  ok(r.unknown === 1, 'a record whose self-ness is UNKNOWN (no identity resolved) is still counted — never a guess', String(r.unknown));
+  ok(r.marked === 1, 'markRead\'s re-derivation from the log skips the owner\'s own record (s2) and counts the rest (u1)', String(r.marked));
+  // CONTROL (site 2, the ingest): the old arithmetic counts the owner's messages and never moves readAt
+  const src = engineSource(REPO);
+  const cut = src.replace('      if (freshRecs.length) countFresh(rec, convId, en, freshRecs);',
+    '      if (freshRecs.length) en.unread = (Number(en.unread) || 0) + freshRecs.filter((r) => Number(r.at) > (Number(en.readAt) || 0)).length;');
+  const cp = patchPath('src/server', 'channels-engine'); writeCopy(cp, cut);
+  const c = await driveSelf(require(cp), 'self-unread-ctl');
+  ok(cut !== src && c.group.unread === 3 && c.replied.unread === 4, 'CONTROL: site 2 without the self rule counts the owner\'s own messages as unread (3, then 4 — userW\'s symptom)', JSON.stringify(c));
 }
 
 console.log('\ntree: the patched copies never touch the tree');

@@ -59,6 +59,32 @@ const HELD_WINDOW_MS = 7 * 86400e3;
 const TAG_ORDER = Object.freeze(['awaiting', 'unknown', 'assigned', 'read', 'new-since-read', 'held', 'direct', 'replied']);
 
 const num = (x) => (Number.isFinite(Number(x)) ? Number(x) : 0);
+
+// lane channel-self-unread (userW inc-muxekkry-clfb 2026-10-07 "发消息在 channel 里面也会被视为一个未读" + B-c91b):
+// THE OWNER'S OWN MESSAGE IS READ BY CONSTRUCTION — a record whose author is the account itself (`author.isSelf`,
+// stamped by the adapter from the RESOLVED identity, or the id `selfId` names) adds 0 to `unread`, moves the read
+// line to its own instant (sending = having read everything up to it, as the vendor apps behave; records AFTER it
+// count again), is never "new since read" and never a watch hit. A record whose self-ness is UNKNOWN (no identity
+// resolved yet) is counted as before — never a guess. Every counter asks these two (the engine's append sites, the
+// store's re-derivation, the watch, statusTag below).
+/** Is `r` the account's own message? `author.isSelf === true`, else its author id equals the resolved `selfId`. */
+function selfRead(r, selfId = null) {
+  const a = r && r.author;
+  if (!a || typeof a !== 'object') return false;
+  if (a.isSelf === true) return true;
+  return typeof selfId === 'string' && selfId !== '' && a.id != null && String(a.id) === selfId;
+}
+/** The read line after a batch `recs`: `{ readAt, unread, moved }` — `readAt` = the newest self record's instant when
+ *  it is past `readAt`; `unread` = the batch's OTHER records past that line; `moved` = the line advanced (the caller
+ *  re-derives the row's whole count past it — older unread records before it are read now). */
+function readAdvance(readAt, recs, selfId = null) {
+  const list = Array.isArray(recs) ? recs : [];
+  let line = num(readAt);
+  for (const r of list) if (selfRead(r, selfId) && num(r && r.at) > line) line = num(r.at);
+  let unread = 0;
+  for (const r of list) if (r && !selfRead(r, selfId) && num(r.at) > line) unread++;
+  return { readAt: line, unread, moved: line > num(readAt) };
+}
 const within = (at, now, win) => { const a = num(at); return a > 0 && now - a < win; };
 
 /** A principal's key as the engine spells it (channel-filter's `principalKey`: `kind:id`). */
@@ -136,7 +162,10 @@ function statusTag(row, now = Date.now()) {
   if (rd && within(rd.at, now, FOCUS_WINDOW_MS)) {
     const name = rd.name || '';   // never the raw session id (r-verify): the words say "an agent" for a nameless reader
     const kind = rd.kind || 'agent';
-    return num(c.lastAt) > num(rd.upTo) ? { code: 'new-since-read', name, kind, at: num(rd.at) } : { code: 'read', name, kind, at: num(rd.at) };
+    // lane channel-self-unread: the owner's OWN newest message (`touch.selfAt`) is never news — a row whose newest
+    // message is his is read up to it (selfRead / readAdvance above)
+    const newsAt = num(c.lastAt) > num(touch.selfAt) ? num(c.lastAt) : 0;
+    return newsAt > num(rd.upTo) ? { code: 'new-since-read', name, kind, at: num(rd.at) } : { code: 'read', name, kind, at: num(rd.at) };
   }
   if (held) return { code: 'held', n: heldPending(touch, now, c.watchers) };
   // lane lark-search-poll (owner decision 1): a single chat somebody wrote in and the owner has not read
@@ -354,4 +383,5 @@ module.exports = {
   FOCUS_WINDOW_MS, HELD_WINDOW_MS, TAG_ORDER, heldPending, heldOf, statusTag, focusRows, filterRows, firstScreen,
   ATTENTION_MAX, HEAD_ROWS, PAGE_ROWS, PAGE_MAX, QUERY_MAX, candidateOf, pageOrder, pageCursor, afterCursor, selectPage, queryOf, textMatches,
   isInternal, needsOwner, internalBlock,
+  selfRead, readAdvance,
 };

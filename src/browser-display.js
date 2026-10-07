@@ -325,6 +325,16 @@ function displayFact({ display = null, plan = null, wanted = null, prev = null, 
     at: Number(at) || 0,
   };
 }
+/** lane browser-unstable-rejudge: THE DISPLAY AS ONE COMPARABLE WORD — what a launch would find (the chosen kind + socket, every
+ *  kind here, whether the hidden-window rung's Xvfb is) from a verdict or a recorded fact (same fields). Two equal keys = the
+ *  same world for a launch; a parked verdict is re-judged when the key it was parked under is not the key now, and a daemon
+ *  launched under another key relaunches with a stale env. Not a fact (null / not an object) ⇒ null. */
+function displayKey(d) {
+  if (!isObj(d)) return null;
+  const kind = DISPLAY_KINDS.includes(d.kind) ? d.kind : 'none';
+  const avail = (Array.isArray(d.available) ? d.available : []).map(String).filter((k) => DISPLAY_PLATFORMS.includes(k)).sort();
+  return `${kind}:${str(d.socket) || '-'}|${avail.join(',') || '-'}|xvfb:${d.xvfb === true ? 'y' : d.xvfb === false ? 'n' : '?'}`;
+}
 /** Does a recorded fact change the config a browser's calls must name? */
 function planApplies(fact) { return isObj(fact) && isObj(fact.fallback); }
 /** The plan a recorded fact makes of a base config (every later call of that browser re-derives the same file). */
@@ -371,5 +381,5 @@ module.exports = {
   runtimeDirOf, parseX11Display, displayCandidates, displayVerdict,
   argsList, ozonePlatformsOf, ozoneOf, withoutDisplayOzone, withOzone, SOFTWARE_GL_ARGS, withSoftwareGl,
   noDisplayModeOf, noDesktop, resolveHeaded, NO_DESKTOP_WINDOW_DEFAULT,
-  wantedOf, launchPlan, applyPlan, displayFact, planApplies, planForFact, factCode, kindName, agentNote, journalLine,
+  wantedOf, launchPlan, applyPlan, displayFact, displayKey, planApplies, planForFact, factCode, kindName, agentNote, journalLine,
 };

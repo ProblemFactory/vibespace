@@ -32,7 +32,7 @@
 
 const GROUP_ID_RE = /^g-[0-9a-f]{8}$/;
 const NAME_MAX = 120;
-const TEXT_MAX = 4 * 1024;        // a report line is ≤ 400 characters (channel-groups LINE_MAX) — the card never grows the meta
+const TEXT_MAX = 4 * 1024;        // a report line is ≤ 2000 characters (channel-groups LINE_MAX) — the card never grows the meta
 const RECORDED_HEAD_MAX = 400;    // what a wake's ring entry keeps of the posted text: enough to find the transcript's record
 const RING_MAX = 120;             // the newest keys + cards a conversation keeps (a meta record, not a log)
 /** A rebuild places a group card this long AFTER the injection instant: the turn's own user record and the hook's

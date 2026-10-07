@@ -2727,6 +2727,16 @@ const HEAL_RETRY_MS = 30000;
 const HEAL_FAIL_BUDGET = 10;
 /** …and the least time they must span (what HEAL_FAIL_BUDGET asks paced by the tick's gate take: 4.5 min). */
 const HEAL_FAIL_SPAN_MS = (HEAL_FAIL_BUDGET - 1) * HEAL_RETRY_MS;
+// ── lane browser-unstable-rejudge (the owner's instance, 2026-10-06: systemd-oomd killed the GNOME session at 01:44, both
+// profiles' Chromes were Wayland clients and died with it; every relaunch ask went to a 42-h-old daemon whose FROZEN env
+// named the dead compositor, ten failed, both parked `failing` — and the verdict outlived the compositor's return at 03:36
+// and the 16:32 restart for 15 h): A PARKED VERDICT IS RE-JUDGED WHEN ITS FACT CHANGES OR THE WORLD RESTARTS, and A RELAUNCH
+// NEVER REUSES A FROZEN LAUNCH ENV. The fact = the display (src/browser-display.js displayKey): `failing` records the key it
+// was parked under (`heals.unstableDisplay`); a key now that differs, or the boot that adopted the daemon, earns ONE fresh
+// ask (a new daemon, the display probed now) — never a timer, never the ten-ask budget. The B-47f9 `closing` tiers unchanged.
+/** The failed relaunch ask that is made by a FRESH daemon instead (its 2 predecessors went to the daemon) — when the display
+ *  that daemon was launched under is not the display now (its env is stale: its relaunch can never find the display). */
+const HEAL_FRESH_AT = 3;
 /** A record's heal ledger as stored (a hand-edited store never throws): attempt times (finite, positive, the newest 20),
  *  the last outcome, when the unstable notice was filed, the count the unstable verdict named, (r6) the failed-ask streak
  *  `{count, since}` (null when none), and which verdict the unstable record carries — `unstableKind` 'failing' (the asks
@@ -2738,7 +2748,8 @@ function healLedger(x) {
   const f = h.failed && typeof h.failed === 'object' && !Array.isArray(h.failed) ? h.failed : null;
   const failed = f && Number.isInteger(f.count) && f.count > 0 && num(f.since) !== null ? { count: f.count, since: num(f.since) } : null;
   return { attempts, lastOutcome: typeof h.lastOutcome === 'string' && h.lastOutcome ? h.lastOutcome : null, noticedAt: num(h.noticedAt), unstableCount: Number.isInteger(h.unstableCount) && h.unstableCount > 0 ? h.unstableCount : null,
-    failed, unstableKind: h.unstableKind === 'failing' ? 'failing' : null, unstableSpanMs: num(h.unstableSpanMs), unstableWindowMs: num(h.unstableWindowMs) };
+    failed, unstableKind: h.unstableKind === 'failing' ? 'failing' : null, unstableSpanMs: num(h.unstableSpanMs), unstableWindowMs: num(h.unstableWindowMs),
+    unstableDisplay: typeof h.unstableDisplay === 'string' && h.unstableDisplay ? h.unstableDisplay : null, noticeId: typeof h.noticeId === 'string' && h.noticeId ? h.noticeId : null }; // lane browser-unstable-rejudge
 }
 /** May a record relaunch its browser NOW? → `{ok, count, recent, kept, windowMs}`: `recent` = the attempts inside the short
  *  window, `kept` = those inside the day (the ledger keeps these), `count` / `windowMs` = the tier that judged; budget
@@ -2759,6 +2770,25 @@ function failedAskVerdict({ failed = null, now = 0, budget = HEAL_FAIL_BUDGET, s
   const count = f ? f.count : 0;
   const span = f ? Math.max(0, (Number(now) || 0) - f.since) : 0;
   return count >= budget && span >= spanMs ? { ok: false, code: 'browser_unstable', count, spanMs: span } : { ok: true, code: null, count, spanMs: span };
+}
+/** lane browser-unstable-rejudge: is a PARKED record asked once more? → `{ask, why, seed}`. Only a `failing` verdict (the asks
+ *  failed — a fact of the world, not of the browser) is re-judged: at the BOOT that adopted its daemon (a restart is a new
+ *  world) ⇒ ask, why 'boot'; when the display key now differs from the one it was parked under ⇒ ask, why 'display'; a
+ *  record parked before this lane (no key) and no boot ⇒ no ask, `seed` (the key now is recorded); else none. Each ask
+ *  records the key it was made under, so one change earns one ask — never a timer, never a loop. */
+function rejudgeVerdict({ unstable = null, parked = null, now = null, boot = false } = {}) {
+  if (unstable !== 'failing') return { ask: false, why: null, seed: false };
+  if (boot === true) return { ask: true, why: 'boot', seed: false };
+  if (typeof parked !== 'string' || !parked) return { ask: false, why: null, seed: typeof now === 'string' && !!now };
+  if (typeof now === 'string' && now && now !== parked) return { ask: true, why: 'display', seed: false };
+  return { ask: false, why: null, seed: false };
+}
+/** lane browser-unstable-rejudge: is THIS failed-ask rung a FRESH daemon? → true when the streak so far (`failed`) makes this
+ *  the HEAL_FRESH_AT-th ask or later AND the display the daemon was launched under (`launched`, a displayKey) is not the
+ *  display now (`now`) — a relaunch through that daemon carries its frozen env and is not a relaunch. Unknown keys ⇒ false. */
+function freshDaemonDue({ failed = null, launched = null, now = null, at = HEAL_FRESH_AT } = {}) {
+  const n = failed && Number.isInteger(failed.count) && failed.count > 0 ? failed.count : 0;
+  return n + 1 >= at && typeof launched === 'string' && !!launched && typeof now === 'string' && !!now && launched !== now;
 }
 const windowWords = (ms) => { const m = Number(ms) || HEAL_WINDOW_MS; return m >= 2 * 3600e3 ? `${Math.round(m / 3600e3)} h` : `${Math.max(1, Math.round(m / 60000))} min`; };
 /** The refusal a lease / a view / an attach gets while a profile's browser is `browser_unstable` — `kind` 'closing' (it was
@@ -3259,7 +3289,7 @@ module.exports = {
   parseDevToolsActivePort, cdpEndpointOf, // verify r8: the second legacy witness — the record's cdpUrl vs the directory's DevToolsActivePort (what a .199 boot on the new pod leaves)
   keeperMarksOf, keeperMarkArg, withKeeperMark, launchedByCli, // lane H verify r4: the keeper's launch mark (ownership by cmdline, never by directory)
   AUTOMATION_FLAG, automationFlagVerdict, withAutomationFlag, // lane browser-propose: the one launch flag that stops Chromium announcing automation
-  HEAL_BUDGET, HEAL_WINDOW_MS, HEAL_DAY_BUDGET, HEAL_DAY_MS, HEAL_RETRY_MS, healLedger, healBudgetVerdict, unstableText, unstableNotice, // lane H verify r5: the heal ledger + budget
+  HEAL_BUDGET, HEAL_WINDOW_MS, HEAL_DAY_BUDGET, HEAL_DAY_MS, HEAL_RETRY_MS, HEAL_FRESH_AT, healLedger, healBudgetVerdict, rejudgeVerdict, freshDaemonDue, unstableText, unstableNotice, // lane H verify r5: the heal ledger + budget
   HEAL_FAIL_BUDGET, HEAL_FAIL_SPAN_MS, failedAskVerdict, // lane H verify r6: a failed relaunch ask is not a relaunch — its own streak + cap
   // P4 (§7.1–§7.3): provider rows + capability gating, the §7.2.1 egress record, the cdp env pair
   DEFAULT_PROVIDER, CLOUD_PROVIDERS, CLOUD_UNWIRED, providerRow, antiBotRow, providerIds, providerControl, capabilityRefusal, providerRows,
