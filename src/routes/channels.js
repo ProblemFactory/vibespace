@@ -579,11 +579,14 @@ router.get('/api/channels/search', async (req, res) => {
 /** THE VENDOR'S OWN SEARCH (design 010, B-c9be): the owner's Search press (no `page`: ≤ the row's pages per press) or
  *  the dialog's scroll to the end of section two (`page` = the previous answer's `next`: one page). The person's act
  *  is the intent; the engine's refusal table (scope, back-off, the 2 s floor, the endpoint's minute, the budget) answers
- *  typed with its wait. Declared BEFORE `/api/channels/:adapterId/:convId` (two segments — it would swallow it). */
+ *  typed with its wait. Declared BEFORE `/api/channels/:adapterId/:convId` (two segments — it would swallow it).
+ *  Lane vendor-search-memo (.230): the account's memo answers a repeat inside its TTL (0 vendor calls, `memo` said);
+ *  `again=1` = the dialog's "Search again" (forgets it, then asks); `peek=1` = the dialog OPENING (the memo or
+ *  `unasked` — never the vendor). */
 router.get('/api/channels/search/full', async (req, res) => {
   try {
     forHost(req);
-    readerAnswer(res, await engine().searchVendor(String(req.query.adapter || ''), String(req.query.q || ''), { pageToken: req.query.page ? String(req.query.page) : null }));
+    readerAnswer(res, await engine().searchVendor(String(req.query.adapter || ''), String(req.query.q || ''), { pageToken: req.query.page ? String(req.query.page) : null, again: req.query.again === '1', peek: req.query.peek === '1' }));
   } catch (e) { fail(res, e); }
 });
 

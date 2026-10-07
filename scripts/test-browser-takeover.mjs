@@ -1160,7 +1160,11 @@ console.log('— ⑦ lane J r2: keyboard ownership, the key routes, text records
   const focusBody = (file, head) => { const s = src(file); const i = s.indexOf(head); return i < 0 ? '' : s.slice(i, i + 400); };
   ok(/if \(keyboardOwned\(\)\) return;/.test(focusBody('src/lib/chat-input.js', '  focus() {')) && /if \(!keyboardOwned\(\)\) this\.terminal\.focus\(\)/.test(focusBody('src/lib/terminal.js', '  focus() {')),
     'ChatInput.focus (the attach path: ChatView.focus → here) and TerminalSession.focus stand down while a takeover owns the keyboard');
-  ok(/chatView\.focus\(\)/.test(src('src/lib/session-lifecycle.js')) && /focus\(\) \{\n    if \(this\._chatInput\) this\._chatInput\.focus\(\);/.test(src('src/lib/chat-view.js')), '…and the two attach sites the study named (session-lifecycle chatView.focus) reach the guard through ChatView.focus → ChatInput.focus (never a per-site patch)');
+  // lane mirror-green-228: the answer sites call `lateFocus(chatView)` — a wrapper that only stands down for an open app dialog;
+  // its body must still end in `view.focus()` (ChatView.focus → ChatInput.focus, where the takeover guard is), never a focus of its own
+  const SL = src('src/lib/session-lifecycle.js');
+  const lateFocusReaches = /const lateFocus = \(view\) => \{[^{}]*\bview\.focus\(\);\s*\};/.test(SL);
+  ok((/chatView\.focus\(\)/.test(SL) || (/lateFocus\(chatView\)/.test(SL) && lateFocusReaches)) && /focus\(\) \{\n    if \(this\._chatInput\) this\._chatInput\.focus\(\);/.test(src('src/lib/chat-view.js')), '…and the two attach sites the study named (session-lifecycle chatView.focus, or its lateFocus wrapper whose body still calls view.focus()) reach the guard through ChatView.focus → ChatInput.focus (never a per-site patch)');
   const LW = src('src/lib/browser-live-window.js');
   // each document listener's registration = the text from its `document.addEventListener('<ev>'` to the next one
   const docRegs = LW.split("document.addEventListener('").slice(1).map((chunk) => ({ ev: chunk.slice(0, chunk.indexOf("'")), body: chunk }));

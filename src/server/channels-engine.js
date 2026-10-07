@@ -5592,9 +5592,15 @@ function create(deps = {}) {
    * shared back-off, the floor, an agent's share, the endpoint's minute, the account's budget), then ≤ `pages` pages
    * paced + metered through `vendor()` and charged to `by`, then the merge (a stored hit dropped). A RATE refusal
    * backs the ENDPOINT off for the account — the change feed shares it and waits with it (its card says so as today).
-   * → { ok: true, sd, hits, next, stored, repeated, pages } | a typed refusal `{ ok: false, code, error, retryAfterSec }`
+   * THE MEMO (lane vendor-search-memo, .230 — `SR.searchMemo`, on the account's LIVE entry: an account change drops it
+   * with the entry; a restart forgets it; never written): an answer is remembered per (scope, normalized query, page);
+   * inside the TTL a press, a reopen (`peek`) or an agent's repeat (it reads the owner's 'all' first, then its own
+   * conversation set's) is answered from it — 0 vendor calls, no floor stamped, `memo: {askedAt, ageMs}` said. `again`
+   * (the owner's "Search again", a press) forgets the entry, then asks under today's table. `peek` with nothing
+   * remembered asks nothing (`unasked`). A refusal, a failure or a partial answer is never remembered.
+   * → { ok: true, sd, hits, next, stored, repeated, pages, memo? , unasked? } | a typed refusal `{ ok: false, code, error, retryAfterSec }`
    */
-  async function vendorSearch(rec, query, { pageToken = null, by = 'owner', ctx = null, shows = null } = {}) {
+  async function vendorSearch(rec, query, { pageToken = null, by = 'owner', ctx = null, shows = null, scope = SR.MEMO_ALL, again = false, peek = false } = {}) {
     const sd = searchRowOf(registry.capsOf(rec.kind));
     const e = sd && rec.enabled !== false ? adapterFor(rec) : null;
     const t = now();
@@ -5610,8 +5616,13 @@ function create(deps = {}) {
     const feedWait = rec.feed && rec.feed.backoffWhy === 'rate-limited' ? Number(rec.feed.backoffUntil) || 0 : 0;
     // verify r1 F3: agents together never take the owner's press — one press's pages of the endpoint's minute stay the owner's
     const agentReserve = sd && by === 'agent' ? sd.pagesPerPress : 0;
+    if (e && again && !pageToken) e.searchMemo = SR.searchMemo(e.searchMemo, { op: 'clear', scope, query }).state;
+    const mq = e && !(again && !pageToken) ? SR.searchMemo(e.searchMemo, { op: 'get', scopes: scope === SR.MEMO_ALL ? [SR.MEMO_ALL] : [SR.MEMO_ALL, scope], query, page: pageToken, now: t }) : null;
+    if (mq) e.searchMemo = mq.state;
+    const kept = mq && mq.answer;
     const v = SR.fullSearchVerdict({
       declared: !!(sd && e), scopeHeld: !sd || !sd.scope || held.includes(sd.scope), now: t,
+      memo: !!kept, peek: !!peek && !pageToken,
       backoffUntil: Math.max(e ? Number(e.searchBackoffUntil) || 0 : 0, feedWait),
       inflight: !!(e && e.searchFlights.has(fkey)), floorMs: by === 'agent' ? SR.AGENT_FLOOR_MS : SR.OWNER_FLOOR_MS,
       // verify r1 F4: the 2 s floor is a PRESS's (a held Enter key = one ask); the scroll's next page (a token, one request)
@@ -5622,6 +5633,13 @@ function create(deps = {}) {
       budgetLeft: w ? Math.floor((b.limit - w.spent) / ((sd && sd.cost) || 1)) : 0, budgetResetAt: w ? w.at + 60e3 : t + 60e3,
       pages: pageToken || by === 'agent' ? 1 : sd ? sd.pagesPerPress : 1,
     });
+    if (v.act === 'memo') {
+      // a snapshot: a hit the local copy has since stored is dropped (it is in section one), nothing else re-asked
+      const om = { oldest: new Map(), older: 0, unknown: 0 };
+      const mg = SR.mergeVendorHits(kept.hits, { stored: (cid, vid, at) => storedHit(rec.id, cid, vid, at, om) });
+      return { ok: true, sd, hits: mg.hits, next: kept.next, stored: mg.stored, repeated: mg.repeated, pages: 0, memo: { askedAt: kept.askedAt, ageMs: kept.ageMs } };
+    }
+    if (v.act === 'unasked') return { ok: true, sd, hits: [], next: null, stored: 0, repeated: 0, pages: 0, unasked: true };
     if (v.act !== 'ask') {
       const sec = Math.max(1, Math.ceil(v.retryAfterMs / 1000));
       const words = {
@@ -5671,13 +5689,14 @@ function create(deps = {}) {
     const mg = SR.mergeVendorHits(hits, { stored: (cid, vid, at) => storedHit(rec.id, cid, vid, at, memo) });
     const sum = (k) => facts.reduce((a, f) => a + (Number(f[k]) || 0), 0);
     measureFullSearch(rec, { pages, hits: hits.length, older: memo.older, unknown: memo.unknown, shape: (facts.find((f) => f.shape && f.shape.form !== 'absent') || {}).shape || null, cjk: SR.isCjk(query), of: sum('of'), holding: sum('holding') });
+    if (!failure && !outlived(rec, e)) e.searchMemo = SR.searchMemo(e.searchMemo, { op: 'put', scope, query, page: pageToken, now: t, hits: mg.hits, next: next || null }).state;
     return { ok: true, sd, hits: mg.hits, next: failure ? null : next || null, stored: mg.stored, repeated: mg.repeated, pages, ...(failure ? { partial: failure.code } : {}) };
   }
   /** THE OWNER'S FULL SEARCH (GET /api/channels/search/full): a press (no token: ≤ pagesPerPress pages) or the scroll's
    *  next page (its token: one). Each hit: the conversation's NAME from the index (an unknown one: `known:false`, no
    *  name — the client words it), the author's name only where the owner named them (never an id), the instant, the
    *  vendor's snippet (THE reader's), the chip's fact (never stored). */
-  async function searchVendor(adapterId, q, { pageToken = null } = {}) {
+  async function searchVendor(adapterId, q, { pageToken = null, again = false, peek = false } = {}) {
     const rec = adapterRecords().adapters.find((r) => r.id === adapterId);
     if (!rec) return { ok: false, code: 'not-found', error: `no such account '${adapterId}'` };
     const query = String(q || '').trim();
@@ -5685,7 +5704,7 @@ function create(deps = {}) {
     if (query.length > SR.QUERY_MAX) return { ok: false, code: 'bad-request', error: `a search is at most ${SR.QUERY_MAX} characters` };
     const tok = pageToken === null || pageToken === undefined || pageToken === '' ? null : String(pageToken);
     if (tok && (tok.length > 2048 || /[\u0000-\u001f]/.test(tok))) return { ok: false, code: 'bad-request', error: 'a malformed page token' };
-    const r = await vendorSearch(rec, query, { pageToken: tok, by: 'owner' });
+    const r = await vendorSearch(rec, query, { pageToken: tok, by: 'owner', again: !!again && !tok, peek: !!peek && !again && !tok });
     if (!r.ok) return r;
     const liveIx = store.index.live();
     const sc = registry.capsOf(rec.kind);
@@ -5695,7 +5714,7 @@ function create(deps = {}) {
       const alias = h.fromId ? peerName(aliasOf(rec.id, h.fromId), 80) : null;
       return { key, convId: h.convId, vendorId: h.vendorId, at: h.at, known: !!en, title: en ? titleOf(sc, en.title) || null : null, author: alias ? { name: alias } : null, snippet: h.snippet, threadKey: h.threadKey };
     });
-    return { ok: true, hits, next: r.next, stored: r.stored, pages: r.pages, match: r.sd.match, adds: r.sd.adds, context: r.sd.context || null, ...(r.partial ? { partial: r.partial } : {}) };
+    return { ok: true, hits, next: r.next, stored: r.stored, pages: r.pages, match: r.sd.match, adds: r.sd.adds, context: r.sd.context || null, ...(r.partial ? { partial: r.partial } : {}), ...(r.memo ? { memo: r.memo } : {}), ...(r.unasked ? { unasked: true } : {}) };
   }
   /** A HIT IN CONTEXT for the owner (GET /api/channels/:adapterId/:convId/around): ONE `around` read (the adapter's
    *  two requests), charged to the owner under the minute budget, one flight per hit; the records drawn by the window's

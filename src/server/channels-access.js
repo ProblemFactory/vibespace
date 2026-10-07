@@ -491,7 +491,9 @@ function create(engineCtx) {
     if (!cand.length) return { ok: true, results: [], truncated: false, full: true, note: 'no account you can see offers its own search — the saved copy is all there is' };
     if (cand.length > 1) return { ok: false, code: 'bad-request', error: `--full asks ONE account's own search per call — add --account <id> (${cand.map((c) => agentId(c.rec.id, 80)).join(', ')})` };
     const { rec, visible } = cand[0];
-    const r = await vendorSearch(rec, query, { by: 'agent', ctx, shows: (cid) => visible.has(String(cid)) });
+    // lane vendor-search-memo: the owner's answer to the same words is read first (0 calls, no floor); a fresh one is
+    // remembered for this conversation set (its hits were read for those only)
+    const r = await vendorSearch(rec, query, { by: 'agent', ctx, shows: (cid) => visible.has(String(cid)), scope: SR.memoScope(visible.keys()) });
     if (!r.ok) return { ok: false, code: r.code === 'search-floor' ? 'refresh-floor' : r.code === 'search-minute' ? 'vendor-budget' : r.code, error: r.error, ...(r.retryAfterSec ? { retryAfterSec: r.retryAfterSec } : {}) };
     const results = [];
     for (const h of r.hits) {
@@ -502,7 +504,7 @@ function create(engineCtx) {
       results.push({ key: agentId(`${rec.id}/${h.convId}`), adapterId: rec.id, adapter: rec.label || rec.id, convId: agentId(h.convId), title: visible.get(h.convId), at: h.at || null, author: null, text: agentText(h.snippet || '', { kind: 'block', max: 400 }), vendorId: agentId(h.vendorId || null), source: 'vendor' });
       if (results.length >= limit) break;
     }
-    return { ok: true, results, truncated: results.length >= limit, full: true, adapterId: rec.id, adds: searchRowOf(registry.capsOf(rec.kind)).adds };   // F2: the CLI words its line by the row
+    return { ok: true, results, truncated: results.length >= limit, full: true, adapterId: rec.id, adds: searchRowOf(registry.capsOf(rec.kind)).adds, ...(r.memo ? { remembered: { ageSec: Math.floor(r.memo.ageMs / 1000) } } : {}) };   // F2: the CLI words its line by the row
   }
   /** THE AGENT'S `read <conv> --around <msg>` (design 010): reach first (the uniform not-found), the message's instant
    *  from the log (a stored one) or from this agent's own `--full` answer, the agents' share, ONE `around` read (two

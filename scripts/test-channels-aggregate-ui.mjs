@@ -380,6 +380,12 @@ const fsr = await p1.evaljs(`(async () => {
     if (!sm) return { fail: 'no "search messages for" toggle', typed };
     sm.click();
     const dlg = () => document.getElementById('chan-search-dialog');
+    // lane vendor-search-memo (.230): the pre-filled open asks the vendor nothing (one peek=1 look at the memo) — the press does
+    for (let i = 0; i < 60; i++) { if (dlg() && /按“搜索”才会问/.test(dlg().textContent)) break; await sleep(150); }
+    const openFull = asked.filter((u) => u.includes('/api/channels/search/full'));
+    const openSaid = !!(dlg() && /按“搜索”才会问/.test(dlg().textContent));
+    const goBtn = dlg() && dlg().querySelector('.mounts-btn-primary');
+    if (goBtn) goBtn.click();
     for (let i = 0; i < 100; i++) { if (dlg() && dlg().querySelector('.chan-search-vendor .chan-search-vhit') && /找到|可能相关/.test(dlg().textContent)) break; await sleep(150); }
     const d = dlg();
     if (!d) return { fail: 'no dialog', typed };
@@ -387,6 +393,7 @@ const fsr = await p1.evaljs(`(async () => {
     const s1 = d.querySelector('.chan-search-saved');
     const vh = () => d.querySelectorAll('.chan-search-vendor .chan-search-vhit').length;
     const out = { typed, heads: [...d.querySelectorAll('.chan-search-sec-head')].map((x) => x.textContent), cov: (d.querySelector('.chan-search-saved .chan-search-cov') || {}).textContent || '', vstat: [...d.querySelectorAll('.chan-search-vstatus')].map((x) => x.textContent), n1: vh(), chips: d.querySelectorAll('.chan-search-vendor .chan-search-chip').length, chip: (d.querySelector('.chan-search-chip') || {}).textContent || '', unknown: [...d.querySelectorAll('.chan-search-vhit b')].map((b) => b.textContent).filter((x) => /尚未同步/.test(x)).length, snippetMarkup: [...d.querySelectorAll('.chan-search-vhit .chan-search-text')].some((x) => /<em>/.test(x.textContent)) };
+    out.openAsks = openFull.filter((u) => !u.includes('peek=1')).length; out.openPeeks = openFull.filter((u) => u.includes('peek=1')).length; out.openSaid = openSaid;
     const s1Before = s1.getBoundingClientRect().top + list.scrollTop, s1Rows = s1.querySelectorAll('.chan-search-hit').length;
     const fullBefore = asked.filter((u) => u.includes('/api/channels/search/full')).length;
     list.scrollTop = list.scrollHeight;
@@ -414,6 +421,39 @@ ok(fsr && fsr.heads && fsr.heads[0] === '已保存的消息' && /^更早的消�
 ok(fsr && fsr.n1 === 20 && fsr.chips === fsr.n1 && fsr.chip === '未保存在本机' && fsr.unknown >= 1 && !fsr.snippetMarkup && fsr.vstat.some((x) => /又向.+查了全部历史：找到 20 条更早的/.test(x)), '⑪ two pages of the vendor\'s older hits, each chipped 未保存在本机, a conversation never synced named 一个尚未同步的对话, the snippet\'s markup stripped, the status line counts them', JSON.stringify(fsr && { n1: fsr.n1, chips: fsr.chips, chip: fsr.chip, unknown: fsr.unknown, vstat: fsr.vstat }));
 ok(fsr && fsr.n2 > fsr.n1 && fsr.pageAsks >= 1 && fsr.s1Moved === 0 && fsr.s1Same, '⑪ scrolling to the end loads the next page by itself (no "Show more"), section one never moves', JSON.stringify(fsr && { n1: fsr.n1, n2: fsr.n2, pageAsks: fsr.pageAsks, moved: fsr.s1Moved }));
 ok(fsr && fsr.sheet && fsr.sheetTitle && fsr.sheetNote && fsr.found && fsr.openBtn === false && fsr.storedArchive === 0, '⑪ a click opens 这条消息前后 — the found message marked among the vendor\'s records, said not saved, no "open" for a conversation never synced; nothing was stored', JSON.stringify(fsr && { sheet: fsr.sheet, title: fsr.sheetTitle, note: fsr.sheetNote, found: fsr.found, open: fsr.openBtn, stored: fsr.storedArchive }));
+ok(fsr && fsr.openAsks === 0 && fsr.openPeeks === 1 && fsr.openSaid, '⑪ lane vendor-search-memo: the pre-filled open asks the vendor NOTHING — one peek=1 look at the memo, 按“搜索”才会问…; the press asks', JSON.stringify(fsr && { asks: fsr.openAsks, peeks: fsr.openPeeks, said: fsr.openSaid }));
+// ── ⑪m lane vendor-search-memo (.230): THE MEMO IN THE DIALOG — opened from an agent's search row twice (the row's door
+//    app.openChannelSearch): the network ring sees NO vendor-asking /search/full on either open (⑪'s press is remembered:
+//    its hits come back with their age); 重新搜索 ⇒ exactly one ──
+const fsm = await p1.evaljs(`(async () => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const asked = []; const f0 = window.fetch; window.fetch = (u, o) => { asked.push(String(u)); return f0.call(window, u, o); };
+  const dlg = () => document.getElementById('chan-search-dialog');
+  const full = () => asked.filter((u) => u.includes('/api/channels/search/full'));
+  const shut = () => document.querySelectorAll('#chan-search-dialog').forEach((x) => { const c = x.closest('.modal-overlay') || x; c.remove(); });
+  const open = async () => {
+    const n0 = full().length;
+    app.openChannelSearch({ adapterIds: ['fake-poll'], q: 'budget' });
+    for (let i = 0; i < 80; i++) { if (dlg() && dlg().querySelector('.chan-search-again')) break; await sleep(150); }
+    const d = dlg(), mine = full().slice(n0);
+    return { asks: mine.filter((u) => !u.includes('peek=1')).length, peeks: mine.filter((u) => u.includes('peek=1')).length, hits: d ? d.querySelectorAll('.chan-search-vendor .chan-search-vhit').length : -1, memo: d ? ((d.querySelector('.chan-search-memo') || {}).textContent || '') : '', again: !!(d && d.querySelector('.chan-search-again')) };
+  };
+  try {
+    const o1 = await open(); shut(); await sleep(300);
+    const o2 = await open();
+    if (!dlg() || !dlg().querySelector('.chan-search-again')) return { o1, o2, fail: 'no 重新搜索' };
+    await sleep(2100);   // past the owner's 2 s press floor (⑪'s last page) — the floor is today's rule, not this leg's
+    const n0 = full().length;
+    dlg().querySelector('.chan-search-again').click();
+    for (let i = 0; i < 80; i++) { if (dlg().querySelectorAll('.chan-search-vendor .chan-search-vhit').length && !dlg().querySelector('.chan-search-memo') && /找到|可能相关/.test(dlg().textContent)) break; await sleep(150); }
+    const ag = full().slice(n0);
+    const out = { o1, o2, againAsks: ag.length, againFlag: ag.filter((u) => u.includes('again=1')).length, urls: ag.map((u) => u.replace(/^[^?]*[?]/, '').replace(/q=[^&]*&?/, '')), afterHits: dlg().querySelectorAll('.chan-search-vendor .chan-search-vhit').length, afterMemo: !!dlg().querySelector('.chan-search-memo') };
+    shut();
+    return out;
+  } finally { window.fetch = f0; }
+})()`);
+ok(fsm && fsm.o1 && fsm.o2 && fsm.o1.asks === 0 && fsm.o2.asks === 0 && fsm.o1.peeks === 1 && fsm.o2.peeks === 1 && fsm.o1.hits >= 10 && fsm.o2.hits === fsm.o1.hits && /来自.*的搜索/.test(fsm.o2.memo) && fsm.o2.again, '⑪m opened from an agent\'s row twice: 0 vendor-asking /search/full on each open — ⑪\'s press answers from the memo with its age (来自…的搜索) and 重新搜索', JSON.stringify(fsm));
+ok(fsm && fsm.againAsks === 1 && fsm.againFlag === 1 && fsm.afterHits >= 10 && !fsm.afterMemo, '⑪m 重新搜索 = exactly ONE /search/full (again=1); the fresh answer carries no age line', JSON.stringify(fsm));
 // ── ⑪c lane mirror-green-channels (the Actions mirror, 2.369.203/.204: ⑪ red as "30 at the first look" AND as "the scroll
 //    to the end asked nothing"): the dialog's next page hung on an IntersectionObserver CROSSING. With the runner's fonts a
 //    vendor row is 40 px and the first answer left section two's end at 904 px of the observer's 914 px reach (one screen

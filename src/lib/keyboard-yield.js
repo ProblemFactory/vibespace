@@ -80,6 +80,12 @@ const classesOf = (el) => { try { return String((el && el.className) || '').spli
 export function isModalOverlay(el) { return !!el && el.nodeType === 1 && classesOf(el).includes(DIALOG_HOSTS.slice(1)); }
 /** …and is it OPEN: in the document and not `.hidden` (the static overlay closes by the class; a shell's by its removal) */
 export function modalOpen(el) { try { return isModalOverlay(el) && el.isConnected !== false && !classesOf(el).includes('hidden') && !el.hidden; } catch { return false; } }
+/** lane mirror-green-228 (THE .228 MIRROR): a focus that lands LATE — on a session window's server answer (`created` /
+ *  `attached`, src/lib/session-lifecycle.js) — takes the keys only while no app dialog holds them. The double-click that
+ *  opens the Rename dialog on a sidebar row also attaches its session; on the slow Actions runner the answer landed after
+ *  the dialog had focused its box, so the new name and its Enter went to the chat composer and the rename never happened.
+ *  PURE over the overlays the caller lists ('keep' = leave the focus where it is). */
+export function lateFocusVerdict(overlays) { try { return Array.from(overlays || []).some(modalOpen) ? 'keep' : 'take'; } catch { return 'take'; } }
 /** lane dialog-keys: where a dialog that TOOK the keys but focuses nothing itself gets them (the brief: "its first
  *  focusable / its input") — its first text box, else the overlay (a keydown there bubbles through the dialog's own
  *  handlers). Never a button: Enter on a primary button the dialog did not choose would act for the user. */

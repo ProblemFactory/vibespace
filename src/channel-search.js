@@ -15,6 +15,8 @@
  *   fullSearchVerdict(facts)    may the vendor be asked NOW — the refusal table (not declared, scope, back-off, floor,
  *                               the agents' share, the endpoint's minute, the account's budget) with each wait
  *   coverageText / statusText / sectionHead   the dialog's words (the caller's `t`; zh / ja in src/lib/i18n-*.js)
+ *   searchMemo(state, ev)       THE MEMO (lane vendor-search-memo, .230): a vendor search is asked ONCE per (account,
+ *                               scope, normalized query) and remembered — memoText says its age; never persisted
  */
 const { peerName } = require('./channel-record.js');
 
@@ -111,7 +113,8 @@ function coverageOf(r) {
 
 /**
  * MAY THE VENDOR BE ASKED NOW — the one table, in order (each refusal names its wait):
- *   not declared → not-supported · the scope not held → needs-scope · the endpoint backing off → backoff ·
+ *   not declared → not-supported · the scope not held → needs-scope · a remembered answer (`memo`) → memo · a look
+ *   that is no press (`peek`) → unasked · the endpoint backing off → backoff ·
  *   a press inside the floor (or one in flight) → search-floor · an agent past its share → vendor-budget ·
  *   the endpoint's sliding minute spent → search-minute · the account's minute budget spent → vendor-budget
  * `pages` = what may be sent: min(asked, the minute's pages left, the budget's units left).
@@ -122,6 +125,10 @@ function fullSearchVerdict(f = {}) {
   const wait = (until) => Math.max(1000, Math.ceil(Number(until) - t));
   if (!f.declared) return { act: 'refuse', code: 'not-supported', retryAfterMs: 0 };
   if (f.scopeHeld === false) return { act: 'refuse', code: 'needs-scope', retryAfterMs: 0 };
+  // lane vendor-search-memo (.230): a remembered answer costs nothing — before the back-off, the floor, the minute; a
+  // look that is not a press (the dialog opening) never asks
+  if (f.memo) return { act: 'memo' };
+  if (f.peek) return { act: 'unasked' };
   if (Number(f.backoffUntil) > t) return { act: 'refuse', code: 'backoff', retryAfterMs: wait(f.backoffUntil) };
   const floor = Number(f.floorMs) || 0;
   if (f.inflight) return { act: 'refuse', code: 'search-floor', retryAfterMs: Math.max(1000, floor) };
@@ -132,6 +139,75 @@ function fullSearchVerdict(f = {}) {
   const budgetLeft = Math.max(0, Math.floor(Number(f.budgetLeft) || 0));
   if (budgetLeft <= 0) return { act: 'refuse', code: 'vendor-budget', retryAfterMs: wait(f.budgetResetAt) };
   return { act: 'ask', pages: Math.max(1, Math.min(Math.max(1, Math.floor(Number(f.pages) || 1)), minuteLeft, budgetLeft)) };
+}
+
+// ── THE MEMO (lane vendor-search-memo, .230; the owner 2026-10-07: 「调用 channel provider 自己的在线搜索的时候缓存结果，
+// 避免重复点开搜索对话框结果就限速了」) ─────────────────────────────────────────────────────────────────────────────
+// One per account, IN MEMORY ONLY (a restart forgets it; never written anywhere). Key = (scope, normalized query); an
+// entry = the pages asked so far, each `{token, hits, next}` (`hits` = the already-merged, snippet-bearing rows), the
+// first press's instant (`askedAt` — the TTL runs from it; a later page appends, it never renews). LRU by Map order.
+const SEARCH_MEMO_TTL_MS = 10 * 60e3;
+const SEARCH_MEMO_MAX = 64;
+const SEARCH_MEMO_BYTES = 2 * 1024 * 1024;
+const MEMO_ALL = 'all';
+/** The query as remembered: trimmed, case-folded, runs of spaces as one. */
+function memoQuery(q) { return String(q || '').trim().toLowerCase().replace(/\s+/g, ' '); }
+/** The scope: the owner's = the whole account ('all'); an agent's = the conversations it may be shown (a hash of the
+ *  set — its hits were read for those only). */
+function memoScope(convIds) {
+  if (convIds === null || convIds === undefined || convIds === MEMO_ALL) return MEMO_ALL;
+  const ids = [...new Set([...convIds].map(String))].sort();
+  let h = 0x811c9dc5;
+  for (const ch of ids.join('\u0000')) { h ^= ch.codePointAt(0); h = Math.imul(h, 0x01000193) >>> 0; }
+  return `set:${ids.length}:${h.toString(16)}`;
+}
+const memoKey = (scope, query) => `${scope || MEMO_ALL}\u0000${memoQuery(query)}`;
+const hitsBytes = (hits) => (Array.isArray(hits) ? hits : []).reduce((n, h) => n + JSON.stringify(h || null).length * 2, 0);
+/**
+ * ONE STEP of an account's memo → { state, answer }. `state` = `{ entries: Map, bytes }` (undefined = empty); a new
+ * state each step (the old one untouched).
+ *   { op: 'get', scopes, query, page, now }  → answer `{ scope, askedAt, ageMs, hits, next }` of the first scope holding
+ *        a live entry with that page (a hit moves it to the newest); an entry past the TTL is dropped; none ⇒ null
+ *   { op: 'put', scope, query, page, now, hits, next } → page null: the entry (re)born; a token: appended to the live
+ *        entry whose last page's `next` is that token (else nothing). An entry over the byte cap is not kept; the
+ *        oldest leave first past SEARCH_MEMO_MAX entries or SEARCH_MEMO_BYTES. → answer = kept (boolean)
+ *   { op: 'clear', scope, query } → that entry gone ("Search again") → answer = had one (boolean)
+ */
+function searchMemo(state, ev = {}) {
+  const entries = new Map(state && state.entries instanceof Map ? state.entries : []);
+  let bytes = Math.max(0, Number(state && state.bytes) || 0);
+  const drop = (k) => { const x = entries.get(k); if (x) { bytes -= x.bytes; entries.delete(k); } return !!x; };
+  const done = (answer) => ({ state: { entries, bytes: Math.max(0, bytes) }, answer });
+  const now = Number(ev.now) || 0;
+  const page = ev.page === null || ev.page === undefined || ev.page === '' ? null : String(ev.page);
+  if (ev.op === 'get') {
+    for (const scope of Array.isArray(ev.scopes) && ev.scopes.length ? ev.scopes : [MEMO_ALL]) {
+      const k = memoKey(scope, ev.query), x = entries.get(k);
+      if (!x) continue;
+      if (!(now - x.askedAt < SEARCH_MEMO_TTL_MS)) { drop(k); continue; }
+      const p = x.pages.find((pg) => pg.token === page);
+      if (!p) continue;
+      entries.delete(k); entries.set(k, x);
+      return done({ scope: scope || MEMO_ALL, askedAt: x.askedAt, ageMs: Math.max(0, now - x.askedAt), hits: p.hits, next: p.next });
+    }
+    return done(null);
+  }
+  if (ev.op === 'clear') return done(drop(memoKey(ev.scope, ev.query)));
+  if (ev.op !== 'put') return done(null);
+  const k = memoKey(ev.scope, ev.query);
+  const pg = { token: page, hits: Array.isArray(ev.hits) ? ev.hits : [], next: ev.next || null };
+  const pb = hitsBytes(pg.hits) + 64;
+  let x;
+  if (page === null) { drop(k); x = { askedAt: now, pages: [pg], bytes: pb }; }
+  else {
+    const o = entries.get(k);
+    if (!o || !(now - o.askedAt < SEARCH_MEMO_TTL_MS) || o.pages[o.pages.length - 1].next !== page) return done(false);
+    drop(k); x = { askedAt: o.askedAt, pages: [...o.pages, pg], bytes: o.bytes + pb };
+  }
+  if (x.bytes > SEARCH_MEMO_BYTES) return done(false);
+  entries.set(k, x); bytes += x.bytes;
+  for (const ok of entries.keys()) { if (entries.size <= SEARCH_MEMO_MAX && bytes <= SEARCH_MEMO_BYTES) break; drop(ok); }
+  return done(entries.has(k));
 }
 
 // ── THE WORDS (the dialog's; zh / ja in src/lib/i18n-*.js) ─────────────────
@@ -152,6 +228,7 @@ function statusText(s, { t = defaultT, vendor = '' } = {}) {
   const v = s && typeof s === 'object' ? s : {};
   const V = vendor || t('The vendor');
   if (v.state === 'asking') return t("Asking {vendor}'s own search…", { vendor: V });
+  if (v.state === 'unasked') return t("Press Search to ask {vendor}'s own search", { vendor: V });
   if (v.state === 'done') {
     const n = Math.max(0, Number(v.found) || 0);
     if (v.adds === 'unsaved') {
@@ -171,6 +248,12 @@ function statusText(s, { t = defaultT, vendor = '' } = {}) {
   }
   if (v.state === 'failed') return t("{vendor}'s search did not answer — the saved results are shown", { vendor: V });
   return '';
+}
+/** A remembered answer's age (lane vendor-search-memo): a snapshot says so — "Search again" beside it asks anew. */
+function memoText(ageMs, { t = defaultT, vendor = '' } = {}) {
+  const V = vendor || t('The vendor');
+  const n = Math.floor(Math.max(0, Number(ageMs) || 0) / 60e3);
+  return n < 1 ? t("From {vendor}'s search less than a minute ago", { vendor: V }) : t("From {vendor}'s search {n} min ago", { vendor: V, n });
 }
 /** Section two's head from the asked rows' `adds`: "Older messages" only when every row says 'older' (none asked keeps
  *  it); one 'unsaved' row turns it to "Not saved here" — true of an older hit too. */
@@ -205,4 +288,5 @@ module.exports = {
   matchParts,
   SNIPPET_MAX, SNIPPET_READ_MAX, SNIPPET_KEYS, SEARCH_VIA, SEARCH_CONTEXT, SEARCH_MATCH, SEARCH_ADDS, OWNER_FLOOR_MS, AGENT_FLOOR_MS, AROUND_MAX, QUERY_MAX,
   snippetOf, snippetShape, holdsQuery, isCjk, mergeVendorHits, coverageOf, fullSearchVerdict, coverageText, statusText, sectionHead,
+  SEARCH_MEMO_TTL_MS, SEARCH_MEMO_MAX, SEARCH_MEMO_BYTES, MEMO_ALL, memoQuery, memoScope, searchMemo, memoText,
 };

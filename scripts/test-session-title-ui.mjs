@@ -59,6 +59,18 @@ const FIRST = (folder) => 'Draft the launch post for ' + folder;
 // the scratch HOME only. The live session and its transcript meet on the CLI id, as a real one does.
 const CONV = `/opt/session-title-ui-conv-${process.pid}`;
 
+// THE .228 MIRROR's verdict, PURE (src/lib/keyboard-yield.js lateFocusVerdict): a focus that lands on a session window's
+// server answer leaves the keys where an open app dialog holds them
+{
+  const { lateFocusVerdict } = await import(new URL('../src/lib/keyboard-yield.js', import.meta.url).href);
+  const ov = (cls, more = {}) => ({ nodeType: 1, className: cls, isConnected: true, ...more });
+  ok(lateFocusVerdict([]) === 'take', 'verdict: no dialog open ⇒ the answer takes the focus');
+  ok(lateFocusVerdict([ov('dialog-overlay')]) === 'keep', 'verdict: an open dialog ⇒ the focus stays where it is');
+  ok(lateFocusVerdict([ov('dialog-overlay hidden')]) === 'take', 'verdict: the static overlay closed by its class ⇒ take');
+  ok(lateFocusVerdict([ov('dialog-overlay', { isConnected: false })]) === 'take', 'verdict: a removed shell ⇒ take');
+  ok(lateFocusVerdict([ov('dialog-overlay hidden'), ov('dialog-overlay')]) === 'keep', 'verdict: one open among closed ones ⇒ keep');
+}
+
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
 let dtachOk = false; try { execFileSync('/usr/bin/which', ['dtach'], { stdio: 'ignore' }); dtachOk = true; } catch { }
 if (!CHROME) skip('no chrome/chromium on this box — every leg needs one');
@@ -97,9 +109,12 @@ while :; do for f in "${EMIT}/$SID".*.json; do [ -f "$f" ] || continue; cat "$f"
   const esbuild = require(path.join(repo, 'node_modules', 'esbuild'));
   /** The page bundle from the scratch worktree's sources (the build's own flags); `sessionName` = the file every
    *  `../session-name.js` import resolves to (the real module, or the patched copy for the control). */
-  const bundle = async (sessionName) => esbuild.build({
+  const bundle = async (sessionName, lifecycle = null) => esbuild.build({
     entryPoints: [path.join(wt, 'src/client.js')], bundle: true, outfile: path.join(wt, 'public/bundle.js'), format: 'iife', platform: 'browser', target: 'es2020', loader: { '.css': 'css' }, logLevel: 'silent',
-    plugins: sessionName ? [{ name: 'session-name', setup(b) { b.onResolve({ filter: /(^|\/)session-name\.js$/ }, () => ({ path: sessionName })); } }] : [],
+    plugins: [
+      ...(sessionName ? [{ name: 'session-name', setup(b) { b.onResolve({ filter: /(^|\/)session-name\.js$/ }, () => ({ path: sessionName })); } }] : []),
+      ...(lifecycle ? [{ name: 'session-lifecycle', setup(b) { b.onResolve({ filter: /(^|\/)session-lifecycle\.js$/ }, () => ({ path: lifecycle })); } }] : []), // leg f's control
+    ],
   });
   await bundle(null);
   const env = { ...process.env, ...VNC_ENV, PATH: BIN + ':' + (process.env.PATH || ''), CLAUDE_CMD: path.join(BIN, 'claude'), CODEX_CMD: path.join(BIN, 'codex'), PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' };
@@ -236,16 +251,38 @@ while :; do for f in "${EMIT}/$SID".*.json; do [ -f "$f" ] || continue; cat "$f"
   ok(await until(async () => (await view(A)).cards.includes(TITLE_B), 20000), `the killed session's discovered row reads its transcript title "${TITLE_B}"`, S(await view(A)));
   ok(!(await view(A)).cards.includes(FIRST('bravo')), `…not its first message "${FIRST('bravo')}"`, S((await view(A)).cards));
 
+  /** THE .228 MIRROR, made deterministic. A double-click on a row's name ATTACHES its session (an `attach` per click)
+   *  and opens the Rename dialog; the attach's answer moved the focus to the chat composer whenever it landed after the
+   *  dialog had focused its box — on the slow Actions runner it did, and the new name + its Enter went to the composer
+   *  (the rename never happened). Here the page's inbound stream is HELD from the press until the dialog's OWN focus is
+   *  on its box (the suite never hand-focuses it), then released in order: the answers land late, on purpose. */
+  const renameRace = async (sess, name) => {
+    await ev(`app.sidebar.toggle(true); return true;`); // the desktop boots with the sidebar folded to its rail
+    await until(() => ev(`const e = [...document.querySelectorAll('.session-card-name')].find((n) => n.textContent.trim() === ${S(name)}); return !!e && e.getBoundingClientRect().width > 0;`), 5000);
+    await sleep(400); // the open transition
+    const at = await ev(`const e = [...document.querySelectorAll('.session-card-name')].find((n) => n.textContent.trim() === ${S(name)}); if (!e || !e.getBoundingClientRect().width) return null; e.scrollIntoView({ block: 'center' }); const r = e.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 };`);
+    if (!at) return { at };
+    await ev(`const raw = app.ws.ws, orig = raw.onmessage, q = []; raw.onmessage = (e) => { q.push(e); };
+      window.__vsHold = { release: () => { raw.onmessage = orig; window.__vsHold = null; let attached = 0, errors = 0;
+        for (const e of q) { try { const m = JSON.parse(e.data); if (m.type === 'attached' && m.sessionId === ${S(sess.sid)}) attached++; } catch { } try { orig.call(raw, e); } catch { errors++; } }
+        return { held: q.length, attached, errors }; } }; return true;`);
+    for (const [type, clickCount] of [['mousePressed', 1], ['mouseReleased', 1], ['mousePressed', 2], ['mouseReleased', 2]]) await send('Input.dispatchMouseEvent', { type, x: at.x, y: at.y, button: 'left', clickCount });
+    const dlg = await until(() => ev(`return [...document.querySelectorAll('input')].some((i) => i.value === ${S(name)} && i.offsetParent);`), 5000);
+    const own = dlg && await until(() => ev(`const a = document.activeElement; return !!a && a.tagName === 'INPUT' && a.value === ${S(name)};`), 5000);
+    await sleep(300); // the answers the server already sent wait in the hold
+    const rel = await ev(`return window.__vsHold ? window.__vsHold.release() : null;`);
+    const after = await ev(`const a = document.activeElement; return a ? [a.tagName, String(a.className || '').slice(0, 40), a.value ?? null] : null;`);
+    const wins = await ev(`return chats().filter((w) => sidOf(w.id) === ${S(sess.sid)}).length;`);
+    return { at, dlg, own, rel, after, wins };
+  };
+
   console.log('\nb — the user\'s rename wins');
-  await ev(`app.sidebar.toggle(true); return true;`); // the desktop boots with the sidebar folded to its rail
-  await until(() => ev(`const e = [...document.querySelectorAll('.session-card-name')].find((n) => n.textContent.trim() === ${S(TITLE)}); return !!e && e.getBoundingClientRect().width > 0;`), 5000);
-  await sleep(400); // the open transition
-  const at = await ev(`const e = [...document.querySelectorAll('.session-card-name')].find((n) => n.textContent.trim() === ${S(TITLE)}); if (!e || !e.getBoundingClientRect().width) return null; e.scrollIntoView({ block: 'center' }); const r = e.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 };`);
-  if (!ok(!!at, 'the titled row\'s name is on screen')) return;
-  for (const [type, clickCount] of [['mousePressed', 1], ['mouseReleased', 1], ['mousePressed', 2], ['mouseReleased', 2]]) await send('Input.dispatchMouseEvent', { type, x: at.x, y: at.y, button: 'left', clickCount });
-  const dlg = await until(() => ev(`return [...document.querySelectorAll('input')].some((i) => i.value === ${S(TITLE)} && i.offsetParent);`), 5000);
-  if (!ok(dlg, 'a double-click on the name opens the rename dialog holding the title', S(await ev(`const e = document.elementFromPoint(${at.x}, ${at.y}); const chain = []; for (let x = e; x && chain.length < 6; x = x.parentElement) chain.push(x.tagName + (x.id ? '#' + x.id : '') + (x.className && typeof x.className === 'string' ? '.' + x.className.split(' ').join('.') : '')); const n = [...document.querySelectorAll('.session-card-name')].map((q) => { const r = q.getBoundingClientRect(); return [q.textContent.trim().slice(0, 20), Math.round(r.left), Math.round(r.top), Math.round(r.width)]; }); return { at: ${S(at)}, chain, names: n, sb: (() => { const b = document.querySelector('#sidebar, .sidebar'); if (!b) return null; const r = b.getBoundingClientRect(); return [b.className, Math.round(r.left), Math.round(r.width), getComputedStyle(b).display]; })(), active: document.activeElement?.tagName, inputs: [...document.querySelectorAll('input')].filter((i) => i.offsetParent).map((i) => i.value).slice(0, 8) };`)))) return;
-  await ev(`const i = [...document.querySelectorAll('input')].find((x) => x.value === ${S(TITLE)} && x.offsetParent); i.focus(); i.select(); return true;`);
+  const race = await renameRace(A, TITLE);
+  if (!ok(!!race.at, 'the titled row\'s name is on screen')) return;
+  if (!ok(race.dlg, 'a double-click on the name opens the rename dialog holding the title', S(race))) return;
+  ok(race.own, 'the dialog focused its own box (the suite never hand-focuses it)', S(race));
+  ok(race.rel?.attached >= 1 && !race.rel.errors, 'the held inbound stream carried the session\'s attach answer, delivered AFTER the dialog took the keys', S(race.rel));
+  ok(race.after?.[0] === 'INPUT' && race.after?.[2] === TITLE, 'THE .228 MIRROR: the late attach answer leaves the keys in the Rename dialog, not the chat composer', S(race.after));
   await send('Input.insertText', { text: RENAME });
   const typed = await ev(`const a = document.activeElement; return a ? [a.tagName, a.value] : null;`);
   ok(Array.isArray(typed) && typed[0] === 'INPUT' && typed[1] === RENAME, 'the new name is typed into the focused dialog input', S(typed));
@@ -287,6 +324,23 @@ while :; do for f in "${EMIT}/$SID".*.json; do [ -f "$f" ] || continue; cat "$f"
     const kv = await view(K);
     ok(kv.cards.includes(FIRST('control')) && !kv.cards.includes(TITLE3), `CONTROL: the live row keeps its first-message name "${FIRST('control')}" (leg a's check is red)`, S(kv.cards));
     ok(!String(kv.win || '').startsWith(TITLE3), 'CONTROL: …and the window title never reads the title', S(kv.win));
+    await bundle(null);
+  }
+
+  console.log('\nf — NEGATIVE CONTROL: the answer\'s focus without its dialog guard (THE .228 MIRROR)');
+  {
+    const src = fs.readFileSync(path.join(repo, 'src/lib/session-lifecycle.js'), 'utf8');
+    const guard = "const lateFocus = (view) => { if (lateFocusVerdict(document.querySelectorAll('.dialog-overlay')) === 'take') view.focus(); };";
+    if (!ok(src.includes(guard), 'the answer sites\' focus guard is where the control cuts')) return;
+    // the copy lives outside the tree: its relative imports name the scratch worktree's modules (the bundle's own sources)
+    const cut = src.replace(guard, 'const lateFocus = (view) => view.focus(); // NEGATIVE CONTROL: the answer takes the keys whatever holds them')
+      .replace(/from '\.\/([^']+)'/g, (m, f) => `from ${S(path.join(wt, 'src/lib', f))}`).replace(/from '\.\.\/([^']+)'/g, (m, f) => `from ${S(path.join(wt, 'src', f))}`);
+    await bundle(null, MUT.write(path.join(repo, 'src/lib/session-lifecycle.js'), cut, 'no-late-focus-guard', { esm: true }));
+    pageErrors.length = 0;
+    if (!ok(await boot(), 'control: the app booted on the guard-less bundle', S(pageErrors))) return;
+    const cr = await renameRace(A, RENAME); // a fresh boot, as leg b's: the double-click's clicks attach the session
+    ok(cr.dlg && cr.own && cr.rel?.attached >= 1, 'CONTROL: the same race ran (dialog up and focused, the attach answer held past it)', S(cr));
+    ok(cr.after?.[0] === 'TEXTAREA', 'CONTROL: the late answer takes the keys to the chat composer — the mirror\'s red (the new leg b check is red)', S(cr.after));
     await bundle(null);
   }
   } finally {

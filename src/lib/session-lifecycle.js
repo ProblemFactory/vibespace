@@ -11,11 +11,16 @@ import { api, escHtml, estDisplayPair, fetchJson, hostStateChip, showConfirmDial
 // collab-row), so "the instance default is a NEW-session default" is ONE law
 // with two callers instead of two `||` chains that drift.
 import { resumeSpawnPick } from '../resume-continuity.js';
+import { lateFocusVerdict } from './keyboard-yield.js'; // lane mirror-green-228: a focus on the server's answer leaves an open dialog's keys
 import { forkGroupPlan } from './fork-groups.js'; // a fork lands in its source's Task Groups (2026-09-25)
 import { carriedGeometry } from './stage-rules.js'; // the geometry a replaced window carries: a borrowed hero's HOME, never the Stage's slot (verify r1 of inc-munl8jkl-gaih)
 import { attachSlab } from './view-visibility.js'; // perf r1: the slab an attach asks for (floor | text)
 import { memberState, poolSubmenuModel, submenuNoteWords } from './pool-priority-model.js'; // THE CONVERSATION'S POOL PIN (2026-09-28): the pool row's submenu, as a PURE model
 import { deviceLocale } from './i18n.js';
+
+// lane mirror-green-228: a window's focus on the server's answer never takes the keys from an open app dialog (the Rename
+// dialog a double-click on its own sidebar row opened while the attach was in flight)
+const lateFocus = (view) => { if (lateFocusVerdict(document.querySelectorAll('.dialog-overlay')) === 'take') view.focus(); };
 
 export function installSessionLifecycle(App, ctx = {}) {
   Object.assign(App.prototype, {
@@ -467,7 +472,7 @@ export function installSessionLifecycle(App, ctx = {}) {
           } else if (initialMessage) {
             this._sendChatMessage(msg.sessionId, initialMessage);
           }
-          chatView.focus();
+          lateFocus(chatView);
         } else {
           const term = new TerminalSession(winInfo, this.ws, msg.sessionId, this.themeManager, (filePath, signalPath) => {
             this._openExternalEditor(filePath, signalPath);
@@ -483,7 +488,7 @@ export function installSessionLifecycle(App, ctx = {}) {
           if (initialCommand) {
             setTimeout(() => this.ws.send({ type: 'input', sessionId: msg.sessionId, data: initialCommand + '\r' }), 1200);
           }
-          term.focus();
+          lateFocus(term);
         }
         this.wm.setTitle(winInfo.id, `${sessionName} — ${msg.cwd||cwd||'~'}`);
         return true;
@@ -773,7 +778,7 @@ export function installSessionLifecycle(App, ctx = {}) {
             chatView.dispose(); this.sessions.delete(winInfo.id); this._checkWelcome();
           };
           winInfo._notifyChanged = () => this.updateTaskbar();
-          chatView.focus();
+          lateFocus(chatView);
         } else {
           // Terminal mode (existing)
           const term = new TerminalSession(winInfo, this.ws, serverId, this.themeManager, (fp, sp) => this._openExternalEditor(fp, sp), {}, this.settings);
@@ -788,7 +793,7 @@ export function installSessionLifecycle(App, ctx = {}) {
             setTimeout(() => { term.terminal.write(buf, () => { term._suppressWaiting = false; term._replaying = false; term.terminal.scrollToBottom(); term.fit(); }); }, 300);
           }
           this._wireTerminalWindow(winInfo, term, serverId, { backend });
-          term.focus();
+          lateFocus(term);
         }
         return true;
       }
@@ -841,7 +846,7 @@ export function installSessionLifecycle(App, ctx = {}) {
         this.sessions.set(winInfo.id, term);
         // Closing window only detaches the tmux view — does NOT kill the session
         this._wireTerminalWindow(winInfo, term, msg.sessionId, { killOnClose: false });
-        term.focus();
+        lateFocus(term);
         return true;
       }
       return false;

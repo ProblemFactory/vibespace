@@ -97,6 +97,37 @@ ok(gRow.adds === 'unsaved' && lRow.adds === 'older' && !/older/i.test(said(gRow.
 ok(words('unknown') === "Asked Lark's whole history: 12 older messages may be related" && words('tokens') === words('unknown') && words('substring') === "Asked Lark's whole history: 12 older found", 'VS3: only a measured `substring` says "found" — until then "may be related"');
 ok(/Re-authorize/.test(SR.statusText({ state: 'refused', code: 'needs-scope' })) && /40 s/.test(SR.statusText({ state: 'refused', code: 'vendor-budget', retryAfterSec: 40 }, { vendor: 'Lark' })) && SR.statusText({ state: 'refused', code: 'not-supported' }) === 'This channel offers no search of its own', 'the refusals are worded: Re-authorize, the wait, no search of its own');
 
+// lane vendor-search-memo (.230): THE MEMO, PURE — key, scope, TTL, page append, Search again, LRU, bytes, table, words
+{
+  const T0 = 1_000_000;
+  const put = (s, o) => SR.searchMemo(s, { op: 'put', scope: 'all', page: null, now: T0, hits: [{ convId: 'c', vendorId: 'v', at: 1, snippet: 'x' }], next: 'p:10', ...o });
+  const get = (s, o) => SR.searchMemo(s, { op: 'get', scopes: ['all'], page: null, now: T0, ...o });
+  ok(SR.memoQuery('  Budget \t  PLAN ') === 'budget plan' && SR.memoScope(null) === 'all' && SR.memoScope(['b', 'a', 'b']) === SR.memoScope(['a', 'b']) && SR.memoScope(['a']) !== SR.memoScope(['a', 'b']), 'memo: the key = trimmed, case-folded, spaces collapsed; the scope = all or the conversation set (order and repeats aside)');
+  let s = put(undefined, { query: 'budget  plan' }).state;
+  const g1 = get(s, { query: ' BUDGET plan', now: T0 + 5000 });
+  ok(g1.answer && g1.answer.hits.length === 1 && g1.answer.next === 'p:10' && g1.answer.ageMs === 5000 && g1.answer.askedAt === T0, 'memo: the same words (another case, other spaces) read the entry with its age');
+  ok(!get(s, { query: 'budget plan', scopes: ['set:1:x'] }).answer && get(s, { query: 'budget plan', scopes: ['set:1:x', 'all'] }).answer, 'memo: a scope reads its own entries only — an agent lists the owner\'s ("all") beside its own');
+  const live = get(s, { query: 'budget plan', now: T0 + SR.SEARCH_MEMO_TTL_MS - 1 }), dead = get(s, { query: 'budget plan', now: T0 + SR.SEARCH_MEMO_TTL_MS });
+  ok(SR.SEARCH_MEMO_TTL_MS === 600000 && live.answer && !dead.answer && dead.state.entries.size === 0 && dead.state.bytes === 0, 'memo: the TTL (10 min) — alive to its last millisecond, then dropped');
+  s = SR.searchMemo(s, { op: 'put', scope: 'all', query: 'budget plan', page: 'p:10', now: T0 + 60000, hits: [{ convId: 'c', vendorId: 'w', at: 0 }], next: null }).state;
+  const pg = get(s, { query: 'budget plan', page: 'p:10', now: T0 + 61000 });
+  const stray = SR.searchMemo(s, { op: 'put', scope: 'all', query: 'budget plan', page: 'p:99', now: T0 + 62000, hits: [], next: null });
+  ok(pg.answer && pg.answer.askedAt === T0 && pg.answer.hits[0].vendorId === 'w' && get(s, { query: 'budget plan' }).answer.next === 'p:10' && stray.answer === false, 'memo: a later page APPENDS (the TTL still runs from the first press); a page that does not follow the last is not kept');
+  const cl = SR.searchMemo(s, { op: 'clear', scope: 'all', query: 'Budget Plan' });
+  ok(cl.answer === true && !get(cl.state, { query: 'budget plan' }).answer && get(s, { query: 'budget plan' }).answer, 'memo: "Search again" forgets the entry (a new state — the old one untouched)');
+  let L;
+  for (let i = 0; i < SR.SEARCH_MEMO_MAX + 6; i++) { L = put(L, { query: `q${i}` }).state; if (i === SR.SEARCH_MEMO_MAX - 1) L = get(L, { query: 'q0' }).state; }
+  ok(L.entries.size === SR.SEARCH_MEMO_MAX && get(L, { query: 'q0' }).answer && !get(L, { query: 'q1' }).answer && get(L, { query: `q${SR.SEARCH_MEMO_MAX + 5}` }).answer, `memo: the LRU — ≤ ${SR.SEARCH_MEMO_MAX} entries, the least recently READ leaves first (q0 was read, q1 left)`);
+  const fat = (n) => [{ convId: 'c', vendorId: 'v', at: 1, snippet: 'x'.repeat(n) }];
+  let B;
+  for (let i = 0; i < 8; i++) B = put(B, { query: `f${i}`, hits: fat(200 * 1024) }).state;
+  const huge = put(B, { query: 'huge', hits: fat(1100 * 1024) });
+  ok(B.bytes <= SR.SEARCH_MEMO_BYTES && B.entries.size < 8 && !get(B, { query: 'f0' }).answer && get(B, { query: 'f7' }).answer && huge.answer === false && huge.state.entries.size === B.entries.size, `memo: ≤ ${SR.SEARCH_MEMO_BYTES / 1048576} MiB an account (the oldest leave); one answer over it is not kept`, JSON.stringify({ bytes: B.bytes, n: B.entries.size }));
+  const Vm = (o) => SR.fullSearchVerdict({ declared: true, scopeHeld: true, now: 100000, floorMs: 2000, minuteLeft: 12, budgetLeft: 60, pages: 3, ...o });
+  ok(Vm({ memo: true, backoffUntil: 200000, lastAt: 99999, inflight: true, minuteLeft: 0, budgetLeft: 0 }).act === 'memo' && Vm({ peek: true }).act === 'unasked' && Vm({ memo: true, peek: true }).act === 'memo' && Vm({ memo: true, declared: false }).code === 'not-supported' && Vm({ memo: true, scopeHeld: false }).code === 'needs-scope', 'the table: a remembered answer before the back-off, the floor, the minute, the budget; a look that is no press asks nothing; not declared / no scope still first');
+  ok(/less than a minute/.test(SR.memoText(59999, { vendor: 'Lark' })) && /Lark's search 5 min ago/.test(SR.memoText(5 * 60e3 + 1, { vendor: 'Lark' })) && /Press Search/.test(SR.statusText({ state: 'unasked' }, { vendor: 'Lark' })), 'the words: a remembered answer says its age; the opened dialog says a press asks');
+}
+
 // ── §B THE STORE: NEWEST CONVERSATION FIRST UNDER THE CAP ──────────────────
 console.log('§B the store scan: newest conversation first, the coverage');
 async function mkStore(dir, n, name) {
@@ -146,10 +177,10 @@ function counted(kind, { search = true } = {}) {
     return impl;
   } } };
 }
-async function mkEngine(name, ENGmod = ENG) {
+async function mkEngine(name, ENGmod = ENG, extra = []) {
   const dataDir = path.join(ROOT, name);
   fs.mkdirSync(path.join(dataDir, 'channels'), { recursive: true });
-  fs.writeFileSync(path.join(dataDir, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: ['srch', 'nos'].map((k) => ({ id: k, kind: k, label: k, enabled: true, auth: { tokenEnc: null, expiresAt: null, scopes: [] }, lastPass: null, consecutiveFailures: 0, push: { enabled: false, claimedExclusive: 'unknown', state: null, lastEventAt: null, missRate: 0, demotedAt: null, demotedWhy: null }, scan: null })) }));
+  fs.writeFileSync(path.join(dataDir, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: ['srch', 'nos', ...extra].map((k) => ({ id: k, kind: /^srch/.test(k) ? 'srch' : k, label: k, enabled: true, auth: { tokenEnc: null, expiresAt: null, scopes: [] }, lastPass: null, consecutiveFailures: 0, push: { enabled: false, claimedExclusive: 'unknown', state: null, lastEventAt: null, missRate: 0, demotedAt: null, demotedWhy: null }, scan: null })) }));
   const S = counted('srch'), N = counted('nos', { search: false });
   const registry = CH.createChannelRegistry();
   registry.register(S.mod); registry.register(N.mod);
@@ -166,24 +197,26 @@ const logHash = (eng, a, c) => { try { return crypto.createHash('sha1').update(f
   const r1 = await eng.searchVendor('srch', 'budget');
   ok(r1.ok && S.calls.search === fake.FAKE_SEARCH.pagesPerPress && r1.hits.length === 2 * fake.FAKE_SEARCH.pageSize && r1.next, `ONE press = ${fake.FAKE_SEARCH.pagesPerPress} pages (the row's pagesPerPress), a token for the rest`, JSON.stringify({ calls: S.calls, n: r1.hits && r1.hits.length, code: r1.code }));
   ok(r1.ok && r1.hits.every((h) => h.snippet && !/<em>/.test(h.snippet)) && r1.hits.some((h) => h.known && h.convId === 'srch-ops') && r1.hits.filter((h) => !h.known).every((h) => h.title === null), 'each hit: the snippet through the reader, a stored conversation named, an unknown one nameless (the client words it)');
-  const r2 = await eng.searchVendor('srch', 'budget');
-  ok(r2.code === 'search-floor' && r2.retryAfterSec >= 1 && S.calls.search === 2, 'a second press inside the 2 s floor = ZERO vendor calls, refused with the wait', JSON.stringify(r2));
+  const r2 = await eng.searchVendor('srch', 'kickoff');
+  ok(r2.code === 'search-floor' && r2.retryAfterSec >= 1 && S.calls.search === 2, 'a second press (other words) inside the 2 s floor = ZERO vendor calls, refused with the wait', JSON.stringify(r2));
   tick(2500);
   const r3 = await eng.searchVendor('srch', 'budget', { pageToken: r1.next });
   ok(r3.ok && S.calls.search === 3 && r3.hits.length >= 1, 'the scroll\'s page = ONE call by its token', JSON.stringify({ calls: S.calls, code: r3.code }));
   const stored = eng.store.readTail('srch', 'srch-ops', { limit: 1 })[0];
   S.inject.extra = { convId: 'srch-ops', vendorId: stored.vendorId, at: stored.at, fromId: null, threadKey: null, snippet: 'stored one' };
   tick(2500);
-  const r4 = await eng.searchVendor('srch', 'budget');
+  const r4 = await eng.searchVendor('srch', 'budget', { again: true });
   ok(r4.ok && !r4.hits.some((h) => h.vendorId === stored.vendorId) && r4.stored >= 1, 'a hit the local copy holds is dropped — it is in section one, once (V6)', JSON.stringify({ stored: r4.stored }));
   S.inject.extra = null;
   S.inject.rate = 1;
   tick(2500);
   const c5 = S.calls.search;
-  const r5 = await eng.searchVendor('srch', 'budget');
+  const r5 = await eng.searchVendor('srch', 'budget', { again: true });
   tick(2500);
-  const r6 = await eng.searchVendor('srch', 'budget');
+  const r6 = await eng.searchVendor('srch', 'budget', { again: true });
   ok(r5.code === 'backoff' && r5.retryAfterSec >= 25 && r6.code === 'backoff' && S.calls.search === c5 + 1, 'a vendor rate refusal backs the endpoint off: said with its wait, and the next press costs ZERO calls', JSON.stringify({ r5, r6, calls: S.calls.search - c5 }));
+  const r6b = await eng.searchVendor('srch', 'budget');
+  ok(r6b.code === 'backoff' && !r6b.memo && S.calls.search === c5 + 1, 'lane vendor-search-memo: a refusal is NOT remembered — the next plain press is refused as today, no empty "remembered" answer', JSON.stringify(r6b));
   // around: one read, nothing stored
   const before = { h: logHash(eng, 'srch', 'srch-ops'), row: JSON.stringify(eng.store.index.peek('srch/srch-ops')), conv: Object.keys(eng.store.index.live()).length };
   const hit = r1.hits.find((h) => h.vendorId === 'srch-ops-old-1') || r1.hits.find((h) => h.convId === 'srch-ops');
@@ -202,8 +235,10 @@ const logHash = (eng, a, c) => { try { return crypto.createHash('sha1').update(f
   const f1 = await eng.searchFor(AG, 'budget', { full: true, adapterId: 'srch' });
   ok(ga.ok && f1.ok && S.calls.search === cA + 1 && f1.results.length >= 1 && f1.results.every((x) => /srch-ops/.test(x.key) && x.source === 'vendor'), 'an agent\'s --full = ONE page; every hit it is shown is in a conversation it can see', JSON.stringify({ ga: ga.code, f1: f1.code || f1.results && f1.results.length, calls: S.calls.search - cA }));
   tick(2500);
-  const f2 = await eng.searchFor(AG, 'budget', { full: true, adapterId: 'srch' });
-  ok(f2.code === 'refresh-floor' && S.calls.search === cA + 1, 'its second --full inside 20 s is refused by the floor, zero calls', JSON.stringify(f2));
+  const f2 = await eng.searchFor(AG, 'kickoff', { full: true, adapterId: 'srch' });
+  ok(f2.code === 'refresh-floor' && S.calls.search === cA + 1, 'its second --full (other words) inside 20 s is refused by the floor, zero calls', JSON.stringify(f2));
+  const f2m = await eng.searchFor(AG, 'Budget', { full: true, adapterId: 'srch' });
+  ok(f2m.ok && f2m.remembered && S.calls.search === cA + 1 && f2m.results.length === f1.results.length, 'lane vendor-search-memo: its repeat of the same words = its own remembered answer, zero calls, no floor', JSON.stringify({ code: f2m.code, rem: f2m.remembered }));
   tick(21000);
   const f3 = await eng.searchFor(AG, 'last year', { full: true, adapterId: 'srch' });
   ok(f3.ok && f3.results.length === 0 && f3.truncated === false && !('stored' in f3) && !('next' in f3), 'a hit only in a conversation it cannot see is ABSENT — no count, no truncated, no token (V2)', JSON.stringify(f3));
@@ -231,9 +266,50 @@ const logHash = (eng, a, c) => { try { return crypto.createHash('sha1').update(f
   await eng.setAccess('srch', { kind: 'conversation', convId: 'srch-ops' }, [{ principal: { kind: 'everyone', id: '*' } }]);
   tick(61000);
   const fx = {};
-  for (let i = 0; i < fake.FAKE_SEARCH.perMin + 2; i++) { const x = await eng.searchFor({ kind: 'agent', id: `agent-L${i}`, name: 'L', groups: [] }, 'budget', { full: true, adapterId: 'srch' }); fx[x.ok ? 'ok' : x.code] = (fx[x.ok ? 'ok' : x.code] || 0) + 1; tick(200); }
-  const own = await eng.searchVendor('srch', 'budget');
+  for (let i = 0; i < fake.FAKE_SEARCH.perMin + 2; i++) { const x = await eng.searchFor({ kind: 'agent', id: `agent-L${i}`, name: 'L', groups: [] }, `zz loop ${i}`, { full: true, adapterId: 'srch' }); fx[x.ok ? 'ok' : x.code] = (fx[x.ok ? 'ok' : x.code] || 0) + 1; tick(200); }
+  const own = await eng.searchVendor('srch', 'budget', { again: true });
   ok(own.ok && fx.ok === fake.FAKE_SEARCH.perMin - fake.FAKE_SEARCH.pagesPerPress, 'verify r1 F3: agents looping --full leave one press of the endpoint\'s minute — the owner\'s press is asked', JSON.stringify({ agents: fx, owner: own.code || 'ok' }));
+  eng.stop && eng.stop();
+}
+
+// ── §M THE MEMO OVER THE FAKE VENDOR (lane vendor-search-memo, .230) ───────
+console.log('§M the memo: one ask per (account, scope, query) — a repeat, a reopen, an agent read it; Search again asks');
+{
+  const { eng, S, tick } = await mkEngine('eng-memo', ENG, ['srch2']);
+  const PP = fake.FAKE_SEARCH.pagesPerPress;
+  const m1 = await eng.searchVendor('srch', 'budget');
+  tick(3000);
+  const m2 = await eng.searchVendor('srch', '  BUDGET ');
+  ok(m1.ok && !m1.memo && m2.ok && m2.memo && m2.pages === 0 && S.calls.search === PP && JSON.stringify(m2.hits) === JSON.stringify(m1.hits) && m2.next === m1.next, 'the same words twice (case and spaces aside) = ONE vendor press; the second answered from the memo — same rows, same token', JSON.stringify({ calls: S.calls.search, m2: m2.code || m2.memo }));
+  tick(60000);
+  const m3 = await eng.searchVendor('srch', 'budget', { peek: true });
+  const m3n = await eng.searchVendor('srch', 'never asked', { peek: true });
+  ok(m3.ok && m3.memo && m3.memo.ageMs === 63000 && m3.hits.length === m1.hits.length && m3n.ok && m3n.unasked && m3n.hits.length === 0 && S.calls.search === PP, 'reopening the dialog (peek) = 0 calls: the memo with its age, or "unasked" — never the vendor', JSON.stringify({ calls: S.calls.search, m3: m3.memo, m3n: m3n.unasked || m3n.code }));
+  const m4 = await eng.searchVendor('srch', 'budget', { again: true });
+  const m5 = await eng.searchVendor('srch', 'budget');
+  ok(m4.ok && !m4.memo && S.calls.search === 2 * PP && m5.memo && m5.memo.ageMs === 0, '"Search again" = ONE more press (the entry forgotten, asked anew); the next press reads the new entry', JSON.stringify({ calls: S.calls.search, m4: m4.code, m5: m5.memo }));
+  const m6 = await eng.searchVendor('srch', 'budget', { pageToken: m5.next });
+  const m6b = await eng.searchVendor('srch', 'budget', { pageToken: m5.next });
+  ok(m5.next && m6.ok && !m6.memo && m6b.memo && S.calls.search === 2 * PP + 1, 'the scroll\'s next page = one call, appended to the entry; asked again it is remembered', JSON.stringify({ calls: S.calls.search }));
+  tick(SR.SEARCH_MEMO_TTL_MS);
+  const m7 = await eng.searchVendor('srch', 'budget');
+  ok(m7.ok && !m7.memo && S.calls.search === 3 * PP + 1, 'past the TTL (10 min) the press asks again', JSON.stringify({ calls: S.calls.search, m7: m7.code }));
+  await eng.setAccess('srch', { kind: 'conversation', convId: 'srch-ops' }, [{ principal: { kind: 'agent', id: 'agent-M', name: 'M' } }]);
+  const AGm = { kind: 'agent', id: 'agent-M', name: 'M', groups: [] };
+  const c8 = S.calls.search;
+  const a1 = await eng.searchFor(AGm, 'Budget', { full: true, adapterId: 'srch' });
+  ok(a1.ok && a1.remembered && S.calls.search === c8 && a1.results.length >= 1 && a1.results.every((x) => /srch-ops/.test(x.key)), 'an agent after the owner (same words) = 0 calls — only what it can see (reach after the memo)', JSON.stringify({ code: a1.code, n: a1.results && a1.results.length, calls: S.calls.search - c8 }));
+  const a2 = await eng.searchFor(AGm, 'kickoff', { full: true, adapterId: 'srch' });
+  tick(2000);
+  const a3 = await eng.searchFor(AGm, 'last year', { full: true, adapterId: 'srch' });
+  const a4 = await eng.searchFor(AGm, 'kickoff', { full: true, adapterId: 'srch' });
+  ok(a2.ok && !a2.remembered && a3.code === 'refresh-floor' && a4.ok && a4.remembered && S.calls.search === c8 + 1, 'the agent floor still gates a FRESH call (20 s; the memo read stamped nothing); its own fresh answer is remembered for it', JSON.stringify({ a2: a2.code, a3: a3.code, a4: a4.code, calls: S.calls.search - c8 }));
+  const c9 = S.calls.search;
+  const b1 = await eng.searchVendor('srch2', 'budget');
+  tick(2500);
+  const b2 = await eng.searchVendor('srch2', 'budget');
+  const b3 = await eng.searchVendor('srch', 'budget');
+  ok(b1.ok && !b1.memo && b2.memo && b3.memo && S.calls.search === c9 + PP, 'two accounts searched: each its OWN memo — the second account asks once, then both answer from their own', JSON.stringify({ b1: b1.code || !!b1.memo, calls: S.calls.search - c9 }));
   eng.stop && eng.stop();
 }
 
@@ -267,7 +343,7 @@ console.log('§K controls: each rule removed ⇒ its leg red');
   const engNoStamp = patched('src/server/channels-engine.js', '    else e.searchOwnerAt = t;\n', '\n', 'no-stamp');
   const k5 = await mkEngine('eng-nostamp', engNoStamp);
   await k5.eng.searchVendor('srch', 'budget');
-  const k5b = await k5.eng.searchVendor('srch', 'budget');
+  const k5b = await k5.eng.searchVendor('srch', 'budge');
   ok(k5b.ok && k5.S.calls.search === 4, 'CONTROL: an engine that never stamps the press lets the second press inside the floor reach the vendor (4 calls, not 2)', JSON.stringify(k5.S.calls));
   k5.eng.stop && k5.eng.stop();
   const engStores = patched('src/server/channels-engine.js', '    if (r.facts) measureFullSearch(rec, { around: r.facts });\n', '    if (r.facts) measureFullSearch(rec, { around: r.facts });\n    store.appendRecords(rec.id, cid, r.records);\n', 'stores');
@@ -278,6 +354,26 @@ console.log('§K controls: each rule removed ⇒ its leg red');
   await k6.eng.aroundOwner('srch', 'srch-ops', { vendorId: kh.vendorId, at: kh.at });
   ok(logHash(k6.eng, 'srch', 'srch-ops') !== h0, 'CONTROL: an around that appends what it read changes the log\'s bytes — the hash leg catches it');
   k6.eng.stop && k6.eng.stop();
+}
+{
+  // lane vendor-search-memo: each memo rule removed ⇒ its §M leg red
+  const PP = fake.FAKE_SEARCH.pagesPerPress;
+  const k7 = await mkEngine('eng-nomemo', patched('src/server/channels-engine.js', '      memo: !!kept, peek: !!peek && !pageToken,\n', '      memo: false, peek: !!peek && !pageToken,\n', 'no-memo'));
+  await k7.eng.searchVendor('srch', 'budget'); k7.tick(3000);
+  const k7b = await k7.eng.searchVendor('srch', 'budget');
+  ok(k7b.ok && !k7b.memo && k7.S.calls.search === 2 * PP, 'CONTROL: an engine with no memo asks the vendor again for the same words (2 presses, not 1)', JSON.stringify(k7.S.calls));
+  k7.eng.stop && k7.eng.stop();
+  const k8 = await mkEngine('eng-refmemo', patched('src/server/channels-engine.js', '    if (failure && !pages) return failure;\n', "    if (failure && !pages) { e.searchMemo = SR.searchMemo(e.searchMemo, { op: 'put', scope, query, page: pageToken, now: t, hits: [], next: null }).state; return failure; }\n", 'refusal-memo'));
+  k8.S.inject.rate = 1;
+  const k8a = await k8.eng.searchVendor('srch', 'budget'); k8.tick(2500);
+  const k8b = await k8.eng.searchVendor('srch', 'budget');
+  ok(k8a.code === 'backoff' && k8b.ok && k8b.memo && k8b.hits.length === 0, 'CONTROL: an engine that remembers a refusal answers the next press with an empty "remembered" result', JSON.stringify({ a: k8a.code, b: k8b.code || k8b.memo }));
+  k8.eng.stop && k8.eng.stop();
+  const k9 = await mkEngine('eng-noagain', patched('src/server/channels-engine.js', 'again: !!again && !tok,', 'again: false,', 'no-again'));
+  await k9.eng.searchVendor('srch', 'budget'); k9.tick(3000);
+  const k9b = await k9.eng.searchVendor('srch', 'budget', { again: true });
+  ok(k9b.memo && k9.S.calls.search === PP, 'CONTROL: a "Search again" that forgets nothing answers from the memo (0 calls)', JSON.stringify(k9.S.calls));
+  k9.eng.stop && k9.eng.stop();
 }
 for (const r of copiesCensus(MUTE.files, MUTE.dir, REPO, { minCopies: 6 })) ok(r.pass, 'tree: ' + r.name, r.pass ? undefined : r.detail);
 

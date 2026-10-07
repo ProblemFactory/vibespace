@@ -7241,6 +7241,10 @@ export default {
   "This account has no search permission — available after Re-authorize": "このアカウントには検索の権限がありません — 再認証すると使えます",
   "{vendor} is limiting its search — asked again in {s} s; the saved results are shown": "{vendor}が検索を制限しています — {s} 秒後にもう一度問い合わせます。保存済みの結果は表示済みです",
   "{vendor}'s search was asked a moment ago — asked again in {s} s": "{vendor}の検索には先ほど問い合わせました — {s} 秒後にもう一度",
+  "Press Search to ask {vendor}'s own search": "「検索」を押すと{vendor}自身の検索に問い合わせます",
+  "From {vendor}'s search less than a minute ago": "1 分以内に問い合わせた{vendor}の検索結果",
+  "From {vendor}'s search {n} min ago": "{n} 分前に問い合わせた{vendor}の検索結果",
+  "Search again": "もう一度検索",
   "{vendor}'s search waits {s} s (this minute's allowance is used) — the saved results are shown": "{vendor}の検索は {s} 秒待ちです（この1分間の枠を使い切りました）— 保存済みの結果は表示済みです",
   "{vendor}'s search did not answer — the saved results are shown": "{vendor}の検索から応答がありません — 保存済みの結果は表示済みです",
   // lane design-ask: the questions sheet, the hand-off prompt, the chip's ask-first box

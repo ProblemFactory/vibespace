@@ -887,6 +887,8 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
 // agent's explicit `--full` (`searchFullFor` ← `searchFor`); `around` only from the owner's sheet and the agent's
 // `--around`. No timer, no ingest pass, no keystroke: the client asks the full route only from the dialog's press / its
 // scroll sentinel, never from an `input` listener. A derived census over the function bodies + two planted controls.
+// Lane vendor-search-memo (.230): the fourth ask is the per-account "Search again" button (a press); the pre-filled
+// open only PEEKS at the account's memo (`run('open')` → `peek=1`, never the vendor).
 console.log('§FS the full search: the call sites (a press, an explicit --full — never a timer, an ingest, a keystroke)');
 {
   const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf-8');
@@ -899,19 +901,20 @@ console.log('§FS the full search: the call sites (a press, an explicit --full �
       adapterSearch: callers(b, /e\.adapter\.search\(/), vendorSearch: callers(b, /\bvendorSearch\(/, 'vendorSearch'), searchFullFor: callers(b, /\bsearchFullFor\(/, 'searchFullFor'),
       adapterAround: callers(b, /e\.adapter\.around\(/), aroundFor: callers(b, /\baroundFor\(/, 'aroundFor'),
       clientRoutes: (panel.match(/\/api\/channels\/search\/full/g) || []).length, keystroke: /addEventListener\('input'/.test(sh), askCalls: (sh.match(/\bask\(st/g) || []).length,
+      openPeeks: /if \(initial\) \{ input\.value = initial; run\('open'\); \}/.test(sh) && /ask\(st, null, opening \? 'peek' : null\)/.test(sh),
     };
   };
-  const want = { adapterSearch: 'vendorSearch', vendorSearch: 'searchFullFor,searchVendor', searchFullFor: 'searchFor', adapterAround: 'aroundFor', aroundFor: 'aroundOwner,readAroundFor', clientRoutes: 1, keystroke: false, askCalls: 3 };
+  const want = { adapterSearch: 'vendorSearch', vendorSearch: 'searchFullFor,searchVendor', searchFullFor: 'searchFor', adapterAround: 'aroundFor', aroundFor: 'aroundOwner,readAroundFor', clientRoutes: 1, keystroke: false, askCalls: 4, openPeeks: true };
   const ENGS = engineSource(REPO), PANEL = read('src/lib/channels-panel.js');
   const j = judge(ENGS, PANEL);
-  ok(JSON.stringify(j) === JSON.stringify(want), 'the full search\'s ONE adapter call is reached only from the press route and the agent\'s --full; around only from the sheet and --around; the client asks only on a press / the scroll sentinel / the once-retry', JSON.stringify(j));
+  ok(JSON.stringify(j) === JSON.stringify(want), 'the full search\'s ONE adapter call is reached only from the press route and the agent\'s --full; around only from the sheet and --around; the client asks only on a press / the scroll sentinel / the once-retry / Search again; the open only peeks', JSON.stringify(j));
   const rc = read('src/routes/channels.js'), ar = read('src/agent-routes.js');
   ok((rc.match(/engine\(\)\.searchVendor\(/g) || []).length === 1 && /router\.get\('\/api\/channels\/search\/full'[\s\S]{0,400}engine\(\)\.searchVendor\(/.test(rc) && (rc.match(/engine\(\)\.aroundOwner\(/g) || []).length === 1 && (ar.match(/full: req\.query\.full === '1'/g) || []).length === 1, 'the owner\'s two routes and the agent\'s one flag are the only doors');
   const tickSpot = ENGS.indexOf('  function feedDue(rec, e, t = now()) {');
   const planted = ENGS.slice(0, tickSpot) + "  function feedDue(rec, e, t = now()) {\n    vendorSearch(rec, 'x', {});" + ENGS.slice(tickSpot + '  function feedDue(rec, e, t = now()) {'.length);
   const keyed = PANEL.replace("  go.onclick = run;\n", "  go.onclick = run;\n  input.addEventListener('input', () => { for (const st of []) ask(st); });\n");
   const jp = judge(planted, PANEL), jk = judge(ENGS, keyed);
-  ok(tickSpot > 0 && jp.vendorSearch.includes('feedDue') && keyed !== PANEL && jk.keystroke === true && jk.askCalls === 4, 'CONTROL: a vendor search planted in the feed\'s tick, and a keystroke listener in the dialog, are each caught by name', JSON.stringify({ tick: jp.vendorSearch, keystroke: jk.keystroke }));
+  ok(tickSpot > 0 && jp.vendorSearch.includes('feedDue') && keyed !== PANEL && jk.keystroke === true && jk.askCalls === 5, 'CONTROL: a vendor search planted in the feed\'s tick, and a keystroke listener in the dialog, are each caught by name', JSON.stringify({ tick: jp.vendorSearch, keystroke: jk.keystroke }));
 }
 
 // §FS-G design 010 S6 (lane channels-followups): GMAIL'S FULL SEARCH IS ASKED ONLY THROUGH ITS `search` / `around`. The

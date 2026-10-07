@@ -461,7 +461,10 @@ function showSearchDialog(app, a, { q: initial = '', convId = null, convTitle = 
     const f = box.querySelector('.chanmsg-found');
     if (f) { const br = box.getBoundingClientRect(), fr = f.getBoundingClientRect(); box.scrollTop += (fr.top - br.top - box.clientTop) - (box.clientHeight - fr.height) / 2; }
   };
-  const run = async () => {
+  // lane vendor-search-memo (.230): `how === 'open'` = the dialog opening pre-filled (an agent's row, the panel's
+  // "Search messages for …") — the saved copy, and section two only from the account's memo (`peek`): never the vendor
+  const run = async (how) => {
+    const opening = how === 'open';
     const q = input.value.trim();
     if (q.length < 2) { status.textContent = t('Type at least 2 characters.'); return; }
     if (go.disabled) return;   // a held Enter key: one press at a time (the server's 2 s floor is the belt)
@@ -519,20 +522,29 @@ function showSearchDialog(app, a, { q: initial = '', convId = null, convTitle = 
     s2.sec.append(skel, sentinel);
     const states = asked.map(({ acc, x }) => {
       const line = document.createElement('div'); line.className = 'chan-search-vstatus'; s2.note.appendChild(line);
-      return { acc, line, offered: !!x.vendorSearch, next: null, busy: false, found: 0, match: x.vendorSearch && x.vendorSearch.match, adds: x.vendorSearch && x.vendorSearch.adds, retried: false };
+      return { acc, line, offered: !!x.vendorSearch, next: null, busy: false, found: 0, match: x.vendorSearch && x.vendorSearch.match, adds: x.vendorSearch && x.vendorSearch.adds, retried: false, rows: [] };
     });
     const say = (st, v) => {
       st.line.textContent = (states.length > 1 ? `${st.acc.label || st.acc.id}: ` : '') + SR.statusText(v, { t, vendor: vendorOf(st.acc) });
       if (v.state === 'refused' && v.code === 'needs-scope' && !st.line.querySelector('button')) { const re = btn(t('Re-authorize'), () => { close(); showReauthAccountDialog(app, st.acc, { kinds: [] }); }); re.classList.add('chan-sec-verb'); st.line.appendChild(re); }
     };
     const busyAny = () => { skel.hidden = !states.some((st) => st.busy); };
-    const ask = async (st, page = null) => {
+    // "Search again" (lane vendor-search-memo): THIS account's remembered rows leave, its memo entry is forgotten by the
+    // server (`again=1`), and the vendor is asked under today's floor / minute / budget
+    const again = (st) => {
+      if (st.busy || my !== gen) return;
+      for (const { it, key } of st.rows) { it.remove(); shown.delete(key); }
+      st.rows = []; st.found = 0; st.next = null; st.retried = false;
+      ask(st, null, 'again');
+    };
+    const ask = async (st, page = null, mode = null) => {
       if (st.busy || my !== gen) return;
       st.busy = true; busyAny();
-      if (!page) say(st, { state: 'asking' });
-      const x = await fetchJson(`/api/channels/search/full?adapter=${encodeURIComponent(st.acc.id)}&q=${encodeURIComponent(q)}${page ? `&page=${encodeURIComponent(page)}` : ''}`);
+      if (!page && mode !== 'peek') say(st, { state: 'asking' });
+      const x = await fetchJson(`/api/channels/search/full?adapter=${encodeURIComponent(st.acc.id)}&q=${encodeURIComponent(q)}${page ? `&page=${encodeURIComponent(page)}` : ''}${!page && mode ? `&${mode === 'peek' ? 'peek' : 'again'}=1` : ''}`);
       st.busy = false; busyAny();
       if (my !== gen) return;
+      if (x && x.unasked) { say(st, { state: 'unasked' }); return; }
       if (!x || x.ok === false || x.error) {
         const code = (x && x.code) || 'failed';
         if (['not-supported', 'needs-scope', 'backoff', 'search-floor', 'search-minute', 'vendor-budget'].includes(code)) {
@@ -554,12 +566,20 @@ function showSearchDialog(app, a, { q: initial = '', convId = null, convTitle = 
         it.dataset.vid = h.vendorId;
         it.onclick = () => openAround(st.acc, h);
         s2.rows.appendChild(it);
+        st.rows.push({ it, key });
         st.found++;
       }
       st.next = x.next || null;
       say(st, { state: 'done', found: st.found, match: st.match, adds: st.adds });
+      // a remembered answer is a snapshot and says so: its age, and the one way to ask anew
+      if (x.memo && !page) {
+        const m = document.createElement('span'); m.className = 'chan-search-memo';
+        m.textContent = ` · ${SR.memoText(x.memo.ageMs, { t, vendor: vendorOf(st.acc) })} · `;
+        const re = btn(t('Search again'), () => again(st)); re.classList.add('chan-sec-verb', 'chan-search-again');
+        st.line.append(m, re);
+      }
     };
-    for (const st of states) { if (st.offered) ask(st); else say(st, { state: 'refused', code: 'not-supported' }); }
+    for (const st of states) { if (st.offered) ask(st, null, opening ? 'peek' : null); else say(st, { state: 'refused', code: 'not-supported' }); }
     // the end of section two, ONE screen ahead: each account's next page, one request each — asked by the person's
     // SCROLL (lane mirror-green-channels, the Actions mirror 2.369.203/.204). An IntersectionObserver speaks only when
     // the end CROSSES into that screen: where the first answer's rows left the end inside it (the runner's 40 px rows:
@@ -582,7 +602,7 @@ function showSearchDialog(app, a, { q: initial = '', convId = null, convTitle = 
   };
   go.onclick = run;
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); if (!e.repeat) run(); } });
-  if (initial) { input.value = initial; run(); }   // the panel's "Search messages for …" — the owner's press on it
+  if (initial) { input.value = initial; run('open'); }   // the panel's "Search messages for …" / an agent's row: the saved copy + the memo (lane vendor-search-memo)
   setTimeout(() => input.focus(), 30);
 }
 

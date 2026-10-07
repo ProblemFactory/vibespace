@@ -7242,6 +7242,10 @@ export default {
   "This account has no search permission — available after Re-authorize": "这个账号没有搜索权限 — 重新授权后可用",
   "{vendor} is limiting its search — asked again in {s} s; the saved results are shown": "{vendor}正在限制搜索 — {s} 秒后再问；本机的结果已经显示",
   "{vendor}'s search was asked a moment ago — asked again in {s} s": "刚刚问过{vendor}的搜索 — {s} 秒后再问",
+  "Press Search to ask {vendor}'s own search": "按“搜索”才会问{vendor}自己的搜索",
+  "From {vendor}'s search less than a minute ago": "来自不到 1 分钟前{vendor}的搜索",
+  "From {vendor}'s search {n} min ago": "来自 {n} 分钟前{vendor}的搜索",
+  "Search again": "重新搜索",
   "{vendor}'s search waits {s} s (this minute's allowance is used) — the saved results are shown": "{vendor}的搜索要等 {s} 秒（这一分钟的额度已用完）— 本机的结果已经显示",
   "{vendor}'s search did not answer — the saved results are shown": "{vendor}的搜索没有回应 — 本机的结果已经显示",
   // lane design-ask: the questions sheet, the hand-off prompt, the chip's ask-first box

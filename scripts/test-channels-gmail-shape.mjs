@@ -1218,6 +1218,7 @@ console.log('\n⑳ design 010 S6: Gmail\'s full search — messages.list?q=, a m
   });
   v.state.search = world();
   const AG = { kind: 'agent', id: 'agent-s6', name: 'Worker', groups: [], msgLevelFor: () => 'none' };
+  const MEMO_TTL = require(path.join(REPO, 'src/channel-search.js')).SEARCH_MEMO_TTL_MS;
   const metaReads = () => v.calls.filter((c) => /\/gmail\/v1\/users\/me\/messages\/[^/]+$/.test(c.path) && c.q.format === 'metadata').map((c) => c.path.split('/').pop()).sort().join();
   const drive = async (E) => {
     clock += 120e3;   // a fresh budget minute, past every floor
@@ -1226,7 +1227,9 @@ console.log('\n⑳ design 010 S6: Gmail\'s full search — messages.list?q=, a m
     const ownReads = metaReads();
     const lists = v.calls.filter((c) => c.path.endsWith('/messages') && c.q.q === 'deploy').map((c) => ({ max: c.q.maxResults, page: c.q.pageToken || null }));
     await E.setReach('gmail', 'thr_ops_0001', { principal: { kind: 'agent', id: AG.id, name: AG.name }, level: 'visible' });
-    clock += 25e3; v.calls.length = 0;
+    // lane vendor-search-memo (.230): the owner's answer to these words is remembered 10 min and an agent reads it first —
+    // past the TTL the agent's --full asks the vendor itself (the hints are what this leg measures)
+    clock += 25e3 + MEMO_TTL; v.calls.length = 0;
     const ag = await E.searchFor(AG, 'deploy', { full: true, adapterId: 'gmail' });
     const agReads = metaReads();
     const rowBefore = JSON.stringify(E.store.index.peek('gmail/thr_ops_0001'));
@@ -1273,7 +1276,7 @@ console.log('\n⑳ design 010 S6: Gmail\'s full search — messages.list?q=, a m
   const anchor = { id: 'msg_ops_d', threadId: 'thr_ops_0001', at: T0 + 5e3, from: 'brook@example.com', words: ['deploy', 'zebra42'] };
   const hiddenMail = (n, from, words) => Array.from({ length: n }, (_, i) => ({ id: `msg_hid_${i}`, threadId: `thr_hid_${i}`, at: T0 + 10e3 + i, from, words }));
   const probe = async (msgs, q) => {
-    clock += 61e3; v.state.oracle = (qq, max) => gq(qq, msgs, max); v.calls.length = 0;
+    clock += 61e3 + MEMO_TTL; v.state.oracle = (qq, max) => gq(qq, msgs, max); v.calls.length = 0;   // past the memo: each world asked
     const r = await e1.searchFor(AG, q, { full: true, adapterId: 'gmail' });
     const sent = v.calls.filter((c) => c.path.endsWith('/messages')).map((c) => ({ q: c.q.q, max: c.q.maxResults }));
     v.state.oracle = null;
@@ -1287,7 +1290,7 @@ console.log('\n⑳ design 010 S6: Gmail\'s full search — messages.list?q=, a m
   ok(w0.ids === 'msg_ops_d' && w1.ids === 'msg_ops_d' && w1.reads === 'msg_ops_d', 'plain words: ten NEWER hidden mails holding the same word no longer push the visible hit off the agent\'s page (and cost no read)', JSON.stringify({ w0, w1 }));
   // a RATE refusal on a metadata read backs the account's search off — the next press inside it asks nothing
   clock += 120e3; v.state.search = { ...world(), rate: 'msg_ops_d' };
-  const r429 = await e1.searchVendor('gmail', 'deploy');
+  const r429 = await e1.searchVendor('gmail', 'deploy', { again: true });
   clock += 3e3; v.calls.length = 0;
   const again = await e1.searchVendor('gmail', 'deploy');
   ok(r429.ok === false && r429.code === 'backoff' && r429.retryAfterSec > 0 && again.ok === false && again.code === 'backoff' && v.calls.length === 0, 'a 429 on a hit\'s metadata read: the press answers `backoff` with its wait, and a press inside it reaches no vendor', JSON.stringify({ r429, again: again.code, calls: v.calls.length }));

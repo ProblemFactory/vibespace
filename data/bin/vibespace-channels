@@ -551,7 +551,8 @@ function printReplaced(r) {
       else if (!rows.length) console.log(`the account's own search found nothing older that you can see for "${q}".`);
       for (const m of rows) console.log(`${m.key} — ${m.title}  [${when(m.at)}] (not saved here): ${String(m.text || '').replace(/\n/g, ' ').slice(0, 200)}  (id ${m.vendorId})`);
       if (rows.length) console.log(`context: vibespace-channels read <conv> --around <id>  (two requests; not saved)`);
-      console.log(`(asked the account's own search — one page per call within your share; narrow the words for more)`);
+      if (r.remembered) console.log(`(the account's own search answered these ${r.remembered.ageSec < 60 ? 'less than a minute' : `${Math.floor(r.remembered.ageSec / 60)} min`} ago — remembered for 10 min, not asked again)`);   // lane vendor-search-memo
+      else console.log(`(asked the account's own search — one page per call within your share; narrow the words for more)`);
       return;
     }
     if (!rows.length) console.log(`nothing you can see matches "${q}".`);

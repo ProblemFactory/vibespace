@@ -2,6 +2,14 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.230 — 2026-10-07
+
+### Changed
+- Searching a channel again shows the provider's earlier results instead of asking it again; "Search again" asks anew.
+
+### Fixed
+- Renaming a conversation from the sidebar while it is still opening keeps your typing in the rename box instead of moving it to the chat box.
+
 ## 2.369.229 — 2026-10-07
 
 ### Changed
