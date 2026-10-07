@@ -787,6 +787,12 @@ function createChannelRegistry({ channelSettings } = {}) {
           if ((r.reactions.read === true && cr.read === 'none') || (r.reactions.add === true && !cr.add)) throw new ChannelError('vendor-error', `${kind}.convCaps returned reactions wider than caps.reactions — a per-conversation resolution may only NARROW`, { retryable: false, detail: { declared: cr, asked: r.reactions } });
           out.reactions = { read: r.reactions.read === true, add: r.reactions.add === true, why: r.reactions.why || null };
         }
+        // lane lark-upload-preflight (userW inc-muxsy69b-mjg1): CAN A FILE RIDE THE SEND — only an adapter that declared
+        // `sendAttachments` may say yes (a yes from one without the row is wider ⇒ refused); the scopes it names are bounded
+        if (r.files && typeof r.files === 'object') {
+          if (r.files.send === true && !caps.sendAttachments) throw new ChannelError('vendor-error', `${kind}.convCaps returned files.send without caps.sendAttachments — a per-conversation resolution may only NARROW`, { retryable: false, detail: { asked: r.files } });
+          out.files = { send: r.files.send === true, why: r.files.why ? String(r.files.why).slice(0, 60) : null, requiredScopes: (Array.isArray(r.files.requiredScopes) ? r.files.requiredScopes : []).filter((x) => typeof x === 'string' && x.length <= 64).slice(0, 8) };
+        }
         // design 012 D20: WHO WILL SEE a message sent here — a closed kind, the organizations by NAME (through the name
         // door: peer-written), a member count; anything else is dropped
         if (r.audience && typeof r.audience === 'object' && AUDIENCE_KINDS.includes(r.audience.kind)) {

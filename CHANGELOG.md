@@ -2,6 +2,16 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.229 — 2026-10-07
+
+### Changed
+- Notifications: pick one session of a group that has access, write a rule as a regular expression, and see the newest matching messages as you type.
+
+### Fixed
+- A conversation paused on your approval now says “waiting for you” after an update, instead of spinning on “thinking” and reloading every few minutes.
+- In a Doc window, the Add comment button now goes away with its selection: a click elsewhere, Esc, or leaving the editor closes it.
+- A message an agent drafts with a file no longer goes out without it unnoticed: the card warns first, and a file that did not arrive is reported in For you.
+
 ## 2.369.228 — 2026-10-07
 
 ### Changed

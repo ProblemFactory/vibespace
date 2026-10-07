@@ -1281,6 +1281,8 @@ estimate(filter, records, { days = 7, now }) -> {
   `truncated`, 而 UI 把这个注意事项打出来。一个悄悄只读了 2,000 条里的 200 条的估计, 比没
   有估计更糟, 因为用户正是凭着它被要求去授权一个*花钱的速率*。
 
+**as-built (lane notify-rules-r2, 2026-10-07):** 规则种类加入 `regex`（RULE_KINDS），保存时判定（`regexVerdict`：`iu`、≤ 256 字符；反向引用、前瞻/后顾、重复组里再重复、相邻且能吃同样文字的两个无界重复、未锚定时能重读匹配起点的无界重复、能匹配空消息的模式——按名拒绝并指出片段），在折叠后的文本（peer-text 的 fold，截到 8 KiB）上匹配，why = `regex /…/`。Notify… 对话框里关键词/正则规则边打边预览：300 ms 防抖，只读本地日志（store.search 以该规则为谓词，最新优先 ≤ 10 条，≤ 16 MiB），owner 专用路由 `POST …/rules/preview`，零 vendor 调用；列出 发送者 · 时间 · 带标记的那一行 + "显示 n / N"。
+
 ### 7.2 估计必须事后可度量
 
 估计是一个**预测**, 而 store 里已经有了检验它所需要的东西。`index.stats.hits7d` 记录 filter
@@ -1724,6 +1726,8 @@ conversation — a delivery now would open a billed turn"), 没有一份唤醒; 
 - **Slack (as built 2.369.212)**: 同一行; 每个文件一条链 `files.getUploadURLExternal` (filename, length) → 字节 POST 到 `upload_url` (只认 files.slack.com, 不带 token) → `files.completeUploadExternal` (channel_id、thread_ts、第一个文件带 `initial_comment` = 正文); 三个方法各有 slack-limits 行 (Tier 4)。user token 无 `files:write` ⇒ 发送前按名拒绝。形状: `scripts/fixtures/slack/send-files.json`。
 - **未实测 (等主人第一次 Approve)**: 以用户 token 上传是否被 Lark 接受、所需 scope 的确切名字、发出的消息是否带应用标记; Slack 分享后的消息 ts (回执以文件 id 为 vendor id)。Agents 渠道无行。
 - **保留**: 拒绝 / 撤回 / 过期时立即删除; 已发送 / 失败的 7 天后由每分钟的清扫删除 (记录仍留名称、大小、sha256, 卡片注明文件不再保留); 被修剪的记录连同文件夹一起删除; 孤儿文件夹与崩溃留下的暂存夹也会被清理。
+
+**As-built(车道 lark-upload-preflight, 2.369.229 — userW inc-muxsy69b-mjg1):卡片显示什么, 就发出什么。** 实测: 一条带一个 .md 附件的 Lark 回复, 卡片画着附件, 主人批准; 文字送达, 上传被 99991679 拒绝(用户 token 只有 im:message + im:message.send_as_user, 同意页从未申请 im:resource:upload / im:resource); "partly sent" 只进了智能体的回执, Outbox 行写着"已发送"。现在: (1) Lark 同意页申请两个上传 scope(第二个可选组, 紧跟 wide 组), 缺它们的账号行写"重新授权一次即可增加: 发送文件"; channel-caps 新增 `send-attachment` offer(`attachments-not-sendable` + `requiredScopes`)。(2) 预检: 提议时按名字拒绝无法携带的文件(说出 scope 与重新授权一步); 提议与批准之间能力变化 ⇒ 卡片的附件行变成警告, 批准按钮变成"不带文件发送"(警告进入 shown digest, 普通批准被拒, 什么都不发)。(3) 部分送达: 在智能体回执之外, 给主人 ONE 条"待你处理"条目(以提案为键)"已发给 X, 但没有带上文件 Y: 原因"+ 重新授权; Outbox 行与卡片写"部分发出"。
 
 ## 10. 面板
 
@@ -3661,6 +3665,10 @@ heavy: test-channels-aggregate-ui ⑤/⑦ (owner 的例子 —— 工作只有�
 门: test-channels-engine ⑪(j)(k)(l)(m)(n) + ⑫。
 
 **as-built (2.369.228, lane channel-self-unread, B-c91b)：** 账号自己的消息永远不是关注命中 —— 关键词 'inc-' 曾命中 owner 自己经 Outbox 回给 userW 的话并唤醒 agent。onFresh 的匹配循环先问 `FO.selfRead`，`all` 模式也跳过；自己消息里的 @ 归他自己处理，同样跳过。
+
+### 24.x as-built (lane notify-rules-r2, 2026-10-07): 组的访问权限经由成员关系流向成员会话
+
+owner（inc-muxt96t5-pk42）："我的 lark 授权给了'工作'组，为啥通知里不能选工作组里的成员而只能选整个工作组。" 访问已经按成员关系生效（channel-acl `principalApplies`），但通知对象过去必须正好是某条访问行的主体。现在：持有访问权限的组的成员会话可以被单独选为通知对象——存为该会话自己的主体（`agent:<cid>`，自己的每日上限与账本），并带 `via: <组 id>`（服务器在保存时按实时名册判定，不信写入方的声明）；读取时由组的访问行覆盖（PURE）；每次唤醒前按实时名册重判，离开该组（或未运行）的会话不被唤醒，行保留，重新加入即恢复。组的访问被移除 ⇒ 成员行一并失效。对话框在组下列出其会话，并说明"{组} 的会话继承该组的访问权限"。
 
 ## 25. 渲染层: raw → blocks → DOM (2026-09-27, lane channel-render)
 

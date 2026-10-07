@@ -328,6 +328,34 @@ try {
   await sleep(500);
   ok(stdinTexts().slice(before).length === 1 && (await ev(`return ${W}.content.querySelectorAll('.doc-cmt').length;`)) === 0 && !(await ev(`return localStorage.getItem('vs-doc-comments:' + '\\u0001' + ${S(P)});`)), 'one message only; the strip and its device copy are empty after');
 
+  // THE COMMENT BUTTON OUTLIVED ITS SELECTION (userW inc-muxrol54-uv2d, lane doc-comment-dismiss): real mouse selections
+  // in this .md; the popover is sampled every 100 ms (never two, gone means it STAYS gone — no re-offer)
+  section('§5b the Add-comment popover lives exactly as long as its selection: a click elsewhere / a new selection / Esc');
+  const cpopN = () => ev(`return document.querySelectorAll('.doc-cpop').length;`);
+  const samples = async (ms) => { const out = []; for (let t = 0; t < ms; t += 100) { out.push(await cpopN()); await sleep(100); } return out; };
+  // "elsewhere" = the intro paragraph ABOVE the heading: on screen, and never under the popover (that sits below the
+  // selection, over the list — a press there is the button's own, the note box, not a click elsewhere)
+  const h2r = await rectIn('.ProseMirror h2'), far = await rectIn('.ProseMirror > p');
+  const where = () => ev(`const pm = document.querySelector('.doc-page .ProseMirror'); return { inPm: !!pm && pm.contains(document.activeElement), note: !!document.querySelector('.doc-note'), sel: String(getSelection()) };`);
+  await mouse('mouseMoved', h2r.left + 2, h2r.y, { button: 'none' }); await mouse('mousePressed', h2r.left + 2, h2r.y, { clickCount: 1 });
+  for (const dx of [20, 40, 70]) { await mouse('mouseMoved', h2r.left + dx, h2r.y); await sleep(30); }
+  await mouse('mouseReleased', h2r.left + 70, h2r.y, { clickCount: 1 });
+  const offered = await until(async () => (await cpopN()) === 1 || null, 3000);
+  const dragSel = await ev('return String(getSelection());');
+  ok(!!offered && dragSel.length > 0, 'a drag selection by mouse ⇒ the Add-comment popover', { dragSel, n: await cpopN() });
+  await click({ x: far.left + 12, y: far.y });
+  const afterClick = await samples(800), w1 = await where();
+  ok(afterClick.every((n) => n === 0) && w1.inPm && !w1.note && w1.sel === '', 'a click elsewhere in the document ⇒ the popover is gone (.doc-cpop = 0, and stays 0; the caret in the text, no note box)', { afterClick, w1 });
+  await click({ x: h2r.left + 12, y: h2r.y }, 2);
+  const again = await until(async () => (await cpopN()) === 1 || null, 3000), w2 = await where();
+  await click({ x: far.left + 12, y: far.y }, 2);
+  const swap = await samples(800), w3 = await where();
+  ok(!!again && w2.sel === 'Goals' && swap.every((n) => n <= 1) && swap[swap.length - 1] === 1 && w3.inPm && !w3.note && !!w3.sel && w3.sel !== 'Goals', 'a new selection elsewhere ⇒ never two, ONE again (the new one)', { again, w2, swap, w3 });
+  await call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }); await call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  const afterEsc = await samples(800), keptSel = await ev('return String(getSelection());');
+  ok(afterEsc.every((n) => n === 0) && keptSel.length > 0, 'Esc ⇒ the popover is gone (the selection kept, not offered again)', { afterEsc, keptSel });
+  await click({ x: far.left + 12, y: far.y }); await sleep(300);
+
   section('§6 Raw = the code editor in place, and back');
   await pressTool('.doc-raw-btn', 'Edit the markdown source');
   const raw = await until(() => ev(`const w = ${W}; const r = w.content.querySelector('.doc-raw'); const cm = r && r.querySelector('.cm-content'); return !r.hidden && cm && cm.textContent.includes('Filler line 2 (agent).') ? { pane: w.content.querySelector('.doc-pane').hidden, pressed: w.content.querySelector('.doc-raw-btn').getAttribute('aria-pressed') } : null;`), 8000);

@@ -65,6 +65,7 @@ const SIGNIN_IS_OWNERS = 'a sign-in is the owner\'s — an agent token may not s
  *  read it and a forged landing ends the owner's sign-in with a vendor
  *  refusal). The agent surface is /api/agent/channels/*, never these. */
 const ACCOUNT_IS_OWNERS = 'an account is the owner\'s — an agent token may not change, end or remove one';
+const RULE_PREVIEW_IS_OWNERS = 'a notification rule\'s preview is the owner\'s — an agent token may not run one';
 /** verify r2: a `fromMount` that is present but not a storage mount id (a
  *  number, an object, an array, the empty string) is refused BY NAME — it
  *  used to be dropped by `choiceOf` and the consent began under the DEFAULT
@@ -467,6 +468,18 @@ router.post('/api/channels/adapters/:id/estimate', (req, res) => {
     forHost(req);
     const b = req.body || {};
     scopeAnswer(res, engine().estimateScope(req.params.id, b.scope || { kind: 'account' }, { filter: b.filter === undefined ? null : b.filter, pattern: b.pattern || null, notify: b.notify || 'wake', digestMinutes: b.digestMinutes, dailyWakeCap: b.dailyWakeCap, principal: b.principal || null }));
+  } catch (e) { fail(res, e); }
+});
+
+/** THE RULE PREVIEW (lane notify-rules-r2) — `{rule, scope:{kind:'account'|'pattern'}, pattern?}` → the newest ≤ 10
+ *  stored messages ONE keyword / regex rule matches, from the LOCAL logs only (zero vendor calls). OWNER-ONLY: the
+ *  dialog is the owner's, and the answer carries message text an agent's own reach never judged. */
+router.post('/api/channels/adapters/:id/rules/preview', async (req, res) => {
+  try {
+    forHost(req);
+    if (refuseAgentBearer(req, res, RULE_PREVIEW_IS_OWNERS)) return;
+    const b = req.body || {};
+    scopeAnswer(res, await engine().previewRule(req.params.id, b.scope || { kind: 'account' }, { rule: b.rule || null, pattern: b.pattern || null }));
   } catch (e) { fail(res, e); }
 });
 
@@ -976,6 +989,16 @@ router.post('/api/channels/:adapterId/:convId/estimate', (req, res) => {
   } catch (e) { fail(res, e); }
 });
 
+/** THE RULE PREVIEW over ONE conversation (lane notify-rules-r2): `{rule}` → as the account route, scoped to it. */
+router.post('/api/channels/:adapterId/:convId/rules/preview', async (req, res) => {
+  try {
+    forHost(req);
+    if (refuseAgentBearer(req, res, RULE_PREVIEW_IS_OWNERS)) return;
+    const b = req.body || {};
+    answer(res, await engine().previewRule(req.params.adapterId, { kind: 'conversation' }, { rule: b.rule || null, convId: req.params.convId }));
+  } catch (e) { fail(res, e); }
+});
+
 // ── P3: outbox / policy / reach (design §8, §9, §10.2) ───────────────────
 /** A P3 verb's typed answer → status BY CODE. `send-not-available` is 409
  *  (the conversation cannot take a message right now — the reason rides
@@ -1054,7 +1077,7 @@ router.post('/api/channels/outbox/:id/approve', async (req, res) => {
     const d = deliverOf(b);
     if (!d.ok) return answer3(res, d);
     if (typeof b.shown !== 'string' || !b.shown) return answer3(res, { ok: false, code: 'bad-request', why: 'shown-required', error: 'shown is required — the digest of the card being approved (reload the page if this tab is from before the update)' });
-    answer3(res, await engine().approve(req.params.id, { text: typeof b.text === 'string' ? b.text : null, by: 'user', deliver: d.deliver, shown: b.shown, ...wakeGuards(b) }));
+    answer3(res, await engine().approve(req.params.id, { text: typeof b.text === 'string' ? b.text : null, by: 'user', deliver: d.deliver, shown: b.shown, withoutFiles: b.withoutFiles === true, ...wakeGuards(b) }));
   } catch (e) { fail(res, e); }
 });
 router.post('/api/channels/outbox/:id/reject', async (req, res) => {

@@ -1186,26 +1186,27 @@ console.log('\n⑪ owner ruling: reactions read by default; the one narrowing re
   // lane lark-threads (B1/B5, MEASURED): + reading people's profiles — the two field scopes and the person scope, optional,
   // after the reactions group (one dropped per refusal, the registry's own narrowing)
   const PPL3 = [lark.JOB_SCOPE, lark.DEPT_SCOPE, lark.PEOPLE_SCOPE];
+  const UP = [...lark.UPLOAD_SCOPES];   // lane lark-upload-preflight: sending files — the SECOND optional group
   const WIDE = [...lark.WIDE_SCOPES];   // lane slack-scopes-lark-reauth: every other usable scope, the FIRST group dropped
   const WIDE_OFF = WIDE.filter((x) => !lark.REACTIONS_READ_SCOPES.includes(x));   // verify r1: reactions off asks no wide scope that reads who reacted
   const dflt = await capture(lark, {}), on = await capture(lark, { reactions: 'read' }), off = await capture(lark, { reactions: 'off' });
-  ok(dflt.scopes.includes(OPT) && lark.SCOPES.every((x) => dflt.scopes.includes(x)) && FEED2.every((x) => dflt.scopes.includes(x)) && PPL3.every((x) => dflt.scopes.includes(x)) && dflt.scopes.length === lark.SCOPES.length + 6 + WIDE.length && JSON.stringify(dflt.optional) === JSON.stringify([WIDE, [OPT], [lark.JOB_SCOPE], [lark.DEPT_SCOPE], [lark.PEOPLE_SCOPE], [lark.P2P_READ_SCOPE], [lark.SEARCH_SCOPE]]), `the DEFAULT consent (a record that never set the option): the five base scopes + ${OPT} + the three profile scopes + the feed's two, declared OPTIONAL as ordered groups, reactions first (${dflt.scopes.join(' ')})`);
+  ok(dflt.scopes.includes(OPT) && lark.SCOPES.every((x) => dflt.scopes.includes(x)) && FEED2.every((x) => dflt.scopes.includes(x)) && PPL3.every((x) => dflt.scopes.includes(x)) && UP.every((x) => dflt.scopes.includes(x)) && dflt.scopes.length === lark.SCOPES.length + 8 + WIDE.length && JSON.stringify(dflt.optional) === JSON.stringify([WIDE, UP, [OPT], [lark.JOB_SCOPE], [lark.DEPT_SCOPE], [lark.PEOPLE_SCOPE], [lark.P2P_READ_SCOPE], [lark.SEARCH_SCOPE]]), `the DEFAULT consent (a record that never set the option): the five base scopes + ${OPT} + the three profile scopes + the feed's two, declared OPTIONAL as ordered groups, reactions first (${dflt.scopes.join(' ')})`);
   ok(JSON.stringify(on.scopes) === JSON.stringify(dflt.scopes) && JSON.stringify(on.optional) === JSON.stringify(dflt.optional), 'option "read" = the default');
-  ok(!off.scopes.includes(OPT) && JSON.stringify(off.scopes) === JSON.stringify([...lark.SCOPES, ...PPL3, ...FEED2, ...WIDE_OFF]) && JSON.stringify(off.optional) === JSON.stringify([WIDE_OFF, [lark.JOB_SCOPE], [lark.DEPT_SCOPE], [lark.PEOPLE_SCOPE], [lark.P2P_READ_SCOPE], [lark.SEARCH_SCOPE]]), 'option "off": the base scopes + the profile scopes + the feed\'s, the reactions group not offered');
+  ok(!off.scopes.includes(OPT) && JSON.stringify(off.scopes) === JSON.stringify([...lark.SCOPES, ...UP, ...PPL3, ...FEED2, ...WIDE_OFF]) && JSON.stringify(off.optional) === JSON.stringify([WIDE_OFF, UP, [lark.JOB_SCOPE], [lark.DEPT_SCOPE], [lark.PEOPLE_SCOPE], [lark.P2P_READ_SCOPE], [lark.SEARCH_SCOPE]]), 'option "off": the base scopes + the profile scopes + the feed\'s, the reactions group not offered');
   const narrowed = new URL(dflt.build({ redirectUri: 'http://127.0.0.1:1/cb', state: 's', without: [...WIDE, OPT] })).searchParams.get('scope').split(' ');
-  ok(JSON.stringify(narrowed) === JSON.stringify([...lark.SCOPES, ...PPL3, ...FEED2]), 'the narrowing retry\'s URL `without` the wide group and the reactions group drops nothing else — the profiles and the search are kept');
+  ok(JSON.stringify(narrowed) === JSON.stringify([...lark.SCOPES, ...UP, ...PPL3, ...FEED2]), 'the narrowing retry\'s URL `without` the wide group and the reactions group drops nothing else — the profiles and the search are kept');
   const optDecl = lark.OPTIONS.find((o) => o.key === 'reactions');
-  ok(optDecl && optDecl.default === 'read' && optDecl.choices.includes('off') && lark.REACTIONS_GRANT.option === 'reactions' && JSON.stringify(lark.OPTIONAL_SCOPES) === JSON.stringify([...WIDE, OPT, ...PPL3, ...FEED2]), 'the option is declared on by default, the grant names it (so `off` silences the account\'s line), and the optional set is the wide group + the read scope + the profile scopes + the feed\'s two');
+  ok(optDecl && optDecl.default === 'read' && optDecl.choices.includes('off') && lark.REACTIONS_GRANT.option === 'reactions' && JSON.stringify(lark.OPTIONAL_SCOPES) === JSON.stringify([...WIDE, ...UP, OPT, ...PPL3, ...FEED2]), 'the option is declared on by default, the grant names it (so `off` silences the account\'s line), and the optional set is the wide group + the read scope + the profile scopes + the feed\'s two');
   // lane slack-scopes-lark-reauth: EVERY USABLE SCOPE ONCE — the scopes Lark's own token answer named for the owner's app
   // (2026-10-03), none a feature reads today, all in the default consent, dropped together by the FIRST press
   const MEASURED_WIDE = ['auth:user.id:read', 'im:message:readonly', 'im:message.group_msg:get_as_user', 'im:chat:read', 'docx:document', 'docx:document:readonly', 'drive:drive', 'sheets:spreadsheet', 'bitable:app', 'wiki:wiki:readonly', 'calendar:calendar:readonly'];
-  ok(JSON.stringify(WIDE) === JSON.stringify(MEASURED_WIDE) && WIDE.every((x) => dflt.scopes.includes(x)) && WIDE_OFF.every((x) => off.scopes.includes(x)) && !WIDE.some((x) => [...lark.SCOPES, OPT, ...PPL3, ...FEED2].includes(x)) && new Set(dflt.scopes).size === dflt.scopes.length, `the default consent asks for every usable scope (the ${WIDE.length} measured beyond today's features), each once (reactions off: all but the one that reads who reacted — verify r1)`);
+  ok(JSON.stringify(WIDE) === JSON.stringify(MEASURED_WIDE) && WIDE.every((x) => dflt.scopes.includes(x)) && WIDE_OFF.every((x) => off.scopes.includes(x)) && !WIDE.some((x) => [...lark.SCOPES, ...UP, OPT, ...PPL3, ...FEED2].includes(x)) && new Set(dflt.scopes).size === dflt.scopes.length, `the default consent asks for every usable scope (the ${WIDE.length} measured beyond today's features), each once (reactions off: all but the one that reads who reacted — verify r1)`);
   const narrowW = new URL(dflt.build({ redirectUri: 'http://127.0.0.1:1/cb', state: 's', without: WIDE })).searchParams.get('scope').split(' ');
-  ok(JSON.stringify(narrowW) === JSON.stringify([...lark.SCOPES, OPT, ...PPL3, ...FEED2]), 'the FIRST press (an app that has not enabled one of them) drops the whole wide group and nothing a feature uses — the consent every release before asked');
+  ok(JSON.stringify(narrowW) === JSON.stringify([...lark.SCOPES, ...UP, OPT, ...PPL3, ...FEED2]), 'the FIRST press (an app that has not enabled one of them) drops the whole wide group and nothing a feature uses — the consent every release before asked (+ the upload pair)');
   { const MW = mutantCopies('chan-lark-wide', REPO);
     const LW = require(MW.write('src/channels/lark.js', fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf-8').replace(", ...wideScopes()].filter((x) =>", '].filter((x) =>'), 'nowide'));
     const nw = await capture(LW, {});
-    ok(!WIDE.some((x) => nw.scopes.includes(x)) && nw.scopes.length === lark.SCOPES.length + 6, `CONTROL — the pre-lane consent (no wide group) asks for none of them (${nw.scopes.length} scopes): the next feature would need a new consent`); }
+    ok(!WIDE.some((x) => nw.scopes.includes(x)) && nw.scopes.length === lark.SCOPES.length + 8, `CONTROL — the pre-lane consent (no wide group) asks for none of them (${nw.scopes.length} scopes): the next feature would need a new consent`); }
   // verify r1 (lane slack-scopes-lark-reauth): NO CAPABILITY WIDENED BY THE WIDE GROUP — im:message:readonly (wide) is also a
   // reactions READ scope (capsOfScopes): "Add and remove only" must stay a consent whose token cannot read who reacted
   const rxRead = (scopes) => lark.capsOfScopes(scopes).reactions.read;
@@ -1236,7 +1237,7 @@ console.log('\n⑪ owner ruling: reactions read by default; the one narrowing re
   const STORE = require(path.join(REPO, 'src/server/integration-store.js'));
   const ENG = require(path.join(REPO, 'src/server/channels-engine.js'));
   const ROOT11 = fs.mkdtempSync(path.join(process.env.TMPDIR || '/tmp', `vs-larkrx-${process.pid}-`));
-  const ENABLED = new Set([...lark.SCOPES, lark.P2P_READ_SCOPE, lark.SEARCH_SCOPE, lark.JOB_SCOPE, lark.DEPT_SCOPE, lark.PEOPLE_SCOPE, ...lark.WIDE_SCOPES]);   // the fake APP: the base scopes + the profile scopes + the feed's two — the reactions read scope NOT enabled yet (owner decision 5: dropping it keeps the search)
+  const ENABLED = new Set([...lark.SCOPES, ...lark.UPLOAD_SCOPES, lark.P2P_READ_SCOPE, lark.SEARCH_SCOPE, lark.JOB_SCOPE, lark.DEPT_SCOPE, lark.PEOPLE_SCOPE, ...lark.WIDE_SCOPES]);   // the fake APP: the base scopes + the profile scopes + the feed's two — the reactions read scope NOT enabled yet (owner decision 5: dropping it keeps the search)
   const granted = new Map();              // code → the scopes the fake page granted
   let codeN = 0;
   const fakeAuth = http.createServer((req, res) => {
@@ -1281,10 +1282,14 @@ console.log('\n⑪ owner ruling: reactions read by default; the one narrowing re
     // (2) the ONE retry: the same flow, the consent without the optional scope; a second one refused by name
     const nW = eng.oauthNarrow(s0.flowId);
     const pW = await browse(nW.flow.consentUrl);
-    ok(pW.status === 200 && /20027/.test(pW.body) && exchanges === 0 && JSON.stringify(nW.flow.nextNarrow) === JSON.stringify([OPT]), 'the first press drops the wide group — this app still refuses (it lacks the reactions read); the next press names it');
+    ok(pW.status === 200 && /20027/.test(pW.body) && exchanges === 0 && JSON.stringify(nW.flow.nextNarrow) === JSON.stringify(UP), 'the first press drops the wide group — this app still refuses (it lacks the reactions read); the next press names the upload pair');
+    // lane lark-upload-preflight: the SECOND press drops the upload pair (a blind ordered drop — this app still refuses)
+    const nU = eng.oauthNarrow(s0.flowId);
+    const pU = await browse(nU.flow.consentUrl);
+    ok(pU.status === 200 && /20027/.test(pU.body) && exchanges === 0 && JSON.stringify(nU.flow.nextNarrow) === JSON.stringify([OPT]), 'the second press drops the upload pair — still refused (the reactions read); the next press names it');
     const n0 = eng.oauthNarrow(s0.flowId);
     const sc0 = new URL(n0.flow.consentUrl).searchParams.get('scope').split(' ');
-    ok(JSON.stringify(n0.flow.narrowed) === JSON.stringify([...lark.WIDE_SCOPES, OPT]) && !sc0.includes(OPT) && sc0.includes(lark.SEARCH_SCOPE) && n0.flowId === s0.flowId && JSON.stringify(n0.flow.nextNarrow) === JSON.stringify([lark.JOB_SCOPE]), `the narrowing retry (POST /api/channels/oauth/narrow): same flow, the consent without ${OPT} ONLY (the search kept); the next press would name the job-title field (lane lark-threads' profile scopes come next)`);
+    ok(JSON.stringify(n0.flow.narrowed) === JSON.stringify([...lark.WIDE_SCOPES, ...UP, OPT]) && !sc0.includes(OPT) && sc0.includes(lark.SEARCH_SCOPE) && n0.flowId === s0.flowId && JSON.stringify(n0.flow.nextNarrow) === JSON.stringify([lark.JOB_SCOPE]), `the narrowing retry (POST /api/channels/oauth/narrow): same flow, the consent without ${OPT} ONLY (the search kept); the next press would name the job-title field (lane lark-threads' profile scopes come next)`);
     const p1 = await browse(n0.flow.consentUrl);
     for (let i = 0; i < 50 && !eng.oauthStatus(s0.flowId).done; i++) await sleep(20);
     ok(p1.status === 302 && eng.oauthStatus(s0.flowId).ok === true && exchanges === 1, 'the narrowed consent is granted and exchanged once');
@@ -1292,7 +1297,7 @@ console.log('\n⑪ owner ruling: reactions read by default; the one narrowing re
     const id = c0.adapter.id;
     const rec0 = eng.adapterRecords().adapters.find((x) => x.id === id);
     const g0 = c0.adapter.reactionsGrant;
-    ok(JSON.stringify(rec0.auth.refusedScopes) === JSON.stringify([...lark.WIDE_SCOPES, OPT]) && JSON.stringify(g0.missing) === JSON.stringify([OPT]) && JSON.stringify(g0.refused) === JSON.stringify([OPT]) && g0.wanted === true, 'the account records what Lark refused (auth.refusedScopes) and its view says it (reactionsGrant: missing + refused, wanted)', JSON.stringify(g0));
+    ok(JSON.stringify(rec0.auth.refusedScopes) === JSON.stringify([...lark.WIDE_SCOPES, ...UP, OPT]) && JSON.stringify(g0.missing) === JSON.stringify([OPT]) && JSON.stringify(g0.refused) === JSON.stringify([OPT]) && g0.wanted === true, 'the account records what Lark refused (auth.refusedScopes) and its view says it (reactionsGrant: missing + refused, wanted)', JSON.stringify(g0));
     ok(words(id) === `Lark refused ${OPT} — enable it in the app console and Re-authorize`, `THE CARD'S WORDS after a narrowed consent: "${words(id)}" — never a silent narrower consent`);
     // (3) the owner enables it in the console; ONE Re-authorize reads reactions — the refusal is gone
     ENABLED.add(OPT);
@@ -1324,20 +1329,21 @@ console.log('\n⑪ owner ruling: reactions read by default; the one narrowing re
     // the account route's narrow: the running re-authorize of this account, once
     const r4 = await eng.reauthorize(id, {});
     const aW = eng.narrowAuth(id);   // lane slack-scopes-lark-reauth: the wide group goes first
+    const aU = eng.narrowAuth(id);   // lane lark-upload-preflight: the upload pair second
     const a4 = eng.narrowAuth(id);
     // lane lark-threads: the three profile groups sit between the reactions and the feed's two (one press each)
     const presses = [];
     for (let i = 0; i < 5; i++) presses.push(eng.narrowAuth(id));
     let a5c = null; try { eng.narrowAuth(id); } catch (e) { a5c = e; }
     const want = [lark.JOB_SCOPE, lark.DEPT_SCOPE, lark.PEOPLE_SCOPE, lark.P2P_READ_SCOPE, lark.SEARCH_SCOPE];
-    ok(r4.flow.flowId === a4.flow.flowId && JSON.stringify(aW.flow.narrowed) === JSON.stringify([...lark.WIDE_SCOPES]) && JSON.stringify(a4.flow.narrowed) === JSON.stringify([...lark.WIDE_SCOPES, OPT]) && presses.every((x, i) => JSON.stringify(x.flow.narrowed) === JSON.stringify([...lark.WIDE_SCOPES, OPT, ...want.slice(0, i + 1)])) && a5c && a5c.code === 'already-narrowed', 'the account\'s own narrow (POST /api/channels/adapters/:id/auth/narrow) narrows ITS running re-authorize one group per press (the wide group → reactions → the job title → the department → people → the single-chat read → the search), then refuses by name');
+    ok(r4.flow.flowId === a4.flow.flowId && JSON.stringify(aW.flow.narrowed) === JSON.stringify([...lark.WIDE_SCOPES]) && JSON.stringify(a4.flow.narrowed) === JSON.stringify([...lark.WIDE_SCOPES, ...UP, OPT]) && presses.every((x, i) => JSON.stringify(x.flow.narrowed) === JSON.stringify([...lark.WIDE_SCOPES, ...UP, OPT, ...want.slice(0, i + 1)])) && a5c && a5c.code === 'already-narrowed', 'the account\'s own narrow (POST /api/channels/adapters/:id/auth/narrow) narrows ITS running re-authorize one group per press (the wide group → reactions → the job title → the department → people → the single-chat read → the search), then refuses by name');
     await eng.cancelAuth(id);
     let a6 = null; try { eng.narrowAuth(id); } catch (e) { a6 = e; }
     ok(a6 && a6.status === 404 && a6.code === 'no-flow', 'no sign-in running ⇒ 404 no-flow');
     // (6) verify r1 (lane slack-scopes-lark-reauth): EVERY GROUP DROPPED, END TO END — the default options name 17 optional
     // scopes (the wide 11 + reactions + 3 profile + the feed's 2); the account records all 17 and the card names both feed
     // scopes (the engine's own bound was 16: the LAST one, the search, fell off the record)
-    const allOpt = [...lark.WIDE_SCOPES, OPT, lark.JOB_SCOPE, lark.DEPT_SCOPE, lark.PEOPLE_SCOPE, lark.P2P_READ_SCOPE, lark.SEARCH_SCOPE];
+    const allOpt = [...lark.WIDE_SCOPES, ...UP, OPT, lark.JOB_SCOPE, lark.DEPT_SCOPE, lark.PEOPLE_SCOPE, lark.P2P_READ_SCOPE, lark.SEARCH_SCOPE];
     const narrowAll = async (E2, tag) => {
       fs.mkdirSync(path.join(ROOT11, tag), { recursive: true });
       const ints2 = STORE.create({ dataDir: path.join(ROOT11, tag, 'int'), env: {}, now, broadcast: () => {}, log: quiet11 });
@@ -1348,7 +1354,7 @@ console.log('\n⑪ owner ruling: reactions read by default; the one narrowing re
       try {
         const s = await e2.startOAuth({ kind: 'lark', credentialKey: 'custom', credential: { appId: 'cli_appa0001', appSecret: 'fs-appa-secret-0001' } });
         const ns = [];
-        for (let i = 0; i < 7; i++) ns.push(e2.oauthNarrow(s.flowId));
+        for (let i = 0; i < 8; i++) ns.push(e2.oauthNarrow(s.flowId));   // lane lark-upload-preflight: + the upload pair's press
         const last = ns[ns.length - 1];
         const pg = await browse(last.flow.consentUrl);
         for (let i = 0; i < 50 && !e2.oauthStatus(s.flowId).done; i++) await sleep(20);
@@ -1360,15 +1366,15 @@ console.log('\n⑪ owner ruling: reactions read by default; the one narrowing re
     const full = await narrowAll(ENG, 'all17');
     const fg = (full.view.grants || []).find((g) => g.what === 'feed');
     const fw = CC.grantsText(full.view.grants, { vendor: 'Lark' }).text;
-    ok(full.pg.status === 302 && JSON.stringify(full.narrowed) === JSON.stringify(allOpt) && allOpt.length === 17, `seven presses drop all ${allOpt.length} optional scopes and the base consent is granted`);
+    ok(full.pg.status === 302 && JSON.stringify(full.narrowed) === JSON.stringify(allOpt) && allOpt.length === 19, `eight presses drop all ${allOpt.length} optional scopes and the base consent is granted`);
     ok(JSON.stringify(full.rec.auth.refusedScopes) === JSON.stringify(allOpt) && fg && JSON.stringify(fg.refused) === JSON.stringify([lark.SEARCH_SCOPE, lark.P2P_READ_SCOPE]) && fw.includes(lark.SEARCH_SCOPE) && fw.includes(lark.P2P_READ_SCOPE), `the account records EXACTLY what Lark refused (${(full.rec.auth.refusedScopes || []).length} of 17) and the card names both feed scopes: "${fw.slice(0, 160)}…"`);
     { const ME = mutantCopies('chan-lark-refused16', REPO);
       const srcE = engineSource(REPO);
       const BOUND = '].slice(0, OPTIONAL_SCOPES_MAX);';
       ok(srcE.split(BOUND).length === 2, 'CONTROL setup: the engine\'s refusal bound is spelled once');
-      const cut = await narrowAll(ME.load('src/server/channels-engine.js', srcE.replace(BOUND, '].slice(0, 16);'), 'refused16'), 'cut16');
+      const cut = await narrowAll(ME.load('src/server/channels-engine.js', srcE.replace(BOUND, '].slice(0, 18);'), 'refused16'), 'cut16');   // lane lark-upload-preflight: 19 optional scopes now — a bound one short
       const cg = (cut.view.grants || []).find((g) => g.what === 'feed');
-      ok(cut.rec.auth.refusedScopes.length === 16 && !cut.rec.auth.refusedScopes.includes(lark.SEARCH_SCOPE) && cg && JSON.stringify(cg.refused) === JSON.stringify([lark.P2P_READ_SCOPE]), 'CONTROL — the engine\'s old bound (16): the search scope falls off the record and the card names only the single-chat scope — the asserts above would be red');
+      ok(cut.rec.auth.refusedScopes.length === 18 && !cut.rec.auth.refusedScopes.includes(lark.SEARCH_SCOPE) && cg && JSON.stringify(cg.refused) === JSON.stringify([lark.P2P_READ_SCOPE]), 'CONTROL — the engine\'s old bound (16): the search scope falls off the record and the card names only the single-chat scope — the asserts above would be red');
       for (const r of copiesCensus(ME.files, ME.dir, REPO, { minCopies: 1, label: 'chan-lark-refused16: ' })) ok(r.pass, r.name, r.detail); }
   } finally {
     ol.stopAll(); eng.stop(); await new Promise((r) => fakeAuth.close(r));
@@ -1662,8 +1668,8 @@ console.log('\n⑬ the change feed: the search page, the declared unit, the desc
   };
   const on = await capture({}), offS = await capture({ search: 'off' }), offBoth = await capture({ search: 'off', reactions: 'off' });
   const PPLG = [[lark.JOB_SCOPE], [lark.DEPT_SCOPE], [lark.PEOPLE_SCOPE]];   // lane lark-threads: the profile groups
-  ok(on.scopes.includes('search:message') && on.scopes.includes('im:message.p2p_msg:get_as_user') && JSON.stringify(on.groups) === JSON.stringify([[...lark.WIDE_SCOPES], ['im:message.reactions:read'], ...PPLG, ['im:message.p2p_msg:get_as_user'], ['search:message']]), 'the default consent asks for the search + the single-chat read; the optional groups are ORDERED least valuable first (reactions, the profile fields, people, the single-chat read, the search)', JSON.stringify(on));
-  ok(!offS.scopes.includes('search:message') && !offS.scopes.includes('im:message.p2p_msg:get_as_user') && JSON.stringify(offS.groups) === JSON.stringify([[...lark.WIDE_SCOPES], ['im:message.reactions:read'], ...PPLG]) && JSON.stringify(offBoth.groups) === JSON.stringify([lark.WIDE_SCOPES.filter((x) => !lark.REACTIONS_READ_SCOPES.includes(x)), ...PPLG]), 'the option `search: off` removes BOTH scopes from the consent (and from the retry\'s groups); the profile groups stay (reactions off too: the wide group without its reactions reader — verify r1)', JSON.stringify(offS));
+  ok(on.scopes.includes('search:message') && on.scopes.includes('im:message.p2p_msg:get_as_user') && JSON.stringify(on.groups) === JSON.stringify([[...lark.WIDE_SCOPES], [...lark.UPLOAD_SCOPES], ['im:message.reactions:read'], ...PPLG, ['im:message.p2p_msg:get_as_user'], ['search:message']]), 'the default consent asks for the search + the single-chat read; the optional groups are ORDERED least valuable first (reactions, the profile fields, people, the single-chat read, the search)', JSON.stringify(on));
+  ok(!offS.scopes.includes('search:message') && !offS.scopes.includes('im:message.p2p_msg:get_as_user') && JSON.stringify(offS.groups) === JSON.stringify([[...lark.WIDE_SCOPES], [...lark.UPLOAD_SCOPES], ['im:message.reactions:read'], ...PPLG]) && JSON.stringify(offBoth.groups) === JSON.stringify([lark.WIDE_SCOPES.filter((x) => !lark.REACTIONS_READ_SCOPES.includes(x)), [...lark.UPLOAD_SCOPES], ...PPLG]), 'the option `search: off` removes BOTH scopes from the consent (and from the retry\'s groups); the profile groups stay (reactions off too: the wide group without its reactions reader — verify r1)', JSON.stringify(offS));
   const sOpt = lark.OPTIONS.find((o) => o.key === 'search');
   ok(sOpt && sOpt.default === 'on' && JSON.stringify(sOpt.choices) === JSON.stringify(['off', 'on']) && lark.FEED_GRANT.option === 'search' && JSON.stringify(lark.FEED_GRANT.scopes) === JSON.stringify(['search:message', 'im:message.p2p_msg:get_as_user']) && lark.FEED_GRANT.console === true && lark.adapter.feedGrant === lark.FEED_GRANT, 'the option is declared (on by default, never hidden), and FEED_GRANT names the two scopes, the console step and the option');
   // the gated-call census reads both new calls as the ONE gate (api())

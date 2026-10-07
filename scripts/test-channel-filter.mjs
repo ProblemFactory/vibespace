@@ -39,7 +39,7 @@ const rec = (i, over = {}) => makeRecord({
 // ── ① validation: the CLOSED set, every field named ──────────────────────
 console.log('① validation refuses by name');
 {
-  ok(!F.validateRule({ kind: 'regex', value: 'x' }).ok, 'an unknown rule kind is refused');
+  ok(!F.validateRule({ kind: 'glob', value: 'x' }).ok, 'an unknown rule kind is refused');
   ok(!F.validateRule({ kind: 'keyword' }).ok && /value/.test(F.validateRule({ kind: 'keyword' }).error), 'keyword without a value names the field');
   ok(!F.validateRule({ kind: 'time-window', from: '9:00', to: '25:00' }).ok, 'time-window refuses 25:00');
   ok(F.validateRule({ kind: 'time-window', from: '09:00', to: '18:00' }).ok, 'time-window accepts HH:MM');
@@ -54,13 +54,13 @@ console.log('① validation refuses by name');
   // zh/ja editor words — "Add rule" used to print `keyword: value is required`.
   const kw = F.validateRule({ kind: 'keyword', value: '' });
   ok(kw.code === 'value-required' && kw.kind === 'keyword' && /value is required/.test(kw.error), 'a refused rule carries a CODE and the rule kind beside its contract sentence', JSON.stringify(kw));
-  ok(F.validateFilter({ rules: [] }).code === 'no-rules' && F.validateRule({ kind: 'time-window', from: '9', to: 'x' }).code === 'time-format' && F.validateRule({ kind: 'sender-in-group', members: [] }).code === 'members-required' && F.validateFilter({ match: 'some', rules: [{ kind: 'has-attachment' }] }).code === 'bad-match' && F.validateRule({ kind: 'regex' }).code === 'bad-kind', 'every refusal has its own code (no-rules / time-format / members-required / bad-match / bad-kind)');
+  ok(F.validateFilter({ rules: [] }).code === 'no-rules' && F.validateRule({ kind: 'time-window', from: '9', to: 'x' }).code === 'time-format' && F.validateRule({ kind: 'sender-in-group', members: [] }).code === 'members-required' && F.validateFilter({ match: 'some', rules: [{ kind: 'has-attachment' }] }).code === 'bad-match' && F.validateRule({ kind: 'glob' }).code === 'bad-kind', 'every refusal has its own code (no-rules / time-format / members-required / bad-match / bad-kind)');
   ok(F.validateFilter({ rules: Array.from({ length: F.MAX_RULES + 1 }, () => ({ kind: 'has-attachment' })) }).code === 'too-many-rules', 'the rule cap refuses with too-many-rules');
   const seen = [];
   const tt = (str, p) => { seen.push(str); return (p ? String(str).replace(/\{(\w+)\}/g, (m, k) => (k in p ? String(p[k]) : m)) : String(str)); };
   ok(F.filterProblemText(kw, { t: tt, ruleLabel: (k) => (k === 'keyword' ? 'contains keyword' : k) }) === 'the rule "contains keyword" needs a value' && seen.length === 1, 'filterProblemText words the code through the caller\'s t() and names the rule the way the editor labels it', JSON.stringify(seen));
   ok(F.filterProblemText(F.validateFilter({ rules: [] }), { t: tt }) === 'add at least one rule' && F.filterProblemText({ ok: true }) === '' && F.filterProblemText({ ok: false, code: 'bad-match', error: 'match must be any|every' }, { t: tt }) === 'match must be any|every', 'no-rules is worded; an accepted filter has no problem; a code the table does not know falls back to the contract sentence (never hidden)');
-  ok(F.RULE_KINDS.length === 10 && F.RULE_KINDS.every((k) => F.validateRule(k === 'time-window' ? { kind: k, from: '00:00', to: '01:00' } : k === 'sender-in-group' ? { kind: k, members: ['x'] } : k === 'has-attachment' || F.PLACE_RULE_KINDS.includes(k) ? { kind: k } : { kind: k, value: 'x' }).ok), 'every declared kind validates with its own minimal shape (' + F.RULE_KINDS.join(', ') + ')');
+  ok(F.RULE_KINDS.length === 11 && F.RULE_KINDS.every((k) => F.validateRule(k === 'time-window' ? { kind: k, from: '00:00', to: '01:00' } : k === 'sender-in-group' ? { kind: k, members: ['x'] } : k === 'has-attachment' || F.PLACE_RULE_KINDS.includes(k) ? { kind: k } : { kind: k, value: 'x' }).ok), 'every declared kind validates with its own minimal shape (' + F.RULE_KINDS.join(', ') + ')');
 }
 
 // ── ② truth table per kind ───────────────────────────────────────────────
@@ -234,11 +234,11 @@ console.log('⑦ the wake block is budgeted and frame-inert');
   const PSRC = fs.readFileSync(path.join(REPO, 'src/peer-text.js'), 'utf-8');
   const L1 = "  if (line) return R.inertFrameLine(t);";
   const L1b = "  return t.split('\\n').map((l) => R.inertFrameLine(l)).join('\\n');";
-  const L2 = "const { toAgentText } = require('./peer-text.js');";
+  const L2 = "const { toAgentText, cutText, foldHidden } = require('./peer-text.js');";
   ok(PSRC.split(L1).length === 2 && PSRC.split(L1b).length === 2 && FSRC.split(L2).length === 2, 'CONTROL setup: the belt applies the line rule once per kind, and channel-filter requires the belt once');
   const M = mutantCopies('chan-filter-lines', REPO);
   const beltPath = M.write('src/peer-text.js', PSRC.replace(L1, '  if (line) return R.inertFrames(t);').replace(L1b, '  return R.inertFrames(t);'), 'complete-tags-only', { name: 'peer-text-complete-tags-only' });
-  const F0 = M.load('src/channel-filter.js', FSRC.replace(L2, `const { toAgentText } = require(${JSON.stringify(beltPath)});`), 'complete-tags-only');
+  const F0 = M.load('src/channel-filter.js', FSRC.replace(L2, `const { toAgentText, cutText, foldHidden } = require(${JSON.stringify(beltPath)});`), 'complete-tags-only');
   const b0 = blocksOf(F0);
   ok(Object.values(b0).every((x) => carriesFrame(x)), 'CONTROL: the copy whose helpers neuter only complete tags leaves a live frame in every block form', Object.entries(b0).map(([k, x]) => `${k}:${carriesFrame(x)}`).join(' '));
   for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(x.pass, 'tree: ' + x.name, x.detail);
@@ -424,7 +424,7 @@ console.log('⑩ R4 verify r2: the store invariant holds at READ — a watcher w
   const legacyOK = F.grainOf({ access: [], watchers: [] }, { principal: ag('L'), mode: 'all', notify: 'wake', authority: 'draft' });
   ok(legacyOK.access.length === 1 && legacyOK.watchers.length === 1, 'a pre-split assignment (access + watcher for one principal) still lifts whole');
   ok(F.liftGrainRecord({ principal: ag('L'), mode: 'all', notify: 'wake', authority: 'draft', watchers: [{ principal: ag('B'), notify: 'wake', mode: 'all' }] }).rec.watchers.map((w) => w.principal.id).join() === 'L', 'liftGrainRecord (the migration) repairs the orphan on its way through');
-  const LINE = '  return { access, watchers: watchers.filter((w) => eligibleFor(keys, w.principal)) };';   // lane channel-agent-watch: the ONE eligibility rule (access here or above)
+  const LINE = '  return { access, watchers: watchers.filter((w) => eligibleFor(keys, w.principal, w)) };';   // lane channel-agent-watch: the ONE eligibility rule (access here or above)
   ok(src.split(LINE).length === 2, 'the read-time filter line is present once (the control patches exactly it)');
   const bad = M.load('src/channel-filter.js', src.replace(LINE, '  return { access, watchers };'), 'orphan-honoured');
   ok(bad.grainOf(orphan).watchers.length === 2, 'CONTROL: a copy without the filter honours the orphan watcher — the leg above would go red');
@@ -744,6 +744,95 @@ console.log('⑬ owner decision A: a topic wakes, a quote chain does not, a quot
   const ng = run(Fg, { ...CTX, threadOf: oldThreadOf });
   ok(ng.some((x) => !x.ok && ['om_c2', 'om_m2', 'om_s2'].includes(x.id)), `CONTROL (c): a rule that does not ask the classifier whether it is a TOPIC wakes on a quote chain (${ng.filter((x) => !x.ok).map((x) => x.id).join(', ')} red)`);
   for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 3 })) ok(x.pass, 'tree: ' + x.name, x.detail);
+}
+
+console.log('⑭ notify-rules-r2: regex rules judged at save, matched on the folded text; a group\'s access reaches its member sessions; the preview reads the local logs only');
+{
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const os = await import('node:os');
+  const V = (value) => F.validateRule({ kind: 'regex', value });
+  // ── the judge table: accepted shapes / refused BY NAME with the offending piece ──
+  const ACCEPT = ['invoice\\s*#?\\d+', 'error|fail(ed|ure)', '^\\[alert\\]', '\\bfoo\\b', '\\p{Script=Han}+', 'deploy (failed|succeeded)', '(foo|bar)+', 'invoice.*paid', '@\\w+\\.com', 'x\\d+y', '^\\d+-\\d+', '部署失败|deploy failed'];
+  const bad1 = ACCEPT.filter((x) => !V(x).ok);
+  ok(!bad1.length, `the judge accepts the ordinary shapes (${ACCEPT.length})`, bad1.join(' '));
+  const REFUSE = { '(a+)+': 'regex-nested-quantifier', '(a|ab)*': 'regex-nested-quantifier', '(x\\d+)*y': 'regex-nested-quantifier', 'q\\d+\\d*': 'regex-adjacent-quantifier', '^.*.*': 'regex-adjacent-quantifier', '^\\w+\\s*\\w+': 'regex-adjacent-quantifier', 'q.*.*': 'regex-leading-repeat', '\\d+x': 'regex-leading-repeat', 'a.*b': 'regex-leading-repeat', '\\w+@\\w+\\.com': 'regex-leading-repeat',
+    '(\\w)\\1': 'regex-backreference', '\\k<n>(?<n>a)': 'regex-backreference', '(?=x)y': 'regex-lookaround', '(?<!a)b': 'regex-lookaround', 'x?': 'regex-empty-match', '[': 'regex-invalid', ['x'.repeat(F.REGEX_MAX + 1)]: 'regex-too-long' };
+  const bad2 = Object.entries(REFUSE).filter(([x, code]) => V(x).code !== code).map(([x, code]) => `${x.slice(0, 20)} → ${V(x).code} (want ${code})`);
+  ok(!bad2.length, `the judge refuses BY NAME the quadratic signatures, backreferences, lookaround, the empty match, the too-long and the broken (${Object.keys(REFUSE).length})`, bad2.join('; '));
+  ok(V('(a+)+').piece === '(a+)+' && V('q\\d+\\d*').piece === '\\d+…\\d*' && V('(?<!a)b').piece === '(?<!' && /\(a\+\)\+/.test(V('(a+)+').error), 'a refusal names the offending piece (in the route\'s sentence too)');
+  const tt = (str0, p) => (p ? String(str0).replace(/\{(\w+)\}/g, (m, k) => (k in p ? String(p[k]) : m)) : String(str0));
+  const worded = F.REGEX_REFUSALS.map((code) => F.filterProblemText({ ok: false, code, error: 'regex: refused — x', piece: 'P', max: 256 }, { t: tt }));
+  ok(worded.every((w, i) => w && w.startsWith('the regex') && (F.REGEX_REFUSALS[i] === 'regex-too-long' || F.REGEX_REFUSALS[i] === 'regex-empty-match' || F.REGEX_REFUSALS[i] === 'regex-invalid' || w.includes('P'))), 'every refusal code has its own words through t() (the dialog says why under the box)', worded.join(' | '));
+  ok(F.validateFilter({ rules: [{ kind: 'keyword', value: 'x' }, { kind: 'regex', value: '(a+)+' }] }).code === 'regex-nested-quantifier', 'a filter holding a refused regex is refused at save (validateFilter), never discovered at match time');
+  // ── the match: the FOLDED text, cut at REGEX_TEXT_MAX, flags iu; the why ──
+  const hit = (value, text) => F.matchRecord({ match: 'any', rules: [{ kind: 'regex', value }] }, { text, at: 1 });
+  ok(hit('invoice\\s*#?\\d+', 'INVOICE​ #42 paid').hit && J2(hit('invoice\\s*#?\\d+', 'Invoice 7').why) === J2(['regex /invoice\\s*#?\\d+/']), 'a regex matches on the folded text (a hidden character out, case-insensitive) and says `regex /…/`');
+  ok(!hit('invoice \\d+', 'x'.repeat(F.REGEX_TEXT_MAX + 10) + 'invoice 1').hit && hit('invoice \\d+', 'x'.repeat(F.REGEX_TEXT_MAX - 40) + 'invoice 1').hit, `the match reads at most REGEX_TEXT_MAX (${F.REGEX_TEXT_MAX}) characters of a message`);
+  ok(!hit('(a+)+$', 'a'.repeat(40) + '!').hit && !hit('', 'x').hit, 'a stored pattern the judge refuses never runs (fail closed — a wake is money)');
+  ok(J2(F.regexSpan('in\\w+e', 'An Invoice')) === J2([3, 10]), 'regexSpan answers the first match span on the folded text (the preview marks it)');
+  // ── the cost: the cap makes the worst ACCEPTED shape constant past REGEX_TEXT_MAX (the refused ones are the controls) ──
+  const timeAt = (value, unit, n) => { const f = { rules: [V(value).rule] }, rec = { text: '中' + unit.repeat(Math.ceil(n / unit.length)) }; F.matchRecord(f, rec); let best = Infinity; for (let r = 0; r < 3; r++) { const t0 = process.hrtime.bigint(); F.matchRecord(f, rec); best = Math.min(best, Number(process.hrtime.bigint() - t0) / 1e6); } return best; };
+  const t8 = timeAt('invoice.*paid', 'invoice', F.REGEX_TEXT_MAX), t64 = timeAt('invoice.*paid', 'invoice', 64 * 1024);
+  ok(t64 <= Math.max(2.5 * t8, 15), `the worst accepted shape (a fixed head + .* over its own head, two-byte text) costs the same at 64 KiB as at the 8 KiB cap: ${t8.toFixed(1)} ms → ${t64.toFixed(1)} ms`);
+  // ── membership: a group's access reaches its member sessions (as themselves) ──
+  const G1 = { kind: 'group', id: 'g-work', name: '工作' };
+  const access = [{ principal: G1, authority: 'draft' }];
+  const members = [{ cid: 'S1', groups: ['g-work'] }, { cid: 'S2', groups: ['g-other'] }];
+  const w = (id, extra = {}) => ({ principal: { kind: 'agent', id, name: id }, notify: 'wake', mode: 'all', ...extra });
+  const v1 = F.validateWatchers([w('S1')], access, { members });
+  ok(v1.ok && v1.watchers[0].via === 'g-work' && v1.watchers[0].principal.kind === 'agent', 'a session in an access-holding group is eligible AS ITSELF (its own row), `via` that group');
+  const v2 = F.validateWatchers([w('S2')], access, { members });
+  ok(!v2.ok && v2.code === 'watcher-needs-access' && v2.principal.id === 'S2', 'a session in no access-holding group is refused BY NAME (watcher-needs-access)');
+  const v3 = F.validateWatchers([w('S2', { via: 'g-work' })], access, { members });
+  ok(!v3.ok && v3.code === 'watcher-needs-access', 'a writer\'s claimed `via` is never trusted — the membership is the server\'s finding');
+  const v4 = F.validateWatchers([{ principal: { kind: 'everyone', id: '*' }, notify: 'wake', mode: 'all' }], [{ principal: { kind: 'everyone', id: '*' }, authority: 'draft' }], { members });
+  ok(v4.ok && !v4.watchers[0].via && F.validateWatchers([w('S1')], [{ principal: { kind: 'agent', id: 'S1' }, authority: 'draft' }], { members }).watchers[0].via === undefined, 'All agents and a direct grant are unchanged (no `via`)');
+  const g = F.grainOf({ access, watchers: [v1.watchers[0], w('S2', { via: 'g-other' })] });
+  ok(g.watchers.length === 1 && g.watchers[0].principal.id === 'S1', 'at READ the group\'s access row covers the member row (PURE); a `via` naming a group without access here is inert');
+  ok(F.grainOf({ access: [], watchers: [v1.watchers[0]] }).watchers.length === 0, 'the group\'s access removed ⇒ its members\' rows are inert too');
+  ok(F.memberStill(v1.watchers[0], members) && !F.memberStill(v1.watchers[0], [{ cid: 'S1', groups: [] }]) && !F.memberStill(v1.watchers[0], []) && F.memberStill(w('S9'), []), 'the wake-time re-judge: a session that LEFT the group (or is not running) is not woken; a row without `via` is not this rule\'s');
+  const eff = F.effectiveGrants({ conversation: { access, watchers: [v1.watchers[0]] }, patterns: [], account: null }, {});
+  ok(eff && eff.watchers.length === 1 && F.principalKey(eff.watchers[0].watcher.principal) === 'agent:S1', 'the engine\'s answer names the member session as its OWN principal (its own key ⇒ its own cap and ledger)');
+  // ── the preview's reader: store.search with a record predicate — bounded, newest first, N counted ──
+  const S = require(path.join(REPO, 'src/channel-store.js'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-nrr2-'));
+  const st = S.createChannelStore({ dir: root });
+  const recs = Array.from({ length: 25 }, (_, i) => ({ vendorId: `m${i}`, convId: 'c1', at: 1000 + i, text: i % 2 ? `Invoice #${i} paid` : `hello ${i}`, author: { id: 'u', name: 'Ada' } }));
+  st.appendRecords('fake', 'c1', recs);
+  const filter = { match: 'any', rules: [V('invoice\\s*#?\\d+').rule] };
+  const r = await st.search('fake', '', { limit: 10, maxBytes: 1 << 20, convIds: ['c1'], match: (x) => F.matchRecord(filter, x).hit });
+  ok(r.results.length === 10 && r.matched === 12 && r.results[0].at === 1023 && r.results.every((x) => /Invoice/.test(x.text)), 'the preview reader: ≤ 10 kept, newest first, N = every match inside the bytes read (12)', J2({ n: r.results.length, matched: r.matched, first: r.results[0] && r.results[0].at }));
+  const capped = await st.search('fake', '', { limit: 10, maxBytes: 10, convIds: ['c1'], match: () => true });
+  ok(capped.results.length === 0 && capped.coverage.capped === true, 'the byte bound holds with a predicate too (nothing past maxBytes is read)');
+  st.close();
+  fs.rmSync(root, { recursive: true, force: true });
+  // the preview route's engine side reads the LOCAL logs only: its body calls store.search and never a vendor verb
+  const ASRC = fs.readFileSync(path.join(REPO, 'src/server/channels-access.js'), 'utf-8');
+  const previewBody = (src0) => { const a = src0.indexOf('async function previewRule('); const b = src0.indexOf('\n  function estimateFilter(', a); return a < 0 || b < 0 ? '' : src0.slice(a, b); };
+  const VENDOR_VERBS = /\b(adapterFor|vendorSearch|threadRead|aroundFor|refreshAuth|tokensFor)\s*\(|\.(listMessages|fetch|search)\(\s*(?!adapterId)/;
+  const zeroVendor = (body) => !!body && /store\.search\(adapterId, q, \{ limit: PREVIEW_LIMIT, maxBytes: PREVIEW_BYTES, convIds,/.test(body) && !/\b(adapterFor|vendorSearch|threadRead|aroundFor|refreshAuth|tokensFor)\s*\(/.test(body) && /PREVIEW_LIMIT = 10/.test(src0Of(body));
+  const src0Of = () => ASRC;
+  ok(zeroVendor(previewBody(ASRC)), 'previewRule: store.search bounded by PREVIEW_LIMIT (10) + PREVIEW_BYTES, zero vendor verbs');
+  const RSRC = fs.readFileSync(path.join(REPO, 'src/routes/channels.js'), 'utf-8');
+  ok((RSRC.match(/if \(refuseAgentBearer\(req, res, RULE_PREVIEW_IS_OWNERS\)\) return;/g) || []).length === 2 && (RSRC.match(/rules\/preview'/g) || []).length === 2, 'both preview routes are OWNER-ONLY (an agent bearer is refused 403)');
+  // ── THE THREE CONTROLS (patched copies; each leg above would go RED) ──
+  const M = mutantCopies('chan-filter-nrr2', REPO);
+  const FSRC = fs.readFileSync(path.join(REPO, 'src/channel-filter.js'), 'utf-8');
+  const CUT1 = "    const via = !keys.has(k) && v.watcher.principal.kind === 'agent' ? memberVia(keys, v.watcher.principal.id, members) : null;";
+  ok(FSRC.split(CUT1).length === 2, 'control setup: the membership line is present once');
+  const Fm = M.load('src/channel-filter.js', FSRC.replace(CUT1, '    const via = null;'), 'member-not-eligible');
+  const c1 = Fm.validateWatchers([w('S1')], access, { members });
+  ok(!c1.ok && c1.code === 'watcher-needs-access', 'CONTROL ①: a copy without the crosswalk refuses the member session — the membership leg above goes RED');
+  const CUT2 = "          if (hasQuantifier(p.group)) { const e = new Error('regex-nested-quantifier'); e.code = e.message; e.piece = p.piece; throw e; }";
+  ok(FSRC.split(CUT2).length === 2, 'control setup: the nested-quantifier refusal is present once');
+  const Fn = M.load('src/channel-filter.js', FSRC.replace(CUT2, ''), 'nested-accepted');
+  const acc = Fn.validateRule({ kind: 'regex', value: '^(a+)+$' });
+  const tN = (n) => { const t0 = process.hrtime.bigint(); Fn.matchRecord({ rules: [acc.rule] }, { text: 'a'.repeat(n) + '!' }); return Number(process.hrtime.bigint() - t0) / 1e6; };
+  const tA = tN(16), tB = tN(20);
+  ok(acc.ok && tB > 6 * Math.max(tA, 0.01), `CONTROL ②: a copy that accepts a nested quantifier runs it EXPONENTIALLY (+4 chars: ${tA.toFixed(2)} → ${tB.toFixed(2)} ms) — the judge table above goes RED`);
+  const vend = previewBody(ASRC).replace('await store.search(adapterId, q,', 'await vendorSearch(adapterId, q,');
+  const unb = previewBody(ASRC).replace('limit: PREVIEW_LIMIT, maxBytes: PREVIEW_BYTES,', 'limit: Infinity,');
+  ok(!zeroVendor(vend) && !zeroVendor(unb), 'CONTROL ③: a preview over the vendor, or an unbounded one, fails the zero-vendor / bound census above');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -97,6 +97,8 @@ export const DATA_PATH_CLASSES = [
   'chanwin-bar', 'chanmsg-head', 'chanmsg-body', 'chan-prop-text', 'chan-prop-link', 'chan-prop-orig', 'chan-prop-honesty-line',
   'chan-prop-edit', 'chan-prop-rejectbox',
   'integ-cb-url', 'integ-mask', 'integ-plain', 'chan-flow-input', 'chan-opt-input', 'chan-af-rule',
+  // lane notify-rules-r2: the rule preview's hit = a stored message's own words (sender · title · the line + its mark)
+  'chan-rule-preview-who', 'chan-rule-preview-line',
   'integ-test-error',  // a Test verdict's words are the RUNNER'S / VENDOR'S own (our refusal sentence is `.integ-test-refusal`, censused)
   'window-title', 'win-title', 'titlebar', 'taskbar', 'rail-badge',
   'chan-reach-who',   // the principal's own name (a session / group title)

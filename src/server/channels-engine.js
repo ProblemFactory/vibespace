@@ -1985,6 +1985,17 @@ function create(deps = {}) {
     const missing = g.scopes.filter((x) => !held.has(x));
     return { scopes: g.scopes.slice(), missing, refused: missing.filter((x) => refusedBy.has(x)), console: !!g.console, wanted: true };
   }
+  /** lane lark-upload-preflight: what unlocks SENDING FILES (the module's `filesGrant`, `any` = one scope is enough). */
+  function filesGrantView(rec) {
+    let mod = null;
+    try { mod = registry.get(rec.kind); } catch { mod = null; }
+    const g = mod && mod.filesGrant;
+    if (!g) return null;
+    const held = new Set(((rec.auth && rec.auth.scopes) || []).map(String));
+    const refusedBy = new Set(((rec.auth && rec.auth.refusedScopes) || []).map(String));
+    const missing = g.any && g.scopes.some((x) => held.has(x)) ? [] : g.scopes.filter((x) => !held.has(x));
+    return { scopes: g.scopes.slice(), missing, refused: missing.filter((x) => refusedBy.has(x)), console: !!g.console, wanted: true };
+  }
   /** THE ONE GRANT LIST (§5.3): every declared grant the sign-in does not hold — the card says ONE line, ONE Re-authorize. */
   function grantsView(rec) {
     const out = [];
@@ -1993,6 +2004,9 @@ function create(deps = {}) {
     // lane lark-threads (B1/B5, MEASURED): reading people's profiles — the card says "One Re-authorize adds: reading
     // people's profiles" while the sign-in lacks it (never a silent refusal per person)
     const pp = peopleGrantView(rec); if (pp) out.push({ what: 'people', ...pp });
+    // lane lark-upload-preflight (userW inc-muxsy69b-mjg1): SENDING FILES — "One Re-authorize adds: sending files" while
+    // the sign-in holds none of the module's `filesGrant` scopes (ANY one carries files), never a silent drop at the send
+    const fl = filesGrantView(rec); if (fl) out.push({ what: 'files', ...fl });
     return out;
   }
 
@@ -2490,6 +2504,9 @@ function create(deps = {}) {
     const self = selfIdOf({ id: adapterId });
     return store.countSince(adapterId, convId, sinceAt, (r) => !FO.selfRead(r, self));
   }
+  /** int229 (channel-self-unread × notify-rules-r2): "is this stored record the account's OWN message" as the watch asks it
+   *  (FO.selfRead over the resolved id) — for the families: the Notify… preview never offers a match that never wakes. */
+  function ownRecordOf(rec) { const self = selfIdOf(rec); return (r) => FO.selfRead(r, self); }
   /** lane channel-self-unread (userW inc-muxekkry-clfb): a batch into the row's count, at EVERY append site —
    *  FO.readAdvance: the owner's newest message moves `readAt` to its instant and the row is re-derived past it
    *  (older unread before it are read now); otherwise the batch's OTHER records past `readAt` add. */
@@ -2832,6 +2849,8 @@ function create(deps = {}) {
         }
         if (v.reactions) out.reactions = { read: !!v.reactions.read, add: !!v.reactions.add, why: v.reactions.why || null };
         else if (cc.reactions) out.reactions = cc.reactions;
+        if (v.files) out.files = { send: !!v.files.send, why: v.files.why || null, requiredScopes: Array.isArray(v.files.requiredScopes) ? v.files.requiredScopes.slice() : [] };   // lane lark-upload-preflight
+        else if (cc.files) out.files = cc.files;
         return out;
       }
     }
@@ -6709,7 +6728,7 @@ function create(deps = {}) {
     RECONCILE_SECONDS, ESTIMATE_CAP, registry, liveSessions, log, now, userTodos, serverSetting, broadcast, deliver, integrations, mountClients,
     fetchFn, store, box, flows, signState, consentRowOf, consentDepsOf, agentsWanted, resolveIntegration, rowOf, live, paceCarry, BOOT_ID,
     adapterRecords, saveAdapters, refusedScopesOf, tokensFor, adapterFor, refreshAuth, tiers, agentShareRefusal, affordable, vendor, isWatched,
-    laneOf, EMPTY_SCAN, pass, effectiveConvCaps, rejudgeConvCaps, rawFactsOf, viewOf, agentCopy, humanNameOf, accountsBrief, conversationName,
+    laneOf, EMPTY_SCAN, pass, effectiveConvCaps, rejudgeConvCaps, rawFactsOf, ownRecordOf, viewOf, agentCopy, humanNameOf, accountsBrief, conversationName,
     presetsOf, clientFieldDecls, customClientView, vendorNameOf, adapterView, notify, disarmPush, syncPushLanes, kick, known, budgetRefusal,
     dropLive, outlived, reactionsPerMin, threadIxOf, vocabularyOf, reactionsFor, withView, offerNow, NOT_A_THREAD, threadRead, threadRefresh,
     rxBackedOff, rxBackoffRefusal, notePages, noteRxRateLimit, appendSides, react, unreact, vendorSearch, aroundFor, refreshConvCaps, retractUnsaved,
@@ -6724,6 +6743,7 @@ function create(deps = {}) {
     stillSees, effectiveForAccount, searchFor, readAroundFor, setPolicy, setReach, reachView, request, decideRequest, directoryLists,
     setAgentDirectory, agentWatch, agentUnwatch, listFor, readFor, readThreadFor, statusFor, setGrain, setAccess, setWatchers, removePattern,
     setAssignment, setScopeAssignment, accessFor, estimateScope, migrateAggregated, migrateGrants, setFilter, estimateFilter,
+    previewRule, membersNow,
   } = Object.assign(engineCtx, ChannelsAccess.create(engineCtx));
   const {
     honestyLineFor, proposalsFor, stashAbout, stashGate, outboxView, sendStartsTurn, outboxAttachment, filesSweep, propose, proposeReaction, compose,
@@ -7062,6 +7082,7 @@ function create(deps = {}) {
     oauth: flows,
     // P2: assign / filter / wake
     setAssignment, setFilter, estimateFilter, settleWakes, coalesceSeconds,
+    previewRule,   // lane notify-rules-r2: the Notify… dialog's local preview of ONE keyword / regex rule
     // B-2198: the raw API's engine side (src/server/channel-api.js is its orchestrator)
     apiGrants, setApiGrants, apiTierFor, apiCredential, apiAccounts,
     // P3: outbox / policy / reach + the agent-facing reads (§9, §8, §11)

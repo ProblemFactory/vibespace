@@ -5339,6 +5339,9 @@ a.chanmsg-file:hover .chanmsg-att-dl { color: var(--accent); }
 .chan-prop-state-awaiting-approval, .chan-prop-state-sending { color: var(--attn-text); background: color-mix(in srgb, var(--accent) 14%, transparent); }
 .chan-prop-state-sent { color: var(--ok-text); background: color-mix(in srgb, var(--green, #3fb950) 13%, transparent); }
 .chan-prop-state-failed { color: var(--bad-text); background: color-mix(in srgb, var(--red, #e55) 12%, transparent); }
+.chan-prop-state-partly { color: var(--warn-text); background: color-mix(in srgb, var(--yellow, #e5c07b) 15%, transparent); }
+.chan-prop-file-blocked .chan-prop-file-name { text-decoration: line-through; opacity: .7; }
+.chan-prop-files-blocked .chan-prop-file-note.chan-warn { color: var(--warn-text); }
 .chan-prop-state-unknown { color: var(--warn-text); background: color-mix(in srgb, var(--yellow, #e5c07b) 15%, transparent); }
 .chan-prop-state-rejected, .chan-prop-state-expired, .chan-prop-state-proposed, .chan-prop-state-withdrawn { color: var(--text-secondary); background: color-mix(in srgb, var(--text-secondary) 12%, transparent); }
 /* 2026-09-27: a proposal its drafting agent took back — settled and dim, no buttons */
@@ -5485,6 +5488,16 @@ a.chanmsg-file:hover .chanmsg-att-dl { color: var(--accent); }
 .chan-af-rule .chan-opt-input { min-width: 0; width: 100%; }
 .chan-af-fields { display: flex; gap: 4px; min-width: 0; }
 .chan-af-rule.chan-af-rule-nofield { grid-template-columns: minmax(110px, 1fr) auto; }
+/* lane notify-rules-r2: a keyword / regex rule's preview — the newest ≤ 10 stored messages it matches */
+.chan-rule-preview { margin: 2px 0 6px; font-size: 12px; color: var(--text-secondary); }
+.chan-rule-preview:empty { display: none; }
+.chan-rule-preview-head { margin-bottom: 4px; }
+.chan-rule-preview-list { list-style: none; margin: 0; padding: 0; max-height: 220px; overflow: auto; border: 1px solid var(--border); border-radius: 6px; }
+.chan-rule-preview-hit { padding: 4px 8px; border-top: 1px solid var(--border); }
+.chan-rule-preview-hit:first-child { border-top: none; }
+.chan-rule-preview-who { opacity: 0.8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chan-rule-preview-line { color: var(--text); overflow-wrap: anywhere; }
+.chan-rule-preview-line mark { background: var(--accent-soft, rgba(255, 200, 0, 0.35)); color: inherit; border-radius: 2px; }
 .chan-af-rm { width: 22px; height: 22px; font-size: 12px; color: var(--text-dim); }
 .chan-af-add { align-self: flex-start; display: inline-flex; align-items: center; gap: 5px; }
 .chan-af-add .chan-ic { font-size: 11px; }

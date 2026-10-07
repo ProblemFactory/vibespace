@@ -6,7 +6,8 @@
 //   · LIVE + CONFLICT: a 2 s stat poll (this machine) / a check on refocus (a remote host — the code editor's rule) +
 //     the `file-changed` relay: the disk moved and no unsaved edits ⇒ repaint in place (scroll kept); with unsaved
 //     edits ⇒ the bar "Reload | Keep editing"; after Keep editing the save asks ONCE before overwriting.
-//   · COMMENTS: a selection ⇒ a floating Comment button (the house popover) ⇒ a note box; the strip on the right
+//   · COMMENTS: a selection ⇒ a floating Comment button (the house popover, living exactly as long as its selection —
+//     commentOffer below) ⇒ a note box; the strip on the right
 //     (device-kept per (host, path); a bottom sheet on a phone); Send all = ONE POST /api/doc/comments.
 //   · THE FRAME (design 020, lane doc-editor-ui, 2.369.223 — docs/design-doc-editor-wheel.md § UI): ONE folding bar of glyph
 //     groups (the house bar-fold), ONE status strip of keyed chips (absent with nothing to say), the page a 76ch column
@@ -142,6 +143,31 @@ const q = (host, path) => { const u = new URLSearchParams(); if (host) u.set('ho
 const dirOf = (p) => p.slice(0, p.lastIndexOf('/')) || '/';
 const joinRel = (dir, rel) => { const out = []; for (const seg of (dir + '/' + rel).split('/')) { if (!seg || seg === '.') continue; if (seg === '..') out.pop(); else out.push(seg); } return '/' + out.join('/'); };
 
+/** THE SELECTION AFFORDANCE (userW inc-muxrol54-uv2d, lane doc-comment-dismiss — the Add-comment button outlived its
+ *  selection: offerComment returned early on an empty selection and the house closer had the pane as its exclusion, so a
+ *  click elsewhere in the text never removed it). The popover lives exactly as long as its selection: ONE at a time,
+ *  keyed to the (from, to) that made it. `sync(sel)` drops it the moment the selection is empty or changes; `sync(sel,
+ *  true)` (the settled offer) opens one for a NEW selection through `open(sel)` (returns the popover, or null); `dismiss()`
+ *  (the editor's blur, the pane's scroll, the window's close, the button itself) drops it keeping the key — and so does
+ *  the house (an outside press, Esc): a selection whose popover was dismissed is not offered again until it changes. */
+export function commentOffer(open) {
+  let pop = null, key = '';
+  const dismiss = () => { if (pop) { pop._closeCtl?.abort(); pop.remove(); pop = null; } };
+  return {
+    sync(sel, settled = false) {
+      const k = sel ? sel.from + '-' + sel.to : '';
+      if (k !== key) { dismiss(); key = ''; }
+      if (!settled || !sel || key) return;
+      key = k; pop = open(sel) || null;
+      // the house closer's exclusion is emptied: createPopover's anchor (the pane) excluded every press in the text, so a
+      // click elsewhere in the document was never an outside press — any press but the popover's own is outside now
+      if (pop?._closeExclude) pop._closeExclude.length = 0;
+    },
+    dismiss,
+    get pop() { return pop && pop.isConnected ? pop : null; },
+  };
+}
+
 export function mountDocWindow({ root, winInfo, host, path, name, from, signal, deps }) {
   const { t, showToast, fetchJson, createModalShell, showConfirmDialog, showInputDialog, createPopover, showContextMenu, uiScale, onFileChanged, sameFile, makeRaw, isPhone, createBarFold, icons: I } = deps;
   if (!document.getElementById('doc-window-css')) { const st = mk('style'); st.id = 'doc-window-css'; st.textContent = CSS; document.head.appendChild(st); }
@@ -263,7 +289,14 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
     return { dom: fig, ignoreMutation: () => true };
   };
   let selTimer = 0;
-  const selPlugin = new Plugin({ view: () => ({ update: (view) => { clearTimeout(selTimer); selTimer = setTimeout(() => offerComment(view), 250); } }) });
+  // the selection the comment popover is keyed to: null = none (empty, the editor unfocused, Raw). Every update syncs AT
+  // ONCE (a collapsed or changed selection drops the popover now); the offer waits for the selection to settle (250 ms)
+  const offer = commentOffer((sel) => offerComment(sel));
+  const selNow = (view) => { const s = view.state.selection; return s.empty || !view.hasFocus() || S.mode !== 'rich' ? null : { from: s.from, to: s.to, view }; };
+  const selPlugin = new Plugin({
+    view: () => ({ update: (view) => { offer.sync(selNow(view)); clearTimeout(selTimer); selTimer = setTimeout(() => offer.sync(selNow(view), true), 250); } }),
+    props: { handleDOMEvents: { blur: () => { clearTimeout(selTimer); offer.dismiss(); return false; } } },
+  });
   // node decorations (UI only — the document is untouched): a code block's fence language → `data-lang` (its chip), a raw
   // block's kind → `data-head` (its head row); recomputed only when the document changes
   const rawHead = (src) => t('{kind} · edit in Raw', { kind: /^\s*</.test(src) ? 'HTML' : /^(---|\+\+\+)/.test(src) ? t('front matter') : 'Markdown' });
@@ -496,22 +529,21 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
   const timer = host ? 0 : setInterval(check, POLL_MS);
   window.addEventListener('focus', check, { signal });
   onFileChanged((d) => { if (sameFile(d, { host: host || null, path })) check(); }, { signal });
-  signal.addEventListener('abort', () => { clearInterval(timer); clearTimeout(selTimer); ro?.disconnect(); S.ed?.destroy(); });
+  signal.addEventListener('abort', () => { clearInterval(timer); clearTimeout(selTimer); offer.dismiss(); ro?.disconnect(); S.ed?.destroy(); });
 
   // ── comments ──
-  let pop = null;
-  function offerComment(view) {
-    const sel = view.state.selection;
-    if (sel.empty || !view.hasFocus() || S.mode !== 'rich') return;
-    const quote = view.state.doc.textBetween(sel.from, sel.to, ' ', ' ').trim();
-    if (!quote) return;
-    const c = view.coordsAtPos(sel.to);
-    let line = 0; try { line = sourceLine(S.loaded, current(), sel.from); } catch { line = 0; } // the SOURCE line (PM state + the block map)
-    pop = createPopover(pane, 'doc-cpop', { position: 'cursor', x: c.left, y: c.bottom + 4 });
+  pane.addEventListener('scroll', () => offer.dismiss(), { signal, passive: true }); // a fixed popover never follows the text
+  function offerComment({ from, to, view }) {
+    const quote = view.state.doc.textBetween(from, to, ' ', ' ').trim();
+    if (!quote) return null;
+    const c = view.coordsAtPos(to);
+    let line = 0; try { line = sourceLine(S.loaded, current(), from); } catch { line = 0; } // the SOURCE line (PM state + the block map)
+    const pop = createPopover(pane, 'doc-cpop', { position: 'cursor', x: c.left, y: c.bottom + 4 });
     const b = mk('button', 'doc-comment-btn', t('Add comment')); // its own words (lane artifacts-e2e): the shared 'Comment' is the Design window's 评论, this window says 批注 everywhere else
     b.addEventListener('mousedown', (e) => e.preventDefault());
-    b.addEventListener('click', () => { pop.remove(); noteBox(quote, c, line); });
+    b.addEventListener('click', () => { offer.dismiss(); noteBox(quote, c, line); });
     pop.appendChild(b);
+    return pop;
   }
   function noteBox(quote, c, line) {
     const box = mk('div', 'doc-note'); box.setAttribute('role', 'dialog');

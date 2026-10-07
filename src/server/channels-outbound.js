@@ -134,7 +134,10 @@ function create(engineCtx) {
     return {
       ...p, ...(p.convId && conversationName(p.adapterId, p.convId) ? { title: conversationName(p.adapterId, p.convId) } : {}),   // B-c127: the conversation's name NOW (a proposal froze its title — or the raw id — when it was drafted)
       adapterLabel: rec ? (rec.label || rec.id) : p.adapterId, identityWarning: c ? caps.identityWarning(c) : null, ttlAt, canDecide: p.state === 'awaiting-approval',
-      convKind: (p.key && store.index.live()[p.key] && store.index.live()[p.key].kind) || null,   // B-f467: the Outbox row draws the conversation's own avatar (a mail thread = the mail glyph)
+      convKind: (p.key && store.index.live()[p.key] && store.index.live()[p.key].kind) || null,
+      // lane lark-upload-preflight: an awaiting card whose files this account cannot carry WARNS on the chip and its
+      // Approve says "Send without the file" (the digest covers it — a card drawn before the change approves nothing)
+      ...(() => { const fb = rec && p.state === 'awaiting-approval' && P.storedAttachments(p).length ? filesBlockedOf(filesOfferFor(rec, p.key && store.index.live()[p.key] ? effectiveConvCaps(rec, store.index.live()[p.key]) : null)) : null; return fb ? { filesBlocked: fb } : {}; })(),   // B-f467: the Outbox row draws the conversation's own avatar (a mail thread = the mail glyph)
       // r3: how many agents approving this WAKES (a billed turn each) — the
       // card says it and echoes it with the Approve (`expectWakes`)
       wakes: !reactionKind && sendStartsTurn(rec) ? 1 : 0,
@@ -457,13 +460,28 @@ function create(engineCtx) {
    * judged against the adapter's `caps.sendAttachments` row (absent / null ⇒ `attachments-not-offered`, in the
    * channel's name, with `sendAttachmentsWhy`). A refusal is `bad-proposal` with its name in `why`; nothing on disk.
    */
-  function attachPrepare(rec, proposal, ctx = null) {
+  /** lane lark-upload-preflight (userW inc-muxsy69b-mjg1): CAN THIS ACCOUNT CARRY A FILE — the `send-attachment` offer over
+   *  the files row judged from the HELD scopes (the module's `capsOfScopes`: an account-level fact, never a stale cache),
+   *  else the conversation's cached row (`cc`). Answers the offer `{offered, why, requiredScopes}`. */
+  function filesOfferFor(rec, cc = null, t = now()) {
+    const c = registry.capsOf(rec.kind) || {};
+    let judged = null;
+    try { const mod = registry.get(rec.kind); judged = mod && typeof mod.capsOfScopes === 'function' ? mod.capsOfScopes(((rec.auth && rec.auth.scopes) || []).map(String)) : null; } catch { judged = null; }
+    const files = (judged && judged.files) || (cc && cc.files) || null;
+    return caps.offers(c, { read: 'yes', sendAs: [], at: t, ...(files ? { files } : {}) }, 'send-attachment', t);
+  }
+  const filesBlockedOf = (o) => (o && !o.offered && o.why === 'attachments-not-sendable' ? { why: o.why, requiredScopes: (o.requiredScopes || []).slice(0, 8) } : null);
+  function attachPrepare(rec, proposal, ctx = null, cc = null) {
     const list = proposal && Array.isArray(proposal.attachments) ? proposal.attachments : [];
     if (!list.length) return { ok: true, files: [] };
     const c = registry.capsOf(rec.kind) || {};
     const files = OF.prepare(list);
     const av = P.attachVerdict(c.sendAttachments || null, files, { hasText: !!String(proposal.text || '').trim(), channel: rec.label || rec.id, why: c.sendAttachmentsWhy || null });
     if (!av.ok) return { ok: false, answer: { ok: false, code: 'bad-proposal', why: av.why, error: av.error } };
+    // lane lark-upload-preflight: a file this ACCOUNT cannot carry is refused HERE, by name (the scopes + the owner's
+    // re-authorize step) — the agent never tells anyone "I attached it" for a file the send would drop
+    const fb = filesBlockedOf(filesOfferFor(rec, cc));
+    if (fb) return { ok: false, answer: { ok: false, code: 'bad-proposal', why: 'attachments-not-sendable', requiredScopes: fb.requiredScopes, error: `${rec.label || rec.id} cannot send files: this account's sign-in lacks ${fb.requiredScopes.join(' or ') || 'the upload permission'} — the owner re-authorizes the account (Channels → the account → Re-authorize) before a file can go; send the text alone, or ask the owner to send the file — nothing was created` } };
     // verify r1 (C4): what this drafter's undecided proposals already keep on disk bounds the new one
     const hv = P.attachHeldVerdict(store.outbox.snapshot().proposals, !ctx || ctx.kind === 'user' ? { kind: 'user', id: null } : { kind: 'agent', id: ctx.id }, files);
     return hv.ok ? { ok: true, files } : { ok: false, answer: { ok: false, code: 'bad-proposal', why: hv.why, error: hv.error } };
@@ -515,7 +533,7 @@ function create(engineCtx) {
     if (own && who.as !== 'user') return { ok: false, code: 'send-not-available', error: `sending as you is not available on this conversation (${who.userWhy || 'unknown'})`, why: who.userWhy || 'unknown' };
     const v = P.validateProposal(input);
     if (!v.ok) return { ok: false, code: 'bad-proposal', error: v.error, ...(v.why ? { why: v.why } : {}) };
-    const att = attachPrepare(rec, v.proposal, ctx);
+    const att = attachPrepare(rec, v.proposal, ctx, enNow ? effectiveConvCaps(rec, enNow) : null);
     if (!att.ok) return att.answer;
     // r6 verify F1 + F3 (2026-09-28, "what you approve is what runs"): WHAT THIS REPLY ANSWERS and WHO RECEIVES
     // it are decided HERE, from this engine's own store, before anything is created or any wake is granted —
@@ -868,7 +886,7 @@ function create(engineCtx) {
     for (const n of fresh.plain) { if (old.has(n)) keep(n); else out.plain.push(n); }
     return { ok: true, prepared: out };
   }
-  async function approve(id, { text = null, by = 'user', consent = null, mayWake = null, deliver = null, shown = null } = {}) {
+  async function approve(id, { text = null, by = 'user', consent = null, mayWake = null, deliver = null, shown = null, withoutFiles = false } = {}) {
     const p0 = store.outbox.snapshot().proposals[id];
     if (!p0) return { ok: false, code: 'not-found', error: 'no such proposal' };
     if (p0.state !== 'awaiting-approval') return { ok: false, code: 'bad-state', error: `proposal is ${p0.state}, not awaiting approval`, state: p0.state };
@@ -936,6 +954,13 @@ function create(engineCtx) {
       log.log(`[channels] outbox ${id}: approval refused — ${why}`);
       return { ok: false, code: 'send-not-available', why, error: `cannot send now: ${why}`, proposal: proposalView(store.outbox.snapshot().proposals[id]) };
     }
+    // lane lark-upload-preflight (userW inc-muxsy69b-mjg1): WHAT THE CARD SHOWS IS WHAT LANDS — files this account cannot
+    // carry leave only as the owner's "Send without the file" (`withoutFiles`); a plain Approve is refused, nothing sent
+    const stored0 = reactionKind ? [] : P.storedAttachments(p0);
+    const fb = stored0.length && rec ? filesBlockedOf(filesOfferFor(rec, cc, t)) : null;
+    if (stored0.length && withoutFiles && !String((edited ? text : p0.text) || '').trim()) return { ok: false, code: 'bad-proposal', why: 'nothing-without-files', error: 'this proposal is only its files — without them nothing is left to send; reject it, or re-authorize the account and approve again', proposal: proposalView(p0) };
+    if (fb && !withoutFiles) return { ok: false, code: 'attachments-not-sendable', why: 'attachments-not-sendable', requiredScopes: fb.requiredScopes, error: `this account's sign-in cannot send files (needs ${fb.requiredScopes.join(' or ')}) — nothing was sent; re-authorize the account, or approve it as "Send without the file"`, proposal: proposalView(p0) };
+    const leftOut = stored0.length && withoutFiles ? { at: t, why: fb ? fb.why : 'owner', requiredScopes: fb ? fb.requiredScopes : [] } : null;
     // …then the pace, only once the send is still offered (a refusal above
     // spends no slot); a floored approve leaves the proposal AWAITING
     const gate = wakeGate(p0.convId, wakeN, { mayWake });
@@ -943,7 +968,7 @@ function create(engineCtx) {
     // r4: a THROW after the grant (the transition's or the send's store
     // write refused) gives the slot back unless the request may have left
     try {
-      const tr = await transition(id, 'sending', by, (p) => { p.approvedBy = by; if (edited) { p.text = text; p.edited = true; if (prepared) p.prepared = prepared; } stampReceiptChoice(p, receiptChoice); });
+      const tr = await transition(id, 'sending', by, (p) => { if (leftOut) p.filesLeftOut = leftOut; p.approvedBy = by; if (edited) { p.text = text; p.edited = true; if (prepared) p.prepared = prepared; } stampReceiptChoice(p, receiptChoice); });
       if (!tr.ok) { wakeRefundIfUnsent(gate, { mayWake }, p0.convId, id); return { ok: false, code: 'bad-state', error: tr.why }; }
       auditOutbox(store.outbox.snapshot().proposals[id], 'approve');
       await sendNow(id);
@@ -1211,7 +1236,7 @@ function create(engineCtx) {
       // handle / lost-answer rules as a reply)
       // design 005 §2.B: THE BYTES THAT LEAVE ARE THE BYTES THE PERSON SAW — each stored file re-read and re-hashed here;
       // the adapter is handed these buffers, a changed or missing file refuses the send by name (nothing sent)
-      const stored = P.storedAttachments(p);
+      const stored = p.filesLeftOut ? [] : P.storedAttachments(p);   // lane lark-upload-preflight: the owner's "Send without the file"
       const fv = !targetWhy && stored.length ? await OF.verify(store.dir, p.id, stored) : null;
       const files = fv && fv.ok ? { attachments: fv.files } : {};
       if (targetWhy) r = { ok: false, code: 'not-found', retryable: false, detail: { reason: `the reply's target is not what was approved (${targetWhy}) — nothing was sent` } };
@@ -1241,6 +1266,8 @@ function create(engineCtx) {
         q.reason = null;
         // lane channel-send-files: a message sent in PARTS (Lark's text + one message per file, Slack's chain per file)
         // whose later part was refused is SENT — and its reason says, by name, what did not land
+        // lane lark-upload-preflight: the files the owner approved WITHOUT ("Send without the file") are parts that did not land
+        if (q.filesLeftOut) q.result.parts = P.sendParts([...(q.result.parts || [{ part: 'text', ok: true, vendorMessageId: q.result.vendorMessageId }]), ...P.storedAttachments(q).map((a) => ({ part: 'attachment', name: a.name, ok: false, code: 'left-out', why: 'approved without the file — this account\'s sign-in cannot send files' }))]);
         const miss = (q.result.parts || []).filter((x) => !x.ok);
         if (miss.length) q.reason = `partly sent — ${P.partsWords(q.result.parts)}`;
         // the NEW conversation's id (the thread the vendor answered with) —
@@ -1271,6 +1298,7 @@ function create(engineCtx) {
     else if (to === 'sent' && (p1.inThread || P.placementOf(p1) === 'quote') && rec) { const e2 = live.get(rec.id); if (e2) kick(rec, e2, p1.convId); }
     if (to === 'sent' && rec && r.observed) { try { await noteIdentityObserved(rec, p1.result.sentAs, r.observed, p1.result.vendorMessageId); } catch (err) { log.warn(`[channels] identity observation not recorded: ${(err && err.message) || err}`); } }
     if (to === 'sent') await noteSentBy(p1);
+    if (to === 'sent') await speakPartial(p1);
     if (to === 'unknown') await speakUnknown(p1);
     else await receipt(id);
     await pointerSync(p1.key);
@@ -1337,6 +1365,38 @@ function create(engineCtx) {
         en.sentBy = sb;
       });
     } catch (err) { log.warn(`[channels] ${p.adapterId}/${p.convId}: what ${d.id} sent could not be recorded (the reply-to-mine rule will miss it): ${(err && err.message) || err}`); }
+  }
+  /** lane lark-upload-preflight (userW inc-muxsy69b-mjg1): A PARTIAL SEND REACHES THE OWNER — beside the agent's receipt,
+   *  ONE For-you item per proposal (its action keyed by the proposal) naming what did NOT land and why, with the step that
+   *  fixes it; its click opens the conversation. A file the owner left out himself ("Send without the file") is no news. */
+  async function speakPartial(p) {
+    const miss = ((p && p.result && p.result.parts) || []).filter((x) => !x.ok && x.code !== 'left-out');
+    if (!miss.length || !userTodos || typeof userTodos.add !== 'function') return;
+    try {
+      const recU = adapterRecords().adapters.find((r) => r.id === p.adapterId) || null;
+      const adapterLabel = recU ? (recU.label || recU.id) : p.adapterId;
+      const title = String(conversationName(p.adapterId, p.convId) || p.title || p.convId || '').slice(0, 120);
+      const files = miss.map((x) => (x.part === 'text' ? 'the text' : String(x.name || 'a file').slice(0, 80))).join(', ');
+      const scopes = [...new Set(miss.flatMap((x) => (Array.isArray(x.requiredScopes) ? x.requiredScopes : [])))].slice(0, 8);
+      const why = miss.map((x) => String(x.code || 'refused')).join(', ') + (scopes.length ? ` — the sign-in lacks ${scopes.join(' or ')}` : '');
+      const fix = scopes.length || miss.some((x) => x.code === 'forbidden') ? `Re-authorize ${adapterLabel} (Channels → the account → Re-authorize) so it can send files, then send the file again.` : 'Send the file again, or tell the recipient it is missing.';
+      const item = userTodos.add(INBOX_KEY, {
+        origin: 'channels',
+        text: `Sent to ${title} WITHOUT the file ${files}: ${why}`,
+        ...(p.convId ? { action: { type: 'open-channel', adapterId: p.adapterId, convId: p.convId, key: `outbox:${p.id}` } } : {}),   // keyed by the PROPOSAL (never merged with the conversation's approval pointer)
+        detail: `A send in ${adapterLabel} · ${title} landed only in part: ${p.reason || ''}\n\n${fix}`,
+        urgency: 'high', by: 'agent', sessionName: 'Channels',
+        i18n: {
+          text: { key: i18nKey('Sent to {title} WITHOUT the file {files}: {why}'), params: { title, files, why } },
+          detail: [
+            { key: i18nKey('A send in {adapter} · {title} landed only in part — the recipient did not get {files}.'), params: { adapter: adapterLabel, title, files } },
+            scopes.length || miss.some((x) => x.code === 'forbidden') ? { key: i18nKey('Re-authorize {adapter} (Channels → the account → Re-authorize) so it can send files, then send the file again.'), params: { adapter: adapterLabel } } : { key: i18nKey('Send the file again, or tell the recipient it is missing.') },
+          ],
+          source: INBOX_SOURCE,
+        },
+      });
+      if (item && item.id) await store.outbox.update((ob) => { if (ob.proposals[p.id]) ob.proposals[p.id].partialTodoId = item.id; });
+    } catch (e) { log.warn(`[channels] outbox ${p.id}: could not file the partly-sent item: ${(e && e.message) || e}`); }
   }
   /** An unknown outcome owes the USER a look (§9.4), not the agent a verdict. */
   async function speakUnknown(p) {

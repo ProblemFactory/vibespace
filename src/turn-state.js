@@ -112,4 +112,76 @@ function reconcileAttachStreaming({ turnStateSeen = false, turnState = null, isS
   return out;
 }
 
-module.exports = { TURN_STATES, isTurnState, turnStateEffect, reconcileAttachStreaming, SIDECAR_SETTLE_MS, AUTHORITATIVE_SETTLE_MS };
+// ── THE PARKED TURN (lane parked-ask-stall, 2.369.229 — D-docusign, inc-muxrol54-uv2d) ──
+// MEASURED on a fleet pod: a claude turn parked on a `can_use_tool` ask (a Bash
+// call bypassPermissions did not cover) for 22 h. After the server restarted,
+// the restored session knew `streaming:true` from the wrapper sidecar and
+// NOTHING else — `_turnStateSeen` starts false on a restore — so the attach
+// said "thinking", and the client's delivery-stall watchdog, reading
+// `_isStreaming` alone, forced a re-attach every 5 min for 8 hours (74 slab
+// re-sends on a starved pod). Zero inbound is EXPECTED from a turn that waits
+// on the user; and a watchdog that acts must be bounded and say so.
+
+/** The harness's last turn state ON RECORD in the wrapper's record ring (the
+ *  .buf text, or its parsed records) — null when the ring holds none (an old
+ *  CLI, a ring rotated past it). The sidecar's `streaming` is NOT the truth of
+ *  a parked turn; the ring is: the CLI wrote `requires_action` and nothing
+ *  since moved it (a later `control_response` of ANOTHER id — our own
+ *  apply_flag_settings push after the restart — is not an answer). */
+function turnStateInRing(ring) {
+  const rows = Array.isArray(ring) ? ring : String(ring || '').split('\n');
+  for (let i = rows.length - 1; i >= 0; i--) {
+    let r = rows[i];
+    if (typeof r === 'string') {
+      if (!r.includes('session_state_changed')) continue;
+      try { r = JSON.parse(r); } catch { continue; }
+    }
+    if (r && r.type === 'system' && r.subtype === 'session_state_changed' && isTurnState(r.state)) return r.state;
+  }
+  return null;
+}
+
+/** A RESTORED session's turn-state fields (boot-restore): the ring's last word
+ *  latches the authority exactly as the live record would have — so the attach
+ *  reconciliation, the session list's turn fact ('waiting') and the client's
+ *  chip all read `requires_action` instead of a bare sidecar `streaming`. */
+function restoredTurnState(ring) {
+  const st = turnStateInRing(ring);
+  return st ? { _turnStateSeen: true, _turnState: st } : {};
+}
+
+/** Is the turn WAITING ON THE USER? The harness said `requires_action`, or an
+ *  ask the user can answer is open here (a permission card, AskUserQuestion, a
+ *  helper's ask — each one an unanswered control_request on record). */
+function waitingOnUser({ turnState = null, pendingAsks = 0 } = {}) {
+  const n = Array.isArray(pendingAsks) ? pendingAsks.length : (Number(pendingAsks) || 0);
+  return turnState === 'requires_action' || n > 0;
+}
+
+const STALL_SILENCE_MS = 120000;   // true silence this long mid-turn is abnormal (tool runs emit tool_progress)
+const STALL_COOLDOWN_MS = 300000;  // at most one forced re-attach per 5 min per view
+const STALL_MAX_REATTACH = 3;      // then it stops, says so ONCE, and waits for a record to re-arm it
+
+/** THE DELIVERY-STALL VERDICT (src/lib/chat-view.js's watchdog, 2.322.0) — one
+ *  tick's decision:
+ *    'none'          nothing to do (no turn, not silent long enough, cooling down)
+ *    'hold'          zero inbound is EXPECTED (the turn waits on the user), or
+ *                    the watchdog already gave up — no re-attach, nothing said
+ *    'reattach'      force a re-attach (counts toward the bound)
+ *    'give-up-once'  N forced re-attaches brought nothing: stop, and say so in
+ *                    the chat — once; a record arriving re-arms (forcedCount 0)
+ *  @param inboundAgoMs    since the last inbound for this session (or the turn's start)
+ *  @param sinceReattachMs since this view last forced one
+ *  @param forcedCount     forced re-attaches since the last record arrived
+ *  @param gaveUp          the give-up note is already in the chat */
+function stallVerdict({ streaming = false, turnState = null, pendingAsks = 0, inboundAgoMs = 0, sinceReattachMs = Infinity, forcedCount = 0, gaveUp = false } = {}) {
+  if (!streaming) return 'none';
+  if (waitingOnUser({ turnState, pendingAsks })) return 'hold';
+  if (!(Number(inboundAgoMs) >= STALL_SILENCE_MS)) return 'none';
+  if (Number(sinceReattachMs) < STALL_COOLDOWN_MS) return 'none';
+  if ((Number(forcedCount) || 0) >= STALL_MAX_REATTACH) return gaveUp ? 'hold' : 'give-up-once';
+  return 'reattach';
+}
+
+module.exports = { TURN_STATES, isTurnState, turnStateEffect, reconcileAttachStreaming, SIDECAR_SETTLE_MS, AUTHORITATIVE_SETTLE_MS,
+  turnStateInRing, restoredTurnState, waitingOnUser, stallVerdict, STALL_SILENCE_MS, STALL_COOLDOWN_MS, STALL_MAX_REATTACH };

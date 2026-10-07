@@ -149,7 +149,10 @@ function appendAttachments(card, p) {
   const files = P.storedAttachments(p);
   if (!files.length) return;
   const gone = !!p.attachmentsGoneAt;
-  const box = el('div', 'chan-prop-files');
+  // lane lark-upload-preflight (userW inc-muxsy69b-mjg1): files this account cannot carry never LOOK attached — each row
+  // says it will not be sent, one warning names the way out, and the Approve below reads "Send without the file"
+  const blocked = !gone && p.state === 'awaiting-approval' && !!p.filesBlocked;
+  const box = el('div', blocked ? 'chan-prop-files chan-prop-files-blocked' : 'chan-prop-files');
   for (const a of files) {
     const row = el('div', 'chan-prop-file');
     const url = `/api/channels/outbox/${encodeURIComponent(p.id)}/attachment/${encodeURIComponent(String(a.n))}`;
@@ -167,11 +170,17 @@ function appendAttachments(card, p) {
     revealInto(name, a.name);
     row.appendChild(name);
     row.appendChild(el('span', 'chan-prop-file-meta', `${P.attachmentSize(a.bytes)} · ${a.mime} · sha256 ${String(a.sha256).slice(0, 12)}…`));
+    if (blocked) { row.classList.add('chan-prop-file-blocked'); row.appendChild(el('span', 'chan-prop-file-chip chan-warn', t('will NOT be sent'))); }
     const mm = P.nameTypeMismatch(a.name, a.mime);
     if (mm) row.appendChild(el('span', 'chan-prop-file-chip chan-warn', t('named .{ext}, but its bytes are {type}', { ext: mm.ext, type: a.mime })));
     box.appendChild(row);
   }
-  box.appendChild(el('div', 'chan-prop-file-note', gone ? t('The files are no longer kept — the card keeps their names, sizes and checksums.') : t('Exactly these bytes are sent; if a file changes, the send is refused.')));
+  if (blocked) {
+    const w = el('div', 'chan-prop-file-note chan-warn', t('This account’s sign-in ({account}) cannot send files — re-authorize it, or send without the file.', { account: p.adapterLabel || p.adapterId }));
+    w.dataset.filesBlocked = (p.filesBlocked.requiredScopes || []).join(' ');
+    if (w.dataset.filesBlocked) w.title = t('Needs one of: {scopes}', { scopes: (p.filesBlocked.requiredScopes || []).join(', ') });
+    box.appendChild(w);
+  } else box.appendChild(el('div', 'chan-prop-file-note', gone ? t('The files are no longer kept — the card keeps their names, sizes and checksums.') : t('Exactly these bytes are sent; if a file changes, the send is refused.')));
   card.appendChild(box);
 }
 /** F4 (r6 verify): ONE envelope fact per line — its label, then its value, wrapping, never clipped. */
@@ -261,6 +270,10 @@ const stamp = (ms) => {
 };
 
 /** The state chip's words. */
+/** lane lark-upload-preflight (userW inc-muxsy69b-mjg1): a SENT proposal a part of which did not land is "partly sent" —
+ *  never a plain "sent" (the owner learned of the dropped file from the recipient). */
+const partlySent = (p) => !!(p && p.state === 'sent' && p.result && Array.isArray(p.result.parts) && p.result.parts.some((x) => x && !x.ok));
+function stateChip(p) { return el('span', `chan-prop-state chan-prop-state-${partlySent(p) ? 'partly' : p.state}`, partlySent(p) ? t('partly sent') : stateLabel(p.state)); }
 export function stateLabel(state) {
   switch (state) {
     case 'awaiting-approval': return t('awaiting your approval');
@@ -314,7 +327,7 @@ export function renderProposalCard(app, p, { compact = false, line = false, onLi
   if (line) { card.classList.add('chan-prop-lined', 'chan-prop-shut'); card.appendChild(proposalLine(p, onLine)); }
   // ── head: state pill · drafter · age ──
   const head = el('div', 'chan-prop-head');
-  head.appendChild(el('span', `chan-prop-state chan-prop-state-${p.state}`, stateLabel(p.state)));
+  head.appendChild(stateChip(p));
   head.appendChild(el('span', 'chan-prop-who', drafterLabel(p)));
   head.appendChild(el('span', 'chan-prop-when', stamp(p.updatedAt || p.at)));
   card.appendChild(head);
@@ -431,7 +444,7 @@ export function renderProposalCard(app, p, { compact = false, line = false, onLi
   // shows its contract string rather than nothing. ──
   const outcome = p.outcome || P.outcomeOf(p);
   const outcomeLine = outcome ? P.outcomeText(outcome, { t, errorCodeText: chanCaps.errorCodeText, sendWhyText: chanCaps.sendWhyText }) : (p.reason || '');
-  if (outcomeLine) card.appendChild(el('div', `chan-prop-reason${p.state === 'unknown' ? ' chan-warn' : ''}`, outcomeLine));
+  if (outcomeLine) card.appendChild(el('div', `chan-prop-reason${p.state === 'unknown' || partlySent(p) ? ' chan-warn' : ''}`, outcomeLine));
   if (p.state === 'unknown') card.appendChild(el('div', 'chan-prop-reason chan-warn', t('This send is never retried automatically. Check the conversation on the platform before proposing it again.')));
   // ── the quiet footer: reconcile facts, the receipt ──
   // RECONCILE (§9.4, P4): what the last check answered, and the control —
@@ -524,6 +537,10 @@ export function renderProposalCard(app, p, { compact = false, line = false, onLi
     const approve = btn(toAgent ? approveLabel(rememberedDelivery()) : t('Approve'), null, 'mounts-btn-primary');
     approve.dataset.approve = '1';
     if (toAgent) approve.dataset.deliver = rememberedDelivery();
+    // lane lark-upload-preflight: the owner never approves a card that lies — files this account cannot carry make the
+    // Approve "Send without the file" (a proposal that is ONLY its files offers no send at all)
+    const noFile = !!p.filesBlocked;
+    if (noFile) { approve.textContent = t('Send without the file'); approve.dataset.withoutFiles = '1'; if (!String(p.text || '').trim()) approve.disabled = true; }
     const lock = (on) => { for (const b of act.querySelectorAll('button')) b.disabled = on; };
     const doApprove = async (deliver) => {
       lock(true);
@@ -532,7 +549,7 @@ export function renderProposalCard(app, p, { compact = false, line = false, onLi
       const woke = toAgent && deliver === 'wake-now' ? 1 : 0;
       // r6 verify F6: `shown` = the digest of the record THIS card was drawn from — the engine refuses the
       // approval (409 changed-since-shown, nothing sent) when the proposal is no longer that record
-      const r = await post(`/api/channels/outbox/${encodeURIComponent(p.id)}/approve`, { ...(text !== null && text !== p.text ? { text } : {}), expectWakes: (Number(p.wakes) || 0) + woke, ...(toAgent ? { deliver } : {}), shown: P.shownDigest(p) });
+      const r = await post(`/api/channels/outbox/${encodeURIComponent(p.id)}/approve`, { ...(text !== null && text !== p.text ? { text } : {}), expectWakes: (Number(p.wakes) || 0) + woke, ...(toAgent ? { deliver } : {}), ...(noFile ? { withoutFiles: true } : {}), shown: P.shownDigest(p) });
       if (!r) { lock(false); return; }
       const sent = !!(r.proposal && r.proposal.state === 'sent');
       const o = r.proposal ? (r.proposal.outcome || P.outcomeOf(r.proposal)) : null;
@@ -545,7 +562,7 @@ export function renderProposalCard(app, p, { compact = false, line = false, onLi
       editor = el('textarea', 'chan-prop-edit');
       editor.value = p.text || '';
       body.replaceWith(editor);
-      approve.textContent = toAgent ? approveLabel(pressedDelivery(approve), { edited: true }) : t('Approve edited');
+      approve.textContent = noFile ? t('Send without the file') : toAgent ? approveLabel(pressedDelivery(approve), { edited: true }) : t('Approve edited');
       edit.disabled = true;
       editor.focus();
     };
@@ -658,7 +675,7 @@ function proposalLine(p, onLine) {
   row.setAttribute('role', 'button');
   row.setAttribute('aria-expanded', 'false');
   row.appendChild(icon('chevronRight', 10, 'chan-prop-line-chev'));
-  row.appendChild(el('span', `chan-prop-state chan-prop-state-${p.state}`, stateLabel(p.state)));
+  row.appendChild(stateChip(p));
   const d = p.draftedBy || {};
   row.appendChild(el('span', 'chan-prop-line-who', d.kind === 'agent' ? (d.name || d.id || t('an agent')) : t('You')));
   row.appendChild(el('span', 'chan-prop-line-at', fateStamp(p.updatedAt || p.at)));
@@ -786,7 +803,7 @@ export function renderProposalRow(app, p, { badge = null, open = false, onToggle
   line.appendChild(icon('chevronRight', 10, 'chan-orow-chev'));
   row.appendChild(line);
   const sub = el('div', 'chan-orow-sub');
-  sub.appendChild(el('span', `chan-prop-state chan-prop-state-${p.state}`, stateLabel(p.state)));
+  sub.appendChild(stateChip(p));
   const text = el('span', 'chan-orow-text');
   revealInto(text, rowFirstLine(p).slice(0, 300));
   sub.appendChild(text);

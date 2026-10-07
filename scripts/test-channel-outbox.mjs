@@ -1922,6 +1922,27 @@ async function ccReachLeg(engine, tag) {
       if (sentLinks[0] && sentLinks[0].onclick) sentLinks[0].onclick({ preventDefault() {} });
       ok(deadLinks(card).length === 0 && find(card, 'chan-prop-link').length === 0 && env0 && env0.textContent === 'Gmail · New message' && sentLinks.length === 1 && sentLinks[0].textContent === 'Open the conversation' && opened.join() === `${A}/thread-9`,
         'B-f216: a compose card\'s envelope is WORDS (no link look without a target); once its thread exists the ONE link opens it', JSON.stringify({ dead: deadLinks(card).map((e) => e.textContent), env: env0 && env0.textContent, sent: sentLinks.map((e) => e.textContent), opened }));
+      // lane lark-upload-preflight (userW inc-muxsy69b-mjg1): THE CARD NEVER LIES — files the account cannot carry WARN on
+      // the chip (each row "will NOT be sent", one line naming the way out) and the Approve reads "Send without the file";
+      // a files-only card offers no send; a sent proposal whose file did not land reads "partly sent", never "sent"
+      {
+        const md = { n: 0, name: 'report.md', bytes: 14336, mime: 'text/markdown', sha256: 'a'.repeat(64), kind: 'file' };
+        const lp = { id: 'p-lup1', adapterId: 'lark-1', adapterLabel: 'Lark', convId: 'oc_1', key: 'lark-1/oc_1', state: 'awaiting-approval', text: 'the report is attached', draftedBy: { kind: 'agent', id: 'agent-1', name: 'Worker' }, attachments: [md], canDecide: true, sendAs: 'user' };
+        const warned = CO.renderProposalCard(app, { ...lp, filesBlocked: { why: 'attachments-not-sendable', requiredScopes: ['im:resource:upload', 'im:resource'] } });
+        const plain = CO.renderProposalCard(app, { ...lp, id: 'p-lup2' });
+        const only = CO.renderProposalCard(app, { ...lp, id: 'p-lup3', text: '', filesBlocked: { why: 'attachments-not-sendable', requiredScopes: ['im:resource:upload'] } });
+        const apv = (c) => c._all().find((e) => e.dataset && e.dataset.approve === '1') || null;
+        const note = find(warned, 'chan-prop-file-note')[0];
+        ok(find(warned, 'chan-prop-files-blocked').length === 1 && find(warned, 'chan-prop-file-blocked').length === 1 && texts(warned).includes('will NOT be sent') && note && note._cls.has('chan-warn') && note.textContent === 'This account’s sign-in (Lark) cannot send files — re-authorize it, or send without the file.' && note.dataset.filesBlocked === 'im:resource:upload im:resource' && apv(warned) && apv(warned).textContent === 'Send without the file' && apv(warned).dataset.withoutFiles === '1' && !apv(warned).disabled,
+          'lark-upload-preflight (real card): a blocked file WARNS on its chip ("will NOT be sent" + the re-authorize line) and the Approve reads "Send without the file"', JSON.stringify({ note: note && note.textContent, btn: apv(warned) && apv(warned).textContent }));
+        ok(find(plain, 'chan-prop-files-blocked').length === 0 && !texts(plain).includes('will NOT be sent') && apv(plain) && apv(plain).textContent !== 'Send without the file' && apv(only) && apv(only).disabled === true,
+          'lark-upload-preflight: a card whose account can carry the file draws it plainly; a files-only blocked card offers no send (Approve disabled)', JSON.stringify([apv(plain) && apv(plain).textContent, apv(only) && apv(only).disabled]));
+        const partly = CO.renderProposalCard(app, { ...lp, id: 'p-lup4', state: 'sent', reason: 'partly sent — landed: the text · NOT landed: "report.md" (forbidden: 99991679 — needs im:resource:upload, im:resource)', result: { vendorMessageId: 'om_1', parts: [{ part: 'text', ok: true }, { part: 'attachment', name: 'report.md', ok: false, code: 'forbidden' }] } });
+        const line = CO.renderProposalCard(app, { ...lp, id: 'p-lup5', state: 'sent', result: { vendorMessageId: 'om_1', parts: [{ part: 'text', ok: true }, { part: 'attachment', name: 'report.md', ok: false, code: 'forbidden' }] } }, { line: true });
+        const whole = CO.renderProposalCard(app, { ...lp, id: 'p-lup6', state: 'sent', result: { vendorMessageId: 'om_2', parts: [{ part: 'text', ok: true }, { part: 'attachment', name: 'report.md', ok: true }] } });
+        ok(texts(partly).includes('partly sent') && find(partly, 'chan-prop-state-partly').length === 1 && find(partly, 'chan-prop-reason').some((e) => e._cls.has('chan-warn') && /NOT landed: "report\.md"/.test(e.textContent)) && texts(line).includes('partly sent') && !texts(whole).includes('partly sent') && texts(whole).includes('sent'),
+          'lark-upload-preflight: a sent proposal whose file did not land reads "partly sent" on the card and the Outbox row (the NOT-landed part in a warning line); a whole send reads "sent"', JSON.stringify(texts(line).slice(0, 4)));
+      }
       {
         const pre = fs.readFileSync(path.join(REPO, 'src/lib/channel-outbox.js'), 'utf-8');
         const FIXED = "where.appendChild(el('span', 'chan-prop-env', `${p.adapterLabel || p.adapterId} · ${t('New message')}`));";

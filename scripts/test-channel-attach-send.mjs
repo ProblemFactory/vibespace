@@ -32,6 +32,7 @@ const ENG = require(path.join(REPO, 'src/server/channels-engine.js'));
 const CH = require(path.join(REPO, 'src/channels/index.js'));
 const fake = require(path.join(REPO, 'src/channels/fake.js'));
 const GM = require(path.join(REPO, 'src/channels/gmail.js'));
+const CC0 = require(path.join(REPO, 'src/channel-caps.js'));
 const STORE = require(path.join(REPO, 'src/channel-store.js'));
 const express = require('express');
 const SRC = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf-8');
@@ -519,7 +520,7 @@ const engReading = (src) => ['attachPrepare', 'outboxAttachment', 'filesSweep'].
   const rd = "app.post('/api/agent/channels/reply', async (req, res) => {\n";
   anchor(ARS, rd, 'door');
   ok(doorsReading(ARS.replace(rd, `${rd}  const peek = require('fs').readFileSync(String((req.body || {}).path));\n`)).includes('/api/agent/channels/reply'), 'control: a reply door that opens a path from the body is red');
-  const ap = '  function attachPrepare(rec, proposal, ctx = null) {\n';
+  const ap = '  function attachPrepare(rec, proposal, ctx = null, cc = null) {\n';
   anchor(ENS, ap, 'eng');
   ok(engReading(ENS.replace(ap, `${ap}    const extra = fs.readFileSync(String(proposal.path));\n`)).includes('attachPrepare'), 'control: an attachPrepare that opens a named path is red');
 }
@@ -543,6 +544,106 @@ ok(legRed(r1PureLegs(polCopy('no-held', '  if (held + adding <= ATTACH_HELD_MAX)
   const cf = '    const data = Buffer.alloc(size);\n    let got = 0;\n    while (got < size) { const n = fs.readSync(fd, data, got, size - got, got); if (!n) break; got += n; }\n';
   if (!CLISRC.includes(cf)) throw new Error('r1 CLI control anchor');
   ok(legRed(await r1CliLeg(M.write('data/bin/vibespace-channels', CLISRC.replace(cf, '    const data = fs.readFileSync(p);\n    const got = data.length;\n'), 'r1-cli-path'), 'C '), /D4:/), 'control: a CLI that reads the PATH after looking hangs on a FIFO swapped in (D4 red)');
+}
+// ═══ ⑪ lane lark-upload-preflight ═══════════════════════════════════════════
+// userW inc-muxsy69b-mjg1 (MEASURED 2026-10-07, a fleet pod on 2.369.226): a Lark proposal carried ONE .md; the owner saw
+// the chip and approved; the text landed, the file was refused 99991679 (the token lacked im:resource:upload / im:resource)
+// and the owner was told nothing. Fixtures: the measured shape (a files row that cannot send), a Lark-shaped account WITH
+// the upload scope (lands, no warning), a mail-shaped account (multipart, no files row) as the control.
+console.log('⑪ lane lark-upload-preflight: a file the account cannot carry is said BEFORE the approve; a partial send reaches the owner');
+const UPS = ['im:resource:upload', 'im:resource'];
+const BLOCKED = { send: false, why: 'attachments-not-sendable', requiredScopes: UPS };
+const W99 = 'lark upload file: Unauthorized. You do not have permission to perform the requested operation on the resource. Please request user re-authorization and try again. required one of these privileges under the user identity: [im:resource:upload, im:resource] (99991679)';
+function lupWorld(kind, files) {
+  const W = { sent: [], files: files ? { ...files } : null, refuse: false };
+  const mod = {
+    kind,
+    caps: { ...fake.fakePoll.caps, sendAttachments: { maxCount: 10, maxTotalBytes: 25e6, withText: true }, budget: undefined, pace: undefined },
+    create(record, deps) {
+      const inner = fake.fakePoll.create(record, { ...deps });
+      return Object.assign(Object.create(inner), {
+        async convCaps(convId) { const c = await inner.convCaps(convId); return W.files ? { ...c, files: { ...W.files } } : c; },
+        async send(convId, o) {
+          const files = o.attachments || [];
+          W.sent.push({ convId, text: o.text, n: files.length });
+          const n = W.sent.length;
+          const parts = [{ part: 'text', ok: true, vendorMessageId: `t-${n}` }, ...files.map((a, i) => (W.refuse ? { part: 'attachment', name: a.name, ok: false, code: 'forbidden', why: W99, requiredScopes: UPS } : { part: 'attachment', name: a.name, ok: true, vendorMessageId: `f-${n}-${i}` }))];
+          return { ok: true, vendorMessageId: `t-${n}`, at: Date.now(), sentAs: 'user', ...(files.length ? { parts } : {}) };
+        },
+      });
+    },
+  };
+  return { W, mod };
+}
+async function lupRig(name, engineMod = ENG) {
+  const LK = lupWorld('lup-lark', BLOCKED), UP = lupWorld('lup-lark-up', { send: true, why: null, requiredScopes: [] }), GM2 = lupWorld('lup-mail', null);
+  const registry = CH.createChannelRegistry();
+  for (const m of [LK.mod, UP.mod, GM2.mod]) registry.register(m);
+  const dataDir = path.join(ROOT, name);
+  seed(dataDir, [['lk', 'lup-lark'], ['lkup', 'lup-lark-up'], ['gm', 'lup-mail']]);
+  const todos = [];
+  const userTodos = { add: (key, it) => { todos.push({ key, ...it }); return { id: `td-${todos.length}` }; }, get: () => null, setStatus: () => {} };
+  const eng = engineMod.create({ dataDir, registry, env: {}, now, broadcast: () => {}, serverSetting: (k) => settings[k], liveSessions: () => [], log: quiet, userTodos });
+  for (const id of ['lk', 'lkup', 'gm']) await eng.pass(id, { force: true });
+  const pick = (id) => { const keys = Object.keys(eng.store.index.live()).filter((k) => k.startsWith(id + '/')); return keys.length ? keys[0].slice(id.length + 1) : null; };
+  return { LK, UP, GM2, eng, todos, pick };
+}
+const MD = Buffer.from('# the report\n\n14 KB of markdown in the measured send\n');
+async function lupLegs(R) {
+  const r = [];
+  const lk = R.pick('lk'), up = R.pick('lkup'), gm = R.pick('gm');
+  const ids0 = Object.keys(R.eng.store.outbox.snapshot().proposals).length;
+  // (1) PROPOSE: the measured account refuses the file BY NAME — the scopes and the owner's step — and creates nothing
+  const p1 = await R.eng.propose(null, 'lk', lk, { text: 'the report is attached', attachments: [att('report.md', MD)] });
+  r.push(['propose refused by name: a file on an account whose sign-in cannot upload ⇒ bad-proposal `attachments-not-sendable`, the scopes and the re-authorize step named, nothing created', !p1.ok && p1.code === 'bad-proposal' && p1.why === 'attachments-not-sendable' && /im:resource:upload or im:resource/.test(p1.error || '') && /re-authorizes the account/.test(p1.error || '') && JSON.stringify(p1.requiredScopes) === JSON.stringify(UPS) && Object.keys(R.eng.store.outbox.snapshot().proposals).length === ids0, JSON.stringify(p1).slice(0, 300)]);
+  const p1t = await R.eng.propose(null, 'lk', lk, { text: 'the text alone' });
+  r.push(['the same account still proposes the TEXT alone (only the file is refused)', p1t.ok && p1t.proposal.state === 'awaiting-approval', JSON.stringify(p1t).slice(0, 200)]);
+  // (2) CONTROLS: an account WITH the upload scope, a mail-shaped account (no files row) — the file lands, no warning
+  const p2 = await R.eng.propose(null, 'lkup', up, { text: 'with the scope', attachments: [att('report.md', MD)] });
+  const v2 = p2.ok ? view(R.eng, p2.proposal.id) : null;
+  const a2 = v2 ? await R.eng.approve(p2.proposal.id, { shown: P.shownDigest(v2) }) : null;
+  const p3 = await R.eng.propose(null, 'gm', gm, { text: 'mail', attachments: [att('report.md', MD)] });
+  const v3 = p3.ok ? view(R.eng, p3.proposal.id) : null;
+  const a3 = v3 ? await R.eng.approve(p3.proposal.id, { shown: P.shownDigest(v3) }) : null;
+  r.push(['control: the upload scope held (Lark) and a mail account (multipart) — no warning on the card, the file handed over, sent whole, no For-you item', !!v2 && !v2.filesBlocked && a2 && a2.ok && R.UP.W.sent[0].n === 1 && !v3.filesBlocked && a3 && a3.ok && R.GM2.W.sent[0].n === 1 && !(a2.proposal.reason || '') && !R.todos.some((x) => /WITHOUT the file/.test(x.text)), JSON.stringify([v2 && v2.filesBlocked, a2 && a2.proposal.reason])]);
+  // (3) THE CAPABILITY CHANGES between propose and approve: the card WARNS and its Approve is "Send without the file"
+  const p4 = await R.eng.propose(null, 'lkup', up, { text: 'before the change', attachments: [att('report.md', MD)] });
+  const v4a = view(R.eng, p4.proposal.id);
+  R.UP.W.files = { ...BLOCKED };
+  await R.eng.store.index.update(() => { const en = R.eng.store.index.entry('lkup', up, { create: false }); en.convCaps = { ...en.convCaps, files: { ...BLOCKED } }; });
+  const v4 = view(R.eng, p4.proposal.id);
+  r.push(['approve card: the files row turned (the sign-in lost the upload) ⇒ the view carries `filesBlocked` with the scopes', !v4a.filesBlocked && !!v4.filesBlocked && v4.filesBlocked.why === 'attachments-not-sendable' && JSON.stringify(v4.filesBlocked.requiredScopes) === JSON.stringify(UPS), JSON.stringify(v4.filesBlocked)]);
+  const n0 = R.UP.W.sent.length;
+  const old = await R.eng.approve(p4.proposal.id, { shown: P.shownDigest(v4a) });
+  const plain = await R.eng.approve(p4.proposal.id, { shown: P.shownDigest(v4) });
+  r.push(['approve card: the card drawn BEFORE the warning approves nothing (changed-since-shown); a plain Approve of the warned card is refused `attachments-not-sendable` — nothing sent', !old.ok && old.code === 'changed-since-shown' && !plain.ok && plain.code === 'attachments-not-sendable' && R.UP.W.sent.length === n0, JSON.stringify([old.code, plain.code, plain.error])]);
+  const wo = await R.eng.approve(p4.proposal.id, { shown: P.shownDigest(v4), withoutFiles: true });
+  const q4 = R.eng.store.outbox.snapshot().proposals[p4.proposal.id];
+  r.push(['"Send without the file": the text goes, the adapter is handed NO file, the record says partly sent (left out at the approve) and the owner gets no For-you item for his own choice', wo.ok && R.UP.W.sent.length === n0 + 1 && R.UP.W.sent[n0].n === 0 && /^partly sent — landed: the text · NOT landed: "report\.md" \(left-out/.test(q4.reason || '') && !!q4.filesLeftOut && !R.todos.some((x) => /WITHOUT the file/.test(x.text)), JSON.stringify([q4.reason, R.todos.map((x) => x.text)])]);
+  // (4) A PARTIAL SEND REACHES THE OWNER: the files row said yes, Lark answered 99991679 for the file
+  R.UP.W.files = { send: true, why: null, requiredScopes: [] };
+  await R.eng.store.index.update(() => { const en = R.eng.store.index.entry('lkup', up, { create: false }); en.convCaps = { ...en.convCaps, files: { ...R.UP.W.files } }; });
+  R.UP.W.refuse = true;
+  const p5 = await R.eng.propose(null, 'lkup', up, { text: 'the measured send', attachments: [att('report.md', MD)] });
+  const a5 = await R.eng.approve(p5.proposal.id, { shown: P.shownDigest(view(R.eng, p5.proposal.id)) });
+  const q5 = R.eng.store.outbox.snapshot().proposals[p5.proposal.id];
+  const td = R.todos.filter((x) => x.action && x.action.key === `outbox:${p5.proposal.id}`);
+  r.push(['partial send: the agent\'s receipt reason stays "partly sent — … NOT landed … needs im:resource:upload, im:resource"', a5.ok && /^partly sent — landed: the text · NOT landed: "report\.md" \(forbidden: .*99991679.* — needs im:resource:upload, im:resource\)$/.test(q5.reason || ''), q5.reason]);
+  r.push(['partial send: ONE For-you item (origin channels, keyed by the proposal) "Sent to … WITHOUT the file report.md: …" with the re-authorize step, worded zh/ja through its i18n keys', td.length === 1 && td[0].origin === 'channels' && /^Sent to .+ WITHOUT the file report\.md: forbidden — the sign-in lacks im:resource:upload or im:resource$/.test(td[0].text) && /Re-authorize lkup/.test(td[0].detail) && td[0].i18n && td[0].i18n.text.key === 'Sent to {title} WITHOUT the file {files}: {why}' && td[0].urgency === 'high' && !!q5.partialTodoId, JSON.stringify(td).slice(0, 400)]);
+  r.push(['partial send: the Outbox record carries the NOT-landed part (the card and the row read it — "partly sent")', !!(q5.result && q5.result.parts && q5.result.parts.some((x) => !x.ok && x.code === 'forbidden' && JSON.stringify(x.requiredScopes) === JSON.stringify(UPS))), JSON.stringify(q5.result && q5.result.parts)]);
+  return r;
+}
+{
+  const RL = await lupRig('lup');
+  for (const [n, p, d] of await lupLegs(RL)) ok(p, n, d);
+  ok(CC0.offers({ sendAttachments: { maxCount: 1 } }, { read: 'yes', sendAs: ['user'], at: Date.now(), files: BLOCKED }, 'send-attachment').why === 'attachments-not-sendable', 'the send-attachment offer: a files row that cannot send ⇒ attachments-not-sendable');
+  // controls: each rule removed in a patched copy turns its leg red
+  const C1 = await lupRig('lup-c1', engCopy('lup-propose', "    if (fb) return { ok: false, answer: { ok: false, code: 'bad-proposal', why: 'attachments-not-sendable'", "    if (false) return { ok: false, answer: { ok: false, code: 'bad-proposal', why: 'attachments-not-sendable'"));
+  ok(legRed(await lupLegs(C1), /propose refused by name/), 'control: an engine whose propose does not refuse the file is red (propose not refused)');
+  const C2 = await lupRig('lup-c2', engCopy('lup-card', 'return fb ? { filesBlocked: fb } : {}; })(),', 'return {}; })(),'));
+  ok(legRed(await lupLegs(C2), /approve card: the files row turned/), 'control: an approve card without the warning is red');
+  const C3 = await lupRig('lup-c3', engCopy('lup-foryou', "    if (to === 'sent') await speakPartial(p1);\n", ''));
+  ok(legRed(await lupLegs(C3), /ONE For-you item/), 'control: a partial send without the For-you item is red');
 }
 R1.server.close();
 console.log(`\n${fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`}`);

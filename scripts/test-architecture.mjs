@@ -3109,6 +3109,7 @@ console.log('§65 every producer that can carry a conversation\'s facts to an ag
     pointerSync: 'the owner\'s For-you pointer to proposals awaiting approval',
     composePointerSync: 'the owner\'s For-you pointer to composed messages awaiting approval',
     speakUnknown: 'the owner\'s For-you item for a lost outcome',
+    speakPartial: 'the owner\'s For-you item for a partly sent proposal (a file that did not land — lane lark-upload-preflight)',
     speakFailure: 'the owner\'s For-you item for a failing account',
     speakSlowed: 'the owner\'s For-you item when the vendor refused an account\'s quota twice in a day (lane gmail-quota-share)',
     speakUnsaved: 'the owner\'s For-you item for an unsaved token',

@@ -7,6 +7,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { restoredTurnState } = require('../turn-state.js'); // PURE (lane parked-ask-stall): the ring's last turn-state record
 const pty = require('node-pty');
 const { execFileSync, spawn } = require('child_process');
 const { createMessageManager } = require('../normalizers');
@@ -407,6 +408,11 @@ function restoreSessions() {
       socketPath,
       buffer: savedBuffer,
       _isStreaming: wrapperStreaming,
+      // …and the harness's OWN last word on record in that ring (lane parked-ask-stall, a fleet pod):
+      // a turn parked on a permission ask restores as `requires_action` — waiting on the user, the
+      // session list's 'waiting' dot, the attach's turn state — not a bare sidecar `streaming:true`
+      // that every reader took for "thinking" (and the client's stall watchdog for a lost delivery)
+      ...restoredTurnState(savedBuffer),
       _goal: wrapperGoal,
       _goalStatus: wrapperGoalStatus,
       _goalElapsed: wrapperGoalElapsed,

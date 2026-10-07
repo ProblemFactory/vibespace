@@ -75,10 +75,10 @@
  * other two.
  */
 const { inertFrames } = require('./channel-record.js');
-const { toAgentText } = require('./peer-text.js');   // lane peer-census: THE belt (bound → fold → the frame rule per line / piece) every agent-facing line takes
+const { toAgentText, cutText, foldHidden } = require('./peer-text.js');   // lane peer-census: THE belt (bound → fold → the frame rule per line / piece) every agent-facing line takes
 
 /** The CLOSED rule set. A kind outside it is refused by `validateFilter`. */
-const RULE_KINDS = Object.freeze(['mention', 'keyword', 'sender-in-group', 'from-address', 'subject', 'has-attachment', 'not-contains', 'time-window', 'reply-to-mine', 'in-thread-with-me']);
+const RULE_KINDS = Object.freeze(['mention', 'keyword', 'regex', 'sender-in-group', 'from-address', 'subject', 'has-attachment', 'not-contains', 'time-window', 'reply-to-mine', 'in-thread-with-me']);
 /** lane channel-threads (spec §5.4): the two rule kinds that read a record's PLACE — `reply-to-mine` and
  *  `in-thread-with-me`. Both read `ctx.mine` (a Set of the vendor ids the OWNER wrote or THIS principal sent from here,
  *  built by the engine per watcher from the conversation's log + the outbox's `sentBy`), `ctx.kindOf(record)` = THE
@@ -177,6 +177,152 @@ const MAX_RULES = 50;
  *  validator's sentence used to reach a zh/ja screen on every "Add rule"). */
 const refuse = (code, error, extra) => ({ ok: false, code, error, ...(extra || {}) });
 
+// ── THE REGEX RULE (lane notify-rules-r2, owner inc-muxt96t5-pk42: "还有正则呢？") ───────────────────────────────
+// JUDGED AT SAVE, never discovered at match time: `regexVerdict` compiles the pattern with the ONE flag set (`iu`),
+// ≤ REGEX_MAX chars, and REFUSES BY NAME the shapes a backtracking engine pays for — a backreference, a lookahead /
+// lookbehind, a repeated piece inside a repeated group (`(a+)+`, an unbounded group over overlapping branches
+// `(a|ab)*`), two unbounded pieces that can eat the same text side by side (`\d+\d*`, `.*.*`, `\w+\s*\w+`), and a
+// pattern that matches the empty message (it would match everything). The match runs on the record's FOLDED text
+// (peer-text's fold — CRLF, hidden characters out) cut to REGEX_TEXT_MAX: the user's own pattern stays bounded by
+// that cap (scripts/test-channel-filter.mjs pins the cost; the refused shapes are its controls).
+const REGEX_MAX = 256;
+const REGEX_FLAGS = 'iu';
+const REGEX_TEXT_MAX = 8192;
+const REGEX_REFUSALS = Object.freeze(['regex-too-long', 'regex-invalid', 'regex-backreference', 'regex-lookaround', 'regex-nested-quantifier', 'regex-adjacent-quantifier', 'regex-leading-repeat', 'regex-empty-match']);
+// the probe alphabet two pieces' overlap is judged on: printable ASCII, the white space, a few letters past it — and
+// every character the pattern itself names (a literal `你` is judged against `\p{Script=Han}` by its own sample)
+const REGEX_PROBES = [...Array.from({ length: 95 }, (_, k) => String.fromCharCode(32 + k)), '\t', '\n', '\u00a0', 'é', 'ß', '中', 'あ', '😀'];
+function regexPieces(src) {
+  // ONE pass over the pattern's own syntax → a tree of pieces `{atom, min, max, inner?, branches?}` (u-mode grammar)
+  let i = 0;
+  const bad = (code, piece) => { const e = new Error(code); e.code = code; e.piece = piece; throw e; };
+  function quant(start) {
+    const c = src[i];
+    let min = 1, max = 1;
+    if (c === '*') { min = 0; max = Infinity; i++; } else if (c === '+') { min = 1; max = Infinity; i++; } else if (c === '?') { min = 0; max = 1; i++; } else if (c === '{') {
+      const m = /^\{(\d+)(,(\d*))?\}/.exec(src.slice(i));
+      if (m) { min = Number(m[1]); max = m[2] ? (m[3] === '' ? Infinity : Number(m[3])) : min; i += m[0].length; }
+    }
+    if ((min !== 1 || max !== 1) && src[i] === '?') i++;   // a lazy mark is the same work
+    return { min, max, text: src.slice(start, i) };
+  }
+  function seq(depth) {
+    const branches = [[]];
+    while (i < src.length) {
+      const c = src[i], start = i;
+      if (c === ')') { if (!depth) bad('regex-invalid', ')'); break; }
+      if (c === '|') { i++; branches.push([]); continue; }
+      let atom;
+      if (c === '(') {
+        i++;
+        if (src.startsWith('?=', i) || src.startsWith('?!', i) || src.startsWith('?<=', i) || src.startsWith('?<!', i)) bad('regex-lookaround', src.slice(start, start + (src[i + 1] === '<' ? 4 : 3)));
+        if (src.startsWith('?:', i)) i += 2; else if (src.startsWith('?<', i)) { const e = src.indexOf('>', i); i = e < 0 ? src.length : e + 1; }
+        const inner = seq(depth + 1);
+        i++;   // ')'
+        atom = { group: inner, text: src.slice(start, i) };
+      } else if (c === '[') {
+        i++;
+        if (src[i] === '^') i++;
+        if (src[i] === ']') i++;
+        while (i < src.length && src[i] !== ']') i += src[i] === '\\' ? 2 : 1;
+        i++;
+        atom = { text: src.slice(start, i) };
+      } else if (c === '\\') {
+        const d = src[i + 1] || '';
+        if (/[1-9]/.test(d) || (d === 'k' && src[i + 2] === '<')) bad('regex-backreference', src.slice(i, i + (d === 'k' ? src.indexOf('>', i) + 1 - i : 2)));
+        const m = /^\\(?:[pP]\{[^}]*\}|x[0-9a-fA-F]{2}|u\{[0-9a-fA-F]+\}|u[0-9a-fA-F]{4}|c[A-Za-z]|0|[\s\S])/.exec(src.slice(i));
+        i += m ? m[0].length : 1;
+        atom = { text: src.slice(start, i), assertion: d === 'b' || d === 'B' };
+      } else if (c === '^' || c === '$') { i++; atom = { text: c, assertion: true }; }
+      else { i += src.codePointAt(i) > 0xffff ? 2 : 1; atom = { text: src.slice(start, i) }; }
+      const q = quant(i);
+      branches[branches.length - 1].push({ ...atom, min: q.min, max: q.max, piece: src.slice(start, i) });
+    }
+    return branches;
+  }
+  const top = seq(0);
+  return top;
+}
+/** What ONE piece can start with, as atoms `[{re, samples}]` (a group: its branches' first pieces, conservative). */
+function probeSet(piece) {
+  if (piece.assertion) return [];
+  if (piece.group) { const out = []; for (const br of piece.group) for (const p of br) { out.push(...probeSet(p)); if (p.min > 0 && !p.assertion) break; } return out; }
+  let re; try { re = new RegExp(`^(?:${piece.text})$`, REGEX_FLAGS); } catch { re = /^[\s\S]$/u; }
+  return [{ re, samples: [...new Set([...REGEX_PROBES, ...Array.from(piece.text)])].filter((c) => re.test(c)) }];
+}
+/** Can two pieces match the same character? (each one's samples against the other's own test) */
+const overlaps = (a, b) => a.some((x) => b.some((y) => x.samples.some((c) => y.re.test(c)) || y.samples.some((c) => x.re.test(c))));
+const hasQuantifier = (branches) => branches.some((br) => br.some((p) => p.max > 1 || (p.group && hasQuantifier(p.group))));
+/** Walk one sequence: `open` = the unbounded pieces still able to eat what comes next (a mandatory piece that does
+ *  not overlap them closes them). Throws the refusal. */
+function judgeSeq(branches, open0, top = false) {
+  let outs = [];
+  for (const br of branches) {
+    let open = open0.slice();
+    for (const [at, p] of br.entries()) {
+      if (p.group) {
+        if (p.max > 1) {
+          if (hasQuantifier(p.group)) { const e = new Error('regex-nested-quantifier'); e.code = e.message; e.piece = p.piece; throw e; }
+          const firsts = p.group.map((b) => probeSet({ group: [b] }));
+          for (let x = 0; x < firsts.length; x++) for (let y = x + 1; y < firsts.length; y++) if (overlaps(firsts[x], firsts[y])) { const e = new Error('regex-nested-quantifier'); e.code = e.message; e.piece = p.piece; throw e; }
+        } else { open = judgeSeq(p.group, open); continue; }
+      }
+      if (p.assertion) continue;
+      const set = probeSet(p);
+      if (p.max === Infinity) {
+        const hit = open.find((o) => overlaps(o.set, set));
+        // a head repeat that ENDS the pattern cannot fail once it matched: the first start answers (linear)
+        if (hit && hit.head && !(top && at === br.length - 1 && open.every((o) => o.head))) { const e = new Error('regex-leading-repeat'); e.code = e.message; e.piece = p.piece; throw e; }
+        if (hit && !hit.head) { const e = new Error('regex-adjacent-quantifier'); e.code = e.message; e.piece = `${hit.piece}…${p.piece}`; throw e; }
+        open = open.concat([{ set, piece: p.piece }]);
+      } else if (p.min > 0) open = open.filter((o) => overlaps(o.set, set));
+    }
+    outs = outs.concat(open);
+  }
+  return outs;
+}
+/**
+ * THE REGEX RULE'S JUDGE (PURE): `{ok:true, source}` or a refusal BY NAME with the offending `piece`.
+ */
+function regexVerdict(src0) {
+  const src = str(src0);
+  if (!src.trim()) return refuse('value-required', 'regex: a pattern is required', { kind: 'regex' });
+  if (src.length > REGEX_MAX) return refuse('regex-too-long', `regex: at most ${REGEX_MAX} characters (got ${src.length})`, { kind: 'regex', max: REGEX_MAX });
+  let re;
+  try { re = new RegExp(src, REGEX_FLAGS); } catch (err) { return refuse('regex-invalid', `regex: does not compile — ${String((err && err.message) || err).replace(/^Invalid regular expression: /, '').slice(0, 200)}`, { kind: 'regex' }); }
+  // THE SEARCH'S OWN LOOP is a repeated piece too: an unanchored match retries at every start, so a repeated piece that
+  // can run over the characters a match STARTS with (`\d+x`, `a.*b`, `\w+@` on a long run of them) re-reads the
+  // text once per start — the head's characters stay "open" until a fixed piece they cannot be closes them
+  try { const tree = regexPieces(src); judgeSeq(tree, tree.every((br) => br.length && br[0].text === '^') ? [] : tree.map((br) => ({ set: probeSet({ group: [br.filter((x) => !x.assertion)] }), piece: '', head: true })), true); } catch (err) {
+    const code = err && REGEX_REFUSALS.includes(err.code) ? err.code : 'regex-invalid';
+    const piece = String((err && err.piece) || '').slice(0, 80);
+    const words = { 'regex-backreference': 'a backreference is not allowed', 'regex-lookaround': 'a lookahead / lookbehind is not allowed', 'regex-nested-quantifier': 'a repeated piece inside a repeated group can take very long on one message', 'regex-adjacent-quantifier': 'two repeated pieces that can match the same text side by side can take very long on one message', 'regex-leading-repeat': 'a repeated piece that can re-read the start of the match (every start re-reads it) can take very long on one message — begin with a fixed word or ^', 'regex-invalid': 'an unbalanced group' }[code];
+    return refuse(code, `regex: refused — ${words} (${piece})`, { kind: 'regex', piece });
+  }
+  if (re.test('')) return refuse('regex-empty-match', 'regex: refused — it matches an empty message (it would match everything)', { kind: 'regex' });
+  return { ok: true, source: src };
+}
+const regexCache = new Map();
+/** A judged pattern, compiled once (≤ 256 kept — a rule set is ≤ 50 rules per filter). */
+function compiledRegex(src) {
+  let re = regexCache.get(src);
+  if (re === undefined) {
+    re = regexVerdict(src).ok ? new RegExp(src, REGEX_FLAGS) : null;   // a stored pattern the judge now refuses never runs
+    if (regexCache.size >= 256) regexCache.delete(regexCache.keys().next().value);
+    regexCache.set(src, re);
+  }
+  return re;
+}
+/** The text a regex rule is matched on: the record's text, cut to REGEX_TEXT_MAX, folded (peer-text's fold). */
+function regexText(text) { return foldHidden(cutText(text, REGEX_TEXT_MAX)); }
+/** The FIRST match span `[start, end]` of a judged pattern in the folded text (the preview marks it), or null. */
+function regexSpan(src, text) {
+  const re = compiledRegex(src);
+  if (!re) return null;
+  const m = re.exec(regexText(text));
+  return m ? [m.index, m.index + m[0].length] : null;
+}
+
 /**
  * Validate ONE rule. Returns `{ok:true, rule}` (normalized) or `{ok:false,
  * code, error, kind?}` naming the field — refused at the editor and at the
@@ -201,6 +347,12 @@ function validateRule(rule) {
       const v = str(r.value).trim().slice(0, 500).trim();
       if (!v) return refuse('value-required', `${r.kind}: value is required`, { kind: r.kind });
       out.value = v; break;
+    }
+    case 'regex': {
+      const v = str(r.value).slice(0, REGEX_MAX + 1);
+      const rv = regexVerdict(v);
+      if (!rv.ok) return rv;
+      out.value = rv.source; break;
     }
     case 'sender-in-group': {
       const members = (Array.isArray(r.members) ? r.members : str(r.value).split(',')).map((x) => str(x).trim()).filter(Boolean);
@@ -256,6 +408,14 @@ function filterProblemText(v, { t = (s, p) => (p ? String(s).replace(/\{(\w+)\}/
     case 'no-rules': return t('add at least one rule');
     case 'kind-value': return t('the rule "{kind}" is one of: direct message, group, mail thread', { kind });
     case 'too-many-rules': return t('a filter may hold at most {n} rules', { n: v.max || MAX_RULES });
+    case 'regex-too-long': return t('the regex is longer than {n} characters', { n: v.max || REGEX_MAX });
+    case 'regex-invalid': return t('the regex does not compile: {why}', { why: String(v.error || '').replace(/^regex: (does not compile — |refused — )?/, '') });
+    case 'regex-backreference': return t('the regex is refused: a backreference ({piece}) is not allowed', { piece: v.piece || '' });
+    case 'regex-lookaround': return t('the regex is refused: a lookahead or lookbehind ({piece}) is not allowed', { piece: v.piece || '' });
+    case 'regex-nested-quantifier': return t('the regex is refused: a repeated piece inside a repeated group ({piece}) can take very long', { piece: v.piece || '' });
+    case 'regex-adjacent-quantifier': return t('the regex is refused: two repeated pieces side by side can match the same text ({piece}) and take very long', { piece: v.piece || '' });
+    case 'regex-leading-repeat': return t('the regex is refused: the repeated piece {piece} can re-read where a match starts and take very long — begin with a fixed word or ^', { piece: v.piece || '' });
+    case 'regex-empty-match': return t('the regex is refused: it matches an empty message, so it would match everything');
     default: return String(v.error || v.code || '');
   }
 }
@@ -265,6 +425,7 @@ function ruleWhy(rule) {
   switch (rule.kind) {
     case 'mention': return `mention @${rule.value}`;
     case 'keyword': return `keyword "${rule.value}"`;
+    case 'regex': return `regex /${rule.value}/`;
     case 'sender-in-group': return `sender in ${rule.label || 'group'}`;
     case 'from-address': return `from ${rule.value}`;
     case 'subject': return `subject "${rule.value}"`;
@@ -333,6 +494,8 @@ function ruleHits(rule, record, ctx) {
       return text.includes('@' + want);
     }
     case 'keyword': return text.includes(lower(rule.value));
+    // judged at save; matched on the FOLDED text cut to REGEX_TEXT_MAX (flags `iu` — no lower-casing needed)
+    case 'regex': { const re = compiledRegex(str(rule.value)); return !!re && re.test(regexText(rec.text)); }
     case 'not-contains': return !text.includes(lower(rule.value));
     case 'sender-in-group': {
       const id = lower(author.id), name = lower(author.name);
@@ -610,7 +773,8 @@ function validateWatcher(input) {
   if (a.delivery !== undefined && a.delivery !== null && !DELIVERY_MODES.includes(a.delivery)) return refuse('bad-watcher', `delivery must be ${DELIVERY_MODES.join('|')}`, { why: 'delivery' });
   if (a.origin !== undefined && a.origin !== null && !WATCH_ORIGINS.includes(a.origin)) return refuse('bad-watcher', `origin must be ${WATCH_ORIGINS.join('|')}`, { why: 'origin' });
   return { ok: true, watcher: { principal: pv.principal, notify, mode, filterId, digestMinutes, dailyWakeCap, receiptWake: a.receiptWake === true,
-    ...(DELIVERY_MODES.includes(a.delivery) ? { delivery: a.delivery } : {}), ...(a.origin === 'agent' ? { origin: 'agent' } : {}) } };
+    ...(DELIVERY_MODES.includes(a.delivery) ? { delivery: a.delivery } : {}), ...(a.origin === 'agent' ? { origin: 'agent' } : {}),
+    ...(pv.principal.kind === 'agent' && str(a.via).trim() ? { via: str(a.via).trim().slice(0, 256) } : {}) } };
 }
 /** THE ONE READER of a watcher row's delivery (the engine's hit dispatch, the dialog's row, the agent's CLI, the
  *  proposal's words): `next-turn` | `wake`; a row that never said (written before the choice existed) = `wake`. */
@@ -638,12 +802,32 @@ function eligibleKeys({ access = [], inherited = [] } = {}) {
   for (const r of inherited instanceof Set ? [...inherited] : Array.isArray(inherited) ? inherited : []) add(r);
   return out;
 }
-/** Does that set cover this principal (itself, or All agents)? An All-agents WATCHER needs an All-agents access. */
-function eligibleFor(keys, principal) {
+/** Does that set cover this principal (itself, or All agents)? An All-agents WATCHER needs an All-agents access.
+ *  lane notify-rules-r2 (owner inc-muxt96t5-pk42: "lark 授权给了'工作'组，为啥通知里不能选工作组里的成员"): a SESSION
+ *  watcher saved as a member of an access-holding group carries `via` (that group's id) — the group's access row
+ *  covers it at READ (PURE: no roster here); WHETHER IT IS STILL A MEMBER is judged at save (`validateWatchers`'
+ *  `members`) and on every wake (`memberStill`, the live roster) — a session that left the group is never woken. */
+function eligibleFor(keys, principal, row = null) {
   const k = principalKey(principal);
   if (!k || !keys) return false;
   if (keys.has(k)) return true;
+  if (principal.kind === 'agent' && row && row.via && keys.has(`group:${str(row.via)}`)) return true;
   return principal.kind !== 'everyone' && keys.has(`everyone:${EVERYONE_ID}`);
+}
+/** THE MEMBERSHIP CROSSWALK's one question: the access-holding groups (`keys`' `group:` rows) session `cid` is a
+ *  member of NOW — `members` = the live roster `[{cid, groups:[gid…]}]` (server: liveSessions, the same crosswalk the
+ *  group round-robin wakes over; the dialog: the sidebar roster). → the first such group id, or null. */
+function memberVia(keys, cid, members = []) {
+  const s = (Array.isArray(members) ? members : []).find((x) => x && str(x.cid) === str(cid));
+  const gs = s && Array.isArray(s.groups) ? s.groups.map(str) : [];
+  return gs.find((g) => keys && keys.has(`group:${g}`)) || null;
+}
+/** Is a `via` watcher's session still a member of its group (the wake-time re-judge)? A row without `via` is not
+ *  this rule's to judge (true). */
+function memberStill(row, members = []) {
+  if (!row || !row.via || !row.principal || row.principal.kind !== 'agent') return true;
+  const s = (Array.isArray(members) ? members : []).find((x) => x && str(x.cid) === str(row.principal.id));
+  return !!s && Array.isArray(s.groups) && s.groups.map(str).includes(str(row.via));
 }
 /**
  * A grain's whole WATCHERS list against ITS OWN access list: one row per
@@ -651,7 +835,7 @@ function eligibleFor(keys, principal) {
  * a watcher without access is refused BY NAME (`watcher-needs-access`):
  * notification is the second operation, access is its prerequisite.
  */
-function validateWatchers(list, access = [], { inherited = [] } = {}) {
+function validateWatchers(list, access = [], { inherited = [], members = [] } = {}) {
   if (!Array.isArray(list)) return refuse('bad-watcher', 'watchers must be a list', { why: 'not-an-object' });
   if (list.length > MAX_WATCHER_ROWS) return refuse('too-many-rows', `a grain holds at most ${MAX_WATCHER_ROWS} watchers`, { max: MAX_WATCHER_ROWS });
   // lane channel-agent-watch W3: access at THIS grain or ABOVE it (the account, a matching rule, a visible grant here)
@@ -663,7 +847,10 @@ function validateWatchers(list, access = [], { inherited = [] } = {}) {
     if (!v.ok) return { ...v, index: i };
     const k = principalKey(v.watcher.principal);
     if (seen.has(k)) return refuse('duplicate-principal', `${principalWords(v.watcher.principal)} is listed twice — one notification per agent or group`, { index: i, principal: v.watcher.principal });
-    if (!eligibleFor(keys, v.watcher.principal)) return refuse('watcher-needs-access', `${principalWords(v.watcher.principal)} has no access here — grant access first (a notification needs access here or on the whole account)`, { index: i, principal: v.watcher.principal });
+    // a session in an access-holding group is eligible AS ITSELF (its own row, cap and ledger), `via` that group
+    const via = !keys.has(k) && v.watcher.principal.kind === 'agent' ? memberVia(keys, v.watcher.principal.id, members) : null;
+    if (via) v.watcher.via = via; else delete v.watcher.via;   // `via` is the server's finding, never the writer's claim
+    if (!eligibleFor(keys, v.watcher.principal, v.watcher)) return refuse('watcher-needs-access', `${principalWords(v.watcher.principal)} has no access here — grant access first (a notification needs access here or on the whole account)`, { index: i, principal: v.watcher.principal });
     seen.add(k);
     rows.push(v.watcher);
   }
@@ -721,7 +908,7 @@ function grainOf(rec, legacy = undefined, { inherited = [] } = {}) {
   // lane channel-agent-watch W3: "access" = this grain's rows OR the ones above it (`inherited`, the caller's: the
   // account, a matching rule, a visible grant) — the same rule `validateWatchers` writes by
   const keys = eligibleKeys({ access, inherited });
-  return { access, watchers: watchers.filter((w) => eligibleFor(keys, w.principal)) };
+  return { access, watchers: watchers.filter((w) => eligibleFor(keys, w.principal, w)) };
 }
 
 /**
@@ -1224,5 +1411,6 @@ module.exports = {
   MAX_ACCESS_ROWS, MAX_WATCHER_ROWS, MAX_AGENT_WATCHES, MAX_OPEN_WATCH_REQUESTS, principalKey, validateAccessRow, validateAccess, validateWatcher, validateWatchers,
   // lane channel-agent-watch: the delivery choice, who wrote a row, and THE eligibility rule (access over the grain and its ancestors)
   DELIVERY_MODES, WATCH_ORIGINS, deliveryModeOf, watchOriginOf, eligibleKeys, eligibleFor,
+  memberVia, memberStill, REGEX_MAX, REGEX_FLAGS, REGEX_TEXT_MAX, REGEX_REFUSALS, regexVerdict, regexText, regexSpan,
   splitAssignment, grainOf, grainStamp, grainBaseVerdict, liftGrainRecord, LEGACY_ASSIGNMENT_FIELDS, effectiveGrants, effectiveAccess, effectiveWatchers, rowNames, expectedWakesTotal, othersLine,
 };

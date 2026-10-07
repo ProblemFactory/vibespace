@@ -969,7 +969,7 @@ console.log('⑥ (P2) assign, filter, wake');
   await eng.setAssignment(A, CID, null);                 // (c)'s ingest must wake nobody
 
   // (c) filter validation + the server-side estimate over the stored log
-  ok((await eng.setFilter(A, CID, { rules: [{ kind: 'regex', value: 'x' }] })).code === 'bad-filter', 'a filter with an unknown rule kind is refused by name');
+  ok((await eng.setFilter(A, CID, { rules: [{ kind: 'glob', value: 'x' }] })).code === 'bad-filter', 'a filter with an unknown rule kind is refused by name');
   await ingest('GPU down', 'lunch?', 'GPU back', 'ok');
   const est = eng.estimateFilter(A, CID, { rules: [{ kind: 'keyword', value: 'gpu' }] });
   ok(est.ok && est.estimate.total === 4 && est.estimate.matched === 2 && !est.estimate.sampled, `the estimate runs over the stored log (${est.estimate.matched} of ${est.estimate.total})`);
@@ -1319,7 +1319,7 @@ console.log('⑪ R4 access and notification (two operations), compose, search');
   // CONTROL: a copy that keeps the watcher when its access goes
   {
     const esrc = engineSource(REPO);
-    const LINE = '      watchers = cur.watchers.filter((w) => F.eligibleFor(keep, w.principal));';   // lane channel-agent-watch: the one eligibility rule (access here or above)
+    const LINE = '      watchers = cur.watchers.filter((w) => F.eligibleFor(keep, w.principal, w));';   // lane channel-agent-watch: the one eligibility rule (access here or above)
     const keep = esrc.replace(LINE, '      watchers = cur.watchers;');
     ok(keep !== esrc && esrc.split(LINE).length === 2, 'CONTROL setup: a copy whose access removal keeps the watcher is reconstructed from the shipped bytes');
     const cp = patchPath('src/server', 'channels-engine'); writeCopy(cp, keep);
@@ -6622,6 +6622,9 @@ console.log('\n㉕ lane channel-self-unread: the account\'s OWN message is read 
     await eng.pass('self-poll', { force: true });
     out.group = { unread: en().unread, readAt: en().readAt, ownerAt: base + 2 * 60e3 };
     out.total = (eng.digest({ scope: 'totals' }) || {}).unreadTotal;
+    // int229 (× notify-rules-r2): the Notify… preview judges as the watch does — the owner's own 'inc-…' line is no match
+    const pv = await eng.previewRule('self-poll', { kind: 'account' }, { rule: { kind: 'keyword', value: 'inc-muxekkry' } });
+    out.preview = { ok: pv.ok, who: (pv.hits || []).map((h) => h.author), matched: pv.matched };
     // the owner answers from the vendor's own app (Lark p2p) / the Outbox's SENT reply comes back on the next listing
     W.say('s2', 4, OWNER, 'fixed in inc-muxekkry-clfb', true);
     await eng.pass('self-poll', { force: true });
@@ -6642,6 +6645,7 @@ console.log('\n㉕ lane channel-self-unread: the account\'s OWN message is read 
   ok(r.replied.unread === 0 && r.replied.readAt === r.replied.ownerAt, 'the owner\'s reply from the vendor\'s own app / the Outbox\'s sent message: 0 unread, readAt = his instant', JSON.stringify(r.replied));
   ok(r.unknown === 1, 'a record whose self-ness is UNKNOWN (no identity resolved) is still counted — never a guess', String(r.unknown));
   ok(r.marked === 1, 'markRead\'s re-derivation from the log skips the owner\'s own record (s2) and counts the rest (u1)', String(r.marked));
+  ok(r.preview.ok && r.preview.matched === 1 && JSON.stringify(r.preview.who) === '["userW"]', 'int229: the Notify… preview of a keyword skips the owner\'s own message as the watch does — userW\'s line only (1 match)', JSON.stringify(r.preview));
   // CONTROL (site 2, the ingest): the old arithmetic counts the owner's messages and never moves readAt
   const src = engineSource(REPO);
   const cut = src.replace('      if (freshRecs.length) countFresh(rec, convId, en, freshRecs);',
@@ -6649,6 +6653,11 @@ console.log('\n㉕ lane channel-self-unread: the account\'s OWN message is read 
   const cp = patchPath('src/server', 'channels-engine'); writeCopy(cp, cut);
   const c = await driveSelf(require(cp), 'self-unread-ctl');
   ok(cut !== src && c.group.unread === 3 && c.replied.unread === 4, 'CONTROL: site 2 without the self rule counts the owner\'s own messages as unread (3, then 4 — userW\'s symptom)', JSON.stringify(c));
+  // CONTROL (int229): a preview without the own-message skip offers the owner's own line as a match
+  const pcut = src.replace('convIds, match: (x) => !own(x) && F.matchRecord(filter, x).hit })', 'convIds, match: (x) => F.matchRecord(filter, x).hit })');
+  const pcp = patchPath('src/server', 'channels-engine-pv'); writeCopy(pcp, pcut);
+  const pc = await driveSelf(require(pcp), 'self-unread-pv-ctl');
+  ok(pcut !== src && pc.preview.matched === 2 && pc.preview.who.includes('Owner'), 'CONTROL (int229): a preview without the skip lists the owner\'s own line (2 matches)', JSON.stringify(pc.preview));
 }
 
 console.log('\ntree: the patched copies never touch the tree');

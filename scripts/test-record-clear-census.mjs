@@ -154,6 +154,8 @@ const CHANNELS_GATES = {
   readFor: 'convFor(',
   estimateScope: 'adapterRecords().adapters.find',
   estimateFilter: 'known(',
+  previewRule: 'adapterRecords().adapters.find',        // lane notify-rules-r2 (int229): the Notify… dialog's OWNER-ONLY preview — the account's record
+                                                        // first, then only that account's own index rows' logs (store.search, ≤ 10 kept, ≤ 16 MiB read)
   healSelfAt: 'store.index',
   // the .197 integration: the other lanes' readers (channel-threads' reactions / thread index, lane-pairing r6's reply
   // anchor), each with the gate that stands before its read

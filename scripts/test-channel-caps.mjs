@@ -526,5 +526,30 @@ console.log("lane channel-feed-authority: the feed's AUTHORITY (authoritative �
   ok(cad(auth, rec({ lastOkAt: NOW - 3600e3 }), hot).seconds === 30 && cad(auth, rec({}), cold).seconds === 900 && cad(auth, rec({ ...fresh, backoffUntil: NOW + 60e3, backoffWhy: 'rate-limited' }), hot).seconds === 30, 'NOT carrying (behind / never ran / backing off) ⇒ the tiers (positive evidence only)');
 }
 
+// ── lane lark-upload-preflight (userW inc-muxsy69b-mjg1): THE send-attachment OFFER — the declared row AND the held scopes ──
+console.log('lane lark-upload-preflight: the send-attachment offer table');
+{
+  const LK = require(path.join(REPO, 'src/channels/lark.js'));
+  const NOW = Date.now();
+  const row = { maxCount: 10, maxTotalBytes: 25e6, withText: true };
+  const cc = (files, extra = {}) => ({ read: 'yes', sendAs: ['user'], at: NOW, ...(files ? { files } : {}), ...extra });
+  const SEND = ['im:message', 'im:message.send_as_user'];
+  const T = [
+    // [what, caps, convCaps, offered, why]
+    ['no sendAttachments row (an adapter that takes no files)', {}, cc(null), false, 'attachments-not-offered'],
+    ['the row + no files row (mail: multipart, nothing narrows)', { sendAttachments: row }, cc(null), true, null],
+    ['the row + a files row that can send (Lark WITH im:resource:upload)', { sendAttachments: row }, cc(LK.capsOfScopes([...SEND, 'im:resource:upload']).files), true, null],
+    ['either upload scope is enough (im:resource alone)', { sendAttachments: row }, cc(LK.capsOfScopes([...SEND, 'im:resource']).files), true, null],
+    ['the MEASURED token: the send pair, no upload scope ⇒ attachments-not-sendable', { sendAttachments: row }, cc(LK.capsOfScopes(SEND).files), false, 'attachments-not-sendable'],
+    ['no send pair at all ⇒ the send reason (the send gate speaks first)', { sendAttachments: row }, cc(LK.capsOfScopes(['im:resource']).files), false, 'send-scope-not-granted'],
+    ['an unresolved conversation is never "allowed"', { sendAttachments: row }, null, false, 'unknown'],
+  ];
+  for (const [n, c, x, want, why] of T) { const o = C.offers(c, x, 'send-attachment', NOW); ok(o.offered === want && o.why === why, `send-attachment: ${n}`, JSON.stringify(o)); }
+  const m = C.offers({ sendAttachments: row }, cc(LK.capsOfScopes(SEND).files), 'send-attachment', NOW);
+  ok(JSON.stringify(m.requiredScopes) === JSON.stringify(['im:resource:upload', 'im:resource']), 'the refusal names the scopes (requiredScopes = the 99991679 pair)', JSON.stringify(m));
+  ok(C.OFFER_WHAT.includes('send-attachment') && JSON.stringify(C.convCapsState(cc({ send: false, why: 'attachments-not-sendable', requiredScopes: ['im:resource'] }), NOW).files) === JSON.stringify({ send: false, why: 'attachments-not-sendable', requiredScopes: ['im:resource'] }), 'OFFER_WHAT lists it; the cached state carries the files row');
+  ok(C.grantsText([{ what: 'files', missing: ['im:resource:upload', 'im:resource'], refused: [], wanted: true }]).text === 'One Re-authorize adds: sending files', 'the account row: "One Re-authorize adds: sending files"');
+}
+
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

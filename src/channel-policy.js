@@ -865,6 +865,9 @@ function shownFields(p) {
     // design 005 §2.B (B-fd1f): WHAT LEAVES WITH IT — each stored attachment's name, size and sha256, so a card approved
     // for other bytes is `changed-since-shown`; appended only when there are any (every other proposal keeps its digest)
     ...(storedAttachments(q).length ? [storedAttachments(q).map((a) => [s(a.name), Number(a.bytes) || 0, s(a.sha256)])] : []),
+    // lane lark-upload-preflight: a card that WARNED "this account cannot send files" (its Approve = "Send without the file")
+    // is not the card that showed them attached — the warning is part of what was shown (appended only when there is one)
+    ...(q.filesBlocked && typeof q.filesBlocked === 'object' ? [['files-blocked', s(q.filesBlocked.why)]] : []),
   ];
 }
 /** FNV-1a 32 over the UTF-16 units, seeded (the plugin-manifest precedent). */

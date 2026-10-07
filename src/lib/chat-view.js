@@ -29,6 +29,7 @@ import { browserFactWords } from '../browser-fact.js'; // lane S2: THE words of 
 import { createCardTraceLoader } from './browser-trace-view.js'; // agent browser P5 (§4.5 / D35): the tool card's action trace
 import { createChannelTouchView, openTouchRow } from './channel-touch-view.js'; // §26 (B-099e): the conversations an agent read / drafted, as rows on the tool card + the status-bar chip
 import { serviceHref, serviceOpenSpec } from './artifact-card.js'; // lane artifacts-services(-url): a service row's link (the server's ladder: published forward, else this instance's proxy)
+import { stallVerdict, waitingOnUser } from '../turn-state.js'; // PURE (lane parked-ask-stall): the delivery-stall verdict + "is the turn waiting on the user"
 import { hasPendingHelperAsk, askState, isWaiting } from '../helper-ask.js'; // PURE (lane S1): a helper's permission ask — the fold rule + the waiting chip's words
 
 // Agent-memory paths: the claude init frame's own `memory_paths` when the
@@ -1071,6 +1072,13 @@ class ChatView {
     // Telemetry fingerprint `chat-stall-reattach` records each firing with
     // the silence length — the instrument that convicts the real seam on the
     // next occurrence. Fires at most once per 5min per view.
+    // PARKED ≠ STALLED, AND BOUNDED (lane parked-ask-stall, 2.369.229, a fleet
+    // pod): a turn parked on a permission ask for 22 h was re-attached every
+    // 5 min for 8 hours — the watchdog read `_typingSince` alone. The decision
+    // is now the PURE stallVerdict (src/turn-state.js): a turn WAITING ON THE
+    // USER (requires_action, or an open ask) holds — zero inbound is expected;
+    // after 3 forced re-attaches with no record it stops and says so ONCE (a
+    // dim note); a record arriving re-arms it.
     // SLEEP COUNTDOWN (2.369.58): a live `clock.sleep` card renders its own
     // deadline into `data-sleep-until`; ONE interval per view rewrites the text
     // so a 20-minute wait visibly counts down instead of sitting behind a
@@ -1086,18 +1094,7 @@ class ChatView {
       } catch { }
     }, 1000);
 
-    this._stallWatch = setInterval(() => {
-      try {
-        if (this._readOnly || !this._typingSince) return;
-        const silence = Date.now() - Math.max(this._lastInboundAt || 0, this._typingSince);
-        if (silence < 120000) return;
-        if (Date.now() - (this._stallReattachAt || 0) < 300000) return;
-        this._stallReattachAt = Date.now();
-        try { window.__vsEvent?.('chat-stall-reattach', { detail: `${Math.round(silence / 1000)}s sid=${String(sessionId).slice(0, 24)}` }); } catch { }
-        console.warn(`[chat] delivery stall: streaming ${Math.round(silence / 1000)}s with zero inbound — forcing re-attach`);
-        this._reattach();
-      } catch { }
-    }, 15000);
+    this._stallWatch = setInterval(() => this._stallTick(sessionId), 15000);
 
     // Listen for normalized message ops from server
     this._handler = (msg) => {
@@ -1105,6 +1102,9 @@ class ChatView {
       // for THIS session is proof of delivery liveness.
       if (msg.sessionId === sessionId) this._lastInboundAt = Date.now();
       if (msg.type === 'msg' && msg.sessionId === sessionId) {
+        // …and a RECORD re-arms the bounded watchdog (lane parked-ask-stall) — the
+        // re-attach's own `attached` answer is not one
+        this._lastRecordAt = Date.now(); this._stallForced = 0; this._stallGaveUp = false;
         // Any live op for this session proves the socket that carried the last
         // send was alive server-side — finalize the deferred draft clear
         // (chat-input dead-ws-window loss defense).
@@ -1192,6 +1192,7 @@ class ChatView {
         // publishes one; a session that never does simply never sends this and
         // the status bar's third state stays unclaimed.
         this._statusBar?.setTurnState?.(msg.state || null);
+        this._noteTurnState(msg.state || null);
       } else if (msg.type === 'tools-in-progress' && msg.sessionId === sessionId) {
         this._onToolsInProgress(msg.ids || []);
       } else if (msg.type === 'compact-progress' && msg.sessionId === sessionId) {
@@ -1910,6 +1911,7 @@ class ChatView {
     // Carries-the-key guards, and `null` is a real value here: "this session
     // has never reported one" — the chip stays off rather than claiming idle.
     if ('turnState' in meta) this._statusBar?.setTurnState?.(meta.turnState || null);
+    if ('turnState' in meta) this._noteTurnState(meta.turnState || null);
     if ('inProgressTools' in meta) this._onToolsInProgress(meta.inProgressTools || []);
     if ('backgroundTasks' in meta && Array.isArray(meta.backgroundTasks)) this._statusBar?.setBackgroundTasks?.(meta.backgroundTasks); // the harness's level set (design-unknown-records); absent/null = never published, the card-derived set stands
     if ('pendingAsks' in meta) this._setPendingAsks(Array.isArray(meta.pendingAsks) ? meta.pendingAsks : []); // lane S1: who waits for the user, and where
@@ -5066,6 +5068,8 @@ class ChatView {
   // _showTyping / _hideTyping delegate to ChatInput (normal) or readOnly _streamStatus
   _showTyping(label = t('thinking...'), kind = null) {
     if (!this._typingSince) this._typingSince = Date.now(); // watchdog arm
+    this._typingReq = [label, kind];
+    label = this._typingWord(label);
     if (this._chatInput) { this._chatInput.showTyping(label, kind); return; }
     // readOnly fallback — same shape as ChatInput's line (label in its own
     // `.chat-stream-label`), so a ticking age is a textContent write and not a
@@ -5083,6 +5087,7 @@ class ChatView {
 
   _hideTyping() {
     this._typingSince = null; // watchdog disarm
+    this._typingReq = null;
     this._roTypingLabel = null;
     // The turn ended: the traffic can no longer grow, so every live age
     // FREEZES to its absolute span (a ticking "last 3s ago" on a finished turn
@@ -5234,6 +5239,7 @@ class ChatView {
   _retireLiveClaims() {
     const wasCompacting = this._retireCompactionStage();
     this._statusBar?.setTurnState?.(null);
+    this._noteTurnState(null);
     this._onToolsInProgress([]);
     this._setPendingAsks([]); // lane S1: "a helper waits for you" dies with the process that asked
     return wasCompacting;
@@ -5244,6 +5250,55 @@ class ChatView {
   _setPendingAsks(asks) {
     this._pendingAsks = Array.isArray(asks) ? asks : [];
     this._statusBar?.setPendingAsks?.(this._pendingAsks);
+    this._refreshTypingWord();
+  }
+
+  /** ONE TICK of the delivery-stall watchdog (every 15 s; the decision is the PURE stallVerdict). */
+  _stallTick(sessionId) {
+    try {
+      if (this._readOnly || !this._typingSince) return;
+      const silence = Date.now() - Math.max(this._lastInboundAt || 0, this._typingSince);
+      const verdict = stallVerdict({
+        streaming: true, turnState: this._turnState || null, pendingAsks: this._pendingAsks || [],
+        inboundAgoMs: silence, sinceReattachMs: Date.now() - (this._stallReattachAt || 0),
+        forcedCount: this._stallForced || 0, gaveUp: !!this._stallGaveUp,
+      });
+      if (verdict === 'give-up-once') {
+        this._stallGaveUp = true;
+        const quiet = Math.round((Date.now() - Math.max(this._lastRecordAt || 0, this._typingSince)) / 60000);
+        const note = this._renderers?.appendSystem?.(t('no output for {n} min — the agent may be waiting on something not shown; Stop or check the session', { n: quiet }));
+        note?.classList?.add('chat-stall-note');
+        console.warn(`[chat] delivery stall: ${this._stallForced} forced re-attaches brought nothing \u2014 the watchdog stops until a record arrives`);
+        return;
+      }
+      if (verdict !== 'reattach') return;
+      this._stallReattachAt = Date.now();
+      this._stallForced = (this._stallForced || 0) + 1;
+      try { window.__vsEvent?.('chat-stall-reattach', { detail: `${Math.round(silence / 1000)}s sid=${String(sessionId).slice(0, 24)}` }); } catch { }
+      console.warn(`[chat] delivery stall: streaming ${Math.round(silence / 1000)}s with zero inbound — forcing re-attach`);
+      this._reattach();
+    } catch { }
+  }
+
+  /** The harness's turn state as THIS view holds it (the watchdog and the typing line read it; the
+   *  status bar keeps its own copy for the chip) — lane parked-ask-stall. */
+  _noteTurnState(v) {
+    this._turnState = (v === 'idle' || v === 'running' || v === 'requires_action') ? v : null;
+    this._refreshTypingWord();
+  }
+
+  /** THE TYPING LINE OF A PARKED TURN (lane parked-ask-stall): a turn waiting on the user is not
+   *  "thinking" — while it waits, the line reads "waiting for you" (the chip's words). DERIVED at
+   *  render time, never stored as the label: the moment the state moves on, the line shows the
+   *  label it was given again (the round-8 rule — no line that outlives its truth). */
+  _typingWord(label) {
+    return waitingOnUser({ turnState: this._turnState || null, pendingAsks: this._pendingAsks || [] }) ? t('waiting for you') : label;
+  }
+
+  _refreshTypingWord() {
+    if (!this._typingSince || !this._typingReq) return;
+    const [label, kind] = this._typingReq;
+    this._showTyping(label, kind);
   }
 
   /** Drop the asks `msg` no longer holds open (its permission resolved, a helper ask settled or its

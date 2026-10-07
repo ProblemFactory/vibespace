@@ -44,6 +44,7 @@ import { principalPicker, rosterFromApp } from './principal-picker.js';
 const RULE_LABELS = () => ({
   'mention': t('mentions'),
   'keyword': t('contains keyword'),
+  'regex': t('matches the regular expression'),
   'sender-in-group': t('sender is one of'),
   'from-address': t('from (name or address)'),
   'subject': t('subject contains'),
@@ -167,6 +168,7 @@ async function readGrain(target) {
       latencyNote: wakeLatencyText(conv.wakeLatency), stats: conv.stats || null,
       inherited: (conv.watchers || []).filter((w) => w.source && w.source !== 'conversation'),
       accessUrl: `${base}/access`, watchersUrl: `${base}/watchers`,
+      preview: (rule) => fetchJson(`${base}/rules/preview`, { method: 'POST', headers: JSON_HDR, body: JSON.stringify({ rule }) }),
       estimate: async (filter) => {
         const r = await fetchJson(`${base}/estimate`, { method: 'POST', headers: JSON_HDR, body: JSON.stringify({ filter }) });
         if (!r || r.error) return { error: (r && r.error) || t('Estimate failed') };
@@ -193,9 +195,11 @@ async function readGrain(target) {
     if (e.truncated) hints.push(t('only {d} days of history are stored — the rate is over that span', { d: e.windowDays }));
     return { estimate: e, expected: r.expectedWakesPerDay, stat: t('about {n} wakes a day (~{m} matching messages a day)', { n: Math.round(r.expectedWakesPerDay * 10) / 10, m: e.matchedPerDay }), hint: hints.join(' · ') };
   };
+  // lane notify-rules-r2: the rule preview over the grain's conversations (the local logs, zero vendor calls)
+  const scopePreview = (kind, pattern) => (rule) => fetchJson(`/api/channels/adapters/${aid}/rules/preview`, { method: 'POST', headers: JSON_HDR, body: JSON.stringify({ rule, scope: { kind }, ...(kind === 'pattern' ? { pattern: pattern() } : {}) }) });
   if (target.kind === 'account') {
     const g = a.accountGrain || { access: [], watchers: [] };
-    return { kind: 'account', target, adapter: a, name: a.label || a.id, selfName: (a.auth && a.auth.user) || '', access: g.access || [], watchers: g.watchers || [], caps, accessUrl: `/api/channels/adapters/${aid}/access`, watchersUrl: `/api/channels/adapters/${aid}/watchers`, estimate: scopeEstimate('account') };
+    return { kind: 'account', target, adapter: a, name: a.label || a.id, selfName: (a.auth && a.auth.user) || '', access: g.access || [], watchers: g.watchers || [], caps, accessUrl: `/api/channels/adapters/${aid}/access`, watchersUrl: `/api/channels/adapters/${aid}/watchers`, preview: scopePreview('account', null), estimate: scopeEstimate('account') };
   }
   const pa = target.id ? (a.patterns || []).find((p) => p.id === target.id) : null;
   if (target.id && !pa) { showToast(t('That rule no longer exists'), { type: 'error' }); return null; }
@@ -206,6 +210,7 @@ async function readGrain(target) {
     accessUrl: pa ? `/api/channels/adapters/${aid}/patterns/${encodeURIComponent(pa.id)}/access` : `/api/channels/adapters/${aid}/patterns`,
     watchersUrl: pa ? `/api/channels/adapters/${aid}/patterns/${encodeURIComponent(pa.id)}/watchers` : null,
     estimate: scopeEstimate('pattern', () => pat),
+    preview: scopePreview('pattern', () => pat),
   };
 }
 /** `onChanged` (mirror-193): a whole-list write refused `grain-changed` — the lists moved since the dialog read
@@ -529,6 +534,7 @@ function watcherRow(host, { w = null, f = null, st, principals, onAnyChange, onR
     switch (rule.kind) {
       case 'mention': bind(textInput(rule.value, t('name or id')), 'value'); break;
       case 'keyword': case 'not-contains': case 'subject': case 'from-address': bind(textInput(rule.value, t('text')), 'value'); break;
+      case 'regex': bind(textInput(rule.value, t('regular expression, e.g. invoice\\s*#?\\d+')), 'value'); break;
       case 'sender-in-group': bind(textInput(Array.isArray(rule.members) ? rule.members.join(', ') : (rule.value || ''), t('ids or names, comma-separated')), 'members', (v) => v.split(',').map((x) => x.trim()).filter(Boolean)); break;
       case 'has-attachment': case 'reply-to-mine': case 'in-thread-with-me': break;
       case 'time-window': bind(textInput(rule.from || '09:00', 'HH:MM'), 'from'); bind(textInput(rule.to || '18:00', 'HH:MM'), 'to'); break;
@@ -540,14 +546,16 @@ function watcherRow(host, { w = null, f = null, st, principals, onAnyChange, onR
     rmR.appendChild(icon('close', 12));
     rmR.onclick = () => { rules.splice(idx, 1); drawRules(); changed(); };
     row.appendChild(rmR);
+    // lane notify-rules-r2: a keyword / regex rule previews the newest ≤ 10 stored messages it matches, as it is typed
+    if ((rule.kind === 'keyword' || rule.kind === 'regex') && typeof st.preview === 'function') row._preview = rulePreview(st, rule, row);
     return row;
   }
   function drawRules() {
     rulesList.textContent = '';
     if (!rules.length) rulesList.appendChild(noteEl(t('No rules yet — add one below. With no rule nothing matches (a wake is money, so the filter fails closed).')));
-    rules.forEach((r, i) => rulesList.appendChild(ruleRow(r, i)));
+    rules.forEach((r, i) => { const row = ruleRow(r, i); rulesList.appendChild(row); if (row._preview) rulesList.appendChild(row._preview.el); });
   }
-  addRule.onclick = () => { rules.push(freshRule('keyword')); drawRules(); changed(); const last = rulesList.querySelector('.chan-af-rule:last-child input'); if (last) last.focus(); };
+  addRule.onclick = () => { rules.push(freshRule('keyword')); drawRules(); changed(); const last = [...rulesList.querySelectorAll('.chan-af-rule')].pop(); const inp = last && last.querySelector('input'); if (inp) inp.focus(); };
   drawRules();
   const whatNow = () => (wRule.inp.checked ? 'rule' : wMen.inp.checked ? 'mention' : 'all');
   // ── ② b WHEN (lane channel-agent-watch W5, the owner 2026-10-01: "notify配置的时候也不能调整是下一回合还是立刻唤醒") ──
@@ -684,12 +692,67 @@ function watcherRow(host, { w = null, f = null, st, principals, onAnyChange, onR
  * ceiling (every watcher has its own cap). Save writes the grain's whole
  * watchers list — nobody listed = nobody is woken.
  */
+/**
+ * THE RULE PREVIEW under one keyword / regex rule row (lane notify-rules-r2): judged here first (a refused regex says
+ * why under the box and asks nothing), then — 300 ms after the last keystroke, one request in flight, the last one
+ * wins — the grain's preview route lists the newest ≤ 10 stored messages it matches: sender · time · the line with
+ * the match marked (textContent + a <mark>, never markup from a message) and "showing n of N".
+ */
+function rulePreview(st, rule, row) {
+  const box = el('div', 'chan-rule-preview');
+  let timer = null, seq = 0;
+  const say = (text, warn = false) => { box.textContent = ''; if (text) box.appendChild(noteEl(text, warn)); };
+  const run = async () => {
+    const my = ++seq;
+    const v = F.validateRule(rule);
+    if (!v.ok) { say(rule.value ? F.filterProblemText(v, { t, ruleLabel: (k) => RULE_LABELS()[k] || k }) : '', !!rule.value); box.dataset.state = rule.value ? 'refused' : 'empty'; return; }
+    box.dataset.state = 'loading';
+    const r = await st.preview(v.rule);
+    if (my !== seq) return;
+    if (!r || r.error) { say(r && r.why ? F.filterProblemText({ ok: false, code: r.why, error: r.error, piece: r.piece, max: r.max, kind: r.rule }, { t, ruleLabel: (k) => RULE_LABELS()[k] || k }) : routeErrorText(r || { error: t('Preview failed') }), true); box.dataset.state = 'refused'; return; }
+    box.textContent = '';
+    box.dataset.state = 'ready';
+    box.dataset.shown = String(r.shown);
+    box.dataset.matched = String(r.matched);
+    if (!r.hits.length) { say(t('No stored message matches yet.')); box.dataset.state = 'ready'; return; }
+    box.appendChild(el('div', 'chan-rule-preview-head', t('Matching messages stored here, newest first — showing {n} of {total}', { n: r.shown, total: r.matched })));
+    const list = el('ul', 'chan-rule-preview-list');
+    for (const h of r.hits) {
+      const li = el('li', 'chan-rule-preview-hit');
+      const who = [h.author, st.kind === 'conversation' ? null : h.title, h.at ? new Date(h.at).toLocaleString() : null].filter(Boolean).join(' · ');
+      li.appendChild(el('div', 'chan-rule-preview-who', who));
+      const line = el('div', 'chan-rule-preview-line');
+      const mark = document.createElement('mark');
+      mark.textContent = h.match;
+      line.append(document.createTextNode(h.before), mark, document.createTextNode(h.after));
+      li.appendChild(line);
+      list.appendChild(li);
+    }
+    box.appendChild(list);
+  };
+  const kick = () => { clearTimeout(timer); timer = setTimeout(() => { run().catch(() => say(t('Preview failed'), true)); }, 300); };
+  const inp = row.querySelector('input');
+  if (inp) inp.addEventListener('input', kick);
+  if (rule.value) kick();
+  return { el: box };
+}
+
 export async function showNotifyDialog(app, target) {
   const st = await grainState(target);
   if (!st) return;
   const { body, close } = createModalShell({ id: 'chan-notify-dialog', title: grainTitle(st, 'notify'), dialogClass: 'chan-dialog chan-assign chan-notify', escapeToClose: true });
   const principals = st.access.map((r) => ({ value: pkOf(r.principal), label: principalText(r.principal), kind: r.principal.kind, id: r.principal.id, name: r.principal.name || null, authority: r.authority }));
   for (const r of st.eligibleAbove || []) if (r && r.principal && !principals.some((x) => x.value === pkOf(r.principal))) principals.push({ value: pkOf(r.principal), label: `${principalText(r.principal)} ${r.via === 'pattern' ? t('(rule)') : r.via === 'grant' ? t('(approved request)') : t('(account)')}`, kind: r.principal.kind, id: r.principal.id, name: r.principal.name || null, authority: null });
+  // lane notify-rules-r2 (owner inc-muxt96t5-pk42): a group that holds access reaches its MEMBER SESSIONS — each is
+  // offered as itself (its own row, cap and ledger); the server re-judges the membership at save and on every wake
+  const memberOf = new Map();
+  for (const g of principals.filter((p) => p.kind === 'group')) {
+    for (const s of rosterFromApp(app, { groups: false })) {
+      if (!(s.groupIds || []).includes(g.id) || principals.some((x) => x.value === s.key)) continue;
+      principals.push({ value: s.key, label: t('Agent · {name} (in {group})', { name: s.name, group: g.name || g.id }), kind: 'agent', id: s.id, name: s.name || null, authority: g.authority, via: g.id });
+      memberOf.set(g.id, g.name || g.id);
+    }
+  }
   if (!principals.length) {
     const empty = el('div', 'chan-notify-empty');
     empty.appendChild(noteEl(t('Grant access first — use "Grant access…". Only an agent or group with access here can be notified.')));
@@ -706,6 +769,7 @@ export async function showNotifyDialog(app, target) {
   if (st.kind === 'conversation' && st.inherited.length) body.appendChild(noteEl(t('Also notified here through the account or a rule: {list}. A notification saved here replaces that agent\'s own for this conversation only.', { list: st.inherited.map((w) => principalText(w.principal)).join(', ') })));
   if (st.latencyNote) body.appendChild(noteEl(st.latencyNote));
   if (principals.some((p) => p.kind === 'group')) body.appendChild(noteEl(t('A group wakes one of its live sessions in turn (round-robin).')));
+  if (memberOf.size) body.appendChild(noteEl(t('Sessions of {groups} inherit its access — pick one to wake it as itself, under its own daily cap.', { groups: [...memberOf.values()].join(', ') })));
   if (principals.some((p) => p.kind === 'everyone')) body.appendChild(noteEl(t('All agents wakes every running conversation — a billed turn for each, each under its own daily cap.'), true));
   const lw = st.stats && st.stats.lastWake;
   if (lw) body.appendChild(noteEl(lw.ok
@@ -751,7 +815,8 @@ export async function showNotifyDialog(app, target) {
     const watchers = [];
     let clamped = false;
     for (const r of rows) { const v = r.read(); if (v.error) { showToast(v.error, { type: 'error' }); return; } watchers.push(v.watcher); clamped = clamped || v.clamped; }
-    const vw = F.validateWatchers(watchers.map((w) => ({ ...w, ...(w.filter ? { filterId: 'inline' } : {}) })), st.access, { inherited: st.eligibleAbove || [] });
+    const members = principals.filter((p) => p.via).map((p) => ({ cid: p.id, groups: [p.via] }));
+    const vw = F.validateWatchers(watchers.map((w) => ({ ...w, ...(w.filter ? { filterId: 'inline' } : {}) })), st.access, { inherited: st.eligibleAbove || [], members });
     if (!vw.ok) { showToast(routeErrorText({ code: vw.code, error: vw.error, why: vw.why, principal: vw.principal }), { type: 'error' }); return; }
     save.disabled = true;
     try {

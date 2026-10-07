@@ -25,7 +25,7 @@ function create(engineCtx) {
   const {
     agentTitle, agentId, INBOX_KEY, i18nKey, INBOX_SOURCE, RESOLVED_BY, RECONCILE_SECONDS, ESTIMATE_CAP, registry, liveSessions, log, now, userTodos,
     store, adapterRecords, adapterFor, tiers, agentShareRefusal, isWatched, laneOf, effectiveConvCaps, rawFactsOf, viewOf, agentCopy, humanNameOf,
-    vendorNameOf, notify, known, withView, NOT_A_THREAD, threadRead, vendorSearch, aroundFor, clearWakeTimer, coalesceSeconds,
+    vendorNameOf, notify, known, withView, NOT_A_THREAD, threadRead, vendorSearch, aroundFor, clearWakeTimer, coalesceSeconds, ownRecordOf,
   } = engineCtx;
   // created AFTER this family: read through the context at call time
   const sendIdentityFor = (...a) => engineCtx.sendIdentityFor(...a);
@@ -229,10 +229,15 @@ function create(engineCtx) {
    *  pace LEDGER: a cap of N is N wakes per conversation, never N shared and never uncapped). `base` = the answer as
    *  the views read it (one All row). Every view path keeps `effectiveFor`. */
   function wakeEffOf(en) {
-    const e = effectiveFor(en);
-    if (!e) return e;
+    const e0 = effectiveFor(en);
+    if (!e0) return e0;
+    // lane notify-rules-r2: a member session's watcher (`via` its group) is RE-JUDGED on every wake — a session that left
+    // the group (or is not running: membership unknown) is not woken; its row stays, inert, until it is a member again
+    const hasVia = e0.watchers.some((it) => it && it.watcher && it.watcher.via);
+    const members = hasVia ? membersNow() : null;
+    const e = hasVia ? { ...e0, watchers: e0.watchers.filter((it) => F.memberStill(it.watcher, members)) } : e0;
     const x = F.fanOutWatchers(e, fanTargets());
-    return x === e ? e : { ...x, base: e };
+    return x === e && e === e0 ? e : { ...x, base: e0 };
   }
   /** A grain's stored watcher for key `pk` — a fan-out key (`everyone:*><cid>`) answers the stored All row as that
    *  conversation's watcher while the conversation runs (null when it stopped: nobody waits for its hits). */
@@ -385,6 +390,12 @@ function create(engineCtx) {
       }
     }
     return ACL.grantsForConversation(target, { entries: en.reachEntries || [], accountGrants: acct, patternGrants: derived });
+  }
+  /** THE MEMBERSHIP CROSSWALK (lane notify-rules-r2): the live roster as `[{cid, groups}]` — the task groups each live
+   *  session belongs to (server.js liveSessions: tasks.groupsForSession, the same crosswalk the group round-robin wakes
+   *  over). A group's access reaches its member sessions as notification targets through it (F.memberVia / memberStill). */
+  function membersNow() {
+    try { return (liveSessions() || []).filter((x) => x && x.cid).map((x) => ({ cid: String(x.cid), groups: Array.isArray(x.groups) ? x.groups.map(String) : [] })); } catch { return []; }
   }
   /** The groups a live session belongs to (a drafter's, for its receipt). */
   function groupsOfSession(cid) {
@@ -1088,7 +1099,7 @@ function create(engineCtx) {
         if (w.filter && w.mode === 'filtered' && pk) return { ...w, filterId: inlineFilterIdFor(site, pk, prevW.get(pk)) };
         return w;
       });
-      const vw = F.validateWatchers(minted, access, { inherited: siteInheritedOf(site) });   // lane channel-agent-watch W3: access here OR above
+      const vw = F.validateWatchers(minted, access, { inherited: siteInheritedOf(site), members: membersNow() });   // lane channel-agent-watch W3: access here OR above; notify-rules-r2: or a member of a group that holds it
       if (!vw.ok) return { ok: false, code: vw.code, error: vw.error, ...(vw.why ? { why: vw.why } : {}), ...(vw.principal ? { principal: vw.principal } : {}), ...(vw.index !== undefined ? { index: vw.index } : {}) };
       watchers = [];
       for (let i = 0; i < vw.watchers.length; i++) {
@@ -1108,7 +1119,7 @@ function create(engineCtx) {
     } else {
       // access removed ⇒ its watcher goes too (notification needs access) — unless access ABOVE this grain still holds it (W3)
       const keep = F.eligibleKeys({ access, inherited: siteInheritedOf(site) });
-      watchers = cur.watchers.filter((w) => F.eligibleFor(keep, w.principal));
+      watchers = cur.watchers.filter((w) => F.eligibleFor(keep, w.principal, w));
     }
     const beforeA = new Set(cur.access.map((r) => pkOf(r.principal)));
     const beforeW = new Set(cur.watchers.map((w) => pkOf(w.principal)));
@@ -1488,6 +1499,51 @@ function create(engineCtx) {
   /** ESTIMATE a filter over THIS conversation's stored history (§7.1 / §10.2):
    *  runs SERVER-SIDE; the client never receives the corpus. `null` estimates
    *  "all messages". Honest about the reader's cap. */
+  /**
+   * THE RULE PREVIEW (lane notify-rules-r2, owner inc-muxt96t5-pk42: "通知里我不是让你实现 preview 匹配到的消息吗？"): ONE
+   * keyword or regex rule (judged exactly as a save judges it — a refused regex answers its refusal, nothing runs) over
+   * the LOCAL logs of the grain's conversations (store.search: newest first, ≤ PREVIEW_LIMIT kept, ≤ PREVIEW_BYTES read,
+   * ZERO vendor calls) → the newest hits as `{convId, title, author, at, before, match, after}` (the matched span cut
+   * out of the folded text — the dialog marks it with textContent only) + `matched` (N inside the bytes read).
+   */
+  const PREVIEW_LIMIT = 10, PREVIEW_BYTES = 16 * 1024 * 1024, PREVIEW_CONTEXT = 80;
+  async function previewRule(adapterId, scope, { rule = null, convId = null, pattern = null } = {}) {
+    const rec = adapterRecords().adapters.find((r) => r.id === adapterId);
+    if (!rec) return { ok: false, code: 'not-found', error: `no such account '${adapterId}'` };
+    const r0 = rule && typeof rule === 'object' ? rule : null;
+    if (!r0 || (r0.kind !== 'keyword' && r0.kind !== 'regex')) return { ok: false, code: 'bad-rule', error: 'preview takes ONE keyword or regex rule', why: 'preview-kind' };
+    const v = F.validateRule(r0);
+    if (!v.ok) return { ok: false, code: 'bad-rule', error: v.error, why: v.code, rule: v.kind || null, ...(v.piece ? { piece: v.piece } : {}), ...(v.max ? { max: v.max } : {}) };
+    const kind = scope && scope.kind;
+    let convIds;
+    if (kind === 'conversation') {
+      const en = store.index.peek(`${adapterId}/${convId}`);
+      if (!en) return { ok: false, code: 'not-found', error: `no such conversation '${convId}'` };
+      convIds = [String(convId)];
+    } else {
+      let pat = null;
+      if (kind === 'pattern') { const pv = F.validatePattern(pattern); if (!pv.ok) return { ok: false, code: 'bad-pattern', error: pv.error, why: pv.code, rule: pv.kind || null }; pat = pv.pattern; }
+      else if (kind !== 'account') return { ok: false, code: 'bad-request', error: 'scope.kind must be conversation|account|pattern' };
+      convIds = Object.values(store.index.live()).filter((en) => en && en.adapterId === adapterId && !en.unlistedAt && (!pat || F.matchConversation(pat, convFacts(en)).hit)).map((en) => String(en.id));
+    }
+    const filter = { match: 'any', rules: [v.rule] };
+    const own = ownRecordOf(rec);   // int229 (× channel-self-unread): the owner's own message never wakes a watcher — never a preview match
+    // the keyword's own bytes are the raw pre-check (a JSON line carries them as written unless they need escaping)
+    const q = v.rule.kind === 'keyword' && !/["\\\u0000-\u001f]/.test(v.rule.value) ? v.rule.value : '';
+    const found = convIds.length ? await store.search(adapterId, q, { limit: PREVIEW_LIMIT, maxBytes: PREVIEW_BYTES, convIds, match: (x) => !own(x) && F.matchRecord(filter, x).hit }) : { results: [], matched: 0, truncated: false, coverage: { scanned: 0, total: 0, capped: false, oldestAt: null } };
+    const hits = found.results.map((x) => {
+      const text = F.regexText(x.text);
+      let span = null;
+      if (v.rule.kind === 'regex') span = F.regexSpan(v.rule.value, x.text);
+      else { const i = text.toLowerCase().indexOf(v.rule.value.toLowerCase()); if (i >= 0) span = [i, i + v.rule.value.length]; }
+      const [s, e] = span || [0, 0];
+      const from = Math.max(0, s - PREVIEW_CONTEXT), to = Math.min(text.length, e + PREVIEW_CONTEXT);
+      const en = store.index.peek(`${adapterId}/${x.convId}`);
+      return { convId: String(x.convId || ''), title: (en && en.title) || null, author: (x.author && (x.author.name || x.author.id)) || null, at: Number(x.at) || null,
+        before: (from > 0 ? '…' : '') + text.slice(from, s).replace(/\s+/g, ' '), match: text.slice(s, e).replace(/\s+/g, ' ').slice(0, 200), after: text.slice(e, to).replace(/\s+/g, ' ') + (to < text.length ? '…' : '') };
+    });
+    return { ok: true, rule: v.rule, hits, shown: hits.length, matched: found.matched || 0, truncated: !!found.truncated, coverage: found.coverage || null, conversations: convIds.length };
+  }
   function estimateFilter(adapterId, convId, input) {
     if (!known(adapterId, convId)) return { ok: false, code: 'not-found', error: 'No such conversation' };
     let filter = null;
@@ -1509,6 +1565,7 @@ function create(engineCtx) {
     convFor, stillSees, effectiveForAccount, accountScopeGrants, searchFor, readAroundFor, setPolicy, setReach, reachView, request, decideRequest,
     directoryLists, setAgentDirectory, agentWatch, agentUnwatch, listFor, readFor, readThreadFor, statusFor, setGrain, setAccess, setWatchers,
     removePattern, setAssignment, setScopeAssignment, accessFor, estimateScope, migrateAggregated, migrateGrants, setFilter, estimateFilter,
+    previewRule, membersNow,
   };
 }
 

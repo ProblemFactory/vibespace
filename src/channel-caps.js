@@ -401,15 +401,17 @@ function convCapsState(cached, now, ttlMs = CONV_CAPS_TTL_MS) {
   // `null` when the cache predates them (a control whose row is unknown is not offered, the r4 rule)
   const threads = e.threads && typeof e.threads === 'object' ? { replyInto: e.threads.replyInto === true, mode: e.threads.mode || null, why: e.threads.why || null } : null;
   const reactions = e.reactions && typeof e.reactions === 'object' ? { read: e.reactions.read === true, add: e.reactions.add === true, why: e.reactions.why || null } : null;
+  // lane lark-upload-preflight: the FILES row (an account whose sign-in cannot upload) — `null` = the adapter does not narrow files
+  const files = e.files && typeof e.files === 'object' ? { send: e.files.send === true, why: e.files.why || null, requiredScopes: Array.isArray(e.files.requiredScopes) ? e.files.requiredScopes.slice(0, 8).map(String) : [] } : null;
   const failed = read === 'unknown' && CONV_CAPS_FAIL_WHYS.includes(e.why) ? { retryAt: num(e.retryAt) } : {};   // when the engine asks again by itself (null: an owner step is needed)
-  return { read, sendAs: Array.isArray(e.sendAs) ? e.sendAs.slice() : [], why: e.why || null, at, ageSeconds: ageS(at, now), threads, reactions, ...failed };
+  return { read, sendAs: Array.isArray(e.sendAs) ? e.sendAs.slice() : [], why: e.why || null, at, ageSeconds: ageS(at, now), threads, reactions, ...(files ? { files } : {}), ...failed };
 }
 
 /** The reasons a control is not offered, in the order they are checked.
  *  lane channel-threads: `thread-reply` (reply INTO a thread), `react` /
  *  `unreact` (the account's user adds / removes its own reaction),
  *  `read-reactions` (the chips have a source). */
-const OFFER_WHAT = ['send-as-user', 'send-as-bot', 'fetch-attachment', 'read', 'thread-reply', 'react', 'unreact', 'read-reactions'];
+const OFFER_WHAT = ['send-as-user', 'send-as-bot', 'fetch-attachment', 'read', 'thread-reply', 'react', 'unreact', 'read-reactions', 'send-attachment'];
 /** A capability row an adapter did not declare reads as none (fail closed — spec §6.5). */
 const threadsRow = (c) => (c && c.threads && typeof c.threads === 'object' ? c.threads : { read: 'none', replyInto: false, listing: 'none' });
 const reactionsRow = (c) => (c && c.reactions && typeof c.reactions === 'object' ? c.reactions : { read: 'none', add: false, remove: 'none', vocabulary: 'names', custom: 'none', perMessageMax: null });
@@ -428,6 +430,15 @@ function offers(caps, convCaps, what, now = Date.now()) {
   if (what === 'read') {
     if (resolved.read === 'yes') return { offered: true, why: null };
     return { offered: false, why: resolved.why || (resolved.read === 'no' ? 'not-a-member' : 'unknown') };
+  }
+  // lane lark-upload-preflight (userW inc-muxsy69b-mjg1): SENDING a file — the declared `sendAttachments` row AND the
+  // resolved files row (the HELD scopes: Lark needs an upload scope beside the send pair); a refusal names the scopes
+  if (what === 'send-attachment') {
+    if (!c.sendAttachments) return { offered: false, why: 'attachments-not-offered' };
+    if (resolved.read !== 'yes') return { offered: false, why: resolved.why || 'unknown' };
+    const f = resolved.files || null;
+    if (f && f.send !== true) return { offered: false, why: f.why === 'send-scope-not-granted' ? f.why : 'attachments-not-sendable', requiredScopes: Array.isArray(f.requiredScopes) ? f.requiredScopes.slice(0, 8).map(String) : [] };
+    return { offered: true, why: null };
   }
   if (what === 'fetch-attachment') {
     if (c.attachments !== 'fetch') return { offered: false, why: 'attachments-not-fetchable' };
@@ -1180,7 +1191,7 @@ function grantsText(grants, { t = defaultT, vendor = '' } = {}) {
     else adds.push(g.what);
   }
   // lane lark-threads (B1/B5, MEASURED): `people` = reading people's profiles (who left a chat, the nickname, the department)
-  const words = { reactions: t('reading reactions'), feed: t('new-message search and single chats'), people: t('reading people\'s profiles') };
+  const words = { reactions: t('reading reactions'), feed: t('new-message search and single chats'), people: t('reading people\'s profiles'), files: t('sending files') };
   const parts = [];
   if (refused.length) parts.push(refusedScopeText([...new Set(refused)], { t, vendor }));
   if (adds.length) parts.push(t('One Re-authorize adds: {what}', { what: adds.map((w) => words[w] || String(w)).join(' · ') }));

@@ -1448,10 +1448,14 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
    * covered: `coverage = {scanned, total, capped, oldestAt}` (conversations read / eligible, whether the BYTE cap
    * cut, the oldest instant the read logs reach — each log's first line is its oldest record).
    */
-  async function search(adapterId, q, { limit = 100, maxBytes = 64 * 1024 * 1024, convIds = null } = {}) {
+  async function search(adapterId, q, { limit = 100, maxBytes = 64 * 1024 * 1024, convIds = null, match = null } = {}) {
+    // lane notify-rules-r2 (the Notify… dialog's preview): `match` = a RECORD predicate (a watcher rule, judged by the
+    // PURE filter) in place of the text check — `q`, when given beside it, stays the raw-bytes pre-check; `matched`
+    // counts every hit inside the bytes read (the dialog's "showing 10 of N"), not only the kept ones
     const needle = String(q || '').trim().toLowerCase();
-    const none = { results: [], scannedBytes: 0, truncated: false, files: 0, coverage: { scanned: 0, total: 0, capped: false, oldestAt: null } };
-    if (!needle) return none;
+    const pred = typeof match === 'function' ? match : null;
+    const none = { results: [], scannedBytes: 0, truncated: false, files: 0, matched: 0, coverage: { scanned: 0, total: 0, capped: false, oldestAt: null } };
+    if (!needle && !pred) return none;
     const dir = path.join(msgsDir, safeSeg(adapterId));
     let names = [];
     try { names = await fs.promises.readdir(dir); } catch { return none; }
@@ -1461,7 +1465,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     const lastAtOf = new Map();
     for (const en of Object.values(ix.conversations)) if (en && en.adapterId === adapterId && en.id != null) lastAtOf.set(`${safeSeg(en.id)}.ndjson`, Number(en.lastAt) || 0);
     names.sort((a, b) => (lastAtOf.has(b) - lastAtOf.has(a)) || ((lastAtOf.get(b) || 0) - (lastAtOf.get(a) || 0)) || (a < b ? -1 : a > b ? 1 : 0));
-    let scanned = 0, truncated = false, files = 0, capped = false, oldestAt = null;
+    let scanned = 0, truncated = false, files = 0, capped = false, oldestAt = null, matched = 0;
     const hits = [];
     for (const n of names) {
       const fp = path.join(dir, n);
@@ -1471,16 +1475,17 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
       scanned += st.size; files++;
       { const nl = text.indexOf('\n'); try { const r0 = JSON.parse(nl < 0 ? text : text.slice(0, nl)); const a0 = Number(r0 && r0.at); if (a0 > 0 && (oldestAt === null || a0 < oldestAt)) oldestAt = a0; } catch { } }
       for (const line of text.split('\n')) {
-        if (!line || !line.toLowerCase().includes(needle)) continue;
+        if (!line || (needle && !line.toLowerCase().includes(needle))) continue;
         let r; try { r = JSON.parse(line); } catch { continue; }
+        if (pred) { const rr = r.convId ? patchedOne(adapterId, String(r.convId), r) : r; let ok = false; try { ok = !!pred(rr); } catch { ok = false; } if (ok) { matched++; hits.push(rr); } continue; }
         const hay = `${r.text || ''}\n${(r.author && (r.author.name || '')) || ''}\n${(r.attachments || []).map((a) => (a && a.role !== 'body' ? a.name : '')).join(' ')}`.toLowerCase();
-        if (hay.includes(needle)) hits.push(r.convId ? patchedOne(adapterId, String(r.convId), r) : r);
+        if (hay.includes(needle)) { matched++; hits.push(r.convId ? patchedOne(adapterId, String(r.convId), r) : r); }
       }
       if (hits.length > limit * 4) { hits.sort((a, b) => cmpRecord(b, a)); hits.length = limit * 2; }
     }
     hits.sort((a, b) => cmpRecord(b, a));
     if (hits.length > limit) truncated = true;
-    return { results: hits.slice(0, limit), scannedBytes: scanned, truncated, files, coverage: { scanned: files, total: names.length, capped, oldestAt } };
+    return { results: hits.slice(0, limit), scannedBytes: scanned, truncated, files, matched, coverage: { scanned: files, total: names.length, capped, oldestAt } };
   }
 
   // ── ATTACHMENTS, fetched on demand, LRU per ACCOUNT (2026-09-26) ─────────
