@@ -2745,11 +2745,16 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   }
   /** A lease's tabs are STICKY: what it holds now becomes its roots (a popup whose opener closes stays its own) — written
    *  only when the set changed, and quietly (the digest never shows roots: nothing to broadcast). */
-  function keepTabRoots(profileId, browserKey, own) {
+  // THE .229 MIRROR (test-jobs-browser F11): a root stamped while the read was in flight (a window opened between the CDP
+  // read and the holders read) was pruned as gone — the job's lease kept no root, its finalize closed nothing, its window
+  // stayed open. `before` = the roots as they stood when the read began (rootsAt): only those may be pruned by it.
+  function rootsAt(profileId, browserKey) { const l = B.findLease(reg.leases, profileId, String(browserKey || '')); return new Set((Array.isArray(l && l.tabRoots) ? l.tabRoots : []).map((x) => String(x).toUpperCase())); }
+  function keepTabRoots(profileId, browserKey, own, before = null) {
     if (!(own instanceof Set)) return;
     const l = B.findLease(reg.leases, profileId, browserKey);
     if (!l) return;
-    const next = TBS.cleanRoots([...(Array.isArray(l.tabRoots) ? l.tabRoots : []).filter((x) => own.has(String(x).toUpperCase())), ...own]);
+    const seen = (x) => !(before instanceof Set) || before.has(String(x).toUpperCase()); // a root newer than the read is not its to prune
+    const next = TBS.cleanRoots([...(Array.isArray(l.tabRoots) ? l.tabRoots : []).filter((x) => own.has(String(x).toUpperCase()) || !seen(x)), ...own]);
     if (JSON.stringify(next) === JSON.stringify(TBS.cleanRoots(l.tabRoots))) return;
     l.tabRoots = next;
     save();
@@ -2765,6 +2770,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (!p || isEph(p) || isMediated(p) || p.host || !B.isLiveBrowser(rec) || !isLocalRec(rec)) return null;
     const l = B.findLease(reg.leases, p.id, String(browserKey || ''));
     if (!l || l.targetId || (Array.isArray(l.tabRoots) && l.tabRoots.length)) return null;
+    const before = rootsAt(p.id, l.browserKey);
     const o = await leaseCliOpts(p.id, l.browserKey);
     if (!o) return null;
     const rows = await tabListUnder(nsOf(p.id), { ...o, timeout: 5000 });
@@ -2772,7 +2778,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const targets = act ? await tabTargetsOf(o.extraEnv.AGENT_BROWSER_CDP) : null;
     if (!targets) return null;
     const own = TBS.ownSetOf(TBS.tabOwners({ targets, holders: tabHoldersOf(p.id, { [l.browserKey]: act }) }), l.browserKey);
-    keepTabRoots(p.id, l.browserKey, own);
+    keepTabRoots(p.id, l.browserKey, own, before);
     return own ? [...own] : null;
   }
   /** The user's tab act goes on the takeover's open cycle — said to the agent at the handback (never a delivery of its own). */
@@ -2999,6 +3005,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const pin = pinTab ? ['--pin-tab'] : [];
     const ns = nsOf(p.id);
     const read = async () => {
+      const before = rootsAt(p.id, bk);
       const rows0 = await tabListUnder(ns, o);
       const lw = B.findLease(reg.leases, p.id, bk);
       const rows = rows0 ? WIN.withLabelsOnRows(rows0, lw && lw.tabLabels) : null; // lane browser-windows: the labels of the tabs VibeSpace opened in their own windows
@@ -3006,7 +3013,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       const active = rows ? ((rows.find((x) => x.active) || {}).targetId || null) : null;
       const owners = targets ? TBS.tabOwners({ targets, holders: tabHoldersOf(p.id, active ? { [bk]: String(active).toUpperCase() } : {}) }) : null;
       const own = TBS.ownSetOf(owners, bk);
-      keepTabRoots(p.id, bk, own);
+      keepTabRoots(p.id, bk, own, before);
       return { rows, owners, own, active: active ? String(active).toUpperCase() : null };
     };
     const s0 = await read();
@@ -3075,12 +3082,13 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const rec = p ? reg.browsers[p.id] : null;
     if (!p || isEph(p) || !B.isLiveBrowser(rec) || !isLocalRec(rec)) return { ok: false };
     if (target.kind !== 'human' && isMediated(p)) return { ok: true, all: 'agent', mediated: true, adoptable: false, ...titled(await tabTargetsOf(rec.cdpUrl)) };
+    const bk = target.kind === 'human' ? null : String(target.sessionName || '').replace(/^vs-/, '');
+    const before = bk ? rootsAt(p.id, bk) : null;
     const targets = await tabTargetsOf(rec.cdpUrl);
     if (!targets) return { ok: false };
-    const bk = target.kind === 'human' ? null : String(target.sessionName || '').replace(/^vs-/, '');
     const act = activeTarget && TBS.TARGET_ID_RE.test(String(activeTarget)) ? String(activeTarget).toUpperCase() : null;
     const owners = TBS.tabOwners({ targets, holders: tabHoldersOf(p.id, bk && act ? { [bk]: act } : {}) });
-    if (bk) keepTabRoots(p.id, bk, TBS.ownSetOf(owners, bk));
+    if (bk) keepTabRoots(p.id, bk, TBS.ownSetOf(owners, bk), before);
     const h = humans.get(p.id);
     const words = {};
     const whose = {};

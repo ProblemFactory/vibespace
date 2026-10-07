@@ -4631,3 +4631,15 @@ The owner: "我的 lark 授权给了'工作'组，为啥通知里不能选工作
 ## REOPENING THE SEARCH DIALOG SPENT THE PROVIDER'S SEARCH PAGES AGAIN (lane vendor-search-memo, owner 2026-10-07)
 
 The owner: 「调用 channel provider 自己的在线搜索的时候缓存结果，避免重复点开搜索对话框结果就限速了」. The dialog opened from an agent's search row (or the panel's "Search messages for …") was pre-filled AND run — section two asked the vendor's own search on every open; a second press of the same words, every account of a multi-account search and an agent repeating the owner's words each asked again. Lark's endpoint allows 12 pages a minute (3 a press): a few reopenings ended in `search-minute` refusals or the vendor's 429, whose back-off parks the account's whole change feed. There was no result memo at all — `fullSearchVerdict` only refused. 不变量 = **a vendor search is asked once per (account, scope, query) and remembered (10 min, in memory, never persisted); only "Search again" spends another call; opening the dialog never asks the vendor**. FIX = PURE `searchMemo` in src/channel-search.js (key normalized, LRU 64 / 2 MiB an account, TTL 10 min, later pages appended), the verdict's `memo` row ahead of the back-off / floor / minute / budget and its `peek` row (`unasked`), the memo on the account's live entry in `vendorSearch` (an account change drops it), the dialog's `peek=1` on open and the per-account "Search again" (`again=1`); agents read the owner's answer first (0 calls, the 20 s floor untouched for a fresh query). A refusal, a failure or a partial answer is never remembered. A memo is a snapshot: a newly stored message does not invalidate it (the local tier shows it; a since-stored hit is dropped from the memo's rows) and the line says its age. Tests: test-channel-search §A memo legs + §M + 3 controls.
+
+## A JOB'S WINDOW STAYED OPEN BECAUSE A TAB READ PRUNED ITS NEWEST ROOT (lane mirror-green-229, the 2.369.229 Actions mirror, 2026-10-07)
+
+**Symptom:** test-jobs-browser F11 red on the Actions mirror only — after the job's finalize its window (104) still held its tab (0004) at the 3 s deadline; 48 local runs under load green.
+
+**Cause:** `keepTabRoots` (browser-keeper.js) made a lease's roots "what it holds now" from a CDP targets read taken before an await, against holders read after it. A tab stamped as a root between the two reads was absent from the targets, so it was pruned as gone; the lease kept no root for it, `jobWindowCloser` computed an empty own set at finalize and closed nothing.
+
+**Fix:** `rootsAt(profile, key)` is taken before each of the three reads (bootstrapTabRoot, the tab-list read, tabOwnersFor) and passed to keepTabRoots: a root not in that snapshot is newer than the read and is kept.
+
+**Invariant:** a read prunes only what it could have seen — any state written while the read was in flight survives it; a judge asserting two facts waits for both under one deadline.
+
+**Gates:** test-jobs-browser THE .229 MIRROR leg (a gated CDP read, a root stamped while it is held), F11 + THE SWEEP one-deadline judges; control: the base keeper ⇒ 2 red (the leg + F11 with window 104 left open).

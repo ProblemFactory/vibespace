@@ -208,7 +208,7 @@ console.log('— ④ the real routes + keeper: a job gets its own lease + window
   const fakeRemove = (ns, tid) => { const st = fakeState(ns); st.tabs = st.tabs.filter((t) => t.targetId !== tid); fakeWrite(ns, st); }; // verify r5 ③: the binary knows the tab no more
   const hook = async (name, ...a) => { const f = model[name]; if (typeof f !== 'function') return; model[name] = null; await f(...a); }; // verify r5: fired ONCE
   const fns = {
-    readTargets: async () => ({ ok: true, targets: liveTargets().map(([id, t]) => ({ targetId: id, type: 'page', openerId: t.openerId || undefined })) }),
+    readTargets: async () => { const targets = liveTargets().map(([id, t]) => ({ targetId: id, type: 'page', openerId: t.openerId || undefined })); if (model.readGate) { const g = model.readGate; model.readGate = null; await g; } return { ok: true, targets }; }, // THE .229 MIRROR: a gate holds ONE read's answer (taken before it) in flight
     openWindow: async (url) => { model.openWindowCalls++; const w = ++model.nextW; const tid = addTab(nsOfUrl(url), mintTid(), { windowId: w, holder: 'keeper' }); const readOk = model.windowReadFails <= 0; if (!readOk) model.windowReadFails--; return { ok: true, targetId: tid, windowId: readOk ? w : null }; },
     windowOf: async (url, tid) => { const t = model.targets.get(String(tid)); return t && t.state !== 'closed' ? t.windowId : null; },
     closeTarget: async (url, tid) => { closeTab(String(tid)); return { ok: true }; },
@@ -317,12 +317,22 @@ console.log('— ④ the real routes + keeper: a job gets its own lease + window
   ok(leasesOf(H).includes(pBank.id) && !leasesOf(KA).length, 'the owner conversation is gone (its lease dropped) — the RUNNING job\'s lease is kept (a running job carries its handle)', { job: leasesOf(H), owner: leasesOf(KA) });
   const r3 = await call('/api/agent/browser/resolve', 'jbt_aaaa', { argv: ['snapshot'] });
   ok(r3.status === 200 && r3.j && r3.j.ok, '…and it still resolves (the owner\'s recorded key + its pin) — it keeps browsing until the job ends', r3);
+  // THE .229 MIRROR (F11 red on the Actions runner: window 104 left open, its tab never closed): a tab read in flight while the
+  // job's window gained a tab — the CDP read taken BEFORE the tab, the holders read AFTER its root was stamped — pruned that
+  // root as gone, so the finalize found nothing of the job's to close. A root stamped after the read began survives the read.
+  { const lH = B.findLease(k._reg().leases, pBank.id, H); let go; model.readGate = new Promise((r) => { go = r; });
+    const pend = k.tabOwnersFor({ kind: 'session', sessionName: H, profileId: pBank.id });
+    const late = addTab(nsOfUrl(k._reg().browsers[pBank.id].cdpUrl), mintTid(), { windowId: lw(H), holder: 'keeper' });
+    lH.tabRoots = [...(Array.isArray(lH.tabRoots) ? lH.tabRoots : []), late]; // the keeper's own stamp (TBS.addRoot at the tab's create)
+    go(); await pend;
+    const roots = (B.findLease(k._reg().leases, pBank.id, H) || {}).tabRoots || [];
+    ok(roots.includes(late) && windowTabs(lw(H)).includes(late), `THE .229 MIRROR: a root stamped while a tab read was in flight (${late.slice(0, 4)}…, the job's window's new tab) survives that read — it was pruned as gone and the finalize closed nothing`, { late, roots }); }
   // the job's end: finalize releases (what onRunEnded calls), the evidence rule releases what a missed finalize left
   const winH = lw(H), tabsH = windowTabs(winH), tabsKA = windowTabs(winKA);
   jobs.get('jb-0000aaaa').state = 'done';
   const released = k.releaseJob('jb-0000aaaa', 'the job run ended');
   // accept-fixes-jobs F11 (the acceptance of 2.369.202: after `vibespace-job stop` the job's window stayed open in the shared profile)
-  ok(tabsH.length > 0 && await until(() => !model.windows.has(winH)) && tabsH.every((t) => model.targets.get(t).state === 'closed') && tabsKA.length > 0 && tabsKA.every((t) => model.targets.get(t).state !== 'closed'), `F11: AT FINALIZE the job's WINDOW closes (window ${winH}: ${tabsH.length} tab(s) closed over CDP) — the owner's page in its own window is untouched; the window stayed open before`, { winH, tabsH, open: windowTabs(winH), tabsKA });
+  ok(tabsH.length > 0 && await until(() => !model.windows.has(winH) && tabsH.every((t) => model.targets.get(t).state === 'closed')) && tabsKA.length > 0 && tabsKA.every((t) => model.targets.get(t).state !== 'closed'), `F11: AT FINALIZE the job's WINDOW closes (window ${winH}: ${tabsH.length} tab(s) closed over CDP) — the owner's page in its own window is untouched; the window stayed open before`, { winH, tabsH, open: windowTabs(winH), tabsKA, journal: jl.filter((x) => x.includes(H)) }); // THE .229 MIRROR: one deadline for both facts; the keeper's own lines name the closer's branch
   ok(!Object.values(k._reg().leftTabs || {}).some((m) => m && m[H]), 'F11: no "left tab" is kept for the released job handle (a job never comes back for its page)', k._reg().leftTabs);
   ok(released.includes(H) && !leasesOf(H).length && !k._reg().children[H], 'AT FINALIZE the job\'s lease and handle are gone (its window closes with the lease)', { released, leases: leasesOf(H) });
   await call('/api/agent/browser/resolve', 'jbt_bbbb', { argv: ['snapshot'] });
@@ -330,7 +340,7 @@ console.log('— ④ the real routes + keeper: a job gets its own lease + window
   const winH2 = lw(H2), tabsH2 = windowTabs(winH2);
   jobs.get('jb-0000bbbb').state = 'failed';
   k.reconcile({ graceMs: 120000 });
-  ok(tabsH2.length > 0 && await until(() => !model.windows.has(winH2)), `F11: THE SWEEP closes the window too (a job that ended without its finalize: window ${winH2}, ${tabsH2.length} tab(s))`, { winH2, open: windowTabs(winH2) });
+  ok(tabsH2.length > 0 && await until(() => !model.windows.has(winH2) && tabsH2.every((t) => model.targets.get(t).state === 'closed')), `F11: THE SWEEP closes the window too (a job that ended without its finalize: window ${winH2}, ${tabsH2.length} tab(s))`, { winH2, open: windowTabs(winH2) });
   ok(H2 && !k._reg().children[H2] && !leasesOf(H2).length, 'THE SWEEP: a job that ended without its finalize hook is released at the next reconcile (evidence: not running)', { H2, children: Object.keys(k._reg().children) });
   ok(jl.some((x) => /job jb-0000aaaa uses the conversation's browser as bk-00000a01\.\d+/.test(x)) && jl.some((x) => /job handle released \(the job run ended\)/.test(x)), 'the journal names the job by its ID at the mint and the release (never its name)', jl.filter((x) => /job/.test(x)));
 }

@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.231 — 2026-10-07
+
+### Fixed
+- When a Background Work job ends, its browser window always closes — a tab it opened while VibeSpace was reading its tabs could keep the window open.
+
 ## 2.369.230 — 2026-10-07
 
 ### Changed

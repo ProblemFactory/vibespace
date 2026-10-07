@@ -1439,7 +1439,9 @@ console.log('— ③ censuses: no card for him (+ control), the holder readers, 
     // lane browser-resume C: whose tab it is — the conversations' tab ROOTS are their leases' (his own tab is added from
     // `humans`, never a lease); the agent's own tab verbs need ITS lease; the user's row judges a CONVERSATION's tab; the
     // orphan rule (adoptable) asks whether any conversation leases the browser; the rebind's new tab is its lease's root
-    tabHoldersOf: 1, keepTabRoots: 1, bootstrapTabRoot: 1, agentTabAct: 4, tabOwnersFor: 1, userTabAct: 1, whoseOf: 1, // accept-fixes-strip F8: another holder's tab is named by ITS lease's conversation (a conversation reader)
+    // lane mirror-green-229 (the 2.369.231 integration): rootsAt = the roots a CONVERSATION lease held when a tab read began
+    // (keepTabRoots prunes only those; a root stamped during the read survives it) — tab roots are leases', his row holds none
+    tabHoldersOf: 1, keepTabRoots: 1, rootsAt: 1, bootstrapTabRoot: 1, agentTabAct: 4, tabOwnersFor: 1, userTabAct: 1, whoseOf: 1, // accept-fixes-strip F8: another holder's tab is named by ITS lease's conversation (a conversation reader)
     // lane site-reset verify r3 #2: the PERSISTED WITNESS lives on a CONVERSATION's lease (`l.tabs` — the tabs the dialog watch
     // saw born of its verbs); his row holds no lease — his tabs are his row's own (`ownTab` / `adopted`)
     noteOwnTab: 1, forgetOwnTab: 1, dropLeaseTabs: 1, pruneOwnTabs: 1, // r4 #3: pruned to the browser's tabs at a watch's connect
