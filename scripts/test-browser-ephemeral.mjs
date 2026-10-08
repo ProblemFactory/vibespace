@@ -200,14 +200,15 @@ const mkKeeper = (extra = {}) => K.create({ dataDir: DATA, homeDir: fakeHome, en
   liveKeys: () => live, runtime: F.createBrowserRuntime({ env: rtEnv }), facts: F.createBrowserFacts({ env: rtEnv }), log: { log() { }, warn() { }, error() { } }, install: false, otherHolders: () => desktopApps, ...extra });
 const k = mkKeeper();
 let beCalls = 0;
-const spyBrowserEnv = new Proxy({}, { get: () => { beCalls++; return () => { beCalls++; return null; }; } });
+// lane browser-resource-care: /resolve asks every answer's TMPDIR (`tmpDir()`, a mkdir under data/browser-env — not the ladder); only the LADDER counts
+const spyBrowserEnv = new Proxy({}, { get: (_, key) => { if (key === 'tmpDir') return () => null; beCalls++; return () => { beCalls++; return null; }; } });
 const sessions = new Map();
 const TOKEN = (n) => 'vsst_' + String(n).repeat(24).slice(0, 24);
 const mkSession = (id, key, n, extra = {}) => { const s = { agentToken: TOKEN(n), _browserKey: key, _browserVariant: 'N', _browserEnv: pairsFor(key), name: `session ${id}`, ...extra }; sessions.set(id, s); return s; };
 const sessA = mkSession('sess-a', KEY_A, 'a');
 mkSession('sess-f', KEY_F, 'f');
 const app = express(); app.use(express.json());
-R.setup({ keeper: k, activeSessions: sessions, browserEnv: () => { beCalls++; return spyBrowserEnv; }, adoptRoots: { homeDir: fakeHome, dataDir: DATA }, tasksForSession: () => [] });
+R.setup({ keeper: k, activeSessions: sessions, browserEnv: () => spyBrowserEnv, adoptRoots: { homeDir: fakeHome, dataDir: DATA }, tasksForSession: () => [] });
 app.use(R.router);
 srv = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
 const API = `http://127.0.0.1:${srv.address().port}`;
@@ -409,7 +410,7 @@ const auditLines = () => { try { return fs.readFileSync(k.auditFile, 'utf8').tri
     const ksrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
     // (verify r2 G4: the anchor carries the pinned-CLI rung lane browser-admin 2b added — the old spelling matched nothing and
     // this control judged the UNPATCHED keeper, red on the lane head)
-    const kpre = ksrc.replace('const rt = configured(runtime || F.createBrowserRuntime({ env: rtEnv, log, pinned: pinnedCli }));', 'const rt = runtime || F.createBrowserRuntime({ env: rtEnv, log, pinned: pinnedCli });');
+    const kpre = ksrc.replace('const rt = configured(runtime || F.createBrowserRuntime({ env: rtEnv, log, pinned: pinnedCli, tmpDir: daemonTmp }));', 'const rt = runtime || F.createBrowserRuntime({ env: rtEnv, log, pinned: pinnedCli, tmpDir: daemonTmp });'); // int236: + lane browser-resource-care's tmpDir (the old anchor matched nothing)
     const { createRequire: cr } = await import('node:module');
     const kreq = cr(path.join(REPO, 'src/server/browser-keeper.js'));
     const km = { exports: {} }; new Function('module', 'exports', 'require', '__dirname', '__filename', kpre)(km, km.exports, kreq, path.join(REPO, 'src/server'), path.join(REPO, 'src/server/browser-keeper.js'));

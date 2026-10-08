@@ -702,12 +702,22 @@ function showOptionsDialog(app, a) {
  *  clears a demotion's counters and retries the lane once, so the claim is
  *  sent only when it changed or the lane is demoted. */
 /** WHAT PUSH IS (design §6.4) — the dialog's first line and the menu row's tooltip (ONE spelling, a t() literal the i18n scan sees). */
-const pushWhat = () => t('Push = the platform tells VibeSpace about a new message the moment it arrives (seconds); off = polling every few minutes. Gmail needs a Google Cloud Pub/Sub topic + this instance\'s own pull subscription (one re-authorize adds the Pub/Sub permission); Lark uses the app\'s long connection — no public address needed.');
+/** lane channel-vendor-one-file: the transport's own line is keyed on the account's DECLARED push transport
+ *  (caps.pushTransport, in the push view) — the panel names no vendor. */
+const PUSH_TRANSPORT_WORDS = Object.freeze({
+  'pubsub-pull': () => t('This needs a Google Cloud Pub/Sub topic + this instance\'s own pull subscription (one re-authorize adds the Pub/Sub permission).'),
+  'ws-long-conn': () => t('It uses the app\'s long connection — no public address needed.'),
+});
+const pushWhat = (a) => {
+  const line = t('Push = the platform tells VibeSpace about a new message the moment it arrives (seconds); off = polling every few minutes.');
+  const tw = a && a.push && PUSH_TRANSPORT_WORDS[a.push.transport];
+  return tw ? `${line} ${tw()}` : line;
+};
 function showPushDialog(app, a) {
   const p = a.push || {};
   const { body, close } = createModalShell({ id: 'chan-push-dialog', title: t('Push lane — {label}', { label: a.label || a.id }), dialogClass: 'chan-dialog chan-options', escapeToClose: true });
   // WHAT PUSH IS, first (the owner: "'推送'按钮是干啥的？我没看明白，是gmail特有的吗") — both vendors' requirements, one line
-  body.appendChild(chanLine('chan-flow-intro chan-push-intro', pushWhat()));
+  body.appendChild(chanLine('chan-flow-intro chan-push-intro', pushWhat(a)));
   body.appendChild(chanLine('chan-flow-intro', chanCaps.pushLaneText(p, a.lane, { t, now: Date.now() })));
   if (p.demotedAt) body.appendChild(noteLine('chan-flow-note', t('The claim was withdrawn by measurement. Re-declaring it clears the counters and retries the lane once.'), { warn: true }));
   let enabledBox = null;
@@ -874,10 +884,10 @@ export function registerChannelAdapterMenu() {
   registerMenuItem({ menu: M, group: '1_rows', order: 10, when: (c) => !A(c).builtin, label: () => t('Grant access…'), run: (c) => showGrantAccessDialog(c.app, { kind: 'account', adapter: A(c) }) });
   registerMenuItem({ menu: M, group: '1_rows', order: 11, when: (c) => !A(c).builtin, label: () => t('Notify…'), run: (c) => showNotifyDialog(c.app, { kind: 'account', adapter: A(c) }) });
   // B-2198: the RAW API pass-through — who may call this account's vendor API, at which tier (off until granted)
-  registerMenuItem({ menu: M, group: '1_rows', order: 11.5, when: (c) => !A(c).builtin && ['lark', 'slack', 'gmail'].includes(A(c).kind), label: () => t('API access…'), run: (c) => showApiAccessDialog(c.app, A(c).id) });
+  registerMenuItem({ menu: M, group: '1_rows', order: 11.5, when: (c) => !A(c).builtin && !!A(c).rawApi, label: () => t('API access…'), run: (c) => showApiAccessDialog(c.app, A(c).id) });
   registerMenuItem({ menu: M, group: '1_rows', order: 12, when: (c) => !A(c).builtin, label: () => t('Conversations matching a rule…'), run: (c) => showGrantAccessDialog(c.app, { kind: 'pattern', adapter: A(c), id: null }) });
   registerMenuItem({ menu: M, group: '1_rows', order: 20, when: (c) => (A(c).optionsSchema || []).length > 0, label: () => t('Options'), run: (c) => showOptionsDialog(c.app, A(c)) });
-  registerMenuItem({ menu: M, group: '1_rows', order: 30, when: (c) => !!A(c).push, label: () => t('Push…'), tooltip: () => pushWhat(), run: (c) => showPushDialog(c.app, A(c)) });
+  registerMenuItem({ menu: M, group: '1_rows', order: 30, when: (c) => !!A(c).push, label: () => t('Push…'), tooltip: (c) => pushWhat(A(c)), run: (c) => showPushDialog(c.app, A(c)) });
   // P4: THE SENDER HONESTY SWITCH (§9.5) — per channel, OFF by default, drawn
   // only where the capability row allows sending (the digest hands `null`
   // for a read-only adapter). The row's check glyph says the state; the

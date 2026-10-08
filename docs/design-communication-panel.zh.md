@@ -597,6 +597,8 @@ adapter 的活, 而这件事做错一次就已经在运维工具里把一条消�
 
 ---
 
+**As-built（lane channel-vendor-one-file，2026-10-07，B-e3f1）**：新增一个 vendor = 它的文件夹（adapter + manifest + blocks）+ `src/channels/registry-list.js` 一行注册（+ zh/ja 词典）。manifest 声明设置表与集成行（含粘贴步骤与 `paste.notes.landed`）；adapter 模块声明 caps、consent 行（mode：ephemeral / fixed / paste / public + relay / landing）与 raw-API 行。共享文件只读声明：账户视图的 `rawApi`（菜单「API access…」）、push 视图的 `transport`（推送说明行）、public 流程的 `paste.notes.landed`（粘贴回填提示）。闸门：test-architecture §83 —— `src/` 下名为 channel* / channels* 的文件（src/channels/ 之外）+ integration-registry.js 的字符串 / 模板 / 正则字面量里不出现任何 vendor id（f835b0e58：7 → 0）；test-channel-manifest 以假 vendor acme 一行注册证明其设置行、集成行、consent 行、raw-API 行全部到位。
+
 ## 5. 会话存储
 
 `data/channels/` —— 一个目录, 四种文件:

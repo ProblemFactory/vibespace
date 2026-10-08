@@ -201,7 +201,11 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   const pinnedCli = () => { try { return cliPinPath(); } catch { return null; } };
   const bf = facts || F.createBrowserFacts({ env: rtEnv, pinned: pinnedCli });
   const bfPath = F.createBrowserFacts({ env: rtEnv });
-  const rt = configured(runtime || F.createBrowserRuntime({ env: rtEnv, log, pinned: pinnedCli }));
+  // lane browser-resource-care: the daemon's TMPDIR = data/browser-env/tmp (browser-env.js TMP_DIR — spelled here: the
+  // keeper requires nothing of that module), so its ephemeral profiles and Xvfb auth files stay off the RAM-backed /tmp
+  let daemonTmpMade = null; // made ONCE (data/ may be a network mount — never an mkdir per CLI call)
+  const daemonTmp = () => { if (daemonTmpMade) return daemonTmpMade; const d = path.join(dataDir, 'browser-env', 'tmp'); try { fs.mkdirSync(d, { recursive: true, mode: 0o700 }); daemonTmpMade = d; return d; } catch { return null; } };
+  const rt = configured(runtime || F.createBrowserRuntime({ env: rtEnv, log, pinned: pinnedCli, tmpDir: daemonTmp }));
   /**
    * takeover r3 (finding 2): THE CONFIG IS NAMED, NEVER SEARCHED. Without
    * AGENT_BROWSER_CONFIG the binary searches `~/.agent-browser/config.json`

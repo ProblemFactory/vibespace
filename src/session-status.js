@@ -374,6 +374,9 @@ const NOTICE_RENDERERS = Object.freeze({
   // lane hooks-create (2026-10-01): the registration that CREATED the hook file reached a session that started without
   // it — ONE free next-turn note (src/hooks-late.js); agent-routes drops it unread in any OTHER process (a resume)
   'hooks-late': (n) => require('./hooks-late').renderHooksLateNotice(n),
+  // lane browser-resource-care (B-afeb): a Chrome this conversation started outside vibespace-browser (debugging port, no
+  // keeper mark, under its process tree) — told once per launch burst, free, at its next turn; never killed
+  'browser-own-chrome': (n) => require('./memory-pressure').renderOwnChromeNotice(n),
   // lane browser-admin 2a: the user's Change build… restarted a browser this conversation uses — the relaunch's own words
   // (browser-interrupt.relaunchText: what was interrupted, its tab reopened), free, at the agent's next turn
   'browser-relaunch': (n) => '<system-reminder>\n' + require('./browser-interrupt').relaunchText({ label: n && n.label, from: n && n.from, to: n && n.to, n: n && n.n, verbs: n && n.verbs, outcome: n && n.outcome }) + '\n</system-reminder>',

@@ -179,9 +179,13 @@ class UsageHistory {
   // bytes (default 1 MiB / setImmediate). Injected only by the parity suite,
   // which holds the yield shut to prove no reader sees a half-walked ledger.
   constructor({ dataDir, homeDir = os.homedir(), resolveAccount = () => null,
-    scanBudgetBytes = SCAN_BUDGET_BYTES, scanYield = () => new Promise(setImmediate) }) {
+    scanBudgetBytes = SCAN_BUDGET_BYTES, scanYield = () => new Promise(setImmediate), paused = () => false }) {
     this._scanBudgetBytes = scanBudgetBytes;
     this._scanYield = scanYield;
+    // lane fuse-canary-notice (B-b327): `paused(roots)` = the mount-health gate (src/server/mount-health-watch.js) —
+    // true while the mount under any of the walk's roots is wedged: a timed scan does not start, a walk in flight stops at
+    // its next yield (cursors untouched, nothing appended: the next scan redoes it). A forced scan is never paused.
+    this._paused = paused;
     this._scanPromise = null;
     this.dir = path.join(dataDir, 'usage-history');
     this.metaDir = path.join(dataDir, 'session-meta');
@@ -469,6 +473,8 @@ class UsageHistory {
     // new events land at most ~15s late; the 3-min background rescan and the
     // in-memory event cache (below) make requests read-only in the common case.
     if (!force && this._lastScanAt && Date.now() - this._lastScanAt < 15000) return { skipped: true };
+    if (!force && this._pausedNow()) return { skipped: true, paused: true };
+    this._scanForced = !!force;
     this._lastScanAt = Date.now();
     this._scanning = true;
     this._scanPromise = this._walkAndAppend();
@@ -478,6 +484,7 @@ class UsageHistory {
   /** The promise of the scan in flight, or of the last one (a reader awaits it
    *  before answering from the ledger — never a half-walked answer). */
   scanSettled() { return this._scanPromise || Promise.resolve({ added: 0, filesTouched: 0 }); }
+  _pausedNow() { try { return !!this._paused([this.projectsDir, this.codexSessionsDir, this.dir]); } catch { return false; } }
 
   async _walkAndAppend() {
     let added = 0, filesTouched = 0;
@@ -510,7 +517,7 @@ class UsageHistory {
         cursors: cursorsAtStart,
         // the per-tick byte budget: the walk hands the loop back every MiB
         budgetBytes: this._scanBudgetBytes,
-        onBudget: this._scanYield,
+        onBudget: async () => { await this._scanYield(); if (!this._scanForced && this._pausedNow()) throw Object.assign(new Error('paused'), { paused: true }); },
         onEvent: (ev) => {
           const minfo = meta[ev.sid] || {};
           // A per-request identity override, when one is wired (see
@@ -571,6 +578,7 @@ class UsageHistory {
       this._writeCursors();
       this._lastScan = Date.now();
     } catch (e) {
+      if (e && e.paused) return { added: 0, filesTouched: 0, paused: true }; // the mount-health gate stopped it mid-walk
       console.error('[usage-history] scan failed:', e && e.message);
       return { added: 0, filesTouched, error: String((e && e.message) || e) };
     } finally { this._scanning = false; }

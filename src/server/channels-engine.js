@@ -217,7 +217,7 @@ const PENDING_FLOW_TTL_MS = 30 * 60 * 1000;
 const DUPLICATE_FIELDS = Object.freeze([
   Object.freeze({ key: 'kind', paths: Object.freeze(['kind']), why: 'the copy is an account of the same type' }),
   Object.freeze({ key: 'client', paths: Object.freeze(['credentialKey', 'credential']), why: 'the OAuth client choice: the preset key, or the custom id + secret RE-SEALED (two accounts of one app are the common case)' }),
-  Object.freeze({ key: 'filters', paths: Object.freeze(['options']), why: 'the account\'s declared filters (Gmail include query and push topic; Lark brand)' }),
+  Object.freeze({ key: 'filters', paths: Object.freeze(['options']), why: 'the account\'s declared filters (the option rows its adapter declares)' }),
   Object.freeze({ key: 'pushClaim', paths: Object.freeze(['push.claimedExclusive']), why: 'the push exclusivity DECLARATION (the switch itself starts at its default)' }),
   Object.freeze({ key: 'senderLine', paths: Object.freeze(['senderHonestyLine']), why: 'the per-channel sender honesty switch' }),
 ]);
@@ -3518,6 +3518,7 @@ function create(deps = {}) {
       // per-channel honesty switch as the panel draws them.
       identityObserved: rec.identityObserved ? { ...rec.identityObserved } : null,
       senderHonestyLine: c.sendAs.length ? { record: rec.senderHonestyLine === true ? true : rec.senderHonestyLine === false ? false : null, effective: honestyLineFor(rec) } : null,
+      rawApi: !!(mod && mod.api),   // lane channel-vendor-one-file: the account menu's "API access…" row reads this, never a kind
       options: viewOptions(mod, rec),
       optionsSchema: (mod && mod.OPTIONS ? mod.OPTIONS : []).map((o) => ({ key: o.key, label: o.label, help: o.help || '', default: o.default === undefined ? '' : o.default, placeholder: o.placeholder || '', choices: Array.isArray(o.choices) ? o.choices.slice() : null, choiceLabels: o.choiceLabels && typeof o.choiceLabels === 'object' ? { ...o.choiceLabels } : null, usedWhen: o.usedWhen && typeof o.usedWhen === 'object' ? JSON.parse(JSON.stringify(o.usedWhen)) : null })),
     };

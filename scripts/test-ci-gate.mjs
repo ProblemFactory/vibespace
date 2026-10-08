@@ -32,7 +32,7 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { SUITES, EXCLUDED, censusFindings, listSuiteFiles, heavyBlocker, machineGlobalFixtures, defaultLockPath, killedFromOutside, OUTSIDE_SIGNALS, scratchOrphans, judgeScratch, SCRATCH_ROOT_RE, REAP_NAMES, reapReport, reapByHand, scratchRootsOf, ROOT_ENV, argvScratchRoots, PRODUCT_ROOT_RE, FAST_DISQUALIFIERS, FAST_MAX_MS, fastRuleFindings } from './ci.mjs';
+import { SUITES, EXCLUDED, censusFindings, listSuiteFiles, heavyBlocker, machineGlobalFixtures, defaultLockPath, killedFromOutside, OUTSIDE_SIGNALS, scratchOrphans, judgeScratch, liveScratchPaths, SCRATCH_ROOT_RE, REAP_NAMES, reapReport, reapByHand, scratchRootsOf, ROOT_ENV, argvScratchRoots, PRODUCT_ROOT_RE, FAST_DISQUALIFIERS, FAST_MAX_MS, fastRuleFindings } from './ci.mjs';
 import { pathToFileURL } from 'node:url';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { GIT_REDIRECTORS, gitEnvFrom } from './git-env.mjs';
@@ -82,6 +82,8 @@ function stubGateRepo(tag) {
   fs.copyFileSync(path.join(REPO, 'scripts', 'ci.mjs'), path.join(root, 'scripts', 'ci.mjs'));
   fs.copyFileSync(path.join(REPO, 'scripts', 'git-env.mjs'), path.join(root, 'scripts', 'git-env.mjs'));
   fs.copyFileSync(path.join(REPO, 'scripts', 'scratch-run.mjs'), path.join(root, 'scripts', 'scratch-run.mjs')); // ci.mjs's other sibling (B-1d08: the run record its reaper reads)
+  // B-60d2: the directory sweep (scratch-sweep.mjs) and the unit declarations it reads (scratch.mjs ← src/fixture-guard.js)
+  for (const f of ['scripts/scratch-sweep.mjs', 'scripts/scratch.mjs', 'src/fixture-guard.js']) { fs.mkdirSync(path.dirname(path.join(root, f)), { recursive: true }); fs.copyFileSync(path.join(REPO, f), path.join(root, f)); }
   fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name: 'x', version: '0.0.0', private: true, scripts: { build: 'node -e "0"' } }) + '\n');
   fs.writeFileSync(path.join(root, 'scripts', STUB_SLICE + '.mjs'), "console.log('ALL PASS (1)');\n");
   git(root, ['init', '-q', '-b', 'main']);
@@ -1766,6 +1768,101 @@ console.log('\n§9c the reaper reads a scratch root off the arguments (dtach / p
   ok(noExcl.split('PRODUCT_ROOT_RE.test(').length === ciSrc.split('PRODUCT_ROOT_RE.test(').length - 2, 'CONTROL: the second patched copy really drops BOTH /tmp/vs-ab-<uid> exclusions (argv roots + the candidate roots)');
   const ne = await import(M.write('scripts/ci.mjs', noExcl, 'no-product-root', { esm: true }));
   ok(ne.scratchOrphans({ procRoot: root, now: NOW, self: 999999 }).some((o) => o.pid === 830), 'CONTROL: without the exclusion the production Chrome under /tmp/vs-ab-<uid> would be reaped');
+}
+
+// ── §9d THE DIRECTORY SWEEP (B-60d2, 2026-10-07) — the dirs the reaper's evidence frees, and a suite ends what it made ──
+// /tmp (tmpfs = RAM + swap) held 30 of 62 GB: 13 986 `vs-*` dirs older than a day. The process reaper never touched a
+// directory. scripts/scratch-sweep.mjs dirVerdict is PURE (the table below); its driver runs over a fixture tree here
+// (prefixes = a fixture root, `now` shifted a day on); patched copies prove each keep rule is load-bearing.
+console.log('\n§9d the directory sweep (B-60d2)');
+{
+  const SW = await import('./scratch-sweep.mjs');
+  const SC = await import('./scratch.mjs');
+  const NOW = Date.now(), H = 3600 * 1000, OLD = NOW - 25 * H;
+  const base = { now: NOW, mtimeMs: OLD, liveRoots: [] };
+  const V = (o) => SW.dirVerdict({ ...base, ...o });
+  ok(V({ path: '/tmp/vs-leak-12', name: 'vs-leak-12' }).verdict === 'reap', 'a minted, unheld dir whose newest write is a day old ⇒ reap');
+  ok(V({ path: '/tmp/vs-work/verify-quota-r3', name: 'verify-quota-r3' }).verdict === 'reap', 'a verify workspace /tmp/vs-work/<lane> is a declared unit (scratch.mjs SCRATCH_SWEEP)');
+  ok(/no minted prefix/.test(V({ path: '/tmp/other-12', name: 'other-12' }).why) && /no minted prefix/.test(V({ path: '/var/tmp/vs-x-1', name: 'vs-x-1' }).why) && /no minted prefix/.test(V({ path: '/tmp/vs-a/b', name: 'b' }).why), 'no minted prefix under a declared root ⇒ keep (a name, /var/tmp, a nested dir)');
+  for (const p of ['/tmp/vs-ab-1000', '/tmp/vs-ab-u', '/tmp/vs-dev-1000', '/tmp/vs-work']) ok(/production root/.test(V({ path: p, name: path.basename(p) }).why), `a production root is never reaped: ${p}`);
+  ok(/production root/.test(V({ path: '/tmp/vs-wt-1', name: 'vs-wt-1', keepList: ['/tmp/vs-wt-1/repo'] }).why), 'a dir CONTAINING the repo (keepList) ⇒ keep');
+  ok(/^held/.test(V({ path: '/tmp/vs-x-1', name: 'vs-x-1', liveRoots: ['/tmp/vs-x-1/home/.cache'] }).why) && V({ path: '/tmp/vs-x-1', name: 'vs-x-1', liveRoots: ['/tmp/vs-x-10'] }).verdict === 'reap', 'a live process naming a path beneath it ⇒ keep (a sibling sharing the name head holds nothing)');
+  ok(/^young/.test(V({ path: '/tmp/vs-x-1', name: 'vs-x-1', mtimeMs: NOW - 23 * H }).why), 'a newest write < 24 h ago ⇒ keep');
+  ok(/symlink/.test(V({ path: '/tmp/vs-x-1', name: 'vs-x-1', symlink: true, isDir: false }).why) && /not a directory/.test(V({ path: '/tmp/vs-x-1', name: 'vs-x-1', isDir: false }).why), 'a symlink / a file ⇒ keep');
+  ok(/owner is alive/.test(V({ path: '/tmp/vs-x-1', name: 'vs-x-1', owner: { alive: true, why: 'pid 7 alive' } }).why), "its run record's owner alive ⇒ keep");
+  ok(/unknown/.test(V({ path: '/tmp/vs-x-1', name: 'vs-x-1', mtimeMs: null }).why), 'an unreadable tree ⇒ keep');
+  // THE DRIVER over a fixture root, `now` a day on: the leak reaped; the held, the young-inside, the symlink, the unprefixed kept
+  const FX = mktmp('sweep9d');
+  const mkd = (n, files = 1) => { const d = path.join(FX, n); fs.mkdirSync(path.join(d, 'sub'), { recursive: true }); for (let i = 0; i < files; i++) fs.writeFileSync(path.join(d, 'sub', `f${i}`), 'x'.repeat(5000)); return d; };
+  const leak = mkd('vs-leak-1', 3), held = mkd('vs-held-1'), youngIn = mkd('vs-younginside-1'), plainD = mkd('notvs-1');
+  const TARGET = mktmp('sweep9d-target'); fs.writeFileSync(path.join(TARGET, 'precious'), 'keep me');
+  fs.symlinkSync(TARGET, path.join(FX, 'vs-link-1'));
+  const LATER = NOW + 25 * H;
+  fs.utimesSync(path.join(youngIn, 'sub', 'f0'), LATER / 1000, LATER / 1000);   // its dir is old, one file beneath it is new
+  const prefixes = [{ under: FX, prefix: 'vs-' }];
+  const lines = [];
+  const dry = SW.sweepScratchDirs({ prefixes, production: [], now: LATER + 1000, liveRoots: [held + '/sub'], dryRun: true, log: (l) => lines.push(l), readOwner: () => null });
+  ok(dry.reaped.length === 1 && fs.existsSync(leak) && /dry run, nothing removed/.test(lines.at(-1)), 'the dry run names the one leak and removes nothing');
+  lines.length = 0;
+  const res = SW.sweepScratchDirs({ prefixes, production: [], now: LATER + 1000, liveRoots: [held + '/sub'], log: (l) => lines.push(l), readOwner: () => null });
+  ok(!fs.existsSync(leak) && fs.existsSync(held) && fs.existsSync(youngIn) && fs.existsSync(plainD) && fs.existsSync(path.join(TARGET, 'precious')) && fs.lstatSync(path.join(FX, 'vs-link-1')).isSymbolicLink(), 'the driver reaps the leak only: held, young-inside (newest mtime in the TREE), unprefixed and the symlink (and what it points at) stay');
+  ok(new RegExp(`^\\[ci\\] reaped dir ${leak.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} — newest write \\d+ h ago, no live process names it — \\d+ KB$`).test(lines[0] || ''), `ONE line per reaped root: ${lines[0]}`);
+  ok(/^\[ci\] dir sweep: reaped 1 dir\(s\), \d+ KB \(vs-leak 1 \/ \d+ KB\); kept 3 /.test(lines.at(-1) || ''), `the summary line: ${lines.at(-1)}`);
+  let refused = ''; try { SW.removeUnit(path.join(FX, 'vs-link-1'), { prefixes }); } catch (e) { refused = e.message; }
+  ok(/symlink/.test(refused) && fs.existsSync(path.join(TARGET, 'precious')), 'removeUnit refuses a symlink even when told to');
+  // CONTROLS — patched copies of the module, each without one keep rule, reap what it must not
+  const SWSRC = fs.readFileSync(path.join(REPO, 'scripts/scratch-sweep.mjs'), 'utf8');
+  const MUT = mktmp('sweep9d-mut'), M9d = mutantCopies('cigate9d', REPO);
+  const mutant = async (tag, from, to) => {
+    ok(SWSRC.includes(from), `CONTROL ${tag}: the patched line is in scratch-sweep.mjs`);
+    return import(pathToFileURL(M9d.write('scripts/scratch-sweep.mjs', SWSRC.replace(from, to), tag)).href);
+  };
+  const CISRC = fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf-8');
+  const mutant9 = async (tag, from, to) => { ok(CISRC.includes(from), `CONTROL ${tag}: the patched line is in ci.mjs`); return import(pathToFileURL(M9d.write('scripts/ci.mjs', CISRC.replace(from, to), tag)).href); };
+  const mAge = await mutant('no-age', "if (age < staleMs) return keep(", "if (false) return keep(");
+  ok(mAge.dirVerdict({ ...base, path: '/tmp/vs-x-1', name: 'vs-x-1', mtimeMs: NOW - H }).verdict === 'reap', 'CONTROL: without the age rule a dir written an hour ago is reaped (red)');
+  const mHeld = await mutant('no-held', "if (held) return keep(", "if (false) return keep(");
+  ok(mHeld.dirVerdict({ ...base, path: '/tmp/vs-x-1', name: 'vs-x-1', liveRoots: ['/tmp/vs-x-1/home'] }).verdict === 'reap', 'CONTROL: without the held rule a dir a live process names is reaped (red)');
+  const mLink = await mutant('follows', "if (symlink) return keep(", "if (false) return keep(");
+  ok(mLink.dirVerdict({ ...base, path: '/tmp/vs-x-1', name: 'vs-x-1', symlink: true }).verdict === 'reap', 'CONTROL: without the symlink rule a link is judged as its target (red)');
+  const mTree = await mutant('own-mtime', "if (st.isDirectory()) for (const e of fs.readdirSync(d)) stack.push(path.join(d, e));", "");
+  ok(mTree.treeFacts(youngIn, { stopAt: LATER - H }).young === false && SW.treeFacts(youngIn, { stopAt: LATER - H }).young === true, "CONTROL: judging the dir's OWN mtime misses the new file beneath it (red); the tree walk sees it");
+  // A SUITE ENDS WHAT IT MADE: scratch.mjs registers a suite's mint and removes it at exit; keepScratch opts out; a helper is never a suite
+  const scratchUrl = pathToFileURL(path.join(REPO, 'scripts/scratch.mjs')).href;
+  const body = (tag) => `import { scratchDir, keepScratch } from ${JSON.stringify(scratchUrl)};\nconst a = scratchDir('cigate9d-${tag}-a'), b = keepScratch(scratchDir('cigate9d-${tag}-b'));\nconsole.log(JSON.stringify([a, b]));\n${tag === 'throw' ? "throw new Error('a red suite');" : ''}`;
+  for (const [file, tag, ends] of [['test-fx9d.mjs', 'ok', true], ['test-fx9d-red.mjs', 'throw', true], ['helper-fx9d.mjs', 'helper', false]]) {
+    const f = path.join(MUT, file); fs.writeFileSync(f, body(tag));
+    const r = spawnSync(process.execPath, [f], { encoding: 'utf8', timeout: 20000 });
+    let made = []; try { made = JSON.parse(r.stdout.trim().split('\n')[0]); } catch { }
+    ok(made.length === 2 && fs.existsSync(made[0]) === !ends && fs.existsSync(made[1]), `${file}: ${ends ? 'its scratch dir is gone after exit' + (tag === 'throw' ? ' (a throw too)' : '') + ', the keepScratch one stays' : 'a helper (not a scripts/test-*.mjs) keeps what it made'}`);
+    for (const d of made) tmpDirs.push(d);
+  }
+  let refusedEnd = ''; try { SC.endScratchAtExit('/home/someone/data'); } catch (e) { refusedEnd = e.message; }
+  ok(/not a \/tmp\/vs-\* scratch dir/.test(refusedEnd), 'endScratchAtExit refuses a path that is not a scratch dir');
+  // THE EVIDENCE: a live process's cwd and XDG_RUNTIME_DIR are held paths (real /proc); a private session bus under a
+  // record-less root is a suite's executable; a verify workspace's lane dir is its own root (item 4: dpi-measure)
+  const hc = mktmp('sweep9d-heldcwd'), hx = mktmp('sweep9d-heldxdg');
+  const sl = spawn('sleep', ['30'], { cwd: hc, env: { PATH: process.env.PATH, XDG_RUNTIME_DIR: hx + '/run' }, stdio: 'ignore' });
+  await new Promise((r) => setTimeout(r, 150));
+  const live = liveScratchPaths({ procRoot: '/proc' });
+  sl.kill('SIGKILL');
+  ok(live.includes(hc) && live.includes(hx + '/run'), 'liveScratchPaths (real /proc) carries a live process\'s cwd and its XDG_RUNTIME_DIR');
+  ok(JSON.stringify(scratchRootsOf({ cwd: '/', env: { HOME: '/tmp/vs-work/dpi-measure/run-1/home', XDG_RUNTIME_DIR: '/tmp/vs-work/dpi-measure/run-1/xdg' } })) === '["/tmp/vs-work/dpi-measure"]' && JSON.stringify(scratchRootsOf({ cwd: '/tmp/vs-work' })) === '["/tmp/vs-work"]', 'a verify workspace lane dir is its own root (/tmp/vs-work/<lane>), XDG_RUNTIME_DIR names it');
+  const proc9d = mktmp('procroot9d'), dpi = mktmp('dpi9d');
+  const mkp = (pid, { name, ppid, cwd = '/', env = {}, born = NOW - 30 * 60 * 1000 }) => {
+    const d = path.join(proc9d, String(pid)); fs.mkdirSync(d);
+    fs.writeFileSync(path.join(d, 'stat'), `${pid} (${name.slice(0, 15)}) S ${ppid} ${pid} ${pid} 0 -1 4194560 0 0 0 0 0 0 0 0 20 0 1 0 12345 0 0`);
+    fs.writeFileSync(path.join(d, 'cmdline'), `/usr/bin/${name}\0`); fs.writeFileSync(path.join(d, 'environ'), Object.entries(env).map(([k, v]) => `${k}=${v}`).join('\0') + '\0');
+    fs.symlinkSync(cwd, path.join(d, 'cwd')); fs.utimesSync(d, born / 1000, born / 1000);
+  };
+  mkp(1, { name: 'systemd', ppid: 0 });
+  const xdgEnv = { HOME: HOME_OF_OWNER, XDG_RUNTIME_DIR: dpi + '/run-1/xdg' };
+  mkp(50, { name: 'dbus-run-session', ppid: 1, env: xdgEnv }); mkp(51, { name: 'xdg-desktop-portal', ppid: 1, env: xdgEnv }); mkp(52, { name: 'gvfsd', ppid: 1, env: xdgEnv }); mkp(53, { name: 'sleep', ppid: 1, env: xdgEnv });
+  const j = judgeScratch({ procRoot: proc9d, now: NOW, self: 999999 });
+  const vp = j.victims.map((o) => o.pid).sort();
+  ok(JSON.stringify(vp) === '[50,51,52]' && j.spared.some((o) => o.pid === 53), `a stale private session bus rooted only by XDG_RUNTIME_DIR under a record-less scratch root is reaped (dbus-run-session / xdg-desktop-portal / gvfsd); the name still narrows (sleep spared): ${vp}`);
+  const preBus = await mutant9('no-bus', "ROOT_ENV.push('XDG_RUNTIME_DIR');", '');
+  ok(!preBus.scratchOrphans({ procRoot: proc9d, now: NOW, self: 999999 }).length, 'CONTROL: without XDG_RUNTIME_DIR as a root the session bus names no root — nothing reaped, its dir held for ever (red)');
 }
 
 // ── §10 THE LAUNCHER, ONCE, FOR REAL (B-f4cb, 2026-09-27) ────────────────

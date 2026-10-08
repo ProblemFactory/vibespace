@@ -198,4 +198,20 @@ function memGuardOffLine(label, sample) {
   return `${label}: memory is not judged for this session — /proc/<pid>/smaps_rollup (PSS) was not readable for every process, and a per-process sum over several processes (VmRSS, or RssAnon+RssShmem) is never compared with a footprint limit${rec ? ` (${rec}, recorded only)` : ''}; CPU is still judged`;
 }
 
-module.exports = { resourceVerdict, reportTransition, reportDelivery, resourceNoticeText, memoryText, providerGuard, guardFor, memGuardOffLine, MEM_METRIC_LABELS, JUDGED_METRICS, BROWSER_GUARD_KINDS };
+/** lane browser-resource-care (B-afeb): a profile directory's size (du, its cache included) against
+ *  BROWSER_DISK_BYTES → { over, bytes, limit } — REPORTED through reportTransition like the memory verdict, never a stop. */
+function diskVerdict(bytes, { limits = LIMITS } = {}) {
+  const L = limits || LIMITS;
+  const limit = Number.isFinite(L.BROWSER_DISK_BYTES) ? L.BROWSER_DISK_BYTES : LIMITS.BROWSER_DISK_BYTES;
+  if (!Number.isFinite(bytes) || bytes < 0) return { over: null, overKind: null, bytes: null, limit, memGuard: null, clear: null };
+  const over = bytes > limit ? `profile ${gb(bytes)} GB on disk (limit ${gb(limit)} GB)` : null;
+  return { over, overKind: over ? 'disk' : null, bytes, limit, memGuard: 'disk', clear: bytes < (L.REPORT_REARM_FRACTION || LIMITS.REPORT_REARM_FRACTION) * limit };
+}
+const gib = (b) => { const v = b / 2 ** 30; return `${Number.isInteger(v) ? v : v.toFixed(1)} GiB`; };
+/** The panel row's line: "profile 2.4 GB of 2 GiB — the cache can be cleared" (over) / "profile 0.3 GB of 2 GiB". */
+function diskLine(v) {
+  if (!v || !Number.isFinite(v.bytes)) return '';
+  return `profile ${gb(v.bytes)} GB of ${gib(v.limit)}${v.over ? ' — the cache can be cleared' : ''}`;
+}
+
+module.exports = { diskVerdict, diskLine, resourceVerdict, reportTransition, reportDelivery, resourceNoticeText, memoryText, providerGuard, guardFor, memGuardOffLine, MEM_METRIC_LABELS, JUDGED_METRICS, BROWSER_GUARD_KINDS };

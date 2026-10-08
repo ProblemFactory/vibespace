@@ -43,8 +43,42 @@ export function scratch(name) {
   // lane H verify r2: `vs-ab-<n>` is the PRODUCT's socket-dir fallback shape (src/browser-profiles.js socketDirDecision),
   // which the scratch reaper (scripts/ci.mjs PRODUCT_ROOT_RE) never judges — a suite minting it would hide from the sweep
   if (name === 'ab') throw new Error('scratch(): "ab" would mint /tmp/vs-ab-<pid> — the product\'s own socket-dir shape; pick another name');
-  return path.join(TMP_ROOTS[0], `${FIXTURE_CWD_PREFIX}${name}-${process.pid}`);
+  const p = path.join(TMP_ROOTS[0], `${FIXTURE_CWD_PREFIX}${name}-${process.pid}`);
+  if (IS_SUITE) endScratchAtExit(p);
+  return p;
 }
+
+/** B-60d2 (2026-10-07): A SUITE ENDS WHAT IT MADE. /tmp is tmpfs (RAM + swap) and held 30 of 62 GB: 13 986 `vs-*`
+ *  directories older than a day — 157 names minted here by 75 suites had no removal on any path, and a suite with one
+ *  removes nothing when it throws before its cleanup line. So a SUITE's mint (argv[1] is a scripts/test-*.mjs; a helper,
+ *  a dbg probe and ci.mjs mint nothing that is removed for them) is registered, and removed when the process exits —
+ *  a red, a throw, process.exit, the end of the event loop. A suite that HANDS its root to a detached process the reaper
+ *  owns calls keepScratch(dir), and is an EXEMPT row of test-architecture §84 with its reason. A suite killed by a signal
+ *  runs no exit hook: the gate's directory sweep (scripts/scratch-sweep.mjs) reaps that dir once nothing holds it and its
+ *  newest write is a day old. */
+const IS_SUITE = /^test-[A-Za-z0-9._-]+\.mjs$/.test(path.basename(process.argv[1] || ''));
+const ENDS = new Set();
+/** The delete helper: `dir` is removed when this process exits (idempotent; a non-scratch path is refused). */
+export function endScratchAtExit(dir) {
+  if (!String(dir).startsWith(path.join(TMP_ROOTS[0], FIXTURE_CWD_PREFIX))) throw new Error(`endScratchAtExit(): ${JSON.stringify(dir)} is not a ${TMP_ROOTS[0]}/${FIXTURE_CWD_PREFIX}* scratch dir`);
+  if (!ENDS.size) process.on('exit', endAll);
+  ENDS.add(dir);
+  return dir;
+}
+/** A root handed to a detached process: not removed at exit (the dir sweep judges it by its holders). */
+export function keepScratch(dir) { ENDS.delete(dir); return dir; }
+function endAll() { for (const d of ENDS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 }); } catch { } } }
+
+/** WHAT THE GATE'S DIRECTORY SWEEP MAY JUDGE (B-60d2) — scripts/scratch-sweep.mjs reads these, never a hand list.
+ *  `prefixes`: a unit is a directory `<under>/<prefix><name>` — what scratch() mints, and a verify workspace
+ *  `/tmp/vs-work/<lane>` (lane-ops: verifiers work there; the workspace itself is never a unit). `production`: never a
+ *  unit — the product's agent-browser socket dir (src/browser-profiles.js socketDirDecision: /tmp/vs-ab-<uid>, the shape
+ *  scratch('ab') refuses), sock-path's tmp rung (src/sock-path.js: /tmp/vs-dev-<uid>) and the workspace. */
+export const WORK_ROOT = path.join(TMP_ROOTS[0], `${FIXTURE_CWD_PREFIX}work`);
+export const SCRATCH_SWEEP = Object.freeze({
+  prefixes: Object.freeze([Object.freeze({ under: TMP_ROOTS[0], prefix: FIXTURE_CWD_PREFIX }), Object.freeze({ under: WORK_ROOT, prefix: '' })]),
+  production: Object.freeze([/^\/tmp\/vs-ab-(?:\d+|u)$/, /^\/tmp\/vs-dev-(?:\d+|u)$/, new RegExp(`^${WORK_ROOT.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`)]),
+});
 
 /** `scratch(name)` CREATED and OWNED (B-1d08, 2026-09-29): the directory plus
  *  its run record `<dir>/.vs-run.json` naming this process (pid + starttime +

@@ -178,6 +178,11 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
   keepOn = null, keptKeys = null } = {}) {
   const ENV_DIR = path.join(dataDir, 'browser-env');        // generated configs + pin symlinks (+ the C rung's `<key>.cwd`)
   const PROFILE_DIR = path.join(dataDir, 'browser-profiles'); // variant C scratch dirs (ours, swept)
+  // lane browser-resource-care (B-afeb): THE TMPDIR every agent-browser process VibeSpace launches gets — the CLI mints its
+  // ephemeral Chrome profile (`agent-browser-chrome-<uuid>`) and its Xvfb auth file (`agent-browser-xauth-<uuid>`) under
+  // TMPDIR; on the dev box that was the RAM-backed /tmp (measured 2026-10-07: 323 dirs, 8.9 GB). data/ is never a tmpfs.
+  const TMP_DIR = path.join(ENV_DIR, 'tmp');
+  let tmpMade = false; // made once per server (data/ may be a network mount)
   const bf = facts || createBrowserFacts({ pinned: require('../browser-facts.js').cliPinReader(dataDir) }); // lane browser-admin 2b: the floor is judged on the CLI the sessions run (the keeper's pin file)
   const uid = () => (typeof process.getuid === 'function' ? process.getuid() : null);
   // The durable conversation → key store (r5). session-stdout's meta writer
@@ -220,7 +225,7 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
   const automationFlagOn = () => setting('browser.automationFlag', true) !== false;
 
   function ensureDirs() {
-    for (const d of [ENV_DIR, PROFILE_DIR]) { try { mkdirPrivate(d); } catch { } }
+    for (const d of [ENV_DIR, PROFILE_DIR, TMP_DIR]) { try { mkdirPrivate(d); } catch { } }
   }
 
   /** The user's own `~/.agent-browser/config.json`, or {}. Read per resolve and
@@ -879,8 +884,10 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
     keepOn: () => keeping(), keptKeys: () => keptKeySet(),
     // B-f7ab: the late key (src/server/browser-key.js) names WHY `envFor` gave nothing — this switch off, before it asks
     isolationOn: () => enabled(),
+    // lane browser-resource-care: the daemon's TMPDIR (made 0700 on first ask; null when it cannot be made — the CLI keeps its own)
+    tmpDir: () => { if (tmpMade) return TMP_DIR; try { mkdirPrivate(ENV_DIR); mkdirPrivate(TMP_DIR); tmpMade = true; return TMP_DIR; } catch { return null; } },
     // paths, so the suite asserts the real ones rather than its own guess
-    ENV_DIR, PROFILE_DIR, configPathFor, linkPathFor, cwdPathFor, scratchDirFor, effectiveConfig, ensureSocketDir,
+    ENV_DIR, PROFILE_DIR, TMP_DIR, configPathFor, linkPathFor, cwdPathFor, scratchDirFor, effectiveConfig, ensureSocketDir,
     // takeover r2: the base the remote prelude's short socket dir is built on — `/resolve` names it to a
     // rung-H CLI, which keeps a shell AGENT_BROWSER_SOCKET_DIR only when it is `<base>/vs-ab-<its uid>`
     socketDirBase: B.socketDirBaseOf(socketDirBase),

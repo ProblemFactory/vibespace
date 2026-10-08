@@ -137,6 +137,8 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { gitEnvFrom } from './git-env.mjs';
 import { procStat, procBootMs, procBornMs, machineBootId, readRunRecord, runOwnerState, stampScratchRun } from './scratch-run.mjs';
+import { sweepScratchDirs } from './scratch-sweep.mjs';
+import { WORK_ROOT } from './scratch.mjs';
 
 const HERE = fileURLToPath(import.meta.url);
 const repo = path.resolve(path.dirname(HERE), '..');
@@ -233,6 +235,8 @@ export const SUITES = [
   // ── FAST TIER — the pre-push gate, by THE TIER RULE above. MEASURED
   // cheap→expensive so a pure-logic regression fails in seconds.
   { name: 'test-lazy', tier: 'fast', why: 'PURE · 15 ms' },
+  { name: 'test-memory-pressure', tier: 'fast', why: 'PURE tables + one stubbed watch run (real ps) · 0.4 s' }, // lane browser-resource-care (B-afeb): the pressure episode, who started each process group, the words, the disk verdict, the daemon TMPDIR
+  { name: 'test-mount-health', tier: 'fast', why: 'PURE tables + one fake-SafeFs canary run · 0.6 s' }, // lane fuse-canary-notice (B-b327): the canary episode, who presses a wedged mount, the words, the pause verdict per kind, the fixture-driven gates
   { name: 'test-boot-phase', tier: 'fast', why: 'PURE · 0.4 s' }, // B-0ece: the server boot phase (booting → ready, the stuck cap + its boot-stuck event), the boot ladder (1 → 2 → 5 → 10 s then the Reload button, a stall bound per request), the reload rule waits for ready; the wiring; four patched-copy controls
   { name: 'test-timed-sync', tier: 'fast', why: 'in-process · 40 ms' }, // design 011 lane 1 (store-timing): the store-write clock — buckets, the closed names, zero overhead when off, the real stores' names
   { name: 'test-fs-canary', tier: 'fast', why: 'in-process · 6.7 s' }, // design 011 lane 1: a blocked loop never reads as a slow mount (the canary's stat timed in its own SafeFs worker; a main-clock control)
@@ -1088,9 +1092,12 @@ export function argvScratchRoots(argv = [], opts = {}) {
 export const REAP_NAMES = new Set(['node', 'npm', 'claude', 'codex', 'opencode', 'Xvfb', 'Xvnc', 'Xtigervnc', 'x11vnc', 'xmessage', 'esbuild', 'dtach']); // Xtigervnc (lane N 2026-09-25, the heavy RED on 69720f2b): the singleton Desktop's X server by its own argv[0] (`Xvnc` is only Debian's symlink) — a leaked `Xtigervnc :7` under a GONE scratch dir held the machine-global :7/5901 for the next run to adopt (observed: cwd a deleted /tmp/vs-deskapp-smoke-*, adopted 40 s later by another run's server; test-ci-gate §9b)
 /** The environment names that ROOT a process (besides its cwd and a Chrome's --user-data-dir). */
 export const ROOT_ENV = ['HOME', 'VIBESPACE_DEVICE_ROOT', 'VIBESPACE_AGENTD_ROOT', 'AGENT_BROWSER_SOCKET_DIR', 'AGENT_BROWSER_PROFILE', 'AGENT_BROWSER_CONFIG'];
+// B-60d2 (2026-10-07): A PRIVATE SESSION BUS's runtime dir roots its helpers too — dpi-measure's dbus-run-session /
+// xdg-desktop-portal / gvfsd under /tmp/vs-work/dpi-measure/run-*/ carry it beside HOME, and held the dir after their run.
+ROOT_ENV.push('XDG_RUNTIME_DIR');
 /** …and the ones that name a DIRECTORY by what they mean (AGENT_BROWSER_CONFIG names a file: it proves a directory
  *  only by going on beneath the root, like a bare argument). */
-const DIR_ENV = new Set(['HOME', 'VIBESPACE_DEVICE_ROOT', 'VIBESPACE_AGENTD_ROOT', 'AGENT_BROWSER_SOCKET_DIR', 'AGENT_BROWSER_PROFILE']);
+const DIR_ENV = new Set(['HOME', 'VIBESPACE_DEVICE_ROOT', 'VIBESPACE_AGENTD_ROOT', 'AGENT_BROWSER_SOCKET_DIR', 'AGENT_BROWSER_PROFILE', 'XDG_RUNTIME_DIR']);
 /** Every scratch root a process NAMES, with where (`via`: cwd / an env name / --user-data-dir / argv) and whether the
  *  naming itself proves the root is a DIRECTORY (`dirProof`: a cwd, a directory-typed env name or flag, or a path that
  *  goes on beneath the root). In order (cwd, ROOT_ENV, --user-data-dir, the argv roots). `joined` = its /proc cmdline
@@ -1124,8 +1131,12 @@ export function scratchRootClaims({ cwd = '', cwdGone = null, env = {}, argv = [
     // rooted there was convicted after the floor. A name the shape does not cover names no scratch root at all.
     const next = s.charAt(m[0].length); if (next && next !== '/') continue;
     const proof = c.dir || next === '/';
-    const seen = out.find((o) => o.root === m[0] && o.via === c.via);
-    if (seen) seen.dirProof = seen.dirProof || proof; else out.push({ root: m[0], via: c.via, dirProof: proof, gone: !!c.gone });
+    // B-60d2: A VERIFY WORKSPACE'S LANE DIR IS ITS OWN ROOT — /tmp/vs-work/<lane>, never the shared workspace, so one
+    // live lane there no longer spares every other lane's orphans (and the directory sweep judges the same unit)
+    const sub = m[0] === WORK_ROOT ? /^\/([A-Za-z0-9._-]+)(?:\/|$)/.exec(s.slice(m[0].length)) : null;
+    const root = sub ? `${m[0]}/${sub[1]}` : m[0];
+    const seen = out.find((o) => o.root === root && o.via === c.via);
+    if (seen) seen.dirProof = seen.dirProof || proof; else out.push({ root, via: c.via, dirProof: proof, gone: !!c.gone });
   }
   return out;
 }
@@ -1135,7 +1146,10 @@ export function scratchRootsOf(info = {}) {
   for (const c of scratchRootClaims(info)) if (!out.includes(c.root)) out.push(c.root);
   return out;
 }
-const reapNamed = (a0) => REAP_NAMES.has(a0) || a0.startsWith('vibespace-devic') || a0.startsWith('chrome');
+// B-60d2: a PRIVATE SESSION BUS a suite or a measurement started (dbus-run-session and what it activates) is a suite's
+// executable too — rooted under a scratch dir by HOME / XDG_RUNTIME_DIR, never the owner's desktop (rooted in ~ and /run/user)
+export const SESSION_BUS_HEADS = ['dbus-', 'xdg-desktop-por', 'xdg-document-po', 'xdg-permission-', 'gvfs', 'at-spi'];
+const reapNamed = (a0) => REAP_NAMES.has(a0) || a0.startsWith('vibespace-devic') || a0.startsWith('chrome') || SESSION_BUS_HEADS.some((h) => a0.startsWith(h));
 // verify r2 L3: a process answers to its argv[0] (the first whitespace token — a title-rewritten Chrome's argv is one
 // string) OR its /proc comm (/usr/bin/google-chrome's comm is `chrome`); never comm alone (the claude CLI's comm is its version)
 const reapNamedProc = (i) => reapNamed(i.a0) || (!!i.comm && reapNamed(i.comm));
@@ -1361,6 +1375,31 @@ export function judgeScratch({ procRoot = defaultProcRoot(), now = Date.now(), s
 /** The orphans a sweep would reap: [{pid, ppid, name, cmd, root, via, why, rule, owner, ageMs, starttime}] — the
  *  `victims` of judgeScratch (PURE over a proc root). */
 export function scratchOrphans(opts = {}) { return judgeScratch(opts).victims; }
+/** B-60d2: EVERY scratch path a live process names (cwd — a gone one too —, the ROOT_ENV values, every argv element or
+ *  word, a `<flag>=` value), normalized, whole — the directory sweep's "held" evidence: a unit is held when one of these
+ *  is it or lies beneath it. A zombie names nothing. */
+export function liveScratchPaths({ procRoot = defaultProcRoot() } = {}) {
+  let pids = [];
+  try { pids = fs.readdirSync(procRoot).filter((d) => /^\d+$/.test(d)).map(Number); } catch (e) { throw new Error(`the process table ${procRoot} could not be read (${(e && e.code) || e}) — no directory judged`); }
+  const out = new Set(), bootMs = procBootMs(procRoot);
+  for (const pid of pids) {
+    const i = procInfo(procRoot, pid, bootMs); if (!i || i.state === 'Z') continue;
+    const cands = [String(i.cwd || '').replace(/ \(deleted\)$/, ''), ...ROOT_ENV.map((k) => i.env[k]), ...i.argv.flatMap((a) => String(a || '').split(/\s+/).map((w) => w.slice(w.startsWith('/') ? 0 : w.indexOf('=') + 1)))];
+    for (const c of cands) { const n = normPath(c); if (SCRATCH_ROOT_RE.test(n)) out.add(n.length > 1 ? n.replace(/\/+$/, '') : n); }
+  }
+  return [...out];
+}
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+/** THE DIRECTORY SWEEP, where the process reaper runs (after every suite, at every heavy launch, `--reap`): the scratch
+ *  dirs nothing live names and nothing wrote for a day (scripts/scratch-sweep.mjs). Never under a fake process table
+ *  (a seam's word about who is alive is not the kernel's). `VIBESPACE_CI_DIR_SWEEP=off` skips the tiers' sweeps (a lane
+ *  on a box whose reap is the owner's); `--reap` by hand always judges. */
+export function sweepDirsNow({ dryRun = false, log = console.log, byHand = false, procRoot = defaultProcRoot(), ...opts } = {}) {
+  if (!byHand && process.env.VIBESPACE_CI_DIR_SWEEP === 'off') return null;
+  if (procRoot !== '/proc') { log(`[ci] dir sweep: skipped under the fake process table ${procRoot} (a test seam) — no directory judged`); return null; }
+  return sweepScratchDirs({ liveRoots: liveScratchPaths({ procRoot }), dryRun, log, keepList: [REPO_ROOT, path.join(REPO_ROOT, 'data')], ...opts });
+}
+const quietSweep = () => { const lines = []; const r = sweepDirsNow({ log: (l) => lines.push(l) }); if (r && (r.reaped.length || r.failed.length)) console.log(lines.join('\n')); };
 /** THE VICTIM LIST, ONE LINE PER PID (B-a965, 2026-09-24): a sweep that named only its
  *  roots left "22 roots / 34 processes" unattributable after a stray `ci.mjs --help`
  *  reaped a lane's detached servers under /tmp/vs-work. PURE over the list. B-1d08: each
@@ -1566,10 +1605,12 @@ export function sweepUsageIndexDirs({ root = path.join(os.homedir(), '.vibespace
  *  victims with their evidence, the spared and why, the processes naming no root)
  *  and signals nothing; it takes no lock (it signals nothing). A refused test seam (procRootSeam) is printed and
  *  exits 2 on both paths (verify r1 K7); an accepted one lists and signals nothing (verify r2 R2). */
+const dirSweepByHand = (log, dryRun) => { try { sweepDirsNow({ dryRun, log, byHand: true }); } catch (e) { log(`[ci] dir sweep refused: ${e.message}`); } };
 export function reapByHand({ dryRun = false, log = console.log, ...opts } = {}) {
   let seam = null;
   try { seam = opts.procRoot ? null : procRootSeam(); } catch (e) { log(`[ci] --reap refused: ${e.message}`); return 2; }
   if (dryRun) {
+    if (!seam && !opts.procRoot) dirSweepByHand(log, true); // B-60d2: the dirs (a fake table judges none)
     if (seam) log(seamLine(seam));
     try { for (const line of verdictReport(judgeScratch({ ...opts, procRoot: seam || opts.procRoot }))) log(line); } catch (e) { log(`[ci] --reap refused: ${e.message}`); return 2; } // verify r3 (T3): announced = judged
     return 0;
@@ -1578,13 +1619,16 @@ export function reapByHand({ dryRun = false, log = console.log, ...opts } = {}) 
   const list = reapScratchOrphans({ log, ...opts });
   // verify r4 (X4c): a table that vanished mid-sweep throws out of the sweep (its lock released by the sweep's finally) — refused, said, exit 2 on both paths
   if (list.skipped) return 3;
-  if (!list.length) { log('[ci] no scratch orphans'); return 0; }
+  // B-60d2: the directories after the processes (a dir a victim held is free once it is gone)
+  const dirSweep = () => { if (!seam && !opts.procRoot) dirSweepByHand(log, false); };
+  if (!list.length) { log('[ci] no scratch orphans'); dirSweep(); return 0; }
   if (seam) { log(`[ci] test seam: ${list.length} listed, none signalled`); return 0; } // verify r2 R2: the closing line never claims a reap under a seam
   // verify r1 (K5): a victim that died but is not yet reaped by its parent is a ZOMBIE — `kill(pid, 0)` still succeeds, so
   // the closing line called it "still alive after SIGKILL" (seen: a non-detached child during a sync sweep). Dead is dead.
   const stillRunning = (pid) => { const st = procStat(pid); return !!st && st.state !== 'Z' && st.state !== 'X'; };
   const left = list.filter((o) => stillRunning(o.pid));
   log(`[ci] reaped ${list.length - left.length} of ${list.length} scratch orphan process(es)${left.length ? ` — ${left.length} still alive after SIGKILL: ${left.map((o) => o.pid).join(' ')}` : ''}`);
+  dirSweep();
   return 0;
   } catch (e) { log(`[ci] --reap refused: ${e.message}`); return 2; }
 }
@@ -2283,6 +2327,7 @@ async function fastGate({ sha: wantSha, isolate } = {}) {
         console.log(r.lines.join('\n'));
         // a suite may not leave a daemon behind (2.369.104) — swept after every suite, as the heavy lanes do
         try { await reapScratchOrphansAsync({}); } catch (e) { console.log(`  · scratch reaper skipped: ${e && e.message}`); }
+        try { quietSweep(); } catch (e) { console.log(`  · dir sweep skipped: ${e && e.message}`); } // …nor its scratch dir, once nothing holds it (B-60d2)
         sweepUsageIndexDirs(); // …nor a usage index of a data/ it removed (design 011 lane 3)
         if (red) break;
         if (r.absent) { absent.push(s.name); continue; }
@@ -2542,6 +2587,7 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
         // a suite may not leave a daemon behind (2.369.104) — the lanes sweep
         // after every suite exactly as the sync runner does, without blocking
         try { await reapScratchOrphansAsync({}); } catch (e) { console.log(`  · scratch reaper skipped: ${e && e.message}`); }
+        try { quietSweep(); } catch (e) { console.log(`  · dir sweep skipped: ${e && e.message}`); } // …nor its scratch dir, once nothing holds it (B-60d2)
         sweepUsageIndexDirs(); // …nor a usage index of a data/ it removed (design 011 lane 3)
         // Absent at the commit being gated (round 6): not run, not judged, and
         // not counted in `timings` — a marker that named 97 suites when 42 of
@@ -2732,7 +2778,8 @@ export function heavyAlreadyGreen({ markers = [], sha, full, commitTimeMs, scope
 }
 function heavyLaunch(sha, { dir, only, lock, lockWaitMs, range } = {}) {
   const d = markerDir(dir);
-  try { reapScratchOrphans({ log: (m) => console.error(m) }); } catch (e) { console.error(`[ci:heavy] scratch reaper skipped: ${e && e.message}`); } // the tier starts on a box the last runs did not litter (2.369.104); a refused seam is said, never swallowed (verify r1 K7)
+  try { reapScratchOrphans({ log: (m) => console.error(m) }); } catch (e) { console.error(`[ci:heavy] scratch reaper skipped: ${e && e.message}`); }
+  try { sweepDirsNow({ log: (m) => console.error(m) }); } catch (e) { console.error(`[ci:heavy] dir sweep skipped: ${e && e.message}`); } // B-60d2: the leaked dirs too // the tier starts on a box the last runs did not litter (2.369.104); a refused seam is said, never swallowed (verify r1 K7)
   if (!sha || gitOut(['cat-file', '-e', sha + '^{commit}']) === null) { console.error(`[ci:heavy] not launching: ${sha ? 'unknown commit ' + shortSha(sha) : 'no sha given'}`); return 0; }
   // SERIALISE THE TIER, NOT JUST THE SHA (round 2 finding). Refusing only a
   // twin for the SAME sha meant two pushes inside one 16-minute window started

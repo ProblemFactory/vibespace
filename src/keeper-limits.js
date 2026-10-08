@@ -72,5 +72,8 @@ const REPORT_NOTICE_FLOOR_MS = 60 * 60 * 1000;
  *  naming the sessions that hold the slots — never an OOM on a machine whose
  *  systemd unit exists to survive one. */
 const CONCURRENT_CAP = 6;
+/** lane browser-resource-care (B-afeb): a browser profile directory's DISK budget, its cache included — REPORTED like
+ *  the memory footprint (src/runaway-guard.js diskVerdict / diskLine, the same report floor), never a stop. */
+const BROWSER_DISK_BYTES = 2 * 1024 * 1024 * 1024;
 
-module.exports = { GUARD_SAMPLE_MS, GUARD_CPU_PCT, GUARD_CPU_SUSTAIN_MS, GUARD_MEM_BYTES, RUNAWAY_COOLDOWN_MS, REPORT_REARM_FRACTION, REPORT_REARM_SAMPLES, REPORT_NOTICE_FLOOR_MS, CONCURRENT_CAP };
+module.exports = { GUARD_SAMPLE_MS, GUARD_CPU_PCT, GUARD_CPU_SUSTAIN_MS, GUARD_MEM_BYTES, RUNAWAY_COOLDOWN_MS, REPORT_REARM_FRACTION, REPORT_REARM_SAMPLES, REPORT_NOTICE_FLOOR_MS, CONCURRENT_CAP, BROWSER_DISK_BYTES };

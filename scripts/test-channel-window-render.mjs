@@ -1469,7 +1469,8 @@ console.log('⑧ the Push… dialog says what push is');
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     return out;
   })()`);
-  ok(!P8.fail && P8.first === P8.intro && /Gmail/.test(P8.intro || '') && /Pub\/Sub/.test(P8.intro || '') && /Lark/.test(P8.intro || '') && /长连接/.test(P8.intro || '') && /轮询/.test(P8.intro || ''), 'the Push… dialog OPENS with what push is — seconds vs polling, and BOTH vendors\' requirements (Gmail: a Pub/Sub topic + this instance\'s subscription; Lark: the app\'s long connection)', JSON.stringify(P8));
+  // lane channel-vendor-one-file (int236): the line is what push is + THIS account's DECLARED transport (gmail: pubsub-pull); the panel names no vendor
+  ok(!P8.fail && P8.first === P8.intro && /几秒/.test(P8.intro || '') && /轮询/.test(P8.intro || '') && /Pub\/Sub/.test(P8.intro || '') && !/Lark|飞书|长连接/.test(P8.intro || ''), 'the Push… dialog OPENS with what push is — seconds vs polling — and THIS account\'s own requirement from its declared transport (Gmail\'s pubsub-pull: a Pub/Sub topic + this instance\'s subscription), no other vendor named', JSON.stringify(P8));
   ok(!P8.fail && /独占/.test(P8.excl || '') && /共享/.test(P8.excl || '') && /游标/.test(P8.excl || ''), 'the exclusivity select says what exclusive and shared mean', P8.excl);
   ok(!P8.fail && P8.tip === P8.intro, 'the menu row carries the same sentence as its tooltip', JSON.stringify(P8.tip));
 }

@@ -3384,6 +3384,13 @@ P1 是对的，而 P1 在本轮长出了附着集合与 handle 寻址，所以�
 
 ---
 
+## 落地记录 —— 浏览器资源照看（lane browser-resource-care，B-afeb，2026-10-07）
+
+- **离开 tmpfs**：VibeSpace 启动的每个 agent-browser 进程的 TMPDIR = `data/browser-env/tmp`（keeper 运行时 `createBrowserRuntime({ tmpDir })`；`/resolve` 应答的 `tmpDir` → `childEnv` ⑧）。实测：CLI 的临时 Chrome 配置 `agent-browser-chrome-*`（250 个，8.81 GB）与 `agent-browser-xauth-*` 原本落在内存盘 /tmp；具名配置在 `~/.agent-browser`（ext4）与 `data/browser-profiles/<key>`（数据盘），不在 tmpfs。
+- **预算**：`keeper-limits.BROWSER_DISK_BYTES` = 2 GiB；`runaway-guard.diskVerdict / diskLine`（"profile 2.4 GB of 2 GiB — the cache can be cleared"），只报告不停止。keeper 的 du 采样、面板行文字与“清除缓存”动作尚未接线（下一车道）。
+- **内存压力告知本人**：`src/memory-pressure.js`（PURE）+ `src/server/memory-pressure-watch.js`：≥ 90 % 开、< 80 % 关，一次压力一条 For you（来源 `server`，“本机”），自动结束；按 ΣPss 列出前 5 个进程组及其启动者（keeper 标记 ⇒ 配置 + 使用者；会话进程树；后台任务；桌面应用；其余 = “不是 VibeSpace 启动的进程”），附 /tmp 内存盘用量与最大的根目录。
+- **agent 自己的 Chrome 会被告知**：带 `--remote-debugging-port`、无 `--vibespace-keeper` 标记、位于某会话进程树下的 Chrome 计为该会话的；每次启动潮只告知一次（session-status 通知 `browser-own-chrome`，下一轮免费送达），从不杀进程。
+
 ## 附录 C —— 批评日志（第四轮）
 
 一位对抗性批评者读了第三轮的修订，报了六条。**六条全部成立**，每一条都在改任何东西之前先按源码

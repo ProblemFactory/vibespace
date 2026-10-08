@@ -46,6 +46,9 @@ try {
   ok(JSON.stringify(acme.blocksOf({ raw: { title: 'Ticket 7' } })) === '[{"k":"card","title":"Ticket 7","rows":[]}]', 'its blocks rung is its own module');
   const inst = reg.create('acme', { id: 'a1', kind: 'acme' }, {});
   ok(typeof inst.apiBearer === 'function' && acme.api.hosts[0] === 'api.acme.test', 'the raw-API fence takes its declared row beside its bearer');
+  // lane channel-vendor-one-file: the account menu's "API access…" row reads the view's declared fact (never a kind list)
+  const view = eng.adapterView({ id: 'a1', kind: 'acme', label: 'Acme', enabled: true, options: {} });
+  ok(view && view.rawApi === true && view.push === null, 'its account view carries the declared raw-API fact (rawApi; a poll vendor has no push view) — the panel reads it, never its kind');
   ok(eng.consentLandingOf ? eng.consentLandingOf('acme') === null || typeof eng.consentLandingOf('acme') === 'object' : true, 'its consent row was validated at load (ephemeral, no landing)');
 } finally { if (eng.stop) eng.stop(); }
 

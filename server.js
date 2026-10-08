@@ -476,6 +476,9 @@ const { migrateLegacyHomeProjects, restoreSessions, restoreAgentdPipeSessions,
 });
 // ── Agent-tool generators + hook registration (src/server/agent-tool-generators.js) ──
 const hooksLate = require('./src/server/hooks-late.js').create({ activeSessions, getSessionStatus: () => sessionStatus, getUserTodos: () => userTodos, sessionStatusKey: (...a) => sessionStatusKey(...a), harnesses: require('./src/harnesses'), log: (...a) => console.log(...a), warn: (...a) => console.warn(...a) }); // lane hooks-create: a hook file CREATED by the registration ('dir-exists') is told to the conversations that predate it (one free note each + ONE For-you line); held until ready() after the boot restore; owns POST /api/cli-config/apply
+// lane browser-resource-care (B-afeb): memory pressure reaches the owner — ONE For-you item per episode naming who started each
+// process group (fed by sysinfo.startWatch's onSample below); a conversation's own Chrome (debugging port, no keeper mark) is told
+const memoryPressure = require('./src/server/memory-pressure-watch.js').create({ activeSessions, BUFFERS_DIR, getUserTodos: () => userTodos, getSessionStatus: () => sessionStatus, sessionStatusKey: (...a) => sessionStatusKey(...a), jobsWiringOf: () => { try { return jobsWiring; } catch { return null; } }, getKeeper: () => { try { return require('./src/server/browser-keeper.js').keeper(); } catch { return null; } }, log: console });
 const {
   AGENT_BIN_DIR, EDITOR_DIR, EDITOR_CMD, STATUS_CMD, USAGE_STATUSLINE_CMD, HOOK_CMD,
   createEditorHelper, createStatusHelper, createHookHelper, userStatuslineCmd,
@@ -727,11 +730,8 @@ app.get('/api/sysinfo/history', (req, res) => {
   res.json({ points: sysinfo.history(ms), rangeMs: ms, cpus: require('os').cpus().length });
 });
 sysinfo.startWatch({
-  dataDir: path.join(__dirname, 'data'),
-  broadcast: (msg) => {
-    const json = JSON.stringify(msg);
-    wss.clients.forEach(c => { if (c.readyState === WS_OPEN) { try { c.send(json); } catch {} } });
-  },
+  dataDir: path.join(__dirname, 'data'), onSample: (mem) => memoryPressure.onSample(mem), // lane browser-resource-care (B-afeb): the memory-pressure episode (src/server/memory-pressure-watch.js)
+  broadcast: (msg) => { const json = JSON.stringify(msg); wss.clients.forEach(c => { if (c.readyState === WS_OPEN) { try { c.send(json); } catch {} } }); },
 });
 
 app.get('/api/tasks', (req, res) => res.json({ tasks: tasks.list() }));
@@ -968,18 +968,18 @@ global.__vsEvent = (name, detail) => { try { telemetry.record({ kind: 'event', n
 
 // ── Threadpool canary (2.108.6; off the main thread since design 011 lane 1) ── src/server/fs-canary.js says why: the
 // stat is timed in its own SafeFs worker and the main loop's delay is a second fact, so a blocked loop never reads as
-// a slow mount. Three stats past 5 s in a row still kick the mount health sweep.
+const mountHealth = require('./src/server/mount-health-watch.js').create({ file: path.join(__dirname, 'package.json'), getUserTodos: () => userTodos, ownerIds: (procs) => memoryPressure.ownerIds(procs), log: console }); // a slow mount. Three stats past 5 s in a row still kick the mount health sweep; lane fuse-canary-notice (B-b327): every answered probe drives the mount-health EPISODE — ONE For-you item naming the mount + who presses it, the server's own scans paused on it (src/server/mount-health-watch.js)
 {
   const fsCanary = require('./src/server/fs-canary.js').createFsCanary({
     file: path.join(__dirname, 'package.json'),
     record: (ev) => telemetry.record(ev),
-    onWedged: () => { try { mounts._healthSweep().catch(() => {}); } catch {} },
+    onWedged: () => { try { mounts._healthSweep().catch(() => {}); } catch {} }, onProbe: (p) => mountHealth.onProbe(p),
   });
   setInterval(() => { fsCanary.tick().catch(() => {}); }, 10000).unref();
 }
 
 const usageHistory = new UsageHistory({
-  dataDir: path.join(__dirname, 'data'),
+  dataDir: path.join(__dirname, 'data'), paused: (roots) => mountHealth.paused('usage-walk', roots), // lane fuse-canary-notice: a wedged mount under the walk pauses it
   // THE RECORD, not list() (prod-stall-202): list() reads every account's login files and the
   // walker asks this once per ledger line — seconds of synchronous NFS reads per walk step on
   // production. The same three fields list()'s row carries: its type/backend defaults, and a
@@ -1459,7 +1459,7 @@ const { mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, 
 });
 // ── Session API (extracted to src/routes/sessions.js) ──
 const { router: sessionsRouter, setup: setupSessions } = require('./src/routes/sessions');
-setupSessions({ activeSessions, webuiPids, refreshWebuiPids, createSessionMessages, BUFFERS_DIR, PERMISSION_MODES, execFileSync, hosts, accounts, sessionAuth, serverSetting });
+setupSessions({ activeSessions, webuiPids, refreshWebuiPids, createSessionMessages, BUFFERS_DIR, PERMISSION_MODES, execFileSync, hosts, accounts, sessionAuth, serverSetting, paused: (kind) => mountHealth.paused(kind) });
 // ── Channels / communication panel (src/server/channels-wiring.js) ──
 const channelsWiring = require('./src/server/channels-wiring.js').create({
   app, dataDir: path.join(__dirname, 'data'), bcastAll: (...a) => bcastAll(...a), integrations: integrationsWiring.store, getMounts: () => mounts, // 2.369.195: a storage mount's own OAuth client, borrowed by an account (server-side copy)

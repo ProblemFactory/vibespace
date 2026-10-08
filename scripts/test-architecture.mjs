@@ -59,7 +59,7 @@ const resolveRel = (from, spec) => {
 };
 
 // ── Tier membership (path-based; NEW files inherit their directory's tier) ──
-const PURE = new Set(['src/timed-sync.js' /* design 011 lane 1 (store-timing): the store-write clock — performance.now + counters, imports nothing; §72 */, 'src/channel-search.js' /* design 010 (B-c9be): the vendor snippet's ONE reader, the merge, the full-search refusal table, the dialog's coverage / status words — the store, the engine, the adapters and the dialog share them; imports only channel-record (PURE → PURE) */, 'src/channel-focus.js' /* design 008 (B-3cf8): the first screen's predicate (statusTag) + the first read's candidate test + the page rules — the engine's first read and the panel's keyed store share them; imports nothing */, 'src/app-recipes.js' /* design 009: the recipes table — imports nothing */, 'src/app-card.js' /* design 009: THE one card of an app install — its view + the digest of what it showed, shared by the engine and the client; imports nothing */, 'src/record-lateness.js' /* lane-hot-switch: a late record is not a live fact — the stream clock + the look-ahead, imports nothing */, 'src/hidden-chars.js', 'src/encoded-command.js' /* lane machine-card-fold: a PowerShell -EncodedCommand decoded for display (imports only hidden-chars) */, 'src/exit-call.js' /* lane exit-calls-in-history: a vibespace-exit Bash call + its result read as the machine call it is, and the card it draws — the server's live pairing and the bundle share it; imports only exit-reach + hidden-chars (PURE → PURE) */, 'src/assistant-note.js' /* B-40f8: text addressed to the assistant — the note rule + THE turn preview, server builders and client alike; imports nothing */, 'src/window-desktop.js', 'src/plugin-manifest.js', 'src/account-pool-auto.js', 'src/model-family.js', 'src/task-color-seq.js', 'src/ssh-key-format.js', 'src/session-schema.js', 'src/otel-truth.js', 'src/msg-acl.js', 'src/backend-caps.js',
+const PURE = new Set(['src/mount-health.js' /* lane fuse-canary-notice (B-b327): the wedged-mount episode, who presses it, the words, the pause verdict per kind — imports only memory-pressure (PURE → PURE, the ONE attribution) */, 'src/memory-pressure.js' /* lane browser-resource-care (B-afeb): the memory-pressure episode + who started each process group — imports nothing; PURE since lane fuse-canary-notice shares its attribute() */, 'src/timed-sync.js' /* design 011 lane 1 (store-timing): the store-write clock — performance.now + counters, imports nothing; §72 */, 'src/channel-search.js' /* design 010 (B-c9be): the vendor snippet's ONE reader, the merge, the full-search refusal table, the dialog's coverage / status words — the store, the engine, the adapters and the dialog share them; imports only channel-record (PURE → PURE) */, 'src/channel-focus.js' /* design 008 (B-3cf8): the first screen's predicate (statusTag) + the first read's candidate test + the page rules — the engine's first read and the panel's keyed store share them; imports nothing */, 'src/app-recipes.js' /* design 009: the recipes table — imports nothing */, 'src/app-card.js' /* design 009: THE one card of an app install — its view + the digest of what it showed, shared by the engine and the client; imports nothing */, 'src/record-lateness.js' /* lane-hot-switch: a late record is not a live fact — the stream clock + the look-ahead, imports nothing */, 'src/hidden-chars.js', 'src/encoded-command.js' /* lane machine-card-fold: a PowerShell -EncodedCommand decoded for display (imports only hidden-chars) */, 'src/exit-call.js' /* lane exit-calls-in-history: a vibespace-exit Bash call + its result read as the machine call it is, and the card it draws — the server's live pairing and the bundle share it; imports only exit-reach + hidden-chars (PURE → PURE) */, 'src/assistant-note.js' /* B-40f8: text addressed to the assistant — the note rule + THE turn preview, server builders and client alike; imports nothing */, 'src/window-desktop.js', 'src/plugin-manifest.js', 'src/account-pool-auto.js', 'src/model-family.js', 'src/task-color-seq.js', 'src/ssh-key-format.js', 'src/session-schema.js', 'src/otel-truth.js', 'src/msg-acl.js', 'src/backend-caps.js',
   // AGENT BROWSER (design-agent-browser-v2 §3.6): the identity/spawn-env decisions, the
   // registry + lease model and the keeper's verdicts — imports nothing (P0/P1); and the ONE
   // constants home every process keeper counts and bounds by (src/keeper-limits.js)
@@ -1492,6 +1492,7 @@ for (const [edge] of EXCEPTIONS) {
     { file: 'src/sysinfo.js', needle: "execFile('ps', ['aux', '--sort=-rss']", why: 'ONE per sysinfo read (topProcs), never per item; PS_MAX_BUFFER governs its size.' },
     { file: 'src/sysinfo.js', needle: "execFile('ps', ['aux']", why: 'ONE per sysinfo read — the fallback for a `ps` with no --sort.' },
     { file: 'src/sysinfo.js', needle: "execFile('ps', ['axo', PS_COLUMNS]", why: 'ONE per process-list read (listProcs), the System panel table.' },
+    { file: 'src/server/memory-pressure-watch.js', needle: "execFile('ps', ['axo', 'pid=,ppid=,rss=,comm=,args=']", why: 'ONE per memory-pressure EPISODE start + ONE per 5-min own-Chrome scan (lane browser-resource-care) — async, never per process; PS_MAX_BUFFER governs its size.' },
     { file: 'src/transcript-service.js', needle: "execFileSync('fuser', [fp]", why: 'ONE per human-triggered `rescue` — the two-writer refusal. Not on any poll.' },
     { file: 'src/incident.js', needle: "sh('ps', ['-eo', 'pid,ppid,lstart,etime,rss,stat,args']", why: 'ONE per HUMAN-TRIGGERED incident capture ("Report a problem"), and the WHOLE-TABLE form — the frozen scene is exactly what a human needs and /proc would only re-implement `ps`. Not on any poll, create or kill. Spelled through a promisified alias, which is why TOOL_FIRST exists.' },
   ];
@@ -4472,5 +4473,142 @@ console.log('§82 CLAUDE.md is an index of ≤ 100 000 bytes; the moved per-file
   ];
   ok(mid > 0 && r82.every(([, got, want]) => got === want), `§82 CONTROLS: ${r82.map(([n, got, want]) => `${n} (${got === want ? (want ? 'RED' : 'quiet') : 'WRONG'})`).join(', ')}`);
 }
+// §83 A CHANNEL VENDOR IS ITS FOLDER + ONE LINE: NO SHARED CHANNEL FILE SPELLS A VENDOR ID (lane channel-vendor-one-file,
+// B-e3f1; the owner 2026-10-04: "保持通用内部接口格式，拓展 vendor 只需要 vendor-specific 的文件 + 一行注册"). A vendor declares
+// its settings table + integration row (+ its paste words) in src/channels/<kind>/manifest.js, joined by ONE line of
+// src/channels/registry-list.js; its caps, consent row and raw-API row ride on its adapter module. Everything shared
+// reads those declarations (test-channel-manifest proves a fake vendor joins by that one line). THIS census keeps the
+// shared side honest. Scope: every src file named channel*/channels* (the engine + its families, access, wiring,
+// routes, caps, drain, feed, words, panel, dialogs, window …) + src/integration-registry.js, OUTSIDE src/channels/ (the
+// adapters' own files). A hit = a string / template / regex token (acorn: a comment or an identifier such as
+// RANGE_SLACK_MS is never one) that contains a vendor id: the registry list's kinds + 'feishu' (Lark's China name, the
+// same adapter). The brand SVGs (src/lib/icons.js) and the dictionaries' display names are outside the scope by name.
+// No EXEMPT row: base f835b0e58 had 7 tokens in 4 files (the "API access…" row's kind list, the push line, a copy
+// row's why, the send-scope sentence, Slack's paste-back hint) — now declared facts (view.rawApi, the push view's
+// transport, paste.notes.landed) or words that name no vendor.
+console.log('§83 no shared channel file spells a channel vendor id (a vendor = its folder + one registry-list line):');
+{
+  const req83 = (await import('node:module')).createRequire(import.meta.url);
+  const acorn83 = req83('acorn');
+  const IDS83 = [...req83(path.join(REPO, 'src/channels/registry-list.js')).MANIFESTS.map((m) => m.kind), 'feishu'];
+  const files83 = fs.readdirSync(path.join(REPO, 'src'), { recursive: true }).map((f) => `src/${String(f).split(path.sep).join('/')}`)
+    .filter((f) => f.endsWith('.js') && !f.startsWith('src/channels/') && (/(^|\/)channels?[-.]/.test(f) || f === 'src/integration-registry.js')).sort();
+  const tokens83 = (src) => {
+    for (const sourceType of ['module', 'script']) {
+      try { return [...acorn83.tokenizer(src, { ecmaVersion: 'latest', sourceType, allowHashBang: true, allowReturnOutsideFunction: true, locations: true })]; } catch { /* the other source type */ }
+    }
+    return null;
+  };
+  const judge83 = (rows, ids) => {
+    const re = new RegExp(ids.join('|'), 'i'), hits = [], unread = [];
+    for (const [rel, src] of rows) {
+      const toks = tokens83(src);
+      if (!toks) { unread.push(rel); continue; }
+      for (const tok of toks) {
+        const lit = tok.type === acorn83.tokTypes.string || tok.type === acorn83.tokTypes.template ? String(tok.value)
+          : tok.type === acorn83.tokTypes.regexp ? String(tok.value && tok.value.pattern) : null;
+        if (lit !== null && re.test(lit)) hits.push(`${rel}:${tok.loc.start.line} ${JSON.stringify(lit.slice(0, 60))}`);
+      }
+    }
+    return { hits, unread };
+  };
+  const rows83 = files83.map((f) => [f, fs.readFileSync(path.join(REPO, f), 'utf-8')]);
+  const j83 = judge83(rows83, IDS83);
+  console.log(`  ${files83.length} files · vendor ids ${IDS83.join(', ')} · ${j83.hits.length} hit(s)${j83.hits.length ? '\n    ' + j83.hits.join('\n    ') : ''}`);
+  const BRIEF83 = ['src/server/channels-engine.js', 'src/server/channels-access.js', 'src/server/channels-wiring.js', 'src/server/channels-auth.js', 'src/server/channels-outbound.js', 'src/routes/channels.js', 'src/channel-caps.js', 'src/channel-drain.js', 'src/channel-feed.js', 'src/lib/channel-words.js', 'src/lib/channels-panel.js', 'src/lib/channel-account-dialogs.js', 'src/channel-settings.js', 'src/integration-registry.js'];
+  ok(BRIEF83.every((f) => files83.includes(f)) && IDS83.length >= 4, `§83 the scope holds the engine + its families, access, wiring, routes, caps, drain, feed, words, panel, dialogs, settings, registry (${files83.length} files)${BRIEF83.filter((f) => !files83.includes(f)).map((f) => ' — missing ' + f).join('')}`);
+  ok(j83.unread.length === 0 && j83.hits.length === 0, `§83 no shared channel file spells a vendor id in a string / template / regex (was 7 at f835b0e58)${j83.unread.length ? ' — unreadable: ' + j83.unread.join(', ') : ''}${j83.hits.length ? ' — ' + j83.hits.slice(0, 4).join(' ; ') : ''}`);
+  // CONTROLS: one 'slack' literal planted back into the engine, the base's API-access kind list planted back into the
+  // panel, a comment + an identifier that must stay quiet, a fake vendor joining the list joins the census
+  const engSrc = rows83.find(([f]) => f === 'src/server/channels-engine.js')[1], panSrc = rows83.find(([f]) => f === 'src/lib/channels-panel.js')[1];
+  const engMut = engSrc.replace('rawApi: !!(mod && mod.api),', "rawApi: rec.kind === 'slack',"), panMut = panSrc.replace('!A(c).builtin && !!A(c).rawApi', "!A(c).builtin && ['lark', 'slack', 'gmail'].includes(A(c).kind)");
+  const red = (rel, src, ids = IDS83) => judge83([[rel, src]], ids).hits.length > 0;
+  const r83 = [
+    ["one 'slack' literal planted in the engine", engMut !== engSrc && red('src/server/channels-engine.js', engMut), true],
+    ["the base's kind list planted back in the panel", panMut !== panSrc && red('src/lib/channels-panel.js', panMut), true],
+    ['a comment naming Slack + RANGE_SLACK_MS', red('src/channel-x.js', '// Slack and Lark answer here\nconst RANGE_SLACK_MS = 5;\n'), false],
+    ['a fake vendor joining the list', red('src/channel-x.js', "if (k === 'acme') go();\n", [...IDS83, 'acme']) && !red('src/channel-x.js', "if (k === 'acme') go();\n"), true],
+  ];
+  ok(r83.every(([, got, want]) => got === want), `§83 CONTROLS: ${r83.map(([n, got, want]) => `${n} (${got === want ? (want ? 'RED' : 'quiet') : 'WRONG'})`).join(', ')}`);
+}
+// ── §84 A SUITE ENDS WHAT IT MADE (B-60d2, 2026-10-07) ─────────────────────
+// /tmp (tmpfs) held 30 of 62 GB of `vs-*` dirs older than a day. A suite's mint through scripts/scratch.mjs (scratch /
+// scratchDir / scratchHome) is registered and removed at its exit (the behaviour: test-ci-gate §9d); a suite that hands
+// its root to a detached process the reaper owns calls keepScratch and is a KEEP row here with its reason. A RAW mint
+// (mkdtempSync of a vs- name, a `/tmp/vs-…${process.pid}` literal) must be ended in the suite — an rm of the name, the
+// `for (const d of [a, b]) rmSync(d…)` idiom, stopWrapper's `dir:`, `worktree remove`, or endScratchAtExit(name) —
+// else RED unless an EXEMPT row. The EXEMPT rows are the raw mints that had no end on 2026-10-07 (B-60d2 debt): the
+// gate's directory sweep reaps them a day after their last write; the fix is endScratchAtExit(<name>) at the mint, and a
+// fixed row must go (a row outliving its leak is RED).
+console.log('\n§84 a suite ends what it made (B-60d2)');
+{
+  const MINT_RE = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:await\s+)?(?:fs\.)?mkdtempSync\(([^;\n]{0,160})|\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*`\/tmp\/vs-[^`]*\$\{process\.pid\}[^`]*`/g;
+  const rx = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // the raw scratch dirs a suite source mints (mkdtempSync of a vs- name, a /tmp/vs-…${process.pid} literal) that it never ends
+  const unended = (src) => {
+    const names = [];
+    for (const m of src.matchAll(MINT_RE)) { if (m[1] && !/vs-/.test(m[2])) continue; const n = m[1] || m[3]; if (!names.includes(n)) names.push(n); }
+    return names.filter((n) => {
+      const N = rx(n);
+      if (new RegExp(`(?:\\brmSync|\\bfs\\.rm|\\bfsp\\.rm|\\brm|endScratchAtExit)\\(\\s*${N}(?![\\w$])|\\bdir:\\s*${N}(?![\\w$])|rm -rf \\$\\{${N}\\}|'remove',[^\\]]{0,40}(?<![\\w$])${N}(?![\\w$])`).test(src)) return false;
+      for (const m of src.matchAll(/(?:for\s*\(\s*(?:const|let)\s+(\w+)\s+of\s+\[([^\]]*)\]\s*\)|\[([^\]]*)\]\s*\.forEach\(\s*\(?\s*(\w+)\s*\)?\s*=>)([\s\S]{0,240})/g)) {
+        const v = m[1] || m[4], list = m[2] ?? m[3];
+        if (new RegExp(`(?<![\\w$.])${N}(?![\\w$])`).test(list) && new RegExp(`(?:rmSync|\\brm|endScratchAtExit)\\(\\s*${v}\\b`).test(m[5])) return false;
+      }
+      return true;
+    });
+  };
+  const SCRATCH_KEEP = { 'test-ci-gate.mjs': "§9d's fixture TEXT proves the opt-out; the suite itself keeps nothing" };
+  const SCRATCH_END_EXEMPT = {
+    'test-acp-harness.mjs': ['dir', 'dir0'],
+    'test-auto-resume-loop.mjs': ['dir', 'dir2', 'mdir'],
+    'test-auto-resume.mjs': ['dV'],
+    'test-channel-api-cards.mjs': ['dir', 'tmp'],
+    'test-channel-manifest.mjs': ['dataDir'],
+    'test-chat-frame-guard.mjs': ['home'],
+    'test-ci-gate.mjs': ['sGone', 'sGone2', 'sGone5', 'sLive'],
+    'test-codex-0153.mjs': ['home'],
+    'test-codex-effort-meta.mjs': ['dir', 'd2', 'tmp', 'home'],
+    'test-codex-p2-client.mjs': ['dir'],
+    'test-codex-p2-wrapper.mjs': ['dir'],
+    'test-codex-pool.mjs': ['root', 'arDir', 'dir', 'd'],
+    'test-fable-cap-pool-storm.mjs': ['root', 'tmp'],
+    'test-harness-contract.mjs': ['dir'],
+    'test-hot-switch-incident.mjs': ['root', 'tmp'],
+    'test-inbox-reply.mjs': ['d'],
+    'test-local-discovery-device.mjs': ['home', 'dataDir'],
+    'test-new-member-wake.mjs': ['root'],
+    'test-opencode-plugin.mjs': ['stubDir'],
+    'test-opencode-remote.mjs': ['d'],
+    'test-otel-truth.mjs': ['dir', 'home', 'dataDir'],
+    'test-path-mounts.mjs': ['dir'],
+    'test-quota-model.mjs': ['dirS', 'root', 'mdir'],
+    'test-readings-attribution.mjs': ['root', 'd2', 'dir', 'd3', 'd4', 'home'],
+    'test-reset-credit-ui.mjs': ['SDIR', 'root', 'SD', 'td'],
+    'test-session-brain-dark.mjs': ['home', 'dataDir'],
+    'test-sysinfo-op.mjs': ['home', 'dataDir'],
+    'test-user-todos-expiry.mjs': ['d'],
+    'test-user-todos-layout.mjs': ['d'],
+  };
+  const DIR = path.join(REPO, 'scripts'), read = (f) => fs.readFileSync(path.join(DIR, f), 'utf8');
+  const suites = fs.readdirSync(DIR).filter((f) => /^test-.*\.mjs$/.test(f)).sort();
+  const SCR = read('scratch.mjs');
+  const regPin = (src) => /const p = path\.join\(TMP_ROOTS\[0\], `\$\{FIXTURE_CWD_PREFIX\}\$\{name\}-\$\{process\.pid\}`\);\n\s*if \(IS_SUITE\) endScratchAtExit\(p\);/.test(src) && /if \(!ENDS\.size\) process\.on\('exit', endAll\);/.test(src);
+  ok(regPin(SCR), 'scratch.mjs registers every SUITE mint (scratch → scratchDir / scratchHome) and removes it at exit');
+  ok(!regPin(SCR.replace('if (IS_SUITE) endScratchAtExit(p);', '')), 'CONTROL: scratch.mjs without the registration fails the pin (red)');
+  const minters = suites.filter((f) => /\b(?:scratch|scratchDir|scratchHome)\(/.test(read(f)));
+  const keepers = suites.filter((f) => /\bkeepScratch\(/.test(read(f)));
+  ok(keepers.every((f) => SCRATCH_KEEP[f]) && Object.keys(SCRATCH_KEEP).every((f) => keepers.includes(f)), `every keepScratch caller is a KEEP row with its reason, and every row still calls it: ${keepers.join(' ') || 'none'}`);
+  const found = {}; for (const f of suites) { const u = unended(read(f)); if (u.length) found[f] = u; }
+  const fresh = Object.entries(found).flatMap(([f, ns]) => ns.filter((n) => !(SCRATCH_END_EXEMPT[f] || []).includes(n)).map((n) => `${f} ${n}`));
+  const stale = Object.entries(SCRATCH_END_EXEMPT).flatMap(([f, ns]) => ns.filter((n) => !(found[f] || []).includes(n)).map((n) => `${f} ${n}`));
+  ok(!fresh.length, `every raw /tmp/vs-* mint in a suite is ended (an rm, a finally, endScratchAtExit) or an EXEMPT row — new: ${fresh.join(', ') || 'none'}`);
+  ok(!stale.length, `no EXEMPT row outlives its leak (drop it once the suite ends the name): ${stale.join(', ') || 'none'}`);
+  console.log(`  · ${minters.length} suites mint through scratch.mjs (ended at exit), ${keepers.length} KEEP row(s); ${Object.values(SCRATCH_END_EXEMPT).flat().length} raw mints in ${Object.keys(SCRATCH_END_EXEMPT).length} suites are EXEMPT debt`);
+  ok(unended("const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ctl-'));\nrun(dir);\n").join() === 'dir', 'CONTROL: a suite minting a raw scratch dir without its finally is RED');
+  ok(!unended("const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ctl-'));\ntry { run(dir); } finally { fs.rmSync(dir, { recursive: true, force: true }); }\n").length, '…and green with the finally');
+  ok(!unended("const a = fs.mkdtempSync('/tmp/vs-a-'), b = 1;\nconst c = `/tmp/vs-c-${process.pid}`;\nfor (const d of [a, c]) fs.rmSync(d, { recursive: true });\n").length && unended("const a = fs.mkdtempSync('/tmp/vs-a-');\nconst c = `/tmp/vs-c-${process.pid}`;\nfor (const d of [a]) fs.rmSync(d, { recursive: true });\n").join() === 'c', '…the for-of cleanup idiom credits exactly the names it lists');
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

@@ -362,7 +362,7 @@ function history(rangeMs) {
 // Memory-pressure watch: amber ≥80%, red ≥92% of the container limit.
 // Re-alerts on ESCALATION immediately, otherwise once per 30min per level;
 // fully clears below 75% so a later climb alerts again.
-function startWatch({ broadcast, dataDir, intervalMs = 45000 } = {}) {
+function startWatch({ broadcast, dataDir, intervalMs = 45000, onSample = null } = {}) {
   let lastLevel = 0, lastAlertAt = 0;
   // ── Event-loop lag watch (2.235.0, userL "卡了2h但CPU不高" incident): the
   // ONE metric that caught that degradation was loop lag, and it lived only in
@@ -400,6 +400,9 @@ function startWatch({ broadcast, dataDir, intervalMs = 45000 } = {}) {
     try {
       const mem = memInfo();
       recordSample(mem, sampleCpuCores());
+      // lane browser-resource-care: the memory-pressure EPISODE (src/memory-pressure.js via src/server/memory-pressure-watch.js)
+      // sees EVERY sample — its own hysteresis (on ≥ 90 %, off < 80 %), ONE For-you item per episode; the log line below stays
+      if (typeof onSample === 'function') { try { onSample(mem); } catch { /* never into the watch */ } }
       const pct = mem.limit ? (mem.used / mem.limit) * 100 : 0;
       global.__vsMetric?.('srv-container-mem-pct', Math.round(pct));
       const level = pct >= 92 ? 2 : pct >= 80 ? 1 : 0;

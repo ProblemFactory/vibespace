@@ -476,6 +476,18 @@
 - A SEARCH BY THE NAME A PERSON READS FOUND NOTHING, AND THE MISSING PERMISSION WAS A LOG LINE — 不变量 = the name a person reads is a search key; a permission the product lacks is said where the owner looks (kb-bugfix-invariants)
 - EVERY RESTART RE-LISTED EVERY MAILBOX (B-6638) — 不变量 = a cursor the vendor gives us is persisted; a restart resumes, it never re-asks what it already knows (kb-bugfix-invariants)
 - THE CLI'S OWN UI CHATTER WORE THE RED 'UNKNOWN EVENT' CARD (cli-2-1-288-records) — 不变量 = a record is known by its measured shape and version; the oracle is pinned per CLI version, never to the box (kb-bugfix-invariants)
+- A NEW VENDOR TOUCHED FOUR FILES (B-e3f1, owner 2026-10-04) — 不变量 = a vendor is one file + one line; settings, credential row and consent mode are declared on the adapter (kb-bugfix-invariants)
+- THIRTY GIGABYTES OF RAM WERE LEAKED SCRATCH DIRECTORIES (B-60d2, lane scratch-dir-reaper) — 不变量 = a suite ends what it made; the gate reaps a scratch dir only on the evidence it reaps a process on (test-architecture §84, test-ci-gate §9d)
+- MEMORY PRESSURE WAS A LOG LINE AND 37 GB OF CHROME SAT ON RAM (B-afeb, lane browser-resource-care) — 不变量 = a browser VibeSpace launches lives off tmpfs inside a said budget; pressure reaches the owner naming who started each process
+- A WEDGED MOUNT WAS A JOURNAL LINE AND THE SERVER KEPT PRESSING IT (B-b327, lane fuse-canary-notice) — 不变量 = a canary strike is an episode the owner is told of by name; the server's own scans stop pressing a wedged mount, a person's read never waits for a sweep
+
+## A NEW VENDOR TOUCHED FOUR FILES (lane channel-vendor-one-file, B-e3f1 — owner 2026-10-04)
+
+**Symptom.** The owner: "保持通用内部接口格式，拓展 vendor 只需要 vendor-specific 的文件 + 一行注册". A vendor once also touched channel-settings.js, integration-registry.js and the engine's consent branches; after those moved to declarations (dc-channels-manifest, dc-channels-consent), the panel still listed the raw-API kinds by name, the push line and the paste-back hint named Gmail, Lark and Slack, and nothing kept a new name from creeping back.
+
+**Invariant.** A vendor is its folder (adapter + manifest + blocks) + ONE line of src/channels/registry-list.js. Its settings table and integration row sit on the manifest; its caps, consent row and raw-API row sit on the adapter. Shared code reads those declarations (view.rawApi, push.transport, paste.notes.landed) and never a vendor id.
+
+**Gate.** test-architecture §83 (no string / template / regex token in a shared channel file names a vendor; 4 controls), test-channel-manifest (the fake vendor acme joins by one line).
 
 ## A REPLY TO A MESSAGE AN AGENT SENT WOKE NOBODY (lane reply-to-sent, 2.369.232 — owner 2026-10-07)
 

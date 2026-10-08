@@ -1238,6 +1238,9 @@ function childEnv(base, answer = {}, { home = '', uid = null, ownDir = null } = 
   // none named and none among the server's pairs the caller must compose one
   // (`needsConfig`) — the child never searches ./agent-browser.json
   if (absPath(a.config)) env[CONFIG_KEY] = a.config;
+  // ⑧ lane browser-resource-care: the daemon's TMPDIR (its ephemeral Chrome profile + Xvfb auth file) — the keeper's
+  // data/browser-env/tmp, so a browser VibeSpace launches never fills the RAM-backed /tmp
+  if (absPath(a.tmpDir)) env.TMPDIR = a.tmpDir;
   const dropped = Object.keys(src).filter((k) => k.startsWith(ENV_PREFIX) && env[k] !== src[k]
     && !(known ? own[k] === src[k] : (ENV_LEGACY_SET.has(k) && k !== SOCKET_KEY)));
   if (Object.prototype.hasOwnProperty.call(src, RUNTIME_KEY) && env[RUNTIME_KEY] !== src[RUNTIME_KEY]) dropped.push(RUNTIME_KEY);

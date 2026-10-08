@@ -637,6 +637,7 @@ function setup(ctx) {
 
   // the boot phase's `sessions-index` step (src/server/boot-phase.js): the FIRST sweep runs at boot, not on the first
   // page's request — a page that reloads into a fresh server finds it cached (or joins it in flight)
+  const discoveryPaused = () => { try { return !!(ctx.paused && ctx.paused('discovery')); } catch { return false; } };
   _warmSweep = () => {
     if (!_sweepInFlight) _sweepInFlight = _runSessionsSweep().finally(() => { _sweepInFlight = null; });
     return _sweepInFlight;
@@ -645,7 +646,9 @@ function setup(ctx) {
     try {
       // 4500ms: clients poll at 5s — a 2s TTL guaranteed every poll missed
       // the cache and ran the full sweep (audit round-2, high)
-      if (_sessionsCache && Date.now() - _sessionsCacheAt < 4500) return res.json(_sessionsCache);
+      // lane fuse-canary-notice (B-b327): while the server's own mount is wedged the sweep's schedule waits — the last
+      // answer stands (never an empty list); with no answer yet it runs
+      if (_sessionsCache && (Date.now() - _sessionsCacheAt < 4500 || discoveryPaused())) return res.json(_sessionsCache);
       // coalesce: N clients missing the cache together share ONE sweep — the
       // sync handler serialized them for free; the async one must do it itself
       if (!_sweepInFlight) {

@@ -45,7 +45,7 @@
  * legacy rung, `originOf` in src/lib/user-todos-layout.js — no migration.
  */
 
-const INBOX_ORIGINS = Object.freeze(['spend', 'login', 'pool', 'jobs', 'channels', 'browser', 'machines', 'apps', 'agent']);
+const INBOX_ORIGINS = Object.freeze(['spend', 'login', 'pool', 'jobs', 'channels', 'browser', 'machines', 'apps', 'agent', 'server']);
 
 // The group / chip words — English t() keys (the panel words them per device;
 // i18nKey is the extraction marker scripts/i18n-extract.mjs reads).
@@ -60,6 +60,7 @@ const ORIGIN_LABELS = Object.freeze({
   machines: i18nKey('Machines'), // lane-pairing ⑥: "Allow <conversation> to run a command on <machine>?" (src/exit-proxy.js)
   apps: i18nKey('Apps'), // Layer 0 apps: "<conversation> wants to install <app>?" — Install / Not now (src/server/apps-engine.js)
   agent: i18nKey('Agents'),
+  server: i18nKey('This machine'), // lane browser-resource-care: memory pressure — ONE item per episode naming who started each top process (src/memory-pressure.js)
 });
 
 /** A member of the closed set → itself. null/undefined/'' THROWS `origin

@@ -2,6 +2,13 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.236 — 2026-10-08
+
+### Changed
+- Adding a chat provider needs one file: everything else reads what that file declares.
+- When memory runs short you are told which conversation started what; agent browsers keep their files off RAM within a budget.
+- When a mounted folder stops answering you are told which one and who is using it, and VibeSpace stops scanning it until it recovers.
+
 ## 2.369.235 — 2026-10-08
 
 ### Changed

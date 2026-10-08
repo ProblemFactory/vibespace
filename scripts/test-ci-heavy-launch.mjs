@@ -45,7 +45,9 @@ import { gitEnvFrom } from './git-env.mjs';
 import { stampScratchRun } from './scratch-run.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const GIT_ENV = gitEnvFrom(process.env);
+// B-60d2: every stub tier here would sweep the REAL /tmp after each of its ~300 rows (≈ 1 500 walks — the int236 heavy timed out
+// at 600 s); the sweep is test-ci-gate §9d's subject, on fixtures — the stubs (and the --heavy-launch legs) run with it off
+const GIT_ENV = { ...gitEnvFrom(process.env), VIBESPACE_CI_DIR_SWEEP: 'off' };
 let pass = 0, fail = 0;
 const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
 
@@ -80,6 +82,7 @@ function stubGateRepo(tag, { ciSource, suites, commits = 1 }) {
   fs.writeFileSync(path.join(root, 'scripts', 'ci.mjs'), ciSource);
   fs.copyFileSync(path.join(REPO, 'scripts', 'git-env.mjs'), path.join(root, 'scripts', 'git-env.mjs'));
   fs.copyFileSync(path.join(REPO, 'scripts', 'scratch-run.mjs'), path.join(root, 'scripts', 'scratch-run.mjs')); // ci.mjs's other sibling (B-1d08: the run record its reaper reads)
+  for (const f of ['scripts/scratch-sweep.mjs', 'scripts/scratch.mjs', 'src/fixture-guard.js']) { fs.mkdirSync(path.dirname(path.join(root, f)), { recursive: true }); fs.copyFileSync(path.join(REPO, f), path.join(root, f)); } // B-60d2: the dir sweep's siblings (as test-ci-gate's stub)
   fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name: 'x', version: '0.0.0', private: true, scripts: { build: 'node -e "0"' } }) + '\n');
   for (const [name, src] of Object.entries(suites)) fs.writeFileSync(path.join(root, 'scripts', name + '.mjs'), src);
   const genv = { ...GIT_ENV, ...GIT_ID };

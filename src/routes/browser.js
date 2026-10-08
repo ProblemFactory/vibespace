@@ -1492,6 +1492,9 @@ function envBasis(f, { k = null, pairs = null, ephemeral = true } = {}) {
     const sr = k.socketRootOf(Array.isArray(pairs) ? pairs : null);
     out.socketDir = sr.socketDir;
     out.runtimeDir = sr.runtimeDir;
+    // lane browser-resource-care: the daemon's scratch (its ephemeral profile, its Xvfb auth file) lands under data/, never
+    // the RAM-backed /tmp — the CLI sets it on the child LAST, beside the socket root
+    try { const be = ctx.browserEnv?.(); const t = be && typeof be.tmpDir === 'function' ? be.tmpDir() : null; if (t) out.tmpDir = t; } catch { /* the CLI keeps its own TMPDIR */ }
     // takeover r3 (finding 2): THE CONFIG IS NAMED — the file the keeper runs this browser with (the pairs'
     // own generated config, else the keeper's machine file for the kind); the CLI sets it on the child LAST,
     // so the binary never searches ./agent-browser.json in the agent's directory (a remote session gets none:

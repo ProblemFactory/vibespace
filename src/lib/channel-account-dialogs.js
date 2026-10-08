@@ -138,7 +138,12 @@ const pasteOpts = (spec) => (isPasteSpec(spec)
   : { pastePlaceholder: PASTE_PLACEHOLDER });
 /** 2.369.214: a design 018 `public` flow lands on this instance's own page (or the relay page shows the code) — its
  *  paste-back words never promise a 127.0.0.1 address; the loopback modes keep theirs. */
-const publicPasteHint = (flow) => (flow && flow.mode === 'public' ? tr('Slack’s last page says “Done here” and this dialog finishes by itself — even when you approved in another browser. If that page shows a code instead, or does not load, paste the code or its address here:') : undefined);
+const publicPasteHint = (flow, x) => {
+  if (!(flow && flow.mode === 'public')) return undefined;
+  // lane channel-vendor-one-file: the vendor's own words ride on its paste row (`paste.notes.landed`) — the dialog names no vendor
+  const P = pasteOf(x);
+  return P && P.notes && P.notes.landed ? tr(P.notes.landed) : tr('The sign-in’s last page says it is done and this dialog finishes by itself — even when you approved in another browser. If that page shows a code instead, or does not load, paste the code or its address here:');
+};
 
 /** A channel route that THROWS (the component's contract: a thrown Error
  *  lands in the dialog's `.cfg-err` / the consent block's status line),
@@ -445,7 +450,7 @@ export async function showConnectAccountDialog(app, kinds) {
       // a storage mount's client is named by its id ALONE — a stale hidden custom id/secret never rides beside it
       extra: () => (!ctx.inputs[`client${sfx}`] ? { options: optionValues(Object.fromEntries(Object.entries(ctx.inputs).map(([key, x]) => [key, x.value])), k.optionsSchema, sfx, 1) } : { ...(mountOf(ctx.inputs[`client${sfx}`].value) ? { fromMount: mountOf(ctx.inputs[`client${sfx}`].value), clientId: undefined, clientSecret: undefined } : { clientPreset: ctx.inputs[`client${sfx}`].value }), options: optionValues(Object.fromEntries(Object.entries(ctx.inputs).map(([key, e]) => [key, e.value])), k.optionsSchema, sfx, 1) }),
       endpoints: {
-        start: async (body) => { const r = await post(CHANNEL_OAUTH_ENDPOINTS.start, body); flowId = r.flowId; return { url: r.url, notice: flowNotice(r.flow), pasteHint: publicPasteHint(r.flow), narrow: narrowOf(r.flow, () => post(CHANNEL_OAUTH_ENDPOINTS.narrow, { flowId })) }; },
+        start: async (body) => { const r = await post(CHANNEL_OAUTH_ENDPOINTS.start, body); flowId = r.flowId; return { url: r.url, notice: flowNotice(r.flow), pasteHint: publicPasteHint(r.flow, k), narrow: narrowOf(r.flow, () => post(CHANNEL_OAUTH_ENDPOINTS.narrow, { flowId })) }; },
         status: () => capi(`${CHANNEL_OAUTH_ENDPOINTS.status}?flowId=${enc(flowId || '')}`),
         callback: (b) => post(CHANNEL_OAUTH_ENDPOINTS.callback, { url: b.url, flowId }),
       },
@@ -485,7 +490,7 @@ export async function showReauthAccountDialog(app, a, { kinds = null, preselect 
       const r = await post(`/api/channels/adapters/${enc(a.id)}/reauthorize`, choiceBody(vals));
       if (watcher) watcher.off();
       watcher = authWatcher(app, a.id, (r.adapter && r.adapter.lastAuthAt) || null);
-      return { url: r.flow && r.flow.consentUrl, notice: flowNotice(r.flow), pasteHint: publicPasteHint(r.flow), narrow: narrowOf(r.flow, () => post(`/api/channels/adapters/${enc(a.id)}/auth/narrow`, {})) };
+      return { url: r.flow && r.flow.consentUrl, notice: flowNotice(r.flow), pasteHint: publicPasteHint(r.flow, a), narrow: narrowOf(r.flow, () => post(`/api/channels/adapters/${enc(a.id)}/auth/narrow`, {})) };
     },
     status: async () => (watcher ? watcher.state() : {}),
     callback: async (url) => { await post(`/api/channels/adapters/${enc(a.id)}/auth/finish`, { url }); return { token: a.id }; },

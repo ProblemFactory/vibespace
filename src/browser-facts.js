@@ -493,7 +493,7 @@ function runDir(inject = null) {
  *   closeAll(ns)           `close --all`          — the CLI's own stop
  * `execFileImpl` is injectable; the fast gate drives a FAKE binary on PATH.
  */
-function createBrowserRuntime({ cmd = 'agent-browser', execFileImpl = execFile, env = process.env, log = null, daemonCwd = null, pinned = null } = {}) {
+function createBrowserRuntime({ cmd = 'agent-browser', execFileImpl = execFile, env = process.env, log = null, daemonCwd = null, pinned = null, tmpDir = null } = {}) {
   const base = sanitizeProbeEnv(env);
   const binOf = execFileImpl === execFile ? binaryResolver(cmd, env, { pinned }) : () => cmd;
   // verify r2 (H1): `cli` = THE BROWSER'S OWN CLI for this call (the keeper's `{path}` — the binary of the version its
@@ -501,6 +501,9 @@ function createBrowserRuntime({ cmd = 'agent-browser', execFileImpl = execFile, 
   // its Chrome), or `{gone}` = that version is no longer installed ⇒ refused by name, never a silent fall to PATH
   const run = (args, extra, { timeout = 15000, cli = null } = {}) => new Promise((resolve) => {
     const e = { ...base, ...extra, AGENT_BROWSER_JSON: '1' };
+    // lane browser-resource-care: any call may START the daemon, and the daemon mints its ephemeral Chrome profile under
+    // TMPDIR — the keeper's data/browser-env/tmp (a getter: made on first use), never the RAM-backed /tmp
+    { let td = null; try { td = typeof tmpDir === 'function' ? tmpDir() : tmpDir; } catch { td = null; } if (typeof td === 'string' && td.startsWith('/')) e.TMPDIR = td; }
     if (cli && typeof cli.gone === 'string') { resolve({ ok: false, code: 'browser_cli_gone', stdout: '', stderr: '', json: null, error: `browser_cli_gone: ${cli.gone}` }); return; }
     const bin = cli && typeof cli.path === 'string' && cli.path ? cli.path : binOf();
     if (!bin) { resolve({ ok: false, code: 'ENOENT', stdout: '', stderr: '', json: null, error: 'binary_absent: the browser CLI is not installed on this machine (only the VibeSpace shim is on PATH, or nothing)' }); return; }

@@ -553,7 +553,7 @@ const isOrphan = (pid) => { const st = procStat(pid); const pp = st && procStat(
   ok(!v.victims.some((o) => o.pid === pB) && /is a file, not a directory/.test((find(v.ignored, pB) || {}).why || ''),
     `THE BRIEF'S LEG, FOR REAL: a shell with a /tmp/vs-*.txt argument SURVIVES — a file is never a root (${(find(v.ignored, pB) || {}).why})`);
   // the CLI, as an operator runs it: the same two verdicts in its dry-run report
-  const cli = spawnSync(process.execPath, [path.join(REPO, 'scripts', 'ci.mjs'), '--reap', '--dry-run'], { encoding: 'utf8', cwd: REPO, env: QUIET_ENV, timeout: 60000 });
+  const cli = spawnSync(process.execPath, [path.join(REPO, 'scripts', 'ci.mjs'), '--reap', '--dry-run'], { encoding: 'utf8', cwd: REPO, env: QUIET_ENV, timeout: 60000, maxBuffer: 256 << 20 }); // B-60d2: the dry run also lists every reapable dir (2.2 MB on the dev box) — the 1 MB default died ENOBUFS
   const cl = (cli.stdout || '').split('\n');
   ok(cli.status === 0 && cl.some((l) => l.startsWith(`[ci]   spare pid ${pA} `) && l.includes('owner is alive')) && cl.some((l) => l.startsWith(`[ci]   not a root: pid ${pB} `) && l.includes('a file, not a directory')) && cl.some((l) => /^\[ci\] --dry-run: /.test(l)),
     '`node scripts/ci.mjs --reap --dry-run` prints both verdicts with their evidence and signals nothing', cl.filter((l) => l.includes(String(pA)) || l.includes(String(pB)) || /--dry-run/.test(l)));
@@ -801,7 +801,8 @@ console.log('\n§8 wiring');
   // every stub repository the gate's own gates build copies ALL of ci.mjs's relative imports (a missing sibling = a stub whose ci.mjs cannot load)
   const sibs = [...ci.matchAll(/^import [^\n]* from '\.\/([^']+)';$/gm)].map((m) => m[1]).sort();
   const stubbers = ['test-ci-gate.mjs', 'test-ci-heavy-launch.mjs'].map((f) => [f, fnBody(fs.readFileSync(path.join(REPO, 'scripts', f), 'utf8'), 'function stubGateRepo(')]);
-  ok(sibs.includes('scratch-run.mjs') && stubbers.every(([, b]) => sibs.every((s) => b.includes(`'${s}'`))), `both stub builders copy every sibling ci.mjs imports (${sibs.join(', ')})`, stubbers.map(([f, b]) => [f, sibs.filter((s) => !b.includes(`'${s}'`))]));
+  const copies = (b, s) => b.includes(`'${s}'`) || b.includes(`'scripts/${s}'`); // a builder names a sibling bare or by its repo path (B-60d2's loop)
+  ok(sibs.includes('scratch-run.mjs') && stubbers.every(([, b]) => sibs.every((s) => copies(b, s))), `both stub builders copy every sibling ci.mjs imports (${sibs.join(', ')})`, stubbers.map(([f, b]) => [f, sibs.filter((s) => !copies(b, s))]));
   ok(/^\.vs-run\.json$/m.test(fs.readFileSync(path.join(REPO, '.gitignore'), 'utf8')), '.vs-run.json is gitignored (the isolated worktree\'s record is never a change)');
   // verify r2 (R6): the launcher's pre-launch sweep SAYS a refused seam (r1 K7 replaced a bare `catch { }`) — nothing gated
   // that print (the revert table found it uncaught); a launcher's stderr is the one place a pusher sees the refusal before the tier
