@@ -78,7 +78,7 @@ import { showGroupMembersDialog, showGroupDetail, renameGroup, archiveGroup } fr
 import { showGrantAccessDialog, showNotifyDialog, showGrainMenu, assignmentSummary } from './channel-filter-editor.js';
 import { grainSummaryText } from './channel-words.js';
 // P3: the reach/policy dialog (row menu) and the Outbox window (header button).
-import { showReachDialog } from './channel-reach-editor.js';
+import { showReachDialog, showAccountReachDialog } from './channel-reach-editor.js';
 import { showApiAccessDialog } from './channel-api-dialog.js';   // B-2198
 import './channel-outbox.js';
 // r4 (design-integrations-per-account, chunk 3): the account dialogs — every
@@ -379,7 +379,7 @@ function openConversationOf(app, convs) {
 /** SEARCH ONE ACCOUNT's messages (2026-09-26, design §6.5): the server reads
  *  the local logs asynchronously with a byte cap; a result opens its
  *  conversation. Every string is vendor text ⇒ textContent only. */
-function showSearchDialog(app, a, { q: initial = '', convId = null, convTitle = '', group = false, hits: agentHits = null } = {}) {
+function showSearchDialog(app, a, { q: initial = '', convId = null, convTitle = '', group = false, hits: agentHits = null, memo: agentMemo = null, searchedAt = 0 } = {}) {
   // R3 (§23): the first screen's filter hands its words to EVERY connected account's search (`a` = a list)
   const accounts = Array.isArray(a) ? a.filter(Boolean) : [a];
   // lane channel-search-view (.212): an AGENT'S search row opens here — pre-filled and run, scoped to its conversation
@@ -489,11 +489,15 @@ function showSearchDialog(app, a, { q: initial = '', convId = null, convTitle = 
     }
     r.results.sort((m, n) => (Number(n.record && n.record.at) || 0) - (Number(m.record && m.record.at) || 0));
     status.textContent = r.results.length ? (r.truncated ? t('{n} results — more exist; narrow the words', { n: r.results.length }) : t('{n} results', { n: r.results.length })) : t('No message matches.');
-    // .212: the agent's hits the saved copy no longer holds (a search older than its window) are SAID, never invented
-    if (sc && q === initial && Array.isArray(agentHits) && agentHits.length) {
+    // .212: the agent's hits the saved copy no longer holds (a search older than its window); lane search-card-open
+    // (.233; the owner: 「既然 agent 进行了搜索说明 vibespace 已经获取到了相关 data，为啥我点不开？」): no longer a count at the
+    // top — section two's head says it and SHOWS them from the memo (the agent's own answer read first, then 'all',
+    // then this conversation's), each with its context; nothing remembered ⇒ said, beside "Search again"
+    const fromAgent = q === initial && ((Array.isArray(agentHits) && agentHits.length > 0) || !!agentMemo);
+    let gone = 0;
+    if (sc && fromAgent) {
       const have = new Set(r.results.map((h) => String((h.record && h.record.vendorId) || '')));
-      const gone = agentHits.filter((h) => h && !have.has(String(h.msgId))).length;
-      if (gone) status.textContent += ` — ${t('{n} of the agent’s hits are not in the saved copy', { n: gone })}`;
+      gone = agentHits.filter((h) => h && !have.has(String(h.msgId))).length;
     }
     s1.note.textContent = SR.coverageText(cov, { t });
     const grouped = group && !sc;
@@ -516,6 +520,7 @@ function showSearchDialog(app, a, { q: initial = '', convId = null, convTitle = 
     if (!asked.length) return;
     const names = [...new Set(asked.filter(({ x }) => x.vendorSearch).map(({ acc }) => vendorOf(acc)))];
     const s2 = section('chan-search-vendor', SR.sectionHead(asked.filter(({ x }) => x.vendorSearch).map(({ x }) => x.vendorSearch.adds), { t, vendor: names.join(' · ') || vendorOf(asked[0].acc) }));
+    if (gone) { const g = document.createElement('span'); g.className = 'chan-search-agenthits'; g.textContent = ` · ${t('{n} of the agent’s hits are not in the saved copy', { n: gone })}`; s2.h.appendChild(g); }
     const shown = new Set(r.results.map((h) => `${h.adapterId}\u0000${h.convId}\u0000${h.record && h.record.vendorId}`));
     const skel = document.createElement('div'); skel.className = 'chan-search-skel'; skel.hidden = true;
     const sentinel = document.createElement('div'); sentinel.className = 'chan-search-sentinel';
@@ -541,10 +546,19 @@ function showSearchDialog(app, a, { q: initial = '', convId = null, convTitle = 
       if (st.busy || my !== gen) return;
       st.busy = true; busyAny();
       if (!page && mode !== 'peek') say(st, { state: 'asking' });
-      const x = await fetchJson(`/api/channels/search/full?adapter=${encodeURIComponent(st.acc.id)}&q=${encodeURIComponent(q)}${page ? `&page=${encodeURIComponent(page)}` : ''}${!page && mode ? `&${mode === 'peek' ? 'peek' : 'again'}=1` : ''}`);
+      // lane search-card-open: opened from an agent's row, the first answer reads that search's memo scope, then 'all',
+      // then this conversation's (what any searcher found for it) — the server's order; "Search again" forgets all three
+      const scoped = !page && fromAgent ? `${agentMemo ? `&memo=${encodeURIComponent(agentMemo)}` : ''}${sc ? `&conv=${encodeURIComponent(sc.convId)}` : ''}` : '';
+      const x = await fetchJson(`/api/channels/search/full?adapter=${encodeURIComponent(st.acc.id)}&q=${encodeURIComponent(q)}${page ? `&page=${encodeURIComponent(page)}` : ''}${!page && mode ? `&${mode === 'peek' ? 'peek' : 'again'}=1` : ''}${scoped}`);
       st.busy = false; busyAny();
       if (my !== gen) return;
-      if (x && x.unasked) { say(st, { state: 'unasked' }); return; }
+      const againBtn = () => { const re = btn(t('Search again'), () => again(st)); re.classList.add('chan-sec-verb', 'chan-search-again'); re.title = t('Asks {vendor} anew — for a message recalled or edited there, or more results', { vendor: vendorOf(st.acc) }); return re; };
+      if (x && x.unasked) {
+        // the agent asked the vendor (its row names the memo) but nothing is remembered here: said, one press away
+        if (fromAgent && agentMemo) { st.line.textContent = (states.length > 1 ? `${st.acc.label || st.acc.id}: ` : '') + SR.forgottenText(searchedAt ? Date.now() - searchedAt : 0, { t, vendor: vendorOf(st.acc), date: searchedAt ? rowTime(searchedAt) : '' }) + ' · '; st.line.appendChild(againBtn()); }
+        else say(st, { state: 'unasked' });
+        return;
+      }
       if (!x || x.ok === false || x.error) {
         const code = (x && x.code) || 'failed';
         if (['not-supported', 'needs-scope', 'backoff', 'search-floor', 'search-minute', 'vendor-budget'].includes(code)) {
@@ -574,9 +588,8 @@ function showSearchDialog(app, a, { q: initial = '', convId = null, convTitle = 
       // a remembered answer is a snapshot and says so: its age, and the one way to ask anew
       if (x.memo && !page) {
         const m = document.createElement('span'); m.className = 'chan-search-memo';
-        m.textContent = ` · ${SR.memoText(x.memo.ageMs, { t, vendor: vendorOf(st.acc) })} · `;
-        const re = btn(t('Search again'), () => again(st)); re.classList.add('chan-sec-verb', 'chan-search-again');
-        st.line.append(m, re);
+        m.textContent = ` · ${SR.memoText(x.memo.ageMs, { t, vendor: vendorOf(st.acc), by: x.memo.by, date: rowTime(x.memo.askedAt) })} · `;
+        st.line.append(m, againBtn());
       }
     };
     for (const st of states) { if (st.offered) ask(st, null, opening ? 'peek' : null); else say(st, { state: 'refused', code: 'not-supported' }); }
@@ -609,12 +622,12 @@ function showSearchDialog(app, a, { q: initial = '', convId = null, convTitle = 
 /** .212 THE AGENT'S SEARCH, AS RESULTS (`app.openChannelSearch` — the card's search row and its tail; lane
  *  channel-search-view): the accounts the touches name, the search dialog pre-filled and run — scoped to one
  *  conversation, or unscoped and grouped by conversation. */
-export async function openSearchResults(app, { adapterIds = [], q = '', convId = null, convTitle = '', group = false, hits = null } = {}) {
+export async function openSearchResults(app, { adapterIds = [], q = '', convId = null, convTitle = '', group = false, hits = null, memo = null, searchedAt = 0 } = {}) {
   const want = new Set((adapterIds || []).map(String));
   const d = await fetchJson('/api/channels');
   const accounts = (d && Array.isArray(d.adapters) ? d.adapters : []).filter((x) => x && want.has(String(x.id)));
   if (!accounts.length) { showToast(t('That account is no longer connected'), { type: 'warn' }); return; }
-  showSearchDialog(app, accounts, { q, convId, convTitle, group, hits });
+  showSearchDialog(app, accounts, { q, convId, convTitle, group, hits, memo, searchedAt });
 }
 
 /** THE OPTIONS EDITOR: the adapter's DECLARED options only (a select for a
@@ -842,6 +855,8 @@ export function registerChannelAdapterMenu() {
   // R4 (2026-09-27, design §7.3): TWO OPERATIONS, ACCESS FIRST — who may see
   // and act on the whole account, then who is woken; a rule's conversations
   // are a grain of their own (a new rule starts with its access)
+  // lane account-policy-door (userW 2026-10-07): the WHOLE account's sending policy + its access + its Notify door
+  registerMenuItem({ menu: M, group: '1_rows', order: 9, when: (c) => !A(c).builtin, label: () => t('Reach & policy…'), run: (c) => showAccountReachDialog(c.app, A(c)) });
   registerMenuItem({ menu: M, group: '1_rows', order: 10, when: (c) => !A(c).builtin, label: () => t('Grant access…'), run: (c) => showGrantAccessDialog(c.app, { kind: 'account', adapter: A(c) }) });
   registerMenuItem({ menu: M, group: '1_rows', order: 11, when: (c) => !A(c).builtin, label: () => t('Notify…'), run: (c) => showNotifyDialog(c.app, { kind: 'account', adapter: A(c) }) });
   // B-2198: the RAW API pass-through — who may call this account's vendor API, at which tier (off until granted)

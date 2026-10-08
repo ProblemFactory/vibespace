@@ -30,6 +30,9 @@ import { icon, el, btn } from './channel-chrome.js';
 import { routeErrorText, policyModeText, groupTitle } from './channel-words.js';
 // the ONE principal picker (search + list, keyed, recent picks) — never a <select> of the whole roster
 import { principalPicker, rosterFromApp } from './principal-picker.js';
+// lane account-policy-door: the ONE policy row model, and the account door's section 2 = the Grant access body itself
+import * as P from '../channel-policy.js';
+import { grainState, grantAccessBody, showNotifyDialog } from './channel-filter-editor.js';
 
 const JSON_HDR = { 'Content-Type': 'application/json' };
 async function api(pathname, body, method = 'PUT') {
@@ -71,6 +74,71 @@ function principals(app) {
   return out;
 }
 
+/** The guards as the client holds them (Settings → Channels) — the row model's guards line; never fetched here. */
+export function policyGuards(app) {
+  const g = (k) => { try { return app && app.settings ? app.settings.get(k) : undefined; } catch { return undefined; } };
+  return { linksReview: g('channels.guardLinksReview') !== false, attachmentsReview: g('channels.guardAttachmentsReview') !== false, offHoursTz: g('channels.offHoursTz') || '' };
+}
+/** THE POLICY ROW as drawn (lane account-policy-door): ONE renderer over the PURE `policyRowModel` — the account's
+ *  Reach & policy… and a conversation's draw the same select, the same words, the same source + guards lines.
+ *  `onPick(mode | null, model, select)`. */
+export function policyRowEl(app, { grain, policy, onPick }) {
+  const m = P.policyRowModel({ grain, policy, guards: policyGuards(app), t, modeText: policyModeText });
+  const box = el('div', 'chan-policy-row');
+  box.dataset.policySource = m.source;
+  box.dataset.policyMode = m.mode;
+  box.appendChild(el('div', 'chan-opt-label', t('Sending policy')));
+  const sel = el('select', 'chan-opt-input chan-policy-pick');
+  const modeRows = m.choices;   // policy modes, not principals (the principal-picker census reads a `choices` loop as a roster)
+  for (const c of modeRows) { const op = el('option', '', c.label); op.value = c.value || ''; sel.appendChild(op); }
+  sel.value = m.value || '';
+  sel.onchange = () => onPick(sel.value === '' ? null : sel.value, m, sel);
+  box.appendChild(sel);
+  box.appendChild(el('div', 'chan-flow-note chan-policy-source', m.sourceText));
+  if (!m.offersDirect) box.appendChild(el('div', 'chan-flow-note', t('This channel offers no “send directly”: every message an agent drafts here waits for your approval on the Outbox card.')));
+  box.appendChild(el('div', 'chan-flow-note chan-policy-guards', m.guardsText));
+  return box;
+}
+
+/** THE WHOLE ACCOUNT's REACH & POLICY… (lane account-policy-door, userW 2026-10-07 "想给整个 Lark 配置可见性与策略，但
+ *  配不了": the account's policy had a route and no door) — ONE dialog at the account grain: ① the sending policy (the
+ *  SAME row as a conversation's; a pick PUTs `{policy, base}` — moved since ⇒ 409 `policy-changed`, re-read), ② who
+ *  may read and act = the Grant access body itself (imported, never a copy — a `send` pick is offered the moment ①
+ *  reads direct, in place, no reopen), ③ who is woken = a line + the Notify… door (not a second copy). */
+export async function showAccountReachDialog(app, adapter) {
+  const target = { kind: 'account', adapter };
+  const st = await grainState(target);
+  if (!st) return;
+  const aid = encodeURIComponent(adapter.id);
+  let part = null;
+  const { body, close } = createModalShell({ id: 'chan-account-reach-dialog', title: t('Reach & policy — {title}', { title: st.name }), dialogClass: 'chan-dialog chan-assign chan-access chan-reach', escapeToClose: true, onClose: () => { if (part) part.picker.close(); } });
+  let pol = st.adapter.policy || null;
+  const polHost = el('div', 'chan-account-policy');
+  const drawPolicy = () => {
+    polHost.textContent = '';
+    polHost.appendChild(policyRowEl(app, { grain: 'account', policy: pol, onPick: async (mode, m, sel) => {
+      sel.disabled = true;
+      const r = await fetchJson(`/api/channels/adapters/${aid}`, { method: 'PUT', headers: JSON_HDR, body: JSON.stringify({ policy: mode, base: m.own }) });
+      if (!r || r.error) showToast(routeErrorText(r), { type: 'error' }); else showToast(t('Policy saved'));
+      // the value as it is NOW (saved, or moved since by the other door) — ② re-draws its authority choices in place
+      const fresh = await fetchJson(`/api/channels/adapters/${aid}/view`);
+      if (fresh && fresh.adapter && fresh.adapter.policy) pol = fresh.adapter.policy;
+      drawPolicy();
+      if (part) part.setCaps({ ...st.caps, policyRequiresReview: !(pol && pol.mode === 'direct') });
+    } }));
+  };
+  drawPolicy();
+  body.appendChild(polHost);
+  const sec2 = el('div', 'chan-account-access');
+  body.appendChild(sec2);
+  part = grantAccessBody(app, st, sec2, { close, target, notify: false, reopen: () => showAccountReachDialog(app, adapter) });
+  const n = (st.watchers || []).length;
+  body.appendChild(el('div', 'chan-opt-label', t('Who is woken')));
+  const wk = el('div', 'chan-flow-actions chan-account-woken');
+  wk.append(el('span', 'chan-flow-note', n ? t('{n} notification(s) on the whole account — access alone never wakes anyone', { n }) : t('Nobody is woken by this account yet — access alone never wakes anyone')), btn(t('Notify…'), () => { close(); showNotifyDialog(app, target); }));
+  body.appendChild(wk);
+}
+
 export async function showReachDialog(app, conv0) {
   const base = `/api/channels/${encodeURIComponent(conv0.adapterId)}/${encodeURIComponent(conv0.id)}`;
   const full = await fetchJson(base);
@@ -87,22 +155,9 @@ export async function showReachDialog(app, conv0) {
 
   function draw() {
     body.textContent = '';
-    // ── POLICY ──
-    body.appendChild(el('div', 'chan-opt-label', t('Sending policy')));
-    const pol = current.policy || { mode: 'review', source: 'default' };
-    const sel = el('select', 'chan-opt-input');
-    // design 012 (Slack S1): a vendor that allows only some modes (`policy.modes` — Slack: review) is offered only those
-    const modes = Array.isArray(pol.modes) && pol.modes.length ? pol.modes : ['review', 'direct'];
-    for (const o of [
-      { value: 'review', label: t('review — every proposal waits for your approval') },
-      { value: 'direct', label: t('direct — a proposal with send authority goes out at once (guards still apply)') },
-      { value: '', label: t('the adapter\'s default') },
-    ].filter((o) => !o.value || modes.includes(o.value))) { const op = el('option', '', o.label); op.value = o.value; sel.appendChild(op); }
-    sel.value = pol.source === 'conversation' && modes.includes(pol.mode) ? pol.mode : '';
-    sel.onchange = async () => { const r = await api(`${base}/policy`, { mode: sel.value === '' ? null : sel.value }); if (r) showToast(t('Policy saved')); };
-    body.appendChild(sel);
-    if (!modes.includes('direct')) body.appendChild(el('div', 'chan-flow-note', t('This channel offers no “send directly”: every message an agent drafts here waits for your approval on the Outbox card.')));
-    body.appendChild(el('div', 'chan-flow-note', t('Reads as: {mode} ({source}). Guards on top can only tighten it: a link, an attachment or off-hours always needs your approval (Settings → Channels).', { mode: policyModeText(pol.mode), source: pol.source === 'conversation' ? t('set here') : pol.source === 'adapter-default' ? t('the adapter\'s default') : t('the default: review') })));
+    // ── POLICY ── (lane account-policy-door: the SAME row as the account's door; its source said — "inherits the
+    // account (direct)" — and "Use the account's" = PUT null)
+    body.appendChild(policyRowEl(app, { grain: 'conversation', policy: current.policy, onPick: async (mode) => { const r = await api(`${base}/policy`, { mode }); if (r) showToast(t('Policy saved')); } }));
 
     // ── REACH ──
     body.appendChild(el('div', 'chan-opt-label', t('Who can see this conversation')));

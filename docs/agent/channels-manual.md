@@ -338,6 +338,10 @@ The user gives you two DIFFERENT things, in this order:
   message) — shown on the card and sent to exactly those; a message arriving
   later never re-targets it.
 
+### Whether your reply waits for the user (the sending policy)
+
+`vibespace-channels status <conversation>` prints the conversation's sending policy and where it comes from — `policy: direct (account)` (the user set the whole account to direct), `policy: review (this conversation)` (the user set this one conversation), or `(the vendor's default)`. Every `list` row shows the same `policy: …` chip. `direct` means a reply you are allowed to send goes out without the user's approval (a link, an attachment or off-hours still waits); `review` means every message waits on the user's Outbox card. You cannot change it — the user does, from the account's ⋯ → Reach & policy… or the conversation's own Reach & policy…; ask them if it is in your way.
+
 ## Sending pictures and files (`--attach`)
 
 The user asked for this: what you send in a channel may carry pictures and

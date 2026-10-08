@@ -143,6 +143,7 @@ export function routeErrorText(r, { fallback = null, ruleLabel = (k) => k } = {}
     case 'duplicate-principal': return t('{who} is listed twice — one row per agent or group', { who: principalText(r.principal) });
     // mirror-193: a whole-list write whose base (the lists it was drawn from) the grain has moved past — nothing written
     case 'grain-changed': return t('The list changed since this dialog opened — open it again to see it as it is now; nothing was saved');
+    case 'policy-changed': return t('The sending policy changed while this dialog was open (another window, or the other door) — here it is as it is now; nothing was saved');
     case 'watcher-needs-access': return t('{who} has no access here — grant access first (Grant access…), then notify', { who: principalText(r.principal) });
     case 'too-many-rows': return t('At most {n} rows per list', { n: Number(r.max) || 16 });
     case 'compose-not-available': return t('This account cannot start a new conversation — reply inside an existing one');
@@ -397,7 +398,9 @@ export function deliveryRowText(row, { t = tDevice, time = hhmmLocal } = {}) {
   if (!row) return '';
   const name = String(row.name || '');
   switch (row.state) {
-    case 'waiting': return t('Waiting for {name}\'s next turn', { name });
+    // lane pair-group-fate: a stopped addressee still waits (a resume delivers it); an ended one is said, never "waiting"
+    case 'waiting': return row.stopped ? t('{name} is stopped — delivered when it resumes', { name }) : t('Waiting for {name}\'s next turn', { name });
+    case 'undeliverable': return row.why === 'gone' ? t('Not delivered — {name}\'s conversation is gone', { name }) : Number.isFinite(row.at) ? t('Not delivered — {name}\'s conversation was archived {when}', { name, when: new Date(row.at).toLocaleDateString() }) : t('Not delivered — {name}\'s conversation was archived', { name });
     case 'handed': return Number.isFinite(row.at) ? t('Read by {name} · {time}', { name, time: time(row.at) }) : t('Read by {name}', { name });
     case 'muted': return t('{name} is muted and will not read it', { name });
     case 'left': return t('{name} left', { name });
@@ -408,6 +411,17 @@ export function deliveryRowText(row, { t = tDevice, time = hhmmLocal } = {}) {
  *  sentence; several ⇒ the counts ("1 waiting · 1 read"), every sentence in the title. `tone`: `waiting` while
  *  anyone still waits (a hollow dot), `handed` when it reached everyone it could (a filled dot), `none` when only
  *  muted / departed members are left (nobody will read it). */
+/** B-eba8: an awaited message's own clause on its line (PURE awaitState's words) — '' when it awaits nothing. */
+export function awaitLineText(st, { t = tDevice, time = hhmmLocal } = {}) {
+  if (!st || !st.state) return '';
+  switch (st.state) {
+    case 'awaiting': return t('Awaiting a reply (it wakes the sender once)');
+    case 'woke': return t('The reply woke the sender · {time}', { time: time(st.at) });
+    case 'held': return t('Reply waiting — the sender\'s wake cap reached');
+    case 'expired': return t('Await expired');
+    default: return '';
+  }
+}
 export function deliveryLineText(rows, { t = tDevice, tc = tcDevice, time = hhmmLocal } = {}) {
   const list = Array.isArray(rows) ? rows.filter((r) => r && DELIVERY_STATES.includes(r.state)) : [];
   if (!list.length) return null;
@@ -421,6 +435,7 @@ export function deliveryLineText(rows, { t = tDevice, tc = tcDevice, time = hhmm
   if (n('handed')) parts.push(tc('delivery', '{n} read', { n: n('handed') }));
   if (n('muted')) parts.push(tc('delivery', '{n} muted', { n: n('muted') }));
   if (n('left')) parts.push(tc('delivery', '{n} left', { n: n('left') }));
+  if (n('undeliverable')) parts.push(tc('delivery', '{n} not delivered', { n: n('undeliverable') }));
   return { text: parts.join(' · '), tone, title: list.map((r) => deliveryRowText(r, { t, time })).join('\n') };
 }
 

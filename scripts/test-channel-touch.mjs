@@ -248,7 +248,7 @@ console.log('⑤ wiring pins');
     'verify r2: a merged touch\'s re-broadcast is coalesced per session (BROADCAST_MS 250); a new touch goes at once');
   const ar = read('src/agent-routes.js');
   const verbs = ["op: 'read'", "op: 'refresh'", "op: 'reply'", "op: 'compose'", "op: 'status'", "op: 'request'"];
-  ok(verbs.every((v) => ar.includes(`touchChannel(id, [{ ${v}`)) && /touchChannel\(id, searchTouches\(r\.results, \{ query: String\(req\.query\.q \|\| ''\) \}\)\)/.test(ar) && /§63/.test(ar) && /§63 THE CHANNEL WITNESS CENSUS/.test(read('scripts/test-architecture.mjs')),
+  ok(verbs.every((v) => ar.includes(`touchChannel(id, [{ ${v}`)) && /touchChannel\(id, searchTouches\(r\.results, \{ query: String\(req\.query\.q \|\| ''\), memo \}\)\)/.test(ar) && /§63/.test(ar) && /§63 THE CHANNEL WITNESS CENSUS/.test(read('scripts/test-architecture.mjs')),
     'every agent channel verb records its touch AFTER the engine answered ok (read / refresh / reply / compose / search / status / request); test-architecture §63 is the census');
   ok(/if \(r && r\.ok\) touchChannel\(id, \[\{ op: 'read'/.test(ar), 'a refused or hidden read (the uniform not-found) records nothing — the call is behind `r.ok`');
   const cr = read('src/lib/chat-renderers.js');
@@ -335,8 +335,13 @@ console.log('⑥ a search touch carries its query + bounded hit refs; a search r
   ok(nb.searchTouches(many, { query: 'x y' })[0].hits.length === 130, 'CONTROL the hit-ref bound removed: 130 refs ride one touch (the BOUND check can go red)');
   const old = copy('old-click', "if (row.query && num(la.search) >= newest) return", "if (false) return");
   ok(old.openVerdict(old.foldTouches([sT({ at: 1000 })])[0]).open === 'conversation', 'CONTROL the search verdict removed: the search row opens the conversation (the old click — the VERDICT check can go red)');
-  const nq = copy('no-query', "...(op === 'search' && x.query ? { query: str(x.query, QUERY_MAX), hits: hitRefs(x.hits) } : {}),", '');
+  const nq = copy('no-query', "...(op === 'search' && x.query ? { query: str(x.query, QUERY_MAX), hits: hitRefs(x.hits), ...(memoOk(x.memo) ? { memo: x.memo } : {}) } : {}),", '');
   ok(!('query' in nq.normalizeTouch(sT({ at: 1000 }))) && nq.openVerdict(nq.foldTouches([nq.normalizeTouch(sT({ at: 1000 }))])[0]).open === 'conversation', 'CONTROL the touch forgets the query: the stored row opens the conversation (the TABLE check can go red)');
+  // lane search-card-open (.233): a vendor search's touch carries its memo scope to the row's dialog (closed shape only)
+  const mt = T.searchTouches([{ adapterId: 'a', convId: 'c', title: 'C', vendorId: 'v', at: 5 }], { query: 'Kayako', memo: 'set:1:ab' })[0];
+  const mv = T.openVerdict(T.foldTouches([T.normalizeTouch({ ...mt, at: 1000 })])[0]);
+  const bad = T.normalizeTouch({ ...T.searchTouches([{ adapterId: 'a', convId: 'c', vendorId: 'v', at: 5 }], { query: 'Kayako', memo: 'conv:c' })[0], at: 1000 });
+  ok(mt.memo === 'set:1:ab' && mv.open === 'search' && mv.memo === 'set:1:ab' && mv.searchedAt === 1000 && !('memo' in bad), 'a --full search\'s touch keeps its memo scope; the row opens the search with it (and when it searched); a key of another shape is dropped', JSON.stringify({ mv, bad }));
   for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 3, label: '⑥ ' })) ok(c.pass, c.name, c.detail);
   // the wiring
   const tv2 = read('src/lib/channel-touch-view.js'), cp = read('src/lib/channels-panel.js'), app = read('src/lib/app.js'), cw = read('src/lib/channel-window.js');

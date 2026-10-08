@@ -1136,8 +1136,11 @@ function create(engineCtx) {
   /** The ACCOUNT's sending policy (R4, B-6acc): `direct` | `review` | null
    *  (= the adapter's declared default). A conversation's own policy still
    *  wins for that conversation; a composed NEW message reads this one. */
-  async function setAccountPolicy(adapterId, mode, by = 'user') {
+  async function setAccountPolicy(adapterId, mode, by = 'user', opts = {}) {
     const rec = recordOrThrow(adapterId);
+    // lane account-policy-door: `base` = the value the door read ('direct' | 'review' | null) — a stored value that
+    // moved since (the other door, another window) is refused by name, never written over
+    if (opts && opts.base !== undefined && (opts.base || null) !== (rec.policy && rec.policy.mode ? rec.policy.mode : null)) return { ok: false, code: 'policy-changed', error: 'the account\'s sending policy changed since this dialog read it — here it is as it is now; nothing was saved', policy: policyFor(rec, null) };
     if (mode !== null && !P.POLICY_MODES.includes(mode)) return { ok: false, code: 'bad-policy', error: `mode must be ${P.POLICY_MODES.join('|')} (or null to use the adapter's default)` };
     if (mode !== null && !P.policyModesOf(registry.capsOf(rec.kind)).includes(mode)) return { ok: false, code: 'bad-policy', why: 'mode-not-offered', error: `${vendorNameOf(rec)} does not allow the "${mode}" policy — every message on it waits for your approval` };
     const t = now();

@@ -174,6 +174,7 @@ const USAGE = `vibespace-channels — read connected channels, PROPOSE replies (
                                                    ← what is STORED (free); --full = ONE page of the account's own search over its whole history (your share, one per account per 20 s)
                                                    ← messages you can see (the stored logs; no vendor call)
   vibespace-channels status [<proposalId>]         ← what you were given (access / notification) + your proposals
+  vibespace-channels status <conversation>         ← its sending policy + where it comes from (account / this conversation) — the user changes it
   vibespace-channels request <conv> "why"          ← ask the user for access (only on a 'requestable' row)
   vibespace-channels watch <conv|account> [--mode next-turn|wake|digest [--digest-minutes N]] [rules…] [--match any|every] [--cap N] [--why "…"]
                                                    ← YOUR notification on what you can read — the user's Notify… grammar: next-turn
@@ -229,6 +230,9 @@ function printReplaced(r) {
   else console.log(`note: your earlier proposal ${r.replaces} was NOT withdrawn: ${r.replaceError || 'it was decided first'}${r.replaceCode ? ' [' + r.replaceCode + ']' : ''}`);
 }
 
+// lane account-policy-door: a sending policy as `direct (account)` / `review (this conversation)` — the mode and WHERE it comes from
+const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p && p.source ? ` (${p.source === 'conversation' ? 'this conversation' : p.source === 'account' ? 'account' : 'the vendor\'s default'})` : ''}`;
+
 (async () => {
   if (!verb || verb === 'list') {
     if (!verb) console.log(USAGE + '\n');
@@ -242,6 +246,7 @@ function printReplaced(r) {
     const via = (v) => (v && v !== 'conversation' ? ` via the ${v === 'account' ? 'whole account' : 'rule'}` : '');
     for (const c of rows) {
       const chips = [c.level === 'requestable' ? 'requestable (not readable yet)' : 'visible', c.canSend ? `reply → ${c.policy === 'direct' ? 'sends directly' : 'user approves'}` : `no reply (${c.sendWhy || 'not offered'})`];
+      if (c.policy) chips.push(`policy: ${policyWords({ mode: c.policy, source: c.policySource })}`);
       // R4: ACCESS and NOTIFICATION are two separate facts
       const acc = c.access || (c.assigned ? { authority: c.authority, via: c.assignedVia } : null);
       if (acc) chips.push(`access${via(acc.via)} (${acc.authority === 'send' ? 'may send' : 'drafts'})`);
@@ -493,6 +498,14 @@ function printReplaced(r) {
   if (verb === 'status') {
     const id = args[1] || null;
     const r = await call('GET', '/api/agent/channels/status' + (id ? '?id=' + encodeURIComponent(id) : ''));
+    if (id && r.conversation) {
+      // lane account-policy-door: the EFFECTIVE policy and its source — the user's doors change it, never an agent
+      const c = r.conversation;
+      console.log(`${c.key}  — ${c.title}  [${c.adapter}]`);
+      console.log(`    policy: ${policyWords(c.policy)}`);
+      console.log('    (the user changes it: the account\'s ⋯ → Reach & policy…, or this conversation\'s Reach & policy…)');
+      return;
+    }
     if (id) { printProposal(r.proposal, { full: true }); return; }
     // R4: WHAT YOU WERE GIVEN — access (see + act, with an authority) and,
     // separately, whether a notification wakes you

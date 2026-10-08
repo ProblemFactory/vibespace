@@ -1577,6 +1577,25 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     peopleCache.set(adapterId, out);
     return out;
   }
+  /** lane search-card-open (.233): THE ACCOUNT'S VENDOR-SEARCH MEMO (`<account>/search-memo.json`, beside people.json) —
+   *  what the vendor's own search answered (SR.memoToDisk's shape, bounded there: 64 entries / 2 MiB), so a restart
+   *  does not forget it. Written whole (0600, atomic) by the engine on each remembered answer; read once at its first
+   *  use; DROPPED with the account (a disconnect, a removal — the engine's dropLive). */
+  const searchMemoFile = (adapterId) => path.join(dir, safeSeg(adapterId), 'search-memo.json');
+  function searchMemoRead(adapterId) {
+    if (!safeSeg(adapterId)) return null;
+    try { return JSON.parse(fs.readFileSync(searchMemoFile(adapterId), 'utf-8')); } catch { return null; }
+  }
+  function searchMemoWrite(adapterId, obj) {
+    if (!safeSeg(adapterId)) return false;
+    fs.mkdirSync(path.join(dir, safeSeg(adapterId)), { recursive: true, mode: 0o700 });
+    writeJsonAtomic(searchMemoFile(adapterId), obj, { mode: 0o600 });
+    return true;
+  }
+  function searchMemoDrop(adapterId) {
+    if (!safeSeg(adapterId)) return false;
+    try { fs.unlinkSync(searchMemoFile(adapterId)); return true; } catch { return false; }
+  }
   /** A cached attachment: `{file, meta}` or null. A hit refreshes its LRU stamp. */
   // verify r1 (lane channel-attach-read): `msg` names the message whose part it is (a Gmail `part:N` repeats per mail)
   const attSlot = (attId, msg) => attHash(msg ? `${msg}\n${attId}` : attId);
@@ -1946,6 +1965,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     appendRecords, readTail, countSince, trim, audit, auditTail, close,
     // 2026-09-26 (the aggregated IM): backfill, search, attachments
     prependRecords, oldestRecord, search, attachmentGet, attachmentPut, attachmentUsage, avatarGet, avatarPut, avatarRefuse, peopleRead, peopleWrite,
+    searchMemoRead, searchMemoWrite, searchMemoDrop,
     // R3 (§23): one record by its vendorId (the attachment's owner), the LRU ledger's coalesced flush
     findRecord, lruFlush,
     // lane channel-threads: the side log (invariant 8) + which conversation holds a message

@@ -86,9 +86,9 @@ import { showReauthAccountDialog } from './channel-account-dialogs.js';
 import * as chanCaps from '../channel-caps.js';
 // g3 (design §22): the composer's mode by conversation kind, the @-autocomplete,
 // the wake preview, and the group dialogs + words.
-import { composerMode, isGroupConv, mentionQuery, mentionCandidates, insertMention, wakePreview, pickedSpans, atProblem, groupBodyRuns, memberName, learnNames, deliveryOf, OWNER, GROUP_ADAPTER_ID } from './channel-groups-view.js';
+import { composerMode, isGroupConv, mentionQuery, mentionCandidates, insertMention, wakePreview, pickedSpans, atProblem, groupBodyRuns, memberName, learnNames, deliveryOf, awaitState, OWNER, GROUP_ADAPTER_ID } from './channel-groups-view.js';
 import { showGroupDetail, showGroupMembersDialog, renameGroup, archiveGroup } from './channel-group-dialogs.js';
-import { groupErrorText, wakeEchoText, deliveryLineText } from './channel-words.js';
+import { groupErrorText, wakeEchoText, deliveryLineText, awaitLineText } from './channel-words.js';
 import { clearRecords, isCleared, clearedText } from './record-clear-ui.js'; // "Clear content…" (2026-09-28): a group message's menu + the cleared sentence
 import { touchedByRow, openSessionOf } from './channel-touch-view.js'; // §26 (B-099e): "Drafted by <agent>" — the reverse link to the chat; B-ff04: a mention chip opens its session
 // lane channel-rich (D2): a mail's formatted body in the ONE sandboxed frame (the surface's only srcdoc lives there)
@@ -1589,7 +1589,10 @@ function openGroupWindow(app, winInfo, groupId, { bar, list, foot }) {
     if (!line) return;
     const rows = group ? deliveryOf(group, rec, { log: log || [...drawn.values()] }) : [];
     const words = deliveryLineText(rows);
-    const sig = words ? JSON.stringify([words.tone, rows.map((r) => [r.member, r.state, r.name, r.at])]) : '';
+    // B-eba8: an awaited message says where its await stands (PURE awaitState over the view's `awaits`)
+    const aw = group && rec.raw && rec.raw.await ? awaitLineText(awaitState(rec, (group.awaits || {})[rec.vendorId], Date.now())) : '';
+    if (words && aw) { words.text += ' · ' + aw; words.title += '\n' + aw; }
+    const sig = words ? JSON.stringify([words.tone, rows.map((r) => [r.member, r.state, r.name, r.at, r.why || '', r.stopped ? 1 : 0]), aw]) : '';
     if (line.dataset.sig === sig) return;
     line.dataset.sig = sig;
     if (!words) { line.hidden = true; line.removeAttribute('data-tone'); line.title = ''; line.querySelector('.chanmsg-dlv-text').textContent = ''; return; }

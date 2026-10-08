@@ -38,10 +38,10 @@
 //                     PURE src/lib/channel-focus.js) — the first screen is the
 //                     ATTENTION list: what matters, one tag per row, the full
 //                     list one switch away.
-import { GROUP_ADAPTER_ID, NOTIFY_MODES, DEFAULT_NOTIFY, OWNER, scanAts, atRefusal, codeSpans, foldCase, deliveryOf, DELIVERY_STATES } from '../channel-groups.js';
+import { GROUP_ADAPTER_ID, NOTIFY_MODES, DEFAULT_NOTIFY, OWNER, scanAts, atRefusal, codeSpans, foldCase, deliveryOf, DELIVERY_STATES, awaitState } from '../channel-groups.js';
 import { nameOf } from '../channel-ref.js'; // B-c127's name ladder (lane channel-names) — memberName climbs it (the 2.369.202 integration)
 // lane group-pending (2026-10-01): the window's line under every message judges by the model's ONE rule — re-exported, never copied
-export { deliveryOf, DELIVERY_STATES };
+export { deliveryOf, DELIVERY_STATES, awaitState };
 // B-5fe1: each conversation row carries its ACCOUNT badge (PURE — the hue per account, the vendor glyph, `multi`)
 import { accountBadges, INTERNAL_BADGE } from './channel-avatar.js';
 

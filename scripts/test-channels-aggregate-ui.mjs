@@ -454,6 +454,40 @@ const fsm = await p1.evaljs(`(async () => {
 })()`);
 ok(fsm && fsm.o1 && fsm.o2 && fsm.o1.asks === 0 && fsm.o2.asks === 0 && fsm.o1.peeks === 1 && fsm.o2.peeks === 1 && fsm.o1.hits >= 10 && fsm.o2.hits === fsm.o1.hits && /来自.*的搜索/.test(fsm.o2.memo) && fsm.o2.again, '⑪m opened from an agent\'s row twice: 0 vendor-asking /search/full on each open — ⑪\'s press answers from the memo with its age (来自…的搜索) and 重新搜索', JSON.stringify(fsm));
 ok(fsm && fsm.againAsks === 1 && fsm.againFlag === 1 && fsm.afterHits >= 10 && !fsm.afterMemo, '⑪m 重新搜索 = exactly ONE /search/full (again=1); the fresh answer carries no age line', JSON.stringify(fsm));
+// ── ⑪s lane search-card-open (.233; the owner: 「既然 agent 进行了搜索说明 vibespace 已经获取到了相关 data，为啥我点不开？」):
+//    the dialog opened the way an agent's search row opens it (its conversation, its hit refs, its memo key): the hit the
+//    saved copy lacks is SHOWN from the memo (0 vendor-asking /search/full), section two's head carries the agent count,
+//    a click opens 这条消息前后; with nothing remembered the line says so beside 重新搜索 ──
+const fss = await p1.evaljs(`(async () => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const asked = []; const f0 = window.fetch; window.fetch = (u, o) => { asked.push(String(u)); return f0.call(window, u, o); };
+  const dlg = () => document.getElementById('chan-search-dialog');
+  const full = () => asked.filter((u) => u.includes('/api/channels/search/full'));
+  const shut = () => document.querySelectorAll('#chan-search-dialog, #chan-around-sheet').forEach((x) => { const c = x.closest('.modal-overlay') || x; c.remove(); });
+  try {
+    const pk = await (await f0('/api/channels/search/full?adapter=fake-poll&q=budget&peek=1')).json();
+    const h = (pk.hits || []).find((x) => x.known);
+    if (!h) return { fail: 'no remembered known hit', pk: Object.keys(pk) };
+    const n0 = full().length;
+    app.openChannelSearch({ adapterIds: ['fake-poll'], q: 'budget', convId: h.convId, convTitle: 'Ops', hits: [{ msgId: h.vendorId, at: h.at }], memo: 'all', searchedAt: Date.now() - 120e3 });
+    for (let i = 0; i < 80; i++) { if (dlg() && dlg().querySelector('.chan-search-vhit[data-vid="' + h.vendorId + '"]')) break; await sleep(150); }
+    const d = dlg(), mine = full().slice(n0);
+    const row = d && d.querySelector('.chan-search-vhit[data-vid="' + h.vendorId + '"]');
+    const out = { asks: mine.filter((u) => !u.includes('peek=1')).length, scoped: mine.filter((u) => u.includes('memo=all') && u.includes('conv=')).length, row: !!row, head: d ? ((d.querySelector('.chan-search-vendor .chan-search-sec-head') || {}).textContent || '') : '', top: d ? ((d.querySelector('.chan-flow-status') || {}).textContent || '') : '', memo: d ? ((d.querySelector('.chan-search-memo') || {}).textContent || '') : '' };
+    if (row) { row.click(); for (let i = 0; i < 60; i++) { if (document.getElementById('chan-around-sheet')) break; await sleep(150); } }
+    out.around = !!document.getElementById('chan-around-sheet');
+    shut(); await sleep(300);
+    const n1 = full().length;
+    app.openChannelSearch({ adapterIds: ['fake-poll'], q: 'zzqx never asked', convId: h.convId, convTitle: 'Ops', hits: [{ msgId: 'zzqx-1', at: 1 }], memo: 'all', searchedAt: Date.now() - 180e3 });
+    for (let i = 0; i < 80; i++) { if (dlg() && /没有记住/.test(dlg().textContent)) break; await sleep(150); }
+    const g = dlg();
+    out.gone = { asks: full().slice(n1).filter((u) => !u.includes('peek=1')).length, said: g ? ((g.querySelector('.chan-search-vstatus') || {}).textContent || '') : '', again: !!(g && g.querySelector('.chan-search-again')) };
+    shut();
+    return out;
+  } finally { window.fetch = f0; }
+})()`);
+ok(fss && !fss.fail && fss.asks === 0 && fss.scoped === 1 && fss.row && /智能体的命中里有 1 条已不在保存的副本中/.test(fss.head) && !/不在保存的副本/.test(fss.top) && /来自/.test(fss.memo), '⑪s opened like an agent\'s row (its conversation, hit refs, memo key): the hit the saved copy lacks is SHOWN from the memo, 0 vendor-asking /search/full; the agent count is section two\'s head, not the top line', JSON.stringify(fss));
+ok(fss && fss.around && fss.gone && fss.gone.asks === 0 && /智能体.*搜过.*这里没有记住它的结果/.test(fss.gone.said) && fss.gone.again, '⑪s the shown hit opens 这条消息前后; nothing remembered ⇒ "智能体…搜过…——这里没有记住它的结果" beside 重新搜索, still 0 asks', JSON.stringify(fss && fss.gone));
 // ── ⑪c lane mirror-green-channels (the Actions mirror, 2.369.203/.204: ⑪ red as "30 at the first look" AND as "the scroll
 //    to the end asked nothing"): the dialog's next page hung on an IntersectionObserver CROSSING. With the runner's fonts a
 //    vendor row is 40 px and the first answer left section two's end at 904 px of the observer's 914 px reach (one screen
@@ -1583,6 +1617,60 @@ ok(race.bars >= 3 && race.barsParsed === race.bars && race.parsed === race.start
     ok(r.status === 200 && Number(r.headers.get('content-length')) === body.byteLength && body.byteLength > 0 && r.headers.get('x-content-type-options') === 'nosniff' && /sandbox/.test(r.headers.get('content-security-policy') || ''), `the attachment route answers Content-Length (${r.headers.get('content-length')} = the body's ${body.byteLength} bytes) + nosniff + a sandbox CSP`, JSON.stringify([r.status, r.headers.get('content-length'), r.headers.get('transfer-encoding')]));
   }
   await p1.evaljs(`(() => { window.app.wm.closeWindow(window.__atkW.id); return true; })()`);
+}
+
+// ── lane account-policy-door (userW 2026-10-07 "想给整个 Lark 配置可见性与策略，但配不了"): the WHOLE account's
+// Reach & policy… — the account ⋯ opens ONE dialog: the policy row, then the Grant access body itself; picking Direct
+// offers 可以直接回复 in the SAME dialog (no reopen), Save writes send, and the conversation's own dialog says it inherits.
+{
+  // the account's access as the legs above left it — put back at the teardown (the ⑧ control below draws it)
+  const acc0 = ((((await api('GET', '/api/channels/adapters/fake-poll/view')).json || {}).adapter || {}).accountGrain || { access: [] }).access.map((r) => ({ principal: r.principal, authority: r.authority }));
+  const g0 = await api('PUT', '/api/channels/adapters/fake-poll/access', { access: [{ principal: YU, authority: 'draft' }] });
+  ok(g0.status === 200, 'POLICY DOOR setup: Yu holds draft access on the whole account (review)');
+  const ma = await p1.evaljs(MENU('可见性与策略…'));
+  ok(!ma.fail && ma.items.indexOf('可见性与策略…') >= 0 && ma.items.indexOf('可见性与策略…') < ma.items.indexOf('授权访问…'), 'POLICY DOOR: the account ⋯ offers 可见性与策略… (before 授权访问…)', JSON.stringify(ma));
+  const pd = await p1.evaljs(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    for (let i = 0; i < 300 && !document.querySelector('#chan-account-reach-dialog .chan-policy-pick'); i++) await sleep(100);
+    const dlg = document.getElementById('chan-account-reach-dialog');
+    if (!dlg) return { fail: 'the account Reach & policy… did not open' };
+    const radios = () => [...dlg.querySelectorAll('.chan-access-row input[type=radio]')].map((x) => x.value);
+    const row = () => dlg.querySelector('.chan-policy-row');
+    const before = { radios: radios(), mode: row().dataset.policyMode, source: row().dataset.policySource, note: [...dlg.querySelectorAll('.chan-flow-note')].map((x) => x.textContent).join(' | ') };
+    const sel = dlg.querySelector('.chan-policy-pick');
+    sel.value = 'direct';
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+    for (let i = 0; i < 100 && row().dataset.policyMode !== 'direct'; i++) await sleep(100);
+    const after = { radios: radios(), mode: row().dataset.policyMode, source: row().dataset.policySource, text: dlg.querySelector('.chan-policy-source').textContent, same: document.getElementById('chan-account-reach-dialog') === dlg };
+    const send = dlg.querySelector('.chan-access-row input[type=radio][value=send]');
+    if (send) { send.checked = true; send.dispatchEvent(new Event('change', { bubbles: true })); }
+    return { before, after, woken: !!dlg.querySelector('.chan-account-woken button') };
+  })()`);
+  ok(!pd.fail && pd.before.mode === 'review' && !pd.before.radios.includes('send') && /直接发送功能在这里不可用|不可用|可见性与策略/.test(pd.before.note), 'POLICY DOOR: under review section 2 offers draft only, and the refusal names where to change it', JSON.stringify(pd).slice(0, 600));
+  ok(!pd.fail && pd.after.mode === 'direct' && pd.after.source === 'account' && pd.after.same && pd.after.radios.includes('send') && pd.woken, 'POLICY DOOR: Direct picked ⇒ saved on the account and 可以直接回复 is offered IN THE SAME dialog (no reopen); section 3 is the Notify door', JSON.stringify(pd && pd.after));
+  const sv = await p1.evaljs(`(async () => { const dlg = document.getElementById('chan-account-reach-dialog'); return (${SAVE_OUTCOME('chan-account-reach-dialog')})([...dlg.querySelectorAll('button')].find((b) => b.textContent.trim() === '保存')); })()`);
+  const view = (await api('GET', '/api/channels/adapters/fake-poll/view')).json || {};
+  const yu = ((view.adapter && view.adapter.accountGrain && view.adapter.accountGrain.access) || []).find((r) => r.principal && r.principal.id === 'agent-yu');
+  ok(sv.closed && yu && yu.authority === 'send' && view.adapter.policy.mode === 'direct', 'POLICY DOOR: Save writes Yu at send on the whole account (the policy reads direct)', JSON.stringify({ sv, yu, policy: view.adapter && view.adapter.policy }).slice(0, 400));
+  const cv = await p1.evaljs(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const r0 = document.querySelector('.rail-panel-channels .chan-row[data-conv="fake-poll/fake-poll-room-1"]');
+    r0.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 200, clientY: 200 }));
+    await sleep(200);
+    const it = [...document.querySelectorAll('.context-menu .context-menu-item')].find((x) => x.textContent.trim() === '可见性与策略…');
+    if (!it) return { fail: 'no row item' };
+    it.click();
+    for (let i = 0; i < 300 && !document.querySelector('#chan-reach-dialog .chan-policy-source'); i++) await sleep(100);
+    const d = document.getElementById('chan-reach-dialog');
+    if (!d) return { fail: 'the conversation dialog did not open' };
+    const out = { text: d.querySelector('.chan-policy-source').textContent, source: d.querySelector('.chan-policy-row').dataset.policySource, mode: d.querySelector('.chan-policy-row').dataset.policyMode, pick: d.querySelector('.chan-policy-pick').value, opts: [...d.querySelectorAll('.chan-policy-pick option')].map((o) => o.textContent) };
+    d.closest('.dialog-overlay') ? d.closest('.dialog-overlay').remove() : d.remove();
+    return out;
+  })()`);
+  ok(!cv.fail && cv.source === 'account' && cv.mode === 'direct' && cv.pick === '' && /^沿用账户：/.test(cv.text) && cv.opts.some((o) => /^沿用账户的设置（/.test(o)), 'POLICY DOOR: the conversation\'s 可见性与策略… says it inherits the account (direct), "沿用账户的设置" chosen', JSON.stringify(cv));
+  const back = await api('PUT', '/api/channels/adapters/fake-poll', { policy: null });
+  const back2 = await api('PUT', '/api/channels/adapters/fake-poll/access', { access: acc0 });
+  ok(back.status === 200 && back2.status === 200, 'POLICY DOOR teardown: the account back on the vendor\'s default');
 }
 
 // ── ⑧ CONTROL: the PRE-FIX DIALOG (it draws the panel's copy) rebuilt into the scratch bundle ──

@@ -2424,7 +2424,7 @@ console.log('⑨d R4 UI wiring: two operations, the picker = the access list, vi
   const mutated = notifyBody.replace('const principals = st.access.map(', 'const principals = principalChoices(app, st.access).map(');
   ok(mutated !== notifyBody && !/const principals = st\.access\.map\(/.test(mutated), 'CONTROL: a picker built from every live principal is caught by the same pin');
   const acctOrder = [...PANEL.matchAll(/registerMenuItem\(\{ menu: M, group: '1_rows', order: (\d+), when: \(c\) => !A\(c\)\.builtin, label: \(\) => t\('([^']+)'\)/g)].map((m) => `${m[1]}:${m[2]}`);
-  ok(acctOrder.join() === '10:Grant access…,11:Notify…,12:Conversations matching a rule…', 'the account ⋯: Grant access… (10), Notify… (11), then the rule grain (12)', acctOrder.join());
+  ok(acctOrder.join() === '9:Reach & policy…,10:Grant access…,11:Notify…,12:Conversations matching a rule…', 'the account ⋯: Reach & policy… (9 — lane account-policy-door: the whole account\'s policy + access + Notify door), Grant access… (10), Notify… (11), then the rule grain (12)', acctOrder.join());
   ok(/label: \(\) => t\('Grant access…'\),\s*\n\s*run: \(c\) => showGrantAccessDialog\(c\.app, \{ kind: 'conversation', conv: c\.conv \}\)/.test(PANEL) && /label: \(\) => t\('Notify…'\),\s*\n\s*run: \(c\) => showNotifyDialog\(c\.app, \{ kind: 'conversation', conv: c\.conv \}\)/.test(PANEL), 'the conversation row menu offers the same two operations');
   const zh = (await import(path.join(REPO, 'src/lib/i18n-zh.js'))).default, ja = (await import(path.join(REPO, 'src/lib/i18n-ja.js'))).default;
   const RETIRED = ['Hand to an agent…', 'Handed to an agent — edit…', 'Handed to {who}', 'Hand the whole account to an agent — {label}', 'Assign to an agent…', 'Unassign', 'by assignment'];

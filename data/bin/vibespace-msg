@@ -36,7 +36,7 @@ const atRefs = [];
 const handPaths = []; // lane artifacts-handover: --artifact <path> (repeatable) — absolute against this shell's cwd; a /p/<id> page link as is
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
-  if (a === '--quiet' || a === '--wake' || a === '--yes') flags[a.slice(2)] = true;
+  if (a === '--quiet' || a === '--wake' || a === '--yes' || a === '--await') flags[a.slice(2)] = true;
   else if (a === '--compact-first') flags.compactFirst = true;
   else if (a === '--again') flags.again = true;                       // verify r2 ②: send the same text again on purpose
   else if (a.startsWith('--again=')) flags.again = a.slice('--again='.length);   // reuse a printed nonce = a retry of that attempt
@@ -59,6 +59,7 @@ const REMEDY = {
   ambiguous: 'repeat the command with one of the ids above',
   'not-member': 'only a member can do that — vibespace-msg group list shows yours',
   'not-allowed': 'only the group\'s creator (or the user, in the Channels panel) may do that',
+  ended: 'nothing was sent — that conversation ended (archived or gone), so nobody would ever read it. vibespace-msg list shows who you can message',
   archived: 'the group is archived (its log stays readable with vibespace-msg read); start a new one with vibespace-msg group create',
   'pair-group': 'a direct (two-member) group takes no third member — vibespace-msg group create <name> <member…> makes a group',
   'job-token': 'run it from the conversation that owns this job (its own VIBESPACE_SESSION_TOKEN)',
@@ -97,7 +98,8 @@ async function call(method, p, body) {
 const USAGE = `vibespace-msg — message other agent sessions (groups; Task-Group scoped reach)
   vibespace-msg list                              ← sessions you can see/message (name · id · state)
   vibespace-msg group list                        ← the groups you are in (id · members · unread · your notify mode; also: groups)
-  vibespace-msg send <name|id|group> "text" [--at <member>]… [--wake] [--yes] [--artifact <path>…]
+  vibespace-msg send <name|id|group> "text" [--at <member>]… [--wake] [--await] [--yes] [--artifact <path>…]
+        ← --await: the FIRST reply (by anyone else, within 2 h) wakes YOU once (one billed turn) — vibespace-docs msg "Being woken by a reply"
         ← an agent: your direct (two-member) group with it · a group: everyone in it.
           Default: it reaches them on THEIR next turn (free). @name in the text, --at <name|id>, or --wake, wakes them NOW (a billed turn each).
           Every @ is resolved to a member's id when you send: an @ that names no member (or two) is refused with the candidates.
@@ -130,6 +132,12 @@ const wokeLine = (r) => {
   if (r.nextTurn && r.nextTurn.length) bits.push(`on their next turn (free): ${r.nextTurn.join(', ')}`);
   return bits.join(' · ');
 };
+/** B-eba8: an awaited record's trailing clause (the server's `await` state). */
+const awaitClause = (a) => {
+  if (!a || !a.state) return '';
+  const hm = (ms) => (Number.isFinite(ms) ? new Date(ms).toISOString().slice(11, 16) + 'Z' : '');
+  return a.state === 'awaiting' ? ' (awaiting reply)' : a.state === 'woke' ? ` (woke you ${hm(a.at)})` : a.state === 'held' ? ' (reply waiting — your wake cap reached)' : a.state === 'answered' ? ' (answered — not woken)' : a.state === 'expired' ? ' (await expired)' : '';
+};
 const MEMBERSHIP_OPS = new Set(['create', 'invite', 'leave', 'kick', 'rename', 'archive', 'notify']);
 /** WHERE A MESSAGE STANDS with its recipients, as one trailing clause (the server's `delivery` rows — the same rule
  *  the user's window shows under the message): " — waiting for beta's next turn" / " — read by beta"; a group ⇒
@@ -138,12 +146,14 @@ const deliveryClause = (rows) => {
   if (!Array.isArray(rows) || !rows.length) return '';
   // a handed row's `at` = when the report / wake went out (UTC HH:MM + Z, like every other instant this CLI prints); a row without one says no time
   const hhmm = (ms) => (Number.isFinite(ms) ? ' ' + new Date(ms).toISOString().slice(11, 16) + 'Z' : '');
-  const word = (x) => (x.state === 'waiting' ? `waiting for ${x.name}'s next turn` : x.state === 'handed' ? `read by ${x.name}${hhmm(x.at)}` : x.state === 'muted' ? `${x.name} is muted (never reads it)` : x.state === 'left' ? `${x.name} left` : '');
+  // lane pair-group-fate: an ENDED addressee is said (never "waiting" for ever); a stopped one still waits for its resume
+  const day = (ms) => (Number.isFinite(ms) ? ' ' + new Date(ms).toISOString().slice(0, 10) : '');
+  const word = (x) => (x.state === 'undeliverable' ? `not delivered — ${x.name}'s conversation ${x.why === 'gone' ? 'is gone' : 'was archived' + day(x.at)}` : x.state === 'waiting' && x.stopped ? `${x.name} is stopped — delivered when it resumes` : x.state === 'waiting' ? `waiting for ${x.name}'s next turn` : x.state === 'handed' ? `read by ${x.name}${hhmm(x.at)}` : x.state === 'muted' ? `${x.name} is muted (never reads it)` : x.state === 'left' ? `${x.name} left` : '');
   if (rows.length === 1) { const w = word(rows[0]); return w ? ' — ' + w : ''; }
   const names = (s) => rows.filter((x) => x.state === s).map((x) => x.name);
   const parts = [];
   const named = (s) => rows.filter((x) => x.state === s).map((x) => x.name + (s === 'handed' ? hhmm(x.at) : ''));
-  for (const [s, label] of [['waiting', 'waiting'], ['handed', 'read'], ['muted', 'muted'], ['left', 'left']]) if (names(s).length) parts.push(`${label}: ${named(s).join(', ')}`);
+  for (const [s, label] of [['waiting', 'waiting'], ['handed', 'read'], ['muted', 'muted'], ['left', 'left'], ['undeliverable', 'not delivered (ended)']]) if (names(s).length) parts.push(`${label}: ${named(s).join(', ')}`);
   return parts.length ? ' — ' + parts.join(' · ') : '';
 };
 
@@ -163,7 +173,7 @@ const deliveryClause = (rows) => {
     const r = await call('GET', '/api/agent/msg/groups');
     if (!r.groups || !r.groups.length) { console.log('you are in no group yet. vibespace-msg send <agent> "..." starts a direct one; vibespace-msg group create <name> <member…> a group.'); return; }
     for (const g of r.groups) {
-      console.log(`${g.id}  "${g.name}"${g.pair ? ' (direct)' : ''}${g.archived ? ' [archived]' : ''} — ${g.unread} unread · your notify: ${g.notify}`);
+      console.log(`${g.id}  "${g.name}"${g.pair ? ' (direct)' : ''}${g.closed ? ' (closed)' : g.archived ? ' [archived]' : ''} — ${g.unread} unread · your notify: ${g.notify}`);
       console.log(`    members: ${g.members.map((m) => `${m.name}${m.live ? '' : ' (not live)'} [${m.notify}]`).join(', ')} + the user`);
     }
     return;
@@ -205,6 +215,7 @@ const deliveryClause = (rows) => {
     if (!to || !text) { console.error('usage: vibespace-msg send <name|id|group> "text" [--wake]'); process.exit(1); }
     if (handPaths.length && args.length > 3) { console.error(`vibespace-msg: refused — ${args.slice(3).join(' ')}: an argument after the text that is not an --artifact path; nothing was sent (--artifact <path> <path>… after the text)`); process.exit(1); }
     const body = { to, text, wake: !!flags.wake };
+    if (flags.await) body.await = true;   // B-eba8: the first reply wakes this conversation once
     if (atRefs.length) body.at = atRefs;
     if (flags.yes) body.yes = true;
     if (handPaths.length) body.artifacts = handPaths;
@@ -218,6 +229,7 @@ const deliveryClause = (rows) => {
       console.log(`posted to ${r.group.pair ? 'your direct group' : 'group'} "${r.group.name}" (${r.group.id})${r.pairCreated ? ' — created just now' : ''}`);
       const w = wokeLine(r);
       if (w) console.log('  ' + w);
+      if (flags.await) console.log('  --await: will wake you once on the first reply (one billed turn, within 2 h)');
       console.log('  replies arrive in this conversation (a report on your next turn, or now if they @name you and you are not muted)');
       return;
     }
@@ -234,7 +246,8 @@ const deliveryClause = (rows) => {
     if (flags.limit) q.set('limit', flags.limit);
     const r = await call('GET', '/api/agent/msg/read?' + q.toString());
     console.log(`group "${r.group.name}" (${r.group.id}) — ${r.records.length} record(s), oldest first:`);
-    for (const x of r.records) console.log(`- [${x.at}] ${x.kind === 'message' ? x.from + ':' : '(' + x.kind + ')'} ${x.text}${x.kind === 'message' ? deliveryClause(x.delivery) : ''}`);
+    for (const x of r.records) console.log(`- [${x.at}] ${x.kind === 'message' ? x.from + ':' : '(' + x.kind + ')'} ${x.text}${x.kind === 'message' ? deliveryClause(x.delivery) + awaitClause(x.await) : ''}`);
+    if (r.closed) console.log(`(closed — the other conversation ${r.closed.why === 'gone' ? 'is gone' : 'was archived'}; the log is kept, a new send starts a new direct group)`);
     if (r.records.length) console.log(`older: vibespace-msg read ${r.group.id} --before ${r.records[0].at}`);
     return;
   }

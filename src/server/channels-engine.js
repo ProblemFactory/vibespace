@@ -4003,6 +4003,9 @@ function create(deps = {}) {
    *  test-channels-aggregate ③g reads this file: `live.delete(` has this ONE
    *  site and every lifecycle verb takes it. */
   function dropLive(id, why) {
+    // lane search-card-open (.233): the vendor-search memo outlives a rebuild (options, client, disabled) but not the
+    // account — a disconnect or a removal forgets it, file and all (a later sign-in may be someone else)
+    if (why === 'disconnected' || why === 'removed') forgetSearchMemo(id);
     const e = live.get(id);
     if (!e) return;
     disarmPush(e, why);
@@ -5592,15 +5595,40 @@ function create(deps = {}) {
    * shared back-off, the floor, an agent's share, the endpoint's minute, the account's budget), then ≤ `pages` pages
    * paced + metered through `vendor()` and charged to `by`, then the merge (a stored hit dropped). A RATE refusal
    * backs the ENDPOINT off for the account — the change feed shares it and waits with it (its card says so as today).
-   * THE MEMO (lane vendor-search-memo, .230 — `SR.searchMemo`, on the account's LIVE entry: an account change drops it
-   * with the entry; a restart forgets it; never written): an answer is remembered per (scope, normalized query, page);
-   * inside the TTL a press, a reopen (`peek`) or an agent's repeat (it reads the owner's 'all' first, then its own
-   * conversation set's) is answered from it — 0 vendor calls, no floor stamped, `memo: {askedAt, ageMs}` said. `again`
-   * (the owner's "Search again", a press) forgets the entry, then asks under today's table. `peek` with nothing
-   * remembered asks nothing (`unasked`). A refusal, a failure or a partial answer is never remembered.
+   * THE MEMO (lane vendor-search-memo, .230 — `SR.searchMemo`; lane search-card-open, .233: PER ACCOUNT, PERSISTED in
+   * `<account>/search-memo.json` (`memoOf` / `memoKeep`), no TTL, dropped with the account — dropLive's disconnect /
+   * removal — or when the file names another identity): an answer is remembered per (scope, normalized query, page)
+   * and FANNED per conversation (+ 'all' when an agent's scope `covers` the account); a press, a reopen (`peek`) or an
+   * agent's repeat (it reads the owner's 'all' first, then its own conversation set's) is answered from it — 0 vendor
+   * calls, no floor stamped, `memo: {askedAt, ageMs, by}` said. The OWNER reads `memoScopes` (the card's exact agent
+   * scope, then 'all', then the dialog's conversation); an answer from any scope but his own 'all' carries no page
+   * token (it belongs to the searcher who asked). `again` (the owner's "Search again", a press) forgets every scope it
+   * would read, then asks under today's table. `peek` with nothing remembered asks nothing (`unasked`). A refusal, a
+   * failure or a partial answer is never remembered.
    * → { ok: true, sd, hits, next, stored, repeated, pages, memo? , unasked? } | a typed refusal `{ ok: false, code, error, retryAfterSec }`
    */
-  async function vendorSearch(rec, query, { pageToken = null, by = 'owner', ctx = null, shows = null, scope = SR.MEMO_ALL, again = false, peek = false } = {}) {
+  const searchMemos = new Map();   // adapterId → the memo state (SR.searchMemo's), read from its file at first use
+  function memoOf(rec) {
+    if (searchMemos.has(rec.id)) return searchMemos.get(rec.id);
+    const disk = store.searchMemoRead(rec.id);
+    let held = {};
+    try { held = heldIdentity(rec, tokensFor(rec).read().token); } catch { held = {}; }
+    let st = SR.memoFromDisk(disk);
+    if (disk && identityMismatch(disk.identity || {}, held)) { st = SR.memoFromDisk(null); store.searchMemoDrop(rec.id); log.log(`[channels] ${rec.id}: the remembered vendor searches named another identity — forgotten`); }
+    searchMemos.set(rec.id, st);
+    return st;
+  }
+  /** The memo after a step: kept in memory; `write` (a put / a clear) writes the account's file whole. */
+  function memoKeep(rec, st, write = false) {
+    searchMemos.set(rec.id, st);
+    if (!write) return;
+    let held = {};
+    try { held = heldIdentity(rec, tokensFor(rec).read().token); } catch { held = {}; }
+    try { store.searchMemoWrite(rec.id, SR.memoToDisk(st, Object.keys(held).length ? held : null)); }
+    catch (err) { log.warn(`[channels] ${rec.id}: the vendor-search memo could not be written: ${(err && err.message) || err}`); }
+  }
+  function forgetSearchMemo(id) { searchMemos.delete(id); store.searchMemoDrop(id); }
+  async function vendorSearch(rec, query, { pageToken = null, by = 'owner', ctx = null, shows = null, scope = SR.MEMO_ALL, again = false, peek = false, memoScopes = null, covers = false } = {}) {
     const sd = searchRowOf(registry.capsOf(rec.kind));
     const e = sd && rec.enabled !== false ? adapterFor(rec) : null;
     const t = now();
@@ -5616,9 +5644,10 @@ function create(deps = {}) {
     const feedWait = rec.feed && rec.feed.backoffWhy === 'rate-limited' ? Number(rec.feed.backoffUntil) || 0 : 0;
     // verify r1 F3: agents together never take the owner's press — one press's pages of the endpoint's minute stay the owner's
     const agentReserve = sd && by === 'agent' ? sd.pagesPerPress : 0;
-    if (e && again && !pageToken) e.searchMemo = SR.searchMemo(e.searchMemo, { op: 'clear', scope, query }).state;
-    const mq = e && !(again && !pageToken) ? SR.searchMemo(e.searchMemo, { op: 'get', scopes: scope === SR.MEMO_ALL ? [SR.MEMO_ALL] : [SR.MEMO_ALL, scope], query, page: pageToken, now: t }) : null;
-    if (mq) e.searchMemo = mq.state;
+    const reads = by === 'agent' ? (scope === SR.MEMO_ALL ? [SR.MEMO_ALL] : [SR.MEMO_ALL, scope]) : Array.isArray(memoScopes) && memoScopes.length ? memoScopes : [scope];
+    if (e && again && !pageToken) memoKeep(rec, SR.searchMemo(memoOf(rec), { op: 'clear', scopes: reads, query }).state, true);
+    const mq = e && !(again && !pageToken) ? SR.searchMemo(memoOf(rec), { op: 'get', scopes: reads, query, page: pageToken, now: t }) : null;
+    if (mq) memoKeep(rec, mq.state);
     const kept = mq && mq.answer;
     const v = SR.fullSearchVerdict({
       declared: !!(sd && e), scopeHeld: !sd || !sd.scope || held.includes(sd.scope), now: t,
@@ -5637,7 +5666,8 @@ function create(deps = {}) {
       // a snapshot: a hit the local copy has since stored is dropped (it is in section one), nothing else re-asked
       const om = { oldest: new Map(), older: 0, unknown: 0 };
       const mg = SR.mergeVendorHits(kept.hits, { stored: (cid, vid, at) => storedHit(rec.id, cid, vid, at, om) });
-      return { ok: true, sd, hits: mg.hits, next: kept.next, stored: mg.stored, repeated: mg.repeated, pages: 0, memo: { askedAt: kept.askedAt, ageMs: kept.ageMs } };
+      const own = kept.scope === scope && !kept.derived;   // a page token belongs to the searcher who asked
+      return { ok: true, sd, hits: mg.hits, next: own ? kept.next : null, stored: mg.stored, repeated: mg.repeated, pages: 0, memo: { askedAt: kept.askedAt, ageMs: kept.ageMs, by: kept.by } };
     }
     if (v.act === 'unasked') return { ok: true, sd, hits: [], next: null, stored: 0, repeated: 0, pages: 0, unasked: true };
     if (v.act !== 'ask') {
@@ -5689,14 +5719,14 @@ function create(deps = {}) {
     const mg = SR.mergeVendorHits(hits, { stored: (cid, vid, at) => storedHit(rec.id, cid, vid, at, memo) });
     const sum = (k) => facts.reduce((a, f) => a + (Number(f[k]) || 0), 0);
     measureFullSearch(rec, { pages, hits: hits.length, older: memo.older, unknown: memo.unknown, shape: (facts.find((f) => f.shape && f.shape.form !== 'absent') || {}).shape || null, cjk: SR.isCjk(query), of: sum('of'), holding: sum('holding') });
-    if (!failure && !outlived(rec, e)) e.searchMemo = SR.searchMemo(e.searchMemo, { op: 'put', scope, query, page: pageToken, now: t, hits: mg.hits, next: next || null }).state;
+    if (!failure && !outlived(rec, e)) memoKeep(rec, SR.searchMemo(memoOf(rec), { op: 'put', scope, query, page: pageToken, now: t, hits: mg.hits, next: next || null, by, covers: !!covers }).state, true);
     return { ok: true, sd, hits: mg.hits, next: failure ? null : next || null, stored: mg.stored, repeated: mg.repeated, pages, ...(failure ? { partial: failure.code } : {}) };
   }
   /** THE OWNER'S FULL SEARCH (GET /api/channels/search/full): a press (no token: ≤ pagesPerPress pages) or the scroll's
    *  next page (its token: one). Each hit: the conversation's NAME from the index (an unknown one: `known:false`, no
    *  name — the client words it), the author's name only where the owner named them (never an id), the instant, the
    *  vendor's snippet (THE reader's), the chip's fact (never stored). */
-  async function searchVendor(adapterId, q, { pageToken = null, again = false, peek = false } = {}) {
+  async function searchVendor(adapterId, q, { pageToken = null, again = false, peek = false, memo = null, convId = null } = {}) {
     const rec = adapterRecords().adapters.find((r) => r.id === adapterId);
     if (!rec) return { ok: false, code: 'not-found', error: `no such account '${adapterId}'` };
     const query = String(q || '').trim();
@@ -5704,7 +5734,11 @@ function create(deps = {}) {
     if (query.length > SR.QUERY_MAX) return { ok: false, code: 'bad-request', error: `a search is at most ${SR.QUERY_MAX} characters` };
     const tok = pageToken === null || pageToken === undefined || pageToken === '' ? null : String(pageToken);
     if (tok && (tok.length > 2048 || /[\u0000-\u001f]/.test(tok))) return { ok: false, code: 'bad-request', error: 'a malformed page token' };
-    const r = await vendorSearch(rec, query, { pageToken: tok, by: 'owner', again: !!again && !tok, peek: !!peek && !again && !tok });
+    // lane search-card-open (.233): the dialog opened from an agent's search row names that search's scope (`memo` — read
+    // first, exact) and its conversation (`convId` — what any searcher found for it); the owner's own 'all' between
+    const cid = convId === null || convId === undefined || convId === '' ? null : String(convId).slice(0, 512);
+    const memoScopes = [...new Set([...(SR.isMemoScope(memo) ? [memo] : []), SR.MEMO_ALL, ...(cid ? [SR.memoConv(cid)] : [])])];
+    const r = await vendorSearch(rec, query, { pageToken: tok, by: 'owner', again: !!again && !tok, peek: !!peek && !again && !tok, memoScopes });
     if (!r.ok) return r;
     const liveIx = store.index.live();
     const sc = registry.capsOf(rec.kind);
@@ -7070,7 +7104,7 @@ function create(deps = {}) {
     // override, the agent refresh, the three assignment grains, the migration
     conversationView, setRefresh, refresh, agentRefresh, watch, loadOlder, attachment, search,
     // design 010: the vendor's own search (the owner's press / scroll), a hit in context, the agent's `--around`
-    searchVendor, aroundOwner, readAroundFor,
+    searchVendor, aroundOwner, readAroundFor, forgetSearchMemo,
     conversationName,   // B-c127: THE NAME LADDER by key (the touches store names a touch by it)
     accountsBrief,   // B-5fe1: the account list a badge's hue is computed from
     healSelfAt,   // R3 (§23): the one-shot derivation of the owner's newest message for rows that predate the field

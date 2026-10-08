@@ -469,7 +469,7 @@ console.log('§1f deliveryOf — where a record stands with each recipient (lane
   const states = (list) => list.map((x) => `${x.name}:${x.state}`).join(',');
   const withMarker = (g, cid, upTo) => { const c = JSON.parse(JSON.stringify(g)); G.memberOf(c, cid).reportedUpTo = upTo; return c; };
   const withNotify = (g, cid, notify) => { const c = JSON.parse(JSON.stringify(g)); G.memberOf(c, cid).notify = notify; return c; };
-  ok(JSON.stringify(G.DELIVERY_STATES) === '["waiting","handed","muted","left"]', 'DELIVERY_STATES is the closed set waiting | handed | muted | left');
+  ok(JSON.stringify(G.DELIVERY_STATES) === '["waiting","handed","muted","left","undeliverable"]', 'DELIVERY_STATES is the closed set waiting | handed | muted | left | undeliverable (lane pair-group-fate)');
   const before = JSON.stringify(mk);
   ok(states(rows(mk, m1)) === 'beta:waiting,gamma:waiting' && rows(mk, m1).every((x) => x.at === null && G.isCid(x.member)), 'a fresh message: every OTHER member is a recipient and WAITING (marker null), `at` null, each row carries the conversation id');
   ok(JSON.stringify(mk) === before, '…the input group is never mutated');
@@ -556,7 +556,7 @@ console.log('§1f deliveryOf — where a record stands with each recipient (lane
   ok(states(G.deliveryOf(planted, m1, { log: [m1] })) === 'beta:waiting,gamma:waiting' && states(NoOwner.deliveryOf(planted, m1, { log: [m1] })).includes('User:waiting'), 'CONTROL: the real module drops a planted owner row; a copy without the exclusion lists the observer');
   const NoJoin = cut('m.joinedAt <= at', 'true', 'join');
   ok(states(NoJoin.deliveryOf(gD, m1, { log: [m1] })).includes('delta:waiting'), 'CONTROL: a copy without the presence rule lists a member added after the record');
-  const NoMute = cut("handed ? 'handed' : m.notify === 'mute' ? 'muted'", "handed ? 'handed' : false ? 'muted'", 'mute');
+  const NoMute = cut("ended ? 'undeliverable' : m.notify === 'mute' ? 'muted'", "ended ? 'undeliverable' : false ? 'muted'", 'mute');
   ok(states(NoMute.deliveryOf(withNotify(mk, C, 'mute'), m1, { log: [m1] })) === 'beta:waiting,gamma:waiting', 'CONTROL: a copy without the mute rule calls a muted member waiting');
   const NoLeft = cut('const departed = departuresAfter(', 'const departed = []; void departuresAfter(', 'left');
   ok(states(NoLeft.deliveryOf(gL, m1, { log: [m1, leave] })) === 'beta:waiting', 'CONTROL: a copy without the departure witness never says left');
@@ -1359,8 +1359,8 @@ console.log('§4b wiring pins');
   ok(/const groups = createGroups\(\{ store: channels\.store, deliver,/.test(read('src/server/channels-wiring.js')), 'PIN: the wiring builds the engine over the channels store + THE ladder');
   ok(/if \(isTypedInput\(chunk\)\) session\._userInputAt = Date\.now\(\);\s*\n\s*session\.pty\.write\(chunk\)/.test(read('src/ws-handler.js')) && /session\._userInputAt = Date\.now\(\);\s*\/\/ the owner's own turn/.test(read('src/server/user-input.js')) && /sendUserInput\(data\.sessionId, data\.text/.test(read('src/ws-handler.js')), 'PIN: ws input (typed bytes only — isTypedInput) AND chat-input (unconditional — THE typing path in src/server/user-input.js, shared with the For-you reply) stamp _userInputAt');
   ok(/s\._machineInputAt = Date\.now\(\)/.test(read('src/server/conversation-deliver.js')) && /s\._isStreaming = true; s\._machineInputAt = Date\.now\(\);/.test(read('server.js')), 'PIN: the ladder AND auto-resume\'s continue stamp _machineInputAt');
-  ok(/ge\.sendToAgent\(\{ from: myCid, to: tgt\.cid, text, wake: req\.body\?\.wake === true, create: !who\.job, mayWake, consent, at \}\)/.test(ar), 'PIN: /api/agent/msg/send routes an agent target through the pair group (a job token never creates one), paced + consented');
-  ok(/const tgt = ge\.resolveTarget\(to, myCid\);/.test(ar) && /ge\.post\(\{ group: tgt\.group\.id, from: myCid, text, wake: req\.body\?\.wake === true, mayWake, consent, at \}\)/.test(ar) && /const consent = agentConsent\(req\.body\?\.yes\);/.test(ar), 'PIN: send resolves its target ONCE (resolveTarget) and every post it makes carries the wake pace AND the --yes consent');
+  ok(/const o = \{ from: myCid, text, wake: req\.body\?\.wake === true, mayWake, consent, at, awaitReply: req\.body\?\.await === true \};/.test(ar) && /ge\.sendToAgent\(\{ \.\.\.o, to: tgt\.cid, create: !who\.job \}\)/.test(ar), 'PIN: /api/agent/msg/send routes an agent target through the pair group (a job token never creates one), paced + consented');
+  ok(/const tgt = ge\.resolveTarget\(to, myCid\);/.test(ar) && /ge\.post\(\{ group: tgt\.group\.id, \.\.\.o \}\)/.test(ar) && /const consent = agentConsent\(req\.body\?\.yes\);/.test(ar), 'PIN: send resolves its target ONCE (resolveTarget) and every post it makes carries the wake pace AND the --yes consent');
   ok((ar.match(/mayWake: wakeFloorFor\(c\.cid\), consent: agentConsent\(b\.yes\)/g) || []).length === 2, 'PIN: group create AND invite carry the wake pace and the consent (an invite is a wake)');
   ok(/return ge && typeof ge\.pacerFor === 'function' \? ge\.pacerFor\(senderCid\) : null;/.test(ar) && !/_wakeFloor/.test(ar), 'PIN: the agent routes\' pace IS the engine\'s persisted pacer — no in-memory floor Map left');
   ok(/if \(!myCid\) return res\.status\(409\)\.json\(\{ error: who\.cidWhy \|\| 'this session has no conversation id yet[^']*', code: 'bad-member' \}\)/.test(ar), 'PIN: with a groups engine, a cid-less sender is refused before the legacy lane — by the caller\'s own sentence (r4: a pending fork is "a fork that has not announced its own conversation id yet")');
@@ -1487,7 +1487,7 @@ console.log('§7 the cards: a group message handed to a turn is SEEN in that cha
     ok(N.redactGroupCards(s6, seenKeys[0].keys, RCm.CLEARED_TEXT) === 0, '…a second clear of the same record changes nothing');
     const rb = require(path.join(REPO, 'src/server/channels-wiring.js'));
     const wsrc = fs.readFileSync(path.join(REPO, 'src/server/channels-wiring.js'), 'utf8');
-    ok(/onCleared: onGroupCardsCleared \}\);/.test(wsrc) && /N\.redactGroupCards\(s, keys, RCm\.CLEARED_TEXT\)/.test(wsrc) && typeof rb.create === 'function', 'WIRING: the wiring hands the groups engine its onCleared — every LIVE session\'s cards re-worded through the ONE normalizer function');
+    ok(/onCleared: onGroupCardsCleared, liveness \}\);/.test(wsrc) && /N\.redactGroupCards\(s, keys, RCm\.CLEARED_TEXT\)/.test(wsrc) && typeof rb.create === 'function', 'WIRING: the wiring hands the groups engine its onCleared — every LIVE session\'s cards re-worded through the ONE normalizer function');
     const rsrc = fs.readFileSync(path.join(REPO, 'src/lib/chat-renderers.js'), 'utf8');
     ok(/if \(msg\.peerCleared\) core = clearedText\(\);/.test(rsrc), 'WIRING: the chat renderer draws a cleared group card as the sentence in the device\'s words');
     f6.close();
@@ -1954,6 +1954,155 @@ console.log('§verify r1 — `later` names only who is handed it; the @ scan kee
   const OLDG = require(oldGFile);
   const o1 = OLDG.scanAts('İzmir build: @beta please', members), o2 = OLDG.scanAts('İİ @beta @gamma', members);
   ok(oldG !== gSrc && o1.unknown.length === 1 && o1.mentions.length === 0 && o2.mentions.length === 0, 'CONTROL: with the plain toLowerCase the same words are refused ("@beta" is not a member) or mention nobody — the legs above would be red', JSON.stringify({ o1, o2 }));
+}
+
+// ── lane pair-group-fate (B-7d1e, the owner 2026-10-07: four dead pair groups showed "waiting" for ever) + B-eba8
+// (`send --await`, the owner's "B 让 agent 自己决定" + the symmetric addendum) ──────────────────────────────────────────
+{
+  const mkG = G.makeGroup({ id: 'g-0000fa7e', name: 'fate', createdBy: A, at: T0, members: [B, C] }).group;
+  const r1 = { at: T0 + 10, author: { id: A, name: 'alpha' }, raw: { kind: 'message' }, text: 'hi' };
+  const rowOf = (g, rec, lv) => G.deliveryOf(g, rec, { log: [rec], liveness: lv }).find((x) => x.member === B);
+  const cases = [['running', 'waiting'], ['stopped', 'waiting'], ['archived', 'undeliverable'], ['gone', 'undeliverable']];
+  const got = cases.map(([st]) => rowOf(mkG, r1, (cid) => (cid === B ? { state: st, at: T0 + 50 } : null)));
+  ok(cases.every(([, want], i) => got[i].state === want) && got[1].stopped === true && !got[0].stopped && got[2].why === 'archived' && got[3].why === 'gone' && got[2].at === T0 + 50, 'FATE: the state table over liveness — running waits · stopped waits (stopped:true, a resume delivers it) · archived / gone ⇒ undeliverable with why + the instant it ended', JSON.stringify(got));
+  const handedG = JSON.parse(JSON.stringify(mkG)); G.memberOf(handedG, B).reportedUpTo = T0 + 10; G.memberOf(handedG, B).reportedAt = T0 + 20;
+  const mutedG = JSON.parse(JSON.stringify(mkG)); G.memberOf(mutedG, B).notify = 'mute';
+  const arch = (cid) => (cid === B ? { state: 'archived', at: T0 + 50 } : null);
+  ok(rowOf(handedG, r1, arch).state === 'handed' && rowOf(mutedG, r1, arch).state === 'undeliverable' && rowOf(mutedG, r1, null).state === 'muted', 'FATE: a record HANDED before the end stays handed; a muted member that ended reads undeliverable (it is a fact about the addressee)');
+  const viewG = JSON.parse(JSON.stringify(mkG)); G.memberOf(viewG, B).ended = { why: 'archived', at: T0 + 60 }; G.memberOf(viewG, C).live = false;
+  const vr = G.deliveryOf(viewG, r1, { log: [r1] });
+  ok(vr[0].state === 'undeliverable' && vr[0].at === T0 + 60 && vr[1].state === 'waiting' && vr[1].stopped === true, 'FATE: with no reader the VIEW\'s own facts judge (member.ended ⇒ undeliverable, live:false ⇒ stopped) — the window and the CLI read the same rule');
+  const leftLog = [r1, { at: T0 + 30, author: { id: C }, raw: { kind: 'leave', member: C } }];
+  const gl = JSON.parse(JSON.stringify(mkG)); gl.members = gl.members.filter((m) => m.member !== C);
+  ok(G.deliveryOf(gl, r1, { log: leftLog, liveness: arch }).map((x) => x.state).join() === 'undeliverable,left', 'FATE: a departed member still reads left beside an ended one');
+  const FM = mutantCopies('chan-groups-fate', REPO);
+  const fsrc = fs.readFileSync(path.join(REPO, 'src/channel-groups.js'), 'utf-8');
+  const needle = "const state = handed ? 'handed' : ended ? 'undeliverable' :";
+  const NoFate = FM.load('src/channel-groups.js', fsrc.replace(needle, "const state = handed ? 'handed' : false ? 'undeliverable' :"), 'nofate');
+  ok(fsrc.includes(needle) && NoFate.deliveryOf(mkG, r1, { log: [r1], liveness: arch }).find((x) => x.member === B).state === 'waiting', 'CONTROL: a copy without the fate branch reads an ARCHIVED member waiting (the table above can go red)');
+  const pairG = G.makeGroup({ id: 'g-0000fa7f', name: '', createdBy: A, at: T0, members: [B], pair: true }).group;
+  const cl = G.closePair(pairG, { member: B, why: 'archived', at: T0 + 99 });
+  ok(cl.group.archivedAt === T0 + 99 && cl.group.closed.why === 'archived' && cl.event.kind === 'closed' && G.closePair(cl.group, { member: B, why: 'archived', at: T0 + 100 }).noop === 'already-archived' && G.closePair(mkG, { member: B, why: 'archived', at: T0 }).code === 'pair-group', 'FATE: closePair closes a pair once (archivedAt + closed), is a no-op after, and refuses a multi-member group');
+  ok(G.endedText({ name: 'beta', why: 'archived', n: 2, closed: true }) === "beta's conversation ended — the group is closed (it was archived; your 2 messages were not delivered)", 'FATE: the closed line names the addressee, the fate and the count');
+
+  // B-eba8: THE AWAIT TABLE — (await × the reply's own --wake), then every reason it wakes nothing
+  const aw = { by: A, at: T0 + 10, until: T0 + 10 + G.AWAIT_MS };
+  const ra = { ...r1, raw: { kind: 'message', await: aw } };
+  const run = (cid) => ({ state: cid === A ? 'running' : 'running' });
+  const rep = (o = {}) => ({ author: { id: B }, at: T0 + 20, wake: false, ...o });
+  const V = (rec, reply, o = {}) => G.awaitVerdict(o.g || mkG, rec, reply, { entry: o.entry || null, liveness: o.lv || run }).why;
+  ok([V(r1, rep()), V(r1, rep({ wake: true })), V(ra, rep()), V(ra, rep({ wake: true }))].join() === 'next-turn,replier,await,both', 'AWAIT: the 2×2 table — (no,no) next-turn · (no,yes) the replier\'s wake · (yes,no) wake once · (yes,yes) ONE wake, both named');
+  const gA = JSON.parse(JSON.stringify(mkG)); const mA = G.memberOf(gA, A);
+  const gMute = JSON.parse(JSON.stringify(gA)); G.memberOf(gMute, A).notify = 'mute';
+  const gHand = JSON.parse(JSON.stringify(gA)); G.memberOf(gHand, A).reportedUpTo = T0 + 20;
+  const gLeft = JSON.parse(JSON.stringify(gA)); gLeft.members = gLeft.members.filter((m) => m.member !== A);
+  const reasons = [V(ra, rep(), { entry: { answeredAt: T0 + 15 } }), V(ra, rep(), { entry: { wokeAt: T0 + 15 } }), V(ra, rep({ at: aw.until + 1 })), V(ra, rep(), { g: gMute }), V(ra, rep(), { g: gLeft }), V(ra, rep(), { g: gHand }), V(ra, rep(), { lv: () => ({ state: 'stopped' }) }), V(ra, rep({ author: { id: A } }))];
+  ok(!!mA && reasons.join() === 'not-first,consumed,expired,muted,left,handed,not-running,own-message', 'AWAIT: a second / consumed / late / muted / left / handed-over / not-running / own reply wakes nothing — each by its named reason', reasons.join());
+  ok(G.awaitState(ra, null, T0 + 11).state === 'awaiting' && G.awaitState(ra, { wokeAt: T0 + 30 }, T0 + 31).state === 'woke' && G.awaitState(ra, null, aw.until + 1).state === 'expired' && G.awaitState(ra, { heldAt: T0 + 30 }, T0 + 31).state === 'held' && G.awaitState(r1, null, T0) === null, 'AWAIT: awaitState — awaiting / woke / held / expired (read\'s clause, the window\'s line)');
+  ok(G.awaitNote(ra, B, mkG).includes('asked to be woken by your reply — a plain reply wakes them once; --wake is not needed') && G.awaitNote(ra, A, mkG) === '' && G.awaitNote(r1, B, mkG) === '', 'AWAIT: the replier\'s line says the asker waits (never to the asker itself, never on a plain record)');
+
+  // the REAL engine: post → archive the recipient → undeliverable + ONE line in the sender's next report + the pair closed
+  const f = fixture('pgf-fate');
+  const s1 = await f.eng.sendToAgent({ from: A, to: B, text: 'first' });
+  const s2 = await f.eng.sendToAgent({ from: A, to: B, text: 'second' });
+  const gid = s1.group.id;
+  const end = await f.eng.onConversationEnded(B, { why: 'archived' });
+  const vw = f.eng.get(gid);
+  const recs = f.eng.read({ by: A, group: gid }).records;
+  const closedRec = recs.find((r) => r.raw && r.raw.kind === 'closed');
+  ok(end.closed.includes(gid) && vw.archivedAt && vw.closed.why === 'archived' && closedRec && /your 2 messages were not delivered/.test(closedRec.text), 'ENGINE: archiving the recipient CLOSES the pair (archivedAt + closed) with ONE closed record counting the 2 undelivered messages', closedRec && closedRec.text);
+  ok(G.deliveryOf(vw, s2.message, { log: recs }).map((x) => x.state).join() === 'undeliverable', 'ENGINE: the record now reads undeliverable off the view (member.ended) — never "waiting" for ever');
+  const repA = f.eng.reportsForTurn(A);
+  await f.eng.commitReports(A, repA.marks);
+  ok(/the group is closed/.test(repA.text) && !/the group is closed/.test(f.eng.reportsForTurn(A).text || ''), 'ENGINE: the sender\'s next report carries the closed line ONCE');
+  const again = await f.eng.onConversationEnded(B, { why: 'archived' });
+  const n0 = f.eng.read({ by: A, group: gid }).records.length;
+  const s3 = await f.eng.sendToAgent({ from: A, to: B, text: 'third' });
+  ok(again.closed.length === 0 && n0 === recs.length && s3.ok === false && s3.code === 'ended' && /beta's conversation ended on \d{4}-\d\d-\d\d/.test(s3.error) && f.eng.listFor(A).find((g) => g.id === gid).closed, 'ENGINE: idempotent (a second end re-logs nothing); send to it is REFUSED by name (`ended`); the closed group still lists, with closed', s3.error);
+  // a STOPPED recipient still waits and a resume delivers it (0 lost)
+  const s4 = await f.eng.sendToAgent({ from: A, to: C, text: 'for gamma' });
+  const iC = f.roster.findIndex((r) => r.cid === C); const rC = f.roster.splice(iC, 1)[0];
+  const stoppedRow = G.deliveryOf(f.eng.get(s4.group.id), s4.message, { log: [s4.message] })[0];
+  f.roster.push(rC);
+  const repC = f.eng.reportsForTurn(C);
+  ok(stoppedRow.state === 'waiting' && stoppedRow.stopped === true && /for gamma/.test(repC.text), 'ENGINE: a STOPPED recipient reads waiting (stopped) and its resume\'s report delivers the message — 0 lost');
+  // the boot sweep: two dead pairs closed ONCE, a live pair untouched
+  const s5 = await f.eng.sendToAgent({ from: A, to: E, text: 'for eps' });
+  let t2 = T0 + 1e7;
+  const eng2 = GE.create({ store: f.store, deliver: f.deliver, roster: () => f.roster, now: () => (t2 += 1000), groupSetting: () => 'none', log: { info() {}, warn() {}, log() {} }, liveness: (cid) => (cid === C ? { state: 'gone' } : cid === D ? { state: 'archived' } : { state: 'running' }) });
+  const sw1 = await eng2.sweepEnded();
+  const sw2 = await eng2.sweepEnded();
+  ok(sw1.closed.length === 1 && sw1.closed[0] === s4.group.id && sw2.closed.length === 0 && !eng2.get(s5.group.id).archivedAt && eng2.get(s4.group.id).closed.why === 'gone', 'BOOT SWEEP: a gone member\'s pair is closed once, a second sweep closes nothing, a live pair is untouched', JSON.stringify([sw1, sw2]));
+  f.close();
+
+  // lane pair-group-fate-r2 — `gone` needs EVIDENCE: the PURE table over the reader's FACTS (a remote / unknown-owner /
+  // unreadable-store conversation is stopped, never undeliverable; the archive closes local and remote alike)
+  const LF = G.livenessFrom;
+  const lt = [[{ live: true }, 'running'], [{ archived: true }, 'archived'], [{ archived: true, owner: 'remote' }, 'archived'], [{ transcript: true, owner: 'remote' }, 'stopped'],
+    [{ owner: 'local', dirReadable: true }, 'gone'], [{ owner: 'remote', dirReadable: true }, 'stopped'], [{ owner: 'unknown', dirReadable: true }, 'stopped'], [{ owner: 'local', dirReadable: false }, 'stopped'], [{}, 'stopped']];
+  const ltGot = lt.map(([facts]) => LF(facts).state);
+  const ltRows = lt.map(([facts]) => G.deliveryOf(mkG, r1, { log: [r1], liveness: () => LF(facts) }).find((x) => x.member === B).state);
+  ok(ltGot.join() === lt.map(([, w]) => w).join() && ltRows.join() === 'waiting,undeliverable,undeliverable,waiting,undeliverable,waiting,waiting,waiting,waiting' && LF({ owner: 'remote', dirReadable: true }).why === 'remote' && LF({ owner: 'local' }).why === 'unreadable', 'EVIDENCE: gone ONLY for a known-LOCAL conversation whose READABLE transcript dir lacks it — remote / unknown owner / unreadable dir ⇒ stopped (the record waits); archived closes local AND remote', ltGot.join() + ' | ' + ltRows.join());
+  // the REAL engine + the wiring's REAL reader: B remote (a conversation-index claim by host-x, no transcript here),
+  // C remote + archived in the sidebar, D local (this machine's session-meta, no host; readable dir, no transcript; its pair
+  // is with eps — alpha cannot reach delta), X a conversation nobody places
+  const { deliveryLineText } = await import(pathToFileURL(path.join(REPO, 'src/lib/channel-words.js')).href);
+  const CI = require(path.join(REPO, 'src/conversation-index.js'));
+  const remoteLeg = async (name, W) => {
+    const fr = fixture(name);
+    const sent = {};
+    for (const [k, to, from] of [['B', B, A], ['C', C, A], ['D', D, E]]) sent[k] = await fr.eng.sendToAgent({ from, to, text: 'for ' + k });
+    const dir = path.join(ROOT, name, 'projects'), metaDir = path.join(ROOT, name, 'session-meta');
+    fs.mkdirSync(dir, { recursive: true }); fs.mkdirSync(metaDir, { recursive: true });
+    fs.writeFileSync(path.join(metaDir, 'cw-delta.json'), JSON.stringify({ claudeSessionId: D, sockName: 'cw-delta', cwd: '/tmp' }));
+    const idx = new CI.ConversationIndex({ dataDir: path.join(ROOT, name) });
+    idx.note(B, 'host-x', { src: 'discovery' }); idx.note(C, 'host-y', { src: 'discovery' });
+    const live = fr.roster.filter((r) => r.cid === A || r.cid === E);
+    const facts = { liveSessions: () => live, readUserState: () => ({ archivedSessions: ['claude:' + C] }), convIndex: () => idx, metaDir, transcriptDirs: () => [dir], findTranscript: () => false };
+    const reader = W.livenessReader(facts);
+    const eng = GE.create({ store: fr.store, deliver: fr.deliver, roster: () => live, now: () => Date.now(), groupSetting: () => 'none', log: { info() {}, warn() {}, log() {} }, liveness: reader });
+    const sw = await eng.sweepEnded();
+    const unread = W.livenessReader({ ...facts, transcriptDirs: () => [path.join(dir, 'not-mounted')] })(D);
+    return { fr, eng, sent, sw, reader, unread, gid: (k) => sent[k].group.id };
+  };
+  const WR = require(path.join(REPO, 'src/server/channels-wiring.js')), X = 'abababab-9999-4000-8000-0000000000ab';
+  const rl = await remoteLeg('pgf-remote', WR);
+  const closedSet = rl.sw.closed.slice().sort().join();
+  const sB = await rl.eng.post({ group: rl.gid('B'), from: A, text: 'still there?' });   // send <the pair> — beta is not live here
+  const rowB = sB.ok ? G.deliveryOf(rl.eng.get(rl.gid('B')), sB.message, { log: [sB.message] }) : [];
+  const lineB = deliveryLineText(rowB);
+  ok(closedSet === [rl.gid('C'), rl.gid('D')].sort().join() && !rl.eng.get(rl.gid('B')).archivedAt && rl.eng.get(rl.gid('C')).closed.why === 'archived' && rl.eng.get(rl.gid('D')).closed.why === 'gone', 'EVIDENCE (real reader): the boot sweep closes the archived REMOTE pair and the local gone one — NOTHING for the remote conversation without a copy here', JSON.stringify(rl.sw));
+  ok(sB.ok === true && rowB.length === 1 && rowB[0].state === 'waiting' && rowB[0].stopped === true && lineB && lineB.tone === 'waiting' && !/Not delivered/.test(lineB.text), 'EVIDENCE (real reader): send to the remote member is ACCEPTED and its window line says waiting (stopped — a resume delivers)', JSON.stringify([sB.code, sB.error, rowB, lineB]));
+  ok(rl.reader(B).state === 'stopped' && rl.reader(B).why === 'remote' && rl.reader(X).why === 'unknown' && rl.unread.state === 'stopped' && rl.unread.why === 'unreadable', 'EVIDENCE (real reader): remote ⇒ stopped (remote), no owner ⇒ stopped (unknown), the local one on an unreadable / unmounted store ⇒ stopped (unreadable)', JSON.stringify([rl.reader(B), rl.reader(X), rl.unread]));
+  rl.fr.close();
+  const wsrcR = fs.readFileSync(path.join(REPO, 'src/server/channels-wiring.js'), 'utf-8');
+  const oldNeedle = '{ transcript, owner: ownerOf(cid), dirReadable: dirReadable() }';
+  const OldReader = FM.load('src/server/channels-wiring.js', wsrcR.replace(oldNeedle, "{ transcript, owner: 'local', dirReadable: true }"), 'oldreader');
+  const rc = await remoteLeg('pgf-remote-ctl', OldReader);
+  const sBc = await rc.eng.post({ group: rc.gid('B'), from: A, text: 'still there?' });
+  ok(wsrcR.includes(oldNeedle) && rc.sw.closed.includes(rc.gid('B')) && rc.eng.get(rc.gid('B')).closed.why === 'gone' && sBc.ok === false, 'CONTROL: a copy with the OLD reader (no transcript here ⇒ gone) CLOSES the remote pair and refuses the send (the legs above can go red)', JSON.stringify([rc.sw, sBc.code]));
+  rc.fr.close();
+
+  // B-eba8 on the REAL engine: A --await → B replies → exactly ONE billed wake of A (peer-message); B again → 0
+  const fa = fixture('pgf-await');
+  const q = await fa.eng.sendToAgent({ from: A, to: B, text: 'question?', awaitReply: true });
+  const repB = fa.eng.reportsForTurn(B);
+  const authsA = () => fa.auths.filter((x) => x.cid === A);
+  const a1 = await fa.eng.post({ group: q.group.id, from: B, text: 'answer' });
+  const n1 = authsA().length, p1 = fa.posts.filter((p) => p.cid === A);
+  await fa.eng.post({ group: q.group.id, from: B, text: 'and more' });
+  ok(q.ok && q.message.raw.await.until === q.message.at + G.AWAIT_MS && /asked to be woken by your reply/.test(repB.text) && n1 === 1 && authsA()[0].reason === 'peer-message' && p1.length === 1 && /\[await\] A reply to your message/.test(p1[0].text) && authsA().length === 1 && a1.awaited[0].woke, 'ENGINE AWAIT: the first reply wakes the asker ONCE through the ladder (peer-message, the [await] lead); a second reply wakes nothing', JSON.stringify(fa.auths));
+  const q2 = await fa.eng.sendToAgent({ from: A, to: B, text: 'another?', awaitReply: true });
+  const before = authsA().length;
+  await fa.eng.post({ group: q2.group.id, from: B, text: 'yes and woke', wake: true });
+  ok(authsA().length === before + 1 && fa.eng.get(q2.group.id).awaits[q2.message.vendorId].why === 'both', 'ENGINE AWAIT (yes,yes): an awaited record answered WITH --wake = exactly ONE billed wake, the entry says both decided', JSON.stringify([before, authsA().length, fa.eng.get(q2.group.id).awaits]));
+  fa.close();
+  const fc = fixture('pgf-cap', { refuse: new Set([A]) });
+  const q3 = await fc.eng.sendToAgent({ from: A, to: B, text: 'capped?', awaitReply: true });
+  await fc.eng.post({ group: q3.group.id, from: B, text: 'reply' });
+  const st3 = G.awaitState(q3.message, fc.eng.get(q3.group.id).awaits[q3.message.vendorId], Date.now());
+  ok(fc.posts.filter((p) => p.cid === A).length === 0 && st3.state === 'held', 'ENGINE AWAIT: a refused wake (the cap) delivers nothing and the record SAYS the reply waits (held)');
+  fc.close();
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

@@ -844,5 +844,42 @@ ok(watcher === false, 'CONTROL: the Message watcher section (never folded) is op
   ok(!String((again.body && again.body.context) || '').includes(PARKED), '⑫ …exactly once: the next turn carries it no more');
 }
 
+// ── ⑬ lane pair-group-fate (+ r2): a message to a conversation that ENDED — alpha `send beta` makes their pair, the
+// sidebar archives beta (THE user-state write), the pair CLOSES; a zh page draws the line under alpha's message as not
+// delivered (archived, with when), never 等待, and lists the pair under the archived groups ──
+{
+  const ALPHA = AGENTS[0], BETA = AGENTS[1];
+  const tg = await api('POST', '/api/tasks', { title: 'pair fate', sessions: AGENTS.map((a) => 'claude:' + a.cid) });
+  const FATE = 'for beta: the pair-fate note';
+  const sent = await api('POST', '/api/agent/msg/send', { to: BETA.cid, text: FATE }, { Authorization: 'Bearer ' + ALPHA.token });
+  const pid = sent.body && sent.body.group && sent.body.group.id;
+  ok(tg.status === 200 && sent.status === 200 && !!pid, '⑬ FIXTURE: one Task Group; alpha `send beta` makes their pair group', JSON.stringify([tg.status, sent.status, sent.body]).slice(0, 400));
+  const us = (await api('GET', '/api/user-state')).body || {};
+  const ar = await api('PATCH', '/api/user-state', { archivedSessions: [...(us.archivedSessions || []), 'claude:' + BETA.cid] });
+  let closed = null;
+  for (let i = 0; i < 40 && !closed; i++) { const l = await api('GET', '/api/channel-groups'); closed = ((l.body && l.body.groups) || []).find((g) => g.id === pid && g.archivedAt) || null; if (!closed) await sleep(250); }
+  ok(ar.status === 200 && closed && closed.closed && closed.closed.why === 'archived', '⑬ the sidebar archive of beta (THE user-state write) CLOSES the pair (archived)', JSON.stringify(closed).slice(0, 400));
+  const again = await api('POST', '/api/agent/msg/send', { to: BETA.cid, text: 'still there?' }, { Authorization: 'Bearer ' + ALPHA.token });
+  ok(again.body && again.body.code === 'ended', '⑬ send beta is now refused `ended`, by name', JSON.stringify(again.body).slice(0, 300));
+  const p = await newPage();
+  await p.cdp('Page.addScriptToEvaluateOnNewDocument', { source: `try { localStorage.setItem('vibespace.lang', 'zh'); } catch {}` });
+  ok(await p.load(), '⑬ zh: a page in zh loaded');
+  await p.evaljs(`(() => { window.app.openChannel('groups', '${pid}'); return 1; })()`);
+  const DLVP = DLV(FATE).replace(`=== '${gid}'`, `=== '${pid}'`);
+  let dz = null;
+  for (const end = Date.now() + 20000; Date.now() < end && !dz;) { try { dz = await p.evaljs(`(() => { const d = ${DLVP}; return d && /未送达/.test(d.text || '') ? d : null; })()`); } catch {} if (!dz) await sleep(250); }
+  ok(dz && /^未送达——beta 的对话已于 .+ 归档$/.test(dz.text) && dz.whole && dz.tone !== 'waiting' && !/等待/.test(dz.title), '⑬ zh: the line under alpha\'s message reads "未送达——beta 的对话已于 … 归档", whole in its row — never 等待', JSON.stringify(dz));
+  await p.evaljs(OPEN_PANEL);
+  let li = null;
+  for (const end = Date.now() + 20000; Date.now() < end && !(li && li.row);) {
+    try { li = await p.evaljs(`(() => { const P = document.querySelector('.rail-panel-channels'); const tog = P && P.querySelector('.chan-archived-toggle'); if (!tog) return null;
+      if (!tog.classList.contains('chan-archived-open')) { tog.click(); return { label: tog.textContent }; }
+      const row = P.querySelector('.chan-grow.chan-grow-archived[data-group="${pid}"]'); const live = P.querySelector('.chan-grow:not(.chan-grow-archived)[data-group="${pid}"]');
+      return { label: P.querySelector('.chan-archived-toggle').textContent, row: row ? row.textContent : null, live: !!live }; })()`); } catch {}
+    if (!(li && li.row)) await sleep(250);
+  }
+  ok(li && li.row && !li.live && /归档/.test(li.label), '⑬ zh: the closed pair is listed under the archived groups (not among the live rows)', JSON.stringify(li));
+}
+
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);
 process.exit(fail ? 1 : 0);

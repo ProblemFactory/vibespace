@@ -827,7 +827,7 @@ const SETTINGS_SCHEMA = {
   'agents.stopNudgeStaleMinutes': {
     type: 'number', default: 10, min: 0, max: 240, step: 1,
     label: t('Stop nudge: staleness threshold (minutes)'),
-    description: t('The nudge only fires when the session has not updated its board status for this long. Lower = agents are reminded more eagerly; higher = quieter. 0 = always considered stale (with cooldown 0 too, the nudge fires on EVERY stop — one bookkeeping mini-turn per turn).'),
+    description: t('The nudge only fires when the session has not updated its board status for this long — and never after a turn that already reported its status or progress (vibespace-status / vibespace-task / vibespace-ask during that turn). Lower = agents are reminded more eagerly; higher = quieter. 0 = always considered stale (with cooldown 0 too, the nudge fires on every stop of a turn that did not report — at most one bookkeeping mini-turn per turn).'),
     when: [{ setting: 'agents.vibespaceIntegration', is: true }, { setting: 'agents.stopBookkeepingNudge', is: true }],
     tier: 'advanced',
     category: t('Integration'), liveApply: true,

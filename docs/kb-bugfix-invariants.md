@@ -4666,3 +4666,28 @@ The owner's conversation held 43 deliverables and 174 code files; the chip's pop
 ## THE AGENT COULD WATCH ONLY BY KEYWORD WHILE THE OWNER HAD TWELVE RULE KINDS (lane agent-watch-parity, owner 2026-10-07)
 
 **What happened.** `vibespace-channels watch` carried mode + keywords + cap through its own little schema in the route, refused `--regex` with a reason the regex judge had since retired, and could not read back what notified the agent. **不变量** = one notification grammar, one validator, two doors (the Notify… dialog and the CLI): `src/channel-watch-spec.js` turns flags / a `--spec` row into the dialog's watcher row and judges it with channel-filter's own validators; the route holds no schema; a new rule kind without a CLI flag is red (test-channel-watch-spec's kind census). Authority stays the owner's: access first, wake / digest = one request the user approves, the user's rows are read-only to the agent.
+
+## THE OWNER COULD NOT OPEN WHAT THE AGENT FOUND (lane search-card-open, 2.369.233, 2026-10-07)
+
+The owner: 「既然 agent 进行了搜索说明 vibespace 已经获取到了相关 data，为啥我点不开？」 — the dialog from the agent's search row said "1 of the agent's hits are not in the saved copy" and "press Search". Cause: the memo was keyed by the AGENT's visible-set scope while the dialog peeked `all`; and the missing hits were counted, not shown.
+- **不变量** = what one searcher found for a conversation is remembered for that conversation (and its own scope, which the card row names); a remembered hit is shown, with its context, never a count. The memo does not expire (history only gains newer messages; the saved copy receives them); it is bounded by size / LRU, persisted per account, dropped with the account or another identity.
+- **Gate:** test-channel-search §A fan legs + §M owner-opens-agent-row (0 vendor calls) + controls (no fan ⇒ miss; a derived token ⇒ red).
+
+
+## A MESSAGE TO A CONVERSATION THAT ENDED WAITED FOR EVER (lane pair-group-fate, B-7d1e, owner 2026-10-07)
+
+The owner saw four dead lane pair groups, each with the sender's last report drawn "waiting": `send <agent>` posts into the pair with notify next-turn, and a recipient that was killed and sidebar-archived never prompts again. INVARIANT: a record's state is a fact about its ADDRESSEE — `deliveryOf` reads each member's liveness (running / stopped / archived / gone); archived / gone ⇒ `undeliverable` (said, with when), stopped still waits (a resume delivers it). The engine's `ended` ledger is the fact; the sidebar archive (THE user-state write) and the boot sweep feed it; a PAIR whose other member ended is CLOSED (one `closed` line the sender's next report carries once), `send` to it is refused `ended`. Same lane, B-eba8: `send --await` — the first reply wakes the asker ONCE through the same `wake()` (peer-message); a wake already made (mention / the replier's `--wake`) consumes it. r2: a REMOTE conversation (an ssh host's / a paired device's — the conversation-index places it) is never gone for a missing local copy, nor is one whose owner is unknown or whose transcript dir could not be read (late NFS): it reads stopped and waits — `gone` needs positive evidence (PURE `livenessFrom`).
+
+
+## THE ACCOUNT'S POLICY HAD A ROUTE AND NO DOOR (lane account-policy-door, userW 2026-10-07: "想给整个 Lark 配置可见性与策略，但配不了")
+
+**Symptom:** at the account grain, Grant access… refused `send` ("Direct send is not offered here: this channel requires review before anything is sent") and no page could make the account direct — the owner read it as "cannot configure".
+
+**Cause:** the account's sending policy (`PUT /api/channels/adapters/:id {policy}`, R4 B-6acc) had a route and an engine verb but no door: the account ⋯ had no Reach & policy…, the Edit dialog carried only the reaction policy; only a conversation's own Reach & policy… wrote a policy.
+
+**Fix:** ONE PURE `policyRowModel` (src/channel-policy.js) behind two doors that read one value — the account ⋯ → Reach & policy… (policy row → the Grant access body itself, re-drawn in place so `send` is offered the moment the policy reads direct → the Notify door) and the account Edit dialog's select; a conversation's dialog says where its value comes from ("Inherits the account: direct"). The route takes `base` (409 `policy-changed`). The refusal names where to change it. Agents read `policy: direct (account)` on `status <conversation>` and every list row.
+
+**Invariant:** every grain that holds a value has a door the owner can find, and a refusal that names a value names where to change it.
+
+**Gates:** test-account-policy-door (fast): model table en/zh/ja, base/409, real engine (review ⇒ send refused; direct ⇒ offered; inheritance; own value kept), agent words, door pins + patched-copy control (the dialog without its policy row ⇒ red); test-channels-aggregate-ui heavy leg.
+

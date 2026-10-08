@@ -17,7 +17,41 @@ const { create: createChannelApi } = require('./channel-api.js');
 const { create: createApiCards } = require('./channel-api-cards.js');
 const N = require('../normalizers.js');
 
-function create({ app, dataDir, bcastAll = () => {}, now = () => Date.now(), env = process.env, integrations = null, userTodos = null, deliver = null, serverSetting = () => undefined, liveSessions = () => [], groupSetting = () => 'none', authEnabled = () => false, getMounts = () => null, sessions = () => null, sessionMeta = () => null, onGroupsPending = () => {} } = {}) {
+// lane pair-group-fate (+ r2: `gone` needs EVIDENCE): THE liveness reader supplies FACTS only — the live roster, the
+// sidebar's archived list (user-state keys are `<backend>:<cid>`), a transcript on disk (Claude / codex), WHO OWNS the
+// conversation (a conversation-index claim ⇒ another machine's, or unknown when the claims are ambiguous; else a
+// session-meta of this machine: no `host` ⇒ local) and whether the transcript directory was readable. PURE
+// channel-groups `livenessFrom` judges: a remote / unknown-owner / unreadable-store conversation is never gone.
+function livenessReader({ liveSessions = () => [], readUserState = () => ({}), convIndex = () => null, metaDir = null, transcriptDirs = null, findTranscript = null, now = () => Date.now() } = {}) {
+  const fs = require('fs'), path = require('path'), os = require('os'), G = require('../channel-groups.js');
+  const dirs = transcriptDirs || (() => [path.join(os.homedir(), '.claude', 'projects')]);
+  const found = findTranscript || ((cid) => !!(require('../session-store.js').findSessionJsonlPath(cid) || require('../adapters/codex.js').findCodexSessionJsonlPath(cid)));
+  const archivedCids = () => { try { const st = readUserState() || {}; return new Set((st.archivedSessions || []).map((k) => { const v = String(k); return v.includes(':') ? v.slice(v.indexOf(':') + 1) : v; })); } catch { return new Set(); } };
+  const transcriptOf = (cid) => { try { return !!found(cid); } catch { return true; } };
+  const dirReadable = () => { try { for (const d of dirs()) fs.readdirSync(d); return true; } catch { return false; } };
+  let metas = null, metasAt = 0;
+  const metaOf = (cid) => {   // conversation id → this machine's session-meta (a 5 s memo: a sweep asks once per member)
+    if (!metaDir) return null;
+    if (!metas || now() - metasAt > 5000) {
+      metas = new Map(); metasAt = now();
+      try { for (const f of fs.readdirSync(metaDir)) { if (!f.endsWith('.json')) continue; try { const m = JSON.parse(fs.readFileSync(path.join(metaDir, f), 'utf-8')) || {}; for (const id of [m.claudeSessionId, m.backendSessionId]) if (id) metas.set(String(id), m); } catch { } } } catch { }
+    }
+    return metas.get(cid) || null;
+  };
+  const ownerOf = (cid) => {
+    try { const idx = convIndex(); const c = idx && idx.lookup(cid); if (c && Object.keys(c.hosts || {}).length) return idx.ownerHost(cid) ? 'remote' : 'unknown'; } catch { return 'unknown'; }
+    const m = metaOf(cid);
+    return m ? (m.host ? 'remote' : 'local') : 'unknown';
+  };
+  return (cid, arch = archivedCids()) => {
+    const live = (liveSessions() || []).some((s) => s && s.cid === cid);
+    if (live || arch.has(cid)) return G.livenessFrom({ live, archived: arch.has(cid) });
+    const transcript = transcriptOf(cid);
+    return G.livenessFrom(transcript ? { transcript } : { transcript, owner: ownerOf(cid), dirReadable: dirReadable() });
+  };
+}
+
+function create({ app, dataDir, bcastAll = () => {}, now = () => Date.now(), env = process.env, integrations = null, userTodos = null, deliver = null, serverSetting = () => undefined, liveSessions = () => [], readUserState = () => ({}), convIndex = () => null, groupSetting = () => 'none', authEnabled = () => false, getMounts = () => null, sessions = () => null, sessionMeta = () => null, onGroupsPending = () => {} } = {}) {
   if (!app) throw new Error('channels-wiring: app is required');
   if (!dataDir) throw new Error('channels-wiring: dataDir is required');
 
@@ -58,7 +92,15 @@ function create({ app, dataDir, bcastAll = () => {}, now = () => Date.now(), env
     const RCm = require('../record-clear.js');
     for (const s of live.values()) { try { N.redactGroupCards(s, keys, RCm.CLEARED_TEXT); } catch (e) { console.warn('[groups] a group card was not re-worded:', e && e.message); } }
   };
-  const groups = createGroups({ store: channels.store, deliver, broadcast: (msg) => bcastAll(msg), now, roster: liveSessions, groupSetting, onPending: onGroupsPending, onCleared: onGroupCardsCleared });
+  const liveness = livenessReader({ liveSessions, readUserState, convIndex, metaDir: require('path').join(dataDir, 'session-meta') });
+  const groups = createGroups({ store: channels.store, deliver, broadcast: (msg) => bcastAll(msg), now, roster: liveSessions, groupSetting, onPending: onGroupsPending, onCleared: onGroupCardsCleared, liveness });
+  // the archive / boot door: ONE sweep at a time, a write during a sweep re-runs it once after
+  let sweeping = null, sweepAgain = false;
+  groups.noteUserState = () => {
+    if (sweeping) { sweepAgain = true; return sweeping; }
+    sweeping = groups.sweepEnded().catch((e) => console.warn('[groups] ended sweep failed:', e && e.message)).finally(() => { sweeping = null; if (sweepAgain) { sweepAgain = false; groups.noteUserState(); } });
+    return sweeping;
+  };
   // THE GROUP CARDS' RING (lane group-report-card): the card door (src/normalizers.js feedGroupCard) keeps it on the live
   // session; its meta write is HERE, beside the meta store — ONE write per session per burst (a report's N cards are
   // emitted in one synchronous pass), on a MICROTASK: commitReports emits its cards before it asks the groups door for
@@ -91,4 +133,4 @@ function create({ app, dataDir, bcastAll = () => {}, now = () => Date.now(), env
   return { channels, groups, touches, flushGroupCards, shutdown: () => { try { channels.apiCards.stop(); } catch {} try { touches.flush(); } catch (e) { console.warn('[channel-touches] flush:', e && e.message); } try { flushGroupCards(); } catch (e) { console.warn('[groups] card flush:', e && e.message); } try { channels.stop(); } catch (e) { console.warn('[channels] shutdown:', e && e.message); } } };
 }
 
-module.exports = { create };
+module.exports = { create, livenessReader };

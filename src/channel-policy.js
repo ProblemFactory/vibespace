@@ -167,6 +167,51 @@ function policyModesOf(caps) {
   if (!pm) return POLICY_MODES.slice();
   return pm.length ? pm : ['review'];
 }
+/** THE POLICY ROW (lane account-policy-door, userW 2026-10-07 "想给整个 Lark 配置可见性与策略，但配不了" — the ACCOUNT's
+ *  policy had a route and no door): ONE model for every door that shows or sets a sending policy — the account's
+ *  Reach & policy…, the account Edit dialog's select, a conversation's Reach & policy…. `grain` = 'account' |
+ *  'conversation'; `policy` = the view at THAT grain (`policyFor`: {mode, source, declared, modes, inherits});
+ *  `guards` = the instance settings as the client holds them ({linksReview, attachmentsReview, offHoursTz} — never
+ *  fetched here); `t` / `modeText` injected. `value` = the grain's OWN stored mode (null = it inherits); the `null`
+ *  choice is "Use the account's" / "The vendor's default" — what `inherits` says it reads. */
+const fillT = (s, p) => (p ? String(s).replace(/\{(\w+)\}/g, (m, k) => (k in p ? String(p[k]) : m)) : String(s));
+function policyRowModel({ grain = 'account', policy = null, guards = null, t = fillT, modeText = (m) => m } = {}) {
+  const pol = policy && typeof policy === 'object' ? policy : { mode: 'review', source: 'default' };
+  const order = ['review', 'direct'].filter((m) => POLICY_MODES.includes(m));   // the safer choice first
+  const modes = Array.isArray(pol.modes) && pol.modes.length ? order.filter((m) => pol.modes.includes(m)) : order;
+  const conv = grain === 'conversation';
+  const own = pol.source === (conv ? 'conversation' : 'account') && POLICY_MODES.includes(pol.declared) ? pol.declared : null;
+  const mode = pol.mode === 'direct' ? 'direct' : 'review';
+  // the `null` choice reads: with an own value, what removing it reads (`inherits`); without one, what it reads now
+  const inh = own ? (pol.inherits && typeof pol.inherits === 'object' ? pol.inherits : null) : { mode, source: pol.source };
+  const inhMode = inh && inh.mode === 'direct' ? 'direct' : 'review';
+  const WORDS = {
+    direct: t('Direct — agents with send authority send without your approval; the link / attachment / off-hours guards still ask'),
+    review: t('Review — every message waits for your approval'),
+  };
+  const choices = modes.map((m) => ({ value: m, label: WORDS[m] }));
+  choices.push({ value: null, label: conv && inh && inh.source === 'account' ? t('Use the account\'s ({mode})', { mode: modeText(inhMode) }) : t('The vendor\'s default ({mode})', { mode: modeText(inhMode) }) });
+  const sourceText = conv
+    ? (own ? t('This conversation\'s own policy: {mode} — without it, it would read {other}', { mode: modeText(mode), other: modeText(inhMode) })
+      : pol.source === 'account' ? t('Inherits the account: {mode} — pick one above to change it for this conversation only', { mode: modeText(mode) })
+        : t('Inherits the vendor\'s default: {mode} — pick one above to change it for this conversation only', { mode: modeText(mode) }))
+    : (own ? t('Set on this account: {mode} — every conversation without its own policy reads it', { mode: modeText(mode) })
+      : t('Not set on this account — the vendor\'s default applies: {mode}', { mode: modeText(mode) }));
+  const g = guards && typeof guards === 'object' ? guards : {};
+  const on = [];
+  if (g.linksReview !== false) on.push(t('a link'));
+  if (g.attachmentsReview !== false) on.push(t('an attachment'));
+  if (typeof g.offHoursTz === 'string' && g.offHoursTz.trim()) on.push(t('off-hours ({tz})', { tz: g.offHoursTz.trim() }));
+  const guardsText = on.length ? t('Guards on top (Settings → Channels): {list} always needs your approval, whatever the policy', { list: on.join(' · ') }) : t('No guard is on (Settings → Channels) — the policy alone decides');
+  return { grain, modes, offersDirect: modes.includes('direct'), value: own && modes.includes(own) ? own : null, own, mode, source: pol.source || 'default', inherits: inh ? { mode: inhMode, source: inh.source || 'default' } : null, choices, words: WORDS[mode], sourceText, guardsText };
+}
+/** WHERE A POLICY IS CHANGED (the invariant: a refusal that names a value names where to change it) — the account's
+ *  ⋯ → Reach & policy… for an account-grain value, the conversation's row menu for its own. */
+function policyWhereText({ grain = 'account', source = 'account' } = {}, t = fillT) {
+  return grain === 'conversation' && source === 'conversation'
+    ? t('change it in this conversation\'s Reach & policy… (its row menu)')
+    : t('change it in the account\'s Reach & policy… (the account\'s ⋯ menu)');
+}
 
 /** Does the text carry a link? Conservative: a scheme or a www. host. */
 function hasLinks(text) {
@@ -1364,7 +1409,7 @@ module.exports = {
   OUTBOX_STATES, TRANSITIONS, TERMINAL_STATES, POLICY_MODES, DECISION_REASONS, RECEIPT_STATUSES, PROPOSAL_TTL_MS, TEXT_MAX_BYTES, HONESTY_LINE_DEFAULT, IDEMPOTENCY_MODES,
   WITHDRAWABLE_STATES, WITHDRAWN_DEFAULT_REASON, withdrawVerdict, withdrawWhy, withdrawReason,
   RECEIPT_DIFF_MAX, RECEIPT_BLOCK_MAX_BYTES, RECEIPT_GUIDANCE, receiptDiff, receiptFeedback, receiptFateOf, receiptFateText, RECEIPT_DELIVERIES, receiptDeliveryVerdict, utf8Bytes,
-  canTransition, isTerminal, policyMode, policyModesOf, hasLinks, offHoursVerdict, decideOutbound, validateProposal, validateCompose, COMPOSE_MAX_RECIPIENTS, expiryVerdict, receiptFor, renderReceiptBlock,
+  canTransition, isTerminal, policyMode, policyModesOf, policyRowModel, policyWhereText, hasLinks, offHoursVerdict, decideOutbound, validateProposal, validateCompose, COMPOSE_MAX_RECIPIENTS, expiryVerdict, receiptFor, renderReceiptBlock,
   ACCESS_REMOVED_NOTE, withheldReceiptLine,
   REACTION_POLICIES, reactionPolicyOf, REACTION_OPS, validateReaction, reactionQuote, decideReaction,
   PLACEMENTS, THREAD_PLACEMENTS, ROOT_REPLIES, isThreadPlacement, placementsOf, rootReplyOf, placementOf, placementWords, placementVerdict, placementText, placementRefusalText,

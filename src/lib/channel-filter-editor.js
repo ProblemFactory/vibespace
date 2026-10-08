@@ -35,6 +35,7 @@ import { fetchJson, showToast, createModalShell, showContextMenu } from './utils
 import { t } from './i18n.js';
 import { icon, el, btn } from './channel-chrome.js';
 import * as F from '../channel-filter.js';
+import * as P from '../channel-policy.js';
 import * as chanCaps from '../channel-caps.js';
 // a3 i18n: route failures by CODE; a principal's kind and a Task Group's title in words.
 import { routeErrorText, wakeWhyText, principalKindText, groupTitle, principalText, accessAuthorityText, watcherHowText, grainSummaryText, clampNoteText, notifySentence, notifyAnswers, watcherOfAnswers } from './channel-words.js';
@@ -145,7 +146,7 @@ function principalChoices(app, stored = []) {
  * draw): `target` = `{kind:'conversation', conv}` | `{kind:'account',
  * adapter}` | `{kind:'pattern', adapter, id?}` (no id = a NEW rule).
  */
-async function grainState(target) {
+export async function grainState(target) {
   const st = await readGrain(target);
   // the STAMP of the two lists as drawn (mirror-193, PURE `grainStamp`) — every whole-list save sends it as `base`
   if (st) st.stamp = F.grainStamp({ access: st.access, watchers: st.watchers });
@@ -293,8 +294,16 @@ export async function showGrantAccessDialog(app, target) {
   if (!st) return;
   // plain words (channel-polish, 2026-09-27): the dialog ASKS its question; the grain is said under it
   // the picker's roster listener ends WITH the dialog (verify round 2: it used to live until the next broadcast)
+  let part = null;
+  const { body, close } = createModalShell({ id: 'chan-access-dialog', title: t('Who may read and act here?'), dialogClass: 'chan-dialog chan-assign chan-access', escapeToClose: true, onClose: () => { if (part) part.picker.close(); } });
+  part = grantAccessBody(app, st, body, { close, target });
+}
+/** THE GRANT ACCESS BODY (lane account-policy-door): the ONE renderer of a grain's access rows — Grant access… draws
+ *  it, and so does the account's Reach & policy… (its section 2, `notify: false` — section 3 is its Notify door).
+ *  `setCaps(caps)` re-draws the authority choices IN PLACE: the section-1 policy just turned direct ⇒ `send` is
+ *  offered without a reopen; turned review ⇒ every row reads draft again. `reopen` = what a `grain-changed` re-opens. */
+export function grantAccessBody(app, st, body, { close, target, notify = true, reopen = null } = {}) {
   let picker = null;
-  const { body, close } = createModalShell({ id: 'chan-access-dialog', title: t('Who may read and act here?'), dialogClass: 'chan-dialog chan-assign chan-access', escapeToClose: true, onClose: () => { if (picker) picker.close(); } });
   body.appendChild(el('div', 'chan-dialog-sub', st.kind === 'conversation' ? st.name : st.kind === 'account' ? t('The whole account — {label}', { label: st.name }) : t('The conversations matching a rule — {label}', { label: st.name })));
   body.appendChild(noteEl(st.kind === 'account'
     ? t('Who may see every conversation of this account — now and later — and act on them: read, search, refresh, reply (and write a new message where the account can). Access alone never wakes anyone.')
@@ -302,7 +311,7 @@ export async function showGrantAccessDialog(app, target) {
       ? t('Who may see the conversations that match the rule — now and later — and act on them. Access alone never wakes anyone.')
       : t('Who may see this conversation and act on it: read, search, refresh and reply. Access alone never wakes anyone.')));
   if (st.kind === 'pattern') patternEditor(body, st.pattern, () => {});
-  const cap = F.authorityCapCode(st.caps);
+  let cap = F.authorityCapCode(st.caps);
   const capWords = (c) => F.authorityCapText(c, { t, sendWhyText: chanCaps.sendWhyText });
   const rows = st.access.map((r) => ({ key: pkOf(r.principal), authority: r.authority === 'send' && !cap ? 'send' : 'draft' }));
   // ALL AGENTS's row first (the chips put it first; the rows follow)
@@ -343,7 +352,14 @@ export async function showGrantAccessDialog(app, target) {
     mootNote.textContent = names.length ? t('All agents may reply directly here, so a draft-only row beside it changes nothing: {names} may reply directly too (set All agents to draft, or remove it, to narrow).', { names: names.join(', ') }) : '';
     mootNote.style.display = names.length ? '' : 'none';
   };
-  if (cap) body.appendChild(noteEl(t('Direct send is not offered here: {why}', { why: capWords(cap) })));
+  // a refusal that names a value names WHERE to change it (lane account-policy-door): the policy's own door
+  const capNote = noteEl('');
+  body.appendChild(capNote);
+  const syncCap = () => {
+    capNote.textContent = cap ? t('Direct send is not offered here: {why}', { why: capWords(cap) }) + (cap.code === 'policy-review' ? ` — ${P.policyWhereText({ grain: st.kind === 'conversation' ? 'conversation' : 'account', source: st.kind === 'conversation' && st.conv && st.conv.policy ? st.conv.policy.source : 'account' }, t)}` : '') : '';
+    capNote.style.display = cap ? '' : 'none';
+  };
+  syncCap();
   for (const r of st.access) if (r.authorityClamped) body.appendChild(noteEl(`${principalText(r.principal)}: ${t('The stored authority is "send" but it reads as draft: {why}', { why: r.authorityWhyCap ? capWords(r.authorityWhyCap) : r.authorityWhy })}`, true));
   const draw = () => {
     list.textContent = '';
@@ -385,9 +401,9 @@ export async function showGrantAccessDialog(app, target) {
     const rmRule = btn(t('Remove the rule'), async () => { rmRule.disabled = true; const r = await put(`/api/channels/adapters/${encodeURIComponent(st.adapter.id)}/patterns/${encodeURIComponent(st.id)}`, {}, 'DELETE'); rmRule.disabled = false; if (r) { showToast(t('The rule is removed — its access and notifications with it')); close(); } });
     actions.append(rmRule, el('span', 'chan-sp'));
   }
-  if (st.access.length && (st.kind !== 'pattern' || st.id)) {
-    const notify = btn(t('Notify…'), () => { close(); showNotifyDialog(app, target); });
-    actions.append(notify, el('span', 'chan-sp'));
+  if (notify && st.access.length && (st.kind !== 'pattern' || st.id)) {
+    const nb = btn(t('Notify…'), () => { close(); showNotifyDialog(app, target); });
+    actions.append(nb, el('span', 'chan-sp'));
   }
   actions.appendChild(btn(t('Cancel'), close));
   const save = btn(t('Save'), null, 'mounts-btn-primary');
@@ -410,7 +426,7 @@ export async function showGrantAccessDialog(app, target) {
     try {
       // the STAMP of the lists this dialog drew rides with the whole list (mirror-193): a grain that moved since is
       // refused by name and the dialog re-opens on it — never written over
-      const again = { onChanged: () => { close(); showGrantAccessDialog(app, target); } };
+      const again = { onChanged: () => { close(); if (reopen) reopen(); else showGrantAccessDialog(app, target); } };
       const r = st.kind === 'pattern'
         ? (st.id ? await put(st.accessUrl, { access, pattern: st.pattern, base: st.stamp }, 'PUT', again) : await put(st.accessUrl, { pattern: st.pattern, access }, 'POST'))
         : await put(st.accessUrl, { access, base: st.stamp }, 'PUT', again);
@@ -422,6 +438,14 @@ export async function showGrantAccessDialog(app, target) {
   };
   actions.appendChild(save);
   body.appendChild(actions);
+  const setCaps = (caps) => {
+    st.caps = caps;
+    cap = F.authorityCapCode(caps);
+    if (cap) for (const r of rows) r.authority = 'draft';
+    syncCap();
+    draw();
+  };
+  return { picker, setCaps };
 }
 
 /** One WATCHER row of the Notify dialog — the pre-R4 form's fields for ONE

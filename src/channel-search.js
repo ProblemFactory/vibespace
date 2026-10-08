@@ -16,7 +16,10 @@
  *                               the agents' share, the endpoint's minute, the account's budget) with each wait
  *   coverageText / statusText / sectionHead   the dialog's words (the caller's `t`; zh / ja in src/lib/i18n-*.js)
  *   searchMemo(state, ev)       THE MEMO (lane vendor-search-memo, .230): a vendor search is asked ONCE per (account,
- *                               scope, normalized query) and remembered — memoText says its age; never persisted
+ *                               scope, normalized query) and remembered — memoText says its age. Lane search-card-open
+ *                               (.233): no TTL (bounded by size / LRU only), an answer fanned per conversation (what one
+ *                               searcher found for a conversation answers that conversation), memoToDisk / memoFromDisk
+ *                               = the per-account file's PURE round trip
  */
 const { peerName } = require('./channel-record.js');
 
@@ -143,13 +146,25 @@ function fullSearchVerdict(f = {}) {
 
 // ── THE MEMO (lane vendor-search-memo, .230; the owner 2026-10-07: 「调用 channel provider 自己的在线搜索的时候缓存结果，
 // 避免重复点开搜索对话框结果就限速了」) ─────────────────────────────────────────────────────────────────────────────
-// One per account, IN MEMORY ONLY (a restart forgets it; never written anywhere). Key = (scope, normalized query); an
-// entry = the pages asked so far, each `{token, hits, next}` (`hits` = the already-merged, snippet-bearing rows), the
-// first press's instant (`askedAt` — the TTL runs from it; a later page appends, it never renews). LRU by Map order.
-const SEARCH_MEMO_TTL_MS = 10 * 60e3;
+// One per account. Key = (scope, normalized query); an entry = the pages asked so far, each `{token, hits, next}`
+// (`hits` = the already-merged, snippet-bearing rows), the first press's instant (`askedAt` — a later page appends, it
+// never renews it), who asked (`by`). LRU by Map order.
+// Lane search-card-open (.233; the owner 2026-10-07: 「既然 agent 进行了搜索说明 vibespace 已经获取到了相关 data，为啥我点不开？」
+// + 「缓存其实不用失效吧，反正搜索结果也只会出现新的而不会更改旧的？而新的都会被我们系统收到？」): NO TTL — a search over
+// history only gains newer messages and every newer one lands in the saved copy, so an entry is bounded by size / LRU
+// only (the engine persists it per account and drops it with the account's identity). A put FANS its page's hits by
+// conversation: a derived entry per conversation (`conv:<id>`, at most SEARCH_MEMO_FAN of them) and — when the searched
+// scope covered every conversation of the account (`covers`) — under 'all'; a derived entry has no page token (the
+// token belongs to the ORIGINAL scope's next page only), never replaces an original entry, and leaves with its origin.
 const SEARCH_MEMO_MAX = 64;
 const SEARCH_MEMO_BYTES = 2 * 1024 * 1024;
 const MEMO_ALL = 'all';
+/** A put derives at most this many conversation entries (the most hits first) — one put never fills the LRU. */
+const SEARCH_MEMO_FAN = 16;
+/** A conversation's derived scope. */
+const memoConv = (convId) => `conv:${String(convId)}`;
+/** A scope key the client may hand back (the card's): 'all' or an agent's set hash — nothing else is read off a request. */
+const isMemoScope = (s) => typeof s === 'string' && (s === MEMO_ALL || /^set:\d{1,7}:[0-9a-f]{1,8}$/.test(s));
 /** The query as remembered: trimmed, case-folded, runs of spaces as one. */
 function memoQuery(q) { return String(q || '').trim().toLowerCase().replace(/\s+/g, ' '); }
 /** The scope: the owner's = the whole account ('all'); an agent's = the conversations it may be shown (a hash of the
@@ -166,48 +181,107 @@ const hitsBytes = (hits) => (Array.isArray(hits) ? hits : []).reduce((n, h) => n
 /**
  * ONE STEP of an account's memo → { state, answer }. `state` = `{ entries: Map, bytes }` (undefined = empty); a new
  * state each step (the old one untouched).
- *   { op: 'get', scopes, query, page, now }  → answer `{ scope, askedAt, ageMs, hits, next }` of the first scope holding
- *        a live entry with that page (a hit moves it to the newest); an entry past the TTL is dropped; none ⇒ null
- *   { op: 'put', scope, query, page, now, hits, next } → page null: the entry (re)born; a token: appended to the live
- *        entry whose last page's `next` is that token (else nothing). An entry over the byte cap is not kept; the
- *        oldest leave first past SEARCH_MEMO_MAX entries or SEARCH_MEMO_BYTES. → answer = kept (boolean)
- *   { op: 'clear', scope, query } → that entry gone ("Search again") → answer = had one (boolean)
+ *   { op: 'get', scopes, query, page, now }  → answer `{ scope, askedAt, ageMs, hits, next, by, derived }` of the first
+ *        scope holding an entry with that page (a hit moves it to the newest); none ⇒ null. No age drops an entry.
+ *   { op: 'put', scope, query, page, now, hits, next, by, covers } → page null: the entry (re)born; a token: appended to
+ *        the entry whose last page's `next` is that token (else nothing). Then THE FAN (above). An entry over the byte
+ *        cap is not kept; the oldest leave first past SEARCH_MEMO_MAX entries or SEARCH_MEMO_BYTES (the one just put
+ *        last). → answer = kept (boolean)
+ *   { op: 'clear', scope | scopes, query } → those entries gone, with what they derived ("Search again") → answer = had one
  */
 function searchMemo(state, ev = {}) {
   const entries = new Map(state && state.entries instanceof Map ? state.entries : []);
   let bytes = Math.max(0, Number(state && state.bytes) || 0);
   const drop = (k) => { const x = entries.get(k); if (x) { bytes -= x.bytes; entries.delete(k); } return !!x; };
+  const dropWith = (k) => { let had = drop(k); for (const [dk, x] of [...entries]) if (x.from === k) had = drop(dk) || had; return had; };
   const done = (answer) => ({ state: { entries, bytes: Math.max(0, bytes) }, answer });
   const now = Number(ev.now) || 0;
   const page = ev.page === null || ev.page === undefined || ev.page === '' ? null : String(ev.page);
+  const by = ev.by === 'agent' ? 'agent' : 'owner';
   if (ev.op === 'get') {
     for (const scope of Array.isArray(ev.scopes) && ev.scopes.length ? ev.scopes : [MEMO_ALL]) {
       const k = memoKey(scope, ev.query), x = entries.get(k);
       if (!x) continue;
-      if (!(now - x.askedAt < SEARCH_MEMO_TTL_MS)) { drop(k); continue; }
       const p = x.pages.find((pg) => pg.token === page);
       if (!p) continue;
       entries.delete(k); entries.set(k, x);
-      return done({ scope: scope || MEMO_ALL, askedAt: x.askedAt, ageMs: Math.max(0, now - x.askedAt), hits: p.hits, next: p.next });
+      return done({ scope: scope || MEMO_ALL, askedAt: x.askedAt, ageMs: Math.max(0, now - x.askedAt), hits: p.hits, next: p.next, by: x.by || 'owner', derived: !!x.from });
     }
     return done(null);
   }
-  if (ev.op === 'clear') return done(drop(memoKey(ev.scope, ev.query)));
+  if (ev.op === 'clear') {
+    let had = false;
+    for (const scope of Array.isArray(ev.scopes) && ev.scopes.length ? ev.scopes : [ev.scope]) had = dropWith(memoKey(scope, ev.query)) || had;
+    return done(had);
+  }
   if (ev.op !== 'put') return done(null);
-  const k = memoKey(ev.scope, ev.query);
+  const scope0 = ev.scope || MEMO_ALL;
+  const k = memoKey(scope0, ev.query);
   const pg = { token: page, hits: Array.isArray(ev.hits) ? ev.hits : [], next: ev.next || null };
   const pb = hitsBytes(pg.hits) + 64;
   let x;
-  if (page === null) { drop(k); x = { askedAt: now, pages: [pg], bytes: pb }; }
+  if (page === null) { dropWith(k); x = { askedAt: now, by, pages: [pg], bytes: pb }; }
   else {
     const o = entries.get(k);
-    if (!o || !(now - o.askedAt < SEARCH_MEMO_TTL_MS) || o.pages[o.pages.length - 1].next !== page) return done(false);
-    drop(k); x = { askedAt: o.askedAt, pages: [...o.pages, pg], bytes: o.bytes + pb };
+    if (!o || o.from || o.pages[o.pages.length - 1].next !== page) return done(false);
+    drop(k); x = { askedAt: o.askedAt, by: o.by || by, pages: [...o.pages, pg], bytes: o.bytes + pb };
   }
   if (x.bytes > SEARCH_MEMO_BYTES) return done(false);
   entries.set(k, x); bytes += x.bytes;
-  for (const ok of entries.keys()) { if (entries.size <= SEARCH_MEMO_MAX && bytes <= SEARCH_MEMO_BYTES) break; drop(ok); }
+  // THE FAN: this page's hits per conversation (the most hits first, ≤ SEARCH_MEMO_FAN), + 'all' when the scope covered
+  // every conversation of the account — a derived entry is one page, no token; an original one is never replaced
+  const per = new Map();
+  for (const h of pg.hits) { const c = h && h.convId !== undefined && h.convId !== null ? String(h.convId) : ''; if (c) { if (!per.has(c)) per.set(c, []); per.get(c).push(h); } }
+  const fans = [...per].sort((a, b) => b[1].length - a[1].length).slice(0, SEARCH_MEMO_FAN).map(([c, hs]) => [memoKey(memoConv(c), ev.query), hs]);
+  if (ev.covers && scope0 !== MEMO_ALL) fans.push([memoKey(MEMO_ALL, ev.query), pg.hits]);
+  for (const [dk, hs] of fans) {
+    if (dk === k) continue;
+    const cur = entries.get(dk);
+    if (cur && !cur.from) continue;   // an own answer (the owner's 'all') outranks anything derived
+    let dh = hs;
+    if (page !== null) {
+      if (cur && cur.from !== k) continue;   // a later page joins only what its own first page derived
+      if (cur) { const seen = new Set(cur.pages[0].hits.map((h) => `${h.convId}\u0000${h.vendorId}`)); dh = [...cur.pages[0].hits, ...hs.filter((h) => !seen.has(`${h.convId}\u0000${h.vendorId}`))]; }
+    }
+    drop(dk);
+    const d = { askedAt: x.askedAt, by: x.by, from: k, pages: [{ token: null, hits: dh, next: null }], bytes: hitsBytes(dh) + 64 };
+    if (d.bytes > SEARCH_MEMO_BYTES) continue;
+    entries.set(dk, d); bytes += d.bytes;
+  }
+  for (const ok of [...entries.keys()]) { if (entries.size <= SEARCH_MEMO_MAX && bytes <= SEARCH_MEMO_BYTES) break; if (ok !== k) drop(ok); }
+  if (entries.size > SEARCH_MEMO_MAX || bytes > SEARCH_MEMO_BYTES) drop(k);
   return done(entries.has(k));
+}
+/** THE FILE'S SHAPE (the engine writes it atomically beside the account's index rows): `{v: 1, identity, entries:
+ *  [[key, entry]…]}` in LRU order — `identity` = whose account answered (a later identity drops the file). */
+function memoToDisk(state, identity = null) {
+  const out = [];
+  for (const [k, x] of state && state.entries instanceof Map ? state.entries : []) out.push([k, { askedAt: x.askedAt, by: x.by || 'owner', ...(x.from ? { from: x.from } : {}), pages: x.pages }]);
+  return { v: 1, identity: identity && typeof identity === 'object' ? identity : null, entries: out };
+}
+/** The file read back → a memo state, every row re-judged (a malformed one is skipped) and the bounds re-applied (the
+ *  newest kept); null/garbage ⇒ empty. */
+function memoFromDisk(obj) {
+  let st = { entries: new Map(), bytes: 0 };
+  if (!obj || obj.v !== 1 || !Array.isArray(obj.entries)) return st;
+  const entries = new Map();
+  let bytes = 0;
+  const hitOk = (h) => h && typeof h === 'object' && (typeof h.convId === 'string' || typeof h.convId === 'number') && (typeof h.vendorId === 'string' || typeof h.vendorId === 'number');
+  for (const row of obj.entries.slice(-SEARCH_MEMO_MAX * 2)) {
+    if (!Array.isArray(row) || typeof row[0] !== 'string' || row[0].length > 4096 || !row[1] || typeof row[1] !== 'object') continue;
+    const x = row[1];
+    if (!Array.isArray(x.pages) || !x.pages.length || !(Number(x.askedAt) > 0)) continue;
+    const pages = x.pages.filter((p) => p && typeof p === 'object' && Array.isArray(p.hits)).map((p) => ({ token: typeof p.token === 'string' ? p.token : null, hits: p.hits.filter(hitOk), next: typeof p.next === 'string' ? p.next : null }));
+    if (pages.length !== x.pages.length || pages[0].token !== null) continue;
+    const e = { askedAt: Number(x.askedAt), by: x.by === 'agent' ? 'agent' : 'owner', ...(typeof x.from === 'string' ? { from: x.from } : {}), pages: x.from ? [{ ...pages[0], next: null }] : pages, bytes: 0 };
+    e.bytes = e.pages.reduce((n, p) => n + hitsBytes(p.hits) + 64, 0);
+    if (e.bytes > SEARCH_MEMO_BYTES) continue;
+    if (entries.has(row[0])) { bytes -= entries.get(row[0]).bytes; entries.delete(row[0]); }
+    entries.set(row[0], e); bytes += e.bytes;
+  }
+  for (const k of [...entries.keys()]) { if (entries.size <= SEARCH_MEMO_MAX && bytes <= SEARCH_MEMO_BYTES) break; bytes -= entries.get(k).bytes; entries.delete(k); }
+  st = { entries, bytes: Math.max(0, bytes) };
+  return st;
 }
 
 // ── THE WORDS (the dialog's; zh / ja in src/lib/i18n-*.js) ─────────────────
@@ -249,11 +323,24 @@ function statusText(s, { t = defaultT, vendor = '' } = {}) {
   if (v.state === 'failed') return t("{vendor}'s search did not answer — the saved results are shown", { vendor: V });
   return '';
 }
-/** A remembered answer's age (lane vendor-search-memo): a snapshot says so — "Search again" beside it asks anew. */
-function memoText(ageMs, { t = defaultT, vendor = '' } = {}) {
+/** A remembered answer's age (lane vendor-search-memo): INFORMATION, never a reason to re-ask (lane search-card-open:
+ *  the memo does not expire) — minutes for the first hour, then the day it was asked (`date`, the caller's own words for
+ *  `askedAt`); `by: 'agent'` says the agent asked. "Search again" beside it asks anew. */
+function memoWhen(ageMs, { t = defaultT, date = '' } = {}) {
+  const n = Math.floor(Math.max(0, Number(ageMs) || 0) / 60e3);
+  return n < 1 ? t('just now') : n < 60 || !date ? t('{n} min ago', { n }) : String(date);
+}
+function memoText(ageMs, { t = defaultT, vendor = '', by = 'owner', date = '' } = {}) {
   const V = vendor || t('The vendor');
   const n = Math.floor(Math.max(0, Number(ageMs) || 0) / 60e3);
+  if (by === 'agent') return t("From {vendor}'s search ({when}, asked by the agent)", { vendor: V, when: memoWhen(ageMs, { t, date }) });
+  if (n >= 60 && date) return t("From {vendor}'s search on {date}", { vendor: V, date: String(date) });
   return n < 1 ? t("From {vendor}'s search less than a minute ago", { vendor: V }) : t("From {vendor}'s search {n} min ago", { vendor: V, n });
+}
+/** The agent searched, nothing is remembered here (another instance, before .233, or the bound evicted it): said, with
+ *  "Search again" beside it — a press, one vendor call. */
+function forgottenText(ageMs, { t = defaultT, vendor = '', date = '' } = {}) {
+  return t('The agent searched {vendor} {when} — its results are not remembered here', { vendor: vendor || t('The vendor'), when: memoWhen(ageMs, { t, date }) });
 }
 /** Section two's head from the asked rows' `adds`: "Older messages" only when every row says 'older' (none asked keeps
  *  it); one 'unsaved' row turns it to "Not saved here" — true of an older hit too. */
@@ -288,5 +375,6 @@ module.exports = {
   matchParts,
   SNIPPET_MAX, SNIPPET_READ_MAX, SNIPPET_KEYS, SEARCH_VIA, SEARCH_CONTEXT, SEARCH_MATCH, SEARCH_ADDS, OWNER_FLOOR_MS, AGENT_FLOOR_MS, AROUND_MAX, QUERY_MAX,
   snippetOf, snippetShape, holdsQuery, isCjk, mergeVendorHits, coverageOf, fullSearchVerdict, coverageText, statusText, sectionHead,
-  SEARCH_MEMO_TTL_MS, SEARCH_MEMO_MAX, SEARCH_MEMO_BYTES, MEMO_ALL, memoQuery, memoScope, searchMemo, memoText,
+  SEARCH_MEMO_MAX, SEARCH_MEMO_BYTES, SEARCH_MEMO_FAN, MEMO_ALL, memoQuery, memoScope, memoConv, isMemoScope, searchMemo, memoToDisk, memoFromDisk,
+  memoWhen, memoText, forgottenText,
 };

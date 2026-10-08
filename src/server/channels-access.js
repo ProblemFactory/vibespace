@@ -39,16 +39,19 @@ function create(engineCtx) {
   function policyFor(rec, en) {
     const own = en && en.policy && typeof en.policy === 'object' ? en.policy : null;
     const pc = rec ? (() => { try { return registry.capsOf(rec.kind); } catch { return null; } })() : null;   // design 012: the vendor's allowed modes
-    if (own && own.mode) return { mode: P.policyMode(own, pc).mode, source: 'conversation', declared: own.mode, modes: P.policyModesOf(pc) };
     // R4 (B-6acc): the ACCOUNT's own policy (`PUT /api/channels/adapters/:id
     // {policy}`) — what a NEW message composed on the account reads, and the
     // default of every conversation that sets none
     const acct = rec && rec.policy && typeof rec.policy === 'object' ? rec.policy : null;
-    if (acct && acct.mode) return { mode: P.policyMode(acct, pc).mode, source: 'account', declared: acct.mode, modes: P.policyModesOf(pc) };
     let dflt = null;
     try { dflt = registry.get(rec.kind).policyDefault || null; } catch {}
-    const pm = P.policyMode(dflt || 'review', pc);
-    return { mode: pm.mode, source: dflt ? 'adapter-default' : 'default', declared: dflt || null, modes: P.policyModesOf(pc) };
+    // lane account-policy-door: `inherits` = what this grain reads WITHOUT its own value (a conversation: the
+    // account's; the account: the vendor's default) — every door says where the value comes from
+    const dv = { mode: P.policyMode(dflt || 'review', pc).mode, source: dflt ? 'adapter-default' : 'default' };
+    const av = acct && acct.mode ? { mode: P.policyMode(acct, pc).mode, source: 'account' } : dv;
+    if (own && own.mode) return { mode: P.policyMode(own, pc).mode, source: 'conversation', declared: own.mode, modes: P.policyModesOf(pc), inherits: av };
+    if (acct && acct.mode) return { mode: av.mode, source: 'account', declared: acct.mode, modes: P.policyModesOf(pc), inherits: en ? null : dv };
+    return { mode: dv.mode, source: dv.source, declared: dflt || null, modes: P.policyModesOf(pc), inherits: null };
   }
   function policyRequiresReview(rec, en) { return policyFor(rec, en).mode === 'review'; }
   /** The two READ-TIME facts `authority:'send'` is capped by (§7.3). */
@@ -494,7 +497,12 @@ function create(engineCtx) {
     const { rec, visible } = cand[0];
     // lane vendor-search-memo: the owner's answer to the same words is read first (0 calls, no floor); a fresh one is
     // remembered for this conversation set (its hits were read for those only)
-    const r = await vendorSearch(rec, query, { by: 'agent', ctx, shows: (cid) => visible.has(String(cid)), scope: SR.memoScope(visible.keys()) });
+    // lane search-card-open (.233): the answer is also remembered per conversation it found (the owner's dialog opened
+    // from this search's row reads it there) and under 'all' when this agent sees every conversation of the account
+    const scope = SR.memoScope(visible.keys());
+    let total = 0;
+    for (const en of Object.values(store.index.live())) if (en && en.adapterId === rec.id) total++;
+    const r = await vendorSearch(rec, query, { by: 'agent', ctx, shows: (cid) => visible.has(String(cid)), scope, covers: visible.size >= total });
     if (!r.ok) return { ok: false, code: r.code === 'search-floor' ? 'refresh-floor' : r.code === 'search-minute' ? 'vendor-budget' : r.code, error: r.error, ...(r.retryAfterSec ? { retryAfterSec: r.retryAfterSec } : {}) };
     const results = [];
     for (const h of r.hits) {
@@ -505,7 +513,7 @@ function create(engineCtx) {
       results.push({ key: agentId(`${rec.id}/${h.convId}`), adapterId: rec.id, adapter: rec.label || rec.id, convId: agentId(h.convId), title: visible.get(h.convId), at: h.at || null, author: null, text: agentText(h.snippet || '', { kind: 'block', max: 400 }), vendorId: agentId(h.vendorId || null), source: 'vendor' });
       if (results.length >= limit) break;
     }
-    return { ok: true, results, truncated: results.length >= limit, full: true, adapterId: rec.id, adds: searchRowOf(registry.capsOf(rec.kind)).adds, ...(r.memo ? { remembered: { ageSec: Math.floor(r.memo.ageMs / 1000) } } : {}) };   // F2: the CLI words its line by the row
+    return { ok: true, results, truncated: results.length >= limit, full: true, adapterId: rec.id, adds: searchRowOf(registry.capsOf(rec.kind)).adds, memoScope: scope, ...(r.memo ? { remembered: { ageSec: Math.floor(r.memo.ageMs / 1000) } } : {}) };   // F2: the CLI words its line by the row; `memoScope` = the card row's key (the route keeps it off the answer)
   }
   /** THE AGENT'S `read <conv> --around <msg>` (design 010): reach first (the uniform not-found), the message's instant
    *  from the log (a stored one) or from this agent's own `--full` answer, the agents' share, ONE `around` read (two
@@ -947,7 +955,8 @@ function create(engineCtx) {
         key: agentId(en.key), adapterId: en.adapterId, adapter: rec.label || rec.id, id: agentId(en.id), title: agentTitle(en, en.id), kind: en.kind,   // verify r1 F2: the title through the belt; r3 F6: the key + id
         level: reach.level, unread: en.unread || 0, lastAt: en.lastAt || null, polledAt: laneOf(en).lastPollAt || null,
         canSend: !!who.as, sendWhy: who.why, sendAs: who.as, identityMarking: c.identityMarking,
-        policy: policyFor(rec, en).mode,
+        // lane account-policy-door: the effective mode AND where it comes from (account / conversation / vendor default)
+        ...(() => { const pf = policyFor(rec, en); return { policy: pf.mode, policySource: pf.source }; })(),
         access: acc.length ? { authority, via: acc[0].source, as: acc[0].row.principal.kind } : null,
         watched: wat.length ? { notify: wat[0].watcher.notify, mode: wat[0].watcher.mode, via: wat[0].source, as: wat[0].watcher.principal.kind, delivery: F.deliveryModeOf(wat[0].watcher), setBy: F.watchOriginOf(wat[0].watcher) } : null,
         // the pre-R4 names (a CLI older than this server reads them)
@@ -1025,11 +1034,24 @@ function create(engineCtx) {
       ...(r.code === 'not-a-thread' ? { note: `(${NOT_A_THREAD})` } : th.walked ? {} : { note: '(thread not loaded here — the user\'s window loads it; ask again after)' }),
     };
   }
+  /** lane account-policy-door: `status <adapter>/<conversation>` = the conversation's EFFECTIVE sending policy and
+   *  WHERE it comes from (an agent cannot change it — the owner's doors do); one it cannot see = null (the uniform
+   *  not-found of `statusFor`). */
+  function convStatusFor(ctx, key) {
+    const k = String(key || ''), i = k.indexOf('/');
+    if (i <= 0) return null;
+    const { en, rec } = convFor(k.slice(0, i), k.slice(i + 1));
+    if (!en || !rec || rec.enabled === false || !ACL.canSee(reachFor(ctx, rec, en).level)) return null;
+    const pf = policyFor(rec, en);
+    return { ok: true, conversation: { key: agentId(en.key), adapterId: en.adapterId, adapter: rec.label || rec.id, title: agentTitle(en, en.id), policy: { mode: pf.mode, source: pf.source } } };
+  }
   /** Own proposals only — somebody else's id is the same uniform not-found. */
   function statusFor(ctx, proposalId = null) {
     const mine = proposalsFor().filter((p) => p.draftedBy && p.draftedBy.kind === 'agent' && ctx && p.draftedBy.id === ctx.id);
     if (proposalId) {
       const p = mine.find((x) => x.id === proposalId);
+      const cv = p ? null : convStatusFor(ctx, proposalId);
+      if (cv) return cv;
       if (!p) return { ok: false, code: 'not-found', error: 'no such proposal (not found, or not yours)' };
       return { ok: true, proposal: agentProposalView(ctx, p) };
     }

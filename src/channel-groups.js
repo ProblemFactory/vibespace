@@ -50,6 +50,21 @@
  * marker, its notify mode and the log's departures; the window's line under
  * every message and the CLI's trailing clause are both this one rule.
  *
+ * WHEN THE ADDRESSEE ENDED (lane pair-group-fate, B-7d1e 2026-10-07 — four dead
+ * pair groups showed "waiting" for ever): a record's state is a fact about its
+ * addressee. `deliveryOf` reads each member's LIVENESS (running / stopped /
+ * archived / gone — `livenessOf`: the engine's reader, else the view's
+ * `ended` + `live`): archived / gone ⇒ `undeliverable` (`why`, `at` = when it
+ * ended); stopped still WAITS (a resume delivers it — `stopped: true`). A
+ * pair whose other member ended is CLOSED (`closePair`: archived + `closed`).
+ *
+ * BEING WOKEN BY A REPLY (B-eba8, the owner 2026-10-07 "让 agent 自己决定" +
+ * the symmetric addendum): the asker marks a record `raw.await {by, at,
+ * until}` (`send --await`); `awaitVerdict` is THE table over (await ×
+ * the reply's own `--wake`) — the first reply by another member before
+ * `until` wakes the asker ONCE; a second / late / after-hand-over / muted /
+ * left / not-running reply wakes nothing, by a named reason.
+ *
  * Every transition returns `{group, event}` (a NEW object; the input is never
  * mutated) or `{ok:false, code, error}` with `code` from the closed
  * `ERROR_CODES`.
@@ -64,7 +79,25 @@ const piece = (s, max = Infinity) => toAgentText(s, { kind: 'line', max });
 const NOTIFY_MODES = Object.freeze(['next-turn', 'mention', 'always', 'mute']);
 const DEFAULT_NOTIFY = 'next-turn';
 /** WHERE A RECORD STANDS WITH A RECIPIENT (`deliveryOf`, lane group-pending): the closed set. */
-const DELIVERY_STATES = Object.freeze(['waiting', 'handed', 'muted', 'left']);
+const DELIVERY_STATES = Object.freeze(['waiting', 'handed', 'muted', 'left', 'undeliverable']);
+/** A member's CONVERSATION as a fact (lane pair-group-fate): stopped is NOT ended (a resume delivers what waited). */
+const LIVENESS_STATES = Object.freeze(['running', 'stopped', 'archived', 'gone']);
+const ENDED_WHYS = Object.freeze(['archived', 'gone']);
+// lane pair-group-fate-r2 — `gone` needs EVIDENCE: the engine's reader (channels-wiring livenessReader) hands FACTS,
+// this table judges. Gone ONLY when the conversation is known LOCAL (a session-meta of this machine names no host and
+// no conversation-index claim places it elsewhere) AND the transcript directory was READABLE AND the id is absent from
+// it. Another machine's / an unknown owner's / an unreadable (unmounted, slow) store's ⇒ stopped: it waits and a
+// resume delivers — a wrong undeliverable is worse than a late waiting. The sidebar archive is evidence for both.
+const OWNERS = Object.freeze(['local', 'remote', 'unknown']);
+function livenessFrom({ live = false, archived = false, transcript = false, owner = 'unknown', dirReadable = false } = {}) {
+  if (archived) return { state: 'archived' };
+  if (live) return { state: 'running' };
+  if (transcript) return { state: 'stopped' };
+  if (owner === 'local' && dirReadable === true) return { state: 'gone' };
+  return { state: 'stopped', why: owner === 'local' ? 'unreadable' : (OWNERS.includes(owner) ? owner : 'unknown') };
+}
+/** `send --await` (B-eba8): how long the asker waits to be woken by the first reply. */
+const AWAIT_MS = 2 * 3600 * 1000;
 /** The owner as an ACTOR (`by`, `createdBy`, a message author id). Never a member row. */
 const OWNER = 'user';
 /** The adapter id the group LOG is filed under in the channel store. */
@@ -84,6 +117,7 @@ const ERROR_CODES = Object.freeze([
   'not-found',
   'unreachable',      // (engine) outside the actor's msg-acl reach — uniform with not-found
   'ambiguous',        // (engine) a name that matches more than one session / group — the answer carries `candidates`
+  'ended',            // (engine) the addressee's conversation was archived / is gone — nothing can read it (lane pair-group-fate)
   'job-token',        // (routes) a Background Work job token may list, read and post — never create a group or change membership
   'confirm-wakes',    // (consent) the act would wake more than WAKE_CONFIRM_ABOVE agents and the caller did not confirm (`--yes`) — the answer carries `wakes`
   'wake-count-mismatch', // (consent) the owner's panel previewed a different number of wakes than the act would cause — the answer carries `wakes`
@@ -308,6 +342,31 @@ function archive(group, { by, at } = {}) {
   const g = clone(group);
   g.archivedAt = at;
   return { group: g, event: { kind: 'archive', by } };
+}
+
+/** A PAIR whose other member's conversation ENDED is CLOSED (lane pair-group-fate): `archivedAt` + `closed {member,
+ *  why, at}` — it leaves `group list` like an archived one, `send` makes a NEW pair, `read` still shows the log. A
+ *  multi-member group is never closed (its rows only read undeliverable). Idempotent: a closed group is a no-op. */
+function closePair(group, { member, why, at } = {}) {
+  if (!group) return err('not-found', 'no such group');
+  if (!group.pair) return err('pair-group', 'only a two-member group closes when a member ends');
+  if (!ENDED_WHYS.includes(why)) return err('bad-request', `why is one of ${ENDED_WHYS.join(' | ')}`);
+  if (!memberOf(group, member)) return err('not-member', `${member} is not a member of "${group.name}"`);
+  if (!Number.isFinite(at) || at <= 0) return err('bad-request', 'closePair needs an instant');
+  if (group.archivedAt) return { group, event: null, noop: 'already-archived' };
+  const g = clone(group);
+  g.archivedAt = at;
+  g.closed = { member, why, at };
+  return { group: g, event: { kind: 'closed', member, why } };
+}
+/** The words of the record an ended addressee leaves (agent-facing English, the name through the belt): a pair's
+ *  `closed` line, a multi-member group's `ended` line; `n` = the messages to it that were not delivered. */
+function endedText({ name, why, n = 0, closed = false } = {}) {
+  const nm = cleanName(name) || 'the other agent';
+  const how = why === 'gone' ? 'is gone' : 'was archived';
+  const k = Math.max(0, Number(n) || 0);
+  const lost = k ? `; ${closed ? 'your' : ''}${closed ? ' ' : ''}${k} message${k === 1 ? '' : 's'}${closed ? '' : ' waiting for it'} ${k === 1 ? 'was' : 'were'} not delivered` : '';
+  return closed ? `${nm}'s conversation ended — the group is closed (it ${how}${lost})` : `${nm}'s conversation ${how}${lost}`;
 }
 
 /** A letter of a script written WITHOUT spaces between words (Han, kana,
@@ -615,7 +674,16 @@ function mentionField(r, member, group) {
 }
 /** One log record as one report line (agent-facing English, frame-inert — the line rule too: no opener dangles). */
 function lineFor(r, member = null, group = null) {
-  return linePrefix(r, member, group) + piece(clipLine(r.text));
+  return linePrefix(r, member, group) + piece(clipLine(r.text)) + awaitNote(r, member, group);
+}
+/** B-eba8 ①: a record whose author asked to be woken tells the member reading it so — the replier's half is the existing
+ *  `--wake`, made visible (a plain reply wakes them once). '' for every other record / the author itself. */
+function awaitNote(r, member, group) {
+  const aw = r && r.raw && r.raw.await;
+  if (!aw || !aw.by || !member || aw.by === member || ((r.raw.kind) || 'message') !== 'message') return '';
+  const m = group && memberOf(group, aw.by);
+  const who = piece((m && m.name) || (r.author && r.author.name) || String(aw.by).slice(0, 8), 80);
+  return ` (${who} asked to be woken by your reply — a plain reply wakes them once; --wake is not needed)`;
 }
 
 /**
@@ -783,7 +851,17 @@ function buildReport(group, m, recs, invite, rest, budget, lead, form, log, newe
  * read's page); every name leaves through the belt (`cleanName`).
  * @returns [{member, name, state, at}] — the members in the group's order, the departed after
  */
-function deliveryOf(group, rec, { log = [] } = {}) {
+function livenessOf(group, cid, liveness = null) {
+  let v = null;
+  if (typeof liveness === 'function') { try { v = liveness(cid); } catch { v = null; } }
+  else if (liveness && typeof liveness === 'object') v = liveness[cid] || null;
+  if (v && LIVENESS_STATES.includes(v.state)) return { state: v.state, at: Number.isFinite(v.at) ? v.at : null };
+  const m = memberOf(group, cid);
+  if (m && m.ended && ENDED_WHYS.includes(m.ended.why)) return { state: m.ended.why, at: Number.isFinite(m.ended.at) ? m.ended.at : null };
+  if (m && m.live === false) return { state: 'stopped', at: null };
+  return { state: 'running', at: null };   // no fact (a stored row, an old view) ⇒ the reading before liveness: waiting
+}
+function deliveryOf(group, rec, { log = [], liveness = null } = {}) {
   const at = rec && Number(rec.at);
   if (!group || !Array.isArray(group.members) || !Number.isFinite(at)) return [];
   const author = (rec.author && rec.author.id) || null;
@@ -796,10 +874,17 @@ function deliveryOf(group, rec, { log = [] } = {}) {
     if (!(m.member !== OWNER && m.joinedAt <= at)) continue;
     seen.add(m.member);
     const handed = Number.isFinite(m.reportedUpTo) && m.reportedUpTo >= at;
-    const state = handed ? 'handed' : m.notify === 'mute' ? 'muted' : 'waiting';
+    // lane pair-group-fate: a record's state is a fact about its ADDRESSEE — archived / gone ⇒ undeliverable (`at` =
+    // when it ended), stopped ⇒ still waiting (a resume delivers it), said by `stopped`
+    const lv = handed ? null : livenessOf(group, m.member, liveness);
+    const ended = !!(lv && ENDED_WHYS.includes(lv.state));
+    const state = handed ? 'handed' : ended ? 'undeliverable' : m.notify === 'mute' ? 'muted' : 'waiting';
     // a handed row's `at` = the hand-over CLOCK (`reportedAt`, stamped beside the marker when it moves); a legacy row
     // stamped before the clock existed answers null — the words then say "Read by beta" without a time
-    out.push({ member: m.member, name: nameOf(m, m.member), state, at: handed && Number.isFinite(m.reportedAt) ? m.reportedAt : null });
+    const row = { member: m.member, name: nameOf(m, m.member), state, at: handed && Number.isFinite(m.reportedAt) ? m.reportedAt : ended ? lv.at : null };
+    if (ended) row.why = lv.state;
+    if (state === 'waiting' && lv && lv.state === 'stopped') row.stopped = true;
+    out.push(row);
   }
   const departed = departuresAfter(recs, at, author);
   for (const d of departed) {
@@ -832,7 +917,51 @@ function nameFromLog(recs, cid) {
   return '';
 }
 
+/**
+ * THE AWAIT TABLE (B-eba8 + the symmetric addendum): does this REPLY wake the asker of `rec`? `entry` = the engine's
+ * persisted state of that await (`{answeredAt, wokeAt}` — the record itself is append-only). (await × reply.wake):
+ *   (no, no)   ⇒ none `next-turn`        (no, yes) ⇒ wake `replier` (the existing --wake decides, as today)
+ *   (yes, no)  ⇒ wake ONCE `await`       (yes, yes) ⇒ wake ONCE `both` (never a second billed turn)
+ * and an await wakes nothing — by name — when the reply is the asker's own (`own-message`), not the FIRST by another
+ * member (`not-first`), past `until` (`expired`), already consumed (`consumed`), handed over by the asker's own turn
+ * (`handed`), or the asker is muted / left / not running (`muted` / `left` / `not-running`).
+ */
+function awaitVerdict(group, rec, reply, { entry = null, liveness = null } = {}) {
+  const aw = rec && rec.raw && rec.raw.await;
+  const wake = !!(reply && reply.wake);
+  if (!aw || !aw.by) return wake ? { wake: true, why: 'replier' } : { wake: false, why: 'next-turn' };
+  const by = aw.by;
+  const at = Number(reply && reply.at);
+  const no = (why) => ({ wake: false, why, by });
+  if (reply && reply.author && reply.author.id === by) return no('own-message');
+  if (entry && Number.isFinite(entry.wokeAt)) return wake ? { wake: true, why: 'replier', by } : no('consumed');
+  if (entry && Number.isFinite(entry.answeredAt)) return wake ? { wake: true, why: 'replier', by } : no('not-first');
+  if (!(at <= Number(aw.until))) return wake ? { wake: true, why: 'replier', by } : no('expired');
+  const m = memberOf(group, by);
+  if (!m) return no('left');
+  if (m.notify === 'mute') return no('muted');
+  if (Number.isFinite(m.reportedUpTo) && m.reportedUpTo >= at) return no('handed');
+  const lv = livenessOf(group, by, liveness);
+  if (lv.state !== 'running') return no('not-running');
+  return { wake: true, why: wake ? 'both' : 'await', by };
+}
+/** Where an awaited record stands for the asker (`read`'s trailing clause, the window's line): `awaiting` / `woke`
+ *  (`at` = the wake) / `held` (the reply waits — the asker's wake cap) / `expired`. null when the record awaits nothing. */
+function awaitState(rec, entry, now) {
+  const aw = rec && rec.raw && rec.raw.await;
+  if (!aw) return null;
+  if (entry && Number.isFinite(entry.wokeAt)) return { state: 'woke', at: entry.wokeAt };
+  if (entry && Number.isFinite(entry.heldAt)) return { state: 'held', at: entry.heldAt };
+  if (entry && Number.isFinite(entry.answeredAt)) return { state: 'answered', at: entry.answeredAt };
+  return Number(now) > Number(aw.until) ? { state: 'expired', at: aw.until } : { state: 'awaiting', at: aw.until };
+}
+/** A woken asker's lead (the `[await]` word in the hand-over line). */
+function awaitLead(at, why) {
+  return `[await] A reply to your message of ${stamp(at)} (${why === 'both' ? 'you asked + they chose' : 'you asked to be woken'})`;
+}
+
 module.exports = {
+  LIVENESS_STATES, ENDED_WHYS, OWNERS, livenessFrom, AWAIT_MS, closePair, endedText, livenessOf, awaitVerdict, awaitState, awaitLead, awaitNote,
   NOTIFY_MODES, DEFAULT_NOTIFY, DELIVERY_STATES, OWNER, GROUP_ADAPTER_ID, ERROR_CODES, NAME_MAX, CONTEXT_MAX, MEMBER_MAX, REPORT_BUDGET, LINE_MAX,
   WAKE_CONFIRM_ABOVE, WAKE_FLOOR_MS, SENDER_WAKES, SENDER_WINDOW_MS, PACE_SKEW_MS,
   newGroupId, pairKey, cleanName, cleanText, isCid, isGroupId, memberOf, validateGroup, makeGroup,

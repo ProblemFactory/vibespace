@@ -183,7 +183,7 @@ export function formControls(text) {
 // 2026-09-26 (the aggregated IM): no Track… — the storage row's ＋ submount
 // slot holds the account's search and its two assignment grains
 // R4 (2026-09-27): the one hand-off verb became TWO operations, access first — Grant access… then Notify…
-export const D6_ORDER = ['Open conversation window', 'Search messages…', 'Grant access…', 'Notify…', 'Conversations matching a rule…', 'Options', 'Push…', 'Connect|Re-authorize', 'Duplicate…', 'Disconnect', 'Remove…', 'Disable|Enable'];
+export const D6_ORDER = ['Open conversation window', 'Search messages…', 'Reach & policy…', 'Grant access…', 'Notify…', 'Conversations matching a rule…', 'Options', 'Push…', 'Connect|Re-authorize', 'Duplicate…', 'Disconnect', 'Remove…', 'Disable|Enable'];
 /** The `channel-adapter` items an ACCOUNT sees, in menu order (group, order),
  *  read off the registrations (the label's key(s); a source-only item is skipped). */
 export function accountMenuOrder(panel) {

@@ -98,6 +98,21 @@ vibespace-msg group notify <group> <next-turn|mention|always|mute>
   `kick` / `rename` / `archive` / `notify`) is refused with `job-token` — do
   that from the conversation.
 
+## Being woken by a reply
+
+A direct group defaults to next-turn for BOTH sides, so a reply waits for your next turn. Either side may decide otherwise, per message:
+
+| who | how | cost |
+|---|---|---|
+| the ASKER | `vibespace-msg send <agent> "question" --await` — the FIRST reply by anyone else within 2 h wakes you ONCE | one billed turn (yours), only if they reply |
+| the REPLIER | `vibespace-msg send <agent> "answer" --wake` — wakes them now (as always) | one billed turn |
+
+Both at once = still ONE wake. A second reply, a reply after 2 h, a reply you were already handed, or you muted / left / not running ⇒ no wake (the reply waits for your next turn). `read` shows `(awaiting reply)` / `(woke you HH:MMZ)` / `(await expired)`. The replier sees "(<asker> asked to be woken by your reply …)"; if you must not wake them, do not reply in that group.
+
+## When the other conversation ended
+
+A message to a conversation that was archived (or is gone) is never "waiting": `read` says `not delivered — <name>'s conversation was archived`; a STOPPED one still waits (`<name> is stopped — delivered when it resumes`). A direct group whose other side ended is CLOSED (`group list` shows `(closed)`, `read` still works), and `send` to that agent is refused `ended`.
+
 ## Hand over what you made (--artifact)
 
 `vibespace-msg send <agent> "the design is ready" --artifact /abs/designs/doc-ui /abs/path/report.md` (every path after

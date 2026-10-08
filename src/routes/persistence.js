@@ -54,7 +54,7 @@ function wordlessTitles(node, depth = 0) {
 }
 
 /** Setup persistence routes. Requires { dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth } context. */
-function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getHosts, getMounts, getTasks, getAccounts, getUsageHistory, onSettingsWrite }) {
+function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getHosts, getMounts, getTasks, getAccounts, getUsageHistory, onSettingsWrite, onUserStateWrite = () => {} }) {
   const broadcast = (msg) => {
     const json = JSON.stringify(msg);
     wss.clients.forEach(client => {
@@ -605,6 +605,8 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     _userStateCache = normalizeUserState(data);
     writeJsonAtomic(USER_STATE_FILE, _userStateCache);
     broadcast({ type: 'user-state-updated', state: _userStateCache });
+    // lane pair-group-fate: the ONE write of the sidebar's archived list — a conversation archived here ends its groups' waits
+    try { onUserStateWrite(_userStateCache); } catch (e) { console.warn('[user-state] write hook failed:', e && e.message); }
   }
 
   router.get('/api/user-state', (req, res) => res.json(readUserState()));

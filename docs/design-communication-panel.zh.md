@@ -1464,11 +1464,16 @@ owner: "所有配置权限的地方都加入'所有'这个选项"。`{kind:'ever
 
 ---
 
+**As-built (lane account-policy-door, 2026-10-07, userW「想给整个 Lark 配置可见性与策略，但配不了」):** 账户也有「可见性与策略…」—— 账户卡片的 ⋯ 第一项（排在「授予访问权限…」之前）。一个对话框、账户粒度：① 发送策略（与会话对话框同一个 PURE 行模型 `policyRowModel`；写 `PUT /api/channels/adapters/:id {policy, base}`，值已被改 ⇒ 409 `policy-changed` 并重读）；② 谁可以读和操作 = Grant access 的同一个渲染器（`grantAccessBody`，不是副本；① 变成 direct 时原地出现「可以直接回复」）；③ 谁会被唤醒 = 一行 + 「通知…」入口。账户的「编辑」对话框也带同一个策略下拉（同一个模型、同一个路由）。会话的「可见性与策略…」说出值的来源：「沿用账户：直接发送」，「沿用账户的设置」= PUT null；会话自己设过的值在账户改动时保持不变。
+
 ## 9. Outbox: propose → policy → approve → send → receipt
 
 > **2.369.159 (§22): 现在只管「消息观察 (Message watcher)」一侧的 agent 起草 —— 次级.** 我自己写的消息直接发出 (群 composer 以"你"发; 外部会话在提供 `sendAsUser` 时走 `POST …/send`, `direct:true`, 不过策略不过守卫, 但仍留 outbox 记录/审计/`unknown`); propose → policy → approve 只留给 agent 起草的回复。
 
 ### 9.1 状态
+
+> **As-built (lane account-policy-door):** 策略的三个粒度 —— 会话自己的值 > 账户的值 > 渠道（adapter）默认值；`policyFor` 同时给出 `source` 和 `inherits`（去掉本粒度的值后会读到什么）。拒绝「直接发送」的提示会说在哪里改（账户 ⋯ → 可见性与策略…，或会话自己的）。智能体：`vibespace-channels status <会话>` 打印 `policy: direct (account)` / `review (this conversation)`，list 每行也带；智能体不能改。
+
 
 ```
 draft ─(agent proposes)──────────────► proposed
@@ -3474,6 +3479,12 @@ owner 原话 (摘): "我不太需要一个 agent 订阅另一个 agent 的消息
 
 **实现状态 (g3 = 面板)**: 第一屏 = 群列表 (agent 群 + 各账号里**已跟踪**的会话, 按最近活动排, 行 = 来源图标 · 名称 · 时间 / 来源 chip · 末行 · 未读; 已归档另折叠), "账号"与"消息观察 (Message watcher)"降为下方可折叠的次级区, 折叠状态存 user state `channelsPanelFolds` 并跨客户端同步。"新建群"对话框: 名称 + 按 Task Group 分组的活会话 (逐个勾选, 不预选, 无整组勾选 — D1) + 开场 context + "立刻叫醒"(默认开) 并在点击**之前**回显 "将叫醒 N 个 agent (N 条计费 turn)"。群窗口 = 同一 `channel` 窗口类型; 系统记录按 kind 用设备语言措辞; 成员 chip / ⋯ 打开群详情 (我 = "你 (观察者)" 排第一; 每个成员一个通知模式下拉, 我可改任何人; 移出; 拉人 = 新建群对话框去掉名称; 改名; 归档)。**composer 以"你"直接发出**: `@` 自动补全成员名, 输入框下方预览这段文字会叫醒谁 (模型自己的 `mentionsIn` + D2 表, 与引擎的 `wakeVerdict` 做了全表一致性测试), 发送的回答带唤醒计数。**外部会话 (Lark/Gmail) 我自己的消息也直接发出**: `sendAsUser` 可用时 composer = 发送 (`POST /api/channels/:a/:c/send` = 用户 proposal + `direct:true`: 不走策略与守卫, 仍保留 outbox 记录/审计/不重发的 unknown); 只提供 bot 身份时仍走 propose 并说明为何不能以你的身份发送; agent 起草的回复保留 outbox 卡片。服务器补充: digest 的 `lastText`, 群引擎的**我的已读标记** (`ownerRead`, 只由我的动作移动, 未移动不广播), `GET /api/channel-groups/roster`, `POST /api/channel-groups/:id/read`。窄栏容器阈值 180 → 160 px (面板变高后默认宽度出现滚动条, 实测内容宽 187 → 172)。门: test-channels-groups-ui (fast) + test-channels-groups-e2e (heavy, 两个 stub CLI 会话, 每次唤醒都经真实投递梯进入录制 stub)。
 
+### 22.6 as-built: 对方对话已结束 + D3 --await (lane pair-group-fate, B-7d1e + B-eba8, owner 2026-10-07)
+
+- 记录的状态是关于收件人的事实：`deliveryOf` 读成员的 liveness（running / stopped / archived / gone）。archived / gone ⇒ `undeliverable`（窗口："未送达——beta 的对话已于 … 归档"），stopped 仍然等待（"beta 已停止——恢复后送达"）。
+- 引擎的 `ended` 账本（groups.json，同一道门）由侧栏归档（user-state 唯一写入点）与启动扫描（restoreSessions 之后）填入；二人群的另一方结束 ⇒ 关闭（archivedAt + `closed`，一行 "…the group is closed"，发送方下一次报告只带一次）；多人群只标记行。`send` 给已结束的对话 ⇒ `ended` 拒绝。
+- D3: --await。发送方 `send --await` 标记记录；`awaitVerdict` = (await × 回复方 --wake) 2×2 表：任一方决定 ⇒ 唤醒一次，双方 ⇒ 仍一次；第二条 / 超时 2 h / 已交付 / 静音 / 离开 / 未运行 ⇒ 不唤醒（具名原因）。唤醒走同一个 `wake()`（spendReason peer-message），上限拒绝时该行写"回复在等——发送者的唤醒上限已到"。
+
 ### 22.4 归属
 B-afa0 (改写为本节); 前置 B-f0a2 (账号); 不动 §7/§8/§9 的机制, 只改它们在界面里的位置与 composer 的语义。
 
@@ -4015,3 +4026,13 @@ Owner 的规则: "拓展 vendor 只需要定义 vendor-specific 的文件 + 一�
 - **它是快照，并且这么说。** 状态行后面跟「来自 N 分钟前{vendor}的搜索 · 重新搜索」；新存进本地的消息不让记忆失效（本地一层会显示它；记忆里已被本地存下的那条会被去掉）。「重新搜索」是对一个记住的词再花一次厂商调用的唯一方式：按账号，先撤掉该账号的行，服务器忘掉那一条（`again=1`），再按今天的地板 / 分钟 / 预算去问。
 - **不记住的。** 拒绝（429 / 退避 / 地板 / 额度）、失败、只拿到一部分的回答都不记；拒绝照旧按类型回答。
 - **智能体。** `vibespace-channels search … --full` 先读主人的 `all`，再读自己的集合；记忆回答时说「answered these N min ago — remembered for 10 min, not asked again」；新的词仍受 20 秒地板。
+
+## 打开智能体找到的东西 · 记忆按会话、不过期（设计 010 as-built 补，2026-10-07，lane search-card-open，2.369.233）
+
+主人原话：「既然 agent 进行了搜索说明 vibespace 已经获取到了相关 data，为啥我点不开？」；修订：「缓存其实不用失效吧，反正搜索结果也只会出现新的而不会更改旧的？而新的都会被我们系统收到？」
+
+- **按会话记住。** 一次厂商搜索的回答除了记在原来的范围下，还按命中所在的会话各记一份（`conv:<id>`，每次最多 16 个会话）；智能体能看见账号的全部会话时也记在 `all` 下。派生的一份没有翻页 token（token 只属于原来那次搜索），从不覆盖主人自己的 `all`，原条目被「重新搜索」忘掉时一起走。
+- **不过期，落盘。** 去掉 10 分钟 TTL：只按大小 / LRU 限（每账号 64 条、2 MiB）。每账号写在 `<account>/search-memo.json`（0600，原子写），首次用到时读回；断开连接、移除账号、或文件记的身份与账号不同时丢掉。
+- **从智能体的行打开。** 卡片的搜索行带上那次搜索的记忆范围；对话框先读它（精确），再读 `all`，再读这个会话的。智能体的命中若不在本地副本里，就在第二段显示出来（发送者 · 时间 · 厂商片段，点开 = 前后消息 / 打开会话），「智能体的命中里有 N 条已不在保存的副本中」成了第二段的标题字样；年龄一行只是信息：「来自 Lark 搜索（N 分钟前，智能体查的）」，一小时后写日期。记忆里没有（别的实例、旧版本、被上限挤掉）时说「智能体{when}搜过{vendor}——这里没有记住它的结果 · 重新搜索」，按一下 = 一次厂商调用。
+- **谁能读。** 主人看得见全部，任何条目都可以回答他；智能体只读 `all` 和自己的集合，再按自己的可见范围过滤（智能体不打开对话框）。
+

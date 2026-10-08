@@ -107,16 +107,16 @@ ok(/Re-authorize/.test(SR.statusText({ state: 'refused', code: 'needs-scope' }))
   const g1 = get(s, { query: ' BUDGET plan', now: T0 + 5000 });
   ok(g1.answer && g1.answer.hits.length === 1 && g1.answer.next === 'p:10' && g1.answer.ageMs === 5000 && g1.answer.askedAt === T0, 'memo: the same words (another case, other spaces) read the entry with its age');
   ok(!get(s, { query: 'budget plan', scopes: ['set:1:x'] }).answer && get(s, { query: 'budget plan', scopes: ['set:1:x', 'all'] }).answer, 'memo: a scope reads its own entries only — an agent lists the owner\'s ("all") beside its own');
-  const live = get(s, { query: 'budget plan', now: T0 + SR.SEARCH_MEMO_TTL_MS - 1 }), dead = get(s, { query: 'budget plan', now: T0 + SR.SEARCH_MEMO_TTL_MS });
-  ok(SR.SEARCH_MEMO_TTL_MS === 600000 && live.answer && !dead.answer && dead.state.entries.size === 0 && dead.state.bytes === 0, 'memo: the TTL (10 min) — alive to its last millisecond, then dropped');
+  const late = get(s, { query: 'budget plan', now: T0 + 365 * 86400e3 });
+  ok(SR.SEARCH_MEMO_TTL_MS === undefined && late.answer && late.answer.ageMs === 365 * 86400e3 && late.state.entries.size === 2, 'memo (lane search-card-open): NO TTL — a year later the entry still answers, with its age');
   s = SR.searchMemo(s, { op: 'put', scope: 'all', query: 'budget plan', page: 'p:10', now: T0 + 60000, hits: [{ convId: 'c', vendorId: 'w', at: 0 }], next: null }).state;
   const pg = get(s, { query: 'budget plan', page: 'p:10', now: T0 + 61000 });
   const stray = SR.searchMemo(s, { op: 'put', scope: 'all', query: 'budget plan', page: 'p:99', now: T0 + 62000, hits: [], next: null });
-  ok(pg.answer && pg.answer.askedAt === T0 && pg.answer.hits[0].vendorId === 'w' && get(s, { query: 'budget plan' }).answer.next === 'p:10' && stray.answer === false, 'memo: a later page APPENDS (the TTL still runs from the first press); a page that does not follow the last is not kept');
+  ok(pg.answer && pg.answer.askedAt === T0 && pg.answer.hits[0].vendorId === 'w' && get(s, { query: 'budget plan' }).answer.next === 'p:10' && stray.answer === false, 'memo: a later page APPENDS (askedAt stays the first press\'s); a page that does not follow the last is not kept');
   const cl = SR.searchMemo(s, { op: 'clear', scope: 'all', query: 'Budget Plan' });
   ok(cl.answer === true && !get(cl.state, { query: 'budget plan' }).answer && get(s, { query: 'budget plan' }).answer, 'memo: "Search again" forgets the entry (a new state — the old one untouched)');
   let L;
-  for (let i = 0; i < SR.SEARCH_MEMO_MAX + 6; i++) { L = put(L, { query: `q${i}` }).state; if (i === SR.SEARCH_MEMO_MAX - 1) L = get(L, { query: 'q0' }).state; }
+  for (let i = 0; i < SR.SEARCH_MEMO_MAX + 6; i++) { L = put(L, { query: `q${i}`, hits: [] }).state; if (i === SR.SEARCH_MEMO_MAX - 1) L = get(L, { query: 'q0' }).state; }
   ok(L.entries.size === SR.SEARCH_MEMO_MAX && get(L, { query: 'q0' }).answer && !get(L, { query: 'q1' }).answer && get(L, { query: `q${SR.SEARCH_MEMO_MAX + 5}` }).answer, `memo: the LRU — ≤ ${SR.SEARCH_MEMO_MAX} entries, the least recently READ leaves first (q0 was read, q1 left)`);
   const fat = (n) => [{ convId: 'c', vendorId: 'v', at: 1, snippet: 'x'.repeat(n) }];
   let B;
@@ -125,6 +125,36 @@ ok(/Re-authorize/.test(SR.statusText({ state: 'refused', code: 'needs-scope' }))
   ok(B.bytes <= SR.SEARCH_MEMO_BYTES && B.entries.size < 8 && !get(B, { query: 'f0' }).answer && get(B, { query: 'f7' }).answer && huge.answer === false && huge.state.entries.size === B.entries.size, `memo: ≤ ${SR.SEARCH_MEMO_BYTES / 1048576} MiB an account (the oldest leave); one answer over it is not kept`, JSON.stringify({ bytes: B.bytes, n: B.entries.size }));
   const Vm = (o) => SR.fullSearchVerdict({ declared: true, scopeHeld: true, now: 100000, floorMs: 2000, minuteLeft: 12, budgetLeft: 60, pages: 3, ...o });
   ok(Vm({ memo: true, backoffUntil: 200000, lastAt: 99999, inflight: true, minuteLeft: 0, budgetLeft: 0 }).act === 'memo' && Vm({ peek: true }).act === 'unasked' && Vm({ memo: true, peek: true }).act === 'memo' && Vm({ memo: true, declared: false }).code === 'not-supported' && Vm({ memo: true, scopeHeld: false }).code === 'needs-scope', 'the table: a remembered answer before the back-off, the floor, the minute, the budget; a look that is no press asks nothing; not declared / no scope still first');
+  // lane search-card-open (.233): THE FAN — what one searcher found for a conversation answers that conversation
+  const AH = [{ convId: 'c1', vendorId: 'm1', at: 3 }, { convId: 'c1', vendorId: 'm2', at: 2 }, { convId: 'c2', vendorId: 'm3', at: 1 }];
+  const ap = (st, o) => SR.searchMemo(st, { op: 'put', scope: 'set:2:ab', query: 'Kayako', page: null, now: T0, hits: AH, next: 'p:10', by: 'agent', ...o });
+  let F = ap(undefined).state;
+  const fc = get(F, { query: 'kayako', scopes: ['all', SR.memoConv('c1')] }).answer;
+  ok(F.entries.size === 3 && fc && fc.scope === 'conv:c1' && fc.hits.map((h) => h.vendorId).join() === 'm1,m2' && fc.next === null && fc.derived && fc.by === 'agent' && !get(F, { query: 'kayako' }).answer, 'fan: an agent\'s answer is ALSO remembered per conversation it found (that conversation\'s hits, no page token, by the agent); not under "all" when its scope did not cover the account', JSON.stringify(fc));
+  const Fa = ap(undefined, { covers: true }).state;
+  const fa = get(Fa, { query: 'kayako' }).answer;
+  ok(fa && fa.hits.length === 3 && fa.next === null && fa.derived, 'fan: a scope covering every conversation of the account is remembered under "all" too (no token — it belongs to the agent\'s scope)');
+  const Fo = ap(put(undefined, { query: 'kayako', next: 'p:o' }).state, { covers: true }).state;
+  ok(get(Fo, { query: 'kayako' }).answer.next === 'p:o' && !get(Fo, { query: 'kayako' }).answer.derived, 'fan: a derived entry never replaces an own answer (the owner\'s "all" keeps its rows and token)');
+  const Fp = SR.searchMemo(F, { op: 'put', scope: 'set:2:ab', query: 'kayako', page: 'p:10', now: T0 + 1, hits: [{ convId: 'c1', vendorId: 'm4', at: 0 }], next: null, by: 'agent' }).state;
+  ok(get(Fp, { query: 'kayako', scopes: ['conv:c1'] }).answer.hits.map((h) => h.vendorId).join() === 'm1,m2,m4' && !get(Fp, { query: 'kayako', scopes: ['conv:c1'], page: 'p:10' }).answer, 'fan: the next page joins what its first page derived; a derived entry answers no page token');
+  const Fc = SR.searchMemo(F, { op: 'clear', scopes: ['set:2:ab'], query: 'kayako' });
+  ok(Fc.answer && Fc.state.entries.size === 0 && Fc.state.bytes === 0, 'fan: "Search again" on the origin forgets what it derived');
+  const many = Array.from({ length: 40 }, (_, i) => ({ convId: `k${i}`, vendorId: `v${i}`, at: i }));
+  const Fm = ap(undefined, { hits: many }).state;
+  ok(Fm.entries.size === 1 + SR.SEARCH_MEMO_FAN && get(Fm, { query: 'kayako', scopes: ['set:2:ab'] }).answer, `fan: bounded — ≤ ${SR.SEARCH_MEMO_FAN} conversation entries a put, the original kept; the LRU (${SR.SEARCH_MEMO_MAX}) bounds them all`);
+  // THE FILE (lane search-card-open: persisted per account) — a round trip, garbage, the bound, a derived token
+  const disk = JSON.parse(JSON.stringify(SR.memoToDisk(Fp, { email: 'a@example.com' })));
+  const back = SR.memoFromDisk(disk);
+  const bad = JSON.parse(JSON.stringify(disk)); bad.entries[bad.entries.length - 1][1].pages[0].next = 'p:x'; bad.entries.push(['junk', { pages: 'x' }]);
+  const badBack = SR.memoFromDisk(bad);
+  ok(disk.v === 1 && disk.identity.email === 'a@example.com' && back.entries.size === Fp.entries.size && back.bytes === Fp.bytes && JSON.stringify(get(back, { query: 'kayako', scopes: ['conv:c1'] }).answer) === JSON.stringify(get(Fp, { query: 'kayako', scopes: ['conv:c1'] }).answer) && SR.memoFromDisk(null).entries.size === 0 && SR.memoFromDisk({ v: 9 }).entries.size === 0, 'file: memoToDisk → JSON → memoFromDisk answers the same; garbage / another version = empty');
+  ok(badBack.entries.size === Fp.entries.size && [...badBack.entries.values()].filter((x) => x.from).every((x) => x.pages[0].next === null), 'file: a malformed row is skipped; a derived row read back has no page token whatever the file says');
+  let BIG; for (let i = 0; i < 100; i++) BIG = put(BIG, { query: `b${i}`, hits: [] }).state;
+  const bigDisk = SR.memoToDisk(BIG); for (let i = 0; i < 50; i++) bigDisk.entries.push([`all\u0000x${i}`, { askedAt: 1, by: 'owner', pages: [{ token: null, hits: [], next: null }] }]);
+  ok(SR.memoFromDisk(bigDisk).entries.size === SR.SEARCH_MEMO_MAX, `file: an over-long file is read back within the bound (${SR.SEARCH_MEMO_MAX}, the newest)`);
+  ok(SR.isMemoScope('all') && SR.isMemoScope(SR.memoScope(['a', 'b'])) && !SR.isMemoScope('conv:c1') && !SR.isMemoScope('set:1:zz') && !SR.isMemoScope({}), 'the card\'s key: "all" or a set hash — a conversation scope is never read off a request');
+  ok(/^From Lark's search \(12 min ago, asked by the agent\)$/.test(SR.memoText(12 * 60e3, { vendor: 'Lark', by: 'agent' })) && /search on 10\/05 09:00$/.test(SR.memoText(3 * 3600e3, { vendor: 'Lark', date: '10/05 09:00' })) && /^The agent searched Lark 3 min ago — its results are not remembered here$/.test(SR.forgottenText(3 * 60e3, { vendor: 'Lark' })), 'the words: the agent\'s remembered answer says who asked and when (minutes, then the day); nothing remembered is said');
   ok(/less than a minute/.test(SR.memoText(59999, { vendor: 'Lark' })) && /Lark's search 5 min ago/.test(SR.memoText(5 * 60e3 + 1, { vendor: 'Lark' })) && /Press Search/.test(SR.statusText({ state: 'unasked' }, { vendor: 'Lark' })), 'the words: a remembered answer says its age; the opened dialog says a press asks');
 }
 
@@ -177,10 +207,11 @@ function counted(kind, { search = true } = {}) {
     return impl;
   } } };
 }
-async function mkEngine(name, ENGmod = ENG, extra = []) {
+async function mkEngine(name, ENGmod = ENG, extra = [], opts = {}) {
   const dataDir = path.join(ROOT, name);
   fs.mkdirSync(path.join(dataDir, 'channels'), { recursive: true });
   fs.writeFileSync(path.join(dataDir, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: ['srch', 'nos', ...extra].map((k) => ({ id: k, kind: /^srch/.test(k) ? 'srch' : k, label: k, enabled: true, auth: { tokenEnc: null, expiresAt: null, scopes: [] }, lastPass: null, consecutiveFailures: 0, push: { enabled: false, claimedExclusive: 'unknown', state: null, lastEventAt: null, missRate: 0, demotedAt: null, demotedWhy: null }, scan: null })) }));
+  if (opts.identity) { const f = path.join(dataDir, 'channels', 'adapters.json'), j = JSON.parse(fs.readFileSync(f, 'utf-8')); j.adapters[0].identity = opts.identity; fs.writeFileSync(f, JSON.stringify(j)); }
   const S = counted('srch'), N = counted('nos', { search: false });
   const registry = CH.createChannelRegistry();
   registry.register(S.mod); registry.register(N.mod);
@@ -291,9 +322,9 @@ console.log('§M the memo: one ask per (account, scope, query) — a repeat, a r
   const m6 = await eng.searchVendor('srch', 'budget', { pageToken: m5.next });
   const m6b = await eng.searchVendor('srch', 'budget', { pageToken: m5.next });
   ok(m5.next && m6.ok && !m6.memo && m6b.memo && S.calls.search === 2 * PP + 1, 'the scroll\'s next page = one call, appended to the entry; asked again it is remembered', JSON.stringify({ calls: S.calls.search }));
-  tick(SR.SEARCH_MEMO_TTL_MS);
+  tick(3 * 86400e3);
   const m7 = await eng.searchVendor('srch', 'budget');
-  ok(m7.ok && !m7.memo && S.calls.search === 3 * PP + 1, 'past the TTL (10 min) the press asks again', JSON.stringify({ calls: S.calls.search, m7: m7.code }));
+  ok(m7.ok && m7.memo && S.calls.search === 2 * PP + 1, 'lane search-card-open: NO TTL — three days later the same words are still answered from the memo (0 calls)', JSON.stringify({ calls: S.calls.search, m7: m7.code }));
   await eng.setAccess('srch', { kind: 'conversation', convId: 'srch-ops' }, [{ principal: { kind: 'agent', id: 'agent-M', name: 'M' } }]);
   const AGm = { kind: 'agent', id: 'agent-M', name: 'M', groups: [] };
   const c8 = S.calls.search;
@@ -310,7 +341,44 @@ console.log('§M the memo: one ask per (account, scope, query) — a repeat, a r
   const b2 = await eng.searchVendor('srch2', 'budget');
   const b3 = await eng.searchVendor('srch', 'budget');
   ok(b1.ok && !b1.memo && b2.memo && b3.memo && S.calls.search === c9 + PP, 'two accounts searched: each its OWN memo — the second account asks once, then both answer from their own', JSON.stringify({ b1: b1.code || !!b1.memo, calls: S.calls.search - c9 }));
+  // lane search-card-open (.233): THE OWNER OPENS WHAT THE AGENT FOUND — the agent's own vendor ask of words whose hit
+  // the saved copy does not hold (the vendor's history: 'Quarterly budget review', 400 days back)
+  tick(21000);
+  const c10 = S.calls.search;
+  const a5 = await eng.searchFor(AGm, 'quarterly', { full: true, adapterId: 'srch' });
+  const o1 = await eng.searchVendor('srch', 'quarterly', { peek: true, memo: a5.memoScope, convId: 'srch-ops' });
+  const o2 = await eng.searchVendor('srch', 'quarterly', { peek: true, convId: 'srch-ops' });
+  const o3 = await eng.searchVendor('srch', 'quarterly', { peek: true });
+  const aIds = a5.results.map((x) => x.vendorId).sort().join();
+  ok(aIds === 'srch-ops-old-1' && S.calls.search === c10 + 1 && a5.memoScope && /^set:/.test(a2.memoScope) && o1.ok && o1.memo && o1.memo.by === 'agent' && o1.next === null && o1.hits.filter((h) => h.convId === 'srch-ops').map((h) => h.vendorId).sort().join() === aIds && S.calls.search === c10 + 1, 'the owner\'s dialog opened from the agent\'s row (its memo scope + conversation) = 0 vendor calls: the agent\'s hits, said "asked by the agent", no page token', JSON.stringify({ k: a5.memoScope, o1: o1.code || o1.memo, n: o1.hits && o1.hits.length, aIds, calls: S.calls.search - c10 }));
+  ok(o2.ok && o2.memo && o2.hits.length && o2.hits.every((h) => h.convId === 'srch-ops') && o2.next === null && o3.unasked && S.calls.search === c10 + 1, 'a dialog scoped to that conversation finds it without the key (the per-conversation entry); the account-wide open does not (the agent saw one conversation)', JSON.stringify({ o2: o2.code || o2.memo, o3: !!o3.unasked }));
+  // a SECOND agent: it never reads another agent's entry nor a conversation entry — its own vendor ask, its own reach
+  const other = Object.values(eng.store.index.live()).find((en) => en && en.adapterId === 'srch' && en.id !== 'srch-ops');
+  await eng.setAccess('srch', { kind: 'conversation', convId: other.id }, [{ principal: { kind: 'agent', id: 'agent-N', name: 'N' } }]);
+  const n1 = await eng.searchFor({ kind: 'agent', id: 'agent-N', name: 'N', groups: [] }, 'quarterly', { full: true, adapterId: 'srch' });
+  ok(n1.ok && !n1.remembered && S.calls.search === c10 + 2 && n1.results.every((x) => !/srch-ops/.test(x.key)), 'agent N (another conversation) is not answered from agent M\'s entries — one ask of its own, nothing of srch-ops (agents open no dialog; the owner reads every entry)', JSON.stringify({ n1: n1.code, calls: S.calls.search - c10, keys: n1.results && n1.results.map((x) => x.key) }));
+  // PERSISTED: a restart reads the account's file — the reopen asks nothing
   eng.stop && eng.stop();
+  const file = path.join(ROOT, 'eng-memo', 'channels', 'srch', 'search-memo.json');
+  const R = await mkEngine('eng-memo', ENG, ['srch2']);
+  const p1 = await R.eng.searchVendor('srch', 'budget', { peek: true });
+  const p2 = await R.eng.searchVendor('srch', 'quarterly', { peek: true, memo: a5.memoScope, convId: 'srch-ops' });
+  ok(fs.existsSync(file) && (fs.statSync(file).mode & 0o777) === 0o600 && p1.ok && p1.memo && p1.hits.length && p2.memo && p2.memo.by === 'agent' && p2.hits.some((h) => h.vendorId === 'srch-ops-old-1') && R.S.calls.search === 0, 'a restart: the memo is read from <account>/search-memo.json (0600) — the reopen and the agent row answer with 0 vendor calls', JSON.stringify({ file: fs.existsSync(file), p1: p1.code || p1.memo, p2: p2.code || p2.memo, calls: R.S.calls.search }));
+  // DROPPED with the account: a disconnect forgets it (file and all)
+  await R.eng.disconnect('srch');
+  const d1 = await R.eng.searchVendor('srch', 'budget', { peek: true });
+  ok(!fs.existsSync(file) && (d1.unasked || d1.ok === false) && !d1.memo && R.S.calls.search === 0, 'a disconnect drops the account\'s memo — its file gone, nothing answered from it', JSON.stringify({ file: fs.existsSync(file), d1: d1.code || d1.unasked }));
+  R.eng.stop && R.eng.stop();
+  // ANOTHER IDENTITY: a file written for one account holder is never read for another
+  const I1 = await mkEngine('eng-ident', ENG, [], { identity: { email: 'ada@example.com' } });
+  await I1.eng.searchVendor('srch', 'budget');
+  I1.eng.stop && I1.eng.stop();
+  const ifile = path.join(ROOT, 'eng-ident', 'channels', 'srch', 'search-memo.json');
+  const held = JSON.parse(fs.readFileSync(ifile, 'utf-8')).identity;
+  const I2 = await mkEngine('eng-ident', ENG, [], { identity: { email: 'bob@example.com' } });
+  const i2 = await I2.eng.searchVendor('srch', 'budget', { peek: true });
+  ok(held && held.email === 'ada@example.com' && i2.unasked && !fs.existsSync(ifile), 'the file names whose account answered; read under another identity it is dropped, never shown', JSON.stringify({ held, i2: i2.code || i2.unasked }));
+  I2.eng.stop && I2.eng.stop();
 }
 
 // ── §K PATCHED-COPY CONTROLS ───────────────────────────────────────────────
@@ -363,7 +431,7 @@ console.log('§K controls: each rule removed ⇒ its leg red');
   const k7b = await k7.eng.searchVendor('srch', 'budget');
   ok(k7b.ok && !k7b.memo && k7.S.calls.search === 2 * PP, 'CONTROL: an engine with no memo asks the vendor again for the same words (2 presses, not 1)', JSON.stringify(k7.S.calls));
   k7.eng.stop && k7.eng.stop();
-  const k8 = await mkEngine('eng-refmemo', patched('src/server/channels-engine.js', '    if (failure && !pages) return failure;\n', "    if (failure && !pages) { e.searchMemo = SR.searchMemo(e.searchMemo, { op: 'put', scope, query, page: pageToken, now: t, hits: [], next: null }).state; return failure; }\n", 'refusal-memo'));
+  const k8 = await mkEngine('eng-refmemo', patched('src/server/channels-engine.js', '    if (failure && !pages) return failure;\n', "    if (failure && !pages) { memoKeep(rec, SR.searchMemo(memoOf(rec), { op: 'put', scope, query, page: pageToken, now: t, hits: [], next: null }).state); return failure; }\n", 'refusal-memo'));
   k8.S.inject.rate = 1;
   const k8a = await k8.eng.searchVendor('srch', 'budget'); k8.tick(2500);
   const k8b = await k8.eng.searchVendor('srch', 'budget');
@@ -374,6 +442,18 @@ console.log('§K controls: each rule removed ⇒ its leg red');
   const k9b = await k9.eng.searchVendor('srch', 'budget', { again: true });
   ok(k9b.memo && k9.S.calls.search === PP, 'CONTROL: a "Search again" that forgets nothing answers from the memo (0 calls)', JSON.stringify(k9.S.calls));
   k9.eng.stop && k9.eng.stop();
+  // lane search-card-open: the fan removed ⇒ the owner's dialog scoped to the agent's conversation misses (asks a press)
+  const NF = patched('src/channel-search.js', '.slice(0, SEARCH_MEMO_FAN).map(', '.slice(0, 0).map(', 'no-fan');
+  const nf = NF.searchMemo(undefined, { op: 'put', scope: 'set:2:ab', query: 'quarterly', page: null, now: 1, hits: [{ convId: 'srch-ops', vendorId: 'srch-ops-old-1', at: 1 }], next: 'p:10', by: 'agent' });
+  const k10b = NF.searchMemo(nf.state, { op: 'get', scopes: ['all', NF.memoConv('srch-ops')], query: 'quarterly', page: null, now: 2 }).answer;
+  ok(nf.answer && k10b === null, 'CONTROL: a memo that does not fan by conversation leaves the owner\'s dialog on the agent\'s conversation unanswered ("press Search")', JSON.stringify(k10b));
+  // the derived entry's token rule removed ⇒ the owner's answer from the agent's scope carries the agent's page token
+  const k11 = await mkEngine('eng-tok', patched('src/server/channels-engine.js', 'next: own ? kept.next : null,', 'next: kept.next,', 'derived-token'));
+  await k11.eng.setAccess('srch', { kind: 'conversation', convId: 'srch-ops' }, [{ principal: { kind: 'agent', id: 'agent-K', name: 'K' } }]);
+  const k11a = await k11.eng.searchFor({ kind: 'agent', id: 'agent-K', name: 'K', groups: [] }, 'budget', { full: true, adapterId: 'srch' });
+  const k11b = await k11.eng.searchVendor('srch', 'budget', { peek: true, memo: k11a.memoScope, convId: 'srch-ops' });
+  ok(k11b.memo && k11b.next, 'CONTROL: an engine handing the agent\'s page token to the owner answers with a token that belongs to another searcher', JSON.stringify({ memo: k11b.memo, next: k11b.next }));
+  k11.eng.stop && k11.eng.stop();
 }
 for (const r of copiesCensus(MUTE.files, MUTE.dir, REPO, { minCopies: 6 })) ok(r.pass, 'tree: ' + r.name, r.pass ? undefined : r.detail);
 

@@ -857,5 +857,13 @@ function AR_intro() {
   try { return require(path.join(REPO, 'src/agent-routes.js')).sessionToolsIntro({ status: true, ask: true, task: true, jobs: true }, {}); } catch (e) { return ''; }
 }
 
+// ── lane pair-group-fate + B-eba8: the CLI says an ended addressee, lists a closed group, takes --await (pinned) ──
+{
+  const cliSrc = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-msg'), 'utf-8');
+  ok(cliSrc.includes("a === '--await'") && cliSrc.includes('if (flags.await) body.await = true;') && cliSrc.includes("'  --await: will wake you once on the first reply (one billed turn, within 2 h)'"), 'CLI: send --await sends `await: true` and echoes the one billed turn it may cost');
+  ok(cliSrc.includes("${g.closed ? ' (closed)' : g.archived ? ' [archived]' : ''}") && cliSrc.includes("ended: 'nothing was sent — that conversation ended"), 'CLI: group list shows (closed); the `ended` refusal has its hint');
+  ok(["`not delivered — ${x.name}'s conversation ${x.why === 'gone' ? 'is gone' : 'was archived' + day(x.at)}`", "`${x.name} is stopped — delivered when it resumes`", "' (awaiting reply)'", "` (woke you ${hm(a.at)})`", "' (await expired)'"].every((n) => cliSrc.includes(n)), 'CLI: read\'s trailing clauses — not delivered (ended) / stopped / awaiting reply / woke you / await expired');
+}
+
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

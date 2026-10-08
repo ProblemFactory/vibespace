@@ -37,7 +37,9 @@
  *  - `openVerdict` / `tailVerdict` (lane channel-search-view, .212 — the owner 2026-10-04: "目前点开似乎是第一条匹配结果
  *    的对话框而不是搜索结果展示"): WHAT A CLICK OPENS — a row whose newest op is a search that carries its query ⇒
  *    the search RESULTS scoped to that conversation; the fold's tail over rows of one search ⇒ that search unscoped;
- *    a search touch carries its `query` + bounded hit refs ({msgId, at} — never the words: the dialog re-reads them).
+ *    a search touch carries its `query` + bounded hit refs ({msgId, at} — never the words: the dialog re-reads them);
+ *    lane search-card-open (.233): a vendor (`--full`) search's touch also carries its memo scope (`memo` — 'all' or
+ *    the agent's set hash, SR.isMemoScope's shape): the dialog reads THAT remembered answer first.
  *  - `rowWords`, `chipView` / `chipText`, `touchedBy` / `touchedByWords`,
  *    `agoText`, `glyphFor`: the words, through an INJECTED translator (the
  *    server sends structure; the device's language speaks it).
@@ -88,6 +90,8 @@ function touchKey(t) {
   return `${t.adapterId}/~compose/${t.proposalId || t.id || ''}`;
 }
 
+/** A vendor search's memo scope as a touch keeps it (src/channel-search.js `isMemoScope` — the same closed shape). */
+const memoOk = (m) => typeof m === 'string' && (m === 'all' || /^set:\d{1,7}:[0-9a-f]{1,8}$/.test(m));
 /** A search's hit refs, bounded: {msgId, at} only (the row re-reads the words at open), one per message, the newest
  *  SEARCH_HITS_MAX. */
 function hitRefs(list) {
@@ -124,7 +128,7 @@ function normalizeTouch(x) {
     // 2026-09-28: where a drafted reply lands (a value outside the closed set is dropped, never printed)
     ...(op === 'reply' && TOUCH_PLACEMENTS.includes(x.placement) ? { placement: x.placement } : {}),
     // lane channel-search-view (.212): a search remembers WHAT was searched — the query + bounded hit refs
-    ...(op === 'search' && x.query ? { query: str(x.query, QUERY_MAX), hits: hitRefs(x.hits) } : {}),
+    ...(op === 'search' && x.query ? { query: str(x.query, QUERY_MAX), hits: hitRefs(x.hits), ...(memoOk(x.memo) ? { memo: x.memo } : {}) } : {}),
     at,
   };
 }
@@ -140,7 +144,7 @@ function appendTouch(ring, t, { mergeMs = MERGE_MS, max = RING_MAX } = {}) {
     if (t.title) last.title = t.title;
     if (t.account) last.account = t.account;
     if (t.placement) last.placement = t.placement;
-    if (t.query) { last.hits = hitRefs([...(t.hits || []), ...(last.query === t.query ? last.hits || [] : [])]); last.query = t.query; }   // the same search again: refs united; another: the newest
+    if (t.query) { last.hits = hitRefs([...(t.hits || []), ...(last.query === t.query ? last.hits || [] : [])]); last.query = t.query; if (t.memo) last.memo = t.memo; else delete last.memo; }   // the same search again: refs united; another: the newest
     return { touch: last, merged: true };
   }
   ring.push(t);
@@ -244,7 +248,7 @@ function foldTouches(touches) {
       if (!r.title && t.title) r.title = t.title;
       if (!r.account && t.account) r.account = t.account;
     }
-    if (t.op === 'search' && t.query && at >= num(r.lastAt.search)) { r.query = t.query; r.hits = Array.isArray(t.hits) ? t.hits : []; }
+    if (t.op === 'search' && t.query && at >= num(r.lastAt.search)) { r.query = t.query; r.hits = Array.isArray(t.hits) ? t.hits : []; if (t.memo) r.memo = t.memo; else delete r.memo; }
     if (at < r.first) r.first = at;
     r.lastAt[t.op] = Math.max(num(r.lastAt[t.op]), at);
   }
@@ -267,7 +271,7 @@ function openVerdict(row) {
   if (!row.convId) return { open: 'outbox' };
   const la = row.lastAt || {};
   const newest = Math.max(0, ...Object.values(la).map(num));
-  if (row.query && num(la.search) >= newest) return { open: 'search', adapterId: row.adapterId, convId: row.convId, title: row.title || row.convId, query: row.query, hits: Array.isArray(row.hits) ? row.hits : [] };
+  if (row.query && num(la.search) >= newest) return { open: 'search', adapterId: row.adapterId, convId: row.convId, title: row.title || row.convId, query: row.query, hits: Array.isArray(row.hits) ? row.hits : [], memo: memoOk(row.memo) ? row.memo : null, searchedAt: num(la.search) };
   return { open: 'conversation', adapterId: row.adapterId, convId: row.convId };
 }
 /** WHAT THE FOLD'S TAIL ("+N more") OPENS: every hidden row a search of ONE query ⇒ that search UNSCOPED (every
@@ -277,8 +281,11 @@ function tailVerdict(rows, { max = FOLD_SHOWN } = {}) {
   const hidden = list.slice(max).map(openVerdict);
   if (!hidden.length || hidden.some((v) => !v || v.open !== 'search' || v.query !== hidden[0].query)) return { open: 'expand' };
   const q = hidden[0].query;
-  const adapterIds = [...new Set(list.map(openVerdict).filter((v) => v && v.open === 'search' && v.query === q).map((v) => v.adapterId))];
-  return { open: 'search-all', query: q, adapterIds };
+  const same = list.map(openVerdict).filter((v) => v && v.open === 'search' && v.query === q);
+  const adapterIds = [...new Set(same.map((v) => v.adapterId))];
+  // lane search-card-open: ONE vendor search's rows name one memo scope — the unscoped dialog reads it first
+  const memos = [...new Set(same.map((v) => v.memo).filter(Boolean))];
+  return { open: 'search-all', query: q, adapterIds, ...(memos.length === 1 && adapterIds.length === 1 ? { memo: memos[0], searchedAt: Math.max(0, ...same.map((v) => num(v.searchedAt))) } : {}) };
 }
 /** A row's words ("drafted a reply · read 12 messages"), in OPS order, through the injected `t`. */
 function rowWords(row, t) {
@@ -372,13 +379,13 @@ function agoText(ms, t) {
 /** A search's answer → the touches it records: one per conversation (hits counted), the SEARCH_MAX_CONVS with the
  *  most hits. `results` = the engine's `searchFor` rows ({adapterId, adapter, convId, title, vendorId, at}); `query` =
  *  what was searched (kept on each touch with ≤ SEARCH_HITS_MAX hit refs — the row opens the search results). */
-function searchTouches(results, { max = SEARCH_MAX_CONVS, query = '' } = {}) {
+function searchTouches(results, { max = SEARCH_MAX_CONVS, query = '', memo = null } = {}) {
   const q = String(query || '').trim();
   const by = new Map();
   for (const r of Array.isArray(results) ? results : []) {
     if (!r || !r.adapterId || !r.convId) continue;
     const k = `${r.adapterId}/${r.convId}`;
-    const x = by.get(k) || { op: 'search', adapterId: r.adapterId, convId: r.convId, title: r.title || '', account: r.adapter || '', count: 0, ...(q ? { query: q, hits: [] } : {}) };
+    const x = by.get(k) || { op: 'search', adapterId: r.adapterId, convId: r.convId, title: r.title || '', account: r.adapter || '', count: 0, ...(q ? { query: q, hits: [], ...(memoOk(memo) ? { memo } : {}) } : {}) };
     x.count += 1;
     if (x.hits && r.vendorId && x.hits.length < SEARCH_HITS_MAX) x.hits.push({ msgId: r.vendorId, at: num(r.at) });   // the rows come newest first
     by.set(k, x);

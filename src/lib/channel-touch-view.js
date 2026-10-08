@@ -55,7 +55,7 @@ export function openTouchRow(app, row) {
   if (!app || !row) return;
   if (row.ops && row.ops.api) { showApiAccessDialog(app, row.adapterId); return; }   // B-2198: a raw API call row opens its credential's API access (the waiting card, the log)
   const v = T.openVerdict(row);
-  if (v.open === 'search' && typeof app.openChannelSearch === 'function') app.openChannelSearch({ adapterIds: [v.adapterId], q: v.query, convId: v.convId, convTitle: v.title, hits: v.hits });
+  if (v.open === 'search' && typeof app.openChannelSearch === 'function') app.openChannelSearch({ adapterIds: [v.adapterId], q: v.query, convId: v.convId, convTitle: v.title, hits: v.hits, memo: v.memo, searchedAt: v.searchedAt });
   else if (v.open !== 'outbox') app.openChannel(v.adapterId, v.convId);
   else if (typeof app.openChannelOutbox === 'function') app.openChannelOutbox();   // a composed message has no conversation until it is sent
 }
@@ -196,7 +196,7 @@ export function createChannelTouchView(view) {
           ev.stopPropagation();
           // .212: the tail of ONE search's rows is that search, unscoped (every conversation, grouped) — not more rows
           const tv = box.dataset.expanded === '1' ? { open: 'expand' } : T.tailVerdict(more._rows || []);
-          if (tv.open === 'search-all' && typeof view.app?.openChannelSearch === 'function') { view.app.openChannelSearch({ adapterIds: tv.adapterIds, q: tv.query, group: true }); return; }
+          if (tv.open === 'search-all' && typeof view.app?.openChannelSearch === 'function') { view.app.openChannelSearch({ adapterIds: tv.adapterIds, q: tv.query, group: true, memo: tv.memo || null, searchedAt: tv.searchedAt || 0 }); return; }
           box.dataset.expanded = box.dataset.expanded === '1' ? '0' : '1'; rebind();
         });
       }

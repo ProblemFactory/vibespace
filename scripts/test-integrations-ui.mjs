@@ -602,7 +602,8 @@ const p2 = await newPage();
   // (i) the ⋯ order = D6
   const menu = await p1.evaljs(`(async () => { ${card(A.id)}.querySelector('.chan-sec-more').click(); await new Promise((r) => setTimeout(r, 200)); const m = document.querySelector('.context-menu'); const items = m ? [...m.children].map((e) => e.classList.contains('context-menu-separator') ? '‖' : e.textContent.trim()) : []; if (m) m.remove(); return items; })()`);
   // R4 (2026-09-27): the one hand-off verb became TWO operations, access first
-  const D6 = ['Open conversation window', 'Search messages…', 'Grant access…', 'Notify…', 'API access…', 'Conversations matching a rule…', 'Options', 'Push…', '‖', 'Re-authorize', 'Duplicate…', 'Disconnect', 'Remove…', '‖', 'Disable'];
+  // lane account-policy-door (2.369.233): the account's policy door, Reach & policy…, right after Search messages… (oauth-field-parity D6_ORDER)
+  const D6 = ['Open conversation window', 'Search messages…', 'Reach & policy…', 'Grant access…', 'Notify…', 'API access…', 'Conversations matching a rule…', 'Options', 'Push…', '‖', 'Re-authorize', 'Duplicate…', 'Disconnect', 'Remove…', '‖', 'Disable'];
   ok(JSON.stringify(menu) === JSON.stringify(D6), `the ⋯ is the storage row's order, EXACTLY D6 (${menu.join(' · ')})`);
 
   // (j) Edit: prefilled, the four buttons in order, switching the client ⇒ Save opens Re-authorize

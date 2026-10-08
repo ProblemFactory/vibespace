@@ -381,7 +381,7 @@ const GRAIN_400 = ['bad-assignment', 'bad-pattern', 'bad-filter', 'no-such-filte
 function scopeAnswer(res, r) {
   if (r && r.ok) return res.json(r);
   const code = (r && r.code) || 'error';
-  const status = code === 'not-found' ? 404 : code === 'authority-capped' || code === 'grain-changed' ? 409 : GRAIN_400.includes(code) ? 400 : 500;
+  const status = code === 'not-found' ? 404 : code === 'authority-capped' || code === 'grain-changed' || code === 'policy-changed' ? 409 : GRAIN_400.includes(code) ? 400 : 500;
   return res.status(status).json({ error: (r && r.error) || 'refused', code, ...(r && r.why ? { why: r.why } : {}), ...(r && r.rule ? { rule: r.rule } : {}), ...(r && r.principal ? { principal: r.principal } : {}), ...(r && r.index !== undefined ? { index: r.index } : {}) });
 }
 // ── R4 (2026-09-27): TWO OPERATIONS PER GRAIN, ACCESS FIRST ─────────────
@@ -501,8 +501,9 @@ router.put('/api/channels/adapters/:id', async (req, res) => {
     // (= follow the instance setting `channels.senderHonestyLine`).
     if (b.senderHonestyLine !== undefined) out = { ...out, ...(await engine().setSenderHonesty(req.params.id, b.senderHonestyLine)) };
     // R4 (B-6acc): the ACCOUNT's sending policy — 'direct' | 'review' | null
-    // (= the adapter's default); what a composed NEW message reads
-    if (b.policy !== undefined) { const pr = await engine().setAccountPolicy(req.params.id, b.policy); if (!pr.ok) return scopeAnswer(res, pr); out = { ...out, ...pr }; }
+    // (= the adapter's default); what a composed NEW message reads. Lane account-policy-door: `base` = the value the
+    // door read — moved since ⇒ 409 `policy-changed` (the dialog re-reads)
+    if (b.policy !== undefined) { const pr = await engine().setAccountPolicy(req.params.id, b.policy, 'user', b.base !== undefined ? { base: b.base } : {}); if (!pr.ok) return scopeAnswer(res, pr); out = { ...out, ...pr }; }
     // r4 (the Edit dialog's in-place saves): the account's name, and a custom
     // client's SECRET for the SAME id (another id / a preset = a client
     // switch = `409 client-change-needs-reauth`: use Re-authorize)
@@ -586,7 +587,7 @@ router.get('/api/channels/search', async (req, res) => {
 router.get('/api/channels/search/full', async (req, res) => {
   try {
     forHost(req);
-    readerAnswer(res, await engine().searchVendor(String(req.query.adapter || ''), String(req.query.q || ''), { pageToken: req.query.page ? String(req.query.page) : null, again: req.query.again === '1', peek: req.query.peek === '1' }));
+    readerAnswer(res, await engine().searchVendor(String(req.query.adapter || ''), String(req.query.q || ''), { pageToken: req.query.page ? String(req.query.page) : null, again: req.query.again === '1', peek: req.query.peek === '1', memo: req.query.memo ? String(req.query.memo) : null, convId: req.query.conv ? String(req.query.conv) : null }));   // lane search-card-open: the agent row's memo scope + its conversation
   } catch (e) { fail(res, e); }
 });
 

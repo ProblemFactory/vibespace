@@ -30,6 +30,7 @@ const { searchTouches } = require('./channel-touch.js'); // §26 (B-099e): a sea
 // the backlog's ONE read order (priority, then newest) + its closed priority set
 const { PRIORITIES: BACKLOG_PRIORITIES, sortBacklog, nudgeThreshold, backlogNudge, nudgeText } = require('./backlog-select.js');
 const { BACKLOG_CAPS } = require('./task-groups.js');
+const { stopNudgeVerdict, turnStartOf } = require('./stop-nudge.js'); // B-a8f0: a turn that bookkept itself stops free (PURE)
 const { artifactsIntroLine } = require('./harnesses/artifacts-of.js'); // PURE: the one Artifacts sentence (lane artifacts-prompt-hint)
 const { liveForkPending, addressableId } = require('./claude-lock-capture.js'); // verify r3 (lane channel-withdraw): a pending fork carries its PARENT's conversation id — never an owner of a channel draft
 const stashSummary = require('./stash-summary.js'); // the stash's kinds, spelled once (a reaction digest is not a channel message)
@@ -58,14 +59,14 @@ const msgPeerRow = (ep, st, lv) => ({
   groups: ep.groups, state: st.state || null, stateReason: st.reason ? agentText(st.reason, { kind: 'line', max: 300 }) : null,
   machine: ep.t.host || null, mode: ep.t.mode || null,
 });
-const msgGroupsAnswer = (groups) => groups.map((g) => ({ id: g.id, name: agentText(g.name, { kind: 'line', max: 200 }), pair: !!g.pair, archived: !!g.archivedAt, unread: g.unread, notify: g.notify, members: g.members.map((m) => ({ name: agentText(m.name || m.member, { kind: 'line', max: 200 }), conversationId: m.member, notify: m.notify, live: m.live })) }));
+const msgGroupsAnswer = (groups) => groups.map((g) => ({ id: g.id, name: agentText(g.name, { kind: 'line', max: 200 }), pair: !!g.pair, archived: !!g.archivedAt, ...(g.closed ? { closed: { why: g.closed.why, at: g.closed.at } } : {}), unread: g.unread, notify: g.notify, members: g.members.map((m) => ({ name: agentText(m.name || m.member, { kind: 'line', max: 200 }), conversationId: m.member, notify: m.notify, live: m.live })) }));
 // lane group-pending (2026-10-01): WHERE EACH MESSAGE STANDS with its recipients rides the read answer — `delivery`
 // = the model's ONE rule (PURE channel-groups deliveryOf over the group's markers + the page's departures), the
 // same rows the owner's window words under the message; the CLI prints them as one trailing clause. Names through
 // the belt like every other piece of the answer; a system record carries none (the window draws none either).
-const { deliveryOf: groupDeliveryOf } = require('./channel-groups.js');
-const msgDeliveryRows = (g, x, log) => (((x.raw && x.raw.kind) || 'message') !== 'message' ? null : groupDeliveryOf(g, x, { log }).map((d) => ({ member: d.member, name: agentText(d.name, { kind: 'line', max: 200 }), state: d.state, at: d.at })));
-const msgReadAnswer = (r) => ({ ok: true, group: { id: r.group.id, name: agentText(r.group.name, { kind: 'line', max: 200 }) }, records: r.records.map((x) => ({ at: x.at, from: agentText((x.author && (x.author.name || x.author.id)) || 'unknown', { kind: 'line', max: 200 }), kind: (x.raw && x.raw.kind) || 'message', text: agentText(x.text, { kind: 'block' }), delivery: msgDeliveryRows(r.group, x, r.records) })) });
+const { deliveryOf: groupDeliveryOf, awaitState: groupAwaitState } = require('./channel-groups.js');
+const msgDeliveryRows = (g, x, log) => (((x.raw && x.raw.kind) || 'message') !== 'message' ? null : groupDeliveryOf(g, x, { log }).map((d) => ({ member: d.member, name: agentText(d.name, { kind: 'line', max: 200 }), state: d.state, at: d.at, ...(d.why ? { why: d.why } : {}), ...(d.stopped ? { stopped: true } : {}) })));
+const msgReadAnswer = (r) => ({ ok: true, group: { id: r.group.id, name: agentText(r.group.name, { kind: 'line', max: 200 }) }, records: r.records.map((x) => ({ at: x.at, from: agentText((x.author && (x.author.name || x.author.id)) || 'unknown', { kind: 'line', max: 200 }), kind: (x.raw && x.raw.kind) || 'message', text: agentText(x.text, { kind: 'block' }), delivery: msgDeliveryRows(r.group, x, r.records), ...(x.raw && x.raw.await ? { await: groupAwaitState(x, (r.group.awaits || {})[x.vendorId], Date.now()) } : {}) })), ...(r.group.closed ? { closed: { why: r.group.closed.why, at: r.group.closed.at } } : {}) });
 // verify r2 (lane peer-census): the SEND and GROUP-OP echoes are doors too — `vibespace-msg` prints `woke N: <name>,
 // <name>`, `added to "<group>": <name>, <name>`, `members: <name>, <name> + the user` as ONE line of names, so a member
 // name the store still held with a dangling opener (a name cut after the rule — cleanName's cut, now re-judged — or a
@@ -337,7 +338,7 @@ function setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionSt
     return (k) => live.has(k);
   };
 // ── vibespace-ask / vibespace-status — src/agent-routes/status.js (the status / todos family, decoupling wave 2b)
-require('./agent-routes/status.js').register(app, { activeSessions, sessionStatus, userTodos, sessionStatusKey, clearAsAgent, agentSession, toolOn, toolDisabled });
+require('./agent-routes/status.js').register(app, { activeSessions, sessionStatus, userTodos, sessionStatusKey, clearAsAgent, agentSession, toolOn, toolDisabled, bookkept });
 // "CLEAR CONTENT…" AS AN AGENT (2026-09-28): the caller an agent's own verbs
 // hand the ONE clear entry point (src/server/record-clear.js) — its keys (the
 // status key and the pre-conversation webui key: an entry written before the
@@ -354,6 +355,11 @@ function agentClearCaller([s, id]) {
   const key = sessionStatusKey(s, id);
   return { role: 'agent', by: key, keys: [key, `webui:${id}`], conversationId: addressableId(s), pendingFork: liveForkPending(s) };
 }
+// THE BOOKKEEPING WITNESS (B-a8f0): every agent bookkeeping WRITE — vibespace-status, vibespace-task
+// progress / progress-redact / backlog, vibespace-ask — stamps the live session AFTER the write took;
+// the stop verdict (src/stop-nudge.js) lets a turn that holds a stamp at or after its start stop free.
+// Reads (show / list) never stamp: a free stop needs a real write. test-stop-nudge's census holds every route to it.
+function bookkept(s) { if (s) s._bookkeptAt = Date.now(); }
 async function clearAsAgent(hit, item, res) {
   const rc = getRecordClear && getRecordClear();
   if (!rc) return res.status(503).json({ error: 'clearing records is not available on this instance', code: 'unavailable' });
@@ -361,6 +367,7 @@ async function clearAsAgent(hit, item, res) {
   try { r = await rc.clear(item, { caller: agentClearCaller(hit) }); }
   catch (e) { return res.status(500).json({ error: e.message, code: 'failed' }); }
   if (!r.ok) return res.status(r.status || 400).json({ error: r.why || 'refused', code: r.code });
+  bookkept(hit[0]);
   return res.json({ success: true, cleared: r.cleared, already: r.already });
 }
 // Resolve the calling agent's session from its per-session bearer token.
@@ -1000,7 +1007,8 @@ const _nudgeExitSaid = new Set();
 // Stop-time bookkeeping nudge (2.79.0): fired by the Stop hook (claude) and
 // the codex wrapper's turn/completed. Returns block+reason ONLY when the
 // session's board state is stale (no status update in 10 min) AND we haven't
-// nudged in 30 min — one bounded bookkeeping mini-turn, not a per-stop tax.
+// nudged in 30 min — one bounded bookkeeping mini-turn, not a per-stop tax —
+// and never after a turn that bookkept itself (B-a8f0: src/stop-nudge.js).
 app.get('/api/agent/stop-check', (req, res) => {
   const hit = agentSession(req, res);
   if (!hit) return;
@@ -1033,10 +1041,7 @@ app.get('/api/agent/stop-check', (req, res) => {
     // (a harness building these routes alone) degrades to the old behaviour.
     const nudgeRec = (() => { try { return spendGuard?.nudgeRec?.(key) || null; } catch { return null; } })();
     const lastNudgeAt = Math.max(Number(s._lastStopNudge) || 0, Number(nudgeRec?.at) || 0);
-    if (cooldownMin > 0 && lastNudgeAt && now - lastNudgeAt < cooldownMin * 60 * 1000) return res.json({ block: false });
     const rec = sessionStatus.get(key) || sessionStatus.get(`webui:${id}`);
-    const sawStatus = !!(rec && rec.at);
-    if (staleMin > 0 && sawStatus && now - rec.at < staleMin * 60 * 1000) return res.json({ block: false });
     // EXIT CONDITION (D8): a session that has NEVER reported a status is being
     // asked to do bookkeeping it does not do — a Task-Group-less session, an
     // agent that ignores the tool, a wrapper whose CLI has no such command.
@@ -1044,14 +1049,19 @@ app.get('/api/agent/stop-check', (req, res) => {
     // after N unanswered nudges we stop asking. Any status report at all
     // resets the counter (that is what "answered" means).
     const maxUnanswered = clamp0(Number(serverSetting('agents.stopNudgeMaxUnanswered')), 1, 100, 3);
-    if (!sawStatus && maxUnanswered > 0 && (nudgeRec?.n || 0) >= maxUnanswered) {
-      if (!_nudgeExitSaid.has(key)) {
-        _nudgeExitSaid.add(key);
-        if (_nudgeExitSaid.size > 500) _nudgeExitSaid.clear();
-        console.log(`[stop-nudge] ${key}: ${nudgeRec.n} nudges with no status report — this session is not asked again (agents.stopNudgeMaxUnanswered)`);
-      }
-      return res.json({ block: false });
+    // THE VERDICT (B-a8f0, src/stop-nudge.js — PURE): a turn that bookkept
+    // itself (`s._bookkeptAt`, stamped by every bookkeeping write below) at or
+    // after its start stops free, however long it ran — FIRST, before the time
+    // rule (cooldown → fresh status → exit condition → stale), which is
+    // unchanged. A free stop never reaches the spend authorizer.
+    const v = stopNudgeVerdict({ now, turnStartedAt: turnStartOf(s), bookkeptAt: s._bookkeptAt, statusAt: rec && rec.at, lastNudgeAt, nudgesUnanswered: nudgeRec?.n || 0, staleMin, cooldownMin, maxUnanswered });
+    if (v.why === 'never-answered' && !_nudgeExitSaid.has(key)) {
+      _nudgeExitSaid.add(key);
+      if (_nudgeExitSaid.size > 500) _nudgeExitSaid.clear();
+      console.log(`[stop-nudge] ${key}: ${nudgeRec.n} nudges with no status report — this session is not asked again (agents.stopNudgeMaxUnanswered)`);
     }
+    if (!v.block) return res.json({ block: false, why: v.why });
+    const sawStatus = !!(rec && rec.at);
     // THE SPEND CEILING (design §4.4c / P9): this returns block+reason, and the
     // CLI answers it with a REAL turn on the session's credential slot —
     // measured on this instance's own transcripts, 603 of them in two months
@@ -1157,6 +1167,7 @@ app.post('/api/agent/task-progress', (req, res) => {
   if (!gid) return;
   try {
     const t = tasks.addProgress(gid, { note: req.body?.note, detail: req.body?.detail, session: sessionStatusKey(hit[0], hit[1]) });
+    bookkept(hit[0]);
     // `entry` = the one just written (addProgress is synchronous — the last entry IS it): its P- id
     // is what `vibespace-task progress-redact` names
     res.json({ success: true, progress: t.progress.slice(-3).map(taskEntryAnswer), entry: taskEntryAnswer(t.progress[t.progress.length - 1] || null) });   // verify r4 F1: the last three entries are other sessions' too
@@ -1314,6 +1325,7 @@ app.post('/api/agent/task-backlog', (req, res) => {
       acted = updated.backlog.find((b) => b.addedAt === added.addedAt && b.addedBy === key && b.text === added.text) || null;
       if (!acted) return res.status(500).json({ error: 'the item was not stored — nothing parked (the store kept its previous contents)' });
     }
+    bookkept(hit[0]);
     // THE CLEANUP NUDGE (2026-09-22): a verb that can GROW what the caller
     // holds (add / edit / claim — never done / drop / unclaim, which shrink
     // it; never show, which writes nothing) answers, AFTER the write, with the
@@ -1550,7 +1562,7 @@ const groupsEngine = () => { try { const g = getGroups(); return g && typeof g.p
 const groupAnswer = (res, r) => {
   if (r && r.ok) return res.json(r);
   const code = (r && r.code) || 'error';
-  const status = code === 'not-found' || code === 'unreachable' ? 404 : code === 'not-allowed' || code === 'not-member' || code === 'job-token' ? 403 : code === 'archived' || code === 'pair-group' || code === 'confirm-wakes' || code === 'not-chat' ? 409 : 400;
+  const status = code === 'not-found' || code === 'unreachable' ? 404 : code === 'not-allowed' || code === 'not-member' || code === 'job-token' ? 403 : code === 'archived' || code === 'ended' || code === 'pair-group' || code === 'confirm-wakes' || code === 'not-chat' ? 409 : 400;
   return res.status(status).json(msgRefusalAnswer(r, code));   // verify r2 (lane peer-census): the sentence and the candidates through the belt (the door)
 };
 /** WHO is calling vibespace-msg: a session (vsst_) acts as its own
@@ -1664,7 +1676,8 @@ app.post('/api/agent/msg/send', async (req, res) => {
     let r;
     const consent = agentConsent(req.body?.yes);
     const at = Array.isArray(req.body?.at) ? req.body.at.filter((x) => typeof x === 'string').slice(0, 16) : [];   // B-ff04: --at <name|id>, repeatable
-    try { r = tgt.kind === 'group' ? await ge.post({ group: tgt.group.id, from: myCid, text, wake: req.body?.wake === true, mayWake, consent, at }) : await ge.sendToAgent({ from: myCid, to: tgt.cid, text, wake: req.body?.wake === true, create: !who.job, mayWake, consent, at }); }
+    const o = { from: myCid, text, wake: req.body?.wake === true, mayWake, consent, at, awaitReply: req.body?.await === true };   // B-eba8: --await
+    try { r = tgt.kind === 'group' ? await ge.post({ group: tgt.group.id, ...o }) : await ge.sendToAgent({ ...o, to: tgt.cid, create: !who.job }); }
     catch (e) { return res.status(500).json({ error: 'group send failed: ' + e.message }); }
     if (!r || !r.ok) return groupAnswer(res, r);
     _msgRate.set(floorKey, { ts: Date.now(), h: _msgDigest(text) });
@@ -2090,7 +2103,11 @@ app.get('/api/agent/channels/search', async (req, res) => {
   try {
     // design 010: `full=1` = ONE page of the account's OWN search (the agents' share, a 20 s floor, reach after the answer)
     const r = await eng.searchFor(channelPrincipal(s, id), String(req.query.q || ''), { adapterId: req.query.account ? String(req.query.account) : null, limit: Number(req.query.limit) || 50, full: req.query.full === '1' || req.query.full === 'true' });
-    if (r && r.ok) touchChannel(id, searchTouches(r.results, { query: String(req.query.q || '') }));   // one touch per conversation hit (the most hits first, bounded) — .212: + what was searched and ≤ 50 hit refs each
+    // lane search-card-open (.233): a --full search's memo scope rides its touches (the row's dialog reads that memo
+    // first) — the card's key, never the agent's answer
+    const memo = r && r.memoScope;
+    if (r) delete r.memoScope;
+    if (r && r.ok) touchChannel(id, searchTouches(r.results, { query: String(req.query.q || ''), memo }));   // one touch per conversation hit (the most hits first, bounded) — .212: + what was searched and ≤ 50 hit refs each
     chanAnswer(res, r);
   }
   catch (e) { res.status(500).json({ error: e.message }); }

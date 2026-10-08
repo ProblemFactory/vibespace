@@ -57,6 +57,16 @@
  *                stash-handover.js), memoised against the facts it reads; every
  *                change that can move it calls `onPending()` (the strip's
  *                re-publish).
+ *   FATE         (lane pair-group-fate, B-7d1e) a conversation that ENDED — the
+ *                sidebar archive, or gone (no transcript) — is the store's `ended`
+ *                ledger {cid: {why, at}} (groups.json, the same door); the view's
+ *                member rows carry it, so `deliveryOf` reads undeliverable.
+ *                `onConversationEnded` CLOSES a pair (a `closed` record the sender's
+ *                next report carries ONCE), a multi-member group only gets an
+ *                `ended` line; `sweepEnded` re-judges every member at boot / on
+ *                every archive through the wiring's `liveness` reader. An await
+ *                (B-eba8, `send --await`) is `g.awaits[vendorId]`, its wake the SAME
+ *                `wake()` (spendReason peer-message — no new producer).
  */
 const crypto = require('crypto');
 const G = require('../channel-groups.js');
@@ -117,6 +127,9 @@ function create({
   // messages happened (a post, a membership / notify change, a marker) — the
   // stash strip's re-publish (server.js → stash-handover `changed()`, debounced)
   onPending = () => {},
+  // lane pair-group-fate: `(cid) → {state: running|stopped|archived|gone}` — the wiring's ONE liveness reader (the live
+  // roster, the sidebar's archived list, the transcript on disk); asked by `sweepEnded` only, never per view
+  liveness = () => null,
 } = {}) {
   if (!store || !store.groups) throw new Error('groups-engine: a channel store with the groups family is required');
   const A = G.GROUP_ADAPTER_ID;
@@ -126,6 +139,9 @@ function create({
   const sessionOf = (cid) => live().find((s) => s.cid === cid) || null;
   const all = () => store.groups.live().groups;
   const getGroup = (id) => (G.isGroupId(id) ? all()[id] || null : null);
+  const endedOf = (cid) => { const e = (store.groups.live().ended || {})[cid]; return e && G.ENDED_WHYS.includes(e.why) ? { why: e.why, at: Number(e.at) || null } : null; };
+  // the liveness the PURE rules read in the engine (the await table): live roster ⇒ running, the ledger ⇒ ended, else stopped
+  const livenessNow = (cid) => { if (sessionOf(cid)) return { state: 'running' }; const e = endedOf(cid); return e ? { state: e.why, at: e.at } : { state: 'stopped' }; };
   const wakesInFlight = new Map();   // `${gid}|${member}` → wakes on their way (that group sits out the member's reports)
 
   /** msg-acl's level of `to` as seen from `by` (the owner reaches everyone live). */
@@ -222,13 +238,14 @@ function create({
     if (G.isGroupId(r)) return g.ok ? { ok: true, kind: 'group', group: g.group } : g;
     if (!g.ok && g.code === 'ambiguous') return g;   // two of MY groups share the name — never fall through to a session lookup
     const m = resolveMember(r, by);
+    if (m.ok && endedOf(m.cid)) { const no = endedRefusal(m.cid, by); if (no) return no; }   // lane pair-group-fate: an archived conversation, still live, is not a target either
     if (m.ok && m.cid === r) return { ok: true, kind: 'agent', cid: m.cid, name: m.name };
     if (g.ok && (m.ok || m.code === 'ambiguous')) {
       const candidates = [{ name: g.group.name, groupId: g.group.id }, ...(m.ok ? [{ name: m.name || null, conversationId: m.cid }] : m.candidates)];
       return { ok: false, code: 'ambiguous', candidates, error: `ambiguous name "${r}" — it is one of your groups (${g.group.id}) AND a session you can message (${candidates.filter((c) => c.conversationId).map((c) => c.conversationId).join(', ')}); name one by its id` };
     }
     if (g.ok) return { ok: true, kind: 'group', group: g.group };
-    return m.ok ? { ok: true, kind: 'agent', cid: m.cid, name: m.name } : m;
+    return m.ok ? { ok: true, kind: 'agent', cid: m.cid, name: m.name } : (endedRefusal(r, by) || m);
   }
 
   /** A member of THIS group by conversation id or display name. A name two
@@ -257,7 +274,10 @@ function create({
       // lane group-pending (2026-10-01): the member's report MARKER rides the view — the window's line under every
       // message ("waiting for beta's next turn" / "read by beta") and the CLI's trailing clause are judged off it
       // (PURE G.deliveryOf); it was a private fact before, so a message handed over looked exactly like one waiting
-      members: g.members.map((m) => ({ member: m.member, name: displayName(g, m.member), notify: m.notify, joinedAt: m.joinedAt, invitedBy: m.invitedBy, live: !!sessionOf(m.member), reportedUpTo: Number.isFinite(m.reportedUpTo) ? m.reportedUpTo : null, reportedAt: Number.isFinite(m.reportedAt) ? m.reportedAt : null })),
+      members: g.members.map((m) => ({ member: m.member, name: displayName(g, m.member), notify: m.notify, joinedAt: m.joinedAt, invitedBy: m.invitedBy, live: !!sessionOf(m.member), ended: endedOf(m.member), reportedUpTo: Number.isFinite(m.reportedUpTo) ? m.reportedUpTo : null, reportedAt: Number.isFinite(m.reportedAt) ? m.reportedAt : null })),
+      // lane pair-group-fate: a pair closed because its other member ended; B-eba8: the awaits' states (read's clause, the window's line)
+      closed: g.closed ? { member: g.closed.member, why: g.closed.why, at: g.closed.at } : null,
+      awaits: g.awaits && typeof g.awaits === 'object' ? JSON.parse(JSON.stringify(g.awaits)) : {},
     };
   }
   /** THE OWNER'S READ MARK (the panel's unread count, g3): the groups file's
@@ -350,9 +370,10 @@ function create({
 
   /** Append ONE record to the group's log, inside the groups door (the caller
    *  holds it): unique `at` per group, log FIRST, summary SECOND. */
-  function appendIn(g, { author, text, mentions = [], raw }) {
+  function appendIn(g, { author, text, mentions = [], raw: raw0 }) {
     const prevLastAt = Number(g.lastAt) || 0;
     const at = Math.max(now(), prevLastAt + 1);
+    const raw = typeof raw0 === 'function' ? raw0(at) : raw0;   // B-eba8: an await's `until` is reckoned from the record's own instant
     const rec = makeRecord({
       adapterId: A, convId: g.id, vendorId: `${raw.kind === 'message' ? 'gm' : 'gs'}-${at.toString(36)}-${(++seq).toString(36)}`, at,
       author: { id: author, name: displayName(g, author), isSelf: author === G.OWNER, isBot: false },
@@ -413,18 +434,18 @@ function create({
   /** ONE wake = the member's pending report delivered NOW, down THE ladder.
    *  The authorizer inside decides; a refusal is journaled and the message
    *  stays for the next report (never stashed — it would arrive twice). */
-  async function wake(gid, member, rec, why) {
+  async function wake(gid, member, rec, why, awaitAt = null) {
     const g = getGroup(gid);
     if (!g) return { ok: false, reason: 'group gone' };
     const flight = gid + '|' + member;
     wakesInFlight.set(flight, (wakesInFlight.get(flight) || 0) + 1);
-    try { return await wakeOnce(g, gid, member, rec, why); } finally {
+    try { return await wakeOnce(g, gid, member, rec, why, awaitAt); } finally {
       const n = (wakesInFlight.get(flight) || 1) - 1;
       if (n > 0) wakesInFlight.set(flight, n); else wakesInFlight.delete(flight);
     }
   }
-  async function wakeOnce(g, gid, member, rec, why) {
-    const lead = `${WAKE_LEAD[why] || 'You were woken'} — group messages (vibespace-msg):`;
+  async function wakeOnce(g, gid, member, rec, why, awaitAt = null) {
+    const lead = `${why === 'await' || why === 'both' ? G.awaitLead(awaitAt, why) : WAKE_LEAD[why] || 'You were woken'} — group messages (vibespace-msg):`;
     const rep = G.reportFor(g, readLog(gid), member, { budget: WAKE_BUDGET, lead });
     if (!rep || rep.fits === false) return { ok: false, reason: rep ? 'the report does not fit a wake' : 'nothing to deliver' };
     let r;
@@ -692,7 +713,7 @@ function create({
    *  words do not already @ is written in front; `mentions` = the places the
    *  owner's @-picker chose by id; `wake:true` (`--wake`) @mentions every OTHER
    *  member — an explicit act, each one a billed turn through the ladder. */
-  async function post({ group: ref, from, text, wake: wakeEveryone = false, mayWake = null, consent = null, at: atRefs = [], mentions: picked = [] } = {}) {
+  async function post({ group: ref, from, text, wake: wakeEveryone = false, mayWake = null, consent = null, at: atRefs = [], mentions: picked = [], awaitReply: awaits = false } = {}) {
     const body = String(text == null ? '' : text);
     if (!body.trim()) return { ok: false, code: 'bad-request', error: 'an empty message' };
     if (Buffer.byteLength(body, 'utf-8') > TEXT_MAX) return { ok: false, code: 'bad-request', error: 'message too large (16KB cap) — write a file and send its path instead' };
@@ -731,7 +752,10 @@ function create({
       if (refusal) return { ...refusal, group: view(g) };
       const cur = G.memberOf(g, from);
       if (cur) cur.name = displayName(g, from);   // refresh the snapshot the report prints when the session is gone
-      rec = appendIn(g, { author: from, text: words, mentions, raw: { kind: 'message' } });
+      // B-eba8: an AGENT asks to be woken by the first reply (the owner is woken by nothing — never an await)
+      const asks = !!awaits && from !== G.OWNER;
+      rec = appendIn(g, { author: from, text: words, mentions, raw: asks ? (at) => ({ kind: 'message', await: { by: from, at, until: at + G.AWAIT_MS } }) : { kind: 'message' } });
+      if (asks) { g.awaits = pruneAwaits(g.awaits, rec.at); g.awaits[rec.vendorId] = { ...rec.raw.await }; }
       if (from === G.OWNER) ownerSaw(gr, g);
       return { ok: true, group: g };
     });
@@ -739,7 +763,121 @@ function create({
     announce([res.group.id], [rec]);
     const others = res.group.members.map((m) => m.member).filter((m) => m !== from);
     const w = await wakeAll(res.group.id, rec, others, mayWake);
-    return { ok: true, group: view(getGroup(res.group.id)), message: rec, woke: w.woke, refused: w.refused, later: w.later };
+    const aw = await awaitWakes(res.group.id, rec, w, mayWake, !!wakeEveryone);
+    return { ok: true, group: view(getGroup(res.group.id)), message: rec, woke: w.woke, refused: w.refused, later: w.later, awaited: aw };
+  }
+  /** an await entry is kept a day past its `until` (read's clause), then dropped on the next write */
+  function pruneAwaits(awaits, at) {
+    const out = {};
+    for (const [k, e] of Object.entries(awaits && typeof awaits === 'object' ? awaits : {})) if (e && Number(e.until) + 86400e3 > at) out[k] = e;
+    return out;
+  }
+  /** B-eba8: THE REPLY to an awaited record — `G.awaitVerdict` per asker (its newest open await in this group), the
+   *  wake through the SAME `wake()` (the ladder, spendReason peer-message), the entry stamped in the groups door:
+   *  `answeredAt` by the first reply whatever the verdict, `wokeAt` when a wake carried it (one already made by
+   *  wakeAll — a mention / always / --wake — CONSUMES it: never a second billed turn), `heldAt` when the ladder or the
+   *  pace refused (the reply waits for next-turn, said on the record's line). */
+  async function awaitWakes(gid, rec, w, mayWake, replyWake) {
+    const g0 = getGroup(gid);
+    const from = rec.author && rec.author.id;
+    if (!g0 || !g0.awaits || !from) return [];
+    const open = new Map();
+    for (const [vid, e] of Object.entries(g0.awaits)) {
+      if (!e || e.by === from || !(Number(e.at) < rec.at) || Number.isFinite(e.answeredAt)) continue;
+      const prev = open.get(e.by);
+      if (!prev || Number(prev[1].at) < Number(e.at)) open.set(e.by, [vid, e]);
+    }
+    const out = [];
+    for (const [asker, [vid, e]] of open) {
+      // a wake wakeAll ALREADY made (the replier's --wake, an @mention, always) carried this reply: it CONSUMES the await —
+      // judged before its marker moved, never a second billed turn
+      const made = w.woke.some((x) => x.member === asker);
+      const v = made ? { wake: true, why: replyWake ? 'both' : 'mention' } : G.awaitVerdict(g0, { raw: { kind: 'message', await: e } }, { author: { id: from }, at: rec.at, wake: replyWake }, { entry: e, liveness: livenessNow });
+      const patch = { answeredAt: rec.at, verdict: v.why };
+      if (v.wake && (v.why === 'await' || v.why === 'both' || v.why === 'mention')) {
+        if (made) Object.assign(patch, { wokeAt: now(), why: v.why });
+        else {
+          const pace = typeof mayWake === 'function' ? mayWake(asker) : true;
+          const r = pace === true ? await wake(gid, asker, rec, v.why, e.at) : { ok: false, reason: (pace && pace.reason) || 'rate floor', refused: 'rate-floor' };
+          if (r.ok) Object.assign(patch, { wokeAt: now(), why: v.why });
+          else {
+            if (pace === true && typeof mayWake === 'function' && typeof mayWake.refund === 'function') { try { mayWake.refund(asker); } catch { } }
+            Object.assign(patch, { heldAt: now(), held: r.refused || r.reason || 'refused' });
+          }
+        }
+      }
+      await store.groups.update((gr) => { const g = gr.groups[gid]; if (g && g.awaits && g.awaits[vid]) g.awaits[vid] = { ...g.awaits[vid], ...patch }; });
+      out.push({ member: asker, vendorId: vid, why: v.why, woke: Number.isFinite(patch.wokeAt), held: patch.held || null });
+    }
+    if (out.length) announce([gid], null, null, { pending: false });
+    return out;
+  }
+
+  /**
+   * A CONVERSATION THAT ENDED (lane pair-group-fate): the sidebar archive or gone. Inside ONE groups door: the ledger
+   * row, then every live group it is in — a PAIR is closed (the `closed` record, authored by the ended member so the
+   * other one's next report carries it ONCE, with the count of its messages that were not delivered), a multi-member
+   * group gets one `ended` record (its rows read undeliverable). Idempotent: a cid already in the ledger with the
+   * same `why` re-logs nothing. ONE broadcast.
+   */
+  async function onConversationEnded(cid, { why = 'archived', at = null } = {}) {
+    if (!G.isCid(cid) || !G.ENDED_WHYS.includes(why)) return { ok: false, closed: [], marked: [] };
+    const closed = [], marked = [], recs = [];
+    await store.groups.update((gr) => {
+      gr.ended = gr.ended && typeof gr.ended === 'object' ? gr.ended : {};
+      const prev = gr.ended[cid];
+      const when = Number(at) || now();
+      if (!(prev && prev.why === why)) gr.ended[cid] = { why, at: when };
+      const atE = Number(gr.ended[cid].at) || when;
+      for (const g of Object.values(gr.groups)) {
+        const m = G.memberOf(g, cid);
+        if (!m || g.archivedAt) continue;
+        if (!g.pair && prev && prev.why === why) continue;   // already said in this group
+        const since = Number.isFinite(m.reportedUpTo) ? m.reportedUpTo : m.joinedAt - 1;
+        const lost = readLog(g.id).filter((r) => r && Number(r.at) > since && ((r.raw && r.raw.kind) || 'message') === 'message' && !(r.author && r.author.id === cid) && G.reachesReport(g, cid, r)).length;
+        const name = displayName(g, cid);
+        if (g.pair) {
+          recs.push(appendIn(g, { author: cid, text: G.endedText({ name, why, n: lost, closed: true }), raw: { kind: 'closed', member: cid, why, lost } }));
+          const t = G.closePair(g, { member: cid, why, at: atE });
+          if (t.group && t.event) { gr.groups[g.id] = t.group; closed.push(g.id); }
+        } else {
+          recs.push(appendIn(g, { author: cid, text: G.endedText({ name, why, n: lost }), raw: { kind: 'ended', member: cid, why, lost } }));
+          marked.push(g.id);
+        }
+      }
+    });
+    const changed = closed.concat(marked);
+    if (changed.length) announce(changed, recs);
+    else announce([], null, null, { pending: false });
+    return { ok: true, closed, marked };
+  }
+  /** The archive was LIFTED (the owner un-archived it): the ledger row goes — its rows wait again (a closed pair stays
+   *  closed: a new `send` makes a new pair). */
+  async function onConversationRevived(cid) {
+    let moved = false;
+    await store.groups.update((gr) => { if (gr.ended && gr.ended[cid] && gr.ended[cid].why === 'archived') { delete gr.ended[cid]; moved = true; } });
+    if (moved) announce([], null, null, { pending: false });
+    return moved;
+  }
+  /** THE STANDING RULE (boot, after restoreSessions, and every archive): every member of a live group is asked the
+   *  wiring's `liveness` — archived / gone ⇒ `onConversationEnded`; a ledger row whose archive was lifted ⇒ revived.
+   *  Idempotent (a closed group is never re-logged). */
+  async function sweepEnded() {
+    const seen = new Set();
+    const out = { closed: [], marked: [], revived: [] };
+    for (const g of Object.values(all())) for (const m of g.members) seen.add(m.member);
+    for (const cid of Object.keys(store.groups.live().ended || {})) seen.add(cid);
+    for (const cid of seen) {
+      let lv = null;
+      try { lv = liveness(cid); } catch { lv = null; }
+      const st = lv && lv.state;
+      const e = endedOf(cid);
+      if (st === 'archived' || st === 'gone') {
+        const hasLive = Object.values(all()).some((g) => !g.archivedAt && G.memberOf(g, cid));
+        if (!e || e.why !== st || hasLive) { const r = await onConversationEnded(cid, { why: st, at: lv.at || null }); out.closed.push(...r.closed); out.marked.push(...r.marked); }
+      } else if (e && e.why === 'archived' && (st === 'running' || st === 'stopped')) { if (await onConversationRevived(cid)) out.revived.push(cid); }
+    }
+    return out;
   }
 
   /** `send <agent>`: the two-member group of these two, found or created (the
@@ -748,15 +886,35 @@ function create({
    *  otherwise or the sender passes `wake` (= an @, a billed turn).
    *  `create:false` (a Background Work job posting as its owner conversation)
    *  posts only into a pair that ALREADY exists — a job never makes a group. */
-  async function sendToAgent({ from, to, text, wake: w = false, create = true, mayWake = null, consent = null, at = [] } = {}) {
+  async function sendToAgent({ from, to, text, wake: w = false, create = true, mayWake = null, consent = null, at = [], awaitReply: aw = false } = {}) {
+    const ended = endedOf(to) ? endedRefusal(to, from) : null;
+    if (ended) return ended;
     const r = resolveMember(to, from);
-    if (!r.ok) return r;
+    if (!r.ok) return endedRefusal(to, from) || r;
     const shown = r.name || to;
     if (!create && !findPair(from, r.cid)) return { ok: false, code: 'job-token', error: `no direct group with "${shown}" exists yet, and a job token never creates one — start it from the conversation that owns this job (vibespace-msg send "${shown}" "…"), then the job can post into it` };
     const pair = await findOrCreatePair(from, r.cid, r.name);
     if (!pair.ok) return pair;
-    const p = await post({ group: pair.group.id, from, text, wake: w, mayWake, consent, at });
+    const p = await post({ group: pair.group.id, from, text, wake: w, mayWake, consent, at, awaitReply: aw });
     return p.ok ? { ...p, pairCreated: pair.created } : p;
+  }
+  /** `send <agent>` to a conversation that ENDED is refused BY NAME (lane pair-group-fate) — only an agent `by` shared
+   *  a group with (its member rows), so the answer is no oracle; null when `ref` names no ended conversation. */
+  function endedRefusal(ref, by) {
+    const r = String(ref || '').trim();
+    if (!r) return null;
+    for (const g of Object.values(all())) {
+      if (!G.memberOf(g, by) && by !== G.OWNER) continue;
+      for (const m of g.members) {
+        if (m.member === by || !(m.member === r || (m.name && G.cleanName(m.name) === r))) continue;
+        const e = endedOf(m.member);
+        if (!e) continue;
+        const name = displayName(g, m.member);
+        const date = e.at ? new Date(e.at).toISOString().slice(0, 10) : 'an earlier day';
+        return { ok: false, code: 'ended', error: `${name}'s conversation ended on ${date} (${e.why === 'gone' ? 'it is gone' : 'archived'}) — nothing can read it`, conversationId: m.member };
+      }
+    }
+    return null;
   }
   /** The live (unarchived) two-member group of a and b, or null. */
   function findPair(a, b) {
@@ -999,7 +1157,7 @@ function create({
     const out = [];
     for (const g of Object.values(all())) {
       const m = G.memberOf(g, cid);
-      if (!m || m.notify === 'mute') continue;
+      if (!m || m.notify === 'mute' || g.closed) continue;   // lane pair-group-fate: a CLOSED pair's entries are nobody's to wait for
       const since = memberSince(m);
       if (!((Number(g.lastAt) || 0) > since)) continue;
       for (const r of readLog(g.id)) {
@@ -1111,6 +1269,7 @@ function create({
   })();
 
   return {
+    onConversationEnded, onConversationRevived, sweepEnded, endedOf, endedRefusal,
     list, listFor, markRead, liveRoster, pacerFor, noteRoster, get: (id) => { const g = getGroup(id); return g ? view(g) : null; }, resolveGroup, resolveMember, resolveTarget, reach,
     sharesGroup, dispatchLedger,   // lane worker-dispatch verify r1 ④ / ②
     create: createGroup, invite, leave: (o) => remove({ ...o, kick: false }), kick: (o) => remove({ ...o, kick: true }),

@@ -2,6 +2,16 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.233 — 2026-10-07
+
+### Added
+- You can set a whole account's sending policy — direct or review — from its menu (Reach & policy…); a conversation can still override it.
+
+### Changed
+- Opening an agent's search shows what it found, even messages not in your saved copy.
+- A conversation that reported its status or progress during the turn is no longer asked again when it stops.
+- A message to an agent whose conversation has ended says it was not delivered instead of waiting for ever, and an agent can ask to be woken by the reply.
+
 ## 2.369.232 — 2026-10-07
 
 ### Added
