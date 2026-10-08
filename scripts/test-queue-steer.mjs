@@ -47,6 +47,8 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 500) : '')); } };
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
+// lane claude-md-diet (B-23e7): the per-file / per-incident index lines moved out of CLAUDE.md into the kb INDEX heads
+const indexHead = (f) => ((t) => (t.split(/^## INDEX\b.*$/m)[1] || '').split(/^## /m)[0])(read(f));
 // Every pre-fix copy of src/lib/chat-view.js is written OUTSIDE the tree
 // (scripts/mutant-copy.mjs: this process's scratch dir as `.mjs`, every
 // relative import rewritten to the real file's URL, so the copy's module graph
@@ -1245,7 +1247,7 @@ console.log('— wiring + docs pins');
     ok("…and chat-view.js carries the chord's view half incl. the turn-identity guard", /THE STEER CHORD'S VIEW HALF/.test(kbfs2) && /`_turnEpoch`/.test(kbfs2)); }
   { const kbd2 = read('docs/keyboard-shortcuts.md');
     ok('docs say what happens when the turn ends first (silence, not an apology)', /\*\*If the turn ends first,\*\*/.test(kbd2)); }
-  ok('CLAUDE.md indexes the new PURE predicate', /composerSendModes/.test(read('CLAUDE.md')));
+  ok('the kb-file-structure INDEX head indexes the new PURE predicate', /composerSendModes/.test(indexHead('docs/kb-file-structure.md')));
 }
 
 console.log('— ⑥ the REAL wrapper against the REAL `codex app-server` (evidence-SKIP without the binary)');

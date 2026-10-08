@@ -24,7 +24,7 @@
 //   ⑧ the harness row (claude declares allowAgentTools, default ON; codex not)
 //   ⑨ the permission-mode words (every CLI mode has words + its raw value)
 //   ⑩ i18n: every new key has zh AND ja
-//   ⑪ the binary oracle (EVIDENCE SKIP without the CLI): the 2.1.281 strings the
+//   ⑪ the binary oracle (EVIDENCE SKIP without the CLI; 2.1.281 + 2.1.288, zod helper names never spelled): the 2.1.281 strings the
 //     measurements above were read from are still in the installed binary
 //   ⑫ r2 — THE VERIFIER'S SIX FINDINGS, each pinned above with its number and
 //     proven able to go red here: a patched copy of the module (mutant-copy)
@@ -316,9 +316,11 @@ console.log('⑪ the binary oracle (the strings the measurements were read from)
   else {
     const has = (s) => buf.indexOf(s) >= 0;
     const ver = path.basename(bin);
-    ok(has('Bash(npm run:*) - prefix matching (legacy)'), `${ver}: the validator still accepts the legacy prefix spelling we ship`);
+    // 2.1.281 named the spelling in the validator's examples; 2.1.288 dropped that example line but still parses it —
+    // the `:*` reader (`.match(/^(.+):\*$/)`) and the validator's empty-prefix refusal (lane cli-2-1-288-records)
+    ok(has('Bash(npm run:*) - prefix matching (legacy)') || (has('.match(/^(.+):\\*$/)?.[1]') && has('"Prefix cannot be empty before :*"')), `${ver}: the validator still accepts the legacy prefix spelling we ship`);
     ok(has('if(Pe===xe)return!0;if(Pe.startsWith(xe+" "))return!0') || has('.startsWith(e.prefix+" ")'), `${ver}: prefix matching is still "equal, or followed by a blank"`);
-    ok(/behavior:R\("allow"\),updatedInput:me\(o\(\),ae\(\)\)\.optional\(\),updatedPermissions:C\(/.test(buf.toString('latin1', 0, buf.length)), `${ver}: the stdio permission result still names updatedPermissions`);
+    ok(/behavior:[\w$]+\("allow"\),updatedInput:[\w$]+\([\w$]+\(\),[\w$]+\(\)\)\.optional\(\),updatedPermissions:[\w$]+\(/.test(buf.toString('latin1', 0, buf.length)), `${ver}: the stdio permission result still names updatedPermissions`);
     ok(has('["userSettings","projectSettings","localSettings","flagSettings","policySettings"]'), `${ver}: flagSettings (the --settings layer) is still a rule source`);
     ok(has('["permissions.allow","permissions.deny","permissions.ask"]'), `${ver}: r2 F2 — permissions.ask is still a settings rule list (the publish ask rule rides it)`);
     ok(/\{type:"addRules",rules:\[\{toolName:[A-Za-z$_]+,ruleContent:`\$\{[A-Za-z$_]+\} \*`\}\],behavior:"allow",destination:"localSettings"\}/.test(buf.toString('latin1', 0, buf.length)), `${ver}: r2 F3 — the CLI still suggests \`<words> *\` to localSettings (the rule a held verb's Always Allow would have persisted)`);

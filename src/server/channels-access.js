@@ -22,6 +22,11 @@ const SR = require('../channel-search.js');
 /** THE FAMILY'S FACTORY — `engineCtx` is the engine's ONE context object (channels-engine.js, the composition root): every
  *  field this family reads is named in the destructure below (test-architecture §79 pins the list), and what it answers
  *  is merged back into the same object for the engine and the families created after it. */
+/** lane channel-names-readable (the belt): the agent's list / search names an account whose sign-in cannot read people's
+ *  profiles — a title or a search by a person's nickname / other name is the vendor's name only there. */
+function namesNoteOf(labels) {
+  return labels.length ? { namesNote: `note: people's names cannot be read on ${labels.map((l) => `"${l}"`).join(', ')} (its sign-in lacks the contact permission — the user can re-authorize the account), so a person shows by the vendor's name and a search by their nickname or other name finds nothing.` } : {};
+}
 function create(engineCtx) {
   const {
     agentTitle, agentId, INBOX_KEY, i18nKey, INBOX_SOURCE, RESOLVED_BY, RECONCILE_SECONDS, ESTIMATE_CAP, registry, liveSessions, log, now, userTodos,
@@ -450,12 +455,14 @@ function create(engineCtx) {
     if (full) return searchFullFor(ctx, query, { adapterId, limit: n });
     let covered = 0;
     const results = [];
+    const blind = [];
     let truncated = false;
     for (const rec of adapterRecords().adapters) {
       if (rec.enabled === false || (adapterId && rec.id !== adapterId)) continue;
       const visible = new Map();
       for (const en of Object.values(store.index.live())) if (en && en.adapterId === rec.id && ACL.canSee(reachFor(ctx, rec, en).level)) visible.set(en.id, agentTitle(en, en.id));   // verify r1 F2: the title through the belt
       if (!visible.size) continue;
+      if (rec.namesReadable && rec.namesReadable.ok === false) blind.push(rec.label || rec.id);   // lane channel-names-readable
       // only the VISIBLE conversations' logs are read at all
       const r = await store.search(rec.id, query, { limit: 200, convIds: [...visible.keys()] });
       truncated = truncated || !!r.truncated;
@@ -473,7 +480,7 @@ function create(engineCtx) {
     }
     results.sort((a, b) => (Number(b.at) || 0) - (Number(a.at) || 0));
     const fullOffered = adapterRecords().adapters.some((r) => r.enabled !== false && (!adapterId || r.id === adapterId) && searchRowOf(registry.capsOf(r.kind)));
-    return { ok: true, results, truncated, covered, fullOffered };
+    return { ok: true, results, truncated, covered, fullOffered, ...namesNoteOf(blind) };
   }
   /**
    * THE AGENT'S `--full` (design 010 — the second tier, EXPLICIT): ONE page of ONE account's own search, refused by the
@@ -964,6 +971,9 @@ function create(engineCtx) {
         awaiting: proposalsFor(en.key).filter((p) => p.state === 'awaiting-approval' && p.draftedBy && p.draftedBy.id === ctx.id).length,
       });
     }
+    const seen = new Set(out.map((c) => c.adapterId));
+    const blind = adapterRecords().adapters.filter((r) => seen.has(r.id) && r.namesReadable && r.namesReadable.ok === false).map((r) => r.label || r.id);
+    if (blind.length) return { ok: true, conversations: out, more, moreRequestable, max: LIST_FOR_MAX, ...namesNoteOf(blind) };
     return { ok: true, conversations: out, more, moreRequestable, max: LIST_FOR_MAX };
   }
   function readFor(ctx, adapterId, convId, { limit = 50, since = null } = {}) {

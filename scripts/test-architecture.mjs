@@ -3119,6 +3119,7 @@ console.log('§65 every producer that can carry a conversation\'s facts to an ag
     speakPartial: 'the owner\'s For-you item for a partly sent proposal (a file that did not land — lane lark-upload-preflight)',
     speakFailure: 'the owner\'s For-you item for a failing account',
     speakSlowed: 'the owner\'s For-you item when the vendor refused an account\'s quota twice in a day (lane gmail-quota-share)',
+    speakNames: 'the owner\'s For-you item when an account\'s sign-in cannot read people\'s profiles, once per sign-in (lane channel-names-readable)',
     speakUnsaved: 'the owner\'s For-you item for an unsaved token',
     request: 'files the OWNER\'s For-you item for an agent\'s access request (the owner decides it)',
     fileWatchRequest: 'files the OWNER\'s For-you item for an agent\'s WAKE watch request (lane channel-agent-watch: the owner approves the billed notification)',
@@ -4391,6 +4392,85 @@ console.log('§81 no suite names a fixed loopback endpoint (scratch.mjs deadPort
     ['a dead EXEMPT row', judge81([['test-x.mjs', "const u = 'http://127.0.0.1" + ":3000/';\n"]], { 'test-x.mjs': [[3000, 4000], 'x'] }).dead.join() === 'test-x.mjs:4000', true],
   ];
   ok(r81.every(([, got, want]) => got === want), `§81 CONTROLS: ${r81.map(([n, got, want]) => `${n} (${got === want ? (want ? 'RED' : 'quiet') : 'WRONG'})`).join(', ')}`);
+}
+// §82 CLAUDE.md IS AN INDEX OF ≤ 100 000 BYTES (lane claude-md-diet, B-23e7, 2.369.235). Every agent session pays the
+// auto-loaded CLAUDE.md at its start AND again after each compaction: ≈ 115K tokens a copy with ~30 lane workers a day
+// was several million tokens a day before any work. The per-file lines ("## File Structure", ~574) and the per-incident
+// lines ("### Bug Fixes Applied", 459) moved VERBATIM to the INDEX heads of docs/kb-file-structure.md and
+// docs/kb-bugfix-invariants.md (the task → file map and the server-side key functions too). This section holds the move:
+// ① the size ratchet (the measured AFTER 37 491 bytes + 10 %; lower it when the file shrinks, never raise it for an index
+// line — the law is in CLAUDE.md's HOW TO USE), ② every `⇒ kb-…` pointer in CLAUDE.md names a file that exists, ③ the two
+// INDEX heads exist and every line in them is ≤ 300 characters (a line moved over 300 is held to its fixture row — never a
+// new one), ④ NO moved line was lost: scripts/fixtures/claude-md-moved.json keeps, per non-blank BEFORE line, the hash of
+// its first 48 characters (its head: the line still exists) and of the whole line (verbatim) + the block's sha256 and line
+// count. A line edited since the move (a count, a reworded tail) keeps its head; a lost head is red. While no line is edited
+// the block re-assembled from its new home must hash to the fixture's sha256 — the move itself is proven verbatim.
+console.log('§82 CLAUDE.md is an index of ≤ 100 000 bytes; the moved per-file / per-incident lines live in the kb INDEX heads:');
+{
+  const CLAUDE_MD_MAX_BYTES = 41240;   // ratchet: 37 491 measured after the move (scripts/measure-claude-md.mjs) + 10 %
+  const h82 = (s) => crypto.createHash('sha256').update(s).digest('hex').slice(0, 10);
+  const fx82 = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/claude-md-moved.json'), 'utf8'));
+  // a region = its `## ` heading line up to the next `## ` heading outside a code fence
+  const region82 = (text, head) => {
+    const lines = text.split('\n'), at = lines.findIndex((l) => l.startsWith(head));
+    if (at < 0) return null;
+    const out = []; let fence = false;
+    for (const l of lines.slice(at + 1)) { if (l.startsWith('```')) fence = !fence; if (!fence && /^## /.test(l)) break; out.push(l); }
+    return out;
+  };
+  const census82 = (block, lines) => {
+    const K = fx82.keyChars, cut = (l) => [...l].slice(0, K).join('');
+    const have = { head: new Map(), full: new Map() }, byFull = new Map();
+    for (const l of lines.filter((x) => x.trim())) {
+      const a = h82(cut(l)), b = h82(l);
+      have.head.set(a, (have.head.get(a) || 0) + 1); have.full.set(b, (have.full.get(b) || 0) + 1);
+      if (!byFull.has(b)) byFull.set(b, l);
+    }
+    const need = { head: new Map(), full: new Map() };
+    for (const r of block.rows) { const [a, b] = r.split(':'); need.head.set(a, (need.head.get(a) || 0) + 1); need.full.set(b, (need.full.get(b) || 0) + 1); }
+    let lost = 0, edited = 0;
+    for (const [a, n] of need.head) lost += Math.max(0, n - (have.head.get(a) || 0));
+    for (const [b, n] of need.full) edited += Math.max(0, n - (have.full.get(b) || 0));
+    edited -= lost;
+    const sha = edited || lost ? null : crypto.createHash('sha256').update(block.rows.map((r) => byFull.get(r.split(':')[1])).join('\n')).digest('hex');
+    return { lost, edited, verbatim: block.rows.length - lost - edited, shaOk: sha === null ? null : sha === block.sha256 && block.rows.length === block.lines };
+  };
+  const over300 = (block, lines) => {
+    const moved = new Set(block ? block.rows.flatMap((r) => r.split(':')) : []);
+    return lines.filter((l) => [...l].length > 300 && !moved.has(h82(l)) && !moved.has(h82([...l].slice(0, fx82.keyChars).join(''))));
+  };
+  const pointers82 = (md) => [...md.matchAll(/⇒\s*`?(?:docs\/)?(kb-[A-Za-z0-9-]+?)(?:\.md)?(?=[^A-Za-z0-9-]|$)/g)].map((m) => m[1]);
+  const md = fs.readFileSync(path.join(REPO, 'CLAUDE.md'), 'utf8'), bytes = Buffer.byteLength(md);
+  ok(bytes <= CLAUDE_MD_MAX_BYTES, `§82 ① CLAUDE.md is ${bytes} bytes ≤ ${CLAUDE_MD_MAX_BYTES} (the ratchet; the law caps it at 100 000) — a per-file or per-incident line goes to its kb INDEX head`);
+  const ptrs = [...new Set(pointers82(md))], dangling = ptrs.filter((k) => !fs.existsSync(path.join(REPO, 'docs', k + '.md')));
+  ok(ptrs.includes('kb-file-structure') && ptrs.includes('kb-bugfix-invariants') && dangling.length === 0, `§82 ② every ⇒ kb-… pointer in CLAUDE.md names a file in docs/ (${ptrs.length}: ${ptrs.join(' ')})${dangling.length ? ' — DANGLING: ' + dangling.join(' ') : ''}`);
+  const homes = new Map();
+  for (const b of fx82.blocks) {
+    const text = fs.readFileSync(path.join(REPO, b.home), 'utf8'), lines = region82(text, b.region);
+    homes.set(b.name, { text, lines });
+    ok(!!lines, `§82 ③ ${b.home} has its "${b.region}" head`);
+    if (!lines) continue;
+    const long = over300(b, lines);
+    ok(long.length === 0, `§82 ③ every ${b.home} "${b.region}" line is ≤ 300 characters or a moved line's fixture row${long.length ? ' — OVER: ' + long.map((l) => [...l].slice(0, 60).join('')).join(' | ') : ''}`);
+    const c = census82(b, lines);
+    ok(c.lost === 0 && c.shaOk !== false, `§82 ④ ${b.name}: ${b.lines} moved lines — ${c.verbatim} verbatim, ${c.edited} edited since the move, ${c.lost} LOST in ${b.home}${c.shaOk === null ? '' : c.shaOk ? ' · the block re-assembled hashes to the fixture sha256' : ' · SHA MISMATCH'}`);
+  }
+  // CONTROLS: a home missing one moved line, a line's head reworded, a tail edit (quiet: edited, not lost), a new 301-char
+  // index line, a dangling pointer, a CLAUDE.md one byte over the ratchet
+  const bug = fx82.blocks.find((b) => b.name === 'bugfix-index'), fsb = fx82.blocks.find((b) => b.name === 'file-index');
+  const bl = homes.get('bugfix-index').lines || [], fl = homes.get('file-index').lines || [];
+  const mid = bl.findIndex((l, i) => i > bl.length / 2 && l.startsWith('- '));
+  const drop = bl.filter((_, i) => i !== mid), head = bl.map((l, i) => (i === mid ? 'X' + l.slice(1) : l)), tail = bl.map((l, i) => (i === mid ? l + ' (edited)' : l));
+  const r82 = [
+    ['a copy missing one incident line', census82(bug, drop).lost === 1, true],
+    ['a file line\'s head reworded', census82(fsb, fl.map((l) => (l.startsWith('src/exit-shell.js — ') ? 'src/exit-shel1.js — ' + l.slice(20) : l))).lost === 1, true],
+    ['a reworded head', census82(bug, head).lost === 1, true],
+    ['a tail edit (edited, never lost)', census82(bug, tail).lost > 0 || census82(bug, tail).edited !== 1, false],
+    ['a new 301-character index line', over300(bug, [...bl, '- ' + 'x'.repeat(299)]).length === 1, true],
+    ['a dangling pointer', pointers82(md + '\nnew line ⇒ kb-nope.md\n').some((k) => !fs.existsSync(path.join(REPO, 'docs', k + '.md'))), true],
+    ['one byte over the ratchet', Buffer.byteLength(md + 'x'.repeat(CLAUDE_MD_MAX_BYTES - bytes + 1)) > CLAUDE_MD_MAX_BYTES, true],
+  ];
+  ok(mid > 0 && r82.every(([, got, want]) => got === want), `§82 CONTROLS: ${r82.map(([n, got, want]) => `${n} (${got === want ? (want ? 'RED' : 'quiet') : 'WRONG'})`).join(', ')}`);
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

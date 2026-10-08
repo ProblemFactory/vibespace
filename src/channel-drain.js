@@ -924,7 +924,43 @@ function recheckOnPress(lastRecheckAt, now, floorMs = RECHECK_FLOOR_MS) {
   return !(last > 0 && t >= last && t - last < floorMs);
 }
 
+/**
+ * THE LISTING'S CURSOR OUTLIVES THE PROCESS (lane discovery-cursor-persist, B-6638). The discovery walk's state is the
+ * account record's `discovery` ({cursor, startedAt, at, complete, completeAt} — adapters.json, beside the feed's
+ * `feed.carrying`): a restart RESUMES a walk from the page it reached and never re-lists an account it already listed
+ * whole. `rewalk` = from the listing's first page — only when the account was never fully listed and holds no cursor,
+ * when the vendor refused the kept cursor (its own word, typed: `cursorRefused`), or on the owner's re-list (a forced
+ * refresh); `none` = nothing owed at boot (the periodic net, `discoveryDue`, keeps its own clock from `completeAt`).
+ */
+const LISTING_VERDICTS = Object.freeze(['resume', 'rewalk', 'none']);
+function listingVerdict({ persisted = null, complete = false, refused = false, intent = null } = {}) {
+  if (refused || intent === 'relist') return 'rewalk';
+  if (persisted && persisted.cursor) return 'resume';
+  return complete ? 'none' : 'rewalk';
+}
+/** The record's `discovery`, healed (a missing / malformed one = never listed). */
+function discoveryOf(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const n = (v) => (Number(v) > 0 ? Number(v) : null);
+  const cursor = typeof raw.cursor === 'string' && raw.cursor && raw.cursor.length <= 4096 ? raw.cursor : null;
+  const completeAt = n(raw.completeAt);
+  return { cursor, startedAt: cursor ? n(raw.startedAt) : null, at: n(raw.at), complete: raw.complete === true && !!completeAt, completeAt };
+}
+/** The walk's state → the record's `discovery` (what `discoveryOf` reads back). */
+function discoveryRecord(d) {
+  const cursor = d && d.cursor ? String(d.cursor) : null;
+  const completeAt = Number(d && d.lastCompleteAt) > 0 ? Number(d.lastCompleteAt) : null;
+  return { cursor, startedAt: cursor ? Number(d.startedAt) || null : null, at: Number(d && d.lastAt) || null, complete: !!completeAt, completeAt };
+}
+/** The vendor refused the CURSOR (expired / unknown page token): the adapter's typed word (`detail.cursorRefused`), or a
+ *  `not-found` answered to a call that carried one. Anything else (auth, rate, transport) is the call's, not the cursor's. */
+function cursorRefused(err) {
+  if (!err || typeof err !== 'object') return false;
+  return !!(err.detail && err.detail.cursorRefused === true) || err.code === 'not-found';
+}
+
 module.exports = {
+  LISTING_VERDICTS, listingVerdict, discoveryOf, discoveryRecord, cursorRefused,
   RECHECK_PER_PASS, RECHECK_EVERY_MS, RECHECK_ACTIVE_MS, RECHECK_FLOOR_MS, RECHECK_DUE_MAX, recheckDue, recheckOnPress,
   REFRESH_QUEUE_CAP, REFRESH_OWNER_RESERVE, STREAK_MAX, ORIGINS, REFUSAL_CODES, ANSWER_OUTCOMES, PACE_WAIT_MAX_MS, FEED_PAGES_PER_PASS,
   OLDER_FLOOR_MS, OLDER_MEMORY_MS, OLDER_EVENTS,

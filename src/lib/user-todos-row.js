@@ -81,6 +81,10 @@ const REPLY_SNIPPET = 80; // chars of "You replied: …" on a resolved row (the 
 // gets ONE button doing it — the client maps the TYPE to a verb it owns.
 const actionBtnHtml = (i, t) => (i && i.action && i.action.type === 'reset-credit' && i.action.accountKey
   ? `<button class="ut-act ut-action-reset" title="${escHtml(t('Use a reset credit…'))}">${UI_ICONS.refresh || ''}</button>` : '');
+// lane channel-names-readable: a channel account's sign-in lacks a permission — ITS Re-authorize dialog (the same
+// producer-action click: the model maps the type)
+const reauthBtnHtml = (i, t) => (i && i.action && i.action.type === 'channel-reauth' && i.action.adapterId
+  ? `<button class="ut-act ut-action-reset ut-action-reauth" title="${escHtml(t('Re-authorize'))}">${UI_ICONS.refresh || ''}</button>` : '');
 /** The command an exit ask names, in mono, then its ANSWER — Allow / Deny on their own line — and the rule (open items
  *  only). lane-pairing ⑥: answered right here (the popup, the mini inbox and the phone paint this row). naive-user
  *  N-ask: the two buttons rode the floated `.ut-actions` bar — at 35 % opacity until the row is hovered (a 60-second
@@ -188,7 +192,7 @@ function partsOf(entry, ctx) {
   const actions = resolved
     ? `<span class="ut-actions">${view}<button class="ut-act ut-reopen" title="${escHtml(t('Reopen'))}">↺</button></span>`
     : card ? `<span class="ut-actions">${view}${more}</span>`
-    : `<span class="ut-actions">${actionBtnHtml(i, t)}${rs.show ? `<button type="button" class="ut-act ut-reply-btn" title="${escHtml(t('Reply'))}">${UI_ICONS.reply}</button>` : ''}${view}`
+    : `<span class="ut-actions">${actionBtnHtml(i, t)}${reauthBtnHtml(i, t)}${rs.show ? `<button type="button" class="ut-act ut-reply-btn" title="${escHtml(t('Reply'))}">${UI_ICONS.reply}</button>` : ''}${view}`
       + `<button class="ut-act ut-done" title="${escHtml(t('Handled — mark done'))}">✓</button>`
       + `<button class="ut-act ut-dismiss" title="${escHtml(t('Dismiss (not going to act on this)'))}">✕</button></span>`;
   return { cls, dot, body, actions, sig: cls + '\u0000' + dot + '\u0000' + body + '\u0000' + actions };

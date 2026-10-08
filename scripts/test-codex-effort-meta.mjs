@@ -665,17 +665,20 @@ console.log('— ⑩ version markers resolve; this branch squats nothing');
   // from the integration branch itself — highest released 2.369.N + 1 — and
   // proves both halves: N is claimed, N+1 is not.
   let NEXT_FREE = null;
-  const SITES = ['CLAUDE.md', 'data/bin/codex-chat-wrapper.js', 'src/codex-message-manager.js',
+  // lane claude-md-diet: the index line moved from CLAUDE.md to the kb-bugfix-invariants INDEX head (`#INDEX` = that head);
+  // CLAUDE.md itself stays in the squat census ③ below
+  const SITES = ['docs/kb-bugfix-invariants.md#INDEX', 'data/bin/codex-chat-wrapper.js', 'src/codex-message-manager.js',
     'src/codex-session-store.js', 'src/server/stdout/codex-events.js', 'src/lib/agent-meta.js',
     'src/lib/chat-status-bar.js', 'src/lib/chat-view.js', 'src/ws-handler.js', 'src/session-schema.js',
     'src/harnesses/codex-models.js', 'docs/kb-file-structure.md', 'docs/kb-features.md', 'docs/kb-bugfix-invariants.md'];
-  for (const f of SITES) ok(read(f).includes(PREDECESSOR), `${f} back-references the predecessor ${PREDECESSOR} (all sites name ONE version)`);
+  const readSite = (f) => (f.endsWith('#INDEX') ? ((t) => (t.split(/^## INDEX\b.*$/m)[1] || '').split(/^## /m)[0])(read(f.slice(0, -6))) : read(f));
+  for (const f of SITES) ok(readSite(f).includes(PREDECESSOR), `${f} back-references the predecessor ${PREDECESSOR} (all sites name ONE version)`);
   // A leftover mention of 2.369.61 is only allowed where it is ABOUT the
   // renumber (the same line names the predecessor) — anywhere else it is still
   // a cross-reference pointing at somebody else's release.
   const staleLines = [];
   for (const f of SITES) {
-    for (const line of read(f).split('\n')) {
+    for (const line of readSite(f).split('\n')) {
       if (/2\.369\.61(?![\d.])/.test(line) && !line.includes(PREDECESSOR)) staleLines.push(`${f}: ${line.trim().slice(0, 80)}`);
     }
   }
@@ -800,7 +803,7 @@ console.log('— ⑩ version markers resolve; this branch squats nothing');
       return [...new Set(out)];
     };
     const squatted = [];
-    for (const f of SITES) for (const v of unreleasedIn(read(f))) squatted.push(`${f}: ${v}`);
+    for (const f of [...SITES, 'CLAUDE.md']) for (const v of unreleasedIn(readSite(f))) squatted.push(`${f}: ${v}`);
     ok(squatted.length === 0, 'every version number named in the cited files is a RELEASE that exists on the integration branch (this branch squats none)', JSON.stringify([...new Set(squatted)]).slice(0, 300));
     // NEGATIVE CONTROL C: the census has teeth — the same predicate over a
     // site's text with an unreleased stamp spliced in reports it. (The r2

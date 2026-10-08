@@ -201,9 +201,11 @@ export function itemView(item, ctx = {}) {
   const appAsk = !resolved && i.action && i.action.type === 'app-install' && i.action.id ? { id: i.action.id, host: i.action.host || 'local' } : null;
   // lane browser-unresponsive: a hung browser's ONE item carries its way out — Restart, first (the profile's id only)
   const restartAsk = !resolved && i.action && i.action.type === 'browser-restart' && i.action.profileId ? { profileId: String(i.action.profileId) } : null;
+  // lane channel-names-readable: a channel account's sign-in lacks a permission — Re-authorize…, first
+  const reauthAsk = !resolved && i.action && i.action.type === 'channel-reauth' && i.action.adapterId ? { adapterId: String(i.action.adapterId) } : null;
   const cardActs = !card ? null : resolved ? [...(cardOpen ? ['app-open'] : []), 'reopen', 'copy']
     : card.state === 'installing' ? ['more'] : card.state === 'failed' ? ['app-retry', 'more'] : card.state === 'done' ? [...(cardOpen ? ['app-open'] : []), 'more'] : ['app-install', 'app-reject', 'more'];
-  const actions = resolved ? ['reopen', 'copy'] : [...(restartAsk ? ['browser-restart'] : []), ...(exitAsk ? ['exit-allow', 'exit-deny'] : []), ...(proposal ? ['proposal-approve', 'proposal-reject'] : []), ...(appAsk ? ['app-install', 'app-reject'] : []), ...(reply.show ? ['reply'] : []), 'done', 'dismiss', 'copy', ...(producer ? ['producer'] : [])];
+  const actions = resolved ? ['reopen', 'copy'] : [...(restartAsk ? ['browser-restart'] : []), ...(reauthAsk ? ['channel-reauth'] : []), ...(exitAsk ? ['exit-allow', 'exit-deny'] : []), ...(proposal ? ['proposal-approve', 'proposal-reject'] : []), ...(appAsk ? ['app-install', 'app-reject'] : []), ...(reply.show ? ['reply'] : []), 'done', 'dismiss', 'copy', ...(producer ? ['producer'] : [])];
   const title = String(ctx.words != null ? ctx.words : (i.text || ''));
   const detail = String(ctx.detail != null ? ctx.detail : (i.detail || ''));
   const replied = i.reply && typeof i.reply.text === 'string' && i.reply.text ? i.reply.text : null;

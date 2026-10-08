@@ -662,7 +662,7 @@ if (!probe) {
       /LAG SHADOW/.test(full) && /WINDOW IDENTITY GUARD/.test(full) && /reading-lag\.js/.test(full) && /NO EVIDENCE ⇒ NO REFUSAL/.test(full), full.slice(-320));
     ok('§9b …including the two properties a later edit is most likely to drop: the PHASE comparison, and that `ownWindow` is stamped and never read back out of `sevenDay.resetsAt`',
       /resetsAt mod 604800/.test(full) && /NEVER read back out of `sevenDay\.resetsAt`/.test(full));
-    ok('§9b …and the file index names the PURE module beside the ledger it works with', /^  reading-lag\.js — PURE \(imports nothing\)/m.test(md));
+    ok('§9b …and the file index names the PURE module beside the ledger it works with', /^  reading-lag\.js — PURE \(imports nothing\)/m.test(((t) => (t.split(/^## INDEX\b.*$/m)[1] || '').split(/^## /m)[0])(read('docs/kb-file-structure.md'))));
     // r2: the auto-loaded index gates the NEXT change, so it must carry the two
     // rules round 2 established — WHICH HALF of a window identifies an account,
     // and WHERE the established window may be kept. Both are the kind of thing

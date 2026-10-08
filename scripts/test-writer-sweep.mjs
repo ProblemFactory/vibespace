@@ -2133,11 +2133,12 @@ function a2key(a) { return a.file + '\u0000' + a.needle; }
 if (fs.existsSync('/proc/self')) {
   const total = pass + fail + 1; // including this assert
   // EVERY doc that advertises a number, not just the one that was wrong: the
-  // kb essay says `test-writer-sweep.mjs (N)`, the CLAUDE.md index says
+  // kb essay says `test-writer-sweep.mjs (N)`, the index line (the kb-bugfix INDEX head since lane claude-md-diet; CLAUDE.md before) says
   // `test-writer-sweep N`. Both are read as "does this essay still describe the
   // code", and both drifted.
-  const claims = ['../docs/kb-bugfix-invariants.md', '../CLAUDE.md'].map((rel) => {
-    const src = fs.readFileSync(new URL(rel, import.meta.url), 'utf8');
+  const kbBug = fs.readFileSync(new URL('../docs/kb-bugfix-invariants.md', import.meta.url), 'utf8');
+  const [kbPre, kbRest = ''] = kbBug.split(/^## INDEX\b.*$/m), kbHead = kbRest.split(/^## /m)[0];
+  const claims = [['kb-bugfix-invariants essays', kbPre + kbRest.slice(kbHead.length)], ['kb-bugfix-invariants INDEX head', kbHead]].map(([rel, src]) => {
     return { rel, ns: [...src.matchAll(/test-writer-sweep(?:\.mjs)?[ (]+(\d+)/g)].map((m) => Number(m[1])) };
   });
   // ONE assert on purpose: `total` counts itself, so a second assert in this

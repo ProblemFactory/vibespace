@@ -386,5 +386,42 @@ console.log('§10 lane classifier-stop-card: system/informational is HANDLED on 
   ok('the copies live outside the tree', M.files.length === 4 && M.files.every((x) => !x.startsWith(REPO)));
 }
 
+console.log('§11 lane cli-2-1-288-records (B-e05e): claude 2.1.288\'s eight new system records are KNOWN — none wears the red card; an invented one still does');
+{
+  const S = 'sess-288';
+  const R = require(path.join(REPO, 'src/record-shape.js'));
+  const zod = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/claude-cli/2.1.288.json'), 'utf8')).zod;
+  // one record per subtype, every field its 2.1.288 zod object declares (values typed as the schema says)
+  const REC = {
+    session_metadata: { metadata: { artifacts: [{ url: 'https://example.invalid/f', title: 'Frame', kind: 'frame', updated_at: '2026-10-07T00:00:00Z' }] } },
+    instruction_size_warning: { total_chars: 61234, total_limit_chars: 40000, file_count: 3, largest_chars: 45000 },
+    ui_invalidate: { event: 'ui.render', instances: [{ surface: 's', component: 'Pane', instance_id: 'r1' }] },
+    ui_log: { plugin: 'p', text: 'a log line' },
+    ui_toast: { plugin: 'p', text: 'Build failed', timeout_ms: 4000 },
+    ui_status: { plugin: 'p', text: null },
+    ui_scroll: { client_id: 'c', component: 'Pane', instance_id: 'x', offset: 3, follow_end: true },
+    ui_focus: { client_id: 'c', component: 'AbovePrompt', instance_id: 'above-prompt', plugin: 'p', key: 'k' },
+  };
+  ok('the fixture records carry exactly the fields of each 2.1.288 zod object (the dump is the evidence)', Object.entries(REC).every(([st, f]) => Object.keys(f).every((k) => zod['system/' + st].includes(k + ':'))));
+  const mm = createMessageManager('claude', 'test-288');
+  let i = 0;
+  for (const [st, f] of Object.entries(REC)) mm.processLive({ type: 'system', subtype: st, ...f, uuid: 'u288-' + (i++), session_id: S });
+  const drift = mm.messages.filter((m) => m.noticeKind === 'unknown-fields');
+  const infos = mm.messages.filter((m) => m.noticeKind === 'harness-informational');
+  ok('all eight live: NO unknown-event card, NO drift card', cards(mm).length === 0 && drift.length === 0, mm.messages.map((m) => m.noticeKind));
+  ok('instruction_size_warning → ONE dim harness notice (level notice, our words + the numbers), the seven others card-less', infos.length === 1 && mm.messages.length === 1 && infos[0].content[0].level === 'notice' && infos[0].content[0].say === 'instruction-size' && infos[0].content[0].params.chars === 61234 && infos[0].content[0].params.limit === 40000 && /61234 characters \(limit 40000\)/.test(infos[0].content[0].text), infos.map((m) => m.content));
+  ok('…the ui_toast text never reaches the chat (a plugin\'s line for the CLI\'s TUI notification bar)', !JSON.stringify(mm.messages).includes('Build failed'));
+  const h = createMessageManager('claude', 'test-288-h');
+  h.convertHistory([{ parentUuid: null, isSidechain: false, userType: 'external', cwd: '/w', sessionId: S, version: '2.1.288', type: 'system', subtype: 'instruction_size_warning', totalChars: 52000, totalLimitChars: 40000, fileCount: 1, uuid: 'h1', timestamp: '2026-10-07T00:00:00Z' }]);
+  ok('…a camelCase history row reads the same notice (never red)', cards(h).length === 0 && h.messages.length === 1 && h.messages[0].content[0].params.chars === 52000, h.messages.map((m) => m.noticeKind));
+  const ctl = createMessageManager('claude', 'test-288-ctl');
+  ctl.processLive({ type: 'system', subtype: 'ui_banner', plugin: 'p', text: 'x', uuid: 'c1', session_id: S });
+  ok('CONTROL: an invented ui_banner (undeclared) still renders the red Unknown-event card — the next upstream feature stays visible', cards(ctl).length === 1, ctl.messages.map((m) => m.noticeKind));
+  const crx = read('src/lib/chat-renderers.js'); const ib = crx.slice(crx.indexOf("noticeKind === 'harness-informational'"), crx.indexOf("noticeKind === 'harness-informational'") + 1800);
+  const KEY = 'The CLI warns the instructions are large: {chars} characters (limit {limit})';
+  ok('renderer: the instruction-size notice is OUR words through t() (escaped) on the same dim card; zh + ja carry the line', /b\.say === 'instruction-size' \? escHtml\(t\('The CLI warns the instructions are large: \{chars\} characters \(limit \{limit\}\)'/.test(ib) && ['zh', 'ja'].every((l) => read('src/lib/i18n-' + l + '.js').includes(JSON.stringify(KEY) + ':')));
+  ok('every one is a declared 2.1.288 row (SHAPE_SINCE) and on exactly one normalizer list', Object.keys(REC).every((st) => R.SHAPE_SINCE['system/' + st] === '2.1.288' && (MM.HANDLED_SYSTEM_SUBTYPES.has(st) !== MM.KNOWN_IGNORED_SYSTEM_SUBTYPES.has(st))));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

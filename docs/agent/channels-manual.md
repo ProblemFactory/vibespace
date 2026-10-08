@@ -496,6 +496,8 @@ A reply's PLACEMENT is one of four, and each channel offers only some:
 
 ## Searching (`search`, `search --full`, `read --around`)
 
+> **A `note: people's names cannot be read on "<account>"` line** (after `list` or `search`): that account's sign-in lacks the contact permission, so a person shows by the vendor's name and a search by their nickname or other name finds nothing — search by the vendor's name or by message words, and tell the user the account needs a Re-authorize (you cannot do it).
+
 The user asked (2026-10-03) whether channel search reads the vendor live or the
 local copy. Both, in two tiers — use the free one first:
 

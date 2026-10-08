@@ -773,7 +773,8 @@ function create(record = {}, deps = {}) {
 
     async listConversations({ cursor = null, limit = 100 } = {}) {
       if (!cursor) await listPeople();
-      const d = await api('users.conversations', { types: 'public_channel,private_channel,mpim,im', exclude_archived: optionOf(record, 'archived') === 'list' ? 'false' : 'true', limit: Math.min(200, Math.max(1, Number(limit) || 100)), ...(cursor ? { cursor } : {}) });
+      // lane discovery-cursor-persist: the vendor's own word for a kept listing cursor it no longer honours (`invalid_cursor`)
+      const d = await api('users.conversations', { types: 'public_channel,private_channel,mpim,im', exclude_archived: optionOf(record, 'archived') === 'list' ? 'false' : 'true', limit: Math.min(200, Math.max(1, Number(limit) || 100)), ...(cursor ? { cursor } : {}) }).catch((e) => { if (cursor && e && e.detail && e.detail.error === 'invalid_cursor') e.detail.cursorRefused = true; throw e; });
       const items = (Array.isArray(d.channels) ? d.channels : []).filter((c) => c && typeof c.id === 'string' && ID_RE.test(c.id)).slice(0, 1000);
       const ims = items.filter((c) => c.is_im && typeof c.user === 'string').map((c) => c.user);
       if (ims.length) await namePeople(ims);

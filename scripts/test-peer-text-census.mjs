@@ -828,7 +828,7 @@ const PRINTS = {
     'e.to': 'judged:agentEnvelope — the To the answered message\'s headers gave, a line piece (agentIdsOf)', 'e.cc': 'judged:agentEnvelope — its Cc, a line piece (agentIdsOf)',
     'e.added': `${O}:the plain addresses the agent itself added with --cc (validated, lower-cased)`,
     'pl.line': 'judged:agentPlaceLine — the parent\'s peerName author + a bounded first line, the line rule (channel-thread.js)', 'pl.tag': 'judged:agentPlaceLine — the thread tag (key + count) under the line rule',
-    'r.covered': `${V}:a count (design 010: the conversations the free search read)`, 'r.fullOffered': `${V}:a flag (design 010)`,
+    'r.covered': `${V}:a count (design 010: the conversations the free search read)`, 'r.namesNote': `${V}:the server's sentence naming the owner's account labels (lane channel-names-readable)`, 'r.fullOffered': `${V}:a flag (design 010)`,
     // design 008 S6 (lane channels-followups): the bounded `list` — how many more it may see / request, the bound
     'r.more': `${V}:a count (only of what the caller may see)`, 'r.moreRequestable': `${V}:a count (directory titles it may request)`, 'r.max': `${V}:the list's bound (200)`,
     'more': `${V}:Number(r.more) — a count`, 'moreReq': `${V}:Number(r.moreRequestable) — a count`, 'max': `${V}:Number(r.max) || 200 — the bound`,

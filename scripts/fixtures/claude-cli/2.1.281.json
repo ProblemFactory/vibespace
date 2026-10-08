@@ -1,0 +1,1188 @@
+{
+ "version": "2.1.281",
+ "method": "strings -n 8 <binary> (latin1) → extractZodUnion + extractPermissionSentences (scripts/claude-cli-dump.mjs)",
+ "helpers": [
+  "d/R @system/compact_boundary"
+ ],
+ "union": {
+  "active_goal": [
+   "value",
+   "uuid",
+   "session_id"
+  ],
+  "adaptive": [
+   "display"
+  ],
+  "agent": [
+   "prompt",
+   "if",
+   "timeout",
+   "model",
+   "statusMessage",
+   "once"
+  ],
+  "api_metrics": [
+   "event",
+   "uuid",
+   "session_id"
+  ],
+  "apply_flag_settings": [
+   "settings",
+   "uuid",
+   "session_id"
+  ],
+  "array": [
+   "title",
+   "description",
+   "minItems",
+   "maxItems",
+   "items",
+   "default"
+  ],
+  "assistant": [
+   "message",
+   "parent_tool_use_id",
+   "error",
+   "uuid",
+   "historical",
+   "session_id",
+   "request_id",
+   "user_message_uuid",
+   "user_message_uuids",
+   "resume_reason",
+   "resumed_from_incomplete_thinking",
+   "supersedes",
+   "aborted",
+   "subagent_type",
+   "task_description",
+   "tool_use_meta",
+   "narration_block_indexes",
+   "narration_hint",
+   "timestamp",
+   "is_meta",
+   "context_usage",
+   "usage_report",
+   "local_command_source",
+   "local_command_run",
+   "local_command_outcome",
+   "is_virtual",
+   "batch_tool_uses",
+   "wire_tool_inputs",
+   "wire_ingest_context",
+   "is_api_error_message",
+   "api_error_status",
+   "api_error",
+   "api_error_params",
+   "api_error_code",
+   "error_details",
+   "advisor_model",
+   "attribution_agent",
+   "attribution_skill",
+   "attribution_plugin",
+   "attribution_mcp_server",
+   "attribution_mcp_tool"
+  ],
+  "attachment": [
+   "attachment",
+   "timestamp",
+   "uuid",
+   "session_id"
+  ],
+  "audio": [
+   "data",
+   "mimeType",
+   "annotations",
+   "_meta"
+  ],
+  "auth_status": [
+   "isAuthenticating",
+   "output",
+   "error",
+   "uuid",
+   "session_id"
+  ],
+  "autocompact_state": [
+   "value",
+   "uuid",
+   "session_id"
+  ],
+  "available": [
+   "tool_uses"
+  ],
+  "bash_command": [
+   "command",
+   "cwd",
+   "uuid",
+   "session_id"
+  ],
+  "boolean": [
+   "title",
+   "description",
+   "default"
+  ],
+  "command": [
+   "command",
+   "args",
+   "if",
+   "shell",
+   "timeout",
+   "statusMessage",
+   "once",
+   "async",
+   "asyncRewake",
+   "rewakeMessage",
+   "rewakeSummary",
+   "cloud"
+  ],
+  "command_lifecycle": [
+   "command_uuid",
+   "state",
+   "uuid",
+   "session_id"
+  ],
+  "compact_end": [],
+  "compact_progress": [
+   "event",
+   "uuid",
+   "session_id"
+  ],
+  "compact_start": [
+   "hint_text"
+  ],
+  "content": [
+   "content"
+  ],
+  "content_block_start": [
+   "id"
+  ],
+  "control_cancel_request": [
+   "request_id"
+  ],
+  "control_request": [
+   "request_id",
+   "request"
+  ],
+  "control_response": [
+   "response"
+  ],
+  "conversation_reset": [
+   "new_conversation_id",
+   "uuid",
+   "session_id",
+   "trigger",
+   "user_message_uuid",
+   "timestamp"
+  ],
+  "disabled": [],
+  "document": [
+   "source",
+   "title",
+   "context",
+   "citations",
+   "cache_control"
+  ],
+  "enabled": [
+   "budgetTokens",
+   "display"
+  ],
+  "end": [
+   "output_tokens",
+   "id"
+  ],
+  "ephemeral": [
+   "ttl"
+  ],
+  "error": [
+   "error"
+  ],
+  "evaluated": [
+   "outcome",
+   "explanation"
+  ],
+  "file": [
+   "file_id"
+  ],
+  "file_unchanged": [
+   "file",
+   "source"
+  ],
+  "hint_clears": [
+   "ids",
+   "content_by_id",
+   "uuid",
+   "session_id"
+  ],
+  "hooks_start": [
+   "hook_type"
+  ],
+  "http": [
+   "url",
+   "if",
+   "timeout",
+   "headers",
+   "allowedEnvVars",
+   "statusMessage",
+   "once",
+   "cloud"
+  ],
+  "idle_notification": [
+   "from",
+   "timestamp",
+   "idleReason",
+   "summary",
+   "completedTaskId",
+   "completedStatus",
+   "failureReason",
+   "result"
+  ],
+  "image": [
+   "source",
+   "cache_control"
+  ],
+  "json_schema": [
+   "schema"
+  ],
+  "keep_alive": [],
+  "local": [
+   "path",
+   "skipMcpDiscovery"
+  ],
+  "mcp_tool": [
+   "server",
+   "tool",
+   "input",
+   "if",
+   "timeout",
+   "statusMessage",
+   "once"
+  ],
+  "notebook": [
+   "file"
+  ],
+  "object": [
+   "properties",
+   "required"
+  ],
+  "open_message_selector": [
+   "uuid",
+   "session_id"
+  ],
+  "os_notification": [
+   "message",
+   "notification_type",
+   "uuid",
+   "session_id"
+  ],
+  "parts": [
+   "file",
+   "firstPage",
+   "pages"
+  ],
+  "pdf": [
+   "file"
+  ],
+  "permission_error": [
+   "message",
+   "details"
+  ],
+  "permission_response": [
+   "request_id",
+   "tool_use_id",
+   "approved_request",
+   "response"
+  ],
+  "plan_approval_request": [
+   "from",
+   "timestamp",
+   "planFilePath",
+   "planContent",
+   "requestId"
+  ],
+  "plan_approval_response": [
+   "requestId",
+   "approved",
+   "feedback",
+   "timestamp",
+   "permissionMode"
+  ],
+  "prompt": [
+   "prompt",
+   "if",
+   "timeout",
+   "model",
+   "continueOnBlock",
+   "statusMessage",
+   "once"
+  ],
+  "prompt_suggestion": [
+   "suggestion",
+   "uuid",
+   "session_id"
+  ],
+  "queued_notification": [
+   "notification",
+   "uuid",
+   "session_id"
+  ],
+  "rate_limit_event": [
+   "rate_limit_info",
+   "uuid",
+   "session_id"
+  ],
+  "redacted_thinking": [
+   "data"
+  ],
+  "refusal_continuation": [
+   "phase",
+   "salvage_text",
+   "uuid",
+   "session_id"
+  ],
+  "regex": [
+   "pattern",
+   "url",
+   "label"
+  ],
+  "request_too_large": [],
+  "resource": [
+   "resource",
+   "annotations",
+   "_meta"
+  ],
+  "response_length": [
+   "op",
+   "delta",
+   "uuid",
+   "session_id"
+  ],
+  "result": [
+   "duration_ms",
+   "duration_api_ms",
+   "is_error",
+   "num_turns",
+   "stop_reason",
+   "total_cost_usd",
+   "usage",
+   "modelUsage",
+   "subagent_stats",
+   "permission_denials",
+   "queued_turn_count",
+   "errors",
+   "runner_exit",
+   "startup_failure_reason",
+   "user_message_uuid",
+   "user_message_uuids",
+   "resume_reason",
+   "terminal_reason",
+   "result_index",
+   "fast_mode_state",
+   "fast_mode_disabled_reason",
+   "origin",
+   "uuid",
+   "session_id"
+  ],
+  "result/success": [
+   "duration_ms",
+   "duration_api_ms",
+   "ttft_ms",
+   "ttft_stream_ms",
+   "time_to_request_ms",
+   "user_message_uuid",
+   "user_message_uuids",
+   "resume_reason",
+   "local_command",
+   "request_sent_wall_ms",
+   "first_content_frame_ms",
+   "first_stream_post_ms",
+   "first_stream_post_ack_ms",
+   "first_stream_post_queue_wait_ms",
+   "first_stream_post_queued_behind",
+   "first_stream_post_wall_ms",
+   "frame_received_wall_ms",
+   "frame_enqueued_wall_ms",
+   "turn_started_wall_ms",
+   "first_text_post_ms",
+   "first_text_post_wall_ms",
+   "time_to_request_from_spawn_ms",
+   "warm_spare_claimed",
+   "time_origin_ms",
+   "is_error",
+   "api_error_status",
+   "api_error_code",
+   "num_turns",
+   "result",
+   "stop_reason",
+   "total_cost_usd",
+   "usage",
+   "modelUsage",
+   "subagent_stats",
+   "permission_denials",
+   "queued_turn_count",
+   "structured_output",
+   "deferred_tool_use",
+   "terminal_reason",
+   "result_index",
+   "fast_mode_state",
+   "fast_mode_disabled_reason",
+   "origin",
+   "uuid",
+   "session_id"
+  ],
+  "sdk": [
+   "name",
+   "timeout",
+   "alwaysLoad"
+  ],
+  "search_result": [
+   "source",
+   "title",
+   "content",
+   "citations",
+   "cache_control"
+  ],
+  "session_not_active": [],
+  "session_notice": [
+   "uuid",
+   "notice_class",
+   "from_session_id",
+   "content",
+   "isSynthetic",
+   "inbound_origin",
+   "session_id"
+  ],
+  "set_expanded_view": [
+   "expanded_view",
+   "uuid",
+   "session_id"
+  ],
+  "set_in_progress_tool_use_ids": [
+   "op",
+   "uuid",
+   "session_id"
+  ],
+  "shutdown_approved": [
+   "requestId",
+   "from",
+   "timestamp",
+   "paneId",
+   "backendType"
+  ],
+  "shutdown_rejected": [
+   "requestId",
+   "from",
+   "reason",
+   "timestamp"
+  ],
+  "shutdown_request": [
+   "requestId",
+   "from",
+   "reason",
+   "timestamp"
+  ],
+  "shutdown_response": [
+   "request_id",
+   "approve",
+   "reason"
+  ],
+  "skipped": [],
+  "sse": [
+   "url",
+   "headers",
+   "headersHelper",
+   "oauth",
+   "timeout",
+   "request_timeout_ms",
+   "tools",
+   "alwaysLoad",
+   "bareElicitationCapability",
+   "discoveryCache",
+   "role",
+   "toolPermissions"
+  ],
+  "start": [
+   "ttft_ms",
+   "id",
+   "message_id"
+  ],
+  "stdio": [
+   "command",
+   "args",
+   "env",
+   "timeout",
+   "alwaysLoad",
+   "bareElicitationCapability",
+   "role"
+  ],
+  "stream_event": [
+   "event",
+   "parent_tool_use_id",
+   "uuid",
+   "session_id",
+   "ttft_ms",
+   "user_message_uuid",
+   "user_message_uuids",
+   "resume_reason"
+  ],
+  "stream_mode": [
+   "mode",
+   "uuid",
+   "session_id"
+  ],
+  "string": [
+   "enum",
+   "description"
+  ],
+  "system/agents_killed": [
+   "uuid",
+   "session_id"
+  ],
+  "system/api_error": [
+   "error",
+   "retry_in_ms",
+   "retry_attempt",
+   "max_retries",
+   "uuid",
+   "session_id"
+  ],
+  "system/api_retry": [
+   "attempt",
+   "max_retries",
+   "retry_delay_ms",
+   "error_status",
+   "error",
+   "no_response",
+   "uuid",
+   "session_id"
+  ],
+  "system/away_summary": [
+   "content",
+   "uuid",
+   "session_id"
+  ],
+  "system/background_tasks_changed": [
+   "tasks",
+   "uuid",
+   "session_id"
+  ],
+  "system/cloud_session_delta": [
+   "seq",
+   "changed",
+   "cloud_session",
+   "uuid",
+   "session_id"
+  ],
+  "system/code_change_published": [
+   "provider",
+   "url",
+   "repo",
+   "identifier",
+   "action",
+   "branch",
+   "uuid",
+   "session_id"
+  ],
+  "system/commands_changed": [
+   "commands",
+   "uuid",
+   "session_id"
+  ],
+  "system/compact_boundary": [
+   "compact_metadata",
+   "logical_parent_uuid",
+   "uuid",
+   "session_id",
+   "historical"
+  ],
+  "system/control_request_progress": [
+   "request_id",
+   "status",
+   "attempt",
+   "max_retries",
+   "retry_delay_ms",
+   "error_status",
+   "uuid",
+   "session_id"
+  ],
+  "system/dev_intent": [
+   "kind",
+   "trigger",
+   "uuid",
+   "session_id"
+  ],
+  "system/elicitation_complete": [
+   "mcp_server_name",
+   "elicitation_id",
+   "uuid",
+   "session_id"
+  ],
+  "system/feedback_draft_queued": [
+   "draft_id",
+   "draft_type",
+   "title",
+   "details_preview",
+   "uuid",
+   "session_id"
+  ],
+  "system/file_snapshot": [
+   "content",
+   "snapshot_files",
+   "uuid",
+   "session_id"
+  ],
+  "system/files_persisted": [
+   "files",
+   "failed",
+   "processed_at",
+   "uuid",
+   "session_id"
+  ],
+  "system/hook_progress": [
+   "hook_id",
+   "hook_name",
+   "hook_event",
+   "stdout",
+   "stderr",
+   "output",
+   "uuid",
+   "session_id"
+  ],
+  "system/hook_response": [
+   "hook_id",
+   "hook_name",
+   "hook_event",
+   "output",
+   "stdout",
+   "stderr",
+   "exit_code",
+   "outcome",
+   "uuid",
+   "session_id"
+  ],
+  "system/hook_started": [
+   "hook_id",
+   "hook_name",
+   "hook_event",
+   "uuid",
+   "session_id"
+  ],
+  "system/informational": [
+   "content",
+   "level",
+   "tool_use_id",
+   "prevent_continuation",
+   "uuid",
+   "session_id"
+  ],
+  "system/init": [
+   "agents",
+   "apiKeySource",
+   "startup_timing",
+   "betas",
+   "claude_code_version",
+   "cwd",
+   "tools",
+   "mcp_servers",
+   "model",
+   "permissionMode",
+   "slash_commands",
+   "terminal_slash_commands",
+   "output_style",
+   "skills",
+   "plugins",
+   "plugin_errors",
+   "plugin_warnings",
+   "mcp_server_errors",
+   "fast_mode_state",
+   "fast_mode_disabled_reason",
+   "footer_indicator",
+   "effort",
+   "per_turn_effort_active",
+   "view_mode",
+   "capabilities",
+   "analytics_disabled",
+   "product_feedback_disabled",
+   "memory_paths",
+   "scratchpad_path",
+   "worker_epoch",
+   "powershell_path",
+   "cloud_session",
+   "uuid",
+   "session_id"
+  ],
+  "system/local_command_output": [
+   "content",
+   "uuid",
+   "session_id"
+  ],
+  "system/memory_recall": [
+   "mode",
+   "memories",
+   "uuid",
+   "session_id"
+  ],
+  "system/memory_saved": [
+   "written_paths",
+   "team_count",
+   "verb",
+   "uuid",
+   "session_id"
+  ],
+  "system/mirror_error": [
+   "error",
+   "key",
+   "uuid",
+   "session_id"
+  ],
+  "system/model_consent_fallback": [
+   "choice",
+   "original_model",
+   "original_model_name",
+   "fallback_model",
+   "persisted_as_default",
+   "content",
+   "uuid",
+   "session_id"
+  ],
+  "system/model_fallback": [
+   "trigger",
+   "original_model",
+   "fallback_model",
+   "content",
+   "uuid",
+   "session_id"
+  ],
+  "system/model_refusal_fallback": [
+   "trigger",
+   "direction",
+   "scope",
+   "original_model",
+   "fallback_model",
+   "request_id",
+   "api_refusal_category",
+   "saw_cyber_refusal",
+   "api_refusal_explanation",
+   "retracted_message_uuids",
+   "refused_user_message_uuid",
+   "content",
+   "uuid",
+   "session_id"
+  ],
+  "system/model_refusal_no_fallback": [
+   "original_model",
+   "request_id",
+   "api_refusal_category",
+   "api_refusal_explanation",
+   "refused_user_message_uuid",
+   "content",
+   "uuid",
+   "session_id"
+  ],
+  "system/notification": [
+   "key",
+   "text",
+   "priority",
+   "color",
+   "timeout_ms",
+   "uuid",
+   "session_id"
+  ],
+  "system/peer_message_hold": [
+   "state",
+   "message_uuid",
+   "lane",
+   "from",
+   "from_name",
+   "cause",
+   "outcome",
+   "uuid",
+   "session_id"
+  ],
+  "system/per_turn_effort_changed": [
+   "per_turn_effort_active",
+   "uuid",
+   "session_id"
+  ],
+  "system/permission_denied": [
+   "tool_name",
+   "tool_use_id",
+   "agent_id",
+   "decision_reason_type",
+   "decision_reason_code",
+   "decision_reason",
+   "message",
+   "uuid",
+   "session_id"
+  ],
+  "system/permission_retry": [
+   "content",
+   "commands",
+   "uuid",
+   "session_id"
+  ],
+  "system/plugin_install": [
+   "status",
+   "name",
+   "error",
+   "uuid",
+   "session_id"
+  ],
+  "system/post_turn_summary": [
+   "summarizes_uuid",
+   "status_category",
+   "status_detail",
+   "needs_action",
+   "uuid",
+   "session_id"
+  ],
+  "system/scheduled_task_fire": [
+   "content",
+   "uuid",
+   "session_id"
+  ],
+  "system/session_state_changed": [
+   "state",
+   "uuid",
+   "session_id"
+  ],
+  "system/status": [
+   "status",
+   "permissionMode",
+   "compact_result",
+   "compact_error",
+   "uuid",
+   "session_id"
+  ],
+  "system/stop_hook_summary": [
+   "hook_count",
+   "hook_infos",
+   "hook_errors",
+   "hook_additional_context",
+   "prevented_continuation",
+   "stop_reason",
+   "has_output",
+   "level",
+   "tool_use_id",
+   "hook_label",
+   "total_duration_ms",
+   "uuid",
+   "session_id"
+  ],
+  "system/task_notification": [
+   "task_id",
+   "tool_use_id",
+   "status",
+   "reason",
+   "output_file",
+   "summary",
+   "usage",
+   "resource_links",
+   "skip_transcript",
+   "ambient",
+   "uuid",
+   "session_id"
+  ],
+  "system/task_progress": [
+   "task_id",
+   "tool_use_id",
+   "description",
+   "subagent_type",
+   "usage",
+   "last_tool_name",
+   "summary",
+   "uuid",
+   "session_id"
+  ],
+  "system/task_started": [
+   "task_id",
+   "tool_use_id",
+   "description",
+   "subagent_type",
+   "is_backgrounded",
+   "spawn_depth",
+   "task_type",
+   "workflow_name",
+   "prompt",
+   "skip_transcript",
+   "ambient",
+   "uuid",
+   "session_id"
+  ],
+  "system/task_summary": [
+   "detail",
+   "uuid",
+   "session_id"
+  ],
+  "system/task_updated": [
+   "task_id",
+   "patch",
+   "uuid",
+   "session_id"
+  ],
+  "system/thinking": [
+   "content",
+   "uuid",
+   "session_id"
+  ],
+  "system/thinking_tokens": [
+   "estimated_tokens",
+   "estimated_tokens_delta",
+   "user_message_uuid",
+   "uuid",
+   "session_id"
+  ],
+  "system/turn_duration": [
+   "duration_ms",
+   "budget_tokens",
+   "budget_limit",
+   "budget_nudges",
+   "message_count",
+   "pending_background_agent_count",
+   "pending_workflow_count",
+   "uuid",
+   "session_id"
+  ],
+  "system/turn_handoff_available": [
+   "v",
+   "tools",
+   "worker_epoch",
+   "uuid",
+   "session_id",
+   "staged_files",
+   "no_query_first",
+   "relay_marker"
+  ],
+  "system/turn_preempted": [
+   "reason",
+   "preempted_by_uuid",
+   "preempted_message_uuids",
+   "uuid",
+   "session_id"
+  ],
+  "system/upgrade_relay_marker": [
+   "uuid",
+   "content"
+  ],
+  "system/vcs_state_changed": [
+   "kind",
+   "cwd",
+   "branch",
+   "uuid",
+   "session_id"
+  ],
+  "system/worker_shutting_down": [
+   "reason",
+   "uuid",
+   "session_id"
+  ],
+  "task_assignment": [
+   "taskId",
+   "subject",
+   "description",
+   "assignedBy",
+   "timestamp"
+  ],
+  "task_completed": [
+   "from",
+   "taskId",
+   "taskSubject",
+   "timestamp"
+  ],
+  "teammate_terminated": [
+   "message"
+  ],
+  "text": [
+   "media_type",
+   "data"
+  ],
+  "thinking": [
+   "thinking",
+   "signature"
+  ],
+  "thinking_dropped": [
+   "path",
+   "reason"
+  ],
+  "thinking_progress": [
+   "estimated_tokens_delta",
+   "id"
+  ],
+  "thinking_signature": [
+   "chars",
+   "id"
+  ],
+  "tombstone": [
+   "message",
+   "uuid",
+   "session_id"
+  ],
+  "tool_progress": [
+   "tool_use_id",
+   "tool_name",
+   "parent_tool_use_id",
+   "elapsed_time_seconds",
+   "task_id",
+   "uuid",
+   "session_id",
+   "heartbeat",
+   "subagent_type",
+   "subagent_retry"
+  ],
+  "tool_reference": [
+   "tool_name"
+  ],
+  "tool_result": [
+   "tool_use_id",
+   "content",
+   "is_error",
+   "cache_control"
+  ],
+  "tool_use": [
+   "id",
+   "name",
+   "input",
+   "cache_control"
+  ],
+  "tool_use_summary": [
+   "summary",
+   "preceding_tool_use_ids",
+   "uuid",
+   "session_id",
+   "timestamp"
+  ],
+  "transcript_mirror": [
+   "filePath",
+   "entries"
+  ],
+  "unavailable": [
+   "reason"
+  ],
+  "unsupported": [],
+  "update_environment_variables": [
+   "variables",
+   "request_id"
+  ],
+  "url": [
+   "url"
+  ],
+  "user": [
+   "message",
+   "parent_tool_use_id",
+   "isSynthetic",
+   "tool_use_result",
+   "priority",
+   "origin",
+   "client_platform",
+   "inbound_origin",
+   "historical",
+   "shouldQuery",
+   "timestamp",
+   "is_meta",
+   "seeded_summon",
+   "client_composed",
+   "initiator",
+   "is_visible_in_transcript_only",
+   "is_virtual",
+   "is_compact_summary",
+   "summarize_metadata",
+   "mcp_meta",
+   "tool_result_meta",
+   "source_tool_use_id",
+   "source_tool_assistant_uuid",
+   "image_paste_ids",
+   "plan_content",
+   "permission_mode",
+   "interrupted_message_id"
+  ],
+  "ws": [
+   "url",
+   "headers",
+   "headersHelper",
+   "timeout",
+   "alwaysLoad",
+   "bareElicitationCapability",
+   "role"
+  ]
+ },
+ "sentences": {
+  "anchor": "Ud",
+  "list": "Gd",
+  "set": "IS",
+  "suffixes": [
+   "u4e"
+  ],
+  "unresolved": [],
+  "rows": [
+   {
+    "name": "ww",
+    "from": "both",
+    "text": "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed."
+   },
+   {
+    "name": "Dx",
+    "from": "Gd",
+    "text": "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). To tell you how to proceed, the user said:"
+   },
+   {
+    "name": "hL",
+    "from": "Gd",
+    "text": "Permission for this tool use was denied. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). Try a different approach or report the limitation to complete your task."
+   },
+   {
+    "name": "v6",
+    "from": "Gd",
+    "text": "Permission for this tool use was denied. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). The user said:"
+   },
+   {
+    "name": "pb",
+    "from": "both",
+    "text": "The user doesn't want to take this action right now. STOP what you are doing and wait for the user to tell you how to proceed."
+   },
+   {
+    "name": "pme",
+    "from": "both",
+    "text": "[Tool call skipped: the turn was stopped before this call ran, by the check whose denial is on another call in this batch. Nothing refused this call and it had no effects; re-run it if still needed.]"
+   },
+   {
+    "name": "ume",
+    "from": "both",
+    "text": "[Tool call skipped: the turn ended to deliver the message that follows before this call ran. Nothing refused it; re-run it if still needed.]"
+   },
+   {
+    "name": "l4e",
+    "from": "both",
+    "text": "[Tool call not completed: an approval request expired with no answer, so the action awaiting approval did not run. Nobody refused it, so this is not the user's decision; ask again if it is still needed.]"
+   },
+   {
+    "name": "c4e",
+    "from": "both",
+    "text": "[Tool call not completed: an approval request was still unanswered when the message that follows arrived and was closed, so the action awaiting approval did not run. Nobody refused it, so this is not the user's decision; ask again if it is still needed.]"
+   },
+   {
+    "name": "Ud",
+    "from": "both",
+    "text": "[Request interrupted by user for tool use]"
+   },
+   {
+    "name": "ok",
+    "from": "both",
+    "text": "[Tool call did not complete: the turn was ended to deliver the message that follows. Nothing refused it; re-run it if still needed.]"
+   },
+   {
+    "name": "kH",
+    "from": "both",
+    "text": "[Tool call interrupted: the session ended before this call's result was recorded, so its outcome is unknown. Check whether it took effect before relying on it or running it again.]"
+   },
+   {
+    "name": "TH",
+    "from": "both",
+    "text": "[Tool call result not in this copy: this session was copied from another session before that session recorded this call's result. The call may have finished there, may still be running there, or may never have run. Check whether it took effect before relying on it or running it again.]"
+   },
+   {
+    "name": "Jw",
+    "from": "IS",
+    "text": "[Request interrupted by user]"
+   }
+  ]
+ },
+ "zod": {}
+}

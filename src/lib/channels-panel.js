@@ -288,11 +288,22 @@ function accountLines(app, a, kinds) {
     // reads "One Re-authorize adds: reading reactions · new-message search and single chats" (a server before the grant
     // list sends only `reactionsGrant` — its own line, as before)
     const vendorW = a.vendor ? t(a.vendor) : (a.label || a.kind);
-    const gl = Array.isArray(a.grants) ? chanCaps.grantsText(a.grants, { t, vendor: vendorW }) : { text: chanCaps.reactReadText(a.reactionsGrant, { t, vendor: vendorW }), warn: !!(a.reactionsGrant && a.reactionsGrant.refused && a.reactionsGrant.refused.length) };
+    // lane channel-names-readable: a sign-in KNOWN not to read people's profiles says it on its own line below — the
+    // grants line does not say "reading people's profiles" a second time
+    const nl = chanCaps.namesText(a.namesReadable, { t });
+    const gl = Array.isArray(a.grants) ? chanCaps.grantsText(nl ? a.grants.filter((g) => !(g && g.what === 'people')) : a.grants, { t, vendor: vendorW }) : { text: chanCaps.reactReadText(a.reactionsGrant, { t, vendor: vendorW }), warn: !!(a.reactionsGrant && a.reactionsGrant.refused && a.reactionsGrant.refused.length) };
     if (gl.text) {
       const n = noteLine('chan-sec-note', gl.text, { warn: gl.warn });
       n.dataset.chanRxRead = a.id;
       n.dataset.chanGrants = a.id;
+      const v = btn(t('Re-authorize'), reauth); v.classList.add('chan-sec-verb'); n.appendChild(v);
+      out.push(n);
+    }
+    // lane channel-names-readable (userW: "Channels cannot find my conversation with" a colleague): the sign-in holds no
+    // permission to read people's profiles — said HERE with its one verb, never only in the server's log
+    if (nl) {
+      const n = noteLine('chan-sec-note', nl, { warn: true });
+      n.dataset.chanNames = a.id;
       const v = btn(t('Re-authorize'), reauth); v.classList.add('chan-sec-verb'); n.appendChild(v);
       out.push(n);
     }
@@ -489,6 +500,9 @@ function showSearchDialog(app, a, { q: initial = '', convId = null, convTitle = 
     }
     r.results.sort((m, n) => (Number(n.record && n.record.at) || 0) - (Number(m.record && m.record.at) || 0));
     status.textContent = r.results.length ? (r.truncated ? t('{n} results — more exist; narrow the words', { n: r.results.length }) : t('{n} results', { n: r.results.length })) : t('No message matches.');
+    // lane channel-names-readable: nothing matched words with letters on an account whose people's names cannot be read
+    const blind = !r.results.length && /\p{L}/u.test(q) ? accounts.find((acc) => acc && acc.namesReadable && acc.namesReadable.ok === false) : null;
+    if (blind) status.textContent = chanCaps.namesSearchText(blind.namesReadable, { t });
     // .212: the agent's hits the saved copy no longer holds (a search older than its window); lane search-card-open
     // (.233; the owner: 「既然 agent 进行了搜索说明 vibespace 已经获取到了相关 data，为啥我点不开？」): no longer a count at the
     // top — section two's head says it and SHOWS them from the memo (the agent's own answer read first, then 'all',
@@ -1426,6 +1440,8 @@ export function renderChannelsPanel(app, c) {
       list.appendChild(chanLine('empty-hint chan-groups-empty chan-focus-empty', t('Nothing here needs you or an agent yet. A conversation appears here when you hand it to an agent, an agent reads it, a draft waits for your approval, a wake is held, or you reply in it. Every conversation is under All ({n}).', { n: allN })));
     } else if (!fs.shown.length && q.trim() && (fs.view === 'focus' || allReady)) {
       list.appendChild(chanLine('empty-hint chan-groups-empty', t('No conversation matches "{q}".', { q: q.trim() })));
+      // lane channel-names-readable: …and why a search by a person's other name can find nothing (the account named)
+      if (/\p{L}/u.test(q)) for (const ad of adapters) if (ad && ad.namesReadable && ad.namesReadable.ok === false) list.appendChild(chanLine('empty-hint chan-groups-empty chan-names-empty', `${ad.label || ad.id}: ${chanCaps.namesSearchText(ad.namesReadable, { t })}`));
     }
     // the ALL view is the server's pages — its end reads the next one as it comes near (design 008; owner 2026-10-03:
     //  seamless, no button); the attention list is short by construction

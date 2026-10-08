@@ -191,6 +191,9 @@ function worldModule(kind, worlds, { receive = 'poll', unitsPerHistory = 1, budg
           await pace(1); meter(1); world.calls.list++;
           if (world.sends) world.sends.push({ at: world.paceNow ? world.paceNow() : 0, units: 1 });
           if (world.failNext) { const code = world.failNext; if (!world.failSticky) world.failNext = null; throw refusal(code); }
+          // lane discovery-cursor-persist: a listing cut mid-walk (`listFailFrom`) and a kept cursor the vendor no longer honours (once: a fresh walk's tokens are new)
+          if (world.listFailFrom != null && (cursor ? Number(cursor) : 0) >= world.listFailFrom) throw refusal('transport');
+          if (cursor && world.staleCursors && world.staleCursors.delete(String(cursor))) throw new CH.ChannelError('not-found', 'HTTP 404 page token unknown', { retryable: false });
           const all = [...world.convs.values()];
           const from = cursor ? Number(cursor) : 0;
           const page = all.slice(from, from + limit);
@@ -2842,7 +2845,7 @@ console.log("㉒ lane gmail-feed-gap (B-5134): a GAP in the change feed is ONE h
     return { named, st, dueBefore, c: G.count(), lines: G.lines.slice(), since0: G.since0, since1: G.rec().feed.carrying && G.rec().feed.carrying.since };
   });
   ok(rs.st.carrying === true && rs.st.state === 'catching-up' && rs.since1 === rs.since0 && rs.since0 > 0, `a restart 30 min later boots CARRYING from the persisted fact (since ${rs.since0}), catching up — never re-derived from an empty measurement`, JSON.stringify(rs.st));
-  ok(rs.dueBefore === 0 && rs.c.feed === 1 && rs.c.hist === NAMED && rs.c.reads.every((id) => rs.named.includes(id)), `the boot pass is the same ONE walk + ${NAMED} named reads, 0 due by the clock (listing pages: ${rs.c.list})`, JSON.stringify({ due: rs.dueBefore, c: { ...rs.c, reads: rs.c.reads.length } }));
+  ok(rs.dueBefore === 0 && rs.c.feed === 1 && rs.c.hist === NAMED && rs.c.reads.every((id) => rs.named.includes(id)) && rs.c.list === 0, `the boot pass is the same ONE walk + ${NAMED} named reads, 0 due by the clock, 0 listing pages (lane discovery-cursor-persist: ${rs.c.list})`, JSON.stringify({ due: rs.dueBefore, c: { ...rs.c, reads: rs.c.reads.length } }));
   ok(rs.lines.filter((l) => /the change feed resumed after 30 min/.test(l)).length === 1, 'ONE journal line for the restart gap (30 min)', JSON.stringify(rs.lines.filter((l) => /resumed/.test(l))));
   // ── THE 404 LEG: an expired cursor ⇒ the listing re-walk, as built (no per-row read) ──
   const ex = await runGap(ENG, 'expired', async (G) => {
@@ -2873,6 +2876,60 @@ console.log("㉒ lane gmail-feed-gap (B-5134): a GAP in the change feed is ONE h
   const wordsPark = caps.feedText({ state: 'backoff', why: 'rate-limited', carrying: true, gapSince: 1, until: 2 }, { vendor: 'Gmail', clock: () => 'HH:MM' });
   ok(words === 'Catching up since HH:MM — the change feed resumes from where it stopped' && /^Catching up since HH:MM — Gmail asked the change feed to wait/.test(wordsPark), `the card says it: "${words}" · "${wordsPark}"`);
   for (const r of copiesCensus(Mg.files, Mg.dir, REPO, { minCopies: 1 })) ok(r.pass, r.name, r.detail);
+}
+
+console.log("㉓ lane discovery-cursor-persist (B-6638): a server restart never re-walks an account's whole listing — the cursor is the record's");
+{
+  const Md = mutantCopies('chan-agg-disccur', REPO);
+  const swap = (src, a, b, what) => { if (!src.includes(a)) throw new Error(`control needle gone: ${what}`); return src.split(a).join(b); };
+  // CONTROL engine: the base — discovery's walk state in memory only (the record's `discovery` never read back at boot)
+  const BASE = Md.load('src/server/channels-engine.js', swap(ENGINE_SRC, 'disc: discFromRecord(rec)', 'disc: discFromRecord({})', 'disc-memory'), 'disc-memory');
+  const N = 10000;
+  const run = async (mod, label, { failFrom = null } = {}, script) => {
+    const t00 = clock;
+    const W = makeWorld(clock, { n: N, hot: 50, warm: 200 });
+    W.calls.changes = 0; W.histPageSize = 10; W.listFailFrom = failFrom;
+    const k = worldModule('dc', W, { feed: 'history', budgetDefault: 1e9 });
+    const dir = path.join(ROOT, `disccur-${label}`);
+    seedAccounts(dir, [['dc', 'dc']]);
+    const reg = CH.createChannelRegistry(); reg.register(k);
+    const lines = [];
+    const lg = { log: (m) => lines.push(String(m)), warn: (m) => lines.push(String(m)), error() {} };
+    const mk = () => mod.create({ dataDir: dir, registry: reg, env: {}, now, broadcast: () => {}, serverSetting: () => undefined, liveSessions: () => SESS, deliver: null, log: lg });
+    const D = { eng: mk(), W, lines };
+    D.rec = () => D.eng.adapterRecords().adapters.find((r) => r.id === 'dc');
+    D.rows = () => Object.values(D.eng.store.index.live()).filter((en) => en && en.adapterId === 'dc');
+    D.restart = () => { D.eng.stop(); clock += 30 * 60e3; D.eng = mk(); W.calls.list = 0; lines.length = 0; };
+    D.passes = async (n) => { for (let i = 0; i < n; i++) { clock += 1000; try { await D.eng.pass('dc'); } catch {} } };
+    try {
+      if (failFrom == null) { for (let i = 0; i < 12 && D.rows().length < N; i++) await D.passes(1); clock += 60e3; await D.passes(1); }
+      else await D.passes(1);
+      D.boot = { list: W.calls.list, disc: D.rec().discovery, rows: D.rows().length };
+      return await script(D);
+    } finally { D.eng.stop(); clock = t00 + 4 * 3600e3; }
+  };
+  const after = (D) => ({ boot: D.boot, list: D.W.calls.list, disc: D.rec().discovery, rows: D.rows().length, unlisted: D.rows().filter((en) => en.unlistedAt).length, lines: D.lines.filter((l) => /listing cursor/.test(l)) });
+  // (a) listed whole, stopped, +30 min, started on the same store
+  const leg = (D) => { D.restart(); return D.passes(3).then(() => after(D)); };
+  const real = await run(ENG, 'whole', {}, leg);
+  const base = await run(BASE, 'whole-base', {}, leg);
+  console.log(`    restart listing pages for one ${N}-row account · BEFORE (cursor in memory): ${base.list} · AFTER: ${real.list} (boot walk ${real.boot.list} pages)`);
+  ok(real.boot.disc && real.boot.disc.complete === true && real.boot.disc.cursor === null && real.boot.list === N / 100, `a complete walk is the record's: discovery {complete, completeAt} after ${real.boot.list} pages`, JSON.stringify(real.boot));
+  ok(real.list === 0 && real.rows === N && real.unlisted === 0, `a restart 30 min later lists 0 pages (the feed's catch-up only), ${real.rows} rows kept, 0 unlisted`, JSON.stringify(real));
+  ok(base.list === N / 100, `CONTROL the base (discovery's cursor in memory): the restart re-walks the whole listing — ${base.list} pages`, JSON.stringify({ list: base.list }));
+  // (b) a walk the restart cut at page 40 resumes from page 40, not page 1
+  const cut = (D) => { D.W.listFailFrom = null; D.restart(); return D.passes(3).then(() => after(D)); };
+  const rc = await run(ENG, 'cut', { failFrom: 4000 }, cut);
+  const rcBase = await run(BASE, 'cut-base', { failFrom: 4000 }, cut);
+  ok(rc.boot.disc && rc.boot.disc.cursor === '4000' && rc.boot.disc.complete === false && rc.boot.rows === 4000, `a walk cut at page 40 keeps its cursor on the record (${JSON.stringify(rc.boot.disc && rc.boot.disc.cursor)}, never complete)`, JSON.stringify(rc.boot));
+  ok(rc.list === 60 && rc.rows === N && rc.unlisted === 0 && rc.disc.complete === true, `a never-completed account RESUMES from its page: ${rc.list} pages after the restart (not 100), all ${rc.rows} rows, 0 unlisted (the walk's start is kept too)`, JSON.stringify(rc));
+  ok(rcBase.list === N / 100, `CONTROL the base: the cut walk starts over from page 1 — ${rcBase.list} pages`, JSON.stringify({ list: rcBase.list }));
+  // (c) the vendor refuses the kept cursor (404) ⇒ ONE re-walk from page 1, said once
+  const stale = (D) => { D.W.listFailFrom = null; D.W.staleCursors = new Set(['4000']); D.restart(); return D.passes(3).then(() => after(D)); };
+  const rx = await run(ENG, 'stale', { failFrom: 4000 }, stale);
+  ok(rx.list === 1 + N / 100 && rx.rows === N && rx.disc.complete === true && rx.disc.cursor === null, `a refused cursor ⇒ ONE re-walk from the first page: ${rx.list} calls (1 refused + ${N / 100}), complete`, JSON.stringify(rx));
+  ok(rx.lines.length === 1 && /the vendor refused the kept listing cursor \(not-found: HTTP 404 page token unknown\) — the listing is walked again from its first page/.test(rx.lines[0]), `said once: ${rx.lines[0] || '(none)'}`, JSON.stringify(rx.lines));
+  for (const r of copiesCensus(Md.files, Md.dir, REPO, { minCopies: 1 })) ok(r.pass, r.name, r.detail);
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

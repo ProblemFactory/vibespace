@@ -15,6 +15,8 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + JSON.stringify(e) : '')); } };
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
+// lane claude-md-diet (B-23e7): the per-file / per-incident index lines moved out of CLAUDE.md into the kb INDEX heads
+const indexHead = (f) => ((t) => (t.split(/^## INDEX\b.*$/m)[1] || '').split(/^## /m)[0])(read(f));
 const { mergeLiveWorkflow, windowState } = require(path.join(REPO, 'src/workflow-live.js'));
 const { createMessageManager } = require(path.join(REPO, 'src/normalizers.js'));
 
@@ -130,7 +132,7 @@ console.log('§3 wiring pins (the 2.355.0 lesson)');
   const win = read('src/lib/workflow-detail.js');
   ok('the window renders the tree: liveTree note (the PURE liveNoteKind picks it, the stall first — lane Q verify), live tokens/tool calls, the last-tool chip, View Log disabled for a transcript not on disk yet', /noteKind === 'tree'\s*\?/.test(win) && /const noteKind = liveNoteKind\(wf\)/.test(win) && /wf\.liveTree && wf\.totalTokens/.test(win) && /workflow-agent-tool/.test(win) && /ag\.onDisk === false/.test(win) && /escHtml\(ag\.lastToolName\)/.test(win));
   ok('the chip is styled with theme vars', /\.workflow-agent-tool \{[^}]*var\(--text-dim\)/.test(read('public/style.css')));
-  ok('the CLAUDE.md head no longer calls live progress unreadable', !/live progress is TUI-only, unreadable/.test(read('CLAUDE.md')));
+  ok('neither CLAUDE.md nor the kb INDEX heads call live progress unreadable', !/live progress is TUI-only, unreadable/.test(read('CLAUDE.md') + indexHead('docs/kb-file-structure.md') + indexHead('docs/kb-bugfix-invariants.md')));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

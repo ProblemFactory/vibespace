@@ -620,5 +620,23 @@ for (const { kind, caps } of REGISTERED) {
   ok(au && au.kind === 'external' && au.orgs.join('|') === 'Acme|Globex' && au.members === 9 && !('audience' in (await ia.convCaps('bad'))), 'convCaps carries `audience` (closed kind, organizations through the name door); an unknown kind is dropped');
 }
 
+// lane discovery-cursor-persist (B-6638): THE LISTING CURSOR CONTRACT — `listConversations({cursor, limit})` answers
+// `{conversations, cursor, complete}` and the cursor is the VENDOR's page token (a string a later process can hand back);
+// a paged adapter types the vendor's refusal of a kept cursor (`detail.cursorRefused`) only on a call that carried one
+console.log('— the listing cursor contract (lane discovery-cursor-persist)');
+{
+  const words = { 'gmail.js': /page \?token/, 'slack.js': /'invalid_cursor'/, 'lark.js': /page_\?token/ };
+  for (const [f, word] of Object.entries(words)) {
+    const src = fs.readFileSync(path.join(REPO, 'src/channels', f), 'utf-8');
+    const i = src.indexOf('async listConversations('), body = i < 0 ? '' : src.slice(i, src.indexOf('\n    },', i));
+    ok(/return \{ conversations, cursor: next, complete: !next \};/.test(body), `${f}: listConversations answers {conversations, cursor: the vendor's next page token, complete}`);
+    ok(/if \(cursor && [^\n]*e\.detail\.cursorRefused = true; throw e; \}\)/.test(body) && word.test(body), `${f}: a refusal of a kept cursor is typed in the vendor's own word (cursorRefused) — only when a cursor was sent`);
+  }
+  for (const f of ['fake.js', 'agents.js']) {
+    const src = fs.readFileSync(path.join(REPO, 'src/channels', f), 'utf-8');
+    ok(/cursor: null, complete: true \}/.test(src), `${f}: one page, no cursor to keep (nothing to resume — the walk is one call)`);
+  }
+}
+
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

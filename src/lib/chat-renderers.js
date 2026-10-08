@@ -1712,7 +1712,10 @@ class ChatRenderers {
       const lv = ['info', 'notice', 'suggestion', 'warning'].includes(b.level) ? b.level : 'notice';
       const el = document.createElement('div');
       el.className = `chat-msg chat-msg-system chat-system-notification chat-harness-notice chat-harness-info-${lv}${lv === 'warning' ? ' chat-harness-notice-high' : ''}`;
-      el.innerHTML = `<span class="chat-system-text" title="${escHtml(t('Harness message · {level}', { level: lv }))}">${lv === 'warning' ? UI_ICONS.alert : UI_ICONS.info || ''} ${escHtml(b.text || '')}</span>`;
+      // `say` = a notice in OUR words (2.1.288 instruction_size_warning carries numbers only); else the CLI's own text
+      const p = b.params || {};
+      const ours = b.say === 'instruction-size' ? escHtml(t('The CLI warns the instructions are large: {chars} characters (limit {limit})', { chars: Number(p.chars).toLocaleString(), limit: p.limit == null ? '?' : Number(p.limit).toLocaleString() })) : null;
+      el.innerHTML = `<span class="chat-system-text" title="${escHtml(t('Harness message · {level}', { level: lv }))}">${lv === 'warning' ? UI_ICONS.alert : UI_ICONS.info || ''} ${ours ?? escHtml(b.text || '')}</span>`;
       return { el, sideEffect: null };
     }
     // THE SAFETY STOP (lane classifier-stop-card): a classifier stopped the

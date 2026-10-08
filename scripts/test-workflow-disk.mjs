@@ -32,6 +32,8 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } };
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
+// lane claude-md-diet (B-23e7): the per-file / per-incident index lines moved out of CLAUDE.md into the kb INDEX heads
+const indexHead = (f) => ((t) => (t.split(/^## INDEX\b.*$/m)[1] || '').split(/^## /m)[0])(read(f));
 const WD = require(path.join(REPO, 'src/workflow-disk.js'));
 const { parseRunDir, journalAttemptsFromText, stallWords, agoWords, STALL_MS } = WD;
 const MIN = 60 * 1000, DAY = 24 * 60 * MIN;
@@ -558,8 +560,8 @@ console.log('§8 wiring pins (the 2.355.0 lesson: a pure fix with no call site i
   ok('ci: test-workflow-disk is in the FAST tier', /\{ name: 'test-workflow-disk', tier: 'fast'(?:,| \})/.test(ci));
   ok('architecture: src/workflow-disk.js is classified PURE (it imports nothing)', /'src\/workflow-disk\.js'\]\);/.test(read('scripts/test-architecture.mjs')) && !/require\(|^import /m.test(read('src/workflow-disk.js')));
   const kb11 = read('docs/kb-design-lessons.md');
-  ok('docs: CLAUDE.md indexes src/workflow-disk.js; kb §11 no longer calls the journal label-less; kb-bugfix names the invariant',
-    /src\/workflow-disk\.js — PURE/.test(read('CLAUDE.md')) && !/journal\.jsonl` = the resume cache \(`\{started\|result, key, agentId\}`, live-appended, NO phase\/label\)/.test(kb11) && /started` lines carry `label` \+ `phase`/.test(kb11)
+  ok('docs: the kb-file-structure INDEX head indexes src/workflow-disk.js; kb §11 no longer calls the journal label-less; kb-bugfix names the invariant',
+    /src\/workflow-disk\.js — PURE/.test(indexHead('docs/kb-file-structure.md')) && !/journal\.jsonl` = the resume cache \(`\{started\|result, key, agentId\}`, live-appended, NO phase\/label\)/.test(kb11) && /started` lines carry `label` \+ `phase`/.test(kb11)
     && /the run dir is the truth when the stream is gone/.test(read('docs/kb-bugfix-invariants.md')));
 }
 

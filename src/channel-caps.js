@@ -1219,6 +1219,41 @@ function grantsText(grants, { t = defaultT, vendor = '' } = {}) {
   if (adds.length) parts.push(t('One Re-authorize adds: {what}', { what: adds.map((w) => words[w] || String(w)).join(' · ') }));
   return { text: parts.join(' · '), warn: refused.length > 0 };
 }
+// ── lane channel-names-readable (userW inc-muyrhqtj-ys0z): WHETHER PEOPLE'S NAMES CAN BE READ on an account ─────────
+// The adapter's people warm-up answers `{unreadable: {why, missing}}` (the sign-in holds no profile permission) or
+// `{ok: n}` (n profiles read); the account KEEPS the fact and every surface words it from here — nothing vendor-named.
+const NAMES_WHYS = Object.freeze(['scopes']);
+/** The kept fact after one answer `r`: `undefined` = unchanged (no write), `null` = cleared (a profile was read), else
+ *  `{ok: false, why, missing, at}` — set at the first refusal; the same refusal again changes nothing. */
+function namesVerdict(prev, r, at) {
+  const p = prev && typeof prev === 'object' && prev.ok === false ? prev : null;
+  if (r && r.unreadable && typeof r.unreadable === 'object') {
+    const why = NAMES_WHYS.includes(r.unreadable.why) ? r.unreadable.why : 'scopes';
+    const missing = (Array.isArray(r.unreadable.missing) ? r.unreadable.missing : []).filter((x) => typeof x === 'string' && x && x.length <= 120).slice(0, 8);
+    if (p && p.why === why && (p.missing || []).join('\n') === missing.join('\n')) return undefined;
+    return { ok: false, why, missing, at: Number(at) || 0 };
+  }
+  if (r && Number(r.ok) > 0) return p ? null : undefined;
+  return undefined;
+}
+/** The fact as the account view carries it (null = readable or not known to be unreadable). */
+function namesView(fact) {
+  if (!fact || typeof fact !== 'object' || fact.ok !== false) return null;
+  return { ok: false, why: NAMES_WHYS.includes(fact.why) ? fact.why : 'scopes', missing: (Array.isArray(fact.missing) ? fact.missing : []).slice(0, 8), at: Number(fact.at) || 0 };
+}
+/** THE CAPABILITY ROW's word: `readable` | `unreadable(<why>)`. */
+function namesRow(fact) {
+  const v = namesView(fact);
+  return v ? `unreadable(${v.why})` : 'readable';
+}
+/** The account card's note line ('' while readable). */
+function namesText(view, { t = defaultT } = {}) {
+  return view && view.ok === false ? t('People\'s names and pictures cannot be read on this account — re-authorize to add the contact permission') : '';
+}
+/** The search's empty state when the account's names cannot be read ('' while readable). */
+function namesSearchText(view, { t = defaultT } = {}) {
+  return view && view.ok === false ? t('No match — people\'s names cannot be read on this account (re-authorize), so a search by a person\'s other name finds nothing') : '';
+}
 /** The words of a born conversation that has no title yet (never the raw vendor id — §3.3). */
 function untitledText(kind, { t = defaultT } = {}) {
   return kind === 'dm' ? t('Single chat') : t('New conversation');
@@ -1253,4 +1288,6 @@ module.exports = {
   feedThreadsText,
   // lane gmail-reply-known: why a send row was not resolved (closed) + the window's foot while it is not
   CONV_CAPS_FAIL_WHYS, sendFoot,
+  // lane channel-names-readable: whether people's names can be read (the kept fact, its row word, its sentences)
+  NAMES_WHYS, namesVerdict, namesView, namesRow, namesText, namesSearchText,
 };

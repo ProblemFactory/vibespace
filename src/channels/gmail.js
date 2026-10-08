@@ -1278,7 +1278,8 @@ function create(record = {}, deps = {}) {
     async listConversations({ cursor = null, limit = 100 } = {}) {
       const p = new URLSearchParams({ q: query(), maxResults: String(Math.min(100, Math.max(1, Number(limit) || 100))) });
       if (cursor) p.set('pageToken', String(cursor));
-      const d = await api(`/threads?${p}`, { what: 'gmail threads' });
+      // lane discovery-cursor-persist: the vendor's own word for a kept listing cursor it no longer honours (400 "Invalid pageToken")
+      const d = await api(`/threads?${p}`, { what: 'gmail threads' }).catch((e) => { if (cursor && e && e.code === 'vendor-error' && e.detail && e.detail.status === 400 && /page ?token/i.test(String(e.message))) e.detail.cursorRefused = true; throw e; });
       const items = (d.threads || []).filter((t) => t && t.id);
       // lane channel-feed-authority: THE RESEED WALK (an expired cursor, a CHANGED_CAP overflow, a first connect) — threads.list
       // answers each thread's historyId, so a thread is judged against the LOST cursor right here: newer ⇒ named changed (the

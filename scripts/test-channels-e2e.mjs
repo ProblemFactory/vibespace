@@ -27,7 +27,8 @@
 //   ⑰ lane R5 (the owner, 2026-09-26: "gmail一直被限速 你可能要控制下gmail默认的读取速度"):
 //      on a server whose poll fake is PACED (2 requests/s), declares its vendor
 //      ("Google"), refuses its first read with the per-user minute quota
-//      (Retry-After 20 s) and has 40 new rooms to read, the zh account card says
+//      (Retry-After 20 s) and has 40 new rooms to read (its last listing aged two days — since lane
+//      discovery-cursor-persist a restart alone never re-lists), the zh account card says
 //      "Google 限速中 · N 秒后继续" (never "paused", never a failure count), then
 //      "首次读取中 · 已 N/M 个会话" rising, then nothing once every room was read (the
 //      poll fake is a SOURCE section — it says what an account card says)
@@ -1245,6 +1246,16 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
   await sleep(3500);
   try { srv.kill('SIGKILL'); } catch {}
   await sleep(400);
+  // lane discovery-cursor-persist (int235): a restart RESUMES — an account listed whole is not re-listed until its periodic
+  // net is due (a cold cycle after the kept `discovery.completeAt`; a day for a feed-only account). The 40 rooms that
+  // appear across this reboot are the ones a server DOWN longer than that finds at boot: fake-poll's kept walk is aged
+  // two days (the record must say it was listed whole — else this leg would not be judging the resume rule)
+  {
+    const af = path.join(wt, 'data/channels/adapters.json'), aj = JSON.parse(fs.readFileSync(af, 'utf-8'));
+    const pr = (aj.adapters || []).find((a) => a.id === 'fake-poll');
+    ok(!!(pr && pr.discovery && pr.discovery.complete === true && pr.discovery.completeAt > 0), '⑰ before the reboot fake-poll\'s record keeps its listing walk, listed whole (lane discovery-cursor-persist)', JSON.stringify(pr && pr.discovery));
+    if (pr && pr.discovery) { pr.discovery.completeAt -= 2 * 86400e3; pr.discovery.at = pr.discovery.completeAt; fs.writeFileSync(af, JSON.stringify(aj, null, 2)); }
+  }
   srv = bootServer({ VIBESPACE_CHANNELS_FAKE_PACE: '2', VIBESPACE_CHANNELS_FAKE_VENDOR: 'Google', VIBESPACE_CHANNELS_FAKE_RATE_LIMIT: '1:20', VIBESPACE_CHANNELS_FAKE_CONVS: '40' });
   ok(await waitServer(), '⑰ the server rebooted with the fixture seams: the poll fake paced at 2/s, named Google, refusing its first read (Retry-After 20 s), 40 new rooms');
   await p1.evaljs(`(() => { localStorage.setItem('vibespace.lang', 'zh'); return 1; })()`);

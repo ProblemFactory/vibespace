@@ -722,8 +722,9 @@ function create(deps = {}) {
       e = { kind: rec.kind, adapter, record: rec, passing: null, failures: 0, nextAt: 0, win: null, exhaustedAt: 0, waiting: 0, authState: null, chargeBy: null,
         // 2026-09-26: the conversations made due NOW (a kick naming them, an
         // adapter's `changed` hint, a refresh), the discovery walk's resumable
-        // cursor, and the last time an unconnected account was re-asked
-        dueNow: new Set(), disc: { cursor: null, startedAt: null, lastCompleteAt: 0, lastAt: 0 }, discoverSoon: false, lastIdleAt: 0,
+        // cursor (lane discovery-cursor-persist: read back from the record — a restart resumes it), and the last time an
+        // unconnected account was re-asked
+        dueNow: new Set(), disc: discFromRecord(rec), discoverSoon: false, lastIdleAt: 0,
         // P1b: the push lane's runtime — the handle, the arm token every
         // callback is keyed on, the event-id memory, the coalesced batch and
         // the kick timer.
@@ -1204,6 +1205,13 @@ function create(deps = {}) {
     if (ix.dirty.size) { const ks = [...ix.dirty]; ix.dirty.clear(); for (const k of ks) dueRekey(rec, ix, k, t, T); }
     return ix;
   }
+  /** lane discovery-cursor-persist (B-6638): the walk's state as the record keeps it (`rec.discovery`) — the PURE drain's
+   *  `listingVerdict` decides: resume the kept cursor, nothing owed (listed whole before), or a walk from the first page. */
+  function discFromRecord(rec) {
+    const p = Drain.discoveryOf(rec.discovery);
+    const v = Drain.listingVerdict({ persisted: p, complete: !!(p && p.complete) });
+    return { cursor: v === 'resume' ? p.cursor : null, startedAt: v === 'resume' ? p.startedAt : null, lastCompleteAt: v === 'rewalk' ? 0 : (p.completeAt || 0), lastAt: v === 'rewalk' ? 0 : (p.at || 0) };
+  }
   function discoveryDue(rec, e, t = now()) {
     if (e.disc.cursor || e.discoverSoon || !e.disc.lastCompleteAt) return true;
     // lane channel-feed-authority: under an AUTHORITATIVE carrying feed a new conversation is born by the feed (its head
@@ -1226,12 +1234,21 @@ function create(deps = {}) {
   async function discover(rec, e) {
     const d = e.disc;
     if (!d.cursor) d.startedAt = now();
-    let pages = 0, complete = false;
+    let pages = 0, complete = false, refused = false;
     await ensureLinked(rec);
-    for (;;) {
+    // lane discovery-cursor-persist: every walk's end (complete, cut by the budget, or thrown) is written to the record
+    try { for (;;) {
       if (!affordable(rec, e)) break;
-      const page = await vendor(rec, e, () => e.adapter.listConversations({ limit: 100, cursor: d.cursor }));
+      const held = d.cursor;
+      // the vendor refusing the KEPT cursor (its own word — `Drain.cursorRefused`) is the listing's, not a failed call
+      const page = await vendor(rec, e, () => e.adapter.listConversations({ limit: 100, cursor: held }).catch((err) => { if (held && !refused && Drain.cursorRefused(err)) return { refusedCursor: err }; throw err; }));
       if (outlived(rec, e)) return { pages, complete: false };   // verify r4: a listing that outlived its entry mints no row
+      if (page && page.refusedCursor) {
+        refused = true;
+        if (Drain.listingVerdict({ persisted: Drain.discoveryOf(rec.discovery), refused }) === 'rewalk') { d.cursor = null; d.startedAt = now(); }
+        log.log(`[channels] ${rec.id}: the vendor refused the kept listing cursor (${page.refusedCursor.code}: ${String(page.refusedCursor.message || '').slice(0, 160)}) — the listing is walked again from its first page`);
+        continue;
+      }
       const listedAt = now();
       await store.index.update(() => {
         for (const c of page.conversations || []) admitListed(rec, c, listedAt);
@@ -1240,7 +1257,7 @@ function create(deps = {}) {
       pages++;
       if (!d.cursor) { complete = true; break; }
       if (pages >= DISCOVERY_MAX_PAGES) break;
-    }
+    } } catch (err) { if (!outlived(rec, e)) { d.lastAt = now(); await keepDisc(rec, d).catch(() => {}); } throw err; }
     d.lastAt = now();
     if (complete) {
       d.lastCompleteAt = now();
@@ -1270,7 +1287,15 @@ function create(deps = {}) {
       });
       if (unlistedHits && rec.feed) { feedRow(rec).counters.unlistedHits += unlistedHits; }
     }
+    await keepDisc(rec, d);
     return { pages, complete };
+  }
+  /** lane discovery-cursor-persist: the walk's state reaches the record only AFTER the rows it listed are on disk (the
+   *  index flush FIRST — the feed's owed-before-cursor order): a crash between the two re-lists, it never skips a row. */
+  async function keepDisc(rec, d) {
+    try { store.index.flush(); } catch (err) { log.warn(`[channels] ${rec.id}: the listed conversations were not flushed (${(err && err.message) || err}) — the listing's cursor on disk stays where it was`); return; }
+    rec.discovery = Drain.discoveryRecord(d);
+    await saveAdapters();
   }
   /** ONE listed conversation into the index — discovery's page and the authoritative feed's births share it (inside an
    *  index update; lane channel-feed-authority moved it out of `discover` verbatim). */
@@ -2523,7 +2548,7 @@ function create(deps = {}) {
     if (typeof e.adapter.warmPeople === 'function') {
       const en0 = store.index.live()[`${rec.id}/${convId}`];
       const ids = (en0 && Array.isArray(en0.authors) ? en0.authors : []).filter((a) => a && a.id && !a.isSelf && !a.isBot).map((a) => String(a.id));
-      if (ids.length) e.adapter.warmPeople(ids).catch((err) => { if (!e.peopleWarmSaid) { e.peopleWarmSaid = true; log.warn(`[channels] ${rec.id}: the people warm-up stopped (${(err && err.message) || err})`); } });
+      if (ids.length) e.adapter.warmPeople(ids).then((r) => namesFact(rec, r)).catch((err) => { if (!e.peopleWarmSaid) { e.peopleWarmSaid = true; log.warn(`[channels] ${rec.id}: the people warm-up stopped (${(err && err.message) || err})`); } });
     }
     return { appended, duplicates, anchorMoved, complete, judged, missed, readAt };
   }
@@ -2736,9 +2761,12 @@ function create(deps = {}) {
     if (adapter != null && adapter !== '' && !byId.has(String(adapter))) return { ok: false, code: 'not-found', error: 'no such account' };
     const only = adapter != null && adapter !== '' ? String(adapter) : null;
     if (before != null && (typeof before !== 'object' || !Number.isFinite(Number(before.lastAt)) || typeof before.key !== 'string')) return bad('before must be a cursor {lastAt, key}');
-    // THE QUERY'S CHEAP HALF: the name a person reads (the ladder) only ever drops or re-joins pieces of the raw title,
-    // participants and author names — so every letter/digit run of a query the name holds is in one of those raw
-    // strings. A row none of whose raw strings hold every run cannot match by its name; only the rest pay for the ladder.
+    // THE QUERY'S CHEAP HALF: the name a person reads is the ladder's (it only ever drops or re-joins pieces of the raw
+    // title, participants and author names) OR a person's profile name that N2 draws in place of the vendor's (lane
+    // channel-names-readable: "Mira (Marketing)" for a vendor name "Dorn" — the nickname / English name / job title /
+    // department, channel-authors ALT_KEYS, on the stored author or in the account's people memo by id). So every
+    // letter/digit run of a query a name holds is in one of those raw strings. A row none of whose raw strings hold every
+    // run cannot match by a name; only the rest pay for the ladder.
     const runs = s ? (s.match(/[\p{L}\p{N}]+/gu) || []) : [];
     const low = (x) => (x ? String(x).toLowerCase() : '');
     const bare = (x) => (x ? String(x).replace(HIDDEN_RE, '').toLowerCase() : '');
@@ -2752,12 +2780,36 @@ function create(deps = {}) {
       const side = named ? low : bare;
       const src = [low(en.title), side(en.participants), low(en.id)];
       if (Array.isArray(en.authors)) for (const a of en.authors) if (a && a.name) src.push(side(a.name));
+      src.push(...altNamesOf(en));
       return runs.every((r) => src.some((x) => x.includes(r)));
+    };
+    // the names a person reads off a profile: the authors' `alt` values (the stored author's, else the people memo's by
+    // id — personView's rule), the account's own id never (a query by the owner's own nickname is no conversation's
+    // name); the memo and the own id read ONCE per account per call
+    const peopleOf = new Map();
+    const altNamesOf = (en) => {
+      if (!Array.isArray(en.authors) || !en.authors.length) return [];
+      let pm = peopleOf.get(en.adapterId);
+      if (!pm) {
+        const rec = byId.get(en.adapterId);
+        let people = {};
+        try { people = (rec && store.peopleRead(rec.id).people) || {}; } catch { people = {}; }
+        pm = { self: rec ? selfIdOf(rec) : null, people };
+        peopleOf.set(en.adapterId, pm);
+      }
+      const out = [];
+      for (const a of en.authors) {
+        if (!a || !a.id || a.isSelf || (pm.self && String(a.id) === pm.self)) continue;
+        const p = pm.people[String(a.id)];
+        const alt = a.alt && typeof a.alt === 'object' ? a.alt : p && p.alt && typeof p.alt === 'object' ? p.alt : null;
+        if (alt) for (const k of Authors.ALT_KEYS) if (typeof alt[k] === 'string' && alt[k]) out.push(alt[k].toLowerCase());
+      }
+      return out;
     };
     const matches = (rec, en) => {
       if (!labelHit.has(rec.id)) labelHit.set(rec.id, FO.textMatches([rec.label || rec.id], s));
       if (labelHit.get(rec.id) || low(en.lastText).includes(s)) return true;
-      return (!runs.length || nameCould(en)) && FO.textMatches([humanNameOf(rec, en) || en.id], s);
+      return (!runs.length || nameCould(en)) && FO.textMatches([humanNameOf(rec, en) || en.id, ...altNamesOf(en)], s);
     };
     const keep = (en) => {
       const rec = byId.get(en.adapterId);
@@ -3407,6 +3459,9 @@ function create(deps = {}) {
       // lane lark-search-poll: the change feed (its state, mode, measurement, catch-up) + THE ONE GRANT LIST (§5.3)
       feed: feedView(rec, t),
       grants: grantsView(rec),
+      // lane channel-names-readable: whether this sign-in may read people's profiles (the kept fact) + the caps row word
+      namesReadable: caps.namesView(rec.namesReadable),
+      names: caps.namesRow(rec.namesReadable),
       reactionPolicy: P.reactionPolicyOf(rec.reactionPolicy),
       agentDirectory: ACL.directoryOf(rec),   // lane channel-agent-watch W2: may agents see the list of conversations (groups / single chats)
       reactions: (() => { const x = live.get(rec.id); const m = x ? Drain.rxMinuteAt(x.rxMinute, t) : { n: 0 }; return { read: reactionsRow(registry.capsOf(rec.kind)).read, add: !!reactionsRow(registry.capsOf(rec.kind)).add, perMinute: reactionsPerMin(), listedThisMinute: m.n, calls60s: x ? (x.rxCalls || []).filter((y) => t - y < 60e3).length : 0 }; })(),
@@ -4129,6 +4184,9 @@ function create(deps = {}) {
     if (!e) return;
     disarmPush(e, why);
     live.delete(id);
+    // lane discovery-cursor-persist: every lifecycle verb (a client switch, re-connect, options, disable) re-lists the
+    // account from its first page, as before the cursor was kept — the record's walk state goes with the entry
+    if (e.record) e.record.discovery = null;
     paceCarry.set(id, { record: e.record, win: e.win, exhaustedAt: e.exhaustedAt, paceTok: e.paceTok, paceRecent: e.paceRecent, paceInflight: 0, paceInflightAt: 0, paceLeakWarnAt: e.paceLeakWarnAt, chargeBy: null });
     settleRequests(e, { ok: false, code: 'account-changed', error: `the account changed while the refresh waited (${why}) — refresh again` });
     wakeSleepers(e);   // lane R5: a pace sleep of the dropped entry ends now (its pass settles on the next step)
@@ -6182,6 +6240,55 @@ function create(deps = {}) {
       const it = userTodos.get(bi.id);
       if (it && it.status === 'open' && it.sessionKey === INBOX_KEY && it.text === bi.text) { userTodos.setStatus(bi.id, 'done', RESOLVED_BY); log.log(`[channels] ${rec.id}: ${why} — retracted the slowed-polling item`); }
     } catch (e) { log.warn(`[channels] ${rec.id}: could not retract the slowed-polling item: ${(e && e.message) || e}`); }
+  }
+  /** lane channel-names-readable (userW, 2026-10-08: "Channels cannot find my conversation with" a colleague — the sign-in held
+   *  no contact permission and only the boot log said so): THE NAMES FACT. The adapter's people warm-up answers whether
+   *  this sign-in may read people's profiles (`unreadable: {why, missing}`) or read one (`ok`); the account KEEPS it
+   *  (caps.namesVerdict, PURE — a write only when it changes) and it is said where the owner looks: the card's note line,
+   *  ONE For-you item per sign-in (speakNames), the search's empty state, the agent's list / search line. */
+  async function namesFact(rec, r) {
+    try {
+      const next = caps.namesVerdict(rec.namesReadable || null, r, now());
+      if (next !== undefined) {
+        await store.adapters.update(() => { if (next) rec.namesReadable = next; else delete rec.namesReadable; });
+        notify([]);
+      }
+      if (rec.namesReadable && rec.namesReadable.ok === false) await speakNames(rec);
+      else if (rec.namesItem) await retractNames(rec);
+    } catch (err) { log.warn(`[channels] ${rec.id}: the names fact could not be kept: ${(err && err.message) || err}`); }
+  }
+  /** ONE "For you" item per (account, sign-in) — keyed by the instant the sign-in's scopes last changed
+   *  (caps.credentialChangedAt): a pass never files again, a dismissal stands for that sign-in, a re-authorize that
+   *  still lacks the permission files ONE new item, one that fixes it resolves the item (namesFact). */
+  async function speakNames(rec) {
+    if (!userTodos || typeof userTodos.add !== 'function') return;
+    const signin = caps.credentialChangedAt(rec);
+    if (rec.namesItem && rec.namesItem.signin === signin) return;
+    if (rec.namesItem) await retractNames(rec, 'superseded');
+    const label = rec.label || rec.id;
+    const text = `Channel ${label}: people's names and pictures cannot be read — re-authorize to add the contact permission`;
+    const missing = (rec.namesReadable && rec.namesReadable.missing) || [];
+    try {
+      const item = userTodos.add(INBOX_KEY, {
+        origin: 'channels', kind: 'action',
+        text,
+        detail: `Adapter: ${label} (${rec.kind})\nThis sign-in holds none of the permissions that read people's profiles${missing.length ? ` (${missing.join(' / ')})` : ''}, so a conversation shows the vendor's name only and a search by a person's nickname or other name finds nothing.\n\nRe-authorize the account: its consent asks for the contact permission. This item is resolved automatically when a profile is read.`,
+        urgency: 'normal', by: 'agent', sessionName: 'Channels',
+        action: { type: 'channel-reauth', adapterId: rec.id },
+        i18n: { text: { key: i18nKey("Channel {label}: people's names and pictures cannot be read — re-authorize to add the contact permission"), params: { label } }, source: INBOX_SOURCE },
+      });
+      if (item && item.id) await store.adapters.update(() => { rec.namesItem = { id: item.id, text, signin, at: now() }; });
+    } catch (e) { log.warn(`[channels] ${rec.id}: could not file the names item: ${(e && e.message) || e}`); }
+  }
+  async function retractNames(rec, why = 'a profile was read') {
+    if (!rec.namesItem) return;
+    const ni = rec.namesItem;
+    await store.adapters.update(() => { delete rec.namesItem; });
+    if (!userTodos || typeof userTodos.get !== 'function') return;
+    try {
+      const it = userTodos.get(ni.id);
+      if (it && it.status === 'open' && it.sessionKey === INBOX_KEY && it.text === ni.text) { userTodos.setStatus(ni.id, 'done', RESOLVED_BY); log.log(`[channels] ${rec.id}: ${why} — resolved the names item`); }
+    } catch (e) { log.warn(`[channels] ${rec.id}: could not resolve the names item: ${(e && e.message) || e}`); }
   }
   /** The retraction: ONLY the item this engine filed (same id, same text),
    *  only while it is still open — the user's own resolution stands. */

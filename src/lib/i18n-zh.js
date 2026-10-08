@@ -260,6 +260,7 @@ export default {
   "Harness notification · {priority}": "Harness 通知 · {priority}",
   "Recap — while you were away": "回顾——你离开期间",
   "A safety check stopped the reply above — the rest was withheld and the agent was told not to repeat it": "安全检查拦下了上面这条回复——其余内容已被扣下，agent 已被告知不要重复",
+  "The CLI warns the instructions are large: {chars} characters (limit {limit})": "CLI 提示指令文件过大：{chars} 个字符（上限 {limit}）",
   "Harness message · {level}": "Harness 消息 · {level}",
   "PR #{id}": "PR #{id}",
   "Change #{id}": "变更 #{id}",
@@ -7878,4 +7879,8 @@ export default {
   "Who is woken": "谁会被唤醒",
   "{n} notification(s) on the whole account — access alone never wakes anyone": "整个账户上有 {n} 条通知 —— 仅有访问权限不会唤醒任何人",
   "Nobody is woken by this account yet — access alone never wakes anyone": "这个账户还不会唤醒任何人 —— 仅有访问权限不会唤醒任何人",
+  "People's names and pictures cannot be read on this account — re-authorize to add the contact permission": "此账户读不到联系人的名字和头像 — 重新授权以加上通讯录权限",
+  "No match — people's names cannot be read on this account (re-authorize), so a search by a person's other name finds nothing": "没有匹配 — 此账户读不到联系人的名字（需重新授权），所以按一个人的其他名字搜索什么也找不到",
+  "Channel {label}: people's names and pictures cannot be read — re-authorize to add the contact permission": "频道 {label}：读不到联系人的名字和头像 — 重新授权以加上通讯录权限",
+  "That account is gone": "该账户已不存在",
 };

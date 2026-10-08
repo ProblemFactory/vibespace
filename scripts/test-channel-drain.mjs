@@ -1699,5 +1699,30 @@ console.log('\nverify r3 (T2 ②): the sliding minute = 60·r + burst − 1, sai
   ok(/burst: pd \? Math\.round\(pd\.burst \* 100\) \/ 100 : null \};/.test(eng), 'WIRING: budgetView serves `burst` from the pace declaration (the card reads it; nothing else computes a ceiling)');
 }
 
+console.log('— lane discovery-cursor-persist (B-6638): the listing verdict — a restart resumes, it never re-asks what it knows');
+{
+  const D = require(path.join(REPO, 'src/channel-drain.js'));
+  const P = (o) => D.discoveryOf(o);
+  const table = [
+    [{ persisted: null, complete: false }, 'rewalk', 'never listed, no cursor'],
+    [{ persisted: P({ cursor: '4000', startedAt: 5, at: 6, complete: false }), complete: false }, 'resume', 'a walk cut mid-listing'],
+    [{ persisted: P({ cursor: 'p9', startedAt: 5, at: 6, complete: true, completeAt: 3 }), complete: true }, 'resume', 'the periodic net walk cut mid-listing'],
+    [{ persisted: P({ cursor: null, at: 6, complete: true, completeAt: 6 }), complete: true }, 'none', 'listed whole'],
+    [{ persisted: P({ cursor: '4000', startedAt: 5, complete: false }), complete: false, refused: true }, 'rewalk', 'the vendor refused the kept cursor'],
+    [{ persisted: P({ cursor: null, complete: true, completeAt: 6 }), complete: true, intent: 'relist' }, 'rewalk', 'the owner re-lists'],
+  ];
+  for (const [inp, want, why] of table) ok(D.listingVerdict(inp) === want, `listingVerdict: ${why} ⇒ ${want}`, JSON.stringify([inp, D.listingVerdict(inp)]));
+  ok(D.LISTING_VERDICTS.join() === 'resume,rewalk,none', 'the verdict vocabulary is closed: resume · rewalk · none');
+  const rt = D.discoveryOf(D.discoveryRecord({ cursor: 'p3', startedAt: 10, lastAt: 20, lastCompleteAt: 0 }));
+  ok(rt.cursor === 'p3' && rt.startedAt === 10 && rt.at === 20 && rt.complete === false && rt.completeAt === null, 'a walk state round-trips through the record (cursor, start, at; never complete)', JSON.stringify(rt));
+  const done = D.discoveryRecord({ cursor: null, startedAt: 10, lastAt: 30, lastCompleteAt: 30 });
+  ok(done.cursor === null && done.startedAt === null && done.complete === true && done.completeAt === 30, 'a complete walk is recorded complete with no cursor', JSON.stringify(done));
+  ok([null, 7, 'x', { cursor: 5 }, { complete: true }].every((r) => { const h = D.discoveryOf(r); return !h || (h.cursor === null && h.complete === false); }), 'a missing / malformed record heals to never listed (complete needs its instant)');
+  ok(D.discoveryOf({ cursor: 'x'.repeat(5000) }).cursor === null, 'a cursor past 4 KB is not kept');
+  const CE = (code, detail) => Object.assign(new Error(code), { code, detail });
+  ok(D.cursorRefused(CE('not-found')) && D.cursorRefused(CE('vendor-error', { cursorRefused: true })), 'cursorRefused: a 404 or the adapter\'s typed word');
+  ok(!['transport', 'rate-limited', 'auth-expired', 'forbidden', 'vendor-error'].some((c) => D.cursorRefused(CE(c, { status: 400 }))) && !D.cursorRefused(null), 'cursorRefused: auth / rate / transport / an untyped vendor error are the call\'s, never the cursor\'s');
+}
+
 console.log(`\n${failN ? 'FAILED' : 'ALL PASS'} (${passN} passed${failN ? `, ${failN} failed` : ''})`);
 process.exit(failN ? 1 : 0);

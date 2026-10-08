@@ -88,3 +88,7 @@ Scratch (not in the repo): `/tmp/vs-census/` holds the census script, the extrac
 - **`conversation_reset` + `trigger`** (`clear|plan_mode_exit|fresh_session|onboarding`, informational) **+ `user_message_uuid`** (with `clear` only: the /clear message's uuid) **+ `timestamp`** (ISO, for a "conversation cleared" row). Declared ignored; the type stays declared-unseen.
 - Not record shapes (no action): the MCP server config shapes `stdio` / `sse` / `ws` gained `bareElicitationCapability`.
 - No field was removed from any shape; no top-level stream type was added or removed.
+
+## 5. CLI 2.1.288 census (2026-10-07, lane cli-2-1-288-records)
+
+**2.1.288:** 170 shapes · 61 system subtypes · 35 stream record types (dump: scripts/fixtures/claude-cli/2.1.288.json, method in scripts/claude-cli-dump.mjs). Eight new subtypes, each decided on its zod literal: instruction_size_warning → HANDLED (dim notice, our words); session_metadata, ui_toast, ui_status, ui_log, ui_invalidate, ui_scroll, ui_focus → KNOWN_IGNORED (+ ui_panes, spelled outside the union, CORPUS_ONLY). 23 new fields on six known shapes → FIELDS_288 (ignored, named). The oracle is pinned per version (SCHEMA_CLI_VERSIONS 2.1.281 + 2.1.288, one tracked dump each, test-record-shape §4e).

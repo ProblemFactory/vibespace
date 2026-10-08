@@ -24,6 +24,7 @@ import { showInstallDialog, launchDpr, launchUiScale } from './desktop-app-launc
 import { appRefusalText } from './app-install-dialog.js'; // a refusal code → the user's words (busy, a decided proposal…)
 import { shownDigest, openRowOf } from './app-card-model.js'; // design 009: the digest of the card pressed; the row an Installed card opens // Layer 0 apps: THE install dialog an agent's install proposal opens (the same component as "Install xpra on {machine}…")
 import { openResetCreditDialog } from './reset-credit-dialog.js'; // THE one reset-credit confirm dialog (design-reset-credits p2): the ask-mode item's button
+import { showReauthAccountDialog } from './channel-account-dialogs.js'; // lane channel-names-readable: a `channel-reauth` item's verb = THE account's Re-authorize dialog
 import { clearRecords, isCleared, clearedText } from './record-clear-ui.js'; // "Clear content…" (2026-09-28): THE confirm dialog + request path; a cleared item's words
 
 /** The badge's tiers — ONE spelling shared by the taskbar / nav button, the
@@ -153,6 +154,15 @@ export function inboxModel(app) {
   /** A PRODUCER'S ACTION (design-reset-credits p2): the client maps the item's
    *  `action.type` to a verb it owns. Today: the reset-credit confirm dialog. */
   const runAction = async (rec, answer = null) => {
+    if (rec && rec.action && rec.action.type === 'channel-reauth') {
+      // lane channel-names-readable: the account's sign-in lacks a permission — ITS Re-authorize dialog (the channels
+      // engine resolves the item once the permission works)
+      const d = await fetchJson('/api/channels?scope=accounts');
+      const acct = d && !d.error ? (d.adapters || []).find((x) => x.id === rec.action.adapterId) : null;
+      if (!acct) { showToast((d && d.error) || t('That account is gone'), { type: 'error' }); return false; }
+      showReauthAccountDialog(app, acct, { kinds: d.kinds || [] });
+      return true;
+    }
     if (rec && rec.action && rec.action.type === 'browser-restart') {
       // lane browser-unresponsive: a HUNG browser's ONE way out — THE user's Restart (cookie route; the keeper's recovery
       // tells every conversation on it and resolves this item)

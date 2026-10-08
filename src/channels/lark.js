@@ -1744,7 +1744,8 @@ function create(record = {}, deps = {}) {
     async listConversations({ cursor = null, limit = 100 } = {}) {
       const p = new URLSearchParams({ page_size: String(Math.min(100, Math.max(1, Number(limit) || 100))), user_id_type: 'open_id' });
       if (cursor) p.set('page_token', String(cursor));
-      const d = await api(`/im/v1/chats?${p}`, { what: 'lark chats' });
+      // lane discovery-cursor-persist: the vendor's own word for a kept listing cursor it no longer honours (a page_token refusal)
+      const d = await api(`/im/v1/chats?${p}`, { what: 'lark chats' }).catch((e) => { if (cursor && e && e.code === 'vendor-error' && e.detail && /page_?token/i.test(String(e.message))) e.detail.cursorRefused = true; throw e; });
       const items = (d.data && d.data.items) || [];
       const conversations = items.filter((c) => c && c.chat_id).map((c) => makeConversation({
         id: String(c.chat_id), vendorId: String(c.chat_id),
@@ -1937,20 +1938,23 @@ function create(record = {}, deps = {}) {
       const me = selfOpenId();
       if (!canReadPeople()) {
         if (!SAID_MEMBERS.has(`people-scope:${adapterId}`)) { SAID_MEMBERS.add(`people-scope:${adapterId}`); log.warn && log.warn(`[channels] lark: people's profiles are not read — this sign-in holds none of ${PEOPLE_READ_SCOPES.join(' / ')}; re-authorize to read nicknames and pictures`); }
-        return { asked: 0 };
+        // lane channel-names-readable: the refusal is ANSWERED (the engine keeps it on the account and says it where the
+        // owner looks) — never only the boot log line above
+        return { asked: 0, ok: 0, unreadable: { why: 'scopes', missing: PEOPLE_READ_SCOPES.slice() } };
       }
       const named = (id) => !!(memo.people[id] && (memo.people[id].member || memo.people[id].sender || memo.people[id].name));
       // a profile (or a refusal) younger than MEMBERS_TTL_MS is not asked again — the schedule, never every draw
       const due = [...new Set(ids)].filter((id) => Feed.idOf(id) && id !== me && !knownAppName(id) && !(PEOPLE.get(id) && now() - PEOPLE.get(id).at < MEMBERS_TTL_MS))
         .sort((a, b) => Number(named(a)) - Number(named(b)));
-      let asked = 0;
+      let asked = 0, ok = 0;
       for (const id of due) {
         if (asked >= PEOPLE_LOOKUPS_PER_CALL || now() < peopleRefusedUntil || peopleBudget() <= 0) break;
         asked++;
-        await lookupPerson(id);
+        const p = await lookupPerson(id);
+        if (p && !p.why) ok++;   // a profile READ (the engine clears the account's "names cannot be read" fact)
       }
       flushMemo(asked > 0);
-      return { asked };
+      return { asked, ok };
     },
     /** lane lark-threads (B4): the account's own organization (the consent's, else learned without a call) — null unknown. */
     selfTenant() { return selfTenant(); },

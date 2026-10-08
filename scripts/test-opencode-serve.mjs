@@ -25,6 +25,8 @@ const { startMockServe, createMockState } = await import(MOCK);
 let pass = 0, fail = 0;
 const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 500) : '')); } };
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
+// lane claude-md-diet (B-23e7): the per-file / per-incident index lines moved out of CLAUDE.md into the kb INDEX heads
+const indexHead = (f) => ((t) => (t.split(/^## INDEX\b.*$/m)[1] || '').split(/^## /m)[0])(read(f));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const serve = require(path.join(REPO, 'src/opencode-serve.js'));
 const { AcpMessageManager } = require(path.join(REPO, 'src/acp-message-manager.js'));
@@ -442,7 +444,7 @@ console.log('— ⑦ wiring pins');
   const oc = read('src/opencode-serve.js');
   ok('opencode-serve talks to 127.0.0.1 only, never a vendor host, never a secret in argv', /http:\/\/127\.0\.0\.1:\$\{port\}/.test(oc) && /'--hostname', '127\.0\.0\.1'/.test(oc) && !/api\.anthropic\.com|api\.openai\.com|Bearer sk-/.test(oc) && !/OPENCODE_SERVER_PASSWORD.*args/.test(oc));
   ok('the record is written atomically (tmp + rename) and the serve is spawned detached with ignored stdio under the caller env', /fs\.renameSync\(tmp, file\)/.test(oc) && /stdio: 'ignore', detached: true/.test(oc) && /env: env\(\)/.test(oc));
-  ok('docs: kb-file-structure essay + design S9 row + CLAUDE.md index line', /src\/opencode-serve\.js — /.test(read('docs/kb-file-structure.md')) && /\| S9 ✅/.test(read('docs/design-harness-plugins.md')) && /opencode-serve\.js — /.test(read('CLAUDE.md')));
+  ok('docs: kb-file-structure essay + design S9 row + its INDEX-head line', /src\/opencode-serve\.js — /.test(read('docs/kb-file-structure.md')) && /\| S9 ✅/.test(read('docs/design-harness-plugins.md')) && /opencode-serve\.js — /.test(indexHead('docs/kb-file-structure.md')));
   ok('the manual live script exists', fs.existsSync(path.join(REPO, 'scripts/dev/opencode-serve-live.mjs')));
 }
 

@@ -269,6 +269,7 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
       if (moreReq) console.log(`… ${moreReq} more you may request — only the newest ${max} are listed`);
       console.log('ask for one: vibespace-channels request <conv> "why"');
     }
+    if (r.namesNote) console.log(r.namesNote);   // lane channel-names-readable: the server's sentence, as written
     if (rows.length) console.log('\nread: vibespace-channels read <conv>   propose a reply: vibespace-channels reply <conv> "..."   be notified: vibespace-channels watch <conv>');
     return;
   }
@@ -576,6 +577,7 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
     if (!rows.length) console.log(`nothing you can see matches "${q}".`);
     for (const m of rows) console.log(`${m.key} — ${m.title}  [${when(m.at)}] ${(m.author && (m.author.name || m.author.id)) || '?'}: ${String(m.text || '').replace(/\n/g, ' ').slice(0, 200)}`);
     if (r.truncated) console.log('(more matches exist — narrow the words or pass --account)');
+    if (r.namesNote) console.log(r.namesNote);   // lane channel-names-readable
     console.log(`(searched what is stored: ${Number(r.covered) || 0} conversation(s) you can see${r.fullOffered ? '; --full asks the account\'s own search' : ''})`);
     return;
   }

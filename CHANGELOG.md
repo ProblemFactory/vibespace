@@ -2,6 +2,15 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.235 — 2026-10-08
+
+### Changed
+- A server restart no longer re-lists every conversation of each connected account; the listing resumes where it stopped.
+
+### Fixed
+- Channels search finds people by the name you see, and an account that cannot read people's names says so, with a Re-authorize button.
+- Claude Code 2.1.288's own status records no longer show as unknown events; a warning that your instruction files are too large now shows as a quiet note.
+
 ## 2.369.234 — 2026-10-08
 
 ### Changed

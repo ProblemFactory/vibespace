@@ -260,6 +260,7 @@ export default {
   "Harness notification · {priority}": "ハーネス通知 · {priority}",
   "Recap — while you were away": "要約 — 離席中の出来事",
   "A safety check stopped the reply above — the rest was withheld and the agent was told not to repeat it": "安全チェックが上の返信を止めました — 残りは保留され、エージェントには繰り返さないよう伝えてあります",
+  "The CLI warns the instructions are large: {chars} characters (limit {limit})": "CLI の警告：指示ファイルが大きすぎます（{chars} 文字、上限 {limit}）",
   "Harness message · {level}": "ハーネスのメッセージ · {level}",
   "PR #{id}": "PR #{id}",
   "Change #{id}": "変更 #{id}",
@@ -7877,4 +7878,8 @@ export default {
   "Who is woken": "誰が起こされるか",
   "{n} notification(s) on the whole account — access alone never wakes anyone": "アカウント全体に {n} 件の通知 — アクセス権だけでは誰も起こされません",
   "Nobody is woken by this account yet — access alone never wakes anyone": "このアカウントではまだ誰も起こされません — アクセス権だけでは誰も起こされません",
+  "People's names and pictures cannot be read on this account — re-authorize to add the contact permission": "このアカウントでは人の名前と写真を読めません — 再認証して連絡先の権限を追加してください",
+  "No match — people's names cannot be read on this account (re-authorize), so a search by a person's other name finds nothing": "一致なし — このアカウントでは人の名前を読めない（再認証が必要）ため、人の別名での検索では何も見つかりません",
+  "Channel {label}: people's names and pictures cannot be read — re-authorize to add the contact permission": "チャンネル {label}: 人の名前と写真を読めません — 再認証して連絡先の権限を追加してください",
+  "That account is gone": "そのアカウントはもうありません",
 };

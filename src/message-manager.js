@@ -67,6 +67,7 @@ const HANDLED_SYSTEM_SUBTYPES = new Set([
   'background_tasks_changed', // a LEVEL signal (the full live set): reconciles the task cards + the status-bar chip meta op
   'task_updated',            // {task_id, patch:{status}} → applied to the task card (closes a failed task without waiting for task_notification)
   'code_change_published',   // ONE small "PR #608 pushed" card (escaped link) — the same fact as the transcript's pr-link row
+  'instruction_size_warning', // 2.1.288 (lane cli-2-1-288-records): CLAUDE.md + rules + imports over the model's limit → the dim harness notice "the CLI warns the instructions are large: N characters (limit M)" — never red
   'informational',           // the CLI's text banner → a dim card, its words verbatim at `level`; the SAFETY STOP line (src/safety-stop.js) + its model-only nudge → ONE worded stop card (lane classifier-stop-card — was the red Unknown-event card)
 ]);
 
@@ -1080,6 +1081,19 @@ class MessageManager extends MessageWindow {
     // the red Unknown-event card. The SAFETY STOP line is read from the census
     // and becomes the worded stop card (_safetyStopCard). Both carriers: the
     // stream's snake_case and the transcript row carry the same two fields.
+    // INSTRUCTIONS TOO LARGE (`system`/`instruction_size_warning`, 2.1.288 — lane cli-2-1-288-records): the CLI
+    // measured CLAUDE.md + rules + imports over the model's limit. The same dim harness notice, in OUR words
+    // (`say` → the client's i18n line; `text` = the English fallback). Numbers only — no file path rides the record.
+    if (raw.subtype === 'instruction_size_warning') {
+      const n = (a, b) => (Number.isFinite(a) ? a : (Number.isFinite(b) ? b : null));
+      const chars = n(raw.total_chars, raw.totalChars), limit = n(raw.total_limit_chars, raw.totalLimitChars);
+      if (chars == null) return;
+      const files = n(raw.file_count, raw.fileCount);
+      const text = `The CLI warns the instructions are large: ${chars} characters (limit ${limit ?? '?'})`;
+      const msg = this._create({ role: 'system', status: 'complete', noticeKind: 'harness-informational', content: [{ type: 'harness_informational', text, level: 'notice', say: 'instruction-size', params: { chars, limit, files } }] });
+      if (emit) this._emit({ op: 'create', message: msg });
+      return;
+    }
     if (raw.subtype === 'informational' && typeof raw.content === 'string' && raw.content.trim()) {
       const text = raw.content.slice(0, 4000);
       const stop = safetyStopOf(text);
@@ -2218,6 +2232,15 @@ const KNOWN_IGNORED_SYSTEM_SUBTYPES = new Set([
   // choice: the name IS the surface — the sidebar row, the window title and the taskbar follow it; a "named …" note in the
   // flow would repeat it). The server consumer owns it: session-brain noteSessionTitle → `cliTitle` (src/session-name.js)
   'session_title_changed',
+  // 2026-10-07 (CLI 2.1.288, lane cli-2-1-288-records — each read off the 2.1.288 zod union, scripts/fixtures/claude-cli/2.1.288.json):
+  'session_metadata',       // the cloud session's metadata push — today only `artifacts` (frame links {url,title,kind:'frame'}); no model / cwd / version in it, so nothing for the status bar: card-less
+  'ui_toast',               // the plugin UI host: a PLUGIN's $.ui.toast line {plugin,text,timeout_ms} — the ONE call site; no severity field, the CLI's own errors never ride it (they are notification / informational). Card-less: the chat is not the CLI's TUI
+  'ui_status',              // the plugin UI host: a plugin's pinned status line (null clears) — card-less
+  'ui_log',                 // the plugin UI host: a plugin's log line — card-less
+  'ui_invalidate',          // the plugin UI host: re-render request for mounted plugin panes — card-less
+  'ui_scroll',              // the plugin UI host: scroll a plugin pane — card-less
+  'ui_focus',               // the plugin UI host: move the focus ring in a plugin pane — card-less
+  'ui_panes',               // the plugin UI host's pane list (spelled in 2.1.288, NOT in its union — record-shape CORPUS_ONLY_SUBTYPES). All ui_* fire only when a client attached a UI surface channel (2.1.288 zi()); VibeSpace attaches none
 ]);
 
 module.exports = { splitToolResultContent, toolResultText, MessageManager, classifyResultError, parseBackgroundLaunch, normalizeTaskType, TASK_TYPE_MAP, peerDisplayName, peerOriginOf, PEER_RECORDED, initFrameFacts, commandNames, normalizeWorkflowProgress, HANDLED_SYSTEM_SUBTYPES, KNOWN_IGNORED_RECORD_TYPES, KNOWN_IGNORED_SYSTEM_SUBTYPES, unknownRecordJson };

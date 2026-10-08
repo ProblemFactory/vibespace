@@ -859,6 +859,8 @@ owner 原话："不能'获取更新'而不是'查询每条是否有更新'吗！
 
 **缺口 = 从游标出发的一次遍历 (lane gmail-feed-gap, B-5134, 2026-10-07, as-built)。** 静默（笔记本休眠、服务重启、vendor 故障、限速停驻）超过冷档后，旧规则判定权威变更源"未承载"，每行退回各自的档位 ⇒ 一次全索引遍历（实测 10 000 行到期 / 10 101 次 vendor 调用）。现在：`Feed.gapVerdict` 判 `catch-up`（有游标、任意长度的缺口，启动也算）/ `rewalk`（游标过期 404 或没有游标 ⇒ 按原样重走列表）/ `fresh`；持有游标的权威变更源保持 `carrying`（`feed.carrying = {since}` 持久化在账户行上，只被拒绝清除），静默时状态 `catching-up`（卡片："Catching up since {time} — the change feed resumes from where it stopped"），退避时按名停驻、仍承载 —— 档位一直停着，到期索引不重建。Gmail 的 history 遍历按页、从游标出发；被拒或超过每次 20 页时保留 page token、下次从那里继续，游标只在最后一页后才前移。每个缺口一条日志："<account>: the change feed resumed after <n> min — <p> history pages, <m> conversations touched, 0 per-row reads"。覆盖率网 `coverageOf` 把声明的缺口排除在外：静默不是漏消息的证据；降级只留给证明漏了自己窗口覆盖到的消息的变更源。实测（test-channels-aggregate ㉒，10 000 行）：跳 20 分钟 ⇒ 0 行到期、31 次调用（一次 3 页的遍历 + 30 次点名读取）；旧规则对照 ⇒ 10 000 行到期 / 10 101 次调用。
 
+**列表游标随账户行持久化 (lane discovery-cursor-persist, B-6638, 2026-10-08, as-built)。** 变更源的游标早已持久化，但发现（discovery，账户的会话列表遍历）的游标只在内存里 ⇒ 每次服务重启都把每个账户的整个列表重走一遍（10 000 个会话 = 100 页列表调用/账户/次重启），被重启打断的遍历从第 1 页重来。现在：`rec.discovery = {cursor, startedAt, at, complete, completeAt}` 存在 adapters.json 的账户行上（与 `feed.carrying` 同一扇门），每次遍历结束时先 flush 索引、再写账户行（游标永远不会先于它列出的行落盘）；启动时由纯函数 `Drain.listingVerdict` 判定：`resume`（从断点页继续）/ `none`（已完整列过，周期性兜底按 `completeAt` 计时）/ `rewalk`（从未完整列过、vendor 拒绝了保存的游标——以 vendor 自己的话、类型化为 `cursorRefused`——或 owner 强制刷新）。拒绝时只重走一次并在日志里说一行。任何生命周期动作（`dropLive`：换客户端、重连、改选项、停用）清掉它，照旧从第 1 页列。实测（test-channels-aggregate ㉓）：重启后列表页 100 → 0；断在第 40 页的遍历重启后续走 60 页。
+
 ### 6.2b 按秒匀速, 以及 vendor 的限速拒绝 (lane R5, 2026-09-26)
 
 owner 在 2.369.185 上的原话: **"gmail一直被限速 你可能要控制下gmail默认的读取速度"**。
@@ -4040,3 +4042,8 @@ Owner 的规则: "拓展 vendor 只需要定义 vendor-specific 的文件 + 一�
 - **从智能体的行打开。** 卡片的搜索行带上那次搜索的记忆范围；对话框先读它（精确），再读 `all`，再读这个会话的。智能体的命中若不在本地副本里，就在第二段显示出来（发送者 · 时间 · 厂商片段，点开 = 前后消息 / 打开会话），「智能体的命中里有 N 条已不在保存的副本中」成了第二段的标题字样；年龄一行只是信息：「来自 Lark 搜索（N 分钟前，智能体查的）」，一小时后写日期。记忆里没有（别的实例、旧版本、被上限挤掉）时说「智能体{when}搜过{vendor}——这里没有记住它的结果 · 重新搜索」，按一下 = 一次厂商调用。
 - **谁能读。** 主人看得见全部，任何条目都可以回答他；智能体只读 `all` 和自己的集合，再按自己的可见范围过滤（智能体不打开对话框）。
 
+
+### 实现记录（lane channel-names-readable，2026-10-07）：按人读到的名字搜索；缺少的权限在主人看的地方说出来
+
+- **搜索的便宜半（`rows()`）**：除了原始标题 / 参与者 / 作者名，还读每个非本人作者的资料别名（昵称 / 英文名 / 职位 / 部门；先看记录里的，再看账户的 people 备忘），完整匹配同样读它们——按「Mira (Marketing)」这样的昵称搜索不再在梯子之前被拒。本人的昵称不算任何对话的名字。
+- **读不到人名是账户上保存的事实**（`namesReadable`，能力行 `names: readable | unreadable(scopes)`）：账户卡片一行「此账户读不到联系人的名字和头像 — 重新授权以加上通讯录权限」+「重新授权」；「给你」里每个账户每次登录只建 ONE 条（带重新授权动作，读到一份资料时自动完成）；消息搜索与列表搜索在没有匹配时说明原因；智能体的 `list` / `search` 多一行 note。

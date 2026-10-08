@@ -25,8 +25,10 @@
 //      touch; the minute's re-sum is gone since lane scheduler-census-index: the door's touch is the one signal).
 //   ⑦ SOURCE CENSUS: src/server/channels-engine.js calls store.index.snapshot() nowhere.
 //   ⑧ THE ENGINE'S OWN WRITERS ARE INCREMENTAL: real passes (discovery complete → the unlisting scan, ingest), a refresh,
-//      a mark-read and a refresh override each leave an incremental write. CONTROL: the pre-fix unlisting scan shape (an
-//      update reaching `ix.conversations`) makes the write a whole one.
+//      a mark-read and a refresh override each leave an incremental write — a pass whose discovery walk ends leaves TWO
+//      (lane discovery-cursor-persist's keepDisc flushes the listed rows BEFORE the walk's cursor reaches the record, then
+//      the pass's own). CONTROL: the pre-fix unlisting scan shape (an update reaching `ix.conversations`) makes the write a
+//      whole one.
 //   ⑨ THE FIRST READ (design 008, B-3cf8 — userW's GET /api/channels: 77.5 MB, 1.49 s to first byte at ≈ 50 000 rows),
 //      at 50 274 and 100 548 rows: its bytes (< 1 MB at both, printed), its rowViews (≤ 300 + 30 per account), its work
 //      against the old whole list (< 2 %); every tag kind buried at position ≈ 49 000 by lastAt is on it after a first
@@ -345,7 +347,8 @@ console.log('⑧ the engine\'s own writers are incremental');
   rows.push(await step('a refresh override', () => e8.setRefresh(A, 'fake-poll-ops', 60)));
   offset -= 122e3;
   ok(first.full === 1, 'fixture: the boot\'s first write is a whole one');
-  for (const r of rows) ok(r.full === 0 && r.incremental === 1, `${r.what}: an incremental write`, JSON.stringify(r));
+  // a pass walks the listing: its rows are flushed before the walk's cursor is recorded (keepDisc), then the pass's own write
+  for (const r of rows) { const want = /\bpass\b/.test(r.what) ? 2 : 1; ok(r.full === 0 && r.incremental === want, `${r.what}: ${want === 2 ? 'two incremental writes (the listed rows before the walk\'s cursor — keepDisc — then the pass\'s own), never a whole one' : 'an incremental write'}`, JSON.stringify(r)); }
   const ctl = await step('the pre-fix unlisting scan', () => x8.update((x) => { for (const en of Object.values(x.conversations)) if (en && en.adapterId === 'nobody') en.unlistedAt = 1; }));
   ok(ctl.full === 1 && /ix\.conversations/.test(ctl.why), `CONTROL: an update reaching ix.conversations (the pre-fix unlisting scan) makes the write a whole one (${ctl.why})`);
   try { e8.stop && e8.stop(); } catch {}

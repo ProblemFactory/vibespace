@@ -315,6 +315,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
     producer: () => actBtn('producer', UI_ICONS.refresh, t('Use a reset credit…'), t('Use a reset credit…'), 'iw-act-producer'),
     // "Clear content…" (verify r2: the verb had no visible door, only a right-click) — THE model's verb, the one dialog
     clear: () => actBtn('clear', UI_ICONS.eraser, t('Clear content…'), t('Replace this item’s text — it keeps its place and time'), 'iw-act-clear'),
+    'channel-reauth': () => actBtn('channel-reauth', UI_ICONS.check, t('Re-authorize'), t('Re-authorize'), 'iw-act-primary'), // lane channel-names-readable: the account's Re-authorize dialog
     'browser-restart': () => actBtn('browser-restart', UI_ICONS.check, t('Restart'), t('Restart the browser that stopped answering — logins stay in the profile, its tabs are re-opened'), 'iw-act-primary'), // lane browser-unresponsive
     'exit-allow': () => actBtn('exit-allow', UI_ICONS.check, t('Allow'), t('Allow'), 'iw-act-primary iw-act-exit'),
     'exit-deny': () => actBtn('exit-deny', UI_ICONS.close, t('Deny'), t('Deny'), 'iw-act-exit'),
@@ -617,6 +618,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
       ]);
       return;
     }
+    if (a === 'channel-reauth') { await model.runAction(it); return; } // lane channel-names-readable: the dialog opens; the engine resolves the item
     if (a === 'browser-restart') { if (await model.runAction(it)) advance(id); return; } // lane browser-unresponsive: THE model's verb (the server resolves the item)
     if (a === 'app-reject') { if (await model.runAction(it, 'reject')) advance(id); return; }
     if (a === 'clear') { model.clearContent(id); return; } // the store's broadcast repaints the pane (and drops this button)

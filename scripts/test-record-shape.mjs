@@ -19,6 +19,8 @@
 //      every system subtype / stream type on exactly ONE of HANDLED ∪ KNOWN_IGNORED ∪
 //      DECLARED_UPSTREAM_UNSEEN, every declared shape's binary fields ⊆ known ∪ ignored, no dead list
 //      entry. SKIP with reason when no claude binary is installed. Red locally the day the CLI updates.
+//   §4e the PINNED dumps (lane cli-2-1-288-records): each build in SCHEMA_CLI_VERSIONS judged from its tracked
+//      dump (scripts/fixtures/claude-cli/<v>.json) — runs with no claude installed; a version-less new row is red.
 //   §5 negative control: a scratch copy with every `ignored` map emptied goes red on §1.
 // Run: node scripts/test-record-shape.mjs
 import fs from 'node:fs';
@@ -242,94 +244,8 @@ console.log('§3 enum drift — an undeclared enum value is a card, and the hand
   ok('…a declared value is silent (negative control)', driftCards(w).length === 0);
 }
 
-// ── THE EXTRACTOR (§4a, §4) ──
-// The SDK record union in the installed binary is a run of zod object literals
-// `<obj>({type:<lit>("…")[,subtype:<lit>("…")]…})`. The minifier RENAMES the helpers between builds —
-// 2.1.274 … 2.1.280 spelled them `u(` / `R(`, 2.1.281 spells the object helper `d(` (2026-09-23: the
-// literal extractor found `union 0 shapes` and five §4 legs went red the moment the CLI auto-updated).
-// So the helper names are never written here: they are READ off an ANCHOR — the system/compact_boundary
-// object (else init / task_started), which exists only in that union — and every object literal spelled
-// with the anchor's pair is walked (string literals skipped, the depth-1 keys collected). The guard in
-// front of the helper keeps a method call that merely ENDS in the helper's letter out: 2.1.281's MCP
-// content blocks carry `QVt.extend({type:R("resource_link")})`, which a bare `d(` matched. No anchor ⇒
-// an ERROR NAMING THE ANCHOR, never a silent 0 / 0 / 0.
-const UNION_ANCHORS = ['compact_boundary', 'init', 'task_started'];
-const HELPER = '[A-Za-z_$][A-Za-z0-9_$]*(?:\\.[A-Za-z_$][A-Za-z0-9_$]*)*';
-const NOT_AFTER_IDENT = '(?<![A-Za-z0-9_$.])';
-const reEsc = (s) => s.replace(/[$.]/g, '\\$&');
-function extractZodUnion(text) {
-  const pairs = new Map();
-  for (const a of UNION_ANCHORS) {
-    const re = new RegExp(NOT_AFTER_IDENT + '(' + HELPER + ')\\(\\{type:(' + HELPER + ')\\("system"\\),subtype:\\2\\("' + a + '"\\)', 'g');
-    let m;
-    while ((m = re.exec(text))) { const k = m[1] + ' ' + m[2]; if (!pairs.has(k)) pairs.set(k, { obj: m[1], lit: m[2], anchor: 'system/' + a }); }
-  }
-  if (!pairs.size) return { union: {}, helpers: [], error: 'NO ANCHOR: none of ' + UNION_ANCHORS.map((a) => '<obj>({type:<lit>("system"),subtype:<lit>("' + a + '")').join(' · ') + ' is in the bundle — the union\'s spelling changed again: read the binary around "compact_boundary" and teach extractZodUnion the new form' };
-  const walkTo = (i) => { let depth = 0; for (let j = i; j < text.length && j < i + 40000; j++) { const c = text[j]; if (c === '"' || c === "'" || c === '`') { const q = c; j++; while (j < text.length && text[j] !== q) { if (text[j] === '\\') j++; j++; } continue; } if (c === '(' || c === '{' || c === '[') depth++; else if (c === ')' || c === '}' || c === ']') { depth--; if (depth === 0) return j; } } return -1; };
-  const union = {};
-  for (const { obj, lit } of pairs.values()) {
-    const re = new RegExp(NOT_AFTER_IDENT + reEsc(obj) + '\\(\\{type:' + reEsc(lit) + '\\("([a-z_]+)"\\)(?:,subtype:' + reEsc(lit) + '\\("([a-z_]+)"\\))?', 'g');
-    let m;
-    while ((m = re.exec(text))) {
-      const key = m[1] + (m[2] ? '/' + m[2] : '');
-      if (union[key]) continue;
-      const i = m.index + m[0].indexOf('{'); const j = walkTo(i); if (j < 0) continue;
-      const body = text.slice(i, j + 1);
-      let d = 0, cur = ''; const fields = [];
-      for (let k = 0; k < body.length; k++) {
-        const c = body[k];
-        if (c === '"' || c === "'" || c === '`') { const q = c; k++; while (k < body.length && body[k] !== q) { if (body[k] === '\\') k++; k++; } cur = ''; continue; }
-        if (c === '(' || c === '{' || c === '[') d++; else if (c === ')' || c === '}' || c === ']') d--;
-        if (d === 1) { if (/[A-Za-z0-9_$]/.test(c)) cur += c; else { if (c === ':' && cur) fields.push(cur); cur = ''; } } else cur = '';
-      }
-      union[key] = fields.filter((f) => f !== 'type' && f !== 'subtype');
-    }
-  }
-  return { union, helpers: [...pairs.values()], error: null };
-}
-
-/** §4d (lane S1 verify r5): the binary's OWN census of the tool_result texts it writes for a permission
- *  outcome. Anchor = the constant holding the interrupt marker; from it the two lists the binary keeps —
- *  `function X(){return[…,N,…]}` (the 2.1.281 `Gd()`, matched by startsWith in `Hd()`) and
- *  `Y=new Set([…,N,…])` (the exact is_error set, with `a+b` suffix forms) — name every constant; each
- *  is resolved to its string on a strings-dump line that declares at least ONE OTHER member (a chunk
- *  declares them together; a reused minified name elsewhere in the bundle is not that). Template literals
- *  end at the dump's line (a feedback tail after "the user said:" begins on the next line) — the rows are
- *  prefixes, as the binary's own matcher is. Never throws; every failure names its anchor. */
-function extractPermissionSentences(text) {
-  const anchor = /(?<![\w$])([\w$]+)="\[Request interrupted by user for tool use\]"/.exec(text);
-  if (!anchor) return { error: 'NO ANCHOR: "[Request interrupted by user for tool use]" is not a named constant in the bundle — the interrupt marker moved or was reworded: read the binary around "Tool call did not complete" and teach extractPermissionSentences the new form' };
-  const N = anchor[1], esc = N.replace(/\$/g, '\\$');
-  const gd = new RegExp('function ([\\w$]+)\\(\\)\\{return\\[((?:[\\w$]+,)*' + esc + '(?:,[\\w$]+)*)\\]\\}').exec(text);
-  if (!gd) return { error: 'NO LIST: no `function X(){return[…,' + N + ',…]}` (the tool_result census the 2.1.281 bundle calls Gd) — the list moved: read the binary around "' + N + '" and teach extractPermissionSentences the new form' };
-  // several chunks keep a Set naming the marker (2.1.281: If = [Jw,Ud], Fbe = [Jw,Ud,pb,ww,WO], IS = the 15-member exact
-  // is_error set) — the census is the LARGEST, the one that lists every constant with its suffix forms
-  const setRe = new RegExp('(?<![\\w$])([\\w$]+)=new Set\\(\\[((?:[\\w$+]+,)*' + esc + '(?:,[\\w$+]+)*)\\]\\)', 'g');
-  let is = null; for (let m; (m = setRe.exec(text));) if (!is || m[2].split(',').length > is[2].split(',').length) is = m;
-  if (!is) return { error: 'NO SET: no `Y=new Set([…,' + N + ',…])` (the exact is_error set the 2.1.281 bundle calls IS) — read the binary around "' + N + '"' };
-  const from = new Map(); const suffixes = new Set();
-  for (const tok of gd[2].split(',')) from.set(tok, 'Gd');
-  for (const tok of is[2].split(',')) { const [head, ...rest] = tok.split('+'); from.set(head, from.has(head) ? 'both' : 'IS'); for (const p of rest) suffixes.add(p); }
-  const names = [...from.keys()];
-  const defRe = (name, flags) => new RegExp('(?<![\\w$])' + name.replace(/\$/g, '\\$') + '=(?:"((?:[^"\\\\]|\\\\.)*)"|`([^`\\n]*))', flags);
-  const defsOf = (name) => { const out = []; const re = defRe(name, 'g'); let m; while ((m = re.exec(text))) out.push({ at: m.index, value: m[1] !== undefined ? m[1] : m[2] }); return out; };
-  const lineOf = (at) => { const a = text.lastIndexOf('\n', at) + 1; const b = text.indexOf('\n', at); return [a, b < 0 ? text.length : b]; };
-  const declaresAnother = (name, at) => { const [a, b] = lineOf(at); const line = text.slice(a, b); return names.some((o) => o !== name && defRe(o, '').test(line)); };
-  const sentences = [], unresolved = [];
-  for (const name of names) {
-    const cands = defsOf(name).filter((d) => d.value.length >= 20 && declaresAnother(name, d.at));
-    if (cands.length === 1) sentences.push({ name, from: from.get(name), text: cands[0].value.replace(/\\"/g, '"'), at: cands[0].at });
-    else unresolved.push(name + ' (' + cands.length + ' candidate definitions on a line declaring another member)');
-  }
-  return { anchor: N, list: gd[1], set: is[1], sentences, unresolved, suffixes: [...suffixes] };
-}
-/** PURE: the binary's sentences vs the table — {unclassified: sentences the table lacks, ghosts: rows the binary lacks}. */
-function outcomeCensus(sentences, rows, literalText = '') {
-  const texts = new Set(sentences.map((x) => x.text));
-  const unclassified = sentences.filter((x) => !rows.some((r) => r.text === x.text)).map((x) => x.name + ' = ' + JSON.stringify(x.text.slice(0, 90)));
-  const ghosts = rows.filter((r) => (r.binary === 'literal' ? !literalText.includes(r.text) : !texts.has(r.text))).map((r) => r.id + ' (' + r.binary + ')');
-  return { unclassified, ghosts };
-}
+// ── THE EXTRACTOR (§4a, §4) — moved verbatim to scripts/claude-cli-dump.mjs (lane cli-2-1-288-records) ──
+import { extractZodUnion, extractPermissionSentences, outcomeCensus } from './claude-cli-dump.mjs';
 
 console.log('§4a the extractor on every spelling the minifier has used — a rename is FOLLOWED, a new form fails BY NAME');
 {
@@ -385,7 +301,8 @@ console.log('§4 the BINARY ORACLE — the installed claude\'s zod union vs the 
   // skipped, so the mirror stays readable and the developer box stays the place that goes red on a CLI update.
   const pinned = process.env.VIBESPACE_ORACLE_PINNED || R.SCHEMA_CLI_VERSION;
   const installed = (() => { if (!bin) return null; const m = path.basename(bin).match(/^\d+\.\d+\.\d+$/); if (m) return m[0]; try { return (execFileSync(bin, ['--version'], { encoding: 'utf8', timeout: 15000, stdio: ['ignore', 'pipe', 'ignore'] }).match(/\d+\.\d+\.\d+/) || [null])[0]; } catch { return null; } })();
-  const lenient = !!process.env.GITHUB_ACTIONS && installed !== pinned;
+  // pinned PER CLI VERSION (lane cli-2-1-288-records): any build in R.SCHEMA_CLI_VERSIONS is strict everywhere
+  const lenient = !!process.env.GITHUB_ACTIONS && installed !== pinned && !R.SCHEMA_CLI_VERSIONS.includes(installed);
   console.log(`  installed claude ${installed || '(unknown)'} vs pinned schema ${pinned} — ${lenient ? 'INFORMATIONAL (mirror, newer build): drift is printed, not red' : 'STRICT'}`);
   const oracleOk = lenient ? (n, c, e) => { if (c) ok(n, c, e); else skip(n, 'informational on the mirror (installed ' + installed + ' ≠ pinned ' + pinned + '): ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600)); } : ok;
   if (!bin || size < 4 * 1024 * 1024) {
@@ -509,7 +426,7 @@ console.log('§4b the CLI 2.1.280 pass (2026-09-22): the latency reason told tru
 
 console.log('§4c the CLI 2.1.281 pass (2026-09-23): the pinned build, six fields on three shapes, one new subtype routed to the fall-back card');
 {
-  ok('SCHEMA_CLI_VERSION is the build the oracle was re-run STRICT against (2.1.281)', R.SCHEMA_CLI_VERSION === '2.1.281', R.SCHEMA_CLI_VERSION);
+  ok('2.1.281 stays a PINNED build beside 2.1.288 (SCHEMA_CLI_VERSIONS; SCHEMA_CLI_VERSION = the newest)', R.SCHEMA_CLI_VERSIONS.join() === '2.1.281,2.1.288' && R.SCHEMA_CLI_VERSION === '2.1.288', R.SCHEMA_CLI_VERSIONS);
   const ADDED = [['system/init', 'per_turn_effort_active'], ['system/init', 'view_mode'], ['assistant', 'local_command_outcome'], ['conversation_reset', 'trigger'], ['conversation_reset', 'user_message_uuid'], ['conversation_reset', 'timestamp']];
   ok('the six fields 2.1.281 added are declared IGNORED (never known — known is the 2.1.274 dump), each with a reason naming the build', ADDED.every(([k, f]) => { const sp = R.SHAPES['claude:stream:' + k]; return !sp.known.has(f) && /2\.1\.281/.test(sp.ignored.get(f) || '') && sp.ignored.get(f).length > 60; }), ADDED.map(([k, f]) => k + '.' + f + ' = ' + R.SHAPES['claude:stream:' + k].ignored.get(f)));
   const pte = R.SHAPES['claude:stream:system/per_turn_effort_changed'];
@@ -532,6 +449,75 @@ console.log('§4c the CLI 2.1.281 pass (2026-09-23): the pinned build, six field
   const mj = createMessageManager('claude', 'test-shape-281-init2');
   mj.processLive({ type: 'system', subtype: 'init', cwd: '/w/proj', session_id: 's', uuid: 'u-j', model: 'claude-fable-5-1', view_mode: 'focus', per_turn_effort_mode: 'x' });
   ok('…NEGATIVE CONTROL: a near-miss name (per_turn_effort_mode) is still drift, named', driftCards(mj).length === 1 && driftCards(mj)[0].content[0].fields.join() === 'per_turn_effort_mode', driftCards(mj).map((m) => m.content[0].fields));
+}
+
+console.log('§4e the PINNED dumps (lane cli-2-1-288-records, B-e05e): every build in SCHEMA_CLI_VERSIONS judged from its tracked dump — no binary needed');
+{
+  const HANDLED = MM.HANDLED_SYSTEM_SUBTYPES, IGN = MM.KNOWN_IGNORED_SYSTEM_SUBTYPES, IGNT = MM.KNOWN_IGNORED_RECORD_TYPES;
+  const routeSrc = read('src/message-manager.js');
+  const routeBody = routeSrc.slice(routeSrc.indexOf('_routeMessage(raw, emit) {'), routeSrc.indexOf('_processTombstone(raw, emit) {'));
+  const cases = new Set([...routeBody.matchAll(/case '([a-z_-]+)':/g)].map((m) => m[1]));
+  const vcmp = (a, b) => { const pa = String(a).split('.').map(Number), pb = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) - (pb[i] || 0); return 0; };
+  const dumpOf = (v) => { try { return JSON.parse(read('scripts/fixtures/claude-cli/' + v + '.json')); } catch { return null; } };
+  /** PURE: one pinned build's dump vs the declarations (R-shaped) — the §4 legs, expecting the rows of THAT build. */
+  const judgeDump = (Rx, dump) => {
+    const v = dump.version, union = dump.union, UNSEEN = Rx.DECLARED_UPSTREAM_UNSEEN;
+    const keys = Object.keys(union);
+    const sys = keys.filter((k) => k.startsWith('system/')).map((k) => k.slice(7));
+    const EXPLICIT = new Set(['user', 'transcript_mirror', 'control_request', 'control_response', 'control_cancel_request', 'keep_alive', 'update_environment_variables', 'result', 'result/success']);
+    const types = [...new Set(keys.filter((k) => !k.startsWith('system/') && ((union[k].includes('uuid') && union[k].includes('session_id')) || EXPLICIT.has(k))).map((k) => k.replace(/\/.*$/, '')))];
+    const newer = (k) => !!(Rx.SHAPE_SINCE[k] && vcmp(Rx.SHAPE_SINCE[k], v) > 0);
+    const out = [];
+    for (const s of sys) if (!HANDLED.has(s) && !IGN.has(s) && !(s in UNSEEN.system)) out.push('UNLISTED system/' + s);
+    for (const t of types) if (!cases.has(t) && !IGNT.has(t) && !(t in UNSEEN.types)) out.push('UNLISTED ' + t);
+    const env = Rx.ENVELOPES['claude:stream'];
+    for (const k of keys) { const spec = Rx.SHAPES['claude:stream:' + (k === 'result/success' ? 'result' : k)]; if (spec) for (const f of union[k]) if (!env.has(f) && !spec.known.has(f) && !spec.ignored.has(f) && !Rx.isOurs(f)) out.push('UNDECLARED ' + k + '.' + f); }
+    const bsys = new Set(sys);
+    for (const s of [...HANDLED, ...IGN, ...Object.keys(UNSEEN.system)]) if (!bsys.has(s) && !(s in Rx.CORPUS_ONLY_SUBTYPES) && !newer('system/' + s)) out.push('DEAD system/' + s);
+    const bkeys = new Set(keys.map((k) => (k === 'result/success' ? 'result' : k)));
+    for (const s of Object.keys(Rx.SHAPES).filter((x) => x.startsWith('claude:stream:')).map((x) => x.slice(14))) if (!bkeys.has(s) && !newer(s)) out.push('GHOST ' + s);
+    for (const [k, since] of Object.entries(Rx.SHAPE_SINCE)) if (vcmp(since, v) <= 0 && !bkeys.has(k)) out.push('SINCE-WRONG ' + k + ' (' + since + ' but not in ' + v + ')');
+    return out;
+  };
+  /** PURE: a row a pinned build ADDED (absent from the oldest pinned dump) must name its build — SHAPE_SINCE, a pinned version whose dump has it. */
+  const versionless = (Rx, dumps) => {
+    const oldest = new Set(Object.keys(dumps[0].union).map((k) => (k === 'result/success' ? 'result' : k)));
+    const bad = [];
+    const rows = new Set(Object.keys(Rx.SHAPES).filter((x) => x.startsWith('claude:stream:')).map((x) => x.slice(14)));
+    for (const s of [...HANDLED, ...IGN, ...Object.keys(Rx.DECLARED_UPSTREAM_UNSEEN.system)]) if (!(s in Rx.CORPUS_ONLY_SUBTYPES)) rows.add('system/' + s);
+    for (const k of rows) {
+      if (oldest.has(k)) continue;
+      const since = Rx.SHAPE_SINCE[k];
+      const d = since && dumps.find((x) => x.version === since);
+      if (!since || !Rx.SCHEMA_CLI_VERSIONS.includes(since) || !d || !(k in d.union)) bad.push(k + (since ? ' (since ' + since + ' — not a pinned dump that has it)' : ' (no SHAPE_SINCE)'));
+    }
+    return bad;
+  };
+  const dumps = R.SCHEMA_CLI_VERSIONS.map(dumpOf);
+  ok('every pinned build has its TRACKED dump (scripts/fixtures/claude-cli/<version>.json), taken by the oracle\'s own method', dumps.every((d, i) => d && d.version === R.SCHEMA_CLI_VERSIONS[i] && /^strings -n 8 .*extractZodUnion/.test(d.method) && Object.keys(d.union).length >= 150), dumps.map((d) => d && [d.version, Object.keys(d.union).length]));
+  if (dumps.every(Boolean)) {
+    for (const d of dumps) { const v = judgeDump(R, d); ok(`${d.version}: every subtype / stream type listed, every field declared, no dead entry, no ghost shape (the rows of THAT build; SHAPE_SINCE excuses the newer ones)`, v.length === 0, v); }
+    const vl = versionless(R, dumps);
+    ok('every row newer than the oldest pinned build names its build (SHAPE_SINCE ∈ SCHEMA_CLI_VERSIONS, in that build\'s dump)', vl.length === 0, vl);
+    // CONTROLS on in-memory patched copies
+    const noSince = { ...R, SHAPE_SINCE: Object.fromEntries(Object.entries(R.SHAPE_SINCE).filter(([k]) => k !== 'system/ui_toast')) };
+    const ns = versionless(noSince, dumps), ns281 = judgeDump(noSince, dumps[0]);
+    ok('CONTROL: a copy declaring ui_toast WITHOUT a version goes red, naming it (version-less row, and DEAD + GHOST on the 2.1.281 dump)', ns.length === 1 && /^system\/ui_toast \(no SHAPE_SINCE\)/.test(ns[0]) && ns281.join() === 'DEAD system/ui_toast,GHOST system/ui_toast', { ns, ns281 });
+    const no288 = { ...R, SHAPES: Object.fromEntries(Object.entries(R.SHAPES).map(([k, sp]) => [k, R.FIELDS_288[k] ? { ...sp, ignored: new Map([...sp.ignored].filter(([f]) => !(f in R.FIELDS_288[k]))) } : sp])) };
+    const n288 = judgeDump(no288, dumps[1]);
+    ok('CONTROL: a copy without FIELDS_288 is red on the 2.1.288 dump (23 fields named) and still green on 2.1.281', n288.length === 23 && n288.every((x) => x.startsWith('UNDECLARED ')) && judgeDump(no288, dumps[0]).length === 0, n288.length);
+    // the §4d sentences of each pinned build: all resolved, each a row of the table
+    const PO = require(path.join(REPO, 'src/permission-outcome.js'));
+    for (const d of dumps) { const c = outcomeCensus(d.sentences.rows || [], PO.PERMISSION_OUTCOME_ROWS, ''); ok(`${d.version}: §4d ${(d.sentences.rows || []).length} permission sentences, none unresolved, each a row of src/permission-outcome.js`, (d.sentences.rows || []).length === 14 && d.sentences.unresolved.length === 0 && c.unclassified.length === 0, { unresolved: d.sentences.unresolved, c: c.unclassified }); }
+    ok('§4d 2.1.281 → 2.1.288: the same sentences (none added, none vanished — no row needs `until`), PERMISSION_OUTCOME_CLI_VERSION 2.1.288', JSON.stringify(dumps[0].sentences.rows.map((x) => x.text).sort()) === JSON.stringify(dumps[1].sentences.rows.map((x) => x.text).sort()) && PO.PERMISSION_OUTCOME_CLI_VERSION === '2.1.288');
+    // THE EIGHT DECISIONS, each on its evidence (the dump's zod literal)
+    const z = dumps[1].zod || {};
+    const EIGHT = ['session_metadata', 'instruction_size_warning', 'ui_invalidate', 'ui_log', 'ui_toast', 'ui_status', 'ui_scroll', 'ui_focus'];
+    ok('the eight 2.1.288 subtypes: a zod literal in the dump, a stream shape row, SHAPE_SINCE 2.1.288', EIGHT.every((s) => typeof z['system/' + s] === 'string' && z['system/' + s].includes('subtype:R("' + s + '")') && R.SHAPES['claude:stream:system/' + s] && R.SHAPE_SINCE['system/' + s] === '2.1.288'), EIGHT.filter((s) => !z['system/' + s]));
+    ok('instruction_size_warning is HANDLED (the dim notice); the other seven are KNOWN_IGNORED (card-less) — none left for the red card', HANDLED.has('instruction_size_warning') && !IGN.has('instruction_size_warning') && EIGHT.filter((s) => s !== 'instruction_size_warning').every((s) => IGN.has(s) && !HANDLED.has(s)));
+    ok('ui_toast evidence: its zod object is {plugin, text, timeout_ms} only — no level / severity, so no error-class toast exists to surface', (dumps[1].union['system/ui_toast'] || []).filter((f) => f !== 'uuid' && f !== 'session_id').join() === 'plugin,text,timeout_ms' && !/level|severity|error/.test(z['system/ui_toast'].replace(/describe\("[^"]*"\)/g, '')));
+    ok('session_metadata evidence: metadata carries artifacts only (no model / cwd / version for the status bar)', /metadata:u\(\{artifacts:/.test(z['system/session_metadata'] || '') && !/model|cwd|version/.test(z['system/session_metadata'] || ''));
+  }
 }
 
 console.log('§5 negative control — a scratch copy with every `ignored` map emptied goes red on §1');

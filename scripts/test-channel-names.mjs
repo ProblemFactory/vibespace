@@ -364,5 +364,97 @@ async function verifyRun(EM, UT, tag) {
   ok(p.names.oc_ghost !== 'Cy' && p.wakes.oc_ghost && p.wakes.oc_ghost.channel.name !== 'Cy', 'CONTROL F5: the lane head named the room by its invisible title (nothing drawn, Cy known)', JSON.stringify(p.wakes.oc_ghost && p.wakes.oc_ghost.channel));
 }
 
+// ── §N lane channel-names-readable (userW inc-muyrhqtj-ys0z): THE NAMES A PERSON READS are search keys, and a sign-in
+// that cannot read people's profiles SAYS it (the account's kept fact → the card, ONE For-you item per sign-in) ────────
+console.log('§N the names a person reads + "people\'s names cannot be read" said where the owner looks');
+const CC = require(path.join(REPO, 'src/channel-caps.js'));
+async function namesRun(EM, tag) {
+  const A = 'nr-' + tag;
+  const CONVS = [{ id: 'oc_dorn', title: '', kind: 'dm' }, { id: 'oc_kenji', title: '', kind: 'dm' }, { id: 'oc_ops', title: 'Ops room', kind: 'group' }];
+  const world = new Map(CONVS.map((c) => [c.id, []]));
+  let seqNo = 0, mode = 'refuse', warmCalls = 0;
+  const mint = (convId, author) => makeRecord({ adapterId: A, convId, vendorId: `${convId}-${++seqNo}`, at: Date.now() - 600e3 + seqNo * 1000, author: { ...author, isSelf: false, isBot: false }, text: 'hello ' + seqNo });
+  const mod = {
+    kind: A,
+    caps: { receive: 'poll', history: 'page', pollInterval: { hot: 30, cold: 300, floor: 10 }, listConversations: true, sendAs: ['user'], identityMarking: 'unknown', identityMarkingWhere: null, identityMarkingText: null, tosRisk: 'none', idempotency: 'key', threading: 'thread-id', editSent: false },
+    create() {
+      return {
+        auth: { async state() { return { state: 'connected', expiresAt: null, scopes: ['fake'], why: null }; } },
+        selfId() { return 'u-owner'; },
+        async listConversations() { return { conversations: CONVS.map((c) => makeConversation({ id: c.id, vendorId: c.id, title: c.title, kind: c.kind, participants: '', lastAt: null })), cursor: null, complete: true }; },
+        async convCaps() { return { read: 'yes', sendAs: ['user'], why: null, at: Date.now() }; },
+        async history(convId, { anchor = null, limit = 50 } = {}) {
+          const all = world.get(convId) || [];
+          let idx = 0;
+          if (anchor) { const at = all.findIndex((r) => r.vendorId === anchor); idx = at >= 0 ? at + 1 : 0; }
+          const page = all.slice(idx).slice(0, limit), drained = page.length === all.slice(idx).length;
+          return { records: page, anchor: page.length ? page[page.length - 1].vendorId : anchor, reachedAnchor: drained, complete: drained };
+        },
+        // the people warm-up's answer: a sign-in without the profile permission refuses by name; one with it reads
+        async warmPeople(ids) { warmCalls++; return mode === 'refuse' ? { asked: 0, ok: 0, unreadable: { why: 'scopes', missing: ['contact:base'] } } : { asked: ids.length, ok: ids.length }; },
+        async send() { return { ok: true, vendorMessageId: 'sent-1', at: Date.now(), sentAs: 'user' }; },
+        async reconcile() { return { unknown: true }; },
+      };
+    },
+  };
+  const dir = path.join(ROOT, tag);
+  fs.mkdirSync(path.join(dir, 'channels', A), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: [{ id: A, kind: A, label: 'Lark NR', enabled: true, auth: { tokenEnc: null, expiresAt: null, scopes: [] }, lastAuthAt: 1000, lastPass: null, consecutiveFailures: 0 }] }));
+  // the people memo the adapter keeps: Dorn's profile nickname is Mira (the owner's own case), Kenji's is a Chinese name;
+  // the owner's own nickname is never a conversation's name
+  fs.writeFileSync(path.join(dir, 'channels', A, 'people.json'), JSON.stringify({ self: 'u-owner', people: {
+    'u-dorn': { name: 'Dorn', alt: { nickname: 'Mira', enName: 'Mira Holt', department: 'Marketing' } },
+    'u-kenji': { name: 'Kenji', alt: { nickname: '林远' } },
+    'u-owner': { name: 'Me', alt: { nickname: 'Bossman' } } } }));
+  const registry = CH.createChannelRegistry(); registry.register(mod);
+  const userTodos = new UserTodoManager({ dataDir: dir });
+  const ladder = { async deliverToConversation() { return { ok: true, lane: 'message' }; }, stashFor() { return { ok: true }; } };
+  const e = EM.create({ dataDir: dir, env: {}, registry, broadcast: () => {}, log: { log() {}, warn() {}, error() {} }, deliver: ladder, userTodos, serverSetting: () => undefined, liveSessions: () => [] });
+  let adds = 0;
+  const add0 = userTodos.add.bind(userTodos);
+  userTodos.add = (k, o) => { if (o && o.action && o.action.type === 'channel-reauth') adds++; return add0(k, o); };   // every filing (a re-file of a dismissed item reopens it)
+  const items = () => ((userTodos._state && userTodos._state.items) || []).filter((i) => i.action && i.action.type === 'channel-reauth');
+  const acct = () => e.digest().adapters.find((x) => x.id === A);
+  const round = async () => { for (const c of ['oc_dorn', 'oc_kenji']) world.get(c).push(mint(c, c === 'oc_dorn' ? { id: 'u-dorn', name: 'Dorn' } : { id: 'u-kenji', name: 'Kenji' })); world.get('oc_ops').push(mint('oc_ops', { id: 'u-owner', name: 'Me' })); await e.pass(A, { force: true }); await sleep(40); };
+  const out = {};
+  try {
+    await e.pass(A, { force: true });
+    await round();
+    const a1 = acct();
+    out.refused = { view: a1.namesReadable, row: a1.names, items: items().map((i) => ({ status: i.status, text: i.text, action: i.action, origin: i.origin, kind: i.kind })) };
+    for (let k = 0; k < 3; k++) await round();
+    out.afterPasses = { filed: adds, items: items().length, open: items().filter((i) => i.status === 'open').length, warmCalls };
+    const hit = (q) => e.rows({ q }).rows.map((r) => r.id).sort().join(',');
+    out.search = { mira: hit('mira'), lee: hit('mira holt'), mkt: hit('marketing'), kenji: hit('林远'), dorn: hit('dorn'), boss: hit('bossman') };
+    mode = 'read';
+    await round();
+    const a2 = acct();
+    out.read = { view: a2.namesReadable, row: a2.names, statuses: items().map((i) => i.status) };
+  } finally { e.stop(); }
+  return out;
+}
+{
+  const v = await namesRun(ENG, 'n1');
+  const r = v.refused;
+  ok(r.view && r.view.ok === false && r.view.why === 'scopes' && r.view.missing.join() === 'contact:base' && r.row === 'unreadable(scopes)', 'N1 a sign-in whose people warm-up is refused by permission KEEPS the fact on the account: namesReadable {ok:false, why:scopes, missing} · caps row unreadable(scopes)', JSON.stringify(r));
+  ok(r.items.length === 1 && r.items[0].status === 'open' && r.items[0].origin === 'channels' && r.items[0].kind === 'action' && r.items[0].action.adapterId === 'nr-n1' && /people's names and pictures cannot be read — re-authorize/.test(r.items[0].text), 'N1 ONE For-you item (origin channels, kind action, the account\'s Re-authorize action) says it', JSON.stringify(r.items));
+  ok(v.afterPasses.filed === 1 && v.afterPasses.items === 1 && v.afterPasses.open === 1 && v.afterPasses.warmCalls >= 8, `N2 filed ONCE per sign-in: ${v.afterPasses.warmCalls} refused warm-ups over 4 passes, ${v.afterPasses.filed} item`, JSON.stringify(v.afterPasses));
+  ok(v.search.mira === 'oc_dorn' && v.search.lee === 'oc_dorn' && v.search.mkt === 'oc_dorn' && v.search.dorn === 'oc_dorn', 'N3 a search by the profile\'s nickname / English name / department finds the single chat whose vendor name is "Dorn"', JSON.stringify(v.search));
+  ok(v.search.kenji === 'oc_kenji', 'N3 a search by a Chinese nickname (林远) finds the chat whose raw name is Latin ("Kenji")', JSON.stringify(v.search));
+  ok(v.search.boss === '', 'N3 the account\'s OWN nickname is no conversation\'s name (no row admitted by it)', JSON.stringify(v.search));
+  ok(v.read.view === null && v.read.row === 'readable' && v.read.statuses.join() === 'done', 'N4 a later warm-up that READS a profile clears the fact (readable) and resolves the For-you item (the re-authorize fixed it)', JSON.stringify(v.read));
+  const t = (s, p) => String(s).replace(/\{(\w+)\}/g, (m, k) => (p && p[k] != null ? p[k] : m));
+  ok(CC.namesText(r.view, { t }) === 'People\'s names and pictures cannot be read on this account — re-authorize to add the contact permission' && CC.namesText(null, { t }) === '', 'N5 the card\'s note line words it (and nothing while readable)');
+  ok(CC.namesSearchText(r.view, { t }) === 'No match — people\'s names cannot be read on this account (re-authorize), so a search by a person\'s other name finds nothing' && CC.namesSearchText(null, { t }) === '', 'N5 the search\'s empty state words it');
+  ok(CC.namesVerdict(r.view, { unreadable: { why: 'scopes', missing: ['contact:base'] } }, 9) === undefined && CC.namesVerdict(null, { asked: 0 }, 9) === undefined && CC.namesVerdict(r.view, { ok: 0, asked: 2 }, 9) === undefined, 'N5 the verdict writes only on a change (the same refusal again / nothing read = unchanged)');
+  // the CONTROLS: the cheap half without the profile names; the item filed at every refused warm-up
+  let s = eng;
+  s = swap(s, "      src.push(...altNamesOf(en));\n", "");
+  s = swap(s, "    if (rec.namesItem && rec.namesItem.signin === signin) return;\n", "");
+  const p = await namesRun(MUT.load('src/server/channels-engine.js', s, 'nr-pre'), 'n1pre');
+  ok(p.search.mira === '' && p.search.kenji === '' && p.search.dorn === 'oc_dorn', 'CONTROL N3: without the profile names the cheap half REJECTS a nickname query before the ladder (Mira / 林远 find nothing)', JSON.stringify(p.search));
+  ok(p.afterPasses.filed > 1, `CONTROL N2: a copy filing at every refused warm-up files ${p.afterPasses.filed} times (a dismissed item would come back every pass)`, JSON.stringify(p.afterPasses));
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

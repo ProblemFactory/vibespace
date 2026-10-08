@@ -634,7 +634,7 @@ process.exit(fs.existsSync(path.join(repo, 'FAST_RED')) ? 1 : 0);
     // finding anything would make every assert below pass.
     const namedBy = (p, suite) => gateInputs.has(p) && gateInputs.get(p).has(suite);
     ok(namedBy('docs/kb-file-structure.md', 'test-codex-effort-meta')
-      && namedBy('CLAUDE.md', 'test-opencode-serve')
+      && namedBy('CLAUDE.md', 'test-readings-attribution')
       && namedBy('CHANGELOG.md', 'test-codex-effort-meta')
       && namedBy('docs/examples/hello-plugin', 'test-plugin-loader')
       && namedBy('docs/agent/msg-manual.md', 'test-agent-msg'),

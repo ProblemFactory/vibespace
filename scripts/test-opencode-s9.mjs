@@ -44,6 +44,8 @@ const skip = (name, why) => { pass++; console.log(`  ⊘ SKIP ${name} — ${why}
  *  something we did not break. */
 const envExhausted = (text) => /EMFILE|ENOSPC|too many open files|watch limit/i.test(String(text || ''));
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf-8');
+// lane claude-md-diet (B-23e7): the incident index lines moved out of CLAUDE.md into the kb-bugfix-invariants INDEX head
+const bugIndex = () => ((t) => (t.split(/^## INDEX\b.*$/m)[1] || '').split(/^## /m)[0])(read('docs/kb-bugfix-invariants.md'));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** A locator over a fixed base url — the keeper is already gated elsewhere. */
@@ -579,7 +581,7 @@ console.log('\n— ROUND 3 (findings from the second review of this branch) —'
   ok('docs: the own-write ledger, the woken sleep and the terminal 404 are in the kb essays + the incident file',
     /noteOwnWrite/.test(kfs) && /ownWriteVerdict/.test(kfs) && /wakes it|wake it|wake the sleep|WAKES/i.test(kfs) && /ptyGone/.test(kfs)
     && /OUR OWN CLICK REPORTED AS SOMEONE ELSE'S TURN/.test(read('docs/kb-bugfix-invariants.md'))
-    && /S9 REMAINDER ROUND 3/.test(read('CLAUDE.md')));
+    && /S9 REMAINDER ROUND 3/.test(bugIndex()));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -805,7 +807,7 @@ console.log('\n— ROUND 4 (findings from the third review of this branch) —')
   ok('docs: the directory-free pty family, the pty reaper and the re-resolved store watch are in the kb essays + the incident file',
     /reapPtys/.test(kfs) && /no `directory`|NO `directory`|directory-free/i.test(kfs) && /re-resolv/i.test(kfs)
     && /A SERVE TERMINAL INDEXED THE USER'S REPO/.test(read('docs/kb-bugfix-invariants.md'))
-    && /S9 REMAINDER ROUND 4/.test(read('CLAUDE.md')));
+    && /S9 REMAINDER ROUND 4/.test(bugIndex()));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -977,7 +979,7 @@ function inotifyWdsOn(dir, pid = 'self') {
   ok('docs: the per-process question map and the service-gated lane are in the kb essays + the incident file + the index',
     /questionsFor/.test(kfs) && /ROUND 5/.test(kfs)
     && /A DEAD ASK STAYED ANSWERABLE/.test(read('docs/kb-bugfix-invariants.md'))
-    && /S9 REMAINDER ROUND 5/.test(read('CLAUDE.md')));
+    && /S9 REMAINDER ROUND 5/.test(bugIndex()));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1192,7 +1194,7 @@ const stalledChild = () => { const c = new EventEmitter(); c.pid = null; c.unref
   ok('docs: "stop() is terminal for work already in flight" is in the kb essays + the incident file + the index',
     /ROUND 6/.test(kfs) && /laneStopped/.test(kfs)
     && /A SERVICE THAT WAS TURNED OFF KEPT THE WATCH/.test(read('docs/kb-bugfix-invariants.md'))
-    && /S9 REMAINDER ROUND 6/.test(read('CLAUDE.md')));
+    && /S9 REMAINDER ROUND 6/.test(bugIndex()));
   if (unfixedFile) { try { fs.rmSync(unfixedFile, { force: true }); } catch { } }   // the control is an artefact of THIS run; an 'exit' hook would not survive the browser leg's removeAllListeners
 }
 
@@ -1351,15 +1353,15 @@ for (const [win, label] of [['reuse', 'the reuse health probe on a BUSY recorded
   ok('docs: "the check belongs at the ACQUISITION point" is in the kb essays + the incident file + the index',
     /ROUND 7/.test(kfs) && /adopt\(\)/.test(kfs)
     && /A SERVICE THAT WAS TURNED OFF STILL ADOPTED/.test(read('docs/kb-bugfix-invariants.md'))
-    && /S9 REMAINDER ROUND 7/.test(read('CLAUDE.md')));
+    && /S9 REMAINDER ROUND 7/.test(bugIndex()));
   // …and the SIZE of that control is stated as a number the TABLE owns, in all
   // three places (round 8 finding 3: the essays said "five" while R7_NEUTER had
   // six entries — a count written by hand drifts silently, and a negative
   // control the reader mis-sizes is one they cannot re-derive)
   const n7 = R7_NEUTER.length;
-  const stated = [['docs/kb-bugfix-invariants.md', new RegExp(`exactly these ${n7} checks`)], ['docs/kb-file-structure.md', new RegExp(`its ${n7} replacements`)], ['CLAUDE.md', new RegExp(`把这 ${n7} 个检查删掉`)]];
+  const stated = [['docs/kb-bugfix-invariants.md', new RegExp(`exactly these ${n7} checks`)], ['docs/kb-file-structure.md', new RegExp(`its ${n7} replacements`)], ['the kb-bugfix-invariants INDEX head', new RegExp(`把这 ${n7} 个检查删掉`)]];
   ok(`docs: the ROUND 7 negative control's size is stated as the number R7_NEUTER owns (${n7}) in all three places`,
-    stated.every(([f, re]) => re.test(read(f))), stated.filter(([f, re]) => !re.test(read(f))).map(([f]) => f));
+    stated.every(([f, re]) => re.test(f.endsWith(' INDEX head') ? bugIndex() : read(f))), stated.filter(([f, re]) => !re.test(f.endsWith(' INDEX head') ? bugIndex() : read(f))).map(([f]) => f));
   if (unfixedServeFile) { try { fs.rmSync(unfixedServeFile, { force: true }); } catch { } }
 }
 
@@ -1529,7 +1531,7 @@ async function r8Run(mod, { disable = true, enable = true } = {}) {
   ok('docs: "a level is not a cancellation" is in the kb essays + the incident file + the index',
     /ROUND 8/.test(kfs) && /stopEpoch/.test(kfs)
     && /A LEVEL IS NOT A CANCELLATION/.test(read('docs/kb-bugfix-invariants.md'))
-    && /S9 REMAINDER ROUND 8/.test(read('CLAUDE.md')));
+    && /S9 REMAINDER ROUND 8/.test(bugIndex()));
   ok(`docs: the ROUND 8 negative control's size is stated as the number R8_NEUTER owns (${n8})`,
     new RegExp(`one per mechanism, ${n8} of them`).test(read('docs/kb-bugfix-invariants.md')) && new RegExp(`${n8} single-mechanism controls`).test(kfs),
     [n8]);
@@ -1777,7 +1779,7 @@ for (const [win, label] of [['bad', "the reuse VERDICT probe on a '/'-worktree l
   ok('docs: "a record you do not own" is in the kb essays + the incident file + the index',
     /ROUND 9/.test(kfs) && /clearRecord/.test(kfs)
     && /A RECORD YOU DO NOT OWN/.test(read('docs/kb-bugfix-invariants.md'))
-    && /S9 REMAINDER ROUND 9/.test(read('CLAUDE.md')));
+    && /S9 REMAINDER ROUND 9/.test(bugIndex()));
   ok(`docs: the ROUND 9 pre-fix control's size is stated as the number R9_NEUTER owns (${n9})`,
     new RegExp(`removing all ${n9}`).test(read('docs/kb-bugfix-invariants.md')) && new RegExp(`its ${n9} replacements`).test(kfs), [n9]);
   for (const f of [r9PreFix.file, r9VerdictCtl.file, r9DeadPidCtl.file, r9OwnedCtl.file]) if (f) { try { fs.rmSync(f, { force: true }); } catch { } }
@@ -2063,18 +2065,18 @@ async function r10Run(mod, { socket = 'hung', recorded = 'ours', autostart = tru
   ok('docs: "the record we were about to overwrite" is in the kb essays + the incident file + the index',
     /ROUND 10/.test(kfs) && /settleRecordedServe/.test(kfs)
     && /THE RECORD WE WERE ABOUT TO OVERWRITE/.test(read('docs/kb-bugfix-invariants.md'))
-    && /S9 REMAINDER ROUND 10/.test(read('CLAUDE.md')));
+    && /S9 REMAINDER ROUND 10/.test(bugIndex()));
   ok(`docs: the ROUND 10 pre-fix control's size is stated as the number R10_NEUTER owns (${n10})`,
     new RegExp(`its ${n10} replacements`).test(kfs), [n10]);
   // ROUND 11 — the same contract: the essay lives in the kb, the incident in
-  // the invariants file, the index line in CLAUDE.md, and the SHIPPED script's
+  // the invariants file, the index line in the kb-bugfix INDEX head (CLAUDE.md until lane claude-md-diet), and the SHIPPED script's
   // own entry says the settlement reached it too (that file was the unfixed
   // twin — a kb that still describes the old `locate()` is how the twin got
   // shipped in the first place).
   ok('docs: ROUND 11 (the portable identity rung, the blind verdict, and the button the park left enabled) is in the kb essays + the incident file + the index',
     /ROUND 11/.test(kfs) && /'blind'/.test(kfs) && /hostCanIdentify/.test(kfs)
     && /A GUARD THAT CAN NEVER ANSWER IS AN OUTAGE/.test(read('docs/kb-bugfix-invariants.md'))
-    && /S9 REMAINDER ROUND 11/.test(read('CLAUDE.md')));
+    && /S9 REMAINDER ROUND 11/.test(bugIndex()));
   ok('docs: the SHIPPED ssh script\'s own kb entry says its record is SETTLED (it carried the unfixed twin of the round-10 bug)',
     /vibespace-opencode-op[\s\S]{0,4000}?SETTLED BEFORE ANYTHING OVERWRITES IT/.test(kfs));
   if (r10Ctl.file) { try { fs.rmSync(r10Ctl.file, { force: true }); } catch { } }
