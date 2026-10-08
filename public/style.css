@@ -6204,6 +6204,16 @@ label.chan-cap-row { cursor: default; }
 .dialog-body .bnew-field input.bnew-label, .dialog-body .bnew-field input.bnew-port { width: 100%; box-sizing: border-box; }
 .bnew-port-row { padding-left: 20px; }
 .bnew-keep { font-size: 12px; line-height: 1.4; }
+/* lane browser-profile-clone: the answer rows the New profile… and Change build… dialogs draw (browser / machine / build / copy
+   from) — their base rules went with the who dialog's rebuild in 2.369.202, leaving radios centred above run-on text */
+.bwho-answers { display: flex; flex-direction: column; gap: 6px; }
+.dialog-body label.bwho-answer { display: flex; flex-direction: row; align-items: flex-start; gap: 8px; margin: 0; padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; font-size: 12px; color: var(--text); }
+.dialog-body label.bwho-answer:has(.bwho-radio:checked) { border-color: var(--accent); }
+.dialog-body label.bwho-answer .bwho-radio { margin: 2px 0 0; padding: 0; flex: 0 0 auto; width: auto; }
+.bwho-answer-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.bwho-answer-head { font-weight: 600; color: var(--text); }
+.bwho-answer-sub { font-size: 11px; color: var(--text-secondary); line-height: 1.4; }
+.bnew-clone-hint { font-size: 12px; line-height: 1.4; }
 .dialog-body label.bwho-answer.is-off { cursor: default; border-style: dashed; }
 .dialog-body label.bwho-answer.is-off .bwho-answer-head { color: var(--text-secondary); }
 .bnew-note { overflow-wrap: anywhere; }

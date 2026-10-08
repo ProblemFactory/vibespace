@@ -19,7 +19,7 @@ import { folderTail } from './principal-picker-model.js';
 import { pickerRows, draftWho, EVERYONE_KEY } from './browser-who-model.js';
 import { nameHelpers } from './browser-who-dialog.js';
 import { installConfirmWords, installOutcomeWords } from './browser-switcher-model.js';
-import { providerChoices, machineChoices, createBody, createRefusalWords, adoptFormOf } from './browser-new-profile-model.js';
+import { providerChoices, machineChoices, createBody, createRefusalWords, adoptFormOf, cloneSourceChoices, cloneMachineVerdict } from './browser-new-profile-model.js';
 import { buildRows, choiceOfRow, installHint, buildRefusalWords } from './browser-build-model.js'; // lane browser-admin 2a: the build section
 import { downloadRow, mountDownloadPicker } from './browser-build-dialog.js'; // lane chrome-builds-download: "Download another build…"
 
@@ -33,7 +33,7 @@ const jsonPost = (body) => ({ method: 'POST', headers: { 'Content-Type': 'applic
  */
 export function openNewProfileDialog(app, { label = '', fromSession = null, onCreated = null, onDismissed = null } = {}) {
   const adopt = adoptFormOf(fromSession); // verify r1 (F7): the server's plan (the picker asked it), never the rung's guess
-  const st = { providers: [], install: null, machines: [{ hostId: 'local' }], hostRows: null, provider: 'chromium', host: null, busy: false, closed: false, created: false, handoff: false, builds: { pending: true }, buildsFor: undefined, buildKey: 'default', buildHint: null };
+  const st = { cloneKey: 'none', cloneSources: null, cloneFor: undefined, providers: [], install: null, machines: [{ hostId: 'local' }], hostRows: null, provider: 'chromium', host: null, busy: false, closed: false, created: false, handoff: false, builds: { pending: true }, buildsFor: undefined, buildKey: 'default', buildHint: null };
   const names = nameHelpers(app);
   const sb = (app && app.sidebar) || {};
   const shell = createModalShell({ id: DIALOG_ID, title: adopt ? t('New persistent profile') : t('New profile'), dialogClass: 'bwho-dialog bnew-dialog', bodyClass: 'bwho-body bnew-body', escapeToClose: true,
@@ -82,6 +82,13 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
   const openBuildPicker = () => { buildList.style.display = 'none'; buildHint.style.display = 'none'; buildPicker.style.display = ''; buildPick = mountDownloadPicker(buildPicker, { onBack: () => closeBuildPicker(), onDownloaded: (v) => { closeBuildPicker(); st.buildKey = 'v:' + v; st.buildsFor = undefined; loadBuilds(); } }); };
   const closeBuildPicker = () => { buildPick?.stop(); buildPick = null; buildPicker.replaceChildren(); buildPicker.style.display = 'none'; buildList.style.display = ''; drawBuilds(); };
   let buildPath = null;
+  // ── lane browser-profile-clone (B-9669): "Copy logins from" — every named profile on the chosen machine, its state in words;
+  // a picked one makes the new profile a one-time copy of its folder (its browser and build come with it) ──
+  const cloneWrap = el('div', 'bnew-section bnew-clone-wrap');
+  const cloneList = el('div', 'bwho-answers bnew-clones'); cloneList.setAttribute('role', 'radiogroup'); cloneList.setAttribute('aria-label', t('Copy logins from'));
+  const cloneHint = el('div', 'bnew-clone-hint chat-status-dim');
+  cloneWrap.append(el('div', 'bnew-section-head', t('Copy logins from')), cloneList, cloneHint);
+  if (!fromSession) body.appendChild(cloneWrap);
   if (adopt !== 'keep') body.appendChild(buildWrap);
 
   // ── who can use it (THE principal picker, as in the who dialog) ──
@@ -185,7 +192,7 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
       if (!row) {
         row = el('label', 'bwho-answer bnew-machine'); row.dataset.host = key;
         const input = document.createElement('input'); input.type = 'radio'; input.name = 'bnew-machine'; input.value = key; input.className = 'bwho-radio';
-        input.onchange = () => { st.host = m.hostId; drawProviders(); drawMachines(); loadBuilds(); };
+        input.onchange = () => { st.host = m.hostId; drawProviders(); drawMachines(); loadBuilds(); loadClones(); };
         const text = el('span', 'bwho-answer-text'); text.append(el('span', 'bwho-answer-head'), el('span', 'bwho-answer-sub bnew-note'));
         row.append(input, text);
       }
@@ -212,6 +219,7 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
   const buildChoiceOf = (id) => { const r = st.providers.find((x) => x && x.id === id); return r ? !!r.buildChoice : !st.providers.length; };
   function drawBuilds() {
     if (adopt === 'keep') return;
+    if (!fromSession && st.cloneKey !== 'none') { buildWrap.style.display = 'none'; return; } // lane browser-profile-clone: a copy runs its source's build
     const show = buildChoiceOf(st.provider);
     buildWrap.style.display = show ? '' : 'none';
     buildWrap.setAttribute('aria-busy', st.builds && st.builds.pending ? 'true' : 'false'); // the list is asked, not answered yet
@@ -244,6 +252,54 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
     const h = installHint({ command: st.buildHint, local: !st.host, download: st.buildDownload || null }, t) || '';
     if (buildHint.textContent !== h) buildHint.textContent = h;
     buildHint.style.display = h ? '' : 'none';
+  }
+  /** lane browser-profile-clone: the section's rows for the chosen machine (a paired machine that cannot copy says why) */
+  function drawClones() {
+    if (fromSession) return;
+    const machine = st.host ? (st.machines || []).find((m) => m && m.hostId === st.host) || { hostId: st.host } : null;
+    const mv = cloneMachineVerdict(machine, { t });
+    const rows = mv.ok ? cloneSourceChoices({ sources: st.cloneSources || [], t }) : cloneSourceChoices({ sources: [], t });
+    if (!rows.some((r) => r.key === st.cloneKey && r.pickable)) st.cloneKey = 'none';
+    const keep = new Map([...cloneList.children].map((n) => [n.dataset.key, n]));
+    const order = [];
+    for (const r of rows) {
+      let row = keep.get(r.key);
+      if (!row) {
+        row = el('label', 'bwho-answer bnew-clone'); row.dataset.key = r.key;
+        const input = document.createElement('input'); input.type = 'radio'; input.name = 'bnew-clone'; input.value = r.key; input.className = 'bwho-radio';
+        input.onchange = () => { st.cloneKey = r.key; drawClones(); };
+        const text = el('span', 'bwho-answer-text'); text.append(el('span', 'bwho-answer-head'), el('span', 'bwho-answer-sub bnew-note'));
+        row.append(input, text);
+      }
+      const input = row.querySelector('input');
+      input.disabled = !r.pickable; input.checked = r.pickable && r.key === st.cloneKey;
+      row.classList.toggle('is-off', !r.pickable);
+      row.dataset.state = r.state;
+      const [head, note] = row.querySelectorAll('.bwho-answer-text > span');
+      if (head.textContent !== r.name) head.textContent = r.name;
+      const nt = r.note || ''; if (note.textContent !== nt) note.textContent = nt; note.style.display = nt ? '' : 'none';
+      order.push(row);
+    }
+    cloneList.replaceChildren(...order);
+    const src = rows.find((r) => r.key === st.cloneKey && r.id);
+    const hint = !mv.ok ? mv.note
+      : st.cloneSources === null ? t('Reading the profiles on this machine…')
+      : src ? t('A one-time copy of {source}: the same browser and build; signing in or out later in either one does not change the other.', { source: src.name })
+      : rows.length > 1 ? '' : t('No profile on this machine to copy from yet.');
+    if (cloneHint.textContent !== hint) cloneHint.textContent = hint;
+    cloneHint.style.display = hint ? '' : 'none';
+    // a copy runs its source's browser and build — the two sections step aside while one is picked
+    provWrap.style.display = src ? 'none' : '';
+    if (src) buildWrap.style.display = 'none'; else drawBuilds();
+  }
+  async function loadClones() {
+    if (fromSession) return;
+    const h = st.host || null;
+    st.cloneFor = h; st.cloneSources = null; drawClones();
+    const r = await fetchJson('/api/browser/clone-sources' + (h ? `?host=${encodeURIComponent(h)}` : ''));
+    if (st.closed || st.cloneFor !== h) return;
+    st.cloneSources = r && Array.isArray(r.sources) ? r.sources : [];
+    drawClones();
   }
   /** the chosen machine's builds (asked again when the machine changes; a paired machine's through its agent) */
   async function loadBuilds() {
@@ -282,7 +338,7 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
     if (serving.length) { const rs = await Promise.all(serving.map((m) => fetchJson(`/api/browser/builds?host=${encodeURIComponent(m.hostId)}`))); if (st.closed) return; st.ready = {}; serving.forEach((m, i) => { const r = rs[i]; if (r && !r.error && r.ready) st.ready[m.hostId] = r.ready; }); }
     if (!st.providers.length && !(pv && pv.error)) st.providers = [{ id: 'chromium', buildChoice: true, control: { ok: true } }];
     if (pv && pv.error) say(t('Could not read which browsers this VibeSpace offers — {reason}', { reason: String(pv.error) }));
-    drawProviders(); drawMachines(); loadBuilds();
+    drawProviders(); drawMachines(); loadBuilds(); loadClones();
   }
   const onGlobal = (m) => { if (!st.closed && m && m.type === 'browser-profiles-updated') loadFacts(); };
   app.ws?.onGlobal?.(onGlobal);
@@ -298,15 +354,20 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
       browser = choiceOfRow(row, buildPath ? buildPath.value : '');
       if (!browser) { say(buildRefusalWords({ code: 'browser_choice_invalid' }, t)); if (buildPath) buildPath.focus(); return; }
     }
-    const c = createBody({ label: nameInput.value, provider: st.provider, host: st.host, cdpPort: portInput.value, mode: whoMode(), who, adopt, browser });
+    const cloneFrom = !fromSession && st.cloneKey && st.cloneKey !== 'none' ? st.cloneKey : null;
+    const c = createBody({ label: nameInput.value, provider: st.provider, host: st.host, cdpPort: portInput.value, mode: whoMode(), who, adopt, browser, cloneFrom });
     if (!c.ok) { say(createRefusalWords({ code: c.code }, t)); (c.field === 'label' ? nameInput : c.field === 'cdpPort' ? portInput : picker).focus(); return; }
     st.busy = true; create.disabled = true; cancel.disabled = true; picker.setBusy(true);
+    const cloneName = cloneFrom ? String(((st.cloneSources || []).find((x) => x && x.id === cloneFrom) || {}).label || cloneFrom) : '';
+    if (cloneFrom) { cloneHint.textContent = t('Copying {source}… the new profile appears when it is done.', { source: cloneName }); cloneHint.style.display = ''; cloneWrap.setAttribute('aria-busy', 'true'); create.textContent = t('Copying…'); }
     const r = fromSession
       ? await fetchJson('/api/browser/adopt', jsonPost({ sessionId: fromSession.webuiId, ...c.body }))
       : await fetchJson('/api/browser/profiles', jsonPost(c.body));
     if (st.closed) return;
     st.busy = false; create.disabled = false; cancel.disabled = false; picker.setBusy(false);
+    if (cloneFrom) { cloneWrap.setAttribute('aria-busy', 'false'); create.textContent = t('Create'); drawClones(); }
     if (!r || r.error) {
+      if (cloneFrom && r && (r.code === 'source_leased' || r.code === 'source_not_found' || r.code === 'source_still_running')) loadClones(); // the rows say the state that refused
       // verify r3 (Y4): the conversation's browser changed since this dialog drew its form (409 adopt_form_changed) — the
       // dialog is REOPENED on the form the server names now (`now`), the typed name kept, the same doors; never left on a
       // form every Create would refuse again (the user had to Cancel and find the row himself)
@@ -323,13 +384,13 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
     const lbl = String((r.profile && r.profile.label) || c.body.label);
     showToast(fromSession
       ? (r.adopted ? t('{label} keeps this conversation\'s logins — every conversation you allowed can use it', { label: lbl }) : t('{label} was created empty — the agent\'s next browser command opens it and you sign in there once', { label: lbl }))
-      : t('Created {label}', { label: lbl }), { duration: 7000 });
+      : cloneFrom ? t('Created {label} with the logins of {source}', { label: lbl, source: cloneName }) : t('Created {label}', { label: lbl }), { duration: 7000 });
     st.created = true;
     shell.close();
     try { onCreated?.(r.profile || null, r); } catch (e) { console.warn('[browser] new profile onCreated', e); }
   }
   nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); doCreate(); } });
-  drawProviders(); drawMachines(); drawBuilds();
+  drawProviders(); drawMachines(); drawBuilds(); drawClones();
   loadFacts();
   setTimeout(() => { try { nameInput.focus(); nameInput.select(); } catch { /* none */ } }, 0);
   return { shell, picker, create: doCreate, close: () => shell.close(), state: () => ({ provider: st.provider, host: st.host, adopt, build: st.buildKey }) };

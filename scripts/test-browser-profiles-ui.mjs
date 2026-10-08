@@ -18,6 +18,9 @@
 //      keeper over a scratch HOME whose browsers/ is a symlink to the account's (nothing else copied) launches a profile
 //      pinned to chrome-146.0.7680.153 while the CLI's default is newer — the running browser's own /json/version and its
 //      process both name 146: the env reached the real CLI on every call (a call without it would relaunch the default).
+//   ③c lane browser-profile-clone (B-9669): zh — New profile… → "Copy logins from" (不复制 first, every named profile a row with
+//      its state), a pick says the one-time copy and steps the browser/build sections aside, Create ⇒ the copy's row fold says
+//      登录 … 从 <source> 复制 (VS_BPCLONE_SHOTS=<dir> ⇒ dialog-zh.png + row-zh.png there).
 //   ③b lane chrome-builds-download: Change build… → "Download another build…" → the picker over a loopback Chrome for Testing
 //      (the scratch copy's record names reserved `.test` hosts, VIBESPACE_TEST_EGRESS_MAP points them at it): the Stable row's
 //      chips and THE confirm in zh / ja / en; in en the download runs through the UI (the progress line) and Change build…
@@ -413,6 +416,40 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
       ok(b && b.title === tr(lang, 'Chrome build for {label}', { label: 'Vendor portal' }) && b.def === tr(lang, "The browser CLI's default build"), `${lang}: Change build… speaks it too`, b);
       await shot(`3-change-build-${lang}`);
       await ev("document.querySelector('#browser-build-dialog .bbuild-cancel').click()");
+    }
+  }
+
+  // ═══ ③c lane browser-profile-clone (B-9669): "Copy logins from" in zh — the section, a pick, Create, the row's fold ═══
+  console.log('— ③c zh: New profile… → Copy logins from → the copy\'s row says where its logins came from');
+  {
+    await load('zh', 1280, 800);
+    await openPanel();
+    await click('.bprof-new');
+    const cs = await until(() => ev(`(() => { const d = document.querySelector('#browser-new-profile-dialog'); const rows = d ? [...d.querySelectorAll('.bnew-clone')] : []; if (rows.length < 2) return null; return { head: [...d.querySelectorAll('.bnew-section-head')].map((x) => x.textContent).find((x) => x === ${J(tr('zh', 'Copy logins from'))}) || null, rows: rows.map((r) => ({ key: r.dataset.key, state: r.dataset.state, head: r.querySelector('.bwho-answer-head').textContent, note: r.querySelector('.bnew-note').textContent, off: r.classList.contains('is-off') })) }; })()`), 15000, 100);
+    const pick = cs && (cs.rows.find((r) => r.state === 'stopped') || cs.rows.find((r) => r.state === 'running'));
+    ok(cs && cs.head && cs.rows[0].key === 'none' && cs.rows[0].head === tr('zh', "Don't copy — start signed out") && pick && cs.rows.every((r) => r.key === 'none' || r.note) && (!cs.rows.some((r) => r.state === 'stopped') || cs.rows.find((r) => r.state === 'stopped').note === tr('zh', 'Stopped — its logins are copied as they are now.')),
+      'zh: the dialog has 复制登录自 — 不复制 first, every named profile a row with its state in words', cs);
+    if (pick) {
+      await ev(`(() => { const i = document.querySelector('#browser-new-profile-dialog .bnew-label'); i.value = '银行副本'; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+      await click(`#browser-new-profile-dialog .bnew-clone[data-key=${J(pick.key)}] input`); await frame();
+      const hint = await text('#browser-new-profile-dialog .bnew-clone-hint');
+      const hidden = await ev(`(() => { const d = document.querySelector('#browser-new-profile-dialog'); const vis = (sel) => { const e = d.querySelector(sel); return !!e && e.getClientRects().length > 0; }; return { prov: vis('.bnew-providers'), build: vis('.bnew-builds-wrap') }; })()`);
+      ok(hint === tr('zh', 'A one-time copy of {source}: the same browser and build; signing in or out later in either one does not change the other.', { source: pick.head }) && hidden && !hidden.prov && !hidden.build, 'zh: picking a source says the one-time copy and steps the browser + build sections aside', { hint, hidden });
+      await shot('3c-dialog-zh');
+      if (process.env.VS_BPCLONE_SHOTS) { try { const r = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(process.env.VS_BPCLONE_SHOTS, 'dialog-zh.png'), Buffer.from(r.result.data, 'base64')); } catch { /* best effort */ } }
+      await click('#browser-new-profile-dialog .bnew-create');
+      const gone = await until(() => ev("!document.querySelector('#browser-new-profile-dialog')"), 20000, 100);
+      const nid = await until(() => ev(`(() => { const p = (window.app._browserProfiles.profiles || []).find((x) => x.label === '银行副本'); return p ? p.id : null; })()`), 15000, 100);
+      ok(gone && nid, 'zh: Create ⇒ the dialog closes and the copy is a profile', { gone, nid });
+      if (nid) {
+        await until(() => ev(`!!document.querySelector('.bprof-profile[data-profile-id=${J(nid)}] .bprof-chev')`), 10000, 100);
+        await click(`.bprof-profile[data-profile-id=${J(nid)}] .bprof-chev`); await frame();
+        const fold = await until(() => text(`.bprof-profile[data-profile-id=${J(nid)}] .bprof-fold`), 5000, 100);
+        ok(fold && fold.includes(tr('zh', 'Logins')) && fold.includes(`从 ${pick.head} 复制`), 'zh: the copy\'s row fold says 登录 … 从 <source> 复制 (dated in the device\'s locale)', fold);
+        await ev(`document.querySelector('.bprof-profile[data-profile-id=${J(nid)}]').scrollIntoView({ block: 'center' })`); await frame();
+        await shotEl('3c-row-zh', `.bprof-profile[data-profile-id=${J(nid)}]`);
+        if (process.env.VS_BPCLONE_SHOTS) { try { const q = await ev(`(() => { const r = document.querySelector('.bprof-profile[data-profile-id=${J(nid)}]').getBoundingClientRect(); return { x: Math.max(0, r.left - 8), y: Math.max(0, r.top - 8), width: r.width + 16, height: r.height + 16 }; })()`); const r = await send('Page.captureScreenshot', { format: 'png', clip: { ...q, scale: 1 } }); fs.writeFileSync(path.join(process.env.VS_BPCLONE_SHOTS, 'row-zh.png'), Buffer.from(r.result.data, 'base64')); } catch { /* best effort */ } }
+      }
     }
   }
 

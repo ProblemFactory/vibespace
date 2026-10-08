@@ -34,7 +34,7 @@
 // law); every string from the wire goes through textContent; theme vars only,
 // SVG icons only. A frame is a SECRET of a logged-in page (§6.4): the dialog
 // says how long it is kept, and nothing here caches a byte.
-import { t, tc } from './i18n.js';
+import { t, tc, deviceLocale } from './i18n.js';
 import { fetchJson, createModalShell, showToast, showConfirmDialog, showInputDialog, showContextMenu, escHtml, attachPopoverClose } from './utils.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { registerMenuItem } from './contributions.js';
@@ -54,7 +54,7 @@ import { sessionOfEntry, sessionOrdinals } from '../browser-sessions.js'; // 202
 import { humanStateLine, humanRefusalText } from '../browser-human.js'; // BROWSE YOURSELF (B-6ae8): the row's "You are browsing it" line (PURE)
 import { dividerText, sessionRowText, sessionReplays, retentionText, sizeText } from './browser-session-words.js'; // the words every session surface shares
 import { displayFactText } from './browser-display-words.js';
-import { rowLine, rowFold, rowMenu, gridNeed, orphanOrder } from './browser-panel-model.js'; // design 015 (lane browser-panel-tidy): the row's line / fold / menu (PURE)
+import { rowLine, rowFold, rowMenu, gridNeed, orphanOrder, usageLine as usageCell, diskFold } from './browser-panel-model.js'; // design 015 (lane browser-panel-tidy): the row's line / fold / menu (PURE)
 import { barLayout } from './live-bar-layout.js'; // design 015 §2b: a cell's line never wraps — what does not fit folds by width (the bar-fold rule) // lane headless-fallback: a browser that runs headless because the machine has no desktop session says so
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
@@ -598,6 +598,8 @@ export function stateText(state) {
   }
 }
 /** `3 d ago` / `5 h ago` / `12 min ago` / `just now`; '' for unknown. */
+/** lane browser-profile-clone: a day in the device's locale ("copied from X on 8 Oct 2026" / "2026年10月8日"). */
+function cloneDateText(ms) { try { return new Date(ms).toLocaleDateString(deviceLocale(), { year: 'numeric', month: 'short', day: 'numeric' }); } catch { return new Date(ms).toISOString().slice(0, 10); } }
 export function agoText(ms) {
   if (ms === null || ms === undefined || !Number.isFinite(Number(ms))) return '';
   const s = Math.max(0, Math.round(Number(ms) / 1000));
@@ -754,7 +756,7 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
   // lane browser-admin: the row's AGE enters the signature as the words it prints (rowWhyText — minutes / hours), never the
   // raw `ageMs`, which moves every millisecond and rebuilt every row on every load (the keyed reuse never held: a click
   // across a load hit a detached node; the heavy UI suite caught it keeping the row a New profile… create must leave alone)
-  const rowSig = (r, v) => { const { use, ageMs, ...rest } = r || {}; return JSON.stringify([rest, rowWhyText(r), app.browserChipFor ? app.browserChipFor(r.id) : null, v?.limits?.recordingFloor || null, st.busy, pageStuckOf(r.id), autoDialogsOf(r), runningBuildOf(r.id)]); }; // lane browser-admin 2a: + the build its browser reports // lane browser-stuck: the page's state is part of what the row prints (+ verify r1 A6: its dialog mode)
+  const rowSig = (r, v) => { const { use, ageMs, disk, ...rest } = r || {}; /* lane browser-disk-sample: `disk` is patched in place (patchDisk) */ return JSON.stringify([rest, rowWhyText(r), app.browserChipFor ? app.browserChipFor(r.id) : null, v?.limits?.recordingFloor || null, st.busy, pageStuckOf(r.id), autoDialogsOf(r), runningBuildOf(r.id)]); }; // lane browser-admin 2a: + the build its browser reports // lane browser-stuck: the page's state is part of what the row prints (+ verify r1 A6: its dialog mode)
   const root = el('div', 'bprof');
   const bar = el('div', 'bprof-bar');
   const summary = el('span', 'bprof-summary', t('Loading…'));
@@ -838,8 +840,14 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
   // one-glance fact, `l2` the secondary), a chevron fold for everything else, ONE primary act and ONE ⋯ menu. The words
   // and which acts exist come from the PURE model (src/lib/browser-panel-model.js); the acts themselves stay here (RUN,
   // below). A fold's open state is per row and survives a rebuild (it is not in the row signature).
-  const WORDS = { t, state: stateText, why: rowWhyText, ago: agoText, bytes: bytesText, size: sizeText, memory: memoryText, display: displayFactText, human: humanStateLine };
+  const WORDS = { t, state: stateText, why: rowWhyText, ago: agoText, bytes: bytesText, size: sizeText, memory: memoryText, display: displayFactText, human: humanStateLine, date: cloneDateText };
   const openFolds = new Set();   // profileId → its fold is open
+  /** lane browser-disk-sample: a new disk sample PATCHES the kept row (its size cell + the fold's On disk) — never a rebuild */
+  const patchDisk = (row, r) => {
+    const x = { w: WORDS }, c = row.querySelector('.bprof-size'), f = diskFold(r, x), fv = row.querySelector('.bprof-fold-disk');
+    if (c) c.textContent = usageCell(r, x).l1; // usageCell: openBrowserProfilesWindow's own `usageLine` (the live memory cell) shadows the model's name
+    if (fv) { fv.textContent = f.v; fv.title = f.title || ''; fv.classList.toggle('warn', f.tone === 'warn'); }
+  };
   function profileRow(r, v) {
     const row = el('div', 'bprof-row bprof-profile'); row.dataset.profileId = r.id;
     const ps = pageStuckOf(r.id);
@@ -1098,6 +1106,7 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
       let row;
       if (had && had.sig === sig) { row = had.row; if (!r.legacy) whoCellFor(r.id).patch(r); }
       else { row = profileRow(r, v); rowsById.set(r.id, { row, sig }); }
+      patchDisk(row, r);
       table.appendChild(row);
     }
     if (rows.length) prof.appendChild(table);

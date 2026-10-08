@@ -1459,6 +1459,9 @@ console.log('— ③ censuses: no card for him (+ control), the holder readers, 
     // verify r2 ⑦: sharedWindowOf reads the CONVERSATION lease's windowIn (is its tab in the shared window of an older run?) for
     // the takeover / handback / paused words — his key names no lease, so his own takeover is never worded as "shared" through it
     sharedWindowOf: 1,
+    // lane browser-profile-clone (the 2.369.239 integration): "Copy logins from" refuses a source a CONVERSATION leases (source_leased
+    // names it — a browser is never taken from an agent); his row is the user asking for the copy (its Stop is the panel's, his own act)
+    cloneHolders: 1,
   };
   // holder: "who holds this browser / is it used" — through holdersOn (the conversations' leases + his row)
   const HOLDER = { list: 1, holdersOn: 1 };

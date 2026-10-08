@@ -79,6 +79,8 @@ const DSP = require('../browser-display.js'); // lane headless-fallback: headed 
 const HC = require('../hidden-chars.js'); // lane browser-propose: a proposal card's words carry no character that is not drawn (THE one set)
 const KB = require('../browser-kept.js'); // lane browser-resume (§3.9): the conversation's KEPT browser — tabs, D2's restore kind (PURE)
 const BB = require('../browser-builds.js');
+const CL = require('../browser-clone.js'); // lane browser-profile-clone (B-9669): New profile… copied from a stopped profile — the PURE tables + verdict
+const CR = require('./browser-clone-run.js'); // … and its copy, off the event loop (atomic: <dir>.copying renamed at the end)
 const BI = require('./browser-installs.js'); // rv-browser F7 (lane dc-browser-installs): THE install slot + one row per installable // lane browser-admin 2a: which Chrome build a profile runs (the machine's list + the ONE verdict)
 const CDP = require('../cdp-census.js'); // lane chrome-builds-download: a version's relation to the CDP census, said on its row before the download
 const WIN = require('../browser-windows.js'); // lane browser-windows: a window per holder — the measured placement, the window mates, the cap setting (PURE)
@@ -288,7 +290,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   // owner ruling A: `scope` = who may use it ('all' | 'only'), DERIVED from `owner` (one field), never stored twice; `use` =
   // the list as keys and ids only (the broadcast — the panel names them from its own rows; the agent's route strips it)
   // BROWSE YOURSELF (B-6ae8, the owner 4): `recordMine` = "Also record my own actions" — an opt-OUT, absent = on
-  const pview = (p) => (p ? { ...B.publicProfileView(p), mediated: isMediated(p), scope: B.scopeOf(p), use: B.useDigestOf(p), createdBy: p.createdBy || null, ...(B.isEphemeralProfile(p) ? {} : { recordMine: HM.recordsMine(p) }) } : null); // (a conversation's own temporary browser is never browsed by him — no switch of his rides its record: verify r1 H1)
+  const pview = (p) => (p ? { ...B.publicProfileView(p), mediated: isMediated(p), scope: B.scopeOf(p), use: B.useDigestOf(p), createdBy: p.createdBy || null, ...(B.isEphemeralProfile(p) ? {} : { recordMine: HM.recordsMine(p), disk: disk.diskOf(p) }) } : null); // (a conversation's own temporary browser is never browsed by him — no switch of his rides its record: verify r1 H1)
   /** The Task Groups the conversation carrying `browserKey` belongs to NOW → `{ids, unreadable, live}` (never throws);
    *  `live: false` = no running session carries the key (a stopped conversation: its membership is not readable NOW and
    *  it is not "no groups" — the re-judge keeps such a lease undecided when a Task Group row could admit it). */
@@ -392,6 +394,10 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     return Promise.race([Promise.allSettled(ps), new Promise((r) => { t = setTimeout(r, armWaitMs); if (t.unref) t.unref(); })]).finally(() => { if (t) clearTimeout(t); });
   }
   function onLease(fn) { leaseListeners.add(fn); return () => leaseListeners.delete(fn); }
+  // lane browser-disk-sample (B-5fab): every named profile's folder size on THIS machine — one bounded `du` child at a time
+  // off the event loop (src/server/browser-disk-run.js), at its browser's start / stop too; REPORTED, never a stop
+  const disk = require('./browser-disk-run.js').createDiskSampler({ profiles: () => { ensureLoaded(); return named(); }, userTodos, limits, log, now });
+  onLease((ev) => { if (ev && ev.profileId && ev.local && (ev.kind === 'browser-ready' || ev.kind === 'browser-stopped')) disk.event(ev.profileId, ev.kind === 'browser-stopped' ? 'stop' : 'start'); });
   function addDigest(fn) { digestExtras.add(fn); return () => digestExtras.delete(fn); }
   function digestExtra() { const out = {}; for (const fn of digestExtras) { try { Object.assign(out, fn() || {}); } catch (e) { log.warn?.(`[browser] digest extra failed: ${e && e.message}`); } } return out; }
   let timer = null;
@@ -903,7 +909,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
    * made 0700 under ~/.agent-browser/ (the CLI's own root, so `agent-browser
    * profiles` lists it too); an adopted directory keeps its path.
    */
-  function createProfile(input = {}, { owner = null, dir = null, legacy = false, createdBy = null, use = null, knownKeys = null, by = 'user', builds = null } = {}) {
+  function createProfile(input = {}, { owner = null, dir = null, legacy = false, createdBy = null, use = null, knownKeys = null, by = 'user', builds = null, id: mintedId = null, clonedFrom = null } = {}) {
     ensureLoaded();
     const v = B.validateProfileInput(input, { existing: named(), control, mediation: mediationOn() });
     if (!v.ok) throw namedError(v.code, v.error, v.why ? { why: v.why } : {});
@@ -919,7 +925,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // is this instance's host registry's answer (refused by name, never a
     // silent local fallback)
     if (v.value.host && !knownHost(v.value.host)) throw namedError('unsupported-host', `${JSON.stringify(v.value.host)} is not a paired machine on this instance — pair it first (Remote → Pair a device), or leave host empty for this machine`);
-    const id = mintId();
+    const id = mintedId || mintId(); // lane browser-profile-clone: the clone mints the id (its directory's name) before the copy
     // The directory is OURS only for a row that owns one, on THIS machine: a
     // paired machine composes and owns its own (browser-serve), `cdp` has none.
     const ownsHere = v.value.ownsDir && !v.value.host;
@@ -931,6 +937,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (SW.providerNeedsSeed(fields.provider) && !Number.isInteger(fields.fingerprintSeed)) fields.fingerprintSeed = SW.mintSeed(crypto.randomBytes(4).toString('hex'));
     const rec = B.newProfileRecord({ id, ...fields, dir: d, owner, legacy, now: now(), createdBy });
     if (choice.kind !== 'default') rec.browser = choice;
+    if (clonedFrom) rec.clonedFrom = { ...clonedFrom }; // lane browser-profile-clone: born with where its logins came from (ONE write)
     reg.profiles.push(rec);
     commit();
     log.log?.(`[browser] profile ${id} "${rec.label}" created${choice.kind === 'build' ? ' (Chrome ' + choice.version + ')' : choice.kind === 'path' ? ' (chrome at ' + choice.path + ')' : ''} (${rec.provider}${rec.host ? ' on ' + rec.host : ''}${rec.cdpPort ? ', cdp port ' + rec.cdpPort : ''}${isMediated(rec) ? ', separate tabs (mediated)' : ''}, ${legacy ? 'legacy shared' : 'usable by ' + whoWords(rec)}${rec.createdBy ? ', created by ' + rec.createdBy : ''})${d ? ' at ' + d : ''}`);
@@ -999,6 +1006,51 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     try { if (!fs.statSync(dir).isDirectory()) return { profile: null, created: false, why: `${dir} is not a directory` }; } catch { return { profile: null, created: false, why: `${dir} does not exist` }; }
     const p = createProfile({ label }, { owner, dir, legacy, createdBy });
     return { profile: p, created: true };
+  }
+  // ── lane browser-profile-clone (B-9669, the owner 2026-10-08): NEW PROFILE… COPIED FROM a named profile on the same machine.
+  // A one-time snapshot (logins drift after); a USER act only (the route refuses an agent's token); the measured answer to
+  // "does a copy decrypt" is in src/browser-clone.js.
+  const cloneHolders = (id) => reg.leases.filter((l) => l.profileId === id).map((l) => ({ sessionId: l.sessionId || null, browserKey: l.browserKey || null }));
+  const cloneLive = (id) => B.isLiveBrowser(reg.browsers[id]) || starting.has(id);
+  /** The dialog's "Copy logins from" rows for a profile that will run on `host` (null = this machine). */
+  function cloneSources(host = null) { ensureLoaded(); return CL.sourceRows({ profiles: named(), host: host || null, liveOf: cloneLive, holdersOf: cloneHolders }); }
+  /** Is a browser still on the source's directory — the recorded browser (pid + starttime) or the directory's lock holder? */
+  function cloneHolderAlive(p) {
+    const b = (reg.browsers[p.id] || {}).browser;
+    if (b && Number.isInteger(b.pid) && (b.starttime != null ? F.sameProcess(b.pid, b.starttime) : F.pidAlive(b.pid))) return true;
+    const l = F.readSingletonLock(p.dir);
+    return !!(l && l.host === os.hostname() && F.pidAlive(l.pid));
+  }
+  /** `input.cloneFrom` = the source profile's id; the rest is the dialog's create body. `nameOf(sessionId)` names a holder.
+   *  Judged BEFORE anything is stopped or written; a running source is stopped through the panel's own Stop, its exit
+   *  witnessed (bounded); the copy is sized, then made atomically; the record is born with `clonedFrom`. Throws by name. */
+  async function cloneProfile(input = {}, { nameOf = null, platform: hostPlatform = null, ...opts } = {}) {
+    ensureLoaded();
+    const src = profile(String(input.cloneFrom || ''));
+    const host = input.host && input.host !== 'local' ? String(input.host) : null;
+    const holders = (id) => cloneHolders(id).map((h) => ({ ...h, name: (typeof nameOf === 'function' && h.sessionId && nameOf(h.sessionId)) || null }));
+    const judge = (bytes) => CL.cloneVerdict({ source: src && !isEph(src) ? src : null, host, live: !!src && cloneLive(src.id), holders: src ? holders(src.id) : [], platform: host ? (hostPlatform || 'linux') : process.platform, cloneOp: !host, bytes }); // a paired machine: its agent has no copy op yet
+    const refuse = (v) => namedError(v.code, v.error, { ...(v.holders ? { holders: v.holders } : {}), ...(v.bytes != null ? { bytes: v.bytes } : {}), ...(src ? { source: src.label } : {}) });
+    let v = judge(null);
+    if (!v.ok) throw refuse(v);
+    const { input: ci, clonedFrom } = CL.cloneInput(input, src, now());
+    const pre = B.validateProfileInput(ci, { existing: named(), control, mediation: mediationOn() }); // a taken name never stops the source
+    if (!pre.ok) throw namedError(pre.code, pre.error, pre.why ? { why: pre.why } : {});
+    if (v.stopFirst) { log.log?.(`[browser] ${src.id} "${src.label}": stopped to copy its logins into a new profile`); await stop(src.id, { why: 'user' }); }
+    const until = now() + CL.CLONE_EXIT_WAIT_MS;
+    while (cloneHolderAlive(src) && now() < until) await sleep(100);
+    if (cloneHolderAlive(src)) throw namedError('source_still_running', `the browser of ${JSON.stringify(src.label)} did not exit within ${CL.CLONE_EXIT_WAIT_MS / 1000} s — nothing was copied`, { source: src.label });
+    v = judge(await CR.sizeToCopy(src.dir, { stopAt: CL.CLONE_MAX_BYTES })); // judged again: a lease may have landed meanwhile
+    if (!v.ok || v.stopFirst) throw v.ok ? namedError('source_still_running', `${JSON.stringify(src.label)} started again while it was being copied — nothing was copied`, { source: src.label }) : refuse(v);
+    const id = mintId();
+    const d = path.join(homeDir, '.agent-browser', B.profileDirName(id));
+    const t0 = now();
+    await CR.copyProfileDir(src.dir, d);
+    try {
+      const out = createProfile(ci, { ...opts, id, dir: d, clonedFrom });
+      log.log?.(`[browser] ${id} "${out.label}" copied from ${src.id} "${src.label}" in ${now() - t0} ms`);
+      return out;
+    } catch (e) { try { await fs.promises.rm(d, { recursive: true, force: true }); } catch { /* said by the refusal */ } throw e; }
   }
   /** lane S2: may this profile's record go at all (leases / a running browser) — asked BEFORE any pin is cleared for it. */
   function removeVerdict(id) {
@@ -6005,6 +6057,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     for (const h of [...humans.values()]) if (!B.isLiveBrowser(reg.browsers[h.profileId])) await endHuman(h.profileId, 'stopped', { closeTab: false });
     commit();
     if (Object.values(reg.browsers).some(B.isLiveBrowser) || reg.leases.length || humans.size || orphanPending) startTimer();
+    disk.start(); // lane browser-disk-sample: the minute clock of the disk sample (unref'd; stopped profiles are measured too)
     return { droppedLeases: r.dropped.length, browsers: Object.values(reg.browsers).filter(B.isLiveBrowser).length, humans: humans.size };
   }
 
@@ -6097,7 +6150,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   }
   function stopTimer() { if (timer) clearInterval(timer); timer = null; }
   /** Timers only — the browsers SURVIVE a VibeSpace exit by design (adopted next boot). */
-  function shutdown() { stopTimer(); if (dirty) save(); installs.shutdown(); /* lane chrome-builds-download: an in-process download ends with its keeper (the marker stays: the next keeper judges it) — lane dc-browser-installs: the running row's own shutdown */ try { keptStore()?.shutdown?.(); } catch { /* lane browser-resume: the kept store's throttled tab list is flushed with its feeder */ } try { mediator?.shutdown?.(); } catch { /* P6: the proxy is this keeper's to end */ } try { const pxs = [...cloakProxies.values()]; cloakProxies.clear(); for (const px of pxs) px.close().catch(() => {}); } catch { /* lane-cloak: the egress proxies are this keeper's to end */ } }
+  function shutdown() { stopTimer(); disk.stop(); if (dirty) save(); installs.shutdown(); /* lane chrome-builds-download: an in-process download ends with its keeper (the marker stays: the next keeper judges it) — lane dc-browser-installs: the running row's own shutdown */ try { keptStore()?.shutdown?.(); } catch { /* lane browser-resume: the kept store's throttled tab list is flushed with its feeder */ } try { mediator?.shutdown?.(); } catch { /* P6: the proxy is this keeper's to end */ } try { const pxs = [...cloakProxies.values()]; cloakProxies.clear(); for (const px of pxs) px.close().catch(() => {}); } catch { /* lane-cloak: the egress proxies are this keeper's to end */ } }
   const ensureTimer = () => { if (Object.values(reg.browsers).some(B.isLiveBrowser) || reg.leases.length || inputs.size || pending.size || humans.size) startTimer(); };
   const attachTimed = async (a) => { const r = await attach(a); ensureTimer(); return r; };
 
@@ -6426,13 +6479,14 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   }
 
   const api = {
-    list, profile, profileByRef, browserOf, leasesFor, leasesOn, createProfile, adoptDirectory, removeProfile,
+    list, profile, profileByRef, browserOf, leasesFor, leasesOn, createProfile, adoptDirectory, removeProfile, cloneSources, cloneProfile,
     buildsFor, // lane browser-admin 2a: Change build… (buildsView, machineBuilds, setBrowserChoice, onRelaunch: the builds row, in ...installs.api)
     restartProfile, askAnswer: (id, by) => { ensureLoaded(); const rec = reg.browsers[id]; return askAnswer(rec, profile(id), by); }, // lane browser-unresponsive: THE recovery + one ask (the gate's seam)
     cliPin, cliFactReady, _reattached: () => reattached, // cliFacts + installCli: the CLI row, in ...installs.api
     ...installs.api, // rv-browser F7 (lane dc-browser-installs): every install row's own routes (lane chrome-builds-download (design 004): Download another build…) // lane browser-admin 2b: the browser CLI VibeSpace drives (verify r3: cliFactReady = the doors' fact, the candidates asked first)
     machineDisplay, machineDisplayCached, noDisplayMode, headedSetting, // lane headless-fallback (+ H5: the stored window preference, for Settings' fact line): this machine's display now (a fresh probe — Settings' read-only line) + the no-display setting
     reshapeStore: (fn) => { ensureLoaded(); const r = fn(reg); commit(); return r; }, // MIGRATIONS ONLY (2026-09-runaway-parks-void): reshape the in-memory registry, then the ONE atomic save
+    diskOf: (id) => { ensureLoaded(); return disk.diskOf(profile(id)); }, _disk: disk, // lane browser-disk-sample: THE disk fact (the panel row, GET /api/browser/profiles)
     usageOf: (id) => { const l = live.get(id); return l ? { ...l } : null; }, // 2026-09-25: the Browser panel's memory cell (memBytes + memMetric, over)
     // takeover C3 (design-browser-takeover §5): the managed ephemeral browser + the ceiling's count seam
     ensureEphemeral, retireEphemeral, ephemerals, ephemeralFor, isEphemeral: (id) => isEph(profile(id)), nsOf,

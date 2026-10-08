@@ -78,7 +78,7 @@ console.log('— ② the fold: only the facts present');
 {
   const F = M.rowFold(P.personal, x(P.personal, { running: '151.0.7922.34' }));
   const keys = F.map((f) => f.key);
-  ok(keys.join(',') === 'name,dir,state,memory,build,records,recordings,display,human', 'personal-life folds: name · directory · state · memory · Chrome build · records · recordings · display · your browsing', keys);
+  ok(keys.join(',') === 'name,dir,state,memory,build,disk,records,recordings,display,human', 'personal-life folds: name · directory · state · memory · Chrome build · on disk · records · recordings · display · your browsing', keys); // lane browser-disk-sample: + On disk
   ok(F.find((f) => f.key === 'records').v === `88 action(s) · ${BT.bytesText(12.3 * MB)} of ${SW.sizeText(GB)} · page-size frames: ${BT.bytesText(1.1 * MB)} · last ${TV.agoText(60000)}` && F.find((f) => f.key === 'recordings').v === 'no recordings' && F.find((f) => f.key === 'dir').mono, 'records = used of limit + page-size frames + last; recordings say none; the directory is mono', F);
   const Fo = M.rowFold(P.office, x(P.office));
   ok(!Fo.some((f) => ['memory', 'display', 'human', 'dir'].includes(f.key)), 'a fact that is not there is not folded either', Fo.map((f) => f.key));

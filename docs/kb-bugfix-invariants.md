@@ -485,6 +485,11 @@
 - A FILE CHOOSER, AN HTTP SIGN-IN, A PERMISSION PROMPT AND PRINT WERE FROZEN PICTURES (B-ebfc, lane browser-ui-prompts) — 不变量 = every browser prompt the screencast cannot paint is a named fact with one way out, or is decided before it can hold; a typed credential never reaches an agent or a log
 - A PID RECORDED HOURS AGO WAS KILLED AS IF IT WERE STILL OURS (B-1cc6, lane pid-identity-census) — 不变量 = a pid is never an identity; every signal to a recorded pid proves starttime (+ bootId), an unprovable one is reported, never killed
 - THE PID CENSUS READ THE OWNER'S rclone BINARY (Update exit 1 at .237): §85 fs-walked data/bin and grepped a gitignored 63 MB ELF. FIX = the scope is the tracked list. 不变量 = a census walks the tracked tree, never an instance's data dir
+- A DOCUMENT WINDOW WASTED HALF ITS WIDTH AND CLIPPED ITS TABLE (lane doc-window-width-export) — 不变量 = a document fills the window it is given unless the person chose a reading width; a table scrolls, never clipped; a document leaves as the file, as HTML or as a print
+
+## A DOCUMENT WINDOW WASTED HALF ITS WIDTH AND CLIPPED ITS TABLE (lane doc-window-width-export, 2.369.239 — owner 2026-10-08)
+
+**Invariant.** A document fills the window it is given unless the person chose a reading width; a table scrolls, it is never clipped; a document can leave as the file, as HTML, as a print. **Gate.** test-doc-window-width (+ RED copy), test-doc-window §10.
 
 ## THIRTEEN BROWSER DAEMONS OUTLIVED THEIR CONVERSATIONS BY DAYS (lane daemon-orphan-end, 2.369.237 — a fleet pod, 2026-10-07)
 

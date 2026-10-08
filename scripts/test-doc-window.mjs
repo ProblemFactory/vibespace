@@ -22,6 +22,9 @@
 //      phone: 36 px targets, nothing clipped, the table scrolls in its wrapper, the bottom sheet · ⑦ PNGs
 //      after-{1280,390}-{dark,light}-{zh,en}.png (+ -strip) into $VS_DOC_UI_SHOTS (else $VS_DOC_WINDOW_SHOTS).
 //      VS_DOC_WINDOW_ONLY=sample runs §9 alone.
+//      §10 (lane doc-window-width-export, 2.369.239): Fit / Comfortable widths at 1872 / 1000 / 390 px, the wide table scrolls,
+//      the ⋯ menu's Download .md / Export HTML / Print / Copy legs, a hostile .md; PNGs after-{fit,comfortable,menu}.png into
+//      $VS_DOC_WIDTH_SHOTS (else $VS_DOC_WINDOW_SHOTS). VS_DOC_WINDOW_ONLY=width runs §10 alone.
 // Run: node scripts/test-doc-window.mjs   (SKIPs with evidence when google-chrome is absent; ~1 min)
 import fs from 'node:fs';
 import path from 'node:path';
@@ -249,7 +252,7 @@ try {
   await call('Page.enable'); await call('Runtime.enable');
   const chatWin = await boot(1280, 900, false);
   if (!ok(!!chatWin, 'the client booted (1280×900) with the conversation\'s chat window open')) throw new Error('no app');
-  if (ONLY !== 'sample') {
+  if (!ONLY) {
 
   section('§1 a link from the chat opens the Doc window beside it, rendered');
   await ev(`app.openFile(${S(P)}, 'BRIEF.md', { from: ${S(chatWin)} }); return true;`);
@@ -424,7 +427,115 @@ try {
   const f2 = await shot('after-comment-zh.png');
   if (SHOTS) ok(!!f1 && !!f2 && fs.statSync(f1).size > 5000 && fs.statSync(f2).size > 5000, `PNGs for the owner: ${f1}, ${f2}`);
   ok(pageErrors.length === 0, 'no uncaught exception in the page across the whole run', pageErrors.slice(0, 4));
-  } // the desktop + phone legs (§1–§8) — VS_DOC_WINDOW_ONLY=sample runs §9 alone
+  } // the desktop + phone legs (§1–§8) — VS_DOC_WINDOW_ONLY=sample runs §9 alone, =width §10 alone
+  if (ONLY === '' || ONLY === 'width') {
+  // ── §10 width + leaving (lane doc-window-width-export, 2.369.239 — owner 2026-10-08 "为啥左右这么多空白，缺少下载和导出功能"):
+  //    the owner's shot = a 4-column table clipped in a centred 76ch column of a 1872 px window, no download / export / print
+  section('§10 the column fills the window (Fit) or keeps the measure (Comfortable); a wide table scrolls; ⋯ = Download .md / Export HTML / Print / Copy');
+  const WSHOTS = process.env.VS_DOC_WIDTH_SHOTS || SHOTS;
+  const wshot = async (n) => { if (!WSHOTS) return null; const r = await call('Page.captureScreenshot', { format: 'png' }); const f = path.join(WSHOTS, n); fs.writeFileSync(f, Buffer.from(r.data, 'base64')); return f; };
+  const DOCS = path.join(fs.realpathSync(PROJ), 'docs'); fs.mkdirSync(path.join(DOCS, 'img'), { recursive: true });
+  fs.copyFileSync(path.join(WT, 'docs/mockups/browser-faces/direction-a-desktop-en.png'), path.join(DOCS, 'img', 'wide.png'));
+  const WIDE = '# Security incident register — compiled from Slack, e-mail and Lark, 2026-07-15 → 2026-10-07\n\nPrepared 2026-10-07 by the Security Officer for the fieldwork (incident identification and tracking).\n\n## 1. Method\n\n'
+    + '| Source | Scope searched | Keywords | Raw hits |\n|---|---|---|---|\n'
+    + '| **Slack** (example-ai.slack.com) | every channel, external shared channel and DM the Security Officer\'s account is a member of; `search.messages` with `after:2026-07-14` | 40: security incident, incident, vulnerability, breach, phishing, exploit, leak, leaked, hacked, attack, DDoS, suspicious, unauthorized, malware, compromised, outage, postmortem, post-mortem, CVE, pentest, penetration, abuse, takeover, XSS, injection, credential, password reset, 2FA, MFA, 安全, 漏洞, 泄露, 攻击, 钓鱼, 入侵, 故障, 事故, 宕机, 复盘, 异常 | 34 unique messages; incident 9, breach 4, security incident 3, hacked 2, 2FA 2, leak/leaked/异常 1 each; RAWHITSEND |\n'
+    + '| **E-mail** — officer@example-audio.example and officer@example-ai.example | whole mailbox per keyword (one query each) | 20: vulnerability, security report, disclosure | personal mail: none an incident; work mail: 3 vendor notices |\n\n'
+    + '![the figure](img/wide.png)\n\nA [kept link](https://example.com/kept) after the table.\n';
+  const WP = path.join(DOCS, 'WIDE.md'), WW = DW(WP); fs.writeFileSync(WP, WIDE);
+  const inW = (js) => ev(`const w = ${WW}; const c = w.content; const pm = c.querySelector('.doc-page .ProseMirror'); const R = (e) => e.getBoundingClientRect(); ${js}`);
+  const GEOM = `const pane = c.querySelector('.doc-pane'), wr = pm.querySelector('.tableWrapper'), tb = pm.querySelector('table'), last = pm.querySelector('table tr:nth-child(2) td:last-child'), first = pm.querySelector('table tr:nth-child(2) td:first-child');
+    const pr = R(pane), mr = R(pm), wrr = R(wr), lr = R(last);
+    return { win: Math.round(R(c).width), pane: Math.round(pane.clientWidth), col: Math.round(mr.width), left: Math.round(mr.left - pr.left), right: Math.round(pane.clientWidth - (mr.right - pr.left)), width: c.querySelector('.doc-window').dataset.width,
+      wrapW: wr.clientWidth, scrollW: wr.scrollWidth, ox: getComputedStyle(wr).overflowX, lastRight: Math.round(lr.right), wrapRight: Math.round(wrr.right), firstLeft: Math.round(R(first).left), wrapLeft: Math.round(wrr.left), sticky: getComputedStyle(first).position,
+      btn: (c.querySelector('.doc-width-btn') || {}).textContent || '', btnShown: !!(c.querySelector('.doc-width-btn') || {}).offsetParent, ls: localStorage.getItem('vs-doc-width') };`;
+  async function openWide(width, height) {
+    await call('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+    await ev(`for (const w of [...app.wm.windows.values()]) app.wm.closeWindow(w.id); return true;`); await sleep(300);
+    await ev(`app.openFile(${S(WP)}, 'WIDE.md', {}); return true;`);
+    const up = await until(() => ev(`const w = ${WW}; const pm = w && w.content.offsetParent && w.content.querySelector('.doc-page .ProseMirror'); return pm && pm.querySelector('table td') && pm.querySelector('img') ? w.id : null;`), 20000, 200);
+    if (up) { await ev(`app.wm.toggleMaximize(${S(up)}); return true;`); await sleep(700); }
+    return up;
+  }
+  const menuRow = async (label) => { await click(await rectIn('.doc-more', WP)); await sleep(200); const r = await ev(`const it = [...document.querySelectorAll('.context-menu .context-menu-item')].find((x) => x.textContent.trim() === ${S(label)}); if (!it) return null; const r = it.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 };`); if (r) await click(r); else await call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }); return r; };
+  // its own boot: §8 left the client in zh on a phone (app.isMobile) — §10 reads at desktop sizes in en
+  await call('Page.addScriptToEvaluateOnNewDocument', { source: `try { localStorage.setItem('vibespace.lang', 'en'); localStorage.removeItem('vs-doc-width'); } catch {}` });
+  if (!ok(!!(await boot(1872, 1000, false)), '§10 the client re-booted at 1872×1000 in en')) throw new Error('no app for §10');
+  await ev(`localStorage.removeItem('vs-doc-width'); return true;`);
+  const g = {};
+  ok(!!(await openWide(1872, 1000)), '①  WIDE.md (the shot\'s 4-column table) opened rich and maximized at 1872 px');
+  g.fit1872 = await inW(GEOM);
+  ok(g.fit1872.width === 'fit' && g.fit1872.ls === null && g.fit1872.col >= 1700 && Math.abs(g.fit1872.left - 32) <= 2 && Math.abs(g.fit1872.right - 32) <= 2, '② the DEFAULT is Fit: the column = the pane minus 32 px each side (≥ 1700 px at 1872)', g.fit1872);
+  ok(g.fit1872.lastRight <= g.fit1872.wrapRight + 1 && g.fit1872.scrollW <= g.fit1872.wrapW + 1, '③ the table\'s 4th column is inside the column at 1872 px — no clip, no scrollbar needed', g.fit1872);
+  ok(/Fit width/.test(g.fit1872.btn) && g.fit1872.btnShown, '④ the bar says the width (glyph + "Fit width") at the right of the comments button', g.fit1872.btn);
+  await wshot('after-fit.png');
+  await click(await rectIn('.doc-width-btn', WP)); await sleep(400);
+  g.comf1872 = await inW(GEOM);
+  const measure = await inW(`const p = c.querySelector('.doc-page'); return Math.round(parseFloat(getComputedStyle(p).maxWidth) - 64);`);
+  ok(g.comf1872.width === 'comfortable' && g.comf1872.ls === 'comfortable' && Math.abs(g.comf1872.col - measure) <= 2 && Math.abs(g.comf1872.left - g.comf1872.right) <= 2 && /Comfortable/.test(g.comf1872.btn), '⑤ Comfortable = the 76ch measure CENTRED, remembered on the device (localStorage vs-doc-width)', { ...g.comf1872, measure });
+  await call('Runtime.evaluate', { expression: `(() => { const w = [...app.wm.windows.values()].find((x) => x.type === 'doc'); const wr = w.content.querySelector('.tableWrapper'); wr.scrollLeft = wr.scrollWidth; return 1; })()` }); await sleep(200);
+  const comfScrolled = await inW(GEOM);
+  ok(comfScrolled.ox === 'auto' && comfScrolled.lastRight <= comfScrolled.wrapRight + 1, '⑥ in Comfortable the table SCROLLS in its own wrapper — scrolled to its end, the 4th column is inside (never clipped)', comfScrolled);
+  await wshot('after-comfortable.png');
+  ok(!!(await openWide(1872, 1000)) && (await inW(GEOM)).width === 'comfortable', '⑦ a reopened Doc window keeps the device\'s choice (Comfortable)');
+  await click(await rectIn('.doc-width-btn', WP)); await sleep(300);
+  ok(!!(await openWide(1000, 800)), '⑧ reopened maximized at 1000 px');
+  g.fit1000 = await inW(GEOM);
+  await call('Runtime.evaluate', { expression: `(() => { const w = [...app.wm.windows.values()].find((x) => x.type === 'doc'); const wr = w.content.querySelector('.tableWrapper'); wr.scrollLeft = wr.scrollWidth; return 1; })()` }); await sleep(200);
+  const s1000 = await inW(GEOM);
+  ok(g.fit1000.width === 'fit' && Math.abs(g.fit1000.left - 32) <= 2 && (g.fit1000.scrollW <= g.fit1000.wrapW + 1 || (s1000.ox === 'auto' && s1000.lastRight <= s1000.wrapRight + 1 && s1000.sticky === 'sticky' && Math.abs(s1000.firstLeft - s1000.wrapLeft) <= 6)), '⑨ at 1000 px Fit: the table fits, or scrolls in its wrapper with the first column held (sticky) — never clipped', { before: g.fit1000, scrolled: s1000 });
+  await call('Emulation.setDeviceMetricsOverride', { width: 390, height: 800, deviceScaleFactor: 2, mobile: true }); await sleep(900);
+  g.phone390 = await inW(GEOM);
+  ok(g.phone390.width === 'fit' && Math.abs(g.phone390.left - 12) <= 2 && !g.phone390.btnShown, '⑩ a phone (390 px) is always Fit with a 12 px gutter; the width control is absent', g.phone390);
+  ok(!!(await openWide(1872, 1000)), '⑪ back at 1872 px');
+  // the ⋯ menu — downloads recorded, not navigated (an <a download> click is the page's only act)
+  await ev(`window.__dl = []; HTMLAnchorElement.prototype.click = function () { window.__dl.push({ href: this.href, download: this.download }); }; window.__clip = []; navigator.clipboard.writeText = async (x) => { window.__clip.push(String(x)); }; return true;`);
+  await click(await rectIn('.doc-more', WP)); await sleep(300);
+  const rows = await ev(`return [...document.querySelectorAll('.context-menu .context-menu-item')].map((x) => [x.textContent.trim(), !!x.querySelector('svg')]);`);
+  await wshot('after-menu.png');
+  await call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }); await sleep(200);
+  ok(S(rows.map((r) => r[0])) === S(['Download .md', 'Export HTML', 'Print / Save as PDF', 'Copy as Markdown', 'Copy as HTML']) && rows.every((r) => r[1]), '⑫ the ⋯ menu at the bar\'s right: Download .md · Export HTML · Print / Save as PDF · Copy as Markdown · Copy as HTML, each with its glyph; no .docx row', rows);
+  await menuRow('Download .md'); await sleep(300);
+  const dl = await ev(`const d = window.__dl.pop(); if (!d) return null; const r = await fetch(d.href); return { ...d, status: r.status, cd: r.headers.get('content-disposition'), body: await r.text() };`);
+  ok(!!dl && /\/api\/download\?/.test(dl.href) && dl.download === 'WIDE.md' && dl.status === 200 && /attachment/.test(dl.cd || '') && /WIDE\.md/.test(dl.cd || '') && dl.body === fs.readFileSync(WP, 'utf8'), '⑬ Download .md = the existing /api/download route: 200, attachment, named WIDE.md, the bytes on disk', dl && { ...dl, body: dl.body.length });
+  await click(await rectIn('.ProseMirror p', WP)); await call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'End', code: 'End', windowsVirtualKeyCode: 35 }); await type(' EDITED'); await sleep(300);
+  await menuRow('Download .md'); await sleep(400);
+  const ask = await until(() => ev(`const b = [...document.querySelectorAll('button')].find((x) => x.textContent.trim() === 'Save and download' && x.offsetParent); if (!b) return null; const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 };`), 4000);
+  const before = (await ev(`return window.__dl.length;`));
+  if (ask) await click(ask);
+  const dl2 = await until(() => ev(`return window.__dl.length > ${before} ? window.__dl[window.__dl.length - 1] : null;`), 6000);
+  ok(!!ask && !!dl2 && fs.readFileSync(WP, 'utf8').includes(' EDITED'), '⑭ an UNSAVED edit asks "Save and download?" — the save lands on disk first, then the download (never a stale file)', { ask: !!ask, dl2 });
+  await menuRow('Export HTML');
+  const ex = await until(() => ev(`const d = window.__dl[window.__dl.length - 1]; if (!d || !/^blob:/.test(d.href)) return null; return { ...d, html: await (await fetch(d.href)).text() };`), 8000);
+  fs.mkdirSync(OUT, { recursive: true }); const exPath = path.join(OUT, 'WIDE.html'); if (ex) fs.writeFileSync(exPath, ex.html);
+  ok(!!ex && ex.download === 'WIDE.html' && !/<script\b/i.test(ex.html) && /<table/.test(ex.html) && /:root\{--/.test(ex.html) && /data:image\/png;base64,/.test(ex.html) && ex.html.includes('https://example.com/kept') && /@page\{margin:16mm\}/.test(ex.html) && ex.html.includes('RAWHITSEND'), '⑮ Export HTML = ONE self-contained WIDE.html: no script, theme tokens + styles inlined, the image beside the file inlined, links kept', ex && { download: ex.download, size: ex.html.length });
+  if (ex) {
+    const tgt = await call('Target.createTarget', { url: pathToFileURL(exPath).href });
+    const tws = await until(async () => (await (await fetch(`http://127.0.0.1:${CDP}/json`)).json()).find((t) => t.id === tgt.targetId)?.webSocketDebuggerUrl, 8000);
+    const w2 = new WebSocket(tws); await new Promise((r, e) => { w2.on('open', r); w2.on('error', e); });
+    await sleep(800);
+    const st = await new Promise((r) => { w2.on('message', (d) => { const m = JSON.parse(d); if (m.id === 1) r(m.result?.result?.value); }); w2.send(S({ id: 1, method: 'Runtime.evaluate', params: { expression: `(() => { const t = document.querySelector('table'), th = document.querySelectorAll('th')[3], img = document.querySelector('img'); return { scripts: document.scripts.length, th: th && th.textContent, thW: th ? Math.round(th.getBoundingClientRect().width) : 0, img: img ? img.naturalWidth : 0, bg: getComputedStyle(document.body).backgroundColor }; })()`, returnByValue: true } })); });
+    w2.close(); await call('Target.closeTarget', { targetId: tgt.targetId });
+    ok(!!st && st.scripts === 0 && st.th === 'Raw hits' && st.thW > 40 && st.img > 0, '⑯ the exported file opens STANDALONE in a second tab: the table renders (4th header "Raw hits"), the image drawn, zero scripts', st);
+  }
+  await menuRow('Print / Save as PDF');
+  const pf = await until(() => ev(`const f = document.querySelectorAll('iframe.doc-print-frame'); if (f.length !== 1 || f[0].dataset.printed !== '1') return null; const d = f[0].contentDocument; return { n: f.length, sandbox: f[0].getAttribute('sandbox'), page: /@page\\{margin:16mm\\}/.test(d.documentElement.outerHTML), table: !!d.querySelector('table'), scripts: d.scripts.length };`), 10000);
+  ok(!!pf && pf.n === 1 && pf.page && pf.table && pf.scripts === 0 && !/allow-scripts/.test(pf.sandbox), '⑰ Print = ONE transient hidden frame holding the same document + the print sheet (16 mm pages); sandbox without allow-scripts; print() called', pf);
+  await menuRow('Copy as Markdown'); await sleep(300);
+  await menuRow('Copy as HTML'); await sleep(500);
+  const clip = await ev(`return window.__clip.slice();`);
+  ok(clip.length === 2 && clip[0] === fs.readFileSync(WP, 'utf8') && /<table/.test(clip[1]) && !/<script/i.test(clip[1]), '⑱ Copy as Markdown = the source; Copy as HTML = the sanitized rendered fragment', clip.map((x) => x.length));
+  // a hostile document: the export carries no script, no handler, no javascript: link
+  const HP = path.join(DOCS, 'HOSTILE.md'); fs.writeFileSync(HP, '# Hostile\n\nA [bad link](javascript:alert(1)) and [ok](https://example.com/ok).\n\n<script>alert(1)</script>\n\n<img src="x" onerror="alert(2)">\n\n| a | b |\n|---|---|\n| 1 | 2 |\n');
+  await ev(`for (const w of [...app.wm.windows.values()]) app.wm.closeWindow(w.id); app.openFile(${S(HP)}, 'HOSTILE.md', {}); return true;`);
+  const hrich = await until(() => ev(`const w = ${DW(HP)}; const pm = w && w.content.offsetParent && w.content.querySelector('.doc-page .ProseMirror'); return pm && pm.querySelector('table') ? true : null;`), 15000, 200);
+  let hx = null;
+  if (hrich) { await click(await rectIn('.doc-more', HP)); await sleep(200); const r = await ev(`const it = [...document.querySelectorAll('.context-menu .context-menu-item')].find((x) => x.textContent.trim() === 'Export HTML'); if (!it) return null; const r = it.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 };`); if (r) await click(r);
+    hx = await until(() => ev(`const d = window.__dl[window.__dl.length - 1]; if (!d || d.download !== 'HOSTILE.html') return null; return await (await fetch(d.href)).text();`), 8000); }
+  ok(!!hx && !/<script\b/i.test(hx) && !/javascript:/i.test(hx.replace(/&lt;[^]*?&gt;/g, '')) && !/<[^>]*\sonerror\s*=/i.test(hx) && hx.includes('https://example.com/ok'), '⑲ a hostile .md (script / javascript: link / onerror) exports with none of them (the one sanitizer)', hx && hx.length);
+  ok(pageErrors.length === 0, '⑳ no page exception through §10', pageErrors.slice(0, 3));
+  console.log('    widths:', S({ fit1872: g.fit1872.col, comf1872: g.comf1872.col, fit1000: g.fit1000.col, phone390: g.phone390.col, pane1872: g.fit1872.pane, pane1000: g.fit1000.pane, pane390: g.phone390.pane }));
+  }
+  if (ONLY !== 'width') {
 
   // ── §9 design 020 (lane doc-editor-ui, 2.369.223): the design desk's audit sample (every block kind) at 1280 / 390 ×
   //    dark / light × zh / en — the PNGs carry the audit's names with `after-` so the owner flips between before and after
@@ -463,7 +574,7 @@ try {
     const level = s.every((x) => Math.abs(x.mid - s[0].mid) <= 1 && x.t >= v.bt - 0.5 && x.b <= v.bb + 0.5 && x.l >= v.bl - 0.5 && x.r <= v.brr + 0.5);
     const apart = s.every((x, i) => i === 0 || s[i - 1].r <= x.l + 0.5);
     const ranked = v.folded.every((f) => v.shown.filter((x) => x.k !== 'sep').every((x) => x.p <= f.p));
-    return level && apart && ranked && v.sw <= v.cw + 1 && v.more === v.folded.length > 0 && v.glyphs >= 3 && v.drawn === v.glyphs; // every shown button's glyph is a DRAWN svg
+    return level && apart && ranked && v.sw <= v.cw + 1 && v.more === true && v.glyphs >= 3 && v.drawn === v.glyphs; // every shown button's glyph is a DRAWN svg
   };
   const moreRows = async () => {
     const m = await inSW(`const b = c.querySelector('.doc-more'); if (!b || !b.getClientRects().length) return null; const r = R(b); return { x: r.left + r.width / 2, y: r.top + r.height / 2 };`);
@@ -490,13 +601,13 @@ try {
       ok(tasks.length === 3 && tasks.every((x) => x.type === 'taskItem' && x.ul === 'taskList' && x.kids === 'LABEL+DIV'), '① every task item is ul[data-type=taskList] > li[data-type=taskItem] > label + div', tasks.map((x) => `${x.ul}>${x.type}>${x.kids}`));
       ok(tasks.length === 3 && tasks.every((x) => x.cbMid >= x.lineTop && x.cbMid <= x.lineBottom && x.cbRight <= x.textLeft), '① each checkbox shares the row with its words (its middle inside the first text line, left of them)', tasks.map((x) => ({ cbMid: x.cbMid, line: [x.lineTop, x.lineBottom], cbRight: x.cbRight, textLeft: x.textLeft })));
       ok(tasks.length === 3 && tasks[0].checked === 'true' && /line-through/.test(tasks[0].deco) && tasks[0].color !== tasks[0].base && tasks[1].checked === 'false' && !/line-through/.test(tasks[1].deco) && tasks[0].cbW === 15, '① the house checkbox (15 px); a done item reads secondary + struck, an open one plain', tasks.map((x) => [x.checked, x.deco, x.color, x.cbW]));
-      // ② THE BAR: never two rows, folds by priority (B before Table, Table before raw), the ⋯ holds exactly the folded
+      // ② THE BAR: never two rows, folds by priority (B before Table, Table before raw), the ⋯ (always shown since 2.369.239) holds the folded first
       const sweep = [];
       for (const px of [0, 760, 560, 470, 390, 300]) {
         await inSW(`const el = w.element; if (${px}) { el.style.width = '${px}px'; } else { app.wm.toggleMaximize(w.id); } return true;`);
         await sleep(450);
         const v = await barCensus();
-        const rows = v && v.folded.length ? await moreRows() : [];
+        const rows = v && v.folded.length ? (await moreRows()).slice(0, v.folded.length) : []; // the folded first, then the document's own rows (§10)
         sweep.push({ px: px || 'max', bw: v && Math.round(v.bw), ok: barOk(v), shown: v && v.shown.filter((x) => x.k !== 'sep').map((x) => x.k).join(' '), folded: v && v.folded.map((x) => x.k).join(' '), rowsOk: !!v && rows.length === v.folded.length && v.folded.every((f, i) => rows[i] === f.title), rows });
         if (!px) { await inSW(`app.wm.toggleMaximize(w.id); return true;`); await sleep(300); }
       }
@@ -544,7 +655,7 @@ try {
         return { gaps, pGap: R(b).top - R(a).bottom, pEm: fz(a), h2Gap: R(h2).top - R(h2.previousElementSibling).bottom, h2Em: fz(h2), h1: fz(pm.querySelector('h1')), h2: fz(h2), h3: fz(pm.querySelector('h3')), lh: parseFloat(getComputedStyle(a).lineHeight) / fz(a), col: R(page).width - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight), page: R(page).width, ch76 };`);
       ok(Math.abs(ty.pGap - 0.75 * ty.pEm) <= 2 && Math.abs(ty.h2Gap - 1.4 * ty.h2Em) <= 2, `④ rhythm: paragraph → paragraph ${ty.pGap.toFixed(1)} px ≈ .75em; h2 top ${ty.h2Gap.toFixed(1)} px ≈ 1.4em`, ty);
       ok(ty.gaps.every((x) => x.g >= 0.5 * 15 - 1), '④ every top-level block keeps a gap from the one before (≥ .5em)', ty.gaps.filter((x) => x.g < 0.5 * 15 - 1));
-      ok(ty.h1 === 26 && ty.h2 === 20 && ty.h3 === 16 && Math.abs(ty.lh - 1.6) < 0.02 && ty.page <= ty.ch76 + 64 + 1, `④ h1 26 / h2 20 / h3 16, body 15 / 1.6, the column ${Math.round(ty.col)} px ≤ 76ch (${Math.round(ty.ch76)}) + 64`, ty);
+      ok(ty.h1 === 26 && ty.h2 === 20 && ty.h3 === 16 && Math.abs(ty.lh - 1.6) < 0.02 && Math.abs(ty.col - (ty.page - 64)) <= 1, `④ h1 26 / h2 20 / h3 16, body 15 / 1.6, the column ${Math.round(ty.col)} px = the page − 2×32 (Fit, the default since 2.369.239; Comfortable = 76ch ${Math.round(ty.ch76)} — §10)`, ty);
       // ⑤ TABLE: header on one line, alignment from the pipe row, the hover grips open the EXISTING menu (a real mouse move)
       const tb = await inSW(`const t = pm.querySelector('table'); const ths = [...t.querySelectorAll('th')]; const lh = parseFloat(getComputedStyle(ths[0]).lineHeight); const row = t.querySelectorAll('tr')[1]; return { thH: ths.map((x) => Math.round(R(x).height)), lh, pad: getComputedStyle(row.children[0]).padding, aligns: [...row.children].map((x) => getComputedStyle(x).textAlign), num: getComputedStyle(row.children[2]).fontVariantNumeric, thBg: getComputedStyle(ths[0]).backgroundColor };`);
       ok(tb.thH.every((h) => h <= tb.lh + 12 + 3) && tb.pad === '6px 10px' && tb.aligns.slice(1, 3).join() === 'center,right' && /tabular-nums/.test(tb.num), '⑤ the header on one line, 6×10 cells, the pipe row\'s alignment (center / right, tabular numbers)', tb);
@@ -568,10 +679,10 @@ try {
       // ⑧ THE PHONE: the bar folds to the style + B I, 36 px targets, nothing clipped, the table scrolls in its wrapper,
       //    the strip scrolls sideways, the comments strip is the bottom sheet
       const v = await barCensus();
-      const rows = v && v.folded.length ? await moreRows() : [];
+      const rows = v && v.folded.length ? (await moreRows()).slice(0, v.folded.length) : []; // the folded first, then the document's own rows (§10)
       ok(barOk(v) && v.shown.filter((x) => x.k !== 'sep').every((x) => x.h >= 36 && x.w >= 36) && v.shown.some((x) => x.k === 'bold') && v.shown.some((x) => x.k === 'style') && /\btable\b/.test(v.folded.map((x) => x.k).join(' ')) && rows.length === v.folded.length, '⑧ 390: one row, every target ≥ 36 × 36, style + B shown, the inserts folded into ⋯', { v, rows });
       const clip = await inSW(`const wr = R(c); const out = [...c.querySelectorAll('.doc-bar > *, .doc-status > *, .doc-page')].filter((e) => e.getClientRects().length && !e.closest('.doc-status')).filter((e) => { const r = R(e); return r.left < wr.left - 0.5 || r.right > wr.right + 0.5; }).map((e) => e.className); const tw = pm.querySelector('.tableWrapper'); const pane = c.querySelector('.doc-pane'); return { out, tw: tw && { sw: tw.scrollWidth, cw: tw.clientWidth, ox: getComputedStyle(tw).overflowX }, pane: { sw: pane.scrollWidth, cw: pane.clientWidth }, h1: parseFloat(getComputedStyle(pm.querySelector('h1')).fontSize), h2: parseFloat(getComputedStyle(pm.querySelector('h2')).fontSize), pad: getComputedStyle(c.querySelector('.doc-page')).paddingLeft };`);
-      ok(!clip.out.length && clip.tw && clip.tw.sw > clip.tw.cw && clip.tw.ox === 'auto' && clip.pane.sw <= clip.pane.cw + 1 && clip.h1 === 23 && clip.h2 === 18 && clip.pad === '16px', '⑧ nothing clipped; the wide table scrolls INSIDE its wrapper (the page does not); h1 23 / h2 18; 16 px gutters', clip);
+      ok(!clip.out.length && clip.tw && clip.tw.sw > clip.tw.cw && clip.tw.ox === 'auto' && clip.pane.sw <= clip.pane.cw + 1 && clip.h1 === 23 && clip.h2 === 18 && clip.pad === '12px', '⑧ nothing clipped; the wide table scrolls INSIDE its wrapper (the page does not); h1 23 / h2 18; 12 px gutters (2.369.239)', clip);
       const p1 = await lastP();
       await click(p1); await type(' 改'); await sleep(200);
       await into('.ProseMirror h2');
@@ -601,6 +712,7 @@ try {
     }
   }
   if (UI_SHOTS) ok(shotsMade.length === 8 && shotsMade.every((f) => fs.statSync(f).size > 5000), `⑦ eight PNGs for the owner (the audit's names, after-*): ${UI_SHOTS}`, shotsMade);
+  } // §9
 } catch (e) {
   ok(false, 'the suite ran to its end', e && e.stack);
   console.log(journal.join('').slice(-2000));

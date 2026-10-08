@@ -915,6 +915,7 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
       r.recording = [...recordings.values()].find((x) => x.profileId === r.id) || null;
       r.recordingRefused = recordingRefusals.get(r.id) || null;
       r.usage = keeper && typeof keeper.usageOf === 'function' ? keeper.usageOf(r.id) : null; // 2026-09-25: the live resource row (report only — memBytes + memMetric, `over`)
+      r.disk = keeper && typeof keeper.diskOf === 'function' ? keeper.diskOf(r.id) : null; // lane browser-disk-sample: the keeper's du sample {bytes, at, state} (the row's On disk)
       r.human = keeper && typeof keeper.humanOf === 'function' ? keeper.humanOf(r.id) : null; // BROWSE YOURSELF (B-6ae8): the user browsing it himself (the row's state line)
       r.display = keeper && typeof keeper.browserOf === 'function' ? ((keeper.browserOf(r.id) || {}).display || null) : null; // lane headless-fallback: its launch's display fact (headless instead of a window, and why)
       // lane profile-lock-roll (L3): the machine its browser last started on, and the takeover of a previous name's lock (a day)

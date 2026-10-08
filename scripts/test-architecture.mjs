@@ -21,7 +21,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { GIT_REDIRECTORS, gitEnvFrom } from './git-env.mjs';
-import { engineSource, FAMILIES as ENGINE_FAMILIES } from './channels-engine-src.mjs';   // lane dc-channels-seams: the engine + its three family files as one text
+import { engineSource, FAMILIES as ENGINE_FAMILIES } from './channels-engine-src.mjs';
+import { BEFORE_REF as BEFORE82, beforeBlocks, beforeText, census as censusMoved, judge as judgeMoved, region as regionMoved } from './claude-md-retire.mjs';   // lane claude-md-retire: §82's census, shared with the retire verb   // lane dc-channels-seams: the engine + its three family files as one text
 
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -4407,36 +4408,20 @@ console.log('§81 no suite names a fixed loopback endpoint (scratch.mjs deadPort
 // its first 48 characters (its head: the line still exists) and of the whole line (verbatim) + the block's sha256 and line
 // count. A line edited since the move (a count, a reworded tail) keeps its head; a lost head is red. While no line is edited
 // the block re-assembled from its new home must hash to the fixture's sha256 — the move itself is proven verbatim.
+// ⑤ RETIRED ROWS (lane claude-md-retire, B-00be, 2.369.239): a lane that deletes or renames a file retires its moved line
+// with `node scripts/claude-md-retire.mjs <block|home> "<line start | path>" --why "…"` — never a bare deletion. The fixture
+// keeps per block `retired: [{head, why, at}]` and `heads` (each row's first 48 characters in clear, so a LOST row is said
+// in words: `lost: <block> row <n>: "<head>"`). A retired row is neither lost nor edited; a retired head whose line is still
+// in its home is red ("dead retirement"), so is a why under 12 characters or an `at` not YYYY-MM-DD. While a block has no
+// retirement its sha leg is the diet's (the stored sha256 stays the zero-retirement proof); with retirements nothing new is
+// stored: the verbatim rows left must hash like the same rows of the before-text (git show f835b0e58:CLAUDE.md, read only
+// then; a depth-1 checkout SKIPs that leg by name). The census itself lives in scripts/claude-md-retire.mjs.
 console.log('§82 CLAUDE.md is an index of ≤ 100 000 bytes; the moved per-file / per-incident lines live in the kb INDEX heads:');
 {
   const CLAUDE_MD_MAX_BYTES = 41240;   // ratchet: 37 491 measured after the move (scripts/measure-claude-md.mjs) + 10 %
   const h82 = (s) => crypto.createHash('sha256').update(s).digest('hex').slice(0, 10);
   const fx82 = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/claude-md-moved.json'), 'utf8'));
-  // a region = its `## ` heading line up to the next `## ` heading outside a code fence
-  const region82 = (text, head) => {
-    const lines = text.split('\n'), at = lines.findIndex((l) => l.startsWith(head));
-    if (at < 0) return null;
-    const out = []; let fence = false;
-    for (const l of lines.slice(at + 1)) { if (l.startsWith('```')) fence = !fence; if (!fence && /^## /.test(l)) break; out.push(l); }
-    return out;
-  };
-  const census82 = (block, lines) => {
-    const K = fx82.keyChars, cut = (l) => [...l].slice(0, K).join('');
-    const have = { head: new Map(), full: new Map() }, byFull = new Map();
-    for (const l of lines.filter((x) => x.trim())) {
-      const a = h82(cut(l)), b = h82(l);
-      have.head.set(a, (have.head.get(a) || 0) + 1); have.full.set(b, (have.full.get(b) || 0) + 1);
-      if (!byFull.has(b)) byFull.set(b, l);
-    }
-    const need = { head: new Map(), full: new Map() };
-    for (const r of block.rows) { const [a, b] = r.split(':'); need.head.set(a, (need.head.get(a) || 0) + 1); need.full.set(b, (need.full.get(b) || 0) + 1); }
-    let lost = 0, edited = 0;
-    for (const [a, n] of need.head) lost += Math.max(0, n - (have.head.get(a) || 0));
-    for (const [b, n] of need.full) edited += Math.max(0, n - (have.full.get(b) || 0));
-    edited -= lost;
-    const sha = edited || lost ? null : crypto.createHash('sha256').update(block.rows.map((r) => byFull.get(r.split(':')[1])).join('\n')).digest('hex');
-    return { lost, edited, verbatim: block.rows.length - lost - edited, shaOk: sha === null ? null : sha === block.sha256 && block.rows.length === block.lines };
-  };
+  const region82 = regionMoved, census82 = (block, lines) => censusMoved(fx82, block, lines);
   const over300 = (block, lines) => {
     const moved = new Set(block ? block.rows.flatMap((r) => r.split(':')) : []);
     return lines.filter((l) => [...l].length > 300 && !moved.has(h82(l)) && !moved.has(h82([...l].slice(0, fx82.keyChars).join(''))));
@@ -4446,6 +4431,10 @@ console.log('§82 CLAUDE.md is an index of ≤ 100 000 bytes; the moved per-file
   ok(bytes <= CLAUDE_MD_MAX_BYTES, `§82 ① CLAUDE.md is ${bytes} bytes ≤ ${CLAUDE_MD_MAX_BYTES} (the ratchet; the law caps it at 100 000) — a per-file or per-incident line goes to its kb INDEX head`);
   const ptrs = [...new Set(pointers82(md))], dangling = ptrs.filter((k) => !fs.existsSync(path.join(REPO, 'docs', k + '.md')));
   ok(ptrs.includes('kb-file-structure') && ptrs.includes('kb-bugfix-invariants') && dangling.length === 0, `§82 ② every ⇒ kb-… pointer in CLAUDE.md names a file in docs/ (${ptrs.length}: ${ptrs.join(' ')})${dangling.length ? ' — DANGLING: ' + dangling.join(' ') : ''}`);
+  // the before-text is read only when some block has a retirement (its sha leg); a depth-1 checkout says SKIP by name
+  const retiring82 = fx82.blocks.some((b) => (b.retired || []).length), md82 = retiring82 ? beforeText(REPO) : null;
+  if (retiring82 && !md82) console.log(`  SKIP §82 ④ the retired blocks' before-text sha leg: ${BEFORE82} is not in this checkout (depth-1) — the per-row leg still holds them`);
+  const before82 = md82 && Object.fromEntries(beforeBlocks(md82).map((x) => [x.name, x.lines]));
   const homes = new Map();
   for (const b of fx82.blocks) {
     const text = fs.readFileSync(path.join(REPO, b.home), 'utf8'), lines = region82(text, b.region);
@@ -4454,20 +4443,27 @@ console.log('§82 CLAUDE.md is an index of ≤ 100 000 bytes; the moved per-file
     if (!lines) continue;
     const long = over300(b, lines);
     ok(long.length === 0, `§82 ③ every ${b.home} "${b.region}" line is ≤ 300 characters or a moved line's fixture row${long.length ? ' — OVER: ' + long.map((l) => [...l].slice(0, 60).join('')).join(' | ') : ''}`);
-    const c = census82(b, lines);
-    ok(c.lost === 0 && c.shaOk !== false, `§82 ④ ${b.name}: ${b.lines} moved lines — ${c.verbatim} verbatim, ${c.edited} edited since the move, ${c.lost} LOST in ${b.home}${c.shaOk === null ? '' : c.shaOk ? ' · the block re-assembled hashes to the fixture sha256' : ' · SHA MISMATCH'}`);
+    const j = judgeMoved(fx82, b, lines, { before: before82 && before82[b.name] });
+    ok(j.ok, `§82 ④ ${j.line}${j.said.map((x) => '\n       ' + x).join('')}`);
+    const off = (b.heads || []).flatMap((t, i) => (h82(t) === String(b.rows[i]).split(':')[0] && [...t].length <= fx82.keyChars ? [] : [i + 1]));
+    ok(Array.isArray(b.retired) && Array.isArray(b.heads) && b.heads.length === b.rows.length && off.length === 0, `§82 ⑤ ${b.name}: ${(b.heads || []).length} clear heads align with its ${b.rows.length} rows (each hashes to its row's head) · ${(b.retired || []).length} retired${off.length ? ' — OFF at rows ' + off.slice(0, 10).join(' ') : ''}`);
   }
   // CONTROLS: a home missing one moved line, a line's head reworded, a tail edit (quiet: edited, not lost), a new 301-char
   // index line, a dangling pointer, a CLAUDE.md one byte over the ratchet
   const bug = fx82.blocks.find((b) => b.name === 'bugfix-index'), fsb = fx82.blocks.find((b) => b.name === 'file-index');
   const bl = homes.get('bugfix-index').lines || [], fl = homes.get('file-index').lines || [];
   const mid = bl.findIndex((l, i) => i > bl.length / 2 && l.startsWith('- '));
+  const midRow = bug.rows.findIndex((r) => r.startsWith(h82([...(bl[mid] || '')].slice(0, fx82.keyChars).join('')) + ':'));
+  const ret82 = { ...bug, retired: [{ head: bug.rows[midRow].split(':')[0], why: 'a §82 control: this line was removed', at: '2026-10-08' }] };
   const drop = bl.filter((_, i) => i !== mid), head = bl.map((l, i) => (i === mid ? 'X' + l.slice(1) : l)), tail = bl.map((l, i) => (i === mid ? l + ' (edited)' : l));
   const r82 = [
     ['a copy missing one incident line', census82(bug, drop).lost === 1, true],
     ['a file line\'s head reworded', census82(fsb, fl.map((l) => (l.startsWith('src/exit-shell.js — ') ? 'src/exit-shel1.js — ' + l.slice(20) : l))).lost === 1, true],
     ['a reworded head', census82(bug, head).lost === 1, true],
     ['a tail edit (edited, never lost)', census82(bug, tail).lost > 0 || census82(bug, tail).edited !== 1, false],
+    ['a retired line removed (neither lost nor edited)', !judgeMoved(fx82, ret82, drop).ok, false],
+    ['a dead retirement (its line still there)', judgeMoved(fx82, ret82, bl).said.some((x) => x.startsWith('dead retirement: bugfix-index row ')), true],
+    ['a lost line said in words', judgeMoved(fx82, bug, drop).said.some((x) => x === `lost: bugfix-index row ${midRow + 1}: "${bug.heads[midRow]}"`), true],
     ['a new 301-character index line', over300(bug, [...bl, '- ' + 'x'.repeat(299)]).length === 1, true],
     ['a dangling pointer', pointers82(md + '\nnew line ⇒ kb-nope.md\n').some((k) => !fs.existsSync(path.join(REPO, 'docs', k + '.md'))), true],
     ['one byte over the ratchet', Buffer.byteLength(md + 'x'.repeat(CLAUDE_MD_MAX_BYTES - bytes + 1)) > CLAUDE_MD_MAX_BYTES, true],

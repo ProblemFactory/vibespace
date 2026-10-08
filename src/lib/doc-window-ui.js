@@ -12,6 +12,9 @@
 //   · THE FRAME (design 020, lane doc-editor-ui, 2.369.223 — docs/design-doc-editor-wheel.md § UI): ONE folding bar of glyph
 //     groups (the house bar-fold), ONE status strip of keyed chips (absent with nothing to say), the page a 76ch column
 //     with a block rhythm; tables get hover grips onto the existing menu, code blocks their language chip.
+//   · WIDTH + LEAVING (lane doc-window-width-export, 2.369.239 — src/lib/doc-window-model.js): the column fills the window
+//     (`fit`, the default) or keeps the 76ch measure (`comfortable`, a device's choice); a wide table scrolls in its wrapper;
+//     the ⋯ at the bar's right end = the folded tools + Download .md / Export HTML / Print / Copy as Markdown / Copy as HTML.
 //   · SAVE: the serializer's output through the atomic /api/file/write of THIS window's path only, then
 //     POST /api/doc/edited {summary} — the owning chat's free next-turn note.
 import { Editor, Extension } from '@tiptap/core';
@@ -19,6 +22,7 @@ import { Plugin } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import M from '../doc-model.js';
 import { schema, extensions, loadDoc, saveDoc, sourceLine, docFidelity, safeHref, safeImageSrc } from './doc-markdown.js';
+import { WIDTH_KEY, widthChoice, nextWidth, columnRule, TABLE_CSS, downloadHref, exportName, localImagePath, exportDocument } from './doc-window-model.js';
 
 const POLL_MS = 2000;
 const SHEET_BELOW = 640;   // px of window width: below it the comments strip is a bottom sheet
@@ -36,8 +40,12 @@ const CSS = `
 .doc-tb[aria-pressed="true"]{background:var(--accent-dim);color:var(--text)}
 .doc-style-btn{color:var(--text);padding:0 4px 0 8px}
 .doc-style-btn svg{width:12px!important;height:12px!important;color:var(--text-dim)}
-.doc-sep{width:1px;height:16px;background:var(--border);margin:0 5px}
+.doc-sep{width:11px;height:16px;background:linear-gradient(var(--border),var(--border)) center/1px 100% no-repeat;margin:0} /* the 1 px rule centred in its own 11 px box: the fold measures offsetWidth, which never counted a margin */
 .doc-strip-btn{margin-left:auto}
+.doc-width-btn{padding:0 8px 0 6px}
+.doc-width-btn[data-width="comfortable"]{color:var(--text)}
+.doc-menu-ico{display:inline-flex;vertical-align:-3px;margin-right:8px;color:var(--text-dim)}
+.doc-menu-ico svg{width:14px!important;height:14px!important}
 .doc-strip-n{font-size:11px}
 .doc-status{display:flex;align-items:center;gap:6px;height:26px;box-sizing:border-box;padding:0 8px;border-bottom:1px solid var(--border);flex:none;font-size:11px;white-space:nowrap;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
 .doc-status>*{flex:0 0 auto}
@@ -80,12 +88,14 @@ const CSS = `
 .doc-page .ProseMirror figure.doc-fig img{display:block;max-width:100%;border-radius:var(--radius-sm)}
 .doc-page .ProseMirror figure.doc-fig figcaption{margin-top:4px;font-size:11px;color:var(--text-dim)}
 .doc-page .ProseMirror figure.doc-img-broken img{min-width:120px;min-height:48px;box-sizing:border-box;border:1px dashed var(--border)}
-.doc-page .ProseMirror .tableWrapper{overflow-x:auto;margin-left:-4px;margin-right:-4px;padding:0 4px}
+${TABLE_CSS}
+.doc-window[data-width="fit"] .doc-page{max-width:none}
 .doc-page .ProseMirror table{border-collapse:collapse;table-layout:auto;width:max-content;max-width:100%}
 .doc-page .ProseMirror th,.doc-page .ProseMirror td{border:1px solid var(--border);padding:6px 10px;vertical-align:top;min-width:3em;position:relative;font-variant-numeric:tabular-nums}
 .doc-page .ProseMirror th{background:var(--bg-input);font-weight:600;white-space:nowrap;text-align:left}
 .doc-page .ProseMirror td p,.doc-page .ProseMirror th p{margin:0}
 .doc-page .ProseMirror .selectedCell{background:color-mix(in srgb,var(--accent) 16%,transparent)}
+.doc-page .ProseMirror :is(td,th):first-child.selectedCell{background:color-mix(in srgb,var(--accent) 16%,var(--bg-window))}
 .doc-page .ProseMirror ul[data-type="taskList"]{list-style:none;padding-left:.2em}
 .doc-page .ProseMirror li[data-type="taskItem"]{display:flex;gap:8px;align-items:flex-start}
 .doc-page .ProseMirror li[data-type="taskItem"]>label{flex:none;display:flex;align-items:center;height:1.6em;user-select:none}
@@ -131,7 +141,7 @@ const CSS = `
 .doc-window.doc-phone .doc-status{height:42px}
 .doc-window.doc-phone .doc-pill,.doc-window.doc-phone .doc-save-btn{height:36px}
 .doc-window.doc-phone button:not(.doc-grip){min-height:36px}
-.doc-window.doc-phone .doc-page{padding:18px 16px 80px}
+.doc-window.doc-phone .doc-page{padding:18px 12px 80px}
 .doc-window.doc-phone .doc-page .ProseMirror h1{font-size:23px}
 .doc-window.doc-phone .doc-page .ProseMirror h2{font-size:18px}
 `;
@@ -169,9 +179,10 @@ export function commentOffer(open) {
 }
 
 export function mountDocWindow({ root, winInfo, host, path, name, from, signal, deps }) {
-  const { t, showToast, fetchJson, createModalShell, showConfirmDialog, showInputDialog, createPopover, showContextMenu, uiScale, onFileChanged, sameFile, makeRaw, isPhone, createBarFold, icons: I } = deps;
+  const { t, showToast, fetchJson, createModalShell, showConfirmDialog, showInputDialog, createPopover, showContextMenu, uiScale, onFileChanged, sameFile, makeRaw, isPhone, createBarFold, icons: I, sanitizeHtml, copyText } = deps;
   if (!document.getElementById('doc-window-css')) { const st = mk('style'); st.id = 'doc-window-css'; st.textContent = CSS; document.head.appendChild(st); }
-  const S = { source: '', base: 0, mode: 'rich', verdict: null, dirty: false, kept: 0, confirmed: 0, busy: false, view: null, ed: null, loaded: null, raw: null, rawBefore: '', owner: null, from, sending: false, at: '', note: '', stripOpen: false };
+  let widthPref = 'fit'; try { widthPref = widthChoice(localStorage.getItem(WIDTH_KEY)); } catch { } // a DEVICE's choice
+  const S = { width: widthPref, source: '', base: 0, mode: 'rich', verdict: null, dirty: false, kept: 0, confirmed: 0, busy: false, view: null, ed: null, loaded: null, raw: null, rawBefore: '', owner: null, from, sending: false, at: '', note: '', stripOpen: false };
   const storeKey = STORE_PREFIX + (host || '') + '\u0001' + path;
   const loadComments = () => { try { const v = JSON.parse(localStorage.getItem(storeKey) || '[]'); return Array.isArray(v) ? v.filter((c) => c && typeof c.id === 'string' && typeof c.note === 'string').slice(0, M.LIMITS.items) : []; } catch { return []; } };
   const saveComments = () => { try { if (comments.length) localStorage.setItem(storeKey, JSON.stringify(comments)); else localStorage.removeItem(storeKey); } catch { } };
@@ -207,11 +218,15 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
   tool('image', I.image, t('Image'), 4, () => insertImage());
   sep(5);
   const btnRaw = tool('raw', I.raw, t('Edit the markdown source'), 5, () => toggleRaw(), 'doc-raw-btn'); btnRaw.setAttribute('aria-pressed', 'false');
-  const more = mk('button', 'doc-tb doc-tb-icon doc-more bar-folded'); more.type = 'button'; more.appendChild(glyph(I.more)); more.title = t('More'); more.setAttribute('aria-label', t('More')); more.setAttribute('aria-haspopup', 'menu');
-  bar.appendChild(more);
+  const more = mk('button', 'doc-tb doc-tb-icon doc-more bar-folded'); more.type = 'button'; more.appendChild(glyph(I.more)); more.title = t('Download, export, print'); more.setAttribute('aria-label', t('Download, export, print')); more.setAttribute('aria-haspopup', 'menu');
   const btnStrip = mk('button', 'doc-tb doc-strip-btn'); btnStrip.type = 'button'; btnStrip.dataset.key = 'comments'; btnStrip.dataset.prio = '0'; btnStrip.appendChild(glyph(I.chat)); btnStrip.setAttribute('aria-pressed', 'false');
   const stripN = mk('span', 'doc-strip-n'); btnStrip.appendChild(stripN);
   BAR.push({ el: btnStrip, key: 'comments', priority: 0 }); bar.appendChild(btnStrip);
+  // the page width (doc-window-model): one glyph + the word of the CURRENT width; a press flips it; absent on a phone (always Fit)
+  const widthWord = () => (S.width === 'fit' ? t('Fit width') : t('Comfortable'));
+  const btnWidth = tool('width', I.fit, '', 5, () => setWidth(nextWidth(S.width)), 'doc-width-btn'); btnWidth.classList.remove('doc-tb-icon');
+  const widthWords = mk('span', 'doc-width-words'); btnWidth.appendChild(widthWords);
+  bar.appendChild(more);
 
   // ── THE STATUS STRIP: keyed chips patched in place — fidelity · conflict (its two acts inline) · comments · the save
   //    dot at the right; ABSENT while it has nothing to say ──
@@ -237,19 +252,32 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
   main.append(pane, rawPane, strip);
   root.append(bar, status, main);
   // the fold after the frame is in the root: its ruler lands there (after the bar), so the phone rules reach the clones
-  const fold = createBarFold(bar, { more, signal, items: () => BAR.map(({ el, key, priority }) => ({ key, el, priority })) });
+  const fold = createBarFold(bar, { more, moreAlways: () => true, signal, items: () => BAR.map(({ el, key, priority }) => ({ key, el, priority })) });
   more.addEventListener('mousedown', (e) => e.preventDefault(), { signal }); // a folded tool acts on the editor's selection
   more.addEventListener('click', (e) => {
     e.stopPropagation();
     const out = new Set(fold.folded());
-    const rows = BAR.filter((x) => x.act && out.has(x.key) && x.el.style.display !== 'none').map((x) => ({ label: x.label, action: () => x.act(more) }));
-    if (!rows.length) return;
-    const r = more.getBoundingClientRect(); showContextMenu(r.left, r.bottom + 2, rows);
+    const rows = BAR.filter((x) => x.act && out.has(x.key) && x.el.style.display !== 'none').map((x) => ({ label: x.key === 'width' ? widthLabel() : x.label, action: () => x.act(more) }));
+    const own = leaveRows();
+    const r = more.getBoundingClientRect(); showContextMenu(r.left, r.bottom + 2, rows.length ? [...rows, { separator: true }, ...own] : own);
   }, { signal });
   // the comments strip is CLOSED until asked (the bar's comments button, the strip's chip, a new comment): on the right of
   // a wide window; a phone or a narrow pane (a split beside the chat) gets it as a bottom sheet
   const sheetMode = () => isPhone() || (root.clientWidth > 0 && root.clientWidth < SHEET_BELOW);
-  const layout = () => { root.classList.toggle('doc-phone', isPhone()); root.classList.toggle('doc-sheet', sheetMode()); };
+  const layout = () => { root.classList.toggle('doc-phone', isPhone()); root.classList.toggle('doc-sheet', sheetMode()); applyWidth(); };
+  function applyWidth() {
+    const rule = columnRule({ choice: S.width, phone: isPhone() });
+    if (root.dataset.width !== rule.choice) root.dataset.width = rule.choice;
+    btnWidth.dataset.width = S.width; if (widthWords.textContent !== widthWord()) widthWords.textContent = widthWord(); // (runs before `patch` exists)
+    btnWidth.title = widthLabel(); btnWidth.setAttribute('aria-label', btnWidth.title);
+    const off = isPhone() ? 'none' : ''; if (btnWidth.style.display !== off && S.mode === 'rich') { btnWidth.style.display = off; fold.schedule?.(); }
+  }
+  function widthLabel() { return S.width === 'fit' ? t('Page width: Fit width — press for Comfortable') : t('Page width: Comfortable — press for Fit width'); }
+  function setWidth(w) {
+    S.width = widthChoice(w);
+    try { localStorage.setItem(WIDTH_KEY, S.width); } catch { }
+    applyWidth(); placeGrips(gripCell); fold.schedule?.();
+  }
   layout();
   const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(layout) : null;
   if (ro) ro.observe(root);
@@ -441,9 +469,86 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
     S.ed.chain().focus().setImage({ src, alt: '' }).run();
   }
 
+  // ── LEAVING (doc-window-model): the file itself, ONE self-contained HTML (export + print), the clipboard ──
+  const escH = (x) => String(x).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const row = (icon, label, action) => ({ label, labelHtml: '<span class="doc-menu-ico">' + (I[icon] || '') + '</span>' + escH(label), action });
+  /** The ⋯ menu's own rows — the HTML ones only while a rendered view exists (no greyed rows: absent otherwise). No .docx: there is a reader, no writer. */
+  function leaveRows() {
+    const rich = S.mode === 'rich' && !!S.ed;
+    return [
+      row('download', t('Download .md'), () => { downloadMd(); }),
+      ...(rich ? [row('external', t('Export HTML'), () => { exportHtml(); }), row('print', t('Print / Save as PDF'), () => { printDoc(); })] : []),
+      { separator: true },
+      row('copy', t('Copy as Markdown'), () => { copyText(sourceNow()).then(() => showToast(t('Copied as Markdown'), { type: 'success' })); }),
+      ...(rich ? [row('code', t('Copy as HTML'), async () => { copyText(await exportBody()).then(() => showToast(t('Copied as HTML'), { type: 'success' })); })] : []),
+    ];
+  }
+  const dirtyNow = () => S.dirty || !!(S.raw && S.raw.modified);
+  /** The markdown as it stands now: Raw's buffer, the rich edits as a save would write them, else the disk's. */
+  const sourceNow = () => {
+    if (S.mode === 'raw' && S.raw?.editorView) return S.raw.editorView.state.doc.toString();
+    if (S.dirty && S.ed) { const p = saveDoc(S.source, S.loaded, current()); if (p.ok) return p.text; }
+    return S.source;
+  };
+  const saveAs = (href, fname) => { const a = mk('a'); a.href = href; a.download = fname; a.style.display = 'none'; document.body.appendChild(a); a.click(); a.remove(); };
+  /** Download .md = the file on disk (the existing attachment route) — unsaved edits are saved first, or nothing downloads. */
+  async function downloadMd() {
+    if (dirtyNow()) {
+      const ok = await showConfirmDialog({ title: t('Save and download?'), message: t('This document has unsaved edits: they are saved first, then the file downloads.'), confirmText: t('Save and download') });
+      if (!ok || signal.aborted) return;
+      if (S.mode === 'raw' && S.raw) await S.raw.save(); else await save();
+      if (dirtyNow()) return; // the save did not land (its chip says why) — never a stale download
+    }
+    saveAs(downloadHref(host, path), name);
+  }
+  /** The rendered fragment through THE one sanitizer, tables wrapped (they scroll), images beside the file inlined as data URLs. */
+  async function exportBody() {
+    const d = new DOMParser().parseFromString('<!doctype html><body>' + sanitizeHtml(S.ed.getHTML()) + '</body>', 'text/html'); // an inert document: nothing in it runs
+    for (const tb of d.querySelectorAll('table')) { const w = d.createElement('div'); w.className = 'tableWrapper'; tb.replaceWith(w); w.appendChild(tb); }
+    for (const img of d.querySelectorAll('img[src]')) {
+      const p = localImagePath(img.getAttribute('src'), path); if (!p) continue;
+      try {
+        const r = await fetch('/api/file/raw?' + q(host, p)); if (!r.ok) continue;
+        const bl = await r.blob(); if (!/^image\//.test(bl.type)) continue;
+        img.setAttribute('src', await new Promise((ok, no) => { const fr = new FileReader(); fr.onload = () => ok(String(fr.result)); fr.onerror = no; fr.readAsDataURL(bl); }));
+      } catch { /* kept as written */ }
+    }
+    return d.body.getHTML(); // the serializer of a detached document — the window's own view still gets no HTML string
+  }
+  async function buildExport(wide) {
+    const body = await exportBody();
+    const css = CSS.split('\n').filter((l) => l.startsWith('.doc-page .ProseMirror') && !/tableWrapper|:first-child/.test(l)).join('\n');
+    const cs = getComputedStyle(root);
+    const tokens = [...new Set((css + TABLE_CSS).match(/var\(--[\w-]+/g) || [])].map((v) => [v.slice(4), cs.getPropertyValue(v.slice(4))]);
+    return exportDocument({ title: name, body, css, tokens, font: getComputedStyle(page).fontFamily, wide });
+  }
+  async function exportHtml() {
+    const html = S.ed ? await buildExport(S.width === 'fit') : null;
+    if (!html) { say(t('This document could not be exported')); return; }
+    const url = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }));
+    saveAs(url, exportName(name)); setTimeout(() => URL.revokeObjectURL(url), 60000);
+  }
+  // PRINT: the same document in a transient hidden frame (design-present's printAll pattern) — the browser's own dialog is
+  // the PDF (Save as PDF); no server-side PDF. sandbox WITHOUT allow-scripts: nothing in the document runs, this window prints it
+  let printFrame = null, printTimer = 0;
+  const dropPrint = () => { clearTimeout(printTimer); if (printFrame) { printFrame.remove(); printFrame = null; } };
+  signal.addEventListener('abort', dropPrint, { once: true });
+  async function printDoc() {
+    const html = S.ed ? await buildExport(true) : null;
+    if (!html) { say(t('This document could not be exported')); return; }
+    if (signal.aborted) return;
+    dropPrint();
+    const f = mk('iframe', 'doc-print-frame'); f.setAttribute('sandbox', 'allow-same-origin allow-modals'); f.setAttribute('aria-hidden', 'true'); f.tabIndex = -1;
+    f.style.cssText = 'position:fixed;left:-10000px;top:0;width:794px;height:1123px;border:0';
+    f.addEventListener('load', () => {
+      try { f.contentWindow.focus(); f.contentWindow.print(); f.dataset.printed = '1'; } catch (e) { say(t('Could not print: {why}', { why: e.message })); }
+    }, { once: true, signal });
+    f.srcdoc = html; document.body.appendChild(f); printFrame = f; printTimer = setTimeout(dropPrint, 120000);
+  }
+
   // ── modes ──
   // Raw: the formatting tools step out of the bar (display none = absent for the fold), Raw + comments stay
-  const tools = (on) => { for (const x of BAR) if (x.key !== 'raw' && x.key !== 'comments') x.el.style.display = on ? '' : 'none'; };
+  const tools = (on) => { for (const x of BAR) if (x.key !== 'raw' && x.key !== 'comments') x.el.style.display = on && !(x.key === 'width' && isPhone()) ? '' : 'none'; };
   const showRich = () => { S.mode = 'rich'; pane.hidden = false; rawPane.hidden = true; btnRaw.setAttribute('aria-pressed', 'false'); tools(true); refreshBar(); };
   const showRaw = () => {
     S.mode = 'raw'; pane.hidden = true; rawPane.hidden = false; btnRaw.setAttribute('aria-pressed', 'true'); tools(false); showConflict(false); placeGrips(null);

@@ -2,6 +2,15 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.239 — 2026-10-08
+
+### Added
+- New profile… can copy a stopped profile's logins on the same machine (“Copy logins from”): the copy starts signed in.
+- An agent browser profile that grows past 2 GB on disk is said in For you, with what grew.
+
+### Changed
+- The document window uses its full width, wide tables scroll instead of being cut off, and a document can be downloaded, exported as HTML or printed to PDF.
+
 ## 2.369.238 — 2026-10-08
 
 ### Fixed

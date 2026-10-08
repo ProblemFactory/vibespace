@@ -124,7 +124,9 @@ function refuseHost(req, res) {
   res.status(400).json({ error: `browser profiles are local-only in this release — host ${JSON.stringify(h)} refused`, code: 'unsupported-host' });
   return true;
 }
-const STATUS = { 'not-found': 404, no_lease: 404, 'bad-request': 400, label_required: 400, label_taken: 409, provider_unknown: 400, provider_unavailable: 400, 'unsupported-host': 400, sharing_refused: 400, fence_refused: 409, bad_proxy: 400, ambiguous: 409, not_owner: 403, leased: 409, running: 409, cap: 409, launch_failed: 502, dir_unwritable: 500, unavailable: 503,
+const STATUS = { // lane browser-profile-clone: the copy's refusals by name
+  source_not_found: 404, source_same_machine_only: 409, source_leased: 409, source_still_running: 409, source_no_folder: 409, clone_too_big: 413, clone_failed: 500, clone_unsupported_platform: 400, clone_agent_too_old: 400,
+  'not-found': 404, no_lease: 404, 'bad-request': 400, label_required: 400, label_taken: 409, provider_unknown: 400, provider_unavailable: 400, 'unsupported-host': 400, sharing_refused: 400, fence_refused: 409, bad_proxy: 400, ambiguous: 409, not_owner: 403, leased: 409, running: 409, cap: 409, launch_failed: 502, dir_unwritable: 500, unavailable: 503,
   // lane chrome-builds-download (design 004): the download's refusals by name
   build_platform_unsupported: 400, disk: 507, build_present: 409, build_version_invalid: 400, build_version_unknown: 404, build_list_invalid: 502, build_list_unreachable: 502, build_url_offhost: 502, build_fetch_failed: 502, build_check_failed: 502, build_zip_shape: 502, build_unpack_failed: 500, build_verify_failed: 502, build_in_use: 409, build_not_downloaded: 409, build_removing: 409, unzip_unavailable: 503, build_stalled: 504,
   // P4 (§7.1–§7.3): the provider rows' typed refusals, the paired-machine rungs, the cdp provider
@@ -213,6 +215,8 @@ function fail(res, e) {
     // the rebuilt switch dialog: a switch whose target did not START carries its rollback facts (whatever the code) —
     // the dialog words the answer by them first: `restored` (the profile is back as it was), `from`, `to`
     ...(typeof e?.restored === 'boolean' ? { restored: e.restored, from: e.from || null, to: e.to || null } : {}),
+    // lane browser-profile-clone: a refused copy names its source, the size it measured and the fs code a failed copy hit
+    ...(typeof e?.source === 'string' ? { source: e.source } : {}), ...(Number.isFinite(e?.bytes) ? { bytes: e.bytes } : {}), ...(e?.fsCode ? { fsCode: e.fsCode } : {}),
     ...rulingExtras(e), ...(res.locals && res.locals.recipe ? { recipe: res.locals.recipe } : {}) });
 }
 /** Owner ruling A: the extras a refusal on the sharing paths carries — a holder's NAME where a refusal names one + the
@@ -421,6 +425,7 @@ router.post('/api/browser/profiles', async (req, res) => {
   // this route does not pre-refuse it (the registry itself is the hub's)
   const k = keeperOr503(res); if (!k) return;
   const { use, ...input } = req.body || {};
+  if (input.cloneFrom != null && refuseAgentBearer(req, res, CLONE_IS_USERS)) return; // lane browser-profile-clone: a user's act — no agent verb copies logins
   // lane browser-admin 2a: which Chrome build it runs is the USER's choice — an agent's own token is refused by name
   if (input.browser != null && refuseAgentBearer(req, res, BUILD_IS_USERS)) return;
   // verify r1 (F6): "Who can use it" is the USER's too — an agent's token never writes the list (its own `new` makes a
@@ -437,8 +442,20 @@ router.post('/api/browser/profiles', async (req, res) => {
     const builds = ch && ch.kind === 'build' && remoteHost && typeof k.buildsFor === 'function' ? await k.buildsFor(remoteHost) : null;
     // owner ruling A: a named profile is usable by ALL of the owner's conversations by default (the dialog / the row's
     // "Who can use it" narrows it); with a list, the record is born with it — ONE write
-    res.json({ profile: k.createProfile(input, { owner: { kind: 'instance', id: null }, by: 'user', builds, ...(u.use ? { use: u.use, knownKeys: u.knownKeys } : {}) }) });
+    const opts = { owner: { kind: 'instance', id: null }, by: 'user', builds, ...(u.use ? { use: u.use, knownKeys: u.knownKeys } : {}) };
+    // lane browser-profile-clone (B-9669): "Copy logins from" — the copy of a stopped profile's folder (a running one is stopped first)
+    if (input.cloneFrom != null) return res.json({ profile: await k.cloneProfile(input, { ...opts, nameOf: cloneHolderName }) });
+    res.json({ profile: k.createProfile(input, opts) });
   } catch (e) { fail(res, e); }
+});
+/** lane browser-profile-clone: a lease holder's name as the user sees it (the live conversation's), null when not running. */
+function cloneHolderName(sessionId) { const s = ctx.activeSessions?.get?.(sessionId); return s ? String(s.name || s.title || '') || null : null; }
+/** lane browser-profile-clone: the New profile… dialog's "Copy logins from" rows — every NAMED profile on the machine the new
+ *  profile will run on (`?host=`), each with its state (stopped / running / leased by whom / other-machine / no-folder). */
+router.get('/api/browser/clone-sources', (req, res) => {
+  const k = keeperOr503(res); if (!k) return;
+  const h = LOCAL.has(hostOf(req)) ? null : hostOf(req);
+  try { res.json({ host: h, sources: k.cloneSources(h).map((r) => ({ ...r, holders: r.holders.map((x) => ({ ...x, name: (x.sessionId && cloneHolderName(x.sessionId)) || null })) })) }); } catch (e) { fail(res, e); }
 });
 /** P4 (§7.1): the provider rows with their capability cells, each with the
  *  local verdict and — with `?host=` — the verdict FOR that machine (a
@@ -504,6 +521,7 @@ const isAgentBearer = (req) => /^Bearer\s+(vsst_|jbt_)/i.test(String((req.header
 const OWN_BROWSING_IS_USERS = 'the user\'s own browsing — an agent token may not start, drive, end or read it';
 const INSTALL_IS_USERS = 'installing a program is the user\'s act — an agent token may not start a download; tell the user what to install';
 const BUILD_IS_USERS = 'which Chrome build a profile runs is the user\'s choice (Agent browser panel → Change build…) — an agent token may not set it; `vibespace-browser providers` lists the builds';
+const CLONE_IS_USERS = 'copying a profile\'s logins into a new profile is the user\'s act (Agent browser panel → New profile… → Copy logins from) — an agent token may not do it';
 const USE_IS_USERS = 'who may use a profile is the user\'s choice (Agent browser panel → Who can use it) — an agent token may not set it; an agent\'s own `new` makes a profile every conversation can use'; // verify r1 (F6)
 const ADOPT_IS_USERS = 'a persistent profile made from a conversation\'s browser is the user\'s act (the picker\'s "New persistent profile…") — an agent token may not adopt a conversation\'s kept browser, its own or another\'s; an agent\'s `new --adopt` is the door for a folder of its own'; // verify r3 (Y4)
 const BUILDS_DOWNLOAD_IS_USERS = 'downloading or removing a Chrome build is the user\'s act (Agent browser panel → Change build… → Download another build…) — an agent token may not do it, nor read Google\'s lists through VibeSpace; `vibespace-browser providers` lists the builds this machine has';

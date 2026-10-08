@@ -67,7 +67,22 @@ export function usageLine(r, x = {}) {
   if (recs.length) l2.push({ key: 'recordings', text: t('{n} recording(s)', { n: recs.length }) });
   if (r.recording) l2.push({ key: 'recording', text: t('recording'), tone: 'rec' });
   if (r.recordingRefused) l2.push({ key: 'refused', text: t('refused: {why}', { why: String(r.recordingRefused.error || r.recordingRefused.code || '') }), tone: 'warn' });
-  return { l1: r.bytes === null || r.bytes === undefined ? t('not measured') : bytes(r.bytes), l2 };
+  // lane browser-disk-sample: the keeper's du sample is THE size once it has measured; the panel's own reading until then
+  const d = measuredDisk(r), b = d ? d.bytes : r.bytes;
+  return { l1: b === null || b === undefined ? t('not measured') : bytes(b), l2 };
+}
+
+const measuredDisk = (r) => (r && r.disk && (r.disk.state === 'ok' || r.disk.state === 'over') && Number.isFinite(r.disk.bytes) ? r.disk : null);
+/** lane browser-disk-sample (B-5fab): the fold's On disk fact — the keeper's `du -sk` sample against the profile disk
+ *  budget ("1.3 GB of 2 GB"; over it in the warn tone), "not measured yet" before the first answer or after a failed one
+ *  (its why in the title), and a paired machine's row its why. The view PATCHES it in place (never a row rebuild). */
+export function diskFold(r, x = {}) {
+  const t = T(x), bytes = W(x, 'bytes', (n) => String(n)), size = W(x, 'size', (n) => String(n));
+  const d = (r && r.disk) || null, k = t('On disk');
+  const m = measuredDisk(r);
+  if (m) return { key: 'disk', k, v: t('{used} of {size}', { used: bytes(m.bytes), size: size(m.limit) }), tone: m.state === 'over' ? 'warn' : '', title: m.state === 'over' ? t('Over the profile disk budget — said in For you; Delete… in its menu frees it') : '' };
+  if (d && d.state === 'not-measured') return { key: 'disk', k, v: d.reason === 'remote' ? t('not measured — its folder is on a paired machine') : t('not measured — VibeSpace keeps no folder for it'), tone: '', title: '' };
+  return { key: 'disk', k, v: t('not measured yet'), tone: '', title: d && d.state === 'unknown' && d.why ? String(d.why) : '' };
 }
 
 /** The ONE visible act: Browse yourself / Open your browsing window — ABSENT (never greyed) for a paired machine's
@@ -127,11 +142,14 @@ export function rowFold(r, x = {}) {
   if (mem) out.push({ key: 'memory', k: t('Memory'), v: mem, tone: r.usage.over ? 'warn' : '', title: r.usage.over ? String(r.usage.over) : '' });
   const bl = x.buildLine || null; // the view's cardBuildLine (the choice + the build the running browser reports)
   if (bl && bl.text) out.push({ key: 'build', k: t('Browser build'), v: String(bl.text), tone: bl.warn ? 'warn' : '' });
+  // lane browser-profile-clone (B-9669): where a copy's logins came from — a one-time snapshot, dated in the viewer's locale
+  if (r.clonedFrom && r.clonedFrom.label) out.push({ key: 'cloned', k: t('Logins'), v: t('copied from {label} on {date}', { label: String(r.clonedFrom.label), date: String(W(x, 'date', (ms) => new Date(ms).toISOString().slice(0, 10))(Number(r.clonedFrom.at) || 0)) }) });
   const tr = r.trace || { n: 0 };
   const lim = Number(tr.limit) || (x.limits && x.limits.bytesPerProfile) || 0;
   const rec = [tr.n ? t('{n} action(s)', { n: tr.n }) : t('no actions'), t('{used} of {size}', { used: bytes(Number(tr.used) || 0), size: size(lim) })];
   if (Number(tr.fitBytes) > 0) rec.push(t('page-size frames: {size}', { size: bytes(Number(tr.fitBytes) || 0) }));
   if (tr.last) rec.push(t('last {ago}', { ago: ago((Number(x.now) || 0) - Number(tr.last)) }));
+  out.push(diskFold(r, x)); // lane browser-disk-sample: next to the records' "0 B of 1 GB"
   out.push({ key: 'records', k: t('Records'), v: rec.join(' · ') });
   const recs = Array.isArray(r.recordings) ? r.recordings : [];
   const rv = [recs.length ? t('{n} recording(s)', { n: recs.length }) + ' · ' + bytes(r.recordingBytes || 0) : t('no recordings')];

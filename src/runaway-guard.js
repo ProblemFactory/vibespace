@@ -179,7 +179,10 @@ function reportDelivery(state, delivered) {
  *  the Desktop panel if that is not what you expect" / "… has been using 280%
  *  CPU for 5 min — …". `who` = the session's name, `where` = the panel that
  *  holds its Stop. */
-function resourceNoticeText({ who, where, verdict, sample, gpuPct = null, drawing = null }) {
+function resourceNoticeText({ who, where, verdict, sample, gpuPct = null, drawing = null, grew = null, remedy = null }) {
+  // lane browser-disk-sample (B-5fab): a profile directory over BROWSER_DISK_BYTES — the size, the limit, what grew, the
+  // remedy in plain words (never "Stop it": a stopped browser keeps its folder)
+  if (verdict && verdict.overKind === 'disk') return `${who} is ${diskSizeText(verdict.bytes)} on disk (limit ${diskSizeText(verdict.limit)})${Array.isArray(grew) && grew.length ? ` — what grew: ${grew.join(', ')}` : ''}. ${remedy || `Delete… in the ${where} frees it`}`;
   const tail = ` — Stop it from the ${where} if that is not what you expect`;
   if (verdict && verdict.overKind === 'cpu') {
     const pct = Number.isFinite(verdict.cpuPct) ? Math.round(verdict.cpuPct) : '?';
@@ -207,6 +210,13 @@ function diskVerdict(bytes, { limits = LIMITS } = {}) {
   const over = bytes > limit ? `profile ${gb(bytes)} GB on disk (limit ${gb(limit)} GB)` : null;
   return { over, overKind: over ? 'disk' : null, bytes, limit, memGuard: 'disk', clear: bytes < (L.REPORT_REARM_FRACTION || LIMITS.REPORT_REARM_FRACTION) * limit };
 }
+/** lane browser-disk-sample: "2.4 GB" / "2 GB" / "420 MB" / "12 KB" — the disk notice's size words (binary units). */
+function diskSizeText(b) {
+  if (!Number.isFinite(b)) return '?';
+  if (b >= 2 ** 30) return `${(b / 2 ** 30).toFixed(1).replace(/\.0$/, '')} GB`;
+  if (b >= 2 ** 20) return `${(b / 2 ** 20).toFixed(1).replace(/\.0$/, '')} MB`;
+  return `${Math.max(0, Math.round(b / 1024))} KB`;
+}
 const gib = (b) => { const v = b / 2 ** 30; return `${Number.isInteger(v) ? v : v.toFixed(1)} GiB`; };
 /** The panel row's line: "profile 2.4 GB of 2 GiB — the cache can be cleared" (over) / "profile 0.3 GB of 2 GiB". */
 function diskLine(v) {
@@ -214,4 +224,4 @@ function diskLine(v) {
   return `profile ${gb(v.bytes)} GB of ${gib(v.limit)}${v.over ? ' — the cache can be cleared' : ''}`;
 }
 
-module.exports = { diskVerdict, diskLine, resourceVerdict, reportTransition, reportDelivery, resourceNoticeText, memoryText, providerGuard, guardFor, memGuardOffLine, MEM_METRIC_LABELS, JUDGED_METRICS, BROWSER_GUARD_KINDS };
+module.exports = { diskVerdict, diskLine, diskSizeText, resourceVerdict, reportTransition, reportDelivery, resourceNoticeText, memoryText, providerGuard, guardFor, memGuardOffLine, MEM_METRIC_LABELS, JUDGED_METRICS, BROWSER_GUARD_KINDS };

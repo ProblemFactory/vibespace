@@ -122,7 +122,7 @@ export function portOk(v) { const n = Number(String(v == null ? '' : v).trim());
  * conversation, the server's default), `browser` only when a build / path was chosen. → `{ok, body}` | `{ok:false,
  * field, code}` (the dialog says it beside the field, nothing is sent).
  */
-export function createBody({ label = '', provider = 'chromium', host = null, cdpPort = '', mode = 'all', who = [], browser = null, adopt = null } = {}) {
+export function createBody({ label = '', provider = 'chromium', host = null, cdpPort = '', mode = 'all', who = [], browser = null, adopt = null, cloneFrom = null } = {}) {
   const l = String(label || '').trim();
   if (!l) return { ok: false, field: 'label', code: 'label_required' };
   const body = { label: l };
@@ -130,7 +130,9 @@ export function createBody({ label = '', provider = 'chromium', host = null, cdp
   // changed since (never the other form applied: an empty profile for a dialog that said "keeps its logins", or the
   // conversation's own browser taken for a dialog that said "empty")
   if (adopt === 'keep' || adopt === 'empty') body.form = adopt;
-  if (adopt !== 'keep') {
+  const cloning = !!cloneFrom && adopt == null; // lane browser-profile-clone: the copy runs its SOURCE's browser + build — neither is sent
+  if (cloning && host) body.host = String(host);
+  if (adopt !== 'keep' && !cloning) {
     body.provider = String(provider || 'chromium');
     if (host) body.host = String(host);
     if (body.provider === 'cdp') { if (!portOk(cdpPort)) return { ok: false, field: 'cdpPort', code: 'cdp_port_required' }; body.cdpPort = Number(String(cdpPort).trim()); }
@@ -140,7 +142,9 @@ export function createBody({ label = '', provider = 'chromium', host = null, cdp
     if (!w.length) return { ok: false, field: 'use', code: 'empty_list' };
     body.use = { mode: 'only', who: w };
   }
-  if (browser && typeof browser === 'object' && browser.kind && browser.kind !== 'default') body.browser = { ...browser };
+  if (browser && typeof browser === 'object' && browser.kind && browser.kind !== 'default' && !cloning) body.browser = { ...browser };
+  // a folder is bound to the Chrome that wrote it — the server gives the copy its source's provider and build
+  if (cloning) body.cloneFrom = String(cloneFrom);
   return { ok: true, body };
 }
 
@@ -172,6 +176,74 @@ export function createRefusalWords(r, t = (s) => s) {
     case 'adopt_form_changed': return t(i18nKey("This conversation's browser changed since this dialog opened — nothing was created; the dialog was reopened with the form that applies now."));
     case 'adopt_keeps_browser': return t(i18nKey("This conversation's browser is kept with its logins, so the profile is that browser as it is — Chromium on this computer. Create it with those, then use Change build… if you want another build."));
     case 'agent_forbidden': return t(i18nKey('Only you can do this, not an agent.'));
+    default: return cloneRefusalWords(r, t);
+  }
+}
+
+// ── lane browser-profile-clone (B-9669, the owner 2026-10-08): "Copy logins from" — a STOPPED named profile's folder copied
+// into the new one (a one-time snapshot). The server sends the rows (GET /api/browser/clone-sources?host=) with each
+// profile's STATE; this file words them. Every named profile is a row — never hidden, never a disabled control explained
+// only by a tooltip: the state is the row's own sentence.
+
+/** The closed set of a source row's states (the server's `sourceState`), and the ones a person may pick. */
+export const CLONE_SOURCE_STATES = Object.freeze(['stopped', 'running', 'leased', 'other-machine', 'no-folder']);
+export const CLONE_PICKABLE = Object.freeze(['stopped', 'running']);
+/** The platforms a copy is made on (src/browser-clone.js CLONE_PLATFORMS — measured on Linux only). */
+const CLONE_PLATFORMS = ['linux'];
+
+/** Can the machine the profile will run on copy one at all? `machine` = a GET /api/desktop/machines row (null = this
+ *  computer). → `{ok}` | `{ok:false, code, note}` — the section says the note instead of rows. */
+export function cloneMachineVerdict(machine, { t = (s) => s } = {}) {
+  if (!machine || !machine.hostId || machine.hostId === 'local') return { ok: true };
+  const name = String(machine.label || machine.hostId);
+  if (machine.platform && !CLONE_PLATFORMS.includes(String(machine.platform))) return { ok: false, code: 'clone_unsupported_platform', note: t(i18nKey('Copying logins works only on Linux for now — {machine} runs {platform}.'), { machine: name, platform: platformName(machine.platform) }) };
+  if (!(Array.isArray(machine.capabilities) && machine.capabilities.includes('browser-clone'))) return { ok: false, code: 'clone_agent_too_old', note: t(i18nKey("The VibeSpace agent on {machine} can't copy a profile yet — copying logins works on this computer only for now.")), machine: name };
+  return { ok: true };
+}
+const platformName = (p) => (p === 'darwin' ? 'macOS' : p === 'win32' ? 'Windows' : String(p || ''));
+
+/** Who holds a leased source, in words (the live conversation's name; one that is not running is said as such). */
+export function holderNames(holders = [], t = (s) => s) {
+  const names = (Array.isArray(holders) ? holders : []).map((h) => (h && h.name ? String(h.name) : t(i18nKey('a conversation that is not running')))).filter(Boolean);
+  return [...new Set(names)].join(', ');
+}
+
+/** The section's rows: "Don't copy" first (the default), then every named profile on that machine with its state.
+ *  → `[{key, id, name, state, pickable, note}]` (`key` 'none' or the profile id). */
+export function cloneSourceChoices({ sources = [], t = (s) => s } = {}) {
+  const out = [{ key: 'none', id: null, name: t(i18nKey("Don't copy — start signed out")), state: 'none', pickable: true, note: null }];
+  for (const r of Array.isArray(sources) ? sources : []) {
+    if (!r || !r.id) continue;
+    const state = CLONE_SOURCE_STATES.includes(r.state) ? r.state : 'no-folder';
+    let note = null;
+    if (state === 'stopped') note = t(i18nKey('Stopped — its logins are copied as they are now.'));
+    else if (state === 'running') note = t(i18nKey('Its browser is running — it will be stopped first.'));
+    else if (state === 'leased') note = t(i18nKey('In use by {holder} — end that first; a browser is never taken from an agent.'), { holder: holderNames(r.holders, t) });
+    else if (state === 'other-machine') note = t(i18nKey('Runs on another machine — a copy is made on the machine the new profile runs on.'));
+    else note = t(i18nKey('VibeSpace keeps no browser folder for it — nothing to copy.'));
+    out.push({ key: String(r.id), id: String(r.id), name: String(r.label || r.id), state, pickable: CLONE_PICKABLE.includes(state), note });
+  }
+  return out;
+}
+
+/** A size in GB with one decimal (the too-big refusal). */
+const gb = (n) => (Math.round((Number(n) || 0) / (1024 * 1024 * 1024) * 10) / 10).toFixed(1);
+
+/** A refused copy, by the server's CODE (`source` = the source's name, `holders`, `bytes`, `fsCode`). null = not a clone code. */
+export function cloneRefusalWords(r, t = (s) => s) {
+  const code = String((r && r.code) || '');
+  const source = String((r && r.source) || '');
+  switch (code) {
+    case 'source_not_found': return t(i18nKey('The profile to copy from no longer exists — pick another.'));
+    case 'source_same_machine_only': return t(i18nKey('A copy is made on the machine the profile runs on — pick a profile from that machine.'));
+    case 'source_leased': return t(i18nKey('{source} is in use by {holder} — end that first, then copy it.'), { source, holder: holderNames(r.holders, t) });
+    case 'source_still_running': return t(i18nKey("{source}'s browser did not stop within 10 seconds — nothing was copied. Try again."), { source });
+    case 'source_no_folder': return t(i18nKey('{source} keeps no browser folder here — nothing to copy.'), { source });
+    case 'clone_too_big': return t(i18nKey('{source} holds {size} GB to copy — a copy may be at most 2 GB.'), { source, size: gb(r.bytes) });
+    case 'clone_failed': return t(i18nKey('The copy failed ({code}) — nothing was created.'), { code: String((r && r.fsCode) || 'error') });
+    case 'clone_unsupported_platform': return t(i18nKey('Copying logins works only on Linux for now.'));
+    case 'clone_agent_too_old': return t(i18nKey("That machine's VibeSpace agent can't copy a profile yet — copying logins works on this computer only for now."));
     default: return null;
   }
 }
+
