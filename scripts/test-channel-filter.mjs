@@ -60,7 +60,7 @@ console.log('① validation refuses by name');
   const tt = (str, p) => { seen.push(str); return (p ? String(str).replace(/\{(\w+)\}/g, (m, k) => (k in p ? String(p[k]) : m)) : String(str)); };
   ok(F.filterProblemText(kw, { t: tt, ruleLabel: (k) => (k === 'keyword' ? 'contains keyword' : k) }) === 'the rule "contains keyword" needs a value' && seen.length === 1, 'filterProblemText words the code through the caller\'s t() and names the rule the way the editor labels it', JSON.stringify(seen));
   ok(F.filterProblemText(F.validateFilter({ rules: [] }), { t: tt }) === 'add at least one rule' && F.filterProblemText({ ok: true }) === '' && F.filterProblemText({ ok: false, code: 'bad-match', error: 'match must be any|every' }, { t: tt }) === 'match must be any|every', 'no-rules is worded; an accepted filter has no problem; a code the table does not know falls back to the contract sentence (never hidden)');
-  ok(F.RULE_KINDS.length === 11 && F.RULE_KINDS.every((k) => F.validateRule(k === 'time-window' ? { kind: k, from: '00:00', to: '01:00' } : k === 'sender-in-group' ? { kind: k, members: ['x'] } : k === 'has-attachment' || F.PLACE_RULE_KINDS.includes(k) ? { kind: k } : { kind: k, value: 'x' }).ok), 'every declared kind validates with its own minimal shape (' + F.RULE_KINDS.join(', ') + ')');
+  ok(F.RULE_KINDS.length === 12 && F.RULE_KINDS.every((k) => F.validateRule(k === 'time-window' ? { kind: k, from: '00:00', to: '01:00' } : k === 'sender-in-group' ? { kind: k, members: ['x'] } : k === 'has-attachment' || F.PLACE_RULE_KINDS.includes(k) ? { kind: k } : { kind: k, value: 'x' }).ok), 'every declared kind validates with its own minimal shape (' + F.RULE_KINDS.join(', ') + ')');
 }
 
 // ── ② truth table per kind ───────────────────────────────────────────────
@@ -702,13 +702,13 @@ console.log('⑬ owner decision A: a topic wakes, a quote chain does not, a quot
   const ED = fs.readFileSync(path.join(REPO, 'src/lib/channel-filter-editor.js'), 'utf-8'), WD = fs.readFileSync(path.join(REPO, 'src/lib/channel-words.js'), 'utf-8');
   ok(ED.includes(`'reply-to-mine': t('${LABEL_R}')`) && ED.includes(`'in-thread-with-me': t('${LABEL_T}')`) && ED.includes("lw.whys.map((w) => wakeWhyText(w))") && /case 'quoted your message': return t\('quoted your message'\);/.test(WD), 'WIRING: the Notify dialog labels the two rules with the quote clause and words the last wake\'s reasons (wakeWhyText)');
   const ENG = engineSource(REPO);
-  ok(/const kindOf = \(r\) => \(ix \? Thr\.placeKindOf\(r, ix\)/.test(ENG) && /return \{ mine, threadOf: placeBase\.threadOf, kindOf: placeBase\.kindOf \};/.test(ENG) && /if \(!th \|\| th\.kind !== 'vendor'\) return \[\];/.test(ENG), 'WIRING: the engine hands the rules THE classifier (Thr.placeKindOf over its index) and a threadOf that answers for a topic only');
+  ok(/const kindOf = \(r\) => \(ix \? Thr\.placeKindOf\(r, ix\)/.test(ENG) && /return \{ ownerMine: placeBase\.owner, sentIds, sentByMe, convKind: placeBase\.convKind, threadOf: placeBase\.threadOf, kindOf: placeBase\.kindOf \};/.test(ENG) && /if \(!th \|\| th\.kind !== 'vendor'\) return \[\];/.test(ENG), 'WIRING: the engine hands the rules THE classifier (Thr.placeKindOf over its index) and a threadOf that answers for a topic only');
   // CONTROLS (scripts/mutant-copy.mjs): (a) the PRE-DECISION rules — reply-to-mine = replyTo OR root, in-thread-with-me
   // = any thread the index keys (the engine's old threadOf: a chain included) ⇒ the chain rows wake: red
   const { mutantCopies, copiesCensus } = await import('./mutant-copy.mjs');
   const M = mutantCopies('chan-filter-deca', REPO);
   const SRC = fs.readFileSync(path.join(REPO, 'src/channel-filter.js'), 'utf-8');
-  const NEW_CASE = "    case 'reply-to-mine': case 'in-thread-with-me': return placeHit(rule, rec, ctx) !== null;";
+  const NEW_CASE = "    case 'reply-to-mine': case 'in-thread-with-me': case 'reply-to-sent': return placeHit(rule, rec, ctx) !== null;";
   const NEW_WHY = "    const placeWhy = PLACE_RULE_KINDS.includes(rule.kind) ? placeHit(rule, record, ctx) : undefined;";
   ok(SRC.split(NEW_CASE).length === 2 && SRC.split(NEW_WHY).length === 2, 'CONTROL setup: the place rules decide in ONE place (placeHit), read once each');
   const OLD_CASE = [
@@ -833,6 +833,74 @@ console.log('⑭ notify-rules-r2: regex rules judged at save, matched on the fol
   const vend = previewBody(ASRC).replace('await store.search(adapterId, q,', 'await vendorSearch(adapterId, q,');
   const unb = previewBody(ASRC).replace('limit: PREVIEW_LIMIT, maxBytes: PREVIEW_BYTES,', 'limit: Infinity,');
   ok(!zeroVendor(vend) && !zeroVendor(unb), 'CONTROL ③: a preview over the vendor, or an unbounded one, fails the zero-vendor / bound census above');
+}
+
+console.log('⑮ reply-to-sent: a reply to a message THIS agent sent, in every shape; a group is judged per member');
+{
+  const T = NOW - 3 * 3600e3;
+  const clock = (at) => new Date(at).toISOString().slice(11, 16) + ' UTC';
+  const A = new Map([['om_a1', { at: T, words: 'Can you send the deck?', subject: 'Re: invoice 42' }]]);
+  const KIND = { om_q: { kind: 'quote', topic: null, quotes: 'om_a1' }, om_tr: { kind: 'topic-reply', topic: 'om_a1', quotes: null }, om_qo: { kind: 'quote', topic: null, quotes: 'om_o1' } };
+  const kindOf = (r) => KIND[r.vendorId] || { kind: 'plain', topic: null, quotes: null };
+  const ctxOf = (sentByMe, convKind, extra = {}) => ({ sentByMe, convKind, kindOf, ownerMine: new Set(['om_o1']), threadOf: () => [], ...extra });
+  const R = { kind: 'reply-to-sent' };
+  const rec = (vendorId, at, more = {}) => ({ vendorId, at, text: 'ok', author: { id: 'u_rowan', name: 'Rowan' }, ...more });
+  const hitOf = (F0, r, ctx) => F0.matchRecord({ match: 'any', rules: [R] }, r, ctx);
+  // Rowan's p2p Lark chat: A sent at T
+  const dm5 = hitOf(F, rec('om_p1', T + 5 * 60e3), ctxOf(A, 'dm'));
+  ok(dm5.hit && dm5.why[0] === 'the next message after yours in a direct chat' && dm5.sent && dm5.sent.at === T && dm5.sent.words === 'Can you send the deck?', 'DM: the peer\'s plain message 5 min after A\'s send ⇒ a hit for A, the why names the shape and the answered message rides `sent`', J2(dm5));
+  ok(!hitOf(F, rec('om_p1', T + 5 * 60e3), ctxOf(new Map(), 'dm')).hit, 'DM: agent B, who never sent here (its own empty sentByMe), is not hit');
+  ok(!hitOf(F, rec('om_p2', T + 2 * 86400e3), ctxOf(A, 'dm')).hit && F.REPLY_WINDOW_MS === 24 * 3600e3, 'DM: a peer message 2 days later is no reply (REPLY_WINDOW_MS = 24 h)');
+  const q = hitOf(F, rec('om_q', T + 60e3, { replyTo: 'om_a1' }), ctxOf(A, 'dm'));
+  ok(q.hit && q.why[0] === `quotes your message of ${clock(T)}`, 'a QUOTE of A\'s message ⇒ the quote why with its clock', J2(q.why));
+  ok(!hitOf(F, rec('om_qo', T + 60e3, { replyTo: 'om_o1' }), ctxOf(A, 'group')).hit && F.matchRecord({ rules: [{ kind: 'reply-to-mine' }] }, rec('om_qo', T + 60e3, { replyTo: 'om_o1' }), ctxOf(A, 'group')).hit, 'the OWNER\'s own message quoted ⇒ reply-to-sent silent (ownerMine is never a send), reply-to-mine still fires');
+  // a Gmail thread: the conversation IS the thread
+  const g1 = hitOf(F, rec('m_r1', T + 3600e3), ctxOf(A, 'thread'));
+  ok(g1.hit && g1.why[0] === 'in the thread of your mail "Re: invoice 42"', 'mail: the customer\'s reply in the thread of A\'s mail ⇒ hit naming the mail', J2(g1.why));
+  ok(!hitOf(F, rec('m_old', T - 60e3), ctxOf(A, 'thread')).hit && !hitOf(F, rec('m_new', T + 3600e3), ctxOf(new Map(), 'thread')).hit, 'mail: a message OLDER than the send, or a new unrelated mail (another thread: nothing sent there) ⇒ no hit');
+  // a Lark topic (today's reply-to-mine shape): both kinds fire, each named once
+  const both = F.matchRecord({ match: 'any', rules: [{ kind: 'reply-to-mine' }, R] }, rec('om_tr', T + 60e3, { replyTo: 'om_a1', root: 'om_a1', threadKey: 'om_a1' }), ctxOf(A, 'group'));
+  ok(both.hit && both.why.length === 2 && both.why[0] === 'a reply to a message of yours' && both.why[1] === `replies in the thread of your message of ${clock(T)}`, 'topic: a reply under A\'s topic root ⇒ reply-to-mine AND reply-to-sent, one why each', J2(both.why));
+  const sl = hitOf(F, rec('171.2', T + 60e3, { threadKey: 'om_a1', root: 'om_a1' }), ctxOf(A, 'group', { kindOf: () => ({ kind: 'plain' }) }));
+  ok(sl.hit && /^replies in the thread of your message of /.test(sl.why[0]), 'Slack: a thread reply under A\'s root ⇒ hit (no classifier needed)');
+  ok(!hitOf(F, rec('om_a1', T + 60e3, { replyTo: 'om_a1' }), ctxOf(A, 'dm')).hit, 'the sent message itself (its echo in the log) is never a reply to it');
+  ok(!hitOf(F, rec('om_p1', T + 5 * 60e3), { convKind: 'dm', mine: new Set(['om_a1']) }).hit, 'the legacy `ctx.mine` is NOT read by reply-to-sent (sentByMe only)');
+  // the hand-over line
+  const blk = F.renderWakeBlock({ adapterLabel: 'Lark', title: 'Rowan', convId: 'oc_1', hits: [{ record: rec('om_p1', T + 5 * 60e3), why: dm5.why, sent: dm5.sent }] });
+  ok(/\nReply to your message \([^)]*, "Can you send the deck\?"\): from Rowan at /.test(blk), 'the hand-over: the hit\'s line BEGINS "Reply to your message (<when>, <first words>): …"', blk.split('\n').slice(0, 4).join(' | '));
+  ok(F.validateRule(R).ok && F.ruleWhy(R) === 'a reply to a message this agent sent' && F.PLACE_RULE_KINDS.includes('reply-to-sent'), 'the kind validates bare, is a PLACE rule, words its rule why');
+  // the words, zh / ja
+  const WORDS = fs.readFileSync(path.join(REPO, 'src/lib/channel-words.js'), 'utf-8');
+  const keys = ['is a reply to a message this agent sent', 'a reply to a message this agent sent', 'the next message after yours in a direct chat', 'quotes your message of {when}', 'replies in the thread of your message of {when}', 'in the thread of your mail "{subject}"', 'Set this on a group to cover each of its agents for their own sends — a reply notifies only the agent whose message it answers.'];
+  const tables = ['i18n-zh.js', 'i18n-ja.js'].map((n) => fs.readFileSync(path.join(REPO, 'src/lib', n), 'utf-8'));
+  const missing = keys.filter((k) => !tables.every((tb) => tb.includes(JSON.stringify(k) + ':')));
+  ok(!missing.length, 'zh + ja carry every word of the kind (label, note, the four shape whys)', J2(missing));
+  ok(Object.values(F.SENT_WHYS).every((w) => WORDS.includes(w.replace(/\{\w+\}/, '').split('{')[0].replace(/"$/, '').slice(0, 20))), 'channel-words wakeWhyText reads every shape template');
+  // a GROUP row is judged PER MEMBER (the fan-out): A and B each their own item, C (not a member) none
+  const gw = { principal: { kind: 'group', id: 'g1', name: 'Work' }, mode: 'filtered', filterId: 'f1', notify: 'wake' };
+  const live = [{ cid: 'A', name: 'a', groups: ['g1'] }, { cid: 'B', name: 'b', groups: ['g1'] }, { cid: 'C', name: 'c', groups: [] }];
+  const fOnly = { match: 'any', rules: [R] }, fMix = { match: 'any', rules: [R, { kind: 'keyword', value: 'x' }] };
+  const fo = (F0, f) => F0.fanOutWatchers({ access: [], watchers: [{ watcher: gw, source: 'conversation' }] }, live, { filterOf: () => f });
+  const e1 = fo(F, fOnly), e2 = fo(F, fMix);
+  const keysOf = (e) => e.watchers.map((x) => F.principalKey(x.watcher.principal) + (x.split ? '/' + x.split : ''));
+  ok(J2(keysOf(e1)) === J2(['group:g1>A/sent', 'group:g1>B/sent']), 'group + reply-to-sent only ⇒ one item per live MEMBER (own key), never the group round-robin', J2(keysOf(e1)));
+  ok(J2(keysOf(e2)) === J2(['group:g1/rest', 'group:g1>A/sent', 'group:g1>B/sent']) && J2(F.splitFilter(fMix, 'rest').rules) === J2([{ kind: 'keyword', value: 'x' }]) && J2(F.splitFilter(fMix, 'sent').rules) === J2([R]), 'group + a keyword beside it ⇒ the keyword stays the group\'s one item, the sent half per member', J2(keysOf(e2)));
+  ok(J2(F.fanOfKey('group:g1>A')) === J2({ root: 'group:g1', cid: 'A' }) && F.fanTargetOf(e1.watchers[0].watcher.principal) === 'A' && F.rowNames({ principal: e1.watchers[0].watcher.principal }, { kind: 'agent', id: 'B', groups: ['g1'] }) === false, 'a member item is keyed and named for its member alone (B is not A\'s item)');
+  ok(fo(F, { match: 'any', rules: [{ kind: 'keyword', value: 'x' }] }).watchers.length === 1, 'a group row WITHOUT the kind keeps today\'s one round-robin item');
+  // ── THE THREE CONTROLS (patched copies; the legs above would go RED) ──
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const M = mutantCopies('chan-filter-rts', REPO);
+  const FSRC = fs.readFileSync(path.join(REPO, 'src/channel-filter.js'), 'utf-8');
+  const C1 = "  if (ctx.convKind === 'dm' && at - Number(newest.at) <= REPLY_WINDOW_MS) return { why: SENT_WHYS.dm, sent: newest };";
+  const C2 = "  const sent = ctx && ctx.sentByMe instanceof Map ? ctx.sentByMe : null;";
+  const C3 = "    if (perMember(item.watcher)) {";
+  ok([C1, C2, C3].every((c) => FSRC.split(c).length === 2), 'control setup: the DM clause, the sentByMe read and the per-member fan-out are each one line');
+  const F1 = M.load('src/channel-filter.js', FSRC.replace(C1, ''), 'dm-ignored');
+  ok(!hitOf(F1, rec('om_p1', T + 5 * 60e3), ctxOf(A, 'dm')).hit, 'CONTROL ①: a copy that ignores a direct chat\'s next message misses Rowan\'s answer — the DM leg goes RED');
+  const F2 = M.load('src/channel-filter.js', FSRC.replace(C2, "  const sent = new Map([...(ctx && ctx.sentByMe instanceof Map ? ctx.sentByMe : []), ...[...((ctx && ctx.ownerMine) || [])].map((v) => [v, { at: 0, words: '' }])]);"), 'owner-as-sent');
+  ok(hitOf(F2, rec('om_qo', T + 60e3, { replyTo: 'om_o1' }), ctxOf(A, 'group')).hit, 'CONTROL ②: a copy counting the owner\'s messages as the agent\'s sends hits the owner\'s quote — the ownerMine leg goes RED');
+  const F3 = M.load('src/channel-filter.js', FSRC.replace(C3, '    if (false) {'), 'group-round-robin');
+  ok(J2(fo(F3, fOnly).watchers.map((x) => F3.principalKey(x.watcher.principal))) === J2(['group:g1']), 'CONTROL ③: a copy without the per-member fan-out hands the group ONE round-robin item — the member legs go RED');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

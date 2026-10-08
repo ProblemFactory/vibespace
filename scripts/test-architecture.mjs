@@ -2785,6 +2785,7 @@ console.log('§62 every path where the user names a window goes through wm.revea
     'src/lib/design-window.js': [1, 'the Design window\'s one-per-(host, dir) re-open (a replay passes { replay })'],
     'src/lib/search-window.js': [1, 'Search everything\'s singleton re-open (a replay passes { replay }; a new query rides it)'],
     'src/lib/doc-window.js': [1, 'the Doc window\'s one-per-(host, path) re-open (a replay passes { replay })'],
+    'src/lib/artifacts-window.js': [1, 'the Artifacts window\'s one-per-conversation re-open (lane artifacts-list-scale; a replay passes { replay })'],
     'src/lib/design-home.js': [1, 'the Design window home\'s one-per-client re-open (a replay passes { replay }) — lane design-systems-home'],
     'src/lib/machine-desktop.js': [1, 'a machine\'s whole-desktop window: one per machine per page, a second open reveals it — design 014 D1'],
     'src/lib/desktop-app-window.js': [2, 'the singleton re-open (a replay passes { replay }) + a satellite the app just opened, in front — design 016 S2'],
@@ -2872,6 +2873,8 @@ console.log('§63 every agent channel route that touches a conversation records 
   const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:\\'"`])\/\/.*$/gm, '$1');
   const EXEMPT = {
     'GET /api/agent/channels/list': 'enumerates the conversations the agent may see — it reads none of them',
+    // lane agent-watch-parity: the read-back of the caller's own notification rows (`watch --show`, `watches`)
+    'GET /api/agent/channels/watches': 'reads back the notification rows that name the caller — no message of any conversation is read',
     // the .195 merge (lane channel-withdraw beside this census): the drafter takes back its OWN undecided draft by proposal
     // id — it reads no conversation and drafts nothing; the draft's card says it was withdrawn and by whom, and the draft
     // itself was recorded as a `reply` / `compose` touch when it was made
@@ -4161,7 +4164,7 @@ console.log('§76c a channel vendor is its folder + one list line: the three der
 console.log('§79 the channels engine\'s families meet only through its one context object');
 {
   const FAM_REQ = {
-    'src/server/channels-access.js': ['../channel-acl.js', '../channel-caps.js', '../channel-filter.js', '../channel-policy.js', '../channel-search.js', '../channels/index.js', '../peer-text.js', 'crypto'],
+    'src/server/channels-access.js': ['../channel-acl.js', '../channel-caps.js', '../channel-filter.js', '../channel-policy.js', '../channel-search.js', '../channel-watch-spec.js', '../channels/index.js', '../peer-text.js', 'crypto'],
     'src/server/channels-outbound.js': ['../channel-acl.js', '../channel-caps.js', '../channel-drain.js', '../channel-filter.js', '../channel-outbox-files.js', '../channel-policy.js', '../channel-ref.js', '../channel-thread.js', '../channels/index.js', '../peer-text.js'],
     'src/server/channels-auth.js': ['../channel-acl.js', '../channel-caps.js', '../channel-filter.js', '../channel-identity.js', '../channel-outbox-files.js', '../channel-policy.js', '../channels/index.js', '../integration-registry.js', './integration-store.js', 'crypto'],
   };

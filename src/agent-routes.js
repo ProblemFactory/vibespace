@@ -1832,6 +1832,7 @@ const touchChannel = (id, touches) => { try { const w = getTouches(); if (w && t
 const chanAnswer = (res, r) => {
   if (r && r.ok) return res.json(r);
   const code = (r && r.code) || 'error';
+  if (r && r.badSpec) return res.status(400).json({ ...r, error: r.error || 'refused', code });   // lane agent-watch-parity: a watch row the dialog's validators refuse (src/channel-watch-spec.js) — a request to fix, never a retry
   const status = code === 'not-found' ? 404 : code === 'not-yours' ? 403 : code === 'send-not-available' || code === 'account-changed' || code === 'compose-not-available' || code === 'not-withdrawable' ? 409 : code === 'refresh-queue-full' || code === 'rate-floor' || code === 'refresh-floor' || code === 'vendor-budget' || code === 'backoff' ? 429 : code === 'bad-proposal' || code === 'bad-request' || code === 'bad-filter' ? 400 : code === 'stopped' ? 503 : code === 'no-access' ? 403 : code === 'not-watching' ? 404 : code === 'watcher-needs-access' ? 400 : 500;   // r5: the request set's cap is a 429 with its wait; an account changed mid-wait a 409; the engine stopping a 503; R4: an adapter that cannot start a conversation a 409; 2026-09-27: somebody else's proposal a 403, one past withdrawing a 409
   if (r && r.retryAfterSec) res.setHeader('Retry-After', String(r.retryAfterSec));
   return res.status(status).json({ ...(r || {}), error: (r && r.error) || 'refused', code });
@@ -2153,7 +2154,7 @@ const watchVerb = async (verb, req, res) => {
   try {
     const ctx = channelPrincipal(s, id);
     const r = verb === 'watch'
-      ? await eng.agentWatch(ctx, b.target, { delivery: b.delivery, keywords: Array.isArray(b.keywords) ? b.keywords.slice(0, 10).map(String) : [], dailyWakeCap: b.dailyWakeCap, why: typeof b.why === 'string' ? b.why : '' })
+      ? await eng.agentWatch(ctx, b.target, b)   // lane agent-watch-parity: the body WHOLE to the engine's one grammar (src/channel-watch-spec.js) — no schema here
       : await eng.agentUnwatch(ctx, b.target);
     const key = splitConvKey(b.target);
     chanAnswer(res, r);
@@ -2162,6 +2163,18 @@ const watchVerb = async (verb, req, res) => {
 };
 app.post('/api/agent/channels/watch', async (req, res) => { const t = await watchVerb('watch', req, res); if (t) touchChannel(t.id, t.touches); });   // §26 (B-099e): a conversation watched is a conversation touched
 app.post('/api/agent/channels/unwatch', async (req, res) => { const t = await watchVerb('unwatch', req, res); if (t) touchChannel(t.id, t.touches); });
+// lane agent-watch-parity: READ BACK — `watch --show <conv|account>` (?target=) / `watches` (none): the rows that notify
+// THIS agent (its own; the user's for it, read-only), its open wake ask, the user's removal mark
+app.get('/api/agent/channels/watches', (req, res) => {
+  const hit = agentSession(req, res);
+  if (!hit) return;
+  if (!integrationOnMaster()) return res.status(403).json({ error: 'VibeSpace integration is off' });
+  const eng = channelsEngine();
+  if (!eng || typeof eng.agentWatchesFor !== 'function') return res.status(503).json({ error: 'Channels are not available on this instance', code: 'unavailable' });
+  const [s, id] = hit;
+  try { chanAnswer(res, eng.agentWatchesFor(channelPrincipal(s, id), typeof req.query.target === 'string' && req.query.target.trim() ? req.query.target.trim() : null)); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
 // B-2198 THE RAW API PASS-THROUGH (docs/design-channel-raw-api.md): the agent sends a raw vendor call — method + PATH —
 // and VibeSpace adds the credential's token server-side; src/server/channel-api.js holds the tier (asked again after
 // every await), the fence, the budget, the ONE fetch, the belt and the audit ring. A write under "ask each" and every

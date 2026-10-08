@@ -50,13 +50,14 @@ export class ChatStatusBar {
    * @param {function} opts.openInTempEditor - (text) => void
    * @param {function} [opts.startReview] - ({ target, delivery }) => void
    */
-  constructor(ws, sessionId, { backend = 'claude', allowReview = false, getToolMsg, openSubagentViewer, openInTempEditor, startReview, onConfigChange, onOpenWorkflow, getWorkflowIds, onWorkflowVerdict = null, onDesignRequest = null, onOpenDesign = null, onPublishDesign = null, onRestartSession = null, onSearch = null, onBrowserAction = null, onJumpToAsk = null, onChannelOpen = null, onOpenArtifact = null }) {
+  constructor(ws, sessionId, { backend = 'claude', allowReview = false, getToolMsg, openSubagentViewer, openInTempEditor, startReview, onConfigChange, onOpenWorkflow, getWorkflowIds, onWorkflowVerdict = null, onDesignRequest = null, onOpenDesign = null, onPublishDesign = null, onRestartSession = null, onSearch = null, onBrowserAction = null, onJumpToAsk = null, onChannelOpen = null, onOpenArtifact = null, app = null, onOpenArtifactsWindow = null }) {
     this._ws = ws;
     // §26 (B-099e): the conversations THIS TURN read or drafted (PURE chipView over the witness's ring — the
     // view hands it over) and the one door that opens one; null = the turn touched nothing (no chip)
     this._channelTouch = null;
     this._artifacts = null; // lane artifacts-model: the conversation's deliverables (GET /api/artifacts — view(rows)); null = none yet
     this._onOpenArtifact = onOpenArtifact;
+    this._app = app; this._onOpenArtifactsWindow = onOpenArtifactsWindow; // lane artifacts-list-scale: the list's ⋯ doors + the ⤢ window
     this._onChannelOpen = onChannelOpen;
     // lane S1: the waiting chip names WHO waits (the server's pending asks, oldest
     // first) and its click goes there — null = the view cannot jump (no chip click)
@@ -180,7 +181,12 @@ export class ChatStatusBar {
    *  something to say (a pin, or a use); amber when the two halves differ. */
   setBrowserProfile(v) { this._browserProfile = v && v.key && v.fact && v.words ? v : null; this.render(); } // lane S2: {key, fact, words} — THE browser fact and its words
   /** §26 (B-099e): the turn's touched conversations `{rows, latest}` (PURE chipView) or null. */
-  setArtifacts(v) { this._artifacts = v && v.ok && ((v.count || 0) + (v.codeCount || 0)) > 0 ? v : null; this.render(); }
+  setArtifacts(v) {
+    this._artifacts = v && v.ok && ((v.count || 0) + (v.codeCount || 0)) > 0 ? v : null;
+    this.render();
+    const open = this._artifacts && (this._popupContainer || this._element?.parentElement)?.querySelector?.('.chat-artifacts-panel'); // lane artifacts-list-scale: an open list follows, patched in place
+    if (open && open._afList) open._afList.update(this._artifacts);
+  }
   setChannelTouches(v) { this._channelTouch = v && v.latest && Array.isArray(v.rows) && v.rows.length ? v : null; this.render(); }
   /** Billing identity chip (mobile — windows have no title bar there, so the
       title-bar badge's click-to-switch has no home; this is its stand-in). */
@@ -1308,9 +1314,11 @@ export class ChatStatusBar {
     const afEl = e.target.closest('.chat-status-artifacts');
     if (afEl && this._artifacts) {
       e.stopPropagation();
-      const dropdown = showDropdown(afEl, { minWidth: 260, maxWidth: 440 });
+      const dropdown = showDropdown(afEl, { minWidth: 300, maxWidth: 420 });
       if (!dropdown) return;
-      renderArtifactList(dropdown, this._artifacts, { onOpen: (b) => this._onOpenArtifact?.(b), close: () => dropdown.remove() });
+      // lane artifacts-list-scale (design 021 E1): BOUNDED — the room above the chip in its container (layout px) caps the panel; it scrolls inside
+      dropdown.style.setProperty('--af-room', Math.max(160, (afEl.getBoundingClientRect().top - container.getBoundingClientRect().top) / uiScale() - 8) + 'px'); // the room above the chip INSIDE its container (a chat window clips what rises past its top)
+      renderArtifactList(dropdown, this._artifacts, { onOpen: (b) => this._onOpenArtifact?.(b), close: () => dropdown.remove(), app: this._app, onExpand: this._onOpenArtifactsWindow ? () => this._onOpenArtifactsWindow() : null });
       return;
     }
     // Channels chip (§26) -> the turn's conversations, drafted first; ONE conversation opens at once

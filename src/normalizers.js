@@ -43,9 +43,11 @@ function feedLive(session, msg) {
   if (!session?._normalizer) return;
   if (session._rebuildQueue) { session._rebuildQueue.push({ kind: 'live', msg }); return; }
   const v0 = session._normalizer.pendingAsksVersion;
+  const p0 = session._normalizer.permissionOpsVersion; // lane parked-ask-inbox: codex / ACP keep no pending level — a permission op is their change
   session._normalizer.processLive(msg);
   routeToHelperView(session, msg);
   if (session._normalizer.pendingAsksVersion !== v0) notifyAsks(session);
+  else if (v0 === undefined && session._normalizer.permissionOpsVersion !== p0) notifyAsks(session);
 }
 
 // ── A HELPER'S PERMISSION ASK (lane S1, B-6e95) ────────────────────────────
@@ -136,9 +138,13 @@ function seedHelperViews(session) {
  *  inbox): told whenever a normalizer's pending set changed. ONE slot. */
 let asksObserver = null;
 function setAsksObserver(fn) { asksObserver = typeof fn === 'function' ? fn : null; }
+/** lane parked-ask-inbox: the MAIN asks' observer (src/server/main-asks.js) beside the helpers' slot. */
+const moreAsksObservers = new Set();
+function addAsksObserver(fn) { if (typeof fn === 'function') moreAsksObservers.add(fn); }
 function notifyAsks(session) {
-  if (!asksObserver || !session) return;
-  try { asksObserver(session); } catch (e) { console.warn('[normalizer] pending-asks observer failed:', e.message); }
+  if (!session) return;
+  if (asksObserver) { try { asksObserver(session); } catch (e) { console.warn('[normalizer] pending-asks observer failed:', e.message); } }
+  for (const fn of moreAsksObservers) { try { fn(session); } catch (e) { console.warn('[normalizer] pending-asks observer failed:', e.message); } }
 }
 
 /** Peer cards (Background Work notify, vibespace-msg, auto-resume notices)
@@ -668,7 +674,7 @@ function rebuildHistory(session, sessionId, records, { budgetMs, onProgress, rep
   return turn;
 }
 
-module.exports = { createMessageManager, NORMALIZERS, feedLive, feedPeerCard, rebuildHistory, taskReplayRecords, pendingPermissions, pendingHelperApprovals, notePermissionStale, routeToHelperView, seedHelperView, setAsksObserver, noteHelperResults, HELD_PEER_CARDS_CAP,
+module.exports = { createMessageManager, NORMALIZERS, feedLive, feedPeerCard, rebuildHistory, taskReplayRecords, pendingPermissions, pendingHelperApprovals, notePermissionStale, routeToHelperView, seedHelperView, setAsksObserver, addAsksObserver, noteHelperResults, HELD_PEER_CARDS_CAP,
   setBrowserCardSource, browserCardsFor, placeBrowserCard, convertWithCards, feedBrowserCard,
   setProposalCardSource, placeProposalCard, patchProposalCard, feedProposalCard,
   placeArtifactCard, patchArtifactCard, feedArtifactCard, artifactCardId, artifactDeriveOpts, setArtifactStoreSource, setArtifactHelperSource, artifactStoreRows, setArtifactServiceSource, // lane artifacts-model: the deliverable card // lane browser-propose: the proposal card

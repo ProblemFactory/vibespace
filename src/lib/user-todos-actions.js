@@ -106,7 +106,7 @@ export function inboxModel(app) {
       else app.attachSession(s.webuiId, s.webuiName || displayName(s), s.cwd, { mode: s.webuiMode });
       // A HELPER's ask (lane S1): land ON the card that waits, not just in its conversation.
       // A window opened just now learns its asks from the attach — retried for a few seconds.
-      if (item?.action?.type === 'helper-ask' && item.action.requestId) {
+      if ((item?.action?.type === 'helper-ask' || item?.action?.type === 'main-ask') && item.action.requestId) { // lane parked-ask-inbox: a conversation's own ask too
         const rid = item.action.requestId;
         let n = 0;
         const tryJump = () => {

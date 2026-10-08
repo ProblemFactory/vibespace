@@ -36,8 +36,10 @@ vibespace-channels search "words" [--account <id>] [--limit N] [--full]
 vibespace-channels read <conv> --around <msg id> # the vendor's messages around a message --full found (not saved)
 vibespace-channels status [<proposalId>]         # what you were given (access / notification) + your proposals
 vibespace-channels request <conv> "why"          # ask for access (requestable rows only)
-vibespace-channels watch <conv|account> [--mode next-turn|wake] [--keyword "w"[,"w2"]] [--cap N] [--why "…"]
-                                                 # YOUR notification on what you can read (next-turn = free, at once; wake = the user approves)
+vibespace-channels watch <conv|account> [--mode next-turn|wake|digest] [rule flags…] [--match any|every] [--cap N] [--why "…"]
+                                                 # YOUR notification on what you can read (next-turn = free, at once; wake / digest = the user approves)
+vibespace-channels watch --show <conv|account>   # what notifies you there: yours + the user's for you (read-only)
+vibespace-channels watches                       # every place something notifies you, one line each
 vibespace-channels unwatch <conv|account>        # remove YOUR notification there
 ```
 
@@ -244,22 +246,48 @@ The user gives you two DIFFERENT things, in this order:
   kind, member count and last activity — never a message, never a name beyond
   the title — each marked `requestable`. `request <conv> "why"` works on them.
 - **Watching on your own (`watch`).** On a conversation you can READ (or a whole
-  account you have access to) you may ask to be told about new messages:
-  `watch <conv>` (every message) or `watch <conv> --keyword deploy,incident`
-  (any of the words). `--mode next-turn` (the default) is FREE and set at once:
-  the news rides your next turn, nothing wakes you. `--mode wake` is a billed
-  turn, so it is NOT yours to set: it files ONE request in the user's For you
-  tray naming exactly what Approve writes (the words, `--cap` wakes a day);
-  until they approve, nothing wakes you. Ask for `--mode wake` ONLY when the
-  user asked to be told at once (or to act on those messages immediately);
-  otherwise next-turn. You may hold at most 20 notifications of your own and
-  2 wake asks waiting; a notification the user REMOVED in Notify… stays
-  removed — `watch` there is refused by name (ask them, or file a wake ask
-  they approve). Your row shows in the user's Notify…
-  as "set by the agent"; a notification the USER set for you is theirs — `watch`
-  never replaces it (it says so), `unwatch` removes only your own. A watch
-  never lets you read anything: a conversation you cannot read is refused with
-  the `request` to file first. `--regex` is not offered (use `--keyword`).
+  account you have access to) you may ask to be told about new messages — with
+  the SAME rules the user has in Notify…, judged by the same validators (a rule
+  they could not save, you are refused with the same words and `[code]`):
+  - how: `--mode next-turn` (the default) is FREE and set at once: the news
+    rides your next turn, nothing wakes you. `--mode wake` (right away) and
+    `--mode digest [--digest-minutes N]` (one batch per N minutes, default 30)
+    are billed turns, so they are NOT yours to set: each files ONE request in
+    the user's For you tray naming exactly what Approve writes (the rules, the
+    window, `--cap N` wakes a day); until they approve, nothing wakes you. Ask
+    for wake/digest ONLY when the user asked to be told at once (or to act on
+    those messages immediately); otherwise next-turn.
+  - what (no rule = every new message; several rules = any of them, or all of
+    them with `--match every`): `--keyword w[,w]` · `--regex "pattern"` (judged
+    at save: ≤ 256 characters, no backreference / lookaround / nested or
+    side-by-side repeats, never matching an empty message — refused by name
+    with the piece; matched case-insensitively) · `--mention name[,name]` ·
+    `--from address[,address]` · `--subject "words"` ·
+    `--sender-in-group id[,id]` · `--has-attachment` · `--not-contains w[,w]` ·
+    `--time-window HH:MM-HH:MM [--tz-offset ±minutes]` · `--reply-to-mine` ·
+    `--in-thread-with-me` · `--reply-to-sent` (a reply to a message YOU sent;
+    refused as `not-on-this-version` where the server lacks it).
+  - the whole row as JSON: `--spec '{"notify":"digest","digestMinutes":60,
+    "filter":{"match":"every","rules":[{"kind":"regex","value":"^deploy"},
+    {"kind":"has-attachment"}]},"dailyWakeCap":10}'` or `--spec @row.json`
+    (the shape `watch --show` prints; only `--why` may stand beside it).
+  - examples: `watch lark/oc_1 --regex "^(deploy|rollback) v\d+"` ·
+    `watch gmail --from billing@x.io --has-attachment --match every` ·
+    `watch lark/oc_ops --reply-to-sent` — in a group each member session holds
+    its OWN row (the group's access covers you; the replies are to what you sent).
+  - read back: `watch --show <conv|account>` prints your row there (how, the
+    rules in words, the cap, the digest window), a wake ask still waiting, a
+    removal by the user — AND, read-only, the rows the USER set for you, your
+    group or all agents ("set by the user — yours to read, theirs to change").
+    `watches` lists every place something notifies you. A rule over
+    conversations (a pattern) is the user's to set — ask them.
+  You may hold at most 20 notifications of your own and 2 wake asks waiting; a
+  notification the user REMOVED in Notify… stays removed — `watch` there is
+  refused by name (ask them, or file a wake ask they approve). Your row shows in
+  the user's Notify… as "set by the agent"; a notification the USER set for you
+  is theirs — `watch` never replaces it (it says so), `unwatch` removes only
+  your own. A watch never lets you read anything: a conversation you cannot
+  read is refused with the `request` to file first.
 - **Access on the whole account counts.** Access the user gave you on the
   whole account (or through a rule, or an approved request) is access on each
   of its conversations — a notification on one chat needs nothing more.

@@ -53,11 +53,11 @@ if (!fs.existsSync(path.join(repo, 'src/lib/build-version.js'))) {
 //   browser-replay — a conversation's (or a profile's) browser SESSIONS and their replay, one window per target (2026-09-27)
 //   design — the Design window: a conversation's designs/<slug>/ artboards live on a canvas, one window per (host, dir) (lane design-window, 2026-10-02)
 //   doc — the Doc window: a markdown file read, edited and commented in one rendered view, one window per (host, path) (lane doc-window, 2026-10-05)
-const CORE_TYPES = ['browser', 'browser-live', 'browser-profiles', 'browser-replay', 'channel', 'channel-outbox', 'channels', 'chat', 'design', 'desktop', 'doc', 'desktop-app', 'editor', 'files', 'hex-viewer', 'inbox', 'integrations', 'job-interact', 'jobs',
+const CORE_TYPES = ['artifacts', 'browser', 'browser-live', 'browser-profiles', 'browser-replay', 'channel', 'channel-outbox', 'channels', 'chat', 'design', 'desktop', 'doc', 'desktop-app', 'editor', 'files', 'hex-viewer', 'inbox', 'integrations', 'job-interact', 'jobs',
   'machine-desktop', 'ports', 'search', 'settings', 'stage-placeholder', 'system', 'task', 'terminal', 'usage', 'viewer', 'workflow']; // + search (lane global-search)
 const CORE_ACTIONS = ['attachSession', 'openFileExplorer', 'openFile', 'openEditor', 'openBrowser', 'openBrowserLive', 'openBrowserProfiles', 'openDesktop', 'openDesktopApp',
   'openTaskDetail', 'openTaskLog', 'openJobs', 'openJobInteract', 'openUsage', 'openSettings', 'openSessionProps',
-  'openWorkflowDetail', 'attachTmuxSession', 'viewSession', 'viewSubagent', 'openChannel', 'openChannelOutbox', 'openIntegrations', 'openChannels', 'openSystem', 'openPorts', 'openInbox', 'openBrowserReplay', 'openDesign', 'openDoc', 'openSearch'];
+  'openWorkflowDetail', 'attachTmuxSession', 'viewSession', 'viewSubagent', 'openChannel', 'openChannelOutbox', 'openIntegrations', 'openChannels', 'openSystem', 'openPorts', 'openInbox', 'openBrowserReplay', 'openDesign', 'openDoc', 'openSearch', 'openArtifacts'];
 // layout.js's former `TRANSIENT_WINDOW_TYPES = new Set(['chat', 'terminal', 'stage-placeholder'])`
 const CORE_TRANSIENT = ['chat', 'terminal', 'stage-placeholder', 'machine-desktop']; // + design 014 D1: a machine's whole desktop is never re-opened by a reload (it asks the sign-in)
 // kinds whose opener focuses an existing window of the kind instead of opening a second
@@ -247,7 +247,7 @@ const EXPECTED_OWNER = { chat: 'session-lifecycle.js', terminal: 'session-lifecy
   'machine-desktop': 'machine-desktop.js', // design 014 D1
   task: 'task-detail.js', jobs: 'jobs-panel.js', 'job-interact': 'jobs-panel.js', usage: 'usage-window.js',
   settings: 'settings-ui.js', workflow: 'workflow-detail.js', 'stage-placeholder': 'stage-manager.js', integrations: 'integrations-window.js',
-  channels: 'channels-panel.js', system: 'sidebar-rail.js', ports: 'sidebar-rail.js', inbox: 'inbox-window.js', 'browser-replay': 'browser-replay-window.js', design: 'design-window.js', doc: 'doc-window.js' };
+  channels: 'channels-panel.js', system: 'sidebar-rail.js', ports: 'sidebar-rail.js', inbox: 'inbox-window.js', 'browser-replay': 'browser-replay-window.js', design: 'design-window.js', doc: 'doc-window.js', artifacts: 'artifacts-window.js' };
 ok(Object.entries(EXPECTED_OWNER).every(([t, f]) => owner[t] === f), 'each kind registers in its owning module',
   Object.entries(EXPECTED_OWNER).filter(([t, f]) => owner[t] !== f).map(([t, f]) => `${t}: ${owner[t]} (expected ${f})`).join('; '));
 ok(regs.some((r) => r.file === 'task-log.js' && r.fn === 'registerOpenAction' && r.actions.includes('openTaskLog') && r.type === 'task')

@@ -289,6 +289,7 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
     global.__vsEvent?.('session-exited', `${session.mode}/${session.backend || 'claude'}${childCode != null ? '/code=' + childCode : ''}${exitReason ? '/' + exitReason : ''}${facts.eventSuffix}`);
     broadcastToSession(session, id, { type: 'exited', sessionId: id, reason: exitReason, detail: death?.detail, ...(facts.signal ? { signal: facts.signal } : {}) });
     try { require('./helper-asks').forget(session); } catch { } // lane S1 verify r1: a dead parent's helper asks wait for nobody — timers cleared, For-you items resolved
+    try { require('./main-asks').forget(session); } catch { } // lane parked-ask-inbox: a dead conversation's own asks wait for nobody
     try { exitProxyRef.onSessionEnd?.(session, id); } catch { } // verify-r2: its exit pairs are dropped with their connections, its waiting asks settled
     activeSessions.delete(id);
     if (cleanupOnExit && session.sockName) deleteSessionMeta(session.sockName);

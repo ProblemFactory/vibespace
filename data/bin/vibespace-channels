@@ -175,10 +175,15 @@ const USAGE = `vibespace-channels — read connected channels, PROPOSE replies (
                                                    ← messages you can see (the stored logs; no vendor call)
   vibespace-channels status [<proposalId>]         ← what you were given (access / notification) + your proposals
   vibespace-channels request <conv> "why"          ← ask the user for access (only on a 'requestable' row)
-  vibespace-channels watch <conv|account> [--mode next-turn|wake] [--keyword "w"[,"w2"]] [--cap N] [--why "…"]
-                                                   ← YOUR notification on what you can read: next-turn (default, free —
-                                                     the news rides your next turn) is set at once; wake (a billed turn now)
-                                                     asks the user, who approves it with one click
+  vibespace-channels watch <conv|account> [--mode next-turn|wake|digest [--digest-minutes N]] [rules…] [--match any|every] [--cap N] [--why "…"]
+                                                   ← YOUR notification on what you can read — the user's Notify… grammar: next-turn
+                                                     (default, free — the news rides your next turn) is set at once; wake / digest
+                                                     (billed turns) ask the user, who approves with one click. rules: --keyword w[,w]
+                                                     --regex "pat" --mention name --from addr --subject "w" --sender-in-group id[,id]
+                                                     --has-attachment --not-contains w --time-window HH:MM-HH:MM [--tz-offset ±min]
+                                                     --reply-to-mine --in-thread-with-me --reply-to-sent; or --spec '<json row>' | @file
+  vibespace-channels watch --show <conv|account>   ← what notifies you there: yours, and the user's for you (theirs to change)
+  vibespace-channels watches                       ← every place something notifies you, one line each
   vibespace-channels unwatch <conv|account>        ← removes YOUR notification there (one the user set is theirs)
   vibespace-channels api creds | docs <cred> | log <cred>   ← the RAW vendor API the user granted you (B-2198)
   vibespace-channels api <cred> METHOD /path [--host h] [--header k:v]… [--json '{…}' | --body @file | --body -] [--out f] [--wait]
@@ -561,21 +566,44 @@ function printReplaced(r) {
     console.log(`(searched what is stored: ${Number(r.covered) || 0} conversation(s) you can see${r.fullOffered ? '; --full asks the account\'s own search' : ''})`);
     return;
   }
+  // lane agent-watch-parity: `watch` = the Notify dialog's grammar — the FLAGS go to the server raw and are parsed there by
+  // src/channel-watch-spec.js (judged by the dialog's own validators; a refusal prints their words + [code]); this file
+  // ships to other machines and parses nothing but `--spec @file` (the file is here). `--show` / `watches` read back.
+  const watchLine = (w) => `${w.how}, on ${w.what}, at most ${w.dailyWakeCap}/day${w.expiresAt ? `, until ${new Date(w.expiresAt).toISOString().slice(0, 16).replace('T', ' ')} UTC` : ''} — ${w.setBy === 'agent' ? 'set by you (unwatch removes it)' : `set by the user${w.as === 'group' ? ` for your group ${w.group}` : w.as === 'everyone' ? ' for all agents' : ' for you'} — yours to read, theirs to change`}`;
+  if (verb === 'watches') {
+    const r = await call('GET', '/api/agent/channels/watches');
+    const ws = r.watches || [];
+    if (!ws.length) console.log('nothing notifies you — `vibespace-channels watch <conv|account>` sets your own (next-turn: free)');
+    for (const w of ws) console.log(`${w.grain === 'pattern' ? `(a rule the user set) ${w.title}` : `${w.target} — ${w.title}${w.grain === 'account' ? ' (the whole account)' : ''}`}\n    ${watchLine(w)}`);
+    if (r.more) console.log(`(${r.more} more)`);
+    for (const q of r.requests || []) console.log(`waiting for the user: ${q.target} — ${q.how}, on ${q.what} (request ${q.id})`);
+    return;
+  }
+  if (verb === 'watch' && args[1] === '--show') args.splice(1, 2, args[2] || '', '--show');   // `watch --show <t>` = `watch <t> --show`
   if (verb === 'watch' || verb === 'unwatch') {
     const target = args[1];
-    if (!target || target.startsWith('--')) { console.error(`usage: vibespace-channels ${verb === 'watch' ? 'watch <conv|account> [--mode next-turn|wake] [--keyword "w"[,"w2"]] [--cap N] [--why "…"]' : 'unwatch <conv|account>'}`); process.exit(1); }
+    if (!target || target.startsWith('--')) { console.error(`usage: vibespace-channels ${verb === 'watch' ? 'watch <conv|account> [--mode next-turn|wake|digest] [rule flags] [--cap N] [--why "…"]   (vibespace-docs channels)' : 'unwatch <conv|account>'}`); process.exit(1); }
     if (verb === 'unwatch') { await call('POST', '/api/agent/channels/unwatch', { target }); console.log(`removed — your notification on ${target} is gone (one the user set stays).`); return; }
-    if (flag('--regex')) { console.error('--regex is not offered: a pattern run over other people\'s messages can stall the server — use --keyword (any of the words matches)'); process.exit(1); }
-    const body = { target, delivery: flag('--mode') || 'next-turn' };
-    if (flag('--keyword')) body.keywords = String(flag('--keyword')).split(',').map((x) => x.trim()).filter(Boolean);
-    if (flag('--cap')) body.dailyWakeCap = Number(flag('--cap'));
-    if (flag('--why')) body.why = flag('--why');
-    const r = await call('POST', '/api/agent/channels/watch', body);
-    const on = (r.keywords && r.keywords.length) ? `messages with: ${r.keywords.join(', ')}` : 'every new message';
+    if (args.includes('--show')) {
+      const r = await call('GET', '/api/agent/channels/watches?target=' + encodeURIComponent(target));
+      console.log(`${r.target} — ${r.title}${r.grain === 'account' ? ' (the whole account)' : ''}`);
+      if (!(r.rows || []).length) console.log('    nothing here notifies you');
+      for (const w of r.rows || []) console.log(`    ${watchLine(w)}`);
+      if (r.request) console.log(`    waiting for the user: ${r.request.how}, on ${r.request.what} (request ${r.request.id})`);
+      if (r.removedByUser) console.log(`    the user removed your own notification here (${new Date(r.removedByUser.at).toISOString().slice(0, 16).replace('T', ' ')} UTC) — theirs to restore; a --mode wake ask goes to them`);
+      return;
+    }
+    const rest = args.slice(2);
+    const k = rest.indexOf('--spec');
+    if (k >= 0 && /^@./.test(rest[k + 1] || '')) {
+      try { rest[k + 1] = require('fs').readFileSync(rest[k + 1].slice(1), 'utf8'); } catch (e) { console.error(`--spec ${rest[k + 1]}: cannot read the file (${e.code || e.message})`); process.exit(1); }
+    }
+    const r = await call('POST', '/api/agent/channels/watch', { target, args: rest });
+    const on = r.what || ((r.keywords && r.keywords.length) ? `messages with: ${r.keywords.join(', ')}` : 'every new message');
     if (r.already && r.setBy === 'user') console.log(r.note);
     else if (r.proposed && r.already) console.log(`a wake request of yours for ${target} is already waiting for the user (${r.request.id}); they decide.`);
-    else if (r.proposed) console.log(`requested — a wake is a billed turn, so the user approves it: their For-you tray shows what Approve writes (at most ${r.dailyWakeCap} wakes a day). Until then nothing wakes you (request ${r.request.id}).`);
-    else console.log(`watching ${r.target}${r.title ? ` (${r.title})` : ''} — ${on} rides your NEXT turn (free; nothing wakes you)${r.replaced ? '; your earlier watch here was replaced' : ''}. Undo: vibespace-channels unwatch ${r.target}`);
+    else if (r.proposed) console.log(`requested — a wake or a digest is a billed turn, so the user approves it: their For-you tray shows what Approve writes (at most ${r.dailyWakeCap} wakes a day). Until then nothing wakes you (request ${r.request.id}).`);
+    else console.log(`watching ${r.target}${r.title ? ` (${r.title})` : ''} — ${on} rides your NEXT turn (free; nothing wakes you)${r.replaced ? '; your earlier watch here was replaced' : ''}. Read back: vibespace-channels watch --show ${r.target} · undo: vibespace-channels unwatch ${r.target}`);
     return;
   }
   // B-2198 THE RAW API PASS-THROUGH (docs/design-channel-raw-api.md): a vendor's OWN API, called raw — VibeSpace adds the

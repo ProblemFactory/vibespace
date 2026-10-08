@@ -58,7 +58,7 @@ const REPLY_HIDDEN_CODES = Object.freeze(['no_session', 'job_item', 'card_item',
 // The action kinds answered by their own buttons on the item (Allow / Deny), never by a typed reply.
 const ANSWER_ACTION_TYPES = Object.freeze(['exit-run-ask']);
 // The action kinds that are answered on a card, never by a typed reply.
-const CARD_ACTION_TYPES = Object.freeze(['helper-ask']);
+const CARD_ACTION_TYPES = Object.freeze(['helper-ask', 'main-ask']); // lane parked-ask-inbox: a conversation's own ask too
 // lane S1 verify r3: what a typed reply DOES to a helper's ask is the ask's own transition table's
 // `reply` row (src/helper-ask.js) — an open item means the ask is still `asked` (the item is released
 // the moment it leaves), and the table says a reply from there REFUSES. This module decides nothing

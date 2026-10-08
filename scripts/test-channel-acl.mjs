@@ -221,6 +221,7 @@ console.log('§2c agents never receive HTML: the agent route census + every agen
     statusFor: 'proposals — the agent\'s / the owner\'s own words; driven below',
     accessFor: 'grains (ids, modes, authority); driven below',
     agentRefresh: 'counts + the conversation\'s key and title — no record',
+    agentWatchesFor: 'notification rows naming the caller (how, rule words, cap) + key / title — no record (lane agent-watch-parity; test-channel-agent-watch ⑩)',
     propose: 'the agent\'s own draft', compose: 'the agent\'s own draft', replaceProposal: 'the agent\'s own draft (replacing its own)',
     withdrawProposal: 'a proposal id and its fate', request: 'a reach request record (the agent\'s own reason)',
     // the .197 integration: lane channel-threads' agent verbs, judged by what they hand an agent

@@ -51,6 +51,7 @@ import { openIntegrationsWindow } from './integrations-window.js';
 import { openSessionProps as openSessionPropsFn } from './session-props.js';
 import { openWorkflowDetail as openWorkflowDetailFn } from './workflow-detail.js';
 import { openDesign as openDesignFn, openDesignPublishDialog, installDesignWindow } from './design-window.js'; // lane design-window: the Design window (window type `design`) + its publish dialog + the hub's open push
+import { openArtifacts as openArtifactsFn } from './artifacts-window.js'; // lane artifacts-list-scale: the Artifacts window (window type `artifacts`) — the chip's list at full size behind its ⤢
 import { openDoc as openDocFn } from './doc-window.js'; // lane doc-window: the Doc window (window type `doc`) — a markdown file read, edited and annotated in one rendered view; the editor itself is the lazy public/doc-editor.js
 import { DesktopManager } from './desktop-manager.js';
 import { StageManager, STAGE_ID } from './stage-manager.js';
@@ -2182,6 +2183,7 @@ class App {
   publishDesign(opts) { return openDesignPublishDialog(this, opts || {}); }
   /** The Doc window for one markdown file ({host, path, from}) — openFile's `.md` route, layout replay. */
   openDoc(opts) { return openDocFn(this, opts || {}); }
+  openArtifacts(opts) { return openArtifactsFn(this, opts || {}); }
 
   // Session state keys (backend:backendSessionId) of every window currently
   // blinking "waiting for input" — the idle-detection signal the task board

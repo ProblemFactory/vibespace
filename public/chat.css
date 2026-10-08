@@ -1677,5 +1677,82 @@ body.hide-empty-thinking .chat-compact .chat-msg.chat-empty-thinking { display: 
 .chat-artifact-more { background: none; border: 0; color: inherit; cursor: pointer; padding: 0 6px; font-size: 1.1em; line-height: 1; }
 .chat-artifact-more:hover, .chat-artifact-more:focus-visible { color: var(--accent, #6aa0ff); }
 .chat-artifact-head { font-size: 0.8em; text-transform: uppercase; letter-spacing: 0.04em; padding: 6px 10px 2px; }
-.chat-artifact-row-top { display: flex; align-items: center; gap: 6px; }
-.chat-artifact-code > summary { cursor: pointer; padding: 4px 8px; }
+/* lane artifacts-list-scale (design 021 E1–E9 + the owner's ⤢ window B): the Artifacts popover is BOUNDED (the room
+   above the chip, --af-room, set at open; never past the viewport) and scrolls inside under a sticky top bar; rows keyed
+   (src/lib/artifact-card.js renderArtifactList); the phone gets a bottom sheet; the window = a rail + a grid table. */
+.chat-status-dropdown.chat-artifacts-panel { display: flex; flex-direction: column; width: 420px; max-height: min(calc(100vh - var(--taskbar-height, 0px) - 24px), var(--af-room, 100vh)); }
+.chat-artifacts-panel .af-top { flex: none; position: sticky; top: 0; z-index: 1; background: var(--bg-panel, var(--bg-dialog)); padding: 8px 8px 6px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; }
+.af-search { display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 6px 0 8px; background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm); box-sizing: border-box; }
+.af-search:focus-within { border-color: var(--accent); }
+.af-search-ic, .af-pick-ic, .af-head-ic, .af-head-chev, .af-th-dir { display: inline-flex; width: 12px; height: 12px; flex: none; color: var(--text-dim); }
+.af-search-ic svg, .af-pick-ic svg, .af-head-ic svg, .af-head-chev svg, .af-th-dir svg { width: 12px; height: 12px; }
+.af-filter { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; font-size: 12px; }
+.af-filter::-webkit-search-cancel-button { display: none; }
+.af-key { font-size: 10px; color: var(--text-dim); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0 4px; line-height: 14px; }
+.af-expand { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0; border: 0; background: none; color: var(--text-dim); cursor: pointer; border-radius: var(--radius-sm); }
+.af-expand:hover, .af-expand:focus-visible { color: var(--accent); background: var(--bg-hover); }
+.af-expand svg { width: 14px; height: 14px; }
+.af-ctl { display: flex; align-items: center; gap: 6px; }
+.af-pick { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; font: inherit; font-size: 11px; color: var(--text); background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; }
+.af-pick:hover, .af-pick:focus-visible { border-color: var(--accent); }
+.af-count { margin-left: auto; font-size: 10px; white-space: nowrap; }
+.chat-artifacts-panel .af-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-bottom: 4px; }
+.chat-artifacts-panel .chat-artifact-head { display: flex; align-items: center; gap: 4px; padding: 8px 10px 3px; font-size: 10px; cursor: pointer; user-select: none; }
+.af-head-word { flex: 1; min-width: 0; }
+.chat-artifact-head.af-head-recent, .chat-artifact-head.af-head-recent .af-head-ic { color: var(--accent); }
+.chat-artifacts-panel .chat-artifact-row { display: flex; align-items: center; gap: 8px; padding: 5px 8px 5px 10px; min-height: 40px; box-sizing: border-box; }
+.chat-artifacts-panel .chat-artifact-row:focus { outline: none; background: var(--bg-hover); }
+.af-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.chat-artifacts-panel .chat-artifact-name { font-size: 12px; }
+.chat-artifacts-panel .chat-artifact-meta { font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-artifact-name mark { background: var(--accent-dim); color: inherit; border-radius: 2px; }
+.af-right { flex: none; display: flex; align-items: center; gap: 4px; }
+.af-ago { font-size: 10px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.chat-artifacts-panel .chat-artifact-more, .af-window .chat-artifact-more { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0; border-radius: var(--radius-sm); visibility: hidden; color: var(--text-dim); }
+.chat-artifacts-panel .chat-artifact-more svg, .af-window .chat-artifact-more svg { width: 14px; height: 14px; }
+.chat-artifact-row:hover .chat-artifact-more, .chat-artifact-row:focus .chat-artifact-more, .chat-artifact-row:focus-within .chat-artifact-more, .af-trow:hover .chat-artifact-more, .af-trow:focus .chat-artifact-more, .af-trow:focus-within .chat-artifact-more { visibility: visible; }
+@media (hover: none) { .chat-artifacts-panel .chat-artifact-more, .af-window .chat-artifact-more { visibility: visible; } }
+.chat-artifacts-panel .chat-status-dropdown-note { max-width: none; }
+@media (max-width: 480px) {
+  .chat-status-dropdown.chat-artifacts-panel { position: fixed !important; left: 0 !important; right: 0; bottom: 0 !important; width: auto; min-width: 0 !important; max-width: none !important; max-height: 82vh; border-radius: var(--radius) var(--radius) 0 0; }
+  .chat-artifacts-panel .chat-artifact-row { min-height: 44px; }
+  .chat-artifacts-panel .af-search { height: 36px; }
+  .chat-artifacts-panel .chat-artifact-more { visibility: visible; }
+  .chat-artifacts-panel .af-key { display: none; }
+}
+.af-window { display: flex; height: 100%; min-height: 0; font-size: 12px; color: var(--text); background: var(--bg-dialog); }
+.af-win-rail { flex: none; width: 190px; overflow-y: auto; border-right: 1px solid var(--border); padding: 8px 6px; display: flex; flex-direction: column; gap: 1px; box-sizing: border-box; }
+.af-rail-item { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: var(--radius-sm); cursor: pointer; }
+.af-rail-item:hover, .af-rail-item:focus-visible { background: var(--bg-hover); outline: none; }
+.af-rail-item.active { background: var(--accent-dim); color: var(--accent); font-weight: 600; }
+.af-rail-word { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.af-rail-n { font-size: 11px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.af-rail-head { font-size: 10px; padding: 10px 8px 3px; }
+.af-win-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.af-window .af-top { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+.af-window .af-search { flex: 1; }
+.af-table { flex: 1; min-height: 0; overflow: auto; }
+.af-thead, .af-trow { display: grid; grid-template-columns: minmax(160px, 2.2fr) minmax(70px, 0.8fr) minmax(90px, 1fr) 56px 104px minmax(120px, 1.6fr) 32px; align-items: center; }
+.af-thead { position: sticky; top: 0; z-index: 1; background: var(--bg-dialog); border-bottom: 1px solid var(--border); }
+.af-th { display: flex; align-items: center; gap: 4px; padding: 6px 8px; font: inherit; font-size: 11px; font-weight: 600; color: var(--text-dim); background: none; border: 0; text-align: left; cursor: pointer; }
+.af-th[data-dir="asc"], .af-th[data-dir="desc"] { color: var(--text); }
+.af-th-word { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.af-td.af-c-more, .af-th.af-c-more { padding: 0; overflow: visible; display: flex; justify-content: center; }
+.af-trow { border-bottom: 1px solid var(--border); cursor: pointer; min-height: 30px; }
+.af-trow:hover, .af-trow:focus { background: var(--bg-hover); outline: none; }
+.af-td { padding: 4px 8px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.af-td.af-c-name { display: flex; align-items: center; gap: 6px; font-weight: 600; }
+.af-c-kind, .af-c-helper, .af-c-changed, .af-c-path { color: var(--text-dim); font-size: 11px; }
+.af-c-edits, .af-c-changed { font-variant-numeric: tabular-nums; }
+.af-td.af-c-path { direction: rtl; text-align: left; }
+.af-trow[data-state="stopped"] { opacity: 0.55; }
+.af-window .chat-artifact-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.af-window .chat-artifact-name mark { background: var(--accent-dim); color: inherit; border-radius: 2px; }
+@media (max-width: 768px) {
+  .af-window { flex-direction: column; }
+  .af-win-rail { width: auto; flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--border); padding: 6px; gap: 6px; }
+  .af-rail-item { flex: none; border: 1px solid var(--border); border-radius: var(--radius); padding: 4px 10px; }
+  .af-rail-head { display: none; }
+  .af-thead, .af-trow { grid-template-columns: minmax(140px, 1fr) 72px 32px; }
+  .af-c-kind, .af-c-helper, .af-c-edits, .af-c-path { display: none; }
+}

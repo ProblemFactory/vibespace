@@ -2,6 +2,16 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.232 — 2026-10-07
+
+### Added
+- An agent is told when someone replies to a message it sent; the Notify dialog gains that trigger.
+- Agents can set the same notification rules you can, and read back what notifies them.
+- When a conversation waits on your permission or a question for a minute, it shows up in For you.
+
+### Changed
+- The Artifacts list filters, groups and sorts, and opens as a window.
+
 ## 2.369.231 — 2026-10-07
 
 ### Fixed

@@ -56,6 +56,9 @@ const RULE_LABELS = () => ({
   // under both — said on the row, so the rule reads as what it does
   'reply-to-mine': t('replies to or quotes a message of mine'),
   'in-thread-with-me': t('is in a thread I am in, or quotes a message of mine'),
+  // lane reply-to-sent (owner 2026-10-07): a quote, a topic / thread reply, a mail-thread reply or a direct chat's next
+  // message answering what THIS agent sent; on a group or All agents each member is judged for its own sends
+  'reply-to-sent': t('is a reply to a message this agent sent'),
 });
 
 
@@ -537,6 +540,7 @@ function watcherRow(host, { w = null, f = null, st, principals, onAnyChange, onR
       case 'regex': bind(textInput(rule.value, t('regular expression, e.g. invoice\\s*#?\\d+')), 'value'); break;
       case 'sender-in-group': bind(textInput(Array.isArray(rule.members) ? rule.members.join(', ') : (rule.value || ''), t('ids or names, comma-separated')), 'members', (v) => v.split(',').map((x) => x.trim()).filter(Boolean)); break;
       case 'has-attachment': case 'reply-to-mine': case 'in-thread-with-me': break;
+      case 'reply-to-sent': fields.appendChild(noteEl(t('Set this on a group to cover each of its agents for their own sends — a reply notifies only the agent whose message it answers.'))); break;
       case 'time-window': bind(textInput(rule.from || '09:00', 'HH:MM'), 'from'); bind(textInput(rule.to || '18:00', 'HH:MM'), 'to'); break;
       default: break;
     }

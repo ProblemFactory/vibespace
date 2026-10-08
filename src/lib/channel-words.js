@@ -445,7 +445,19 @@ export function wakeWhyText(why) {
     case 'quoted your message': return t('quoted your message');
     case 'a reply to a message of yours': return t('a reply to a message of yours');
     case 'in a thread you are in': return t('in a thread you are in');
-    default: return String(why || '');
+    // lane reply-to-sent: the rule's four shapes (src/channel-filter.js SENT_WHYS — {when} / {subject} filled by the matcher)
+    case 'a reply to a message this agent sent': return t('a reply to a message this agent sent');
+    case 'the next message after yours in a direct chat': return t('the next message after yours in a direct chat');
+    default: {
+      const s = String(why || '');
+      let m = /^quotes your message of (.+)$/.exec(s);
+      if (m) return t('quotes your message of {when}', { when: m[1] });
+      m = /^replies in the thread of your message of (.+)$/.exec(s);
+      if (m) return t('replies in the thread of your message of {when}', { when: m[1] });
+      m = /^in the thread of your mail "(.*)"$/.exec(s);
+      if (m) return t('in the thread of your mail "{subject}"', { subject: m[1] });
+      return s;
+    }
   }
 }
 export function agoText(at, now = Date.now(), opts = {}) { return agoWords(at, now, opts); }

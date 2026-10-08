@@ -12,6 +12,7 @@
 const crypto = require('crypto');
 const caps = require('../channel-caps.js');
 const F = require('../channel-filter.js');
+const WS = require('../channel-watch-spec.js');   // lane agent-watch-parity: the agent's watch = the Notify dialog's grammar, judged by the same validators
 const P = require('../channel-policy.js');
 const ACL = require('../channel-acl.js');
 const { toAgentText: agentText } = require('../peer-text.js');
@@ -100,7 +101,7 @@ function create(engineCtx) {
     const list = (Array.isArray(en && en.pending) ? en.pending : []).filter(mine);
     const elidedTagged = Number(en && en.pendingElidedBy && en.pendingElidedBy[pk]) || 0;
     const elidedUntagged = pk === firstPk ? (Number(en && en.pendingElided) || 0) : 0;
-    return { hits: list.map((p) => ({ record: p.record, why: p.why || [] })), ids: new Set(list.map((p) => p.record && p.record.id).filter(Boolean)), elidedTagged, elidedUntagged, elided: elidedTagged + elidedUntagged };
+    return { hits: list.map((p) => ({ record: p.record, why: p.why || [], ...(p.sent ? { sent: p.sent } : {}) })), ids: new Set(list.map((p) => p.record && p.record.id).filter(Boolean)), elidedTagged, elidedUntagged, elided: elidedTagged + elidedUntagged };
   }
   /** Drop what one delivery CARRIED (and nothing else) from `pending`. */
   function clearCarried(e2, pk, eff, carried) {
@@ -222,7 +223,7 @@ function create(engineCtx) {
   function fanTargets() {
     let live = [];
     try { live = liveSessions() || []; } catch (err) { log.warn(`[channels] liveSessions threw: ${(err && err.message) || err}`); }
-    return live.filter((x) => x && x.cid).map((x) => ({ cid: String(x.cid), name: x.name || null }));
+    return live.filter((x) => x && x.cid).map((x) => ({ cid: String(x.cid), name: x.name || null, groups: Array.isArray(x.groups) ? x.groups.map(String) : [] }));
   }
   /** THE ANSWER EVERY WAKE PATH READS (lane everyone-principal): `effectiveFor` with every ALL-AGENTS watcher fanned
    *  out to one item per RUNNING conversation (F.fanOutWatchers — each its own key, pending, timers, scope chain and
@@ -236,7 +237,7 @@ function create(engineCtx) {
     const hasVia = e0.watchers.some((it) => it && it.watcher && it.watcher.via);
     const members = hasVia ? membersNow() : null;
     const e = hasVia ? { ...e0, watchers: e0.watchers.filter((it) => F.memberStill(it.watcher, members)) } : e0;
-    const x = F.fanOutWatchers(e, fanTargets());
+    const x = F.fanOutWatchers(e, fanTargets(), { filterOf: (w) => (w && w.mode === 'filtered' ? filterFor(w.filterId) : null) });   // lane reply-to-sent: a group row's sent half per member
     return x === e && e === e0 ? e : { ...x, base: e0 };
   }
   /** A grain's stored watcher for key `pk` — a fan-out key (`everyone:*><cid>`) answers the stored All row as that
@@ -247,7 +248,7 @@ function create(engineCtx) {
     if (!fan) return list.find((x) => pkOf(x.principal) === pk) || null;
     const root = list.find((x) => pkOf(x.principal) === fan.root);
     if (!root) return null;
-    const tg = fanTargets().find((x) => x.cid === fan.cid);
+    const tg = fanTargets().find((x) => x.cid === fan.cid && (root.principal.kind !== 'group' || x.groups.includes(String(root.principal.id))));   // a member that left its group waits for nothing
     return tg ? F.fanWatcher(root, tg.cid, tg.name) : null;
   }
   /** Is THIS item the watcher of principal `pk`? */
@@ -700,28 +701,26 @@ function create(engineCtx) {
     }
     return { ok: true, adapterId: rec.id, rec, en: null, key: null, title: rec.label || rec.id, grain: { kind: 'account' }, grainNow: () => F.grainOf(accountGrainOf(rec.id), undefined, { inherited: accountGrantKeys(rec.id) }), raw: () => { const g = accountGrainOf(rec.id) || {}; return { access: g.access || [], watchers: g.watchers || [] }; } };
   }
-  /** The keywords → the watch's inline filter (any of them); none = every new message. */
-  function watchFilterOf(keywords) {
-    const kws = (Array.isArray(keywords) ? keywords : []).map((x) => String(x || '').trim()).filter(Boolean).slice(0, 10);
-    if (!kws.length) return { ok: true, filter: null };
-    const fv = F.validateFilter({ match: 'any', rules: kws.map((value) => ({ kind: 'keyword', value })) });
-    return fv.ok ? { ok: true, filter: fv.filter, keywords: kws } : { ok: false, code: 'bad-filter', error: fv.error };
-  }
   /**
-   * W1 — `vibespace-channels watch <conv|account> [--mode next-turn|wake] [--keyword …]`: the agent's OWN notification on
+   * W1 — `vibespace-channels watch <conv|account> [--mode next-turn|wake|digest] [rule flags | --spec json]` (lane
+   * agent-watch-parity: the Notify dialog's whole grammar, src/channel-watch-spec.js): the agent's OWN notification on
    * a grain it can read. `next-turn` (free) is written at once — ONE row per (agent, grain) with `origin:'agent'`, never
    * over a row the user set for it (widen-only: the user's row stays, said); `wake` (a billed turn) is NOT the agent's
    * to grant — it files ONE request the user approves with one click (For you; the same decide route as an access
    * request), naming exactly what Approve writes (grain, mode, keywords, the daily cap it asks for).
    */
-  async function agentWatch(ctx, ref, { delivery = 'next-turn', keywords = [], dailyWakeCap = null, why = '' } = {}) {
+  async function agentWatch(ctx, ref, body = {}) {
     if (!ctx || ctx.kind !== 'agent' || !ctx.id) return ACL.notFound();
-    const d = delivery === undefined || delivery === null || delivery === '' ? 'next-turn' : delivery;
-    if (!F.DELIVERY_MODES.includes(d)) return { ok: false, code: 'bad-request', error: '--mode must be next-turn (free: the news rides your next turn) or wake (a billed turn now — the user approves it)' };
+    // lane agent-watch-parity: THE ONE GRAMMAR (src/channel-watch-spec.js) — the CLI's raw flags (`args`), a whole row
+    // (`spec`) or the pre-parity body (delivery + keywords), judged by the Notify dialog's own validators; a refusal is
+    // the validator's code + words (`badSpec` = the route's 400)
+    const sp = WS.watchSpecOfBody(body);
+    if (!sp.ok) return { ...sp, badSpec: true };
+    const S = sp.spec;
+    const d = S.delivery;
     const tg = watchTargetOf(ctx, ref);
     if (!tg.ok) return tg;
-    const fl = watchFilterOf(keywords);
-    if (!fl.ok) return fl;
+    const fl = { filter: S.filter || null, keywords: S.filter ? S.filter.rules.filter((x) => x.kind === 'keyword').map((x) => x.value) : [] };
     const principal = { kind: 'agent', id: ctx.id, name: ctx.name || null };
     const pk = pkOf(principal);
     const cur = tg.grainNow();
@@ -737,14 +736,54 @@ function create(engineCtx) {
     if (blk && d !== 'wake') return { ok: false, code: 'removed-by-user', error: `the user removed your notification on ${tg.key ? agentId(tg.key) : tg.adapterId} (${new Date(blk.at).toISOString().slice(0, 16).replace('T', ' ')} UTC) — it is theirs to restore: ask them (vibespace-ask), or file a wake ask (--mode wake) they approve; re-registering it yourself is refused` };
     // verify r1 F2: a bound on the rows one agent may hold of its OWN across every grain, said with the count
     if (!(mine && F.watchOriginOf(mine) === 'agent') && agentWatchCount(pk) >= F.MAX_AGENT_WATCHES) return { ok: false, code: 'watch-limit', error: `you already hold ${F.MAX_AGENT_WATCHES} notifications of your own (the limit) — \`vibespace-channels unwatch <conv>\` frees one; the user can set more for you in Notify…` };
-    const cap = dailyWakeCap === null || dailyWakeCap === undefined || dailyWakeCap === '' ? F.DEFAULT_DAILY_WAKE_CAP : Number(dailyWakeCap);
-    const row = { principal, origin: 'agent', delivery: d, notify: 'wake', mode: fl.filter ? 'filtered' : 'all', ...(fl.filter ? { filter: fl.filter } : {}), dailyWakeCap: Number.isFinite(cap) ? Math.max(1, Math.min(F.MAX_DAILY_WAKE_CAP, Math.round(cap))) : F.DEFAULT_DAILY_WAKE_CAP };
-    if (d === 'wake') return fileWatchRequest(ctx, tg, row, why);
+    const row = { principal, origin: 'agent', delivery: d, notify: S.notify, mode: S.mode, ...(fl.filter ? { filter: fl.filter } : {}), ...(S.notify === 'digest' ? { digestMinutes: S.digestMinutes } : {}), dailyWakeCap: Math.max(1, S.dailyWakeCap) };
+    if (d === 'wake') return fileWatchRequest(ctx, tg, row, S.why);
     // the grain AS READ (the legacy lift + the access rule applied) minus this agent's row, plus the new one
     const r = await setGrain(tg.adapterId, tg.grain, { watchers: [...cur.watchers.filter((w) => w && pkOf(w.principal) !== pk), row] }, { by: `agent:${ctx.id}` });
     if (!r || !r.ok) return r;
-    try { store.audit({ kind: 'acl', op: 'agent-watch', principal, scope: tg.key ? { kind: 'conversation', id: tg.key } : { kind: 'adapter', id: tg.adapterId }, delivery: d, keywords: fl.keywords || [], at: now(), by: 'agent' }); } catch {}
-    return { ok: true, set: true, delivery: d, target: tg.key ? agentId(tg.key) : tg.adapterId, title: tg.key ? agentTitle(tg.en, tg.en.id) : tg.title, keywords: fl.keywords || [], replaced: !!mine };
+    try { store.audit({ kind: 'acl', op: 'agent-watch', principal, scope: tg.key ? { kind: 'conversation', id: tg.key } : { kind: 'adapter', id: tg.adapterId }, delivery: d, keywords: fl.keywords, rules: fl.filter ? fl.filter.rules.map((x) => x.kind) : [], at: now(), by: 'agent' }); } catch {}
+    return { ok: true, set: true, delivery: d, target: tg.key ? agentId(tg.key) : tg.adapterId, title: tg.key ? agentTitle(tg.en, tg.en.id) : tg.title, keywords: fl.keywords, what: WS.watchWhatWords(row), how: WS.watchHowWords(row), replaced: !!mine };
+  }
+  /** lane agent-watch-parity: READ BACK — what notifies THIS agent. At one grain (`ref`, judged like `watch`: reach
+   *  first) every row naming it — its own, and the user's for it, its group or all agents (theirs: read-only) — its open
+   *  wake ask and the user's removal mark; with no `ref`, every grain where a row names it (a conversation only when it
+   *  may read it), one entry each. Never another agent's row. */
+  function agentWatchesFor(ctx, ref = null) {
+    if (!ctx || ctx.kind !== 'agent' || !ctx.id) return ACL.notFound();
+    const pk = pkOf({ kind: 'agent', id: ctx.id });
+    const view = (w) => { const f = w.mode === 'filtered' ? (w.filter || (w.filterId ? filterFor(w.filterId) : null)) : null;
+      return { setBy: F.watchOriginOf(w), as: w.principal.kind, ...(w.principal.kind === 'group' ? { group: w.principal.name || w.principal.id } : {}), ...(w.via ? { via: w.via } : {}),
+        delivery: F.deliveryModeOf(w), notify: w.notify, mode: w.mode, filter: f ? { match: f.match, rules: f.rules } : null, digestMinutes: w.digestMinutes, dailyWakeCap: w.dailyWakeCap,
+        how: WS.watchHowWords(w), what: WS.watchWhatWords(w, f), expiresAt: w.expiresAt || null }; };
+    const rowsOf = (ws) => (Array.isArray(ws) ? ws : []).filter((w) => w && w.principal && F.rowNames(w, ctx)).map(view);
+    const askView = (r) => ({ id: r.id, target: r.scope.kind === 'conversation' ? agentId(r.scope.id) : r.scope.id, how: WS.watchHowWords(r.watch), what: WS.watchWhatWords(r.watch), at: r.at });
+    if (ref) {
+      const tg = watchTargetOf(ctx, ref);
+      if (!tg.ok) return tg;
+      const scope = tg.key ? { kind: 'conversation', id: tg.key } : { kind: 'adapter', id: tg.adapterId };
+      const ask = openWatchRequestsOf(pk).find((r) => r.scope && r.scope.kind === scope.kind && r.scope.id === scope.id);
+      const blk = agentWatchBlockOf(scope, pk);
+      return { ok: true, target: tg.key ? agentId(tg.key) : tg.adapterId, title: tg.key ? agentTitle(tg.en, tg.en.id) : tg.title, grain: tg.grain.kind, rows: rowsOf(tg.grainNow().watchers), request: ask ? askView(ask) : null, removedByUser: blk ? { at: blk.at } : null };
+    }
+    const out = [];
+    const recs = new Map(adapterRecords().adapters.map((r) => [r.id, r]));
+    for (const en of Object.values(store.index.live())) {   // B-f32b: read-only
+      if (!en || !Array.isArray(en.watchers) || !en.watchers.some((w) => w && w.principal && F.rowNames(w, ctx))) continue;
+      const rec = recs.get(en.adapterId);
+      if (!rec || rec.enabled === false || !ACL.canSee(reachFor(ctx, rec, en).level)) continue;
+      for (const r of rowsOf(convGrainOf(en).watchers)) out.push({ target: agentId(en.key), title: agentTitle(en, en.id), grain: 'conversation', ...r });
+    }
+    for (const [adapterId, g] of Object.entries(store.index.table('accountAssignments') || {})) {
+      const rec = recs.get(adapterId);
+      if (!rec || rec.enabled === false) continue;
+      for (const r of rowsOf(g && g.watchers)) out.push({ target: adapterId, title: rec.label || adapterId, grain: 'account', ...r });
+    }
+    for (const g of Object.values(store.index.table('patternAssignments') || {})) {
+      const rec = g && recs.get(g.adapterId);
+      if (!rec || rec.enabled === false) continue;
+      for (const r of rowsOf(g.watchers)) out.push({ target: null, adapterId: g.adapterId, title: `${rec.label || g.adapterId}: conversations matching ${F.patternSummary(g.pattern)}`, grain: 'pattern', ...r });
+    }
+    return { ok: true, watches: out.slice(0, 200), more: Math.max(0, out.length - 200), requests: openWatchRequestsOf(pk).map(askView) };
   }
   /** W1: `unwatch` removes ONLY the agent's own row (`origin:'agent'`) at that grain — the user's rows are theirs. */
   async function agentUnwatch(ctx, ref) {
@@ -794,7 +833,7 @@ function create(engineCtx) {
     if (waiting.length >= F.MAX_OPEN_WATCH_REQUESTS) return { ok: false, code: 'watch-request-limit', error: `${waiting.length} wake asks of yours are already waiting for the user — no more until they decide; --mode next-turn (free) needs no approval` };
     const own = agentWatchCount(pkR);
     const reason = String(why || '').trim().slice(0, 500);
-    const kws = row.filter ? row.filter.rules.map((x) => x.value) : [];
+    const kws = row.filter ? row.filter.rules.map((x) => F.ruleWhy(x)) : [];   // lane agent-watch-parity: every rule kind in words (was: the keywords' values)
     const req = { id: `wr-${t.toString(36)}-${crypto.randomBytes(3).toString('hex')}`, kind: 'watch', principal: row.principal, scope, adapterId: tg.adapterId, grain: tg.grain, watch: row, why: reason, at: t, status: 'open', todoId: null, decidedAt: null };
     if (userTodos && typeof userTodos.add === 'function') {
       try {
@@ -804,12 +843,13 @@ function create(engineCtx) {
         const item = userTodos.add(INBOX_KEY, {
           origin: 'channels',
           text: `${ctx.name || ctx.id} asks to be woken by ${where}`,
-          detail: `Approve writes: wake ${ctx.name || ctx.id} now (a billed turn) ${what} in ${where}, at most ${row.dailyWakeCap} wakes a day.${reason ? `\nReason: ${reason}` : ''}\nIt already has ${own} notifications of its own and ${waiting.length} wake asks waiting.\nDeny changes nothing. Without it, the agent can still ask for the news on its next turn (free).`,
+          detail: `Approve writes: wake ${ctx.name || ctx.id} now (a billed turn) ${what} in ${where}, at most ${row.dailyWakeCap} wakes a day.${row.notify === 'digest' ? `\nAs a digest: one billed turn every ${row.digestMinutes} minutes at most.` : ''}${reason ? `\nReason: ${reason}` : ''}\nIt already has ${own} notifications of its own and ${waiting.length} wake asks waiting.\nDeny changes nothing. Without it, the agent can still ask for the news on its next turn (free).`,
           urgency: 'normal', by: 'agent', sessionName: 'Channels', action: { type: 'channel-watch-request', id: req.id },
           i18n: {
             text: { key: i18nKey('{agent} asks to be woken by {where}'), params: { agent: ctx.name || ctx.id, where } },
             detail: [
               { key: kws.length ? i18nKey('Approve writes: wake {agent} now (a billed turn) on messages with: {words} — in {where}, at most {cap} wakes a day.') : i18nKey('Approve writes: wake {agent} now (a billed turn) on every new message in {where}, at most {cap} wakes a day.'), params: { agent: ctx.name || ctx.id, words: kws.join(', '), where, cap: row.dailyWakeCap } },
+              ...(row.notify === 'digest' ? [{ key: i18nKey('As a digest: one billed turn every {n} minutes at most.'), params: { n: row.digestMinutes } }] : []),
               ...(reason ? [{ key: i18nKey('Reason: {reason}'), params: { reason } }] : []),
               { key: i18nKey('It already has {n} notifications of its own and {m} wake asks waiting.'), params: { n: own, m: waiting.length } },
               { key: i18nKey('Deny changes nothing. Without it, the agent can still ask for the news on its next turn (free).') },
@@ -1565,7 +1605,7 @@ function create(engineCtx) {
     statsView, wakeLatencyFor, accountGrainOf, patternsOf, patternById, pkOf, legacyConvAssignment, convGrainOf, convFacts, effectiveFor, fanTargets,
     wakeEffOf, storedWatcherFor, itemIs, scopeKeyOf, watcherRef, accessRowView, watcherView, eligibleAboveView, grainView, reachFor, groupsOfSession,
     convFor, stillSees, effectiveForAccount, accountScopeGrants, searchFor, readAroundFor, setPolicy, setReach, reachView, request, decideRequest,
-    directoryLists, setAgentDirectory, agentWatch, agentUnwatch, listFor, readFor, readThreadFor, statusFor, setGrain, setAccess, setWatchers,
+    directoryLists, setAgentDirectory, agentWatch, agentUnwatch, agentWatchesFor, listFor, readFor, readThreadFor, statusFor, setGrain, setAccess, setWatchers,
     removePattern, setAssignment, setScopeAssignment, accessFor, estimateScope, migrateAggregated, migrateGrants, setFilter, estimateFilter,
     previewRule, membersNow,
   };

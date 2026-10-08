@@ -45,7 +45,13 @@ class MessageWindow {
 
   onOp(fn) { this.listeners.push(fn); }
   offOp(fn) { const i = this.listeners.indexOf(fn); if (i >= 0) this.listeners.splice(i, 1); }
-  _emit(op) { for (const fn of this.listeners) fn(op); }
+  _emit(op) {
+    // lane parked-ask-inbox: an op carrying a permission (an ask opened / settled) is counted — feedLive tells the
+    // For-you observer by it for a normalizer without the pending-asks level (codex / ACP)
+    if (op && ((op.fields && op.fields.permission) || (op.op === 'create' && ((op.message && op.message.permission) || (op.msg && op.msg.permission))))) this._permOps = (this._permOps || 0) + 1;
+    for (const fn of this.listeners) fn(op);
+  }
+  get permissionOpsVersion() { return this._permOps || 0; }
 
   /** Get current message count */
   get total() { return this.messages.length; }

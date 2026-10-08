@@ -122,7 +122,7 @@ console.log('§2 replyVerdict');
   const liveChat = { live: true, mode: 'chat', remoteState: null };
   const c1 = v(liveChat, helperItem), c2 = v(null, helperItem), c3 = v({ ...liveChat, turn: 'running' }, helperItem);
   ok(c1.code === 'card_item' && c1.why === 'Answer it on the helper’s card — click the item to go there' && c2.code === 'card_item' && c3.code === 'card_item', 'a helper-ask item ⇒ card_item on a live, a dead and a mid-turn session alike (the card is the surface, never a typed reply)', [c1, c2, c3]);
-  ok(R.REPLY_HIDDEN_CODES.includes('card_item') && R.CARD_ACTION_TYPES.includes('helper-ask') && R.CARD_ACTION_TYPES.length === 1, 'card_item is HIDDEN (no Reply button drawn) and helper-ask is the one card action kind');
+  ok(R.REPLY_HIDDEN_CODES.includes('card_item') && R.CARD_ACTION_TYPES.includes('helper-ask') && R.CARD_ACTION_TYPES.includes('main-ask') && R.CARD_ACTION_TYPES.length === 2, 'card_item is HIDDEN (no Reply button drawn) and helper-ask + main-ask (lane parked-ask-inbox: a conversation\'s own ask) are the card action kinds');
   ok(v(liveChat, { ...item, action: { type: 'open-window', winId: 'w1' } }).ok === true && v(liveChat, { ...item, action: null }).ok === true, 'an item with another action kind (or none) still replies');
   ok(v(liveChat, { ...item, jobId: 'j1', action: { type: 'helper-ask', requestId: 'r' } }).code === 'job_item', 'a job item stays job_item (the earlier rung wins)');
   // lane-pairing verify-r4 F5: an agent's "run this command on <machine>?" is answered by Allow / Deny on the item — a

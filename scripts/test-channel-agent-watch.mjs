@@ -84,7 +84,7 @@ ok(ACL.validateDirectory({ singles: true }).ok && ACL.validateDirectory({ single
 const A = 'fake-poll', C = 'fake-poll-ops', KEY = `${A}/${C}`;
 const AG = { kind: 'agent', id: 'agent-1', name: 'Worker', groups: [], msgLevelFor: () => 'none' };
 function dayStartClock() { const t0 = Date.now(); const day0 = Math.floor(t0 / 86400e3) * 86400e3 + 60e3; let skew = 0; const f = () => day0 + (Date.now() - t0) + skew; f.advance = (ms) => { skew += ms; }; return f; }
-function mkEngine(name, { ENGM = ENG } = {}) {
+function mkEngine(name, { ENGM = ENG, live = null } = {}) {
   const dataDir = path.join(ROOT, name);
   const userTodos = new UserTodoManager({ dataDir });
   const delivered = [], stashed = [];
@@ -96,7 +96,7 @@ function mkEngine(name, { ENGM = ENG } = {}) {
   // the fake world follows THIS clock (a later pass sees the day's later records — new messages)
   const registry = createChannelRegistry();
   registry.register(FAKE.makeFakeAdapter({ kind: 'fake-poll', receive: 'poll', sendAs: ['user'], now: clock }));
-  const eng = ENGM.create({ dataDir, env: { VIBESPACE_CHANNELS_FAKE: '1' }, registry, broadcast: () => {}, userTodos, deliver, now: clock, log: { log() {}, warn() {}, error() {} }, liveSessions: () => [{ cid: 'agent-1', name: 'Worker', groups: [] }, { cid: 'agent-2', name: 'Other', groups: [] }] });
+  const eng = ENGM.create({ dataDir, env: { VIBESPACE_CHANNELS_FAKE: '1' }, registry, broadcast: () => {}, userTodos, deliver, now: clock, log: { log() {}, warn() {}, error() {} }, liveSessions: () => live || [{ cid: 'agent-1', name: 'Worker', groups: [] }, { cid: 'agent-2', name: 'Other', groups: [] }] });
   return { eng, userTodos, delivered, stashed, clock };
 }
 
@@ -313,15 +313,95 @@ async function selfWatchLeg(ENGM, name) {
   ok(cut !== src && rc.afterSelf >= 1, 'CONTROL: the watch without its self skip hits on the owner\'s own words (B-c91b; the leg above would be red)', JSON.stringify(rc));
 }
 
+console.log('⑨ reply-to-sent (owner 2026-10-07): a reply to what a MEMBER sent reaches that member alone — a group and All agents are judged per member');
+const GRP = { kind: 'group', id: 'g-work', name: 'Work' };
+async function replyLeg(ENGM, name, principal) {
+  const live = [{ cid: 'agent-1', name: 'Worker', groups: ['g-work'] }, { cid: 'agent-2', name: 'Other', groups: ['g-work'] }];
+  const { eng, delivered, stashed } = mkEngine(name, { ENGM, live });
+  await eng.pass(A, { force: true });
+  const rec = eng.adapterRecords().adapters.find((r) => r.id === A);
+  const got = eng.messages(A, C, { limit: 1 });
+  const r0 = (got.records || got)[0];
+  const t0 = Number(r0.at);
+  const set = await eng.setGrain(A, { kind: 'conversation', convId: C }, { access: [acc(principal)], watchers: [{ principal, delivery: 'next-turn', mode: 'filtered', filter: { match: 'any', rules: [{ kind: 'reply-to-sent' }] } }] });
+  // what each member sent from here: the outbox's sent proposals (draftedBy, vendorMessageId, at)
+  const sent = (id, cid, vid, text, dt) => ({ id, adapterId: A, convId: C, state: 'sent', text, draftedBy: { kind: 'agent', id: cid, name: cid }, at: t0 + dt, updatedAt: t0 + dt, result: { vendorMessageId: vid, at: t0 + dt } });
+  await eng.store.outbox.update((ob) => { ob.proposals['p-a'] = sent('p-a', 'agent-1', 'vm-a1', 'Worker asks: can you send the deck?', 100); ob.proposals['p-b'] = sent('p-b', 'agent-2', 'vm-b1', 'Other asks: the invoice?', 200); });
+  const mkR = (vid, to, dt) => ({ ...r0, id: `${r0.id}-${vid}`, vendorId: vid, at: t0 + dt, author: { id: 'ou_rowan', name: 'Rowan', isSelf: false, isBot: false }, text: `answer ${vid}`, replyTo: to, root: to, threadKey: to });
+  const step = async (r) => { await eng.onFresh(rec, C, [r], { origin: 'test' }); await new Promise((res) => setTimeout(res, 30)); return stashed.map((x) => x.cid).join(','); };
+  const s1 = await step(mkR('w-1', 'vm-a1', 1000));
+  const s2 = await step(mkR('w-2', 'vm-a1', 2000));
+  const s3 = await step(mkR('w-3', 'vm-b1', 3000));
+  const s4 = await step(mkR('w-4', 'om_owner_own', 4000));
+  return { set: !!set.ok, s1, s2, s3, s4, billed: delivered.length, text: (stashed[0] || {}).text || '' };
+}
+for (const [label, pr] of [['a GROUP of A + B', GRP], ['ALL AGENTS', { kind: 'everyone', id: '*' }]]) {
+  const r = await replyLeg(ENG, `e9-${pr.kind}`, pr);
+  ok(r.set && r.s1 === 'agent-1' && r.s2 === 'agent-1,agent-1' && r.s3 === 'agent-1,agent-1,agent-2' && r.s4 === r.s3 && r.billed === 0, `${label}: two replies to A's message reach A only, a reply to B's reaches B only, a reply to anything else nobody (next-turn: nothing billed)`, JSON.stringify(r));
+  if (pr.kind === 'group') ok(/\nReply to your message \([^)]*, "Worker asks: can you send the deck\?"\): from Rowan at /.test(r.text) && /matched: replies in the thread of your message of \d\d:\d\d UTC|matched: quotes your message of \d\d:\d\d UTC/.test(r.text), 'the hand-over (the stash): the line begins "Reply to your message (<when>, <first words>)" and the why names the member\'s own message', r.text.split('\n').slice(0, 4).join(' | '));
+}
+{
+  const src = engineSource(REPO);
+  const cut = src.replace("    const x = F.fanOutWatchers(e, fanTargets(), { filterOf: (w) => (w && w.mode === 'filtered' ? filterFor(w.filterId) : null) });", '    const x = F.fanOutWatchers(e, fanTargets());');
+  const E9 = MUT.load('src/server/channels-engine.js', cut, 'group-not-per-member');
+  const rc = await replyLeg(E9, 'e9c', GRP);
+  ok(cut !== src && !(rc.s2 === 'agent-1,agent-1' && rc.s3 === 'agent-1,agent-1,agent-2'), 'CONTROL: an engine judging the group row as ONE round-robin item hands a reply to the wrong member — the group leg above would be red', JSON.stringify(rc));
+}
+
+console.log('⑩ lane agent-watch-parity: the agent\'s watch = the dialog\'s grammar on the real engine; read back');
+async function parityLeg(ENGM, name) {
+  const { eng, userTodos } = mkEngine(name, { ENGM });
+  await eng.pass(A, { force: true });
+  await eng.setGrain(A, { kind: 'account' }, { access: [acc(AGENT)] });
+  const out = {};
+  out.set = await eng.agentWatch(AG, KEY, { target: KEY, args: ['--regex', '^deploy v\\d+', '--has-attachment', '--match', 'every', '--cap', '7'] });
+  out.show = eng.agentWatchesFor(AG, KEY);
+  out.refused = await eng.agentWatch(AG, KEY, { target: KEY, args: ['--regex', '(a+)+'] });
+  out.kind = await eng.agentWatch(AG, KEY, { target: KEY, spec: { filter: { rules: [{ kind: 'nope' }] } } });
+  // the USER sets a digest for this agent on the whole account — the agent reads it, never writes it
+  await eng.setGrain(A, { kind: 'account' }, { access: [acc(AGENT)], watchers: [{ principal: AGENT, notify: 'digest', digestMinutes: 60, mode: 'filtered', filter: { match: 'any', rules: [{ kind: 'mention', value: 'Worker' }] } }] });
+  out.all = eng.agentWatchesFor(AG);
+  out.digest = await eng.agentWatch(AG, KEY, { target: KEY, args: ['--mode', 'digest', '--digest-minutes', '45', '--keyword', 'outage'] });
+  const wr = (eng.store.index.table('watchRequests') || []).find((r) => out.digest && out.digest.request && r.id === out.digest.request.id);
+  out.item = wr && wr.todoId ? userTodos.get(wr.todoId) : null;
+  out.other = eng.agentWatchesFor({ kind: 'agent', id: 'agent-2', name: 'Other', groups: [], msgLevelFor: () => 'none' });
+  return out;
+}
+{
+  const o = await parityLeg(ENG, 'e10');
+  const row = o.show && o.show.rows && o.show.rows[0];
+  ok(o.set.ok && o.set.set && /regex \/\^deploy v\\d\+\/ and has attachment/.test(o.set.what || ''), 'a next-turn watch with a regex AND an attachment rule is set at once (the dialog\'s rule kinds, judged)', JSON.stringify(o.set));
+  ok(row && row.setBy === 'agent' && row.delivery === 'next-turn' && row.filter && row.filter.match === 'every' && row.filter.rules.map((r) => r.kind).join() === 'regex,has-attachment' && row.dailyWakeCap === 7, '--show reads it back: next-turn, match every, regex + has-attachment, cap 7, set by the agent', JSON.stringify(o.show));
+  const d = F.validateRule({ kind: 'regex', value: '(a+)+' });
+  ok(!o.refused.ok && o.refused.badSpec && o.refused.code === d.code && o.refused.error === d.error, 'a pattern the dialog refuses is refused to the agent identically (code + words; the route answers 400)', JSON.stringify(o.refused));
+  ok(!o.kind.ok && o.kind.code === 'bad-kind', 'a kind the dialog does not know is refused by the same validator', JSON.stringify(o.kind));
+  const acct = (o.all.watches || []).find((w) => w.grain === 'account');
+  const conv = (o.all.watches || []).find((w) => w.grain === 'conversation');
+  ok(acct && acct.setBy === 'user' && acct.notify === 'digest' && acct.digestMinutes === 60 && /mention @Worker/.test(acct.what) && conv && conv.setBy === 'agent', '`watches` lists every grain: its own row AND the row the user set for it (a digest on the account — read-only)', JSON.stringify(o.all.watches));
+  ok(o.digest.ok && o.digest.proposed && o.item && /As a digest: one billed turn every 45 minutes/.test(o.item.detail || '') && /keyword "outage"/.test(o.item.detail || ''), 'a digest is a billed turn: ONE request the user approves, its For-you item names the digest window and the rule in words', JSON.stringify(o.digest) + ' ' + JSON.stringify(o.item && o.item.detail));
+  ok(o.other.ok && !(o.other.watches || []).length, 'another agent reads none of these rows');
+  // CONTROL: a SECOND SCHEMA at the door (the pre-parity keywords-only body) instead of the one grammar — ⑩ goes red
+  const src = engineSource(REPO);
+  const cut = src.replace('    const sp = WS.watchSpecOfBody(body);', "    const sp = { ok: true, spec: { delivery: body.delivery || 'next-turn', notify: 'wake', mode: (body.keywords || []).length ? 'filtered' : 'all', ...((body.keywords || []).length ? { filter: { match: 'any', rules: body.keywords.map((value) => ({ kind: 'keyword', value })) } } : {}), dailyWakeCap: 40, why: '' } };");
+  const E10 = MUT.load('src/server/channels-engine.js', cut, 'second-schema');
+  const c = await parityLeg(E10, 'e10c');
+  const crow = c.show && c.show.rows && c.show.rows[0];
+  ok(cut !== src && c.refused.ok && !(crow && crow.filter), 'CONTROL: a second schema at the door drops the rules and accepts "(a+)+" — the legs above would be red', JSON.stringify(c.refused));
+}
+{ const asrc = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf8');
+  const wv = asrc.slice(asrc.indexOf('const watchVerb = async'), asrc.indexOf("app.post('/api/agent/channels/watch'"));
+  ok(/eng\.agentWatch\(ctx, b\.target, b\)/.test(wv) && !/keywords|delivery:|dailyWakeCap/.test(wv.replace(/\/\/.*$/gm, '')), 'the route hands the body WHOLE to the engine\'s one grammar — no schema of its own in watchVerb');
+  ok(/app\.get\('\/api\/agent\/channels\/watches'/.test(asrc) && /agentWatchesFor\(channelPrincipal\(s, id\)/.test(asrc), 'the read-back route answers the caller\'s own principal'); }
+
 // ── wiring pins: the route + CLI spell the three verbs ──
 {
   const asrc = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf8');
   const cli = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-channels'), 'utf8');
   ok(/app\.post\('\/api\/agent\/channels\/watch', async \(req, res\) => \{ const t = await watchVerb\('watch', req, res\)/.test(asrc) && /app\.post\('\/api\/agent\/channels\/unwatch', async \(req, res\) => \{ const t = await watchVerb\('unwatch', req, res\)/.test(asrc) && /listFor\(channelPrincipal\(s, id\), \{ all: /.test(asrc), 'wiring: the agent routes for watch / unwatch / list --all');
-  ok(/verb === 'watch' \|\| verb === 'unwatch'/.test(cli) && /\/api\/agent\/channels\/list' \+ \(all \? '\?all=1' : ''\)/.test(cli) && /--regex is not offered/.test(cli), 'wiring: the CLI spells watch / unwatch / list --all and refuses --regex by name');
+  ok(/verb === 'watch' \|\| verb === 'unwatch'/.test(cli) && /\/api\/agent\/channels\/list' \+ \(all \? '\?all=1' : ''\)/.test(cli) && /\{ target, args: rest \}/.test(cli), 'wiring: the CLI spells watch / unwatch / list --all and hands the watch flags to the server raw (lane agent-watch-parity: the grammar is the server\'s)');
 }
 
-{ const cli = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-channels'), 'utf8'); ok(/delivery: flag\('--mode'\) \|\| 'next-turn'/.test(cli), 'wiring (verify r1 ⑤): the CLI\'s default mode is next-turn — an agent never chooses a billed wake for itself by default'); }
+{ const cli = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-channels'), 'utf8'); ok(cli && require(path.join(REPO, 'src/channel-watch-spec.js')).watchSpecFromArgs([]).spec.delivery === 'next-turn' && require(path.join(REPO, 'src/channel-watch-spec.js')).watchSpecOfBody({}).spec.delivery === 'next-turn', 'wiring (verify r1 ⑤): the CLI\'s default mode is next-turn — an agent never chooses a billed wake for itself by default'); }
 fs.rmSync(ROOT, { recursive: true, force: true });
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

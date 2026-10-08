@@ -409,7 +409,8 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
     // fold its lines and make a `# …` line a heading: the same trap as F4 of r4)
     const verbatim = isCmd || !!(it.action && it.action.type === 'helper-ask');
     // lane browser-propose: a browser proposal's detail is what its Approve runs, line for line — verbatim too, never markdown
-    const plain = verbatim || !!(it.action && it.action.type === 'browser-proposal');
+    // lane parked-ask-inbox: a conversation's own ask carries its whole request too — verbatim, never markdown
+    const plain = verbatim || !!(it.action && (it.action.type === 'browser-proposal' || it.action.type === 'main-ask'));
     // design 009: an app install's ONE card — its lines, progress and Details fold (escaped; its buttons are the action row)
     const card = it.card && it.action && it.action.type === 'app-install' ? it.card : null;
     const detailSig = card ? 'card\u0000' + (v.resolved ? 'r' : 'o') + JSON.stringify(card) : (plain ? 'cmd\u0000' : 'md\u0000') + v.detail;

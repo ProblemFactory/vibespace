@@ -28,7 +28,7 @@ import { heldText } from './jobs-layout.js';
 import { browserFactWords } from '../browser-fact.js'; // lane S2: THE words of THE browser fact (the chip prints them, never its own)
 import { createCardTraceLoader } from './browser-trace-view.js'; // agent browser P5 (§4.5 / D35): the tool card's action trace
 import { createChannelTouchView, openTouchRow } from './channel-touch-view.js'; // §26 (B-099e): the conversations an agent read / drafted, as rows on the tool card + the status-bar chip
-import { serviceHref, serviceOpenSpec } from './artifact-card.js'; // lane artifacts-services(-url): a service row's link (the server's ladder: published forward, else this instance's proxy)
+import { serviceHref, serviceOpenSpec, publishArtifacts } from './artifact-card.js'; // lane artifacts-services(-url): a service row's link (the server's ladder: published forward, else this instance's proxy)
 import { stallVerdict, waitingOnUser } from '../turn-state.js'; // PURE (lane parked-ask-stall): the delivery-stall verdict + "is the turn waiting on the user"
 import { hasPendingHelperAsk, askState, isWaiting } from '../helper-ask.js'; // PURE (lane S1): a helper's permission ask — the fold rule + the waiting chip's words
 
@@ -389,6 +389,8 @@ class ChatView {
       // §26 (B-099e): the channels chip opens a touched conversation through the ONE door
       onChannelOpen: (row) => openTouchRow(this.app, row),
       onOpenArtifact: (b) => this._openArtifact(b), // lane artifacts-model: the Artifacts chip's row → the file beside the chat
+      app: this.app, // lane artifacts-list-scale: the list's ⋯ (show in Files, a helper's conversation, a service's job / Ports)
+      onOpenArtifactsWindow: () => this.app.openArtifacts?.({ sessionId: this.sessionId, name: String((this.winInfo && (this.winInfo.name || this.winInfo.title)) || '').split(' — ')[0] }), // lane artifacts-list-scale: the popover's ⤢ → the Artifacts window
     });
     this._refreshArtifacts(); // lane artifacts-e2e: the chip reads the registry when the view is BUILT (a reload / a re-opened chat) — the attach reply never reached it on that path
     // The chip's facts ride the `active-sessions` payload; a window opened
@@ -3983,7 +3985,7 @@ class ChatView {
     if (this._readOnly || !this.sessionId) return;
     clearTimeout(this._artifactsTimer);
     this._artifactsTimer = setTimeout(() => {
-      fetch(`/api/artifacts?sessionId=${encodeURIComponent(this.sessionId)}`).then((r) => r.json()).then((v) => this._statusBar?.setArtifacts(v)).catch(() => { });
+      fetch(`/api/artifacts?sessionId=${encodeURIComponent(this.sessionId)}`).then((r) => r.json()).then((v) => { this._statusBar?.setArtifacts(v); publishArtifacts(this.sessionId, v); }).catch(() => { }); // lane artifacts-list-scale: an open Artifacts window of this conversation follows
     }, 250);
   }
   /** A card's LIVE birth: the chip re-reads; a doc the agent just WROTE opens beside the chat when the setting is on

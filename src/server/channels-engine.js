@@ -6136,12 +6136,27 @@ function create(deps = {}) {
         };
         // THE classifier (the one the window's tag and the placement read) — the place rules ask it first
         const kindOf = (r) => (ix ? Thr.placeKindOf(r, ix) : { kind: 'plain', topic: null, quotes: null });
-        placeBase = { owner, threadOf, kindOf, sentBy: en.sentBy && typeof en.sentBy === 'object' ? en.sentBy : {} };
+        // lane reply-to-sent: what each drafter SENT here, from the outbox's sent proposals (the last 30 days, ≤ 500 per
+        // drafter) — {at, words, subject} per vendor id; `reply-to-sent` reads only these
+        const sentOut = new Map();   // cid → Map(vid → {at, words, subject})
+        const since = t - F.SENT_WINDOW_MS;
+        const props = Object.values((store.outbox.snapshot() || {}).proposals || {}).filter((p) => p && p.state === 'sent' && p.adapterId === rec.id && p.convId === convId && p.kind !== 'reaction' && p.draftedBy && p.draftedBy.kind === 'agent' && p.result && p.result.vendorMessageId && Number(p.result.at || p.at) >= since);
+        props.sort((a, b) => Number(a.result.at || a.at) - Number(b.result.at || b.at));
+        for (const p of props) {
+          const m = sentOut.get(String(p.draftedBy.id)) || new Map();
+          m.set(String(p.result.vendorMessageId), { at: Number(p.result.at || p.at), words: String(p.text || '').replace(/\s+/g, ' ').trim().slice(0, 80), subject: String((p.compose && p.compose.subject) || p.title || '').slice(0, 120) });
+          if (m.size > F.SENT_MAX) m.delete(m.keys().next().value);
+          sentOut.set(String(p.draftedBy.id), m);
+        }
+        placeBase = { owner, threadOf, kindOf, sentBy: en.sentBy && typeof en.sentBy === 'object' ? en.sentBy : {}, sentOut, convKind: en.kind || null };
       }
-      const mine = new Set(placeBase.owner);
       const cids = !principal ? [] : principal.kind === 'agent' ? [String(principal.id)] : F.fanTargetOf(principal) ? [F.fanTargetOf(principal)] : principal.kind === 'everyone' ? [] : Object.keys(placeBase.sentBy).filter((k) => k.startsWith('agent:')).map((k) => k.slice(6)).filter((cid) => groupsOfSession(cid).includes(String(principal.id)));
-      for (const cid of cids) for (const v of placeBase.sentBy[`agent:${cid}`] || []) mine.add(String(v));
-      return { mine, threadOf: placeBase.threadOf, kindOf: placeBase.kindOf };
+      // lane reply-to-sent: `ctx.mine` split — the OWNER's (`ownerMine`) and THIS principal's sends (`sentByMe` from the
+      // outbox; `sentIds` = the index ledger); `reply-to-mine` reads all three, `reply-to-sent` only `sentByMe`
+      const sentIds = new Set();
+      const sentByMe = new Map();
+      for (const cid of cids) { for (const v of placeBase.sentBy[`agent:${cid}`] || []) sentIds.add(String(v)); for (const [v, s] of placeBase.sentOut.get(cid) || []) sentByMe.set(v, s); }
+      return { ownerMine: placeBase.owner, sentIds, sentByMe, convKind: placeBase.convKind, threadOf: placeBase.threadOf, kindOf: placeBase.kindOf };
     };
     // R4 verify r5: ONE BAD RECORD (or a throw preparing one watcher) MUST NOT
     // DROP THE REST OF THIS CONVERSATION'S BATCH. onFresh is tracked per
@@ -6155,8 +6170,12 @@ function create(deps = {}) {
     for (const item of order) {
       try {
         const w = item.watcher;
-        const filter = w.mode === 'filtered' ? filterFor(w.filterId) : null;
-        if (w.mode === 'filtered' && !filter) { log.warn(`[channels] ${rec.id}/${convId}: ${pkOf(w.principal)}'s notification names filter ${w.filterId} which does not exist — not woken (fail closed)`); continue; }
+        const filter0 = w.mode === 'filtered' ? filterFor(w.filterId) : null;
+        if (w.mode === 'filtered' && !filter0) { log.warn(`[channels] ${rec.id}/${convId}: ${pkOf(w.principal)}'s notification names filter ${w.filterId} which does not exist — not woken (fail closed)`); continue; }
+        // lane reply-to-sent: a group row carrying the rule is judged PER MEMBER (F.fanOutWatchers' `split`): a member's item
+        // reads only the sent half, for that member's sends; the group's own item the rest of the rules
+        const filter = item.split ? F.splitFilter(filter0, item.split) : filter0;
+        if (item.split && !filter) continue;
         const hits = [];
         const mctx = { ...(filter && Array.isArray(filter.rules) && filter.rules.some((x) => x && F.PLACE_RULE_KINDS.includes(x.kind)) ? placeCtx(w.principal) : {}), subjectOf };
         for (const r of fresh) {
@@ -6166,7 +6185,7 @@ function create(deps = {}) {
             if (FO.selfRead(r, selfId)) continue;
             if (w.mode === 'all') { hits.push({ record: r, why: [] }); continue; }
             const m = F.matchRecord(filter, r, mctx);
-            if (m.hit) hits.push({ record: r, why: m.why });
+            if (m.hit) hits.push({ record: r, why: m.why, ...(m.sent ? { sent: m.sent } : {}) });
           } catch (err) { log.warn(`[channels] ${rec.id}/${convId}: a record could not be matched for ${pkOf(w.principal)} — skipped: ${(err && err.message) || err}`); }
         }
         if (!hits.length) continue;
@@ -6259,7 +6278,7 @@ function create(deps = {}) {
       const e2 = store.index.entry(rec.id, convId, { create: false });
       if (!e2) return;
       healP2(e2);
-      for (const h of hits) e2.pending.push({ record: h.record, why: h.why || [], at: now(), ...(pk ? { for: pk } : {}) });
+      for (const h of hits) e2.pending.push({ record: h.record, why: h.why || [], ...(h.sent ? { sent: h.sent } : {}), at: now(), ...(pk ? { for: pk } : {}) });
       if (!pk) { e2.pendingElided += Number(elided) || 0; return; }
       if (Number(elided) > 0) e2.pendingElidedBy[pk] = (Number(e2.pendingElidedBy[pk]) || 0) + Number(elided);
       // PENDING_CAP per (conversation, watcher): the oldest of THIS watcher's go
@@ -6444,6 +6463,9 @@ function create(deps = {}) {
       if (!cid) return { cid: null, name: null, via: 'everyone', live: false, cursor: null, why: 'all agents — no running conversation named (kept for the next pass)' };
       return { cid, name: (s && s.name) || w.principal.name || cid, via: 'everyone', live: !!s, cursor: null };
     }
+    // lane reply-to-sent: a group MEMBER's item (the per-member fan-out) names its one member — never the round-robin
+    const mt = F.fanTargetOf(w.principal);
+    if (mt) { const s = live.find((x) => x && x.cid === mt); return { cid: mt, name: (s && s.name) || w.principal.member || mt, via: 'group', live: !!s, cursor: null }; }
     const all = live.filter((x) => x && Array.isArray(x.groups) && x.groups.includes(w.principal.id)).map((x) => x.cid);
     const got = batch && batch.got ? batch.got : null;
     const fresh = got ? all.filter((c) => !got.has(c)) : all;
@@ -6760,7 +6782,7 @@ function create(deps = {}) {
     accountGrainOf, patternsOf, patternById, pkOf, legacyConvAssignment, convGrainOf, convFacts, effectiveFor, fanTargets, wakeEffOf,
     storedWatcherFor, itemIs, scopeKeyOf, watcherRef, accessRowView, watcherView, eligibleAboveView, grainView, reachFor, groupsOfSession, convFor,
     stillSees, effectiveForAccount, searchFor, readAroundFor, setPolicy, setReach, reachView, request, decideRequest, directoryLists,
-    setAgentDirectory, agentWatch, agentUnwatch, listFor, readFor, readThreadFor, statusFor, setGrain, setAccess, setWatchers, removePattern,
+    setAgentDirectory, agentWatch, agentUnwatch, agentWatchesFor, listFor, readFor, readThreadFor, statusFor, setGrain, setAccess, setWatchers, removePattern,
     setAssignment, setScopeAssignment, accessFor, estimateScope, migrateAggregated, migrateGrants, setFilter, estimateFilter,
     previewRule, membersNow,
   } = Object.assign(engineCtx, ChannelsAccess.create(engineCtx));
@@ -7112,7 +7134,7 @@ function create(deps = {}) {
     // P4: reconcile / the boot sweep / the per-channel honesty switch
     reconcile: (id, o) => onProposal(id, () => reconcile(id, o)), sweepSending, sweepReplaces, setSenderHonesty, honestyLineFor, deprecatedReceiptWakes,   // verify r2: two Check-outcome presses ask the adapter ONCE
     setPolicy, policyFor, setReach, reachView, reachFor, request, decideRequest,
-    agentWatch, agentUnwatch, setAgentDirectory, directoryLists,   // lane channel-agent-watch
+    agentWatch, agentUnwatch, agentWatchesFor, setAgentDirectory, directoryLists,   // lane channel-agent-watch
     onFresh,   // lane channel-agent-watch: the hit dispatch, driven by test-channel-agent-watch ⑤ with records the store already holds
     listFor, readFor, statusFor,
     flushPending: (adapterId, convId, opts) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId); return rec ? flushPending(rec, convId, opts || {}) : Promise.resolve({ ok: false, why: 'no-such-adapter' }); },

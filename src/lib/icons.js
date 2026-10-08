@@ -138,6 +138,7 @@ export const UI_ICONS = {
   more:      _s('<circle cx="3.5" cy="8" r="1.1" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.1" fill="currentColor" stroke="none"/><circle cx="12.5" cy="8" r="1.1" fill="currentColor" stroke="none"/>'),
   chevronRight: _s('<path d="M6 3.5L10.5 8 6 12.5"/>'),
   chevronLeft: _s('<path d="M10 3.5L5.5 8 10 12.5"/>'), // the replay window's previous action
+  expand:    _s('<path d="M9.5 2.5h4v4M13.5 2.5L9 7M6.5 13.5h-4v-4M2.5 13.5L7 9"/>'), // lane artifacts-list-scale: ⤢ the Artifacts popover opens as a window
   outbox:    _s('<path d="M2.5 4.5h11v8h-11z"/><path d="M2.5 4.5l5.5 4 5.5-4"/><path d="M8 2v3"/>'),
   filter:    _s('<path d="M2.5 3h11l-4.5 5.5V13l-2-1V8.5z"/>'),
   reach:     _s('<path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8s-2.5 4.5-6.5 4.5S1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/>'),

@@ -78,7 +78,7 @@ const { inertFrames } = require('./channel-record.js');
 const { toAgentText, cutText, foldHidden } = require('./peer-text.js');   // lane peer-census: THE belt (bound → fold → the frame rule per line / piece) every agent-facing line takes
 
 /** The CLOSED rule set. A kind outside it is refused by `validateFilter`. */
-const RULE_KINDS = Object.freeze(['mention', 'keyword', 'regex', 'sender-in-group', 'from-address', 'subject', 'has-attachment', 'not-contains', 'time-window', 'reply-to-mine', 'in-thread-with-me']);
+const RULE_KINDS = Object.freeze(['mention', 'keyword', 'regex', 'sender-in-group', 'from-address', 'subject', 'has-attachment', 'not-contains', 'time-window', 'reply-to-mine', 'in-thread-with-me', 'reply-to-sent']);
 /** lane channel-threads (spec §5.4): the two rule kinds that read a record's PLACE — `reply-to-mine` and
  *  `in-thread-with-me`. Both read `ctx.mine` (a Set of the vendor ids the OWNER wrote or THIS principal sent from here,
  *  built by the engine per watcher from the conversation's log + the outbox's `sentBy`), `ctx.kindOf(record)` = THE
@@ -92,7 +92,28 @@ const RULE_KINDS = Object.freeze(['mention', 'keyword', 'regex', 'sender-in-grou
  *     yours"); a QUOTE (a `quote`, a `topic-quote`, a topic root that quotes) only when the message it quotes is mine
  *     ("quoted your message") — never because the chain it hangs in started with me (a chain's `root` is not read).
  *  `placeHit(rule, record, ctx)` = the ONE decision → the `why` string that fired, or null. */
-const PLACE_RULE_KINDS = Object.freeze(['reply-to-mine', 'in-thread-with-me']);
+const PLACE_RULE_KINDS = Object.freeze(['reply-to-mine', 'in-thread-with-me', 'reply-to-sent']);
+/** lane reply-to-sent (owner 2026-10-07: "通知功能好像缺少'回复了这个 agent 之前发送的消息'的 trigger"): `reply-to-sent` fires
+ *  when a record ANSWERS a message THIS principal sent from here — judged by PLACE across every shape the channel has
+ *  (`sentHit`): a quote / reply naming a sent id; a topic or Slack-thread reply under a sent parent / root; a record in a
+ *  MAIL thread (`ctx.convKind === 'thread'`) newer than a sent mail; and in a DIRECT chat (`dm` — no reply marker) the
+ *  peer's message within REPLY_WINDOW_MS after this principal's newest send. It reads `ctx.sentByMe` ONLY (a Map
+ *  vendorId → {at, words, subject} the engine builds from the outbox's sent proposals of this drafter, the last
+ *  SENT_WINDOW_MS / SENT_MAX ids) — never the owner's own messages (`ctx.ownerMine`, which `reply-to-mine` reads). */
+const REPLY_WINDOW_MS = 24 * 3600e3;
+const SENT_WINDOW_MS = 30 * 24 * 3600e3;
+const SENT_MAX = 500;
+/** lane reply-to-sent (owner revision 21:50Z: "对组设置这个权限就等于对每个 agent 单独处理"): a GROUP row carrying the rule is
+ *  judged PER MEMBER — `fanOutWatchers` gives each live member its own item (its own key `group:<gid>><cid>`, ledger,
+ *  stash); the row's OTHER rules (match any) stay the group's one round-robin item. `splitFilter` = the two halves. */
+function hasSentRule(filter) { return !!filter && Array.isArray(filter.rules) && filter.rules.some((r) => r && r.kind === 'reply-to-sent'); }
+function splitFilter(filter, part) {
+  if (!hasSentRule(filter)) return part === 'rest' ? filter : null;
+  const every = filter.match === 'every';
+  if (part === 'sent') return every ? filter : { ...filter, rules: filter.rules.filter((r) => r && r.kind === 'reply-to-sent') };
+  const rest = filter.rules.filter((r) => r && r.kind !== 'reply-to-sent');
+  return every || !rest.length ? null : { ...filter, rules: rest };
+}
 const MATCH_MODES = Object.freeze(['any', 'every']);
 const PRINCIPAL_KINDS = Object.freeze(['agent', 'group', 'everyone']);
 /** THE everyone principal's ONE id (channel-acl's, the picker's). */
@@ -361,7 +382,7 @@ function validateRule(rule) {
       out.label = str(r.label).trim().slice(0, 100) || null;
       break;
     }
-    case 'has-attachment': case 'reply-to-mine': case 'in-thread-with-me': break;
+    case 'has-attachment': case 'reply-to-mine': case 'in-thread-with-me': case 'reply-to-sent': break;
     case 'time-window': {
       const from = hhmm(r.from), to = hhmm(r.to);
       if (from === null || to === null) return refuse('time-format', 'time-window: from and to must be HH:MM', { kind: r.kind });
@@ -434,6 +455,7 @@ function ruleWhy(rule) {
     case 'time-window': return `within ${rule.from}-${rule.to}`;
     case 'reply-to-mine': return WHY_REPLY;
     case 'in-thread-with-me': return WHY_THREAD;
+    case 'reply-to-sent': return WHY_SENT;
     default: return rule.kind;
   }
 }
@@ -442,14 +464,62 @@ function ruleWhy(rule) {
 const WHY_REPLY = 'a reply to a message of yours';
 const WHY_THREAD = 'in a thread you are in';
 const WHY_QUOTED = 'quoted your message';
+const WHY_SENT = 'a reply to a message this agent sent';
 const PLACE_WHYS = Object.freeze([WHY_REPLY, WHY_THREAD, WHY_QUOTED]);
+/** lane reply-to-sent: the `reply-to-sent` whys — ONE per shape, a fixed template the client words (channel-words
+ *  wakeWhyText): {when} = the answered message's clock (UTC), {subject} = the sent mail's subject. */
+const SENT_WHYS = Object.freeze({ quote: 'quotes your message of {when}', thread: 'replies in the thread of your message of {when}', mail: 'in the thread of your mail "{subject}"', dm: 'the next message after yours in a direct chat' });
+const clockOf = (at) => { const d = new Date(Number(at)); return Number.isFinite(d.getTime()) ? `${d.toISOString().slice(11, 16)} UTC` : '?'; };
+/** The ids a `reply-to-mine` / `in-thread-with-me` rule calls mine: the owner's (`ownerMine`), what this principal sent
+ *  (`sentByMe` + the index ledger `sentIds`), and a caller's legacy `mine`. */
+function mineOf(ctx) {
+  const out = new Set();
+  for (const s of [ctx && ctx.mine, ctx && ctx.ownerMine, ctx && ctx.sentIds]) if (s instanceof Set) for (const v of s) out.add(str(v));
+  if (ctx && ctx.sentByMe instanceof Map) for (const v of ctx.sentByMe.keys()) out.add(str(v));
+  return out;
+}
+/**
+ * lane reply-to-sent: DOES THIS RECORD ANSWER A MESSAGE THIS PRINCIPAL SENT — `{why, sent}` (the shape's why and the
+ * answered sent entry `{at, words, subject}`) or null. Reads `ctx.sentByMe` only; a record that IS a sent one never.
+ */
+function sentHit(record, ctx) {
+  const rec = record || {};
+  const sent = ctx && ctx.sentByMe instanceof Map ? ctx.sentByMe : null;
+  if (!sent || !sent.size) return null;
+  const self = str(rec.vendorId);
+  if (self && sent.has(self)) return null;
+  const of = (x) => (x !== null && x !== undefined && str(x) !== '' && str(x) !== self ? sent.get(str(x)) || null : null);
+  const c = (typeof ctx.kindOf === 'function' && ctx.kindOf(rec)) || {};
+  const kind = String(c.kind || 'plain');
+  const topical = !!c.topic && /^topic-/.test(kind);   // the topic gate (placeHit's, read here for the sent ids)
+  const fill = (tpl, s) => tpl.replace('{when}', clockOf(s.at)).replace('{subject}', str(s.subject || s.words).slice(0, 60));
+  // (a) a QUOTE / reply naming one of mine (a quote inside a topic, a topic head that quotes)
+  const q = kind !== 'topic-reply' ? (of(c.quotes) || (!topical ? of(rec.replyTo) : null)) : null;
+  if (q) return { why: fill(SENT_WHYS.quote, q), sent: q };
+  // (b) a topic reply / (d) a Slack thread reply — under a sent parent or root
+  if (topical || rec.root || rec.threadKey) {
+    const s = of(rec.replyTo) || of(rec.root) || of(rec.threadKey);
+    if (s) return { why: fill(SENT_WHYS.thread, s), sent: s };
+  }
+  const at = Number(rec.at);
+  if (!Number.isFinite(at)) return null;
+  let newest = null;
+  for (const s of sent.values()) if (s && Number.isFinite(Number(s.at)) && Number(s.at) < at && (!newest || Number(s.at) > Number(newest.at))) newest = s;
+  if (!newest) return null;
+  // (c) a MAIL thread IS the conversation: a record newer than a mail this principal sent in it
+  if (ctx.convKind === 'thread') return { why: fill(SENT_WHYS.mail, newest), sent: newest };
+  // (e) a DIRECT chat has no reply marker: the peer's message within the window after this principal's newest send
+  if (ctx.convKind === 'dm' && at - Number(newest.at) <= REPLY_WINDOW_MS) return { why: SENT_WHYS.dm, sent: newest };
+  return null;
+}
 /**
  * THE PLACE RULES' ONE DECISION (owner decision A, 2026-09-28): the `why` string ONE place rule fires with for ONE
  * record, or null. Reads THE classifier (`ctx.kindOf` — a quote chain is never a thread) and `ctx.mine`.
  */
 function placeHit(rule, record, ctx) {
   const rec = record || {};
-  const mine = ctx && ctx.mine instanceof Set ? ctx.mine : null;
+  if (rule && rule.kind === 'reply-to-sent') { const s = sentHit(rec, ctx); return s ? s.why : null; }
+  const mine = ctx ? mineOf(ctx) : null;
   if (!mine || !mine.size || !ctx || typeof ctx.kindOf !== 'function') return null;
   const self = str(rec.vendorId);
   const isMine = (x) => x !== null && x !== undefined && str(x) !== '' && str(x) !== self && mine.has(str(x));
@@ -521,7 +591,7 @@ function ruleHits(rule, record, ctx) {
       if (from === null || to === null) return false;
       return from <= to ? (minutes >= from && minutes < to) : (minutes >= from || minutes < to);   // a window past midnight wraps
     }
-    case 'reply-to-mine': case 'in-thread-with-me': return placeHit(rule, rec, ctx) !== null;
+    case 'reply-to-mine': case 'in-thread-with-me': case 'reply-to-sent': return placeHit(rule, rec, ctx) !== null;
     default: return false;
   }
 }
@@ -537,15 +607,17 @@ function matchRecord(filter, record, ctx = {}) {
   const match = MATCH_MODES.includes(f.match) ? f.match : 'any';
   const why = [];
   let hits = 0;
+  let sent = null;   // lane reply-to-sent: the sent message this record answers (the hand-over line names it)
   for (const rule of f.rules) {
     if (!rule || !RULE_KINDS.includes(rule.kind)) continue;
+    if (rule.kind === 'reply-to-sent' && !sent) { const s = sentHit(record, ctx); if (s) sent = s.sent; }
     // a place rule names the clause that fired ("quoted your message" / "a reply to …" / "in a thread …")
     const placeWhy = PLACE_RULE_KINDS.includes(rule.kind) ? placeHit(rule, record, ctx) : undefined;
     if (placeWhy !== undefined ? placeWhy !== null : ruleHits(rule, record, ctx)) { hits++; why.push(placeWhy || ruleWhy(rule)); }
     else if (match === 'every') return { hit: false, why: [] };
   }
   const hit = match === 'every' ? hits === f.rules.length && hits > 0 : hits > 0;
-  return { hit, why: hit ? why : [] };
+  return { hit, why: hit ? why : [], ...(hit && sent ? { sent: { at: Number(sent.at) || null, words: str(sent.words).slice(0, 80) } } : {}) };
 }
 
 // ── the estimate ───────────────────────────────────────────────────────────
@@ -695,6 +767,8 @@ function effectiveAuthority(assignment, caps = {}) {
 function principalKey(p) {
   if (!p || typeof p !== 'object' || !PRINCIPAL_KINDS.includes(p.kind)) return null;
   if (p.kind === 'everyone') { const tg = str(p.target).trim(); return `everyone:${EVERYONE_ID}${tg ? FAN_SEP + tg : ''}`; }
+  // lane reply-to-sent: a GROUP row's per-member item (`fanOutWatchers`) is keyed by its member — never a stored row
+  if (p.kind === 'group' && str(p.target).trim() && str(p.id).trim()) return `group:${str(p.id).trim()}${FAN_SEP}${str(p.target).trim()}`;
   return str(p.id).trim() ? `${p.kind}:${str(p.id).trim()}` : null;
 }
 function cleanPrincipal(p0) {
@@ -1161,20 +1235,23 @@ function rowNames(row, ctx) {
   if (!p || !ctx) return false;
   if (p.kind === 'everyone') return ctx.kind === 'agent' && !!ctx.id && (!p.target || str(p.target) === str(ctx.id));
   if (p.kind === 'agent') return ctx.kind === 'agent' && ctx.id === p.id;
-  if (p.kind === 'group') return Array.isArray(ctx.groups) && ctx.groups.includes(p.id);
+  if (p.kind === 'group') return Array.isArray(ctx.groups) && ctx.groups.includes(p.id) && (!p.target || str(p.target) === str(ctx.id));
   return false;
 }
 // ── ALL AGENTS: the watcher FAN-OUT (lane everyone-principal) ────────────
 
 /** The fan-out target of a principal (`fanOutWatchers` made it) — its conversation id — or null. */
 function fanTargetOf(p) {
-  return p && typeof p === 'object' && p.kind === 'everyone' && str(p.target).trim() ? str(p.target).trim() : null;
+  return p && typeof p === 'object' && (p.kind === 'everyone' || p.kind === 'group') && str(p.target).trim() ? str(p.target).trim() : null;
 }
 /** A watcher key's fan-out parts: `everyone:*><cid>` → `{root:'everyone:*', cid}`, anything else → null. */
 function fanOfKey(pk) {
   const k = str(pk);
   const head = `everyone:${EVERYONE_ID}${FAN_SEP}`;
-  return k.startsWith(head) && k.length > head.length ? { root: `everyone:${EVERYONE_ID}`, cid: k.slice(head.length) } : null;
+  if (k.startsWith(head) && k.length > head.length) return { root: `everyone:${EVERYONE_ID}`, cid: k.slice(head.length) };
+  // lane reply-to-sent: a group member's item `group:<gid>><cid>`
+  const m = /^(group:[^>]+)>(.+)$/.exec(k);
+  return m ? { root: m[1], cid: m[2] } : null;
 }
 /** The pace ledger of ONE fan-out target inside the stored everyone row (`stats.fan[<cid>]`; a read-only empty one
  *  when it has none yet). */
@@ -1185,6 +1262,8 @@ function fanStatsOf(w, cid) {
 /** A fan-out target's watcher: the stored everyone row's settings (notify, mode, filter, digest, CAP) with the
  *  target's principal and the target's OWN ledger — never the shared one. */
 function fanWatcher(root, cid, name = null) {
+  const g = root && root.principal && root.principal.kind === 'group' ? root.principal : null;
+  if (g) return { ...root, principal: { kind: 'group', id: g.id, name: g.name || null, target: str(cid), member: name || null }, stats: fanStatsOf(root, cid) };   // lane reply-to-sent: a group member's item
   return { ...root, principal: { kind: 'everyone', id: EVERYONE_ID, target: str(cid), name: name || null }, stats: fanStatsOf(root, cid) };
 }
 /**
@@ -1194,19 +1273,27 @@ function fanWatcher(root, cid, name = null) {
  * running wakes nobody (its hits are not held for a conversation that does not exist). Nothing else changes:
  * access rows, the other watchers, the sources. PURE.
  */
-function fanOutWatchers(eff, live = []) {
-  if (!eff || !Array.isArray(eff.watchers) || !eff.watchers.some((x) => x && x.watcher && x.watcher.principal && x.watcher.principal.kind === 'everyone' && !fanTargetOf(x.watcher.principal))) return eff;
+function fanOutWatchers(eff, live = [], { filterOf = null } = {}) {
+  // lane reply-to-sent: a GROUP row whose filter (`filterOf(watcher)`) carries `reply-to-sent` fans out to its live members
+  const perMember = (w) => !!w && w.principal && w.principal.kind === 'group' && !fanTargetOf(w.principal) && w.mode === 'filtered' && typeof filterOf === 'function' && hasSentRule(filterOf(w));
+  if (!eff || !Array.isArray(eff.watchers) || !eff.watchers.some((x) => x && x.watcher && x.watcher.principal && ((x.watcher.principal.kind === 'everyone' && !fanTargetOf(x.watcher.principal)) || perMember(x.watcher)))) return eff;
   const seen = new Set();
   const targets = [];
   for (const s of Array.isArray(live) ? live : []) {
     const cid = s && str(s.cid).trim();
     if (!cid || seen.has(cid)) continue;
     seen.add(cid);
-    targets.push({ cid, name: s.name || null });
+    targets.push({ cid, name: s.name || null, groups: Array.isArray(s.groups) ? s.groups.map(str) : [] });
   }
   const watchers = [];
   for (const item of eff.watchers) {
     const p = item && item.watcher && item.watcher.principal;
+    if (perMember(item.watcher)) {
+      // the rest of its rules (match any) stay the GROUP's one item; the sent half is judged per member, for that member
+      if (splitFilter(filterOf(item.watcher), 'rest')) watchers.push({ ...item, split: 'rest' });
+      for (const tg of targets) if (tg.groups.includes(str(p.id))) watchers.push({ ...item, watcher: fanWatcher(item.watcher, tg.cid, tg.name), fan: { cid: tg.cid, root: item.watcher }, split: 'sent' });
+      continue;
+    }
     if (!p || p.kind !== 'everyone' || fanTargetOf(p)) { watchers.push(item); continue; }
     for (const tg of targets) watchers.push({ ...item, watcher: fanWatcher(item.watcher, tg.cid, tg.name), fan: { cid: tg.cid, root: item.watcher } });
   }
@@ -1301,11 +1388,14 @@ function renderWakeBlock({ adapterLabel = 'channel', title = '', convId = '', hi
   if (meta.length) lines.push(meta.join(' · '));
   const ol = othersLine(others);
   if (ol) lines.push(ol);
-  let body = shown.map((h) => {
+  // lane reply-to-sent: a hit that ANSWERS a message this agent sent says which one first
+  const lineOf = (h, max) => {
     const r = h.record;
     const who = safeInline((r.author && (r.author.display || r.author.name || r.author.id)) || 'unknown', 80);
-    return `from ${who} at ${stamp(r.at)}\n${safeLine(r.text, maxChars)}`;
-  });
+    const re = h.sent && typeof h.sent === 'object' ? `Reply to your message (${h.sent.at ? stamp(h.sent.at) : 'earlier'}, "${safeInline(h.sent.words || '', 60)}"): ` : '';
+    return `${re}from ${who} at ${stamp(r.at)}\n${safeLine(r.text, max)}`;
+  };
+  let body = shown.map((h) => lineOf(h, maxChars));
   if (dropped > 0) body.push(`(${dropped} older elided)`);
   if (replyHint) body.push(`Reply with: vibespace-channels reply ${safeInline(convId, 200)} "…"   (this PROPOSES; the user approves)`);
   let out = [...lines, ...body].join('\n');
@@ -1317,7 +1407,7 @@ function renderWakeBlock({ adapterLabel = 'channel', title = '', convId = '', hi
     n--;
     const cut = shown.slice(shown.length - n);
     const drop2 = list.length - cut.length + (Number(elided) || 0);
-    body = cut.map((h) => `from ${safeInline((h.record.author && (h.record.author.display || h.record.author.name || h.record.author.id)) || 'unknown', 80)} at ${stamp(h.record.at)}\n${safeLine(h.record.text, Math.max(80, Math.floor(maxChars / 2)))}`);
+    body = cut.map((h) => lineOf(h, Math.max(80, Math.floor(maxChars / 2))));
     if (drop2 > 0) body.push(`(${drop2} older elided)`);
     if (replyHint) body.push(`Reply with: vibespace-channels reply ${safeInline(convId, 200)} "…"   (this PROPOSES; the user approves)`);
     out = [...lines, ...body].join('\n');
@@ -1397,7 +1487,7 @@ function whyText(why) {
 }
 
 module.exports = {
-  RULE_KINDS, PLACE_RULE_KINDS, MATCH_MODES, PRINCIPAL_KINDS, ASSIGN_MODES, NOTIFY_MODES, AUTHORITIES,
+  RULE_KINDS, PLACE_RULE_KINDS, REPLY_WINDOW_MS, SENT_WINDOW_MS, SENT_MAX, SENT_WHYS, WHY_SENT, sentHit, hasSentRule, splitFilter, MATCH_MODES, PRINCIPAL_KINDS, ASSIGN_MODES, NOTIFY_MODES, AUTHORITIES,
   DEFAULT_DIGEST_MINUTES, MIN_DIGEST_MINUTES, MAX_DIGEST_MINUTES, DEFAULT_DAILY_WAKE_CAP, MAX_DAILY_WAKE_CAP,
   BLOCK_MAX_RECORDS, BLOCK_MAX_CHARS, BLOCK_MAX_BYTES,
   validateRule, validateFilter, filterProblemText, MAX_RULES, ruleWhy, placeHit, PLACE_WHYS, matchRecord, estimate,
