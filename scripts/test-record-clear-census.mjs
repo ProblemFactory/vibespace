@@ -415,6 +415,7 @@ const ROUTES = {
   'POST /api/agent/browser/dialog': 'meta',
   'POST /api/agent/browser/direct': 'meta',
   'POST /api/agent/browser/passkey': 'meta', // lane browser-passkey: the page's passkey wait — status / cancel through the watch
+  'POST /api/agent/browser/permission': 'meta', // lane browser-ui-prompts-r2: one page permission decided through the watch (the lease's l.permissions row: kind + origin, no content)
   'POST /api/agent/browser/restart': 'meta', // int220 (lane browser-unresponsive): the keeper's restartProfile on a browser the caller holds — no record of the five kinds
   'POST /api/agent/browser/site-reset': 'meta',
   'GET /api/agent/browser/providers': 'meta',

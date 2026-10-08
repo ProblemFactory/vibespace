@@ -1824,8 +1824,8 @@ if (fs.existsSync('/proc/self')) {
     //    what was missing was the REASON, which is the thing the sweep is for.
     { file: 'src/cli-identity.js', needle: `execFileSync('ps', ['-p', String(pid), '-o', 'args=']`,
       why: 'ARGV READ — the JS twin of vs_argv\'s allowlisted `ps -p "$1" -o args=` rung, same non-decision: an unanswerable `ps` yields the empty word that already means "no evidence" to isCliProcess.' },
-    { file: 'src/agentd/agentd.js', needle: `spawnSync('ps', ['-p', String(pid), '-o', 'lstart=']`,
-      why: 'START-TIME READ (the no-/proc rung of the pid-identity stamp): it makes a recycled pid DISTINGUISHABLE from the original. An unanswerable `ps` returns \'\' = "no stamp", which is compared as a non-match and therefore never credits a stranger with being ours.' },
+    { file: 'src/proc-identity.js', needle: `spawnSync('ps', ['-p', String(pid), '-o', 'lstart=']`,
+      why: 'START-TIME READ (startToken, moved verbatim from agentd pidStartTime by lane pid-identity-census, B-1cc6 — the no-/proc rung of the pid-identity stamp): it makes a recycled pid DISTINGUISHABLE from the original. An unanswerable `ps` returns \'\' = "no stamp", which is compared as a non-match and therefore never credits a stranger with being ours.' },
     { file: 'src/agentd/agentd.js', needle: `execFileSync('ps', ['-p', String(pid), '-o', 'command=']`,
       why: 'ARGV READ inside the single-instance lock check, and existence is decided on the NEXT line by `process.kill(pid, 0)`. The empty answer is deliberately treated as "could be ours" (it BLOCKS a second daemon) — the conservative direction, the opposite of a false all-clear.' },
     // The two PARENT READs that used to sit here (`execFileSync`/`execFileP`

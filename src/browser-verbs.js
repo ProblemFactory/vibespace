@@ -51,7 +51,9 @@ const OURS = Object.freeze(['profiles', 'new', 'providers', 'use', 'detach', 'st
  *  stored login cleared in the conversation's own browser; a proposal on a shared profile). Ours always wins. */
 // lane browser-passkey (2026-10-05): + `passkey status | cancel` (a page of the conversation's waiting for a passkey — the watch's
 // hook aborts the page's own request; 0.38.1 has no `passkey` verb)
-const OURS_PAGE = Object.freeze(['stop', 'site-reset', 'passkey']);
+// lane browser-ui-prompts-r2 (2026-10-08): + `permission <kind> allow|deny [origin] [lat,lon]` (Browser.setPermission through the
+// watch — every kind is denied ahead; 0.38.1 has no `permission` verb, so no help fixture names it)
+const OURS_PAGE = Object.freeze(['stop', 'site-reset', 'passkey', 'permission']);
 
 /** Page verbs (the browser CLI 0.32.0's `--help` + `skills get core --full`
  *  census, design §3.2 rows 1–2 + `close` + D4/D5's pass-throughs). `profiles`

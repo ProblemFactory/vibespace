@@ -157,7 +157,7 @@ async function scenario(tag, wt) {
   const rA = await waitRow(c, A, (r) => !!cid(r), 20000), rB = await waitRow(c, B, (r) => !!cid(r), 20000);
   const idA = cid(rA), idB = cid(rB);
   ok(!!idA && !!idB, `[${tag}] both parents have their own ids (A terminal via the lock capture, B chat via its init)`, JSON.stringify({ idA, idB }));
-  const fork = (name, cwd, src, mode) => create(c, { cwd, name, mode, resume: true, resumeId: src, backendSessionId: src, fork: true, extraArgs: '--fork-session' });
+  const fork = (name, cwd, src, mode) => create(c, { cwd, name, mode, resume: true, resumeId: src, backendSessionId: src, fork: true }); // as the API sends it: the server derives --fork-session (B-8b7b)
   const FT = await fork('fork-FT', dFT, idA, 'terminal');
   const FC = await fork('fork-FC', dFC, idB, 'chat');
   const FC2 = await fork('fork-FC2', dFC2, idB, 'chat');

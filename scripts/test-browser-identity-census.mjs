@@ -239,6 +239,9 @@ const AGENT_ROUTES = {
   // lane browser-passkey (owner inc-muuvthv9-g69w): `passkey status | cancel` — THIS conversation's own browser only
   // (dialogTargetFor, asked again after every await); the answer is the passkey block + a sentence, no record
   'POST /api/agent/browser/passkey': null,
+  // lane browser-ui-prompts-r2: `permission <kind> allow|deny` — THIS conversation's own browser only (dialogTargetFor, asked
+  // again after the arm); the answer is the decision + a sentence, the lease row is its own
+  'POST /api/agent/browser/permission': null,
 };
 function judgeAgentRoutes(src) {
   const clean = stripComments(src);
@@ -455,6 +458,8 @@ const WALK = (eph, helper) => [
   ['POST', '/api/agent/browser/dialog', { profile: 'p-secret', action: 'status' }], ['POST', '/api/agent/browser/dialog', { profile: eph, action: 'dismiss' }],
   // lane browser-passkey: the passkey status / cancel (another conversation's profile, its own temporary browser, a shared one)
   ['POST', '/api/agent/browser/passkey', { profile: 'p-secret', action: 'status' }], ['POST', '/api/agent/browser/passkey', { profile: eph, action: 'cancel' }], ['POST', '/api/agent/browser/passkey', { profile: 'p-all', action: 'status' }],
+  // lane browser-ui-prompts-r2: a permission decided on another conversation's profile, its own temporary browser, a shared one
+  ['POST', '/api/agent/browser/permission', { profile: 'p-secret', kind: 'geolocation', setting: 'allow', origin: 'https://x.test' }], ['POST', '/api/agent/browser/permission', { profile: eph, kind: 'camera', setting: 'deny', origin: 'https://x.test' }], ['POST', '/api/agent/browser/permission', { profile: 'p-all', kind: 'geolocation', setting: 'allow', origin: 'https://x.test' }],
   // lane site-reset: the ways out (direct, through the watch) and one site's stored login cleared / proposed
   ['POST', '/api/agent/browser/direct', { profile: 'p-secret', action: 'stop' }], ['POST', '/api/agent/browser/direct', { profile: eph, action: 'stop' }], ['POST', '/api/agent/browser/direct', { profile: 'p-all', action: 'close' }], ['POST', '/api/agent/browser/direct', { profile: eph, action: 'screenshot' }],
   ['POST', '/api/agent/browser/site-reset', { profile: 'p-secret', host: 'x' }], ['POST', '/api/agent/browser/site-reset', { profile: 'p-all', host: 'x', explicit: true }], ['POST', '/api/agent/browser/site-reset', { profile: eph, host: 'x', explicit: true }],

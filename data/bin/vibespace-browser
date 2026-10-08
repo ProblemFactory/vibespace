@@ -132,6 +132,8 @@ PAGE VERBS (your own browser, or the attachment you name):
                                                   until answered — a verb that meets one says [dialog_open] and names it
   vibespace-browser passkey status|cancel         a page waiting for a passkey ([passkey_open]): you hold none — cancel it,
                                                   then the page's other way in (a recovery code, a password) or ask the user
+  vibespace-browser permission <kind> allow|deny [origin] [lat,lon]   every page permission is DENIED ahead (no prompt
+                                                  ever pends); flip one kind for one origin (your tab's by default)
   vibespace-browser stop                          stop the current tab loading (at once, even while it loops)
   vibespace-browser site-reset <host> | --host <h>   clear ONE site's stored login (its cookies + its storage) in your
                                                   own browser; on a shared profile it is a proposal the user approves
@@ -872,7 +874,7 @@ async function runPage(c) {
   child.on('error', (e) => { for (const h of head) console.error(h); console.error(`vibespace-browser: could not run the browser CLI (${e.message}) [binary_absent]`); process.exit(1); });
   // lane browser-stuck, rule 1: while the verb runs, the dialog watch is asked (a long-poll the SERVER answers at the
   // event) — a dialog that holds the page ends this command AT ONCE with [dialog_open], never after the 30 s timeout
-  let childDone = false, dialogHit = null, loopHit = null, shotCut = null, passkeyHit = null;
+  let childDone = false, dialogHit = null, loopHit = null, shotCut = null, passkeyHit = null, promptHit = null;
   const pkWake = !!PKS && !PKS.passkeyPasses(words[0] || '') && !PKS.passkeyReads(words[0] || ''); // lane browser-passkey: an ACTING verb ends at passkey_open
   const pollAbort = new AbortController();
   // lane site-reset: which verbs a LOOP ends — every page-waiting verb, and a navigation verb by a loop that began after its
@@ -881,6 +883,7 @@ async function runPage(c) {
   const readVerb = loopRead(words[0] || ''); // verify r4 #4: never cut by a loop whose pages load (its answer is the page; the audit tells the loop)
   const loopNav = navVerb || words[0] === 'back' || words[0] === 'forward' || words[0] === 'reload'; // a way out that navigates: cut only by a loop of ITS OWN page
   const loopWake = !!(dlg && dlg.watched && dlg.profileId && !dialogVerb) && (!loopPass(words[0] || '') || loopNav || shotVerb);
+  const pmWake = loopNav || pkWake; // lane browser-ui-prompts-r2: a navigating / acting verb ends at an HTTP sign-in AT ONCE (never its 25 s timeout)
   // a SCREENSHOT of a looping tab is bounded (measured on 0.38.1: the never-painting shape has no frame — the CLI sat 30 s)
   const tStart = Date.now();
   let shotTimer = null;
@@ -892,10 +895,11 @@ async function runPage(c) {
   if (dlg && dlg.watched && dlg.profileId && !dialogVerb) {
     (async () => {
       while (!childDone) {
-        const w = await peek(`/api/agent/browser/dialog?profile=${encodeURIComponent(dlg.profileId)}&wait=20000${loopWake ? `&loop=1&after=${loopNav && Number(r.at) > 0 ? Number(r.at) : 0}` : ''}${pkWake ? '&passkey=1' : ''}`, pollAbort.signal);
+        const w = await peek(`/api/agent/browser/dialog?profile=${encodeURIComponent(dlg.profileId)}&wait=20000${loopWake ? `&loop=1&after=${loopNav && Number(r.at) > 0 ? Number(r.at) : 0}` : ''}${pkWake ? '&passkey=1' : ''}${pmWake ? '&prompt=1' : ''}`, pollAbort.signal);
         if (childDone || !w || w._failed) return;
         if (w.open) { dialogHit = w; try { child.kill('SIGTERM'); } catch { /* ended */ } return; }
         if (w.passkey && pkWake) { passkeyHit = w.passkey; try { child.kill('SIGTERM'); } catch { /* ended */ } return; }
+        if (w.prompt && pmWake) { promptHit = w.prompt; try { child.kill('SIGTERM'); } catch { /* ended */ } return; } // lane browser-ui-prompts-r2
         if (w.loop && readVerb && w.loop.readable) return; // verify r4 #4: a reading verb on a readable loop answers on its own
         if (w.loop && shotVerb) { boundShot(w.loop); return; }
         if (w.loop) { loopHit = w.loop; try { child.kill('SIGTERM'); } catch { /* ended */ } return; }
@@ -919,7 +923,7 @@ async function runPage(c) {
     const nav = navVerb && code === 0 ? navFacts(outText) : null; // lane browser-propose: the final url + title the server judges for the sign-in hint
     // verify r4 #1: a `tab new` that succeeded names its tab (the ack) — the server binds it to this conversation
     const tabAck = words[0] === 'tab' && words[1] === 'new' && code === 0 && profileId ? await tabNewAck(outText, { bin: bin.path, env, cwd: runCwd.dir, wantsJson }) : null;
-    try { au = await call('POST', '/api/agent/browser/audit', { profile: profileId, verb: words[0] || null, ok: code === 0 && !dialogHit && !loopHit && !shotCut && !passkeyHit, ...(navUrl ? { url: navUrl } : {}), ...(tabAck ? { tab: { new: true, targetId: tabAck.targetId } } : {}), ...(Number(r.at) > 0 ? { since: Number(r.at) } : {}), ...(r.kind === 'child' && r.handle ? { handle: r.handle } : {}), ...(timedOut && !loopHit && !shotCut ? { timedOut: true } : {}), ...(dialogHit ? { dialog: true } : {}), ...(loopHit ? { loop: 'cut' } : shotCut ? { loop: true } : {}), ...(nav ? { nav } : {}) }, { soft: true }); } catch { au = null; }
+    try { au = await call('POST', '/api/agent/browser/audit', { profile: profileId, verb: words[0] || null, ok: code === 0 && !dialogHit && !loopHit && !shotCut && !passkeyHit && !promptHit, ...(navUrl ? { url: navUrl } : {}), ...(tabAck ? { tab: { new: true, targetId: tabAck.targetId } } : {}), ...(Number(r.at) > 0 ? { since: Number(r.at) } : {}), ...(r.kind === 'child' && r.handle ? { handle: r.handle } : {}), ...(timedOut && !loopHit && !shotCut ? { timedOut: true } : {}), ...(dialogHit ? { dialog: true } : {}), ...(loopHit ? { loop: 'cut' } : shotCut ? { loop: true } : {}), ...(nav ? { nav } : {}) }, { soft: true }); } catch { au = null; }
     const after = au && !au._failed && au.dialog && typeof au.dialog === 'object' ? au.dialog : null;
     // THE VERDICT: a dialog holds the page (the long-poll's hit, else the watch's fact after the verb, else — where no watch
     // runs — the browser CLI's own line) ⇒ the sentence FIRST, exit 1 [dialog_open]
@@ -936,6 +940,14 @@ async function runPage(c) {
     // lane browser-passkey: the verb met a page waiting for a passkey (the long-poll's hit, or a timeout while one stands) ⇒ THE SENTENCE first
     const pkHit = passkeyHit || (timedOut && after && after.passkey && after.passkey.state === 'passkey_open' ? after.passkey : null);
     if (open) printDialogOpen(open);
+    else if (promptHit) { // lane browser-ui-prompts-r2: the page asked for an HTTP sign-in and waits — THE SENTENCE first, the verb's own timeout never
+      if (wantsJson) console.log(JSON.stringify({ success: false, data: null, code: 'page_prompt', prompt: promptHit, error: promptHit.text || '' }));
+      else console.log(promptHit.text || 'The page asked for an HTTP sign-in and waits — only the user can answer it in the live view.');
+      console.error('[page_prompt]');
+      for (const h of head) console.error(h);
+      for (const n of notes) console.error(`note: ${n} [page_dialog]`);
+      process.exit(1);
+    }
     else if (pkHit) {
       printPasskey(pkHit);
       for (const h of head) console.error(h);
@@ -958,6 +970,7 @@ async function runPage(c) {
     for (const n of notes) console.error(`note: ${n} [page_dialog]`);
     if (after && after.loading) console.error(`note: ${after.loading} [page_loading]`); // verify r2 #5: a timeout while the tab loads is SAID (the time so far)
     if (after && after.stuck) console.error(`note: ${after.stuck} [page_unresponsive]`);
+    if (after && after.prompt && after.prompt.text) console.error(`note: ${after.prompt.text} [page_prompt]`); // lane browser-ui-prompts: a file chooser / an HTTP sign-in the page opened
     // lane site-reset: a way-out verb (a tab switch, a close, a screenshot) that ran beside a loop still standing is told it
     if (after && after.loop && !navVerb) console.error(`note: ${after.loop.text} [navigation_loop]`);
     // verify r1: on a SHARED browser whose tab of yours VibeSpace cannot tell, a verb that failed or timed out beside a looping
@@ -1044,6 +1057,25 @@ async function runOursPage(cls, { r, head, profileId, wantsJson }) {
       process.exit(1);
     }
     if (wantsJson) console.log(JSON.stringify({ success: true, data: sub === 'status' ? { passkey: a.passkey || null } : { cancelled: a.cancelled || 0 }, error: null }));
+    else console.log(a.text || 'done');
+    process.exit(0);
+  }
+  // lane browser-ui-prompts-r2: `permission <kind> allow|deny [origin] [lat,lon]` — OUR CDP act (0.38.1 has no such verb): every
+  // kind is denied ahead by the watch; this flips one kind for one origin on your own browser (recorded on the lease + the trace)
+  if (verbName === 'permission') {
+    const [, kind, setting, a3, a4] = words;
+    const at = a3 && /^-?[\d.]+,-?[\d.]+$/.test(a3) ? a3 : a4;
+    const origin = a3 && a3 !== at ? a3 : '';
+    if (!kind || !setting || words.length > 5) refuseLocally({ code: 'bad-request', error: 'permission takes <kind> allow|deny [origin] [lat,lon]', remedy: 'vibespace-browser permission geolocation allow' }, 2);
+    const a = await call('POST', '/api/agent/browser/permission', { profile: profileId, kind, setting, ...(origin ? { origin } : {}), ...(at ? { at } : {}) }, { soft: true });
+    for (const h of head) console.error(h);
+    await call('POST', '/api/agent/browser/audit', { profile: profileId, verb: 'permission', ok: !a._failed, ...(Number(r.at) > 0 ? { since: Number(r.at) } : {}) }, { soft: true }).catch(() => null);
+    if (a._failed) {
+      if (wantsJson) console.log(JSON.stringify({ success: false, data: null, code: a.code || 'refused', error: a.error || '' }));
+      console.error(`${a.error || 'HTTP ' + a._status} [${a.code || 'refused'}]`);
+      process.exit(1);
+    }
+    if (wantsJson) console.log(JSON.stringify({ success: true, data: { permission: a.permission || null }, error: null }));
     else console.log(a.text || 'done');
     process.exit(0);
   }

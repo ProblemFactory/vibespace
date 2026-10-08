@@ -13,7 +13,7 @@
   "src/lib/manage-agents.js": 10,
   "src/lib/permission-mode-labels.js": 2,
   "src/lib/session-card.js": 1,
-  "src/lib/session-lifecycle.js": 2,
+  "src/lib/session-lifecycle.js": 1,
   "src/login-state.js": 1,
   "src/machine-probes.js": 1,
   "src/opencode-serve.js": 1,

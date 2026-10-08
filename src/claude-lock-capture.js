@@ -93,7 +93,7 @@ function claimedLockIds(activeSessions, selfId) {
  *  the lock of a `claude -p` its Bash tool ran and persisted that foreign id.
  *  A deeper lock is a child of the CLI, never the CLI — no exclusion falls
  *  through to it. */
-function pickClaudeLock({ locks, createdAt, claimed, excludeId = null, pidDepth, isWriter = null }) {
+function pickClaudeLock({ locks, createdAt, claimed, excludeId = null, pidDepth, isWriter = null, onSeed = null }) {
   if (typeof pidDepth !== 'function') return null;
   const t0 = Number(createdAt) || 0;
   let best = null, bestDepth = Infinity, tie = false;
@@ -114,10 +114,24 @@ function pickClaudeLock({ locks, createdAt, claimed, excludeId = null, pidDepth,
   // startedAt — but the rule is stated here, not inherited from that one.)
   if (best.unreadable || typeof best.sessionId !== 'string' || !best.sessionId) return null;
   // the CLI's own lock, judged — never skipped in favour of a deeper one (round 4)
+  if (onSeed && excludeId && best.sessionId === excludeId && Number(best.startedAt) >= t0) onSeed(best); // the fork proof's sighting (forkResumedParent)
   if (excludeId && best.sessionId === excludeId) return null;
   if (claimed && claimed.has(best.sessionId)) return null;
   if (!(Number(best.startedAt) >= t0)) return null;
   return best.sessionId;
+}
+
+/** PURE — A FORK IS PROVEN BEFORE THE CHILD WRITES (B-8b7b): a pending fork
+ *  whose OWN CLI (the nearest live descendant of its wrapper, written by its
+ *  pid, after the create) holds its PARENT's id is a resume in disguise — a
+ *  second writer on the parent's transcript (the B-4058 class). Answers that
+ *  lock (its pid is the writer to stop) or null. The seed is still never a
+ *  pick; this is the verdict on it. */
+function forkResumedParent({ locks, createdAt, seedId, pidDepth, isWriter = null }) {
+  if (!seedId) return null;
+  let seen = null;
+  pickClaudeLock({ locks, createdAt, claimed: null, excludeId: seedId, pidDepth, isWriter, onSeed: (l) => { seen = l; } });
+  return seen;
 }
 
 /** The ownership walk: pid → its parents, up to `maxHops`, looking for the
@@ -219,6 +233,17 @@ function captureLockId({ session, id, activeSessions, sessionsDir, sidecarPath, 
   });
 }
 
+/** ONE proof step for a pending fork: the lock that betrays a resumed parent, or null. */
+function captureForkProof({ session, sessionsDir, sidecarPath, readPpid, procStartOf = null, isCli = null }) {
+  if (!session || !session._forkRequested || !session.claudeSessionId || !lockCaptureWanted(session)) return null;
+  const wrapperPid = wrapperPidOf(sidecarPath);
+  if (!wrapperPid) return null;
+  return forkResumedParent({
+    locks: readClaudeLocks(sessionsDir), createdAt: session.createdAt, seedId: session.claudeSessionId,
+    pidDepth: wrapperDepthOf(wrapperPid, readPpid), isWriter: (l) => lockWrittenByItsPid(l, { procStartOf, isCli }),
+  });
+}
+
 /** PURE: the wait before attempt `n` (0-based). Brisk while a CLI normally
  *  starts, then backing off — but never giving up while the capture is wanted
  *  (a fork whose CLI replays a big parent transcript can take far longer than
@@ -235,12 +260,17 @@ function captureDelay(n) {
  *  under its id), or it no longer wants a capture. `onAdopt(lockId)` persists.
  *  Returns false when this session already has a chain. */
 const ARMED = new WeakSet();
-function armLockCapture({ id, session, activeSessions, attempt, onAdopt, schedule = setTimeout }) {
+function armLockCapture({ id, session, activeSessions, attempt, onAdopt, proof = null, onResumedParent = null, schedule = setTimeout }) {
   if (!session || ARMED.has(session)) return false; // one chain per session (the boot sweep may meet a fresh create's)
   ARMED.add(session);
-  let n = 0;
+  let n = 0, strikes = 0;
   const step = () => {
     if (activeSessions.get(id) !== session || !lockCaptureWanted(session)) { ARMED.delete(session); return; }
+    let betrayed = null;
+    if (proof) { try { betrayed = proof(); } catch {} }
+    // TWO consecutive sightings (~1 s apart): a lock caught mid-rewrite is never a verdict
+    strikes = betrayed ? strikes + 1 : 0;
+    if (strikes >= 2) { ARMED.delete(session); try { onResumedParent?.(betrayed); } catch {} return; }
     let lockId = null;
     try { lockId = attempt(); } catch {}
     if (lockId) { ARMED.delete(session); try { onAdopt(lockId); } catch {} return; }
@@ -334,5 +364,5 @@ function ownsItsId(meta) {
 
 module.exports = {
   lockCaptureWanted, claimedLockIds, pickClaudeLock, wrapperDepthOf, readClaudeLocks, wrapperPidOf,
-  lockWrittenByItsPid, captureLockId, captureDelay, armLockCapture, adoptCapturedId, restoredForkPending, liveForkPending, addressableId, ownsItsId,
+  lockWrittenByItsPid, captureLockId, forkResumedParent, captureForkProof, captureDelay, armLockCapture, adoptCapturedId, restoredForkPending, liveForkPending, addressableId, ownsItsId,
 };

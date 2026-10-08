@@ -343,8 +343,10 @@ function stuckAgentText(v) {
  * The CONVERSATION's stuck fact (what `factFor` / the chip / the profile row read): a dialog open on its tab, else
  * the unresponsive verdict, else nothing.
  */
-function stuckFact({ dialog = null, verdict = null, loop = null, now = 0 } = {}) {
+function stuckFact({ dialog = null, verdict = null, loop = null, prompt = null, now = 0 } = {}) {
   if (dialog) return { state: 'dialog', dialog: dialogBlock(dialog, { now }), since: dialog.openedAt || 0 };
+  // lane browser-ui-prompts: a browser-UI prompt (a file chooser, an HTTP sign-in) — after a page dialog, before a loop
+  if (prompt) return { state: 'prompt', prompt: promptBlock(prompt, { now }), since: prompt.openedAt || 0 };
   // lane site-reset: a navigation loop explains the timeouts — it is said before (and instead of) "not responding"
   if (loop) return { state: 'loop', loop: loopBlock(loop), since: Number(loop.runStart) || 0 };
   if (verdict && verdict.state === 'unresponsive') return { state: 'unresponsive', why: verdict.why || 'timeouts', count: verdict.count || 0, since: verdict.since || 0 };
@@ -356,7 +358,7 @@ function stuckFact({ dialog = null, verdict = null, loop = null, now = 0 } = {})
 }
 /** The fact's digest part (moves with every printed field, never a clock — a loop's cycle, never its hop count; a blind
  *  watch's tab). */
-function stuckDigest(f) { return f ? [f.state, f.dialog ? f.dialog.id : '', f.why || '', f.count || 0, f.loop ? (f.loop.urls || []).join(' ') : '', f.state === 'blind' ? `${f.targetId || ''}/${f.title || ''}` : ''].join(':') : ''; }
+function stuckDigest(f) { return f ? [f.state, f.dialog ? f.dialog.id : f.prompt ? f.prompt.id : '', f.why || '', f.count || 0, f.loop ? (f.loop.urls || []).join(' ') : '', f.state === 'blind' ? `${f.targetId || ''}/${f.title || ''}` : ''].join(':') : ''; }
 
 // ── the UI's words (t = the client's i18n; every key a literal t('…')) ──
 function fill(s, p) { return String(s).replace(/\{(\w+)\}/g, (m, k) => (p && p[k] !== undefined ? String(p[k]) : m)); }
@@ -390,6 +392,8 @@ function stuckWords(f, tIn) {
   // lane browser-held-not-hung: the watch is blind into one tab — an INFO line (tone), no Restart primary; the tooltip names the tab
   if (f.state === 'blind') return { chip: t('dialog watch blind'), line: t('The dialog watch cannot see into one tab — a dialog opened there would not be caught; Restart re-attaches'), action: null, tone: 'info', tooltip: f.title ? t('The tab: {title}', { title: pageText(f.title, 120) }) : t('A page dialog that opened before VibeSpace was watching (for example across a VibeSpace restart) holds a tab this way') };
   // lane browser-passkey: a page waiting for a passkey (the banner's words are browser-passkey's passkeyWords)
+  // lane browser-ui-prompts: the browser's own prompt (the bar's words are promptWords)
+  if (f.state === 'prompt') return f.prompt && f.prompt.type === 'http-auth' ? { chip: t('page asks for a sign-in'), line: t('The page asks for an HTTP sign-in — enter it in the live view'), action: null } : { chip: t('page asks for a file'), line: t('The page asks for a file — the agent uploads it'), action: null };
   if (f.state === 'passkey') return { chip: t('page waits for a passkey'), line: t('The page is waiting for a passkey — cancel it in the live view'), action: null };
   // lane site-reset: the loop (with its cycle where the fact carries it; the panel row's digest carries kinds only)
   if (f.state === 'loop') { const w = f.loop ? loopWords(f.loop, tIn) : null; return { chip: w ? w.chip : t('page keeps reloading'), line: w ? w.line : t('The page keeps reloading by itself (a navigation loop) — its stored login may be stale'), action: null, loop: w }; } // verify r4 #4: the chip follows the shape (a self-refreshing page says its period)
@@ -759,6 +763,126 @@ function unresponsiveWords(f, tIn) {
   };
 }
 
+// ── lane browser-ui-prompts (B-ebfc, owner 2026-10-02): A PROMPT THE SCREENCAST CANNOT PAINT IS A NAMED FACT. The four page
+// dialogs above are the PAGE's; a FILE CHOOSER and an HTTP SIGN-IN are the BROWSER's own UI — not one pixel of either reaches
+// the live view. MEASURED on 0.38.1 + its Chrome 154, headless AND the hidden window alike (the table: docs/kb-file-structure.md
+// under src/server/browser-dialogs.js): an un-hooked file chooser picks nothing and says nothing (the click answers "Done",
+// the page runs on); an un-hooked 401 fails the navigation at once (net::ERR_INVALID_AUTH_CREDENTIALS) — the page never
+// shows and nobody could sign in. The dialog watch hooks both on every page tab (Page.setInterceptFileChooserDialog,
+// Fetch.enable {handleAuthRequests} on Document requests) and makes ONE record per prompt: the agent's sentence, the live
+// view's bar, the chip. A PERMISSION prompt and PRINT are measured only (the same table): headless denies every permission at
+// once and window.print() returns at once; the hidden window holds a permission's promise for ever and a print preview holds
+// the page's renderer (every verb times out) — r2 below decides every permission ahead and releases the print preview.
+const PROMPT_TYPES = Object.freeze(['file', 'http-auth']);
+/** An HTTP sign-in nobody answered this long ⇒ ONE For-you item (a human must type it — the agent never can). */
+const PROMPT_ASK_MS = 60 * 1000;
+/** A sign-in held this long is cancelled by the watch (the page gets its 401 — a request never waits for ever). */
+const AUTH_HOLD_MAX_MS = 10 * 60 * 1000;
+/** `Page.fileChooserOpened` / `Fetch.authRequired` params → THE prompt record. The request id of a sign-in stays in the watch
+ *  (never here: this record reaches the routes, the live view and the agent). */
+function promptFromCdp(type, params, { targetId = null, now = 0, seq = 0 } = {}) {
+  const p = params && typeof params === 'object' ? params : {};
+  const base = { id: `prm-${str(targetId).slice(0, 8).toLowerCase() || 'tab'}-${Number(seq) || 0}`, openedAt: Number(now) || 0, targetId: targetId ? str(targetId) : null };
+  if (type === 'file') return { ...base, type: 'file', multiple: p.mode === 'selectMultiple', accept: pageText(p.accept, 120), url: pageText(p.url, URL_MAX) };
+  if (type === 'http-auth') {
+    const c = p.authChallenge && typeof p.authChallenge === 'object' ? p.authChallenge : {};
+    return { ...base, type: 'http-auth', origin: pageText(c.origin, URL_MAX), realm: pageText(c.realm, 200), scheme: /^[a-z][a-z0-9-]{0,19}$/i.test(str(c.scheme)) ? str(c.scheme).toLowerCase() : 'basic', proxy: c.source === 'Proxy' };
+  }
+  return null;
+}
+/** THE SENTENCE (agent-facing, English, never t()): what the agent's verb result carries while the prompt stands. */
+function promptText(p) {
+  if (!p) return '';
+  if (p.type === 'file') return `The page opened a file chooser (${p.multiple ? 'several files allowed' : 'one file'}${p.accept ? `, accepts ${quoted(p.accept)}` : ''}) — no file window shows in this browser and nothing was picked. Upload it: vibespace-browser upload <selector of the file input> <path> (a file in your conversation's folder). The page keeps running meanwhile.`;
+  if (p.type === 'http-auth') return `The page asked for an HTTP sign-in (${p.proxy ? 'a proxy, ' : ''}${p.scheme}, realm ${quoted(p.realm)}, ${quoted(p.origin)}) and waits — only the user can answer it: they type the username and password in the live view, and you never see them. Tell the user which site asks; do not retry the page in a loop.`;
+  return '';
+}
+/** The machine-readable block beside the sentence (the routes' answers, the stuck fact). */
+function promptBlock(p, { now = 0 } = {}) {
+  if (!p || !PROMPT_TYPES.includes(p.type)) return null;
+  const b = { id: str(p.id), type: p.type, openedAt: Number(p.openedAt) || 0, openForMs: Number(now) > 0 && p.openedAt ? Math.max(0, Number(now) - Number(p.openedAt)) : 0, text: promptText(p) };
+  if (p.type === 'file') Object.assign(b, { multiple: !!p.multiple, accept: str(p.accept), url: str(p.url) });
+  else Object.assign(b, { origin: str(p.origin), realm: str(p.realm), scheme: str(p.scheme) || 'basic', proxy: !!p.proxy });
+  return b;
+}
+/** The ONE line the agent's next result carries once a sign-in was answered — who and how, NEVER the credential. */
+function promptAnsweredNote(a) {
+  if (!a || !a.prompt || a.prompt.type !== 'http-auth') return '';
+  const how = a.how === 'signed-in' ? 'the user signed in' : a.how === 'expired' ? `nobody answered it within ${AUTH_HOLD_MAX_MS / 60000} min, so VibeSpace cancelled it` : 'it was cancelled (the page got its 401)';
+  return `the HTTP sign-in the page asked for (${quoted(a.prompt.origin)}) was answered: ${how} at ${hhmm(a.at)}`;
+}
+/** The live view's bar (t = the client's i18n; every key a literal t('…')). */
+function promptWords(p, tIn) {
+  if (!p) return null;
+  const t = typeof tIn === 'function' ? (s, q) => tIn(s, q) : fill;
+  if (p.type === 'file') return { title: t('The page asks for a file'), body: t('No file window opens here — the agent uploads it with vibespace-browser upload'), form: false, dismiss: t('Dismiss') };
+  if (p.type === 'http-auth') return { title: t('The page asks you to sign in'), body: `${pageText(p.origin, URL_MAX)}${p.realm ? ` — ${pageText(p.realm, 200)}` : ''}`, form: true, user: t('Username'), password: t('Password'), accept: t('Sign in'), dismiss: t('Cancel'), hint: t('Sent to this page only — never to the agent, never written down') };
+  return null;
+}
+
+// ── lane browser-ui-prompts-r2 (B-ebfc): THE TWO MEASURED HANGS — a permission prompt and print, decided before they hold ──
+// MEASURED on 0.38.1 + Chrome 154 (lane table: docs/kb-file-structure.md under src/server/browser-dialogs.js): Browser.setPermission
+// with NO origin (= every origin of that browser context) set to `denied` answers geolocation / notifications / microphone / midi
+// in ≤ 72 ms in the hidden window (headless denied them already); a per-origin `granted` set after it wins for that origin only
+// (another origin stays denied); a decision set while a prompt ALREADY pends never answers it (the decision must come first);
+// a granted geolocation still pends with no position source — Emulation.setGeolocationOverride answers it (0 ms).
+// window.print() in the hidden window opens a `chrome://print/` page target and holds the opener's renderer: Target.closeTarget,
+// Page.close and an Escape key leave it held (the verb times out at 30 s); the preview's own WebUI cancel
+// (chrome.send closePrintPreviewDialog + dialogClose) frees it in ≤ 25 ms. Headless: window.print() returns at once — no hook.
+/** The agent's word → the CDP PermissionDescriptor (every name measured accepted by Chrome 154's Browser.setPermission). */
+const PERMISSION_KINDS = Object.freeze({
+  geolocation: { name: 'geolocation' }, notifications: { name: 'notifications' }, camera: { name: 'camera' }, microphone: { name: 'microphone' },
+  'clipboard-read': { name: 'clipboard-read' }, midi: { name: 'midi' }, 'midi-sysex': { name: 'midi', sysex: true }, 'local-fonts': { name: 'local-fonts' },
+  'window-management': { name: 'window-management' }, 'idle-detection': { name: 'idle-detection' }, 'storage-access': { name: 'storage-access' },
+  'display-capture': { name: 'display-capture' }, 'speaker-selection': { name: 'speaker-selection' }, 'captured-surface-control': { name: 'captured-surface-control' },
+  'background-sync': { name: 'background-sync' }, 'periodic-background-sync': { name: 'periodic-background-sync' }, 'payment-handler': { name: 'payment-handler' },
+  'screen-wake-lock': { name: 'screen-wake-lock' }, 'keyboard-lock': { name: 'keyboard-lock' }, 'pointer-lock': { name: 'pointer-lock' }, nfc: { name: 'nfc' },
+  sensors: { name: 'accelerometer' }, 'web-app-installation': { name: 'web-app-installation' }, 'local-network-access': { name: 'local-network-access' },
+});
+/** ONE rule per rung: what every kind is decided to before any page asks (the hidden window pends for ever otherwise). */
+const PERMISSION_DEFAULT = Object.freeze({ headless: 'denied', headed: 'denied' });
+/** The calls that decide every kind ahead for one browser context (null = the default context). */
+function permissionPlan(rung, { browserContextId = null } = {}) {
+  const setting = PERMISSION_DEFAULT[rung === 'headless' ? 'headless' : 'headed'];
+  return Object.entries(PERMISSION_KINDS).map(([kind, permission]) => ({ kind, params: { permission: { ...permission }, setting, ...(browserContextId ? { browserContextId: str(browserContextId) } : {}) } }));
+}
+/** The agent's `permission <kind> allow|deny [origin] [lat,lon]` → the decision, or a refusal (an http(s) origin only). */
+function permissionVerdict({ kind, setting, origin, at = null } = {}) {
+  const k = str(kind).toLowerCase();
+  if (!PERMISSION_KINDS[k]) return { ok: false, code: 'bad-request', error: `permission takes one of ${Object.keys(PERMISSION_KINDS).join(' | ')} — not "${str(kind).slice(0, 40)}"` };
+  const s = str(setting).toLowerCase();
+  if (!['allow', 'deny'].includes(s)) return { ok: false, code: 'bad-request', error: `permission ${k} takes allow | deny — not "${str(setting).slice(0, 40)}"` };
+  let o = null; try { const u = new URL(str(origin)); if (/^https?:$/.test(u.protocol)) o = u.origin; } catch { o = null; }
+  if (!o) return { ok: false, code: 'no_origin', error: `no http(s) origin to decide ${k} for${origin ? ` ("${str(origin).slice(0, 80)}")` : ' — your tab shows no web page'}` };
+  let pos = null;
+  if (at != null && at !== '') {
+    const m = /^(-?\d{1,2}(?:\.\d+)?),(-?\d{1,3}(?:\.\d+)?)$/.exec(str(at));
+    if (k !== 'geolocation' || !m || Math.abs(+m[1]) > 90 || Math.abs(+m[2]) > 180) return { ok: false, code: 'bad-request', error: 'a position is <lat>,<lon> and only for geolocation allow' };
+    pos = { latitude: +m[1], longitude: +m[2], accuracy: 10 }; // measured (heavy r2): without `accuracy` Chrome answers POSITION_UNAVAILABLE
+  }
+  return { ok: true, kind: k, permission: { ...PERMISSION_KINDS[k] }, setting: s === 'allow' ? 'granted' : 'denied', origin: o, position: pos };
+}
+/** THE LINE the trace, the live view and the agent read (English; the live view's words are permissionWords). */
+function permissionNote(rec) {
+  if (!rec) return '';
+  return `permission ${rec.kind} ${rec.setting === 'granted' ? 'granted to' : 'denied for'} ${rec.origin} by ${rec.by === 'user' ? 'the user' : 'the agent'}`;
+}
+function permissionWords(rec, tIn) {
+  if (!rec) return '';
+  const t = typeof tIn === 'function' ? (s, q) => tIn(s, q) : fill;
+  return rec.setting === 'granted' ? t('Permission {kind} granted to {origin} by the agent', { kind: str(rec.kind), origin: str(rec.origin) }) : t('Permission {kind} denied for {origin} by the agent', { kind: str(rec.kind), origin: str(rec.origin) });
+}
+/** The print preview the hidden window opens (a page target `chrome://print/…`) — the ONE target the watch releases. */
+const PRINT_PREVIEW_RE = /^chrome:\/\/print\//;
+function printTargetVerdict(info) {
+  return !!(info && info.type === 'page' && PRINT_PREVIEW_RE.test(str(info.url))) ? 'release' : null;
+}
+/** Evaluated IN the preview: its own Cancel (the WebUI's handlers) — the opener's window.print() returns. */
+const PRINT_RELEASE_EXPR = "chrome.send('closePrintPreviewDialog');chrome.send('dialogClose');'released'";
+const PRINT_TEXT = 'The page tried to print — no print window works in this browser, so VibeSpace closed it and the page runs on. To keep a printout: vibespace-browser pdf <path> (a file in your conversation\'s folder).';
+function printNote(n) { return n && n.at ? `${PRINT_TEXT} (at ${hhmm(n.at)})` : PRINT_TEXT; }
+function printWords(tIn) { const t = typeof tIn === 'function' ? (s, q) => tIn(s, q) : fill; return t('The page tried to print — closed; the agent saves a PDF with vibespace-browser pdf'); }
+
 module.exports = {
   MESSAGE_MAX, BEFOREUNLOAD_TEXT, STUCK_AFTER, OK_RECENT_MS, COMMAND_TIMEOUT_MS, ENABLE_TIMEOUT_MS, NO_DIALOG_TEXT,
   FRAME_TAGS, FRAME_TAG_RE, FRAME_OPEN_RE, inertOpeners, pageText, quoted, // verify r1 A2: page text is frame-inert, delimited, bounded
@@ -774,4 +898,8 @@ module.exports = {
   // lane browser-unresponsive: the WHOLE browser that does not answer (one verdict, every surface reads it)
   UNRESPONSIVE_AFTER_MS, UNRESPONSIVE_MIN_ASKS, ANSWER_ASK_MS, browserAnswerVerdict, unresponsiveFact, utcClock, minutesSince, restartAdmission,
   restartedCardText, unresponsiveLine, answeredAgainLine, unresponsiveNotice, unresponsiveWords,
+  // lane browser-ui-prompts: the browser's own prompts (a file chooser, an HTTP sign-in) — one record, one sentence, one bar
+  PROMPT_TYPES, PROMPT_ASK_MS, AUTH_HOLD_MAX_MS, promptFromCdp, promptText, promptBlock, promptAnsweredNote, promptWords,
+  // lane browser-ui-prompts-r2: permissions decided ahead (the agent's per-origin flip) + the print preview released and told
+  PERMISSION_KINDS, PERMISSION_DEFAULT, permissionPlan, permissionVerdict, permissionNote, permissionWords, PRINT_PREVIEW_RE, printTargetVerdict, PRINT_RELEASE_EXPR, PRINT_TEXT, printNote, printWords,
 };

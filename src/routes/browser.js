@@ -1782,7 +1782,7 @@ async function dialogAnswerFor(k, f, profileId, { arm = true, outcome = null, en
     const fresh = outcome ? D.factFor({ ...t, consume: false }) : fct;
     const loop = fresh.loop;
     // verify r1: `loopShared` — some tab of a shared browser loops and this conversation's cannot be told apart (a kind only)
-    return { dialog: { watched: fct.watched, profileId: t.profileId, passkey: fct.passkey || null /* lane browser-passkey */, open: fct.open, text: fct.text || '', notes: fct.notes, stuck: stuck ? stuck.text : null, blind: !!fct.blind, unattributed: !!fct.unattributed, loading: loading ? require('../browser-stuck.js').loadingText(loading, { now: loading.at }) : null, loop: loop || null, loopShared: !!fresh.loopShared, ...(bound ? { tabBound: { ok: !!bound.ok, code: bound.code || null } } : {}) } };
+    return { dialog: { watched: fct.watched, profileId: t.profileId, passkey: fct.passkey || null /* lane browser-passkey */, prompt: fct.prompt || null /* lane browser-ui-prompts */, open: fct.open, text: fct.text || '', notes: fct.notes, stuck: stuck ? stuck.text : null, blind: !!fct.blind, unattributed: !!fct.unattributed, loading: loading ? require('../browser-stuck.js').loadingText(loading, { now: loading.at }) : null, loop: loop || null, loopShared: !!fresh.loopShared, ...(bound ? { tabBound: { ok: !!bound.ok, code: bound.code || null } } : {}) } };
   } catch (e) { console.warn(`[browser-dialog] ${f.browserKey}: the dialog fact was not read — ${e && e.message}`); return {}; }
 }
 /** The CLI's long-poll while its verb runs: answers at the first HELD dialog in this conversation's scope (the event),
@@ -1801,11 +1801,11 @@ router.get('/api/agent/browser/dialog', async (req, res) => {
   const ac = new AbortController();
   res.on('close', () => ac.abort());
   try {
-    const hit = wait ? await D.waitForOpen(t, wait, { signal: ac.signal, loop: loopWanted, passkey: String(req.query.passkey || '') === '1' }) : null; // lane browser-passkey: `passkey=1` — an ACTING verb also ends at `passkey_open`
+    const hit = wait ? await D.waitForOpen(t, wait, { signal: ac.signal, loop: loopWanted, passkey: String(req.query.passkey || '') === '1', prompt: String(req.query.prompt || '') === '1' }) : null; // lane browser-passkey: `passkey=1` — an ACTING verb also ends at `passkey_open` (+ r2 of browser-ui-prompts: `prompt=1` — a navigating verb ends at an HTTP sign-in)
     if (ac.signal.aborted && !res.writable) return;
     const fct = D.factFor({ ...t, consume: false });
     const loop = hit && hit.loop ? { ...require('../browser-stuck.js').loopBlock(hit.loop), runStart: hit.loop.runStart, text: require('../browser-stuck.js').loopText(hit.loop) } : null;
-    res.json({ watched: fct.watched, open: fct.open, text: fct.text || '', via: hit ? hit.via : null, eventAt: hit ? hit.at : null, answeredAt: Date.now(), ...(loop && !fct.open ? { loop } : {}), ...(hit && hit.passkey && !fct.open ? { passkey: hit.passkey } : {}) });
+    res.json({ watched: fct.watched, open: fct.open, text: fct.text || '', via: hit ? hit.via : null, eventAt: hit ? hit.at : null, answeredAt: Date.now(), ...(loop && !fct.open ? { loop } : {}), ...(hit && hit.passkey && !fct.open ? { passkey: hit.passkey } : {}), ...(hit && hit.prompt && !fct.open ? { prompt: hit.prompt } : {}) });
   } catch (e) { fail(res, e); }
 });
 /** lane browser-passkey (owner inc-muuvthv9-g69w): the agent's `passkey status | cancel` — a page waiting for a passkey on
@@ -1836,6 +1836,29 @@ router.post('/api/agent/browser/passkey', async (req, res) => {
     if (!again.ok) return failVerdict(res, again);
     if (!r.ok) return res.status(409).json({ error: r.error, code: r.code });
     res.json({ ok: true, cancelled: r.n, text: r.text });
+  } catch (e) { fail(res, e); }
+});
+/** lane browser-ui-prompts-r2 (B-ebfc): the agent's `permission <kind> allow|deny [origin] [lat,lon]` — OUR CDP act on THIS
+ *  conversation's own browser (every kind is denied ahead by the watch; this flips one kind for one origin, the current tab's
+ *  by default). Recorded on the lease, the trace and the live view's line. While the user drives it is the user's page. */
+router.post('/api/agent/browser/permission', async (req, res) => {
+  const k = keeperOr503(res); if (!k) return;
+  const f = agentFacts(req, res); if (!f) return;
+  const D = ctx.dialogs;
+  if (!D || typeof D.setPermission !== 'function') return res.status(409).json({ error: 'VibeSpace does not decide page permissions on this server', code: 'not_watched' });
+  const t0 = dialogTargetFor(k, f, req.body?.profile);
+  if (!t0.ok) return failVerdict(res, t0);
+  try {
+    const armed = await D.arm(t0.profileId);
+    if (!armed.ok) return res.status(409).json({ error: armed.error || 'VibeSpace is not watching this browser', code: 'not_watched' });
+    const t = dialogTargetFor(k, f, req.body?.profile); // the reach, asked again after the await
+    if (!t.ok) return failVerdict(res, t);
+    let st = null; try { st = k.inputStateFor(t.ephemeral ? t.browserKey : f.browserKey, t.ephemeral ? null : t.profileId); } catch { st = null; }
+    if (st && st.input === 'user') return res.status(409).json({ error: require('../browser-interrupt.js').interruptedText('permission'), code: 'browser_interrupted', takenAt: st.takenAt || 0 });
+    const r = await D.setPermission(t, { kind: req.body?.kind, setting: req.body?.setting, origin: typeof req.body?.origin === 'string' ? req.body.origin : '', at: req.body?.at ?? null, by: 'agent' });
+    if (!r.ok) return res.status(r.code === 'bad-request' || r.code === 'no_origin' ? 400 : 409).json({ error: r.error, code: r.code });
+    try { ctx.traceDialogAct?.({ sessionId: f.sessionId, profileId: t.ephemeral ? null : t.profileId, action: 'permission', permission: r.permission }); } catch (e) { console.warn('[browser-permission] the trace row was not written — ' + (e && e.message)); }
+    res.json({ ok: true, permission: r.permission, text: r.text });
   } catch (e) { fail(res, e); }
 });
 /** The agent's `dialog status | accept [text] | dismiss` — answered through the watch (the one client that saw the

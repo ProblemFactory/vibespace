@@ -50,6 +50,23 @@ const os = require('os');
 // `key` = the ROW key of the claude settings table (src/harness-settings.js)
 // — the value arrives as `opts.settings.<key>` (design-harness-settings §5),
 // never as a `claude.*` settings path the adapter would have to spell.
+// A FORK IS A FORK WHOEVER ASKS (B-8b7b, 2026-10-02): `--fork-session` and
+// `--resume-session-at <uuid>` are DERIVED here from the fork fact (`fork` +
+// the resume id, `forkAt` = the message to fork at) — the ONE producer, for a
+// local, ssh, dial and daemon-pipe spawn alike (they all consume this argv).
+// A `create {fork: true}` sent through the API carried no client extraArgs, so
+// the CLI RESUMED the parent: a second writer on its transcript (the B-4058
+// class). A copy of either flag in extraArgs (a stale client, a caller) is
+// dropped, so the flag is never spelled twice and never without the fact.
+const FORK_FLAGS = new Set(['--fork-session', '--resume-session-at']);
+/** PURE: the fork flags of one claude spawn. A fork point that is not an
+ *  id-shaped token is dropped (never an argv token from a free string). */
+function claudeForkArgs({ resumeId, fork, forkAt } = {}) {
+  if (!resumeId || !fork) return [];
+  const at = typeof forkAt === 'string' && /^[0-9a-f][0-9a-f-]{7,63}$/i.test(forkAt) ? forkAt : '';
+  return at ? ['--fork-session', '--resume-session-at', at] : ['--fork-session'];
+}
+
 const PROMPT_CACHE_FLAGS = [
   { key: 'systemPromptSnapshot', flag: '--system-prompt-snapshot', kind: 'value', validate: (v) => (v === 'on' || v === 'off' ? v : null) },
   { key: 'excludeDynamicSystemPromptSections', flag: '--exclude-dynamic-system-prompt-sections', kind: 'boolean' },
@@ -107,7 +124,14 @@ class ClaudeCodeAdapter extends BackendAdapter {
     // — the user's file governs (`notes` says so; the server logs it).
     const notes = [];
     const xa = [];
-    for (const a of extraArgs) {
+    for (let i = 0; i < extraArgs.length; i++) {
+      const a = extraArgs[i];
+      const flag = typeof a === 'string' ? a.split('=')[0] : '';
+      if (FORK_FLAGS.has(flag)) { // the fork fact owns these (claudeForkArgs) — never a second spelling
+        if (flag === '--resume-session-at' && !a.includes('=')) i++;
+        notes.push(`extraArgs ${flag} dropped: the fork flags derive from the fork fact${options.fork ? '' : ' (this create is not a fork)'}`);
+        continue;
+      }
       if (typeof a === 'string' && a.startsWith('--settings=')) xa.push('--settings', a.slice('--settings='.length));
       else xa.push(a);
     }
@@ -120,6 +144,7 @@ class ClaudeCodeAdapter extends BackendAdapter {
     if (resumeId) {
       args.push('--resume', resumeId);
     }
+    args.push(...claudeForkArgs({ resumeId, fork: options.fork, forkAt: options.forkAt }));
     if (sessionName && this.config.supportsName) args.push('--name', sessionName);
     if (model) args.push('--model', model);
     if (permissionMode) args.push('--permission-mode', permissionMode);
@@ -699,4 +724,4 @@ class ClaudeCodeAdapter extends BackendAdapter {
   }
 }
 
-module.exports = { ClaudeCodeAdapter };
+module.exports = { ClaudeCodeAdapter, claudeForkArgs };

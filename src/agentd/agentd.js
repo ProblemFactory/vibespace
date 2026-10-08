@@ -169,6 +169,7 @@ const os = require('os');
 const path = require('path');
 const { extractTailIds, pidLooksClaude, interpretDiscoveryLines, synthesizeDiscoveryLines, titleLinesOf, TITLE_HEAD_BYTES, TITLE_TAIL_BYTES } = require('./../discovery-facts.js');
 const machineProbes = require('./../machine-probes.js');
+const PI = require('./../proc-identity.js'); // B-1cc6: a pid is never an identity
 const { ClaudeCodeAdapter: { parseLimitBanner } } = require('./../adapters/claude-code.js');
 const { repointPoolSymlink } = require('./../account-material.js');
 // R3: the SHARED transcript service, constructed lazily on first use — the
@@ -594,19 +595,7 @@ const { reExecArgv, repointCurrent, handOver, listenWithRetry } = require('./ree
 // sentinel for the running remote chat sessions and orphaned their claudes).
 // Linux: /proc/<pid>/stat field 22 (ticks since boot, unique per boot);
 // macOS/BSD: `ps -o lstart=` (second granularity — plenty for pid reuse).
-function pidStartTime(pid) {
-  try {
-    const st = fs.readFileSync('/proc/' + pid + '/stat', 'utf-8');
-    const rest = st.slice(st.lastIndexOf(')') + 2).split(' ');
-    if (rest[19]) return 'l' + rest[19];
-  } catch { }
-  try {
-    const r = require('child_process').spawnSync('ps', ['-p', String(pid), '-o', 'lstart='], { encoding: 'utf-8' });
-    const s = String(r.stdout || '').trim();
-    if (s) return 'p' + s;
-  } catch { }
-  return '';
-}
+function pidStartTime(pid) { return PI.startToken(pid); } // moved verbatim to src/proc-identity.js (B-1cc6)
 
 // ── log (rotated at 5MB ×2) ──
 function log(msg) {
@@ -898,6 +887,9 @@ const pipeSessions = {
   _meta(sid) { try { return JSON.parse(fs.readFileSync(this._paths(sid).meta, 'utf-8')); } catch { return null; } },
   _own: new Set(), // pids WE spawned this incarnation (have a real exit waiter)
   _adoptWatch: new Map(), // sid → liveness poll timer for adopted children
+  _childProven(m) { // the identity a signal needs: the start token recorded at spawn, equal now (B-1cc6)
+    return !!(m && m.childPid > 1 && m.startTime && pidStartTime(m.childPid) === m.startTime);
+  },
   _childAlive(m) {
     if (!m || !m.childPid) return false;
     try { process.kill(m.childPid, 0); } catch { return false; }
@@ -1047,8 +1039,13 @@ const pipeSessions = {
     const m = this._meta(sid);
     if (!m) return;
     if (this._childAlive(m)) {
-      try { process.kill(m.childPid, 'SIGTERM'); } catch { }
-      setTimeout(() => { try { if (this._childAlive(m)) process.kill(m.childPid, 'SIGKILL'); } catch { } }, 2500);
+      // B-1cc6: _childAlive may answer from a legacy cmdline match or "cannot verify — assume"; a SIGNAL needs the
+      // spawn-recorded start token to match NOW. A meta without one (an older daemon wrote it) is reported, never killed.
+      if (!this._childProven(m)) log('kill ' + sid + ': pid ' + m.childPid + ' — ' + PI.UNPROVABLE + ' — not signalled');
+      else {
+        try { process.kill(m.childPid, 'SIGTERM'); } catch { }
+        setTimeout(() => { try { if (this._childProven(m)) process.kill(m.childPid, 'SIGKILL'); } catch { } }, 2500);
+      }
     }
     // File GC once the child is really gone (the exit waiter/adopt watcher has
     // written the sentinel by then; a kill comes from a server TERMINATE, whose
@@ -1516,7 +1513,7 @@ function serveConnection(sock) {
           // per-op capability gating (three-tier design): consumers check the
           // capability, NEVER parse daemonVersion — unknown ops on an old
           // daemon get no reply and hang the request until its timeout
-          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'desktop-serve', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream'],
+          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'desktop-serve', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream'],
         }));
         return;
       }

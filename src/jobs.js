@@ -10,6 +10,7 @@ const fs = require('fs');
 const path = require('path');
 const net = require('net');
 const http = require('http');
+const PI = require('./proc-identity.js'); // B-1cc6: a pid is never an identity
 const crypto = require('crypto');
 const { withoutNoticeHead } = require('./notification-senders.js'); // lane notify-retry: a parked frame carries the ladder's head; the floor's digest is of the raw text
 const textDigest = (t) => crypto.createHash('sha256').update(String(t)).digest('hex'); // a flood floor's memory of a text (verify r9)
@@ -48,14 +49,9 @@ function capUnclaimedNotifs(q) {
   }
   return dropped;
 }
-function readStarttime(pid) {
-  try {
-    const s = fs.readFileSync(`/proc/${pid}/stat`, 'utf-8');
-    return Number(s.slice(s.lastIndexOf(')') + 2).split(' ')[19]);
-  } catch { return 0; }
-}
+function readStarttime(pid) { return PI.starttimeOf(pid) || 0; } // B-1cc6: the ONE reader is src/proc-identity.js
 const LISTEN_READ_MS = 30_000; // lane artifacts-services: a running job's listening ports, re-read at most this often (the sweep's tick)
-function bootId() { try { return fs.readFileSync('/proc/sys/kernel/random/boot_id', 'utf-8').trim(); } catch { return ''; } }
+function bootId() { return PI.bootIdOf(); }
 // mirror of ws-handler's agentEnv drops (jobs must never inherit ambient vendor
 // credentials or server config — §ban-safety structural leg)
 function jobEnv(extra = {}) {
@@ -933,13 +929,12 @@ class JobManager {
   }
   _verifyAlive(stamp) {
     if (!stamp || !stamp.pid) return false;
-    const st = readStarttime(stamp.pid);
-    return !!st && st === stamp.starttime && stamp.bootId === bootId();
+    return stamp.bootId === bootId() && PI.aliveIdentity(stamp) === true; // pid+starttime+bootId, and not a zombie
   }
   _killGroup(job, sig) { // handle-kill with act-time re-verification (B-16d9 law)
     const stamp = this._readStamp(job);
     if (!this._verifyAlive(stamp)) return false;
-    try { process.kill(-stamp.pid, sig); return true; } catch { try { process.kill(stamp.pid, sig); return true; } catch { return false; } }
+    return PI.signalIdentity(stamp, sig, { group: true, what: `job ${job.id}` }).ok; // the group, else its leader
   }
 
   // ── spawn ───────────────────────────────────────────────────────────────

@@ -59,7 +59,7 @@ const resolveRel = (from, spec) => {
 };
 
 // ── Tier membership (path-based; NEW files inherit their directory's tier) ──
-const PURE = new Set(['src/mount-health.js' /* lane fuse-canary-notice (B-b327): the wedged-mount episode, who presses it, the words, the pause verdict per kind — imports only memory-pressure (PURE → PURE, the ONE attribution) */, 'src/memory-pressure.js' /* lane browser-resource-care (B-afeb): the memory-pressure episode + who started each process group — imports nothing; PURE since lane fuse-canary-notice shares its attribute() */, 'src/timed-sync.js' /* design 011 lane 1 (store-timing): the store-write clock — performance.now + counters, imports nothing; §72 */, 'src/channel-search.js' /* design 010 (B-c9be): the vendor snippet's ONE reader, the merge, the full-search refusal table, the dialog's coverage / status words — the store, the engine, the adapters and the dialog share them; imports only channel-record (PURE → PURE) */, 'src/channel-focus.js' /* design 008 (B-3cf8): the first screen's predicate (statusTag) + the first read's candidate test + the page rules — the engine's first read and the panel's keyed store share them; imports nothing */, 'src/app-recipes.js' /* design 009: the recipes table — imports nothing */, 'src/app-card.js' /* design 009: THE one card of an app install — its view + the digest of what it showed, shared by the engine and the client; imports nothing */, 'src/record-lateness.js' /* lane-hot-switch: a late record is not a live fact — the stream clock + the look-ahead, imports nothing */, 'src/hidden-chars.js', 'src/encoded-command.js' /* lane machine-card-fold: a PowerShell -EncodedCommand decoded for display (imports only hidden-chars) */, 'src/exit-call.js' /* lane exit-calls-in-history: a vibespace-exit Bash call + its result read as the machine call it is, and the card it draws — the server's live pairing and the bundle share it; imports only exit-reach + hidden-chars (PURE → PURE) */, 'src/assistant-note.js' /* B-40f8: text addressed to the assistant — the note rule + THE turn preview, server builders and client alike; imports nothing */, 'src/window-desktop.js', 'src/plugin-manifest.js', 'src/account-pool-auto.js', 'src/model-family.js', 'src/task-color-seq.js', 'src/ssh-key-format.js', 'src/session-schema.js', 'src/otel-truth.js', 'src/msg-acl.js', 'src/backend-caps.js',
+const PURE = new Set(['src/browser-orphans.js' /* lane daemon-orphan-end: a daemon nobody holds — the verdict, imports nothing */, 'src/mount-health.js' /* lane fuse-canary-notice (B-b327): the wedged-mount episode, who presses it, the words, the pause verdict per kind — imports only memory-pressure (PURE → PURE, the ONE attribution) */, 'src/memory-pressure.js' /* lane browser-resource-care (B-afeb): the memory-pressure episode + who started each process group — imports nothing; PURE since lane fuse-canary-notice shares its attribute() */, 'src/timed-sync.js' /* design 011 lane 1 (store-timing): the store-write clock — performance.now + counters, imports nothing; §72 */, 'src/channel-search.js' /* design 010 (B-c9be): the vendor snippet's ONE reader, the merge, the full-search refusal table, the dialog's coverage / status words — the store, the engine, the adapters and the dialog share them; imports only channel-record (PURE → PURE) */, 'src/channel-focus.js' /* design 008 (B-3cf8): the first screen's predicate (statusTag) + the first read's candidate test + the page rules — the engine's first read and the panel's keyed store share them; imports nothing */, 'src/app-recipes.js' /* design 009: the recipes table — imports nothing */, 'src/app-card.js' /* design 009: THE one card of an app install — its view + the digest of what it showed, shared by the engine and the client; imports nothing */, 'src/record-lateness.js' /* lane-hot-switch: a late record is not a live fact — the stream clock + the look-ahead, imports nothing */, 'src/hidden-chars.js', 'src/encoded-command.js' /* lane machine-card-fold: a PowerShell -EncodedCommand decoded for display (imports only hidden-chars) */, 'src/exit-call.js' /* lane exit-calls-in-history: a vibespace-exit Bash call + its result read as the machine call it is, and the card it draws — the server's live pairing and the bundle share it; imports only exit-reach + hidden-chars (PURE → PURE) */, 'src/assistant-note.js' /* B-40f8: text addressed to the assistant — the note rule + THE turn preview, server builders and client alike; imports nothing */, 'src/window-desktop.js', 'src/plugin-manifest.js', 'src/account-pool-auto.js', 'src/model-family.js', 'src/task-color-seq.js', 'src/ssh-key-format.js', 'src/session-schema.js', 'src/otel-truth.js', 'src/msg-acl.js', 'src/backend-caps.js',
   // AGENT BROWSER (design-agent-browser-v2 §3.6): the identity/spawn-env decisions, the
   // registry + lease model and the keeper's verdicts — imports nothing (P0/P1); and the ONE
   // constants home every process keeper counts and bounds by (src/keeper-limits.js)
@@ -279,7 +279,7 @@ const PURE = new Set(['src/mount-health.js' /* lane fuse-canary-notice (B-b327):
   // grouped aggregate pass, its fold, the comparison of two answers — imports nothing (the worker and the owner ask it)
   'src/usage-index-model.js',
   'src/workflow-disk.js']);
-const SHARED = new Set(['src/discovery-facts.js', 'src/sysinfo.js', 'src/machine-probes.js', 'src/usage-walker.js',
+const SHARED = new Set(['src/discovery-facts.js', 'src/proc-identity.js', 'src/sysinfo.js', 'src/machine-probes.js', 'src/usage-walker.js',
   'src/transcript-service.js', 'src/ctx-sync.js', 'src/writer-sweep.js', 'src/remote-shell.js', 'src/account-material.js',
   // THE agent-CLI process identity, one rule in two spellings (B-3185 r3): the JS twin
   // (discovery-facts, so the daemon bundles it) beside the shell text the sweep and the
@@ -1482,7 +1482,8 @@ for (const [edge] of EXCEPTIONS) {
     { file: 'src/cli-identity.js', needle: "execFile('pgrep', ['-f', String(needle)]", why: 'NO-/proc FALLBACK ONLY (pidsMatchingCmdline) — ONE per question for the WHOLE table, never one per candidate. Where /proc exists the rung above it reads every `/proc/<pid>/cmdline` into ONE reused buffer, which is why the kill path now starts no child process at all.' },
     { file: 'src/session-store.js', needle: "execFileP('ps', ['-p', String(pid), '-o', 'comm=']", why: 'NO-/proc FALLBACK ONLY (isProcessClaudeAsync), reached from isLockClaude when a lock carries no numeric procStart AND there is no procfs. On a procfs machine the rung above it is `isCliProcess`, pure file reads.' },
     { file: 'src/discovery-facts.js', needle: "spawnSync('lsof', ['-Fpn', '+D', root]", why: 'NO-/proc FALLBACK ONLY (macOS/BSD codex liveness), ONE per scan of the whole sessions tree.' },
-    { file: 'src/agentd/agentd.js', needle: "spawnSync('ps', ['-p', String(pid), '-o', 'lstart=']", why: 'NO-/proc FALLBACK ONLY (pidStartTime) — /proc/<pid>/stat field 22 is the rung above it. Asked when a pipe session is adopted, not per poll.' },
+    { file: 'src/proc-identity.js', needle: "spawnSync('ps', ['-p', String(pid), '-o', 'lstart=']", why: 'NO-/proc FALLBACK ONLY (startToken = agentd pidStartTime, moved verbatim by lane pid-identity-census) — /proc/<pid>/stat field 22 is the rung above it. Asked when a pipe session is adopted, not per poll.' },
+    { file: 'src/proc-identity.js', needle: "spawnSync('ps', ['-o', 'stat=', '-o', 'lstart=', '-p', String(Number(pid))]", why: 'NO-/proc FALLBACK ONLY (judge / identityOf on macOS: B-1cc6 a pid is never an identity) — ONE per recorded identity proven before its signal, never per poll on a procfs machine.' },
     { file: 'src/agentd/agentd.js', needle: "execFileSync('ps', ['-p', String(pid), '-o', 'command=']", why: 'NO-/proc FALLBACK ONLY (acquireSingleton), and ONCE per daemon start — /proc/<pid>/cmdline is the rung above it.' },
     { file: 'src/plugins/tailscale.js', needle: "execFileSync('pgrep', ['-x', 'tailscaled']", why: 'ONE per tailscale status read (a plugin card), never per session; the loop under it reads /proc cmdlines, not more spawns.' },
     { file: 'src/server/boot-restore.js', needle: "execFileSync('fuser', [path.join(SOCKETS_DIR, sockFile)]", why: 'BOOT ONLY (restoreSessions, once per surviving socket, before this server serves anybody) — "is this dtach socket still owned" has no /proc rung that does not re-implement fuser. Out of scope on purpose: the incident is create/kill/poll, and a boot pays this once.' },
@@ -4610,5 +4611,33 @@ console.log('\n§84 a suite ends what it made (B-60d2)');
   ok(!unended("const a = fs.mkdtempSync('/tmp/vs-a-'), b = 1;\nconst c = `/tmp/vs-c-${process.pid}`;\nfor (const d of [a, c]) fs.rmSync(d, { recursive: true });\n").length && unended("const a = fs.mkdtempSync('/tmp/vs-a-');\nconst c = `/tmp/vs-c-${process.pid}`;\nfor (const d of [a]) fs.rmSync(d, { recursive: true });\n").join() === 'c', '…the for-of cleanup idiom credits exactly the names it lists');
 }
 
+// §85 A PID IS NEVER AN IDENTITY (B-1cc6, lane pid-identity-census, 2026-10-08). This box's pids wrapped ≥ 3 times since
+// the 09-17 boot; a pid recorded hours ago can name a stranger. Every process.kill / kill - / pkill / killall / tail --pid
+// in the server, the daemon, data/bin, the gate and the image entrypoint is a ROW of scripts/pid-identity-census.mjs:
+// what it signals → what proves the pid (src/proc-identity.js, a starttime, a fresh scan, the spawn handle) or EXEMPT why.
+{
+  const C = await import('./pid-identity-census.mjs');
+  const files85 = C.censusFiles(REPO);
+  const j85 = C.judgeCensus(files85);
+  for (const r of j85.rows) console.log('    ' + r);
+  ok(j85.red.length === 0, `§85 ${files85.length} files: ${j85.rows.length} signal/alive sites, each a row with its proof ${JSON.stringify(j85.counts)}${j85.red.length ? ' — RED: ' + j85.red.join(' | ') : ''}`);
+  ok(j85.dead.length === 0, `§85 every row names a live site (a dead row would hide a new bare kill)${j85.dead.length ? ' — DEAD: ' + j85.dead.join(' | ') : ''}`);
+  const rec85 = C.recordsJudge(REPO);
+  ok(rec85.every((r) => r.ok), `§85 RECORDS: ${rec85.length} persisted pids, each writer on the page (${rec85.map((r) => r.what + ' = ' + r.proof).join('; ')})${rec85.some((r) => !r.ok) ? ' — MISSING: ' + rec85.filter((r) => !r.ok).map((r) => r.what).join(', ') : ''}`);
+  // CONTROLS: a bare kill of the stored pid planted back into jobs.js, agentd's kill with its proof taken away, an
+  // unlisted shell probe, and a comment that must stay quiet
+  const [jf, jt] = files85.find(([f]) => f === 'src/jobs.js');
+  const bare = jt.replace('return PI.signalIdentity(stamp, sig, { group: true, what: `job ${job.id}` }).ok;', 'try { process.kill(stamp.pid, sig); return true; } catch { return false; }');
+  const [af, at] = files85.find(([f]) => f === 'src/agentd/agentd.js');
+  const noProof = at.replace('if (this._childProven(m)) process.kill(', 'if (this._childAlive(m)) process.kill(').replace(/if \(!this\._childProven\(m\)\)[^\n]*\n\s*else \{/, '{');
+  const red85 = (f, src) => C.judgeCensus([[f, src]]).red.length > 0;
+  const r85 = [
+    ['a bare process.kill(stamp.pid) planted into jobs.js', bare !== jt && red85(jf, bare), true],
+    ['agentd kill without _childProven', noProof !== at && red85(af, noProof), true],
+    ['an unlisted kill -0 in a shell string', red85('src/x.js', 'const s = `kill -0 "$P" && echo up`;\n'), true],
+    ['a comment naming process.kill(pid)', red85('src/x.js', '// process.kill(pid) alone is never enough\n'), false],
+  ];
+  ok(r85.every(([, got, want]) => got === want), `§85 CONTROLS: ${r85.map(([n, got, want]) => `${n} (${got === want ? (want ? 'RED' : 'quiet') : 'WRONG'})`).join(', ')}`);
+}
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

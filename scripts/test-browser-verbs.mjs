@@ -106,6 +106,10 @@ console.log('① the PURE router');
   const unknown = census.filter((w) => !V.known(w));
   ok(unknown.length === 0, `every census word is classified by the table — page or refused by name (${unknown.join(', ') || 'none left over'})`);
   ok(V.classify(['--', 'profiles']).kind === 'page', 'the collided word is reachable as `-- profiles` (the browser CLI\'s, harmless)');
+  // lane browser-ui-prompts-r2: `permission` is VibeSpace's own CDP act (no help fixture names it — none needed); `pdf` is the binary's
+  { const pm = V.classify(['permission', 'geolocation', 'allow']), pd = V.classify(['pdf', 'out.pdf']);
+    ok(!census.includes('permission') && V.OURS_PAGE.includes('permission') && pm.kind === 'page' && pm.ours === true && pm.verb === 'permission', '`permission` (decide a page permission) is OURS: the resolve road, never the binary — 0.38.1 has no such verb', JSON.stringify(pm));
+    ok(census.includes('pdf') && pd.kind === 'page' && !pd.ours && pd.writeFiles.length === 1, '`pdf <path>` (the print sentence\'s way out) is the binary\'s own page verb, its path a WRITE verdict', JSON.stringify(pd)); }
   // lane H (2026-09-25): the 0.38.1 re-measure's NEW surface, each decided by name
   {
     ok(census.includes('a11y') && census.includes('webmcp'), '0.38.1: the census carries its two new top-level words (a11y from `skills get core --full`, webmcp from the help)', census.join(' '));

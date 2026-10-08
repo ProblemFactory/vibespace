@@ -1444,7 +1444,8 @@ console.log('— ③ censuses: no card for him (+ control), the holder readers, 
     tabHoldersOf: 1, keepTabRoots: 1, rootsAt: 1, bootstrapTabRoot: 1, agentTabAct: 4, tabOwnersFor: 1, userTabAct: 1, whoseOf: 1, // accept-fixes-strip F8: another holder's tab is named by ITS lease's conversation (a conversation reader)
     // lane site-reset verify r3 #2: the PERSISTED WITNESS lives on a CONVERSATION's lease (`l.tabs` — the tabs the dialog watch
     // saw born of its verbs); his row holds no lease — his tabs are his row's own (`ownTab` / `adopted`)
-    noteOwnTab: 1, forgetOwnTab: 1, dropLeaseTabs: 1, pruneOwnTabs: 1, // r4 #3: pruned to the browser's tabs at a watch's connect
+    noteOwnTab: 1, forgetOwnTab: 1, dropLeaseTabs: 2 /* + lane browser-ui-prompts-r2: a fresh Chrome forgot each lease's permission decisions */, pruneOwnTabs: 1, // r4 #3: pruned to the browser's tabs at a watch's connect
+    notePermission: 1, // lane browser-ui-prompts-r2 (the 2.369.237 integration): `vibespace-browser permission` writes a CONVERSATION's per-origin decision on its own lease (his row holds no lease; his browsing asks Chrome itself)
     tabsLost: 1, // lane profile-lock-roll L2: every CONVERSATION lease of a replaced browser is marked `life` (his row holds no lease — his tab ends with the browser, said by his window)
     holderTabs: 1, // lane site-reset verify r1: a CONVERSATION lease's pinned tab (+ r3's persisted witness); his tabs are read off his row, by his key, before this loop
     // lane browser-windows: a CONVERSATION lease's own window (its `windowIn` / roots at attach — his tab opens in his own window

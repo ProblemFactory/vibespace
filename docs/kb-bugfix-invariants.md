@@ -480,6 +480,18 @@
 - THIRTY GIGABYTES OF RAM WERE LEAKED SCRATCH DIRECTORIES (B-60d2, lane scratch-dir-reaper) — 不变量 = a suite ends what it made; the gate reaps a scratch dir only on the evidence it reaps a process on (test-architecture §84, test-ci-gate §9d)
 - MEMORY PRESSURE WAS A LOG LINE AND 37 GB OF CHROME SAT ON RAM (B-afeb, lane browser-resource-care) — 不变量 = a browser VibeSpace launches lives off tmpfs inside a said budget; pressure reaches the owner naming who started each process
 - A WEDGED MOUNT WAS A JOURNAL LINE AND THE SERVER KEPT PRESSING IT (B-b327, lane fuse-canary-notice) — 不变量 = a canary strike is an episode the owner is told of by name; the server's own scans stop pressing a wedged mount, a person's read never waits for a sweep
+- THIRTEEN BROWSER DAEMONS OUTLIVED THEIR CONVERSATIONS BY DAYS (lane daemon-orphan-end) — 不变量 = a daemon the keeper started with no browser, no lease and no conversation is ended by identity after a said grace; an unmarked one is only reported (kb-bugfix-invariants)
+- A FORK ASKED THROUGH THE API RESUMED THE PARENT (B-8b7b, lane fork-flag-server-side) — 不变量 = the server derives the fork flag from the fork fact, one producer; a fork that owns its parent's id is killed before its first turn
+- A FILE CHOOSER, AN HTTP SIGN-IN, A PERMISSION PROMPT AND PRINT WERE FROZEN PICTURES (B-ebfc, lane browser-ui-prompts) — 不变量 = every browser prompt the screencast cannot paint is a named fact with one way out, or is decided before it can hold; a typed credential never reaches an agent or a log
+- A PID RECORDED HOURS AGO WAS KILLED AS IF IT WERE STILL OURS (B-1cc6, lane pid-identity-census) — 不变量 = a pid is never an identity; every signal to a recorded pid proves starttime (+ bootId), an unprovable one is reported, never killed
+
+## THIRTEEN BROWSER DAEMONS OUTLIVED THEIR CONVERSATIONS BY DAYS (lane daemon-orphan-end, 2.369.237 — a fleet pod, 2026-10-07)
+
+**Symptom.** 13 `agent-browser` daemons + 7 Xvfb with no Chrome child, up to 2.6 d old (10–130 MB each, a display each, their TMPDIR profile dirs), from killed / archived conversations or temporary browsers recorded "stopped (idle)".
+
+**Invariant.** src/browser-orphans.js `daemonVerdict` + the keeper's `orphanCensus` (tick every 60 s, boot once): ended by pid + starttime after 10 min; a lease, a Chrome child, a recent verb or a running conversation (≤ 6 h idle) keeps it; the Xvfb only with its daemon; no launch mark ⇒ reported, never ended.
+
+**Gate.** test-browser-orphans ①–④ (+ 2 mutant controls).
 
 ## A NEW VENDOR TOUCHED FOUR FILES (lane channel-vendor-one-file, B-e3f1 — owner 2026-10-04)
 

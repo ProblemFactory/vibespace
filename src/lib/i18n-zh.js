@@ -7911,4 +7911,17 @@ export default {
   "- the age-based buffer and meta sweeps": "- 按时间清理缓冲区和元数据",
   "- the mount cache scan": "- 挂载缓存扫描",
   "A file you open yourself is never paused. This item resolves itself when the folder answers again.": "你自己打开文件从不会被暂停。文件夹恢复响应时，这一条会自动结束。",
+  "page asks for a sign-in": "网页要求登录", // lane browser-ui-prompts
+  "Permission {kind} granted to {origin} by the agent": "agent 已允许 {origin} 使用 {kind} 权限", // lane browser-ui-prompts-r2
+  "Permission {kind} denied for {origin} by the agent": "agent 已拒绝 {origin} 的 {kind} 权限", // lane browser-ui-prompts-r2
+  "The page tried to print — closed; the agent saves a PDF with vibespace-browser pdf": "网页想打印 — 已关闭；agent 用 vibespace-browser pdf 存成 PDF", // lane browser-ui-prompts-r2
+  "page asks for a file": "网页要一个文件", // lane browser-ui-prompts
+  "The page asks for an HTTP sign-in — enter it in the live view": "网页要求 HTTP 登录 — 在实时画面里填写", // lane browser-ui-prompts
+  "The page asks for a file — the agent uploads it": "网页要一个文件 — 由 agent 上传", // lane browser-ui-prompts
+  "The page asks for a file": "网页要一个文件", // lane browser-ui-prompts
+  "No file window opens here — the agent uploads it with vibespace-browser upload": "这里不会弹出文件窗口 — agent 用 vibespace-browser upload 上传", // lane browser-ui-prompts
+  "The page asks you to sign in": "网页要求你登录", // lane browser-ui-prompts
+  "Sent to this page only — never to the agent, never written down": "只发给这个网页 — 不给 agent，也不记录", // lane browser-ui-prompts
+  "A page in the agent browser asks you to sign in ({host})": "Agent 浏览器里的网页要求你登录（{host}）", // lane browser-ui-prompts
+  "Open its live view and type the username and password there — the agent never sees them.": "打开它的实时画面，在那里输入用户名和密码 — agent 看不到。", // lane browser-ui-prompts
 };

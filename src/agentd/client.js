@@ -881,6 +881,8 @@ class DeviceManager {
     // the action by name; a start carrying a build it ignores would run its default build), said by name here
     if ((action === 'builds' || (action === 'start' && params && params.browser && params.browser.kind && params.browser.kind !== 'default')) && !conn.info.capabilities.includes('browser-builds')) { const e = new Error('this machine\'s agent cannot list Chrome builds (it predates the list) -- upgrade the agent on this machine'); e.code = 'builds_unsupported'; throw e; }
     // lane remote-profile-start: removing a profile's folder is its own capability — an older agent is never asked (said by name)
+    // lane daemon-orphan-end: ending a daemon that has no browser is its own capability — an older agent is never asked (reported in the row)
+    if (action === 'end-daemon' && !conn.info.capabilities.includes('browser-end-daemon')) { const e = new Error('this machine\'s agent cannot end a browser daemon (it predates it) -- upgrade the agent on this machine'); e.code = 'end_daemon_unsupported'; throw e; }
     if (action === 'remove' && !conn.info.capabilities.includes('browser-remove')) { const e = new Error('this machine\'s agent cannot remove a profile\'s folder (it predates it) -- upgrade the agent on this machine'); e.code = 'remove_unsupported'; throw e; }
     const r = await this._request({ op: 'browser-serve', action, params, timeoutMs });
     if (r.error) throw new Error(r.error);

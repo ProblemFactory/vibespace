@@ -1468,12 +1468,9 @@ export function installSessionLifecycle(App, ctx = {}) {
     const forkName = (customName && customName.trim()) || this._defaultForkName(sessionInfo);
 
     const mode = sessionInfo.webuiMode || this.settings.get('session.defaultMode') || 'chat';
-    // --resume-session-at <uuid> truncates the fork to up-to-and-including that
-    // assistant message (claude-only). uuid has no spaces, so it tokenizes
-    // cleanly inside the extraArgs string.
-    const forkArgs = backend === 'claude'
-      ? ('--fork-session' + (resumeAt ? ` --resume-session-at ${resumeAt}` : ''))
-      : '';
+    // The fork FLAGS are the server's (B-8b7b): `fork: true` + `forkAtUuid`
+    // are the whole request — the claude adapter derives --fork-session and
+    // --resume-session-at from them, for every caller (an API create too).
     // PER-SESSION GIT WORKTREE (owner ruling 9). A fork is the OTHER spawn that
     // emits `--worktree` (worktreeSpawnArgs: `--fork-session` STRIPS the CLI's
     // recorded `worktreeSession`, so the branch inherits nothing and would run
@@ -1508,7 +1505,6 @@ export function installSessionLifecycle(App, ctx = {}) {
       // `claude --resume <remote-id> --fork-session` against a transcript
       // that doesn't exist here (audit 2.192.0)
       hostId: sessionInfo.host || sessionInfo.hostId || undefined,
-      extraArgs: forkArgs,
       initialMessage,
       forkAtUuid: resumeAt || undefined,
       forkTitle: forkName,

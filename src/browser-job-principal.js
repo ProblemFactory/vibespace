@@ -27,8 +27,9 @@
 const B = require('./browser-profiles.js');
 
 const RUNNING_STATES = Object.freeze(['starting', 'up']);
-/** The /api/agent/browser/<route> verbs a job may call: read, act, answer a dialog or a page's passkey wait. */
-const JOB_ROUTES_ALLOWED = Object.freeze(['profiles', 'status', 'providers', 'resolve', 'audit', 'tab', 'dialog', 'direct', 'passkey']);
+/** The /api/agent/browser/<route> verbs a job may call: read, act, answer a dialog or a page's passkey wait, decide a page
+ *  permission on its own browser (lane browser-ui-prompts-r2). */
+const JOB_ROUTES_ALLOWED = Object.freeze(['profiles', 'status', 'providers', 'resolve', 'audit', 'tab', 'dialog', 'direct', 'passkey', 'permission']);
 /** …and the ones that would change the conversation's browsers — refused by name. Any route in neither list is refused too. */
 const JOB_ROUTES_REFUSED = Object.freeze(['use', 'pin', 'new', 'new-child', 'detach', 'backend', 'blocked', 'site-hint', 'site-reset', 'resume', 'restart']); // int220: `restart` (lane browser-unresponsive) stops the browser under every holder — a conversation's act, never a job's
 

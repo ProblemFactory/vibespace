@@ -73,6 +73,7 @@ const VERBS = require('../browser-verbs.js'); // takeover r3: the ONE config rul
 const BS = require('../browser-stuck.js'); // lane browser-unresponsive: THE hung-browser verdict (PURE) + its words
 const LIMITS = require('../keeper-limits.js');
 const RG = require('../runaway-guard.js'); // the ONE resource verdict + per-provider numbers + report level (2026-09-25: report only)
+const O = require('../browser-orphans.js'); // lane daemon-orphan-end: a daemon nobody holds — THE verdict (PURE)
 const HM = require('../browser-human.js'); // BROWSE YOURSELF (B-6ae8): the user as one more holder on his own tab
 const DSP = require('../browser-display.js'); // lane headless-fallback: headed is a preference, the display is a fact (PURE)
 const HC = require('../hidden-chars.js'); // lane browser-propose: a proposal card's words carry no character that is not drawn (THE one set)
@@ -138,6 +139,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   facts = null, runtime = null, limits = LIMITS, log = console, now = Date.now, tickMs = TICK_MS, guardSampleMs = null, install = true, answerAskMs = null, /* lane browser-unresponsive: the gate's bound of one ask */
   // lane H: how long a verb waits for the lease seam's listeners (the recorder ARMING its tap) before it runs
   armWaitMs = ARM_WAIT_MS,
+  daemonTable = null, endIdentity = null, orphanScanMs = O.SCAN_MS, /* lane daemon-orphan-end: the gate's process table (rows) + ending seam */
   taskGroupDefault = null, access = null, hostKnown = null,
   vncDisplay = null, // B-d635 (lane browser-reliability): VibeSpace's own VNC desktop display the probe also looks at (the server wiring names it)
   // P4 second half (§7.4 / §7.5): the integration store (a handle or a
@@ -2124,12 +2126,12 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   }
   /** SIGTERM, then SIGKILL — each only while the pid is STILL the process (pid + starttime). Real time, never the
    *  injectable clock (a stuck fake clock must not spin this). → 'ended' | 'gone' | 'unproven' | 'survived'. */
-  async function endProcess(pid, starttime) {
+  async function endProcess(pid, starttime, { termMs = 1500 } = {}) {
     const same = () => F.pidAlive(pid) && F.sameProcess(pid, starttime);
     if (!F.pidAlive(pid)) return 'gone';
     if (!same()) return 'unproven';
     try { process.kill(pid, 'SIGTERM'); } catch { /* gone meanwhile */ }
-    for (let i = 0; i < 15 && F.pidAlive(pid); i++) await sleep(100);
+    for (let i = 0; i < termMs / 100 && F.pidAlive(pid); i++) await sleep(100);
     if (same()) { try { process.kill(pid, 'SIGKILL'); } catch { /* gone */ } for (let i = 0; i < 10 && F.pidAlive(pid); i++) await sleep(50); }
     return F.pidAlive(pid) && F.sameProcess(pid, starttime) ? 'survived' : 'ended';
   }
@@ -2297,6 +2299,82 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     markEphemeralGone(rec, seenBy);
     commit();
     return true;
+  }
+
+  // ── lane daemon-orphan-end: a daemon nobody holds (no browser, no lease, no conversation) — ended by identity ──
+  const orphanSeen = new Map(); // `${pid}:${starttime}` → {browserAt, said}
+  let orphanPending = 0; let lastOrphanScan = 0; let orphanRun = null;
+  const orphanDirs = () => { const d = [CONFIG_DIR]; try { d.push(fs.realpathSync(CONFIG_DIR)); } catch { /* not yet */ } return d; };
+  async function endOrphan(d, v, { rec, p, conversation, idleMs, rowIdleMs = idleMs, seenBy }) {
+    const end = endIdentity || ((pid, st) => endProcess(pid, st, { termMs: 5000 })); // SIGTERM, SIGKILL after 5 s
+    const result = await end(d.pid, d.starttime);
+    const xvfb = [];
+    for (const x of d.xvfb || []) if (x.starttime != null) xvfb.push({ pid: x.pid, result: await end(x.pid, x.starttime) });
+    log.log?.(`[browser] ${O.endedLine({ pid: d.pid, why: v.why, conversation, idleMs, result, xvfb })} (seen by ${seenBy})`);
+    if (rec && result !== 'survived') {
+      if (B.isLiveBrowser(rec)) { if (isEph(p)) markEphemeralGone(rec, seenBy); else markDaemonGone(rec, seenBy); }
+      rec.state = 'stopped'; rec.stoppedBy = 'idle'; rec.endedAt = rec.endedAt || now(); rec.note = O.rowNote(rowIdleMs); dirty = true;
+    }
+    return result;
+  }
+  /** The census over THIS machine's daemons (the tick, every orphanScanMs; the boot, once after adoption) and each
+   *  paired machine's stopped record whose daemon still answers (through `browser-serve`, capability-gated). */
+  function orphanCensus(seenBy, t = now(), { force = false } = {}) {
+    if (orphanRun) return orphanRun;
+    if (!force && t - lastOrphanScan < orphanScanMs) return Promise.resolve(null);
+    lastOrphanScan = t;
+    orphanRun = (async () => {
+      let rows = [];
+      try { rows = await (daemonTable || F.daemonRows)(); } catch (e) { log.warn?.(`[browser] the daemon census could not read the process table: ${e && e.message}`); rows = []; }
+      const live = liveKeys(); const dirs = orphanDirs(); const out = { ended: [], kept: [], reported: [] }; let pending = 0;
+      for (const d of O.daemonsFromRows(rows)) {
+        const id = `${d.pid}:${d.starttime}`; const seen = orphanSeen.get(id) || {}; orphanSeen.set(id, seen);
+        const rec = Object.values(reg.browsers).find((r) => isLocalRec(r) && r.pid === d.pid && r.starttime === d.starttime) || null;
+        if (rec && (starting.has(rec.profileId) || stopping.has(rec.profileId))) continue;
+        const mark = O.daemonMark(d.env, dirs);
+        const p = rec ? profile(rec.profileId) : mark ? (mark.kind === 'ephemeral' ? reg.profiles.find((x) => isEph(x) && x.owner.id === mark.mark) : profile(mark.mark)) || null : null;
+        if (p && (starting.has(p.id) || stopping.has(p.id))) continue;
+        const conversation = p && isEph(p) ? p.owner.id : mark && mark.kind === 'ephemeral' ? mark.mark : null;
+        const browserAlive = d.chrome.length > 0; if (browserAlive) seen.browserAt = t;
+        const noBrowserSince = Math.max(d.startedAt || 0, seen.browserAt || 0, (rec && rec.browserLost && rec.browserLost.at) || 0);
+        const stoppedIdleAt = rec ? (!B.isLiveBrowser(rec) ? rec.endedAt || noBrowserSince : null) : noBrowserSince;
+        const v = O.daemonVerdict({ daemon: { pid: d.pid, starttime: d.starttime, owned: !!(rec || mark), cdp: d.cdp, stoppedIdleAt, noBrowserSince }, browserAlive,
+          leases: rec && p ? holdersOn(p.id).length : 0 /* a lease names the RECORDED daemon, never a stray of the same mark */, conversationAlive: conversation ? (B.keyCarried(conversation, live) ? 'running' : 'gone') : null,
+          lastVerbAt: (p && p.lastVerbAt) || 0, lastViewerAt: 0, now: t });
+        if (v.act === 'end') { const r = await endOrphan(d, v, { rec, p, conversation, idleMs: t - noBrowserSince, rowIdleMs: t - Math.max((p && p.lastVerbAt) || 0, stoppedIdleAt == null ? noBrowserSince : stoppedIdleAt), seenBy }); out.ended.push({ pid: d.pid, why: v.why, result: r }); orphanSeen.delete(id); continue; }
+        if (v.act === 'report') { out.reported.push({ pid: d.pid, why: v.why }); if (!seen.said && !d.cdp && !browserAlive) { seen.said = true; log.warn?.(`[browser] ${O.reportLine({ pid: d.pid, startedAt: d.startedAt, now: t })}`); } continue; }
+        out.kept.push({ pid: d.pid, why: v.why }); if (!browserAlive) pending++;
+      }
+      for (const k of [...orphanSeen.keys()]) if (!O.daemonsFromRows(rows).some((d) => `${d.pid}:${d.starttime}` === k)) orphanSeen.delete(k);
+      await remoteOrphans(seenBy, t, out);
+      orphanPending = pending;
+      if (dirty) commit();
+      return out;
+    })().finally(() => { orphanRun = null; });
+    return orphanRun;
+  }
+  /** A PAIRED machine: a stopped (idle) record of a profile there, no lease — its `status` answers the daemon facts;
+   *  the verdict is applied through `end-daemon` (an agent without the capability is never asked: reported in the row). */
+  async function remoteOrphans(seenBy, t, out) {
+    for (const rec of Object.values(reg.browsers)) {
+      if (isLocalRec(rec) || rec.external || !rec.hostId || B.isLiveBrowser(rec) || rec.stoppedBy !== 'idle') continue;
+      const p = profile(rec.profileId); if (!p) continue;
+      let st = null; try { st = await acc().call(rec.hostId, 'status', { profileId: rec.profileId }); } catch { continue; }
+      const d = st && st.active && st.daemon ? st.daemon : null; if (!d) continue;
+      const v = O.daemonVerdict({ daemon: { pid: d.pid, starttime: d.starttime, owned: true, stoppedIdleAt: rec.endedAt || 0, noBrowserSince: Math.max(rec.endedAt || 0, d.startedAt || 0) }, browserAlive: !!d.chrome,
+        leases: holdersOn(p.id).length, conversationAlive: null, lastVerbAt: p.lastVerbAt || 0, now: t });
+      if (v.act !== 'end') continue;
+      const idleMs = t - (rec.endedAt || t);
+      try {
+        const r = await acc().call(rec.hostId, 'end-daemon', { profileId: rec.profileId, pid: d.pid, starttime: d.starttime });
+        log.log?.(`[browser] ${rec.profileId} on ${rec.hostId}: ${O.endedLine({ pid: d.pid, why: v.why, idleMs, result: r && r.ok ? r.result : `refused (${(r && r.code) || '?'})` })} (seen by ${seenBy})`);
+        if (r && r.ok) { rec.note = O.rowNote(idleMs); dirty = true; out.ended.push({ pid: d.pid, host: rec.hostId, why: v.why, result: r.result }); }
+      } catch (e) {
+        const note = `stopped — its daemon on ${rec.hostId} (pid ${d.pid}) has had no browser for ${O.durText(idleMs)}; reported, not ended (${e && e.code === 'end_daemon_unsupported' ? "that machine's agent predates ending it" : e && e.message})`;
+        if (rec.note !== note) { rec.note = note; dirty = true; log.warn?.(`[browser] ${rec.profileId}: ${note}`); }
+        out.reported.push({ pid: d.pid, host: rec.hostId, why: note });
+      }
+    }
   }
   /**
    * VERIFY r1 H2: the live-view bridge's upstream (the daemon's own stream server) closed on an EPHEMERAL relay —
@@ -5723,9 +5801,22 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (n) commit();
     return n;
   }
+  /** lane browser-ui-prompts-r2: the conversation's own per-origin permission decision, written on its lease (`l.permissions`,
+   *  ≤ 16, the newest per kind + origin) — gone with the browser (a fresh Chrome decides every kind again: denied). */
+  function notePermission(profileId, browserKey, rec) {
+    ensureLoaded();
+    const pid = String(profileId || ''), bk = String(browserKey || '');
+    const l = pid && bk && rec ? B.findLease(reg.leases, pid, bk) : null;
+    if (!l) return false;
+    const row = { kind: String(rec.kind || '').slice(0, 40), setting: rec.setting === 'granted' ? 'granted' : 'denied', origin: String(rec.origin || '').slice(0, 300), by: rec.by === 'user' ? 'user' : 'agent', at: Number(rec.at) || Date.now() };
+    l.permissions = [...(Array.isArray(l.permissions) ? l.permissions : []).filter((x) => !(x && x.kind === row.kind && x.origin === row.origin)), row].slice(-16);
+    commit();
+    return true;
+  }
   function dropLeaseTabs(profileId) {
     const pid = String(profileId || '');
     let n = 0;
+    for (const l of reg.leases) if (l && l.profileId === pid && Array.isArray(l.permissions)) { delete l.permissions; n++; } // lane browser-ui-prompts-r2: a fresh Chrome forgot them
     for (const l of reg.leases) if (l && l.profileId === pid && Array.isArray(l.tabs) && l.tabs.length) { delete l.tabs; n++; }
     if (n) commit();
     return n;
@@ -5908,11 +5999,12 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     await r.retired;
     await adoptAll();
     await Promise.allSettled([...reaping.values()]); // r2 M1
+    await orphanCensus('boot', now(), { force: true }); // lane daemon-orphan-end: the boot sweep (after restoreSessions: liveKeys is final)
     // BROWSE YOURSELF verify r1 (H4): a restored holder of the user's whose browser did not survive the restart ends
     // `stopped` (his tab went with it); one on an adopted browser stays away — kept, counted by the idle clock, continued
     for (const h of [...humans.values()]) if (!B.isLiveBrowser(reg.browsers[h.profileId])) await endHuman(h.profileId, 'stopped', { closeTab: false });
     commit();
-    if (Object.values(reg.browsers).some(B.isLiveBrowser) || reg.leases.length || humans.size) startTimer();
+    if (Object.values(reg.browsers).some(B.isLiveBrowser) || reg.leases.length || humans.size || orphanPending) startTimer();
     return { droppedLeases: r.dropped.length, browsers: Object.values(reg.browsers).filter(B.isLiveBrowser).length, humans: humans.size };
   }
 
@@ -5986,6 +6078,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     }
     await Promise.allSettled(asks); // lane browser-unresponsive: bounded by BS.ANSWER_ASK_MS
     await Promise.allSettled([...reaping.values()]); // r2 M1: every orphan this tick found is ended before it returns
+    await orphanCensus('the tick', t); // lane daemon-orphan-end: a daemon nobody holds, ended by identity after the grace
     if (dirty) commit();
     // P3 (§4.3): a takeover somebody walked away from hands back by itself, a
     // pending confirmation the daemon has already auto-denied is forgotten.
@@ -5995,7 +6088,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     sweepIdleReleases(t); // MULTIVIEW B-325a
     await sweepIdlePaint(t); // lane browser-swiftshader-cpu
     refreshKeptTabs(t); // lane browser-resume: a running conversation browser nobody mirrors — its tabs read every 30 s (a crash keeps them)
-    if (!Object.values(reg.browsers).some(B.isLiveBrowser) && !reg.leases.length && !inputs.size && !pending.size && !humans.size) stopTimer();
+    if (!Object.values(reg.browsers).some(B.isLiveBrowser) && !reg.leases.length && !inputs.size && !pending.size && !humans.size && !orphanPending) stopTimer();
   }
   function startTimer() {
     if (timer) return;
@@ -6382,13 +6475,13 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     notePending, resolvePending, pendingFor, pendingAllFor, answerConfirmation, onConfirmation,
     // P1 second half (§3.7/§3.8): the set, handles, the one-time refusal, children, the audit, adopt
     setFor, tell, resolveFor, newChild, dropChild, jobHandleFor, findJobHandle, jobOf, releaseJob, audit, adoptScratch, auditFile: path.join(dataDir, AUDIT_FILE),
-    reconcile, adoptAll, boot, tick, startTimer, shutdown,
+    reconcile, adoptAll, boot, tick, startTimer, shutdown, orphanCensus,
     // P4 (§7.3): the paired-machine question the routes ask before a create is judged
     hostKnown: knownHost, isLocalRec, probeCdp, desktopConsent,
     // P4 second half (§7.4 / §7.5): the switch, its view, the chip, seats, the agent's claims, per-site memory, the lease's last URL
     switchBackend, switcherView, chipFor, choicesFor: (id) => { const p = profile(id); return p && !isEph(p) ? backendFactFor(p).choices : []; }, seatStates, runningOf, blocked, blockedFor, clearBlocked, addSiteHint, dropSiteHint, siteHints, noteLeaseUrl, cloakExecutable, readDirMajor, keys: () => keysOf(),
     onProposal, proposalEntry, stepProposal, noteProposal, proposalsFor, proposalOthers, openInLease,
-    proposeSiteReset, siteResetHolders, holderTabs, noteOwnTab, forgetOwnTab, pruneOwnTabs, // lane site-reset step 3 (verify r3 #2: the persisted witness; r4 #3: pruned at a connect) (+ verify r1: a holder's attributable tabs): one site's login on a shared profile — a proposal // lane browser-propose: the proposal record + what its runner acts through
+    proposeSiteReset, siteResetHolders, holderTabs, noteOwnTab, forgetOwnTab, pruneOwnTabs, notePermission /* lane browser-ui-prompts-r2 */, // lane site-reset step 3 (verify r3 #2: the persisted witness; r4 #3: pruned at a connect) (+ verify r1: a holder's attributable tabs): one site's login on a shared profile — a proposal // lane browser-propose: the proposal record + what its runner acts through
     // §7.4 failure form (1): the install action (verdict = PURE over the proof record; the act spawns npm ONLY on ok)
     installDir, cloakEgress, cloakRefusals, // installVerdict, installCloak, installedCloakBin, installedStamp, cloakCacheDir: the cloak row, in ...installs.api
     // P5 (§4.5 / D7 / D35): the lease seam the recorder and the screencast hang on, the digest hook, the editable fields

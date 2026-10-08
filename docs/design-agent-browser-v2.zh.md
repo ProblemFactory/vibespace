@@ -817,6 +817,8 @@ agent 于是自己建了一个多余的 profile，最后静默退回一个临时
 * **spawn 卫生。** `agentEnv()` 式的净化环境；秘密（代理密码、provider 授权 key）走环境或文件，
   **绝不走 argv** —— argv 在这台机器上是全局可读的，而且正是 writer sweep 读的东西。
 
+**落地（lane daemon-orphan-end，2.369.237）：没人持有的 daemon。** keeper 启动的 daemon（记录里的 pid + starttime，或其 env 的 `AGENT_BROWSER_CONFIG` 是 keeper 的 `machine[-ephemeral]-<mark>.json`），在 10 分钟内没有 Chrome 子进程、没有租约、没有命令或观看者、且其对话已结束（或记录为 stopped-idle）时，被 keeper 按 pid + starttime 结束（SIGTERM，5 秒后 SIGKILL），其 Xvfb 一并结束；对话仍在运行的 stopped-idle daemon 保留给下一条命令，空闲超过 6 小时才结束。没有启动标记的 daemon 只报告，绝不结束。判定在 src/browser-orphans.js（PURE），普查每 60 秒随 tick 一次、boot 时一次；配对机器经 `browser-serve status` / `end-daemon`（能力 `browser-end-daemon`）。
+
 ### 3.6 每一块落在哪（套用 CLAUDE.md 的路由表）
 
 | 块 | 模块 | 层 | 门禁 |
@@ -3608,3 +3610,9 @@ diff 的感觉。本轮没有被判错的条目。
 > (`tab-held`)。每次重新询问（30 秒）都重新判定；标签页回答了、关掉了、或者不再在租约范围里 ⇒ 清除。实测
 > （scripts/measure-held-enable.mjs，0.38.1 + Chrome 154，16 个忙碌标签页，新 socket 接到已在运行的守护进程）：
 > Page.enable p50 1 ms / p95 25 ms / 最大 25 ms；对话框下的标签页 30 秒内从不回答 —— 所以 `ENABLE_TIMEOUT_MS` 仍是 5 秒。
+
+## 实现记录：浏览器自身的提示（lane browser-ui-prompts，2.369.237）
+
+文件选择框与 HTTP 登录由对话监视（browser-dialogs.js）在每个标签页上挂钩：文件选择框被拦截（Page.fileChooserOpened ⇒ `file` 记录，agent 用 `vibespace-browser upload` 上传后记录结束）；HTTP 登录只暂停 Document 请求（Fetch.authRequired ⇒ `http-auth` 记录，实时画面的用户名/密码框 ⇒ continueWithAuth，取消 ⇒ CancelAuth，60 秒无人回答 ⇒ 一条 For you 事项，10 分钟 ⇒ 自动取消）。凭据只送到 Chrome，从不进 agent、日志或记录。权限提示与打印只做了测量（隐藏窗口下权限请求永远挂起、print 预览会卡住页面），预先决定权限的 `permission` 动词与打印钩子是后续工作。
+
+**r2（权限与打印，2.369.237）**：实测隐藏窗口里权限请求永远挂起、`window.print()` 打开 chrome://print 并卡住页面（关闭预览目标、Page.close、Esc 都放不开；只有预览自己的取消 chrome.send closePrintPreviewDialog + dialogClose 能在 25 ms 内放开）。现在监视在每个浏览器上下文的第一个标签页时把 24 种权限预先全部设为拒绝（无头与隐藏窗口同一张表），页面立刻得到答复；agent 用 `vibespace-browser permission <kind> allow|deny [origin] [lat,lon]` 为某个来源翻转一种权限（记在租约、轨迹和实时画面的一行上；允许定位时同时给出位置，否则仍会挂起）。chrome://print 页面目标从不算作标签页：监视按下它的取消，打开它的对话被告知一次（用 `pdf`）。导航类动作遇到 HTTP 登录时，长轮询（`prompt=1`）立即结束该动作并给出那句话，不再等 25 秒超时。已在权限挂起之后才设定的决定不会回答它（实测）——所以必须预先决定。

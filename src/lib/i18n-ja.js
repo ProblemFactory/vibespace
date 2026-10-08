@@ -7910,4 +7910,17 @@ export default {
   "- the age-based buffer and meta sweeps": "- 期限によるバッファーとメタデータの掃除",
   "- the mount cache scan": "- マウントキャッシュのスキャン",
   "A file you open yourself is never paused. This item resolves itself when the folder answers again.": "ご自身で開くファイルは一時停止されません。フォルダーが応答を取り戻すと、この項目は自動で解決します。",
+  "page asks for a sign-in": "ページがサインインを要求", // lane browser-ui-prompts
+  "Permission {kind} granted to {origin} by the agent": "エージェントが {origin} に {kind} の権限を許可しました", // lane browser-ui-prompts-r2
+  "Permission {kind} denied for {origin} by the agent": "エージェントが {origin} の {kind} の権限を拒否しました", // lane browser-ui-prompts-r2
+  "The page tried to print — closed; the agent saves a PDF with vibespace-browser pdf": "ページが印刷しようとしました — 閉じました。エージェントは vibespace-browser pdf で PDF に保存します", // lane browser-ui-prompts-r2
+  "page asks for a file": "ページがファイルを要求", // lane browser-ui-prompts
+  "The page asks for an HTTP sign-in — enter it in the live view": "ページが HTTP サインインを求めています — ライブビューで入力してください", // lane browser-ui-prompts
+  "The page asks for a file — the agent uploads it": "ページがファイルを求めています — エージェントがアップロードします", // lane browser-ui-prompts
+  "The page asks for a file": "ページがファイルを求めています", // lane browser-ui-prompts
+  "No file window opens here — the agent uploads it with vibespace-browser upload": "ここではファイル選択画面は開きません — エージェントが vibespace-browser upload でアップロードします", // lane browser-ui-prompts
+  "The page asks you to sign in": "ページがサインインを求めています", // lane browser-ui-prompts
+  "Sent to this page only — never to the agent, never written down": "このページにだけ送られます — エージェントには渡らず、記録もされません", // lane browser-ui-prompts
+  "A page in the agent browser asks you to sign in ({host})": "エージェントブラウザのページがサインインを求めています（{host}）", // lane browser-ui-prompts
+  "Open its live view and type the username and password there — the agent never sees them.": "ライブビューを開いてユーザー名とパスワードを入力してください — エージェントには見えません。", // lane browser-ui-prompts
 };

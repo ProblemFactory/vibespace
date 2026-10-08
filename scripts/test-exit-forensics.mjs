@@ -1237,7 +1237,7 @@ console.log('— §6c every kill door is declared: an actor marked before the ki
     'src/device-mount.js': [4, 'not a conversation: rclone mounts (lane mac-pull-refresh added one — its bounded refresh child; composed at the 2.369.202 integration)'],
     'src/machine-mounts.js': [1, 'not a conversation: mount probes'],
     'src/mounts.js': [7, 'not a conversation: mounts (2.369.213: + a hung/over-ceiling starting daemon, + the bounded cache-count child)'],
-    'src/jobs.js': [2, 'not a conversation: background jobs'],
+    'src/proc-identity.js': [2, 'not a conversation: the identity-proven signal (background jobs\' group kill, B-1cc6) — moved from src/jobs.js'],
     'src/plugins/frp.js': [1, 'not a conversation: plugins (the frpc daemon it started)'],
     'src/plugins/tailscale.js': [1, 'not a conversation: plugins (the tailscaled it started)'],
     'src/server/plugin-loader.js': [2, 'not a conversation: plugin children'],
@@ -1256,6 +1256,9 @@ console.log('— §6c every kill door is declared: an actor marked before the ki
     'src/server/usage-index.js': [2, "not a conversation: the server's own exit, re-raised past the index worker's 2 s join bound (usage-index-shadow)"],
     // the 2.369.221 integration — lane global-search's ORCH joins its index worker at process exit the same way (its own close bound)
     'src/server/search-index.js': [1, "not a conversation: the server's own exit, re-raised past the search index worker's close bound (global-search)"],
+    // the 2.369.237 integration — lane daemon-orphan-end's end-daemon op and lane fork-flag-server-side's fork proof
+    'src/browser-serve.js': [2, "not a conversation: a machine's browser daemon with no browser, ended by pid+starttime when the hub asks (end-daemon, daemon-orphan-end)"],
+    'src/ws-create.js': [1, "actor fork-resumed-parent: a pending fork's own CLI holding its parent's id, SIGKILLed before its first turn (B-8b7b)"],
   };
   // the actor pins: the mark is set BEFORE the kill it names (the teardown reads it; the kill case deletes the session late)
   const ACTOR_PINS = [
@@ -1263,6 +1266,7 @@ console.log('— §6c every kill door is declared: an actor marked before the ki
     ['src/adapters/claude-code.js', "session._exitAsked = { by: 'interrupt', at: Date.now() };", ["process.kill(session._childPid, 'SIGINT')"]],
     ['src/server/sysinfo-wiring.js', "markAskedByPid(pid, 'user-signal', { refreshOnly: sig === 'CONT' })", ["process.kill(pid, 'SIG' + sig)"]],
     ['src/routes/sessions.js', "markAskedByPid(pid, 'user-kill')", ["process.kill(pid, 'SIGTERM')"]],
+    ['src/ws-create.js', "session._exitAsked = { by: 'fork-resumed-parent', at: Date.now() };", ["process.kill(Number(lock.pid), 'SIGKILL')"]],
   ];
   const serverFiles = (root) => {
     const out = ['server.js'];

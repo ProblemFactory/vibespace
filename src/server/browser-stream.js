@@ -230,6 +230,9 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
       if (ev.kind === 'open' && dialogShownOn(r, ev.targetId)) broadcast(r, { type: 'dialog', state: 'open', dialog: require('../browser-stuck.js').dialogBlock(ev.dialog, { now: now() }) });
       else if (ev.kind === 'closed' && ev.answered && dialogShownOn(r, ev.targetId)) broadcast(r, { type: 'dialog', state: 'closed', id: ev.answered.id, answered: { how: ev.answered.how, by: ev.answered.by, at: ev.answered.at } });
       else if (ev.kind === 'down' && ev.closed && ev.closed.length) broadcast(r, { type: 'dialog', state: 'closed', ids: ev.closed, answered: null });
+      // lane browser-ui-prompts-r2: the bar's one line — a permission the agent decided, a print preview the watch closed
+      else if (ev.kind === 'permission' && ev.permission) broadcast(r, { type: 'page-note', permission: ev.permission });
+      else if (ev.kind === 'print' && (!ev.targetId || dialogShownOn(r, ev.targetId))) broadcast(r, { type: 'page-note', print: { released: !!ev.released } });
     }
   }) : null;
   function armDialogs(relay) {
@@ -255,6 +258,17 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
       .then((r) => ack(r.ok ? { ok: true, n: r.n } : { ok: false, code: r.code || 'refused', error: r.error || 'refused' }))
       .catch((e) => ack({ ok: false, code: 'internal', error: String(e && e.message) }));
   }
+  /** lane browser-ui-prompts: the live view's answer to a browser prompt, as the USER — the credential goes to the watch (and on
+   *  to Chrome) and nowhere else: not into the ack, a journal line or the trace. */
+  function answerPromptFor(relay, viewer, msg) {
+    const pid = relayProfileId(relay);
+    const ack = (o) => send(viewer.ws, { type: 'prompt-ack', id: String(msg.id || '').slice(0, 80), ...o });
+    if (!dialogs || !pid || typeof dialogs.answerPrompt !== 'function') return ack({ ok: false, code: 'not_watched', error: 'VibeSpace is not watching this browser' });
+    dialogs.answerPrompt({ profileId: pid, browserKey: relay.browserKey, sessionId: relay.sessionId, ephemeral: relay.target.kind !== 'attachment', promptId: msg.id ? String(msg.id).slice(0, 80) : null },
+      { cancel: msg.cancel === true, username: typeof msg.username === 'string' ? msg.username : '', password: typeof msg.password === 'string' ? msg.password : '', by: 'user' })
+      .then((r) => ack(r.ok ? { ok: true } : { ok: false, code: r.code || 'refused', error: r.error || 'refused' }))
+      .catch(() => ack({ ok: false, code: 'internal', error: 'the answer was not delivered' }));
+  }
   /** The tab each of a conversation's relays shows (the watch's scope for a dialog — whose tab it is). */
   function activeTargetsFor({ sessionId = null, browserKey = null, profileId = null } = {}) {
     // verify r2 #3: ONE conversation's relays — by its browser key (a helper's view is keyed on its own), else its session;
@@ -268,10 +282,12 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
   /** The agent's own dialog answer is a page act on the trace: the stream mirror's command/result shape, to the TAPS
    *  only (the recorder), never to a viewer. */
   let dialogActSeq = 0;
-  function tapDialogAct({ sessionId, profileId = null, action, dialog = null } = {}) {
-    const id = `r-vs-dialog-${++dialogActSeq}`; const t = now();
-    const cmd = { type: 'command', action: 'dialog', id, params: { action: 'dialog', id, response: String(action || '') }, timestamp: t };
-    const res = { type: 'result', action: 'dialog', id, success: true, data: dialog ? { type: dialog.type, message: dialog.message } : null, duration_ms: 0, timestamp: t };
+  function tapDialogAct({ sessionId, profileId = null, action, dialog = null, permission = null } = {}) {
+    const pm = action === 'permission' && permission ? { kind: String(permission.kind || ''), setting: String(permission.setting || ''), origin: String(permission.origin || '') } : null; // lane browser-ui-prompts-r2: the agent's permission decision
+    const verb = pm ? 'permission' : 'dialog';
+    const id = `r-vs-${verb}-${++dialogActSeq}`; const t = now();
+    const cmd = { type: 'command', action: verb, id, params: pm ? { action: verb, id, ...pm } : { action: 'dialog', id, response: String(action || '') }, timestamp: t };
+    const res = { type: 'result', action: verb, id, success: true, data: pm || (dialog ? { type: dialog.type, message: dialog.message } : null), duration_ms: 0, timestamp: t };
     let n = 0;
     for (const r of relays.values()) {
       if (r.sessionId !== sessionId || (r.target.profileId || null) !== (profileId || null) || r.target.child || r.target.kind === 'child') continue;
@@ -1184,6 +1200,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
   function onViewerMessage(relay, viewer, d) {
     let msg = null; try { msg = JSON.parse(typeof d === 'string' ? d : d.toString()); } catch { send(viewer.ws, { type: 'refused', code: 'bad-message', error: 'not JSON' }); return; }
     if (msg && msg.type === 'passkey-cancel') { cancelPasskeyFor(relay, viewer); return; } // lane browser-passkey: the banner's ONE button
+    if (msg && msg.type === 'prompt-answer') { answerPromptFor(relay, viewer, msg); return; } // lane browser-ui-prompts: the sign-in boxes / Dismiss — the message is never kept, traced or logged
     if (msg && msg.type === 'dialog-answer') { answerDialog(relay, viewer, msg); return; } // lane browser-stuck: the user's Accept / Dismiss on a page dialog (any viewer — the user's own chrome, not a forwarded page input)
     const v = S.viewerMessageVerdict(msg, { holder: relay.holder, viewerId: viewer.id, mode: relay.mode });
     if (v.kind === 'config') { if (v.maxFps !== undefined) { viewer.maxFps = v.maxFps; pushMaxFps(relay); armTrail(relay, viewer); } send(viewer.ws, { type: 'config-ack', maxFps: viewer.maxFps, upstreamMaxFps: relay.upstreamMaxFps }); return; } // lane S4: a viewer back from 2 fps (a hidden tab) catches up on the latest frame

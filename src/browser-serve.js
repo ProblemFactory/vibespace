@@ -33,7 +33,7 @@ const { REAL_BINARY } = require('./browser-verbs.js'); // lane remote-profile-st
 
 /** The closed op set — a caller cannot invent one (unknown ops on an old
  *  daemon hang; unknown ops here are refused by name). */
-const BROWSER_SERVE_OPS = Object.freeze(['version', 'status', 'start', 'stop', 'cdp-url', 'builds', 'remove']); // lane browser-admin 2a: + builds (capability `browser-builds` — an older daemon is never asked); lane remote-profile-start: + remove (capability `browser-remove`)
+const BROWSER_SERVE_OPS = Object.freeze(['version', 'status', 'start', 'stop', 'cdp-url', 'builds', 'remove', 'end-daemon']); // lane browser-admin 2a: + builds (capability `browser-builds` — an older daemon is never asked); lane remote-profile-start: + remove (capability `browser-remove`)
 
 /** ONE facts instance per PROCESS (the daemon keeps it in a module-level
  *  variable, never on a connection — a dial-out device reconnects on every
@@ -186,7 +186,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /**
  * Run ONE op. `bs` is install()'s handle. Shapes:
  *   version                 → {ok, version|null, floor}
- *   status  {profileId}     → {ok, active, pid, starttime, socketDir, version, dir}
+ *   status  {profileId}     → {ok, active, pid, starttime, socketDir, version, dir, daemon}   (lane daemon-orphan-end: `daemon` =
+ *                             {pid, starttime, startedAt, chrome} — the census facts the hub's keeper judges)
+ *   end-daemon {profileId, pid, starttime} → {ok, result, xvfb}   (lane daemon-orphan-end, capability `browser-end-daemon`:
+ *                             ONLY that profile's daemon, by pid + starttime, only with no Chrome under it; its Xvfb with it)
  *   start   {profileId, idleMs?, headed?, noDisplayMode?} → {ok, pid, starttime, socketDir, cdpUrl, cdpPort, dir, active, display}
  *   stop    {profileId}     → {ok, closed, left|null}
  *   cdp-url {profileId}     → {ok, url, port}
@@ -211,7 +214,18 @@ async function runBrowserServeOp(bs, action, params = {}) {
   if (op === 'status') {
     const info = await bs.runtime.info(ns, { dir });
     const starttime = info.pid ? F.procStart(info.pid) : null;
-    return { ok: true, active: !!info.active, pid: info.pid, starttime, socketDir: info.socketDir, version: info.version, dir, exists: dirExists(dir) };
+    return { ok: true, active: !!info.active, pid: info.pid, starttime, socketDir: info.socketDir, version: info.version, dir, exists: dirExists(dir), daemon: info.pid ? await daemonFactsOf(info.pid) : null };
+  }
+  if (op === 'end-daemon') {
+    const info = await bs.runtime.info(ns, { dir });
+    const pid = Number(p.pid);
+    if (!info.pid || info.pid !== pid || F.procStart(pid) == null || F.procStart(pid) !== p.starttime) return { ok: false, code: 'not_that_daemon', error: `pid ${p.pid} is not ${ns}'s daemon here (now ${info.pid || 'none'}) — left alone` };
+    const d = await daemonFactsOf(pid);
+    if (!d) return { ok: false, code: 'not_a_daemon', error: `pid ${pid} is not a browser daemon here — left alone` };
+    if (d.chrome) return { ok: false, code: 'has_browser', error: `${ns}'s daemon pid ${pid} has a browser — left running` };
+    const result = await endByIdentity(pid, p.starttime);
+    const xvfb = []; for (const x of d.xvfb || []) if (x.starttime != null) xvfb.push({ pid: x.pid, result: await endByIdentity(x.pid, x.starttime) });
+    return { ok: true, result, xvfb };
   }
   if (op === 'start') {
     // lane remote-profile-start: no CLI here ⇒ refused BY NAME with the one step, before anything is created on this machine
@@ -273,6 +287,21 @@ async function runBrowserServeOp(bs, action, params = {}) {
     if (F.pidAlive(before.pid)) left = `daemon pid ${before.pid} is still alive after close --all`;
   }
   return { ok: !!r.ok || !before.active, closed: before.active ? 1 : 0, left, ...(r.ok ? {} : { code: 'stop_failed', error: (r.stderr || r.error || '').trim().slice(0, 300) || 'close --all failed' }) };
+}
+/** lane daemon-orphan-end: one daemon's census facts (browser-orphans over this machine's process table). */
+async function daemonFactsOf(pid) {
+  const d = require('./browser-orphans.js').daemonsFromRows(await F.daemonRows()).find((x) => x.pid === pid);
+  return d ? { pid: d.pid, starttime: d.starttime, startedAt: d.startedAt, chrome: d.chrome.length > 0, xvfb: d.xvfb } : null;
+}
+/** SIGTERM, then SIGKILL after 5 s — each only while pid + starttime still name the process. */
+async function endByIdentity(pid, starttime) {
+  const same = () => F.pidAlive(pid) && F.procStart(pid) === starttime;
+  if (!F.pidAlive(pid)) return 'gone';
+  if (!same()) return 'unproven';
+  try { process.kill(pid, 'SIGTERM'); } catch { /* gone */ }
+  for (let i = 0; i < 50 && same(); i++) await sleep(100);
+  if (same()) { try { process.kill(pid, 'SIGKILL'); } catch { /* gone */ } for (let i = 0; i < 10 && same(); i++) await sleep(50); }
+  return same() ? 'survived' : 'ended';
 }
 function dirExists(d) { try { return fs.statSync(d).isDirectory(); } catch { return false; } }
 

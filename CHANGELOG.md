@@ -2,6 +2,16 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.237 — 2026-10-08
+
+### Added
+- When a page asks for a file, a sign-in or a permission, or tries to print, the agent's browser no longer freezes: the live view shows it and the agent is told.
+
+### Fixed
+- A browser helper left behind by a closed conversation is cleaned up by itself.
+- A conversation forked by an agent or through the API is a real fork, never a second writer on the original.
+- VibeSpace never stops a process it cannot prove is its own: a process number saved hours ago that now belongs to another program is left alone.
+
 ## 2.369.236 — 2026-10-08
 
 ### Changed

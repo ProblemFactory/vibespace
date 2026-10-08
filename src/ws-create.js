@@ -17,7 +17,7 @@ const { execFile } = require('child_process');
 const { spawnFor } = require('./spawn'); // decoupling wave 2b: the per-transport spawn ladders (local / ssh / dial)
 const { pipePtyShim } = require('./pty-duck'); // B-ae4b: the R6 pipe duck holds a listener SET (the liveness stamp + the consumer)
 const { writerSweepOpts, forkChainEnv } = require('./resume-store'); // descriptor store hooks (writerSweep / forkChain), no id branch
-const { lockCaptureWanted, captureLockId, armLockCapture, adoptCapturedId } = require('./claude-lock-capture'); // the ONE local lock capture (create + boot re-arm; a terminal fork included; the witness is the wrapper's pid, 2026-09-25)
+const { lockCaptureWanted, captureLockId, captureForkProof, armLockCapture, adoptCapturedId } = require('./claude-lock-capture'); // the ONE local lock capture (create + boot re-arm; a terminal fork included; the witness is the wrapper's pid, 2026-09-25)
 const { readPpid } = require('./cli-identity');
 const { resumeSpawnPick, applyOriginHint, continuityLogLine } = require('./resume-continuity');
 const { openOpencodePty } = require('./server/opencode-pty-bridge'); // S9 remainder (c): a serve-owned pty as a normal terminal session
@@ -669,6 +669,9 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             permissionMode: data.permissionMode,
             resumeId: data.resume && data.resumeId ? data.resumeId : null,
             fork: data.fork || false,
+            // the message a fork is cut at (the chat's fork-from-here) — the
+            // adapter derives the fork flags from these two facts (B-8b7b)
+            forkAt: data.fork && data.forkAtUuid ? String(data.forkAtUuid) : null,
             sessionName: data.sessionName,
             effort: data.effort,
             // client value wins; else the instance default (covers every create
@@ -1615,6 +1618,19 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             armLockCapture({
               id, session, activeSessions,
               attempt: () => captureLockId({ session, id, activeSessions, sessionsDir: SESSIONS_DIR, sidecarPath: metaFileW, readPpid }),
+              // A FORK IS PROVEN BEFORE THE CHILD WRITES (B-8b7b): a pending
+              // fork whose own CLI holds its PARENT's id resumed the parent — a
+              // second writer on its transcript. Its CLI is killed (SIGKILL: no
+              // turn, no flush) with the session, and the creator told by name.
+              proof: () => captureForkProof({ session, sessionsDir: SESSIONS_DIR, sidecarPath: metaFileW, readPpid }),
+              onResumedParent: (lock) => {
+                const parent = session.claudeSessionId;
+                console.error(`[session] ${id}: fork-resumed-parent — the fork's CLI (pid ${lock.pid}) holds its parent ${parent}; killed before its first turn`);
+                session._exitAsked = { by: 'fork-resumed-parent', at: Date.now() };
+                try { process.kill(Number(lock.pid), 'SIGKILL'); } catch { }
+                try { session.pty?.kill(); } catch { }
+                try { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, sessionId: id, code: 'fork-resumed-parent', message: `Fork stopped: "${session.name || id}" resumed its original (${parent}) instead of forking, so it was ended before its first turn — the original is untouched.` })); } catch { }
+              },
               onAdopt: (lockId) => {
                 const adopted = adoptCapturedId(session, lockId);
                 // MERGE into the existing meta (spread base) — a hardcoded

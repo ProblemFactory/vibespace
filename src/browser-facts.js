@@ -187,6 +187,7 @@ function createBrowserFacts({ cmd = 'agent-browser', execFileImpl = execFile, no
 // server's own AGENT_BROWSER_* (the probe's rule, one layer down).
 const fs = require('fs');
 const cliIdentity = require('./cli-identity.js');
+const PI = require('./proc-identity.js'); // B-1cc6: the ONE identity reader
 
 /** kill -0: "something runs under that number" — an existence probe only.
  *  A ZOMBIE answers kill -0 but runs nothing: for a keeper deciding "did the
@@ -203,20 +204,8 @@ function pidAlive(pid) {
 /** /proc/<pid>/stat field 22 (starttime, clock ticks since boot) — the half
  *  of a process identity a recycled pid cannot forge. null = no /proc or the
  *  process is gone; a null is NEVER "the same process". */
-function procStart(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return null;
-  try {
-    const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
-    const f = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
-    const v = Number(f[19]);
-    return Number.isFinite(v) ? v : null;
-  } catch { return null; }
-}
-function sameProcess(pid, starttime) {
-  if (starttime == null) return false;
-  const now = procStart(pid);
-  return now != null && Number(now) === Number(starttime);
-}
+function procStart(pid) { return Number.isInteger(pid) ? PI.starttimeOf(pid) : null; } // moved to src/proc-identity.js (identical)
+function sameProcess(pid, starttime) { return starttime != null && PI.sameProcess(pid, { pid, starttime }); }
 /** The daemon AND what it spawned (chromium is the daemon's child, its
  *  renderers the grandchildren): one sample over the tree, bounded depth —
  *  `{ cpuTicks, memBytes, memMetric, rssBytes, pids: [every pid walked] }` or
@@ -457,6 +446,31 @@ async function markedBrowsers(value, { procRoot = '/proc', batch = 64 } = {}) {
   });
 }
 
+/** lane daemon-orphan-end: ONE /proc walk → the rows browser-orphans.daemonsFromRows judges (`{pid, ppid, starttime,
+ *  startedAt, argv, env?}`; env read only for an `agent-browser*` argv[0] — the names the verdict needs). startedAt =
+ *  wall-clock ms from /proc/uptime and the stat starttime (USER_HZ 100). */
+const DAEMON_ENV = ['AGENT_BROWSER_DAEMON', 'AGENT_BROWSER_CONFIG', 'AGENT_BROWSER_SESSION', 'AGENT_BROWSER_CDP', 'XAUTHORITY'];
+async function daemonRows({ procRoot = '/proc', batch = 64, hz = 100 } = {}) {
+  let names = [];
+  try { names = (await fs.promises.readdir(procRoot)).filter((x) => /^\d+$/.test(x)); } catch { return []; }
+  let up = 0; try { up = Number(String(await fs.promises.readFile(`${procRoot}/uptime`, 'utf8')).split(' ')[0]) || 0; } catch { up = 0; }
+  const at = Date.now();
+  const rows = [];
+  for (let i = 0; i < names.length; i += batch) {
+    await Promise.all(names.slice(i, i + batch).map(async (n) => {
+      const pid = Number(n);
+      let raw, st; try { raw = (await fs.promises.readFile(`${procRoot}/${n}/cmdline`)).toString('utf8'); st = await fs.promises.readFile(`${procRoot}/${n}/stat`, 'utf8'); } catch { return; }
+      const argv = raw.replace(/\0+$/, '').split('\0');
+      const f = st.slice(st.lastIndexOf(')') + 2).split(' ');
+      const starttime = Number(f[19]);
+      const row = { pid, ppid: Number(f[1]), starttime: Number.isFinite(starttime) ? starttime : null, startedAt: Number.isFinite(starttime) && up ? at - Math.max(0, up - starttime / hz) * 1000 : 0, argv };
+      if (/agent-browser/.test(String(argv[0] || '').split('/').pop())) row.env = procEnvOf(pid, DAEMON_ENV) || {};
+      rows.push(row);
+    }));
+  }
+  return rows;
+}
+
 /** lane L r5 F1 (b) — THE DIRECTORY A DAEMON RUNS IN (verify r3 F1: the keeper
  *  launched every managed daemon with no `cwd`, so it inherited the SERVER's —
  *  `WorkingDirectory=<repo>` — and resolved a relative `pdf ./data/bin/vibespace-
@@ -622,7 +636,7 @@ async function probeDisplay({ env = process.env, x11Dir = undefined, connectMs =
   return D.displayVerdict({ env, runtimeDir, entries, x11Dir: xdir, xvfb, vncDisplay });
 }
 
-module.exports = { versionFromProbe, cliPinReader, createBrowserFacts, binaryResolver, sanitizeProbeEnv, VERSION_TTL_MS, createBrowserRuntime, pidAlive, procStart, sameProcess, treeUsage,
+module.exports = { daemonRows, versionFromProbe, cliPinReader, createBrowserFacts, binaryResolver, sanitizeProbeEnv, VERSION_TTL_MS, createBrowserRuntime, pidAlive, procStart, sameProcess, treeUsage,
   // lane headless-fallback: the display this machine has now (probed at every launch where the browser runs)
   probeDisplay,
   // lane H verify r2 (M1): the browser a daemon launched, and who holds a profile directory's lock

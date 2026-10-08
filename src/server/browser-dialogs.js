@@ -69,7 +69,8 @@ const STOP_RETRIES = 4, STOP_RETRY_MS = 120; // verify r4 #5: Page.stopLoading u
 
 function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.now,
   enableTimeoutMs = ST.ENABLE_TIMEOUT_MS, connectTimeoutMs = 3000, callTimeoutMs = 5000, captureTimeoutMs = ST.LOOP_SCREENSHOT_MS, quietMs = ST.LOOP_QUIET_MS, reEnableMs = RE_ENABLE_MS, // verify r1: the quiet rule is a clock a fast gate shortens (lane browser-held-not-hung: the re-ask too)
-  tabsOf = null, holdersOf = null, leaseCountOf = null, labelOf = null, notice = null, withdraw = null, forYou = null } = {}) {
+  tabsOf = null, holdersOf = null, leaseCountOf = null, labelOf = null, notice = null, withdraw = null, forYou = null,
+  promptAskMs = ST.PROMPT_ASK_MS, authHoldMaxMs = ST.AUTH_HOLD_MAX_MS } = {}) { // lane browser-ui-prompts: the sign-in's two clocks (a fast gate shortens them)
   const watches = new Map();       // profileId → watch
   const listeners = new Set();
   const waiters = new Set();       // long-polls: {profileId, scope(), resolve}
@@ -114,7 +115,9 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   // ── the socket ──
   function newWatch(profileId, url) {
     const w = { profileId, url, holds: true, ws: null, state: 'connecting', id: 0, waiting: new Map(), sessions: new Map(), targets: new Map(), open: new Map(), pendingBy: new Map(), answered: [], seq: 0, readyP: null, commands: [],
-      pkBinding: 'vs' + crypto.randomBytes(12).toString('hex'), pkKey: crypto.randomBytes(16).toString('hex'), pkForYou: new Map(), headed: null, bornAt: now() }; // lane browser-passkey
+      pkBinding: 'vs' + crypto.randomBytes(12).toString('hex'), pkKey: crypto.randomBytes(16).toString('hex'), pkForYou: new Map(), headed: null, bornAt: now(), // lane browser-passkey
+      prompts: new Map(), authReq: new Map(), promptNotes: [], promptTimers: new Map(), promptForYou: new Map(), // lane browser-ui-prompts (authReq: prompt id → the paused request — never in a record)
+      permCtx: new Map(), grants: new Map(), printing: new Set() }; // lane browser-ui-prompts-r2: contexts decided ahead (ctx → the decision's promise), the agent's per-origin flips, previews being released
     let readyResolve;
     w.readyP = new Promise((r) => { readyResolve = r; });
     w.ready = () => readyResolve();
@@ -160,6 +163,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (w.state === 'down') return;
     w.state = 'down';
     for (const id of w.pkForYou.values()) { try { forYou?.resolve?.(id); } catch { /* the tray's own failure */ } } w.pkForYou.clear(); // lane browser-passkey
+    for (const rec of [...w.prompts.values()]) dropPrompt(w, rec, 'down'); // lane browser-ui-prompts: a gone socket's paused sign-in is Chrome's again
     w.ready();
     for (const fn of w.waiting.values()) { try { fn({ error: { message: why } }); } catch { /* */ } }
     w.waiting.clear();
@@ -172,9 +176,11 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   }
   /** One page tab: attach (flat session) + Page.enable — the enable bounded; a tab that never answers is HELD. */
   function track(w, info) {
+    if (ST.printTargetVerdict(info)) return releasePrint(w, info); // lane browser-ui-prompts-r2: the print preview is never a tab — it is released
     if (!info || info.type !== 'page' || !info.targetId) return Promise.resolve();
     // lane browser-swiftshader-cpu: thawPaint's own blank tab (opened and closed in ~20 ms) is nobody's — never tracked
     if (w.flipping && !info.openerId && /^(about:blank)?$/.test(String(info.url || ''))) return Promise.resolve();
+    decideAhead(w, info.browserContextId || null); // lane browser-ui-prompts-r2: no permission prompt ever pends (browser-wide per context: never awaited by the tab's enable)
     const tid = String(info.targetId);
     const known = w.targets.get(tid);
     if (known) { known.url = String(info.url || known.url || ''); known.title = String(info.title || known.title || ''); return known.enabling || Promise.resolve(); }
@@ -205,6 +211,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       const was = e.heldAt;
       e.enabled = true; e.heldAt = 0;
       armPasskey(w, e);
+      armPrompts(w, e); // lane browser-ui-prompts
       if (was) emit({ kind: 'held-cleared', profileId: w.profileId, targetId: e.targetId });
       return;
     }
@@ -232,6 +239,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
         w.targets.delete(tid); if (e.sid) w.sessions.delete(e.sid); if (e.reEnable) clearTimeout(e.reEnable);
         if (e.quiet) clearTimeout(e.quiet);
         if (PK.endPending(e.pk.records, { now: now() }).length) passkeyChanged(w, e); // lane browser-passkey: a closed tab waits for nothing
+        if (w.prompts.has(tid)) dropPrompt(w, w.prompts.get(tid), 'tab-closed'); // lane browser-ui-prompts
         if (e.owner && keeper && typeof keeper.forgetOwnTab === 'function') { try { keeper.forgetOwnTab(w.profileId, e.owner, tid); } catch { /* the keeper's own failure */ } } // verify r3 #2: the persisted witness goes with the tab
         if (e.loop) { e.loop = null; emit({ kind: 'loop-cleared', profileId: w.profileId, targetId: tid, why: 'tab-closed' }); } // lane site-reset: a closed tab's loop is over
         if (e.heldAt) emit({ kind: 'held-cleared', profileId: w.profileId, targetId: tid, why: 'tab-closed' }); // lane browser-held-not-hung: a closed tab holds nothing (the fact moves)
@@ -247,7 +255,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       // lane site-reset: the renderer's OWN request (script / meta refresh / reload / a click's link or form) — measured on
       // 0.38.1: it precedes frameStartedNavigating by ≤ 2 ms; a browser-initiated navigation (the agent's open) has none
       case 'Page.frameRequestedNavigation': { const e = tabOf(w, m); if (e && String(p.frameId || '') === e.targetId) e.req = { reason: String(p.reason || 'other').slice(0, 40), at: now() }; return; }
-      case 'Page.frameNavigated': { const e = tabOf(w, m); if (e && p.frame && String(p.frame.id || '') === e.targetId && !p.frame.parentId) { endNav(e); hop(w, e, { url: String(p.frame.url || '') }); } return; }
+      case 'Page.frameNavigated': { const e = tabOf(w, m); if (e && p.frame && String(p.frame.id || '') === e.targetId && !p.frame.parentId && w.prompts.get(e.targetId)?.type === 'file') dropPrompt(w, w.prompts.get(e.targetId), 'navigated'); if (e && p.frame && String(p.frame.id || '') === e.targetId && !p.frame.parentId) { endNav(e); hop(w, e, { url: String(p.frame.url || '') }); } return; }
       case 'Page.navigatedWithinDocument': case 'Page.frameStoppedLoading': {
         const e = tabOf(w, m);
         if (e && m.method === 'Page.navigatedWithinDocument' && String(p.frameId || '') === e.targetId) hop(w, e, { url: String(p.url || ''), same: true });
@@ -258,6 +266,11 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
         if (e && m.method === 'Page.frameStoppedLoading' && String(p.frameId || '') === e.targetId) { const last = e.hops[e.hops.length - 1]; if (last && !last.stop && !last.same && !last.loaded) { last.loaded = true; if (e.loop) judgeLoop(w, e); } }
         return;
       }
+      // lane browser-ui-prompts: the browser's own prompts — a file chooser (intercepted: no window, the page runs on), an HTTP
+      // sign-in (paused until the user answers in the live view), every other paused Document request continued at once
+      case 'Page.fileChooserOpened': return onPrompt(w, m, 'file', p);
+      case 'Fetch.authRequired': return onPrompt(w, m, 'http-auth', p);
+      case 'Fetch.requestPaused': { call(w, 'Fetch.continueRequest', { requestId: String(p.requestId || '') }, m.sessionId ? String(m.sessionId) : null); return; }
       case 'Page.javascriptDialogOpening': return onOpen(w, w.sessions.get(String(m.sessionId || '')) || null, p);
       case 'Page.javascriptDialogClosed': return onClosed(w, w.sessions.get(String(m.sessionId || '')) || null, p);
       // lane browser-passkey: the hook's report; a document that went ends its pending ceremonies (the page no longer waits)
@@ -700,6 +713,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
         if (words) notes.push(words);
       }
       // verify r1 A3: a few alerts are told one by one (the ruling's mention); a storm is ONE line, never 32
+      for (const a of w.promptNotes) { if (seen.has(a.id) || !inScope(scope, a.targetId)) continue; if (consume) seen.add(a.id); const words = a.kind === 'print' ? ST.printNote(a) : ST.promptAnsweredNote(a); if (words) notes.push(words); } // lane browser-ui-prompts (+ r2: the page tried to print, once per occurrence): who answered a sign-in, never what
       if (alerts.length > ST.ALERT_NOTES_MAX) notes.unshift(ST.alertsNote(alerts));
       else notes.unshift(...alerts.map((a) => ST.answeredNote(a)).filter(Boolean));
       if (seen.size > 256) { const keep = [...seen].slice(-128); told.set(browserKey, new Set(keep)); }
@@ -736,6 +750,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       loopAny: loopAny ? { ...ST.loopBlock(loopAny), runStart: loopAny.runStart } : null,
       loopShared, // verify r1: kinds only
       passkey: watched ? PK.passkeyBlock(passkeyIn(pid, scope)) : null, // lane browser-passkey: `passkey_open` with THE SENTENCE, `unknown` where no hook armed
+      prompt: watched ? ST.promptBlock(promptIn(pid, scope), { now: t }) : null, // lane browser-ui-prompts: a file chooser / an HTTP sign-in, with THE SENTENCE
     };
   }
   /** The conversation-level stuck fact (the keeper's `factFor` → the chip / the row): across its browsers. */
@@ -754,7 +769,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       const f = factFor({ ...c, browserKey: bk, consume: false });
       // lane browser-passkey: a page waiting for a passkey (after a held dialog — that is answered first)
       if (!f.open && f.passkey && f.passkey.state === PK.PASSKEY_OPEN_CODE) return { state: 'passkey', passkey: f.passkey, headed: onDesktop(c.profileId), since: f.passkey.startedAt, profileId: c.profileId };
-      const fact = ST.stuckFact({ dialog: f.open ? { ...f.open, id: f.open.id } : null, verdict: f.stuck || (f.held && !f.loopAny ? f.held : null), loop: f.loopAny, now: now() });
+      const fact = ST.stuckFact({ dialog: f.open ? { ...f.open, id: f.open.id } : null, prompt: f.prompt, verdict: f.stuck || (f.held && !f.loopAny ? f.held : null), loop: f.loopAny, now: now() }); // lane browser-ui-prompts: + the browser's own prompt
       if (fact) return { ...fact, profileId: c.profileId };
     }
     return null;
@@ -765,16 +780,17 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
    *  CLI keeps while its verb runs; null at `ms`. The bound is the event, never a clock. */
   // lane site-reset: `loop: {after}` — the verb also ends at a navigation loop judged in its scope whose run began at or
   // after `after` (a navigation verb passes its own start: the old page's loop is not its; the new page's is)
-  function waitForOpen({ profileId, browserKey = '', sessionId = null, ephemeral = false } = {}, ms = 20000, { signal = null, loop = null, passkey = false } = {}) {
+  function waitForOpen({ profileId, browserKey = '', sessionId = null, ephemeral = false } = {}, ms = 20000, { signal = null, loop = null, passkey = false, prompt = false } = {}) {
     const pid = String(profileId || '');
     const scope = () => scopeFor({ profileId: pid, browserKey, sessionId, ephemeral });
     const d = openIn(pid, scope());
     if (d) return Promise.resolve({ dialog: d, via: 'already-open', at: now() });
     if (loop) { const l = loopIn(pid, scope(), { after: Number(loop.after) || 0, current: true }); if (l) return Promise.resolve({ loop: l, via: 'already-looping', at: now() }); }
     if (passkey) { const v = passkeyIn(pid, scope()); if (v.state === PK.PASSKEY_OPEN_CODE) return Promise.resolve({ passkey: PK.passkeyBlock(v), via: 'already-waiting', at: now() }); } // lane browser-passkey
+    if (prompt) { const r = promptIn(pid, scope()); if (r && r.type === 'http-auth') return Promise.resolve({ prompt: ST.promptBlock(r, { now: now() }), via: 'already-waiting', at: now() }); } // lane browser-ui-prompts-r2
     return new Promise((resolve) => {
       let t = null;
-      const x = { profileId: pid, scope, loop: loop ? { after: Number(loop.after) || 0 } : null, passkey: !!passkey, resolve: (v) => { if (t) clearTimeout(t); resolve(v); } };
+      const x = { profileId: pid, scope, loop: loop ? { after: Number(loop.after) || 0 } : null, passkey: !!passkey, prompt: !!prompt, resolve: (v) => { if (t) clearTimeout(t); resolve(v); } };
       waiters.add(x);
       t = setTimeout(() => { if (waiters.delete(x)) resolve(null); }, Math.max(0, Math.min(Number(ms) || 0, 60000)));
       if (t.unref) t.unref();
@@ -783,6 +799,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     });
   }
   function verbStarted(browserKey, { profileId = null, verb = null } = {}) {
+    if (verb === 'upload' && profileId) { const w = watches.get(String(profileId)); if (w) for (const rec of [...w.prompts.values()]) if (rec.type === 'file') dropPrompt(w, rec, 'uploaded'); } // lane browser-ui-prompts: the agent's upload answers the chooser
     if (!browserKey) return;
     if (profileId && watches.get(String(profileId))) watches.get(String(profileId)).lastVerbAt = now(); // lane browser-swiftshader-cpu
     const r = running.get(browserKey) || { n: 0, at: 0, on: {} }; const on = { ...(r.on || {}) }; if (profileId) { const o = on[String(profileId)] || { n: 0, at: 0 }; on[String(profileId)] = { n: o.n + 1, at: now() }; } running.set(browserKey, { n: r.n + 1, at: now(), on });
@@ -1108,6 +1125,135 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   function stats() { return [...watches.values()].map((w) => ({ profileId: w.profileId, state: w.state, tabs: w.targets.size, enabled: [...w.targets.values()].filter((e) => e.enabled).length, held: [...w.targets.values()].filter((e) => e.heldAt).length, open: [...w.open.values()].map((d) => ({ id: d.id, type: d.type })), answered: w.answered.length, loops: [...w.targets.values()].filter((e) => e.loop).length })); }
   function shutdown() { for (const w of [...watches.values()]) { try { w.ws && w.ws.close(1001); } catch { /* */ } down(w, 'the server is restarting', { keepNotices: true }); } for (const x of waiters) x.resolve(null); waiters.clear(); }
 
+  // ── lane browser-ui-prompts (B-ebfc): THE BROWSER'S OWN PROMPTS — hooked on every enabled tab of this socket ──
+  // MEASURED (0.38.1 + Chrome 154, headless and the hidden window): intercepted, a chooser reports `Page.fileChooserOpened` in
+  // ≤ 5 ms and the page runs on; the CLI's own `upload` (DOM.setFileInputFiles on ITS session) still lands while we intercept.
+  // Fetch pauses DOCUMENT requests only (a sub-resource never waits on this socket; on '*' a 100-image page cost +12 ms); a
+  // sign-in on a sub-resource is not caught (named in the kb table).
+  function armPrompts(w, e) {
+    if (!e.sid) return;
+    call(w, 'Page.setInterceptFileChooserDialog', { enabled: true }, e.sid).then((r) => { if (r && r.error) say('fc:' + r.error.message, `${w.profileId}: the file chooser was not hooked — ${r.error.message}`); });
+    call(w, 'Fetch.enable', { patterns: [{ urlPattern: '*', resourceType: 'Document', requestStage: 'Request' }], handleAuthRequests: true }, e.sid).then((r) => { if (r && r.error) say('auth:' + r.error.message, `${w.profileId}: HTTP sign-ins were not hooked — ${r.error.message}`); });
+    const geo = [...w.grants.values()].find((g) => g.kind === 'geolocation' && g.setting === 'granted'); if (geo) call(w, 'Emulation.setGeolocationOverride', geo.position || {}, e.sid); // lane browser-ui-prompts-r2
+  }
+  function onPrompt(w, m, type, p) {
+    const sid = String(m.sessionId || ''); const tid = w.sessions.get(sid); const e = tid ? w.targets.get(tid) : null;
+    if (type === 'http-auth' && !e) { call(w, 'Fetch.continueWithAuth', { requestId: String(p.requestId || ''), authChallengeResponse: { response: 'Default' } }, sid || null); return; }
+    if (!e) return;
+    const rec = ST.promptFromCdp(type, p, { targetId: tid, now: now(), seq: ++w.seq });
+    if (!rec) return;
+    const old = w.prompts.get(tid);
+    if (old && old.type === 'http-auth') settleAuth(w, old, { how: 'cancelled', by: 'superseded' }); // one prompt per tab: an older sign-in gets its 401
+    else if (old) dropPrompt(w, old, 'superseded');
+    w.prompts.set(tid, rec);
+    if (type === 'http-auth') {
+      w.authReq.set(rec.id, { requestId: String(p.requestId || ''), sid });
+      const ask = setTimeout(() => promptAsk(w, rec), promptAskMs); const end = setTimeout(() => { if (w.prompts.get(tid) === rec) settleAuth(w, rec, { how: 'expired', by: 'watch' }); }, authHoldMaxMs);
+      for (const x of [ask, end]) if (x.unref) x.unref();
+      w.promptTimers.set(rec.id, [ask, end]);
+    }
+    emit({ kind: 'prompt', profileId: w.profileId, targetId: tid, state: 'open', type });
+    // lane browser-ui-prompts-r2: a sign-in holds the navigating verb — the verb's long-poll hears it NOW (the dialog's seam)
+    if (type === 'http-auth') for (const x of [...waiters]) if (x.profileId === w.profileId && x.prompt && inScope(x.scope(), tid)) { waiters.delete(x); x.resolve({ prompt: ST.promptBlock(rec, { now: now() }), via: 'event', at: now() }); }
+  }
+  /** A sign-in unanswered PROMPT_ASK_MS ⇒ ONE For-you item (a human must type it); resolved when it ends. */
+  function promptAsk(w, rec) {
+    if (!forYou || w.prompts.get(rec.targetId) !== rec || w.promptForYou.has(rec.id)) return;
+    let label = null; try { label = labelOf ? labelOf(w.profileId) : null; } catch { label = null; }
+    const host = ST.hostOf(rec.origin) || rec.origin;
+    const text = 'A page in the agent browser asks you to sign in ({host})'; const detail = 'Open its live view and type the username and password there — the agent never sees them.';
+    let id = null; try { id = forYou.add?.(w.profileId, { text: text.replace('{host}', host) + (label ? ` — ${String(label).slice(0, 80)}` : ''), detail, i18n: { text: { key: text, params: { host } }, detail: { key: detail } } }); } catch (err) { say('prm-fy:' + (err && err.message), `the sign-in For-you item was not filed — ${err && err.message}`); }
+    if (id) w.promptForYou.set(rec.id, id);
+  }
+  function dropPrompt(w, rec, why) {
+    if (!rec) return;
+    if (w.prompts.get(rec.targetId) === rec) w.prompts.delete(rec.targetId);
+    for (const x of w.promptTimers.get(rec.id) || []) clearTimeout(x); w.promptTimers.delete(rec.id);
+    const fy = w.promptForYou.get(rec.id); if (fy) { w.promptForYou.delete(rec.id); try { forYou?.resolve?.(fy); } catch { /* the tray's own failure */ } }
+    if (why !== 'down') emit({ kind: 'prompt', profileId: w.profileId, targetId: rec.targetId, state: 'cleared', why });
+  }
+  function promptIn(profileId, scope) {
+    const w = watches.get(String(profileId || ''));
+    if (!w) return null;
+    let best = null; for (const r of w.prompts.values()) if (inScope(scope, r.targetId) && (!best || r.openedAt >= best.openedAt)) best = r;
+    return best;
+  }
+  /** The credential goes to Chrome and nowhere else: never logged, never in a record, a note or an answer. */
+  async function settleAuth(w, rec, { how, by, username = '', password = '' }) {
+    const q = w.authReq.get(rec.id); w.authReq.delete(rec.id);
+    dropPrompt(w, rec, how);
+    if (!q) return { ok: false, code: 'gone', error: 'the sign-in already ended' };
+    const r = await call(w, 'Fetch.continueWithAuth', { requestId: q.requestId, authChallengeResponse: how === 'signed-in' ? { response: 'ProvideCredentials', username: String(username).slice(0, 512), password: String(password).slice(0, 1024) } : { response: 'CancelAuth' } }, q.sid || null);
+    w.promptNotes.push({ id: rec.id, prompt: rec, how, by, at: now(), targetId: rec.targetId }); if (w.promptNotes.length > ANSWERED_KEEP) w.promptNotes.shift();
+    return r && (r.error || r.timeout) ? { ok: false, code: 'gone', error: 'the page no longer waits for that sign-in' } : { ok: true };
+  }
+  /** The live view's answer: a sign-in (username + password, or Cancel), or a file chooser dismissed (the page got nothing). */
+  async function answerPrompt({ profileId, browserKey = '', sessionId = null, ephemeral = false, promptId = null } = {}, { cancel = false, username = '', password = '', by = 'user' } = {}) {
+    const pid = String(profileId || ''); const w = watches.get(pid);
+    if (!w || w.state !== 'open') return { ok: false, code: 'not_watched', error: 'VibeSpace is not watching this browser' };
+    const scope = scopeFor({ profileId: pid, browserKey, sessionId, ephemeral });
+    const rec = [...w.prompts.values()].find((r) => inScope(scope, r.targetId) && (!promptId || r.id === String(promptId)));
+    if (!rec) return { ok: false, code: 'no_prompt', error: 'no browser prompt is open there' };
+    if (rec.type === 'file') { dropPrompt(w, rec, 'dismissed'); return { ok: true }; }
+    if (!cancel && (typeof username !== 'string' || !username || typeof password !== 'string')) return { ok: false, code: 'bad_request', error: 'a username is needed' };
+    return settleAuth(w, rec, cancel ? { how: 'cancelled', by } : { how: 'signed-in', by, username, password });
+  }
+
+  // ── lane browser-ui-prompts-r2 (B-ebfc): THE TWO MEASURED HANGS, decided before they hold (the table: ST.PERMISSION_KINDS) ──
+  /** Every permission kind DENIED for one browser context before its first tab is enabled (measured: a decision set while a
+   *  prompt pends never answers it — so it comes first), then the agent's own per-origin flips put back. Once per context. */
+  function decideAhead(w, ctxId) {
+    const key = ctxId ? String(ctxId) : '';
+    if (w.permCtx.has(key)) return w.permCtx.get(key);
+    const p = (async () => {
+      const rows = ST.permissionPlan(w.headed === false ? 'headless' : 'headed', { browserContextId: ctxId });
+      const got = await Promise.all(rows.map((row) => call(w, 'Browser.setPermission', row.params)));
+      const bad = rows.filter((row, i) => got[i] && (got[i].error || got[i].timeout)).map((row) => row.kind);
+      if (bad.length) say('perm:' + w.profileId + ':' + bad.join(','), `${w.profileId}: ${bad.length} permission kind(s) were not decided ahead (${bad.join(', ')}) — a page asking for them may wait`);
+      for (const g of [...w.grants.values()]) await call(w, 'Browser.setPermission', { permission: g.permission, setting: g.setting, origin: g.origin, ...(ctxId ? { browserContextId: String(ctxId) } : {}) });
+    })();
+    w.permCtx.set(key, p);
+    return p;
+  }
+  /** The agent's (or the user's) per-origin decision on this conversation's browser: every context decided, a granted
+   *  geolocation answered with a position (measured: without one it pends), the lease record, the event the live view +
+   *  the trace read. The origin defaults to the conversation's current tab's. */
+  async function setPermission({ profileId, browserKey = '', sessionId = null, ephemeral = false } = {}, { kind, setting, origin = '', at = null, by = 'agent' } = {}) {
+    const pid = String(profileId || ''); const w = watches.get(pid);
+    if (!w || w.state !== 'open') return { ok: false, code: 'not_watched', error: 'VibeSpace is not watching this browser' };
+    const scope = scopeFor({ profileId: pid, browserKey, sessionId, ephemeral });
+    const tabs = [...w.targets.values()].filter((e) => inScope(scope, e.targetId));
+    const cur = tabs.filter((e) => /^https?:/.test(e.url)).sort((a, b) => (b.seenAt || 0) - (a.seenAt || 0))[0];
+    const v = ST.permissionVerdict({ kind, setting, origin: origin || (cur ? cur.url : ''), at });
+    if (!v.ok) return v;
+    const ctxs = [...w.permCtx.keys()];
+    for (const c of ctxs.length ? ctxs : ['']) { const r = await call(w, 'Browser.setPermission', { permission: v.permission, setting: v.setting, origin: v.origin, ...(c ? { browserContextId: c } : {}) }); if (r && (r.error || r.timeout)) return { ok: false, code: 'cdp', error: `Chrome did not take the decision — ${r.error ? r.error.message : 'timed out'}` }; }
+    if (v.kind === 'geolocation') for (const e of [...w.targets.values()]) if (e.sid) await call(w, v.setting === 'granted' ? 'Emulation.setGeolocationOverride' : 'Emulation.clearGeolocationOverride', v.setting === 'granted' ? (v.position || {}) : {}, e.sid);
+    const rec = { kind: v.kind, permission: v.permission, setting: v.setting, origin: v.origin, position: v.position, by: by === 'user' ? 'user' : 'agent', at: now() };
+    w.grants.set(v.kind + ' ' + v.origin, rec);
+    if (keeper && typeof keeper.notePermission === 'function') { try { keeper.notePermission(pid, browserKey, rec); } catch (err) { say('perm-note:' + (err && err.message), `${pid}: the permission was not recorded on its lease — ${err && err.message}`); } }
+    emit({ kind: 'permission', profileId: pid, targetId: cur ? cur.targetId : null, permission: { kind: rec.kind, setting: rec.setting, origin: rec.origin, by: rec.by, at: rec.at } });
+    return { ok: true, permission: { kind: rec.kind, setting: rec.setting, origin: rec.origin, position: rec.position }, text: ST.permissionNote(rec) };
+  }
+  function permissionsOf(profileId) { const w = watches.get(String(profileId || '')); return w ? [...w.grants.values()].map((g) => ({ kind: g.kind, setting: g.setting, origin: g.origin, by: g.by, at: g.at })) : []; }
+  /** The print preview (`chrome://print/`) the hidden window opened: ITS OWN Cancel is pressed (measured: closing the target
+   *  leaves the opener held; the WebUI's cancel frees it in ≤ 25 ms), the opener's conversation is told ONCE. */
+  async function releasePrint(w, info) {
+    const tid = String(info.targetId || '');
+    if (!tid || w.printing.has(tid)) return;
+    w.printing.add(tid);
+    const opener = info.openerId && w.targets.has(String(info.openerId)) ? String(info.openerId) : ([...w.targets.values()].filter((e) => !/^chrome:/.test(e.url)).sort((a, b) => (b.seenAt || 0) - (a.seenAt || 0))[0] || {}).targetId || null;
+    const a = await call(w, 'Target.attachToTarget', { targetId: tid, flatten: true });
+    const sid = a && a.result ? String(a.result.sessionId || '') : '';
+    const r = sid ? await call(w, 'Runtime.evaluate', { expression: ST.PRINT_RELEASE_EXPR, returnByValue: true }, sid) : null;
+    const ok = !!(r && r.result && r.result.result && r.result.result.value === 'released');
+    if (!ok) { say('print:' + w.profileId, `${w.profileId}: a print preview was not released — ${JSON.stringify((r && (r.error || r.result)) || a).slice(0, 160)}`); await call(w, 'Target.closeTarget', { targetId: tid }); }
+    const n = { id: `prn-${tid.slice(0, 8).toLowerCase()}-${++w.seq}`, kind: 'print', at: now(), targetId: opener, released: ok };
+    w.promptNotes.push(n); if (w.promptNotes.length > ANSWERED_KEEP) w.promptNotes.shift();
+    emit({ kind: 'print', profileId: w.profileId, targetId: opener, released: ok });
+    setTimeout(() => w.printing.delete(tid), 60000).unref?.();
+  }
+
   // the keeper's own lease seam: a browser that starts again or stops starts a fresh watch and a fresh verdict
   let unsubLease = null;
   if (keeper && typeof keeper.onLease === 'function') {
@@ -1124,6 +1270,8 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     ownTabs, clearSite, // lane site-reset step 2: one site's stored login, cleared
     passkeyIn, cancelPasskey, // lane browser-passkey: a page waiting for a passkey, named and cancellable
     paintFacts, freezePaint, thawPaint, // lane browser-swiftshader-cpu: a browser nobody watches and nobody drives paints nothing
+    promptIn, answerPrompt, // lane browser-ui-prompts: a file chooser / an HTTP sign-in, named and answerable
+    setPermission, permissionsOf, // lane browser-ui-prompts-r2: every permission decided ahead; the agent's per-origin flip
     shutdown: () => { shutdown(); try { unsubLease?.(); } catch { /* */ } }, _watches: watches };
 }
 

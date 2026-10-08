@@ -888,7 +888,7 @@ function createSessionMessages(session, sessionId) {
       browserKeeper.addDigest(() => ({ pageStuck: Object.fromEntries(Object.entries(browserDialogs.pageStuckMap()).filter(([pid]) => { try { return !browserKeeper.isEphemeral(pid); } catch { return false; } })) }));
       let digestTimer = null;
       browserDialogs.onChange((ev) => {
-        if (!ev || !['open', 'closed', 'stuck', 'held', 'held-cleared', 'down', 'loop', 'loop-cleared', 'passkey'].includes(ev.kind) || digestTimer) return; // lane site-reset: + a navigation loop begun / ended
+        if (!ev || !['open', 'closed', 'stuck', 'held', 'held-cleared', 'down', 'loop', 'loop-cleared', 'passkey', 'prompt'].includes(ev.kind) || digestTimer) return; // lane site-reset: + a navigation loop begun / ended
         digestTimer = setTimeout(() => { digestTimer = null; try { bcastAll({ type: 'browser-profiles-updated', ...browserKeeper.list() }); } catch (e) { console.warn('[browser-dialog] the digest was not re-published — ' + (e && e.message)); } }, 300);
         if (digestTimer.unref) digestTimer.unref();
       });
