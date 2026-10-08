@@ -179,11 +179,13 @@ function reportDelivery(state, delivered) {
  *  the Desktop panel if that is not what you expect" / "… has been using 280%
  *  CPU for 5 min — …". `who` = the session's name, `where` = the panel that
  *  holds its Stop. */
-function resourceNoticeText({ who, where, verdict, sample, gpuPct = null }) {
+function resourceNoticeText({ who, where, verdict, sample, gpuPct = null, drawing = null }) {
   const tail = ` — Stop it from the ${where} if that is not what you expect`;
   if (verdict && verdict.overKind === 'cpu') {
     const pct = Number.isFinite(verdict.cpuPct) ? Math.round(verdict.cpuPct) : '?';
     // lane browser-unresponsive: the GPU process is the one over — said as what it is (software rendering), REPORT only
+    // lane browser-swiftshader-cpu: a browser nobody can see (the hidden window / headless) names the PAGE it draws and the cores
+    if (Number.isFinite(gpuPct) && Number.isFinite(verdict.cpuPct) && gpuPct >= verdict.cpuPct / 2 && drawing && drawing.hidden) return `${drawing.who || who} is drawing ${drawing.title ? `"${String(drawing.title).slice(0, 80)}"` : 'a page'} at ${(gpuPct / 100).toFixed(1)} cores (its GPU process renders in software; ${pct}% CPU for the whole browser, ${Math.max(1, Number(verdict.hotMin) || 1)} min)${tail}`;
     if (Number.isFinite(gpuPct) && Number.isFinite(verdict.cpuPct) && gpuPct >= verdict.cpuPct / 2) return `${who}: its GPU process is rendering in software at ${Math.round(gpuPct)}% CPU (${pct}% for the whole browser, ${Math.max(1, Number(verdict.hotMin) || 1)} min) — a page with continuous animation/WebGL on a machine without a GPU; Restart ends it, closing that page keeps it from coming back`;
     return `${who} has been using ${pct}% CPU for ${Math.max(1, Number(verdict.hotMin) || 1)} min${tail}`;
   }

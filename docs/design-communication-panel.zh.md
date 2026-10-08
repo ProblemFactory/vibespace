@@ -848,12 +848,16 @@ poll 与 scan 灌进去, 必须得到**同一批记录、同一个唤醒次数�
 
 owner 原话："不能'获取更新'而不是'查询每条是否有更新'吗！"——产品**获取更新**，从不逐条询问会话是否有变化。
 
+**调度卡的统计 = 读保留的事实 (lane scheduler-census-index, B-7978, 2026-10-07, as-built)。** 账户卡上的 "热 · 温 · 冷 · 到期" 计数过去每次统计都把索引里的每一行按当前时刻重算一遍档位（90 298 行、6 个账户：每轮 ≈ 278 ms，同步占住事件循环）。现在每行只判定一次，并记下这个判定成立到哪个时刻（档位边界含端点、窗口心跳结束、到期时刻）；只有被写入触及的行和时钟越过其时刻的行才重判（src/channel-census.js，PURE）。卡片数字与逐行遍历完全一致（test-channel-census：10 000 行、2 000 步种子游走，每步之后逐字段相等）。实测每轮 1.7 ms、最慢一次 3.4 ms。不变量：统计读保留的事实；一次 pass 是 O(到期 + 被触及)，从不 O(行数)。
+
 - `caps.changeFeed.authority`：`authoritative`（vendor 自己的变更日志，只有 `via:'history'`，即 Gmail 的 history.list）或 `measured`（Lark 的搜索，覆盖率靠测量，规则不变）。
 - 权威变更源**在承载时**（首个新鲜的成功应答即算；从未运行、落后、退避、被拒都不算）⇒ `pollCadence:'feed-only'`：每行 0 s，时钟不让任何行到期；只有变更源点名的行、用户打开的窗口（hot）、owner 的手动刷新、kick、欠读标记会被读取。一次 pass = 1 次变更源调用 + 被点名的行，与邮箱大小无关。
 - 游标过期（404）、CHANGED_CAP 溢出、首次连接 ⇒ **列表遍历**：threads.list 返回每个线程的 historyId，与丢失的游标比较——更新的点名为已变更，其余记为已遍历；遍历不读任何单个线程。
 - 变更源点名、但引擎没有的线程，从列表查询的首页取出再出生（不会出生查询范围外的线程）。feed-only 下的列表重遍历每天一次（只用于发现离开列表的线程）。
 - 到期列表来自**索引**（每个账户一个按到期时刻排序的下界数组 + 欠读标记集合），只读 ≤ now 的头部；只有强制 pass 才遍历全部行。
 - 后续一级（本车道未做）：Gmail 推送（users.watch → Pub/Sub），需要集群 GCP 项目里的 topic。
+
+**缺口 = 从游标出发的一次遍历 (lane gmail-feed-gap, B-5134, 2026-10-07, as-built)。** 静默（笔记本休眠、服务重启、vendor 故障、限速停驻）超过冷档后，旧规则判定权威变更源"未承载"，每行退回各自的档位 ⇒ 一次全索引遍历（实测 10 000 行到期 / 10 101 次 vendor 调用）。现在：`Feed.gapVerdict` 判 `catch-up`（有游标、任意长度的缺口，启动也算）/ `rewalk`（游标过期 404 或没有游标 ⇒ 按原样重走列表）/ `fresh`；持有游标的权威变更源保持 `carrying`（`feed.carrying = {since}` 持久化在账户行上，只被拒绝清除），静默时状态 `catching-up`（卡片："Catching up since {time} — the change feed resumes from where it stopped"），退避时按名停驻、仍承载 —— 档位一直停着，到期索引不重建。Gmail 的 history 遍历按页、从游标出发；被拒或超过每次 20 页时保留 page token、下次从那里继续，游标只在最后一页后才前移。每个缺口一条日志："<account>: the change feed resumed after <n> min — <p> history pages, <m> conversations touched, 0 per-row reads"。覆盖率网 `coverageOf` 把声明的缺口排除在外：静默不是漏消息的证据；降级只留给证明漏了自己窗口覆盖到的消息的变更源。实测（test-channels-aggregate ㉒，10 000 行）：跳 20 分钟 ⇒ 0 行到期、31 次调用（一次 3 页的遍历 + 30 次点名读取）；旧规则对照 ⇒ 10 000 行到期 / 10 101 次调用。
 
 ### 6.2b 按秒匀速, 以及 vendor 的限速拒绝 (lane R5, 2026-09-26)
 

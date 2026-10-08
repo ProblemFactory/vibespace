@@ -1757,6 +1757,8 @@ async function dialogAnswerFor(k, f, profileId, { arm = true, outcome = null, en
   if (!t.ok) return {};
   try {
     if (arm) await D.arm(t.profileId);
+    // lane browser-swiftshader-cpu: a page frozen for idle paint is shown again BEFORE the verb runs (the CLI's /resolve door)
+    if (arm && typeof D.thawPaint === 'function') { try { await D.thawPaint(t.profileId, { holder: t }); } catch { /* the verb runs on the page as it is */ } } // r2: THIS conversation's tabs only
     // verify r4 #1: the tab a `tab new`'s ack named is bound to this conversation FIRST — the fact below reads it as its own
     let bound = null;
     if (bind && typeof D.bindTab === 'function') { try { bound = D.bindTab(t, bind); } catch (e) { bound = { ok: false, code: 'bind_failed', error: String(e && e.message) }; } }

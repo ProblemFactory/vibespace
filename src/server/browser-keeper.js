@@ -61,6 +61,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
 const B = require('../browser-profiles.js');
+const BIdle = require('../browser-idle.js'); // lane browser-swiftshader-cpu: a browser nobody watches and nobody drives paints nothing
 const J = require('../browser-job-principal.js'); // lane jobs-browser: a Background Work job's browser handle + its release rule
 const SW = require('../browser-switch.js');
 const F = require('../browser-facts.js');
@@ -4272,6 +4273,43 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const k = inputKey(browserKey, profileId);
     const v = Math.max(0, Number(n) || 0);
     if (v) watchers.set(k, v); else watchers.delete(k);
+    // lane browser-swiftshader-cpu: the viewer's last instant per browser (the idle-paint verdict) — a viewer arriving thaws now
+    viewerSeen.set(k, { pid: profileId || `eph:${browserKey}`, n: v, at: now() });
+    // r2: a viewer arriving shows ITS conversation's frozen front again (never another holder's window — heavy e)
+    if (v && paintWatch) { const er = profileId ? null : ephemeralFor(browserKey); const pid = profileId || (er && er.profileId); if (pid) Promise.resolve().then(() => paintWatch.thawPaint(pid, { holder: { profileId: pid, browserKey, ephemeral: !profileId } })).catch(() => { /* the next verb thaws */ }); }
+  }
+  // ── lane browser-swiftshader-cpu: IDLE PAINT STOPS (src/browser-idle.js) — the page watch's socket does the act ──
+  const viewerSeen = new Map(); // inputKey → {pid: profileId | 'eph:<browserKey>', n, at}
+  let paintWatch = null;
+  function setPaintWatch(api) { paintWatch = api && typeof api.paintFacts === 'function' ? api : null; }
+  /** The page an unseen browser draws (the runaway report names it): `{hidden, title, who}` | null. */
+  function drawingOf(rec, p) {
+    if (!rec || !BIdle.unseenRung(rec.display)) return null;
+    let f = null; try { f = paintWatch ? paintWatch.paintFacts(rec.profileId) : null; } catch { f = null; }
+    return { hidden: true, title: f && f.title ? f.title : null, who: p && isEph(p) ? `The hidden browser of "${p.label}"` : `The hidden browser of profile "${p ? p.label : rec.profileId}"` };
+  }
+  function viewersOf(p) {
+    const pid = isEph(p) ? `eph:${p.owner.id}` : p.id; let n = 0, at = 0;
+    for (const x of viewerSeen.values()) if (x.pid === pid) { n += x.n; at = Math.max(at, x.at); }
+    return { n, at };
+  }
+  /** Every live browser on an unseen rung (the hidden window, headless): freeze when nobody watches and nobody drives for
+   *  IDLE_PAINT_MS, thaw when a viewer is there (a verb thaws at its resolve, before it runs). Never throws. */
+  async function sweepIdlePaint(t) {
+    if (!paintWatch) return;
+    const enabled = setting('browser.idlePaintFreeze', false) === true; // lane browser-swiftshader-cpu-r2: the owner's switch, read at EVERY sweep (off by default)
+    for (const rec of Object.values(reg.browsers)) {
+      if (!B.isLiveBrowser(rec) || stopping.has(rec.profileId) || starting.has(rec.profileId) || !BIdle.unseenRung(rec.display)) continue;
+      const p = profile(rec.profileId); if (!p) continue;
+      let f = null; try { f = paintWatch.paintFacts(rec.profileId); } catch { f = null; }
+      if (!f) continue;
+      const vw = viewersOf(p);
+      const v = BIdle.idlePaintVerdict({ enabled, viewers: vw.n, lastViewerAt: vw.at, lastVerbAt: f.lastVerbAt, now: t, busy: f.busy, frozen: f.frozen });
+      try {
+        if (v.act === 'freeze') { const r = await paintWatch.freezePaint(rec.profileId); if (r && r.ok) log.info?.(`[browser] ${rec.profileId}: nobody watches or drives it for ${Math.round(BIdle.IDLE_PAINT_MS / 1000)} s — its ${r.tabs} tab(s) stop drawing until the next verb or viewer`); }
+        else if (v.act === 'thaw') await paintWatch.thawPaint(rec.profileId);
+      } catch (e) { log.warn?.(`[browser] ${rec.profileId}: idle paint ${v.act} failed: ${e && e.message}`); }
+    }
   }
   function idleReleaseAfterMs() { return B.idleReleaseMs(setting('browser.idleReleaseAfterTurnMs', B.DEFAULT_IDLE_RELEASE_MS)); }
   /** The tick's release arm: every LIVE managed ephemeral / helper browser whose conversation's turn has been idle ≥ the setting.
@@ -5920,7 +5958,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         const vc = v.overKind === 'memory' && v.cpuOver ? { ...v, over: v.cpuOver, overKind: 'cpu' } : v.overKind === 'cpu' ? null : { ...v, over: null, overKind: null, clear: !v.hotSince };
         const lvc = vc ? RG.reportTransition(g.cpuReport, vc, { now: t, limits: lim }) : null; if (lvc) g.cpuReport = lvc.state;
         guard.set(rec.profileId, g);
-        if (s) { const was = live.get(rec.profileId); live.set(rec.profileId, { gpu: s.gpu && Number.isFinite(gpuPct) ? { pid: s.gpu.pid, cpuPct: gpuPct } : null, cpuPct: v.cpuPct, memBytes: s.memBytes, memMetric: s.memMetric, rssBytes: s.rssBytes /* deprecated: ΣVmRSS, never judged — one release */, pids: s.pids.length, over: v.over, since: v.over ? ((was && was.over && was.since) || t) : null, sampledAt: t }); dirty = true; }
+        if (s) { const was = live.get(rec.profileId); live.set(rec.profileId, { gpu: s.gpu && Number.isFinite(gpuPct) ? { pid: s.gpu.pid, cpuPct: gpuPct, drawing: drawingOf(rec, p)?.title || null } : null, cpuPct: v.cpuPct, memBytes: s.memBytes, memMetric: s.memMetric, rssBytes: s.rssBytes /* deprecated: ΣVmRSS, never judged — one release */, pids: s.pids.length, over: v.over, since: v.over ? ((was && was.over && was.since) || t) : null, sampledAt: t }); dirty = true; }
         if (v.memGuard === 'unavailable' && !g.memOffSaid) { g.memOffSaid = true; log.warn?.(`[browser] ${RG.memGuardOffLine(rec.profileId, s)}`); }
         const label = p ? p.label : rec.profileId;
         if (lvl.fire) {
@@ -5930,14 +5968,14 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         if (lvl.notify) {
           const who = isEph(p) ? `The agent browser of "${label}"` : `The agent browser of profile "${label}"`;
           let delivered;
-          try { delivered = serverNotice?.(`browser-resource:${rec.profileId}:${lvl.state.crossings}`, RG.resourceNoticeText({ who, where: 'Browser panel', verdict: v, sample: s, gpuPct }), { level: 'warn' }); } catch (e) { log.warn?.(`[browser] ${rec.profileId}: the resource notice failed: ${e && e.message}`); }
+          try { delivered = serverNotice?.(`browser-resource:${rec.profileId}:${lvl.state.crossings}`, RG.resourceNoticeText({ who, where: 'Browser panel', verdict: v, sample: s, gpuPct, drawing: drawingOf(rec, p) }), { level: 'warn' }); } catch (e) { log.warn?.(`[browser] ${rec.profileId}: the resource notice failed: ${e && e.message}`); }
           g.report = RG.reportDelivery(g.report, delivered);
         }
         if (lvc && lvc.fire) log.warn?.(`[browser] ${rec.profileId} "${label}" is over the reporting threshold: ${vc.over}${Number.isFinite(gpuPct) ? ` (GPU process ${Math.round(gpuPct)} %)` : ''} — reported, left running`);
         if (lvc && lvc.notify) {
           const who = isEph(p) ? `The agent browser of "${label}"` : `The agent browser of profile "${label}"`;
           let delivered;
-          try { delivered = serverNotice?.(`browser-resource:${rec.profileId}:cpu:${lvc.state.crossings}`, RG.resourceNoticeText({ who, where: 'Browser panel', verdict: vc, sample: s, gpuPct }), { level: 'warn' }); } catch (e) { log.warn?.(`[browser] ${rec.profileId}: the CPU notice failed: ${e && e.message}`); }
+          try { delivered = serverNotice?.(`browser-resource:${rec.profileId}:cpu:${lvc.state.crossings}`, RG.resourceNoticeText({ who, where: 'Browser panel', verdict: vc, sample: s, gpuPct, drawing: drawingOf(rec, p) }), { level: 'warn' }); } catch (e) { log.warn?.(`[browser] ${rec.profileId}: the CPU notice failed: ${e && e.message}`); }
           g.cpuReport = RG.reportDelivery(g.cpuReport, delivered);
         }
       }
@@ -5951,6 +5989,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     await sweepHumans(t); // BROWSE YOURSELF: an away holder past its keep ends `left`; one whose browser stopped ends `stopped`
     sweepPending();
     sweepIdleReleases(t); // MULTIVIEW B-325a
+    await sweepIdlePaint(t); // lane browser-swiftshader-cpu
     refreshKeptTabs(t); // lane browser-resume: a running conversation browser nobody mirrors — its tabs read every 30 s (a crash keeps them)
     if (!Object.values(reg.browsers).some(B.isLiveBrowser) && !reg.leases.length && !inputs.size && !pending.size && !humans.size) stopTimer();
   }
@@ -6316,7 +6355,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     tabVisibilityFor, captureTabFor, watchTabFor, // lane browser-windows (U3/U0b): a background tab is said and polled; a watched tab's frames
     setViewportFor, freshFrameFor, // lane S4: size the page to the pane (never starting a browser) + a fresh frame after a navigation
     watchCopiesFor, // lane live-input: the copies the page performs while the user drives (copy out)
-    cdpEndpointFor, setStuckSource, holdsDialogsFor, // lane browser-stuck: the dialog watch's upstream by profile id; the conversation's stuck fact on factView
+    cdpEndpointFor, setStuckSource, holdsDialogsFor, setPaintWatch, sweepIdlePaint, // lane browser-swiftshader-cpu
+    // lane browser-stuck: the dialog watch's upstream by profile id; the conversation's stuck fact on factView
     viewportNoteFor, noteViewport, // verify r1: the page-size note on the browser's own record (agent choice / applied / baseline / floor)
     // MULTIVIEW D4 / B-325a: the per-conversation cap, the own count, the release after the turn, the viewers the bridge reports
     capOf, capFor, setCap, stampGroupCap, groupCapOf, ownLive, noteViewers, sweepIdleReleases, idleReleaseAfterMs,

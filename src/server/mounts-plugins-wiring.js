@@ -877,6 +877,7 @@ function createSessionMessages(session, sessionId) {
         withdraw: (sessionId, dialogId) => { const st = getSessionStatus ? getSessionStatus() : null; const s = activeSessions.get(sessionId); if (st && sessionStatusKey && s && typeof st.dropNotices === 'function') st.dropNotices(sessionStatusKey(s, sessionId), (x) => x && x.kind === 'browser-dialog' && x.dialog && x.dialog.id === dialogId); },
       });
       browserKeeper.setStuckSource((bk) => browserDialogs.stuckForKey(bk));
+      browserKeeper.setPaintWatch?.(browserDialogs); // lane browser-swiftshader-cpu: idle paint stops on the watch's own socket
       // verify r1 (site-reset): a holder's tabs the KEEPER can attribute (its pinned tab, its mediated lease's tabs, the user's
       // own + adopted ones) — the watch's `tabsOf` from here on; the stream bridge below UNIONS its live view's active target
       // (before, only the bridge answered: a shared browser with no live view open attributed nothing, and a conversation's

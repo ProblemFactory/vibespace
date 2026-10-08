@@ -85,6 +85,10 @@ console.log('— ② the fold: only the facts present');
   const Fn = M.rowFold(P.notours, x(P.notours));
   ok(Fn.find((f) => f.key === 'state').v.includes(TV.rowWhyText(P.notours)), 'a not-ours profile (no record, no Delete…): its fold says why', Fn);
   ok(M.rowFold(P.sales, x(P.sales, { stuck: STUCK })).find((f) => f.key === 'state').tone === 'warn', 'a warn sentence makes the fold\'s state row warn');
+  // lane browser-held-not-hung: the dialog watch blind into one tab (the page answers) — the row's quiet INFO, never warn
+  const BLIND = BS.stuckWords({ state: 'blind', why: 'held', since: 1 }, tOf(null));
+  const Lb = M.rowLine(P.sales, x(P.sales, { stuck: BLIND }));
+  ok(BLIND.tone === 'info' && BLIND.action === null && Lb.state.l2.key === 'stuck' && Lb.state.l2.tone === 'info' && M.rowFold(P.sales, x(P.sales, { stuck: BLIND })).find((f) => f.key === 'state').tone !== 'warn' && !/not responding/.test(Lb.state.l2.text), 'a blind watch: its line is the l2 in the INFO tone (the fold\'s state row stays quiet) — never "not responding"', Lb.state.l2);
 }
 
 console.log('— ③ the menu: the closed act list, no disabled item');
@@ -92,6 +96,7 @@ console.log('— ③ the menu: the closed act list, no disabled item');
   const ids = (r, more) => M.rowMenu(r, x(r, more)).map((m) => (m.sep ? '|' : m.id)).join(',');
   ok(ids(P.personal) === 'record,record-mine,replay,build,rename,stop,|,delete', 'a live local profile: record ☐ · record mine ☑ · Replay… · Change build… · Rename… · Stop | Delete…', ids(P.personal));
   ok(ids(P.sales, { stuck: STUCK }) === 'record,record-mine,replay,build,rename,stop,restart,|,delete' && ids(P.dialogs, { autoDialogs: true, autoText: AUTO }) === 'record,record-mine,replay,build,rename,stop,restart-hold,|,delete', 'stuck ⇒ Restart (its words), else leave-page dialogs ⇒ Restart to hold dialogs — never both', [ids(P.sales, { stuck: STUCK }), ids(P.dialogs, { autoDialogs: true })]);
+  ok(ids(P.sales, { stuck: BS.stuckWords({ state: 'blind', why: 'held' }, tOf(null)) }) === 'record,record-mine,replay,build,rename,stop,|,delete', 'lane browser-held-not-hung: a blind watch offers NO Restart (the page answers — a restart is not the cure the row pushes)');
   ok(ids(P.office) === 'build,rename,|,delete' && ids(P.notours) === 'rename', "a paired machine's: no record switches; a not-ours: Rename… only (no record, no build, no Delete…)", [ids(P.office), ids(P.notours)]);
   const all = Object.values(P).flatMap((r) => M.rowMenu(r, x(r, { stuck: STUCK, autoDialogs: true, autoText: AUTO })));
   ok(all.every((m) => !('disabled' in m)) && all.filter((m) => m.check !== undefined).every((m) => ['record', 'record-mine'].includes(m.id)), 'no menu item is ever `disabled`; only the two switches are check rows', all.filter((m) => 'disabled' in m));

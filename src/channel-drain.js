@@ -78,7 +78,8 @@
  *   { type: 'answer', waiters, outcome, code? }           a settlement (stop /
  *                                                          drop / failure / not-connected)
  *   { type: 'discover' }                                   the discovery walk
- *   { type: 'feed' }                                       ONE change-feed page (rule 21)
+ *   { type: 'feed' }                                       ONE change-feed page (rule 21) — or a cursor feed's CATCH-UP:
+ *                                                          ONE action, its result `{due, pages, catchUp:true}` (lane gmail-feed-gap)
  *   { type: 'recheck', key }                               ONE recent-roots page (rule 22)
  *   { type: 'scanHost' }                                   the scan lane's host facts
  *   { type: 'fetch', key, chargeTo: 'timer'|'owner'|'agent', waiters, due,
@@ -635,6 +636,9 @@ function apply(snap, act, result) {
       p.vendorCalls++;
       if (result && result.error) { p.failed = String(result.error); break; }
       p.feed = { ...p.feed, pages: (Number(p.feed && p.feed.pages) || 0) + 1 };
+      // lane gmail-feed-gap: a cursor feed's CATCH-UP is ONE action with its pages (the adapter walks them, each paced and
+      // metered through the gate) — counted in `walked`, never re-armed in its pass (`more` is not its to say)
+      if (result && result.catchUp) { p.feed = { ...p.feed, walked: (Number(p.feed.walked) || 0) + Math.max(1, Math.floor(Number(result.pages) || 1)), catchUp: true }; if (Array.isArray(result.due) && result.due.length) p.due = mergeFront(p, result.due, requests); p.feed = { ...p.feed, wanted: false, done: true }; break; }
       if (result && result.skip) { p.feed = { ...p.feed, wanted: false, done: true, skipped: String(result.skip) }; break; }
       if (result && Array.isArray(result.due) && result.due.length) p.due = mergeFront(p, result.due, requests);
       { const more = !!(result && result.more) && p.feed.pages < (Number(p.feed.perPass) || FEED_PAGES_PER_PASS); p.feed = { ...p.feed, wanted: more, done: !more }; }
@@ -855,6 +859,13 @@ function threadApply(mem, ev, now) { return rxApply(mem, ev, now); }
  *     nobody's request, so the agent route's retry-able table gains no code.
  *     The page token and the window are the engine's (the drain never sees a
  *     cursor — the discovery precedent).
+ *     21a (lane gmail-feed-gap, B-5134): a CURSOR feed after a gap answers a
+ *     CATCH-UP — `{due, pages, catchUp:true}`: ONE action whose pages the
+ *     adapter walked from the cursor (each paced and metered through the
+ *     gate); `walked` counts them, its rows go ahead like a page's, and it
+ *     ends the feed for the pass (never re-armed by `more`). The tiers stay
+ *     parked meanwhile (channel-caps `feedState`), so the pass's plain due
+ *     rows are the clock's few — never the whole index.
  *     The step is `next`'s (after the cut, before discovery), the merge `mergeFront`, the move `apply`'s `feed`.
  */
 

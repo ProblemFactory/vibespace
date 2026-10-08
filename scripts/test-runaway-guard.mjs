@@ -171,5 +171,11 @@ console.log('⑤ negative controls (patched copies in scratch)');
   for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 4, label: '⑤ ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
 }
 
+// lane browser-swiftshader-cpu: the report NAMES the page an unseen browser draws, and the cores (report only, Stop as today)
+{ const v = { overKind: 'cpu', cpuPct: 980, hotMin: 6 };
+  const t = RG.resourceNoticeText({ who: 'The agent browser of "pay"', where: 'Browser panel', verdict: v, sample: {}, gpuPct: 938, drawing: { hidden: true, title: 'Mercury – Payments', who: 'The hidden browser of "pay"' } });
+  const plain = RG.resourceNoticeText({ who: 'The agent browser of "pay"', where: 'Browser panel', verdict: v, sample: {}, gpuPct: 938 });
+  ok(t.startsWith('The hidden browser of "pay" is drawing "Mercury – Payments" at 9.4 cores') && /Stop it from the Browser panel/.test(t) && !/is drawing/.test(plain), 'lane browser-swiftshader-cpu: an unseen browser over on CPU is named by the page it draws at N cores; a seen one keeps the GPU line', { t, plain }); }
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

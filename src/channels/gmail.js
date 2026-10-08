@@ -231,6 +231,8 @@ const NAME_READ_UNITS = 20;
 const META_TTL_MS = 6 * 60 * 60 * 1000;
 /** Past this many changed threads the memory says "everything changed". */
 const CHANGED_CAP = 5000;
+/** lane gmail-feed-gap: history pages ONE sync reads (500 records each); a longer walk resumes from its token next sync. */
+const HISTORY_PAGES_PER_SYNC = 20;
 /** design 010 S6: a full-search page — `messages.list` answers this many ids, each one the person is shown costs ONE
  *  metadata read, so the page's worst cost is the list + this many reads (the row's `cost`). */
 const SEARCH_PAGE = 10;
@@ -877,7 +879,7 @@ function create(record = {}, deps = {}) {
   // the last (re)seed: a thread not in it is fetched whatever history.list
   // says (the first pass after a restart, or after a reseed), one in it is
   // fetched only when history.list names it.
-  const mailbox = { historyId: null, at: 0, changed: new Set(), walked: new Set(), self: null, mustWalk: true, walkFrom: null };
+  const mailbox = { historyId: null, at: 0, changed: new Set(), walked: new Set(), self: null, mustWalk: true, walkFrom: null, walk: null, walkPages: 0 };
   // THE CURSOR SURVIVES A RESTART (2026-09-26): the mailbox's `historyId` and
   // the threads it named but nobody fetched yet are persisted in the
   // account's `state` (plain JSON, the engine's serialized door). A restored
@@ -1088,17 +1090,26 @@ function create(record = {}, deps = {}) {
       persistCursor(false);
       return mailbox;
     }
-    let pageToken = null, pages = 0, newest = mailbox.historyId;
+    // lane gmail-feed-gap (B-5134): A GAP IS ONE WALK FROM THE CURSOR, bounded by PAGES. A walk the vendor refused mid-way
+    // (a rate limit, an outage) or one longer than HISTORY_PAGES_PER_SYNC keeps its page token in `mailbox.walk` and the
+    // next sync RESUMES there — the cursor moves only when the walk's last page is read (the cursor used to jump to the
+    // mailbox's newest id after 20 pages: every change past page 20 was lost; a refused page re-asked pages 1…n).
+    const w0 = mailbox.walk && mailbox.walk.from === mailbox.historyId ? mailbox.walk : null;
+    let pageToken = w0 ? w0.token : null, pages = 0, newest = w0 ? w0.newest : mailbox.historyId;
     const from = mailbox.historyId;
+    mailbox.walkPages = 0;
     try {
       do {
         const q = new URLSearchParams({ startHistoryId: mailbox.historyId, historyTypes: 'messageAdded', maxResults: '500' });
         if (pageToken) q.set('pageToken', pageToken);
         const h = await api(`/history?${q}`, { what: 'gmail history' });
+        mailbox.walkPages++;
         for (const ev of h.history || []) for (const a of ev.messagesAdded || []) if (a && a.message && a.message.threadId) mailbox.changed.add(String(a.message.threadId));
         if (h.historyId) newest = String(h.historyId);
         pageToken = h.nextPageToken ? String(h.nextPageToken) : null;
-      } while (pageToken && ++pages < 20);
+        mailbox.walk = pageToken ? { from, token: pageToken, newest } : null;
+      } while (pageToken && ++pages < HISTORY_PAGES_PER_SYNC);
+      if (pageToken) { persistCursor(false); return mailbox; }   // the walk continues at the next sync, from its token
       mailbox.historyId = newest;
       if (mailbox.changed.size > CHANGED_CAP) { mailbox.changed.clear(); mailbox.walked.clear(); mailbox.mustWalk = true; mailbox.walkFrom = mailbox.walkFrom || from; }
       persistCursor(false);
@@ -1113,6 +1124,7 @@ function create(record = {}, deps = {}) {
         mailbox.walked.clear();
         mailbox.mustWalk = true;
         mailbox.walkFrom = mailbox.walkFrom || from;   // lane channel-feed-authority: the walk judges each thread against the LOST cursor
+        mailbox.walk = null;
         persistCursor(false);
         return mailbox;
       }
@@ -1261,7 +1273,7 @@ function create(record = {}, deps = {}) {
         for (const id of fresh) if (!listed.has(id) && mb.changed.delete(id)) dropped++;
         if (dropped) persistCursor();
       }
-      return { changed: [...mb.changed], conversations, mustWalk: mb.mustWalk === true };
+      return { changed: [...mb.changed], conversations, mustWalk: mb.mustWalk === true, pages: Math.max(1, Number(mb.walkPages) || 1) };
     },
     async listConversations({ cursor = null, limit = 100 } = {}) {
       const p = new URLSearchParams({ q: query(), maxResults: String(Math.min(100, Math.max(1, Number(limit) || 100))) });

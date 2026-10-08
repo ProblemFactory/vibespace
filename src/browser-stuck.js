@@ -32,6 +32,11 @@ const URL_MAX = 300;
 const BEFOREUNLOAD_TEXT = 'Leave site? Changes you made may not be saved.';
 /** Consecutive timed-out commands on ONE browser before it is called unresponsive (the brief's N). */
 const STUCK_AFTER = 3;
+/** lane browser-held-not-hung (owner 2026-10-08, his .231 instance: 30+ `navigate`s ok in 40 min under the yellow "not
+ *  responding" banner): a tab the dialog watch cannot see into (`tabHeld`) is that page's hang ONLY when the
+ *  conversation's own commands have not been answered for this long — an `ok` this recent is positive evidence the page
+ *  answers, and it outranks the watch's blindness. */
+const OK_RECENT_MS = 60 * 1000;
 /** verify r1 A7 (MEASURED, Chrome 154 + 0.38.1): a navigation to a site that has not answered yet times the command out
  *  (`CDP command timed out: Page.navigate`, and every read after it: the tab's Runtime.evaluate does not answer while the
  *  navigation is pending — the watch's own evaluate neither), exactly like a page that holds it — yet the next `open`
@@ -43,7 +48,10 @@ const LOADING_GRACE_MS = 120 * 1000;
 /** The browser CLI's own per-command CDP timeout (measured 30 003 ms for Page.navigate / Runtime.evaluate). */
 const COMMAND_TIMEOUT_MS = 30000;
 /** How long a watch's `Page.enable` may stay unanswered before the tab is "held" (a dialog nobody can see into, a
- *  renderer that does not answer) — measured: a held tab never answers; a healthy one answers in < 10 ms. */
+ *  renderer that does not answer) — measured: a held tab never answers; a healthy one answers in < 10 ms.
+ *  lane browser-held-not-hung (scripts/measure-held-enable.mjs, 0.38.1 + Chrome 154, a FRESH socket on the running daemon
+ *  — the adopted shape): p50 1 ms / p95 25 ms / max 25 ms (160 enables: 16 busy tabs × 5 rounds, idle and with the lease's own `open` loop); a tab under an alert that opened before the socket never answers in 30 s and
+ *  answers the re-ask in 1 ms once `dialog accept` closed it. Load is not the hold — the timeout stays a constant. */
 const ENABLE_TIMEOUT_MS = 5000;
 
 const str = (v) => (v == null ? '' : String(v));
@@ -287,18 +295,24 @@ function navigateOutcome({ durationMs = 0, timeoutMs = COMMAND_TIMEOUT_MS, timed
 
 /**
  * ONE browser's recent outcomes (oldest first, `{at, state}` — ok | timeout | unresponsive | held-by-dialog) ⇒
- * `unresponsive` once the last `n` are all timeouts (an ok, or a dialog that explains the hold, breaks the run);
- * `tabHeld` (the watch's Page.enable on its tab never answered) is the same verdict at once.
+ * `unresponsive` once the last `n` are all timeouts (an ok, or a dialog that explains the hold, breaks the run).
+ * `tabHeld` (`{at, targetId, title?}`: the watch's Page.enable on a tab in scope never answered) — lane
+ * browser-held-not-hung: "not responding" is a claim about the PAGE's answers, never about the watch's ability to see in:
+ *   · an `ok` within OK_RECENT_MS of `now` ⇒ the run's verdict (`ok` unless 3 timeouts followed it), `held` carried along;
+ *   · no outcome at all (nothing asked yet — nothing proves a hang) ⇒ `blind` (the watch says so as itself);
+ *   · outcomes, none of them a recent `ok` ⇒ `unresponsive` / `tab-held` (as before).
  */
-function stuckVerdict(recent, { n = STUCK_AFTER, tabHeld = null } = {}) {
+function stuckVerdict(recent, { n = STUCK_AFTER, tabHeld = null, now = 0 } = {}) {
   const list = Array.isArray(recent) ? recent : [];
-  if (tabHeld && tabHeld.at) return { state: 'unresponsive', why: 'tab-held', count: 0, since: Number(tabHeld.at) || 0 };
+  const held = tabHeld && tabHeld.at ? { targetId: tabHeld.targetId ? String(tabHeld.targetId) : null, since: Number(tabHeld.at) || 0, ...(tabHeld.title ? { title: pageText(tabHeld.title, 120) } : {}) } : null;
+  if (held && !list.length) return { state: 'blind', why: 'held', count: 0, ...held };
+  if (held && !list.some((o) => o && o.state === 'ok' && Number(now) - (Number(o.at) || 0) <= OK_RECENT_MS)) return { state: 'unresponsive', why: 'tab-held', count: 0, since: held.since };
   let run = 0, since = 0;
   for (let i = list.length - 1; i >= 0; i--) {
     const s = list[i] && list[i].state;
     if (s === 'timeout' || s === 'unresponsive') { run++; since = Number(list[i].at) || since; } else break;
   }
-  return run >= n ? { state: 'unresponsive', why: 'timeouts', count: run, since } : { state: 'ok', count: run };
+  return run >= n ? { state: 'unresponsive', why: 'timeouts', count: run, since } : { state: 'ok', count: run, ...(held ? { held } : {}) };
 }
 /**
  * verify r2 #5: what a command that ran into the timeout WHILE its tab was loading tells the agent — at every such
@@ -334,10 +348,15 @@ function stuckFact({ dialog = null, verdict = null, loop = null, now = 0 } = {})
   // lane site-reset: a navigation loop explains the timeouts — it is said before (and instead of) "not responding"
   if (loop) return { state: 'loop', loop: loopBlock(loop), since: Number(loop.runStart) || 0 };
   if (verdict && verdict.state === 'unresponsive') return { state: 'unresponsive', why: verdict.why || 'timeouts', count: verdict.count || 0, since: verdict.since || 0 };
+  // lane browser-held-not-hung: a tab the watch cannot see into while the page answers (or nothing asked yet) — the
+  // WATCH's state, said as itself (a quiet line, never "not responding")
+  const h = verdict && verdict.state === 'blind' ? verdict : verdict && verdict.state === 'ok' && verdict.held ? verdict.held : null;
+  if (h) return { state: 'blind', why: 'held', targetId: h.targetId || null, since: Number(h.since) || 0, ...(h.title ? { title: pageText(h.title, 120) } : {}) };
   return null;
 }
-/** The fact's digest part (moves with every printed field, never a clock — a loop's cycle, never its hop count). */
-function stuckDigest(f) { return f ? [f.state, f.dialog ? f.dialog.id : '', f.why || '', f.count || 0, f.loop ? (f.loop.urls || []).join(' ') : ''].join(':') : ''; }
+/** The fact's digest part (moves with every printed field, never a clock — a loop's cycle, never its hop count; a blind
+ *  watch's tab). */
+function stuckDigest(f) { return f ? [f.state, f.dialog ? f.dialog.id : '', f.why || '', f.count || 0, f.loop ? (f.loop.urls || []).join(' ') : '', f.state === 'blind' ? `${f.targetId || ''}/${f.title || ''}` : ''].join(':') : ''; }
 
 // ── the UI's words (t = the client's i18n; every key a literal t('…')) ──
 function fill(s, p) { return String(s).replace(/\{(\w+)\}/g, (m, k) => (p && p[k] !== undefined ? String(p[k]) : m)); }
@@ -368,6 +387,8 @@ function stuckWords(f, tIn) {
   // lane browser-unresponsive: the WHOLE browser does not answer (the keeper's verdict) — its own words, the same Restart
   if (f.state === 'unresponsive' && f.why === 'browser') { const u = unresponsiveWords({ since: f.since, label: f.label, clock: f.clock }, tIn); return { chip: u.chip, line: u.banner, action: u.action, tooltip: u.tooltip }; }
   if (f.state === 'unresponsive') return { chip: t('page not responding'), line: t('The page is not responding — Restart'), action: t('Restart'), tooltip: t('Restart stops this browser and starts it again; open tabs close, logins in a saved profile stay') };
+  // lane browser-held-not-hung: the watch is blind into one tab — an INFO line (tone), no Restart primary; the tooltip names the tab
+  if (f.state === 'blind') return { chip: t('dialog watch blind'), line: t('The dialog watch cannot see into one tab — a dialog opened there would not be caught; Restart re-attaches'), action: null, tone: 'info', tooltip: f.title ? t('The tab: {title}', { title: pageText(f.title, 120) }) : t('A page dialog that opened before VibeSpace was watching (for example across a VibeSpace restart) holds a tab this way') };
   // lane browser-passkey: a page waiting for a passkey (the banner's words are browser-passkey's passkeyWords)
   if (f.state === 'passkey') return { chip: t('page waits for a passkey'), line: t('The page is waiting for a passkey — cancel it in the live view'), action: null };
   // lane site-reset: the loop (with its cycle where the fact carries it; the panel row's digest carries kinds only)
@@ -739,7 +760,7 @@ function unresponsiveWords(f, tIn) {
 }
 
 module.exports = {
-  MESSAGE_MAX, BEFOREUNLOAD_TEXT, STUCK_AFTER, COMMAND_TIMEOUT_MS, ENABLE_TIMEOUT_MS, NO_DIALOG_TEXT,
+  MESSAGE_MAX, BEFOREUNLOAD_TEXT, STUCK_AFTER, OK_RECENT_MS, COMMAND_TIMEOUT_MS, ENABLE_TIMEOUT_MS, NO_DIALOG_TEXT,
   FRAME_TAGS, FRAME_TAG_RE, FRAME_OPEN_RE, inertOpeners, pageText, quoted, // verify r1 A2: page text is frame-inert, delimited, bounded
   AUTO_ACCEPT_MAX, AUTO_ACCEPT_WINDOW_MS, ALERT_NOTES_MAX, alertsNote, // verify r1 A3: an alert storm is bounded and told as one line
   LOADING_GRACE_MS, loadingText, // verify r1 A7: a timeout during a navigation the site has not answered is the network's (+ r2 #5: said, with the time so far)

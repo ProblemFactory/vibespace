@@ -711,6 +711,18 @@ function pollTier(entry, now, { tiers = null, watched = false } = {}) {
   if (age <= Number(T.warmRecentHours) * 3600e3) return 'warm';
   return 'cold';
 }
+/** lane scheduler-census-index (B-7978): the LAST instant `pollTier` (unwatched) still answers what it answers at
+ *  `now` — hot / warm hold while the message's age stays within its window (inclusive), cold forever (Infinity). The
+ *  scheduler card's census re-judges a row only once the clock passes this (src/channel-census.js `rowClock`). */
+function tierUntil(entry, now, { tiers = null } = {}) {
+  const T = { ...TIER_DEFAULTS, ...(tiers || {}) };
+  const last = num(entry && entry.lastAt);
+  if (last === null) return Infinity;
+  const age = Number(now) - last;
+  if (age <= Number(T.hotRecentMinutes) * 60e3) return last + Number(T.hotRecentMinutes) * 60e3;
+  if (age <= Number(T.warmRecentHours) * 3600e3) return last + Number(T.warmRecentHours) * 3600e3;
+  return Infinity;
+}
 /**
  * THE ONE CADENCE RESOLVER — the scheduler's due time and the freshness chip
  * both read it, so the chip cannot claim a number the tick does not keep.
@@ -1061,9 +1073,15 @@ function feedState(caps, rec, now, { everySec = FEED_DEFAULTS.everySec, overlapS
   // row of three, or a stale last page, is said as the wait it is.
   const freshOk = Number(f.lastOkAt) > 0 && Number(now) - Number(f.lastOkAt) <= feedFreshMs({ everySec, overlapSec });
   const lone = f.backoffWhy === 'failed' && (Number(f.strikes) || 0) < FEED_LOUD_STRIKES && freshOk;
-  if (Number(f.backoffUntil) > Number(now) && !lone) return { ...on, state: 'backoff', why: f.backoffWhy === 'failed' ? 'failed' : 'rate-limited', until: Number(f.backoffUntil) };
+  // lane gmail-feed-gap (B-5134): an AUTHORITATIVE feed holding its cursor (`feed.carrying` — a PERSISTED fact with its
+  // `since`, stamped by a good page, cleared only by a refusal) CARRIES THROUGH A GAP: a silence (asleep, a restart, an
+  // outage) is a catch-up from the cursor and a back-off is a park by name — never a fall to the per-row tiers (which
+  // was ONE whole-index pass: 10 000 due rows / 10 101 vendor calls measured). Silence is never evidence of misses.
+  const cursorHeld = d.authority === 'authoritative' && !!f.carrying && typeof f.carrying === 'object' && Number(f.carrying.since) > 0 && Number(f.lastOkAt) > 0;
+  const gapCarry = cursorHeld ? { carrying: true, since: Number(f.carrying.since), gapSince: Number(f.lastOkAt) } : {};
+  if (Number(f.backoffUntil) > Number(now) && !lone) return { ...on, state: 'backoff', why: f.backoffWhy === 'failed' ? 'failed' : 'rate-limited', until: Number(f.backoffUntil), ...gapCarry };
   if (!(Number(f.lastOkAt) > 0)) return { ...on, state: 'never' };
-  if (Number(now) - Number(f.lastOkAt) > feedFreshMs({ everySec, overlapSec })) return { ...on, state: 'behind', ageSeconds: ageS(f.lastOkAt, Number(now)) };
+  if (Number(now) - Number(f.lastOkAt) > feedFreshMs({ everySec, overlapSec })) return cursorHeld ? { ...on, state: 'catching-up', ageSeconds: ageS(f.lastOkAt, Number(now)), ...gapCarry } : { ...on, state: 'behind', ageSeconds: ageS(f.lastOkAt, Number(now)) };
   return { ...on, fresh: true, state: mode, carrying: mode === 'carrying' };
 }
 /**
@@ -1092,6 +1110,8 @@ function feedText(view, { t = defaultT, vendor = '', now = Date.now(), clock = h
       return t('Search is off: {vendor} answered in a shape this version does not read — each chat is checked on its own', { vendor: V });
     case 'backoff': {
       const s = Math.max(1, Math.ceil((Number(v.until) - Number(now)) / 1000));
+      // lane gmail-feed-gap: a cursor feed's park is a catch-up waiting by name — no chat is read on its own meanwhile
+      if (v.carrying && Number(v.gapSince) > 0) return t('Catching up since {time} — {vendor} asked the change feed to wait; it resumes from where it stopped at {until}', { vendor: V, time: clock(Number(v.gapSince)), until: clock(Number(v.until)) });
       if (v.why === 'failed') {
         // lane lark-p2p: the back-off SAYS its count, its kind and its END — "until 03:28", never a countdown the card
         // freezes at (a card is drawn once per broadcast)
@@ -1113,6 +1133,8 @@ function feedText(view, { t = defaultT, vendor = '', now = Date.now(), clock = h
     }
     case 'never': return t('New messages: searching for the first time');
     case 'behind': return t('Search is behind — each chat is checked on its own until it catches up');
+    // lane gmail-feed-gap: a cursor feed after a gap — ONE walk from where it stopped, never a read of every chat
+    case 'catching-up': return t('Catching up since {time} — the change feed resumes from where it stopped', { time: clock(Number(v.gapSince)) });
     case 'measuring': {
       const m = v.measured || {};
       // verify r1: a measurement that already HAS its samples and finds the search missing messages says so — "checking …
@@ -1220,7 +1242,7 @@ module.exports = {
   laneState, scanState, convCapsState, offers, authState,
   identityWarning, identityWarningText, freshnessClaim, freshnessText, humanAge,
   // 2026-09-26: the per-conversation cadence, the override choices, the vendor budget + push remedies
-  TIER_DEFAULTS, COLD_MAX_SEC, REFRESH_CHOICES, validRefresh, pollTier, cadenceFor, budgetText, learnedBudgetText, passStateText, firstReadText, pushUnavailableText,
+  TIER_DEFAULTS, COLD_MAX_SEC, REFRESH_CHOICES, validRefresh, pollTier, tierUntil, cadenceFor, budgetText, learnedBudgetText, passStateText, firstReadText, pushUnavailableText,
   authWhyText, laneWhyText, errorCodeText, deliveryLaneText, scanSourceText, wakeRefusalText,
   pushWindow, pushSamplesAdd, pushMissRate, pushDemotionVerdict, pushLaneText,
   // lane lark-search-poll: the change feed's one lane answer + its words

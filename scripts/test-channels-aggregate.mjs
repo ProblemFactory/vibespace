@@ -241,8 +241,14 @@ function worldModule(kind, worlds, { receive = 'poll', unitsPerHistory = 1, budg
         // its instant, `dropRate` of them never (a stable hash), newest first, 30 a page, an offset token
         changes: feed === 'history' ? async () => {
           meter(2); world.calls.changes = (world.calls.changes || 0) + 1;
+          // lane gmail-feed-gap: a scripted refusal of the walk (`failChanges`), an expired cursor (`expired` ⇒ mustWalk —
+          // the change log is kept for the walk's next pass) and the walk's pages (`histPageSize` names a page)
+          if (world.failChanges) { const code = world.failChanges; world.failChanges = null; throw refusal(code); }
+          if (world.expired) { world.expired = false; world.calls.historyPages = (world.calls.historyPages || 0) + 1; return { changed: [], conversations: [], mustWalk: true }; }
           const ids = [...(world.changed || [])]; world.changed = new Set();
-          return { changed: ids, conversations: [], mustWalk: false };
+          const pages = Math.max(1, Math.ceil(ids.length / (world.histPageSize || 500)));
+          world.calls.historyPages = (world.calls.historyPages || 0) + pages;
+          return { changed: ids, conversations: [], mustWalk: false, pages };
         } : feed ? async ({ from, to, pageToken = null, chatType = null, pageSize = 30 } = {}) => {
           meter(1); world.calls.changes = (world.calls.changes || 0) + 1; (world.calls.feedAt = world.calls.feedAt || []).push(world.clock ? world.clock() : 0);
           const f = world.feed || {};
@@ -2675,7 +2681,9 @@ console.log("㉑ lane channel-feed-authority (OWNER'S LAW 2026-10-06: fetch the 
   const FEED_ONLY_NEEDLE = "  if (l.pollCadence === 'feed-only') {\n    if (watched) return { seconds: clamp(T.hotSec), tier, paused: false, source: 'tier' };\n";
   // ONE world of n rows behind the authoritative feed: discovered (no row is read — none is named), then ONE timer pass a
   // minute later with `changed` names. → the pass's vendor calls and wall time.
-  const runHist = async (mod, n, { changed = 20, watchId = null, label = 'real' } = {}) => {
+  // `settle`: one quiet pass 5 s after discovery first — the census index's ONE O(rows) build after discovery's mass
+  // write (a boot's) lands there (`settleMs`), so the measured pass is a steady one (lane scheduler-census-index)
+  const runHist = async (mod, n, { changed = 20, watchId = null, label = 'real', settle = false } = {}) => {
     const t00 = clock;
     const Wh = makeWorld(clock, { n, hot: Math.min(50, n), warm: Math.min(200, n) });
     Wh.calls.changes = 0;
@@ -2688,6 +2696,8 @@ console.log("㉑ lane channel-feed-authority (OWNER'S LAW 2026-10-06: fetch the 
       for (let i = 0; i < 12 && Object.keys(eh.store.index.live()).length < n; i++) { clock += 1000; await eh.pass('hist'); }
       const rows = Object.keys(eh.store.index.live()).length;
       const setupHist = historyCalls(Wh);
+      let settleMs = null;
+      if (settle) { clock += 5000; const s0 = performance.now(); await eh.pass('hist'); settleMs = performance.now() - s0; }
       if (watchId) { await eh.watch('hist', watchId); clock += 1000; await eh.pass('hist'); }   // the watch's own first read is spent here: what follows is the hot timer alone
       clock += 60e3;
       const ids = [...Wh.convs.keys()];
@@ -2695,15 +2705,17 @@ console.log("㉑ lane channel-feed-authority (OWNER'S LAW 2026-10-06: fetch the 
       const named = [...Wh.changed];
       Wh.calls.history = new Map(); Wh.calls.list = 0; Wh.calls.changes = 0;
       const dueBefore = eh.dueListOf('hist').length;
+      const st0 = eh.censusIndexStats ? eh.censusIndexStats() : null;
       const t0 = performance.now();
       await eh.pass('hist');
       const ms = performance.now() - t0;
+      const st1 = st0 ? eh.censusIndexStats() : null;
       const fetched = [...Wh.calls.history.keys()];
-      return { rows, setupHist, dueBefore, ms, calls: Wh.calls.changes + historyCalls(Wh) + Wh.calls.list, feed: Wh.calls.changes, hist: historyCalls(Wh), list: Wh.calls.list, named, fetched };
+      return { rows, setupHist, dueBefore, ms, settleMs, built: st1 ? st1.builds - st0.builds : null, censusRows: st1 ? st1.rowsRead - st0.rowsRead : null, calls: Wh.calls.changes + historyCalls(Wh) + Wh.calls.list, feed: Wh.calls.changes, hist: historyCalls(Wh), list: Wh.calls.list, named, fetched };
     } finally { eh.stop(); clock = t00 + 3600e3; }
   };
   const legs = [];
-  for (const n of [1000, 10000, 90000]) legs.push([n, await runHist(ENG, n)]);
+  for (const n of [1000, 10000, 90000]) legs.push([n, await runHist(ENG, n, { settle: true })]);
   for (const [n, r] of legs) console.log(`    ${n} rows: a pass = ${r.calls} vendor calls (feed ${r.feed} + named reads ${r.hist} + listing ${r.list}) · ${r.ms.toFixed(1)} ms · discovery read ${r.setupHist} rows`);
   ok(legs.every(([n, r]) => r.rows === n), 'every world is discovered whole (1 000 / 10 000 / 90 000 rows)', legs.map(([n, r]) => `${n}:${r.rows}`).join(' '));
   ok(legs.every(([, r]) => r.setupHist === 0), 'discovery names rows and reads NONE of them (no per-row read rides the walk under the authoritative feed)', legs.map(([, r]) => r.setupHist).join(' '));
@@ -2711,7 +2723,9 @@ console.log("㉑ lane channel-feed-authority (OWNER'S LAW 2026-10-06: fetch the 
   ok(legs.every(([, r]) => r.fetched.length === 20 && r.fetched.every((id) => r.named.includes(id))), 'the reads are EXACTLY the rows the feed named — no other row is asked whether it changed');
   const big = legs[2][1];
   // the pass's remaining O(rows) cost is the scheduler VIEW (`schedulerScan`, the card's census — lane channel-drain-scale paces it), not the due path
-  console.log(`    the 90 000-row pass: ${big.ms.toFixed(1)} ms wall (the scheduler card's census included); due rows by the clock before it: ${big.dueBefore}`);
+  console.log(`    the 90 000-row pass: ${big.ms.toFixed(1)} ms wall (the scheduler card's census included; it read ${big.censusRows} rows, ${big.built} index builds); due rows by the clock before it: ${big.dueBefore}; the settle pass after discovery (the index's one build): ${big.settleMs.toFixed(1)} ms`);
+  // lane scheduler-census-index (B-7978): the census is an index — a pass is O(due + touched) (≈ 290 ms before: the walk)
+  ok(big.ms < 100 && big.built === 0 && big.censusRows < 1000, `a 90 000-row pass < 100 ms wall, the scheduler card's census included (${big.ms.toFixed(1)} ms; the census read ${big.censusRows} rows, no build)`);
   ok(legs.every(([, r]) => r.dueBefore === 0), 'under the carrying authoritative feed the clock makes NO row due (feed-only), at every size', legs.map(([n, r]) => `${n}:${r.dueBefore}`).join(' '));
   // the open window: a watched row keeps its hot refresh (the owner looking) — the feed names nothing, it is read
   const watched = 'c0007';
@@ -2762,6 +2776,103 @@ console.log("㉑ lane channel-feed-authority (OWNER'S LAW 2026-10-06: fetch the 
   const s10 = await meter(scanEng, 10000, 20, 'scan'), s90 = await meter(scanEng, 90000, 20, 'scan');
   ok(s90.got === 20 && !(s90.ms < 2 && s90.ms < 3 * s10.ms + 0.3), `CONTROL: the scan restored ⇒ the meter follows the ROWS (90 000 rows · 20 due: ${s90.ms.toFixed(2)} ms, ${(s90.ms / s10.ms).toFixed(1)}× the 10 000-row figure)`);
   for (const r of copiesCensus(Mf.files, Mf.dir, REPO, { minCopies: 2 })) ok(r.pass, r.name, r.detail);
+}
+
+console.log("㉒ lane gmail-feed-gap (B-5134): a GAP in the change feed is ONE history walk from the saved cursor — never a whole-index pass");
+{
+  const Mg = mutantCopies('chan-agg-feedgap', REPO);
+  const CAPS_SRC = fs.readFileSync(path.join(REPO, 'src/channel-caps.js'), 'utf-8');
+  const capsReq = "require('../channel-caps.js')";
+  const swap = (src, a, b, what) => { if (!src.includes(a)) throw new Error(`control needle gone: ${what}`); return src.split(a).join(b); };
+  // CONTROL engine: the base rule — the feed "not carrying" after a silence (a cursor-holding feed falls to the tiers)
+  const BASE = Mg.load('src/server/channels-engine.js', swap(ENGINE_SRC, capsReq, `require(${JSON.stringify(Mg.write('src/channel-caps.js', swap(CAPS_SRC, "  const cursorHeld = d.authority === 'authoritative' && !!f.carrying", '  const cursorHeld = false && !!f.carrying', 'cursor-held'), 'silence-falls'))})`, 'silence-falls'), 'silence-falls');
+  const N = 10000, NAMED = 30, PAGE = 10;
+  const runGap = async (mod, label, script) => {
+    const t00 = clock;
+    const Wg = makeWorld(clock, { n: N, hot: 50, warm: 200 });
+    Wg.calls.changes = 0; Wg.histPageSize = PAGE;
+    const kg = worldModule('gap', Wg, { feed: 'history', budgetDefault: 1e9 });
+    const dir = path.join(ROOT, `gap-${label}`);
+    seedAccounts(dir, [['gap', 'gap']]);
+    const reg = CH.createChannelRegistry(); reg.register(kg);
+    const lines = [];
+    const lg = { log: (m) => lines.push(String(m)), warn: (m) => lines.push(String(m)), error() {} };
+    const mk = () => mod.create({ dataDir: dir, registry: reg, env: {}, now, broadcast: () => {}, serverSetting: () => undefined, liveSessions: () => SESS, deliver: null, log: lg });
+    const G = { eng: mk(), Wg, lines, kg };
+    G.rec = () => G.eng.adapterRecords().adapters.find((r) => r.id === 'gap');
+    G.state = () => caps.feedState(kg.caps, G.rec(), clock);
+    G.restart = () => { G.eng.stop(); G.eng = mk(); };
+    G.name = () => { const ids = [...Wg.convs.keys()]; Wg.changed = new Set(ids.filter((_, i) => i % Math.floor(N / NAMED) === 7).slice(0, NAMED)); return [...Wg.changed]; };
+    G.zero = () => { Wg.calls.history = new Map(); Wg.calls.list = 0; Wg.calls.changes = 0; Wg.calls.historyPages = 0; lines.length = 0; };
+    G.count = () => ({ feed: Wg.calls.changes, pages: Wg.calls.historyPages || 0, hist: historyCalls(Wg), list: Wg.calls.list, reads: [...Wg.calls.history.keys()] });
+    try {
+      for (let i = 0; i < 12 && Object.keys(G.eng.store.index.live()).length < N; i++) { clock += 1000; await G.eng.pass('gap'); }
+      clock += 60e3; await G.eng.pass('gap');   // one steady pass: the feed answered from its cursor (carrying, feed-only)
+      G.since0 = G.rec().feed && G.rec().feed.carrying ? G.rec().feed.carrying.since : null;
+      return await script(G);
+    } finally { G.eng.stop(); clock = t00 + 4 * 3600e3; }
+  };
+  // ── THE 20-MIN CLOCK JUMP (a laptop asleep): the real rule vs the base rule (the "before" numbers) ──
+  const jump = async (G) => {
+    clock += 20 * 60e3;
+    const named = G.name(); G.zero();
+    const st = G.state(), dueBefore = G.eng.dueListOf('gap').length;
+    await G.eng.pass('gap');
+    return { named, st, dueBefore, c: G.count(), lines: G.lines.slice(), after: G.state(), since0: G.since0, since1: G.rec().feed.carrying && G.rec().feed.carrying.since };
+  };
+  const real = await runGap(ENG, 'jump', jump);
+  const before = await runGap(BASE, 'jump-base', jump);
+  console.log(`    20-min jump over ${N} rows · BEFORE (base rule): ${before.dueBefore} due by the clock, a pass = ${before.c.feed + before.c.hist + before.c.list} vendor calls (feed ${before.c.feed} + reads ${before.c.hist} + listing ${before.c.list}) · AFTER: ${real.dueBefore} due, ${real.c.feed + real.c.hist + real.c.list} calls (ONE walk of ${real.c.pages} history pages + ${real.c.hist} named reads + listing ${real.c.list})`);
+  ok(real.st.state === 'catching-up' && real.st.carrying === true && real.st.gapSince > 0, `after 20 min of silence the cursor feed is CATCHING UP and still carrying (state ${real.st.state})`, JSON.stringify(real.st));
+  ok(real.dueBefore === 0, `the clock makes NO row due across the gap (the tiers stay parked): ${real.dueBefore} due`);
+  ok(real.c.feed === 1 && real.c.pages <= Math.ceil(NAMED / PAGE) && real.c.hist === NAMED && real.c.list === 0, `exactly ONE history walk (${real.c.feed} call, ${real.c.pages} pages ≤ ceil(${NAMED}/${PAGE})) + the ${NAMED} named reads, 0 listing pages`, JSON.stringify(real.c));
+  ok(real.c.reads.every((id) => real.named.includes(id)) && real.c.reads.length === NAMED, '0 per-row reads: every read is a conversation the walk named');
+  ok(real.after.state === 'carrying' && real.after.carrying && real.since1 === real.since0 && real.since0 > 0, `the feed is carrying after the walk — the persisted fact's since unchanged (${real.since0})`, JSON.stringify(real.after));
+  const jl = real.lines.filter((l) => /the change feed resumed after/.test(l));
+  ok(jl.length === 1 && jl[0].includes(`resumed after 20 min — ${real.c.pages} history pages, ${NAMED} conversations touched, 0 per-row reads`), `ONE journal line per gap: ${jl[0] || '(none)'}`, JSON.stringify(jl));
+  ok(before.dueBefore >= 9000 && before.c.hist > 1000, `CONTROL the base rule (silence = not carrying): ${before.dueBefore} rows due, ${before.c.hist} reads in the pass — the whole-index pass`, JSON.stringify({ due: before.dueBefore, c: { ...before.c, reads: before.c.reads.length } }));
+  // ── THE SERVER-RESTART LEG: stopped, +30 min, started on the same store ⇒ the same ONE walk, carrying persisted ──
+  const rs = await runGap(ENG, 'restart', async (G) => {
+    G.restart(); G.eng.stop();
+    clock += 30 * 60e3;
+    G.eng = (() => { G.restart(); return G.eng; })();
+    const named = G.name(); G.zero();
+    const st = G.state(), dueBefore = G.eng.dueListOf('gap').length;
+    await G.eng.pass('gap');
+    return { named, st, dueBefore, c: G.count(), lines: G.lines.slice(), since0: G.since0, since1: G.rec().feed.carrying && G.rec().feed.carrying.since };
+  });
+  ok(rs.st.carrying === true && rs.st.state === 'catching-up' && rs.since1 === rs.since0 && rs.since0 > 0, `a restart 30 min later boots CARRYING from the persisted fact (since ${rs.since0}), catching up — never re-derived from an empty measurement`, JSON.stringify(rs.st));
+  ok(rs.dueBefore === 0 && rs.c.feed === 1 && rs.c.hist === NAMED && rs.c.reads.every((id) => rs.named.includes(id)), `the boot pass is the same ONE walk + ${NAMED} named reads, 0 due by the clock (listing pages: ${rs.c.list})`, JSON.stringify({ due: rs.dueBefore, c: { ...rs.c, reads: rs.c.reads.length } }));
+  ok(rs.lines.filter((l) => /the change feed resumed after 30 min/.test(l)).length === 1, 'ONE journal line for the restart gap (30 min)', JSON.stringify(rs.lines.filter((l) => /resumed/.test(l))));
+  // ── THE 404 LEG: an expired cursor ⇒ the listing re-walk, as built (no per-row read) ──
+  const ex = await runGap(ENG, 'expired', async (G) => {
+    clock += 20 * 60e3;
+    G.zero(); G.Wg.expired = true;
+    for (let i = 0; i < 3; i++) { await G.eng.pass('gap'); clock += 1000; }
+    return { c: G.count(), st: G.state(), lines: G.lines.slice() };
+  });
+  ok(ex.c.list >= Math.ceil(N / 100) && ex.c.hist === 0 && ex.st.carrying, `an expired cursor (404) ⇒ the listing re-walk (${ex.c.list} listing pages), 0 per-row reads, no catch-up line`, JSON.stringify({ c: { ...ex.c, reads: ex.c.reads.length }, st: ex.st.state }));
+  ok(!ex.lines.some((l) => /resumed after/.test(l)), 'the rewalk is not said as a catch-up');
+  // ── THE RATE-LIMIT-MID-WALK LEG: parked by name, resumed from the cursor, never a whole-index pass ──
+  const rl = await runGap(ENG, 'rate', async (G) => {
+    clock += 20 * 60e3;
+    const named = G.name(); G.zero();
+    G.Wg.failChanges = 'rate-limited';
+    await G.eng.pass('gap');
+    const parked = { st: G.state(), f: { why: G.rec().feed.backoffWhy, until: G.rec().feed.backoffUntil }, due: G.eng.dueListOf('gap').length, c: G.count() };
+    clock = Math.max(Number(G.rec().feed.backoffUntil), clock + 31e3) + 1000;   // the park over AND the feed's tick due
+    const due2 = G.eng.dueListOf('gap').length;
+    await G.eng.pass('gap');
+    return { named, parked, due2, c: G.count(), lines: G.lines.slice(), after: G.state() };
+  });
+  ok(rl.parked.st.state === 'backoff' && rl.parked.st.why === 'rate-limited' && rl.parked.st.carrying === true && rl.parked.f.why === 'rate-limited' && rl.parked.due === 0 && rl.parked.c.hist === 0, `a rate refusal mid-walk PARKS by name (backoff · rate-limited), still carrying: 0 rows due, 0 reads while parked`, JSON.stringify(rl.parked));
+  ok(rl.lines.filter((l) => /catch-up was limited by the vendor — parked by name/.test(l)).length === 1, 'the park is said once in the journal, by name', JSON.stringify(rl.lines.filter((l) => /parked/.test(l))));
+  ok(rl.due2 === 0 && rl.c.feed === 2 && rl.c.hist === NAMED && rl.c.reads.every((id) => rl.named.includes(id)) && rl.after.state === 'carrying', `resumed past the park: the walk again from the cursor + the ${NAMED} named reads — never a whole-index pass (reads ${rl.c.hist}, due ${rl.due2})`, JSON.stringify({ c: { ...rl.c, reads: rl.c.reads.length }, after: rl.after.state }));
+  // the card's words for the two gap states (feedText — "catching up since <t>")
+  const words = caps.feedText({ state: 'catching-up', gapSince: real.st.gapSince }, { clock: () => 'HH:MM' });
+  const wordsPark = caps.feedText({ state: 'backoff', why: 'rate-limited', carrying: true, gapSince: 1, until: 2 }, { vendor: 'Gmail', clock: () => 'HH:MM' });
+  ok(words === 'Catching up since HH:MM — the change feed resumes from where it stopped' && /^Catching up since HH:MM — Gmail asked the change feed to wait/.test(wordsPark), `the card says it: "${words}" · "${wordsPark}"`);
+  for (const r of copiesCensus(Mg.files, Mg.dir, REPO, { minCopies: 1 })) ok(r.pass, r.name, r.detail);
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

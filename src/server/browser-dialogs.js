@@ -68,7 +68,7 @@ const RE_ENABLE_MS = 30 * 1000;              // a held tab's Page.enable is aske
 const STOP_RETRIES = 4, STOP_RETRY_MS = 120; // verify r4 #5: Page.stopLoading under "Not attached to an active page" (a page mid-swap) is asked again — ≤ 0.5 s
 
 function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.now,
-  enableTimeoutMs = ST.ENABLE_TIMEOUT_MS, connectTimeoutMs = 3000, callTimeoutMs = 5000, captureTimeoutMs = ST.LOOP_SCREENSHOT_MS, quietMs = ST.LOOP_QUIET_MS, // verify r1: the quiet rule is a clock a fast gate shortens
+  enableTimeoutMs = ST.ENABLE_TIMEOUT_MS, connectTimeoutMs = 3000, callTimeoutMs = 5000, captureTimeoutMs = ST.LOOP_SCREENSHOT_MS, quietMs = ST.LOOP_QUIET_MS, reEnableMs = RE_ENABLE_MS, // verify r1: the quiet rule is a clock a fast gate shortens (lane browser-held-not-hung: the re-ask too)
   tabsOf = null, holdersOf = null, leaseCountOf = null, labelOf = null, notice = null, withdraw = null, forYou = null } = {}) {
   const watches = new Map();       // profileId → watch
   const listeners = new Set();
@@ -84,7 +84,16 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   const okey = (pid, bk) => `${pid}|${bk || ''}`;
   const dropOutcomes = (pid) => { let n = 0; for (const k of [...outcomes.keys()]) if (k.startsWith(pid + '|')) { outcomes.delete(k); n++; } return n; };
   /** The worst run on a browser across its conversations (the panel row / the chip of a browser, kinds only). */
-  const browserVerdict = (pid, tabHeld) => { let best = ST.stuckVerdict([], { tabHeld }); if (best.state === 'unresponsive') return best; for (const [k, list] of outcomes) if (k.startsWith(pid + '|')) { const v = ST.stuckVerdict(list); if (v.state === 'unresponsive' && (best.state !== 'unresponsive' || v.count > best.count)) best = v; } return best; };
+  // lane browser-held-not-hung: a held tab is judged against EVERY conversation's answers on this browser (an ok from any
+  // of them within OK_RECENT_MS = the page answers) — a blind watch is the row's quiet `blind`, never "not responding"
+  const browserVerdict = (pid, tabHeld) => {
+    const all = []; for (const [k, list] of outcomes) if (k.startsWith(pid + '|')) all.push(...list);
+    let best = ST.stuckVerdict(tabHeld ? all.sort((a, b) => (Number(a.at) || 0) - (Number(b.at) || 0)) : [], { tabHeld, now: now() });
+    if (best.state === 'unresponsive' && best.why === 'tab-held') return best;
+    if (best.state !== 'blind' && !best.held) best = { state: 'ok', count: 0 };
+    for (const [k, list] of outcomes) if (k.startsWith(pid + '|')) { const v = ST.stuckVerdict(list); if (v.state === 'unresponsive' && (best.state !== 'unresponsive' || v.count > best.count)) best = v; }
+    return best;
+  };
   let tabsFn = typeof tabsOf === 'function' ? tabsOf : null;
   const sayOnce = new Set();
   const say = (key, line) => { if (sayOnce.has(key)) return; sayOnce.add(key); try { log.warn?.(`[browser-dialog] ${line}`); } catch { /* */ } };
@@ -105,7 +114,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   // ── the socket ──
   function newWatch(profileId, url) {
     const w = { profileId, url, holds: true, ws: null, state: 'connecting', id: 0, waiting: new Map(), sessions: new Map(), targets: new Map(), open: new Map(), pendingBy: new Map(), answered: [], seq: 0, readyP: null, commands: [],
-      pkBinding: 'vs' + crypto.randomBytes(12).toString('hex'), pkKey: crypto.randomBytes(16).toString('hex'), pkForYou: new Map(), headed: null }; // lane browser-passkey
+      pkBinding: 'vs' + crypto.randomBytes(12).toString('hex'), pkKey: crypto.randomBytes(16).toString('hex'), pkForYou: new Map(), headed: null, bornAt: now() }; // lane browser-passkey
     let readyResolve;
     w.readyP = new Promise((r) => { readyResolve = r; });
     w.ready = () => readyResolve();
@@ -164,6 +173,8 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   /** One page tab: attach (flat session) + Page.enable — the enable bounded; a tab that never answers is HELD. */
   function track(w, info) {
     if (!info || info.type !== 'page' || !info.targetId) return Promise.resolve();
+    // lane browser-swiftshader-cpu: thawPaint's own blank tab (opened and closed in ~20 ms) is nobody's — never tracked
+    if (w.flipping && !info.openerId && /^(about:blank)?$/.test(String(info.url || ''))) return Promise.resolve();
     const tid = String(info.targetId);
     const known = w.targets.get(tid);
     if (known) { known.url = String(info.url || known.url || ''); known.title = String(info.title || known.title || ''); return known.enabling || Promise.resolve(); }
@@ -200,8 +211,11 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (en && en.timeout && w.state === 'open' && w.targets.get(e.targetId) === e) {
       // measured: a tab whose dialog opened before this socket was enabled never answers Page.enable — nothing in
       // VibeSpace can see or answer that dialog; the page is HELD (the unresponsive fact, the user's Restart)
-      if (!e.heldAt) { e.heldAt = now(); emit({ kind: 'held', profileId: w.profileId, targetId: e.targetId }); }
-      e.reEnable = setTimeout(() => { e.reEnable = null; if (w.state === 'open' && w.targets.get(e.targetId) === e && !e.enabled) enable(w, e); }, RE_ENABLE_MS);
+      if (!e.heldAt) { e.heldAt = now(); w.rowJudged = JSON.stringify(rowFact(w.profileId, w) || null); emit({ kind: 'held', profileId: w.profileId, targetId: e.targetId }); }
+      // lane browser-held-not-hung: the hold is RE-JUDGED at every re-ask — an `ok` that aged past OK_RECENT_MS moves the
+      // verdict without any event of its own (the panel row's digest is re-published only when the row's fact moved)
+      else { const row = JSON.stringify(rowFact(w.profileId, w) || null); emit(row !== w.rowJudged ? { kind: 'stuck', profileId: w.profileId, why: 'held-rejudged' } : { kind: 'held-rejudged', profileId: w.profileId, targetId: e.targetId }); w.rowJudged = row; }
+      e.reEnable = setTimeout(() => { e.reEnable = null; if (w.state === 'open' && w.targets.get(e.targetId) === e && !e.enabled) enable(w, e); }, reEnableMs);
       if (e.reEnable.unref) e.reEnable.unref();
     }
   }
@@ -220,6 +234,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
         if (PK.endPending(e.pk.records, { now: now() }).length) passkeyChanged(w, e); // lane browser-passkey: a closed tab waits for nothing
         if (e.owner && keeper && typeof keeper.forgetOwnTab === 'function') { try { keeper.forgetOwnTab(w.profileId, e.owner, tid); } catch { /* the keeper's own failure */ } } // verify r3 #2: the persisted witness goes with the tab
         if (e.loop) { e.loop = null; emit({ kind: 'loop-cleared', profileId: w.profileId, targetId: tid, why: 'tab-closed' }); } // lane site-reset: a closed tab's loop is over
+        if (e.heldAt) emit({ kind: 'held-cleared', profileId: w.profileId, targetId: tid, why: 'tab-closed' }); // lane browser-held-not-hung: a closed tab holds nothing (the fact moves)
         const dlg = w.open.get(tid);
         if (dlg) { w.open.delete(tid); emit({ kind: 'closed', profileId: w.profileId, targetId: tid, answered: { id: dlg.id, dialog: dlg, how: 'dismissed', by: 'tab-closed', at: now(), targetId: tid } }); withdrawNotices([dlg.id]); }
         return;
@@ -551,6 +566,73 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     down(w, why);
   }
 
+  // ── lane browser-swiftshader-cpu: IDLE PAINT (src/browser-idle.js) — the keeper's tick freezes, a verb / a viewer thaws ──
+  const settle = (p) => Promise.resolve(p).then((m) => m, () => null);
+  /** What the idle-paint verdict reads of one browser's watch (null = no open watch: nothing to drive). */
+  function paintFacts(profileId) {
+    const w = watches.get(String(profileId || ''));
+    if (!w || w.state !== 'open') return null;
+    const loading = [...w.targets.values()].some((e) => e.navSince > 0);
+    return { frozen: w.paint === 'frozen', lastVerbAt: w.lastVerbAt || w.bornAt || 0, busy: w.open.size > 0 || loading || !!w.thawing, frozenAt: w.frozenAt || 0, fronts: (w.fronts || []).length, hidden: w.hiddenFronts ? w.hiddenFronts.size : 0, title: [...w.targets.values()].map((e) => e.title).find(Boolean) || null };
+  }
+  /** Every tab of the browser FROZEN (measured: the only act that stops an Xvfb window drawing — IDLE_PAINT_PROOF). The tabs
+   *  in front are remembered: a frozen page is hidden, and only its tab strip shows it again (thawPaint). */
+  async function freezePaint(profileId) {
+    const w = watches.get(String(profileId || ''));
+    if (!w || w.state !== 'open' || w.paint === 'frozen' || w.thawing || w.open.size) return { ok: false };
+    const tabs = [...w.targets.values()].filter((e) => e.sid);
+    const fronts = []; const t0 = now();
+    for (const e of tabs) { const v = await settle(call(w, 'Runtime.evaluate', { expression: 'document.visibilityState', returnByValue: true }, e.sid, 1000)); if (v && v.result && v.result.result && v.result.result.value === 'visible') fronts.push(e.targetId); }
+    if (w.thawing || (w.lastVerbAt || 0) >= t0) return { ok: false }; // a verb arrived while the fronts were read
+    // r2: a front another conversation has not shown again since the last freeze stays owed to it (it is hidden now, not visible)
+    const owed = [...(w.hiddenFronts || [])].filter((tid) => w.targets.has(tid));
+    w.paint = 'frozen'; w.fronts = fronts; w.hiddenFronts = new Set([...owed, ...fronts]); w.frozenAt = now();
+    for (const e of tabs) await settle(call(w, 'Page.setWebLifecycleState', { state: 'frozen' }, e.sid, 1000));
+    return { ok: true, tabs: tabs.length, fronts: fronts.length };
+  }
+  /** Undo freezePaint BEFORE a verb runs / when a live view attaches: every tab active again (a hidden page then still draws
+   *  nothing), and each tab that was in front AND is the asking conversation's (`holder` = the route's dialog target / the
+   *  viewer's {profileId, browserKey}; null = every tab — the sweep's own thaw) shown by its tab strip (measured: `active`
+   *  alone leaves it hidden — a blank tab opened and closed, the page activated). Lane browser-swiftshader-cpu-r2 (heavy
+   *  test-browser-hidden-paint e, measured red before): a thaw for A flipped B's window too, and its blank landed in the
+   *  window activated LAST (WINDOWS_PROOF: a plain create lands there) — now only the asker's fronts, each activated FIRST.
+   *  Another conversation's front stays owed (hiddenFronts) until ITS verb / viewer. */
+  function thawPaint(profileId, { holder = null } = {}) {
+    const w = watches.get(String(profileId || ''));
+    if (!w) return Promise.resolve({ ok: true, thawed: false });
+    if (w.thawing) return w.thawing.then(() => thawPaint(profileId, { holder }), () => thawPaint(profileId, { holder }));
+    const scope = holder ? scopeFor(holder) : null;
+    const need = [...(w.hiddenFronts || [])].filter((tid) => inScope(scope, tid));
+    if (w.paint !== 'frozen' && !need.length) return Promise.resolve({ ok: true, thawed: false });
+    w.thawing = (async () => {
+      try {
+        if (w.paint === 'frozen') { for (const e of w.targets.values()) if (e.sid) await settle(call(w, 'Page.setWebLifecycleState', { state: 'active' }, e.sid, 1000)); w.paint = 'active'; w.thawedAt = now(); }
+        const shown = [];
+        for (const tid of need) { w.hiddenFronts.delete(tid); if (w.targets.has(tid)) shown.push(await showFront(w, tid)); }
+        return { ok: true, thawed: true, shown };
+      } finally { w.fronts = []; w.thawing = null; }
+    })();
+    return w.thawing;
+  }
+  /** One frozen front shown again IN ITS OWN WINDOW: activated first (its window becomes the last activated one — where a
+   *  plain create lands), a blank opened, its window read off Chrome (getWindowForTarget), closed, the front activated. A
+   *  blank that landed elsewhere (another holder's activation raced it) is closed at once and journaled — never kept. */
+  async function showFront(w, tid) {
+    const winOf = async (id) => { const r = await settle(call(w, 'Browser.getWindowForTarget', { targetId: id }, null, 1000)); return r && r.result ? r.result.windowId : null; };
+    w.flipping = (w.flipping || 0) + 1;
+    try {
+      const want = await winOf(tid);
+      await settle(call(w, 'Target.activateTarget', { targetId: tid }, null, 2000));
+      const b = await settle(call(w, 'Target.createTarget', { url: 'about:blank' }, null, 2000));
+      const bid = b && b.result && b.result.targetId;
+      const got = bid ? await winOf(bid) : null;
+      if (bid) await settle(call(w, 'Target.closeTarget', { targetId: bid }, null, 2000));
+      await settle(call(w, 'Target.activateTarget', { targetId: tid }, null, 2000));
+      if (bid && want != null && got !== want) { try { log.warn?.(`[browser-dialogs] ${w.profileId}: the idle-paint thaw's blank tab opened in window ${got}, not the tab's window ${want} — closed at once`); } catch { /* */ } }
+      return { targetId: tid, window: want, blankIn: got };
+    } finally { w.flipping -= 1; }
+  }
+
   // ── which conversation a tab's dialog is for ──
   function inScope(scope, tid) { return scope === null || (scope instanceof Set && scope.has(tid)); }
   /** null = every tab of that browser; a Set = these tabs only (empty = none attributed). */
@@ -590,7 +672,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   function heldIn(profileId, scope) {
     const w = watches.get(String(profileId || ''));
     if (!w || w.state !== 'open') return null;
-    for (const e of w.targets.values()) if (e.heldAt && inScope(scope, e.targetId)) return { at: e.heldAt, targetId: e.targetId };
+    for (const e of w.targets.values()) if (e.heldAt && inScope(scope, e.targetId)) return { at: e.heldAt, targetId: e.targetId, title: e.title || '' };
     return null;
   }
 
@@ -622,7 +704,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       else notes.unshift(...alerts.map((a) => ST.answeredNote(a)).filter(Boolean));
       if (seen.size > 256) { const keep = [...seen].slice(-128); told.set(browserKey, new Set(keep)); }
     }
-    const verdict = ST.stuckVerdict(outcomes.get(okey(pid, browserKey)) || [], { tabHeld: watched ? heldIn(pid, scope) : null });
+    const verdict = ST.stuckVerdict(outcomes.get(okey(pid, browserKey)) || [], { tabHeld: watched ? heldIn(pid, scope) : null, now: t }); // lane browser-held-not-hung: the page's answers outrank a hold
     // lane site-reset: a page that will not settle, named — `loop` = on the tab the agent still works in (what its verbs are
     // answered with), `loopAny` = on any tab of its (the chip, the live view)
     const loopAny = watched && !d ? loopIn(pid, scope) : null;
@@ -647,6 +729,9 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       targetId: d ? d.targetId : null,
       notes,
       stuck: !d && !loop && verdict.state === 'unresponsive' ? { ...verdict, text: ST.stuckAgentText(verdict) } : null,
+      // lane browser-held-not-hung: a held tab in scope while the page answers (or nothing was asked yet) — the watch's own
+      // `blind` fact (the chip / the live view's quiet line), never the agent's "not responding"
+      held: !d && !loop && (verdict.state === 'blind' || verdict.held) ? ST.stuckFact({ verdict }) : null,
       loop: loop ? { ...ST.loopBlock(loop), runStart: loop.runStart, text: ST.loopText(loop) } : null,
       loopAny: loopAny ? { ...ST.loopBlock(loopAny), runStart: loopAny.runStart } : null,
       loopShared, // verify r1: kinds only
@@ -669,7 +754,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       const f = factFor({ ...c, browserKey: bk, consume: false });
       // lane browser-passkey: a page waiting for a passkey (after a held dialog — that is answered first)
       if (!f.open && f.passkey && f.passkey.state === PK.PASSKEY_OPEN_CODE) return { state: 'passkey', passkey: f.passkey, headed: onDesktop(c.profileId), since: f.passkey.startedAt, profileId: c.profileId };
-      const fact = ST.stuckFact({ dialog: f.open ? { ...f.open, id: f.open.id } : null, verdict: f.stuck, loop: f.loopAny, now: now() });
+      const fact = ST.stuckFact({ dialog: f.open ? { ...f.open, id: f.open.id } : null, verdict: f.stuck || (f.held && !f.loopAny ? f.held : null), loop: f.loopAny, now: now() });
       if (fact) return { ...fact, profileId: c.profileId };
     }
     return null;
@@ -699,6 +784,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   }
   function verbStarted(browserKey, { profileId = null, verb = null } = {}) {
     if (!browserKey) return;
+    if (profileId && watches.get(String(profileId))) watches.get(String(profileId)).lastVerbAt = now(); // lane browser-swiftshader-cpu
     const r = running.get(browserKey) || { n: 0, at: 0, on: {} }; const on = { ...(r.on || {}) }; if (profileId) { const o = on[String(profileId)] || { n: 0, at: 0 }; on[String(profileId)] = { n: o.n + 1, at: now() }; } running.set(browserKey, { n: r.n + 1, at: now(), on });
     // lane site-reset: a page-ACTING command's instant — a page turn right after it is the agent's, never the page's loop
     const w = profileId ? watches.get(String(profileId)) : null;
@@ -914,11 +1000,14 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     const pid = String(profileId || ''); if (!pid || !state) return;
     const k = okey(pid, browserKey);
     const list = outcomes.get(k) || [];
-    const before = ST.stuckVerdict(list).state;
+    // lane browser-held-not-hung: judged WITH the browser's hold — an ok over a held tab moves the verdict too
+    const judge = () => ST.stuckVerdict(list, { tabHeld: heldIn(pid, null), now: now() }).state;
+    const before = judge();
     list.push({ at, state }); if (list.length > OUTCOMES_KEEP) list.splice(0, list.length - OUTCOMES_KEEP);
     outcomes.set(k, list);
     if (outcomes.size > 1024) outcomes.delete(outcomes.keys().next().value);
-    if (ST.stuckVerdict(list).state !== before) emit({ kind: 'stuck', profileId: pid, state: ST.stuckVerdict(list).state });
+    const after = judge();
+    if (after !== before) emit({ kind: 'stuck', profileId: pid, state: after });
   }
   function resetOutcomes(profileId) { if (dropOutcomes(String(profileId || ''))) emit({ kind: 'stuck', profileId: String(profileId), state: 'ok' }); }
 
@@ -930,12 +1019,21 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       if (w.state !== 'open') continue;
       const d = openIn(pid, null);
       if (d) { out[pid] = { state: 'dialog', type: d.type, since: d.openedAt }; continue; }
-      const lp = loopIn(pid, null); // lane site-reset: kinds only here (the digest reaches agents — never a page's address)
-      if (lp) { out[pid] = { state: 'loop', since: lp.runStart || 0 }; continue; }
-      const v = browserVerdict(pid, heldIn(pid, null));
-      if (v.state === 'unresponsive') out[pid] = { state: 'unresponsive', why: v.why, count: v.count || 0, since: v.since || 0 };
+      const r = rowFact(pid, w);
+      if (r) out[pid] = r;
     }
     return out;
+  }
+  /** One browser's row fact after its dialog (kinds only). lane browser-held-not-hung: a blind watch is `blind` (no tab
+   *  title — the digest reaches agents). */
+  function rowFact(pid, w) {
+    if (!w || w.state !== 'open') return null;
+    const lp = loopIn(pid, null); // lane site-reset: kinds only here (the digest reaches agents — never a page's address)
+    if (lp) return { state: 'loop', since: lp.runStart || 0 };
+    const v = browserVerdict(pid, heldIn(pid, null));
+    if (v.state === 'unresponsive') return { state: 'unresponsive', why: v.why, count: v.count || 0, since: v.since || 0 };
+    if (v.state === 'blind' || v.held) return { state: 'blind', why: 'held', since: Number(v.since || (v.held && v.held.since)) || 0 };
+    return null;
   }
   // ── lane browser-passkey: the ceremony hook ──
   function armPasskey(w, e) {
@@ -1025,6 +1123,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     ownsTab, pickTab, stopTab, closeTab, captureTab, noteCut, busyFor, // lane site-reset: a looping tab never disables the browser
     ownTabs, clearSite, // lane site-reset step 2: one site's stored login, cleared
     passkeyIn, cancelPasskey, // lane browser-passkey: a page waiting for a passkey, named and cancellable
+    paintFacts, freezePaint, thawPaint, // lane browser-swiftshader-cpu: a browser nobody watches and nobody drives paints nothing
     shutdown: () => { shutdown(); try { unsubLease?.(); } catch { /* */ } }, _watches: watches };
 }
 

@@ -51,7 +51,7 @@ export function stateLines(r, x = {}) {
   const why = String(W(x, 'why', () => '')(r) || '');
   const out = [];
   if (hung(r, x)) out.push({ key: 'unresponsive', text: String(x.unresponsive.tooltip || x.unresponsive.state), tone: 'warn' });
-  if (x.stuck && x.stuck.line) out.push({ key: 'stuck', text: String(x.stuck.line), tone: 'warn' });
+  if (x.stuck && x.stuck.line) out.push({ key: 'stuck', text: String(x.stuck.line), tone: x.stuck.tone === 'info' ? 'info' : 'warn' }); // lane browser-held-not-hung: a blind watch is info
   if (r.browserClosed && why) out.push({ key: 'closed', text: why, tone: 'warn' });
   if (x.autoDialogs && x.autoText) out.push({ key: 'auto-dialogs', text: String(x.autoText), tone: 'warn' });
   if (!r.browserClosed && why) out.push({ key: 'why', text: why, tone: '' });

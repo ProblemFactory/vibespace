@@ -582,6 +582,57 @@ function splitThreadDueKey(key, isConvKey = () => true) {
   return { convKey, threadKey: s.slice(i + 1) };
 }
 
+/** lane gmail-feed-gap (B-5134): the declared gaps the coverage net keeps per account (the oldest dropped). */
+const GAPS_MAX = 20;
+/**
+ * lane gmail-feed-gap (B-5134, 2026-10-07 — "fetch updates, never ask each row"): THE GAP VERDICT of a CURSOR feed.
+ * A silence (a laptop asleep, a server restart, a vendor outage, a rate-limit park) is a GAP: the cursor survives it
+ * and the vendor answers "everything since <cursor>" in pages. It is never evidence the feed misses messages — it is
+ * evidence nobody asked.
+ *   rewalk    the cursor is expired (the vendor's 404) or there is none — the listing re-walk, as built
+ *   catch-up  a cursor and a gap of ANY length (its last page older than the fresh bound, or none at all — a boot) —
+ *             ONE paged walk from the cursor, bounded by pages, never by time; the per-row tiers stay parked
+ *   fresh     no gap
+ * `overCold` = the gap outlived the cold tier: the silence that used to fall to the tiers (ONE whole-index pass —
+ * 10 000 due rows / 10 101 vendor calls measured on the owner's mailboxes).
+ * → { verdict, gapMs (null = no page known), from, overCold }
+ */
+function gapVerdict({ cursor = null, lastPageAt = null, now = 0, coldTierSec = 900, expired = false, freshBoundMs = 180e3 } = {}) {
+  const t = Number(now) || 0, last = num(lastPageAt);
+  const gapMs = last === null || !(last > 0) ? null : Math.max(0, t - last);
+  const overCold = gapMs === null || gapMs > (Number(coldTierSec) || 900) * 1000;
+  if (expired || !cursor) return { verdict: 'rewalk', gapMs, from: gapMs === null ? null : last, overCold };
+  if (gapMs === null || gapMs > (Number(freshBoundMs) || 180e3)) return { verdict: 'catch-up', gapMs, from: gapMs === null ? null : last, overCold };
+  return { verdict: 'fresh', gapMs, from: last, overCold: false };
+}
+/** A gap declared to the coverage net: `{from, to}` merged into the account's list (overlaps joined, ≤ GAPS_MAX kept,
+ *  newest last). → the new list (a new array). */
+function addGap(gaps, g) {
+  const a = num(g && g.from), b = num(g && g.to);
+  const list = (Array.isArray(gaps) ? gaps : []).map((x) => ({ from: num(x && x.from), to: num(x && x.to) })).filter((x) => x.from !== null && x.to !== null && x.to > x.from);
+  if (a !== null && b !== null && b > a) list.push({ from: a, to: b });
+  list.sort((x, y) => x.from - y.from);
+  const out = [];
+  for (const x of list) { const l = out[out.length - 1]; if (l && x.from <= l.to) l.to = Math.max(l.to, x.to); else out.push({ ...x }); }
+  return out.slice(-GAPS_MAX);
+}
+/**
+ * lane gmail-feed-gap: THE COVERAGE NET with its GAPS declared — `sample` over the records whose instant lies in NO
+ * declared gap (`(from, to]` each — a span the feed's own window never searched: a long stop's older part). A record
+ * inside a gap is excluded (counted), never judged a miss: silence is not evidence the feed misses messages. The
+ * demotion stays for a feed that PROVABLY misses — a record its own window covered and did not see.
+ * → sample's answer + { excluded }
+ */
+function coverageOf(records, { gaps = [], ...o } = {}) {
+  const iv = addGap(gaps, null);
+  const inGap = (r) => { const at = Number(r && r.at) || 0; return iv.some((g) => at > g.from && at <= g.to); };
+  const keep = [], pend = [];
+  let excluded = 0;
+  for (const r of Array.isArray(records) ? records : []) { if (inGap(r)) excluded++; else keep.push(r); }
+  for (const r of Array.isArray(o.pending) ? o.pending : []) { if (inGap(r)) excluded++; else pend.push(r); }
+  return { ...sample(keep, { ...o, pending: pend }), excluded };
+}
+
 /** The feed's fresh bound (§2.8): the feed carries only while its last good page is younger than this. */
 function freshMs(everySec, overlapSec) { return Math.max(180e3, (3 * (Number(everySec) || 30) + (Number(overlapSec) || OVERLAP_DEFAULT_SEC)) * 1000); }
 
@@ -593,4 +644,5 @@ module.exports = {
   window, isoSec, isoMs, readTime, normalizeHit, cleanHit, pageVerdict, pageSig, foldHits, mergeThreadOwed, mergeThreadReach, owedSatisfied, birthFacts,
   sample, minuteAt, pagesLeft, modeVerdict, trimSeen, threadDueKey, splitThreadDueKey, freshMs, idOf,
   fieldList, mergeFieldLists, shapeVerdict, recentUnreadable, recentUnreadableCount,
+  GAPS_MAX, gapVerdict, addGap, coverageOf,
 };

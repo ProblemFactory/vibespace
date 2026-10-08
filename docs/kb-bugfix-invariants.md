@@ -4691,3 +4691,41 @@ The owner saw four dead lane pair groups, each with the sender's last report dra
 
 **Gates:** test-account-policy-door (fast): model table en/zh/ja, base/409, real engine (review ⇒ send refused; direct ⇒ offered; inheritance; own value kept), agent words, door pins + patched-copy control (the dialog without its policy row ⇒ red); test-channels-aggregate-ui heavy leg.
 
+
+## THE HIDDEN WINDOW DREW A PAGE NOBODY WATCHED AT NINE CORES (lane browser-swiftshader-cpu, userW inc-muyp9vj6-tv0m, 2026-10-07)
+
+userW's pod: one conversation's hidden-window browser drew Mercury's payments dashboard (two Stripe iframes, a Sentry replay worker) with its GPU process at 938 % CPU on 16 SwiftShader threads; `navigate` 30 s timeouts, `tab new` 120 s, the shared browser hung for 9 conversations, 8+ restarts a day. Measured on the dev box (scripts/measure-hidden-window-cpu.mjs, `HIDDEN_WINDOW_CPU_PROOF`): B-cc68's `--use-angle=swiftshader --enable-unsafe-swiftshader` (added for WebGL) also put the COMPOSITOR on SwiftShader — 592 % for a 60 fps page; `--disable-gpu-rasterization` changed nothing (582 %), `--disable-gpu-compositing` 98 % with WebGL kept. An Xvfb window is never occluded and has no window manager, so it painted at full rate with no viewer; only a page freeze stops it (`IDLE_PAINT_PROOF`), and Chrome's freeze hides the page for good unless its tab strip shows it again.
+
+**不变量 = software GL is for WebGL only, never raster or compositing; a browser nobody watches and nobody drives paints nothing (only with the owner's `browser.idlePaintFreeze` on — OFF by default, r2), and a thaw never touches another conversation's window** — `HIDDEN_WINDOW_ARGS` on every hidden-window launch (`launchPlan` → `withSoftwareGl`); src/browser-idle.js `idlePaintVerdict` freezes an unseen rung's tabs after 30 s without a viewer or a verb, the /resolve door and a viewer's arrival thaw it (active + the tab-strip flip) before anything runs. Gates: test-browser-display (the args row + a pre-fix copy RED, the idle row + a viewer-blind copy RED), test-runaway-guard (the notice names the page).
+
+## A PAGE THAT ANSWERED EVERY COMMAND WAS CALLED NOT RESPONDING (lane browser-held-not-hung, owner 2026-10-08, his 2.369.231 instance)
+
+**Symptom:** the Agent browser live view of an adopted profile (16 tabs, the agent operating) showed the yellow "网页没有响应 —— 可以重启" over a page that moved; the browser trace showed 30+ `navigate`s ok in 40 min; the keeper's record said `unresponsive: null`.
+
+**Cause:** the per-conversation stuck fact turned a HOLD — one tab in scope whose `Page.enable` the dialog watch could not get answered in 5 s (after the .231 restart the watch re-attached to the adopted daemon) — into `unresponsive` at once, whatever the page's own answers. Measured (scripts/measure-held-enable.mjs): a healthy tab answers a fresh socket's Page.enable in ≤ 25 ms on 16 busy tabs; a tab under a dialog that opened before the socket never answers.
+
+**Invariant:** "not responding" is a claim about the page's answers; a watch that cannot see in says so as itself. A hold is `unresponsive` only when the conversation has no `ok` within OK_RECENT_MS (60 s); otherwise the fact is `blind` (an info line, no Restart). The hold is re-judged at every re-ask and cleared by an answer, a closed tab or a scope without the tab. Pinned: test-browser-stuck's hold verdict table + controls (the old "held ⇒ unresponsive at once" and the words without the blind chip both redden it), the watch legs over the fake CDP (blind / ok / aged ok / scope / close / re-judge / answered).
+
+## A SIXTEEN-MINUTE SILENCE RE-READ A WHOLE MAILBOX (lane gmail-feed-gap, B-5134, 2026-10-07)
+
+**Symptom:** after a stall longer than the cold tier (a laptop asleep, a server restart, a vendor outage, a rate-limit park) Gmail's authoritative change feed was judged "not carrying" and every row fell back to its per-row tier — ONE whole-index pass: 10 000 due rows / 10 101 vendor calls measured on the owner's mailboxes; a fleet user's 89 000-row mailbox froze the workspace twice in a week.
+
+**Cause:** `feedState` derived `carrying` from the freshness of the last page — silence read as "the feed misses messages". The cursor (historyId) survives any gap; Gmail answers "everything since <historyId>" in pages.
+
+**Fix:** `Feed.gapVerdict` (catch-up / rewalk / fresh); an authoritative feed holding its cursor keeps the persisted `feed.carrying` fact through a silence (`catching-up`) and a park (`backoff`); the walk is paged from the cursor (Gmail resumes a refused or capped walk from its page token); only a 404 re-walks the listing; the coverage net excludes declared gaps (`coverageOf`).
+
+**Invariant:** a gap in a cursor feed is one walk from the cursor; silence is never evidence of misses — the demotion is for a feed that provably misses a message its own window covered.
+
+**Gates:** test-channels-aggregate ㉒ (20-min jump / restart / 404 / rate-limit mid-walk; CONTROL the base rule ⇒ 10 000 due), test-channel-feed ⑩ (CONTROL: silence counted as misses ⇒ demoted), test-channel-caps, test-channel-drain rule 21a, test-channels-gmail-shape (token resume).
+
+## THE SCHEDULER CARD WALKED 90 000 ROWS EVERY PASS (lane scheduler-census-index, B-7978, 2026-10-07)
+
+**Symptom:** a channels pass over the owner's 90 298 conversations (4 Gmail accounts + Lark + Slack) cost ≈ 270–290 ms of synchronous wall on the event loop, beside every other feature, while the due path itself was ≈ 10 ms (scripts/measure-channels-pass.mjs: BEFORE a round of 6 account passes 278 ms, max pass 355 ms).
+
+**Cause:** the account card's census (`schedulerView` → `clockCensus` → `schedulerScan`) counted hot / warm / cold / due by evaluating EVERY row's cadence at the instant — and each account's walk iterated every row of the index (6 × 90 298 per census). Pacing (5 s, then 250 ms views) only made the walk rarer. The kept row facts also re-summed every row once a minute (≈ 100 ms of that minute's pass).
+
+**Fix:** PURE src/channel-census.js — `rowClock` judges a row once with the instant its judgement holds until (the tier's inclusive edge `caps.tierUntil`, a watch's exclusive end, the due instant), `censusStep` moves the counters. The engine's census index (`clockIndexed`) re-judges only the rows a write touched (`markDue`: index write, poll stamp, watch start) and the rows whose instant the clock passed; one O(rows) build at boot / a whole-map write / a tier-setting or lane change / the clock going back / a mass write. `schedulerScan` is the definition, reached only by `schedulerExact` (gates). The minute re-sum of the kept facts is gone (the store's touch is the one signal, as for the due index). AFTER: a round 1.7 ms, max pass 3.4 ms, ~29 rows read per round.
+
+**Invariant:** a census is read off kept facts; a pass is O(due + touched), never O(rows). A new input to a row's cadence must either touch the row (`markDue`) or join the index signature.
+
+**Gates:** test-channel-census (heavy, ~34 s: the step table; PARITY — 10 000 rows over 5 accounts, a seeded 2 000-step walk of real passes / clock jumps incl. exact edge instants and a clock going back / messages / overrides / pauses / unlist / stamps / watches / settings / a mass write, the indexed census equal to the walk field for field after every step; the work — ~5 rows read a pass vs 12 000 for the walk restored (CONTROL); 3 closed-world controls red), test-channels-aggregate ㉑ (a 90 000-row pass < 100 ms, asserted), test-channels-census-pace (the trailing broadcast equals the walk).

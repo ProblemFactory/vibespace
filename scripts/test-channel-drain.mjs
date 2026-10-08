@@ -527,6 +527,12 @@ function createSim(D, o = {}) {
           if (want.some((k) => dueBefore.some((d) => d.key === k))) bump('f21-moved-up');
         }
         if (result && result.more && snap.pass.feed.wanted) bump('f21-more');
+        // RULE 21a (lane gmail-feed-gap): a catch-up is ONE action — its pages land in `walked`, the feed is done for the pass
+        if (result && result.catchUp) {
+          if (snap.pass.feed.wanted || !snap.pass.feed.done) V('f21a-one-action', `a catch-up left the feed wanted (${J(snap.pass.feed)})`);
+          else if (!(Number(snap.pass.feed.walked) >= Number(result.pages))) V('f21a-walked', `walked ${snap.pass.feed.walked} < the catch-up's ${result.pages} pages`);
+          else bump('f21a-catch-up');
+        }
         if (W.feed && pv.feedPages >= W.feed.perPass && result && result.more) bump('f21-bound-hit');
       }
       lostCheck(beforeIds, act.type + ' completion');
@@ -593,7 +599,7 @@ const PROFILES = {
   tight: { storm: 0.02, arrivals: 0.5, rerequest: 0.12, p429: 0.03, sticky: 0.04, limit: [12, 25, 40], share: [5, 25] },
   // lane R5: rule 18 on — [unitsPerSec, burst] (a burst of 1 with 2-unit calls = a call larger than the bucket)
   // (lane lark-search-poll: a third of the paced seeds run the change feed too — rule 18 holds a feed page like any call)
-  paced: { storm: 0.02, arrivals: 0.45, rerequest: 0.12, p429: 0.01, sticky: 0.01, limit: [40, 120, 600, 1e6], share: [5, 25, 100], pace: [[1, 1], [2, 4], [5, 5], [3, 10], [20, 20]], feedShare: 0.34, feed: { perPass: [2, 5], perMin: [4, 10], pMore: 0.5, pSkip: 0.03, pError: 0.005 }, recheckShare: 0.34, recheck: { perPass: [1, 3], pSkip: 0.03, pError: 0.005 } },
+  paced: { storm: 0.02, arrivals: 0.45, rerequest: 0.12, p429: 0.01, sticky: 0.01, limit: [40, 120, 600, 1e6], share: [5, 25, 100], pace: [[1, 1], [2, 4], [5, 5], [3, 10], [20, 20]], feedShare: 0.34, feed: { perPass: [2, 5], perMin: [4, 10], pMore: 0.5, pSkip: 0.03, pError: 0.005, pCatchUp: 0.15 }, recheckShare: 0.34, recheck: { perPass: [1, 3], pSkip: 0.03, pError: 0.005 } },
 };
 function walk(D, seed, profileName, steps = 3000, { forceFeed = false, noFeed = false, forceRecheck = false } = {}) {
   const P = PROFILES[profileName];
@@ -635,6 +641,8 @@ function walk(D, seed, profileName, steps = 3000, { forceFeed = false, noFeed = 
       if (x < FP.pError + FP.pSkip) return { skip: rnd() < 0.5 ? 'rate-limited' : 'forbidden' };
       const due = [];
       for (let i = ri(5); i > 0; i--) due.push({ key: keyOf(ri(nKeys)), dueAt: sim2.W.now - ri(90e3) + (rnd() < 0.3 ? 40e3 : 0) });
+      // lane gmail-feed-gap (rule 21a): a cursor feed's CATCH-UP after a gap — ONE action with the pages it walked
+      if (FP.pCatchUp && rnd() < FP.pCatchUp) return { due, pages: 1 + ri(6), catchUp: true };
       return { due, more: rnd() < FP.pMore };
     },
   } : null;
@@ -694,7 +702,7 @@ const RULE_COVER = [
   ['18-wait', 'rule 18: a wait for the bucket'], ['18-wait-fetch', 'rule 18: a wait holding the pick'], ['18-wait-discover', 'rule 18: a wait holding a discovery'], ['18-over-burst', 'rule 18: a call larger than the bucket sent on a full one'],
   ['18-repick', 'rule 18: the step after a wait picked something else (a new arrival, a refusal, a stop)'], ['18-window-1s', 'rule 18: every 1 s window within the tolerance'], ['18-window-60s', 'rule 18: every 60 s window within the tolerance'],
   // rule 21 (lane lark-search-poll)
-  ['f21-feed', 'rule 21: a feed page'], ['f21-more', 'rule 21: a page with `more` kept the feed wanted'], ['f21-bound-hit', 'rule 21: the per-pass bound stopped a feed that had more'],
+  ['f21-feed', 'rule 21: a feed page'], ['f21-more', 'rule 21: a page with `more` kept the feed wanted'], ['f21-bound-hit', 'rule 21: the per-pass bound stopped a feed that had more'], ['f21a-catch-up', 'rule 21a: a cursor feed\'s catch-up — ONE action with its pages, the feed done for the pass'],
   ['f21-skip', 'rule 21: a feed-local refusal ended the feed, never the pass'], ['f21-error', 'rule 21: an account failure on a feed page (rule 3)'],
   ['f21-front', 'rule 21: the feed\'s rows went AHEAD of pending plain rows'], ['f21-moved-up', 'rule 21: a pending key moved up'], ['f21-fetched-not-again', 'rule 21: a key fetched this pass with no newer hit was not due again'],
   ['f21-human-first', 'rule 21: a waiting human went before a wanted feed'], ['f21-minute-spent', 'rule 21: the feed\'s own minute held it back'], ['18-wait-feed', 'rule 18: a wait holding a feed page'],

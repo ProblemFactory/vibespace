@@ -569,6 +569,16 @@ const SETTINGS_SCHEMA = {
     tier: 'advanced',
     category: t('Agent browser'), liveApply: true,
   },
+  // lane browser-swiftshader-cpu-r2 (2026-10-07): a browser on an unseen rung (the hidden window, headless) that nobody
+  // watches and no command drives for 30 s stops drawing (src/browser-idle.js — the page frozen; thawed at the next
+  // command's resolve / a live view). OFF until the owner turns it on; read by the keeper at every sweep.
+  'browser.idlePaintFreeze': {
+    type: 'boolean', default: false,
+    label: t('Stop drawing in a browser nobody watches'),
+    description: t('Stop drawing in a browser nobody watches or drives for 30 s (hidden window / headless). The browser is thawed before the next command.'),
+    tier: 'advanced',
+    category: t('Agent browser'), liveApply: true,
+  },
   // ── AGENT BROWSER P3 (design-agent-browser-v2 §4.3 / §4.3.1) ──────────
   'browser.takeoverIdleMs': {
     type: 'number', default: 600000, min: 0, max: 86400000,

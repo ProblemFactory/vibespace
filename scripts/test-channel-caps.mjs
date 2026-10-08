@@ -524,6 +524,19 @@ console.log("lane channel-feed-authority: the feed's AUTHORITY (authoritative �
   ok(cad(auth, rec(fresh), cold, true).seconds === 30, 'feed-only: a WATCHED row keeps the hot refresh (30 s — the owner looking)');
   ok(cad(meas, rec({ ...fresh, mode: 'carrying' }), hot).seconds === 300 && cad(meas, rec({ ...fresh, mode: 'carrying' }), cold).seconds === 900, "a measured carrying feed: Lark's relaxed net unchanged (300 s at least, a cold row stays cold)");
   ok(cad(auth, rec({ lastOkAt: NOW - 3600e3 }), hot).seconds === 30 && cad(auth, rec({}), cold).seconds === 900 && cad(auth, rec({ ...fresh, backoffUntil: NOW + 60e3, backoffWhy: 'rate-limited' }), hot).seconds === 30, 'NOT carrying (behind / never ran / backing off) ⇒ the tiers (positive evidence only)');
+  // lane gmail-feed-gap (B-5134): a cursor-holding authoritative feed (the PERSISTED `carrying` fact) CARRIES THROUGH A GAP —
+  // a silence is a catch-up from the cursor, a rate park waits by name; neither falls to the per-row tiers
+  const held = { carrying: { since: NOW - 86400e3 } }, G20 = NOW - 20 * 60e3;
+  const gapR = rec({ ...held, lastOkAt: G20 }), parkR = rec({ ...held, lastOkAt: G20, backoffUntil: NOW + 60e3, backoffWhy: 'rate-limited' });
+  const gap = C.feedState(auth, gapR, NOW), park = C.feedState(auth, parkR, NOW);
+  ok(gap.state === 'catching-up' && gap.carrying && gap.gapSince === G20 && gap.since === NOW - 86400e3 && C.laneState(auth, gapR, {}, NOW).pollCadence === 'feed-only' && cad(auth, gapR, cold).seconds === 0, 'a 20-min gap with the cursor held: CATCHING UP, still carrying — feed-only, no row due by the clock', JSON.stringify(gap));
+  ok(park.state === 'backoff' && park.why === 'rate-limited' && park.carrying && cad(auth, parkR, cold).seconds === 0, 'a rate park mid-walk: parked by name, still carrying (the tiers stay parked)', JSON.stringify(park));
+  const measGap = C.feedState(meas, rec({ ...held, mode: 'carrying', lastOkAt: G20 }), NOW);
+  const refusedHeld = C.feedState(auth, rec({ ...held, lastOkAt: G20, refused: { at: NOW - 60e3, code: 'forbidden' } }), NOW);
+  ok(measGap.state === 'behind' && !measGap.carrying && refusedHeld.state === 'refused' && !refusedHeld.carrying, 'a MEASURED feed after a gap is behind (no cursor to resume — its net is the tiers); a refused feed carries nothing', JSON.stringify([measGap.state, refusedHeld.state]));
+  const tx = C.feedText(gap, { clock: (ms) => (ms === G20 ? '11:40' : '?') });
+  const tp = C.feedText(park, { vendor: 'Gmail', clock: (ms) => (ms === G20 ? '11:40' : ms === NOW + 60e3 ? '12:01' : '?') });
+  ok(tx === 'Catching up since 11:40 — the change feed resumes from where it stopped' && tp === 'Catching up since 11:40 — Gmail asked the change feed to wait; it resumes from where it stopped at 12:01', `feedText words the gap: "${tx}" · "${tp}"`);
 }
 
 // ── lane lark-upload-preflight (userW inc-muxsy69b-mjg1): THE send-attachment OFFER — the declared row AND the held scopes ──

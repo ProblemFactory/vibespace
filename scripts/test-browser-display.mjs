@@ -131,18 +131,18 @@ const OWNER_ARGS = '--no-sandbox,--disable-blink-features=AutomationControlled,-
   const noneX = V({}, []); noneX.xvfb = true;
   const staleX = D.displayVerdict({ env: { DISPLAY: ':97', XDG_SESSION_TYPE: 'wayland' }, entries: [], x11Dir: '/x', xvfb: true });
   const h1 = D.launchPlan({ wanted: { headed: true, args: OWNER_ARGS }, display: noneX });
-  ok(h1.headed === true && h1.args === '--no-sandbox,--disable-blink-features=AutomationControlled,--ozone-platform=x11,--use-angle=swiftshader,--enable-unsafe-swiftshader' && h1.fallback.rung === 'hidden-window' && eq(h1.fallback.dropped, ['--ozone-platform=wayland']) && eq(h1.env, {}), 'no display + Xvfb here (auto) ⇒ HEADED on the CLI\'s own Xvfb: the Wayland pin becomes x11 (XDG_SESSION_TYPE=wayland would pick Wayland — measured), rung hidden-window', h1);
+  ok(h1.headed === true && h1.args === '--no-sandbox,--disable-blink-features=AutomationControlled,--ozone-platform=x11,--use-angle=swiftshader,--enable-unsafe-swiftshader,--disable-gpu-compositing' && h1.fallback.rung === 'hidden-window' && eq(h1.fallback.dropped, ['--ozone-platform=wayland']) && eq(h1.env, {}), 'no display + Xvfb here (auto) ⇒ HEADED on the CLI\'s own Xvfb: the Wayland pin becomes x11 (XDG_SESSION_TYPE=wayland would pick Wayland — measured), rung hidden-window', h1);
   const h2 = D.launchPlan({ wanted: { headed: true, args: OWNER_ARGS }, display: staleX });
   ok(staleX.kind === 'none' && staleX.envNamesDisplay === true && eq(h2.env, { DISPLAY: '', WAYLAND_DISPLAY: '' }), 'a STALE DISPLAY in the process env ⇒ the launch clears BOTH (measured: a named display keeps the CLI from starting its Xvfb; DISPLAY=\'\' beside a set WAYLAND_DISPLAY does too)', { staleX, h2 });
   ok(D.launchPlan({ wanted: { headed: true, args: OWNER_ARGS }, display: noneX, mode: 'headless' }).fallback.rung === 'headless' && D.launchPlan({ wanted: { headed: true, args: OWNER_ARGS }, display: { ...noneX, xvfb: false } }).fallback.rung === 'headless' && D.launchPlan({ wanted: { headed: true, args: OWNER_ARGS }, display: none }).headed === false, 'browser.noDisplayMode = headless, no Xvfb, or Xvfb unknown ⇒ the headless rung');
-  ok(!D.launchPlan({ wanted: { headed: false, args: OWNER_ARGS }, display: noneX }).changed && D.launchPlan({ wanted: { headed: true, args: null }, display: noneX }).args === '--ozone-platform=x11,--use-angle=swiftshader,--enable-unsafe-swiftshader', 'no window wanted ⇒ untouched even with Xvfb; no args ⇒ just the x11 pin (+ the software-WebGL pair)');
+  ok(!D.launchPlan({ wanted: { headed: false, args: OWNER_ARGS }, display: noneX }).changed && D.launchPlan({ wanted: { headed: true, args: null }, display: noneX }).args === '--ozone-platform=x11,--use-angle=swiftshader,--enable-unsafe-swiftshader,--disable-gpu-compositing', 'no window wanted ⇒ untouched even with Xvfb; no args ⇒ just the x11 pin (+ the software-WebGL pair)');
   // B-cc68 (lane browser-reliability): THE HIDDEN WINDOW DRAWS WEBGL IN SOFTWARE — measured: an Xvfb has no GL (no WebGL, GPU
   // or not), the SwiftShader pair gives it WebGL; headless has it by itself (untouched)
   { const g1 = D.launchPlan({ wanted: { headed: true, args: ['--no-sandbox'] }, display: noneX });
     const g2 = D.launchPlan({ wanted: { headed: true, args: '--use-angle=vulkan' }, display: noneX });
     const g3 = D.launchPlan({ wanted: { headed: true, args: OWNER_ARGS }, display: none });
     const gf = D.displayFact({ display: noneX, plan: h1, wanted: { headed: true, args: OWNER_ARGS }, mode: 'auto' });
-    ok(eq(h1.fallback.softwareGl, ['--use-angle=swiftshader', '--enable-unsafe-swiftshader']) && eq(g1.args, ['--no-sandbox', '--ozone-platform=x11', '--use-angle=swiftshader', '--enable-unsafe-swiftshader']) && g2.args === '--use-angle=vulkan,--ozone-platform=x11' && eq(g2.fallback.softwareGl, []) && !/swiftshader/.test(String(g3.args)) && g3.fallback.softwareGl === undefined && eq(gf.fallback.softwareGl, h1.fallback.softwareGl) && eq(D.planForFact({ args: OWNER_ARGS, headed: true }, gf), h1) && /WebGL in software \(--use-angle=swiftshader --enable-unsafe-swiftshader/.test(D.journalLine(gf, 'launch')), 'B-cc68: the hidden-window rung adds the SwiftShader pair (a list stays a list; a config naming its own --use-angle keeps it); headless is untouched; the fact carries it, every later call re-derives it, the launch line says WebGL in software', { g1: g1.args, g2: g2.args, line: D.journalLine(gf, 'launch') }); }
+    ok(eq(h1.fallback.softwareGl, ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--disable-gpu-compositing']) && eq(g1.args, ['--no-sandbox', '--ozone-platform=x11', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--disable-gpu-compositing']) && g2.args === '--use-angle=vulkan,--ozone-platform=x11' && eq(g2.fallback.softwareGl, []) && !/swiftshader/.test(String(g3.args)) && g3.fallback.softwareGl === undefined && eq(gf.fallback.softwareGl, h1.fallback.softwareGl) && eq(D.planForFact({ args: OWNER_ARGS, headed: true }, gf), h1) && /WebGL in software \(--use-angle=swiftshader --enable-unsafe-swiftshader/.test(D.journalLine(gf, 'launch')), 'B-cc68: the hidden-window rung adds the SwiftShader pair (a list stays a list; a config naming its own --use-angle keeps it); headless is untouched; the fact carries it, every later call re-derives it, the launch line says WebGL in software', { g1: g1.args, g2: g2.args, line: D.journalLine(gf, 'launch') }); }
   const fh = D.displayFact({ display: noneX, plan: h1, wanted: { headed: true, args: OWNER_ARGS }, mode: 'auto' });
   ok(D.factCode(fh) === 'hidden-window' && fh.xvfb === true && fh.mode === 'auto' && eq(D.planForFact({ args: OWNER_ARGS, headed: true }, fh), h1) && eq(D.planForFact({ args: OWNER_ARGS, headed: true }, D.displayFact({ display: noneX, wanted: { headed: true, args: OWNER_ARGS }, mode: 'headless' })).fallback.rung, 'headless'), 'the fact carries Xvfb + the mode, so every later call re-derives the SAME rung');
   ok(/runs in a hidden window/.test(D.agentNote(fh)) && /\[browser_hidden_window\]$/.test(D.agentNote(fh)) && /HIDDEN WINDOW/.test(D.journalLine(fh, 'x')), 'the agent\'s note and the journal name the rung');
@@ -195,12 +195,54 @@ const OWNER_ARGS = '--no-sandbox,--disable-blink-features=AutomationControlled,-
   const offBad = ROWS.filter(([, d, pref, mode, why]) => D.resolveHeaded({ setting: pref, display: d, mode }).why !== (why === 'no-desktop' ? 'inherit' : why));
   ok(D.NO_DESKTOP_WINDOW_DEFAULT === false && offBad.length === 0 && ROWS.filter((r) => r[4] === 'no-desktop').length === 3, 'H5 THE SHIPPED DEFAULT (2.369.200): the switch is OFF — unset + no desktop + Xvfb inherits (headless), exactly as .199; "yes" still asks the hidden window', offBad.map((r) => r[0]));
   const ph = launchOf('', staleX);
-  ok(ph.headed === true && ph.args === ['--no-sandbox', '--ozone-platform=x11', ...D.SOFTWARE_GL_ARGS].join(',') && eq(ph.env, { DISPLAY: '', WAYLAND_DISPLAY: '' }), 'H5: the pod\'s launch is the hidden-window rung exactly (x11 pinned, a stale display cleared; + lane browser-reliability\'s software GL — composed at the 2.369.202 integration)', ph);
+  ok(ph.headed === true && ph.args === ['--no-sandbox', '--ozone-platform=x11', ...D.HIDDEN_WINDOW_ARGS].join(',') && eq(ph.env, { DISPLAY: '', WAYLAND_DISPLAY: '' }), 'H5: the pod\'s launch is the hidden-window rung exactly (x11 pinned, a stale display cleared; + lane browser-reliability\'s software GL — composed at the 2.369.202 integration)', ph);
   const fd = D.displayFact({ display: noneX, plan: launchOf('', noneX), wanted: { headed: true, args: '--no-sandbox' }, mode: 'auto', byDefault: true });
   ok(fd.wanted.byDefault === true && D.factCode(fd) === 'hidden-window' && eq(D.planForFact(POD, fd), launchOf('', noneX)) && D.applyPlan(POD, D.planForFact(POD, fd)).headed === true && D.planForFact({ ...POD, headed: false }, fd).headed === true, 'H5: the fact says the window was the default\'s (wanted.byDefault) and EVERY later call re-derives the same planned config — headed:true — from a base that says nothing (or false)', fd);
   ok(D.displayFact({ display: noneX, plan: h1, wanted: { headed: true } }).wanted.byDefault === undefined && !D.planForFact(POD, D.displayFact({ display: noneX, wanted: { headed: false, args: '--no-sandbox' }, mode: 'auto' })).changed, 'H5: a fact without the default\'s mark never asks a window for a base that says nothing (today\'s meaning)');
 
   // CONTROLS: patched copies of the PURE module, judged by the SAME rows
+  // lane browser-swiftshader-cpu: THE HIDDEN WINDOW DREW A PAGE NOBODY WATCHED AT NINE CORES — software GL is for WebGL only,
+  // never the compositor (HIDDEN_WINDOW_CPU_PROOF: today's rung 592 % GPU, + --disable-gpu-compositing 98 %, WebGL kept)
+  const hiddenArgsRow = (DX) => {
+    const p0 = DX.launchPlan({ wanted: { headed: true, args: null }, display: noneX });
+    const own = DX.launchPlan({ wanted: { headed: true, args: '--enable-gpu-compositing' }, display: noneX });
+    const P = DX.HIDDEN_WINDOW_CPU_PROOF || {};
+    return eq(DX.HIDDEN_WINDOW_ARGS, ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--disable-gpu-compositing'])
+      && p0.args === '--ozone-platform=x11,--use-angle=swiftshader,--enable-unsafe-swiftshader,--disable-gpu-compositing'
+      && !String(own.args).includes('--disable-gpu-compositing') && String(own.args).includes('--use-angle=swiftshader')
+      && P.c && P.c.webgl === true && P.a && P.c.gpu * 2 <= P.a.gpu && P.e && P.e.webgl === false && /^2\.369\.\d+$/.test(P.version) && /^\d{4}-\d\d-\d\d$/.test(P.measured);
+  };
+  { const LE = D.HIDDEN_WINDOW_CPU_PROOF.lowEnd;
+    ok(LE && LE.nineTabs.rpl.blockMs > 1000 && LE.nineTabs.shipped.blockMs < 100 && LE.webglAndCanvas2dKept === true && !D.HIDDEN_WINDOW_ARGS.some((a) => /low-end|process-per-site|renderer-process-limit|accelerated-2d|smooth-scrolling|device-scale|BackForwardCache/.test(a)),
+      'lane browser-swiftshader-cpu-r2: the low-end flags were MEASURED and none ships (CPU ≤ 2.5 %, low-end mode 4–8 % memory; the process cap\'s 36 % memory makes one conversation\'s busy page stall another\'s same-site tab 2.8 s)', LE); }
+  ok(hiddenArgsRow(D), 'lane browser-swiftshader-cpu: the hidden-window rung = x11 + the SwiftShader pair + --disable-gpu-compositing (the measured minimum keeping WebGL; a config naming its own compositing keeps it; the dated proof says c ≤ a/2 with WebGL, e without)');
+  { const BI = require('../src/browser-idle.js'); const V = BI.idlePaintVerdict; const T0 = 1e6;
+    const idleRow = (V0) => { const VV = (o) => V0({ enabled: true, ...o }); return VV({ now: T0, lastVerbAt: T0 - 31000 }).act === 'freeze' && VV({ now: T0, lastVerbAt: T0 - 29000 }).act === null
+      && VV({ now: T0, lastVerbAt: T0 - 31000, viewers: 1 }).act === null && VV({ now: T0, lastVerbAt: 0, viewers: 1, frozen: true }).act === 'thaw'
+      && VV({ now: T0, lastViewerAt: T0 - 5000, frozen: true }).act === 'thaw' && VV({ now: T0, driving: true, frozen: true }).why === 'driving'
+      && VV({ now: T0, busy: true }).act === null && VV({ now: T0, lastVerbAt: T0 - 60000, frozen: true }).act === null; };
+    // lane browser-swiftshader-cpu-r2: the owner's switch (browser.idlePaintFreeze, OFF by default) — off ⇒ never a freeze, a
+    // browser frozen before it went off is thawed; an absent `enabled` is off
+    const offRow = (VV) => VV({ now: T0, lastVerbAt: T0 - 600000 }).act === null && VV({ enabled: false, now: T0, lastVerbAt: T0 - 600000 }).why === 'off'
+      && VV({ enabled: 'yes', now: T0, lastVerbAt: T0 - 600000 }).act === null && VV({ enabled: false, now: T0, lastVerbAt: T0 - 600000, frozen: true }).act === 'thaw';
+    const ssrc = fs.readFileSync(path.join(REPO, 'src/lib/settings-schema.js'), 'utf8'); const sch = (ssrc.split("  'browser.idlePaintFreeze': {")[1] || '').split('\n  },')[0];
+    const ksrc0 = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8'); const sw = ksrc0.slice(ksrc0.indexOf('async function sweepIdlePaint(t)'), ksrc0.indexOf('function idleReleaseAfterMs()'));
+    ok(offRow(V) && /type: 'boolean', default: false,/.test(sch) && /tier: 'advanced',/.test(sch) && /category: t\('Agent browser'\)/.test(sch) && /setting\('browser\.idlePaintFreeze', false\) === true/.test(sw) && /idlePaintVerdict\(\{ enabled,/.test(sw),
+      'lane browser-swiftshader-cpu-r2: browser.idlePaintFreeze (advanced, OFF by default) — off ⇒ never a freeze (absent = off), a browser frozen before it went off is thawed; the keeper reads the switch at EVERY sweep', sch);
+    ok(idleRow(V) && BI.IDLE_PAINT_MS === 30000 && BI.IDLE_PAINT_PROOF.frozenThenFlip.gpu === 0 && BI.IDLE_PAINT_PROOF.minimized.gpu > 50,
+      'lane browser-swiftshader-cpu: idlePaintVerdict — no viewer and no verb for 30 s ⇒ freeze; a viewer / a recent viewer / a verb ⇒ thaw; a dialog or a navigation ⇒ left drawing; the proof: frozen 0 %, minimized still draws');
+    ok(BI.unseenRung({ headed: true, fallback: { rung: 'hidden-window' } }) && BI.unseenRung({ headed: false }) && !BI.unseenRung({ headed: true, fallback: null }) && !BI.unseenRung(null),
+      'lane browser-swiftshader-cpu: only the hidden window and headless are frozen — a window on a real desktop never (a person may be looking at it)');
+    const MI = mutantCopies('browser-idle', REPO); const isrc = fs.readFileSync(path.join(REPO, 'src/browser-idle.js'), 'utf8');
+    const vline = "  else if ((Number(viewers) || 0) > 0) why = 'watched';";
+    ok(isrc.includes(vline) && !idleRow(MI.load('src/browser-idle.js', isrc.replace(vline, ''), 'no-viewer-rule').idlePaintVerdict), 'CONTROL: a verdict that ignores the live view freezes a watched page (RED on the idle row)');
+    const offLine = "  if (enabled !== true) why = 'off';\n  else if (driving) why = 'driving';";
+    ok(isrc.includes(offLine) && !offRow(MI.load('src/browser-idle.js', isrc.replace(offLine, "  if (driving) why = 'driving';"), 'switch-blind').idlePaintVerdict), 'CONTROL: a verdict that ignores the switch freezes while it is off (RED on the off row)');
+    const src0 = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8'); const rsrc = fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8');
+    const thawAt = rsrc.indexOf('await D.thawPaint(t.profileId, { holder: t })');
+    ok((thawAt > 0 && thawAt < rsrc.indexOf('if (arm) D.verbStarted(')) && /Target\.activateTarget[\s\S]{0,120}Target\.createTarget[\s\S]{0,300}Target\.closeTarget[\s\S]{0,200}Target\.activateTarget/.test(src0)
+      && /const need = \[\.\.\.\(w\.hiddenFronts \|\| \[\]\)\]\.filter\(\(tid\) => inScope\(scope, tid\)\);/.test(src0),
+      'lane browser-swiftshader-cpu: the resolve door thaws BEFORE the verb is marked running — THIS conversation\'s fronts only (r2); the thaw shows a front by its tab strip, the front activated FIRST so the blank lands in its window (measured: `active` alone leaves it hidden; a plain create lands in the last activated window)'); }
   const MP = mutantCopies('browser-display-pure', REPO);
   const src = fs.readFileSync(path.join(REPO, 'src/browser-display.js'), 'utf8');
   const liveLine = "const live = (p) => { const e = p ? byPath.get(p) : null; return !!e && e.type === 'socket' && e.alive !== false; };";
@@ -208,6 +250,10 @@ const OWNER_ARGS = '--no-sandbox,--disable-blink-features=AutomationControlled,-
   ok(src.includes(liveLine) && src.includes(keepLine), 'CONTROL setup: the liveness line and the drop line are found');
   const DS = MP.load('src/browser-display.js', src.replace(liveLine, "const live = (p) => { const e = p ? byPath.get(p) : null; return !!e && e.type === 'socket'; };"), 'stale-counts');
   ok(DS.displayVerdict({ env: { XDG_RUNTIME_DIR: '/r' }, entries: [sock('/r/wayland-0', false)] }).kind === 'wayland', 'CONTROL: a verdict that ignores the connect test counts the STALE socket (the table row above would be red)');
+  { const hwLine = "const HIDDEN_WINDOW_ARGS = Object.freeze([...SOFTWARE_GL_ARGS, '--disable-gpu-compositing']);";
+    ok(src.includes(hwLine), 'CONTROL setup: the hidden-window args line is found');
+    const DH = MP.load('src/browser-display.js', src.replace(hwLine, 'const HIDDEN_WINDOW_ARGS = SOFTWARE_GL_ARGS;'), 'pre-fix-args');
+    ok(!hiddenArgsRow(DH), 'CONTROL: the pre-fix rung (the SwiftShader pair alone — every frame composited on SwiftShader) is RED on the args row'); }
   const DK = MP.load('src/browser-display.js', src.replace(keepLine, '    const cut = { args, dropped: [] };'), 'keeps-pin');
   ok(DK.launchPlan({ wanted: { headed: true, args: OWNER_ARGS }, display: none }).args === OWNER_ARGS, 'CONTROL: a plan that keeps the Wayland pin is caught by the owner\'s-case row');
   const modeLine = "    if (noDisplayModeOf(mode) === 'auto' && d.xvfb === true) {";

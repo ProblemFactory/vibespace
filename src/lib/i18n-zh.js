@@ -6072,6 +6072,8 @@ export default {
   "{n} search hits could not be read in the last hour": "最近一小时有 {n} 条搜索结果无法读取",
   "New messages: searching for the first time": "新消息：首次搜索中",
   "Search is behind — each chat is checked on its own until it catches up": "搜索落后了 — 追上之前每个会话单独检查",
+  "Catching up since {time} — the change feed resumes from where it stopped": "追赶中（自 {time}）— 变更流从中断处继续",
+  "Catching up since {time} — {vendor} asked the change feed to wait; it resumes from where it stopped at {until}": "追赶中（自 {time}）— {vendor} 要求变更流稍候；它将于 {until} 从中断处继续",
   "New messages: a search every {s} s · each chat is still checked on its own until {m} messages show it finds everything ({n}/{m})": "新消息：每 {s} 秒搜索一次 · 在 {m} 条消息证明它一条不漏之前，每个会话仍各自检查（{n}/{m}）",
   "New messages: a search every {s} s · {missed} of {total} messages missed — each chat is still checked on its own until one full polling cycle confirms it": "新消息：每 {s} 秒搜索一次 · {total} 条消息漏掉 {missed} 条 —— 在一个完整的轮询周期确认之前，每个会话仍各自检查",
   "New messages come from a search every {s} s; each chat is also checked every {min} min": "新消息靠每 {s} 秒一次的搜索发现；每个会话另外每 {min} 分钟检查一次",
@@ -6283,6 +6285,11 @@ export default {
   "Restart this browser so VibeSpace holds leave-page dialogs for a decision instead of the browser accepting them — its tabs close, logins stay": "重启这个浏览器，让 VibeSpace 把“离开页面”对话框拦下来等你决定，而不是由浏览器自行接受 —— 打开的标签页会关闭，登录保留", // verify r2: the one-click restart that makes a pre-lane browser hold dialogs
   "Restart {label}?": "重启 {label}？", // verify r2: the one-click restart that makes a pre-lane browser hold dialogs
   "Its open tabs close (logins in the profile stay). From its next start VibeSpace holds leave-page dialogs for a decision, so nothing typed on a page is lost without a word.": "打开的标签页会关闭（配置里的登录保留）。从下次启动起，VibeSpace 会把“离开页面”对话框拦下来等待决定，网页上输入的内容不会再不声不响地丢失。", // verify r2: the one-click restart that makes a pre-lane browser hold dialogs
+  // lane browser-held-not-hung: the dialog watch cannot see into one tab while the page answers (a quiet info line)
+  "dialog watch blind": "对话框监看看不到一个标签页",
+  "The dialog watch cannot see into one tab — a dialog opened there would not be caught; Restart re-attaches": "对话框监看看不进其中一个标签页——那里弹出的对话框不会被拦到；重启后会重新接上",
+  "The tab: {title}": "标签页：{title}",
+  "A page dialog that opened before VibeSpace was watching (for example across a VibeSpace restart) holds a tab this way": "在 VibeSpace 开始监看之前就弹出的网页对话框（例如跨过一次 VibeSpace 重启）会这样占住一个标签页",
   "page not responding": "网页没有响应",
   "The page is not responding — Restart": "网页没有响应 —— 可以重启",
   "Restart": "重启",
@@ -6326,6 +6333,8 @@ export default {
   "Then: {changes}": "之后的改动：{changes}",
   "The layout could not be re-read after reconnecting — window changes on this page are held until it can be": "重新连接后无法重新读取布局——本页面的窗口改动将暂存，直到能读取为止",
   "The layout was re-read — window changes made on this page more than a minute ago were not kept ({n})": "布局已重新读取——本页面一分钟多以前做的窗口改动未能保留（{n} 项）",
+  "Stop drawing in a browser nobody watches": "停止绘制没人看的浏览器",
+  "Stop drawing in a browser nobody watches or drives for 30 s (hidden window / headless). The browser is thawed before the next command.": "无人观看、也没有命令驱动满 30 秒的浏览器（隐藏窗口 / 无头）停止绘制。下一条命令执行前会先恢复它。",
   "Do not announce the agent browser as automated": "不要让 agent 浏览器自报是自动化的",
   "ON (default): the agent's browser starts with --disable-blink-features=AutomationControlled, so pages no longer read it as an automated browser (navigator.webdriver is false). It hides that one signal only — a site that still refuses the browser makes the agent propose a switch to CloakBrowser, which you approve. If your own ~/.agent-browser/config.json already names an AutomationControlled value, yours is kept. Applies to the next browser that starts; CloakBrowser is not affected.": "开(默认): agent 的浏览器启动时带 --disable-blink-features=AutomationControlled，网页不再把它读成自动化浏览器(navigator.webdriver 为 false)。它只隐藏这一个信号——网站仍然拒绝这个浏览器时，agent 会提议切换到 CloakBrowser，由你批准。如果你自己的 ~/.agent-browser/config.json 已经写了 AutomationControlled 的值，保留你的。对下一个启动的浏览器生效；不影响 CloakBrowser。",
   "No switch can be offered: CloakBrowser cannot be installed on this machine — its build for this kind of machine was never measured.": "无法提供切换：这台机器装不了 CloakBrowser——它这类机器的版本从未测量过。",

@@ -1500,6 +1500,41 @@ console.log("lane channel-feed-authority (OWNER'S LAW): Gmail's history.list is 
   ok(st.gmailWalkFrom === null && st.gmailHistoryId, 'the walk ends durably: the persisted cursor no longer asks for a walk');
 }
 
+console.log('lane gmail-feed-gap (B-5134): a gap is ONE history walk from the saved cursor — a refused page resumes from its token, a long walk never skips past a page cap');
+{
+  // a 20-min gap left 25 history pages behind the persisted cursor (1000); page 2 is refused once with a 429
+  const PAGES = Array.from({ length: 25 }, (_, i) => [`g${i}a`, `g${i}b`]);
+  const asked = [];
+  let refuseAt = '1';
+  const fetchFn = async (url) => {
+    const u = new URL(String(url));
+    if (u.hostname === 'oauth2.googleapis.com') return jsonRes({ access_token: 'ya', expires_in: 3600 });
+    const p = u.pathname.replace(/^\/gmail\/v1\/users\/me/, '');
+    if (p === '/history') {
+      const tk = u.searchParams.get('pageToken') || '0';
+      asked.push(`${u.searchParams.get('startHistoryId')}:${tk}`);
+      if (tk === refuseAt) { refuseAt = null; return jsonRes({ error: { code: 429, message: 'Too many concurrent requests for user' } }, 429); }
+      const i = Number(tk);
+      return jsonRes({ historyId: '1300', history: PAGES[i].map((t, j) => ({ id: String(1001 + i * 2 + j), messagesAdded: [{ message: { id: `${t}-m`, threadId: t } }] })), ...(i + 1 < PAGES.length ? { nextPageToken: String(i + 1) } : {}) });
+    }
+    return jsonRes({ error: { code: 404, message: 'unrouted ' + p } }, 404);
+  };
+  let st = { gmailHistoryId: '1000', gmailChanged: [] };
+  const tok = { token: { access_token: 'ya', expiresAt: T0 + 3600e3, refresh_token: 'r', scopes: [gmail.SCOPE], email: 'me@example.com' } };
+  const a = gmail.create({ id: 'gmail-gap', options: {} }, { now, fetch: fetchFn, named: () => true, state: { read: () => st, write: async (x) => { st = { ...st, ...x }; } },
+    tokens: { read: () => ({ token: tok.token, why: null }), async write(t) { tok.token = t; }, async clear() {} }, resolveIntegration: () => ({ values: { clientId: 'c', clientSecret: 's' }, why: null }), log: { warn() {}, log() {} } });
+  let e1 = null;
+  try { await a.changes(); } catch (err) { e1 = err; }
+  ok(e1 && e1.code === 'rate-limited' && st.gmailHistoryId === '1000' && asked.join(' ') === '1000:0 1000:1', `a 429 on page 2 refuses the walk; the cursor stays at 1000 (asked: ${asked.join(' ')})`, e1 && e1.code);
+  asked.length = 0;
+  const c2 = await a.changes();
+  ok(asked[0] === '1000:1' && !asked.includes('1000:0') && asked.length === 20 && c2.pages === 20 && st.gmailHistoryId === '1000', `the next walk RESUMES from page 2's token (never re-asks page 1): ${asked.length} pages, the cursor still 1000 while the walk continues`, asked.slice(0, 3).join(' '));
+  asked.length = 0;
+  const c3 = await a.changes();
+  const all = PAGES.flat();
+  ok(asked.join(' ') === '1000:21 1000:22 1000:23 1000:24' && c3.pages === 4 && st.gmailHistoryId === '1300' && all.every((t) => c3.changed.includes(t)) && c3.mustWalk === false, `past the 20-page bound the walk continues from its token: pages 22–25, then the cursor moves to 1300 — all ${all.length} changed threads named (none lost past page 20)`, JSON.stringify({ asked, pages: c3.pages, cursor: st.gmailHistoryId, n: c3.changed.length }));
+}
+
 eng.stop();
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

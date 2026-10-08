@@ -221,11 +221,41 @@ function wantedOf(cfg, { headedEnv = null } = {}) {
 // an Xvfb has no GL, GPU or not — and with the pair below it gets the same SwiftShader WebGL. So the hidden-window rung adds
 // the pair (a config naming its own --use-angle, or turning WebGL off, keeps its choice); headless is left as it is.
 const SOFTWARE_GL_ARGS = Object.freeze(['--use-angle=swiftshader', '--enable-unsafe-swiftshader']);
-/** `args` with the SwiftShader pair appended → `{args, added}` (nothing added when the config chose its own GL). */
+// ── lane browser-swiftshader-cpu (2026-10-07, userW inc-muyp9vj6-tv0m: a hidden window drew Mercury's dashboard with its GPU
+// process at 938 % on 16 SwiftShader threads): SOFTWARE GL IS FOR WEBGL ONLY, NEVER THE COMPOSITOR. With the pair above,
+// Chrome composited every frame through ANGLE-on-SwiftShader too (featureStatus gpu_compositing "enabled"); the CLI's own
+// --enable-gpu-rasterization was NOT the cost. The rung's args = the measured minimum that keeps WebGL: the pair +
+// --disable-gpu-compositing (scripts/measure-hidden-window-cpu.mjs; the table below is its run on the dev box).
+const HIDDEN_WINDOW_ARGS = Object.freeze([...SOFTWARE_GL_ARGS, '--disable-gpu-compositing']);
+const HIDDEN_WINDOW_CPU_PROOF = Object.freeze({
+  measured: '2026-10-07', version: '2.369.233', agentBrowser: '0.38.1', chrome: '154.0.8037.57', display: 'the CLI\'s own Xvfb 1280×720, 32 cores',
+  page: 'a 60 fps canvas chart + 2 CSS animations + a same-origin animated iframe + a 240 px WebGL cube, 20 s per set, un-occluded (60 fps in every set)',
+  // GPU process CPU % (utime+stime of every thread) · renderers % · WebGL in the page · featureStatus raster / compositing
+  a: { args: 'today: --ozone-platform=x11 + the pair', gpu: 591.7, renderers: 11.9, webgl: true, raster: 'enabled', compositing: 'enabled', top: '16 × Thread<N> (SwiftShader) 548.7 %' },
+  b: { args: 'a + --disable-gpu-rasterization', gpu: 582.1, renderers: 14.5, webgl: true, raster: 'disabled_software', compositing: 'enabled', top: '16 × Thread<N> 542.3 %' },
+  c: { args: 'a + --disable-gpu-compositing (SHIPPED)', gpu: 98.2, renderers: 19.3, webgl: true, raster: 'enabled', compositing: 'disabled_software', top: '16 × Thread<N> 88.4 % = the WebGL cube itself' },
+  d: { args: 'b + c', gpu: 97.4, renderers: 19.3, webgl: true, raster: 'disabled_software', compositing: 'disabled_software', top: 'as c' },
+  e: { args: 'the pair absent (--ozone-platform=x11 alone)', gpu: 5.1, renderers: 17.8, webgl: false, raster: 'disabled_software', compositing: 'disabled_software', top: 'VizCompositorThread 4.9 %' },
+  verdict: 'the hypothesis half-refuted: GPU RASTER is not the cost (a→b −2 %); GPU COMPOSITING on SwiftShader is (a→c −83 %, 6×); what c still spends is the WebGL the page draws',
+  // lane browser-swiftshader-cpu-r2 ADDENDUM (the owner: "chrome 有一些参数是给低性能设备用的，能开吗"): each candidate ON TOP of
+  // the shipped set, same page / rig / 20 s; all = Chrome's whole process set's CPU; memory = ΣRSS and ΣRssAnon (Pss is not
+  // readable: Chrome's processes are not dumpable); block = how long ANOTHER same-site tab took to answer during a 3 s
+  // script loop in the front tab. The bar: ≥ 10 % less CPU or ≥ 15 % less memory, WebGL + 2D kept, no conversation stalling
+  // another's — NOTHING passed; HIDDEN_WINDOW_ARGS is unchanged.
+  lowEnd: Object.freeze({
+    measured: '2026-10-07', oneTab: { shipped: { all: 118.2, rssMib: 1276, anonMib: 322 }, le: { flag: '--enable-low-end-device-mode', all: 117.8, rssMib: 1197, anonMib: 297 }, c2d: { flag: '--disable-accelerated-2d-canvas', all: 119.7, rssMib: 1278, canvas2d: 'disabled_software (2D kept)' }, nss: { flag: '--disable-smooth-scrolling', all: 120.1, rssMib: 1274 }, dsf1: { flag: '--force-device-scale-factor=1', all: 119.4, rssMib: 1276 }, bfc: { flag: '--disable-features=BackForwardCache', all: 115.3, rssMib: 1275 }, union: { all: 118.0, rssMib: 1208 } },
+    nineTabs: { shipped: { all: 118.8, rssMib: 2284, anonMib: 556, procs: 19, blockMs: 1 }, rpl: { flag: '--renderer-process-limit=4 --process-per-site', all: 120.8, rssMib: 1267, anonMib: 354, procs: 10, blockMs: 2802 }, le: { all: 119.6, rssMib: 2200, anonMib: 532, procs: 18, blockMs: 1 } },
+    webglAndCanvas2dKept: true,
+    verdict: 'no flag ships: CPU moved ≤ 2.5 % (noise), low-end mode saves 4–8 % memory; the process cap saves 36 % RssAnon with 9 tabs but makes one conversation\'s busy page stall another\'s same-site tab for 2.8 s (one renderer main thread) — the shared browser hanging for every conversation is the incident itself',
+  }),
+});
+/** `args` with the hidden window's software-GL args appended (HIDDEN_WINDOW_ARGS) → `{args, added}` (nothing added when the
+ *  config chose its own GL; a config naming its own --disable-gpu* / --enable-gpu-compositing keeps that choice). */
 function withSoftwareGl(args) {
   const list = argsList(args);
   if (list.some((a) => a.startsWith('--use-angle=') || a === '--disable-webgl' || a === '--disable-3d-apis')) return { args, added: [] };
-  const added = SOFTWARE_GL_ARGS.filter((a) => !list.includes(a));
+  const ownGpu = list.some((a) => a === '--disable-gpu' || a === '--enable-gpu-compositing' || a === '--disable-gpu-compositing');
+  const added = HIDDEN_WINDOW_ARGS.filter((a) => !list.includes(a) && !(ownGpu && a === '--disable-gpu-compositing'));
   return added.length ? { args: argsLike(args, [...list, ...added]), added } : { args, added: [] };
 }
 
@@ -379,7 +409,7 @@ function journalLine(fact, what) {
 module.exports = {
   DISPLAY_KINDS, X11_DIR, OZONE_PREFIX, DISPLAY_PLATFORMS,
   runtimeDirOf, parseX11Display, displayCandidates, displayVerdict,
-  argsList, ozonePlatformsOf, ozoneOf, withoutDisplayOzone, withOzone, SOFTWARE_GL_ARGS, withSoftwareGl,
+  argsList, ozonePlatformsOf, ozoneOf, withoutDisplayOzone, withOzone, SOFTWARE_GL_ARGS, HIDDEN_WINDOW_ARGS, HIDDEN_WINDOW_CPU_PROOF, withSoftwareGl,
   noDisplayModeOf, noDesktop, resolveHeaded, NO_DESKTOP_WINDOW_DEFAULT,
   wantedOf, launchPlan, applyPlan, displayFact, displayKey, planApplies, planForFact, factCode, kindName, agentNote, journalLine,
 };

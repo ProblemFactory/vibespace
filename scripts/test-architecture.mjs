@@ -189,6 +189,10 @@ const PURE = new Set(['src/timed-sync.js' /* design 011 lane 1 (store-timing): t
   //     async-interleaved imperative scheduler each grew an ordering bug; a pure
   //     step function is pinned by a seeded invariant walk (test-channel-drain).
   'src/channel-drain.js',
+  //   channel-census — THE SCHEDULER CARD'S CLOCK CENSUS (lane scheduler-census-index, B-7978): one row's judgement
+  //     and the instant it holds until (`rowClock`), how a re-judged row moves the counters (`censusStep`). Imports
+  //     nothing, reads no clock; the engine keeps the index and only drives it (test-channel-census).
+  'src/channel-census.js',
   //   channel-blocks — THE RENDER LAYER'S RUNGS (design §25, 2026-09-27): raw →
   //     the typed block tree (the generic rung, the mail rung, cleanSubject,
   //     the preview, THE KIT a vendor's rungs build on). The adapters run it

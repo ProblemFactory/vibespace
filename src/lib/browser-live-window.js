@@ -947,6 +947,9 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
     const d = st.dialog;
     renderLoop(!d && st.fact && st.fact.stuck && st.fact.stuck.state === 'loop' ? st.fact.stuck.loop : null);
     const stuck = !d && st.fact && st.fact.stuck && st.fact.stuck.state === 'unresponsive' ? st.fact.stuck : null;
+    // lane browser-held-not-hung: the watch cannot see into one tab while the page answers — a quiet info line (the tab's
+    // title in its tooltip), never the yellow "not responding" banner and never a Restart primary
+    const blind = !d && !stuck && st.fact && st.fact.stuck && st.fact.stuck.state === 'blind' ? st.fact.stuck : null;
     // lane browser-passkey (owner inc-muuvthv9-g69w): Chrome's own passkey window is not page pixels — this banner says the
     // page waits for one, names the desktop it is on when the browser is headed, and its ONE button cancels the request
     const pk = !d && st.fact && st.fact.stuck && st.fact.stuck.state === 'passkey' ? st.fact.stuck : null;
@@ -969,8 +972,9 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
     }
     if (dialogBar.dataset.passkey) { delete dialogBar.dataset.passkey; st.passkeyCancelling = false; }
     dialogBar.textContent = '';
-    dialogBar.style.display = d || stuck ? '' : 'none';
+    dialogBar.style.display = d || stuck || blind ? '' : 'none';
     dialogBar.classList.toggle('stuck', !!stuck);
+    dialogBar.classList.toggle('blind', !!blind);
     if (d) {
       const w = dialogWords(d, t);
       const title = document.createElement('div'); title.className = 'browser-live-dialog-title'; title.textContent = w.title;
@@ -999,6 +1003,10 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
       const re = textBtn(w.action, () => restartBrowser(), 'browser-live-dialog-restart'); re.title = w.tooltip || '';
       re.disabled = !!st.restarting;
       dialogBar.append(line, re);
+    } else if (blind) {
+      const w = stuckWords(blind, t);
+      const line = document.createElement('span'); line.className = 'browser-live-dialog-body browser-live-blind-line'; line.textContent = w.line; line.title = w.tooltip || '';
+      dialogBar.append(line);
     }
   };
   function answerDialog(accept, text) {

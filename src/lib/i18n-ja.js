@@ -6071,6 +6071,8 @@ export default {
   "{n} search hits could not be read in the last hour": "直近 1 時間に {n} 件の検索結果を読み取れませんでした",
   "New messages: searching for the first time": "新着メッセージ：初回の検索中",
   "Search is behind — each chat is checked on its own until it catches up": "検索が遅れています — 追いつくまで各チャットを個別に確認します",
+  "Catching up since {time} — the change feed resumes from where it stopped": "{time} から追いつき中 — 変更フィードは止まったところから再開します",
+  "Catching up since {time} — {vendor} asked the change feed to wait; it resumes from where it stopped at {until}": "{time} から追いつき中 — {vendor} が変更フィードに待機を求めました。{until} に止まったところから再開します",
   "New messages: a search every {s} s · each chat is still checked on its own until {m} messages show it finds everything ({n}/{m})": "新着メッセージ：{s} 秒ごとに検索 · {m} 件のメッセージで漏れがないと確認できるまで、各チャットは個別に確認します（{n}/{m}）",
   "New messages: a search every {s} s · {missed} of {total} messages missed — each chat is still checked on its own until one full polling cycle confirms it": "新着メッセージ：{s} 秒ごとに検索 · {total} 件中 {missed} 件の取りこぼし — 1 回の完全なポーリング周期で確認できるまで、各チャットは個別に確認します",
   "New messages come from a search every {s} s; each chat is also checked every {min} min": "新着メッセージは {s} 秒ごとの検索で見つけます。各チャットも {min} 分ごとに確認します",
@@ -6282,6 +6284,11 @@ export default {
   "Restart this browser so VibeSpace holds leave-page dialogs for a decision instead of the browser accepting them — its tabs close, logins stay": "このブラウザを再起動すると、「ページを離れる」ダイアログをブラウザが自動で受け入れず、VibeSpace が判断を待って保留します — 開いているタブは閉じ、ログインは残ります", // verify r2: the one-click restart that makes a pre-lane browser hold dialogs
   "Restart {label}?": "{label} を再起動しますか？", // verify r2: the one-click restart that makes a pre-lane browser hold dialogs
   "Its open tabs close (logins in the profile stay). From its next start VibeSpace holds leave-page dialogs for a decision, so nothing typed on a page is lost without a word.": "開いているタブは閉じます（プロファイルのログインは残ります）。次回の起動から VibeSpace が「ページを離れる」ダイアログを保留して判断を待つため、ページに入力した内容が知らないうちに失われることはありません。", // verify r2: the one-click restart that makes a pre-lane browser hold dialogs
+  // lane browser-held-not-hung: the dialog watch cannot see into one tab while the page answers (a quiet info line)
+  "dialog watch blind": "ダイアログ監視が届かないタブあり",
+  "The dialog watch cannot see into one tab — a dialog opened there would not be caught; Restart re-attaches": "ダイアログ監視が 1 つのタブの中を見られません — そこで開いたダイアログは捕捉されません。再起動すると再接続します",
+  "The tab: {title}": "タブ：{title}",
+  "A page dialog that opened before VibeSpace was watching (for example across a VibeSpace restart) holds a tab this way": "VibeSpace が監視を始める前に開いたページのダイアログ（VibeSpace の再起動をまたいだ場合など）は、このようにタブを止めます",
   "page not responding": "ページが応答しません",
   "The page is not responding — Restart": "ページが応答しません — 再起動できます",
   "Restart": "再起動",
@@ -6325,6 +6332,8 @@ export default {
   "Then: {changes}": "その後の変更: {changes}",
   "The layout could not be re-read after reconnecting — window changes on this page are held until it can be": "再接続後にレイアウトを再読み込みできませんでした — このページのウィンドウ変更は、読み込めるまで保留されます",
   "The layout was re-read — window changes made on this page more than a minute ago were not kept ({n})": "レイアウトを再読み込みしました — このページで1分以上前に行ったウィンドウ変更は保持されませんでした（{n} 件）",
+  "Stop drawing in a browser nobody watches": "誰も見ていないブラウザの描画を止める",
+  "Stop drawing in a browser nobody watches or drives for 30 s (hidden window / headless). The browser is thawed before the next command.": "誰も見ておらず、コマンドも 30 秒動かしていないブラウザ（非表示ウィンドウ / ヘッドレス）の描画を止めます。次のコマンドの前に再開されます。",
   "Do not announce the agent browser as automated": "エージェントのブラウザを自動操作中と名乗らせない",
   "ON (default): the agent's browser starts with --disable-blink-features=AutomationControlled, so pages no longer read it as an automated browser (navigator.webdriver is false). It hides that one signal only — a site that still refuses the browser makes the agent propose a switch to CloakBrowser, which you approve. If your own ~/.agent-browser/config.json already names an AutomationControlled value, yours is kept. Applies to the next browser that starts; CloakBrowser is not affected.": "オン(既定): エージェントのブラウザは --disable-blink-features=AutomationControlled 付きで起動し、ページはそれを自動操作のブラウザとして読まなくなります(navigator.webdriver が false)。隠すのはこの一つの信号だけです——それでもサイトがブラウザを拒むと、エージェントが CloakBrowser への切り替えを提案し、あなたが承認します。ご自身の ~/.agent-browser/config.json に AutomationControlled の値がすでにあれば、そちらを保ちます。次に起動するブラウザから適用され、CloakBrowser には影響しません。",
   "No switch can be offered: CloakBrowser cannot be installed on this machine — its build for this kind of machine was never measured.": "切り替えは提案できません: このマシンには CloakBrowser をインストールできません——この種類のマシン向けのビルドは測定されていません。",

@@ -969,7 +969,9 @@ function createChannelRegistry({ channelSettings } = {}) {
           const ids = (Array.isArray(r.changed) ? r.changed : []).filter((x) => (typeof x === 'string' || typeof x === 'number') && String(x).length > 0 && String(x).length <= 256).map(String);
           if (ids.length > 5000) throw new ChannelError('vendor-error', `${kind}.changes named ${ids.length} conversations — more than 5000 is a reseed (mustWalk), never a list`, { retryable: false, detail: { contract: 'page-size' } });
           const convs = (Array.isArray(r.conversations) ? r.conversations : []).filter((c) => c && typeof c === 'object' && typeof c.id === 'string' && c.id).slice(0, 100);
-          return { changed: ids, conversations: convs, mustWalk: r.mustWalk === true };
+          // lane gmail-feed-gap: `pages` = the history pages this walk read (a gap's catch-up names its count) — bounded
+          const pages = Number.isInteger(r.pages) && r.pages > 0 ? Math.min(r.pages, 1000) : 1;
+          return { changed: ids, conversations: convs, mustWalk: r.mustWalk === true, pages };
         }
         const size = Number(caps.changeFeed && caps.changeFeed.pageSize) || 30;
         const raw = Array.isArray(r.hits) ? r.hits : [];

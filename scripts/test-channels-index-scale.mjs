@@ -21,7 +21,8 @@
 //   ⑤ THE CENSUS'S OWN CONTROL: VIBESPACE_CHANNELS_INDEX_VERIFY=<file> catches an incremental write that drifted
 //      (the line lands in <file>) and writes the whole serialization instead.
 //   ⑥ THE KEPT UNREAD TOTAL equals the old whole-index sum through a walk (mark-read, rows touched, a row unlisted, a
-//      whole-map update, a row written past the door healed by the minute's re-sum).
+//      whole-map update, a row written past the door healed by the store's sweep — its drifted chunk fires the rows'
+//      touch; the minute's re-sum is gone since lane scheduler-census-index: the door's touch is the one signal).
 //   ⑦ SOURCE CENSUS: src/server/channels-engine.js calls store.index.snapshot() nowhere.
 //   ⑧ THE ENGINE'S OWN WRITERS ARE INCREMENTAL: real passes (discovery complete → the unlisting scan, ingest), a refresh,
 //      a mark-read and a refresh override each leave an incremental write. CONTROL: the pre-fix unlisting scan shape (an
@@ -310,12 +311,17 @@ console.log('⑥ the kept unread total = the old whole-index sum');
     ['a whole-map update (every 1000th row +1)', () => ix.update((x) => { let n = 0; for (const en of Object.values(x.conversations)) if (n++ % 1000 === 0) en.unread = (Number(en.unread) || 0) + 1; })],
   ];
   for (const [what, run] of walk) { await run(); const k = kept(), w = want(); ok(k === w, `${what}: kept ${k} = summed ${w}`); }
+  ix.flush();                                               // the walk's writes on disk: each cached chunk holds its rows as they are
   ix.live()['fake-poll/thr_000000000009'].unread = 1000;   // past the door: the kept total cannot know…
   const stale = kept();
-  offset += 61e3;                                           // …until the minute's re-sum
-  const healed = kept();
-  ok(stale !== want() && healed === want(), `a row written past the door: ${stale} until the minute's re-sum, then ${healed} = ${want()}`);
+  offset += 61e3;                                           // …a minute later either (lane scheduler-census-index: no clock re-sum)
+  const still = kept();
   offset -= 61e3;
+  const bound = Math.ceil(ix.flushStats().chunks / S.SWEEP_CHUNKS) + 1;
+  let sweeps = 0;                                           // …until the store's sweep finds the drifted chunk and fires its rows' touch
+  while (kept() === stale && sweeps < bound) { ix.sweep(); sweeps++; }
+  const healed = kept();
+  ok(stale !== want() && healed === want(), `a row written past the door: ${stale} (a minute later ${still}), healed by the store's sweep in ${sweeps} tick(s) (bound ${bound}): ${healed} = ${want()}`);
 }
 
 console.log('⑦ source census');

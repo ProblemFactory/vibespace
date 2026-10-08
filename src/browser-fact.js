@@ -155,7 +155,7 @@ function browserFactFor(session, view) {
   const fact = { v: 1, key: bk, pinned, pinGone, pinCleared, using, own, lastUsed, differs, input, live: !!liveRef, liveRef: liveRef || null };
   // lane browser-stuck (2026-09-28): the page is held by a dialog / not responding — the dialog watch's fact, carried as
   // the view gives it (`{state: dialog|unresponsive, dialog?, why?, count?, since, profileId}`); null when all is well
-  if (v.stuck && typeof v.stuck === 'object' && (v.stuck.state === 'dialog' || v.stuck.state === 'unresponsive' || v.stuck.state === 'loop')) fact.stuck = v.stuck; // lane site-reset: + the navigation loop
+  if (v.stuck && typeof v.stuck === 'object' && (v.stuck.state === 'dialog' || v.stuck.state === 'unresponsive' || v.stuck.state === 'loop' || v.stuck.state === 'blind')) fact.stuck = v.stuck; // lane site-reset: + the navigation loop; lane browser-held-not-hung: + the blind watch
   fact.digest = factDigest(fact);
   return fact;
 }
@@ -183,7 +183,7 @@ function factDigest(f) {
     `${u.kind}:${u.id || ''}:${u.label || ''}:${u.state}:${u.locked ? 'L' : ''}:${u.count || ''}:${u.error ? u.error.length : 0}`,
     f.own ? `${f.own.label || ''}:${f.own.state}${f.own.kept ? `:k${f.own.kept.tabs}/${f.own.kept.kind}/${f.own.kept.why || ''}/${f.own.kept.restoreBy || ''}${f.own.kept.handedBack ? 'h' : ''}/${f.own.kept.waiting}` : ''}` : '-', // lane browser-resume B
     f.lastUsed ? `${f.lastUsed.kind}:${f.lastUsed.id || ''}:${f.lastUsed.label || ''}` : '-', f.differs || '-', f.input || '-', f.liveRef || '-',
-    f.stuck ? `${f.stuck.state}:${f.stuck.dialog ? f.stuck.dialog.id || '' : ''}:${f.stuck.why || ''}:${f.stuck.count || 0}:${f.stuck.loop && Array.isArray(f.stuck.loop.urls) ? f.stuck.loop.urls.join(' ') : ''}` : '-'].join('|'); // lane browser-stuck (+ lane site-reset: a loop's cycle, never its hop count)
+    f.stuck ? `${f.stuck.state}:${f.stuck.dialog ? f.stuck.dialog.id || '' : ''}:${f.stuck.why || ''}:${f.stuck.count || 0}:${f.stuck.loop && Array.isArray(f.stuck.loop.urls) ? f.stuck.loop.urls.join(' ') : ''}${f.stuck.state === 'blind' ? `:${f.stuck.targetId || ''}/${f.stuck.title || ''}` : ''}` : '-'].join('|'); // lane browser-stuck (+ lane site-reset: a loop's cycle, never its hop count)
 }
 
 /** `{name}` placeholders, for a `t` that is not given (the server's journal, a test). */
@@ -250,9 +250,10 @@ function browserFactWords(fact, tIn) {
   const ownName = fact.own && fact.own.label ? fact.own.label : TEMP;
   const ownShort = fact.own && fact.own.label ? fact.own.label : t('Temp browser');
   // lane browser-stuck: a page held by a dialog / not responding is said on every surface that prints the fact (the chip, the title)
-  const stuck = fact.stuck && fact.stuck.state === 'dialog' ? t('page dialog open') : fact.stuck && fact.stuck.state === 'unresponsive' ? t('page not responding') : fact.stuck && fact.stuck.state === 'loop' ? t('page keeps reloading') : '';
-  if (stuck) { lines.unshift(fact.stuck.state === 'dialog' ? t('The page is waiting on a dialog — answer it in the live view') : fact.stuck.state === 'loop' ? t('The page keeps reloading by itself (a navigation loop) — its stored login may be stale') : t('The page is not responding — Restart')); line = t('{line} · {stuck}', { line, stuck }); }
-  return { name, line, state, pinned: pinnedName, why, running: runningName, amber: !!fact.differs || !!stuck, tooltip: lines.join('\n'), show: show || !!stuck, temporary: !!u.temporary, ownName, ownShort, stuck };
+  const stuck = fact.stuck && fact.stuck.state === 'dialog' ? t('page dialog open') : fact.stuck && fact.stuck.state === 'unresponsive' ? t('page not responding') : fact.stuck && fact.stuck.state === 'loop' ? t('page keeps reloading') : fact.stuck && fact.stuck.state === 'blind' ? t('dialog watch blind') : '';
+  if (stuck) { lines.unshift(fact.stuck.state === 'dialog' ? t('The page is waiting on a dialog — answer it in the live view') : fact.stuck.state === 'loop' ? t('The page keeps reloading by itself (a navigation loop) — its stored login may be stale') : fact.stuck.state === 'blind' ? t('The dialog watch cannot see into one tab — a dialog opened there would not be caught; Restart re-attaches') : t('The page is not responding — Restart')); line = t('{line} · {stuck}', { line, stuck }); }
+  // lane browser-held-not-hung: a blind watch is a quiet INFO — never the chip's amber (the page answers)
+  return { name, line, state, pinned: pinnedName, why, running: runningName, amber: !!fact.differs || (!!stuck && fact.stuck.state !== 'blind'), tooltip: lines.join('\n'), show: show || !!stuck, temporary: !!u.temporary, ownName, ownShort, stuck };
 }
 
 /**

@@ -1126,6 +1126,20 @@ gate 的对象相反。
 
 **verify r5（2026-10-02，本 lane 最后一轮；攻击 r4 的三个部分，产品自己的 Chrome，headless 与隐藏窗口各 30 次）：** r4 的 plan 在梯子**顶端**读一次——在 opener 探测（最多 4 × 400 ms）和 rung-2 锁等待之前——于是 `tab new` 进行到 150 ms 时开始的接管让 rung 2（循环 + 激活）在用户手下照跑（30/30），那时打开的直播视图在它的头几帧下吃到循环（30/30；激活还会把被看的标签页压到后面）⇒ plan 改在 **rung 2 时、锁内**读。create 与绑定之间用户关掉了窗口 ⇒ `tab <id>` 答 No tab with label，keeper 退回二进制自己的 `tab new` ⇒ 标签页落进**另一个**持有者窗口的前台、它的页面被永久遮住（30/30）⇒ 改为 `window_busy`（`why: bind_failed`），绝不退回共享窗口，重试时重问窗口（没了就开自己的新窗口）。被 `user_driving` 拒绝的持有者在 handback 时什么也听不到（15 次驾驶 0 事件）⇒ 驾驶结束发一次 `drive-ended`，每个被拒持有者下一回合收到一条免费的 `browser-window-free` 提示。实测并保留：绑定（`tab <id>`）就是一次窗口聚焦（是另一方 rung 2 的竞争者，但仍 10/10 落入自己窗口）；headless 每次 `tab new` 3 次可见性事件、隐藏窗口 1 次；半开的观看者 socket 让窗口一直算有人在看（保守侧）。待办：另一持有者狂开标签页时绑定 + 导航偶尔耗时 ~30 s 仍成功（1–4/10）。
 
+### 3.11 隐藏窗口的 GL 与空闲停绘（lane browser-swiftshader-cpu + r2，2026-10-07，as-built；userW inc-muyp9vj6-tv0m："一个对话的隐藏窗口浏览器用九个核在画没人看的 Mercury 付款面板"）
+
+**实测（`HIDDEN_WINDOW_CPU_PROOF`，src/browser-display.js；scripts/measure-hidden-window-cpu.mjs，agent-browser 0.38.1 + Chrome 154.0.8037.57，CLI 自己的 Xvfb，一个永不停画的 60 fps 合成页，每组 20 s）：** B-cc68 为 WebGL 加的 `--use-angle=swiftshader --enable-unsafe-swiftshader` 把**合成器**也放到了 SwiftShader 上——GPU 进程 592 %（16 个 SwiftShader `Thread<N>`）；`--disable-gpu-rasterization` 582 %（光栅化**不是**成本）；`--disable-gpu-compositing` 98 %，WebGL 保留。**落地：** `HIDDEN_WINDOW_ARGS` = 这对参数 + `--disable-gpu-compositing`，每条启动路径（keeper、临时浏览器、browser-serve、配对机器的 daemon）都经 `launchPlan` → `withSoftwareGl`；配置自己写了 GL / 合成参数的照旧。runaway-guard 对看不见的浏览器的 CPU 通知点名它在画的页面（"The hidden browser of <对话> is drawing <标题> at N cores"，只报告）。
+
+**空闲停绘（src/browser-idle.js，PURE）：** 在 Xvfb 上只有**冻结页面**（`Page.setWebLifecycleState frozen`）能让窗口停画——最小化（没有窗口管理器）和焦点模拟都照画。冻结会**隐藏**页面，`active` 一个人永远显示不回来；能显示回来的是标签栏：在它前面开一个空白标签页再关掉、再激活它（23 ms 出下一帧）。
+
+**开关（r2）：** `browser.idlePaintFreeze`（Agent browser 类，高级，**默认关**）。keeper 每次 sweep 现读这个设置（从不在启动时缓存）；关 ⇒ 永不冻结、没有任何 CDP 动作（关之前冻住的会被解冻）。`idlePaintVerdict` 多了 `enabled` 输入（缺省 = 关）。规则：实测的 6× 收益直接上线；没在真 CLI 上证明过的二阶收益不默认运行——owner 读过报告后再开。
+
+**r2 在真 CLI 上测出并修掉的（heavy scripts/test-browser-hidden-paint.mjs，两个对话共用一个具名 profile、各一个窗口）：** builder 的解冻先 `createTarget` 再激活——空白页落在**最后被激活的窗口**（§3.10 的 WINDOWS_PROOF），实测三个空白页各落在**上一个**前台标签页的窗口里，A 的命令解冻时有一个落进了 B 的窗口；而且一次解冻会把 B 窗口也翻一遍。现在：解冻只翻**发起者**（命令的 /resolve 目标、或 live view 的 {profile, browserKey}）自己的前台标签页（`scopeFor`），每个先 `activateTarget` 再开空白页，用 `Browser.getWindowForTarget` 核对落点，落错的立即关掉并记日志；别的对话的前台标签页记在 `hiddenFronts`，等**它自己的**命令或查看者来时再翻（被隐藏的页面不画，所以不耗 GPU）。证明的结果见该测试与 changelog-engineering 2.369.231。
+
+**低端设备参数（r2 addendum，owner："chrome 有一些参数是给低性能设备用的，能开吗"；`HIDDEN_WINDOW_CPU_PROOF.lowEnd`）：** 在已上线参数之上逐个实测——CPU 变化都 ≤ 2.5 %（噪声）；`--enable-low-end-device-mode` 只省 4–8 % 内存；`--renderer-process-limit=4 --process-per-site` 在 9 个标签页时进程 19 → 10、ΣRssAnon −36 %，**但**一个对话的页面跑 3 s 脚本循环时，另一个对话的同站标签页要 2802 ms 才应答（现在 1 ms）——多个对话共用一个渲染进程主线程，正是这次事故本身那一类。没有一个参数达标，`HIDDEN_WINDOW_ARGS` 不变。
+
+**仍然开放：** 冻结期间页面的脚本、计时器全部暂停——一个靠页面脚本在后台干活的页面（比如脚本驱动的上传）只在 agent 下命令或有人查看时才走；这是开关默认关的另一个原因。
+
 ## 4. 实时视图（1.c）
 
 > **改名注记（takeover T5，2026-09-24，方向 B —— docs/design-browser-faces.zh.md）：** 本节的"实时视图"窗口（`browser-live`）在界面上叫 **Agent 浏览器 / Agent browser / エージェントブラウザ**；工具栏上的嵌入式浏览器叫 **网页视图 / Web view**；桌面应用里的浏览器卡片副标题为 **浏览器应用 / Browser app**。只改显示的名字 —— 窗口类型、openSpec、设置键、rail id 都不动。见 §11a。
@@ -3578,3 +3592,12 @@ diff 的感觉。本轮没有被判错的条目。
 一格的那几件事**内部**的子句，唯一真正新增的实现是一个 runner 内部的 helper），也没有软化"我没能
 核实的东西"里的任何一条 —— 那份清单从 39 条长到了 41 条，而且其中一条（§12.40）被明写成 P4 第一批
 动作里的一次**零代码**测量，因为一条具名拒绝的判据不该是我的猜测。
+
+> **as-built：lane browser-held-not-hung（2026-10-08，owner 在 2.369.231 上看到"网页没有响应"盖在一个正在动的网页上）。**
+> "没有响应"只说网页自己的回答，绝不说对话框监看能不能看进去。监看对某个标签页的 `Page.enable` 5 秒没有回答（"held"，
+> 例如 VibeSpace 重启后接管了还活着的守护进程，那个标签页上有一个监看接上之前就弹出的对话框）时：这个对话 60 秒内
+> （`OK_RECENT_MS`）有过一次 `ok` ⇒ 不算卡住；还什么都没问过 ⇒ 新的 `blind` 事实（"对话框监看看不进一个标签页"，
+> 一行安静的说明，没有重启按钮，提示里写那个标签页的标题）；有过结果但 60 秒内没有一次 `ok` ⇒ 仍然是 `unresponsive`
+> (`tab-held`)。每次重新询问（30 秒）都重新判定；标签页回答了、关掉了、或者不再在租约范围里 ⇒ 清除。实测
+> （scripts/measure-held-enable.mjs，0.38.1 + Chrome 154，16 个忙碌标签页，新 socket 接到已在运行的守护进程）：
+> Page.enable p50 1 ms / p95 25 ms / 最大 25 ms；对话框下的标签页 30 秒内从不回答 —— 所以 `ENABLE_TIMEOUT_MS` 仍是 5 秒。

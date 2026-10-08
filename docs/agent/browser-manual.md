@@ -776,6 +776,7 @@ default with `*`.
 ## 5. Honest limits
 
 * **No desktop session on the machine ⇒ a hidden window, or headless.** When the browser config asks for a window but the machine has no display right now (nobody logged in to its desktop), your browser launches in a hidden window on an invisible screen when the machine has Xvfb (an ordinary browser to sign-in pages; `[browser_hidden_window]`), else headless (`[browser_headless]`) — said once by the command that launched it — instead of failing; pages work the same and the user can still watch and take over in the live view. The next launch after the desktop comes back is a window again (`[browser_headed_again]`); a config pinning a display the machine lacks while it has another runs on that one (`[browser_display_substituted]`).
+* **A browser nobody watches can be paused (only if the user turned on `browser.idlePaintFreeze`; off by default).** On a hidden window or headless, with no command of yours and no live view for 30 s, its pages are frozen: they stop drawing AND their scripts and timers pause. Your next command thaws it before it runs (you see the page as it is), so nothing changes for your commands — but a page that must keep working on its own (a script-driven upload, a page you are waiting on with no command) only moves while you run commands or the user watches.
 * **On a remote machine** (an ssh host or a paired device) the same verbs work
   and the same refusals apply, and the browser is isolated to your session —
   but it is **not managed**: that machine's own browser CLI runs it under your

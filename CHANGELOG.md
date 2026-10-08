@@ -2,6 +2,16 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.234 — 2026-10-08
+
+### Changed
+- After a pause, a mailbox catches up through its change feed instead of re-reading every thread.
+- A very large set of mailboxes no longer costs a scan on every refresh.
+
+### Fixed
+- An agent's hidden browser draws pages with about 6× less CPU; a new advanced setting (off by default) can also stop drawing in a browser nobody watches.
+- The Agent browser no longer says a page is not responding while it answers every command; a tab it cannot watch for dialogs gets a quiet note.
+
 ## 2.369.233 — 2026-10-07
 
 ### Added

@@ -172,6 +172,7 @@ const ChannelsAuth = require('./channels-auth.js');
 // trust verdict, the fold into owed marks / births, the measurement); the scheduling is drain rule 21, the one lane
 // answer channel-caps `feedState` — this engine only DRIVES it (`feedPage`)
 const Feed = require('../channel-feed.js');
+const Census = require('../channel-census.js');   // lane scheduler-census-index (B-7978, PURE): the card's clock census as kept judgements
 
 /** THE REAL ADAPTERS (P1). Each module names its integration row
  *  (`integration`), its Test runner (`integrationTest`), its per-record
@@ -259,13 +260,13 @@ const TRIM_EVERY_MS = 6 * 3600e3;
 const AUTHORS_MAX = 30;
 /** A broadcast names at most this many conversations before it sends the whole digest. */
 const PARTIAL_MAX = 200;
-// B-f32b: the kept row facts (the digest's unread total, each account's row counts) are re-summed from every row at
-// least this often (a row written past the store's door heals here)
-const ROW_RESUM_MS = 60 * 1000;
 // B-f32b r2 (the coordinator's ruling, 2026-10-03): an account's CLOCK census (hot / warm / cold / due — every row's
 // cadence at the instant) is recomputed at most this often; a broadcast inside the window reads the last one and arms
 // ONE trailing recompute + broadcast at the window's end, so the card always settles on the exact numbers
 const CENSUS_EVERY_MS = 5 * 1000;
+// lane scheduler-census-index (B-7978): what the census index bought, measured by scripts/measure-channels-pass.mjs —
+// 90 298 rows (4 authoritative-feed accounts + 2 tier accounts), 50 rounds × 6 account passes, the clock +5 s a round
+const CENSUS_INDEX_PROOF = Object.freeze({ date: '2026-10-07', version: '2.369.232', box: 'dev (32 cores)', rows: 90298, before: { roundMs: 278.1, maxPassMs: 355.3, censusShare: 0.97 }, after: { roundMs: 1.7, maxPassMs: 3.4, censusShare: 0.12, rowsReadPerRound: 29 } });
 // lane channel-drain-scale (2026-10-06 — a 89 000-row mailbox: `digest` / `adapterView` / `schedulerView` /
 // `clockCensus` rebuilt the account views at EVERY answered fetch of a pass): THE VIEWS ARE PACED — a pass broadcasts
 // its early keys at most once per VIEW_PACE_MS (physical time); a key answered inside the window waits with its answer
@@ -1135,11 +1136,16 @@ function create(deps = {}) {
   // boot and whenever the account's shared inputs change (the tier settings; the lane: push, the feed carrying or not).
   const dueIx = new Map();   // adapterId -> { sig, keys: [{key, at}], at: Map<key, at>, marks: Set<key>, dirty: Set<key>, stale }
   const dueStats = { builds: 0, rekeys: 0, lastBuildMs: 0 };
+  // lane scheduler-census-index: the scheduler card's CENSUS INDEX (`clockIndexed`, beside `schedulerScan`) is re-judged
+  // at the same writes as the due index
+  const censusIx = new Map();   // adapterId -> { sig, t, kept, rows: Map<key, judgement>, order: [judgement], dirty: Set<key>, stale }
   function markDue(key) {
-    if (key === null || key === undefined) { for (const ix of dueIx.values()) ix.stale = true; return; }
+    if (key === null || key === undefined) { for (const ix of dueIx.values()) ix.stale = true; for (const cx of censusIx.values()) cx.stale = true; return; }
     const k = String(key), i = k.indexOf('/');
     const ix = i > 0 ? dueIx.get(k.slice(0, i)) : null;
     if (ix) ix.dirty.add(k);
+    const cx = i > 0 ? censusIx.get(k.slice(0, i)) : null;
+    if (cx) cx.dirty.add(k);
   }
   store.index.onTouch(markDue);
   { const set0 = store.stamps.set; store.stamps.set = (key, patch) => { const r = set0(key, patch); markDue(key); return r; }; }
@@ -1468,6 +1474,9 @@ function create(deps = {}) {
       if (w.act === 'none') { log.warn(`[channels] ${rec.id}: the clock is behind the change feed's cursor — no page this tick`); await store.adapters.update(() => {}); return { noCall: true }; }
       kind = 'steady'; win = { from: w.from, to: w.to };
       f.window = { from: w.from, to: w.to, pages: 0 };
+      // lane gmail-feed-gap: a long stop's older span is DECLARED a gap — no window of the feed searched it, so the coverage
+      // net never judges a record there a miss (silence is not evidence the feed misses messages)
+      if (w.gap) f.gaps = Feed.addGap(f.gaps, w.gap);
       if (e.feedMemStart === null) e.feedMemStart = w.from;
       const days = setting('channels.feedBackfillDays');
       if (w.first) {
@@ -1679,25 +1688,49 @@ function create(deps = {}) {
    * THE AUTHORITATIVE FEED's page — ONE `changes()` (Gmail: one history.list, the pass's; the reads after it reuse its
    * memo) names the conversations that changed: they are the pass's due rows (under `feed-only` the clock makes none
    * due). A changed conversation the index lacks is born from the adapter's own listing (`admitListed`); a reseeded
-   * cursor asks discovery's listing walk, never a per-row poll. A refusal is the feed's own (`feedRefusal`: the rows fall
-   * back to their tiers — positive evidence only). → `{due}` | `{skip}` | `{noCall}` for drain rule 21.
+   * cursor asks discovery's listing walk, never a per-row poll. A refusal is the feed's own (`feedRefusal`: a refused
+   * feed's rows fall back to their tiers — positive evidence only).
+   * lane gmail-feed-gap (B-5134): A GAP IS ONE WALK FROM THE CURSOR. The feed's cursor survives a silence (asleep, a
+   * restart, an outage, a rate-limit park); `Feed.gapVerdict` judges it before the call: `catch-up` = this page is the
+   * paged walk from the cursor (the adapter pages it, each page paced and metered through the gate), the tiers stay
+   * parked meanwhile (channel-caps `feedState`: a cursor-holding feed carries through the gap — `feed.carrying`, persisted
+   * with its `since`); a 404 is the adapter's `mustWalk` (the listing re-walk, as built); a rate refusal parks by name
+   * and resumes from the same cursor. ONE journal line per gap. → `{due, pages?, catchUp?}` | `{skip}` | `{noCall}`.
    */
   async function historyFeed(rec, e) {
     const t = now();
     const f = feedRow(rec);
     if (f.refused) { if (feedStateOf(rec, t).state === 'refused') return { noCall: true }; f.refused = null; f.strikes = 0; f.strikeWhy = null; }
     if (Number(f.backoffUntil) > t) return { noCall: true };
+    const fo = feedOpts();
+    const cursorHeld = !!(f.carrying && Number(f.carrying.since) > 0);
+    const gap = Feed.gapVerdict({ cursor: cursorHeld, lastPageAt: f.lastOkAt, now: t, coldTierSec: tiers().coldSec, freshBoundMs: Feed.freshMs(fo.everySec, fo.overlapSec) });
     f.lastRunAt = t;
     e.feedCalls = Feed.minuteAt(e.feedCalls, t).calls.concat([t]);
     let page;
     try { page = await vendor(rec, e, () => e.adapter.changes({})); }
-    catch (err) { if (outlived(rec, e)) throw err; return feedRefusal(rec, e, f, 'steady', err, false); }
+    catch (err) {
+      if (outlived(rec, e)) throw err;
+      const r = await feedRefusal(rec, e, f, 'steady', err, false);
+      if (f.refused) f.carrying = null;   // a refusal refutes the cursor: the rows fall back to their tiers (positive evidence only)
+      else if (cursorHeld && f.backoffWhy === 'rate-limited' && f.strikes === 1) log.log(`[channels] ${rec.id}: the change feed's catch-up was limited by the vendor — parked by name until ${new Date(Number(f.backoffUntil)).toISOString()}; it resumes from its cursor, no conversation is read on its own`);
+      return r;
+    }
     if (outlived(rec, e)) return { skip: 'account-changed' };
     const changed = Array.isArray(page && page.changed) ? page.changed.map(String) : [];
     const births = (Array.isArray(page && page.conversations) ? page.conversations : []).filter((c) => c && c.id && !store.index.has(`${rec.id}/${c.id}`));
     if (births.length) { await ensureLinked(rec); await store.index.update(() => { for (const c of births) admitListed(rec, c, t); }); }
     if (page && page.mustWalk && !e.disc.cursor) e.discoverSoon = true;
     f.lastOkAt = now(); f.lastHits = changed.length; f.strikes = 0; f.strikeWhy = null; f.backoffUntil = null; f.backoffWhy = null;
+    if (!cursorHeld) f.carrying = { since: f.lastOkAt };
+    const pages = Math.max(1, Math.floor(Number(page && page.pages) || 1));
+    const caughtUp = gap.verdict === 'catch-up' && !(page && page.mustWalk);
+    if (caughtUp) {
+      f.gaps = Feed.addGap(f.gaps, { from: gap.from, to: t });
+      f.lastCatchUp = { at: t, gapMs: gap.gapMs, pages, touched: changed.length };
+      const mins = Math.max(1, Math.round((Number(gap.gapMs) || 0) / 60e3));
+      log.log(`[channels] ${rec.id}: the change feed resumed after ${mins} min — ${pages} history page${pages === 1 ? '' : 's'}, ${changed.length} conversation${changed.length === 1 ? '' : 's'} touched, 0 per-row reads`);
+    }
     await store.adapters.update(() => {});
     const due = [];
     for (const id of changed) {
@@ -1705,7 +1738,7 @@ function create(deps = {}) {
       if (en && !(en.refresh && en.refresh.every === 'paused')) due.push({ key: en.key, dueAt: t });   // the owner's pause wins
     }
     if (births.length) notify(births.map((c) => `${rec.id}/${c.id}`), { full: false });
-    return { due };
+    return caughtUp ? { due, pages, catchUp: true } : { due };
   }
   /** Ask the adapter to NAME conversations the feed found (§3.3): the births of this page first, then an untitled
    *  feed-born row not described for 6 h — at most DESCRIBE_MAX per feed tick, only while the minute's budget holds;
@@ -1914,7 +1947,7 @@ function create(deps = {}) {
     if (!fs.on) return;
     const f = feedRow(rec);
     const coveredTo = Number(f.cursorAt) > 0 ? Number(f.cursorAt) - feedOpts().overlapSec * 1000 : null;
-    const sm = Feed.sample(records.map((r) => ({ vendorId: r && r.vendorId, at: r && r.at, msgType: rawFactsOf(rec, r).type })), { coveredTo, memStart: e.feedMemStart, seen: e.feedSeen, pending: e.feedPending });
+    const sm = Feed.coverageOf(records.map((r) => ({ vendorId: r && r.vendorId, at: r && r.at, msgType: rawFactsOf(rec, r).type })), { coveredTo, memStart: e.feedMemStart, seen: e.feedSeen, pending: e.feedPending, gaps: f.gaps });
     e.feedPending = sm.pending;
     if (!sm.n) return;
     const t = now();
@@ -1951,6 +1984,8 @@ function create(deps = {}) {
       everySec: o.everySec, overlapSec: o.overlapSec, relaxedSec: setting('channels.relaxedPollSec'), promoteMin: Feed.PROMOTE_MIN,
       measured: { total: m.total, missed: m.missed, rate: m.rate }, lastOkAt: f.lastOkAt || null, cursorAt: f.cursorAt || null,
       catchUp: cu, lastFlip: f.lastFlip || null,
+      // lane gmail-feed-gap: the cursor feed's gap — "catching up since <t>" (the last good page), the carrying fact's `since`
+      gapSince: fs.gapSince || null, since: fs.since || null, lastCatchUp: f.lastCatchUp || null,
       // verify r2: `malformedRecent` / `malformedAt` = the last hour's unreadable hits (the card's line reads these, never the
       // cumulative `malformed`, which is diagnostics)
       counters: f.counters ? { malformed: f.counters.malformed || 0, malformedFields: Feed.mergeFieldLists(f.counters.malformedFields, []), ...(() => { const r = Feed.recentUnreadableCount(f.counters.unreadableRecent, t); return { malformedRecent: r.n, malformedAt: r.at }; })(), births: f.counters.births || 0, unlistedHits: f.counters.unlistedHits || 0, pages: f.counters.pages || 0, missedTypes: { ...(f.counters.missedTypes || {}) },
@@ -2737,8 +2772,10 @@ function create(deps = {}) {
    *  summed `unread` over all 50 274 rows of userW's index, and each account's census walked them all again. A row's
    *  facts that the clock does not move — listed / unlisted, unread, paused, overridden, being read, walked — are kept
    *  per account: the store says which rows an update touched (`index.onTouch`: a key, or null = the whole map) and
-   *  only those are re-read. A whole-map touch, a full digest or a minute without one re-sums every row — the same
-   *  numbers as the old loops (test-channels-index-scale ⑥, test-channels-census-pace). */
+   *  only those are re-read. A whole-map touch re-sums every row — the same numbers as the old loops
+   *  (test-channels-index-scale ⑥, test-channels-census-pace). lane scheduler-census-index (B-7978): the minute's
+   *  re-sum is gone — 100 ms of every minute's pass at 90 298 rows; the door's touch is the one signal, as for the due
+   *  and census indexes (test-channel-census holds the kept facts to the walk after every step). */
   const FACTS = ['conversations', 'unread', 'unlisted', 'paused', 'overridden', 'reading', 'walked'];
   const rowKept = { stale: null, rows: new Map(), by: new Map(), at: 0 };   // stale null = re-sum
   store.index.onTouch((k) => { if (k === null) rowKept.stale = null; else if (rowKept.stale) rowKept.stale.add(k); });
@@ -2760,7 +2797,7 @@ function create(deps = {}) {
   /** Each account's kept facts (`Map<adapterId, {conversations, unread, …}>`), brought up to date. */
   function rowFactsNow(resum = false) {
     const liveIx = store.index.live(), t = now();
-    if (resum || !rowKept.stale || !(t - rowKept.at < ROW_RESUM_MS)) {
+    if (resum || !rowKept.stale) {
       rowKept.rows = new Map(); rowKept.by = new Map(); rowKept.at = t;
       for (const k of Object.keys(liveIx)) { const f = rowFacts(liveIx[k]); if (f) { rowKept.rows.set(k, f); addFacts(f, 1); } }
     } else {
@@ -3432,7 +3469,8 @@ function create(deps = {}) {
   }
 
   /** The account's scheduler census computed from EVERY row at instant `t` (the card's "N conversations · M unread"
-   *  line and the tiers' counts) — the definition the paced census below is held to (`schedulerExact`, the gates). */
+   *  line and the tiers' counts) — THE DEFINITION the kept census below is held to; reached only by `schedulerExact`
+   *  (the gates), never by a pass (lane scheduler-census-index). */
   function schedulerScan(rec, t = now()) {
     const out = { conversations: 0, unread: 0, hot: 0, warm: 0, cold: 0, paused: 0, overridden: 0, unlisted: 0, due: 0, lastDiscoveryAt: null, discovering: false, firstIngest: null };
     let walked = 0, reading = 0;   // lane R5: the first-read census — conversations being read (not paused, not refused by the vendor) and those walked once
@@ -3440,6 +3478,7 @@ function create(deps = {}) {
     const c = registry.capsOf(rec.kind);
     const lane = laneOrScan(rec, {});
     for (const en of Object.values(store.index.live())) {
+      censusIxStats.rowsRead++;
       if (!en || en.adapterId !== rec.id) continue;
       if (en.unlistedAt) { out.unlisted++; continue; }
       out.conversations++;
@@ -3481,11 +3520,87 @@ function create(deps = {}) {
       return c;
     }
     if (c && c.timer) { try { c.timer.cancel(); } catch { } }
-    const s = schedulerScan(rec, t);
+    const s = clockIndexed(rec, t);
     c = { at: t, hot: s.hot, warm: s.warm, cold: s.cold, due: s.due, timer: null };
     censusTimed.set(rec.id, c);
     censusCount.set(rec.id, (censusCount.get(rec.id) || 0) + 1);
     return c;
+  }
+  /** THE CENSUS INDEX (lane scheduler-census-index, B-7978 — 2026-10-07: the card's clock counts walked every row of
+   *  the index for every account, ≈ 270 ms a pass at 90 298 rows, the pass's last O(rows) term). Per account: each
+   *  row's JUDGEMENT (src/channel-census.js `rowClock`: its class, due, and the instant until which both hold) and the
+   *  counters they sum to. A census re-judges the rows a write touched (`markDue`: an index write, a poll stamp, a
+   *  watch start) and the rows whose instant the clock passed (`order`, soonest first) — O(touched + crossed), never
+   *  O(rows). Built in ONE O(rows) pass when absent / stale (a whole-map write) / its shared inputs changed (the tier
+   *  settings; the lane — the due index's signature) / the clock went back / a mass write (as the due index). */
+  // `rowsRead` = every row a census looked at, either path (the walk below counts too — the gates' work meter)
+  const censusIxStats = { builds: 0, rejudged: 0, rowsRead: 0, lastBuildMs: 0 };
+  function censusJudge(rec, lane, en, t, T) {
+    if (!en || en.adapterId !== rec.id || en.unlistedAt) return null;
+    const cad = caps.cadenceFor(registry.capsOf(rec.kind), lane, en, t, { tiers: T, watched: isWatched(en.key, t) });
+    const j = Census.rowClock({ paused: cad.paused, tier: cad.tier, seconds: cad.seconds, lastPollAt: Number(laneOf(en).lastPollAt) || 0, tierUntil: caps.tierUntil(en, t, { tiers: T }), watchUntil: watching.get(en.key) || 0 }, t);
+    j.key = en.key;
+    return j;
+  }
+  function censusPut(cx, j) {
+    cx.rows.set(j.key, j);
+    if (j.at === Infinity) return;
+    let lo = 0, hi = cx.order.length;
+    while (lo < hi) { const m = (lo + hi) >> 1; if (Census.untilCmp(cx.order[m], j) < 0) lo = m + 1; else hi = m; }
+    cx.order.splice(lo, 0, j);
+  }
+  function censusDrop(cx, key) {
+    const j = cx.rows.get(key);
+    if (!j) return null;
+    cx.rows.delete(key);
+    if (j.at !== Infinity) {
+      let lo = 0, hi = cx.order.length;
+      while (lo < hi) { const m = (lo + hi) >> 1; if (Census.untilCmp(cx.order[m], j) < 0) lo = m + 1; else hi = m; }
+      if (cx.order[lo] === j) cx.order.splice(lo, 1);
+    }
+    return j;
+  }
+  function censusRejudge(rec, cx, key, t, T) {
+    const was = censusDrop(cx, key);
+    const j = censusJudge(rec, cx.lane, store.index.peek(key), t, T);
+    Census.censusStep(cx.kept, was, j);
+    if (j) censusPut(cx, j);
+    censusIxStats.rejudged++; censusIxStats.rowsRead++;
+  }
+  /** The account's clock counters at `t` ({hot, warm, cold, due} — what `schedulerScan` counts), from the index. */
+  function clockIndexed(rec, t) {
+    const T = tiers();
+    const lane = laneOrScan(rec, {});
+    const sig = JSON.stringify([T, lane.via, lane.pollCadence, lane.why || null, lane.feedSeconds || null]);
+    let cx = censusIx.get(rec.id);
+    if (!cx || cx.stale || cx.sig !== sig || t < cx.t || cx.dirty.size > (cx.rows.size >> 3) + 256) {
+      const t0 = Date.now();
+      cx = { sig, t, lane, kept: Census.emptyCounts(), rows: new Map(), order: [], dirty: new Set(), stale: false };
+      for (const en of Object.values(store.index.live())) {
+        censusIxStats.rowsRead++;
+        if (!en || en.adapterId !== rec.id) continue;
+        const j = censusJudge(rec, lane, en, t, T);
+        if (!j) continue;
+        Census.censusStep(cx.kept, null, j);
+        cx.rows.set(j.key, j);
+        if (j.at !== Infinity) cx.order.push(j);
+      }
+      cx.order.sort(Census.untilCmp);
+      censusIx.set(rec.id, cx);
+      censusIxStats.builds++; censusIxStats.lastBuildMs = Date.now() - t0;
+      return { ...cx.kept };
+    }
+    cx.lane = lane;
+    if (cx.dirty.size) { const ks = [...cx.dirty]; cx.dirty.clear(); for (const k of ks) censusRejudge(rec, cx, k, t, T); }
+    // the rows whose judgement the clock passed: taken off the head once, re-judged at `t` (each re-keys past `t`)
+    let n = 0;
+    while (n < cx.order.length && Census.expired(cx.order[n], t)) n++;
+    if (n) {
+      const crossed = cx.order.splice(0, n);
+      for (const j of crossed) { if (cx.rows.get(j.key) === j) cx.rows.delete(j.key); else continue; const now2 = censusJudge(rec, lane, store.index.peek(j.key), t, T); Census.censusStep(cx.kept, j, now2); if (now2) censusPut(cx, now2); censusIxStats.rejudged++; censusIxStats.rowsRead++; }
+    }
+    cx.t = t;
+    return { ...cx.kept };
   }
   function censusTrail(id) {
     const c = censusTimed.get(id);
@@ -3497,8 +3612,12 @@ function create(deps = {}) {
     try { notify([], { full: false }); } finally { censusTrailing = false; }
   }
   function schedulerView(rec, t = now()) {
-    const f = rowFactsNow().get(rec.id) || {};
     const c = clockCensus(rec, t);
+    return schedulerOf(rec, c);
+  }
+  /** The card's census from the kept row facts + clock counters `c`. */
+  function schedulerOf(rec, c) {
+    const f = rowFactsNow().get(rec.id) || {};
     const out = { conversations: f.conversations || 0, unread: f.unread || 0, hot: c.hot, warm: c.warm, cold: c.cold, paused: f.paused || 0, overridden: f.overridden || 0, unlisted: f.unlisted || 0, due: c.due, lastDiscoveryAt: null, discovering: false, firstIngest: null };
     return finishCensus(rec, out, f.walked || 0, f.reading || 0);
   }
@@ -7135,6 +7254,9 @@ function create(deps = {}) {
     // B-f32b r2: the census's definition (every row at `t`) and the paced census's clock walks, for the gates
     schedulerExact: (adapterId, t = now()) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId); return rec ? schedulerScan(rec, t) : null; },
     censusStats: () => Object.fromEntries(censusCount),
+    // lane scheduler-census-index: the census index's work — O(rows) builds, rows re-judged, rows read in all
+    censusIndexStats: () => ({ ...censusIxStats }), CENSUS_INDEX_PROOF,
+    schedulerIndexed: (adapterId, t = now()) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId); return rec ? schedulerOf(rec, clockIndexed(rec, t)) : null; },
     // design 008: the paged read + the first read's view counter (the scale suite's bound)
     rows, digestStats: () => ({ ...viewStats }),
     // verify r3: a READ-ONLY count of the per-account memories on the table above (the census leg + a diagnostic)

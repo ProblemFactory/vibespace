@@ -534,6 +534,45 @@ console.log('⑨ the unreadable ring (verify r2)');
   for (let i = 0; i < 600; i++) busy0 = F11.recentUnreadable(busy0, T0 + i * 6000, 26);
   ok(busy0.length === F11.UNREADABLE_RING_MAX && F11.recentUnreadableCount(busy0, T0 + 599 * 6000).n === 200 * 26, `CONTROL the per-page ring: 600 busy pages fill the ${F11.UNREADABLE_RING_MAX}-entry bound and the hour reads ${200 * 26} for ${600 * 26} dropped — the exactness leg would be red`, J(busy0.length));
 }
+// ⑩ lane gmail-feed-gap (B-5134, 2026-10-07): A GAP IN A CURSOR FEED IS ONE WALK FROM THE CURSOR — the gap table, and the
+// coverage net that never counts the gap's silence as misses (CONTROL: the copy that counts it demotes a complete feed)
+console.log('⑩ lane gmail-feed-gap: the gap verdict (gap × cursor × expired) and a coverage net that excludes declared gaps');
+{
+  const MIN = 60e3, fb = F0.freshMs(30, 60);
+  const table = [
+    ['no gap (a page 30 s ago)', { cursor: 'h1', lastPageAt: T0 - 30e3 }, 'fresh'],
+    ['a 4-min gap + cursor', { cursor: 'h1', lastPageAt: T0 - 4 * MIN }, 'catch-up'],
+    ['a 20-min gap + cursor', { cursor: 'h1', lastPageAt: T0 - 20 * MIN }, 'catch-up'],
+    ['a 3-day gap + cursor', { cursor: 'h1', lastPageAt: T0 - 3 * 86400e3 }, 'catch-up'],
+    ['a boot (no page known) + cursor', { cursor: 'h1', lastPageAt: null }, 'catch-up'],
+    ['expired (404), no gap', { cursor: 'h1', lastPageAt: T0 - 30e3, expired: true }, 'rewalk'],
+    ['expired after a 20-min gap', { cursor: 'h1', lastPageAt: T0 - 20 * MIN, expired: true }, 'rewalk'],
+    ['no cursor', { cursor: null, lastPageAt: T0 - 20 * MIN }, 'rewalk'],
+  ];
+  const got = table.map(([, a]) => F0.gapVerdict({ now: T0, coldTierSec: 900, freshBoundMs: fb, ...a }).verdict);
+  ok(table.every(([, , v], i) => got[i] === v), `the gap table: ${table.map(([l], i) => `${l} ⇒ ${got[i]}`).join(' · ')}`, J(got));
+  const g20 = F0.gapVerdict({ cursor: 'h1', lastPageAt: T0 - 20 * MIN, now: T0, coldTierSec: 900, freshBoundMs: fb });
+  const g4 = F0.gapVerdict({ cursor: 'h1', lastPageAt: T0 - 4 * MIN, now: T0, coldTierSec: 900, freshBoundMs: fb });
+  ok(g20.overCold && !g4.overCold && g20.gapMs === 20 * MIN && g20.from === T0 - 20 * MIN, 'overCold names the gap that used to fall to the tiers (20 min > the 15-min cold tier; 4 min is not)', J([g20, g4]));
+  let gs = [];
+  for (let i = 0; i < 30; i++) gs = F0.addGap(gs, { from: T0 + i * 10 * MIN, to: T0 + i * 10 * MIN + MIN });
+  const mg = F0.addGap([{ from: T0, to: T0 + 5 * MIN }], { from: T0 + 4 * MIN, to: T0 + 9 * MIN });
+  ok(gs.length === F0.GAPS_MAX && gs[0].from === T0 + 100 * MIN && mg.length === 1 && mg[0].to === T0 + 9 * MIN && F0.addGap(null, { from: 5, to: 1 }).length === 0, `declared gaps: overlaps join, the newest ${F0.GAPS_MAX} kept, an empty span is no gap`, J([gs.length, mg]));
+  // THE NET: a 20-min silence; the tiers / a catch-up fetched 40 messages of that span — no window of the feed searched it
+  const gap = { from: T0 - 30 * MIN, to: T0 - 10 * MIN };
+  const seen = new Map(), recs = [];
+  for (let i = 0; i < 40; i++) recs.push({ vendorId: `in-gap-${i}`, at: gap.from + (i + 1) * 25e3 });
+  for (let i = 0; i < 300; i++) { const vid = `seen-${i}`; seen.set(vid, T0); recs.push({ vendorId: vid, at: T0 - 9 * MIN + i * 1000 }); }
+  const cov = { coveredTo: T0, memStart: T0 - 2 * 3600e3, seen, pending: [] };
+  const real = F0.coverageOf(recs, { ...cov, gaps: [gap] });
+  ok(real.n === 300 && real.p === 0 && real.excluded === 40, `a declared gap is excluded from the net: 300 judged, 0 missed, the gap's 40 never judged (${real.n}/${real.p}/${real.excluded})`);
+  const lone = F0.coverageOf([{ vendorId: 'miss-1', at: T0 - 5 * MIN }, ...recs.slice(40)], { ...cov, gaps: [gap] });
+  ok(lone.n === 301 && lone.p === 1, "a message the feed's own window covered and did not see is still a MISS (the demotion stays for a feed that provably misses)", J([lone.n, lone.p]));
+  const mode = (F, m) => F.modeVerdict('carrying', caps.pushMissRate(caps.pushSamplesAdd([], { at: T0, n: m.n, p: m.p }), T0)).mode;
+  const Fs = patch('  const iv = addGap(gaps, null);', '  const iv = [];', 'silence-is-miss');
+  const sil = Fs.coverageOf(recs, { ...cov, gaps: [gap] });
+  ok(mode(F0, real) === 'carrying' && sil.p === 40 && mode(Fs, sil) === 'demoted', `CONTROL: a copy counting the gap's silence as misses ⇒ ${sil.p} of ${sil.n} "missed" ⇒ the complete feed DEMOTED (real: ${mode(F0, real)})`);
+}
 for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 8, label: 'larkfeed: ' })) ok(c.pass, c.name, c.pass ? undefined : c.detail);
 
 console.log(`\n${failN ? '✗' : '✓'} test-channel-feed: ${passN} passed, ${failN} failed`);

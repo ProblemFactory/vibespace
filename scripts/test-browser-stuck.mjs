@@ -8,7 +8,7 @@
 //      0.38.1), the navigate / stuck verdicts, the UI words for every kind × accept/dismiss × en/zh/ja;
 //   ② the WATCH (src/server/browser-dialogs.js) over a fake CDP browser: attach + Page.enable on every tab, a dialog
 //      opening ⇒ open + the event, an alert accepted at once (told once), an answer on the right session stamped by who,
-//      a tab whose Page.enable never answers ⇒ held ⇒ unresponsive, three timeouts ⇒ unresponsive, a restart resets,
+//      a tab whose Page.enable never answers ⇒ held ⇒ blind while the page answers (unresponsive once no ok in 60 s), three timeouts ⇒ unresponsive, a restart resets,
 //      the scope (whose tab), the idle notice (once, never while a verb runs);
 //   ③ the REAL routes + the REAL CLI: a verb IN FLIGHT when a beforeunload opens returns `dialog_open` within 1 s of
 //      the event (the long-poll answered BY THE EVENT; the fake binary would have hung 30 s) with the sentence FIRST;
@@ -101,10 +101,43 @@ function kindTable(mod) {
     && nav({ durationMs: 30001, urlBefore: 'a', urlAfter: 'a', titleBefore: 't', titleAfter: 't' }) === 'timeout' && nav({ durationMs: 25 }) === 'ok' && nav({ durationMs: 25, timedOut: true }) === 'timeout', 'navigateOutcome: a dialog HOLDS; userW\'s signature (pending url over the old title) with no dialog = unresponsive; else a timeout; else ok');
   const sv = (states, o) => ST.stuckVerdict(states.map((state, i) => ({ at: i + 1, state })), o);
   ok(sv(['timeout', 'timeout']).state === 'ok' && sv(['timeout', 'timeout', 'timeout']).state === 'unresponsive' && sv(['timeout', 'timeout', 'timeout']).count === 3 && sv(['timeout', 'timeout', 'timeout']).since === 1
-    && sv(['timeout', 'timeout', 'ok', 'timeout']).state === 'ok' && sv(['timeout', 'held-by-dialog', 'timeout', 'timeout']).state === 'ok' && sv([], { tabHeld: { at: 9 } }).why === 'tab-held', 'stuckVerdict: 3 consecutive timeouts ⇒ unresponsive; an ok or a dialog breaks the run; a tab the watch cannot enable ⇒ unresponsive at once');
+    && sv(['timeout', 'timeout', 'ok', 'timeout']).state === 'ok' && sv(['timeout', 'held-by-dialog', 'timeout', 'timeout']).state === 'ok' && sv([], { tabHeld: { at: 9 } }).state === 'blind', 'stuckVerdict: 3 consecutive timeouts ⇒ unresponsive; an ok or a dialog breaks the run; a tab the watch cannot enable with nothing asked yet ⇒ blind (never unresponsive)');
   ok(/not responded to your last 3 commands/.test(ST.stuckAgentText(sv(['timeout', 'timeout', 'timeout']))) && /do not retry in a loop/.test(ST.stuckAgentText(sv(['timeout', 'timeout', 'timeout']))) && ST.stuckAgentText({ state: 'ok' }) === '', 'the agent\'s unresponsive words name the Restart as the user\'s and forbid a loop');
   const f1 = ST.stuckFact({ dialog: d, now: 2000 }), f2 = ST.stuckFact({ verdict: sv(['timeout', 'timeout', 'timeout']) });
   ok(f1.state === 'dialog' && f1.dialog.id === d.id && f2.state === 'unresponsive' && ST.stuckFact({}) === null && ST.stuckDigest(f1) !== ST.stuckDigest(f2) && ST.stuckDigest(ST.stuckFact({ dialog: d, now: 9e9 })) === ST.stuckDigest(f1), 'stuckFact + its digest (moves with what is printed, never a clock)');
+  // lane browser-held-not-hung (owner 2026-10-08: 30+ navigates ok under "网页没有响应"): "not responding" is a claim
+  // about the PAGE's answers — a hold the watch cannot see past outranks nothing; positive evidence outranks the hold
+  const NOW = 1_000_000, HELD = { at: NOW - 300_000, targetId: 'T9', title: 'Fieldguide — Engagements' };
+  const table = (M) => {
+    const v = (list, o = {}) => M.stuckVerdict(list, { tabHeld: HELD, now: NOW, ...o });
+    const okRecent = v([{ at: NOW - 59_000, state: 'ok' }]), okOld = v([{ at: NOW - 61_000, state: 'ok' }]), none = v([]);
+    const plain = M.stuckVerdict([{ at: 1, state: 'timeout' }, { at: 2, state: 'timeout' }, { at: 3, state: 'timeout' }], { now: NOW });
+    const blindF = M.stuckFact({ verdict: none }), okF = M.stuckFact({ verdict: okRecent }), w = blindF ? M.stuckWords(blindF) : null;
+    return {
+      'held × ok 59 s ago ⇒ ok': okRecent.state === 'ok',
+      'held × ok 61 s ago ⇒ unresponsive tab-held': okOld.state === 'unresponsive' && okOld.why === 'tab-held',
+      'held × no outcomes ⇒ blind (targetId, since)': none.state === 'blind' && none.why === 'held' && none.targetId === 'T9' && none.since === HELD.at,
+      'held × a timeout and an old ok ⇒ unresponsive tab-held': v([{ at: NOW - 90_000, state: 'ok' }, { at: NOW - 20_000, state: 'timeout' }]).why === 'tab-held',
+      'held × ok recent then 3 timeouts ⇒ unresponsive timeouts': v([{ at: NOW - 50_000, state: 'ok' }, { at: NOW - 3, state: 'timeout' }, { at: NOW - 2, state: 'timeout' }, { at: NOW - 1, state: 'timeout' }]).why === 'timeouts',
+      'no hold × 3 timeouts ⇒ unresponsive as today': plain.state === 'unresponsive' && plain.why === 'timeouts' && plain.count === 3,
+      'the blind fact (held × nothing asked, held × ok) names the tab': !!blindF && blindF.state === 'blind' && blindF.targetId === 'T9' && blindF.title === HELD.title && !!okF && okF.state === 'blind',
+      'the blind words: a quiet info chip, no Restart, the tab named': !!w && w.chip === 'dialog watch blind' && w.tone === 'info' && w.action === null && /Fieldguide — Engagements/.test(w.tooltip) && !/not responding/.test(w.line),
+      'the agent hears nothing of a blind watch': M.stuckAgentText(none) === '' && M.stuckAgentText(okRecent) === '',
+      'the digest moves unresponsive → blind and with the tab': M.stuckDigest(blindF) !== M.stuckDigest(M.stuckFact({ verdict: okOld })) && M.stuckDigest(blindF) !== M.stuckDigest(M.stuckFact({ verdict: { ...none, targetId: 'T8' } })),
+    };
+  };
+  const tb = table(ST), bad = Object.entries(tb).filter(([, v]) => !v).map(([k]) => k);
+  ok(bad.length === 0 && ST.OK_RECENT_MS === 60_000, `the hold verdict table (${Object.keys(tb).length} rows, OK_RECENT_MS 60 s): an ok within 60 s outranks a held tab; nothing asked ⇒ blind; 3 timeouts stay unresponsive`, bad);
+  {
+    const src = fs.readFileSync(path.join(REPO, 'src/browser-stuck.js'), 'utf8');
+    const holdNeedle = "  if (held && !list.length) return { state: 'blind', why: 'held', count: 0, ...held };";
+    const wordsNeedle = "  if (f.state === 'blind') return { chip: t('dialog watch blind'),";
+    ok(src.includes(holdNeedle) && src.includes(wordsNeedle), 'CONTROL needles stand in src/browser-stuck.js');
+    const oldRule = table(MUT.load('src/browser-stuck.js', src.replace(holdNeedle, "  if (held) return { state: 'unresponsive', why: 'tab-held', count: 0, since: held.since };" + holdNeedle), 'held-at-once'));
+    ok(!oldRule['held × ok 59 s ago ⇒ ok'] && !oldRule['held × no outcomes ⇒ blind (targetId, since)'], 'CONTROL: the old rule (a held tab ⇒ unresponsive at once) reddens the table', oldRule);
+    const noChip = table(MUT.load('src/browser-stuck.js', src.replace(wordsNeedle, "  if (false) return { chip: t('dialog watch blind'),"), 'blind-no-words'));
+    ok(!noChip['the blind words: a quiet info chip, no Restart, the tab named'], 'CONTROL: the words without the blind chip redden the table', noChip);
+  }
 }
 // VERIFY r1 A2 (2026-09-28): a dialog's message is PAGE CONTENT — any web page's words — reaching the agent as the first
 // line of a tool result and inside the idle notice's <system-reminder>. Reproduced on the real stack: a confirm / an alert
@@ -584,13 +617,27 @@ const EPH = 'bp-e0000001', NAMED = 'bp-a0000002', KEY = 'bk-0000d1a1', KEY2 = 'b
   ok(w.factFor({ ...tgt, consume: false }).open === null, '…a dialog on another tab is not');
   await w.answer({ ...tgt, targetId: 'T2' }, { accept: false, by: 'user' });
   leaseCount = 1; tabs = null;
-  // a tab whose Page.enable never answers (its dialog opened before anybody could see it) ⇒ held ⇒ unresponsive
+  // a tab whose Page.enable never answers (its dialog opened before anybody could see it) ⇒ held
   ch.addTab('T3', { held: true });
   await until(() => evs.some((e) => e.kind === 'held' && e.targetId === 'T3'), 2000);
+  // lane browser-held-not-hung: nothing asked yet ⇒ the watch's own `blind` fact (it says what it cannot see), never
+  // "not responding" — the row's digest carries the kind only (never the tab's title: the digest reaches agents)
+  const sb = w.factFor({ ...tgt, consume: false }), kb = w.stuckForKey(KEY);
+  ok(!sb.stuck && sb.blind === true && sb.held && sb.held.state === 'blind' && sb.held.targetId === 'T3' && kb && kb.state === 'blind' && kb.title === 'T T3' && w.pageStuckMap()[NAMED] && w.pageStuckMap()[NAMED].state === 'blind' && !JSON.stringify(w.pageStuckMap()).includes('T T3'), 'held + nothing asked ⇒ BLIND (the watch\'s fact, the tab named to its conversation, kinds only on the row) — never unresponsive', { sb, kb, row: w.pageStuckMap() });
+  w.noteOutcome(NAMED, { state: 'ok', browserKey: KEY });
+  const so = w.factFor({ ...tgt, consume: false }), ko = w.stuckForKey(KEY);
+  ok(!so.stuck && ko && ko.state === 'blind' && !/unresponsive/.test(JSON.stringify(ko)) && w.pageStuckMap()[NAMED].state === 'blind', 'held + the lease\'s verbs ok ⇒ still blind: the page answers, no `unresponsive` reaches the chip / the live view / the row (the owner\'s 2026-10-08 banner)', { so, ko });
+  w.resetOutcomes(NAMED); w.noteOutcome(NAMED, { state: 'ok', browserKey: KEY, at: Date.now() - 61_000 });
   const sf = w.factFor({ ...tgt, consume: false });
-  ok(sf.stuck && sf.stuck.why === 'tab-held' && /does not answer VibeSpace's own watch — a page dialog that opened before VibeSpace was watching/.test(sf.stuck.text) && /vibespace-browser dialog status/.test(sf.stuck.text) && sf.blind === true, 'a tab whose Page.enable never answers is HELD — the unresponsive verdict at once (nothing here can see or answer that dialog)', sf);
+  ok(sf.stuck && sf.stuck.why === 'tab-held' && /does not answer VibeSpace's own watch — a page dialog that opened before VibeSpace was watching/.test(sf.stuck.text) && /vibespace-browser dialog status/.test(sf.stuck.text) && sf.blind === true && !sf.held && w.stuckForKey(KEY).state === 'unresponsive', 'held + its last ok 61 s ago ⇒ HELD reads unresponsive (tab-held, the agent\'s words) — the page has not proved it answers', sf);
+  leaseCount = 2; tabs = ['T1'];
+  const scoped = w.factFor({ ...tgt, consume: false });
+  ok(!scoped.stuck && !scoped.held && !w.stuckForKey(KEY), 'a lease whose scope no longer includes the held tab ⇒ no fact (the hold is another tab\'s)', scoped);
+  leaseCount = 1; tabs = null;
   ch.targets.delete('T3'); for (const c of ch.wss.clients) c.send(JSON.stringify({ method: 'Target.targetDestroyed', params: { targetId: 'T3' } }));
   await until(() => !w.factFor({ ...tgt, consume: false }).stuck, 1000);
+  ok(evs.some((e) => e.kind === 'held-cleared' && e.targetId === 'T3' && e.why === 'tab-closed') && !w.factFor({ ...tgt, consume: false }).held && !w.stuckForKey(KEY) && !w.pageStuckMap()[NAMED], 'the held tab CLOSED ⇒ `held-cleared` (why tab-closed — the fact moves, the live view redraws) and no fact anywhere');
+  w.resetOutcomes(NAMED);
   // three timeouts ⇒ unresponsive; the keeper's fact via stuckForKey; a restart resets
   // verify r1: a shared browser's OTHER conversation timing out is not this one's run
   for (let i = 0; i < 3; i++) w.noteOutcome(NAMED, { state: 'timeout', browserKey: KEY2 });
@@ -1246,6 +1293,30 @@ async function noticeCase(scenario, { Dmod = D, SSmod = null } = {}) {
   await sleep(200);
   const f = w.factFor({ profileId: NAMED, browserKey: KEY, consume: true });
   ok(ch.handled.length === 0 && f.open && f.open.type === 'alert' && f.notes.length === 0, 'CONTROL: without the rule an alert holds the page (nothing accepted it, no note) — the ② alert leg reddens on it');
+  w.shutdown(); await ch.close();
+}
+
+// ═══ ②h lane browser-held-not-hung: the hold is RE-JUDGED at every re-ask (clocks shortened — RE_ENABLE_MS is 30 s) ═══
+console.log('②h the hold re-judged: an ok aging past 60 s, a held tab that answers at last');
+{
+  const ch = await fakeChrome().listen();
+  ch.addTab('H1'); ch.addTab('H2', { held: true });
+  const keeper = { cdpEndpointFor: async () => ({ ok: true, url: ch.url }), onLease: () => () => { }, setFor: () => ({ attachments: [{ profileId: NAMED }] }), ephemeralFor: () => null };
+  const w = D.create({ keeper, log: { warn() { }, log() { } }, enableTimeoutMs: 200, reEnableMs: 150, tabsOf: () => null, leaseCountOf: () => 1, holdersOf: () => [{ browserKey: KEY, sessionId: 'sess-1' }] });
+  const evs = []; w.onChange((e) => evs.push(e));
+  await w.arm(NAMED);
+  await until(() => evs.some((e) => e.kind === 'held' && e.targetId === 'H2'), 2000);
+  w.noteOutcome(NAMED, { state: 'ok', browserKey: KEY, at: Date.now() - 59_400 });
+  const k0 = w.stuckForKey(KEY);
+  await until(() => evs.some((e) => e.kind === 'stuck' && e.why === 'held-rejudged'), 3000);
+  const k1 = w.stuckForKey(KEY);
+  ok(k0 && k0.state === 'blind' && k1 && k1.state === 'unresponsive' && k1.why === 'tab-held' && w.pageStuckMap()[NAMED].state === 'unresponsive', 'an ok 59.4 s old under a held tab ⇒ blind; once it ages past 60 s the RE-ASK re-judges (a `stuck` event: the row and the chip move without any verb)', { k0, k1 });
+  const quiet = evs.filter((e) => e.kind === 'stuck').length;
+  await until(() => evs.filter((e) => e.kind === 'held-rejudged').length >= 2, 3000);
+  ok(evs.filter((e) => e.kind === 'stuck').length === quiet, 'a re-ask whose row fact did not move says `held-rejudged` (the session facts re-judge) — never another `stuck` (no digest re-broadcast every 30 s)');
+  ch.targets.get('H2').held = false;
+  await until(() => evs.some((e) => e.kind === 'held-cleared' && e.targetId === 'H2'), 3000);
+  ok(!w.stuckForKey(KEY) && !w.pageStuckMap()[NAMED] && !w.factFor({ profileId: NAMED, browserKey: KEY, sessionId: 'sess-1', consume: false }).held, 'a held tab that answers Page.enable at last ⇒ `held-cleared`, no fact');
   w.shutdown(); await ch.close();
 }
 

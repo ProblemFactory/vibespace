@@ -5845,6 +5845,7 @@ label.chan-cap-row { cursor: default; }
    an UNRESPONSIVE page offers Restart (theme vars only) */
 .browser-live-dialog { display: flex; flex-direction: column; gap: 4px; padding: 6px 10px; flex-shrink: 0; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--yellow, var(--accent)) 14%, var(--bg-window)); font-size: 12px; color: var(--text); }
 .browser-live-dialog.stuck { flex-direction: row; align-items: center; gap: 8px; flex-wrap: wrap; }
+.browser-live-dialog.blind { background: var(--bg-window); color: var(--text-secondary); font-size: 11px; padding: 3px 10px; } /* lane browser-held-not-hung: the watch's quiet info line, never the yellow banner */
 .browser-live-dialog-title { font-weight: 600; }
 .browser-live-dialog-body { overflow-wrap: anywhere; white-space: pre-wrap; min-width: 0; flex: 1 1 auto; }
 .browser-live-dialog-note { font-size: 11px; color: var(--warn-text); }
