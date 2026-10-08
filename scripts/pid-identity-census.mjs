@@ -12,6 +12,8 @@
 //   unknown   — a RECORDED pid this build does not prove yet (EXEMPT, with why + a backlog line in the lane report)
 import fs from 'fs';
 import path from 'path';
+import { execFileSync } from 'child_process';
+import { gitEnvFrom } from './git-env.mjs';
 
 export const SITE = /process\.kill\(|\bkill -(?:[0-9A-Z]|\$\{?)|\bpkill\b|\bkillall\b|tail --pid|\['kill'|\('kill'/;
 const COMMENT = /^\s*(\/\/|\/?\*|#)/;
@@ -144,13 +146,17 @@ export function judgeCensus(files, rows = ROWS) {
   for (const r of rows) if (used.has(r)) counts[r[2]] = (counts[r[2]] || 0) + 1;
   return { rows: out, red, dead, counts };
 }
-/** The census scope, read off a checkout: src/**.js, server.js, data/bin/*, scripts/ci.mjs, the image entrypoint. */
+/** The census scope, read off a checkout: src/**.js, server.js, data/bin/* (TRACKED), scripts/ci.mjs, the image entrypoint. */
 export function censusFiles(repo) {
   const out = [];
   const walk = (d) => { for (const e of fs.readdirSync(path.join(repo, d), { withFileTypes: true })) { const p = path.posix.join(d, e.name); if (e.isDirectory()) { if (p !== 'src/client') walk(p); } else if (/\.(c?js|mjs)$/.test(e.name)) out.push(p); } };
   walk('src');
-  // data/bin/vibespace-agentd.js is the BUILT daemon bundle (npm run build) — its sources are the src/ rows
-  for (const e of fs.readdirSync(path.join(repo, 'data/bin'))) { const p = 'data/bin/' + e; if (e !== 'vibespace-agentd.js' && fs.statSync(path.join(repo, p)).isFile()) out.push(p); }
+  // data/bin: the TRACKED files only (git ls-files), never a readdir — an instance's data/bin also holds what it downloaded
+  // or generated, and the owner's Update went red at 2.369.237 on the gitignored 63 MB rclone ELF (its bytes hold
+  // 'kill -SIGHUP $(pidof rclone)'). data/bin/vibespace-agentd.js is the BUILT daemon bundle (npm run build) — its sources
+  // are the src/ rows. The git env is sanitized: the census runs inside the pre-push hook (GIT_DIR / GIT_INDEX_FILE)
+  const tracked = execFileSync('git', ['-C', repo, 'ls-files', '-z', '--', 'data/bin'], { encoding: 'utf8', env: gitEnvFrom(process.env), maxBuffer: 1 << 24 }).split('\0');
+  for (const p of tracked) if (/^data\/bin\/[^/]+$/.test(p) && p !== 'data/bin/vibespace-agentd.js' && fs.existsSync(path.join(repo, p)) && fs.statSync(path.join(repo, p)).isFile()) out.push(p);
   out.push('server.js', 'scripts/ci.mjs', 'deploy/docker/entrypoint.sh');
   return out.filter((p) => fs.existsSync(path.join(repo, p))).sort().map((p) => [p, fs.readFileSync(path.join(repo, p), 'utf8')]);
 }

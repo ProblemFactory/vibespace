@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.238 — 2026-10-08
+
+### Fixed
+- Updating no longer fails on a machine with rclone installed.
+
 ## 2.369.237 — 2026-10-08
 
 ### Added

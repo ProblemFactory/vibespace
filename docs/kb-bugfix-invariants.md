@@ -484,6 +484,7 @@
 - A FORK ASKED THROUGH THE API RESUMED THE PARENT (B-8b7b, lane fork-flag-server-side) — 不变量 = the server derives the fork flag from the fork fact, one producer; a fork that owns its parent's id is killed before its first turn
 - A FILE CHOOSER, AN HTTP SIGN-IN, A PERMISSION PROMPT AND PRINT WERE FROZEN PICTURES (B-ebfc, lane browser-ui-prompts) — 不变量 = every browser prompt the screencast cannot paint is a named fact with one way out, or is decided before it can hold; a typed credential never reaches an agent or a log
 - A PID RECORDED HOURS AGO WAS KILLED AS IF IT WERE STILL OURS (B-1cc6, lane pid-identity-census) — 不变量 = a pid is never an identity; every signal to a recorded pid proves starttime (+ bootId), an unprovable one is reported, never killed
+- THE PID CENSUS READ THE OWNER'S rclone BINARY (Update exit 1 at .237): §85 fs-walked data/bin and grepped a gitignored 63 MB ELF. FIX = the scope is the tracked list. 不变量 = a census walks the tracked tree, never an instance's data dir
 
 ## THIRTEEN BROWSER DAEMONS OUTLIVED THEIR CONVERSATIONS BY DAYS (lane daemon-orphan-end, 2.369.237 — a fleet pod, 2026-10-07)
 

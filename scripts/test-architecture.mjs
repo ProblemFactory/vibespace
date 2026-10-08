@@ -4638,6 +4638,21 @@ console.log('\n§84 a suite ends what it made (B-60d2)');
     ['a comment naming process.kill(pid)', red85('src/x.js', '// process.kill(pid) alone is never enough\n'), false],
   ];
   ok(r85.every(([, got, want]) => got === want), `§85 CONTROLS: ${r85.map(([n, got, want]) => `${n} (${got === want ? (want ? 'RED' : 'quiet') : 'WRONG'})`).join(', ')}`);
+  // int238 HOTFIX (the owner's Update exit 1 at 2.369.237): the scope is the TRACKED data/bin, never a readdir — a scratch
+  // repo whose data/bin holds an IGNORED file with a kill line (the downloaded rclone ELF's shape) and a TRACKED one
+  const s85 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-arch85-'));
+  try {
+    fs.mkdirSync(path.join(s85, 'src'), { recursive: true }); fs.mkdirSync(path.join(s85, 'data/bin'), { recursive: true });
+    fs.writeFileSync(path.join(s85, 'src/a.js'), 'module.exports = 1;\n');
+    fs.writeFileSync(path.join(s85, '.gitignore'), 'data/bin/rclone\n');
+    fs.writeFileSync(path.join(s85, 'data/bin/rclone'), '\x7fELF\0\0 kill -SIGHUP $(pidof rclone) \0');
+    fs.writeFileSync(path.join(s85, 'data/bin/vibespace-x'), '#!/bin/sh\nkill -TERM "$P"\n');
+    const g85 = (...a) => spawnSync('git', ['-C', s85, ...a], { encoding: 'utf8', env: gitEnvFrom(process.env) });
+    g85('init', '-q'); g85('add', '-A');
+    const tracked85 = C.censusFiles(s85).map(([f]) => f), ignored85 = C.censusFiles(s85).filter(([f]) => f !== 'data/bin/vibespace-x');
+    ok(!tracked85.includes('data/bin/rclone') && tracked85.includes('data/bin/vibespace-x') && C.judgeCensus(ignored85).red.length === 0 && C.judgeCensus(C.censusFiles(s85)).red.length > 0,
+      `§85 CONTROL: the scope is the TRACKED data/bin — an ignored data/bin/rclone holding a kill line is never read (quiet), a tracked data/bin kill line is RED (scope ${JSON.stringify(tracked85)})`);
+  } finally { fs.rmSync(s85, { recursive: true, force: true }); }
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

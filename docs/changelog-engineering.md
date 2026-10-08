@@ -4,6 +4,13 @@ This file is the engineers' record of every release: the lanes, the verification
 
 `CHANGELOG.md` (with `CHANGELOG.zh.md` and `CHANGELOG.ja.md`) is the user's: what changed for the person using VibeSpace, one plain line per change, in the interface's language — the rules are in docs/changelog-style.md. From 2.369.199 on, every release also writes its section here, under the same `## <version> — <date>` heading as its user entry and in the same commit, newest first above the verbatim record.
 
+## 2.369.238 — 2026-10-08
+
+### int238 hotfix (Opus) — updating no longer fails on a machine with rclone installed (the owner's Update exit 1 at 2.369.237; rel237's Actions red) — on master d7cff48b6 (2.369.237)
+
+- **§85 reads the tracked list (cherry-pick of the int238 seam 826aa8403):** scripts/pid-identity-census.mjs `censusFiles` listed data/bin by readdir and grepped every file; on the owner's instance (and a fleet pod) data/bin/rclone is the gitignored 63 MB rclone ELF, whose bytes hold `kill -SIGHUP $(pidof rclone)` ⇒ "§85 704 files … RED", the build and so the Update stopped, every retry. The scope is now `git ls-files -z -- data/bin` (top level, the sanitized git env — the census runs inside the pre-push hook; vibespace-agentd.js still excluded; the generated vibespace-browser-passkey.js copy drops out too, its source is a src row). test-architecture §85 gains a CONTROL: a scratch repo whose IGNORED data/bin/rclone holds a kill line is quiet, a TRACKED one is RED. Proofs on git-archive copies: d7cff48b6 + a planted ignored rclone ⇒ §85 RED; the fix + the plant ⇒ green; the fix + a tracked kill line ⇒ RED; MUTANT readdir ⇒ the CONTROL red. kb-bugfix INDEX line at the end.
+- **⑦ counts work (cherry-pick of 3f2f69338):** rel237's Actions fast shard was red on test-artifacts-list-model ⑦ `ok(med < 5)` — listPlan at 500 rows read 7.63 ms on the runner. Now judged in WORK (scripts/work-meter.mjs judgeInChild): 250 → 500 ×2.11, 500 → 1000 ×2.08 ≤ 2.2; a quadratic copy (an in-suite CONTROL) ×3.28 red; the ms printed only; ci.mjs CLOCK_JUDGES lists the print ("not a judge"), the row's why says it. The old pin had slipped past the clock-judge census (no complexity word beside it).
+
 ## 2.369.237 — 2026-10-08
 
 ### int237 — the integration (Opus): a browser helper left behind by a closed conversation is cleaned up by itself; a conversation forked by an agent or through the API is a real fork; when a page asks for a file, a sign-in or a permission the live view shows it and the agent is told what to do; VibeSpace never stops a process it cannot prove is its own — on master 0c234ffb4 (2.369.236)

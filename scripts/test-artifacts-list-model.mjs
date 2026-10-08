@@ -3,10 +3,13 @@
 // src/lib/artifacts-list-model.js). DOM-free: filterRows over name / path tail / helper (CJK, case fold, the 80-char
 // bound, matchedCode); orderRows 3 groups × 3 sorts over the owner's 217-row conversation (43 deliverables + 174 code)
 // with ties — stable and deterministic; recentOf (code included) + the band rule; rowWords per kind (services say their
-// state); countLine; sortRows / railOf / railRows (the window's); listPlan; < 5 ms at 500 rows (printed). Each table row
+// state); countLine; sortRows / railOf / railRows (the window's); listPlan; listPlan LINEAR in WORK at 250 → 500 → 1 000 rows (scripts/work-meter.mjs; the ms only printed). Each table row
 // has a control.
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { judgeInChild, LINEAR_BOUND } from './work-meter.mjs';
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const M = await import(pathToFileURL(path.join(REPO, 'src/lib/artifacts-list-model.js')).href);
 let pass = 0, fail = 0;
@@ -121,15 +124,34 @@ const v1 = M.viewFrom({ group: 'helper', sort: 'edits', collapsed: { helper: ['h
 ok(v1.group === 'helper' && v1.sort === 'edits' && v1.collapsed.helper[0] === 'h:pt2:fix' && v1.collapsed.kind.join() === 'k:code', 'viewFrom keeps a stored choice; an absent kind fold set = 代码 collapsed');
 ok(JSON.stringify(M.viewFrom('junk')) === JSON.stringify(M.viewFrom(null)) && M.viewFrom({ group: 'x' }).group === 'kind', 'junk ⇒ the defaults');
 
-console.log('⑦ the work at 500 rows (< 5 ms per keystroke: filterRows → orderRows)');
+console.log('⑦ the work per keystroke (filterRows → orderRows): LINEAR in WORK at 250 → 500 → 1 000 rows; the clock printed, never judged');
 const big = []; for (let i = 0; i < 500; i++) big.push({ ...ROWS[i % ROWS.length], key: 'k' + i, name: (i % 3 ? 'mod_' : 'Sec') + i + '.py' });
 for (let i = 0; i < 20; i++) M.orderRows(M.filterRows(big, 'sec1').rows, { group: 'kind' }); // warm
 const takes = [];
 for (const q of ['s', 'se', 'sec', 'sec1', 'sec10', 'pt2', '']) { const t0 = performance.now(); M.listPlan({ items: big.slice(0, 43), code: big.slice(43) }, { q, group: 'kind', sort: 'changed' }); takes.push(performance.now() - t0); }
 takes.sort((a, b) => a - b);
 const med = takes[Math.floor(takes.length / 2)];
-console.log(`  · listPlan at 500 rows: median ${med.toFixed(2)} ms, max ${takes[takes.length - 1].toFixed(2)} ms over ${takes.length} queries`);
-ok(med < 5, `median < 5 ms (${med.toFixed(2)} ms)`);
+console.log(`  · listPlan at 500 rows: median ${med.toFixed(2)} ms, max ${takes[takes.length - 1].toFixed(2)} ms over ${takes.length} queries (information only)`);
+// int238 (rel237's Actions red: the runner read a 7.63 ms median against the old `med < 5` pin): a complexity gate counts WORK,
+// never the clock (lane-mirror-198, scripts/work-meter.mjs) — the 7 keystrokes' listPlan over n vs 2n rows, judged in a child
+const LP = {
+  module: path.join(REPO, 'src/lib/artifacts-list-model.js'), kind: 'linear',
+  run: "(M, v) => { for (const q of ['s', 'se', 'sec', 'sec1', 'sec10', 'pt2', '']) M.listPlan(v, { q, group: 'kind', sort: 'changed' }); }",
+  mk: "(n) => { const T0 = Date.UTC(2026, 9, 7, 12); const rows = Array.from({ length: n }, (_, i) => { const nm = (i % 3 ? 'mod_' : 'Sec') + i + '.py'; "
+    + "return { key: 'k' + i, kind: i % 3 ? 'code' : (i % 2 ? 'doc' : 'other'), name: nm, path: '/home/u/p/src/pkg' + (i % 9) + '/' + nm, lastAt: T0 - (i % 17) * 3600e3 - (i % 3) * 60e3, "
+    + "writes: i % 4, edits: i % 5, via: i % 5 === 4 ? null : { kind: 'subagent', name: 'pt2:h' + (i % 7) } }; }); "
+    + "return { items: rows.filter((r) => r.kind !== 'code'), code: rows.filter((r) => r.kind === 'code') }; }",
+};
+for (const n of [250, 500]) { const v = judgeInChild({ ...LP, n }); ok(v.ok, `listPlan is LINEAR in WORK over ${n} → ${2 * n} rows (×${(v.r || 0).toFixed(2)} ≤ ${LINEAR_BOUND}: ${v.w1} → ${v.w2} ops)`, v.err || ''); }
+{ // CONTROL: a quadratic listPlan copy (a findIndex dedupe over every row) must read red
+  const s7 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-alm7-'));
+  try {
+    const src7 = fs.readFileSync(LP.module, 'utf8'), needle7 = '  const all = [...items, ...code];\n';
+    fs.writeFileSync(path.join(s7, 'artifacts-list-model.mjs'), src7.replace(needle7, '  const all = [...items, ...code].filter((r, i, a) => a.findIndex((x) => x.key === r.key) === i);\n'));
+    const q7 = judgeInChild({ ...LP, module: path.join(s7, 'artifacts-list-model.mjs'), n: 250 });
+    ok(src7.includes(needle7) && !q7.ok && q7.r > LINEAR_BOUND, `CONTROL: a quadratic listPlan copy reads ×${(q7.r || 0).toFixed(2)} over 250 → 500 rows — red`, q7.err || '');
+  } finally { fs.rmSync(s7, { recursive: true, force: true }); }
+}
 
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASSED'} (${pass} passed)`);
 process.exit(fail ? 1 : 0);
