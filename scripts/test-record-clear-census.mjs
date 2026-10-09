@@ -165,6 +165,7 @@ const CHANNELS_GATES = {
   unreact: 'convOr404(',
   storedRecord: 'store.index',                          // a reply's anchor: a KNOWN conversation's stored message
   newestStored: 'store.index',
+  sharedSince: 'store.index.peek(',                     // lane slack-file-send-key r2: the sent transition's look-back — a KNOWN conversation's own stored shares (file ids only, never served)
   propose: 'convFor(',
   proposeReaction: 'convFor(',
   // lane lark-threads: "does the log hold this message" — a boolean, never a served record; asked by the change feed's
@@ -1830,6 +1831,7 @@ const I_RECV = {
   'src/usage-routes.js|hMeta2': ['host', 'a machine name'], 'src/usage-routes.js|hMeta': ['host', 'a machine name'], 'src/weekly-lanes-unfold.js|lane': ['quota', 'a lane\'s name'],
   'src/spawn/ssh.js|h': ['host', 'a machine name'], 'src/spawn/dial.js|h': ['host', 'a machine name'], 'src/ws-handler.js|data': ['caller', 'the owner\'s own queued text (a refusal echoes its LENGTH to the owner who typed it)'],
   'src/ws-handler.js|h': ['host', 'a machine name'], 'src/ws-handler.js|wcaps': ['harness', 'a wrapper capability\'s reason'],
+  'src/ws-handler.js|w': ['words', 'the withheld-signal sentence (B-5ee1, proc-identity withheldWords): the killed session\'s name or its machine, a pid number and a start minute — never a record\'s words'],
   // ── verify r8 ③: the journal's receivers (every server console / log line rides the incident ring) ──
   'data/bin/codex-chat-wrapper.js|r': ['harness', 'an app-server answer\'s reason / detail (an RPC refusal)'], 'data/bin/codex-chat-wrapper.js|st': ['harness', 'a steer answer\'s reason / detail (an RPC refusal)'],
   'src/accounts.js|to': ['account', 'a pool member (the deleted default\'s re-point target — lane pool-pin)'], 'src/accounts.js|pool': ['account', 'a pool'],

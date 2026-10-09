@@ -7,6 +7,7 @@ const i18nKey = (s) => s; // extraction marker (scripts/i18n-extract.mjs) — th
 
 module.exports = {
   id: 'cloud',
+  dirCache: { ttl: '30s' },   // its records name many backends: the 30 s listing bound, no poll declared (only a row of ONE polling backend may)
   oauth: null,            // rclone's own client per backend — nothing to lend
   oauthBacked: () => true,
   adopts: (rcloneType, MM) => !!MM.CLOUD_BACKENDS[rcloneType],

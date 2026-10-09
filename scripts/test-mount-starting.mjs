@@ -12,6 +12,8 @@
 //     making CPU progress is not torn down (the 15:09 / 16:41 path), an idle one still is
 //   ⑤ a hung daemon (no CPU progress) is killed ⑥ "not empty" → stranded + ONE retry, said on the row
 //   ⑦ patched-copy controls: the 5 s verdict restored ⇒ red; unblock before mount ⇒ red
+//   ⑧ the log survives a remount (lane mount-argv-dir-cache): a killed daemon's last line is still readable after
+//     the next daemon mounts (the log was reopened 'w' at every spawn)
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -31,6 +33,7 @@ fs.writeFileSync(FAKE, `#!/bin/bash
 if [ -z "$FAKE_REEXEC" ]; then FAKE_REEXEC=1 exec -a "$0" /bin/bash "$0" "$@"; fi
 [ "$1" = mount ] || exit 0
 MP="$3"; echo "$MP" >> "$FAKE_DIR/spawns"
+[ -n "$FAKE_SAY" ] && echo "$FAKE_SAY $$"
 busy() { local end=$(( \${EPOCHREALTIME/./} + $1 * 1000000 )); while (( \${EPOCHREALTIME/./} < end )); do :; done; }
 idle() { while :; do sleep 1; done; }
 case "$FAKE_MODE" in
@@ -113,6 +116,8 @@ try {
   mgr._probeMountpoint = async () => { await sleep(700); return 'hung'; }; // the real probe needs 6 s to say hung
   await sleep(300);
   await mgr._healthSweep();
+  ok(!calls.includes('A') && /not answering/.test(row(mgr, 'A').error || ''), '④ the first silent sweep is a STRIKE, never a teardown (lane mount-liveness: strikes ≥ 2)', calls.join());
+  await mgr._healthSweep();   // the second consecutive silent sweep — the deadlock signature
   ok(!calls.includes('B') && mgr._daemonPids(mgr.pathOf(mgr._get('B'))).length === 1 && /storage busy/.test(row(mgr, 'B').error || ''), '④ a slow listing while the daemon makes CPU progress is NOT torn down (no lazy unmount, no kill)', calls.join() + ' ' + row(mgr, 'B').error);
   ok(calls.includes('A'), '④ …while an IDLE daemon whose listing hangs still is (the unreachable-host defense stands)', calls.join());
   mgr.unmount = realUnmount;
@@ -134,6 +139,22 @@ try {
   ok(m1 && !m1.alive && !m1.starting, '⑦ NEGATIVE CONTROL: the fixed 5 s verdict restored ⇒ the scanning daemon is called failed and killed (red)', JSON.stringify(m1));
   const m2 = await mutant('unblock', 'this.blockPath(mp, T.ceilingMs + 60e3);', 'this.unblockPath(mp);');
   ok(m2 && !m2.blocked, '⑦ NEGATIVE CONTROL: unblock before the mount exists ⇒ the bare directory is writable (red)', JSON.stringify(m2));
+
+  // ── ⑧ the log survives a remount ──
+  const gl = makeMgr(MountManager, 'log', [rec('L', { FAKE_SAY: 'NOTICE: fake daemon' })]); all.push(gl);
+  const mpL = gl.pathOf(gl._get('L'));
+  await gl.mount('L');
+  ok(await until(() => row(gl, 'L').mounted, 5000), '⑧ the first daemon mounts');
+  const pid1 = gl._daemonPids(mpL)[0];
+  gl._killMountDaemon(mpL); fs.rmSync(path.join(D, 'mounted-L'), { force: true });
+  await until(() => gl._daemonPids(mpL).length === 0, 3000);
+  await gl.mount('L');
+  ok(await until(() => row(gl, 'L').mounted, 5000), '⑧ …is killed, and a second daemon mounts the same record');
+  const pid2 = gl._daemonPids(mpL)[0];
+  const lines = gl.tailMountLog('L', 10);
+  ok(pid1 && pid2 && pid1 !== pid2 && lines.includes(`NOTICE: fake daemon ${pid1}`) && lines.includes(`NOTICE: fake daemon ${pid2}`) && lines.filter((l) => l.startsWith(MountManager.LOG_MARK)).length === 2,
+    '⑧ the dead daemon\'s last line is still readable after the remount (one spawn marker each)', `${pid1} ${pid2} ${JSON.stringify(lines)}`);
+  ok(gl.tailMountLog('L', 5, { current: true }).join('|') === `NOTICE: fake daemon ${pid2}`, '⑧ the newest daemon\'s own lines (what the start verdict quotes) hold only its words');
 
   // ── the row: no Connect while starting, the line says what it waits for ──
   const sb = fs.readFileSync(path.join(REPO, 'src/lib/sidebar-mounts.js'), 'utf8');

@@ -10,6 +10,7 @@ const webdav = require('./webdav.js');
 module.exports = {
   ...webdav,              // the same config / edit / rclone shape as WebDAV
   id: 'vibespace',
+  dirCache: { ttl: '30s' },   // no ChangeNotify in rclone for this backend: a listing is re-read when 30 s old (no poll flag)
   davUrl: (m) => m.url + '/dav',
   revocable: true,        // the sharing instance can revoke the token — the heavier backend re-auth probe runs
   everyFileErrors: 'connected but every file errors — the share may have been revoked, or the source instance is unreachable',

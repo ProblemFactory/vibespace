@@ -6375,6 +6375,9 @@ function create(deps = {}) {
     // lane lark-threads (B2–B5): the batch through the ONE view door — a wake / a For-you item names an author as the owner
     // reads them (`author.display`: the owner's name › the vendor's way); the vendor `name` (what a rule matches) unchanged
     const fresh = fresh0.map((r) => viewOf(rec, r));
+    // lane slack-file-send-key (B-2840): a self-authored share re-keys a file send BEFORE this batch is judged (the share
+    // precedes its replies by ts, so a reply in this very batch already names a known message); never costs the wake
+    try { await learnSentFiles(rec, convId, fresh0); } catch (err) { log.warn(`[channels] ${rec.id}/${convId}: a file send's message could not be learned (a reply under it will not count): ${(err && err.message) || err}`); }
     const t = now();
     const selfId = selfIdOf(rec);
     const en = store.index.peek(`${rec.id}/${convId}`);
@@ -7069,7 +7072,7 @@ function create(deps = {}) {
   const {
     honestyLineFor, proposalsFor, stashAbout, stashGate, outboxView, sendStartsTurn, outboxAttachment, filesSweep, propose, proposeReaction, compose,
     approve, reject, onProposal, withdrawProposal, replaceProposal, noteReceiptStash, reconcileReceiptFates, reconcile, sweepSending, sweepReplaces,
-    receipt, expireSweep, pointerSync,
+    receipt, expireSweep, pointerSync, learnSentFiles,
   } = Object.assign(engineCtx, ChannelsOutbound.create(engineCtx));
   const {
     clientFor, resolverFor, credentialFactsFor, credentialFacts, offeredCredentials, defaultCredentialKey, credentialLabelFor, connectableFor,

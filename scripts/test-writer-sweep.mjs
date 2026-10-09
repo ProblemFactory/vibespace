@@ -1826,6 +1826,10 @@ if (fs.existsSync('/proc/self')) {
       why: 'ARGV READ — the JS twin of vs_argv\'s allowlisted `ps -p "$1" -o args=` rung, same non-decision: an unanswerable `ps` yields the empty word that already means "no evidence" to isCliProcess.' },
     { file: 'src/proc-identity.js', needle: `spawnSync('ps', ['-p', String(pid), '-o', 'lstart=']`,
       why: 'START-TIME READ (startToken, moved verbatim from agentd pidStartTime by lane pid-identity-census, B-1cc6 — the no-/proc rung of the pid-identity stamp): it makes a recycled pid DISTINGUISHABLE from the original. An unanswerable `ps` returns \'\' = "no stamp", which is compared as a non-match and therefore never credits a stranger with being ours.' },
+    { file: 'src/proc-identity.js', needle: `vs_sp_ps=$(ps -p "$1" -o lstart= 2>/dev/null`,
+      why: 'START-TIME READ (vs_same_proc, the sh twin of startToken — B-5ee1, lane pid-identity-close — no-/proc rung): a VALUE compared to the recorded birth; an unanswerable `ps` yields no token = "gone" = never signalled, the safe direction.' },
+    { file: 'data/bin/vibespace-remote-keeper', needle: `spawnSync('ps', ['-p', String(pid), '-o', 'lstart=']`,
+      why: 'The SHIPPED TWIN of startToken (byte-identical copy of the marked section of src/proc-identity.js, pinned by test-pid-identity): the keeper ships to a host as one file. Same value-not-existence rule.' },
     { file: 'src/agentd/agentd.js', needle: `execFileSync('ps', ['-p', String(pid), '-o', 'command=']`,
       why: 'ARGV READ inside the single-instance lock check, and existence is decided on the NEXT line by `process.kill(pid, 0)`. The empty answer is deliberately treated as "could be ours" (it BLOCKS a second daemon) — the conservative direction, the opposite of a false all-clear.' },
     // The two PARENT READs that used to sit here (`execFileSync`/`execFileP`

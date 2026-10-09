@@ -1216,7 +1216,7 @@ console.log('\n— ROUND 7 (the sixth review: stop() vs the KEEPER ladder alread
  *  This is src/opencode-serve.js with exactly this fix's checks removed; its
  *  relative requires are re-pointed at the repo so it can live in /tmp. */
 const R7_NEUTER = [
-  ['the acquisition-point check in adopt()', 'async function adopt(port, pid, source, epoch) {\n    if (cancelled(epoch)) return null;', 'async function adopt(port, pid, source, epoch) {', 1],
+  ['the acquisition-point check in adopt()', 'async function adopt(port, pid, source, epoch, birth = null) {\n    if (cancelled(epoch)) return null;', 'async function adopt(port, pid, source, epoch, birth = null) {', 1],
   ['the reuse-probe check', '        if (cancelled(epoch)) return null;\n        // THE OPS KILL SWITCH', '        // THE OPS KILL SWITCH', 1],
   ['the isolated-cwd check', '      if (cancelled(epoch)) return null;   // `git init` is an await too: a disable landing in it used to reach the spawn below\n', '', 1],
   ['the pre-spawn check', '    if (cancelled(epoch)) return null;   // never START a third-party daemon for a service that was turned off mid-ladder\n', '', 1],
@@ -2105,8 +2105,8 @@ const R11_NEUTER = [
 ];
 const R11_STOP_NEUTER = [
   ["stop()'s verdict route",
-    "      const decided = decideRecordedKill(rec, talking ? livePid : null);\n      if (decided.pid) { try { if (decided.pid !== process.pid) killPid(decided.pid, 'SIGTERM'); } catch { } }\n      else if (decided.why) { state.lastError = decided.why; log?.warn?.(`[opencode-serve] ${decided.why}`); }",
-    "      const target = livePid || rec?.pid || null;\n      try { if (target && target !== process.pid) killPid(target, 'SIGTERM'); } catch { }", 1],
+    "      const decided = decideRecordedKill(rec, talking ? livePid : null);\n      const birth = talking && decided.pid === livePid ? liveBirth : { start: rec && rec.start, bootId: rec && rec.bootId };\n      if (decided.pid) { try { if (decided.pid !== process.pid) signalServe(decided.pid, birth.start, birth.bootId, 'SIGTERM', 'serve stop'); } catch { } }\n      else if (decided.why) { state.lastError = decided.why; log?.warn?.(`[opencode-serve] ${decided.why}`); }",
+    "      const target = livePid || rec?.pid || null;\n      try { if (target && target !== process.pid) (killPid || ((p, s) => process.kill(p, s)))(target, 'SIGTERM'); } catch { }", 1],
 ];
 /** RESIDUAL (a) — the PRE-FIX stop(): a Disable that leaves the blocked/runaway
  *  park standing, so the store keeps reporting itself broken after the user

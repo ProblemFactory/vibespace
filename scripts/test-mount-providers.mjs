@@ -174,12 +174,19 @@ ok(fake.oauth && fake.lent, '② its declared cells reach the OAuth facts: OAuth
     return out;
   }
   if (baseSrc) {
-    const before = await snap(OLD, 'base'), after = await snap(MountManager, 'tree');
+    let before = await snap(OLD, 'base'); const after = await snap(MountManager, 'tree');
     const firstDiff = (a, b, at = '') => {
       if (JSON.stringify(a) === JSON.stringify(b)) return null;
       if (a && b && typeof a === 'object' && typeof b === 'object') for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) { const d = firstDiff(a[k], b[k], at + '.' + k); if (d) return d; }
       return `${at}: ${JSON.stringify(a)} ≠ ${JSON.stringify(b)}`;
     };
+    // lane mount-liveness (the ONE child resolver): a CHILD of an OAuth record now reads its parent's row, so it IS OAuth-backed
+    // (the s3 default row said false) — the one named delta; the base's answer is lifted to it before comparing
+    const lift = (b, a, k) => (b && a && b[k] && a[k] && b[k].v && a[k].v && b[k].v.oauth === false && a[k].v.oauth === true) ? { ...b, [k]: { ...b[k], v: { ...b[k].v, oauth: true } } } : b;
+    const childDelta = (b, a) => lift(lift(b, a, 'child'), a, 'childUpd');   // the child as added, and after its edit
+    const lifted = before.filter((b, i) => childDelta(b, after[i]) !== b).length;
+    ok(lifted > 0, `③ the child-resolver delta is real: ${lifted} OAuth rows' children now read OAuth-backed (their parent's row)`);
+    before = before.map((b, i) => childDelta(b, after[i]));
     let same = 0; const diffs = [];
     before.forEach((b, i) => { if (JSON.stringify(b) === JSON.stringify(after[i])) same++; else diffs.push(`scenario ${i}: ` + firstDiff(b, after[i])); });
     ok(before.length === after.length && diffs.length === 0, `③ every provider answers the same before and after the move (${same}/${before.length} scenarios: add · list · config · child · edit · rclone env · OAuth/share facts · re-auth client · raw-rclone adoption)`, diffs.join('\n    '));
@@ -273,6 +280,21 @@ ok(fake.oauth && fake.lent, '② its declared cells reach the OAuth facts: OAuth
     const diffs = Object.keys(before).filter((k) => JSON.stringify(before[k]) !== JSON.stringify(after[k]));
     ok(diffs.length === 0 && Object.keys(before).length === Object.keys(after).length, `⑤ DIFFERENTIAL: the base client and this tree answer the same over every real provider (${Object.keys(before).length} facts: Connect fields ×2 preset sets, ${TYPES.length * 4} submit bodies, Edit top/child, names, D2)`, diffs.slice(0, 3).map((k) => { const a = [].concat(before[k]), b = [].concat(after[k]); const i = a.findIndex((x, n) => x !== b[n]); return `${k}[${i}]: ${String(a[i]).slice(0, 300)} ≠ ${String(b[i]).slice(0, 300)}`; }).join('\n    '));
   }
+}
+
+// ⑥ lane mount-argv-dir-cache — the directory cache is a ROW cell (src/mount-argv.js builds the argv from it): every
+// row that runs rclone declares `dirCache`, rclone's poll < ttl law holds, and only a row of ONE ChangeNotify backend
+// (onedrive, drive) declares a poll — a multi-backend row (cloud, rclone) or a backend without ChangeNotify never does.
+{
+  const MA = require(path.join(REPO, 'src/mount-argv.js'));
+  const bad = PROV.rows.flatMap((r) => {
+    if (r.rclone === false) return r.dirCache ? [`${r.id}: dirCache on a row with no rclone`] : [];
+    const d = MA.dirCacheOf(r);
+    return [...(!r.dirCache ? [`${r.id}: no dirCache`] : []), ...(!d.ok ? [`${r.id}: ${d.why}`] : []),
+      ...(d.poll && !MA.CHANGE_NOTIFY_BACKENDS.includes(r.rcloneType) ? [`${r.id}: poll without ChangeNotify`] : [])];
+  });
+  ok(bad.length === 0, `⑥ dirCache census: ${PROV.rows.filter((r) => r.dirCache).length} rclone rows declare it, poll < ttl, poll only on onedrive / drive`, bad.join('; '));
+  ok(PROV.rows.filter((r) => r.dirCache?.poll).map((r) => r.id).sort().join() === 'drive,onedrive', '⑥ the polling rows are exactly onedrive + drive ({5m, 1m} = rclone\'s own defaults)');
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

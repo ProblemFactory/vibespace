@@ -90,6 +90,10 @@ vs_fd_pids() { vs_fd_scan "$1" | cut -f1 | sort -u; }`;
  *  conversation's transcript open); the identity test only decides whether the
  *  holder is the agent CLI (a writer) or a reader that must be left alone. */
 const { cliIdentityShellFns } = require('./cli-identity');
+/** THE BIRTH TEST (`vs_same_proc <pid> <token>`, B-5ee1) — the sh twin of src/proc-identity.js, embedded verbatim: a
+ *  daemon meta's childPid is SIGTERMed only while the meta's `startTime` (agentd's spawn token) still names it. */
+const PI = require('./proc-identity');
+const { procIdentityShellFns } = PI;
 
 /** THE writer sweep's harness-neutral pieces. The per-harness HOLDER legs
  *  (which fds / lock files / argv name a writer of THIS conversation) are the
@@ -100,19 +104,26 @@ const { cliIdentityShellFns } = require('./cli-identity');
  *  legs every script ends with (they reference the conversation id verbatim
  *  whatever the harness). Every kill leg echoes `SWEPT:<pid>` so the caller
  *  can TELL THE USER what was stopped (the honesty rule — a sweep is
- *  destructive by design). */
+ *  destructive by design); a meta pid whose recorded birth no longer names it
+ *  echoes `REFUSED:<pid>:<why>` and is NOT signalled (B-5ee1); a birth-less
+ *  meta (an older daemon) echoes `LEGACY:<pid>` and keeps today's rung. */
 function sweepSharedLegs() {
-  return `for kf in "$HOME"/.vibespace/*/state/sessions/*.json; do
+  return `${procIdentityShellFns()}
+for kf in "$HOME"/.vibespace/*/state/sessions/*.json; do
   [ -e "$kf" ] || continue
   grep -q "$RID" "$kf" 2>/dev/null || continue
   grep -q '"exited"' "$kf" 2>/dev/null && continue
   cpid=$(sed -n 's/.*"childPid":\\([0-9]*\\).*/\\1/p' "$kf" | head -1)
-  [ -n "$cpid" ] && kill -TERM "$cpid" 2>/dev/null && echo "SWEPT:$cpid"
+  [ -n "$cpid" ] || continue
+  cst=$(sed -n 's/.*"startTime":"\\([^"]*\\)".*/\\1/p' "$kf" | head -1)
+  if [ -z "$cst" ]; then echo "LEGACY:$cpid"; kill -TERM "$cpid" 2>/dev/null && echo "SWEPT:$cpid"
+  elif vs_same_proc "$cpid" "$cst"; then kill -TERM "$cpid" 2>/dev/null && echo "SWEPT:$cpid"
+  else case "$VS_SAME_WHY" in pid-recycled|unknown) echo "REFUSED:$cpid:$VS_SAME_WHY";; esac; fi
 done
 find "$HOME/.vibespace/run" -maxdepth 1 -name '*.json' 2>/dev/null | while read -r kf; do
   grep -q "$RID" "$kf" 2>/dev/null || continue
   grep -q '"exited"' "$kf" 2>/dev/null && continue
-  node "$HOME/.vibespace/bin/vibespace-remote-keeper" stop "$(basename "$kf" .json)" >/dev/null 2>&1 || true
+  node "$HOME/.vibespace/bin/vibespace-remote-keeper" stop "$(basename "$kf" .json)" 2>/dev/null | grep '^REFUSED:' || true
 done`;
 }
 
@@ -127,7 +138,7 @@ async function sweepWriters(hosts, hostId, rid, { shq, timeoutMs = 20000, connec
   try {
     const dm = await hosts.deviceBounded(hostId, connectMs);
     const r = await dm.runCmd('sh', ['-c', script], { timeoutMs });
-    return { swept: parseSwept(r?.stdout), via: 'device' };
+    return { swept: parseSwept(r?.stdout), ...sayRefused(r?.stdout, hostId), via: 'device' };
   } catch (e) {
     // ssh hosts keep the legacy per-op channel as the fallback the data plane
     // has always had; local and dial have no second channel by design.
@@ -135,8 +146,32 @@ async function sweepWriters(hosts, hostId, rid, { shq, timeoutMs = 20000, connec
     const h = hosts.get(hostId);
     if (h?.transport === 'dial') throw e;
     const out = await execFileAsync('ssh', [...hosts.sshArgs(h, { multiplex: true }), '--', script], { timeout: timeoutMs, encoding: 'utf-8' });
-    return { swept: parseSwept(out), via: 'ssh' };
+    return { swept: parseSwept(out), ...sayRefused(out, hostId), via: 'ssh' };
   }
+}
+
+/** REFUSED:<pid>:<why> / LEGACY:<pid> lines → { refused: [{pid, why}], legacy: [pid] }, each said ONCE by name in the
+ *  journal (the door: writer sweep). A refused pid is not ours any more — nothing of VibeSpace's holds the file. */
+function parseRefused(stdout) {
+  const refused = [], legacy = [];
+  for (const line of String(stdout || '').split('\n')) {
+    const m = /^REFUSED:(\d+):([\w-]+)/.exec(line.trim());
+    if (m) refused.push({ pid: m[1], why: m[2] });
+    const l = /^LEGACY:(\d+)/.exec(line.trim());
+    if (l) legacy.push(l[1]);
+  }
+  return { refused, legacy };
+}
+const _refusedSaid = new Set();
+function sayRefused(stdout, hostId) {
+  const r = parseRefused(stdout), where = hostId || 'this machine';
+  for (const x of r.refused) {
+    if (_refusedSaid.has(`${where}:${x.pid}`)) continue;
+    _refusedSaid.add(`${where}:${x.pid}`);
+    console.warn(`[writer-sweep] ${where}: pid ${x.pid} — the daemon meta's recorded birth no longer names it (${x.why}), not signalled`);
+  }
+  for (const pid of r.legacy) PI.legacyOnce(`writer sweep on ${where}`, pid);
+  return r;
 }
 
 function parseSwept(stdout) {
@@ -148,4 +183,4 @@ function parseSwept(stdout) {
   return out;
 }
 
-module.exports = { sweepSharedLegs, sweepWriters, parseSwept, fdScanShellFns, cliIdentityShellFns };
+module.exports = { sweepSharedLegs, sweepWriters, parseSwept, parseRefused, fdScanShellFns, cliIdentityShellFns, procIdentityShellFns };

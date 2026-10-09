@@ -137,6 +137,7 @@ const TABLE = {
   'src/plugins/tailscale.js': 'tailscaled plugin socket — socketPathFits asked at start: over ⇒ refused by name',
   'server.js': 'dtach session anchors data/sockets/cw-* — ONE boot line when cw- + 36 exceeds the bound',
   'src/incident.js': 'incident capture — a READER of data/sockets',
+  'src/mount-argv.js': 'rclone mount rc sockets — its own rcSocketPath: $XDG_RUNTIME_DIR/vibespace-mounts or /tmp/vs-mounts-<uid>, the 107-byte bound, never the data dir / a network fs (mounts.js verifies the dir with ensureSocketDir)',
   'data/bin/vibespace-remote-keeper': 'remote keeper socket under ~/.vibespace/run on the remote host — short by construction (existing)',
 };
 const PRODUCER_RE = /\.sock['"`]|\bsockDir\b|\bsocketDir\b|agentd\.sock|ControlPath|\bdaemonSocketPath\b|\bwitnessOrRule\b|socketPathFits|data', 'sockets'|SOCKETS_DIR, 'cw-/;

@@ -236,6 +236,9 @@ function startChild() {
   childDead = false;
   log(`Spawned child PID=${child.pid}${REMOTE_SID ? ` offset=${remoteOffset} attempt=${reconnectAttempts}` : ''}`);
   meta.childPid = child.pid;
+  // its BIRTH beside the pid, same write (B-5ee1): the server's interrupt signals meta.childPid only while this names it;
+  // a birth is a record, never a reason for the wrapper to die at spawn — a failed read leaves a birth-less (legacy) record
+  try { const PI = require(path.join(__dirname, '..', '..', 'src', 'proc-identity.js')); meta.childStart = child.pid ? PI.startToken(child.pid) : ''; meta.childBoot = PI.bootToken(); } catch { meta.childStart = ''; meta.childBoot = ''; }
   scheduleMeta();
 
   // Child stdout → parse JSON lines → buffer + tee to our stdout (dtach PTY).

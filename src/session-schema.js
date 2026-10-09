@@ -192,6 +192,7 @@ const SESSION_FIELDS = {
   // misc consumers
   _sizeOwnerWs:        { owner: 'ws',     persisted: null,      note: 'size-override owner connection' },
   _childPid:           { owner: 'boot',   persisted: 'meta',    note: 'the pid INSIDE the dtach session (the wrapper/CLI, not our pty) — restored from session-meta at boot and used by the kill path' },
+  _childIdentity:      { owner: 'boot',   persisted: 'meta',    note: "_childPid's BIRTH (B-5ee1) — identityFromToken(meta.childPid, meta.childStart, meta.childBoot), written by the wrapper at its spawn tick; null = a legacy wrapper's meta (the cmdline rung, said once). The interrupt signals only through it" },
   _restoreAgentTasks:  { owner: 'boot',   persisted: null,      note: "the wrapper meta's subagent task map, carried from restore until setupSessionPty's watcher is armed, then cleared (null = consumed)" },
   _todos:              { owner: 'stdout', persisted: null,      note: 'TodoWrite/TaskCreate-derived {done,total,current}' },
   _sbSeen:             { owner: 'brain',  persisted: null,      note: 'first-writer-wins record gate (bounded set)' },

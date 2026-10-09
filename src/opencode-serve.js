@@ -112,6 +112,7 @@ const path = require('path');
 const net = require('net');
 const { spawn, execFile } = require('child_process');
 const cliIdentity = require('./cli-identity');   // THE process-identity ladder (residual (c)): one definition for every caller that signals
+const PI = require('./proc-identity');            // the record's BIRTH (B-5ee1): signalServe → signalIdentity
 const { nameFromText } = require('./discovery-facts');
 const { AcpSessionMessages } = require('./acp-message-manager');
 
@@ -840,7 +841,7 @@ function createServeLocator({
   maxCrashes = MAX_CRASHES, stopOnExit = false, onCaps = null, onState = null,
   autostart = true, // false (or a function returning false) = REUSE ONLY (smoke harnesses: a SIGKILLed test server must not leave a serve behind)
   // ── the runaway guard (2.369.50) ──
-  readProc = readProcUsage, killPid = (pid, sig) => process.kill(pid, sig),
+  readProc = readProcUsage, killPid = null, // null = process.kill — only ever behind signalServe (B-5ee1)
   // ── the recorded-serve settlement (round 10) ──
   readCmdline = readProcCmdline, readUid = readProcUid,
   confirmTimeoutMs = RECORD_CONFIRM_TIMEOUT_MS, killWaitMs = RECORD_KILL_WAIT_MS, blockedRetryMs = BLOCKED_RETRY_MS,
@@ -850,7 +851,7 @@ function createServeLocator({
 } = {}) {
   if (!dataDir) throw new Error('createServeLocator: dataDir is required (the record lives at data/opencode-serve.json)');
   const recordPath = path.join(dataDir, 'opencode-serve.json');
-  const state = { client: null, port: null, pid: null, startedAt: null, source: null, child: null, crashes: 0, parked: false, parkedKind: null, runawayUntil: 0, retryAfter: 0, lastError: null, stopping: false, stopEpoch: 0, backoffUntil: 0, caps: null, version: null, capsProbed: false, cwd: cwd || null, cwdIsolated: null, cpuPct: null, memBytes: null, memMetric: null, rssBytes: null, sampledAt: null, skippedWorktrees: [] };
+  const state = { client: null, port: null, pid: null, start: null, startedAt: null, source: null, child: null, crashes: 0, parked: false, parkedKind: null, runawayUntil: 0, retryAfter: 0, lastError: null, stopping: false, stopEpoch: 0, backoffUntil: 0, caps: null, version: null, capsProbed: false, cwd: cwd || null, cwdIsolated: null, cpuPct: null, memBytes: null, memMetric: null, rssBytes: null, sampledAt: null, skippedWorktrees: [] };
   const guard = { prev: null, hotSince: 0, timer: null, memOffSaid: false };
   const guardL = { ...LIMITS, ...(guardLimits || {}), GUARD_CPU_PCT: guardCpuPct, GUARD_CPU_SUSTAIN_MS: guardCpuSustainMs };
   let ensuring = null;
@@ -862,6 +863,17 @@ function createServeLocator({
   const notify = () => { try { onState?.(snapshot()); } catch { } };
   function readRecord() { try { const r = JSON.parse(fs.readFileSync(recordPath, 'utf8')); return r && Number.isInteger(r.port) && r.port > 0 ? r : null; } catch { return null; } }
   function writeRecord(r) { try { writeJsonAtomic(recordPath, r); } catch (e) { log?.warn?.(`[opencode-serve] record write failed: ${e.message}`); } }
+  /** THE SERVE SIGNAL (B-5ee1) — every signal to a serve pid this process holds no handle for (a runaway park of an
+   *  adopted serve, the replace rung, settle's stop, stop({killRecorded})): the record's BIRTH (`start` + `bootId`,
+   *  written beside the pid at the spawn tick, carried by adopt) must still name it — PI.signalIdentity, a refusal
+   *  said once by name. A record from before 2.369.242 has no birth: the cmdline+uid verdict its caller already read
+   *  decides — the LEGACY rung, said once (retire 2026-12-01). The ladder rounds 7–11 are unchanged around it. */
+  function signalServe(pid, start, bootId, sig, door) {
+    if (!pid || pid === process.pid) return { ok: false, why: 'self' };
+    if (start) return PI.signalIdentity(PI.identityFromToken(pid, start, bootId), sig, { kill: killPid || undefined, what: `the opencode serve (${door})`, say: (l) => log?.warn?.(l) });
+    PI.legacyOnce(`opencode serve ${door}`, pid, (l) => log?.warn?.(l));
+    try { (killPid || ((p, s) => process.kill(p, s)))(pid, sig); return { ok: true, target: pid }; } catch (e) { return { ok: false, why: e && e.code === 'EPERM' ? 'not-ours' : 'gone' }; }
+  }
   /** EVERY CLEAR NAMES THE SERVE IT BELIEVES IS RECORDED (round 9).
    *  data/opencode-serve.json is a promise to the NEXT boot: "this port/pid is
    *  ours — adopt it or kill it". Deleting one you do not own leaves a live
@@ -925,9 +937,10 @@ function createServeLocator({
    *  fires `onExternal`, for a service they just disabled. Reproduced through
    *  the real wiring (install() + locator.start() + locator.stop()) with a
    *  busy serve, and again with a stop landing inside the boot probe. */
-  async function adopt(port, pid, source, epoch) {
+  async function adopt(port, pid, source, epoch, birth = null) {
     if (cancelled(epoch)) return null;
     state.client = mkClient(port);
+    if (birth) { state.start = birth.start || null; state.bootId = birth.bootId || null; }
     state.port = port; state.pid = pid; state.source = source; state.startedAt = Date.now(); state.lastError = null;
     guard.prev = null; guard.hotSince = 0; armGuard();
     notify();
@@ -967,14 +980,14 @@ function createServeLocator({
     if (why) parkRunaway(why); else notify();
   }
   function parkRunaway(why) {
-    const pid = state.pid, port = state.port;
+    const pid = state.pid, port = state.port, start = state.start, bootId = state.bootId;
     state.parked = true; state.parkedKind = 'runaway'; state.runawayUntil = now() + runawayCooldownMs;
     state.retryAfter = state.runawayUntil;
     state.lastError = `opencode serve (pid ${pid}) was STOPPED as a runaway: ${why}`;
     guard.prev = null; guard.hotSince = 0;
     const ch = state.child;
     state.child = null; state.client = null; state.port = null; state.pid = null;
-    try { if (ch) ch.kill('SIGTERM'); else if (pid && pid !== process.pid) killPid(pid, 'SIGTERM'); } catch { }
+    try { if (ch) ch.kill('SIGTERM'); else if (pid && pid !== process.pid) signalServe(pid, start, bootId, 'SIGTERM', 'runaway stop'); } catch { }
     clearRecord({ port, pid });   // the serve we just stopped, named (round 9)
     log?.error?.(`[opencode-serve] RUNAWAY — ${state.lastError}. OpenCode boots an instance per session DIRECTORY and its file finder indexes + watches that whole tree; a session rooted at a huge directory burns the machine. Not restarting for ${Math.round(runawayCooldownMs / 60000)} min — disable the "OpenCode background service" plugin (⚙ → Plugins) if it recurs.`);
     try { telemetry?.({ name: 'opencode-serve-runaway', detail: `${why}${port ? ` port ${port}` : ''}`, value: Math.round((state.memBytes || 0) / 1048576) }); } catch { }
@@ -1062,6 +1075,12 @@ function createServeLocator({
    *  same recorded pid (round 11: stop() used to SIGTERM the very pid the
    *  settlement had just refused to signal). */
   function verdictFor(rec, pid) {
+    // the recorded BIRTH first (B-5ee1): a pid whose start no longer matches is provably not the recorded serve —
+    // whatever its cmdline says now (a recycled pid can run another `opencode serve` on the same port)
+    if (rec && rec.start) {
+      const b = PI.tokenVerdict(pid, rec.start, rec.bootId);
+      if (b === 'pid-recycled' || b === 'gone' || b === 'zombie') return { verdict: 'other', why: `pid ${pid} ${b === 'pid-recycled' ? 'now belongs to another process (its start differs from the recorded one)' : 'is gone'} — ${b}` };
+    }
     return classifyRecordedPid(rec, {
       pid, argv: readCmdline(pid), uid: readUid(pid),
       selfUid: typeof process.getuid === 'function' ? process.getuid() : null, selfPid: process.pid,
@@ -1149,7 +1168,7 @@ function createServeLocator({
     if (await healthy(probe, confirmTimeoutMs)) return 'answered';
     if (cancelled(epoch)) return 'cancelled';
     log?.warn?.(`[opencode-serve] the recorded serve (pid ${pid}, port ${rec.port}) is ALIVE but answered no /global/health in ${DEFAULT_TIMEOUT_MS}+${confirmTimeoutMs}ms (${v.why}) — stopping it before starting a replacement`);
-    try { killPid(pid, 'SIGTERM'); } catch (e) { log?.warn?.(`[opencode-serve] SIGTERM to pid ${pid} failed: ${e.message}`); }
+    { const r = signalServe(pid, rec.start, rec.bootId, 'SIGTERM', 'replace a wedged serve'); if (!r.ok) log?.warn?.(`[opencode-serve] SIGTERM to pid ${pid} not sent: ${r.why}`); }
     const gone = await waitForExit(pid, killWaitMs);
     // the wait is an await like every other one in this rung: a newer ladder
     // (or a stop) may own the record by now, and round 9's rule is that a
@@ -1248,7 +1267,7 @@ function createServeLocator({
         const bad = serveEnvOverride() === false
           ? 'VIBESPACE_OPENCODE_SERVE=0 is set on this instance — the ops kill switch stops an adopted serve too'
           : await unsafeReuseReason(probe, rec);
-        if (!bad) return adopt(rec.port, rec.pid || null, 'reused', epoch);
+        if (!bad) return adopt(rec.port, rec.pid || null, 'reused', epoch, { start: rec.start || null, bootId: rec.bootId || null });
         // …AND THE VERDICT IS AN AWAIT OF ITS OWN (round 9): `unsafeReuseReason`
         // probes `GET /project/current` on that same busy serve. Round 8 made
         // two ladders concurrent for the first time (`stop()` detaches the
@@ -1263,7 +1282,7 @@ function createServeLocator({
         log?.warn?.(`[opencode-serve] replacing the recorded serve (pid ${rec.pid}, port ${rec.port}): ${bad}`);
         // never signal ourselves: a record can name this very process (a stale
         // pid reused after a reboot) and a self-SIGTERM would take the server down
-        try { if (rec.pid && rec.pid !== process.pid) killPid(rec.pid, 'SIGTERM'); } catch { }
+        try { if (rec.pid && rec.pid !== process.pid) signalServe(rec.pid, rec.start, rec.bootId, 'SIGTERM', 'replace the recorded serve'); } catch { }
         clearRecord(owned);
       }
     }
@@ -1278,9 +1297,10 @@ function createServeLocator({
     } catch (e) { state.lastError = `spawn failed: ${e.message}`; state.crashes++; if (state.crashes >= maxCrashes) { state.parked = true; state.parkedKind = 'crash'; state.retryAfter = 0; } notify(); return null; }
     if (typeof child.unref === 'function') child.unref();
     state.child = child; state.pid = child.pid || null; state.startedAt = Date.now();
+    state.start = child.pid ? PI.startToken(child.pid) || null : null; state.bootId = PI.bootToken() || null; // its BIRTH, at the spawn tick (B-5ee1)
     child.once('error', (e) => { state.lastError = `spawn failed: ${e.message}`; });
     child.on('exit', (code, signal) => onChildExit(child, code, signal, port));
-    writeRecord({ port, pid: child.pid || null, startedAt: state.startedAt, command: cmd, cwd: state.cwd || cwd || null });
+    writeRecord({ port, pid: child.pid || null, start: state.start, bootId: state.bootId, startedAt: state.startedAt, command: cmd, cwd: state.cwd || cwd || null });
     const probe = mkClient(port);
     const t0 = Date.now();
     /** A boot we walk away from must not leave the child behind. `stop()` ran
@@ -1383,7 +1403,7 @@ function createServeLocator({
     clearTimeout(respawnTimer); respawnTimer = null;
     if (guard.timer) { clearInterval(guard.timer); guard.timer = null; }
     const ch = state.child;
-    const livePid = state.pid;
+    const livePid = state.pid, liveBirth = { start: state.start, bootId: state.bootId };
     // "we are TALKING to it" is the identity proof this branch owns: the
     // client answered /global/health on the port we adopted, so state.pid is
     // that serve without asking /proc anything (round 11).
@@ -1403,7 +1423,8 @@ function createServeLocator({
       // authority over OUR daemon, never a licence to signal a stranger.
       const rec = readRecord();
       const decided = decideRecordedKill(rec, talking ? livePid : null);
-      if (decided.pid) { try { if (decided.pid !== process.pid) killPid(decided.pid, 'SIGTERM'); } catch { } }
+      const birth = talking && decided.pid === livePid ? liveBirth : { start: rec && rec.start, bootId: rec && rec.bootId };
+      if (decided.pid) { try { if (decided.pid !== process.pid) signalServe(decided.pid, birth.start, birth.bootId, 'SIGTERM', 'serve stop'); } catch { } }
       else if (decided.why) { state.lastError = decided.why; log?.warn?.(`[opencode-serve] ${decided.why}`); }
       clearRecord();
       // A DELIBERATELY-OFF SERVICE IS NOT A BROKEN STORE (S9 residual (a)).

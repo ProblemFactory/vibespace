@@ -9,7 +9,10 @@
 //   self      — process.pid
 //   probe     — an existence probe whose answer never feeds a signal (display / a liveness wait)
 //   user      — the owner named the pid in the process panel (his explicit kill)
-//   unknown   — a RECORDED pid this build does not prove yet (EXEMPT, with why + a backlog line in the lane report)
+//   legacy    — a RECORDED pid proven by its recorded birth, whose birth-LESS record (an older build wrote it) still
+//               falls to today's cmdline rung, said once (B-5ee1 rung 3); `guard` = the proof on the page, the why
+//               names the retire date (`retire YYYY-MM-DD`)
+//   unknown   — RETIRED (B-5ee1, lane pid-identity-close): a recorded pid with no proof at all — a row of this kind is RED
 import fs from 'fs';
 import path from 'path';
 import { execFileSync } from 'child_process';
@@ -18,25 +21,26 @@ import { gitEnvFrom } from './git-env.mjs';
 export const SITE = /process\.kill\(|\bkill -(?:[0-9A-Z]|\$\{?)|\bpkill\b|\bkillall\b|tail --pid|\['kill'|\('kill'/;
 const COMMENT = /^\s*(\/\/|\/?\*|#)/;
 const OP = 'data/bin/vibespace-opencode-op', RK = 'data/bin/vibespace-remote-keeper', CI = 'scripts/ci.mjs', AG = 'src/agentd/agentd.js';
-const RKWHY = 'a meta childPid/keeperPid proven by cmdline argv0 only (isOurChildPid / isKeeperPid) — the keeper ships to ssh hosts as one file and records no starttime yet';
-const SHWHY = 'a remote agentd meta childPid read off disk in a shell sweep — the meta carries startTime, the shell does not compare it yet';
+const RETIRE = 'retire 2026-12-01';
+const RKWHY = `the meta's childStart/keeperStart (+bootId) via the keeper's SHIPPED TWIN tokenVerdict (proven()); a birth-less meta an older keeper wrote falls to isOurChildPid / isKeeperPid once, said, and is re-recorded (rerecord) — ${RETIRE}`;
+const SHWHY = `a remote agentd meta childPid read off disk in a shell — vs_same_proc against the meta's startTime; a birth-less meta prints LEGACY:<pid> and keeps today's rung — ${RETIRE}`;
 // [file, needle, kind, guard|why, signals, win = 12 lines above, sites = 1]
 export const ROWS = [
   [OP, "process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'", 'probe', 'existence half of the serve verdict (cmdline + uid read beside it)', 'nothing'],
   [OP, "process.kill(pid, 'SIGTERM')", 'scan', 'v\\.verdict', 'a recorded opencode serve, after a cmdline+uid verdict read in the same call', 14],
   [OP, "process.kill(child.pid, 'SIGTERM')", 'handle', 'child.pid', 'its own spawned serve'],
   [RK, 'function pidAlive(pid) { try { process.kill(pid, 0)', 'probe', 'liveness polls of the keeper\'s child', 'nothing'],
-  [RK, "process.kill(m.childPid, 'SIGTERM')", 'unknown', RKWHY, 'a pipe-mode orphan claude'],
-  [RK, "process.kill(m.childPid, 'SIGKILL')", 'unknown', RKWHY, 'a pipe-mode orphan claude'],
-  [RK, "process.kill(childPid, 'SIGTERM')", 'unknown', 'childPid = its spawn handle\'s pid OR a takeover-adopted meta pid (cmdline-only)', 'its claude on stop'],
-  [RK, "for (const pid of targets) { try { process.kill(pid, 'SIGTERM')", 'unknown', RKWHY, 'stop: the child + the keeper'],
-  [RK, "if (pidAlive(pid)) { try { process.kill(pid, 'SIGKILL')", 'unknown', RKWHY, 'stop: the child + the keeper'],
+  [RK, "process.kill(m.childPid, 'SIGTERM')", 'legacy', "proven\\(m, 'child'\\)", 'a pipe-mode orphan claude', 14, 1, RKWHY],
+  [RK, "process.kill(m.childPid, 'SIGKILL')", 'legacy', "proven\\(m, 'child'\\)", 'the same, 3 s later (re-proven)', 12, 1, RKWHY],
+  [RK, "process.kill(childPid, 'SIGTERM')", 'legacy', 'proven\\(\\{ childPid, childStart, bootId \\}', 'a takeover-adopted claude on the daemon\'s SIGTERM (its own spawn: directChild.kill, the handle)', 12, 1, RKWHY],
+  [RK, "for (const role of targets) { if (proven(m, role)) { try { process.kill(m[role + 'Pid'], 'SIGTERM')", 'legacy', 'proven\\(m, role\\)', 'stop: the child + the keeper', 12, 1, RKWHY],
+  [RK, "&& proven(m, role)) { try { process.kill(m[role + 'Pid'], 'SIGKILL')", 'legacy', 'proven\\(m, role\\)', 'stop: the survivors 2.5 s later (re-proven)', 12, 1, RKWHY],
   ['deploy/docker/entrypoint.sh', 'kill -TERM "$child"', 'handle', '"$child"', 'the entrypoint\'s own $! child'],
   [CI, "process.kill(child.pid, 'SIGKILL'", 'handle', 'child.pid', 'a held gate child'],
-  [CI, 'process.kill(o.pid, sig)', 'starttime', 'sameProcess\\(o,', 'the reaper\'s victims (own copy: rows from the same /proc pass; a starttime-less row passes)'],
+  [CI, 'process.kill(o.pid, sig)', 'starttime', 'sameProcess\\(o,', 'the reaper\'s victims (own copy: rows from the same /proc pass; a starttime-less row is never signalled, said — B-5ee1)'],
   [CI, 'const alive = (pid) => { try { process.kill(pid, 0)', 'probe', 'the reaper\'s liveness wait', 'nothing'],
   [CI, "process.kill(-old.pid, 'SIGTERM')", 'scan', 'looksLikeHeavyRun\\(old\\.pid\\)', 'a superseded heavy run (lock record, its cmdline read now)'],
-  ['src/adapters/claude-code.js', "process.kill(session._childPid, 'SIGINT')", 'unknown', 'an in-memory pid of this process\'s own pipe child, kept past the spawn tick (not the handle)', 'interrupt'],
+  ['src/adapters/claude-code.js', "process.kill(session._childPid, 'SIGINT')", 'legacy', "PI\\.legacyOnce\\('interrupt'", 'interrupt (a legacy wrapper meta; with childStart it is PI.signalIdentity — the choke point\'s row)', 4, 1, `the wrapper meta's childPid: session._childIdentity (childStart + childBoot, written at the wrapper's spawn tick) goes through signalIdentity; a birth-less meta (an older wrapper) falls to isCliProcess(pid, 'claude') once, said — ${RETIRE}`],
   [AG, 'let alive = false; try { process.kill(pid, 0)', 'probe', 'a claude lock pid — discovery liveness', 'nothing'],
   [AG, 'try { process.kill(pid, 0); alive = true; }', 'probe', 'a session pid — discovery liveness', 'nothing'],
   [AG, 'try { process.kill(m.childPid, 0); }', 'probe', 'the existence half of _childAlive (adoption liveness); signals need _childProven', 'nothing'],
@@ -67,7 +71,7 @@ export const ROWS = [
   ['src/mounts.js', 'try { process.kill(pid, 0); return Math.floor(process.uptime() * 100); }', 'probe', 'cpu-ticks fallback on no-/proc', 'nothing'],
   ['src/mounts.js', "try { process.kill(+pid, 'SIGKILL'); } catch {}", 'scan', "readdirSync\\('/proc'\\)", 'an rclone mount/authorize daemon (fresh /proc cmdline scan)', 8, 2],
   ['src/opencode-serve.js', "try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }", 'probe', 'the serve record\'s liveness (verdict reads cmdline beside it)', 'nothing'],
-  ['src/opencode-serve.js', 'killPid = (pid, sig) => process.kill(pid, sig)', 'unknown', 'the serve record pid — its callers check cmdline/port verdicts but the record has no starttime yet', 'a recorded opencode serve'],
+  ['src/opencode-serve.js', '(killPid || ((p, s) => process.kill(p, s)))(pid, sig)', 'legacy', 'PI\\.legacyOnce\\(`opencode serve', 'a recorded opencode serve (signalServe; with a birth it is PI.signalIdentity)', 4, 1, `the serve record's start + bootId (written beside the pid at the spawn tick, carried by adopt) go through signalIdentity; a record from before 2.369.242 falls to the cmdline+uid verdict its caller read, said once — ${RETIRE}`],
   ['src/peer-messaging.js', "try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }", 'probe', 'a peer\'s lock liveness', 'nothing'],
   ['src/plugins/frp.js', "if (pid) { try { process.kill(pid, 'SIGTERM')", 'scan', 'frpDaemonPid\\(\\)', 'its frpc (looked up now)', 4],
   ['src/plugins/proc.js', 'function pidAlive(pid) { try { process.kill(pid, 0)', 'probe', 'plugin liveness', 'nothing'],
@@ -98,11 +102,12 @@ export const ROWS = [
   ['src/server/window-targets-engine.js', 'const pidAlive = (pid) => { try { process.kill(pid, 0)', 'probe', 'a window\'s pid — liveness for listing', 'nothing'],
   ['src/session-store.js', 'try { process.kill(pid, 0); return true; } catch { return false; }', 'probe', 'a claude lock pid (isLockClaude proves procStart)', 'nothing'],
   ['src/vnc.js', "try { process.kill(own.pid, 'SIGTERM'); } catch { return false; }", 'starttime', 'procStart\\(own\\.pid\\) !== own\\.start', 'its own VNC server (pid+start)', 3],
-  ['src/writer-sweep.js', 'kill -TERM "$cpid" 2>/dev/null && echo "SWEPT:$cpid"', 'unknown', SHWHY, 'a remote session\'s CLI'],
+  ['src/writer-sweep.js', 'vs_same_proc "$cpid" "$cst"; then kill -TERM "$cpid"', 'identity', 'vs_same_proc "\\$cpid" "\\$cst"', 'a daemon session\'s CLI (its meta startTime still names it)', 0],
+  ['src/writer-sweep.js', 'echo "LEGACY:$cpid"; kill -TERM "$cpid"', 'legacy', 'echo "LEGACY:\\$cpid"', 'a birth-less daemon meta\'s CLI', 0, 1, SHWHY],
   // int237: fork-flag-server-side's fork-resumed-parent kill — the pid is the lock the proof step read in the same pass
   ['src/ws-create.js', "try { process.kill(Number(lock.pid), 'SIGKILL'); } catch { }", 'scan', 'captureForkProof\\(', 'a pending fork\'s own CLI holding its parent\'s id (B-8b7b: the lock dir, the ppid walk to its wrapper and lockWrittenByItsPid read in the same proof step, 2 sightings)'],
   ['src/ws-handler.js', "try { process.kill(dpid, 'SIGTERM'); } catch {}", 'scan', 'pidsMatchingCmdline\\(', 'a stale dtach of this socket (cmdline scan, same pass)', 4],
-  ['src/ws-handler.js', 'kill -9 $P 2>/dev/null; true;', 'unknown', SHWHY, 'a remote session\'s CLI'],
+  ['src/ws-handler.js', 'kill -9 $P 2>/dev/null; true;', 'legacy', 'vs_same_proc "\\$P" "\\$T"', 'a remote session\'s CLI (the ssh kill)', 0, 1, SHWHY],
 ];
 // the persisted pids — each record and what its signal proves (a record with no starttime cannot be signalled by proof)
 export const RECORDS = [
@@ -114,8 +119,9 @@ export const RECORDS = [
   ['xpra install slot', 'src/install-slot.js', '<pid> <starttime> <lock>', 'pid+starttime (shell)'],
   ['ci heavy lock / reaper rows', CI, 'looksLikeHeavyRun(', 'cmdline now (lock) · starttime (reaper rows)'],
   ['session-meta wrapper/pty pids', 'src/claude-lock-capture.js', 'wrapperPidOf(', 'never signalled (ppid depth only)'],
-  ['remote keeper meta childPid/keeperPid', RK, 'isOurChildPid(', 'cmdline only — unknown'],
-  ['opencode serve record', 'src/opencode-serve.js', 'killPid', 'cmdline+port verdict — unknown'],
+  ['remote keeper meta childPid/keeperPid', RK, 'keeperStart: startToken(process.pid), childStart, bootId', 'start token + bootId (legacy: cmdline, re-recorded)'],
+  ['opencode serve record', 'src/opencode-serve.js', 'start: state.start, bootId: state.bootId', 'start token + bootId (legacy: cmdline+uid)'],
+  ['chat-wrapper meta childPid (the interrupt)', 'data/bin/chat-wrapper.js', 'meta.childStart = ', 'start token + bootId (legacy: isCliProcess)'],
 ];
 
 const strip = (l) => l.replace(/\s\/\/\s.*$/, '');
@@ -130,13 +136,15 @@ export function judgeCensus(files, rows = ROWS) {
       if (COMMENT.test(line) || !SITE.test(strip(line))) return;
       const cand = (byFile.get(f) || []).filter((r) => line.includes(r[1])).sort((a, b) => b[1].length - a[1].length);
       if (!cand.length) { red.push(`${f}:${i + 1} UNLISTED: ${line.trim().slice(0, 110)}`); return; }
-      const r = cand[0]; const [, , kind, g, signals, win = 12] = r;
+      const r = cand[0]; const [, , kind, g, signals, win = 12, , legacyWhy] = r;
       used.set(r, (used.get(r) || 0) + 1);
       let proven = true;
-      if (kind === 'identity' || kind === 'starttime' || kind === 'scan') proven = new RegExp(g).test(lines.slice(Math.max(0, i - win), i + 1).join('\n'));
+      if (kind === 'unknown') red.push(`${f}:${i + 1} UNKNOWN ROW (B-5ee1: no recorded pid is signalled without its proof): ${line.trim().slice(0, 100)}`);
+      if (kind === 'legacy' && !/retire \d{4}-\d{2}-\d{2}/.test(legacyWhy || '')) red.push(`${f}:${i + 1} LEGACY ROW WITHOUT A RETIRE DATE: ${line.trim().slice(0, 100)}`);
+      if (kind === 'identity' || kind === 'starttime' || kind === 'scan' || kind === 'legacy') proven = new RegExp(g).test(lines.slice(Math.max(0, i - win), i + 1).join('\n'));
       else if (kind === 'handle' || kind === 'self') proven = line.includes(g);
       if (!proven) red.push(`${f}:${i + 1} PROOF MISSING (${kind}: ${g}): ${line.trim().slice(0, 100)}`);
-      out.push(`${f}:${i + 1} → ${signals} → ${kind}${kind === 'probe' || kind === 'unknown' || kind === 'user' ? ' (' + g + ')' : ''}`);
+      out.push(`${f}:${i + 1} → ${signals} → ${kind}${kind === 'probe' || kind === 'unknown' || kind === 'user' ? ' (' + g + ')' : kind === 'legacy' ? ' (' + legacyWhy + ')' : ''}`);
     });
   }
   const dead = rows.filter((r) => files.some(([f]) => f === r[0]) && !used.has(r)).map((r) => `${r[0]}: ${r[1].slice(0, 60)}`);

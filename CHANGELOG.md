@@ -2,6 +2,16 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.242 — 2026-10-09
+
+### Changed
+- OneDrive and Google Drive mounts no longer ask for a folder listing every minute; changes made elsewhere show up within a minute instead of 30 seconds.
+
+### Fixed
+- VibeSpace stops only the processes it started, on paired machines and over ssh too — a process whose number was reused is left alone and you are told.
+- A reply in Slack under a file an agent sent now reaches that agent like any reply to its message.
+- OneDrive and Google Drive no longer disconnect because one folder listing was slow — a mount reconnects only when its own process stops answering, and says why.
+
 ## 2.369.241 — 2026-10-08
 
 ### Added

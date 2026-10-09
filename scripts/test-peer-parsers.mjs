@@ -11,10 +11,9 @@
 //    browser's page-chosen bytes: src/browser-kept.js, src/browser-tabs.js) is either a ROW below or in EXCLUDED with
 //    a reason — a new export goes RED until it is placed
 //  ② every ROW has a SIZE CAP proven by an input over it (refused by name, or the work bounded to the cap)
-//  ③ every ROW is LINEAR on its own adversarial shapes: t(2n) ≤ 2.5 × t(n) at n = 64 KB / 128 KB (a capped parser
-//    is judged at cap/2 and cap; a parser under 15 ms at 2n is trivially fast — the ratio pin then holds by the
-//    floor, never by noise), min of 5 runs, the base repeated to ≥ 25 ms — the FLOOR IS ASKED FIRST (one call of the
-//    2n input, min of 5): a shape already under it never pays for the ratio (35 s → 8 s, THE TIER RULE's 10 s)
+//  ③ every ROW is BOUNDED on its own adversarial shapes: each shape at the row's size (its cap, at most 1 MiB) runs ONCE
+//    in a child killed past the row's deadline — max(2 s, the row's own `ms` = 20× its measured time) — a DEADLINE,
+//    never a ratio of two clocks (lane regex-control-deadline: t(2n) ≤ 2.5 × t(n) failed 5/5 under load, B-b683)
 //  ④ CONTROLS: patched copies restoring round 1's per-quote newline scan in the mail sanitizer and round 2's regex
 //    chain in stripHtml go RED on ③ under the same judge
 import fs from 'node:fs';
@@ -54,9 +53,10 @@ const larkPost = (text) => ({ message_id: 'om_c', msg_type: 'post', create_time:
 const gmailMsg = (html) => ({ id: 'm1', threadId: 't1', internalDate: '1700000000000', labelIds: [], snippet: '', payload: { mimeType: 'text/html', partId: '', headers: [{ name: 'From', value: 'A <a@b.example>' }, { name: 'Subject', value: 's' }], body: { size: html.length, data: Buffer.from(html).toString('base64url') } } });
 const ROWS = [
   // ── src/mail-frame.js (the browser: the mail frame's sanitizer, main thread) ──
-  { mod: 'mail-frame', fn: 'sanitizeMailHtml', cap: { n: MF.MAX_HTML_BYTES, holds: (out) => out && out.ok === false && out.code === 'too-large' }, run: (m, x) => m.sanitizeMailHtml(x),
+  // ③'s own deadlines (20× the slowest shape at 1 MiB measured on the lane's box, rounded up): 115 ms / 153 ms
+  { mod: 'mail-frame', fn: 'sanitizeMailHtml', ms: 2500, cap: { n: MF.MAX_HTML_BYTES, holds: (out) => out && out.ok === false && out.code === 'too-large' }, run: (m, x) => m.sanitizeMailHtml(x),
     shapes: { 'a tag with no >': (n) => '<a '.repeat(n / 3), '<b<b<b': (n) => '<b'.repeat(n / 2), 'a dropped <svg> then <svg with no >': (n) => '<svg>' + '<svg '.repeat(n / 5), 'CSS quote pairs, no newline': (n) => '<style>' + "''".repeat(n / 2) + '</style>', 'url( with no )': (n) => '<style>' + 'url('.repeat(n / 4) + '</style>', '@keyframes x{ unclosed': (n) => '<style>' + '@keyframes x{'.repeat(n / 13) + '</style>', 'an ordinary mail': (n) => '<p>Hello <b>team</b>, <a href="https://x.example/a">link</a></p>'.repeat(n / 60), '1 000 images': (n) => '<img src="https://x.example/p.png">'.repeat(n / 34), 'entities in text': (n) => '&amp;&lt;&#x41;'.repeat(n / 15), 'nested divs': (n) => '<div>'.repeat(n / 5) } },
-  { mod: 'mail-frame', fn: 'sanitizeCss', cap: { n: MF.MAX_HTML_BYTES, holds: () => true, byCaller: 'sanitizeMailHtml cuts the mail at MAX_HTML_BYTES before any style reaches it' }, run: (m, x) => m.sanitizeCss(x),
+  { mod: 'mail-frame', fn: 'sanitizeCss', ms: 3500, cap: { n: MF.MAX_HTML_BYTES, holds: () => true, byCaller: 'sanitizeMailHtml cuts the mail at MAX_HTML_BYTES before any style reaches it' }, run: (m, x) => m.sanitizeCss(x),
     shapes: { 'quote pairs, no newline': (n) => "''".repeat(n / 2), 'url( no )': (n) => 'url('.repeat(n / 4), '@font-face{ no }': (n) => '@font-face{'.repeat(n / 11), '@keyframes x{ no }': (n) => '@keyframes x{'.repeat(n / 13), '@import': (n) => '@import "x";'.repeat(n / 12), 'comments': (n) => '/**/'.repeat(n / 4), 'backslashes': (n) => '\\'.repeat(n), 'expression(': (n) => 'expression('.repeat(n / 11) } },
   { mod: 'mail-frame', fn: 'cidRefs', cap: { n: MF.MAX_HTML_BYTES, holds: (out) => Array.isArray(out) && out.length <= MF.MAX_CID_FETCH }, run: (m, x) => m.cidRefs(x), shapes: { 'src="cid: unclosed': (n) => 'src="cid:'.repeat(n / 9), 'cid refs': (n) => 'src="cid:a@b" '.repeat(n / 14) } },
   { mod: 'mail-frame', fn: 'decodeAttr', cap: { n: 400, holds: () => true, byCaller: 'sanitizeMailHtml keeps ≤ 400 chars of a decoded attribute; the input is inside MAX_HTML_BYTES' }, run: (m, x) => m.decodeAttr(x), shapes: { '&#x41 no ;': (n) => '&#x41'.repeat(n / 5), '&amp;': (n) => '&amp;'.repeat(n / 5), '&': (n) => '&'.repeat(n) } },
@@ -208,6 +208,13 @@ const EXCLUDED = {
   'browser-tabs': { ownSetOf: 'a walk of our own owners map', ownerWord: 'a key compare', agentTabVerdict: 'typed inputs (a Set, ids)', userTabVerdict: 'typed booleans + counts', ownerMarkText: 'our words', ownerTipText: 'our words', tabRefusalText: 'our words', unresponsiveAgentText: 'our words over our own profile label and two instants (int220, lane browser-unresponsive)', tabsCountText: 'our two counts (lane browser-tabs-by-window)', windowLabelText: 'our words over a holder name nameOfHolder cuts to 24 (lane browser-tabs-by-window)' },
 };
 const MODS = { 'mail-frame': MF, 'channel-blocks': B, 'lark-blocks': LBm, 'channel-record': R, gmail: G, lark: L, 'browser-kept': KBm, 'browser-tabs': TBm, 'slack-text': SKm, slack: SLm };
+// ③'s child (rowInChild below): `--row <i>` runs ROWS[i]'s shapes and exits before ① (the size: its cap, at most 1 MiB)
+if (process.argv[2] === '--row') {
+  const row = ROWS[Number(process.argv[3])];
+  process.stdout.write('ready\n');
+  for (const [label, shape] of Object.entries(row.shapes)) { const x = shape(Math.min(row.cap.n, 1024 * K)), t0 = process.hrtime.bigint(); row.run(MODS[row.mod], x); process.stdout.write(`${J(label)}\t${Number(process.hrtime.bigint() - t0) / 1e6}\n`); }
+  process.exit(0);
+}
 
 // ── ① the derived census ──
 console.log('① every exported function of the peer-byte modules is a row or excluded with a reason');
@@ -222,38 +229,44 @@ for (const [name, mod] of Object.entries(MODS)) {
 }
 ok(MF.safeOpenHref('https://x.example/' + 'a'.repeat(3000)) === null && MF.safeOpenHref('https://x.example/a') === 'https://x.example/a', 'safeOpenHref (excluded): over 2 048 chars refused before any work');
 
-// ── ② + ③ per row: the cap, then linearity ──
-const hr = () => Number(process.hrtime.bigint()) / 1e6;
-const timeOf = (fn, x, reps) => { let best = Infinity; for (let r = 0; r < 5; r++) { const t = hr(); for (let k = 0; k < reps; k++) fn(x); best = Math.min(best, hr() - t); } return best; };
-const RATIO_MAX = 2.5, FAST_FLOOR_MS = 15, BASE_MS = 25;
-function judgeLinear(row, mod, label, shape, nBase) {
-  const x1 = shape(nBase), x2 = shape(nBase * 2);
-  const fn = (x) => row.run(mod, x);
-  // THE FLOOR FIRST (security verify r2, continued — THE TIER RULE, ci.mjs: a fast row measures < 10 s; this suite
-  // measured 35 s, almost all of it the ratio machinery on shapes the floor passes anyway): the 2n input ONE call at
-  // a time, min of 3 (built above, outside the timer); under FAST_FLOOR_MS per call it is trivially fast at the size
-  // that matters — a quadratic shape at 128 KB is hundreds of ms per call (the controls: 48–400 ms) and takes the
-  // full ratio judge below
-  const one = timeOf(fn, x2, 1);
-  if (one < FAST_FLOOR_MS) { const t0 = timeOf(fn, x1, 1); return { ok: true, ratio: +(one / Math.max(t0, 0.001)).toFixed(2), t1: +t0.toFixed(2), t2: +one.toFixed(2), reps: 1, n: nBase, fast: true }; }
-  let reps = 1;
-  let t1 = timeOf(fn, x1, 1);
-  if (t1 < BASE_MS) { reps = Math.max(1, Math.ceil(BASE_MS / Math.max(t1, 0.05))); t1 = timeOf(fn, x1, reps); }
-  const t2 = timeOf(fn, x2, reps);
-  const ratio = t2 / Math.max(t1, 0.001);
-  const fast = t2 / reps < FAST_FLOOR_MS;
-  return { ok: fast || ratio <= RATIO_MAX, ratio: +ratio.toFixed(2), t1: +(t1 / reps).toFixed(2), t2: +(t2 / reps).toFixed(2), reps, n: nBase, fast };
+// ── ② per row: the cap; ③ per row: BOUNDED on its adversarial shapes — each shape at the row's size (its cap, at most
+// 1 MiB) runs ONCE in a CHILD under the row's deadline (lane regex-control-deadline, B-b683). A ratio of two hrtime reads
+// was noise under load (t(2n) ≤ 2.5 × t(n) failed 5/5 at 32 spinners) and the work meter cannot see a regex BACKTRACK
+// inside one exec (V8 release builds expose no regexp step counter): a row that finishes is bounded, a catastrophic one
+// is seconds-to-hours and is killed. DEADLINE_MS is ≥ 20× the slowest shape measured unloaded; a row slower than that
+// carries its own `ms` (20× its measured time, rounded up) — never loosened to make a row pass ──
+const DEADLINE_MS = 2000, BUILD_SLACK_MS = 2000, START_MS = 30000, CHILDREN = 4;
+const sizeOf = (row) => Math.min(row.cap.n, 1024 * K);
+const deadlineOf = (row) => Math.max(DEADLINE_MS, row.ms || 0);
+/** ③'s child: every shape of ROWS[i] at its size, ONE call each, a `label<TAB>ms` line as each ends; the parent kills it
+ *  past the row's deadline (+ the input's build) after the previous line. */
+function rowInChild(i) {
+  const row = ROWS[i], labels = Object.keys(row.shapes), deadline = deadlineOf(row);
+  return new Promise((res) => {
+    const c = spawn(process.execPath, [new URL(import.meta.url).pathname, '--row', String(i)], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const got = [];
+    let buf = '', err = '', cut = setTimeout(() => c.kill('SIGKILL'), START_MS);
+    const arm = () => { clearTimeout(cut); cut = setTimeout(() => c.kill('SIGKILL'), deadline + BUILD_SLACK_MS); };
+    c.stdout.on('data', (d) => { buf += d; for (let k; (k = buf.indexOf('\n')) >= 0; buf = buf.slice(k + 1)) { const [l, ms] = buf.slice(0, k).split('\t'); if (l !== 'ready') got.push({ label: JSON.parse(l), ms: Number(ms) }); arm(); } });
+    c.stderr.on('data', (d) => { err += d; });
+    c.on('exit', (code, sig) => { clearTimeout(cut); res({ deadline, got, code, killed: !!sig, pending: labels.slice(got.length), err: err.slice(-300) }); });
+  });
 }
-console.log('② every row has a size cap; ③ every row is linear on its own adversarial shapes (t(2n) ≤ 2.5 × t(n), or under 15 ms at 2n)');
+console.log('② every row has a size cap; ③ every row is bounded on its own adversarial shapes (each at its cap ≤ 1 MiB, once, in a child under the row\'s deadline)');
 for (const row of ROWS) {
   const mod = MODS[row.mod];
   const over = row.cap.n + 4096;
   if (row.cap.byCaller) ok(true, `${row.mod}.${row.fn}: cap = the caller's (${row.cap.byCaller})`);
   else { const out = row.run(mod, row.capInput ? row.capInput(over) : 'x'.repeat(over)); ok(row.cap.holds(out, row.cap.n), `${row.mod}.${row.fn}: an input over its cap (${row.cap.n}) is refused or bounded`, J(out).slice(0, 200)); }
-  const nBase = Math.min(64 * K, Math.floor(row.cap.n / 2));
-  const bad = [];
-  for (const [label, shape] of Object.entries(row.shapes)) { const v = judgeLinear(row, mod, label, shape, nBase); if (!v.ok) bad.push(`${label}: ${v.t1} ms → ${v.t2} ms (×${v.ratio})`); }
-  ok(!bad.length, `${row.mod}.${row.fn}: linear on ${Object.keys(row.shapes).length} shapes at ${nBase / K} / ${nBase * 2 / K} KB`, bad.join('; '));
+}
+{
+  const verdicts = new Array(ROWS.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: CHILDREN }, async () => { while (next < ROWS.length) { const i = next++; verdicts[i] = await rowInChild(i); } }));
+  ROWS.forEach((row, i) => {
+    const v = verdicts[i], late = v.got.filter((g) => !(g.ms < v.deadline)), slow = v.got.reduce((a, g) => (g.ms > a.ms ? g : a), { label: '-', ms: 0 });
+    ok(v.code === 0 && !v.killed && !late.length && !v.pending.length, `${row.mod}.${row.fn}: bounded — ${Object.keys(row.shapes).length} shapes at ${(sizeOf(row) / K).toFixed(1)} KB each finished under ${v.deadline} ms (slowest: ${slow.label} ${slow.ms.toFixed(1)} ms)`, J({ late, pending: v.pending, killed: v.killed, code: v.code, err: v.err }));
+  });
 }
 // the census pins its own wiring: the bound every block reader cuts at is the record's, and stripHtml's is declared
 ok(TEXT_CAP === 64 * K && R.MAX_TEXT === 64 * K, 'the block readers\' bound IS the record\'s MAX_TEXT (64 KiB)');
@@ -270,8 +283,8 @@ console.log('④ controls: a restored quadratic loop goes RED — by WORK, or pa
 // sanitizer ×2.00, both in a child — the meter pins the optimizer off for its process). The two round-2 regexes
 // BACKTRACK inside one exec, which no work count sees (V8 release builds expose no regexp step counter —
 // --trace-regexp-bytecodes is debug-only): they are judged by a DEADLINE at 64 KB in a child killed past it — seconds
-// for the old regex, a few ms for the real one, and load only makes the old one read MORE red. ③'s rows above stay a
-// clock ratio (ci.mjs CLOCK_JUDGES, FAST_SERIAL): the meter's charge model does not read every regex-heavy row honestly yet.
+// for the old regex, a few ms for the real one, and load only makes the old one read MORE red. ③'s rows above are
+// deadlines in children too (lane regex-control-deadline): the meter's charge model does not read every regex-heavy row honestly.
 const REGEX_DEADLINE_MS = 1000;
 const deadlineInChild = (file, fn, src) => new Promise((res) => {
   const code = `const M=require(${J(file)});const x=(${src})();const t=process.hrtime.bigint();M[${J(fn)}](x);process.stdout.write(String(Number(process.hrtime.bigint()-t)/1e6));`;

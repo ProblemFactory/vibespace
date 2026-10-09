@@ -38,11 +38,19 @@ const { spawn, execFile, execFileSync } = require('child_process');
 // ANY read failure and silently orphan every stored ciphertext.
 const { secretBox, describeJsonError } = require('./secret-box');
 const { parseDriveClients } = require('./preset-layers.js');
+const LIVENESS = require('./mount-liveness.js');   // lane mount-liveness: THE sweep's verdict table (PURE)
 const PROVIDERS = require('./mount-providers/index.js');   // lane dc-mount-providers: a storage provider = its row file + one list line
 /** A record's storage-provider ROW (src/mount-providers/): every per-provider fact and branch is asked of it. A module
  *  function, not a method — suites call the manager's predicates on a bare `this`. */
+const healthOf = (r) => (r && typeof r === 'object') ? r.health : r;   // a probe answers {health, ms} (a stub may answer the bare word)
 const rowOf = (m) => PROVIDERS.rowOf(m && m.type);                 // lane cluster-presets: ONE parser for the file and the env
+/** THE effective row of a record (lane mount-liveness): a CHILD mount point (parentId, no type of its own) reads its PARENT's
+ *  row — a drive child resolved to the s3 default row and its daemon got `--s3-use-accept-encoding-gzip=false`. Every row
+ *  read in this file goes through here (test-mount-providers' census); `x` = the manager whose records hold the parent. */
+const rowFor = (x, m) => rowOf((m && !m.type && m.parentId && x?._state?.mounts?.find((r) => r.id === m.parentId)) || m);
 const clusterPresets = require('./server/cluster-presets.js');              // the presets DIRECTORY's reader (the file rung, live)
+const { rcloneMountArgs, rcSocketPath, LOG_ROTATE_BYTES } = require('./mount-argv.js');   // lane mount-argv-dir-cache: THE mount argv (hub + device twin)
+const { ensureSocketDir } = require('./sock-path.js');
 
 const SHARE_PREFIX = 'vibespace-share:v1:';
 const CEPHMOUNT_PREFIX = 'vibespace-cephmount:v1:';
@@ -126,14 +134,14 @@ class MountManager {
     // always want to be mounted (the user can't un-provision it — only
     // unmount transiently). This also covers the one-shot where a prior boot
     // (e.g. running the pre-cephfs code, or an import race) left it unmounted.
-    const cephMs = this._state.mounts.find(m => m.origin === 'my-storage' && rowOf(m).replacesMyStorage);
+    const cephMs = this._state.mounts.find(m => m.origin === 'my-storage' && rowFor(this, m).replacesMyStorage);
     if (cephMs && cephMs.desired !== 'mounted') { cephMs.desired = 'mounted'; this._save(); }
     if (this._state._cephImportedSig === sig) return;
     const hadMyStorage = this._state.mounts.some(m => m.origin === 'my-storage');
     // A prior S3 my-storage is REPLACED by cephfs (user directive) — unmount
     // + drop it so the flash mount takes the "My storage" slot.
-    if (!hadMyStorage || !this._state.mounts.some(m => m.origin === 'my-storage' && rowOf(m).replacesMyStorage)) {
-      for (const old of this._state.mounts.filter(m => m.origin === 'my-storage' && !rowOf(m).replacesMyStorage)) {
+    if (!hadMyStorage || !this._state.mounts.some(m => m.origin === 'my-storage' && rowFor(this, m).replacesMyStorage)) {
+      for (const old of this._state.mounts.filter(m => m.origin === 'my-storage' && !rowFor(this, m).replacesMyStorage)) {
         try { this.unmount(old.id); } catch {}
         this._state.mounts = this._state.mounts.filter(x => x.id !== old.id);
       }
@@ -351,7 +359,7 @@ class MountManager {
       // copy older releases committed — reinstall it when some mount actually
       // needs rclone and the PATH has none (a user's own PATH rclone is
       // respected; we never shadow it).
-      const needsRclone = this._state.mounts.some((m) => rowOf(m).rclone !== false);
+      const needsRclone = this._state.mounts.some((m) => rowFor(this, m).rclone !== false);
       if (needsRclone && !this.rcloneAvailable()) {
         console.log(`[mounts] data/bin/rclone missing and no PATH rclone — installing ${MountManager.RCLONE_PIN}`);
         this.installRclone().then(
@@ -401,7 +409,7 @@ class MountManager {
   // native `drive` type so users + code see a single concept.
   // the generic rclone row's record of a backend another row ADOPTS → that row's record (its adoptRecord moves the params)
   _adoptRawRclone(m) {
-    const row = rowOf(m).rawRclone && this._adopterOf(m.rcloneType);
+    const row = rowFor(this, m).rawRclone && this._adopterOf(m.rcloneType);
     if (!row) return false;
     row.adoptRecord(m, this);
     return true;
@@ -503,7 +511,7 @@ class MountManager {
 
   isMounted(m, live = this._liveMounts()) {
     // a row with its own liveness (a sync worker is not a filesystem) answers itself
-    const prow = rowOf(m);
+    const prow = rowFor(this, m);
     if (prow.isMounted) return prow.isMounted(m, this);
     // /proc/mounts escapes spaces as \040
     const p = this.pathOf(m).replace(/ /g, '\\040');
@@ -530,7 +538,7 @@ class MountManager {
     const rp = String(p);
     const live = this._liveMounts();
     for (const m of this._state.mounts) {
-      if (rowOf(m).filesystem === false || this._kindOf(m) === 'credential') continue;
+      if (rowFor(this, m).filesystem === false || this._kindOf(m) === 'credential') continue;
       let mp; try { mp = this.pathOf(m); } catch { continue; }
       if (rp !== mp && !rp.startsWith(mp + '/')) continue;
       if (!this.isMounted(m, live)) return m;
@@ -564,7 +572,7 @@ class MountManager {
 
   _sourceLabel(m) {
     m = this._connOf(m);
-    const row = rowOf(m);
+    const row = rowFor(this, m);
     return (row.label ? row : PROVIDERS.defaultRow).label(m, MountManager);
   }
 
@@ -578,11 +586,11 @@ class MountManager {
         childCount: m.parentId ? undefined : this._childrenOf(m.id).length,
         endpoint: conn.endpoint, bucket: conn.bucket, prefix: conn.prefix,
         rcloneType: conn.rcloneType, remotePath: conn.remotePath, driveFolder: conn.driveFolder,
-        driveMode: conn.driveMode || rowOf(conn).driveModeDefault, teamDriveId: conn.teamDriveId, clientPreset: conn.clientPreset,
-        ...(rowOf(m).listFields?.(m, this) || {}),   // a row's own list cells (Gmail's sync state)
+        driveMode: conn.driveMode || rowFor(this, conn).driveModeDefault, teamDriveId: conn.teamDriveId, clientPreset: conn.clientPreset,
+        ...(rowFor(this, m).listFields?.(m, this) || {}),   // a row's own list cells (Gmail's sync state)
         // secret VALUES never leave the server; keys let the edit dialog offer
         // per-parameter replacement (blank = keep) for custom rclone records
-        paramKeys: (rowOf(conn).rawRclone && !m.parentId) ? Object.keys(conn.paramsEnc || {}) : undefined,
+        paramKeys: (rowFor(this, conn).rawRclone && !m.parentId) ? Object.keys(conn.paramsEnc || {}) : undefined,
         url: conn.url, user: conn.user, vendor: conn.vendor,
         sshHost: conn.sshHost, sshUser: conn.sshUser, sshPort: conn.sshPort, sshPath: conn.sshPath, keyPath: conn.keyPath,
         clientId: conn.clientId,
@@ -593,6 +601,7 @@ class MountManager {
         canCephShare: this.canCephShare(m),
         path: this.pathOf(m), desired: m.desired, expiresAt: m.expiresAt || null,
         mounted: this.isMounted(m), error: this._errors.get(m.id) || null,
+        ...((lv) => lv ? { probe: { verdict: lv.verdict, strikes: lv.strikes, lastMs: lv.lastMs } } : {})(this._liveness?.get(m.id)),   // the sweep's last verdict (lane mount-liveness)
         // A connect legitimately spends 10-25s in mount()'s window (mountpoint
         // wait + IO probe + auth probes). Without this flag EVERY client showed
         // a plain grey "Not mounted" dot the whole time, and the initiating
@@ -725,7 +734,7 @@ class MountManager {
       };
     }
     const out = { ...base, type: m.type || 's3' };
-    rowOf(m).config?.(m, out, dec, this);
+    rowFor(this, m).config?.(m, out, dec, this);
     if (m.extraParamsEnc) out.extraParams = Object.fromEntries(Object.entries(m.extraParamsEnc).map(([k, v]) => [k, this._dec(v)]));
     return out;
   }
@@ -734,7 +743,7 @@ class MountManager {
 
   add(cfg) {
     // a raw rclone cfg of a backend another row ADOPTS (ONE Google Drive, OneDrive, the cloud list) is added as that row
-    const adopter = rowOf(cfg).rawRclone && this._adopterOf(cfg.rcloneType);
+    const adopter = rowFor(this, cfg).rawRclone && this._adopterOf(cfg.rcloneType);
     if (adopter) cfg = adopter.fromRclone(cfg);
     const type = cfg.type || 's3';
     if (!cfg.name) throw new Error('name required');
@@ -789,7 +798,7 @@ class MountManager {
       desired: 'unmounted',
       createdAt: Date.now(),
     };
-    const row = rowOf(p);
+    const row = rowFor(this, p);
     if (!row.child) throw new Error(`credentials of type "${p.type}" don't support mount points yet`);
     row.child(m, cfg, p, this);
     this._state.mounts.push(m);
@@ -906,7 +915,7 @@ class MountManager {
     const parentType = m.parentId ? (this._get(m.parentId).type || 's3') : null;
     if (!envLocked) {
       // the row edits the record: a mount point's PARENT row its path (`updateChild`), a top-level record its own row
-      const row = parentType ? PROVIDERS.rowOf(parentType) : rowOf(m);
+      const row = parentType ? PROVIDERS.rowOf(parentType) : rowFor(this, m);
       const said = parentType ? row.updateChild?.(m, patch, setIf, this) : row.update?.(m, patch, setIf, this);
       // a sync worker's scope change answers 'reseed': its state file goes (the folder is the dedup index)
       if (said === 'reseed' && row.syncStateFile) { try { fs.rmSync(path.join(this.pathOf(m), row.syncStateFile), { force: true }); } catch { } }
@@ -952,7 +961,7 @@ class MountManager {
    *  semantics (Drive: `clientPreset` any value, `clientId` only when
    *  non-empty; Gmail: `clientPreset` only). */
   _refuseClientSwitch(m, patch) {
-    const type = m.type || 's3', pc = rowOf(m).presetClient;
+    const type = m.type || 's3', pc = rowFor(this, m).presetClient;
     if (!pc || m.parentId || m.origin === 'my-storage' || !m.tokenEnc) return;
     if (patch.token !== undefined && String(patch.token).trim() !== '') return; // the token lands with its client
     const cur = { clientId: m.clientId || '', clientPreset: m.clientPreset || null, hasSecret: !!m.clientSecretEnc };
@@ -986,7 +995,7 @@ class MountManager {
     const P = (k) => `RCLONE_CONFIG_${R}_${k}`;
     const env = { ...process.env };
     let remote;
-    const row = rowOf(m);
+    const row = rowFor(this, m);
     remote = (row.rclone ? row : PROVIDERS.defaultRow).rclone(m, env, P, R, this);
     // Advanced extra params (custom API keys, tuning) override/extend any type
     for (const [k, blob] of Object.entries(m.extraParamsEnc || {})) env[P(k.toUpperCase())] = this._dec(blob);
@@ -1033,7 +1042,7 @@ class MountManager {
     // cache index JOINS it — never a second daemon, never a kill.
     if (this._starting?.has(id)) return 'starting';
     // A row with its OWN mount (Gmail = a sync WORKER writing .eml files; CephFS = a native kernel mount) — not rclone.
-    const prow = rowOf(m);
+    const prow = rowFor(this, m);
     if (prow.mount) return prow.mount(id, this);
     // A daemon ALREADY on this mountpoint with no mount yet (a server restart
     // mid-scan, a Connect after the old 5 s verdict) is ADOPTED and watched
@@ -1044,7 +1053,8 @@ class MountManager {
     if (pid0) { m.desired = 'mounted'; this._save(); return this._watchStart(m, this.pathOf(m), pid0, opts); }
     // The row's own pre-flight (OneDrive resolves its drive through Graph; a VibeSpace bridge refuses a token THIS
     // instance minted — a self-mount deadlocks the server): `undefined` = go on, anything else is the answer.
-    if (prow.preMount) { const said = await prow.preMount(m, id, this); if (said !== undefined) return said; }
+    // a child's pre-flight runs on its parent (the record that holds the connection)
+    if (prow.preMount) { const said = await prow.preMount(m.parentId ? this._get(m.parentId) : m, id, this); if (said !== undefined) return said; }
     // Credential model (user-refined): a credential IS the rclone remote (the
     // part before the colon); a mount is remote:path. A credential itself IS
     // mountable when its token can reach the remote's root (Google Drive,
@@ -1070,50 +1080,15 @@ class MountManager {
     try { dest = await this._ensureMountpointDir(mp, { quarantine: true }); }
     catch (e) { this._errors.set(id, String(e.message || e)); this._notify(); throw e; } // mount()'s finally clears _connecting
     if (dest) this._noteStranded(m, dest);
-    fs.mkdirSync(this._logDir, { recursive: true });
     const { env, remote } = this._rcloneFor(m);
-    const log = fs.openSync(path.join(this._logDir, `${m.id}.log`), 'w');
-    // Read+write caching (user directive: 最稳定 + 性能最好 + 开读写cache).
-    // --vfs-cache-mode full = reads cached chunk-wise on local disk AND writes
-    // land locally first, uploading async. With a PERSISTENT per-mount
-    // --cache-dir, DIRTY WRITES SURVIVE a daemon crash / server restart and
-    // resume uploading on remount — the crash-safety half of "最稳定". Bounded
-    // timeouts make a flaky backend DEGRADE (IO error) instead of hanging the
-    // fuse op; the hung-mount defense stays the backstop. Flags gated on the
-    // installed rclone actually knowing them (an old system rclone would
-    // refuse to mount at all on an unknown flag).
+    // The argv is ONE PURE builder (src/mount-argv.js) over the record's EFFECTIVE row — read+write vfs cache on a
+    // PERSISTENT per-mount --cache-dir (dirty writes survive a daemon crash), bounded timeouts, the row's directory
+    // cache, the s3 proxy-signing flag for an s3 backend, the owner-only rc socket — every version-sensitive flag
+    // gated on the installed rclone knowing it.
     const cacheDir = path.join(this._vfsCacheRoot(), m.id);
     try { fs.mkdirSync(cacheDir, { recursive: true }); } catch {}
-    const cacheGB = Math.max(1, Number(this._getSetting('mounts.vfsCacheMaxSizeGB')) || 10);
-    const args = ['mount', remote, mp,
-      '--vfs-cache-mode', this._rcloneHasFlag('vfs-fast-fingerprint') ? 'full' : 'writes',
-      '--cache-dir', cacheDir,
-      '--vfs-cache-max-size', `${cacheGB}G`,
-      '--vfs-cache-max-age', '168h',
-      '--vfs-cache-poll-interval', '1m',
-      '--vfs-write-back', '5s',
-      '--buffer-size', '16M',
-      '--timeout', '60s', '--contimeout', '15s',
-      '--low-level-retries', '10', '--retries', '3',
-      '--dir-cache-time', '30s',
-      // NOTICE (rclone's default): the INFO per-minute vfs-cache heartbeat grew
-      // mount logs unrotated for weeks AND polluted the tail-2 failure
-      // diagnostic; ERROR/NOTICE lines are what that diagnostic actually reads.
-      '--log-level', 'NOTICE'];
-    if (this._rcloneHasFlag('vfs-fast-fingerprint')) args.push('--vfs-fast-fingerprint');
-    if (this._rcloneHasFlag('vfs-read-ahead')) args.push('--vfs-read-ahead', '128M');
-    // Proxy-safe signing: old aws-sdk-go signs Accept-Encoding into the V4
-    // signature and CDN proxies (Cloudflare) rewrite that header on plain
-    // object GETs → SignatureDoesNotMatch on every read (silent retry loop
-    // that looks like a hang; list/put unaffected because query-string
-    // requests pass untouched). rclone ≥1.63 has a flag that stops sending/
-    // signing it — add it whenever the installed rclone supports it.
-    // s3-backed whether it's the native type OR a custom rclone mount using
-    // the s3 backend (rclone.conf import, Custom type) — both hit the proxy
-    // signing issue, so the fix must key off the BACKEND, not our type name.
-    const isS3 = !!rowOf(m).s3Backend?.(m);
-    if (isS3 && this._rcloneSupportsAcceptEncodingFlag()) args.push('--s3-use-accept-encoding-gzip=false');
-    if (m.mode === 'ro') args.push('--read-only');
+    const args = this._mountArgv(m, { remote, mp, cacheDir, rcSocket: this._rcSocketReady(m) });
+    const isS3 = !!rowFor(this, m).s3Backend?.(m.parentId ? this._connOf(m) : m);
     // One-time signing probe: some proxies (Cloudflare) rewrite the signed
     // Accept-Encoding header → SignatureDoesNotMatch on everything. V2 auth
     // avoids signing it and rescues PERMANENT-credential mounts; STS session
@@ -1159,6 +1134,7 @@ class MountManager {
       await new Promise((r) => setTimeout(r, 300));
     }
     // detached: mounts survive server restarts (adopted on boot)
+    const log = this._openMountLog(m.id);
     const child = spawn(this.rcloneBin(), args, { env, detached: true, stdio: ['ignore', log, log] });
     child.unref();
     fs.closeSync(log);
@@ -1248,7 +1224,7 @@ class MountManager {
     if (r === 'mounted') return this._afterMounted(m, mp);
     const id = m.id;
     let tail = '';
-    try { tail = fs.readFileSync(path.join(this._logDir, `${id}.log`), 'utf-8').trim().split('\n').slice(-2).join(' '); } catch {}
+    tail = this.tailMountLog(id, 2, { current: true }).join(' ');
     // "not empty": something wrote into the bare directory while it started —
     // isolate the strays (the connect-time stranded move) and retry ONCE
     if (r === 'died' && /is not empty/i.test(tail) && !opts.retried) {
@@ -1285,20 +1261,12 @@ class MountManager {
     // deployed instance — /login took 130s, readiness failed, pod dropped
     // from the Service). Probe in a CHILD process (never node fs), and cut
     // the mount loose instead of serving a folder that would wedge us.
-    const health = await this._probeMountpoint(mp);
-    if (health === 'hung') {
-      this.blockPath(mp, 90000); // keep failing fast while teardown + stragglers drain
-      // desired stays 'mounted' — the watchdog auto-reconnects with backoff
-      // (each attempt re-runs this same probe + teardown, so a still-dead
-      // backend is cut loose again within seconds). Only an explicit user
-      // Unmount stops the supervision.
-      this._errors.set(id, 'storage connected but IO hangs (host unreachable from this machine?) — disconnected to protect the server; will retry');
-      await this.unmount(id, { internal: true });
-      this._killMountDaemon(mp);
-      this._noteReconnectBackoff(id);
-      this._notify();
-      return false;
-    }
+    // The same TWO QUESTIONS as the sweep (lane mount-liveness): a slow cold listing keeps the path blocked and says so;
+    // only the table's teardown verdicts cut the mount loose (the first sweep after a mount starts from strike 0).
+    const lv = await this._probeLiveness(m, mp);
+    if (lv.teardown) return false;
+    if (lv.verdict !== 'alive') { this._notify(); return this.isMounted(m); }
+    const health = lv.health;
     this.unblockPath(mp);
     // Revoke/expiry surfacing: a fuse mount to a REVOKED share still "mounts"
     // (and a cached mountpoint `ls` lies about it), so probe the BACKEND fresh
@@ -1335,21 +1303,26 @@ class MountManager {
    *   'error' — non-zero exit (EIO / access denied — a REVOKED or expired
    *             share, changed creds; responsive but broken → surface it)
    *   'ok'    — listed fine.  */
-  _probeMountpoint(mp, timeoutMs = 6000) {
+  _probeMountpoint(mp, timeoutMs = 6000, verb = 'list') {
+    // A killed `ls` on a FUSE mount whose daemon never answers stays in D state (request_wait_answer — measured, lane
+    // mount-liveness): it only exits when the daemon answers. Never stack a second one — the held child IS the witness.
+    const key = verb + ':' + mp, held = (this._heldProbes = this._heldProbes || new Map()).get(key);
+    if (held) return Promise.resolve({ health: 'hung', ms: Date.now() - held.t0, held: true });
     return new Promise((resolve) => {
-      const c = spawn('ls', [mp], { stdio: 'ignore' });
-      const t = setTimeout(() => { try { c.kill('SIGKILL'); } catch {} resolve('hung'); }, timeoutMs);
-      c.on('exit', (code) => { clearTimeout(t); resolve(code === 0 ? 'ok' : 'error'); });
-      c.on('error', () => { clearTimeout(t); resolve('error'); });
+      const t0 = Date.now();
+      const c = spawn('ls', verb === 'attr' ? ['-d', mp] : [mp], { stdio: 'ignore' });
+      const t = setTimeout(() => { this._heldProbes.set(key, { t0 }); try { c.kill('SIGKILL'); } catch {} resolve({ health: 'hung', ms: Date.now() - t0 }); }, timeoutMs);
+      c.on('exit', (code) => { clearTimeout(t); this._heldProbes.delete(key); resolve({ health: code === 0 ? 'ok' : 'error', ms: Date.now() - t0 }); });
+      c.on('error', () => { clearTimeout(t); this._heldProbes.delete(key); resolve({ health: 'error', ms: Date.now() - t0 }); });
     });
   }
   /** Back-compat: true only when the mountpoint HANGS. */
-  async _probeMountpointHung(mp, timeoutMs = 6000) { return (await this._probeMountpoint(mp, timeoutMs)) === 'hung'; }
+  async _probeMountpointHung(mp, timeoutMs = 6000) { return healthOf(await this._probeMountpoint(mp, timeoutMs)) === 'hung'; }
 
   /** A mount whose access can be REVOKED/EXPIRE out from under us (an imported
    *  share, a VibeSpace bridge, or an STS-style expiring credential). Only
    *  these get the (heavier) backend re-auth probe — my own S3/Drive don't. */
-  _revocable(m) { return m.origin === 'imported' || !!rowOf(m).revocable || !!m.expiresAt; }
+  _revocable(m) { return m.origin === 'imported' || !!rowFor(this, m).revocable || !!m.expiresAt; }
 
   /** OAuth-backed mount (Drive/OneDrive/Dropbox/…): its refresh token can die
    *  out from under a HEALTHY-looking mount (revoked, password change, expiry)
@@ -1357,7 +1330,7 @@ class MountManager {
    *  so the UI showed a fine mount whose every file open was EIO (real
    *  OneDrive incident: "unauthenticated: Unauthenticated" on every read). */
   _oauthBacked(m) {
-    return !!rowOf(m).oauthBacked?.(m, MountManager);
+    return !!rowFor(this, m).oauthBacked?.(m.parentId ? this._connOf(m) : m, MountManager);
   }
 
   /** Uncached BACKEND access probe (fresh rclone process re-auths, bypassing
@@ -1368,7 +1341,7 @@ class MountManager {
     try { ({ env, remote } = this._rcloneFor(m)); } catch { return Promise.resolve('ok'); }
     if (m.v2Auth) env.RCLONE_CONFIG_VS_V2_AUTH = 'true';
     const args = ['lsf', remote, '--max-depth', '1', '--retries', '1', '--low-level-retries', '1'];
-    if (rowOf(m).s3Backend?.(m) && this._rcloneSupportsAcceptEncodingFlag()) args.push('--s3-use-accept-encoding-gzip=false');
+    if (rowFor(this, m).s3Backend?.(m.parentId ? this._connOf(m) : m) && this._rcloneSupportsAcceptEncodingFlag()) args.push('--s3-use-accept-encoding-gzip=false');
     return new Promise((resolve) => {
       let done = false;
       const child = execFile(this.rcloneBin(), args, { env, timeout: timeoutMs },
@@ -1454,6 +1427,52 @@ class MountManager {
     } catch {} // non-Linux: no /proc — daemon exits with the unmount anyway
   }
 
+  /** Gather ONE sweep's witnesses for a mounted record and apply the table's verdict (lane mount-liveness): attr =
+   *  `ls -d` (liveness — answered without a backend call), list = `ls` (readiness), backend = a fresh `rclone lsf` only
+   *  when the listing hung, cpu = the daemon's tick Δ across the probes (/proc reads). Children with timeouts only. */
+  async _probeLiveness(m, mp) {
+    const row = rowFor(this, m), P = LIVENESS.probeCell(row);
+    let pid = 0;
+    try { pid = row.daemon === false ? 0 : (this._daemonPids(mp)[0] || 0); } catch {}
+    const cpu0 = pid ? this._cpuTicks(pid) : null;
+    const st = (r) => { const x = typeof r === 'object' && r ? r : { health: r }; return { state: x.health || 'skipped', ms: x.ms || 0, held: !!x.held }; };
+    const attr = st(await this._probeMountpoint(mp, P.attrMs, 'attr'));
+    const list = attr.state === 'hung' ? st('skipped') : st(await this._probeMountpoint(mp, P.listMs));
+    let backend = st('skipped');
+    if (list.state === 'hung' && row.rclone !== false) {
+      const t0 = Date.now();
+      const said = await this._probeBackendAccess(m);   // ok · denied (an answer: the vendor is reachable) · hung · unknown (inconclusive)
+      backend = { state: said === 'ok' ? 'ok' : said === 'denied' ? 'error' : said === 'hung' ? 'hung' : 'skipped', ms: Date.now() - t0, held: false };
+    }
+    const cpu1 = pid ? this._cpuTicks(pid) : null;
+    const T = this._startingT || MountManager.STARTING;
+    const w = { daemonAlive: true, attr, list, backend, cpuTicks: cpu0 != null && cpu1 != null ? cpu1 - cpu0 : null, progressTicks: T.progressTicks, now: Date.now() };
+    const v = await this._livenessApply(m, mp, w);
+    return { ...v, health: list.state };
+  }
+
+  /** Apply a verdict: the journal line + `mount-probe-ms` metric on every strike / teardown, the block, the row's words,
+   *  the teardown (named cause). `list()` carries the last verdict as `probe`. */
+  async _livenessApply(m, mp, w) {
+    this._liveness = this._liveness || new Map();
+    const v = LIVENESS.livenessStep(this._liveness.get(m.id)?.state, w, rowFor(this, m));
+    this._liveness.set(m.id, { state: v.state, verdict: v.verdict, strikes: v.strikes.n, lastMs: Math.round((w.list && w.list.state !== 'skipped' ? w.list.ms : w.attr?.ms) || 0) });
+    if (v.verdict === 'alive') { if (v.unblock) this.unblockPath(mp); return v; }
+    console.warn(LIVENESS.verdictLine(m.id, v, w));   // the record id, never its name (the journal ring outlives a clear)
+    try { global.__vsMetric?.('mount-probe-ms', Math.round((w.list?.state === 'hung' ? w.list.ms : w.attr?.ms) || 0), `mount=${m.id} verdict=${v.verdict}`); } catch {}
+    if (v.blockMs) this.blockPath(mp, v.blockMs);
+    const words = LIVENESS.wordsFor(v.words.key, 'en', v.words.vars);
+    if (this._errors.get(m.id) !== words) { this._errors.set(m.id, words); if (!v.teardown) this._notify(); }
+    if (v.teardown && v.verdict !== 'died') {
+      // desired stays 'mounted' → the sweep's dead-mount branch reconnects with backoff; only a user Unmount ends supervision
+      await this.unmount(m.id, { internal: true });
+      this._killMountDaemon(mp);
+      this._noteReconnectBackoff(m.id);
+      this._notify();
+    }
+    return v;
+  }
+
   /**
    * Watchdog: every 60s, health-probe every mounted record from a child
    * process. A mount whose IO hangs is auto-disconnected (desired persisted,
@@ -1472,7 +1491,7 @@ class MountManager {
    *  own S3) there is no share to revoke, so a generic "couldn't list" message
    *  avoids the misleading banner (user report: a working SMB mount). */
   _accessErrorMsg(m) {
-    if (rowOf(m).everyFileErrors) return rowOf(m).everyFileErrors;
+    if (rowFor(this, m).everyFileErrors) return rowFor(this, m).everyFileErrors;
     if (m.expiresAt && Date.now() > m.expiresAt) return 'connected but access denied — this share credential has expired';
     if (m.origin === 'imported') return 'connected but access denied — the share may have been revoked or its credentials changed';
     if (this._oauthBacked(m)) return 'connected but the sign-in has expired or been revoked — listings come from cache while every file read fails; re-authorize to fix';
@@ -1524,7 +1543,7 @@ class MountManager {
       // User-owned backend (SMB/NAS, SFTP, own S3): a single non-zero ls is
       // NOT proof of denial. Re-probe; if it lists now it was transient, and
       // if the backend itself lists fine the ls error was a benign quirk.
-      if ((await this._probeMountpoint(mp)) !== 'error') return null;
+      if (healthOf(await this._probeMountpoint(mp)) !== 'error') return null;
       if ((await this._probeBackendAccess(m)) === 'ok') return null;
       return this._accessErrorMsg(m); // persistently broken → honest message
     }
@@ -1537,7 +1556,7 @@ class MountManager {
     try {
       for (const m of [...this._state.mounts]) {
         if (this._kindOf(m) === 'credential') continue;
-        if (rowOf(m).filesystem === false) {
+        if (rowFor(this, m).filesystem === false) {
           // sync worker, not a filesystem — restart it if it died, skip all
           // fuse/mountpoint probing (a plain dir can't hang the pool)
           if (!this.isMounted(m) && m.desired === 'mounted') await this._maybeAutoRemount(m);
@@ -1559,50 +1578,20 @@ class MountManager {
         // would read the zombie's ENOTCONN as an access error, poisoning the
         // record with a "revoked?" message that blocks auto-remount (found by
         // the 2.110.0 e2e). Overwrite any stale error and reconnect NOW.
-        if (rowOf(m).daemon !== false && !this._daemonAlive(mp)) {
-          this._errors.set(m.id, 'mount daemon died — reconnecting…');
+        if (rowFor(this, m).daemon !== false && !this._daemonAlive(mp)) {
+          this._livenessApply(m, mp, { daemonAlive: false, now: Date.now() });
           await this.unmount(m.id, { internal: true }); // clears the zombie entry
           if (m.desired === 'mounted') await this._maybeAutoRemount(m);
           this._notify();
           continue;
         }
-        // cephfs (native kernel mount) gets a longer probe window — an MDS
-        // session on a cold mount can spike a first `ls` past the fuse budget,
-        // and a single blip must not disconnect a trusted deployment mount.
-        let pid = 0;
-        try { pid = rowOf(m).daemon === false ? 0 : (this._daemonPids(mp)[0] || 0); } catch {}
-        const cpu0 = pid ? this._cpuTicks(pid) : null;
-        const health = await this._probeMountpoint(mp, rowOf(m).probeMs || 6000);
-        // 2026-10-04 15:09:43 / 16:41:43 (this sweep's :43 phase): THIS branch
-        // lazily unmounted the owner's OneDrive while its daemon was busy, then
-        // killed it ("survived lazy unmount"). A daemon making CPU progress is
-        // WORKING, not hung: keep the path blocked (fail fast), re-check next sweep.
-        const T = this._startingT || MountManager.STARTING;
-        if (health === 'hung' && cpu0 != null && (this._cpuTicks(pid) ?? cpu0) - cpu0 >= T.progressTicks) {
-          this.blockPath(mp, 65000);
-          const busy = 'storage busy — its rclone is working and the listing took over 6 s; kept connected, re-checked every minute';
-          if (this._errors.get(m.id) !== busy) { this._errors.set(m.id, busy); this._notify(); }
-          continue;
-        }
-        if (health === 'hung') {
-          // Blip tolerance: require TWO consecutive hangs before auto-
-          // disconnecting a trusted deployment mount (cephfs) — a single slow
-          // MDS access shouldn't tear it down. Untrusted mounts disconnect
-          // immediately (a hung fuse mount is the outage class we defend).
-          this._hungStrikes = this._hungStrikes || new Map();
-          const strikes = (this._hungStrikes.get(m.id) || 0) + 1;
-          if (strikes < (rowOf(m).hungStrikes || 0)) { this._hungStrikes.set(m.id, strikes); continue; }
-          this._hungStrikes.delete(m.id);
-          this.blockPath(mp, 90000); // fail fast while teardown + in-flight stragglers drain
-          // desired stays 'mounted' → the sweep's dead-mount branch reconnects
-          // with backoff; only an explicit user Unmount ends the supervision.
-          this._errors.set(m.id, 'storage stopped responding (unreachable host?) — auto-disconnected to protect the server; will retry');
-          await this.unmount(m.id, { internal: true });
-          this._killMountDaemon(mp);
-          this._noteReconnectBackoff(m.id);
-          this._notify();
-        } else {
-          this._hungStrikes?.delete(m.id); // recovered — reset the strike count
+        // THE TWO QUESTIONS (lane mount-liveness, 2026-10-09): one slow `ls` tore the owner's OneDrive down 37× in 7 days.
+        // The sweep only GATHERS witnesses; src/mount-liveness.js's table decides (strike · block · teardown — no second
+        // decision site). A slow listing is never a teardown; the daemon's own silence (or a wedge the backend proves) is.
+        const lv = await this._probeLiveness(m, mp);
+        if (lv.verdict !== 'alive') continue;
+        const health = lv.health;
+        {
           // Not hung. Decide whether to surface an access error with re-confirm
           // (no single-shot false positives on a working SMB/NAS mount).
           const accErr = await this._accessErrorFor(m, mp, health);
@@ -1648,7 +1637,7 @@ class MountManager {
     this._notify();
     // A crashed daemon leaves a dead fuse endpoint ("Transport endpoint is
     // not connected") that blocks the fresh mount — clear it first.
-    if (rowOf(m).daemon !== false) {
+    if (rowFor(this, m).daemon !== false) {
       await new Promise((res) => execFile('fusermount3', ['-uz', mp], () =>
         execFile('fusermount', ['-uz', mp], () => res())));
     }
@@ -1711,6 +1700,92 @@ class MountManager {
   /** VFS cache root — per-mount subdirs. On K8s this rides the PVC (fast,
    *  persistent — dirty write-back survives pod-level restarts). Overridable
    *  for hosts whose data dir sits on slow network storage. */
+  /** The rclone mount argv of a record (lane mount-argv-dir-cache): its EFFECTIVE row — a child (parentId, no type)
+   *  mounts its parent's backend, but its own typeless row is the s3 DEFAULT row (/mnt/gdrive_39ai_shared carried the s3
+   *  flag, its parent did not), read through rowFor (lane mount-liveness: ONE resolver) — through THE builder the device twin calls too. */
+  _mountArgv(m, { remote, mp, cacheDir, rcSocket = null }) {
+    const conn = this._connOf(m), row = rowFor(this, m);
+    return rcloneMountArgs({ row, remote, mountpoint: mp, cacheDir, s3: !!row.s3Backend?.(conn), readOnly: m.mode === 'ro',
+      cacheGB: this._getSetting('mounts.vfsCacheMaxSizeGB'), hasFlag: (f) => this._rcloneHasFlag(f), rcSocket, dataDir: this.dataDir });
+  }
+
+  /** Where this mount's rc socket lives (src/mount-argv.js rcSocketPath: a LOCAL per-user dir, never the data dir,
+   *  never a network filesystem). → {path, dir, via} | {path: null, why}. */
+  _rcSocketPick(m) {
+    return rcSocketPath({ id: m.id, dataDir: this.dataDir, xdgRuntimeDir: process.env.XDG_RUNTIME_DIR || '',
+      uid: typeof process.getuid === 'function' ? process.getuid() : null, network: (d) => MountManager._onNetworkFs(d) });
+  }
+
+  /** The rc socket for a NEW daemon, or null (the mount still spawns, without rc): the dir created 0700 and verified
+   *  (sock-path's ownership verdict), and a dead daemon's socket file removed — measured on v1.69.3: a socket left by
+   *  a SIGKILLed daemon makes the next mount die "Failed to start remote control … address already in use". */
+  _rcSocketReady(m) {
+    if (!this._rcloneHasFlag('rc-addr')) return null;
+    const pick = this._rcSocketPick(m);
+    const v = pick.path ? ensureSocketDir(pick.dir) : { ok: false, why: pick.why };
+    if (!v.ok) { console.warn(`[mounts] ${m.id}: no rc socket for this daemon — ${v.why}`); return null; }
+    try { fs.unlinkSync(pick.path); } catch {}
+    return pick.path;
+  }
+
+  /** Is `dir` (or its nearest existing ancestor) on a network / FUSE filesystem? statfs magic: NFS, SMB, CIFS, SMB2,
+   *  FUSE (bindfs, rclone), Ceph. A unix socket there is refused. */
+  static _onNetworkFs(dir) {
+    const NET = new Set([0x6969, 0x517b, 0xff534d42, 0xfe534d42, 0x65735546, 0x00c36400]);
+    for (let d = dir; ; d = path.dirname(d)) {
+      try { return NET.has(Number(fs.statfsSync(d).type) >>> 0); } catch {}
+      if (d === path.dirname(d)) return false;
+    }
+  }
+
+  /** The owner's rclone daemon, asked for its own stats over its rc socket (a SEAM: nothing in the sweep calls it
+   *  yet). `core/stats` (transfers, errors, retries) + `vfs/queue` (the dirty items still to upload), each ONE
+   *  `rclone rc` child bounded at `timeoutMs` — never on the loop. → {stats, queue} | {error}. */
+  async _rcStats(m, timeoutMs = 2000) {
+    const pick = this._rcSocketPick(m);
+    if (!pick.path) return { error: pick.why };
+    try { if (!(await fs.promises.stat(pick.path)).isSocket()) return { error: `${pick.path} is not a socket` }; }
+    catch { return { error: `no rc socket at ${pick.path}` }; }
+    const ask = (cmd) => new Promise((resolve) => {
+      execFile(this.rcloneBin(), ['rc', '--unix-socket', pick.path, cmd], { timeout: timeoutMs, maxBuffer: 1024 * 1024 }, (err, out, stderr) => {
+        if (err) return resolve({ error: `${cmd}: ${err.killed ? `no answer in ${timeoutMs} ms` : String(stderr || err.message).trim().split('\n').pop()}` });
+        try { resolve({ v: JSON.parse(out) }); } catch { resolve({ error: `${cmd}: not JSON` }); }
+      });
+    });
+    const [stats, queue] = await Promise.all([ask('core/stats'), ask('vfs/queue')]);
+    if (stats.error) return { error: stats.error };
+    return { stats: stats.v, queue: queue.error ? { error: queue.error } : queue.v };
+  }
+
+  /** A NEW daemon's log fd: data/mount-logs/<id>.log APPENDED (it was reopened 'w' at every remount, destroying the
+   *  dead daemon's last words), rotated to <id>.log.1 past LOG_ROTATE_BYTES, one marker line per spawn. */
+  _openMountLog(id) {
+    fs.mkdirSync(this._logDir, { recursive: true });
+    const f = path.join(this._logDir, `${id}.log`);
+    try { if (fs.statSync(f).size >= LOG_ROTATE_BYTES) fs.renameSync(f, f + '.1'); } catch {}
+    const fd = fs.openSync(f, 'a');
+    try { fs.writeSync(fd, `${MountManager.LOG_MARK} ${new Date().toISOString()}\n`); } catch {}
+    return fd;
+  }
+
+  /** The last `n` lines of a mount's log — a bounded read (its last 64 KB). `current` = the newest daemon's lines
+   *  only (after the last spawn marker); else the previous daemon's last words too, markers included. */
+  tailMountLog(id, n = 20, { current = false } = {}) {
+    let text = '';
+    try {
+      const fd = fs.openSync(path.join(this._logDir, `${id}.log`), 'r');
+      try {
+        const size = fs.fstatSync(fd).size, len = Math.min(size, 65536), b = Buffer.alloc(len);
+        fs.readSync(fd, b, 0, len, size - len);
+        text = b.toString('utf8');
+      } finally { fs.closeSync(fd); }
+    } catch { return []; }
+    if (current) { const at = text.lastIndexOf(MountManager.LOG_MARK); if (at >= 0) text = text.slice(at).split('\n').slice(1).join('\n'); }
+    return text.split('\n').filter((l) => l.trim()).slice(-n);
+  }
+
+  static LOG_MARK = '=== vibespace: rclone mount spawned';
+
   _vfsCacheRoot() {
     return process.env.VIBESPACE_VFS_CACHE_DIR || path.join(this.dataDir, 'vfs-cache');
   }
@@ -1806,7 +1881,7 @@ class MountManager {
       this._notify();
       return ok;
     };
-    const urow = rowOf(m);   // a row with its own unmount (a sync worker stops; a kernel mount umounts)
+    const urow = rowFor(this, m);   // a row with its own unmount (a sync worker stops; a kernel mount umounts)
     if (urow.unmount) return urow.unmount(m, id, mp, finish, this);
     return new Promise((resolve) => {
       // A lazy detach can leave the DAEMON alive: an EIO-wedged rclone (dead
@@ -1968,7 +2043,7 @@ class MountManager {
     let env;
     if (id) {
       const m = this._connOf(this._get(id));
-      if (!rowOf(m).sharedDrives) throw new Error('not a Google Drive record');
+      if (!rowFor(this, m).sharedDrives) throw new Error('not a Google Drive record');
       ({ env } = this._rcloneFor(m));
     } else {
       if (!token) throw new Error('token required');
@@ -1996,7 +2071,7 @@ class MountManager {
   listGmailLabels({ id, token, clientId, clientSecret, clientPreset } = {}) {
     if (id) {
       const m = this._get(id);
-      if (!rowOf(m).labels) throw new Error('not a Gmail record');
+      if (!rowFor(this, m).labels) throw new Error('not a Gmail record');
       return this.gmail.listLabels({
         token: this._dec(m.tokenEnc),
         clientPreset: m.clientPreset || null,
@@ -2123,7 +2198,7 @@ class MountManager {
    */
   startDriveAuthForMount(id) {
     const m = this._connOf(this._get(id));
-    const row = rowOf(m);   // the row says which client re-signs it in (its own, a preset, rclone's)
+    const row = rowFor(this, m);   // the row says which client re-signs it in (its own, a preset, rclone's)
     if (!row.reauthClient) throw new Error('Not an OAuth cloud connection');
     return this.startDriveAuth(row.reauthClient(m, this));
   }
@@ -2179,7 +2254,7 @@ class MountManager {
       throw new Error('client must name a preset ("" = built-in) or a custom id + secret');
     }
     if (client && typeof client === 'object') {
-      if (!rowOf(holder).presetClient?.reauthSwitch) throw new Error('Switching the OAuth client with a new sign-in is only for Google Drive records');
+      if (!rowFor(this, holder).presetClient?.reauthSwitch) throw new Error('Switching the OAuth client with a new sign-in is only for Google Drive records');
       const cid = String(client.clientId || '').trim();
       if (cid && !client.clientSecret) throw new Error('A custom OAuth client needs its client secret too');
       if (cid) { holder.clientId = cid; holder.clientSecretEnc = this._enc(String(client.clientSecret)); holder.clientPreset = null; }
@@ -2187,7 +2262,7 @@ class MountManager {
     }
     // OneDrive + generic cloud backends re-auth through the same dialog —
     // rejecting them here left the edit-dialog button dead for those types.
-    const hrow = rowOf(holder);   // the row stores the token where its record keeps it
+    const hrow = rowFor(this, holder);   // the row stores the token where its record keeps it
     if (!hrow.writeToken) throw new Error('Not an OAuth cloud connection');
     hrow.writeToken(holder, tok, this);
     this._save();
@@ -2298,7 +2373,7 @@ class MountManager {
   // imported down-scoped share, not a session-token STS credential).
   canShareFromMount(m) {
     m = this._connOf(m); // a child mount shares with its credential's keys
-    return !!rowOf(m).s3Share && !!m.secretKeyEnc && !m.sessionTokenEnc && m.origin !== 'imported';
+    return !!rowFor(this, m).s3Share && !!m.secretKeyEnc && !m.sessionTokenEnc && m.origin !== 'imported';
   }
 
   async mintShareFromMount(mountId, { folder, mode, name, expiryDays }) {
@@ -2353,7 +2428,7 @@ class MountManager {
   // embeds it, the receiver adds a normal `cephfs` mount. Env-gated: absent
   // the minter, the row keeps only the WebDAV bridge.
   cephMintAvailable() { return !!(process.env.VIBESPACE_CEPHMINT_URL && process.env.VIBESPACE_CEPHMINT_TOKEN); }
-  canCephShare(m) { return !!m && !!rowOf(m).cephShare && this.cephMintAvailable(); }
+  canCephShare(m) { return !!m && !!rowFor(this, m).cephShare && this.cephMintAvailable(); }
 
   async _mintCall(path, body) {
     const url = process.env.VIBESPACE_CEPHMINT_URL.replace(/\/+$/, '') + path;
@@ -2469,4 +2544,4 @@ class MountManager {
   }
 }
 
-module.exports = { MountManager };
+module.exports = { MountManager, rowFor };

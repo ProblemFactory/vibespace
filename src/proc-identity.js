@@ -157,6 +157,8 @@ function signalIdentity(identity, signal, opts = {}) {
   return one(pid);
 }
 
+// ── SHIPPED TWIN BEGIN — data/bin/vibespace-remote-keeper carries these lines byte-for-byte: it ships to a host as ONE
+// file and cannot require src/ (the vibespace-usage-scan precedent). test-pid-identity pins the copy to this source. ──
 /** agentd's spawn-proof token (moved verbatim from src/agentd/agentd.js pidStartTime): 'l' + field 22 on a
  *  procfs, else 'p' + the `ps -o lstart=` string, else ''. Kept because session metas persist it as `startTime`. */
 function startToken(pid) {
@@ -172,9 +174,84 @@ function startToken(pid) {
   } catch { }
   return '';
 }
+/** This box's boot id ('' with no procfs) — recorded beside a token: a reboot ends every process a record names. */
+function bootToken() { try { return fs.readFileSync('/proc/sys/kernel/random/boot_id', 'utf-8').trim(); } catch { return ''; } }
+/** A RECORDED birth (startToken's form) against the pid now → same | zombie | pid-recycled | gone | unknown-identity
+ *  (no birth recorded) | unknown (the recorded rung is not readable here). Only `same` may be signalled. */
+function tokenVerdict(pid, token, bootId) {
+  if (!(Number(pid) > 1) || !token) return 'unknown-identity';
+  if (bootId) { const b = bootToken(); if (b && b !== bootId) return 'gone'; }
+  const cur = startToken(pid);
+  if (!cur) return 'gone';
+  if (cur[0] !== String(token)[0]) return 'unknown';
+  if (cur !== String(token)) return 'pid-recycled';
+  try { const st = fs.readFileSync('/proc/' + pid + '/stat', 'utf-8'); if (st[st.lastIndexOf(')') + 2] === 'Z') return 'zombie'; } catch { }
+  return 'same';
+}
+// ── SHIPPED TWIN END ──
+
+/** A record's start token (+ bootId) → the identity judge() / signalIdentity() read. No token = a birth-less record
+ *  (`unknown-identity`: never signalled by proof — the caller's legacy rung decides, said once). */
+function identityFromToken(pid, token, bootId) {
+  const t = String(token || '');
+  if (t[0] === 'l' && /^\d+$/.test(t.slice(1))) return { pid: Number(pid), starttime: Number(t.slice(1)), bootId: bootId || '' };
+  if (t[0] === 'p' && t.length > 1) return { pid: Number(pid), starttime: null, lstart: t.slice(1), bootId: '' };
+  return { pid: Number(pid), starttime: null, bootId: '' };
+}
+
+/** THE SH TWIN (B-5ee1): `vs_same_proc <pid> <token> [bootId]` returns 0 only while <pid> is still the process whose
+ *  start token (startToken's form) was recorded; else 1 with $VS_SAME_WHY = pid-recycled | gone | zombie |
+ *  unknown-identity | unknown. Linux: /proc/<pid>/stat field 22 counted from the LAST ') ' (comm may hold one) +
+ *  /proc/sys/kernel/random/boot_id; else `ps -o lstart= -p`. Embedded verbatim by the writer sweep and the ssh kill,
+ *  exactly as cliIdentityShellFns() is; test-pid-identity drives it against a REAL scratch sleep. */
+function procIdentityShellFns() {
+  return `vs_same_proc() {
+  VS_SAME_WHY=unknown-identity
+  case "$1" in ''|*[!0-9]*) return 1;; esac
+  [ -n "$2" ] || return 1
+  if [ -n "$3" ] && [ -r /proc/sys/kernel/random/boot_id ] && [ "$(cat /proc/sys/kernel/random/boot_id)" != "$3" ]; then VS_SAME_WHY=gone; return 1; fi
+  vs_sp_cur=; vs_sp_state=
+  if [ -r "/proc/$1/stat" ]; then
+    vs_sp_st=$(cat "/proc/$1/stat" 2>/dev/null)
+    vs_sp_rest=\${vs_sp_st##*) }
+    vs_sp_t=$(printf '%s\\n' "$vs_sp_rest" | cut -d' ' -f20)
+    [ -n "$vs_sp_st" ] && [ -n "$vs_sp_t" ] && { vs_sp_cur=l$vs_sp_t; vs_sp_state=$(printf '%s\\n' "$vs_sp_rest" | cut -d' ' -f1); }
+  fi
+  if [ -z "$vs_sp_cur" ]; then
+    vs_sp_ps=$(ps -p "$1" -o lstart= 2>/dev/null | sed 's/^ *//;s/ *$//')
+    [ -n "$vs_sp_ps" ] && vs_sp_cur=p$vs_sp_ps
+  fi
+  [ -n "$vs_sp_cur" ] || { VS_SAME_WHY=gone; return 1; }
+  case "$vs_sp_cur" in l*) case "$2" in l*) ;; *) VS_SAME_WHY=unknown; return 1;; esac;; *) case "$2" in p*) ;; *) VS_SAME_WHY=unknown; return 1;; esac;; esac
+  [ "$vs_sp_cur" = "$2" ] || { VS_SAME_WHY=pid-recycled; return 1; }
+  [ "$vs_sp_state" = Z ] && { VS_SAME_WHY=zombie; return 1; }
+  VS_SAME_WHY=same; return 0
+}`;
+}
+
+/** The words a WITHHELD signal reaches the user with (the no-silent-failures law): the kill answer / exit record / notice
+ *  where the stop was asked. i18n = {key, params} for serverNotice; `text` = the English (journal, older clients). */
+const i18nKey = (k) => k; // the extraction marker scripts/i18n-extract.mjs reads (zh/ja: src/lib/i18n-zh.js / i18n-ja.js)
+const WITHHELD_KEY = i18nKey("{name}'s process was not stopped: pid {pid} now belongs to another process (recorded {when}) — nothing of VibeSpace's is running");
+function withheldWords(name, pid, when) {
+  const params = { name: String(name || 'VibeSpace'), pid: String(pid), when: String(when || 'earlier') };
+  return { text: WITHHELD_KEY.replace(/\{(\w+)\}/g, (m, k) => params[k]), i18n: { key: WITHHELD_KEY, params } };
+}
+/** The legacy rung's ONE line per record (B-5ee1 rung 3, retire 2026-12-01): a record an older build wrote carries no birth. */
+const LEGACY_LINE = 'legacy pid record, cmdline-only — re-recorded at its next start';
+const _legacySaid = new Set();
+function legacyOnce(door, pid, say) {
+  const key = `${door}:${pid}`;
+  if (_legacySaid.has(key)) return null;
+  _legacySaid.add(key);
+  const line = `[proc-identity] ${door}: pid ${pid} — ${LEGACY_LINE}`;
+  try { (say || ((l) => console.warn(l)))(line); } catch { }
+  return line;
+}
 
 module.exports = {
-  PROC_ROOT, UNPROVABLE,
+  PROC_ROOT, UNPROVABLE, WITHHELD_KEY, LEGACY_LINE,
   hasProc, bootIdOf, starttimeOf, stateOf, identityOf, judge, sameProcess, aliveIdentity, signalIdentity, reportOnce, startToken,
-  _resetReported: () => _reported.clear(),
+  bootToken, tokenVerdict, identityFromToken, procIdentityShellFns, withheldWords, legacyOnce,
+  _resetReported: () => { _reported.clear(); _legacySaid.clear(); },
 };

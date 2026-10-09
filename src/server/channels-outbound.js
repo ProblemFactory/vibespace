@@ -1256,6 +1256,10 @@ function create(engineCtx) {
     // a transport failure AFTER the request left (`detail.lost`): the vendor
     // may have processed it, so it is `unknown`, never `failed` (§9.4).
     const lost = threw || !!(r && !r.ok && r.detail && r.detail.lost);
+    // lane slack-file-send-key r2: the share may have been INGESTED while this proposal was still sending (a record is fresh
+    // once, and learnSentFiles skips a proposal that is not yet sent) — the conversation's STORED self-authored records since
+    // the send began re-key a file-keyed result IN this transition (one write; a local read, never a vendor call)
+    const shared = r && r.ok && Array.isArray(r.parts) && r.parts.some((x) => x && x.ok === true && x.part === 'attachment') ? sharedSince(p.adapterId, p.convId, t0) : null;
     let to, patch;
     if (r && r.ok) {
       to = 'sent';
@@ -1273,6 +1277,8 @@ function create(engineCtx) {
         // the NEW conversation's id (the thread the vendor answered with) —
         // the card's link, the receipt; the index row arrives with the next pass
         if (q.compose && r.threadId && !q.convId) q.convId = String(r.threadId);
+        const k = shared && shared.size ? P.rekeyByFiles(q.result, shared) : null;
+        if (k) q.result = k;
       };
     } else if (lost) {
       to = 'unknown';
@@ -1297,6 +1303,7 @@ function create(engineCtx) {
     // it shows under what it quotes as promptly as a thread reply does (a plain message still waits for its pass)
     else if (to === 'sent' && (p1.inThread || P.placementOf(p1) === 'quote') && rec) { const e2 = live.get(rec.id); if (e2) kick(rec, e2, p1.convId); }
     if (to === 'sent' && rec && r.observed) { try { await noteIdentityObserved(rec, p1.result.sentAs, r.observed, p1.result.vendorMessageId); } catch (err) { log.warn(`[channels] identity observation not recorded: ${(err && err.message) || err}`); } }
+    if (to === 'sent' && shared && shared.size && p1.result && Array.isArray(p1.result.fileIds)) sayFilesLearned(rec ? rec.kind : p1.adapterId, id, p1.result);
     if (to === 'sent') await noteSentBy(p1);
     if (to === 'sent') await speakPartial(p1);
     if (to === 'unknown') await speakUnknown(p1);
@@ -1365,6 +1372,41 @@ function create(engineCtx) {
         en.sentBy = sb;
       });
     } catch (err) { log.warn(`[channels] ${p.adapterId}/${p.convId}: what ${d.id} sent could not be recorded (the reply-to-mine rule will miss it): ${(err && err.message) || err}`); }
+  }
+  /** lane slack-file-send-key (B-2840): A FILE SEND LEARNS ITS MESSAGE AT INGEST — an adapter that keys a file send by the
+   *  FILE id (Slack: completeUploadExternal answers no message) has the proposal re-keyed by the self-authored share the
+   *  moment that record is ingested: ONE outbox write (state unchanged; a replay moves nothing), the `sentBy` ledger gains
+   *  the message id, ONE journal line per proposal. No vendor call. */
+  async function learnSentFiles(rec, convId, records) {
+    const byFile = P.sharedFilesOf(records);
+    if (!byFile.size) return [];
+    const since = now() - F.SENT_WINDOW_MS;
+    const mine = (q) => !!(q && q.state === 'sent' && q.adapterId === rec.id && q.convId === convId && q.kind !== 'reaction' && q.result && Number(q.result.at || q.at) >= since);
+    if (!Object.values(store.outbox.snapshot().proposals || {}).some((q) => mine(q) && P.rekeyByFiles(q.result, byFile))) return [];
+    const moved = [];
+    await store.outbox.update((ob) => { for (const [id, q] of Object.entries(ob.proposals)) { const r1 = mine(q) ? P.rekeyByFiles(q.result, byFile) : null; if (r1) { q.result = r1; moved.push(id); } } });
+    for (const id of moved) {
+      const p1 = store.outbox.snapshot().proposals[id];
+      await noteSentBy(p1);
+      sayFilesLearned(rec.kind, id, p1.result);
+    }
+    if (moved.length) notifyOutbox(moved);
+    return moved;
+  }
+  /** ONE journal line per re-keyed proposal: `<kind>: sent file <fid> = message <ts> (outbox <id>)`. */
+  function sayFilesLearned(kind, id, result) {
+    const pairs = [result, ...(result.parts || [])].filter((x) => x && x.fileId).map((x) => `file ${x.fileId} = message ${x.vendorMessageId}`);
+    log.log(`[channels] ${kind}: sent ${pairs.length ? pairs.join(', ') : `file ${(result.fileIds || []).join(', ')} = message ${result.vendorMessageId}`} (outbox ${id})`);
+  }
+  /** lane slack-file-send-key r2: the files this account's OWN stored records shared in the conversation since `sinceAt` (a
+   *  minute of clock skew allowed) — the newest LOOK_BACK_MAX records of the local log, never a vendor call; only the log of
+   *  a conversation with an index row (the record-clear census gate); an unreadable log is an empty one. */
+  const LOOK_BACK_MAX = 200;
+  function sharedSince(adapterId, convId, sinceAt) {
+    if (!store.index.peek(`${adapterId}/${convId}`)) return new Map();
+    let recs = [];
+    try { recs = store.readTail(adapterId, convId, { limit: LOOK_BACK_MAX }); } catch { recs = []; }
+    return P.sharedFilesOf(recs.filter((x) => x && Number(x.at) >= Number(sinceAt) - 60e3));
   }
   /** lane lark-upload-preflight (userW inc-muxsy69b-mjg1): A PARTIAL SEND REACHES THE OWNER — beside the agent's receipt,
    *  ONE For-you item per proposal (its action keyed by the proposal) naming what did NOT land and why, with the step that
@@ -1784,7 +1826,7 @@ function create(engineCtx) {
   return {
     honestyLineFor, sendIdentityFor, proposalsFor, agentProposalView, stashAbout, stashGate, outboxView, notifyOutbox, sendStartsTurn,
     outboxAttachment, filesSweep, propose, proposeReaction, compose, approve, reject, onProposal, withdrawProposal, replaceProposal,
-    noteReceiptStash, reconcileReceiptFates, reconcile, sweepSending, sweepReplaces, receipt, expireSweep, pointerSync,
+    noteReceiptStash, reconcileReceiptFates, reconcile, sweepSending, sweepReplaces, receipt, expireSweep, pointerSync, learnSentFiles,
   };
 }
 

@@ -653,6 +653,28 @@ function sentIdsOf(result) {
   for (const v of [r.vendorMessageId, ...(Array.isArray(r.parts) ? r.parts.filter((x) => x && x.ok === true).map((x) => x.vendorMessageId) : [])]) if (v !== null && v !== undefined && String(v) !== '' && !out.includes(String(v))) out.push(String(v));
   return out;
 }
+/** lane slack-file-send-key (B-2840): the FILES each self-authored record shared — Map(file id → that record's vendor id),
+ *  the earliest share first (records in `at` order). Slack keys a file send by the FILE id (its completeUploadExternal
+ *  answers no message); the share message is what a thread reply names. PURE. */
+function sharedFilesOf(records) {
+  const out = new Map();
+  const list = (Array.isArray(records) ? records : []).filter((r) => r && r.author && r.author.isSelf === true && r.vendorId && Array.isArray(r.attachments));
+  for (const r of list.sort((a, b) => Number(a.at) - Number(b.at))) for (const a of r.attachments) if (a && a.id && !out.has(String(a.id))) out.set(String(a.id), String(r.vendorId));
+  return out;
+}
+/** lane slack-file-send-key (B-2840): a sent result keyed by FILE ids, re-keyed by the messages that shared them
+ *  (`byFile` from sharedFilesOf): the result's and each landed part's file-id key → the message id, the file ids kept in
+ *  `fileIds` (a part keeps its own as `fileId`). null when nothing moves — a replay is a no-op. PURE. */
+function rekeyByFiles(result, byFile) {
+  const r = result && typeof result === 'object' ? result : null;
+  if (!r || !byFile || !byFile.size) return null;
+  const learned = [];
+  const to = (v) => { const k = v === null || v === undefined ? '' : String(v); if (!k || !byFile.has(k)) return null; if (!learned.includes(k)) learned.push(k); return byFile.get(k); };
+  const head = to(r.vendorMessageId);
+  const parts = Array.isArray(r.parts) ? r.parts.map((x) => { const m = x && x.ok === true ? to(x.vendorMessageId) : null; return m ? { ...x, vendorMessageId: m, fileId: String(x.vendorMessageId) } : x; }) : null;
+  if (!learned.length) return null;
+  return { ...r, ...(head ? { vendorMessageId: head } : {}), ...(parts ? { parts } : {}), fileIds: [...new Set([...(Array.isArray(r.fileIds) ? r.fileIds.map(String) : []), ...learned])].slice(0, 12) };
+}
 function sendParts(v) {
   if (!Array.isArray(v) || !v.length) return null;
   return v.slice(0, 12).filter((x) => x && typeof x === 'object').map((x) => ({ part: x.part === 'text' ? 'text' : 'attachment', ...(x.name ? { name: String(x.name).slice(0, 200) } : {}), ok: x.ok === true, ...(x.vendorMessageId ? { vendorMessageId: String(x.vendorMessageId).slice(0, 200) } : {}), ...(x.ok === true ? {} : { code: String(x.code || 'vendor-error').slice(0, 40), ...(x.why ? { why: String(x.why).slice(0, 300) } : {}), ...(x.lost ? { lost: true } : {}), ...(Array.isArray(x.requiredScopes) && x.requiredScopes.length ? { requiredScopes: x.requiredScopes.slice(0, 8).map(String) } : {}) }) }));
@@ -1415,6 +1437,7 @@ function renderReceiptBlock(receipt, { adapterLabel = null, title = null, text =
 
 module.exports = {
   sentIdsOf,   // lane channel-reply-real
+  sharedFilesOf, rekeyByFiles,   // lane slack-file-send-key
   OUTBOX_STATES, TRANSITIONS, TERMINAL_STATES, POLICY_MODES, DECISION_REASONS, RECEIPT_STATUSES, PROPOSAL_TTL_MS, TEXT_MAX_BYTES, HONESTY_LINE_DEFAULT, IDEMPOTENCY_MODES,
   WITHDRAWABLE_STATES, WITHDRAWN_DEFAULT_REASON, withdrawVerdict, withdrawWhy, withdrawReason,
   RECEIPT_DIFF_MAX, RECEIPT_BLOCK_MAX_BYTES, RECEIPT_GUIDANCE, receiptDiff, receiptFeedback, receiptFateOf, receiptFateText, RECEIPT_DELIVERIES, receiptDeliveryVerdict, utf8Bytes,

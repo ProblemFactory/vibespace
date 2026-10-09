@@ -84,7 +84,7 @@ ok(ACL.validateDirectory({ singles: true }).ok && ACL.validateDirectory({ single
 const A = 'fake-poll', C = 'fake-poll-ops', KEY = `${A}/${C}`;
 const AG = { kind: 'agent', id: 'agent-1', name: 'Worker', groups: [], msgLevelFor: () => 'none' };
 function dayStartClock() { const t0 = Date.now(); const day0 = Math.floor(t0 / 86400e3) * 86400e3 + 60e3; let skew = 0; const f = () => day0 + (Date.now() - t0) + skew; f.advance = (ms) => { skew += ms; }; return f; }
-function mkEngine(name, { ENGM = ENG, live = null } = {}) {
+function mkEngine(name, { ENGM = ENG, live = null, sendHook = null } = {}) {
   const dataDir = path.join(ROOT, name);
   const userTodos = new UserTodoManager({ dataDir });
   const delivered = [], stashed = [];
@@ -95,7 +95,10 @@ function mkEngine(name, { ENGM = ENG, live = null } = {}) {
   const clock = dayStartClock();
   // the fake world follows THIS clock (a later pass sees the day's later records — new messages)
   const registry = createChannelRegistry();
-  registry.register(FAKE.makeFakeAdapter({ kind: 'fake-poll', receive: 'poll', sendAs: ['user'], now: clock }));
+  const fk = FAKE.makeFakeAdapter({ kind: 'fake-poll', receive: 'poll', sendAs: ['user'], now: clock });
+  // lane slack-file-send-key r2: a leg may stand in for the vendor's send (the adapter's own send handed in)
+  if (sendHook) { const mk0 = fk.create; fk.create = (record, deps) => { const a = mk0(record, deps); const s0 = a.send; a.send = (convId, o) => sendHook(s0, convId, o); return a; }; }
+  registry.register(fk);
   const eng = ENGM.create({ dataDir, env: { VIBESPACE_CHANNELS_FAKE: '1' }, registry, broadcast: () => {}, userTodos, deliver, now: clock, log: { log() {}, warn() {}, error() {} }, liveSessions: () => live || [{ cid: 'agent-1', name: 'Worker', groups: [] }, { cid: 'agent-2', name: 'Other', groups: [] }] });
   return { eng, userTodos, delivered, stashed, clock };
 }
@@ -353,6 +356,107 @@ for (const [label, pr] of [['a GROUP of A + B', GRP], ['ALL AGENTS', { kind: 'ev
   const E9 = MUT.load('src/server/channels-engine.js', cut, 'group-not-per-member');
   const rc = await replyLeg(E9, 'e9c', GRP);
   ok(cut !== src && !(rc.s2 === 'agent-1,agent-1' && rc.s3 === 'agent-1,agent-1,agent-2'), 'CONTROL: an engine judging the group row as ONE round-robin item hands a reply to the wrong member — the group leg above would be red', JSON.stringify(rc));
+}
+
+console.log('⑨b lane slack-file-send-key (B-2840): a FILE send keyed by its file id learns its share message at ingest — a thread reply under the share is a reply to the drafter');
+// Slack keys a file send by the FILE id (scripts/fixtures/slack/send-files.json: completeUploadExternal answers {ok, files:[{id, title}]}
+// — no share ts); the share arrives later as a SELF-authored record whose attachments[].id is that file id (recorded.json: subtype
+// file_share, or a plain message with files[]). Slack lists history by ts, so a reply never arrives in a page BEFORE its share.
+async function fileLeg(ENGM, name) {
+  const { eng, stashed } = mkEngine(name, { ENGM });
+  await eng.pass(A, { force: true });
+  const rec = eng.adapterRecords().adapters.find((r) => r.id === A);
+  const got = eng.messages(A, C, { limit: 1 });
+  const r0 = (got.records || got)[0];
+  const t0 = Number(r0.at);
+  const EV = { kind: 'everyone', id: '*' };
+  await eng.setGrain(A, { kind: 'conversation', convId: C }, { access: [acc(EV)], watchers: [{ principal: EV, delivery: 'next-turn', mode: 'filtered', filter: { match: 'any', rules: [{ kind: 'reply-to-sent' }] } }] });
+  const part = (n, fid, extra = {}) => ({ part: 'attachment', name: n, ok: true, vendorMessageId: fid, ...extra });
+  await eng.store.outbox.update((ob) => {
+    ob.proposals['p-f'] = { id: 'p-f', adapterId: A, convId: C, state: 'sent', text: 'Worker: the deck and the chart', draftedBy: { kind: 'agent', id: 'agent-1', name: 'agent-1' }, at: t0 + 100, updatedAt: t0 + 100, result: { ok: true, vendorMessageId: 'F0SEND001', at: t0 + 100, sentAs: 'user', parts: [part('deck.pdf', 'F0SEND001', { withText: true }), part('chart.png', 'F0SEND002')] } };
+    ob.proposals['p-b'] = { id: 'p-b', adapterId: A, convId: C, state: 'sent', text: 'Other asks: the invoice?', draftedBy: { kind: 'agent', id: 'agent-2', name: 'agent-2' }, at: t0 + 200, updatedAt: t0 + 200, result: { vendorMessageId: 'vm-b1', at: t0 + 200 } };
+  });
+  const share = (ts, fid, dt) => ({ ...r0, id: `${r0.id}-${ts}`, vendorId: ts, at: t0 + dt, author: { id: 'U0SELF', name: 'Me', isSelf: true, isBot: false }, text: '', attachments: [{ id: fid, name: 'f', bytes: 1, mime: 'application/pdf' }], replyTo: null, root: null, threadKey: null });
+  const reply = (vid, ts, dt) => ({ ...r0, id: `${r0.id}-${vid}`, vendorId: vid, at: t0 + dt, author: { id: 'U0ROWAN', name: 'Rowan', isSelf: false, isBot: false }, text: `answer ${vid}`, attachments: [], replyTo: ts, root: null, threadKey: ts });
+  const real = eng.store.outbox.update.bind(eng.store.outbox);
+  let writes = 0;
+  eng.store.outbox.update = (fn) => { writes++; return real(fn); };
+  const step = async (rs) => { writes = 0; await eng.onFresh(rec, C, rs, { origin: 'test' }); await new Promise((res) => setTimeout(res, 30)); return { stash: stashed.map((x) => x.cid).join(','), writes }; };
+  const pf = () => JSON.parse(JSON.stringify(eng.store.outbox.snapshot().proposals['p-f']));
+  // ONE page: the share of the first file, then a thread reply under it (thread_ts = the share's ts)
+  const s1 = await step([share('1700000100.000100', 'F0SEND001', 500), reply('w-1', '1700000100.000100', 1000)]);
+  const p1 = pf();
+  const s2 = await step([share('1700000100.000100', 'F0SEND001', 500)]);   // the same page again (a re-poll)
+  const p2 = pf();
+  const s3 = await step([share('1700000300.000300', 'F0OTHER01', 3000), reply('w-3', '1700000300.000300', 3500)]);   // an UNRELATED file share
+  const s4 = await step([share('1700000400.000400', 'F0SEND002', 4000), reply('w-4', '1700000400.000400', 4500)]);   // the second file's own share
+  const p4 = pf();
+  const ledger = ((eng.store.index.peek(KEY) || {}).sentBy || {})['agent:agent-1'] || [];
+  return { s1, s2, s3, s4, p1, p2, p4, ledger };
+}
+{
+  const r = await fileLeg(ENG, 'e9f');
+  ok(r.s1.stash === 'agent-1' && r.p1.result.vendorMessageId === '1700000100.000100' && JSON.stringify(r.p1.result.fileIds) === '["F0SEND001"]' && r.p1.result.parts[0].vendorMessageId === '1700000100.000100' && r.p1.result.parts[0].fileId === 'F0SEND001' && r.p1.result.parts[1].vendorMessageId === 'F0SEND002', 'ONE page (the share, then a thread reply under it): the proposal\'s result is re-keyed by the share ts (file id kept in fileIds) BEFORE the reply is judged — the reply reaches the drafter (agent-1) and nobody else', JSON.stringify({ s1: r.s1, result: r.p1.result }));
+  ok(r.s1.writes === 1 && r.p1.state === 'sent' && r.s2.writes === 0 && JSON.stringify(r.p2) === JSON.stringify(r.p1) && r.s2.stash === r.s1.stash, 'THE DOOR: the re-key is ONE outbox write with the state unchanged (sent); the same page again writes nothing and moves nothing (idempotent)', JSON.stringify({ w1: r.s1.writes, w2: r.s2.writes, state: r.p1.state }));
+  ok(r.s3.stash === r.s1.stash && r.s3.writes === 0, 'a thread reply under an UNRELATED file share reaches nobody (no proposal moved)', JSON.stringify(r.s3));
+  ok(r.s4.stash === 'agent-1,agent-1' && r.p4.result.vendorMessageId === '1700000100.000100' && r.p4.result.parts[1].vendorMessageId === '1700000400.000400' && JSON.stringify(r.p4.result.fileIds) === '["F0SEND001","F0SEND002"]' && r.ledger.includes('1700000100.000100') && r.ledger.includes('1700000400.000400'), 'the SECOND file (its own share message, one per file on Slack) re-keys its part; a reply under it reaches agent-1; the sentBy ledger carries both share ts', JSON.stringify({ s4: r.s4, result: r.p4.result, ledger: r.ledger }));
+  const engSrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
+  const noKey = engSrc.replace('    try { await learnSentFiles(rec, convId, fresh0); }', '    try { /* no re-key */ }');
+  const rc = await fileLeg(MUT.load('src/server/channels-engine.js', noKey, 'no-file-rekey'), 'e9f-c1');
+  ok(noKey !== engSrc && rc.s1.stash === '' && rc.p1.result.vendorMessageId === 'F0SEND001', 'CONTROL: an engine copy WITHOUT the ingest re-key — the reply under the file share reaches nobody (the leg above would be red)', JSON.stringify({ s1: rc.s1, vid: rc.p1.result.vendorMessageId }));
+  const obSrc = fs.readFileSync(path.join(REPO, 'src/server/channels-outbound.js'), 'utf8');
+  const again = obSrc.replace('if (r1) { q.result = r1; moved.push(id); }', 'if (r1) { q.result = { ...r1, vendorMessageId: q.result.vendorMessageId, parts: q.result.parts }; moved.push(id); }');
+  const engAgain = engSrc.replace("const ChannelsOutbound = require('./channels-outbound.js');", `const ChannelsOutbound = require(${JSON.stringify(MUT.write('src/server/channels-outbound.js', again, 'file-key-again'))});`);
+  const ra = await fileLeg(MUT.load('src/server/channels-engine.js', engAgain, 'file-key-again'), 'e9f-c2');
+  ok(again !== obSrc && engAgain !== engSrc && ra.s1.stash === '' && ra.p1.result.vendorMessageId === 'F0SEND001', 'CONTROL: an outbox door that keys the result by the FILE id again — the reply reaches nobody (red)', JSON.stringify({ s1: ra.s1, vid: ra.p1.result.vendorMessageId }));
+}
+
+console.log('⑨c lane slack-file-send-key r2: the share INGESTED while the proposal was still sending — the transition that turns it sent looks back over the stored records');
+async function lookBackLeg(ENGM, name) {
+  const TS = '1700000500.000500';
+  const hook = { fn: null };
+  const { eng, stashed, clock } = mkEngine(name, { ENGM, sendHook: (s0, convId, o) => hook.fn(s0, convId, o) });
+  await eng.pass(A, { force: true });
+  const rec = eng.adapterRecords().adapters.find((r) => r.id === A);
+  const r0 = ((g) => (g.records || g)[0])(eng.messages(A, C, { limit: 1 }));
+  const EV = { kind: 'everyone', id: '*' };
+  await eng.setGrain(A, { kind: 'conversation', convId: C }, { access: [acc(EV)], watchers: [{ principal: EV, delivery: 'next-turn', mode: 'filtered', filter: { match: 'any', rules: [{ kind: 'reply-to-sent' }] } }] });
+  const share = () => ({ ...r0, id: `${r0.id}-${TS}`, vendorId: TS, at: Number(clock()), author: { id: 'U0SELF', name: 'Me', isSelf: true, isBot: false }, text: '', attachments: [{ id: 'F0SEND005', name: 'deck.pdf', bytes: 1, mime: 'application/pdf' }], replyTo: null, root: null, threadKey: null });
+  // the vendor's send: the share lands in the log and is ingested (the poll's order: stored, then judged) BEFORE the answer comes
+  hook.fn = async () => {
+    const sh = share();
+    await eng.store.appendRecords(A, C, [sh]);
+    await eng.onFresh(rec, C, [sh], { origin: 'test' });
+    return { ok: true, vendorMessageId: 'F0SEND005', at: Number(clock()), sentAs: 'user', parts: [{ part: 'attachment', name: 'deck.pdf', withText: true, ok: true, vendorMessageId: 'F0SEND005' }] };
+  };
+  const real = eng.store.outbox.update.bind(eng.store.outbox);
+  const seen = [];
+  let writes = 0;
+  eng.store.outbox.update = async (fn) => { writes++; const out = await real(fn); for (const q of Object.values(eng.store.outbox.snapshot().proposals || {})) if (q && q.result && q.draftedBy && q.draftedBy.id === 'agent-1') seen.push(String(q.result.vendorMessageId)); return out; };
+  const pr = await eng.propose(AGENT, A, C, { text: 'Worker: the deck' });
+  const ap = pr.ok ? await eng.approve(pr.proposal.id) : null;
+  const q1 = JSON.parse(JSON.stringify(eng.store.outbox.snapshot().proposals[pr.proposal && pr.proposal.id] || {}));
+  const before = stashed.length;
+  await eng.onFresh(rec, C, [{ ...r0, id: `${r0.id}-w5`, vendorId: 'w-5', at: Number(clock()) + 1000, author: { id: 'U0ROWAN', name: 'Rowan', isSelf: false, isBot: false }, text: 'answer w-5', attachments: [], replyTo: TS, root: null, threadKey: TS }], { origin: 'test' });
+  await new Promise((res) => setTimeout(res, 30));
+  const reached = stashed.slice(before).map((x) => x.cid).join(',');
+  writes = 0;
+  await eng.onFresh(rec, C, [share()], { origin: 'test' });   // AFTER the reply: the same share handed in again moves nothing
+  const replayWrites = writes;
+  return { proposed: !!pr.ok, state: ap && ap.proposal && ap.proposal.state, q1, seen: [...new Set(seen)], replayWrites, reached, ledger: ((eng.store.index.peek(KEY) || {}).sentBy || {})['agent:agent-1'] || [] };
+}
+{
+  const r = await lookBackLeg(ENG, 'e9g');
+  const res = r.q1.result || {};
+  ok(r.proposed && r.state === 'sent' && res.vendorMessageId === '1700000500.000500' && JSON.stringify(res.fileIds) === '["F0SEND005"]' && res.parts && res.parts[0].vendorMessageId === '1700000500.000500', 'the share was stored and ingested while the proposal was SENDING; the transition that turned it sent re-keyed it by the stored share (state sent)', JSON.stringify({ proposed: r.proposed, state: r.state, result: res }));
+  ok(JSON.stringify(r.seen) === '["1700000500.000500"]' && r.replayWrites === 0 && r.ledger.includes('1700000500.000500') && !r.ledger.includes('F0SEND005'), 'ONE write: the result was never stored under the file id (the re-key rode the sent transition); the same share again writes nothing; the sentBy ledger carries the ts', JSON.stringify({ seen: r.seen, replayWrites: r.replayWrites, ledger: r.ledger }));
+  ok(r.reached === 'agent-1', 'the thread reply under the share reaches the drafter (agent-1) alone', JSON.stringify({ reached: r.reached }));
+  const obSrc = fs.readFileSync(path.join(REPO, 'src/server/channels-outbound.js'), 'utf8');
+  const noLook = obSrc.replace("? sharedSince(p.adapterId, p.convId, t0) : null;", '? null : null;');
+  const engSrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
+  const engNo = engSrc.replace("const ChannelsOutbound = require('./channels-outbound.js');", `const ChannelsOutbound = require(${JSON.stringify(MUT.write('src/server/channels-outbound.js', noLook, 'no-look-back'))});`);
+  const rc = await lookBackLeg(MUT.load('src/server/channels-engine.js', engNo, 'no-look-back'), 'e9g-c');
+  ok(noLook !== obSrc && engNo !== engSrc && rc.state === 'sent' && (rc.q1.result || {}).vendorMessageId === 'F0SEND005' && rc.reached === '', 'CONTROL: an outbox WITHOUT the look-back — the share ingested mid-send never re-keys it and the reply reaches nobody (red)', JSON.stringify({ state: rc.state, vid: (rc.q1.result || {}).vendorMessageId, reached: rc.reached }));
 }
 
 console.log('⑩ lane agent-watch-parity: the agent\'s watch = the dialog\'s grammar on the real engine; read back');

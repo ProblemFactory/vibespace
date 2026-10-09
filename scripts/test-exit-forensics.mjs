@@ -1103,7 +1103,8 @@ console.log('— §6 B-f698: an unexpected exit while working is resumed once by
     const got = new Promise((res) => kid.on('exit', (code, sig) => { liveKids.delete(kid.pid); res({ code, sig }); }));
     const sid = 'xf-ue-stop-' + (++seq);
     fs.writeFileSync(path.join(BUF, sid + '.json'), JSON.stringify({ streaming: true }));
-    const s = { _childPid: kid.pid };
+    // B-5ee1: the interrupt signals a RECORD only through its birth — the identity the wrapper's meta carries (childStart)
+    const s = { _childPid: kid.pid, _childIdentity: require(path.join(REPO, 'src/proc-identity.js')).identityOf(kid.pid) };
     new AdapterClass({ buffersDir: BUF }).postInterrupt(s, sid);
     const ex = await within(got, 5000);
     return { exitAsked: s._exitAsked || null, exit: ex };
@@ -1187,6 +1188,11 @@ console.log('— §5 wiring: the line, the event and the tomb are built from exi
   // reads the same list through the adapter). Admitted only while that module requires NOTHING and the wrapper is not a
   // remote-shipped tool (it runs on the server box beside src/; HostManager.AGENT_TOOLS is the ship list).
   const TRANSPORT_REQ = "require(path.join(__dirname, '..', '..', 'src', 'harnesses', 'claude-transport.js'))";
+  // B-5ee1 (lane pid-identity-close): the wrapper records its child's BIRTH beside the pid — src/proc-identity.js, SHARED
+  // (node builtins only: fs, child_process), admitted on the same terms: it requires nothing but builtins
+  const PI_REQ = "require(path.join(__dirname, '..', '..', 'src', 'proc-identity.js'))";
+  const builtinsOnly = (t) => !/require\((?!['"](fs|child_process)['"])[^)]*\)/.test(t.replace(/^\s*(\/\/|\*).*$/gm, ''));
+  ok(builtinsOnly(read('src/proc-identity.js')) && !builtinsOnly("const x = require('./other.js');\n"), 'chat-wrapper.js\'s birth module (src/proc-identity.js) requires node builtins only (fs, child_process) — CONTROL: a relative require is red');
   const transportPure = (t) => !/\brequire\(|\bimport\b/.test(t.replace(/^\s*\/\/.*$/gm, ''));
   const shipList = (t) => ((t.match(/static AGENT_TOOLS = \[([^\]]*)\]/) || [])[1] || '');
   ok(transportPure(read('src/harnesses/claude-transport.js')) && /'vibespace-status'/.test(shipList(read('src/hosts.js'))) && !/wrapper/.test(shipList(read('src/hosts.js'))),
@@ -1194,8 +1200,8 @@ console.log('— §5 wiring: the line, the event and the tomb are built from exi
   ok(!transportPure("'use strict';\nconst x = require('./other.js');\n") && /wrapper/.test(shipList("  static AGENT_TOOLS = ['vibespace-status', 'chat-wrapper.js'];")),
     'CONTROL: a require in the transport module, or a wrapper on the ship list, is red');
   for (const [f, src] of KINDS.map((k) => [path.basename(REL[k]), SRC[k]])) {
-    ok(!/require\((?!['"](fs|path|os|child_process|crypto)['"])[^)]*\)/.test(src.replace(/require\(path\.join\(__dirname, '\.\.\/\.\.\/node_modules\/node-pty'\)\)/, '').replace(TRANSPORT_REQ, '')),
-      `${f}: node builtins only (a STATIC file; node-pty is its one pre-existing dependency; crypto since lane codex-0159: the reset-credit consume's idempotencyKey; dc-harness-store 2.369.213: the claude transport flags' PURE module, below)`);
+    ok(!/require\((?!['"](fs|path|os|child_process|crypto)['"])[^)]*\)/.test(src.replace(/require\(path\.join\(__dirname, '\.\.\/\.\.\/node_modules\/node-pty'\)\)/, '').replace(TRANSPORT_REQ, '').replace(PI_REQ, '')),
+      `${f}: node builtins only (a STATIC file; node-pty is its one pre-existing dependency; crypto since lane codex-0159: the reset-credit consume's idempotencyKey; dc-harness-store 2.369.213: the claude transport flags' PURE module, below; pid-identity-close 2.369.242: the child's birth, src/proc-identity.js, above)`);
     const body = src.slice(src.indexOf('function onWrapperSignal'), src.indexOf('for (const sig of Object.keys(WRAPPER_SIGNO))'));
     ok(body.length > 0 && !/await|setTimeout|setImmediate|\.write\(|\.end\(|Promise/.test(body.replace(/fs\.writeFileSync|clearTimeout/g, '')),
       `${f}: the signal handler is synchronous (no await/timer/stream write)`);

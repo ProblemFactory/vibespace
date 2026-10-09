@@ -8026,4 +8026,5 @@ export default {
   "{name} answered, but the reading was refused as another account’s window — it stays inactive": "{name} 已应答，但读数因属于另一个账户的窗口而被拒绝 — 仍为失效状态",
   "{name} still does not answer — its subscription stays inactive": "{name} 仍未应答 — 订阅仍为失效状态",
   "{account}'s subscription is no longer active (since {since}): the pool skips it until it answers again — usage refresh is Off in Settings: turn it on to Re-check, or run a turn on it directly": "{account} 的订阅已失效（自 {since} 起）：在它重新应答之前池会跳过它 — 用量刷新在设置里已关闭：打开它才能重新检查，或直接在这个账户上跑一轮对话",
+  "{name}'s process was not stopped: pid {pid} now belongs to another process (recorded {when}) — nothing of VibeSpace's is running": "{name} 的进程未被停止：pid {pid} 现已属于另一个进程（记录于 {when}）— 没有任何 VibeSpace 的进程在运行", // lane pid-identity-close (B-5ee1)
 };

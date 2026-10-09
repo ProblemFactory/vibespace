@@ -324,7 +324,7 @@ function refreshWebuiPids() {
       const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
       if (meta.childPid) {
         webuiPids.add(meta.childPid);
-        s._childPid = meta.childPid;
+        s._childPid = meta.childPid; s._childIdentity = meta.childStart ? require('./src/proc-identity').identityFromToken(meta.childPid, meta.childStart, meta.childBoot) : null; // its birth (B-5ee1); null = a legacy wrapper's meta
         for (const p of readChildPids(meta.childPid)) webuiPids.add(p);  // claude forks from the node-pty spawn
       }
       if (meta.pid) { webuiPids.add(meta.pid); }

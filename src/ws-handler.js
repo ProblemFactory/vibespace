@@ -14,6 +14,7 @@ const { get: harnessOf, spawnOf } = require('./harnesses'); // S3: store.warmTra
 const { capsOf } = require('./backend-caps');      // inputModes.queueVerbs / review / renameWriteback gates (never a backend-id branch)
 const { reconcileAttachStreaming } = require('./turn-state'); // §2.5: ONE attach-time streaming decision, shared with the live consumer
 const { pidsMatchingCmdline } = require('./cli-identity'); // THE process reader: the kill path's `pgrep -f` without the fork
+const PI = require('./proc-identity'); // the ssh kill compares the meta's recorded birth (vs_same_proc, B-5ee1)
 const { shrinkVerdict, windowIds } = require('./lib/desktop-record.js'); // PURE (userW inc-mun7qjmw-iksh): the layout-sync shrink belt
 
 /** The sentence a harness-level verb refusal carries. Every branch says what
@@ -290,6 +291,21 @@ function registerWsHandler(wss, ctx) {
 
   // Shared by the dial + ssh terminate legs: a kill we could not confirm on
   // the machine must reach the USER (静默失败零容忍), not just the log.
+  /** A WITHHELD signal reaches the user where the kill was asked (B-5ee1, the no-silent-failures law): the remote
+   *  shell / keeper stop printed REFUSED:<pid>:<why> — that pid now names another process, so nothing was signalled;
+   *  the session is torn down all the same (nothing of VibeSpace's runs there). The journal line names the door. */
+  const sayKillWithheld = (stdout, hostName, session) => {
+    for (const line of String(stdout || '').split('\n')) {
+      const l = /^LEGACY:(\d+)/.exec(line.trim());
+      if (l) PI.legacyOnce(`ssh kill on ${hostName}`, l[1]);
+      const m = /^REFUSED:(\d+):([\w-]+)/.exec(line.trim());
+      if (!m) continue;
+      const when = session && session.createdAt ? new Date(session.createdAt).toISOString().slice(0, 16).replace('T', ' ') + ' UTC' : 'earlier';
+      const w = PI.withheldWords((session && session.name) || hostName, m[1], when);
+      console.warn(`[remote] ssh kill on ${hostName}: pid ${m[1]} — ${m[2]}, not signalled`);
+      try { ctx.serverNotice?.(`kill-withheld:${hostName}:${m[1]}`, w.text, { level: 'warn', i18n: w.i18n }); } catch { }
+    }
+  };
   const notifyKillUnconfirmed = (hostName) => {
     try {
       ctx.serverNotice?.(`kill-unconfirmed:${hostName}`,
@@ -1442,12 +1458,17 @@ function registerWsHandler(wss, ctx) {
                   // dial branch's sidSafe above). The keeper leg is a harmless
                   // no-op for agentd sids, kept for legacy keeper sessions.
                   const sshSidSafe = String(session.keeperSid || data.sessionId).replace(/[^\w-]/g, '');
+                  // B-5ee1: the meta's childPid is signalled only while its recorded birth (agentd's startTime) names
+                  // it — vs_same_proc, the sh twin; a mismatch prints REFUSED:<pid>:<why> and kills nothing (the keeper
+                  // stop prints its own); a birth-less meta prints LEGACY:<pid> and keeps today's rung
                   execFile('ssh', [...hosts.sshArgs(h), '--',
-                    `M="$HOME/.vibespace/agentd/state/sessions/${sshSidSafe}.json"; P=$(grep -o '"childPid":[0-9]*' "$M" 2>/dev/null | cut -d: -f2); [ -n "$P" ] && kill $P 2>/dev/null; `
+                    `${PI.procIdentityShellFns()}\nM="$HOME/.vibespace/agentd/state/sessions/${sshSidSafe}.json"; P=$(grep -o '"childPid":[0-9]*' "$M" 2>/dev/null | cut -d: -f2); T=$(sed -n 's/.*"startTime":"\\([^"]*\\)".*/\\1/p' "$M" 2>/dev/null | head -1); `
+                    + `if [ -n "$P" ] && [ -n "$T" ] && ! vs_same_proc "$P" "$T"; then case "$VS_SAME_WHY" in pid-recycled|unknown) echo "REFUSED:$P:$VS_SAME_WHY";; esac; P=; fi; [ -n "$P" ] && [ -z "$T" ] && echo "LEGACY:$P"; [ -n "$P" ] && kill $P 2>/dev/null; `
                     + `node "$HOME/.vibespace/bin/vibespace-remote-keeper" stop ${sshSidSafe} 2>/dev/null; `
-                    + `sleep 2; [ -n "$P" ] && kill -9 $P 2>/dev/null; true; rm -f "$HOME/.vibespace/bin/.tok-${data.sessionId}"`],
-                    { timeout: 15000 }, (err) => {
+                    + `sleep 2; [ -n "$P" ] && { [ -z "$T" ] || vs_same_proc "$P" "$T"; } && kill -9 $P 2>/dev/null; true; rm -f "$HOME/.vibespace/bin/.tok-${data.sessionId}"`],
+                    { timeout: 15000 }, (err, stdout) => {
                       try { hosts.invalidateDiscovery(session.host); } catch {}
+                      try { sayKillWithheld(stdout, h.name, session); } catch {}
                       // ssh leg failed (host lag/down) — the remote claude may
                       // still be running; say so instead of silently claiming
                       // the terminate worked (2.271.0 T1-3).

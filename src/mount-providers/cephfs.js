@@ -9,8 +9,7 @@ module.exports = {
   rclone: false,          // no rclone binary, no fuse daemon: nothing to adopt, kill or fusermount
   daemon: false,
   fstype: /^ceph$/,       // isMounted()'s /proc/mounts fstype
-  probeMs: 12000,         // the health probe's patience (a network filesystem under load)
-  hungStrikes: 2,         // strikes before a hung verdict
+  probe: { attrMs: 12000, listMs: 12000, strikes: 2 },   // the health sweep's cell (src/mount-liveness.js): a network filesystem under load gets 12 s, two strikes
   cephShare: true,        // the CephFS share minting (canCephShare)
   replacesMyStorage: true,   // the deployment's flash "My storage": an env-provisioned record of this row replaces a prior S3 one
   label: (m) => `CephFS ${m.cephPath || '/'} @ ${(m.cephMonHosts || '').split(',')[0] || '?'}`,

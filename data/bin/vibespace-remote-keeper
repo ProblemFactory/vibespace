@@ -25,6 +25,10 @@
 //   • every pid check verifies /proc/<pid>/cmdline (pid reuse: a recycled pid
 //     made alive() true → attach connect-looped forever; stop's blind kill
 //     could hit an innocent same-uid process).
+//   • 2.369.242 (B-5ee1): the meta records each pid's BIRTH beside it
+//     (childStart / keeperStart + bootId, same writeMeta) and every signal
+//     compares it first — a cmdline match is not an identity. A meta an older
+//     keeper wrote falls to the cmdline rung once, said, and is re-recorded.
 //   • the daemon sniffs claude's session_id from the buffer head into meta
 //     (orphan/lock matching for the resume-cleanup path needs it), and meta
 //     records the FULL argv (the old 4-element slice cut --resume off).
@@ -73,6 +77,39 @@ const readMeta = () => { try { return JSON.parse(fs.readFileSync(P.meta, 'utf-8'
 const writeMeta = (m) => { try { fs.writeFileSync(P.meta, JSON.stringify(m)); } catch { } };
 const log = (m) => { try { process.stderr.write('[keeper] ' + m + '\n'); } catch { } };
 
+// ── SHIPPED TWIN BEGIN — data/bin/vibespace-remote-keeper carries these lines byte-for-byte: it ships to a host as ONE
+// file and cannot require src/ (the vibespace-usage-scan precedent). test-pid-identity pins the copy to this source. ──
+/** agentd's spawn-proof token (moved verbatim from src/agentd/agentd.js pidStartTime): 'l' + field 22 on a
+ *  procfs, else 'p' + the `ps -o lstart=` string, else ''. Kept because session metas persist it as `startTime`. */
+function startToken(pid) {
+  try {
+    const st = fs.readFileSync('/proc/' + pid + '/stat', 'utf-8');
+    const rest = st.slice(st.lastIndexOf(')') + 2).split(' ');
+    if (rest[19]) return 'l' + rest[19];
+  } catch { }
+  try {
+    const r = spawnSync('ps', ['-p', String(pid), '-o', 'lstart='], { encoding: 'utf-8' });
+    const s = String(r.stdout || '').trim();
+    if (s) return 'p' + s;
+  } catch { }
+  return '';
+}
+/** This box's boot id ('' with no procfs) — recorded beside a token: a reboot ends every process a record names. */
+function bootToken() { try { return fs.readFileSync('/proc/sys/kernel/random/boot_id', 'utf-8').trim(); } catch { return ''; } }
+/** A RECORDED birth (startToken's form) against the pid now → same | zombie | pid-recycled | gone | unknown-identity
+ *  (no birth recorded) | unknown (the recorded rung is not readable here). Only `same` may be signalled. */
+function tokenVerdict(pid, token, bootId) {
+  if (!(Number(pid) > 1) || !token) return 'unknown-identity';
+  if (bootId) { const b = bootToken(); if (b && b !== bootId) return 'gone'; }
+  const cur = startToken(pid);
+  if (!cur) return 'gone';
+  if (cur[0] !== String(token)[0]) return 'unknown';
+  if (cur !== String(token)) return 'pid-recycled';
+  try { const st = fs.readFileSync('/proc/' + pid + '/stat', 'utf-8'); if (st[st.lastIndexOf(')') + 2] === 'Z') return 'zombie'; } catch { }
+  return 'same';
+}
+// ── SHIPPED TWIN END ──
+
 // /proc cmdline identity check — a bare kill(pid, 0) is pid-reuse-blind.
 // Returns '' where /proc is unavailable (non-Linux): callers treat '' as
 // "cannot verify" and fall back to the bare liveness bit.
@@ -95,6 +132,41 @@ function isOurChildPid(pid, m) {
   return argv0 ? c.includes(argv0) : false;
 }
 
+// ── THE KEEPER'S PROOF (B-5ee1): a meta pid is signalled only while its recorded birth names it now
+// (tokenVerdict 'same'). A birth-less meta (an older keeper wrote it) falls to the cmdline rung above —
+// the LEGACY rung, said once per pid, retire 2026-12-01 — and rerecord() writes the birth on this wake. ──
+const said = new Set();
+const sayOnce = (k, line) => { if (said.has(k)) return; said.add(k); log(line); };
+const REFUSED = []; // 'pid:why' — `stop` prints them (REFUSED:<pid>:<why>) so the hub can say it by name
+function proven(m, role) {
+  const pid = m && m[role + 'Pid'], tok = m && m[role + 'Start'];
+  if (!pid) return false;
+  if (tok) {
+    const v = tokenVerdict(pid, tok, m.bootId);
+    if (v === 'same') return true;
+    if (v === 'pid-recycled' || v === 'unknown') {
+      if (!REFUSED.includes(pid + ':' + v)) REFUSED.push(pid + ':' + v);
+      sayOnce(role + pid, 'pid ' + pid + ' (the ' + role + ' this meta recorded) now belongs to another process — ' + v + ', not signalled');
+    }
+    return false;
+  }
+  const ok = role === 'child' ? isOurChildPid(pid, m) : isKeeperPid(pid);
+  if (ok) sayOnce('legacy' + role + pid, 'legacy pid record, cmdline-only — re-recorded at its next start (' + role + ' pid ' + pid + ')');
+  return ok;
+}
+/** The legacy window closes by itself: a birth-less meta whose pids pass today's rung gets their birth now. */
+function rerecord(m) {
+  if (!m || m.exited !== undefined) return m;
+  const add = {};
+  if (m.childPid && !m.childStart && isOurChildPid(m.childPid, m)) add.childStart = startToken(m.childPid);
+  if (m.keeperPid && !m.keeperStart && isKeeperPid(m.keeperPid)) add.keeperStart = startToken(m.keeperPid);
+  if (!add.childStart && !add.keeperStart) return m;
+  sayOnce('rerecord', 'legacy pid record, cmdline-only — re-recorded at its next start (births written now: ' + Object.keys(add).join(', ') + ')');
+  const n = { ...readMeta(), ...add, bootId: m.bootId || bootToken() };
+  writeMeta(n);
+  return n;
+}
+
 function sweepOld() { // best-effort hygiene: dead sessions' files, 7d+
   try {
     const cutoff = Date.now() - 7 * 864e5;
@@ -108,7 +180,7 @@ function sweepOld() { // best-effort hygiene: dead sessions' files, 7d+
 function alive() { // daemon liveness = socket exists + VERIFIED keeper pid
   const m = readMeta();
   if (!m || !m.keeperPid || m.exited !== undefined) return false;
-  if (!isKeeperPid(m.keeperPid)) return false;
+  if (!proven(m, 'keeper')) return false;
   return fs.existsSync(P.sock);
 }
 
@@ -196,15 +268,15 @@ if (mode === 'run') {
   const cmd = sep >= 0 ? process.argv.slice(sep + 1) : [];
   try { fs.mkdirSync(RUN_DIR, { recursive: true, mode: 0o700 }); } catch { }
   sweepOld();
-  const m = readMeta();
+  const m = rerecord(readMeta());
   const bufExists = fs.existsSync(P.out);
   if (m && m.exited !== undefined) {
     log('session already exited (code ' + m.exited + ') — draining buffer');
     attach(offset); // sentinel is in the buffer; NEVER restart an exited session
   } else if (alive()) {
     attach(offset);
-  } else if (m && isOurChildPid(m.childPid, m)) {
-    // daemon dead, claude ALIVE (verified) — the daemon-SIGKILL survivor.
+  } else if (m && proven(m, 'child')) {
+    // daemon dead, claude ALIVE (its recorded birth, or the legacy rung) — the daemon-SIGKILL survivor.
     if (m.mode === 'fifo') {
       // fifo-mode claude is fully self-sufficient (own fds) — TAKE OVER.
       log('daemon dead but claude alive (pid ' + m.childPid + ') — starting takeover daemon');
@@ -216,7 +288,7 @@ if (mode === 'run') {
       log('pipe-mode orphan claude (pid ' + m.childPid + ') — terminating + synthesizing exit');
       try { process.kill(m.childPid, 'SIGTERM'); } catch { }
       setTimeout(() => {
-        if (pidAlive(m.childPid)) { try { process.kill(m.childPid, 'SIGKILL'); } catch { } }
+        if (pidAlive(m.childPid) && proven(m, 'child')) { try { process.kill(m.childPid, 'SIGKILL'); } catch { } }
         synthesizeCrash(readMeta());
         attach(offset);
       }, 3000);
@@ -247,17 +319,17 @@ if (mode === 'run') {
   if (!takeover && !cmd.length) process.exit(2);
 
   const outFd = fs.openSync(P.out, 'a');
-  let childPid = null;
+  let childPid = null, childStart = '', bootId = '';
   let inFd = null; // daemon's write handle into the fifo (fifo mode)
   let fifoMode = false;
 
   if (takeover) {
     const m = readMeta();
-    if (!m || m.mode !== 'fifo' || !isOurChildPid(m.childPid, m)) { log('takeover: nothing to adopt'); process.exit(2); }
-    childPid = m.childPid;
+    if (!m || m.mode !== 'fifo' || !proven(m, 'child')) { log('takeover: nothing to adopt'); process.exit(2); }
+    childPid = m.childPid; childStart = m.childStart || startToken(childPid); bootId = m.bootId || bootToken();
     fifoMode = true;
     try { inFd = fs.openSync(P.in, 'r+'); } catch (e) { log('takeover: fifo gone: ' + e.message); process.exit(2); }
-    writeMeta({ ...m, keeperPid: process.pid, takenOverAt: Date.now() });
+    writeMeta({ ...m, keeperPid: process.pid, keeperStart: startToken(process.pid), childStart, bootId, takenOverAt: Date.now() });
     log('takeover: adopted claude pid ' + childPid);
   } else {
     // 2.138.0: claude gets DIRECT fds (stdout→buffer file, stdin←fifo O_RDWR,
@@ -277,8 +349,10 @@ if (mode === 'run') {
       : ['pipe', 'pipe', 'pipe'];
     const child = spawn(cmd[0], cmd.slice(1), { stdio, env: process.env, cwd: process.cwd(), detached: fifoMode });
     childPid = child.pid;
+    childStart = childPid ? startToken(childPid) : ''; bootId = bootToken();
     writeMeta({
       keeperPid: process.pid, childPid, startedAt: Date.now(), cmd,
+      keeperStart: startToken(process.pid), childStart, bootId, // the births, in the SAME write as the pids (B-5ee1)
       mode: fifoMode ? 'fifo' : 'pipe',
       resumeId: (() => { const i = cmd.indexOf('--resume'); return i >= 0 ? cmd[i + 1] : undefined; })(),
     });
@@ -326,25 +400,27 @@ if (mode === 'run') {
   if (takeover) {
     // adopted child isn't ours to wait() on — poll liveness; exit code unknowable
     const poll = setInterval(() => {
-      if (!pidAlive(childPid)) { clearInterval(poll); finalize(143); }
+      const v = tokenVerdict(childPid, childStart, bootId);
+      if (!pidAlive(childPid) || v === 'gone' || v === 'pid-recycled' || v === 'zombie') { clearInterval(poll); finalize(143); }
     }, 1500);
   }
   process.on('SIGTERM', () => {
-    try { process.kill(childPid, 'SIGTERM'); } catch { }
+    // its own spawn: the handle IS the identity; an adopted child: its recorded birth
+    if (typeof directChild !== 'undefined') { try { directChild.kill('SIGTERM'); } catch { } }
+    else if (proven({ childPid, childStart, bootId }, 'child')) { try { process.kill(childPid, 'SIGTERM'); } catch { } }
     setTimeout(() => finalize(143), 3000);
   });
 } else if (mode === 'stop') {
   const m = readMeta();
   if (m) {
-    // identity-verified kills only — a recycled pid must never take a hit
-    const targets = [];
-    if (isOurChildPid(m.childPid, m)) targets.push(m.childPid);
-    if (isKeeperPid(m.keeperPid)) targets.push(m.keeperPid);
-    for (const pid of targets) { try { process.kill(pid, 'SIGTERM'); } catch { } }
+    // identity-verified kills only — a recycled pid must never take a hit (B-5ee1: its recorded birth)
+    const targets = ['child', 'keeper'].filter((role) => proven(m, role));
+    for (const role of targets) { if (proven(m, role)) { try { process.kill(m[role + 'Pid'], 'SIGTERM'); } catch { } } }
     setTimeout(() => {
-      for (const pid of targets) {
-        if (pidAlive(pid)) { try { process.kill(pid, 'SIGKILL'); } catch { } }
+      for (const role of targets) {
+        if (pidAlive(m[role + 'Pid']) && proven(m, role)) { try { process.kill(m[role + 'Pid'], 'SIGKILL'); } catch { } }
       }
+      for (const r of REFUSED) console.log('REFUSED:' + r);
       try { fs.unlinkSync(P.sock); } catch { }
       try { fs.unlinkSync(P.in); } catch { }
       if (m.exited === undefined) {

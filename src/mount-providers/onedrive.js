@@ -7,6 +7,7 @@ const i18nKey = (s) => s; // extraction marker (scripts/i18n-extract.mjs) — th
 
 module.exports = {
   id: 'onedrive',
+  dirCache: { ttl: '5m', poll: '1m' },   // rclone's own defaults for a ChangeNotify backend: listings kept 5 min, changes polled each minute (poll < ttl)
   oauth: 'microsoft',
   rcloneType: 'onedrive',
   oauthBacked: () => true,

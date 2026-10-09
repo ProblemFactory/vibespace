@@ -420,7 +420,14 @@ class ClaudeCodeAdapter extends BackendAdapter {
       } catch {}
       // Still streaming after 2s → force SIGINT. The exit it may cause was ASKED for (B-f698: never respawned as unexpected)
       session._exitAsked = { by: 'interrupt', at: Date.now() };
-      try { process.kill(session._childPid, 'SIGINT'); } catch {}
+      // B-5ee1: _childPid was read off the wrapper's meta, so it is a RECORD — signalled only while its recorded birth
+      // names it (signalIdentity); a legacy wrapper's meta has none ⇒ the cmdline rung, said once (retire 2026-12-01)
+      const PI = require('../proc-identity');
+      if (session._childIdentity) PI.signalIdentity(session._childIdentity, 'SIGINT', { what: `the interrupt of ${sessionId}` }); // a refusal is journalled once by name
+      else if (require('../cli-identity').isCliProcess(session._childPid, 'claude')) {
+        PI.legacyOnce('interrupt', session._childPid);
+        try { process.kill(session._childPid, 'SIGINT'); } catch {}
+      }
     }, 2000);
   }
 

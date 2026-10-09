@@ -8025,4 +8025,5 @@ export default {
   "{name} answered, but the reading was refused as another account’s window — it stays inactive": "{name} は応答しましたが、読み取り値は別のアカウントのウィンドウとして拒否されました — 無効のままです",
   "{name} still does not answer — its subscription stays inactive": "{name} はまだ応答しません — サブスクリプションは無効のままです",
   "{account}'s subscription is no longer active (since {since}): the pool skips it until it answers again — usage refresh is Off in Settings: turn it on to Re-check, or run a turn on it directly": "{account} のサブスクリプションは無効になりました（{since} から）：再び応答するまでプールはスキップします — 使用量の更新は設定でオフです：オンにして再確認するか、このアカウントで直接 1 ターン実行してください",
+  "{name}'s process was not stopped: pid {pid} now belongs to another process (recorded {when}) — nothing of VibeSpace's is running": "{name} のプロセスは停止されませんでした：pid {pid} は現在別のプロセスのものです（記録 {when}）— VibeSpace のものは何も動いていません", // lane pid-identity-close (B-5ee1)
 };

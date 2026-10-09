@@ -7,6 +7,7 @@ const i18nKey = (s) => s; // extraction marker (scripts/i18n-extract.mjs) — th
 
 module.exports = {
   id: 'webdav',
+  dirCache: { ttl: '30s' },   // no ChangeNotify in rclone for this backend: a listing is re-read when 30 s old (no poll flag)
   label: (m) => m.url,
   config(m, out, dec, x) {
     Object.assign(out, { url: m.url, vendor: m.vendor, user: m.user, pass: dec(m.passEnc), bearerToken: dec(m.bearerTokenEnc) });

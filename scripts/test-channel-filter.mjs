@@ -17,7 +17,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-seams: the engine + its three family files as one text
+import { engineSource } from './channels-engine-src.mjs';
+import { judgeInChild } from './work-meter.mjs';   // lane dc-channels-seams: the engine + its three family files as one text
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -771,9 +772,11 @@ console.log('⑭ notify-rules-r2: regex rules judged at save, matched on the fol
   ok(!hit('(a+)+$', 'a'.repeat(40) + '!').hit && !hit('', 'x').hit, 'a stored pattern the judge refuses never runs (fail closed — a wake is money)');
   ok(J2(F.regexSpan('in\\w+e', 'An Invoice')) === J2([3, 10]), 'regexSpan answers the first match span on the folded text (the preview marks it)');
   // ── the cost: the cap makes the worst ACCEPTED shape constant past REGEX_TEXT_MAX (the refused ones are the controls) ──
-  const timeAt = (value, unit, n) => { const f = { rules: [V(value).rule] }, rec = { text: '中' + unit.repeat(Math.ceil(n / unit.length)) }; F.matchRecord(f, rec); let best = Infinity; for (let r = 0; r < 3; r++) { const t0 = process.hrtime.bigint(); F.matchRecord(f, rec); best = Math.min(best, Number(process.hrtime.bigint() - t0) / 1e6); } return best; };
-  const t8 = timeAt('invoice.*paid', 'invoice', F.REGEX_TEXT_MAX), t64 = timeAt('invoice.*paid', 'invoice', 64 * 1024);
-  ok(t64 <= Math.max(2.5 * t8, 15), `the worst accepted shape (a fixed head + .* over its own head, two-byte text) costs the same at 64 KiB as at the 8 KiB cap: ${t8.toFixed(1)} ms → ${t64.toFixed(1)} ms`);
+  // a DEADLINE in a CHILD, never a ratio of two clocks (lane regex-control-deadline): the .* BACKTRACKS inside one exec,
+  // which no work count sees — uncut, 1 MiB of heads is ~10^11 steps (minutes); cut at the cap it is milliseconds. The
+  // child also judges the pass around the regex by WORK (the fold before the cut reads the text once: linear, not flat)
+  const capW = judgeInChild({ module: path.join(REPO, 'src/channel-filter.js'), run: "(M, x) => M.matchRecord({ rules: [M.validateRule({ kind: 'regex', value: 'invoice.*paid' }).rule] }, x)", mk: "(n) => ({ text: '中' + 'invoice'.repeat(Math.ceil(n / 7)) })", n: 512 * 1024, kind: 'linear' }, { timeout: 20000 });
+  ok(capW.ok && !capW.err, `the worst accepted shape (a fixed head + .* over its own head, two-byte text) at 1 MiB finishes in a child under a 20 s wall — the regex reads the ${F.REGEX_TEXT_MAX}-char cut (work ${capW.w1} → ${capW.w2} from 512 KiB)`, J2(capW));
   // ── membership: a group's access reaches its member sessions (as themselves) ──
   const G1 = { kind: 'group', id: 'g-work', name: '工作' };
   const access = [{ principal: G1, authority: 'draft' }];
@@ -825,11 +828,16 @@ console.log('⑭ notify-rules-r2: regex rules judged at save, matched on the fol
   ok(!c1.ok && c1.code === 'watcher-needs-access', 'CONTROL ①: a copy without the crosswalk refuses the member session — the membership leg above goes RED');
   const CUT2 = "          if (hasQuantifier(p.group)) { const e = new Error('regex-nested-quantifier'); e.code = e.message; e.piece = p.piece; throw e; }";
   ok(FSRC.split(CUT2).length === 2, 'control setup: the nested-quantifier refusal is present once');
-  const Fn = M.load('src/channel-filter.js', FSRC.replace(CUT2, ''), 'nested-accepted');
+  const nestedPath = M.write('src/channel-filter.js', FSRC.replace(CUT2, ''), 'nested-accepted'), Fn = require(nestedPath);
   const acc = Fn.validateRule({ kind: 'regex', value: '^(a+)+$' });
-  const tN = (n) => { const t0 = process.hrtime.bigint(); Fn.matchRecord({ rules: [acc.rule] }, { text: 'a'.repeat(n) + '!' }); return Number(process.hrtime.bigint() - t0) / 1e6; };
-  const tA = tN(16), tB = tN(20);
-  ok(acc.ok && tB > 6 * Math.max(tA, 0.01), `CONTROL ②: a copy that accepts a nested quantifier runs it EXPONENTIALLY (+4 chars: ${tA.toFixed(2)} → ${tB.toFixed(2)} ms) — the judge table above goes RED`);
+  // A DEADLINE, NEVER A RATIO (lane regex-control-deadline — rel241's mirror read +4 chars ×5.5 against a ×6 pin): the
+  // mutant's matchRecord runs in a CHILD killed past NESTED_WALL_MS on 'a'×40 + '!' (2^40 backtracking steps; 'a'×26 is
+  // only ~220 ms on a 2026 box, 'a'×28 ~0.9 s — too close to any wall); the same child on 'a'×8 + '!' answers inside the
+  // same wall, so what was killed is the regex, not a slow start. The REAL judge refuses the pattern by name, unrun.
+  const NESTED_WALL_MS = 1500;
+  const nestedOn = (n) => judgeInChild({ module: nestedPath, run: "(M, x) => M.matchRecord({ rules: [M.validateRule({ kind: 'regex', value: '^(a+)+$' }).rule] }, x)", mk: `() => ({ text: 'a'.repeat(${n}) + '!' })`, n: 1, kind: 'bounded' }, { timeout: NESTED_WALL_MS });
+  const small = nestedOn(8), big = nestedOn(40), real = F.validateRule({ kind: 'regex', value: '^(a+)+$' });
+  ok(acc.ok && !small.err && /ETIMEDOUT/.test(String(big.err)) && !real.ok && real.code === 'regex-nested-quantifier', `CONTROL ②: a copy that ACCEPTS a nested quantifier runs it catastrophically — the mutant did not finish 'a'×40 + '!' in ${NESTED_WALL_MS / 1000} s (its child killed; 'a'×8 answered inside the same wall); the real judge refused it by name without running it — the judge table above goes RED`, J2({ small, big: String(big.err).slice(0, 120), real: real.code }));
   const vend = previewBody(ASRC).replace('await store.search(adapterId, q,', 'await vendorSearch(adapterId, q,');
   const unb = previewBody(ASRC).replace('limit: PREVIEW_LIMIT, maxBytes: PREVIEW_BYTES,', 'limit: Infinity,');
   ok(!zeroVendor(vend) && !zeroVendor(unb), 'CONTROL ③: a preview over the vendor, or an unbounded one, fails the zero-vendor / bound census above');

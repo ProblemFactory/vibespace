@@ -99,17 +99,17 @@ function larkJudge(lark) {
 }
 
 // a Slack-shaped fixture token, split so push protection never reads it as a credential (it is not one)
-const SLACK_FIXTURE_TOKEN = ['xox', 'p-fixture-0001'].join('');
+const SLACK_SAMPLE_TOKEN = ['xox', 'p-fixture-0001'].join('');
 
 function slackJudge(slack) {
   const out = [];
-  const mk = (route, scopes = ['chat:write', 'files:write', 'channels:history']) => { const s = stub(route); const a = slack.create({ id: 's' }, { fetch: s.fetchFn, now: () => T0, tokens: tokens({ access_token: SLACK_FIXTURE_TOKEN, scopes, userId: 'T1/U1', label: 'Fixture · @me' }) }); return { a, ...s }; };
+  const mk = (route, scopes = ['chat:write', 'files:write', 'channels:history']) => { const s = stub(route); const a = slack.create({ id: 's' }, { fetch: s.fetchFn, now: () => T0, tokens: tokens({ access_token: SLACK_SAMPLE_TOKEN, scopes, userId: 'T1/U1', label: 'Fixture · @me' }) }); return { a, ...s }; };
   const answer = (c) => (c.url.endsWith('files.getUploadURLExternal') ? jsonRes(200, SF.getUploadURLExternal.answer) : c.url.startsWith(SF.upload.origin) ? jsonRes(200, SF.upload.answer) : jsonRes(200, SF.completeUploadExternal.answer));
   return (async () => {
     { const { a, calls } = mk(answer);
       const r = await a.send('C0FIXTURE', { text: 'here they are', idemKey: 'p-1', as: 'user', attachments: files() });
       const chain = (i, first) => [
-        (c) => c.url.endsWith('/api/files.getUploadURLExternal') && c.json.filename === files()[i].name && Number(c.json.length) === files()[i].data.length && c.headers.Authorization === 'Bearer ' + SLACK_FIXTURE_TOKEN,
+        (c) => c.url.endsWith('/api/files.getUploadURLExternal') && c.json.filename === files()[i].name && Number(c.json.length) === files()[i].data.length && c.headers.Authorization === 'Bearer ' + SLACK_SAMPLE_TOKEN,
         (c) => c.url === SF.getUploadURLExternal.answer.upload_url && c.method === 'POST' && c.bytes === files()[i].data.length && !c.headers.Authorization,
         (c) => c.url.endsWith('/api/files.completeUploadExternal') && c.json.channel_id === 'C0FIXTURE' && JSON.parse(c.json.files)[0].id === SF.getUploadURLExternal.answer.file_id && JSON.parse(c.json.files)[0].title === files()[i].name && (first ? c.json.initial_comment === 'here they are' : c.json.initial_comment === undefined),
       ];
@@ -186,6 +186,21 @@ const failed = { id: 'p-10', state: 'failed', convId: 'C1', adapterId: 'slack', 
 const fb = P.renderReceiptBlock(P.receiptFor(failed), { adapterLabel: 'Slack' });
 ok(/FAILED/.test(fb) && /NOT landed: "a\.png" \(rate-limited\); "b\.pdf" \(not sent after the refusal before it\)/.test(fb), 'a refused send: the receipt says no part landed, by name');
 
+console.log('⑤b lane slack-file-send-key (B-2840): a Slack file send is keyed by its FILE ids; the self-authored share record names them');
+{ // the documented completeUploadExternal answer names no share ts — the real adapter keys each part by its file id; the
+  // real record of the owner's share carries that id as attachments[].id; the PURE re-key maps one onto the other
+  let n = 0;
+  const s = stub((c) => (c.url.endsWith('files.getUploadURLExternal') ? jsonRes(200, { ...SF.getUploadURLExternal.answer, file_id: `F07FIXTURE0${++n}` }) : c.url.startsWith(SF.upload.origin) ? jsonRes(200, SF.upload.answer) : jsonRes(200, SF.completeUploadExternal.answer)));
+  const a = slack.create({ id: 's' }, { fetch: s.fetchFn, now: () => T0, tokens: tokens({ access_token: SLACK_SAMPLE_TOKEN, scopes: ['chat:write', 'files:write', 'channels:history'], userId: 'T1/U1', label: 'Fixture · @me' }) });
+  const r = await a.send('C0FIXTURE', { text: 'here they are', idemKey: 'p-1', as: 'user', attachments: files() });
+  const rec = (ts, user, fid, share) => slack.toRecord('s', 'C0FIXTURE', { type: 'message', ...(share ? { subtype: 'file_share' } : {}), ts, user, text: '', files: [{ id: fid, name: 'a.png', mimetype: 'image/png', size: 5 }] }, { selfId: 'U1' });
+  const recs = [rec('1700000101.000101', 'U1', 'F07FIXTURE01', true), rec('1700000102.000102', 'U1', 'F07FIXTURE02', false), rec('1700000103.000103', 'U2', 'F07FIXTURE09', true)];
+  const by = P.sharedFilesOf(recs);
+  const k = P.rekeyByFiles(r, by);
+  ok(!JSON.stringify(SF.completeUploadExternal.answer).includes('shares') && r.vendorMessageId === 'F07FIXTURE01' && r.parts.map((x) => x.vendorMessageId).join() === 'F07FIXTURE01,F07FIXTURE02', 'at the send: the result and each part are keyed by the FILE id (the fixture answer carries no shares/ts — no send-time key, no new vendor call)', JSON.stringify(r.parts));
+  ok(recs[0].attachments[0].id === 'F07FIXTURE01' && recs[0].author.isSelf && recs[1].author.isSelf && !recs[2].author.isSelf && by.size === 2 && by.get('F07FIXTURE02') === '1700000102.000102', 'the share record (subtype file_share, or a plain message with files[]) keeps files[].id as attachments[].id; only SELF-authored shares are read', JSON.stringify([...by]));
+  ok(k && k.vendorMessageId === '1700000101.000101' && k.parts[1].vendorMessageId === '1700000102.000102' && k.parts[1].fileId === 'F07FIXTURE02' && k.fileIds.join() === 'F07FIXTURE01,F07FIXTURE02' && P.sentIdsOf(k).join() === '1700000101.000101,1700000102.000102' && P.rekeyByFiles(k, by) === null && P.rekeyByFiles(r, new Map([['F07FIXTURE09', 'x']])) === null, 're-keyed: the result and every landed part name their share message (what a thread reply names), the file ids kept; a replay moves nothing; an unrelated file moves nothing', JSON.stringify(k));
+}
 console.log('⑥ the vendor-response census');
 const VC = await import(path.join(REPO, 'scripts/vendor-response-census.mjs'));
 const cen = VC.responseCensus(fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf8'), { direct: /\b(?:api|callJson|callForm|fetchFn)\s*\(/, raw: /\bfetchFn\s*\(/g, rateOkIds: new Set(lark.RATE_OK.map((r) => r.id)) });

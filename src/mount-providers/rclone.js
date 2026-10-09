@@ -7,6 +7,7 @@ const i18nKey = (s) => s; // extraction marker (scripts/i18n-extract.mjs) — th
 
 module.exports = {
   id: 'rclone',
+  dirCache: { ttl: '30s' },   // its records name many backends: the 30 s listing bound, no poll declared (only a row of ONE polling backend may)
   rawRclone: true,        // the generic row: its records name their rclone backend (`rcloneType`) and carry raw params —
                           // a backend another row adopts (drive / onedrive / the cloud list) normalizes to that row
   s3Backend: (m) => m.rcloneType === 's3',

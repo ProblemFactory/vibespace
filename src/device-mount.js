@@ -11,6 +11,7 @@ const fs = require('fs');
 const path = require('path');
 const http = require('http');
 const { spawn } = require('child_process');
+const { rcloneMountArgs } = require('./mount-argv.js');   // THE mount argv — the hub's builder (lane mount-argv-dir-cache)
 
 // B-35e3 (2.369.202): a file rewritten IN PLACE on the device keeps its size
 // (a SQLite DB), and a reader that keeps it open read the old bytes for days.
@@ -59,11 +60,12 @@ function sharedScan(procRoot, since) {
   return s;
 }
 
+/** The pull mount's ROW for the ONE argv builder (src/mount-argv.js): read-only webdav, minimal cache; webdav has
+ *  no ChangeNotify, so the listing bound is the held-file tick (5 s) and no poll is declared. */
+const PULL_ROW = Object.freeze({ id: 'device-pull', pull: true, dirCache: Object.freeze({ ttl: `${HELD_TICK_MS / 1000}s` }) });
 /** rclone argv of a pull mount (read-only webdav). Pinned by test-pull-refresh. */
-function pullMountArgs(mountpoint) {
-  return ['mount', 'vsdev:', mountpoint, '--read-only', '--dir-cache-time', '5s',
-    '--vfs-cache-mode', 'minimal', '--timeout', '30s', '--contimeout', '10s',
-    '--attr-timeout', '1s'];
+function pullMountArgs(mountpoint, cacheDir = null) {
+  return rcloneMountArgs({ row: PULL_ROW, remote: 'vsdev:', mountpoint, cacheDir });
 }
 
 /**
@@ -254,8 +256,7 @@ async function deviceFolderMount({ device, remotePath, mountpoint, rcloneBin, vf
     RCLONE_CONFIG_VSDEV_URL: `http://127.0.0.1:${bridgePort}`,
     RCLONE_CONFIG_VSDEV_VENDOR: 'other',
   };
-  const args = pullMountArgs(mountpoint);
-  if (vfsCacheDir) { args.push('--cache-dir', vfsCacheDir); }
+  const args = pullMountArgs(mountpoint, vfsCacheDir);
   const rc = spawn(rcloneBin, args, { env, detached: true, stdio: ['ignore', 'ignore', 'pipe'] });
   let stderr = '';
   rc.stderr.on('data', (d) => { stderr += d.toString().slice(0, 2000); });
@@ -331,4 +332,4 @@ function waitMounted(mp, timeoutMs) {
   });
 }
 
-module.exports = { deviceFolderMount, heldRefresher, pullMountArgs };
+module.exports = { deviceFolderMount, heldRefresher, pullMountArgs, PULL_ROW };

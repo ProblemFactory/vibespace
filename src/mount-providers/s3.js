@@ -7,6 +7,7 @@ const i18nKey = (s) => s; // extraction marker (scripts/i18n-extract.mjs) — th
 
 module.exports = {
   id: 's3',
+  dirCache: { ttl: '30s' },   // no ChangeNotify in rclone for this backend: a listing is re-read when 30 s old (no poll flag)
   default: true,          // `m.type || <this id>` — a record saved before types existed, and a child's own record
   oauth: null,            // no OAuth client of its own to lend
   s3Backend: () => true,  // rclone's s3 backend (the --s3-use-accept-encoding-gzip=false proxy fix)

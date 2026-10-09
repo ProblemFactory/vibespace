@@ -9,6 +9,7 @@ const isAbs = (p) => String(p).startsWith('/');   // path.isAbsolute on POSIX â€
 
 module.exports = {
   id: 'sftp',
+  dirCache: { ttl: '30s' },   // no ChangeNotify in rclone for this backend: a listing is re-read when 30 s old (no poll flag)
   label: (m) => `${m.sshUser}@${m.sshHost}:${m.sshPath || '~'}`,
   config(m, out, dec, x) {
     Object.assign(out, { sshHost: m.sshHost, sshUser: m.sshUser, sshPort: m.sshPort, sshPath: m.sshPath, keyPath: m.keyPath, pass: dec(m.passEnc) });

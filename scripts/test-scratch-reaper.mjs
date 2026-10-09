@@ -122,6 +122,16 @@ console.log('\n§1 the run record (scripts/scratch-run.mjs)');
 
 // ── §2 THE THREE FACTS, OVER A FAKE PROC ROOT ────────────────────────────
 console.log('\n§2 (a) a root is a directory · (b) its owner is gone · (c) it is old — over a fake proc root');
+// B-5ee1 (lane pid-identity-close): a reaper row WITHOUT a starttime is unprovable — never "the same process" (the
+// census report's "WEAKER … stays" item: it was waved through by `!o.starttime ||`), so never signalled
+{
+  const CI = await import('./ci.mjs');
+  const own = fs.readFileSync('/proc/self/stat', 'utf8'); const ownStart = Number(own.slice(own.lastIndexOf(')') + 2).split(' ')[19]);
+  ok(CI.sameProcess({ pid: process.pid, starttime: ownStart }, '/proc') === true && CI.sameProcess({ pid: process.pid, starttime: null }, '/proc') === false && CI.sameProcess({ pid: process.pid }, '/proc') === false && CI.sameProcess({ pid: process.pid, starttime: ownStart + 1 }, '/proc') === false,
+    'the reaper\'s identity re-check: the true starttime passes; a row with NO starttime (null / absent) or a wrong one never does');
+  const before = (o, st) => !!st && (!o.starttime || st.starttime === o.starttime);   // the pre-B-5ee1 rule, restated
+  ok(before({ pid: process.pid, starttime: null }, { starttime: ownStart }) === true, 'CONTROL: the old rule passed the starttime-less row (the leg above is RED on it)');
+}
 const F = fakeProc('rule');
 const R = {
   other: mkRoot('other'), dead: mkRoot('dead'), reused: mkRoot('reused'), boot: mkRoot('boot'), zombie: mkRoot('zombie'),
@@ -627,7 +637,7 @@ const listed = (mod, pid, opts) => (mod && mod.judgeScratch ? mod.judgeScratch(o
   const c6lines = []; const c6code = c6 && !c6.missing ? (() => { const prev = process.env.VIBESPACE_CI_REAP_PROCFS; process.env.VIBESPACE_CI_REAP_PROCFS = outsideTable; try { return c6.reapByHand({ dryRun: true, now: NOW, self: 999999, log: (m) => c6lines.push(m) }); } finally { if (prev === undefined) delete process.env.VIBESPACE_CI_REAP_PROCFS; else process.env.VIBESPACE_CI_REAP_PROCFS = prev; } })() : null;
   ok(c6code === 0 && c6lines.some((l) => /pid 4999999 .*scratch dir gone/.test(l)) && !c6lines.some((l) => /refused/.test(l)), `CONTROL (the seam taken as given): a copy that skips the scratch-root check judges the table under /var/tmp and lists its pid as a victim — the refusal leg can go red (${JSON.stringify(c6.missing || c6lines.slice(0, 2))})`);
   // (7) verify r1 K5/K8: the signal by number alone ⇒ a recycled pid is SIGKILLed
-  const c7 = await copy('signal-by-number', [["const sameProcess = (o, procRoot = defaultProcRoot()) => { const st = procStat(o.pid, procRoot); return !!st && st.state !== 'Z' && st.state !== 'X' && (!o.starttime || st.starttime === o.starttime); };", 'const sameProcess = (o) => alive(o.pid);']]);
+  const c7 = await copy('signal-by-number', [["export const sameProcess = (o, procRoot = defaultProcRoot()) => { const st = procStat(o.pid, procRoot); return !!st && st.state !== 'Z' && st.state !== 'X' && o.starttime != null && o.starttime !== '' && st.starttime === o.starttime; };", 'export const sameProcess = (o) => alive(o.pid);']]);
   const r7 = c7 && !c7.missing ? await recycledPid(M.files[M.files.length - 1], 'bynumber') : null;
   ok(!!r7 && r7.listed && !r7.alive, `CONTROL (the signal by number alone): a copy that never re-reads the starttime SIGKILLs the pid whose number changed hands — the §5b leg can go red (${r7 ? 'pid ' + r7.pid + ' alive=' + r7.alive : JSON.stringify(c7)})`);
   // (8) verify r1 K5: the closing line by `kill(pid, 0)` ⇒ a zombie reads as "still alive after SIGKILL"
